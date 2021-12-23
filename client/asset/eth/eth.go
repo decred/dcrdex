@@ -1107,7 +1107,7 @@ func (eth *ExchangeWallet) Withdraw(addr string, value, _ uint64) (asset.Coin, e
 		return nil, err
 	}
 	txHash := tx.Hash()
-	return &coin{id: txHash[:], value: tx.Value().Uint64()}, nil
+	return &coin{id: txHash[:], value: dexeth.WeiToGwei(tx.Value())}, nil
 }
 
 // ValidateSecret checks that the secret satisfies the contract.
