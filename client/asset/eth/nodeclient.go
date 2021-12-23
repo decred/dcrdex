@@ -226,8 +226,6 @@ func (n *nodeClient) balance(ctx context.Context) (*Balance, error) {
 
 	for _, tx := range pendingTxs {
 		from, _ := ethSigner.Sender(tx) // zero Address on error
-		// Intentionally ignoring receives from addresses that do not
-		// belong to us.
 		if from != n.creds.addr {
 			continue
 		}
