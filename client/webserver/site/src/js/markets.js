@@ -627,7 +627,7 @@ export default class MarketsPage extends BasePage {
     }
 
     page.hoverPrice.textContent = Doc.formatCoinValue(d.rate / this.market.rateConversionFactor)
-    page.hoverVolume.textContent = Doc.formatCoinValue(d.depth, this.market.base.info.unitinfo)
+    page.hoverVolume.textContent = Doc.formatCoinValue(d.depth)
     page.hoverVolume.style.color = d.dotColor
     Doc.show(page.hoverData)
   }
@@ -652,7 +652,7 @@ export default class MarketsPage extends BasePage {
     page.candleEnd.textContent = Doc.formatCoinValue(candle.endRate / this.market.rateConversionFactor)
     page.candleHigh.textContent = Doc.formatCoinValue(candle.highRate / this.market.rateConversionFactor)
     page.candleLow.textContent = Doc.formatCoinValue(candle.lowRate / this.market.rateConversionFactor)
-    page.candleVol.textContent = Doc.formatCoinValue(candle.matchVolume, this.market.base.unitInfo)
+    page.candleVol.textContent = Doc.formatCoinValue(candle.matchVolume, this.market.base.info.unitinfo)
     Doc.show(page.hoverData)
   }
 

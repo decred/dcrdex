@@ -66,7 +66,7 @@ function convertToConventional (v, unitInfo) {
   let prec = 8
   if (unitInfo) {
     const f = unitInfo.conventional.conversionFactor
-    v = v / unitInfo.conventional.conversionFactor
+    v /= f
     prec = Math.round(Math.log10(f))
   }
   return [v, prec]
