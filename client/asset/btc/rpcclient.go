@@ -34,7 +34,6 @@ const (
 	methodUnlock             = "walletpassphrase"
 	methodLock               = "walletlock"
 	methodPrivKeyForAddress  = "dumpprivkey"
-	methodSignMessage        = "signmessagewithprivkey"
 	methodGetTransaction     = "gettransaction"
 	methodSendToAddress      = "sendtoaddress"
 	methodSetTxFee           = "settxfee"
@@ -109,10 +108,18 @@ func (wc *rpcClient) connect(ctx context.Context, _ *sync.WaitGroup) error {
 	if codeVer < minProtocolVersion {
 		return fmt.Errorf("node software out of date. version %d is less than minimum %d", codeVer, minProtocolVersion)
 	}
+	wiRes, err := wc.GetWalletInfo()
+	if err != nil {
+		return fmt.Errorf("getwalletinfo failure: %w", err)
+	}
+	if wiRes.Descriptors {
+		return fmt.Errorf("descriptor wallets are not supported, see " +
+			"https://bitcoincore.org/en/releases/0.21.0/#experimental-descriptor-wallets")
+	}
 	return nil
 }
 
-// RawRequest passes the reqeuest to the wallet's RawRequester.
+// RawRequest passes the request to the wallet's RawRequester.
 func (wc *rpcClient) RawRequest(method string, params []json.RawMessage) (json.RawMessage, error) {
 	return wc.requester.RawRequest(wc.ctx, method, params)
 }
