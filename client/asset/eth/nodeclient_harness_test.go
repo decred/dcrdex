@@ -74,20 +74,20 @@ var (
 	ctx                       context.Context
 	tLogger                   = dex.StdOutLogger("ETHTEST", dex.LevelCritical)
 	simnetWalletSeed          = "5c52e2ef5f5298ec41107e4e9573df4488577fb3504959cbc26c88437205dd2c0812f5244004217452059e2fd11603a511b5d0870ead753df76c966ce3c71531"
-	simnetPrivKey             = "8b19650a41e740f3b7ebb7ad112a91f63df9f005320489147cdf6f8d8f585500"
-	simnetAddr                = common.HexToAddress("dd93b447f7eBCA361805eBe056259853F3912E04")
-	simnetAcct                = &accounts.Account{Address: simnetAddr}
-	ethClient                 *nodeClient
-	participantWalletSeed     = "b99fb787fc5886eb539830d103c0017eff5241ace28ee137d40f135fd02212b1a897afbdcba037c8c735cc63080558a30d72851eb5a3d05684400ec4123a2d00"
-	participantPrivKey        = "4fc4f43c00bc6550314b8561878edbfc776884e006ad51a2fe2c054f85cfbd12"
-	participantAddr           = common.HexToAddress("1D4F2ee206474B136Af4868B887C7b166693c194")
-	participantAcct           = &accounts.Account{Address: participantAddr}
-	participantEthClient      *nodeClient
-	ethSwapContractAddr       common.Address
-	tokenSwapContractAddr     common.Address
-	testTokenContractAddr     common.Address
-	simnetID                  int64  = 42
-	maxFeeRate                uint64 = 1000 // gwei per gas
+	// simnetPrivKey             = "8b19650a41e740f3b7ebb7ad112a91f63df9f005320489147cdf6f8d8f585500"
+	simnetAddr            = common.HexToAddress("dd93b447f7eBCA361805eBe056259853F3912E04")
+	simnetAcct            = &accounts.Account{Address: simnetAddr}
+	ethClient             *nodeClient
+	participantWalletSeed = "b99fb787fc5886eb539830d103c0017eff5241ace28ee137d40f135fd02212b1a897afbdcba037c8c735cc63080558a30d72851eb5a3d05684400ec4123a2d00"
+	// participantPrivKey        = "4fc4f43c00bc6550314b8561878edbfc776884e006ad51a2fe2c054f85cfbd12"
+	participantAddr       = common.HexToAddress("1D4F2ee206474B136Af4868B887C7b166693c194")
+	participantAcct       = &accounts.Account{Address: participantAddr}
+	participantEthClient  *nodeClient
+	ethSwapContractAddr   common.Address
+	tokenSwapContractAddr common.Address
+	testTokenContractAddr common.Address
+	simnetID              int64  = 42
+	maxFeeRate            uint64 = 1000 // gwei per gas
 )
 
 func newContract(stamp uint64, secretHash [32]byte, val uint64) *asset.Contract {
