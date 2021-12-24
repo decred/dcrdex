@@ -141,6 +141,14 @@ contract TestToken {
     }
 
     /**
+     * Airdrop is used to mint new tokens and give them to a user.
+     */
+    function airdrop(address recipient, uint256 amount) public virtual {
+        _totalSupply += amount;
+        _balances[recipient] += amount;
+    }
+
+    /**
      * @dev Moves `amount` of tokens from `sender` to `recipient`.
      *
      * This internal function is equivalent to {transfer}, and can be used to
