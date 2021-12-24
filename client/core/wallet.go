@@ -30,12 +30,17 @@ type xcWallet struct {
 	hookedUp     bool
 	synced       bool
 	syncProgress float32
+
+	// wallets for assets that are tokens will have a baseWallet
+	baseWallet   *xcWallet
+	childWallets []*xcWallet
 }
 
 // encPW returns xcWallet's encrypted password.
 func (w *xcWallet) encPW() []byte {
 	w.mtx.RLock()
 	defer w.mtx.RUnlock()
+
 	return w.encPass
 }
 
@@ -190,6 +195,9 @@ func (w *xcWallet) refreshDepositAddress() (string, error) {
 func (w *xcWallet) connected() bool {
 	w.mtx.RLock()
 	defer w.mtx.RUnlock()
+	if w.baseWallet != nil {
+		return w.baseWallet.connected()
+	}
 	return w.hookedUp
 }
 
@@ -202,12 +210,12 @@ func (w *xcWallet) Connect() error {
 	if err != nil {
 		return err
 	}
+
 	// Now that we are connected, we must Disconnect if any calls fail below
 	// since we are considering this wallet not "hookedUp".
-
 	synced, progress, err := w.SyncStatus()
 	if err != nil {
-		w.connector.Disconnect()
+		w.Disconnect()
 		return err
 	}
 
@@ -217,14 +225,14 @@ func (w *xcWallet) Connect() error {
 	if haveAddress {
 		haveAddress, err = w.OwnsAddress(w.address)
 		if err != nil {
-			w.connector.Disconnect()
+			w.Disconnect()
 			return err
 		}
 	}
 	if !haveAddress {
 		w.address, err = w.Address()
 		if err != nil {
-			w.connector.Disconnect()
+			w.Disconnect()
 			return fmt.Errorf("%s Wallet.Address error: %w", unbip(w.AssetID), err)
 		}
 	}
@@ -238,7 +246,19 @@ func (w *xcWallet) Connect() error {
 // Disconnect calls the dex.Connector's Disconnect method and sets the
 // xcWallet.hookedUp flag to false.
 func (w *xcWallet) Disconnect() {
+	fmt.Printf("~~ Disconnecting wallet: %v", w.AssetID)
+	if w.baseWallet != nil {
+		return
+	}
+
 	w.connector.Disconnect()
+	w.setHookedUp(false)
+	for _, childWallet := range w.childWallets {
+		childWallet.setHookedUp(false)
+	}
+}
+
+func (w *xcWallet) setHookedUp(hookedUp bool) {
 	w.mtx.Lock()
 	w.hookedUp = false
 	w.mtx.Unlock()

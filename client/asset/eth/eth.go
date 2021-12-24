@@ -175,6 +175,8 @@ type ethFetcher interface {
 	sendToAddr(ctx context.Context, addr common.Address, val uint64) (*types.Transaction, error)
 	transactionConfirmations(context.Context, common.Hash) (uint32, error)
 	sendSignedTransaction(ctx context.Context, tx *types.Transaction) error
+
+	tokenBalance(ctx context.Context, tokenAddr common.Address) (*big.Int, error)
 }
 
 // Check that ExchangeWallet satisfies the asset.Wallet interface.
@@ -188,13 +190,15 @@ type ExchangeWallet struct {
 	// https://golang.org/pkg/sync/atomic/#pkg-note-BUG
 	tipAtConnect int64
 
-	ctx         context.Context // the asset subsystem starts with Connect(ctx)
-	net         dex.Network
-	node        ethFetcher
-	addr        common.Address
-	log         dex.Logger
-	tipChange   func(error)
-	gasFeeLimit uint64
+	ctx              context.Context // the asset subsystem starts with Connect(ctx)
+	wg               sync.WaitGroup
+	monitoringBlocks bool
+	net              dex.Network
+	node             ethFetcher
+	addr             common.Address
+	log              dex.Logger
+	tipChange        func(error)
+	gasFeeLimit      uint64
 
 	tipMtx     sync.RWMutex
 	currentTip *types.Block
@@ -204,6 +208,8 @@ type ExchangeWallet struct {
 
 	findRedemptionMtx  sync.RWMutex
 	findRedemptionReqs map[[32]byte]*findRedemptionRequest
+
+	tokenWallets []*TokenWallet
 }
 
 // Info returns basic information about the wallet and asset.
@@ -278,6 +284,7 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		tipChange:          assetCFG.TipChange,
 		gasFeeLimit:        gasFeeLimit,
 		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
+		tokenWallets:       make([]*TokenWallet, 0),
 	}, nil
 }
 
@@ -287,6 +294,10 @@ func getWalletDir(dataDir string, network dex.Network) string {
 
 func (eth *ExchangeWallet) shutdown() {
 	eth.node.shutdown()
+}
+
+func (eth *ExchangeWallet) addTokenWallet(tokenWallet *TokenWallet) {
+	eth.tokenWallets = append(eth.tokenWallets, tokenWallet)
 }
 
 // Connect connects to the node RPC server. A dex.Connector.
@@ -315,6 +326,7 @@ func (eth *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	eth.log.Infof("Connected to geth, at height %d", height)
 
 	var wg sync.WaitGroup
+	eth.wg = wg
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -353,7 +365,6 @@ func (eth *ExchangeWallet) balance() (*asset.Balance, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	locked := eth.locked + dexeth.WeiToGwei(bal.PendingOut)
 	return &asset.Balance{
 		Available: dexeth.WeiToGwei(bal.Current) - locked,
@@ -1144,6 +1155,7 @@ func (eth *ExchangeWallet) RegFeeConfirmations(ctx context.Context, coinID dex.B
 // when the block changes. New blocks are also scanned for potential contract
 // redeems.
 func (eth *ExchangeWallet) monitorBlocks(ctx context.Context) {
+	eth.monitoringBlocks = true
 	ticker := time.NewTicker(blockTicker)
 	defer ticker.Stop()
 	for {
@@ -1151,6 +1163,7 @@ func (eth *ExchangeWallet) monitorBlocks(ctx context.Context) {
 		case <-ticker.C:
 			eth.checkForNewBlocks()
 		case <-ctx.Done():
+			eth.monitoringBlocks = false
 			return
 		}
 	}
@@ -1164,7 +1177,7 @@ func (eth *ExchangeWallet) checkForNewBlocks() {
 	defer cancel()
 	bestHash, err := eth.node.bestBlockHash(ctx)
 	if err != nil {
-		go eth.tipChange(fmt.Errorf("failed to get best hash: %w", err))
+		eth.callTipChange(fmt.Errorf("failed to get best hash: %w", err))
 		return
 	}
 	// This method is called frequently. Don't hold write lock
@@ -1178,7 +1191,7 @@ func (eth *ExchangeWallet) checkForNewBlocks() {
 
 	newTip, err := eth.node.block(ctx, bestHash)
 	if err != nil {
-		go eth.tipChange(fmt.Errorf("failed to get best block: %w", err))
+		eth.callTipChange(fmt.Errorf("failed to get best block: %w", err))
 		return
 	}
 
@@ -1189,8 +1202,15 @@ func (eth *ExchangeWallet) checkForNewBlocks() {
 	eth.currentTip = newTip
 	eth.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.NumberU64(),
 		prevTip.Hash(), newTip.NumberU64(), newTip.Hash())
-	go eth.tipChange(nil)
+	eth.callTipChange(nil)
 	go eth.checkFindRedemptions()
+}
+
+func (eth *ExchangeWallet) callTipChange(err error) {
+	go eth.tipChange(err)
+	for _, tokenWallet := range eth.tokenWallets {
+		go tokenWallet.tipChange(err)
+	}
 }
 
 // checkFindRedemptions checks queued findRedemptionRequests.

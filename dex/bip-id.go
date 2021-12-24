@@ -614,4 +614,8 @@ var bipIDs = map[uint32]string{
 	91927009: "kusd",
 	99999998: "fluid",
 	99999999: "qkc",
+
+	// The following tokens IDs are used for ERC20 tokens. They are not
+	// part of slip 44.
+	42000: "tst",
 }

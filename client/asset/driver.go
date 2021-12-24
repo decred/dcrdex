@@ -13,6 +13,7 @@ import (
 var (
 	driversMtx sync.RWMutex
 	drivers    = make(map[uint32]Driver)
+	baseWallet = make(map[uint32]uint32)
 )
 
 // CreateWalletParams are the parameters for internal wallet creation. The
@@ -43,6 +44,10 @@ type Creator interface {
 	Create(*CreateWalletParams) error
 }
 
+type TokenDriver interface {
+	OpenToken(*Wallet, *WalletConfig, dex.Logger) (Wallet, error)
+}
+
 func withDriver(assetID uint32, f func(Driver) error) error {
 	driversMtx.Lock()
 	defer driversMtx.Unlock()
@@ -57,7 +62,10 @@ func withDriver(assetID uint32, f func(Driver) error) error {
 func Register(assetID uint32, driver Driver) {
 	driversMtx.Lock()
 	defer driversMtx.Unlock()
+	register(assetID, driver)
+}
 
+func register(assetID uint32, driver Driver) {
 	if driver == nil {
 		panic("asset: Register driver is nil")
 	}
@@ -68,6 +76,13 @@ func Register(assetID uint32, driver Driver) {
 		panic(fmt.Sprint("asset: Registered driver doesn't have a conventional conversion factor set in the wallet info ", assetID))
 	}
 	drivers[assetID] = driver
+}
+
+func RegisterToken(assetID, parentAssetID uint32, driver Driver) {
+	driversMtx.Lock()
+	defer driversMtx.Unlock()
+	register(assetID, driver)
+	baseWallet[assetID] = parentAssetID
 }
 
 // WalletExists will be true if the specified wallet exists.
@@ -97,6 +112,17 @@ func CreateWallet(assetID uint32, seedParams *CreateWalletParams) error {
 func OpenWallet(assetID uint32, cfg *WalletConfig, logger dex.Logger, net dex.Network) (w Wallet, err error) {
 	return w, withDriver(assetID, func(drv Driver) error {
 		w, err = drv.Open(cfg, logger, net)
+		return err
+	})
+}
+
+func OpenTokenWallet(assetID uint32, base *Wallet, cfg *WalletConfig, logger dex.Logger) (w Wallet, err error) {
+	return w, withDriver(assetID, func(drv Driver) error {
+		tokenDriver, ok := drv.(TokenDriver)
+		if !ok {
+			return fmt.Errorf("asset %d does not have a token driver", assetID)
+		}
+		w, err = tokenDriver.OpenToken(base, cfg, logger)
 		return err
 	})
 }
@@ -141,4 +167,9 @@ func Info(assetID uint32) (*WalletInfo, error) {
 		return nil, fmt.Errorf("asset: unsupported asset %d", assetID)
 	}
 	return drv.Info(), nil
+}
+
+func BaseAsset(assetID uint32) (uint32, bool) {
+	baseAsset, isToken := baseWallet[assetID]
+	return baseAsset, isToken
 }

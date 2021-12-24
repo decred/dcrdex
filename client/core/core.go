@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1690,9 +1691,18 @@ func (c *Core) User() *User {
 func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	assetID := form.AssetID
 	symbol := unbip(assetID)
+
 	_, exists := c.wallet(assetID)
 	if exists {
 		return fmt.Errorf("%s wallet already exists", symbol)
+	}
+
+	baseAsset, isToken := asset.BaseAsset(assetID)
+	if isToken {
+		if _, exists := c.wallet(baseAsset); !exists {
+			baseSymbol := unbip(baseAsset)
+			return fmt.Errorf("Cannot create %s without first creating %s", symbol, baseSymbol)
+		}
 	}
 
 	crypter, err := c.encryptionKey(appPW)
@@ -1720,7 +1730,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		}
 	}
 
-	if walletDef.Seeded {
+	if walletDef.Seeded && !isToken {
 		if len(walletPW) > 0 {
 			return errors.New("external password incompatible with seeded wallet")
 		}
@@ -1772,8 +1782,10 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	if err != nil {
 		return initErr("error getting wallet balance for %s: %w", symbol, err)
 	}
-	wallet.setBalance(balances)         // update xcWallet's WalletBalance
-	dbWallet.Balance = balances.Balance // store the db.Balance
+	wallet.setBalance(balances)
+	// update xcWallet's WalletBalance
+	dbWallet.Balance = &db.Balance{}
+	// store the db.Balance
 
 	// Store the wallet in the database.
 	err = c.db.UpdateWallet(dbWallet)
@@ -1781,10 +1793,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		return initErr("error storing wallet credentials: %w", err)
 	}
 
-	c.log.Infof("Created %s wallet. Balance available = %d / "+
-		"locked = %d / locked in contracts = %d, Deposit address = %s",
-		symbol, balances.Available, balances.Locked, balances.ContractLocked,
-		dbWallet.Address)
+	c.log.Infof("Created %s wallet. \n", symbol)
 
 	// The wallet has been successfully created. Store it.
 	c.walletMtx.Lock()
@@ -1874,14 +1883,33 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	}
 
 	logger := c.log.SubLogger(unbip(assetID))
-	w, err := asset.OpenWallet(assetID, walletCfg, logger, c.net)
-	if err != nil {
-		return nil, fmt.Errorf("error opening wallet: %w", err)
+
+	var w asset.Wallet
+	var baseXcWallet *xcWallet
+	var err error
+	baseAssetID, isToken := asset.BaseAsset(assetID)
+	if isToken {
+		var exists bool
+		baseXcWallet, exists = c.wallet(baseAssetID)
+		if !exists {
+			return nil, fmt.Errorf("base asset wallet %s must be loaded before child %s",
+				unbip(assetID), unbip(baseAssetID))
+		}
+		baseWallet := &baseXcWallet.Wallet
+		w, err = asset.OpenTokenWallet(assetID, baseWallet, walletCfg, logger)
+		if err != nil {
+			return nil, fmt.Errorf("error opening token wallet: %w", err)
+		}
+	} else {
+		w, err = asset.OpenWallet(assetID, walletCfg, logger, c.net)
+		if err != nil {
+			return nil, fmt.Errorf("error opening wallet: %w", err)
+		}
 	}
 
 	// Construct the unconnected xcWallet.
 	contractLockedAmt, orderLockedAmt := c.lockedAmounts(assetID)
-	return &xcWallet{
+	xcWallet := &xcWallet{
 		Wallet:    w,
 		connector: dex.NewConnectionMaster(w),
 		AssetID:   assetID,
@@ -1890,11 +1918,19 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 			OrderLocked:    orderLockedAmt,
 			ContractLocked: contractLockedAmt,
 		},
-		encPass:    dbWallet.EncryptedPW,
-		address:    dbWallet.Address,
-		dbID:       dbWallet.ID(),
-		walletType: dbWallet.Type,
-	}, nil
+		encPass:      dbWallet.EncryptedPW,
+		address:      dbWallet.Address,
+		dbID:         dbWallet.ID(),
+		walletType:   dbWallet.Type,
+		baseWallet:   baseXcWallet,
+		childWallets: make([]*xcWallet, 0),
+	}
+
+	if isToken {
+		baseXcWallet.childWallets = append(baseXcWallet.childWallets, xcWallet)
+	}
+
+	return xcWallet, nil
 }
 
 // WalletState returns the *WalletState for the asset ID.
@@ -2034,6 +2070,7 @@ func (c *Core) ChangeAppPass(appPW, newAppPW []byte) error {
 // the password if newWalletPW is non-nil. Do not make concurrent calls to
 // ReconfigureWallet for the same asset.
 func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) error {
+	// TODO: reconfiguring token wallets not allowed
 	crypter, err := c.encryptionKey(appPW)
 	if err != nil {
 		return newError(authErr, "ReconfigureWallet password error: %v", err)
@@ -2138,6 +2175,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 	sameWallet := func() error {
 		hasActiveTrade := false
 		for _, dc := range c.dexConnections() {
+			// TODO: check if token wallets have active trades
 			if dc.hasActiveAssetOrders(wallet.AssetID) {
 				hasActiveTrade = true
 				break
@@ -2215,6 +2253,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 	c.walletMtx.Lock()
 	c.wallets[assetID] = wallet
 	c.walletMtx.Unlock()
+	// TODO: reload token wallets
 
 	restartOnFail = false
 
@@ -4389,7 +4428,13 @@ func (c *Core) initialize() {
 	if err != nil {
 		c.log.Errorf("error loading wallets from database: %v", err)
 	}
-	c.walletMtx.Lock()
+
+	// Load token wallets last to ensure base wallet for token is already loaded
+	sort.Slice(dbWallets, func(_, j int) bool {
+		_, isToken := asset.BaseAsset(dbWallets[j].AssetID)
+		return isToken
+	})
+
 	for _, dbWallet := range dbWallets {
 		wallet, err := c.loadWallet(dbWallet)
 		aid := dbWallet.AssetID
@@ -4398,11 +4443,12 @@ func (c *Core) initialize() {
 			continue
 		}
 		// Wallet is loaded from the DB, but not yet connected.
-		c.log.Infof("Loaded %s wallet configuration.", unbip(aid))
+		c.walletMtx.Lock()
 		c.wallets[dbWallet.AssetID] = wallet
+		c.walletMtx.Unlock()
 	}
+
 	numWallets := len(c.wallets)
-	c.walletMtx.Unlock()
 	if len(dbWallets) > 0 {
 		c.log.Infof("successfully loaded %d of %d wallets", numWallets, len(dbWallets))
 	}
