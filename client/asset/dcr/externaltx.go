@@ -400,7 +400,7 @@ func (dcr *ExchangeWallet) findTxOutSpender(ctx context.Context, op outPoint, ou
 				op, iHeight, iHash)
 			blk, err := dcr.wallet.GetBlockVerbose(ctx, iHash, true)
 			if err != nil {
-				return nil, lastScannedHash, fmt.Errorf("error retrieving block %s: %w", iHash, err)
+				return nil, iHash, fmt.Errorf("error retrieving block %s: %w", iHash, err)
 			}
 			blockTxs := append(blk.RawTx, blk.RawSTx...)
 			for i := range blockTxs {
