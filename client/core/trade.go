@@ -1960,7 +1960,7 @@ func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, 
 		t.dc.log.Infof("Refunding %s contract %s for match %s (%s)",
 			refundAsset.Symbol, swapCoinString, match, matchFailureReason)
 
-		feeSuggestion := c.feeSuggestion(t.dc, refundAsset.ID, refundAsset.ID == t.Base())
+		feeSuggestion := c.feeSuggestion(t.dc, refundAsset.ID)
 		refundCoin, err := refundWallet.Refund(swapCoinID, contractToRefund, feeSuggestion)
 		if err != nil {
 			if errors.Is(err, asset.CoinNotFoundError) && match.Side == order.Taker {

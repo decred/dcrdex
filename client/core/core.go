@@ -3339,12 +3339,12 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEs
 		return nil, errors.New("cannot divide by lot size zero")
 	}
 
-	swapFeeSuggestion := c.feeSuggestion(dc, quote, false)
+	swapFeeSuggestion := c.feeSuggestion(dc, quote)
 	if swapFeeSuggestion == 0 {
 		return nil, fmt.Errorf("failed to get swap fee suggestion for %s at %s", unbip(quote), host)
 	}
 
-	redeemFeeSuggestion := c.feeSuggestion(dc, base, false)
+	redeemFeeSuggestion := c.feeSuggestion(dc, base)
 	if redeemFeeSuggestion == 0 {
 		return nil, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", unbip(base), host)
 	}
@@ -3397,12 +3397,12 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, erro
 		return nil, fmt.Errorf("no book synced for %s at %s", mktID, host)
 	}
 
-	swapFeeSuggestion := c.feeSuggestion(dc, base, true)
+	swapFeeSuggestion := c.feeSuggestion(dc, base)
 	if swapFeeSuggestion == 0 {
 		return nil, fmt.Errorf("failed to get swap fee suggestion for %s at %s", unbip(base), host)
 	}
 
-	redeemFeeSuggestion := c.feeSuggestion(dc, quote, false)
+	redeemFeeSuggestion := c.feeSuggestion(dc, quote)
 	if redeemFeeSuggestion == 0 {
 		return nil, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", unbip(quote), host)
 	}
@@ -3607,9 +3607,32 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 	return <-errChan
 }
 
+// feeSuggestionAny gets a fee suggestion for the given asset from any source
+// with it available. It first checks all relevant books for a cached fee rate
+// obtained with an epoch_report message, and falls back to directly requesting
+// a rate from servers with a fee_rate request.
+func (c *Core) feeSuggestionAny(assetID uint32) uint64 {
+	conns := c.dexConnections()
+	// Look for cached rates from epoch_report messages.
+	for _, dc := range conns {
+		feeSuggestion := dc.bestBookFeeSuggestion(assetID)
+		if feeSuggestion > 0 {
+			return feeSuggestion
+		}
+	}
+	// Request a rate with fee_rate.
+	for _, dc := range conns {
+		feeSuggestion := dc.fetchFeeRate(assetID)
+		if feeSuggestion > 0 {
+			return feeSuggestion
+		}
+	}
+	return 0
+}
+
 // feeSuggestion gets the best fee suggestion, first from a synced order book,
 // and if not synced, directly from the server.
-func (c *Core) feeSuggestion(dc *dexConnection, assetID uint32, isBase bool) (feeSuggestion uint64) {
+func (c *Core) feeSuggestion(dc *dexConnection, assetID uint32) (feeSuggestion uint64) {
 	// Prepare a fee suggestion based on the last reported fee rate in the
 	// order book feed.
 	feeSuggestion = dc.bestBookFeeSuggestion(assetID)
@@ -3637,7 +3660,7 @@ func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string)
 	if err != nil {
 		return nil, err
 	}
-	const feeSuggestion = 100
+	feeSuggestion := c.feeSuggestionAny(assetID)
 	coin, err := wallet.Withdraw(address, value, feeSuggestion)
 	if err != nil {
 		subject, details := c.formatDetails(TopicWithdrawError, unbip(assetID), err)
@@ -3736,12 +3759,12 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 		}
 	}
 
-	swapFeeSuggestion := c.feeSuggestion(dc, wallets.fromAsset.ID, form.Sell)
+	swapFeeSuggestion := c.feeSuggestion(dc, wallets.fromAsset.ID)
 	if swapFeeSuggestion == 0 {
 		return nil, fmt.Errorf("failed to get swap fee suggestion for %s at %s", unbip(wallets.fromAsset.ID), form.Host)
 	}
 
-	redeemFeeSuggestion := c.feeSuggestion(dc, wallets.toAsset.ID, !form.Sell)
+	redeemFeeSuggestion := c.feeSuggestion(dc, wallets.toAsset.ID)
 	if redeemFeeSuggestion == 0 {
 		return nil, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", unbip(wallets.toAsset.ID), form.Host)
 	}
@@ -3914,7 +3937,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		MaxSwapCount:  lots,
 		DEXConfig:     wallets.fromAsset,
 		Immediate:     isImmediate,
-		FeeSuggestion: c.feeSuggestion(dc, wallets.fromAsset.ID, form.Sell),
+		FeeSuggestion: c.feeSuggestion(dc, wallets.fromAsset.ID),
 		Options:       form.Options,
 	})
 	if err != nil {
