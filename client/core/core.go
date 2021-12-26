@@ -3607,9 +3607,32 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 	return <-errChan
 }
 
+// feeSuggestionAny gets a fee suggestion for the given asset from any source
+// with it available. It first checks all relevant books for a cached fee rate
+// obtained with an epoch_report message, and falls back to directly requesting
+// a rate from servers with a fee_rate request.
+func (c *Core) feeSuggestionAny(assetID uint32) uint64 {
+	conns := c.dexConnections()
+	// Look for cached rates from epoch_report messages.
+	for _, dc := range conns {
+		feeSuggestion := dc.bestBookFeeSuggestion(assetID)
+		if feeSuggestion > 0 {
+			return feeSuggestion
+		}
+	}
+	// Request a rate with fee_rate.
+	for _, dc := range conns {
+		feeSuggestion := dc.fetchFeeRate(assetID)
+		if feeSuggestion > 0 {
+			return feeSuggestion
+		}
+	}
+	return 0
+}
+
 // feeSuggestion gets the best fee suggestion, first from a synced order book,
 // and if not synced, directly from the server.
-func (c *Core) feeSuggestion(dc *dexConnection, assetID uint32, isBase bool) (feeSuggestion uint64) {
+func (c *Core) feeSuggestion(dc *dexConnection, assetID uint32, isBase /* ??? */ bool) (feeSuggestion uint64) {
 	// Prepare a fee suggestion based on the last reported fee rate in the
 	// order book feed.
 	feeSuggestion = dc.bestBookFeeSuggestion(assetID)
@@ -3637,7 +3660,7 @@ func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string)
 	if err != nil {
 		return nil, err
 	}
-	const feeSuggestion = 100
+	feeSuggestion := c.feeSuggestionAny(assetID)
 	coin, err := wallet.Withdraw(address, value, feeSuggestion)
 	if err != nil {
 		subject, details := c.formatDetails(TopicWithdrawError, unbip(assetID), err)
