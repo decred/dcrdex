@@ -74,6 +74,8 @@ type testNode struct {
 	}
 	isRefundableErr error
 	nonce           uint64
+	sendToAddrTx    *types.Transaction
+	sendToAddrErr   error
 }
 
 func newBalance(current, in, out uint64) *Balance {
@@ -199,7 +201,7 @@ func tTx(gasFeeCap, gasTipCap, value uint64, to *common.Address, data []byte) *t
 }
 
 func (n *testNode) sendToAddr(ctx context.Context, addr common.Address, val uint64) (*types.Transaction, error) {
-	return nil, nil
+	return n.sendToAddrTx, n.sendToAddrErr
 }
 
 func (n *testNode) transactionConfirmations(context.Context, common.Hash) (uint32, error) {
@@ -2363,4 +2365,62 @@ func ethToGwei(v uint64) uint64 {
 func ethToWei(v uint64) *big.Int {
 	bigV := new(big.Int).SetUint64(ethToGwei(v))
 	return new(big.Int).Mul(bigV, dexeth.BigGweiFactor)
+}
+
+func TestPayFee(t *testing.T) {
+	tx := tTx(0, 0, 0, &testAddressA, nil)
+	txHash := tx.Hash()
+	maxFee := uint64(defaultSendGasLimit * defaultGasFeeLimit)
+	tests := []struct {
+		name                  string
+		regFee                uint64
+		bal                   *Balance
+		balErr, sendToAddrErr error
+		wantErr               bool
+	}{{
+		name:   "ok",
+		regFee: 10e9,
+		bal:    newBalance(10e9+maxFee, 0, 0),
+	}, {
+		name:    "balance error",
+		balErr:  errors.New(""),
+		wantErr: true,
+	}, {
+		name:    "not enough",
+		regFee:  10e9,
+		bal:     newBalance(10e9, 0, 0),
+		wantErr: true,
+	}, {
+		name:          "sendToAddr error",
+		regFee:        5e9,
+		bal:           newBalance(10e9, 0, 0),
+		sendToAddrErr: errors.New(""),
+		wantErr:       true,
+	}}
+
+	for _, test := range tests {
+		node := &testNode{
+			bal:           test.bal,
+			balErr:        test.balErr,
+			sendToAddrTx:  tx,
+			sendToAddrErr: test.sendToAddrErr,
+		}
+		eth := &ExchangeWallet{
+			node:        node,
+			gasFeeLimit: defaultGasFeeLimit,
+		}
+		coin, err := eth.PayFee("", test.regFee, 0)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %v", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %v: %v", test.name, err)
+		}
+		if !bytes.Equal(txHash[:], coin.ID()) {
+			t.Fatal("coin is not the tx hash")
+		}
+	}
 }
