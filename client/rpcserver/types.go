@@ -441,6 +441,24 @@ func parseWithdrawArgs(params *RawParams) (*withdrawForm, error) {
 	return req, nil
 }
 
+func parseRescanWalletArgs(params *RawParams) (uint32, bool, error) {
+	if err := checkNArgs(params, []int{0}, []int{1, 2}); err != nil {
+		return 0, false, err
+	}
+	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
+	if err != nil {
+		return 0, false, err
+	}
+	var force bool // do not rescan with active orders by default
+	if len(params.Args) > 1 {
+		force, err = checkBoolArg(params.Args[1], "force")
+		if err != nil {
+			return 0, false, err
+		}
+	}
+	return uint32(assetID), force, nil
+}
+
 func parseOrderBookArgs(params *RawParams) (*orderBookForm, error) {
 	if err := checkNArgs(params, []int{0}, []int{3, 4}); err != nil {
 		return nil, err

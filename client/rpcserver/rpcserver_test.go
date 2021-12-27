@@ -39,6 +39,7 @@ type TCore struct {
 	createWalletErr     error
 	newWalletForm       *core.WalletForm
 	openWalletErr       error
+	rescanWalletErr     error
 	walletState         *core.WalletState
 	closeWalletErr      error
 	wallets             []*core.WalletState
@@ -93,6 +94,9 @@ func (c *TCore) Logout() error {
 }
 func (c *TCore) OpenWallet(assetID uint32, pw []byte) error {
 	return c.openWalletErr
+}
+func (c *TCore) RescanWallet(assetID uint32, force bool) error {
+	return c.rescanWalletErr
 }
 func (c *TCore) GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange, error) {
 	return c.dexExchange, c.getDEXConfigErr
