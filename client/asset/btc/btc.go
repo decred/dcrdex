@@ -2286,13 +2286,19 @@ func (btc *ExchangeWallet) refundTx(txHash *chainhash.Hash, vout uint32, contrac
 	return msgTx, nil
 }
 
-// Address returns a new external address from the wallet.
+// Address returns an external address from the wallet.
 func (btc *ExchangeWallet) Address() (string, error) {
 	addr, err := btc.externalAddress()
 	if err != nil {
 		return "", err
 	}
 	return addr.String(), nil
+}
+
+// NewAddress returns a new address from the wallet. This satisfies the
+// NewAddresser interface.
+func (btc *ExchangeWallet) NewAddress() (string, error) {
+	return btc.Address()
 }
 
 // PayFee sends the dex registration fee. Transaction fees are in addition to

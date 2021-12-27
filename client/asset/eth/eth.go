@@ -738,7 +738,8 @@ func (*ExchangeWallet) Refund(coinID, contract dex.Bytes, feeSuggestion uint64) 
 	return nil, asset.ErrNotImplemented
 }
 
-// Address returns an address for the exchange wallet.
+// Address returns an address for the exchange wallet. This implementation is
+// idempotent, always returning the same address for a given ExchangeWallet.
 func (eth *ExchangeWallet) Address() (string, error) {
 	return eth.acct.Address.String(), nil
 }
