@@ -21,6 +21,7 @@ type xcWallet struct {
 	AssetID    uint32
 	dbID       []byte
 	walletType string
+	traits     asset.WalletTrait
 
 	mtx          sync.RWMutex
 	encPass      []byte // empty means wallet not password protected
@@ -153,6 +154,7 @@ func (w *xcWallet) state() *WalletState {
 		Synced:       w.synced,
 		SyncProgress: w.syncProgress,
 		WalletType:   w.walletType,
+		Traits:       w.traits,
 	}
 }
 
@@ -177,7 +179,12 @@ func (w *xcWallet) refreshDepositAddress() (string, error) {
 			unbip(w.AssetID))
 	}
 
-	addr, err := w.Address()
+	na, is := w.Wallet.(asset.NewAddresser)
+	if !is {
+		return "", fmt.Errorf("wallet does not generate new addresses")
+	}
+
+	addr, err := na.NewAddress()
 	if err != nil {
 		return "", fmt.Errorf("%s Wallet.Address error: %w", unbip(w.AssetID), err)
 	}

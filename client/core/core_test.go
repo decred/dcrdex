@@ -760,6 +760,10 @@ func (w *TXCWallet) Address() (string, error) {
 	return "", w.addrErr
 }
 
+func (w *TXCWallet) NewAddress() (string, error) {
+	return "", w.addrErr
+}
+
 func (w *TXCWallet) Unlock(pw []byte) error {
 	return w.unlockErr
 }

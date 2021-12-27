@@ -2420,6 +2420,12 @@ func (dcr *ExchangeWallet) Address() (string, error) {
 	return addr.String(), nil
 }
 
+// NewAddress returns a new address from the wallet. This satisfies the
+// NewAddresser interface.
+func (dcr *ExchangeWallet) NewAddress() (string, error) {
+	return dcr.Address()
+}
+
 func (dcr *ExchangeWallet) accountUnlocked(ctx context.Context, acct string) (encrypted, unlocked bool, err error) {
 	var res *walletjson.AccountUnlockedResult
 	res, err = dcr.wallet.AccountUnlocked(ctx, acct)
