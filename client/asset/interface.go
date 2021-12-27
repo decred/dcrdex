@@ -10,6 +10,39 @@ import (
 	"decred.org/dcrdex/dex"
 )
 
+// WalletTrait is a bitset indicating various optional wallet features, such as
+// the presence of auxiliary methods like Rescan and Send.
+type WalletTrait uint64
+
+const (
+	WalletTraitRescanner    WalletTrait = 1 << iota // The Wallet is an asset.Rescanner.
+	WalletTraitNewAddresser                         // The Wallet can generate new addresses on demand with NewAddress.
+)
+
+// IsRescanner tests if the WalletTrait has the WalletTraitRescanner bit set.
+func (wt WalletTrait) IsRescanner() bool {
+	return wt&WalletTraitRescanner != 0
+}
+
+// IsNewAddresser tests if the WalletTrait has the WalletTraitNewAddresser bit
+// set, which indicates the presence of a NewAddress method that will generate a
+// new address on each call. If this method does not exist, the Address method
+// should be assumed to always return the same deposit address.
+func (wt WalletTrait) IsNewAddresser() bool {
+	return wt&WalletTraitNewAddresser != 0
+}
+
+// DetermineWalletTraits returns the WalletTrait bitset for the provided Wallet.
+func DetermineWalletTraits(w Wallet) (t WalletTrait) {
+	if _, is := w.(Rescanner); is {
+		t |= WalletTraitRescanner
+	}
+	if _, is := w.(NewAddresser); is {
+		t |= WalletTraitNewAddresser
+	}
+	return t
+}
+
 // CoinNotFoundError is returned when a coin cannot be found, either because it
 // has been spent or it never existed. This error may be returned from
 // AuditContract, Refund or Redeem as those methods expect the provided coin to
@@ -27,7 +60,9 @@ type WalletDefinition struct {
 	// seed that should be used to set the wallet key(s). This would be
 	// true for built-in wallets.
 	Seeded bool `json:"seeded"`
-	// Type is a string identifying the wallet type.
+	// Type is a string identifying the wallet type. NOTE: There should be a
+	// particular WalletTrait set for any given Type, but wallet construction is
+	// presently required to discern traits.
 	Type string `json:"type"`
 	// Tab is a displayable string for the wallet type. One or two words. First
 	// word capitalized. Displayed on a wallet selection tab.
@@ -111,7 +146,7 @@ type Wallet interface {
 	// It should be assumed that once disconnected, subsequent Connect calls
 	// will fail, requiring a new Wallet instance.
 	dex.Connector
-	// Info returns a set of basic information about the wallet.
+	// Info returns a set of basic information about the wallet driver.
 	Info() *WalletInfo
 	// Balance should return the balance of the wallet, categorized by
 	// available, immature, and locked. Balance takes a list of minimum
@@ -231,6 +266,28 @@ type Wallet interface {
 	// payment. This method need not be supported by all assets. Those assets
 	// which do no support DEX registration fees will return an ErrUnsupported.
 	RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error)
+}
+
+// Rescanner is a wallet implementation with rescan functionality.
+type Rescanner interface {
+	Rescan(ctx context.Context) error
+}
+
+// Sender is a wallet that can send funds to an address, as opposed to
+// withdrawing a certain amount from the source wallet/account.
+type Sender interface {
+	Send(address string, value, feeSuggestion uint64) (Coin, error)
+}
+
+// Sweeper is a wallet that can clear the entire balance of the wallet/account
+// to an address. Similar to Withdraw, but no input value is required.
+type Sweeper interface {
+	Sweep(address string, feeSuggestion uint64) (Coin, error)
+}
+
+// NewAddresser is a wallet that can generate new deposit addresses.
+type NewAddresser interface {
+	NewAddress() (string, error)
 }
 
 // TokenMaster is implemented by assets which support degenerate tokens.
