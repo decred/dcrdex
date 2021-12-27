@@ -70,6 +70,7 @@ type clientCore interface {
 	Trade(appPass []byte, form *core.TradeForm) (order *core.Order, err error)
 	Wallets() (walletsStates []*core.WalletState)
 	WalletState(assetID uint32) *core.WalletState
+	RescanWallet(assetID uint32, force bool) error
 	Withdraw(appPass []byte, assetID uint32, value uint64, addr string) (asset.Coin, error)
 	ExportSeed(pw []byte) ([]byte, error)
 }

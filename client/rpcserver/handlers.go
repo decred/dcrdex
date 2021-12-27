@@ -36,6 +36,7 @@ const (
 	tradeRoute        = "trade"
 	versionRoute      = "version"
 	walletsRoute      = "wallets"
+	rescanWalletRoute = "rescanwallet"
 	withdrawRoute     = "withdraw"
 	appSeedRoute      = "appseed"
 )
@@ -86,6 +87,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	tradeRoute:        handleTrade,
 	versionRoute:      handleVersion,
 	walletsRoute:      handleWallets,
+	rescanWalletRoute: handleRescanWallet,
 	withdrawRoute:     handleWithdraw,
 	appSeedRoute:      handleAppSeed,
 }
@@ -429,6 +431,24 @@ func handleWithdraw(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	}
 	res := coin.String()
 	return createResponse(withdrawRoute, &res, nil)
+}
+
+// handleRescanWallet handles requests to rescan a wallet. This may trigger an
+// asynchronous resynchronization of wallet address activity, and the wallet
+// state should be consulted for status. *msgjson.ResponsePayload.Error is empty
+// if successful.
+func handleRescanWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	assetID, force, err := parseRescanWalletArgs(params)
+	if err != nil {
+		return usage(withdrawRoute, err)
+	}
+	err = s.core.RescanWallet(assetID, force)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to rescan wallet: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCWalletRescanError, errMsg)
+		return createResponse(rescanWalletRoute, nil, resErr)
+	}
+	return createResponse(rescanWalletRoute, "started", nil)
 }
 
 // handleLogout logs out the DEX client. *msgjson.ResponsePayload.Error is empty
@@ -926,6 +946,24 @@ Registration is complete after the fee transaction has been confirmed.`,
     orderID (string): The hex ID of the order to cancel`,
 		returns: `Returns:
     string: The message "` + fmt.Sprintf(canceledOrderStr, "[order ID]") + `"`,
+	},
+	rescanWalletRoute: {
+		argsShort: `assetID (force)`,
+		cmdSummary: `Initiate a rescan of an asset's wallet. This is only supported for certain
+wallet types. Wallet resynchronization may be asynchronous, and the wallet
+state should be consulted for progress.
+	
+WARNING: It is ill-advised to initiate a wallet rescan with active orders
+unless as a last ditch effort to get the wallet to recognize a transaction
+needed to complete a swap.`,
+		returns: `Returns:
+    string: "started"`,
+		argsLong: `Args:
+    assetID (int): The asset's BIP-44 registered coin index. Used to identify
+      which wallet to withdraw from. e.g. 42 for DCR. See
+      https://github.com/satoshilabs/slips/blob/master/slip-0044.md
+    force (bool): Force a wallet rescan even if their are active orders. The
+      default is false.`,
 	},
 	withdrawRoute: {
 		pwArgsShort: `"appPass"`,

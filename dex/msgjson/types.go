@@ -78,6 +78,7 @@ const (
 	TooManyRequestsError              // 59
 	RPCGetDEXConfigError              // 60
 	RPCDiscoverAcctError              // 61
+	RPCWalletRescanError              // 62
 )
 
 // Routes are destinations for a "payload" of data. The type of data being
