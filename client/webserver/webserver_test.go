@@ -53,22 +53,23 @@ func (c *tCoin) Confirmations(context.Context) (uint32, error) {
 }
 
 type TCore struct {
-	balanceErr      error
-	syncFeed        core.BookFeed
-	syncErr         error
-	regErr          error
-	loginErr        error
-	logoutErr       error
-	initErr         error
-	isInited        bool
-	getDEXConfigErr error
-	createWalletErr error
-	openWalletErr   error
-	closeWalletErr  error
-	withdrawErr     error
-	notHas          bool
-	notRunning      bool
-	notOpen         bool
+	balanceErr       error
+	syncFeed         core.BookFeed
+	syncErr          error
+	regErr           error
+	loginErr         error
+	logoutErr        error
+	initErr          error
+	isInited         bool
+	getDEXConfigErr  error
+	createWalletErr  error
+	openWalletErr    error
+	closeWalletErr   error
+	rescannWalletErr error
+	withdrawErr      error
+	notHas           bool
+	notRunning       bool
+	notOpen          bool
 }
 
 func (c *TCore) Network() dex.Network                 { return dex.Mainnet }
@@ -104,6 +105,7 @@ func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error {
 	return c.createWalletErr
 }
+func (c *TCore) RescanWallet(assetID uint32, force bool) error    { return c.rescannWalletErr }
 func (c *TCore) OpenWallet(assetID uint32, pw []byte) error       { return c.openWalletErr }
 func (c *TCore) CloseWallet(assetID uint32) error                 { return c.closeWalletErr }
 func (c *TCore) ConnectWallet(assetID uint32) error               { return nil }

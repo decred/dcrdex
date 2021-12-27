@@ -141,6 +141,32 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
+// apiRescanWallet is the handler for the '/rescanwallet' API request. Commands
+// a rescan of the specified wallet.
+func (s *WebServer) apiRescanWallet(w http.ResponseWriter, r *http.Request) {
+	var form struct {
+		AssetID uint32 `json:"assetID"`
+		Force   bool   `json:"force"`
+	}
+	if !readPost(w, r, &form) {
+		return
+	}
+	status := s.core.WalletState(form.AssetID)
+	if status == nil {
+		s.writeAPIError(w, fmt.Errorf("No wallet for %d -> %s", form.AssetID, unbip(form.AssetID)))
+		return
+	}
+	err := s.core.RescanWallet(form.AssetID, form.Force)
+	if err != nil {
+		// NOTE: client may may check for code activeOrdersErr to prompt for
+		// override the active orders safety check.
+		s.writeAPIError(w, fmt.Errorf("error unlocking %s wallet: %w", unbip(form.AssetID), err))
+		return
+	}
+
+	writeJSON(w, simpleAck(), s.indent)
+}
+
 // apiOpenWallet is the handler for the '/openwallet' API request. Unlocks the
 // specified wallet.
 func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
