@@ -37,6 +37,7 @@ export default class WalletsPage extends BasePage {
         withdraw: getAction(tr, 'withdraw'),
         deposit: getAction(tr, 'deposit'),
         create: getAction(tr, 'create'),
+        rescan: getAction(tr, 'rescan'),
         lock: getAction(tr, 'lock'),
         settings: getAction(tr, 'settings')
       }
@@ -105,6 +106,7 @@ export default class WalletsPage extends BasePage {
       bind(a.withdraw, 'click', e => { run(e, this.showWithdraw.bind(this)) })
       bind(a.deposit, 'click', e => { run(e, this.showDeposit.bind(this)) })
       bind(a.create, 'click', e => { run(e, this.showNewWallet.bind(this)) })
+      bind(a.rescan, 'click', e => { run(e, this.rescanWallet.bind(this)) })
       bind(a.unlock, 'click', e => { run(e, this.openWallet.bind(this)) })
       bind(a.lock, 'click', async e => { run(e, this.lock.bind(this)) })
       bind(a.settings, 'click', e => { run(e, this.showReconfig.bind(this)) })
@@ -238,6 +240,16 @@ export default class WalletsPage extends BasePage {
     await this.newWalletForm.loadDefaults()
   }
 
+  async rescanWallet (assetID) {
+    const loaded = app().loading(this.body)
+    const res = await postJSON('/api/rescanwallet', {
+      assetID: assetID,
+      force: false // TODO input arg
+    })
+    loaded()
+    app().checkResponse(res)
+  }
+
   /* Show the open wallet form if the password is not cached, and otherwise
    * attempt to open the wallet.
    */
@@ -340,7 +352,7 @@ export default class WalletsPage extends BasePage {
     const wallet = app().walletMap[assetID]
     this.depositAsset = this.lastFormAsset = assetID
     if (!wallet) {
-      app().notify(ntfn.make(`No wallet found for ${asset.info.name}`, 'Cannot retrieve deposit address.', ntfn.ERROR)) // TODO: translate
+      app().notify(ntfn.make('Cannot retrieve deposit address.', `No wallet found for ${asset.info.name}`, ntfn.ERROR)) // TODO: translate
       return
     }
     await this.hideBox()
@@ -375,7 +387,7 @@ export default class WalletsPage extends BasePage {
     const asset = this.withdrawAsset = app().assets[assetID]
     const wallet = app().walletMap[assetID]
     if (!wallet) {
-      app().notify(ntfn.make(`No wallet found for ${asset.info.name}`, 'Cannot withdraw.', ntfn.ERROR))
+      app().notify(ntfn.make('Cannot withdraw.', `No wallet found for ${asset.info.name}`, ntfn.ERROR))
     }
     await this.hideBox()
     page.withdrawAddr.value = ''

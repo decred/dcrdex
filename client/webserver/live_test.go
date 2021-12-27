@@ -1291,6 +1291,10 @@ func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) erro
 	return nil
 }
 
+func (c *TCore) RescanWallet(assetID uint32, force bool) error {
+	return nil
+}
+
 func (c *TCore) OpenWallet(assetID uint32, pw []byte) error {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
