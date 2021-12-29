@@ -60,9 +60,7 @@ contract ERC20Swap {
     constructor() {}
 
     // senderIsOrigin ensures that this contract cannot be used by other
-    // contracts, which reduces possible attack vectors. There is some
-    // conversation in the eth community about removing tx.origin, which would
-    // make this check impossible.
+    // contracts, which reduces possible attack vectors.
     modifier senderIsOrigin() {
         require(tx.origin == msg.sender, "sender != origin");
         _;
@@ -90,14 +88,6 @@ contract ERC20Swap {
     // previously. Once initiated, each swap's state is set to Filled. The
     // tokens equal to the sum of each swap's value are now in the custody of
     // the contract and can only be retrieved through redeem or refund.
-    //
-    // It is important to note that this calls an external contract which has no
-    // restrictions on gas used. This has the potential to open the contract up
-    // to a reentry attack.
-    //
-    // This is a writing function and requires gas. Failure or success should
-    // be guaged by querying the swap and checking state after being mined. Gas
-    // is expended either way.
     function initiate(Initiation[] calldata initiations, address token)
         public
         senderIsOrigin()
@@ -149,17 +139,6 @@ contract ERC20Swap {
     // redeem redeems a contract. It checks that the sender is not a contract,
     // and that the secret hash hashes to secretHash. The ERC20 tokens are tranfered
     // from the contract to the sender.
-    //
-    // It is important to note that this calls an external contract which has no
-    // restrictions on gas used. This has the potential to open the contract up
-    // to a reentry attack.
-    //
-    // Any throw at any point in this function will revert the state to what it
-    // was originally, to Initiated.
-    //
-    // This is a writing function and requires gas. Failure or success should
-    // be guaged by querying the swap and checking state after being mined. Gas
-    // is expended either way.
     function redeem(Redemption[] calldata redemptions)
         public
         senderIsOrigin()
@@ -205,18 +184,6 @@ contract ERC20Swap {
     // refund refunds a contract. It checks that the sender is not a contract,
     // and that the refund time has passed. An amount of ERC20 tokens equal to
     // swap.value is tranfered from the contract to the sender.
-    //
-    //
-    // It is important to note that this calls an external contract which has no
-    // restrictions on gas used. This has the potential to open the contract up
-    // to a reentry attack.
-    //
-    // Any throw at any point in this function will revert the state to what it
-    // was originally, to Initiated.
-    //
-    // This is a writing function and requires gas. Failure or success should
-    // be guaged by querying the swap and checking state after being mined. Gas
-    // is expended either way.
     function refund(bytes32 secretHash)
         public
         senderIsOrigin()
