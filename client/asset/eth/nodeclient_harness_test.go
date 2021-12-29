@@ -49,7 +49,6 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/crypto/secp256k1"
@@ -575,19 +574,16 @@ func TestInitiateGas(t *testing.T) {
 	}
 }
 
-// feesAtBlk calculates the gas fee at blkNum. Txs that have already been mined
-// should pass the block number before being mined. This adds the base fee as
-// calculated at blkNum to a minimum gas tip cap.
+// feesAtBlk calculates the gas fee at blkNum. This adds the base fee at blkNum
+// to a minimum gas tip cap.
 func feesAtBlk(ctx context.Context, n *nodeClient, blkNum int64) (fees *big.Int, err error) {
 	hdr, err := n.leth.ApiBackend.HeaderByNumber(ctx, rpc.BlockNumber(blkNum))
 	if err != nil {
 		return nil, err
 	}
-	base := misc.CalcBaseFee(n.leth.ApiBackend.ChainConfig(), hdr)
-
 	tip := new(big.Int).Set(minGasTipCap)
 
-	return base.Add(base, tip), nil
+	return tip.Add(tip, hdr.BaseFee), nil
 }
 
 func testInitiate(t *testing.T) {
@@ -723,7 +719,7 @@ func testInitiate(t *testing.T) {
 			t.Fatalf("%s: balance error: %v", test.name, err)
 		}
 
-		gasPrice, err := feesAtBlk(ctx, ethClient, receipt.BlockNumber.Int64()-1)
+		gasPrice, err := feesAtBlk(ctx, ethClient, receipt.BlockNumber.Int64())
 		if err != nil {
 			t.Fatalf("%s: feesAtBlk error: %v", test.name, err)
 		}
@@ -1042,7 +1038,7 @@ func testRedeem(t *testing.T) {
 			t.Fatalf("%s: redeemer balance error: %v", test.name, err)
 		}
 
-		gasPrice, err := feesAtBlk(ctx, ethClient, receipt.BlockNumber.Int64()-1)
+		gasPrice, err := feesAtBlk(ctx, ethClient, receipt.BlockNumber.Int64())
 		if err != nil {
 			t.Fatalf("%s: feesAtBlk error: %v", test.name, err)
 		}
@@ -1247,7 +1243,7 @@ func testRefund(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: balance error: %v", test.name, err)
 		}
-		gasPrice, err := feesAtBlk(ctx, test.refunderClient, receipt.BlockNumber.Int64()-1)
+		gasPrice, err := feesAtBlk(ctx, test.refunderClient, receipt.BlockNumber.Int64())
 		if err != nil {
 			t.Fatalf("%s: feesAtBlk error: %v", test.name, err)
 		}
@@ -2101,7 +2097,7 @@ func TestReplayAttack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	gasPrice, err := feesAtBlk(ctx, ethClient, receipt.BlockNumber.Int64()-1)
+	gasPrice, err := feesAtBlk(ctx, ethClient, receipt.BlockNumber.Int64())
 	if err != nil {
 		t.Fatalf("feesAtBlk error: %v", err)
 	}
