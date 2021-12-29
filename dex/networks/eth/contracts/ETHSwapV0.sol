@@ -64,9 +64,7 @@ contract ETHSwap {
     }
 
     // senderIsOrigin ensures that this contract cannot be used by other
-    // contracts, which reduces possible attack vectors. There is some
-    // conversation in the eth community about removing tx.origin, which would
-    // make this check impossible.
+    // contracts, which reduces possible attack vectors.
     modifier senderIsOrigin() {
         require(tx.origin == msg.sender, "sender != origin");
         _;
@@ -93,10 +91,6 @@ contract ETHSwap {
     // Once initiated, each swap's state is set to Filled. The msg.value is now
     // in the custody of the contract and can only be retrieved through redeem
     // or refund.
-    //
-    // This is a writing function and requires gas. Failure or success should
-    // be guaged by querying the swap and checking state after being mined. Gas
-    // is expended either way.
     function initiate(Initiation[] calldata initiations)
         public
         payable
@@ -153,13 +147,6 @@ contract ETHSwap {
     // before proceeding to send. That way, the nested attacking function will
     // throw upon trying to call redeem a second time. Currently, reentry is also
     // not possible because contracts cannot use this contract.
-    //
-    // Any throw at any point in this function will revert the state to what it
-    // was originally, to Initiated.
-    //
-    // This is a writing function and requires gas. Failure or success should
-    // be guaged by querying the swap and checking state after being mined. Gas
-    // is expended either way.
     function redeem(Redemption[] calldata redemptions)
         public
         senderIsOrigin()
@@ -189,13 +176,6 @@ contract ETHSwap {
     //
     // It is important to note that this also uses call.value which comes with no
     // restrictions on gas used. See redeem for more info.
-    //
-    // Any throw at any point in this function will revert the state to what it
-    // was originally, to Initiated.
-    //
-    // This is a writing function and requires gas. Failure or success should
-    // be guaged by querying the swap and checking state after being mined. Gas
-    // is expended either way.
     function refund(bytes32 secretHash)
         public
         senderIsOrigin()
