@@ -475,11 +475,6 @@ func testSendSignedTransaction(t *testing.T) {
 
 	bal, _ := ethClient.balance(ctx)
 
-	// Removed pending issue #1342 resolution.
-	//if bal.PendingIn.Cmp(dexeth.GweiToWei(1)) != 0 { // We sent it to ourselves.
-	//	t.Fatalf("pending in not showing")
-	//}
-
 	fee := uint64(21000 * 300) // gwei
 	if bal.PendingOut.Cmp(dexeth.GweiToWei(1+fee)) != 0 {
 		t.Fatalf("pending out not showing")
@@ -580,6 +575,9 @@ func TestInitiateGas(t *testing.T) {
 	}
 }
 
+// feesAtBlk calculates the gas fee at blkNum. Txs that have already been mined
+// should pass the block number before being mined. This adds the base fee as
+// calculated at blkNum to a minimum gas tip cap.
 func feesAtBlk(ctx context.Context, n *nodeClient, blkNum int64) (fees *big.Int, err error) {
 	hdr, err := n.leth.ApiBackend.HeaderByNumber(ctx, rpc.BlockNumber(blkNum))
 	if err != nil {

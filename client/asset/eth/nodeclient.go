@@ -543,7 +543,8 @@ func (n *nodeClient) transactionConfirmations(ctx context.Context, txHash common
 	// tx pool, and when our peers are ready to supply the info. I saw a
 	// CoinNotFoundError in TestAccount/testSendTransaction, but haven't
 	// reproduced.
-	return 0, fmt.Errorf("cannot find %v: %w", txHash, asset.CoinNotFoundError)
+	n.log.Warnf("transactionConfirmations: cannot find %v", txHash)
+	return 0, asset.CoinNotFoundError
 }
 
 // sendSignedTransaction injects a signed transaction into the pending pool for execution.
