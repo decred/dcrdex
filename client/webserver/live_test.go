@@ -25,6 +25,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/client/asset/dcr"
+	"decred.org/dcrdex/client/asset/eth"
 	"decred.org/dcrdex/client/asset/ltc"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
@@ -35,7 +36,6 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	dexbch "decred.org/dcrdex/dex/networks/bch"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
-	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
 )
@@ -185,7 +185,6 @@ func mkMrkt(base, quote string) *core.Market {
 
 func mkSupportedAsset(symbol string, state *tWalletState, bal *core.WalletBalance) *core.SupportedAsset {
 	assetID, _ := dex.BipSymbolID(symbol)
-	winfo := winfos[assetID]
 	var wallet *core.WalletState
 	if state != nil {
 		wallet = &core.WalletState{
@@ -195,21 +194,35 @@ func mkSupportedAsset(symbol string, state *tWalletState, bal *core.WalletBalanc
 			Running:   state.running,
 			Address:   ordertest.RandomAddress(),
 			Balance:   bal,
-			Units:     winfo.UnitInfo.AtomicUnit,
+			Units:     unitInfo(assetID).Conventional.Unit,
 			Encrypted: true,
 			Synced:    false,
 		}
 	}
+	winfo := winfos[assetID]
+	var name string
+	var unitInfo dex.UnitInfo
+	if winfo == nil {
+		name = tinfos[assetID].Name
+		unitInfo = tinfos[assetID].UnitInfo
+	} else {
+		name = winfo.Name
+		unitInfo = winfo.UnitInfo
+	}
 	return &core.SupportedAsset{
-		ID:     assetID,
-		Symbol: symbol,
-		Wallet: wallet,
-		Info:   winfo,
+		ID:       assetID,
+		Symbol:   symbol,
+		Wallet:   wallet,
+		Info:     winfo,
+		Token:    tinfos[assetID],
+		Name:     name,
+		UnitInfo: unitInfo,
 	}
 }
 
 func mkDexAsset(symbol string) *dex.Asset {
 	assetID, _ := dex.BipSymbolID(symbol)
+	// ui, _ := asset.UnitInfo(assetID)
 	a := &dex.Asset{
 		ID:           assetID,
 		Symbol:       symbol,
@@ -218,6 +231,7 @@ func mkDexAsset(symbol string) *dex.Asset {
 		SwapSize:     uint64(rand.Intn(150) + 150),
 		SwapSizeBase: uint64(rand.Intn(150) + 15),
 		SwapConf:     uint32(rand.Intn(5) + 2),
+		// UnitInfo:     ui,
 	}
 	return a
 }
@@ -277,15 +291,16 @@ func miniOrderFromCoreOrder(ord *core.Order) *core.MiniOrder {
 }
 
 var dexAssets = map[uint32]*dex.Asset{
-	0:   mkDexAsset("btc"),
-	2:   mkDexAsset("ltc"),
-	42:  mkDexAsset("dcr"),
-	22:  mkDexAsset("mona"),
-	28:  mkDexAsset("vtc"),
-	141: mkDexAsset("kmd"),
-	3:   mkDexAsset("doge"),
-	145: mkDexAsset("bch"),
-	60:  mkDexAsset("eth"),
+	0:     mkDexAsset("btc"),
+	2:     mkDexAsset("ltc"),
+	42:    mkDexAsset("dcr"),
+	22:    mkDexAsset("mona"),
+	28:    mkDexAsset("vtc"),
+	141:   mkDexAsset("kmd"),
+	3:     mkDexAsset("doge"),
+	145:   mkDexAsset("bch"),
+	60:    mkDexAsset("eth"),
+	60000: mkDexAsset("dextt.eth"),
 }
 
 var tExchanges = map[string]*core.Exchange{
@@ -294,14 +309,15 @@ var tExchanges = map[string]*core.Exchange{
 		Assets: dexAssets,
 		AcctID: "abcdef0123456789",
 		Markets: map[string]*core.Market{
-			mkid(42, 0):   mkMrkt("dcr", "btc"),
-			mkid(145, 42): mkMrkt("bch", "dcr"),
-			mkid(60, 42):  mkMrkt("eth", "dcr"),
-			mkid(2, 42):   mkMrkt("ltc", "dcr"),
-			mkid(3, 0):    mkMrkt("doge", "btc"),
-			mkid(3, 42):   mkMrkt("doge", "dcr"),
-			mkid(22, 42):  mkMrkt("mona", "dcr"),
-			mkid(28, 0):   mkMrkt("vtc", "btc"),
+			mkid(42, 0):     mkMrkt("dcr", "btc"),
+			mkid(145, 42):   mkMrkt("bch", "dcr"),
+			mkid(60, 42):    mkMrkt("eth", "dcr"),
+			mkid(2, 42):     mkMrkt("ltc", "dcr"),
+			mkid(3, 0):      mkMrkt("doge", "btc"),
+			mkid(3, 42):     mkMrkt("doge", "dcr"),
+			mkid(22, 42):    mkMrkt("mona", "dcr"),
+			mkid(28, 0):     mkMrkt("vtc", "btc"),
+			mkid(60000, 42): mkMrkt("dextt.eth", "dcr"),
 		},
 		Connected: true,
 		RegFees: map[string]*core.FeeAsset{
@@ -334,6 +350,11 @@ var tExchanges = map[string]*core.Exchange{
 				ID:    3,
 				Confs: 10,
 				Amt:   1e12,
+			},
+			"dextt.eth": {
+				ID:    60000,
+				Confs: 10,
+				Amt:   1e11,
 			},
 			"kmd": { // Not-supported
 				ID:    141,
@@ -470,14 +491,15 @@ func newTCore() *TCore {
 	return &TCore{
 		wallets: make(map[uint32]*tWalletState),
 		balances: map[uint32]*core.WalletBalance{
-			0:   randomBalance(0),
-			2:   randomBalance(2),
-			42:  randomBalance(42),
-			22:  randomBalance(22),
-			3:   randomBalance(3),
-			28:  randomBalance(28),
-			60:  randomBalance(60),
-			145: randomBalance(145),
+			0:     randomBalance(0),
+			2:     randomBalance(2),
+			42:    randomBalance(42),
+			22:    randomBalance(22),
+			3:     randomBalance(3),
+			28:    randomBalance(28),
+			60:    randomBalance(60),
+			145:   randomBalance(145),
+			60000: randomBalance(60000),
 		},
 		noteFeed: make(chan core.Notification, 1),
 	}
@@ -527,7 +549,7 @@ func (c *TCore) Login([]byte) (*core.LoginResult, error) { return &core.LoginRes
 func (c *TCore) IsInitialized() bool                     { return true }
 func (c *TCore) Logout() error                           { return nil }
 
-var orderAssets = []string{"dcr", "btc", "ltc", "doge", "mona", "vtc"}
+var orderAssets = []string{"dcr", "btc", "ltc", "doge", "mona", "vtc", "dextt.eth"}
 
 func (c *TCore) Orders(filter *core.OrderFilter) ([]*core.Order, error) {
 	var spacing uint64 = 60 * 60 * 1000 / 2 // half an hour
@@ -695,6 +717,7 @@ func makeCoreOrder() *core.Order {
 	baseID, _ := dex.BipSymbolID(baseSymbol)
 	quoteID, _ := dex.BipSymbolID(quoteSymbol)
 	mktID, _ := dex.MarketName(baseID, quoteID)
+	// TODO: Fix this. This market probably doesn't exist.
 	lotSize := tExchanges[host].Markets[mktID].LotSize
 	rateStep := tExchanges[host].Markets[mktID].RateStep
 	rate := uint64(rand.Intn(1e3)) * rateStep
@@ -1184,13 +1207,7 @@ var winfos = map[uint32]*asset.WalletInfo{
 			ConfigOpts: configOpts,
 		}},
 	},
-	60: {
-		Name:     "Ethereum",
-		UnitInfo: dexeth.UnitInfo,
-		AvailableWallets: []*asset.WalletDefinition{{
-			ConfigOpts: configOpts,
-		}},
-	},
+	60: eth.WalletInfo,
 	145: {
 		Name:     "Bitcoin Cash",
 		UnitInfo: dexbch.UnitInfo,
@@ -1198,6 +1215,17 @@ var winfos = map[uint32]*asset.WalletInfo{
 			ConfigOpts: configOpts,
 		}},
 	},
+}
+
+var tinfos = map[uint32]*asset.Token{
+	60000: asset.TokenInfo(60000),
+}
+
+func unitInfo(assetID uint32) dex.UnitInfo {
+	if tinfo, found := tinfos[assetID]; found {
+		return tinfo.UnitInfo
+	}
+	return winfos[assetID].UnitInfo
 }
 
 func (c *TCore) WalletState(assetID uint32) *core.WalletState {
@@ -1219,7 +1247,7 @@ func (c *TCore) walletState(assetID uint32) *core.WalletState {
 		Running:   w.running,
 		Address:   ordertest.RandomAddress(),
 		Balance:   c.balances[assetID],
-		Units:     winfos[assetID].UnitInfo.AtomicUnit,
+		Units:     unitInfo(assetID).AtomicUnit,
 		Encrypted: true,
 		Synced:    true,
 	}
@@ -1341,7 +1369,7 @@ func (c *TCore) Wallets() []*core.WalletState {
 			Running:   wallet.running,
 			Address:   ordertest.RandomAddress(),
 			Balance:   c.balances[assetID],
-			Units:     winfos[assetID].UnitInfo.AtomicUnit,
+			Units:     unitInfo(assetID).AtomicUnit,
 			Encrypted: true,
 		})
 	}
@@ -1391,14 +1419,15 @@ func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
 	return map[uint32]*core.SupportedAsset{
-		0:   mkSupportedAsset("btc", c.wallets[0], c.balances[0]),
-		42:  mkSupportedAsset("dcr", c.wallets[42], c.balances[42]),
-		2:   mkSupportedAsset("ltc", c.wallets[2], c.balances[2]),
-		22:  mkSupportedAsset("mona", c.wallets[22], c.balances[22]),
-		3:   mkSupportedAsset("doge", c.wallets[3], c.balances[3]),
-		28:  mkSupportedAsset("vtc", c.wallets[28], c.balances[28]),
-		60:  mkSupportedAsset("eth", c.wallets[60], c.balances[60]),
-		145: mkSupportedAsset("bch", c.wallets[145], c.balances[145]),
+		0:     mkSupportedAsset("btc", c.wallets[0], c.balances[0]),
+		42:    mkSupportedAsset("dcr", c.wallets[42], c.balances[42]),
+		2:     mkSupportedAsset("ltc", c.wallets[2], c.balances[2]),
+		22:    mkSupportedAsset("mona", c.wallets[22], c.balances[22]),
+		3:     mkSupportedAsset("doge", c.wallets[3], c.balances[3]),
+		28:    mkSupportedAsset("vtc", c.wallets[28], c.balances[28]),
+		60:    mkSupportedAsset("eth", c.wallets[60], c.balances[60]),
+		145:   mkSupportedAsset("bch", c.wallets[145], c.balances[145]),
+		60000: mkSupportedAsset("dextt.eth", c.wallets[60000], c.balances[60000]),
 	}
 }
 

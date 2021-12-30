@@ -1668,10 +1668,27 @@ func (c *Core) assetMap() map[uint32]*SupportedAsset {
 			wallet = w.state()
 		}
 		assets[assetID] = &SupportedAsset{
-			ID:     assetID,
-			Symbol: asset.Symbol,
-			Wallet: wallet,
-			Info:   asset.Info,
+			ID:       assetID,
+			Symbol:   asset.Symbol,
+			Wallet:   wallet,
+			Info:     asset.Info,
+			Name:     asset.Info.Name,
+			UnitInfo: asset.Info.UnitInfo,
+		}
+		for tokenID, token := range asset.Tokens {
+			wallet = nil
+			w, found := c.wallets[assetID]
+			if found {
+				wallet = w.state()
+			}
+			assets[tokenID] = &SupportedAsset{
+				ID:       tokenID,
+				Symbol:   dex.BipIDSymbol(tokenID),
+				Wallet:   wallet,
+				Token:    token,
+				Name:     token.Name,
+				UnitInfo: token.UnitInfo,
+			}
 		}
 	}
 	return assets
@@ -1700,50 +1717,17 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		return err
 	}
 
-	walletDef, err := walletDefinition(assetID, form.Type)
+	var dbWallet *db.Wallet
+
+	// Check if this is a token.
+	token := asset.TokenInfo(assetID)
+	if token != nil {
+		dbWallet, err = c.createTokenWallet(assetID, token, form)
+	} else {
+		dbWallet, err = c.createWallet(crypter, walletPW, assetID, form)
+	}
 	if err != nil {
 		return err
-	}
-
-	// Remove unused key-values from parsed settings before saving to db.
-	// Especially necessary if settings was parsed from a config file, b/c
-	// config files usually define more key-values than we need.
-	// Expected keys should be lowercase because config.Parse returns lowercase
-	// keys.
-	expectedKeys := make(map[string]bool, len(walletDef.ConfigOpts))
-	for _, option := range walletDef.ConfigOpts {
-		expectedKeys[strings.ToLower(option.Key)] = true
-	}
-	for key := range form.Config {
-		if !expectedKeys[key] {
-			delete(form.Config, key)
-		}
-	}
-
-	if walletDef.Seeded {
-		if len(walletPW) > 0 {
-			return errors.New("external password incompatible with seeded wallet")
-		}
-		walletPW, err = c.createSeededWallet(assetID, crypter, form)
-		if err != nil {
-			return err
-		}
-	}
-
-	var encPW []byte
-	if len(walletPW) > 0 {
-		encPW, err = crypter.Encrypt(walletPW)
-		if err != nil {
-			return fmt.Errorf("wallet password encryption error: %w", err)
-		}
-	}
-
-	dbWallet := &db.Wallet{
-		Type:        walletDef.Type,
-		AssetID:     assetID,
-		Settings:    form.Config,
-		EncryptedPW: encPW,
-		// Balance and Address are set after connect.
 	}
 
 	wallet, err := c.loadWallet(dbWallet)
@@ -1794,6 +1778,76 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	c.notify(newWalletStateNote(wallet.state()))
 
 	return nil
+}
+
+func (c *Core) createWallet(crypter encrypt.Crypter, walletPW []byte, assetID uint32, form *WalletForm) (*db.Wallet, error) {
+	walletDef, err := walletDefinition(assetID, form.Type)
+	if err != nil {
+		return nil, err
+	}
+
+	// Remove unused key-values from parsed settings before saving to db.
+	// Especially necessary if settings was parsed from a config file, b/c
+	// config files usually define more key-values than we need.
+	// Expected keys should be lowercase because config.Parse returns lowercase
+	// keys.
+	expectedKeys := make(map[string]bool, len(walletDef.ConfigOpts))
+	for _, option := range walletDef.ConfigOpts {
+		expectedKeys[strings.ToLower(option.Key)] = true
+	}
+	for key := range form.Config {
+		if !expectedKeys[key] {
+			delete(form.Config, key)
+		}
+	}
+
+	if walletDef.Seeded {
+		if len(walletPW) > 0 {
+			return nil, errors.New("external password incompatible with seeded wallet")
+		}
+		walletPW, err = c.createSeededWallet(assetID, crypter, form)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	var encPW []byte
+	if len(walletPW) > 0 {
+		encPW, err = crypter.Encrypt(walletPW)
+		if err != nil {
+			return nil, fmt.Errorf("wallet password encryption error: %w", err)
+		}
+	}
+
+	return &db.Wallet{
+		Type:        walletDef.Type,
+		AssetID:     assetID,
+		Settings:    form.Config,
+		EncryptedPW: encPW,
+		// Balance and Address are set after connect.
+	}, nil
+}
+
+func (c *Core) createTokenWallet(tokenID uint32, token *asset.Token, form *WalletForm) (*db.Wallet, error) {
+	wallet, found := c.wallet(token.ParentID)
+	if !found {
+		return nil, fmt.Errorf("no parent wallet %d for token %d (%s)", token.ParentID, tokenID, unbip(tokenID))
+	}
+
+	tokenMaster, is := wallet.Wallet.(asset.TokenMaster)
+	if !is {
+		return nil, fmt.Errorf("parent wallet %s is not a TokenMaster", unbip(token.ParentID))
+	}
+
+	if err := tokenMaster.CreateTokenWallet(tokenID, form.Config); err != nil {
+		return nil, fmt.Errorf("CreateTokenWallet error: %w", err)
+	}
+
+	return &db.Wallet{
+		Type:    "token",
+		AssetID: tokenID,
+		// Balance and Address are set after connect.
+	}, nil
 }
 
 // createSeededWallet initializes a seeded wallet with an asset-specific seed
@@ -1860,21 +1914,42 @@ func (c *Core) assetDataDirectory(assetID uint32) string {
 func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	// Create the client/asset.Wallet.
 	assetID := dbWallet.AssetID
-	walletCfg := &asset.WalletConfig{
-		Type:     dbWallet.Type,
-		Settings: dbWallet.Settings,
-		TipChange: func(err error) {
-			// asset.Wallet implementations should not need wait for the
-			// callback, as they don't know what it is, and will likely launch
-			// TipChange as a goroutine. However, guard against the possibility
-			// of deadlocking a Core method that calls Wallet.Disconnect.
-			go c.tipChange(assetID, err)
-		},
-		DataDir: c.assetDataDirectory(assetID),
-	}
 
-	logger := c.log.SubLogger(unbip(assetID))
-	w, err := asset.OpenWallet(assetID, walletCfg, logger, c.net)
+	token := asset.TokenInfo(assetID)
+	var w asset.Wallet
+	var err error
+	if token == nil {
+		walletCfg := &asset.WalletConfig{
+			Type:     dbWallet.Type,
+			Settings: dbWallet.Settings,
+			TipChange: func(err error) {
+				// asset.Wallet implementations should not need wait for the
+				// callback, as they don't know what it is, and will likely launch
+				// TipChange as a goroutine. However, guard against the possibility
+				// of deadlocking a Core method that calls Wallet.Disconnect.
+				go c.tipChange(assetID, err)
+			},
+			DataDir: c.assetDataDirectory(assetID),
+		}
+
+		logger := c.log.SubLogger(unbip(assetID))
+		w, err = asset.OpenWallet(assetID, walletCfg, logger, c.net)
+	} else {
+		parentWallet, found := c.wallet(token.ParentID)
+		if !found {
+			return nil, fmt.Errorf("cannot load %s wallet before %s wallet", unbip(assetID), unbip(token.ParentID))
+		}
+
+		tokenMaster, is := parentWallet.Wallet.(asset.TokenMaster)
+		if !is {
+			return nil, fmt.Errorf("%s token's %s parent wallet is not a TokenMaster", unbip(assetID), unbip(token.ParentID))
+		}
+
+		w, err = tokenMaster.OpenTokenWallet(assetID, dbWallet.Settings, func(err error) {
+			go c.tipChange(assetID, err)
+		})
+
+	}
 	if err != nil {
 		return nil, fmt.Errorf("error opening wallet: %w", err)
 	}
@@ -6320,6 +6395,10 @@ func parseCert(host string, certI interface{}, net dex.Network) ([]byte, error) 
 // walletDefinition gets the registered WalletDefinition for the asset and
 // wallet type.
 func walletDefinition(assetID uint32, walletType string) (*asset.WalletDefinition, error) {
+	token := asset.TokenInfo(assetID)
+	if token != nil {
+		return token.Definition, nil
+	}
 	winfo, err := asset.Info(assetID)
 	if err != nil {
 		return nil, newError(assetSupportErr, "asset.Info error: %v", err)

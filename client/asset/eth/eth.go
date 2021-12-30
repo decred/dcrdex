@@ -30,12 +30,33 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
+	ethmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
+var erc20AllowanceOption = &asset.ConfigOption{
+	Key:          "limitAllowance",
+	DisplayName:  "Limited Allowance",
+	Description:  "Unlimited allowance is cheaper. Limited allowance reduces risk from malicious or poorly designed contracts.",
+	DefaultValue: false,
+	IsBoolean:    true,
+}
+
+func registerToken(tokenID uint32, desc string) {
+	token := dexeth.Tokens[tokenID]
+	asset.RegisterToken(tokenID, token, &asset.WalletDefinition{
+		Type:        "token",
+		Description: desc,
+		ConfigOpts:  []*asset.ConfigOption{erc20AllowanceOption},
+	})
+}
+
 func init() {
 	asset.Register(BipID, &Driver{})
+
+	// Test token
+	registerToken(testTokenID, "A token wallet for the DEX test token. Used for testing DEX software.")
 }
 
 const (
@@ -86,6 +107,9 @@ var (
 	}
 
 	minGasTipCap = dexeth.GweiToWei(2)
+
+	unlimitedAllowance                   = ethmath.MaxBig256
+	unlimitedAllowanceReplenishThreshold = new(big.Int).Div(unlimitedAllowance, big.NewInt(2))
 
 	findRedemptionCoinID = []byte("FindRedemption Coin")
 )
@@ -155,59 +179,81 @@ type Balance struct {
 // satisfied by rpcclient. For testing, it can be satisfied by a stub.
 type ethFetcher interface {
 	address() common.Address
-	balance(ctx context.Context) (*Balance, error)
 	bestBlockHash(ctx context.Context) (common.Hash, error)
 	bestHeader(ctx context.Context) (*types.Header, error)
 	block(ctx context.Context, hash common.Hash) (*types.Block, error)
 	connect(ctx context.Context) error
-	initiate(ctx context.Context, contracts []*asset.Contract, maxFeeRate uint64, contractVer uint32) (*types.Transaction, error)
 	shutdown()
 	syncProgress() ethereum.SyncProgress
-	isRedeemable(secretHash, secret [32]byte, contractVer uint32) (bool, error)
-	redeem(ctx context.Context, redemptions []*asset.Redemption, maxFeeRate uint64, contractVer uint32) (*types.Transaction, error)
-	isRefundable(secretHash [32]byte, contractVer uint32) (bool, error)
-	refund(ctx context.Context, secretHash [32]byte, maxFeeRate uint64, contractVer uint32) (*types.Transaction, error)
-	swap(ctx context.Context, secretHash [32]byte, contractVer uint32) (*dexeth.SwapState, error)
 	lock() error
 	locked() bool
 	unlock(pw string) error
 	signData(addr common.Address, data []byte) ([]byte, error)
-	sendToAddr(ctx context.Context, addr common.Address, val uint64) (*types.Transaction, error)
 	transactionConfirmations(context.Context, common.Hash) (uint32, error)
 	sendSignedTransaction(ctx context.Context, tx *types.Transaction) error
+	// Contract- and asset-dependent methods.
+	sendToAddr(ctx context.Context, assetID uint32, addr common.Address, val uint64) (*types.Transaction, error)
+	initiate(ctx context.Context, assetID uint32, contracts []*asset.Contract, maxFeeRate uint64, contractVer uint32) (*types.Transaction, error)
+	isRedeemable(assetID uint32, secretHash, secret [32]byte, contractVer uint32) (bool, error)
+	redeem(ctx context.Context, assetID uint32, redemptions []*asset.Redemption, maxFeeRate uint64, contractVer uint32) (*types.Transaction, error)
+	isRefundable(assetID uint32, secretHash [32]byte, contractVer uint32) (bool, error)
+	refund(ctx context.Context, assetID uint32, secretHash [32]byte, maxFeeRate uint64, contractVer uint32) (*types.Transaction, error)
+	swap(ctx context.Context, assetID uint32, secretHash [32]byte, contractVer uint32) (*dexeth.SwapState, error)
+	balance(ctx context.Context, assetID uint32) (*Balance, error)
+	// Token-specific methods.
+	loadToken(ctx context.Context, tokenID uint32) (*dex.Gases, error)
+	tokenAllowance(ctx context.Context, assetID uint32, contractVer uint32) (*big.Int, error)
+	approveToken(ctx context.Context, assetID uint32, amount *big.Int, maxFeeRate uint64, contractVer uint32) (*types.Transaction, error)
 }
 
 // Check that ExchangeWallet satisfies the asset.Wallet interface.
-var _ asset.Wallet = (*ExchangeWallet)(nil)
+var _ asset.Wallet = (*AssetWallet)(nil)
+var _ asset.TokenMaster = (*AssetWallet)(nil)
 
-// ExchangeWallet is a wallet backend for Ethereum. The backend is how the DEX
-// client app communicates with the Ethereum blockchain and wallet. ExchangeWallet
-// satisfies the dex.Wallet interface.
-type ExchangeWallet struct {
+type baseWallet struct {
 	// 64-bit atomic variables first. See
 	// https://golang.org/pkg/sync/atomic/#pkg-note-BUG
 	tipAtConnect int64
-
-	ctx         context.Context // the asset subsystem starts with Connect(ctx)
-	net         dex.Network
-	node        ethFetcher
-	addr        common.Address
-	log         dex.Logger
-	tipChange   func(error)
-	gasFeeLimit uint64
+	ctx          context.Context // the asset subsystem starts with Connect(ctx)
+	net          dex.Network
+	node         ethFetcher
+	addr         common.Address
+	log          dex.Logger
+	gasFeeLimit  uint64
 
 	tipMtx     sync.RWMutex
 	currentTip *types.Block
+
+	walletsMtx sync.RWMutex
+	wallets    map[uint32]*AssetWallet
+}
+
+type tokenConfig struct {
+	*tokenWalletConfig
+	gas    *dex.Gases
+	parent *AssetWallet
+}
+
+// AssetWallet is a wallet backend for Ethereum. The backend is how the DEX
+// client app communicates with the Ethereum blockchain and wallet. AssetWallet
+// satisfies the dex.Wallet interface.
+type AssetWallet struct {
+	*baseWallet
+	assetID   uint32
+	tipChange func(error)
 
 	locked    uint64
 	lockedMtx sync.RWMutex
 
 	findRedemptionMtx  sync.RWMutex
 	findRedemptionReqs map[[32]byte]*findRedemptionRequest
+
+	// token is only used by token wallets.
+	token *tokenConfig
 }
 
 // Info returns basic information about the wallet and asset.
-func (*ExchangeWallet) Info() *asset.WalletInfo {
+func (*baseWallet) Info() *asset.WalletInfo {
 	return WalletInfo
 }
 
@@ -254,7 +300,7 @@ func CreateWallet(createWalletParams *asset.CreateWalletParams) error {
 
 // NewWallet is the exported constructor by which the DEX will import the
 // exchange wallet. It starts an internal light node.
-func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network) (*ExchangeWallet, error) {
+func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network) (*AssetWallet, error) {
 	cl, err := newNodeClient(getWalletDir(assetCFG.DataDir, net), net, logger.SubLogger("NODE"))
 	if err != nil {
 		return nil, err
@@ -270,58 +316,147 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		gasFeeLimit = defaultGasFeeLimit
 	}
 
-	return &ExchangeWallet{
-		log:                logger,
-		net:                net,
-		node:               cl,
-		addr:               cl.address(),
+	eth := &baseWallet{
+		log:         logger,
+		net:         net,
+		node:        cl,
+		addr:        cl.address(),
+		gasFeeLimit: gasFeeLimit,
+		wallets:     make(map[uint32]*AssetWallet),
+	}
+
+	w := &AssetWallet{
+		baseWallet:         eth,
+		assetID:            BipID,
 		tipChange:          assetCFG.TipChange,
-		gasFeeLimit:        gasFeeLimit,
 		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
-	}, nil
+	}
+
+	w.wallets = map[uint32]*AssetWallet{
+		BipID: w,
+	}
+
+	return w, nil
 }
 
 func getWalletDir(dataDir string, network dex.Network) string {
 	return filepath.Join(dataDir, network.String())
 }
 
-func (eth *ExchangeWallet) shutdown() {
+func (eth *baseWallet) shutdown() {
 	eth.node.shutdown()
 }
 
 // Connect connects to the node RPC server. A dex.Connector.
-func (eth *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
-	eth.ctx = ctx
+func (w *AssetWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
+	w.ctx = ctx
 
-	err := eth.node.connect(ctx)
+	// If this is a token wallet, just wait for the provided context or the
+	// parent context to be canceled.
+	if w.token != nil {
+		if w.token.parent.ctx == nil || w.token.parent.ctx.Err() != nil {
+			return nil, fmt.Errorf("parent not connected")
+		}
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case <-ctx.Done():
+			case <-w.baseWallet.ctx.Done():
+			}
+		}()
+		return &wg, nil
+	}
+
+	err := w.node.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	// Initialize the best block.
-	bestHash, err := eth.node.bestBlockHash(ctx)
+	bestHash, err := w.node.bestBlockHash(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error getting best block hash from geth: %w", err)
 	}
-	block, err := eth.node.block(ctx, bestHash)
+	block, err := w.node.block(ctx, bestHash)
 	if err != nil {
 		return nil, fmt.Errorf("error getting best block from geth: %w", err)
 	}
-	eth.tipMtx.Lock()
-	eth.currentTip = block
-	eth.tipMtx.Unlock()
-	height := eth.currentTip.NumberU64()
-	atomic.StoreInt64(&eth.tipAtConnect, int64(height))
-	eth.log.Infof("Connected to geth, at height %d", height)
+	w.tipMtx.Lock()
+	w.currentTip = block
+	w.tipMtx.Unlock()
+	height := w.currentTip.NumberU64()
+	// NOTE: We should be using the tipAtConnect to set Progress in SyncStatus.
+	atomic.StoreInt64(&w.baseWallet.tipAtConnect, int64(height))
+	w.log.Infof("Connected to geth, at height %d", height)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		eth.monitorBlocks(ctx)
-		eth.shutdown()
+		w.monitorBlocks(ctx, w.tipChange)
+		w.shutdown()
 	}()
 	return &wg, nil
+}
+
+// tokenWalletConfig is the configuration options for token wallets.
+type tokenWalletConfig struct {
+	LimitAllowance bool `ini:"limitAllowance"`
+}
+
+// parseTokenWalletConfig parses the settings map into a *WalletConfig.
+func parseTokenWalletConfig(settings map[string]string) (cfg *tokenWalletConfig, err error) {
+	cfg = new(tokenWalletConfig)
+	err = config.Unmapify(settings, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing wallet config: %w", err)
+	}
+	return cfg, nil
+}
+
+// CreateTokenWallet "creates" a wallet for a token. There is really nothing
+// to do, except check that the token exists.
+func (eth *baseWallet) CreateTokenWallet(tokenID uint32, _ map[string]string) error {
+	// Just check that the token exists for now.
+	if dexeth.Tokens[tokenID] == nil {
+		return fmt.Errorf("token not found for asset ID %d", tokenID)
+	}
+	return nil
+}
+
+// OpenTokenWallet creates a new AssetWallet for a token.
+func (w *AssetWallet) OpenTokenWallet(tokenID uint32, settings map[string]string, tipChange func(error)) (asset.Wallet, error) {
+	if w.assetID != BipID {
+		return nil, fmt.Errorf("token wallets create other token wallets")
+	}
+	cfg, err := parseTokenWalletConfig(settings)
+	if err != nil {
+		return nil, err
+	}
+	gases, err := w.node.loadToken(w.ctx, tokenID)
+	if err != nil {
+		return nil, err
+	}
+	tokenWallet := &AssetWallet{
+		baseWallet: w.baseWallet,
+		assetID:    tokenID,
+		token: &tokenConfig{
+			tokenWalletConfig: cfg,
+			parent:            w,
+			gas:               gases,
+		},
+		tipChange:          tipChange,
+		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
+	}
+
+	w.baseWallet.walletsMtx.Lock()
+	w.baseWallet.wallets[tokenID] = tokenWallet
+	w.baseWallet.walletsMtx.Unlock()
+
+	return tokenWallet, nil
 }
 
 // OwnsAddress indicates if an address belongs to the wallet. The address need
@@ -329,7 +464,7 @@ func (eth *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 // prefix, and case is not important.
 //
 // In Ethereum, an address is an account.
-func (eth *ExchangeWallet) OwnsAddress(address string) (bool, error) {
+func (eth *baseWallet) OwnsAddress(address string) (bool, error) {
 	if !common.IsHexAddress(address) {
 		return false, errors.New("invalid address")
 	}
@@ -339,22 +474,22 @@ func (eth *ExchangeWallet) OwnsAddress(address string) (bool, error) {
 
 // Balance returns the total available funds in the account. The eth node
 // returns balances in wei. Those are flored and stored as gwei, or 1e9 wei.
-func (eth *ExchangeWallet) Balance() (*asset.Balance, error) {
-	eth.lockedMtx.Lock()
-	defer eth.lockedMtx.Unlock()
+func (w *AssetWallet) Balance() (*asset.Balance, error) {
+	w.lockedMtx.Lock()
+	defer w.lockedMtx.Unlock()
 
-	return eth.balance()
+	return w.balance()
 }
 
 // balance returns the total available funds in the account.
 // This function expects eth.lockedMtx to be held.
-func (eth *ExchangeWallet) balance() (*asset.Balance, error) {
-	bal, err := eth.node.balance(eth.ctx)
+func (w *AssetWallet) balance() (*asset.Balance, error) {
+	bal, err := w.node.balance(w.ctx, w.assetID)
 	if err != nil {
 		return nil, err
 	}
 
-	locked := eth.locked + dexeth.WeiToGwei(bal.PendingOut)
+	locked := w.locked + dexeth.WeiToGwei(bal.PendingOut)
 	return &asset.Balance{
 		Available: dexeth.WeiToGwei(bal.Current) - locked,
 		Locked:    locked,
@@ -367,27 +502,36 @@ func (eth *ExchangeWallet) balance() (*asset.Balance, error) {
 // estimate based on current network conditions, and will be <= the fees
 // associated with nfo.MaxFeeRate. For quote assets, the caller will have to
 // calculate lotSize based on a rate conversion from the base asset's lot size.
-func (eth *ExchangeWallet) MaxOrder(lotSize uint64, feeSuggestion uint64, nfo *dex.Asset) (*asset.SwapEstimate, error) {
-	balance, err := eth.Balance()
+func (w *AssetWallet) MaxOrder(lotSize uint64, feeSuggestion uint64, nfo *dex.Asset) (*asset.SwapEstimate, error) {
+	balance, err := w.Balance()
 	if err != nil {
 		return nil, err
 	}
 	if balance.Available == 0 {
 		return &asset.SwapEstimate{}, nil
 	}
-	maxTxFee := dexeth.InitGas(1, nfo.Version) * nfo.MaxFeeRate
-	lots := balance.Available / (lotSize + maxTxFee)
+	gas := gases(w.assetID, nfo.Version)
+	if gas == nil {
+		return nil, fmt.Errorf("no gas table for %d", w.assetID)
+	}
+	maxTxFee := gas.Swap * nfo.MaxFeeRate
+	var lots uint64
+	if w.assetID == BipID {
+		lots = balance.Available / (lotSize + maxTxFee)
+	} else {
+		lots = balance.Available / lotSize
+	}
+
 	if lots < 1 {
 		return &asset.SwapEstimate{}, nil
 	}
-	est := eth.estimateSwap(lots, lotSize, feeSuggestion, nfo)
-	return est, nil
+	return w.estimateSwap(lots, lotSize, feeSuggestion, nfo)
 }
 
 // PreSwap gets order estimates based on the available funds and the wallet
 // configuration.
-func (eth *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
-	maxEst, err := eth.MaxOrder(req.LotSize, req.FeeSuggestion, req.AssetConfig)
+func (w *AssetWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
+	maxEst, err := w.MaxOrder(req.LotSize, req.FeeSuggestion, req.AssetConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -396,35 +540,87 @@ func (eth *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 		return nil, fmt.Errorf("%d lots available for %d-lot order", maxEst.Lots, req.Lots)
 	}
 
-	est := eth.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion, req.AssetConfig)
+	est, err := w.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion, req.AssetConfig)
+	if err != nil {
+		return nil, err
+	}
+
 	return &asset.PreSwap{
 		Estimate: est,
 	}, nil
 }
 
 // estimateSwap prepares an *asset.SwapEstimate.
-func (eth *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, nfo *dex.Asset) *asset.SwapEstimate {
+func (w *AssetWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, nfo *dex.Asset) (*asset.SwapEstimate, error) {
 	if lots == 0 {
-		return &asset.SwapEstimate{}
+		return &asset.SwapEstimate{}, nil
 	}
 	value := lots * lotSize
-	maxFees := dexeth.InitGas(1, nfo.Version) * nfo.MaxFeeRate * lots
+	var allowanceGas, oneGas uint64
+	if w.token != nil {
+		oneGas = w.token.gas.Swap
+		// Need to check if we need to add gas for changing the token contract
+		// approval.
+		currentAllowance, err := w.node.tokenAllowance(w.ctx, w.assetID, nfo.Version)
+		if err != nil {
+			return nil, err
+		}
+		// No reason to do anything if the allowance is > the unlimited
+		// allowance approval threshold.
+		if currentAllowance.Cmp(unlimitedAllowanceReplenishThreshold) < 0 {
+			// Two ways in which we'll need to add gas for approval.
+			//   1. Limited allowance and the current allowance is not sufficient.
+			//   2. Unlimited allowance below the refill threshold.
+			if w.token.LimitAllowance {
+				// Only add allowance gas if we're too low.
+				w.lockedMtx.RLock()
+				locked := w.locked
+				w.lockedMtx.RUnlock()
+				// This is maybe a little unsophisticated and aggressive, and
+				// would definitely preclude trading with two instances of
+				// AssetWallet on the same account.
+				candidate := new(big.Int).Add(dexeth.GweiToWei(locked), dexeth.GweiToWei(value))
+				if candidate.Cmp(currentAllowance) > 0 {
+					allowanceGas = w.token.gas.Approve
+				}
+			} else {
+				allowanceGas = w.token.gas.Approve
+			}
+		}
+	} else {
+		oneGas = dexeth.InitGas(1, nfo.Version)
+	}
+
+	maxFees := (oneGas*lots + allowanceGas) * nfo.MaxFeeRate
+	locked := value
+	if w.token == nil {
+		locked = value + maxFees
+	}
 	return &asset.SwapEstimate{
 		Lots:               lots,
 		Value:              value,
 		MaxFees:            maxFees,
-		RealisticWorstCase: lots * dexeth.InitGas(1, nfo.Version) * feeSuggestion,
-		RealisticBestCase:  dexeth.InitGas(int(lots), nfo.Version) * feeSuggestion,
-	}
+		RealisticWorstCase: (oneGas*lots + allowanceGas) * feeSuggestion,
+		RealisticBestCase:  (dexeth.InitGas(int(lots), nfo.Version) + allowanceGas) * feeSuggestion,
+	}, nil
 }
 
 // PreRedeem generates an estimate of the range of redemption fees that could
 // be assessed.
-func (*ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, error) {
+func (w *AssetWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, error) {
+	if w.token == nil {
+		return &asset.PreRedeem{
+			Estimate: &asset.RedeemEstimate{
+				RealisticBestCase:  dexeth.RedeemGas(int(req.Lots), 0) * req.FeeSuggestion,
+				RealisticWorstCase: dexeth.RedeemGas(1, 0) * req.FeeSuggestion * req.Lots,
+			},
+		}, nil
+	}
+
 	return &asset.PreRedeem{
 		Estimate: &asset.RedeemEstimate{
-			RealisticBestCase:  dexeth.RedeemGas(int(req.Lots), 0) * req.FeeSuggestion,
-			RealisticWorstCase: dexeth.RedeemGas(1, 0) * req.FeeSuggestion * req.Lots,
+			RealisticBestCase:  w.token.gas.RedeemN(int(req.Lots)) * req.FeeSuggestion,
+			RealisticWorstCase: w.token.gas.Redeem * req.FeeSuggestion * req.Lots,
 		},
 	}, nil
 }
@@ -436,6 +632,11 @@ type coin struct {
 	// coin ids a lookup would be required from the blockchain to
 	// determine its value, so this field is used as a cache.
 	value uint64
+}
+
+type tokenCoin struct {
+	coin
+	fees uint64
 }
 
 // ID is the ETH coins ID. For functions related to funding an order,
@@ -460,7 +661,7 @@ var _ asset.Coin = (*coin)(nil)
 // decodeFundingCoinID decodes a coin id into a coin object. This function ensures
 // that the id contains an encoded fundingCoinID whose address is the same as
 // the one managed by this wallet.
-func (eth *ExchangeWallet) decodeFundingCoinID(id []byte) (*coin, error) {
+func (eth *baseWallet) decodeFundingCoinID(id []byte) (*coin, error) {
 	fundingCoinID, err := decodeFundingCoinID(id)
 	if err != nil {
 		return nil, err
@@ -477,11 +678,22 @@ func (eth *ExchangeWallet) decodeFundingCoinID(id []byte) (*coin, error) {
 	}, nil
 }
 
-func (eth *ExchangeWallet) createFundingCoin(amount uint64) *coin {
+func (eth *baseWallet) createFundingCoin(amount uint64) *coin {
 	id := createFundingCoinID(eth.addr, amount)
 	return &coin{
 		id:    id.Encode(),
 		value: amount,
+	}
+}
+
+func (eth *baseWallet) createTokenFundingCoin(amount, fees uint64) *tokenCoin {
+	id := createTokenFundingCoinID(eth.addr, amount, fees)
+	return &tokenCoin{
+		coin: coin{
+			id:    id.Encode(),
+			value: amount,
+		},
+		fees: fees,
 	}
 }
 
@@ -491,47 +703,109 @@ func (eth *ExchangeWallet) createFundingCoin(amount uint64) *coin {
 // In UTXO based coins, the returned []dex.Bytes contains the redeem scripts for the
 // selected coins, but since there are no redeem scripts in Ethereum, nil is returned.
 // Equal number of coins and redeem scripts must be returned.
-func (eth *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error) {
-	if eth.gasFeeLimit < ord.DEXConfig.MaxFeeRate {
+func (w *AssetWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error) {
+	cfg := ord.DEXConfig
+
+	if w.gasFeeLimit < cfg.MaxFeeRate {
 		return nil, nil, fmt.Errorf(
 			"%v: server's max fee rate %v higher than configured fee rate limit %v",
-			ord.DEXConfig.Symbol,
-			ord.DEXConfig.MaxFeeRate,
-			eth.gasFeeLimit)
+			cfg.Symbol,
+			cfg.MaxFeeRate,
+			w.gasFeeLimit)
 	}
-	maxSwapFees := ord.DEXConfig.MaxFeeRate * ord.DEXConfig.SwapSize * ord.MaxSwapCount
-	refundFees := dexeth.RefundGas(0) * eth.gasFeeLimit
-	fundsNeeded := ord.Value + maxSwapFees + refundFees
-	coins := asset.Coins{eth.createFundingCoin(fundsNeeded)}
-	err := eth.lockFunds(fundsNeeded)
+	maxSwapFees := cfg.MaxFeeRate * cfg.SwapSize * ord.MaxSwapCount
+	refundFees := dexeth.RefundGas(0) * w.gasFeeLimit
+	ethNeeded := maxSwapFees + refundFees
+	ethWallet := w
+	var success bool
+	var coin asset.Coin
+	if w.assetID == BipID {
+		ethNeeded += ord.Value
+		coin = w.createFundingCoin(ethNeeded)
+	} else {
+		// Check if we need to up the allowance.
+		ethWallet = w.token.parent
+		currentAllowance, err := w.node.tokenAllowance(w.ctx, w.assetID, cfg.Version)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error retrieving current allowance: %w", err)
+		}
+		var newAllowance *big.Int
+		// No reason to do anything if the allowance is > the unlimited
+		// allowance approval threshold.
+		if currentAllowance.Cmp(unlimitedAllowanceReplenishThreshold) < 0 {
+			if w.token.LimitAllowance {
+				w.lockedMtx.RLock()
+				locked := w.locked
+				w.lockedMtx.RUnlock()
+				// This is maybe a little unsophisticated and aggressive, and
+				// would definitely preclude trading with two instances of
+				// AssetWallet on the same account.
+				candidate := new(big.Int).Add(dexeth.GweiToWei(locked), dexeth.GweiToWei(ord.Value))
+				if candidate.Cmp(currentAllowance) > 0 {
+					newAllowance = candidate
+				}
+			} else {
+				newAllowance = unlimitedAllowance
+			}
+		}
+		if newAllowance != nil {
+			ethBal, err := ethWallet.balance()
+			if err != nil {
+				return nil, nil, fmt.Errorf("error getting eth balance: %w", err)
+			}
+			if (w.token.gas.Approve*cfg.MaxFeeRate)+ethNeeded > ethBal.Available {
+				return nil, nil, fmt.Errorf("parent balance %d doesn't cover setAllowance (%d) and fees (%d)",
+					ethBal.Available, w.token.gas.Approve*cfg.MaxFeeRate, ethNeeded)
+			}
+			if _, err := w.node.approveToken(w.ctx, w.assetID, newAllowance, cfg.MaxFeeRate, cfg.Version); err != nil {
+				return nil, nil, fmt.Errorf("token contract approval error: %w", err)
+			}
+		}
+		if err := w.lockFunds(ord.Value); err != nil {
+			return nil, nil, fmt.Errorf("error locking token funds: %v", err)
+		}
+		defer func() {
+			if success {
+				return
+			}
+			if err := w.unlockFunds(ord.Value); err != nil {
+				w.log.Errorf("error unlocking funds afeter failed FundOrder: %v", err)
+			}
+		}()
+
+		coin = w.createTokenFundingCoin(ord.Value, ethNeeded)
+	}
+
+	err := ethWallet.lockFunds(ethNeeded)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	return coins, []dex.Bytes{nil}, nil
+	success = true
+	return asset.Coins{coin}, []dex.Bytes{nil}, nil
 }
 
 // ReturnCoins unlocks coins. This would be necessary in the case of a
 // canceled order.
-func (eth *ExchangeWallet) ReturnCoins(coins asset.Coins) error {
+func (w *AssetWallet) ReturnCoins(coins asset.Coins) error {
 	var amt uint64
 	for i := range coins {
-		coin, err := eth.decodeFundingCoinID(coins[i].ID())
+		coin, err := w.decodeFundingCoinID(coins[i].ID())
 		if err != nil {
 			return fmt.Errorf("ReturnCoins: unable to decode funding coin id: %w", err)
 		}
 		amt += coin.Value()
 	}
-	return eth.unlockFunds(amt)
+	return w.unlockFunds(amt)
 }
 
 // FundingCoins gets funding coins for the coin IDs. The coins are locked. This
 // method might be called to reinitialize an order from data stored externally.
-func (eth *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
+func (w *AssetWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	coins := make([]asset.Coin, 0, len(ids))
 	var totalValue uint64
 	for _, id := range ids {
-		coin, err := eth.decodeFundingCoinID(id)
+		coin, err := w.decodeFundingCoinID(id)
 		if err != nil {
 			return nil, fmt.Errorf("FundingCoins: unable to decode funding coin id: %w", err)
 		}
@@ -539,7 +813,7 @@ func (eth *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 		totalValue += coin.Value()
 	}
 
-	err := eth.lockFunds(totalValue)
+	err := w.lockFunds(totalValue)
 	if err != nil {
 		return nil, err
 	}
@@ -548,11 +822,11 @@ func (eth *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 }
 
 // lockFunds locks funds held by the wallet.
-func (eth *ExchangeWallet) lockFunds(amt uint64) error {
-	eth.lockedMtx.Lock()
-	defer eth.lockedMtx.Unlock()
+func (w *AssetWallet) lockFunds(amt uint64) error {
+	w.lockedMtx.Lock()
+	defer w.lockedMtx.Unlock()
 
-	balance, err := eth.balance()
+	balance, err := w.balance()
 	if err != nil {
 		return err
 	}
@@ -562,21 +836,21 @@ func (eth *ExchangeWallet) lockFunds(amt uint64) error {
 			amt, balance.Available)
 	}
 
-	eth.locked += amt
+	w.locked += amt
 	return nil
 }
 
 // unlockFunds unlocks funds held by the wallet.
-func (eth *ExchangeWallet) unlockFunds(amt uint64) error {
-	eth.lockedMtx.Lock()
-	defer eth.lockedMtx.Unlock()
+func (w *AssetWallet) unlockFunds(amt uint64) error {
+	w.lockedMtx.Lock()
+	defer w.lockedMtx.Unlock()
 
-	if eth.locked < amt {
+	if w.locked < amt {
 		return fmt.Errorf("attempting to unlock more than is currently locked. %d > %d",
-			amt, eth.locked)
+			amt, w.locked)
 	}
 
-	eth.locked -= amt
+	w.locked -= amt
 	return nil
 }
 
@@ -628,33 +902,58 @@ var _ asset.Receipt = (*swapReceipt)(nil)
 // Swap sends the swaps in a single transaction. The fees used returned are the
 // max fees that will possibly be used, since in ethereum with EIP-1559 we cannot
 // know exactly how much fees will be used.
-func (eth *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
-	fail := func(err error) ([]asset.Receipt, asset.Coin, uint64, error) {
-		return nil, nil, 0, err
+func (w *AssetWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
+	fail := func(s string, a ...interface{}) ([]asset.Receipt, asset.Coin, uint64, error) {
+		return nil, nil, 0, fmt.Errorf(s, a...)
 	}
 
 	receipts := make([]asset.Receipt, 0, len(swaps.Contracts))
 
-	var totalInputValue uint64
-	for _, input := range swaps.Inputs {
-		totalInputValue += input.Value()
+	// For now, reject swaps where # inputs > 1. Core doesn't support grouping
+	// from multiple orders for now.
+	if len(swaps.Inputs) != 1 {
+		return fail("expected 1 input coin. got %d", len(swaps.Inputs))
 	}
 
-	var totalContractValue uint64
+	isToken := w.token != nil
+	var reservedVal, reservedParent uint64
+	if isToken {
+		c, err := decodeTokenFundingCoinID(swaps.Inputs[0].ID())
+		if err != nil {
+			return fail("error decoding coin ID: %v", err)
+		}
+		reservedVal, reservedParent = c.TokenValue, c.Fees
+	} else {
+		c, err := decodeFundingCoinID(swaps.Inputs[0].ID())
+		if err != nil {
+			return fail("error decoding coin ID: %v", err)
+		}
+		reservedVal = c.Amount
+	}
+
+	var swapVal uint64
 	for _, contract := range swaps.Contracts {
-		totalContractValue += contract.Value
+		swapVal += contract.Value
 	}
 
 	fees := dexeth.InitGas(1, swaps.AssetVersion) * uint64(len(swaps.Contracts)) * swaps.FeeRate
 
-	totalSpend := fees + totalContractValue
-	if totalSpend > totalInputValue {
-		return nil, nil, 0, fmt.Errorf("unfunded contract. %d < %d", totalInputValue, totalSpend)
+	if isToken {
+		if swapVal > reservedVal {
+			return fail("unfunded token swap: %d < %d", reservedVal, swapVal)
+		}
+		if fees > reservedParent {
+			return fail("unfunded token swap fees: %d < %d", reservedParent, fees)
+		}
+	} else {
+		if swapVal+fees > reservedVal {
+			return fail("unfunded swap: %d < %d", reservedVal, swapVal+fees)
+		}
 	}
 
-	tx, err := eth.node.initiate(eth.ctx, swaps.Contracts, swaps.FeeRate, swaps.AssetVersion)
+	tx, err := w.node.initiate(w.ctx, w.assetID, swaps.Contracts, swaps.FeeRate, swaps.AssetVersion)
 	if err != nil {
-		return fail(fmt.Errorf("Swap: initiate error: %w", err))
+		return fail("Swap: initiate error: %w", err)
 	}
 
 	txHash := tx.Hash()
@@ -673,10 +972,31 @@ func (eth *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 
 	var change asset.Coin
 	if swaps.LockChange {
-		eth.unlockFunds(totalSpend)
-		change = eth.createFundingCoin(totalInputValue - totalSpend)
+		if isToken {
+			// For tokens, we'll unlock the swap val and the fees separately for
+			// the child and parent asset respectively.
+			if err := w.unlockFunds(swapVal); err != nil {
+				w.log.Errorf("error unlocking ")
+			}
+			if err := w.token.parent.unlockFunds(fees); err != nil {
+				w.log.Errorf("error unlocking parent asset funds: %v", err)
+			}
+			change = w.createTokenFundingCoin(reservedVal-swapVal, reservedParent-fees)
+		} else {
+			if err := w.unlockFunds(swapVal + fees); err != nil {
+				w.log.Errorf("error unlocking ")
+			}
+			change = w.createFundingCoin(reservedVal - swapVal - fees)
+		}
 	} else {
-		eth.unlockFunds(totalInputValue)
+		if err := w.unlockFunds(reservedVal); err != nil {
+			w.log.Errorf("error unlocking parent asset funds: %v", err)
+		}
+		if isToken {
+			if err := w.token.parent.unlockFunds(reservedParent); err != nil {
+				w.log.Errorf("error unlocking parent asset funds: %v", err)
+			}
+		}
 	}
 
 	return receipts, change, fees, nil
@@ -687,7 +1007,7 @@ func (eth *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 // current API requires a single transaction reported (asset.Coin output), but
 // conceptually a batch of redeems could be processed for any number of
 // different contract addresses with multiple transactions.
-func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
+func (w *AssetWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
 	fail := func(err error) ([]dex.Bytes, asset.Coin, uint64, error) {
 		return nil, nil, 0, err
 	}
@@ -721,7 +1041,7 @@ func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 		// are maker (the swap initiator).
 		var secret [32]byte
 		copy(secret[:], redemption.Secret)
-		redeemable, err := eth.node.isRedeemable(secretHash, secret, ver)
+		redeemable, err := w.node.isRedeemable(w.assetID, secretHash, secret, ver)
 		if err != nil {
 			return fail(fmt.Errorf("Redeem: failed to check if swap is redeemable: %w", err))
 		}
@@ -730,7 +1050,7 @@ func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 				secretHash, secret))
 		}
 
-		swapData, err := eth.node.swap(eth.ctx, secretHash, ver)
+		swapData, err := w.node.swap(w.ctx, w.assetID, secretHash, ver)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("Redeem: error finding swap state: %w", err)
 		}
@@ -738,12 +1058,12 @@ func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 		inputs = append(inputs, redemption.Spends.Coin.ID())
 	}
 
-	outputCoin := eth.createFundingCoin(redeemedValue)
+	outputCoin := w.createFundingCoin(redeemedValue)
 	fundsRequired := dexeth.RedeemGas(len(form.Redemptions), contractVersion) * form.FeeSuggestion
 
 	// TODO: make sure the amount we locked for redemption is enough to cover the gas
 	// fees. Also unlock coins.
-	_, err := eth.node.redeem(eth.ctx, form.Redemptions, form.FeeSuggestion, contractVersion)
+	_, err := w.node.redeem(w.ctx, w.assetID, form.Redemptions, form.FeeSuggestion, contractVersion)
 	if err != nil {
 		return fail(fmt.Errorf("Redeem: redeem error: %w", err))
 	}
@@ -772,7 +1092,7 @@ func recoverPubkey(msgHash, sig []byte) ([]byte, error) {
 // SignMessage signs the message with the private key associated with the
 // specified funding Coin. Only a coin that came from the address this wallet
 // is initialized with can be used to sign.
-func (eth *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
+func (eth *baseWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
 	_, err = eth.decodeFundingCoinID(coin.ID())
 	if err != nil {
 		return nil, nil, fmt.Errorf("SignMessage: error decoding coin: %w", err)
@@ -796,7 +1116,7 @@ func (eth *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 // during a swap. coinID is expected to be the transaction id, and must
 // be the same as the hash of txData. contract is expected to be
 // (contractVersion|secretHash) where the secretHash uniquely keys the swap.
-func (eth *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroadcast bool) (*asset.AuditInfo, error) {
+func (eth *baseWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroadcast bool) (*asset.AuditInfo, error) {
 	tx := new(types.Transaction)
 	err := tx.UnmarshalBinary(txData)
 	if err != nil {
@@ -850,19 +1170,19 @@ func (eth *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, reb
 
 // LocktimeExpired returns true if the specified contract's locktime has
 // expired, making it possible to issue a Refund.
-func (eth *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, error) {
+func (w *AssetWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, error) {
 	contractVer, secretHash, err := dexeth.DecodeContractData(contract)
 	if err != nil {
 		return false, time.Time{}, err
 	}
 
-	header, err := eth.node.bestHeader(eth.ctx)
+	header, err := w.node.bestHeader(w.ctx)
 	if err != nil {
 		return false, time.Time{}, err
 	}
 	blockTime := time.Unix(int64(header.Time), 0)
 
-	swap, err := eth.node.swap(eth.ctx, secretHash, contractVer)
+	swap, err := w.node.swap(w.ctx, w.assetID, secretHash, contractVer)
 	if err != nil {
 		return false, time.Time{}, err
 	}
@@ -883,7 +1203,7 @@ type findRedemptionRequest struct {
 
 // sendFindRedemptionResult sends the result or logs a message if it cannot be
 // sent.
-func (eth *ExchangeWallet) sendFindRedemptionResult(req *findRedemptionRequest, secretHash [32]byte, secret []byte, err error) {
+func (eth *baseWallet) sendFindRedemptionResult(req *findRedemptionRequest, secretHash [32]byte, secret []byte, err error) {
 	select {
 	case req.res <- &findRedemptionResult{secret: secret, err: err}:
 	default:
@@ -892,11 +1212,11 @@ func (eth *ExchangeWallet) sendFindRedemptionResult(req *findRedemptionRequest, 
 }
 
 // findRedemptionRequests creates a copy of the findRedemptionReqs map.
-func (eth *ExchangeWallet) findRedemptionRequests() map[[32]byte]*findRedemptionRequest {
-	eth.findRedemptionMtx.RLock()
-	defer eth.findRedemptionMtx.RUnlock()
-	reqs := make(map[[32]byte]*findRedemptionRequest, len(eth.findRedemptionReqs))
-	for secretHash, req := range eth.findRedemptionReqs {
+func (w *AssetWallet) findRedemptionRequests() map[[32]byte]*findRedemptionRequest {
+	w.findRedemptionMtx.RLock()
+	defer w.findRedemptionMtx.RUnlock()
+	reqs := make(map[[32]byte]*findRedemptionRequest, len(w.findRedemptionReqs))
+	for secretHash, req := range w.findRedemptionReqs {
 		reqs[secretHash] = req
 	}
 	return reqs
@@ -905,14 +1225,14 @@ func (eth *ExchangeWallet) findRedemptionRequests() map[[32]byte]*findRedemption
 // FindRedemption checks the contract for a redemption. If the swap is initiated
 // but un-redeemed and un-refunded, FindRedemption will block until a redemption
 // is seen.
-func (eth *ExchangeWallet) FindRedemption(ctx context.Context, _, contract dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {
+func (w *AssetWallet) FindRedemption(ctx context.Context, _, contract dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {
 	contractVer, secretHash, err := dexeth.DecodeContractData(contract)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// See if it's ready right away.
-	secret, err = eth.findSecret(ctx, secretHash, contractVer)
+	secret, err = w.findSecret(ctx, secretHash, contractVer)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -927,16 +1247,16 @@ func (eth *ExchangeWallet) FindRedemption(ctx context.Context, _, contract dex.B
 		res:         make(chan *findRedemptionResult, 1),
 	}
 
-	eth.findRedemptionMtx.Lock()
+	w.findRedemptionMtx.Lock()
 
-	if eth.findRedemptionReqs[secretHash] != nil {
-		eth.findRedemptionMtx.Unlock()
+	if w.findRedemptionReqs[secretHash] != nil {
+		w.findRedemptionMtx.Unlock()
 		return nil, nil, fmt.Errorf("duplicate find redemption request for %x", secretHash)
 	}
 
-	eth.findRedemptionReqs[secretHash] = req
+	w.findRedemptionReqs[secretHash] = req
 
-	eth.findRedemptionMtx.Unlock()
+	w.findRedemptionMtx.Unlock()
 
 	var res *findRedemptionResult
 	select {
@@ -944,9 +1264,9 @@ func (eth *ExchangeWallet) FindRedemption(ctx context.Context, _, contract dex.B
 	case <-ctx.Done():
 	}
 
-	eth.findRedemptionMtx.Lock()
-	delete(eth.findRedemptionReqs, secretHash)
-	eth.findRedemptionMtx.Unlock()
+	w.findRedemptionMtx.Lock()
+	delete(w.findRedemptionReqs, secretHash)
+	w.findRedemptionMtx.Unlock()
 
 	if res == nil {
 		return nil, nil, fmt.Errorf("context cancelled for find redemption request %x", secretHash)
@@ -959,11 +1279,11 @@ func (eth *ExchangeWallet) FindRedemption(ctx context.Context, _, contract dex.B
 	return findRedemptionCoinID, res.secret[:], nil
 }
 
-func (eth *ExchangeWallet) findSecret(ctx context.Context, secretHash [32]byte, contractVer uint32) ([]byte, error) {
+func (w *AssetWallet) findSecret(ctx context.Context, secretHash [32]byte, contractVer uint32) ([]byte, error) {
 	// Add a reasonable timeout here.
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	swap, err := eth.node.swap(ctx, secretHash, contractVer)
+	swap, err := w.node.swap(ctx, w.assetID, secretHash, contractVer)
 	if err != nil {
 		return nil, err
 	}
@@ -983,13 +1303,13 @@ func (eth *ExchangeWallet) findSecret(ctx context.Context, secretHash [32]byte, 
 
 // Refund refunds a contract. This can only be used after the time lock has
 // expired.
-func (eth *ExchangeWallet) Refund(_, contract dex.Bytes, feeSuggestion uint64) (dex.Bytes, error) {
+func (w *AssetWallet) Refund(_, contract dex.Bytes, feeSuggestion uint64) (dex.Bytes, error) {
 	version, secretHash, err := dexeth.DecodeContractData(contract)
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to decode contract: %w", err)
 	}
 
-	refundable, err := eth.node.isRefundable(secretHash, version)
+	refundable, err := w.node.isRefundable(w.assetID, secretHash, version)
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to check isRefundable: %w", err)
 	}
@@ -997,54 +1317,54 @@ func (eth *ExchangeWallet) Refund(_, contract dex.Bytes, feeSuggestion uint64) (
 		return nil, fmt.Errorf("Refund: swap with secret hash %x is not refundable", secretHash)
 	}
 
-	tx, err := eth.node.refund(eth.ctx, secretHash, feeSuggestion, version)
+	tx, err := w.node.refund(w.ctx, w.assetID, secretHash, feeSuggestion, version)
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to call refund: %w", err)
 	}
 
-	eth.unlockFunds(eth.gasFeeLimit * dexeth.RefundGas(version))
+	w.unlockFunds(w.gasFeeLimit * dexeth.RefundGas(version))
 
 	txHash := tx.Hash()
 	return txHash[:], nil
 }
 
 // Address returns an address for the exchange wallet.
-func (eth *ExchangeWallet) Address() (string, error) {
+func (eth *baseWallet) Address() (string, error) {
 	return eth.addr.String(), nil
 }
 
 // Unlock unlocks the exchange wallet.
-func (eth *ExchangeWallet) Unlock(pw []byte) error {
+func (eth *baseWallet) Unlock(pw []byte) error {
 	return eth.node.unlock(string(pw))
 }
 
 // Lock locks the exchange wallet.
-func (eth *ExchangeWallet) Lock() error {
+func (eth *baseWallet) Lock() error {
 	return eth.node.lock()
 }
 
 // Locked will be true if the wallet is currently locked.
-func (eth *ExchangeWallet) Locked() bool {
+func (eth *baseWallet) Locked() bool {
 	return eth.node.locked()
 }
 
 // PayFee sends the dex registration fee. Transaction fees are in addition to
 // the registration fee, and the fee rate is taken from the DEX configuration.
-func (eth *ExchangeWallet) PayFee(address string, regFee, _ uint64) (asset.Coin, error) {
-	eth.lockedMtx.Lock()
-	defer eth.lockedMtx.Unlock()
+func (w *AssetWallet) PayFee(address string, regFee, _ uint64) (asset.Coin, error) {
+	w.lockedMtx.Lock()
+	defer w.lockedMtx.Unlock()
 
-	bal, err := eth.balance()
+	bal, err := w.balance()
 	if err != nil {
 		return nil, err
 	}
 	avail := bal.Available
-	maxFee := defaultSendGasLimit * eth.gasFeeLimit
+	maxFee := defaultSendGasLimit * w.gasFeeLimit
 	need := regFee + maxFee
 	if avail < need {
 		return nil, fmt.Errorf("not enough funds to pay fee: have %d gwei need %d gwei", avail, need)
 	}
-	tx, err := eth.node.sendToAddr(eth.ctx, common.HexToAddress(address), regFee)
+	tx, err := w.node.sendToAddr(w.ctx, w.assetID, common.HexToAddress(address), regFee)
 	if err != nil {
 		return nil, err
 	}
@@ -1054,18 +1374,18 @@ func (eth *ExchangeWallet) PayFee(address string, regFee, _ uint64) (asset.Coin,
 
 // SwapConfirmations gets the number of confirmations and the spend status
 // for the specified swap.
-func (eth *ExchangeWallet) SwapConfirmations(ctx context.Context, _ dex.Bytes, contract dex.Bytes, _ time.Time) (confs uint32, spent bool, err error) {
+func (w *AssetWallet) SwapConfirmations(ctx context.Context, _ dex.Bytes, contract dex.Bytes, _ time.Time) (confs uint32, spent bool, err error) {
 	contractVer, secretHash, err := dexeth.DecodeContractData(contract)
 	if err != nil {
 		return 0, false, err
 	}
 
-	hdr, err := eth.node.bestHeader(ctx)
+	hdr, err := w.node.bestHeader(ctx)
 	if err != nil {
 		return 0, false, fmt.Errorf("error fetching best header: %w", err)
 	}
 
-	swapData, err := eth.node.swap(ctx, secretHash, contractVer)
+	swapData, err := w.node.swap(ctx, w.assetID, secretHash, contractVer)
 	if err != nil {
 		return 0, false, fmt.Errorf("error finding swap state: %w", err)
 	}
@@ -1082,11 +1402,11 @@ func (eth *ExchangeWallet) SwapConfirmations(ctx context.Context, _ dex.Bytes, c
 
 // Withdraw withdraws funds to the specified address. Value is gwei. The fee is
 // subtracted from the total balance if it cannot be sent otherwise.
-func (eth *ExchangeWallet) Withdraw(addr string, value, _ uint64) (asset.Coin, error) {
-	eth.lockedMtx.Lock()
-	defer eth.lockedMtx.Unlock()
+func (w *AssetWallet) Withdraw(addr string, value, _ uint64) (asset.Coin, error) {
+	w.lockedMtx.Lock()
+	defer w.lockedMtx.Unlock()
 
-	bal, err := eth.balance()
+	bal, err := w.balance()
 	if err != nil {
 		return nil, err
 	}
@@ -1094,14 +1414,14 @@ func (eth *ExchangeWallet) Withdraw(addr string, value, _ uint64) (asset.Coin, e
 	if avail < value {
 		return nil, fmt.Errorf("not enough funds to withdraw: have %d gwei need %d gwei", avail, value)
 	}
-	maxFee := defaultSendGasLimit * eth.gasFeeLimit
+	maxFee := defaultSendGasLimit * w.gasFeeLimit
 	if avail < maxFee {
 		return nil, fmt.Errorf("not enough funds to withdraw: cannot cover max fee of %d gwei", maxFee)
 	}
 	if avail < value+maxFee {
 		value -= maxFee
 	}
-	tx, err := eth.node.sendToAddr(eth.ctx, common.HexToAddress(addr), value)
+	tx, err := w.node.sendToAddr(w.ctx, w.assetID, common.HexToAddress(addr), value)
 	if err != nil {
 		return nil, err
 	}
@@ -1110,13 +1430,13 @@ func (eth *ExchangeWallet) Withdraw(addr string, value, _ uint64) (asset.Coin, e
 }
 
 // ValidateSecret checks that the secret satisfies the contract.
-func (*ExchangeWallet) ValidateSecret(secret, secretHash []byte) bool {
+func (*baseWallet) ValidateSecret(secret, secretHash []byte) bool {
 	h := sha256.Sum256(secret)
 	return bytes.Equal(h[:], secretHash)
 }
 
 // SyncStatus is information about the blockchain sync status.
-func (eth *ExchangeWallet) SyncStatus() (bool, float32, error) {
+func (eth *baseWallet) SyncStatus() (bool, float32, error) {
 	// node.SyncProgress will return nil both before syncing has begun and
 	// after it has finished. In order to discern when syncing has begun,
 	// check that the best header came in under dexeth.MaxBlockInterval.
@@ -1145,7 +1465,7 @@ func (eth *ExchangeWallet) SyncStatus() (bool, float32, error) {
 
 // RegFeeConfirmations gets the number of confirmations for the specified
 // transaction.
-func (eth *ExchangeWallet) RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error) {
+func (eth *baseWallet) RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error) {
 	var txHash common.Hash
 	copy(txHash[:], coinID)
 	return eth.node.transactionConfirmations(ctx, txHash)
@@ -1154,13 +1474,13 @@ func (eth *ExchangeWallet) RegFeeConfirmations(ctx context.Context, coinID dex.B
 // monitorBlocks pings for new blocks and runs the tipChange callback function
 // when the block changes. New blocks are also scanned for potential contract
 // redeems.
-func (eth *ExchangeWallet) monitorBlocks(ctx context.Context) {
+func (eth *baseWallet) monitorBlocks(ctx context.Context, reportErr func(error)) {
 	ticker := time.NewTicker(blockTicker)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			eth.checkForNewBlocks()
+			eth.checkForNewBlocks(reportErr)
 		case <-ctx.Done():
 			return
 		}
@@ -1170,12 +1490,12 @@ func (eth *ExchangeWallet) monitorBlocks(ctx context.Context) {
 // checkForNewBlocks checks for new blocks. When a tip change is detected, the
 // tipChange callback function is invoked and a goroutine is started to check
 // if any contracts in the findRedemptionQueue are redeemed in the new blocks.
-func (eth *ExchangeWallet) checkForNewBlocks() {
+func (eth *baseWallet) checkForNewBlocks(reportErr func(error)) {
 	ctx, cancel := context.WithTimeout(eth.ctx, 2*time.Second)
 	defer cancel()
 	bestHash, err := eth.node.bestBlockHash(ctx)
 	if err != nil {
-		go eth.tipChange(fmt.Errorf("failed to get best hash: %w", err))
+		go reportErr(fmt.Errorf("failed to get best hash: %w", err))
 		return
 	}
 	// This method is called frequently. Don't hold write lock
@@ -1189,7 +1509,7 @@ func (eth *ExchangeWallet) checkForNewBlocks() {
 
 	newTip, err := eth.node.block(ctx, bestHash)
 	if err != nil {
-		go eth.tipChange(fmt.Errorf("failed to get best block: %w", err))
+		go reportErr(fmt.Errorf("failed to get best block: %w", err))
 		return
 	}
 
@@ -1200,18 +1520,27 @@ func (eth *ExchangeWallet) checkForNewBlocks() {
 	eth.currentTip = newTip
 	eth.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.NumberU64(),
 		prevTip.Hash(), newTip.NumberU64(), newTip.Hash())
-	go eth.tipChange(nil)
-	go eth.checkFindRedemptions()
+
+	go func() {
+		for _, w := range eth.wallets {
+			w.tipChange(nil)
+		}
+	}()
+	go func() {
+		for _, w := range eth.wallets {
+			w.checkFindRedemptions()
+		}
+	}()
 }
 
 // checkFindRedemptions checks queued findRedemptionRequests.
-func (eth *ExchangeWallet) checkFindRedemptions() {
-	for secretHash, req := range eth.findRedemptionRequests() {
-		secret, err := eth.findSecret(eth.ctx, secretHash, req.contractVer)
+func (w *AssetWallet) checkFindRedemptions() {
+	for secretHash, req := range w.findRedemptionRequests() {
+		secret, err := w.findSecret(w.ctx, secretHash, req.contractVer)
 		if err != nil {
-			eth.sendFindRedemptionResult(req, secretHash, nil, err)
+			w.sendFindRedemptionResult(req, secretHash, nil, err)
 		} else if len(secret) > 0 {
-			eth.sendFindRedemptionResult(req, secretHash, secret, nil)
+			w.sendFindRedemptionResult(req, secretHash, secret, nil)
 		}
 	}
 }

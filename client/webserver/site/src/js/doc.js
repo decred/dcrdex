@@ -12,7 +12,8 @@ const BipIDs = {
   28: 'vtc',
   3: 'doge',
   145: 'bch',
-  60: 'eth'
+  60: 'eth',
+  60000: 'dextt.eth'
 }
 
 const BipSymbols = Object.values(BipIDs)
@@ -221,6 +222,25 @@ export default class Doc {
   static logoPath (symbol) {
     if (BipSymbols.indexOf(symbol) === -1) symbol = symbol.substring(0, 1)
     return `/img/coins/${symbol}.png`
+  }
+
+  /*
+   * symbolize creates a token-aware symbol element for the asset's symbol. For
+   * non-token assets, this is simply a <span>SYMBOL</span>. For tokens, it'll
+   * be <span><span>SYMBOL</span><sup>PARENT</sup></span>.
+   */
+  static symbolize (symbol) {
+    const parts = symbol.split('.')
+    const assetSymbol = document.createElement('span')
+    assetSymbol.textContent = parts[0].toUpperCase()
+    if (parts.length === 1) return assetSymbol
+    const span = document.createElement('span')
+    span.classList.add('token-aware-symbol')
+    span.appendChild(assetSymbol)
+    const parent = document.createElement('sup')
+    parent.textContent = parts[1].toUpperCase()
+    span.appendChild(parent)
+    return span
   }
 
   /*

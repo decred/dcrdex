@@ -504,7 +504,7 @@ export default class Application {
         asset.wallet = wallet
         this.walletMap[wallet.assetID] = wallet
         const balances = this.main.querySelectorAll(`[data-balance-target="${wallet.assetID}"]`)
-        balances.forEach(el => { el.textContent = Doc.formatFullPrecision(wallet.balance.available, asset.info.unitinfo) })
+        balances.forEach(el => { el.textContent = Doc.formatFullPrecision(wallet.balance.available, asset.unitInfo) })
         break
       }
       case 'match': {
@@ -671,7 +671,7 @@ export default class Application {
   }
 
   /* unitInfo fetches unit info [dex.UnitInfo] for the asset */
-  unitInfo (assetID) { return this.assets[assetID].info.unitinfo }
+  unitInfo (assetID) { return this.assets[assetID].unitInfo }
 
   /* conventionalRate converts the encoded atomic rate to a conventional rate */
   conventionalRate (baseID, quoteID, encRate) {
@@ -681,9 +681,10 @@ export default class Application {
   }
 
   walletDefinition (assetID, walletType) {
-    const assetInfo = this.assets[assetID].info
-    if (walletType === '') return assetInfo.availablewallets[assetInfo.emptyidx]
-    return assetInfo.availablewallets.filter(def => def.type === walletType)[0]
+    const asset = this.assets[assetID]
+    if (asset.token) return asset.token.definition
+    if (walletType === '') return asset.info.availablewallets[asset.info.emptyidx]
+    return asset.info.availablewallets.filter(def => def.type === walletType)[0]
   }
 
   currentWalletDefinition (assetID) {

@@ -8,23 +8,16 @@ package eth
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math/big"
-	"strings"
 	"sync"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/encode"
-	dexerc20 "decred.org/dcrdex/dex/networks/erc20"
-	v0 "decred.org/dcrdex/dex/networks/erc20/contracts/v0"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
-	ethv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
-	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/state"
@@ -40,6 +33,11 @@ import (
 	"github.com/ethereum/go-ethereum/consensus/misc"
 )
 
+const (
+	contractVersionAny = ^uint32(0)
+	approveGas         = 3e5
+)
+
 var (
 	// https://github.com/ethereum/go-ethereum/blob/16341e05636fd088aa04a27fca6dc5cda5dbab8f/eth/backend.go#L110-L113
 	// ultimately results in a minimum fee rate by the filter applied at
@@ -48,6 +46,8 @@ var (
 
 	// Check that nodeClient satisfies the ethFetcher interface.
 	_ ethFetcher = (*nodeClient)(nil)
+
+	testTokenID, _ = dex.BipSymbolID("dextt.eth")
 )
 
 // nodeClient satisfies the ethFetcher interface. Do not use until Connect is
@@ -61,11 +61,8 @@ type nodeClient struct {
 	node         *node.Node
 	leth         *les.LightEthereum
 	chainID      *big.Int
-	contractors  map[uint32]contractor
+	contractors  map[uint32]map[uint32]contractor // assetID -> version -> contractor
 	nonceSendMtx sync.Mutex
-
-	tokenSwapContract     *v0.ERC20Swap
-	tokenSwapContractAddr *common.Address
 }
 
 func newNodeClient(dir string, net dex.Network, log dex.Logger) (*nodeClient, error) {
@@ -95,12 +92,47 @@ func newNodeClient(dir string, net dex.Network, log dex.Logger) (*nodeClient, er
 		creds:       creds,
 		net:         net,
 		log:         log,
-		contractors: make(map[uint32]contractor),
+		contractors: make(map[uint32]map[uint32]contractor),
 	}, nil
 }
 
 func (n *nodeClient) address() common.Address {
 	return n.creds.addr
+}
+
+func (n *nodeClient) loadToken(ctx context.Context, tokenID uint32) (gas *dex.Gases, err error) {
+	token, found := dexeth.Tokens[tokenID]
+	if !found {
+		return nil, fmt.Errorf("token %d not found", tokenID)
+	}
+	addrs, found := token.NetAddresses[n.net]
+	if !found {
+		return nil, fmt.Errorf("token %d not found", tokenID)
+	}
+
+	contractors := make(map[uint32]contractor, len(addrs.SwapContracts))
+	n.contractors[tokenID] = contractors
+
+	for ver := range addrs.SwapContracts {
+		constructor, found := tokenContractorConstructors[ver]
+		if !found {
+			n.log.Errorf("contractor constructor not found for token %s, version %d", token.Name, ver)
+			continue
+		}
+		c, err := constructor(n.net, tokenID, n.creds.addr, n.ec)
+		if err != nil {
+			return nil, fmt.Errorf("error constructing token %s contractor version %d: %w", token.Name, ver, err)
+		}
+
+		if tokenAddr, err := c.tokenAddress(ctx); err != nil {
+			return nil, fmt.Errorf("error getting token address bound to contract: %w", err)
+		} else if tokenAddr != addrs.Address {
+			return nil, fmt.Errorf("wrong %s token address. expected %s, got %s", token.Name, addrs.Address, tokenAddr)
+		}
+
+		contractors[ver] = c
+	}
+	return &token.Gas, nil
 }
 
 // connect connects to a node. It then wraps ethclient's client and
@@ -116,15 +148,10 @@ func (n *nodeClient) connect(ctx context.Context) error {
 		return fmt.Errorf("no *p2p.Server")
 	}
 
-	tokenSwapContractAddr := dexerc20.ContractAddresses[0][n.net]
-	n.tokenSwapContractAddr = &tokenSwapContractAddr
-	n.tokenSwapContract, err = v0.NewERC20Swap(*n.tokenSwapContractAddr, n.ec)
-	if err != nil {
-		return err
-	}
+	n.contractors[BipID] = make(map[uint32]contractor, 1)
 
 	for ver, constructor := range contractorConstructors {
-		if n.contractors[ver], err = constructor(n.net, n.creds.addr, n.ec); err != nil {
+		if n.contractors[BipID][ver], err = constructor(n.net, n.creds.addr, n.ec); err != nil {
 			return fmt.Errorf("error constructor version %d contractor: %v", ver, err)
 		}
 	}
@@ -144,13 +171,33 @@ func (n *nodeClient) shutdown() {
 	}
 }
 
-// withcontractor runs the provided function with the versioned contractor.
-func (n *nodeClient) withcontractor(ver uint32, f func(contractor) error) error {
-	contractor, found := n.contractors[ver]
+// withContractor runs the provided function with the versioned contractor.
+func (n *nodeClient) withContractor(assetID, ver uint32, f func(contractor) error) error {
+	assetContractors, found := n.contractors[assetID]
 	if !found {
-		return fmt.Errorf("no version %d contractor", ver)
+		return fmt.Errorf("no asset %d contractor", assetID)
+	}
+	if ver == contractVersionAny {
+		for _, c := range assetContractors {
+			return f(c)
+		}
+	}
+	contractor, found := assetContractors[ver]
+	if !found {
+		return fmt.Errorf("no version %d contractor for asset %d", ver, assetID)
 	}
 	return f(contractor)
+}
+
+// withTokenContractor runs the provided function with the tokenContractor.
+func (n *nodeClient) withTokenContractor(assetID, ver uint32, f func(tokenContractor) error) error {
+	return n.withContractor(assetID, ver, func(c contractor) error {
+		tc, is := c.(tokenContractor)
+		if !is {
+			return fmt.Errorf("contractor for %d %T is not a tokenContractor", assetID, c)
+		}
+		return f(tc)
+	})
 }
 
 // bestBlockHash gets the best block's hash at the time of calling.
@@ -196,12 +243,27 @@ func (n *nodeClient) addressBalance(ctx context.Context, addr common.Address) (*
 }
 
 // balance gets the current and pending balances.
-func (n *nodeClient) balance(ctx context.Context) (*Balance, error) {
+func (n *nodeClient) balance(ctx context.Context, assetID uint32) (*Balance, error) {
+	if assetID == BipID {
+		return n.ethBalance(ctx)
+	}
+	bal, err := n.tokenBalance(ctx, assetID)
+	if err != nil {
+		return nil, fmt.Errorf("pending balance error: %w", err)
+	}
+	return n.balanceWithTxPool(ctx, bal, assetID)
+}
+
+func (n *nodeClient) ethBalance(ctx context.Context) (*Balance, error) {
 	bal, err := n.balanceAt(ctx, n.creds.addr, rpc.LatestBlockNumber)
 	if err != nil {
 		return nil, fmt.Errorf("pending balance error: %w", err)
 	}
+	return n.balanceWithTxPool(ctx, bal, BipID)
+}
 
+func (n *nodeClient) balanceWithTxPool(ctx context.Context, bal *big.Int, assetID uint32) (*Balance, error) {
+	isETH := assetID == BipID
 	pendingTxs, err := n.pendingTransactions()
 	if err != nil {
 		return nil, fmt.Errorf("error getting pending txs: %w", err)
@@ -211,44 +273,50 @@ func (n *nodeClient) balance(ctx context.Context) (*Balance, error) {
 	incoming := new(big.Int)
 	zero := new(big.Int)
 
-	addFees := func(tx *types.Transaction) {
-		gas := new(big.Int).SetUint64(tx.Gas())
-		if gasPrice := tx.GasPrice(); gasPrice != nil && gasPrice.Cmp(zero) > 0 {
-			outgoing.Add(outgoing, new(big.Int).Mul(gas, gasPrice))
-		} else if gasFeeCap := tx.GasFeeCap(); gasFeeCap != nil {
-			outgoing.Add(outgoing, new(big.Int).Mul(gas, gasFeeCap))
-		} else {
-			n.log.Errorf("unable to calculate fees for tx %s", tx.Hash())
-		}
-	}
-
 	ethSigner := types.LatestSigner(n.leth.ApiBackend.ChainConfig()) // "latest" good for pending
+
+	contractors := n.contractors[assetID]
 
 	for _, tx := range pendingTxs {
 		from, _ := ethSigner.Sender(tx) // zero Address on error
 		if from != n.creds.addr {
 			continue
 		}
-		addFees(tx)
-		v := tx.Value()
-		if v.Cmp(zero) == 0 {
-			// If zero value, attempt to find redemptions or refunds that pay
-			// to us.
-			for ver, c := range n.contractors {
-				in, err := c.incomingValue(ctx, tx)
-				if err != nil {
-					n.log.Errorf("version %d contractor incomingValue error: %v", ver, err)
-					continue
-				}
-				if in > 0 {
-					incoming.Add(incoming, dexeth.GweiToWei(in))
-				}
+
+		if isETH {
+			// Add tx fees
+			gas := new(big.Int).SetUint64(tx.Gas())
+			if gasPrice := tx.GasPrice(); gasPrice != nil && gasPrice.Cmp(zero) > 0 {
+				outgoing.Add(outgoing, new(big.Int).Mul(gas, gasPrice))
+			} else if gasFeeCap := tx.GasFeeCap(); gasFeeCap != nil {
+				outgoing.Add(outgoing, new(big.Int).Mul(gas, gasFeeCap))
+			} else {
+				n.log.Errorf("unable to calculate fees for tx %s", tx.Hash())
 			}
-		} else {
-			// If non-zero outgoing value, this is a swap or a send of some
-			// type.
-			outgoing.Add(outgoing, v)
 		}
+
+		var contractOut uint64
+		for ver, c := range contractors {
+			in, out, err := c.value(ctx, tx)
+			if err != nil {
+				n.log.Errorf("version %d contractor incomingValue error: %v", ver, err)
+				continue
+			}
+			contractOut += out
+			if in > 0 {
+				incoming.Add(incoming, dexeth.GweiToWei(in))
+			}
+		}
+		if contractOut > 0 {
+			outgoing.Add(outgoing, dexeth.GweiToWei(contractOut))
+		} else if isETH {
+			// Count withdraws and sends for ETH.
+			v := tx.Value()
+			if v.Cmp(zero) > 0 {
+				outgoing.Add(outgoing, v)
+			}
+		}
+
 	}
 
 	return &Balance{
@@ -275,12 +343,20 @@ func (n *nodeClient) locked() bool {
 }
 
 // sendToAddr sends funds to the address.
-func (n *nodeClient) sendToAddr(ctx context.Context, addr common.Address, amt uint64) (*types.Transaction, error) {
+func (n *nodeClient) sendToAddr(ctx context.Context, assetID uint32, addr common.Address, amt uint64) (tx *types.Transaction, err error) {
 	txOpts, err := n.txOpts(ctx, amt, defaultSendGasLimit, nil)
 	if err != nil {
 		return nil, err
 	}
-	return n.sendTransaction(ctx, txOpts, addr, nil)
+	if assetID == BipID {
+		return n.sendTransaction(ctx, txOpts, addr, nil)
+	}
+	return tx, n.withTokenContractor(assetID, contractVersionAny, func(c tokenContractor) error {
+		txOpts.Value = new(big.Int)
+		tx, err = c.transfer(ctx, txOpts, addr, dexeth.GweiToWei(amt))
+		return err
+	})
+
 }
 
 // transactionReceipt retrieves the transaction's receipt.
@@ -354,8 +430,8 @@ func (n *nodeClient) syncProgress() ethereum.SyncProgress {
 }
 
 // swap gets a swap keyed by secretHash in the contract.
-func (n *nodeClient) swap(ctx context.Context, secretHash [32]byte, contractVer uint32) (swap *dexeth.SwapState, err error) {
-	return swap, n.withcontractor(contractVer, func(c contractor) error {
+func (n *nodeClient) swap(ctx context.Context, assetID uint32, secretHash [32]byte, contractVer uint32) (swap *dexeth.SwapState, err error) {
+	return swap, n.withContractor(assetID, contractVer, func(c contractor) error {
 		swap, err = c.swap(ctx, secretHash)
 		return err
 	})
@@ -381,18 +457,24 @@ func (n *nodeClient) signTransaction(addr common.Address, tx *types.Transaction)
 	return n.creds.ks.SignTx(accounts.Account{Address: addr}, tx, n.chainID)
 }
 
-// initiate initiates multiple swaps in the same transaction.
-func (n *nodeClient) initiate(ctx context.Context, contracts []*asset.Contract, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
-	gas := dexeth.InitGas(len(contracts), contractVer)
+func (n *nodeClient) initiate(ctx context.Context, assetID uint32, contracts []*asset.Contract,
+	maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
+
 	var val uint64
-	for _, c := range contracts {
-		val += c.Value
+	gas := gases(assetID, contractVer)
+	if gas == nil {
+		return nil, fmt.Errorf("no gas table for asset %d", assetID)
 	}
-	txOpts, _ := n.txOpts(ctx, val, gas, dexeth.GweiToWei(maxFeeRate))
+	if assetID == BipID {
+		for _, c := range contracts {
+			val += c.Value
+		}
+	}
+	txOpts, _ := n.txOpts(ctx, val, gas.SwapN(len(contracts)), dexeth.GweiToWei(maxFeeRate))
 	if err := n.addSignerToOpts(txOpts); err != nil {
 		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
 	}
-	return tx, n.withcontractor(contractVer, func(c contractor) error {
+	return tx, n.withContractor(assetID, contractVer, func(c contractor) error {
 		tx, err = c.initiate(txOpts, contracts)
 		return err
 	})
@@ -400,24 +482,24 @@ func (n *nodeClient) initiate(ctx context.Context, contracts []*asset.Contract, 
 
 // estimateInitGas checks the amount of gas that is used for the
 // initialization.
-func (n *nodeClient) estimateInitGas(ctx context.Context, numSwaps int, contractVer uint32) (gas uint64, err error) {
-	return gas, n.withcontractor(contractVer, func(c contractor) error {
+func (n *nodeClient) estimateInitGas(ctx context.Context, assetID uint32, numSwaps int, contractVer uint32) (gas uint64, err error) {
+	return gas, n.withContractor(assetID, contractVer, func(c contractor) error {
 		gas, err = c.estimateInitGas(ctx, numSwaps)
 		return err
 	})
 }
 
 // estimateRedeemGas checks the amount of gas that is used for the redemption.
-func (n *nodeClient) estimateRedeemGas(ctx context.Context, secrets [][32]byte, contractVer uint32) (gas uint64, err error) {
-	return gas, n.withcontractor(contractVer, func(c contractor) error {
+func (n *nodeClient) estimateRedeemGas(ctx context.Context, assetID uint32, secrets [][32]byte, contractVer uint32) (gas uint64, err error) {
+	return gas, n.withContractor(assetID, contractVer, func(c contractor) error {
 		gas, err = c.estimateRedeemGas(ctx, secrets)
 		return err
 	})
 }
 
 // estimateRefundGas checks the amount of gas that is used for a refund.
-func (n *nodeClient) estimateRefundGas(ctx context.Context, secretHash [32]byte, contractVer uint32) (gas uint64, err error) {
-	return gas, n.withcontractor(contractVer, func(c contractor) error {
+func (n *nodeClient) estimateRefundGas(ctx context.Context, assetID uint32, secretHash [32]byte, contractVer uint32) (gas uint64, err error) {
+	return gas, n.withContractor(assetID, contractVer, func(c contractor) error {
 		gas, err = c.estimateRefundGas(ctx, secretHash)
 		return err
 	})
@@ -425,13 +507,17 @@ func (n *nodeClient) estimateRefundGas(ctx context.Context, secretHash [32]byte,
 
 // redeem redeems a swap contract. Any on-chain failure, such as this secret not
 // matching the hash, will not cause this to error.
-func (n *nodeClient) redeem(ctx context.Context, redemptions []*asset.Redemption, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
-	gas := dexeth.RedeemGas(len(redemptions), contractVer)
-	txOpts, _ := n.txOpts(ctx, 0, gas, dexeth.GweiToWei(maxFeeRate))
+func (n *nodeClient) redeem(ctx context.Context, assetID uint32, redemptions []*asset.Redemption, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
+	gas := gases(assetID, contractVer)
+	if gas == nil {
+		return nil, fmt.Errorf("no gas table for asset %d", assetID)
+	}
+
+	txOpts, _ := n.txOpts(ctx, 0, gas.RedeemN(len(redemptions)), dexeth.GweiToWei(maxFeeRate))
 	if err := n.addSignerToOpts(txOpts); err != nil {
 		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
 	}
-	return tx, n.withcontractor(contractVer, func(c contractor) error {
+	return tx, n.withContractor(assetID, contractVer, func(c contractor) error {
 		tx, err = c.redeem(txOpts, redemptions)
 		return err
 	})
@@ -440,13 +526,16 @@ func (n *nodeClient) redeem(ctx context.Context, redemptions []*asset.Redemption
 // refund refunds a swap contract using the account controlled by the wallet.
 // Any on-chain failure, such as the locktime not being past, will not cause
 // this to error.
-func (n *nodeClient) refund(ctx context.Context, secretHash [32]byte, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
-	gas := dexeth.RefundGas(contractVer)
-	txOpts, _ := n.txOpts(ctx, 0, gas, dexeth.GweiToWei(maxFeeRate))
+func (n *nodeClient) refund(ctx context.Context, assetID uint32, secretHash [32]byte, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
+	gas := gases(assetID, contractVer)
+	if gas == nil {
+		return nil, fmt.Errorf("no gas table for asset %d", assetID)
+	}
+	txOpts, _ := n.txOpts(ctx, 0, gas.Refund, dexeth.GweiToWei(maxFeeRate))
 	if err := n.addSignerToOpts(txOpts); err != nil {
 		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
 	}
-	return tx, n.withcontractor(contractVer, func(c contractor) error {
+	return tx, n.withContractor(assetID, contractVer, func(c contractor) error {
 		tx, err = c.refund(txOpts, secretHash)
 		return err
 	})
@@ -502,16 +591,16 @@ func (n *nodeClient) txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate 
 }
 
 // isRedeemable checks if the swap identified by secretHash is redeemable using secret.
-func (n *nodeClient) isRedeemable(secretHash [32]byte, secret [32]byte, contractVer uint32) (redeemable bool, err error) {
-	return redeemable, n.withcontractor(contractVer, func(c contractor) error {
+func (n *nodeClient) isRedeemable(assetID uint32, secretHash [32]byte, secret [32]byte, contractVer uint32) (redeemable bool, err error) {
+	return redeemable, n.withContractor(assetID, contractVer, func(c contractor) error {
 		redeemable, err = c.isRedeemable(secretHash, secret)
 		return err
 	})
 }
 
 // isRefundable checks if the swap identified by secretHash is refundable.
-func (n *nodeClient) isRefundable(secretHash [32]byte, contractVer uint32) (refundable bool, err error) {
-	return refundable, n.withcontractor(contractVer, func(c contractor) error {
+func (n *nodeClient) isRefundable(assetID uint32, secretHash [32]byte, contractVer uint32) (refundable bool, err error) {
+	return refundable, n.withContractor(assetID, contractVer, func(c contractor) error {
 		refundable, err = c.isRefundable(secretHash)
 		return err
 	})
@@ -548,215 +637,57 @@ func (n *nodeClient) sendSignedTransaction(ctx context.Context, tx *types.Transa
 	return n.leth.ApiBackend.SendTx(ctx, tx)
 }
 
-// tokenSwap gets a swap keyed by secretHash in the token swap contract.
-func (n *nodeClient) tokenSwap(ctx context.Context, secretHash [32]byte) (ethv0.ETHSwapSwap, error) {
-	callOpts := &bind.CallOpts{
-		Pending: true,
-		From:    n.address(),
-		Context: ctx,
-	}
-	return n.tokenSwapContract.Swap(callOpts, secretHash)
-}
-
 // tokenBalance checks the token balance of the account handled by the wallet.
-func (n *nodeClient) tokenBalance(ctx context.Context, tokenAddr common.Address) (*big.Int, error) {
-	callOpts := &bind.CallOpts{
-		Pending: true,
-		From:    n.address(),
-		Context: ctx,
-	}
-
-	tokenContract, err := dexerc20.NewIERC20(tokenAddr, n.ec)
-	if err != nil {
-		return nil, err
-	}
-	return tokenContract.BalanceOf(callOpts, n.address())
+func (n *nodeClient) tokenBalance(ctx context.Context, assetID uint32) (bal *big.Int, err error) {
+	// We don't care about the version.
+	return bal, n.withTokenContractor(assetID, contractVersionAny, func(c tokenContractor) error {
+		bal, err = c.balance(ctx)
+		return err
+	})
 }
 
 // tokenAllowance checks the amount of tokens that the swap contract is approved
 // to spend on behalf of the account handled by the wallet.
-func (n *nodeClient) tokenAllowance(ctx context.Context, tokenAddr common.Address) (*big.Int, error) {
-	callOpts := &bind.CallOpts{
-		Pending: true,
-		From:    n.address(),
-		Context: ctx,
-	}
-
-	tokenContract, err := dexerc20.NewIERC20(tokenAddr, n.ec)
-	if err != nil {
-		return nil, err
-	}
-	return tokenContract.Allowance(callOpts, n.address(), *n.tokenSwapContractAddr)
+func (n *nodeClient) tokenAllowance(ctx context.Context, assetID uint32, contractVer uint32) (allowance *big.Int, err error) {
+	return allowance, n.withTokenContractor(assetID, contractVer, func(c tokenContractor) error {
+		allowance, err = c.allowance(ctx)
+		return err
+	})
 }
 
 // approveToken approves the token swap contract to spend tokens on behalf of
 // account handled by the wallet.
-func (n *nodeClient) approveToken(ctx context.Context, tokenAddr common.Address, amount *big.Int, maxFeeRate uint64) (tx *types.Transaction, err error) {
-	txOpts, _ := n.txOpts(ctx, 0, 3e5, dexeth.GweiToWei(maxFeeRate))
+func (n *nodeClient) approveToken(ctx context.Context, assetID uint32, amount *big.Int,
+	maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
+
+	txOpts, _ := n.txOpts(ctx, 0, approveGas, dexeth.GweiToWei(maxFeeRate))
 	if err := n.addSignerToOpts(txOpts); err != nil {
 		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
 	}
 
-	tokenContract, err := dexerc20.NewIERC20(tokenAddr, n.ec)
-	if err != nil {
-		return nil, err
-	}
-	return tokenContract.Approve(txOpts, *n.tokenSwapContractAddr, amount)
-}
-
-// initiateToken initiates multiple token swaps in the same transaction.
-func (n *nodeClient) initiateToken(ctx context.Context, initiations []ethv0.ETHSwapInitiation, token common.Address, maxFeeRate uint64) (tx *types.Transaction, err error) {
-	// TODO: reject if there is duplicate secret hash
-	// TODO: use estimated gas
-	txOpts, _ := n.txOpts(ctx, 0, 1e6, dexeth.GweiToWei(maxFeeRate))
-	if err := n.addSignerToOpts(txOpts); err != nil {
-		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
-	}
-
-	return n.tokenSwapContract.Initiate(txOpts, initiations)
-}
-
-// redeemToken redeems multiple token swaps. All redemptions must involve the
-// same ERC20 token.
-func (n *nodeClient) redeemToken(ctx context.Context, redemptions []ethv0.ETHSwapRedemption, maxFeeRate uint64) (tx *types.Transaction, err error) {
-	// TODO: reject if there is duplicate secret hash
-	// TODO: use estimated gas
-	txOpts, _ := n.txOpts(ctx, 0, 300000, dexeth.GweiToWei(maxFeeRate))
-	if err := n.addSignerToOpts(txOpts); err != nil {
-		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
-	}
-
-	return n.tokenSwapContract.Redeem(txOpts, redemptions)
-}
-
-// tokenIsRedeemable checks if a token swap identified by secretHash is currently
-// redeemable using secret.
-func (n *nodeClient) tokenIsRedeemable(ctx context.Context, secretHash, secret [32]byte) (bool, error) {
-	callOpts := &bind.CallOpts{
-		Pending: true,
-		From:    n.address(),
-		Context: ctx,
-	}
-	return n.tokenSwapContract.IsRedeemable(callOpts, secretHash, secret)
-}
-
-// refundToken refunds a token swap.
-func (n *nodeClient) refundToken(ctx context.Context, secretHash [32]byte, maxFeeRate uint64) (tx *types.Transaction, err error) {
-	// TODO: use estimated gas
-	txOpts, _ := n.txOpts(ctx, 0, 5e5, dexeth.GweiToWei(maxFeeRate))
-	if err := n.addSignerToOpts(txOpts); err != nil {
-		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
-	}
-
-	return n.tokenSwapContract.Refund(txOpts, secretHash)
-}
-
-// tokenIsRefundable checks if a token swap identified by secretHash is
-// refundable.
-func (n *nodeClient) tokenIsRefundable(ctx context.Context, secretHash [32]byte) (bool, error) {
-	callOpts := &bind.CallOpts{
-		Pending: true,
-		From:    n.address(),
-		Context: ctx,
-	}
-	return n.tokenSwapContract.IsRefundable(callOpts, secretHash)
-}
-
-func (n *nodeClient) getTokenAddress(ctx context.Context) (common.Address, error) {
-	callOpts := &bind.CallOpts{
-		Pending: true,
-		From:    n.address(),
-		Context: ctx,
-	}
-
-	return n.tokenSwapContract.TOKENADDRESS(callOpts)
-}
-
-// estimateInitTokenGas checks the amount of gas that is used to redeem
-// token swaps.
-func (n *nodeClient) estimateInitTokenGas(ctx context.Context, tokenAddr common.Address, num int) (uint64, error) {
-	initiations := make([]ethv0.ETHSwapInitiation, 0, num)
-	for j := 0; j < num; j++ {
-		var secretHash [32]byte
-		copy(secretHash[:], encode.RandomBytes(32))
-		initiations = append(initiations, ethv0.ETHSwapInitiation{
-			RefundTimestamp: big.NewInt(1),
-			SecretHash:      secretHash,
-			Participant:     n.address(),
-			Value:           big.NewInt(1),
-		})
-	}
-
-	parsedABI, err := abi.JSON(strings.NewReader(v0.ERC20SwapMetaData.ABI))
-	if err != nil {
-		return 0, err
-	}
-
-	data, err := parsedABI.Pack("initiate", initiations)
-	if err != nil {
-		return 0, nil
-	}
-
-	return n.ec.EstimateGas(ctx, ethereum.CallMsg{
-		From:  n.address(),
-		To:    n.tokenSwapContractAddr,
-		Value: big.NewInt(0),
-		Gas:   0,
-		Data:  data,
+	return tx, n.withTokenContractor(assetID, contractVer, func(c tokenContractor) error {
+		tx, err = c.approve(ctx, txOpts, amount)
+		return err
 	})
 }
 
-// estimateRedeemTokenGas checks the amount of gas that is used to redeem
-// token swaps.
-func (n *nodeClient) estimateRedeemTokenGas(ctx context.Context, secrets [][32]byte) (uint64, error) {
-	redemptions := make([]ethv0.ETHSwapRedemption, 0, len(secrets))
-	for _, secret := range secrets {
-		var secretHash [32]byte
-		copy(secretHash[:], encode.RandomBytes(32))
-		redemptions = append(redemptions, ethv0.ETHSwapRedemption{
-			Secret:     secret,
-			SecretHash: sha256.Sum256(secret[:]),
-		})
-	}
-
-	parsedABI, err := abi.JSON(strings.NewReader(ethv0.ETHSwapMetaData.ABI))
-	if err != nil {
-		return 0, err
-	}
-
-	data, err := parsedABI.Pack("redeem", redemptions)
-	if err != nil {
-		return 0, nil
-	}
-
-	return n.ec.EstimateGas(ctx, ethereum.CallMsg{
-		From:  n.address(),
-		To:    n.tokenSwapContractAddr,
-		Value: big.NewInt(0),
-		Gas:   0,
-		Data:  data,
+func (n *nodeClient) estimateApproveGas(ctx context.Context, assetID uint32, val uint64) (gas uint64, err error) {
+	return gas, n.withTokenContractor(assetID, contractVersionAny, func(c tokenContractor) error {
+		gas, err = c.estimateApproveGas(ctx, dexeth.GweiToWei(val))
+		return err
+	})
+}
+func (n *nodeClient) estimateTransferGas(ctx context.Context, assetID uint32, val uint64) (gas uint64, err error) {
+	return gas, n.withTokenContractor(assetID, contractVersionAny, func(c tokenContractor) error {
+		gas, err = c.estimateTransferGas(ctx, dexeth.GweiToWei(val))
+		return err
 	})
 }
 
-// estimateRefundTokenGas checks the amount of gas that is used to refund
-// a token swap.
-func (n *nodeClient) estimateRefundTokenGas(ctx context.Context, secretHash [32]byte) (uint64, error) {
-	parsedABI, err := abi.JSON(strings.NewReader(ethv0.ETHSwapMetaData.ABI))
-	if err != nil {
-		return 0, err
-	}
-
-	data, err := parsedABI.Pack("refund", secretHash)
-	if err != nil {
-		return 0, nil
-	}
-
-	return n.ec.EstimateGas(ctx, ethereum.CallMsg{
-		From:  n.address(),
-		To:    n.tokenSwapContractAddr,
-		Value: big.NewInt(0),
-		Gas:   0,
-		Data:  data,
+func (n *nodeClient) getTokenAddress(ctx context.Context, assetID uint32) (addr common.Address, err error) {
+	return addr, n.withTokenContractor(assetID, contractVersionAny, func(c tokenContractor) error {
+		addr, err = c.tokenAddress(ctx)
+		return err
 	})
 }
 
@@ -773,4 +704,15 @@ func newTxOpts(ctx context.Context, from common.Address, val, maxGas uint64, max
 		GasTipCap: gasTipCap,
 		GasLimit:  maxGas,
 	}
+}
+
+func gases(assetID uint32, contractVer uint32) *dex.Gases {
+	if assetID == BipID {
+		return dexeth.VersionedGases[contractVer]
+	}
+	token, found := dexeth.Tokens[assetID]
+	if !found {
+		return nil
+	}
+	return &token.Gas
 }

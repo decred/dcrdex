@@ -89,9 +89,15 @@ func newBalance(current, in, out uint64) *Balance {
 func (n *testNode) address() common.Address {
 	return n.addr
 }
+
 func (n *testNode) connect(ctx context.Context) error {
 	return n.connectErr
 }
+
+func (n *testNode) loadToken(ctx context.Context, tokenID uint32) (*dex.Gases, error) {
+	return nil, nil
+}
+
 func (n *testNode) shutdown() {}
 func (n *testNode) bestHeader(ctx context.Context) (*types.Header, error) {
 	return n.bestHdr, n.bestHdrErr
@@ -102,7 +108,7 @@ func (n *testNode) bestBlockHash(ctx context.Context) (common.Hash, error) {
 func (n *testNode) block(ctx context.Context, hash common.Hash) (*types.Block, error) {
 	return n.blk, n.blkErr
 }
-func (n *testNode) balance(ctx context.Context) (*Balance, error) {
+func (n *testNode) balance(ctx context.Context, assetID uint32) (*Balance, error) {
 	return n.bal, n.balErr
 }
 func (n *testNode) syncStatus(ctx context.Context) (bool, float32, error) {
@@ -123,7 +129,7 @@ func (n *testNode) syncProgress() ethereum.SyncProgress {
 }
 
 // initiate is not concurrent safe
-func (n *testNode) initiate(ctx context.Context, contracts []*asset.Contract, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
+func (n *testNode) initiate(ctx context.Context, assetID uint32, contracts []*asset.Contract, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
 	if n.initErr != nil {
 		return nil, n.initErr
 	}
@@ -133,10 +139,10 @@ func (n *testNode) initiate(ctx context.Context, contracts []*asset.Contract, ma
 		Nonce: n.nonce,
 	}), nil
 }
-func (n *testNode) isRedeemable(secretHash [32]byte, secret [32]byte, contractVer uint32) (redeemable bool, err error) {
+func (n *testNode) isRedeemable(assetID uint32, secretHash [32]byte, secret [32]byte, contractVer uint32) (redeemable bool, err error) {
 	return n.redeemable, n.isRedeemableErr
 }
-func (n *testNode) redeem(ctx context.Context, redemptions []*asset.Redemption, maxFeeRate uint64, contractVer uint32) (*types.Transaction, error) {
+func (n *testNode) redeem(ctx context.Context, assetID uint32, redemptions []*asset.Redemption, maxFeeRate uint64, contractVer uint32) (*types.Transaction, error) {
 	if n.redeemErr != nil {
 		return nil, n.redeemErr
 	}
@@ -145,7 +151,7 @@ func (n *testNode) redeem(ctx context.Context, redemptions []*asset.Redemption, 
 		Nonce: n.nonce,
 	}), nil
 }
-func (n *testNode) refund(ctx context.Context, secretHash [32]byte, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
+func (n *testNode) refund(ctx context.Context, assetID uint32, secretHash [32]byte, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
 	if n.refundErr != nil {
 		return nil, n.refundErr
 	}
@@ -158,10 +164,10 @@ func (n *testNode) refund(ctx context.Context, secretHash [32]byte, maxFeeRate u
 	})
 	return n.lastRefund.tx, nil
 }
-func (n *testNode) isRefundable(secretHash [32]byte, contractVer uint32) (isRefundable bool, err error) {
+func (n *testNode) isRefundable(assetID uint32, secretHash [32]byte, contractVer uint32) (isRefundable bool, err error) {
 	return n.refundable, n.isRefundableErr
 }
-func (n *testNode) swap(ctx context.Context, secretHash [32]byte, contractVer uint32) (*dexeth.SwapState, error) {
+func (n *testNode) swap(ctx context.Context, assetID uint32, secretHash [32]byte, contractVer uint32) (*dexeth.SwapState, error) {
 	if n.swapErr != nil {
 		return nil, n.swapErr
 	}
@@ -200,12 +206,28 @@ func tTx(gasFeeCap, gasTipCap, value uint64, to *common.Address, data []byte) *t
 	})
 }
 
-func (n *testNode) sendToAddr(ctx context.Context, addr common.Address, val uint64) (*types.Transaction, error) {
+func (n *testNode) sendToAddr(ctx context.Context, assetID uint32, addr common.Address, val uint64) (*types.Transaction, error) {
 	return n.sendToAddrTx, n.sendToAddrErr
 }
 
 func (n *testNode) transactionConfirmations(context.Context, common.Hash) (uint32, error) {
 	return 0, nil
+}
+
+func (n *testNode) tokenAllowance(ctx context.Context, assetID uint32, contractVer uint32) (*big.Int, error) {
+	return nil, nil
+}
+
+func (n *testNode) approveToken(ctx context.Context, assetID uint32, amount *big.Int, maxFeeRate uint64, contractVer uint32) (*types.Transaction, error) {
+	return nil, nil
+}
+
+func (n *testNode) estimateApproveGas(ctx context.Context, assetID uint32, val uint64) (uint64, error) {
+	return 1, nil
+}
+
+func (n *testNode) estimateTransferGas(ctx context.Context, assetID uint32, val uint64) (uint64, error) {
+	return 1, nil
 }
 
 func TestCheckForNewBlocks(t *testing.T) {
@@ -251,15 +273,19 @@ func TestCheckForNewBlocks(t *testing.T) {
 		node.blk = block1
 		node.bestBlkHashErr = test.hashErr
 		node.blkErr = test.blockErr
-		eth := &ExchangeWallet{
-			node:       node,
-			addr:       node.address(),
-			tipChange:  tipChange,
-			ctx:        ctx,
-			currentTip: block0,
-			log:        tLogger,
+		w := &AssetWallet{
+			baseWallet: &baseWallet{
+				node:       node,
+				addr:       node.address(),
+				ctx:        ctx,
+				log:        tLogger,
+				currentTip: block0,
+			},
+			tipChange: tipChange,
+			assetID:   BipID,
 		}
-		eth.checkForNewBlocks()
+		w.wallets = map[uint32]*AssetWallet{BipID: w}
+		w.checkForNewBlocks(tipChange)
 
 		if test.hasTipChange {
 			<-blocker
@@ -315,7 +341,7 @@ func TestSyncStatus(t *testing.T) {
 			bestHdr:    &types.Header{Time: nowInSecs - test.subSecs},
 			bestHdrErr: test.bestHdrErr,
 		}
-		eth := &ExchangeWallet{
+		eth := &baseWallet{
 			node: node,
 			addr: node.address(),
 			ctx:  ctx,
@@ -366,11 +392,14 @@ func TestBalance(t *testing.T) {
 	defer cancel()
 	node := &testNode{}
 	node.swapMap = make(map[[32]byte]*dexeth.SwapState)
-	eth := &ExchangeWallet{
-		node: node,
-		ctx:  ctx,
-		log:  tLogger,
-		addr: testAddressA,
+	eth := &AssetWallet{
+		baseWallet: &baseWallet{
+			node: node,
+			ctx:  ctx,
+			log:  tLogger,
+			addr: testAddressA,
+		},
+		assetID: BipID,
 	}
 
 	tests := []struct {
@@ -462,10 +491,13 @@ func TestRefund(t *testing.T) {
 	node := &testNode{}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	eth := &ExchangeWallet{
-		node: node,
-		ctx:  ctx,
-		addr: testAddressA,
+	eth := &AssetWallet{
+		baseWallet: &baseWallet{
+			node: node,
+			ctx:  ctx,
+			addr: testAddressA,
+		},
+		assetID: BipID,
 	}
 	var randomSecretHash [32]byte
 	copy(randomSecretHash[:], encode.RandomBytes(32))
@@ -613,15 +645,18 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	}
 	node := newTestNode(&account)
 	node.bal = newBalance(walletBalanceGwei, 0, 0)
-	eth := &ExchangeWallet{
-		node:        node,
-		addr:        node.address(),
-		ctx:         ctx,
-		log:         tLogger,
-		gasFeeLimit: 200,
+	eth := &AssetWallet{
+		baseWallet: &baseWallet{
+			node:        node,
+			addr:        node.address(),
+			ctx:         ctx,
+			log:         tLogger,
+			gasFeeLimit: 200,
+		},
+		assetID: BipID,
 	}
 
-	checkBalance := func(wallet *ExchangeWallet, expectedAvailable, expectedLocked uint64, testName string) {
+	checkBalance := func(wallet *AssetWallet, expectedAvailable, expectedLocked uint64, testName string) {
 		balance, err := wallet.Balance()
 		if err != nil {
 			t.Fatalf("%v: unexpected error %v", testName, err)
@@ -747,11 +782,14 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	}
 	eth.gasFeeLimit = tmpGasFeeLimit
 
-	eth2 := &ExchangeWallet{
-		node: node,
-		addr: node.address(),
-		ctx:  ctx,
-		log:  tLogger,
+	eth2 := &AssetWallet{
+		baseWallet: &baseWallet{
+			node: node,
+			addr: node.address(),
+			ctx:  ctx,
+			log:  tLogger,
+		},
+		assetID: BipID,
 	}
 
 	// Test reloading coins from first order
@@ -891,9 +929,9 @@ func TestPreSwap(t *testing.T) {
 
 			wantLots:      1,
 			wantValue:     ethToGwei(10),
-			wantMaxFees:   100 * gases.InitGas,
-			wantBestCase:  90 * gases.InitGas,
-			wantWorstCase: 90 * gases.InitGas,
+			wantMaxFees:   100 * gases.Swap,
+			wantBestCase:  90 * gases.Swap,
+			wantWorstCase: 90 * gases.Swap,
 		},
 		{
 			name:          "more lots than max lots",
@@ -915,9 +953,9 @@ func TestPreSwap(t *testing.T) {
 
 			wantLots:      4,
 			wantValue:     ethToGwei(40),
-			wantMaxFees:   4 * 100 * gases.InitGas,
-			wantBestCase:  90 * (gases.InitGas + 3*gases.AdditionalInitGas),
-			wantWorstCase: 4 * 90 * gases.InitGas,
+			wantMaxFees:   4 * 100 * gases.Swap,
+			wantBestCase:  90 * gases.SwapN(4),
+			wantWorstCase: 4 * 90 * gases.Swap,
 		},
 		{
 			name:          "balanceError",
@@ -936,7 +974,7 @@ func TestPreSwap(t *testing.T) {
 		ID:           60,
 		Symbol:       "ETH",
 		MaxFeeRate:   100,
-		SwapSize:     gases.InitGas,
+		SwapSize:     gases.Swap,
 		SwapSizeBase: 0,
 		SwapConf:     1,
 	}
@@ -952,11 +990,14 @@ func TestPreSwap(t *testing.T) {
 		node := newTestNode(nil)
 		node.bal = newBalance(test.bal*1e9, 0, 0)
 		node.balErr = test.balErr
-		eth := &ExchangeWallet{
-			node: node,
-			addr: node.address(),
-			ctx:  ctx,
-			log:  tLogger,
+		eth := &AssetWallet{
+			baseWallet: &baseWallet{
+				node: node,
+				addr: node.address(),
+				ctx:  ctx,
+				log:  tLogger,
+			},
+			assetID: BipID,
 		}
 		dexAsset.MaxFeeRate = test.maxFeeRate
 		preSwap, err := eth.PreSwap(&preSwapForm)
@@ -998,11 +1039,14 @@ func TestSwap(t *testing.T) {
 	receivingAddress := "0x2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27"
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	eth := &ExchangeWallet{
-		node: node,
-		addr: common.HexToAddress(address),
-		ctx:  ctx,
-		log:  tLogger,
+	eth := &AssetWallet{
+		baseWallet: &baseWallet{
+			node: node,
+			addr: common.HexToAddress(address),
+			ctx:  ctx,
+			log:  tLogger,
+		},
+		assetID: BipID,
 	}
 
 	coinIDsForAmounts := func(coinAmounts []uint64) []dex.Bytes {
@@ -1029,6 +1073,7 @@ func TestSwap(t *testing.T) {
 	}
 
 	testSwap := func(testName string, swaps asset.Swaps, expectError bool) {
+		t.Helper()
 		originalBalance, err := eth.Balance()
 		if err != nil {
 			t.Fatalf("%v: error getting balance: %v", testName, err)
@@ -1226,11 +1271,14 @@ func TestPreRedeem(t *testing.T) {
 	node := newTestNode(nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	eth := &ExchangeWallet{
-		node: node,
-		addr: node.address(),
-		ctx:  ctx,
-		log:  tLogger,
+	eth := &AssetWallet{
+		baseWallet: &baseWallet{
+			node: node,
+			addr: node.address(),
+			ctx:  ctx,
+			log:  tLogger,
+		},
+		assetID: BipID,
 	}
 	preRedeem, err := eth.PreRedeem(&asset.PreRedeemForm{
 		LotSize:       123456,
@@ -1259,11 +1307,14 @@ func TestRedeem(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	eth := &ExchangeWallet{
-		node: node,
-		ctx:  ctx,
-		log:  tLogger,
-		addr: testAddressA,
+	eth := &AssetWallet{
+		baseWallet: &baseWallet{
+			node: node,
+			ctx:  ctx,
+			log:  tLogger,
+			addr: testAddressA,
+		},
+		assetID: BipID,
 	}
 	addSwapToSwapMap := func(secretHash [32]byte, value uint64, step dexeth.SwapStep) {
 		swap := dexeth.SwapState{
@@ -1535,10 +1586,10 @@ func TestMaxOrder(t *testing.T) {
 			maxFeeRate:    100,
 			wantLots:      1,
 			wantValue:     ethToGwei(10),
-			wantMaxFees:   100 * gases.InitGas,
-			wantBestCase:  90 * gases.InitGas,
-			wantWorstCase: 90 * gases.InitGas,
-			wantLocked:    ethToGwei(10) + (100 * gases.InitGas),
+			wantMaxFees:   100 * gases.Swap,
+			wantBestCase:  90 * gases.Swap,
+			wantWorstCase: 90 * gases.Swap,
+			wantLocked:    ethToGwei(10) + (100 * gases.Swap),
 		},
 		{
 			name:          "multiple lots",
@@ -1548,10 +1599,10 @@ func TestMaxOrder(t *testing.T) {
 			maxFeeRate:    100,
 			wantLots:      5,
 			wantValue:     ethToGwei(50),
-			wantMaxFees:   5 * 100 * gases.InitGas,
-			wantBestCase:  90 * (gases.InitGas + 4*gases.AdditionalInitGas),
-			wantWorstCase: 5 * 90 * gases.InitGas,
-			wantLocked:    ethToGwei(50) + (5 * 100 * gases.InitGas),
+			wantMaxFees:   5 * 100 * gases.Swap,
+			wantBestCase:  90 * gases.SwapN(5),
+			wantWorstCase: 5 * 90 * gases.Swap,
+			wantLocked:    ethToGwei(50) + (5 * 100 * gases.Swap),
 		},
 		{
 			name:          "balanceError",
@@ -1568,7 +1619,7 @@ func TestMaxOrder(t *testing.T) {
 		ID:           60,
 		Symbol:       "ETH",
 		MaxFeeRate:   100,
-		SwapSize:     gases.InitGas,
+		SwapSize:     gases.Swap,
 		SwapSizeBase: 0,
 		SwapConf:     1,
 	}
@@ -1578,11 +1629,14 @@ func TestMaxOrder(t *testing.T) {
 		node := newTestNode(nil)
 		node.bal = newBalance(test.bal*1e9, 0, 0)
 		node.balErr = test.balErr
-		eth := &ExchangeWallet{
-			node: node,
-			addr: node.address(),
-			ctx:  ctx,
-			log:  tLogger,
+		eth := &AssetWallet{
+			baseWallet: &baseWallet{
+				node: node,
+				addr: node.address(),
+				ctx:  ctx,
+				log:  tLogger,
+			},
+			assetID: BipID,
 		}
 		dexAsset.MaxFeeRate = test.maxFeeRate
 		maxOrder, err := eth.MaxOrder(test.lotSize, test.feeSuggestion, &dexAsset)
@@ -1641,7 +1695,7 @@ func packInitiateDataV0(initiations []*dexeth.Initiation) ([]byte, error) {
 
 func TestAuditContract(t *testing.T) {
 	node := &testNode{}
-	eth := &ExchangeWallet{
+	eth := &baseWallet{
 		node: node,
 		log:  tLogger,
 	}
@@ -1820,7 +1874,7 @@ func TestOwnsAddress(t *testing.T) {
 	var otherAddress common.Address
 	rand.Read(otherAddress[:])
 
-	eth := &ExchangeWallet{
+	eth := &baseWallet{
 		addr: common.HexToAddress(address),
 	}
 
@@ -1907,7 +1961,7 @@ func TestSignMessage(t *testing.T) {
 	}
 	node := newTestNode(&account)
 	node.privKeyForSigning = privKey
-	eth := &ExchangeWallet{
+	eth := &baseWallet{
 		node: node,
 		addr: node.address(),
 		ctx:  ctx,
@@ -1984,9 +2038,12 @@ func TestSwapConfirmation(t *testing.T) {
 		},
 	}
 
-	eth := &ExchangeWallet{
-		node: node,
-		addr: testAddressA,
+	eth := &AssetWallet{
+		baseWallet: &baseWallet{
+			node: node,
+			addr: testAddressA,
+		},
+		assetID: BipID,
 	}
 
 	state.BlockHeight = 5
@@ -2070,9 +2127,9 @@ func TestDriverOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("driver open error: %v", err)
 	}
-	eth, ok := wallet.(*ExchangeWallet)
+	eth, ok := wallet.(*AssetWallet)
 	if !ok {
-		t.Fatalf("failed to cast wallet as ExchangeWallet")
+		t.Fatalf("failed to cast wallet as AssetWallet")
 	}
 	if eth.gasFeeLimit != defaultGasFeeLimit {
 		t.Fatalf("expected gasFeeLimit to be default, but got %v", eth.gasFeeLimit)
@@ -2085,9 +2142,9 @@ func TestDriverOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("driver open error: %v", err)
 	}
-	eth, ok = wallet.(*ExchangeWallet)
+	eth, ok = wallet.(*AssetWallet)
 	if !ok {
-		t.Fatalf("failed to cast wallet as ExchangeWallet")
+		t.Fatalf("failed to cast wallet as AssetWallet")
 	}
 	if eth.gasFeeLimit != 150 {
 		t.Fatalf("expected gasFeeLimit to be 150, but got %v", eth.gasFeeLimit)
@@ -2157,7 +2214,10 @@ func TestLocktimeExpired(t *testing.T) {
 		bestHdr:  header,
 	}
 
-	eth := &ExchangeWallet{node: node}
+	eth := &AssetWallet{
+		baseWallet: &baseWallet{node: node},
+		assetID:    BipID,
+	}
 
 	contract := make([]byte, 36)
 	copy(contract[4:], secretHash[:])
@@ -2221,11 +2281,15 @@ func TestFindRedemption(t *testing.T) {
 		swapVers: map[uint32]struct{}{0: {}},
 	}
 
-	eth := &ExchangeWallet{
-		ctx:                context.Background(),
-		node:               node,
+	eth := &AssetWallet{
+		baseWallet: &baseWallet{
+			ctx:  context.Background(),
+			node: node,
+
+			log: tLogger,
+		},
+		assetID:            BipID,
 		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
-		log:                tLogger,
 	}
 
 	baseCtx := context.Background()
@@ -2396,9 +2460,12 @@ func TestPayFee(t *testing.T) {
 			sendToAddrTx:  tx,
 			sendToAddrErr: test.sendToAddrErr,
 		}
-		eth := &ExchangeWallet{
-			node:        node,
-			gasFeeLimit: defaultGasFeeLimit,
+		eth := &AssetWallet{
+			baseWallet: &baseWallet{
+				node:        node,
+				gasFeeLimit: defaultGasFeeLimit,
+			},
+			assetID: BipID,
 		}
 		coin, err := eth.PayFee("", test.regFee, 0)
 		if test.wantErr {
@@ -2458,9 +2525,11 @@ func TestWithdraw(t *testing.T) {
 			sendToAddrTx:  tx,
 			sendToAddrErr: test.sendToAddrErr,
 		}
-		eth := &ExchangeWallet{
-			node:        node,
-			gasFeeLimit: defaultGasFeeLimit,
+		eth := &AssetWallet{
+			baseWallet: &baseWallet{
+				node:        node,
+				gasFeeLimit: defaultGasFeeLimit,
+			},
 		}
 		coin, err := eth.Withdraw("", test.value, 0)
 		if test.wantErr {

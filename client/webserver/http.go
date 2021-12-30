@@ -133,10 +133,10 @@ func (s *WebServer) handleWallets(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	sort.Slice(assets, func(i, j int) bool {
-		return assets[i].Info.Name < assets[j].Info.Name
+		return assets[i].Name < assets[j].Name
 	})
 	sort.Slice(nowallets, func(i, j int) bool {
-		return nowallets[i].Info.Name < nowallets[j].Info.Name
+		return nowallets[i].Name < nowallets[j].Name
 	})
 	data := &walletsTmplData{
 		CommonArguments: *commonArgs(r, "Wallets | Decred DEX"),
@@ -346,15 +346,16 @@ func defaultUnitInfo(symbol string) dex.UnitInfo {
 
 func (s *WebServer) orderReader(ord *core.Order) *orderReader {
 	unitInfo := func(assetID uint32, symbol string) dex.UnitInfo {
-		assetInfo, err := asset.Info(assetID)
-		if err != nil {
-			xc := s.core.Exchanges()[ord.Host]
-			asset, found := xc.Assets[assetID]
-			if !found || asset.UnitInfo.Conventional.ConversionFactor == 0 {
-				return defaultUnitInfo(symbol)
-			}
+		unitInfo, err := asset.UnitInfo(assetID)
+		if err == nil {
+			return unitInfo
 		}
-		return assetInfo.UnitInfo
+		xc := s.core.Exchanges()[ord.Host]
+		dexAsset, found := xc.Assets[assetID]
+		if !found || dexAsset.UnitInfo.Conventional.ConversionFactor == 0 {
+			return defaultUnitInfo(symbol)
+		}
+		return dexAsset.UnitInfo
 	}
 
 	return &orderReader{

@@ -56,7 +56,6 @@ export default class SettingsPage extends BasePage {
       }
 
       this.newWalletForm.setAsset(assetID)
-      this.newWalletForm.loadDefaults()
       this.currentForm = page.newWalletForm
       forms.slideSwap(page.regAssetForm, page.newWalletForm)
     })

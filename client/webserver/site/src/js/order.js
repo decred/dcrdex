@@ -82,8 +82,8 @@ export default class OrderPage extends BasePage {
     const page = this.page
     const remaining = order.qty - order.filled
     const asset = Order.isMarketBuy(order) ? app().assets[order.quoteID] : app().assets[order.baseID]
-    page.cancelRemain.textContent = Doc.formatCoinValue(remaining, asset.info.unitinfo)
-    page.cancelUnit.textContent = asset.info.unitinfo.conventional.unit.toUpperCase()
+    page.cancelRemain.textContent = Doc.formatCoinValue(remaining, asset.unitinfo)
+    page.cancelUnit.textContent = asset.unitinfo.conventional.unit.toUpperCase()
     this.showForm(page.cancelForm)
   }
 

@@ -276,7 +276,7 @@
                         <th>
                           <div class="d-flex align-items-center pb-1" id="baseWalletIcons">
                             <img id="baseImg" class="micro-icon mr-1">
-                            <span data-unit="base"></span>
+                            <span id="balBaseSymbol"></span>
                             <div class="flex-grow-1"></div>
                             <div id="baseWalletState" class="fs12">{{template "walletIcons"}}</div>
                             <span class="ico-expired fs16 pl-1" id="baseExpired" data-tooltip="Balance may be outdated. Connect to the wallet to refresh."></span>
@@ -285,7 +285,7 @@
                         <th>
                           <div class="d-flex align-items-center pb-1" id="quoteWalletIcons">
                             <img id="quoteImg" class="micro-icon mr-1">
-                            <span data-unit="quote"></span>
+                            <span id="balQuoteSymbol"></span>
                             <div class="flex-grow-1"></div>
                             <div id="quoteWalletState" class="fs12">{{template "walletIcons"}}</div>
                             <span class="ico-expired fs16 pl-1" id="quoteExpired" data-tooltip="Balance may be outdated. Connect to the wallet to refresh."></span>

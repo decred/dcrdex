@@ -29,7 +29,7 @@
   <button data-action="withdraw"{{if not $ready}} class="d-hide"{{end}}>Withdraw</button>
   <button data-action="deposit"{{if not $ready}} class="d-hide"{{end}}>Deposit</button>
   <button data-action="lock"{{if or (not $ready) (not $w.Encrypted)}} class="d-hide"{{end}}>Lock</button>
-  <button data-action="create" class="d-hide">Create a {{.Info.Name}} Wallet</button>
+  <button data-action="create" class="d-hide">Create a {{.Name}} Wallet</button>
     <span data-action="settings" class="ico-settings fs20 pointer"></span>
     {{else}}
     <button data-action="connect" class="d-hide">Connect</button>
@@ -37,7 +37,7 @@
     <button data-action="withdraw" class="d-hide">Withdraw</button>
     <button data-action="deposit" class="d-hide">Deposit</button>
     <button data-action="lock" class="d-hide">Lock</button>
-    <button data-action="create">Create a {{.Info.Name}} Wallet</button>
+    <button data-action="create">Create a {{.Name}} Wallet</button>
     <span data-action="settings" class="ico-settings fs20 pointer d-hide"></span>
   {{end}}
 {{end}}
@@ -61,15 +61,15 @@
       </thead>
       <tbody id="walletTable">
         {{range .Assets}}
-        <tr data-asset-i-d="{{.ID}}" data-symbol="{{.Symbol}}" data-name="{{.Info.Name}}">
+        <tr data-asset-i-d="{{.ID}}" data-symbol="{{.Symbol}}" data-name="{{.Name}}">
           <td>
             <img src="{{logoPath .Symbol}}" class="mini-icon">
-            <span class="fs20">{{.Info.Name}}</span>
+            <span class="fs20">{{.Name}}</span>
             <span class="fs15">({{toUpper .Symbol}})</span>
           </td>
           <td data-balance-target="{{.ID}}">
             {{if .Wallet}}
-              {{.Info.UnitInfo.ConventionalString .Wallet.Balance.Available}}
+              {{.UnitInfo.ConventionalString .Wallet.Balance.Available}}
             {{else}}
               0.00000000
             {{end}}

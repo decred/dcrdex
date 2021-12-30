@@ -119,10 +119,16 @@ type User struct {
 // SupportedAsset is data about an asset and possibly the wallet associated
 // with it.
 type SupportedAsset struct {
-	ID     uint32            `json:"id"`
-	Symbol string            `json:"symbol"`
-	Wallet *WalletState      `json:"wallet"`
-	Info   *asset.WalletInfo `json:"info"`
+	ID     uint32       `json:"id"`
+	Symbol string       `json:"symbol"`
+	Name   string       `json:"name"`
+	Wallet *WalletState `json:"wallet"`
+	// Info is only populated for base chain assets. One of either Info or
+	// Token will be populated.
+	Info *asset.WalletInfo `json:"info"`
+	// Token is only populated for token assets.
+	Token    *asset.Token `json:"token"`
+	UnitInfo dex.UnitInfo `json:"unitInfo"`
 }
 
 // RegisterForm is information necessary to register an account on a DEX.

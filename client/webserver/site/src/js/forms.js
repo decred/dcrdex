@@ -14,7 +14,7 @@ export class NewWalletForm {
     this.form = form
     this.success = success
     this.pwCache = pwCache
-    this.currentAsset = null
+    this.current = {}
     const page = this.page = Doc.parseTemplate(form)
     this.pwHiders = Array.from(form.querySelectorAll('.hide-pw'))
     this.refresh()
@@ -51,48 +51,56 @@ export class NewWalletForm {
       return
     }
     Doc.hide(page.newWalletErr)
-    const assetID = parseInt(this.currentAsset.id)
 
-    const createForm = {
-      assetID: assetID,
-      pass: page.newWalletPass.value || '',
-      config: this.subform.map(),
-      appPass: pw,
-      walletType: this.currentWalletType
+    const createWallet = async (assetID, walletType) => {
+      const createForm = {
+        assetID: assetID,
+        pass: page.newWalletPass.value || '',
+        config: this.subform.map(assetID),
+        appPass: pw,
+        walletType: walletType
+      }
+      page.appPass.value = ''
+      const loaded = app().loading(page.mainForm)
+
+      const res = await postJSON('/api/newwallet', createForm)
+      loaded()
+      return res
     }
-    page.appPass.value = ''
-    const loaded = app().loading(page.mainForm)
-    const res = await postJSON('/api/newwallet', createForm)
-    loaded()
-    if (!app().checkResponse(res)) {
-      this.setError(res.msg)
-      return
+
+    const { regAssets, walletDef } = this.current
+    for (const i in regAssets) {
+      const walletType = walletDef.types ? walletDef.types[i] : walletDef.type
+      const res = await createWallet(regAssets[i], walletType)
+      if (!app().checkResponse(res)) {
+        this.setError(res.msg)
+        return
+      }
     }
+
     if (this.pwCache) this.pwCache.pw = pw
     page.newWalletPass.value = ''
-    this.success(assetID)
+    this.success(this.current.asset.id)
   }
 
   async setAsset (assetID) {
+    if (!this.parseAsset(assetID)) return // nothing to change
     const page = this.page
-    const asset = app().assets[assetID]
     const tabs = page.walletTypeTabs
-    if (this.currentAsset && this.currentAsset.id === asset.id) return
-    this.currentAsset = asset
-    page.assetLogo.src = Doc.logoPath(asset.symbol)
-    page.assetName.textContent = asset.info.name
+    const { winfo, walletDefs } = this.current
+    page.assetName.textContent = winfo.name
     page.newWalletPass.value = ''
 
-    if (asset.info.availablewallets.length > 1) page.header.classList.add('bordertop')
+    if (walletDefs.length > 1) page.header.classList.add('bordertop')
     else page.header.classList.remove('bordertop')
 
-    const walletDef = asset.info.availablewallets[0]
+    const walletDef = walletDefs[0]
     Doc.empty(tabs)
     Doc.hide(tabs, page.newWalletErr)
 
-    if (asset.info.availablewallets.length > 1) {
+    if (walletDefs.length > 1) {
       Doc.show(tabs)
-      for (const wDef of asset.info.availablewallets) {
+      for (const wDef of walletDefs) {
         const tab = page.walletTabTmpl.cloneNode(true)
         tab.dataset.tooltip = wDef.description
         tab.textContent = wDef.tab
@@ -110,9 +118,47 @@ export class NewWalletForm {
     await this.update(walletDef)
   }
 
+  /*
+  * parseAsset parses the current data for the asset ID.
+  */
+  parseAsset (assetID) {
+    const asset = app().assets[assetID]
+    if (this.current.asset && this.current.asset.id === asset.id) return false
+    this.current = { asset, configAsset: asset, regAssets: [asset.id] }
+    this.page.assetLogo.src = Doc.logoPath(asset.symbol)
+    const token = asset.token
+    if (!token) {
+      this.current.winfo = asset.info
+      this.current.walletDefs = asset.info.availablewallets
+      return true
+    }
+    this.current.winfo = token
+    const tokenDef = token.definition
+    const parentAsset = app().user.assets[token.parentID]
+    const parentWallet = parentAsset.wallet
+    if (parentWallet) {
+      this.current.walletDefs = [tokenDef]
+      delete this.current.configAsset // No config file loading for tokens.
+      return true
+    }
+    this.current.regAssets = [parentAsset.id, asset.id]
+    this.current.configAsset = parentAsset // Load config file settings for parent wallet.
+    // No parent wallet. Need to merge the defs.
+    const parentInfo = parentAsset.info
+    const mergedDefs = JSON.parse(JSON.stringify(parentInfo.availablewallets))
+    for (const def of mergedDefs) {
+      for (const opt of def.configopts) opt.regAsset = parentAsset
+      for (const opt of tokenDef.configopts) opt.regAsset = asset
+      def.types = [def.type, tokenDef.type]
+      def.configopts.push(...tokenDef.configopts)
+    }
+    this.current.walletDefs = mergedDefs
+    return true
+  }
+
   async update (walletDef) {
     const page = this.page
-    this.currentWalletType = walletDef.type
+    this.current.walletDef = walletDef
     const appPwCached = State.passwordIsCached() || (this.pwCache && this.pwCache.pw)
     Doc.hide(page.auth, page.oneBttnBox, page.newWalletPassBox)
     if (appPwCached && walletDef.seeded) {
@@ -148,12 +194,12 @@ export class NewWalletForm {
    */
   async loadDefaults () {
     // No default config files for seeded assets right now.
-    const walletDef = app().walletDefinition(this.currentAsset.id, this.currentWalletType)
-    if (walletDef.seeded) return
+    const walletDef = this.current.walletDef
+    if (!this.configAsset || walletDef.seeded || !walletDef.configpath) return
     const loaded = app().loading(this.form)
     const res = await postJSON('/api/defaultwalletcfg', {
-      assetID: this.currentAsset.id,
-      type: this.currentWalletType
+      assetID: this.configAsset.id,
+      type: walletDef.type
     })
     loaded()
     if (!app().checkResponse(res)) {
@@ -266,6 +312,11 @@ export class WalletConfigForm {
       const label = el.querySelector('label')
       label.htmlFor = elID // 'for' attribute, but 'for' is a keyword
       label.prepend(opt.displayname)
+      if (typeof opt.regAsset !== 'undefined') {
+        const logo = new window.Image(15, 15)
+        logo.src = Doc.logoPath(opt.regAsset.symbol)
+        label.prepend(logo)
+      }
       box.appendChild(el)
       if (opt.noecho) input.type = 'password'
       if (opt.description) label.dataset.tooltip = opt.description
@@ -339,11 +390,13 @@ export class WalletConfigForm {
    * map reads all inputs and constructs an object from the configOpt keys and
    * values.
    */
-  map () {
+  map (assetID) {
     const config = {}
     this.allSettings.querySelectorAll('input').forEach(input => {
-      if (input.configOpt.isboolean && input.configOpt.key) config[input.configOpt.key] = input.checked ? '1' : '0'
-      else if (input.value) config[input.configOpt.key] = input.value
+      const opt = input.configOpt
+      if (opt.regAsset && opt.regAsset.id !== assetID) return
+      if (opt.isboolean && opt.key) config[opt.key] = input.checked ? '1' : '0'
+      else if (input.value) config[opt.key] = input.value
     })
 
     return config
@@ -395,12 +448,12 @@ export class ConfirmRegistrationForm {
 
   setAsset (assetID) {
     const asset = app().assets[assetID]
-    const unitInfo = asset.info.unitinfo
+    const ui = asset.unitInfo
     this.feeAssetID = asset.id
     const page = this.page
     const regAsset = this.xc.regFees[asset.symbol]
-    page.fee.textContent = Doc.formatCoinValue(regAsset.amount, unitInfo)
-    page.feeUnit.textContent = unitInfo.conventional.unit.toUpperCase()
+    page.fee.textContent = Doc.formatCoinValue(regAsset.amount, ui)
+    page.feeUnit.textContent = ui.conventional.unit.toUpperCase()
     page.logo.src = Doc.logoPath(asset.symbol)
   }
 
@@ -480,9 +533,9 @@ export class FeeAssetSelectionForm {
       const marketTmpl = Doc.parseTemplate(marketNode)
 
       const baseAsset = xc.assets[mkt.baseid]
-      const baseUnitInfo = unitInfo(xc, mkt.baseid)
+      const baseUnitInfo = xcUnitInfo(xc, mkt.baseid)
       const quoteAsset = xc.assets[mkt.quoteid]
-      const quoteUnitInfo = unitInfo(xc, mkt.quoteid)
+      const quoteUnitInfo = xcUnitInfo(xc, mkt.quoteid)
 
       if (cFactor(baseUnitInfo) === 0 || cFactor(quoteUnitInfo) === 0) return null
 
@@ -518,14 +571,14 @@ export class FeeAssetSelectionForm {
       const asset = app().assets[feeAsset.id]
       if (!asset) continue
       const haveWallet = asset.wallet
-      const unitInfo = asset.info.unitinfo
+      const ui = asset.unitInfo
       const assetNode = page.assetTmpl.cloneNode(true)
       Doc.bind(assetNode, 'click', () => { this.success(feeAsset.id) })
       const assetTmpl = Doc.parseTemplate(assetNode)
       page.assets.appendChild(assetNode)
       assetTmpl.logo.src = Doc.logoPath(symbol)
-      const fee = Doc.formatCoinValue(feeAsset.amount, unitInfo)
-      assetTmpl.fee.textContent = `${fee} ${unitInfo.conventional.unit}`
+      const fee = Doc.formatCoinValue(feeAsset.amount, ui)
+      assetTmpl.fee.textContent = `${fee} ${ui.conventional.unit}`
       assetTmpl.confs.textContent = feeAsset.confs
       assetTmpl.ready.textContent = haveWallet ? intl.prep(intl.WALLET_READY) : intl.prep(intl.SETUP_NEEDED)
       assetTmpl.ready.classList.add(haveWallet ? 'readygreen' : 'setuporange')
@@ -620,7 +673,7 @@ export class WalletWaitForm {
     for (const span of this.form.querySelectorAll('.unit')) span.textContent = asset.symbol.toUpperCase()
     page.logo.src = Doc.logoPath(asset.symbol)
     page.depoAddr.textContent = wallet.address
-    page.fee.textContent = Doc.formatCoinValue(fee.amount, asset.info.unitinfo)
+    page.fee.textContent = Doc.formatCoinValue(fee.amount, asset.unitInfo)
 
     Doc.hide(page.syncUncheck, page.syncCheck, page.balUncheck, page.balCheck, page.syncRemainBox)
     Doc.show(page.balanceBox)
@@ -654,7 +707,7 @@ export class WalletWaitForm {
     const fee = this.regFee
 
     if (bal.available <= fee.amount) {
-      page.balance.textContent = Doc.formatCoinValue(bal.available, asset.info.unitinfo)
+      page.balance.textContent = Doc.formatCoinValue(bal.available, asset.unitInfo)
       return
     }
 
@@ -726,7 +779,7 @@ export class UnlockWalletForm {
     const page = this.page
     this.currentAsset = asset
     page.uwAssetLogo.src = Doc.logoPath(asset.symbol)
-    page.uwAssetName.textContent = asset.info.name
+    page.uwAssetName.textContent = asset.name
     page.uwAppPass.value = ''
     const hidePWBox = State.passwordIsCached() || (this.pwCache && this.pwCache.pw)
     if (hidePWBox) Doc.hide(page.uwAppPassBox)
@@ -1000,10 +1053,10 @@ function isTruthyString (s) {
   return s === '1' || s.toLowerCase() === 'true'
 }
 
-function unitInfo (xc, assetID) {
+function xcUnitInfo (xc, assetID) {
   const dexAsset = xc.assets[assetID]
   if (dexAsset && dexAsset.unitInfo.conventional.conversionFactor > 0) return dexAsset.unitInfo
-  const supportedAsset = app().assets[assetID]
-  if (!supportedAsset) return null
-  return supportedAsset.info.unitinfo
+  const asset = app().assets[assetID]
+  if (!asset) return null
+  return asset.unitInfo
 }

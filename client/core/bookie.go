@@ -151,9 +151,9 @@ func newBookie(dc *dexConnection, base, quote uint32, binSizes []string, logger 
 	}
 
 	parseUnitInfo := func(assetID uint32) dex.UnitInfo {
-		assetInfo, _ := asset.Info(assetID)
-		if assetInfo != nil {
-			return assetInfo.UnitInfo
+		unitInfo, err := asset.UnitInfo(assetID)
+		if err == nil {
+			return unitInfo
 		} else {
 			dexAsset := dc.assets[assetID]
 			if dexAsset == nil {

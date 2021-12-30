@@ -230,9 +230,8 @@ export default class WalletsPage extends BasePage {
     const box = page.newWalletForm
     await this.hideBox()
     this.walletAsset = this.lastFormAsset = assetID
-    this.newWalletForm.setAsset(assetID)
     this.animation = this.showBox(box)
-    await this.newWalletForm.loadDefaults()
+    await this.newWalletForm.setAsset(assetID)
   }
 
   /* Show the open wallet form if the password is not cached, and otherwise
@@ -277,12 +276,13 @@ export default class WalletsPage extends BasePage {
     const asset = app().assets[assetID]
 
     const currentDef = app().currentWalletDefinition(assetID)
+    const walletDefs = asset.token ? [asset.token.definition] : asset.info.availablewallets
 
-    if (asset.info.availablewallets.length > 1) {
+    if (walletDefs.length > 1) {
       Doc.empty(page.changeWalletTypeSelect)
       Doc.show(page.showChangeType, page.changeTypeShowIcon)
       page.changeTypeMsg.textContent = intl.prep(intl.ID_CHANGE_WALLET_TYPE)
-      for (const wDef of asset.info.availablewallets) {
+      for (const wDef of walletDefs) {
         const option = document.createElement('option')
         if (wDef.type === currentDef.type) option.selected = '1'
         option.value = option.textContent = wDef.type
@@ -293,7 +293,7 @@ export default class WalletsPage extends BasePage {
     }
 
     page.recfgAssetLogo.src = Doc.logoPath(asset.symbol)
-    page.recfgAssetName.textContent = asset.info.name
+    page.recfgAssetName.textContent = asset.name
     await this.hideBox()
     this.animation = this.showBox(page.reconfigForm)
     const loaded = app().loading(page.reconfigForm)
@@ -320,7 +320,7 @@ export default class WalletsPage extends BasePage {
   }
 
   updateDisplayedReconfigFields (walletDef) {
-    if (walletDef.seeded) {
+    if (walletDef.seeded || walletDef.type === 'token') {
       Doc.hide(this.page.showChangePW)
       this.changeWalletPW = false
       this.setPWSettingViz(false)
@@ -337,11 +337,11 @@ export default class WalletsPage extends BasePage {
     const wallet = app().walletMap[assetID]
     this.depositAsset = this.lastFormAsset = assetID
     if (!wallet) {
-      app().notify(ntfn.make(`No wallet found for ${asset.info.name}`, 'Cannot retrieve deposit address.', ntfn.ERROR)) // TODO: translate
+      app().notify(ntfn.make(`No wallet found for ${asset.name}`, 'Cannot retrieve deposit address.', ntfn.ERROR)) // TODO: translate
       return
     }
     await this.hideBox()
-    page.depositName.textContent = asset.info.name
+    page.depositName.textContent = asset.name
     page.depositAddress.textContent = wallet.address
     this.animation = this.showBox(box)
   }
@@ -370,16 +370,16 @@ export default class WalletsPage extends BasePage {
     const asset = app().assets[assetID]
     const wallet = app().walletMap[assetID]
     if (!wallet) {
-      app().notify(ntfn.make(`No wallet found for ${asset.info.name}`, 'Cannot withdraw.', ntfn.ERROR))
+      app().notify(ntfn.make(`No wallet found for ${asset.name}`, 'Cannot withdraw.', ntfn.ERROR))
     }
     await this.hideBox()
     page.withdrawAddr.value = ''
     page.withdrawAmt.value = ''
     page.withdrawPW.value = ''
 
-    page.withdrawAvail.textContent = Doc.formatFullPrecision(wallet.balance.available, asset.info.unitinfo)
+    page.withdrawAvail.textContent = Doc.formatFullPrecision(wallet.balance.available, asset.unitinfo)
     page.withdrawLogo.src = Doc.logoPath(asset.symbol)
-    page.withdrawName.textContent = asset.info.name
+    page.withdrawName.textContent = asset.name
     // page.withdrawFee.textContent = wallet.feerate
     // page.withdrawUnit.textContent = wallet.units
     box.dataset.assetID = this.lastFormAsset = assetID
@@ -464,7 +464,7 @@ export default class WalletsPage extends BasePage {
     const loaded = app().loading(page.reconfigForm)
     const req = {
       assetID: this.reconfigAsset,
-      config: this.reconfigForm.map(),
+      config: this.reconfigForm.map(this.reconfigAsset),
       appPW: page.appPW.value,
       walletType: walletType
     }

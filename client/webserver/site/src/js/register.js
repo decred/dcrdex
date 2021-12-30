@@ -72,7 +72,6 @@ export default class RegistrationPage extends BasePage {
       }
 
       this.newWalletForm.setAsset(assetID)
-      this.newWalletForm.loadDefaults()
       slideSwap(page.regAssetForm, page.newWalletForm)
     })
 
