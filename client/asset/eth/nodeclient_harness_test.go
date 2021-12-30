@@ -73,8 +73,8 @@ var (
 	simnetAcct            = &accounts.Account{Address: simnetAddr}
 	ethClient             *nodeClient
 	participantWalletSeed = "b99fb787fc5886eb539830d103c0017eff5241ace28ee137d40f135fd02212b1a897afbdcba037c8c735cc63080558a30d72851eb5a3d05684400ec4123a2d00"
-	participantPrivKey    = "88daaaa2cb839a08d90dbe910b4603184bd669ae3316e7a7bae581493b927e61"
-	participantAddr       = common.HexToAddress("8d83B207674bfd53B418a6E47DA148F5bFeCc652")
+	participantPrivKey    = "4fc4f43c00bc6550314b8561878edbfc776884e006ad51a2fe2c054f85cfbd12"
+	participantAddr       = common.HexToAddress("1D4F2ee206474B136Af4868B887C7b166693c194")
 	participantAcct       = &accounts.Account{Address: participantAddr}
 	participantEthClient  *nodeClient
 	contractAddr          common.Address
