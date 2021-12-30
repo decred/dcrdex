@@ -2,10 +2,9 @@
 // pragma should be as specific as possible to allow easier validation.
 pragma solidity = 0.8.6;
 
-
 // ETHSwap creates a contract to be deployed on an ethereum network. After
 // deployed, it keeps a map of swaps that facilitates atomic swapping of
-// ERC20 tokens with other crypto currencies that support time locks.
+// ERC20 tokens with other crypto currencies that support time locks. 
 //
 // It accomplishes this by holding tokens acquired during a swap initiation
 // until conditions are met. Prior to initiating a swap, the initiator must
@@ -18,18 +17,20 @@ pragma solidity = 0.8.6;
 // locktime. The participant can redeem at any time after the initiation
 // transaction is mined if they have the secret that hashes to the secret hash.
 // Otherwise, the initiator can refund funds any time after the locktime.
+// 
+// In order to save on gas fees, a separate ERC20Swap contract is deployed
+// for each ERC20 token. The TOKEN_ADDRESS constant must be updated for
+// each contract deployment.
 //
 // This contract has no limits on gas used for any transactions.
 //
 // This contract cannot be used by other contracts or by a third party mediating
 // the swap or multisig wallets.
-//
-// This code should be verifiable as resulting in a certain on-chain contract
-// by compiling with the correct version of solidity and comparing the
-// resulting byte code to the data in the original transaction.
 contract ERC20Swap {
     bytes4 private constant TRANSFER_FROM_SELECTOR = bytes4(keccak256("transferFrom(address,address,uint256)"));
     bytes4 private constant TRANSFER_SELECTOR = bytes4(keccak256("transfer(address,uint256)"));
+    
+    address public immutable TOKEN_ADDRESS;
 
     // State is a type that hold's a contract's state. Empty is the uninitiated
     // or null value.
@@ -46,7 +47,6 @@ contract ERC20Swap {
         uint refundBlockTimestamp;
         address initiator;
         address participant;
-        address token;
         State state;
     }
 
@@ -57,7 +57,9 @@ contract ERC20Swap {
     // constructor is empty. This contract has no connection to the original
     // sender after deployed. It can only be interacted with by users
     // initiating, redeeming, and refunding swaps.
-    constructor() {}
+    constructor(address token) {
+        TOKEN_ADDRESS = token;
+    }
 
     // senderIsOrigin ensures that this contract cannot be used by other
     // contracts, which reduces possible attack vectors.
@@ -82,13 +84,13 @@ contract ERC20Swap {
         uint value;
     }
 
-    // initiate initiates an array of swaps all for the same ERC20 token.
-    // It checks that all of the swaps have a non zero redemptionTimestamp
-    // and value, and that none of the secret hashes have ever been used
-    // previously. Once initiated, each swap's state is set to Filled. The
-    // tokens equal to the sum of each swap's value are now in the custody of
-    // the contract and can only be retrieved through redeem or refund.
-    function initiate(Initiation[] calldata initiations, address token)
+    // initiate initiates an array of swaps. It checks that all of the swaps
+    // have a non zero redemptionTimestamp and value, and that none of the
+    // secret hashes have ever been used previously. Once initiated, each
+    // swap's state is set to Filled. The tokens equal to the sum of each
+    // swap's value are now in the custody of the contract and can only be
+    // retrieved through redeem or refund.
+    function initiate(Initiation[] calldata initiations)
         public
         senderIsOrigin()
     {
@@ -107,13 +109,12 @@ contract ERC20Swap {
             swapToUpdate.participant = initiation.participant;
             swapToUpdate.value = initiation.value;
             swapToUpdate.state = State.Filled;
-            swapToUpdate.token = token;
 
             initVal += initiation.value;
         }
 		bool success;
 		bytes memory data;
-        (success, data) = token.call(abi.encodeWithSelector(TRANSFER_FROM_SELECTOR, msg.sender, address(this), initVal));
+        (success, data) = TOKEN_ADDRESS.call(abi.encodeWithSelector(TRANSFER_FROM_SELECTOR, msg.sender, address(this), initVal));
         require(success && (data.length == 0 || abi.decode(data, (bool))), 'transfer from failed');
     }
 
@@ -136,24 +137,17 @@ contract ERC20Swap {
                sha256(abi.encodePacked(secret)) == secretHash;
     }
 
-    // redeem redeems a contract. It checks that the sender is not a contract,
-    // and that the secret hash hashes to secretHash. The ERC20 tokens are tranfered
-    // from the contract to the sender.
+    // redeem redeems an array of swaps contract. It checks that the sender is
+    // not a contract, and that the secret hash hashes to secretHash. The ERC20
+    // tokens are tranfered from the contract to the sender.
     function redeem(Redemption[] calldata redemptions)
         public
         senderIsOrigin()
     {
         uint amountToRedeem = 0;
-        address token;
         for (uint i = 0; i < redemptions.length; i++) {
             Redemption calldata redemption = redemptions[i];
             Swap storage swapToRedeem = swaps[redemption.secretHash];
-
-            if (i == 0) {
-                token = swapToRedeem.token;
-            } else {
-                require(token == swapToRedeem.token, "multiple tokens");
-            }
 
             require(swapToRedeem.state == State.Filled, "bad state");
             require(swapToRedeem.participant == msg.sender, "bad participant");
@@ -166,7 +160,7 @@ contract ERC20Swap {
         }
 		bool success;
 		bytes memory data;
-        (success, data) = token.call(abi.encodeWithSelector(TRANSFER_SELECTOR, msg.sender, amountToRedeem));
+        (success, data) = TOKEN_ADDRESS.call(abi.encodeWithSelector(TRANSFER_SELECTOR, msg.sender, amountToRedeem));
         require(success && (data.length == 0 || abi.decode(data, (bool))), 'transfer failed');
     }
 
@@ -194,7 +188,7 @@ contract ERC20Swap {
 
 		bool success;
 		bytes memory data;
-        (success, data) = swapToRefund.token.call(abi.encodeWithSelector(TRANSFER_SELECTOR, msg.sender, swapToRefund.value));
+        (success, data) = TOKEN_ADDRESS.call(abi.encodeWithSelector(TRANSFER_SELECTOR, msg.sender, swapToRefund.value));
         require(success && (data.length == 0 || abi.decode(data, (bool))), 'transfer failed');
     }
 }

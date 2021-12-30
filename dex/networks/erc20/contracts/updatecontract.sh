@@ -41,7 +41,8 @@ package ${PKG_NAME}
 const ERC20SwapRuntimeBin = "${BYTECODE}"
 EOF
 
-abigen --sol ${SOLIDITY_FILE} --pkg ${PKG_NAME} --out ./${PKG_NAME}/contract.go
+CONTRACT_FILE=./${PKG_NAME}/contract.go 
+abigen --sol ${SOLIDITY_FILE} --pkg ${PKG_NAME} --out ${CONTRACT_FILE}
 
 solc --bin --optimize ${SOLIDITY_FILE} -o ./temp
 BYTECODE=$(<./temp/ERC20Swap.bin)
@@ -58,3 +59,17 @@ sed -i.tmp "s/TEST_TOKEN=.*/TEST_TOKEN=\"${TEST_TOKEN_BYTECODE}\"/" ../../../tes
 rm ../../../testing/eth/harness.sh.tmp
 
 rm -fr temp
+
+if [ "$VERSION" -eq "0" ]; then
+  # Replace a few generated types with the ETH contract versions for interface compatibility.
+  perl -0pi -e 's/go-ethereum\/event"/go-ethereum\/event"\n\tethv0 "decred.org\/dcrdex\/dex\/networks\/eth\/contracts\/v0"/' $CONTRACT_FILE
+
+  perl -0pi -e 's/\/\/ ERC20SwapInitiation[^}]*}\n\n//' $CONTRACT_FILE
+  perl -0pi -e 's/ERC20SwapInitiation/ethv0.ETHSwapInitiation/g' $CONTRACT_FILE
+
+  perl -0pi -e 's/\/\/ ERC20SwapRedemption[^}]*}\n\n//' $CONTRACT_FILE
+  perl -0pi -e 's/ERC20SwapRedemption/ethv0.ETHSwapRedemption/g' $CONTRACT_FILE
+
+  perl -0pi -e 's/\/\/ ERC20SwapSwap[^}]*}\n\n//' $CONTRACT_FILE
+  perl -0pi -e 's/ERC20SwapSwap/ethv0.ETHSwapSwap/g' $CONTRACT_FILE
+fi
