@@ -1081,27 +1081,39 @@ func (eth *ExchangeWallet) SwapConfirmations(ctx context.Context, _ dex.Bytes, c
 	return
 }
 
-// Withdraw withdraws funds to the specified address. Value is gwei.
-//
-// TODO: Return the asset.Coin.
-// TODO: Subtract fees from the value.
+// Withdraw withdraws funds to the specified address. Value is gwei. The fee is
+// subtracted from the total balance if it cannot be sent otherwise.
 func (eth *ExchangeWallet) Withdraw(addr string, value, _ uint64) (asset.Coin, error) {
-	_, err := eth.node.sendToAddr(eth.ctx, common.HexToAddress(addr), value)
+	eth.lockedMtx.Lock()
+	defer eth.lockedMtx.Unlock()
+
+	bal, err := eth.balance()
 	if err != nil {
 		return nil, err
 	}
-	return nil, nil
+	avail := bal.Available
+	if avail < value {
+		return nil, fmt.Errorf("not enough funds to withdraw: have %d gwei need %d gwei", avail, value)
+	}
+	maxFee := defaultSendGasLimit * eth.gasFeeLimit
+	if avail < maxFee {
+		return nil, fmt.Errorf("not enough funds to withdraw: cannot cover max fee of %d gwei", maxFee)
+	}
+	if avail < value+maxFee {
+		value -= maxFee
+	}
+	tx, err := eth.node.sendToAddr(eth.ctx, common.HexToAddress(addr), value)
+	if err != nil {
+		return nil, err
+	}
+	txHash := tx.Hash()
+	return &coin{id: txHash[:], value: dexeth.WeiToGwei(tx.Value())}, nil
 }
 
 // ValidateSecret checks that the secret satisfies the contract.
 func (*ExchangeWallet) ValidateSecret(secret, secretHash []byte) bool {
 	h := sha256.Sum256(secret)
 	return bytes.Equal(h[:], secretHash)
-}
-
-// Confirmations gets the number of confirmations for the specified coin ID.
-func (*ExchangeWallet) Confirmations(ctx context.Context, id dex.Bytes) (confs uint32, spent bool, err error) {
-	return 0, false, asset.ErrNotImplemented
 }
 
 // SyncStatus is information about the blockchain sync status.

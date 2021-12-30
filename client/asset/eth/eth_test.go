@@ -2424,3 +2424,65 @@ func TestPayFee(t *testing.T) {
 		}
 	}
 }
+
+func TestWithdraw(t *testing.T) {
+	tx := tTx(0, 0, 0, &testAddressA, nil)
+	txHash := tx.Hash()
+	maxFee := uint64(defaultSendGasLimit * defaultGasFeeLimit)
+	tests := []struct {
+		name                  string
+		value                 uint64
+		bal                   *Balance
+		balErr, sendToAddrErr error
+		wantErr               bool
+	}{{
+		name:  "ok",
+		value: 10e9,
+		bal:   newBalance(10e9, 0, 0),
+	}, {
+		name:    "balance error",
+		balErr:  errors.New(""),
+		wantErr: true,
+	}, {
+		name:    "not enough",
+		value:   10e9 + 1,
+		bal:     newBalance(10e9, 0, 0),
+		wantErr: true,
+	}, {
+		name:    "cannot cover fee",
+		bal:     newBalance(maxFee-1, 0, 0),
+		wantErr: true,
+	}, {
+		name:          "sendToAddr error",
+		value:         5e9,
+		bal:           newBalance(10e9, 0, 0),
+		sendToAddrErr: errors.New(""),
+		wantErr:       true,
+	}}
+
+	for _, test := range tests {
+		node := &testNode{
+			bal:           test.bal,
+			balErr:        test.balErr,
+			sendToAddrTx:  tx,
+			sendToAddrErr: test.sendToAddrErr,
+		}
+		eth := &ExchangeWallet{
+			node:        node,
+			gasFeeLimit: defaultGasFeeLimit,
+		}
+		coin, err := eth.Withdraw("", test.value, 0)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %v", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %v: %v", test.name, err)
+		}
+		if !bytes.Equal(txHash[:], coin.ID()) {
+			t.Fatal("coin is not the tx hash")
+		}
+	}
+}
