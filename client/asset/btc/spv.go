@@ -61,6 +61,16 @@ const (
 	WalletTransactionNotFound = dex.ErrorKind("wallet transaction not found")
 	SpentStatusUnknown        = dex.ErrorKind("spend status not known")
 
+	// defaultBroadcastWait is long enough for btcwallet's PublishTransaction
+	// method to record the outgoing transaction and queue it for broadcasting.
+	// This rough duration is necessary since with neutrino as the wallet's
+	// chain service, its chainClient.SendRawTransaction call is blocking for up
+	// to neutrino.Config.BroadcastTimeout while peers either respond to the inv
+	// request with a getdata or time out. However, in virtually all cases, we
+	// just need to know that btcwallet was able to create and store the
+	// transaction record, and pass it to the chain service.
+	defaultBroadcastWait = 2 * time.Second
+
 	// see btcd/blockchain/validate.go
 	maxFutureBlockTime = 2 * time.Hour
 	neutrinoDBName     = "neutrino.db"
@@ -398,20 +408,45 @@ func (w *spvWallet) ownsAddress(addr btcutil.Address) (bool, error) {
 }
 
 func (w *spvWallet) sendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) {
-	// Fee sanity check?
-	err := w.wallet.PublishTransaction(tx, "")
-	if err != nil {
-		return nil, err
-	}
-	txHash := tx.TxHash()
+	// Publish the transaction in a goroutine so the caller may wait for a given
+	// period before it goes asynchronous and it is assumed that btcwallet at
+	// least succeeded with its DB updates and queueing of the transaction for
+	// rebroadcasting. In the future, a new btcwallet method should be added
+	// that returns after performing its internal actions, but broadcasting
+	// asynchronously and sending the outcome in a channel or promise.
+	res := make(chan error, 1)
+	go func() {
+		tStart := time.Now()
+		defer close(res)
+		if err := w.wallet.PublishTransaction(tx, ""); err != nil {
+			w.log.Errorf("PublishTransaction(%v) failure: %v", tx.TxHash(), err)
+			res <- err
+			return
+		}
+		defer w.log.Tracef("PublishTransaction(%v) completed in %v", tx.TxHash(),
+			time.Since(tStart)) // after outpoint unlocking and signalling
 
-	// bitcoind would unlock these, but it seems that btcwallet doesn't, but it
-	// seems like they're no longer returned from ListUnspent even if we unlock
-	// the outpoint before the transaction is mined.
-	for _, txIn := range tx.TxIn {
-		w.wallet.UnlockOutpoint(txIn.PreviousOutPoint)
+		// bitcoind would unlock these, but it seems that btcwallet does not.
+		// However, it seems like they are no longer returned from ListUnspent
+		// even if we unlock the outpoint before the transaction is mined, so
+		// this is just housekeeping for btcwallet's lockedOutpoints map.
+		for _, txIn := range tx.TxIn {
+			w.wallet.UnlockOutpoint(txIn.PreviousOutPoint)
+		}
+		res <- nil
+	}()
+
+	select {
+	case err := <-res:
+		if err != nil {
+			return nil, err
+		}
+	case <-time.After(defaultBroadcastWait):
+		w.log.Debugf("No error from PublishTransaction after %v for txn %v. "+
+			"Assuming wallet accepted it.", defaultBroadcastWait, tx.TxHash())
 	}
 
+	txHash := tx.TxHash() // down here in case... the msgTx was mutated?
 	return &txHash, nil
 }
 
@@ -1160,12 +1195,17 @@ func (w *spvWallet) startWallet() error {
 		}
 	}
 	chainService, err := neutrino.NewChainService(neutrino.Config{
-		DataDir:          w.netDir,
-		Database:         w.neutrinoDB,
-		ChainParams:      *w.chainParams,
-		AddPeers:         addPeers,
-		ConnectPeers:     w.connectPeers,
-		BroadcastTimeout: 10 * time.Second,
+		DataDir:       w.netDir,
+		Database:      w.neutrinoDB,
+		ChainParams:   *w.chainParams,
+		PersistToDisk: true, // keep cfilter headers on disk for efficient rescanning
+		AddPeers:      addPeers,
+		ConnectPeers:  w.connectPeers,
+		// WARNING: PublishTransaction currently uses the entire duration
+		// because if an external bug, but even if the resolved, a typical
+		// inv/getdata round trip is ~4 seconds, so we set this so neutrino does
+		// not cancel queries too readily.
+		BroadcastTimeout: 6 * time.Second,
 	})
 	if err != nil {
 		bailOnWalletAndDB()
