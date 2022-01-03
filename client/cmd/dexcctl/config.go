@@ -83,11 +83,9 @@ func configure() (*config, []string, bool, error) {
 	}
 
 	// Show the version and exit if the version flag was specified.
-	appName := filepath.Base(os.Args[0])
-	appName = strings.TrimSuffix(appName, filepath.Ext(appName))
 	if cfg.ShowVersion {
 		fmt.Printf("%s version %s (Go version %s %s/%s)\n", appName,
-			version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+			version(), runtime.Version(), runtime.GOOS, runtime.GOARCH)
 		return nil, nil, stop, nil
 	}
 

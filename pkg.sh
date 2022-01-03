@@ -2,7 +2,7 @@
 
 set -e
 
-VER="v0.3.0"
+VER="v0.4.0"
 
 rm -rf bin
 mkdir -p bin/dexc-windows-amd64-${VER}
@@ -24,11 +24,11 @@ GOOS=darwin GOARCH=arm64 go build -trimpath -o ../../../bin/dexc-darwin-arm64-${
 popd
 
 pushd client/cmd/dexcctl
-GOOS=linux GOARCH=amd64 go build -trimpath -o ../../../bin/dexc-linux-amd64-${VER}
-GOOS=linux GOARCH=arm64 go build -trimpath -o ../../../bin/dexc-linux-arm64-${VER}
-GOOS=windows GOARCH=amd64 go build -trimpath -o ../../../bin/dexc-windows-amd64-${VER}
-GOOS=darwin GOARCH=amd64 go build -trimpath -o ../../../bin/dexc-darwin-amd64-${VER}
-GOOS=darwin GOARCH=arm64 go build -trimpath -o ../../../bin/dexc-darwin-arm64-${VER}
+GOOS=linux GOARCH=amd64 go build -trimpath -o ../../../bin/dexc-linux-amd64-${VER} -ldflags "$LDFLAGS"
+GOOS=linux GOARCH=arm64 go build -trimpath -o ../../../bin/dexc-linux-arm64-${VER} -ldflags "$LDFLAGS"
+GOOS=windows GOARCH=amd64 go build -trimpath -o ../../../bin/dexc-windows-amd64-${VER} -ldflags "$LDFLAGS"
+GOOS=darwin GOARCH=amd64 go build -trimpath -o ../../../bin/dexc-darwin-amd64-${VER} -ldflags "$LDFLAGS"
+GOOS=darwin GOARCH=arm64 go build -trimpath -o ../../../bin/dexc-darwin-arm64-${VER} -ldflags "$LDFLAGS"
 popd
 
 pushd client/webserver/site

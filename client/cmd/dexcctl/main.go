@@ -25,19 +25,6 @@ const (
 	listCmdMessage  = "Specify -l to list available commands"
 )
 
-// version is the dex server's release version.
-var version = semver{major: 0, minor: 4, patch: 0}
-
-// semver holds dexcctl's semver values.
-type semver struct {
-	major, minor, patch uint32
-}
-
-// String satisfies fmt.Stringer.
-func (s semver) String() string {
-	return fmt.Sprintf("%d.%d.%d", s.major, s.minor, s.patch)
-}
-
 func main() {
 	// Create a context that is canceled when a shutdown signal is received.
 	ctx := withShutdownCancel(context.Background())
