@@ -253,7 +253,7 @@ func (c *tBtcWallet) syncedTo() waddrmgr.BlockStamp {
 	return waddrmgr.BlockStamp{
 		Height:    int32(bestHeight),
 		Hash:      *bestHash,
-		Timestamp: blk.msgBlock.Header.Timestamp, // neutrino doesn't actually set this, yet
+		Timestamp: blk.msgBlock.Header.Timestamp,
 	}
 }
 
@@ -297,9 +297,11 @@ func (c *tNeutrinoClient) BestBlock() (*headerfs.BlockStamp, error) {
 	}
 	c.blockchainMtx.RUnlock()
 	bestHash, bestHeight := c.bestBlock()
+	blk := c.getBlock(bestHash.String())
 	return &headerfs.BlockStamp{
-		Height: int32(bestHeight),
-		Hash:   *bestHash,
+		Height:    int32(bestHeight),
+		Hash:      *bestHash,
+		Timestamp: blk.msgBlock.Header.Timestamp, // neutrino sets this as of 88c025e
 	}, nil
 }
 

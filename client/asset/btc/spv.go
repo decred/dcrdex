@@ -71,8 +71,7 @@ const (
 	// transaction record, and pass it to the chain service.
 	defaultBroadcastWait = 2 * time.Second
 
-	// see btcd/blockchain/validate.go
-	maxFutureBlockTime = 2 * time.Hour
+	maxFutureBlockTime = 2 * time.Hour // see MaxTimeOffsetSeconds in btcd/blockchain/validate.go
 	neutrinoDBName     = "neutrino.db"
 	logDirName         = "logs"
 	defaultAcctNum     = 0
@@ -281,6 +280,7 @@ type spvWallet struct {
 	wallet       btcWallet
 	cl           neutrinoService
 	chainClient  *chain.NeutrinoClient
+	birthday     time.Time
 	acctNum      uint32
 	acctName     string
 	netDir       string
@@ -296,8 +296,9 @@ type spvWallet struct {
 	log    dex.Logger
 	loader *wallet.Loader
 
-	tipChan    chan *block
-	syncTarget int32
+	tipChan            chan *block
+	syncTarget         int32
+	lastPrenatalHeight int32
 }
 
 var _ Wallet = (*spvWallet)(nil)
@@ -518,65 +519,6 @@ func (w *spvWallet) syncHeight() int32 {
 // address recovery/rescan, and switch to the wallet's sync height when it
 // reports non-zero height.
 func (w *spvWallet) syncStatus() (*syncStatus, error) {
-	var synced bool
-	var blk *block
-	target := w.syncHeight()
-
-	// First try the wallet address manager sync block.
-	walletBlock := w.wallet.syncedTo()
-	if walletBlock.Height == 0 { // becomes non-zero shortly after birthday
-		// Chain service headers (block and filter) height.
-		chainBlock, err := w.cl.BestBlock()
-		if err != nil {
-			return nil, err
-		}
-		blk = &block{
-			height: int64(chainBlock.Height),
-			hash:   chainBlock.Hash,
-		}
-	} else {
-		blk = &block{
-			height: int64(walletBlock.Height),
-			hash:   walletBlock.Hash,
-		}
-		synced = walletBlock.Height >= target
-	}
-
-	if target > 0 && atomic.SwapInt32(&w.syncTarget, target) == 0 {
-		w.tipChan <- blk
-	}
-
-	return &syncStatus{
-		Target:  target,
-		Height:  int32(blk.height),
-		Syncing: !synced,
-	}, nil
-}
-
-// getWalletBirthdayBlock retrieves the wallet's birthday block.
-//
-// NOTE: The wallet birthday block hash is NOT SET until the chain service
-// passes the birthday block and the wallet looks it up based on the birthday
-// Time and the downloaded block headers.
-// func (w *walletExtender) getWalletBirthdayBlock() (*waddrmgr.BlockStamp, error) {
-// 	var birthdayBlock waddrmgr.BlockStamp
-// 	err := walletdb.View(w.Database(), func(dbtx walletdb.ReadTx) error {
-// 		ns := dbtx.ReadBucket([]byte("waddrmgr")) // it'll be fine
-// 		var err error
-// 		birthdayBlock, _, err = w.Manager.BirthdayBlock(ns)
-// 		return err
-// 	})
-// 	if err != nil {
-// 		return nil, err // sadly, waddrmgr.ErrBirthdayBlockNotSet is expected during most of chain sync
-// 	}
-// 	return &birthdayBlock, nil
-// }
-
-/* If neutrino.(*ChainService).BestBlock starts returning a non-zero Timestamp:
-
-var lastPrenatalHeight int32
-
-func (w *spvWallet) syncStatus() (*syncStatus, error) {
 	// Chain service headers (block and filter) height.
 	chainBlk, err := w.cl.BestBlock()
 	if err != nil {
@@ -588,15 +530,18 @@ func (w *spvWallet) syncStatus() (*syncStatus, error) {
 	var synced bool
 	var blk *block
 	// Wallet address manager sync height.
-	if chainBlk.Timestamp.After(w.wallet.Manager.Birthday()) {
-		// After birthday, wallet address manager should be syncing.
+	if chainBlk.Timestamp.After(w.birthday) {
+		// After birthday, wallet address manager should be syncing. Although
+		// block time stamps are not necessarily monotonically increasing, this
+		// is a reasonable condition at which the wallet's sync height should be
+		// consulted instead of the chain service's height.
 		walletBlock := w.wallet.syncedTo()
 		if walletBlock.Height == 0 {
-			// About to start, so just return last chain service height prior to
-			// wallet birthday.
+			// The wallet is about to start its sync, so just return the last
+			// chain service height prior to wallet birthday until it begins.
 			return &syncStatus{
 				Target:  target,
-				Height:  atomic.LoadInt32(&lastPrenatalHeight),
+				Height:  atomic.LoadInt32(&w.lastPrenatalHeight),
 				Syncing: true,
 			}, nil
 		}
@@ -606,19 +551,13 @@ func (w *spvWallet) syncStatus() (*syncStatus, error) {
 		}
 		currentHeight = walletBlock.Height
 		synced = currentHeight >= target // maybe && w.wallet.ChainSynced()
-		w.log.Debugf("chain = %d, wallet = %d, target = %d (synced = %v)",
-			chainBlk.Height, walletBlock.Height, target, synced)
-		// NOTE: when sync flips to wallet height, progress may go down.
-		// Alternatively, always just consider walletBlock, never chainBlk, but
-		// it could appear to be stuck at 0% for a minute prior to the chain
-		// service reaching the wallet's birthday.
 	} else {
 		// Chain service still syncing.
 		blk = &block{
 			height: int64(currentHeight),
 			hash:   chainBlk.Hash,
 		}
-		atomic.StoreInt32(&lastPrenatalHeight, currentHeight)
+		atomic.StoreInt32(&w.lastPrenatalHeight, currentHeight)
 	}
 
 	if target > 0 && atomic.SwapInt32(&w.syncTarget, target) == 0 {
@@ -631,7 +570,6 @@ func (w *spvWallet) syncStatus() (*syncStatus, error) {
 		Syncing: !synced,
 	}, nil
 }
-*/
 
 // Balances retrieves a wallet's balance details.
 func (w *spvWallet) balances() (*GetBalancesResult, error) {
@@ -1224,6 +1162,7 @@ func (w *spvWallet) startWallet() error {
 	w.cl = chainService
 	w.chainClient = chain.NewNeutrinoClient(w.chainParams, chainService)
 	w.wallet = &walletExtender{btcw, w.chainParams}
+	w.birthday = btcw.Manager.Birthday()
 
 	if err = w.chainClient.Start(); err != nil { // lazily starts connmgr
 		bailOnEverything()
@@ -1832,6 +1771,26 @@ func (w *walletExtender) walletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDe
 func (w *walletExtender) syncedTo() waddrmgr.BlockStamp {
 	return w.Manager.SyncedTo()
 }
+
+// getWalletBirthdayBlock retrieves the wallet's birthday block.
+//
+// NOTE: The wallet birthday block hash is NOT SET until the chain service
+// passes the birthday block and the wallet looks it up based on the birthday
+// Time and the downloaded block headers.
+// This is presently unused, but I have plans for it with a wallet rescan.
+// func (w *walletExtender) getWalletBirthdayBlock() (*waddrmgr.BlockStamp, error) {
+// 	var birthdayBlock waddrmgr.BlockStamp
+// 	err := walletdb.View(w.Database(), func(dbtx walletdb.ReadTx) error {
+// 		ns := dbtx.ReadBucket([]byte("waddrmgr")) // it'll be fine
+// 		var err error
+// 		birthdayBlock, _, err = w.Manager.BirthdayBlock(ns)
+// 		return err
+// 	})
+// 	if err != nil {
+// 		return nil, err // sadly, waddrmgr.ErrBirthdayBlockNotSet is expected during most of chain sync
+// 	}
+// 	return &birthdayBlock, nil
+// }
 
 // signTransaction signs the transaction inputs.
 func (w *walletExtender) signTransaction(tx *wire.MsgTx) error {
