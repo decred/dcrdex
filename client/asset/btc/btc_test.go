@@ -154,7 +154,7 @@ type testData struct {
 	newAddressErr     error
 	privKeyForAddr    *btcutil.WIF
 	privKeyForAddrErr error
-
+	birthdayTime      time.Time
 	getTransaction    *GetTransactionResult
 	getTransactionErr error
 
@@ -2560,8 +2560,9 @@ func testSyncStatus(t *testing.T, segwit bool, walletType string) {
 	}
 
 	// spv
-	blkHash, _ := node.addRawTx(100, dummyTx())
-	node.mainchain[100] = blkHash // SPV, actually has to reach target
+	blkHash, msgBlock := node.addRawTx(100, dummyTx())
+	node.birthdayTime = msgBlock.Header.Timestamp.Add(-time.Minute) // SPV, wallet birthday is passed
+	node.mainchain[100] = blkHash                                   // SPV, actually has to reach target
 
 	synced, progress, err := wallet.SyncStatus()
 	if err != nil {
