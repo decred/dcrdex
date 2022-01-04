@@ -1189,7 +1189,7 @@ func fund(utxos []*compositeUTXO, enough func(uint64, uint64) bool) (
 
 	tryUTXOs := func(minconf uint32) bool {
 		sum, size = 0, 0
-		coins, spents = nil, nil
+		coins, spents, redeemScripts = nil, nil, nil
 		fundingCoins = make(map[outPoint]*utxo)
 
 		okUTXOs := make([]*compositeUTXO, 0, len(utxos)) // over-allocate
@@ -1222,7 +1222,8 @@ func fund(utxos []*compositeUTXO, enough func(uint64, uint64) bool) (
 	// First try with confs>0, falling back to allowing 0-conf outputs.
 	if !tryUTXOs(1) {
 		if !tryUTXOs(0) {
-			return 0, 0, nil, nil, nil, nil, fmt.Errorf("not enough to cover requested funds %s available", amount(sum))
+			return 0, 0, nil, nil, nil, nil, fmt.Errorf("not enough to cover requested funds. "+
+				"%s BTC available in %d UTXOs", amount(sum), len(coins))
 		}
 	}
 
