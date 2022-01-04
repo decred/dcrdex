@@ -1180,7 +1180,7 @@ func (dcr *ExchangeWallet) tryFund(utxos []*compositeUTXO, enough func(sum uint6
 
 	tryUTXOs := func(minconf int64) (ok bool, err error) {
 		sum, size = 0, 0
-		coins, spents = nil, nil
+		coins, spents, redeemScripts = nil, nil, nil
 
 		okUTXOs := make([]*compositeUTXO, 0, len(utxos)) // over-allocate
 		for _, cu := range utxos {
@@ -1225,7 +1225,8 @@ func (dcr *ExchangeWallet) tryFund(utxos []*compositeUTXO, enough func(sum uint6
 			return 0, 0, nil, nil, nil, err
 		}
 		if !ok {
-			return 0, 0, nil, nil, nil, fmt.Errorf("not enough to cover requested funds. %s DCR available", amount(sum))
+			return 0, 0, nil, nil, nil, fmt.Errorf("not enough to cover requested funds. "+
+				"%s DCR available in %d UTXOs", amount(sum), len(coins))
 		}
 	}
 
