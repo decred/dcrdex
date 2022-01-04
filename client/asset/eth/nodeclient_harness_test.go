@@ -61,7 +61,7 @@ const (
 
 var (
 	homeDir               = os.Getenv("HOME")
-	contractAddrFile      = filepath.Join(homeDir, "dextest", "eth", "contract_addr.txt")
+	contractAddrFile      = filepath.Join(homeDir, "dextest", "eth", "eth_swap_contract_address.txt")
 	simnetWalletDir       = filepath.Join(homeDir, "dextest", "eth", "client_rpc_tests", "simnet")
 	participantWalletDir  = filepath.Join(homeDir, "dextest", "eth", "client_rpc_tests", "participant")
 	alphaNodeDir          = filepath.Join(homeDir, "dextest", "eth", "alpha", "node")
