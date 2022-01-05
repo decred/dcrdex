@@ -1,0 +1,509 @@
+# DCRDEX v0.4.0
+
+Dec 23, 2021
+
+For a high level introduction to DCRDEX, please read the [initial release's notes](release-notes-0.1.0.md).
+
+## Highlights
+
+This release includes a large number of improvements to wallet support, the UI,
+the communications protocol, and software design.
+
+The most notable new features are:
+
+- An integrated light (SPV) BTC wallet
+- Support for dcrwallet/Decrediton in SPV mode
+- BTC may be used for account account registration
+- Introduce an application "seed" for deterministic account and wallet restoration
+- UI overhaul and streamlined setup
+- Improved market view with candlestick charts and a price feed
+- A "remember password" login option to eliminate password nagging
+- Translations for Chinese (zh-CN) and Portuguese (pt-BR)
+- Extensive under-the-hood improvements
+
+The latest 1.7 release of dcrd and dcrwallet is required for this release of
+DCRDEX. At the time of release, this corresponds to the v1.7.0 releases. Bitcoin
+Core 0.20 and 0.21 are both supported. Bitcoin Core v22 may be used, but the
+wallet type must not be a "decsriptor" wallet, which may be the default on
+certain platforms and redistributed builds.
+
+Note that we skipped a v0.3 release. The v0.3 development branch is a pre-SPV
+checkpoint branch, but it also requires Decred 1.7. Given the timing of the
+Decred v1.7 and DCRDEX v0.4 releases now coinciding, we are jumping straight to
+the DCRDEX v0.4 SPV-enabled release.
+
+## Important Notices
+
+Although DCRDEX looks and feels like a regular exchange, the "decentralized"
+aspect brings an expanded role to the client. Please take the time to read and
+understand the following:
+
+- **Never shutdown your external wallets with dexc running**. When shutting
+  down, always stop dexc before stopping your wallets.
+- If you have to restart dexc with active orders or swaps, you must
+  **immediately login again** with your app password when dexc starts up.
+- There is an "inaction timeout" when it becomes your client's turn to broadcast
+  a transaction, so be sure not to stop dexc or lose connectivity for too long
+  or you risk having your active orders and swaps/matches revoked. If you do
+  have to restart dexc, just remember to login as soon as you start it up again.
+- Only one dexc process should be running for a given user account at any time.
+  For example, if you have identical dexc configurations on two computers and
+  you run dexc and login on both, neither dexc instance will be adequately
+  connected to successfully negotiate swaps. Also note that order history is not
+  synchronized between different installations.
+- If you use Bitcoin Core with a non-default bitcoin wallet name, don't forget to
+  set it in bitcoin.conf with a `wallet=wallet_name_here` line so that bitcoind
+  will load it each time it starts. Otherwise, dexc will give you a "wallet not
+  found" error.
+
+## Client (dexc)
+
+### Features and Improvements
+
+- The client now uses a seed and deterministic (HD) account key derivation. An
+  application seed is generated during client initialization. When a new dex
+  account is created, the server's identity is used to deterministically
+  generate a client identity for the account. **Users should save a copy of
+  their app seed.** When upgrading, a new seed will be generated, which may be
+  accessed for backup from the Settings page. When initializing a new dex
+  client, there is an option to provide an existing seed. The RPC client
+  (dexcctl) also has an `appseed` request endpoint. If an account is suspended,
+  a new one will be generated from a different derivation path, and on restore
+  from seed, non-suspended accounts will be located.
+  ([b66a35f](https://github.com/decred/dcrdex/commit/b66a35f24215456763a16cee9c32875f61f9814b),
+  [ac5affe](https://github.com/decred/dcrdex/commit/ac5affe9db320c48534cf4c51e3f7100a6ce4f42),
+  [d8e46bb](https://github.com/decred/dcrdex/commit/d8e46bb21e6dcd299343f69257270529aaee6c7e),
+  [59868fe](https://github.com/decred/dcrdex/commit/59868fe81173a2d67100ff071d01552cc74fcb1a),
+  [7f9d0d5](https://github.com/decred/dcrdex/commit/7f9d0d504b918a58e27576e01b2912b49833a600),
+  [d203ebd](https://github.com/decred/dcrdex/commit/d203ebd53127f658e8ae58269907c3c634709e83),
+  [242f597](https://github.com/decred/dcrdex/commit/242f597fb1303883eaeb400234a8cffbaa80bf5c),
+  [a548723](https://github.com/decred/dcrdex/commit/a5487231f0d1682003617837f279a3b12ef787de),
+  [2df3b4b](https://github.com/decred/dcrdex/commit/2df3b4b3f4cdf9e41f87db88936b1cd823c0d36f))
+- A new Bitcoin SPV wallet integrated into the DEX client.
+  ([c1992d8](https://github.com/decred/dcrdex/commit/c1992d8d1cc11036c4933284a53126b8c452c82d),
+  [d202f6d](https://github.com/decred/dcrdex/commit/d202f6d4d0de6884be7dc1bd73a0e865835d6a9b),
+  [d808492](https://github.com/decred/dcrdex/commit/d8084925bfe8ded4af88bf4865d8714f8a662b14),
+  [2d18cc8](https://github.com/decred/dcrdex/commit/2d18cc80b372d942428eef23824701268a385569),
+  [f5835bd](https://github.com/decred/dcrdex/commit/f5835bde802f8d4a7884c3afe1c922daca115455),
+  [4249d97](https://github.com/decred/dcrdex/commit/4249d97f02ac0644c03429b9bea0bd401e6e7a73),
+  [82833e0](https://github.com/decred/dcrdex/commit/82833e00bdbf4481535c8f57e922312dc06e2840),
+  [1890057](https://github.com/decred/dcrdex/commit/1890057fcfee8963f303a5ad354d15f0683f178b),
+  [deab1c9](https://github.com/decred/dcrdex/commit/deab1c9deeab70876059d5246c60f023fa6a3e28))
+- Decred SPV wallet support (dcrwallet in SPV mode), use compact filters in
+  counterparty redemption search, gettxout, gettransaction, etc.
+  ([fe1995a](https://github.com/decred/dcrdex/commit/fe1995a42289f29e18bcccd9e537a2ba707a8ad1),
+  [1c508cb](https://github.com/decred/dcrdex/commit/1c508cb04d1cc0618843f03abbe4baff2c6a94e9),
+  [c5413e8](https://github.com/decred/dcrdex/commit/c5413e8e76cd8f1ca59e2eba524b929cfbf4fa1d),
+  [13d12a8](https://github.com/decred/dcrdex/commit/13d12a866dd6886efbca366e665129a67b14a256))
+- Add historical market data charts (candle sticks) to the market page.
+  ([d11f1ce](https://github.com/decred/dcrdex/commit/d11f1ce9ea1313e17fdc588d0f3d9f0e9e153444))
+- Display prices from a new spot price feed from a server market. The current
+  rate and 24-hour percent change are displayed in the market list on the left
+  of the markets page, and in the browser title.
+  ([bb05332](https://github.com/decred/dcrdex/commit/bb05332e7720aa8315e03d35c7fed9cb5023d192),
+  [7c0fe85](https://github.com/decred/dcrdex/commit/7c0fe85a565fc39b4492f22e00dbaad1f5ad382c),
+  [8ac1498](https://github.com/decred/dcrdex/commit/8ac1498e5573972863985e6b0b7c9f947966087c),
+  [10d78e9](https://github.com/decred/dcrdex/commit/10d78e952ba4a05fbb16d1421e637bf00c94ccba),
+  [61e9138](https://github.com/decred/dcrdex/commit/61e913882708a2cfc059c1c47b4c48e48462d99c),
+  [6231cf4](https://github.com/decred/dcrdex/commit/6231cf403c58a5e39e2a53e7c6457180393cd375))
+- Support paying registration fees with multiple assets, now including BTC. The
+  `getfee` RPC is replaced with `getdexconfig`.
+  ([4f2ab59](https://github.com/decred/dcrdex/commit/4f2ab59c6fb1fa9e60cb8b953a9a294a2e7c925a),
+  [0d4075a](https://github.com/decred/dcrdex/commit/0d4075a5451f203eaf9a371b1c4b10bc9a25f287),
+  [07c2001](https://github.com/decred/dcrdex/commit/07c20017e565f9135b6e28c9fcb815dfc4445b11))
+- Improved registration sequence and form design. Add a table showing all
+  markets offered by a server when registering.
+  ([ebfcff7](https://github.com/decred/dcrdex/commit/ebfcff744ad90754aba651c0a5d0b998543771a3),
+  [027b480](https://github.com/decred/dcrdex/commit/027b480ed39c3b12868547f9590f5fbf19d81359))
+- Add the ability to persist password on UI login. This adds a checkbox to the
+  login page that gives the user the option to persist their password for the
+  session. When selected, all the password fields, other than disable account
+  and view seed, will no longer be displayed.
+  ([7a0c387](https://github.com/decred/dcrdex/commit/7a0c38735dc030d42ce7af2eb21a25962d4e3ea1))
+- Internationalization support for frontend and backend notifications.
+  ([7c3d865](https://github.com/decred/dcrdex/commit/7c3d865b21aa5911cd7464c66a93e4070e0bcdd8),
+  [6e6cac4](https://github.com/decred/dcrdex/commit/6e6cac4bf16f42ee6ad9e47721bb15263874f22d),
+  [0c4d240](https://github.com/decred/dcrdex/commit/0c4d2405d6c2ebe4aa6319cf1245ffd5d5f4bf19),
+  [11d4e39](https://github.com/decred/dcrdex/commit/11d4e39fa7d023f99289d0277fc5d9a0fe810166))
+- Added a pt-BR translation.
+  ([de0f679](https://github.com/decred/dcrdex/commit/de0f6797ad96680a13d67ae4ce785cfe5afac9e2))
+- Added a zh-CN translation.
+  ([de1d00e](https://github.com/decred/dcrdex/commit/de1d00e78fa66c8bef7ac468c6bc91335b2eb82a),
+  [d42e2fa](https://github.com/decred/dcrdex/commit/d42e2fa3af4438602ca091cb58a12519564dc288))
+- Lot size and rate step are now parameters of a market, not an asset. For newer
+  clients that expect lot size and rate step to be market parameters, this
+  detects and supports an older server. Older clients may not support newer
+  servers, depending on their configuration.
+  ([4231914](https://github.com/decred/dcrdex/commit/423191441b5bfb569cba6a5de1dcd5a1a8f57855),
+  [45e3894](https://github.com/decred/dcrdex/commit/45e3894c1e6dc692ecb2b6a25d4388e72128a43f))
+- To make order loading in the client faster, split the client order database
+  into separate active and archived orders buckets.
+  ([e58a139](https://github.com/decred/dcrdex/commit/e58a139d145494f7012e7d980d2f257fb4a1e71e))
+- To make match loading in the client faster, split the client match database
+  into separate active and archived matches buckets.
+  ([283744d](https://github.com/decred/dcrdex/commit/283744d68021b82c43c0a1c6ed2817c3d658a609),
+  [e122088](https://github.com/decred/dcrdex/commit/e1220888b9d36f675e9c7972077aa287b97ed7d9),
+  [ee34cba](https://github.com/decred/dcrdex/commit/ee34cba600a3a751ef8273b106203ef341a89a7c))
+- Log backup swap refund transactions so that the user can salvage funds in the
+  case that they lose access to the client but still have the logs. These are
+  for BACKUP ONLY as the client will do the refund, and if the user broadcasts
+  them unnecessarily, they may cause unrecoverable client issues that could
+  necessitate recreating the client DB.
+  ([9b012f9](https://github.com/decred/dcrdex/commit/9b012f9242bea5e82431726cd27bbd7d2372294e))
+- Bin order tables by rate. Instead of displaying each individual order's
+  quantity and rate on a separate row, the total quantity available at each rate
+  will be displayed. Epoch orders are binned along with all other orders, and
+  the check mark will no longer be displayed.
+  ([f7086ab](https://github.com/decred/dcrdex/commit/f7086abac43add3816076cc24ca54875409fe5c6))
+- Introduce an "expired" order status for executed orders with 0% filled, and
+  for orders that are still booked but currently settling matches to
+  "booked/settling".
+  ([c8d8d1d](https://github.com/decred/dcrdex/commit/c8d8d1d33d08b02a7cdedbdadfde9cb84a7cc558))
+- The order confirmation dialog is now modal, staying open until the submission
+  request is processed, displaying any errors on the form.
+  ([ff59dbb](https://github.com/decred/dcrdex/commit/ff59dbb8a64ec5d50a348ea918206870657ff387))
+- Add an `assetseed` command line tool for the user to derive various
+  asset/wallet seeds from their application seed.
+- The Bitcoin Core `rpcconnect` setting is now recognized and used to configure
+  the RPC client for such wallets.
+  ([2eaa733](https://github.com/decred/dcrdex/commit/2eaa733624d41414d96cb13e377be38af3cf340f))
+- When connecting to a Bitcoin Core wallet, check the wallet type to prevent use
+  of "descriptor" wallets, which do not support the full set of RPCs required by
+  the DEX client. See
+  https://bitcoincore.org/en/releases/0.21.0/#experimental-descriptor-wallets
+  for more information on descriptor wallets.
+  ([256cd69](https://github.com/decred/dcrdex/commit/256cd69a73ccaa2af0a31757a5d62e4aab57eddd))
+- If a user has active trades, they must be settled by a wallet that can
+  complete those trades. Disallow changing to a new wallet that cannot do this.
+  ([3fa59cf](https://github.com/decred/dcrdex/commit/3fa59cf4dad60a991346795da25666f9bd215af2),
+  [aee00c8](https://github.com/decred/dcrdex/commit/aee00c8abf644b2209a054627090365a0e1858d3),
+  [0fc475d](https://github.com/decred/dcrdex/commit/0fc475d99afd93e6f256db7522c701b4e004f8e0))
+- Add a "Fees" section to the readme to clarify on-chain transaction fees vs.
+  the registration fee.
+  ([352809](https://github.com/decred/dcrdex/commit/35280962fd0f2631f3e9c0aa1977a1e3feb71768))
+- Automatically check balance before attempting to pay registration fees, and
+  show a clear error on the frontend.
+  ([cb0e295](https://github.com/decred/dcrdex/commit/cb0e295c185623f38718bbdfd262c904975a2a52))
+- Optionally rebroadcast counterparty swap transactions after auditing
+  contracts, and log the counterparty redeem script for recovery purposes. Do
+  this asynchronously since the outcome is not important.
+  ([2e4fe26](https://github.com/decred/dcrdex/commit/2e4fe260b078fa5cb5557b7824bd36aa42ebd8e7),
+  [0f7d561](https://github.com/decred/dcrdex/commit/0f7d561a76e57b95174bcdde88a61c51d291f226))
+
+### Fixes
+
+The most notable fixes are:
+
+- Prevent high CPU use with max order size computations.
+  ([964fcc0](https://github.com/decred/dcrdex/commit/964fcc0a3cc0e9054f9e171a791ecb84972d5048))
+- Keep order form hidden when wallets are not configured (regression fix).
+  ([5546ae2](https://github.com/decred/dcrdex/commit/5546ae2964a02932153c074bac38ca930020f634))
+- Shutdown the DCR websocket client when a connection attempt fails.
+  ([16f357b](https://github.com/decred/dcrdex/commit/16f357b5abaa15a3705fd8ddc1dac538f70bf598))
+- With both client and server btc asset backends using dcrd's rpcclient, use the
+  correct error type to correctly recognize specific RPC errors from bitcoind.
+  ([03f9973](https://github.com/decred/dcrdex/commit/03f9973b77f69f0c8ac0527cc1f7f6e5e15f34ad))
+- Fix an unbuffered `os.Signal` channel (CTRL+C was potentially ignored).
+  ([e755134](https://github.com/decred/dcrdex/commit/e75513453abae7f1a3e76e82b1c6582888b00ec8))
+- Validate the commitment checksum in a match proof notification against the
+  checksum from the preimage request to ensure the server did not change the
+  epoch after the client provided a preimage for an order
+  ([1c06280](https://github.com/decred/dcrdex/commit/1c06280e1114ad1975a595f70412152ca4538f01))
+- Allow only one preimage request per order.
+  ([0ab34db](https://github.com/decred/dcrdex/commit/0ab34db44d141aa00300712536306f136eaae832))
+- Fix depth chart resizing errors.
+  ([fda9187](https://github.com/decred/dcrdex/commit/fda918722c3e2ef96cb9d9cb1d573270c99d7d64),
+  [1640b70](https://github.com/decred/dcrdex/commit/1640b7021f70efae83c18795d89ad3700c04cc68))
+- Fix max order amount when balance is insufficient for a single lot. Other max
+  order fixes.
+  ([f118992](https://github.com/decred/dcrdex/commit/f118992badfaa3736fa652594ab6a8df76836e74),
+  [015961e](https://github.com/decred/dcrdex/commit/015961e1293079f3c356b48d6378499a0f4cf83e))
+- Fix an incorrect asset symbol in the client error log.
+  ([92c49d5](https://github.com/decred/dcrdex/commit/92c49d540ec6e1f3ccd9a8abc29a19a9156c088f))
+- Correct determination of main chain ancestor on reorg.
+  ([cfa95eb](https://github.com/decred/dcrdex/commit/cfa95ebaa34d954f078fef27289c5232ecb0fbae))
+- Prevent hang on Decred RPC client shutdown.
+  ([0490291](https://github.com/decred/dcrdex/commit/049029115ed80cab484babec9c7a25626c3518b1))
+- Restore vertical scroll in orders tables.
+  ([499ab0d](https://github.com/decred/dcrdex/commit/499ab0dff19093c993df71bba14e3884b269d0f5))
+- Always generate a refund transaction before broadcasting a swap transaction.
+  ([bd426fb](https://github.com/decred/dcrdex/commit/bd426fb36118b8561759fa797d2e0981bf8b37a3))
+- Do not log negative swap contract expiry durations (when they are just waiting
+  on consensus rules).
+  ([85bc90f](https://github.com/decred/dcrdex/commit/85bc90fc28ef83b681682c00e7d6809447168b40))
+- Fix `match_status` requests failing if "tx data" were required for BTC swap
+  transactions.
+  ([15f66bc](https://github.com/decred/dcrdex/commit/15f66bcb477ec9221aab927a5ceae306412a98b5))
+- Do not try to check for a site directory identified by an empty string.
+  ([6743411](https://github.com/decred/dcrdex/commit/6743411c0e6ef58efcfeb7c78b42c67359be7731))
+- Resolve data races with `client/core.Core.conns`.
+  ([6acc21f](https://github.com/decred/dcrdex/commit/6acc21fff622d3fe8fcf68e8d075cf3d2fceebf1))
+- Leave the sequence in Bitcoin and Decred redeem transaction inputs set to the
+  max value, since using a lower value was only needed for the refunds when the
+  CLTV opcode is used and locktime is relevant.
+  ([28473de](https://github.com/decred/dcrdex/commit/28473de0021ff5d2bf53e2a602447b55151ac8de))
+- Before broadcasting a swap transaction after startup or reconnect, perform
+  match status resolution to ensure the match is not revoked.
+  ([983df6b](https://github.com/decred/dcrdex/commit/983df6b04739286950a6ac0293307a46852aaaa2))
+- Avoid a (recoverable) panic on RPC wallet connect failure.
+  ([8478b6c](https://github.com/decred/dcrdex/commit/8478b6cf85e0d5d685e78657ec4e83e32fed45b0))
+- Add a missing error check in `server/db/driver/pg.(*Archiver).LoadEpochStats`.
+  ([7957691](https://github.com/decred/dcrdex/commit/795769123971c5dcf8ebfe589e8a4810f737470f))
+
+## Server (dcrdex)
+
+- Lot size and rate step are now configured per-market, not per-asset. The
+  dcrdex server app now errors if markets.json has lot size or rate step set for
+  any asset, and if any market lacks a non-zero lot size or rate step. A
+  `'config'` response is generated in different ways depending on if a given
+  asset has consistent lot sizes and rate steps across all markets. If
+  consistent, it will also set the `LotSize`/`RateStep` in the `msgjson.Asset`.
+  If not consistent, the values will be zero/omitted and a warning will be
+  logged that old clients will not work with the asset.
+  ([4231914](https://github.com/decred/dcrdex/commit/423191441b5bfb569cba6a5de1dcd5a1a8f57855))
+- Support lot size changes without manual DB updates.
+  ([509205d](https://github.com/decred/dcrdex/commit/509205d4ce4d711b96bb41e596c2c8f100ba7596))
+- Accept registration fee payment in multiple assets, including BTC. An operator
+  now specifies the accepted fee assets and amounts in market.json settings
+  instead of dcrdex.conf. The `'config'` response now includes a `regFees` field
+  that communicates these values to clients. Fee address derivation is moved out
+  of server/db and into the server/asset packages. To accept BTC, an operator
+  must provide a zpub extended public key encoding.
+  ([4f2ab59](https://github.com/decred/dcrdex/commit/4f2ab59c6fb1fa9e60cb8b953a9a294a2e7c925a),
+  [0124247](https://github.com/decred/dcrdex/commit/012424702e9f5ddcd8459d04f25eb6bceb859207))
+- Support clients with HD account key derivation. Return special errors during
+  registration when the client's key already exists or is suspended.
+  ([b66a35f](https://github.com/decred/dcrdex/commit/b66a35f24215456763a16cee9c32875f61f9814b))
+- Allow a client to submit a cancel order while a market is suspended. The
+  database entries after a cancel order during a market suspension will be
+  identical to one that gets matched while the market is running, except the
+  preimage will not be recorded (or requested). Also there will be
+  ([4a3dde1](https://github.com/decred/dcrdex/commit/4a3dde1ef23b8bb40e68130d528d6977486dbf02))
+- Route-level request rate limiting.
+  ([5e2ab91](https://github.com/decred/dcrdex/commit/5e2ab91533d3fdf9ce774d104fbff844347baa1f),
+  [132b16f](https://github.com/decred/dcrdex/commit/132b16f88a619181b1c2f931359816480f8808f2))
+- Add a new `price_feed` subscription request route, which is handled by the
+  `BookRouter`, and sends `msgjson.Spot` messages to subscribed clients in
+  `price_update` notifications.
+  ([bb05332](https://github.com/decred/dcrdex/commit/bb05332e7720aa8315e03d35c7fed9cb5023d192))
+- Add a `usermatches` command line tool for exporting decoded match data
+  directly from the database.
+  ([0844058](https://github.com/decred/dcrdex/commit/08440585fbaa7747c142d7073b0ff0305cf72f32))
+- Access postgres notices and log them depending on severity.
+  ([d6a9c33](https://github.com/decred/dcrdex/commit/d6a9c33d2c68a9f067f7ea8584da176042abefdf))
+- Remove pre-schema-versioning DB pseudo-upgrade.
+  ([dad4a2e](https://github.com/decred/dcrdex/commit/dad4a2e085417f4f14a50b84276e3133f2aa9f51))
+- Increase websocket read limits. Increases the server's authorized read limit
+  by a factor of 4 to allow a large number of orders in a single epoch, and with
+  more funding coins than normal. Also doubles the unauthorized/default read
+  limit, which is still quite small at 8192 bytes.
+  ([de775fa](https://github.com/decred/dcrdex/commit/de775fa067e797c6a2f17d7e8eb549aff9752954))
+- Remove the `ban` and `unban` administrative functions. Forgiveness is done at
+  the level of the match only now, and all administrative interference will go
+  away in a future anyway (both fidelity bonds and mesh configuration).
+  ([dfbbe9a](https://github.com/decred/dcrdex/commit/dfbbe9a60c5efa577c5cd03f848485927e6c59b3))
+- Exclude the maker address from a cancel order match's `msgjson.Match`.
+  ([dd31a8](https://github.com/decred/dcrdex/commit/dd31a8d28c524dcff9763b8b333ee200d65af1e2))
+- Abandon orphaned epoch orders on startup, which may happen after a hard server
+  crash.
+  ([bd1599e](https://github.com/decred/dcrdex/commit/bd1599e2545a7cadd5b52fbfd2091b4df2cdeeb8))
+- Validate the taker's contract hash during audit, complementing the existing
+  client-side check.
+  ([10bb7a3](https://github.com/decred/dcrdex/commit/10bb7a3e9f704afc858df1fb4b1cee3ac595284f))
+- Fix incorrect encoding of preimage and commitment in an error log.
+  ([bc60036](https://github.com/decred/dcrdex/commit/bc60036ba5f2f2a5ed441fd27322340a39911ad7))
+- Enable the `rpcclient` package logger, and set up a logging subsystem for the
+  `rpcclient` to see connection attempts and other notices from dcrd's
+  `rpcclient`.
+  ([c1f03e0](https://github.com/decred/dcrdex/commit/c1f03e08b4dc2249fb98abf6ea5a19ceacb2a5d2))
+- Fix required order funds check with market buys.
+  ([8ca81e2](https://github.com/decred/dcrdex/commit/8ca81e2b4b663222d553a252ee501bc91cda1535))
+- Export candles types and make a `dex/candles` package.
+  ([26c149a](https://github.com/decred/dcrdex/commit/26c149af45ed42ebf33c8a781925424d087413dd),
+  [d11f1ce](https://github.com/decred/dcrdex/commit/d11f1ce9ea1313e17fdc588d0f3d9f0e9e153444))
+- Modify `server/dex.feeFetcher` with the context arg, and add a `LastRate` method
+  for consumers to use as a fallback if FeeRate fails. Fix an issue where a zero
+  rate would be cached on `FeeRate` error.
+  ([7ffae7b](https://github.com/decred/dcrdex/commit/7ffae7b215746b646c2ff98084040d594d856493))
+
+## Developer
+
+- Update build requirements to Go 1.16 or 1.17, and Node.js 16 or 17.
+  ([75c9b7a](https://github.com/decred/dcrdex/commit/75c9b7a765767f0555e7642fc70e8df3160b65a1),
+  [b6cfe2a](https://github.com/decred/dcrdex/commit/b6cfe2aeb9de656531ac0594042575198e9ceaa9),
+  [6c95f4f](https://github.com/decred/dcrdex/commit/6c95f4fdbdd6274465fc2d2b2f2595323bd09142),
+  [ce823c3](https://github.com/decred/dcrdex/commit/ce823c3315bc8d68b9b2acf81c9265607570b04c))
+- (Breaking) Context-enable `asset.Backend.FeeRate`. With a websocket RPC client with
+  auto-reconnect where RPCs hang when the RPC server is disconnected, it is
+  helpful to allow the caller to cancel requests. Give FeeRate a context arg.
+  ([7ffae7b](https://github.com/decred/dcrdex/commit/7ffae7b215746b646c2ff98084040d594d856493))
+- (Breaking) Give notifications topic IDs for internationalization support.
+  ([c994f03](https://github.com/decred/dcrdex/commit/c994f032fe0e9a36e58a9a984dd924734c659e36))
+- Add `(*Core).DiscoverAccount` to determine if an account exists at a DEX
+  server after restoring from seed.
+  ([59868fe](https://github.com/decred/dcrdex/commit/59868fe81173a2d67100ff071d01552cc74fcb1a))
+- (Breaking) `(*Core).InitializeClient` has a new `restorationSeed []byte` input
+  argument, which may be `nil` to generate a new app seed, or a previous seed
+  for to restore a previous identity. Further, the keys, encrypted app seed, and
+  the relevant encryption parameters are embodied by the
+  `client/db.PrimaryCredentials` struct, and the DB interface has new methods
+  for upgrading to, initializing, and updating the `PrimaryCredentials`.
+  ([b66a35f](https://github.com/decred/dcrdex/commit/b66a35f24215456763a16cee9c32875f61f9814b))
+- (Breaking) To support paying registration fees with multiple assets, the
+  `core.Exchange` struct has new `RegFees` and `PendingFee` fields, the
+  deprecated `ConfsRequired` and `RegConfirms` fields are removed, but the
+  deprecated `Fee` field (DCR-specific) remains for compatibility.
+  `(*Core).GetFee` is removed and `GetDEXConfig` should be used instead. The
+  `core.RegisterForm` struct now has an `Asset *uint32` field to specify which
+  asset to pay the fee with. The default if unset is 42 (DCR).
+  ([4f2ab59](https://github.com/decred/dcrdex/commit/4f2ab59c6fb1fa9e60cb8b953a9a294a2e7c925a))
+- Remove a hard-coded 1e8 constant in the client. This introduces a `UnitInfo`
+  type that is defined for each asset and returned in new fields of
+  `asset.WalletInfo`, `dex.Asset`, and `msgjson.Asset`. Its
+  `(*UnitInfo).ConventionalString` method should be used to convert from atomic
+  units to a conventional string representation (e.g. "1.2 DCR"). The
+  `client/core.{MiniOrder,RemainderUpdate}` structs are updated with a
+  `QtyAtomic uint64` field to complement the existing `Qty float64` fields.
+  `MiniOrder` also has a new `MsgRate uint64` field, which communicates rate in
+  "message-rate encoding" as [described in the
+  spec](https://github.com/decred/dcrdex/blob/master/spec/comm.mediawiki#Rate_Encoding),
+  and now modeled in `dex/calc.RateEncodingFactor`, with the new encoding
+  helpers `ConventionalRate` and `ConventionalRateAlt`.
+  ([08a72d1](https://github.com/decred/dcrdex/commit/08a72d1cd085af6a89dc535ab03184efa6083ad9),
+  [ad1c20a](https://github.com/decred/dcrdex/commit/ad1c20a71c10ade6752d422c449fb89b1c5a2338),
+  [75fa328](https://github.com/decred/dcrdex/commit/75fa328272d756f13e303c570dba69e07ce0b2c5))
+- Add `SpotPrice *msgjson.Spot` field to `core/Market`.
+  ([bb05332](https://github.com/decred/dcrdex/commit/bb05332e7720aa8315e03d35c7fed9cb5023d192))
+- (Breaking) To support multiple types of wallets, `client/asset.WalletInfo` has
+  a new `AvailableWallets []*WalletDefinition` field to describe available
+  wallet types. The `client/asset.Driver` now has `Create` and `Exists` methods
+  for "seeded" (native, built-in) wallet types. `(*Core).ReconfigureWallet`
+  replaces the `assetID` and `cfg` fields with a `core.WalletForm struct`, which
+  now has a `Type string` field. The `core.WalletState` struct now has a new
+  `WalletType string` field. A type of `""` (empty string) will be recognized as
+  the legacy RPC wallets
+  ([d202f6d](https://github.com/decred/dcrdex/commit/d202f6d4d0de6884be7dc1bd73a0e865835d6a9b))
+- (Breaking) Move the shutdown prompt function from client/core into client/cmd/dexc. The
+  `(*Core).PromptShutdown` method is removed.
+  ([1248eb9](https://github.com/decred/dcrdex/commit/1248eb92275cf7dddd98b3cc7c1b97a81be4ab5f)
+- (Breaking) Remove the `LotSize` and `RateStep` fields from `dex.Asset`. Add
+  the `LotSize` and `RateStep` fields to `msgjson.Market`. `msgjson.Asset` still
+  has `LotSize` and `RateStep`, but they are tagged with `omitempty`, and will
+  be zero/omitted when market configs require multiple different lot sizes or
+  rate steps for an asset. The dcrdex server harness uses a configuration with
+  two markets with DCR as the base asset and *different* lot sizes.
+  ([4231914](https://github.com/decred/dcrdex/commit/423191441b5bfb569cba6a5de1dcd5a1a8f57855))
+
+- Update Decred dependencies for RPC client syntax changes to `EstimateSmartFee`
+  and `GetTxOut`, and decentralized treasury changes to various stake package
+  functions.
+  ([8976d8d](https://github.com/decred/dcrdex/commit/8976d8d166706ba626cee437d8765fa3ca3794e4))
+- Update Decred dependencies for auto-revocation agenda changes.
+  ([c2bdeb5](https://github.com/decred/dcrdex/commit/c2bdeb5ab7201460f155cad67f84d9ac99b7c9e5))
+- Update Decred `stdscript` dependency and simplify much of the dex/networks/dcr
+  package. Several exported functions and types are removed or renamed (breaking
+  changes).
+  ([920b35a](https://github.com/decred/dcrdex/commit/920b35a59c5def1d1689976a55a108b106a39b8b))
+- Replace dcrutil usages with stdaddr.
+  ([f37fcbd](https://github.com/decred/dcrdex/commit/f37fcbd2866de14b17b6119177ccb008faf31366))
+- Add `build` and `run` scripts to the dcrdex harness for easier testing.
+  ([e0a64a7](https://github.com/decred/dcrdex/commit/e0a64a7e66c812daa69b5ef3283c145e0fa33210))
+- Use the new `GetTxOutResult.ScriptPubKey.Version` field with dcrd 1.7. Add
+  script version checks and use actual version when decoding scripts.
+  ([fcd3926](https://github.com/decred/dcrdex/commit/fcd3926fe989d987d18e873ff604f4a754af4ce4))
+- Webpack 5 and other build system updates.
+  ([1298264](https://github.com/decred/dcrdex/commit/129826436361027a95c0a066b55f7e743e293280),
+  [93ac487](https://github.com/decred/dcrdex/commit/93ac4875b847a8c7a63bc889a9ebde966293f10c),
+  [fa9b19](https://github.com/decred/dcrdex/commit/fa9b19d1c266d3e1a13e1f54c20d4d42946eed3a))
+- Frontend refactoring.
+  ([581f852](https://github.com/decred/dcrdex/commit/581f852e249410ee0af030b0a7d277dd517eb085),
+  [f7bb867](https://github.com/decred/dcrdex/commit/f7bb867dda5193987280848224796b26220405c2))
+- Improve the Decred harness chain reorganization testing function.
+  ([c34f5f7](https://github.com/decred/dcrdex/commit/c34f5f7407828e6be12b20df40079b0b49d6b4fd),
+  [90b1d92](https://github.com/decred/dcrdex/commit/90b1d9289eb55e74d59840f3a856d44a313559df))
+- With internationalization support, CI now checks that the localized_html files
+  are up-to-date.
+  ([c2ecd94](https://github.com/decred/dcrdex/commit/c2ecd94b4fbf0a9fe8c407573a4df3eb3083b4d8))
+- Add a build and packaging script and update it for the localized html
+  templates.
+  ([245ed7a](https://github.com/decred/dcrdex/commit/245ed7a25eac98d22305eb8ecbb543599923a62c),
+  [cf4eb6d](https://github.com/decred/dcrdex/commit/cf4eb6d9afbdb26250fd58f8b30056c105de1ad0))
+- Always use IPv4 in comms tests.
+  ([7523694](https://github.com/decred/dcrdex/commit/7523694ebf4c7c434e5d982cf95f07bd0aa50bad))
+- Update the server administration section of the specification with a link to
+  the wiki and an ETH market example.
+  ([c7ceb8c](https://github.com/decred/dcrdex/commit/c7ceb8cfb72c6b966514588a9c0fd2324b7c351e))
+- Remove all usage of the deprecated io/ioutil standard library package.
+  ([b294a00](https://github.com/decred/dcrdex/commit/b294a00be0960821d131357a3ad19adde4e7cbab))
+- Set btc test harness node's debug levels per-subsystem.
+  ([aa76b62](https://github.com/decred/dcrdex/commit/aa76b62600a37a468b0ad4f4fbb4260fed8722d9))
+- Add build meta data to dexcctl.
+  ([9c8f52f](https://github.com/decred/dcrdex/commit/9c8f52f22a71e48097ee08332301f11afdd40777))
+
+## Ethereum (not enabled in 0.4)
+
+- Add internal ethereum client
+  ([16da72f](https://github.com/decred/dcrdex/commit/16da72f5e3af049db315400c68b87d7957c15bfa),
+  [f4194e0](https://github.com/decred/dcrdex/commit/f4194e0b064133e4dce8bc4bea1eac148d6e9793),
+  [d0e5f31](https://github.com/decred/dcrdex/commit/d0e5f31015815f898b35cda6fff30e495753e5f5),
+  [3ea9141](https://github.com/decred/dcrdex/commit/3ea91418306c658d15dfbd369a737ec5eaf01e9b))
+- Add the ETH swap contract solidity and compiled ABI.
+  ([a7046c6](https://github.com/decred/dcrdex/commit/a7046c670b4f824b7b5e237c9efcecbd8fc5e604),
+  [a6eca9e](https://github.com/decred/dcrdex/commit/a6eca9e972507e8e797a0d4b844e4bafd5cdc9ee),
+  [39fbfce](https://github.com/decred/dcrdex/commit/39fbfce546a70b98d1285a237af717b8478cc878),
+  [beaf951](https://github.com/decred/dcrdex/commit/beaf951f96b7fff8162dc9acc5cf9798519eac41),
+  [202465e](https://github.com/decred/dcrdex/commit/202465e1ee4e717f4a6ba1563c878a2a282b01a1),
+  [ead7bdd](https://github.com/decred/dcrdex/commit/ead7bdd89a037650966b0e9cca7e6c5a00c4326a))
+- Implement the required `client/asset.Wallet` methods.
+  ([783bf2c](https://github.com/decred/dcrdex/commit/783bf2c41ae5f22a4af8c82e9d15838e6d55ec8e),
+  [72212a8](https://github.com/decred/dcrdex/commit/72212a8bfa41ec3a22a6d9bcfa9e6471584dbae5),
+  [d9611e5](https://github.com/decred/dcrdex/commit/d9611e5678da6cbc1726a72e696d0d193e02443e),
+  [8bd3a34](https://github.com/decred/dcrdex/commit/8bd3a34054f6961493cae64e8958a7e7d90e06d9),
+  [5f1928b](https://github.com/decred/dcrdex/commit/5f1928bc9bf3408afe40f60b4ca043172246defe),
+  [cef9c5c](https://github.com/decred/dcrdex/commit/cef9c5c2b22a44ee434bb5dd7b00b54ad375043d))
+- Implement the required `server/asset.Backend` methods.
+  ([fed96f5](https://github.com/decred/dcrdex/commit/fed96f585cdd7d423589d3fb1ebc78aefa3c3f82),
+  [9e1e0cb](https://github.com/decred/dcrdex/commit/9e1e0cb8787ca6ec48463ac006084c3a1e0ee461),
+  [4aa78e1](https://github.com/decred/dcrdex/commit/4aa78e14c4d0b35830b1719d5febf19086e714fe),
+  [2dac253](https://github.com/decred/dcrdex/commit/2dac2536a94431442ac23769a2142e46b8bd78c6),
+  [05367f1](https://github.com/decred/dcrdex/commit/05367f10fbc7c69ba303821d3f75e045f705689f))
+- Add a shell script that generates go code containing the runtime bytecode of
+  the swap contract.
+  ([7f9793e](https://github.com/decred/dcrdex/commit/7f9793e3932b1ebcf1fa0e0fc29e5dec1333fb2c),
+  [9df4f78](https://github.com/decred/dcrdex/commit/9df4f78ad99c479f1033f6a878c9482b6aea71bd))
+- Functions to decode transaction data.
+  ([ec3b7fd](https://github.com/decred/dcrdex/commit/ec3b7fdeada0e7609e176fd93e06118f46c8c8fe))
+- Derive ETH wallet account keys from the dex client application seed.
+  ([7c2058f](https://github.com/decred/dcrdex/commit/7c2058ff24d89979ddac013054deb74471900764))
+- Use snap mode for server nodes in harness.
+  ([68d1e64](https://github.com/decred/dcrdex/commit/68d1e64a73c10a98d7a00035985b8b7828cb361c))
+
+## Build requirements
+
+- Go 1.16 or 1.17
+- Node 16 is the minimum supported version for building the site assets.
+- dcrd and dcrwallet must *still* be built from their `release-v1.7` branches.
+- The minimum required dcrwallet RPC server version is 8.8.0, which corresponds
+  to the v1.7.0 release of dcrwallet, but the latest `release-v1.7.x` tag should
+  be used.
+
+## Code Summary
+
+186 commits, 330 files changed, 50,332 insertions(+), 23,221 deletions(-)
+
+https://github.com/decred/dcrdex/compare/ba59397...release-v0.4
+
+12 contributors
+
+- Amir Massarwa (@amassarwi)
+- Brian Stafford (@buck54321)
+- David Hill (@dajohi)
+- Dominic Ting
+- @iurii
+- Joe Gruffins (@JoeGruffins)
+- Jonathan Chappelow (@chappjc)
+- @martonp
+- Peter Banik (@peterzen)
+- Victor Oliveira (@vctt94)
+- Wisdom Arerosuoghene (@itswisdomagain)
+- @xaur
