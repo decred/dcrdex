@@ -227,6 +227,14 @@ type Wallet interface {
 	RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error)
 }
 
+// AccountRedeemer is implemented by account based assets and has methods that
+// support their redemption needs.
+type AccountRedeemer interface {
+	// SignRedeem signs a message that allows a server to verify that this
+	// account owns a redemption address.
+	SignRedeem(dex.Bytes) (pubkey, sig dex.Bytes, err error)
+}
+
 // Balance is categorized information about a wallet's balance.
 type Balance struct {
 	// Available is the balance that is available for trading immediately.

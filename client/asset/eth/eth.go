@@ -180,6 +180,9 @@ type ethFetcher interface {
 // Check that ExchangeWallet satisfies the asset.Wallet interface.
 var _ asset.Wallet = (*ExchangeWallet)(nil)
 
+// Check that ExchangeWallet satisfies the asset.AccountRedeemer interface.
+var _ asset.AccountRedeemer = (*ExchangeWallet)(nil)
+
 // ExchangeWallet is a wallet backend for Ethereum. The backend is how the DEX
 // client app communicates with the Ethereum blockchain and wallet. ExchangeWallet
 // satisfies the dex.Wallet interface.
@@ -770,6 +773,20 @@ func recoverPubkey(msgHash, sig []byte) ([]byte, error) {
 	return pubKey.SerializeUncompressed(), nil
 }
 
+func (eth *ExchangeWallet) signMessage(msg dex.Bytes) (pubkeys, sigs dex.Bytes, err error) {
+	sig, err := eth.node.signData(eth.addr, msg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("signMessage: error signing data: %w", err)
+	}
+
+	pubKey, err := recoverPubkey(crypto.Keccak256(msg), sig)
+	if err != nil {
+		return nil, nil, fmt.Errorf("signMessage: error recovering pubkey %w", err)
+	}
+
+	return pubKey, sig, nil
+}
+
 // SignMessage signs the message with the private key associated with the
 // specified funding Coin. Only a coin that came from the address this wallet
 // is initialized with can be used to sign.
@@ -779,17 +796,18 @@ func (eth *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 		return nil, nil, fmt.Errorf("SignMessage: error decoding coin: %w", err)
 	}
 
-	sig, err := eth.node.signData(eth.addr, msg)
+	pk, sig, err := eth.signMessage(msg)
 	if err != nil {
-		return nil, nil, fmt.Errorf("SignMessage: error signing data: %w", err)
+		return nil, nil, err
 	}
 
-	pubKey, err := recoverPubkey(crypto.Keccak256(msg), sig)
-	if err != nil {
-		return nil, nil, fmt.Errorf("SignMessage: error recovering pubkey %w", err)
-	}
+	return []dex.Bytes{pk}, []dex.Bytes{sig}, nil
+}
 
-	return []dex.Bytes{pubKey}, []dex.Bytes{sig}, nil
+// SignRedeem signs a message that allows a server to verify that this account
+// owns a redemption address.
+func (eth *ExchangeWallet) SignRedeem(msg dex.Bytes) (pubkey, sig dex.Bytes, err error) {
+	return eth.signMessage(msg)
 }
 
 // AuditContract retrieves information about a swap contract on the

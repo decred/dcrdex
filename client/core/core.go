@@ -3975,16 +3975,35 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		return nil, 0, fmt.Errorf("wallet %v failed to sign coins: %w", wallets.fromAsset.ID, err)
 	}
 
+	route, msgOrder := messageOrder(ord, msgCoins)
+	if acctRedeemer, ok := toWallet.Wallet.(asset.AccountRedeemer); ok {
+		signRedeem := func(sigMsg []byte) (*msgjson.RedeemSig, error) {
+			pk, sig, err := acctRedeemer.SignRedeem(sigMsg)
+			if err != nil {
+				unlockCoins()
+				return nil, fmt.Errorf("wallet %v failed to sign for redeem: %w", wallets.toAsset.ID, err)
+			}
+			return &msgjson.RedeemSig{PubKey: pk, Sig: sig}, nil
+		}
+		switch msg := msgOrder.(type) {
+		case *msgjson.LimitOrder:
+			if msg.RedeemSig, err = signRedeem(msg.Serialize()); err != nil {
+				return nil, 0, err
+			}
+		case *msgjson.MarketOrder:
+			if msg.RedeemSig, err = signRedeem(msg.Serialize()); err != nil {
+				return nil, 0, err
+			}
+		}
+	}
+
 	commitSig := make(chan struct{})
 	defer close(commitSig) // signals on both success and failure, unlike syncOrderPlaced/piSyncers
 	c.sentCommitsMtx.Lock()
 	c.sentCommits[prefix.Commit] = commitSig
 	c.sentCommitsMtx.Unlock()
 
-	// Everything is ready. Send the order.
-	route, msgOrder := messageOrder(ord, msgCoins)
-
-	// Send and get the result.
+	// Everything is ready. Send the order and get the result.
 	result := new(msgjson.OrderResult)
 	err = dc.signAndRequest(msgOrder, route, result, fundingTxWait+DefaultResponseTimeout)
 	if err != nil {
