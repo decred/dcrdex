@@ -715,7 +715,7 @@ func (dcr *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, utx
 	// MaxFeeRate
 	bumpedMaxRate := nfo.MaxFeeRate
 	bumpedNetRate := feeSuggestion
-	if feeBump > 1.01 {
+	if feeBump > 1 {
 		bumpedMaxRate = uint64(math.Round(float64(bumpedMaxRate) * feeBump))
 		bumpedNetRate = uint64(math.Round(float64(bumpedNetRate) * feeBump))
 	}
@@ -838,7 +838,7 @@ func (dcr *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 	if maxBumpEst != nil {
 		noBumpEst, _, _, err := dcr.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion, utxos, req.AssetConfig, split, 1.0)
 		if err != nil {
-			// shouldn't be possible, since we already succeded with a higher bump.
+			// shouldn't be possible, since we already succeeded with a higher bump.
 			return nil, fmt.Errorf("error getting no-bump estimate: %w", err)
 		}
 
@@ -848,7 +848,7 @@ func (dcr *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 		}
 
 		extraFees := maxBumpEst.RealisticWorstCase - noBumpEst.RealisticWorstCase
-		desc := fmt.Sprintf("Bump fees up to %.1fx (up to ~%s DCR more) for faster settlement when network traffic is high.",
+		desc := fmt.Sprintf("Add a fee multiplier up to %.1fx (up to ~%s DCR more) for faster settlement when network traffic is high.",
 			maxBump, amount(extraFees))
 
 		opts = append(opts, &asset.OrderOption{
@@ -906,9 +906,9 @@ func (dcr *ExchangeWallet) splitOption(req *asset.PreSwapForm, utxos []*composit
 
 	var reason string
 	if pctChange > 1 {
-		reason = fmt.Sprintf("+%d%% fees, -%s DCR overlock", int(math.Round(pctChange)), amount(overlock))
+		reason = fmt.Sprintf("+%d%% fees, avoids %s DCR overlock", int(math.Round(pctChange)), amount(overlock))
 	} else {
-		reason = fmt.Sprintf("+%.1f%% fees, -%s DCR overlock", pctChange, amount(overlock))
+		reason = fmt.Sprintf("+%.1f%% fees, avoids %s DCR overlock", pctChange, amount(overlock))
 	}
 
 	desc := fmt.Sprintf("Using a split transaction to prevent temporary overlock of %s DCR, but for additional fees of %s DCR",
@@ -948,8 +948,6 @@ func (dcr *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem
 		return nil, fmt.Errorf("error parsing selected options: %w", err)
 	}
 
-	var opts []*asset.OrderOption
-
 	// Parse the configured fee bump.
 	var currentBump float64 = 1.0
 	if customCfg.FeeBump != nil {
@@ -960,7 +958,7 @@ func (dcr *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem
 		currentBump = bump
 	}
 
-	opts = append(opts, &asset.OrderOption{
+	opts := []*asset.OrderOption{{
 		ConfigOption: asset.ConfigOption{
 			Key:          redeemFeeBumpFee,
 			DisplayName:  "Faster Redemption",
@@ -981,7 +979,7 @@ func (dcr *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem
 			YUnit: "atoms/B",
 			XUnit: "X",
 		},
-	})
+	}}
 
 	return &asset.PreRedeem{
 		Estimate: &asset.RedeemEstimate{

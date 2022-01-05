@@ -1069,7 +1069,7 @@ func (btc *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 	if maxBumpEst != nil {
 		noBumpEst, _, _, err := btc.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion, utxos, req.AssetConfig, split, 1.0)
 		if err != nil {
-			// shouldn't be possible, since we already succeded with a higher bump.
+			// shouldn't be possible, since we already succeeded with a higher bump.
 			return nil, fmt.Errorf("error getting no-bump estimate: %w", err)
 		}
 
@@ -1079,7 +1079,7 @@ func (btc *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 		}
 
 		extraFees := maxBumpEst.RealisticWorstCase - noBumpEst.RealisticWorstCase
-		desc := fmt.Sprintf("Bump fees up to %.1fx (up to ~%s %s more) for faster settlement when %s network traffic is high.",
+		desc := fmt.Sprintf("Add a fee multiplier up to %.1fx (up to ~%s %s more) for faster settlement when %s network traffic is high.",
 			maxBump, prettyBTC(extraFees), btc.symbol, btc.walletInfo.Name)
 
 		opts = append(opts, &asset.OrderOption{
@@ -1173,7 +1173,7 @@ func (btc *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, utx
 	// MaxFeeRate
 	bumpedMaxRate := nfo.MaxFeeRate
 	bumpedNetRate := feeSuggestion
-	if feeBump > 1.01 {
+	if feeBump > 1 {
 		bumpedMaxRate = uint64(math.Round(float64(bumpedMaxRate) * feeBump))
 		bumpedNetRate = uint64(math.Round(float64(bumpedNetRate) * feeBump))
 	}
@@ -1259,8 +1259,6 @@ func (btc *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem
 		return nil, fmt.Errorf("error parsing selected options: %w", err)
 	}
 
-	var opts []*asset.OrderOption
-
 	// Parse the configured fee bump.
 	var currentBump float64 = 1.0
 	if customCfg.FeeBump != nil {
@@ -1271,7 +1269,7 @@ func (btc *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem
 		currentBump = bump
 	}
 
-	opts = append(opts, &asset.OrderOption{
+	opts := []*asset.OrderOption{{
 		ConfigOption: asset.ConfigOption{
 			Key:          redeemFeeBumpFee,
 			DisplayName:  "Change Redemption Fees",
@@ -1292,7 +1290,7 @@ func (btc *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem
 			YUnit: btc.walletInfo.UnitInfo.AtomicUnit + "/" + btc.sizeUnit(),
 			XUnit: "X",
 		},
-	})
+	}}
 
 	return &asset.PreRedeem{
 		Estimate: &asset.RedeemEstimate{
@@ -3409,18 +3407,12 @@ func findRedemptionsInTx(ctx context.Context, segwit bool, reqs map[outPoint]*fi
 // prettyBTC prints a value as a float with up to 8 digits of precision, but
 // with trailing zeros and decimal points removed.
 func prettyBTC(v uint64) string {
-	s := strconv.FormatFloat(float64(v)/1e8, 'f', 8, 64)
-	s = strings.TrimRightFunc(s, func(r rune) bool {
-		return r == '0'
-	})
-	return strings.TrimRightFunc(s, func(r rune) bool {
-		return r == '.'
-	})
+	return strings.TrimRight(strings.TrimRight(strconv.FormatFloat(float64(v)/1e8, 'f', 8, 64), "0"), ".")
 }
 
 // calcBumpedRate calculated a bump on the baseRate. If bump is nil, the
-// baseRate is returned directly. If *bump is out of range, an error is
-// returned.
+// baseRate is returned directly. In the case of an error (nil or out-of-range),
+// the baseRate is returned unchanged.
 func calcBumpedRate(baseRate uint64, bump *float64) (uint64, error) {
 	if bump == nil {
 		return baseRate, nil

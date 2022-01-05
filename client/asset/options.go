@@ -31,6 +31,10 @@ type XYRangePoint struct {
 // OrderOption is an available option for an order.
 type OrderOption struct {
 	ConfigOption
+
+	// Fields below are mutually exclusive. The consumer should use nilness to
+	// determine what type of option to display.
+
 	// Boolean is a boolean option with two custom labels.
 	Boolean *BooleanConfig `json:"boolean,omitempty"`
 	// Range indicates a numeric input where the user can adjust the value
