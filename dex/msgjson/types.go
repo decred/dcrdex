@@ -1032,7 +1032,7 @@ type Asset struct {
 
 // ConfigResult is the successful result for the ConfigRoute.
 type ConfigResult struct {
-	DEXPubKey        Bytes     `json:"dexpubkey,omitempty"` // empty prior to 0.2.2
+	DEXPubKey        Bytes     `json:"pubkey,omitempty"` // empty prior to 0.2.2
 	CancelMax        float64   `json:"cancelmax"`
 	BroadcastTimeout uint64    `json:"btimeout"`
 	RegFeeConfirms   uint16    `json:"regfeeconfirms"`
