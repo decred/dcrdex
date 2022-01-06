@@ -55,6 +55,7 @@ export default class WalletsPage extends BasePage {
     this.openAsset = null
     this.walletAsset = null
     this.reconfigAsset = null
+    this.withdrawAsset = null
 
     // Bind the new wallet form.
     this.newWalletForm = new NewWalletForm(page.newWalletForm, () => { this.createWalletSuccess() })
@@ -114,7 +115,8 @@ export default class WalletsPage extends BasePage {
     // Clicking on the available amount on the withdraw form populates the
     // amount field.
     bind(page.withdrawAvail, 'click', () => {
-      page.withdrawAmt.value = page.withdrawAvail.textContent
+      const asset = this.withdrawAsset
+      page.withdrawAmt.value = asset.wallet.balance.available / asset.info.unitinfo.conventional.conversionFactor
     })
 
     // A link on the wallet reconfiguration form to show/hide the password field.
@@ -367,7 +369,7 @@ export default class WalletsPage extends BasePage {
   async showWithdraw (assetID) {
     const page = this.page
     const box = page.withdrawForm
-    const asset = app().assets[assetID]
+    const asset = this.withdrawAsset = app().assets[assetID]
     const wallet = app().walletMap[assetID]
     if (!wallet) {
       app().notify(ntfn.make(`No wallet found for ${asset.info.name}`, 'Cannot withdraw.', ntfn.ERROR))
