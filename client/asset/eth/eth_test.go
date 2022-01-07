@@ -891,9 +891,9 @@ func TestPreSwap(t *testing.T) {
 
 			wantLots:      1,
 			wantValue:     ethToGwei(10),
-			wantMaxFees:   100 * gases.InitGas,
-			wantBestCase:  90 * gases.InitGas,
-			wantWorstCase: 90 * gases.InitGas,
+			wantMaxFees:   100 * gases.Swap,
+			wantBestCase:  90 * gases.Swap,
+			wantWorstCase: 90 * gases.Swap,
 		},
 		{
 			name:          "more lots than max lots",
@@ -915,9 +915,9 @@ func TestPreSwap(t *testing.T) {
 
 			wantLots:      4,
 			wantValue:     ethToGwei(40),
-			wantMaxFees:   4 * 100 * gases.InitGas,
-			wantBestCase:  90 * (gases.InitGas + 3*gases.AdditionalInitGas),
-			wantWorstCase: 4 * 90 * gases.InitGas,
+			wantMaxFees:   4 * 100 * gases.Swap,
+			wantBestCase:  90 * gases.SwapN(4),
+			wantWorstCase: 4 * 90 * gases.Swap,
 		},
 		{
 			name:          "balanceError",
@@ -936,7 +936,7 @@ func TestPreSwap(t *testing.T) {
 		ID:           60,
 		Symbol:       "ETH",
 		MaxFeeRate:   100,
-		SwapSize:     gases.InitGas,
+		SwapSize:     gases.Swap,
 		SwapSizeBase: 0,
 		SwapConf:     1,
 	}
@@ -1535,10 +1535,10 @@ func TestMaxOrder(t *testing.T) {
 			maxFeeRate:    100,
 			wantLots:      1,
 			wantValue:     ethToGwei(10),
-			wantMaxFees:   100 * gases.InitGas,
-			wantBestCase:  90 * gases.InitGas,
-			wantWorstCase: 90 * gases.InitGas,
-			wantLocked:    ethToGwei(10) + (100 * gases.InitGas),
+			wantMaxFees:   100 * gases.Swap,
+			wantBestCase:  90 * gases.Swap,
+			wantWorstCase: 90 * gases.Swap,
+			wantLocked:    ethToGwei(10) + (100 * gases.Swap),
 		},
 		{
 			name:          "multiple lots",
@@ -1548,10 +1548,10 @@ func TestMaxOrder(t *testing.T) {
 			maxFeeRate:    100,
 			wantLots:      5,
 			wantValue:     ethToGwei(50),
-			wantMaxFees:   5 * 100 * gases.InitGas,
-			wantBestCase:  90 * (gases.InitGas + 4*gases.AdditionalInitGas),
-			wantWorstCase: 5 * 90 * gases.InitGas,
-			wantLocked:    ethToGwei(50) + (5 * 100 * gases.InitGas),
+			wantMaxFees:   5 * 100 * gases.Swap,
+			wantBestCase:  90 * gases.SwapN(5),
+			wantWorstCase: 5 * 90 * gases.Swap,
+			wantLocked:    ethToGwei(50) + (5 * 100 * gases.Swap),
 		},
 		{
 			name:          "balanceError",
@@ -1568,7 +1568,7 @@ func TestMaxOrder(t *testing.T) {
 		ID:           60,
 		Symbol:       "ETH",
 		MaxFeeRate:   100,
-		SwapSize:     gases.InitGas,
+		SwapSize:     gases.Swap,
 		SwapSizeBase: 0,
 		SwapConf:     1,
 	}

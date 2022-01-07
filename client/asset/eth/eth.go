@@ -34,8 +34,32 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
+var (
+	erc20AllowanceOption = &asset.ConfigOption{
+		Key:          "limitAllowance",
+		DisplayName:  "Limited Allowance",
+		Description:  "Unlimited allowance is cheaper. Limited allowance reduces risk from malicious or poorly designed contracts.",
+		DefaultValue: false,
+		IsBoolean:    true,
+	}
+
+	testTokenID, _ = dex.BipSymbolID("dextt.eth")
+)
+
+func registerToken(tokenID uint32, desc string) {
+	token := dexeth.Tokens[tokenID]
+	asset.RegisterToken(tokenID, token, &asset.WalletDefinition{
+		Type:        "token",
+		Description: desc,
+		ConfigOpts:  []*asset.ConfigOption{erc20AllowanceOption},
+	})
+}
+
 func init() {
 	asset.Register(BipID, &Driver{})
+
+	// Test token
+	registerToken(testTokenID, "A token wallet for the DEX test token. Used for testing DEX software.")
 }
 
 const (
