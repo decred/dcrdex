@@ -636,7 +636,7 @@ export default class MarketsPage extends BasePage {
       }
     }
 
-    page.hoverPrice.textContent = Doc.formatCoinValue(d.rate / this.market.rateConversionFactor)
+    page.hoverPrice.textContent = Doc.formatCoinValue(d.rate)
     page.hoverVolume.textContent = Doc.formatCoinValue(d.depth)
     page.hoverVolume.style.color = d.dotColor
     Doc.show(page.hoverData)
