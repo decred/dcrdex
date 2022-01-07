@@ -1129,9 +1129,6 @@ func checkSwapEstimate(t *testing.T, est *asset.SwapEstimate, lots, swapVal, max
 	if est.RealisticBestCase != estBestCase {
 		t.Fatalf("MaxOrder has wrong RealisticBestCase. wanted %d, got %d", estBestCase, est.RealisticBestCase)
 	}
-	if est.Locked != locked {
-		t.Fatalf("MaxOrder has wrong Locked. wanted %d, got %d", locked, est.Locked)
-	}
 }
 
 func TestFundEdges(t *testing.T) {

@@ -11,7 +11,6 @@ import (
 )
 
 func loadINIConfig(cfgPathOrData interface{}) (*ini.File, error) {
-	// force all section and key names to lowercase
 	loadOpts := ini.LoadOptions{Insensitive: true}
 	return ini.LoadSources(loadOpts, cfgPathOrData)
 }

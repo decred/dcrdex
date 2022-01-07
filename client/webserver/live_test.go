@@ -560,7 +560,6 @@ func (c *TCore) MaxBuy(host string, base, quote uint32, rate uint64) (*core.MaxO
 			MaxFees:            quoteQty / 100,
 			RealisticWorstCase: quoteQty / 200,
 			RealisticBestCase:  quoteQty / 300,
-			Locked:             quoteQty,
 		},
 		Redeem: &asset.RedeemEstimate{
 			RealisticWorstCase: qty / 300,
@@ -585,11 +584,78 @@ func (c *TCore) MaxSell(host string, base, quote uint32) (*core.MaxOrderEstimate
 			MaxFees:            qty / 100,
 			RealisticWorstCase: qty / 200,
 			RealisticBestCase:  qty / 300,
-			Locked:             qty,
 		},
 		Redeem: &asset.RedeemEstimate{
 			RealisticWorstCase: quoteQty / 300,
 			RealisticBestCase:  quoteQty / 400,
+		},
+	}, nil
+}
+
+func (c *TCore) PreOrder(*core.TradeForm) (*core.OrderEstimate, error) {
+	return &core.OrderEstimate{
+		Swap: &asset.PreSwap{
+			Estimate: &asset.SwapEstimate{
+				Lots:               5,
+				Value:              5e8,
+				MaxFees:            1600,
+				RealisticWorstCase: 12010,
+				RealisticBestCase:  6008,
+			},
+			Options: []*asset.OrderOption{
+				{
+					ConfigOption: asset.ConfigOption{
+						Key:          "moredough",
+						DisplayName:  "Get More Dough",
+						Description:  "Cast a magical incantation to double the amount of XYZ received.",
+						DefaultValue: true,
+					},
+					Boolean: &asset.BooleanConfig{
+						Reason: "Cuz why not?",
+					},
+				},
+				{
+					ConfigOption: asset.ConfigOption{
+						Key:          "awesomeness",
+						DisplayName:  "More Awesomeness",
+						Description:  "Crank up the awesomeness for next-level trading.",
+						DefaultValue: 1.0,
+					},
+					XYRange: &asset.XYRange{
+						Start: asset.XYRangePoint{
+							Label: "Low",
+							X:     1,
+							Y:     3,
+						},
+						End: asset.XYRangePoint{
+							Label: "High",
+							X:     10,
+							Y:     30,
+						},
+						XUnit: "X",
+						YUnit: "kBTC",
+					},
+				},
+			},
+		},
+		Redeem: &asset.PreRedeem{
+			Estimate: &asset.RedeemEstimate{
+				RealisticBestCase:  2800,
+				RealisticWorstCase: 6500,
+			},
+			Options: []*asset.OrderOption{
+				{
+					ConfigOption: asset.ConfigOption{
+						Key:          "lesshassle",
+						DisplayName:  "Smoother Experience",
+						Description:  "Select this option for a super-elite VIP DEX experience.",
+						DefaultValue: false,
+					},
+					Boolean: &asset.BooleanConfig{
+						Reason: "Half the time, twice the service",
+					},
+				},
+			},
 		},
 	}, nil
 }

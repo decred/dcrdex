@@ -888,6 +888,22 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 		t.Fatalf("expected spendable of value %d, got %d", littleFunds, v)
 	}
 
+	// Adding a fee bump should now require the larger UTXO.
+	ord.Options = map[string]string{swapFeeBumpKey: "1.5"}
+	spendables, _, err = wallet.FundOrder(ord)
+	if err != nil {
+		t.Fatalf("error funding bumped fees: %v", err)
+	}
+	if len(spendables) != 1 {
+		t.Fatalf("expected 1 spendable, got %d", len(spendables))
+	}
+	v = spendables[0].Value()
+	if v != lottaFunds { // picks the bigger output because it is confirmed
+		t.Fatalf("expected bumped fee utxo of value %d, got %d", littleFunds, v)
+	}
+	ord.Options = nil
+	littleUTXO.Confirmations = 0
+
 	// Return/unlock the reserved coins to avoid warning in subsequent tests
 	// about fundingCoins map containing the coins already. i.e.
 	// "Known order-funding coin %v returned by listunspent"
@@ -997,6 +1013,18 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 		t.Fatalf("split failed - no tx sent")
 	}
 	_ = wallet.ReturnCoins(coins)
+
+	// The split should also be added if we set the option at order time.
+	wallet.useSplitTx = false
+	ord.Options = map[string]string{splitKey: "true"}
+	coins, _, err = wallet.FundOrder(ord)
+	if err != nil {
+		t.Fatalf("error for forced split tx: %v", err)
+	}
+	// Should be just one coin still.
+	if len(coins) != 1 {
+		t.Fatalf("forced split failed - coin count != 1")
+	}
 
 	// // Hit some error paths.
 
@@ -1210,9 +1238,6 @@ func checkSwapEstimate(t *testing.T, est *asset.SwapEstimate, lots, swapVal, max
 	}
 	if est.RealisticBestCase != estBestCase {
 		t.Fatalf("Estimate has wrong RealisticBestCase. wanted %d, got %d", estBestCase, est.RealisticBestCase)
-	}
-	if est.Locked != locked {
-		t.Fatalf("Estimate has wrong Locked. wanted %d, got %d", locked, est.Locked)
 	}
 }
 
@@ -2970,6 +2995,39 @@ func testTryRedemptionRequests(t *testing.T, segwit bool, walletType string) {
 					t.Fatalf("redemption not found")
 				}
 			}
+		}
+	}
+}
+
+func TestPrettyBTC(t *testing.T) {
+	type test struct {
+		v   uint64
+		exp string
+	}
+
+	tests := []*test{{
+		v:   1,
+		exp: "0.00000001",
+	}, {
+		v:   1e8,
+		exp: "1",
+	}, {
+		v:   100000001,
+		exp: "1.00000001",
+	}, {
+		v:   0,
+		exp: "0",
+	}, {
+		v:   123000,
+		exp: "0.00123",
+	}, {
+		v:   100123000,
+		exp: "1.00123",
+	}}
+
+	for _, tt := range tests {
+		if prettyBTC(tt.v) != tt.exp {
+			t.Fatalf("prettyBTC(%d) = %s != %q", tt.v, prettyBTC(tt.v), tt.exp)
 		}
 	}
 }

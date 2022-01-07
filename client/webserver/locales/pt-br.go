@@ -102,6 +102,7 @@ var PtBr = map[string]string{
 	"verify_market":                  "Está é uma ordem de mercado e combinará com o(s) melhor(es) pedidos no livro de ofertas. Baseado no atual valor médio de mercado, você receberá", //revisar
 	"auth_order_app_pw":              "Autorizar este pedido com a senha do app.",
 	"lots":                           "lotes",
+	"provied_markets":                "Essa DEX provê os seguintes mercados:",
 	"order_disclaimer": `<span class="red">IMPORTANTE</span>: Trocas levam tempo para serem concluídas, e vc não pode desligar o cliente e software DEX,
 		ou o <span data-unit="quote"></span> ou <span data-unit="base"></span> blockchain e/ou software da carteira, até os pedidos serem completamente concluídos.
 		A troca pode completar em alguns minutos ou levar até mesmo horas.`, //revisar
@@ -119,7 +120,6 @@ var PtBr = map[string]string{
 	"ago":                       "atrás",
 	"Cancellation":              "Cancelamento",
 	"Order Portion":             "Porção do pedido",
-	"Swap":                      "", // Label for the first on-chain transaction cast by each party
 	"you":                       "você",
 	"them":                      "Eles",
 	"Redemption":                "Rendenção",

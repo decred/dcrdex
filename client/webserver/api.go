@@ -720,6 +720,29 @@ func (s *WebServer) apiMaxSell(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp, s.indent)
 }
 
+// apiPreOrder handles the 'preorder' API request.
+func (s *WebServer) apiPreOrder(w http.ResponseWriter, r *http.Request) {
+	form := new(core.TradeForm)
+	if !readPost(w, r, form) {
+		return
+	}
+
+	est, err := s.core.PreOrder(form)
+	if err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+
+	resp := struct {
+		OK       bool                `json:"ok"`
+		Estimate *core.OrderEstimate `json:"estimate"`
+	}{
+		OK:       true,
+		Estimate: est,
+	}
+	writeJSON(w, resp, s.indent)
+}
+
 // apiActuallyLogin logs the user in.
 func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login *loginForm) {
 	pass, err := s.resolvePass(login.Pass, r)

@@ -108,6 +108,7 @@ type clientCore interface {
 	AccountDisable(pw []byte, host string) error
 	IsInitialized() bool
 	ExportSeed(pw []byte) ([]byte, error)
+	PreOrder(*core.TradeForm) (*core.OrderEstimate, error)
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -328,6 +329,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/withdraw", s.apiWithdraw)
 			apiAuth.Post("/maxbuy", s.apiMaxBuy)
 			apiAuth.Post("/maxsell", s.apiMaxSell)
+			apiAuth.Post("/preorder", s.apiPreOrder)
 			apiAuth.Post("/exportaccount", s.apiAccountExport)
 			apiAuth.Post("/exportseed", s.apiExportSeed)
 			apiAuth.Post("/importaccount", s.apiAccountImport)

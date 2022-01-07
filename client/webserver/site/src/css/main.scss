@@ -5,11 +5,14 @@ html {
   -moz-font-smoothing: antialiased !important;
   text-rendering: optimizeLegibility !important;
   height: 100%;
+  color: $font-color-light;
 }
 
-html,
 button {
   color: $font-color-light;
+  background-color: transparent;
+  border: 1px solid #7777;
+  outline: none;
 }
 
 body {
@@ -23,11 +26,6 @@ body {
   justify-content: flex-start;
   background-color: $light_body_bg;
   font-family: $sans;
-}
-
-button {
-  border: none;
-  outline: none;
 }
 
 select {
@@ -97,6 +95,7 @@ div.clear {
 
 button.selected {
   background-color: #38cfb0;
+  border: none;
 }
 
 button:focus {
@@ -126,10 +125,6 @@ button:focus {
     font-size: 15px;
     font-family: $demi-sans;
   }
-}
-
-body.dark button {
-  color: #f2fffd;
 }
 
 .dynamicopts {

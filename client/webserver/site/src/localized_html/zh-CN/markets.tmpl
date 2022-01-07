@@ -421,73 +421,241 @@
       {{template "newWalletForm"}}
     </form>
 
-    {{- /* VERIFY ORDER */ -}}
-    <form class="position-relative fs16 text-center d-hide" id="verifyForm" autocomplete="off">
-      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
-      <div class="py-1 text-center fs18 position-relative header" id="vHeader">
-        检查<span id="vSideHeader"></span> 请求
-      </div>
-      <div class="echo-data mt-2 sans-light fs18">
-        您正在提交一下订单
-        <div class="fs20 sans py-1">
-          <span id="vSide"></span>
-          <span id="vQty"></span>
-          <span id="vBase"></span>
+    {{- /* VERIFY FORM */ -}}
+      <form class="position-relative fs16 text-center d-hide" id="verifyForm" autocomplete="off">
+        <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+        <div class="py-1 text-center fs18 position-relative header buygreen" id="vHeader">
+          <span id="vBuySell"></span> <span data-unit="base"></span>
         </div>
+        <div class="d-flex justify-content-between align-items-center py-2 fs13">
+          <span id="vOrderType" class="grey"></span>
+          <span id="vOrderHost" class="grey"></span>
+        </div>
+
+        <hr class="dashed mt-0 mb-2">
+
+        {{- /* Price, Quantity, Total Section */ -}}
         <div id="verifyLimit">
-          汇率
-          <div class="fs20 sans py-1">
-            <span id="vRate"></span>
-            <sup data-unit="quote"></sup>/<sub data-unit="base"></sub>
+          <div class="d-flex align-items-center justify-content-between">
+            <span class="grey fs17 flex-grow-1 text-left">价格</span>
+            <span id="vRate" class="fs18 demi"></span>
+            <span class="grey fs14 ml-2">
+              <sup data-unit="quote"></sup>/<sub data-unit="base"></sub>
+            </span>
           </div>
-          共计
-          <div class="fs20 sans py-1">
-            <span id="vTotal"></span>
-            <span id="vQuote"></span>
+          <div class="d-flex align-items-center mt-1">
+            <span class="grey fs17 flex-grow-1 text-left">数量</span>
+            <span id="vQty" class="fs18 demi"></span>
+            <span data-unit="base" class="grey fs14 ml-2"></span>
+          </div>
+          <div class="d-flex align-items-center mt-1">
+            <span class="grey fs17 flex-grow-1 text-left">Total</span>
+            <span id="vTotal" class="fs18 demi"></span>
+            <span data-unit="quote" class="grey fs14 ml-2"></span>
           </div>
         </div>
         <div id="verifyMarket">
-          这是一个市价单，将匹配订单簿中的最佳订单。根据当前的平均市场价，您将收到
-          <div class="fs20 sans py-1">
-            <span id="vmTotal"></span>
-            <span id="vmAsset"></span>
-            <span class="fs15">(<div class="d-inline" id="vmLots"></div class="d-inline"> 批)</span>
+          <div class="d-flex align-items-center justify-content-between">
+            <span class="grey fs17 flex-grow-1 text-left">Trading</span>
+            <span id="vmFromTotal" class="fs18 demi"></span>
+            <span id="vmFromAsset" class="grey fs14 ml-2"></span>
+          </div>
+          <div id="vMarketEstimate" class="d-flex align-items-center justify-content-between">
+            <span class="grey fs17 flex-grow-1 text-left">
+              Receiving Approximately
+              <span class="ico-info fs12" data-tooltip="这是一个市价单，将匹配订单簿中的最佳订单。根据当前的平均市场价，您将收到"></span>
+            </span>
+            <span id="vmToTotal" class="fs18 demi"></span>
+            <span id="vmToAsset" class="grey fs14 ml-2"></span>
           </div>
         </div>
-      </div>
-      <hr class="dashed my-3">
-      {{$passwordIsCached := .UserInfo.PasswordIsCached}}
-      <div class="fs18 sans-light text-center {{if $passwordIsCached}}d-hide{{end}}">使用应用密码授权此订单。</div>
-      <div class="d-flex mt-3 {{if $passwordIsCached}}justify-content-end{{end}}" >
-        <div class="col-12 p-0 text-left {{if $passwordIsCached}}d-hide{{end}}">
-          <label for="vPass" class="pl-1 mb-1">密码</label>
-          <input type="password" class="form-control select" id="vPass">
-        </div>
-        <div class="col-12 p-0 {{if not $passwordIsCached}}text-right{{end}}">
-          <div {{if $passwordIsCached}}class="d-hide"{{end}}>&nbsp;</div>
-          <button id="vSubmit" type="button" class="w-75 justify-content-center fs15 selected">
-            <span id="vSideSubmit"></span>
-            <span id="vBaseSubmit"></span>
-          </button>
-          <div id="vLoader" class="loader flex-center d-hide">
-            <div class="ico-spinner spinner"></div>
+
+        <hr class="dashed my-2">
+
+        {{- /* Auth Section */ -}}
+        {{$passwordIsCached := .UserInfo.PasswordIsCached}}
+        <div class="fs16 text-center {{if $passwordIsCached}}d-hide{{end}}">使用应用密码授权此订单。</div>
+        <div class="d-flex mt-3 {{if $passwordIsCached}}justify-content-end{{end}}" >
+          <div class="col-12 p-0 text-left {{if $passwordIsCached}}d-hide{{end}}">
+            <label for="vPass" class="pl-1 mb-1">密码</label>
+            <input type="password" class="form-control select" id="vPass">
+          </div>
+          <div class="col-12 p-0 d-flex justify-content-end">
+            <button id="vSubmit" type="button" class="w-75 mt-1 justify-content-center fs15 selected">
+              <span id="vSideSubmit"></span>
+              <span data-unit="base"></span>
+            </button>
+            <div id="vLoader" class="loader flex-center d-hide">
+              <div class="ico-spinner spinner"></div>
+            </div>
           </div>
         </div>
-      </div>
-      <div class="fs15 pt-3 text-center d-hide errcolor" id="vErr"></div>
-      <hr class="dashed my-3">
-      <div class="disclaimer mt-2 fs14">
-        <span class="red">交易需要</span>一定时间才能完成，禁止关闭 DEX 客户端软件以及
+        <div class="fs15 pt-3 text-center d-hide errcolor" id="vErr"></div>{{- /* End Auth Section */ -}}
+
+        <div id="vPreorder">
+          <hr class="dashed mb-2 mt-3">
+
+          <div class="d-flex justify-content-between align-items-center">
+            <span class="grey fs18">
+              Fee Projection
+              <span class="ico-info fs12" data-tooltip="If network conditions don't change before your order matches, total realized fees (as a percentage of trade) should fall within this range."></span>
+            </span>
+            <span class="grey fs14 underline pointer hoverbright" id="vFeeDetails">details</span>
+          </div>
+
+          <div class="py-1 d-flex align-items-center justify-content-center fs18" id="vFeeSummary">
+            <span id="vFeeSummaryLow"></span>
+            <span class="fs15">%</span>
+            <span class="fs15 px-2">to</span>
+            <span id="vFeeSummaryHigh"></span>
+            <span class="fs15">%</span>
+          </div>
+
+          <hr class="dashed mb-2 mt-3">
+
+          <div class="grey fs18 text-left">Options</div>
+
+          <div id="vOrderOpts">
+            {{- /* Order Option Templates */ -}}
+            <div id="orderOptTmpl" class="order-opt d-flex align-items-start">
+              <div data-tmpl="toggle" class="opt-check selected"></div>
+              <div class="flex-grow-1" data-tmpl="controls">
+                <div class="d-flex align-items-center">
+                  <span data-tmpl="optName" class="flex-grow-1 text-left fs16 pl-2"></span>
+                  <span data-tmpl="tooltip" class="ico-info mr-2" data-tooltip="Prevent temporary overlocking of funds"></span>
+                  <img data-tmpl="chainIcon" class="micro-icon mr-1">
+                </div>
+
+                <div id="booleanOptTmpl" class="d-flex justify-content-between align-items-center fs14 pl-2">
+                  <span data-tmpl="reason"></span>
+                </div>
+
+                <div id="rangeOptTmpl">
+                  <div class="d-flex flex-nowrap fs12">
+                    <span data-tmpl="rangeLblStart"></span>
+                    <div data-tmpl="slider" class="slider flex-grow-1">
+                      <div data-tmpl="handle" class="slider-handle"></div>
+                    </div>
+                    <span data-tmpl="rangeLblEnd"></span>
+                  </div>
+
+                  <div class="d-flex justify-content-between align-items-center fs14">
+                    <span>
+                      <input type="text" pattern="[0-9]+([\.,][0-9]+)?" data-tmpl="xInput" class="xy-range-input d-hide">
+                      <span data-tmpl="x" class="pointer"></span> <span data-tmpl="xUnit"></span>
+                    </span>
+                    <span>
+                      <input type="text" pattern="[0-9]+([\.,][0-9]+)?" data-tmpl="yInput" class="xy-range-input d-hide">
+                      <span data-tmpl="y" class="pointer"></span> <span data-tmpl="yUnit"></span>
+                    </span>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+
+        </div> {{- /* END id="vPreorder" */ -}}
+
+        <div id="vUnlockPreorder">
+          <hr class="dashed mb-2 mt-3">
+          <div class="flex-center flex-column my-2 p-3">
+            <span class="ico-locked my-2"></span>
+            <span>Unlock your wallets to retrieve order details and additional options.</span>
+            <div class="d-flex align-items-stretch w-100">
+              <div class="col-12 p-0 text-left">
+                <label for="vUnlockPass" class="pl-1 mb-1">密码</label>
+                <input type="password" class="form-control select w-100" id="vUnlockPass">
+              </div>
+              <div class="col-12 p-0 d-flex align-items-end justify-content-end">
+                <button type="button" id="vUnlockSubmit" class="selected buygreen">解锁</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="vPreorderErr" class="mt-2">
+          Order estimates and options unavailable
+          <span class="ico-info red fs12" id="vPreorderErrTip" data-tooltip=" "></span>
+        </div>
+
+        <hr class="dashed my-2">
+        <div class="disclaimer fs14">
+          <span class="red">交易需要</span>一定时间才能完成，禁止关闭 DEX 客户端软件以及
 		<span data-unit="quote"></span>或<span data-unit="base"></span>钱包软件。
 		交易可能在几分钟内完成，也可能长至几个小时。
-      </div>
-      
-    </form>
+        </div>
+      </form>
 
-    <form class="d-hide" id="cancelForm" autocomplete="off">
-      {{template "cancelOrderForm" .}}
-    </form>
+      {{- /* FEE DETAIL BREAKDOWN */ -}}
+      <form id="vDetailPane" class="d-hide fs16 pb-2">
+        <div class="d-flex justify-content-between align-items-center py-1 px-3">
+          <span>Fee Details</span>
+          <span class="ico-cross fs12 pointer" id="closeDetailPane"></span>
+        </div>
+        <div class="px-3">
+          <div class="m-1">
+            Best- and worst-case estimates are based on current network conditions, and might change by the time the order matches.
+          </div>
 
+          <div class="fs18 mt-2 demi">Best Case Fees</div>
+          <div class="px-3 indent">
+            <div>
+              The best case fees occur when the entire order is consumed in a single match.
+            </div>
+            <div class="d-flex">
+              <table class="fee-breakout">
+                <tr>
+                  <td><img class="micro-icon" data-icon="from"> </td>
+                  <td><img class="micro-icon" data-icon="to"> Redeem</td>
+                </tr>
+                <tr>
+                  <td><span id="vSwapFeesLow"></span> (<span id="vSwapFeesLowPct"></span>)</td>
+                  <td><span  id="vRedeemFeesLow"></span> (<span  id="vRedeemFeesLowPct"></span>)</td>
+                </tr>
+              </table>
+            </div>
+          </div>
+
+          <div class="fs18 mt-2 demi">Worst Case Fees</div>
+          <div class="px-3 indent">
+            <div>
+              The worst case can occur if the order matches one lot at a time over the course of many epochs.
+            </div>
+            <div class="d-flex">
+              <table class="fee-breakout">
+                <tr>
+                  <td><img class="micro-icon" data-icon="from"> </td>
+                  <td><img class="micro-icon" data-icon="to"> Redeem</td>
+                </tr>
+                <tr>
+                  <td><span id="vSwapFeesHigh"></span> (<span id="vSwapFeesHighPct"></span>)</td>
+                  <td><span  id="vRedeemFeesHigh"></span> (<span  id="vRedeemFeesHighPct"></span>)</td>
+                </tr>
+              </table>
+            </div>
+          </div>
+
+          <div class="fs18 mt-2 demi">Maximum Possible Swap Fees</div>
+          <div class="px-3 indent">
+            <div>
+              This is the most you would ever pay in fees on your swap. Fees are normally assessed at a fraction of this rate. The maximum is not subject to changes once your order is placed.
+            </div>
+            <div>
+              <img class="micro-icon mr-1" data-icon="from">
+              <span id="vSwapFeesMax"></span>  (<span id="vSwapFeesMaxPct"></span>)
+            </div>
+          </div>
+
+        </div>
+      </form>
+
+      {{- /* CANCEL ORDER FORM */ -}}
+      <form class="d-hide" id="cancelForm" autocomplete="off">
+        {{template "cancelOrderForm" .}}
+      </form>
+
+    </div>
   </div>
 
 </div>

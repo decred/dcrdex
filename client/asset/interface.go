@@ -309,6 +309,8 @@ type Swaps struct {
 	// may force each Contract to use the same version, but conceptually this
 	// should perhaps be in Contract with SecretHash.
 	AssetVersion uint32
+	// Options are OrderOptions set or selected by the user at order time.
+	Options map[string]string
 }
 
 // Contract is a swap contract.
@@ -343,6 +345,7 @@ type RedeemForm struct {
 	// suggestion in any way, but obviously fees that are too low may result in
 	// the redemption getting stuck in mempool.
 	FeeSuggestion uint64
+	Options       map[string]string
 }
 
 // Order is order details needed for FundOrder.
@@ -371,89 +374,7 @@ type Order struct {
 	// is used, the fee rate used should be at least the suggested fee, else
 	// zero-conf coins might be rejected.
 	FeeSuggestion uint64
-}
-
-// SwapEstimate is an estimate of the fees and locked amounts associated with
-// an order.
-type SwapEstimate struct {
-	// Lots is the number of lots in the order.
-	Lots uint64 `json:"lots"`
-	// Value is the total value of the order.
-	Value uint64 `json:"value"`
-	// MaxFees is the maximum possible fees that can be assessed for the order's
-	// swaps.
-	MaxFees uint64 `json:"maxFees"`
-	// RealisticWorstCase is an estimation of the fees that might be assessed in
-	// a worst-case scenario of 1 tx per 1 lot match, but at the prevailing fee
-	// rate estimate.
-	RealisticWorstCase uint64 `json:"realisticWorstCase"`
-	// RealisticBestCase is an estimation of the fees that might be assessed in
-	// a best-case scenario of 1 tx and 1 output for the entire order.
-	RealisticBestCase uint64 `json:"realisticBestCase"`
-	// Locked is the amount that will be locked if this order is
-	// subsequently placed.
-	Locked uint64 `json:"locked"`
-}
-
-// RedeemEstimate is an estimate of the range of fees that might realistically
-// be assessed to the redemption transaction.
-type RedeemEstimate struct {
-	// RealisticBestCase is the best-case scenario fees of a single transaction
-	// with a match covering the entire order, at the prevailing fee rate.
-	RealisticBestCase uint64 `json:"realisticBestCase"`
-	// RealisticWorstCase is the worst-case scenario fees of all 1-lot matches,
-	// each with their own call to Redeem.
-	RealisticWorstCase uint64 `json:"realisticWorstCase"`
-}
-
-// PreSwapForm can be used to get a swap fees estimate.
-type PreSwapForm struct {
-	// LotSize is the lot size for the calculation. For quote assets, LotSize
-	// should be based on either the user's limit order rate, or some measure
-	// of the current market rate.
-	LotSize uint64
-	// Lots is the number of lots in the order.
-	Lots uint64
-	// AssetConfig is the dex's asset configuration info.
-	AssetConfig *dex.Asset
-	// Immediate should be set to true if this is for an order that is not a
-	// standing order, likely a market order or a limit order with immediate
-	// time-in-force.
-	Immediate bool
-	// FeeSuggestion is a suggested fee from the server. If a split transaction
-	// is used, the fee rate used should be at least the suggested fee, else
-	// zero-conf coins might be rejected.
-	FeeSuggestion uint64
-}
-
-// SwapOption is an OrderEstimate and it's associated ConfigOption.
-type SwapOption struct {
-	ConfigOption
-	// Estimate is the OrderEstimate for an order with the specified
-	// option values.
-	Estimate *SwapEstimate
-}
-
-// PreSwap is a SwapEstimate returned from Wallet.PreSwap. The struct will be
-// expanded in in-progress work to accommodate order-time options.
-type PreSwap struct {
-	Estimate *SwapEstimate `json:"estimate"`
-}
-
-// PreRedeemForm can be used to get a redemption estimate.
-type PreRedeemForm struct {
-	// LotSize is the lot size for the calculation. For quote assets, LotSize
-	// should be based on either the user's limit order rate, or some measure
-	// of the current market rate.
-	LotSize uint64
-	// Lots is the number of lots in the order.
-	Lots uint64
-	// FeeSuggestion is a suggested fee from the server.
-	FeeSuggestion uint64
-}
-
-// PreRedeem is an estimate of the fees for redemption. The struct will be
-// expanded in in-progress work to accommodate order-time options.
-type PreRedeem struct {
-	Estimate *RedeemEstimate `json:"estimate"`
+	// Options are options that corresponds to PreSwap.Options, as well as
+	// their values.
+	Options map[string]string
 }

@@ -72,6 +72,10 @@ const (
 	walletTypeLegacy = ""
 	walletTypeRPC    = "bitcoindRPC"
 	walletTypeSPV    = "SPV"
+
+	swapFeeBumpKey   = "swapfeebump"
+	splitKey         = "swapsplit"
+	redeemFeeBumpFee = "redeemfeebump"
 )
 
 var (
@@ -472,6 +476,18 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 // Info returns basic information about the wallet and asset.
 func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
+}
+
+// swapOptions captures the available Swap options. Tagged to be used with
+// config.Unmapify to decode e.g. asset.Order.Options.
+type swapOptions struct {
+	Split   *bool    `ini:"swapsplit"`
+	FeeBump *float64 `ini:"swapfeebump"`
+}
+
+// redeemOptions are order options that apply to redemptions.
+type redeemOptions struct {
+	FeeBump *float64 `ini:"redeemfeebump"`
 }
 
 func init() {
@@ -956,7 +972,7 @@ func (btc *ExchangeWallet) maxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asse
 	basicFee := nfo.SwapSize * nfo.MaxFeeRate
 	lots := avail / (lotSize + basicFee)
 	for lots > 0 {
-		est, _, err := btc.estimateSwap(lots, lotSize, feeSuggestion, utxos, nfo, btc.useSplitTx)
+		est, _, _, err := btc.estimateSwap(lots, lotSize, feeSuggestion, utxos, nfo, btc.useSplitTx, 1.0)
 		// The only failure mode of estimateSwap -> btc.fund is when there is
 		// not enough funds, so if an error is encountered, count down the lots
 		// and repeat until we have enough.
@@ -969,16 +985,24 @@ func (btc *ExchangeWallet) maxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asse
 	return utxos, &asset.SwapEstimate{}, nil
 }
 
-// PreSwap get order estimates based on the available funds and the wallet
-// configuration.
+// sizeUnit returns the short form of the unit used to measure size, either
+// vB if segwit, else B.
+func (btc *ExchangeWallet) sizeUnit() string {
+	if btc.segwit {
+		return "vB"
+	}
+	return "B"
+}
+
+// PreSwap get order estimates and order options based on the available funds
+// and user-selected options.
 func (btc *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
 	// Start with the maxOrder at the default configuration. This gets us the
-	// utxo set, the network fee rate, and the wallet's maximum order size.
-	// The utxo set can then be used repeatedly in estimateSwap at virtually
-	// zero cost since there are no more RPC calls.
-	// The utxo set is only used once right now, but when order-time options are
-	// implemented, the utxos will be used to calculate option availability and
-	// fees.
+	// utxo set, the network fee rate, and the wallet's maximum order size. The
+	// utxo set can then be used repeatedly in estimateSwap at virtually zero
+	// cost since there are no more RPC calls. The utxo set is only used once
+	// right now, but when order-time options are implemented, the utxos will be
+	// used to calculate option availability and fees.
 	utxos, maxEst, err := btc.maxOrder(req.LotSize, req.FeeSuggestion, req.AssetConfig)
 	if err != nil {
 		return nil, err
@@ -987,57 +1011,205 @@ func (btc *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 		return nil, fmt.Errorf("%d lots available for %d-lot order", maxEst.Lots, req.Lots)
 	}
 
-	// Get the estimate for the requested number of lots.
-	est, _, err := btc.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion, utxos, req.AssetConfig, btc.useSplitTx)
+	// Load the user's selected order-time options.
+	customCfg := new(swapOptions)
+	err = config.Unmapify(req.SelectedOptions, customCfg)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing selected swap options: %w", err)
+	}
+
+	// Parse the configured split transaction.
+	split := btc.useSplitTx
+	if customCfg.Split != nil {
+		split = *customCfg.Split
+	}
+
+	// Parse the configured fee bump.
+	var bump float64 = 1.0
+	if customCfg.FeeBump != nil {
+		bump = *customCfg.FeeBump
+		if bump > 2.0 {
+			return nil, fmt.Errorf("fee bump %f is higher than the 2.0 limit", bump)
+		}
+		if bump < 1.0 {
+			return nil, fmt.Errorf("fee bump %f is lower than 1", bump)
+		}
+	}
+
+	// Get the estimate using the current configuration.
+	est, splitUsed, _, err := btc.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion, utxos, req.AssetConfig, split, bump)
 	if err != nil {
 		return nil, fmt.Errorf("estimation failed: %v", err)
 	}
 
+	var opts []*asset.OrderOption
+
+	// If the used split isn't the requested split, the other split option was
+	// unavailable, so there is no option to offer.
+	if !req.Immediate && splitUsed == split {
+		if splitOpt := btc.splitOption(req, utxos, bump); splitOpt != nil {
+			opts = append(opts, splitOpt)
+		}
+	}
+
+	// Figure out what our maximum available fee bump is, within our 2x hard
+	// limit.
+	var maxBump float64
+	var maxBumpEst *asset.SwapEstimate
+	for maxBump = 2.0; maxBump > 1.01; maxBump -= 0.1 {
+		tryEst, splitUsed, _, err := btc.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion, utxos, req.AssetConfig, split, maxBump)
+		// If the split used wasn't the configured value, this option is not
+		// available.
+		if err == nil && split == splitUsed {
+			maxBumpEst = tryEst
+			break
+		}
+	}
+
+	if maxBumpEst != nil {
+		noBumpEst, _, _, err := btc.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion, utxos, req.AssetConfig, split, 1.0)
+		if err != nil {
+			// shouldn't be possible, since we already succeeded with a higher bump.
+			return nil, fmt.Errorf("error getting no-bump estimate: %w", err)
+		}
+
+		bumpLabel := "2X"
+		if maxBump < 2.0 {
+			bumpLabel = strconv.FormatFloat(maxBump, 'f', 1, 64) + "X"
+		}
+
+		extraFees := maxBumpEst.RealisticWorstCase - noBumpEst.RealisticWorstCase
+		desc := fmt.Sprintf("Add a fee multiplier up to %.1fx (up to ~%s %s more) for faster settlement when %s network traffic is high.",
+			maxBump, prettyBTC(extraFees), btc.symbol, btc.walletInfo.Name)
+
+		opts = append(opts, &asset.OrderOption{
+			ConfigOption: asset.ConfigOption{
+				Key:          swapFeeBumpKey,
+				DisplayName:  "Faster Swaps",
+				Description:  desc,
+				DefaultValue: 1.0,
+			},
+			XYRange: &asset.XYRange{
+				Start: asset.XYRangePoint{
+					Label: "1X",
+					X:     1.0,
+					Y:     float64(req.FeeSuggestion),
+				},
+				End: asset.XYRangePoint{
+					Label: bumpLabel,
+					X:     maxBump,
+					Y:     float64(req.FeeSuggestion) * maxBump,
+				},
+				XUnit: "X",
+				YUnit: btc.walletInfo.UnitInfo.AtomicUnit + "/" + btc.sizeUnit(),
+			},
+		})
+	}
+
 	return &asset.PreSwap{
 		Estimate: est,
+		Options:  opts,
 	}, nil
+}
+
+// splitOption constructs an *asset.OrderOption with customized text based on the
+// difference in fees between the configured and test split condition.
+func (btc *ExchangeWallet) splitOption(req *asset.PreSwapForm, utxos []*compositeUTXO, bump float64) *asset.OrderOption {
+	noSplitEst, _, noSplitLocked, err := btc.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion, utxos, req.AssetConfig, false, bump)
+	if err != nil {
+		btc.log.Errorf("estimateSwap (no split) error: %v", err)
+		return nil
+	}
+	splitEst, splitUsed, splitLocked, err := btc.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion, utxos, req.AssetConfig, true, bump)
+	if err != nil {
+		btc.log.Errorf("estimateSwap (with split) error: %v", err)
+		return nil
+	}
+	if !splitUsed {
+		// unable to do the split. no option.
+		btc.log.Debugf("split option unavailable")
+		return nil
+	}
+	symbol := strings.ToUpper(btc.symbol)
+
+	xtraFees := splitEst.RealisticWorstCase - noSplitEst.RealisticWorstCase
+	pctChange := (float64(splitEst.RealisticWorstCase)/float64(noSplitEst.RealisticWorstCase) - 1) * 100
+	overlock := noSplitLocked - splitLocked
+
+	var reason string
+	if pctChange > 1 {
+		reason = fmt.Sprintf("+%d%% fees, -%s %s overlock", int(math.Round(pctChange)), prettyBTC(overlock), symbol)
+	} else {
+		reason = fmt.Sprintf("+%.1f%% fees, -%s %s overlock", pctChange, prettyBTC(overlock), symbol)
+	}
+
+	desc := fmt.Sprintf("Using a split transaction to prevent temporary overlock of %s %s, but for additional fees of %s %s",
+		prettyBTC(overlock), symbol, prettyBTC(xtraFees), symbol)
+
+	return &asset.OrderOption{
+		ConfigOption: asset.ConfigOption{
+			Key:          splitKey,
+			DisplayName:  "Pre-size Funds",
+			Description:  desc,
+			DefaultValue: btc.useSplitTx,
+			IsBoolean:    true,
+		},
+		Boolean: &asset.BooleanConfig{
+			Reason: reason,
+		},
+	}
 }
 
 // estimateSwap prepares an *asset.SwapEstimate.
 func (btc *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, utxos []*compositeUTXO,
-	nfo *dex.Asset, trySplit bool) (*asset.SwapEstimate, bool /*split used*/, error) {
+	nfo *dex.Asset, trySplit bool, feeBump float64) (*asset.SwapEstimate, bool /*split used*/, uint64 /*amt locked*/, error) {
 
 	var avail uint64
 	for _, utxo := range utxos {
 		avail += utxo.amount
 	}
 
+	// If there is a fee bump, the networkFeeRate can be higher than the
+	// MaxFeeRate
+	bumpedMaxRate := nfo.MaxFeeRate
+	bumpedNetRate := feeSuggestion
+	if feeBump > 1 {
+		bumpedMaxRate = uint64(math.Round(float64(bumpedMaxRate) * feeBump))
+		bumpedNetRate = uint64(math.Round(float64(bumpedNetRate) * feeBump))
+	}
+
 	val := lots * lotSize
 
 	enough := func(inputsSize, inputsVal uint64) bool {
-		reqFunds := calc.RequiredOrderFunds(val, inputsSize, lots, nfo)
+		reqFunds := calc.RequiredOrderFundsAlt(val, inputsSize, lots, nfo.SwapSizeBase, nfo.SwapSize, bumpedMaxRate)
 		return inputsVal >= reqFunds
 	}
 
 	sum, inputsSize, _, _, _, _, err := fund(utxos, enough)
 	if err != nil {
-		return nil, false, fmt.Errorf("error funding swap value %s: %w", amount(val), err)
+		return nil, false, 0, fmt.Errorf("error funding swap value %s: %w", amount(val), err)
 	}
 
-	reqFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots, nfo.SwapSizeBase, nfo.SwapSize, nfo.MaxFeeRate)
+	reqFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots, nfo.SwapSizeBase, nfo.SwapSize, bumpedMaxRate)
 	maxFees := reqFunds - val
 
-	estHighFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots, nfo.SwapSizeBase, nfo.SwapSize, feeSuggestion)
+	estHighFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots, nfo.SwapSizeBase, nfo.SwapSize, bumpedNetRate)
 	estHighFees := estHighFunds - val
 
-	estLowFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), 1, nfo.SwapSizeBase, nfo.SwapSize, feeSuggestion)
+	estLowFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), 1, nfo.SwapSizeBase, nfo.SwapSize, bumpedNetRate)
 	if btc.segwit {
-		estLowFunds += dexbtc.P2WSHOutputSize * (lots - 1) * feeSuggestion
+		estLowFunds += dexbtc.P2WSHOutputSize * (lots - 1) * bumpedNetRate
 	} else {
-		estLowFunds += dexbtc.P2SHOutputSize * (lots - 1) * feeSuggestion
+		estLowFunds += dexbtc.P2SHOutputSize * (lots - 1) * bumpedNetRate
 	}
 
 	estLowFees := estLowFunds - val
 
 	// Math for split transactions is a little different.
 	if trySplit {
-		_, extraMaxFees := btc.splitBaggageFees(nfo.MaxFeeRate)
-		_, splitFees := btc.splitBaggageFees(feeSuggestion)
+		_, extraMaxFees := btc.splitBaggageFees(bumpedMaxRate)
+		_, splitFees := btc.splitBaggageFees(bumpedNetRate)
+		locked := val + maxFees + extraMaxFees
 
 		if avail >= reqFunds+extraMaxFees {
 			return &asset.SwapEstimate{
@@ -1046,8 +1218,7 @@ func (btc *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, utx
 				MaxFees:            maxFees + extraMaxFees,
 				RealisticBestCase:  estLowFees + splitFees,
 				RealisticWorstCase: estHighFees + splitFees,
-				Locked:             val + maxFees + extraMaxFees,
-			}, true, nil
+			}, true, locked, nil
 		}
 	}
 
@@ -1057,8 +1228,7 @@ func (btc *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, utx
 		MaxFees:            maxFees,
 		RealisticBestCase:  estLowFees,
 		RealisticWorstCase: estHighFees,
-		Locked:             sum,
-	}, false, nil
+	}, false, sum, nil
 }
 
 // PreRedeem generates an estimate of the range of redemption fees that could
@@ -1082,11 +1252,52 @@ func (btc *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem
 	best += inputSize*req.Lots + outputSize
 	worst += (inputSize + outputSize) * req.Lots
 
+	// Read the order options.
+	customCfg := new(redeemOptions)
+	err := config.Unmapify(req.SelectedOptions, customCfg)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing selected options: %w", err)
+	}
+
+	// Parse the configured fee bump.
+	var currentBump float64 = 1.0
+	if customCfg.FeeBump != nil {
+		bump := *customCfg.FeeBump
+		if bump < 1.0 || bump > 2.0 {
+			return nil, fmt.Errorf("invalid fee bump: %f", bump)
+		}
+		currentBump = bump
+	}
+
+	opts := []*asset.OrderOption{{
+		ConfigOption: asset.ConfigOption{
+			Key:          redeemFeeBumpFee,
+			DisplayName:  "Change Redemption Fees",
+			Description:  "Bump the redemption transaction fees up to 2x for faster confirmation of your redemption transaction.",
+			DefaultValue: 1.0,
+		},
+		XYRange: &asset.XYRange{
+			Start: asset.XYRangePoint{
+				Label: "1X",
+				X:     1.0,
+				Y:     float64(feeRate),
+			},
+			End: asset.XYRangePoint{
+				Label: "2X",
+				X:     2.0,
+				Y:     float64(feeRate * 2),
+			},
+			YUnit: btc.walletInfo.UnitInfo.AtomicUnit + "/" + btc.sizeUnit(),
+			XUnit: "X",
+		},
+	}}
+
 	return &asset.PreRedeem{
 		Estimate: &asset.RedeemEstimate{
-			RealisticWorstCase: worst * feeRate,
-			RealisticBestCase:  best * feeRate,
+			RealisticWorstCase: uint64(math.Round(float64(worst*feeRate) * currentBump)),
+			RealisticBestCase:  uint64(math.Round(float64(best*feeRate) * currentBump)),
 		},
+		Options: opts,
 	}, nil
 }
 
@@ -1108,6 +1319,12 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	if ord.MaxSwapCount == 0 {
 		return nil, nil, fmt.Errorf("cannot fund a zero-lot order")
 	}
+	if ord.FeeSuggestion > ord.DEXConfig.MaxFeeRate {
+		return nil, nil, fmt.Errorf("fee suggestion %d > max fee rate %d", ord.FeeSuggestion, ord.DEXConfig.MaxFeeRate)
+	}
+	if ord.FeeSuggestion > btc.feeRateLimit {
+		return nil, nil, fmt.Errorf("suggested fee > configured limit. %d > %d", ord.FeeSuggestion, btc.feeRateLimit)
+	}
 	// Check wallets fee rate limit against server's max fee rate
 	if btc.feeRateLimit < ord.DEXConfig.MaxFeeRate {
 		return nil, nil, fmt.Errorf(
@@ -1115,6 +1332,12 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 			ord.DEXConfig.Symbol,
 			ord.DEXConfig.MaxFeeRate,
 			btc.feeRateLimit)
+	}
+
+	customCfg := new(swapOptions)
+	err := config.Unmapify(ord.Options, customCfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error parsing swap options: %w", err)
 	}
 
 	btc.fundingMtx.Lock()         // before getting spendable utxos from wallet
@@ -1129,8 +1352,13 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 			ordValStr, amount(avail))
 	}
 
+	bumpedMaxRate, err := calcBumpedRate(ord.DEXConfig.MaxFeeRate, customCfg.FeeBump)
+	if err != nil {
+		btc.log.Errorf("calcBumpRate error: %v", err)
+	}
+
 	enough := func(inputsSize, inputsVal uint64) bool {
-		reqFunds := calc.RequiredOrderFunds(ord.Value, inputsSize, ord.MaxSwapCount, ord.DEXConfig)
+		reqFunds := calc.RequiredOrderFundsAlt(ord.Value, inputsSize, ord.MaxSwapCount, ord.DEXConfig.SwapSizeBase, ord.DEXConfig.SwapSize, bumpedMaxRate)
 		return inputsVal >= reqFunds
 	}
 
@@ -1139,9 +1367,34 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 		return nil, nil, fmt.Errorf("error funding swap value of %s: %w", amount(ord.Value), err)
 	}
 
-	if btc.useSplitTx && !ord.Immediate {
+	useSplit := btc.useSplitTx
+	if customCfg.Split != nil {
+		useSplit = *customCfg.Split
+	}
+
+	if useSplit && !ord.Immediate {
+		// We apply the bumped fee rate to the split transaction when the
+		// PreSwap is created, so we use that bumped rate here too.
+		// But first, check that it's within bounds.
+		splitFeeRate := ord.FeeSuggestion
+		if splitFeeRate == 0 {
+			// TODO
+			// 1.0: Error when no suggestion.
+			// return nil, nil, fmt.Errorf("cannot do a split transaction without a fee rate suggestion from the server")
+			splitFeeRate = btc.feeRateWithFallback(btc.redeemConfTarget, 0)
+			// We PreOrder checked this as <= MaxFeeRate, so use that as an
+			// upper limit.
+			if splitFeeRate > ord.DEXConfig.MaxFeeRate {
+				splitFeeRate = ord.DEXConfig.MaxFeeRate
+			}
+		}
+		splitFeeRate, err = calcBumpedRate(splitFeeRate, customCfg.FeeBump)
+		if err != nil {
+			btc.log.Errorf("calcBumpRate error: %v", err)
+		}
+
 		splitCoins, split, err := btc.split(ord.Value, ord.MaxSwapCount, spents,
-			uint64(size), fundingCoins, ord.FeeSuggestion, ord.DEXConfig)
+			uint64(size), fundingCoins, splitFeeRate, bumpedMaxRate, ord.DEXConfig)
 		if err != nil {
 			return nil, nil, err
 		} else if split {
@@ -1249,7 +1502,7 @@ func fund(utxos []*compositeUTXO, enough func(uint64, uint64) bool) (
 // would already have an output of just the right size, and that would be
 // recognized here.
 func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output,
-	inputsSize uint64, fundingCoins map[outPoint]*utxo, suggestedFeeRate uint64, nfo *dex.Asset) (asset.Coins, bool, error) {
+	inputsSize uint64, fundingCoins map[outPoint]*utxo, suggestedFeeRate, bumpedMaxRate uint64, nfo *dex.Asset) (asset.Coins, bool, error) {
 
 	var err error
 	defer func() {
@@ -1267,7 +1520,7 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output,
 
 	// Calculate the extra fees associated with the additional inputs, outputs,
 	// and transaction overhead, and compare to the excess that would be locked.
-	swapInputSize, baggage := btc.splitBaggageFees(nfo.MaxFeeRate)
+	swapInputSize, baggage := btc.splitBaggageFees(bumpedMaxRate)
 
 	var coinSum uint64
 	coins := make(asset.Coins, 0, len(outputs))
@@ -1278,7 +1531,7 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output,
 
 	valueStr := amount(value).String()
 
-	excess := coinSum - calc.RequiredOrderFundsAlt(value, inputsSize, lots, nfo.SwapSizeBase, nfo.SwapSize, nfo.MaxFeeRate)
+	excess := coinSum - calc.RequiredOrderFundsAlt(value, inputsSize, lots, nfo.SwapSizeBase, nfo.SwapSize, bumpedMaxRate)
 	if baggage > excess {
 		btc.log.Debugf("Skipping split transaction because cost is greater than potential over-lock. "+
 			"%s > %s", amount(baggage), amount(excess))
@@ -1293,7 +1546,7 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output,
 		return nil, false, fmt.Errorf("error creating split transaction address: %w", err)
 	}
 
-	reqFunds := calc.RequiredOrderFundsAlt(value, swapInputSize, lots, nfo.SwapSizeBase, nfo.SwapSize, nfo.MaxFeeRate)
+	reqFunds := calc.RequiredOrderFundsAlt(value, swapInputSize, lots, nfo.SwapSizeBase, nfo.SwapSize, bumpedMaxRate)
 
 	baseTx, _, _, err := btc.fundedTx(coins)
 	splitScript, err := txscript.PayToAddrScript(addr)
@@ -1306,19 +1559,6 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output,
 	changeAddr, err := btc.node.changeAddress()
 	if err != nil {
 		return nil, false, fmt.Errorf("error creating change address: %w", err)
-	}
-
-	if suggestedFeeRate > nfo.MaxFeeRate {
-		return nil, false, fmt.Errorf("suggested fee is > the max fee rate")
-	}
-	if suggestedFeeRate > btc.feeRateLimit {
-		return nil, false, fmt.Errorf("suggested fee is > our internal limit")
-	}
-	if suggestedFeeRate == 0 {
-		suggestedFeeRate = btc.feeRateWithFallback(1, 0)
-		// TODO
-		// 1.0: Error when no suggestion.
-		// return nil, false, fmt.Errorf("cannot do a split transaction without a fee rate suggestion from the server")
 	}
 
 	// Sign, add change, and send the transaction.
@@ -1532,6 +1772,12 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		return nil, nil, 0, err
 	}
 
+	customCfg := new(swapOptions)
+	err = config.Unmapify(swaps.Options, customCfg)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("error parsing swap options: %w", err)
+	}
+
 	refundAddrs := make([]btcutil.Address, 0, len(swaps.Contracts))
 
 	// Add the contract outputs.
@@ -1591,9 +1837,14 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		return nil, nil, 0, fmt.Errorf("error creating change address: %w", err)
 	}
 
+	feeRate, err := calcBumpedRate(swaps.FeeRate, customCfg.FeeBump)
+	if err != nil {
+		btc.log.Errorf("ignoring invalid fee bump factor, %s: %v", float64PtrStr(customCfg.FeeBump), err)
+	}
+
 	// Sign, add change, but don't send the transaction yet until
 	// the individual swap refund txs are prepared and signed.
-	msgTx, change, fees, err := btc.signTxAndAddChange(baseTx, changeAddr, totalIn, totalOut, swaps.FeeRate)
+	msgTx, change, fees, err := btc.signTxAndAddChange(baseTx, changeAddr, totalIn, totalOut, feeRate)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -1708,10 +1959,26 @@ func (btc *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 		size += dexbtc.RedeemSwapSigScriptSize*uint64(len(form.Redemptions)) + dexbtc.P2PKHOutputSize
 	}
 
-	feeRate := btc.feeRateWithFallback(btc.redeemConfTarget, form.FeeSuggestion)
+	customCfg := new(redeemOptions)
+	err := config.Unmapify(form.Options, customCfg)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("error parsing selected swap options: %w", err)
+	}
+
+	rawFeeRate := btc.feeRateWithFallback(btc.redeemConfTarget, form.FeeSuggestion)
+	feeRate, err := calcBumpedRate(rawFeeRate, customCfg.FeeBump)
+	if err != nil {
+		btc.log.Errorf("calcBumpRate error: %v", err)
+	}
 	fee := feeRate * size
 	if fee > totalIn {
-		return nil, nil, 0, fmt.Errorf("redeem tx not worth the fees")
+		// Double check that the fee bump isn't the issue.
+		feeRate = rawFeeRate
+		fee = feeRate * size
+		if fee > totalIn {
+			return nil, nil, 0, fmt.Errorf("redeem tx not worth the fees")
+		}
+		btc.log.Warnf("Ignoring fee bump (%s) resulting in fees > redemption", float64PtrStr(customCfg.FeeBump))
 	}
 
 	// Send the funds back to the exchange wallet.
@@ -3135,4 +3402,34 @@ func findRedemptionsInTx(ctx context.Context, segwit bool, reqs map[outPoint]*fi
 		}
 	}
 	return
+}
+
+// prettyBTC prints a value as a float with up to 8 digits of precision, but
+// with trailing zeros and decimal points removed.
+func prettyBTC(v uint64) string {
+	return strings.TrimRight(strings.TrimRight(strconv.FormatFloat(float64(v)/1e8, 'f', 8, 64), "0"), ".")
+}
+
+// calcBumpedRate calculated a bump on the baseRate. If bump is nil, the
+// baseRate is returned directly. In the case of an error (nil or out-of-range),
+// the baseRate is returned unchanged.
+func calcBumpedRate(baseRate uint64, bump *float64) (uint64, error) {
+	if bump == nil {
+		return baseRate, nil
+	}
+	userBump := *bump
+	if userBump > 2.0 {
+		return baseRate, fmt.Errorf("fee bump %f is higher than the 2.0 limit", userBump)
+	}
+	if userBump < 1.0 {
+		return baseRate, fmt.Errorf("fee bump %f is lower than 1", userBump)
+	}
+	return uint64(math.Round(float64(baseRate) * userBump)), nil
+}
+
+func float64PtrStr(v *float64) string {
+	if v == nil {
+		return "nil"
+	}
+	return strconv.FormatFloat(*v, 'f', 8, 64)
 }

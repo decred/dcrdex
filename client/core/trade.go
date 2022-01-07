@@ -155,12 +155,14 @@ type trackedTrade struct {
 	formatDetails func(Topic, ...interface{}) (string, string)
 	epochLen      uint64
 	fromAssetID   uint32
+	options       map[string]string
 }
 
 // newTrackedTrade is a constructor for a trackedTrade.
 func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnection, epochLen uint64,
 	lockTimeTaker, lockTimeMaker time.Duration, db db.DB, latencyQ *wait.TickerQueue, wallets *walletSet,
-	coins asset.Coins, notify func(Notification), formatDetails func(Topic, ...interface{}) (string, string)) *trackedTrade {
+	coins asset.Coins, notify func(Notification), formatDetails func(Topic, ...interface{}) (string, string),
+	options map[string]string) *trackedTrade {
 
 	fromID := dbOrder.Order.Quote()
 	if dbOrder.Order.Trade().Sell {
@@ -186,6 +188,7 @@ func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnec
 		epochLen:      epochLen,
 		fromAssetID:   fromID,
 		formatDetails: formatDetails,
+		options:       options,
 	}
 	return t
 }
@@ -1441,6 +1444,7 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 		FeeRate:      highestFeeRate,
 		LockChange:   lockChange,
 		AssetVersion: t.metaData.FromVersion,
+		Options:      t.options,
 	}
 	receipts, change, fees, err := t.wallets.fromWallet.Swap(swaps)
 	if err != nil {
@@ -1482,7 +1486,7 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 		}
 	}
 
-	c.log.Infof("Broadcasted transaction with %d swap contracts for order %v. Fee rate = %d. Receipts (%s): %v.",
+	c.log.Infof("Broadcasted transaction with %d swap contracts for order %v. Assigned fee rate = %d. Receipts (%s): %v.",
 		len(receipts), t.ID(), swaps.FeeRate, t.wallets.fromAsset.Symbol, receipts)
 	c.log.Infof("The following are contract identifiers mapped to raw refund "+
 		"transactions that are only valid after the swap contract expires. "+
@@ -1681,6 +1685,7 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 	coinIDs, outCoin, fees, err := redeemWallet.Redeem(&asset.RedeemForm{
 		Redemptions:   redemptions,
 		FeeSuggestion: feeSuggestion,
+		Options:       t.options,
 	})
 	// If an error was encountered, fail all of the matches. A failed match will
 	// not run again on during ticks.
