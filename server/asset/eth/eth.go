@@ -39,12 +39,6 @@ const (
 	// The blockPollInterval is the delay between calls to bestBlockHash to
 	// check for new blocks.
 	blockPollInterval = time.Second
-	// TODO: Fill in with an addresses. Also consider upgrades where one
-	// contract will be good for current active swaps, but a new one is
-	// required for new swaps.
-	mainnetContractAddr = ""
-	testnetContractAddr = ""
-	simnetContractAddr  = ""
 )
 
 var _ asset.Driver = (*Driver)(nil)
@@ -145,21 +139,17 @@ var _ asset.AccountBalancer = (*Backend)(nil)
 
 // unconnectedETH returns a Backend without a node. The node should be set
 // before use.
-func unconnectedETH(logger dex.Logger, cfg *config) *Backend {
-	ctx, cancel := context.WithCancel(context.Background())
+func unconnectedETH(logger dex.Logger, cfg *config) (*Backend, error) {
 	// TODO: At some point multiple contracts will need to be used, at
 	// least for transitory periods when updating the contract, and
 	// possibly a random contract setup, and so this section will need to
 	// change to support multiple contracts.
-	var contractAddr common.Address
-	switch cfg.network {
-	case dex.Simnet:
-		contractAddr = common.HexToAddress(simnetContractAddr)
-	case dex.Testnet:
-		contractAddr = common.HexToAddress(testnetContractAddr)
-	case dex.Mainnet:
-		contractAddr = common.HexToAddress(mainnetContractAddr)
+	contractAddr, exists := dexeth.ContractAddresses[0][cfg.network]
+	if !exists || contractAddr == (common.Address{}) {
+		return nil, fmt.Errorf("no eth contract for version 0, net %s", cfg.network)
 	}
+
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Backend{
 		rpcCtx:       ctx,
 		cancelRPCs:   cancel,
@@ -168,7 +158,7 @@ func unconnectedETH(logger dex.Logger, cfg *config) *Backend {
 		blockChans:   make(map[chan *asset.BlockUpdate]struct{}),
 		contractAddr: contractAddr,
 		initTxSize:   uint32(dexeth.InitGas(1, version)),
-	}
+	}, nil
 }
 
 // NewBackend is the exported constructor by which the DEX will import the
@@ -178,7 +168,7 @@ func NewBackend(ipc string, logger dex.Logger, network dex.Network) (*Backend, e
 	if err != nil {
 		return nil, err
 	}
-	return unconnectedETH(logger, cfg), nil
+	return unconnectedETH(logger, cfg)
 }
 
 func (eth *Backend) shutdown() {

@@ -244,7 +244,13 @@ func TestDecodeCoinID(t *testing.T) {
 
 func TestRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	backend := unconnectedETH(tLogger, new(config))
+	cfg := &config{
+		network: dex.Simnet,
+	}
+	backend, err := unconnectedETH(tLogger, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
 	backend.node = &testNode{
 		bestHdr: &types.Header{Number: big.NewInt(1)},
 	}
