@@ -306,7 +306,7 @@ type tokenContractorV0 struct {
 var _ tokenContractor = (*tokenContractorV0)(nil)
 
 func newV0TokenContractor(net dex.Network, assetID uint32, acctAddr common.Address, ec *ethclient.Client) (tokenContractor, error) {
-	_, token, swapContractAddr, err := dexeth.VersionedNetworkToken(assetID, 0, net)
+	_, tokenAddr, swapContractAddr, err := dexeth.VersionedNetworkToken(assetID, 0, net)
 	if err != nil {
 		return nil, err
 	}
@@ -316,7 +316,7 @@ func newV0TokenContractor(net dex.Network, assetID uint32, acctAddr common.Addre
 		return nil, err
 	}
 
-	tokenContract := bind.NewBoundContract(token.Address, *erc20.ERC20_ABI, ec, ec, ec)
+	tokenContract := bind.NewBoundContract(tokenAddr, *erc20.ERC20_ABI, ec, ec, ec)
 
 	return &tokenContractorV0{
 		contractorV0: &contractorV0{
@@ -328,7 +328,7 @@ func newV0TokenContractor(net dex.Network, assetID uint32, acctAddr common.Addre
 			isToken:      true,
 		},
 		tokenContractor: c,
-		tokenAddr:       token.Address,
+		tokenAddr:       tokenAddr,
 		tokenContract:   tokenContract,
 	}, nil
 }
