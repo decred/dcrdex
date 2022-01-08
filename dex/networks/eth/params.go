@@ -230,18 +230,22 @@ var Tokens = map[uint32]*dex.Token{
 	},
 }
 
-func VersionedNetworkToken(assetID uint32, contractVer uint32, net dex.Network) (*dex.Token, *dex.TokenAddresses, common.Address, error) {
+// VersionedNetworkToken retrieves the token, token address, and swap contract
+// address for the token asset.
+func VersionedNetworkToken(assetID uint32, contractVer uint32, net dex.Network) (token *dex.Token,
+	tokenAddr, contractAddr common.Address, err error) {
+
 	token, found := Tokens[assetID]
 	if !found {
-		return nil, nil, common.Address{}, fmt.Errorf("token %d not found", assetID)
+		return nil, common.Address{}, common.Address{}, fmt.Errorf("token %d not found", assetID)
 	}
 	addrs, found := token.NetAddresses[net]
 	if !found {
-		return nil, nil, common.Address{}, fmt.Errorf("token %d has no network %s", assetID, net)
+		return nil, common.Address{}, common.Address{}, fmt.Errorf("token %d has no network %s", assetID, net)
 	}
-	contractAddr, found := addrs.SwapContracts[contractVer]
+	contractAddr, found = addrs.SwapContracts[contractVer]
 	if !found {
-		return nil, nil, common.Address{}, fmt.Errorf("token %d version %d has no network %s token info", assetID, contractVer, net)
+		return nil, common.Address{}, common.Address{}, fmt.Errorf("token %d version %d has no network %s token info", assetID, contractVer, net)
 	}
-	return token, addrs, contractAddr, nil
+	return token, addrs.Address, contractAddr, nil
 }

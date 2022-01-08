@@ -35,14 +35,6 @@ import (
 )
 
 var (
-	erc20AllowanceOption = &asset.ConfigOption{
-		Key:          "limitAllowance",
-		DisplayName:  "Limited Allowance",
-		Description:  "Unlimited allowance is cheaper. Limited allowance reduces risk from malicious or poorly designed contracts.",
-		DefaultValue: false,
-		IsBoolean:    true,
-	}
-
 	testTokenID, _ = dex.BipSymbolID("dextt.eth")
 )
 
@@ -51,7 +43,6 @@ func registerToken(tokenID uint32, desc string) {
 	asset.RegisterToken(tokenID, token, &asset.WalletDefinition{
 		Type:        "token",
 		Description: desc,
-		ConfigOpts:  []*asset.ConfigOption{erc20AllowanceOption},
 	})
 }
 

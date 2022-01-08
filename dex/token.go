@@ -4,6 +4,10 @@
 package dex
 
 // Gases is a the gas required for various operations.
+// NOTE: For ERC20 tokens, the implementation can cause the gas to vary, or the
+// implementation itself can change with a proxy delegate. The gas needed for
+// initiations should be estimated directly (with EstimateGas) at order-time
+// wherever possible.
 type Gases struct {
 	// Swap is the amount of gas needed to initialize a single ethereum swap.
 	Swap uint64 `json:"swap"`
