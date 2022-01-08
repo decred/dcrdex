@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	v0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -120,7 +121,11 @@ func GweiToWei(v uint64) *big.Int {
 
 // GweiToWei converts *big.Int Wei to uint64 Gwei.
 func WeiToGwei(v *big.Int) uint64 {
-	return new(big.Int).Div(v, BigGweiFactor).Uint64()
+	vGwei := new(big.Int).Div(v, BigGweiFactor)
+	if vGwei.IsUint64() {
+		return vGwei.Uint64()
+	}
+	return 0
 }
 
 // SwapStep is the state of a swap and corresponds to values in the Solidity
@@ -248,4 +253,21 @@ func VersionedNetworkToken(assetID uint32, contractVer uint32, net dex.Network) 
 		return nil, common.Address{}, common.Address{}, fmt.Errorf("token %d version %d has no network %s token info", assetID, contractVer, net)
 	}
 	return token, addrs.Address, contractAddr, nil
+}
+
+// SwapStateFromV0 converts a v0.ETHSwapSwap to a *SwapState.
+func SwapStateFromV0(state *v0.ETHSwapSwap) *SwapState {
+	var blockTime int64
+	if state.RefundBlockTimestamp.IsInt64() {
+		blockTime = state.RefundBlockTimestamp.Int64()
+	}
+	return &SwapState{
+		BlockHeight: state.InitBlockNumber.Uint64(),
+		LockTime:    time.Unix(blockTime, 0),
+		Secret:      state.Secret,
+		Initiator:   state.Initiator,
+		Participant: state.Participant,
+		Value:       WeiToGwei(state.Value),
+		State:       SwapStep(state.State),
+	}
 }

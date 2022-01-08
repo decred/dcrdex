@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math/big"
 
+	dexeth "decred.org/dcrdex/dex/networks/eth"
 	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -91,7 +92,7 @@ func (c *rpcclient) blockNumber(ctx context.Context) (uint64, error) {
 }
 
 // swap gets a swap keyed by secretHash in the contract.
-func (c *rpcclient) swap(ctx context.Context, secretHash [32]byte) (*swapv0.ETHSwapSwap, error) {
+func (c *rpcclient) swap(ctx context.Context, secretHash [32]byte) (*dexeth.SwapState, error) {
 	callOpts := &bind.CallOpts{
 		Pending: true,
 		Context: ctx,
@@ -100,7 +101,7 @@ func (c *rpcclient) swap(ctx context.Context, secretHash [32]byte) (*swapv0.ETHS
 	if err != nil {
 		return nil, err
 	}
-	return &swap, nil
+	return dexeth.SwapStateFromV0(&swap), nil
 }
 
 // transaction gets the transaction that hashes to hash from the chain or
