@@ -89,6 +89,7 @@ cat > "${NODES_ROOT}/genesis.json" <<EOF
     "muirGlacierBlock": 0,
     "berlinBlock": 0,
     "londonBlock": 0,
+    "arrowGlacierBlock": 0,
     "clique": {
       "period": 1,
       "epoch": 30000
