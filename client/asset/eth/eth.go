@@ -35,20 +35,11 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
-var erc20AllowanceOption = &asset.ConfigOption{
-	Key:          "limitAllowance",
-	DisplayName:  "Limited Allowance",
-	Description:  "Unlimited allowance is cheaper. Limited allowance reduces risk from malicious or poorly designed contracts.",
-	DefaultValue: false,
-	IsBoolean:    true,
-}
-
 func registerToken(tokenID uint32, desc string) {
 	token := dexeth.Tokens[tokenID]
 	asset.RegisterToken(tokenID, token, &asset.WalletDefinition{
 		Type:        "token",
 		Description: desc,
-		ConfigOpts:  []*asset.ConfigOption{erc20AllowanceOption},
 	})
 }
 
@@ -404,7 +395,9 @@ func (w *AssetWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 
 // tokenWalletConfig is the configuration options for token wallets.
 type tokenWalletConfig struct {
-	LimitAllowance bool `ini:"limitAllowance"`
+	// LimitAllowance disabled for now.
+	// See https://github.com/decred/dcrdex/pull/1394#discussion_r780479402.
+	// LimitAllowance bool `ini:"limitAllowance"`
 }
 
 // parseTokenWalletConfig parses the settings map into a *WalletConfig.
@@ -568,34 +561,13 @@ func (w *AssetWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, nfo *dex
 		// No reason to do anything if the allowance is > the unlimited
 		// allowance approval threshold.
 		if currentAllowance.Cmp(unlimitedAllowanceReplenishThreshold) < 0 {
-			// Two ways in which we'll need to add gas for approval.
-			//   1. Limited allowance and the current allowance is not sufficient.
-			//   2. Unlimited allowance below the refill threshold.
-			if w.token.LimitAllowance {
-				// Only add allowance gas if we're too low.
-				w.lockedMtx.RLock()
-				locked := w.locked
-				w.lockedMtx.RUnlock()
-				// This is maybe a little unsophisticated and aggressive, and
-				// would definitely preclude trading with two instances of
-				// AssetWallet on the same account.
-				candidate := new(big.Int).Add(dexeth.GweiToWei(locked), dexeth.GweiToWei(value))
-				if candidate.Cmp(currentAllowance) > 0 {
-					allowanceGas = w.token.gas.Approve
-				}
-			} else {
-				allowanceGas = w.token.gas.Approve
-			}
+			allowanceGas = w.token.gas.Approve
 		}
 	} else {
 		oneGas = dexeth.InitGas(1, nfo.Version)
 	}
 
 	maxFees := (oneGas*lots + allowanceGas) * nfo.MaxFeeRate
-	locked := value
-	if w.token == nil {
-		locked = value + maxFees
-	}
 	return &asset.SwapEstimate{
 		Lots:               lots,
 		Value:              value,
@@ -729,26 +701,7 @@ func (w *AssetWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, err
 		if err != nil {
 			return nil, nil, fmt.Errorf("error retrieving current allowance: %w", err)
 		}
-		var newAllowance *big.Int
-		// No reason to do anything if the allowance is > the unlimited
-		// allowance approval threshold.
 		if currentAllowance.Cmp(unlimitedAllowanceReplenishThreshold) < 0 {
-			if w.token.LimitAllowance {
-				w.lockedMtx.RLock()
-				locked := w.locked
-				w.lockedMtx.RUnlock()
-				// This is maybe a little unsophisticated and aggressive, and
-				// would definitely preclude trading with two instances of
-				// AssetWallet on the same account.
-				candidate := new(big.Int).Add(dexeth.GweiToWei(locked), dexeth.GweiToWei(ord.Value))
-				if candidate.Cmp(currentAllowance) > 0 {
-					newAllowance = candidate
-				}
-			} else {
-				newAllowance = unlimitedAllowance
-			}
-		}
-		if newAllowance != nil {
 			ethBal, err := ethWallet.balance()
 			if err != nil {
 				return nil, nil, fmt.Errorf("error getting eth balance: %w", err)
@@ -757,7 +710,7 @@ func (w *AssetWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, err
 				return nil, nil, fmt.Errorf("parent balance %d doesn't cover setAllowance (%d) and fees (%d)",
 					ethBal.Available, w.token.gas.Approve*cfg.MaxFeeRate, ethNeeded)
 			}
-			if _, err := w.node.approveToken(w.ctx, w.assetID, newAllowance, cfg.MaxFeeRate, cfg.Version); err != nil {
+			if _, err := w.node.approveToken(w.ctx, w.assetID, unlimitedAllowance, cfg.MaxFeeRate, cfg.Version); err != nil {
 				return nil, nil, fmt.Errorf("token contract approval error: %w", err)
 			}
 		}
