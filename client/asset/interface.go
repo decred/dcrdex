@@ -44,6 +44,12 @@ type WalletDefinition struct {
 	ConfigOpts []*ConfigOption `json:"configopts"`
 }
 
+// Token combines the generic dex.Token with a WalletDefinition.
+type Token struct {
+	*dex.Token
+	Definition *WalletDefinition `json:"definition"`
+}
+
 // WalletInfo is auxiliary information about an ExchangeWallet.
 type WalletInfo struct {
 	// Name is the display name for the currency, e.g. "Decred"
@@ -225,6 +231,17 @@ type Wallet interface {
 	// payment. This method need not be supported by all assets. Those assets
 	// which do no support DEX registration fees will return an ErrUnsupported.
 	RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error)
+}
+
+// TokenMaster is implemented by assets which support degenerate tokens.
+type TokenMaster interface {
+	// CreateTokenWallet creates a wallet for the specified token asset. The
+	// settings correspond to the Token.Definition.ConfigOpts.
+	CreateTokenWallet(assetID uint32, settings map[string]string) error
+	// OpenTokenWallet opens a wallet for the specified token asset. The
+	// settings correspond to the Token.Definition.ConfigOpts. The tipChange
+	// function will be called after the parent's tipChange function.
+	OpenTokenWallet(assetID uint32, settings map[string]string, tipChange func(error)) (Wallet, error)
 }
 
 // Balance is categorized information about a wallet's balance.

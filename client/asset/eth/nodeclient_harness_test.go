@@ -558,10 +558,10 @@ func TestInitiateGas(t *testing.T) {
 		var expectedGas uint64
 		var actualGas uint64
 		if i == 1 {
-			expectedGas = gases.InitGas
+			expectedGas = gases.Swap
 			actualGas = gas
 		} else {
-			expectedGas = gases.AdditionalInitGas
+			expectedGas = gases.SwapAdd
 			actualGas = gas - previousGas
 		}
 		if actualGas > expectedGas || actualGas < expectedGas/100*95 {
@@ -814,10 +814,10 @@ func TestRedeemGas(t *testing.T) {
 		var expectedGas uint64
 		var actualGas uint64
 		if i == 0 {
-			expectedGas = gases.RedeemGas
+			expectedGas = gases.Redeem
 			actualGas = gas
 		} else {
-			expectedGas = gases.AdditionalRedeemGas
+			expectedGas = gases.RedeemAdd
 			actualGas = gas - previous
 		}
 		if actualGas > expectedGas || actualGas < (expectedGas/100*95) {

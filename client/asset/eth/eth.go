@@ -34,8 +34,23 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
+var (
+	testTokenID, _ = dex.BipSymbolID("dextt.eth")
+)
+
+func registerToken(tokenID uint32, desc string) {
+	token := dexeth.Tokens[tokenID]
+	asset.RegisterToken(tokenID, token, &asset.WalletDefinition{
+		Type:        "token",
+		Description: desc,
+	})
+}
+
 func init() {
 	asset.Register(BipID, &Driver{})
+
+	// Test token
+	registerToken(testTokenID, "A token wallet for the DEX test token. Used for testing DEX software.")
 }
 
 const (

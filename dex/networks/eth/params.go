@@ -9,6 +9,7 @@ package eth
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"time"
@@ -23,6 +24,7 @@ const (
 	// MaxBlockInterval is the number of seconds since the last header came
 	// in over which we consider the chain to be out of sync.
 	MaxBlockInterval = 180
+	EthBipID         = 60
 )
 
 var (
@@ -37,7 +39,7 @@ var (
 	// BigGweiFactor is the *big.Int form of the GweiFactor.
 	BigGweiFactor = big.NewInt(GweiFactor)
 
-	VersionedGases = map[uint32]*Gases{
+	VersionedGases = map[uint32]*dex.Gases{
 		0: v0Gases,
 	}
 
@@ -50,24 +52,12 @@ var (
 	}
 )
 
-type Gases struct {
-	InitGas, AdditionalInitGas, RedeemGas, AdditionalRedeemGas, RefundGas uint64
-}
-
-var v0Gases = &Gases{
-	// InitGas is the amount of gas needed to initialize a single
-	// ethereum swap.
-	InitGas: 135000,
-	// AdditionalInitGas is the amount of gas needed to initialize
-	// additional swaps in the same transaction.
-	AdditionalInitGas: 113000,
-	// RedeemGas is the amount of gas it costs to redeem a swap.
-	RedeemGas: 63000,
-	// AdditionalRedeemGas is the amount of gas needed to redeem
-	// additional swaps in the same transaction.
-	AdditionalRedeemGas: 32000,
-	// RefundGas is the amount of gas it costs to refund a swap.
-	RefundGas: 43000,
+var v0Gases = &dex.Gases{
+	Swap:      135000,
+	SwapAdd:   113000,
+	Redeem:    63000,
+	RedeemAdd: 32000,
+	Refund:    43000,
 }
 
 // EncodeContractData packs the contract version and the secret hash into a byte
@@ -99,7 +89,7 @@ func InitGas(n int, contractVer uint32) uint64 {
 	if !ok {
 		return math.MaxUint64
 	}
-	return g.InitGas + (uint64(n)-1)*g.AdditionalInitGas
+	return g.SwapN(n)
 }
 
 // RedeemGas calculates the gas required for a batch of n redemptions.
@@ -111,7 +101,7 @@ func RedeemGas(n int, contractVer uint32) uint64 {
 	if !ok {
 		return math.MaxUint64
 	}
-	return g.RedeemGas + (uint64(n)-1)*g.AdditionalRedeemGas
+	return g.RedeemN(n)
 }
 
 // RefundGas calculates the gas required for a refund.
@@ -120,7 +110,7 @@ func RefundGas(contractVer uint32) uint64 {
 	if !ok {
 		return math.MaxUint64
 	}
-	return g.RefundGas
+	return g.Refund
 }
 
 // GweiToWei converts uint64 Gwei to *big.Int Wei.
@@ -196,4 +186,66 @@ type Initiation struct {
 type Redemption struct {
 	Secret     [32]byte
 	SecretHash [32]byte
+}
+
+var testTokenID, _ = dex.BipSymbolID("dextt.eth")
+
+var Tokens = map[uint32]*dex.Token{
+	// testTokenID = 'dextt.eth' is the used for the test token from
+	// dex/networks/erc20/contracts/TestToken.sol that is deployed on the simnet
+	// harness, and possibly other networks too if needed for testing.
+	testTokenID: {
+		NetAddresses: map[dex.Network]*dex.TokenAddresses{
+			dex.Mainnet: {
+				Address:       common.Address{},
+				SwapContracts: map[uint32][20]byte{},
+			},
+			dex.Testnet: {
+				Address:       common.Address{},
+				SwapContracts: map[uint32][20]byte{},
+			},
+			dex.Simnet: {
+				Address:       common.Address{},
+				SwapContracts: map[uint32][20]byte{},
+			},
+		},
+		ParentID: EthBipID,
+		Name:     "DCRDEXTestToken",
+		UnitInfo: dex.UnitInfo{
+			AtomicUnit: "Dextoshi",
+			Conventional: dex.Denomination{
+				Unit:             "DEXTT",
+				ConversionFactor: GweiFactor,
+			},
+		},
+		Gas: dex.Gases{
+			Swap:      157_000,
+			SwapAdd:   115_000,
+			Redeem:    70_000,
+			RedeemAdd: 33_000,
+			Refund:    50_000,
+			Approve:   29_000,
+			Transfer:  31_000,
+		},
+	},
+}
+
+// VersionedNetworkToken retrieves the token, token address, and swap contract
+// address for the token asset.
+func VersionedNetworkToken(assetID uint32, contractVer uint32, net dex.Network) (token *dex.Token,
+	tokenAddr, contractAddr common.Address, err error) {
+
+	token, found := Tokens[assetID]
+	if !found {
+		return nil, common.Address{}, common.Address{}, fmt.Errorf("token %d not found", assetID)
+	}
+	addrs, found := token.NetAddresses[net]
+	if !found {
+		return nil, common.Address{}, common.Address{}, fmt.Errorf("token %d has no network %s", assetID, net)
+	}
+	contractAddr, found = addrs.SwapContracts[contractVer]
+	if !found {
+		return nil, common.Address{}, common.Address{}, fmt.Errorf("token %d version %d has no network %s token info", assetID, contractVer, net)
+	}
+	return token, addrs.Address, contractAddr, nil
 }
