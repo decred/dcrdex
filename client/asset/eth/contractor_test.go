@@ -54,7 +54,7 @@ func (c tContractV0) IsRefundable(opts *bind.CallOpts, secretHash [32]byte) (boo
 
 func TestInitV0(t *testing.T) {
 	abiContract := &tContractV0{}
-	c := contractorV0{contractV0: abiContract}
+	c := contractorV0{contractV0: abiContract, evmify: dexeth.GweiToWei}
 	addrStr := "0xB6De8BB5ed28E6bE6d671975cad20C03931bE981"
 	secretHashB := encode.RandomBytes(32)
 	const gweiVal = 123456
@@ -131,7 +131,7 @@ func TestInitV0(t *testing.T) {
 
 func TestRedeemV0(t *testing.T) {
 	abiContract := &tContractV0{}
-	c := contractorV0{contractV0: abiContract}
+	c := contractorV0{contractV0: abiContract, evmify: dexeth.GweiToWei}
 
 	secretB := encode.RandomBytes(32)
 	secretHashB := encode.RandomBytes(32)
@@ -193,7 +193,7 @@ func TestRedeemV0(t *testing.T) {
 
 func TestSwapV0(t *testing.T) {
 	abiContract := &tContractV0{}
-	c := contractorV0{contractV0: abiContract}
+	c := contractorV0{contractV0: abiContract, evmify: dexeth.GweiToWei}
 
 	var secret [32]byte
 	const valGwei = 123_456

@@ -41,7 +41,8 @@ var (
 	testAddressB = common.HexToAddress("8d83B207674bfd53B418a6E47DA148F5bFeCc652")
 	testAddressC = common.HexToAddress("2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27")
 
-	ethGases = dexeth.VersionedGases[0]
+	ethGases   = dexeth.VersionedGases[0]
+	tokenGases = dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts[0].Gas
 
 	tETH = &dex.Asset{
 		ID:           60,
@@ -52,6 +53,31 @@ var (
 		RedeemSize:   ethGases.Redeem,
 		SwapConf:     1,
 	}
+
+	tBTC = &dex.Asset{
+		ID:           0,
+		Symbol:       "btc",
+		Version:      0, // match btc.version
+		SwapSize:     300,
+		SwapSizeBase: 300,
+		MaxFeeRate:   10,
+		SwapConf:     1,
+	}
+
+	tToken = &dex.Asset{
+		ID:           testTokenID,
+		Symbol:       "dextt.eth",
+		Version:      0,
+		SwapSize:     tokenGases.Swap,
+		SwapSizeBase: tokenGases.Swap,
+		RedeemSize:   tokenGases.Redeem,
+		MaxFeeRate:   20,
+		SwapConf:     1,
+	}
+
+	// simBackend = backends.NewSimulatedBackend(core.GenesisAlloc{
+	// 	testAddressA: core.GenesisAccount{Balance: dexeth.GweiToWei(5e10)},
+	// }, 1e9)
 )
 
 type testNode struct {
@@ -72,12 +98,14 @@ type testNode struct {
 	tip            *big.Int
 	netFeeStateErr error
 
-	sendTxTx   *types.Transaction
-	sendTxErr  error
-	simBackend bind.ContractBackend
-	maxFeeRate *big.Int
-	pendingTxs []*types.Transaction
-	contractor *tContractor
+	sendTxTx        *types.Transaction
+	sendTxErr       error
+	simBackend      bind.ContractBackend
+	maxFeeRate      *big.Int
+	pendingTxs      []*types.Transaction
+	tContractor     *tContractor
+	tokenContractor *tTokenContractor
+	contractor      contractor
 }
 
 func newBalance(current, in, out uint64) *Balance {
@@ -120,6 +148,7 @@ func (n *testNode) currentFees(ctx context.Context) (baseFees, tipCap *big.Int, 
 }
 
 func (n *testNode) shutdown() {}
+
 func (n *testNode) bestHeader(ctx context.Context) (*types.Header, error) {
 	return n.bestHdr, n.bestHdrErr
 }
@@ -195,7 +224,7 @@ type tContractor struct {
 	redeemable    bool
 	redeemableErr error
 	valueIn       map[common.Hash]uint64
-	// valueOut      uint64
+	valueOut      map[common.Hash]uint64
 	valueErr      error
 	refundable    bool
 	refundableErr error
@@ -204,14 +233,6 @@ type tContractor struct {
 		secretHash [32]byte
 		maxFeeRate *big.Int
 		// contractVer uint32
-	}
-}
-
-func tNewContractor(g *dexeth.Gases) *tContractor {
-	return &tContractor{
-		gasEstimates: g,
-		swapMap:      make(map[[32]byte]*dexeth.SwapState),
-		valueIn:      make(map[common.Hash]uint64),
 	}
 }
 
@@ -256,12 +277,62 @@ func (c *tContractor) isRedeemable(secretHash, secret [32]byte) (bool, error) {
 	return c.redeemable, c.redeemableErr
 }
 
-func (c *tContractor) incomingValue(_ context.Context, tx *types.Transaction) (incoming uint64, err error) {
-	return c.valueIn[tx.Hash()], c.valueErr
+func (c *tContractor) value(_ context.Context, tx *types.Transaction) (incoming, outgoing uint64, err error) {
+	return c.valueIn[tx.Hash()], c.valueOut[tx.Hash()], c.valueErr
 }
 
 func (c *tContractor) isRefundable(secretHash [32]byte) (bool, error) {
 	return c.refundable, c.refundableErr
+}
+
+type tTokenContractor struct {
+	*tContractor
+	tokenAddr           common.Address
+	tokenAddrErr        error
+	bal                 *big.Int
+	balErr              error
+	allow               *big.Int
+	allowErr            error
+	approveTx           *types.Transaction
+	approved            bool
+	approveErr          error
+	approveEstimate     uint64
+	approveEstimateErr  error
+	transferTx          *types.Transaction
+	transferErr         error
+	transferEstimate    uint64
+	transferEstimateErr error
+}
+
+func (c *tTokenContractor) tokenAddress(ctx context.Context) (common.Address, error) {
+	return c.tokenAddr, c.tokenAddrErr
+}
+
+func (c *tTokenContractor) balance(context.Context) (*big.Int, error) {
+	return c.bal, c.balErr
+}
+
+func (c *tTokenContractor) allowance(context.Context) (*big.Int, error) {
+	return c.allow, c.allowErr
+}
+
+func (c *tTokenContractor) approve(*bind.TransactOpts, *big.Int) (*types.Transaction, error) {
+	if c.approveErr == nil {
+		c.approved = true
+	}
+	return c.approveTx, c.approveErr
+}
+
+func (c *tTokenContractor) estimateApproveGas(context.Context, *big.Int) (uint64, error) {
+	return c.approveEstimate, c.approveEstimateErr
+}
+
+func (c *tTokenContractor) transfer(*bind.TransactOpts, common.Address, *big.Int) (*types.Transaction, error) {
+	return c.transferTx, c.transferErr
+}
+
+func (c *tTokenContractor) estimateTransferGas(context.Context, *big.Int) (uint64, error) {
+	return c.transferEstimate, c.transferEstimateErr
 }
 
 func TestCheckForNewBlocks(t *testing.T) {
@@ -299,15 +370,19 @@ func TestCheckForNewBlocks(t *testing.T) {
 
 		node.bestHdr = test.bestHeader
 		node.bestHdrErr = test.blockErr
-		w := &ExchangeWallet{
-			node:       node,
-			addr:       node.address(),
-			ctx:        ctx,
-			log:        tLogger,
-			currentTip: header0,
-			tipChange:  tipChange,
+		w := &AssetWallet{
+			baseWallet: &baseWallet{
+				node:       node,
+				addr:       node.address(),
+				ctx:        ctx,
+				log:        tLogger,
+				currentTip: header0,
+			},
+			tipChange: tipChange,
+			assetID:   BipID,
 		}
-		w.checkForNewBlocks()
+		w.wallets = map[uint32]*AssetWallet{BipID: w}
+		w.checkForNewBlocks(tipChange)
 
 		if test.hasTipChange {
 			<-blocker
@@ -363,7 +438,7 @@ func TestSyncStatus(t *testing.T) {
 			bestHdr:    &types.Header{Time: nowInSecs - test.subSecs},
 			bestHdrErr: test.bestHdrErr,
 		}
-		eth := &ExchangeWallet{
+		eth := &baseWallet{
 			node: node,
 			addr: node.address(),
 			ctx:  ctx,
@@ -389,34 +464,87 @@ func TestSyncStatus(t *testing.T) {
 	}
 }
 
-func newTestNode() *testNode {
+func newTestNode(assetID uint32) *testNode {
 	privKey, _ := crypto.HexToECDSA("9447129055a25c8496fca9e5ee1b9463e47e6043ff0c288d07169e8284860e34")
 	addr := common.HexToAddress("2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27")
 	acct := &accounts.Account{
 		Address: addr,
 	}
+
+	tc := &tContractor{
+		gasEstimates: ethGases,
+		swapMap:      make(map[[32]byte]*dexeth.SwapState),
+		valueIn:      make(map[common.Hash]uint64),
+		valueOut:     make(map[common.Hash]uint64),
+	}
+
+	var c contractor = tc
+
+	ttc := &tTokenContractor{
+		tContractor: tc,
+	}
+	if assetID != BipID {
+		c = ttc
+	}
+
 	return &testNode{
-		acct:       acct,
-		addr:       acct.Address,
-		maxFeeRate: dexeth.GweiToWei(100),
-		baseFee:    dexeth.GweiToWei(100),
-		tip:        dexeth.GweiToWei(2),
-		privKey:    privKey,
-		contractor: tNewContractor(ethGases),
+		acct:            acct,
+		addr:            acct.Address,
+		maxFeeRate:      dexeth.GweiToWei(100),
+		baseFee:         dexeth.GweiToWei(100),
+		tip:             dexeth.GweiToWei(2),
+		privKey:         privKey,
+		contractor:      c,
+		tContractor:     tc,
+		tokenContractor: ttc,
 	}
 }
 
-func tAssetWallet() (*ExchangeWallet, *testNode, context.CancelFunc) {
-	node := newTestNode()
+func tAssetWallet(assetID uint32) (*AssetWallet, *testNode, context.CancelFunc) {
+	node := newTestNode(assetID)
 	ctx, cancel := context.WithCancel(context.Background())
-	w := &ExchangeWallet{
-		addr:               node.addr,
-		node:               node,
-		ctx:                ctx,
-		log:                tLogger,
-		gasFeeLimit:        defaultGasFeeLimit,
-		contractors:        map[uint32]contractor{0: node.contractor},
+	var c contractor = node.tContractor
+	if assetID != BipID {
+		c = node.tokenContractor
+	}
+
+	w := &AssetWallet{
+		baseWallet: &baseWallet{
+			addr:        node.addr,
+			net:         dex.Simnet,
+			node:        node,
+			ctx:         ctx,
+			log:         tLogger,
+			gasFeeLimit: defaultGasFeeLimit,
+		},
+		assetID:            assetID,
+		contractors:        map[uint32]contractor{0: c},
 		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
+		evmify:             dexeth.GweiToWei,
+		atomize:            dexeth.WeiToGwei,
+	}
+	w.wallets = map[uint32]*AssetWallet{
+		BipID: w,
+	}
+
+	if assetID == BipID {
+		w.wallets = map[uint32]*AssetWallet{
+			BipID: w,
+		}
+	} else {
+		w.token = &tokenConfig{
+			tokenWalletConfig: &tokenWalletConfig{},
+			parent: &AssetWallet{
+				baseWallet:  w.baseWallet,
+				contractors: map[uint32]contractor{0: node.tContractor},
+				assetID:     BipID,
+				atomize:     dexeth.WeiToGwei,
+			},
+		}
+		w.wallets = map[uint32]*AssetWallet{
+			testTokenID: w,
+			BipID:       w.token.parent,
+		}
 	}
 
 	return w, node, cancel
@@ -434,6 +562,7 @@ func TestBalance(t *testing.T) {
 		wantBal      uint64
 		wantImmature uint64
 		wantLocked   uint64
+		token        bool
 	}{{
 		name:         "ok zero",
 		bal:          newBalance(0, 0, 0),
@@ -448,21 +577,45 @@ func TestBalance(t *testing.T) {
 		bal:     newBalance(1, 0, 0),
 		wantBal: 1,
 	}, {
+		name:    "ok one token",
+		bal:     newBalance(1, 0, 0),
+		wantBal: 1,
+		token:   true,
+	}, {
 		name:       "ok pending out",
 		bal:        newBalance(4e8, 0, 1.4e8),
 		wantBal:    2.6e8,
 		wantLocked: 0,
+	}, {
+		name:       "ok pending out token",
+		bal:        newBalance(4e8, 0, 1.4e8),
+		wantBal:    2.6e8,
+		wantLocked: 0,
+		token:      true,
 	}, {
 		name:         "ok pending in",
 		bal:          newBalance(1e8, 3e8, 0),
 		wantBal:      1e8,
 		wantImmature: 3e8,
 	}, {
+		name:         "ok pending in token",
+		bal:          newBalance(1e8, 3e8, 0),
+		wantBal:      1e8,
+		wantImmature: 3e8,
+		token:        true,
+	}, {
 		name:         "ok pending out and in",
 		bal:          newBalance(4e8, 2e8, 1e8),
 		wantBal:      3e8,
 		wantLocked:   0,
 		wantImmature: 2e8,
+	}, {
+		name:         "ok pending out and in token",
+		bal:          newBalance(4e8, 2e8, 1e8),
+		wantBal:      3e8,
+		wantLocked:   0,
+		wantImmature: 2e8,
+		token:        true,
 	}, {
 		// 	name:         "ok max int",
 		// 	bal:          maxWei,
@@ -482,11 +635,21 @@ func TestBalance(t *testing.T) {
 	}}
 
 	for _, test := range tests {
-		eth, node, shutdown := tAssetWallet()
+		var assetID uint32 = BipID
+		if test.token {
+			assetID = testTokenID
+		}
+
+		eth, node, shutdown := tAssetWallet(assetID)
 		defer shutdown()
 
-		node.bal = test.bal.Current
-		node.balErr = test.balErr
+		if test.token {
+			node.tokenContractor.bal = test.bal.Current
+			node.tokenContractor.balErr = test.balErr
+		} else {
+			node.bal = test.bal.Current
+			node.balErr = test.balErr
+		}
 
 		var nonce uint64
 		newTx := func(value *big.Int) *types.Transaction {
@@ -505,10 +668,16 @@ func TestBalance(t *testing.T) {
 		if test.bal.PendingIn.Cmp(new(big.Int)) > 0 {
 			tx := newTx(new(big.Int))
 			node.pendingTxs = append(node.pendingTxs, tx)
-			node.contractor.valueIn[tx.Hash()] = dexeth.WeiToGwei(test.bal.PendingIn)
+			node.tContractor.valueIn[tx.Hash()] = dexeth.WeiToGwei(test.bal.PendingIn)
 		}
 		if test.bal.PendingOut.Cmp(new(big.Int)) > 0 {
-			node.pendingTxs = append(node.pendingTxs, newTx(test.bal.PendingOut))
+			if test.token {
+				tx := newTx(nil)
+				node.pendingTxs = append(node.pendingTxs, tx)
+				node.tContractor.valueOut[tx.Hash()] = dexeth.WeiToGwei(test.bal.PendingOut)
+			} else {
+				node.pendingTxs = append(node.pendingTxs, newTx(test.bal.PendingOut))
+			}
 		}
 
 		bal, err := eth.Balance()
@@ -537,7 +706,7 @@ func TestFeeRate(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	node := &testNode{}
-	eth := &ExchangeWallet{
+	eth := &baseWallet{
 		node: node,
 		ctx:  ctx,
 		log:  tLogger,
@@ -580,22 +749,46 @@ func TestFeeRate(t *testing.T) {
 }
 
 func TestRefund(t *testing.T) {
-	eth, node, shutdown := tAssetWallet()
+	t.Run("eth", func(t *testing.T) { testRefund(t, BipID) })
+	t.Run("token", func(t *testing.T) { testRefund(t, testTokenID) })
+}
+
+func testRefund(t *testing.T, assetID uint32) {
+	eth, node, shutdown := tAssetWallet(assetID)
 	defer shutdown()
 
 	const feeSuggestion = 100
 	const gweiBal = 1e9
 	const ogRefundReserves = 1e8
 
+	v1Contractor := &tContractor{
+		swapMap:      make(map[[32]byte]*dexeth.SwapState, 1),
+		gasEstimates: ethGases,
+		redeemTx:     types.NewTx(&types.DynamicFeeTx{}),
+	}
+	var v1c contractor = v1Contractor
+
 	gasesV1 := &dexeth.Gases{Refund: 1e5}
-	dexeth.VersionedGases[1] = gasesV1
-	v1Contractor := tNewContractor(gasesV1)
+	if assetID == BipID {
+		dexeth.VersionedGases[1] = gasesV1
+		defer delete(dexeth.VersionedGases, 1)
+	} else {
+		tokenContracts := dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts
+		tc := *tokenContracts[0]
+		tc.Gas = *gasesV1
+		tokenContracts[1] = &tc
+		defer delete(tokenContracts, 1)
+		v1c = &tTokenContractor{tContractor: v1Contractor}
+	}
+
+	eth.contractors[1] = v1c
 
 	var secretHash [32]byte
 	copy(secretHash[:], encode.RandomBytes(32))
 	v0Contract := dexeth.EncodeContractData(0, secretHash)
 	ss := new(dexeth.SwapState)
-	v0Contractor := node.contractor
+	v0Contractor := node.tContractor
+
 	v0Contractor.swapMap[secretHash] = ss
 	v1Contractor.swapMap[secretHash] = ss
 
@@ -665,21 +858,19 @@ func TestRefund(t *testing.T) {
 
 	for _, test := range tests {
 		contract := v0Contract
-		node.contractor = v0Contractor
+		c := v0Contractor
 		if test.useV1Gases {
 			contract = dexeth.EncodeContractData(1, secretHash)
-			node.contractor = v1Contractor
-			eth.contractors[1] = node.contractor
-			defer delete(eth.contractors, 1)
+			c = v1Contractor
 		} else if test.badContract {
 			contract = []byte{}
 		}
 
-		node.contractor.refundable = test.isRefundable
-		node.contractor.refundableErr = test.isRefundableErr
-		node.contractor.refundErr = test.refundErr
+		c.refundable = test.isRefundable
+		c.refundableErr = test.isRefundableErr
+		c.refundErr = test.refundErr
 		node.bal = dexeth.GweiToWei(gweiBal)
-		node.contractor.swapErr = test.swapErr
+		c.swapErr = test.swapErr
 		ss.State = test.swapStep
 		eth.lockedFunds.refundReserves = ogRefundReserves
 
@@ -687,7 +878,7 @@ func TestRefund(t *testing.T) {
 		if test.isRefundable {
 			tx := types.NewTx(&types.DynamicFeeTx{})
 			txHash = tx.Hash()
-			node.contractor.refundTx = tx
+			c.refundTx = tx
 		}
 
 		refundID, err := eth.Refund(nil, contract, feeSuggestion)
@@ -713,14 +904,14 @@ func TestRefund(t *testing.T) {
 				t.Fatalf(`%v: expected refund tx hash: %x = returned id: %s`, test.name, txHash, refundID)
 			}
 
-			if secretHash != node.contractor.lastRefund.secretHash {
+			if secretHash != c.lastRefund.secretHash {
 				t.Fatalf(`%v: secret hash in contract %x != used to call refund %x`,
-					test.name, secretHash, node.contractor.lastRefund.secretHash)
+					test.name, secretHash, c.lastRefund.secretHash)
 			}
 
-			if dexeth.GweiToWei(feeSuggestion).Cmp(node.contractor.lastRefund.maxFeeRate) != 0 {
+			if dexeth.GweiToWei(feeSuggestion).Cmp(c.lastRefund.maxFeeRate) != 0 {
 				t.Fatalf(`%v: fee suggestion %v != used to call refund %v`,
-					test.name, dexeth.GweiToWei(feeSuggestion), node.contractor.lastRefund.maxFeeRate)
+					test.name, dexeth.GweiToWei(feeSuggestion), c.lastRefund.maxFeeRate)
 			}
 		}
 	}
@@ -741,12 +932,24 @@ func (b *badCoin) Value() uint64 {
 }
 
 func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
-	eth, node, shutdown := tAssetWallet()
+	t.Run("eth", func(t *testing.T) { testFundOrderReturnCoinsFundingCoins(t, BipID) })
+	t.Run("token", func(t *testing.T) { testFundOrderReturnCoinsFundingCoins(t, testTokenID) })
+}
+
+func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
+	eth, node, shutdown := tAssetWallet(assetID)
 	defer shutdown()
 	walletBalanceGwei := uint64(dexeth.GweiFactor)
-	node.bal = dexeth.GweiToWei(walletBalanceGwei)
+	fromAsset := tETH
+	if assetID == BipID {
+		node.bal = dexeth.GweiToWei(walletBalanceGwei)
+	} else {
+		fromAsset = tToken
+		node.tokenContractor.bal = dexeth.GweiToWei(walletBalanceGwei)
+		eth.token.parent.node.(*testNode).bal = dexeth.GweiToWei(walletBalanceGwei)
+	}
 
-	checkBalance := func(wallet *ExchangeWallet, expectedAvailable, expectedLocked uint64, testName string) {
+	checkBalance := func(wallet *AssetWallet, expectedAvailable, expectedLocked uint64, testName string) {
 		t.Helper()
 		balance, err := wallet.Balance()
 		if err != nil {
@@ -787,7 +990,12 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 		if !is {
 			t.Fatalf("%s: funding coin is not a RecoveryCoin", test.testName)
 		}
-		_, err = eth.decodeFundingCoinID(rc.RecoveryID())
+
+		if assetID == BipID {
+			_, err = decodeFundingCoin(rc.RecoveryID())
+		} else {
+			_, err = decodeTokenFundingCoin(rc.RecoveryID())
+		}
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", test.testName, err)
 		}
@@ -797,16 +1005,20 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	}
 
 	order := asset.Order{
-		Value:        500000000,
+		Value:        walletBalanceGwei / 2,
 		MaxSwapCount: 2,
-		DEXConfig:    tETH,
+		DEXConfig:    fromAsset,
+		RedeemConfig: tBTC,
 	}
 
 	// Test fund order with less than available funds
 	coins1, redeemScripts1, err := eth.FundOrder(&order)
 	expectedOrderFees := order.DEXConfig.SwapSize * order.DEXConfig.MaxFeeRate * order.MaxSwapCount
 	expectedFees := expectedOrderFees
-	expectedCoinValue := order.Value + expectedOrderFees
+	expectedCoinValue := order.Value
+	if assetID == BipID {
+		expectedCoinValue += expectedOrderFees
+	}
 
 	checkFundOrderResult(coins1, redeemScripts1, err, fundOrderTest{
 		testName:    "more than enough",
@@ -816,7 +1028,10 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	checkBalance(eth, walletBalanceGwei-expectedCoinValue, expectedCoinValue, "more than enough")
 
 	// Test fund order with 1 more than available funds
-	order.Value = walletBalanceGwei - expectedCoinValue - expectedOrderFees + 1
+	order.Value = walletBalanceGwei - expectedCoinValue + 1
+	if assetID == BipID {
+		order.Value -= expectedOrderFees
+	}
 	coins, redeemScripts, err := eth.FundOrder(&order)
 	checkFundOrderResult(coins, redeemScripts, err, fundOrderTest{
 		testName: "not enough",
@@ -826,10 +1041,14 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 
 	// Test fund order with funds equal to available
 	order.Value = order.Value - 1
+	expVal := order.Value
+	if assetID == BipID {
+		expVal += expectedFees
+	}
 	coins2, redeemScripts2, err := eth.FundOrder(&order)
 	checkFundOrderResult(coins2, redeemScripts2, err, fundOrderTest{
 		testName:    "just enough",
-		coinValue:   order.Value + expectedFees,
+		coinValue:   expVal,
 		coinAddress: node.addr.String(),
 	})
 	checkBalance(eth, 0, walletBalanceGwei, "just enough")
@@ -842,7 +1061,10 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	checkBalance(eth, walletBalanceGwei, 0, "after return too much")
 
 	// Fund order with funds equal to available
-	order.Value = walletBalanceGwei - expectedOrderFees
+	order.Value = walletBalanceGwei
+	if assetID == BipID {
+		order.Value -= expectedOrderFees
+	}
 	_, _, err = eth.FundOrder(&order)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -879,11 +1101,14 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	}
 	eth.gasFeeLimit = tmpGasFeeLimit
 
-	eth2, _, shutdown2 := tAssetWallet()
+	eth2, _, shutdown2 := tAssetWallet(assetID)
 	defer shutdown2()
 	eth2.node = node
+	eth2.contractors[0] = node.tokenContractor
+	node.tokenContractor.bal = dexeth.GweiToWei(walletBalanceGwei)
 
 	// Test reloading coins from first order
+	coinVal := coins1[0].Value()
 	coins, err = eth2.FundingCoins([]dex.Bytes{parseRecoveryID(coins1[0])})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -891,24 +1116,29 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	if len(coins) != 1 {
 		t.Fatalf("expected 1 coins but got %v", len(coins))
 	}
-	if coins[0].Value() != coins1[0].Value() {
+	if coins[0].Value() != coinVal {
 		t.Fatalf("funding coin value %v != expected %v", coins[0].Value(), coins[1].Value())
 	}
-	checkBalance(eth2, walletBalanceGwei-coins1[0].Value(), coins1[0].Value(), "funding1")
+	checkBalance(eth2, walletBalanceGwei-coinVal, coinVal, "funding1")
 
 	// Test reloading more coins than are available in balance
-	_, err = eth2.FundingCoins([]dex.Bytes{parseRecoveryID(coins1[0])})
+	rid := parseRecoveryID(coins1[0])
+	if assetID != BipID {
+		rid = createTokenFundingCoin(node.addr, coinVal+1, 1).RecoveryID()
+	}
+	_, err = eth2.FundingCoins([]dex.Bytes{rid})
 	if err == nil {
 		t.Fatalf("expected error but didn't get one")
 	}
-	checkBalance(eth2, walletBalanceGwei-coins1[0].Value(), coins1[0].Value(), "after funding error 1")
+	checkBalance(eth2, walletBalanceGwei-coinVal, coinVal, "after funding error 1")
 
 	// Test funding coins with bad coin ID
-	_, err = eth2.FundingCoins([]dex.Bytes{parseRecoveryID(coins1[0])})
+
+	_, err = eth2.FundingCoins([]dex.Bytes{append(parseRecoveryID(coins1[0]), 0x0a)})
 	if err == nil {
 		t.Fatalf("expected error but did not get")
 	}
-	checkBalance(eth2, walletBalanceGwei-coins1[0].Value(), coins1[0].Value(), "after funding error 3")
+	checkBalance(eth2, walletBalanceGwei-coinVal, coinVal, "after funding error 3")
 
 	// Test funding coins with coin from different address
 	var differentAddress [20]byte
@@ -918,7 +1148,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	copy(nonce[:], encode.RandomBytes(8))
 
 	differentKindaCoin := (&coin{
-		id: encode.RandomBytes(20), // e.g. tx hash
+		id: randomHash(), // e.g. tx hash
 	})
 	_, err = eth2.FundingCoins([]dex.Bytes{differentKindaCoin.ID()})
 	if err == nil {
@@ -930,7 +1160,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error for wrong address, but did not get")
 	}
-	checkBalance(eth2, walletBalanceGwei-coins1[0].Value(), coins1[0].Value(), "after funding error 4")
+	checkBalance(eth2, walletBalanceGwei-coinVal, coinVal, "after funding error 4")
 
 	// Test funding coins with balance error
 	node.balErr = errors.New("")
@@ -939,7 +1169,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 		t.Fatalf("expected error but did not get")
 	}
 	node.balErr = nil
-	checkBalance(eth2, walletBalanceGwei-coins1[0].Value(), coins1[0].Value(), "after funding error 5")
+	checkBalance(eth2, walletBalanceGwei-coinVal, coinVal, "after funding error 5")
 
 	// Reloading coins from second order
 	coins, err = eth2.FundingCoins([]dex.Bytes{parseRecoveryID(coins2[0])})
@@ -986,11 +1216,15 @@ func TestPreSwap(t *testing.T) {
 	oneFee := ethGases.Swap * tETH.MaxFeeRate
 	oneLock := lotSize + oneFee
 
+	oneFeeToken := tokenGases.Swap * tToken.MaxFeeRate
+
 	tests := []struct {
-		name   string
-		bal    uint64
-		balErr error
-		lots   uint64
+		name      string
+		bal       uint64
+		balErr    error
+		lots      uint64
+		token     bool
+		parentBal uint64
 
 		wantErr       bool
 		wantLots      uint64
@@ -1014,6 +1248,15 @@ func TestPreSwap(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:      "not enough for fees - token",
+			bal:       lotSize,
+			parentBal: oneFeeToken - 1,
+			lots:      1,
+			token:     true,
+
+			wantErr: true,
+		},
+		{
 			name: "one lot enough for fees",
 			bal:  oneLock,
 			lots: 1,
@@ -1025,9 +1268,31 @@ func TestPreSwap(t *testing.T) {
 			wantWorstCase: feeSuggestion * ethGases.Swap,
 		},
 		{
+			name:      "one lot enough for fees - token",
+			bal:       lotSize,
+			lots:      1,
+			parentBal: oneFeeToken,
+			token:     true,
+
+			wantLots:      1,
+			wantValue:     lotSize,
+			wantMaxFees:   tToken.MaxFeeRate * tokenGases.Swap,
+			wantBestCase:  feeSuggestion * tokenGases.Swap,
+			wantWorstCase: feeSuggestion * tokenGases.Swap,
+		},
+		{
 			name: "more lots than max lots",
 			bal:  oneLock*2 - 1,
 			lots: 2,
+
+			wantErr: true,
+		},
+		{
+			name:      "more lots than max lots - token",
+			bal:       lotSize*2 - 1,
+			lots:      2,
+			token:     true,
+			parentBal: oneFeeToken * 2,
 
 			wantErr: true,
 		},
@@ -1043,6 +1308,19 @@ func TestPreSwap(t *testing.T) {
 			wantWorstCase: 4 * feeSuggestion * ethGases.Swap,
 		},
 		{
+			name:      "fewer than max lots - token",
+			bal:       10 * lotSize,
+			lots:      4,
+			token:     true,
+			parentBal: oneFeeToken * 4,
+
+			wantLots:      4,
+			wantValue:     4 * lotSize,
+			wantMaxFees:   4 * tToken.MaxFeeRate * tokenGases.Swap,
+			wantBestCase:  feeSuggestion * tokenGases.SwapN(4),
+			wantWorstCase: 4 * feeSuggestion * tokenGases.Swap,
+		},
+		{
 			name:   "balanceError",
 			bal:    5 * lotSize,
 			balErr: errors.New(""),
@@ -1050,18 +1328,42 @@ func TestPreSwap(t *testing.T) {
 
 			wantErr: true,
 		},
+		{
+			name:   "balanceError - token",
+			bal:    5 * lotSize,
+			balErr: errors.New(""),
+			lots:   1,
+			token:  true,
+
+			wantErr: true,
+		},
 	}
 
 	for _, test := range tests {
-		eth, node, shutdown := tAssetWallet()
+		var assetID uint32 = BipID
+		assetCfg := tETH
+		if test.token {
+			assetID = testTokenID
+			assetCfg = tToken
+		}
+
+		eth, node, shutdown := tAssetWallet(assetID)
 		defer shutdown()
-		node.bal = dexeth.GweiToWei(test.bal)
+
+		if test.token {
+			node.tokenContractor.bal = dexeth.GweiToWei(test.bal)
+			node.bal = dexeth.GweiToWei(test.parentBal)
+		} else {
+			node.bal = dexeth.GweiToWei(test.bal)
+		}
+
 		node.balErr = test.balErr
 
 		preSwap, err := eth.PreSwap(&asset.PreSwapForm{
 			LotSize:       lotSize,
 			Lots:          test.lots,
-			AssetConfig:   tETH,
+			AssetConfig:   assetCfg,
+			RedeemConfig:  tBTC,
 			FeeSuggestion: feeSuggestion,
 		})
 
@@ -1075,46 +1377,62 @@ func TestPreSwap(t *testing.T) {
 			t.Fatalf("unexpected error for test %q: %v", test.name, err)
 		}
 
-		if preSwap.Estimate.Lots != test.wantLots {
-			t.Fatalf("want lots %v got %v for test %q", test.wantLots, preSwap.Estimate.Lots, test.name)
+		est := preSwap.Estimate
+
+		if est.Lots != test.wantLots {
+			t.Fatalf("want lots %v got %v for test %q", test.wantLots, est.Lots, test.name)
 		}
-		if preSwap.Estimate.Value != test.wantValue {
-			t.Fatalf("want value %v got %v for test %q", test.wantValue, preSwap.Estimate.Value, test.name)
+		if est.Value != test.wantValue {
+			t.Fatalf("want value %v got %v for test %q", test.wantValue, est.Value, test.name)
 		}
-		if preSwap.Estimate.MaxFees != test.wantMaxFees {
-			t.Fatalf("want maxFees %v got %v for test %q", test.wantMaxFees, preSwap.Estimate.MaxFees, test.name)
+		if est.MaxFees != test.wantMaxFees {
+			t.Fatalf("want maxFees %v got %v for test %q", test.wantMaxFees, est.MaxFees, test.name)
 		}
-		if preSwap.Estimate.RealisticBestCase != test.wantBestCase {
-			t.Fatalf("want best case %v got %v for test %q", test.wantBestCase, preSwap.Estimate.RealisticBestCase, test.name)
+		if est.RealisticBestCase != test.wantBestCase {
+			t.Fatalf("want best case %v got %v for test %q", test.wantBestCase, est.RealisticBestCase, test.name)
 		}
-		if preSwap.Estimate.RealisticWorstCase != test.wantWorstCase {
-			t.Fatalf("want worst case %v got %v for test %q", test.wantWorstCase, preSwap.Estimate.RealisticWorstCase, test.name)
+		if est.RealisticWorstCase != test.wantWorstCase {
+			t.Fatalf("want worst case %v got %v for test %q", test.wantWorstCase, est.RealisticWorstCase, test.name)
 		}
 	}
 }
 
 func TestSwap(t *testing.T) {
-	eth, node, shutdown := tAssetWallet()
+	t.Run("eth", func(t *testing.T) { testSwap(t, BipID) })
+	t.Run("token", func(t *testing.T) { testSwap(t, testTokenID) })
+}
+
+func testSwap(t *testing.T, assetID uint32) {
+	eth, node, shutdown := tAssetWallet(assetID)
 	defer shutdown()
 	receivingAddress := "0x2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27"
-	node.contractor.initTx = types.NewTx(&types.DynamicFeeTx{})
+	node.tContractor.initTx = types.NewTx(&types.DynamicFeeTx{})
 
-	coinIDsForAmounts := func(coinAmounts []uint64) []dex.Bytes {
+	coinIDsForAmounts := func(coinAmounts []uint64, n uint64) []dex.Bytes {
 		coinIDs := make([]dex.Bytes, 0, len(coinAmounts))
 		for _, amt := range coinAmounts {
-			fundingCoinID := createFundingCoin(eth.addr, amt)
-			coinIDs = append(coinIDs, fundingCoinID.RecoveryID())
+			if assetID == BipID {
+				coinIDs = append(coinIDs, createFundingCoin(eth.addr, amt).RecoveryID())
+			} else {
+				fees := n * tokenGases.Swap * tToken.MaxFeeRate
+				coinIDs = append(coinIDs, createTokenFundingCoin(eth.addr, amt, fees).RecoveryID())
+			}
 		}
 		return coinIDs
 	}
 
-	refreshWalletAndFundCoins := func(ethBalance uint64, coinAmounts []uint64) asset.Coins {
-		node.bal = ethToWei(ethBalance)
+	refreshWalletAndFundCoins := func(bal uint64, coinAmounts []uint64, n uint64) asset.Coins {
+		if assetID == BipID {
+			node.bal = ethToWei(bal)
+		} else {
+			node.tokenContractor.bal = ethToWei(bal)
+			node.bal = ethToWei(10)
+		}
+
 		eth.lockedFunds.initiateReserves = 0
 		eth.lockedFunds.redemptionReserves = 0
 		eth.lockedFunds.refundReserves = 0
-
-		coins, err := eth.FundingCoins(coinIDsForAmounts(coinAmounts))
+		coins, err := eth.FundingCoins(coinIDsForAmounts(coinAmounts, n))
 		if err != nil {
 			t.Fatalf("FundingCoins error: %v", err)
 		}
@@ -1122,7 +1440,12 @@ func TestSwap(t *testing.T) {
 	}
 
 	gasNeededForSwaps := func(numSwaps int) uint64 {
-		return dexeth.InitGas(1, 0) * uint64(numSwaps)
+		if assetID == BipID {
+			return ethGases.Swap * uint64(numSwaps)
+		} else {
+			return tokenGases.Swap * uint64(numSwaps)
+		}
+
 	}
 
 	testSwap := func(testName string, swaps asset.Swaps, expectError bool) {
@@ -1165,7 +1488,7 @@ func TestSwap(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to decode contract data: %v", err)
 			}
-			if swaps.AssetVersion != ver {
+			if swaps.AssetConfig.Version != ver {
 				t.Fatal("wrong contract version")
 			}
 			if !bytes.Equal(contract.SecretHash, secretHash[:]) {
@@ -1188,9 +1511,10 @@ func TestSwap(t *testing.T) {
 		}
 		var expectedLocked uint64
 		if swaps.LockChange {
-			expectedLocked = originalBalance.Locked -
-				totalCoinValue -
-				gasNeededForSwaps(len(swaps.Contracts))*swaps.FeeRate
+			expectedLocked = originalBalance.Locked - totalCoinValue
+			if assetID == BipID {
+				expectedLocked -= gasNeededForSwaps(len(swaps.Contracts)) * swaps.FeeRate
+			}
 		} else {
 			expectedLocked = originalBalance.Locked - totalInputValue
 		}
@@ -1200,9 +1524,10 @@ func TestSwap(t *testing.T) {
 		}
 
 		// Check that change coin is correctly returned
-		expectedChangeValue := totalInputValue -
-			totalCoinValue -
-			gasNeededForSwaps(len(swaps.Contracts))*swaps.FeeRate
+		expectedChangeValue := totalInputValue - totalCoinValue
+		if assetID == BipID {
+			expectedChangeValue -= gasNeededForSwaps(len(swaps.Contracts)) * swaps.FeeRate
+		}
 		if expectedChangeValue == 0 && changeCoin != nil {
 			t.Fatalf("%v: change coin should be nil if change is 0", testName)
 		} else if expectedChangeValue > 0 && changeCoin == nil && swaps.LockChange {
@@ -1228,7 +1553,7 @@ func TestSwap(t *testing.T) {
 	expiration := uint64(time.Now().Add(time.Hour * 8).Unix())
 
 	// Ensure error when initializing swap errors
-	node.contractor.initErr = errors.New("")
+	node.tContractor.initErr = errors.New("")
 	contracts := []*asset.Contract{
 		{
 			Address:    receivingAddress,
@@ -1237,15 +1562,20 @@ func TestSwap(t *testing.T) {
 			LockTime:   expiration,
 		},
 	}
-	inputs := refreshWalletAndFundCoins(5, []uint64{ethToGwei(2)})
+	inputs := refreshWalletAndFundCoins(5, []uint64{ethToGwei(2)}, 1)
+	assetCfg := tETH
+	if assetID != BipID {
+		assetCfg = tToken
+	}
 	swaps := asset.Swaps{
-		Inputs:     inputs,
-		Contracts:  contracts,
-		FeeRate:    200,
-		LockChange: false,
+		Inputs:      inputs,
+		Contracts:   contracts,
+		FeeRate:     assetCfg.MaxFeeRate,
+		LockChange:  false,
+		AssetConfig: assetCfg,
 	}
 	testSwap("error initialize but no send", swaps, true)
-	node.contractor.initErr = nil
+	node.tContractor.initErr = nil
 
 	// Tests one contract without locking change
 	contracts = []*asset.Contract{
@@ -1256,22 +1586,25 @@ func TestSwap(t *testing.T) {
 			LockTime:   expiration,
 		},
 	}
-	inputs = refreshWalletAndFundCoins(5, []uint64{ethToGwei(2)})
+
+	inputs = refreshWalletAndFundCoins(5, []uint64{ethToGwei(2)}, 1)
 	swaps = asset.Swaps{
-		Inputs:     inputs,
-		Contracts:  contracts,
-		FeeRate:    200,
-		LockChange: false,
+		Inputs:      inputs,
+		Contracts:   contracts,
+		FeeRate:     assetCfg.MaxFeeRate,
+		LockChange:  false,
+		AssetConfig: assetCfg,
 	}
 	testSwap("one contract, don't lock change", swaps, false)
 
 	// Test one contract with locking change
-	inputs = refreshWalletAndFundCoins(5, []uint64{ethToGwei(2)})
+	inputs = refreshWalletAndFundCoins(5, []uint64{ethToGwei(2)}, 1)
 	swaps = asset.Swaps{
-		Inputs:     inputs,
-		Contracts:  contracts,
-		FeeRate:    200,
-		LockChange: true,
+		Inputs:      inputs,
+		Contracts:   contracts,
+		FeeRate:     assetCfg.MaxFeeRate,
+		LockChange:  true,
+		AssetConfig: assetCfg,
 	}
 	testSwap("one contract, lock change", swaps, false)
 
@@ -1290,51 +1623,51 @@ func TestSwap(t *testing.T) {
 			LockTime:   expiration,
 		},
 	}
-	inputs = refreshWalletAndFundCoins(5, []uint64{ethToGwei(3)})
+	inputs = refreshWalletAndFundCoins(5, []uint64{ethToGwei(3)}, 2)
 	swaps = asset.Swaps{
-		Inputs:     inputs,
-		Contracts:  contracts,
-		FeeRate:    200,
-		LockChange: false,
+		Inputs:      inputs,
+		Contracts:   contracts,
+		FeeRate:     assetCfg.MaxFeeRate,
+		LockChange:  false,
+		AssetConfig: assetCfg,
 	}
 	testSwap("two contracts", swaps, false)
 
 	// Test error when funding coins are not enough to cover swaps
-	inputs = refreshWalletAndFundCoins(5, []uint64{ethToGwei(1)})
+	inputs = refreshWalletAndFundCoins(5, []uint64{ethToGwei(1)}, 2)
 	swaps = asset.Swaps{
-		Inputs:     inputs,
-		Contracts:  contracts,
-		FeeRate:    200,
-		LockChange: false,
+		Inputs:      inputs,
+		Contracts:   contracts,
+		FeeRate:     assetCfg.MaxFeeRate,
+		LockChange:  false,
+		AssetConfig: assetCfg,
 	}
 	testSwap("funding coins not enough balance", swaps, true)
 
 	// Ensure when funds are exactly the same as required works properly
-	inputs = refreshWalletAndFundCoins(5, []uint64{ethToGwei(2) + (2 * 200 * dexeth.InitGas(1, 0))})
+	inputs = refreshWalletAndFundCoins(5, []uint64{ethToGwei(2) + (2 * 200 * dexeth.InitGas(1, 0))}, 2)
 	swaps = asset.Swaps{
-		Inputs:     inputs,
-		Contracts:  contracts,
-		FeeRate:    200,
-		LockChange: false,
+		Inputs:      inputs,
+		Contracts:   contracts,
+		FeeRate:     assetCfg.MaxFeeRate,
+		LockChange:  false,
+		AssetConfig: assetCfg,
 	}
 	testSwap("exact change", swaps, false)
 }
 
 func TestPreRedeem(t *testing.T) {
-	node := newTestNode()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	eth := &ExchangeWallet{
-		node: node,
-		addr: node.address(),
-		ctx:  ctx,
-		log:  tLogger,
-	}
-	preRedeem, err := eth.PreRedeem(&asset.PreRedeemForm{
+	eth, _, shutdown := tAssetWallet(BipID)
+	defer shutdown()
+
+	form := &asset.PreRedeemForm{
 		LotSize:       123456,
 		Lots:          5,
 		FeeSuggestion: 100,
-	})
+		AssetConfig:   tETH,
+	}
+
+	preRedeem, err := eth.PreRedeem(form)
 	if err != nil {
 		t.Fatalf("unexpected PreRedeem error: %v", err)
 	}
@@ -1342,16 +1675,55 @@ func TestPreRedeem(t *testing.T) {
 	if preRedeem.Estimate.RealisticBestCase >= preRedeem.Estimate.RealisticWorstCase {
 		t.Fatalf("best case > worst case")
 	}
+
+	// Token
+	w, node, shutdown2 := tAssetWallet(testTokenID)
+	defer shutdown2()
+
+	form.AssetConfig = tToken
+	node.tokenContractor.allow = unlimitedAllowanceReplenishThreshold
+
+	preRedeem, err = w.PreRedeem(form)
+	if err != nil {
+		t.Fatalf("unexpected token PreRedeem error: %v", err)
+	}
+
+	if preRedeem.Estimate.RealisticBestCase >= preRedeem.Estimate.RealisticWorstCase {
+		t.Fatalf("token best case > worst case")
+	}
+
+	// Make sure a lower allowance results in higher fee estimate.
+	oldEst := preRedeem.Estimate.RealisticWorstCase
+	node.tokenContractor.allow = new(big.Int).Sub(unlimitedAllowanceReplenishThreshold, big.NewInt(1))
+	preRedeem, err = w.PreRedeem(form)
+	if err != nil {
+		t.Fatalf("unexpected token PreRedeem with approval error: %v", err)
+	}
+
+	approvalCost := preRedeem.Estimate.RealisticWorstCase - oldEst
+	expApprovalCost := tokenGases.Approve * form.FeeSuggestion
+	if approvalCost != expApprovalCost {
+		t.Fatalf("unexpected approval cost: wanted %d, got %d", expApprovalCost, approvalCost)
+	}
+
 }
 
 func TestRedeem(t *testing.T) {
-	eth, node, shutdown := tAssetWallet()
+	t.Run("eth", func(t *testing.T) { testRedeem(t, BipID) })
+	t.Run("token", func(t *testing.T) { testRedeem(t, testTokenID) })
+}
+
+func testRedeem(t *testing.T, assetID uint32) {
+	eth, node, shutdown := tAssetWallet(assetID)
 	defer shutdown()
 
 	// Test with a non-zero contract version to ensure it makes it into the receipt
 	contractVer := uint32(1)
 	dexeth.VersionedGases[1] = ethGases // for dexeth.RedeemGas(..., 1)
+	tokenContracts := dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts
+	tokenContracts[1] = tokenContracts[0]
 	defer delete(dexeth.VersionedGases, 1)
+	defer delete(tokenContracts, 1)
 
 	node.bal = dexeth.GweiToWei(10e9)
 
@@ -1360,7 +1732,13 @@ func TestRedeem(t *testing.T) {
 		gasEstimates: ethGases,
 		redeemTx:     types.NewTx(&types.DynamicFeeTx{}),
 	}
-	eth.contractors[1] = contractorV1
+	var c contractor = contractorV1
+	if assetID != BipID {
+		c = &tTokenContractor{
+			tContractor: contractorV1,
+		}
+	}
+	eth.contractors[1] = c
 
 	addSwapToSwapMap := func(secretHash [32]byte, value uint64, step dexeth.SwapStep) {
 		swap := dexeth.SwapState{
@@ -1407,7 +1785,7 @@ func TestRedeem(t *testing.T) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
 							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
 							Coin: &coin{
-								id: encode.RandomBytes(32),
+								id: randomHash(),
 							},
 						},
 						Secret: secrets[0][:],
@@ -1417,7 +1795,7 @@ func TestRedeem(t *testing.T) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
 							SecretHash: secretHashes[1][:],
 							Coin: &coin{
-								id: encode.RandomBytes(32),
+								id: randomHash(),
 							},
 						},
 						Secret: secrets[1][:],
@@ -1437,7 +1815,7 @@ func TestRedeem(t *testing.T) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
 							SecretHash: secretHashes[0][:],
 							Coin: &coin{
-								id: encode.RandomBytes(32),
+								id: randomHash(),
 							},
 						},
 						Secret: secrets[0][:],
@@ -1447,7 +1825,7 @@ func TestRedeem(t *testing.T) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
 							SecretHash: secretHashes[1][:],
 							Coin: &coin{
-								id: encode.RandomBytes(32),
+								id: randomHash(),
 							},
 						},
 						Secret: secrets[1][:],
@@ -1468,7 +1846,7 @@ func TestRedeem(t *testing.T) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
 							SecretHash: secretHashes[0][:],
 							Coin: &coin{
-								id: encode.RandomBytes(32),
+								id: randomHash(),
 							},
 						},
 						Secret: secrets[0][:],
@@ -1478,7 +1856,7 @@ func TestRedeem(t *testing.T) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
 							SecretHash: secretHashes[1][:],
 							Coin: &coin{
-								id: encode.RandomBytes(32),
+								id: randomHash(),
 							},
 						},
 						Secret: secrets[1][:],
@@ -1499,7 +1877,7 @@ func TestRedeem(t *testing.T) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
 							SecretHash: secretHashes[0][:],
 							Coin: &coin{
-								id: encode.RandomBytes(32),
+								id: randomHash(),
 							},
 						},
 						Secret: secrets[0][:],
@@ -1519,7 +1897,7 @@ func TestRedeem(t *testing.T) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[2]),
 							SecretHash: secretHashes[2][:],
 							Coin: &coin{
-								id: encode.RandomBytes(32),
+								id: randomHash(),
 							},
 						},
 						Secret: secrets[2][:],
@@ -1562,6 +1940,9 @@ func TestRedeem(t *testing.T) {
 
 		// Check fees returned from Redeem are as expected
 		expectedGas := dexeth.RedeemGas(len(test.form.Redemptions), 0)
+		if assetID != BipID {
+			expectedGas = tokenGases.Redeem + (uint64(len(test.form.Redemptions))-1)*tokenGases.RedeemAdd
+		}
 		expectedFees := expectedGas * test.form.FeeSuggestion
 		if fees != expectedFees {
 			t.Fatalf("%v: expected fees %d, but got %d", test.name, expectedFees, fees)
@@ -1587,8 +1968,6 @@ func TestRedeem(t *testing.T) {
 }
 
 func TestMaxOrder(t *testing.T) {
-	gases := dexeth.VersionedGases[0]
-
 	tests := []struct {
 		name          string
 		bal           uint64
@@ -1596,6 +1975,8 @@ func TestMaxOrder(t *testing.T) {
 		lotSize       uint64
 		maxFeeRate    uint64
 		feeSuggestion uint64
+		token         bool
+		parentBal     uint64
 		wantErr       bool
 		wantLots      uint64
 		wantValue     uint64
@@ -1607,73 +1988,126 @@ func TestMaxOrder(t *testing.T) {
 		{
 			name:          "no balance",
 			bal:           0,
-			lotSize:       ethToGwei(10),
+			lotSize:       10,
 			feeSuggestion: 90,
 			maxFeeRate:    100,
 		},
 		{
+			name:          "no balance - token",
+			bal:           0,
+			lotSize:       10,
+			feeSuggestion: 90,
+			maxFeeRate:    100,
+			token:         true,
+			parentBal:     100,
+		},
+		{
 			name:          "not enough for fees",
 			bal:           10,
-			lotSize:       ethToGwei(10),
+			lotSize:       10,
+			feeSuggestion: 90,
+			maxFeeRate:    100,
+		},
+		{
+			name:          "not enough for fees - token",
+			bal:           10,
+			token:         true,
+			parentBal:     0,
+			lotSize:       10,
 			feeSuggestion: 90,
 			maxFeeRate:    100,
 		},
 		{
 			name:          "one lot enough for fees",
 			bal:           11,
-			lotSize:       ethToGwei(10),
+			lotSize:       10,
 			feeSuggestion: 90,
 			maxFeeRate:    100,
 			wantLots:      1,
 			wantValue:     ethToGwei(10),
-			wantMaxFees:   100 * gases.Swap,
-			wantBestCase:  90 * gases.Swap,
-			wantWorstCase: 90 * gases.Swap,
-			wantLocked:    ethToGwei(10) + (100 * gases.Swap),
+			wantMaxFees:   100 * ethGases.Swap,
+			wantBestCase:  90 * ethGases.Swap,
+			wantWorstCase: 90 * ethGases.Swap,
+			wantLocked:    ethToGwei(10) + (100 * ethGases.Swap),
+		},
+		{
+			name:          "one lot enough for fees - token",
+			bal:           11,
+			lotSize:       10,
+			feeSuggestion: 90,
+			maxFeeRate:    100,
+			token:         true,
+			parentBal:     1,
+			wantLots:      1,
+			wantValue:     ethToGwei(10),
+			wantMaxFees:   100 * tokenGases.Swap,
+			wantBestCase:  90 * tokenGases.Swap,
+			wantWorstCase: 90 * tokenGases.Swap,
+			wantLocked:    ethToGwei(10) + (100 * tokenGases.Swap),
 		},
 		{
 			name:          "multiple lots",
 			bal:           51,
-			lotSize:       ethToGwei(10),
+			lotSize:       10,
 			feeSuggestion: 90,
 			maxFeeRate:    100,
 			wantLots:      5,
 			wantValue:     ethToGwei(50),
-			wantMaxFees:   5 * 100 * gases.Swap,
-			wantBestCase:  90 * gases.SwapN(5),
-			wantWorstCase: 5 * 90 * gases.Swap,
-			wantLocked:    ethToGwei(50) + (5 * 100 * gases.Swap),
+			wantMaxFees:   5 * 100 * ethGases.Swap,
+			wantBestCase:  90 * ethGases.SwapN(5),
+			wantWorstCase: 5 * 90 * ethGases.Swap,
+			wantLocked:    ethToGwei(50) + (5 * 100 * ethGases.Swap),
+		},
+		{
+			name:          "multiple lots - token",
+			bal:           51,
+			lotSize:       10,
+			feeSuggestion: 90,
+			maxFeeRate:    100,
+			token:         true,
+			parentBal:     1,
+			wantLots:      5,
+			wantValue:     ethToGwei(50),
+			wantMaxFees:   5 * 100 * tokenGases.Swap,
+			wantBestCase:  90 * tokenGases.SwapN(5),
+			wantWorstCase: 5 * 90 * tokenGases.Swap,
+			wantLocked:    ethToGwei(50) + (5 * 100 * tokenGases.Swap),
 		},
 		{
 			name:          "balanceError",
 			bal:           51,
-			lotSize:       ethToGwei(10),
+			lotSize:       10,
 			feeSuggestion: 90,
 			maxFeeRate:    100,
 			balErr:        errors.New(""),
 			wantErr:       true,
 		},
 	}
-
-	dexAsset := &dex.Asset{
-		ID:           60,
-		Symbol:       "ETH",
-		MaxFeeRate:   100,
-		SwapSize:     gases.Swap,
-		SwapSizeBase: gases.Swap,
-		SwapConf:     1,
-	}
+	redeemerAsset := tBTC
 
 	for _, test := range tests {
-		eth, node, shutdown := tAssetWallet()
+		var assetID uint32 = BipID
+		dexAsset := tETH
+		if test.token {
+			assetID = testTokenID
+			dexAsset = tToken
+		}
+
+		eth, node, shutdown := tAssetWallet(assetID)
 		defer shutdown()
 
-		node.bal = dexeth.GweiToWei(test.bal * 1e9)
+		if test.token {
+			node.tokenContractor.bal = dexeth.GweiToWei(ethToGwei(test.bal))
+			node.bal = dexeth.GweiToWei(ethToGwei(test.parentBal))
+		} else {
+			node.bal = dexeth.GweiToWei(ethToGwei(test.bal))
+		}
+
 		node.balErr = test.balErr
 
 		dexAsset.MaxFeeRate = test.maxFeeRate
 
-		maxOrder, err := eth.MaxOrder(test.lotSize, test.feeSuggestion, dexAsset)
+		maxOrder, err := eth.maxOrder(ethToGwei(test.lotSize), test.feeSuggestion, dexAsset, redeemerAsset)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)
@@ -1726,11 +2160,13 @@ func packInitiateDataV0(initiations []*dexeth.Initiation) ([]byte, error) {
 }
 
 func TestAuditContract(t *testing.T) {
-	node := &testNode{}
-	eth := &ExchangeWallet{
-		node: node,
-		log:  tLogger,
-	}
+	t.Run("eth", func(t *testing.T) { testAuditContract(t, BipID) })
+	t.Run("token", func(t *testing.T) { testAuditContract(t, testTokenID) })
+}
+
+func testAuditContract(t *testing.T, assetID uint32) {
+	eth, _, shutdown := tAssetWallet(assetID)
+	defer shutdown()
 
 	numSecretHashes := 3
 	secretHashes := make([][32]byte, 0, numSecretHashes)
@@ -1860,7 +2296,7 @@ func TestAuditContract(t *testing.T) {
 
 		txHash := tx.Hash()
 		if test.differentHash {
-			copy(txHash[:], encode.RandomBytes(32))
+			copy(txHash[:], encode.RandomBytes(20))
 		}
 
 		auditInfo, err := eth.AuditContract(txHash[:], test.contract, txBinary, true)
@@ -1906,7 +2342,7 @@ func TestOwnsAddress(t *testing.T) {
 	var otherAddress common.Address
 	rand.Read(otherAddress[:])
 
-	eth := &ExchangeWallet{
+	eth := &baseWallet{
 		addr: common.HexToAddress(address),
 	}
 
@@ -1985,12 +2421,16 @@ func TestOwnsAddress(t *testing.T) {
 func TestSignMessage(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	node := newTestNode()
-	eth := &ExchangeWallet{
-		node: node,
-		addr: node.address(),
-		ctx:  ctx,
-		log:  tLogger,
+
+	node := newTestNode(BipID)
+	eth := &AssetWallet{
+		baseWallet: &baseWallet{
+			node: node,
+			addr: node.address(),
+			ctx:  ctx,
+			log:  tLogger,
+		},
+		assetID: BipID,
 	}
 
 	msg := []byte("msg")
@@ -2020,7 +2460,7 @@ func TestSignMessage(t *testing.T) {
 }
 
 func TestSwapConfirmation(t *testing.T) {
-	eth, node, shutdown := tAssetWallet()
+	eth, node, shutdown := tAssetWallet(BipID)
 	defer shutdown()
 
 	var secretHash [32]byte
@@ -2028,7 +2468,7 @@ func TestSwapConfirmation(t *testing.T) {
 	state := &dexeth.SwapState{}
 	hdr := &types.Header{}
 
-	node.contractor.swapMap[secretHash] = state
+	node.tContractor.swapMap[secretHash] = state
 
 	state.BlockHeight = 5
 	state.State = dexeth.SSInitiated
@@ -2064,9 +2504,9 @@ func TestSwapConfirmation(t *testing.T) {
 	ver = 0
 
 	// swap error
-	node.contractor.swapErr = fmt.Errorf("test error")
+	node.tContractor.swapErr = fmt.Errorf("test error")
 	checkResult(true, 0, false)
-	node.contractor.swapErr = nil
+	node.tContractor.swapErr = nil
 
 	// header error
 	node.bestHdrErr = fmt.Errorf("test error")
@@ -2114,9 +2554,9 @@ func TestDriverOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("driver open error: %v", err)
 	}
-	eth, ok := wallet.(*ExchangeWallet)
+	eth, ok := wallet.(*AssetWallet)
 	if !ok {
-		t.Fatalf("failed to cast wallet as ExchangeWallet")
+		t.Fatalf("failed to cast wallet as AssetWallet")
 	}
 	if eth.gasFeeLimit != defaultGasFeeLimit {
 		t.Fatalf("expected gasFeeLimit to be default, but got %v", eth.gasFeeLimit)
@@ -2129,9 +2569,9 @@ func TestDriverOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("driver open error: %v", err)
 	}
-	eth, ok = wallet.(*ExchangeWallet)
+	eth, ok = wallet.(*AssetWallet)
 	if !ok {
-		t.Fatalf("failed to cast wallet as ExchangeWallet")
+		t.Fatalf("failed to cast wallet as AssetWallet")
 	}
 	if eth.gasFeeLimit != 150 {
 		t.Fatalf("expected gasFeeLimit to be 150, but got %v", eth.gasFeeLimit)
@@ -2209,6 +2649,16 @@ func TestDriverDecodeCoinID(t *testing.T) {
 		t.Fatalf("expected coin id to be %s but got %s", fundingCoin.String(), coinID)
 	}
 
+	// Token funding coin
+	fc := createTokenFundingCoin(address, 1000, 1)
+	coinID, err = drv.DecodeCoinID(fc.RecoveryID())
+	if err != nil {
+		t.Fatalf("error decoding token coin id: %v", err)
+	}
+	if coinID != fc.String() {
+		t.Fatalf("expected coin id to be %s but got %s", fc.String(), coinID)
+	}
+
 	// Test byte encoded address string
 	coinID, err = drv.DecodeCoinID([]byte(addressStr))
 	if err != nil {
@@ -2226,7 +2676,7 @@ func TestDriverDecodeCoinID(t *testing.T) {
 }
 
 func TestLocktimeExpired(t *testing.T) {
-	eth, node, shutdown := tAssetWallet()
+	eth, node, shutdown := tAssetWallet(BipID)
 	defer shutdown()
 
 	var secretHash [32]byte
@@ -2241,7 +2691,7 @@ func TestLocktimeExpired(t *testing.T) {
 		Time: uint64(time.Now().Add(time.Second).Unix()),
 	}
 
-	node.contractor.swapMap[secretHash] = state
+	node.tContractor.swapMap[secretHash] = state
 	node.bestHdr = header
 
 	contract := make([]byte, 36)
@@ -2277,9 +2727,9 @@ func TestLocktimeExpired(t *testing.T) {
 	state.State = saveState
 
 	// missing swap
-	delete(node.contractor.swapMap, secretHash)
+	delete(node.tContractor.swapMap, secretHash)
 	ensureResult("missing swap", true, false)
-	node.contractor.swapMap[secretHash] = state
+	node.tContractor.swapMap[secretHash] = state
 
 	// lock time not expired
 	state.LockTime = time.Now().Add(time.Minute)
@@ -2296,7 +2746,12 @@ func TestLocktimeExpired(t *testing.T) {
 }
 
 func TestFindRedemption(t *testing.T) {
-	eth, node, shutdown := tAssetWallet()
+	t.Run("eth", func(t *testing.T) { testFindRedemption(t, BipID) })
+	t.Run("token", func(t *testing.T) { testFindRedemption(t, testTokenID) })
+}
+
+func testFindRedemption(t *testing.T, assetID uint32) {
+	eth, node, shutdown := tAssetWallet(assetID)
 	defer shutdown()
 
 	var secret [32]byte
@@ -2309,7 +2764,7 @@ func TestFindRedemption(t *testing.T) {
 		State:  dexeth.SSInitiated,
 	}
 
-	node.contractor.swapMap[secretHash] = state
+	node.tContractor.swapMap[secretHash] = state
 
 	baseCtx := context.Background()
 
@@ -2389,15 +2844,15 @@ func TestFindRedemption(t *testing.T) {
 	})
 
 	// swap error
-	node.contractor.swapErr = errors.New("test error")
+	node.tContractor.swapErr = errors.New("test error")
 	runTest("swap error", true, 0)
-	node.contractor.swapErr = nil
+	node.tContractor.swapErr = nil
 
 	// swap error after queuing
 	runWithUpdate("swap error after queuing", true, dexeth.SSInitiated, func() {
-		node.contractor.swapErr = errors.New("test error")
+		node.tContractor.swapErr = errors.New("test error")
 	})
-	node.contractor.swapErr = nil
+	node.tContractor.swapErr = nil
 
 	// cancelled context error
 	var cancel context.CancelFunc
@@ -2433,7 +2888,14 @@ func TestFindRedemption(t *testing.T) {
 }
 
 func TestRefundReserves(t *testing.T) {
-	node := newTestNode()
+	t.Run("eth", func(t *testing.T) { testRefundReserves(t, BipID) })
+	t.Run("token", func(t *testing.T) { testRefundReserves(t, testTokenID) })
+}
+
+func testRefundReserves(t *testing.T, assetID uint32) {
+	w, node, shutdown := tAssetWallet(assetID)
+	defer shutdown()
+
 	node.bal = dexeth.GweiToWei(1e9)
 	node.refundable = true
 	node.swapVers = map[uint32]struct{}{0: {}}
@@ -2441,115 +2903,173 @@ func TestRefundReserves(t *testing.T) {
 	var secretHash [32]byte
 	node.swapMap = map[[32]byte]*dexeth.SwapState{secretHash: {}}
 
-	eth := &ExchangeWallet{
-		node: node,
+	feeWallet := w
+	if assetID != BipID {
+		feeWallet = w.token.parent
 	}
 
-	var maxFeeRateV0 uint64 = 45
 	gasesV0 := dexeth.VersionedGases[0]
-
 	gasesV1 := &dexeth.Gases{Refund: 1e6}
-	dexeth.VersionedGases[1] = gasesV1
-	var maxFeeRateV1 uint64 = 50
+	assetV0 := *tETH
+	assetV1 := *tETH
+	if assetID == BipID {
+		dexeth.VersionedGases[1] = gasesV1
+		defer delete(dexeth.VersionedGases, 1)
+	} else {
+		feeWallet = w.token.parent
+		assetV0 = *tToken
+		assetV1 = *tToken
+		tokenContracts := dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts
+		gasesV0 = &tokenGases
+		tc := *tokenContracts[0]
+		tc.Gas = *gasesV1
+		tokenContracts[1] = &tc
+		defer delete(tokenContracts, 1)
+	}
+
+	assetV0.MaxFeeRate = 45
+	assetV1.Version = 1
+	assetV1.MaxFeeRate = 50
 
 	// Lock for 3 refunds with contract version 0
-	v0Val, err := eth.ReserveNRefunds(3, maxFeeRateV0, 0)
+	v0Val, err := w.ReserveNRefunds(3, &assetV0)
 	if err != nil {
 		t.Fatalf("ReserveNRefunds error: %v", err)
 	}
-	lockPerV0 := gasesV0.Refund * maxFeeRateV0
+	lockPerV0 := gasesV0.Refund * assetV0.MaxFeeRate
+
 	expLock := 3 * lockPerV0
-	if eth.lockedFunds.refundReserves != expLock {
-		t.Fatalf("wrong v0 locked. wanted %d, got %d", expLock, eth.lockedFunds.refundReserves)
+	if feeWallet.lockedFunds.refundReserves != expLock {
+		t.Fatalf("wrong v0 locked. wanted %d, got %d", expLock, feeWallet.lockedFunds.refundReserves)
 	}
 	if v0Val != expLock {
 		t.Fatalf("expected locked %d, got %d", expLock, v0Val)
 	}
 
 	// Lock for 2 refunds with contract version 1
-	v1Val, err := eth.ReserveNRefunds(2, maxFeeRateV1, 1)
+	v1Val, err := w.ReserveNRefunds(2, &assetV1)
 	if err != nil {
 		t.Fatalf("ReserveNRefunds error: %v", err)
 	}
-	lockPerV1 := gasesV1.Refund * maxFeeRateV1
+	lockPerV1 := gasesV1.Refund * assetV1.MaxFeeRate
 	v1Lock := 2 * lockPerV1
 	expLock += v1Lock
-	if eth.lockedFunds.refundReserves != expLock {
-		t.Fatalf("wrong v1 locked. wanted %d, got %d", expLock, eth.lockedFunds.refundReserves)
+	if feeWallet.lockedFunds.refundReserves != expLock {
+		t.Fatalf("wrong v1 locked. wanted %d, got %d", expLock, feeWallet.lockedFunds.refundReserves)
 	}
 	if v1Val != v1Lock {
 		t.Fatalf("expected locked %d, got %d", v1Lock, v1Val)
 	}
 
-	eth.UnlockRefundReserves(9e5)
+	w.UnlockRefundReserves(9e5)
 	expLock -= 9e5
-	if eth.lockedFunds.refundReserves != expLock {
-		t.Fatalf("incorrect amount locked. wanted %d, got %d", expLock, eth.lockedFunds.refundReserves)
+	if feeWallet.lockedFunds.refundReserves != expLock {
+		t.Fatalf("incorrect amount locked. wanted %d, got %d", expLock, feeWallet.lockedFunds.refundReserves)
 	}
 
 	// Reserve more than available should return an error
-	err = eth.ReReserveRefund(1e9)
+	err = w.ReReserveRefund(1e9)
 	if err == nil {
 		t.Fatalf("expected an error but did not get")
 	}
 
-	err = eth.ReReserveRefund(5e6)
+	err = w.ReReserveRefund(5e6)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	expLock += 5e6
-	if eth.lockedFunds.refundReserves != expLock {
-		t.Fatalf("incorrect amount locked. wanted %d, got %d", expLock, eth.lockedFunds.refundReserves)
+	if feeWallet.lockedFunds.refundReserves != expLock {
+		t.Fatalf("incorrect amount locked. wanted %d, got %d", expLock, feeWallet.lockedFunds.refundReserves)
 	}
 }
 
 func TestRedemptionReserves(t *testing.T) {
-	eth, node, shutdown := tAssetWallet()
+	t.Run("eth", func(t *testing.T) { testRedemptionReserves(t, BipID) })
+	t.Run("token", func(t *testing.T) { testRedemptionReserves(t, testTokenID) })
+}
+
+func testRedemptionReserves(t *testing.T, assetID uint32) {
+	w, node, shutdown := tAssetWallet(assetID)
 	defer shutdown()
 
 	node.bal = dexeth.GweiToWei(1e9)
-	node.contractor.redeemable = true
+	node.tContractor.redeemable = true
 
 	var secretHash [32]byte
-	node.contractor.swapMap[secretHash] = &dexeth.SwapState{}
-
-	var maxFeeRateV0 uint64 = 45
-	gasesV0 := dexeth.VersionedGases[0]
+	node.tContractor.swapMap[secretHash] = &dexeth.SwapState{}
 
 	gasesV1 := &dexeth.Gases{Redeem: 1e6, RedeemAdd: 85e5}
-	dexeth.VersionedGases[1] = gasesV1
-	var maxFeeRateV1 uint64 = 50
+	gasesV0 := dexeth.VersionedGases[0]
+	assetV0 := *tETH
+	assetV1 := *tETH
+	feeWallet := w
+	if assetID == BipID {
+		dexeth.VersionedGases[1] = gasesV1
+		defer delete(dexeth.VersionedGases, 1)
+	} else {
+		node.tokenContractor.allow = unlimitedAllowanceReplenishThreshold
+		feeWallet = w.token.parent
+		assetV0 = *tToken
+		assetV1 = *tToken
+		tokenContracts := dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts
+		gasesV0 = &tokenGases
+		tc := *tokenContracts[0]
+		tc.Gas = *gasesV1
+		tokenContracts[1] = &tc
+		defer delete(tokenContracts, 1)
+	}
 
-	v0Val, err := eth.ReserveNRedemptions(3, maxFeeRateV0, 0)
+	assetV0.MaxFeeRate = 45
+	assetV1.Version = 1
+	assetV1.MaxFeeRate = 50
+
+	v0Val, err := w.ReserveNRedemptions(3, &assetV0)
 	if err != nil {
 		t.Fatalf("reservation error: %v", err)
 	}
 
-	lockPerV0 := gasesV0.Redeem * maxFeeRateV0
+	lockPerV0 := gasesV0.Redeem * assetV0.MaxFeeRate
 	expLock := 3 * lockPerV0
-	if eth.lockedFunds.redemptionReserves != expLock {
-		t.Fatalf("wrong v0 locked. wanted %d, got %d", expLock, eth.lockedFunds.redemptionReserves)
+
+	if feeWallet.lockedFunds.redemptionReserves != expLock {
+		t.Fatalf("wrong v0 locked. wanted %d, got %d", expLock, feeWallet.lockedFunds.redemptionReserves)
 	}
 
 	if v0Val != expLock {
 		t.Fatalf("expected value %d, got %d", lockPerV0, v0Val)
 	}
 
-	v1Val, err := eth.ReserveNRedemptions(2, maxFeeRateV1, 1)
+	v1Val, err := w.ReserveNRedemptions(2, &assetV1)
 	if err != nil {
 		t.Fatalf("reservation error: %v", err)
 	}
 
-	lockPerV1 := gasesV1.Redeem * maxFeeRateV1
+	lockPerV1 := gasesV1.Redeem * assetV1.MaxFeeRate
 	v1Lock := 2 * lockPerV1
 	if v1Val != v1Lock {
-		t.Fatalf("")
+		t.Fatal("wrong reserved val", v1Val, v1Lock)
 	}
 
 	expLock += v1Lock
-	if eth.lockedFunds.redemptionReserves != expLock {
-		t.Fatalf("wrong v1 locked. wanted %d, got %d", expLock, eth.lockedFunds.redemptionReserves)
+	if feeWallet.lockedFunds.redemptionReserves != expLock {
+		t.Fatalf("wrong v1 locked. wanted %d, got %d", expLock, feeWallet.lockedFunds.redemptionReserves)
 	}
+
+	// Run some token tests
+	if assetID == BipID {
+		return
+	}
+
+	node.tokenContractor.allow = new(big.Int).Sub(unlimitedAllowanceReplenishThreshold, big.NewInt(1))
+	node.tokenContractor.approveTx = tTx(0, 0, 0, &testAddressA, nil)
+	_, err = w.ReserveNRedemptions(1, &assetV0)
+	if err != nil {
+		t.Fatalf("error reserving with token approval: %v", err)
+	}
+	if !node.tokenContractor.approved {
+		t.Fatalf("token not approved")
+	}
+
 }
 
 func ethToGwei(v uint64) uint64 {
@@ -2562,56 +3082,75 @@ func ethToWei(v uint64) *big.Int {
 }
 
 func TestPayFee(t *testing.T) {
+	t.Run("eth", func(t *testing.T) { testPayFee(t, BipID) })
+	t.Run("token", func(t *testing.T) { testPayFee(t, testTokenID) })
+}
+
+func testPayFee(t *testing.T, assetID uint32) {
+	w, node, shutdown := tAssetWallet(assetID)
+	defer shutdown()
+
 	tx := tTx(0, 0, 0, &testAddressA, nil)
 	txHash := tx.Hash()
-	maxFee := uint64(defaultSendGasLimit * defaultGasFeeLimit)
+
+	node.sendTxTx = tx
+	node.tokenContractor.transferTx = tx
+
+	maxFeeRate, _ := w.recommendedMaxFeeRate(w.ctx)
+	txFees := dexeth.WeiToGwei(maxFeeRate) * defaultSendGasLimit
+	transferFees := dexeth.WeiToGwei(maxFeeRate) * tokenGases.Transfer
+
+	const regFees = 10e9
+
 	tests := []struct {
 		name              string
-		regFee            uint64
-		bal               uint64
+		regFeeAdj         uint64
+		txFeeAdj          uint64
+		token             bool
 		balErr, sendTxErr error
 		wantErr           bool
 	}{{
-		name:   "ok",
-		regFee: 10e9,
-		bal:    10e9 + maxFee,
+		name: "ok",
+	}, {
+		name:     "low fees",
+		txFeeAdj: 1,
+		wantErr:  true,
 	}, {
 		name:    "balance error",
 		balErr:  errors.New(""),
 		wantErr: true,
 	}, {
-		name:    "not enough",
-		regFee:  10e9,
-		bal:     10e9,
-		wantErr: true,
+		name:      "not enough",
+		regFeeAdj: 1,
+		wantErr:   true,
 	}, {
 		name:      "sendToAddr error",
-		regFee:    5e9,
-		bal:       10e9,
 		sendTxErr: errors.New(""),
 		wantErr:   true,
 	}}
 
 	for _, test := range tests {
-		node := newTestNode()
 
-		node.bal = dexeth.GweiToWei(test.bal)
 		node.balErr = test.balErr
-		node.sendTxTx = tx
 		node.sendTxErr = test.sendTxErr
-		eth := &ExchangeWallet{
-			node:        node,
-			gasFeeLimit: defaultGasFeeLimit,
+		node.tokenContractor.transferErr = test.sendTxErr
+
+		if assetID == BipID {
+			node.bal = dexeth.GweiToWei(regFees + txFees - test.txFeeAdj - test.regFeeAdj)
+		} else {
+			node.tokenContractor.bal = dexeth.GweiToWei(regFees - test.regFeeAdj)
+			node.bal = dexeth.GweiToWei(transferFees - test.txFeeAdj)
 		}
-		coin, err := eth.PayFee("", test.regFee, 0)
+
+		coin, err := w.PayFee(testAddressA.String(), regFees, 0)
 		if test.wantErr {
 			if err == nil {
-				t.Fatalf("expected error for test %v", test.name)
+				t.Fatalf("expected error for test %q", test.name)
 			}
 			continue
 		}
 		if err != nil {
-			t.Fatalf("unexpected error for test %v: %v", test.name, err)
+			t.Fatalf("unexpected error for test %q: %v", test.name, err)
 		}
 		if !bytes.Equal(txHash[:], coin.ID()) {
 			t.Fatal("coin is not the tx hash")
@@ -2620,51 +3159,65 @@ func TestPayFee(t *testing.T) {
 }
 
 func TestWithdraw(t *testing.T) {
+	t.Run("eth", func(t *testing.T) { testWithdraw(t, BipID) })
+	t.Run("token", func(t *testing.T) { testWithdraw(t, testTokenID) })
+}
+
+func testWithdraw(t *testing.T, assetID uint32) {
+	eth, node, shutdown := tAssetWallet(assetID)
+	defer shutdown()
+
 	tx := tTx(0, 0, 0, &testAddressA, nil)
 	txHash := tx.Hash()
-	maxFee := uint64(defaultSendGasLimit * defaultGasFeeLimit)
+
+	node.sendTxTx = tx
+	node.tokenContractor.transferTx = tx
+
+	maxFeeRate, _ := eth.recommendedMaxFeeRate(eth.ctx)
+	ethFees := dexeth.WeiToGwei(maxFeeRate) * defaultSendGasLimit
+	tokenFees := dexeth.WeiToGwei(maxFeeRate) * tokenGases.Transfer
+
+	const val = 10e9
+
 	tests := []struct {
 		name              string
-		value             uint64
-		bal               uint64
+		sendAdj, feeAdj   uint64
 		balErr, sendTxErr error
 		wantErr           bool
 	}{{
-		name:  "ok",
-		value: 10e9,
-		bal:   10e9,
+		name: "ok",
 	}, {
 		name:    "balance error",
 		balErr:  errors.New(""),
 		wantErr: true,
 	}, {
 		name:    "not enough",
-		value:   10e9 + 1,
-		bal:     10e9,
+		sendAdj: 1,
 		wantErr: true,
 	}, {
-		name:    "cannot cover fee",
-		bal:     maxFee - 1,
+		name:    "low fees",
+		feeAdj:  1,
 		wantErr: true,
 	}, {
 		name:      "sendToAddr error",
-		value:     5e9,
-		bal:       10e9,
 		sendTxErr: errors.New(""),
 		wantErr:   true,
 	}}
 
 	for _, test := range tests {
-		node := newTestNode()
-		node.bal = dexeth.GweiToWei(test.bal)
+
 		node.balErr = test.balErr
-		node.sendTxTx = tx
 		node.sendTxErr = test.sendTxErr
-		eth := &ExchangeWallet{
-			node:        node,
-			gasFeeLimit: defaultGasFeeLimit,
+		node.tokenContractor.transferErr = test.sendTxErr
+
+		if assetID == BipID {
+			node.bal = dexeth.GweiToWei(val + ethFees - test.sendAdj - test.feeAdj)
+		} else {
+			node.tokenContractor.bal = dexeth.GweiToWei(val - test.sendAdj)
+			node.bal = dexeth.GweiToWei(tokenFees - test.feeAdj)
 		}
-		coin, err := eth.Withdraw("", test.value, 0)
+
+		coin, err := eth.Withdraw("", val, 0)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %v", test.name)
@@ -2681,5 +3234,9 @@ func TestWithdraw(t *testing.T) {
 }
 
 func parseRecoveryID(c asset.Coin) []byte {
-	return c.(*fundingCoin).RecoveryID()
+	return c.(asset.RecoveryCoin).RecoveryID()
+}
+
+func randomHash() common.Hash {
+	return common.BytesToHash(encode.RandomBytes(20))
 }

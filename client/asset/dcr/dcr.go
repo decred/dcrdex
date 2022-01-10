@@ -708,8 +708,8 @@ func (a amount) String() string {
 // associated with nfo.MaxFeeRate. For quote assets, the caller will have to
 // calculate lotSize based on a rate conversion from the base asset's lot size.
 // lotSize must not be zero and will cause a panic if so.
-func (dcr *ExchangeWallet) MaxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asset) (*asset.SwapEstimate, error) {
-	_, est, err := dcr.maxOrder(lotSize, feeSuggestion, nfo)
+func (dcr *ExchangeWallet) MaxOrder(ord *asset.MaxOrderForm) (*asset.SwapEstimate, error) {
+	_, est, err := dcr.maxOrder(ord.LotSize, ord.FeeSuggestion, ord.AssetConfig)
 	return est, err
 }
 

@@ -3532,7 +3532,7 @@ func (c *Core) marketWallets(host string, base, quote uint32) (ba, qa *dex.Asset
 // for trading will vary based on the rate for a buy order (unlike a sell
 // order).
 func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEstimate, error) {
-	_, quoteAsset, baseWallet, quoteWallet, err := c.marketWallets(host, base, quote)
+	baseAsset, quoteAsset, baseWallet, quoteWallet, err := c.marketWallets(host, base, quote)
 	if err != nil {
 		return nil, err
 	}
@@ -3564,7 +3564,12 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEs
 		return nil, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", unbip(base), host)
 	}
 
-	maxBuy, err := quoteWallet.MaxOrder(quoteLotEst, swapFeeSuggestion, quoteAsset)
+	maxBuy, err := quoteWallet.MaxOrder(&asset.MaxOrderForm{
+		LotSize:       quoteLotEst,
+		FeeSuggestion: swapFeeSuggestion,
+		AssetConfig:   quoteAsset,
+		RedeemConfig:  baseAsset,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("%s wallet MaxOrder error: %v", unbip(quote), err)
 	}
@@ -3573,6 +3578,7 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEs
 		LotSize:       lotSize,
 		Lots:          maxBuy.Lots,
 		FeeSuggestion: redeemFeeSuggestion,
+		AssetConfig:   baseAsset,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%s PreRedeem error: %v", unbip(base), err)
@@ -3587,7 +3593,7 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEs
 // MaxSell is the maximum-sized *OrderEstimate for a sell order on the specified
 // market.
 func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, error) {
-	baseAsset, _, baseWallet, quoteWallet, err := c.marketWallets(host, base, quote)
+	baseAsset, quoteAsset, baseWallet, quoteWallet, err := c.marketWallets(host, base, quote)
 	if err != nil {
 		return nil, err
 	}
@@ -3622,7 +3628,12 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, erro
 		return nil, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", unbip(quote), host)
 	}
 
-	maxSell, err := baseWallet.MaxOrder(lotSize, swapFeeSuggestion, baseAsset)
+	maxSell, err := baseWallet.MaxOrder(&asset.MaxOrderForm{
+		LotSize:       lotSize,
+		FeeSuggestion: swapFeeSuggestion,
+		AssetConfig:   baseAsset,
+		RedeemConfig:  quoteAsset,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("%s wallet MaxOrder error: %v", unbip(base), err)
 	}
@@ -4027,6 +4038,7 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 		LotSize:         fromLotSize,
 		Lots:            lots,
 		AssetConfig:     wallets.fromAsset,
+		RedeemConfig:    wallets.toAsset,
 		Immediate:       (form.IsLimit && form.TifNow),
 		FeeSuggestion:   swapFeeSuggestion,
 		SelectedOptions: form.Options,
@@ -4040,6 +4052,7 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 		Lots:            lots,
 		FeeSuggestion:   redeemFeeSuggestion,
 		SelectedOptions: form.Options,
+		AssetConfig:     wallets.toAsset,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error getting redemption estimate: %v", err)
@@ -4197,6 +4210,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		Value:         fundQty,
 		MaxSwapCount:  lots,
 		DEXConfig:     wallets.fromAsset,
+		RedeemConfig:  wallets.toAsset,
 		Immediate:     isImmediate,
 		FeeSuggestion: c.feeSuggestion(dc, wallets.fromAsset.ID),
 		Options:       form.Options,
@@ -4299,7 +4313,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		if len(pubKeys) == 0 || len(sigs) == 0 {
 			return nil, 0, newError(signatureErr, "wrong number of pubkeys or signatures, %d & %d", len(pubKeys), len(sigs))
 		}
-		redemptionReserves, err = accountRedeemer.ReserveNRedemptions(redemptionRefundLots, wallets.toAsset.MaxFeeRate, wallets.toAsset.Version)
+		redemptionReserves, err = accountRedeemer.ReserveNRedemptions(redemptionRefundLots, wallets.toAsset)
 		if err != nil {
 			return nil, 0, codedError(walletErr, fmt.Errorf("ReserveNRedemptions error: %w", err))
 		}
@@ -4317,7 +4331,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	// If the from asset is an AccountLocker, we need to lock up refund funds.
 	var refundReserves uint64
 	if isAccountRefund {
-		refundReserves, err = accountRefunder.ReserveNRefunds(redemptionRefundLots, wallets.fromAsset.MaxFeeRate, wallets.fromAsset.Version)
+		refundReserves, err = accountRefunder.ReserveNRefunds(redemptionRefundLots, wallets.fromAsset)
 		if err != nil {
 			return nil, 0, codedError(walletErr, fmt.Errorf("ReserveNRefunds error: %w", err))
 		}

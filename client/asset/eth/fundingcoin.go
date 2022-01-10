@@ -13,7 +13,8 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-const fundingCoinIDSize = 28 // address (20) + amount (8) = 28
+const fundingCoinIDSize = 28      // address (20) + amount (8) = 28
+const tokenFundingCoinIDSize = 36 // address (20) + amount (8) + amount (8) = 36
 
 // fundingCoin is an identifier for a coin which has not yet been sent to the
 // swap contract.
@@ -69,5 +70,62 @@ func createFundingCoin(address common.Address, amount uint64) *fundingCoin {
 	return &fundingCoin{
 		addr: address,
 		amt:  amount,
+	}
+}
+
+// tokenFundingCoin is a funding coin for a token.
+type tokenFundingCoin struct {
+	addr common.Address
+	amt  uint64
+	fees uint64
+}
+
+// String creates a human readable string.
+func (c *tokenFundingCoin) String() string {
+	return fmt.Sprintf("address: %s, amount:%v, fees:%v", c.addr, c.amt, c.fees)
+}
+
+// ID utf-8 encodes the account address. This ID will be sent to the server as
+// part of the an order.
+func (c *tokenFundingCoin) ID() dex.Bytes {
+	return []byte(c.addr.String())
+}
+
+// ID creates a byte slice that can be decoded with DecodeCoinID.
+func (c *tokenFundingCoin) RecoveryID() dex.Bytes {
+	b := make([]byte, tokenFundingCoinIDSize)
+	copy(b[:20], c.addr[:])
+	binary.BigEndian.PutUint64(b[20:28], c.amt)
+	binary.BigEndian.PutUint64(b[28:36], c.fees)
+	return b
+}
+
+func (c *tokenFundingCoin) Value() uint64 {
+	return c.amt
+}
+
+// decodeTokenFundingCoin decodes a byte slice into an tokenFundingCoinID.
+func decodeTokenFundingCoin(coinID []byte) (*tokenFundingCoin, error) {
+	if len(coinID) != tokenFundingCoinIDSize {
+		return nil, fmt.Errorf("decodeTokenFundingCoin: length expected %v, got %v",
+			tokenFundingCoinIDSize, len(coinID))
+	}
+
+	var address [20]byte
+	copy(address[:], coinID[:20])
+	return &tokenFundingCoin{
+		addr: address,
+		amt:  binary.BigEndian.Uint64(coinID[20:28]),
+		fees: binary.BigEndian.Uint64(coinID[28:36]),
+	}, nil
+}
+
+// createTokenFundingCoin constructs a new fundingtokenFundingCoinCoin for the provided account
+// address, value, and fees in gwei.
+func createTokenFundingCoin(address common.Address, tokenValue, fees uint64) *tokenFundingCoin {
+	return &tokenFundingCoin{
+		addr: address,
+		amt:  tokenValue,
+		fees: fees,
 	}
 }

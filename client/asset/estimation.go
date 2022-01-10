@@ -45,6 +45,9 @@ type PreSwapForm struct {
 	Lots uint64
 	// AssetConfig is the dex's asset configuration info.
 	AssetConfig *dex.Asset
+	// RedeemConfig is the dex's asset configuration info for the redemption
+	// asset.
+	RedeemConfig *dex.Asset
 	// Immediate should be set to true if this is for an order that is not a
 	// standing order, likely a market order or a limit order with immediate
 	// time-in-force.
@@ -79,6 +82,8 @@ type PreRedeemForm struct {
 	FeeSuggestion uint64
 	// SelectedOptions is any options that the user has selected.
 	SelectedOptions map[string]string
+	// AssetConfig is the dex's asset configuration info.
+	AssetConfig *dex.Asset
 }
 
 // PreRedeem is an estimate of the fees for redemption. The struct will be
@@ -86,4 +91,12 @@ type PreRedeemForm struct {
 type PreRedeem struct {
 	Estimate *RedeemEstimate `json:"estimate"`
 	Options  []*OrderOption  `json:"options"`
+}
+
+// MaxOrderForm is used to get a SwapEstimate from the Wallet's MaxOrder method.
+type MaxOrderForm struct {
+	LotSize       uint64
+	FeeSuggestion uint64
+	AssetConfig   *dex.Asset
+	RedeemConfig  *dex.Asset
 }
