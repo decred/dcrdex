@@ -228,7 +228,7 @@ func (t *trackedTrade) lockRedemptionFraction(num, denom uint64) {
 	t.redemptionLocked += newReserved
 }
 
-// unlockRedemptionFraction unlocks the specified fractiOn of the redemption
+// unlockRedemptionFraction unlocks the specified fraction of the redemption
 // reserves. t.mtx should be locked if this trackedTrade is in the dc.trades
 // map. If the requested unlock would put the locked reserves < 0, an error
 // message is logged and the remaining locked reserves will be unlocked instead.

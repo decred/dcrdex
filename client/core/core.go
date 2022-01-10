@@ -4047,7 +4047,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		}
 		redemptionReserves, err = accountRedeemer.ReserveN(redemptionLots, wallets.toAsset.MaxFeeRate, wallets.toAsset.Version)
 		if err != nil {
-			return nil, 0, codedError(walletErr, fmt.Errorf("ReserveRedemption error: %w", err))
+			return nil, 0, codedError(walletErr, fmt.Errorf("ReserveN error: %w", err))
 		}
 		msgTrade.RedeemSig = &msgjson.RedeemSig{
 			PubKey: pubKeys[0],
@@ -5063,8 +5063,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 			}
 		}
 
-		preCancelFilled, canceled := tracker.recalcFilled()
-		tracker.Trade().SetFill(preCancelFilled + canceled)
+		tracker.recalcFilled()
 
 		if isActive {
 			tracker.lockRedemptionFraction(trade.Remaining(), trade.Quantity)

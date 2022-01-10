@@ -1922,43 +1922,16 @@ func TestSignMessage(t *testing.T) {
 
 	msg := []byte("msg")
 
-	// Error due to coin with unparsable ID
-	var badCoin badCoin
-	_, _, err := eth.SignMessage(&badCoin, msg)
-	if err == nil {
-		t.Fatalf("expected error for signing message with bad coin")
-	}
-
-	// Error due to coin from with account than wallet
-	differentAddress := common.HexToAddress("8d83B207674bfd53B418a6E47DA148F5bFeCc652")
-	coinDifferentAddress := coin{
-		id: (&fundingCoinID{
-			Address: differentAddress,
-			Amount:  100,
-		}).Encode(),
-	}
-	_, _, err = eth.SignMessage(&coinDifferentAddress, msg)
-	if err == nil {
-		t.Fatalf("expected error for signing message with different address than wallet")
-	}
-
-	coin := coin{
-		id: (&fundingCoinID{
-			Address: account.Address,
-			Amount:  100,
-		}).Encode(),
-	}
-
 	// SignData error
 	node.signDataErr = errors.New("")
-	_, _, err = eth.SignMessage(&coin, msg)
+	_, _, err := eth.SignMessage(nil, msg)
 	if err == nil {
 		t.Fatalf("expected error due to error in rpcclient signData")
 	}
 	node.signDataErr = nil
 
 	// Test no error
-	pubKeys, sigs, err := eth.SignMessage(&coin, msg)
+	pubKeys, sigs, err := eth.SignMessage(nil, msg)
 	if err != nil {
 		t.Fatalf("unexpected error signing message: %v", err)
 	}

@@ -802,9 +802,8 @@ func (eth *ExchangeWallet) ReserveN(n, feeRate uint64, assetVer uint32) (uint64,
 	}
 	if reserve > bal.Available {
 		return 0, fmt.Errorf("balance too low. %d < %d", bal.Available, reserve)
-	} else {
-		eth.redemptionReserve += reserve
 	}
+	eth.redemptionReserve += reserve
 
 	return reserve, err
 }
@@ -841,12 +840,7 @@ func (eth *ExchangeWallet) ReReserve(req uint64) error {
 // SignMessage signs the message with the private key associated with the
 // specified funding Coin. Only a coin that came from the address this wallet
 // is initialized with can be used to sign.
-func (eth *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
-	_, err = eth.decodeFundingCoinID(coin.ID())
-	if err != nil {
-		return nil, nil, fmt.Errorf("SignMessage: error decoding coin: %w", err)
-	}
-
+func (eth *ExchangeWallet) SignMessage(_ asset.Coin, msg dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
 	sig, pubKey, err := eth.node.signData(msg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("SignMessage: error signing data: %w", err)

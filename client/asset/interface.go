@@ -244,6 +244,8 @@ type TokenMaster interface {
 	OpenTokenWallet(assetID uint32, settings map[string]string, tipChange func(error)) (Wallet, error)
 }
 
+// AccountRedeemer is a wallet in which redemptions require a wallet to have
+// available balance to pay fees.
 type AccountRedeemer interface {
 	// ReserveN is used when preparing funding for an order that redeems to an
 	// account-based asset. The wallet will set aside the appropriate amount of
