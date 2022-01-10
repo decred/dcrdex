@@ -22,7 +22,7 @@ func packInitiateDataV0(initiations []*Initiation) ([]byte, error) {
 			RefundTimestamp: big.NewInt(init.LockTime.Unix()),
 			SecretHash:      init.SecretHash,
 			Participant:     init.Participant,
-			Value:           new(big.Int).Mul(bigVal, BigGweiFactor),
+			Value:           new(big.Int).Mul(bigVal, big.NewInt(GweiFactor)),
 		})
 	}
 	return (*ABIs[0]).Pack("initiate", abiInitiations)

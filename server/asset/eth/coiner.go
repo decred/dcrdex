@@ -143,13 +143,13 @@ func (eth *Backend) baseCoin(coinID []byte, contractData []byte) (*baseCoin, err
 		}
 	}
 
-	gasPrice, err := dexeth.ToGwei(rate)
+	gasPrice, err := dexeth.WeiToGweiUint64(rate)
 	if err != nil {
 		return nil, fmt.Errorf("unable to convert gas price: %v", err)
 	}
 
 	// Value is stored in the swap with the initialization transaction.
-	value, err := dexeth.ToGwei(tx.Value())
+	value, err := dexeth.WeiToGweiUint64(tx.Value())
 	if err != nil {
 		return nil, fmt.Errorf("unable to convert value: %v", err)
 	}

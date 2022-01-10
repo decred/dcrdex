@@ -235,7 +235,7 @@ func (eth *Backend) FeeRate(ctx context.Context) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return dexeth.ToGwei(bigGP)
+	return dexeth.WeiToGweiUint64(bigGP)
 }
 
 // BlockChannel creates and returns a new channel on which to receive block
@@ -357,7 +357,7 @@ func (eth *Backend) AccountBalance(addrStr string) (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("accountBalance error: %w", err)
 	}
-	return dexeth.ToGwei(bigBal)
+	return dexeth.WeiToGweiUint64(bigBal)
 }
 
 // ValidateSignature checks that the pubkey is correct for the address and

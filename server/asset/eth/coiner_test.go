@@ -106,11 +106,11 @@ func TestNewSwapCoin(t *testing.T) {
 	badCoinIDBytes := encode.RandomBytes(39)
 	const gasPrice = 30
 	const value = 5e9
-	wantGas, err := dexeth.ToGwei(big.NewInt(3e10))
+	wantGas, err := dexeth.WeiToGweiUint64(big.NewInt(3e10))
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantVal, err := dexeth.ToGwei(big.NewInt(5e18))
+	wantVal, err := dexeth.WeiToGweiUint64(big.NewInt(5e18))
 	if err != nil {
 		t.Fatal(err)
 	}
