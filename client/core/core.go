@@ -3991,6 +3991,18 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		coinIDs = append(coinIDs, []byte(coins[i].ID()))
 	}
 
+	// In the special case that there is a single coin that implements
+	// RecoveryCoin, set that as the change coin.
+	var recoveryCoin asset.Coin
+	var changeID []byte
+	if len(coins) == 1 {
+		c := coins[0]
+		if rc, is := c.(asset.RecoveryCoin); is {
+			recoveryCoin = c
+			changeID = rc.RecoveryID()
+		}
+	}
+
 	// The coins selected for this order will need to be unlocked
 	// if the order does not get to the server successfully.
 	var success bool
@@ -4125,6 +4137,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 			ToVersion:          wallets.toAsset.Version,
 			Options:            form.Options,
 			RedemptionReserves: redemptionReserves,
+			ChangeCoin:         changeID,
 		},
 		Order: ord,
 	}
@@ -4137,6 +4150,12 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	// Prepare and store the tracker and get the core.Order to return.
 	tracker := newTrackedTrade(dbOrder, preImg, dc, dc.marketEpochDuration(mktID), c.lockTimeTaker, c.lockTimeMaker,
 		c.db, c.latencyQ, wallets, coins, c.notify, c.formatDetails, form.Options, redemptionReserves)
+
+	if recoveryCoin != nil {
+		tracker.change = recoveryCoin
+		tracker.coinsLocked = false
+		tracker.changeLocked = true
+	}
 
 	dc.tradeMtx.Lock()
 	dc.trades[tracker.ID()] = tracker

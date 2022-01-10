@@ -655,20 +655,24 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 			return
 		}
 		if err != nil {
-			t.Fatalf("%v: unexpected error: %v", test.testName, err)
+			t.Fatalf("%s: unexpected error: %v", test.testName, err)
 		}
 		if len(coins) != 1 {
-			t.Fatalf("%v: expected 1 coins but got %v", test.testName, len(coins))
+			t.Fatalf("%s: expected 1 coins but got %v", test.testName, len(coins))
 		}
 		if len(redeemScripts) != 1 {
-			t.Fatalf("%v: expected 1 redeem script but got %v", test.testName, len(redeemScripts))
+			t.Fatalf("%s: expected 1 redeem script but got %v", test.testName, len(redeemScripts))
 		}
-		_, err = eth.decodeFundingCoinID(coins[0].ID())
+		rc, is := coins[0].(asset.RecoveryCoin)
+		if !is {
+			t.Fatalf("%s: funding coin is not a RecoveryCoin", test.testName)
+		}
+		_, err = eth.decodeFundingCoinID(rc.RecoveryID())
 		if err != nil {
-			t.Fatalf("%v: unexpected error: %v", test.testName, err)
+			t.Fatalf("%s: unexpected error: %v", test.testName, err)
 		}
 		if coins[0].Value() != test.coinValue {
-			t.Fatalf("%v: expected %v but got %v", test.testName, test.coinValue, coins[0].Value())
+			t.Fatalf("%s: expected %v but got %v", test.testName, test.coinValue, coins[0].Value())
 		}
 	}
 
@@ -733,7 +737,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	// Test returning correct coins returns all funds
 	err = eth.ReturnCoins([]asset.Coin{coins1[0], coins2[0]})
 	if err != nil {
-		t.Fatalf("unexpected error")
+		t.Fatalf("unexpected error: %v", err)
 	}
 	checkBalance(eth, walletBalanceGwei, 0, "returned correct amount")
 
@@ -761,7 +765,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	}
 
 	// Test reloading coins from first order
-	coins, err = eth2.FundingCoins([]dex.Bytes{coins1[0].ID()})
+	coins, err = eth2.FundingCoins([]dex.Bytes{parseRecoveryID(coins1[0])})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -774,14 +778,14 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	checkBalance(eth2, walletBalanceGwei-coins1[0].Value(), coins1[0].Value(), "funding1")
 
 	// Test reloading more coins than are available in balance
-	_, err = eth2.FundingCoins([]dex.Bytes{coins1[0].ID()})
+	_, err = eth2.FundingCoins([]dex.Bytes{parseRecoveryID(coins1[0])})
 	if err == nil {
 		t.Fatalf("expected error but didn't get one")
 	}
 	checkBalance(eth2, walletBalanceGwei-coins1[0].Value(), coins1[0].Value(), "after funding error 1")
 
 	// Test funding coins with bad coin ID
-	_, err = eth2.FundingCoins([]dex.Bytes{badCoin.ID()})
+	_, err = eth2.FundingCoins([]dex.Bytes{parseRecoveryID(coins1[0])})
 	if err == nil {
 		t.Fatalf("expected error but did not get")
 	}
@@ -793,13 +797,11 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	copy(differentAddress[:], decodedHex)
 	var nonce [8]byte
 	copy(nonce[:], encode.RandomBytes(8))
-	differentAddressCoin := coin{
-		id: (&fundingCoinID{
-			Address: differentAddress,
-			Amount:  100000,
-		}).Encode(),
-	}
-	_, err = eth2.FundingCoins([]dex.Bytes{differentAddressCoin.ID()})
+
+	differentKindaCoin := (&coin{
+		id: encode.RandomBytes(20), // e.g. tx hash
+	})
+	_, err = eth2.FundingCoins([]dex.Bytes{differentKindaCoin.ID()})
 	if err == nil {
 		t.Fatalf("expected error but did not get")
 	}
@@ -815,7 +817,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	checkBalance(eth2, walletBalanceGwei-coins1[0].Value(), coins1[0].Value(), "after funding error 5")
 
 	// Reloading coins from second order
-	coins, err = eth2.FundingCoins([]dex.Bytes{coins2[0].ID()})
+	coins, err = eth2.FundingCoins([]dex.Bytes{parseRecoveryID(coins2[0])})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -828,7 +830,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	checkBalance(eth2, 0, walletBalanceGwei, "funding2")
 
 	// return coin with incorrect address
-	err = eth2.ReturnCoins([]asset.Coin{&differentAddressCoin})
+	err = eth2.ReturnCoins([]asset.Coin{differentKindaCoin})
 	if err == nil {
 		t.Fatalf("expected error but did not get")
 	}
@@ -841,7 +843,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	checkBalance(eth2, walletBalanceGwei, 0, "return coins after funding")
 
 	// Test funding coins with two coins at the same time
-	_, err = eth2.FundingCoins([]dex.Bytes{coins1[0].ID(), coins2[0].ID()})
+	_, err = eth2.FundingCoins([]dex.Bytes{parseRecoveryID(coins1[0]), parseRecoveryID(coins2[0])})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2532,4 +2534,8 @@ func TestWithdraw(t *testing.T) {
 			t.Fatal("coin is not the tx hash")
 		}
 	}
+}
+
+func parseRecoveryID(c asset.Coin) []byte {
+	return c.(*fundingCoin).recoveryID
 }

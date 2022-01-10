@@ -283,6 +283,13 @@ type Coin interface {
 	Value() uint64
 }
 
+type RecoveryCoin interface {
+	// RecoveryID is an ID that can be used to re-establish funding state during
+	// startup. If a Coin implements RecoveryCoin, the RecoveryID will be used
+	// in the database record, and ultimately passed to the FundingCoin method.
+	RecoveryID() dex.Bytes
+}
+
 // Coins a collection of coins as returned by Fund.
 type Coins []Coin
 
