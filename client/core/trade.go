@@ -1639,8 +1639,12 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 	if change == nil {
 		t.metaData.ChangeCoin = nil
 	} else {
-		t.coins[hex.EncodeToString(change.ID())] = change
-		t.metaData.ChangeCoin = []byte(change.ID())
+		cid := change.ID()
+		if rc, is := change.(asset.RecoveryCoin); is {
+			cid = rc.RecoveryID()
+		}
+		t.coins[cid.String()] = change
+		t.metaData.ChangeCoin = []byte(cid)
 		c.log.Debugf("Saving change coin %v (%v) to DB for order %v",
 			coinIDString(fromAsset.ID, t.metaData.ChangeCoin), fromAsset.Symbol, t.ID())
 	}

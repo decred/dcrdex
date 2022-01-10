@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -471,6 +472,22 @@ func (c *coin) Value() uint64 {
 	return c.value
 }
 
+// fundingCoin is a coin that also implements asset.RecoveryCoin, enabling
+// a custom database record and special handling of the recovery ID for use in
+// later calls to FundingCoin.
+type fundingCoin struct {
+	*coin
+	recoveryID []byte
+}
+
+func (c *fundingCoin) RecoveryID() dex.Bytes {
+	return c.recoveryID[:]
+}
+
+func (c *fundingCoin) String() string {
+	return "{" + c.id.String() + ":" + hex.EncodeToString(c.recoveryID) + "}"
+}
+
 var _ asset.Coin = (*coin)(nil)
 
 // decodeFundingCoinID decodes a coin id into a coin object. This function ensures
@@ -493,11 +510,14 @@ func (eth *ExchangeWallet) decodeFundingCoinID(id []byte) (*coin, error) {
 	}, nil
 }
 
-func (eth *ExchangeWallet) createFundingCoin(amount uint64) *coin {
+func (eth *ExchangeWallet) createFundingCoin(amount uint64) *fundingCoin {
 	id := createFundingCoinID(eth.addr, amount)
-	return &coin{
-		id:    id.Encode(),
-		value: amount,
+	return &fundingCoin{
+		coin: &coin{
+			id:    []byte(eth.addr.String()),
+			value: amount,
+		},
+		recoveryID: id.Encode(),
 	}
 }
 
@@ -532,11 +552,12 @@ func (eth *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 func (eth *ExchangeWallet) ReturnCoins(coins asset.Coins) error {
 	var amt uint64
 	for i := range coins {
-		coin, err := eth.decodeFundingCoinID(coins[i].ID())
-		if err != nil {
-			return fmt.Errorf("ReturnCoins: unable to decode funding coin id: %w", err)
+		switch c := coins[i].(type) {
+		case *fundingCoin:
+			amt += c.value
+		default:
+			return fmt.Errorf("unsupported funding coin type for coin %[1]s: %[1]T", coins[i])
 		}
-		amt += coin.Value()
 	}
 	return eth.unlockFunds(amt)
 }
