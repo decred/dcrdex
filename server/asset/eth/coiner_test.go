@@ -30,13 +30,12 @@ func TestNewRedeemCoin(t *testing.T) {
 	copy(txHash[:], encode.RandomBytes(32))
 	copy(secret[:], redeemSecretB)
 	copy(secretHash[:], redeemSecretHashB)
-	txCoinIDBytes := txHash[:]
+	contract := dexeth.EncodeContractData(0, secretHash)
 	const gasPrice = 30
 	const value = 5e9
 	const wantGas = 30
 	tests := []struct {
 		name          string
-		coinID        []byte
 		contract      []byte
 		tx            *types.Transaction
 		swpErr, txErr error
@@ -44,24 +43,20 @@ func TestNewRedeemCoin(t *testing.T) {
 	}{{
 		name:     "ok redeem",
 		tx:       tTx(gasPrice, 0, contractAddr, redeemCalldata),
-		coinID:   txCoinIDBytes,
-		contract: dexeth.EncodeContractData(0, secretHash),
+		contract: contract,
 	}, {
 		name:     "non zero value with redeem",
 		tx:       tTx(gasPrice, value, contractAddr, redeemCalldata),
-		coinID:   txCoinIDBytes,
-		contract: redeemSecretHashB,
+		contract: contract,
 		wantErr:  true,
 	}, {
 		name:     "unable to decode redeem data, must be redeem for redeem coin type",
 		tx:       tTx(gasPrice, 0, contractAddr, initCalldata),
-		coinID:   txCoinIDBytes,
-		contract: redeemSecretHashB,
+		contract: contract,
 		wantErr:  true,
 	}, {
 		name:     "tx coin id for redeem - contract not in tx",
 		tx:       tTx(gasPrice, value, contractAddr, redeemCalldata),
-		coinID:   txCoinIDBytes,
 		contract: encode.RandomBytes(32),
 		wantErr:  true,
 	}}
@@ -76,7 +71,7 @@ func TestNewRedeemCoin(t *testing.T) {
 			contractAddr: *contractAddr,
 			initTxSize:   uint32(dexeth.InitGas(1, 0)),
 		}
-		rc, err := eth.newRedeemCoin(test.coinID, test.contract)
+		rc, err := eth.newRedeemCoin(txHash[:], test.contract)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)

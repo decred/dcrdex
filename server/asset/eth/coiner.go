@@ -89,6 +89,10 @@ func (eth *Backend) newRedeemCoin(coinID []byte, contractData []byte) (*redeemCo
 		return nil, err
 	}
 
+	if bc.value != 0 {
+		return nil, fmt.Errorf("expected tx value of zero for redeem but got: %d", bc.value)
+	}
+
 	redemptions, err := dexeth.ParseRedeemData(bc.txData, ethContractVersion)
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse redemption call data: %v", err)
