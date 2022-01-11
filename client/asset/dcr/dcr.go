@@ -1862,14 +1862,14 @@ func (dcr *ExchangeWallet) lookupTxOutput(ctx context.Context, txHash *chainhash
 	output, err := dcr.wallet.UnspentOutput(ctx, txHash, vout, wire.TxTreeUnknown)
 	if err == nil {
 		return output.TxOut, output.Confirmations, false, nil
-	} else if err != asset.CoinNotFoundError {
+	} else if !errors.Is(err, asset.CoinNotFoundError) {
 		return nil, 0, false, err
 	}
 
 	// Check wallet transactions.
 	tx, err := dcr.wallet.GetTransaction(ctx, txHash)
 	if err != nil {
-		return nil, 0, false, err
+		return nil, 0, false, err // asset.CoinNotFoundError if not found
 	}
 	msgTx, err := msgTxFromHex(tx.Hex)
 	if err != nil {
@@ -2538,8 +2538,10 @@ func (dcr *ExchangeWallet) ValidateSecret(secret, secretHash []byte) bool {
 // the specified swap. The contract and matchTime are provided so that wallets
 // may search for the coin using light filters.
 //
-// If the swap was not funded by this wallet, and it is already spent, this
-// method may return asset.CoinNotFoundError. Compare dcr.externalTxOut.
+// For a non-SPV wallet, if the swap appears spent but it cannot be located in a
+// block with a cfilters scan, this will return asset.CoinNotFoundError. For SPV
+// wallets, it is not an error if the transaction cannot be located SPV wallets
+// cannot see non-wallet transactions until they are mined.
 //
 // If the coin is located, but recognized as spent, no error is returned.
 func (dcr *ExchangeWallet) SwapConfirmations(ctx context.Context, coinID, contract dex.Bytes, matchTime time.Time) (confs uint32, spent bool, err error) {
@@ -2552,7 +2554,7 @@ func (dcr *ExchangeWallet) SwapConfirmations(ctx context.Context, coinID, contra
 	_, confs, spent, err = dcr.lookupTxOutput(ctx, txHash, vout)
 	if err == nil {
 		return confs, spent, nil
-	} else if err != asset.CoinNotFoundError {
+	} else if !errors.Is(err, asset.CoinNotFoundError) {
 		return 0, false, err
 	}
 
@@ -2563,9 +2565,17 @@ func (dcr *ExchangeWallet) SwapConfirmations(ctx context.Context, coinID, contra
 	}
 	_, p2shScript := scriptAddr.PaymentScript()
 
-	// Find the contract and it's spend status using block filters.
+	// Find the contract and its spend status using block filters.
 	dcr.log.Debugf("Contract output %s:%d NOT yet found, will attempt finding it with block filters.", txHash, vout)
-	return dcr.lookupTxOutWithBlockFilters(ctx, newOutPoint(txHash, vout), p2shScript, matchTime)
+	confs, spent, err = dcr.lookupTxOutWithBlockFilters(ctx, newOutPoint(txHash, vout), p2shScript, matchTime)
+	// Don't trouble the caller if we're using an SPV wallet and the transaction
+	// cannot be located.
+	if errors.Is(err, asset.CoinNotFoundError) && dcr.wallet.SpvMode() {
+		dcr.log.Debugf("SwapConfirmations - cfilters scan did not find %v:%d. "+
+			"Assuming in mempool.", txHash, vout)
+		err = nil
+	}
+	return confs, spent, err
 }
 
 // RegFeeConfirmations gets the number of confirmations for the specified
@@ -3225,7 +3235,7 @@ func (dcr *ExchangeWallet) isMainchainBlock(ctx context.Context, block *block) (
 	}
 	nextBlockHash, err := chainhash.NewHashFromStr(blockHeader.NextHash)
 	if err != nil {
-		return false, fmt.Errorf("block %s has invalid nexthash value %s: %v",
+		return false, fmt.Errorf("block %s has invalid nexthash value %s: %w",
 			block.hash, blockHeader.NextHash, err)
 	}
 	nextBlockHeader, err := dcr.wallet.GetBlockHeaderVerbose(ctx, nextBlockHash)

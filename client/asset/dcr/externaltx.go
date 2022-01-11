@@ -54,12 +54,12 @@ func (dcr *ExchangeWallet) lookupTxOutWithBlockFilters(ctx context.Context, op o
 
 	output, outputBlock, err := dcr.externalTxOutput(ctx, op, pkScript, earliestTxTime)
 	if err != nil {
-		return 0, false, err
+		return 0, false, err // may be asset.CoinNotFoundError
 	}
 
 	spent, err := dcr.isOutputSpent(ctx, output)
 	if err != nil {
-		return 0, false, fmt.Errorf("error checking if output %s is spent: %v", op, err)
+		return 0, false, fmt.Errorf("error checking if output %s is spent: %w", op, err)
 	}
 
 	// Get the current tip height to calculate confirmations.
@@ -82,7 +82,7 @@ func (dcr *ExchangeWallet) externalTxOutput(ctx context.Context, op outPoint, pk
 	tx := dcr.externalTxCache[op.txHash]
 	if tx == nil {
 		tx = &externalTx{hash: &op.txHash}
-		dcr.externalTxCache[op.txHash] = tx
+		dcr.externalTxCache[op.txHash] = tx // never deleted (TODO)
 	}
 	dcr.externalTxMtx.Unlock()
 
@@ -98,14 +98,14 @@ func (dcr *ExchangeWallet) externalTxOutput(ctx context.Context, op outPoint, pk
 	// First check if the tx block is cached.
 	txBlock, err := dcr.txBlockFromCache(ctx, tx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error checking if tx %s is known to be mined: %v", tx.hash, err)
+		return nil, nil, fmt.Errorf("error checking if tx %s is known to be mined: %w", tx.hash, err)
 	}
 
 	// Scan block filters to find the tx block if it is yet unknown.
 	if txBlock == nil {
 		txBlock, err = dcr.scanFiltersForTxBlock(ctx, tx, [][]byte{pkScript}, earliestTxTime)
 		if err != nil {
-			return nil, nil, fmt.Errorf("error checking if tx %s is mined: %v", tx.hash, err)
+			return nil, nil, fmt.Errorf("error checking if tx %s is mined: %w", tx.hash, err)
 		}
 		if txBlock == nil {
 			return nil, nil, asset.CoinNotFoundError
@@ -171,11 +171,11 @@ func (dcr *ExchangeWallet) scanFiltersForTxBlock(ctx context.Context, tx *extern
 	// to block just before earliestTxTime.
 	currentTip := dcr.cachedBestBlock()
 	if lastScannedBlock == nil {
-		dcr.log.Debugf("Searching for tx %s in blocks between block %d (%s) to the block just before %s.",
+		dcr.log.Debugf("Searching for tx %s in blocks between best block %d (%s) and the block just before %s.",
 			tx.hash, currentTip.height, currentTip.hash, earliestTxTime)
 	} else if lastScannedBlock.height < currentTip.height {
 		dcr.log.Debugf("Searching for tx %s in blocks %d (%s) to %d (%s).", tx.hash,
-			currentTip.height, currentTip.hash, lastScannedBlock.height, lastScannedBlock.hash)
+			lastScannedBlock.height, lastScannedBlock.hash, currentTip.height, currentTip.hash)
 	} else {
 		if lastScannedBlock.height > currentTip.height {
 			dcr.log.Warnf("Previous cfilters look up for tx %s stopped at block %d but current tip is %d?",
@@ -192,7 +192,7 @@ func (dcr *ExchangeWallet) scanFiltersForTxBlock(ctx context.Context, tx *extern
 	scanCompletedWithoutResults := func() (*block, error) {
 		tx.lastScannedBlock = currentTip.hash
 		dcr.log.Debugf("Tx %s NOT found in blocks %d (%s) to %d (%s).", tx.hash,
-			currentTip.height, currentTip.hash, iHeight, iHash)
+			iHeight, iHash, currentTip.height, currentTip.hash)
 		return nil, nil
 	}
 
@@ -272,8 +272,8 @@ func (dcr *ExchangeWallet) findTxInBlock(ctx context.Context, txHash *chainhash.
 		return nil, nil, fmt.Errorf("invalid hex for tx %s: %v", txHash, err)
 	}
 
-	// We have the txs in this block, check if any them spends an output
-	// from the original tx.
+	// We have the txs in this block, check if any of them spends an output from
+	// the original tx.
 	outputSpenders := make([]*outputSpenderFinder, len(msgTx.TxOut))
 	for i, txOut := range msgTx.TxOut {
 		outputSpenders[i] = &outputSpenderFinder{
@@ -286,7 +286,7 @@ func (dcr *ExchangeWallet) findTxInBlock(ctx context.Context, txHash *chainhash.
 	for t := range blockTxs {
 		blkTx := &blockTxs[t]
 		if blkTx.Txid == txHash.String() {
-			continue // oriignal tx, ignore
+			continue // original tx, ignore
 		}
 		for i := range blkTx.Vin {
 			input := &blkTx.Vin[i]
@@ -340,7 +340,12 @@ func (dcr *ExchangeWallet) isOutputSpent(ctx context.Context, output *outputSpen
 
 	bestBlock := dcr.cachedBestBlock()
 	if nextScanHeight >= bestBlock.height {
-		if nextScanHeight > bestBlock.height {
+		// When a transaction is initially found in a block, that block is also
+		// scanned for spending transactions (see findTxInBlock) as an
+		// optimization since the block was pulled. As such, it is normal for
+		// the lastScannedHeight for newly located transactions to be the best
+		// block, so there is no need to warn, only return.
+		if nextScanHeight > bestBlock.height+1 {
 			dcr.log.Warnf("Attempted to look for output spender in block %d but current tip is %d!",
 				nextScanHeight, bestBlock.height)
 		}
