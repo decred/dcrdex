@@ -957,6 +957,8 @@ func (w *spvWallet) swapConfirmations(txHash *chainhash.Hash, vout uint32, pkScr
 		if assumedMempool {
 			w.log.Tracef("swapConfirmations - scanFilters did not find %v:%d, assuming in mempool.",
 				txHash, vout)
+			// NOT asset.CoinNotFoundError since this is normal for mempool
+			// transactions with an SPV wallet.
 			return 0, false, nil
 		}
 		return 0, false, fmt.Errorf("output %s:%v not found with search parameters startTime = %s, pkScript = %x",
