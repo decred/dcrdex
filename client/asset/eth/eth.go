@@ -134,9 +134,9 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Ne
 
 // DecodeCoinID creates a human-readable representation of a coin ID for Ethereum.
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
-	id, err := dexeth.DecodeCoinID(coinID)
+	id, err := decodeFundingCoinID(coinID)
 	if err != nil {
-		return "", nil
+		return "<invalid coin>", err
 	}
 	return id.String(), nil
 }

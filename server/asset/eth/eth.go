@@ -363,8 +363,9 @@ func (eth *Backend) AccountBalance(addrStr string) (uint64, error) {
 // ValidateSignature checks that the pubkey is correct for the address and
 // that the signature shows ownership of the associated private key.
 func (eth *Backend) ValidateSignature(addr string, pubkey, msg, sig []byte) error {
-	if len(sig) != 65 {
-		return fmt.Errorf("expected sig length of sixty five bytes but got %d", len(sig))
+	const sigLen = 64
+	if len(sig) != sigLen {
+		return fmt.Errorf("expected sig length of %d bytes but got %d", sigLen, len(sig))
 	}
 	ethPK, err := crypto.UnmarshalPubkey(pubkey)
 	if err != nil {
