@@ -623,13 +623,17 @@ export class WalletWaitForm {
     page.fee.textContent = Doc.formatCoinValue(fee.amount, asset.info.unitinfo)
 
     Doc.hide(page.syncUncheck, page.syncCheck, page.balUncheck, page.balCheck, page.syncRemainBox)
-    Doc.show(page.balanceBox)
+    Doc.show(page.balanceBox, page.sendEnough)
 
     Doc.show(wallet.synced ? page.syncCheck : wallet.syncProgress >= 1 ? page.syncSpinner : page.syncUncheck)
     Doc.show(wallet.balance.available > fee.amount ? page.balCheck : page.balUncheck)
 
     page.progress.textContent = Math.round(wallet.syncProgress * 100)
-    this.reportBalance(wallet.balance)
+
+    if (wallet.synced) {
+      this.progressed = true
+    }
+    this.reportBalance(wallet.balance, wallet.assetID)
   }
 
   /*
@@ -640,27 +644,27 @@ export class WalletWaitForm {
     if (wallet.assetID !== this.assetID) return
     if (this.progressed && this.funded) return
     this.reportProgress(wallet.synced, wallet.syncProgress)
-    this.reportBalance(wallet.balance)
+    this.reportBalance(wallet.balance, wallet.assetID)
   }
 
   /*
    * reportBalance sets the balance display and calls success if we go over the
    * threshold.
    */
-  reportBalance (bal) {
-    if (this.funded || this.assetID === -1) return
+  reportBalance (bal, assetID) {
+    if (this.funded || this.assetID === -1 || this.assetID !== assetID) return
     const page = this.page
     const asset = app().assets[this.assetID]
-    const fee = this.regFee
 
-    if (bal.available <= fee.amount) {
+    if (bal.available <= this.regFee.amount) {
       page.balance.textContent = Doc.formatCoinValue(bal.available, asset.info.unitinfo)
       return
     }
 
     Doc.show(page.balCheck)
-    Doc.hide(page.balUncheck, page.balanceBox)
+    Doc.hide(page.balUncheck, page.balanceBox, page.sendEnough)
     this.funded = true
+
     if (this.progressed) this.success()
   }
 
