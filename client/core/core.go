@@ -53,6 +53,8 @@ const (
 	// defaultTickInterval is the tick interval used before the broadcast
 	// timeout is known (e.g. startup with down server).
 	defaultTickInterval = 30 * time.Second
+
+	marketBuyRedemptionSlippageBuffer = 2
 )
 
 var (
@@ -440,7 +442,7 @@ func (c *Core) tryCancelTrade(dc *dexConnection, tracker *trackedTrade) error {
 	c.sentCommitsMtx.Unlock()
 
 	// Create and send the order message. Check the response before using it.
-	route, msgOrder := messageOrder(co, nil)
+	route, msgOrder, _ := messageOrder(co, nil)
 	var result = new(msgjson.OrderResult)
 	err = dc.signAndRequest(msgOrder, route, result, DefaultResponseTimeout)
 	if err != nil {
@@ -771,6 +773,7 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 		if trade.metaData.Status == order.OrderStatusEpoch || trade.metaData.Status == order.OrderStatusBooked {
 			knownActiveTrades[oid] = trade
 		} else if srvOrderStatus := srvActiveOrderStatuses[oid]; srvOrderStatus != nil {
+			// Lock redemption funds?
 			dc.log.Warnf("Inactive order %v, status %q reported by DEX %s as active, status %q",
 				oid, trade.metaData.Status, dc.acct.host, order.OrderStatus(srvOrderStatus.Status))
 		}
@@ -797,6 +800,16 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 			err := trade.db.UpdateOrderStatus(cid, order.OrderStatusExecuted)
 			if err != nil {
 				dc.log.Errorf("Failed to update status of executed cancel order %v: %v", cid, err)
+			}
+		}
+		// If we're updating an order from an active state to executed,
+		// canceled, or revoked, return the remaining quantity.
+		if newStatus >= order.OrderStatusExecuted && trade.Trade().Remaining() > 0 &&
+			(!trade.isMarketBuy() || len(trade.matches) == 0) {
+			if trade.isMarketBuy() {
+				trade.unlockRedemptionFraction(1, 1)
+			} else {
+				trade.unlockRedemptionFraction(trade.Trade().Remaining(), trade.Trade().Quantity)
 			}
 		}
 		// Now update the trade.
@@ -3852,6 +3865,8 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	}
 	fromWallet, toWallet := wallets.fromWallet, wallets.toWallet
 
+	accountRedeemer, isAccountRedemption := toWallet.Wallet.(asset.AccountRedeemer)
+
 	prepareWallet := func(w *xcWallet) error {
 		// NOTE: If the wallet is already internally unlocked (the decrypted
 		// password cached in xcWallet.pw), this could be done without the
@@ -3893,6 +3908,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	if form.IsLimit && !form.Sell {
 		fundQty = calc.BaseToQuote(rate, fundQty)
 	}
+	redemptionLots := lots
 
 	isImmediate := (!form.IsLimit || form.TifNow)
 
@@ -3915,6 +3931,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 			if err == nil {
 				baseQty := calc.QuoteToBase(midGap, fundQty)
 				lots = baseQty / lotSize
+				redemptionLots = lots * marketBuyRedemptionSlippageBuffer
 				if lots == 0 {
 					err = newError(orderParamsErr,
 						"order quantity is too low for current market rates. "+
@@ -3923,6 +3940,8 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 						wallets.baseAsset.Symbol, lotSize)
 					return nil, 0, err
 				}
+			} else if isAccountRedemption {
+				return nil, 0, newError(orderParamsErr, "cannot estimate redemption count")
 			}
 		}
 	}
@@ -3944,6 +3963,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		return nil, 0, codedError(walletErr, fmt.Errorf("FundOrder error for %s, funding quantity %d (%d lots): %w",
 			wallets.fromAsset.Symbol, fundQty, lots, err))
 	}
+
 	coinIDs := make([]order.CoinID, 0, len(coins))
 	for i := range coins {
 		coinIDs = append(coinIDs, []byte(coins[i].ID()))
@@ -3951,12 +3971,16 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 
 	// The coins selected for this order will need to be unlocked
 	// if the order does not get to the server successfully.
-	unlockCoins := func() {
+	var success bool
+	defer func() {
+		if success {
+			return
+		}
 		err := fromWallet.ReturnCoins(coins)
 		if err != nil {
 			c.log.Warnf("Unable to return %s funding coins: %v", unbip(fromWallet.AssetID), err)
 		}
-	}
+	}()
 
 	// Construct the order.
 	preImg := newPreimage()
@@ -3999,14 +4023,41 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	}
 	err = order.ValidateOrder(ord, order.OrderStatusEpoch, lotSize)
 	if err != nil {
-		unlockCoins()
 		return nil, 0, fmt.Errorf("ValidateOrder error: %w", err)
 	}
 
 	msgCoins, err := messageCoins(wallets.fromWallet, coins, redeemScripts)
 	if err != nil {
-		unlockCoins()
 		return nil, 0, fmt.Errorf("wallet %v failed to sign coins: %w", wallets.fromAsset.ID, err)
+	}
+
+	// Everything is ready. Send the order.
+	route, msgOrder, msgTrade := messageOrder(ord, msgCoins)
+
+	// If the to asset is an AccountRedeemer, we need to lock up redemption
+	// funds.
+	var redemptionReserves uint64
+	if isAccountRedemption {
+		pubKeys, sigs, err := toWallet.SignMessage(nil, msgOrder.Serialize())
+		if err != nil {
+			return nil, 0, codedError(signatureErr, fmt.Errorf("SignMessage error: %w", err))
+		}
+		if len(pubKeys) == 0 || len(sigs) == 0 {
+			return nil, 0, newError(signatureErr, "wrong number of pubkeys or signatures, %d & %d", len(pubKeys), len(sigs))
+		}
+		redemptionReserves, err = accountRedeemer.ReserveN(redemptionLots, wallets.toAsset.MaxFeeRate, wallets.toAsset.Version)
+		if err != nil {
+			return nil, 0, codedError(walletErr, fmt.Errorf("ReserveN error: %w", err))
+		}
+		msgTrade.RedeemSig = &msgjson.RedeemSig{
+			PubKey: pubKeys[0],
+			Sig:    sigs[0],
+		}
+		defer func() {
+			if !success {
+				accountRedeemer.UnlockReserves(redemptionReserves)
+			}
+		}()
 	}
 
 	commitSig := make(chan struct{})
@@ -4015,14 +4066,10 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	c.sentCommits[prefix.Commit] = commitSig
 	c.sentCommitsMtx.Unlock()
 
-	// Everything is ready. Send the order.
-	route, msgOrder := messageOrder(ord, msgCoins)
-
 	// Send and get the result.
 	result := new(msgjson.OrderResult)
 	err = dc.signAndRequest(msgOrder, route, result, fundingTxWait+DefaultResponseTimeout)
 	if err != nil {
-		unlockCoins()
 		// At this point there is a possibility that the server got the request
 		// and created the trade order, but we lost the connection before
 		// receiving the response with the trade's order ID. Any preimage
@@ -4038,7 +4085,6 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 
 	err = validateOrderResponse(dc, result, ord, msgOrder) // stamps the order, giving it a valid ID
 	if err != nil {
-		unlockCoins()
 		logAbandon(fmt.Sprintf("order response validation failure: %v", err))
 		return nil, 0, fmt.Errorf("validateOrderResponse error: %w", err)
 	}
@@ -4053,22 +4099,22 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 				DEXSig:   result.Sig,
 				Preimage: preImg[:],
 			},
-			FromVersion: wallets.fromAsset.Version,
-			ToVersion:   wallets.toAsset.Version,
-			Options:     form.Options,
+			FromVersion:        wallets.fromAsset.Version,
+			ToVersion:          wallets.toAsset.Version,
+			Options:            form.Options,
+			RedemptionReserves: redemptionReserves,
 		},
 		Order: ord,
 	}
 	err = c.db.UpdateOrder(dbOrder)
 	if err != nil {
-		unlockCoins()
 		logAbandon(fmt.Sprintf("failed to store order in database: %v", err))
 		return nil, 0, fmt.Errorf("Order abandoned due to database error: %w", err)
 	}
 
 	// Prepare and store the tracker and get the core.Order to return.
 	tracker := newTrackedTrade(dbOrder, preImg, dc, dc.marketEpochDuration(mktID), c.lockTimeTaker, c.lockTimeMaker,
-		c.db, c.latencyQ, wallets, coins, c.notify, c.formatDetails, form.Options)
+		c.db, c.latencyQ, wallets, coins, c.notify, c.formatDetails, form.Options, redemptionReserves)
 
 	dc.tradeMtx.Lock()
 	dc.trades[tracker.ID()] = tracker
@@ -4094,6 +4140,8 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 			sellString(corder.Sell), ui.ConventionalString(corder.Qty), ui.Conventional.Unit, rateString, tracker.token())
 		c.notify(newOrderNote(TopicOrderPlaced, subject, details, db.Poke, corder))
 	}
+
+	success = true
 
 	return corder, wallets.fromWallet.AssetID, nil
 }
@@ -4672,7 +4720,8 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		var preImg order.Preimage
 		copy(preImg[:], dbOrder.MetaData.Proof.Preimage)
 		tracker := newTrackedTrade(dbOrder, preImg, dc, dc.marketEpochDuration(mktID), c.lockTimeTaker,
-			c.lockTimeMaker, c.db, c.latencyQ, nil, nil, c.notify, c.formatDetails, dbOrder.MetaData.Options)
+			c.lockTimeMaker, c.db, c.latencyQ, nil, nil, c.notify, c.formatDetails,
+			dbOrder.MetaData.Options, dbOrder.MetaData.RedemptionReserves)
 		trackers[dbOrder.Order.ID()] = tracker
 
 		// Get matches.
@@ -4680,11 +4729,17 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		if err != nil {
 			return nil, fmt.Errorf("error loading matches for order %s: %w", oid, err)
 		}
+		var makerCancel *msgjson.Match
 		for _, dbMatch := range dbMatches {
 			// Only trade matches are added to the matches map. Detect and skip
 			// cancel order matches, which have an empty Address field.
 			if dbMatch.Address == "" { // only correct for maker's cancel match
 				// tracker.cancel is set from LinkedOrder with cancelTrade.
+				makerCancel = &msgjson.Match{
+					OrderID:  oid[:],
+					MatchID:  dbMatch.MatchID[:],
+					Quantity: dbMatch.Quantity,
+				}
 				continue
 			}
 			// Make sure that a taker will not prematurely send an
@@ -4721,6 +4776,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		var pimg order.Preimage
 		copy(pimg[:], metaCancel.MetaData.Proof.Preimage)
 		err = tracker.cancelTrade(co, pimg) // set tracker.cancel and link
+		tracker.cancel.matches.maker = makerCancel
 		if err != nil {
 			c.log.Errorf("Error setting cancel order info %s: %v", co.ID(), err)
 		}
@@ -4866,6 +4922,14 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 
 		tracker.wallets = wallets
 
+		lockMatchRedemption := func(match *matchTracker) {
+			if tracker.isMarketBuy() {
+				tracker.lockRedemptionFraction(1, uint64(len(tracker.matches)))
+			} else {
+				tracker.lockRedemptionFraction(match.Quantity, trade.Quantity)
+			}
+		}
+
 		// If matches haven't redeemed, but the counter-swap has been received,
 		// reload the audit info.
 		isActive := tracker.metaData.Status == order.OrderStatusBooked || tracker.metaData.Status == order.OrderStatusEpoch
@@ -4881,6 +4945,9 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 					needsAuditInfo = true // maker needs AuditInfo for takers contract
 					counterSwap = match.MetaData.Proof.TakerSwap
 				}
+				if match.Status < order.MakerRedeemed {
+					lockMatchRedemption(match)
+				}
 			} else { // Taker
 				if match.Status < order.TakerSwapCast {
 					matchesNeedingCoins = append(matchesNeedingCoins, match)
@@ -4888,6 +4955,9 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				if match.Status < order.MatchComplete && match.Status >= order.MakerSwapCast {
 					needsAuditInfo = true // taker needs AuditInfo for maker's contract
 					counterSwap = match.MetaData.Proof.MakerSwap
+				}
+				if match.Status < order.MatchComplete {
+					lockMatchRedemption(match)
 				}
 			}
 			c.log.Tracef("Trade %v match %v needs coins = %v, needs audit info = %v",
@@ -4991,6 +5061,12 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 					tracker.coins = mapifyCoins(coins)
 				}
 			}
+		}
+
+		tracker.recalcFilled()
+
+		if isActive {
+			tracker.lockRedemptionFraction(trade.Remaining(), trade.Quantity)
 		}
 
 		// Balances should be updated for any orders with locked wallet coins,
@@ -5439,7 +5515,7 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	copy(matchID[:], revocation.MatchID)
 
 	tracker.mtx.Lock()
-	err = tracker.revokeMatch(matchID, true)
+	err = tracker.revokeMatch(c.ctx, matchID, true)
 	tracker.mtx.Unlock()
 	if err != nil {
 		return fmt.Errorf("unable to revoke match %s for order %s: %w", matchID, tracker.ID(), err)
@@ -5584,7 +5660,16 @@ func (c *Core) listen(dc *dexConnection) {
 
 		if len(doneTrades) > 0 {
 			dc.tradeMtx.Lock()
+
 			for _, trade := range doneTrades {
+				// Log an error if redemption funds are still reserved.
+				trade.mtx.RLock()
+				reserved := trade.redemptionLocked
+				trade.mtx.RUnlock()
+				if reserved > 0 {
+					dc.log.Errorf("retiring order %s with %d > 0 redemption funds reserved", trade.ID(), reserved)
+				}
+
 				c.notify(newOrderNote(TopicOrderRetired, "", "", db.Data, trade.coreOrder()))
 				delete(dc.trades, trade.ID())
 			}
@@ -6238,7 +6323,7 @@ func messageCoins(wallet *xcWallet, coins asset.Coins, redeemScripts []dex.Bytes
 
 // messageOrder converts an order.Order of any underlying type to an appropriate
 // msgjson type used for submitting the order.
-func messageOrder(ord order.Order, coins []*msgjson.Coin) (string, msgjson.Stampable) {
+func messageOrder(ord order.Order, coins []*msgjson.Coin) (string, msgjson.Stampable, *msgjson.Trade) {
 	prefix, trade := ord.Prefix(), ord.Trade()
 	switch o := ord.(type) {
 	case *order.LimitOrder:
@@ -6246,22 +6331,24 @@ func messageOrder(ord order.Order, coins []*msgjson.Coin) (string, msgjson.Stamp
 		if o.Force == order.ImmediateTiF {
 			tifFlag = msgjson.ImmediateOrderNum
 		}
-		return msgjson.LimitRoute, &msgjson.LimitOrder{
+		msgOrd := &msgjson.LimitOrder{
 			Prefix: *messagePrefix(prefix),
 			Trade:  *messageTrade(trade, coins),
 			Rate:   o.Rate,
 			TiF:    tifFlag,
 		}
+		return msgjson.LimitRoute, msgOrd, &msgOrd.Trade
 	case *order.MarketOrder:
-		return msgjson.MarketRoute, &msgjson.MarketOrder{
+		msgOrd := &msgjson.MarketOrder{
 			Prefix: *messagePrefix(prefix),
 			Trade:  *messageTrade(trade, coins),
 		}
+		return msgjson.MarketRoute, msgOrd, &msgOrd.Trade
 	case *order.CancelOrder:
 		return msgjson.CancelRoute, &msgjson.CancelOrder{
 			Prefix:   *messagePrefix(prefix),
 			TargetID: o.TargetOrderID[:],
-		}
+		}, nil
 	default:
 		panic("unknown order type")
 	}

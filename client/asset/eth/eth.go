@@ -31,7 +31,6 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 )
 
 var (
@@ -186,7 +185,7 @@ type ethFetcher interface {
 	lock() error
 	locked() bool
 	unlock(pw string) error
-	signData(addr common.Address, data []byte) ([]byte, error)
+	signData(data []byte) (sig, pubKey []byte, err error)
 	sendToAddr(ctx context.Context, addr common.Address, val uint64) (*types.Transaction, error)
 	transactionConfirmations(context.Context, common.Hash) (uint32, error)
 	sendSignedTransaction(ctx context.Context, tx *types.Transaction) error
@@ -194,6 +193,7 @@ type ethFetcher interface {
 
 // Check that ExchangeWallet satisfies the asset.Wallet interface.
 var _ asset.Wallet = (*ExchangeWallet)(nil)
+var _ asset.AccountRedeemer = (*ExchangeWallet)(nil)
 
 // ExchangeWallet is a wallet backend for Ethereum. The backend is how the DEX
 // client app communicates with the Ethereum blockchain and wallet. ExchangeWallet
@@ -214,8 +214,9 @@ type ExchangeWallet struct {
 	tipMtx     sync.RWMutex
 	currentTip *types.Block
 
-	locked    uint64
-	lockedMtx sync.RWMutex
+	lockedMtx         sync.RWMutex
+	locked            uint64
+	redemptionReserve uint64
 
 	findRedemptionMtx  sync.RWMutex
 	findRedemptionReqs map[[32]byte]*findRedemptionRequest
@@ -369,7 +370,7 @@ func (eth *ExchangeWallet) balance() (*asset.Balance, error) {
 		return nil, err
 	}
 
-	locked := eth.locked + dexeth.WeiToGwei(bal.PendingOut)
+	locked := eth.locked + eth.redemptionReserve + dexeth.WeiToGwei(bal.PendingOut)
 	return &asset.Balance{
 		Available: dexeth.WeiToGwei(bal.Current) - locked,
 		Locked:    locked,
@@ -713,7 +714,7 @@ func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 
 	var contractVersion uint32 // require a consistent version since this is a single transaction
 	inputs := make([]dex.Bytes, 0, len(form.Redemptions))
-	var redeemedValue uint64
+	var redeemedValue, unlocked uint64
 	for i, redemption := range form.Redemptions {
 		// NOTE: redemption.Spends.SecretHash is a dup of the hash extracted
 		// from redemption.Spends.Contract. Even for scriptable UTXO assets, the
@@ -750,6 +751,7 @@ func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 			return nil, nil, 0, fmt.Errorf("Redeem: error finding swap state: %w", err)
 		}
 		redeemedValue += swapData.Value
+		unlocked += redemption.UnlockedReserves
 		inputs = append(inputs, redemption.Spends.Coin.ID())
 	}
 
@@ -762,6 +764,8 @@ func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 	if err != nil {
 		return fail(fmt.Errorf("Redeem: redeem error: %w", err))
 	}
+
+	eth.UnlockReserves(unlocked)
 
 	return inputs, outputCoin, fundsRequired, nil
 }
@@ -784,23 +788,62 @@ func recoverPubkey(msgHash, sig []byte) ([]byte, error) {
 	return pubKey.SerializeUncompressed(), nil
 }
 
+// ReserveN locks funds for redemption. It is an error if there is insufficient
+// spendable balance. Part of the AccountRedeemer interface.
+func (eth *ExchangeWallet) ReserveN(n, feeRate uint64, assetVer uint32) (uint64, error) {
+	redeemCost := dexeth.RedeemGas(1, assetVer) * feeRate
+	reserve := redeemCost * n
+
+	eth.lockedMtx.Lock()
+	defer eth.lockedMtx.Unlock()
+	bal, err := eth.balance()
+	if err != nil {
+		return 0, fmt.Errorf("error retreiving balance: %w", err)
+	}
+	if reserve > bal.Available {
+		return 0, fmt.Errorf("balance too low. %d < %d", bal.Available, reserve)
+	}
+	eth.redemptionReserve += reserve
+
+	return reserve, err
+}
+
+// UnlockReserves unlocks the specified amount from redemption reserves. Part
+// of the AccountRedeemer interface.
+func (eth *ExchangeWallet) UnlockReserves(reserves uint64) {
+	eth.lockedMtx.Lock()
+	if reserves > eth.redemptionReserve {
+		eth.redemptionReserve = 0
+		eth.log.Errorf("attempting to unlock more than reserved. %d > %d", reserves, eth.redemptionReserve)
+	} else {
+		eth.redemptionReserve -= reserves
+	}
+	eth.lockedMtx.Unlock()
+}
+
+// ReReserve checks out an amount for redemptions. Use ReReserve after
+// initializing a new ExchangeWallet.
+func (eth *ExchangeWallet) ReReserve(req uint64) error {
+	eth.lockedMtx.Lock()
+	defer eth.lockedMtx.Unlock()
+	bal, err := eth.balance()
+	if err != nil {
+		return err
+	}
+	if eth.redemptionReserve+req > bal.Available {
+		return fmt.Errorf("not enough funds. %d < %d", eth.redemptionReserve+req, bal.Available)
+	}
+	eth.redemptionReserve += req
+	return nil
+}
+
 // SignMessage signs the message with the private key associated with the
 // specified funding Coin. Only a coin that came from the address this wallet
 // is initialized with can be used to sign.
-func (eth *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
-	_, err = eth.decodeFundingCoinID(coin.ID())
-	if err != nil {
-		return nil, nil, fmt.Errorf("SignMessage: error decoding coin: %w", err)
-	}
-
-	sig, err := eth.node.signData(eth.addr, msg)
+func (eth *ExchangeWallet) SignMessage(_ asset.Coin, msg dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
+	sig, pubKey, err := eth.node.signData(msg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("SignMessage: error signing data: %w", err)
-	}
-
-	pubKey, err := recoverPubkey(crypto.Keccak256(msg), sig)
-	if err != nil {
-		return nil, nil, fmt.Errorf("SignMessage: error recovering pubkey %w", err)
 	}
 
 	return []dex.Bytes{pubKey}, []dex.Bytes{sig}, nil

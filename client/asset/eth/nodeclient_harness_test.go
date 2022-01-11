@@ -455,7 +455,7 @@ func testSendSignedTransaction(t *testing.T) {
 		Value:     dexeth.GweiToWei(1),
 		Data:      []byte{},
 	})
-	tx, err = ethClient.signTransaction(simnetAddr, tx)
+	tx, err = ethClient.signTransaction(tx)
 
 	err = ethClient.sendSignedTransaction(ctx, tx)
 	if err != nil {
@@ -2175,13 +2175,9 @@ func testSignMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error unlocking account: %v", err)
 	}
-	signature, err := ethClient.signData(simnetAddr, msg)
+	sig, pubKey, err := ethClient.signData(msg)
 	if err != nil {
 		t.Fatalf("error signing text: %v", err)
-	}
-	pubKey, err := recoverPubkey(crypto.Keccak256(msg), signature)
-	if err != nil {
-		t.Fatalf("recoverPubkey: %v", err)
 	}
 	x, y := elliptic.Unmarshal(secp256k1.S256(), pubKey)
 	recoveredAddress := crypto.PubkeyToAddress(ecdsa.PublicKey{
@@ -2192,7 +2188,7 @@ func testSignMessage(t *testing.T) {
 	if !bytes.Equal(recoveredAddress.Bytes(), simnetAcct.Address.Bytes()) {
 		t.Fatalf("recovered address: %v != simnet account address: %v", recoveredAddress, simnetAcct.Address)
 	}
-	if !crypto.VerifySignature(pubKey, crypto.Keccak256(msg), signature[:len(signature)-1]) {
+	if !crypto.VerifySignature(pubKey, crypto.Keccak256(msg), sig) {
 		t.Fatalf("failed to verify signature")
 	}
 }

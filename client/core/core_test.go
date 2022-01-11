@@ -34,6 +34,7 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
+	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/order/test"
 	ordertest "decred.org/dcrdex/dex/order/test"
@@ -70,6 +71,16 @@ var (
 		MaxFeeRate:   2,
 		SwapConf:     1,
 	}
+
+	tETH = &dex.Asset{
+		ID:           60,
+		Symbol:       "eth",
+		Version:      0, // match the stubbed (*TXCWallet).Info result
+		SwapSize:     dexeth.InitGas(1, 0),
+		SwapSizeBase: dexeth.InitGas(1, 0),
+		MaxFeeRate:   10,
+		SwapConf:     1,
+	}
 	tDexPriv            *secp256k1.PrivateKey
 	tDexKey             *secp256k1.PublicKey
 	tDexAccountID       account.AccountID
@@ -77,6 +88,7 @@ var (
 	wPW                        = []byte("walletpw")
 	tDexHost                   = "somedex.tld:7232"
 	tDcrBtcMktName             = "dcr_btc"
+	tBtcEthMktName             = "btc_eth"
 	tErr                       = fmt.Errorf("test error")
 	tFee                uint64 = 1e8
 	tFeeAsset           uint32 = 42
@@ -194,6 +206,7 @@ func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, 
 		assets: map[uint32]*dex.Asset{
 			tDCR.ID: tDCR,
 			tBTC.ID: tBTC,
+			tETH.ID: tETH,
 		},
 		books: make(map[string]*bookie),
 		cfg: &msgjson.ConfigResult{
@@ -202,6 +215,7 @@ func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, 
 			Assets: []*msgjson.Asset{
 				uncovertAssetInfo(tDCR),
 				uncovertAssetInfo(tBTC),
+				uncovertAssetInfo(tETH),
 			},
 			Markets: []*msgjson.Market{
 				{
@@ -216,6 +230,19 @@ func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, 
 						StartEpoch: 12, // since the stone age
 						FinalEpoch: 0,  // no scheduled suspend
 						// Persist:   nil,
+					},
+				},
+				{
+					Name:            tBtcEthMktName,
+					Base:            tBTC.ID,
+					Quote:           tETH.ID,
+					LotSize:         dcrBtcLotSize,
+					RateStep:        dcrBtcRateStep,
+					EpochLen:        60000,
+					MarketBuyBuffer: 1.1,
+					MarketStatus: msgjson.MarketStatus{
+						StartEpoch: 12,
+						FinalEpoch: 0,
 					},
 				},
 			},
@@ -576,6 +603,8 @@ type TXCWallet struct {
 	preRedeem         *asset.PreRedeem
 	ownsAddress       bool
 	ownsAddressErr    error
+	pubKeys           []dex.Bytes
+	sigs              []dex.Bytes
 }
 
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
@@ -703,7 +732,7 @@ func (w *TXCWallet) Redeem(*asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, 
 }
 
 func (w *TXCWallet) SignMessage(asset.Coin, dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
-	return nil, nil, w.signCoinErr
+	return w.pubKeys, w.sigs, w.signCoinErr
 }
 
 func (w *TXCWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroadcast bool) (*asset.AuditInfo, error) {
@@ -791,6 +820,37 @@ func (w *TXCWallet) SwapConfirmations(ctx context.Context, coinID dex.Bytes, con
 
 func (w *TXCWallet) RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (uint32, error) {
 	return w.tConfirmations(ctx, coinID)
+}
+
+type TAccountRedeemer struct {
+	*TXCWallet
+	reserveN           uint64
+	reserveNErr        error
+	reReserveErr       error
+	redemptionUnlocked uint64
+	reserved           uint64
+}
+
+var _ asset.AccountRedeemer = (*TAccountRedeemer)(nil)
+
+func newTAccountRedeemer(assetID uint32) (*xcWallet, *TAccountRedeemer) {
+	xcWallet, tWallet := newTWallet(assetID)
+	accountRedeemer := &TAccountRedeemer{TXCWallet: tWallet}
+	xcWallet.Wallet = accountRedeemer
+	return xcWallet, accountRedeemer
+}
+
+func (w *TAccountRedeemer) ReserveN(n, feeRate uint64, assetVer uint32) (uint64, error) {
+	return w.reserveN, w.reserveNErr
+}
+
+func (w *TAccountRedeemer) ReReserve(v uint64) error {
+	w.reserved += v
+	return w.reReserveErr
+}
+
+func (w *TAccountRedeemer) UnlockReserves(v uint64) {
+	w.redemptionUnlocked += v
 }
 
 type tCrypterSmart struct {
@@ -1958,7 +2018,7 @@ func TestLogin(t *testing.T) {
 	tCore.wallets[tBTC.ID] = btcWallet
 	walletSet, _ := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails, nil) // nil means no funding coins
+		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails, nil, 0) // nil means no funding coins
 	matchID := ordertest.RandomMatchID()
 	match := &matchTracker{
 		MetaMatch: db.MetaMatch{
@@ -2297,6 +2357,11 @@ func TestTrade(t *testing.T) {
 	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
 	btcWallet.Unlock(rig.crypter)
 
+	ethWallet, tEthWallet := newTAccountRedeemer(tETH.ID)
+	tCore.wallets[tETH.ID] = ethWallet
+	ethWallet.address = "18d65fb8d60c1199bb1ad381be47aa692b482605"
+	ethWallet.Unlock(rig.crypter)
+
 	var lots uint64 = 10
 	qty := dcrBtcLotSize * lots
 	rate := dcrBtcRateStep * 1000
@@ -2581,6 +2646,244 @@ func TestTrade(t *testing.T) {
 	if tDcrWallet.fundedSwaps != lots {
 		t.Fatalf("market sell expected %d max swaps, got %d", lots, tDcrWallet.fundedSwaps)
 	}
+
+	// Selling to an account-based quote asset.
+	const reserveN = 50
+	form.Base = tBTC.ID
+	form.Quote = tETH.ID
+	rig.ws.queueResponse(msgjson.MarketRoute, handleMarket)
+	tEthWallet.reserveN = reserveN
+	tEthWallet.sigs = []dex.Bytes{{}}
+	tEthWallet.pubKeys = []dex.Bytes{{}}
+	_, err = tCore.Trade(tPW, form)
+	if err != nil {
+		t.Fatalf("account-redeemed order error: %v", err)
+	}
+
+	// redeem sig error
+	tEthWallet.signCoinErr = tErr
+	ensureErr("redeem sig error")
+	tEthWallet.signCoinErr = nil
+
+	// missing sig
+	tEthWallet.sigs = []dex.Bytes{}
+	ensureErr("no redeem sig is result")
+	tEthWallet.sigs = []dex.Bytes{{}}
+
+	// ReserveN error
+	tEthWallet.reserveNErr = tErr
+	ensureErr("reserveN error")
+	tEthWallet.reserveNErr = nil
+
+	// Funds returned for later error.
+	tEthWallet.redemptionUnlocked = 0
+	rig.db.updateOrderErr = tErr
+	rig.ws.queueResponse(msgjson.MarketRoute, handleMarket)
+	ensureErr("db error after redeem funds checked out")
+	rig.db.updateOrderErr = nil
+	if tEthWallet.redemptionUnlocked != reserveN {
+		t.Fatalf("redeem funds not returned")
+	}
+}
+
+func TestRedemptionReserves(t *testing.T) {
+	const reserves = 100_000
+
+	rig := newTestRig()
+	defer rig.shutdown()
+	dc := rig.dc
+	tCore := rig.core
+
+	btcWallet, _ := newTWallet(tBTC.ID)
+	tCore.wallets[tBTC.ID] = btcWallet
+	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
+	btcWallet.Unlock(rig.crypter)
+
+	ethWallet, tEthWallet := newTAccountRedeemer(tETH.ID)
+	tCore.wallets[tETH.ID] = ethWallet
+	ethWallet.address = "18d65fb8d60c1199bb1ad381be47aa692b482605"
+	ethWallet.Unlock(rig.crypter)
+
+	lotSize := dcrBtcLotSize
+	qty := lotSize * 10
+	rate := dcrBtcRateStep * 100
+
+	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, qty, rate)
+	lo.BaseAsset = tETH.ID
+	lo.Force = order.StandingTiF
+	loid := lo.ID()
+
+	walletSet, err := tCore.walletSet(dc, tBTC.ID, tETH.ID, true)
+	if err != nil {
+		t.Fatalf("walletSet error: %v", err)
+	}
+
+	mkt := dc.marketConfig(tBtcEthMktName)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails, nil, reserves)
+	dc.trades[loid] = tracker
+	preImgC := newPreimage()
+	co := &order.CancelOrder{
+		P: order.Prefix{
+			AccountID:  dc.acct.ID(),
+			BaseAsset:  tETH.ID,
+			QuoteAsset: tBTC.ID,
+			OrderType:  order.MarketOrderType,
+			ClientTime: time.Now(),
+			ServerTime: time.Now().Add(time.Millisecond),
+			Commit:     preImgC.Commit(),
+		},
+	}
+
+	// coid := co.ID()
+	msgCancelMatch := &msgjson.Match{
+		OrderID:  loid[:],
+		MatchID:  encode.RandomBytes(32),
+		Quantity: qty / 3,
+		// empty Address signals cancel order match
+	}
+	sign(tDexPriv, msgCancelMatch)
+
+	matchQty := qty * 2 / 3
+	matchReserves := applyFraction(2, 3, reserves)
+	msgMatch := &msgjson.Match{
+		OrderID:  loid[:],
+		MatchID:  encode.RandomBytes(32),
+		Quantity: matchQty,
+		Rate:     rate,
+		Address:  "somenonemptyaddress",
+	}
+	sign(tDexPriv, msgMatch)
+
+	test := func(tag string, expUnlock uint64, f func()) {
+		t.Helper()
+		tEthWallet.redemptionUnlocked = 0
+		tracker.redemptionLocked = reserves
+		tracker.metaData.Status = order.OrderStatusEpoch
+		f()
+		if tEthWallet.redemptionUnlocked != expUnlock {
+			t.Fatalf("%s: expected %d to be unlocked. saw %d", tag, expUnlock, tEthWallet.redemptionUnlocked)
+		}
+	}
+
+	test("revoke_order in epoch", reserves, func() {
+		tracker.revoke()
+	})
+
+	test("revoke_order in booked, partial fill", reserves/2, func() {
+		// Revoke in booked with partial fill.
+		tracker.Trade().SetFill(qty / 2)
+		tracker.metaData.Status = order.OrderStatusBooked
+		tracker.revoke()
+	})
+
+	test("canceled, partially filled", reserves/3, func() {
+		tracker.cancel = &trackedCancel{CancelOrder: *co}
+		msgCancel, _ := msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch, msgCancelMatch})
+		if err := handleMatchRoute(tCore, rig.dc, msgCancel); err != nil {
+			t.Fatalf("handleMatchRoute error: %v", err)
+		}
+	})
+
+	tracker.cancel = nil
+
+	mo := &order.MarketOrder{
+		P: lo.P,
+		T: *lo.Trade(),
+	}
+	mo.Prefix().OrderType = order.MarketOrderType
+	moid := mo.ID()
+	dbOrder.Order = mo
+	msgMatch.OrderID = moid[:]
+
+	tracker = newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails, nil, reserves)
+	dc.trades = map[order.OrderID]*trackedTrade{moid: tracker}
+
+	test("nomatch", reserves, func() {
+		tracker.nomatch(moid)
+	})
+
+	test("partial market sell match", reserves/3, func() {
+		matchReq, _ := msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
+		if err := handleMatchRoute(tCore, rig.dc, matchReq); err != nil {
+			t.Fatalf("handleMatchRoute error: %v", err)
+		}
+	})
+
+	addMatch := func(side order.MatchSide, status order.MatchStatus, qty uint64) order.MatchID {
+		msgMatch.Side = uint8(side)
+		m := *msgMatch
+		var mid order.MatchID
+		copy(mid[:], encode.RandomBytes(32))
+		m.MatchID = mid[:]
+		m.Quantity = qty
+		matchReq, _ := msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{&m})
+		if err := handleMatchRoute(tCore, rig.dc, matchReq); err != nil {
+			t.Fatalf("handleMatchRoute error: %v", err)
+		}
+		mt, ok := tracker.matches[mid]
+		if !ok {
+			t.Fatalf("match not found")
+		}
+		mt.Status = status
+		return mid
+	}
+
+	resetMatches := func() {
+		tracker.matches = make(map[order.MatchID]*matchTracker)
+	}
+
+	testRevokeMatch := func(side order.MatchSide, status order.MatchStatus, expReserves uint64) {
+		t.Helper()
+		resetMatches()
+		matchID := addMatch(side, status, matchQty)
+		desc := fmt.Sprintf("match revoke - %s in %s", side, status)
+		test(desc, expReserves, func() {
+			tracker.revokeMatch(tCtx, matchID, true)
+		})
+	}
+
+	testRevokeMatch(order.Maker, order.NewlyMatched, matchReserves)
+
+	testRevokeMatch(order.Taker, order.NewlyMatched, matchReserves)
+
+	testRevokeMatch(order.Taker, order.MakerSwapCast, matchReserves)
+
+	// But Maker in TakerSwapCast shouldn't return reserves, since the trade
+	// will proceed to redeem.
+	testRevokeMatch(order.Maker, order.MakerSwapCast, 0)
+
+	// Similarly Taker in TakerSwapCast shouldn't return anything, since we will
+	// be watching for a redemption.
+	testRevokeMatch(order.Taker, order.TakerSwapCast, 0)
+
+	// Market buy order with dust handling.
+	mo.BaseAsset, mo.QuoteAsset = mo.QuoteAsset, mo.BaseAsset
+	mo.Sell = false
+	tracker.wallets, _ = tCore.walletSet(dc, tETH.ID, tBTC.ID, false)
+
+	resetMatches()
+	mids := []order.MatchID{
+		addMatch(order.Maker, order.NewlyMatched, lotSize*2),
+		addMatch(order.Maker, order.NewlyMatched, lotSize*2),
+		addMatch(order.Maker, order.NewlyMatched, lotSize*2),
+	}
+
+	tracker.redemptionLocked = reserves
+	tEthWallet.redemptionUnlocked = 0
+	for _, mid := range mids {
+		// Third match should catch the market buy order dust filter.
+		if err := tracker.revokeMatch(tCtx, mid, true); err != nil {
+			t.Fatalf("revokeMatch error: %v", err)
+		}
+	}
+	if tracker.redemptionLocked != 0 {
+		t.Fatalf("redemptionLocked (1/3) * 3 != 1: %d still reserved of %d", tracker.redemptionLocked, reserves)
+	}
+	if tEthWallet.redemptionUnlocked != reserves {
+		t.Fatalf("redemptionUnlocked (1/3) * 3 != 1: %d returned of %d", tEthWallet.redemptionUnlocked, reserves)
+	}
 }
 
 func TestCancel(t *testing.T) {
@@ -2592,7 +2895,7 @@ func TestCancel(t *testing.T) {
 	oid := lo.ID()
 	mkt := dc.marketConfig(tDcrBtcMktName)
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, nil, nil, rig.core.notify, rig.core.formatDetails, nil)
+		rig.db, rig.queue, nil, nil, rig.core.notify, rig.core.formatDetails, nil, 0)
 	dc.trades[oid] = tracker
 
 	rig.queueCancel(nil)
@@ -2642,7 +2945,6 @@ func TestCancel(t *testing.T) {
 	ensureErr("Request error")
 	ensureNilCancel("Request error")
 	rig.ws.reqErr = nil
-
 }
 
 func TestHandlePreimageRequest(t *testing.T) {
@@ -3271,7 +3573,7 @@ func TestHandleRevokeOrderMsg(t *testing.T) {
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen,
 		rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, tDcrWallet.fundingCoins, rig.core.notify,
-		rig.core.formatDetails, nil)
+		rig.core.formatDetails, nil, 0)
 	rig.dc.trades[oid] = tracker
 
 	orderNotes, feedDone := orderNoteFeed(tCore)
@@ -3331,7 +3633,7 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen,
 		rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, tDcrWallet.fundingCoins, rig.core.notify,
-		rig.core.formatDetails, nil)
+		rig.core.formatDetails, nil, 0)
 
 	match := &matchTracker{
 		MetaMatch: db.MetaMatch{
@@ -3399,7 +3701,7 @@ func TestTradeTracking(t *testing.T) {
 	fundCoinDcrID := encode.RandomBytes(36)
 	fundingCoins := asset.Coins{&tCoin{id: fundCoinDcrID}}
 	tracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, fundingCoins, rig.core.notify, rig.core.formatDetails, nil)
+		rig.db, rig.queue, walletSet, fundingCoins, rig.core.notify, rig.core.formatDetails, nil, 0)
 	rig.dc.trades[tracker.ID()] = tracker
 	var match *matchTracker
 	checkStatus := func(tag string, wantStatus order.MatchStatus) {
@@ -4161,7 +4463,7 @@ func makeTradeTracker(rig *testRig, mkt *msgjson.Market, walletSet *walletSet, f
 	tracker := newTrackedTrade(dbOrder, preImg, rig.dc, mkt.EpochLen,
 		rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, nil, rig.core.notify,
-		rig.core.formatDetails, nil)
+		rig.core.formatDetails, nil, 0)
 
 	return tracker
 }
@@ -4243,7 +4545,7 @@ func TestRefunds(t *testing.T) {
 	tDcrWallet.fundingCoins = fundCoinsDCR
 	tDcrWallet.fundRedeemScripts = []dex.Bytes{nil}
 	tracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, fundCoinsDCR, rig.core.notify, rig.core.formatDetails, nil)
+		rig.db, rig.queue, walletSet, fundCoinsDCR, rig.core.notify, rig.core.formatDetails, nil, 0)
 	rig.dc.trades[tracker.ID()] = tracker
 
 	// MAKER REFUND, INVALID TAKER COUNTERSWAP
@@ -4412,8 +4714,8 @@ func TestResolveActiveTrades(t *testing.T) {
 	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
 
-	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
-	tCore.wallets[tDCR.ID] = dcrWallet
+	ethWallet, tEthWallet := newTAccountRedeemer(tETH.ID)
+	tCore.wallets[tETH.ID] = ethWallet
 
 	rig.acct.auth(false) // Short path through initializeDEXConnections
 
@@ -4423,8 +4725,8 @@ func TestResolveActiveTrades(t *testing.T) {
 	lo := &order.LimitOrder{
 		P: order.Prefix{
 			OrderType:  order.LimitOrderType,
-			BaseAsset:  tDCR.ID,
-			QuoteAsset: tBTC.ID,
+			BaseAsset:  tBTC.ID,
+			QuoteAsset: tETH.ID,
 			ClientTime: time.Now(),
 			ServerTime: time.Now(),
 			Commit:     ordertest.RandomCommitment(),
@@ -4440,13 +4742,15 @@ func TestResolveActiveTrades(t *testing.T) {
 	oid := lo.ID()
 	changeCoinID := encode.RandomBytes(36)
 	changeCoin := &tCoin{id: changeCoinID}
+	const redemptionReserves = 50
 
 	dbOrder := &db.MetaOrder{
 		MetaData: &db.OrderMetaData{
-			Status:     order.OrderStatusBooked,
-			Host:       tDexHost,
-			Proof:      db.OrderProof{},
-			ChangeCoin: changeCoinID,
+			Status:             order.OrderStatusBooked,
+			Host:               tDexHost,
+			Proof:              db.OrderProof{},
+			ChangeCoin:         changeCoinID,
+			RedemptionReserves: redemptionReserves,
 		},
 		Order: lo,
 	}
@@ -4457,6 +4761,7 @@ func TestResolveActiveTrades(t *testing.T) {
 
 	mid := ordertest.RandomMatchID()
 	addr := ordertest.RandomAddress()
+	matchQty := qty - dcrBtcLotSize
 	match := &db.MetaMatch{
 		MetaData: &db.MatchMetaData{
 			Proof: db.MatchProof{
@@ -4469,13 +4774,13 @@ func TestResolveActiveTrades(t *testing.T) {
 				},
 			},
 			DEX:   tDexHost,
-			Base:  tDCR.ID,
-			Quote: tBTC.ID,
+			Base:  tBTC.ID,
+			Quote: tETH.ID,
 		},
 		UserMatch: &order.UserMatch{
 			OrderID:  oid,
 			MatchID:  mid,
-			Quantity: qty - dcrBtcLotSize,
+			Quantity: matchQty,
 			Rate:     rate,
 			Address:  addr,
 			Status:   order.MakerSwapCast,
@@ -4484,13 +4789,14 @@ func TestResolveActiveTrades(t *testing.T) {
 	}
 	rig.db.activeMatchOIDs = []order.OrderID{oid}
 	rig.db.matchesForOID = []*db.MetaMatch{match}
-	tDcrWallet.fundingCoins = asset.Coins{changeCoin}
+	tBtcWallet.fundingCoins = asset.Coins{changeCoin}
 
 	// reset
 	reset := func() {
 		rig.acct.lock()
-		dcrWallet.Lock()
 		btcWallet.Lock()
+		ethWallet.Lock()
+		tEthWallet.reserved = 0
 		rig.dc.trades = make(map[order.OrderID]*trackedTrade)
 	}
 
@@ -4508,8 +4814,8 @@ func TestResolveActiveTrades(t *testing.T) {
 			t.Fatalf("%s: btc wallet not unlocked", description)
 		}
 
-		if !dcrWallet.unlocked() {
-			t.Fatalf("%s: dcr wallet not unlocked", description)
+		if !ethWallet.unlocked() {
+			t.Fatalf("%s: eth wallet not unlocked", description)
 		}
 
 		trade, found := rig.dc.trades[oid]
@@ -4524,6 +4830,19 @@ func TestResolveActiveTrades(t *testing.T) {
 
 		if len(trade.coins) != expCoinsLoaded {
 			t.Fatalf("%s: expected %d coin loaded, got %d", description, expCoinsLoaded, len(trade.coins))
+		}
+
+		if (match.Side == order.Taker && match.Status < order.MatchComplete) ||
+			(match.Side == order.Taker && match.Status < order.MakerRedeemed) {
+
+			var reReserveQty uint64 = redemptionReserves
+			if dbOrder.MetaData.Status > order.OrderStatusBooked {
+				reReserveQty = applyFraction(matchQty, qty, redemptionReserves)
+			}
+
+			if tEthWallet.reserved != reReserveQty {
+				t.Fatalf("%s: redemption funds not reserved, %d != %d", description, tEthWallet.reserved, reReserveQty)
+			}
 		}
 
 		reset()
@@ -4546,16 +4865,16 @@ func TestResolveActiveTrades(t *testing.T) {
 	// NEGATIVE PATHS
 
 	// No base wallet
-	delete(tCore.wallets, tDCR.ID)
+	delete(tCore.wallets, tBTC.ID)
 	ensureFail("missing base")
-	tCore.wallets[tDCR.ID] = dcrWallet
+	tCore.wallets[tBTC.ID] = btcWallet
 
 	// Base wallet unlock errors
-	tDcrWallet.unlockErr = tErr
-	tDcrWallet.locked = true
+	tBtcWallet.unlockErr = tErr
+	tBtcWallet.locked = true
 	ensureFail("base unlock")
-	tDcrWallet.unlockErr = nil
-	tDcrWallet.locked = false
+	tBtcWallet.unlockErr = nil
+	tBtcWallet.locked = false
 
 	// No quote wallet
 	delete(tCore.wallets, tBTC.ID)
@@ -4563,17 +4882,17 @@ func TestResolveActiveTrades(t *testing.T) {
 	tCore.wallets[tBTC.ID] = btcWallet
 
 	// Quote wallet unlock errors
-	tBtcWallet.unlockErr = tErr
-	tBtcWallet.locked = true
+	tEthWallet.unlockErr = tErr
+	tEthWallet.locked = true
 	ensureFail("quote unlock")
-	tBtcWallet.unlockErr = nil
-	tBtcWallet.locked = false
+	tEthWallet.unlockErr = nil
+	tEthWallet.locked = false
 
 	// Funding coin error still puts it in the trades map, just with no coins
 	// locked.
-	tDcrWallet.fundingCoinErr = tErr
+	tBtcWallet.fundingCoinErr = tErr
 	ensureGood("funding coin", 0)
-	tDcrWallet.fundingCoinErr = nil
+	tBtcWallet.fundingCoinErr = nil
 
 	// No matches
 	rig.db.activeMatchOIDSErr = tErr
@@ -4680,7 +4999,7 @@ func TestCompareServerMatches(t *testing.T) {
 	}
 	mkt := dc.marketConfig(tDcrBtcMktName)
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, nil, nil, rig.core.notify, rig.core.formatDetails, nil)
+		rig.db, rig.queue, nil, nil, rig.core.notify, rig.core.formatDetails, nil, 0)
 
 	// Known trade, and known match
 	knownID := ordertest.RandomMatchID()
@@ -4711,7 +5030,7 @@ func TestCompareServerMatches(t *testing.T) {
 	// Entirely missing order
 	loMissing, dbOrderMissing, preImgMissing, _ := makeLimitOrder(dc, true, 3*dcrBtcLotSize, dcrBtcRateStep*10)
 	trackerMissing := newTrackedTrade(dbOrderMissing, preImgMissing, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, nil, nil, notify, rig.core.formatDetails, nil)
+		rig.db, rig.queue, nil, nil, notify, rig.core.formatDetails, nil, 0)
 	oidMissing := loMissing.ID()
 	// an active match for the missing trade
 	matchIDMissing := ordertest.RandomMatchID()
@@ -5339,7 +5658,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 		lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)
 		oid := lo.ID()
 		tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-			rig.db, rig.queue, walletSet, coins, rig.core.notify, rig.core.formatDetails, nil)
+			rig.db, rig.queue, walletSet, coins, rig.core.notify, rig.core.formatDetails, nil, 0)
 		dc.trades[oid] = tracker
 		return tracker
 	}
@@ -5635,7 +5954,7 @@ func TestHandleNomatch(t *testing.T) {
 	loImmediate.Force = order.ImmediateTiF
 	immediateOID := loImmediate.ID()
 	immediateTracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails, nil)
+		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails, nil, 0)
 	dc.trades[immediateOID] = immediateTracker
 
 	// 2. Standing limit order
@@ -5643,7 +5962,7 @@ func TestHandleNomatch(t *testing.T) {
 	loStanding.Force = order.StandingTiF
 	standingOID := loStanding.ID()
 	standingTracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails, nil)
+		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails, nil, 0)
 	dc.trades[standingOID] = standingTracker
 
 	// 3. Cancel order.
@@ -5666,7 +5985,7 @@ func TestHandleNomatch(t *testing.T) {
 	dbOrder.Order = mktOrder
 	marketOID := mktOrder.ID()
 	marketTracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails, nil)
+		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails, nil, 0)
 	dc.trades[marketOID] = marketTracker
 
 	runNomatch := func(tag string, oid order.OrderID) {
@@ -6227,7 +6546,7 @@ func TestMatchStatusResolution(t *testing.T) {
 	dbOrder.MetaData.Status = order.OrderStatusExecuted // so there is no order_status request for this
 	oid := lo.ID()
 	trade := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails, nil)
+		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails, nil, 0)
 
 	dc.trades[trade.ID()] = trade
 	matchID := ordertest.RandomMatchID()
@@ -6716,7 +7035,7 @@ func TestSuspectTrades(t *testing.T) {
 	oid := lo.ID()
 	mkt := dc.marketConfig(tDcrBtcMktName)
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails, nil)
+		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails, nil, 0)
 	dc.trades[oid] = tracker
 
 	newMatch := func(side order.MatchSide, status order.MatchStatus) *matchTracker {
