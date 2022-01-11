@@ -28,7 +28,7 @@ const (
 	appPatch uint   = 0
 )
 
-// go build -v -ldflags "-X decred.org/dcrdex/client/cmd/dexc/version.appPreRelease= -X decred.org/dcrdex/client/cmd/dexc/version.appBuild=$(git rev-parse --short HEAD)"
+// go build -v -ldflags "-X decred.org/dcrdex/client/cmd/dexcctl/main.appPreRelease= -X decred.org/dcrdex/client/cmd/dexcctl/main.appBuild=$(git rev-parse --short HEAD)"
 var (
 	// appPreRelease is defined as a variable so it can be overridden during the
 	// build process. It MUST only contain characters from semanticAlphabet per
