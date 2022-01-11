@@ -1052,6 +1052,12 @@ func (eth *ExchangeWallet) PayFee(address string, regFee, _ uint64) (asset.Coin,
 	return &coin{id: txHash[:], value: dexeth.WeiToGwei(tx.Value())}, nil
 }
 
+// EstimateRegistrationTxFee gives a conservative enstimate for how much
+// transaction fees need to be spent to pay the registration fee.
+func (eth *ExchangeWallet) EstimateRegistrationTxFee() uint64 {
+	return defaultSendGasLimit * eth.gasFeeLimit
+}
+
 // SwapConfirmations gets the number of confirmations and the spend status
 // for the specified swap.
 func (eth *ExchangeWallet) SwapConfirmations(ctx context.Context, _ dex.Bytes, contract dex.Bytes, _ time.Time) (confs uint32, spent bool, err error) {

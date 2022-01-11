@@ -102,7 +102,7 @@ export default class RegistrationPage extends BasePage {
     if (app().user.authed) this.auth()
     this.notifiers = {
       walletstate: note => this.walletWaitForm.reportWalletState(note.wallet),
-      balance: note => this.walletWaitForm.reportBalance(note.balance)
+      balance: note => this.walletWaitForm.reportBalance(note.balance, note.assetID)
     }
   }
 

@@ -141,18 +141,19 @@ func (w *xcWallet) state() *WalletState {
 	defer w.mtx.RUnlock()
 	winfo := w.Info()
 	return &WalletState{
-		Symbol:       unbip(w.AssetID),
-		AssetID:      w.AssetID,
-		Version:      winfo.Version,
-		Open:         len(w.encPass) == 0 || len(w.pw) > 0,
-		Running:      w.connector.On(),
-		Balance:      w.balance,
-		Address:      w.address,
-		Units:        winfo.UnitInfo.AtomicUnit,
-		Encrypted:    len(w.encPass) > 0,
-		Synced:       w.synced,
-		SyncProgress: w.syncProgress,
-		WalletType:   w.walletType,
+		Symbol:        unbip(w.AssetID),
+		AssetID:       w.AssetID,
+		Version:       winfo.Version,
+		Open:          len(w.encPass) == 0 || len(w.pw) > 0,
+		Running:       w.connector.On(),
+		Balance:       w.balance,
+		Address:       w.address,
+		Units:         winfo.UnitInfo.AtomicUnit,
+		Encrypted:     len(w.encPass) > 0,
+		Synced:        w.synced,
+		SyncProgress:  w.syncProgress,
+		WalletType:    w.walletType,
+		RegisterTxFee: w.EstimateRegistrationTxFee(),
 	}
 }
 

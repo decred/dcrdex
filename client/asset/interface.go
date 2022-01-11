@@ -205,6 +205,9 @@ type Wallet interface {
 	// PayFee sends the dex registration fee. Transaction fees are in addition to
 	// the registration fee, and the feeRateSuggestion is gotten from the server.
 	PayFee(address string, feeAmt, feeRateSuggestion uint64) (Coin, error)
+	// EstimateRegistrationTxFee gives a conservative enstimate for how much
+	// transaction fees need to be spent to pay the registration fee.
+	EstimateRegistrationTxFee() uint64
 	// SwapConfirmations gets the number of confirmations and the spend status
 	// for the specified swap. If the swap was not funded by this wallet, and
 	// it is already spent, you may see CoinNotFoundError.

@@ -2573,6 +2573,12 @@ func (btc *ExchangeWallet) PayFee(address string, regFee, feeRateSuggestion uint
 	return newOutput(txHash, vout, sent), nil
 }
 
+// EstimateRegistrationTxFee gives a conservative enstimate for how much
+// transaction fees need to be spent to pay the registration fee.
+func (btc *ExchangeWallet) EstimateRegistrationTxFee() uint64 {
+	return (dexbtc.MinimumTxOverhead + (2 * dexbtc.P2PKHOutputSize) + dexbtc.RedeemP2PKHInputSize) * btc.feeRateLimit
+}
+
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
 // the value. feeRate is in units of atoms/byte.
 func (btc *ExchangeWallet) Withdraw(address string, value, feeSuggestion uint64) (asset.Coin, error) {
