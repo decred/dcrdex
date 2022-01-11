@@ -2539,7 +2539,14 @@ func (t *trackedTrade) returnCoins() {
 func mapifyCoins(coins asset.Coins) map[string]asset.Coin {
 	coinMap := make(map[string]asset.Coin, len(coins))
 	for _, c := range coins {
-		cid := hex.EncodeToString(c.ID())
+		var cid string
+		if rc, is := c.(asset.RecoveryCoin); is {
+			// Account coins are keyed by a coin that includes
+			// address and value. The ID only returns address.
+			cid = hex.EncodeToString(rc.RecoveryID())
+		} else {
+			cid = hex.EncodeToString(c.ID())
+		}
 		coinMap[cid] = c
 	}
 	return coinMap

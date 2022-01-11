@@ -4094,6 +4094,15 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		}()
 	}
 
+	// A non-nil changeID indicates that this is an account based coin. The
+	// first coin is an address and the entire serialized message needs to
+	// be signed with that address's private key.
+	if changeID != nil {
+		if _, msgTrade.Coins[0].Sigs, err = fromWallet.SignMessage(nil, msgOrder.Serialize()); err != nil {
+			return nil, 0, fmt.Errorf("wallet %v failed to sign for redeem: %w", wallets.fromAsset.ID, err)
+		}
+	}
+
 	commitSig := make(chan struct{})
 	defer close(commitSig) // signals on both success and failure, unlike syncOrderPlaced/piSyncers
 	c.sentCommitsMtx.Lock()

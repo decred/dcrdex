@@ -820,7 +820,7 @@ func TestValidateSignature(t *testing.T) {
 	// "ok" values used are the same as tests in client/assets/eth.
 	pkBytes := mustParseHex("04b911d1f39f7792e165767e35aa134083e2f70ac7de6945d7641a3015d09a54561b71112b8d60f63831f0e62c23c6921ec627820afedf8236155b9e9bd82b6523")
 	msg := []byte("msg")
-	sigBytes := mustParseHex("ffd26911d3fdaf11ac44801744f2df015a16539b6e688aff4cabc092b747466e7bc8036a03d1479a1570dd11bf042120301c34a65b237267720ef8a9e56f2eb101")
+	sigBytes := mustParseHex("ffd26911d3fdaf11ac44801744f2df015a16539b6e688aff4cabc092b747466e7bc8036a03d1479a1570dd11bf042120301c34a65b237267720ef8a9e56f2eb1")
 	max32Bytes := mustParseHex("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
 	addr := "0x2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27"
 	eth := new(Backend)
