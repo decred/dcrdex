@@ -93,6 +93,14 @@ type match struct {
 	IsCancel      bool   `json:"isCancel"`
 }
 
+// discoverAcctForm is information necessary to discover an account used with a
+// certain dex.
+type discoverAcctForm struct {
+	addr    string
+	appPass encode.PassBytes
+	cert    interface{}
+}
+
 // openWalletForm is information necessary to open a wallet.
 type openWalletForm struct {
 	assetID uint32
@@ -187,6 +195,22 @@ func checkBoolArg(arg, name string) (bool, error) {
 		return b, fmt.Errorf("%w: %s must be a boolean: %v", errArgs, name, err)
 	}
 	return b, nil
+}
+
+func parseDiscoverAcctArgs(params *RawParams) (*discoverAcctForm, error) {
+	if err := checkNArgs(params, []int{1}, []int{1, 2}); err != nil {
+		return nil, err
+	}
+	var cert []byte
+	if len(params.Args) > 1 {
+		cert = []byte(params.Args[1])
+	}
+	req := &discoverAcctForm{
+		appPass: params.PWArgs[0],
+		addr:    params.Args[0],
+		cert:    cert,
+	}
+	return req, nil
 }
 
 func parseHelpArgs(params *RawParams) (*helpForm, error) {
