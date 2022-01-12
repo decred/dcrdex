@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"math/big"
+	"os"
 	"testing"
 	"time"
 
@@ -30,7 +31,8 @@ const initLocktime = 1632112916
 var (
 	_            ethFetcher = (*testNode)(nil)
 	tLogger                 = dex.StdOutLogger("ETHTEST", dex.LevelTrace)
-	initCalldata            = mustParseHex("a8793f94000000000000000000000000000" +
+	tCtx         context.Context
+	initCalldata = mustParseHex("a8793f94000000000000000000000000000" +
 		"0000000000000000000000000000000000020000000000000000000000000000000000" +
 		"0000000000000000000000000000002000000000000000000000000000000000000000" +
 		"00000000000000000614811148b3e4acc53b664f9cf6fcac0adcd328e95d62ba1f4379" +
@@ -108,11 +110,15 @@ type testNode struct {
 	acctBalErr       error
 }
 
-func (n *testNode) connect(ctx context.Context, ipc string, contractAddr *common.Address) error {
+func (n *testNode) connect(ctx context.Context) error {
 	return n.connectErr
 }
 
 func (n *testNode) shutdown() {}
+
+func (n *testNode) loadToken(context.Context, uint32) error {
+	return nil
+}
 
 func (n *testNode) bestHeader(ctx context.Context) (*types.Header, error) {
 	return n.bestHdr, n.bestHdrErr
@@ -134,7 +140,7 @@ func (n *testNode) suggestGasTipCap(ctx context.Context) (*big.Int, error) {
 	return n.suggGasTipCap, n.suggGasTipCapErr
 }
 
-func (n *testNode) swap(ctx context.Context, secretHash [32]byte) (*dexeth.SwapState, error) {
+func (n *testNode) swap(ctx context.Context, assetID uint32, secretHash [32]byte) (*dexeth.SwapState, error) {
 	return n.swp, n.swpErr
 }
 
@@ -142,7 +148,7 @@ func (n *testNode) transaction(ctx context.Context, hash common.Hash) (tx *types
 	return n.tx, n.txIsMempool, n.txErr
 }
 
-func (n *testNode) accountBalance(ctx context.Context, addr common.Address) (*big.Int, error) {
+func (n *testNode) accountBalance(ctx context.Context, assetID uint32, addr common.Address) (*big.Int, error) {
 	return n.acctBal, n.acctBalErr
 }
 
@@ -157,44 +163,30 @@ func tSwap(bn, locktime int64, value uint64, secret [32]byte, state dexeth.SwapS
 	}
 }
 
-func TestLoad(t *testing.T) {
-	tests := []struct {
-		name, ipc, wantIPC string
-		network            dex.Network
-		wantErr            bool
-	}{{
-		name:    "ok ipc supplied",
-		ipc:     "/home/john/bleh.ipc",
-		wantIPC: "/home/john/bleh.ipc",
-		network: dex.Simnet,
-	}, {
-		name:    "ok ipc not supplied",
-		ipc:     "",
-		wantIPC: defaultIPC,
-		network: dex.Simnet,
-	}, {
-		name:    "mainnet not allowed",
-		ipc:     "",
-		wantIPC: defaultIPC,
-		network: dex.Mainnet,
-		wantErr: true,
-	}}
+func tNewBackend(assetID uint32) (*AssetBackend, *testNode) {
+	node := &testNode{}
+	return &AssetBackend{
+		baseBackend: &baseBackend{
+			net:  dex.Simnet,
+			node: node,
+			log:  tLogger,
+		},
+		assetID:    assetID,
+		blockChans: make(map[chan *asset.BlockUpdate]struct{}),
+	}, node
+}
 
-	for _, test := range tests {
-		cfg, err := load(test.ipc, test.network)
-		if test.wantErr {
-			if err == nil {
-				t.Fatalf("expected error for test %v", test.name)
-			}
-			continue
-		}
-		if err != nil {
-			t.Fatalf("unexpected error for test %v: %v", test.name, err)
-		}
-		if cfg.ipc != test.wantIPC {
-			t.Fatalf("want ipc value of %v but got %v for test %v", test.wantIPC, cfg.ipc, test.name)
-		}
+func TestMain(m *testing.M) {
+	tLogger = dex.StdOutLogger("TEST", dex.LevelTrace)
+	var shutdown func()
+	tCtx, shutdown = context.WithCancel(context.Background())
+	doIt := func() int {
+		defer shutdown()
+		dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts[0].Address = common.BytesToAddress(encode.RandomBytes(20))
+		registerToken(testTokenID, 0)
+		return m.Run()
 	}
+	os.Exit(doIt())
 }
 
 func TestDecodeCoinID(t *testing.T) {
@@ -243,7 +235,7 @@ func TestDecodeCoinID(t *testing.T) {
 
 func TestRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	backend, err := unconnectedETH(tLogger, &config{network: dex.Simnet})
+	backend, err := unconnectedETH(tLogger, dex.Simnet)
 	if err != nil {
 		t.Fatalf("unconnectedETH error: %v", err)
 	}
@@ -323,22 +315,15 @@ func TestFeeRate(t *testing.T) {
 	}}
 
 	for _, test := range tests {
-		ctx, cancel := context.WithCancel(context.Background())
-		node := &testNode{
-			bestHdr: &types.Header{
-				BaseFee: test.hdrBaseFee,
-			},
-			bestHdrErr:       test.hdrErr,
-			suggGasTipCap:    test.suggGasTipCap,
-			suggGasTipCapErr: test.suggGasTipCapErr,
+		eth, node := tNewBackend(BipID)
+		node.bestHdr = &types.Header{
+			BaseFee: test.hdrBaseFee,
 		}
-		eth := &Backend{
-			node:   node,
-			rpcCtx: ctx,
-			log:    tLogger,
-		}
-		fee, err := eth.FeeRate(ctx)
-		cancel()
+		node.bestHdrErr = test.hdrErr
+		node.suggGasTipCap = test.suggGasTipCap
+		node.suggGasTipCapErr = test.suggGasTipCapErr
+
+		fee, err := eth.FeeRate(tCtx)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)
@@ -382,20 +367,13 @@ func TestSynced(t *testing.T) {
 
 	for _, test := range tests {
 		nowInSecs := uint64(time.Now().Unix() / 1000)
-		ctx, cancel := context.WithCancel(context.Background())
-		node := &testNode{
-			syncProg:    test.syncProg,
-			syncProgErr: test.syncProgErr,
-			bestHdr:     &types.Header{Time: nowInSecs - test.subSecs},
-			bestHdrErr:  test.bestHdrErr,
-		}
-		eth := &Backend{
-			node:   node,
-			rpcCtx: ctx,
-			log:    tLogger,
-		}
+		eth, node := tNewBackend(BipID)
+		node.syncProg = test.syncProg
+		node.syncProgErr = test.syncProgErr
+		node.bestHdr = &types.Header{Time: nowInSecs - test.subSecs}
+		node.bestHdrErr = test.bestHdrErr
+
 		synced, err := eth.Synced()
-		cancel()
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)
@@ -414,9 +392,9 @@ func TestSynced(t *testing.T) {
 // TestRequiredOrderFunds ensures that a fee calculation in the calc package
 // will come up with the correct required funds.
 func TestRequiredOrderFunds(t *testing.T) {
-	eth := &Backend{
-		initTxSize: uint32(dexeth.InitGas(1, 0)),
-	}
+	eth, _ := tNewBackend(BipID)
+	eth.initTxSize = uint32(dexeth.InitGas(1, 0))
+
 	swapVal := uint64(1000000000)                // gwei
 	numSwaps := uint64(17)                       // swaps
 	initSizeBase := uint64(eth.InitTxSizeBase()) // 0 gas
@@ -492,17 +470,13 @@ func TestContract(t *testing.T) {
 		wantErr:  true,
 	}}
 	for _, test := range tests {
-		node := &testNode{
-			tx:     test.tx,
-			txErr:  test.txErr,
-			swp:    test.swap,
-			swpErr: test.swapErr,
-		}
-		eth := &Backend{
-			node:         node,
-			log:          tLogger,
-			contractAddr: *contractAddr,
-		}
+		eth, node := tNewBackend(BipID)
+		node.tx = test.tx
+		node.txErr = test.txErr
+		node.swp = test.swap
+		node.swpErr = test.swapErr
+		eth.contractAddr = *contractAddr
+
 		contractData := dexeth.EncodeContractData(0, secretHash) // matches initCalldata
 		contract, err := eth.Contract(test.coinID, contractData)
 		if test.wantErr {
@@ -533,9 +507,7 @@ func TestValidateFeeRate(t *testing.T) {
 		Coin: &swapCoin,
 	}
 
-	eth := &Backend{
-		log: tLogger,
-	}
+	eth, _ := tNewBackend(BipID)
 
 	if !eth.ValidateFeeRate(contract, 100) {
 		t.Fatalf("expected valid fee rate, but was not valid")
@@ -570,9 +542,7 @@ func TestValidateSecret(t *testing.T) {
 		name: "bad contract data",
 	}}
 	for _, test := range tests {
-		eth := &Backend{
-			log: tLogger,
-		}
+		eth, _ := tNewBackend(BipID)
 		got := eth.ValidateSecret(secret[:], test.contractData)
 		if test.want != got {
 			t.Fatalf("expected %v but got %v for test %q", test.want, got, test.name)
@@ -626,18 +596,14 @@ func TestRedemption(t *testing.T) {
 		wantErr:    true,
 	}}
 	for _, test := range tests {
-		node := &testNode{
-			tx:          test.tx,
-			txIsMempool: test.txIsMempool,
-			txErr:       test.txErr,
-			swp:         test.swp,
-			swpErr:      test.swpErr,
-		}
-		eth := &Backend{
-			node:         node,
-			log:          tLogger,
-			contractAddr: *contractAddr,
-		}
+		eth, node := tNewBackend(BipID)
+		node.tx = test.tx
+		node.txIsMempool = test.txIsMempool
+		node.txErr = test.txErr
+		node.swp = test.swp
+		node.swpErr = test.swpErr
+		eth.contractAddr = *contractAddr
+
 		_, err := eth.Redemption(test.coinID, nil, test.contractID)
 		if test.wantErr {
 			if err == nil {
@@ -652,10 +618,8 @@ func TestRedemption(t *testing.T) {
 }
 
 func TestTxData(t *testing.T) {
-	node := &testNode{}
-	eth := &Backend{
-		node: node,
-	}
+	eth, node := tNewBackend(BipID)
+
 	const gasPrice = 30
 	const gasTipCap = 2
 	const value = 5e9
@@ -704,6 +668,11 @@ func TestTxData(t *testing.T) {
 }
 
 func TestValidateContract(t *testing.T) {
+	t.Run("eth", func(t *testing.T) { testValidateContract(t, BipID) })
+	t.Run("token", func(t *testing.T) { testValidateContract(t, testTokenID) })
+}
+
+func testValidateContract(t *testing.T, assetID uint32) {
 	tests := []struct {
 		name       string
 		ver        uint32
@@ -723,7 +692,7 @@ func TestValidateContract(t *testing.T) {
 		wantErr:    true,
 	}}
 	for _, test := range tests {
-		eth := new(Backend)
+		eth, _ := tNewBackend(assetID)
 		swapData := make([]byte, 4+len(test.secretHash))
 		binary.BigEndian.PutUint32(swapData[:4], test.ver)
 		copy(swapData[4:], test.secretHash)
@@ -741,8 +710,7 @@ func TestValidateContract(t *testing.T) {
 }
 
 func TestAccountBalance(t *testing.T) {
-	node := &testNode{}
-	eth := &Backend{node: node}
+	eth, node := tNewBackend(BipID)
 
 	const gweiBal = 1e9
 	bigBal := big.NewInt(gweiBal)
@@ -821,19 +789,13 @@ func TestPoll(t *testing.T) {
 	}}
 
 	for _, test := range tests {
-		node := &testNode{
-			bestHdr:        test.bestHdr,
-			bestHdrErr:     test.bestHdrErr,
-			hdrByHeight:    test.hdrByHeight,
-			hdrByHeightErr: test.hdrByHeightErr,
-		}
-		eth := Backend{
-			log:        tLogger,
-			blockChans: make(map[chan *asset.BlockUpdate]struct{}),
-			node:       node,
-			bestHash: hashN{
-				hash: blkHdr.Hash(),
-			},
+		eth, node := tNewBackend(BipID)
+		node.bestHdr = test.bestHdr
+		node.bestHdrErr = test.bestHdrErr
+		node.hdrByHeight = test.hdrByHeight
+		node.hdrByHeightErr = test.hdrByHeightErr
+		eth.bestHash = hashN{
+			hash: blkHdr.Hash(),
 		}
 		chSize := 1
 		if test.preventSend {
@@ -875,7 +837,7 @@ func TestValidateSignature(t *testing.T) {
 	sigBytes := mustParseHex("ffd26911d3fdaf11ac44801744f2df015a16539b6e688aff4cabc092b747466e7bc8036a03d1479a1570dd11bf042120301c34a65b237267720ef8a9e56f2eb1")
 	max32Bytes := mustParseHex("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
 	addr := "0x2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27"
-	eth := new(Backend)
+	eth := new(AssetBackend)
 
 	tests := []struct {
 		name                   string

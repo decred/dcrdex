@@ -66,11 +66,14 @@ func TestNewRedeemCoin(t *testing.T) {
 			tx:    test.tx,
 			txErr: test.txErr,
 		}
-		eth := &Backend{
-			node:         node,
-			log:          tLogger,
+		eth := &AssetBackend{
+			baseBackend: &baseBackend{
+				node: node,
+				log:  tLogger,
+			},
 			contractAddr: *contractAddr,
 			initTxSize:   uint32(dexeth.InitGas(1, 0)),
+			assetID:      BipID,
 		}
 		rc, err := eth.newRedeemCoin(txHash[:], test.contract)
 		if test.wantErr {
@@ -188,9 +191,11 @@ func TestNewSwapCoin(t *testing.T) {
 			tx:    test.tx,
 			txErr: test.txErr,
 		}
-		eth := &Backend{
-			node:         node,
-			log:          tLogger,
+		eth := &AssetBackend{
+			baseBackend: &baseBackend{
+				node: node,
+				log:  tLogger,
+			},
 			contractAddr: *contractAddr,
 			initTxSize:   uint32(dexeth.InitGas(1, 0)),
 		}
@@ -309,9 +314,11 @@ func TestConfirmations(t *testing.T) {
 			blkNum:    test.bn,
 			blkNumErr: test.bnErr,
 		}
-		eth := &Backend{
-			node:         node,
-			log:          tLogger,
+		eth := &AssetBackend{
+			baseBackend: &baseBackend{
+				node: node,
+				log:  tLogger,
+			},
 			contractAddr: *contractAddr,
 			initTxSize:   uint32(dexeth.InitGas(1, 0)),
 		}

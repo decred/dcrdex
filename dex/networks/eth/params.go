@@ -210,6 +210,20 @@ type SwapState struct {
 	State       SwapStep
 }
 
+// SwapStateFromV0 converts a version 0 contract *ETHSwapSwap to the generalized
+// *SwapState type.
+func SwapStateFromV0(state *v0.ETHSwapSwap) *SwapState {
+	return &SwapState{
+		BlockHeight: state.InitBlockNumber.Uint64(),
+		LockTime:    time.Unix(state.RefundBlockTimestamp.Int64(), 0),
+		Secret:      state.Secret,
+		Initiator:   state.Initiator,
+		Participant: state.Participant,
+		Value:       WeiToGwei(state.Value),
+		State:       SwapStep(state.State),
+	}
+}
+
 // Initiation is the data used to initiate a swap.
 type Initiation struct {
 	LockTime    time.Time
@@ -260,21 +274,4 @@ func (g *Gases) RedeemN(n int) uint64 {
 		return 0
 	}
 	return g.Redeem + g.RedeemAdd*(uint64(n)-1)
-}
-
-// SwapStateFromV0 converts a v0.ETHSwapSwap to a *SwapState.
-func SwapStateFromV0(state *v0.ETHSwapSwap) *SwapState {
-	var blockTime int64
-	if state.RefundBlockTimestamp.IsInt64() {
-		blockTime = state.RefundBlockTimestamp.Int64()
-	}
-	return &SwapState{
-		BlockHeight: state.InitBlockNumber.Uint64(),
-		LockTime:    time.Unix(blockTime, 0),
-		Secret:      state.Secret,
-		Initiator:   state.Initiator,
-		Participant: state.Participant,
-		Value:       WeiToGwei(state.Value),
-		State:       SwapStep(state.State),
-	}
 }
