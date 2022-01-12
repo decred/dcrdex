@@ -421,7 +421,7 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 			return msgjson.NewError(msgjson.SignatureError, "redeem signature validation failed")
 		}
 
-		if !r.sufficientAccountBalance(acctAddr, oRecord.order, &assets.receiving.Asset, tunnel) {
+		if !r.sufficientAccountBalance(acctAddr, oRecord.order, &assets.receiving.Asset, assets.funding.ID, tunnel) {
 			return msgjson.NewError(msgjson.FundingError, "insufficient balance")
 		}
 	}
@@ -452,7 +452,7 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 			return msgjson.NewError(msgjson.SignatureError, "signature validation failed")
 		}
 
-		if !r.sufficientAccountBalance(acctAddr, oRecord.order, &assets.funding.Asset, tunnel) {
+		if !r.sufficientAccountBalance(acctAddr, oRecord.order, &assets.funding.Asset, assets.receiving.ID, tunnel) {
 			return msgjson.NewError(msgjson.FundingError, "insufficient balance")
 		}
 		return r.submitOrderToMarket(tunnel, oRecord)
@@ -469,7 +469,7 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 		}
 		// TODO: Check all markets here?
 		if tunnel.CoinLocked(assets.funding.ID, coinID) {
-			return msgjson.NewError(msgjson.FundingError, fmt.Sprintf("coin %s is locked", fmtCoinID(assets.funding.Symbol, coinID)))
+			return msgjson.NewError(msgjson.FundingError, fmt.Sprintf("coin %s is locked", fmtCoinID(assets.funding.ID, coinID)))
 		}
 		coinStrs = append(coinStrs, coinStr)
 	}
@@ -618,7 +618,7 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 // sufficientAccountBalance checks that the user's account-based asset balance
 // is sufficient to support the order, considering the user's other orders and
 // active matches across all DEX markets.
-func (r *OrderRouter) sufficientAccountBalance(accountAddr string, ord order.Order, assetInfo *dex.Asset, tunnel MarketTunnel) bool {
+func (r *OrderRouter) sufficientAccountBalance(accountAddr string, ord order.Order, assetInfo *dex.Asset, redeemAssetID uint32, tunnel MarketTunnel) bool {
 	assetID := assetInfo.ID
 	trade := ord.Trade()
 
@@ -649,7 +649,7 @@ func (r *OrderRouter) sufficientAccountBalance(accountAddr string, ord order.Ord
 		}
 	}
 
-	return r.dexBalancer.CheckBalance(accountAddr, assetID, fundingQty, fundingLots, redeems)
+	return r.dexBalancer.CheckBalance(accountAddr, assetID, redeemAssetID, fundingQty, fundingLots, redeems)
 }
 
 func (r *OrderRouter) submitOrderToMarket(tunnel MarketTunnel, oRecord *orderRecord) *msgjson.Error {
@@ -945,8 +945,8 @@ func msgBytesToBytes(msgBs []msgjson.Bytes) [][]byte {
 
 // fmtCoinID formats the coin ID by asset. If an error is encountered, the
 // coinID string returned hex-encoded and prepended with "unparsed:".
-func fmtCoinID(symbol string, coinID []byte) string {
-	strID, err := asset.DecodeCoinID(symbol, coinID)
+func fmtCoinID(assetID uint32, coinID []byte) string {
+	strID, err := asset.DecodeCoinID(assetID, coinID)
 	if err != nil {
 		return "unparsed:" + hex.EncodeToString(coinID)
 	}

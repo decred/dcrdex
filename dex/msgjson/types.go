@@ -1063,6 +1063,7 @@ type Asset struct {
 	MaxFeeRate   uint64       `json:"maxfeerate"`
 	SwapSize     uint64       `json:"swapsize"`
 	SwapSizeBase uint64       `json:"swapsizebase"`
+	RedeemSize   uint64       `json:"redeemsize"`
 	SwapConf     uint16       `json:"swapconf"`
 	UnitInfo     dex.UnitInfo `json:"unitinfo"`
 }

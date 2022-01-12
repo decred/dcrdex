@@ -1640,7 +1640,7 @@ func checkSigS256(msg, sig []byte, pubKey *secp256k1.PublicKey) error {
 }
 
 func coinIDString(assetID uint32, coinID []byte) string {
-	s, err := asset.DecodeCoinID(dex.BipIDSymbol(assetID), coinID)
+	s, err := asset.DecodeCoinID(assetID, coinID)
 	if err != nil {
 		return "unparsed:" + hex.EncodeToString(coinID)
 	}

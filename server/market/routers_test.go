@@ -269,6 +269,7 @@ type TMarketTunnel struct {
 	acctQty     uint64
 	acctLots    uint64
 	acctRedeems int
+	base, quote uint32
 }
 
 func (m *TMarketTunnel) SubmitOrder(o *orderRecord) error {
@@ -345,6 +346,14 @@ func (m *TMarketTunnel) CheckUnfilled(assetID uint32, user account.AccountID) (u
 
 func (m *TMarketTunnel) AccountPending(acctAddr string, assetID uint32) (qty, lots uint64, redeems int) {
 	return m.acctQty, m.acctLots, m.acctRedeems
+}
+
+func (m *TMarketTunnel) Base() uint32 {
+	return m.base
+}
+
+func (m *TMarketTunnel) Quote() uint32 {
+	return m.quote
 }
 
 type TBackend struct {
@@ -463,6 +472,10 @@ func (b *tAccountBackend) ValidateSignature(addr string, pubkey, msg, sig []byte
 	return b.sigErr
 }
 
+func (b *tAccountBackend) RedeemSize() uint64 {
+	return 21_000
+}
+
 type tUTXO struct {
 	val     uint64
 	decoded string
@@ -490,12 +503,20 @@ type tUser struct {
 }
 
 type tMatchNegotiator struct {
-	qty, swaps uint64
-	redeems    int
+	qty, swaps map[uint32]uint64
+	redeems    map[uint32]int
+}
+
+func tNewMatchNegotiator() *tMatchNegotiator {
+	return &tMatchNegotiator{
+		qty:     make(map[uint32]uint64),
+		swaps:   make(map[uint32]uint64),
+		redeems: make(map[uint32]int),
+	}
 }
 
 func (m *tMatchNegotiator) AccountStats(acctAddr string, assetID uint32) (qty, swaps uint64, redeems int) {
-	return m.qty, m.swaps, m.redeems
+	return m.qty[assetID], m.swaps[assetID], m.redeems[assetID]
 }
 
 type tOrderRig struct {
@@ -560,6 +581,20 @@ var assetETH = &asset.BackedAsset{
 		SwapSize:     dummySize,
 		SwapSizeBase: dummySize,
 		RedeemSize:   tRedeemSize,
+		SwapConf:     2,
+	},
+}
+
+var testTokenId, _ = dex.BipSymbolID("dextt.eth")
+
+var assetToken = &asset.BackedAsset{
+	Asset: dex.Asset{
+		ID:           testTokenId,
+		Symbol:       "dextt.eth",
+		MaxFeeRate:   12,
+		SwapSize:     dummySize + 10,
+		SwapSizeBase: dummySize + 10,
+		RedeemSize:   tRedeemSize + 10,
 		SwapConf:     2,
 	},
 }
@@ -630,7 +665,7 @@ func TestMain(m *testing.M) {
 		preimagesByMsgID: make(map[uint64]order.Preimage),
 		preimagesByOrdID: make(map[string]order.Preimage),
 	}
-	matchNegotiator := &tMatchNegotiator{}
+	matchNegotiator := tNewMatchNegotiator()
 	oRig = &tOrderRig{
 		btc:     tNewUTXOBackend(),
 		dcr:     tNewUTXOBackend(),
@@ -674,12 +709,16 @@ func TestMain(m *testing.M) {
 		60:  assetETH,
 		966: assetMATIC,
 	}
+	balancer, err := NewDEXBalancer(pendingAccounters, assets, matchNegotiator)
+	if err != nil {
+		panic("NewDEXBalancer error:" + err.Error())
+	}
 	oRig.router = NewOrderRouter(&OrderRouterConfig{
 		AuthManager: oRig.auth,
 		Assets:      assets,
 		Markets:     tunnels,
 		FeeSource:   &tFeeSource{},
-		DEXBalancer: NewDEXBalancer(pendingAccounters, assets, matchNegotiator),
+		DEXBalancer: balancer,
 	})
 	rig = newTestRig()
 	src1 := rig.source1
@@ -927,7 +966,7 @@ func TestLimit(t *testing.T) {
 	// Just enough for the order, but not enough because there are pending
 	// redeems in Swapper.
 	redeemCost := assetETH.RedeemSize * assetETH.MaxFeeRate
-	oRig.matchNegotiator.redeems = 1
+	oRig.matchNegotiator.redeems[assetETH.ID] = 1
 	oRig.eth.bal = reqFunds + redeemCost - 1
 	ensureErr("not enough for active redeems", sendLimit(), msgjson.FundingError)
 
@@ -939,7 +978,7 @@ func TestLimit(t *testing.T) {
 	// number of redeems we're concerned with.
 	limit.Side = msgjson.BuyOrderNum
 	// Start with no active redeems. 10 lots should be 10 redeems.
-	oRig.matchNegotiator.redeems = 0
+	oRig.matchNegotiator.redeems[assetETH.ID] = 0
 	oRig.eth.bal = lots*redeemCost - 1
 	ensureErr("not enough to redeem", sendLimit(), msgjson.FundingError)
 

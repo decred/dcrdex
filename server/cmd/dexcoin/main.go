@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/server/asset"
 	_ "decred.org/dcrdex/server/asset/bch"
 	_ "decred.org/dcrdex/server/asset/btc"
@@ -28,12 +29,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	assetID, ok := dex.BipSymbolID(symbol)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "asset %s not known \n", symbol)
+		os.Exit(1)
+	}
+
 	coinID, err := hex.DecodeString(flag.Arg(0))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
-	coinIDStr, err := asset.DecodeCoinID(symbol, coinID)
+	coinIDStr, err := asset.DecodeCoinID(assetID, coinID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)

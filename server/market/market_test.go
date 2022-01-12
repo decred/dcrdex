@@ -253,7 +253,7 @@ func newTBalancer() *tBalancer {
 	return &tBalancer{make(map[string]int)}
 }
 
-func (b *tBalancer) CheckBalance(acctAddr string, assetID uint32, qty, lots uint64, redeems int) bool {
+func (b *tBalancer) CheckBalance(acctAddr string, assetID, redeemAssetID uint32, qty, lots uint64, redeems int) bool {
 	b.reqs[acctAddr]++
 	return true
 }

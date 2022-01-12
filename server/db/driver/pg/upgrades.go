@@ -104,10 +104,9 @@ func v2Upgrade(tx *sql.Tx) error {
 	}
 
 	unitInfo := func(assetID uint32) dex.UnitInfo {
-		symbol := dex.BipIDSymbol(assetID)
-		ui, err := asset.UnitInfo(symbol)
+		ui, err := asset.UnitInfo(assetID)
 		if err != nil {
-			log.Errorf("no unit info found for %q", symbol)
+			log.Errorf("no unit info found for %d (%q)", assetID, dex.BipIDSymbol(assetID))
 			ui.Conventional.ConversionFactor = 1e8
 		}
 		return ui

@@ -468,12 +468,18 @@ type TAccountBackend struct {
 	TBackend
 }
 
+var _ asset.AccountBalancer = (*TAccountBackend)(nil)
+
 func (b *TAccountBackend) AccountBalance(addr string) (uint64, error) {
 	return 0, nil
 }
 
 func (b *TAccountBackend) ValidateSignature(addr string, pubkey, msg, sig []byte) error {
 	return nil
+}
+
+func (b *TAccountBackend) RedeemSize() uint64 {
+	return 21_000
 }
 
 // This stub satisfies asset.Transaction, used by asset.Backend.

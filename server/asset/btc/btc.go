@@ -71,7 +71,7 @@ func (d *Driver) NewAddresser(xPub string, keyIndexer asset.KeyIndexer, network 
 }
 
 func init() {
-	asset.Register(assetName, &Driver{})
+	asset.Register(BipID, &Driver{})
 }
 
 var (
@@ -84,6 +84,7 @@ var (
 
 const (
 	version                  = 0
+	BipID                    = 0
 	assetName                = "btc"
 	immatureTransactionError = dex.ErrorKind("immature output")
 )
