@@ -722,3 +722,38 @@ func TestParseAppSeedArgs(t *testing.T) {
 		}
 	}
 }
+
+func TestParseDiscoverAcctArgs(t *testing.T) {
+	pw := encode.PassBytes("password123")
+	pwArgs := []encode.PassBytes{pw}
+	args := []string{"dex address", "da cert"}
+	tests := []struct {
+		name    string
+		params  *RawParams
+		wantErr error
+	}{{
+		name:   "ok",
+		params: &RawParams{PWArgs: pwArgs, Args: args},
+	}}
+	for _, test := range tests {
+		reg, err := parseDiscoverAcctArgs(test.params)
+		if test.wantErr != nil {
+			if errors.Is(err, test.wantErr) {
+				continue
+			}
+			t.Fatalf("expected error for test %v", test.name)
+		}
+		if err != nil {
+			t.Fatalf("unexpected error %v for test %s", err, test.name)
+		}
+		if !bytes.Equal(reg.appPass, test.params.PWArgs[0]) {
+			t.Fatalf("appPass doesn't match")
+		}
+		if reg.addr != test.params.Args[0] {
+			t.Fatalf("url doesn't match")
+		}
+		if string(reg.cert.([]byte)) != test.params.Args[1] {
+			t.Fatalf("cert doesn't match")
+		}
+	}
+}

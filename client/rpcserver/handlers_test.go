@@ -190,24 +190,21 @@ func TestHandleVersion(t *testing.T) {
 	}
 }
 
-/* TODO: TestHandleDEXConfig
-func TestHandleGetFee(t *testing.T) {
+func TestHandleGetDEXConfig(t *testing.T) {
 	tests := []struct {
-		name        string
-		params      *RawParams
-		regFee      uint64
-		getFeeErr   error
-		wantErrCode int
+		name            string
+		params          *RawParams
+		getDEXConfigErr error
+		wantErrCode     int
 	}{{
 		name:        "ok",
 		params:      &RawParams{Args: []string{"dex", "cert bytes"}},
-		regFee:      5,
 		wantErrCode: -1,
 	}, {
-		name:        "core.getFee error",
-		params:      &RawParams{Args: []string{"dex", "cert bytes"}},
-		getFeeErr:   errors.New("error"),
-		wantErrCode: msgjson.RPCGetFeeError,
+		name:            "get dex conf error",
+		params:          &RawParams{Args: []string{"dex", "cert bytes"}},
+		getDEXConfigErr: errors.New(""),
+		wantErrCode:     msgjson.RPCGetDEXConfigError,
 	}, {
 		name:        "bad params",
 		params:      &RawParams{},
@@ -215,22 +212,16 @@ func TestHandleGetFee(t *testing.T) {
 	}}
 	for _, test := range tests {
 		tc := &TCore{
-			regFee:    test.regFee,
-			getFeeErr: test.getFeeErr,
+			getDEXConfigErr: test.getDEXConfigErr,
 		}
 		r := &RPCServer{core: tc}
-		payload := handleGetFee(r, test.params)
-		res := new(getFeeResponse)
+		payload := handleGetDEXConfig(r, test.params)
+		res := new(*core.Exchange)
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatal(err)
 		}
-		if test.wantErrCode == -1 && res.Fee != test.regFee {
-			t.Fatalf("wanted registration fee %d but got %d for test %s",
-				test.regFee, res.Fee, test.name)
-		}
 	}
 }
-*/
 
 func TestHandleInit(t *testing.T) {
 	pw := encode.PassBytes("password123")
@@ -1104,5 +1095,46 @@ func TestHandleAppSeed(t *testing.T) {
 			t.Fatalf("expected ff but got %v", res)
 		}
 
+	}
+}
+
+func TestHandleDiscoverAcct(t *testing.T) {
+	pw := encode.PassBytes("password123")
+	params := &RawParams{
+		PWArgs: []encode.PassBytes{pw},
+		Args: []string{
+			"dex:1234",
+			"cert",
+		},
+	}
+	tests := []struct {
+		name            string
+		params          *RawParams
+		discoverAcctErr error
+		wantErrCode     int
+	}{{
+		name:        "ok",
+		params:      params,
+		wantErrCode: -1,
+	}, {
+		name:            "discover account error",
+		params:          params,
+		discoverAcctErr: errors.New(""),
+		wantErrCode:     msgjson.RPCDiscoverAcctError,
+	}, {
+		name:        "bad params",
+		params:      &RawParams{},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{
+			discoverAcctErr: test.discoverAcctErr,
+		}
+		r := &RPCServer{core: tc}
+		payload := handleDiscoverAcct(r, test.params)
+		res := new(bool)
+		if err := verifyResponse(payload, res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
