@@ -1639,7 +1639,7 @@ func packInitiateDataV0(initiations []*dexeth.Initiation) ([]byte, error) {
 			RefundTimestamp: big.NewInt(init.LockTime.Unix()),
 			SecretHash:      init.SecretHash,
 			Participant:     init.Participant,
-			Value:           new(big.Int).Mul(bigVal, dexeth.BigGweiFactor),
+			Value:           new(big.Int).Mul(bigVal, big.NewInt(dexeth.GweiFactor)),
 		})
 	}
 	return (*dexeth.ABIs[0]).Pack("initiate", abiInitiations)
@@ -2411,7 +2411,7 @@ func ethToGwei(v uint64) uint64 {
 
 func ethToWei(v uint64) *big.Int {
 	bigV := new(big.Int).SetUint64(ethToGwei(v))
-	return new(big.Int).Mul(bigV, dexeth.BigGweiFactor)
+	return new(big.Int).Mul(bigV, big.NewInt(dexeth.GweiFactor))
 }
 
 func TestPayFee(t *testing.T) {

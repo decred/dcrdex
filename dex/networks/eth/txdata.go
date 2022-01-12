@@ -128,7 +128,7 @@ func (t *txDataHandlerV0) parseInitiateData(calldata []byte) (map[[SecretHashSiz
 
 	toReturn := make(map[[SecretHashSize]byte]*Initiation, len(initiations))
 	for _, init := range initiations {
-		gweiValue, err := ToGwei(init.Value)
+		gweiValue, err := WeiToGweiUint64(init.Value)
 		if err != nil {
 			return nil, fmt.Errorf("cannot convert wei to gwei: %w", err)
 		}

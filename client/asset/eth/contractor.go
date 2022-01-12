@@ -112,7 +112,7 @@ func (c *contractorV0) initiate(txOpts *bind.TransactOpts, contracts []*asset.Co
 			RefundTimestamp: big.NewInt(int64(contract.LockTime)),
 			SecretHash:      secretHash,
 			Participant:     common.HexToAddress(contract.Address),
-			Value:           new(big.Int).Mul(bigVal, dexeth.BigGweiFactor),
+			Value:           new(big.Int).Mul(bigVal, big.NewInt(dexeth.GweiFactor)),
 		})
 	}
 

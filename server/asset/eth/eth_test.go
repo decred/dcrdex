@@ -20,37 +20,38 @@ import (
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
-	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"decred.org/dcrdex/server/asset"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
+const initLocktime = 1632112916
+
 var (
 	_            ethFetcher = (*testNode)(nil)
 	tLogger                 = dex.StdOutLogger("ETHTEST", dex.LevelTrace)
-	initCalldata            = mustParseHex("a8793f940000000000000000000000000000" +
-		"00000000000000000000000000000000002000000000000000000000000000000000000" +
-		"00000000000000000000000000002000000000000000000000000000000000000000000" +
-		"00000000000000614811148b3e4acc53b664f9cf6fcac0adcd328e95d62ba1f4379650a" +
-		"e3e1460a0f9d1a1000000000000000000000000345853e21b1d475582e71cc269124ed5" +
-		"e2dd3422000000000000000000000000000000000000000000000000000000000000000" +
-		"10000000000000000000000000000000000000000000000000000000061481114ebdc4c" +
-		"31b88d0c8f4d644591a8e00e92b607f920ad8050deb7c7469767d9c5610000000000000" +
-		"00000000000345853e21b1d475582e71cc269124ed5e2dd342200000000000000000000" +
-		"00000000000000000000000000000000000000000001")
+	initCalldata            = mustParseHex("a8793f94000000000000000000000000000" +
+		"0000000000000000000000000000000000020000000000000000000000000000000000" +
+		"0000000000000000000000000000002000000000000000000000000000000000000000" +
+		"00000000000000000614811148b3e4acc53b664f9cf6fcac0adcd328e95d62ba1f4379" +
+		"650ae3e1460a0f9d1a1000000000000000000000000345853e21b1d475582e71cc2691" +
+		"24ed5e2dd342200000000000000000000000000000000000000000000000022b1c8c12" +
+		"27a0000000000000000000000000000000000000000000000000000000000006148111" +
+		"4ebdc4c31b88d0c8f4d644591a8e00e92b607f920ad8050deb7c7469767d9c56100000" +
+		"0000000000000000000345853e21b1d475582e71cc269124ed5e2dd342200000000000" +
+		"000000000000000000000000000000000000022b1c8c1227a0000")
 	/* initCallData parses to:
 	[ETHSwapInitiation {
 			RefundTimestamp: 1632112916
 			SecretHash: 8b3e4acc53b664f9cf6fcac0adcd328e95d62ba1f4379650ae3e1460a0f9d1a1
-			Value: 1
+			Value: 5e9 gwei
 			Participant: 0x345853e21b1d475582e71cc269124ed5e2dd3422
 		},
 	ETHSwapInitiation {
 			RefundTimestamp: 1632112916
 			SecretHash: ebdc4c31b88d0c8f4d644591a8e00e92b607f920ad8050deb7c7469767d9c561
-			Value: 1
+			Value: 5e9 gwei
 			Participant: 0x345853e21b1d475582e71cc269124ed5e2dd3422
 		}]
 	*/
@@ -77,7 +78,6 @@ var (
 	redeemSecretHashA = mustParseHex("99d971975c09331eb00f5e0dc1eaeca9bf4ee2d086d3fe1de489f920007d6546")
 	redeemSecretHashB = mustParseHex("ebdc4c31b88d0c8f4d644591a8e00e92b607f920ad8050deb7c7469767d9c561")
 	redeemSecretB     = mustParseHex("87eac09638c0c38b4e735b79f053cb869167ee770640ac5df5c4ab030813122a")
-	initLocktime      = int64(1632112916)
 )
 
 func mustParseHex(s string) []byte {
@@ -100,7 +100,7 @@ type testNode struct {
 	syncProgErr    error
 	sugGasPrice    *big.Int
 	sugGasPriceErr error
-	swp            *swapv0.ETHSwapSwap
+	swp            *dexeth.SwapState
 	swpErr         error
 	tx             *types.Transaction
 	txIsMempool    bool
@@ -135,7 +135,7 @@ func (n *testNode) suggestGasPrice(ctx context.Context) (*big.Int, error) {
 	return n.sugGasPrice, n.sugGasPriceErr
 }
 
-func (n *testNode) swap(ctx context.Context, secretHash [32]byte) (*swapv0.ETHSwapSwap, error) {
+func (n *testNode) swap(ctx context.Context, secretHash [32]byte) (*dexeth.SwapState, error) {
 	return n.swp, n.swpErr
 }
 
@@ -147,14 +147,14 @@ func (n *testNode) accountBalance(ctx context.Context, addr common.Address) (*bi
 	return n.acctBal, n.acctBalErr
 }
 
-func tSwap(bn int64, locktime, value *big.Int, secret [32]byte, state dexeth.SwapStep, participantAddr *common.Address) *swapv0.ETHSwapSwap {
-	return &swapv0.ETHSwapSwap{
-		Secret:               secret,
-		InitBlockNumber:      big.NewInt(bn),
-		RefundBlockTimestamp: locktime,
-		Participant:          *participantAddr,
-		State:                uint8(state),
-		Value:                value,
+func tSwap(bn, locktime int64, value uint64, secret [32]byte, state dexeth.SwapStep, participantAddr *common.Address) *dexeth.SwapState {
+	return &dexeth.SwapState{
+		Secret:      secret,
+		BlockHeight: uint64(bn),
+		LockTime:    time.Unix(locktime, 0),
+		Participant: *participantAddr,
+		State:       state,
+		Value:       value,
 	}
 }
 
@@ -244,12 +244,9 @@ func TestDecodeCoinID(t *testing.T) {
 
 func TestRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	cfg := &config{
-		network: dex.Simnet,
-	}
-	backend, err := unconnectedETH(tLogger, cfg)
+	backend, err := unconnectedETH(tLogger, &config{network: dex.Simnet})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("unconnectedETH error: %v", err)
 	}
 	backend.node = &testNode{
 		bestHdr: &types.Header{Number: big.NewInt(1)},
@@ -426,11 +423,11 @@ func TestRequiredOrderFunds(t *testing.T) {
 	}
 }
 
-func tTx(gasPrice, value *big.Int, to *common.Address, data []byte) *types.Transaction {
+func tTx(gasPrice, value uint64, to *common.Address, data []byte) *types.Transaction {
 	return types.NewTx(&types.LegacyTx{
-		GasPrice: gasPrice,
+		GasPrice: dexeth.GweiToWei(gasPrice),
 		To:       to,
-		Value:    value,
+		Value:    dexeth.GweiToWei(value),
 		Data:     data,
 	})
 }
@@ -441,9 +438,9 @@ func TestContract(t *testing.T) {
 	copy(contractAddr[:], encode.RandomBytes(20))
 	var txHash [32]byte
 	copy(txHash[:], encode.RandomBytes(32))
-	gasPrice := big.NewInt(3e10)
-	value := big.NewInt(5e18)
-	locktime := big.NewInt(initLocktime)
+	const gasPrice = 30
+	const swapVal = 25e8
+	const txVal = 5e9
 	var secret, secretHash [32]byte
 	copy(secret[:], redeemSecretB)
 	copy(secretHash[:], redeemSecretHashB)
@@ -452,25 +449,25 @@ func TestContract(t *testing.T) {
 		coinID         []byte
 		contract       []byte
 		tx             *types.Transaction
-		swap           *swapv0.ETHSwapSwap
+		swap           *dexeth.SwapState
 		swapErr, txErr error
 		wantErr        bool
 	}{{
 		name:     "ok",
-		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
+		tx:       tTx(gasPrice, txVal, contractAddr, initCalldata),
 		contract: dexeth.EncodeContractData(0, secretHash),
-		swap:     tSwap(97, locktime, value, secret, dexeth.SSInitiated, &initParticipantAddr),
+		swap:     tSwap(97, initLocktime, swapVal, secret, dexeth.SSInitiated, &initParticipantAddr),
 		coinID:   txHash[:],
 	}, {
 		name:     "new coiner error, wrong tx type",
-		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
+		tx:       tTx(gasPrice, txVal, contractAddr, initCalldata),
 		contract: dexeth.EncodeContractData(0, secretHash),
-		swap:     tSwap(97, locktime, value, secret, dexeth.SSInitiated, &initParticipantAddr),
+		swap:     tSwap(97, initLocktime, swapVal, secret, dexeth.SSInitiated, &initParticipantAddr),
 		coinID:   txHash[1:],
 		wantErr:  true,
 	}, {
 		name:     "confirmations error, swap error",
-		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
+		tx:       tTx(gasPrice, txVal, contractAddr, initCalldata),
 		contract: dexeth.EncodeContractData(0, secretHash),
 		coinID:   txHash[:],
 		swapErr:  errors.New(""),
@@ -500,7 +497,7 @@ func TestContract(t *testing.T) {
 			t.Fatalf("unexpected error for test %q: %v", test.name, err)
 		}
 		if contract.SwapAddress != initParticipantAddr.String() ||
-			contract.LockTime.Unix() != initLocktime/1000 {
+			contract.LockTime.Unix() != initLocktime {
 			t.Fatalf("returns do not match expected for test %q", test.name)
 		}
 	}
@@ -541,41 +538,40 @@ func TestRedemption(t *testing.T) {
 	copy(secret[:], redeemSecretB)
 	copy(secretHash[:], redeemSecretHashB)
 	copy(txHash[:], encode.RandomBytes(32))
-	gasPrice := big.NewInt(3e10)
-	bigO := new(big.Int)
+	const gasPrice = 30
 	tests := []struct {
 		name               string
 		coinID, contractID []byte
-		swp                *swapv0.ETHSwapSwap
+		swp                *dexeth.SwapState
 		tx                 *types.Transaction
 		txIsMempool        bool
 		swpErr, txErr      error
 		wantErr            bool
 	}{{
 		name:       "ok",
-		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
+		tx:         tTx(gasPrice, 0, contractAddr, redeemCalldata),
 		contractID: dexeth.EncodeContractData(0, secretHash),
 		coinID:     txHash[:],
-		swp:        tSwap(0, bigO, bigO, secret, dexeth.SSRedeemed, receiverAddr),
+		swp:        tSwap(0, 0, 0, secret, dexeth.SSRedeemed, receiverAddr),
 	}, {
 		name:       "new coiner error, wrong tx type",
-		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
+		tx:         tTx(gasPrice, 0, contractAddr, redeemCalldata),
 		contractID: dexeth.EncodeContractData(0, secretHash),
 		coinID:     txHash[1:],
 		wantErr:    true,
 	}, {
 		name:       "confirmations error, swap wrong state",
-		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
+		tx:         tTx(gasPrice, 0, contractAddr, redeemCalldata),
 		contractID: dexeth.EncodeContractData(0, secretHash),
-		swp:        tSwap(0, bigO, bigO, secret, dexeth.SSRefunded, receiverAddr),
+		swp:        tSwap(0, 0, 0, secret, dexeth.SSRefunded, receiverAddr),
 		coinID:     txHash[:],
 		wantErr:    true,
 	}, {
 		name:       "validate redeem error",
-		tx:         tTx(gasPrice, bigO, contractAddr, redeemCalldata),
+		tx:         tTx(gasPrice, 0, contractAddr, redeemCalldata),
 		contractID: secretHash[:31],
 		coinID:     txHash[:],
-		swp:        tSwap(0, bigO, bigO, secret, dexeth.SSRedeemed, receiverAddr),
+		swp:        tSwap(0, 0, 0, secret, dexeth.SSRedeemed, receiverAddr),
 		wantErr:    true,
 	}}
 	for _, test := range tests {
@@ -609,8 +605,8 @@ func TestTxData(t *testing.T) {
 	eth := &Backend{
 		node: node,
 	}
-	gasPrice := big.NewInt(3e10)
-	value := big.NewInt(5e18)
+	const gasPrice = 30
+	const value = 5e9
 	addr := randomAddress()
 	data := encode.RandomBytes(5)
 	tx := tTx(gasPrice, value, addr, data)
@@ -779,7 +775,7 @@ func TestPoll(t *testing.T) {
 			hdrByHeight:    test.hdrByHeight,
 			hdrByHeightErr: test.hdrByHeightErr,
 		}
-		eth := &Backend{
+		eth := Backend{
 			log:        tLogger,
 			blockChans: make(map[chan *asset.BlockUpdate]struct{}),
 			node:       node,

@@ -17,9 +17,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
-	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
@@ -38,7 +36,8 @@ const (
 	assetName = "eth"
 	// The blockPollInterval is the delay between calls to bestBlockHash to
 	// check for new blocks.
-	blockPollInterval = time.Second
+	blockPollInterval  = time.Second
+	ethContractVersion = 0
 )
 
 var _ asset.Driver = (*Driver)(nil)
@@ -86,7 +85,7 @@ type ethFetcher interface {
 	shutdown()
 	suggestGasPrice(ctx context.Context) (*big.Int, error)
 	syncProgress(ctx context.Context) (*ethereum.SyncProgress, error)
-	swap(ctx context.Context, secretHash [32]byte) (*swapv0.ETHSwapSwap, error)
+	swap(ctx context.Context, secretHash [32]byte) (*dexeth.SwapState, error)
 	transaction(ctx context.Context, hash common.Hash) (tx *types.Transaction, isMempool bool, err error)
 	accountBalance(ctx context.Context, addr common.Address) (*big.Int, error)
 }
@@ -236,7 +235,7 @@ func (eth *Backend) FeeRate(ctx context.Context) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return dexeth.ToGwei(bigGP)
+	return dexeth.WeiToGweiUint64(bigGP)
 }
 
 // BlockChannel creates and returns a new channel on which to receive block
@@ -268,7 +267,7 @@ func (eth *Backend) ValidateContract(contractData []byte) error {
 func (eth *Backend) Contract(coinID, contractData []byte) (*asset.Contract, error) {
 	// newSwapCoin validates the contractData, extracting version, secret hash,
 	// counterparty address, and locktime. The supported version is enforced.
-	sc, err := eth.newSwapCoin(coinID, contractData, sctInit)
+	sc, err := eth.newSwapCoin(coinID, contractData)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create coiner: %w", err)
 	}
@@ -282,9 +281,9 @@ func (eth *Backend) Contract(coinID, contractData []byte) (*asset.Contract, erro
 	}
 	return &asset.Contract{
 		Coin:         sc,
-		SwapAddress:  sc.counterParty.String(),
+		SwapAddress:  sc.init.Participant.String(),
 		ContractData: contractData,
-		LockTime:     encode.UnixTimeMilli(sc.locktime),
+		LockTime:     sc.init.LockTime,
 	}, nil
 }
 
@@ -323,7 +322,7 @@ func (eth *Backend) Redemption(redeemCoinID, _, contractData []byte) (asset.Coin
 	// newSwapCoin uses the contract account's state to validate the
 	// contractData, extracting version, secret, and secret hash. The supported
 	// version is enforced.
-	rc, err := eth.newSwapCoin(redeemCoinID, contractData, sctRedeem)
+	rc, err := eth.newRedeemCoin(redeemCoinID, contractData)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create coiner: %w", err)
 	}
@@ -358,7 +357,7 @@ func (eth *Backend) AccountBalance(addrStr string) (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("accountBalance error: %w", err)
 	}
-	return dexeth.ToGwei(bigBal)
+	return dexeth.WeiToGweiUint64(bigBal)
 }
 
 // ValidateSignature checks that the pubkey is correct for the address and

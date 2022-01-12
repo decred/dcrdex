@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	v0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -35,9 +36,6 @@ var (
 			ConversionFactor: 1e9,
 		},
 	}
-
-	// BigGweiFactor is the *big.Int form of the GweiFactor.
-	BigGweiFactor = big.NewInt(GweiFactor)
 
 	VersionedGases = map[uint32]*dex.Gases{
 		0: v0Gases,
@@ -115,12 +113,31 @@ func RefundGas(contractVer uint32) uint64 {
 
 // GweiToWei converts uint64 Gwei to *big.Int Wei.
 func GweiToWei(v uint64) *big.Int {
-	return new(big.Int).Mul(big.NewInt(int64(v)), BigGweiFactor)
+	return new(big.Int).Mul(big.NewInt(int64(v)), big.NewInt(GweiFactor))
 }
 
-// GweiToWei converts *big.Int Wei to uint64 Gwei.
+// WeiToGwei converts *big.Int Wei to uint64 Gwei. If v is determined to be
+// unsuitable for a uint64, zero is returned.
 func WeiToGwei(v *big.Int) uint64 {
-	return new(big.Int).Div(v, BigGweiFactor).Uint64()
+	vGwei := new(big.Int).Div(v, big.NewInt(GweiFactor))
+	if vGwei.IsUint64() {
+		return vGwei.Uint64()
+	}
+	return 0
+}
+
+// WeiToGweiUint64 converts a *big.Int in wei (1e18 unit) to gwei (1e9 unit) as
+// a uint64. Errors if the amount of gwei is too big to fit fully into a uint64.
+func WeiToGweiUint64(wei *big.Int) (uint64, error) {
+	if wei.Cmp(new(big.Int)) == -1 {
+		return 0, fmt.Errorf("wei must be non-negative")
+	}
+	gweiFactorBig := big.NewInt(GweiFactor)
+	gwei := new(big.Int).Div(wei, gweiFactorBig)
+	if !gwei.IsUint64() {
+		return 0, fmt.Errorf("suggest gas price %v gwei is too big for a uint64", wei)
+	}
+	return gwei.Uint64(), nil
 }
 
 // SwapStep is the state of a swap and corresponds to values in the Solidity
@@ -248,4 +265,21 @@ func VersionedNetworkToken(assetID uint32, contractVer uint32, net dex.Network) 
 		return nil, common.Address{}, common.Address{}, fmt.Errorf("token %d version %d has no network %s token info", assetID, contractVer, net)
 	}
 	return token, addrs.Address, contractAddr, nil
+}
+
+// SwapStateFromV0 converts a v0.ETHSwapSwap to a *SwapState.
+func SwapStateFromV0(state *v0.ETHSwapSwap) *SwapState {
+	var blockTime int64
+	if state.RefundBlockTimestamp.IsInt64() {
+		blockTime = state.RefundBlockTimestamp.Int64()
+	}
+	return &SwapState{
+		BlockHeight: state.InitBlockNumber.Uint64(),
+		LockTime:    time.Unix(blockTime, 0),
+		Secret:      state.Secret,
+		Initiator:   state.Initiator,
+		Participant: state.Participant,
+		Value:       WeiToGwei(state.Value),
+		State:       SwapStep(state.State),
+	}
 }

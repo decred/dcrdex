@@ -18,36 +18,26 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-type swapCoinType uint8
+var _ asset.Coin = (*swapCoin)(nil)
+var _ asset.Coin = (*redeemCoin)(nil)
 
-const (
-	sctInit swapCoinType = iota
-	sctRedeem
-)
-
-func (sct swapCoinType) String() string {
-	switch sct {
-	case sctInit:
-		return "init"
-	case sctRedeem:
-		return "redeem"
-	default:
-		return "invalid type"
-	}
+type baseCoin struct {
+	backend    *Backend
+	secretHash [32]byte
+	gasPrice   uint64
+	txHash     common.Hash
+	value      uint64
+	txData     []byte
 }
 
-var _ asset.Coin = (*swapCoin)(nil)
-
 type swapCoin struct {
-	backend                    *Backend
-	contractAddr, counterParty common.Address
-	secret, secretHash         [32]byte
-	value                      uint64
-	gasPrice                   uint64
-	txHash                     common.Hash
-	txid                       string
-	locktime                   int64
-	sct                        swapCoinType
+	*baseCoin
+	init *dexeth.Initiation
+}
+
+type redeemCoin struct {
+	*baseCoin
+	secret [32]byte
 }
 
 // newSwapCoin creates a new swapCoin that stores and retrieves info about a
@@ -57,33 +47,79 @@ type swapCoin struct {
 // swap before it is mined. Having the initial transaction allows us to track
 // it in the mempool. It also tells us all the data we need to confirm a tx
 // will do what we expect if mined and satisfies contract constraints. These
-// fields are verified the first time the Confirmations method is called, and
-// an error is returned then if something is different than expected. As such,
-// the swapCoin expects Confirmations to be called with confirmations
-// available at least once before the swap be trusted for swap initializations.
-func (backend *Backend) newSwapCoin(coinID []byte, contractData []byte, sct swapCoinType) (*swapCoin, error) {
-	switch sct {
-	case sctInit, sctRedeem:
-	default:
-		return nil, fmt.Errorf("unknown swapCoin type: %d", sct)
+// fields are verified when the Confirmations method is called.
+func (eth *Backend) newSwapCoin(coinID []byte, contractData []byte) (*swapCoin, error) {
+	bc, err := eth.baseCoin(coinID, contractData)
+	if err != nil {
+		return nil, err
 	}
 
+	inits, err := dexeth.ParseInitiateData(bc.txData, ethContractVersion)
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse initiate call data: %v", err)
+	}
+
+	init, ok := inits[bc.secretHash]
+	if !ok {
+		return nil, fmt.Errorf("tx %v does not contain initiation with secret hash %x", bc.txHash, bc.secretHash)
+	}
+
+	var sum uint64
+	for _, in := range inits {
+		sum += in.Value
+	}
+	if bc.value < sum {
+		return nil, fmt.Errorf("tx %s value < sum of inits. %d < %d", bc.txHash, bc.value, sum)
+	}
+
+	return &swapCoin{
+		baseCoin: bc,
+		init:     init,
+	}, nil
+}
+
+// newRedeemCoin pulls the tx for the coinID => txHash, extracts the secret, and
+// provides a coin to check confirmations, as required by asset.Coin interface,
+// TODO: The redeemCoin's Confirmation method is never used by the current
+// swapper implementation. Might consider an API change for
+// asset.Backend.Redemption.
+func (eth *Backend) newRedeemCoin(coinID []byte, contractData []byte) (*redeemCoin, error) {
+	bc, err := eth.baseCoin(coinID, contractData)
+	if err != nil {
+		return nil, err
+	}
+
+	if bc.value != 0 {
+		return nil, fmt.Errorf("expected tx value of zero for redeem but got: %d", bc.value)
+	}
+
+	redemptions, err := dexeth.ParseRedeemData(bc.txData, ethContractVersion)
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse redemption call data: %v", err)
+	}
+	redemption, ok := redemptions[bc.secretHash]
+	if !ok {
+		return nil, fmt.Errorf("tx %v does not contain redemption with secret hash %x", bc.txHash, bc.secretHash)
+	}
+
+	return &redeemCoin{
+		baseCoin: bc,
+		secret:   redemption.Secret,
+	}, nil
+}
+
+// The baseCoin is basic tx and swap contract data.
+func (eth *Backend) baseCoin(coinID []byte, contractData []byte) (*baseCoin, error) {
 	txHash, err := dexeth.DecodeCoinID(coinID)
 	if err != nil {
 		return nil, err
 	}
-	tx, _, err := backend.node.transaction(backend.rpcCtx, txHash)
+	tx, _, err := eth.node.transaction(eth.rpcCtx, txHash)
 	if err != nil {
 		if errors.Is(err, ethereum.NotFound) {
 			return nil, asset.CoinNotFoundError
 		}
 		return nil, fmt.Errorf("unable to fetch transaction: %v", err)
-	}
-
-	txdata := tx.Data()
-	// Transactions that call contract functions must have extra data.
-	if len(txdata) == 0 {
-		return nil, errors.New("tx calling contract function has no extra data")
 	}
 
 	contractVer, secretHash, err := dexeth.DecodeContractData(contractData)
@@ -94,76 +130,41 @@ func (backend *Backend) newSwapCoin(coinID []byte, contractData []byte, sct swap
 		return nil, fmt.Errorf("contract version %d not supported, only %d", contractVer, version)
 	}
 	contractAddr := tx.To()
-	if *contractAddr != backend.contractAddr {
+	if *contractAddr != eth.contractAddr {
 		return nil, fmt.Errorf("contract address is not supported: %v", contractAddr)
-	}
-
-	// Parse the call data for the counter-party address and lock time for an
-	// init txn, and the secret key for a redeem txn.
-	var (
-		counterParty = new(common.Address)
-		secret       [32]byte
-		locktime     int64
-	)
-
-	switch sct {
-	case sctInit:
-		initiations, err := dexeth.ParseInitiateData(txdata, contractVer)
-		if err != nil {
-			return nil, fmt.Errorf("unable to parse initiate call data: %v", err)
-		}
-		initiation, ok := initiations[secretHash]
-		if !ok {
-			return nil, fmt.Errorf("tx %v does not contain initiation with secret hash %x",
-				txHash, secretHash)
-		}
-		counterParty = &initiation.Participant
-		locktime = initiation.LockTime.Unix()
-	case sctRedeem:
-		redemptions, err := dexeth.ParseRedeemData(txdata, contractVer)
-		if err != nil {
-			return nil, fmt.Errorf("unable to parse redemption call data: %v", err)
-		}
-		redemption, ok := redemptions[secretHash]
-		if !ok {
-			return nil, fmt.Errorf("tx %v does not contain redemption with secret hash %x",
-				txHash, secretHash)
-		}
-		secret = redemption.Secret
 	}
 
 	// Gas price is not stored in the swap, and is used to determine if the
 	// initialization transaction could take a long time to be mined. A
 	// transaction with a very low gas price may need to be resent with a
 	// higher price.
-	gasPrice, err := dexeth.ToGwei(tx.GasPrice())
+	zero := new(big.Int)
+	rate := tx.GasPrice()
+	if rate == nil || rate.Cmp(zero) <= 0 {
+		rate = tx.GasFeeCap()
+		if rate == nil || rate.Cmp(zero) <= 0 {
+			return nil, fmt.Errorf("Failed to parse gas price from tx %s", txHash)
+		}
+	}
+
+	gasPrice, err := dexeth.WeiToGweiUint64(rate)
 	if err != nil {
 		return nil, fmt.Errorf("unable to convert gas price: %v", err)
 	}
 
 	// Value is stored in the swap with the initialization transaction.
-	value, err := dexeth.ToGwei(tx.Value())
+	value, err := dexeth.WeiToGweiUint64(tx.Value())
 	if err != nil {
 		return nil, fmt.Errorf("unable to convert value: %v", err)
 	}
 
-	// For redemptions, the transaction should move no value.
-	if sct == sctRedeem && value != 0 {
-		return nil, fmt.Errorf("expected swapCoin value of zero for redeem but got: %d", value)
-	}
-
-	return &swapCoin{
-		backend:      backend,
-		contractAddr: *contractAddr, // non-zero for init
-		secret:       secret,        // non-zero for redeem
-		secretHash:   secretHash,
-		value:        value,
-		gasPrice:     gasPrice,
-		txHash:       txHash,
-		txid:         txHash.Hex(), // == String(), with 0x prefix
-		counterParty: *counterParty,
-		locktime:     locktime, // non-zero for init
-		sct:          sct,
+	return &baseCoin{
+		backend:    eth,
+		secretHash: secretHash,
+		gasPrice:   gasPrice,
+		txHash:     txHash,
+		value:      value,
+		txData:     tx.Data(),
 	}, nil
 }
 
@@ -176,109 +177,104 @@ func (backend *Backend) newSwapCoin(coinID []byte, contractData []byte, sct swap
 // any other values if a user sent another transaction with a higher gas fee
 // and the same account and nonce, effectively voiding the transaction we
 // expected to be mined.
-func (c *swapCoin) Confirmations(_ context.Context) (int64, error) {
-	swap, err := c.backend.node.swap(c.backend.rpcCtx, c.secretHash)
+func (c *swapCoin) Confirmations(ctx context.Context) (int64, error) {
+	swap, err := c.backend.node.swap(ctx, c.secretHash)
 	if err != nil {
 		return -1, err
 	}
 
-	switch c.sct {
-	case sctRedeem:
-		// There should be no need to check the counter party, or value
-		// as a swap with a specific secret hash that has been redeemed
-		// wouldn't have been redeemed without ensuring the initiator
-		// is the expected address and value was also as expected. Also
-		// not validating the locktime, as the swap is redeemed and
-		// locktime no longer relevant.
-		ss := dexeth.SwapStep(swap.State)
-		if ss == dexeth.SSRedeemed {
-			// While not completely accurate, we know that if the
-			// swap is redeemed the redemption has at least one
-			// confirmation.
-			return 1, nil
-		}
-		// If swap is in the Initiated state, the transaction may be
-		// unmined.
-		if ss == dexeth.SSInitiated {
-			// Assume the tx still has a chance of being mined.
-			return 0, nil
-		}
-		// If swap is in None state, then the redemption can't possibly
-		// succeed as the swap must already be in the Initialized state
-		// to redeem. If the swap is in the Refunded state, then the
-		// redemption either failed or never happened.
-		return -1, fmt.Errorf("redemption in failed state with swap at %s state", ss)
+	// Uninitiated state is zero confs. It could still be in mempool.
+	// It is important to only trust confirmations according to the
+	// swap contract. Until there are confirmations we cannot be sure
+	// that initiation happened successfully.
+	if swap.State == dexeth.SSNone {
+		// Assume the tx still has a chance of being mined.
+		return 0, nil
+	}
+	// Any other swap state is ok. We are sure that initialization
+	// happened.
 
-	case sctInit:
-		// Uninitiated state is zero confs. It could still be in mempool.
-		// It is important to only trust confirmations according to the
-		// swap contract. Until there are confirmations we cannot be sure
-		// that initiation happened successfully.
-		if dexeth.SwapStep(swap.State) == dexeth.SSNone {
-			// Assume the tx still has a chance of being mined.
-			return 0, nil
-		}
-		// Any other swap state is ok. We are sure that initialization
-		// happened.
+	// The swap initiation transaction has some number of
+	// confirmations, and we are sure the secret hash belongs to
+	// this swap. Assert that the value, receiver, and locktime are
+	// as expected.
+	if swap.Value != c.init.Value {
+		return -1, fmt.Errorf("tx data swap val (%dgwei) does not match contract value (%dgwei)",
+			c.init.Value, swap.Value)
+	}
+	if swap.Participant != c.init.Participant {
+		return -1, fmt.Errorf("tx data participant %q does not match contract value %q",
+			c.init.Participant, swap.Participant)
+	}
 
-		// The swap initiation transaction has some number of
-		// confirmations, and we are sure the secret hash belongs to
-		// this swap. Assert that the value, receiver, and locktime are
-		// as expected.
-		value, err := dexeth.ToGwei(new(big.Int).Set(swap.Value))
-		if err != nil {
-			return -1, fmt.Errorf("unable to convert value: %v", err)
-		}
-		if value != c.value {
-			return -1, fmt.Errorf("expected swap val (%dgwei) does not match expected (%dgwei)",
-				c.value, value)
-		}
-		if swap.Participant != c.counterParty {
-			return -1, fmt.Errorf("expected swap participant %q does not match expected %q",
-				c.counterParty, swap.Participant)
-		}
-		if !swap.RefundBlockTimestamp.IsInt64() {
-			return -1, errors.New("swap locktime is larger than expected")
-		}
-		locktime := swap.RefundBlockTimestamp.Int64()
-		if locktime != c.locktime {
-			return -1, fmt.Errorf("expected swap locktime (%d) does not match expected (%d)",
-				c.locktime, locktime)
-		}
+	// locktime := swap.RefundBlockTimestamp.Int64()
+	if !swap.LockTime.Equal(c.init.LockTime) {
+		return -1, fmt.Errorf("expected swap locktime (%s) does not match expected (%s)",
+			c.init.LockTime, swap.LockTime)
+	}
 
-		bn, err := c.backend.node.blockNumber(c.backend.rpcCtx)
+	bn, err := c.backend.node.blockNumber(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("unable to fetch block number: %v", err)
+	}
+	return int64(bn - swap.BlockHeight + 1), nil
+}
+
+func (c *redeemCoin) Confirmations(ctx context.Context) (int64, error) {
+	swap, err := c.backend.node.swap(ctx, c.secretHash)
+	if err != nil {
+		return -1, err
+	}
+
+	// There should be no need to check the counter party, or value
+	// as a swap with a specific secret hash that has been redeemed
+	// wouldn't have been redeemed without ensuring the initiator
+	// is the expected address and value was also as expected. Also
+	// not validating the locktime, as the swap is redeemed and
+	// locktime no longer relevant.
+	if swap.State == dexeth.SSRedeemed {
+		bn, err := c.backend.node.blockNumber(ctx)
 		if err != nil {
 			return 0, fmt.Errorf("unable to fetch block number: %v", err)
 		}
-		return int64(bn - swap.InitBlockNumber.Uint64()), nil
+		return int64(bn - swap.BlockHeight + 1), nil
 	}
-
-	return -1, fmt.Errorf("unsupported swap type for confirmations: %d", c.sct)
+	// If swap is in the Initiated state, the redemption may be
+	// unmined.
+	if swap.State == dexeth.SSInitiated {
+		// Assume the tx still has a chance of being mined.
+		return 0, nil
+	}
+	// If swap is in None state, then the redemption can't possibly
+	// succeed as the swap must already be in the Initialized state
+	// to redeem. If the swap is in the Refunded state, then the
+	// redemption either failed or never happened.
+	return -1, fmt.Errorf("redemption in failed state with swap at %s state", swap.State)
 }
 
 // ID is the swap's coin ID.
-func (c *swapCoin) ID() []byte {
+func (c *baseCoin) ID() []byte {
 	return c.txHash.Bytes() // c.txHash[:]
 }
 
 // TxID is the original init transaction txid.
-func (c *swapCoin) TxID() string {
-	return c.txid
+func (c *baseCoin) TxID() string {
+	return c.txHash.String()
 }
 
 // String is a human readable representation of the swap coin.
-func (c *swapCoin) String() string {
-	return fmt.Sprintf("%v (%s)", c.txid, c.sct)
+func (c *baseCoin) String() string {
+	return c.txHash.String()
 }
 
 // Value is the amount paid to the swap, set in initialization. Always zero for
 // redemptions.
-func (c *swapCoin) Value() uint64 {
+func (c *baseCoin) Value() uint64 {
 	return c.value
 }
 
 // FeeRate returns the gas rate, in gwei/gas. It is set in initialization of
 // the swapCoin.
-func (c *swapCoin) FeeRate() uint64 {
+func (c *baseCoin) FeeRate() uint64 {
 	return c.gasPrice
 }
