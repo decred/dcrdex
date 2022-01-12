@@ -5,6 +5,8 @@
 
 set +e
 
+SEED="9b6aff43a73ddfaee71414100801a4ca533a9ffc9696ae7f22a7e345b6e4f4fb00f7256c46a7457b70d1eb53fa660be31e04d46d09221dd44a7fc94d6c5c41b8"
+
 ~/dextest/ltc/harness-ctl/alpha getblockchaininfo > /dev/null
 LTC_ON=$?
 
@@ -17,7 +19,7 @@ ETH_ON=$?
 set -e
 
 echo initializing
-./dexcctl -p abc --simnet init
+./dexcctl -p abc --simnet init $SEED
 
 echo configuring Decred wallet
 ./dexcctl -p abc -p abc --simnet newwallet 42 dcrwalletRPC ~/dextest/dcr/alpha/alpha.conf '{"account":"default"}'
@@ -40,10 +42,21 @@ if [ $ETH_ON -eq 0 ]; then
 	./dexcctl -p abc -p "" --simnet newwallet 60 geth
 fi
 
-echo registering with DEX
-./dexcctl -p abc --simnet register 127.0.0.1:17273 100000000 42 ~/dextest/dcrdex/rpc.cert
+echo checking if we have an account already
+RESTORING=$(./dexcctl -p abc --simnet discoveracct 127.0.0.1:17273 ~/dextest/dcrdex/rpc.cert)
 
-echo mining fee confirmation blocks
-tmux send-keys -t dcr-harness:0 "./mine-alpha 1" C-m
-sleep 2
-tmux send-keys -t dcr-harness:0 "./mine-alpha 1" C-m
+if [ $RESTORING == "true" ]; then
+
+  echo account exists and is paid
+
+else
+
+  echo registering with DEX
+  ./dexcctl -p abc --simnet register 127.0.0.1:17273 100000000 42 ~/dextest/dcrdex/rpc.cert
+
+  echo mining fee confirmation blocks
+  tmux send-keys -t dcr-harness:0 "./mine-alpha 1" C-m
+  sleep 2
+  tmux send-keys -t dcr-harness:0 "./mine-alpha 1" C-m
+
+fi
