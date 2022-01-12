@@ -77,6 +77,7 @@ const (
 	RPCExportSeedError                // 58
 	TooManyRequestsError              // 59
 	RPCGetDEXConfigError              // 60
+	RPCDiscoverAcctError              // 61
 )
 
 // Routes are destinations for a "payload" of data. The type of data being

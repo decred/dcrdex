@@ -19,24 +19,25 @@ import (
 
 // routes
 const (
-	cancelRoute      = "cancel"
-	closeWalletRoute = "closewallet"
-	exchangesRoute   = "exchanges"
-	helpRoute        = "help"
-	initRoute        = "init"
-	loginRoute       = "login"
-	logoutRoute      = "logout"
-	myOrdersRoute    = "myorders"
-	newWalletRoute   = "newwallet"
-	openWalletRoute  = "openwallet"
-	orderBookRoute   = "orderbook"
-	getDEXConfRoute  = "getdexconfig" // consider a getfees route
-	registerRoute    = "register"
-	tradeRoute       = "trade"
-	versionRoute     = "version"
-	walletsRoute     = "wallets"
-	withdrawRoute    = "withdraw"
-	appSeedRoute     = "appseed"
+	cancelRoute       = "cancel"
+	closeWalletRoute  = "closewallet"
+	discoverAcctRoute = "discoveracct"
+	exchangesRoute    = "exchanges"
+	helpRoute         = "help"
+	initRoute         = "init"
+	loginRoute        = "login"
+	logoutRoute       = "logout"
+	myOrdersRoute     = "myorders"
+	newWalletRoute    = "newwallet"
+	openWalletRoute   = "openwallet"
+	orderBookRoute    = "orderbook"
+	getDEXConfRoute   = "getdexconfig" // consider a getfees route
+	registerRoute     = "register"
+	tradeRoute        = "trade"
+	versionRoute      = "version"
+	walletsRoute      = "wallets"
+	withdrawRoute     = "withdraw"
+	appSeedRoute      = "appseed"
 )
 
 const (
@@ -68,24 +69,25 @@ func usage(route string, err error) *msgjson.ResponsePayload {
 
 // routes maps routes to a handler function.
 var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponsePayload{
-	cancelRoute:      handleCancel,
-	closeWalletRoute: handleCloseWallet,
-	exchangesRoute:   handleExchanges,
-	helpRoute:        handleHelp,
-	initRoute:        handleInit,
-	loginRoute:       handleLogin,
-	logoutRoute:      handleLogout,
-	myOrdersRoute:    handleMyOrders,
-	newWalletRoute:   handleNewWallet,
-	openWalletRoute:  handleOpenWallet,
-	orderBookRoute:   handleOrderBook,
-	getDEXConfRoute:  handleGetDEXConfig,
-	registerRoute:    handleRegister,
-	tradeRoute:       handleTrade,
-	versionRoute:     handleVersion,
-	walletsRoute:     handleWallets,
-	withdrawRoute:    handleWithdraw,
-	appSeedRoute:     handleAppSeed,
+	cancelRoute:       handleCancel,
+	closeWalletRoute:  handleCloseWallet,
+	discoverAcctRoute: handleDiscoverAcct,
+	exchangesRoute:    handleExchanges,
+	helpRoute:         handleHelp,
+	initRoute:         handleInit,
+	loginRoute:        handleLogin,
+	logoutRoute:       handleLogout,
+	myOrdersRoute:     handleMyOrders,
+	newWalletRoute:    handleNewWallet,
+	openWalletRoute:   handleOpenWallet,
+	orderBookRoute:    handleOrderBook,
+	getDEXConfRoute:   handleGetDEXConfig,
+	registerRoute:     handleRegister,
+	tradeRoute:        handleTrade,
+	versionRoute:      handleVersion,
+	walletsRoute:      handleWallets,
+	withdrawRoute:     handleWithdraw,
+	appSeedRoute:      handleAppSeed,
 }
 
 // handleHelp handles requests for help. Returns general help for all commands
@@ -252,6 +254,22 @@ func handleGetDEXConfig(s *RPCServer, params *RawParams) *msgjson.ResponsePayloa
 		return createResponse(getDEXConfRoute, nil, resErr)
 	}
 	return createResponse(getDEXConfRoute, exchange, nil)
+}
+
+// handleDiscoverAcct is the handler for discoveracct. *msgjson.ResponsePayload.Error
+// is empty if successful.
+func handleDiscoverAcct(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	form, err := parseDiscoverAcctArgs(params)
+	if err != nil {
+		return usage(discoverAcctRoute, err)
+	}
+	defer form.appPass.Clear()
+	_, paid, err := s.core.DiscoverAccount(form.addr, form.appPass, form.cert)
+	if err != nil {
+		resErr := &msgjson.Error{Code: msgjson.RPCDiscoverAcctError, Message: err.Error()}
+		return createResponse(discoverAcctRoute, nil, resErr)
+	}
+	return createResponse(discoverAcctRoute, &paid, nil)
 }
 
 // handleRegister handles requests for register. *msgjson.ResponsePayload.Error
@@ -682,6 +700,20 @@ var helpMsgs = map[string]helpMsg{
 		cmdSummary: `Print the DEX client rpcserver version.`,
 		returns: `Returns:
     string: The DEX client rpcserver version.`,
+	},
+	discoverAcctRoute: {
+		pwArgsShort: `"appPass"`,
+		argsShort:   `"addr" ("cert")`,
+		cmdSummary: `Discover an account that is used for a dex. Useful when restoring
+    an account and can be used in place of register. Will error if
+    the account has already been discovered/restored.`,
+		pwArgsLong: `Password Args:
+    appPass (string): The DEX client password.`,
+		argsLong: `Args:
+    addr (string): The DEX address to discover an account for.
+    cert (string): Optional. The TLS certificate path.`,
+		returns: `Returns:
+    bool: True if the account has has been registered and paid for.`,
 	},
 	initRoute: {
 		pwArgsShort: `"appPass"`,

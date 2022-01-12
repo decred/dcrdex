@@ -58,6 +58,7 @@ type TCore struct {
 	bookErr             error
 	exportSeed          []byte
 	exportSeedErr       error
+	discoverAcctErr     error
 }
 
 func (c *TCore) Balance(uint32) (uint64, error) {
@@ -116,6 +117,9 @@ func (c *TCore) Withdraw(pw []byte, assetID uint32, value uint64, addr string) (
 }
 func (c *TCore) ExportSeed(pw []byte) ([]byte, error) {
 	return c.exportSeed, c.exportSeedErr
+}
+func (c *TCore) DiscoverAccount(dexAddr string, pass []byte, certI interface{}) (*core.Exchange, bool, error) {
+	return c.dexExchange, false, c.discoverAcctErr
 }
 
 type tBookFeed struct{}
