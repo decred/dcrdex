@@ -456,13 +456,13 @@
         </div>
         <div id="verifyMarket">
           <div class="d-flex align-items-center justify-content-between">
-            <span class="grey fs17 flex-grow-1 text-left">Trading</span>
+            <span class="grey fs17 flex-grow-1 text-left">Trocando</span>
             <span id="vmFromTotal" class="fs18 demi"></span>
             <span id="vmFromAsset" class="grey fs14 ml-2"></span>
           </div>
           <div id="vMarketEstimate" class="d-flex align-items-center justify-content-between">
             <span class="grey fs17 flex-grow-1 text-left">
-              Receiving Approximately
+              Recebendo aproximadamente
               <span class="ico-info fs12" data-tooltip="Está é uma ordem de mercado e combinará com o(s) melhor(es) pedidos no livro de ofertas. Baseado no atual valor médio de mercado, você receberá"></span>
             </span>
             <span id="vmToTotal" class="fs18 demi"></span>
@@ -497,23 +497,23 @@
 
           <div class="d-flex justify-content-between align-items-center">
             <span class="grey fs18">
-              Fee Projection
-              <span class="ico-info fs12" data-tooltip="If network conditions don't change before your order matches, total realized fees (as a percentage of trade) should fall within this range."></span>
+              Projeção de Taxa
+              <span class="ico-info fs12" data-tooltip="Se as condições da rede não mudarem antes que seu pedido corresponda, O total de taxas realizadas (como porcentagem da troca) deve estar dentro dessa faixa."></span>
             </span>
-            <span class="grey fs14 underline pointer hoverbright" id="vFeeDetails">details</span>
+            <span class="grey fs14 underline pointer hoverbright" id="vFeeDetails">detalhes</span>
           </div>
 
           <div class="py-1 d-flex align-items-center justify-content-center fs18" id="vFeeSummary">
             <span id="vFeeSummaryLow"></span>
             <span class="fs15">%</span>
-            <span class="fs15 px-2">to</span>
+            <span class="fs15 px-2">para</span>
             <span id="vFeeSummaryHigh"></span>
             <span class="fs15">%</span>
           </div>
 
           <hr class="dashed mb-2 mt-3">
 
-          <div class="grey fs18 text-left">Options</div>
+          <div class="grey fs18 text-left">Opções</div>
 
           <div id="vOrderOpts">
             {{- /* Order Option Templates */ -}}
@@ -561,7 +561,7 @@
           <hr class="dashed mb-2 mt-3">
           <div class="flex-center flex-column my-2 p-3">
             <span class="ico-locked my-2"></span>
-            <span>Unlock your wallets to retrieve order details and additional options.</span>
+            <span>Desbloqueie suas carteiras para recuperar detalhes do pedido e opções adicionais.</span>
             <div class="d-flex align-items-stretch w-100">
               <div class="col-12 p-0 text-left">
                 <label for="vUnlockPass" class="pl-1 mb-1">Senha</label>
@@ -575,7 +575,7 @@
         </div>
 
         <div id="vPreorderErr" class="mt-2">
-          Order estimates and options unavailable
+          Orçamentos e opções de pedidos indisponíveis
           <span class="ico-info red fs12" id="vPreorderErrTip" data-tooltip=" "></span>
         </div>
 
@@ -590,24 +590,24 @@
       {{- /* FEE DETAIL BREAKDOWN */ -}}
       <form id="vDetailPane" class="d-hide fs16 pb-2">
         <div class="d-flex justify-content-between align-items-center py-1 px-3">
-          <span>Fee Details</span>
+          <span>Detalhes da taxa</span>
           <span class="ico-cross fs12 pointer" id="closeDetailPane"></span>
         </div>
         <div class="px-3">
           <div class="m-1">
-            Best- and worst-case estimates are based on current network conditions, and might change by the time the order matches.
+            As estimativas de melhor e pior caso são baseadas nas condições atuais da rede e podem mudar quando o pedido corresponder.
           </div>
 
-          <div class="fs18 mt-2 demi">Best Case Fees</div>
+          <div class="fs18 mt-2 demi">Cenário de melhor taxa</div>
           <div class="px-3 indent">
             <div>
-              The best case fees occur when the entire order is consumed in a single match.
+              O melhor cenário para taxa ocorre quando todo pedido é correspondido em uma única combinação.
             </div>
             <div class="d-flex">
               <table class="fee-breakout">
                 <tr>
-                  <td><img class="micro-icon" data-icon="from"> Swap</td>
-                  <td><img class="micro-icon" data-icon="to"> Redeem</td>
+                  <td><img class="micro-icon" data-icon="from"> Troca</td>
+                  <td><img class="micro-icon" data-icon="to"> Resgatar</td>
                 </tr>
                 <tr>
                   <td><span id="vSwapFeesLow"></span> (<span id="vSwapFeesLowPct"></span>)</td>
@@ -617,16 +617,16 @@
             </div>
           </div>
 
-          <div class="fs18 mt-2 demi">Worst Case Fees</div>
+          <div class="fs18 mt-2 demi">Pior cenário para taxas</div>
           <div class="px-3 indent">
             <div>
-              The worst case can occur if the order matches one lot at a time over the course of many epochs.
+              O pior caso pode ocorrer se a ordem corresponder em um lote de cada vez ao longo de muitos epoques.
             </div>
             <div class="d-flex">
               <table class="fee-breakout">
                 <tr>
-                  <td><img class="micro-icon" data-icon="from"> Swap</td>
-                  <td><img class="micro-icon" data-icon="to"> Redeem</td>
+                  <td><img class="micro-icon" data-icon="from"> Troca</td>
+                  <td><img class="micro-icon" data-icon="to"> Resgatar</td>
                 </tr>
                 <tr>
                   <td><span id="vSwapFeesHigh"></span> (<span id="vSwapFeesHighPct"></span>)</td>
@@ -636,10 +636,10 @@
             </div>
           </div>
 
-          <div class="fs18 mt-2 demi">Maximum Possible Swap Fees</div>
+          <div class="fs18 mt-2 demi">Taxas Máximas de Troca Possíveis</div>
           <div class="px-3 indent">
             <div>
-              This is the most you would ever pay in fees on your swap. Fees are normally assessed at a fraction of this rate. The maximum is not subject to changes once your order is placed.
+              Este é o máximo que você pagaria em taxas em sua troca. As taxas são normalmente avaliadas em uma fração dessa taxa. O máximo não está sujeito a alterações uma vez que seu pedido é feito.
             </div>
             <div>
               <img class="micro-icon mr-1" data-icon="from">
