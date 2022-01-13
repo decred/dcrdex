@@ -1507,6 +1507,9 @@ func TestRegister(t *testing.T) {
 
 	wallet, tWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = wallet
+	tWallet.bal = &asset.Balance{
+		Available: 4e9,
+	}
 
 	// When registering, successfully retrieving *db.AccountInfo from the DB is
 	// an error (no dupes). Initial state is to return an error.
@@ -1624,6 +1627,7 @@ func TestRegister(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registration error: %v", err)
 	}
+
 	// Should be two success notifications. One for fee paid on-chain, one for
 	// fee notification sent, each along with a balance note.
 	feeNote := getFeeAndBalanceNote() // payment in progress
@@ -1707,6 +1711,15 @@ func TestRegister(t *testing.T) {
 		t.Fatalf("wrong account key error: %v", err)
 	}
 	rig.crypter.(*tCrypter).encryptErr = nil
+
+	bal0 := tWallet.bal.Available
+	tWallet.bal.Available = 0
+	queueConfigAndConnectUnknownAcct()
+	run()
+	if !errorHasCode(err, walletBalanceErr) {
+		t.Fatalf("expected low balance error")
+	}
+	tWallet.bal.Available = bal0
 
 	// register request error
 	queueConfigAndConnectUnknownAcct()
