@@ -298,7 +298,21 @@ func runTest(t *testing.T, splitTx bool) {
 	makeRedemption := func(swapVal uint64, receipt asset.Receipt, secret []byte) *asset.Redemption {
 		t.Helper()
 		swapOutput := receipt.Coin()
-		ci, err := rig.alpha().AuditContract(swapOutput.ID(), receipt.Contract(), nil, false)
+		op := swapOutput.(*output)
+		// rig.beta().lookupTxOutput(tCtx, op.txHash(), op.vout())
+		tx, err := rig.beta().wallet.GetTransaction(tCtx, op.txHash())
+		if err != nil || tx == nil {
+			t.Fatalf("GetTransaction: %v", err)
+		}
+		msgTx, err := msgTxFromHex(tx.Hex)
+		if err != nil {
+			t.Fatalf("msgTxFromHex: %v", err)
+		}
+		txData, err := msgTx.Bytes()
+		if err != nil {
+			t.Fatalf("msgTx.Bytes: %v", err)
+		}
+		ci, err := rig.alpha().AuditContract(swapOutput.ID(), receipt.Contract(), txData, false)
 		if err != nil {
 			t.Fatalf("error auditing contract: %v", err)
 		}
