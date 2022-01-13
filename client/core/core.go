@@ -2699,6 +2699,11 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	}
 	if paid {
 		registrationComplete = true
+		// The listen goroutine is already running, now track the conn.
+		c.connMtx.Lock()
+		c.conns[dc.acct.host] = dc
+		c.connMtx.Unlock()
+
 		return &RegisterResult{FeeID: hex.EncodeToString(dc.acct.feeCoin), ReqConfirms: 0}, nil
 	}
 	// dc.acct is now configured with encKey, privKey, and id for a new
@@ -2725,6 +2730,8 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		return nil, err
 	}
 	if paid { // would have gotten this from discoverAccount
+		registrationComplete = true
+		// register already promoted the connection
 		return &RegisterResult{FeeID: hex.EncodeToString(dc.acct.feeCoin), ReqConfirms: 0}, nil
 	}
 	if suspended { // would have gotten this from discoverAccount
