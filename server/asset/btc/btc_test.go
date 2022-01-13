@@ -47,7 +47,10 @@ func TestMain(m *testing.M) {
 	// Set any created Backends to poll for blocks every 50 ms to
 	// accommodate reorg testing.
 	blockPollInterval = time.Millisecond * 50
-	blockPollDelay = blockPollInterval + time.Millisecond*5
+	// blockPollDelay must be long enough to allow for block polling go-routine
+	// to get a single tick (must be at least as long as blockPollInterval and
+	// ideally significantly longer).
+	blockPollDelay = blockPollInterval + time.Millisecond * 50
 	os.Exit(m.Run())
 }
 
