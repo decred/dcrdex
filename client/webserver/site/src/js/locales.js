@@ -140,7 +140,11 @@ export const ptBR = {
   [ID_REGISTRATION_FEE_SUCCESS]: 'Sucesso no pagamento da taxa de registro!',
   [ID_API_ERROR]: 'Erro de API',
   [ID_WALLET_READY]: 'Escolher',
-  [ID_SETUP_WALLET]: 'Configurar'
+  [ID_SETUP_WALLET]: 'Configurar',
+  [ID_CHANGE_WALLET_TYPE]: 'trocar o tipo de carteira',
+  [ID_KEEP_WALLET_TYPE]: 'Não trocara tipo de carteira',
+  [WALLET_READY]: 'Carteira Pronta',
+  [SETUP_NEEDED]: 'Configuração Necessária'
 }
 
 export const zhCN = {

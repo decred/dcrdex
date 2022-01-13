@@ -147,7 +147,7 @@
           <div class="px-3 pb-3{{if not $coin}} d-hide{{end}}" data-tmpl="swap">
             <div class="d-inline-block">
               <div class="d-flex align-items-center justify-content-between">
-                <span class="match-data-label"> ({{$ord.FromSymbol}}, você)</span>
+                <span class="match-data-label">Troca ({{$ord.FromSymbol}}, você)</span>
                 <span class="match-data-label{{if not $match.InSwapCast}} d-hide{{end}}" data-tmpl="swapMsg">
                   {{$match.SwapConfirmString}}
                 </span>
@@ -160,7 +160,7 @@
           <div class="px-3 pb-3{{if not $coin}} d-hide{{end}}" data-tmpl="counterSwap">
             <div class="d-inline-block">
               <div class="d-flex align-items-center justify-content-between">
-                <span class="match-data-label"> ({{$ord.ToSymbol}}, Eles)</span>
+                <span class="match-data-label">Troca ({{$ord.ToSymbol}}, Eles)</span>
                 <span class="match-data-label{{if not $match.InCounterSwapCast}} d-hide{{end}}" data-tmpl="counterSwapMsg">
                   {{$match.CounterSwapConfirmString}}
                 </span>
