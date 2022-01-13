@@ -13,6 +13,7 @@ import (
 const (
 	walletErr = iota
 	walletAuthErr
+	walletBalanceErr
 	dupeDEXErr
 	assetSupportErr
 	registerErr

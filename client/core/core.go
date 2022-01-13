@@ -2683,6 +2683,14 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		return nil, codedError(connectionErr, err)
 	}
 
+	// close the connection to the dex server if the registration fails.
+	var registrationComplete bool
+	defer func() {
+		if !registrationComplete {
+			dc.connMaster.Disconnect()
+		}
+	}()
+
 	// Ensure this DEX supports this asset for registration fees, and get the
 	// required confirmations and fee amount.
 	dc.cfgMtx.RLock()
@@ -2698,14 +2706,6 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	reqConfs := feeAsset.Confs
 	// TODO: basic sanity check on required confirms, e.g. > 1000, but asset-specific
 
-	// close the connection to the dex server if the registration fails.
-	var registrationComplete bool
-	defer func() {
-		if !registrationComplete {
-			dc.connMaster.Disconnect()
-		}
-	}()
-
 	paid, err := c.discoverAccount(dc, crypter)
 	if err != nil {
 		return nil, err
@@ -2716,6 +2716,21 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	}
 	// dc.acct is now configured with encKey, privKey, and id for a new
 	// (unregistered) account.
+
+	// Before we do the 'register' request, make sure we have sufficient funds.
+	balance, err := wallet.Balance()
+	if err != nil {
+		return nil, newError(walletErr, "unable to retrieve wallet balance for %v: %v",
+			regFeeAssetSymbol, err)
+	}
+	// Just avail==required is not sufficient because of net fees, although that
+	// is actually not true for degen tokens so this will need adjusting.
+	if balance.Available <= feeAsset.Amt {
+		// TODO: Use an asset-specific network fee source e.g.
+		// (*ExchangeWallet).EstimateRegistrationTxFee.
+		return nil, newError(walletBalanceErr, "insufficient balance for fee %v, have %v, "+
+			"but need fee amount plus network fees", feeAsset.Amt, balance.Available)
+	}
 
 	// Make the register request to the server for fee payment details.
 	regRes, paid, suspended, err := c.register(dc, feeAsset.ID)
