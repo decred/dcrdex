@@ -50,7 +50,7 @@ func TestMain(m *testing.M) {
 	// blockPollDelay must be long enough to allow for block polling go-routine
 	// to run at least a single tick (must be at least as long as blockPollInterval
 	// and ideally significantly longer).
-	blockPollDelay = blockPollInterval + time.Millisecond * 50
+	blockPollDelay = blockPollInterval + time.Millisecond*50
 	os.Exit(m.Run())
 }
 
