@@ -23,6 +23,8 @@ GOOS=darwin GOARCH=amd64 go build -trimpath -o ../../../bin/dexc-darwin-amd64-${
 GOOS=darwin GOARCH=arm64 go build -trimpath -o ../../../bin/dexc-darwin-arm64-${VER} -ldflags "$LDFLAGS"
 popd
 
+LDFLAGS="-s -w -X main.appPreRelease= -X main.appBuild=release"
+
 pushd client/cmd/dexcctl
 GOOS=linux GOARCH=amd64 go build -trimpath -o ../../../bin/dexc-linux-amd64-${VER} -ldflags "$LDFLAGS"
 GOOS=linux GOARCH=arm64 go build -trimpath -o ../../../bin/dexc-linux-arm64-${VER} -ldflags "$LDFLAGS"
