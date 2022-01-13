@@ -509,8 +509,7 @@ func (dcr *ExchangeWallet) Info() *asset.WalletInfo {
 // }
 
 // Connect connects the wallet to the RPC server. Satisfies the dex.Connector
-// interface. WARNING: Once stopped, it cannot reconnect, requiring NewWallet to
-// construct a new ExchangeWallet to Connect again.
+// interface.
 func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	// rpclog(dcr.log)
 	dcr.ctx = ctx
