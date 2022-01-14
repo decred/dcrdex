@@ -619,6 +619,8 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 		Wallet:       w,
 		connector:    dex.NewConnectionMaster(w),
 		AssetID:      assetID,
+		cfg:          &asset.WalletConfig{},
+		logger:       dex.Disabled,
 		hookedUp:     true,
 		dbID:         encode.Uint32Bytes(assetID),
 		encPass:      []byte{0x01},
@@ -6317,7 +6319,7 @@ func TestSetWalletPassword(t *testing.T) {
 		EncryptedPW: []byte("abc"),
 	}
 	newPW := []byte("def")
-	var assetID uint32 = 54321
+	var assetID uint32 = 42
 
 	// Nil password error
 	err := tCore.SetWalletPassword(tPW, assetID, nil)

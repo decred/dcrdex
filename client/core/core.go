@@ -1875,6 +1875,9 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		Wallet:    w,
 		connector: dex.NewConnectionMaster(w),
 		AssetID:   assetID,
+		cfg:       walletCfg,
+		logger:    logger,
+		net:       c.net,
 		balance: &WalletBalance{
 			Balance:        dbWallet.Balance,
 			OrderLocked:    orderLockedAmt,

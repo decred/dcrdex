@@ -20,6 +20,9 @@ type xcWallet struct {
 	asset.Wallet
 	connector  *dex.ConnectionMaster
 	AssetID    uint32
+	cfg        *asset.WalletConfig // for recreating connector and asset.Wallet
+	net        dex.Network
+	logger     dex.Logger
 	dbID       []byte
 	walletType string
 	traits     asset.WalletTrait
@@ -205,34 +208,51 @@ func (w *xcWallet) connected() bool {
 // flag to true, and validates the deposit address. Use Disconnect to cleanly
 // shutdown the wallet.
 func (w *xcWallet) Connect() error {
-	// No parent context; use Disconnect instead.
-	err := w.connector.Connect(context.Background())
-	if err != nil {
-		return err
-	}
-	// Now that we are connected, we must Disconnect if any calls fail below
-	// since we are considering this wallet not "hookedUp".
-
-	synced, progress, err := w.SyncStatus()
-	if err != nil {
-		w.connector.Disconnect()
-		return err
+	reloadWallet := func() {
+		wallet, err := asset.OpenWallet(w.AssetID, w.cfg, w.logger, w.net)
+		if err != nil {
+			w.logger.Errorf("error opening wallet: %v", err)
+			return
+		}
+		w.Wallet = wallet
+		w.connector = dex.NewConnectionMaster(wallet)
 	}
 
 	w.mtx.Lock()
 	defer w.mtx.Unlock()
+
+	// No parent context; use Disconnect instead.
+	err := w.connector.Connect(context.Background())
+	if err != nil {
+		// Now w.connector should assume to be hosed completely.
+		reloadWallet()
+		return err
+	}
+
+	// Now that we are connected, we must Disconnect if any calls fail below
+	// since we are considering this wallet not "hookedUp".
+	defer func() {
+		if !w.hookedUp {
+			w.connector.Disconnect()
+			reloadWallet()
+		}
+	}()
+
+	synced, progress, err := w.SyncStatus()
+	if err != nil {
+		return err
+	}
+
 	haveAddress := w.address != ""
 	if haveAddress {
 		haveAddress, err = w.OwnsAddress(w.address)
 		if err != nil {
-			w.connector.Disconnect()
 			return err
 		}
 	}
 	if !haveAddress {
 		w.address, err = w.Address()
 		if err != nil {
-			w.connector.Disconnect()
 			return fmt.Errorf("%s Wallet.Address error: %w", unbip(w.AssetID), err)
 		}
 	}
@@ -246,8 +266,8 @@ func (w *xcWallet) Connect() error {
 // Disconnect calls the dex.Connector's Disconnect method and sets the
 // xcWallet.hookedUp flag to false.
 func (w *xcWallet) Disconnect() {
-	w.connector.Disconnect()
 	w.mtx.Lock()
+	w.connector.Disconnect()
 	w.hookedUp = false
 	w.mtx.Unlock()
 }
