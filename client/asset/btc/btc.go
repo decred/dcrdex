@@ -2573,6 +2573,34 @@ func (btc *ExchangeWallet) PayFee(address string, regFee, feeRateSuggestion uint
 	return newOutput(txHash, vout, sent), nil
 }
 
+// feeRateWithOracleFallback attempts to retrieve a fee rate from the wallet
+// but falls back to the oracle function if it fails.
+func (btc *ExchangeWallet) feeRateWithOracleFallback(confTarget uint64, oracle func() uint64) uint64 {
+	feeRate, err := btc.estimateFee(btc.node, confTarget)
+	if err == nil {
+		btc.log.Tracef("Obtained local estimate for %d-conf fee rate, %d", confTarget, feeRate)
+		return feeRate
+	}
+	feeSuggestion := oracle()
+	if feeSuggestion > 0 && feeSuggestion < btc.fallbackFeeRate && feeSuggestion < btc.feeRateLimit {
+		btc.log.Tracef("feeRateWithFallback using caller's suggestion for %d-conf fee rate, %d. Local estimate unavailable (%q)",
+			confTarget, feeSuggestion, err)
+		return feeSuggestion
+	}
+	btc.log.Warnf("Unable to get optimal fee rate, using fallback of %d: %v",
+		btc.fallbackFeeRate, err)
+	return btc.fallbackFeeRate
+}
+
+// EstimateRegistrationTxFee provides an estimate for the tx fee needed to
+// pay the registration fee. rateOracleFallback is used in the case where
+// the wallet fails to determine the current fee rate on its own.
+func (btc *ExchangeWallet) EstimateRegistrationTxFee(rateOracleFallback func() uint64) uint64 {
+	const inputCount = 5 // buffer so this estimate is higher than what PayFee uses
+	return (dexbtc.MinimumTxOverhead + 2*dexbtc.P2PKHOutputSize + inputCount*dexbtc.RedeemP2PKHInputSize) *
+		btc.feeRateWithOracleFallback(1, rateOracleFallback)
+}
+
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
 // the value. feeRate is in units of atoms/byte.
 func (btc *ExchangeWallet) Withdraw(address string, value, feeSuggestion uint64) (asset.Coin, error) {

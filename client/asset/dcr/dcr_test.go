@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -2486,5 +2487,44 @@ func TestPreRedeem(t *testing.T) {
 	// Just a sanity check.
 	if preRedeem.Estimate.RealisticBestCase >= preRedeem.Estimate.RealisticWorstCase {
 		t.Fatalf("best case > worst case")
+	}
+}
+
+func TestEstimateRegistrationTxFee(t *testing.T) {
+	wallet, rpcclient, shutdown, _ := tNewWallet()
+	defer shutdown()
+
+	oracleEstimate := uint64(15)
+	rateOracleFallback := func() uint64 {
+		return oracleEstimate
+	}
+	const inputCount = 5
+	const txSize = dexdcr.MsgTxOverhead + dexdcr.P2PKHOutputSize*2 + inputCount*dexdcr.P2PKHInputSize
+	wallet.fallbackFeeRate = 30
+
+	estimate := wallet.EstimateRegistrationTxFee(rateOracleFallback)
+	if estimate != (optimalFeeRate+1)*txSize {
+		t.Fatalf("expected tx fee to be %d but got %d", (optimalFeeRate+1)*txSize, estimate)
+	}
+
+	// if wallet estimation fails, use oracle
+	rpcclient.estFeeErr = errors.New("")
+	estimate = wallet.EstimateRegistrationTxFee(rateOracleFallback)
+	if estimate != oracleEstimate*txSize {
+		t.Fatalf("expected tx fee to be %d but got %d", oracleEstimate*txSize, estimate)
+	}
+
+	// if oracle returns 0, use fallback fee rate
+	oracleEstimate = 0
+	estimate = wallet.EstimateRegistrationTxFee(rateOracleFallback)
+	if estimate != wallet.fallbackFeeRate*txSize {
+		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate*txSize, estimate)
+	}
+
+	// if value from oracle > fallback fee rate, use fallback fee rate
+	oracleEstimate = 31
+	estimate = wallet.EstimateRegistrationTxFee(rateOracleFallback)
+	if estimate != wallet.fallbackFeeRate*txSize {
+		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate*txSize, estimate)
 	}
 }

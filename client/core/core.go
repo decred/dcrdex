@@ -2615,6 +2615,32 @@ func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI interface{}) 
 	return dc.exchangeInfo(), true, nil
 }
 
+// EstimateRegistrationTxFee provides an estimate for the tx fee needed to
+// pay the registration fee for a certain asset. The dex host is required
+// because the dex server is used as a fallback to determine the current
+// fee rate in case the client wallet is unable to do it.
+func (c *Core) EstimateRegistrationTxFee(host string, certI interface{}, assetID uint32) (uint64, error) {
+	getDexFeeRate := func() uint64 {
+		dc, err := c.tempDexConnection(host, certI)
+		if dc != nil {
+			// Stop (re)connect loop, which may be running even if err != nil.
+			defer dc.connMaster.Disconnect()
+		}
+		if err != nil {
+			return 0
+		}
+		return dc.fetchFeeRate(assetID)
+	}
+
+	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return 0, nil
+	}
+
+	txFee := wallet.EstimateRegistrationTxFee(getDexFeeRate)
+	return txFee, nil
+}
+
 // Register registers an account with a new DEX. If an error occurs while
 // fetching the DEX configuration or creating the fee transaction, it will be
 // returned immediately.

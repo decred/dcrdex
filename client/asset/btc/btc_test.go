@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -2387,6 +2388,53 @@ func TestPayFee(t *testing.T) {
 	runRubric(t, func(t *testing.T, segwit bool, walletType string) {
 		testSender(t, tPayFeeSender, segwit, walletType)
 	})
+}
+
+func TestEstimateRegistrationTxFee(t *testing.T) {
+	runRubric(t, testEstimateRegistrationTxFee)
+}
+
+func testEstimateRegistrationTxFee(t *testing.T, segwit bool, walletType string) {
+	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
+	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oracleEstimate := uint64(15)
+	rateOracleFallback := func() uint64 {
+		return oracleEstimate
+	}
+	const inputCount = 5
+	const txSize = dexbtc.MinimumTxOverhead + 2*dexbtc.P2PKHOutputSize + inputCount*dexbtc.RedeemP2PKHInputSize
+	wallet.fallbackFeeRate = 30
+
+	estimate := wallet.EstimateRegistrationTxFee(rateOracleFallback)
+	// estimateSmartFee is not supported in the spv wallet
+	if estimate != (optimalFeeRate+1)*txSize && walletType != walletTypeSPV {
+		t.Fatalf("expected tx fee to be %d but got %d", (optimalFeeRate+1)*txSize, estimate)
+	}
+
+	// if wallet estimation fails, use oracle
+	node.estFeeErr = errors.New("")
+	estimate = wallet.EstimateRegistrationTxFee(rateOracleFallback)
+	if estimate != oracleEstimate*txSize {
+		t.Fatalf("expected tx fee to be %d but got %d", oracleEstimate*txSize, estimate)
+	}
+
+	// if oracle returns 0, use fallback fee rate
+	oracleEstimate = 0
+	estimate = wallet.EstimateRegistrationTxFee(rateOracleFallback)
+	if estimate != wallet.fallbackFeeRate*txSize {
+		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate*txSize, estimate)
+	}
+
+	// if value from oracle > fallback fee rate, use fallback fee rate
+	oracleEstimate = 31
+	estimate = wallet.EstimateRegistrationTxFee(rateOracleFallback)
+	if estimate != wallet.fallbackFeeRate*txSize {
+		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate*txSize, estimate)
+	}
 }
 
 func TestWithdraw(t *testing.T) {

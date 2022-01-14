@@ -185,6 +185,7 @@ var EnUS = map[string]string{
 	"Registration fee":            "Registration fee",
 	"Your Deposit Address":        "Your Deposit Address",
 	"Send enough for reg fee":     `Make sure you send enough to also cover network fees.`,
+	"Send enough with estimate":   `Send about <span data-tmpl="totalFees"></span> <span class="unit">XYZ</span> here to also cover network fees.`,
 	"add a different server":      "add a different server",
 	"Add a custom server":         "Add a custom server",
 	"plus tx fees":                "+ tx fees",

@@ -1110,6 +1110,14 @@ func (eth *ExchangeWallet) PayFee(address string, regFee, _ uint64) (asset.Coin,
 	return &coin{id: txHash[:], value: dexeth.WeiToGwei(tx.Value())}, nil
 }
 
+// EstimateRegistrationTxFee provides an estimate for the tx fee needed to
+// pay the registration fee. rateOracleFallback is used in the case where
+// the wallet fails to determine the current fee rate on its own.
+func (eth *ExchangeWallet) EstimateRegistrationTxFee(oracle func() uint64) uint64 {
+	// TODO: implement this
+	return 0
+}
+
 // SwapConfirmations gets the number of confirmations and the spend status
 // for the specified swap.
 func (eth *ExchangeWallet) SwapConfirmations(ctx context.Context, _ dex.Bytes, contract dex.Bytes, _ time.Time) (confs uint32, spent bool, err error) {

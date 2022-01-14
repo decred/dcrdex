@@ -2514,6 +2514,34 @@ func (dcr *ExchangeWallet) PayFee(address string, regFee, feeRateSuggestion uint
 	return newOutput(msgTx.CachedTxHash(), 0, regFee, wire.TxTreeRegular), nil
 }
 
+// feeRateWithOracleFallback attempts to retrieve a fee rate from the wallet
+// but falls back to the oracle function if it fails.
+func (dcr *ExchangeWallet) feeRateWithOracleFallback(confTarget uint64, oracle func() uint64) uint64 {
+	feeRate, err := dcr.feeRate(confTarget)
+	if err == nil {
+		dcr.log.Tracef("Obtained local estimate for %d-conf fee rate, %d", confTarget, feeRate)
+		return feeRate
+	}
+	feeSuggestion := oracle()
+	if feeSuggestion > 0 && feeSuggestion < dcr.fallbackFeeRate && feeSuggestion < dcr.feeRateLimit {
+		dcr.log.Tracef("feeRateWithFallback using caller's suggestion for %d-conf fee rate, %d. Local estimate unavailable (%q)",
+			confTarget, feeSuggestion, err)
+		return feeSuggestion
+	}
+	dcr.log.Warnf("Unable to get optimal fee rate, using fallback of %d: %v",
+		dcr.fallbackFeeRate, err)
+	return dcr.fallbackFeeRate
+}
+
+// EstimateRegistrationTxFee provides an estimate for the tx fee needed to
+// pay the registration fee. rateOracleFallback is used in the case where
+// the wallet fails to determine the current fee rate on its own.
+func (dcr *ExchangeWallet) EstimateRegistrationTxFee(rateOracleFallback func() uint64) uint64 {
+	const inputCount = 5 // buffer so this estimate is higher than what PayFee uses
+	return (dexdcr.MsgTxOverhead + dexdcr.P2PKHOutputSize*2 + inputCount*dexdcr.P2PKHInputSize) *
+		dcr.feeRateWithOracleFallback(1, rateOracleFallback)
+}
+
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
 // the value.
 func (dcr *ExchangeWallet) Withdraw(address string, value, feeSuggestion uint64) (asset.Coin, error) {

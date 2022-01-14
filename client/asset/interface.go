@@ -231,6 +231,10 @@ type Wallet interface {
 	// payment. This method need not be supported by all assets. Those assets
 	// which do no support DEX registration fees will return an ErrUnsupported.
 	RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error)
+	// EstimateRegistrationTxFee provides an estimate for the tx fee needed to
+	// pay the registration fee. rateOracleFallback is used in the case where
+	// the wallet fails to determine the current fee rate on its own.
+	EstimateRegistrationTxFee(rateOracleFallback func() uint64) uint64
 }
 
 // TokenMaster is implemented by assets which support degenerate tokens.

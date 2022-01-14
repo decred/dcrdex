@@ -109,6 +109,7 @@ type clientCore interface {
 	IsInitialized() bool
 	ExportSeed(pw []byte) ([]byte, error)
 	PreOrder(*core.TradeForm) (*core.OrderEstimate, error)
+	EstimateRegistrationTxFee(host string, certI interface{}, assetID uint32) (uint64, error)
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -304,6 +305,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiInit.Post("/login", s.apiLogin)
 			apiInit.Post("/getdexinfo", s.apiGetDEXInfo)
 			apiInit.Post("/discoveracct", s.apiDiscoverAccount)
+			apiInit.Post("/regtxfee", s.apiEstimateRegistrationTxFee)
 		})
 
 		r.Group(func(apiAuth chi.Router) {
