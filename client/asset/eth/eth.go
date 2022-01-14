@@ -134,9 +134,17 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Ne
 
 // DecodeCoinID creates a human-readable representation of a coin ID for Ethereum.
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
+	const invalid = "<invalid coin>"
+	if len(coinID) == common.HashLength {
+		id, err := dexeth.DecodeCoinID(coinID)
+		if err != nil {
+			return invalid, err
+		}
+		return id.String(), nil
+	}
 	id, err := decodeFundingCoinID(coinID)
 	if err != nil {
-		return "<invalid coin>", err
+		return invalid, err
 	}
 	return id.String(), nil
 }
@@ -689,7 +697,9 @@ func (eth *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		return nil, nil, 0, fmt.Errorf("unfunded contract. %d < %d", totalInputValue, totalSpend)
 	}
 
-	tx, err := eth.node.initiate(eth.ctx, swaps.Contracts, swaps.FeeRate, swaps.AssetVersion)
+	// TODO: Fix fee rate. The current fee rate returned from the server
+	// will not allow this to be mined on simnet.
+	tx, err := eth.node.initiate(eth.ctx, swaps.Contracts, 200 /*swaps.FeeRate*/, swaps.AssetVersion)
 	if err != nil {
 		return fail(fmt.Errorf("Swap: initiate error: %w", err))
 	}
@@ -734,7 +744,6 @@ func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 	}
 
 	var contractVersion uint32 // require a consistent version since this is a single transaction
-	inputs := make([]dex.Bytes, 0, len(form.Redemptions))
 	var redeemedValue, unlocked uint64
 	for i, redemption := range form.Redemptions {
 		// NOTE: redemption.Spends.SecretHash is a dup of the hash extracted
@@ -773,7 +782,6 @@ func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 		}
 		redeemedValue += swapData.Value
 		unlocked += redemption.UnlockedReserves
-		inputs = append(inputs, redemption.Spends.Coin.ID())
 	}
 
 	outputCoin := eth.createFundingCoin(redeemedValue)
@@ -781,14 +789,22 @@ func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 
 	// TODO: make sure the amount we locked for redemption is enough to cover the gas
 	// fees. Also unlock coins.
-	_, err := eth.node.redeem(eth.ctx, form.Redemptions, form.FeeSuggestion, contractVersion)
+	// TODO: Fix fee rate. The current fee rate returned from the server
+	// will not allow this to be mined on simnet.
+	tx, err := eth.node.redeem(eth.ctx, form.Redemptions, 200 /*form.FeeSuggestion*/, contractVersion)
 	if err != nil {
 		return fail(fmt.Errorf("Redeem: redeem error: %w", err))
 	}
 
 	eth.UnlockReserves(unlocked)
 
-	return inputs, outputCoin, fundsRequired, nil
+	txHash := tx.Hash()
+	txs := make([]dex.Bytes, len(form.Redemptions))
+	for i := range txs {
+		txs[i] = txHash[:]
+	}
+
+	return txs, outputCoin, fundsRequired, nil
 }
 
 // recoverPubkey recovers the uncompressed public key from the signature and the
@@ -873,11 +889,11 @@ func (eth *ExchangeWallet) SignMessage(_ asset.Coin, msg dex.Bytes) (pubkeys, si
 // AuditContract retrieves information about a swap contract on the
 // blockchain. This would be used to verify the counter-party's contract
 // during a swap. coinID is expected to be the transaction id, and must
-// be the same as the hash of txData. contract is expected to be
+// be the same as the hash of serializedTx. contract is expected to be
 // (contractVersion|secretHash) where the secretHash uniquely keys the swap.
-func (eth *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroadcast bool) (*asset.AuditInfo, error) {
+func (eth *ExchangeWallet) AuditContract(coinID, contract, serializedTx dex.Bytes, rebroadcast bool) (*asset.AuditInfo, error) {
 	tx := new(types.Transaction)
-	err := tx.UnmarshalBinary(txData)
+	err := tx.UnmarshalBinary(serializedTx)
 	if err != nil {
 		return nil, fmt.Errorf("AuditContract: failed to unmarshal transaction: %w", err)
 	}
@@ -935,16 +951,21 @@ func (eth *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time,
 		return false, time.Time{}, err
 	}
 
+	swap, err := eth.node.swap(eth.ctx, secretHash, contractVer)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+
+	// Time is not yet set for uninitiated swaps.
+	if swap.State == dexeth.SSNone {
+		return false, time.Time{}, asset.ErrSwapNotInitiated
+	}
+
 	header, err := eth.node.bestHeader(eth.ctx)
 	if err != nil {
 		return false, time.Time{}, err
 	}
 	blockTime := time.Unix(int64(header.Time), 0)
-
-	swap, err := eth.node.swap(eth.ctx, secretHash, contractVer)
-	if err != nil {
-		return false, time.Time{}, err
-	}
 	return swap.LockTime.Before(blockTime), swap.LockTime, nil
 }
 
@@ -1151,7 +1172,7 @@ func (eth *ExchangeWallet) SwapConfirmations(ctx context.Context, _ dex.Bytes, c
 	}
 
 	if swapData.State == dexeth.SSNone {
-		return 0, false, asset.CoinNotFoundError
+		return 0, false, asset.ErrSwapNotInitiated
 	}
 
 	spent = swapData.State >= dexeth.SSRedeemed

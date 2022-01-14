@@ -1550,7 +1550,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	matchID := match.ID()
 	chain := stepInfo.asset.Backend
 	if !chain.ValidateSecret(params.Secret, cpContract) {
-		log.Errorf("Secret validation failed (match id=%v, maker=%v, secret=%x)",
+		log.Infof("Secret validation failed (match id=%v, maker=%v, secret=%v)",
 			matchID, actor.isMaker, params.Secret)
 		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError, "secret validation failed")
 		return wait.DontTryAgain

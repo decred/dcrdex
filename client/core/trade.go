@@ -793,8 +793,12 @@ func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTra
 	have, spent, err = t.wallets.toWallet.SwapConfirmations(ctx, coin.ID(),
 		match.MetaData.Proof.CounterContract, match.MetaData.Stamp)
 	if err != nil {
-		t.dc.log.Errorf("Failed to get confirmations of the counter-party's swap %s (%s) for match %s, order %v: %v",
-			coin, t.wallets.toAsset.Symbol, match, t.UID(), err)
+		if !errors.Is(err, asset.ErrSwapNotInitiated) {
+			// No need to log an error if swap not initiated as this
+			// is expected for newly made swaps involving contracts.
+			t.dc.log.Errorf("Failed to get confirmations of the counter-party's swap %s (%s) for match %s, order %v: %v",
+				coin, t.wallets.toAsset.Symbol, match, t.UID(), err)
+		}
 		return
 	}
 
@@ -1007,8 +1011,10 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 			coinIDString(wallet.AssetID, match.MetaData.Proof.MakerSwap), unbip(wallet.AssetID))
 		confs, spent, err := wallet.SwapConfirmations(ctx, match.MetaData.Proof.MakerSwap,
 			match.MetaData.Proof.ContractData, match.MetaData.Stamp)
-		if err != nil {
-			t.dc.log.Errorf("error getting confirmation for our own swap transaction: %v", err)
+		if err != nil && !errors.Is(err, asset.ErrSwapNotInitiated) {
+			// No need to log an error if swap not initiated as this
+			// is expected for newly made swaps involving contracts.
+			t.dc.log.Errorf("isSwappable: error getting confirmation for our own swap transaction: %v", err)
 		}
 		if spent {
 			t.dc.log.Debugf("our (maker) swap for match %s is being reported as spent, "+
@@ -1065,8 +1071,10 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bo
 		// If we're the taker, check the confirmations anyway so we can notify.
 		confs, spent, err := t.wallets.fromWallet.SwapConfirmations(ctx, match.MetaData.Proof.TakerSwap,
 			match.MetaData.Proof.ContractData, match.MetaData.Stamp)
-		if err != nil {
-			t.dc.log.Errorf("error getting confirmation for our own swap transaction: %v", err)
+		if err != nil && !errors.Is(err, asset.ErrSwapNotInitiated) {
+			// No need to log an error if swap not initiated as this
+			// is expected for newly made swaps involving contracts.
+			t.dc.log.Errorf("isRedeemable: error getting confirmation for our own swap transaction: %v", err)
 		}
 		if spent {
 			t.dc.log.Debugf("our (taker) swap for match %s is being reported as spent, "+
@@ -1120,8 +1128,12 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 	// Issue a refund if our swap's locktime has expired.
 	swapLocktimeExpired, contractExpiry, err := wallet.LocktimeExpired(match.MetaData.Proof.ContractData)
 	if err != nil {
-		t.dc.log.Errorf("error checking if locktime has expired for %s contract on order %s, match %s: %v",
-			match.Side, t.ID(), match, err)
+		if !errors.Is(err, asset.ErrSwapNotInitiated) {
+			// No need to log an error as this is expected for newly
+			// made swaps involving contracts.
+			t.dc.log.Errorf("error checking if locktime has expired for %s contract on order %s, match %s: %v",
+				match.Side, t.ID(), match, err)
+		}
 		return false
 	}
 	if swapLocktimeExpired {
@@ -1187,8 +1199,12 @@ func (t *trackedTrade) shouldBeginFindRedemption(ctx context.Context, match *mat
 
 	confs, spent, err := t.wallets.fromWallet.SwapConfirmations(ctx, swapCoinID, proof.ContractData, match.MetaData.Stamp)
 	if err != nil {
-		t.dc.log.Errorf("Failed to get confirmations of the taker's swap %s (%s) for match %s, order %v: %v",
-			coinIDString(t.wallets.fromAsset.ID, swapCoinID), t.wallets.fromAsset.Symbol, match, t.UID(), err)
+		if !errors.Is(err, asset.ErrSwapNotInitiated) {
+			// No need to log an error if swap not initiated as this
+			// is expected for newly made swaps involving contracts.
+			t.dc.log.Errorf("Failed to get confirmations of the taker's swap %s (%s) for match %s, order %v: %v",
+				coinIDString(t.wallets.fromAsset.ID, swapCoinID), t.wallets.fromAsset.Symbol, match, t.UID(), err)
+		}
 		return false
 	}
 	if spent { // NOTE: spent may not be accurate for SPV wallet, so this should not be a requirement.

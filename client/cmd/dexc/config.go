@@ -12,9 +12,11 @@ import (
 	"runtime"
 	"strings"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/cmd/dexc/version"
 	"decred.org/dcrdex/dex"
 	"github.com/decred/dcrd/dcrutil/v4"
+	"github.com/decred/slog"
 	flags "github.com/jessevdk/go-flags"
 )
 
@@ -37,6 +39,8 @@ var (
 	logFilename, netDirectory   string
 	logDirectory                string
 	cfg                         *Config
+	// TODO: Make specific log levels settable for the user.
+	defaultLogLevelMap = map[string]slog.Level{asset.InternalNodeLoggerName: slog.LevelError}
 )
 
 // setNet sets the filepath for the network directory and some network specific

@@ -283,14 +283,20 @@ func (eth *Backend) Contract(coinID, contractData []byte) (*asset.Contract, erro
 		Coin:         sc,
 		SwapAddress:  sc.init.Participant.String(),
 		ContractData: contractData,
+		SecretHash:   sc.secretHash[:],
+		TxData:       sc.serializedTx,
 		LockTime:     sc.init.LockTime,
 	}, nil
 }
 
 // ValidateSecret checks that the secret satisfies the secret hash.
-func (eth *Backend) ValidateSecret(secret, secretHash []byte) bool {
+func (eth *Backend) ValidateSecret(secret, contractData []byte) bool {
+	_, secretHash, err := dexeth.DecodeContractData(contractData)
+	if err != nil {
+		return false
+	}
 	sh := sha256.Sum256(secret)
-	return bytes.Equal(sh[:], secretHash)
+	return bytes.Equal(sh[:], secretHash[:])
 }
 
 // Synced is true if the blockchain is ready for action.

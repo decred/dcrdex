@@ -504,26 +504,28 @@ func TestContract(t *testing.T) {
 }
 
 func TestValidateSecret(t *testing.T) {
-	secret, blankHash := make([]byte, 32), make([]byte, 32)
+	secret, blankHash := [32]byte{}, [32]byte{}
 	copy(secret[:], encode.RandomBytes(32))
 	secretHash := sha256.Sum256(secret[:])
 	tests := []struct {
-		name       string
-		secretHash []byte
-		want       bool
+		name         string
+		contractData []byte
+		want         bool
 	}{{
-		name:       "ok",
-		secretHash: secretHash[:],
-		want:       true,
+		name:         "ok",
+		contractData: dexeth.EncodeContractData(0, secretHash),
+		want:         true,
 	}, {
-		name:       "not the right hash",
-		secretHash: blankHash,
+		name:         "not the right hash",
+		contractData: dexeth.EncodeContractData(0, blankHash),
+	}, {
+		name: "bad contract data",
 	}}
 	for _, test := range tests {
 		eth := &Backend{
 			log: tLogger,
 		}
-		got := eth.ValidateSecret(secret, test.secretHash)
+		got := eth.ValidateSecret(secret[:], test.contractData)
 		if test.want != got {
 			t.Fatalf("expected %v but got %v for test %q", test.want, got, test.name)
 		}

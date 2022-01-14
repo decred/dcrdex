@@ -1455,7 +1455,7 @@ func TestRedeem(t *testing.T) {
 		node.redeemable = test.isRedeemable
 		node.isRedeemableErr = test.isRedeemableErr
 
-		ins, out, fees, err := eth.Redeem(&test.form)
+		txs, out, fees, err := eth.Redeem(&test.form)
 		if test.expectError {
 			if err == nil {
 				t.Fatalf("%v: expected error", test.name)
@@ -1466,9 +1466,9 @@ func TestRedeem(t *testing.T) {
 			t.Fatalf("%v: unexpected error: %v", test.name, err)
 		}
 
-		if len(ins) != len(test.form.Redemptions) {
-			t.Fatalf("%v: expected %d inputs but got %d",
-				test.name, len(test.form.Redemptions), len(ins))
+		if len(txs) != len(test.form.Redemptions) {
+			t.Fatalf("%v: expected %d txn but got %d",
+				test.name, len(test.form.Redemptions), len(txs))
 		}
 
 		// Check fees returned from Redeem are as expected
@@ -1479,13 +1479,7 @@ func TestRedeem(t *testing.T) {
 		}
 
 		var totalSwapValue uint64
-		for i, redemption := range test.form.Redemptions {
-			coinID := redemption.Spends.Coin.ID()
-			if !bytes.Equal(coinID, ins[i]) {
-				t.Fatalf("%v: expected input %x to equal coin id %x",
-					test.name, coinID, ins[i])
-			}
-
+		for _, redemption := range test.form.Redemptions {
 			_, secretHash, err := dexeth.DecodeContractData(redemption.Spends.Contract)
 			if err != nil {
 				t.Fatalf("DecodeContractData: %v", err)
@@ -2009,11 +2003,11 @@ func TestSwapConfirmation(t *testing.T) {
 	checkResult(true, 0, false)
 	node.bestHdrErr = nil
 
-	// CoinNotFoundError
+	// ErrSwapNotInitiated
 	state.State = dexeth.SSNone
 	_, _, err := eth.SwapConfirmations(nil, nil, dexeth.EncodeContractData(0, secretHash), time.Time{})
-	if !errors.Is(err, asset.CoinNotFoundError) {
-		t.Fatalf("expected CoinNotFoundError, got %v", err)
+	if !errors.Is(err, asset.ErrSwapNotInitiated) {
+		t.Fatalf("expected ErrSwapNotInitiated, got %v", err)
 	}
 
 	// 1 conf, spent
@@ -2126,6 +2120,7 @@ func TestLocktimeExpired(t *testing.T) {
 
 	state := &dexeth.SwapState{
 		LockTime: time.Now(),
+		State:    dexeth.SSInitiated,
 	}
 
 	header := &types.Header{
@@ -2164,6 +2159,12 @@ func TestLocktimeExpired(t *testing.T) {
 	node.bestHdrErr = errors.New("test error")
 	ensureResult("header error", true, false)
 	node.bestHdrErr = nil
+
+	// swap not initiated
+	saveState := state.State
+	state.State = dexeth.SSNone
+	ensureResult("swap not initiated", true, false)
+	state.State = saveState
 
 	// missing swap
 	delete(node.swapMap, secretHash)

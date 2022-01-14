@@ -138,6 +138,14 @@ func NewLoggerMaker(writer io.Writer, debugLevel string, utc ...bool) (*LoggerMa
 	return lm, nil
 }
 
+// SetLevelsFromMap sets all logs for certain subsystems with the same name to
+// the corresponding log level in the map.
+func (lm *LoggerMaker) SetLevelsFromMap(lvls map[string]slog.Level) {
+	for name, lvl := range lvls {
+		lm.Levels[name] = lvl
+	}
+}
+
 // SetLevels either set the DefaultLevel or resets the Levels map for future
 // subsystems created with the LoggerMaker.
 //
