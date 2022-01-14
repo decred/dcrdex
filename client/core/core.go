@@ -1455,22 +1455,54 @@ func (c *Core) connectAndUpdateWallet(w *xcWallet) error {
 	return nil
 }
 
+// reloadWallet creates a fresh xcWallet via loadWallet from the provided
+// xcWallet. This creates a new asset.Wallet so that repeated connection
+// attempts are not met with confusing "already connected" errors if the
+// underlying asset.Wallet implementation is not capable of handling repeated
+// Connect request, which is a common limitation of wallet clients, especially
+// after a Disconnect.
+func (c *Core) reloadWallet(wallet *xcWallet) (*xcWallet, error) {
+	wallet.mtx.RLock()
+	defer wallet.mtx.RUnlock()
+	return c.loadWallet(&db.Wallet{
+		AssetID:     wallet.AssetID,
+		Type:        wallet.cfg.Type,
+		Settings:    wallet.cfg.Settings,
+		Balance:     wallet.balance.Balance,
+		EncryptedPW: wallet.encPass,
+		Address:     wallet.address,
+	})
+}
+
 // connectedWallet fetches a wallet and will connect the wallet if it is not
 // already connected. If the wallet gets connected, this also emits WalletState
 // and WalletBalance notification.
 func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
-	wallet, exists := c.wallet(assetID)
+	c.walletMtx.RLock()
+	defer c.walletMtx.RUnlock()
+	wallet, exists := c.wallets[assetID]
 	if !exists {
 		return nil, newError(missingWalletErr, "no configured wallet found for %s (%d)",
 			strings.ToUpper(unbip(assetID)), assetID)
 	}
-	if !wallet.connected() {
-		err := c.connectAndUpdateWallet(wallet)
-		if err != nil {
-			return nil, err
-		}
+	if wallet.connected() {
+		return wallet, nil
 	}
-	return wallet, nil
+
+	err := c.connectAndUpdateWallet(wallet)
+	if err == nil {
+		return wallet, nil
+	}
+
+	// When connect fails, assume the wallet is dead, so create a new xcWallet.
+	if newWallet, errLoad := c.reloadWallet(wallet); errLoad == nil {
+		c.wallets[assetID] = newWallet
+	} else {
+		// Leave the old xcWallet in the map for future attempt.
+		c.log.Errorf("Failed to reload %v wallet: %v", unbip(assetID), errLoad)
+	}
+
+	return nil, err
 }
 
 // connectWallet connects to the wallet and returns the deposit address
@@ -1528,34 +1560,6 @@ func (c *Core) connectWallet(w *xcWallet) (depositAddr string, err error) {
 	}
 
 	return
-}
-
-// Connect to the wallet if not already connected. Unlock the wallet if not
-// already unlocked.
-func (c *Core) connectAndUnlock(crypter encrypt.Crypter, wallet *xcWallet) error {
-	if !wallet.connected() {
-		c.log.Infof("Connecting wallet for %s", unbip(wallet.AssetID))
-		err := c.connectAndUpdateWallet(wallet)
-		if err != nil {
-			return err
-		}
-	}
-	// Unlock if either the backend itself is locked or if we lack a cached
-	// unencrypted password for encrypted wallets.
-	if !wallet.unlocked() {
-		// Note that in cases where we already had the cached decrypted password
-		// but it was just the backend reporting as locked, only unlocking the
-		// backend is needed but this redecrypts the password using the provided
-		// crypter. This case could instead be handled with a refreshUnlock.
-		err := wallet.Unlock(crypter)
-		if err != nil {
-			return newError(walletAuthErr, "failed to unlock %s wallet: %v",
-				unbip(wallet.AssetID), err)
-		}
-		// Notify new wallet state.
-		c.notify(newWalletStateNote(wallet.state()))
-	}
-	return nil
 }
 
 // walletBalance gets the xcWallet's current WalletBalance, which includes the
@@ -1898,6 +1902,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		Wallet:    w,
 		connector: dex.NewConnectionMaster(w),
 		AssetID:   assetID,
+		cfg:       walletCfg,
 		balance: &WalletBalance{
 			Balance:        dbWallet.Balance,
 			OrderLocked:    orderLockedAmt,
@@ -2084,7 +2089,14 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 
 	defer func() {
 		if restartOnFail {
-			if _, err := c.connectWallet(oldWallet); err != nil {
+			oldWallet, err = c.reloadWallet(oldWallet)
+			if err != nil {
+				// Keep oldWallet in c.wallets, but it's dead.
+				c.log.Errorf("Failed to reload wallet after failed reconfiguration attempt: %v")
+				return
+			}
+			_, err = c.connectWallet(oldWallet)
+			if err != nil {
 				c.log.Errorf("Failed to reconnect wallet after a failed reconfiguration attempt: %v", err)
 			}
 		}
@@ -2281,12 +2293,10 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 		return newError(authErr, "SetWalletPassword password error: %v", err)
 	}
 
-	// Check that the specified wallet exists.
-	c.walletMtx.Lock()
-	defer c.walletMtx.Unlock()
-	wallet, found := c.wallets[assetID]
-	if !found {
-		return newError(missingWalletErr, "wallet for %s (%d) is not known", unbip(assetID), assetID)
+	// Retrieve and connect to the wallet if it is not already connected.
+	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return err
 	}
 
 	// Set new password, connecting to it if necessary to verify. It is left
@@ -2294,7 +2304,8 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 	return c.setWalletPassword(wallet, newPW, crypter)
 }
 
-// setWalletPassword updates the (encrypted) password for the wallet.
+// setWalletPassword updates the (encrypted) password for the wallet, which must
+// already be connected.
 func (c *Core) setWalletPassword(wallet *xcWallet, newPW []byte, crypter encrypt.Crypter) error {
 	walletDef, err := walletDefinition(wallet.AssetID, wallet.walletType)
 	if err != nil {
@@ -2302,14 +2313,6 @@ func (c *Core) setWalletPassword(wallet *xcWallet, newPW []byte, crypter encrypt
 	}
 	if walletDef.Seeded {
 		return newError(passwordErr, "cannot set a password on a seeded wallet")
-	}
-
-	// Connect if necessary.
-	wasConnected := wallet.connected()
-	if !wasConnected {
-		if err := c.connectAndUpdateWallet(wallet); err != nil {
-			return newError(connectionErr, "SetWalletPassword connection error: %v", err)
-		}
 	}
 
 	wasUnlocked := wallet.unlocked()
@@ -3111,6 +3114,23 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 				if err != nil {
 					c.log.Errorf("Unable to connect to %s wallet (start and sync wallets BEFORE starting dex!): %v",
 						unbip(wallet.AssetID), err)
+					// NOTE: Details for this topic is in the context of fee
+					// payment, but the subject pertains to a failure to connect
+					// to the wallet. This is better than just an ERR log.
+					subject, _ := c.formatDetails(TopicWalletConnectionWarning)
+					c.notify(newWalletConfigNote(TopicWalletConnectionWarning, subject, err.Error(),
+						db.ErrorLevel, wallet.state()))
+
+					// Reset the xcWallet so that repeated connects may be
+					// attempted without a cryptic "already connected" error.
+					wallet, errLoad := c.reloadWallet(wallet)
+					if errLoad != nil {
+						c.log.Errorf("Failed to reload %s wallet: %v", unbip(wallet.AssetID), errLoad)
+					} else {
+						c.walletMtx.Lock()
+						c.wallets[wallet.AssetID] = wallet
+						c.walletMtx.Unlock()
+					}
 					return
 				}
 			}
@@ -3665,14 +3685,19 @@ func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string)
 	if value == 0 {
 		return nil, fmt.Errorf("%s zero withdraw", unbip(assetID))
 	}
-	wallet, found := c.wallet(assetID)
-	if !found {
-		return nil, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
-	}
-	err = c.connectAndUnlock(crypter, wallet)
+	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
 		return nil, err
 	}
+	if !wallet.unlocked() {
+		err = wallet.Unlock(crypter)
+		if err != nil {
+			return nil, newError(walletAuthErr, "failed to unlock %s wallet: %v",
+				unbip(wallet.AssetID), err)
+		}
+		c.notify(newWalletStateNote(wallet.state()))
+	}
+
 	feeSuggestion := c.feeSuggestionAny(assetID)
 	coin, err := wallet.Withdraw(address, value, feeSuggestion)
 	if err != nil {
@@ -3700,7 +3725,7 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 		return nil, newError(marketErr, "unknown market %q", mktID)
 	}
 
-	wallets, err := c.walletSet(dc, form.Base, form.Quote, form.Sell)
+	wallets, err := c.walletSet(dc, form.Base, form.Quote, form.Sell, true)
 	if err != nil {
 		return nil, err
 	}
@@ -3709,23 +3734,6 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 	// unlocked to get order estimation (listunspent works on locked wallet),
 	// but if we run into an asset that breaks that assumption, we may need
 	// to require a password here before estimation.
-
-	// We need the wallets to be connected.
-	if !wallets.fromWallet.connected() {
-		err := c.connectAndUpdateWallet(wallets.fromWallet)
-		if err != nil {
-			c.log.Errorf("Error connecting to %s wallet: %v", wallets.fromAsset.Symbol, err)
-			return nil, fmt.Errorf("Error connecting to %s wallet", wallets.fromAsset.Symbol)
-		}
-	}
-
-	if !wallets.toWallet.connected() {
-		err := c.connectAndUpdateWallet(wallets.toWallet)
-		if err != nil {
-			c.log.Errorf("Error connecting to %s wallet: %v", wallets.toAsset.Symbol, err)
-			return nil, fmt.Errorf("Error connecting to %s wallet", wallets.toAsset.Symbol)
-		}
-	}
 
 	// Fund the order and prepare the coins.
 	lotSize := mktConf.LotSize
@@ -3859,7 +3867,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		return nil, 0, newError(orderParamsErr, "zero-rate order not allowed")
 	}
 
-	wallets, err := c.walletSet(dc, form.Base, form.Quote, form.Sell)
+	wallets, err := c.walletSet(dc, form.Base, form.Quote, form.Sell, true)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -3871,10 +3879,12 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		// NOTE: If the wallet is already internally unlocked (the decrypted
 		// password cached in xcWallet.pw), this could be done without the
 		// crypter via refreshUnlock.
-		err := c.connectAndUnlock(crypter, w)
-		if err != nil {
-			return fmt.Errorf("%s connectAndUnlock error: %w",
-				wallets.fromAsset.Symbol, err)
+		if !w.unlocked() {
+			if err := w.Unlock(crypter); err != nil {
+				return newError(walletAuthErr, "failed to unlock %s wallet: %v",
+					unbip(w.AssetID), err)
+			}
+			c.notify(newWalletStateNote(w.state()))
 		}
 		w.mtx.RLock()
 		defer w.mtx.RUnlock()
@@ -4170,8 +4180,10 @@ func (w *walletSet) trimmedConventionalRateString(r uint64) string {
 	return strings.TrimRight(strings.TrimRight(s, "0"), ".")
 }
 
-// walletSet constructs a walletSet.
-func (c *Core) walletSet(dc *dexConnection, baseID, quoteID uint32, sell bool) (*walletSet, error) {
+// walletSet constructs a walletSet. If connect is true, it will attempt to
+// connect to the wallets and return an error if either fails to connect. If
+// connect is not provided, it will not attempt to connect.
+func (c *Core) walletSet(dc *dexConnection, baseID, quoteID uint32, sell bool, connect bool) (*walletSet, error) {
 	dc.assetsMtx.RLock()
 	baseAsset, baseFound := dc.assets[baseID]
 	quoteAsset, quoteFound := dc.assets[quoteID]
@@ -4184,13 +4196,27 @@ func (c *Core) walletSet(dc *dexConnection, baseID, quoteID uint32, sell bool) (
 	}
 
 	// Connect and open the wallets if needed.
-	baseWallet, found := c.wallet(baseID)
-	if !found {
-		return nil, newError(missingWalletErr, "no wallet found for %s", unbip(baseID))
-	}
-	quoteWallet, found := c.wallet(quoteID)
-	if !found {
-		return nil, newError(missingWalletErr, "no wallet found for %s", unbip(quoteID))
+	var baseWallet, quoteWallet *xcWallet
+	if connect {
+		var err error
+		baseWallet, err = c.connectedWallet(baseID)
+		if err != nil {
+			return nil, err
+		}
+		quoteWallet, err = c.connectedWallet(quoteID)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		var found bool
+		baseWallet, found = c.wallet(baseID)
+		if !found {
+			return nil, newError(missingWalletErr, "no wallet found for %s", unbip(baseID))
+		}
+		quoteWallet, found = c.wallet(quoteID)
+		if !found {
+			return nil, newError(missingWalletErr, "no wallet found for %s", unbip(quoteID))
+		}
 	}
 
 	if ver := baseWallet.Info().Version; baseAsset.Version != ver {
@@ -4913,8 +4939,8 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 
 		// See if the order is 100% filled.
 		trade := tracker.Trade()
-		// Make sure we have the necessary wallets.
-		wallets, err := c.walletSet(dc, tracker.Base(), tracker.Quote(), trade.Sell)
+		// Make sure we have the necessary wallets, but do not require connect.
+		wallets, err := c.walletSet(dc, tracker.Base(), tracker.Quote(), trade.Sell, false)
 		if err != nil {
 			notifyErr(TopicWalletMissing, tracker.token(), err)
 			continue

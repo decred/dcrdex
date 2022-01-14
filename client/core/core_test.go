@@ -616,12 +616,16 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 		ownsAddress: true,
 	}
 	xcWallet := &xcWallet{
-		Wallet:       w,
-		connector:    dex.NewConnectionMaster(w),
-		AssetID:      assetID,
-		hookedUp:     true,
-		dbID:         encode.Uint32Bytes(assetID),
-		encPass:      []byte{0x01},
+		Wallet:    w,
+		connector: dex.NewConnectionMaster(w),
+		AssetID:   assetID,
+		cfg:       &asset.WalletConfig{},
+		hookedUp:  true,
+		dbID:      encode.Uint32Bytes(assetID),
+		encPass:   []byte{0x01},
+		balance: &WalletBalance{
+			Balance: &db.Balance{},
+		},
 		synced:       true,
 		syncProgress: 1,
 		pw:           tPW,
@@ -2016,7 +2020,7 @@ func TestLogin(t *testing.T) {
 	tCore.wallets[tDCR.ID] = dcrWallet
 	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
-	walletSet, _ := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
+	walletSet, _ := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true, false)
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails, nil, 0) // nil means no funding coins
 	matchID := ordertest.RandomMatchID()
@@ -2713,7 +2717,7 @@ func TestRedemptionReserves(t *testing.T) {
 	lo.Force = order.StandingTiF
 	loid := lo.ID()
 
-	walletSet, err := tCore.walletSet(dc, tBTC.ID, tETH.ID, true)
+	walletSet, err := tCore.walletSet(dc, tBTC.ID, tETH.ID, true, false)
 	if err != nil {
 		t.Fatalf("walletSet error: %v", err)
 	}
@@ -2861,7 +2865,7 @@ func TestRedemptionReserves(t *testing.T) {
 	// Market buy order with dust handling.
 	mo.BaseAsset, mo.QuoteAsset = mo.QuoteAsset, mo.BaseAsset
 	mo.Sell = false
-	tracker.wallets, _ = tCore.walletSet(dc, tETH.ID, tBTC.ID, false)
+	tracker.wallets, _ = tCore.walletSet(dc, tETH.ID, tBTC.ID, false, false)
 
 	resetMatches()
 	mids := []order.MatchID{
@@ -3549,7 +3553,7 @@ func TestHandleRevokeOrderMsg(t *testing.T) {
 
 	tDcrWallet.fundingCoins = asset.Coins{fundCoinDcr}
 
-	walletSet, err := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
+	walletSet, err := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true, false)
 	if err != nil {
 		t.Fatalf("walletSet error: %v", err)
 	}
@@ -3624,7 +3628,7 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 	tDcrWallet.fundingCoins = asset.Coins{fundCoinDcr}
 
 	mid := ordertest.RandomMatchID()
-	walletSet, err := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
+	walletSet, err := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true, false)
 	if err != nil {
 		t.Fatalf("walletSet error: %v", err)
 	}
@@ -3693,7 +3697,7 @@ func TestTradeTracking(t *testing.T) {
 	//tDcrWallet.fundingCoins = asset.Coins{fundCoinDcr}
 
 	mid := ordertest.RandomMatchID()
-	walletSet, err := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
+	walletSet, err := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true, false)
 	if err != nil {
 		t.Fatalf("walletSet error: %v", err)
 	}
@@ -4258,7 +4262,7 @@ func TestReconcileTrades(t *testing.T) {
 	mkt := dc.marketConfig(tDcrBtcMktName)
 	rig.core.wallets[mkt.Base], _ = newTWallet(mkt.Base)
 	rig.core.wallets[mkt.Quote], _ = newTWallet(mkt.Quote)
-	walletSet, err := rig.core.walletSet(dc, mkt.Base, mkt.Quote, true)
+	walletSet, err := rig.core.walletSet(dc, mkt.Base, mkt.Quote, true, false)
 	if err != nil {
 		t.Fatalf("walletSet error: %v", err)
 	}
@@ -4536,7 +4540,7 @@ func TestRefunds(t *testing.T) {
 	lo, dbOrder, preImgL, addr := makeLimitOrder(dc, true, qty, dcrBtcRateStep)
 	loid := lo.ID()
 	mid := ordertest.RandomMatchID()
-	walletSet, err := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
+	walletSet, err := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true, false)
 	if err != nil {
 		t.Fatalf("walletSet error: %v", err)
 	}
@@ -5607,6 +5611,7 @@ func TestAssetBalance(t *testing.T) {
 		Immature:  6e7,
 		Locked:    2e8,
 	}
+	wallet.balance.Balance.Balance = *bal
 	tWallet.bal = bal
 	walletBal, err := tCore.AssetBalance(tDCR.ID)
 	if err != nil {
@@ -5650,7 +5655,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	btcWallet.Unlock(rig.crypter)
 
 	mkt := dc.marketConfig(tDcrBtcMktName)
-	walletSet, _ := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
+	walletSet, _ := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true, false)
 
 	rig.dc.books[tDcrBtcMktName] = newBookie(rig.dc, tDCR.ID, tBTC.ID, nil, tLogger)
 
@@ -5942,7 +5947,7 @@ func TestHandleNomatch(t *testing.T) {
 	btcWallet, _ := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
 
-	walletSet, err := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
+	walletSet, err := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true, false)
 	if err != nil {
 		t.Fatalf("walletSet error: %v", err)
 	}
@@ -6300,7 +6305,7 @@ func TestSetWalletPassword(t *testing.T) {
 		EncryptedPW: []byte("abc"),
 	}
 	newPW := []byte("def")
-	var assetID uint32 = 54321
+	var assetID uint32 = 42
 
 	// Nil password error
 	err := tCore.SetWalletPassword(tPW, assetID, nil)
@@ -6329,7 +6334,7 @@ func TestSetWalletPassword(t *testing.T) {
 	xyzWallet.hookedUp = false
 	tXyzWallet.connectErr = tErr
 	err = tCore.SetWalletPassword(tPW, assetID, newPW)
-	if !errorHasCode(err, connectionErr) {
+	if !errorHasCode(err, connectWalletErr) {
 		t.Fatalf("wrong error for connection error: %v", err)
 	}
 	xyzWallet.hookedUp = true
@@ -6536,7 +6541,7 @@ func TestMatchStatusResolution(t *testing.T) {
 	tCore.wallets[tDCR.ID] = dcrWallet
 	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
-	walletSet, _ := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
+	walletSet, _ := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true, false)
 
 	qty := 3 * dcrBtcLotSize
 	secret := encode.RandomBytes(32)
@@ -7029,7 +7034,7 @@ func TestSuspectTrades(t *testing.T) {
 	tCore.wallets[tDCR.ID] = dcrWallet
 	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
-	walletSet, _ := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
+	walletSet, _ := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true, false)
 
 	lo, dbOrder, preImg, addr := makeLimitOrder(dc, true, 0, 0)
 	oid := lo.ID()

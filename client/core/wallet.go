@@ -19,6 +19,7 @@ type xcWallet struct {
 	asset.Wallet
 	connector  *dex.ConnectionMaster
 	AssetID    uint32
+	cfg        *asset.WalletConfig // for recreating the xcWallet
 	dbID       []byte
 	walletType string
 
