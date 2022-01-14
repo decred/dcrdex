@@ -2424,7 +2424,7 @@ func (btc *ExchangeWallet) watchBlocks(ctx context.Context) {
 			newTipHash, err := btc.node.getBestBlockHash()
 			if err != nil {
 				go btc.tipChange(fmt.Errorf("failed to get best block hash from %s node", btc.symbol))
-				return
+				continue
 			}
 
 			if queuedBlock != nil && *newTipHash == queuedBlock.block.hash {
@@ -2441,6 +2441,7 @@ func (btc *ExchangeWallet) watchBlocks(ctx context.Context) {
 			newTip, err := btc.blockFromHash(newTipHash)
 			if err != nil {
 				go btc.tipChange(fmt.Errorf("error setting new tip: %w", err))
+				continue
 			}
 
 			// If the wallet is not offering tip reports, send this one right
