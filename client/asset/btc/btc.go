@@ -2638,7 +2638,13 @@ func (btc *ExchangeWallet) SwapConfirmations(_ context.Context, id dex.Bytes, co
 	if err != nil {
 		return 0, false, err
 	}
-	return btc.node.swapConfirmations(txHash, vout, pkScript, startTime)
+	confs, spent, err := btc.node.swapConfirmations(txHash, vout, pkScript, startTime)
+	if _, isRPC := btc.node.(*rpcClient); isRPC && errors.Is(err, asset.CoinNotFoundError) {
+		// We'll assume caller is silent for this error, but it is a bad
+		// indication for full node wallets, so let's make extra noise here.
+		btc.log.Warnf("Failed to find swap transaction %v.", txHash)
+	}
+	return confs, spent, err
 }
 
 // RegFeeConfirmations gets the number of confirmations for the specified output

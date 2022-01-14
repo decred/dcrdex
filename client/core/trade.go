@@ -793,8 +793,14 @@ func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTra
 	have, spent, err = t.wallets.toWallet.SwapConfirmations(ctx, coin.ID(),
 		match.MetaData.Proof.CounterContract, match.MetaData.Stamp)
 	if err != nil {
-		t.dc.log.Errorf("Failed to get confirmations of the counter-party's swap %s (%s) for match %s, order %v: %v",
-			coin, t.wallets.toAsset.Symbol, match, t.UID(), err)
+		if !errors.Is(err, asset.CoinNotFoundError) {
+			// CoinNotFoundError may be expected for foreign transactions until
+			// it is mined. The wallet implementation may choose to log this if
+			// it has the capability to find unconfirmed external transactions.
+			t.dc.log.Errorf("Failed to get confirmations of the counter-party's swap "+
+				"%s (%s) for match %s, order %v: %v",
+				coin, t.wallets.toAsset.Symbol, match, t.UID(), err)
+		}
 		return
 	}
 
@@ -1007,11 +1013,11 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 			coinIDString(wallet.AssetID, match.MetaData.Proof.MakerSwap), unbip(wallet.AssetID))
 		confs, spent, err := wallet.SwapConfirmations(ctx, match.MetaData.Proof.MakerSwap,
 			match.MetaData.Proof.ContractData, match.MetaData.Stamp)
-		if err != nil {
-			t.dc.log.Errorf("error getting confirmation for our own swap transaction: %v", err)
+		if err != nil { // unexpected error includes asset.CoinNotFoundError because this is our swap.
+			t.dc.log.Errorf("Unexpected error getting confirmation for our own swap transaction: %v", err)
 		}
 		if spent {
-			t.dc.log.Debugf("our (maker) swap for match %s is being reported as spent, "+
+			t.dc.log.Debugf("Our (maker) swap for match %s is being reported as spent, "+
 				"but we have not seen the counter-party's redemption yet. This could just"+
 				" be network latency.", match)
 		}
@@ -1065,8 +1071,8 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bo
 		// If we're the taker, check the confirmations anyway so we can notify.
 		confs, spent, err := t.wallets.fromWallet.SwapConfirmations(ctx, match.MetaData.Proof.TakerSwap,
 			match.MetaData.Proof.ContractData, match.MetaData.Stamp)
-		if err != nil {
-			t.dc.log.Errorf("error getting confirmation for our own swap transaction: %v", err)
+		if err != nil { // unexpected error includes asset.CoinNotFoundError because this is our swap.
+			t.dc.log.Errorf("Unexpected error getting confirmation for our own swap transaction: %v", err)
 		}
 		if spent {
 			t.dc.log.Debugf("our (taker) swap for match %s is being reported as spent, "+
@@ -1185,16 +1191,19 @@ func (t *trackedTrade) shouldBeginFindRedemption(ctx context.Context, match *mat
 		return false
 	}
 
-	confs, spent, err := t.wallets.fromWallet.SwapConfirmations(ctx, swapCoinID, proof.ContractData, match.MetaData.Stamp)
+	fromAsset := t.wallets.fromAsset
+	confs, spent, err := t.wallets.fromWallet.SwapConfirmations(ctx, swapCoinID,
+		proof.ContractData, match.MetaData.Stamp)
 	if err != nil {
-		t.dc.log.Errorf("Failed to get confirmations of the taker's swap %s (%s) for match %s, order %v: %v",
-			coinIDString(t.wallets.fromAsset.ID, swapCoinID), t.wallets.fromAsset.Symbol, match, t.UID(), err)
+		t.dc.log.Errorf("Failed to get confirmations of our (taker) swap %s (%s) "+
+			"for match %s, order %v: %v", coinIDString(fromAsset.ID, swapCoinID),
+			fromAsset.Symbol, match, t.UID(), err)
 		return false
 	}
 	if spent {
 		t.dc.log.Infof("Swap contract for revoked match %s, order %s is spent. Will begin search for redemption", match, t.ID())
 	}
-	return confs >= t.wallets.fromAsset.SwapConf || spent
+	return confs >= fromAsset.SwapConf || spent
 }
 
 // tick will check for and perform any match actions necessary.

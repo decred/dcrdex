@@ -179,7 +179,7 @@ func (wc *rpcClient) getTxOutput(txHash *chainhash.Hash, index uint32) (*btcjson
 func (wc *rpcClient) locked() bool {
 	walletInfo, err := wc.GetWalletInfo()
 	if err != nil {
-		wc.log.Errorf("GetWalletInfo error: %w", err)
+		wc.log.Errorf("GetWalletInfo error: %v", err)
 		return false
 	}
 	if walletInfo.UnlockedUntil == nil {
