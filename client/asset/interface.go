@@ -48,11 +48,19 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 // AuditContract, Refund or Redeem as those methods expect the provided coin to
 // exist and be unspent.
 const (
-	CoinNotFoundError = dex.ErrorKind("coin not found")
-	ErrRequestTimeout = dex.ErrorKind("request timeout")
-	ErrConnectionDown = dex.ErrorKind("wallet not connected")
-	ErrNotImplemented = dex.ErrorKind("not implemented")
-	ErrUnsupported    = dex.ErrorKind("unsupported")
+	// ErrSwapNotInitiated most likely means that a swap using a contract has
+	// not yet been mined. There is no guarantee that the swap will be mined
+	// in the future.
+	ErrSwapNotInitiated = dex.ErrorKind("swap not yet initiated")
+	CoinNotFoundError   = dex.ErrorKind("coin not found")
+	ErrRequestTimeout   = dex.ErrorKind("request timeout")
+	ErrConnectionDown   = dex.ErrorKind("wallet not connected")
+	ErrNotImplemented   = dex.ErrorKind("not implemented")
+	ErrUnsupported      = dex.ErrorKind("unsupported")
+
+	// InternalNodeLoggerName is the name for a logger that is used to fine
+	// tune log levels for only loggers using this name.
+	InternalNodeLoggerName = "INTL"
 )
 
 type WalletDefinition struct {

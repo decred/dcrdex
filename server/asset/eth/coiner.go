@@ -22,12 +22,13 @@ var _ asset.Coin = (*swapCoin)(nil)
 var _ asset.Coin = (*redeemCoin)(nil)
 
 type baseCoin struct {
-	backend    *Backend
-	secretHash [32]byte
-	gasPrice   uint64
-	txHash     common.Hash
-	value      uint64
-	txData     []byte
+	backend      *Backend
+	secretHash   [32]byte
+	gasPrice     uint64
+	txHash       common.Hash
+	value        uint64
+	txData       []byte
+	serializedTx []byte
 }
 
 type swapCoin struct {
@@ -122,6 +123,11 @@ func (eth *Backend) baseCoin(coinID []byte, contractData []byte) (*baseCoin, err
 		return nil, fmt.Errorf("unable to fetch transaction: %v", err)
 	}
 
+	serializedTx, err := tx.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+
 	contractVer, secretHash, err := dexeth.DecodeContractData(contractData)
 	if err != nil {
 		return nil, err
@@ -159,12 +165,13 @@ func (eth *Backend) baseCoin(coinID []byte, contractData []byte) (*baseCoin, err
 	}
 
 	return &baseCoin{
-		backend:    eth,
-		secretHash: secretHash,
-		gasPrice:   gasPrice,
-		txHash:     txHash,
-		value:      value,
-		txData:     tx.Data(),
+		backend:      eth,
+		secretHash:   secretHash,
+		gasPrice:     gasPrice,
+		txHash:       txHash,
+		value:        value,
+		txData:       tx.Data(),
+		serializedTx: serializedTx,
 	}, nil
 }
 

@@ -72,7 +72,7 @@ func newNodeClient(dir string, net dex.Network, log dex.Logger) (*nodeClient, er
 	node, err := prepareNode(&nodeConfig{
 		net:    net,
 		appDir: dir,
-		logger: log.SubLogger("NODE"),
+		logger: log.SubLogger(asset.InternalNodeLoggerName),
 	})
 	if err != nil {
 		return nil, err

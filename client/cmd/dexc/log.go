@@ -47,6 +47,7 @@ func initLogging(lvl string, utc bool) *dex.LoggerMaker {
 		fmt.Fprintf(os.Stderr, "failed to create custom logger: %v\n", err)
 		os.Exit(1)
 	}
+	lm.SetLevelsFromMap(defaultLogLevelMap)
 	log = lm.Logger("APP")
 	return lm
 }
