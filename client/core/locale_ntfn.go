@@ -872,10 +872,297 @@ var zhCN = map[Topic]*translation{
 	},
 }
 
+var plPL = map[Topic]*translation{
+	// [host]
+	TopicAccountRegistered: {
+		subject:  "Konto zarejestrowane",
+		template: "Możesz teraz handlować na %s",
+	},
+	// [confs, host]
+	TopicFeePaymentInProgress: {
+		subject:  "Opłata rejestracyjna w drodze",
+		template: "Oczekiwanie na %d potwierdzeń przed rozpoczęciem handlu na %s",
+	},
+	// [confs, required confs]
+	TopicRegUpdate: {
+		subject:  "Aktualizacja rejestracji",
+		template: "Potwierdzenia opłaty rejestracyjnej %v/%v",
+	},
+	// [host, error]
+	TopicFeePaymentError: {
+		subject:  "Błąd płatności rejestracyjnej",
+		template: "Wystąpił błąd przy płatności dla %s: %v",
+	},
+	// [host, error]
+	TopicAccountUnlockError: {
+		subject:  "Błąd odblokowywania konta",
+		template: "błąd odblokowywania konta dla %s: %v",
+	},
+	// [host]
+	TopicFeeCoinError: {
+		subject:  "Błąd w płatności rejestracyjnej",
+		template: "Nie znaleziono środków na płatność rejestracyjną dla %s.",
+	},
+	// [host]
+	TopicWalletConnectionWarning: {
+		subject:  "Ostrzeżenie połączenia z portfelem",
+		template: "Wykryto niedokończoną rejestrację dla %s, ale nie można połączyć się z portfelem Decred",
+	},
+	// [host, error]
+	TopicWalletUnlockError: {
+		subject:  "Błąd odblokowywania portfela",
+		template: "Połączono z portfelem Decred, aby dokończyć rejestrację na %s, lecz próba odblokowania portfela nie powiodła się: %v",
+	},
+	// [ticker, error]
+	TopicWithdrawError: {
+		subject:  "Błąd wypłaty środków",
+		template: "Wystąpił błąd przy wypłacaniu %s: %v",
+	},
+	// [ticker, coin ID]
+	TopicWithdrawSend: {
+		subject:  "Wypłata zrealizowana",
+		template: "Wypłata %s została zrealizowana pomyślnie. ID monety = %s",
+	},
+	// [error]
+	TopicOrderLoadFailure: {
+		subject:  "Błąd wczytywania zleceń",
+		template: "Niektórych zleceń nie udało się wczytać z bazy danych: %v",
+	},
+	// [qty, ticker, token]
+	TopicYoloPlaced: {
+		subject:  "Złożono zlecenie rynkowe",
+		template: "sprzedaż %s %s po kursie rynkowym (%s)",
+	},
+	// [sell string, qty, ticker, rate string, token]
+	TopicOrderPlaced: {
+		subject:  "Złożono zlecenie",
+		template: "%sing %s %s, kurs = %s (%s)",
+	},
+	// [missing count, token, host]
+	TopicMissingMatches: {
+		subject:  "Brak spasowanych zamówień",
+		template: "%d spasowań dla zlecenia %s nie zostało odnotowanych przez %q i są uznane za unieważnione",
+	},
+	// [token, error]
+	TopicWalletMissing: {
+		subject:  "Brak portfela",
+		template: "Błąd odczytu z portfela dla aktywnego zlecenia %s: %v",
+	},
+	// [side, token, match status]
+	TopicMatchErrorCoin: {
+		subject:  "Błąd spasowanej monety",
+		template: "Spasowanie %s dla zlecenia %s jest w stanie %s, lecz brakuje monety po stronie maker.",
+	},
+	// [side, token, match status]
+	TopicMatchErrorContract: {
+		subject:  "Błąd kontraktu spasowania",
+		template: "Spasowanie %s dla zlecenia %s jest w stanie %s, lecz brakuje kontraktu zamiany po stronie maker.",
+	},
+	// [ticker, contract, token, error]
+	TopicMatchRecoveryError: {
+		subject:  "Błąd odzyskiwania spasowania",
+		template: "Błąd przy audycie kontraktu zamiany u kontrahenta (%s %v) podczas odzyskiwania zamiany dla zlecenia %s: %v",
+	},
+	// [token]
+	TopicOrderCoinError: {
+		subject:  "Błąd monety dla zlecenia",
+		template: "Nie znaleziono środków fundujących dla aktywnego zlecenia %s",
+	},
+	// [token, ticker, error]
+	TopicOrderCoinFetchError: {
+		subject:  "Błąd pozyskania środków dla zlecenia",
+		template: "Błąd pozyskania środków źródłowych dla zlecenia %s (%s): %v",
+	},
+	// [token]
+	TopicMissedCancel: {
+		subject:  "Spóźniona anulacja",
+		template: "Zlecenie anulacji nie zostało spasowane dla zlecenia %s. Może to mieć miejsce, gdy zlecenie anulacji wysłane jest w tej samej epoce, co zlecenie handlu, lub gdy zlecenie handlu zostaje w pełni wykonane przed spasowaniem ze zleceniem anulacji.",
+	},
+	// [capitalized sell string, base ticker, quote ticker, host, token]
+	TopicOrderCanceled: {
+		subject:  "Zlecenie anulowane",
+		template: "Zlecenie %s dla %s-%s na %s zostało anulowane (%s)",
+	},
+	// [capitalized sell string, base ticker, quote ticker, fill percent, token]
+	TopicMatchesMade: {
+		subject:  "Dokonano spasowania",
+		template: "Zlecenie %s na %s-%s zrealizowane w %.1f%% (%s)",
+	},
+	// [qty, ticker, token]
+	TopicSwapSendError: {
+		subject:  "Błąd wysyłki środków",
+		template: "Błąd przy wysyłaniu środków wartych %s %s dla zlecenia %s",
+	},
+	// [match, error]
+	TopicInitError: {
+		subject:  "Błąd raportowania zamiany",
+		template: "Błąd powiadomienia DEX o zamianie dla spasowania %s: %v",
+	},
+	// [match, error]
+	TopicReportRedeemError: {
+		subject:  "Błąd raportowania wykupienia",
+		template: "Błąd powiadomienia DEX o wykupieniu środków dla spasowania %s: %v",
+	},
+	// [qty, ticker, token]
+	TopicSwapsInitiated: {
+		subject:  "Zamiana rozpoczęta",
+		template: "Wysłano środki o wartości %s %s dla zlecenia %s",
+	},
+	// [qty, ticker, token]
+	TopicRedemptionError: {
+		subject:  "Błąd wykupienia",
+		template: "Napotkano błąd przy wykupywaniu środków o wartości %s %s dla zlecenia %s",
+	},
+	// [qty, ticker, token]
+	TopicMatchComplete: {
+		subject:  "Spasowanie zakończone",
+		template: "Wykupiono %s %s ze zlecenia %s",
+	},
+	// [qty, ticker, token]
+	TopicRefundFailure: {
+		subject:  "Niepowodzenie zwrotu środków",
+		template: "Zwrócono %s %s za zlecenie %s, z pewnymi błędami",
+	},
+	// [qty, ticker, token]
+	TopicMatchesRefunded: {
+		subject:  "Zwrot środków za spasowanie zleceń",
+		template: "Zwrócono %s %s za zlecenie %s",
+	},
+	// [match ID token]
+	TopicMatchRevoked: {
+		subject:  "Spasowanie zleceń unieważnione",
+		template: "Spasowanie %s zostało unieważnione",
+	},
+	// [token, market name, host]
+	TopicOrderRevoked: {
+		subject:  "Zlecenie unieważnione",
+		template: "Zlecenie %s na rynku %s na %s zostało unieważnione przez serwer",
+	},
+	// [token, market name, host]
+	TopicOrderAutoRevoked: {
+		subject:  "Zlecenie unieważnione automatycznie",
+		template: "Zlecenie %s na rynku %s na %s zostało unieważnione z powodu wstrzymania handlu na tym rynku",
+	},
+	// [ticker, coin ID, match]
+	TopicMatchRecovered: {
+		subject:  "Odzyskano spasowanie",
+		template: "Odnaleziono wykup ze strony maker (%s: %v) oraz potwierdzono sekret dla spasowania %s",
+	},
+	// [token]
+	TopicCancellingOrder: {
+		subject:  "Anulowanie zlecenia",
+		template: "Złożono polecenie anulowania dla zlecenia %s",
+	},
+	// [token, old status, new status]
+	TopicOrderStatusUpdate: {
+		subject:  "Aktualizacja statusu zlecenia",
+		template: "Status zlecenia %v został zmieniony z %v na %v",
+	},
+	// [count, host, token]
+	TopicMatchResolutionError: {
+		subject:  "Błąd rozstrzygnięcia spasowania",
+		template: "Nie znaleziono %d spasowań odnotowanych przez %s dla %s.",
+	},
+	// [token]
+	TopicFailedCancel: {
+		subject:  "Niepowodzenie anulowania",
+		template: "Zlecenie anulacji dla zlecenia %s utknęło w statusie epoki przez 2 epoki i zostało usunięte.",
+	},
+	// [coin ID, ticker, match]
+	TopicAuditTrouble: {
+		subject:  "Problem z audytem",
+		template: "Wciąż szukamy monety kontraktowej kontrahenta %v (%s) dla spasowania %s. Czy Twoje połączenie z Internetem i portfelem jest dobre?",
+	},
+	// [host, error]
+	TopicDexAuthError: {
+		subject:  "Błąd uwierzytelniania DEX",
+		template: "%s: %v",
+	},
+	// [count, host]
+	TopicUnknownOrders: {
+		subject:  "DEX odnotował nieznane zlecenia",
+		template: "Nie znaleziono %d aktywnych zleceń odnotowanych przez DEX %s.",
+	},
+	// [count]
+	TopicOrdersReconciled: {
+		subject:  "Pogodzono zlecenia z DEX",
+		template: "Zaktualizowano statusy dla %d zleceń.",
+	},
+	// [ticker, address]
+	TopicWalletConfigurationUpdated: {
+		subject:  "Zaktualizowano konfigurację portfela",
+		template: "Konfiguracja dla portfela %s została zaktualizowana. Adres do depozytów = %s",
+	},
+	//  [ticker]
+	TopicWalletPasswordUpdated: {
+		subject:  "Zaktualizowano hasło portfela",
+		template: "Hasło dla portfela %s zostało zaktualizowane.",
+	},
+	// [market name, host, time]
+	TopicMarketSuspendScheduled: {
+		subject:  "Planowane zawieszenie rynku",
+		template: "Rynek %s na %s zostanie wstrzymany o %v",
+	},
+	// [market name, host]
+	TopicMarketSuspended: {
+		subject:  "Rynek wstrzymany",
+		template: "Handel na rynku %s na %s jest obecnie wstrzymany.",
+	},
+	// [market name, host]
+	TopicMarketSuspendedWithPurge: {
+		subject:  "Rynek wstrzymany, księga zamówień wyczyszczona",
+		template: "Handel na rynku %s na %s jest obecnie wstrzymany. Wszystkie złożone zamówienia zostały WYCOFANE.",
+	},
+	// [market name, host, time]
+	TopicMarketResumeScheduled: {
+		subject:  "Planowane wznowienie rynku",
+		template: "Rynek %s na %s zostanie wznowiony o %v",
+	},
+	// [market name, host, epoch]
+	TopicMarketResumed: {
+		subject:  "Rynek wznowiony",
+		template: "Rynek %s na %s wznowił handel w epoce %d",
+	},
+	// [host]
+	TopicUpgradeNeeded: {
+		subject:  "Wymagana aktualizacja",
+		template: "Aby handlować na %s wymagana jest aktualizacja klienta.",
+	},
+	// [host]
+	TopicDEXConnected: {
+		subject:  "Połączono z serwerem",
+		template: "Połączono z %s",
+	},
+	// [host]
+	TopicDEXDisconnected: {
+		subject:  "Rozłączono z serwerem",
+		template: "Rozłączono z %s",
+	},
+	// [host, rule, time, details]
+	TopicPenalized: {
+		subject:  "Serwer ukarał Cię punktami karnymi",
+		template: "Punkty karne od serwera DEX na %s\nostatnia złamana reguła: %s\nczas: %v\nszczegóły:\n\"%s\"\n",
+	},
+	TopicSeedNeedsSaving: {
+		subject:  "Nie zapomnij zrobić kopii ziarna aplikacji",
+		template: "Utworzono nowe ziarno aplikacji. Zrób jego kopię w zakładce ustawień.",
+	},
+	TopicUpgradedToSeed: {
+		subject:  "Zrób kopię nowego ziarna aplikacji",
+		template: "Klient został zaktualizowany, by korzystać z ziarna aplikacji. Zrób jego kopię w zakładce ustawień.",
+	},
+	// [host, msg]
+	TopicDEXNotification: {
+		subject:  "Wiadomość od DEX",
+		template: "%s: %s",
+	},
+}
+
 var locales = map[string]map[Topic]*translation{
 	language.AmericanEnglish.String():     enUS,
 	language.BrazilianPortuguese.String(): ptBR,
 	"zh-CN":                               zhCN, // language.SimplifiedChinese is zh-Hans
+	language.Polish.String():							 plPL,
 }
 
 func init() {
