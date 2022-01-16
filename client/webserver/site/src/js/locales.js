@@ -193,10 +193,61 @@ export const zhCN = {
   [ID_SETUP_WALLET]: 'Setup' // xxx translate
 }
 
+export const plPL = {
+  [ID_NO_PASS_ERROR_MSG]: 'hasło nie może być puste',
+  [ID_NO_APP_PASS_ERROR_MSG]: 'hasło aplikacji nie może być puste',
+  [ID_PASSWORD_NOT_MATCH]: 'hasła nie są jednakowe',
+  [ID_SET_BUTTON_BUY]: 'Złóż zlecenie, aby kupić  {{ asset }}',
+  [ID_SET_BUTTON_SELL]: 'Złóż zlecenie, aby sprzedać {{ asset }}',
+  [ID_OFF]: 'wyłączony',
+  [ID_READY]: 'gotowy',
+  [ID_LOCKED]: 'zablokowany',
+  [ID_NOWALLET]: 'brak portfela',
+  [ID_WALLET_SYNC_PROGRESS]: 'portfel zsynchronizowany w {{ syncProgress }}%',
+  [ID_HIDE_ADDITIONAL_SETTINGS]: 'ukryj dodatkowe ustawienia',
+  [ID_SHOW_ADDITIONAL_SETTINGS]: 'pokaż dodatkowe ustawienia',
+  [ID_BUY]: 'Kup',
+  [ID_SELL]: 'Sprzedaj',
+  [ID_NOT_SUPPORTED]: '{{ asset }} nie jest wspierany',
+  [ID_CONNECTION_FAILED]: 'Połączenie z serwerem dex nie powiodło się. Możesz zamknąć dexc i spróbować ponownie później, lub poczekać na wznowienie połączenia.',
+  [ID_ORDER_PREVIEW]: 'W sumie: {{ total }} {{ asset }}',
+  [ID_CALCULATING]: 'obliczanie...',
+  [ID_ESTIMATE_UNAVAILABLE]: 'brak szacunkowego wyliczenia',
+  [ID_NO_ZERO_RATE]: 'zero nie może być ceną',
+  [ID_NO_ZERO_QUANTITY]: 'zero nie może być ilością',
+  [ID_TRADE]: 'handluj',
+  [ID_NO_ASSET_WALLET]: 'Brak portfela {{ asset }}',
+  [ID_EXECUTED]: 'wykonano',
+  [ID_BOOKED]: 'zapisano',
+  [ID_CANCELING]: 'anulowanie',
+  [ID_ACCT_UNDEFINED]: 'Niezdefiniowane konto.',
+  [ID_KEEP_WALLET_PASS]: 'zachowaj obecne hasło portfela',
+  [ID_NEW_WALLET_PASS]: 'ustaw nowe hasło portfela',
+  [ID_LOT]: 'lot',
+  [ID_LOTS]: 'loty(ów)',
+  [ID_UNKNOWN]: 'nieznane',
+  [ID_EPOCH]: 'epoka',
+  [ID_SETTLING]: 'rozliczanie',
+  [ID_NO_MATCH]: 'brak spasowania',
+  [ID_CANCELED]: 'anulowano',
+  [ID_REVOKED]: 'unieważniono',
+  [ID_WAITING_FOR_CONFS]: 'Oczekiwanie na potwierdzenia...',
+  [ID_NONE_SELECTED]: 'brak zaznaczenia',
+  [ID_REGISTRATION_FEE_SUCCESS]: 'Płatność rejestracyjna powiodła się!',
+  [ID_API_ERROR]: 'błąd API',
+  [ID_WALLET_READY]: 'Gotowy',
+  [ID_SETUP_WALLET]: 'Konfiguracja',
+  [ID_CHANGE_WALLET_TYPE]: 'zmień typ portfela',
+  [ID_KEEP_WALLET_TYPE]: 'nie zmieniaj typu portfela',
+  [WALLET_READY]: 'Portfel jest gotowy',
+  [SETUP_NEEDED]: 'Potrzebna konfiguracja'
+}
+
 const localesMap = {
   'en-us': enUS,
   'pt-br': ptBR,
-  'zh-cn': zhCN
+  'zh-cn': zhCN,
+  'pl-pl': plPL
 }
 
 /* locale will hold the locale loaded via setLocale. */
