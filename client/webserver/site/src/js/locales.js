@@ -242,9 +242,8 @@ export const plPL = {
 const localesMap = {
   'en-us': enUS,
   'pt-br': ptBR,
-  'zh-cn': zhCN
-  'pl-pl': plPL
-
+  'zh-cn': zhCN,
+  'pl-pl': plPL,
 }
 
 /* locale will hold the locale loaded via setLocale. */
