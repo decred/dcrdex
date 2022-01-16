@@ -1,0 +1,215 @@
+{{define "microIcon"}}
+<img src="/img/coins/{{.}}.png" class="micro-icon">
+{{end}}
+
+{{define "order"}}
+{{template "top" .}}
+{{$ord := .Order}}
+<div id="main" data-handler="order" class="main w-100 overflow-y-auto" data-net="{{.Net}}" data-oid="{{$ord.ID}}">
+  <div class="px-5">
+    <div class="px-1 py-2">
+      <span class="fs22 demi mr-2">Zlecenie</span>
+      <span class="fs18">{{$ord.ID}}</span>
+      <span class="float-right mr-2"><a href="/orders" class="d-inline-block subtlelink fs15"><span class="fs12 ico-textfile"></span> wyświetl wszystkie zlecenia</a></span>
+    </div>
+
+    {{- /* DATA CARDS */ -}}
+    <div class="d-flex flex-wrap">
+      <div class="order-datum">
+        <div>Giełda</div>
+        <div>{{$ord.Host}}</div>
+      </div>
+      <div class="order-datum">
+        <div>Rynek</div>
+        <a href="/markets?host={{$ord.Host}}&base={{$ord.BaseID}}&quote={{$ord.QuoteID}}" class="plainlink hoverbg">
+          {{template "microIcon" $ord.BaseSymbol}} {{template "microIcon" $ord.QuoteSymbol}} {{toUpper $ord.BaseSymbol}}-{{toUpper $ord.QuoteSymbol}}
+        </a>
+      </div>
+      <div class="order-datum">
+        <div>Rodzaj</div>
+        <div>{{ $ord.TypeString }}</div>
+      </div>
+      <div class="order-datum">
+        <div>Status</div>
+        <div>
+          <span id="status">{{$ord.StatusString}}</span>
+          {{if $ord.Cancelable}}
+            <span id="cancelBttn" class="ico-cross fs12 ml-1 pointer hoverbg" data-tooltip="cancel order"></span>
+          {{end}}
+        </div>
+      </div>
+      <div class="order-datum">
+        <div>Oferta</div>
+        <div>{{$ord.OfferString}} {{$ord.FromSymbol}} {{template "microIcon" $ord.FromSymbol}}</div>
+      </div>
+      <div class="order-datum">
+        <div>W zamian za</div>
+        <div>
+          {{if (not $ord.IsMarketOrder)}}
+            {{$ord.AskString}}
+          {{end}}
+          {{$ord.ToSymbol}} {{template "microIcon" $ord.ToSymbol}}
+        </div>
+      </div>
+      <div class="order-datum">
+        <div>Kurs</div>
+        <div>{{$ord.RateString}}</div>
+      </div>
+      <div class="order-datum">
+        <div>Zrealizowane</div>
+        <div>
+          {{$ord.FilledPercent}}%
+          ({{$ord.FilledFrom}} {{template "microIcon" $ord.FromSymbol}}
+          &rarr;
+          {{$ord.FilledTo}} {{template "microIcon" $ord.ToSymbol}})
+        </div>
+      </div>
+      <div class="order-datum">
+        <div>Rozliczone</div>
+        <div>
+          {{$ord.SettledPercent}}%
+          ({{$ord.SettledFrom}} {{template "microIcon" $ord.FromSymbol}}
+          &rarr;
+          {{$ord.SettledTo}} {{template "microIcon" $ord.ToSymbol}})
+        </div>
+      </div>
+      <div class="order-datum">
+        <div>Opłaty <span class="ico-info fs12" data-tooltip="Opłaty transakcyjne on-chain, zazwyczaj zbierane przez górników. Decred DEX nie pobiera żadnych opłat handlowych."></span></div>
+        <div>
+          {{$ord.SwapFeesString}} {{template "microIcon" $ord.FromSymbol}},
+          {{$ord.RedemptionFeesString}} {{template "microIcon" $ord.ToSymbol}}
+        </div>
+      </div>
+      <div class="order-datum">
+        <div>Wiek</div>
+        <div data-stamp="{{$ord.Stamp}}"></div>
+      </div>
+    </div> {{- /* END DATA CARDS */ -}}
+
+    {{- /* MATCHES */ -}}
+    <div class="fs18 demi pt-4 pb-2{{if eq (len $ord.Matches) 0}} d-hide{{end}}" id="matchesLabel">Spasowane zlecenia</div>
+    <div class="d-flex align-items-stretch justify-content-start flex-wrap" id="matchBox">
+    {{range $match := $ord.MatchReaders}}
+      <div class="match-card" data-match-i-d="{{$match.MatchID}}">
+        <div class="match-header">
+          <div class="d-flex justify-content-between align-items-center">
+            <span class="match-data-label ml-3">ID zlecenia</span>
+          </div>
+          <div class="mono mx-3 fs15">{{$match.MatchID}}</div>
+        </div>
+
+        <div class="row py-2">
+          <div class="col-10 text-center">
+            <span class="match-data-label">Status</span><br>
+            <span class="fs15" data-tmpl="status">
+              {{$match.StatusString}}
+            </span>
+          </div>
+          <div class="col-14 text-center">
+            <span class="match-data-label">Czas</span><br>
+            <span class="fs15">{{$match.TimeString}}</span>
+            <span class="fs14">(<span class="fs15" data-stamp="{{$match.Stamp}}"></span> temu)</span>
+          </div>
+        </div>
+
+        {{if $match.IsCancel}}
+          <div class="text-center fs20 red">Anulowano</div>
+          <div class="text-center fs16">{{$match.FromQuantityString}} {{template "microIcon" $ord.FromSymbol}} ({{$match.OrderPortion}}%)</div>
+        {{else}}
+          <div class="text-center demi fs20 py-2">
+            {{$match.FromQuantityString}} {{template "microIcon" $ord.FromSymbol}}
+            &rarr;
+            {{$match.ToQuantityString}} {{template "microIcon" $ord.ToSymbol}}
+          </div>
+
+          <div class="row py-2">
+            <div class="col-10 text-center">
+              <span class="match-data-label">Kurs</span><br>
+              <span class="fs15">
+                {{$match.RateString}}
+              </span>
+            </div>
+            <div class="col-7 text-center">
+              <span class="match-data-label">Strona</span><br>
+              <span class="fs15">{{$match.Side}}</span>
+            </div>
+            <div class="col-7 text-center">
+              <span class="match-data-label">Część zlecenia</span><br>
+              <span class="fs15">
+                {{$match.OrderPortion}}%
+              </span>
+            </div>
+          </div>
+        {{end}}
+
+        <div class="pt-3">
+          {{$coin := $match.Swap}}
+          <div class="px-3 pb-3{{if not $coin}} d-hide{{end}}" data-tmpl="swap">
+            <div class="d-inline-block">
+              <div class="d-flex align-items-center justify-content-between">
+                <span class="match-data-label">Zamiana ({{$ord.FromSymbol}}, Ty)</span>
+                <span class="match-data-label{{if not $match.InSwapCast}} d-hide{{end}}" data-tmpl="swapMsg">
+                  {{$match.SwapConfirmString}}
+                </span>
+              </div>
+              <a target="_blank" class="mono plainlink" data-explorer-id="{{$ord.FromID}}"
+                data-explorer-coin="{{if $coin}}{{$coin.StringID}}{{end}}" data-tmpl="swapCoin">{{if $coin}}{{$coin.StringID}}{{end}}</a>
+            </div>
+          </div>
+          {{$coin = $match.CounterSwap}}
+          <div class="px-3 pb-3{{if not $coin}} d-hide{{end}}" data-tmpl="counterSwap">
+            <div class="d-inline-block">
+              <div class="d-flex align-items-center justify-content-between">
+                <span class="match-data-label">Zamiana ({{$ord.ToSymbol}}, oni)</span>
+                <span class="match-data-label{{if not $match.InCounterSwapCast}} d-hide{{end}}" data-tmpl="counterSwapMsg">
+                  {{$match.CounterSwapConfirmString}}
+                </span>
+              </div>
+              <a target="_blank" class="mono plainlink" data-explorer-id="{{$ord.ToID}}"
+                data-explorer-coin="{{if $coin}}{{$coin.StringID}}{{end}}" data-tmpl="counterSwapCoin">{{if $coin}}{{$coin.StringID}}{{end}}</a>
+            </div>
+          </div>
+          {{$coin = $match.Redeem}}
+          <div class="px-3 pb-3{{if not $coin}} d-hide{{end}}" data-tmpl="redeem">
+            <span class="match-data-label">Wykupienie środków ({{$ord.ToSymbol}}, Ty)</span><br>
+            <a target="_blank" class="mono plainlink" data-explorer-id="{{$ord.ToID}}"
+              data-explorer-coin="{{if $coin}}{{$coin.StringID}}{{end}}" data-tmpl="redeemCoin">{{if $coin}}{{$coin.StringID}}{{end}}</a>
+          </div>
+          {{$coin = $match.CounterRedeem}}
+          <div class="px-3 pb-3{{if not $coin}} d-hide{{end}}" data-tmpl="counterRedeem">
+            <span class="match-data-label">Wykupienie środków ({{$ord.FromSymbol}}, oni)</span><br>
+            <a target="_blank" class="mono plainlink" data-explorer-id="{{$ord.FromID}}"
+              data-explorer-coin="{{if $coin}}{{$coin.StringID}}{{end}}" data-tmpl="counterRedeemCoin">{{if $coin}}{{$coin.StringID}}{{end}}</a>
+          </div>
+          {{$coin = $match.Refund}}
+          <div class="px-3 pb-3{{if not $coin}} d-hide{{end}}" data-tmpl="refund">
+            <span class="match-data-label red">Zwrot środków ({{$ord.FromSymbol}}, Ty)</span><br>
+            <a target="_blank" class="mono plainlink red" data-explorer-id="{{$ord.FromID}}"
+              data-explorer-coin="{{if $coin}}{{$coin.StringID}}{{end}}" data-tmpl="refundCoin">{{if $coin}}{{$coin.StringID}}{{end}}</a>
+          </div>
+        </div>
+
+      </div>
+    {{end}}
+    </div>
+
+    {{- /* FUNDING COINS */ -}}
+    <div class="order-datum d-inline-block my-3">
+      <div class="text-left">Środki fundujące zlecenie</div>
+      <div class="fs14 text-left">
+        {{range $ord.FundingCoins}}
+          <a class="plainlink mono" data-explorer-id="{{$ord.FromID}}" data-explorer-coin="{{.StringID}}">{{.StringID}}</a><br>
+        {{end}}
+      </div>
+    </div>
+
+  </div>
+
+  <div id="forms" class="d-hide">
+    <form class="d-hide" id="cancelForm" autocomplete="off">
+      {{template "cancelOrderForm" .}}
+    </form>
+  </div>
+</div>
+{{template "bottom"}}
+{{end}}
