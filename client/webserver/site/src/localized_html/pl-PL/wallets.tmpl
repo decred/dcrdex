@@ -1,0 +1,229 @@
+{{define "stateIcons"}}
+  {{$w := .Wallet}}
+  {{if $w}}
+    {{$ready := and $w.Running $w.Open}}
+    <span data-state="sleeping" class="ico-sleeping fs17 grey{{if $w.Running}} d-hide{{end}}"></span>
+    <span data-state="locked" class="ico-locked grey{{if or $ready (not $w.Running)}} d-hide{{end}}"></span>
+    <span data-state="unlocked" class="ico-unlocked{{if not $ready}} d-hide{{end}}"></span>
+    <span data-state="nowallet" class="ico-cross fs12 red d-hide"></span>
+    <span data-state="syncing" 
+      class="ico-sync fs12{{if or (not $w.Running) $w.Synced}} d-hide{{end}}"
+      data-tooltip="wallet is {{printf "%.2f" (x100  $w.SyncProgress)}}% synced"></span>
+    <span data-state="status" class="txt-status">{{if $w.Open}}gotowy{{else if $w.Running}}zablokowane{{else}}wyłączony{{end}}</span>
+  {{else}}
+    <span data-state="sleeping" class="ico-sleeping fs17 grey d-hide"></span>
+    <span data-state="locked" class="ico-locked grey d-hide"></span>
+    <span data-state="unlocked" class="ico-unlocked d-hide"></span>
+    <span data-state="nowallet" class="ico-cross fs12 red"></span>
+    <span data-state="syncing" class="ico-sync fs12 d-hide"></span>
+    <span data-state="status" class="txt-status">brak portfela</span>
+  {{end}}
+{{end}}
+
+{{define "actionButtons"}}
+  {{$w := .Wallet}}
+  {{if $w}}
+  {{$ready := and $w.Running $w.Open}}
+  <button data-action="connect"{{if $w.Running}} class="d-hide"{{end}}>Połącz</button>
+  <button data-action="unlock"{{if $w.Open}} class="d-hide"{{end}}>Odblokuj</button>
+  <button data-action="withdraw"{{if not $ready}} class="d-hide"{{end}}>Wypłać</button>
+  <button data-action="deposit"{{if not $ready}} class="d-hide"{{end}}>Zdeponuj</button>
+  <button data-action="lock"{{if or (not $ready) (not $w.Encrypted)}} class="d-hide"{{end}}>Zablokuj</button>
+  <button data-action="create" class="d-hide">Utwórz portfel {{.Info.Name}}</button>
+    <span data-action="settings" class="ico-settings fs20 pointer"></span>
+    {{else}}
+    <button data-action="connect" class="d-hide">Połącz</button>
+    <button data-action="unlock" class="d-hide">Odblokuj</button>
+    <button data-action="withdraw" class="d-hide">Wypłać</button>
+    <button data-action="deposit" class="d-hide">Zdeponuj</button>
+    <button data-action="lock" class="d-hide">Zablokuj</button>
+    <button data-action="create">Utwórz portfel {{.Info.Name}}</button>
+    <span data-action="settings" class="ico-settings fs20 pointer d-hide"></span>
+  {{end}}
+{{end}}
+
+{{define "wallets"}}
+{{template "top" .}}
+<div id="main" data-handler="wallets" class="main">
+{{$passwordIsCached := .UserInfo.PasswordIsCached}}
+
+  {{- /* LEFT SIDE */ -}}
+  <div class="col-14">
+    <h3 class="p-3">Portfele</h3>
+    <table class="wallets">
+      <thead>
+        <tr>
+          <th>Aktywo <span id="assetArrow"></span></th>
+          <th>Saldo <span id="balanceArrow"></span></th>
+          <th>Status <span id="statusArrow"></span></th>
+          <th>Czynności</th>
+        </tr>
+      </thead>
+      <tbody id="walletTable">
+        {{range .Assets}}
+        <tr data-asset-i-d="{{.ID}}" data-symbol="{{.Symbol}}" data-name="{{.Info.Name}}">
+          <td>
+            <img src="{{logoPath .Symbol}}" class="mini-icon">
+            <span class="fs20">{{.Info.Name}}</span>
+            <span class="fs15">({{toUpper .Symbol}})</span>
+          </td>
+          <td data-balance-target="{{.ID}}">
+            {{if .Wallet}}
+              {{.Info.UnitInfo.ConventionalString .Wallet.Balance.Available}}
+            {{else}}
+              0.00000000
+            {{end}}
+          </td>
+          <td class="status-col fs16">
+            {{template "stateIcons" .}}
+          </td>
+          <td>
+            {{template "actionButtons" .}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+
+  {{- /* RIGHT SIDE */ -}}
+  <div id="rightBox" class="col-10 px-2 py-5 d-flex justify-content-center align-items-start overflow-auto">
+
+    {{- /* AVAILABLE MARKETS (for selected asset) */ -}}
+    <div id="marketsBox" class="d-hide">
+      <div class="fs22 text-center py-1 fs24 sans-light"><img id="marketsForLogo"> <span id="marketsFor"></span> Rynki</div>
+      <div id="marketsCard">
+        <div id="marketCard" class="market-box p-3">
+          <div class="px-2 text-center fs18" data-tmpl="dexTitle"></div>
+          <div class="d-flex justify-content-center align-items-start flex-wrap" data-tmpl="markets">
+            <div class="asset-market hoverbg pointer m-2 px-2 py-1 d-flex flex-column align-items-center" id="oneMarket">
+              {{/* TODO: Get rid of this call to logoPath. We don't need to set this value. It's overwritten anyway. Do we even need the template function? */}}
+              <img src="{{logoPath "dcr"}}" class="logo">
+              <span class="mt-1 fs14 demi">DCR-BTC</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {{- /* NEW WALLET */ -}}
+    <form class="position-relative d-hide" id="newWalletForm" autocomplete="off">
+      {{template "newWalletForm"}}
+    </form>
+
+    {{- /* UNLOCK WALLET */ -}}
+    <form class="position-relative d-hide" id="unlockWalletForm" autocomplete="off">
+      {{template "unlockWalletForm"}}
+    </form>
+
+    {{- /* DEPOSIT ADDRESS */ -}}
+    <div class="text-center fs20 d-hide" id="deposit">
+      <div class="px-2 py-1 mb-2 text-center position-relative fs22 sans-light">
+        Zdeponuj
+        <img id="depositLogo" class="micro-icon mx-1">
+        <span id="depositName"></span>
+        <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      </div>
+      <div class="mono d-inline bg0 p-2 fs15" id="depositAddress"></div>
+      <div class="my-3">
+        <button id="newDepAddrBttn" type="button" class=" px-2 justify-content-center fs15 bg2 selected">Nowy adres do depozytów</button>
+      </div>
+      <div class="fs15 pt-3 text-center d-hide errcolor" id="depositErr"></div>
+    </div>
+
+    {{- /* WITHDRAW */ -}}
+    <form class="pb-3 d-hide" id="withdrawForm" autocomplete="off">
+      <div class="py-1 text-center position-relative fs22 sans-light">
+        Wypłać
+        <img id="withdrawLogo" class="micro-icon mx-1">
+        <span id="withdrawName"></span>
+        <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      </div>
+      <div class="mt-3">
+        <label for="withdrawAddr" class="pl-1 mb-1">Adres</label>
+        <input type="text" class="form-control select" id="withdrawAddr">
+      </div>
+      <div class="d-flex align-items-stretch">
+        <div class="mt-2 col-10 p-0">
+          <label for="withdrawAmt" class="pl-1 mb-1">Ilość</label>
+          <input type="text" class="form-control select" id="withdrawAmt">
+        </div>
+        <div class="col-14 px-0 py-1 flex-center flex-column fs15 justify-content-between">
+          <div class="d-inline pt-3"><span class="pointer" id="withdrawAvail"></span> dostępne</div>
+          <!-- <div class="d-inline">tx fees: <span id="withdrawFee"></span> <span id="withdrawUnit"></span>/byte</div> -->
+        </div>
+      </div>
+      <hr class="dashed my-4">
+      <div class="fs16 px-4 text-center">Zatwierdź wypłatę swoim hasłem aplikacji.</div>
+      <div class="d-flex mt-3">
+        <div class="col-12 p-0">
+          <label for="withdrawPW" class="pl-1 mb-1">Hasło</label>
+          <input type="password" class="form-control select" id="withdrawPW" autocomplete="off">
+        </div>
+        <div class="col-12 p-0 text-right">
+          <div>&nbsp;</div>
+          <button id="submitWithdraw" type="button" class="w-75 mt-1 justify-content-center fs15 bg2 selected">Wypłać</button>
+        </div>
+      </div>
+      <div class="fs15 pt-3 text-center d-hide errcolor" id="withdrawErr"></div>
+    </form>
+    
+    {{- /* RECONFIGURE WALLET */ -}}
+    <form class="pb-3 d-hide mt-3" id="reconfigForm" autocomplete="off">
+      <div class="py-1 text-center position-relative fs22 sans-light">
+        Skonfiguruj ponownie
+        <img id="recfgAssetLogo" class="micro-icon mx-1">
+        <span id="recfgAssetName"></span>
+        Portfel
+        <div class="form-closer recfg-form hoverbg"><span class="ico-cross"></span></div>
+      </div>
+      <div class="py-1 mt-2" id="reconfigInputs">
+        {{template "walletConfigTemplates"}}
+      </div>
+      <div id="showChangePW" class="py-1 mt-2 pointer d-flex align-items-center justify-content-start">
+        <span id="showIcon" class="ico-plus fs8 pl-1"></span>
+        <span id="hideIcon" class="ico-minus fs8 pl-1"></span>
+        <span id="switchPWMsg" class="d-inline-block pl-1 pb-1"></span>
+      </div>
+      <div id="changePW" class="py-1">
+        <div class="fs15">
+          Zmiana poniższego hasła nie powoduje zmiany hasła do Twojego oprogramowania portfela. Skorzystaj z tego formularza, aby zaktualizować klienta DEX po tym, jak zmienisz hasło do swojego oprogramowania portfela.
+        </div>
+        <div class="pt-3">
+          <label for="newPW" class="mb-1">Nowe hasło portfela</label>
+          <input type="password" class="form-control select" id="newPW" autocomplete="new-password">
+        </div>
+      </div>
+
+      <div id="showChangeType" class="py-1 mt-2 pointer d-flex align-items-center justify-content-start">
+        <span id="changeTypeShowIcon" class="ico-plus fs8 pl-1"></span>
+        <span id="changeTypeHideIcon" class="ico-minus fs8 pl-1 d-hide"></span>
+        <span id="changeTypeMsg" class="d-inline-block pl-1 pb-1">zmień typ portfela</span>
+      </div>
+      <div id="changeWalletType" class="py-1 d-hide">
+        <select id="changeWalletTypeSelect"></select>
+      </div>
+
+
+      <hr class="dashed my-2">
+      <div class="my-2">
+        Uwaga: Zmiana portfela podczas gdy trwają wymiany może spowodować utratę środków.
+      </div>
+      <div class="d-flex mt-1 {{if $passwordIsCached}}justify-content-end{{end}}">
+        <div class="col-12 p-0 {{if $passwordIsCached}}d-hide{{end}}">
+          <label for="appPW" class="pl-1 mb-1">Hasło aplikacji</label>
+          <input type="password" class="form-control select" id="appPW" autocomplete="off">
+        </div>
+        <div class="col-12 p-0 text-right">
+          <div>&nbsp;</div>
+          <button id="submitReconfig" type="button" class="w-75 mt-1 justify-content-center fs15 bg2 selected">Wyślij</button>
+        </div>
+      </div>
+      <div class="fs15 pt-3 text-center d-hide errcolor" id="reconfigErr"></div>
+    </form>
+
+  </div>
+
+</div>
+{{template "bottom"}}
+{{end}}
