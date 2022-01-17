@@ -1288,7 +1288,10 @@ func TestReorg(t *testing.T) {
 	setChain(chainA)
 	tipHeight := btc.blockCache.tipHeight()
 	txHash := randomHash()
-	tip, _ := btc.blockCache.atHeight(tipHeight)
+	tip, found := btc.blockCache.atHeight(tipHeight)
+	if !found {
+		t.Fatalf("did not find newly connected block at height %d, likely cache sync issue", tipHeight)
+	}
 	msg := testMakeMsgTx(false)
 	testAddBlockVerbose(&tip.hash, nil, 1, tipHeight)
 	testAddTxOut(msg.tx, 0, txHash, &tip.hash, int64(tipHeight), 1)
@@ -1318,7 +1321,10 @@ func TestReorg(t *testing.T) {
 	// Start over, but put it in a lower block instead.
 	reset()
 	setChain(chainA)
-	tip, _ = btc.blockCache.atHeight(tipHeight)
+	tip, found := btc.blockCache.atHeight(tipHeight)
+	if !found {
+		t.Fatalf("did not find newly connected block at height %d, likely cache sync issue", tipHeight)
+	}
 	testAddBlockVerbose(&tip.hash, nil, 1, tipHeight)
 	testAddTxOut(msg.tx, 0, txHash, &tip.hash, int64(tipHeight), 1)
 	utxo, err = btc.utxo(txHash, msg.vout, nil)
