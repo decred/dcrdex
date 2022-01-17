@@ -1321,7 +1321,7 @@ func TestReorg(t *testing.T) {
 	// Start over, but put it in a lower block instead.
 	reset()
 	setChain(chainA)
-	tip, found := btc.blockCache.atHeight(tipHeight)
+	tip, found = btc.blockCache.atHeight(tipHeight)
 	if !found {
 		t.Fatalf("did not find newly connected block at height %d, likely cache sync issue", tipHeight)
 	}
