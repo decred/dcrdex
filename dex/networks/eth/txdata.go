@@ -12,6 +12,7 @@ import (
 	"time"
 
 	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
+	swapv1 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -60,11 +61,17 @@ var ABIs = initAbis()
 func initAbis() map[uint32]*abi.ABI {
 	v0ABI, err := abi.JSON(strings.NewReader(swapv0.ETHSwapABI))
 	if err != nil {
-		panic(fmt.Sprintf("failed to parse abi: %v", err))
+		panic(fmt.Sprintf("failed to parse v0 abi: %v", err))
+	}
+
+	v1ABI, err := abi.JSON(strings.NewReader(swapv1.ETHSwapABI))
+	if err != nil {
+		panic(fmt.Sprintf("failed to parse v1 abi: %v", err))
 	}
 
 	return map[uint32]*abi.ABI{
 		0: &v0ABI,
+		1: &v1ABI,
 	}
 }
 

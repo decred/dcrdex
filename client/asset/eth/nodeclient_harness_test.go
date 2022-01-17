@@ -117,7 +117,8 @@ var (
 	// secPerBlock is one for simnet, because it takes one second to mine a
 	// block currently. Is set in code to testnetSecPerBlock if runing on
 	// testnet.
-	secPerBlock = time.Second
+	secPerBlock        = time.Second
+	maxFeeRate  uint64 = 1000 // gwei per gas
 )
 
 func newContract(stamp uint64, secretHash [32]byte, val uint64) *asset.Contract {
