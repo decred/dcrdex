@@ -2295,7 +2295,7 @@ func (c *Core) setWalletPassword(wallet *xcWallet, newPW []byte, crypter encrypt
 	wasConnected := wallet.connected()
 	if !wasConnected {
 		if err := c.connectAndUpdateWallet(wallet); err != nil {
-			return newError(connectionErr, "SetWalletPassword connection error: %v", err)
+			return newError(connectWalletErr, "SetWalletPassword connection error: %v", err)
 		}
 	}
 
@@ -3120,6 +3120,12 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 				if err != nil {
 					c.log.Errorf("Unable to connect to %s wallet (start and sync wallets BEFORE starting dex!): %v",
 						unbip(wallet.AssetID), err)
+					// NOTE: Details for this topic is in the context of fee
+					// payment, but the subject pertains to a failure to connect
+					// to the wallet. This is better than just an ERR log.
+					subject, _ := c.formatDetails(TopicWalletConnectionWarning)
+					c.notify(newWalletConfigNote(TopicWalletConnectionWarning, subject, err.Error(),
+						db.ErrorLevel, wallet.state()))
 					return
 				}
 			}

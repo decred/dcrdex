@@ -6020,7 +6020,7 @@ func TestSetWalletPassword(t *testing.T) {
 	xyzWallet.hookedUp = false
 	tXyzWallet.connectErr = tErr
 	err = tCore.SetWalletPassword(tPW, assetID, newPW)
-	if !errorHasCode(err, connectionErr) {
+	if !errorHasCode(err, connectWalletErr) {
 		t.Fatalf("wrong error for connection error: %v", err)
 	}
 	xyzWallet.hookedUp = true
