@@ -2582,7 +2582,7 @@ func (btc *ExchangeWallet) feeRateWithOracleFallback(confTarget uint64, oracle f
 		return feeRate
 	}
 	feeSuggestion := oracle()
-	if feeSuggestion > 0 && feeSuggestion < btc.fallbackFeeRate && feeSuggestion < btc.feeRateLimit {
+	if feeSuggestion > 0 && feeSuggestion < btc.feeRateLimit {
 		btc.log.Tracef("feeRateWithFallback using caller's suggestion for %d-conf fee rate, %d. Local estimate unavailable (%q)",
 			confTarget, feeSuggestion, err)
 		return feeSuggestion

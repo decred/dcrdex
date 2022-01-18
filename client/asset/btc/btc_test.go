@@ -2407,7 +2407,7 @@ func testEstimateRegistrationTxFee(t *testing.T, segwit bool, walletType string)
 	}
 	const inputCount = 5
 	const txSize = dexbtc.MinimumTxOverhead + 2*dexbtc.P2PKHOutputSize + inputCount*dexbtc.RedeemP2PKHInputSize
-	wallet.fallbackFeeRate = 30
+	wallet.feeRateLimit = 100
 
 	estimate := wallet.EstimateRegistrationTxFee(rateOracleFallback)
 	// estimateSmartFee is not supported in the spv wallet
@@ -2429,8 +2429,8 @@ func testEstimateRegistrationTxFee(t *testing.T, segwit bool, walletType string)
 		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate*txSize, estimate)
 	}
 
-	// if value from oracle > fallback fee rate, use fallback fee rate
-	oracleEstimate = 31
+	// if value from oracle > fee rate limit, use fallback fee rate
+	oracleEstimate = wallet.feeRateLimit + 1
 	estimate = wallet.EstimateRegistrationTxFee(rateOracleFallback)
 	if estimate != wallet.fallbackFeeRate*txSize {
 		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate*txSize, estimate)

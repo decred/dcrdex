@@ -2523,7 +2523,7 @@ func (dcr *ExchangeWallet) feeRateWithOracleFallback(confTarget uint64, oracle f
 		return feeRate
 	}
 	feeSuggestion := oracle()
-	if feeSuggestion > 0 && feeSuggestion < dcr.fallbackFeeRate && feeSuggestion < dcr.feeRateLimit {
+	if feeSuggestion > 0 && feeSuggestion < dcr.feeRateLimit {
 		dcr.log.Tracef("feeRateWithFallback using caller's suggestion for %d-conf fee rate, %d. Local estimate unavailable (%q)",
 			confTarget, feeSuggestion, err)
 		return feeSuggestion

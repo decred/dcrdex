@@ -2500,7 +2500,7 @@ func TestEstimateRegistrationTxFee(t *testing.T) {
 	}
 	const inputCount = 5
 	const txSize = dexdcr.MsgTxOverhead + dexdcr.P2PKHOutputSize*2 + inputCount*dexdcr.P2PKHInputSize
-	wallet.fallbackFeeRate = 30
+	wallet.feeRateLimit = 100
 
 	estimate := wallet.EstimateRegistrationTxFee(rateOracleFallback)
 	if estimate != (optimalFeeRate+1)*txSize {
@@ -2521,8 +2521,8 @@ func TestEstimateRegistrationTxFee(t *testing.T) {
 		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate*txSize, estimate)
 	}
 
-	// if value from oracle > fallback fee rate, use fallback fee rate
-	oracleEstimate = 31
+	// if value from oracle > fee rate limit, use fallback fee rate
+	oracleEstimate = wallet.feeRateLimit + 1
 	estimate = wallet.EstimateRegistrationTxFee(rateOracleFallback)
 	if estimate != wallet.fallbackFeeRate*txSize {
 		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate*txSize, estimate)
