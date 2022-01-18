@@ -9,8 +9,6 @@
 
 package main
 
-// import (
-// 	ETH is commented to prevent go-ethereum goroutines from launching via
-// 	it's init(). Uncomment this when ETH is ready:
-//	_ "decred.org/dcrdex/client/asset/eth" // register eth asset
-// )
+import (
+	_ "decred.org/dcrdex/client/asset/eth" // register eth asset
+)
