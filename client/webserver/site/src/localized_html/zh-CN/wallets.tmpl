@@ -23,20 +23,22 @@
 {{define "actionButtons"}}
   {{$w := .Wallet}}
   {{if $w}}
-  {{$ready := and $w.Running $w.Open}}
-  <button data-action="connect"{{if $w.Running}} class="d-hide"{{end}}>连接</button>
-  <button data-action="unlock"{{if $w.Open}} class="d-hide"{{end}}>解锁</button>
-  <button data-action="withdraw"{{if not $ready}} class="d-hide"{{end}}>提款</button>
-  <button data-action="deposit"{{if not $ready}} class="d-hide"{{end}}>存款</button>
-  <button data-action="lock"{{if or (not $ready) (not $w.Encrypted)}} class="d-hide"{{end}}>锁定</button>
-  <button data-action="create" class="d-hide">创建{{.Info.Name}}钱包</button>
+    {{$ready := and $w.Running $w.Open}}
+    <button data-action="connect"{{if $w.Running}} class="d-hide"{{end}}>连接</button>
+    <button data-action="unlock"{{if $w.Open}} class="d-hide"{{end}}>解锁</button>
+    <button data-action="withdraw"{{if not $ready}} class="d-hide"{{end}}>提款</button>
+    <button data-action="deposit"{{if not $ready}} class="d-hide"{{end}}>存款</button>
+    <button data-action="lock"{{if or (not $ready) (not $w.Encrypted)}} class="d-hide"{{end}}>锁定</button>
+    <button data-action="rescan"{{if not $w.Traits.IsRescanner}} class="d-hide"{{end}}>Rescan</button>
+    <button data-action="create" class="d-hide">创建{{.Info.Name}}钱包</button>
     <span data-action="settings" class="ico-settings fs20 pointer"></span>
-    {{else}}
+  {{else}}
     <button data-action="connect" class="d-hide">连接</button>
     <button data-action="unlock" class="d-hide">解锁</button>
     <button data-action="withdraw" class="d-hide">提款</button>
     <button data-action="deposit" class="d-hide">存款</button>
     <button data-action="lock" class="d-hide">锁定</button>
+    <button data-action="rescan" class="d-hide">Rescan</button>
     <button data-action="create">创建{{.Info.Name}}钱包</button>
     <span data-action="settings" class="ico-settings fs20 pointer d-hide"></span>
   {{end}}

@@ -18,6 +18,7 @@ var EnUS = map[string]string{
 	"app_password_helper":            "Your app password is always required when performing sensitive wallet operations.",
 	"Add":                            "Add",
 	"Unlock":                         "Unlock",
+	"Rescan":                         "Rescan",
 	"Wallet":                         "Wallet",
 	"app_password_reminder":          "Your app password is always required when performing sensitive wallet operations.",
 	"DEX Address":                    "DEX Address",
