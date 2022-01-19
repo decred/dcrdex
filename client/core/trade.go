@@ -1191,7 +1191,7 @@ func (t *trackedTrade) shouldBeginFindRedemption(ctx context.Context, match *mat
 			coinIDString(t.wallets.fromAsset.ID, swapCoinID), t.wallets.fromAsset.Symbol, match, t.UID(), err)
 		return false
 	}
-	if spent {
+	if spent { // NOTE: spent may not be accurate for SPV wallet, so this should not be a requirement.
 		t.dc.log.Infof("Swap contract for revoked match %s, order %s is spent. Will begin search for redemption", match, t.ID())
 	}
 	return confs >= t.wallets.fromAsset.SwapConf || spent

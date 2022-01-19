@@ -298,7 +298,20 @@ func runTest(t *testing.T, splitTx bool) {
 	makeRedemption := func(swapVal uint64, receipt asset.Receipt, secret []byte) *asset.Redemption {
 		t.Helper()
 		swapOutput := receipt.Coin()
-		ci, err := rig.alpha().AuditContract(swapOutput.ID(), receipt.Contract(), nil, false)
+		op := swapOutput.(*output)
+		tx, err := rig.beta().wallet.GetTransaction(tCtx, op.txHash())
+		if err != nil || tx == nil {
+			t.Fatalf("GetTransaction: %v", err)
+		}
+		msgTx, err := msgTxFromHex(tx.Hex)
+		if err != nil {
+			t.Fatalf("msgTxFromHex: %v", err)
+		}
+		txData, err := msgTx.Bytes()
+		if err != nil {
+			t.Fatalf("msgTx.Bytes: %v", err)
+		}
+		ci, err := rig.alpha().AuditContract(swapOutput.ID(), receipt.Contract(), txData, false)
 		if err != nil {
 			t.Fatalf("error auditing contract: %v", err)
 		}
@@ -340,24 +353,30 @@ func runTest(t *testing.T, splitTx bool) {
 		t.Fatalf("redemption error: %v", err)
 	}
 
+	betaSPV := rig.beta().wallet.SpvMode()
+
 	// Find the redemption
 	swapReceipt := receipts[0]
-	waitNetwork()
-	ctx, cancel := context.WithDeadline(tCtx, time.Now().Add(time.Second*5))
-	defer cancel()
-	_, checkKey, err := rig.beta().FindRedemption(ctx, swapReceipt.Coin().ID(), nil)
-	if err != nil {
-		t.Fatalf("error finding unconfirmed redemption: %v", err)
-	}
-	if !bytes.Equal(checkKey, secretKey1) {
-		t.Fatalf("findRedemption (unconfirmed) key mismatch. %x != %x", checkKey, secretKey1)
+	// The mempool find redemption request does not work in SPV mode.
+	if !betaSPV {
+		waitNetwork()
+		ctx, cancel := context.WithDeadline(tCtx, time.Now().Add(time.Second*5))
+		defer cancel()
+		_, checkKey, err := rig.beta().FindRedemption(ctx, swapReceipt.Coin().ID(), nil)
+		if err != nil {
+			t.Fatalf("error finding unconfirmed redemption: %v", err)
+		}
+		if !bytes.Equal(checkKey, secretKey1) {
+			t.Fatalf("findRedemption (unconfirmed) key mismatch. %x != %x", checkKey, secretKey1)
+		}
 	}
 
 	// Mine a block and find the redemption again.
 	mineAlpha()
 	waitNetwork()
 	// Check that the swap has one confirmation.
-	checkConfs(1, true)
+	expectSpent := !betaSPV // spv wallets SwapConfirmations will never report their own swap as spent
+	checkConfs(1, expectSpent)
 	if !blockReported {
 		t.Fatalf("no block reported")
 	}
