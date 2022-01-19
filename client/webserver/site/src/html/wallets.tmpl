@@ -23,20 +23,22 @@
 {{define "actionButtons"}}
   {{$w := .Wallet}}
   {{if $w}}
-  {{$ready := and $w.Running $w.Open}}
-  <button data-action="connect"{{if $w.Running}} class="d-hide"{{end}}>[[[Connect]]]</button>
-  <button data-action="unlock"{{if $w.Open}} class="d-hide"{{end}}>[[[Unlock]]]</button>
-  <button data-action="withdraw"{{if not $ready}} class="d-hide"{{end}}>[[[Withdraw]]]</button>
-  <button data-action="deposit"{{if not $ready}} class="d-hide"{{end}}>[[[Deposit]]]</button>
-  <button data-action="lock"{{if or (not $ready) (not $w.Encrypted)}} class="d-hide"{{end}}>[[[Lock]]]</button>
-  <button data-action="create" class="d-hide">[[[create_a_x_wallet]]]</button>
+    {{$ready := and $w.Running $w.Open}}
+    <button data-action="connect"{{if $w.Running}} class="d-hide"{{end}}>[[[Connect]]]</button>
+    <button data-action="unlock"{{if $w.Open}} class="d-hide"{{end}}>[[[Unlock]]]</button>
+    <button data-action="withdraw"{{if not $ready}} class="d-hide"{{end}}>[[[Withdraw]]]</button>
+    <button data-action="deposit"{{if not $ready}} class="d-hide"{{end}}>[[[Deposit]]]</button>
+    <button data-action="lock"{{if or (not $ready) (not $w.Encrypted)}} class="d-hide"{{end}}>[[[Lock]]]</button>
+    <button data-action="rescan"{{if not $w.Traits.IsRescanner}} class="d-hide"{{end}}>[[[Rescan]]]</button>
+    <button data-action="create" class="d-hide">[[[create_a_x_wallet]]]</button>
     <span data-action="settings" class="ico-settings fs20 pointer"></span>
-    {{else}}
+  {{else}}
     <button data-action="connect" class="d-hide">[[[Connect]]]</button>
     <button data-action="unlock" class="d-hide">[[[Unlock]]]</button>
     <button data-action="withdraw" class="d-hide">[[[Withdraw]]]</button>
     <button data-action="deposit" class="d-hide">[[[Deposit]]]</button>
     <button data-action="lock" class="d-hide">[[[Lock]]]</button>
+    <button data-action="rescan" class="d-hide">[[[Rescan]]]</button>
     <button data-action="create">[[[create_a_x_wallet]]]</button>
     <span data-action="settings" class="ico-settings fs20 pointer d-hide"></span>
   {{end}}

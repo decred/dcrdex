@@ -9,6 +9,7 @@ import * as intl from './locales'
 
 const bind = Doc.bind
 const animationLength = 300
+const traitNewAddresser = 1 << 1
 
 export default class WalletsPage extends BasePage {
   constructor (body) {
@@ -345,6 +346,8 @@ export default class WalletsPage extends BasePage {
     await this.hideBox()
     page.depositName.textContent = asset.info.name
     page.depositAddress.textContent = wallet.address
+    if ((wallet.traits & traitNewAddresser) !== 0) Doc.show(page.newDepAddrBttn)
+    else Doc.hide(page.newDepAddrBttn)
     this.animation = this.showBox(box)
   }
 
