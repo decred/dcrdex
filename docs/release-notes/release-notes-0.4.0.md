@@ -66,23 +66,37 @@ understand the following:
 
 ### Client (dexc)
 
-When upgrading from v0.2, an application "seed" is automatically generated. The
-seed is used when creating new DEX accounts and native (built-in) wallets, and
-may be used to restore these accounts on a new DEX client installation. You
-should go to the Settings page to view this new seed, and **back it up somewhere
-safe**. This is especially important if you create a native Bitcoin wallet from
-within the DEX client since you will need the seed to recover any funds in the
-wallet.
+#### Application Seed
+
+When upgrading from v0.2, an application "seed" is automatically generated upon
+login. The seed is used when creating new DEX accounts and native (built-in)
+wallets, and may be used to restore these accounts on a new DEX client
+installation. You should go to the Settings page to view this new seed, and
+**back it up somewhere safe**. This is especially important if you create a
+native Bitcoin wallet from within the DEX client since you will need the seed to
+recover any funds in the wallet.
 
 If you run the upgrade multiple times, such as from different client
 installations or just repeated the upgrade from a v0.2 backup, you will get a
-**different seed each time** the upgrade runs.
+**different seed each time** the upgrade runs and you login.
 
 **Any DEX accounts created prior to upgrading can NOT be later recovered from
 this seed.** These "legacy" accounts continue to work in v0.4, but to back them
 up or move them to a different installation, it is still necessary to
 export/import them from the Settings page or backup the dexc.db file as it was
 in v0.2.
+
+**Developer note:** For the upgrade to complete, it is necessary to call `Login`
+before using most other `Core` methods. If you receive the error "primary
+credentials not retrieved. Is the client initialized?" it is likely that you
+need to `Login` first to complete the seed generation and credentials scheme
+migration. Typical startup should involve `core.New` followed by: `c.Run` in a
+goroutine, wait for `<-c.Ready()`, consult `c.IsInitialized()` before calling
+either `c.InitializeClient` or `c.Login`. After login, you should call
+`c.ExportSeed` with the application password to retrieve the newly-generated
+application seed.
+
+#### Changing the Bitcoin Wallet Type
 
 If you previously had an external Bitcoin Core wallet configured with DEX, you
 may switch to a native BTC wallet from the Wallets page. Click the "gears" icon
@@ -415,10 +429,14 @@ The most notable fixes are:
   ([59868fe](https://github.com/decred/dcrdex/commit/59868fe81173a2d67100ff071d01552cc74fcb1a))
 - (Breaking) `(*Core).InitializeClient` has a new `restorationSeed []byte` input
   argument, which may be `nil` to generate a new app seed, or a previous seed
-  for to restore a previous identity. Further, the keys, encrypted app seed, and
-  the relevant encryption parameters are embodied by the
+  for to restore a previous identity. The `(*Core).ExportSeed` method is added
+  to retrieve the generated seed. Further, the keys, encrypted app seed, and the
+  relevant encryption parameters are embodied by the
   `client/db.PrimaryCredentials` struct, and the DB interface has new methods
-  for upgrading to, initializing, and updating the `PrimaryCredentials`.
+  for upgrading to, initializing, and updating the `PrimaryCredentials`. When
+  upgrading, it is necessary call `Login` for the seed to be generated and the
+  new credentials scheme applied, otherwise most methods will fail with "primary
+  credentials not retrieved. Is the client initialized?".
   ([b66a35f](https://github.com/decred/dcrdex/commit/b66a35f24215456763a16cee9c32875f61f9814b))
 - (Breaking) To support paying registration fees with multiple assets, the
   `core.Exchange` struct has new `RegFees` and `PendingFee` fields, the
