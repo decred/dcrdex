@@ -31,9 +31,9 @@ contract ETHSwap {
     // swaps is a map of contract hashes to the "swap record". The swap record
     // has the following interpretation.
     //   if (record == bytes32(0x00)): contract is uninitiated
-    //   else if (uint256(record) < block.number && sha256(record) != contract.secret):
+    //   else if (uint256(record) < block.number && sha256(record) != contract.secretHash):
     //      contract is initiated and redeemable by the participant with the secret.
-    //   else if (sha256(record) == contract.secret): contract has been redeemed
+    //   else if (sha256(record) == contract.secretHash): contract has been redeemed
     //   else if (record == RefundRecord): contract has been refunded
     //   else: invalid record. Should be impossible by construction
     mapping(bytes32 => bytes32) public swaps;
@@ -104,7 +104,6 @@ contract ETHSwap {
         if (secretValidates(record, c.secretHash)) {
             return State.Redeemed;
         }
-        // Is it worth checking whether blockNum < block.number?
         return State.Filled;
     }
 
@@ -121,14 +120,14 @@ contract ETHSwap {
             require(c.value > 0, "0 val");
             require(c.refundTimestamp > 0, "0 refundTimestamp");
 
-            // Is this needed?
-            // require(msg.sender == c.initiator)
-
             bytes32 k = contractKey(c);
             bytes32 record = swaps[k];
             require(record == bytes32(0), "swap not empty");
 
-            swaps[k] = bytes32(block.number);
+            record = bytes32(block.number);
+            require(!secretValidates(record, c.secretHash), "hash collision");
+
+            swaps[k] = record;
 
             initVal += c.value * 1 gwei;
         }
@@ -171,7 +170,6 @@ contract ETHSwap {
             // To be redeemable, the record needs to represent a valid block
             // number.
             require(blockNum > 0 && blockNum < block.number, "unfilled swap");
-            // require(blockNum >> 32 == 0, "invalid swap format");
 
             // Can't already be redeemed.
             require(!secretValidates(record, r.c.secretHash), "already redeemed");

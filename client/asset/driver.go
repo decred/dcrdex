@@ -76,6 +76,9 @@ func Register(assetID uint32, driver Driver) {
 	if driver.Info().UnitInfo.Conventional.ConversionFactor == 0 {
 		panic(fmt.Sprint("asset: Registered driver doesn't have a conventional conversion factor set in the wallet info ", assetID))
 	}
+
+	fmt.Println("--Register'ing", assetID, driver.Info().UnitInfo)
+
 	drivers[assetID] = driver
 }
 
