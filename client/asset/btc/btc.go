@@ -496,7 +496,7 @@ func init() {
 }
 
 // ExchangeWallet is a wallet backend for Bitcoin. The backend is how the DEX
-// client app communicates with the BTC blockchain and wallet. ExchangeWallet
+// client app communicates with the BTC blockchain and wallet. baseWallet
 // satisfies the dex.Wallet interface.
 type ExchangeWallet struct {
 	// 64-bit atomic variables first. See
@@ -533,21 +533,41 @@ type ExchangeWallet struct {
 	findRedemptionQueue map[outPoint]*findRedemptionReq
 }
 
-// ExchangeWalletSPV embeds an ExchangeWallet, and also provides the Rescan
+// asyncRescanner is implemented by the built-in SPV wallet.
+type asyncRescanner interface {
+	rescanWalletAsync() error
+}
+
+// ExchangeWalletSPV embeds a ExchangeWallet, but also provides the Rescan
 // method to implement asset.Rescanner.
 type ExchangeWalletSPV struct {
 	*ExchangeWallet
+	scanner asyncRescanner
 }
+
+// ExchangeWalletFullNode implements Wallet and adds the FeeRate method.
+type ExchangeWalletFullNode struct {
+	*ExchangeWallet
+}
+
+// Check that wallets satisfy their supported interfaces.
+
+var _ asset.Wallet = (*ExchangeWallet)(nil)
+var _ asset.Rescanner = (*ExchangeWalletSPV)(nil)
+var _ asset.FeeRater = (*ExchangeWalletFullNode)(nil)
+var _ asset.LogFiler = (*ExchangeWalletSPV)(nil)
 
 // Rescan satisfies the asset.Rescanner interface, and issues a rescan wallet
 // command if the backend is an SPV wallet.
 func (btc *ExchangeWalletSPV) Rescan(_ context.Context) error {
-	// This will panic if not an spvWallet, which would indicate that
-	// openSPVWallet was not used to construct this instance.
-	w := btc.node.(*spvWallet)
 	atomic.StoreInt64(&btc.tipAtConnect, 0) // for progress
 	// Caller should start calling SyncStatus on a ticker.
-	return w.rescanWalletAsync()
+	return btc.scanner.rescanWalletAsync()
+}
+
+// FeeRate satisfies asset.FeeRater.
+func (btc *ExchangeWalletFullNode) FeeRate() (uint64, error) {
+	return btc.feeRate(nil, 1)
 }
 
 // LogFilePath returns the path to the neutrino log file.
@@ -592,9 +612,6 @@ type findRedemptionResult struct {
 	secret           dex.Bytes
 	err              error
 }
-
-// Check that ExchangeWallet satisfies the Wallet interface.
-var _ asset.Wallet = (*ExchangeWallet)(nil)
 
 func parseChainParams(net dex.Network) (*chaincfg.Params, error) {
 	switch net {
@@ -644,7 +661,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 // default network ports. A BTC clone can use this method, possibly in
 // conjunction with ReadCloneParams, to create a ExchangeWallet for other assets
 // with minimal coding.
-func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
+func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWalletFullNode, error) {
 	clientCfg, client, err := parseRPCWalletConfig(cfg.WalletCFG.Settings, cfg.Symbol, cfg.Network, cfg.Ports)
 	if err != nil {
 		return nil, err
@@ -671,14 +688,14 @@ func newRPCWalletConnection(cfg *RPCWalletConfig) (*rpcclient.Client, error) {
 }
 
 // newRPCWallet creates the ExchangeWallet and starts the block monitor.
-func newRPCWallet(requester RawRequesterWithContext, cfg *BTCCloneCFG, walletConfig *WalletConfig) (*ExchangeWallet, error) {
+func newRPCWallet(requester RawRequesterWithContext, cfg *BTCCloneCFG, walletConfig *WalletConfig) (*ExchangeWalletFullNode, error) {
 	btc, err := newUnconnectedWallet(cfg, walletConfig)
 	if err != nil {
 		return nil, err
 	}
 	btc.node = newRPCClient(requester, cfg.Segwit, btc.decodeAddr, cfg.ArglessChangeAddrRPC,
 		cfg.LegacyRawFeeLimit, cfg.MinNetworkVersion, cfg.Logger.SubLogger("RPC"), cfg.ChainParams)
-	return btc, nil
+	return &ExchangeWalletFullNode{btc}, nil
 }
 
 func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*ExchangeWallet, error) {
@@ -748,8 +765,6 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*ExchangeW
 	return w, nil
 }
 
-var _ asset.Wallet = (*ExchangeWallet)(nil)
-
 // openSPVWallet opens the previously created native SPV wallet.
 func openSPVWallet(cfg *BTCCloneCFG) (*ExchangeWalletSPV, error) {
 	walletCfg := new(WalletConfig)
@@ -768,14 +783,15 @@ func openSPVWallet(cfg *BTCCloneCFG) (*ExchangeWalletSPV, error) {
 		peers = append(peers, walletCfg.Peer)
 	}
 
-	btc.node = loadSPVWallet(cfg.WalletCFG.DataDir, cfg.Logger.SubLogger("SPV"), peers, cfg.ChainParams)
+	spvNode := loadSPVWallet(cfg.WalletCFG.DataDir, cfg.Logger.SubLogger("SPV"), peers, cfg.ChainParams)
 
-	return &ExchangeWalletSPV{btc}, nil
+	btc.node = spvNode
+
+	return &ExchangeWalletSPV{
+		ExchangeWallet: btc,
+		scanner:        spvNode,
+	}, nil
 }
-
-var _ asset.Wallet = (*ExchangeWalletSPV)(nil)
-var _ asset.Rescanner = (*ExchangeWalletSPV)(nil)
-var _ asset.LogFiler = (*ExchangeWalletSPV)(nil)
 
 // Info returns basic information about the wallet and asset.
 func (btc *ExchangeWallet) Info() *asset.WalletInfo {
@@ -962,21 +978,29 @@ func (a amount) String() string {
 	return strconv.FormatFloat(btcutil.Amount(a).ToBTC(), 'f', -1, 64) // dec, but no trailing zeros
 }
 
-// feeRateWithFallback attempts to get the optimal fee rate in sat / byte via
-// FeeRate. If that fails, it will return the configured fallback fee rate.
-func (btc *ExchangeWallet) feeRateWithFallback(confTarget, feeSuggestion uint64) uint64 {
+// targetFeeRateWithFallback attempts to get a fresh fee rate for the target
+// number of confirmations, but falls back to the suggestion or fallbackFeeRate
+// via feeRateWithFallback.
+func (btc *ExchangeWallet) targetFeeRateWithFallback(confTarget, feeSuggestion uint64) uint64 {
 	feeRate, err := btc.estimateFee(btc.node, confTarget)
 	if err == nil {
 		btc.log.Tracef("Obtained local estimate for %d-conf fee rate, %d", confTarget, feeRate)
 		return feeRate
 	}
-	if feeSuggestion > 0 && feeSuggestion < btc.fallbackFeeRate && feeSuggestion < btc.feeRateLimit {
-		btc.log.Tracef("feeRateWithFallback using caller's suggestion for %d-conf fee rate, %d. Local estimate unavailable (%q)",
-			confTarget, feeSuggestion, err)
+	btc.log.Tracef("no %d-conf feeRate available: %v", confTarget, err)
+	return btc.feeRateWithFallback(feeSuggestion)
+}
+
+// feeRateWithFallback filters the suggested fee rate by ensuring it is within
+// limits. If not, the configured fallbackFeeRate is returned and a warning
+// logged.
+func (btc *ExchangeWallet) feeRateWithFallback(feeSuggestion uint64) uint64 {
+	if feeSuggestion > 0 && feeSuggestion < btc.feeRateLimit {
+		btc.log.Tracef("feeRateWithFallback using caller's suggestion for fee rate, %d. Local estimate unavailable",
+			feeSuggestion)
 		return feeSuggestion
 	}
-	btc.log.Warnf("Unable to get optimal fee rate, using fallback of %d: %v",
-		btc.fallbackFeeRate, err)
+	btc.log.Warnf("Unable to get optimal fee rate, using fallback of %d", btc.fallbackFeeRate)
 	return btc.fallbackFeeRate
 }
 
@@ -1271,7 +1295,7 @@ func (btc *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, utx
 // PreRedeem generates an estimate of the range of redemption fees that could
 // be assessed.
 func (btc *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, error) {
-	feeRate := btc.feeRateWithFallback(btc.redeemConfTarget, req.FeeSuggestion)
+	feeRate := btc.targetFeeRateWithFallback(btc.redeemConfTarget, req.FeeSuggestion)
 	// Best is one transaction with req.Lots inputs and 1 output.
 	var best uint64 = dexbtc.MinimumTxOverhead
 	// Worst is req.Lots transactions, each with one input and one output.
@@ -1418,7 +1442,7 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 			// TODO
 			// 1.0: Error when no suggestion.
 			// return nil, nil, fmt.Errorf("cannot do a split transaction without a fee rate suggestion from the server")
-			splitFeeRate = btc.feeRateWithFallback(btc.redeemConfTarget, 0)
+			splitFeeRate = btc.targetFeeRateWithFallback(btc.redeemConfTarget, 0)
 			// We PreOrder checked this as <= MaxFeeRate, so use that as an
 			// upper limit.
 			if splitFeeRate > ord.DEXConfig.MaxFeeRate {
@@ -2003,7 +2027,7 @@ func (btc *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 		return nil, nil, 0, fmt.Errorf("error parsing selected swap options: %w", err)
 	}
 
-	rawFeeRate := btc.feeRateWithFallback(btc.redeemConfTarget, form.FeeSuggestion)
+	rawFeeRate := btc.targetFeeRateWithFallback(btc.redeemConfTarget, form.FeeSuggestion)
 	feeRate, err := calcBumpedRate(rawFeeRate, customCfg.FeeBump)
 	if err != nil {
 		btc.log.Errorf("calcBumpRate error: %v", err)
@@ -2526,7 +2550,7 @@ func (btc *ExchangeWallet) refundTx(txHash *chainhash.Hash, vout uint32, contrac
 	}
 
 	// Create the transaction that spends the contract.
-	feeRate := btc.feeRateWithFallback(2, feeSuggestion) // meh level urgency
+	feeRate := btc.targetFeeRateWithFallback(2, feeSuggestion) // meh level urgency
 	msgTx := wire.NewMsgTx(wire.TxVersion)
 	msgTx.LockTime = uint32(lockTime)
 	prevOut := wire.NewOutPoint(txHash, vout)
@@ -2607,8 +2631,8 @@ func (btc *ExchangeWallet) NewAddress() (string, error) {
 
 // PayFee sends the dex registration fee. Transaction fees are in addition to
 // the registration fee, and the fee rate is taken from the DEX configuration.
-func (btc *ExchangeWallet) PayFee(address string, regFee, feeRateSuggestion uint64) (asset.Coin, error) {
-	txHash, vout, sent, err := btc.send(address, regFee, btc.feeRateWithFallback(1, feeRateSuggestion), false)
+func (btc *ExchangeWallet) PayFee(address string, regFee, feeRate uint64) (asset.Coin, error) {
+	txHash, vout, sent, err := btc.send(address, regFee, btc.feeRateWithFallback(feeRate), false)
 	if err != nil {
 		btc.log.Errorf("PayFee error - address = '%s', fee = %s: %v", address, amount(regFee), err)
 		return nil, err
@@ -2618,8 +2642,8 @@ func (btc *ExchangeWallet) PayFee(address string, regFee, feeRateSuggestion uint
 
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
 // the value. feeRate is in units of atoms/byte.
-func (btc *ExchangeWallet) Withdraw(address string, value, feeSuggestion uint64) (asset.Coin, error) {
-	txHash, vout, sent, err := btc.send(address, value, btc.feeRateWithFallback(2, feeSuggestion), true)
+func (btc *ExchangeWallet) Withdraw(address string, value, feeRate uint64) (asset.Coin, error) {
+	txHash, vout, sent, err := btc.send(address, value, btc.feeRateWithFallback(feeRate), true)
 	if err != nil {
 		btc.log.Errorf("Withdraw error - address = '%s', amount = %s: %v", address, amount(value), err)
 		return nil, err
