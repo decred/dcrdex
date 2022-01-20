@@ -670,8 +670,16 @@ export default class Application {
     }
   }
 
-  /* unitInfo fetches unit info [dex.UnitInfo] for the asset */
-  unitInfo (assetID) { return this.assets[assetID].info.unitinfo }
+  /*
+   * unitInfo fetches unit info [dex.UnitInfo] for the asset. If xc
+   * [core.Exchange] is provided, and this is not a SupportedAsset, the UnitInfo
+   * sent from the exchange's assets map [dex.Asset] will be used.
+   */
+  unitInfo (assetID, xc) {
+    const supportedAsset = this.assets[assetID]
+    if (supportedAsset) return supportedAsset.info.unitinfo
+    return xc.assets[assetID].unitInfo
+  }
 
   /* conventionalRate converts the encoded atomic rate to a conventional rate */
   conventionalRate (baseID, quoteID, encRate) {
