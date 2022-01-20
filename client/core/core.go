@@ -6215,15 +6215,16 @@ func (c *Core) cacheRedemptionFeeSuggestion(t *trackedTrade) {
 
 // convertAssetInfo converts from a *msgjson.Asset to the nearly identical
 // *dex.Asset.
-func convertAssetInfo(asset *msgjson.Asset) *dex.Asset {
+func convertAssetInfo(ai *msgjson.Asset) *dex.Asset {
 	return &dex.Asset{
-		ID:           asset.ID,
-		Symbol:       asset.Symbol,
-		Version:      asset.Version,
-		MaxFeeRate:   asset.MaxFeeRate,
-		SwapSize:     asset.SwapSize,
-		SwapSizeBase: asset.SwapSizeBase,
-		SwapConf:     uint32(asset.SwapConf),
+		ID:           ai.ID,
+		Symbol:       ai.Symbol,
+		Version:      ai.Version,
+		MaxFeeRate:   ai.MaxFeeRate,
+		SwapSize:     ai.SwapSize,
+		SwapSizeBase: ai.SwapSizeBase,
+		SwapConf:     uint32(ai.SwapConf),
+		UnitInfo:     ai.UnitInfo,
 	}
 }
 

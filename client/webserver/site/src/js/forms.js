@@ -480,9 +480,9 @@ export class FeeAssetSelectionForm {
       const marketTmpl = Doc.parseTemplate(marketNode)
 
       const baseAsset = xc.assets[mkt.baseid]
-      const baseUnitInfo = unitInfo(xc, mkt.baseid)
+      const baseUnitInfo = app().unitInfo(mkt.baseid, xc)
       const quoteAsset = xc.assets[mkt.quoteid]
-      const quoteUnitInfo = unitInfo(xc, mkt.quoteid)
+      const quoteUnitInfo = app().unitInfo(mkt.quoteid, xc)
 
       if (cFactor(baseUnitInfo) === 0 || cFactor(quoteUnitInfo) === 0) return null
 
@@ -1002,12 +1002,4 @@ export function bind (form, submitBttn, handler) {
 // value representing true.
 function isTruthyString (s) {
   return s === '1' || s.toLowerCase() === 'true'
-}
-
-function unitInfo (xc, assetID) {
-  const dexAsset = xc.assets[assetID]
-  if (dexAsset && dexAsset.unitInfo.conventional.conversionFactor > 0) return dexAsset.unitInfo
-  const supportedAsset = app().assets[assetID]
-  if (!supportedAsset) return null
-  return supportedAsset.info.unitinfo
 }

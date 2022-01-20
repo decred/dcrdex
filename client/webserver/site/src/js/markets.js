@@ -426,8 +426,7 @@ export default class MarketsPage extends BasePage {
     Doc.hide(page.orderForm)
     const feePaid = !this.hasFeePending()
     const assetsAreSupported = this.assetsAreSupported()
-    const base = this.market.base
-    const quote = this.market.quote
+    const { base, quote } = this.market
     const hasWallets = base && app().assets[base.id].wallet && quote && app().assets[quote.id].wallet
 
     if (feePaid && assetsAreSupported && hasWallets) {
@@ -550,8 +549,10 @@ export default class MarketsPage extends BasePage {
 
     const baseCfg = dex.assets[base]
     const quoteCfg = dex.assets[quote]
-    const [baseAsset, quoteAsset] = [app().assets[base], app().assets[quote]]
-    const rateConversionFactor = Order.RateEncodingFactor / baseAsset.info.unitinfo.conventional.conversionFactor * quoteAsset.info.unitinfo.conventional.conversionFactor
+
+    const [bui, qui] = [app().unitInfo(base, dex), app().unitInfo(quote, dex)]
+
+    const rateConversionFactor = Order.RateEncodingFactor / bui.conventional.conversionFactor * qui.conventional.conversionFactor
     Doc.hide(page.maxOrd, page.chartErrMsg)
     if (this.maxEstimateTimer) {
       window.clearTimeout(this.maxEstimateTimer)
@@ -564,8 +565,10 @@ export default class MarketsPage extends BasePage {
       cfg: dex.markets[mktId],
       // app().assets is a map of core.SupportedAsset type, which can be found at
       // client/core/types.go.
-      base: baseAsset,
-      quote: quoteAsset,
+      base: app().assets[base],
+      quote: app().assets[quote],
+      baseUnitInfo: bui,
+      quoteUnitInfo: qui,
       maxSell: null,
       maxBuys: {},
       candleCaches: {},
@@ -603,8 +606,7 @@ export default class MarketsPage extends BasePage {
    */
   reportDepthVolume (d) {
     const page = this.page
-    const { base, quote } = this.market
-    const [b, q] = [base.info.unitinfo, quote.info.unitinfo]
+    const { baseUnitInfo: b, quoteUnitInfo: q } = this.market
     // DepthChart reports volumes in conventional units. We'll still use
     // formatCoinValue for formatting though.
     page.sellBookedBase.textContent = Doc.formatCoinValue(d.sellBase * b.conventional.conversionFactor, b)
@@ -662,7 +664,7 @@ export default class MarketsPage extends BasePage {
     page.candleEnd.textContent = Doc.formatCoinValue(candle.endRate / this.market.rateConversionFactor)
     page.candleHigh.textContent = Doc.formatCoinValue(candle.highRate / this.market.rateConversionFactor)
     page.candleLow.textContent = Doc.formatCoinValue(candle.lowRate / this.market.rateConversionFactor)
-    page.candleVol.textContent = Doc.formatCoinValue(candle.matchVolume, this.market.base.info.unitinfo)
+    page.candleVol.textContent = Doc.formatCoinValue(candle.matchVolume, this.market.baseUnitInfo)
     Doc.show(page.hoverData)
   }
 
@@ -685,7 +687,7 @@ export default class MarketsPage extends BasePage {
       sell: sell,
       base: market.base.id,
       quote: market.quote.id,
-      qty: convertConventional(qtyField.value, conventionalFactor(market.base)),
+      qty: convertConventional(qtyField.value, market.baseUnitInfo.conventional.conversionFactor),
       rate: convertConventional(page.rateField.value, market.rateConversionFactor), // message-rate
       tifnow: page.tifNow.checked,
       options: this.orderOpts
@@ -719,7 +721,7 @@ export default class MarketsPage extends BasePage {
     }
     const quoteAsset = app().assets[order.quote]
     const quoteQty = order.qty * order.rate / Order.RateEncodingFactor
-    const total = Doc.formatCoinValue(quoteQty, this.market.quote.info.unitinfo)
+    const total = Doc.formatCoinValue(quoteQty, this.market.quoteUnitInfo)
 
     page.orderPreview.textContent = intl.prep(intl.ID_ORDER_PREVIEW, { total, asset: quoteAsset.symbol.toUpperCase() })
     if (this.isSell()) this.preSell()
@@ -865,7 +867,7 @@ export default class MarketsPage extends BasePage {
 
   /* handleBook accepts the data sent in the 'book' notification. */
   handleBook (data) {
-    const { cfg, base, quote, baseCfg, quoteCfg } = this.market
+    const { cfg, baseUnitInfo, quoteUnitInfo, baseCfg, quoteCfg } = this.market
     this.book = new OrderBook(data, baseCfg.symbol, quoteCfg.symbol)
     this.loadTable()
     for (const order of (data.book.epoch || [])) {
@@ -878,7 +880,7 @@ export default class MarketsPage extends BasePage {
       Doc.empty(this.page.sellRows)
       return
     }
-    this.depthChart.set(this.book, cfg.lotsize, cfg.ratestep, base.info.unitinfo, quote.info.unitinfo)
+    this.depthChart.set(this.book, cfg.lotsize, cfg.ratestep, baseUnitInfo, quoteUnitInfo)
   }
 
   /*
@@ -889,8 +891,8 @@ export default class MarketsPage extends BasePage {
   midGapConventional () {
     const gap = this.midGap()
     if (!gap) return gap
-    const { base, quote } = this.market
-    return gap * base.info.unitinfo.conventional.conversionFactor / quote.info.unitinfo.conventional.conversionFactor
+    const { baseUnitInfo: b, quoteUnitInfo: q } = this.market
+    return gap * b.conventional.conversionFactor / q.conventional.conversionFactor
   }
 
   /*
@@ -925,7 +927,7 @@ export default class MarketsPage extends BasePage {
     const buffer = xc.markets[market.sid].buybuffer
     const gap = this.midGapConventional()
     if (gap) {
-      this.page.minMktBuy.textContent = Doc.formatCoinValue(lotSize * buffer * gap, market.base.info.unitinfo)
+      this.page.minMktBuy.textContent = Doc.formatCoinValue(lotSize * buffer * gap, market.baseUnitInfo)
     }
   }
 
@@ -1009,7 +1011,7 @@ export default class MarketsPage extends BasePage {
     updateDataCol(tr, 'side', Order.sellString(ord))
     updateDataCol(tr, 'age', Doc.timeSince(ord.stamp))
     updateDataCol(tr, 'rate', Doc.formatCoinValue(ord.rate / this.market.rateConversionFactor))
-    updateDataCol(tr, 'qty', Doc.formatCoinValue(ord.qty, this.market.base.info.unitinfo))
+    updateDataCol(tr, 'qty', Doc.formatCoinValue(ord.qty, this.market.baseUnitInfo))
     updateDataCol(tr, 'filled', `${(ord.filled / ord.qty * 100).toFixed(1)}%`)
     updateDataCol(tr, 'settled', `${(Order.settled(ord) / ord.qty * 100).toFixed(1)}%`)
     updateDataCol(tr, 'status', Order.statusString(ord))
@@ -1051,8 +1053,7 @@ export default class MarketsPage extends BasePage {
     const midGapValue = this.midGapConventional()
     if (!midGapValue) return
 
-    const market = this.market
-    const [b, q] = [market.baseCfg, market.quoteCfg]
+    const { baseCfg: b, quoteCfg: q } = this.market
     const baseSymb = b.symbol.toUpperCase()
     const quoteSymb = q.symbol.toUpperCase()
     // more than 6 numbers it gets too big for the title.
@@ -1083,7 +1084,7 @@ export default class MarketsPage extends BasePage {
       quote: mktBook.quote
     })
 
-    page.lotSize.textContent = Doc.formatCoinValue(market.cfg.lotsize, market.base.info.unitinfo)
+    page.lotSize.textContent = Doc.formatCoinValue(market.cfg.lotsize, market.baseUnitInfo)
     page.rateStep.textContent = Doc.formatCoinValue(market.cfg.ratestep / market.rateConversionFactor)
     this.baseUnits.forEach(el => { el.textContent = b.symbol.toUpperCase() })
     this.quoteUnits.forEach(el => { el.textContent = q.symbol.toUpperCase() })
@@ -1157,7 +1158,7 @@ export default class MarketsPage extends BasePage {
     const dur = data.payload.dur
     this.market.candleCaches[dur] = data.payload
     if (this.currentChart !== candleChart || this.candleDur !== dur) return
-    this.candleChart.setCandles(data.payload, this.market.cfg, this.market.base.info.unitinfo, this.market.quote.info.unitinfo)
+    this.candleChart.setCandles(data.payload, this.market.cfg, this.market.baseUnitInfo, this.market.quoteUnitInfo)
   }
 
   /* handleCandleUpdateRoute is the handler for 'candle_update' notifications. */
@@ -1591,13 +1592,13 @@ export default class MarketsPage extends BasePage {
     const mkt = this.market
     const avail = note.balance.available
     switch (note.assetID) {
-      case mkt.base.id:
+      case mkt.baseCfg.id:
         // If we're not showing the max order panel yet, don't do anything.
         if (!mkt.maxSell) break
         if (typeof mkt.sellBalance === 'number' && mkt.sellBalance !== avail) mkt.maxSell = null
         if (this.isSell()) this.preSell()
         break
-      case mkt.quote.id:
+      case mkt.quoteCfg.id:
         if (!Object.keys(mkt.maxBuys).length) break
         if (typeof mkt.buyBalance === 'number' && mkt.buyBalance !== avail) mkt.maxBuys = {}
         if (!this.isSell()) this.preBuy()
@@ -1675,7 +1676,7 @@ export default class MarketsPage extends BasePage {
     }
     const lotSize = this.market.cfg.lotsize
     page.lotField.value = lots
-    page.qtyField.value = Doc.formatCoinValue(lots * lotSize, this.market.base.info.unitinfo)
+    page.qtyField.value = Doc.formatCoinValue(lots * lotSize, this.market.baseUnitInfo)
     this.previewQuoteAmt(true)
   }
 
@@ -1696,7 +1697,7 @@ export default class MarketsPage extends BasePage {
     const adjusted = lots * lotSize
     page.lotField.value = lots
     if (!order.isLimit && !order.sell) return
-    if (finalize) page.qtyField.value = Doc.formatCoinValue(adjusted, this.market.base.info.unitinfo)
+    if (finalize) page.qtyField.value = Doc.formatCoinValue(adjusted, this.market.baseUnitInfo)
     this.previewQuoteAmt(true)
   }
 
@@ -1706,7 +1707,7 @@ export default class MarketsPage extends BasePage {
    */
   marketBuyChanged () {
     const page = this.page
-    const qty = convertConventional(page.mktBuyField.value, conventionalFactor(this.market.quote))
+    const qty = convertConventional(page.mktBuyField.value, this.market.quoteUnitInfo.conventional.conversionFactor)
     const gap = this.midGap()
     if (!gap || !qty) {
       page.mktBuyLots.textContent = '0'
@@ -1716,7 +1717,7 @@ export default class MarketsPage extends BasePage {
     const lotSize = this.market.cfg.lotsize
     const received = qty / gap
     page.mktBuyLots.textContent = (received / lotSize).toFixed(1)
-    page.mktBuyScore.textContent = Doc.formatCoinValue(received, this.market.base.info.unitinfo)
+    page.mktBuyScore.textContent = Doc.formatCoinValue(received, this.market.baseUnitInfo)
   }
 
   /*
@@ -1878,8 +1879,8 @@ export default class MarketsPage extends BasePage {
    */
   orderTableRow (orderBin) {
     const tr = this.page.rowTemplate.cloneNode(true)
-    const { base, rateConversionFactor } = this.market
-    const manager = new OrderTableRowManager(tr, orderBin, base.info.unitinfo, rateConversionFactor)
+    const { baseUnitInfo, rateConversionFactor } = this.market
+    const manager = new OrderTableRowManager(tr, orderBin, baseUnitInfo, rateConversionFactor)
     tr.manager = manager
     bind(tr, 'click', () => {
       this.reportDepthClick(tr.manager.getRate() / rateConversionFactor)
@@ -1991,8 +1992,8 @@ export default class MarketsPage extends BasePage {
         }
       }, 10000)
     }
-    const { dex, base, quote } = this.market
-    ws.request('loadcandles', { host: dex.host, base: base.id, quote: quote.id, dur: this.candleDur })
+    const { dex, baseCfg, quoteCfg } = this.market
+    ws.request('loadcandles', { host: dex.host, base: baseCfg.id, quote: quoteCfg.id, dur: this.candleDur })
   }
 
   /*
@@ -2337,12 +2338,6 @@ function makeMarket (host, base, quote) {
 
 /* marketID creates a DEX-compatible market name from the ticker symbols. */
 export function marketID (b, q) { return `${b}_${q}` }
-
-/*
- * conventionalFactor picks out the conversion factor for conventional units for
- * the asset [core.SupportedAsset].
- */
-function conventionalFactor (asset) { return asset.info.unitinfo.conventional.conversionFactor }
 
 /* convertConventional converts the float string to atoms. */
 function convertConventional (s, conversionFactor) {
