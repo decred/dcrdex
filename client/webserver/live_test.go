@@ -218,6 +218,7 @@ func mkDexAsset(symbol string) *dex.Asset {
 		SwapSize:     uint64(rand.Intn(150) + 150),
 		SwapSizeBase: uint64(rand.Intn(150) + 15),
 		SwapConf:     uint32(rand.Intn(5) + 2),
+		UnitInfo:     dex.UnitInfo{Conventional: dex.Denomination{ConversionFactor: 1e8}},
 	}
 	return a
 }
