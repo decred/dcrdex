@@ -102,6 +102,22 @@ NUM=1
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/mine-alpha"
 
+# A node ctl config only exists for beta because some node functions are not
+# accessible through the beta spv wallet.
+cat > "${NODES_ROOT}/beta/beta_node-ctl.conf" <<EOF
+rpcuser=${RPC_USER}
+rpcpass=${RPC_PASS}
+rpccert="${NODES_ROOT}/beta/rpc.cert"
+rpcserver=127.0.0.1:${BETA_NODE_RPC_PORT}
+EOF
+
+# node ctl script
+cat > "${NODES_ROOT}/harness-ctl/beta_node" <<EOF
+#!/usr/bin/env bash
+dcrctl -C "${NODES_ROOT}/beta/beta_node-ctl.conf" \$*
+EOF
+chmod +x "${NODES_ROOT}/harness-ctl/beta_node"
+
 # Beta mine script
 cat > "${NODES_ROOT}/harness-ctl/mine-beta" <<EOF
 #!/usr/bin/env bash
@@ -111,9 +127,9 @@ NUM=1
       *) NUM=\$1 ;;
   esac
   for i in \$(seq \$NUM) ; do
-    dcrctl -C ${NODES_ROOT}/beta/beta-ctl.conf regentemplate
+    dcrctl -C ${NODES_ROOT}/beta/beta_node-ctl.conf regentemplate
     sleep 0.05
-    dcrctl -C ${NODES_ROOT}/beta/beta-ctl.conf generate 1
+    dcrctl -C ${NODES_ROOT}/beta/beta_node-ctl.conf generate 1
     if [ $i != $NUM ]; then
       sleep ${MINE_SLEEP}
     fi
@@ -128,7 +144,7 @@ chmod +x "${NODES_ROOT}/harness-ctl/mine-beta"
 # really other than just voting on tickets purchased with the alpha wallet.
 cat > "${NODES_ROOT}/harness-ctl/clone-w-alpha" <<EOF
 "${HARNESS_DIR}/create-wallet" "$SESSION:7" "alpha-clone" ${ALPHA_WALLET_SEED} \
-${ALPHA_WALLET_CLONE_RPC_PORT} 1 # ENABLE_VOTING=1 enables voting but not ticket buyer
+${ALPHA_WALLET_CLONE_RPC_PORT} 0 1 # ENABLE_VOTING=1 enables voting but not ticket buyer
 tmux select-window -t $SESSION:0 # return to the ctl window
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/clone-w-alpha"
@@ -150,10 +166,10 @@ if [ "\$2" != "" ]; then
 fi
 
 echo "Current alpha, beta best blocks"
-./alpha getbestblock && ./beta getbestblock
+./alpha getbestblock && ./beta_node getbestblock
 
 echo "Disconnecting beta from alpha"
-./beta addnode 127.0.0.1:${ALPHA_NODE_PORT} remove
+./beta_node addnode 127.0.0.1:${ALPHA_NODE_PORT} remove
 sleep 1
 
 # Start the alpha wallet clone to enable the beta node receive
@@ -169,7 +185,7 @@ echo "Mining \$((REORG_DEPTH+1)) blocks on \${VALID_NODE}"
 ./mine-\${VALID_NODE} \$((REORG_DEPTH+1))
 sleep 1
 
-echo "Diverged alpha, beta best blocks" && ./alpha getbestblock && ./beta getbestblock
+echo "Diverged alpha, beta best blocks" && ./alpha getbestblock && ./beta_node getbestblock
 
 # Stop alpha wallet clone, no longer needed.
 echo "Stopping alpha-clone wallet"
@@ -177,10 +193,10 @@ tmux send-keys -t $SESSION:7 C-c
 tmux send-keys -t $SESSION:7 exit C-m
 
 echo "Reconnecting beta to alpha"
-./beta addnode 127.0.0.1:${ALPHA_NODE_PORT} add
+./beta_node addnode 127.0.0.1:${ALPHA_NODE_PORT} add
 sleep 1
 
-echo "Reconnected alpha, beta best blocks" && ./alpha getbestblock && ./beta getbestblock
+echo "Reconnected alpha, beta best blocks" && ./alpha getbestblock && ./beta_node getbestblock
 
 echo "${NODES_ROOT}/\${REORG_NODE}/logs/simnet/dcrd.log:"
 grep REORG ${NODES_ROOT}/\${REORG_NODE}/logs/simnet/dcrd.log | tail -4
