@@ -699,6 +699,7 @@ export default class MarketsPage extends BasePage {
    */
   previewQuoteAmt (show) {
     const page = this.page
+    if (!this.market.base || !this.market.quote) return // Not a supported asset
     const order = this.parseOrder()
     const adjusted = this.adjustedRate()
     page.orderErr.textContent = ''
