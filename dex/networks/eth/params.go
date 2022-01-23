@@ -48,7 +48,7 @@ var (
 		0: {
 			dex.Mainnet: common.Address{},
 			dex.Simnet:  common.HexToAddress("0x2f68e723b8989ba1c6a9f03e42f33cb7dc9d606f"),
-			dex.Testnet: common.Address{},
+			dex.Testnet: common.HexToAddress("0xa483b6166dA8Da6748B29Af35f96C4F9388c456C"),
 		},
 	}
 )
