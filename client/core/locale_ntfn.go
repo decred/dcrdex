@@ -52,7 +52,12 @@ var enUS = map[Topic]*translation{
 	// [host, error]
 	TopicWalletUnlockError: {
 		subject:  "Wallet unlock error",
-		template: "Connected to Decred wallet to complete registration at %s, but failed to unlock: %v",
+		template: "Connected to wallet to complete registration at %s, but failed to unlock: %v",
+	},
+	// [asset name]
+	TopicWalletPeersWarning: {
+		subject:  "Wallet network issue",
+		template: "%v wallet has no network peers!",
 	},
 	// [ticker, error]
 	TopicWithdrawError: {
@@ -338,7 +343,7 @@ var ptBR = map[Topic]*translation{
 	// [host, error]
 	TopicWalletUnlockError: {
 		subject:  "Erro ao Destravar Carteira",
-		template: "Conectado com carteira decred para completar o registro em %s, mas falha ao destrancar: %v",
+		template: "Conectado com carteira para completar o registro em %s, mas falha ao destrancar: %v",
 	},
 	// [ticker, error]
 	TopicWithdrawError: {

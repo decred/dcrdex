@@ -50,6 +50,8 @@ type xcWallet struct {
 	balance      *WalletBalance
 	pw           encode.PassBytes
 	address      string
+	peerCount    uint32
+	monitored    uint32 // startWalletSyncMonitor goroutines monitoring sync status
 	hookedUp     bool
 	synced       bool
 	syncProgress float32
@@ -176,6 +178,7 @@ func (w *xcWallet) state() *WalletState {
 		Address:      w.address,
 		Units:        winfo.UnitInfo.AtomicUnit,
 		Encrypted:    len(w.encPass) > 0,
+		PeerCount:    w.peerCount,
 		Synced:       w.synced,
 		SyncProgress: w.syncProgress,
 		WalletType:   w.walletType,

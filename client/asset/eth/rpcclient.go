@@ -72,6 +72,10 @@ func (c *rpcclient) bestBlockHash(ctx context.Context) (common.Hash, error) {
 	return header.Hash(), nil
 }
 
+func (c *rpcclient) peerCount() uint32 {
+	return uint32(c.n.Server().PeerCount())
+}
+
 // bestHeader gets the best header at the time of calling.
 func (c *rpcclient) bestHeader(ctx context.Context) (*types.Header, error) {
 	bn, err := c.ec.BlockNumber(ctx)

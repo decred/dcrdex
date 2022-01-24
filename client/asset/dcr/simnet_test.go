@@ -74,6 +74,9 @@ func tBackend(t *testing.T, name string, blkFunc func(string, error)) (*Exchange
 		TipChange: func(err error) {
 			blkFunc(name, err)
 		},
+		PeersChange: func(num uint32) {
+			t.Log("peer count: ", num)
+		},
 	}
 	var backend asset.Wallet
 	backend, err = NewWallet(walletCfg, tLogger, dex.Simnet)

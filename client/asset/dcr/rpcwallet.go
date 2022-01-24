@@ -40,6 +40,7 @@ const (
 	methodListLockUnspent    = "listlockunspent"
 	methodSignRawTransaction = "signrawtransaction"
 	methodSyncStatus         = "syncstatus"
+	methodGetPeerInfo        = "getpeerinfo"
 )
 
 // rpcWallet implements Wallet functionality using an rpc client to communicate
@@ -480,6 +481,7 @@ func (w *rpcWallet) GetNewAddressGapPolicy(ctx context.Context, account string, 
 // SignRawTransaction signs the provided transaction using rpc RawRequest.
 // Part of the Wallet interface.
 func (w *rpcWallet) SignRawTransaction(ctx context.Context, txHex string) (*walletjson.SignRawTransactionResult, error) {
+	// w.rpcClient.SignRawTransaction exists
 	var res walletjson.SignRawTransactionResult
 	err := w.rpcClientRawRequest(ctx, methodSignRawTransaction, anylist{txHex}, &res)
 	return &res, err
@@ -618,7 +620,24 @@ func (w *rpcWallet) SyncStatus(ctx context.Context) (bool, float32, error) {
 		return false, 0, fmt.Errorf("rawrequest error: %w", err)
 	}
 	ready := syncStatus.Synced && !syncStatus.InitialBlockDownload
-	return ready, syncStatus.HeadersFetchProgress, nil
+	if !ready {
+		return false, syncStatus.HeadersFetchProgress, nil
+	}
+	// It looks like we are ready based on syncstatus, but that may just be
+	// comparing wallet height to known chain height. Now check peers.
+	numPeers, err := w.PeerCount(ctx)
+	if err != nil {
+		return false, 0, err
+	}
+	return numPeers > 0, syncStatus.HeadersFetchProgress, nil
+}
+
+// PeerCount returns the number of network peers to which the wallet or its
+// backing node are connected.
+func (w *rpcWallet) PeerCount(ctx context.Context) (uint32, error) {
+	var peerInfo []*walletjson.GetPeerInfoResult
+	err := w.rpcClientRawRequest(ctx, methodGetPeerInfo, nil, &peerInfo)
+	return uint32(len(peerInfo)), err
 }
 
 // AddressPrivKey fetches the privkey for the specified address.

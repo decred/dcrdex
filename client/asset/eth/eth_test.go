@@ -105,6 +105,9 @@ func (n *testNode) blockNumber(ctx context.Context) (uint64, error) {
 func (n *testNode) syncProgress(ctx context.Context) (*ethereum.SyncProgress, error) {
 	return n.syncProg, n.syncProgErr
 }
+func (n *testNode) peerCount() uint32 {
+	return 1
+}
 func (n *testNode) pendingTransactions(ctx context.Context) ([]*types.Transaction, error) {
 	return nil, nil
 }
@@ -263,7 +266,7 @@ func TestSyncStatus(t *testing.T) {
 		wantRatio: 0.25,
 	}, {
 		name:    "ok header too old",
-		subSecs: dexeth.MaxBlockInterval,
+		subSecs: dexeth.MaxBlockInterval + 1,
 	}, {
 		name:       "best header error",
 		bestHdrErr: errors.New(""),
@@ -275,7 +278,7 @@ func TestSyncStatus(t *testing.T) {
 	}}
 
 	for _, test := range tests {
-		nowInSecs := uint64(time.Now().Unix() / 1000)
+		nowInSecs := uint64(time.Now().Unix())
 		ctx, cancel := context.WithCancel(context.Background())
 		node := &testNode{
 			syncProg:    test.syncProg,

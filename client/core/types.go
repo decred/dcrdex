@@ -106,6 +106,7 @@ type WalletState struct {
 	Address      string            `json:"address"`
 	Units        string            `json:"units"`
 	Encrypted    bool              `json:"encrypted"`
+	PeerCount    uint32            `json:"peerCount"`
 	Synced       bool              `json:"synced"`
 	SyncProgress float32           `json:"syncProgress"`
 }

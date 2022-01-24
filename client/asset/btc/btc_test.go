@@ -246,6 +246,10 @@ type tRawRequester struct {
 func (c *tRawRequester) RawRequest(_ context.Context, method string, params []json.RawMessage) (json.RawMessage, error) {
 	switch method {
 	// TODO: handle methodGetBlockHash and add actual tests to cover it.
+	case methodGetNetworkInfo:
+		return json.Marshal(&btcjson.GetNetworkInfoResult{
+			Connections: 1,
+		})
 	case methodEstimateSmartFee:
 		if c.testData.estFeeErr != nil {
 			return nil, c.testData.estFeeErr
@@ -579,6 +583,9 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWallet, *testData, fun
 			case data.tipChanged <- struct{}{}:
 			default:
 			}
+		},
+		PeersChange: func(num uint32) {
+			fmt.Println("peer count: ", num)
 		},
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)

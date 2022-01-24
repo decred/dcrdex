@@ -47,6 +47,9 @@ const (
 	methodGetBestBlockHash   = "getbestblockhash"
 	methodGetRawMempool      = "getrawmempool"
 	methodGetRawTransaction  = "getrawtransaction"
+	methodGetBlockHeader     = "getblockheader"
+	methodGetNetworkInfo     = "getnetworkinfo"
+	methodGetBlockchainInfo  = "getblockchaininfo"
 )
 
 // RawRequester defines decred's rpcclient RawRequest func where all RPC
@@ -530,6 +533,17 @@ func (wc *rpcClient) getBlockHeight(blockHash *chainhash.Hash) (int32, error) {
 		return -1, fmt.Errorf("block is not a mainchain block")
 	}
 	return int32(hdr.Height), nil
+}
+
+func (wc *rpcClient) peerCount() (uint32, error) {
+	var r struct {
+		Connections uint32 `json:"connections"`
+	}
+	err := wc.call(methodGetNetworkInfo, nil, &r)
+	if err != nil {
+		return 0, err
+	}
+	return r.Connections, nil
 }
 
 // getBlockchainInfo sends the getblockchaininfo request and returns the result.
