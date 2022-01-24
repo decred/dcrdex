@@ -622,6 +622,7 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 		hookedUp:     true,
 		dbID:         encode.Uint32Bytes(assetID),
 		encPass:      []byte{0x01},
+		peerCount:    1,
 		synced:       true,
 		syncProgress: 1,
 		pw:           tPW,
@@ -2368,6 +2369,9 @@ func TestTrade(t *testing.T) {
 	tCore.wallets[tDCR.ID] = dcrWallet
 	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
 	dcrWallet.Unlock(rig.crypter)
+	_ = dcrWallet.Connect() // connector will panic on Wait, and sync status goroutines will exit if disconnected
+	defer dcrWallet.Disconnect()
+	syncTickerPeriod = 10 * time.Millisecond
 
 	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
@@ -2495,6 +2499,34 @@ func TestTrade(t *testing.T) {
 	}
 	if tCore.CloseWallet(tBTC.ID) == nil {
 		t.Fatalf("no error for closing BTC wallet with active orders")
+	}
+
+	// We want to set peerCount to 0, but we'll do this the hard way to ensure
+	// the peerChange handler works as intended.
+	// dcrWallet.mtx.Lock()
+	// dcrWallet.peerCount = 0
+	// dcrWallet.mtx.Unlock()
+	tCore.peerChange(dcrWallet, 0)
+	_, err = tCore.Trade(tPW, form)
+	if err == nil {
+		t.Fatalf("no error for no peers")
+	}
+	ch := tCore.NotificationFeed() // detect when sync goroutine completes
+	tCore.peerChange(dcrWallet, 1)
+
+	// Wait for the balance update note when the sync status goroutine flags the
+	// wallet as synced and returns.
+wait:
+	for {
+		select {
+		case note := <-ch:
+			t.Log(note)
+			if note.Topic() == TopicBalanceUpdated {
+				break wait
+			}
+		case <-time.After(time.Second):
+			t.Fatal("no balance note from sync status monitor")
+		}
 	}
 
 	// Dex not found

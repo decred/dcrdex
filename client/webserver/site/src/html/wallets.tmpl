@@ -9,6 +9,7 @@
     <span data-state="syncing" 
       class="ico-sync fs12{{if or (not $w.Running) $w.Synced}} d-hide{{end}}"
       data-tooltip="wallet is {{printf "%.2f" (x100  $w.SyncProgress)}}% synced"></span>
+    <span data-state="nopeers" class="ico-disconnected fs17 d-hide" data-tooltip="no peers!"></span>
     <span data-state="status" class="txt-status">{{if $w.Open}}[[[ready]]]{{else if $w.Running}}[[[locked]]]{{else}}[[[off]]]{{end}}</span>
   {{else}}
     <span data-state="sleeping" class="ico-sleeping fs17 grey d-hide"></span>
@@ -16,6 +17,7 @@
     <span data-state="unlocked" class="ico-unlocked d-hide"></span>
     <span data-state="nowallet" class="ico-cross fs12 red"></span>
     <span data-state="syncing" class="ico-sync fs12 d-hide"></span>
+    <span data-state="nopeers" class="ico-disconnected fs17 d-hide"></span>
     <span data-state="status" class="txt-status">[[[no_wallet]]]</span>
   {{end}}
 {{end}}

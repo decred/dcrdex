@@ -135,6 +135,9 @@ type Wallet interface {
 	UnlockAccount(ctx context.Context, account, passphrase string) error
 	// SyncStatus returns the wallet's sync status.
 	SyncStatus(ctx context.Context) (bool, float32, error)
+	// PeerCount returns the number of network peers to which the wallet or its
+	// backing node are connected.
+	PeerCount(ctx context.Context) (uint32, error)
 	// AddressPrivKey fetches the privkey for the specified address.
 	AddressPrivKey(ctx context.Context, address stdaddr.Address) (*dcrutil.WIF, error)
 }

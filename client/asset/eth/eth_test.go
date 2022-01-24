@@ -121,6 +121,9 @@ func (n *testNode) locked() bool {
 func (n *testNode) syncProgress() ethereum.SyncProgress {
 	return n.syncProg
 }
+func (n *testNode) peerCount() uint32 {
+	return 1
+}
 
 // initiate is not concurrent safe
 func (n *testNode) initiate(ctx context.Context, contracts []*asset.Contract, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
@@ -306,7 +309,7 @@ func TestSyncStatus(t *testing.T) {
 		wantRatio: 0.25,
 	}, {
 		name:    "ok header too old",
-		subSecs: dexeth.MaxBlockInterval,
+		subSecs: dexeth.MaxBlockInterval + 1,
 	}, {
 		name:       "best header error",
 		bestHdrErr: errors.New(""),
@@ -314,7 +317,7 @@ func TestSyncStatus(t *testing.T) {
 	}}
 
 	for _, test := range tests {
-		nowInSecs := uint64(time.Now().Unix() / 1000)
+		nowInSecs := uint64(time.Now().Unix())
 		ctx, cancel := context.WithCancel(context.Background())
 		node := &testNode{
 			syncProg:   test.syncProg,

@@ -162,6 +162,10 @@ func (n *nodeClient) bestBlockHash(ctx context.Context) (common.Hash, error) {
 	return header.Hash(), nil
 }
 
+func (n *nodeClient) peerCount() uint32 {
+	return uint32(n.p2pSrv.PeerCount())
+}
+
 // bestHeader gets the best header at the time of calling.
 func (n *nodeClient) bestHeader(ctx context.Context) (*types.Header, error) {
 	return n.leth.ApiBackend.HeaderByNumber(ctx, rpc.LatestBlockNumber)

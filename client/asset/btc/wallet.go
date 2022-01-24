@@ -36,6 +36,7 @@ type Wallet interface {
 	sendToAddress(address string, value, feeRate uint64, subtract bool) (*chainhash.Hash, error)
 	locked() bool
 	syncStatus() (*syncStatus, error)
+	peerCount() (uint32, error)
 	swapConfirmations(txHash *chainhash.Hash, vout uint32, contract []byte, startTime time.Time) (confs uint32, spent bool, err error)
 	getBlockHeader(blockHash *chainhash.Hash) (*blockHeader, error)
 	ownsAddress(addr btcutil.Address) (bool, error)

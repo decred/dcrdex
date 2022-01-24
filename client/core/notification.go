@@ -178,6 +178,7 @@ const (
 	TopicFeeCoinError            Topic = "FeeCoinError"
 	TopicWalletConnectionWarning Topic = "WalletConnectionWarning"
 	TopicWalletUnlockError       Topic = "WalletUnlockError"
+	TopicWalletPeersWarning      Topic = "WalletPeersWarning"
 )
 
 func newFeePaymentNote(topic Topic, subject, details string, severity db.Severity, dexAddr string) *FeePaymentNote {

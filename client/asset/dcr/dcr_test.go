@@ -152,7 +152,8 @@ func newTxOutResult(script []byte, value uint64, confs int64) *chainjson.GetTxOu
 func tNewWallet() (*ExchangeWallet, *tRPCClient, func(), error) {
 	client := newTRPCClient()
 	walletCfg := &asset.WalletConfig{
-		TipChange: func(error) {},
+		TipChange:   func(error) {},
+		PeersChange: func(uint32) {},
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
 	wallet, err := unconnectedWallet(walletCfg, &Config{Account: "default"}, tChainParams, tLogger)
@@ -530,6 +531,12 @@ func (c *tRPCClient) RawRequest(_ context.Context, method string, params []json.
 	}
 
 	switch method {
+	case methodGetPeerInfo:
+		return json.Marshal([]*walletjson.GetPeerInfoResult{
+			{
+				Addr: "127.0.0.1",
+			},
+		})
 	case methodGetCFilterV2:
 		if len(params) != 1 {
 			return nil, fmt.Errorf("getcfilterv2 requires 1 param, got %d", len(params))

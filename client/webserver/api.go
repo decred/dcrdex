@@ -118,7 +118,6 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 	}
 	has := s.core.WalletState(form.AssetID) != nil
 	if has {
-
 		s.writeAPIError(w, fmt.Errorf("already have a wallet for %s", unbip(form.AssetID)))
 		return
 	}
