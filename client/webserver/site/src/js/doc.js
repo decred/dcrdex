@@ -321,6 +321,7 @@ export class WalletIcons {
     this.icons.unlocked = stateElement('unlocked')
     this.icons.nowallet = stateElement('nowallet')
     this.icons.syncing = stateElement('syncing')
+    this.icons.nopeers = stateElement('nopeers')
     this.status = stateElement('status')
   }
 
@@ -362,15 +363,25 @@ export class WalletIcons {
   }
 
   setSyncing (wallet) {
-    const icon = this.icons.syncing
+    const syncIcon = this.icons.syncing
     if (!wallet || !wallet.running) {
-      Doc.hide(icon)
+      Doc.hide(syncIcon)
       return
     }
+
+    if (wallet.peerCount === 0) {
+      Doc.show(this.icons.nopeers)
+      Doc.hide(syncIcon) // potentially misleading with no peers
+      return
+    }
+    Doc.hide(this.icons.nopeers)
+
     if (!wallet.synced) {
-      Doc.show(icon)
-      icon.dataset.tooltip = intl.prep(intl.ID_WALLET_SYNC_PROGRESS, { syncProgress: (wallet.syncProgress * 100).toFixed(1) })
-    } else Doc.hide(icon)
+      Doc.show(syncIcon)
+      syncIcon.dataset.tooltip = intl.prep(intl.ID_WALLET_SYNC_PROGRESS, { syncProgress: (wallet.syncProgress * 100).toFixed(1) })
+      return
+    }
+    Doc.hide(syncIcon)
   }
 
   /* reads the core.Wallet state and sets the icon visibility. */

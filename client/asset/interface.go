@@ -152,6 +152,10 @@ type WalletConfig struct {
 	// should not be blocking, and Wallet implementations should not rely on any
 	// specific side effect of the function call.
 	TipChange func(error)
+	// PeersChange is a function that will be called when the number of
+	// wallet/node peers changes, or the wallet fails to get the count. This
+	// should not be called prior to Connect of the constructed wallet.
+	PeersChange func(uint32)
 	// DataDir is a filesystem directory the the wallet may use for persistent
 	// storage.
 	DataDir string
@@ -277,7 +281,9 @@ type Wallet interface {
 	Withdraw(address string, value, feeSuggestion uint64) (Coin, error)
 	// ValidateSecret checks that the secret hashes to the secret hash.
 	ValidateSecret(secret, secretHash []byte) bool
-	// SyncStatus is information about the blockchain sync status.
+	// SyncStatus is information about the blockchain sync status. It should
+	// only indicate synced when there are network peers and all blocks on the
+	// network have been processed by the wallet.
 	SyncStatus() (synced bool, progress float32, err error)
 	// RegFeeConfirmations gets the confirmations for a registration fee
 	// payment. This method need not be supported by all assets. Those assets

@@ -1488,18 +1488,7 @@ func (c *Core) connectWallet(w *xcWallet) (depositAddr string, err error) {
 	// If the wallet is not synced, start a loop to check the sync status until
 	// it is.
 	if !w.synced {
-		// If the wallet is shut down before sync is complete, exit the syncer
-		// loop.
-		innerCtx, cancel := context.WithCancel(c.ctx)
-		go func() {
-			w.connector.Wait()
-			cancel()
-		}()
-		c.wg.Add(1)
-		go func() {
-			defer c.wg.Done()
-			c.monitorWalletSync(innerCtx, w)
-		}()
+		c.startWalletSyncMonitor(w)
 	}
 
 	return
@@ -1846,6 +1835,8 @@ func (c *Core) assetDataDirectory(assetID uint32) string {
 // loadWallet uses the data from the database to construct a new exchange
 // wallet. The returned wallet is running but not connected.
 func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
+	var wallet *xcWallet
+	var ready uint32 // in case asset.Open tries to call PeersChange before actually starting
 	// Create the client/asset.Wallet.
 	assetID := dbWallet.AssetID
 	walletCfg := &asset.WalletConfig{
@@ -1858,6 +1849,11 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 			// of deadlocking a Core method that calls Wallet.Disconnect.
 			go c.tipChange(assetID, err)
 		},
+		PeersChange: func(numPeers uint32) {
+			if atomic.LoadUint32(&ready) == 1 {
+				go c.peerChange(wallet, numPeers)
+			}
+		},
 		DataDir: c.assetDataDirectory(assetID),
 	}
 
@@ -1869,7 +1865,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 
 	// Construct the unconnected xcWallet.
 	contractLockedAmt, orderLockedAmt := c.lockedAmounts(assetID)
-	return &xcWallet{
+	wallet = &xcWallet{ // captured by the PeersChange closure
 		Wallet:    w,
 		connector: dex.NewConnectionMaster(w),
 		AssetID:   assetID,
@@ -1883,7 +1879,9 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		dbID:       dbWallet.ID(),
 		walletType: dbWallet.Type,
 		traits:     asset.DetermineWalletTraits(w),
-	}, nil
+	}
+	atomic.StoreUint32(&ready, 1)
+	return wallet, nil
 }
 
 // WalletState returns the *WalletState for the asset ID.
@@ -1910,32 +1908,53 @@ func (c *Core) walletCheckAndNotify(w *xcWallet) bool {
 		return false
 	}
 	w.mtx.Lock()
+	wasSynced := w.synced
 	w.synced = synced
 	w.syncProgress = progress
 	w.mtx.Unlock()
 	c.notify(newWalletStateNote(w.state()))
-	if synced {
+	if synced && !wasSynced {
 		c.updateWalletBalance(w)
 		c.log.Infof("Wallet synced for asset %s", unbip(w.AssetID))
 	}
 	return synced
 }
 
-// monitorWalletSync repeatedly calls walletCheckAndNotify on a ticker until it
-// is synced. This should be run as a goroutine.
-func (c *Core) monitorWalletSync(ctx context.Context, wallet *xcWallet) {
-	ticker := time.NewTicker(syncTickerPeriod)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			if c.walletCheckAndNotify(wallet) {
+// startWalletSyncMonitor repeatedly calls walletCheckAndNotify on a ticker
+// until it is synced. This launches the monitor goroutine, if not already
+// running, and immediately returns.
+func (c *Core) startWalletSyncMonitor(wallet *xcWallet) {
+	// Prevent multiple sync monitors for this wallet.
+	if !atomic.CompareAndSwapUint32(&wallet.monitored, 0, 1) {
+		return // already monitoring
+	}
+
+	// If the wallet is shut down before sync is complete or Core stops, exit
+	// the loop by wrapping Core's context.
+	innerCtx, cancel := context.WithCancel(c.ctx)
+	go func() {
+		if wallet.connector.On() {
+			wallet.connector.Wait()
+		}
+		cancel()
+	}()
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		defer atomic.StoreUint32(&wallet.monitored, 0)
+		ticker := time.NewTicker(syncTickerPeriod)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if c.walletCheckAndNotify(wallet) {
+					return
+				}
+			case <-innerCtx.Done():
 				return
 			}
-		case <-ctx.Done():
-			return
 		}
-	}
+	}()
 }
 
 // RescanWallet will issue a Rescan command to the wallet if supported by the
@@ -1971,11 +1990,7 @@ func (c *Core) RescanWallet(assetID uint32, force bool) error {
 	}
 
 	// Synchronization still running. Launch a status update goroutine.
-	c.wg.Add(1)
-	go func() {
-		defer c.wg.Done()
-		c.monitorWalletSync(c.ctx, wallet)
-	}()
+	c.startWalletSyncMonitor(wallet)
 
 	return nil
 }
@@ -3966,6 +3981,10 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		}
 		w.mtx.RLock()
 		defer w.mtx.RUnlock()
+		if w.peerCount == 0 {
+			return fmt.Errorf("%s wallet has no network peers (check your network or firewall)",
+				unbip(w.AssetID))
+		}
 		if !w.synced {
 			return fmt.Errorf("%s still syncing. progress = %.2f", unbip(w.AssetID),
 				w.syncProgress)
@@ -6243,6 +6262,45 @@ func (c *Core) removeWaiter(id string) {
 	c.waiterMtx.Lock()
 	delete(c.blockWaiters, id)
 	c.waiterMtx.Unlock()
+}
+
+// peerChange is called by a wallet backend when the peer count changes or
+// cannot be determined. A wallet state note is always emitted. In addition to
+// recording the number of peers, if the number of peers is 0, the wallet is
+// flagged as not synced. If the number of peers has just dropped to zero, a
+// notification that includes wallet state is emitted with the topic
+// TopicWalletPeersWarning. If the number of peers is >0 and was previously
+// zero, a resync monitor goroutine is launched to poll SyncStatus until the
+// wallet has caught up with its network. The monitor goroutine will regularly
+// emit wallet state notes, and once sync has been restored, a wallet balance
+// note will be emitted.
+func (c *Core) peerChange(w *xcWallet, numPeers uint32) {
+	if numPeers == 0 {
+		c.log.Warnf("Wallet for asset %s has zero network peers!", unbip(w.AssetID))
+	} else {
+		c.log.Tracef("New peer count for asset %s: %v", unbip(w.AssetID), numPeers)
+	}
+
+	w.mtx.Lock()
+	wasDisconnected := w.peerCount == 0
+	w.peerCount = numPeers
+	if numPeers == 0 {
+		w.synced = false
+	}
+	w.mtx.Unlock()
+
+	// When we get peers after having none, start waiting for re-sync, otherwise
+	// leave synced alone.
+	if wasDisconnected && numPeers > 0 {
+		c.startWalletSyncMonitor(w)
+	} else if numPeers == 0 && !wasDisconnected {
+		subject, details := c.formatDetails(TopicWalletPeersWarning, w.Info().Name)
+		c.notify(newWalletConfigNote(TopicWalletPeersWarning, subject, details,
+			db.WarningLevel, w.state()))
+	}
+
+	// Send a WalletStateNote in case Synced or anything else has changed.
+	c.notify(newWalletStateNote(w.state()))
 }
 
 // tipChange is called by a wallet backend when the tip block changes, or when

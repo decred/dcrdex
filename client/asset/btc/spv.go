@@ -497,6 +497,10 @@ func (w *spvWallet) getChainHeight() (int32, error) {
 	return blk.Height, err
 }
 
+func (w *spvWallet) peerCount() (uint32, error) {
+	return uint32(len(w.cl.Peers())), nil
+}
+
 // syncHeight is the best known sync height among peers.
 func (w *spvWallet) syncHeight() int32 {
 	var maxHeight int32

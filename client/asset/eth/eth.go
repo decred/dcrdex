@@ -66,8 +66,9 @@ const (
 var (
 	defaultAppDir = dcrutil.AppDataDir("dexethclient", false)
 	// blockTicker is the delay between calls to check for new blocks.
-	blockTicker = time.Second
-	configOpts  = []*asset.ConfigOption{
+	blockTicker     = time.Second
+	peerCountTicker = 5 * time.Second
+	configOpts      = []*asset.ConfigOption{
 		{
 			Key:         "gasfeelimit",
 			DisplayName: "Gas Fee Limit",
@@ -191,6 +192,7 @@ type ethFetcher interface {
 	initiate(ctx context.Context, contracts []*asset.Contract, maxFeeRate uint64, contractVer uint32) (*types.Transaction, error)
 	shutdown()
 	syncProgress() ethereum.SyncProgress
+	peerCount() uint32
 	isRedeemable(secretHash, secret [32]byte, contractVer uint32) (bool, error)
 	redeem(ctx context.Context, redemptions []*asset.Redemption, maxFeeRate uint64, contractVer uint32) (*types.Transaction, error)
 	isRefundable(secretHash [32]byte, contractVer uint32) (bool, error)
@@ -217,13 +219,15 @@ type ExchangeWallet struct {
 	// https://golang.org/pkg/sync/atomic/#pkg-note-BUG
 	tipAtConnect int64
 
-	ctx         context.Context // the asset subsystem starts with Connect(ctx)
-	net         dex.Network
-	node        ethFetcher
-	addr        common.Address
-	log         dex.Logger
-	tipChange   func(error)
-	gasFeeLimit uint64
+	ctx           context.Context // the asset subsystem starts with Connect(ctx)
+	net           dex.Network
+	node          ethFetcher
+	addr          common.Address
+	log           dex.Logger
+	tipChange     func(error)
+	lastPeerCount uint32
+	peersChange   func(uint32)
+	gasFeeLimit   uint64
 
 	tipMtx     sync.RWMutex
 	currentTip *types.Block
@@ -306,6 +310,7 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		node:               cl,
 		addr:               cl.address(),
 		tipChange:          assetCFG.TipChange,
+		peersChange:        assetCFG.PeersChange,
 		gasFeeLimit:        gasFeeLimit,
 		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
 	}, nil
@@ -350,6 +355,11 @@ func (eth *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		defer wg.Done()
 		eth.monitorBlocks(ctx)
 		eth.shutdown()
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		eth.monitorPeers(ctx)
 	}()
 	return &wg, nil
 }
@@ -1243,8 +1253,8 @@ func (*ExchangeWallet) ValidateSecret(secret, secretHash []byte) bool {
 
 // SyncStatus is information about the blockchain sync status.
 func (eth *ExchangeWallet) SyncStatus() (bool, float32, error) {
-	// node.SyncProgress will return nil both before syncing has begun and
-	// after it has finished. In order to discern when syncing has begun,
+	// node.syncProgress will return a zero value both before syncing has begun
+	// and after it has finished. In order to discern when syncing has begun,
 	// check that the best header came in under dexeth.MaxBlockInterval.
 	prog := eth.node.syncProgress()
 	syncing := prog.CurrentBlock >= prog.HighestBlock
@@ -1255,18 +1265,21 @@ func (eth *ExchangeWallet) SyncStatus() (bool, float32, error) {
 		}
 		return false, ratio, nil
 	}
+
+	// According to syncProgress we are at the highest network block, but check
+	// the time since the block.
 	bh, err := eth.node.bestHeader(eth.ctx)
 	if err != nil {
 		return false, 0, err
 	}
 	// Time in the header is in seconds.
-	nowInSecs := time.Now().Unix() / 1000
-	timeDiff := nowInSecs - int64(bh.Time)
-	var progress float32
-	if timeDiff < dexeth.MaxBlockInterval {
-		progress = 1
+	timeDiff := time.Now().Unix() - int64(bh.Time)
+	if timeDiff > dexeth.MaxBlockInterval && eth.net != dex.Simnet {
+		eth.log.Debugf("Time since last block (%d sec) exceeds %d sec."+
+			"Assuming not in sync.", timeDiff, dexeth.MaxBlockInterval)
+		return false, 0, nil
 	}
-	return progress == 1, progress, nil
+	return eth.node.peerCount() > 0, 1.0, nil
 }
 
 // RegFeeConfirmations gets the number of confirmations for the specified
@@ -1275,6 +1288,28 @@ func (eth *ExchangeWallet) RegFeeConfirmations(ctx context.Context, coinID dex.B
 	var txHash common.Hash
 	copy(txHash[:], coinID)
 	return eth.node.transactionConfirmations(ctx, txHash)
+}
+
+func (eth *ExchangeWallet) checkPeers() {
+	numPeers := eth.node.peerCount()
+	prevPeer := atomic.SwapUint32(&eth.lastPeerCount, numPeers)
+	if prevPeer != numPeers {
+		eth.peersChange(numPeers)
+	}
+}
+
+func (eth *ExchangeWallet) monitorPeers(ctx context.Context) {
+	ticker := time.NewTicker(peerCountTicker)
+	defer ticker.Stop()
+	for {
+		eth.checkPeers()
+
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // monitorBlocks pings for new blocks and runs the tipChange callback function

@@ -39,12 +39,6 @@ import (
 const (
 	version = 0
 
-	// Use RawRequest to get the verbose block header for a blockhash.
-	methodGetBlockHeader = "getblockheader"
-	// Use RawRequest to get the verbose block with verbose txs, as the btcd
-	// rpcclient.Client's GetBlockVerboseTx appears to be busted.
-	methodGetNetworkInfo    = "getnetworkinfo"
-	methodGetBlockchainInfo = "getblockchaininfo"
 	// BipID is the BIP-0044 asset ID.
 	BipID = 0
 
@@ -81,6 +75,7 @@ const (
 var (
 	// blockTicker is the delay between calls to check for new blocks.
 	blockTicker                  = time.Second
+	peerCountTicker              = 5 * time.Second
 	walletBlockAllowance         = time.Second * 10
 	conventionalConversionFactor = float64(dexbtc.UnitInfo.Conventional.ConversionFactor)
 	rpcOpts                      = []*asset.ConfigOption{
@@ -513,6 +508,8 @@ type ExchangeWallet struct {
 	log               dex.Logger
 	symbol            string
 	tipChange         func(error)
+	lastPeerCount     uint32
+	peersChange       func(uint32)
 	minNetworkVersion uint64
 	fallbackFeeRate   uint64
 	feeRateLimit      uint64
@@ -727,6 +724,7 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*ExchangeW
 		chainParams:         cfg.ChainParams,
 		log:                 cfg.Logger,
 		tipChange:           cfg.WalletCFG.TipChange,
+		peersChange:         cfg.WalletCFG.PeersChange,
 		fundingCoins:        make(map[outPoint]*utxo),
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
 		minNetworkVersion:   cfg.MinNetworkVersion,
@@ -823,6 +821,11 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		btc.watchBlocks(ctx)
 		btc.shutdown()
 	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		btc.monitorPeers(ctx)
+	}()
 	return &wg, nil
 }
 
@@ -865,7 +868,14 @@ func (btc *ExchangeWallet) SyncStatus() (bool, float32, error) {
 		}
 		return false, progress, nil
 	}
-	return true, 1, nil
+
+	// It looks like we are ready based on syncStatus, but that may just be
+	// comparing wallet height to known chain height. Now check peers.
+	numPeers, err := btc.node.peerCount()
+	if err != nil {
+		return false, 0, err
+	}
+	return numPeers > 0, 1, nil
 }
 
 // OwnsAddress indicates if an address belongs to the wallet.
@@ -2690,6 +2700,36 @@ func (btc *ExchangeWallet) RegFeeConfirmations(_ context.Context, id dex.Bytes) 
 		return 0, err
 	}
 	return uint32(tx.Confirmations), nil
+}
+
+func (btc *ExchangeWallet) checkPeers() {
+	numPeers, err := btc.node.peerCount()
+	if err != nil {
+		prevPeer := atomic.SwapUint32(&btc.lastPeerCount, 0)
+		if prevPeer != 0 {
+			btc.log.Errorf("Failed to get peer count: %v", err)
+			btc.peersChange(0)
+		}
+		return
+	}
+	prevPeer := atomic.SwapUint32(&btc.lastPeerCount, numPeers)
+	if prevPeer != numPeers {
+		btc.peersChange(numPeers)
+	}
+}
+
+func (btc *ExchangeWallet) monitorPeers(ctx context.Context) {
+	ticker := time.NewTicker(peerCountTicker)
+	defer ticker.Stop()
+	for {
+		btc.checkPeers()
+
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // watchBlocks pings for new blocks and runs the tipChange callback function

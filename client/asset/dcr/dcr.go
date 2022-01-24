@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -69,6 +70,7 @@ const (
 var (
 	// blockTicker is the delay between calls to check for new blocks.
 	blockTicker                  = time.Second
+	peerCountTicker              = 5 * time.Second
 	conventionalConversionFactor = float64(dexdcr.UnitInfo.Conventional.ConversionFactor)
 	configOpts                   = []*asset.ConfigOption{
 		{
@@ -386,6 +388,8 @@ type ExchangeWallet struct {
 	log              dex.Logger
 	acct             string
 	tipChange        func(error)
+	lastPeerCount    uint32
+	peersChange      func(uint32)
 	fallbackFeeRate  uint64
 	feeRateLimit     uint64
 	redeemConfTarget uint64
@@ -501,6 +505,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *cha
 		chainParams:         chainParams,
 		acct:                dcrCfg.Account,
 		tipChange:           cfg.TipChange,
+		peersChange:         cfg.PeersChange,
 		fundingCoins:        make(map[outPoint]*fundingCoin),
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
 		externalTxCache:     make(map[chainhash.Hash]*externalTx),
@@ -581,6 +586,11 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 			<-ctx.Done() // just wait for shutdown signal
 		}
 		dcr.shutdown()
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		dcr.monitorPeers(ctx)
 	}()
 	return &wg, nil
 }
@@ -3064,6 +3074,38 @@ func (dcr *ExchangeWallet) getKeys(addr stdaddr.Address) (*secp256k1.PrivateKey,
 
 	priv := secp256k1.PrivKeyFromBytes(wif.PrivKey())
 	return priv, priv.PubKey(), nil
+}
+
+func (dcr *ExchangeWallet) checkPeers() {
+	ctx, cancel := context.WithTimeout(dcr.ctx, 2*time.Second)
+	defer cancel()
+	numPeers, err := dcr.wallet.PeerCount(ctx)
+	if err != nil { // e.g. dcrd passthrough fail in non-SPV mode
+		prevPeer := atomic.SwapUint32(&dcr.lastPeerCount, 0)
+		if prevPeer != 0 {
+			dcr.log.Errorf("Failed to get peer count: %v", err)
+			dcr.peersChange(0)
+		}
+		return
+	}
+	prevPeer := atomic.SwapUint32(&dcr.lastPeerCount, numPeers)
+	if prevPeer != numPeers {
+		dcr.peersChange(numPeers)
+	}
+}
+
+func (dcr *ExchangeWallet) monitorPeers(ctx context.Context) {
+	ticker := time.NewTicker(peerCountTicker)
+	defer ticker.Stop()
+	for {
+		dcr.checkPeers()
+
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // monitorBlocks pings for new blocks and runs the tipChange callback function
