@@ -859,7 +859,11 @@ func (s *Swapper) failMatch(match *matchTracker) {
 
 	// Cancellation rate accounting
 	s.swapDone(orderAtFault, match.Match, true) // will also unbook/revoke order if needed
-	s.swapDone(otherOrder, match.Match, false)
+
+	// Accounting for the maker has already taken place if they have redeemed.
+	if match.Status != order.MakerRedeemed {
+		s.swapDone(otherOrder, match.Match, false)
+	}
 
 	// Register the failure to act violation, adjusting the user's score.
 	s.authMgr.Inaction(orderAtFault.User(), misstep, db.MatchID(match.Match), match.Quantity, refTime, orderAtFault.ID())
