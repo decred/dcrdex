@@ -89,24 +89,24 @@ func mustParseHex(s string) []byte {
 }
 
 type testNode struct {
-	connectErr     error
-	bestHdr        *types.Header
-	bestHdrErr     error
-	hdrByHeight    *types.Header
-	hdrByHeightErr error
-	blkNum         uint64
-	blkNumErr      error
-	syncProg       *ethereum.SyncProgress
-	syncProgErr    error
-	sugGasPrice    *big.Int
-	sugGasPriceErr error
-	swp            *dexeth.SwapState
-	swpErr         error
-	tx             *types.Transaction
-	txIsMempool    bool
-	txErr          error
-	acctBal        *big.Int
-	acctBalErr     error
+	connectErr       error
+	bestHdr          *types.Header
+	bestHdrErr       error
+	hdrByHeight      *types.Header
+	hdrByHeightErr   error
+	blkNum           uint64
+	blkNumErr        error
+	syncProg         *ethereum.SyncProgress
+	syncProgErr      error
+	suggGasTipCap    *big.Int
+	suggGasTipCapErr error
+	swp              *dexeth.SwapState
+	swpErr           error
+	tx               *types.Transaction
+	txIsMempool      bool
+	txErr            error
+	acctBal          *big.Int
+	acctBalErr       error
 }
 
 func (n *testNode) connect(ctx context.Context, ipc string, contractAddr *common.Address) error {
@@ -131,8 +131,8 @@ func (n *testNode) syncProgress(ctx context.Context) (*ethereum.SyncProgress, er
 	return n.syncProg, n.syncProgErr
 }
 
-func (n *testNode) suggestGasPrice(ctx context.Context) (*big.Int, error) {
-	return n.sugGasPrice, n.sugGasPriceErr
+func (n *testNode) suggestGasTipCap(ctx context.Context) (*big.Int, error) {
+	return n.suggGasTipCap, n.suggGasTipCapErr
 }
 
 func (n *testNode) swap(ctx context.Context, secretHash [32]byte) (*dexeth.SwapState, error) {
@@ -278,43 +278,60 @@ func TestFeeRate(t *testing.T) {
 	overMaxWei := new(big.Int).Set(maxWei)
 	overMaxWei.Add(overMaxWei, gweiFactorBig)
 	tests := []struct {
-		name    string
-		gas     *big.Int
-		gasErr  error
-		wantFee uint64
-		wantErr bool
+		name             string
+		hdrBaseFee       *big.Int
+		hdrErr           error
+		suggGasTipCap    *big.Int
+		suggGasTipCapErr error
+		wantFee          uint64
+		wantErr          bool
 	}{{
-		name:    "ok zero",
-		gas:     new(big.Int),
-		wantFee: 0,
+		name:          "ok zero",
+		hdrBaseFee:    new(big.Int),
+		suggGasTipCap: new(big.Int),
+		wantFee:       0,
 	}, {
-		name:    "ok rounded down",
-		gas:     big.NewInt(dexeth.GweiFactor - 1),
-		wantFee: 0,
+		name:          "ok rounded down",
+		hdrBaseFee:    big.NewInt(dexeth.GweiFactor - 1),
+		suggGasTipCap: new(big.Int),
+		wantFee:       1,
 	}, {
-		name:    "ok one",
-		gas:     big.NewInt(dexeth.GweiFactor),
-		wantFee: 1,
+		name:          "ok 100, 2",
+		hdrBaseFee:    big.NewInt(dexeth.GweiFactor * 100),
+		suggGasTipCap: big.NewInt(dexeth.GweiFactor * 2),
+		wantFee:       202,
 	}, {
-		name:    "ok max int",
-		gas:     maxWei,
-		wantFee: maxInt,
+		name:          "over max int",
+		hdrBaseFee:    overMaxWei,
+		suggGasTipCap: big.NewInt(dexeth.GweiFactor * 2),
+		wantErr:       true,
 	}, {
-		name:    "over max int",
-		gas:     overMaxWei,
-		wantErr: true,
+		name:          "node header err",
+		hdrBaseFee:    new(big.Int),
+		hdrErr:        errors.New(""),
+		suggGasTipCap: new(big.Int),
+		wantErr:       true,
 	}, {
-		name:    "node suggest gas fee error",
-		gas:     new(big.Int),
-		gasErr:  errors.New(""),
-		wantErr: true,
+		name:          "nil base fee error",
+		hdrBaseFee:    nil,
+		suggGasTipCap: new(big.Int),
+		wantErr:       true,
+	}, {
+		name:             "node suggest gas tip cap err",
+		hdrBaseFee:       new(big.Int),
+		suggGasTipCapErr: errors.New(""),
+		wantErr:          true,
 	}}
 
 	for _, test := range tests {
 		ctx, cancel := context.WithCancel(context.Background())
 		node := &testNode{
-			sugGasPrice:    test.gas,
-			sugGasPriceErr: test.gasErr,
+			bestHdr: &types.Header{
+				BaseFee: test.hdrBaseFee,
+			},
+			bestHdrErr:       test.hdrErr,
+			suggGasTipCap:    test.suggGasTipCap,
+			suggGasTipCapErr: test.suggGasTipCapErr,
 		}
 		eth := &Backend{
 			node:   node,

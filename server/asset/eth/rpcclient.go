@@ -75,10 +75,10 @@ func (c *rpcclient) headerByHeight(ctx context.Context, height uint64) (*types.H
 	return c.ec.HeaderByNumber(ctx, big.NewInt(int64(height)))
 }
 
-// suggestGasPrice retrieves the currently suggested gas price to allow a timely
-// execution of a transaction.
-func (c *rpcclient) suggestGasPrice(ctx context.Context) (sgp *big.Int, err error) {
-	return c.ec.SuggestGasPrice(ctx)
+// suggestGasTipCap retrieves the currently suggested priority fee to allow a
+// timely execution of a transaction.
+func (c *rpcclient) suggestGasTipCap(ctx context.Context) (*big.Int, error) {
+	return c.ec.SuggestGasTipCap(ctx)
 }
 
 // syncProgress return the current sync progress. Returns no error and nil when not syncing.
