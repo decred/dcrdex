@@ -503,6 +503,42 @@ func TestContract(t *testing.T) {
 	}
 }
 
+func TestValidateFeeRate(t *testing.T) {
+	swapCoin := swapCoin{
+		baseCoin: &baseCoin{
+			gasPrice:  100,
+			gasTipCap: 2,
+			dynamicTx: true,
+		},
+	}
+
+	contract := &asset.Contract{
+		Coin: &swapCoin,
+	}
+
+	eth := &Backend{
+		log: tLogger,
+	}
+
+	if !eth.ValidateFeeRate(contract, 100) {
+		t.Fatalf("expected valid fee rate, but was not valid")
+	}
+
+	if eth.ValidateFeeRate(contract, 101) {
+		t.Fatalf("expected invalid fee rate, but was valid")
+	}
+
+	swapCoin.gasTipCap = dexeth.MinGasTipCap - 1
+	if eth.ValidateFeeRate(contract, 100) {
+		t.Fatalf("expected invalid fee rate, but was valid")
+	}
+
+	swapCoin.dynamicTx = false
+	if !eth.ValidateFeeRate(contract, 100) {
+		t.Fatalf("expected valid fee rate, but was not valid")
+	}
+}
+
 func TestValidateSecret(t *testing.T) {
 	secret, blankHash := [32]byte{}, [32]byte{}
 	copy(secret[:], encode.RandomBytes(32))

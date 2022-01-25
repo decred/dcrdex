@@ -493,6 +493,18 @@ func (btc *Backend) FeeRate(_ context.Context) (uint64, error) {
 	return btc.estimateFee(btc.node)
 }
 
+// SupportsDynamicTxFee returns true if the tx fee for this asset adjusts based
+// on market conditions
+func (*Backend) SupportsDynamicTxFee() bool {
+	return false
+}
+
+// ValidateFeeRate checks that the transaction fees used to initiate the
+// contract are sufficient.
+func (*Backend) ValidateFeeRate(contract *asset.Contract, reqFeeRate uint64) bool {
+	return contract.FeeRate() >= reqFeeRate
+}
+
 // CheckAddress checks that the given address is parseable.
 func (btc *Backend) CheckAddress(addr string) bool {
 	_, err := btc.decodeAddr(addr, btc.chainParams)

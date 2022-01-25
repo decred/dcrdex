@@ -75,6 +75,12 @@ type Backend interface {
 	// Synced should return true when the blockchain is synced and ready for
 	// fee rate estimation.
 	Synced() (bool, error)
+	// SupportsDynamicTxFee returns true if the tx fee for this asset adjusts based
+	// on market conditions.
+	SupportsDynamicTxFee() bool
+	// ValidateFeeRate checks that the transaction fees used to initiate the
+	// contract are sufficient.
+	ValidateFeeRate(contract *Contract, reqFeeRate uint64) bool
 }
 
 // OutputTracker is implemented by backends for UTXO-based blockchains.

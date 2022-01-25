@@ -428,6 +428,12 @@ func (b *TBackend) Synced() (bool, error) {
 }
 
 func (b *TBackend) TxData([]byte) ([]byte, error) { return nil, nil }
+func (*TBackend) SupportsDynamicTxFee() bool {
+	return false
+}
+func (*TBackend) ValidateFeeRate(*asset.Contract, uint64) bool {
+	return true
+}
 
 type tUTXOBackend struct {
 	*TBackend

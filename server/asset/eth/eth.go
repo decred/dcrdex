@@ -238,6 +238,30 @@ func (eth *Backend) FeeRate(ctx context.Context) (uint64, error) {
 	return dexeth.WeiToGweiUint64(bigGP)
 }
 
+// SupportsDynamicTxFee returns true if the tx fee for this asset adjusts based
+// on market conditions
+func (*Backend) SupportsDynamicTxFee() bool {
+	return true
+}
+
+// ValidateFeeRate checks that the transaction fees used to initiate the
+// contract are sufficient. For most assets only the contract.FeeRate() cannot
+// be less than reqFeeRate, but for Eth, the gasTipCap must also be checked.
+func (eth *Backend) ValidateFeeRate(contract *asset.Contract, reqFeeRate uint64) bool {
+	coin := contract.Coin
+	sc, ok := coin.(*swapCoin)
+	if !ok {
+		eth.log.Error("eth contract coin type must be a swapCoin but got %T", sc)
+		return false
+	}
+
+	if sc.dynamicTx && sc.gasTipCap < dexeth.MinGasTipCap {
+		return false
+	}
+
+	return contract.FeeRate() >= reqFeeRate
+}
+
 // BlockChannel creates and returns a new channel on which to receive block
 // updates. If the returned channel is ever blocking, there will be no error
 // logged from the eth package. Part of the asset.Backend interface.

@@ -300,6 +300,18 @@ func (dcr *Backend) FeeRate(ctx context.Context) (uint64, error) {
 	return atomsPerB, nil
 }
 
+// SupportsDynamicTxFee returns true if the tx fee for this asset adjusts based
+// on market conditions
+func (*Backend) SupportsDynamicTxFee() bool {
+	return false
+}
+
+// ValidateFeeRate checks that the transaction fees used to initiate the
+// contract are sufficient.
+func (*Backend) ValidateFeeRate(contract *asset.Contract, reqFeeRate uint64) bool {
+	return contract.FeeRate() >= reqFeeRate
+}
+
 // BlockChannel creates and returns a new channel on which to receive block
 // updates. If the returned channel is ever blocking, there will be no error
 // logged from the dcr package. Part of the asset.Backend interface.

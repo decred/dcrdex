@@ -25,6 +25,8 @@ type baseCoin struct {
 	backend      *Backend
 	secretHash   [32]byte
 	gasPrice     uint64
+	gasTipCap    uint64
+	dynamicTx    bool
 	txHash       common.Hash
 	value        uint64
 	txData       []byte
@@ -145,9 +147,11 @@ func (eth *Backend) baseCoin(coinID []byte, contractData []byte) (*baseCoin, err
 	// transaction with a very low gas price may need to be resent with a
 	// higher price.
 	zero := new(big.Int)
+	var dynamicTx bool
 	rate := tx.GasPrice()
 	if rate == nil || rate.Cmp(zero) <= 0 {
 		rate = tx.GasFeeCap()
+		dynamicTx = true
 		if rate == nil || rate.Cmp(zero) <= 0 {
 			return nil, fmt.Errorf("Failed to parse gas price from tx %s", txHash)
 		}
@@ -156,6 +160,15 @@ func (eth *Backend) baseCoin(coinID []byte, contractData []byte) (*baseCoin, err
 	gasPrice, err := dexeth.WeiToGweiUint64(rate)
 	if err != nil {
 		return nil, fmt.Errorf("unable to convert gas price: %v", err)
+	}
+
+	var gasTipCap uint64
+	priorityFee := tx.GasTipCap()
+	if priorityFee != nil {
+		gasTipCap, err = dexeth.WeiToGweiUint64(priorityFee)
+		if err != nil {
+			return nil, fmt.Errorf("unable to convert priority fee: %v", err)
+		}
 	}
 
 	// Value is stored in the swap with the initialization transaction.
@@ -168,6 +181,8 @@ func (eth *Backend) baseCoin(coinID []byte, contractData []byte) (*baseCoin, err
 		backend:      eth,
 		secretHash:   secretHash,
 		gasPrice:     gasPrice,
+		gasTipCap:    gasTipCap,
+		dynamicTx:    dynamicTx,
 		txHash:       txHash,
 		value:        value,
 		txData:       tx.Data(),

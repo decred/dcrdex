@@ -488,8 +488,9 @@ func (n *nodeClient) netFeeState(ctx context.Context) (baseFees, tipCap *big.Int
 		return nil, nil, err
 	}
 
-	if tip.Cmp(minGasTipCap) < 0 {
-		tip = new(big.Int).Set(minGasTipCap)
+	minGasTipCapWei := dexeth.GweiToWei(dexeth.MinGasTipCap)
+	if tip.Cmp(minGasTipCapWei) < 0 {
+		tip = new(big.Int).Set(minGasTipCapWei)
 	}
 
 	return base, tip, nil

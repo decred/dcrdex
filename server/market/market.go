@@ -70,6 +70,7 @@ type DataCollector interface {
 // with FeeFetcher fairly frequently.
 type FeeFetcher interface {
 	FeeRate(context.Context) uint64
+	SwapFeeRate(context.Context) uint64
 	LastRate() uint64
 	MaxFeeRate() uint64
 }
@@ -2258,7 +2259,7 @@ func (m *Market) getFeeRate(assetID uint32, f FeeFetcher) uint64 {
 	// Do not block indefinitely waiting for fetcher.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	rate := f.FeeRate(ctx)
+	rate := f.SwapFeeRate(ctx)
 	if ctx.Err() != nil { // timeout, try last known rate
 		rate = f.LastRate()
 		log.Warnf("Failed to get latest fee rate for %v. Using last known rate %d.",
