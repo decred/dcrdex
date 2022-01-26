@@ -42,7 +42,7 @@
 </div>
 <div class="position-relative" data-tmpl="mainForm">
   <div class="flex-center py-3" data-tmpl="oneBttnBox">
-    <button class="one-bttn w-auto" data-tmpl="oneBttn">Create!</button>
+    <button class="one-bttn w-auto" data-tmpl="oneBttn">[[[Create]]]!</button>
   </div>
   <div class="py-2 fs14 grey">
     <span class="hoverbg pointer d-hide" data-tmpl="goBack"><span class="ico-arrowback fs12 mr-1"></span> [[[pick a different asset]]]</span>
@@ -100,7 +100,7 @@
 {{define "dexAddrForm"}}
 <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 <div class="flex-center fs24 sans-light"><span class="ico-plus fs12 mr-2"></span> [[[Add a DEX]]]</div>
-<div class="fs20 sans-light">Pick a server</div>
+<div class="fs20 sans-light">[[[Pick a server]]]</div>
 <div class="d-flex flex-column align-items-stretch mt-1" data-tmpl="knownXCs">
   {{range .KnownExchanges}}
     <div class="known-exchange" data-host="{{.}}"><img class="micro-icon mr-1" src={{dummyExchangeLogo .}}> {{.}}</div>

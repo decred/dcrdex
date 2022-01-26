@@ -173,4 +173,6 @@ var ZhCN = map[string]string{
 	"ready":                  "准备就绪",
 	"off":                    "关闭",
 	"Export Trades":          "导出交易",
+	"Create":                 "创建",
+	"Register_loudly":        "注册!",
 }
