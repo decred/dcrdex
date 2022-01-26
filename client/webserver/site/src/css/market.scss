@@ -6,7 +6,7 @@ div.marketlist {
   min-width: 175px;
 
   .selected {
-    border-style: solid none solid none;
+    border-style: solid none;
     border-width: 1px;
     border-color: #aaa;
   }
@@ -122,7 +122,7 @@ table.ordertable {
 
   th {
     font-size: 14px;
-    font-family: 'demi-sans', sans-serif;
+    font-family: "demi-sans", sans-serif;
   }
 
   td {
@@ -310,7 +310,7 @@ table.balance-table button:hover {
   span.unitbox {
     position: absolute;
     font-size: 14px;
-    font-family: 'demi-sans', sans-serif;
+    font-family: "demi-sans", sans-serif;
     right: 5px;
     top: 48%; // Looks better than 50 for some reason.
     transform: translateY(-50%);
@@ -379,7 +379,7 @@ table.balance-table button:hover {
       bottom: 2px;
 
       &::after {
-        content: '|';
+        content: "|";
       }
     }
 
@@ -428,18 +428,18 @@ table.balance-table button:hover {
     }
 
     #candlestickBttn {
-      background-image: url('/img/candlestick_bttn.png');
+      background-image: url("/img/candlestick_bttn.png");
     }
 
     #depthBttn {
-      background-image: url('/img/depth_bttn.png');
+      background-image: url("/img/depth_bttn.png");
     }
   }
 }
 
 #marketLoader {
   z-index: 50;
-  background-color: rgba(0, 0, 0, 0.5);
+  background-color: rgba(0 0 0 / 50%);
 }
 
 #marketLoader > div {
@@ -489,7 +489,7 @@ table.balance-table button:hover {
   top: -11px;
   padding: 0 3px;
   font-size: 16px;
-  font-family: 'demi-sans', sans-serif;
+  font-family: "demi-sans", sans-serif;
   background-color: $light_bg_1;
 }
 

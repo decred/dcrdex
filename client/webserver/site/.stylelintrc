@@ -1,7 +1,17 @@
 {
-    "extends": "stylelint-config-standard",
+    "extends": "stylelint-config-standard-scss",
     "rules": {
         "at-rule-no-unknown": null,
-        "no-descending-specificity": null
+        "font-family-name-quotes": "always-unless-keyword",
+        "no-descending-specificity": null,
+        "property-no-vendor-prefix": null,
+        "selector-attribute-quotes": null,
+        "selector-id-pattern": null,
+        "value-keyword-case": null,
+        "scss/dollar-variable-pattern": null,
+        "scss/double-slash-comment-empty-line-before": null,
+        "scss/at-import-no-partial-leading-underscore": null,
+        "scss/at-import-partial-extension": null,
+        "scss/at-extend-no-missing-placeholder": null
     }
 }

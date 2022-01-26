@@ -44,7 +44,9 @@ module.exports = {
     new MiniCssExtractPlugin({
       filename: '../dist/style.css'
     }),
-    new StyleLintPlugin()
+    new StyleLintPlugin({
+      threads: true,
+    })
   ],
   output: {
     filename: 'entry.js',
