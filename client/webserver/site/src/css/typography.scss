@@ -1,48 +1,48 @@
 /* fonts */
 @font-face {
-  font-family: 'source-sans';
+  font-family: "source-sans";
   src:
-    url('/font/source-sans-pro-v9-latin-regular.woff') format('woff'),
-    url('/font/source-sans-pro-v9-latin-regular.svg') format('svg');
+    url("/font/source-sans-pro-v9-latin-regular.woff") format("woff"),
+    url("/font/source-sans-pro-v9-latin-regular.svg") format("svg");
   font-weight: normal;
   font-style: normal;
 }
 
 @font-face {
-  font-family: 'source-sans-light';
+  font-family: "source-sans-light";
   src:
-    url('/font/SourceSansPro-Light.woff') format('woff'),
-    url('/font/SourceSansPro-Light.svg') format('svg');
+    url("/font/SourceSansPro-Light.woff") format("woff"),
+    url("/font/SourceSansPro-Light.svg") format("svg");
   font-weight: 200;
   font-style: normal;
 }
 
 /* fonts */
 @font-face {
-  font-family: 'demi-sans';
+  font-family: "demi-sans";
   src:
-    url('/font/source-sans-pro-semibold.woff') format('woff'),
-    url('/font/source-sans-pro-semibold.svg') format('svg');
+    url("/font/source-sans-pro-semibold.woff") format("woff"),
+    url("/font/source-sans-pro-semibold.svg") format("svg");
   font-weight: bolder;
   font-style: normal;
 }
 
 @font-face {
-  font-family: 'mono';
+  font-family: "mono";
   src:
-    url('/font/inconsolata-v15-latin-regular.woff') format('woff'),
-    url('/font/inconsolata-v15-latin-regular.svg') format('svg');
+    url("/font/inconsolata-v15-latin-regular.woff") format("woff"),
+    url("/font/inconsolata-v15-latin-regular.svg") format("svg");
   font-weight: normal;
   font-style: normal;
 }
 
 /* icons */
 @font-face {
-  font-family: 'icomoon';
+  font-family: "icomoon";
   src:
-    url('/font/icomoon.ttf?g003m6') format('truetype'),
-    url('/font/icomoon.woff?g003m6') format('woff'),
-    url('/font/icomoon.svg?g003m6#icomoon') format('svg');
+    url("/font/icomoon.ttf?g003m6") format("truetype"),
+    url("/font/icomoon.woff?g003m6") format("woff"),
+    url("/font/icomoon.svg?g003m6#icomoon") format("svg");
   font-weight: normal;
   font-style: normal;
 }
