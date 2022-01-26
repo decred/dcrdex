@@ -111,7 +111,6 @@ func (f *feeFetcher) MaxFeeRate() uint64 {
 func (f *feeFetcher) SwapFeeRate(ctx context.Context) uint64 {
 	if f.Backend.SupportsDynamicTxFee() {
 		return f.MaxFeeRate()
-	} else {
-		return f.FeeRate(ctx)
 	}
+	return f.FeeRate(ctx)
 }
