@@ -23,20 +23,22 @@
 {{define "actionButtons"}}
   {{$w := .Wallet}}
   {{if $w}}
-  {{$ready := and $w.Running $w.Open}}
-  <button data-action="connect"{{if $w.Running}} class="d-hide"{{end}}>Połącz</button>
-  <button data-action="unlock"{{if $w.Open}} class="d-hide"{{end}}>Odblokuj</button>
-  <button data-action="withdraw"{{if not $ready}} class="d-hide"{{end}}>Wypłać</button>
-  <button data-action="deposit"{{if not $ready}} class="d-hide"{{end}}>Zdeponuj</button>
-  <button data-action="lock"{{if or (not $ready) (not $w.Encrypted)}} class="d-hide"{{end}}>Zablokuj</button>
-  <button data-action="create" class="d-hide">Utwórz portfel {{.Info.Name}}</button>
+    {{$ready := and $w.Running $w.Open}}
+    <button data-action="connect"{{if $w.Running}} class="d-hide"{{end}}>Połącz</button>
+    <button data-action="unlock"{{if $w.Open}} class="d-hide"{{end}}>Odblokuj</button>
+    <button data-action="withdraw"{{if not $ready}} class="d-hide"{{end}}>Wypłać</button>
+    <button data-action="deposit"{{if not $ready}} class="d-hide"{{end}}>Zdeponuj</button>
+    <button data-action="lock"{{if or (not $ready) (not $w.Encrypted)}} class="d-hide"{{end}}>Zablokuj</button>
+    <button data-action="rescan"{{if not $w.Traits.IsRescanner}} class="d-hide"{{end}}>Rescan</button>
+    <button data-action="create" class="d-hide">Utwórz portfel {{.Info.Name}}</button>
     <span data-action="settings" class="ico-settings fs20 pointer"></span>
-    {{else}}
+  {{else}}
     <button data-action="connect" class="d-hide">Połącz</button>
     <button data-action="unlock" class="d-hide">Odblokuj</button>
     <button data-action="withdraw" class="d-hide">Wypłać</button>
     <button data-action="deposit" class="d-hide">Zdeponuj</button>
     <button data-action="lock" class="d-hide">Zablokuj</button>
+    <button data-action="rescan" class="d-hide">Rescan</button>
     <button data-action="create">Utwórz portfel {{.Info.Name}}</button>
     <span data-action="settings" class="ico-settings fs20 pointer d-hide"></span>
   {{end}}

@@ -120,10 +120,10 @@ export class NewWalletForm {
     } else if (walletDef.seeded) {
       Doc.show(page.auth)
       page.newWalletPass.value = ''
-      page.submitAdd.textContent = 'Create'
+      page.submitAdd.textContent = intl.prep(intl.ID_CREATE)
     } else {
       Doc.show(page.auth, page.newWalletPassBox)
-      page.submitAdd.textContent = 'Add'
+      page.submitAdd.textContent = intl.prep(intl.ID_ADD)
     }
 
     this.subform.update(walletDef.configopts || [])
