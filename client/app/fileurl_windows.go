@@ -1,6 +1,6 @@
-//go:build systray && windows
+//go:build windows
 
-package main
+package app
 
 import (
 	"path/filepath"
@@ -10,7 +10,7 @@ import (
 // slashes converted to forward slashes.
 // https://en.wikipedia.org/wiki/File_URI_scheme#Windows
 
-func filePathToURL(name string) (string, error) {
+func FilePathToURL(name string) (string, error) {
 	path, err := filepath.Abs(name)
 	if err != nil { // can't pwd if name was relative, probably impossible
 		return "", err

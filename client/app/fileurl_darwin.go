@@ -1,6 +1,6 @@
-//go:build systray && darwin
+//go:build darwin
 
-package main
+package app
 
 import (
 	"net/url"
@@ -9,7 +9,7 @@ import (
 
 // Darwin appears to need paths pre-escaped.
 
-func filePathToURL(name string) (string, error) {
+func FilePathToURL(name string) (string, error) {
 	path, err := filepath.Abs(name)
 	if err != nil { // can't pwd if name was relative, probably impossible
 		return "", err

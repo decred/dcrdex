@@ -36,7 +36,6 @@ interface Translator {
     uny: (y: number) => number
     w: (w: number) => number
     h: (h: number) => number
-    dataCoords: (f: () => void) => void
 }
 
 export interface MouseReport {
@@ -367,13 +366,11 @@ export class Chart {
       ctx.lineWidth = 1
       ctx.strokeStyle = this.theme.gridBorder
       ctx.beginPath()
-      tools.dataCoords(() => {
-        ctx.moveTo(0, 0)
-        ctx.lineTo(0, 1)
-        ctx.lineTo(1, 1)
-        ctx.lineTo(1, 0)
-        ctx.lineTo(0, 0)
-      })
+      ctx.moveTo(tools.x(0), tools.y(0))
+      ctx.lineTo(tools.x(0), tools.y(1))
+      ctx.lineTo(tools.x(1), tools.y(1))
+      ctx.lineTo(tools.x(1), tools.y(0))
+      ctx.lineTo(tools.x(0), tools.y(0))
       ctx.stroke()
     })
   }
@@ -494,6 +491,7 @@ export class DepthChart extends Chart {
     const mousePos = this.mousePos
     const buys = this.book.buys
     const sells = this.book.sells
+
     const [midGap, gapWidth] = this.gap()
 
     const halfWindow = this.zoomLevel * midGap / 2
@@ -776,26 +774,23 @@ export class DepthChart extends Chart {
   /* drawDepth draws a single side's depth chart data. */
   drawDepth (depth: [number, number][]) {
     const firstPt = depth[0]
-    let y = firstPt[1]
     let x: number
     this.plotRegion.plot(this.dataExtents, (ctx, tools) => {
-      tools.dataCoords(() => {
-        ctx.beginPath()
-        ctx.moveTo(firstPt[0], firstPt[1])
-        for (let i = 0; i < depth.length; i++) {
-          // Set x, but don't set y until we draw the horizontal line.
-          x = depth[i][0]
-          ctx.lineTo(x, y)
-          // If this is past the render edge, quit drawing.
-          y = depth[i][1]
-          ctx.lineTo(x, y)
-        }
-      })
+      const yZero = tools.y(0)
+      let y = tools.y(firstPt[1])
+      ctx.beginPath()
+      ctx.moveTo(tools.x(firstPt[0]), tools.y(firstPt[1]))
+      for (let i = 0; i < depth.length; i++) {
+        // Set x, but don't set y until we draw the horizontal line.
+        x = tools.x(depth[i][0])
+        ctx.lineTo(x, y)
+        // If this is past the render edge, quit drawing.
+        y = tools.y(depth[i][1])
+        ctx.lineTo(x, y)
+      }
       ctx.stroke()
-      tools.dataCoords(() => {
-        ctx.lineTo(x, 0)
-        ctx.lineTo(firstPt[0], 0)
-      })
+      ctx.lineTo(x, yZero)
+      ctx.lineTo(tools.x(firstPt[0]), yZero)
       ctx.closePath()
       ctx.globalAlpha = 0.25
       ctx.fill()
@@ -1245,8 +1240,7 @@ class Region {
       unx: (x: number) => (x - screenMinX) / xFactor + xMin,
       uny: (y: number) => yMin - (y - screenMaxY) / yFactor,
       w: (w: number) => w / xRange * screenW,
-      h: (h: number) => -h / yRange * screenH,
-      dataCoords: () => { /* Added when using plot() */ }
+      h: (h: number) => -h / yRange * screenH
     }
   }
 
@@ -1277,33 +1271,35 @@ class Region {
     // with this transform in place using data coordinates, and remove the
     // transform before stroking. The dataCoords method of the supplied tool
     // provides this functionality.
-    const yRange = dataExtents.yRange
-    const xFactor = region.xRange / dataExtents.xRange
-    const yFactor = region.yRange / yRange
-    const xMin = dataExtents.x.min
-    const yMin = dataExtents.y.min
-    // These translation factors are complicated because the (0, 0) of the
-    // region is not necessarily the (0, 0) of the canvas.
-    const tx = (region.x.min + xMin) - xMin * xFactor
-    const ty = -region.y.min - (yRange - yMin) * yFactor
-    const setTransform = () => {
-      // Data coordinates are flipped about y. Flip the coordinates and
-      // translate top left corner to canvas (0, 0).
-      ctx.transform(1, 0, 0, -1, -xMin, yMin)
-      // Scale to data coordinates and shift into place for the region's offset
-      // on the canvas.
-      ctx.transform(xFactor, 0, 0, yFactor, tx, ty)
-    }
-    // dataCoords allows some drawing to be performed directly in data
-    // coordinates. Most actual drawing functions like ctx.stroke and
-    // ctx.fillRect should not be called from inside dataCoords, but
-    // ctx.moveTo and ctx.LineTo are fine.
-    tools.dataCoords = f => {
-      ctx.save()
-      setTransform()
-      f()
-      ctx.restore()
-    }
+
+    // TODO: Figure out why this doesn't work on WebView.
+    // const yRange = dataExtents.yRange
+    // const xFactor = region.xRange / dataExtents.xRange
+    // const yFactor = region.yRange / yRange
+    // const xMin = dataExtents.x.min
+    // const yMin = dataExtents.y.min
+    // // These translation factors are complicated because the (0, 0) of the
+    // // region is not necessarily the (0, 0) of the canvas.
+    // const tx = (region.x.min + xMin) - xMin * xFactor
+    // const ty = -region.y.min - (yRange - yMin) * yFactor
+    // const setTransform = () => {
+    //   // Data coordinates are flipped about y. Flip the coordinates and
+    //   // translate top left corner to canvas (0, 0).
+    //   ctx.transform(1, 0, 0, -1, -xMin, yMin)
+    //   // Scale to data coordinates and shift into place for the region's offset
+    //   // on the canvas.
+    //   ctx.transform(xFactor, 0, 0, yFactor, tx, ty)
+    // }
+    // // dataCoords allows some drawing to be performed directly in data
+    // // coordinates. Most actual drawing functions like ctx.stroke and
+    // // ctx.fillRect should not be called from inside dataCoords, but
+    // // ctx.moveTo and ctx.LineTo are fine.
+    // tools.dataCoords = f => {
+    //   ctx.save()
+    //   setTransform()
+    //   f()
+    //   ctx.restore()
+    // }
 
     drawFunc(this.context, tools)
     ctx.restore()
