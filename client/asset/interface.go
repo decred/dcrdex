@@ -276,7 +276,7 @@ type Wallet interface {
 	Locked() bool
 	// PayFee sends the dex registration fee. Transaction fees are in addition to
 	// the registration fee, and the feeSuggestion is gotten from the server.
-	PayFee(address string, feeAmt, feeSuggestion uint64) (Coin, error)
+	PayFee(address string, feeAmt, feeRate uint64) (Coin, error)
 	// SwapConfirmations gets the number of confirmations and the spend status
 	// for the specified swap. If the swap was not funded by this wallet, and
 	// it is already spent, you may see CoinNotFoundError.
@@ -288,7 +288,7 @@ type Wallet interface {
 	SwapConfirmations(ctx context.Context, coinID dex.Bytes, contract dex.Bytes, matchTime time.Time) (confs uint32, spent bool, err error)
 	// Withdraw withdraws funds to the specified address. Fees are subtracted
 	// from the value.
-	Withdraw(address string, value, feeSuggestion uint64) (Coin, error)
+	Withdraw(address string, value, feeRate uint64) (Coin, error)
 	// ValidateSecret checks that the secret hashes to the secret hash.
 	ValidateSecret(secret, secretHash []byte) bool
 	// SyncStatus is information about the blockchain sync status. It should
