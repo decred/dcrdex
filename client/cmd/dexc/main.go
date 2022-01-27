@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"runtime/debug"
 	"runtime/pprof"
 	"strings"
 	"sync"
@@ -80,6 +81,14 @@ func mainCore() error {
 			time.Now().Local().Format("15:04:05 MST"))
 	}
 
+	defer func() {
+		if pv := recover(); pv != nil {
+			log.Criticalf("Uh-oh! \n\nPanic:\n\n%v\n\nStack:\n\n%v\n\n",
+				pv, string(debug.Stack()))
+		}
+		closeFileLogger()
+	}()
+
 	// Prepare the Core.
 	clientCore, err := core.New(&core.Config{
 		DBPath:       cfg.DBPath, // global set in config.go
@@ -121,7 +130,6 @@ func mainCore() error {
 		log.Info("Exiting dexc main.")
 		cancel()  // no-op with clean rpc/web server setup
 		wg.Wait() // no-op with clean setup and shutdown
-		closeFileLogger()
 	}()
 
 	if cfg.RPCOn {
