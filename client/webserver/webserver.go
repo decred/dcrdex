@@ -469,6 +469,11 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	return &wg, nil
 }
 
+// Addr returns the IP address on which the webserver is listening.
+func (s *WebServer) Addr() string {
+	return s.addr
+}
+
 // authorize creates, stores, and returns a new auth token to identify the user.
 // deauth should be used to invalidate tokens on logout.
 func (s *WebServer) authorize() string {

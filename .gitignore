@@ -20,6 +20,7 @@ markets.json
 dist/
 node_modules/
 client/cmd/dexc/dexc
+client/cmd/dexc-webview/dexc-webview
 client/cmd/dexcctl/dexcctl
 client/cmd/assetseed/assetseed
 docs/examples/rpcclient/rpcclient
