@@ -11,11 +11,10 @@ pragma solidity = 0.8.6;
 // code that tells the contract to insert a swap struct into the public map. At
 // this point the funds belong to the contract, and cannot be accessed by
 // anyone else, not even the contract's deployer. The initiator sets a
-// participant, a secret hash, a blocktime the funds will be accessible should
-// they not be redeemed, and a participant who can redeem before or after the
-// locktime. The participant can redeem at any time after the initiation
-// transaction is mined if they have the secret that hashes to the secret hash.
-// Otherwise, the initiator can refund funds any time after the locktime.
+// participant, a secret hash, and a refund blocktime. The participant can
+// redeem at any time after the initiation transaction is mined if they have
+// the secret that hashes to the secret hash. Otherwise, anyone can refund
+// funds any time after the locktime.
 //
 // This contract has no limits on gas used for any transactions.
 //
@@ -54,12 +53,11 @@ contract ETHSwap {
     constructor() {}
 
     // isRefundable checks that a swap can be refunded. The requirements are
-    // the initiator is msg.sender, the state is Filled, and the block
-    // timestamp be after the swap's stored refundBlockTimestamp.
+    // the state is Filled, and the block timestamp be after the swap's stored
+    // refundBlockTimestamp.
     function isRefundable(bytes32 secretHash) public view returns (bool) {
         Swap storage swapToCheck = swaps[secretHash];
         return swapToCheck.state == State.Filled &&
-               swapToCheck.initiator == msg.sender &&
                block.timestamp >= swapToCheck.refundBlockTimestamp;
     }
 
@@ -171,8 +169,8 @@ contract ETHSwap {
     }
 
     // refund refunds a contract. It checks that the sender is not a contract,
-    // and that the refund time has passed. msg.value is tranfered from the
-    // contract to the sender.
+    // and that the refund time has passed. msg.value is transferred from the
+    // contract to the initiator.
     //
     // It is important to note that this also uses call.value which comes with no
     // restrictions on gas used. See redeem for more info.
@@ -183,7 +181,7 @@ contract ETHSwap {
         require(isRefundable(secretHash), "not refundable");
         Swap storage swapToRefund = swaps[secretHash];
         swapToRefund.state = State.Refunded;
-        (bool ok, ) = payable(msg.sender).call{value: swapToRefund.value}("");
+        (bool ok, ) = payable(swapToRefund.initiator).call{value: swapToRefund.value}("");
         require(ok == true, "transfer failed");
     }
 }

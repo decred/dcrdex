@@ -465,39 +465,71 @@ func TestBalance(t *testing.T) {
 }
 
 func TestRefund(t *testing.T) {
-	node := &testNode{}
+	contractVer := uint32(0)
+	node := &testNode{
+		swapVers: map[uint32]struct{}{
+			contractVer: {},
+		},
+		swapMap: make(map[[32]byte]*dexeth.SwapState),
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	eth := &ExchangeWallet{
 		node: node,
 		ctx:  ctx,
 		addr: testAddressA,
+		log:  tLogger,
 	}
 	var randomSecretHash [32]byte
 	copy(randomSecretHash[:], encode.RandomBytes(32))
 	randomContractData := dexeth.EncodeContractData(0, randomSecretHash)
+	ss := new(dexeth.SwapState)
+	node.swapMap[randomSecretHash] = ss
 	tests := []struct {
 		name            string
 		contract        dex.Bytes
+		swapStep        dexeth.SwapStep
 		feeSuggestion   uint64
 		gasFeeLimit     uint64
 		isRefundable    bool
 		isRefundableErr error
 		refundErr       error
+		swapErr         error
 		originalBalance *Balance
 		originalLocked  uint64
 		wantLocked      uint64
+		wantZeroHash    bool
 		wantErr         bool
 	}{
 		{
 			name:            "ok",
 			contract:        randomContractData,
+			swapStep:        dexeth.SSInitiated,
 			isRefundable:    true,
 			feeSuggestion:   100,
 			gasFeeLimit:     200,
 			originalBalance: newBalance(1e9, 0, 0),
 			originalLocked:  1e8,
 			wantLocked:      1e8 - 200*dexeth.RefundGas(0),
+		},
+		{
+			name:            "ok refunded",
+			contract:        randomContractData,
+			swapStep:        dexeth.SSRefunded,
+			isRefundable:    true,
+			feeSuggestion:   100,
+			gasFeeLimit:     200,
+			originalBalance: newBalance(1e9, 0, 0),
+			originalLocked:  1e8,
+			wantLocked:      1e8 - 200*dexeth.RefundGas(0),
+			wantZeroHash:    true,
+		},
+		{
+			name:     "swap error",
+			contract: randomContractData,
+			swapStep: dexeth.SSInitiated,
+			swapErr:  errors.New(""),
+			wantErr:  true,
 		},
 		{
 			name:            "is refundable error",
@@ -544,6 +576,8 @@ func TestRefund(t *testing.T) {
 		node.isRefundableErr = test.isRefundableErr
 		node.refundErr = test.refundErr
 		node.bal = test.originalBalance
+		node.swapErr = test.swapErr
+		ss.State = test.swapStep
 		eth.locked = test.originalLocked
 		eth.gasFeeLimit = test.gasFeeLimit
 
@@ -558,29 +592,37 @@ func TestRefund(t *testing.T) {
 			t.Fatalf(`%v: unexpected error: %v`, test.name, err)
 		}
 
-		lastTxHash := node.lastRefund.tx.Hash()
-		if !bytes.Equal(id, lastTxHash[:]) {
-			t.Fatalf(`%v: expected refund tx hash: %x = returned id: %x`, test.name, lastTxHash, id)
-		}
+		if test.wantZeroHash {
+			// No on chain refund expected if status was already refunded.
+			zeroHash := common.Hash{}
+			if !bytes.Equal(id, zeroHash[:]) {
+				t.Fatalf(`%v: expected refund tx hash: %x = returned id: %x`, test.name, zeroHash, id)
+			}
+		} else {
+			lastTxHash := node.lastRefund.tx.Hash()
+			if !bytes.Equal(id, lastTxHash[:]) {
+				t.Fatalf(`%v: expected refund tx hash: %x = returned id: %x`, test.name, lastTxHash, id)
+			}
 
-		contractVer, secretHash, err := dexeth.DecodeContractData(test.contract)
-		if err != nil {
-			t.Fatalf(`%v: error decoding versioned secret hash: %v`, test.name, err)
-		}
+			contractVer, secretHash, err := dexeth.DecodeContractData(test.contract)
+			if err != nil {
+				t.Fatalf(`%v: error decoding versioned secret hash: %v`, test.name, err)
+			}
 
-		if secretHash != node.lastRefund.secretHash {
-			t.Fatalf(`%v: secret hash in contract %x != used to call refund %x`,
-				test.name, secretHash, node.lastRefund.secretHash)
-		}
+			if secretHash != node.lastRefund.secretHash {
+				t.Fatalf(`%v: secret hash in contract %x != used to call refund %x`,
+					test.name, secretHash, node.lastRefund.secretHash)
+			}
 
-		if contractVer != node.lastRefund.contractVer {
-			t.Fatalf(`%v: contract version %v != used to call refund %v`,
-				test.name, contractVer, node.lastRefund.contractVer)
-		}
+			if contractVer != node.lastRefund.contractVer {
+				t.Fatalf(`%v: contract version %v != used to call refund %v`,
+					test.name, contractVer, node.lastRefund.contractVer)
+			}
 
-		if test.feeSuggestion != node.lastRefund.fee {
-			t.Fatalf(`%v: contract version %v != used to call refund %v`,
-				test.name, contractVer, node.lastRefund.contractVer)
+			if test.feeSuggestion != node.lastRefund.fee {
+				t.Fatalf(`%v: contract fee %v != used to call refund %v`,
+					test.name, test.feeSuggestion, node.lastRefund.fee)
+			}
 		}
 
 		balance, err := eth.Balance()

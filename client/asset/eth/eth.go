@@ -1089,6 +1089,23 @@ func (eth *ExchangeWallet) Refund(_, contract dex.Bytes, feeSuggestion uint64) (
 		return nil, fmt.Errorf("Refund: failed to decode contract: %w", err)
 	}
 
+	unlockFunds := func() {
+		eth.unlockFunds(eth.gasFeeLimit * dexeth.RefundGas(version))
+	}
+
+	swap, err := eth.node.swap(eth.ctx, secretHash, version)
+	if err != nil {
+		return nil, err
+	}
+	// It's possible the swap was refunded by someone else. In that case we
+	// cannot know the refunding tx hash.
+	if swap.State == dexeth.SSRefunded {
+		eth.log.Infof("Swap with secret hash %x already refunded.", secretHash)
+		unlockFunds()
+		zeroHash := common.Hash{}
+		return zeroHash[:], nil
+	}
+
 	refundable, err := eth.node.isRefundable(secretHash, version)
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to check isRefundable: %w", err)
@@ -1102,7 +1119,7 @@ func (eth *ExchangeWallet) Refund(_, contract dex.Bytes, feeSuggestion uint64) (
 		return nil, fmt.Errorf("Refund: failed to call refund: %w", err)
 	}
 
-	eth.unlockFunds(eth.gasFeeLimit * dexeth.RefundGas(version))
+	unlockFunds()
 
 	txHash := tx.Hash()
 	return txHash[:], nil
