@@ -109,6 +109,22 @@ var (
 		},
 	}
 
+	// 02 Jun 21 21:12 CDT
+	defaultWalletBirthdayUnix = 1622668320
+	defaultWalletBirthday     = time.Unix(int64(defaultWalletBirthdayUnix), 0)
+
+	spvOpts = []*asset.ConfigOption{{
+		Key:         "walletbirthday",
+		DisplayName: "Wallet Birthday",
+		Description: "This is the date the wallet start scanning the blockchain for " +
+			"transactions related to this wallet. When updating this date, a rescan " +
+			"must also be done for it to take effect.",
+		DefaultValue: defaultWalletBirthdayUnix,
+		MaxValue:     "now",
+		MinValue:     defaultWalletBirthdayUnix,
+		IsDate:       true,
+	}}
+
 	commonOpts = []*asset.ConfigOption{
 		{
 			Key:         "fallbackfee",
@@ -159,7 +175,7 @@ var (
 		Type:        walletTypeSPV,
 		Tab:         "Native",
 		Description: "Use the built-in SPV wallet",
-		ConfigOpts:  commonOpts,
+		ConfigOpts:  append(spvOpts, commonOpts...),
 		Seeded:      true,
 	}
 
@@ -174,7 +190,6 @@ var (
 		},
 		LegacyWalletIndex: 1,
 	}
-	walletBirthday time.Time
 )
 
 // TxInSigner is a transaction input signer.
@@ -369,8 +384,9 @@ type WalletConfig struct {
 	FallbackFeeRate  float64 `ini:"fallbackfee"`
 	FeeRateLimit     float64 `ini:"feeratelimit"`
 	RedeemConfTarget uint64  `ini:"redeemconftarget"`
-	WalletName       string  `ini:"walletname"` // RPC
-	Peer             string  `ini:"peer"`       // SPV
+	WalletName       string  `ini:"walletname"`     // RPC
+	Peer             string  `ini:"peer"`           // SPV
+	Birthday         uint64  `ini:"walletbirthday"` // SPV
 }
 
 // readRPCWalletConfig parses the settings map into a *RPCWalletConfig.
@@ -449,7 +465,21 @@ func (d *Driver) Create(params *asset.CreateWalletParams) error {
 		return fmt.Errorf("error parsing chain: %w", err)
 	}
 
-	return createSPVWallet(params.Pass, params.Seed, params.DataDir, params.Logger, chainParams)
+	walletCfg := new(WalletConfig)
+	err = config.Unmapify(params.Settings, walletCfg)
+	if err != nil {
+		return err
+	}
+
+	bday := time.Unix(int64(walletCfg.Birthday), 0)
+	now := time.Now()
+	if defaultWalletBirthday.After(bday) {
+		bday = defaultWalletBirthday
+	} else if bday.After(now) {
+		bday = now
+	}
+
+	return createSPVWallet(params.Pass, params.Seed, bday, params.DataDir, params.Logger, chainParams)
 }
 
 // Open opens or connects to the BTC exchange wallet. Start the wallet with its
@@ -486,12 +516,6 @@ type redeemOptions struct {
 }
 
 func init() {
-	var err error
-	walletBirthday, err = time.Parse(time.RFC822, "02 Jun 21 21:12 CDT")
-	if err != nil {
-		panic("error parsing wallet birthday: " + err.Error())
-	}
-
 	asset.Register(BipID, &Driver{})
 }
 
@@ -537,6 +561,8 @@ type baseWallet struct {
 // method to implement asset.Rescanner.
 type ExchangeWalletSPV struct {
 	*baseWallet
+
+	walletBirthday time.Time
 }
 
 // ExchangeWalletFullNode implements Wallet and adds the FeeRate method.
@@ -559,7 +585,7 @@ func (btc *ExchangeWalletSPV) Rescan(_ context.Context) error {
 	w := btc.node.(*spvWallet)
 	atomic.StoreInt64(&btc.tipAtConnect, 0) // for progress
 	// Caller should start calling SyncStatus on a ticker.
-	return w.rescanWalletAsync()
+	return w.rescanWalletAsync(btc.walletBirthday)
 }
 
 // FeeRate satisfies asset.FeeRater.
@@ -782,9 +808,15 @@ func openSPVWallet(cfg *BTCCloneCFG) (*ExchangeWalletSPV, error) {
 
 	btc.node = loadSPVWallet(cfg.WalletCFG.DataDir, cfg.Logger.SubLogger("SPV"), peers, cfg.ChainParams)
 
-	return &ExchangeWalletSPV{
-		baseWallet: btc,
-	}, nil
+	bday := time.Unix(int64(walletCfg.Birthday), 0)
+	now := time.Now()
+	if defaultWalletBirthday.After(bday) {
+		bday = defaultWalletBirthday
+	} else if bday.After(now) {
+		bday = now
+	}
+
+	return &ExchangeWalletSPV{baseWallet: btc, walletBirthday: bday}, nil
 }
 
 // Info returns basic information about the wallet and asset.

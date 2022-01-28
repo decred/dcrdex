@@ -1094,6 +1094,8 @@ type Core struct {
 	credMtx     sync.RWMutex
 	credentials *db.PrimaryCredentials
 
+	seedGenerationTime uint64
+
 	wsConstructor func(*comms.WsCfg) (comms.WsConn, error)
 	newCrypter    func([]byte) encrypt.Crypter
 	reCrypter     func([]byte, []byte) (encrypt.Crypter, error)
@@ -1175,6 +1177,11 @@ func New(cfg *Config) (*Core, error) {
 		return nil, err
 	}
 
+	seedGenerationTime, err := boltDB.SeedGenerationTime()
+	if err != nil && !errors.Is(err, db.ErrNoSeedGenTime) {
+		return nil, err
+	}
+
 	core := &Core{
 		cfg:           cfg,
 		credentials:   creds,
@@ -1196,8 +1203,9 @@ func New(cfg *Config) (*Core, error) {
 		reCrypter:     encrypt.Deserialize,
 		latencyQ:      wait.NewTickerQueue(recheckInterval),
 
-		locale:        locale,
-		localePrinter: message.NewPrinter(lang),
+		locale:             locale,
+		localePrinter:      message.NewPrinter(lang),
+		seedGenerationTime: seedGenerationTime,
 	}
 
 	// Populate the initial user data. User won't include any DEX info yet, as
@@ -1663,9 +1671,10 @@ func (c *Core) assetMap() map[uint32]*SupportedAsset {
 // User is a thread-safe getter for the User.
 func (c *Core) User() *User {
 	return &User{
-		Assets:      c.assetMap(),
-		Exchanges:   c.exchangeMap(),
-		Initialized: c.IsInitialized(),
+		Assets:             c.assetMap(),
+		Exchanges:          c.exchangeMap(),
+		Initialized:        c.IsInitialized(),
+		SeedGenerationTime: c.seedGenerationTime,
 	}
 }
 
@@ -3128,6 +3137,14 @@ func (c *Core) InitializeClient(pw, restorationSeed []byte) error {
 	if err != nil {
 		return fmt.Errorf("SetPrimaryCredentials error: %w", err)
 	}
+
+	freshSeed := len(restorationSeed) == 0
+	if freshSeed {
+		now := uint64(time.Now().Unix())
+		c.db.SetSeedGenerationTime(now)
+		c.seedGenerationTime = now
+	}
+
 	c.setCredentials(creds)
 
 	if len(restorationSeed) == 0 {

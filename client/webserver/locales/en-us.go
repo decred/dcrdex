@@ -214,4 +214,9 @@ var EnUS = map[string]string{
 	"Maximum Possible Swap Fees":  "Maximum Possible Swap Fees",
 	"max_fee_conditions":          "This is the most you would ever pay in fees on your swap. Fees are normally assessed at a fraction of this rate. The maximum is not subject to changes once your order is placed.",
 	"wallet_logs":                 "Wallet Logs",
+	"Initialize fresh":            "Initialize as fresh wallet",
+	"Earliest possible birthday":  "Use earliest possible birthday",
+	"Enter custom birthday":       "Enter custom birthday",
+	"Select wallet birthday":      "Select wallet birthday",
+	"w_birthday_tooltip":          "This wallet scans for transactions starting on a certain date. If you have never used this wallet, initialize it as fresh wallet. If you are not sure, use the earliest possible birthday. If you remember the first time you initialized this wallet, select a custom date.",
 }

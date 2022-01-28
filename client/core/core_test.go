@@ -524,6 +524,12 @@ func (tdb *TDB) DeleteInactiveMatches(ctx context.Context, olderThan *time.Time,
 func (tdb *TDB) PrimaryCredentials() (*db.PrimaryCredentials, error) {
 	return tdb.creds, nil
 }
+func (tdb *TDB) SetSeedGenerationTime(time uint64) error {
+	return nil
+}
+func (tdb *TDB) SeedGenerationTime() (uint64, error) {
+	return 0, nil
+}
 
 func (tdb *TDB) Recrypt(creds *db.PrimaryCredentials, oldCrypter, newCrypter encrypt.Crypter) (
 	walletUpdates map[uint32][]byte, acctUpdates map[string][]byte, err error) {

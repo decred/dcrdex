@@ -16,6 +16,10 @@
         <label class="form-check-label fs14"> <span class="ico-info fs13"></span></label>
       </div>
     </div>
+    <div data-tmpl="dateInput" class="px-0 d-flex flex-column justify-content-end">
+      <label class="pl-1 mb-1 small"> <span class="ico-info"></span></label>
+      <input type="date">
+    </div>
   </div>
   <div data-tmpl="showOther" class="d-hide mb-1 pointer d-flex align-items-center justify-content-start">
     <span data-tmpl="showIcon" class="ico-plus fs8 pl-1"></span>
@@ -51,6 +55,16 @@
     {{template "walletConfigTemplates"}}
   </div>
   <hr class="dashed my-2">
+  <div class="d-hide" data-tmpl="selectBirthday">
+    <span>Select wallet birthday: </span><span class="ico-info" data-tooltip="This wallet scans for transactions starting on a certain date. If you have never used this wallet, initialize it as fresh wallet. If you are not sure, use the earliest possible birthday. If you remember the first time you initialized this wallet, select a custom date."></span><br/>
+    <input type="radio" id="fresh" name="birthday" value="fresh" data-tmpl="freshButton">
+    <label for="fresh">Initialize as fresh wallet</label><br/>
+    <input type="radio" id="earliest" name="birthday" value="earliest" data-tmpl="earliestButton">
+    <label for="earliest">Use earliest possible birthday</label><br/>
+    <input type="radio" id="custom" name="birthday" value="custom" data-tmpl="customButton">
+    <label for="custom">Enter custom birthday</label>
+    <input type="date" data-tmpl="customDate">
+  </div>
   <div class="d-flex justify-content-between align-items-stretch flex-wrap" data-tmpl="auth">
     <div class="col-11 p-0" data-tmpl="newWalletPassBox">
       <label for="newWalletPass" class="pt-3 pl-1 mb-1">Hasło portfela

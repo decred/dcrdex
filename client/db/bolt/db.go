@@ -87,6 +87,7 @@ var (
 	redemptionFeesKey      = []byte("redeemFees")
 	typeKey                = []byte("type")
 	credentialsBucket      = []byte("credentials")
+	seedGenTimeKey         = []byte("seedGenTime")
 	encSeedKey             = []byte("encSeed")
 	encInnerKeyKey         = []byte("encInnerKey")
 	innerKeyParamsKey      = []byte("innerKeyParams")
@@ -298,7 +299,7 @@ func (db *BoltDB) primaryCreds() (creds *dexdb.PrimaryCredentials, err error) {
 	return creds, db.View(func(tx *bbolt.Tx) error {
 		bkt := tx.Bucket(credentialsBucket)
 		if bkt == nil {
-			return fmt.Errorf("no credentials bucket")
+			return errors.New("no credentials bucket")
 		}
 		if bkt.Stats().KeyN == 0 {
 			return dexdb.ErrNoCredentials
@@ -317,7 +318,7 @@ func (db *BoltDB) primaryCreds() (creds *dexdb.PrimaryCredentials, err error) {
 func (db *BoltDB) setCreds(tx *bbolt.Tx, creds *dexdb.PrimaryCredentials) error {
 	bkt := tx.Bucket(credentialsBucket)
 	if bkt == nil {
-		return fmt.Errorf("no credentials bucket")
+		return errors.New("no credentials bucket")
 	}
 	return newBucketPutter(bkt).
 		put(encSeedKey, creds.EncSeed).
@@ -331,6 +332,43 @@ func (db *BoltDB) setCreds(tx *bbolt.Tx, creds *dexdb.PrimaryCredentials) error 
 // is an error if none have been stored.
 func (db *BoltDB) PrimaryCredentials() (creds *dexdb.PrimaryCredentials, err error) {
 	return db.primaryCreds()
+}
+
+// SetSeedGenerationTime stores the time the app seed was generated.
+func (db *BoltDB) SetSeedGenerationTime(time uint64) error {
+	return db.Update(func(tx *bbolt.Tx) error {
+		bkt := tx.Bucket(credentialsBucket)
+		if bkt == nil {
+			return errors.New("no credentials bucket")
+		}
+
+		return newBucketPutter(bkt).
+			put(seedGenTimeKey, uint64Bytes(time)).
+			err()
+	})
+}
+
+// SeedGenerationTime returns the time the app seed was generated, if it was
+// stored. It returns dexdb.ErrNoSeedGenTime if it was not stored.
+func (db *BoltDB) SeedGenerationTime() (uint64, error) {
+	var seedGenTime uint64
+	return seedGenTime, db.View(func(tx *bbolt.Tx) error {
+		bkt := tx.Bucket(credentialsBucket)
+		if bkt == nil {
+			return errors.New("no credentials bucket")
+		}
+
+		seedGenTimeBytes := bkt.Get(seedGenTimeKey)
+		if seedGenTimeBytes == nil {
+			return dexdb.ErrNoSeedGenTime
+		}
+		if len(seedGenTimeBytes) != 8 {
+			return fmt.Errorf("seed generation time length %v, expected 8", len(seedGenTimeBytes))
+		}
+
+		seedGenTime = intCoder.Uint64(seedGenTimeBytes)
+		return nil
+	})
 }
 
 // ListAccounts returns a list of DEX URLs. The DB is designed to have a single

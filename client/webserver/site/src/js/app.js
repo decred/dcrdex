@@ -48,6 +48,7 @@ export default class Application {
       accounts: {},
       wallets: {}
     }
+    this.seedGenTime = 0
     this.commitHash = process.env.COMMITHASH
     this.showPopups = State.getCookie('popups') === '1'
     console.log('Decred DEX Client App, Build', this.commitHash.substring(0, 7))
@@ -153,6 +154,7 @@ export default class Application {
     // If it's not a page that requires auth, skip the error notification.
     const skipNote = unauthedPages.indexOf(this.main.dataset.handler) > -1
     if (!this.checkResponse(user, skipNote)) return
+    this.seedGenTime = user.seedgentime
     this.user = user
     this.assets = user.assets
     this.exchanges = user.exchanges

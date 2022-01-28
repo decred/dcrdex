@@ -140,8 +140,13 @@ type ConfigOption struct {
 	DisplayName  string      `json:"displayname"`
 	Description  string      `json:"description"`
 	DefaultValue interface{} `json:"default"`
-	NoEcho       bool        `json:"noecho"`
-	IsBoolean    bool        `json:"isboolean"`
+	// If MaxValue/MinValue are set to the string "now" for a date config, the
+	// UI will display the current date.
+	MaxValue  interface{} `json:"max"`
+	MinValue  interface{} `json:"min"`
+	NoEcho    bool        `json:"noecho"`
+	IsBoolean bool        `json:"isboolean"`
+	IsDate    bool        `json:"isdate"`
 }
 
 // WalletConfig is the configuration settings for the wallet. WalletConfig

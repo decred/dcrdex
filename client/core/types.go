@@ -113,9 +113,10 @@ type WalletState struct {
 
 // User is information about the user's wallets and DEX accounts.
 type User struct {
-	Exchanges   map[string]*Exchange       `json:"exchanges"`
-	Initialized bool                       `json:"inited"`
-	Assets      map[uint32]*SupportedAsset `json:"assets"`
+	Exchanges          map[string]*Exchange       `json:"exchanges"`
+	Initialized        bool                       `json:"inited"`
+	SeedGenerationTime uint64                     `json:"seedgentime"`
+	Assets             map[uint32]*SupportedAsset `json:"assets"`
 }
 
 // SupportedAsset is data about an asset and possibly the wallet associated

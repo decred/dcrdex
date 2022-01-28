@@ -41,6 +41,7 @@ const (
 )
 
 const ErrNoCredentials = dex.ErrorKind("no credentials have been stored")
+const ErrNoSeedGenTime = dex.ErrorKind("seed generation time has not been stored")
 
 // String satisfies fmt.Stringer for Severity.
 func (s Severity) String() string {

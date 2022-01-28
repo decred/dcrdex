@@ -128,7 +128,7 @@ type neutrinoService interface {
 var _ neutrinoService = (*neutrino.ChainService)(nil)
 
 // createSPVWallet creates a new SPV wallet.
-func createSPVWallet(privPass []byte, seed []byte, dbDir string, log dex.Logger, net *chaincfg.Params) error {
+func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string, log dex.Logger, net *chaincfg.Params) error {
 	netDir := filepath.Join(dbDir, net.Name)
 
 	if err := logNeutrino(netDir); err != nil {
@@ -145,7 +145,7 @@ func createSPVWallet(privPass []byte, seed []byte, dbDir string, log dex.Logger,
 
 	pubPass := []byte(wallet.InsecurePubPassphrase)
 
-	_, err = loader.CreateNewWallet(pubPass, privPass, seed, walletBirthday)
+	_, err = loader.CreateNewWallet(pubPass, privPass, seed, bday)
 	if err != nil {
 		return fmt.Errorf("CreateNewWallet error: %w", err)
 	}
@@ -1200,7 +1200,7 @@ func (w *spvWallet) startWallet() error {
 // located. The neutrinoService is not stopped, so most spvWallet methods will
 // continue to work without error, but methods using the btcWallet will likely
 // return incorrect results or errors.
-func (w *spvWallet) rescanWalletAsync() error {
+func (w *spvWallet) rescanWalletAsync(walletBirthday time.Time) error {
 	if !atomic.CompareAndSwapUint32(&w.rescanStarting, 0, 1) {
 		return errors.New("rescan already in progress")
 	}
@@ -1231,10 +1231,14 @@ func (w *spvWallet) rescanWalletAsync() error {
 
 	err = walletdb.Update(wdb, func(dbtx walletdb.ReadWriteTx) error {
 		ns := dbtx.ReadWriteBucket([]byte("waddrmgr")) // it'll be fine
-		return btcw.Manager.SetSyncedTo(ns, nil)       // never synced, forcing recover from birthday
+		err := btcw.Manager.SetBirthday(ns, walletBirthday)
+		if err != nil {
+			return err
+		}
+		return btcw.Manager.SetSyncedTo(ns, nil) // never synced, forcing recover from birthday
 	})
 	if err != nil {
-		w.log.Errorf("Failed to reset wallet manager sync height: %v", err)
+		w.log.Errorf("Failed to reset wallet manager sync height and birthday: %v", err)
 	}
 
 	w.log.Info("Starting wallet...")
