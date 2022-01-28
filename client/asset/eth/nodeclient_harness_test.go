@@ -1113,12 +1113,12 @@ func testRefund(t *testing.T) {
 	const amt = 1e9
 	locktime := time.Second * 12
 	tests := []struct {
-		name                         string
-		sleep                        time.Duration
-		refunder                     *accounts.Account
-		refunderClient               *nodeClient
-		finalState                   dexeth.SwapStep
-		addAmt, redeem, isRefundable bool
+		name                                 string
+		sleep                                time.Duration
+		refunder                             *accounts.Account
+		refunderClient                       *nodeClient
+		finalState                           dexeth.SwapStep
+		addAmt, addFee, redeem, isRefundable bool
 	}{{
 		name:           "ok",
 		sleep:          time.Second * 16,
@@ -1126,6 +1126,7 @@ func testRefund(t *testing.T) {
 		refunderClient: ethClient,
 		refunder:       simnetAcct,
 		addAmt:         true,
+		addFee:         true,
 		finalState:     dexeth.SSRefunded,
 	}, {
 		name:           "before locktime",
@@ -1133,20 +1134,28 @@ func testRefund(t *testing.T) {
 		isRefundable:   false,
 		refunderClient: ethClient,
 		refunder:       simnetAcct,
+		addFee:         true,
 		finalState:     dexeth.SSInitiated,
-	}, {
-		name:           "wrong refunder",
-		sleep:          time.Second * 16,
-		isRefundable:   false,
-		refunderClient: participantEthClient,
-		refunder:       participantAcct,
-		finalState:     dexeth.SSInitiated,
+
+		// NOTE: Refunding to an account other than the sender takes more
+		// gas. At present redeem gas must be set to around 46000 although
+		// it will only use about 43100. Set in dex/networks/eth/params.go
+		// to test.
+		// }, {
+		// 	name:           "ok non initiator refunder",
+		// 	sleep:          time.Second * 16,
+		// 	isRefundable:   true,
+		// 	refunderClient: participantEthClient,
+		// 	refunder:       participantAcct,
+		// 	addAmt:         true,
+		// 	finalState:     dexeth.SSRefunded,
 	}, {
 		name:           "already redeemed",
 		sleep:          time.Second * 16,
 		isRefundable:   false,
 		refunderClient: ethClient,
 		refunder:       simnetAcct,
+		addFee:         true,
 		redeem:         true,
 		finalState:     dexeth.SSRedeemed,
 	}}
@@ -1195,7 +1204,7 @@ func testRefund(t *testing.T) {
 			t.Fatalf("unexpected post-init mining error for test %v: %v", test.name, err)
 		}
 
-		originalBal, err := test.refunderClient.balance(ctx)
+		originalBal, err := ethClient.balance(ctx)
 		if err != nil {
 			t.Fatalf("%s: balance error: %v", test.name, err)
 		}
@@ -1215,12 +1224,12 @@ func testRefund(t *testing.T) {
 		}
 		spew.Dump(tx)
 
-		bal, err := test.refunderClient.balance(ctx)
+		bal, err := ethClient.balance(ctx)
 		if err != nil {
 			t.Fatalf("%s: balance error: %v", test.name, err)
 		}
 
-		if test.addAmt && dexeth.WeiToGwei(bal.PendingIn) != amt {
+		if test.addFee && dexeth.WeiToGwei(bal.PendingIn) != amt {
 			t.Fatalf("%s: unexpected pending in balance %s", test.name, bal.PendingIn)
 		}
 
@@ -1229,7 +1238,7 @@ func testRefund(t *testing.T) {
 		}
 
 		// It appears the receipt is only accessible after the tx is mined.
-		receipt, err := test.refunderClient.transactionReceipt(ctx, tx.Hash())
+		receipt, err := ethClient.transactionReceipt(ctx, tx.Hash())
 		if err != nil {
 			t.Fatalf("%s: receipt error: %v", test.name, err)
 		}
@@ -1239,16 +1248,23 @@ func testRefund(t *testing.T) {
 		// depending on whether redeem completed successfully on-chain.
 		// If unsuccessful the fee is subtracted. If successful, amt is
 		// added.
-		bal, err = test.refunderClient.balance(ctx)
+		bal, err = ethClient.balance(ctx)
 		if err != nil {
 			t.Fatalf("%s: balance error: %v", test.name, err)
 		}
-		gasPrice, err := feesAtBlk(ctx, test.refunderClient, receipt.BlockNumber.Int64())
+		swap, err = ethClient.swap(ctx, secretHash, 0)
+		if err != nil {
+			t.Fatalf("%s: post-refund swap error: %v", test.name, err)
+		}
+		gasPrice, err := feesAtBlk(ctx, ethClient, receipt.BlockNumber.Int64())
 		if err != nil {
 			t.Fatalf("%s: feesAtBlk error: %v", test.name, err)
 		}
-		bigGasUsed := new(big.Int).SetUint64(receipt.GasUsed)
-		txFee := new(big.Int).Mul(bigGasUsed, gasPrice)
+		txFee := big.NewInt(0)
+		if test.addFee {
+			bigGasUsed := new(big.Int).SetUint64(receipt.GasUsed)
+			txFee = new(big.Int).Mul(bigGasUsed, gasPrice)
+		}
 		wantBal := new(big.Int).Sub(originalBal.Current, txFee)
 		if test.addAmt {
 			wantBal.Add(wantBal, dexeth.GweiToWei(amt))
@@ -1260,7 +1276,7 @@ func testRefund(t *testing.T) {
 				test.name, wantBal, bal.Current, diff)
 		}
 
-		swap, err = test.refunderClient.swap(ctx, secretHash, 0)
+		swap, err = ethClient.swap(ctx, secretHash, 0)
 		if err != nil {
 			t.Fatalf("%s: post-refund swap error: %v", test.name, err)
 		}
