@@ -1241,6 +1241,8 @@ func (w *spvWallet) rescanWalletAsync(walletBirthday time.Time) error {
 		w.log.Errorf("Failed to reset wallet manager sync height and birthday: %v", err)
 	}
 
+	w.birthday = walletBirthday
+
 	w.log.Info("Starting wallet...")
 	btcw.Start()
 
