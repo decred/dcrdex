@@ -171,6 +171,9 @@ func (c *TCore) AccountDisable(pw []byte, host string) error { return nil }
 func (c *TCore) ExportSeed(pw []byte) ([]byte, error) {
 	return []byte("ab"), nil
 }
+func (c *TCore) GetWalletLogFilePath(uint32) (string, error) {
+	return "", nil
+}
 
 type TWriter struct {
 	b []byte

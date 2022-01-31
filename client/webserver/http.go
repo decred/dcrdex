@@ -5,8 +5,10 @@ package webserver
 
 import (
 	"encoding/csv"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,6 +27,7 @@ const (
 	loginRoute       = "/login"
 	marketsRoute     = "/markets"
 	walletsRoute     = "/wallets"
+	walletLogRoute   = "/wallets/logfile"
 	settingsRoute    = "/settings"
 	ordersRoute      = "/orders"
 	exportOrderRoute = "/orders/export"
@@ -143,6 +146,81 @@ func (s *WebServer) handleWallets(w http.ResponseWriter, r *http.Request) {
 		Assets:          append(assets, nowallets...),
 	}
 	s.sendTemplate(w, "wallets", data)
+}
+
+// handleWalletLogFile is the handler for the '/wallets/logfile' page request.
+func (s *WebServer) handleWalletLogFile(w http.ResponseWriter, r *http.Request) {
+	wf, ok := w.(http.Flusher)
+	if !ok {
+		log.Errorf("unable to flush streamed data")
+		http.Error(w, "unable to flush streamed data", http.StatusBadRequest)
+		return
+	}
+
+	err := r.ParseForm()
+	if err != nil {
+		log.Errorf("error parsing form for wallet log file: %v", err)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	assetIDQueryString := r.Form["assetid"]
+	if len(assetIDQueryString) != 1 || len(assetIDQueryString[0]) == 0 {
+		log.Error("could not find asset id in query string")
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	assetID, err := strconv.ParseUint(assetIDQueryString[0], 10, 32)
+	if err != nil {
+		log.Errorf("failed to parse asset id query string %v", err)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	logFilePath, err := s.core.GetWalletLogFilePath(uint32(assetID))
+	if err != nil {
+		log.Errorf("failed to get log file path %v", err)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	logFile, err := os.Open(logFilePath)
+	if err != nil {
+		log.Errorf("error opening log file: %v", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	assetName := dex.BipIDSymbol(uint32(assetID))
+	logFileName := fmt.Sprintf("dcrdex-%s-wallet.log", assetName)
+	w.Header().Set("Content-Disposition", "attachment; filename="+logFileName)
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusOK)
+
+	bufferLength := int64(1024)
+	buffer := make([]byte, bufferLength)
+	offset := int64(0)
+	for {
+		n, readErr := logFile.ReadAt(buffer, offset)
+		if readErr != nil && readErr != io.EOF {
+			log.Errorf("error reading file %v", err)
+			return
+		}
+
+		_, err = w.Write(buffer[0:n])
+		if err != nil {
+			log.Errorf("error writing file: %v", err)
+			return
+		}
+		wf.Flush()
+
+		if readErr == io.EOF {
+			return
+		}
+
+		offset += bufferLength
+	}
 }
 
 // handleSettings is the handler for the '/settings' page request.
