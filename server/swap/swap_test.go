@@ -14,6 +14,7 @@ import (
 	"math/rand"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -351,6 +352,7 @@ type TAsset struct {
 	redemptionErr error
 	bChan         chan *asset.BlockUpdate // to trigger processBlock and eventually (after up to BroadcastTimeout) checkInaction depending on block time
 	lbl           string
+	swapFeeForced uint64
 }
 
 func newTAsset(lbl string) *TAsset {
@@ -448,6 +450,7 @@ type TCoin struct {
 	confsErr  error
 	auditAddr string
 	auditVal  uint64
+	feeRate   uint64
 }
 
 func (coin *TCoin) Confirmations(context.Context) (int64, error) {
@@ -474,7 +477,7 @@ func (coin *TCoin) SpendSize() uint32                             { return 0 }
 func (coin *TCoin) String() string                                { return hex.EncodeToString(coin.id) /* not txid:vout */ }
 
 func (coin *TCoin) FeeRate() uint64 {
-	return 72 // make sure it's at least the required fee if you want it to pass (test fail TODO)
+	return coin.feeRate
 }
 
 func TNewAsset(backend asset.Backend) *asset.BackedAsset {
@@ -482,7 +485,7 @@ func TNewAsset(backend asset.Backend) *asset.BackedAsset {
 		Backend: backend,
 		Asset: dex.Asset{
 			Symbol:     "qwe",
-			MaxFeeRate: 12,
+			MaxFeeRate: 120, // not used by Swapper other than prohibiting zero
 			SwapConf:   2,
 		},
 	}
@@ -514,24 +517,12 @@ type testRig struct {
 	noResume      bool
 }
 
-func tNewTestRig(matchInfo *tMatch, seed ...*testRig) (*testRig, func()) {
-	var abcBackend, xyzBackend *TAsset
+func tNewTestRig(matchInfo *tMatch) (*testRig, func()) {
 	storage := &TStorage{}
 	authMgr := newTAuthManager()
 	var noResume bool
-	manualMode := len(seed) > 0
-	if manualMode && seed[0] != nil {
-		seedRig := seed[0]
-		abcBackend, xyzBackend = seedRig.abcNode, seedRig.xyzNode
-		storage = seedRig.storage
-		noResume = seedRig.noResume
-		authMgr.newReq = seedRig.auth.newReq
-		authMgr.newNtfn = seedRig.auth.newNtfn
-		authMgr.newSuspend = seedRig.auth.newSuspend
-	} else {
-		abcBackend = newTAsset("abc")
-		xyzBackend = newTAsset("xyz")
-	}
+	abcBackend := newTAsset("abc")
+	xyzBackend := newTAsset("xyz")
 
 	abcAsset := TNewAsset(abcBackend)
 	abcCoinLocker := coinlock.NewAssetCoinLocker()
@@ -741,8 +732,14 @@ func (rig *testRig) sendSwap(user *tUser, oid order.OrderID, recipient string) (
 	swap := tNewSwap(matchInfo, oid, recipient, user)
 	if isQuoteSwap(user, matchInfo.match) {
 		rig.xyzNode.setContract(swap.coin, false)
+		if rig.xyzNode.swapFeeForced != 0 {
+			swap.coin.Coin.(*TCoin).feeRate = rig.xyzNode.swapFeeForced
+		}
 	} else {
 		rig.abcNode.setContract(swap.coin, false)
+		if rig.abcNode.swapFeeForced != 0 {
+			swap.coin.Coin.(*TCoin).feeRate = rig.abcNode.swapFeeForced
+		}
 	}
 	rpcErr := rig.swapper.handleInit(user.acct, swap.req)
 	if rpcErr != nil {
@@ -1125,10 +1122,12 @@ func tAckArr(user *tUser, matchIDs []order.MatchID) []byte {
 
 func tMatchInfo(maker, taker *tUser, matchQty, matchRate uint64, makerOrder *order.LimitOrder, takerOrder order.Order) *tMatch {
 	match := &order.Match{
-		Taker:    takerOrder,
-		Maker:    makerOrder,
-		Quantity: matchQty,
-		Rate:     matchRate,
+		Taker:        takerOrder,
+		Maker:        makerOrder,
+		Quantity:     matchQty,
+		Rate:         matchRate,
+		FeeRateBase:  42,
+		FeeRateQuote: 62,
 	}
 	mid := match.ID()
 	maker.matchIDs = append(maker.matchIDs, mid)
@@ -1165,6 +1164,10 @@ func (set *tMatchSet) add(matchInfo *tMatch) *tMatchSet {
 	ms.Amounts = append(ms.Amounts, matchInfo.qty)
 	ms.Rates = append(ms.Rates, matchInfo.rate)
 	ms.Total += matchInfo.qty
+	// In practice, a MatchSet's fee rate is used to set the individual match
+	// fee rates via (*MatchSet).Matches in Negotiate > readMatches.
+	ms.FeeRateBase = matchInfo.match.FeeRateBase
+	ms.FeeRateQuote = matchInfo.match.FeeRateQuote
 	set.matchInfos = append(set.matchInfos, matchInfo)
 	return set
 }
@@ -1201,9 +1204,12 @@ type tSwap struct {
 	contract string
 }
 
-var tValSpoofer uint64 = 1
-var tRecipientSpoofer = ""
-var tLockTimeSpoofer time.Time
+var (
+	tConfsSpoofer     int64
+	tValSpoofer       uint64 = 1
+	tRecipientSpoofer        = ""
+	tLockTimeSpoofer  time.Time
+)
 
 func tNewSwap(matchInfo *tMatch, oid order.OrderID, recipient string, user *tUser) *tSwap {
 	auditVal := matchInfo.qty
@@ -1212,7 +1218,8 @@ func tNewSwap(matchInfo *tMatch, oid order.OrderID, recipient string, user *tUse
 	}
 	coinID := randBytes(36)
 	coin := &TCoin{
-		confs:     0,
+		feeRate:   64,
+		confs:     tConfsSpoofer,
 		auditAddr: recipient + tRecipientSpoofer,
 		auditVal:  auditVal * tValSpoofer,
 		id:        coinID,
@@ -1305,8 +1312,8 @@ func makeEnsureNilErr(t *testing.T) func(error) {
 
 // Create a closure that will call t.Fatal if a user doesn't have an
 // msgjson.RPCError of the correct type.
-func rpcErrorChecker(t *testing.T, rig *testRig, code int) func(*tUser) {
-	return func(user *tUser) {
+func rpcErrorChecker(t *testing.T, rig *testRig, code int) func(*tUser, ...string) {
+	return func(user *tUser, grep ...string) {
 		t.Helper()
 		msg, resp := rig.auth.getResp(user.acct)
 		if msg == nil {
@@ -1317,6 +1324,9 @@ func rpcErrorChecker(t *testing.T, rig *testRig, code int) func(*tUser) {
 		}
 		if resp.Error.Code != code {
 			t.Fatalf("wrong error code for %s. expected %d, got %d", user.lbl, msgjson.SignatureError, resp.Error.Code)
+		}
+		if len(grep) > 0 && !strings.Contains(resp.Error.Message, grep[0]) {
+			t.Fatalf("error missing the message %q", grep[0])
 		}
 	}
 }
@@ -1791,28 +1801,46 @@ func TestMalformedSwap(t *testing.T) {
 	matchInfo := set.matchInfos[0]
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
+
 	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
 	ensureNilErr := makeEnsureNilErr(t)
 	checkContractErr := rpcErrorChecker(t, rig, msgjson.ContractError)
 
 	ensureNilErr(rig.ackMatch_maker(true))
 	ensureNilErr(rig.ackMatch_taker(true))
+
 	// Bad contract value
 	tValSpoofer = 2
 	ensureNilErr(rig.sendSwap_maker(false))
-	checkContractErr(matchInfo.maker)
+	checkContractErr(matchInfo.maker, "expected contract value to be")
 	tValSpoofer = 1
 	// Bad contract recipient
 	tRecipientSpoofer = "2"
 	ensureNilErr(rig.sendSwap_maker(false))
-	checkContractErr(matchInfo.maker)
+	checkContractErr(matchInfo.maker, "incorrect recipient")
 	tRecipientSpoofer = ""
 	// Bad locktime
 	tLockTimeSpoofer = time.Unix(1, 0)
 	ensureNilErr(rig.sendSwap_maker(false))
-	checkContractErr(matchInfo.maker)
+	checkContractErr(matchInfo.maker, "expected lock time")
 	tLockTimeSpoofer = time.Time{}
-	// Now make sure it works.
+
+	// Low fee, unconfirmed
+	rig.abcNode.swapFeeForced = 20
+	ensureNilErr(rig.sendSwap_maker(false))
+	checkContractErr(matchInfo.maker, "low tx fee")
+
+	// Works with low fee, but now a confirmation.
+	tConfsSpoofer = 1
+	ensureNilErr(rig.sendSwap_maker(true))
+	rig.abcNode.swapFeeForced = 0
+	tConfsSpoofer = 0 // back to 0
+
+	// Back to NewlyMatched
+	tracker := rig.getTracker()
+	tracker.Status = order.NewlyMatched
+
+	// And works with adequate fee and 0 confs.
 	ensureNilErr(rig.sendSwap_maker(true))
 }
 

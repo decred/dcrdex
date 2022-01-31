@@ -1272,14 +1272,31 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 			"redemption error")
 		return wait.DontTryAgain
 	}
+
+	// Enforce the prescribed swap fee rate, but only if the swap is not already
+	// confirmed.
+	swapConfs := func() int64 { // not executed if adequate fee rate
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		confs, err := contract.Confirmations(ctx)
+		if err != nil {
+			log.Warnf("Failed to get confirmations on swap tx %v: %v", contract.TxID(), err)
+			confs = 0 // should be already
+		}
+		return confs
+	}
 	reqFeeRate := stepInfo.match.FeeRateQuote
 	if stepInfo.isBaseAsset {
 		reqFeeRate = stepInfo.match.FeeRateBase
 	}
 	if contract.FeeRate() < reqFeeRate {
-		// TODO: test this case
-		s.respondError(msg.ID, actor.user, msgjson.ContractError, "low tx fee")
-		return wait.DontTryAgain
+		confs := swapConfs()
+		if confs < 1 {
+			s.respondError(msg.ID, actor.user, msgjson.ContractError, "low tx fee")
+			return wait.DontTryAgain
+		}
+		log.Infof("Swap txn %v (%s) with low fee rate %v (%v required), accepted with %d confirmations.",
+			contract, stepInfo.asset.Symbol, contract.FeeRate(), reqFeeRate, confs)
 	}
 	if contract.SwapAddress != counterParty.order.Trade().SwapAddress() {
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
