@@ -191,6 +191,7 @@ func (s *WebServer) handleWalletLogFile(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
+	defer logFile.Close()
 
 	assetName := dex.BipIDSymbol(uint32(assetID))
 	logFileName := fmt.Sprintf("dcrdex-%s-wallet.log", assetName)
