@@ -2114,6 +2114,49 @@ func TestDriverExists(t *testing.T) {
 	}
 }
 
+func TestDriverDecodeCoinID(t *testing.T) {
+	drv := &Driver{}
+	addressStr := "0xB6De8BB5ed28E6bE6d671975cad20C03931bE981"
+	address := common.HexToAddress(addressStr)
+
+	// Test tx hash
+	txHash := encode.RandomBytes(common.HashLength)
+	coinID, err := drv.DecodeCoinID(txHash)
+	if err != nil {
+		t.Fatalf("error decoding coin id: %v", err)
+	}
+	var hash common.Hash
+	hash.SetBytes(txHash)
+	if coinID != hash.String() {
+		t.Fatalf("expected coin id to be %s but got %s", hash.String(), coinID)
+	}
+
+	// Test funding coin id
+	fundingCoinID := createFundingCoinID(address, 1000)
+	coinID, err = drv.DecodeCoinID(fundingCoinID.Encode())
+	if err != nil {
+		t.Fatalf("error decoding coin id: %v", err)
+	}
+	if coinID != fundingCoinID.String() {
+		t.Fatalf("expected coin id to be %s but got %s", fundingCoinID.String(), coinID)
+	}
+
+	// Test byte encoded address string
+	coinID, err = drv.DecodeCoinID([]byte(addressStr))
+	if err != nil {
+		t.Fatalf("error decoding coin id: %v", err)
+	}
+	if coinID != addressStr {
+		t.Fatalf("expected coin id to be %s but got %s", addressStr, coinID)
+	}
+
+	// Test invalid coin id
+	_, err = drv.DecodeCoinID(encode.RandomBytes(20))
+	if err == nil {
+		t.Fatal("expected error but did not get")
+	}
+}
+
 func TestLocktimeExpired(t *testing.T) {
 	var secretHash [32]byte
 	copy(secretHash[:], encode.RandomBytes(32))
