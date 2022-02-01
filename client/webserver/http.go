@@ -150,13 +150,6 @@ func (s *WebServer) handleWallets(w http.ResponseWriter, r *http.Request) {
 
 // handleWalletLogFile is the handler for the '/wallets/logfile' page request.
 func (s *WebServer) handleWalletLogFile(w http.ResponseWriter, r *http.Request) {
-	wf, ok := w.(http.Flusher)
-	if !ok {
-		log.Errorf("unable to flush streamed data")
-		http.Error(w, "unable to flush streamed data", http.StatusBadRequest)
-		return
-	}
-
 	err := r.ParseForm()
 	if err != nil {
 		log.Errorf("error parsing form for wallet log file: %v", err)
@@ -199,29 +192,7 @@ func (s *WebServer) handleWalletLogFile(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusOK)
 
-	bufferLength := int64(1024)
-	buffer := make([]byte, bufferLength)
-	offset := int64(0)
-	for {
-		n, readErr := logFile.ReadAt(buffer, offset)
-		if readErr != nil && readErr != io.EOF {
-			log.Errorf("error reading file %v", err)
-			return
-		}
-
-		_, err = w.Write(buffer[0:n])
-		if err != nil {
-			log.Errorf("error writing file: %v", err)
-			return
-		}
-		wf.Flush()
-
-		if readErr == io.EOF {
-			return
-		}
-
-		offset += bufferLength
-	}
+	io.Copy(w, logFile)
 }
 
 // handleSettings is the handler for the '/settings' page request.
@@ -269,13 +240,6 @@ func (s *WebServer) handleOrders(w http.ResponseWriter, r *http.Request) {
 
 // handleExportOrders is the handler for the /orders/export page request.
 func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
-	wf, ok := w.(http.Flusher)
-	if !ok {
-		log.Errorf("unable to flush streamed data")
-		http.Error(w, "unable to flush streamed data", http.StatusBadRequest)
-		return
-	}
-
 	filter := new(core.OrderFilter)
 	err := r.ParseForm()
 	if err != nil {
@@ -348,7 +312,6 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 		log.Errorf("error writing CSV: %v", err)
 		return
 	}
-	wf.Flush()
 
 	for _, ord := range ords {
 		ordReader := s.orderReader(ord)
@@ -381,7 +344,6 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 			log.Errorf("error writing CSV: %v", err)
 			return
 		}
-		wf.Flush()
 	}
 }
 
