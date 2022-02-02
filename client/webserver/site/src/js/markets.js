@@ -687,8 +687,8 @@ export default class MarketsPage extends BasePage {
       sell: sell,
       base: market.base.id,
       quote: market.quote.id,
-      qty: convertConventional(qtyField.value, market.baseUnitInfo.conventional.conversionFactor),
-      rate: convertConventional(page.rateField.value, market.rateConversionFactor), // message-rate
+      qty: convertToAtoms(qtyField.value, market.baseUnitInfo.conventional.conversionFactor),
+      rate: convertToAtoms(page.rateField.value, market.rateConversionFactor), // message-rate
       tifnow: page.tifNow.checked,
       options: this.orderOpts
     }
@@ -1677,7 +1677,8 @@ export default class MarketsPage extends BasePage {
     }
     const lotSize = this.market.cfg.lotsize
     page.lotField.value = lots
-    page.qtyField.value = Doc.formatCoinValue(lots * lotSize, this.market.baseUnitInfo)
+    // Conversion factor must be a multiple of 10.
+    page.qtyField.value = lots * lotSize / this.market.baseUnitInfo.conventional.conversionFactor
     this.previewQuoteAmt(true)
   }
 
@@ -1698,7 +1699,8 @@ export default class MarketsPage extends BasePage {
     const adjusted = lots * lotSize
     page.lotField.value = lots
     if (!order.isLimit && !order.sell) return
-    if (finalize) page.qtyField.value = Doc.formatCoinValue(adjusted, this.market.baseUnitInfo)
+    // Conversion factor must be a multiple of 10.
+    if (finalize) page.qtyField.value = adjusted / this.market.baseUnitInfo.conventional.conversionFactor
     this.previewQuoteAmt(true)
   }
 
@@ -1708,7 +1710,7 @@ export default class MarketsPage extends BasePage {
    */
   marketBuyChanged () {
     const page = this.page
-    const qty = convertConventional(page.mktBuyField.value, this.market.quoteUnitInfo.conventional.conversionFactor)
+    const qty = convertToAtoms(page.mktBuyField.value, this.market.quoteUnitInfo.conventional.conversionFactor)
     const gap = this.midGap()
     if (!gap || !qty) {
       page.mktBuyLots.textContent = '0'
@@ -1752,7 +1754,7 @@ export default class MarketsPage extends BasePage {
   adjustedRate () {
     const v = this.page.rateField.value
     if (!v) return null
-    const rate = convertConventional(v, this.market.rateConversionFactor)
+    const rate = convertToAtoms(v, this.market.rateConversionFactor)
     const rateStep = this.market.cfg.ratestep
     return rate - (rate % rateStep)
   }
@@ -2340,8 +2342,8 @@ function makeMarket (host, base, quote) {
 /* marketID creates a DEX-compatible market name from the ticker symbols. */
 export function marketID (b, q) { return `${b}_${q}` }
 
-/* convertConventional converts the float string to atoms. */
-function convertConventional (s, conversionFactor) {
+/* convertToAtoms converts the float string to the basic unit of a coin. */
+function convertToAtoms (s, conversionFactor) {
   return Math.round(parseFloat(s) * conversionFactor)
 }
 
