@@ -362,13 +362,14 @@ type Coins []Coin
 type Receipt interface {
 	// Expiration is the time lock expiration.
 	Expiration() time.Time
-	// Coin is the contract's coin.
+	// Coin is the swap initiation transaction's Coin.
 	Coin() Coin
 	// Contract is the unique swap contract data. This may be a redeem script
 	// for UTXO assets, or other information that uniquely identifies the swap
 	// for account-based assets e.g. a contract version and secret hash for ETH.
 	Contract() dex.Bytes
-	// String provides a human-readable representation of the contract's Coin.
+	// String provides a human-readable representation of the swap that may
+	// provide supplementary data to locate the swap.
 	String() string
 	// SignedRefund is a signed refund script that can be used to return
 	// funds to the user in the case a contract expires.

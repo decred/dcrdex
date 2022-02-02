@@ -636,9 +636,10 @@ type swapReceipt struct {
 	secretHash [dexeth.SecretHashSize]byte
 	// expiration and value can be determined with a blockchain
 	// lookup, but we cache these values to avoid this.
-	expiration time.Time
-	value      uint64
-	ver        uint32
+	expiration   time.Time
+	value        uint64
+	ver          uint32
+	contractAddr string // specified by ver, here for naive consumers
 }
 
 // Expiration returns the time after which the contract can be
@@ -661,9 +662,14 @@ func (r *swapReceipt) Contract() dex.Bytes {
 	return dexeth.EncodeContractData(r.ver, r.secretHash)
 }
 
-// String returns a string representation of the swapReceipt.
+// String returns a string representation of the swapReceipt. The secret hash
+// and contract address should be included in this to facilitate a manual refund
+// since the secret hash identifies the swap in the contract (for v0). Although
+// the user can pick this information from the transaction's "to" address and
+// the calldata, this simplifies the process.
 func (r *swapReceipt) String() string {
-	return fmt.Sprintf("{ tx hash: %x, secret hash: %x }", r.txHash, r.secretHash)
+	return fmt.Sprintf("{ tx hash: %x, contract address: %s, secret hash: %x }",
+		r.txHash, r.contractAddr, r.secretHash)
 }
 
 // SignedRefund returns an empty byte array. ETH does not support a pre-signed
@@ -713,11 +719,12 @@ func (eth *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		copy(secretHash[:], swap.SecretHash)
 		receipts = append(receipts,
 			&swapReceipt{
-				expiration: encode.UnixTimeMilli(int64(swap.LockTime)),
-				value:      swap.Value,
-				txHash:     txHash,
-				secretHash: secretHash,
-				ver:        swaps.AssetVersion,
+				expiration:   encode.UnixTimeMilli(int64(swap.LockTime)),
+				value:        swap.Value,
+				txHash:       txHash,
+				secretHash:   secretHash,
+				ver:          swaps.AssetVersion,
+				contractAddr: dexeth.ContractAddresses[swaps.AssetVersion][eth.net].String(),
 			})
 	}
 
