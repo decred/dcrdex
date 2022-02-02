@@ -75,7 +75,7 @@ func NewDEXBalancer(tunnels map[string]PendingAccounter, assets map[uint32]*asse
 		if isToken {
 			parent, found := balancers[parentID]
 			if !found {
-				return fmt.Errorf("%s parent asset %d(%s)", ba.Symbol, parentID, dex.BipIDSymbol(parentID))
+				return fmt.Errorf("%s parent asset %d(%s) not found", ba.Symbol, parentID, dex.BipIDSymbol(parentID))
 			}
 			bb.feeFamily[parentID] = parent.assetInfo
 			for tokenID := range asset.Tokens(parentID) {
@@ -127,8 +127,10 @@ func NewDEXBalancer(tunnels map[string]PendingAccounter, assets map[uint32]*asse
 // new funding and redemptions, given the existing orders throughout DEX that
 // fund from or redeem to the specified account address for the account-based
 // asset. It is an internally logged error to call CheckBalance for a
-// non-account-based asset or an asset that is was not provided to the
-// constructor.
+// non-account-based asset or an asset that was not provided to the constructor.
+// Because these assets may have a base chain as well as degenerate tokens,
+// we need to consider outstanding orders and matches across all "fee family"
+// assets.
 func (b *DEXBalancer) CheckBalance(acctAddr string, assetID, redeemAssetID uint32, qty, lots uint64, redeems int) bool {
 	backedAsset, found := b.assets[assetID]
 	if !found {
@@ -219,7 +221,8 @@ func (b *DEXBalancer) CheckBalance(acctAddr string, assetID, redeemAssetID uint3
 
 	// Add fee-family asset pending fees.
 	for famID := range backedAsset.feeFamily {
-		if q := addPending(famID); isToken && famID == feeID {
+		q := addPending(famID)
+		if isToken && famID == feeID {
 			// Add the quantity of the base chain order reserves to our fee
 			// asset balance check.
 			feeQty = q

@@ -128,6 +128,9 @@ func RegisterToken(assetID uint32, drv TokenDriver) {
 	if _, exists := drivers[token.ParentID]; !exists {
 		panic(fmt.Sprintf("no parent (%d) registered for %s", token.ParentID, token.Name))
 	}
+	if drv.UnitInfo().Conventional.ConversionFactor == 0 {
+		panic(fmt.Sprintf("asset: TokenDriver registered with unit conversion factor = 0: %q", assetID))
+	}
 	children := childTokens[token.ParentID]
 	if children == nil {
 		children = make(map[uint32]*dex.Token, 1)
