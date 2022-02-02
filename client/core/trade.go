@@ -1631,20 +1631,30 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 
 	refundTxs := ""
 	for i, r := range receipts {
-		refundTxs = fmt.Sprintf("%s%q: %s", refundTxs, r.Coin(), r.SignedRefund())
+		rawRefund := r.SignedRefund()
+		if len(rawRefund) == 0 { // e.g. eth
+			continue // in case others are not empty for some reason
+		}
+		refundTxs = fmt.Sprintf("%s%q: %s", refundTxs, r.Coin(), rawRefund)
 		if i != len(receipts)-1 {
 			refundTxs = fmt.Sprintf("%s, ", refundTxs)
 		}
 	}
 
-	c.log.Infof("Broadcasted transaction with %d swap contracts for order %v. Assigned fee rate = %d. Receipts (%s): %v.",
+	// Log the swap receipts. It is important to print the receipts as a
+	// Stringer to provide important data, such as the secret hash and contract
+	// address with ETH since it allows manually refunding.
+	c.log.Infof("Broadcasted transaction with %d swap contracts for order %v. "+
+		"Assigned fee rate = %d. Receipts (%s): %v.",
 		len(receipts), t.ID(), swaps.FeeRate, t.wallets.fromAsset.Symbol, receipts)
-	c.log.Infof("The following are contract identifiers mapped to raw refund "+
-		"transactions that are only valid after the swap contract expires. "+
-		"These are fallback transactions that can be used to return funds "+
-		"to your wallet in the case dexc no longer functions. They SHOULD "+
-		"NOT be used if dexc is running without error. dexc will refund "+
-		"failed contracts automatically.\nRefund Txs: {%s}", refundTxs)
+	if refundTxs != "" {
+		c.log.Infof("The following are contract identifiers mapped to raw refund "+
+			"transactions that are only valid after the swap contract expires. "+
+			"These are fallback transactions that can be used to return funds "+
+			"to your wallet in the case dexc no longer functions. They should "+
+			"NOT be used if dexc is operable. dexc will refund failed "+
+			"contracts automatically.\nRefund Txs: {%s}", refundTxs)
+	}
 
 	// If this is the first swap (and even if not), the funding coins
 	// would have been spent and unlocked.
