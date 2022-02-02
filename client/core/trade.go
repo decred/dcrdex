@@ -1860,7 +1860,6 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 	// one cached.
 	feeSuggestion := atomic.LoadUint64(&t.redeemFeeSuggestion)
 	if feeSuggestion == 0 {
-		// No new RPC requests.
 		feeSuggestion = t.dc.bestBookFeeSuggestion(t.wallets.toAsset.ID)
 	}
 

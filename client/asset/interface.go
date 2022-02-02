@@ -329,14 +329,14 @@ type LogFiler interface {
 }
 
 // FeeRater is capable of retrieving a non-critical fee rate estimate for an
-// asset. SPV wallets, for example, cannot provide a fee rate estimate, so
-// shouldn't implement FeeRater. The rates from FeeRate are used for rates
-// that are not validated by the server (Withdraw, Send, PayFee), and
-// will/should not be used to generate a fee suggestion for swap operations.
-// Assets may also be unable to retrieve an estimate temporarily, such as before
-// the node is primed for BTC. In that case, an error should be returned, but
-// the caller can proceed to get an estimate from any known server's
-// 'fee_rate' endpoint, if possible.
+// asset. Some SPV wallets, for example, cannot provide a fee rate estimate, so
+// shouldn't implement FeeRater. The rates from FeeRate are used for rates that
+// are not validated by the server (Withdraw, Send, PayFee), and will/should not
+// be used to generate a fee suggestion for swap operations. Assets may also be
+// unable to retrieve an estimate temporarily, such as before the node is primed
+// for BTC. In that case, an error should be returned, but the caller can
+// proceed to get an estimate from any known server's 'fee_rate' endpoint, if
+// possible.
 type FeeRater interface {
 	FeeRate() (uint64, error)
 }

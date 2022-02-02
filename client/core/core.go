@@ -6391,14 +6391,15 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 // updated. If there is no synced book, but a non-zero fee suggestion is already
 // cached, no new requests will be made.
 func (c *Core) cacheRedemptionFeeSuggestion(t *trackedTrade) {
-	// Try to find any book that might have the fee.
 	if rater, is := t.wallets.toWallet.feeRater(); is {
-		if feeRate, err := rater.FeeRate(); err == nil {
+		feeRate, err := rater.FeeRate()
+		if err == nil {
 			atomic.StoreUint64(&t.redeemFeeSuggestion, feeRate)
-		} else {
-			c.log.Debugf("unable to retrieve fee rate from FeeRater. falling back to other methods: %v", err)
+			return
 		}
+		c.log.Debugf("unable to retrieve fee rate from FeeRater. falling back to other methods: %v", err)
 	}
+	// Try to find any book that might have the fee.
 	redeemAsset := t.wallets.toAsset.ID
 	feeSuggestion := t.dc.bestBookFeeSuggestion(redeemAsset)
 	if feeSuggestion > 0 {
