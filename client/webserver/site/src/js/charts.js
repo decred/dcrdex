@@ -53,6 +53,7 @@ class Chart {
     this.ctx = this.canvas.getContext('2d')
     this.ctx.textAlign = 'center'
     this.ctx.textBaseline = 'middle'
+    this.setZoomBttns()
     // Mouse handling
     this.mousePos = null
     bind(this.canvas, 'mousemove', e => {
@@ -87,6 +88,10 @@ class Chart {
   draw () {
     this.render()
   }
+
+  // setZoomBttns is run before drawing and should be used for setup of zoom
+  // buttons.
+  setZoomBttns () {}
 
   /* click is the handler for a click event on the canvas. */
   click (e) {
@@ -277,11 +282,17 @@ export class DepthChart extends Chart {
     this.resize(parent.clientHeight)
   }
 
+  // setZoomBttns creates new regions for zoom in and zoom out buttons. It is
+  // used in initiation of the buttons and resizing.
+  setZoomBttns () {
+    this.zoomInBttn = new Region(this.ctx, new Extents(0, 0, 0, 0))
+    this.zoomOutBttn = new Region(this.ctx, new Extents(0, 0, 0, 0))
+  }
+
   /* resized is called when the window or parent element are resized. */
   resized () {
     // The button region extents are set during drawing.
-    this.zoomInBttn = new Region(this.ctx, new Extents(0, 0, 0, 0))
-    this.zoomOutBttn = new Region(this.ctx, new Extents(0, 0, 0, 0))
+    this.setZoomBttns()
     if (this.book) this.draw()
   }
 
