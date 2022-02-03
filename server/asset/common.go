@@ -22,6 +22,11 @@ type KeyIndexer interface {
 	SetKeyIndex(idx uint32, xpub string) error
 }
 
+// BackendInfo provides auxillary information about a backend.
+type BackendInfo struct {
+	SupportsDynamicTxFee bool
+}
+
 // CoinNotFoundError is to be returned from Contract, Redemption, and
 // FundingCoin when the specified transaction cannot be found. Used by the
 // server to handle network latency.
@@ -75,9 +80,8 @@ type Backend interface {
 	// Synced should return true when the blockchain is synced and ready for
 	// fee rate estimation.
 	Synced() (bool, error)
-	// SupportsDynamicTxFee returns true if the tx fee for this asset adjusts based
-	// on market conditions.
-	SupportsDynamicTxFee() bool
+	// Info provides auxillary information about a backend.
+	Info() *BackendInfo
 	// ValidateFeeRate checks that the transaction fees used to initiate the
 	// contract are sufficient.
 	ValidateFeeRate(contract *Contract, reqFeeRate uint64) bool

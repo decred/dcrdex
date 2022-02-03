@@ -440,12 +440,13 @@ func TestRequiredOrderFunds(t *testing.T) {
 	}
 }
 
-func tTx(gasPrice, value uint64, to *common.Address, data []byte) *types.Transaction {
-	return types.NewTx(&types.LegacyTx{
-		GasPrice: dexeth.GweiToWei(gasPrice),
-		To:       to,
-		Value:    dexeth.GweiToWei(value),
-		Data:     data,
+func tTx(gasFeeCap, gasTipCap, value uint64, to *common.Address, data []byte) *types.Transaction {
+	return types.NewTx(&types.DynamicFeeTx{
+		GasFeeCap: dexeth.GweiToWei(gasFeeCap),
+		GasTipCap: dexeth.GweiToWei(gasTipCap),
+		To:        to,
+		Value:     dexeth.GweiToWei(value),
+		Data:      data,
 	})
 }
 
@@ -456,6 +457,7 @@ func TestContract(t *testing.T) {
 	var txHash [32]byte
 	copy(txHash[:], encode.RandomBytes(32))
 	const gasPrice = 30
+	const gasTipCap = 2
 	const swapVal = 25e8
 	const txVal = 5e9
 	var secret, secretHash [32]byte
@@ -471,20 +473,20 @@ func TestContract(t *testing.T) {
 		wantErr        bool
 	}{{
 		name:     "ok",
-		tx:       tTx(gasPrice, txVal, contractAddr, initCalldata),
+		tx:       tTx(gasPrice, gasTipCap, txVal, contractAddr, initCalldata),
 		contract: dexeth.EncodeContractData(0, secretHash),
 		swap:     tSwap(97, initLocktime, swapVal, secret, dexeth.SSInitiated, &initParticipantAddr),
 		coinID:   txHash[:],
 	}, {
 		name:     "new coiner error, wrong tx type",
-		tx:       tTx(gasPrice, txVal, contractAddr, initCalldata),
+		tx:       tTx(gasPrice, gasTipCap, txVal, contractAddr, initCalldata),
 		contract: dexeth.EncodeContractData(0, secretHash),
 		swap:     tSwap(97, initLocktime, swapVal, secret, dexeth.SSInitiated, &initParticipantAddr),
 		coinID:   txHash[1:],
 		wantErr:  true,
 	}, {
 		name:     "confirmations error, swap error",
-		tx:       tTx(gasPrice, txVal, contractAddr, initCalldata),
+		tx:       tTx(gasPrice, gasTipCap, txVal, contractAddr, initCalldata),
 		contract: dexeth.EncodeContractData(0, secretHash),
 		coinID:   txHash[:],
 		swapErr:  errors.New(""),
@@ -523,9 +525,8 @@ func TestContract(t *testing.T) {
 func TestValidateFeeRate(t *testing.T) {
 	swapCoin := swapCoin{
 		baseCoin: &baseCoin{
-			gasPrice:  100,
+			gasFeeCap: 100,
 			gasTipCap: 2,
-			dynamicTx: true,
 		},
 	}
 
@@ -548,11 +549,6 @@ func TestValidateFeeRate(t *testing.T) {
 	swapCoin.gasTipCap = dexeth.MinGasTipCap - 1
 	if eth.ValidateFeeRate(contract, 100) {
 		t.Fatalf("expected invalid fee rate, but was valid")
-	}
-
-	swapCoin.dynamicTx = false
-	if !eth.ValidateFeeRate(contract, 100) {
-		t.Fatalf("expected valid fee rate, but was not valid")
 	}
 }
 
@@ -594,6 +590,7 @@ func TestRedemption(t *testing.T) {
 	copy(secretHash[:], redeemSecretHashB)
 	copy(txHash[:], encode.RandomBytes(32))
 	const gasPrice = 30
+	const gasTipCap = 2
 	tests := []struct {
 		name               string
 		coinID, contractID []byte
@@ -604,26 +601,26 @@ func TestRedemption(t *testing.T) {
 		wantErr            bool
 	}{{
 		name:       "ok",
-		tx:         tTx(gasPrice, 0, contractAddr, redeemCalldata),
+		tx:         tTx(gasPrice, gasTipCap, 0, contractAddr, redeemCalldata),
 		contractID: dexeth.EncodeContractData(0, secretHash),
 		coinID:     txHash[:],
 		swp:        tSwap(0, 0, 0, secret, dexeth.SSRedeemed, receiverAddr),
 	}, {
 		name:       "new coiner error, wrong tx type",
-		tx:         tTx(gasPrice, 0, contractAddr, redeemCalldata),
+		tx:         tTx(gasPrice, gasTipCap, 0, contractAddr, redeemCalldata),
 		contractID: dexeth.EncodeContractData(0, secretHash),
 		coinID:     txHash[1:],
 		wantErr:    true,
 	}, {
 		name:       "confirmations error, swap wrong state",
-		tx:         tTx(gasPrice, 0, contractAddr, redeemCalldata),
+		tx:         tTx(gasPrice, gasTipCap, 0, contractAddr, redeemCalldata),
 		contractID: dexeth.EncodeContractData(0, secretHash),
 		swp:        tSwap(0, 0, 0, secret, dexeth.SSRefunded, receiverAddr),
 		coinID:     txHash[:],
 		wantErr:    true,
 	}, {
 		name:       "validate redeem error",
-		tx:         tTx(gasPrice, 0, contractAddr, redeemCalldata),
+		tx:         tTx(gasPrice, gasTipCap, 0, contractAddr, redeemCalldata),
 		contractID: secretHash[:31],
 		coinID:     txHash[:],
 		swp:        tSwap(0, 0, 0, secret, dexeth.SSRedeemed, receiverAddr),
@@ -661,10 +658,11 @@ func TestTxData(t *testing.T) {
 		node: node,
 	}
 	const gasPrice = 30
+	const gasTipCap = 2
 	const value = 5e9
 	addr := randomAddress()
 	data := encode.RandomBytes(5)
-	tx := tTx(gasPrice, value, addr, data)
+	tx := tTx(gasPrice, gasTipCap, value, addr, data)
 	goodCoinID, _ := hex.DecodeString("09c3bed75b35c6cf0549b0636c9511161b18765c019ef371e2a9f01e4b4a1487")
 	node.tx = tx
 

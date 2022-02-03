@@ -493,10 +493,9 @@ func (btc *Backend) FeeRate(_ context.Context) (uint64, error) {
 	return btc.estimateFee(btc.node)
 }
 
-// SupportsDynamicTxFee returns true if the tx fee for this asset adjusts based
-// on market conditions
-func (*Backend) SupportsDynamicTxFee() bool {
-	return false
+// Info provides some general information about the backend.
+func (*Backend) Info() *asset.BackendInfo {
+	return &asset.BackendInfo{}
 }
 
 // ValidateFeeRate checks that the transaction fees used to initiate the

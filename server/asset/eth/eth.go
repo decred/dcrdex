@@ -40,6 +40,10 @@ const (
 	ethContractVersion = 0
 )
 
+var backendInfo = &asset.BackendInfo{
+	SupportsDynamicTxFee: true,
+}
+
 var _ asset.Driver = (*Driver)(nil)
 
 // Driver implements asset.Driver.
@@ -257,10 +261,9 @@ func (eth *Backend) FeeRate(ctx context.Context) (uint64, error) {
 	return feeRateGwei, nil
 }
 
-// SupportsDynamicTxFee returns true if the tx fee for this asset adjusts based
-// on market conditions
-func (*Backend) SupportsDynamicTxFee() bool {
-	return true
+// Info provides some general information about the backend.
+func (*Backend) Info() *asset.BackendInfo {
+	return backendInfo
 }
 
 // ValidateFeeRate checks that the transaction fees used to initiate the
@@ -274,7 +277,7 @@ func (eth *Backend) ValidateFeeRate(contract *asset.Contract, reqFeeRate uint64)
 		return false
 	}
 
-	if sc.dynamicTx && sc.gasTipCap < dexeth.MinGasTipCap {
+	if sc.gasTipCap < dexeth.MinGasTipCap {
 		return false
 	}
 

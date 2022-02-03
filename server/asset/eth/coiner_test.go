@@ -32,8 +32,10 @@ func TestNewRedeemCoin(t *testing.T) {
 	copy(secretHash[:], redeemSecretHashB)
 	contract := dexeth.EncodeContractData(0, secretHash)
 	const gasPrice = 30
+	const gasTipCap = 2
 	const value = 5e9
 	const wantGas = 30
+	const wantGasTipCap = 2
 	tests := []struct {
 		name          string
 		contract      []byte
@@ -42,21 +44,21 @@ func TestNewRedeemCoin(t *testing.T) {
 		wantErr       bool
 	}{{
 		name:     "ok redeem",
-		tx:       tTx(gasPrice, 0, contractAddr, redeemCalldata),
+		tx:       tTx(gasPrice, gasTipCap, 0, contractAddr, redeemCalldata),
 		contract: contract,
 	}, {
 		name:     "non zero value with redeem",
-		tx:       tTx(gasPrice, value, contractAddr, redeemCalldata),
+		tx:       tTx(gasPrice, gasTipCap, value, contractAddr, redeemCalldata),
 		contract: contract,
 		wantErr:  true,
 	}, {
 		name:     "unable to decode redeem data, must be redeem for redeem coin type",
-		tx:       tTx(gasPrice, 0, contractAddr, initCalldata),
+		tx:       tTx(gasPrice, gasTipCap, 0, contractAddr, initCalldata),
 		contract: contract,
 		wantErr:  true,
 	}, {
 		name:     "tx coin id for redeem - contract not in tx",
-		tx:       tTx(gasPrice, value, contractAddr, redeemCalldata),
+		tx:       tTx(gasPrice, gasTipCap, value, contractAddr, redeemCalldata),
 		contract: encode.RandomBytes(32),
 		wantErr:  true,
 	}}
@@ -84,8 +86,8 @@ func TestNewRedeemCoin(t *testing.T) {
 		if rc.secretHash != secretHash ||
 			rc.secret != secret ||
 			rc.value != 0 ||
-			rc.gasPrice != wantGas {
-
+			rc.gasFeeCap != wantGas ||
+			rc.gasTipCap != wantGasTipCap {
 			t.Fatalf("returns do not match expected for test %q / %v", test.name, rc)
 		}
 	}
@@ -101,11 +103,16 @@ func TestNewSwapCoin(t *testing.T) {
 	badCoinIDBytes := encode.RandomBytes(39)
 	const gasPrice = 30
 	const value = 5e9
+	const gasTipCap = 2
 	wantGas, err := dexeth.WeiToGweiUint64(big.NewInt(3e10))
 	if err != nil {
 		t.Fatal(err)
 	}
 	wantVal, err := dexeth.WeiToGweiUint64(big.NewInt(5e18))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantGasTipCap, err := dexeth.WeiToGweiUint64(big.NewInt(2e9))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,61 +125,61 @@ func TestNewSwapCoin(t *testing.T) {
 		wantErr       bool
 	}{{
 		name:     "ok init",
-		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
+		tx:       tTx(gasPrice, gasTipCap, value, contractAddr, initCalldata),
 		coinID:   txCoinIDBytes,
 		contract: dexeth.EncodeContractData(0, secretHash),
 	}, {
 		name:     "contract incorrect length",
-		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
+		tx:       tTx(gasPrice, gasTipCap, value, contractAddr, initCalldata),
 		coinID:   txCoinIDBytes,
 		contract: initSecretHashA[:31],
 		wantErr:  true,
 	}, {
 		name:     "tx has no data",
-		tx:       tTx(gasPrice, value, contractAddr, nil),
+		tx:       tTx(gasPrice, gasTipCap, value, contractAddr, nil),
 		coinID:   txCoinIDBytes,
 		contract: initSecretHashA,
 		wantErr:  true,
 	}, {
 		name:     "unable to decode init data, must be init for init coin type",
-		tx:       tTx(gasPrice, value, contractAddr, redeemCalldata),
+		tx:       tTx(gasPrice, gasTipCap, value, contractAddr, redeemCalldata),
 		coinID:   txCoinIDBytes,
 		contract: initSecretHashA,
 		wantErr:  true,
 	}, {
 		name:     "unable to decode CoinID",
-		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
+		tx:       tTx(gasPrice, gasTipCap, value, contractAddr, initCalldata),
 		contract: initSecretHashA,
 		wantErr:  true,
 	}, {
 		name:     "invalid coinID",
-		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
+		tx:       tTx(gasPrice, gasTipCap, value, contractAddr, initCalldata),
 		coinID:   badCoinIDBytes,
 		contract: initSecretHashA,
 		wantErr:  true,
 	}, {
 		name:     "transaction error",
-		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
+		tx:       tTx(gasPrice, gasTipCap, value, contractAddr, initCalldata),
 		coinID:   txCoinIDBytes,
 		contract: initSecretHashA,
 		txErr:    errors.New(""),
 		wantErr:  true,
 	}, {
 		name:     "transaction not found error",
-		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
+		tx:       tTx(gasPrice, gasTipCap, value, contractAddr, initCalldata),
 		coinID:   txCoinIDBytes,
 		contract: initSecretHashA,
 		txErr:    ethereum.NotFound,
 		wantErr:  true,
 	}, {
 		name:     "wrong contract",
-		tx:       tTx(gasPrice, value, randomAddr, initCalldata),
+		tx:       tTx(gasPrice, gasTipCap, value, randomAddr, initCalldata),
 		coinID:   txCoinIDBytes,
 		contract: initSecretHashA,
 		wantErr:  true,
 	}, {
 		name:     "tx coin id for swap - contract not in tx",
-		tx:       tTx(gasPrice, value, contractAddr, initCalldata),
+		tx:       tTx(gasPrice, gasTipCap, value, contractAddr, initCalldata),
 		coinID:   txCoinIDBytes,
 		contract: encode.RandomBytes(32),
 		wantErr:  true,
@@ -202,9 +209,9 @@ func TestNewSwapCoin(t *testing.T) {
 		if sc.init.Participant != initParticipantAddr ||
 			sc.secretHash != secretHash ||
 			sc.value != wantVal ||
-			sc.gasPrice != wantGas ||
+			sc.gasFeeCap != wantGas ||
+			sc.gasTipCap != wantGasTipCap ||
 			sc.init.LockTime.Unix() != initLocktime {
-
 			t.Fatalf("returns do not match expected for test %q / %v", test.name, sc)
 		}
 	}
@@ -223,6 +230,7 @@ func TestConfirmations(t *testing.T) {
 	copy(secret[:], redeemSecretB)
 	copy(secretHash[:], redeemSecretHashB)
 	const gasPrice = 30
+	const gasTipCap = 2
 	const swapVal = 25e8
 	const txVal = swapVal * 2
 	const oneGweiMore = swapVal + 1
@@ -314,10 +322,10 @@ func TestConfirmations(t *testing.T) {
 		var confirmer Confirmer
 		var err error
 		if test.redeem {
-			node.tx = tTx(gasPrice, test.value, contractAddr, redeemCalldata)
+			node.tx = tTx(gasPrice, gasTipCap, test.value, contractAddr, redeemCalldata)
 			confirmer, err = eth.newRedeemCoin(txHash[:], swapData)
 		} else {
-			node.tx = tTx(gasPrice, test.value, contractAddr, initCalldata)
+			node.tx = tTx(gasPrice, gasTipCap, test.value, contractAddr, initCalldata)
 			confirmer, err = eth.newSwapCoin(txHash[:], swapData)
 		}
 		if err != nil {

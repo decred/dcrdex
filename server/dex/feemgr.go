@@ -109,7 +109,7 @@ func (f *feeFetcher) MaxFeeRate() uint64 {
 // This fee will be the max fee rate if the asset supports dynamic tx fees,
 // and otherwise it will be the current market fee rate.
 func (f *feeFetcher) SwapFeeRate(ctx context.Context) uint64 {
-	if f.Backend.SupportsDynamicTxFee() {
+	if f.Backend.Info().SupportsDynamicTxFee {
 		return f.MaxFeeRate()
 	}
 	return f.FeeRate(ctx)

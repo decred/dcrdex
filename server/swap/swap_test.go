@@ -443,8 +443,8 @@ func (a *TBackend) setRedemption(redeem asset.Coin, cpSwap asset.Coin, resetErr 
 	}
 	a.mtx.Unlock()
 }
-func (*TBackend) SupportsDynamicTxFee() bool {
-	return false
+func (*TBackend) Info() *asset.BackendInfo {
+	return &asset.BackendInfo{}
 }
 func (a *TBackend) ValidateFeeRate(*asset.Contract, uint64) bool {
 	return !a.invalidFeeRate
