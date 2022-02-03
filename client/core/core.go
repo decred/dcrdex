@@ -1478,8 +1478,8 @@ func (c *Core) reloadWallet(wallet *xcWallet) (*xcWallet, error) {
 // already connected. If the wallet gets connected, this also emits WalletState
 // and WalletBalance notification.
 func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
-	c.walletMtx.RLock()
-	defer c.walletMtx.RUnlock()
+	c.walletMtx.Lock() // may replace the xcWallet in the map if connect fails
+	defer c.walletMtx.Unlock()
 	wallet, exists := c.wallets[assetID]
 	if !exists {
 		return nil, newError(missingWalletErr, "no configured wallet found for %s (%d)",
