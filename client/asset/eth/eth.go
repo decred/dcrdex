@@ -379,9 +379,9 @@ func (eth *ExchangeWallet) balance() (*asset.Balance, error) {
 		return nil, err
 	}
 
-	locked := eth.locked + eth.redemptionReserve + dexeth.WeiToGwei(bal.PendingOut)
+	locked := eth.locked + eth.redemptionReserve
 	return &asset.Balance{
-		Available: dexeth.WeiToGwei(bal.Current) - locked,
+		Available: dexeth.WeiToGwei(bal.Current) - locked - dexeth.WeiToGwei(bal.PendingOut),
 		Locked:    locked,
 		Immature:  dexeth.WeiToGwei(bal.PendingIn),
 	}, nil
@@ -567,7 +567,8 @@ func (eth *ExchangeWallet) ReturnCoins(coins asset.Coins) error {
 			return fmt.Errorf("unsupported funding coin type for coin %[1]s: %[1]T", coins[i])
 		}
 	}
-	return eth.unlockFunds(amt)
+	eth.unlockFunds(amt)
+	return nil
 }
 
 // FundingCoins gets funding coins for the coin IDs. The coins are locked. This
@@ -612,17 +613,17 @@ func (eth *ExchangeWallet) lockFunds(amt uint64) error {
 }
 
 // unlockFunds unlocks funds held by the wallet.
-func (eth *ExchangeWallet) unlockFunds(amt uint64) error {
+func (eth *ExchangeWallet) unlockFunds(amt uint64) {
 	eth.lockedMtx.Lock()
 	defer eth.lockedMtx.Unlock()
 
 	if eth.locked < amt {
-		return fmt.Errorf("attempting to unlock more than is currently locked. %d > %d",
-			amt, eth.locked)
+		eth.log.Errorf("attempting to unlock more than is currently locked - %d > %d. "+
+			"clearing all locked funds", amt, eth.locked)
+		eth.locked = 0
+	} else {
+		eth.locked -= amt
 	}
-
-	eth.locked -= amt
-	return nil
 }
 
 // swapReceipt implements the asset.Receipt interface for ETH.
@@ -1083,7 +1084,7 @@ func (eth *ExchangeWallet) findSecret(ctx context.Context, secretHash [32]byte, 
 
 // Refund refunds a contract. This can only be used after the time lock has
 // expired.
-func (eth *ExchangeWallet) Refund(_, contract dex.Bytes, feeSuggestion uint64) (dex.Bytes, error) {
+func (eth *ExchangeWallet) Refund(_, contract dex.Bytes, _ uint64) (dex.Bytes, error) {
 	version, secretHash, err := dexeth.DecodeContractData(contract)
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to decode contract: %w", err)
@@ -1114,7 +1115,7 @@ func (eth *ExchangeWallet) Refund(_, contract dex.Bytes, feeSuggestion uint64) (
 		return nil, fmt.Errorf("Refund: swap with secret hash %x is not refundable", secretHash)
 	}
 
-	tx, err := eth.node.refund(eth.ctx, secretHash, feeSuggestion, version)
+	tx, err := eth.node.refund(eth.ctx, secretHash, eth.gasFeeLimit, version)
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to call refund: %w", err)
 	}

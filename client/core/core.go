@@ -4220,6 +4220,8 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	tracker := newTrackedTrade(dbOrder, preImg, dc, dc.marketEpochDuration(mktID), c.lockTimeTaker, c.lockTimeMaker,
 		c.db, c.latencyQ, wallets, coins, c.notify, c.formatDetails, form.Options, redemptionReserves)
 
+	tracker.redemptionLocked = tracker.redemptionReserves
+
 	if recoveryCoin != nil {
 		tracker.change = recoveryCoin
 		tracker.coinsLocked = false
