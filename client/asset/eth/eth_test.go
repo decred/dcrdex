@@ -407,7 +407,7 @@ func TestBalance(t *testing.T) {
 		name:       "ok pending out",
 		bal:        newBalance(4e8, 0, 1.4e8),
 		wantBal:    2.6e8,
-		wantLocked: 1.4e8,
+		wantLocked: 0,
 	}, {
 		name:         "ok pending in",
 		bal:          newBalance(1e8, 3e8, 0),
@@ -417,7 +417,7 @@ func TestBalance(t *testing.T) {
 		name:         "ok pending out and in",
 		bal:          newBalance(4e8, 2e8, 1e8),
 		wantBal:      3e8,
-		wantLocked:   1e8,
+		wantLocked:   0,
 		wantImmature: 2e8,
 	}, {
 		// 	name: "swap error",
@@ -622,9 +622,9 @@ func TestRefund(t *testing.T) {
 					test.name, contractVer, node.lastRefund.contractVer)
 			}
 
-			if test.feeSuggestion != node.lastRefund.fee {
-				t.Fatalf(`%v: contract fee %v != used to call refund %v`,
-					test.name, test.feeSuggestion, node.lastRefund.fee)
+			if eth.gasFeeLimit != node.lastRefund.fee {
+				t.Fatalf(`%v: gas fee limit %v != used to call refund %v`,
+					test.name, test.feeSuggestion, eth.gasFeeLimit)
 			}
 		}
 
@@ -765,12 +765,20 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	})
 	checkBalance(eth, 0, walletBalanceGwei, "just enough")
 
-	// Test returning too much funds fails
+	// Test returning funds > locked returns locked funds to 0
 	err = eth.ReturnCoins([]asset.Coin{coins1[0], coins1[0]})
-	if err == nil {
-		t.Fatalf("expected error but did not get")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	checkBalance(eth, 0, walletBalanceGwei, "after redeem too much")
+	checkBalance(eth, walletBalanceGwei, 0, "after redeem too much")
+
+	// Fund order with funds equal to available
+	order.Value = walletBalanceGwei - expectedFees
+	_, _, err = eth.FundOrder(&order)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	checkBalance(eth, 0, walletBalanceGwei, "just enough 2")
 
 	// Test returning coin with invalid ID
 	var badCoin badCoin
