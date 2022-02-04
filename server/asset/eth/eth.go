@@ -277,6 +277,8 @@ func (eth *Backend) ValidateFeeRate(contract *asset.Contract, reqFeeRate uint64)
 		return false
 	}
 
+	// Legacy transactions are also supported. In a legacy transaction, the
+	// gas tip cap will be equal to the gas price.
 	if sc.gasTipCap < dexeth.MinGasTipCap {
 		return false
 	}

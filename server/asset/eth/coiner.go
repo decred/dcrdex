@@ -145,8 +145,13 @@ func (eth *Backend) baseCoin(coinID []byte, contractData []byte) (*baseCoin, err
 	// initialization transaction could take a long time to be mined. A
 	// transaction with a very low gas price may need to be resent with a
 	// higher price.
+	//
+	// Although we only retrieve the GasFeeCap and GasTipCap here, legacy
+	// transaction are also supported. In legacy transactions, the full
+	// gas price that is specified will be used no matter what, so the
+	// values returned from GasFeeCap and GasTipCap will both be equal to the
+	// gas price.
 	zero := new(big.Int)
-
 	gasFeeCap := tx.GasFeeCap()
 	if gasFeeCap == nil || gasFeeCap.Cmp(zero) <= 0 {
 		return nil, fmt.Errorf("Failed to parse gas fee cap from tx %s", txHash)
