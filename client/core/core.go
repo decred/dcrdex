@@ -5092,8 +5092,12 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				// already done when it was initially stored as CounterScript.
 				auditInfo, err := wallets.toWallet.AuditContract(counterSwap, counterContract, counterTxData, true)
 				if err != nil {
+					// This case is unlikely to happen since the original audit
+					// message handling would have passed the audit based on the
+					// tx data, but it depends on the asset backend.
 					contractStr := coinIDString(wallets.toAsset.ID, counterSwap)
-					c.log.Warnf("Starting search for counterparty contract %v (%s)", contractStr, unbip(wallets.toAsset.ID))
+					c.log.Warnf("Auditing for counterparty contract %v (%s): %v",
+						contractStr, unbip(wallets.toAsset.ID), err)
 					// Start the audit retry waiter. Set swapErr to block tick
 					// actions like counterSwap.Confirmations checks while it is
 					// searching since matchTracker.counterSwap is not yet set.
@@ -5104,7 +5108,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 						auditInfo, err := tracker.searchAuditInfo(match, counterSwap, counterContract, counterTxData)
 						tracker.mtx.Lock()
 						defer tracker.mtx.Unlock()
-						if err != nil {
+						if err != nil { // contract data could be bad, or just already spent (refunded)
 							match.swapErr = fmt.Errorf("audit error: %w", err)
 							// NOTE: This behaviour differs from the audit request handler behaviour for failed audits.
 							// handleAuditRoute does NOT set a swapErr in case a revised audit request is received from
@@ -5114,13 +5118,16 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 							c.log.Debugf("AuditContract error for match %v status %v, refunded = %v, revoked = %v: %v",
 								match, match.Status, len(match.MetaData.Proof.RefundCoin) > 0,
 								match.MetaData.Proof.IsRevoked(), err)
-							notifyErr(TopicMatchRecoveryError, unbip(wallets.toAsset.ID), contractStr, tracker.token(), err)
-							// The match may become revoked by server.
+							subject, detail := c.formatDetails(TopicMatchRecoveryError,
+								unbip(wallets.toAsset.ID), contractStr, tracker.token(), err)
+							c.notify(newOrderNote(TopicMatchRecoveryError, subject, detail,
+								db.ErrorLevel, tracker.coreOrderInternal())) // tracker.mtx already locked
+							// The match may be revoked by server. Only refund possible now.
 							return
 						}
 						match.counterSwap = auditInfo
 						match.swapErr = nil // unblock tick actions
-						c.log.Infof("Successfully located and re-validated counterparty contract %v (%s)",
+						c.log.Infof("Successfully re-validated counterparty contract %v (%s)",
 							contractStr, unbip(wallets.toAsset.ID))
 					}(tracker, match)
 
