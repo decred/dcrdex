@@ -4189,8 +4189,9 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 							c.log.Debugf("AuditContract error for match %v status %v, refunded = %v, revoked = %v: %v",
 								match, match.Status, len(match.MetaData.Proof.RefundCoin) > 0,
 								match.MetaData.Proof.IsRevoked(), err)
-							notifyErr(SubjectMatchRecoveryError, "Error auditing counter-party's swap contract (%s %v) during swap recovery on order %s: %v",
+							detail := fmt.Sprintf("Error auditing counter-party's swap contract (%s %v) during swap recovery on order %s: %v",
 								unbip(wallets.toAsset.ID), contractStr, tracker.token(), err)
+							c.notify(newOrderNote(SubjectMatchRecoveryError, detail, db.ErrorLevel, tracker.coreOrderInternal()))
 							// The match may become revoked by server.
 							return
 						}
