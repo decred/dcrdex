@@ -106,7 +106,7 @@ if [ $ETH_ON -eq 0 ]; then
             "base": "DCR_simnet",
             "quote": "ETH_simnet",
             "lotSize": 1000000000,
-            "rateStep": 1000000000,
+            "rateStep": 1000,
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2
 EOF
