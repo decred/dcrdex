@@ -47,7 +47,10 @@ func TestMain(m *testing.M) {
 	// Set any created Backends to poll for blocks every 50 ms to
 	// accommodate reorg testing.
 	blockPollInterval = time.Millisecond * 50
-	blockPollDelay = blockPollInterval + time.Millisecond*5
+	// blockPollDelay must be long enough to allow for block polling go-routine
+	// to run at least a single tick (must be at least as long as blockPollInterval
+	// and ideally significantly longer).
+	blockPollDelay = blockPollInterval + time.Millisecond*50
 	os.Exit(m.Run())
 }
 
@@ -1285,7 +1288,10 @@ func TestReorg(t *testing.T) {
 	setChain(chainA)
 	tipHeight := btc.blockCache.tipHeight()
 	txHash := randomHash()
-	tip, _ := btc.blockCache.atHeight(tipHeight)
+	tip, found := btc.blockCache.atHeight(tipHeight)
+	if !found {
+		t.Fatalf("did not find newly connected block at height %d, likely cache sync issue", tipHeight)
+	}
 	msg := testMakeMsgTx(false)
 	testAddBlockVerbose(&tip.hash, nil, 1, tipHeight)
 	testAddTxOut(msg.tx, 0, txHash, &tip.hash, int64(tipHeight), 1)
@@ -1315,7 +1321,10 @@ func TestReorg(t *testing.T) {
 	// Start over, but put it in a lower block instead.
 	reset()
 	setChain(chainA)
-	tip, _ = btc.blockCache.atHeight(tipHeight)
+	tip, found = btc.blockCache.atHeight(tipHeight)
+	if !found {
+		t.Fatalf("did not find newly connected block at height %d, likely cache sync issue", tipHeight)
+	}
 	testAddBlockVerbose(&tip.hash, nil, 1, tipHeight)
 	testAddTxOut(msg.tx, 0, txHash, &tip.hash, int64(tipHeight), 1)
 	utxo, err = btc.utxo(txHash, msg.vout, nil)
