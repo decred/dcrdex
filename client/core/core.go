@@ -2247,7 +2247,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 		c.log.Warnf("Error getting balance for wallet %s: %v", unbip(assetID), err)
 		// Do not fail in case this requires an unlocked wallet.
 	} else {
-		wallet.balance = balances           // update xcWallet's WalletBalance
+		wallet.setBalance(balances)         // update xcWallet's WalletBalance
 		dbWallet.Balance = balances.Balance // store the db.Balance
 	}
 
