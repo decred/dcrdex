@@ -105,6 +105,9 @@ func (c *ConnectionMaster) Connect(ctx context.Context) (err error) {
 	c.mtx.Lock()
 	c.wg, err = c.connector.Connect(c.ctx)
 	c.mtx.Unlock()
+	if err != nil {
+		c.cancel() // otherwise On() says true
+	}
 	return err
 }
 
