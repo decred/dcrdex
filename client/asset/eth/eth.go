@@ -131,20 +131,27 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Ne
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for Ethereum.
+// In ETH there are 3 possible coin IDs:
+//   1. A transaction hash
+//   2. An encoded funding coin id which includes the account address and amount.
+//   3. A byte encoded string of the account address.
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
-	const invalid = "<invalid coin>"
-	if len(coinID) == common.HashLength {
-		id, err := dexeth.DecodeCoinID(coinID)
-		if err != nil {
-			return invalid, err
-		}
-		return id.String(), nil
+	txHashID, err := dexeth.DecodeCoinID(coinID)
+	if err == nil {
+		return txHashID.String(), nil
 	}
-	id, err := decodeFundingCoinID(coinID)
-	if err != nil {
-		return invalid, err
+
+	fundingCoinID, err := decodeFundingCoinID(coinID)
+	if err == nil {
+		return fundingCoinID.String(), nil
 	}
-	return id.String(), nil
+
+	addressID := string(coinID)
+	if len(addressID) == 42 && addressID[0:2] == "0x" {
+		return addressID, nil
+	}
+
+	return "", fmt.Errorf("%x is not a valid ETH coin id", coinID)
 }
 
 // Info returns basic information about the wallet and asset.

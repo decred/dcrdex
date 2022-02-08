@@ -394,7 +394,7 @@ func (eth *Backend) Redemption(redeemCoinID, _, contractData []byte) (asset.Coin
 func (eth *Backend) ValidateCoinID(coinID []byte) (string, error) {
 	txHash, err := dexeth.DecodeCoinID(coinID)
 	if err != nil {
-		return "", err
+		return "<invalid>", err
 	}
 	return txHash.String(), nil
 }

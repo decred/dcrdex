@@ -468,7 +468,7 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Ne
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 	txid, vout, err := decodeCoinID(coinID)
 	if err != nil {
-		return "", err
+		return "<invalid>", err
 	}
 	return fmt.Sprintf("%v:%d", txid, vout), err
 }
