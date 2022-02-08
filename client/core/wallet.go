@@ -262,9 +262,9 @@ func (w *xcWallet) Rescan(ctx context.Context) error {
 	return rescanner.Rescan(ctx)
 }
 
-// GetLogFilePath returns the path of the wallet's log file if the
+// LogFilePath returns the path of the wallet's log file if the
 // asset.Wallet implementation is a LogFiler.
-func (w *xcWallet) GetLogFilePath() (string, error) {
+func (w *xcWallet) LogFilePath() (string, error) {
 	logFiler, ok := w.Wallet.(asset.LogFiler)
 	if !ok {
 		return "", errors.New("wallet does not support getting log file")

@@ -110,7 +110,7 @@ type clientCore interface {
 	IsInitialized() bool
 	ExportSeed(pw []byte) ([]byte, error)
 	PreOrder(*core.TradeForm) (*core.OrderEstimate, error)
-	GetWalletLogFilePath(assetID uint32) (string, error)
+	WalletLogFilePath(assetID uint32) (string, error)
 }
 
 var _ clientCore = (*core.Core)(nil)

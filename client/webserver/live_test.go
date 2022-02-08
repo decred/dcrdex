@@ -1581,7 +1581,7 @@ func (c *TCore) ExportSeed(pw []byte) ([]byte, error) {
 	b, _ := hex.DecodeString("deadbeef1234567890")
 	return b, nil
 }
-func (c *TCore) GetWalletLogFilePath(uint32) (string, error) {
+func (c *TCore) WalletLogFilePath(uint32) (string, error) {
 	return "", nil
 }
 

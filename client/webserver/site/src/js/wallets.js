@@ -519,7 +519,7 @@ export default class WalletsPage extends BasePage {
 
   async downloadLogs () {
     const search = new URLSearchParams('')
-    search.append('assetid', this.reconfigAsset + '')
+    search.append('assetid', `${this.reconfigAsset}`)
     const url = new URL(window.location)
     url.search = search.toString()
     url.pathname = '/wallets/logfile'

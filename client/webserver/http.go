@@ -171,7 +171,7 @@ func (s *WebServer) handleWalletLogFile(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	logFilePath, err := s.core.GetWalletLogFilePath(uint32(assetID))
+	logFilePath, err := s.core.WalletLogFilePath(uint32(assetID))
 	if err != nil {
 		log.Errorf("failed to get log file path %v", err)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
@@ -192,7 +192,10 @@ func (s *WebServer) handleWalletLogFile(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusOK)
 
-	io.Copy(w, logFile)
+	_, err = io.Copy(w, logFile)
+	if err != nil {
+		log.Errorf("error copying log file: %v", err)
+	}
 }
 
 // handleSettings is the handler for the '/settings' page request.
