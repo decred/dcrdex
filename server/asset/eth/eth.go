@@ -40,6 +40,10 @@ const (
 	ethContractVersion = 0
 )
 
+var backendInfo = &asset.BackendInfo{
+	SupportsDynamicTxFee: true,
+}
+
 var _ asset.Driver = (*Driver)(nil)
 
 // Driver implements asset.Driver.
@@ -83,7 +87,7 @@ type ethFetcher interface {
 	headerByHeight(ctx context.Context, height uint64) (*types.Header, error)
 	connect(ctx context.Context, ipc string, contractAddr *common.Address) error
 	shutdown()
-	suggestGasPrice(ctx context.Context) (*big.Int, error)
+	suggestGasTipCap(ctx context.Context) (*big.Int, error)
 	syncProgress(ctx context.Context) (*ethereum.SyncProgress, error)
 	swap(ctx context.Context, secretHash [32]byte) (*dexeth.SwapState, error)
 	transaction(ctx context.Context, hash common.Hash) (tx *types.Transaction, isMempool bool, err error)
@@ -231,11 +235,55 @@ func (eth *Backend) InitTxSizeBase() uint32 {
 
 // FeeRate returns the current optimal fee rate in gwei / gas.
 func (eth *Backend) FeeRate(ctx context.Context) (uint64, error) {
-	bigGP, err := eth.node.suggestGasPrice(ctx)
+	hdr, err := eth.node.bestHeader(ctx)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("error getting best header: %w", err)
 	}
-	return dexeth.WeiToGweiUint64(bigGP)
+
+	if hdr.BaseFee == nil {
+		return 0, errors.New("eth block header does not contain base fee")
+	}
+
+	suggestedGasTipCap, err := eth.node.suggestGasTipCap(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("error getting suggested gas tip cap: %w", err)
+	}
+
+	feeRate := new(big.Int).Add(
+		suggestedGasTipCap,
+		new(big.Int).Mul(hdr.BaseFee, big.NewInt(2)))
+
+	feeRateGwei, err := dexeth.WeiToGweiUint64(feeRate)
+	if err != nil {
+		return 0, fmt.Errorf("failed to convert wei to gwei: %w", err)
+	}
+
+	return feeRateGwei, nil
+}
+
+// Info provides some general information about the backend.
+func (*Backend) Info() *asset.BackendInfo {
+	return backendInfo
+}
+
+// ValidateFeeRate checks that the transaction fees used to initiate the
+// contract are sufficient. For most assets only the contract.FeeRate() cannot
+// be less than reqFeeRate, but for Eth, the gasTipCap must also be checked.
+func (eth *Backend) ValidateFeeRate(contract *asset.Contract, reqFeeRate uint64) bool {
+	coin := contract.Coin
+	sc, ok := coin.(*swapCoin)
+	if !ok {
+		eth.log.Error("eth contract coin type must be a swapCoin but got %T", sc)
+		return false
+	}
+
+	// Legacy transactions are also supported. In a legacy transaction, the
+	// gas tip cap will be equal to the gas price.
+	if sc.gasTipCap < dexeth.MinGasTipCap {
+		return false
+	}
+
+	return contract.FeeRate() >= reqFeeRate
 }
 
 // BlockChannel creates and returns a new channel on which to receive block

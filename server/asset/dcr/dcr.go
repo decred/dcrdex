@@ -300,6 +300,17 @@ func (dcr *Backend) FeeRate(ctx context.Context) (uint64, error) {
 	return atomsPerB, nil
 }
 
+// Info provides some general information about the backend.
+func (*Backend) Info() *asset.BackendInfo {
+	return &asset.BackendInfo{}
+}
+
+// ValidateFeeRate checks that the transaction fees used to initiate the
+// contract are sufficient.
+func (*Backend) ValidateFeeRate(contract *asset.Contract, reqFeeRate uint64) bool {
+	return contract.FeeRate() >= reqFeeRate
+}
+
 // BlockChannel creates and returns a new channel on which to receive block
 // updates. If the returned channel is ever blocking, there will be no error
 // logged from the dcr package. Part of the asset.Backend interface.

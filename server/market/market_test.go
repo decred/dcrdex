@@ -241,6 +241,10 @@ func (f *tFeeFetcher) LastRate() uint64 {
 	return 10
 }
 
+func (f *tFeeFetcher) SwapFeeRate(context.Context) uint64 {
+	return 10
+}
+
 type tBalancer struct {
 	reqs map[string]int
 }

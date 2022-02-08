@@ -1390,8 +1390,8 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	if stepInfo.isBaseAsset {
 		reqFeeRate = stepInfo.match.FeeRateBase
 	}
-	if contract.FeeRate() < reqFeeRate {
-		// TODO: test this case
+
+	if !chain.ValidateFeeRate(contract, reqFeeRate) {
 		s.respondError(msg.ID, actor.user, msgjson.ContractError, "low tx fee")
 		return wait.DontTryAgain
 	}

@@ -213,9 +213,8 @@ func (n *nodeClient) balance(ctx context.Context) (*Balance, error) {
 
 	addFees := func(tx *types.Transaction) {
 		gas := new(big.Int).SetUint64(tx.Gas())
-		if gasPrice := tx.GasPrice(); gasPrice != nil && gasPrice.Cmp(zero) > 0 {
-			outgoing.Add(outgoing, new(big.Int).Mul(gas, gasPrice))
-		} else if gasFeeCap := tx.GasFeeCap(); gasFeeCap != nil {
+		// For legacy transactions, GasFeeCap returns gas price
+		if gasFeeCap := tx.GasFeeCap(); gasFeeCap != nil {
 			outgoing.Add(outgoing, new(big.Int).Mul(gas, gasFeeCap))
 		} else {
 			n.log.Errorf("unable to calculate fees for tx %s", tx.Hash())
@@ -488,8 +487,9 @@ func (n *nodeClient) netFeeState(ctx context.Context) (baseFees, tipCap *big.Int
 		return nil, nil, err
 	}
 
-	if tip.Cmp(minGasTipCap) < 0 {
-		tip = new(big.Int).Set(minGasTipCap)
+	minGasTipCapWei := dexeth.GweiToWei(dexeth.MinGasTipCap)
+	if tip.Cmp(minGasTipCapWei) < 0 {
+		tip = new(big.Int).Set(minGasTipCapWei)
 	}
 
 	return base, tip, nil

@@ -428,6 +428,12 @@ func (b *TBackend) Synced() (bool, error) {
 }
 
 func (b *TBackend) TxData([]byte) ([]byte, error) { return nil, nil }
+func (*TBackend) Info() *asset.BackendInfo {
+	return &asset.BackendInfo{}
+}
+func (*TBackend) ValidateFeeRate(*asset.Contract, uint64) bool {
+	return true
+}
 
 type tUTXOBackend struct {
 	*TBackend

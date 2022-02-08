@@ -24,7 +24,8 @@ var _ asset.Coin = (*redeemCoin)(nil)
 type baseCoin struct {
 	backend      *Backend
 	secretHash   [32]byte
-	gasPrice     uint64
+	gasFeeCap    uint64
+	gasTipCap    uint64
 	txHash       common.Hash
 	value        uint64
 	txData       []byte
@@ -144,18 +145,29 @@ func (eth *Backend) baseCoin(coinID []byte, contractData []byte) (*baseCoin, err
 	// initialization transaction could take a long time to be mined. A
 	// transaction with a very low gas price may need to be resent with a
 	// higher price.
+	//
+	// Although we only retrieve the GasFeeCap and GasTipCap here, legacy
+	// transaction are also supported. In legacy transactions, the full
+	// gas price that is specified will be used no matter what, so the
+	// values returned from GasFeeCap and GasTipCap will both be equal to the
+	// gas price.
 	zero := new(big.Int)
-	rate := tx.GasPrice()
-	if rate == nil || rate.Cmp(zero) <= 0 {
-		rate = tx.GasFeeCap()
-		if rate == nil || rate.Cmp(zero) <= 0 {
-			return nil, fmt.Errorf("Failed to parse gas price from tx %s", txHash)
-		}
+	gasFeeCap := tx.GasFeeCap()
+	if gasFeeCap == nil || gasFeeCap.Cmp(zero) <= 0 {
+		return nil, fmt.Errorf("Failed to parse gas fee cap from tx %s", txHash)
+	}
+	gasFeeCapGwei, err := dexeth.WeiToGweiUint64(gasFeeCap)
+	if err != nil {
+		return nil, fmt.Errorf("unable to convert gas fee cap: %v", err)
 	}
 
-	gasPrice, err := dexeth.WeiToGweiUint64(rate)
+	gasTipCap := tx.GasTipCap()
+	if gasTipCap == nil || gasTipCap.Cmp(zero) <= 0 {
+		return nil, fmt.Errorf("Failed to parse gas tip cap from tx %s", txHash)
+	}
+	gasTipCapGwei, err := dexeth.WeiToGweiUint64(gasTipCap)
 	if err != nil {
-		return nil, fmt.Errorf("unable to convert gas price: %v", err)
+		return nil, fmt.Errorf("unable to convert gas tip cap: %v", err)
 	}
 
 	// Value is stored in the swap with the initialization transaction.
@@ -167,7 +179,8 @@ func (eth *Backend) baseCoin(coinID []byte, contractData []byte) (*baseCoin, err
 	return &baseCoin{
 		backend:      eth,
 		secretHash:   secretHash,
-		gasPrice:     gasPrice,
+		gasFeeCap:    gasFeeCapGwei,
+		gasTipCap:    gasTipCapGwei,
 		txHash:       txHash,
 		value:        value,
 		txData:       tx.Data(),
@@ -283,5 +296,5 @@ func (c *baseCoin) Value() uint64 {
 // FeeRate returns the gas rate, in gwei/gas. It is set in initialization of
 // the swapCoin.
 func (c *baseCoin) FeeRate() uint64 {
-	return c.gasPrice
+	return c.gasFeeCap
 }

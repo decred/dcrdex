@@ -100,8 +100,6 @@ var (
 		dex.Simnet:  42, // see dex/testing/eth/harness.sh
 	}
 
-	minGasTipCap = dexeth.GweiToWei(2)
-
 	findRedemptionCoinID = []byte("FindRedemption Coin")
 )
 
@@ -697,9 +695,7 @@ func (eth *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		return nil, nil, 0, fmt.Errorf("unfunded contract. %d < %d", totalInputValue, totalSpend)
 	}
 
-	// TODO: Fix fee rate. The current fee rate returned from the server
-	// will not allow this to be mined on simnet.
-	tx, err := eth.node.initiate(eth.ctx, swaps.Contracts, 200 /*swaps.FeeRate*/, swaps.AssetVersion)
+	tx, err := eth.node.initiate(eth.ctx, swaps.Contracts, swaps.FeeRate, swaps.AssetVersion)
 	if err != nil {
 		return fail(fmt.Errorf("Swap: initiate error: %w", err))
 	}
@@ -789,9 +785,7 @@ func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 
 	// TODO: make sure the amount we locked for redemption is enough to cover the gas
 	// fees. Also unlock coins.
-	// TODO: Fix fee rate. The current fee rate returned from the server
-	// will not allow this to be mined on simnet.
-	tx, err := eth.node.redeem(eth.ctx, form.Redemptions, 200 /*form.FeeSuggestion*/, contractVersion)
+	tx, err := eth.node.redeem(eth.ctx, form.Redemptions, form.FeeSuggestion, contractVersion)
 	if err != nil {
 		return fail(fmt.Errorf("Redeem: redeem error: %w", err))
 	}

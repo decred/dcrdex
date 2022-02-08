@@ -581,7 +581,9 @@ func feesAtBlk(ctx context.Context, n *nodeClient, blkNum int64) (fees *big.Int,
 	if err != nil {
 		return nil, err
 	}
-	tip := new(big.Int).Set(minGasTipCap)
+
+	minGasTipCapWei := dexeth.GweiToWei(dexeth.MinGasTipCap)
+	tip := new(big.Int).Set(minGasTipCapWei)
 
 	return tip.Add(tip, hdr.BaseFee), nil
 }

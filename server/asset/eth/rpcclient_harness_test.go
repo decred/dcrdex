@@ -98,8 +98,8 @@ func TestSyncProgress(t *testing.T) {
 	}
 }
 
-func TestSuggestGasPrice(t *testing.T) {
-	_, err := ethClient.suggestGasPrice(ctx)
+func TestSuggestGasTipCap(t *testing.T) {
+	_, err := ethClient.suggestGasTipCap(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

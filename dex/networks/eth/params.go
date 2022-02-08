@@ -29,6 +29,7 @@ const (
 	// in over which we consider the chain to be out of sync.
 	MaxBlockInterval = 180
 	EthBipID         = 60
+	MinGasTipCap     = 2 //gwei
 )
 
 var (
