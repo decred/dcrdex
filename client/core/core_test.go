@@ -4811,8 +4811,8 @@ func TestResolveActiveTrades(t *testing.T) {
 	// reset
 	reset := func() {
 		rig.acct.lock()
-		btcWallet.Lock()
-		ethWallet.Lock()
+		btcWallet.Lock(time.Second)
+		ethWallet.Lock(time.Second)
 		tEthWallet.reserved = 0
 		rig.dc.trades = make(map[order.OrderID]*trackedTrade)
 	}

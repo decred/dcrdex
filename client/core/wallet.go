@@ -8,12 +8,33 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
 )
+
+// runWithTimeout runs the provided function, returning either the error from
+// the function or errTimeout if the function fails to return within the
+// timeout. This function is for wallet methods that may not have a context or
+// timeout of their own, or we simply cannot rely on thirdparty packages to
+// respect context cancellation or deadlines.
+func runWithTimeout(f func() error, timeout time.Duration) error {
+	errChan := make(chan error, 1)
+	go func() {
+		defer close(errChan)
+		errChan <- f()
+	}()
+
+	select {
+	case err := <-errChan:
+		return err
+	case <-time.After(timeout):
+		return errTimeout
+	}
+}
 
 // xcWallet is a wallet. Use (*Core).loadWallet to construct a xcWallet.
 type xcWallet struct {
@@ -61,7 +82,7 @@ func (w *xcWallet) Unlock(crypter encrypt.Crypter) error {
 	if err != nil {
 		return fmt.Errorf("unlockWallet decryption error: %w", err)
 	}
-	err = w.Wallet.Unlock(pw)
+	err = w.Wallet.Unlock(pw) // can be slow - no timeout and NOT in the critical section!
 	if err != nil {
 		return err
 	}
@@ -86,34 +107,37 @@ func (w *xcWallet) refreshUnlock() (unlockAttempted bool, err error) {
 	if !w.Locked() {
 		return false, nil // unlocked
 	}
+
 	// Locked backend requires both encrypted and decrypted passwords.
-	if len(w.encPW()) == 0 {
-		return false, fmt.Errorf("%s wallet reporting as locked but no password has been set", unbip(w.AssetID))
-	}
 	w.mtx.RLock()
-	defer w.mtx.RUnlock()
-	if len(w.encPass) == 0 {
+	pwUnset := len(w.encPass) == 0
+	locked := len(w.pw) == 0
+	w.mtx.RUnlock()
+	if pwUnset {
 		return false, fmt.Errorf("%s wallet reporting as locked but no password"+
 			" has been set", unbip(w.AssetID))
 	}
-	if len(w.pw) == 0 {
+	if locked {
 		return false, fmt.Errorf("cannot refresh unlock on a locked %s wallet",
 			unbip(w.AssetID))
 	}
+
 	return true, w.Wallet.Unlock(w.pw)
 }
 
 // Lock the wallet. For encrypted wallets (encPW set), this clears the cached
 // decrypted password and attempts to lock the wallet backend.
-func (w *xcWallet) Lock() error {
+func (w *xcWallet) Lock(timeout time.Duration) error {
 	w.mtx.Lock()
-	defer w.mtx.Unlock()
 	if len(w.encPass) == 0 {
+		w.mtx.Unlock()
 		return nil
 	}
 	w.pw.Clear()
 	w.pw = nil
-	return w.Wallet.Lock()
+	w.mtx.Unlock() // end critical section before actual wallet request
+
+	return runWithTimeout(w.Wallet.Lock, timeout)
 }
 
 // unlocked will only return true if both the wallet backend is unlocked and we
@@ -173,9 +197,7 @@ func (w *xcWallet) currentDepositAddress() string {
 }
 
 func (w *xcWallet) refreshDepositAddress() (string, error) {
-	w.mtx.Lock()
-	defer w.mtx.Unlock()
-	if !w.hookedUp {
+	if !w.connected() {
 		return "", fmt.Errorf("cannot get address from unconnected %s wallet",
 			unbip(w.AssetID))
 	}
@@ -190,7 +212,10 @@ func (w *xcWallet) refreshDepositAddress() (string, error) {
 		return "", fmt.Errorf("%s Wallet.Address error: %w", unbip(w.AssetID), err)
 	}
 
+	w.mtx.Lock()
 	w.address = addr
+	w.mtx.Unlock()
+
 	return addr, nil
 }
 
