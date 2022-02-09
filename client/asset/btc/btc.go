@@ -553,6 +553,12 @@ func (btc *ExchangeWalletSPV) Rescan(_ context.Context) error {
 	return w.rescanWalletAsync()
 }
 
+// LogFilePath returns the path to the neutrino log file.
+func (btc *ExchangeWalletSPV) LogFilePath() string {
+	w := btc.node.(*spvWallet)
+	return w.logFilePath()
+}
+
 type block struct {
 	height int64
 	hash   chainhash.Hash
@@ -771,6 +777,7 @@ func openSPVWallet(cfg *BTCCloneCFG) (*ExchangeWalletSPV, error) {
 
 var _ asset.Wallet = (*ExchangeWalletSPV)(nil)
 var _ asset.Rescanner = (*ExchangeWalletSPV)(nil)
+var _ asset.LogFiler = (*ExchangeWalletSPV)(nil)
 
 // Info returns basic information about the wallet and asset.
 func (btc *ExchangeWallet) Info() *asset.WalletInfo {

@@ -1581,6 +1581,9 @@ func (c *TCore) ExportSeed(pw []byte) ([]byte, error) {
 	b, _ := hex.DecodeString("deadbeef1234567890")
 	return b, nil
 }
+func (c *TCore) WalletLogFilePath(uint32) (string, error) {
+	return "", nil
+}
 
 func TestServer(t *testing.T) {
 	// Register dummy drivers for unimplemented assets.

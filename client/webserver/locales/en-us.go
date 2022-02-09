@@ -212,4 +212,5 @@ var EnUS = map[string]string{
 	"worst_case_conditions":       "The worst case can occur if the order matches one lot at a time over the course of many epochs.",
 	"Maximum Possible Swap Fees":  "Maximum Possible Swap Fees",
 	"max_fee_conditions":          "This is the most you would ever pay in fees on your swap. Fees are normally assessed at a fraction of this rate. The maximum is not subject to changes once your order is placed.",
+	"wallet_logs":                 "Wallet Logs",
 }

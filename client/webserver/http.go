@@ -5,8 +5,10 @@ package webserver
 
 import (
 	"encoding/csv"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,6 +27,7 @@ const (
 	loginRoute       = "/login"
 	marketsRoute     = "/markets"
 	walletsRoute     = "/wallets"
+	walletLogRoute   = "/wallets/logfile"
 	settingsRoute    = "/settings"
 	ordersRoute      = "/orders"
 	exportOrderRoute = "/orders/export"
@@ -145,6 +148,56 @@ func (s *WebServer) handleWallets(w http.ResponseWriter, r *http.Request) {
 	s.sendTemplate(w, "wallets", data)
 }
 
+// handleWalletLogFile is the handler for the '/wallets/logfile' page request.
+func (s *WebServer) handleWalletLogFile(w http.ResponseWriter, r *http.Request) {
+	err := r.ParseForm()
+	if err != nil {
+		log.Errorf("error parsing form for wallet log file: %v", err)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	assetIDQueryString := r.Form["assetid"]
+	if len(assetIDQueryString) != 1 || len(assetIDQueryString[0]) == 0 {
+		log.Error("could not find asset id in query string")
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	assetID, err := strconv.ParseUint(assetIDQueryString[0], 10, 32)
+	if err != nil {
+		log.Errorf("failed to parse asset id query string %v", err)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	logFilePath, err := s.core.WalletLogFilePath(uint32(assetID))
+	if err != nil {
+		log.Errorf("failed to get log file path %v", err)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	logFile, err := os.Open(logFilePath)
+	if err != nil {
+		log.Errorf("error opening log file: %v", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	defer logFile.Close()
+
+	assetName := dex.BipIDSymbol(uint32(assetID))
+	logFileName := fmt.Sprintf("dcrdex-%s-wallet.log", assetName)
+	w.Header().Set("Content-Disposition", "attachment; filename="+logFileName)
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusOK)
+
+	_, err = io.Copy(w, logFile)
+	if err != nil {
+		log.Errorf("error copying log file: %v", err)
+	}
+}
+
 // handleSettings is the handler for the '/settings' page request.
 func (s *WebServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 	data := &struct {
@@ -190,13 +243,6 @@ func (s *WebServer) handleOrders(w http.ResponseWriter, r *http.Request) {
 
 // handleExportOrders is the handler for the /orders/export page request.
 func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
-	wf, ok := w.(http.Flusher)
-	if !ok {
-		log.Errorf("unable to flush streamed data")
-		http.Error(w, "unable to flush streamed data", http.StatusBadRequest)
-		return
-	}
-
 	filter := new(core.OrderFilter)
 	err := r.ParseForm()
 	if err != nil {
@@ -269,7 +315,6 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 		log.Errorf("error writing CSV: %v", err)
 		return
 	}
-	wf.Flush()
 
 	for _, ord := range ords {
 		ordReader := s.orderReader(ord)
@@ -302,7 +347,6 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 			log.Errorf("error writing CSV: %v", err)
 			return
 		}
-		wf.Flush()
 	}
 }
 

@@ -74,6 +74,7 @@ const (
 	maxFutureBlockTime = 2 * time.Hour // see MaxTimeOffsetSeconds in btcd/blockchain/validate.go
 	neutrinoDBName     = "neutrino.db"
 	logDirName         = "logs"
+	logFileName        = "neutrino.log"
 	defaultAcctNum     = 0
 	defaultAcctName    = "default"
 )
@@ -186,7 +187,7 @@ func logRotator(netDir string) (*rotator.Rotator, error) {
 		return nil, fmt.Errorf("error creating log directory: %w", err)
 	}
 
-	logFilename := filepath.Join(logDir, "neutrino.log")
+	logFilename := filepath.Join(logDir, logFileName)
 	return rotator.New(logFilename, 32*1024, false, maxLogRolls)
 }
 
@@ -1005,6 +1006,10 @@ func (w *spvWallet) calcMedianTime(blockHash *chainhash.Hash) (time.Time, error)
 
 	medianTimestamp := timestamps[len(timestamps)/2]
 	return time.Unix(medianTimestamp, 0), nil
+}
+
+func (w *spvWallet) logFilePath() string {
+	return filepath.Join(w.netDir, logDirName, logFileName)
 }
 
 // connect will start the wallet and begin syncing.
