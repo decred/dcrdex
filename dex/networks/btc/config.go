@@ -10,7 +10,7 @@ import (
 	"strconv"
 
 	"decred.org/dcrdex/dex"
-	"github.com/btcsuite/btcutil"
+	"github.com/btcsuite/btcd/btcutil"
 )
 
 // NetPorts are a set of port to use with the different networks.

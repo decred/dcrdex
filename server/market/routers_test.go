@@ -3,6 +3,7 @@ package market
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -538,7 +539,8 @@ func (rig *tOrderRig) signedUTXO(id int, val uint64, numSigs int) *msgjson.Coin 
 	}
 	pk := u.privKey.PubKey().SerializeCompressed()
 	for i := 0; i < numSigs; i++ {
-		sig := ecdsa.Sign(u.privKey, coin.ID)
+		msgHash := sha256.Sum256(coin.ID)
+		sig := ecdsa.Sign(u.privKey, msgHash[:])
 		coin.Sigs = append(coin.Sigs, sig.Serialize())
 		coin.PubKeys = append(coin.PubKeys, pk)
 	}

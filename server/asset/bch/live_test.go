@@ -31,7 +31,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/server/asset/btc"
-	"github.com/btcsuite/btcutil"
+	"github.com/btcsuite/btcd/btcutil"
 )
 
 var (

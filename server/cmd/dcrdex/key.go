@@ -4,6 +4,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -62,7 +63,12 @@ func loadKeyFile(path string, pass []byte) (*secp256k1.PrivateKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	return secp256k1.PrivKeyFromBytes(keyB), nil
+	// secp256k1.PrivKeyFromBytes() but don't trust that the DB has a valid key.
+	var priv secp256k1.PrivateKey
+	if overflow := priv.Key.SetByteSlice(keyB); overflow || priv.Key.IsZero() {
+		return nil, errors.New("invalid decrypted private key bytes")
+	}
+	return &priv, nil
 }
 
 func createAndStoreKey(path string, pass []byte) (*secp256k1.PrivateKey, error) {

@@ -22,13 +22,14 @@ import (
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
-	"github.com/btcsuite/btcd/btcec"
+	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
 	"github.com/btcsuite/btcd/btcjson"
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcutil"
 )
 
 var (
@@ -1645,7 +1646,7 @@ func testSwap(t *testing.T, segwit bool, walletType string) {
 	node.changeAddr = addrStr
 
 	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
-	privKey, _ := btcec.PrivKeyFromBytes(btcec.S256(), privBytes)
+	privKey, _ := btcec.PrivKeyFromBytes(privBytes)
 	wif, err := btcutil.NewWIF(privKey, &chaincfg.MainNetParams, true)
 	if err != nil {
 		t.Fatalf("error encoding wif: %v", err)
@@ -1782,7 +1783,7 @@ func testRedeem(t *testing.T, segwit bool, walletType string) {
 	}
 
 	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
-	privKey, _ := btcec.PrivKeyFromBytes(btcec.S256(), privBytes)
+	privKey, _ := btcec.PrivKeyFromBytes(privBytes)
 	wif, err := btcutil.NewWIF(privKey, &chaincfg.MainNetParams, true)
 	if err != nil {
 		t.Fatalf("error encoding wif: %v", err)
@@ -1891,7 +1892,7 @@ func testSignMessage(t *testing.T, segwit bool, walletType string) {
 
 	vout := uint32(5)
 	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
-	privKey, pubKey := btcec.PrivKeyFromBytes(btcec.S256(), privBytes)
+	privKey, pubKey := btcec.PrivKeyFromBytes(privBytes)
 	wif, err := btcutil.NewWIF(privKey, &chaincfg.MainNetParams, true)
 	if err != nil {
 		t.Fatalf("error encoding wif: %v", err)
@@ -1900,10 +1901,7 @@ func testSignMessage(t *testing.T, segwit bool, walletType string) {
 	msg := randBytes(36)
 	msgHash := chainhash.HashB(msg)
 	pk := pubKey.SerializeCompressed()
-	signature, err := privKey.Sign(msgHash)
-	if err != nil {
-		t.Fatalf("signature error: %v", err)
-	}
+	signature := ecdsa.Sign(privKey, msgHash)
 	sig := signature.Serialize()
 
 	pt := newOutPoint(tTxHash, vout)
@@ -1928,7 +1926,8 @@ func testSignMessage(t *testing.T, segwit bool, walletType string) {
 		if sentMsg.String() != checkMsg.String() {
 			t.Fatalf("received wrong message. expected '%s', got '%s'", checkMsg.String(), sentMsg.String())
 		}
-		sig, _ := wif.PrivKey.Sign(sentMsg)
+		msgHash := chainhash.HashB(sentMsg)
+		sig := ecdsa.Sign(wif.PrivKey, msgHash)
 		r, _ := json.Marshal(base64.StdEncoding.EncodeToString(sig.Serialize()))
 		return r, nil
 	}
@@ -2209,7 +2208,7 @@ func testRefund(t *testing.T, segwit bool, walletType string) {
 	const feeSuggestion = 100
 
 	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
-	privKey, _ := btcec.PrivKeyFromBytes(btcec.S256(), privBytes)
+	privKey, _ := btcec.PrivKeyFromBytes(privBytes)
 	wif, err := btcutil.NewWIF(privKey, &chaincfg.MainNetParams, true)
 	if err != nil {
 		t.Fatalf("error encoding wif: %v", err)

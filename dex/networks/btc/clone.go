@@ -4,9 +4,9 @@
 package btc
 
 import (
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcutil"
 )
 
 // AddressDecoder decodes a string address to a btcutil.Address.

@@ -21,10 +21,10 @@ import (
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"decred.org/dcrdex/server/asset"
 	"github.com/btcsuite/btcd/btcjson"
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcutil"
 	"github.com/decred/dcrd/dcrjson/v4" // for dcrjson.RPCError returns from rpcclient
 	"github.com/decred/dcrd/rpcclient/v7"
 )
