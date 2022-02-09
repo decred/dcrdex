@@ -22,7 +22,11 @@ func init() {
 // Generate a public key on the secp256k1 curve.
 func randomPubKey() *secp256k1.PublicKey {
 	//return secp256k1.NewPublicKey(secp256k1.S256().ScalarBaseMult(randBytes(32)))
-	return secp256k1.PrivKeyFromBytes(randBytes(32)).PubKey()
+	priv, err := secp256k1.GeneratePrivateKey()
+	if err != nil {
+		panic(err.Error())
+	}
+	return priv.PubKey()
 }
 
 func randString(maxLen int) string {

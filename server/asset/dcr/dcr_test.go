@@ -392,7 +392,10 @@ type testMsgTx struct {
 
 // Generate a public key on the secp256k1 curve.
 func genPubkey() ([]byte, []byte) {
-	priv := secp256k1.PrivKeyFromBytes(randomBytes(32))
+	priv, err := secp256k1.GeneratePrivateKey()
+	if err != nil {
+		panic(err.Error())
+	}
 	pub := priv.PubKey()
 	pubkey := pub.SerializeCompressed()
 	pkHash := dcrutil.Hash160(pubkey)

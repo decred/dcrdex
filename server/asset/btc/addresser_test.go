@@ -10,9 +10,9 @@ import (
 	"testing"
 
 	"decred.org/dcrdex/server/asset"
+	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcutil/hdkeychain"
 )
 
 // Dummy keyIndexer since there is no DB or need to coordinate withother

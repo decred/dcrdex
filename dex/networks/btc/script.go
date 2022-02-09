@@ -11,11 +11,10 @@ import (
 	"fmt"
 
 	"decred.org/dcrdex/dex"
-	"github.com/btcsuite/btcd/blockchain"
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcutil"
 )
 
 const (
@@ -235,7 +234,7 @@ const (
 	InitTxSizeSegwit = InitTxSizeBaseSegwit + RedeemP2WPKHInputSize +
 		(SegwitMarkerAndFlagWeight+RedeemP2WPKHInputWitnessWeight+(witnessWeight-1))/witnessWeight
 
-	witnessWeight = blockchain.WitnessScaleFactor
+	witnessWeight = 4 // github.com/btcsuite/btcd/blockchain.WitnessScaleFactor
 )
 
 // BTCScriptType holds details about a pubkey script and possibly it's redeem

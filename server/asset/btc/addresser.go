@@ -10,10 +10,10 @@ import (
 	"sync"
 
 	"decred.org/dcrdex/server/asset"
+	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcutil"
-	"github.com/btcsuite/btcutil/hdkeychain"
 )
 
 // AddressDeriver generates unique addresses from an extended public key.

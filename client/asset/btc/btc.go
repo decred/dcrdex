@@ -24,13 +24,14 @@ import (
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
-	"github.com/btcsuite/btcd/btcec"
+	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
 	"github.com/btcsuite/btcd/btcjson"
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcutil"
 	"github.com/btcsuite/btcwallet/wallet"
 	"github.com/decred/dcrd/dcrjson/v4" // for dcrjson.RPCError returns from rpcclient
 	"github.com/decred/dcrd/rpcclient/v7"
@@ -2914,10 +2915,7 @@ func (btc *baseWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sig
 	}
 	pk := privKey.PubKey()
 	hash := chainhash.HashB(msg) // legacy servers will not accept this signature!
-	sig, err := privKey.Sign(hash)
-	if err != nil {
-		return nil, nil, err
-	}
+	sig := ecdsa.Sign(privKey, hash)
 	pubkeys = append(pubkeys, pk.SerializeCompressed())
 	sigs = append(sigs, sig.Serialize()) // DER format serialization
 	return

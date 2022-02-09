@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	"decred.org/dcrdex/dex/encode"
-	"github.com/btcsuite/btcd/btcec"
+	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcutil"
 	"github.com/gcash/bchutil"
 )
 
@@ -92,7 +92,11 @@ func TestCashAddr(t *testing.T) {
 		// wrong.
 		checkHash(net, lowPubKey)
 		for i := 0; i < 100; i++ {
-			_, pubKey := btcec.PrivKeyFromBytes(btcec.S256(), encode.RandomBytes(33))
+			priv, err := btcec.NewPrivateKey()
+			if err != nil {
+				panic(err.Error())
+			}
+			pubKey := priv.PubKey()
 			checkHash(net, pubKey.SerializeUncompressed())
 			checkHash(net, pubKey.SerializeCompressed())
 		}

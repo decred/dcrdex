@@ -7,17 +7,19 @@ import (
 	"crypto/sha256"
 	"fmt"
 
-	"github.com/btcsuite/btcd/btcec"
+	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
 )
 
 // checkSig checks that the message's signature was created with the
 // private key for the provided public key.
 func checkSig(msg, pkBytes, sigBytes []byte) error {
-	pubKey, err := btcec.ParsePubKey(pkBytes, btcec.S256())
+	pubKey, err := btcec.ParsePubKey(pkBytes)
 	if err != nil {
 		return fmt.Errorf("error decoding PublicKey from bytes: %w", err)
 	}
-	signature, err := btcec.ParseDERSignature(sigBytes, btcec.S256())
+
+	signature, err := ecdsa.ParseDERSignature(sigBytes)
 	if err != nil {
 		return fmt.Errorf("error decoding Signature from bytes: %w", err)
 	}

@@ -14,7 +14,7 @@ import (
 	"decred.org/dcrdex/dex"
 	dexbch "decred.org/dcrdex/dex/networks/bch"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
-	"github.com/btcsuite/btcd/btcec"
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"

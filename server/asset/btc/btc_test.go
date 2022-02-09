@@ -25,13 +25,14 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
-	"github.com/btcsuite/btcd/btcec"
+	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
 	"github.com/btcsuite/btcd/btcjson"
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcutil"
 	"gopkg.in/ini.v1"
 )
 
@@ -516,7 +517,7 @@ type testMsgTx struct {
 }
 
 func s256Auth(msg []byte) *testAuth {
-	priv, err := btcec.NewPrivateKey(btcec.S256())
+	priv, err := btcec.NewPrivateKey()
 	if err != nil {
 		fmt.Printf("s256Auth error: %v\n", err)
 	}
@@ -525,10 +526,7 @@ func s256Auth(msg []byte) *testAuth {
 		msg = randomBytes(32)
 	}
 	hash := sha256.Sum256(msg)
-	sig, err := priv.Sign(hash[:])
-	if err != nil {
-		fmt.Printf("s256Auth sign error: %v\n", err)
-	}
+	sig := ecdsa.Sign(priv, hash[:])
 	return &testAuth{
 		pubkey: pubkey,
 		pkHash: btcutil.Hash160(pubkey),
@@ -539,7 +537,11 @@ func s256Auth(msg []byte) *testAuth {
 
 // Generate a public key on the secp256k1 curve.
 func genPubkey() ([]byte, []byte) {
-	_, pub := btcec.PrivKeyFromBytes(btcec.S256(), randomBytes(32))
+	priv, err := btcec.NewPrivateKey()
+	if err != nil {
+		panic(err.Error())
+	}
+	pub := priv.PubKey()
 	pubkey := pub.SerializeCompressed()
 	pkHash := btcutil.Hash160(pubkey)
 	return pubkey, pkHash
