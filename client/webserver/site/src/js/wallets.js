@@ -10,6 +10,7 @@ import * as intl from './locales'
 const bind = Doc.bind
 const animationLength = 300
 const traitNewAddresser = 1 << 1
+const traitLogFiler = 1 << 2
 
 export default class WalletsPage extends BasePage {
   constructor (body) {
@@ -93,6 +94,8 @@ export default class WalletsPage extends BasePage {
       }
     }
     bind(document, 'keyup', this.keyup)
+
+    bind(page.downloadLogs, 'click', async () => { this.downloadLogs() })
 
     // Bind buttons
     for (const [k, asset] of Object.entries(rowInfos)) {
@@ -307,6 +310,10 @@ export default class WalletsPage extends BasePage {
       Doc.hide(page.showChangeType)
     }
 
+    const wallet = app().walletMap[assetID]
+    if ((wallet.traits & traitLogFiler) !== 0) Doc.show(page.downloadLogs)
+    else Doc.hide(page.downloadLogs)
+
     page.recfgAssetLogo.src = Doc.logoPath(asset.symbol)
     page.recfgAssetName.textContent = asset.info.name
     await this.hideBox()
@@ -508,6 +515,15 @@ export default class WalletsPage extends BasePage {
     const a = asset.actions
     Doc.hide(a.withdraw, a.lock, a.deposit)
     Doc.show(a.unlock)
+  }
+
+  async downloadLogs () {
+    const search = new URLSearchParams('')
+    search.append('assetid', `${this.reconfigAsset}`)
+    const url = new URL(window.location)
+    url.search = search.toString()
+    url.pathname = '/wallets/logfile'
+    window.open(url.toString())
   }
 
   /* handleBalance handles notifications updating a wallet's balance. */

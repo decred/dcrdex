@@ -109,6 +109,7 @@ type clientCore interface {
 	AccountDisable(pw []byte, host string) error
 	IsInitialized() bool
 	ExportSeed(pw []byte) ([]byte, error)
+	WalletLogFilePath(assetID uint32) (string, error)
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -270,6 +271,7 @@ func New(cfg *Config) (*WebServer, error) {
 			webInit.Group(func(webAuthNoDEX chi.Router) {
 				webAuthNoDEX.Use(s.requireLogin)
 				webAuthNoDEX.Get(walletsRoute, s.handleWallets)
+				webAuthNoDEX.Get(walletLogRoute, s.handleWalletLogFile)
 			})
 
 			webInit.Group(func(webDC chi.Router) {

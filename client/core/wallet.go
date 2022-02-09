@@ -262,6 +262,16 @@ func (w *xcWallet) Rescan(ctx context.Context) error {
 	return rescanner.Rescan(ctx)
 }
 
+// LogFilePath returns the path of the wallet's log file if the
+// asset.Wallet implementation is a LogFiler.
+func (w *xcWallet) LogFilePath() (string, error) {
+	logFiler, ok := w.Wallet.(asset.LogFiler)
+	if !ok {
+		return "", errors.New("wallet does not support getting log file")
+	}
+	return logFiler.LogFilePath(), nil
+}
+
 // SwapConfirmations calls (asset.Wallet).SwapConfirmations with a timeout
 // Context. If the coin cannot be located, an asset.CoinNotFoundError is
 // returned. If the coin is located, but recognized as spent, no error is

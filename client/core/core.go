@@ -6423,3 +6423,14 @@ func walletDefinition(assetID uint32, walletType string) (*asset.WalletDefinitio
 	}
 	return walletDef, nil
 }
+
+// WalletLogFilePath returns the path to the wallet's log file.
+func (c *Core) WalletLogFilePath(assetID uint32) (string, error) {
+	wallet, exists := c.wallet(assetID)
+	if !exists {
+		return "", newError(missingWalletErr, "no configured wallet found for %s (%d)",
+			strings.ToUpper(unbip(assetID)), assetID)
+	}
+
+	return wallet.LogFilePath()
+}

@@ -17,6 +17,7 @@ type WalletTrait uint64
 const (
 	WalletTraitRescanner    WalletTrait = 1 << iota // The Wallet is an asset.Rescanner.
 	WalletTraitNewAddresser                         // The Wallet can generate new addresses on demand with NewAddress.
+	WalletTraitLogFiler                             // The Wallet allows for downloading of a log file.
 )
 
 // IsRescanner tests if the WalletTrait has the WalletTraitRescanner bit set.
@@ -32,6 +33,11 @@ func (wt WalletTrait) IsNewAddresser() bool {
 	return wt&WalletTraitNewAddresser != 0
 }
 
+// IsLogFiler tests if WalletTrait has the WalletTraitLogFiler bit set.
+func (wt WalletTrait) IsLogFiler() bool {
+	return wt&WalletTraitLogFiler != 0
+}
+
 // DetermineWalletTraits returns the WalletTrait bitset for the provided Wallet.
 func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(Rescanner); is {
@@ -39,6 +45,9 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	}
 	if _, is := w.(NewAddresser); is {
 		t |= WalletTraitNewAddresser
+	}
+	if _, is := w.(LogFiler); is {
+		t |= WalletTraitLogFiler
 	}
 	return t
 }
@@ -282,6 +291,11 @@ type Sweeper interface {
 // NewAddresser is a wallet that can generate new deposit addresses.
 type NewAddresser interface {
 	NewAddress() (string, error)
+}
+
+// LogFiler is a wallet that allows for downloading of its log file.
+type LogFiler interface {
+	LogFilePath() string
 }
 
 // Balance is categorized information about a wallet's balance.

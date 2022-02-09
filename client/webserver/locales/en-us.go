@@ -193,4 +193,5 @@ var EnUS = map[string]string{
 	"Add a custom server":         "Add a custom server",
 	"plus tx fees":                "+ tx fees",
 	"Export Seed":                 "Export Seed",
+	"wallet_logs":                 "Wallet Logs",
 }
