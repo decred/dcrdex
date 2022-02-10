@@ -5,7 +5,10 @@ package dex
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
+	"sync/atomic"
 )
 
 // contextManager is used to manage a context and its cancellation function.
@@ -86,12 +89,15 @@ type Connector interface {
 
 // ConnectionMaster manages a Connector.
 type ConnectionMaster struct {
-	contextManager
-	wg        *sync.WaitGroup
 	connector Connector
+	cancel    context.CancelFunc
+	done      atomic.Value // chan struct{}
 }
 
-// NewConnectionMaster is the constructor for a new ConnectionMaster.
+// NewConnectionMaster creates a new ConnectionMaster. The Connect method should
+// be used before Disconnect. The On, Done, and Wait methods may be used at any
+// time. However, prior to Connect, Wait and Done immediately return and signal
+// completion, respectively.
 func NewConnectionMaster(c Connector) *ConnectionMaster {
 	return &ConnectionMaster{
 		connector: c,
@@ -100,24 +106,42 @@ func NewConnectionMaster(c Connector) *ConnectionMaster {
 
 // Connect connects the Connector, and returns any initial connection error. Use
 // Disconnect to shut down the Connector. Even if Connect returns a non-nil
-// error, On will report true until Disconnect is called. You would use Connect
+// error, On may report true until Disconnect is called. You would use Connect
 // if the wrapped Connector has a reconnect loop to continually attempt to
 // establish a connection even if the initial attempt fails. Use ConnectOnce if
 // the Connector should be given one chance to connect before being considered
 // not to be "on". If the ConnectionMaster is discarded on error, it is not
 // important which method is used.
 func (c *ConnectionMaster) Connect(ctx context.Context) (err error) {
-	c.init(ctx)
-	c.mtx.Lock()
-	c.wg, err = c.connector.Connect(c.ctx)
-	if c.wg == nil { // don't expect a waitgroup if Connect errored
-		c.wg = new(sync.WaitGroup) // don't let Disconnect or Wait panic
-		c.cancel()                 // we're not "On"
+	if c.On() { // probably a bug in the consumer
+		return errors.New("already running")
 	}
-	c.mtx.Unlock()
-	// NOTE: Even if err is non-nil, we can't cancel the internal context
-	// because the connector may be attempting to reconnect. The caller should
-	// decide to let it go or to call Disconnect.
+
+	// Attempt to start the Connector.
+	ctx, cancel := context.WithCancel(ctx)
+	wg, err := c.connector.Connect(ctx)
+	if wg == nil {
+		cancel() // no context leak
+		return fmt.Errorf("connect failure: %w", err)
+	}
+	// NOTE: A non-nil error currently does not indicate that the Connector is
+	// not running, only that the initial connection attempt has failed. As long
+	// as the WaitGroup is non-nil we need to wait on it. We return the error so
+	// that the caller may decide to stop it or wait (see ConnectOnce).
+
+	// It's running, enable Disconnect.
+	c.cancel = cancel // caller should synchronize Connect/Disconnect calls
+
+	// Done and On may be checked at any time.
+	done := make(chan struct{})
+	c.done.Store(done)
+
+	go func() { // capture the local variables
+		wg.Wait()
+		cancel() // if the Connector just died on its own, don't leak the context
+		close(done)
+	}()
+
 	return err
 }
 
@@ -127,21 +151,51 @@ func (c *ConnectionMaster) Connect(ctx context.Context) (err error) {
 // parent context or call Disconnect.
 func (c *ConnectionMaster) ConnectOnce(ctx context.Context) (err error) {
 	if err = c.Connect(ctx); err != nil {
-		c.cancel()
+		// If still "On", disconnect.
+		// c.Disconnect() // no-op if not "On"
+		if c.cancel != nil {
+			c.cancel()
+			<-c.done.Load().(chan struct{}) // wait for Connector
+		}
 	}
 	return err
 }
 
-// Disconnect closes the connection and waits for shutdown.
-func (c *ConnectionMaster) Disconnect() {
-	c.cancel()
-	c.mtx.RLock()
-	c.wg.Wait()
-	c.mtx.RUnlock()
+// Done returns a channel that is closed when the Connector's WaitGroup is done.
+// If called before Connect, a closed channel is returned.
+func (c *ConnectionMaster) Done() <-chan struct{} {
+	done, ok := c.done.Load().(chan struct{})
+	if ok {
+		return done
+	}
+	done = make(chan struct{})
+	close(done)
+	return done
 }
 
-// Wait waits for the the WaitGroup returned by Connect.
+// On indicates if the Connector is running. This returns false if never
+// connected, or if the Connector has completed shut down.
+func (c *ConnectionMaster) On() bool {
+	select {
+	case <-c.Done():
+		return false
+	default:
+		return true
+	}
+}
+
+// Wait waits for the the Connector to shut down. It returns immediately if
+// Connect has not been called yet.
 func (c *ConnectionMaster) Wait() {
-	c.wg.Wait()
-	c.cancel() // if not called from Disconnect, would leak context
+	<-c.Done() // let the anon goroutine from Connect return
+}
+
+// Disconnect closes the connection and waits for shutdown. This must not be
+// used before or concurrently with Connect.
+func (c *ConnectionMaster) Disconnect() {
+	if !c.On() {
+		return
+	}
+	c.cancel()
+	c.Wait()
 }
