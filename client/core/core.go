@@ -72,6 +72,8 @@ var (
 	// ActiveOrdersLogoutErr is returned from logout when there are active
 	// orders.
 	ActiveOrdersLogoutErr = errors.New("cannot log out with active orders")
+
+	errTimeout = errors.New("timeout")
 )
 
 type dexTicker struct {
@@ -1059,7 +1061,6 @@ type Config struct {
 type Core struct {
 	ctx           context.Context
 	wg            sync.WaitGroup
-	walletWait    sync.WaitGroup
 	ready         chan struct{}
 	cfg           *Config
 	log           dex.Logger
@@ -1259,14 +1260,11 @@ func (c *Core) Run(ctx context.Context) {
 		}
 		symb := strings.ToUpper(unbip(assetID))
 		c.log.Infof("Locking %s wallet", symb)
-		if err := wallet.Lock(); err != nil {
+		if err := wallet.Lock(5 * time.Second); err != nil {
 			c.log.Errorf("Failed to lock %v wallet: %v", symb, err)
 		}
 		wallet.Disconnect()
 	}
-
-	// Let the wallet backends shut down cleanly.
-	c.walletWait.Wait()
 
 	c.log.Infof("DEX client core off")
 }
@@ -1734,7 +1732,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	}
 
 	initErr := func(s string, a ...interface{}) error {
-		_ = wallet.Lock() // just try, but don't confuse the user with an error
+		_ = wallet.Lock(2 * time.Second) // just try, but don't confuse the user with an error
 		wallet.Disconnect()
 		return fmt.Errorf(s, a...)
 	}
@@ -2013,7 +2011,7 @@ func (c *Core) CloseWallet(assetID uint32) error {
 	if err != nil {
 		return fmt.Errorf("wallet not found for %d -> %s: %w", assetID, unbip(assetID), err)
 	}
-	err = wallet.Lock()
+	err = wallet.Lock(5 * time.Second)
 	if err != nil {
 		return err
 	}
@@ -2390,7 +2388,7 @@ func (c *Core) setWalletPassword(wallet *xcWallet, newPW []byte, crypter encrypt
 
 	// Re-lock the wallet if it was previously locked.
 	if !wasUnlocked {
-		if err = wallet.Lock(); err != nil {
+		if err = wallet.Lock(2 * time.Second); err != nil {
 			c.log.Warnf("Unable to relock %s wallet: %v", unbip(wallet.AssetID), err)
 		}
 	}
@@ -3276,8 +3274,10 @@ func (c *Core) Logout() error {
 	// Lock wallets
 	for _, w := range c.xcWallets() {
 		if w.connected() {
-			if err := w.Lock(); err != nil {
-				return err
+			if err := w.Lock(5 * time.Second); err != nil {
+				// A failure to lock the wallet need not block the ability to
+				// lock the DEX accounts or shutdown Core gracefully.
+				c.log.Warnf("Unable to lock %v wallet: %v", unbip(w.AssetID), err)
 			}
 		}
 	}
