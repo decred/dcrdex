@@ -4811,8 +4811,8 @@ func TestResolveActiveTrades(t *testing.T) {
 	// reset
 	reset := func() {
 		rig.acct.lock()
-		btcWallet.Lock()
-		ethWallet.Lock()
+		btcWallet.Lock(time.Second)
+		ethWallet.Lock(time.Second)
 		tEthWallet.reserved = 0
 		rig.dc.trades = make(map[order.OrderID]*trackedTrade)
 	}
@@ -5407,7 +5407,7 @@ func TestLogout(t *testing.T) {
 	defer rig.shutdown()
 	tCore := rig.core
 
-	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
+	dcrWallet, _ := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
 
 	btcWallet, _ := newTWallet(tBTC.ID)
@@ -5457,10 +5457,6 @@ func TestLogout(t *testing.T) {
 	// Active orders with matches error.
 	ensureErr("active orders matches")
 	rig.dc.trades = nil
-
-	// Lock wallet error.
-	tDcrWallet.lockErr = tErr
-	ensureErr("lock wallet")
 }
 
 func TestSetEpoch(t *testing.T) {
