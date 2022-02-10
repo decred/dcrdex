@@ -2003,15 +2003,6 @@ func (c *Core) startWalletSyncMonitor(wallet *xcWallet) {
 		return // already monitoring
 	}
 
-	// If the wallet is shut down before sync is complete or Core stops, exit
-	// the loop by wrapping Core's context.
-	innerCtx, cancel := context.WithCancel(c.ctx)
-	go func() {
-		if wallet.connector.On() {
-			wallet.connector.Wait()
-		}
-		cancel()
-	}()
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
@@ -2024,7 +2015,10 @@ func (c *Core) startWalletSyncMonitor(wallet *xcWallet) {
 				if c.walletCheckAndNotify(wallet) {
 					return
 				}
-			case <-innerCtx.Done():
+			case <-wallet.connector.Done():
+				c.log.Warnf("%v wallet shut down before sync completed.", wallet.Info().Name)
+				return
+			case <-c.ctx.Done():
 				return
 			}
 		}

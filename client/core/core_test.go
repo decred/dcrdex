@@ -8342,8 +8342,7 @@ func TestWalletSyncing(t *testing.T) {
 	dcrWallet, tDcrWallet := newTWallet(tUTXOAssetA.ID)
 	dcrWallet.synced = false
 	dcrWallet.syncProgress = 0
-	_ = dcrWallet.Connect()
-	defer dcrWallet.Disconnect()
+	// Connect with tCore.connectWallet below.
 
 	tStart := time.Now()
 	testDuration := 100 * time.Millisecond
