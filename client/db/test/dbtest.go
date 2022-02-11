@@ -15,6 +15,10 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
+
 // Generate a public key on the secp256k1 curve.
 func randomPubKey() *secp256k1.PublicKey {
 	//return secp256k1.NewPublicKey(secp256k1.S256().ScalarBaseMult(randBytes(32)))

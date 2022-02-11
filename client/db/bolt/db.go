@@ -1624,6 +1624,243 @@ func (idx *timeIndexNewest) add(t uint64, k []byte, b *bbolt.Bucket) {
 	})
 }
 
+// DeleteInactiveOrders deletes orders that are no longer needed for normal
+// operations. Optionally accepts a time to delete orders with a later time
+// stamp. Accepts an optional function to perform on deleted orders.
+func (db *BoltDB) DeleteInactiveOrders(ctx context.Context, olderThan *time.Time,
+	perOrderFn func(ords *db.MetaOrder) error) error {
+	const batchSize = 1000
+	var (
+		finished   bool
+		olderThanB []byte
+	)
+	if olderThan != nil {
+		olderThanB = uint64Bytes(encode.UnixMilliU(*olderThan))
+	} else {
+		olderThanB = uint64Bytes(timeNow())
+	}
+
+	activeMatchOrders := make(map[order.OrderID]struct{})
+	if err := db.View(func(tx *bbolt.Tx) error {
+		// Some archived orders may still be needed for active matches.
+		// Put those order id's in a map to prevent deletion.
+		amb := tx.Bucket(activeMatchesBucket)
+		if err := amb.ForEach(func(k, _ []byte) error {
+			mBkt := amb.Bucket(k)
+			if mBkt == nil {
+				return fmt.Errorf("match %x bucket is not a bucket", k)
+			}
+			oidB := mBkt.Get(orderIDKey)
+			var oid order.OrderID
+			copy(oid[:], oidB)
+			activeMatchOrders[oid] = struct{}{}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("unable to get active matches: %v", err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	nDeletedOrders := 0
+	for !finished {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		start := time.Now()
+		nDeletedOrders = 0
+		err := db.Update(func(tx *bbolt.Tx) error {
+			// Run through the archived order bucket storing id's keys for
+			// returning the order data and deletion later.
+			archivedOB := tx.Bucket(archivedOrdersBucket)
+			if archivedOB == nil {
+				return fmt.Errorf("failed to open %s bucket", string(archivedOrdersBucket))
+			}
+			// Retrieve one more than we will delete in order to gauge if
+			// this is the last order to delete.
+			oneOverSize := batchSize + 1
+			filter := func(k []byte, oBkt *bbolt.Bucket) bool {
+				var oid order.OrderID
+				copy(oid[:], k)
+				if order.OrderStatus(intCoder.Uint16(oBkt.Get(statusKey))).IsActive() {
+					db.log.Warnf("active order %v found in inactive bucket", oid)
+					return false
+				}
+				if _, has := activeMatchOrders[oid]; has {
+					return false
+				}
+				timeB := oBkt.Get(updateTimeKey)
+				return bytes.Compare(timeB, olderThanB) <= 0
+			}
+			trios := newestBuckets([]*bbolt.Bucket{archivedOB}, oneOverSize, updateTimeKey, filter)
+
+			// Ignore the last order if it exists. Otherwise there are no
+			// more orders to delete.
+			if len(trios) == oneOverSize {
+				trios = trios[:batchSize]
+			} else {
+				finished = true
+			}
+			for _, trio := range trios {
+				o, err := decodeOrderBucket(trio.k, trio.b)
+				if err != nil {
+					return fmt.Errorf("failed to decode order bucket: %v", err)
+				}
+				if err := archivedOB.DeleteBucket(trio.k); err != nil {
+					return fmt.Errorf("failed to delete order bucket: %v", err)
+				}
+				if perOrderFn != nil {
+					if err := perOrderFn(o); err != nil {
+						return fmt.Errorf("problem performing batch function: %v", err)
+					}
+				}
+				nDeletedOrders++
+			}
+			db.log.Infof("Deleted %d orders from the database in %v.", nDeletedOrders, time.Since(start))
+			return nil
+		})
+		if err != nil {
+			if perOrderFn != nil && nDeletedOrders != 0 {
+				db.log.Warnf("%d orders reported as deleted have been rolled back due to error.", nDeletedOrders)
+			}
+			return fmt.Errorf("unable to delete orders: %v", err)
+		}
+	}
+	return nil
+}
+
+// orderSide Returns wether the order was for buying or selling the asset.
+func orderSide(tx *bbolt.Tx, oid order.OrderID) (sell bool, err error) {
+	oidB := oid[:]
+	ob := tx.Bucket(activeOrdersBucket)
+	if ob == nil {
+		return false, fmt.Errorf("failed to open %s bucket", string(activeOrdersBucket))
+	}
+	oBkt := ob.Bucket(oidB)
+	// If the order is not in the active bucket, check the archived bucket.
+	if oBkt == nil {
+		archivedOB := tx.Bucket(archivedOrdersBucket)
+		if archivedOB == nil {
+			return false, fmt.Errorf("failed to open %s bucket", string(archivedOrdersBucket))
+		}
+		oBkt = archivedOB.Bucket(oidB)
+	}
+	if oBkt == nil {
+		return false, fmt.Errorf("order %s not found", oid)
+	}
+	orderB := getCopy(oBkt, orderKey)
+	if orderB == nil {
+		return false, fmt.Errorf("nil order bytes for order %x", oid)
+	}
+	ord, err := order.DecodeOrder(orderB)
+	if err != nil {
+		return false, fmt.Errorf("error decoding order %x: %w", oid, err)
+	}
+	sell = ord.Trade().Sell
+	return
+}
+
+// DeleteInactiveMatches deletes matches that are no longer needed for normal
+// operations. Optionally accepts a time to delete matchess with a later time
+// stamp. Accepts an optional function to perform on deleted matches.
+func (db *BoltDB) DeleteInactiveMatches(ctx context.Context, olderThan *time.Time,
+	perMatchFn func(mtch *db.MetaMatch, isSell bool) error) error {
+	const batchSize = 1000
+	var (
+		finished   bool
+		olderThanB []byte
+	)
+	if olderThan != nil {
+		olderThanB = uint64Bytes(encode.UnixMilliU(*olderThan))
+	} else {
+		olderThanB = uint64Bytes(timeNow())
+	}
+
+	activeOrders := make(map[order.OrderID]struct{})
+	if err := db.View(func(tx *bbolt.Tx) error {
+		// Some archived matches still have active orders. Put those
+		// order id's in a map to prevent deletion just in case they
+		// are needed again.
+		aob := tx.Bucket(activeOrdersBucket)
+		if err := aob.ForEach(func(k, _ []byte) error {
+			var oid order.OrderID
+			copy(oid[:], k)
+			activeOrders[oid] = struct{}{}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("unable to get active orders: %v", err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	nDeletedMatches := 0
+	for !finished {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		start := time.Now()
+		nDeletedMatches = 0
+		if err := db.Update(func(tx *bbolt.Tx) error {
+			archivedMB := tx.Bucket(archivedMatchesBucket)
+			if archivedMB == nil {
+				return fmt.Errorf("failed to open %s bucket", string(archivedMatchesBucket))
+			}
+			// Retrieve one more than we will delete in order to gauge if
+			// this is the last match to delete.
+			oneOverSize := batchSize + 1
+			filter := func(k []byte, mBkt *bbolt.Bucket) bool {
+				oidB := mBkt.Get(orderIDKey)
+				var oid order.OrderID
+				copy(oid[:], oidB)
+				if _, has := activeOrders[oid]; has {
+					return false
+				}
+				timeB := mBkt.Get(stampKey)
+				return bytes.Compare(timeB, olderThanB) <= 0
+			}
+			trios := newestBuckets([]*bbolt.Bucket{archivedMB}, oneOverSize, stampKey, filter)
+
+			// Ignore the last order if it exists. Otherwise there are no
+			// more orders to delete.
+			if len(trios) == oneOverSize {
+				trios = trios[:batchSize]
+			} else {
+				finished = true
+			}
+			for _, trio := range trios {
+				m, err := loadMatchBucket(trio.b, false)
+				if err != nil {
+					return fmt.Errorf("failed to load match bucket: %v", err)
+				}
+				if err := archivedMB.DeleteBucket(trio.k); err != nil {
+					return fmt.Errorf("failed to delete match bucket: %v", err)
+				}
+				if perMatchFn != nil {
+					isSell, err := orderSide(tx, m.OrderID)
+					if err != nil {
+						return fmt.Errorf("problem getting order side for order %v: %v", m.OrderID, err)
+					}
+					if err := perMatchFn(m, isSell); err != nil {
+						return fmt.Errorf("problem performing batch function: %v", err)
+					}
+				}
+				nDeletedMatches++
+			}
+			db.log.Infof("Deleted %d matches from the database in %v.", nDeletedMatches, time.Since(start))
+			return nil
+		}); err != nil {
+			if perMatchFn != nil && nDeletedMatches != 0 {
+				db.log.Warnf("%d matches reported as deleted have been rolled back due to error.", nDeletedMatches)
+			}
+			return fmt.Errorf("unable to delete matches: %v", err)
+		}
+	}
+	return nil
+}
+
 // timeNow is the current unix timestamp in milliseconds.
 func timeNow() uint64 {
 	return encode.UnixMilliU(time.Now())

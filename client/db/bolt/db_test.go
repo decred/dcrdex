@@ -21,6 +21,10 @@ import (
 	"go.etcd.io/bbolt"
 )
 
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
+
 var (
 	tDir     string
 	tCounter int
@@ -59,7 +63,7 @@ func TestMain(m *testing.M) {
 		var err error
 		tDir, err = os.MkdirTemp("", "dbtest")
 		if err != nil {
-			fmt.Println("error creating temporary directory:", err)
+			fmt.Printf("error creating temporary directory: %v\n", err)
 			return -1
 		}
 		defer os.RemoveAll(tDir)
@@ -1170,4 +1174,415 @@ func testCredentialsUpdate(t *testing.T, boltdb *BoltDB, tester func([]byte, str
 			t.Fatalf("%T error: %v", tester, err)
 		}
 	})
+}
+
+func TestDeleteInactiveMatches(t *testing.T) {
+	boltdb, shutdown := newTestDB(t)
+	defer shutdown()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Create an account to use.
+	acct1 := dbtest.RandomAccountInfo()
+	acct2 := dbtest.RandomAccountInfo()
+	err := boltdb.CreateAccount(acct1)
+	err1 := boltdb.CreateAccount(acct2)
+	if err != nil || err1 != nil {
+		t.Fatalf("CreateAccount error: %v : %v", err, err1)
+	}
+	base1, quote1 := randU32(), randU32()
+	base2, quote2 := randU32(), randU32()
+
+	numToDoO := 1000
+	numActiveO := 500
+	numActiveOrdWithMtch := 481
+
+	if testing.Short() {
+		numToDoO = 24
+		numActiveO = 11
+		numActiveOrdWithMtch = 6
+	}
+
+	activeOrdsWithMtch := make([]order.OrderID, numActiveOrdWithMtch)
+	var anInactiveOrder order.OrderID
+	orders := make(map[int]*db.MetaOrder, numToDoO)
+	nTimes(numToDoO, func(i int) {
+		// statuses 3, 4, and 5 considered inactive orders
+		status := order.OrderStatus(rand.Intn(3) + 3) // inactive
+		if i < numActiveO {
+			// Technically, this is putting even cancel and market orders in the
+			// booked state half the time, which should be impossible. The DB does not
+			// check for this, and will recognize the order as active.
+			// statuses 1 and 2 considered inactive orders.
+			status = order.OrderStatus(rand.Intn(2) + 1)
+		}
+		acct := acct1
+		base, quote := base1, quote1
+		if i%2 == 1 {
+			acct = acct2
+			base, quote = base2, quote2
+		}
+		ord := randOrderForMarket(base, quote)
+
+		orders[i] = &db.MetaOrder{
+			MetaData: &db.OrderMetaData{
+				Status:             status,
+				Host:               acct.Host,
+				Proof:              db.OrderProof{DEXSig: randBytes(73)},
+				SwapFeesPaid:       rand.Uint64(),
+				RedemptionFeesPaid: rand.Uint64(),
+				MaxFeeRate:         rand.Uint64(),
+			},
+			Order: ord,
+		}
+		// One order saved so that orderSide does not fail.
+		if i == numActiveO {
+			anInactiveOrder = ord.ID()
+		}
+		if i < numActiveOrdWithMtch {
+			activeOrdsWithMtch[i] = ord.ID()
+		}
+	})
+
+	tStart := time.Now()
+	nTimes(numToDoO, func(i int) {
+		err := boltdb.UpdateOrder(orders[i])
+		if err != nil {
+			t.Fatalf("error inserting order: %v", err)
+		}
+	})
+	t.Logf("~ %d milliseconds to insert %d MetaOrder", int(time.Since(tStart)/time.Millisecond)-numToDoO, numToDoO)
+
+	numToDo := 10000
+	numActive := 100
+	numNewer := 1111
+	if testing.Short() {
+		numToDo = 24
+		numActive = 8
+		numNewer = 3
+	}
+	stamp := rand.Uint64() - 1
+	metaMatches := make([]*db.MetaMatch, 0, numToDo)
+	matchIndex := make(map[order.MatchID]*db.MetaMatch, numToDo)
+	nTimes(numToDo, func(i int) {
+		s := stamp
+		// numNewer archived matches are deleted.
+		if i >= numActive && i < numActive+numNewer {
+			s += 1
+		}
+		m := &db.MetaMatch{
+			MetaData: &db.MatchMetaData{
+				Proof: *dbtest.RandomMatchProof(0.5),
+				DEX:   acct1.Host,
+				Base:  base1,
+				Quote: quote1,
+				Stamp: s,
+			},
+			UserMatch: ordertest.RandomUserMatch(),
+		}
+		if i < numActive {
+			m.Status = order.MatchStatus(rand.Intn(4))
+		} else {
+			// Some matches will not be deleted if they have an
+			// active order.
+			if i >= numNewer+numActive && i < numActive+numNewer+numActiveOrdWithMtch {
+				m.OrderID = activeOrdsWithMtch[i-numActive-numNewer]
+			} else {
+				m.OrderID = anInactiveOrder
+			}
+			m.Status = order.MatchComplete              // inactive
+			m.MetaData.Proof.Auth.RedeemSig = []byte{0} // redeemSig required for MatchComplete to be considered inactive
+		}
+		matchIndex[m.MatchID] = m
+		metaMatches = append(metaMatches, m)
+	})
+
+	tStart = time.Now()
+	nTimes(numToDo, func(i int) {
+		err := boltdb.UpdateMatch(metaMatches[i])
+		if err != nil {
+			t.Fatalf("update error: %v", err)
+		}
+	})
+	t.Logf("%d milliseconds to insert %d account MetaMatch", time.Since(tStart)/time.Millisecond, numToDo)
+
+	var (
+		olderThan  = encode.UnixTimeMilli(int64(stamp))
+		matchN     = 0
+		perMatchFn = func(mtch *db.MetaMatch, isSell bool) error {
+			matchN++
+			if matchN%100 == 0 {
+				fmt.Printf("Deleted %d'th match %v with isSell %v\n", matchN, mtch.MatchID, isSell)
+			}
+			return nil
+		}
+	)
+	err = boltdb.DeleteInactiveMatches(ctx, &olderThan, perMatchFn)
+	if err != nil {
+		t.Fatalf("unable to delete inactive matches: %v", err)
+	}
+
+	// Active matches should be untouched.
+	activeMatches, err := boltdb.ActiveMatches()
+	if err != nil {
+		t.Fatalf("error getting active matches: %v", err)
+	}
+	if len(activeMatches) != numActive {
+		t.Fatalf("expected %d active matches, got %d", numActive, len(activeMatches))
+	}
+
+	// Matches occurring after stamp or with active orders should be
+	// untouched.
+	numArchivedMatches := 0
+	if err = boltdb.View(func(tx *bbolt.Tx) error {
+		archivedMB := tx.Bucket(archivedMatchesBucket)
+		if archivedMB == nil {
+			return fmt.Errorf("failed to open %s bucket", string(archivedMatchesBucket))
+		}
+		numArchivedMatches = archivedMB.Stats().BucketN - 1
+		return nil
+	}); err != nil {
+		t.Fatalf("unable to count archived matches: %v", err)
+	}
+	numLeft := numNewer + numActiveOrdWithMtch
+	if numArchivedMatches != numLeft {
+		t.Fatalf("expected %d acrchived matches left after deletion but got %d", numLeft, numArchivedMatches)
+	}
+}
+
+func TestDeleteInactiveOrders(t *testing.T) {
+	boltdb, shutdown := newTestDB(t)
+	defer shutdown()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Create an account to use.
+	acct1 := dbtest.RandomAccountInfo()
+	acct2 := dbtest.RandomAccountInfo()
+	err := boltdb.CreateAccount(acct1)
+	err1 := boltdb.CreateAccount(acct2)
+	if err != nil || err1 != nil {
+		t.Fatalf("CreateAccount error: %v : %v", err, err1)
+	}
+	base1, quote1 := randU32(), randU32()
+	base2, quote2 := randU32(), randU32()
+
+	numToDo := 10008
+	numActive := 1000
+	numNewer := 1111
+	numActiveMtchWithOrd := 481
+	if testing.Short() {
+		numToDo = 48
+		numActive = 10
+		numNewer = 4
+		numActiveMtchWithOrd = 5
+	}
+	activeMtchsWithOrd := make([]order.OrderID, numActiveMtchWithOrd)
+	orders := make(map[int]*db.MetaOrder, numToDo)
+	orderIndex := make(map[order.OrderID]order.Order)
+	nTimes(numToDo, func(i int) {
+		// statuses 3, 4, and 5 considered inactive orders
+		status := order.OrderStatus(rand.Intn(3) + 3) // inactive
+		if i < numActive {
+			// Technically, this is putting even cancel and market orders in the
+			// booked state half the time, which should be impossible. The DB does not
+			// check for this, and will recognize the order as active.
+			// statuses 1 and 2 considered active orders.
+			status = order.OrderStatus(rand.Intn(2) + 1)
+		}
+		acct := acct1
+		base, quote := base1, quote1
+		if i%2 == 1 {
+			acct = acct2
+			base, quote = base2, quote2
+		}
+		ord := randOrderForMarket(base, quote)
+
+		// These orders will be inserted into active matches.
+		if i > numToDo/2 && i <= numToDo/2+numActiveMtchWithOrd {
+			activeMtchsWithOrd[i-numToDo/2-1] = ord.ID()
+		}
+
+		orders[i] = &db.MetaOrder{
+			MetaData: &db.OrderMetaData{
+				Status:             status,
+				Host:               acct.Host,
+				Proof:              db.OrderProof{DEXSig: randBytes(73)},
+				SwapFeesPaid:       rand.Uint64(),
+				RedemptionFeesPaid: rand.Uint64(),
+				MaxFeeRate:         rand.Uint64(),
+			},
+			Order: ord,
+		}
+		orderIndex[ord.ID()] = ord
+	})
+
+	var olderThan time.Time
+	tStart := time.Now()
+	nTimes(numToDo, func(i int) {
+		if numToDo-i == numNewer {
+			olderThan = time.Now()
+			time.Sleep(time.Millisecond * 100)
+		}
+		err := boltdb.UpdateOrder(orders[i])
+		if err != nil {
+			t.Fatalf("error inserting order: %v", err)
+		}
+	})
+	t.Logf("~ %d milliseconds to insert %d MetaOrder", int(time.Since(tStart)/time.Millisecond)-numToDo, numToDo)
+
+	numToDoM := 1000
+	numActiveM := 500 // must be more than numActiveMtchWithOrd
+	if testing.Short() {
+		numToDoM = 24
+		numActiveM = 8
+	}
+	metaMatches := make([]*db.MetaMatch, 0, numToDoM)
+	matchIndex := make(map[order.MatchID]*db.MetaMatch, numToDoM)
+	nTimes(numToDoM, func(i int) {
+		m := &db.MetaMatch{
+			MetaData: &db.MatchMetaData{
+				Proof: *dbtest.RandomMatchProof(0.5),
+				DEX:   acct1.Host,
+				Base:  base1,
+				Quote: quote1,
+				Stamp: rand.Uint64(),
+			},
+			UserMatch: ordertest.RandomUserMatch(),
+		}
+		// Insert orders in active matches to be ignored.
+		if i < numActiveMtchWithOrd {
+			m.OrderID = activeMtchsWithOrd[i]
+		}
+		if i < numActiveM {
+			m.Status = order.MatchStatus(rand.Intn(4))
+		} else {
+			m.Status = order.MatchComplete              // inactive
+			m.MetaData.Proof.Auth.RedeemSig = []byte{0} // redeemSig required for MatchComplete to be considered inactive
+		}
+		matchIndex[m.MatchID] = m
+		metaMatches = append(metaMatches, m)
+	})
+	tStart = time.Now()
+	nTimes(numToDoM, func(i int) {
+		err := boltdb.UpdateMatch(metaMatches[i])
+		if err != nil {
+			t.Fatalf("update error: %v", err)
+		}
+	})
+	t.Logf("%d milliseconds to insert %d account MetaMatch", time.Since(tStart)/time.Millisecond, numToDoM)
+
+	var (
+		orderN     int
+		perOrderFn = func(ord *db.MetaOrder) error {
+			orderN++
+			if orderN%100 == 0 {
+				fmt.Printf("Deleted %d'th order %v\n", orderN, ord.Order.ID())
+			}
+			return nil
+		}
+	)
+	err = boltdb.DeleteInactiveOrders(ctx, &olderThan, perOrderFn)
+	if err != nil {
+		t.Fatalf("unable to delete inactive matches: %v", err)
+	}
+
+	// Active orders should be untouched.
+	activeOrders, err := boltdb.ActiveOrders()
+	if err != nil {
+		t.Fatalf("error getting active orders: %v", err)
+	}
+	if len(activeOrders) != numActive {
+		t.Fatalf("expected %d active orcers, got %d", numActive, len(activeOrders))
+	}
+
+	// Matches occurring after stamp or part of an active match should be
+	// untouched.
+	numArchivedOrders := 0
+	if err = boltdb.View(func(tx *bbolt.Tx) error {
+		archivedOB := tx.Bucket(archivedOrdersBucket)
+		if archivedOB == nil {
+			return fmt.Errorf("failed to open %s bucket", string(archivedOrdersBucket))
+		}
+		numArchivedOrders = archivedOB.Stats().BucketN - 1
+		return nil
+	}); err != nil {
+		t.Fatalf("unable to count archived orders: %v", err)
+	}
+	numUntouched := numNewer + numActiveMtchWithOrd
+	if numArchivedOrders != numUntouched {
+		t.Fatalf("expected %d acrchived orders left after deletion but got %d", numUntouched, numArchivedOrders)
+	}
+}
+
+func TestOrderSide(t *testing.T) {
+	boltdb, shutdown := newTestDB(t)
+	defer shutdown()
+
+	// Create an account to use.
+	acct1 := dbtest.RandomAccountInfo()
+	acct2 := dbtest.RandomAccountInfo()
+	err := boltdb.CreateAccount(acct1)
+	err1 := boltdb.CreateAccount(acct2)
+	if err != nil || err1 != nil {
+		t.Fatalf("CreateAccount error: %v : %v", err, err1)
+	}
+	base1, quote1 := randU32(), randU32()
+	base2, quote2 := randU32(), randU32()
+
+	numToDoO := 2
+
+	orders := make(map[int]*db.MetaOrder, numToDoO)
+	nTimes(numToDoO, func(i int) {
+		status := order.OrderStatus(rand.Intn(5) + 1)
+		acct := acct1
+		base, quote := base1, quote1
+		if i%2 == 1 {
+			acct = acct2
+			base, quote = base2, quote2
+		}
+		ord, _ := ordertest.RandomLimitOrder()
+		ord.BaseAsset = base
+		ord.QuoteAsset = quote
+		ord.Trade().Sell = i == 0 // true then false
+
+		orders[i] = &db.MetaOrder{
+			MetaData: &db.OrderMetaData{
+				Status:             status,
+				Host:               acct.Host,
+				Proof:              db.OrderProof{DEXSig: randBytes(73)},
+				SwapFeesPaid:       rand.Uint64(),
+				RedemptionFeesPaid: rand.Uint64(),
+				MaxFeeRate:         rand.Uint64(),
+			},
+			Order: ord,
+		}
+	})
+
+	tStart := time.Now()
+	nTimes(numToDoO, func(i int) {
+		err := boltdb.UpdateOrder(orders[i])
+		if err != nil {
+			t.Fatalf("error inserting order: %v", err)
+		}
+	})
+	t.Logf("~ %d milliseconds to insert %d MetaOrder", int(time.Since(tStart)/time.Millisecond)-numToDoO, numToDoO)
+
+	if err := boltdb.View(func(tx *bbolt.Tx) error {
+		for _, ord := range orders {
+			side, err := orderSide(tx, ord.Order.ID())
+			if err != nil {
+				return err
+			}
+			want := ord.Order.Trade().Sell
+			if side != want {
+				t.Fatalf("wanted isSell %v but got %v", want, side)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
