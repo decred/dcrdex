@@ -35,7 +35,7 @@ func verifyResponse(payload *msgjson.ResponsePayload, res interface{}, wantErrCo
 		}
 	}
 	if err := json.Unmarshal(payload.Result, res); err != nil {
-		return errors.New("unable to unmarshal res")
+		return fmt.Errorf("unable to unmarshal res: %v", err)
 	}
 	return nil
 }
@@ -1134,6 +1134,48 @@ func TestHandleDiscoverAcct(t *testing.T) {
 		payload := handleDiscoverAcct(r, test.params)
 		res := new(bool)
 		if err := verifyResponse(payload, res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestDeleteRecords(t *testing.T) {
+	params := &RawParams{
+		Args: []string{
+			"123",
+		},
+	}
+	tests := []struct {
+		name                     string
+		params                   *RawParams
+		deleteArchivedRecordsErr error
+		wantErrCode              int
+	}{{
+		name:        "ok",
+		params:      params,
+		wantErrCode: -1,
+	}, {
+		name:                     "delete archived records error",
+		params:                   params,
+		deleteArchivedRecordsErr: errors.New(""),
+		wantErrCode:              msgjson.RPCDeleteArchivedRecordsError,
+	}, {
+		name: "bad params",
+		params: &RawParams{
+			Args: []string{
+				"abc",
+			},
+		},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{
+			deleteArchivedRecordsErr: test.deleteArchivedRecordsErr,
+		}
+		r := &RPCServer{core: tc}
+		payload := handleDeleteArchivedRecords(r, test.params)
+		res := ""
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatal(err)
 		}
 	}

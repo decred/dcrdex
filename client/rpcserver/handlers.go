@@ -19,26 +19,27 @@ import (
 
 // routes
 const (
-	cancelRoute       = "cancel"
-	closeWalletRoute  = "closewallet"
-	discoverAcctRoute = "discoveracct"
-	exchangesRoute    = "exchanges"
-	helpRoute         = "help"
-	initRoute         = "init"
-	loginRoute        = "login"
-	logoutRoute       = "logout"
-	myOrdersRoute     = "myorders"
-	newWalletRoute    = "newwallet"
-	openWalletRoute   = "openwallet"
-	orderBookRoute    = "orderbook"
-	getDEXConfRoute   = "getdexconfig" // consider a getfees route
-	registerRoute     = "register"
-	tradeRoute        = "trade"
-	versionRoute      = "version"
-	walletsRoute      = "wallets"
-	rescanWalletRoute = "rescanwallet"
-	withdrawRoute     = "withdraw"
-	appSeedRoute      = "appseed"
+	cancelRoute                = "cancel"
+	closeWalletRoute           = "closewallet"
+	discoverAcctRoute          = "discoveracct"
+	exchangesRoute             = "exchanges"
+	helpRoute                  = "help"
+	initRoute                  = "init"
+	loginRoute                 = "login"
+	logoutRoute                = "logout"
+	myOrdersRoute              = "myorders"
+	newWalletRoute             = "newwallet"
+	openWalletRoute            = "openwallet"
+	orderBookRoute             = "orderbook"
+	getDEXConfRoute            = "getdexconfig" // consider a getfees route
+	registerRoute              = "register"
+	tradeRoute                 = "trade"
+	versionRoute               = "version"
+	walletsRoute               = "wallets"
+	rescanWalletRoute          = "rescanwallet"
+	withdrawRoute              = "withdraw"
+	appSeedRoute               = "appseed"
+	deleteArchivedRecordsRoute = "deletearchivedrecords"
 )
 
 const (
@@ -70,26 +71,27 @@ func usage(route string, err error) *msgjson.ResponsePayload {
 
 // routes maps routes to a handler function.
 var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponsePayload{
-	cancelRoute:       handleCancel,
-	closeWalletRoute:  handleCloseWallet,
-	discoverAcctRoute: handleDiscoverAcct,
-	exchangesRoute:    handleExchanges,
-	helpRoute:         handleHelp,
-	initRoute:         handleInit,
-	loginRoute:        handleLogin,
-	logoutRoute:       handleLogout,
-	myOrdersRoute:     handleMyOrders,
-	newWalletRoute:    handleNewWallet,
-	openWalletRoute:   handleOpenWallet,
-	orderBookRoute:    handleOrderBook,
-	getDEXConfRoute:   handleGetDEXConfig,
-	registerRoute:     handleRegister,
-	tradeRoute:        handleTrade,
-	versionRoute:      handleVersion,
-	walletsRoute:      handleWallets,
-	rescanWalletRoute: handleRescanWallet,
-	withdrawRoute:     handleWithdraw,
-	appSeedRoute:      handleAppSeed,
+	cancelRoute:                handleCancel,
+	closeWalletRoute:           handleCloseWallet,
+	discoverAcctRoute:          handleDiscoverAcct,
+	exchangesRoute:             handleExchanges,
+	helpRoute:                  handleHelp,
+	initRoute:                  handleInit,
+	loginRoute:                 handleLogin,
+	logoutRoute:                handleLogout,
+	myOrdersRoute:              handleMyOrders,
+	newWalletRoute:             handleNewWallet,
+	openWalletRoute:            handleOpenWallet,
+	orderBookRoute:             handleOrderBook,
+	getDEXConfRoute:            handleGetDEXConfig,
+	registerRoute:              handleRegister,
+	tradeRoute:                 handleTrade,
+	versionRoute:               handleVersion,
+	walletsRoute:               handleWallets,
+	rescanWalletRoute:          handleRescanWallet,
+	withdrawRoute:              handleWithdraw,
+	appSeedRoute:               handleAppSeed,
+	deleteArchivedRecordsRoute: handleDeleteArchivedRecords,
 }
 
 // handleHelp handles requests for help. Returns general help for all commands
@@ -624,6 +626,21 @@ func handleAppSeed(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	return createResponse(appSeedRoute, seedHex, nil)
 }
 
+// handleDeleteArchivedRecords handles requests for deleting archived records.
+// *msgjson.ResponsePayload.Error is empty if successful.
+func handleDeleteArchivedRecords(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	form, err := parseDeleteArchivedRecordsArgs(params)
+	if err != nil {
+		return usage(deleteArchivedRecordsRoute, err)
+	}
+	if err := s.core.DeleteArchivedRecords(form.olderThan, form.matchesFileStr, form.ordersFileStr); err != nil {
+		errMsg := fmt.Sprintf("unable to delete records: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCDeleteArchivedRecordsError, errMsg)
+		return createResponse(deleteArchivedRecordsRoute, nil, resErr)
+	}
+	return createResponse(deleteArchivedRecordsRoute, nil, nil)
+}
+
 // format concatenates thing and tail. If thing is empty, returns an empty
 // string.
 func format(thing, tail string) string {
@@ -745,6 +762,21 @@ var helpMsgs = map[string]helpMsg{
     seed (string): Optional. hex-encoded 512-bit restoration seed.`,
 		returns: `Returns:
     string: The message "` + initializedStr + `"`,
+	},
+	deleteArchivedRecordsRoute: {
+		argsShort: `("unix time milli") ("matches csv path") ("orders csv path")`,
+		cmdSummary: `Delete archived matches from the database. Optionally set a time to
+    delete records before and file paths to save deleted records as comma separated
+    values. Note that file locations are from the perspective of dexc and not the caller.`,
+		argsLong: `Args:
+    unix time milli (int): Optional. If set deletes records before the date in unix time
+      in milliseconds (not seconds). Unset or 0 will default to the current time.
+    matches csv path (string): Optional. A path to save a csv with deleted matches.
+      Will not save by default.
+    orders csv path (string): Optional. A path to save a csv with deleted orders.
+      Will not save by default.`,
+		returns: `Returns:
+    Nothing.`,
 	},
 	getDEXConfRoute: {
 		argsShort:  `"dex" ("cert")`,
