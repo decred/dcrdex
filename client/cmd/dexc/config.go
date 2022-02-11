@@ -7,10 +7,8 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/user"
 	"path/filepath"
 	"runtime"
-	"strings"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/cmd/dexc/version"
@@ -141,12 +139,18 @@ func configure() (*Config, error) {
 		os.Exit(0)
 	}
 
-	// If the app directory has been changed, but the config file path hasn't,
-	// reform the config file path with the new directory.
-	if preCfg.AppData != defaultApplicationDirectory && preCfg.Config == defaultConfigPath {
-		preCfg.Config = filepath.Join(preCfg.AppData, configFilename)
+	// If the app directory has been changed, replace shortcut chars such
+	// as "~" with the full path.
+	if preCfg.AppData != defaultApplicationDirectory {
+		preCfg.AppData = dex.CleanAndExpandPath(preCfg.AppData)
+		// If the app directory has been changed, but the config file path hasn't,
+		// reform the config file path with the new directory.
+		if preCfg.Config == defaultConfigPath {
+			preCfg.Config = filepath.Join(preCfg.AppData, configFilename)
+		}
 	}
-	cfgPath := cleanAndExpandPath(preCfg.Config)
+
+	cfgPath := dex.CleanAndExpandPath(preCfg.Config)
 
 	// Load additional config from file.
 	parser := flags.NewParser(&iniCfg, flags.Default)
@@ -212,53 +216,4 @@ func configure() (*Config, error) {
 	}
 
 	return cfg, nil
-}
-
-// cleanAndExpandPath expands environment variables and leading ~ in the passed
-// path, cleans the result, and returns it.
-func cleanAndExpandPath(path string) string {
-	// NOTE: The os.ExpandEnv doesn't work with Windows cmd.exe-style
-	// %VARIABLE%, but the variables can still be expanded via POSIX-style
-	// $VARIABLE.
-	path = os.ExpandEnv(path)
-
-	if !strings.HasPrefix(path, "~") {
-		return filepath.Clean(path)
-	}
-
-	// Expand initial ~ to the current user's home directory, or ~otheruser to
-	// otheruser's home directory.  On Windows, both forward and backward
-	// slashes can be used.
-	path = path[1:]
-
-	var pathSeparators string
-	if runtime.GOOS == "windows" {
-		pathSeparators = string(os.PathSeparator) + "/"
-	} else {
-		pathSeparators = string(os.PathSeparator)
-	}
-
-	userName := ""
-	if i := strings.IndexAny(path, pathSeparators); i != -1 {
-		userName = path[:i]
-		path = path[i:]
-	}
-
-	homeDir := ""
-	var u *user.User
-	var err error
-	if userName == "" {
-		u, err = user.Current()
-	} else {
-		u, err = user.Lookup(userName)
-	}
-	if err == nil {
-		homeDir = u.HomeDir
-	}
-	// Fallback to CWD if user lookup fails or user has no home directory.
-	if homeDir == "" {
-		homeDir = "."
-	}
-
-	return filepath.Join(homeDir, path)
 }

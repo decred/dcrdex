@@ -8,6 +8,8 @@ import (
 	"os"
 	"reflect"
 	"testing"
+
+	"decred.org/dcrdex/dex"
 )
 
 func TestConfigure(t *testing.T) {
@@ -92,7 +94,7 @@ func TestConfigure(t *testing.T) {
 
 func TestReadTextFile(t *testing.T) {
 	saveTextToFile := func(text, filePath string) {
-		path := cleanAndExpandPath(filePath)
+		path := dex.CleanAndExpandPath(filePath)
 		file, err := os.Create(path)
 		if err != nil {
 			t.Fatalf("create test file error: %v", err)

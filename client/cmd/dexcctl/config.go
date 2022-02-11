@@ -7,14 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/user"
 	"path/filepath"
 	"runtime"
-	"strings"
 
 	flags "github.com/jessevdk/go-flags"
 
 	"decred.org/dcrdex/client/rpcserver"
+	"decred.org/dcrdex/dex"
 	"github.com/decred/dcrd/dcrutil/v4"
 )
 
@@ -114,13 +113,13 @@ func configure() (*config, []string, bool, error) {
 
 	if cfg.RPCCert == "" {
 		// Check in ~/.dexcctl first.
-		cfg.RPCCert = cleanAndExpandPath(filepath.Join(appDir, defaultRPCCertFile))
+		cfg.RPCCert = dex.CleanAndExpandPath(filepath.Join(appDir, defaultRPCCertFile))
 		if !fileExists(cfg.RPCCert) { // Then in ~/.dexc
-			cfg.RPCCert = cleanAndExpandPath(filepath.Join(dexcAppDir, defaultRPCCertFile))
+			cfg.RPCCert = dex.CleanAndExpandPath(filepath.Join(dexcAppDir, defaultRPCCertFile))
 		}
 	} else {
 		// Handle environment variable and tilde expansion in the given path.
-		cfg.RPCCert = cleanAndExpandPath(cfg.RPCCert)
+		cfg.RPCCert = dex.CleanAndExpandPath(cfg.RPCCert)
 	}
 
 	if cfg.Simnet && cfg.Testnet {
@@ -141,58 +140,4 @@ func configure() (*config, []string, bool, error) {
 	}
 
 	return cfg, remainingArgs, false, nil
-}
-
-// cleanAndExpandPath expands environment variables and leading ~ in the
-// passed path, cleans the result, and returns it.
-func cleanAndExpandPath(path string) string {
-	// Nothing to do when no path is given.
-	if path == "" {
-		return path
-	}
-
-	// NOTE: The os.ExpandEnv doesn't work with Windows cmd.exe-style
-	// %VARIABLE%, but the variables can still be expanded via POSIX-style
-	// $VARIABLE.
-	path = os.ExpandEnv(path)
-
-	if !strings.HasPrefix(path, "~") {
-		return filepath.Clean(path)
-	}
-
-	// Expand initial ~ to the current user's home directory, or ~otheruser
-	// to otheruser's home directory.  On Windows, both forward and backward
-	// slashes can be used.
-	path = path[1:]
-
-	var pathSeparators string
-	if runtime.GOOS == "windows" {
-		pathSeparators = string(os.PathSeparator) + "/"
-	} else {
-		pathSeparators = string(os.PathSeparator)
-	}
-
-	userName := ""
-	if i := strings.IndexAny(path, pathSeparators); i != -1 {
-		userName = path[:i]
-		path = path[i:]
-	}
-
-	homeDir := ""
-	var u *user.User
-	var err error
-	if userName == "" {
-		u, err = user.Current()
-	} else {
-		u, err = user.Lookup(userName)
-	}
-	if err == nil {
-		homeDir = u.HomeDir
-	}
-	// Fallback to CWD if user lookup fails or user has no home directory.
-	if homeDir == "" {
-		homeDir = "."
-	}
-
-	return filepath.Join(homeDir, path)
 }

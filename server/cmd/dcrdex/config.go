@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/user"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -153,59 +152,6 @@ type flagsData struct {
 	NoResumeSwaps bool `long:"noresumeswaps" description:"Do not attempt to resume swaps that are active in the DB."`
 
 	DisableDataAPI bool `long:"nodata" description:"Disable the HTTP data API."`
-}
-
-// cleanAndExpandPath expands environment variables and leading ~ in the passed
-// path, cleans the result, and returns it.
-func cleanAndExpandPath(path string) string {
-	// Do not try to clean the empty string
-	if path == "" {
-		return ""
-	}
-
-	// NOTE: The os.ExpandEnv doesn't work with Windows cmd.exe-style
-	// %VARIABLE%, but the variables can still be expanded via POSIX-style
-	// $VARIABLE.
-	path = os.ExpandEnv(path)
-	if !strings.HasPrefix(path, "~") {
-		return filepath.Clean(path)
-	}
-
-	// Expand initial ~ to the current user's home directory, or ~otheruser to
-	// otheruser's home directory.  On Windows, both forward and backward
-	// slashes can be used.
-	path = path[1:]
-
-	var pathSeparators string
-	if runtime.GOOS == "windows" {
-		pathSeparators = string(os.PathSeparator) + "/"
-	} else {
-		pathSeparators = string(os.PathSeparator)
-	}
-
-	userName := ""
-	if i := strings.IndexAny(path, pathSeparators); i != -1 {
-		userName = path[:i]
-		path = path[i:]
-	}
-
-	homeDir := ""
-	var u *user.User
-	var err error
-	if userName == "" {
-		u, err = user.Current()
-	} else {
-		u, err = user.Lookup(userName)
-	}
-	if err == nil {
-		homeDir = u.HomeDir
-	}
-	// Fallback to CWD if user lookup fails or user has no home directory.
-	if homeDir == "" {
-		homeDir = "."
-	}
-
-	return filepath.Join(homeDir, path)
 }
 
 // supportedSubsystems returns a sorted slice of the supported subsystems for
@@ -472,7 +418,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 	//
 	// Make list of old versions of testnet directories here since the network
 	// specific DataDir will be used after this.
-	cfg.DataDir = cleanAndExpandPath(cfg.DataDir)
+	cfg.DataDir = dex.CleanAndExpandPath(cfg.DataDir)
 	cfg.DataDir = filepath.Join(cfg.DataDir, network.String())
 	// Create the data folder if it does not exist.
 	err = os.MkdirAll(cfg.DataDir, 0700)
@@ -483,7 +429,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 	logRotator = nil
 	// Append the network type to the log directory so it is "namespaced"
 	// per network in the same fashion as the data directory.
-	cfg.LogDir = cleanAndExpandPath(cfg.LogDir)
+	cfg.LogDir = dex.CleanAndExpandPath(cfg.LogDir)
 	cfg.LogDir = filepath.Join(cfg.LogDir, network.String())
 
 	// Ensure that all specified files are absolute paths, prepending the

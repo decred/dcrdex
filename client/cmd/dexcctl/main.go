@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"decred.org/dcrdex/client/rpcserver"
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/admin"
@@ -102,7 +103,7 @@ func readTextFile(cmd string, args []string) error {
 	if !readFile || len(args) < fileArgIndx+1 || args[fileArgIndx] == "" {
 		return nil
 	}
-	path := cleanAndExpandPath(args[fileArgIndx])
+	path := dex.CleanAndExpandPath(args[fileArgIndx])
 	if !fileExists(path) {
 		return fmt.Errorf("no file found at %s", path)
 	}
