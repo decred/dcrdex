@@ -386,7 +386,7 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 
 type orderTmplData struct {
 	CommonArguments
-	Order *orderReader
+	Order *core.OrderReader
 	// Don't use dex.Network because the template parser will use the Stringer.
 	Net uint8
 }
@@ -422,7 +422,7 @@ func defaultUnitInfo(symbol string) dex.UnitInfo {
 	}
 }
 
-func (s *WebServer) orderReader(ord *core.Order) *orderReader {
+func (s *WebServer) orderReader(ord *core.Order) *core.OrderReader {
 	unitInfo := func(assetID uint32, symbol string) dex.UnitInfo {
 		assetInfo, err := asset.Info(assetID)
 		if err != nil {
@@ -435,10 +435,10 @@ func (s *WebServer) orderReader(ord *core.Order) *orderReader {
 		return assetInfo.UnitInfo
 	}
 
-	return &orderReader{
+	return &core.OrderReader{
 		Order:         ord,
-		baseUnitInfo:  unitInfo(ord.BaseID, ord.BaseSymbol),
-		quoteUnitInfo: unitInfo(ord.QuoteID, ord.QuoteSymbol),
+		BaseUnitInfo:  unitInfo(ord.BaseID, ord.BaseSymbol),
+		QuoteUnitInfo: unitInfo(ord.QuoteID, ord.QuoteSymbol),
 	}
 
 }
