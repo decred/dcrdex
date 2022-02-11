@@ -333,40 +333,42 @@ func (conn *TWebsocket) Connect(context.Context) (*sync.WaitGroup, error) {
 }
 
 type TDB struct {
-	updateWalletErr       error
-	acct                  *db.AccountInfo
-	acctErr               error
-	createAccountErr      error
-	accountPaidErr        error
-	updateOrderErr        error
-	activeDEXOrders       []*db.MetaOrder
-	matchesForOID         []*db.MetaMatch
-	matchesForOIDErr      error
-	updateMatchChan       chan order.MatchStatus
-	activeMatchOIDs       []order.OrderID
-	activeMatchOIDSErr    error
-	lastStatusID          order.OrderID
-	lastStatus            order.OrderStatus
-	wallet                *db.Wallet
-	walletErr             error
-	setWalletPwErr        error
-	orderOrders           map[order.OrderID]*db.MetaOrder
-	orderErr              error
-	linkedFromID          order.OrderID
-	linkedToID            order.OrderID
-	existValues           map[string]bool
-	accountProof          *db.AccountProof
-	accountProofErr       error
-	verifyAccountPaid     bool
-	verifyCreateAccount   bool
-	verifyUpdateAccount   bool
-	accountProofPersisted *db.AccountProof
-	disabledAcct          *db.AccountInfo
-	disableAccountErr     error
-	creds                 *db.PrimaryCredentials
-	setCredsErr           error
-	legacyKeyErr          error
-	recryptErr            error
+	updateWalletErr          error
+	acct                     *db.AccountInfo
+	acctErr                  error
+	createAccountErr         error
+	accountPaidErr           error
+	updateOrderErr           error
+	activeDEXOrders          []*db.MetaOrder
+	matchesForOID            []*db.MetaMatch
+	matchesForOIDErr         error
+	updateMatchChan          chan order.MatchStatus
+	activeMatchOIDs          []order.OrderID
+	activeMatchOIDSErr       error
+	lastStatusID             order.OrderID
+	lastStatus               order.OrderStatus
+	wallet                   *db.Wallet
+	walletErr                error
+	setWalletPwErr           error
+	orderOrders              map[order.OrderID]*db.MetaOrder
+	orderErr                 error
+	linkedFromID             order.OrderID
+	linkedToID               order.OrderID
+	existValues              map[string]bool
+	accountProof             *db.AccountProof
+	accountProofErr          error
+	verifyAccountPaid        bool
+	verifyCreateAccount      bool
+	verifyUpdateAccount      bool
+	accountProofPersisted    *db.AccountProof
+	disabledAcct             *db.AccountInfo
+	disableAccountErr        error
+	creds                    *db.PrimaryCredentials
+	setCredsErr              error
+	legacyKeyErr             error
+	recryptErr               error
+	deleteInactiveOrdersErr  error
+	deleteInactiveMatchesErr error
 }
 
 func (tdb *TDB) Run(context.Context) {}
@@ -507,6 +509,14 @@ func (tdb *TDB) SetPrimaryCredentials(creds *db.PrimaryCredentials) error {
 	}
 	tdb.creds = creds
 	return nil
+}
+
+func (tdb *TDB) DeleteInactiveOrders(ctx context.Context, olderThan *time.Time, perBatchFn func(ords *db.MetaOrder) error) error {
+	return tdb.deleteInactiveOrdersErr
+}
+
+func (tdb *TDB) DeleteInactiveMatches(ctx context.Context, olderThan *time.Time, perBatchFn func(mtchs *db.MetaMatch, isSell bool) error) error {
+	return tdb.deleteInactiveMatchesErr
 }
 
 func (tdb *TDB) PrimaryCredentials() (*db.PrimaryCredentials, error) {
