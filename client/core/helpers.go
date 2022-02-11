@@ -134,6 +134,9 @@ func (ord *OrderReader) SettledTo() string {
 
 // SettledPercent is the percent of the order which has completed settlement.
 func (ord *OrderReader) SettledPercent() string {
+	if ord.Type == order.CancelOrderType {
+		return ""
+	}
 	return ord.percent(settledFilter)
 }
 
@@ -156,11 +159,18 @@ func (ord *OrderReader) FilledTo() string {
 // FilledPercent is the percent of the order that has filled, without percent
 // sign.
 func (ord *OrderReader) FilledPercent() string {
+	if ord.Type == order.CancelOrderType {
+		return ""
+	}
 	return ord.percent(filledFilter)
 }
 
-// SideString is "sell" for sell orders and "buy" for buy orders.
+// SideString is "sell" for sell orders, "buy" for buy orders, and "" for
+// cancels.
 func (ord *OrderReader) SideString() string {
+	if ord.Type == order.CancelOrderType {
+		return ""
+	}
 	if ord.Sell {
 		return "sell"
 	}
@@ -243,7 +253,7 @@ func (ord *OrderReader) StatusString() string {
 		if isLive {
 			return "settling"
 		}
-		if ord.Filled == 0 {
+		if ord.Filled == 0 && ord.Type != order.CancelOrderType {
 			return "no match"
 		}
 		return "executed"
