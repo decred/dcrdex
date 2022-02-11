@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/csv"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -6669,4 +6671,268 @@ func (c *Core) WalletLogFilePath(assetID uint32) (string, error) {
 	}
 
 	return wallet.LogFilePath()
+}
+
+func createFile(fileName string) (*os.File, error) {
+	if fileName == "" {
+		return nil, errors.New("no file path specified for creating")
+	}
+	fileName = dex.CleanAndExpandPath(fileName)
+	// Errors if file exists.
+	f, err := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	if err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+func (c *Core) deleteOrderFn(ordersFileStr string) (perOrderFn func(*db.MetaOrder) error, cleanUpFn func() error, err error) {
+	ordersFile, err := createFile(ordersFileStr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("problem opening orders file: %v", err)
+	}
+	csvWriter := csv.NewWriter(ordersFile)
+	csvWriter.UseCRLF = runtime.GOOS == "windows"
+	err = csvWriter.Write([]string{
+		"Host",
+		"Order ID",
+		"Base",
+		"Quote",
+		"Base Quantity",
+		"Order Rate",
+		"Actual Rate",
+		"Base Fees",
+		"Quote Fees",
+		"Type",
+		"Side",
+		"Time in Force",
+		"Status",
+		"TargetOrderID",
+		"Filled (%)",
+		"Settled (%)",
+		"Time",
+	})
+	if err != nil {
+		ordersFile.Close()
+		return nil, nil, fmt.Errorf("error writing CSV: %v", err)
+	}
+	csvWriter.Flush()
+	err = csvWriter.Error()
+	if err != nil {
+		ordersFile.Close()
+		return nil, nil, fmt.Errorf("error writing CSV: %v", err)
+	}
+	return func(ord *db.MetaOrder) error {
+		cord := coreOrderFromTrade(ord.Order, ord.MetaData)
+
+		baseUnitInfo, err := asset.UnitInfo(cord.BaseID)
+		if err != nil {
+			return fmt.Errorf("unable to get base unit info for %v: %v", cord.BaseSymbol, err)
+		}
+		quoteUnitInfo, err := asset.UnitInfo(cord.QuoteID)
+		if err != nil {
+			return fmt.Errorf("unable to get quote unit info for %v: %v", cord.QuoteSymbol, err)
+		}
+		ordReader := &OrderReader{
+			Order:         cord,
+			BaseUnitInfo:  baseUnitInfo,
+			QuoteUnitInfo: quoteUnitInfo,
+		}
+
+		timestamp := encode.UnixTimeMilli(int64(cord.Stamp)).Local().Format(time.RFC3339Nano)
+		err = csvWriter.Write([]string{
+			cord.Host,                     // Host
+			ord.Order.ID().String(),       // Order ID
+			cord.BaseSymbol,               // Base
+			cord.QuoteSymbol,              // Quote
+			ordReader.BaseQtyString(),     // Base Quantity
+			ordReader.SimpleRateString(),  // Order Rate
+			ordReader.AverageRateString(), // Actual Rate
+			ordReader.BaseAssetFees(),     // Base Fees
+			ordReader.QuoteAssetFees(),    // Quote Fees
+			ordReader.Type.String(),       // Type
+			ordReader.SideString(),        // Side
+			cord.TimeInForce.String(),     // Time in Force
+			ordReader.StatusString(),      // Status
+			cord.TargetOrderID.String(),   // Target Order ID
+			ordReader.FilledPercent(),     // Filled
+			ordReader.SettledPercent(),    // Settled
+			timestamp,                     // Time
+		})
+		if err != nil {
+			return fmt.Errorf("error writing orders CSV: %v", err)
+		}
+		csvWriter.Flush()
+		err = csvWriter.Error()
+		if err != nil {
+			return fmt.Errorf("error writing orders CSV: %v", err)
+		}
+		return nil
+	}, ordersFile.Close, nil
+}
+
+func deleteMatchFn(matchesFileStr string) (perMatchFn func(*db.MetaMatch, bool) error, cleanUpFn func() error, err error) {
+	matchesFile, err := createFile(matchesFileStr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("problem opening orders file: %v", err)
+	}
+	csvWriter := csv.NewWriter(matchesFile)
+	csvWriter.UseCRLF = runtime.GOOS == "windows"
+
+	err = csvWriter.Write([]string{
+		"Host",
+		"Base",
+		"Quote",
+		"Match ID",
+		"Order ID",
+		"Quantity",
+		"Rate",
+		"Swap Fee Rate",
+		"Swap Address",
+		"Status",
+		"Side",
+		"Secret Hash",
+		"Secret",
+		"Maker Swap Coin ID",
+		"Maker Redeem Coin ID",
+		"Taker Swap Coin ID",
+		"Taker Redeem Coin ID",
+		"Refund Coin ID",
+		"Time",
+	})
+	if err != nil {
+		matchesFile.Close()
+		return nil, nil, fmt.Errorf("error writing matches CSV: %v", err)
+	}
+	csvWriter.Flush()
+	err = csvWriter.Error()
+	if err != nil {
+		matchesFile.Close()
+		return nil, nil, fmt.Errorf("error writing matches CSV: %v", err)
+	}
+	return func(mtch *db.MetaMatch, isSell bool) error {
+		numToStr := func(n interface{}) string {
+			return fmt.Sprintf("%d", n)
+		}
+		base, quote := mtch.MetaData.Base, mtch.MetaData.Quote
+
+		makerAsset, takerAsset := base, quote
+		// If we are either not maker or not buying, invert it. Double
+		// inverse would be no change.
+		if (mtch.Side == order.Taker) != isSell {
+			makerAsset, takerAsset = quote, base
+		}
+
+		var (
+			makerSwapID, makerRedeemID, takerSwapID, redeemSwapID, refundCoinID string
+			err                                                                 error
+		)
+
+		decode := func(assetID uint32, coin []byte) (string, error) {
+			if coin == nil {
+				return "", nil
+			}
+			return asset.DecodeCoinID(assetID, coin)
+		}
+
+		makerSwapID, err = decode(takerAsset, mtch.MetaData.Proof.MakerSwap)
+		if err != nil {
+			return fmt.Errorf("unable to format maker's swap: %v", err)
+		}
+		makerRedeemID, err = decode(makerAsset, mtch.MetaData.Proof.MakerRedeem)
+		if err != nil {
+			return fmt.Errorf("unable to format maker's redeem: %v", err)
+		}
+		takerSwapID, err = decode(makerAsset, mtch.MetaData.Proof.TakerSwap)
+		if err != nil {
+			return fmt.Errorf("unable to format taker's swap: %v", err)
+		}
+		redeemSwapID, err = decode(takerAsset, mtch.MetaData.Proof.TakerRedeem)
+		if err != nil {
+			return fmt.Errorf("unable to format taker's redeem: %v", err)
+		}
+		refundCoinID, err = decode(makerAsset, mtch.MetaData.Proof.RefundCoin)
+		if err != nil {
+			return fmt.Errorf("unable to format maker's refund: %v", err)
+		}
+
+		timestamp := encode.UnixTimeMilli(int64(mtch.MetaData.Stamp)).Local().Format(time.RFC3339Nano)
+		err = csvWriter.Write([]string{
+			mtch.MetaData.DEX,                                 // Host
+			dex.BipIDSymbol(base),                             // Base
+			dex.BipIDSymbol(quote),                            // Quote
+			mtch.MatchID.String(),                             // Match ID
+			mtch.OrderID.String(),                             // Order ID
+			numToStr(mtch.Quantity),                           // Quantity
+			numToStr(mtch.Rate),                               // Rate
+			numToStr(mtch.FeeRateSwap),                        // Swap Fee Rate
+			mtch.Address,                                      // Swap Address
+			mtch.Status.String(),                              // Status
+			mtch.Side.String(),                                // Side
+			fmt.Sprintf("%x", mtch.MetaData.Proof.SecretHash), // Secret Hash
+			fmt.Sprintf("%x", mtch.MetaData.Proof.Secret),     // Secret
+			makerSwapID,                                       // Maker Swap Coin ID
+			makerRedeemID,                                     // Maker Redeem Coin ID
+			takerSwapID,                                       // Taker Swap Coin ID
+			redeemSwapID,                                      // Taker Redeem Coin ID
+			refundCoinID,                                      // Refund Coin ID
+			timestamp,                                         // Time
+		})
+		if err != nil {
+			return fmt.Errorf("error writing matches CSV: %v", err)
+		}
+		csvWriter.Flush()
+		err = csvWriter.Error()
+		if err != nil {
+			return fmt.Errorf("error writing matches CSV: %v", err)
+		}
+		return nil
+	}, matchesFile.Close, nil
+}
+
+// DeleteArchivedRecords deletes archived matches from the database. Optionally
+// set a time to delete records after and file paths to save deleted records as
+// comma separated values. If a nil *time.Time is provided, current time is used.
+func (c *Core) DeleteArchivedRecords(olderThan *time.Time, matchesFile, ordersFile string) error {
+	var (
+		err       error
+		perMtchFn func(*db.MetaMatch, bool) error
+	)
+	// If provided a file to write the orders csv to, write the header and
+	// defer closing the file.
+	if matchesFile != "" {
+		var cleanup func() error
+		perMtchFn, cleanup, err = deleteMatchFn(matchesFile)
+		if err != nil {
+			return fmt.Errorf("unable to set up orders csv: %v", err)
+		}
+		defer cleanup()
+	}
+
+	// Delete matches while saving to csv if available until the database
+	// says that's all or context is canceled.
+	err = c.db.DeleteInactiveMatches(c.ctx, olderThan, perMtchFn)
+	if err != nil {
+		return fmt.Errorf("unable to delete matches: %v", err)
+	}
+
+	var perOrdFn func(*db.MetaOrder) error
+	// If provided a file to write the orders csv to, write the header and
+	// defer closing the file.
+	if ordersFile != "" {
+		var cleanup func() error
+		perOrdFn, cleanup, err = c.deleteOrderFn(ordersFile)
+		if err != nil {
+			return fmt.Errorf("unable to set up orders csv: %v", err)
+		}
+		defer cleanup()
+	}
+
+	// Delete orders while saving to csv if available until the database
+	// says that's all or context is canceled.
+	err = c.db.DeleteInactiveOrders(c.ctx, olderThan, perOrdFn)
+	if err != nil {
+		return fmt.Errorf("unable to delete orders: %v", err)
+	}
+	return nil
 }

@@ -281,29 +281,30 @@ func matchFromMetaMatchWithConfs(ord order.Order, metaMatch *db.MetaMatch, swapC
 // Order is core's general type for an order. An order may be a market, limit,
 // or cancel order. Some fields are only relevant to particular order types.
 type Order struct {
-	Host         string            `json:"host"`
-	BaseID       uint32            `json:"baseID"`
-	BaseSymbol   string            `json:"baseSymbol"`
-	QuoteID      uint32            `json:"quoteID"`
-	QuoteSymbol  string            `json:"quoteSymbol"`
-	MarketID     string            `json:"market"`
-	Type         order.OrderType   `json:"type"`
-	ID           dex.Bytes         `json:"id"`
-	Stamp        uint64            `json:"stamp"`
-	Sig          dex.Bytes         `json:"sig"`
-	Status       order.OrderStatus `json:"status"`
-	Epoch        uint64            `json:"epoch"`
-	Qty          uint64            `json:"qty"`
-	Sell         bool              `json:"sell"`
-	Filled       uint64            `json:"filled"`
-	Matches      []*Match          `json:"matches"`
-	Cancelling   bool              `json:"cancelling"`
-	Canceled     bool              `json:"canceled"`
-	FeesPaid     *FeeBreakdown     `json:"feesPaid"`
-	FundingCoins []*Coin           `json:"fundingCoins"`
-	LockedAmt    uint64            `json:"lockedamt"`
-	Rate         uint64            `json:"rate"` // limit only
-	TimeInForce  order.TimeInForce `json:"tif"`  // limit only
+	Host          string            `json:"host"`
+	BaseID        uint32            `json:"baseID"`
+	BaseSymbol    string            `json:"baseSymbol"`
+	QuoteID       uint32            `json:"quoteID"`
+	QuoteSymbol   string            `json:"quoteSymbol"`
+	MarketID      string            `json:"market"`
+	Type          order.OrderType   `json:"type"`
+	ID            dex.Bytes         `json:"id"`
+	Stamp         uint64            `json:"stamp"`
+	Sig           dex.Bytes         `json:"sig"`
+	Status        order.OrderStatus `json:"status"`
+	Epoch         uint64            `json:"epoch"`
+	Qty           uint64            `json:"qty"`
+	Sell          bool              `json:"sell"`
+	Filled        uint64            `json:"filled"`
+	Matches       []*Match          `json:"matches"`
+	Cancelling    bool              `json:"cancelling"`
+	Canceled      bool              `json:"canceled"`
+	FeesPaid      *FeeBreakdown     `json:"feesPaid"`
+	FundingCoins  []*Coin           `json:"fundingCoins"`
+	LockedAmt     uint64            `json:"lockedamt"`
+	Rate          uint64            `json:"rate"`          // limit only
+	TimeInForce   order.TimeInForce `json:"tif"`           // limit only
+	TargetOrderID dex.Bytes         `json:"targetOrderID"` // cancel only
 }
 
 // FeeBreakdown is categorized fee information.
@@ -316,6 +317,7 @@ type FeeBreakdown struct {
 // order and associated metadata.
 func coreOrderFromTrade(ord order.Order, metaData *db.OrderMetaData) *Order {
 	prefix, trade := ord.Prefix(), ord.Trade()
+	baseID, quoteID := ord.Base(), ord.Quote()
 
 	var rate uint64
 	var tif order.TimeInForce
@@ -324,8 +326,21 @@ func coreOrderFromTrade(ord order.Order, metaData *db.OrderMetaData) *Order {
 		rate = ot.Rate
 		tif = ot.Force
 	case *order.CancelOrder:
-		fmt.Println("coreOrderFromTrade got a cancel order", ord.ID())
-		return &Order{}
+		return &Order{
+			Host:          metaData.Host,
+			BaseID:        baseID,
+			BaseSymbol:    unbip(baseID),
+			QuoteID:       quoteID,
+			QuoteSymbol:   unbip(quoteID),
+			MarketID:      marketName(baseID, quoteID),
+			Type:          prefix.OrderType,
+			ID:            ord.ID().Bytes(),
+			Stamp:         encode.UnixMilliU(prefix.ServerTime),
+			Sig:           metaData.Proof.DEXSig,
+			Status:        metaData.Status,
+			FeesPaid:      new(FeeBreakdown),
+			TargetOrderID: ot.TargetOrderID.Bytes(),
+		}
 	}
 
 	var cancelling, canceled bool
@@ -337,7 +352,6 @@ func coreOrderFromTrade(ord order.Order, metaData *db.OrderMetaData) *Order {
 		}
 	}
 
-	baseID, quoteID := ord.Base(), ord.Quote()
 	fromID := quoteID
 	if trade.Sell {
 		fromID = baseID

@@ -6,12 +6,13 @@ package core
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
+	crand "crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"os"
 	"strconv"
 	"strings"
@@ -59,6 +60,7 @@ func init() {
 			winfo:         tWalletInfo,
 		},
 	})
+	rand.Seed(time.Now().UnixNano())
 }
 
 var (
@@ -901,7 +903,7 @@ func newTCrypterSmart() *tCrypterSmart {
 // Encrypt appends 8 random bytes to given []byte to mock.
 func (c *tCrypterSmart) Encrypt(b []byte) ([]byte, error) {
 	randSuffix := make([]byte, 8)
-	rand.Read(randSuffix)
+	crand.Read(randSuffix)
 	b = append(b, randSuffix...)
 	return b, c.encryptErr
 }
@@ -7758,5 +7760,249 @@ func TestCoreAssetSeedAndPass(t *testing.T) {
 				t.Errorf("seed not as expected, got %#v", seed)
 			}
 		})
+	}
+}
+
+var randU32 = func() uint32 { return uint32(rand.Int31()) }
+
+func randOrderForMarket(base, quote uint32) order.Order {
+	switch rand.Intn(3) {
+	case 0:
+		o, _ := ordertest.RandomCancelOrder()
+		o.BaseAsset = base
+		o.QuoteAsset = quote
+		return o
+	case 1:
+		o, _ := ordertest.RandomMarketOrder()
+		o.BaseAsset = base
+		o.QuoteAsset = quote
+		return o
+	default:
+		o, _ := ordertest.RandomLimitOrder()
+		o.BaseAsset = base
+		o.QuoteAsset = quote
+		return o
+	}
+}
+
+func randBytes(n int) []byte {
+	b := make([]byte, n)
+	rand.Read(b)
+	return b
+}
+
+func TestDeleteOrderFn(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	tCore := rig.core
+
+	randomOdrs := func() []*db.MetaOrder {
+		acct1 := dbtest.RandomAccountInfo()
+		acct2 := dbtest.RandomAccountInfo()
+		base1, quote1 := tUTXOAssetA.ID, tUTXOAssetB.ID
+		base2, quote2 := tACCTAsset.ID, tUTXOAssetA.ID
+		n := rand.Intn(9) + 1
+		orders := make([]*db.MetaOrder, n)
+		for i := 0; i < n; i++ {
+			acct := acct1
+			base, quote := base1, quote1
+			if i%2 == 1 {
+				acct = acct2
+				base, quote = base2, quote2
+			}
+			ord := randOrderForMarket(base, quote)
+			orders[i] = &db.MetaOrder{
+				MetaData: &db.OrderMetaData{
+					Status:             order.OrderStatus(rand.Intn(5) + 1),
+					Host:               acct.Host,
+					Proof:              db.OrderProof{DEXSig: randBytes(73)},
+					SwapFeesPaid:       rand.Uint64(),
+					RedemptionFeesPaid: rand.Uint64(),
+					MaxFeeRate:         rand.Uint64(),
+				},
+				Order: ord,
+			}
+		}
+		return orders
+	}
+
+	ordersFile, err := os.CreateTemp("", "delete_archives_test_orders")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ordersFileName := ordersFile.Name()
+	ordersFile.Close()
+	os.Remove(ordersFileName)
+
+	tests := []struct {
+		name, ordersFileStr string
+		wantErr             bool
+	}{{
+		name:          "ok orders and file save",
+		ordersFileStr: ordersFileName,
+	}, {
+		name:          "bad file (already closed)",
+		ordersFileStr: ordersFileName,
+		wantErr:       true,
+	}}
+
+	for _, test := range tests {
+		perOrdFn, cleanupFn, err := tCore.deleteOrderFn(test.ordersFileStr)
+		if test.wantErr {
+			if err != nil {
+				continue
+			}
+			t.Fatalf("%q: expected error", test.name)
+		}
+		if err != nil {
+			t.Fatalf("%q: unexpected failure: %v", test.name, err)
+		}
+		for _, o := range randomOdrs() {
+			err = perOrdFn(o)
+			if err != nil {
+				t.Fatalf("%q: unexpected failure: %v", test.name, err)
+			}
+		}
+		cleanupFn()
+	}
+
+	b, err := os.ReadFile(ordersFileName)
+	if err != nil {
+		t.Fatalf("unable to read file: %s", ordersFileName)
+	}
+	fmt.Println(string(b))
+	os.Remove(ordersFileName)
+}
+
+func TestDeleteMatchFn(t *testing.T) {
+	randomMtchs := func() []*db.MetaMatch {
+		base, quote := tUTXOAssetA.ID, tUTXOAssetB.ID
+		acct := dbtest.RandomAccountInfo()
+		n := rand.Intn(9) + 1
+		metaMatches := make([]*db.MetaMatch, 0, n)
+		for i := 0; i < n; i++ {
+			m := &db.MetaMatch{
+				MetaData: &db.MatchMetaData{
+					Proof: *dbtest.RandomMatchProof(0.5),
+					DEX:   acct.Host,
+					Base:  base,
+					Quote: quote,
+					Stamp: rand.Uint64(),
+				},
+				UserMatch: ordertest.RandomUserMatch(),
+			}
+			if i%2 == 1 {
+				m.Status = order.MatchStatus(rand.Intn(4))
+			} else {
+				m.Status = order.MatchComplete              // inactive
+				m.MetaData.Proof.Auth.RedeemSig = []byte{0} // redeemSig required for MatchComplete to be considered inactive
+			}
+			metaMatches = append(metaMatches, m)
+		}
+		return metaMatches
+	}
+
+	matchesFile, err := os.CreateTemp("", "delete_archives_test_matches")
+	if err != nil {
+		t.Fatal(err)
+	}
+	matchesFileName := matchesFile.Name()
+	matchesFile.Close()
+	os.Remove(matchesFileName)
+
+	tests := []struct {
+		name, matchesFileStr string
+		wantErr              bool
+	}{{
+		name:           "ok matches and file save",
+		matchesFileStr: matchesFileName,
+	}, {
+		name:           "bad file (already closed)",
+		matchesFileStr: matchesFileName,
+		wantErr:        true,
+	}}
+
+	for _, test := range tests {
+		perMatchFn, cleanupFn, err := deleteMatchFn(test.matchesFileStr)
+		if test.wantErr {
+			if err != nil {
+				continue
+			}
+			t.Fatalf("%q: expected error", test.name)
+		}
+		if err != nil {
+			t.Fatalf("%q: unexpected failure: %v", test.name, err)
+		}
+		for _, m := range randomMtchs() {
+			err = perMatchFn(m, true)
+			if err != nil {
+				t.Fatalf("%q: unexpected failure: %v", test.name, err)
+			}
+		}
+		cleanupFn()
+	}
+
+	b, err := os.ReadFile(matchesFileName)
+	if err != nil {
+		t.Fatalf("unable to read file: %s", matchesFileName)
+	}
+	fmt.Println(string(b))
+	os.Remove(matchesFileName)
+}
+
+func TestDeleteArchivedRecords(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	tCore := rig.core
+	tdb := tCore.db.(*TDB)
+
+	tempFile := func(suffix string) (path string) {
+		matchesFile, err := os.CreateTemp("", "delete_archives_test_matches")
+		if err != nil {
+			t.Fatal(err)
+		}
+		matchesFileName := matchesFile.Name()
+		matchesFile.Close()
+		os.Remove(matchesFileName)
+		return matchesFileName
+	}
+
+	tests := []struct {
+		name                                              string
+		olderThan                                         *time.Time
+		matchesFileStr, ordersFileStr                     string
+		deleteInactiveOrdersErr, deleteInactiveMatchesErr error
+		wantErr                                           bool
+	}{{
+		name: "ok no order or file save",
+	}, {
+		name:           "ok orders and file save",
+		ordersFileStr:  tempFile("abc"),
+		matchesFileStr: tempFile("123"),
+	}, {
+		name:                    "orders save error",
+		ordersFileStr:           tempFile("abc"),
+		deleteInactiveOrdersErr: errors.New(""),
+		wantErr:                 true,
+	}, {
+		name:                     "matches save error",
+		matchesFileStr:           tempFile("123"),
+		deleteInactiveMatchesErr: errors.New(""),
+		wantErr:                  true,
+	}}
+
+	for _, test := range tests {
+		tdb.deleteInactiveOrdersErr = test.deleteInactiveOrdersErr
+		tdb.deleteInactiveMatchesErr = test.deleteInactiveMatchesErr
+		err := tCore.DeleteArchivedRecords(test.olderThan, test.matchesFileStr, test.ordersFileStr)
+		if test.wantErr {
+			if err != nil {
+				continue
+			}
+			t.Fatalf("%q: expected error", test.name)
+		}
+		if err != nil {
+			t.Fatalf("%q: unexpected failure: %v", test.name, err)
+		}
 	}
 }
