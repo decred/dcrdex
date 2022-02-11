@@ -757,3 +757,45 @@ func TestParseDiscoverAcctArgs(t *testing.T) {
 		}
 	}
 }
+
+func TestDeleteArchivedRecordsArgs(t *testing.T) {
+	paramsWithArgs := func(args ...string) *RawParams {
+		return &RawParams{Args: args}
+	}
+	tests := []struct {
+		name    string
+		params  *RawParams
+		wantErr error
+	}{{
+		name:   "ok no params",
+		params: paramsWithArgs(),
+	}, {
+		name:   "ok just time",
+		params: paramsWithArgs("123"),
+	}, {
+		name:   "ok just matches file",
+		params: paramsWithArgs("", "abc"),
+	}, {
+		name:   "ok just orders file",
+		params: paramsWithArgs("", "", "def"),
+	}, {
+		name:   "ok all three",
+		params: paramsWithArgs("123", "abc", "def"),
+	}, {
+		name:    "time not a number",
+		params:  paramsWithArgs("abc"),
+		wantErr: errArgs,
+	}}
+	for _, test := range tests {
+		_, err := parseDeleteArchivedRecordsArgs(test.params)
+		if test.wantErr != nil {
+			if err != nil {
+				continue
+			}
+			t.Fatalf("%q: expected error", test.name)
+		}
+		if err != nil {
+			t.Fatalf("%q: unexpected error: %v", test.name, err)
+		}
+	}
+}

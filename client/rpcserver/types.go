@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
@@ -155,6 +156,11 @@ type myOrdersForm struct {
 	host  string
 	base  *uint32
 	quote *uint32
+}
+
+type deleteRecordsForm struct {
+	olderThan                     *time.Time
+	ordersFileStr, matchesFileStr string
 }
 
 // checkNArgs checks that args and pwArgs are the correct length.
@@ -524,4 +530,31 @@ func parseAppSeedArgs(params *RawParams) (encode.PassBytes, error) {
 		return nil, err
 	}
 	return params.PWArgs[0], nil
+}
+
+func parseDeleteArchivedRecordsArgs(params *RawParams) (form *deleteRecordsForm, err error) {
+	if err = checkNArgs(params, []int{0}, []int{0, 3}); err != nil {
+		return nil, err
+	}
+	form = new(deleteRecordsForm)
+	switch len(params.Args) {
+	case 3:
+		form.ordersFileStr = params.Args[2]
+		fallthrough
+	case 2:
+		form.matchesFileStr = params.Args[1]
+		fallthrough
+	case 1:
+		olderThanStr := params.Args[0]
+		if olderThanStr == "" || olderThanStr == "0" {
+			break
+		}
+		olderThanMs, err := strconv.ParseInt(olderThanStr, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid older than time %q: %v", olderThanStr, err)
+		}
+		t := encode.UnixTimeMilli(olderThanMs)
+		form.olderThan = &t
+	}
+	return form, nil
 }

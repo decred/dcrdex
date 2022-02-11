@@ -73,6 +73,7 @@ type clientCore interface {
 	RescanWallet(assetID uint32, force bool) error
 	Withdraw(appPass []byte, assetID uint32, value uint64, addr string) (asset.Coin, error)
 	ExportSeed(pw []byte) ([]byte, error)
+	DeleteArchivedRecords(olderThan *time.Time, matchesFileStr, ordersFileStr string) error
 }
 
 // RPCServer is a single-client http and websocket server enabling a JSON

@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"testing"
+	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
@@ -32,34 +33,35 @@ var (
 )
 
 type TCore struct {
-	dexExchange         *core.Exchange
-	getDEXConfigErr     error
-	balanceErr          error
-	syncErr             error
-	createWalletErr     error
-	newWalletForm       *core.WalletForm
-	openWalletErr       error
-	rescanWalletErr     error
-	walletState         *core.WalletState
-	closeWalletErr      error
-	wallets             []*core.WalletState
-	initializeClientErr error
-	registerResult      *core.RegisterResult
-	registerErr         error
-	exchanges           map[string]*core.Exchange
-	loginErr            error
-	loginResult         *core.LoginResult
-	order               *core.Order
-	tradeErr            error
-	cancelErr           error
-	coin                asset.Coin
-	withdrawErr         error
-	logoutErr           error
-	book                *core.OrderBook
-	bookErr             error
-	exportSeed          []byte
-	exportSeedErr       error
-	discoverAcctErr     error
+	dexExchange              *core.Exchange
+	getDEXConfigErr          error
+	balanceErr               error
+	syncErr                  error
+	createWalletErr          error
+	newWalletForm            *core.WalletForm
+	openWalletErr            error
+	rescanWalletErr          error
+	walletState              *core.WalletState
+	closeWalletErr           error
+	wallets                  []*core.WalletState
+	initializeClientErr      error
+	registerResult           *core.RegisterResult
+	registerErr              error
+	exchanges                map[string]*core.Exchange
+	loginErr                 error
+	loginResult              *core.LoginResult
+	order                    *core.Order
+	tradeErr                 error
+	cancelErr                error
+	coin                     asset.Coin
+	withdrawErr              error
+	logoutErr                error
+	book                     *core.OrderBook
+	bookErr                  error
+	exportSeed               []byte
+	exportSeedErr            error
+	discoverAcctErr          error
+	deleteArchivedRecordsErr error
 }
 
 func (c *TCore) Balance(uint32) (uint64, error) {
@@ -124,6 +126,9 @@ func (c *TCore) ExportSeed(pw []byte) ([]byte, error) {
 }
 func (c *TCore) DiscoverAccount(dexAddr string, pass []byte, certI interface{}) (*core.Exchange, bool, error) {
 	return c.dexExchange, false, c.discoverAcctErr
+}
+func (c *TCore) DeleteArchivedRecords(olderThan *time.Time, matchesFileStr, ordersFileStr string) error {
+	return c.deleteArchivedRecordsErr
 }
 
 type tBookFeed struct{}
