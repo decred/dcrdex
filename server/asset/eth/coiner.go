@@ -298,3 +298,8 @@ func (c *baseCoin) Value() uint64 {
 func (c *baseCoin) FeeRate() uint64 {
 	return c.gasFeeCap
 }
+
+// Value returns the value of one swap in order to validate during processing.
+func (c *swapCoin) Value() uint64 {
+	return c.init.Value
+}
