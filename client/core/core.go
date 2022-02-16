@@ -2848,7 +2848,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	c.log.Infof("Attempting registration fee payment to %s, account ID %v, of %d units of %s. "+
 		"Do NOT manually send funds to this address even if this fails.",
 		regRes.Address, dc.acct.id, regRes.Fee, regFeeAssetSymbol)
-	feeRate := c.feeSuggestionAny(feeAsset.ID)
+	feeRate := c.feeSuggestionAny(feeAsset.ID, dc)
 	coin, err := wallet.PayFee(regRes.Address, regRes.Fee, feeRate)
 	if err != nil {
 		return nil, newError(feeSendErr, "error paying registration fee: %v", err)
@@ -3731,8 +3731,8 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 // with it available. It first checks for a capable wallet, then relevant books
 // for a cached fee rate obtained with an epoch_report message, and falls back
 // to directly requesting a rate from servers with a fee_rate request.
-func (c *Core) feeSuggestionAny(assetID uint32) uint64 {
-	conns := c.dexConnections()
+func (c *Core) feeSuggestionAny(assetID uint32, preferredConns ...*dexConnection) uint64 {
+	conns := append(preferredConns, c.dexConnections()...)
 	// See if the wallet supports fee rates.
 	w, found := c.wallet(assetID)
 	if found && w.connected() {
