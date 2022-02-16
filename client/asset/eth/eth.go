@@ -10,7 +10,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -508,7 +507,7 @@ func (c *fundingCoin) RecoveryID() dex.Bytes {
 }
 
 func (c *fundingCoin) String() string {
-	return "{" + c.id.String() + ":" + hex.EncodeToString(c.recoveryID) + "}"
+	return fmt.Sprintf("{%s:%x}", []byte(c.id), c.recoveryID)
 }
 
 var _ asset.Coin = (*coin)(nil)
