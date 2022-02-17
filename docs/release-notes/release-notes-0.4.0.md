@@ -1,6 +1,6 @@
 # DCRDEX v0.4.0
 
-Dec 23, 2021
+Jan 20, 2022
 
 For a high level introduction to DCRDEX, please read the [initial release's notes](release-notes-0.1.0.md).
 
@@ -66,23 +66,37 @@ understand the following:
 
 ### Client (dexc)
 
-When upgrading from v0.2, an application "seed" is automatically generated. The
-seed is used when creating new DEX accounts and native (built-in) wallets, and
-may be used to restore these accounts on a new DEX client installation. You
-should go to the Settings page to view this new seed, and **back it up somewhere
-safe**. This is especially important if you create a native Bitcoin wallet from
-within the DEX client since you will need the seed to recover any funds in the
-wallet.
+#### Application Seed
+
+When upgrading from v0.2, an application "seed" is automatically generated upon
+login. The seed is used when creating new DEX accounts and native (built-in)
+wallets, and may be used to restore these accounts on a new DEX client
+installation. You should go to the Settings page to view this new seed, and
+**back it up somewhere safe**. This is especially important if you create a
+native Bitcoin wallet from within the DEX client since you will need the seed to
+recover any funds in the wallet.
 
 If you run the upgrade multiple times, such as from different client
 installations or just repeated the upgrade from a v0.2 backup, you will get a
-**different seed each time** the upgrade runs.
+**different seed each time** the upgrade runs and you login.
 
 **Any DEX accounts created prior to upgrading can NOT be later recovered from
 this seed.** These "legacy" accounts continue to work in v0.4, but to back them
 up or move them to a different installation, it is still necessary to
 export/import them from the Settings page or backup the dexc.db file as it was
 in v0.2.
+
+**Developer note:** For the upgrade to complete, it is necessary to call `Login`
+before using most other `Core` methods. If you receive the error "primary
+credentials not retrieved. Is the client initialized?" it is likely that you
+need to `Login` first to complete the seed generation and credentials scheme
+migration. Typical startup should involve `core.New` followed by: `c.Run` in a
+goroutine, wait for `<-c.Ready()`, consult `c.IsInitialized()` before calling
+either `c.InitializeClient` or `c.Login`. After login, you should call
+`c.ExportSeed` with the application password to retrieve the newly-generated
+application seed.
+
+#### Changing the Bitcoin Wallet Type
 
 If you previously had an external Bitcoin Core wallet configured with DEX, you
 may switch to a native BTC wallet from the Wallets page. Click the "gears" icon
@@ -157,7 +171,8 @@ and server/cmd/dcrdex/sample-dcrdex.conf
   [4249d97](https://github.com/decred/dcrdex/commit/4249d97f02ac0644c03429b9bea0bd401e6e7a73),
   [82833e0](https://github.com/decred/dcrdex/commit/82833e00bdbf4481535c8f57e922312dc06e2840),
   [1890057](https://github.com/decred/dcrdex/commit/1890057fcfee8963f303a5ad354d15f0683f178b),
-  [deab1c9](https://github.com/decred/dcrdex/commit/deab1c9deeab70876059d5246c60f023fa6a3e28))
+  [deab1c9](https://github.com/decred/dcrdex/commit/deab1c9deeab70876059d5246c60f023fa6a3e28),
+  [3b4f2eb](https://github.com/decred/dcrdex/commit/3b4f2eb6b06f72cba47ecd16cd94bd44ba14f655))
 - Decred SPV wallet support (dcrwallet in SPV mode), use compact filters in
   counterparty redemption search, gettxout, gettransaction, etc.
   ([fe1995a](https://github.com/decred/dcrdex/commit/fe1995a42289f29e18bcccd9e537a2ba707a8ad1),
@@ -183,7 +198,10 @@ and server/cmd/dcrdex/sample-dcrdex.conf
 - Improved registration sequence and form design. Add a table showing all
   markets offered by a server when registering.
   ([ebfcff7](https://github.com/decred/dcrdex/commit/ebfcff744ad90754aba651c0a5d0b998543771a3),
-  [027b480](https://github.com/decred/dcrdex/commit/027b480ed39c3b12868547f9590f5fbf19d81359))
+  [027b480](https://github.com/decred/dcrdex/commit/027b480ed39c3b12868547f9590f5fbf19d81359),
+  [bbf161e](https://github.com/decred/dcrdex/commit/bbf161eb48ef70f0611ef8f2a9fdfe04690178ea))
+- The wallet balance is double checked prior attempting registration.
+  ([a5da7349](https://github.com/decred/dcrdex/commit/a5da7349041a005f23aea4a7eb895dd53edc9a47))
 - Add the ability to persist password on UI login. This adds a checkbox to the
   login page that gives the user the option to persist their password for the
   session. When selected, all the password fields, other than disable account
@@ -259,6 +277,9 @@ and server/cmd/dcrdex/sample-dcrdex.conf
   this asynchronously since the outcome is not important.
   ([2e4fe26](https://github.com/decred/dcrdex/commit/2e4fe260b078fa5cb5557b7824bd36aa42ebd8e7),
   [0f7d561](https://github.com/decred/dcrdex/commit/0f7d561a76e57b95174bcdde88a61c51d291f226))
+- Wallet connection errors that are encountered on login are show in the
+  notification menu.
+  ([5149ee2](https://github.com/decred/dcrdex/commit/5149ee2e336047d63eee9a16cddf212fea544d30))
 
 ### Fixes
 
@@ -319,6 +340,19 @@ The most notable fixes are:
   ([8478b6c](https://github.com/decred/dcrdex/commit/8478b6cf85e0d5d685e78657ec4e83e32fed45b0))
 - Add a missing error check in `server/db/driver/pg.(*Archiver).LoadEpochStats`.
   ([7957691](https://github.com/decred/dcrdex/commit/795769123971c5dcf8ebfe589e8a4810f737470f))
+- Fix handling of P2SH funding UTXOs when 0-conf coins are included.
+  ([dda8654](https://github.com/decred/dcrdex/commit/dda86540ad9b585b3165bf0eb06c733576596a9d))
+- Show a properly scaled exchange rate in the depth chart's price legend.
+  ([94eedbd](https://github.com/decred/dcrdex/commit/94eedbd56241e10c40859ed2206f354688ce8c5e))
+- Avoid a potential panic in the BTC native wallet in the event that the best
+  block hash cannot be provided by the wallet.
+  ([1911080](https://github.com/decred/dcrdex/commit/19110802ab238dd19d3612e2e82e34b8eb4dedd6))
+- Promote DEX connections to persistent when the `Register` method finds that
+  the account is already paid. Normally this is done in `DiscoverAccount`, but
+  should be handled by `Register` as well.
+  ([a897f10](https://github.com/decred/dcrdex/commit/a897f10185936292e884e97d922244db81de5856))
+- Omit commas from the withdraw amount text field when clicking the max amount.
+  ([c987fa8](https://github.com/decred/dcrdex/commit/c987fa86666984e2e926fda6d3e918fbedb840f1))
 
 ## Server
 
@@ -410,15 +444,20 @@ The most notable fixes are:
   ([7ffae7b](https://github.com/decred/dcrdex/commit/7ffae7b215746b646c2ff98084040d594d856493))
 - (Breaking) Give notifications topic IDs for internationalization support.
   ([c994f03](https://github.com/decred/dcrdex/commit/c994f032fe0e9a36e58a9a984dd924734c659e36))
-- Add `(*Core).DiscoverAccount` to determine if an account exists at a DEX
-  server after restoring from seed.
-  ([59868fe](https://github.com/decred/dcrdex/commit/59868fe81173a2d67100ff071d01552cc74fcb1a))
+- Add `(*Core).DiscoverAccount` and an RPC (dexcctl) endpoint to determine if an
+  account exists at a DEX server after restoring from seed.
+  ([59868fe](https://github.com/decred/dcrdex/commit/59868fe81173a2d67100ff071d01552cc74fcb1a),
+  [524b5a1](https://github.com/decred/dcrdex/commit/524b5a1019eb543cb41e49d5a50443f25f2b18f2))
 - (Breaking) `(*Core).InitializeClient` has a new `restorationSeed []byte` input
   argument, which may be `nil` to generate a new app seed, or a previous seed
-  for to restore a previous identity. Further, the keys, encrypted app seed, and
-  the relevant encryption parameters are embodied by the
+  for to restore a previous identity. The `(*Core).ExportSeed` method is added
+  to retrieve the generated seed. Further, the keys, encrypted app seed, and the
+  relevant encryption parameters are embodied by the
   `client/db.PrimaryCredentials` struct, and the DB interface has new methods
-  for upgrading to, initializing, and updating the `PrimaryCredentials`.
+  for upgrading to, initializing, and updating the `PrimaryCredentials`. When
+  upgrading, it is necessary call `Login` for the seed to be generated and the
+  new credentials scheme applied, otherwise most methods will fail with "primary
+  credentials not retrieved. Is the client initialized?".
   ([b66a35f](https://github.com/decred/dcrdex/commit/b66a35f24215456763a16cee9c32875f61f9814b))
 - (Breaking) To support paying registration fees with multiple assets, the
   `core.Exchange` struct has new `RegFees` and `PendingFee` fields, the
@@ -442,7 +481,8 @@ The most notable fixes are:
   helpers `ConventionalRate` and `ConventionalRateAlt`.
   ([08a72d1](https://github.com/decred/dcrdex/commit/08a72d1cd085af6a89dc535ab03184efa6083ad9),
   [ad1c20a](https://github.com/decred/dcrdex/commit/ad1c20a71c10ade6752d422c449fb89b1c5a2338),
-  [75fa328](https://github.com/decred/dcrdex/commit/75fa328272d756f13e303c570dba69e07ce0b2c5))
+  [75fa328](https://github.com/decred/dcrdex/commit/75fa328272d756f13e303c570dba69e07ce0b2c5),
+  [207ddcf](https://github.com/decred/dcrdex/commit/207ddcff8d52502b098e93203051f80cc1f862c3))
 - Add `SpotPrice *msgjson.Spot` field to `core/Market`.
   ([bb05332](https://github.com/decred/dcrdex/commit/bb05332e7720aa8315e03d35c7fed9cb5023d192))
 - (Breaking) To support multiple types of wallets, `client/asset.WalletInfo` has
@@ -509,7 +549,8 @@ The most notable fixes are:
 - Set btc test harness node's debug levels per-subsystem.
   ([aa76b62](https://github.com/decred/dcrdex/commit/aa76b62600a37a468b0ad4f4fbb4260fed8722d9))
 - Add build meta data to dexcctl.
-  ([9c8f52f](https://github.com/decred/dcrdex/commit/9c8f52f22a71e48097ee08332301f11afdd40777))
+  ([9c8f52f](https://github.com/decred/dcrdex/commit/9c8f52f22a71e48097ee08332301f11afdd40777),
+  [16c81be](https://github.com/decred/dcrdex/commit/16c81be31c9abc3cb7fb05a5065a92d925b16596))
 
 ## Ethereum (not enabled in 0.4)
 
