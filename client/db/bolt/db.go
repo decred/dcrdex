@@ -95,7 +95,8 @@ var (
 	fromVersionKey         = []byte("fromVersion")
 	toVersionKey           = []byte("toVersion")
 	optionsKey             = []byte("options")
-	reservesKey            = []byte("reservesKey")
+	redemptionReservesKey  = []byte("redemptionReservesKey")
+	refundReservesKey      = []byte("refundReservesKey")
 	byteTrue               = encode.ByteTrue
 	backupDir              = "backup"
 )
@@ -869,9 +870,15 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 	}
 
 	var redemptionReserves uint64
-	reservesB := oBkt.Get(reservesKey)
-	if len(reservesB) == 8 {
-		redemptionReserves = intCoder.Uint64(reservesB)
+	redemptionReservesB := oBkt.Get(redemptionReservesKey)
+	if len(redemptionReservesB) == 8 {
+		redemptionReserves = intCoder.Uint64(redemptionReservesB)
+	}
+
+	var refundReserves uint64
+	refundReservesB := oBkt.Get(refundReservesKey)
+	if len(refundReservesB) == 8 {
+		refundReserves = intCoder.Uint64(refundReservesB)
 	}
 
 	var linkedID order.OrderID
@@ -916,6 +923,7 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 			ToVersion:          toVersion,
 			Options:            options,
 			RedemptionReserves: redemptionReserves,
+			RefundReserves:     refundReserves,
 		},
 		Order: ord,
 	}, nil
@@ -990,7 +998,8 @@ func (db *BoltDB) UpdateOrderMetaData(oid order.OrderID, md *db.OrderMetaData) e
 			put(fromVersionKey, uint32Bytes(md.FromVersion)).
 			put(toVersionKey, uint32Bytes(md.ToVersion)).
 			put(optionsKey, config.Data(md.Options)).
-			put(reservesKey, uint64Bytes(md.RedemptionReserves)).
+			put(redemptionReservesKey, uint64Bytes(md.RedemptionReserves)).
+			put(refundReservesKey, uint64Bytes(md.RefundReserves)).
 			err()
 	})
 }

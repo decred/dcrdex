@@ -267,6 +267,7 @@ type OrderMetaData struct {
 	Options map[string]string
 	// RedemptionReserve is the reserved redemption funds.
 	RedemptionReserves uint64
+	RefundReserves     uint64
 }
 
 // MetaMatch is a match and its metadata.
