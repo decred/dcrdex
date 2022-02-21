@@ -410,6 +410,13 @@ func (n *nodeClient) initiate(ctx context.Context, contracts []*asset.Contract, 
 		val += c.Value
 	}
 	txOpts, _ := n.txOpts(ctx, val, gas, dexeth.GweiToWei(maxFeeRate))
+	n.nonceSendMtx.Lock()
+	defer n.nonceSendMtx.Unlock()
+	nonce, err := n.leth.ApiBackend.GetPoolNonce(ctx, n.creds.addr)
+	if err != nil {
+		return nil, fmt.Errorf("error getting nonce: %v", err)
+	}
+	txOpts.Nonce = new(big.Int).SetUint64(nonce)
 	if err := n.addSignerToOpts(txOpts); err != nil {
 		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
 	}
@@ -449,6 +456,13 @@ func (n *nodeClient) estimateRefundGas(ctx context.Context, secretHash [32]byte,
 func (n *nodeClient) redeem(ctx context.Context, redemptions []*asset.Redemption, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
 	gas := dexeth.RedeemGas(len(redemptions), contractVer)
 	txOpts, _ := n.txOpts(ctx, 0, gas, dexeth.GweiToWei(maxFeeRate))
+	n.nonceSendMtx.Lock()
+	defer n.nonceSendMtx.Unlock()
+	nonce, err := n.leth.ApiBackend.GetPoolNonce(ctx, n.creds.addr)
+	if err != nil {
+		return nil, fmt.Errorf("error getting nonce: %v", err)
+	}
+	txOpts.Nonce = new(big.Int).SetUint64(nonce)
 	if err := n.addSignerToOpts(txOpts); err != nil {
 		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
 	}
@@ -464,6 +478,13 @@ func (n *nodeClient) redeem(ctx context.Context, redemptions []*asset.Redemption
 func (n *nodeClient) refund(ctx context.Context, secretHash [32]byte, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
 	gas := dexeth.RefundGas(contractVer)
 	txOpts, _ := n.txOpts(ctx, 0, gas, dexeth.GweiToWei(maxFeeRate))
+	n.nonceSendMtx.Lock()
+	defer n.nonceSendMtx.Unlock()
+	nonce, err := n.leth.ApiBackend.GetPoolNonce(ctx, n.creds.addr)
+	if err != nil {
+		return nil, fmt.Errorf("error getting nonce: %v", err)
+	}
+	txOpts.Nonce = new(big.Int).SetUint64(nonce)
 	if err := n.addSignerToOpts(txOpts); err != nil {
 		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
 	}
@@ -512,6 +533,11 @@ func (n *nodeClient) getCodeAt(ctx context.Context, contractAddr common.Address)
 // txOpts generates a set of TransactOpts for the account. If maxFeeRate is
 // zero, it will be calculated as double the current baseFee. The tip will be
 // added automatically.
+//
+// NOTE: The v0 contract will reuse account nonces if the tx is not yet
+// confirmed. To avoid that be sure to get the next nonce from the light eth
+// node pool api while holding the nodeClient nonceSendMtx and set manually.
+// Hold the mutex until the tx has been sent or errors on sending.
 func (n *nodeClient) txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate *big.Int) (*bind.TransactOpts, error) {
 	baseFee, gasTipCap, err := n.netFeeState(ctx)
 	if maxFeeRate == nil {
@@ -632,6 +658,13 @@ func (n *nodeClient) initiateToken(ctx context.Context, initiations []ethv0.ETHS
 	// TODO: reject if there is duplicate secret hash
 	// TODO: use estimated gas
 	txOpts, _ := n.txOpts(ctx, 0, 1e6, dexeth.GweiToWei(maxFeeRate))
+	n.nonceSendMtx.Lock()
+	defer n.nonceSendMtx.Unlock()
+	nonce, err := n.leth.ApiBackend.GetPoolNonce(ctx, n.creds.addr)
+	if err != nil {
+		return nil, fmt.Errorf("error getting nonce: %v", err)
+	}
+	txOpts.Nonce = new(big.Int).SetUint64(nonce)
 	if err := n.addSignerToOpts(txOpts); err != nil {
 		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
 	}
@@ -645,6 +678,13 @@ func (n *nodeClient) redeemToken(ctx context.Context, redemptions []ethv0.ETHSwa
 	// TODO: reject if there is duplicate secret hash
 	// TODO: use estimated gas
 	txOpts, _ := n.txOpts(ctx, 0, 300000, dexeth.GweiToWei(maxFeeRate))
+	n.nonceSendMtx.Lock()
+	defer n.nonceSendMtx.Unlock()
+	nonce, err := n.leth.ApiBackend.GetPoolNonce(ctx, n.creds.addr)
+	if err != nil {
+		return nil, fmt.Errorf("error getting nonce: %v", err)
+	}
+	txOpts.Nonce = new(big.Int).SetUint64(nonce)
 	if err := n.addSignerToOpts(txOpts); err != nil {
 		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
 	}
@@ -667,6 +707,13 @@ func (n *nodeClient) tokenIsRedeemable(ctx context.Context, secretHash, secret [
 func (n *nodeClient) refundToken(ctx context.Context, secretHash [32]byte, maxFeeRate uint64) (tx *types.Transaction, err error) {
 	// TODO: use estimated gas
 	txOpts, _ := n.txOpts(ctx, 0, 5e5, dexeth.GweiToWei(maxFeeRate))
+	n.nonceSendMtx.Lock()
+	defer n.nonceSendMtx.Unlock()
+	nonce, err := n.leth.ApiBackend.GetPoolNonce(ctx, n.creds.addr)
+	if err != nil {
+		return nil, fmt.Errorf("error getting nonce: %v", err)
+	}
+	txOpts.Nonce = new(big.Int).SetUint64(nonce)
 	if err := n.addSignerToOpts(txOpts); err != nil {
 		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
 	}
