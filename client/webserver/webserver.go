@@ -264,6 +264,8 @@ func New(cfg *Config) (*WebServer, error) {
 		web.Get(registerRoute, s.handleRegister)
 		web.Get(settingsRoute, s.handleSettings)
 
+		web.Get("/generateqrcode", s.handleGenerateQRCode)
+
 		// The rest of the web handlers require initialization.
 		web.Group(func(webInit chi.Router) {
 			webInit.Use(s.requireInit)
