@@ -177,6 +177,9 @@ func (c *TCore) ExportSeed(pw []byte) ([]byte, error) {
 func (c *TCore) WalletLogFilePath(uint32) (string, error) {
 	return "", nil
 }
+func (c *TCore) AssetHasActiveOrders(uint32) bool {
+	return false
+}
 
 type TWriter struct {
 	b []byte

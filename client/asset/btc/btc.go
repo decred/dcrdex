@@ -117,12 +117,15 @@ var (
 		Key:         "walletbirthday",
 		DisplayName: "Wallet Birthday",
 		Description: "This is the date the wallet start scanning the blockchain for " +
-			"transactions related to this wallet. When updating this date, a rescan " +
-			"must also be done for it to take effect.",
+			"transactions related to this wallet. A rescan of the will automatically" +
+			"be started if the new birthday is earlier than the old one. This option" +
+			" is disabled if there are currently active BTC trades.",
 		DefaultValue: defaultWalletBirthdayUnix,
 		MaxValue:     "now",
-		MinValue:     defaultWalletBirthdayUnix,
-		IsDate:       true,
+		// This MinValue must be removed if we start supporting importing private keys
+		MinValue:          defaultWalletBirthdayUnix,
+		IsDate:            true,
+		DisableWhenActive: true,
 	}}
 
 	commonOpts = []*asset.ConfigOption{
@@ -384,9 +387,10 @@ type WalletConfig struct {
 	FallbackFeeRate  float64 `ini:"fallbackfee"`
 	FeeRateLimit     float64 `ini:"feeratelimit"`
 	RedeemConfTarget uint64  `ini:"redeemconftarget"`
-	WalletName       string  `ini:"walletname"`     // RPC
-	Peer             string  `ini:"peer"`           // SPV
-	Birthday         uint64  `ini:"walletbirthday"` // SPV
+	ActivelyUsed     bool    `ini:"special:activelyUsed"` //injected by core
+	WalletName       string  `ini:"walletname"`           // RPC
+	Peer             string  `ini:"peer"`                 // SPV
+	Birthday         uint64  `ini:"walletbirthday"`       // SPV
 }
 
 // readRPCWalletConfig parses the settings map into a *RPCWalletConfig.
@@ -473,6 +477,7 @@ func (d *Driver) Create(params *asset.CreateWalletParams) error {
 
 	bday := time.Unix(int64(walletCfg.Birthday), 0)
 	now := time.Now()
+	// This check must be removed if we start supporting importing private keys
 	if defaultWalletBirthday.After(bday) {
 		bday = defaultWalletBirthday
 	} else if bday.After(now) {
@@ -561,8 +566,6 @@ type baseWallet struct {
 // method to implement asset.Rescanner.
 type ExchangeWalletSPV struct {
 	*baseWallet
-
-	walletBirthday time.Time
 }
 
 // ExchangeWalletFullNode implements Wallet and adds the FeeRate method.
@@ -585,7 +588,7 @@ func (btc *ExchangeWalletSPV) Rescan(_ context.Context) error {
 	w := btc.node.(*spvWallet)
 	atomic.StoreInt64(&btc.tipAtConnect, 0) // for progress
 	// Caller should start calling SyncStatus on a ticker.
-	return w.rescanWalletAsync(btc.walletBirthday)
+	return w.rescanWalletAsync()
 }
 
 // FeeRate satisfies asset.FeeRater.
@@ -806,8 +809,6 @@ func openSPVWallet(cfg *BTCCloneCFG) (*ExchangeWalletSPV, error) {
 		peers = append(peers, walletCfg.Peer)
 	}
 
-	btc.node = loadSPVWallet(cfg.WalletCFG.DataDir, cfg.Logger.SubLogger("SPV"), peers, cfg.ChainParams)
-
 	bday := time.Unix(int64(walletCfg.Birthday), 0)
 	now := time.Now()
 	if defaultWalletBirthday.After(bday) {
@@ -816,7 +817,10 @@ func openSPVWallet(cfg *BTCCloneCFG) (*ExchangeWalletSPV, error) {
 		bday = now
 	}
 
-	return &ExchangeWalletSPV{baseWallet: btc, walletBirthday: bday}, nil
+	allowAutomaticRescan := !walletCfg.ActivelyUsed
+	btc.node = loadSPVWallet(cfg.WalletCFG.DataDir, cfg.Logger.SubLogger("SPV"), peers, cfg.ChainParams, bday, allowAutomaticRescan)
+
+	return &ExchangeWalletSPV{baseWallet: btc}, nil
 }
 
 // Info returns basic information about the wallet and asset.

@@ -328,7 +328,7 @@ export default class WalletsPage extends BasePage {
       Doc.show(page.reconfigErr)
       return
     }
-    this.reconfigForm.update(currentDef.configopts || [])
+    this.reconfigForm.update(currentDef.configopts || [], res.hasactiveorders)
     this.reconfigForm.setConfig(res.map)
     this.updateDisplayedReconfigFields(currentDef)
   }

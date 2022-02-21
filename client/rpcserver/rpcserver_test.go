@@ -130,6 +130,9 @@ func (c *TCore) DiscoverAccount(dexAddr string, pass []byte, certI interface{}) 
 func (c *TCore) DeleteArchivedRecords(olderThan *time.Time, matchesFileStr, ordersFileStr string) error {
 	return c.deleteArchivedRecordsErr
 }
+func (c *TCore) AssetHasActiveOrders(uint32) bool {
+	return false
+}
 
 type tBookFeed struct{}
 

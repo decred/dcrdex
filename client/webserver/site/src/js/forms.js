@@ -115,8 +115,6 @@ export class NewWalletForm {
    */
   setupBirthdaySelection () {
     const page = this.page
-    if (app().seedGenTime > 0) page.freshButton.checked = true
-    else page.earliestButton.checked = true
     page.customDate.valueAsDate = new Date()
     page.customDate.max = dateToString(new Date())
     const onChange = () => {
@@ -135,6 +133,11 @@ export class NewWalletForm {
    */
   setupBirthdayConfig (configOpts) {
     const page = this.page
+    // Setting the default selection could be done in setupBirthdaySelection
+    // if the user was already logged in, but since this is not certain, we
+    // do it here.
+    if (app().seedGenTime > 0) page.freshButton.checked = true
+    else page.earliestButton.checked = true
     const birthdayConfig = configOpts.find(config => config.key === WALLET_BIRTHDAY_CONFIG)
     this.walletHasBirthday = !!birthdayConfig
     if (this.walletHasBirthday) {
@@ -326,7 +329,7 @@ export class WalletConfigForm {
   /*
    * update creates the dynamic form.
    */
-  update (configOpts) {
+  update (configOpts, assetHasActiveOrders) {
     this.configElements = {}
     this.configOpts = configOpts
     Doc.empty(this.dynamicOpts, this.defaultSettings, this.loadedSettings)
@@ -368,6 +371,7 @@ export class WalletConfigForm {
         input.min = getMinMaxVal(opt.min)
         input.valueAsDate = opt.default ? new Date(opt.default * 1000) : new Date()
       } else input.value = opt.default !== null ? opt.default : ''
+      input.disabled = opt.disablewhenactive && assetHasActiveOrders
     }
     for (const opt of this.configOpts) {
       if (this.sectionize && opt.default !== null) defaultedOpts.push(opt)

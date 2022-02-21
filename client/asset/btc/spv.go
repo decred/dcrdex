@@ -277,16 +277,20 @@ func (w logWriter) Write(p []byte) (n int, err error) {
 // Bitcoin wallet. spvWallet controls an instance of btcwallet.Wallet directly
 // and does not run or connect to the RPC server.
 type spvWallet struct {
-	chainParams  *chaincfg.Params
-	wallet       btcWallet
-	cl           neutrinoService
-	chainClient  *chain.NeutrinoClient
-	birthday     time.Time
-	acctNum      uint32
-	acctName     string
-	netDir       string
-	neutrinoDB   walletdb.DB
-	connectPeers []string
+	chainParams *chaincfg.Params
+	wallet      btcWallet
+	cl          neutrinoService
+	chainClient *chain.NeutrinoClient
+	birthday    time.Time
+	// if allowAutomaticRescan is true, if when connect is called, spvWallet.birthday
+	// is earlier than the birthday stored in the btcwallet database, the transaction
+	// history will be wiped and a rescan will start.
+	allowAutomaticRescan bool
+	acctNum              uint32
+	acctName             string
+	netDir               string
+	neutrinoDB           walletdb.DB
+	connectPeers         []string
 
 	txBlocksMtx sync.Mutex
 	txBlocks    map[chainhash.Hash]*hashEntry
@@ -310,17 +314,19 @@ var _ Wallet = (*spvWallet)(nil)
 var _ tipNotifier = (*spvWallet)(nil)
 
 // loadSPVWallet loads an existing wallet.
-func loadSPVWallet(dbDir string, logger dex.Logger, connectPeers []string, chainParams *chaincfg.Params) *spvWallet {
+func loadSPVWallet(dbDir string, logger dex.Logger, connectPeers []string, chainParams *chaincfg.Params, birthday time.Time, allowAutomaticRescan bool) *spvWallet {
 	return &spvWallet{
-		chainParams:  chainParams,
-		acctNum:      defaultAcctNum,
-		acctName:     defaultAcctName,
-		netDir:       filepath.Join(dbDir, chainParams.Name),
-		txBlocks:     make(map[chainhash.Hash]*hashEntry),
-		checkpoints:  make(map[outPoint]*scanCheckpoint),
-		log:          logger,
-		connectPeers: connectPeers,
-		tipChan:      make(chan *block, 8),
+		chainParams:          chainParams,
+		acctNum:              defaultAcctNum,
+		acctName:             defaultAcctName,
+		netDir:               filepath.Join(dbDir, chainParams.Name),
+		txBlocks:             make(map[chainhash.Hash]*hashEntry),
+		checkpoints:          make(map[outPoint]*scanCheckpoint),
+		log:                  logger,
+		connectPeers:         connectPeers,
+		tipChan:              make(chan *block, 8),
+		allowAutomaticRescan: allowAutomaticRescan,
+		birthday:             birthday,
 	}
 }
 
@@ -1175,9 +1181,40 @@ func (w *spvWallet) startWallet() error {
 	}
 
 	w.cl = chainService
+
 	w.chainClient = chain.NewNeutrinoClient(w.chainParams, chainService)
 	w.wallet = &walletExtender{btcw, w.chainParams}
-	w.birthday = btcw.Manager.Birthday()
+
+	oldBday := btcw.Manager.Birthday()
+	wdb := btcw.Database()
+	performRescan := w.allowAutomaticRescan && w.birthday.Before(oldBday)
+
+	if !oldBday.Equal(w.birthday) {
+		err = walletdb.Update(wdb, func(dbtx walletdb.ReadWriteTx) error {
+			ns := dbtx.ReadWriteBucket([]byte("waddrmgr"))
+			return btcw.Manager.SetBirthday(ns, w.birthday)
+		})
+		if err != nil {
+			w.log.Errorf("Failed to reset wallet manager birthday: %v", err)
+			performRescan = false
+		}
+	}
+
+	if performRescan {
+		w.log.Info("Starting a wallet rescan")
+		err := wallet.DropTransactionHistory(wdb, false)
+		if err != nil {
+			w.log.Errorf("Failed to drop wallet transaction history: %v", err)
+		}
+
+		err = walletdb.Update(wdb, func(dbtx walletdb.ReadWriteTx) error {
+			ns := dbtx.ReadWriteBucket([]byte("waddrmgr"))
+			return btcw.Manager.SetSyncedTo(ns, nil)
+		})
+		if err != nil {
+			w.log.Errorf("Failed to reset wallet manager sync height: %v", err)
+		}
+	}
 
 	if err = w.chainClient.Start(); err != nil { // lazily starts connmgr
 		bailOnEverything()
@@ -1200,7 +1237,7 @@ func (w *spvWallet) startWallet() error {
 // located. The neutrinoService is not stopped, so most spvWallet methods will
 // continue to work without error, but methods using the btcWallet will likely
 // return incorrect results or errors.
-func (w *spvWallet) rescanWalletAsync(walletBirthday time.Time) error {
+func (w *spvWallet) rescanWalletAsync() error {
 	if !atomic.CompareAndSwapUint32(&w.rescanStarting, 0, 1) {
 		return errors.New("rescan already in progress")
 	}
@@ -1231,17 +1268,11 @@ func (w *spvWallet) rescanWalletAsync(walletBirthday time.Time) error {
 
 	err = walletdb.Update(wdb, func(dbtx walletdb.ReadWriteTx) error {
 		ns := dbtx.ReadWriteBucket([]byte("waddrmgr")) // it'll be fine
-		err := btcw.Manager.SetBirthday(ns, walletBirthday)
-		if err != nil {
-			return err
-		}
-		return btcw.Manager.SetSyncedTo(ns, nil) // never synced, forcing recover from birthday
+		return btcw.Manager.SetSyncedTo(ns, nil)       // never synced, forcing recover from birthday
 	})
 	if err != nil {
-		w.log.Errorf("Failed to reset wallet manager sync height and birthday: %v", err)
+		w.log.Errorf("Failed to reset wallet manager sync height: %v", err)
 	}
-
-	w.birthday = walletBirthday
 
 	w.log.Info("Starting wallet...")
 	btcw.Start()

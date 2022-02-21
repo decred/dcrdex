@@ -79,6 +79,12 @@ body.dark {
     background-color: black;
   }
 
+  input:disabled {
+    color: $font-color-dark;
+    background-color: #343232;
+    opacity: 1;
+  }
+
   form.card button,
   form.card label {
     text-shadow: 0 0 4px black;

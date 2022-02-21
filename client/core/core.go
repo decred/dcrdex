@@ -1872,6 +1872,10 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		DataDir: c.assetDataDirectory(assetID),
 	}
 
+	walletCfg.Settings[asset.SpecialSettingActivelyUsed] =
+		strconv.FormatBool(c.AssetHasActiveOrders(dbWallet.AssetID))
+	defer delete(walletCfg.Settings, asset.SpecialSettingActivelyUsed)
+
 	logger := c.log.SubLogger(unbip(assetID))
 	w, err := asset.OpenWallet(assetID, walletCfg, logger, c.net)
 	if err != nil {
@@ -1909,6 +1913,17 @@ func (c *Core) WalletState(assetID uint32) *WalletState {
 		return nil
 	}
 	return wallet.state()
+}
+
+// AssetHasActiveOrders checks whether there are any active orders or
+// negotiating matches for the specified asset.
+func (c *Core) AssetHasActiveOrders(assetID uint32) bool {
+	for _, dc := range c.dexConnections() {
+		if dc.hasActiveAssetOrders(assetID) {
+			return true
+		}
+	}
+	return false
 }
 
 // walletCheckAndNotify sets the xcWallet's synced and syncProgress fields from
