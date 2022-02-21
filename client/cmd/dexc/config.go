@@ -95,23 +95,25 @@ type Config struct {
 	LocalLogs    bool   `long:"loglocal" description:"Use local time zone time stamps in log entries."`
 	CPUProfile   string `long:"cpuprofile" description:"File for CPU profiling."`
 	HTTPProfile  bool   `long:"httpprof" description:"Start HTTP profiler on /pprof."`
-	ShowVer      bool   `short:"V" long:"version" description:"Display version information and exit"`
+	ShowVersion  bool   `short:"V" long:"version" description:"Display version information and exit"`
 	TorProxy     string `long:"torproxy" description:"Connect via TOR (eg. 127.0.0.1:9050)."`
 	TorIsolation bool   `long:"torisolation" description:"Enable TOR circuit isolation."`
 	Net          dex.Network
 	CertHosts    []string
 }
 
-var defaultConfig = Config{
-	AppData:    defaultApplicationDirectory,
-	Config:     defaultConfigPath,
-	DebugLevel: defaultLogLevel,
-	CertHosts: []string{defaultTestnetHost, defaultSimnetHost,
-		defaultMainnetHost},
-}
-
 // configure processes the application configuration.
 func configure() (*Config, error) {
+
+	// Default configuration
+	defaultConfig := Config{
+		AppData:    defaultApplicationDirectory,
+		Config:     defaultConfigPath,
+		DebugLevel: defaultLogLevel,
+		CertHosts: []string{defaultTestnetHost, defaultSimnetHost,
+			defaultMainnetHost},
+	}
+
 	// Pre-parse the command line options to see if an alternative config file
 	// or the version flag was specified. Override any environment variables
 	// with parsed command line flags.
@@ -133,14 +135,13 @@ func configure() (*Config, error) {
 	}
 
 	// Show the version and exit if the version flag was specified.
-	if preCfg.ShowVer {
+	if preCfg.ShowVersion {
 		fmt.Printf("%s version %s (Go version %s %s/%s)\n",
 			version.AppName, version.Version(), runtime.Version(), runtime.GOOS, runtime.GOARCH)
 		os.Exit(0)
 	}
 
-	// If the app directory has been changed, replace shortcut chars such
-	// as "~" with the full path.
+	// Update the application directory if specified on CLI.
 	if preCfg.AppData != defaultApplicationDirectory {
 		preCfg.AppData = dex.CleanAndExpandPath(preCfg.AppData)
 		// If the app directory has been changed, but the config file path hasn't,
@@ -150,11 +151,9 @@ func configure() (*Config, error) {
 		}
 	}
 
-	cfgPath := dex.CleanAndExpandPath(preCfg.Config)
-
 	// Load additional config from file.
 	parser := flags.NewParser(&iniCfg, flags.Default)
-	err := flags.NewIniParser(parser).ParseFile(cfgPath)
+	err := flags.NewIniParser(parser).ParseFile(preCfg.Config)
 	if err != nil {
 		if _, ok := err.(*os.PathError); !ok {
 			fmt.Fprintln(os.Stderr, err)
