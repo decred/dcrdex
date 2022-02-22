@@ -2387,7 +2387,7 @@ func TestWithdraw(t *testing.T) {
 
 	wallet.Wallet = feeRater
 
-	_, err = tCore.Withdraw(tPW, tDCR.ID, 1e8, address)
+	_, err = tCore.Withdraw(tPW, tUTXOAssetA.ID, 1e8, address)
 	if err != nil {
 		t.Fatalf("FeeRater Withdraw error: %v", err)
 	}
