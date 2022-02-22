@@ -44,18 +44,18 @@ import (
 
 func init() {
 	asset.Register(tUTXOAssetA.ID, &tDriver{
-		decodedCoinID: tUTXOAssetA.Symbol,
+		decodedCoinID: tUTXOAssetA.Symbol + "-coin",
 		winfo:         tWalletInfo,
 	})
 	asset.Register(tUTXOAssetB.ID, &tCreator{
 		tDriver: &tDriver{
-			decodedCoinID: tUTXOAssetB.Symbol,
+			decodedCoinID: tUTXOAssetB.Symbol + "-coin",
 			winfo:         tWalletInfo,
 		},
 	})
 	asset.Register(tACCTAsset.ID, &tCreator{
 		tDriver: &tDriver{
-			decodedCoinID: tACCTAsset.Symbol,
+			decodedCoinID: tACCTAsset.Symbol + "-coin",
 			winfo:         tWalletInfo,
 		},
 	})
@@ -1488,10 +1488,6 @@ func TestCreateWallet(t *testing.T) {
 	tILT.Symbol = "ilt"
 	tILT.ID, _ = dex.BipSymbolID(tILT.Symbol)
 
-	// ILT is based on DCR, so use it's coinID decoder. If this changes, update
-	// the following decoder function:
-	decodedCoinID := "dcr"
-
 	// Create registration form.
 	form := &WalletForm{
 		AssetID: tILT.ID,
@@ -1532,7 +1528,7 @@ func TestCreateWallet(t *testing.T) {
 	// Register the asset.
 	asset.Register(tILT.ID, &tDriver{
 		wallet:        wallet.Wallet,
-		decodedCoinID: decodedCoinID,
+		decodedCoinID: "ilt-coin",
 		winfo:         tWalletInfo,
 	})
 
