@@ -1713,8 +1713,8 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 		})
 	}
 
-	// Don't use (*Core).feeSuggestion here, since can incur an RPC request.
-	// If we don't have a synced book, use t.redemption
+	// Don't use (*Core).feeSuggestion here, since it can incur an RPC request.
+	// If we don't have a synced book, use t.redeemFeeSuggestion.
 	feeSuggestion := t.dc.bestBookFeeSuggestion(t.wallets.toAsset.ID)
 	if feeSuggestion == 0 {
 		feeSuggestion = atomic.LoadUint64(&t.redeemFeeSuggestion)
@@ -2000,7 +2000,7 @@ func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, 
 		t.dc.log.Infof("Refunding %s contract %s for match %s (%s)",
 			refundAsset.Symbol, swapCoinString, match, matchFailureReason)
 
-		feeSuggestion := c.feeSuggestion(t.dc, refundAsset.ID)
+		feeSuggestion := c.feeSuggestionAny(refundAsset.ID)
 		refundCoin, err := refundWallet.Refund(swapCoinID, contractToRefund, feeSuggestion)
 		if err != nil {
 			// CRITICAL - Refund must indicate if the swap is spent (i.e.

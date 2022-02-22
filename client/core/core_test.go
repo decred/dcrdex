@@ -535,7 +535,7 @@ func (r *tReceipt) SignedRefund() dex.Bytes {
 }
 
 type TXCWallet struct {
-	mtx               sync.RWMutex
+	payFeeSuggestion  uint64
 	payFeeCoin        *tCoin
 	payFeeErr         error
 	addrErr           error
@@ -634,10 +634,6 @@ func (w *TXCWallet) Balance() (*asset.Balance, error) {
 		w.bal = new(asset.Balance)
 	}
 	return w.bal, nil
-}
-
-func (w *TXCWallet) FeeRate() (uint64, error) {
-	return 24, nil
 }
 
 func (w *TXCWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error) {
@@ -752,21 +748,17 @@ func (w *TXCWallet) Locked() bool {
 	return w.locked
 }
 
-func (w *TXCWallet) Send(address string, fee uint64, _ *dex.Asset) (asset.Coin, error) {
-	w.mtx.RLock()
-	defer w.mtx.RUnlock()
-	return w.payFeeCoin, w.payFeeErr
-}
-
 func (w *TXCWallet) ConfirmTime(id dex.Bytes, nConfs uint32) (time.Time, error) {
 	return time.Time{}, nil
 }
 
-func (w *TXCWallet) PayFee(address string, fee, feeRateSuggestion uint64) (asset.Coin, error) {
+func (w *TXCWallet) PayFee(address string, fee, feeSuggestion uint64) (asset.Coin, error) {
+	w.payFeeSuggestion = feeSuggestion
 	return w.payFeeCoin, w.payFeeErr
 }
 
 func (w *TXCWallet) Withdraw(address string, value, feeSuggestion uint64) (asset.Coin, error) {
+	w.payFeeSuggestion = feeSuggestion
 	return w.payFeeCoin, w.payFeeErr
 }
 
@@ -800,6 +792,18 @@ func (w *TXCWallet) SwapConfirmations(ctx context.Context, coinID dex.Bytes, con
 
 func (w *TXCWallet) RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (uint32, error) {
 	return w.tConfirmations(ctx, coinID)
+}
+
+type TFeeRater struct {
+	*TXCWallet
+	feeRate uint64
+}
+
+func (w *TFeeRater) FeeRate() (uint64, error) {
+	if w.feeRate == 0 {
+		return 0, fmt.Errorf("test fee rate unavailable")
+	}
+	return w.feeRate, nil
 }
 
 type tCrypterSmart struct {
@@ -2302,6 +2306,29 @@ func TestWithdraw(t *testing.T) {
 	coinID := coin.ID()
 	if len(coinID) != 1 || coinID[0] != 'a' {
 		t.Fatalf("coin ID not propagated")
+	}
+
+	// So far, the fee suggestion should have always been zero.
+	if tWallet.payFeeSuggestion != 0 {
+		t.Fatalf("unexpected non-zero fee rate when no books or responses prepared")
+	}
+
+	const feeRate = 54321
+
+	feeRater := &TFeeRater{
+		TXCWallet: tWallet,
+		feeRate:   feeRate,
+	}
+
+	wallet.Wallet = feeRater
+
+	_, err = tCore.Withdraw(tPW, tDCR.ID, 1e8, address)
+	if err != nil {
+		t.Fatalf("FeeRater Withdraw error: %v", err)
+	}
+
+	if tWallet.payFeeSuggestion != feeRate {
+		t.Fatalf("unexpected fee rate from FeeRater. wanted %d, got %d", feeRate, tWallet.payFeeSuggestion)
 	}
 }
 

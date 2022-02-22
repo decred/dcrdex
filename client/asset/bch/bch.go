@@ -182,20 +182,20 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	}
 
 	return &BCHWallet{
-		ExchangeWallet: xcWallet,
+		ExchangeWalletFullNode: xcWallet,
 	}, nil
 }
 
-// BCHWallet embeds btc.ExchangeWallet, but re-implements a couple of methods to
-// perform on-the-fly address translation.
+// BCHWallet embeds btc.ExchangeWalletFullNode, but re-implements a couple of
+// methods to perform on-the-fly address translation.
 type BCHWallet struct {
-	*btc.ExchangeWallet
+	*btc.ExchangeWalletFullNode
 }
 
 // Address converts the Bitcoin base58-encoded address returned by the embedded
 // ExchangeWallet into a Cash Address.
 func (bch *BCHWallet) Address() (string, error) {
-	btcAddrStr, err := bch.ExchangeWallet.Address()
+	btcAddrStr, err := bch.ExchangeWalletFullNode.Address()
 	if err != nil {
 		return "", err
 	}
@@ -206,7 +206,7 @@ func (bch *BCHWallet) Address() (string, error) {
 // AuditContract method by converting the Recipient to the Cash Address
 // encoding.
 func (bch *BCHWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroadcast bool) (*asset.AuditInfo, error) { // AuditInfo has address
-	ai, err := bch.ExchangeWallet.AuditContract(coinID, contract, txData, rebroadcast)
+	ai, err := bch.ExchangeWalletFullNode.AuditContract(coinID, contract, txData, rebroadcast)
 	if err != nil {
 		return nil, err
 	}

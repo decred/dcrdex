@@ -309,3 +309,9 @@ func (w *xcWallet) SwapConfirmations(ctx context.Context, coinID []byte, contrac
 	defer cancel()
 	return w.Wallet.SwapConfirmations(ctx, coinID, contract, encode.UnixTimeMilli(int64(matchTime)))
 }
+
+// feeRater is identical to calling w.Wallet.(asset.FeeRater).
+func (w *xcWallet) feeRater() (asset.FeeRater, bool) {
+	rater, is := w.Wallet.(asset.FeeRater)
+	return rater, is
+}

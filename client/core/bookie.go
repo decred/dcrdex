@@ -712,6 +712,9 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 		Seq:      sp.Seq,        // forces seq reset, but should be in seq with previous
 		Epoch:    sp.FinalEpoch, // unused?
 		// Orders is nil
+		// BaseFeeRate = QuoteFeeRate = 0 effectively disables the book's fee
+		// cache until an update is received, since bestBookFeeSuggestion
+		// ignores zeros.
 	})
 	// Return any non-nil error, but still revoke purged orders.
 

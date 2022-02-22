@@ -393,6 +393,10 @@ type ExchangeWallet struct {
 	externalTxCache map[chainhash.Hash]*externalTx
 }
 
+// Check that ExchangeWallet satisfies the Wallet interface.
+var _ asset.Wallet = (*ExchangeWallet)(nil)
+var _ asset.FeeRater = (*ExchangeWallet)(nil)
+
 type block struct {
 	height int64
 	hash   *chainhash.Hash
@@ -418,9 +422,6 @@ type findRedemptionResult struct {
 	Secret           dex.Bytes
 	Err              error
 }
-
-// Check that ExchangeWallet satisfies the Wallet interface.
-var _ asset.Wallet = (*ExchangeWallet)(nil)
 
 // NewWallet is the exported constructor by which the DEX will import the
 // exchange wallet.
@@ -606,6 +607,12 @@ func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
 	}, nil
 }
 
+// FeeRate satisfies asset.FeeRater.
+func (dcr *ExchangeWallet) FeeRate() (uint64, error) {
+	// Requesting a rate for 1 confirmation can return unreasonably high rates.
+	return dcr.feeRate(2)
+}
+
 // FeeRate returns the current optimal fee rate in atoms / byte.
 func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
 	// estimatesmartfee 1 returns extremely high rates on DCR.
@@ -625,21 +632,29 @@ func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
 	return 1 + uint64(atomsPerKB)/1000, nil // dcrPerKB * 1e8 / 1e3
 }
 
-// feeRateWithFallback attempts to get the optimal fee rate in atoms / byte via
-// FeeRate. If that fails, it will return the configured fallback fee rate.
-func (dcr *ExchangeWallet) feeRateWithFallback(confTarget, feeSuggestion uint64) uint64 {
+// targetFeeRateWithFallback attempts to get a fresh fee rate for the target
+// number of confirmations, but falls back to the suggestion or fallbackFeeRate
+// via feeRateWithFallback.
+func (dcr *ExchangeWallet) targetFeeRateWithFallback(confTarget, feeSuggestion uint64) uint64 {
 	feeRate, err := dcr.feeRate(confTarget)
 	if err == nil {
 		dcr.log.Tracef("Obtained local estimate for %d-conf fee rate, %d", confTarget, feeRate)
 		return feeRate
 	}
-	if feeSuggestion > 0 && feeSuggestion < dcr.fallbackFeeRate && feeSuggestion < dcr.feeRateLimit {
-		dcr.log.Tracef("feeRateWithFallback using caller's suggestion for %d-conf fee rate, %d. Local estimate unavailable (%q)",
-			confTarget, feeSuggestion, err)
+	dcr.log.Tracef("no %d-conf feeRate available: %v", confTarget, err)
+	return dcr.feeRateWithFallback(feeSuggestion)
+}
+
+// feeRateWithFallback filters the suggested fee rate by ensuring it is within
+// limits. If not, the configured fallbackFeeRate is returned and a warning
+// logged.
+func (dcr *ExchangeWallet) feeRateWithFallback(feeSuggestion uint64) uint64 {
+	if feeSuggestion > 0 && feeSuggestion < dcr.feeRateLimit {
+		dcr.log.Tracef("feeRateWithFallback using caller's suggestion for fee rate, %d. Local estimate unavailable",
+			feeSuggestion)
 		return feeSuggestion
 	}
-	dcr.log.Warnf("Unable to get optimal fee rate, using fallback of %d: %v",
-		dcr.fallbackFeeRate, err)
+	dcr.log.Warnf("Unable to get optimal fee rate, using fallback of %d", dcr.fallbackFeeRate)
 	return dcr.fallbackFeeRate
 }
 
@@ -778,7 +793,7 @@ func (dcr *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 // PreRedeem generates an estimate of the range of redemption fees that could
 // be assessed.
 func (dcr *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, error) {
-	feeRate := dcr.feeRateWithFallback(dcr.redeemConfTarget, req.FeeSuggestion)
+	feeRate := dcr.targetFeeRateWithFallback(dcr.redeemConfTarget, req.FeeSuggestion)
 	// Best is one transaction with req.Lots inputs and 1 output.
 	var best uint64 = dexdcr.MsgTxOverhead
 	// Worst is req.Lots transactions, each with one input and one output.
@@ -1053,7 +1068,7 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 	}
 
 	if suggestedFeeRate == 0 {
-		suggestedFeeRate = dcr.feeRateWithFallback(1, 0)
+		suggestedFeeRate = dcr.targetFeeRateWithFallback(1, 0)
 		// TODO
 		// 1.0: Error when no suggestion.
 		// return nil, false, fmt.Errorf("cannot do a split transaction without a fee rate suggestion from the server")
@@ -1396,7 +1411,7 @@ func (dcr *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 
 	// Calculate the size and the fees.
 	size := msgTx.SerializeSize() + dexdcr.RedeemSwapSigScriptSize*len(form.Redemptions) + dexdcr.P2PKHOutputSize
-	feeRate := dcr.feeRateWithFallback(dcr.redeemConfTarget, form.FeeSuggestion)
+	feeRate := dcr.targetFeeRateWithFallback(dcr.redeemConfTarget, form.FeeSuggestion)
 	fee := feeRate * uint64(size)
 	if fee > totalIn {
 		return nil, nil, 0, fmt.Errorf("redeem tx not worth the fees")
@@ -2118,7 +2133,7 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 	}
 
 	// Create the transaction that spends the contract.
-	feeRate := dcr.feeRateWithFallback(2, feeSuggestion)
+	feeRate := dcr.targetFeeRateWithFallback(2, feeSuggestion)
 	msgTx := wire.NewMsgTx()
 	msgTx.LockTime = uint32(lockTime)
 	prevOut := wire.NewOutPoint(txHash, vout, wire.TxTreeRegular)
@@ -2252,14 +2267,14 @@ func (dcr *ExchangeWallet) Locked() bool {
 
 // PayFee sends the dex registration fee. Transaction fees are in addition to
 // the registration fee, and the fee rate is taken from the DEX configuration.
-func (dcr *ExchangeWallet) PayFee(address string, regFee, feeRateSuggestion uint64) (asset.Coin, error) {
+func (dcr *ExchangeWallet) PayFee(address string, regFee, feeRate uint64) (asset.Coin, error) {
 	addr, err := stdaddr.DecodeAddress(address, dcr.chainParams)
 	if err != nil {
 		return nil, err
 	}
 	// TODO: Evaluate SendToAddress and how it deals with the change output
 	// address index to see if it can be used here instead.
-	msgTx, sent, err := dcr.sendRegFee(addr, regFee, dcr.feeRateWithFallback(1, feeRateSuggestion))
+	msgTx, sent, err := dcr.sendRegFee(addr, regFee, dcr.feeRateWithFallback(feeRate))
 	if err != nil {
 		return nil, err
 	}
@@ -2272,12 +2287,12 @@ func (dcr *ExchangeWallet) PayFee(address string, regFee, feeRateSuggestion uint
 
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
 // the value.
-func (dcr *ExchangeWallet) Withdraw(address string, value, feeSuggestion uint64) (asset.Coin, error) {
+func (dcr *ExchangeWallet) Withdraw(address string, value, feeRate uint64) (asset.Coin, error) {
 	addr, err := stdaddr.DecodeAddress(address, dcr.chainParams)
 	if err != nil {
 		return nil, err
 	}
-	msgTx, net, err := dcr.sendMinusFees(addr, value, dcr.feeRateWithFallback(2, feeSuggestion))
+	msgTx, net, err := dcr.sendMinusFees(addr, value, dcr.feeRateWithFallback(feeRate))
 	if err != nil {
 		return nil, err
 	}
