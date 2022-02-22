@@ -19,6 +19,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
+	qrcode "github.com/skip2/go-qrcode"
 )
 
 const (
@@ -195,6 +196,39 @@ func (s *WebServer) handleWalletLogFile(w http.ResponseWriter, r *http.Request) 
 	_, err = io.Copy(w, logFile)
 	if err != nil {
 		log.Errorf("error copying log file: %v", err)
+	}
+}
+
+// handleGenerateQRCode is the handler for the '/generateqrcode' page request
+func (s *WebServer) handleGenerateQRCode(w http.ResponseWriter, r *http.Request) {
+	err := r.ParseForm()
+	if err != nil {
+		log.Errorf("error parsing form for generate qr code: %v", err)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	address := r.Form["address"]
+	if len(address) != 1 || len(address[0]) == 0 {
+		log.Error("form for generating qr code does not contain address")
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	png, err := qrcode.Encode(address[0], qrcode.Medium, 200)
+	if err != nil {
+		log.Error("error generating qr code: %v", err)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Content-Length", strconv.Itoa(len(png)))
+	w.WriteHeader(http.StatusOK)
+
+	_, err = w.Write(png)
+	if err != nil {
+		log.Errorf("error writing qr code image: %v", err)
 	}
 }
 

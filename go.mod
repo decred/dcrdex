@@ -42,6 +42,7 @@ require (
 	github.com/jrick/logrotate v1.0.0
 	github.com/lib/pq v1.10.3
 	github.com/lightninglabs/neutrino v0.13.1-0.20211214231330-53b628ce1756
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	go.etcd.io/bbolt v1.3.5
 	golang.org/x/crypto v0.0.0-20210711020723-a769d52b0f97
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
