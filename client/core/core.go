@@ -1031,11 +1031,15 @@ func (dc *dexConnection) bestBookFeeSuggestion(assetID uint32) uint64 {
 	dc.booksMtx.RLock()
 	defer dc.booksMtx.RUnlock()
 	for _, book := range dc.books {
+		var feeRate uint64
 		switch assetID {
 		case book.base:
-			return book.BaseFeeRate()
+			feeRate = book.BaseFeeRate()
 		case book.quote:
-			return book.QuoteFeeRate()
+			feeRate = book.QuoteFeeRate()
+		}
+		if feeRate > 0 {
+			return feeRate
 		}
 	}
 	return 0
@@ -2844,8 +2848,8 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	c.log.Infof("Attempting registration fee payment to %s, account ID %v, of %d units of %s. "+
 		"Do NOT manually send funds to this address even if this fails.",
 		regRes.Address, dc.acct.id, regRes.Fee, regFeeAssetSymbol)
-	feeRateSuggestion := dc.fetchFeeRate(feeAsset.ID)
-	coin, err := wallet.PayFee(regRes.Address, regRes.Fee, feeRateSuggestion)
+	feeRate := c.feeSuggestionAny(feeAsset.ID, dc)
+	coin, err := wallet.PayFee(regRes.Address, regRes.Fee, feeRate)
 	if err != nil {
 		return nil, newError(feeSendErr, "error paying registration fee: %v", err)
 	}
@@ -3460,7 +3464,7 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEs
 		return nil, fmt.Errorf("failed to get swap fee suggestion for %s at %s", unbip(quote), host)
 	}
 
-	redeemFeeSuggestion := c.feeSuggestion(dc, base)
+	redeemFeeSuggestion := c.feeSuggestionAny(base)
 	if redeemFeeSuggestion == 0 {
 		return nil, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", unbip(base), host)
 	}
@@ -3518,7 +3522,7 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, erro
 		return nil, fmt.Errorf("failed to get swap fee suggestion for %s at %s", unbip(base), host)
 	}
 
-	redeemFeeSuggestion := c.feeSuggestion(dc, quote)
+	redeemFeeSuggestion := c.feeSuggestionAny(quote)
 	if redeemFeeSuggestion == 0 {
 		return nil, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", unbip(quote), host)
 	}
@@ -3724,11 +3728,22 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 }
 
 // feeSuggestionAny gets a fee suggestion for the given asset from any source
-// with it available. It first checks all relevant books for a cached fee rate
-// obtained with an epoch_report message, and falls back to directly requesting
-// a rate from servers with a fee_rate request.
-func (c *Core) feeSuggestionAny(assetID uint32) uint64 {
-	conns := c.dexConnections()
+// with it available. It first checks for a capable wallet, then relevant books
+// for a cached fee rate obtained with an epoch_report message, and falls back
+// to directly requesting a rate from servers with a fee_rate request.
+func (c *Core) feeSuggestionAny(assetID uint32, preferredConns ...*dexConnection) uint64 {
+	conns := append(preferredConns, c.dexConnections()...)
+	// See if the wallet supports fee rates.
+	w, found := c.wallet(assetID)
+	if found && w.connected() {
+		if rater, is := w.feeRater(); is {
+			if r, err := rater.FeeRate(); err == nil {
+				return r
+			} else {
+				c.log.Debugf("failed to get fee suggestion from %s FeeRater: %v", unbip(assetID), err)
+			}
+		}
+	}
 	// Look for cached rates from epoch_report messages.
 	for _, dc := range conns {
 		feeSuggestion := dc.bestBookFeeSuggestion(assetID)
@@ -3736,8 +3751,32 @@ func (c *Core) feeSuggestionAny(assetID uint32) uint64 {
 			return feeSuggestion
 		}
 	}
+
+	// Helper function to determine if a server has an active market that pairs
+	// the requested asset.
+	hasActiveMarket := func(dc *dexConnection) bool {
+		dc.cfgMtx.RLock()
+		cfg := dc.cfg
+		dc.cfgMtx.RUnlock()
+		for _, mkt := range cfg.Markets {
+			if mkt.Base == assetID || mkt.Quote == assetID && mkt.Running() {
+				return true
+			}
+		}
+		return false
+	}
+
 	// Request a rate with fee_rate.
 	for _, dc := range conns {
+		// The server should have at least one active market with the asset,
+		// otherwise we might get an outdated rate for an asset whose backend
+		// might be supported but not in active use, e.g. down for maintenance.
+		// The fee_rate endpoint will happily return a very old rate without
+		// indication.
+		if !hasActiveMarket(dc) {
+			continue
+		}
+
 		feeSuggestion := dc.fetchFeeRate(assetID)
 		if feeSuggestion > 0 {
 			return feeSuggestion
@@ -3880,7 +3919,7 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 		return nil, fmt.Errorf("failed to get swap fee suggestion for %s at %s", unbip(wallets.fromAsset.ID), form.Host)
 	}
 
-	redeemFeeSuggestion := c.feeSuggestion(dc, wallets.toAsset.ID)
+	redeemFeeSuggestion := c.feeSuggestionAny(wallets.toAsset.ID)
 	if redeemFeeSuggestion == 0 {
 		return nil, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", unbip(wallets.toAsset.ID), form.Host)
 	}
@@ -6354,6 +6393,14 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 // updated. If there is no synced book, but a non-zero fee suggestion is already
 // cached, no new requests will be made.
 func (c *Core) cacheRedemptionFeeSuggestion(t *trackedTrade) {
+	if rater, is := t.wallets.toWallet.feeRater(); is {
+		feeRate, err := rater.FeeRate()
+		if err == nil {
+			atomic.StoreUint64(&t.redeemFeeSuggestion, feeRate)
+			return
+		}
+		c.log.Debugf("unable to retrieve fee rate from FeeRater. falling back to other methods: %v", err)
+	}
 	// Try to find any book that might have the fee.
 	redeemAsset := t.wallets.toAsset.ID
 	feeSuggestion := t.dc.bestBookFeeSuggestion(redeemAsset)

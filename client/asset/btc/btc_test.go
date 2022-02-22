@@ -567,7 +567,7 @@ func makeSwapContract(segwit bool, lockTimeOffset time.Duration) (secret []byte,
 	return
 }
 
-func tNewWallet(segwit bool, walletType string) (*ExchangeWallet, *testData, func(), error) {
+func tNewWallet(segwit bool, walletType string) (*ExchangeWalletFullNode, *testData, func(), error) {
 	if segwit {
 		tBTC.SwapSize = dexbtc.InitTxSizeSegwit
 		tBTC.SwapSizeBase = dexbtc.InitTxSizeBaseSegwit
@@ -602,14 +602,15 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWallet, *testData, fun
 
 	// rpcClient := newRPCClient(requester, segwit, nil, false, minNetworkVersion, dex.StdOutLogger("RPCTEST", dex.LevelTrace), &chaincfg.MainNetParams)
 
-	var wallet *ExchangeWallet
+	var wallet *ExchangeWalletFullNode
 	var err error
 	switch walletType {
 	case walletTypeRPC:
 		wallet, err = newRPCWallet(&tRawRequester{data}, cfg, &WalletConfig{})
 	case walletTypeSPV:
-		wallet, err = newUnconnectedWallet(cfg, &WalletConfig{})
+		w, err := newUnconnectedWallet(cfg, &WalletConfig{})
 		if err == nil {
+			wallet = &ExchangeWalletFullNode{w}
 			neutrinoClient := &tNeutrinoClient{data}
 			wallet.node = &spvWallet{
 				chainParams: &chaincfg.MainNetParams,
@@ -1220,7 +1221,7 @@ func testFundingCoins(t *testing.T, segwit bool, walletType string) {
 	ensureGood()
 }
 
-func checkMaxOrder(t *testing.T, wallet *ExchangeWallet, lots, swapVal, maxFees, estWorstCase, estBestCase, locked uint64) {
+func checkMaxOrder(t *testing.T, wallet asset.Wallet, lots, swapVal, maxFees, estWorstCase, estBestCase, locked uint64) {
 	t.Helper()
 	maxOrder, err := wallet.MaxOrder(tLotSize, feeSuggestion, tBTC)
 	if err != nil {
