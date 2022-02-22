@@ -18,6 +18,7 @@ const (
 	WalletTraitRescanner    WalletTrait = 1 << iota // The Wallet is an asset.Rescanner.
 	WalletTraitNewAddresser                         // The Wallet can generate new addresses on demand with NewAddress.
 	WalletTraitLogFiler                             // The Wallet allows for downloading of a log file.
+	WalletTraitFeeRater                             // Wallet can provide a fee rate for non-critical transactions
 )
 
 // IsRescanner tests if the WalletTrait has the WalletTraitRescanner bit set.
@@ -38,6 +39,12 @@ func (wt WalletTrait) IsLogFiler() bool {
 	return wt&WalletTraitLogFiler != 0
 }
 
+// IsFeeRater tests if the WalletTrait has the WalletTraitFeeRater bit set,
+// which indicates the presence of a FeeRate method.
+func (wt WalletTrait) IsFeeRater() bool {
+	return wt&WalletTraitFeeRater != 0
+}
+
 // DetermineWalletTraits returns the WalletTrait bitset for the provided Wallet.
 func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(Rescanner); is {
@@ -48,6 +55,9 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	}
 	if _, is := w.(LogFiler); is {
 		t |= WalletTraitLogFiler
+	}
+	if _, is := w.(FeeRater); is {
+		t |= WalletTraitFeeRater
 	}
 	return t
 }
@@ -253,8 +263,8 @@ type Wallet interface {
 	// Locked will be true if the wallet is currently locked.
 	Locked() bool
 	// PayFee sends the dex registration fee. Transaction fees are in addition to
-	// the registration fee, and the feeRateSuggestion is gotten from the server.
-	PayFee(address string, feeAmt, feeRateSuggestion uint64) (Coin, error)
+	// the registration fee, and the feeSuggestion is gotten from the server.
+	PayFee(address string, feeAmt, feeRate uint64) (Coin, error)
 	// SwapConfirmations gets the number of confirmations and the spend status
 	// for the specified swap. If the swap was not funded by this wallet, and
 	// it is already spent, you may see CoinNotFoundError.
@@ -266,7 +276,7 @@ type Wallet interface {
 	SwapConfirmations(ctx context.Context, coinID dex.Bytes, contract dex.Bytes, matchTime time.Time) (confs uint32, spent bool, err error)
 	// Withdraw withdraws funds to the specified address. Fees are subtracted
 	// from the value.
-	Withdraw(address string, value, feeSuggestion uint64) (Coin, error)
+	Withdraw(address string, value, feeRate uint64) (Coin, error)
 	// ValidateSecret checks that the secret hashes to the secret hash.
 	ValidateSecret(secret, secretHash []byte) bool
 	// SyncStatus is information about the blockchain sync status. It should
@@ -304,6 +314,19 @@ type NewAddresser interface {
 // LogFiler is a wallet that allows for downloading of its log file.
 type LogFiler interface {
 	LogFilePath() string
+}
+
+// FeeRater is capable of retrieving a non-critical fee rate estimate for an
+// asset. Some SPV wallets, for example, cannot provide a fee rate estimate, so
+// shouldn't implement FeeRater. The rates from FeeRate are used for rates that
+// are not validated by the server (Withdraw, Send, PayFee), and will/should not
+// be used to generate a fee suggestion for swap operations. Assets may also be
+// unable to retrieve an estimate temporarily, such as before the node is primed
+// for BTC. In that case, an error should be returned, but the caller can
+// proceed to get an estimate from any known server's 'fee_rate' endpoint, if
+// possible.
+type FeeRater interface {
+	FeeRate() (uint64, error)
 }
 
 // Balance is categorized information about a wallet's balance.
