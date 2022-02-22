@@ -215,8 +215,7 @@ var _ asset.AccountLocker = (*ExchangeWallet)(nil)
 type fundReserveType uint32
 
 const (
-	fundsReserveType fundReserveType = iota
-	initiationReserve
+	initiationReserve fundReserveType = iota
 	redemptionReserve
 	refundReserve
 )
@@ -474,6 +473,8 @@ func (eth *ExchangeWallet) Balance() (*asset.Balance, error) {
 	return eth.balance()
 }
 
+// balance returns the total available funds in the account.
+// This function expects eth.lockedFundsMtx to be held.
 func (eth *ExchangeWallet) balance() (*asset.Balance, error) {
 	bal, err := eth.node.balance(eth.ctx)
 	if err != nil {
@@ -644,9 +645,13 @@ func (eth *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 			ord.DEXConfig.MaxFeeRate,
 			eth.gasFeeLimit)
 	}
+
 	maxSwapFees := ord.DEXConfig.MaxFeeRate * ord.DEXConfig.SwapSize * ord.MaxSwapCount
 	initiationFunds := ord.Value + maxSwapFees
 	coins := asset.Coins{eth.createFundingCoin(initiationFunds)}
+
+	eth.lockedFundsMtx.Lock()
+	defer eth.lockedFundsMtx.Unlock()
 	err := eth.lockedFunds.lock(initiationFunds, initiationReserve, eth.balance)
 	if err != nil {
 		return nil, nil, err
@@ -667,6 +672,9 @@ func (eth *ExchangeWallet) ReturnCoins(coins asset.Coins) error {
 			return fmt.Errorf("unsupported funding coin type for coin %[1]s: %[1]T", coins[i])
 		}
 	}
+
+	eth.lockedFundsMtx.Lock()
+	defer eth.lockedFundsMtx.Unlock()
 	err := eth.lockedFunds.unlock(amt, initiationReserve)
 	if err != nil {
 		eth.log.Error(err)
@@ -688,6 +696,8 @@ func (eth *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 		totalValue += coin.Value()
 	}
 
+	eth.lockedFundsMtx.Lock()
+	defer eth.lockedFundsMtx.Unlock()
 	err := eth.lockedFunds.lock(totalValue, initiationReserve, eth.balance)
 	if err != nil {
 		return nil, err
@@ -794,12 +804,21 @@ func (eth *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 			})
 	}
 
+	eth.lockedFundsMtx.Lock()
+	defer eth.lockedFundsMtx.Unlock()
+
 	var change asset.Coin
 	if swaps.LockChange {
-		eth.lockedFunds.unlock(totalSpend, initiationReserve)
+		err = eth.lockedFunds.unlock(totalSpend, initiationReserve)
+		if err != nil {
+			eth.log.Error(err)
+		}
 		change = eth.createFundingCoin(totalInputValue - totalSpend)
 	} else {
-		eth.lockedFunds.unlock(totalInputValue, initiationReserve)
+		err = eth.lockedFunds.unlock(totalInputValue, initiationReserve)
+		if err != nil {
+			eth.log.Error(err)
+		}
 	}
 
 	return receipts, change, fees, nil
@@ -1181,7 +1200,12 @@ func (eth *ExchangeWallet) Refund(_, contract dex.Bytes, _ uint64) (dex.Bytes, e
 	}
 
 	unlockFunds := func() {
-		eth.lockedFunds.unlock(eth.gasFeeLimit*dexeth.RefundGas(version), refundReserve)
+		eth.lockedFundsMtx.Lock()
+		defer eth.lockedFundsMtx.Unlock()
+		err = eth.lockedFunds.unlock(eth.gasFeeLimit*dexeth.RefundGas(version), refundReserve)
+		if err != nil {
+			eth.log.Error(err)
+		}
 	}
 
 	swap, err := eth.node.swap(eth.ctx, secretHash, version)
