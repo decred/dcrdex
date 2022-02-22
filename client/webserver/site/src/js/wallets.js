@@ -365,7 +365,7 @@ export default class WalletsPage extends BasePage {
     await this.hideBox()
     page.depositName.textContent = asset.info.name
     page.depositAddress.textContent = wallet.address
-    page.qrcode.src = `/generateqrcode?address=${wallet.address}&dark=${State.isDark()}`
+    page.qrcode.src = `/generateqrcode?address=${wallet.address}`
     if ((wallet.traits & traitNewAddresser) !== 0) Doc.show(page.newDepAddrBttn)
     else Doc.hide(page.newDepAddrBttn)
     this.animation = this.showBox(box)
@@ -386,7 +386,7 @@ export default class WalletsPage extends BasePage {
       return
     }
     page.depositAddress.textContent = res.address
-    page.qrcode.src = `/generateqrcode?address=${res.address}&dark=${State.isDark()}`
+    page.qrcode.src = `/generateqrcode?address=${res.address}`
   }
 
   /* Show the form to withdraw funds. */

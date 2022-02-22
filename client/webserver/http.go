@@ -14,8 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"image/color"
-
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
@@ -217,29 +215,9 @@ func (s *WebServer) handleGenerateQRCode(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var darkMode bool
-	dark := r.Form["dark"]
-	if len(dark) >= 1 && len(dark[0]) > 0 {
-		darkMode, _ = strconv.ParseBool(dark[0])
-	}
-
-	qr, err := qrcode.New(address[0], qrcode.Medium)
+	png, err := qrcode.Encode(address[0], qrcode.Medium, 200)
 	if err != nil {
 		log.Error("error generating qr code: %v", err)
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-		return
-	}
-
-	if darkMode {
-		qr.BackgroundColor = color.Black
-		qr.ForegroundColor = color.White
-	} else {
-		qr.BackgroundColor = color.White
-		qr.ForegroundColor = color.Black
-	}
-	png, err := qr.PNG(200)
-	if err != nil {
-		log.Error("error generating png: %v", err)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
