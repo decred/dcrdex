@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -110,7 +111,7 @@ func NewDB(dbPath string, logger dex.Logger) (dexdb.DB, error) {
 	_, err := os.Stat(dbPath)
 	isNew := os.IsNotExist(err)
 
-	db, err := bbolt.Open(dbPath, 0600, &bbolt.Options{Timeout: 1 * time.Second})
+	db, err := bbolt.Open(dbPath, 0600, &bbolt.Options{Timeout: 3 * time.Second})
 	if err != nil {
 		return nil, err
 	}
@@ -158,14 +159,61 @@ func NewDB(dbPath string, logger dex.Logger) (dexdb.DB, error) {
 	return bdb, bdb.upgradeDB()
 }
 
+func (db *BoltDB) fileSize(path string) int64 {
+	stat, err := os.Stat(path)
+	if err != nil {
+		db.log.Errorf("Failed to stat %v: %v", path, err)
+		return 0
+	}
+	return stat.Size()
+}
+
 // Run waits for context cancellation and closes the database.
 func (db *BoltDB) Run(ctx context.Context) {
-	<-ctx.Done()
+	<-ctx.Done() // wait for shutdown to backup and compact
+
+	// Create a backup in the backups folder.
+	db.log.Infof("Backing up database...")
 	err := db.Backup()
 	if err != nil {
-		db.log.Errorf("unable to backup database: %v", err)
+		db.Close()
+		db.log.Errorf("Unable to backup database: %v", err)
 	}
-	db.Close()
+
+	// Only compact the current DB file if there are excessive free pages.
+	if db.Stats().FreePageN < 32 { // 128 KiB for 4096 page size
+		db.Close()
+		return
+	}
+
+	// TODO: If we never see trouble with the compacted DB files when dexc
+	// starts up, we can just compact to the backups folder and copy that backup
+	// file back on top of the main DB file after it is closed.  For now, the
+	// backup above is a direct (not compacted) copy.
+
+	// Compact the database by writing into a temporary file, closing the source
+	// DB, and overwriting the original with the compacted temporary file.
+	db.log.Infof("Compacting database...")
+	srcPath := db.Path()                    // before db.Close
+	compFile := srcPath + ".tmp"            // deterministic on *same fs*
+	err = db.BackupTo(compFile, true, true) // overwrite and compact
+	if err != nil {
+		db.Close()
+		db.log.Errorf("Unable to compact database: %v", err)
+		return
+	}
+
+	db.Close() // close db file at srcPath
+
+	initSize, compSize := db.fileSize(srcPath), db.fileSize(compFile)
+	db.log.Infof("Compacted database from %v => %v bytes (%.2f%% reduction)",
+		initSize, compSize, 100*float64(compSize)/float64(initSize))
+
+	err = os.Rename(compFile, srcPath) // compFile => srcPath
+	if err != nil {
+		db.log.Errorf("Unable to switch to compacted database: %v", err)
+		return
+	}
 }
 
 // Recrypt re-encrypts the wallet passwords and account private keys. As a
@@ -1479,31 +1527,93 @@ func (db *BoltDB) withBucket(bkt []byte, viewer txFunc, f bucketFunc) error {
 	})
 }
 
-// Backup makes a copy of the database.
-func (db *BoltDB) Backup() error {
-	return db.backup("")
+func ovrFlag(overwrite bool) int {
+	if overwrite {
+		return os.O_TRUNC
+	}
+	return os.O_EXCL
 }
 
-// backup makes a copy of the database to the specified file name in the backup
-// subfolder of the current DB file's folder. If fileName is empty, the current
-// DB's file name is used.
-func (db *BoltDB) backup(fileName string) error {
-	dir := filepath.Join(filepath.Dir(db.Path()), backupDir)
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		err := os.Mkdir(dir, 0700)
+// compact writes a compacted copy of the DB into the specified destination
+// file. This function should be called from BackupTo to validate the
+// destination file and create any needed parent folders.
+func (db *BoltDB) compact(dst string, overwrite bool) error {
+	opts := bbolt.Options{
+		OpenFile: func(path string, _ int, mode os.FileMode) (*os.File, error) {
+			return os.OpenFile(path, os.O_RDWR|os.O_CREATE|ovrFlag(overwrite), mode)
+		},
+	}
+	newDB, err := bbolt.Open(dst, 0600, &opts)
+	if err != nil {
+		return fmt.Errorf("unable to compact database: %w", err)
+	}
+
+	const txMaxSize = 1 << 19 // 512 KiB
+	err = bbolt.Compact(newDB, db.DB, txMaxSize)
+	if err != nil {
+		_ = newDB.Close()
+		return fmt.Errorf("unable to compact database: %w", err)
+	}
+	return newDB.Close()
+}
+
+// backup writes a direct copy of the DB into the specified destination file.
+// This function should be called from BackupTo to validate the destination file
+// and create any needed parent folders.
+func (db *BoltDB) backup(dst string, overwrite bool) error {
+	// Just copy. This is like tx.CopyFile but with the overwrite flag set
+	// as specified.
+	f, err := os.OpenFile(dst, os.O_RDWR|os.O_CREATE|ovrFlag(overwrite), 0600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	err = db.View(func(tx *bbolt.Tx) error {
+		_, err = tx.WriteTo(f)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	return f.Sync()
+}
+
+// BackupTo makes a copy of the database to the specified file, optionally
+// overwriting and compacting the DB.
+func (db *BoltDB) BackupTo(dst string, overwrite, compact bool) error {
+	// If relative path, use current db path.
+	var dir string
+	if !filepath.IsAbs(dst) {
+		dir = filepath.Dir(db.Path())
+		dst = filepath.Join(dir, dst)
+	}
+	dst = filepath.Clean(dst)
+	dir = filepath.Dir(dst)
+	if dst == filepath.Clean(db.Path()) {
+		return errors.New("destination is the active DB")
+	}
+
+	// Make the parent folder if it does not exists.
+	if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
+		err = os.MkdirAll(dir, 0700)
 		if err != nil {
 			return fmt.Errorf("unable to create backup directory: %w", err)
 		}
 	}
 
-	if fileName == "" {
-		fileName = filepath.Base(db.Path())
+	if compact {
+		return db.compact(dst, overwrite)
 	}
-	path := filepath.Join(dir, fileName)
-	err := db.View(func(tx *bbolt.Tx) error {
-		return tx.CopyFile(path, 0600)
-	})
-	return err
+
+	return db.backup(dst, overwrite)
+}
+
+// Backup makes a copy of the database in the "backup" folder, overwriting any
+// existing backup.
+func (db *BoltDB) Backup() error {
+	dir, file := filepath.Split(db.Path())
+	return db.BackupTo(filepath.Join(dir, backupDir, file), true, false)
 }
 
 // bucketPutter enables chained calls to (*bbolt.Bucket).Put with error

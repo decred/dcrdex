@@ -91,6 +91,44 @@ func TestBackup(t *testing.T) {
 	}
 }
 
+func TestBackupTo(t *testing.T) {
+	db, shutdown := newTestDB(t)
+	defer shutdown()
+
+	// Backup the database.
+	testBackup := "asdf.db"
+	err := db.BackupTo(testBackup, false, false)
+	if err != nil {
+		t.Fatalf("unable to backup database: %v", err)
+	}
+
+	// Ensure the backup exists.
+	path := filepath.Join(filepath.Dir(db.Path()), testBackup)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		t.Fatalf("backup file does not exist: %v", err)
+	}
+
+	// Don't overwrite existing.
+	same := db.Path()
+	err = db.BackupTo(same, false, false)
+	if err == nil {
+		t.Fatalf("overwrote file!")
+	}
+	err = db.BackupTo(testBackup, false, false)
+	if err == nil {
+		t.Fatalf("overwrote file!")
+	}
+	// Allow overwrite
+	err = db.BackupTo(testBackup, true, false) // no compact
+	if err != nil {
+		t.Fatalf("unable to backup database: %v", err)
+	}
+	err = db.BackupTo(testBackup, true, true) // compact
+	if err != nil {
+		t.Fatalf("unable to backup database: %v", err)
+	}
+}
+
 func TestStorePrimaryCredentials(t *testing.T) {
 	boltdb, shutdown := newTestDB(t)
 	defer shutdown()

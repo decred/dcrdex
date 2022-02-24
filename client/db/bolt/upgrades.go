@@ -86,7 +86,7 @@ func (db *BoltDB) upgradeDB() error {
 	// DBVersion. Note that any intermediate versions are not stored.
 	currentFile := filepath.Base(db.Path())
 	backupPath := fmt.Sprintf("%s.v%d.bak", currentFile, version) // e.g. dexc.db.v1.bak
-	if err = db.backup(backupPath); err != nil {
+	if err = db.backup(backupPath, true); err != nil {
 		return fmt.Errorf("failed to backup DB prior to upgrade: %w", err)
 	}
 
