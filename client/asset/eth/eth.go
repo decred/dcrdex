@@ -71,7 +71,7 @@ var (
 		{
 			Key:         "gasfeelimit",
 			DisplayName: "Gas Fee Limit",
-			Description: "This is the highest network fee rate you are willing to " +
+			Description: "This is the highest gas fee rate you are willing to " +
 				"pay on swap transactions. If gasfeelimit is lower than a market's " +
 				"maxfeerate, you will not be able to trade on that market with this " +
 				"wallet.  Units: gwei / gas",
@@ -201,9 +201,10 @@ type ethFetcher interface {
 	locked() bool
 	unlock(pw string) error
 	signData(data []byte) (sig, pubKey []byte, err error)
-	sendToAddr(ctx context.Context, addr common.Address, val uint64) (*types.Transaction, error)
+	sendToAddr(ctx context.Context, addr common.Address, val, maxFeeRate uint64) (*types.Transaction, error)
 	transactionConfirmations(context.Context, common.Hash) (uint32, error)
 	sendSignedTransaction(ctx context.Context, tx *types.Transaction) error
+	netFeeState(ctx context.Context) (baseFees, tipCap *big.Int, err error)
 }
 
 // Check that ExchangeWallet satisfies the asset.Wallet interface.
@@ -426,7 +427,12 @@ func (eth *ExchangeWallet) MaxOrder(lotSize uint64, feeSuggestion uint64, nfo *d
 // PreSwap gets order estimates based on the available funds and the wallet
 // configuration.
 func (eth *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
-	maxEst, err := eth.MaxOrder(req.LotSize, req.FeeSuggestion, req.AssetConfig)
+	gasFeeLimit, err := eth.feeLimitWithFallback(req.FeeSuggestion)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get pre swap fee rate limit: %v", err)
+	}
+
+	maxEst, err := eth.MaxOrder(req.LotSize, gasFeeLimit, req.AssetConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -435,7 +441,7 @@ func (eth *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 		return nil, fmt.Errorf("%d lots available for %d-lot order", maxEst.Lots, req.Lots)
 	}
 
-	est := eth.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion, req.AssetConfig)
+	est := eth.estimateSwap(req.Lots, req.LotSize, gasFeeLimit, req.AssetConfig)
 	return &asset.PreSwap{
 		Estimate: est,
 	}, nil
@@ -459,11 +465,15 @@ func (eth *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, nfo
 
 // PreRedeem generates an estimate of the range of redemption fees that could
 // be assessed.
-func (*ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, error) {
+func (eth *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, error) {
+	gasFeeLimit, err := eth.feeLimitWithFallback(req.FeeSuggestion)
+	if err != nil {
+		return nil, fmt.Errorf("unable to get pre redeem fee rate limit: %v", err)
+	}
 	return &asset.PreRedeem{
 		Estimate: &asset.RedeemEstimate{
-			RealisticBestCase:  dexeth.RedeemGas(int(req.Lots), 0) * req.FeeSuggestion,
-			RealisticWorstCase: dexeth.RedeemGas(1, 0) * req.FeeSuggestion * req.Lots,
+			RealisticBestCase:  dexeth.RedeemGas(int(req.Lots), 0) * gasFeeLimit,
+			RealisticWorstCase: dexeth.RedeemGas(1, 0) * gasFeeLimit * req.Lots,
 		},
 	}, nil
 }
@@ -699,6 +709,11 @@ func (eth *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		return nil, nil, 0, err
 	}
 
+	gasFeeLimit, err := eth.feeLimitWithFallback(swaps.FeeRate)
+	if err != nil {
+		return fail(fmt.Errorf("unable to get initiation fee rate limit: %v", err))
+	}
+
 	receipts := make([]asset.Receipt, 0, len(swaps.Contracts))
 
 	var totalInputValue uint64
@@ -711,14 +726,14 @@ func (eth *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		totalContractValue += contract.Value
 	}
 
-	fees := dexeth.InitGas(1, swaps.AssetVersion) * uint64(len(swaps.Contracts)) * swaps.FeeRate
+	fees := dexeth.InitGas(1, swaps.AssetVersion) * uint64(len(swaps.Contracts)) * gasFeeLimit
 
 	totalSpend := fees + totalContractValue
 	if totalSpend > totalInputValue {
-		return nil, nil, 0, fmt.Errorf("unfunded contract. %d < %d", totalInputValue, totalSpend)
+		return fail(fmt.Errorf("unfunded contract. %d < %d", totalInputValue, totalSpend))
 	}
 
-	tx, err := eth.node.initiate(eth.ctx, swaps.Contracts, swaps.FeeRate, swaps.AssetVersion)
+	tx, err := eth.node.initiate(eth.ctx, swaps.Contracts, gasFeeLimit, swaps.AssetVersion)
 	if err != nil {
 		return fail(fmt.Errorf("Swap: initiate error: %w", err))
 	}
@@ -757,6 +772,11 @@ func (eth *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
 	fail := func(err error) ([]dex.Bytes, asset.Coin, uint64, error) {
 		return nil, nil, 0, err
+	}
+
+	gasFeeLimit, err := eth.feeLimitWithFallback(form.FeeSuggestion)
+	if err != nil {
+		return fail(fmt.Errorf("unable to get redeem fee rate limit: %v", err))
 	}
 
 	if len(form.Redemptions) == 0 {
@@ -805,11 +825,11 @@ func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 	}
 
 	outputCoin := eth.createFundingCoin(redeemedValue)
-	fundsRequired := dexeth.RedeemGas(len(form.Redemptions), contractVersion) * form.FeeSuggestion
+	fundsRequired := dexeth.RedeemGas(len(form.Redemptions), contractVersion) * gasFeeLimit
 
 	// TODO: make sure the amount we locked for redemption is enough to cover the gas
 	// fees. Also unlock coins.
-	tx, err := eth.node.redeem(eth.ctx, form.Redemptions, form.FeeSuggestion, contractVersion)
+	tx, err := eth.node.redeem(eth.ctx, form.Redemptions, gasFeeLimit, contractVersion)
 	if err != nil {
 		return fail(fmt.Errorf("Redeem: redeem error: %w", err))
 	}
@@ -1180,7 +1200,7 @@ func (eth *ExchangeWallet) PayFee(address string, regFee, _ uint64) (asset.Coin,
 	if avail < need {
 		return nil, fmt.Errorf("not enough funds to pay fee: have %d gwei need %d gwei", avail, need)
 	}
-	tx, err := eth.node.sendToAddr(eth.ctx, common.HexToAddress(address), regFee)
+	tx, err := eth.node.sendToAddr(eth.ctx, common.HexToAddress(address), regFee, eth.gasFeeLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -1237,7 +1257,7 @@ func (eth *ExchangeWallet) Withdraw(addr string, value, _ uint64) (asset.Coin, e
 	if avail < value+maxFee {
 		value -= maxFee
 	}
-	tx, err := eth.node.sendToAddr(eth.ctx, common.HexToAddress(addr), value)
+	tx, err := eth.node.sendToAddr(eth.ctx, common.HexToAddress(addr), value, eth.gasFeeLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -1375,4 +1395,43 @@ func (eth *ExchangeWallet) checkFindRedemptions() {
 			eth.sendFindRedemptionResult(req, secretHash, secret, nil)
 		}
 	}
+}
+
+// feeLimitWithFallback filters the suggested fee rate limit by ensuring it is
+// within limits. If not, attempts to get a local estimate. If that is also not
+// within limits, errors.
+func (eth *ExchangeWallet) feeLimitWithFallback(feeSuggestion uint64) (uint64, error) {
+	if feeSuggestion > 0 && feeSuggestion <= eth.gasFeeLimit {
+		eth.log.Tracef("using caller's suggestion for gas fee rate limit, %d.",
+			feeSuggestion)
+		return feeSuggestion, nil
+	}
+	baseFee, tipCap, err := eth.node.netFeeState(eth.ctx)
+	if err != nil {
+		return 0, fmt.Errorf("unable to get base gas fee rate limit: %v", err)
+	}
+	// The most the base fee can increase for a full block is 12.5%.
+	// Doubling the next block's base fee ensures this transaction can be
+	// mined in the next six blocks in a worst case scenerio.
+	localFeeRate := dexeth.WeiToGwei(tipCap.Add(baseFee.Mul(baseFee, big.NewInt(2)), tipCap))
+	if localFeeRate > 0 && localFeeRate <= eth.gasFeeLimit {
+		eth.log.Tracef("using local estimation for gas fee rate limit, %d.",
+			localFeeRate)
+		return localFeeRate, nil
+	}
+	var lowerRate uint64
+	if feeSuggestion > 0 {
+		lowerRate = feeSuggestion
+	}
+	// NOTE: It currently is impossible for the nodeclient to return zero
+	// for the local fee rate limit.
+	if lowerRate == 0 || localFeeRate < lowerRate {
+		lowerRate = localFeeRate
+	}
+	if lowerRate > 0 {
+		eth.log.Warnf("Eth gas rate limit too low! Set above %d gwei to complete current transaction!",
+			lowerRate)
+		return 0, fmt.Errorf("the needed gas fee rate limit (%d gwei) is higher than set max (%d gwei)", lowerRate, eth.gasFeeLimit)
+	}
+	return 0, errors.New("fee suggestion and local fee estimation both zero, cannot assign gas rate limit")
 }

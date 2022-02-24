@@ -72,10 +72,12 @@ type testNode struct {
 		fee         uint64
 		contractVer uint32
 	}
-	isRefundableErr error
-	nonce           uint64
-	sendToAddrTx    *types.Transaction
-	sendToAddrErr   error
+	isRefundableErr  error
+	nonce            uint64
+	sendToAddrTx     *types.Transaction
+	sendToAddrErr    error
+	baseFees, tipCap *big.Int
+	netFeeStateErr   error
 }
 
 func newBalance(current, in, out uint64) *Balance {
@@ -123,6 +125,9 @@ func (n *testNode) syncProgress() ethereum.SyncProgress {
 }
 func (n *testNode) peerCount() uint32 {
 	return 1
+}
+func (n *testNode) netFeeState(ctx context.Context) (baseFees, tipCap *big.Int, err error) {
+	return n.baseFees, n.tipCap, n.netFeeStateErr
 }
 
 // initiate is not concurrent safe
@@ -209,7 +214,7 @@ func tTx(gasFeeCap, gasTipCap, value uint64, to *common.Address, data []byte) *t
 	})
 }
 
-func (n *testNode) sendToAddr(ctx context.Context, addr common.Address, val uint64) (*types.Transaction, error) {
+func (n *testNode) sendToAddr(ctx context.Context, addr common.Address, val, maxFeeRate uint64) (*types.Transaction, error) {
 	return n.sendToAddrTx, n.sendToAddrErr
 }
 
@@ -957,6 +962,15 @@ func TestPreSwap(t *testing.T) {
 			wantWorstCase: 90 * gases.Swap,
 		},
 		{
+			name:          "fee suggestion too high",
+			bal:           11,
+			lotSize:       ethToGwei(10),
+			feeSuggestion: defaultGasFeeLimit + 1,
+			maxFeeRate:    100,
+			lots:          1,
+			wantErr:       true,
+		},
+		{
 			name:          "more lots than max lots",
 			bal:           11,
 			lotSize:       ethToGwei(10),
@@ -1013,11 +1027,14 @@ func TestPreSwap(t *testing.T) {
 		node := newTestNode(nil)
 		node.bal = newBalance(test.bal*1e9, 0, 0)
 		node.balErr = test.balErr
+		node.baseFees = dexeth.GweiToWei(defaultGasFeeLimit) // Always too high.
+		node.tipCap = new(big.Int)
 		eth := &ExchangeWallet{
-			node: node,
-			addr: node.address(),
-			ctx:  ctx,
-			log:  tLogger,
+			node:        node,
+			addr:        node.address(),
+			ctx:         ctx,
+			log:         tLogger,
+			gasFeeLimit: defaultGasFeeLimit,
 		}
 		dexAsset.MaxFeeRate = test.maxFeeRate
 		preSwap, err := eth.PreSwap(&preSwapForm)
@@ -1053,17 +1070,20 @@ func TestPreSwap(t *testing.T) {
 
 func TestSwap(t *testing.T) {
 	node := &testNode{
-		bal: newBalance(0, 0, 0),
+		bal:      newBalance(0, 0, 0),
+		baseFees: dexeth.GweiToWei(defaultGasFeeLimit), // Always too high.
+		tipCap:   new(big.Int),
 	}
 	address := "0xB6De8BB5ed28E6bE6d671975cad20C03931bE981"
 	receivingAddress := "0x2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27"
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	eth := &ExchangeWallet{
-		node: node,
-		addr: common.HexToAddress(address),
-		ctx:  ctx,
-		log:  tLogger,
+		node:        node,
+		addr:        common.HexToAddress(address),
+		ctx:         ctx,
+		log:         tLogger,
+		gasFeeLimit: defaultGasFeeLimit,
 	}
 
 	coinIDsForAmounts := func(coinAmounts []uint64) []dex.Bytes {
@@ -1204,7 +1224,7 @@ func TestSwap(t *testing.T) {
 	swaps := asset.Swaps{
 		Inputs:     inputs,
 		Contracts:  contracts,
-		FeeRate:    200,
+		FeeRate:    defaultGasFeeLimit,
 		LockChange: false,
 	}
 	testSwap("error initialize but no send", swaps, true)
@@ -1223,17 +1243,35 @@ func TestSwap(t *testing.T) {
 	swaps = asset.Swaps{
 		Inputs:     inputs,
 		Contracts:  contracts,
-		FeeRate:    200,
+		FeeRate:    defaultGasFeeLimit,
 		LockChange: false,
 	}
 	testSwap("one contract, don't lock change", swaps, false)
+
+	// Test fee too high.
+	contracts = []*asset.Contract{
+		{
+			Address:    receivingAddress,
+			Value:      ethToGwei(1),
+			SecretHash: secretHash[:],
+			LockTime:   expiration,
+		},
+	}
+	inputs = refreshWalletAndFundCoins(5, []uint64{ethToGwei(2)})
+	swaps = asset.Swaps{
+		Inputs:     inputs,
+		Contracts:  contracts,
+		FeeRate:    defaultGasFeeLimit + 1,
+		LockChange: false,
+	}
+	testSwap("fee too high", swaps, true)
 
 	// Test one contract with locking change
 	inputs = refreshWalletAndFundCoins(5, []uint64{ethToGwei(2)})
 	swaps = asset.Swaps{
 		Inputs:     inputs,
 		Contracts:  contracts,
-		FeeRate:    200,
+		FeeRate:    defaultGasFeeLimit,
 		LockChange: true,
 	}
 	testSwap("one contract, lock change", swaps, false)
@@ -1257,7 +1295,7 @@ func TestSwap(t *testing.T) {
 	swaps = asset.Swaps{
 		Inputs:     inputs,
 		Contracts:  contracts,
-		FeeRate:    200,
+		FeeRate:    defaultGasFeeLimit,
 		LockChange: false,
 	}
 	testSwap("two contracts", swaps, false)
@@ -1267,7 +1305,7 @@ func TestSwap(t *testing.T) {
 	swaps = asset.Swaps{
 		Inputs:     inputs,
 		Contracts:  contracts,
-		FeeRate:    200,
+		FeeRate:    defaultGasFeeLimit,
 		LockChange: false,
 	}
 	testSwap("funding coins not enough balance", swaps, true)
@@ -1285,25 +1323,49 @@ func TestSwap(t *testing.T) {
 
 func TestPreRedeem(t *testing.T) {
 	node := newTestNode(nil)
+	node.baseFees = dexeth.GweiToWei(defaultGasFeeLimit) // Always too high.
+	node.tipCap = new(big.Int)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	eth := &ExchangeWallet{
-		node: node,
-		addr: node.address(),
-		ctx:  ctx,
-		log:  tLogger,
-	}
-	preRedeem, err := eth.PreRedeem(&asset.PreRedeemForm{
-		LotSize:       123456,
-		Lots:          5,
-		FeeSuggestion: 100,
-	})
-	if err != nil {
-		t.Fatalf("unexpected PreRedeem error: %v", err)
-	}
 
-	if preRedeem.Estimate.RealisticBestCase >= preRedeem.Estimate.RealisticWorstCase {
-		t.Fatalf("best case > worst case")
+	tests := []struct {
+		name          string
+		feeSuggestion uint64
+		wantErr       bool
+	}{{
+		name:          "ok",
+		feeSuggestion: defaultGasFeeLimit,
+	}, {
+		name:          "fee suggestion too high",
+		feeSuggestion: defaultGasFeeLimit + 1,
+		wantErr:       true,
+	}}
+	for _, test := range tests {
+		eth := &ExchangeWallet{
+			node:        node,
+			addr:        node.address(),
+			ctx:         ctx,
+			log:         tLogger,
+			gasFeeLimit: defaultGasFeeLimit,
+		}
+		preRedeem, err := eth.PreRedeem(&asset.PreRedeemForm{
+			LotSize:       123456,
+			Lots:          5,
+			FeeSuggestion: test.feeSuggestion,
+		})
+		if test.wantErr {
+			if err != nil {
+				continue
+			}
+			t.Fatalf("expected error for test %q", test.name)
+		}
+		if err != nil {
+			t.Fatalf("unexpected PreRedeem error: %v", err)
+		}
+
+		if preRedeem.Estimate.RealisticBestCase >= preRedeem.Estimate.RealisticWorstCase {
+			t.Fatalf("best case > worst case")
+		}
 	}
 }
 
@@ -1316,15 +1378,18 @@ func TestRedeem(t *testing.T) {
 		swapVers: map[uint32]struct{}{
 			contractVer: {},
 		},
-		swapMap: make(map[[32]byte]*dexeth.SwapState),
+		swapMap:  make(map[[32]byte]*dexeth.SwapState),
+		baseFees: dexeth.GweiToWei(defaultGasFeeLimit), // Always too high.
+		tipCap:   new(big.Int),
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	eth := &ExchangeWallet{
-		node: node,
-		ctx:  ctx,
-		log:  tLogger,
-		addr: testAddressA,
+		node:        node,
+		ctx:         ctx,
+		log:         tLogger,
+		addr:        testAddressA,
+		gasFeeLimit: defaultGasFeeLimit,
 	}
 	addSwapToSwapMap := func(secretHash [32]byte, value uint64, step dexeth.SwapStep) {
 		swap := dexeth.SwapState{
@@ -1387,7 +1452,37 @@ func TestRedeem(t *testing.T) {
 						Secret: secrets[1][:],
 					},
 				},
-				FeeSuggestion: 100,
+				FeeSuggestion: defaultGasFeeLimit,
+			},
+		},
+		{
+			name:         "fee suggestion too high",
+			expectError:  true,
+			isRedeemable: true,
+			form: asset.RedeemForm{
+				Redemptions: []*asset.Redemption{
+					{
+						Spends: &asset.AuditInfo{
+							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
+							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
+							Coin: &coin{
+								id: encode.RandomBytes(32),
+							},
+						},
+						Secret: secrets[0][:],
+					},
+					{
+						Spends: &asset.AuditInfo{
+							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
+							SecretHash: secretHashes[1][:],
+							Coin: &coin{
+								id: encode.RandomBytes(32),
+							},
+						},
+						Secret: secrets[1][:],
+					},
+				},
+				FeeSuggestion: defaultGasFeeLimit + 1,
 			},
 		},
 		{
@@ -1417,7 +1512,7 @@ func TestRedeem(t *testing.T) {
 						Secret: secrets[1][:],
 					},
 				},
-				FeeSuggestion: 100,
+				FeeSuggestion: defaultGasFeeLimit,
 			},
 		},
 		{
@@ -1448,7 +1543,7 @@ func TestRedeem(t *testing.T) {
 						Secret: secrets[1][:],
 					},
 				},
-				FeeSuggestion: 100,
+				FeeSuggestion: defaultGasFeeLimit,
 			},
 		},
 		{
@@ -1469,7 +1564,7 @@ func TestRedeem(t *testing.T) {
 						Secret: secrets[0][:],
 					},
 				},
-				FeeSuggestion: 200,
+				FeeSuggestion: defaultGasFeeLimit,
 			},
 		},
 		{
@@ -1489,7 +1584,7 @@ func TestRedeem(t *testing.T) {
 						Secret: secrets[2][:],
 					},
 				},
-				FeeSuggestion: 100,
+				FeeSuggestion: defaultGasFeeLimit,
 			},
 		},
 		{
@@ -1498,7 +1593,7 @@ func TestRedeem(t *testing.T) {
 			expectError:  true,
 			form: asset.RedeemForm{
 				Redemptions:   []*asset.Redemption{},
-				FeeSuggestion: 100,
+				FeeSuggestion: defaultGasFeeLimit,
 			},
 		},
 	}
@@ -2432,13 +2527,17 @@ func TestRedemptionReserves(t *testing.T) {
 	node.bal = newBalance(1e9, 0, 0)
 	node.redeemable = true
 	node.swapVers = map[uint32]struct{}{0: {}}
+	node.baseFees = dexeth.GweiToWei(defaultGasFeeLimit / 2)
+	node.tipCap = new(big.Int)
 
 	var secretHash [32]byte
 	node.swapMap = map[[32]byte]*dexeth.SwapState{secretHash: {}}
 	spentCoin := &coin{id: encode.RandomBytes(32)}
 
 	eth := &ExchangeWallet{
-		node: node,
+		node:        node,
+		gasFeeLimit: defaultGasFeeLimit,
+		log:         tLogger,
 	}
 
 	var maxFeeRateV0 uint64 = 45
@@ -2635,4 +2734,73 @@ func TestWithdraw(t *testing.T) {
 
 func parseRecoveryID(c asset.Coin) []byte {
 	return c.(*fundingCoin).recoveryID
+}
+
+func TestFeeLimitWithFallback(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tests := []struct {
+		name                             string
+		feeSuggestion, gasFeeLimit, want uint64
+		baseFees, tipCap                 *big.Int
+		netFeeStateErr                   error
+		wantErr                          bool
+	}{{
+		name:          "ok using suggestion",
+		feeSuggestion: 100,
+		gasFeeLimit:   200,
+		want:          100,
+	}, {
+		name:        "ok using our estimation",
+		gasFeeLimit: 200,
+		baseFees:    dexeth.GweiToWei(50),
+		tipCap:      dexeth.GweiToWei(1),
+		want:        101,
+	}, {
+		name:           "net fee state error",
+		feeSuggestion:  201,
+		gasFeeLimit:    200,
+		netFeeStateErr: errors.New(""),
+		wantErr:        true,
+	}, {
+		name:          "both fees too high",
+		gasFeeLimit:   200,
+		feeSuggestion: 201,
+		baseFees:      dexeth.GweiToWei(100),
+		tipCap:        dexeth.GweiToWei(1),
+		wantErr:       true,
+	}, {
+		name:          "both fees zero",
+		gasFeeLimit:   200,
+		feeSuggestion: 0,
+		baseFees:      dexeth.GweiToWei(0),
+		tipCap:        new(big.Int),
+		wantErr:       true,
+	}}
+	for _, test := range tests {
+		node := &testNode{
+			baseFees:       test.baseFees,
+			tipCap:         test.tipCap,
+			netFeeStateErr: test.netFeeStateErr,
+		}
+		eth := &ExchangeWallet{
+			node:        node,
+			ctx:         ctx,
+			log:         tLogger,
+			gasFeeLimit: test.gasFeeLimit,
+		}
+		feeLimit, err := eth.feeLimitWithFallback(test.feeSuggestion)
+		if test.wantErr {
+			if err != nil {
+				continue
+			}
+			t.Fatalf("%q: expected error", test.name)
+		}
+		if err != nil {
+			t.Fatalf("%q: unexpected error: %v", test.name, err)
+		}
+		if feeLimit != test.want {
+			t.Fatalf("%q: want fee limit %d but got %d", test.name, test.want, feeLimit)
+		}
+	}
 }

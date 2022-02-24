@@ -278,8 +278,8 @@ func (n *nodeClient) locked() bool {
 }
 
 // sendToAddr sends funds to the address.
-func (n *nodeClient) sendToAddr(ctx context.Context, addr common.Address, amt uint64) (*types.Transaction, error) {
-	txOpts, err := n.txOpts(ctx, amt, defaultSendGasLimit, nil)
+func (n *nodeClient) sendToAddr(ctx context.Context, addr common.Address, gasFeeLimit, amt uint64) (*types.Transaction, error) {
+	txOpts, err := n.txOpts(ctx, amt, defaultSendGasLimit, gasFeeLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -409,7 +409,7 @@ func (n *nodeClient) initiate(ctx context.Context, contracts []*asset.Contract, 
 	for _, c := range contracts {
 		val += c.Value
 	}
-	txOpts, _ := n.txOpts(ctx, val, gas, dexeth.GweiToWei(maxFeeRate))
+	txOpts, _ := n.txOpts(ctx, val, gas, maxFeeRate)
 	n.nonceSendMtx.Lock()
 	defer n.nonceSendMtx.Unlock()
 	nonce, err := n.leth.ApiBackend.GetPoolNonce(ctx, n.creds.addr)
@@ -455,7 +455,7 @@ func (n *nodeClient) estimateRefundGas(ctx context.Context, secretHash [32]byte,
 // matching the hash, will not cause this to error.
 func (n *nodeClient) redeem(ctx context.Context, redemptions []*asset.Redemption, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
 	gas := dexeth.RedeemGas(len(redemptions), contractVer)
-	txOpts, _ := n.txOpts(ctx, 0, gas, dexeth.GweiToWei(maxFeeRate))
+	txOpts, _ := n.txOpts(ctx, 0, gas, maxFeeRate)
 	n.nonceSendMtx.Lock()
 	defer n.nonceSendMtx.Unlock()
 	nonce, err := n.leth.ApiBackend.GetPoolNonce(ctx, n.creds.addr)
@@ -477,7 +477,7 @@ func (n *nodeClient) redeem(ctx context.Context, redemptions []*asset.Redemption
 // this to error.
 func (n *nodeClient) refund(ctx context.Context, secretHash [32]byte, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
 	gas := dexeth.RefundGas(contractVer)
-	txOpts, _ := n.txOpts(ctx, 0, gas, dexeth.GweiToWei(maxFeeRate))
+	txOpts, _ := n.txOpts(ctx, 0, gas, maxFeeRate)
 	n.nonceSendMtx.Lock()
 	defer n.nonceSendMtx.Unlock()
 	nonce, err := n.leth.ApiBackend.GetPoolNonce(ctx, n.creds.addr)
@@ -530,23 +530,18 @@ func (n *nodeClient) getCodeAt(ctx context.Context, contractAddr common.Address)
 	return code, state.Error()
 }
 
-// txOpts generates a set of TransactOpts for the account. If maxFeeRate is
-// zero, it will be calculated as double the current baseFee. The tip will be
-// added automatically.
+// txOpts generates a set of TransactOpts for the account.
 //
 // NOTE: The v0 contract will reuse account nonces if the tx is not yet
 // confirmed. To avoid that be sure to get the next nonce from the light eth
 // node pool api while holding the nodeClient nonceSendMtx and set manually.
 // Hold the mutex until the tx has been sent or errors on sending.
-func (n *nodeClient) txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate *big.Int) (*bind.TransactOpts, error) {
-	baseFee, gasTipCap, err := n.netFeeState(ctx)
-	if maxFeeRate == nil {
-		maxFeeRate = new(big.Int).Mul(baseFee, big.NewInt(2))
-	}
+func (n *nodeClient) txOpts(ctx context.Context, val, maxGas, maxFeeRate uint64) (*bind.TransactOpts, error) {
+	_, gasTipCap, err := n.netFeeState(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return newTxOpts(ctx, n.creds.addr, val, maxGas, maxFeeRate, gasTipCap), nil
+	return newTxOpts(ctx, n.creds.addr, val, maxGas, dexeth.GweiToWei(maxFeeRate), gasTipCap), nil
 }
 
 // isRedeemable checks if the swap identified by secretHash is redeemable using secret.
@@ -641,7 +636,7 @@ func (n *nodeClient) tokenAllowance(ctx context.Context, tokenAddr common.Addres
 // approveToken approves the token swap contract to spend tokens on behalf of
 // account handled by the wallet.
 func (n *nodeClient) approveToken(ctx context.Context, tokenAddr common.Address, amount *big.Int, maxFeeRate uint64) (tx *types.Transaction, err error) {
-	txOpts, _ := n.txOpts(ctx, 0, 3e5, dexeth.GweiToWei(maxFeeRate))
+	txOpts, _ := n.txOpts(ctx, 0, 3e5, maxFeeRate)
 	if err := n.addSignerToOpts(txOpts); err != nil {
 		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
 	}
@@ -657,7 +652,7 @@ func (n *nodeClient) approveToken(ctx context.Context, tokenAddr common.Address,
 func (n *nodeClient) initiateToken(ctx context.Context, initiations []ethv0.ETHSwapInitiation, token common.Address, maxFeeRate uint64) (tx *types.Transaction, err error) {
 	// TODO: reject if there is duplicate secret hash
 	// TODO: use estimated gas
-	txOpts, _ := n.txOpts(ctx, 0, 1e6, dexeth.GweiToWei(maxFeeRate))
+	txOpts, _ := n.txOpts(ctx, 0, 1e6, maxFeeRate)
 	n.nonceSendMtx.Lock()
 	defer n.nonceSendMtx.Unlock()
 	nonce, err := n.leth.ApiBackend.GetPoolNonce(ctx, n.creds.addr)
@@ -677,7 +672,7 @@ func (n *nodeClient) initiateToken(ctx context.Context, initiations []ethv0.ETHS
 func (n *nodeClient) redeemToken(ctx context.Context, redemptions []ethv0.ETHSwapRedemption, maxFeeRate uint64) (tx *types.Transaction, err error) {
 	// TODO: reject if there is duplicate secret hash
 	// TODO: use estimated gas
-	txOpts, _ := n.txOpts(ctx, 0, 300000, dexeth.GweiToWei(maxFeeRate))
+	txOpts, _ := n.txOpts(ctx, 0, 300000, maxFeeRate)
 	n.nonceSendMtx.Lock()
 	defer n.nonceSendMtx.Unlock()
 	nonce, err := n.leth.ApiBackend.GetPoolNonce(ctx, n.creds.addr)
@@ -706,7 +701,7 @@ func (n *nodeClient) tokenIsRedeemable(ctx context.Context, secretHash, secret [
 // refundToken refunds a token swap.
 func (n *nodeClient) refundToken(ctx context.Context, secretHash [32]byte, maxFeeRate uint64) (tx *types.Transaction, err error) {
 	// TODO: use estimated gas
-	txOpts, _ := n.txOpts(ctx, 0, 5e5, dexeth.GweiToWei(maxFeeRate))
+	txOpts, _ := n.txOpts(ctx, 0, 5e5, maxFeeRate)
 	n.nonceSendMtx.Lock()
 	defer n.nonceSendMtx.Unlock()
 	nonce, err := n.leth.ApiBackend.GetPoolNonce(ctx, n.creds.addr)

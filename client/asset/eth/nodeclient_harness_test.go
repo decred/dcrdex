@@ -386,7 +386,7 @@ func testSendTransaction(t *testing.T) {
 		t.Fatalf("no CoinNotFoundError")
 	}
 
-	txOpts, _ := ethClient.txOpts(ctx, 1, defaultSendGasLimit, nil)
+	txOpts, _ := ethClient.txOpts(ctx, 1, defaultSendGasLimit, defaultGasFeeLimit)
 
 	tx, err := ethClient.sendTransaction(ctx, txOpts, participantAddr, nil)
 	if err != nil {
@@ -499,7 +499,7 @@ func testTransactionReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	txOpts, _ := ethClient.txOpts(ctx, 1, dexeth.InitGas(1, 0), nil)
+	txOpts, _ := ethClient.txOpts(ctx, 1, dexeth.InitGas(1, 0), defaultGasFeeLimit)
 
 	tx, err := ethClient.sendTransaction(ctx, txOpts, simnetAddr, nil)
 	if err != nil {
@@ -2016,7 +2016,7 @@ func TestReplayAttack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	txOpts, err := ethClient.txOpts(ctx, 1, defaultSendGasLimit*5, nil)
+	txOpts, err := ethClient.txOpts(ctx, 1, defaultSendGasLimit*5, defaultGasFeeLimit)
 	if err != nil {
 		t.Fatalf("txOpts error: %v", err)
 	}
