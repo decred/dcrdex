@@ -25,7 +25,7 @@
     {{- /* LIST OF EXCHANGE SECTIONS WITH MARKETS */ -}}
     <div id="marketList">
       <div data-tmpl="xc" class="xc">
-        <div class="header d-flex justify-content-start align-items-center pl-1 fs14 grey">
+        <div class="header d-flex justify-content-start align-items-center ps-1 fs14 grey">
           <span class="ico-disconnected" title="disconnected" data-tmpl="disconnected"></span>
           <span data-tmpl="header"></span>
         </div>
@@ -33,9 +33,9 @@
         <div data-tmpl="mkts">
           <div class="marketrow" data-tmpl="mktrow">
             <div>
-              <img class="micro-icon mr-1" data-tmpl="baseIcon">
-              <img class="micro-icon mr-1" data-tmpl="quoteIcon">
-              <div class="pl-1 pr-2 flex-grow-1">
+              <img class="micro-icon me-1" data-tmpl="baseIcon">
+              <img class="micro-icon me-1" data-tmpl="quoteIcon">
+              <div class="ps-1 pe-2 flex-grow-1">
                 <span data-tmpl="baseSymbol"></span>-<span data-tmpl="quoteSymbol"></span>
               </div>
               <span data-tmpl="pctChange" class="upgreen fs14 demi d-hide pct-change"></span>
@@ -70,7 +70,7 @@
         <div class="flex-grow-1">
           <div id="hoverData" class="d-flex align-items-center d-hide">
             <span class="category-spacer text-center text-nowrap"></span>
-            <span class="ico-target fs11 mr-1"></span>
+            <span class="ico-target fs11 me-1"></span>
             <span id="depthHoverData">
               preço: <span id="hoverPrice"></span>,
               volume: <span id="hoverVolume"></span>
@@ -87,9 +87,9 @@
         <div id="depthSummary" class="d-flex align-items-center">
           <span>vendas: <span id="sellBookedBase"></span> <span data-unit="base"></span>, <span id="sellBookedQuote"></span> <span data-unit="quote"></span></span>
           <span class="category-spacer"></span>
-          <span class="mr-2">compras: <span id="buyBookedBase"></span> <span data-unit="base"></span>, <span id="buyBookedQuote"></span> <span data-unit="quote"></span></span>
+          <span class="me-2">compras: <span id="buyBookedBase"></span> <span data-unit="base"></span>, <span id="buyBookedQuote"></span> <span data-unit="quote"></span></span>
         </div>
-        <div class="d-flex flex-nowrap mr-2 d-hide" id="durBttnBox"><button class="candle-dur-bttn" id="durBttnTemplate"></button></div>
+        <div class="d-flex flex-nowrap me-2 d-hide" id="durBttnBox"><button class="candle-dur-bttn" id="durBttnTemplate"></button></div>
       </div>
       <div id="chartResizer"></div>
     </div>
@@ -109,23 +109,23 @@
                   {{block "thead" .}}
                   <thead>
                     <tr>
-                      <th class="text-left pl-2">Quantidade</th>
-                      <th class="text-right pr-2">Câmbio</th>
-                      <th class="text-right pr-2">Epoque</th>
+                      <th class="text-start ps-2">Quantidade</th>
+                      <th class="text-end pe-2">Câmbio</th>
+                      <th class="text-end pe-2">Epoque</th>
                     </tr>
                   </thead>
                   {{end}}
                   <tbody id="buyRows">
                     {{- /* This row is used by the app as a template. */ -}}
                     <tr id="rowTemplate">
-                      <td class="pl-2">
+                      <td class="ps-2">
                         <div class="d-flex justify-content-start align-items-center">
                           <div data-tmpl="qty">-</div>
-                          <div class="numorders text-center ml-2" data-tmpl="numorders">-</div>
+                          <div class="numorders text-center ms-2" data-tmpl="numorders">-</div>
                         </div>
                       </td>
-                      <td class="text-right pr-2" data-tmpl="rate">-</td>
-                      <td class="text-right pr-3" data-tmpl="epoch"></td>
+                      <td class="text-end pe-2" data-tmpl="rate">-</td>
+                      <td class="text-end pe-3" data-tmpl="epoch"></td>
                     </tr>
                   </tbody>
                 </table>
@@ -135,7 +135,7 @@
 
           {{- /* ORDER PANEL */ -}}
           <div class="col-lg-10 order-1 order-lg-2 order-panel p-0 brdrleft brdrright d-flex flex-column">
-            <div class="market-header fs14 d-flex justify-content-start pl-4 align-items-stretch">
+            <div class="market-header fs14 d-flex justify-content-start ps-4 align-items-stretch">
               <button id="limitBttn" type="button" class="flex-center px-3 py-0 markettab brdrleft selected">Ordem Limite</button>
               <button id="marketBttn" type="button" class="flex-center px-3 py-0 markettab brdrleft brdrright">Ordem de Mercado</button>
             </div>
@@ -167,7 +167,7 @@
                         Comprar
                         <span data-unit="base"></span>
                       </button>
-                      <button id="sellBttn" type="button" class="bg2 sellred ml-2">
+                      <button id="sellBttn" type="button" class="bg2 sellred ms-2">
                         Vender
                         <span data-unit="base"></span>
                       </button>
@@ -207,14 +207,14 @@
 
                     {{- /* RATE AND QUANTITY INPUTS */ -}}
                     <div class="d-flex mt-3" id="priceBox">
-                      <label for="rateField" class="col-6 d-flex align-items-center p-0">Preço</label>
+                      <label for="rateField" class="form-label col-6 d-flex align-items-center p-0">Preço</label>
                       <div class="col-18 p-0 position-relative">
                         <input type="number" class="form-control select bg1" id="rateField">
                         <span class="unitbox"><span class="unit" data-unit="quote"></span>/<span class="unit" data-unit="base"></span></span>
                       </div>
                     </div>
                     <div class="d-flex mt-4" id="qtyBox">
-                      <label for="qtyField" class="col-6 d-flex align-items-center p-0">Quantidade</label>
+                      <label for="qtyField" class="form-label col-6 d-flex align-items-center p-0">Quantidade</label>
                       <div class="col-6 p-0 position-relative">
                         <input type="number" class="form-control select bg1" id="lotField">
                         <span class="unit unitbox">Lotes</span>
@@ -248,10 +248,10 @@
                     </div>
 
                     {{- /* ORDER PREVIEW */ -}}
-                    <div class="mt-2 fs14 text-right" id="orderPreview"></div>
+                    <div class="mt-2 fs14 text-end" id="orderPreview"></div>
 
                     {{- /* TIME-IN-FORCE CHECK BOX */ -}}
-                    <div class="my-1 text-left pl-4" id="tifBox">
+                    <div class="my-1 text-start ps-4" id="tifBox">
                       <input id="tifNow" class="form-check-input" type="checkbox" value="">
                       <label class="form-check-label" for="tifNow">
                         Imediato ou cancelar
@@ -260,7 +260,7 @@
                     </div>
 
                     {{- /* SUBMIT ORDER BUTTON */ -}}
-                    <div class="text-right">
+                    <div class="text-end">
                       <button id="submitBttn" type="button" class="my-1 fs14 submit text-center buygreen"></button> {{/* textContent set by script */}}
                     </div>
                   </div>
@@ -276,20 +276,20 @@
                         <th></th>
                         <th>
                           <div class="d-flex align-items-center pb-1" id="baseWalletIcons">
-                            <img id="baseImg" class="micro-icon mr-1">
+                            <img id="baseImg" class="micro-icon me-1">
                             <span data-unit="base"></span>
                             <div class="flex-grow-1"></div>
                             <div id="baseWalletState" class="fs12">{{template "walletIcons"}}</div>
-                            <span class="ico-expired fs16 pl-1" id="baseExpired" data-tooltip="Balanço pode está desatualizado. Conecte-se a carteira para atualizar."></span>
+                            <span class="ico-expired fs16 ps-1" id="baseExpired" data-tooltip="Balanço pode está desatualizado. Conecte-se a carteira para atualizar."></span>
                           </div>
                         </th>
                         <th>
                           <div class="d-flex align-items-center pb-1" id="quoteWalletIcons">
-                            <img id="quoteImg" class="micro-icon mr-1">
+                            <img id="quoteImg" class="micro-icon me-1">
                             <span data-unit="quote"></span>
                             <div class="flex-grow-1"></div>
                             <div id="quoteWalletState" class="fs12">{{template "walletIcons"}}</div>
-                            <span class="ico-expired fs16 pl-1" id="quoteExpired" data-tooltip="Balanço pode está desatualizado. Conecte-se a carteira para atualizar."></span>
+                            <span class="ico-expired fs16 ps-1" id="quoteExpired" data-tooltip="Balanço pode está desatualizado. Conecte-se a carteira para atualizar."></span>
                           </div>
                         </th>
                       </tr>
@@ -388,9 +388,9 @@
                   <td data-tmpl="filled"></td>
                   <td data-tmpl="settled"></td>
                   <td data-tmpl="status"></td>
-                  <td class="last text-right">
+                  <td class="last text-end">
                     <span data-tmpl="cancelBttn" class="ico-cross d-hide" data-tooltip="cancelar pedido"></span>
-                    <a data-tmpl="link" class="ico-open fs13 pointer ml-2 plainlink" data-tooltip="detalhes do pedido"></a>
+                    <a data-tmpl="link" class="ico-open fs13 pointer ms-2 plainlink" data-tooltip="detalhes do pedido"></a>
                   </td>
                 </tr>
               </tbody>
@@ -438,36 +438,36 @@
         {{- /* Price, Quantity, Total Section */ -}}
         <div id="verifyLimit">
           <div class="d-flex align-items-center justify-content-between">
-            <span class="grey fs17 flex-grow-1 text-left">Preço</span>
+            <span class="grey fs17 flex-grow-1 text-start">Preço</span>
             <span id="vRate" class="fs18 demi"></span>
-            <span class="grey fs14 ml-2">
+            <span class="grey fs14 ms-2">
               <sup data-unit="quote"></sup>/<sub data-unit="base"></sub>
             </span>
           </div>
           <div class="d-flex align-items-center mt-1">
-            <span class="grey fs17 flex-grow-1 text-left">Quantidade</span>
+            <span class="grey fs17 flex-grow-1 text-start">Quantidade</span>
             <span id="vQty" class="fs18 demi"></span>
-            <span data-unit="base" class="grey fs14 ml-2"></span>
+            <span data-unit="base" class="grey fs14 ms-2"></span>
           </div>
           <div class="d-flex align-items-center mt-1">
-            <span class="grey fs17 flex-grow-1 text-left">Total</span>
+            <span class="grey fs17 flex-grow-1 text-start">Total</span>
             <span id="vTotal" class="fs18 demi"></span>
-            <span data-unit="quote" class="grey fs14 ml-2"></span>
+            <span data-unit="quote" class="grey fs14 ms-2"></span>
           </div>
         </div>
         <div id="verifyMarket">
           <div class="d-flex align-items-center justify-content-between">
-            <span class="grey fs17 flex-grow-1 text-left">Trocando</span>
+            <span class="grey fs17 flex-grow-1 text-start">Trocando</span>
             <span id="vmFromTotal" class="fs18 demi"></span>
-            <span id="vmFromAsset" class="grey fs14 ml-2"></span>
+            <span id="vmFromAsset" class="grey fs14 ms-2"></span>
           </div>
           <div id="vMarketEstimate" class="d-flex align-items-center justify-content-between">
-            <span class="grey fs17 flex-grow-1 text-left">
+            <span class="grey fs17 flex-grow-1 text-start">
               Recebendo aproximadamente
               <span class="ico-info fs12" data-tooltip="Está é uma ordem de mercado e combinará com o(s) melhor(es) pedidos no livro de ofertas. Baseado no atual valor médio de mercado, você receberá"></span>
             </span>
             <span id="vmToTotal" class="fs18 demi"></span>
-            <span id="vmToAsset" class="grey fs14 ml-2"></span>
+            <span id="vmToAsset" class="grey fs14 ms-2"></span>
           </div>
         </div>
 
@@ -477,8 +477,8 @@
         {{$passwordIsCached := .UserInfo.PasswordIsCached}}
         <div class="fs16 text-center {{if $passwordIsCached}}d-hide{{end}}">Autorizar este pedido com a senha do app.</div>
         <div class="d-flex mt-3 {{if $passwordIsCached}}justify-content-end{{end}}" >
-          <div class="col-12 p-0 text-left {{if $passwordIsCached}}d-hide{{end}}">
-            <label for="vPass" class="pl-1 mb-1">Senha</label>
+          <div class="col-12 p-0 text-start {{if $passwordIsCached}}d-hide{{end}}">
+            <label for="vPass" class="form-label ps-1 mb-1">Senha</label>
             <input type="password" class="form-control select" id="vPass">
           </div>
           <div class="col-12 p-0 d-flex justify-content-end">
@@ -514,7 +514,7 @@
 
           <hr class="dashed mb-2 mt-3">
 
-          <div class="grey fs18 text-left">Opções</div>
+          <div class="grey fs18 text-start">Opções</div>
 
           <div id="vOrderOpts">
             {{- /* Order Option Templates */ -}}
@@ -522,12 +522,12 @@
               <div data-tmpl="toggle" class="opt-check selected"></div>
               <div class="flex-grow-1" data-tmpl="controls">
                 <div class="d-flex align-items-center">
-                  <span data-tmpl="optName" class="flex-grow-1 text-left fs16 pl-2"></span>
-                  <span data-tmpl="tooltip" class="ico-info mr-2" data-tooltip="Prevent temporary overlocking of funds"></span>
-                  <img data-tmpl="chainIcon" class="micro-icon mr-1">
+                  <span data-tmpl="optName" class="flex-grow-1 text-start fs16 ps-2"></span>
+                  <span data-tmpl="tooltip" class="ico-info me-2" data-tooltip="Prevent temporary overlocking of funds"></span>
+                  <img data-tmpl="chainIcon" class="micro-icon me-1">
                 </div>
 
-                <div id="booleanOptTmpl" class="d-flex justify-content-between align-items-center fs14 pl-2">
+                <div id="booleanOptTmpl" class="d-flex justify-content-between align-items-center fs14 ps-2">
                   <span data-tmpl="reason"></span>
                 </div>
 
@@ -564,8 +564,8 @@
             <span class="ico-locked my-2"></span>
             <span>Desbloqueie suas carteiras para recuperar detalhes do pedido e opções adicionais.</span>
             <div class="d-flex align-items-stretch w-100">
-              <div class="col-12 p-0 text-left">
-                <label for="vUnlockPass" class="pl-1 mb-1">Senha</label>
+              <div class="col-12 p-0 text-start">
+                <label for="vUnlockPass" class="form-label ps-1 mb-1">Senha</label>
                 <input type="password" class="form-control select w-100" id="vUnlockPass">
               </div>
               <div class="col-12 p-0 d-flex align-items-end justify-content-end">
@@ -643,7 +643,7 @@
               Este é o máximo que você pagaria em taxas em sua troca. As taxas são normalmente avaliadas em uma fração dessa taxa. O máximo não está sujeito a alterações uma vez que seu pedido é feito.
             </div>
             <div>
-              <img class="micro-icon mr-1" data-icon="from">
+              <img class="micro-icon me-1" data-icon="from">
               <span id="vSwapFeesMax"></span>  (<span id="vSwapFeesMaxPct"></span>)
             </div>
           </div>

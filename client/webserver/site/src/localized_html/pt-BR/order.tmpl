@@ -8,9 +8,9 @@
 <div id="main" data-handler="order" class="main w-100 overflow-y-auto" data-net="{{.Net}}" data-oid="{{$ord.ID}}">
   <div class="px-5">
     <div class="px-1 py-2">
-      <span class="fs22 demi mr-2">Ordem</span>
+      <span class="fs22 demi me-2">Ordem</span>
       <span class="fs18">{{$ord.ID}}</span>
-      <span class="float-right mr-2"><a href="/orders" class="d-inline-block subtlelink fs15"><span class="fs12 ico-textfile"></span> ver todas as ordens</a></span>
+      <span class="float-end me-2"><a href="/orders" class="d-inline-block subtlelink fs15"><span class="fs12 ico-textfile"></span> ver todas as ordens</a></span>
     </div>
 
     {{- /* DATA CARDS */ -}}
@@ -34,7 +34,7 @@
         <div>
           <span id="status">{{$ord.StatusString}}</span>
           {{if $ord.Cancelable}}
-            <span id="cancelBttn" class="ico-cross fs12 ml-1 pointer hoverbg" data-tooltip="cancel order"></span>
+            <span id="cancelBttn" class="ico-cross fs12 ms-1 pointer hoverbg" data-tooltip="cancel order"></span>
           {{end}}
         </div>
       </div>
@@ -93,7 +93,7 @@
       <div class="match-card" data-match-i-d="{{$match.MatchID}}">
         <div class="match-header">
           <div class="d-flex justify-content-between align-items-center">
-            <span class="match-data-label ml-3">ID de Combinação</span>
+            <span class="match-data-label ms-3">ID de Combinação</span>
           </div>
           <div class="mono mx-3 fs15">{{$match.MatchID}}</div>
         </div>
@@ -195,8 +195,8 @@
 
     {{- /* FUNDING COINS */ -}}
     <div class="order-datum d-inline-block my-3">
-      <div class="text-left">Moedas de Financiamento</div>
-      <div class="fs14 text-left">
+      <div class="text-start">Moedas de Financiamento</div>
+      <div class="fs14 text-start">
         {{range $ord.FundingCoins}}
           <a class="plainlink mono" data-explorer-id="{{$ord.FromID}}" data-explorer-coin="{{.StringID}}">{{.StringID}}</a><br>
         {{end}}

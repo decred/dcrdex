@@ -44,7 +44,7 @@
         [[[simultaneous_servers_msg]]]
         </p>
         <button id="addADex" class="bg2 selected">[[[Add a DEX]]]</button>
-        <button id="importAccount" class="bg2 selected ml-2">[[[Import Account]]]</button>
+        <button id="importAccount" class="bg2 selected ms-2">[[[Import Account]]]</button>
       </div>
     </div>
     <div>
@@ -61,7 +61,7 @@
   <div id="forms" class="d-hide">
     
     {{- /* DEX ADDRESS */ -}}
-    <form class="position-relative text-left" id="dexAddrForm" autocomplete="off">
+    <form class="position-relative text-start" id="dexAddrForm" autocomplete="off">
       {{template "dexAddrForm" .}}
     </form>
 
@@ -105,11 +105,11 @@
       <div class="py-1 text-center position-relative fs22 sans-light">
         [[[Export Seed]]]
       </div>
-      <div class="fs15 text-left mt-2">
+      <div class="fs15 text-start mt-2">
         [[[pw_for_seed]]]
       </div>
-      <div class="text-left mt-2">
-        <label for="exportSeedPW" class="pl-1 mb-1">[[[Password]]]</label>
+      <div class="text-start mt-2">
+        <label for="exportSeedPW" class="ps-1 mb-1">[[[Password]]]</label>
         <input type="password" class="form-control select" id="exportSeedPW" autocomplete="current-password">
       </div>
       <div class="d-flex justify-content-end mt-4">

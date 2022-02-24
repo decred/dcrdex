@@ -87,7 +87,7 @@ label.market-search {
 }
 
 div.market-orders-table-container {
-  @include media-breakpoint-down(md) {
+  @include media-breakpoint-down(lg) {
     max-height: 200px;
   }
 
@@ -101,7 +101,7 @@ div.market-orders-table-container {
 }
 
 div.user-orders-table-container {
-  @include media-breakpoint-down(xl) {
+  @include media-breakpoint-down(xxl) {
     max-height: 200px;
   }
 

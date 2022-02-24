@@ -56,7 +56,7 @@ const (
 	notifyRoute = "notify"
 	// The basis for content-security-policy. connect-src must be the final
 	// directive so that it can be reliably supplemented on startup.
-	baseCSP = "default-src 'none'; script-src 'self'; img-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'"
+	baseCSP = "default-src 'none'; script-src 'self'; img-src 'self' data:; style-src 'self'; font-src 'self'; connect-src 'self'"
 )
 
 var (

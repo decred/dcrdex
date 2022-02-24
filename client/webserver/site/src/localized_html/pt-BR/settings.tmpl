@@ -44,7 +44,7 @@
         O cliente da DEX suporta simultâneos números de servidores DEX.
         </p>
         <button id="addADex" class="bg2 selected">Adicionar uma DEX</button>
-        <button id="importAccount" class="bg2 selected ml-2">Importar Conta</button>
+        <button id="importAccount" class="bg2 selected ms-2">Importar Conta</button>
       </div>
     </div>
     <div>
@@ -61,7 +61,7 @@
   <div id="forms" class="d-hide">
     
     {{- /* DEX ADDRESS */ -}}
-    <form class="position-relative text-left" id="dexAddrForm" autocomplete="off">
+    <form class="position-relative text-start" id="dexAddrForm" autocomplete="off">
       {{template "dexAddrForm" .}}
     </form>
 
@@ -105,11 +105,11 @@
       <div class="py-1 text-center position-relative fs22 sans-light">
         Exportar Seed
       </div>
-      <div class="fs15 text-left mt-2">
+      <div class="fs15 text-start mt-2">
         Informar sua senha do aplicativo para mostrar sua seed. Tenha certeza que mais ninguém pode ver sua tela.
       </div>
-      <div class="text-left mt-2">
-        <label for="exportSeedPW" class="pl-1 mb-1">Senha</label>
+      <div class="text-start mt-2">
+        <label for="exportSeedPW" class="ps-1 mb-1">Senha</label>
         <input type="password" class="form-control select" id="exportSeedPW" autocomplete="current-password">
       </div>
       <div class="d-flex justify-content-end mt-4">
