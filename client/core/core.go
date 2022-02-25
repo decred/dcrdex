@@ -1275,6 +1275,12 @@ func (c *Core) Ready() <-chan struct{} {
 	return c.ready
 }
 
+// BackupDB makes a backup of the database at the specified location, optionally
+// overwriting any existing file and compacting the database.
+func (c *Core) BackupDB(dst string, overwrite, compact bool) error {
+	return c.db.BackupTo(dst, overwrite, compact)
+}
+
 const defaultDEXPort = "7232"
 
 // addrHost returns the host or url:port pair for an address.
