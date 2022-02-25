@@ -502,8 +502,9 @@ func (tdb *TDB) AccountPaid(proof *db.AccountProof) error {
 	return tdb.accountPaidErr
 }
 
-func (tdb *TDB) SaveNotification(*db.Notification) error        { return nil }
-func (tdb *TDB) NotificationsN(int) ([]*db.Notification, error) { return nil, nil }
+func (tdb *TDB) SaveNotification(*db.Notification) error            { return nil }
+func (tdb *TDB) BackupTo(dst string, overwrite, compact bool) error { return nil }
+func (tdb *TDB) NotificationsN(int) ([]*db.Notification, error)     { return nil, nil }
 
 func (tdb *TDB) SetPrimaryCredentials(creds *db.PrimaryCredentials) error {
 	if tdb.setCredsErr != nil {
