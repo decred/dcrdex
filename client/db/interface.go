@@ -101,8 +101,11 @@ type DB interface {
 	Wallets() ([]*Wallet, error)
 	// Wallet fetches the wallet for the specified asset by wallet ID.
 	Wallet(wid []byte) (*Wallet, error)
-	// Backup makes a copy of the database.
+	// Backup makes a copy of the database to the default "backups" folder.
 	Backup() error
+	// BackupTo makes a backup of the database at the specified location,
+	// optionally overwriting any existing file and compacting the database.
+	BackupTo(dst string, overwrite, compact bool) error
 	// SaveNotification saves the notification.
 	SaveNotification(*Notification) error
 	// NotificationsN reads out the N most recent notifications.
