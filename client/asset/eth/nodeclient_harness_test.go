@@ -766,7 +766,7 @@ func TestRedeemGas(t *testing.T) {
 	}
 
 	// Create secrets and secret hashes
-	numSecrets := 7
+	numSecrets := 9
 	secrets := make([][32]byte, 0, numSecrets)
 	secretHashes := make([][32]byte, 0, numSecrets)
 	for i := 0; i < numSecrets; i++ {
