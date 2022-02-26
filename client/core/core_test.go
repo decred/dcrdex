@@ -91,7 +91,7 @@ var (
 		Version:      0, // match the stubbed (*TXCWallet).Info result
 		SwapSize:     135000,
 		SwapSizeBase: 135000,
-		MaxFeeRate:   10,
+		MaxFeeRate:   20,
 		SwapConf:     1,
 	}
 	tDexPriv            *secp256k1.PrivateKey
@@ -574,50 +574,52 @@ func (r *tReceipt) SignedRefund() dex.Bytes {
 }
 
 type TXCWallet struct {
-	payFeeSuggestion  uint64
-	payFeeCoin        *tCoin
-	payFeeErr         error
-	addrErr           error
-	signCoinErr       error
-	lastSwaps         *asset.Swaps
-	swapReceipts      []asset.Receipt
-	swapCounter       int
-	swapErr           error
-	auditInfo         *asset.AuditInfo
-	auditErr          error
-	auditChan         chan struct{}
-	refundCoin        dex.Bytes
-	refundErr         error
-	redeemCoins       []dex.Bytes
-	redeemCounter     int
-	redeemErr         error
-	redeemErrChan     chan error
-	badSecret         bool
-	fundedVal         uint64
-	fundedSwaps       uint64
-	connectErr        error
-	unlockErr         error
-	balErr            error
-	bal               *asset.Balance
-	fundingCoins      asset.Coins
-	fundRedeemScripts []dex.Bytes
-	returnedCoins     asset.Coins
-	fundingCoinErr    error
-	lockErr           error
-	locked            bool
-	changeCoin        *tCoin
-	syncStatus        func() (bool, float32, error)
-	confsMtx          sync.RWMutex
-	confs             map[string]uint32
-	confsErr          map[string]error
-	preSwapForm       *asset.PreSwapForm
-	preSwap           *asset.PreSwap
-	preRedeemForm     *asset.PreRedeemForm
-	preRedeem         *asset.PreRedeem
-	ownsAddress       bool
-	ownsAddressErr    error
-	pubKeys           []dex.Bytes
-	sigs              []dex.Bytes
+	payFeeSuggestion    uint64
+	payFeeCoin          *tCoin
+	payFeeErr           error
+	addrErr             error
+	signCoinErr         error
+	lastSwaps           *asset.Swaps
+	swapReceipts        []asset.Receipt
+	swapCounter         int
+	swapErr             error
+	auditInfo           *asset.AuditInfo
+	auditErr            error
+	auditChan           chan struct{}
+	refundCoin          dex.Bytes
+	refundErr           error
+	refundFeeSuggestion uint64
+	redeemCoins         []dex.Bytes
+	redeemCounter       int
+	redeemFeeSuggestion uint64
+	redeemErr           error
+	redeemErrChan       chan error
+	badSecret           bool
+	fundedVal           uint64
+	fundedSwaps         uint64
+	connectErr          error
+	unlockErr           error
+	balErr              error
+	bal                 *asset.Balance
+	fundingCoins        asset.Coins
+	fundRedeemScripts   []dex.Bytes
+	returnedCoins       asset.Coins
+	fundingCoinErr      error
+	lockErr             error
+	locked              bool
+	changeCoin          *tCoin
+	syncStatus          func() (bool, float32, error)
+	confsMtx            sync.RWMutex
+	confs               map[string]uint32
+	confsErr            map[string]error
+	preSwapForm         *asset.PreSwapForm
+	preSwap             *asset.PreSwap
+	preRedeemForm       *asset.PreRedeemForm
+	preRedeem           *asset.PreRedeem
+	ownsAddress         bool
+	ownsAddressErr      error
+	pubKeys             []dex.Bytes
+	sigs                []dex.Bytes
 }
 
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
@@ -728,7 +730,8 @@ func (w *TXCWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 	return w.swapReceipts, w.changeCoin, tSwapFeesPaid, nil
 }
 
-func (w *TXCWallet) Redeem(*asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
+func (w *TXCWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
+	w.redeemFeeSuggestion = form.FeeSuggestion
 	defer func() {
 		if w.redeemErrChan != nil {
 			w.redeemErrChan <- w.redeemErr
@@ -762,7 +765,8 @@ func (w *TXCWallet) FindRedemption(ctx context.Context, coinID, _ dex.Bytes) (re
 	return nil, nil, fmt.Errorf("not mocked")
 }
 
-func (w *TXCWallet) Refund(dex.Bytes, dex.Bytes, uint64) (dex.Bytes, error) {
+func (w *TXCWallet) Refund(refundCoin dex.Bytes, refundContract dex.Bytes, feeSuggestion uint64) (dex.Bytes, error) {
+	w.refundFeeSuggestion = feeSuggestion
 	return w.refundCoin, w.refundErr
 }
 
@@ -834,14 +838,14 @@ func (w *TXCWallet) RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (
 
 type TAccountLocker struct {
 	*TXCWallet
-	reserveNRedemption     uint64
-	reserveNRedemptionErr  error
+	reserveNRedemptions    uint64
+	reserveNRedemptionsErr error
 	reReserveRedemptionErr error
 	redemptionUnlocked     uint64
 	reservedRedemption     uint64
 
-	reserveNRefund     uint64
-	reserveNRefundErr  error
+	reserveNRefunds    uint64
+	reserveNRefundsErr error
 	reReserveRefundErr error
 	refundUnlocked     uint64
 	reservedRefund     uint64
@@ -856,8 +860,8 @@ func newTAccountLocker(assetID uint32) (*xcWallet, *TAccountLocker) {
 	return xcWallet, accountLocker
 }
 
-func (w *TAccountLocker) ReserveNRedemption(n, feeRate uint64, assetVer uint32) (uint64, error) {
-	return w.reserveNRedemption, w.reserveNRedemptionErr
+func (w *TAccountLocker) ReserveNRedemptions(n, feeRate uint64, assetVer uint32) (uint64, error) {
+	return w.reserveNRedemptions, w.reserveNRedemptionsErr
 }
 
 func (w *TAccountLocker) ReReserveRedemption(v uint64) error {
@@ -869,8 +873,8 @@ func (w *TAccountLocker) UnlockRedemptionReserves(v uint64) {
 	w.redemptionUnlocked += v
 }
 
-func (w *TAccountLocker) ReserveNRefund(n uint64, assetVer uint32) (uint64, error) {
-	return w.reserveNRefund, w.reserveNRefundErr
+func (w *TAccountLocker) ReserveNRefunds(n, feeRate uint64, assetVer uint32) (uint64, error) {
+	return w.reserveNRefunds, w.reserveNRefundsErr
 }
 
 func (w *TAccountLocker) UnlockRefundReserves(v uint64) {
@@ -2756,7 +2760,7 @@ wait:
 	form.Base = tUTXOAssetB.ID
 	form.Quote = tACCTAsset.ID
 	rig.ws.queueResponse(msgjson.MarketRoute, handleMarket)
-	tEthWallet.reserveNRedemption = reserveN
+	tEthWallet.reserveNRedemptions = reserveN
 	tEthWallet.sigs = []dex.Bytes{{}}
 	tEthWallet.pubKeys = []dex.Bytes{{}}
 	_, err = tCore.Trade(tPW, form)
@@ -2775,9 +2779,9 @@ wait:
 	tEthWallet.sigs = []dex.Bytes{{}}
 
 	// ReserveN error
-	tEthWallet.reserveNRedemptionErr = tErr
+	tEthWallet.reserveNRedemptionsErr = tErr
 	ensureErr("reserveN error")
-	tEthWallet.reserveNRedemptionErr = nil
+	tEthWallet.reserveNRedemptionsErr = nil
 
 	// Funds returned for later error.
 	tEthWallet.redemptionUnlocked = 0
@@ -4805,6 +4809,19 @@ func makeTradeTracker(rig *testRig, mkt *msgjson.Market, walletSet *walletSet, f
 func TestRefunds(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
+
+	dc := rig.dc
+	tCore := rig.core
+	btcWallet, tBtcWallet := newTWallet(tUTXOAssetB.ID)
+	tCore.wallets[tUTXOAssetB.ID] = btcWallet
+	btcWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
+	btcWallet.Unlock(rig.crypter)
+
+	ethWallet, tEthWallet := newTAccountLocker(tACCTAsset.ID)
+	tCore.wallets[tACCTAsset.ID] = ethWallet
+	ethWallet.address = "18d65fb8d60c1199bb1ad381be47aa692b482605"
+	ethWallet.Unlock(rig.crypter)
+
 	checkStatus := func(tag string, match *matchTracker, wantStatus order.MatchStatus) {
 		t.Helper()
 		if match.Status != wantStatus {
@@ -4850,36 +4867,31 @@ func TestRefunds(t *testing.T) {
 		} else {
 			checkStatus("taker swapped", match, order.TakerSwapCast)
 		}
+
+		if _, is := tracker.accountRefunder(); is {
+			if tEthWallet.refundFeeSuggestion != tMaxFeeRate {
+				t.Fatalf("refund suggestion for account asset %v != server max fee rate %v",
+					tEthWallet.refundFeeSuggestion, tACCTAsset.MaxFeeRate)
+			}
+		}
 	}
-
-	dc := rig.dc
-	tCore := rig.core
-	dcrWallet, tDcrWallet := newTWallet(tUTXOAssetA.ID)
-	tCore.wallets[tUTXOAssetA.ID] = dcrWallet
-	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
-	dcrWallet.Unlock(rig.crypter)
-
-	btcWallet, tBtcWallet := newTWallet(tUTXOAssetB.ID)
-	tCore.wallets[tUTXOAssetB.ID] = btcWallet
-	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
-	btcWallet.Unlock(rig.crypter)
 
 	matchSize := 4 * dcrBtcLotSize
 	qty := 3 * matchSize
 	rate := dcrBtcRateStep * 10
-	lo, dbOrder, preImgL, addr := makeLimitOrder(dc, true, qty, dcrBtcRateStep)
+	lo, dbOrder, preImgL, addr := makeLimitOrder(dc, false, qty, dcrBtcRateStep)
 	loid := lo.ID()
 	mid := ordertest.RandomMatchID()
-	walletSet, err := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
+	walletSet, err := tCore.walletSet(dc, tUTXOAssetB.ID, tACCTAsset.ID, false)
 	if err != nil {
 		t.Fatalf("walletSet error: %v", err)
 	}
-	mkt := dc.marketConfig(tDcrBtcMktName)
-	fundCoinsDCR := asset.Coins{&tCoin{id: encode.RandomBytes(36)}}
-	tDcrWallet.fundingCoins = fundCoinsDCR
-	tDcrWallet.fundRedeemScripts = []dex.Bytes{nil}
+	mkt := dc.marketConfig(tBtcEthMktName)
+	fundCoinsETH := asset.Coins{&tCoin{id: encode.RandomBytes(36)}}
+	tEthWallet.fundingCoins = fundCoinsETH
+	tEthWallet.fundRedeemScripts = []dex.Bytes{nil}
 	tracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, fundCoinsDCR, rig.core.notify, rig.core.formatDetails, nil, 0, 0)
+		rig.db, rig.queue, walletSet, fundCoinsETH, rig.core.notify, rig.core.formatDetails, nil, 0, 0)
 	rig.dc.trades[tracker.ID()] = tracker
 
 	// MAKER REFUND, INVALID TAKER COUNTERSWAP
@@ -4897,7 +4909,7 @@ func TestRefunds(t *testing.T) {
 	}
 	swapID := encode.RandomBytes(36)
 	contract := encode.RandomBytes(36)
-	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: swapID}, contract: contract}}
+	tEthWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: swapID}, contract: contract}}
 	sign(tDexPriv, msgMatch)
 	msg, _ := msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
 	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
@@ -4918,8 +4930,7 @@ func TestRefunds(t *testing.T) {
 	}
 
 	// Send the counter-party's init info.
-	auditQty := calc.BaseToQuote(rate, matchSize)
-	audit, auditInfo := tMsgAudit(loid, mid, addr, auditQty, proof.SecretHash)
+	audit, auditInfo := tMsgAudit(loid, mid, addr, matchSize, proof.SecretHash)
 	tBtcWallet.auditInfo = auditInfo
 	auditInfo.Expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeMaker))
 
@@ -4931,17 +4942,18 @@ func TestRefunds(t *testing.T) {
 	}
 
 	// Attempt refund.
-	tDcrWallet.refundCoin = encode.RandomBytes(36)
-	tDcrWallet.refundErr = nil
+	tEthWallet.refundCoin = encode.RandomBytes(36)
+	tEthWallet.refundErr = nil
 	tBtcWallet.refundCoin = nil
 	tBtcWallet.refundErr = fmt.Errorf("unexpected call to btcWallet.Refund")
-	checkRefund(tracker, match, matchSize)
+	matchSizeQuoteUnits := calc.BaseToQuote(rate, matchSize)
+	checkRefund(tracker, match, matchSizeQuoteUnits)
 
 	// TAKER REFUND, NO MAKER REDEEM
 	//
 	// Reset funding coins in the trackedTrade, wipe change coin.
 	tracker.mtx.Lock()
-	tracker.coins = mapifyCoins(fundCoinsDCR)
+	tracker.coins = mapifyCoins(fundCoinsETH)
 	tracker.coinsLocked = true
 	tracker.changeLocked = false
 	tracker.change = nil
@@ -4993,7 +5005,7 @@ func TestRefunds(t *testing.T) {
 	tBtcWallet.setConfs(auditInfo.Coin.ID(), tUTXOAssetB.SwapConf, nil)
 	counterSwapID := encode.RandomBytes(36)
 	counterScript := encode.RandomBytes(36)
-	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID}, contract: counterScript}}
+	tEthWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID}, contract: counterScript}}
 	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
 	tCore.tickAsset(dc, tUTXOAssetB.ID)
 	newMatchStatus = <-rig.db.updateMatchChan // MakerSwapCast->TakerSwapCast (after taker's swap bcast)
@@ -5019,7 +5031,7 @@ func TestRefunds(t *testing.T) {
 
 	// Attempt refund.
 	rig.db.updateMatchChan = nil
-	checkRefund(tracker, match, matchSize)
+	checkRefund(tracker, match, matchSizeQuoteUnits)
 }
 
 func TestNotifications(t *testing.T) {

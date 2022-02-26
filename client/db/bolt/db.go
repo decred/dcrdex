@@ -84,6 +84,7 @@ var (
 	ackKey                 = []byte("ack")
 	swapFeesKey            = []byte("swapFees")
 	maxFeeRateKey          = []byte("maxFeeRate")
+	redeemMaxFeeRateKey    = []byte("redeemMaxFeeRate")
 	redemptionFeesKey      = []byte("redeemFees")
 	typeKey                = []byte("type")
 	credentialsBucket      = []byte("credentials")
@@ -600,6 +601,7 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 			put(orderKey, order.EncodeOrder(ord)).
 			put(swapFeesKey, uint64Bytes(md.SwapFeesPaid)).
 			put(maxFeeRateKey, uint64Bytes(md.MaxFeeRate)).
+			put(redeemMaxFeeRateKey, uint64Bytes(md.RedeemMaxFeeRate)).
 			put(redemptionFeesKey, uint64Bytes(md.RedemptionFeesPaid)).
 			put(optionsKey, config.Data(md.Options)).
 			err()
@@ -894,6 +896,11 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 		maxFeeRate = ^uint64(0) // should not happen for trade orders after v2 upgrade
 	}
 
+	var redeemMaxFeeRate uint64
+	if redeemMaxFeeRateB := oBkt.Get(redeemMaxFeeRateKey); len(redeemMaxFeeRateB) == 8 {
+		redeemMaxFeeRate = intCoder.Uint64(redeemMaxFeeRateB)
+	}
+
 	var fromVersion, toVersion uint32
 	fromVersionB, toVersionB := oBkt.Get(fromVersionKey), oBkt.Get(toVersionKey)
 	if len(fromVersionB) == 4 {
@@ -918,6 +925,7 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 			LinkedOrder:        linkedID,
 			SwapFeesPaid:       intCoder.Uint64(oBkt.Get(swapFeesKey)),
 			MaxFeeRate:         maxFeeRate,
+			RedeemMaxFeeRate:   redeemMaxFeeRate,
 			RedemptionFeesPaid: intCoder.Uint64(oBkt.Get(redemptionFeesKey)),
 			FromVersion:        fromVersion,
 			ToVersion:          toVersion,

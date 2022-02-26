@@ -167,7 +167,7 @@ type trackedTrade struct {
 func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnection, epochLen uint64,
 	lockTimeTaker, lockTimeMaker time.Duration, db db.DB, latencyQ *wait.TickerQueue, wallets *walletSet,
 	coins asset.Coins, notify func(Notification), formatDetails func(Topic, ...interface{}) (string, string),
-	options map[string]string, redemptionReserves uint64, refundReserves uint64) *trackedTrade {
+	options map[string]string, redemptionReserves, refundReserves uint64) *trackedTrade {
 
 	fromID := dbOrder.Order.Quote()
 	if dbOrder.Order.Trade().Sell {
@@ -1921,7 +1921,12 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 	// t.redeemFeeSuggestion is updated every tick and uses a rate directly
 	// from our wallet, if available. Only go looking for one if we don't have
 	// one cached.
-	feeSuggestion := atomic.LoadUint64(&t.redeemFeeSuggestion)
+	var feeSuggestion uint64
+	if _, is := t.accountRedeemer(); is {
+		feeSuggestion = t.metaData.RedeemMaxFeeRate
+	} else {
+		feeSuggestion = atomic.LoadUint64(&t.redeemFeeSuggestion)
+	}
 	if feeSuggestion == 0 {
 		feeSuggestion = t.dc.bestBookFeeSuggestion(t.wallets.toAsset.ID)
 	}
@@ -2217,7 +2222,14 @@ func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, 
 		t.dc.log.Infof("Refunding %s contract %s for match %s (%s)",
 			refundAsset.Symbol, swapCoinString, match, matchFailureReason)
 
-		feeSuggestion := c.feeSuggestionAny(refundAsset.ID)
+		var feeSuggestion uint64
+		if _, is := t.accountRefunder(); is {
+			feeSuggestion = t.metaData.MaxFeeRate
+		}
+		if feeSuggestion == 0 {
+			feeSuggestion = c.feeSuggestionAny(refundAsset.ID)
+		}
+
 		refundCoin, err := refundWallet.Refund(swapCoinID, contractToRefund, feeSuggestion)
 		if err != nil {
 			if errors.Is(err, asset.CoinNotFoundError) && match.Side == order.Taker {

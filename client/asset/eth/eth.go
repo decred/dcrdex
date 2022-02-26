@@ -204,11 +204,13 @@ type ethFetcher interface {
 	sendToAddr(ctx context.Context, addr common.Address, val uint64) (*types.Transaction, error)
 	transactionConfirmations(context.Context, common.Hash) (uint32, error)
 	sendSignedTransaction(ctx context.Context, tx *types.Transaction) error
+	netFeeState(ctx context.Context) (baseFees, tipCap *big.Int, err error)
 }
 
 // Check that ExchangeWallet satisfies the asset.Wallet interface.
 var _ asset.Wallet = (*ExchangeWallet)(nil)
 var _ asset.AccountLocker = (*ExchangeWallet)(nil)
+var _ asset.FeeRater = (*ExchangeWallet)(nil)
 
 // fundReserveType represents the various uses for which funds need to be locked:
 // initiations, redemptions, and refunds.
@@ -883,7 +885,7 @@ func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 	fundsRequired := dexeth.RedeemGas(len(form.Redemptions), contractVersion) * form.FeeSuggestion
 
 	// TODO: make sure the amount we locked for redemption is enough to cover the gas
-	// fees. Also unlock coins.
+	// fees.
 	tx, err := eth.node.redeem(eth.ctx, form.Redemptions, form.FeeSuggestion, contractVersion)
 	if err != nil {
 		return fail(fmt.Errorf("Redeem: redeem error: %w", err))
@@ -918,9 +920,9 @@ func recoverPubkey(msgHash, sig []byte) ([]byte, error) {
 	return pubKey.SerializeUncompressed(), nil
 }
 
-// ReserveNRedemption locks funds for redemption. It is an error if there
+// ReserveNRedemptions locks funds for redemption. It is an error if there
 // is insufficient spendable balance. Part of the AccountLocker interface.
-func (eth *ExchangeWallet) ReserveNRedemption(n, feeRate uint64, assetVer uint32) (uint64, error) {
+func (eth *ExchangeWallet) ReserveNRedemptions(n, feeRate uint64, assetVer uint32) (uint64, error) {
 	redeemCost := dexeth.RedeemGas(1, assetVer) * feeRate
 	reserve := redeemCost * n
 
@@ -951,10 +953,10 @@ func (eth *ExchangeWallet) ReReserveRedemption(req uint64) error {
 	return eth.lockedFunds.lock(req, redemptionReserve, eth.balance)
 }
 
-// ReserveNRefund locks funds for doing refunds. It is an error if there
+// ReserveNRefunds locks funds for doing refunds. It is an error if there
 // is insufficient spendable balance. Part of the AccountLocker interface.
-func (eth *ExchangeWallet) ReserveNRefund(n uint64, assetVer uint32) (uint64, error) {
-	refundCost := dexeth.RefundGas(assetVer) * eth.gasFeeLimit
+func (eth *ExchangeWallet) ReserveNRefunds(n, feeRate uint64, assetVer uint32) (uint64, error) {
+	refundCost := dexeth.RefundGas(assetVer) * feeRate
 	reserve := refundCost * n
 
 	eth.lockedFundsMtx.Lock()
@@ -1193,7 +1195,7 @@ func (eth *ExchangeWallet) findSecret(ctx context.Context, secretHash [32]byte, 
 
 // Refund refunds a contract. This can only be used after the time lock has
 // expired.
-func (eth *ExchangeWallet) Refund(_, contract dex.Bytes, _ uint64) (dex.Bytes, error) {
+func (eth *ExchangeWallet) Refund(_, contract dex.Bytes, feeSuggestion uint64) (dex.Bytes, error) {
 	version, secretHash, err := dexeth.DecodeContractData(contract)
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to decode contract: %w", err)
@@ -1202,7 +1204,7 @@ func (eth *ExchangeWallet) Refund(_, contract dex.Bytes, _ uint64) (dex.Bytes, e
 	unlockFunds := func() {
 		eth.lockedFundsMtx.Lock()
 		defer eth.lockedFundsMtx.Unlock()
-		err = eth.lockedFunds.unlock(eth.gasFeeLimit*dexeth.RefundGas(version), refundReserve)
+		err = eth.lockedFunds.unlock(feeSuggestion*dexeth.RefundGas(version), refundReserve)
 		if err != nil {
 			eth.log.Error(err)
 		}
@@ -1229,7 +1231,7 @@ func (eth *ExchangeWallet) Refund(_, contract dex.Bytes, _ uint64) (dex.Bytes, e
 		return nil, fmt.Errorf("Refund: swap with secret hash %x is not refundable", secretHash)
 	}
 
-	tx, err := eth.node.refund(eth.ctx, secretHash, eth.gasFeeLimit, version)
+	tx, err := eth.node.refund(eth.ctx, secretHash, feeSuggestion, version)
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to call refund: %w", err)
 	}
@@ -1379,6 +1381,25 @@ func (eth *ExchangeWallet) RegFeeConfirmations(ctx context.Context, coinID dex.B
 	var txHash common.Hash
 	copy(txHash[:], coinID)
 	return eth.node.transactionConfirmations(ctx, txHash)
+}
+
+// FeeRate satisfies asset.FeeRater.
+func (eth *ExchangeWallet) FeeRate() (uint64, error) {
+	base, tip, err := eth.node.netFeeState(eth.ctx)
+	if err != nil {
+		return 0, fmt.Errorf("error getting net fee state: %w", err)
+	}
+
+	feeRate := new(big.Int).Add(
+		tip,
+		new(big.Int).Mul(base, big.NewInt(2)))
+
+	feeRateGwei, err := dexeth.WeiToGweiUint64(feeRate)
+	if err != nil {
+		return 0, fmt.Errorf("failed to convert wei to gwei: %w", err)
+	}
+
+	return feeRateGwei, nil
 }
 
 func (eth *ExchangeWallet) checkPeers() {

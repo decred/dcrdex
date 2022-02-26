@@ -4206,9 +4206,9 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		if len(pubKeys) == 0 || len(sigs) == 0 {
 			return nil, 0, newError(signatureErr, "wrong number of pubkeys or signatures, %d & %d", len(pubKeys), len(sigs))
 		}
-		redemptionReserves, err = accountRedeemer.ReserveNRedemption(redemptionRefundLots, wallets.toAsset.MaxFeeRate, wallets.toAsset.Version)
+		redemptionReserves, err = accountRedeemer.ReserveNRedemptions(redemptionRefundLots, wallets.toAsset.MaxFeeRate, wallets.toAsset.Version)
 		if err != nil {
-			return nil, 0, codedError(walletErr, fmt.Errorf("ReserveNRedemption error: %w", err))
+			return nil, 0, codedError(walletErr, fmt.Errorf("ReserveNRedemptions error: %w", err))
 		}
 		msgTrade.RedeemSig = &msgjson.RedeemSig{
 			PubKey: pubKeys[0],
@@ -4224,9 +4224,9 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	// If the from asset is an AccountLocker, we need to lock up refund funds.
 	var refundReserves uint64
 	if isAccountRefund {
-		refundReserves, err = accountRefunder.ReserveNRefund(redemptionRefundLots, wallets.fromAsset.Version)
+		refundReserves, err = accountRefunder.ReserveNRefunds(redemptionRefundLots, wallets.fromAsset.MaxFeeRate, wallets.fromAsset.Version)
 		if err != nil {
-			return nil, 0, codedError(walletErr, fmt.Errorf("ReserveNRefund error: %w", err))
+			return nil, 0, codedError(walletErr, fmt.Errorf("ReserveNRefunds error: %w", err))
 		}
 		defer func() {
 			if !success {
@@ -4276,9 +4276,10 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	// Store the order.
 	dbOrder := &db.MetaOrder{
 		MetaData: &db.OrderMetaData{
-			Status:     order.OrderStatusEpoch,
-			Host:       dc.acct.host,
-			MaxFeeRate: wallets.fromAsset.MaxFeeRate,
+			Status:           order.OrderStatusEpoch,
+			Host:             dc.acct.host,
+			MaxFeeRate:       wallets.fromAsset.MaxFeeRate,
+			RedeemMaxFeeRate: wallets.toAsset.MaxFeeRate,
 			Proof: db.OrderProof{
 				DEXSig:   result.Sig,
 				Preimage: preImg[:],
