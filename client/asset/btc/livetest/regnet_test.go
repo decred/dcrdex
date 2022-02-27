@@ -93,7 +93,7 @@ func TestWallet(t *testing.T) {
 		}
 		defer cm.Disconnect()
 
-		addr, err := w.Address()
+		addr, err := w.DepositAddress()
 		if err != nil {
 			return fmt.Errorf("Address error: %w", err)
 		}

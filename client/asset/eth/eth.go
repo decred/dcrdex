@@ -562,12 +562,12 @@ func (w *ETHWallet) OpenTokenWallet(tokenID uint32, settings map[string]string, 
 	}, nil
 }
 
-// OwnsAddress indicates if an address belongs to the wallet. The address need
-// not be a EIP55-compliant formatted address. It may or may not have a 0x
+// OwnsDepositAddress indicates if an address belongs to the wallet. The address
+// need not be a EIP55-compliant formatted address. It may or may not have a 0x
 // prefix, and case is not important.
 //
 // In Ethereum, an address is an account.
-func (eth *baseWallet) OwnsAddress(address string) (bool, error) {
+func (eth *baseWallet) OwnsDepositAddress(address string) (bool, error) {
 	if !common.IsHexAddress(address) {
 		return false, errors.New("invalid address")
 	}
@@ -1966,9 +1966,9 @@ func (w *assetWallet) Refund(_, contract dex.Bytes, feeSuggestion uint64) (dex.B
 	return txHash[:], nil
 }
 
-// Address returns an address for the exchange wallet. This implementation is
-// idempotent, always returning the same address for a given assetWallet.
-func (eth *baseWallet) Address() (string, error) {
+// DepositAddress returns an address for the exchange wallet. This implementation
+// is idempotent, always returning the same address for a given assetWallet.
+func (eth *baseWallet) DepositAddress() (string, error) {
 	return eth.addr.String(), nil
 }
 

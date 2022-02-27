@@ -2432,7 +2432,7 @@ func TestOwnsAddress(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			owns, err := eth.OwnsAddress(tt.address)
+			owns, err := eth.OwnsDepositAddress(tt.address)
 			if (err == nil) && tt.wantErr {
 				t.Error("expected error")
 			}

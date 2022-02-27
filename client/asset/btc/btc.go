@@ -1052,8 +1052,9 @@ func (btc *baseWallet) SyncStatus() (bool, float32, error) {
 	return numPeers > 0, 1, nil
 }
 
-// OwnsAddress indicates if an address belongs to the wallet.
-func (btc *baseWallet) OwnsAddress(address string) (bool, error) {
+// OwnsDepositAddress indicates if the provided address can be used
+// to deposit funds into the wallet.
+func (btc *baseWallet) OwnsDepositAddress(address string) (bool, error) {
 	addr, err := btc.decodeAddr(address, btc.chainParams)
 	if err != nil {
 		return false, err
@@ -3414,8 +3415,9 @@ func (btc *baseWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract de
 	return msgTx, nil
 }
 
-// Address returns an external address from the wallet.
-func (btc *baseWallet) Address() (string, error) {
+// DepositAddress returns an address for depositing funds into the
+// exchange wallet.
+func (btc *baseWallet) DepositAddress() (string, error) {
 	addr, err := btc.externalAddress()
 	if err != nil {
 		return "", err
@@ -3426,7 +3428,7 @@ func (btc *baseWallet) Address() (string, error) {
 // NewAddress returns a new address from the wallet. This satisfies the
 // NewAddresser interface.
 func (btc *baseWallet) NewAddress() (string, error) {
-	return btc.Address()
+	return btc.DepositAddress()
 }
 
 // PayFee sends the dex registration fee. Transaction fees are in addition to
