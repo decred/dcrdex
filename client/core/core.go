@@ -1873,7 +1873,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	}
 
 	walletCfg.Settings[asset.SpecialSettingActivelyUsed] =
-		strconv.FormatBool(c.AssetHasActiveOrders(dbWallet.AssetID))
+		strconv.FormatBool(c.assetHasActiveOrders(dbWallet.AssetID))
 	defer delete(walletCfg.Settings, asset.SpecialSettingActivelyUsed)
 
 	logger := c.log.SubLogger(unbip(assetID))
@@ -1917,7 +1917,7 @@ func (c *Core) WalletState(assetID uint32) *WalletState {
 
 // AssetHasActiveOrders checks whether there are any active orders or
 // negotiating matches for the specified asset.
-func (c *Core) AssetHasActiveOrders(assetID uint32) bool {
+func (c *Core) assetHasActiveOrders(assetID uint32) bool {
 	for _, dc := range c.dexConnections() {
 		if dc.hasActiveAssetOrders(assetID) {
 			return true

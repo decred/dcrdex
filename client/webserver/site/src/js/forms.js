@@ -5,8 +5,6 @@ import State from './state'
 import * as intl from './locales'
 import { RateEncodingFactor } from './orderutil'
 
-const WALLET_BIRTHDAY_CONFIG = 'walletbirthday'
-
 /*
  * NewWalletForm should be used with the "newWalletForm" template. The enclosing
  * <form> element should be the second argument of the constructor.
@@ -16,7 +14,6 @@ export class NewWalletForm {
     this.form = form
     this.success = success
     this.pwCache = pwCache
-    this.walletHasBirthday = false
     this.currentAsset = null
     const page = this.page = Doc.parseTemplate(form)
     this.pwHiders = Array.from(form.querySelectorAll('.hide-pw'))
@@ -32,8 +29,6 @@ export class NewWalletForm {
 
     // WalletConfigForm will set the global app variable.
     this.subform = new WalletConfigForm(page.walletSettings, true)
-
-    this.setupBirthdaySelection()
 
     Doc.bind(this.subform.showOther, 'click', () => Doc.show(page.walletSettingsHeader))
 
@@ -57,16 +52,10 @@ export class NewWalletForm {
     }
     Doc.hide(page.newWalletErr)
     const assetID = parseInt(this.currentAsset.id)
-    const config = this.subform.map()
-    // The wallet birthday config is not passed to the subform, so we populate
-    // it here.
-    if (this.walletHasBirthday) {
-      config[WALLET_BIRTHDAY_CONFIG] = this.getWalletBirthday() + ''
-    }
     const createForm = {
       assetID: assetID,
       pass: page.newWalletPass.value || '',
-      config: config,
+      config: this.subform.map(),
       appPass: pw,
       walletType: this.currentWalletType
     }
@@ -81,74 +70,6 @@ export class NewWalletForm {
     if (this.pwCache) this.pwCache.pw = pw
     page.newWalletPass.value = ''
     this.success(assetID)
-  }
-
-  /*
-   * getWalletBirthday checks the wallet birthday section and returns a unix
-   * date of the wallet birthday.
-   */
-  getWalletBirthday () {
-    const page = this.page
-    if (page.freshButton.checked) return toUnixDate(new Date())
-    else if (page.earliestButton.checked) {
-      const minDate = toUnixDate(new Date(page.customDate.min))
-      return Math.max(minDate, app().seedGenTime)
-    } else {
-      const minDate = page.customDate.min
-        ? toUnixDate(new Date(page.customDate.min))
-        : Number.MIN_SAFE_INTEGER
-      const maxDate = page.customDate.max
-        ? toUnixDate(new Date(page.customDate.max))
-        : Number.MAX_SAFE_INTEGER
-      let date = page.customDate.value
-        ? toUnixDate(new Date(page.customDate.value))
-        : 0
-      if (date < minDate) date = minDate
-      else if (date > maxDate) date = maxDate
-      return date
-    }
-  }
-
-  /*
-   * setupBirthdaySelection does the initial setup for the section used to set
-   * the wallet birthday.
-   */
-  setupBirthdaySelection () {
-    const page = this.page
-    page.customDate.valueAsDate = new Date()
-    page.customDate.max = dateToString(new Date())
-    const onChange = () => {
-      page.customDate.disabled = !page.customButton.checked
-    }
-    onChange()
-    Doc.bind(page.freshButton, 'change', onChange)
-    Doc.bind(page.earliestButton, 'change', onChange)
-    Doc.bind(page.customButton, 'change', onChange)
-  }
-
-  /*
-   * setupBirthdayConfig takes the configs for the current wallet, and if there
-   * is a wallet birthday config inside, it displays the birthday selection
-   * section.
-   */
-  setupBirthdayConfig (configOpts) {
-    const page = this.page
-    // Setting the default selection could be done in setupBirthdaySelection
-    // if the user was already logged in, but since this is not certain, we
-    // do it here.
-    if (app().seedGenTime > 0) page.freshButton.checked = true
-    else page.earliestButton.checked = true
-    const birthdayConfig = configOpts.find(config => config.key === WALLET_BIRTHDAY_CONFIG)
-    this.walletHasBirthday = !!birthdayConfig
-    if (this.walletHasBirthday) {
-      const min = birthdayConfig.min
-        ? Math.max(birthdayConfig.min, app().seedGenTime)
-        : app().seedGenTime
-      page.customDate.min = dateToString(new Date(min * 1000))
-      Doc.show(page.selectBirthday)
-    } else {
-      Doc.hide(page.selectBirthday)
-    }
   }
 
   async setAsset (assetID) {
@@ -193,14 +114,16 @@ export class NewWalletForm {
     this.currentWalletType = walletDef.type
     const appPwCached = State.passwordIsCached() || (this.pwCache && this.pwCache.pw)
     Doc.hide(page.auth, page.oneBttnBox, page.newWalletPassBox)
-    let configOpts = walletDef.configopts || []
-
-    // During wallet creation we display a special UI with radio boxes for the
-    // user to select the wallet birthday, so we filter out the wallet birthday
-    // here in order to not display it in the regular config section.
-    this.setupBirthdayConfig(configOpts)
-    configOpts = configOpts.filter(config => config.key !== WALLET_BIRTHDAY_CONFIG)
-
+    const configOpts = walletDef.configopts || []
+    // If a config represents a wallet's birthday, we update the default
+    // selection to the current date if this installation of the client
+    // generated a seed.
+    configOpts.map((opt) => {
+      if (opt.isBirthdayConfig && app().seedGenTime > 0) {
+        opt.default = toUnixDate(new Date())
+      }
+      return opt
+    })
     if (appPwCached && walletDef.seeded) {
       Doc.show(page.oneBttnBox)
     } else if (walletDef.seeded) {

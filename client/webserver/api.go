@@ -539,17 +539,12 @@ func (s *WebServer) apiWalletSettings(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("error setting wallet settings: %w", err))
 		return
 	}
-
-	hasActiveOrders := s.core.AssetHasActiveOrders(form.AssetID)
-
 	writeJSON(w, &struct {
-		OK              bool              `json:"ok"`
-		Map             map[string]string `json:"map"`
-		HasActiveOrders bool              `json:"hasactiveorders"`
+		OK  bool              `json:"ok"`
+		Map map[string]string `json:"map"`
 	}{
-		OK:              true,
-		Map:             settings,
-		HasActiveOrders: hasActiveOrders,
+		OK:  true,
+		Map: settings,
 	}, s.indent)
 }
 

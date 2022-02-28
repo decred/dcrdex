@@ -112,7 +112,6 @@ type clientCore interface {
 	PreOrder(*core.TradeForm) (*core.OrderEstimate, error)
 	WalletLogFilePath(assetID uint32) (string, error)
 	EstimateRegistrationTxFee(host string, certI interface{}, assetID uint32) (uint64, error)
-	AssetHasActiveOrders(assetID uint32) bool
 }
 
 var _ clientCore = (*core.Core)(nil)

@@ -671,7 +671,6 @@ func (c *TCore) AccountImport(pw []byte, account core.Account) error {
 	return nil
 }
 func (c *TCore) AccountDisable(pw []byte, host string) error { return nil }
-func (c *TCore) AssetHasActiveOrders(uint32) bool            { return false }
 
 func coreCoin() *core.Coin {
 	b := make([]byte, 36)

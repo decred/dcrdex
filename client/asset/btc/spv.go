@@ -1181,7 +1181,6 @@ func (w *spvWallet) startWallet() error {
 	}
 
 	w.cl = chainService
-
 	w.chainClient = chain.NewNeutrinoClient(w.chainParams, chainService)
 	w.wallet = &walletExtender{btcw, w.chainParams}
 

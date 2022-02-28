@@ -148,6 +148,7 @@ type ConfigOption struct {
 	IsBoolean         bool        `json:"isboolean"`
 	IsDate            bool        `json:"isdate"`
 	DisableWhenActive bool        `json:"disablewhenactive"`
+	IsBirthdayConfig  bool        `json:"isBirthdayConfig"`
 }
 
 const (

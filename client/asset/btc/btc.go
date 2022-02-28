@@ -126,6 +126,7 @@ var (
 		MinValue:          defaultWalletBirthdayUnix,
 		IsDate:            true,
 		DisableWhenActive: true,
+		IsBirthdayConfig:  true,
 	}}
 
 	commonOpts = []*asset.ConfigOption{

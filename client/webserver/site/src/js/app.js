@@ -7,7 +7,7 @@ import SettingsPage from './settings'
 import MarketsPage from './markets'
 import OrdersPage from './orders'
 import OrderPage from './order'
-import { RateEncodingFactor } from './orderutil'
+import { RateEncodingFactor, StatusExecuted, hasLiveMatches } from './orderutil'
 import { getJSON, postJSON } from './http'
 import * as ntfn from './notifications'
 import ws from './ws'
@@ -658,6 +658,23 @@ export default class Application {
       this.user.exchanges[host].markets[mktID].orders = o
     }
     return o
+  }
+
+  /*
+   * haveActiveOrders returns whether or not the there are active orders
+   * involving a certain asset.
+   */
+  haveAssetOrders (assetID) {
+    for (const xc of Object.values(this.user.exchanges)) {
+      for (const market of Object.values(xc.markets)) {
+        if (!market.orders) continue
+        for (const ord of market.orders) {
+          if ((ord.baseID === assetID || ord.quoteID === assetID) &&
+            (ord.status < StatusExecuted || hasLiveMatches(ord))) return true
+        }
+      }
+    }
+    return false
   }
 
   /* order attempts to locate an order by order ID. */
