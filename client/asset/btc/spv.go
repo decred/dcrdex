@@ -431,14 +431,6 @@ func (w *spvWallet) sendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) 
 		}
 		defer w.log.Tracef("PublishTransaction(%v) completed in %v", tx.TxHash(),
 			time.Since(tStart)) // after outpoint unlocking and signalling
-
-		// bitcoind would unlock these, but it seems that btcwallet does not.
-		// However, it seems like they are no longer returned from ListUnspent
-		// even if we unlock the outpoint before the transaction is mined, so
-		// this is just housekeeping for btcwallet's lockedOutpoints map.
-		for _, txIn := range tx.TxIn {
-			w.wallet.UnlockOutpoint(txIn.PreviousOutPoint)
-		}
 		res <- nil
 	}()
 
@@ -450,6 +442,14 @@ func (w *spvWallet) sendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) 
 	case <-time.After(defaultBroadcastWait):
 		w.log.Debugf("No error from PublishTransaction after %v for txn %v. "+
 			"Assuming wallet accepted it.", defaultBroadcastWait, tx.TxHash())
+	}
+
+	// bitcoind would unlock these, btcwallet does not. Although it seems like
+	// they are no longer returned from ListUnspent after publishing, it must
+	// not be returned by LockedOutpoints (listlockunspent) for the lockedSats
+	// computations to be correct.
+	for _, txIn := range tx.TxIn {
+		w.wallet.UnlockOutpoint(txIn.PreviousOutPoint)
 	}
 
 	txHash := tx.TxHash() // down here in case... the msgTx was mutated?
