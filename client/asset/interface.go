@@ -299,6 +299,9 @@ type Wallet interface {
 	// payment. This method need not be supported by all assets. Those assets
 	// which do no support DEX registration fees will return an ErrUnsupported.
 	RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error)
+	// EstimateRegistrationTxFee returns an estimate for the tx fee needed to
+	// pay the registration fee using the provided feeRate.
+	EstimateRegistrationTxFee(feeRate uint64) uint64
 }
 
 // Rescanner is a wallet implementation with rescan functionality.

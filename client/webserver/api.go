@@ -46,6 +46,29 @@ func (s *WebServer) apiDiscoverAccount(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp, s.indent)
 }
 
+// apiEstimateRegistrationTxFee is the handler for the '/regtxfee' API request.
+func (s *WebServer) apiEstimateRegistrationTxFee(w http.ResponseWriter, r *http.Request) {
+	form := new(registrationTxFeeForm)
+	if !readPost(w, r, form) {
+		return
+	}
+	cert := []byte(form.Cert)
+	txFee, err := s.core.EstimateRegistrationTxFee(form.Addr, cert, *form.AssetID)
+	if err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+	resp := struct {
+		OK       bool           `json:"ok"`
+		Exchange *core.Exchange `json:"xc,omitempty"`
+		TxFee    uint64         `json:"txfee"`
+	}{
+		OK:    true,
+		TxFee: txFee,
+	}
+	writeJSON(w, resp, s.indent)
+}
+
 // apiGetDEXInfo is the handler for the '/getdexinfo' API request.
 func (s *WebServer) apiGetDEXInfo(w http.ResponseWriter, r *http.Request) {
 	form := new(registrationForm)

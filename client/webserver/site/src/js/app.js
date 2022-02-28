@@ -658,6 +658,18 @@ export default class Application {
     return o
   }
 
+  haveAssetOrders (assetID) {
+    for (const xc of Object.values(this.user.exchanges)) {
+      for (const market of Object.values(xc.markets)) {
+        if (!market.orders) continue
+        for (const ord of market.orders) {
+          if (ord.baseID === assetID || ord.quoteID === assetID) return true
+        }
+      }
+    }
+    return false
+  }
+
   /* order attempts to locate an order by order ID. */
   order (oid) {
     for (const xc of Object.values(this.user.exchanges)) {
