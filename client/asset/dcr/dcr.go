@@ -1663,7 +1663,13 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	defer dcr.fundingMtx.Unlock() // hold until after returnCoins and lockFundingCoins(change)
 	// Sign the tx but don't send the transaction yet until
 	// the individual swap refund txs are prepared and signed.
-	msgTx, change, changeAddr, fees, err := dcr.signTxAndAddChange(baseTx, feeRate, -1)
+	changeAcct := dcr.depositAccount()
+	if swaps.LockChange && dcr.tradingAccount != "" {
+		// Change will likely be used to fund more swaps,
+		// send to trading account.
+		changeAcct = dcr.tradingAccount
+	}
+	msgTx, change, changeAddr, fees, err := dcr.signTxAndAddChange(baseTx, feeRate, -1, changeAcct)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -1783,7 +1789,7 @@ func (dcr *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 	}
 
 	// Send the funds back to the exchange wallet.
-	txOut, _, err := dcr.makeChangeOut(totalIn - fee)
+	txOut, _, err := dcr.makeChangeOut(dcr.depositAccount(), totalIn-fee)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -2952,8 +2958,8 @@ func msgTxToHex(msgTx *wire.MsgTx) (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-func (dcr *ExchangeWallet) makeChangeOut(val uint64) (*wire.TxOut, stdaddr.Address, error) {
-	changeAddr, err := dcr.wallet.InternalAddress(dcr.ctx, dcr.depositAccount())
+func (dcr *ExchangeWallet) makeChangeOut(changeAcct string, val uint64) (*wire.TxOut, stdaddr.Address, error) {
+	changeAddr, err := dcr.wallet.InternalAddress(dcr.ctx, changeAcct)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating change address: %w", err)
 	}
@@ -2965,7 +2971,7 @@ func (dcr *ExchangeWallet) makeChangeOut(val uint64) (*wire.TxOut, stdaddr.Addre
 // the amount is dust. subtractFrom indicates the output from which fees should
 // be subtraced, where -1 indicates fees should come out of a change output.
 func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, feeRate uint64, subtractFrom int32) (*wire.MsgTx, error) {
-	signedTx, _, _, _, err := dcr.signTxAndAddChange(baseTx, feeRate, subtractFrom)
+	signedTx, _, _, _, err := dcr.signTxAndAddChange(baseTx, feeRate, subtractFrom, dcr.depositAccount())
 	if err != nil {
 		return nil, err
 	}
@@ -2974,10 +2980,11 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, feeRate uint64, su
 	return signedTx, err
 }
 
-// signTxAndAddChange signs the passed msgTx, adding a change output unless the
-// amount is dust. subtractFrom indicates the output from which fees should be
-// subtraced, where -1 indicates fees should come out of a change output.
-func (dcr *ExchangeWallet) signTxAndAddChange(baseTx *wire.MsgTx, feeRate uint64, subtractFrom int32) (*wire.MsgTx, *output, string, uint64, error) {
+// signTxAndAddChange signs the passed msgTx, adding a change output that pays
+// an address from the specified changeAcct, unless the change amount is dust.
+// subtractFrom indicates the output from which fees should be subtraced, where
+// -1 indicates fees should come out of a change output.
+func (dcr *ExchangeWallet) signTxAndAddChange(baseTx *wire.MsgTx, feeRate uint64, subtractFrom int32, changeAcct string) (*wire.MsgTx, *output, string, uint64, error) {
 	// Sign the transaction to get an initial size estimate and calculate
 	// whether a change output would be dust.
 	sigCycles := 1
@@ -3018,7 +3025,7 @@ func (dcr *ExchangeWallet) signTxAndAddChange(baseTx *wire.MsgTx, feeRate uint64
 				baseTx.TxOut[subtractFrom].Value -= int64(minFeeWithChange)
 				remaining += minFeeWithChange
 			}
-			changeOutput, changeAddress, err = dcr.makeChangeOut(changeValue)
+			changeOutput, changeAddress, err = dcr.makeChangeOut(changeAcct, changeValue)
 			if err != nil {
 				return nil, nil, "", 0, err
 			}
