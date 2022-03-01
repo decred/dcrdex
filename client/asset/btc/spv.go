@@ -800,7 +800,7 @@ func (w *spvWallet) sendWithSubtract(pkScript []byte, value, feeRate uint64) (*c
 
 	sum, inputsSize, _, fundingCoins, _, _, err := fund(utxos, enough)
 	if err != nil {
-		return nil, fmt.Errorf("error funding sendWithSubtract value of %s: %v", amount(value), err)
+		return nil, fmt.Errorf("error funding sendWithSubtract value of %s: %w", amount(value), err)
 	}
 
 	fees := (unfundedTxSize + uint64(inputsSize)) * feeRate

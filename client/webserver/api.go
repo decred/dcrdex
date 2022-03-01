@@ -26,7 +26,7 @@ func (s *WebServer) apiDiscoverAccount(w http.ResponseWriter, r *http.Request) {
 	cert := []byte(form.Cert)
 	pass, err := s.resolvePass(form.Password, r)
 	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("password error: %v", err))
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
 	exchangeInfo, paid, err := s.core.DiscoverAccount(form.Addr, pass, cert)
@@ -108,7 +108,7 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	pass, err := s.resolvePass(reg.Password, r)
 	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("password error: %v", err))
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
 	_, err = s.core.Register(&core.RegisterForm{
@@ -145,7 +145,7 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 	}
 	pass, err := s.resolvePass(form.AppPW, r)
 	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("password error: %v", err))
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
 	// Wallet does not exist yet. Try to create it.
@@ -203,7 +203,7 @@ func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
 	}
 	pass, err := s.resolvePass(form.Pass, r)
 	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("password error: %v", err))
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
 	err = s.core.OpenWallet(form.AssetID, pass)
@@ -255,7 +255,7 @@ func (s *WebServer) apiConnectWallet(w http.ResponseWriter, r *http.Request) {
 	}
 	err := s.core.ConnectWallet(form.AssetID)
 	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("error connecting to %s wallet: %v", unbip(form.AssetID), err))
+		s.writeAPIError(w, fmt.Errorf("error connecting to %s wallet: %w", unbip(form.AssetID), err))
 		return
 	}
 
@@ -272,7 +272,7 @@ func (s *WebServer) apiTrade(w http.ResponseWriter, r *http.Request) {
 	r.Close = true
 	pass, err := s.resolvePass(form.Pass, r)
 	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("password error: %v", err))
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
 	ord, err := s.core.Trade(pass, form.Order)
@@ -301,7 +301,7 @@ func (s *WebServer) apiAccountExport(w http.ResponseWriter, r *http.Request) {
 	r.Close = true
 	pass, err := s.resolvePass(form.Pass, r)
 	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("password error: %v", err))
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
 	account, err := s.core.AccountExport(pass, form.Host)
@@ -331,7 +331,7 @@ func (s *WebServer) apiExportSeed(w http.ResponseWriter, r *http.Request) {
 	r.Close = true
 	seed, err := s.core.ExportSeed(form.Pass)
 	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("error exporting seed: %v", err))
+		s.writeAPIError(w, fmt.Errorf("error exporting seed: %w", err))
 		return
 	}
 	writeJSON(w, &struct {
@@ -353,7 +353,7 @@ func (s *WebServer) apiAccountImport(w http.ResponseWriter, r *http.Request) {
 	r.Close = true
 	pass, err := s.resolvePass(form.Pass, r)
 	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("password error: %v", err))
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
 	err = s.core.AccountImport(pass, form.Account)
@@ -392,7 +392,7 @@ func (s *WebServer) apiCancel(w http.ResponseWriter, r *http.Request) {
 	}
 	pass, err := s.resolvePass(form.Pass, r)
 	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("password error: %v", err))
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
 	err = s.core.Cancel(pass, form.OrderID)
@@ -643,7 +643,7 @@ func (s *WebServer) apiChangeAppPass(w http.ResponseWriter, r *http.Request) {
 	if passwordIsCached {
 		key, err := s.cacheAppPassword(form.NewAppPW, authToken)
 		if err != nil {
-			log.Errorf("unable to cache password: %v", err)
+			log.Errorf("unable to cache password: %w", err)
 			clearCookie(pwKeyCK, w)
 		} else {
 			setCookie(pwKeyCK, hex.EncodeToString(key), w)
@@ -672,7 +672,7 @@ func (s *WebServer) apiReconfig(w http.ResponseWriter, r *http.Request) {
 	}
 	pass, err := s.resolvePass(form.AppPW, r)
 	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("password error: %v", err))
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
 	// Update wallet settings.
@@ -794,7 +794,7 @@ func (s *WebServer) apiPreOrder(w http.ResponseWriter, r *http.Request) {
 func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login *loginForm) {
 	pass, err := s.resolvePass(login.Pass, r)
 	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("password error: %v", err))
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
 	loginResult, err := s.core.Login(pass)
@@ -810,7 +810,7 @@ func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login 
 		if login.RememberPass {
 			key, err := s.cacheAppPassword(pass, authToken)
 			if err != nil {
-				s.writeAPIError(w, fmt.Errorf("login error: %v", err))
+				s.writeAPIError(w, fmt.Errorf("login error: %w", err))
 				return
 			}
 			setCookie(pwKeyCK, hex.EncodeToString(key), w)
@@ -853,9 +853,11 @@ func (s *WebServer) writeAPIError(w http.ResponseWriter, err error) {
 	if errors.As(err, &cErr) {
 		code = cErr.Code()
 	}
+	
+	rawErr := core.Unwrap(err)
 	resp := &standardResponse{
 		OK:   false,
-		Msg:  err.Error(),
+		Msg:  rawErr.Error(),
 		Code: code,
 	}
 	log.Error(err.Error())
