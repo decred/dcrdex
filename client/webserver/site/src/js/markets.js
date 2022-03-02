@@ -596,7 +596,7 @@ export default class MarketsPage extends BasePage {
    * on the chart area. The rate field is set to the x-value of the click.
    */
   reportDepthClick (r) {
-    this.page.rateField.value = Doc.formatCoinValue(r)
+    this.page.rateField.value = r
     this.rateFieldChanged()
   }
 
