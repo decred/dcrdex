@@ -2707,7 +2707,7 @@ func (c *Core) EstimateRegistrationTxFee(host string, certI interface{}, assetID
 		if r, err := rater.FeeRate(); err == nil {
 			rate = r
 		} else {
-			c.log.Debugf("failed to get fee suggestion from %s FeeRater: %v", unbip(assetID), err)
+			c.log.Warnf("failed to get fee suggestion from %s FeeRater: %v", unbip(assetID), err)
 		}
 	}
 
@@ -2720,7 +2720,7 @@ func (c *Core) EstimateRegistrationTxFee(host string, certI interface{}, assetID
 		if err == nil {
 			rate = dc.fetchFeeRate(assetID)
 		} else {
-			c.log.Debugf("failed to connect to dex: %v", err)
+			c.log.Warnf("failed to connect to dex: %v", err)
 		}
 	}
 
@@ -3776,7 +3776,7 @@ func (c *Core) feeSuggestionAny(assetID uint32, preferredConns ...*dexConnection
 			if r, err := rater.FeeRate(); err == nil {
 				return r
 			} else {
-				c.log.Debugf("failed to get fee suggestion from %s FeeRater: %v", unbip(assetID), err)
+				c.log.Warnf("failed to get fee suggestion from %s FeeRater: %v", unbip(assetID), err)
 			}
 		}
 	}
