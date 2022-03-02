@@ -6401,7 +6401,8 @@ func (c *Core) cacheRedemptionFeeSuggestion(t *trackedTrade) {
 		}
 		c.log.Debugf("unable to retrieve fee rate from FeeRater. falling back to other methods: %v", err)
 	}
-	// Try to find any book that might have the fee.
+	// Check any book that might have the fee recorded from an epoch_report note
+	// (requires a book subscription).
 	redeemAsset := t.wallets.toAsset.ID
 	feeSuggestion := t.dc.bestBookFeeSuggestion(redeemAsset)
 	if feeSuggestion > 0 {
@@ -6409,11 +6410,13 @@ func (c *Core) cacheRedemptionFeeSuggestion(t *trackedTrade) {
 		return
 	}
 	// Don't request it if we already have one.
+	// TODO: declare the rate stale at some point and fetch a new one.
 	if atomic.LoadUint64(&t.redeemFeeSuggestion) != 0 {
 		return
 	}
 	// Fetch it from the server.
 	go func() {
+		c.log.Tracef("Fetching fee rate for %v", unbip(redeemAsset))
 		feeSuggestion = t.dc.fetchFeeRate(redeemAsset)
 		if feeSuggestion > 0 {
 			atomic.StoreUint64(&t.redeemFeeSuggestion, feeSuggestion)
