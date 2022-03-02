@@ -534,6 +534,12 @@ export default class MarketsPage extends BasePage {
   async setMarket (host, base, quote) {
     const dex = app().user.exchanges[host]
     const page = this.page
+
+    // reset form inputs
+    page.lotField.value = 0
+    page.qtyField.value = ''
+    page.rateField.value = ''
+
     // If we have not yet connected, there is no dex.assets or any other
     // exchange data, so just put up a message and wait for the connection to be
     // established, at which time handleConnNote will refresh and reload.
@@ -589,6 +595,7 @@ export default class MarketsPage extends BasePage {
     this.resolveOrderFormVisibility()
     this.setOrderBttnText()
     this.setCandleDurBttns()
+    this.previewQuoteAmt(false)
   }
 
   /*
