@@ -36,8 +36,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	seed, _ := core.AssetSeedAndPass(uint32(assetID), appSeedB)
-	fmt.Printf("%x\n", seed)
+	seed, walletPW := core.AssetSeedAndPass(uint32(assetID), appSeedB)
+	fmt.Printf("seed: %x\n", seed)
+	fmt.Printf("wallet pass bytes: %x\n", walletPW)
 
 	os.Exit(0)
 }
