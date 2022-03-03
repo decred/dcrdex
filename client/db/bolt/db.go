@@ -1757,6 +1757,10 @@ func orderSide(tx *bbolt.Tx, oid order.OrderID) (sell bool, err error) {
 	if err != nil {
 		return false, fmt.Errorf("error decoding order %x: %w", oid, err)
 	}
+	// Cancel orders have no side.
+	if ord.Type() == order.CancelOrderType {
+		return false, nil
+	}
 	sell = ord.Trade().Sell
 	return
 }
