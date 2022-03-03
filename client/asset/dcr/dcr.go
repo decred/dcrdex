@@ -2353,7 +2353,8 @@ func (dcr *baseWallet) fatalFindRedemptionsError(err error, contractOutpoints []
 }
 
 // Refund refunds a contract. This can only be used after the time lock has
-// expired.
+// expired. This MUST return an asset.CoinNotFoundError error if the coin is
+// spent.
 // NOTE: The contract cannot be retrieved from the unspent coin info as the
 // wallet does not store it, even though it was known when the init transaction
 // was created. The client should store this information for persistence across
@@ -2394,7 +2395,10 @@ func (dcr *baseWallet) refundTx(coinID, contract dex.Bytes, val uint64, refundAd
 			return nil, asset.CoinNotFoundError
 		}
 		if spent {
-			return nil, fmt.Errorf("contract %s:%d is spent", txHash, vout)
+			// Refund MUST signal to caller that it is spent via
+			// asset.CoinNotFoundError so that it knows to begin looking for the
+			// counterparty's redeem and move on to redeem too.
+			return nil, fmt.Errorf("contract %s:%d is spent (%w)", txHash, vout, asset.CoinNotFoundError)
 		}
 		val = uint64(utxo.Value)
 	}
