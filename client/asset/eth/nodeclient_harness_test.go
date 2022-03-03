@@ -86,7 +86,7 @@ var (
 	tokenSwapContractAddr common.Address
 	testTokenContractAddr common.Address
 	simnetID              int64  = 42
-	maxFeeRate            uint64 = 1000 // gwei per gas
+	maxFeeRate            uint64 = 200 // gwei per gas
 )
 
 func newContract(stamp uint64, secretHash [32]byte, val uint64) *asset.Contract {
