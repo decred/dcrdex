@@ -4500,8 +4500,8 @@ func (c *Core) authDEX(dc *dexConnection) error {
 
 		// Flag each of the missing matches as revoked.
 		for _, match := range missing {
-			c.log.Warnf("DEX %s did not report active match %s on order %s - assuming revoked.",
-				dc.acct.host, match, oid)
+			c.log.Warnf("DEX %s did not report active match %s on order %s - assuming revoked, status %v.",
+				dc.acct.host, match, oid, match.Status)
 			// Must have been revoked while we were gone. Flag to allow recovery
 			// and subsequent retirement of the match and parent trade.
 			match.MetaData.Proof.SelfRevoked = true
