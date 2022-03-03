@@ -1587,17 +1587,22 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 
 	// Use a higher swap fee rate if a local estimate is higher than the
 	// prescribed rate, but not higher than the funded (max) rate.
-	var freshRate uint64
-	if r, ok := t.wallets.fromWallet.feeRater(); ok {
-		freshRate, _ = r.FeeRate()
-	}
-	if freshRate == 0 { // either not a FeeRater, or FeeRate failed
-		freshRate = t.dc.bestBookFeeSuggestion(fromAsset.ID)
-	}
-	if highestFeeRate < freshRate && freshRate <= t.metaData.MaxFeeRate {
-		c.log.Infof("Prescribed %v fee rate %v looks low, using %v",
-			fromAsset.Symbol, highestFeeRate, freshRate)
-		highestFeeRate = freshRate
+	if highestFeeRate < t.metaData.MaxFeeRate {
+		var freshRate uint64
+		if r, ok := t.wallets.fromWallet.feeRater(); ok {
+			freshRate, _ = r.FeeRate()
+		}
+		if freshRate == 0 { // either not a FeeRater, or FeeRate failed
+			freshRate = t.dc.bestBookFeeSuggestion(fromAsset.ID)
+		}
+		if freshRate > t.metaData.MaxFeeRate {
+			freshRate = t.metaData.MaxFeeRate
+		}
+		if highestFeeRate < freshRate {
+			c.log.Infof("Prescribed %v fee rate %v looks low, using %v",
+				fromAsset.Symbol, highestFeeRate, freshRate)
+			highestFeeRate = freshRate
+		}
 	}
 	// swapMatches is no longer idempotent after this point.
 
