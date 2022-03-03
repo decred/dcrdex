@@ -1117,11 +1117,19 @@ func (eth *ExchangeWallet) Refund(_, contract dex.Bytes, _ uint64) (dex.Bytes, e
 	}
 	// It's possible the swap was refunded by someone else. In that case we
 	// cannot know the refunding tx hash.
-	if swap.State == dexeth.SSRefunded {
+	switch swap.State {
+	case dexeth.SSInitiated: // good, check refundability
+	case dexeth.SSNone:
+		return nil, asset.ErrSwapNotInitiated
+	case dexeth.SSRefunded:
 		eth.log.Infof("Swap with secret hash %x already refunded.", secretHash)
 		unlockFunds()
 		zeroHash := common.Hash{}
 		return zeroHash[:], nil
+	case dexeth.SSRedeemed:
+		eth.log.Infof("Swap with secret hash %x already redeemed with secret key %x.",
+			secretHash, swap.Secret)
+		return nil, asset.CoinNotFoundError // so caller knows to FindRedemption
 	}
 
 	refundable, err := eth.node.isRefundable(secretHash, version)

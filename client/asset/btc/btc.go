@@ -2487,7 +2487,8 @@ func (btc *baseWallet) tryRedemptionRequests(ctx context.Context, startBlock *ch
 }
 
 // Refund revokes a contract. This can only be used after the time lock has
-// expired.
+// expired. This MUST return an asset.CoinNotFoundError error if the coin is
+// spent.
 // NOTE: The contract cannot be retrieved from the unspent coin info as the
 // wallet does not store it, even though it was known when the init transaction
 // was created. The client should store this information for persistence across
@@ -2516,7 +2517,7 @@ func (btc *baseWallet) Refund(coinID, contract dex.Bytes, feeSuggestion uint64) 
 		return nil, fmt.Errorf("error finding unspent contract: %w", err)
 	}
 	if utxo == nil {
-		return nil, asset.CoinNotFoundError
+		return nil, asset.CoinNotFoundError // spent
 	}
 	msgTx, err := btc.refundTx(txHash, vout, contract, uint64(utxo.Value), nil, feeSuggestion)
 	if err != nil {
