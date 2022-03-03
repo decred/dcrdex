@@ -71,8 +71,8 @@ type matchTracker struct {
 	// another redeem request for this match while one is already active.
 	sendingRedeemAsync uint32 // atomic
 	// refundErr will be set to true if we attempt a refund and get a
-	// CoinNotFoundError, indicating there is nothing to refund. Prevents
-	// retries.
+	// CoinNotFoundError, indicating there is nothing to refund and the
+	// counterparty redemption search should be attempted. Prevents retries.
 	refundErr   error
 	prefix      *order.Prefix
 	trade       *order.Trade
@@ -1952,11 +1952,14 @@ func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, 
 		feeSuggestion := c.feeSuggestion(t.dc, refundAsset.ID)
 		refundCoin, err := refundWallet.Refund(swapCoinID, contractToRefund, feeSuggestion)
 		if err != nil {
+			// CRITICAL - Refund must indicate if the swap is spent (i.e.
+			// redeemed already) so that as taker we will start the
+			// auto-redemption path.
 			if errors.Is(err, asset.CoinNotFoundError) && match.Side == order.Taker {
 				match.refundErr = err
-				// Could not find the contract coin, which means it has been spent.
-				// We should have already started FindRedemption for this contract,
-				// but let's do it again to ensure we find the secret.
+				// Could not find the contract coin, which means it has been
+				// spent. Unless the locktime is expired, we would have already
+				// started FindRedemption for this contract.
 				t.dc.log.Debugf("Failed to refund %s contract %s, already redeemed. Beginning find redemption.",
 					refundAsset.Symbol, swapCoinString)
 				t.findMakersRedemption(match)
@@ -1964,6 +1967,12 @@ func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, 
 				t.delayTicks(match, time.Minute*5)
 				errs.add("error sending refund tx for match %s, swap coin %s: %v",
 					match, swapCoinString, err)
+				if match.Status == order.TakerSwapCast && match.Side == order.Taker {
+					// Check for a redeem even though Refund did not indicate it
+					// was spent via CoinNotFoundError, but do not set refundErr
+					// so that a refund can be tried again.
+					t.findMakersRedemption(match)
+				}
 			}
 			continue
 		}
