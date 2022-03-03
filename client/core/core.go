@@ -1915,7 +1915,7 @@ func (c *Core) WalletState(assetID uint32) *WalletState {
 	return wallet.state()
 }
 
-// AssetHasActiveOrders checks whether there are any active orders or
+// assetHasActiveOrders checks whether there are any active orders or
 // negotiating matches for the specified asset.
 func (c *Core) assetHasActiveOrders(assetID uint32) bool {
 	for _, dc := range c.dexConnections() {
@@ -1996,12 +1996,8 @@ func (c *Core) startWalletSyncMonitor(wallet *xcWallet) {
 // orders unless as a last ditch effort to get the wallet to recognize a
 // transaction needed to complete a swap.
 func (c *Core) RescanWallet(assetID uint32, force bool) error {
-	if !force {
-		for _, dc := range c.dexConnections() {
-			if dc.hasActiveAssetOrders(assetID) {
-				return newError(activeOrdersErr, "active orders for %v", unbip(assetID))
-			}
-		}
+	if !force && c.assetHasActiveOrders(assetID) {
+		return newError(activeOrdersErr, "active orders for %v", unbip(assetID))
 	}
 
 	wallet, err := c.connectedWallet(assetID)
@@ -2060,10 +2056,8 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 // CloseWallet closes the wallet for the specified asset. The wallet cannot be
 // closed if there are active negotiations for the asset.
 func (c *Core) CloseWallet(assetID uint32) error {
-	for _, dc := range c.dexConnections() {
-		if dc.hasActiveAssetOrders(assetID) {
-			return fmt.Errorf("cannot lock %s wallet with active swap negotiations", unbip(assetID))
-		}
+	if c.assetHasActiveOrders(assetID) {
+		return fmt.Errorf("cannot lock %s wallet with active swap negotiations", unbip(assetID))
 	}
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
@@ -2252,14 +2246,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 	// If there are active trades, make sure they can be settled by the
 	// keys held within the new wallet.
 	sameWallet := func() error {
-		hasActiveTrade := false
-		for _, dc := range c.dexConnections() {
-			if dc.hasActiveAssetOrders(wallet.AssetID) {
-				hasActiveTrade = true
-				break
-			}
-		}
-		if hasActiveTrade {
+		if c.assetHasActiveOrders(wallet.AssetID) {
 			owns, err := wallet.OwnsAddress(oldDepositAddr)
 			if err != nil {
 				return err
@@ -3156,7 +3143,10 @@ func (c *Core) InitializeClient(pw, restorationSeed []byte) error {
 	freshSeed := len(restorationSeed) == 0
 	if freshSeed {
 		now := uint64(time.Now().Unix())
-		c.db.SetSeedGenerationTime(now)
+		err = c.db.SetSeedGenerationTime(now)
+		if err != nil {
+			return fmt.Errorf("SetSeedGenerationTime error: %w", err)
+		}
 		c.seedGenerationTime = now
 	}
 

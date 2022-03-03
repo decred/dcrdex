@@ -116,10 +116,10 @@ var (
 	spvOpts = []*asset.ConfigOption{{
 		Key:         "walletbirthday",
 		DisplayName: "Wallet Birthday",
-		Description: "This is the date the wallet start scanning the blockchain for " +
-			"transactions related to this wallet. A rescan of the will automatically" +
-			"be started if the new birthday is earlier than the old one. This option" +
-			" is disabled if there are currently active BTC trades.",
+		Description: "This is the date the wallet starts scanning the blockchain " +
+			"for transactions related to this wallet. If reconfiguring an existing " +
+			"wallet, this may start a rescan if the new birthday is older. This " +
+			"option is disabled if there are currently active BTC trades.",
 		DefaultValue: defaultWalletBirthdayUnix,
 		MaxValue:     "now",
 		// This MinValue must be removed if we start supporting importing private keys
@@ -394,6 +394,20 @@ type WalletConfig struct {
 	Birthday         uint64  `ini:"walletbirthday"`       // SPV
 }
 
+// adjustedBirthday converts WalletConfig.Birthday to a time.Time, and adjusts
+// it so that defaultWalletBirthday <= WalletConfig.Bithday <= now.
+func (cfg *WalletConfig) adjustedBirthday() time.Time {
+	bday := time.Unix(int64(cfg.Birthday), 0)
+	now := time.Now()
+	if defaultWalletBirthday.After(bday) {
+		return defaultWalletBirthday
+	} else if bday.After(now) {
+		return now
+	} else {
+		return bday
+	}
+}
+
 // readRPCWalletConfig parses the settings map into a *RPCWalletConfig.
 func readRPCWalletConfig(settings map[string]string, symbol string, net dex.Network, ports dexbtc.NetPorts) (cfg *RPCWalletConfig, err error) {
 	cfg = new(RPCWalletConfig)
@@ -476,16 +490,7 @@ func (d *Driver) Create(params *asset.CreateWalletParams) error {
 		return err
 	}
 
-	bday := time.Unix(int64(walletCfg.Birthday), 0)
-	now := time.Now()
-	// This check must be removed if we start supporting importing private keys
-	if defaultWalletBirthday.After(bday) {
-		bday = defaultWalletBirthday
-	} else if bday.After(now) {
-		bday = now
-	}
-
-	return createSPVWallet(params.Pass, params.Seed, bday, params.DataDir, params.Logger, chainParams)
+	return createSPVWallet(params.Pass, params.Seed, walletCfg.adjustedBirthday(), params.DataDir, params.Logger, chainParams)
 }
 
 // Open opens or connects to the BTC exchange wallet. Start the wallet with its
@@ -810,16 +815,8 @@ func openSPVWallet(cfg *BTCCloneCFG) (*ExchangeWalletSPV, error) {
 		peers = append(peers, walletCfg.Peer)
 	}
 
-	bday := time.Unix(int64(walletCfg.Birthday), 0)
-	now := time.Now()
-	if defaultWalletBirthday.After(bday) {
-		bday = defaultWalletBirthday
-	} else if bday.After(now) {
-		bday = now
-	}
-
 	allowAutomaticRescan := !walletCfg.ActivelyUsed
-	btc.node = loadSPVWallet(cfg.WalletCFG.DataDir, cfg.Logger.SubLogger("SPV"), peers, cfg.ChainParams, bday, allowAutomaticRescan)
+	btc.node = loadSPVWallet(cfg.WalletCFG.DataDir, cfg.Logger.SubLogger("SPV"), peers, cfg.ChainParams, walletCfg.adjustedBirthday(), allowAutomaticRescan)
 
 	return &ExchangeWalletSPV{baseWallet: btc}, nil
 }

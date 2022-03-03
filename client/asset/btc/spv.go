@@ -1186,7 +1186,12 @@ func (w *spvWallet) startWallet() error {
 
 	oldBday := btcw.Manager.Birthday()
 	wdb := btcw.Database()
-	performRescan := w.allowAutomaticRescan && w.birthday.Before(oldBday)
+
+	performRescan := w.birthday.Before(oldBday)
+	if performRescan && !w.allowAutomaticRescan {
+		bailOnWalletAndDB()
+		return errors.New("cannot set earlier birthday while there are active deals")
+	}
 
 	if !oldBday.Equal(w.birthday) {
 		err = walletdb.Update(wdb, func(dbtx walletdb.ReadWriteTx) error {
@@ -1200,19 +1205,7 @@ func (w *spvWallet) startWallet() error {
 	}
 
 	if performRescan {
-		w.log.Info("Starting a wallet rescan")
-		err := wallet.DropTransactionHistory(wdb, false)
-		if err != nil {
-			w.log.Errorf("Failed to drop wallet transaction history: %v", err)
-		}
-
-		err = walletdb.Update(wdb, func(dbtx walletdb.ReadWriteTx) error {
-			ns := dbtx.ReadWriteBucket([]byte("waddrmgr"))
-			return btcw.Manager.SetSyncedTo(ns, nil)
-		})
-		if err != nil {
-			w.log.Errorf("Failed to reset wallet manager sync height: %v", err)
-		}
+		w.forceRescan()
 	}
 
 	if err = w.chainClient.Start(); err != nil { // lazily starts connmgr
@@ -1248,16 +1241,38 @@ func (w *spvWallet) rescanWalletAsync() error {
 	if !ok {
 		return errors.New("wallet not loaded")
 	}
-	wdb := btcw.Database()
 
 	w.log.Info("Stopping wallet and chain client...")
 	btcw.Stop() // stops Wallet and chainClient (not chainService)
 	btcw.WaitForShutdown()
 	w.chainClient.WaitForShutdown()
 
-	// Force a full rescan with active address discovery on wallet restart by
-	// dropping the complete transaction history. See the
-	// btcwallet/cmd/dropwtxmgr app for more information.
+	w.forceRescan()
+
+	w.log.Info("Starting wallet...")
+	btcw.Start()
+
+	if err := w.chainClient.Start(); err != nil {
+		return fmt.Errorf("couldn't start Neutrino client: %v", err)
+	}
+
+	w.log.Info("Synchronizing wallet with network...")
+	btcw.SynchronizeRPC(w.chainClient)
+	return nil
+}
+
+// forceRescan forces a full rescan with active address discovery on wallet
+// restart by dropping the complete transaction history and setting the
+// "synced to" field to nil. See the btcwallet/cmd/dropwtxmgr app for more
+// information.
+func (w *spvWallet) forceRescan() {
+	btcw, ok := w.loader.LoadedWallet()
+	if !ok {
+		w.log.Errorf("wallet not loaded")
+		return
+	}
+	wdb := btcw.Database()
+
 	w.log.Info("Dropping transaction history to perform full rescan...")
 	err := wallet.DropTransactionHistory(wdb, false)
 	if err != nil {
@@ -1272,17 +1287,6 @@ func (w *spvWallet) rescanWalletAsync() error {
 	if err != nil {
 		w.log.Errorf("Failed to reset wallet manager sync height: %v", err)
 	}
-
-	w.log.Info("Starting wallet...")
-	btcw.Start()
-
-	if err = w.chainClient.Start(); err != nil {
-		return fmt.Errorf("couldn't start Neutrino client: %v", err)
-	}
-
-	w.log.Info("Synchronizing wallet with network...")
-	btcw.SynchronizeRPC(w.chainClient)
-	return nil
 }
 
 // stop stops the wallet and database threads.
