@@ -536,7 +536,7 @@ export default class MarketsPage extends BasePage {
     const page = this.page
 
     // reset form inputs
-    page.lotField.value = 0
+    page.lotField.value = ''
     page.qtyField.value = ''
     page.rateField.value = ''
 
