@@ -59,9 +59,8 @@ func (s *WebServer) apiEstimateRegistrationTxFee(w http.ResponseWriter, r *http.
 		return
 	}
 	resp := struct {
-		OK       bool           `json:"ok"`
-		Exchange *core.Exchange `json:"xc,omitempty"`
-		TxFee    uint64         `json:"txfee"`
+		OK    bool   `json:"ok"`
+		TxFee uint64 `json:"txfee"`
 	}{
 		OK:    true,
 		TxFee: txFee,
