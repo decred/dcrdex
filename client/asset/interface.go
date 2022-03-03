@@ -234,11 +234,13 @@ type Wallet interface {
 	// a goroutine.
 	FindRedemption(ctx context.Context, coinID dex.Bytes) (redemptionCoin, secret dex.Bytes, err error)
 	// Refund refunds a contract. This can only be used after the time lock has
-	// expired AND if the contract has not been redeemed/refunded.
-	// NOTE: The contract cannot be retrieved from the unspent coin info
-	// as the wallet does not store it, even though it was known when the init
-	// transaction was created. The client should store this information for
-	// persistence across sessions.
+	// expired AND if the contract has not been redeemed/refunded. This method
+	// MUST return an asset.CoinNotFoundError error if the swap is already
+	// spent, which is used to indicate if FindRedemption should be used and the
+	// counterparty's swap redeemed. NOTE: The contract cannot be retrieved from
+	// the unspent coin info as the wallet does not store it, even though it was
+	// known when the init transaction was created. The client should store this
+	// information for persistence across sessions.
 	Refund(coinID, contract dex.Bytes, feeSuggestion uint64) (dex.Bytes, error)
 	// Address returns an address for the exchange wallet.
 	Address() (string, error)
