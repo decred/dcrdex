@@ -33,6 +33,16 @@ select {
   padding: 5px 10px;
 }
 
+// bootstrap override
+thead,
+tbody,
+tfoot,
+tr,
+td,
+th {
+  border-style: none;
+}
+
 // Hide number arrows.
 // Chrome, Safari, Edge, Opera
 input::-webkit-outer-spin-button,

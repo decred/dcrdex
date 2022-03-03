@@ -76,6 +76,12 @@ body.dark {
     border: none;
     outline: none;
     color: $font-color-dark;
+  }
+
+  select,
+  select:focus,
+  input:not([type=checkbox]),
+  input:focus:not([type=checkbox]) {
     background-color: black;
   }
 
