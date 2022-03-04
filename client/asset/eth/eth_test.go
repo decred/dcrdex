@@ -741,6 +741,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	}
 
 	checkBalance := func(wallet *ExchangeWallet, expectedAvailable, expectedLocked uint64, testName string) {
+		t.Helper()
 		balance, err := wallet.Balance()
 		if err != nil {
 			t.Fatalf("%v: unexpected error %v", testName, err)
@@ -836,7 +837,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	checkBalance(eth, walletBalanceGwei, 0, "after redeem too much")
+	checkBalance(eth, walletBalanceGwei, 0, "after return too much")
 
 	// Fund order with funds equal to available
 	order.Value = walletBalanceGwei - expectedOrderFees
@@ -1143,7 +1144,10 @@ func TestSwap(t *testing.T) {
 
 	refreshWalletAndFundCoins := func(ethBalance uint64, coinAmounts []uint64) asset.Coins {
 		node.bal.Current = ethToWei(ethBalance)
-		eth.lockedFunds = fundReserves{}
+		eth.lockedFunds.initiateReserves = 0
+		eth.lockedFunds.redemptionReserves = 0
+		eth.lockedFunds.refundReserves = 0
+
 		coins, err := eth.FundingCoins(coinIDsForAmounts(coinAmounts))
 		if err != nil {
 			t.Fatalf("FundingCoins error: %v", err)

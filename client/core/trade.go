@@ -219,14 +219,16 @@ func (t *trackedTrade) accountRefunder() (asset.AccountLocker, bool) {
 // lockRedemptionFraction would put the locked reserves > available reserves,
 // nothing will be reserved, and an error message is logged.
 func (t *trackedTrade) lockRefundFraction(num, denom uint64) {
-	redeemer, is := t.accountRefunder()
+	refunder, is := t.accountRefunder()
 	if !is {
 		return
 	}
-
 	newReserved := t.reservesToLock(num, denom, t.refundReserves, t.refundLocked)
+	if newReserved == 0 {
+		return
+	}
 
-	if err := redeemer.ReReserveRefund(newReserved); err != nil {
+	if err := refunder.ReReserveRefund(newReserved); err != nil {
 		t.dc.log.Errorf("error re-reserving refund %d %s for order %s: %v",
 			newReserved, t.wallets.fromAsset.UnitInfo.AtomicUnit, t.ID(), err)
 		return
@@ -243,8 +245,10 @@ func (t *trackedTrade) lockRedemptionFraction(num, denom uint64) {
 	if !is {
 		return
 	}
-
 	newReserved := t.reservesToLock(num, denom, t.redemptionReserves, t.redemptionLocked)
+	if newReserved == 0 {
+		return
+	}
 
 	if err := redeemer.ReReserveRedemption(newReserved); err != nil {
 		t.dc.log.Errorf("error re-reserving redemption %d %s for order %s: %v",
