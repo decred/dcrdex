@@ -45,6 +45,12 @@ type registrationForm struct {
 	AssetID  *uint32          `json:"asset,omitempty"` // prevent out-of-date frontend from paying fee in BTC
 }
 
+type registrationTxFeeForm struct {
+	Addr    string  `json:"addr"`
+	Cert    string  `json:"cert"`
+	AssetID *uint32 `json:"asset,omitempty"`
+}
+
 // newWalletForm is information necessary to create a new wallet.
 type newWalletForm struct {
 	AssetID    uint32 `json:"assetID"`

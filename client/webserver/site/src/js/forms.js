@@ -608,7 +608,7 @@ export class WalletWaitForm {
   }
 
   /* setWallet must be called before showing the form. */
-  setWallet (wallet) {
+  setWallet (wallet, txFee) {
     this.assetID = wallet.assetID
     this.progressCache = []
     this.progressed = false
@@ -623,7 +623,16 @@ export class WalletWaitForm {
     page.fee.textContent = Doc.formatCoinValue(fee.amount, asset.info.unitinfo)
 
     Doc.hide(page.syncUncheck, page.syncCheck, page.balUncheck, page.balCheck, page.syncRemainBox)
-    Doc.show(page.balanceBox, page.sendEnough)
+    Doc.show(page.balanceBox)
+
+    if (txFee > 0) {
+      page.totalFees.textContent = Doc.formatCoinValue(fee.amount + txFee, asset.info.unitinfo)
+      Doc.show(page.sendEnoughWithEst)
+      Doc.hide(page.sendEnough)
+    } else {
+      Doc.show(page.sendEnough)
+      Doc.hide(page.sendEnoughWithEst)
+    }
 
     Doc.show(wallet.synced ? page.syncCheck : wallet.syncProgress >= 1 ? page.syncSpinner : page.syncUncheck)
     Doc.show(wallet.balance.available > fee.amount ? page.balCheck : page.balUncheck)

@@ -2694,6 +2694,42 @@ func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI interface{}) 
 	return dc.exchangeInfo(), true, nil
 }
 
+// EstimateRegistrationTxFee provides an estimate for the tx fee needed to
+// pay the registration fee for a certain asset. The dex host is required
+// because the dex server is used as a fallback to determine the current
+// fee rate in case the client wallet is unable to do it.
+func (c *Core) EstimateRegistrationTxFee(host string, certI interface{}, assetID uint32) (uint64, error) {
+	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return 0, err
+	}
+
+	var rate uint64
+	if rater, is := wallet.Wallet.(asset.FeeRater); is {
+		if r, err := rater.FeeRate(); err == nil {
+			rate = r
+		} else {
+			c.log.Warnf("failed to get fee suggestion from %s FeeRater: %v", unbip(assetID), err)
+		}
+	}
+
+	if rate == 0 {
+		dc, err := c.tempDexConnection(host, certI)
+		if dc != nil {
+			// Stop (re)connect loop, which may be running even if err != nil.
+			defer dc.connMaster.Disconnect()
+		}
+		if err == nil {
+			rate = dc.fetchFeeRate(assetID)
+		} else {
+			c.log.Warnf("failed to connect to dex: %v", err)
+		}
+	}
+
+	txFee := wallet.EstimateRegistrationTxFee(rate)
+	return txFee, nil
+}
+
 // Register registers an account with a new DEX. If an error occurs while
 // fetching the DEX configuration or creating the fee transaction, it will be
 // returned immediately.
@@ -3742,7 +3778,7 @@ func (c *Core) feeSuggestionAny(assetID uint32, preferredConns ...*dexConnection
 			if r, err := rater.FeeRate(); err == nil {
 				return r
 			} else {
-				c.log.Debugf("failed to get fee suggestion from %s FeeRater: %v", unbip(assetID), err)
+				c.log.Warnf("failed to get fee suggestion from %s FeeRater: %v", unbip(assetID), err)
 			}
 		}
 	}
