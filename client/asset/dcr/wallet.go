@@ -55,6 +55,11 @@ type BlockHeader struct {
 	NextHash      *chainhash.Hash
 }
 
+type AddressInfo struct {
+	Account string
+	Branch  *uint32
+}
+
 // Wallet defines methods that the ExchangeWallet uses for communicating with
 // a Decred wallet and blockchain.
 type Wallet interface {
@@ -71,6 +76,8 @@ type Wallet interface {
 	// notification is unimplemented, monitorBlocks should be used to track
 	// tip changes.
 	NotifyOnTipChange(ctx context.Context, cb TipChangeCallback) bool
+	// AddressInfo returns information for the provided address.
+	AddressInfo(ctx context.Context, address string) (*AddressInfo, error)
 	// AccountOwnsAddress checks if the provided address belongs to the
 	// specified account.
 	AccountOwnsAddress(ctx context.Context, addr stdaddr.Address, acctName string) (bool, error)

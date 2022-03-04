@@ -3,7 +3,7 @@ module decred.org/dcrdex
 go 1.17
 
 require (
-	decred.org/dcrwallet/v2 v2.0.0-20211206163037-9537363becbb
+	decred.org/dcrwallet/v2 v2.0.1
 	github.com/btcsuite/btcd v0.22.0-beta.0.20220413172512-bf64c8bdbbbf
 	github.com/btcsuite/btcd/btcec/v2 v2.2.0
 	github.com/btcsuite/btcd/btcutil v1.1.1
@@ -54,7 +54,7 @@ require (
 )
 
 require (
-	decred.org/cspp/v2 v2.0.0-20211122173608-ee00e4952d5f // indirect
+	decred.org/cspp/v2 v2.0.0 // indirect
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
 	github.com/VictoriaMetrics/fastcache v1.6.0 // indirect
 	github.com/aead/siphash v1.0.1 // indirect

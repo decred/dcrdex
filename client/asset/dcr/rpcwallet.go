@@ -353,6 +353,20 @@ func (w *rpcWallet) NotifyOnTipChange(ctx context.Context, cb TipChangeCallback)
 	return false
 }
 
+// AddressInfo returns information for the provided address.
+// Part of the Wallet interface.
+func (w *rpcWallet) AddressInfo(ctx context.Context, address string) (*AddressInfo, error) {
+	a, err := stdaddr.DecodeAddress(address, w.chainParams)
+	if err != nil {
+		return nil, err
+	}
+	res, err := w.client().ValidateAddress(ctx, a)
+	if err != nil {
+		return nil, translateRPCCancelErr(err)
+	}
+	return &AddressInfo{Account: res.Account, Branch: res.Branch}, nil
+}
+
 // AccountOwnsAddress checks if the provided address belongs to the specified
 // account.
 // Part of the Wallet interface.
