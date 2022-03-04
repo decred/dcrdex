@@ -421,7 +421,7 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 			return msgjson.NewError(msgjson.SignatureError, "redeem signature validation failed")
 		}
 
-		if !r.sufficientAccountBalance(acctAddr, oRecord.order, &assets.receiving.Asset, assets.funding.ID, tunnel) {
+		if !r.sufficientAccountBalance(acctAddr, oRecord.order, &assets.receiving.Asset, assets.receiving.ID, tunnel) {
 			return msgjson.NewError(msgjson.FundingError, "insufficient balance")
 		}
 	}

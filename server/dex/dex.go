@@ -299,7 +299,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		symbol := strings.ToLower(assetConf.Symbol)
 
 		// Ensure the symbol is a recognized BIP44 symbol, and retrieve its ID.
-		ID, found := dex.BipSymbolID(symbol)
+		assetID, found := dex.BipSymbolID(symbol)
 		if !found {
 			return nil, fmt.Errorf("asset symbol %q unrecognized", assetConf.Symbol)
 		}
@@ -319,7 +319,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			return nil, fmt.Errorf("max fee rate of 0 is invalid for asset %q", symbol)
 		}
 
-		assetIDs[i] = ID
+		assetIDs[i] = assetID
 	}
 
 	// Check each market's base lot size to see if any asset has different base

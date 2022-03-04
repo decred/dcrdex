@@ -5,13 +5,11 @@ package asset
 
 import (
 	"fmt"
-	"sync"
 
 	"decred.org/dcrdex/dex"
 )
 
 var (
-	driversMtx  sync.Mutex // Can we get rid of this?
 	drivers     = make(map[uint32]Driver)
 	tokens      = make(map[uint32]TokenDriver)
 	childTokens = make(map[uint32]map[uint32]*dex.Token)
@@ -48,8 +46,6 @@ type TokenDriver interface {
 }
 
 func baseDriver(assetID uint32) (driverBase, bool) {
-	driversMtx.Lock()
-	defer driversMtx.Unlock()
 	if drv, found := drivers[assetID]; found {
 		return drv, true
 	}
@@ -83,9 +79,7 @@ func UnitInfo(assetID uint32) (dex.UnitInfo, error) {
 // for the given extended public key on a certain network while maintaining the
 // address index in an external HDKeyIndex.
 func NewAddresser(assetID uint32, acctXPub string, keyIndexer KeyIndexer, network dex.Network) (Addresser, uint32, error) {
-	driversMtx.Lock()
 	drv, ok := drivers[assetID]
-	driversMtx.Unlock()
 	if !ok {
 		return nil, 0, fmt.Errorf("unknown asset driver %d", assetID)
 	}
@@ -113,8 +107,6 @@ func Register(assetID uint32, drv Driver) {
 // RegisterToken is called to register a token. The parent asset should be
 // registered first.
 func RegisterToken(assetID uint32, drv TokenDriver) {
-	driversMtx.Lock()
-	defer driversMtx.Unlock()
 	if drv == nil {
 		panic("asset: Register driver is nil")
 	}
@@ -144,9 +136,7 @@ func RegisterToken(assetID uint32, drv TokenDriver) {
 // from the asset's configuration file located at configPath. Setup is only
 // called for base chain assets, not tokens.
 func Setup(assetID uint32, configPath string, logger dex.Logger, network dex.Network) (Backend, error) {
-	driversMtx.Lock()
 	drv, ok := drivers[assetID]
-	driversMtx.Unlock()
 	if !ok {
 		return nil, fmt.Errorf("asset: unknown asset driver %d", assetID)
 	}
@@ -162,7 +152,7 @@ func Version(assetID uint32) (uint32, error) {
 	return drv.Version(), nil
 }
 
-// IsTokens checks if the asset ID is for a token and returns the token's parent
+// IsToken checks if the asset ID is for a token and returns the token's parent
 // ID.
 func IsToken(assetID uint32) (is bool, parentID uint32) {
 	token, is := tokens[assetID]

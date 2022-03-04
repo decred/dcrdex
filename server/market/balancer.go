@@ -131,6 +131,9 @@ func NewDEXBalancer(tunnels map[string]PendingAccounter, assets map[uint32]*asse
 // Because these assets may have a base chain as well as degenerate tokens,
 // we need to consider outstanding orders and matches across all "fee family"
 // assets.
+// It is acceptable to call CheckBalance with qty = 0, lots = 0, redeems > 0
+// and assetID = redeemAssetID, as might be the case when checking that a user
+// has sufficient balance to redeem an order's matches.
 func (b *DEXBalancer) CheckBalance(acctAddr string, assetID, redeemAssetID uint32, qty, lots uint64, redeems int) bool {
 	backedAsset, found := b.assets[assetID]
 	if !found {
@@ -230,8 +233,10 @@ func (b *DEXBalancer) CheckBalance(acctAddr string, assetID, redeemAssetID uint3
 	}
 
 	// Add redeems if we're redeeming this to a fee-family asset.
-	if redeemAsset, found := backedAsset.feeFamily[redeemAssetID]; found {
-		redeemFees += redeemAsset.RedeemSize * redeemAsset.MaxFeeRate * lots
+	if assetID != redeemAssetID { // Don't double count
+		if redeemAsset, found := backedAsset.feeFamily[redeemAssetID]; found {
+			redeemFees += redeemAsset.RedeemSize * redeemAsset.MaxFeeRate * lots
+		}
 	}
 
 	reqFunds := qty
