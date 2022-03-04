@@ -2371,6 +2371,38 @@ func TestPayFee(t *testing.T) {
 	})
 }
 
+func TestEstimateRegistrationTxFee(t *testing.T) {
+	runRubric(t, testEstimateRegistrationTxFee)
+}
+
+func testEstimateRegistrationTxFee(t *testing.T, segwit bool, walletType string) {
+	wallet, _, shutdown, err := tNewWallet(segwit, walletType)
+	defer shutdown()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const inputCount = 5
+	const txSize = dexbtc.MinimumTxOverhead + 2*dexbtc.P2PKHOutputSize + inputCount*dexbtc.RedeemP2PKHInputSize
+	wallet.feeRateLimit = 100
+	wallet.fallbackFeeRate = 30
+
+	estimate := wallet.EstimateRegistrationTxFee(50)
+	if estimate != 50*txSize {
+		t.Fatalf("expected tx fee to be %d but got %d", 50*txSize, estimate)
+	}
+
+	estimate = wallet.EstimateRegistrationTxFee(0)
+	if estimate != wallet.fallbackFeeRate*txSize {
+		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate*txSize, estimate)
+	}
+
+	estimate = wallet.EstimateRegistrationTxFee(wallet.feeRateLimit + 1)
+	if estimate != wallet.fallbackFeeRate*txSize {
+		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate*txSize, estimate)
+	}
+}
+
 func TestWithdraw(t *testing.T) {
 	runRubric(t, func(t *testing.T, segwit bool, walletType string) {
 		testSender(t, tWithdrawSender, segwit, walletType)

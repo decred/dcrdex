@@ -46,9 +46,10 @@ func init() {
 
 const (
 	// BipID is the BIP-0044 asset ID.
-	BipID              = 60
-	defaultGasFee      = 82  // gwei
-	defaultGasFeeLimit = 200 // gwei
+	BipID               = 60
+	defaultGasFee       = 82  // gwei
+	defaultGasFeeLimit  = 200 // gwei
+	defaultSendGasLimit = 21_000
 )
 
 var (
@@ -788,6 +789,12 @@ func (eth *ExchangeWallet) Locked() bool {
 		return false
 	}
 	return wallet.Status != "Unlocked"
+}
+
+// EstimateRegistrationTxFee returns an estimate for the tx fee needed to
+// pay the registration fee using the provided feeRate.
+func (eth *ExchangeWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
+	return feeRate * defaultSendGasLimit
 }
 
 // PayFee sends the dex registration fee. Transaction fees are in addition to
