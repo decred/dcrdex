@@ -2298,6 +2298,16 @@ func (dcr *ExchangeWallet) PayFee(address string, regFee, feeRate uint64) (asset
 	return newOutput(msgTx.CachedTxHash(), 0, regFee, wire.TxTreeRegular), nil
 }
 
+// EstimateRegistrationTxFee returns an estimate for the tx fee needed to
+// pay the registration fee using the provided feeRate.
+func (dcr *ExchangeWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
+	const inputCount = 5 // buffer so this estimate is higher than what PayFee uses
+	if feeRate == 0 || feeRate > dcr.feeRateLimit {
+		feeRate = dcr.fallbackFeeRate
+	}
+	return (dexdcr.MsgTxOverhead + dexdcr.P2PKHOutputSize*2 + inputCount*dexdcr.P2PKHInputSize) * feeRate
+}
+
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
 // the value.
 func (dcr *ExchangeWallet) Withdraw(address string, value, feeRate uint64) (asset.Coin, error) {

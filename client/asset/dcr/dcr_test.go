@@ -2498,3 +2498,28 @@ func TestPreRedeem(t *testing.T) {
 		t.Fatalf("best case > worst case")
 	}
 }
+
+func TestEstimateRegistrationTxFee(t *testing.T) {
+	wallet, _, shutdown, _ := tNewWallet()
+	defer shutdown()
+
+	const inputCount = 5
+	const txSize = dexdcr.MsgTxOverhead + dexdcr.P2PKHOutputSize*2 + inputCount*dexdcr.P2PKHInputSize
+	wallet.feeRateLimit = 100
+	wallet.fallbackFeeRate = 30
+
+	estimate := wallet.EstimateRegistrationTxFee(50)
+	if estimate != 50*txSize {
+		t.Fatalf("expected tx fee to be %d but got %d", 50*txSize, estimate)
+	}
+
+	estimate = wallet.EstimateRegistrationTxFee(0)
+	if estimate != wallet.fallbackFeeRate*txSize {
+		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate*txSize, estimate)
+	}
+
+	estimate = wallet.EstimateRegistrationTxFee(wallet.feeRateLimit + 1)
+	if estimate != wallet.fallbackFeeRate*txSize {
+		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate*txSize, estimate)
+	}
+}

@@ -39,7 +39,7 @@ export default class SettingsPage extends BasePage {
     })
 
     // Asset selection
-    this.regAssetForm = new forms.FeeAssetSelectionForm(page.regAssetForm, assetID => {
+    this.regAssetForm = new forms.FeeAssetSelectionForm(page.regAssetForm, async assetID => {
       this.confirmRegisterForm.setAsset(assetID)
 
       const asset = app().assets[assetID]
@@ -50,7 +50,8 @@ export default class SettingsPage extends BasePage {
           this.animateConfirmForm(page.regAssetForm)
           return
         }
-        this.walletWaitForm.setWallet(wallet)
+        const txFee = await this.getRegistrationTxFeeEstimate(assetID, page.regAssetForm)
+        this.walletWaitForm.setWallet(wallet, txFee)
         forms.slideSwap(page.regAssetForm, page.walletWait)
         return
       }
@@ -144,6 +145,22 @@ export default class SettingsPage extends BasePage {
     }
   }
 
+  // Retrieve an estimate for the tx fee needed to pay the registration fee.
+  async getRegistrationTxFeeEstimate (assetID, form) {
+    const cert = await this.getCertFile()
+    const loaded = app().loading(form)
+    const res = await postJSON('/api/regtxfee', {
+      addr: this.currentDEX.host,
+      cert: cert,
+      asset: assetID
+    })
+    loaded()
+    if (!app().checkResponse(res, true)) {
+      return 0
+    }
+    return res.txfee
+  }
+
   async newWalletCreated (assetID) {
     const user = await app().fetchUser()
     const page = this.page
@@ -156,7 +173,8 @@ export default class SettingsPage extends BasePage {
       return
     }
 
-    this.walletWaitForm.setWallet(wallet)
+    const txFee = await this.getRegistrationTxFeeEstimate(assetID, page.newWalletForm)
+    this.walletWaitForm.setWallet(wallet, txFee)
     this.currentForm = page.walletWait
     await forms.slideSwap(page.newWalletForm, page.walletWait)
   }

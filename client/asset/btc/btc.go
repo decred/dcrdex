@@ -2373,6 +2373,16 @@ func (btc *baseWallet) PayFee(address string, regFee, feeRate uint64) (asset.Coi
 	return newOutput(txHash, vout, sent), nil
 }
 
+// EstimateRegistrationTxFee returns an estimate for the tx fee needed to
+// pay the registration fee using the provided feeRate.
+func (btc *baseWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
+	const inputCount = 5 // buffer so this estimate is higher than what PayFee uses
+	if feeRate == 0 || feeRate > btc.feeRateLimit {
+		feeRate = btc.fallbackFeeRate
+	}
+	return (dexbtc.MinimumTxOverhead + 2*dexbtc.P2PKHOutputSize + inputCount*dexbtc.RedeemP2PKHInputSize) * feeRate
+}
+
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
 // the value. feeRate is in units of atoms/byte.
 func (btc *baseWallet) Withdraw(address string, value, feeRate uint64) (asset.Coin, error) {
