@@ -1697,7 +1697,7 @@ export default class MarketsPage extends BasePage {
   quantityChanged (finalize) {
     const page = this.page
     const order = this.parseOrder()
-    if (order.qty <= 0) {
+    if (order.qty < 0) {
       page.lotField.value = ''
       page.qtyField.value = ''
       this.previewQuoteAmt(false)
