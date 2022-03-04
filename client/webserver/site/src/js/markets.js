@@ -1676,10 +1676,11 @@ export default class MarketsPage extends BasePage {
   /* lotChanged is attached to the keyup and change events of the lots input. */
   lotChanged () {
     const page = this.page
-    const lots = parseInt(page.lotField.value)
+    const lots = parseInt(page.lotField.value) || 0
     if (lots <= 0) {
-      page.lotField.value = 0
+      page.lotField.value = ''
       page.qtyField.value = ''
+      this.previewQuoteAmt(false)
       return
     }
     const lotSize = this.market.cfg.lotsize
@@ -1697,8 +1698,9 @@ export default class MarketsPage extends BasePage {
     const page = this.page
     const order = this.parseOrder()
     if (order.qty <= 0) {
-      page.lotField.value = 0
+      page.lotField.value = ''
       page.qtyField.value = ''
+      this.previewQuoteAmt(false)
       return
     }
     const lotSize = this.market.cfg.lotsize
@@ -2351,6 +2353,7 @@ export function marketID (b, q) { return `${b}_${q}` }
 
 /* convertToAtoms converts the float string to the basic unit of a coin. */
 function convertToAtoms (s, conversionFactor) {
+  if (!s) return 0
   return Math.round(parseFloat(s) * conversionFactor)
 }
 
