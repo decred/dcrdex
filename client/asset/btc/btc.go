@@ -109,6 +109,26 @@ var (
 		},
 	}
 
+	// 02 Jun 21 21:12 CDT
+	defaultWalletBirthdayUnix = 1622668320
+	defaultWalletBirthday     = time.Unix(int64(defaultWalletBirthdayUnix), 0)
+
+	spvOpts = []*asset.ConfigOption{{
+		Key:         "walletbirthday",
+		DisplayName: "Wallet Birthday",
+		Description: "This is the date the wallet starts scanning the blockchain " +
+			"for transactions related to this wallet. If reconfiguring an existing " +
+			"wallet, this may start a rescan if the new birthday is older. This " +
+			"option is disabled if there are currently active BTC trades.",
+		DefaultValue: defaultWalletBirthdayUnix,
+		MaxValue:     "now",
+		// This MinValue must be removed if we start supporting importing private keys
+		MinValue:          defaultWalletBirthdayUnix,
+		IsDate:            true,
+		DisableWhenActive: true,
+		IsBirthdayConfig:  true,
+	}}
+
 	commonOpts = []*asset.ConfigOption{
 		{
 			Key:         "fallbackfee",
@@ -159,7 +179,7 @@ var (
 		Type:        walletTypeSPV,
 		Tab:         "Native",
 		Description: "Use the built-in SPV wallet",
-		ConfigOpts:  commonOpts,
+		ConfigOpts:  append(spvOpts, commonOpts...),
 		Seeded:      true,
 	}
 
@@ -174,7 +194,6 @@ var (
 		},
 		LegacyWalletIndex: 1,
 	}
-	walletBirthday time.Time
 )
 
 // TxInSigner is a transaction input signer.
@@ -369,8 +388,24 @@ type WalletConfig struct {
 	FallbackFeeRate  float64 `ini:"fallbackfee"`
 	FeeRateLimit     float64 `ini:"feeratelimit"`
 	RedeemConfTarget uint64  `ini:"redeemconftarget"`
-	WalletName       string  `ini:"walletname"` // RPC
-	Peer             string  `ini:"peer"`       // SPV
+	ActivelyUsed     bool    `ini:"special:activelyUsed"` //injected by core
+	WalletName       string  `ini:"walletname"`           // RPC
+	Peer             string  `ini:"peer"`                 // SPV
+	Birthday         uint64  `ini:"walletbirthday"`       // SPV
+}
+
+// adjustedBirthday converts WalletConfig.Birthday to a time.Time, and adjusts
+// it so that defaultWalletBirthday <= WalletConfig.Bithday <= now.
+func (cfg *WalletConfig) adjustedBirthday() time.Time {
+	bday := time.Unix(int64(cfg.Birthday), 0)
+	now := time.Now()
+	if defaultWalletBirthday.After(bday) {
+		return defaultWalletBirthday
+	} else if bday.After(now) {
+		return now
+	} else {
+		return bday
+	}
 }
 
 // readRPCWalletConfig parses the settings map into a *RPCWalletConfig.
@@ -449,7 +484,13 @@ func (d *Driver) Create(params *asset.CreateWalletParams) error {
 		return fmt.Errorf("error parsing chain: %w", err)
 	}
 
-	return createSPVWallet(params.Pass, params.Seed, params.DataDir, params.Logger, chainParams)
+	walletCfg := new(WalletConfig)
+	err = config.Unmapify(params.Settings, walletCfg)
+	if err != nil {
+		return err
+	}
+
+	return createSPVWallet(params.Pass, params.Seed, walletCfg.adjustedBirthday(), params.DataDir, params.Logger, chainParams)
 }
 
 // Open opens or connects to the BTC exchange wallet. Start the wallet with its
@@ -486,12 +527,6 @@ type redeemOptions struct {
 }
 
 func init() {
-	var err error
-	walletBirthday, err = time.Parse(time.RFC822, "02 Jun 21 21:12 CDT")
-	if err != nil {
-		panic("error parsing wallet birthday: " + err.Error())
-	}
-
 	asset.Register(BipID, &Driver{})
 }
 
@@ -780,11 +815,10 @@ func openSPVWallet(cfg *BTCCloneCFG) (*ExchangeWalletSPV, error) {
 		peers = append(peers, walletCfg.Peer)
 	}
 
-	btc.node = loadSPVWallet(cfg.WalletCFG.DataDir, cfg.Logger.SubLogger("SPV"), peers, cfg.ChainParams)
+	allowAutomaticRescan := !walletCfg.ActivelyUsed
+	btc.node = loadSPVWallet(cfg.WalletCFG.DataDir, cfg.Logger.SubLogger("SPV"), peers, cfg.ChainParams, walletCfg.adjustedBirthday(), allowAutomaticRescan)
 
-	return &ExchangeWalletSPV{
-		baseWallet: btc,
-	}, nil
+	return &ExchangeWalletSPV{baseWallet: btc}, nil
 }
 
 // Info returns basic information about the wallet and asset.

@@ -52,7 +52,6 @@ export class NewWalletForm {
     }
     Doc.hide(page.newWalletErr)
     const assetID = parseInt(this.currentAsset.id)
-
     const createForm = {
       assetID: assetID,
       pass: page.newWalletPass.value || '',
@@ -115,6 +114,16 @@ export class NewWalletForm {
     this.currentWalletType = walletDef.type
     const appPwCached = State.passwordIsCached() || (this.pwCache && this.pwCache.pw)
     Doc.hide(page.auth, page.oneBttnBox, page.newWalletPassBox)
+    const configOpts = walletDef.configopts || []
+    // If a config represents a wallet's birthday, we update the default
+    // selection to the current date if this installation of the client
+    // generated a seed.
+    configOpts.map((opt) => {
+      if (opt.isBirthdayConfig && app().seedGenTime > 0) {
+        opt.default = toUnixDate(new Date())
+      }
+      return opt
+    })
     if (appPwCached && walletDef.seeded) {
       Doc.show(page.oneBttnBox)
     } else if (walletDef.seeded) {
@@ -126,7 +135,7 @@ export class NewWalletForm {
       page.submitAdd.textContent = intl.prep(intl.ID_ADD)
     }
 
-    this.subform.update(walletDef.configopts || [])
+    this.subform.update(configOpts)
 
     if (this.subform.dynamicOpts.children.length) Doc.show(page.walletSettingsHeader)
     else Doc.hide(page.walletSettingsHeader)
@@ -182,6 +191,8 @@ export class WalletConfigForm {
     this.dynamicOpts = Doc.tmplElement(form, 'dynamicOpts')
     this.textInputTmpl = Doc.tmplElement(form, 'textInput')
     this.textInputTmpl.remove()
+    this.dateInputTmpl = Doc.tmplElement(form, 'dateInput')
+    this.dateInputTmpl.remove()
     this.checkboxTmpl = Doc.tmplElement(form, 'checkbox')
     this.checkboxTmpl.remove()
     this.fileSelector = Doc.tmplElement(form, 'fileSelector')
@@ -241,7 +252,7 @@ export class WalletConfigForm {
   /*
    * update creates the dynamic form.
    */
-  update (configOpts) {
+  update (configOpts, assetHasActiveOrders) {
     this.configElements = {}
     this.configOpts = configOpts
     Doc.empty(this.dynamicOpts, this.defaultSettings, this.loadedSettings)
@@ -258,7 +269,10 @@ export class WalletConfigForm {
     const defaultedOpts = []
     const addOpt = (box, opt) => {
       const elID = 'wcfg-' + opt.key
-      const el = opt.isboolean ? this.checkboxTmpl.cloneNode(true) : this.textInputTmpl.cloneNode(true)
+      let el
+      if (opt.isboolean) el = this.checkboxTmpl.cloneNode(true)
+      else if (opt.isdate) el = this.dateInputTmpl.cloneNode(true)
+      else el = this.textInputTmpl.cloneNode(true)
       this.configElements[opt.key] = el
       const input = el.querySelector('input')
       input.id = elID
@@ -270,7 +284,17 @@ export class WalletConfigForm {
       if (opt.noecho) input.type = 'password'
       if (opt.description) label.dataset.tooltip = opt.description
       if (opt.isboolean) input.checked = opt.default
-      else input.value = opt.default !== null ? opt.default : ''
+      else if (opt.isdate) {
+        const getMinMaxVal = (minMax) => {
+          if (!minMax) return undefined
+          if (minMax === 'now') return dateToString(new Date())
+          return dateToString(new Date(minMax * 1000))
+        }
+        input.max = getMinMaxVal(opt.max)
+        input.min = getMinMaxVal(opt.min)
+        input.valueAsDate = opt.default ? new Date(opt.default * 1000) : new Date()
+      } else input.value = opt.default !== null ? opt.default : ''
+      input.disabled = opt.disablewhenactive && assetHasActiveOrders
     }
     for (const opt of this.configOpts) {
       if (this.sectionize && opt.default !== null) defaultedOpts.push(opt)
@@ -317,6 +341,7 @@ export class WalletConfigForm {
       if (typeof v === 'undefined') return
       finds.push(this.configElements[k])
       if (input.configOpt.isboolean) input.checked = isTruthyString(v)
+      else if (input.configOpt.isdate) input.valueAsDate = new Date(v * 1000)
       else input.value = v
     })
     return finds
@@ -342,8 +367,18 @@ export class WalletConfigForm {
   map () {
     const config = {}
     this.allSettings.querySelectorAll('input').forEach(input => {
-      if (input.configOpt.isboolean && input.configOpt.key) config[input.configOpt.key] = input.checked ? '1' : '0'
-      else if (input.value) config[input.configOpt.key] = input.value
+      if (input.configOpt.isboolean && input.configOpt.key) {
+        config[input.configOpt.key] = input.checked ? '1' : '0'
+      } else if (input.configOpt.isdate && input.configOpt.key) {
+        const minDate = input.min ? toUnixDate(new Date(input.min)) : Number.MIN_SAFE_INTEGER
+        const maxDate = input.max ? toUnixDate(new Date(input.max)) : Number.MAX_SAFE_INTEGER
+        let date = input.value ? toUnixDate(new Date(input.value)) : 0
+        if (date < minDate) date = minDate
+        else if (date > maxDate) date = maxDate
+        config[input.configOpt.key] = '' + date
+      } else if (input.value) {
+        config[input.configOpt.key] = input.value
+      }
     })
 
     return config
@@ -1011,4 +1046,15 @@ export function bind (form, submitBttn, handler) {
 // value representing true.
 function isTruthyString (s) {
   return s === '1' || s.toLowerCase() === 'true'
+}
+
+// toUnixDate converts a javscript date object to a unix date, which is
+// the number of *seconds* since the start of the epoch.
+function toUnixDate (date) {
+  return Math.floor(date.getTime() / 1000)
+}
+
+// dateToString converts a javascript date object to a YYYY-MM-DD format string.
+function dateToString (date) {
+  return date.toISOString().split('T')[0]
 }

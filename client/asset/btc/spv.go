@@ -128,7 +128,7 @@ type neutrinoService interface {
 var _ neutrinoService = (*neutrino.ChainService)(nil)
 
 // createSPVWallet creates a new SPV wallet.
-func createSPVWallet(privPass []byte, seed []byte, dbDir string, log dex.Logger, net *chaincfg.Params) error {
+func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string, log dex.Logger, net *chaincfg.Params) error {
 	netDir := filepath.Join(dbDir, net.Name)
 
 	if err := logNeutrino(netDir); err != nil {
@@ -145,7 +145,7 @@ func createSPVWallet(privPass []byte, seed []byte, dbDir string, log dex.Logger,
 
 	pubPass := []byte(wallet.InsecurePubPassphrase)
 
-	_, err = loader.CreateNewWallet(pubPass, privPass, seed, walletBirthday)
+	_, err = loader.CreateNewWallet(pubPass, privPass, seed, bday)
 	if err != nil {
 		return fmt.Errorf("CreateNewWallet error: %w", err)
 	}
@@ -277,16 +277,20 @@ func (w logWriter) Write(p []byte) (n int, err error) {
 // Bitcoin wallet. spvWallet controls an instance of btcwallet.Wallet directly
 // and does not run or connect to the RPC server.
 type spvWallet struct {
-	chainParams  *chaincfg.Params
-	wallet       btcWallet
-	cl           neutrinoService
-	chainClient  *chain.NeutrinoClient
-	birthday     time.Time
-	acctNum      uint32
-	acctName     string
-	netDir       string
-	neutrinoDB   walletdb.DB
-	connectPeers []string
+	chainParams *chaincfg.Params
+	wallet      btcWallet
+	cl          neutrinoService
+	chainClient *chain.NeutrinoClient
+	birthday    time.Time
+	// if allowAutomaticRescan is true, if when connect is called, spvWallet.birthday
+	// is earlier than the birthday stored in the btcwallet database, the transaction
+	// history will be wiped and a rescan will start.
+	allowAutomaticRescan bool
+	acctNum              uint32
+	acctName             string
+	netDir               string
+	neutrinoDB           walletdb.DB
+	connectPeers         []string
 
 	txBlocksMtx sync.Mutex
 	txBlocks    map[chainhash.Hash]*hashEntry
@@ -310,17 +314,19 @@ var _ Wallet = (*spvWallet)(nil)
 var _ tipNotifier = (*spvWallet)(nil)
 
 // loadSPVWallet loads an existing wallet.
-func loadSPVWallet(dbDir string, logger dex.Logger, connectPeers []string, chainParams *chaincfg.Params) *spvWallet {
+func loadSPVWallet(dbDir string, logger dex.Logger, connectPeers []string, chainParams *chaincfg.Params, birthday time.Time, allowAutomaticRescan bool) *spvWallet {
 	return &spvWallet{
-		chainParams:  chainParams,
-		acctNum:      defaultAcctNum,
-		acctName:     defaultAcctName,
-		netDir:       filepath.Join(dbDir, chainParams.Name),
-		txBlocks:     make(map[chainhash.Hash]*hashEntry),
-		checkpoints:  make(map[outPoint]*scanCheckpoint),
-		log:          logger,
-		connectPeers: connectPeers,
-		tipChan:      make(chan *block, 8),
+		chainParams:          chainParams,
+		acctNum:              defaultAcctNum,
+		acctName:             defaultAcctName,
+		netDir:               filepath.Join(dbDir, chainParams.Name),
+		txBlocks:             make(map[chainhash.Hash]*hashEntry),
+		checkpoints:          make(map[outPoint]*scanCheckpoint),
+		log:                  logger,
+		connectPeers:         connectPeers,
+		tipChan:              make(chan *block, 8),
+		allowAutomaticRescan: allowAutomaticRescan,
+		birthday:             birthday,
 	}
 }
 
@@ -1177,7 +1183,30 @@ func (w *spvWallet) startWallet() error {
 	w.cl = chainService
 	w.chainClient = chain.NewNeutrinoClient(w.chainParams, chainService)
 	w.wallet = &walletExtender{btcw, w.chainParams}
-	w.birthday = btcw.Manager.Birthday()
+
+	oldBday := btcw.Manager.Birthday()
+	wdb := btcw.Database()
+
+	performRescan := w.birthday.Before(oldBday)
+	if performRescan && !w.allowAutomaticRescan {
+		bailOnWalletAndDB()
+		return errors.New("cannot set earlier birthday while there are active deals")
+	}
+
+	if !oldBday.Equal(w.birthday) {
+		err = walletdb.Update(wdb, func(dbtx walletdb.ReadWriteTx) error {
+			ns := dbtx.ReadWriteBucket([]byte("waddrmgr"))
+			return btcw.Manager.SetBirthday(ns, w.birthday)
+		})
+		if err != nil {
+			w.log.Errorf("Failed to reset wallet manager birthday: %v", err)
+			performRescan = false
+		}
+	}
+
+	if performRescan {
+		w.forceRescan()
+	}
 
 	if err = w.chainClient.Start(); err != nil { // lazily starts connmgr
 		bailOnEverything()
@@ -1212,16 +1241,38 @@ func (w *spvWallet) rescanWalletAsync() error {
 	if !ok {
 		return errors.New("wallet not loaded")
 	}
-	wdb := btcw.Database()
 
 	w.log.Info("Stopping wallet and chain client...")
 	btcw.Stop() // stops Wallet and chainClient (not chainService)
 	btcw.WaitForShutdown()
 	w.chainClient.WaitForShutdown()
 
-	// Force a full rescan with active address discovery on wallet restart by
-	// dropping the complete transaction history. See the
-	// btcwallet/cmd/dropwtxmgr app for more information.
+	w.forceRescan()
+
+	w.log.Info("Starting wallet...")
+	btcw.Start()
+
+	if err := w.chainClient.Start(); err != nil {
+		return fmt.Errorf("couldn't start Neutrino client: %v", err)
+	}
+
+	w.log.Info("Synchronizing wallet with network...")
+	btcw.SynchronizeRPC(w.chainClient)
+	return nil
+}
+
+// forceRescan forces a full rescan with active address discovery on wallet
+// restart by dropping the complete transaction history and setting the
+// "synced to" field to nil. See the btcwallet/cmd/dropwtxmgr app for more
+// information.
+func (w *spvWallet) forceRescan() {
+	btcw, ok := w.loader.LoadedWallet()
+	if !ok {
+		w.log.Errorf("wallet not loaded")
+		return
+	}
+	wdb := btcw.Database()
+
 	w.log.Info("Dropping transaction history to perform full rescan...")
 	err := wallet.DropTransactionHistory(wdb, false)
 	if err != nil {
@@ -1236,17 +1287,6 @@ func (w *spvWallet) rescanWalletAsync() error {
 	if err != nil {
 		w.log.Errorf("Failed to reset wallet manager sync height: %v", err)
 	}
-
-	w.log.Info("Starting wallet...")
-	btcw.Start()
-
-	if err = w.chainClient.Start(); err != nil {
-		return fmt.Errorf("couldn't start Neutrino client: %v", err)
-	}
-
-	w.log.Info("Synchronizing wallet with network...")
-	btcw.SynchronizeRPC(w.chainClient)
-	return nil
 }
 
 // stop stops the wallet and database threads.

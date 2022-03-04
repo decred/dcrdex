@@ -140,9 +140,24 @@ type ConfigOption struct {
 	DisplayName  string      `json:"displayname"`
 	Description  string      `json:"description"`
 	DefaultValue interface{} `json:"default"`
-	NoEcho       bool        `json:"noecho"`
-	IsBoolean    bool        `json:"isboolean"`
+	// If MaxValue/MinValue are set to the string "now" for a date config, the
+	// UI will display the current date.
+	MaxValue          interface{} `json:"max"`
+	MinValue          interface{} `json:"min"`
+	NoEcho            bool        `json:"noecho"`
+	IsBoolean         bool        `json:"isboolean"`
+	IsDate            bool        `json:"isdate"`
+	DisableWhenActive bool        `json:"disablewhenactive"`
+	IsBirthdayConfig  bool        `json:"isBirthdayConfig"`
 }
+
+const (
+	// SpecialSettingActivelyUsed is a special setting that can be injected by
+	// core that lets the wallet know that it is being actively used. A use
+	// case is by the bitcoin SPV wallet to decide whether or not it is safe
+	// to do a full rescan.
+	SpecialSettingActivelyUsed = "special:activelyUsed"
+)
 
 // WalletConfig is the configuration settings for the wallet. WalletConfig
 // is passed to the wallet constructor.
