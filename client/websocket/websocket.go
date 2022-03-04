@@ -352,7 +352,7 @@ func wsLoadCandles(s *Server, cl *wsClient, msg *msgjson.Message) *msgjson.Error
 func wsUnmarket(_ *Server, cl *wsClient, _ *msgjson.Message) *msgjson.Error {
 	cl.feedMtx.Lock()
 	defer cl.feedMtx.Unlock()
-	if cl.feed != nil && cl.feed.loop != nil {
+	if cl.feed != nil {
 		cl.feed.loop.Stop()
 		cl.feed.loop.WaitForShutdown()
 		cl.feed = nil
