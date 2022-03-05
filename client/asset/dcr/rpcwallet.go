@@ -149,7 +149,8 @@ func newRPCWallet(cfg *Config, chainParams *chaincfg.Params, logger dex.Logger) 
 		log:         log,
 	}
 
-	certs, err := os.ReadFile(cfg.RPCCert)
+	cert := dex.CleanAndExpandPath(cfg.RPCCert)
+	certs, err := os.ReadFile(cert)
 	if err != nil {
 		return nil, fmt.Errorf("TLS certificate read error: %w", err)
 	}

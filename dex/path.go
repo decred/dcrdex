@@ -31,7 +31,6 @@ func CleanAndExpandPath(path string) string {
 			// they didn't have a LOCALAPPDATA.
 			dirName = os.Getenv("LOCALAPPDATA")
 		}
-
 		return filepath.Join(dirName, path)
 	}
 
@@ -40,17 +39,14 @@ func CleanAndExpandPath(path string) string {
 		// %VARIABLE%, but the variables can still be expanded via POSIX-style
 		// $VARIABLE.
 		path = os.ExpandEnv(path)
-		path, _ = filepath.Abs(path)
-		return path
+		return filepath.Clean(path)
 	}
 
-	if strings.HasPrefix(path, "~") {
-		dirName, _ = os.UserHomeDir()
-	}
-
-	if dirName == "" {
+	dirName, err := os.UserHomeDir()
+	if err != nil {
+		// Fallback to CWD if retrieving user home directory fails.
 		dirName = "."
 	}
 
-	return filepath.Join(dirName, path[2:])
+	return filepath.Join(dirName, path[1:])
 }

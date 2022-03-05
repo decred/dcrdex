@@ -151,9 +151,11 @@ func configure() (*Config, error) {
 		}
 	}
 
+	cfgPath := dex.CleanAndExpandPath(preCfg.Config)
+
 	// Load additional config from file.
 	parser := flags.NewParser(&iniCfg, flags.Default)
-	err := flags.NewIniParser(parser).ParseFile(preCfg.Config)
+	err := flags.NewIniParser(parser).ParseFile(cfgPath)
 	if err != nil {
 		if _, ok := err.(*os.PathError); !ok {
 			fmt.Fprintln(os.Stderr, err)
