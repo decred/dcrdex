@@ -76,6 +76,9 @@ type testNode struct {
 	nonce           uint64
 	sendToAddrTx    *types.Transaction
 	sendToAddrErr   error
+	baseFee         *big.Int
+	tip             *big.Int
+	netFeeStateErr  error
 }
 
 func newBalance(current, in, out uint64) *Balance {
@@ -117,12 +120,14 @@ func (n *testNode) lock() error {
 func (n *testNode) locked() bool {
 	return false
 }
-
 func (n *testNode) syncProgress() ethereum.SyncProgress {
 	return n.syncProg
 }
 func (n *testNode) peerCount() uint32 {
 	return 1
+}
+func (n *testNode) netFeeState(ctx context.Context) (baseFees, tipCap *big.Int, err error) {
+	return n.baseFee, n.tip, n.netFeeStateErr
 }
 
 // initiate is not concurrent safe
@@ -467,11 +472,69 @@ func TestBalance(t *testing.T) {
 	}
 }
 
+func TestFeeRate(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	node := &testNode{}
+	eth := &ExchangeWallet{
+		node: node,
+		ctx:  ctx,
+	}
+
+	maxInt := ^int64(0)
+	tests := []struct {
+		name           string
+		baseFee        *big.Int
+		tip            *big.Int
+		netFeeStateErr error
+		wantFeeRate    uint64
+		wantErr        bool
+	}{
+		{
+			name:        "ok",
+			baseFee:     big.NewInt(100e9),
+			tip:         big.NewInt(2e9),
+			wantFeeRate: 202,
+		},
+		{
+			name:           "net fee state error",
+			wantErr:        true,
+			netFeeStateErr: errors.New(""),
+		},
+		{
+			name:    "overflow error",
+			wantErr: true,
+			baseFee: big.NewInt(maxInt),
+			tip:     big.NewInt(1),
+		},
+	}
+
+	for _, test := range tests {
+		node.baseFee = test.baseFee
+		node.tip = test.tip
+		node.netFeeStateErr = test.netFeeStateErr
+		feeRate, err := eth.FeeRate()
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("%v: expected error but did not get", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%v: unexpected error: %v", test.name, err)
+		}
+
+		if feeRate != test.wantFeeRate {
+			t.Fatalf("%v: expected fee rate %d but got %d", test.name, test.wantFeeRate, feeRate)
+		}
+	}
+}
+
 func TestRefund(t *testing.T) {
-	contractVer := uint32(0)
 	node := &testNode{
 		swapVers: map[uint32]struct{}{
-			contractVer: {},
+			0: {},
+			1: {},
 		},
 		swapMap: make(map[[32]byte]*dexeth.SwapState),
 	}
@@ -483,83 +546,95 @@ func TestRefund(t *testing.T) {
 		addr: testAddressA,
 		log:  tLogger,
 	}
+
+	gasesV0 := dexeth.VersionedGases[0]
+	gasesV1 := &dex.Gases{Refund: 1e5}
+	dexeth.VersionedGases[1] = gasesV1
+
 	var randomSecretHash [32]byte
 	copy(randomSecretHash[:], encode.RandomBytes(32))
-	randomContractData := dexeth.EncodeContractData(0, randomSecretHash)
+	randomContractDataV0 := dexeth.EncodeContractData(0, randomSecretHash)
+	randomContractDataV1 := dexeth.EncodeContractData(1, randomSecretHash)
+
 	ss := new(dexeth.SwapState)
 	node.swapMap[randomSecretHash] = ss
+
 	tests := []struct {
-		name            string
-		contract        dex.Bytes
-		swapStep        dexeth.SwapStep
-		feeSuggestion   uint64
-		gasFeeLimit     uint64
-		isRefundable    bool
-		isRefundableErr error
-		refundErr       error
-		swapErr         error
-		originalBalance *Balance
-		originalLocked  uint64
-		wantLocked      uint64
-		wantZeroHash    bool
-		wantErr         bool
+		name                   string
+		contract               dex.Bytes
+		swapStep               dexeth.SwapStep
+		feeSuggestion          uint64
+		originalRefundReserves uint64
+		wantRefundReserves     uint64
+		isRefundable           bool
+		isRefundableErr        error
+		refundErr              error
+		swapErr                error
+		originalBalance        *Balance
+		wantZeroHash           bool
+		wantErr                bool
 	}{
 		{
-			name:            "ok",
-			contract:        randomContractData,
-			swapStep:        dexeth.SSInitiated,
-			isRefundable:    true,
-			feeSuggestion:   100,
-			gasFeeLimit:     200,
-			originalBalance: newBalance(1e9, 0, 0),
-			originalLocked:  1e8,
-			wantLocked:      1e8 - 200*dexeth.RefundGas(0),
+			name:                   "ok v0",
+			contract:               randomContractDataV0,
+			swapStep:               dexeth.SSInitiated,
+			isRefundable:           true,
+			feeSuggestion:          100,
+			originalBalance:        newBalance(1e9, 0, 0),
+			originalRefundReserves: 1e8,
+			wantRefundReserves:     1e8 - 100*gasesV0.Refund,
 		},
 		{
-			name:            "ok refunded",
-			contract:        randomContractData,
-			swapStep:        dexeth.SSRefunded,
-			isRefundable:    true,
-			feeSuggestion:   100,
-			gasFeeLimit:     200,
-			originalBalance: newBalance(1e9, 0, 0),
-			originalLocked:  1e8,
-			wantLocked:      1e8 - 200*dexeth.RefundGas(0),
-			wantZeroHash:    true,
+			name:                   "ok v1",
+			contract:               randomContractDataV1,
+			swapStep:               dexeth.SSInitiated,
+			isRefundable:           true,
+			feeSuggestion:          100,
+			originalBalance:        newBalance(1e9, 0, 0),
+			originalRefundReserves: 1e8,
+			wantRefundReserves:     1e8 - 100*gasesV1.Refund,
+		},
+		{
+			name:                   "ok refunded",
+			contract:               randomContractDataV0,
+			swapStep:               dexeth.SSRefunded,
+			isRefundable:           true,
+			feeSuggestion:          100,
+			originalBalance:        newBalance(1e9, 0, 0),
+			originalRefundReserves: 1e8,
+			wantRefundReserves:     1e8 - 100*gasesV0.Refund,
+			wantZeroHash:           true,
 		},
 		{
 			name:     "swap error",
-			contract: randomContractData,
+			contract: randomContractDataV0,
 			swapStep: dexeth.SSInitiated,
 			swapErr:  errors.New(""),
 			wantErr:  true,
 		},
 		{
 			name:            "is refundable error",
-			contract:        randomContractData,
+			contract:        randomContractDataV0,
 			isRefundable:    true,
 			isRefundableErr: errors.New(""),
 			feeSuggestion:   100,
-			gasFeeLimit:     200,
 			originalBalance: newBalance(1e9, 0, 0),
 			wantErr:         true,
 		},
 		{
 			name:            "is refundable false",
-			contract:        randomContractData,
+			contract:        randomContractDataV0,
 			isRefundable:    false,
 			feeSuggestion:   100,
-			gasFeeLimit:     200,
 			originalBalance: newBalance(1e9, 0, 0),
 			wantErr:         true,
 		},
 		{
 			name:            "refund error",
-			contract:        randomContractData,
+			contract:        randomContractDataV0,
 			isRefundable:    true,
 			refundErr:       errors.New(""),
 			feeSuggestion:   100,
-			gasFeeLimit:     200,
 			originalBalance: newBalance(1e9, 0, 0),
 			wantErr:         true,
 		},
@@ -568,7 +643,6 @@ func TestRefund(t *testing.T) {
 			contract:        []byte{},
 			isRefundable:    true,
 			feeSuggestion:   100,
-			gasFeeLimit:     200,
 			originalBalance: newBalance(1e9, 0, 0),
 			wantErr:         true,
 		},
@@ -581,8 +655,7 @@ func TestRefund(t *testing.T) {
 		node.bal = test.originalBalance
 		node.swapErr = test.swapErr
 		ss.State = test.swapStep
-		eth.locked = test.originalLocked
-		eth.gasFeeLimit = test.gasFeeLimit
+		eth.lockedFunds.refundReserves = test.originalRefundReserves
 
 		id, err := eth.Refund(nil, test.contract, test.feeSuggestion)
 		if test.wantErr {
@@ -622,20 +695,15 @@ func TestRefund(t *testing.T) {
 					test.name, contractVer, node.lastRefund.contractVer)
 			}
 
-			if eth.gasFeeLimit != node.lastRefund.fee {
-				t.Fatalf(`%v: gas fee limit %v != used to call refund %v`,
-					test.name, test.feeSuggestion, eth.gasFeeLimit)
+			if test.feeSuggestion != node.lastRefund.fee {
+				t.Fatalf(`%v: fee suggestion %v != used to call refund %v`,
+					test.name, test.feeSuggestion, node.lastRefund.fee)
 			}
 		}
 
-		balance, err := eth.Balance()
-		if err != nil {
-			t.Fatalf("%v: error getting balance: %v", test.name, err)
-		}
-
-		if balance.Locked != test.wantLocked {
-			t.Fatalf(`%v: expected %v to be locked but got %v`,
-				test.name, test.wantLocked, eth.locked)
+		if test.wantRefundReserves != eth.lockedFunds.refundReserves {
+			t.Fatalf("%v: refund reserves %v != expected %v",
+				test.name, eth.lockedFunds.refundReserves, test.wantRefundReserves)
 		}
 	}
 }
@@ -673,6 +741,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	}
 
 	checkBalance := func(wallet *ExchangeWallet, expectedAvailable, expectedLocked uint64, testName string) {
+		t.Helper()
 		balance, err := wallet.Balance()
 		if err != nil {
 			t.Fatalf("%v: unexpected error %v", testName, err)
@@ -736,9 +805,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	// Test fund order with less than available funds
 	coins1, redeemScripts1, err := eth.FundOrder(&order)
 	expectedOrderFees := order.DEXConfig.SwapSize * order.DEXConfig.MaxFeeRate * order.MaxSwapCount
-	expctedRefundFees := dexeth.RefundGas(0) * eth.gasFeeLimit
-	expectedFees := expectedOrderFees + expctedRefundFees
-	expectedCoinValue := order.Value + expectedFees
+	expectedCoinValue := order.Value + expectedOrderFees
 	checkFundOrderResult(coins1, redeemScripts1, err, fundOrderTest{
 		testName:    "more than enough",
 		coinValue:   expectedCoinValue,
@@ -747,7 +814,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	checkBalance(eth, walletBalanceGwei-expectedCoinValue, expectedCoinValue, "more than enough")
 
 	// Test fund order with 1 more than available funds
-	order.Value = walletBalanceGwei - expectedCoinValue - expectedFees + 1
+	order.Value = walletBalanceGwei - expectedCoinValue - expectedOrderFees + 1
 	coins, redeemScripts, err := eth.FundOrder(&order)
 	checkFundOrderResult(coins, redeemScripts, err, fundOrderTest{
 		testName: "not enough",
@@ -760,7 +827,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	coins2, redeemScripts2, err := eth.FundOrder(&order)
 	checkFundOrderResult(coins2, redeemScripts2, err, fundOrderTest{
 		testName:    "just enough",
-		coinValue:   order.Value + expectedFees,
+		coinValue:   order.Value + expectedOrderFees,
 		coinAddress: address,
 	})
 	checkBalance(eth, 0, walletBalanceGwei, "just enough")
@@ -770,10 +837,10 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	checkBalance(eth, walletBalanceGwei, 0, "after redeem too much")
+	checkBalance(eth, walletBalanceGwei, 0, "after return too much")
 
 	// Fund order with funds equal to available
-	order.Value = walletBalanceGwei - expectedFees
+	order.Value = walletBalanceGwei - expectedOrderFees
 	_, _, err = eth.FundOrder(&order)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1077,7 +1144,10 @@ func TestSwap(t *testing.T) {
 
 	refreshWalletAndFundCoins := func(ethBalance uint64, coinAmounts []uint64) asset.Coins {
 		node.bal.Current = ethToWei(ethBalance)
-		eth.locked = 0
+		eth.lockedFunds.initiateReserves = 0
+		eth.lockedFunds.redemptionReserves = 0
+		eth.lockedFunds.refundReserves = 0
+
 		coins, err := eth.FundingCoins(coinIDsForAmounts(coinAmounts))
 		if err != nil {
 			t.Fatalf("FundingCoins error: %v", err)
@@ -2427,6 +2497,77 @@ func TestFindRedemption(t *testing.T) {
 	}
 }
 
+func TestRefundReserves(t *testing.T) {
+	node := newTestNode(nil)
+	node.bal = newBalance(1e9, 0, 0)
+	node.refundable = true
+	node.swapVers = map[uint32]struct{}{0: {}}
+
+	var secretHash [32]byte
+	node.swapMap = map[[32]byte]*dexeth.SwapState{secretHash: {}}
+
+	eth := &ExchangeWallet{
+		node: node,
+	}
+
+	var maxFeeRateV0 uint64 = 45
+	gasesV0 := dexeth.VersionedGases[0]
+
+	gasesV1 := &dex.Gases{Refund: 1e6}
+	dexeth.VersionedGases[1] = gasesV1
+	var maxFeeRateV1 uint64 = 50
+
+	// Lock for 3 refunds with contract version 0
+	v0Val, err := eth.ReserveNRefunds(3, maxFeeRateV0, 0)
+	if err != nil {
+		t.Fatalf("ReserveNRefunds error: %v", err)
+	}
+	lockPerV0 := gasesV0.Refund * maxFeeRateV0
+	expLock := 3 * lockPerV0
+	if eth.lockedFunds.refundReserves != expLock {
+		t.Fatalf("wrong v0 locked. wanted %d, got %d", expLock, eth.lockedFunds.refundReserves)
+	}
+	if v0Val != expLock {
+		t.Fatalf("expected locked %d, got %d", expLock, v0Val)
+	}
+
+	// Lock for 2 refunds with contract version 1
+	v1Val, err := eth.ReserveNRefunds(2, maxFeeRateV1, 1)
+	if err != nil {
+		t.Fatalf("ReserveNRefunds error: %v", err)
+	}
+	lockPerV1 := gasesV1.Refund * maxFeeRateV1
+	v1Lock := 2 * lockPerV1
+	expLock += v1Lock
+	if eth.lockedFunds.refundReserves != expLock {
+		t.Fatalf("wrong v1 locked. wanted %d, got %d", expLock, eth.lockedFunds.refundReserves)
+	}
+	if v1Val != v1Lock {
+		t.Fatalf("expected locked %d, got %d", v1Lock, v1Val)
+	}
+
+	eth.UnlockRefundReserves(9e5)
+	expLock -= 9e5
+	if eth.lockedFunds.refundReserves != expLock {
+		t.Fatalf("incorrect amount locked. wanted %d, got %d", expLock, eth.lockedFunds.refundReserves)
+	}
+
+	// Reserve more than available should return an error
+	err = eth.ReReserveRefund(1e9)
+	if err == nil {
+		t.Fatalf("expected an error but did not get")
+	}
+
+	err = eth.ReReserveRefund(5e6)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expLock += 5e6
+	if eth.lockedFunds.refundReserves != expLock {
+		t.Fatalf("incorrect amount locked. wanted %d, got %d", expLock, eth.lockedFunds.refundReserves)
+	}
+}
+
 func TestRedemptionReserves(t *testing.T) {
 	node := newTestNode(nil)
 	node.bal = newBalance(1e9, 0, 0)
@@ -2448,22 +2589,22 @@ func TestRedemptionReserves(t *testing.T) {
 	dexeth.VersionedGases[1] = gasesV1
 	var maxFeeRateV1 uint64 = 50
 
-	v0Val, err := eth.ReserveN(3, maxFeeRateV0, 0)
+	v0Val, err := eth.ReserveNRedemptions(3, maxFeeRateV0, 0)
 	if err != nil {
 		t.Fatalf("reservation error: %v", err)
 	}
 
 	lockPerV0 := gasesV0.Redeem * maxFeeRateV0
 	expLock := 3 * lockPerV0
-	if eth.redemptionReserve != expLock {
-		t.Fatalf("wrong v0 locked. wanted %d, got %d", expLock, eth.redemptionReserve)
+	if eth.lockedFunds.redemptionReserves != expLock {
+		t.Fatalf("wrong v0 locked. wanted %d, got %d", expLock, eth.lockedFunds.redemptionReserves)
 	}
 
 	if v0Val != expLock {
 		t.Fatalf("expected value %d, got %d", lockPerV0, v0Val)
 	}
 
-	v1Val, err := eth.ReserveN(2, maxFeeRateV1, 1)
+	v1Val, err := eth.ReserveNRedemptions(2, maxFeeRateV1, 1)
 	if err != nil {
 		t.Fatalf("reservation error: %v", err)
 	}
@@ -2475,8 +2616,8 @@ func TestRedemptionReserves(t *testing.T) {
 	}
 
 	expLock += v1Lock
-	if eth.redemptionReserve != expLock {
-		t.Fatalf("wrong v1 locked. wanted %d, got %d", expLock, eth.redemptionReserve)
+	if eth.lockedFunds.redemptionReserves != expLock {
+		t.Fatalf("wrong v1 locked. wanted %d, got %d", expLock, eth.lockedFunds.redemptionReserves)
 	}
 
 	// Redeem two v0.
@@ -2499,8 +2640,8 @@ func TestRedemptionReserves(t *testing.T) {
 	}
 
 	expLock -= lockPerV0 * 2
-	if eth.redemptionReserve != expLock {
-		t.Fatalf("wrong unreserved. wanted %d, got %d", expLock, eth.redemptionReserve)
+	if eth.lockedFunds.redemptionReserves != expLock {
+		t.Fatalf("wrong unreserved. wanted %d, got %d", expLock, eth.lockedFunds.redemptionReserves)
 	}
 }
 

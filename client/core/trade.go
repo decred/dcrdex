@@ -159,13 +159,15 @@ type trackedTrade struct {
 	options            map[string]string
 	redemptionReserves uint64
 	redemptionLocked   uint64
+	refundReserves     uint64
+	refundLocked       uint64
 }
 
 // newTrackedTrade is a constructor for a trackedTrade.
 func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnection, epochLen uint64,
 	lockTimeTaker, lockTimeMaker time.Duration, db db.DB, latencyQ *wait.TickerQueue, wallets *walletSet,
 	coins asset.Coins, notify func(Notification), formatDetails func(Topic, ...interface{}) (string, string),
-	options map[string]string, redemptionReserves uint64) *trackedTrade {
+	options map[string]string, redemptionReserves, refundReserves uint64) *trackedTrade {
 
 	fromID := dbOrder.Order.Quote()
 	if dbOrder.Order.Trade().Sell {
@@ -193,15 +195,45 @@ func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnec
 		formatDetails:      formatDetails,
 		options:            options,
 		redemptionReserves: redemptionReserves,
+		refundReserves:     refundReserves,
 	}
 	return t
 }
 
 // accountRedeemer is equivalent to calling
-// xcWallet.Wallet.(asset.AccountRedeemer) on the to-wallet.
-func (t *trackedTrade) accountRedeemer() (asset.AccountRedeemer, bool) {
-	ar, is := t.wallets.toWallet.Wallet.(asset.AccountRedeemer)
+// xcWallet.Wallet.(asset.AccountLocker) on the to-wallet.
+func (t *trackedTrade) accountRedeemer() (asset.AccountLocker, bool) {
+	ar, is := t.wallets.toWallet.Wallet.(asset.AccountLocker)
 	return ar, is
+}
+
+// accountRefunder is equivalent to calling
+// xcWallet.Wallet.(asset.AccountLocker) on the from-wallet.
+func (t *trackedTrade) accountRefunder() (asset.AccountLocker, bool) {
+	ar, is := t.wallets.fromWallet.Wallet.(asset.AccountLocker)
+	return ar, is
+}
+
+// lockRedemptionFraction locks the specified fraction of the available
+// refund reserves. Subsequent calls are additive. If a call to
+// lockRedemptionFraction would put the locked reserves > available reserves,
+// nothing will be reserved, and an error message is logged.
+func (t *trackedTrade) lockRefundFraction(num, denom uint64) {
+	refunder, is := t.accountRefunder()
+	if !is {
+		return
+	}
+	newReserved := t.reservesToLock(num, denom, t.refundReserves, t.refundLocked)
+	if newReserved == 0 {
+		return
+	}
+
+	if err := refunder.ReReserveRefund(newReserved); err != nil {
+		t.dc.log.Errorf("error re-reserving refund %d %s for order %s: %v",
+			newReserved, t.wallets.fromAsset.UnitInfo.AtomicUnit, t.ID(), err)
+		return
+	}
+	t.refundLocked += newReserved
 }
 
 // lockRedemptionFraction locks the specified fraction of the available
@@ -213,19 +245,45 @@ func (t *trackedTrade) lockRedemptionFraction(num, denom uint64) {
 	if !is {
 		return
 	}
-	newReserved := applyFraction(num, denom, t.redemptionReserves)
-	if t.redemptionLocked+newReserved > t.redemptionReserves {
-		t.dc.log.Errorf("attempting to mark as active more reserves than available for order %s:"+
-			"%d available, %d already reserved, %d requested", t.ID(), t.redemptionReserves, t.redemptionLocked, newReserved)
+	newReserved := t.reservesToLock(num, denom, t.redemptionReserves, t.redemptionLocked)
+	if newReserved == 0 {
 		return
 	}
 
-	if err := redeemer.ReReserve(newReserved); err != nil {
-		t.dc.log.Errorf("error re-reserving %d %s for order %s: %v",
+	if err := redeemer.ReReserveRedemption(newReserved); err != nil {
+		t.dc.log.Errorf("error re-reserving redemption %d %s for order %s: %v",
 			newReserved, t.wallets.toAsset.UnitInfo.AtomicUnit, t.ID(), err)
 		return
 	}
 	t.redemptionLocked += newReserved
+}
+
+// reservesToLock is a helper function used by lockRedemptionFraction and
+// lockRefundFraction to determine the amount of funds to lock.
+func (t *trackedTrade) reservesToLock(num, denom, reserves, reservesLocked uint64) uint64 {
+	newReserved := applyFraction(num, denom, reserves)
+	if reservesLocked+newReserved > reserves {
+		t.dc.log.Errorf("attempting to mark as active more reserves than available for order %s:"+
+			"%d available, %d already reserved, %d requested", t.ID(), t.redemptionReserves, t.redemptionLocked, newReserved)
+		return 0
+	}
+	return newReserved
+}
+
+// unlockRefundFraction unlocks the specified fraction of the refund
+// reserves. t.mtx should be locked if this trackedTrade is in the dc.trades
+// map. If the requested unlock would put the locked reserves < 0, an error
+// message is logged and the remaining locked reserves will be unlocked instead.
+// If the remaining locked reserves after this unlock is determined to be
+// "dust", it will be unlocked too.
+func (t *trackedTrade) unlockRefundFraction(num, denom uint64) {
+	refunder, is := t.accountRefunder()
+	if !is {
+		return
+	}
+	unlock := t.reservesToUnlock(num, denom, t.refundReserves, t.refundLocked)
+	t.refundLocked -= unlock
+	refunder.UnlockRefundReserves(unlock)
 }
 
 // unlockRedemptionFraction unlocks the specified fraction of the redemption
@@ -239,20 +297,27 @@ func (t *trackedTrade) unlockRedemptionFraction(num, denom uint64) {
 	if !is {
 		return
 	}
-	unlock := applyFraction(num, denom, t.redemptionReserves)
-	if unlock > t.redemptionLocked {
+	unlock := t.reservesToUnlock(num, denom, t.redemptionReserves, t.redemptionLocked)
+	t.redemptionLocked -= unlock
+	redeemer.UnlockRedemptionReserves(unlock)
+}
+
+// reservesToUnlock is a helper function used by unlockRedemptionFraction and
+// unlockRefundFraction to determine the amount of funds to unlock.
+func (t *trackedTrade) reservesToUnlock(num, denom, reserves, reservesLocked uint64) uint64 {
+	unlock := applyFraction(num, denom, reserves)
+	if unlock > reservesLocked {
 		t.dc.log.Errorf("attempting to unlock more than is reserved for order %s. unlocking reserved amount instead: "+
-			"%d reserved, unlocking %d", t.ID(), t.redemptionLocked, unlock)
-		unlock = t.redemptionLocked
-		t.redemptionLocked = 0
+			"%d reserved, unlocking %d", t.ID(), reservesLocked, unlock)
+		unlock = reservesLocked
 	}
 
-	t.redemptionLocked -= unlock
+	reservesLocked -= unlock
 
 	// Can be dust. Clean it up.
 	var isDust bool
 	if t.isMarketBuy() {
-		isDust = t.redemptionLocked < applyFraction(1, uint64(2*len(t.matches)), t.redemptionReserves)
+		isDust = reservesLocked < applyFraction(1, uint64(2*len(t.matches)), reserves)
 	} else if t.metaData.Status > order.OrderStatusBooked && len(t.matches) > 0 {
 		// Order is executed, so no changes should be expected. If there were
 		// zero matches, the return is expected to be fraction 1 / 1, so no
@@ -261,7 +326,7 @@ func (t *trackedTrade) unlockRedemptionFraction(num, denom uint64) {
 		// divide it by 2. Any remainder less than that is dust.
 		smallestShare := ^uint64(0)
 		shrink := func(num, denom uint64) {
-			v := applyFraction(num, denom, t.redemptionReserves)
+			v := applyFraction(num, denom, reserves)
 			if v < smallestShare {
 				smallestShare = v
 			}
@@ -274,16 +339,12 @@ func (t *trackedTrade) unlockRedemptionFraction(num, denom uint64) {
 		for _, m := range t.matches {
 			shrink(m.Quantity, qty)
 		}
-		isDust = t.redemptionLocked < applyFraction(smallestShare, qty*2, t.redemptionReserves)
+		isDust = reservesLocked < applyFraction(smallestShare, qty*2, reserves)
 	}
 	if isDust {
-		unlock += t.redemptionLocked
-		t.redemptionLocked = 0
+		unlock += reservesLocked
 	}
-
-	if unlock > 0 {
-		redeemer.UnlockReserves(unlock)
-	}
+	return unlock
 }
 
 func (t *trackedTrade) isMarketBuy() bool {
@@ -473,6 +534,7 @@ func (t *trackedTrade) nomatch(oid order.OrderID) (assetMap, error) {
 	} else {
 		t.returnCoins()
 		t.unlockRedemptionFraction(1, 1)
+		t.unlockRefundFraction(1, 1)
 		assets.count(t.wallets.fromAsset.ID)
 		t.dc.log.Infof("Non-standing order %s did not match.", t.token())
 		t.metaData.Status = order.OrderStatusExecuted
@@ -622,10 +684,21 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 	// filled amount must be set, not just increased.
 	trade.SetFill(filled)
 
-	// Before we update any order statuses, check if this is a market sell order
-	// which is now executed, in which case we can return redemption reserves
-	// associated with any remainder.
-	completedMarketSell := trade.Sell && t.Type() == order.MarketOrderType && t.metaData.Status < order.OrderStatusExecuted
+	// Before we update any order statuses, check if this is a market sell
+	// order or an immediate TiF limit order which has just been executed. We
+	// can return reserves for the remaining part of an order which will not
+	// filled in the future if the order is a market sell, an immediate TiF
+	// limit order, or if the order was cancelled.
+	var completedMarketSell, completedImmediateTiF bool
+	completedMarketSell = trade.Sell && t.Type() == order.MarketOrderType && t.metaData.Status < order.OrderStatusExecuted
+	lo, ok := t.Order.(*order.LimitOrder)
+	if ok {
+		completedImmediateTiF = lo.Force == order.ImmediateTiF && t.metaData.Status < order.OrderStatusExecuted
+	}
+	if remain := trade.Quantity - preCancelFilled; remain > 0 && (completedMarketSell || completedImmediateTiF || cancelMatch != nil) {
+		t.unlockRedemptionFraction(remain, trade.Quantity)
+		t.unlockRefundFraction(remain, trade.Quantity)
+	}
 
 	// Set the order as executed depending on type and fill.
 	if t.metaData.Status != order.OrderStatusCanceled && t.metaData.Status != order.OrderStatusRevoked {
@@ -634,12 +707,6 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		} else {
 			t.metaData.Status = order.OrderStatusExecuted
 		}
-	}
-
-	// If this is a market sell or a cancelled limit order, unlock redemption
-	// reserves.
-	if remain := trade.Quantity - preCancelFilled; remain > 0 && (completedMarketSell || cancelMatch != nil) {
-		t.unlockRedemptionFraction(remain, trade.Quantity)
 	}
 
 	// Send notifications.
@@ -1423,8 +1490,10 @@ func (t *trackedTrade) revoke() {
 
 	if t.isMarketBuy() { // Is this even possible?
 		t.unlockRedemptionFraction(1, 1)
+		t.unlockRefundFraction(1, 1)
 	} else {
 		t.unlockRedemptionFraction(t.Trade().Remaining(), t.Trade().Quantity)
+		t.unlockRefundFraction(t.Trade().Remaining(), t.Trade().Quantity)
 	}
 }
 
@@ -1469,8 +1538,10 @@ func (t *trackedTrade) revokeMatch(ctx context.Context, matchID order.MatchID, f
 
 		if t.isMarketBuy() {
 			t.unlockRedemptionFraction(1, uint64(len(t.matches)))
+			t.unlockRefundFraction(1, uint64(len(t.matches)))
 		} else {
 			t.unlockRedemptionFraction(revokedMatch.Quantity, t.Trade().Quantity)
+			t.unlockRefundFraction(revokedMatch.Quantity, t.Trade().Quantity)
 		}
 	}
 
@@ -1858,7 +1929,12 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 	// t.redeemFeeSuggestion is updated every tick and uses a rate directly
 	// from our wallet, if available. Only go looking for one if we don't have
 	// one cached.
-	feeSuggestion := atomic.LoadUint64(&t.redeemFeeSuggestion)
+	var feeSuggestion uint64
+	if _, is := t.accountRedeemer(); is {
+		feeSuggestion = t.metaData.RedeemMaxFeeRate
+	} else {
+		feeSuggestion = atomic.LoadUint64(&t.redeemFeeSuggestion)
+	}
 	if feeSuggestion == 0 {
 		feeSuggestion = t.dc.bestBookFeeSuggestion(t.wallets.toAsset.ID)
 	}
@@ -1939,6 +2015,11 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 			match.Status = order.MatchComplete // could this cause the match to be retired before the `redeem` request succeeds?
 			proof.TakerRedeem = coinID
 		} else {
+			if t.isMarketBuy() {
+				t.unlockRefundFraction(1, uint64(len(t.matches)))
+			} else {
+				t.unlockRefundFraction(match.Quantity, t.Trade().Quantity)
+			}
 			match.Status = order.MakerRedeemed
 			proof.MakerRedeem = coinID
 		}
@@ -2087,6 +2168,12 @@ func (t *trackedTrade) findMakersRedemption(match *matchTracker) {
 			return
 		}
 
+		if t.isMarketBuy() {
+			t.unlockRefundFraction(1, uint64(len(t.matches)))
+		} else {
+			t.unlockRefundFraction(match.Quantity, t.Trade().Quantity)
+		}
+
 		// Update the match status and set the secret so that Maker's swap
 		// will be redeemed in the next call to trade.tick().
 		match.Status = order.MakerRedeemed
@@ -2143,7 +2230,14 @@ func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, 
 		t.dc.log.Infof("Refunding %s contract %s for match %s (%s)",
 			refundAsset.Symbol, swapCoinString, match, matchFailureReason)
 
-		feeSuggestion := c.feeSuggestionAny(refundAsset.ID)
+		var feeSuggestion uint64
+		if _, is := t.accountRefunder(); is {
+			feeSuggestion = t.metaData.MaxFeeRate
+		}
+		if feeSuggestion == 0 {
+			feeSuggestion = c.feeSuggestionAny(refundAsset.ID)
+		}
+
 		refundCoin, err := refundWallet.Refund(swapCoinID, contractToRefund, feeSuggestion)
 		if err != nil {
 			// CRITICAL - Refund must indicate if the swap is spent (i.e.
@@ -2173,8 +2267,10 @@ func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, 
 
 		if t.isMarketBuy() {
 			t.unlockRedemptionFraction(1, uint64(len(t.matches)))
+			t.unlockRefundFraction(1, uint64(len(t.matches)))
 		} else {
 			t.unlockRedemptionFraction(match.Quantity, t.Trade().Quantity)
+			t.unlockRefundFraction(match.Quantity, t.Trade().Quantity)
 		}
 
 		// Refund successful, cancel any previously started attempt to find
@@ -2495,6 +2591,14 @@ func (t *trackedTrade) processMakersRedemption(match *matchTracker, coinID, secr
 	redeemAsset := t.wallets.fromAsset
 	t.dc.log.Infof("Notified of maker's redemption (%s: %v) and validated secret for order %v...",
 		redeemAsset.Symbol, coinIDString(redeemAsset.ID, coinID), t.ID())
+
+	if match.Status < order.MakerRedeemed {
+		if t.isMarketBuy() {
+			t.unlockRefundFraction(1, uint64(len(t.matches)))
+		} else {
+			t.unlockRefundFraction(match.Quantity, t.Trade().Quantity)
+		}
+	}
 
 	match.Status = order.MakerRedeemed
 	proof.MakerRedeem = coinID

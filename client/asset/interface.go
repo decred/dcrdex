@@ -372,20 +372,34 @@ type TokenMaster interface {
 	OpenTokenWallet(assetID uint32, settings map[string]string, tipChange func(error)) (Wallet, error)
 }
 
-// AccountRedeemer is a wallet in which redemptions require a wallet to have
-// available balance to pay fees.
-type AccountRedeemer interface {
-	// ReserveN is used when preparing funding for an order that redeems to an
-	// account-based asset. The wallet will set aside the appropriate amount of
-	// funds so that we can redeem. It is an error to request funds > spendable
-	// balance.
-	ReserveN(n, feeRate uint64, assetVer uint32) (uint64, error)
-	// ReReserve is used when reconstructing existing orders on startup. It is
+// AccountLocker is a wallet in which redemptions and refunds require a wallet
+// to have available balance to pay fees.
+type AccountLocker interface {
+	// ReserveNRedemption is used when preparing funding for an order that
+	// redeems to an account-based asset. The wallet will set aside the
+	// appropriate amount of funds so that we can redeem N swaps on the
+	// specified version of the asset, at the specified fee rate. It is an
+	// error to request funds > spendable balance.
+	ReserveNRedemptions(n, feeRate uint64, assetVer uint32) (uint64, error)
+	// ReReserveRedemption is used when reconstructing existing orders on
+	// startup. It is an error to request funds > spendable balance.
+	ReReserveRedemption(amt uint64) error
+	// UnlockRedemptionReserves is used to return funds reserved for redemption
+	// when an order is canceled or otherwise completed unfilled.
+	UnlockRedemptionReserves(uint64)
+	// ReserveNRefunds is used when preparing funding for an order that
+	// refunds to an account-based asset. The wallet will set aside the
+	// appropriate amount of funds so that we can refund N swaps on the
+	// specified version of the asset, at the specified fee rate. It is
 	// an error to request funds > spendable balance.
-	ReReserve(amt uint64) error
-	// UnlockReserves is used to return funds when an order is canceled or
-	// otherwise completed unfilled.
-	UnlockReserves(uint64)
+	ReserveNRefunds(n, feeRate uint64, assetVer uint32) (uint64, error)
+	// ReReserveRefund is used when reconstructing existing orders on
+	// startup. It is an error to request funds > spendable balance.
+	ReReserveRefund(uint64) error
+	// UnlockRefundReserves is used to return funds reserved for refunds
+	// when an order was cancelled or revoked before a swap was initiated,
+	// completed successully, or after a refund was done.
+	UnlockRefundReserves(uint64)
 }
 
 // Balance is categorized information about a wallet's balance.

@@ -812,8 +812,10 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 			(!trade.isMarketBuy() || len(trade.matches) == 0) {
 			if trade.isMarketBuy() {
 				trade.unlockRedemptionFraction(1, 1)
+				trade.unlockRefundFraction(1, 1)
 			} else {
 				trade.unlockRedemptionFraction(trade.Trade().Remaining(), trade.Trade().Quantity)
+				trade.unlockRefundFraction(trade.Trade().Remaining(), trade.Trade().Quantity)
 			}
 		}
 		// Now update the trade.
@@ -4067,7 +4069,8 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	}
 	fromWallet, toWallet := wallets.fromWallet, wallets.toWallet
 
-	accountRedeemer, isAccountRedemption := toWallet.Wallet.(asset.AccountRedeemer)
+	accountRedeemer, isAccountRedemption := toWallet.Wallet.(asset.AccountLocker)
+	accountRefunder, isAccountRefund := fromWallet.Wallet.(asset.AccountLocker)
 
 	prepareWallet := func(w *xcWallet) error {
 		// NOTE: If the wallet is already internally unlocked (the decrypted
@@ -4114,7 +4117,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	if form.IsLimit && !form.Sell {
 		fundQty = calc.BaseToQuote(rate, fundQty)
 	}
-	redemptionLots := lots
+	redemptionRefundLots := lots
 
 	isImmediate := (!form.IsLimit || form.TifNow)
 
@@ -4137,7 +4140,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 			if err == nil {
 				baseQty := calc.QuoteToBase(midGap, fundQty)
 				lots = baseQty / lotSize
-				redemptionLots = lots * marketBuyRedemptionSlippageBuffer
+				redemptionRefundLots = lots * marketBuyRedemptionSlippageBuffer
 				if lots == 0 {
 					err = newError(orderParamsErr,
 						"order quantity is too low for current market rates. "+
@@ -4252,7 +4255,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	// Everything is ready. Send the order.
 	route, msgOrder, msgTrade := messageOrder(ord, msgCoins)
 
-	// If the to asset is an AccountRedeemer, we need to lock up redemption
+	// If the to asset is an AccountLocker, we need to lock up redemption
 	// funds.
 	var redemptionReserves uint64
 	if isAccountRedemption {
@@ -4263,9 +4266,9 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		if len(pubKeys) == 0 || len(sigs) == 0 {
 			return nil, 0, newError(signatureErr, "wrong number of pubkeys or signatures, %d & %d", len(pubKeys), len(sigs))
 		}
-		redemptionReserves, err = accountRedeemer.ReserveN(redemptionLots, wallets.toAsset.MaxFeeRate, wallets.toAsset.Version)
+		redemptionReserves, err = accountRedeemer.ReserveNRedemptions(redemptionRefundLots, wallets.toAsset.MaxFeeRate, wallets.toAsset.Version)
 		if err != nil {
-			return nil, 0, codedError(walletErr, fmt.Errorf("ReserveN error: %w", err))
+			return nil, 0, codedError(walletErr, fmt.Errorf("ReserveNRedemptions error: %w", err))
 		}
 		msgTrade.RedeemSig = &msgjson.RedeemSig{
 			PubKey: pubKeys[0],
@@ -4273,7 +4276,21 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		}
 		defer func() {
 			if !success {
-				accountRedeemer.UnlockReserves(redemptionReserves)
+				accountRedeemer.UnlockRedemptionReserves(redemptionReserves)
+			}
+		}()
+	}
+
+	// If the from asset is an AccountLocker, we need to lock up refund funds.
+	var refundReserves uint64
+	if isAccountRefund {
+		refundReserves, err = accountRefunder.ReserveNRefunds(redemptionRefundLots, wallets.fromAsset.MaxFeeRate, wallets.fromAsset.Version)
+		if err != nil {
+			return nil, 0, codedError(walletErr, fmt.Errorf("ReserveNRefunds error: %w", err))
+		}
+		defer func() {
+			if !success {
+				accountRefunder.UnlockRefundReserves(refundReserves)
 			}
 		}()
 	}
@@ -4319,9 +4336,10 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	// Store the order.
 	dbOrder := &db.MetaOrder{
 		MetaData: &db.OrderMetaData{
-			Status:     order.OrderStatusEpoch,
-			Host:       dc.acct.host,
-			MaxFeeRate: wallets.fromAsset.MaxFeeRate,
+			Status:           order.OrderStatusEpoch,
+			Host:             dc.acct.host,
+			MaxFeeRate:       wallets.fromAsset.MaxFeeRate,
+			RedeemMaxFeeRate: wallets.toAsset.MaxFeeRate,
 			Proof: db.OrderProof{
 				DEXSig:   result.Sig,
 				Preimage: preImg[:],
@@ -4342,9 +4360,10 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 
 	// Prepare and store the tracker and get the core.Order to return.
 	tracker := newTrackedTrade(dbOrder, preImg, dc, dc.marketEpochDuration(mktID), c.lockTimeTaker, c.lockTimeMaker,
-		c.db, c.latencyQ, wallets, coins, c.notify, c.formatDetails, form.Options, redemptionReserves)
+		c.db, c.latencyQ, wallets, coins, c.notify, c.formatDetails, form.Options, redemptionReserves, refundReserves)
 
 	tracker.redemptionLocked = tracker.redemptionReserves
+	tracker.refundLocked = tracker.refundReserves
 
 	if recoveryCoin != nil {
 		tracker.change = recoveryCoin
@@ -4957,7 +4976,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		copy(preImg[:], dbOrder.MetaData.Proof.Preimage)
 		tracker := newTrackedTrade(dbOrder, preImg, dc, dc.marketEpochDuration(mktID), c.lockTimeTaker,
 			c.lockTimeMaker, c.db, c.latencyQ, nil, nil, c.notify, c.formatDetails,
-			dbOrder.MetaData.Options, dbOrder.MetaData.RedemptionReserves)
+			dbOrder.MetaData.Options, dbOrder.MetaData.RedemptionReserves, dbOrder.MetaData.RefundReserves)
 		trackers[dbOrder.Order.ID()] = tracker
 
 		// Get matches.
@@ -5166,6 +5185,14 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 			}
 		}
 
+		lockMatchRefund := func(match *matchTracker) {
+			if tracker.isMarketBuy() {
+				tracker.lockRefundFraction(1, uint64(len(tracker.matches)))
+			} else {
+				tracker.lockRefundFraction(match.Quantity, trade.Quantity)
+			}
+		}
+
 		// If matches haven't redeemed, but the counter-swap has been received,
 		// reload the audit info.
 		isActive := tracker.metaData.Status == order.OrderStatusBooked || tracker.metaData.Status == order.OrderStatusEpoch
@@ -5183,6 +5210,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				}
 				if match.Status < order.MakerRedeemed {
 					lockMatchRedemption(match)
+					lockMatchRefund(match)
 				}
 			} else { // Taker
 				if match.Status < order.TakerSwapCast {
@@ -5191,6 +5219,9 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				if match.Status < order.MatchComplete && match.Status >= order.MakerSwapCast {
 					needsAuditInfo = true // taker needs AuditInfo for maker's contract
 					counterSwap = match.MetaData.Proof.MakerSwap
+				}
+				if match.Status < order.MakerRedeemed {
+					lockMatchRefund(match)
 				}
 				if match.Status < order.MatchComplete {
 					lockMatchRedemption(match)
@@ -5310,6 +5341,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 
 		if isActive {
 			tracker.lockRedemptionFraction(trade.Remaining(), trade.Quantity)
+			tracker.lockRefundFraction(trade.Remaining(), trade.Quantity)
 		}
 
 		// Balances should be updated for any orders with locked wallet coins,

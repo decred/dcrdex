@@ -204,11 +204,13 @@ type ethFetcher interface {
 	sendToAddr(ctx context.Context, addr common.Address, val uint64) (*types.Transaction, error)
 	transactionConfirmations(context.Context, common.Hash) (uint32, error)
 	sendSignedTransaction(ctx context.Context, tx *types.Transaction) error
+	netFeeState(ctx context.Context) (baseFees, tipCap *big.Int, err error)
 }
 
 // Check that ExchangeWallet satisfies the asset.Wallet interface.
 var _ asset.Wallet = (*ExchangeWallet)(nil)
-var _ asset.AccountRedeemer = (*ExchangeWallet)(nil)
+var _ asset.AccountLocker = (*ExchangeWallet)(nil)
+var _ asset.FeeRater = (*ExchangeWallet)(nil)
 
 // ExchangeWallet is a wallet backend for Ethereum. The backend is how the DEX
 // client app communicates with the Ethereum blockchain and wallet. ExchangeWallet
@@ -231,9 +233,12 @@ type ExchangeWallet struct {
 	tipMtx     sync.RWMutex
 	currentTip *types.Block
 
-	lockedMtx         sync.RWMutex
-	locked            uint64
-	redemptionReserve uint64
+	lockedFunds struct {
+		mtx                sync.RWMutex
+		initiateReserves   uint64
+		redemptionReserves uint64
+		refundReserves     uint64
+	}
 
 	findRedemptionMtx  sync.RWMutex
 	findRedemptionReqs map[[32]byte]*findRedemptionRequest
@@ -376,24 +381,98 @@ func (eth *ExchangeWallet) OwnsAddress(address string) (bool, error) {
 	return addr == eth.addr, nil
 }
 
+// fundReserveType represents the various uses for which funds need to be locked:
+// initiations, redemptions, and refunds.
+type fundReserveType uint32
+
+const (
+	initiationReserve fundReserveType = iota
+	redemptionReserve
+	refundReserve
+)
+
+func (f fundReserveType) String() string {
+	switch f {
+	case initiationReserve:
+		return "initiation"
+	case redemptionReserve:
+		return "redemption"
+	case refundReserve:
+		return "refund"
+	default:
+		return ""
+	}
+}
+
+// fundReserveOfType returns a pointer to the funds reserved for a particular
+// use case.
+func (eth *ExchangeWallet) fundReserveOfType(t fundReserveType) *uint64 {
+	switch t {
+	case initiationReserve:
+		return &eth.lockedFunds.initiateReserves
+	case redemptionReserve:
+		return &eth.lockedFunds.redemptionReserves
+	case refundReserve:
+		return &eth.lockedFunds.refundReserves
+	default:
+		panic(fmt.Sprintf("invalid fund reserve type: %v", t))
+	}
+}
+
+// lockFunds locks funds for a use case.
+func (eth *ExchangeWallet) lockFunds(amt uint64, t fundReserveType) error {
+	reserve := eth.fundReserveOfType(t)
+	balance, err := eth.balance()
+	if err != nil {
+		return err
+	}
+
+	if balance.Available < amt {
+		return fmt.Errorf("attempting to lock more for %s than is currently available. %d > %d",
+			t, amt, balance.Available)
+	}
+
+	*reserve += amt
+	return nil
+}
+
+// unlockFunds unlocks funds for a use case.
+func (eth *ExchangeWallet) unlockFunds(amt uint64, t fundReserveType) {
+	reserve := eth.fundReserveOfType(t)
+
+	if *reserve < amt {
+		*reserve = 0
+		eth.log.Errorf("attempting to unlock more for %s than is currently locked - %d > %d. "+
+			"clearing all locked funds", t, amt, *reserve)
+		return
+	}
+
+	*reserve -= amt
+}
+
+// amountLocked returns the total amount currently locked.
+func (eth *ExchangeWallet) amountLocked() uint64 {
+	return eth.lockedFunds.initiateReserves + eth.lockedFunds.redemptionReserves + eth.lockedFunds.refundReserves
+}
+
 // Balance returns the total available funds in the account. The eth node
 // returns balances in wei. Those are flored and stored as gwei, or 1e9 wei.
 func (eth *ExchangeWallet) Balance() (*asset.Balance, error) {
-	eth.lockedMtx.Lock()
-	defer eth.lockedMtx.Unlock()
+	eth.lockedFunds.mtx.Lock()
+	defer eth.lockedFunds.mtx.Unlock()
 
 	return eth.balance()
 }
 
 // balance returns the total available funds in the account.
-// This function expects eth.lockedMtx to be held.
+// This function expects eth.lockedFunds.mtx to be held.
 func (eth *ExchangeWallet) balance() (*asset.Balance, error) {
 	bal, err := eth.node.balance(eth.ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	locked := eth.locked + eth.redemptionReserve
+	locked := eth.amountLocked()
 	return &asset.Balance{
 		Available: dexeth.WeiToGwei(bal.Current) - locked - dexeth.WeiToGwei(bal.PendingOut),
 		Locked:    locked,
@@ -557,11 +636,14 @@ func (eth *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 			ord.DEXConfig.MaxFeeRate,
 			eth.gasFeeLimit)
 	}
+
 	maxSwapFees := ord.DEXConfig.MaxFeeRate * ord.DEXConfig.SwapSize * ord.MaxSwapCount
-	refundFees := dexeth.RefundGas(0) * eth.gasFeeLimit
-	fundsNeeded := ord.Value + maxSwapFees + refundFees
-	coins := asset.Coins{eth.createFundingCoin(fundsNeeded)}
-	err := eth.lockFunds(fundsNeeded)
+	initiationFunds := ord.Value + maxSwapFees
+	coins := asset.Coins{eth.createFundingCoin(initiationFunds)}
+
+	eth.lockedFunds.mtx.Lock()
+	defer eth.lockedFunds.mtx.Unlock()
+	err := eth.lockFunds(initiationFunds, initiationReserve)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -581,7 +663,11 @@ func (eth *ExchangeWallet) ReturnCoins(coins asset.Coins) error {
 			return fmt.Errorf("unsupported funding coin type for coin %[1]s: %[1]T", coins[i])
 		}
 	}
-	eth.unlockFunds(amt)
+
+	eth.lockedFunds.mtx.Lock()
+	defer eth.lockedFunds.mtx.Unlock()
+	eth.unlockFunds(amt, initiationReserve)
+
 	return nil
 }
 
@@ -599,45 +685,14 @@ func (eth *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 		totalValue += coin.Value()
 	}
 
-	err := eth.lockFunds(totalValue)
+	eth.lockedFunds.mtx.Lock()
+	defer eth.lockedFunds.mtx.Unlock()
+	err := eth.lockFunds(totalValue, initiationReserve)
 	if err != nil {
 		return nil, err
 	}
 
 	return coins, nil
-}
-
-// lockFunds locks funds held by the wallet.
-func (eth *ExchangeWallet) lockFunds(amt uint64) error {
-	eth.lockedMtx.Lock()
-	defer eth.lockedMtx.Unlock()
-
-	balance, err := eth.balance()
-	if err != nil {
-		return err
-	}
-
-	if balance.Available < amt {
-		return fmt.Errorf("attempting to lock more than is currently available. %d > %d",
-			amt, balance.Available)
-	}
-
-	eth.locked += amt
-	return nil
-}
-
-// unlockFunds unlocks funds held by the wallet.
-func (eth *ExchangeWallet) unlockFunds(amt uint64) {
-	eth.lockedMtx.Lock()
-	defer eth.lockedMtx.Unlock()
-
-	if eth.locked < amt {
-		eth.log.Errorf("attempting to unlock more than is currently locked - %d > %d. "+
-			"clearing all locked funds", amt, eth.locked)
-		eth.locked = 0
-	} else {
-		eth.locked -= amt
-	}
 }
 
 // swapReceipt implements the asset.Receipt interface for ETH.
@@ -738,12 +793,15 @@ func (eth *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 			})
 	}
 
+	eth.lockedFunds.mtx.Lock()
+	defer eth.lockedFunds.mtx.Unlock()
+
 	var change asset.Coin
 	if swaps.LockChange {
-		eth.unlockFunds(totalSpend)
+		eth.unlockFunds(totalSpend, initiationReserve)
 		change = eth.createFundingCoin(totalInputValue - totalSpend)
 	} else {
-		eth.unlockFunds(totalInputValue)
+		eth.unlockFunds(totalInputValue, initiationReserve)
 	}
 
 	return receipts, change, fees, nil
@@ -808,13 +866,13 @@ func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 	fundsRequired := dexeth.RedeemGas(len(form.Redemptions), contractVersion) * form.FeeSuggestion
 
 	// TODO: make sure the amount we locked for redemption is enough to cover the gas
-	// fees. Also unlock coins.
+	// fees.
 	tx, err := eth.node.redeem(eth.ctx, form.Redemptions, form.FeeSuggestion, contractVersion)
 	if err != nil {
 		return fail(fmt.Errorf("Redeem: redeem error: %w", err))
 	}
 
-	eth.UnlockReserves(unlocked)
+	eth.UnlockRedemptionReserves(unlocked)
 
 	txHash := tx.Hash()
 	txs := make([]dex.Bytes, len(form.Redemptions))
@@ -843,53 +901,64 @@ func recoverPubkey(msgHash, sig []byte) ([]byte, error) {
 	return pubKey.SerializeUncompressed(), nil
 }
 
-// ReserveN locks funds for redemption. It is an error if there is insufficient
-// spendable balance. Part of the AccountRedeemer interface.
-func (eth *ExchangeWallet) ReserveN(n, feeRate uint64, assetVer uint32) (uint64, error) {
+// ReserveNRedemptions locks funds for redemption. It is an error if there
+// is insufficient spendable balance. Part of the AccountLocker interface.
+func (eth *ExchangeWallet) ReserveNRedemptions(n, feeRate uint64, assetVer uint32) (uint64, error) {
 	redeemCost := dexeth.RedeemGas(1, assetVer) * feeRate
 	reserve := redeemCost * n
 
-	eth.lockedMtx.Lock()
-	defer eth.lockedMtx.Unlock()
-	bal, err := eth.balance()
-	if err != nil {
-		return 0, fmt.Errorf("error retreiving balance: %w", err)
-	}
-	if reserve > bal.Available {
-		return 0, fmt.Errorf("balance too low. %d < %d", bal.Available, reserve)
-	}
-	eth.redemptionReserve += reserve
+	eth.lockedFunds.mtx.Lock()
+	defer eth.lockedFunds.mtx.Unlock()
+	err := eth.lockFunds(reserve, redemptionReserve)
 
 	return reserve, err
 }
 
-// UnlockReserves unlocks the specified amount from redemption reserves. Part
-// of the AccountRedeemer interface.
-func (eth *ExchangeWallet) UnlockReserves(reserves uint64) {
-	eth.lockedMtx.Lock()
-	if reserves > eth.redemptionReserve {
-		eth.redemptionReserve = 0
-		eth.log.Errorf("attempting to unlock more than reserved. %d > %d", reserves, eth.redemptionReserve)
-	} else {
-		eth.redemptionReserve -= reserves
-	}
-	eth.lockedMtx.Unlock()
+// UnlockRedemptionReserves unlocks the specified amount from redemption
+// reserves. Part of the AccountLocker interface.
+func (eth *ExchangeWallet) UnlockRedemptionReserves(reserves uint64) {
+	eth.lockedFunds.mtx.Lock()
+	defer eth.lockedFunds.mtx.Unlock()
+	eth.unlockFunds(reserves, redemptionReserve)
 }
 
-// ReReserve checks out an amount for redemptions. Use ReReserve after
-// initializing a new ExchangeWallet.
-func (eth *ExchangeWallet) ReReserve(req uint64) error {
-	eth.lockedMtx.Lock()
-	defer eth.lockedMtx.Unlock()
-	bal, err := eth.balance()
-	if err != nil {
-		return err
-	}
-	if eth.redemptionReserve+req > bal.Available {
-		return fmt.Errorf("not enough funds. %d < %d", eth.redemptionReserve+req, bal.Available)
-	}
-	eth.redemptionReserve += req
-	return nil
+// ReReserveRedemption checks out an amount for redemptions. Use
+// ReReserveRedemption after initializing a new ExchangeWallet.
+// Part of the AccountLocker interface.
+func (eth *ExchangeWallet) ReReserveRedemption(req uint64) error {
+	eth.lockedFunds.mtx.Lock()
+	defer eth.lockedFunds.mtx.Unlock()
+	return eth.lockFunds(req, redemptionReserve)
+}
+
+// ReserveNRefunds locks funds for doing refunds. It is an error if there
+// is insufficient spendable balance. Part of the AccountLocker interface.
+func (eth *ExchangeWallet) ReserveNRefunds(n, feeRate uint64, assetVer uint32) (uint64, error) {
+	refundCost := dexeth.RefundGas(assetVer) * feeRate
+	reserve := refundCost * n
+
+	eth.lockedFunds.mtx.Lock()
+	defer eth.lockedFunds.mtx.Unlock()
+	err := eth.lockFunds(reserve, refundReserve)
+
+	return reserve, err
+}
+
+// UnlockRefundReserves unlocks the specified amount from refund
+// reserves. Part of the AccountLocker interface.
+func (eth *ExchangeWallet) UnlockRefundReserves(reserves uint64) {
+	eth.lockedFunds.mtx.Lock()
+	defer eth.lockedFunds.mtx.Unlock()
+	eth.unlockFunds(reserves, refundReserve)
+}
+
+// ReReserveRefund checks out an amount for doing refunds. Use ReReserveRefund
+// after initializing a new ExchangeWallet. Part of the AccountLocker
+// interface.
+func (eth *ExchangeWallet) ReReserveRefund(req uint64) error {
+	eth.lockedFunds.mtx.Lock()
+	defer eth.lockedFunds.mtx.Unlock()
+	return eth.lockFunds(req, refundReserve)
 }
 
 // SignMessage signs the message with the private key associated with the
@@ -1101,14 +1170,16 @@ func (eth *ExchangeWallet) findSecret(ctx context.Context, secretHash [32]byte, 
 
 // Refund refunds a contract. This can only be used after the time lock has
 // expired.
-func (eth *ExchangeWallet) Refund(_, contract dex.Bytes, _ uint64) (dex.Bytes, error) {
+func (eth *ExchangeWallet) Refund(_, contract dex.Bytes, feeSuggestion uint64) (dex.Bytes, error) {
 	version, secretHash, err := dexeth.DecodeContractData(contract)
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to decode contract: %w", err)
 	}
 
 	unlockFunds := func() {
-		eth.unlockFunds(eth.gasFeeLimit * dexeth.RefundGas(version))
+		eth.lockedFunds.mtx.Lock()
+		defer eth.lockedFunds.mtx.Unlock()
+		eth.unlockFunds(feeSuggestion*dexeth.RefundGas(version), refundReserve)
 	}
 
 	swap, err := eth.node.swap(eth.ctx, secretHash, version)
@@ -1140,7 +1211,7 @@ func (eth *ExchangeWallet) Refund(_, contract dex.Bytes, _ uint64) (dex.Bytes, e
 		return nil, fmt.Errorf("Refund: swap with secret hash %x is not refundable", secretHash)
 	}
 
-	tx, err := eth.node.refund(eth.ctx, secretHash, eth.gasFeeLimit, version)
+	tx, err := eth.node.refund(eth.ctx, secretHash, feeSuggestion, version)
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to call refund: %w", err)
 	}
@@ -1175,10 +1246,7 @@ func (eth *ExchangeWallet) Locked() bool {
 // PayFee sends the dex registration fee. Transaction fees are in addition to
 // the registration fee, and the fee rate is taken from the DEX configuration.
 func (eth *ExchangeWallet) PayFee(address string, regFee, _ uint64) (asset.Coin, error) {
-	eth.lockedMtx.Lock()
-	defer eth.lockedMtx.Unlock()
-
-	bal, err := eth.balance()
+	bal, err := eth.Balance()
 	if err != nil {
 		return nil, err
 	}
@@ -1233,10 +1301,7 @@ func (eth *ExchangeWallet) SwapConfirmations(ctx context.Context, _ dex.Bytes, c
 // Withdraw withdraws funds to the specified address. Value is gwei. The fee is
 // subtracted from the total balance if it cannot be sent otherwise.
 func (eth *ExchangeWallet) Withdraw(addr string, value, _ uint64) (asset.Coin, error) {
-	eth.lockedMtx.Lock()
-	defer eth.lockedMtx.Unlock()
-
-	bal, err := eth.balance()
+	bal, err := eth.Balance()
 	if err != nil {
 		return nil, err
 	}
@@ -1302,6 +1367,25 @@ func (eth *ExchangeWallet) RegFeeConfirmations(ctx context.Context, coinID dex.B
 	var txHash common.Hash
 	copy(txHash[:], coinID)
 	return eth.node.transactionConfirmations(ctx, txHash)
+}
+
+// FeeRate satisfies asset.FeeRater.
+func (eth *ExchangeWallet) FeeRate() (uint64, error) {
+	base, tip, err := eth.node.netFeeState(eth.ctx)
+	if err != nil {
+		return 0, fmt.Errorf("error getting net fee state: %w", err)
+	}
+
+	feeRate := new(big.Int).Add(
+		tip,
+		new(big.Int).Mul(base, big.NewInt(2)))
+
+	feeRateGwei, err := dexeth.WeiToGweiUint64(feeRate)
+	if err != nil {
+		return 0, fmt.Errorf("failed to convert wei to gwei: %w", err)
+	}
+
+	return feeRateGwei, nil
 }
 
 func (eth *ExchangeWallet) checkPeers() {

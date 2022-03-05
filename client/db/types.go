@@ -260,14 +260,31 @@ type OrderMetaData struct {
 	// MaxFeeRate is the dex.Asset.MaxFeeRate at the time of ordering. The rates
 	// assigned to matches will be validated against this value.
 	MaxFeeRate uint64
+	// RedeemMaxFeeRate is the dex.Asset.MaxFeeRate for the redemption asset at
+	// the time of ordering. This rate is used to reserve funds for redemption,
+	// and therefore this rate can be used when actually submitting a redemption
+	// transaction.
+	RedeemMaxFeeRate uint64
 	// FromVersion is the version of the from asset.
 	FromVersion uint32
 	// ToVersion is the version of the to asset.
 	ToVersion uint32
 	// Options are the options offered by the wallet and selected by the user.
 	Options map[string]string
-	// RedemptionReserve is the reserved redemption funds.
+	// RedemptionReserves is the amount of funds reserved by the wallet to pay
+	// the transaction fees for all the possible redemptions in this order.
+	// The amount that should be locked at any point can be determined by
+	// checking the status of the order and the status of all matches related
+	// to this order, and determining how many more possible redemptions there
+	// could be.
 	RedemptionReserves uint64
+	// RedemptionRefunds is the amount of funds reserved by the wallet to pay
+	// the transaction fees for all the possible refunds in this order.
+	// The amount that should be locked at any point can be determined by
+	// checking the status of the order and the status of all matches related
+	// to this order, and determining how many more possible refunds there
+	// could be.
+	RefundReserves uint64
 }
 
 // MetaMatch is a match and its metadata.
