@@ -1676,9 +1676,9 @@ export default class MarketsPage extends BasePage {
   /* lotChanged is attached to the keyup and change events of the lots input. */
   lotChanged () {
     const page = this.page
-    const lots = parseInt(page.lotField.value) || 0
+    const lots = parseInt(page.lotField.value || 0)
     if (lots <= 0) {
-      page.lotField.value = ''
+      page.lotField.value = 0
       page.qtyField.value = ''
       this.previewQuoteAmt(false)
       return
@@ -1698,7 +1698,7 @@ export default class MarketsPage extends BasePage {
     const page = this.page
     const order = this.parseOrder()
     if (order.qty < 0) {
-      page.lotField.value = ''
+      page.lotField.value = 0
       page.qtyField.value = ''
       this.previewQuoteAmt(false)
       return
