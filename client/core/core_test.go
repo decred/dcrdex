@@ -2894,6 +2894,21 @@ func TestRefundReserves(t *testing.T) {
 
 	tracker.cancel = nil
 
+	lo.Force = order.ImmediateTiF
+	loid = lo.ID()
+	msgMatch.OrderID = loid[:]
+
+	test("partial immediate TiF limit order", reserves/3, func() {
+		matchReq, _ := msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
+		if err := handleMatchRoute(tCore, rig.dc, matchReq); err != nil {
+			t.Fatalf("handleMatchRoute error: %v", err)
+		}
+	})
+
+	lo.Force = order.StandingTiF
+	loid = lo.ID()
+	msgMatch.OrderID = loid[:]
+
 	addMatch := func(side order.MatchSide, status order.MatchStatus, qty uint64) order.MatchID {
 		msgMatch.Side = uint8(side)
 		m := *msgMatch
@@ -3124,6 +3139,17 @@ func TestRedemptionReserves(t *testing.T) {
 	})
 
 	tracker.cancel = nil
+
+	lo.Force = order.ImmediateTiF
+	loid = lo.ID()
+	msgMatch.OrderID = loid[:]
+
+	test("partially filled immediate TiF limit order", reserves/3, func() {
+		matchReq, _ := msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
+		if err := handleMatchRoute(tCore, rig.dc, matchReq); err != nil {
+			t.Fatalf("handleMatchRoute error: %v", err)
+		}
+	})
 
 	mo := &order.MarketOrder{
 		P: lo.P,

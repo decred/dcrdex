@@ -684,10 +684,21 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 	// filled amount must be set, not just increased.
 	trade.SetFill(filled)
 
-	// Before we update any order statuses, check if this is a market sell order
-	// which is now executed, in which case we can return redemption reserves
-	// associated with any remainder.
-	completedMarketSell := trade.Sell && t.Type() == order.MarketOrderType && t.metaData.Status < order.OrderStatusExecuted
+	// Before we update any order statuses, check if this is a market sell
+	// order or an immediate TiF limit order which has just been executed. We
+	// can return reserves for the remaining part of an order which will not
+	// filled in the future if the order is a market sell, an immediate TiF
+	// limit order, or if the order was cancelled.
+	var completedMarketSell, completedImmediateTiF bool
+	completedMarketSell = trade.Sell && t.Type() == order.MarketOrderType && t.metaData.Status < order.OrderStatusExecuted
+	lo, ok := t.Order.(*order.LimitOrder)
+	if ok {
+		completedImmediateTiF = lo.Force == order.ImmediateTiF && t.metaData.Status < order.OrderStatusExecuted
+	}
+	if remain := trade.Quantity - preCancelFilled; remain > 0 && (completedMarketSell || completedImmediateTiF || cancelMatch != nil) {
+		t.unlockRedemptionFraction(remain, trade.Quantity)
+		t.unlockRefundFraction(remain, trade.Quantity)
+	}
 
 	// Set the order as executed depending on type and fill.
 	if t.metaData.Status != order.OrderStatusCanceled && t.metaData.Status != order.OrderStatusRevoked {
@@ -696,13 +707,6 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		} else {
 			t.metaData.Status = order.OrderStatusExecuted
 		}
-	}
-
-	// If this is a market sell or a cancelled limit order, unlock redemption
-	// reserves.
-	if remain := trade.Quantity - preCancelFilled; remain > 0 && (completedMarketSell || cancelMatch != nil) {
-		t.unlockRedemptionFraction(remain, trade.Quantity)
-		t.unlockRefundFraction(remain, trade.Quantity)
 	}
 
 	// Send notifications.

@@ -4305,8 +4305,6 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	tracker.redemptionLocked = tracker.redemptionReserves
 	tracker.refundLocked = tracker.refundReserves
 
-	tracker.redemptionLocked = tracker.redemptionReserves
-
 	if recoveryCoin != nil {
 		tracker.change = recoveryCoin
 		tracker.coinsLocked = false

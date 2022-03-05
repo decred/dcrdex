@@ -212,44 +212,6 @@ var _ asset.Wallet = (*ExchangeWallet)(nil)
 var _ asset.AccountLocker = (*ExchangeWallet)(nil)
 var _ asset.FeeRater = (*ExchangeWallet)(nil)
 
-// fundReserveType represents the various uses for which funds need to be locked:
-// initiations, redemptions, and refunds.
-type fundReserveType uint32
-
-const (
-	initiationReserve fundReserveType = iota
-	redemptionReserve
-	refundReserve
-)
-
-func (f fundReserveType) String() string {
-	switch f {
-	case initiationReserve:
-		return "initiation"
-	case redemptionReserve:
-		return "redemption"
-	case refundReserve:
-		return "refund"
-	default:
-		return ""
-	}
-}
-
-// fundReserveOfType returns a pointer to the funds reserved for a particular
-// use case.
-func (eth *ExchangeWallet) fundReserveOfType(t fundReserveType) *uint64 {
-	switch t {
-	case initiationReserve:
-		return &eth.lockedFunds.initiateReserves
-	case redemptionReserve:
-		return &eth.lockedFunds.redemptionReserves
-	case refundReserve:
-		return &eth.lockedFunds.refundReserves
-	default:
-		panic(fmt.Sprintf("invalid fund reserve type: %v", t))
-	}
-}
-
 // ExchangeWallet is a wallet backend for Ethereum. The backend is how the DEX
 // client app communicates with the Ethereum blockchain and wallet. ExchangeWallet
 // satisfies the dex.Wallet interface.
@@ -419,6 +381,44 @@ func (eth *ExchangeWallet) OwnsAddress(address string) (bool, error) {
 	return addr == eth.addr, nil
 }
 
+// fundReserveType represents the various uses for which funds need to be locked:
+// initiations, redemptions, and refunds.
+type fundReserveType uint32
+
+const (
+	initiationReserve fundReserveType = iota
+	redemptionReserve
+	refundReserve
+)
+
+func (f fundReserveType) String() string {
+	switch f {
+	case initiationReserve:
+		return "initiation"
+	case redemptionReserve:
+		return "redemption"
+	case refundReserve:
+		return "refund"
+	default:
+		return ""
+	}
+}
+
+// fundReserveOfType returns a pointer to the funds reserved for a particular
+// use case.
+func (eth *ExchangeWallet) fundReserveOfType(t fundReserveType) *uint64 {
+	switch t {
+	case initiationReserve:
+		return &eth.lockedFunds.initiateReserves
+	case redemptionReserve:
+		return &eth.lockedFunds.redemptionReserves
+	case refundReserve:
+		return &eth.lockedFunds.refundReserves
+	default:
+		panic(fmt.Sprintf("invalid fund reserve type: %v", t))
+	}
+}
+
 // lockFunds locks funds for a use case.
 func (eth *ExchangeWallet) lockFunds(amt uint64, t fundReserveType) error {
 	reserve := eth.fundReserveOfType(t)
@@ -473,7 +473,6 @@ func (eth *ExchangeWallet) balance() (*asset.Balance, error) {
 	}
 
 	locked := eth.amountLocked()
-	fmt.Printf("in balance -- %+v - %v\n", bal, locked)
 	return &asset.Balance{
 		Available: dexeth.WeiToGwei(bal.Current) - locked - dexeth.WeiToGwei(bal.PendingOut),
 		Locked:    locked,
