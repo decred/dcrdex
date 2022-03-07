@@ -3494,6 +3494,7 @@ func (c *Core) Order(oidB dex.Bytes) (*Order, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving order %s: %w", oid, err)
 	}
+
 	return c.coreOrderFromMetaOrder(mOrd)
 }
 
@@ -7127,4 +7128,140 @@ func (c *Core) DeleteArchivedRecords(olderThan *time.Time, matchesFile, ordersFi
 		return fmt.Errorf("unable to delete orders: %v", err)
 	}
 	return nil
+}
+
+// AccelerateOrder will use the Child-Pays-For-Parent technique to accelerate
+// the swap transactions in an order.
+func (c *Core) AccelerateOrder(pw []byte, oidB dex.Bytes, newFeeRate uint64) (string, error) {
+	_, err := c.encryptionKey(pw)
+	if err != nil {
+		return "", fmt.Errorf("Accelerate password error: %w", err)
+	}
+
+	tracker, swapCoinIDs, accelerationCoins, changeCoinID, requiredForRemainingSwaps, err := c.orderAccelerationParameters(oidB)
+	if err != nil {
+		return "", err
+	}
+
+	newChangeCoin, txID, err :=
+		tracker.wallets.fromWallet.AccelerateOrder(swapCoinIDs, accelerationCoins, changeCoinID, requiredForRemainingSwaps, newFeeRate)
+	if err != nil {
+		return "", err
+	}
+
+	tracker.metaData.ChangeCoin = order.CoinID(newChangeCoin.ID())
+	tracker.metaData.AccelerationCoins = append(tracker.metaData.AccelerationCoins, tracker.metaData.ChangeCoin)
+	tracker.coins[newChangeCoin.ID().String()] = newChangeCoin
+	err = tracker.db.UpdateOrder(tracker.metaOrder())
+	if err != nil {
+		c.log.Errorf("AccelerateOrder: failed to update order in database: %v", err)
+	}
+
+	return txID, nil
+}
+
+// AccelerationEstimate returns the amount of funds that would be needed to
+// accelerate the swap transactions in an order to a desired fee rate.
+func (c *Core) AccelerationEstimate(oidB dex.Bytes, newFeeRate uint64) (uint64, error) {
+	tracker, swapCoins, accelerationCoins, changeCoin, requiredForRemainingSwaps, err := c.orderAccelerationParameters(oidB)
+	if err != nil {
+		return 0, err
+	}
+
+	accelerationFee, err := tracker.wallets.fromWallet.AccelerationEstimate(swapCoins, accelerationCoins, changeCoin, requiredForRemainingSwaps, newFeeRate)
+	if err != nil {
+		return 0, err
+	}
+
+	return accelerationFee, nil
+}
+
+// PreAccelerateOrder returns information the user can use to decide how much
+// to accelerate stuck swap transactions in an order.
+func (c *Core) PreAccelerateOrder(oidB dex.Bytes) (*PreAccelerate, error) {
+	tracker, swapCoinIDs, accelerationCoins, changeCoinID, requiredForRemainingSwaps, err := c.orderAccelerationParameters(oidB)
+	if err != nil {
+		return nil, err
+	}
+
+	feeSuggestion := c.feeSuggestionAny(tracker.fromAssetID)
+
+	currentRate, suggestedRange, err :=
+		tracker.wallets.fromWallet.PreAccelerate(swapCoinIDs, accelerationCoins, changeCoinID, requiredForRemainingSwaps, feeSuggestion)
+	if err != nil {
+		return nil, err
+	}
+
+	return &PreAccelerate{
+		SwapRate:       currentRate,
+		SuggestedRate:  feeSuggestion,
+		SuggestedRange: suggestedRange,
+	}, nil
+}
+
+// orderAccelerationParameters takes an order id, and returns the parameters
+// needed to accelerate the swap transactions in that order.
+func (c *Core) orderAccelerationParameters(oidB dex.Bytes) (tracker *trackedTrade, swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps uint64, err error) {
+	makeError := func(err error) (*trackedTrade, []dex.Bytes, []dex.Bytes, dex.Bytes, uint64, error) {
+		return nil, nil, nil, nil, 0, err
+	}
+
+	if len(oidB) != order.OrderIDSize {
+		return makeError(fmt.Errorf("wrong order ID length. wanted %d, got %d", order.OrderIDSize, len(oidB)))
+	}
+	var oid order.OrderID
+	copy(oid[:], oidB)
+
+	for _, dc := range c.dexConnections() {
+		tracker, _, _ = dc.findOrder(oid)
+		if tracker != nil {
+			mktID := marketName(tracker.Base(), tracker.Quote())
+			mkt := dc.marketConfig(mktID)
+			if mkt == nil {
+				return makeError(fmt.Errorf("could not find market: %v", mktID))
+			}
+			lotSize := mkt.LotSize
+			fromAsset := dc.assets[tracker.fromAssetID]
+			if fromAsset == nil {
+				return makeError(fmt.Errorf("could not find asset with id: %v", tracker.fromAssetID))
+			}
+			swapSize := fromAsset.SwapSize
+			lotsRemaining := tracker.Trade().Remaining() / lotSize
+			requiredForRemainingSwaps = lotsRemaining * swapSize * tracker.metaData.MaxFeeRate
+		}
+	}
+	if tracker == nil {
+		return makeError(fmt.Errorf("could not find active order with id: %s", oid))
+	}
+
+	tracker.mtx.Lock()
+	defer tracker.mtx.Unlock()
+
+	swapCoins = make([]dex.Bytes, 0, len(tracker.matches))
+	for _, match := range tracker.matches {
+		if match.Status < order.MakerSwapCast {
+			continue
+		}
+		var swapCoinID order.CoinID
+		if match.Side == order.Maker {
+			swapCoinID = match.MetaData.Proof.MakerSwap
+		} else {
+			if match.Status < order.TakerSwapCast {
+				continue
+			}
+			swapCoinID = match.MetaData.Proof.TakerSwap
+		}
+		swapCoins = append(swapCoins, dex.Bytes(swapCoinID))
+	}
+
+	accelerationCoins = make([]dex.Bytes, 0, len(tracker.metaData.AccelerationCoins))
+	for _, coin := range tracker.metaData.AccelerationCoins {
+		accelerationCoins = append(accelerationCoins, dex.Bytes(coin))
+	}
+
+	if tracker.metaData.ChangeCoin == nil {
+		return makeError(fmt.Errorf("order does not have change which can be accelerated"))
+	}
+
+	return tracker, swapCoins, accelerationCoins, dex.Bytes(tracker.metaData.ChangeCoin), requiredForRemainingSwaps, nil
 }

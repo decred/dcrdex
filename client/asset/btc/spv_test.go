@@ -204,27 +204,51 @@ func (c *tBtcWallet) walletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetail
 	if c.getTransactionErr != nil {
 		return nil, c.getTransactionErr
 	}
-	if c.testData.getTransaction == nil {
+	var txData *GetTransactionResult
+	if c.getTransactionMap != nil {
+		if txData = c.getTransactionMap["any"]; txData == nil {
+			txData = c.getTransactionMap[txHash.String()]
+		}
+	}
+	if txData == nil {
 		return nil, WalletTransactionNotFound
 	}
 
-	txData := c.testData.getTransaction
 	tx, _ := msgTxFromBytes(txData.Hex)
-
 	blockHash, _ := chainhash.NewHashFromStr(txData.BlockHash)
 
 	blk := c.getBlock(txData.BlockHash)
+	var blockHeight int32
+	if blk != nil {
+		blockHeight = int32(blk.height)
+	} else {
+		blockHeight = -1
+	}
 
 	credits := make([]wtxmgr.CreditRecord, 0, len(tx.TxIn))
-	for i := range tx.TxIn {
+	debits := make([]wtxmgr.DebitRecord, 0, len(tx.TxIn))
+	for i, in := range tx.TxIn {
 		credits = append(credits, wtxmgr.CreditRecord{
 			// Amount:,
 			Index: uint32(i),
 			Spent: c.walletTxSpent,
 			// Change: ,
 		})
-	}
 
+		var debitAmount int64
+		// The sources of transaction inputs all need to be added to getTransactionMap
+		// in order to get accurate Fees and Amounts when calling GetWalletTransaction
+		// when using the SPV wallet.
+		if gtr := c.getTransactionMap[in.PreviousOutPoint.Hash.String()]; gtr != nil {
+			tx, _ := msgTxFromBytes(gtr.Hex)
+			debitAmount = tx.TxOut[in.PreviousOutPoint.Index].Value
+		}
+
+		debits = append(debits, wtxmgr.DebitRecord{
+			Amount: btcutil.Amount(debitAmount),
+		})
+
+	}
 	return &wtxmgr.TxDetails{
 		TxRecord: wtxmgr.TxRecord{
 			MsgTx: *tx,
@@ -232,10 +256,11 @@ func (c *tBtcWallet) walletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetail
 		Block: wtxmgr.BlockMeta{
 			Block: wtxmgr.Block{
 				Hash:   *blockHash,
-				Height: int32(blk.height),
+				Height: blockHeight,
 			},
 		},
 		Credits: credits,
+		Debits:  debits,
 	}, nil
 }
 
@@ -243,7 +268,16 @@ func (c *tBtcWallet) getTransaction(txHash *chainhash.Hash) (*GetTransactionResu
 	if c.getTransactionErr != nil {
 		return nil, c.getTransactionErr
 	}
-	return c.testData.getTransaction, nil
+	var txData *GetTransactionResult
+	if c.getTransactionMap != nil {
+		if txData = c.getTransactionMap["any"]; txData == nil {
+			txData = c.getTransactionMap[txHash.String()]
+		}
+	}
+	if txData == nil {
+		return nil, WalletTransactionNotFound
+	}
+	return txData, nil
 }
 
 func (c *tBtcWallet) syncedTo() waddrmgr.BlockStamp {
@@ -419,14 +453,15 @@ func TestSwapConfirmations(t *testing.T) {
 	node.confs = 10
 	node.confsSpent = true
 	txB, _ := serializeMsgTx(swapTx)
-	node.getTransaction = &GetTransactionResult{
-		BlockHash:  swapBlockHash.String(),
-		BlockIndex: swapHeight,
-		Hex:        txB,
-	}
+	node.getTransactionMap = map[string]*GetTransactionResult{
+		"any": &GetTransactionResult{
+			BlockHash:  swapBlockHash.String(),
+			BlockIndex: swapHeight,
+			Hex:        txB,
+		}}
 	node.walletTxSpent = true
 	checkSuccess("confirmations", swapConfs, true)
-	node.getTransaction = nil
+	node.getTransactionMap = nil
 	node.walletTxSpent = false
 	node.confsErr = WalletTransactionNotFound
 
@@ -555,10 +590,10 @@ func TestGetTxOut(t *testing.T) {
 
 	// Wallet transaction found
 	node.getTransactionErr = nil
-	node.getTransaction = &GetTransactionResult{
+	node.getTransactionMap = map[string]*GetTransactionResult{"any": &GetTransactionResult{
 		BlockHash: blockHash.String(),
 		Hex:       txB,
-	}
+	}}
 
 	_, confs, err := spv.getTxOut(&txHash, vout, pkScript, generateTestBlockTime(blockHeight))
 	if err != nil {
@@ -570,7 +605,7 @@ func TestGetTxOut(t *testing.T) {
 
 	// No wallet transaction, but we have a spend recorded.
 	node.getTransactionErr = WalletTransactionNotFound
-	node.getTransaction = nil
+	node.getTransactionMap = nil
 	node.checkpoints[outPt] = &scanCheckpoint{res: &filterScanResult{
 		blockHash:  blockHash,
 		spend:      &spendingInput{},
@@ -633,7 +668,7 @@ func TestSendWithSubtract(t *testing.T) {
 
 	const availableFunds = 5e8
 	const feeRate = 100
-	const inputSize = dexbtc.RedeemP2WPKHInputSize + ((dexbtc.RedeemP2WPKHInputWitnessWeight + 2 + 3) / 4)
+	const inputSize = dexbtc.RedeemP2PWKHInputTotalSize
 	const feesWithChange = (dexbtc.MinimumTxOverhead + 2*dexbtc.P2WPKHOutputSize + inputSize) * feeRate
 	const feesWithoutChange = (dexbtc.MinimumTxOverhead + dexbtc.P2WPKHOutputSize + inputSize) * feeRate
 

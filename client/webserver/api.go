@@ -606,6 +606,85 @@ func (s *WebServer) apiOrders(w http.ResponseWriter, r *http.Request) {
 	}, s.indent)
 }
 
+// apiAccelerateOrder uses the Child-Pays-For-Parent technique to speen up an
+// order.
+func (s *WebServer) apiAccelerateOrder(w http.ResponseWriter, r *http.Request) {
+	form := struct {
+		Pass    encode.PassBytes `json:"pw"`
+		OrderID dex.Bytes        `json:"orderID"`
+		NewRate uint64           `json:"newRate"`
+	}{}
+
+	defer form.Pass.Clear()
+	if !readPost(w, r, &form) {
+		return
+	}
+
+	txID, err := s.core.AccelerateOrder(form.Pass, form.OrderID, form.NewRate)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("Accelerate Order error: %w", err))
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK   bool   `json:"ok"`
+		TxID string `json:"txID"`
+	}{
+		OK:   true,
+		TxID: txID,
+	}, s.indent)
+}
+
+// apiPreAccelerate responds with information about accelerating the mining of
+// swaps in an order
+func (s *WebServer) apiPreAccelerate(w http.ResponseWriter, r *http.Request) {
+	var oid dex.Bytes
+	if !readPost(w, r, &oid) {
+		return
+	}
+
+	preAccelerate, err := s.core.PreAccelerateOrder(oid)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("Pre accelerate error: %w", err))
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK            bool                `json:"ok"`
+		PreAccelerate *core.PreAccelerate `json:"preAccelerate"`
+	}{
+		OK:            true,
+		PreAccelerate: preAccelerate,
+	}, s.indent)
+}
+
+// apiAccelerationEstimate responds with how much it would cost to accelerate
+// an order to the requested fee rate.
+func (s *WebServer) apiAccelerationEstimate(w http.ResponseWriter, r *http.Request) {
+	form := struct {
+		OrderID dex.Bytes `json:"orderID"`
+		NewRate uint64    `json:"newRate"`
+	}{}
+
+	if !readPost(w, r, &form) {
+		return
+	}
+
+	fee, err := s.core.AccelerationEstimate(form.OrderID, form.NewRate)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("Accelerate Order error: %w", err))
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK  bool   `json:"ok"`
+		Fee uint64 `json:"fee"`
+	}{
+		OK:  true,
+		Fee: fee,
+	}, s.indent)
+}
+
 // apiOrder responds with data for an order.
 func (s *WebServer) apiOrder(w http.ResponseWriter, r *http.Request) {
 	var oid dex.Bytes

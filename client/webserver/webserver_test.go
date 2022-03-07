@@ -176,6 +176,15 @@ func (c *TCore) ExportSeed(pw []byte) ([]byte, error) {
 func (c *TCore) WalletLogFilePath(uint32) (string, error) {
 	return "", nil
 }
+func (c *TCore) AccelerateOrder(pw []byte, oidB dex.Bytes, newFeeRate uint64) (string, error) {
+	return "", nil
+}
+func (c *TCore) AccelerationEstimate(oidB dex.Bytes, newFeeRate uint64) (uint64, error) {
+	return 0, nil
+}
+func (c *TCore) PreAccelerateOrder(oidB dex.Bytes) (*core.PreAccelerate, error) {
+	return nil, nil
+}
 
 type TWriter struct {
 	b []byte

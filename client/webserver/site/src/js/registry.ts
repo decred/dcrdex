@@ -73,6 +73,7 @@ export interface Order {
   canceled: boolean
   feesPaid: FeeBreakdown
   fundingCoins: Coin[]
+  accelerationCoins: Coin[]
   lockedamt: number
   rate: number // limit only
   tif: number // limit only

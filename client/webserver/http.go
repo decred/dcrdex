@@ -440,5 +440,4 @@ func (s *WebServer) orderReader(ord *core.Order) *core.OrderReader {
 		BaseUnitInfo:  unitInfo(ord.BaseID, ord.BaseSymbol),
 		QuoteUnitInfo: unitInfo(ord.QuoteID, ord.QuoteSymbol),
 	}
-
 }

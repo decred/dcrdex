@@ -87,6 +87,7 @@ var (
 	maxFeeRateKey          = []byte("maxFeeRate")
 	redeemMaxFeeRateKey    = []byte("redeemMaxFeeRate")
 	redemptionFeesKey      = []byte("redeemFees")
+	accelerationsKey       = []byte("accelerations")
 	typeKey                = []byte("type")
 	credentialsBucket      = []byte("credentials")
 	seedGenTimeKey         = []byte("seedGenTime")
@@ -674,6 +675,14 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 			linkedB = md.LinkedOrder[:]
 		}
 
+		var accelerationsB encode.BuildyBytes
+		if len(md.AccelerationCoins) > 0 {
+			accelerationsB = encode.BuildyBytes{0}
+			for _, acceleration := range md.AccelerationCoins {
+				accelerationsB = accelerationsB.AddData(acceleration)
+			}
+		}
+
 		return newBucketPutter(oBkt).
 			put(baseKey, uint32Bytes(ord.Base())).
 			put(quoteKey, uint32Bytes(ord.Quote())).
@@ -690,6 +699,7 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 			put(redeemMaxFeeRateKey, uint64Bytes(md.RedeemMaxFeeRate)).
 			put(redemptionFeesKey, uint64Bytes(md.RedemptionFeesPaid)).
 			put(optionsKey, config.Data(md.Options)).
+			put(accelerationsKey, accelerationsB).
 			err()
 	})
 }
@@ -1002,6 +1012,18 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 		return nil, fmt.Errorf("unable to decode order options")
 	}
 
+	var accelerationCoinIDs []order.CoinID
+	accelerationsB := oBkt.Get(accelerationsKey)
+	if len(accelerationsB) > 0 {
+		_, coinIDs, err := encode.DecodeBlob(accelerationsB)
+		if err != nil {
+			return nil, fmt.Errorf("unable to decode accelerations")
+		}
+		for _, coinID := range coinIDs {
+			accelerationCoinIDs = append(accelerationCoinIDs, order.CoinID(coinID))
+		}
+	}
+
 	return &dexdb.MetaOrder{
 		MetaData: &dexdb.OrderMetaData{
 			Proof:              *proof,
@@ -1018,6 +1040,7 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 			Options:            options,
 			RedemptionReserves: redemptionReserves,
 			RefundReserves:     refundReserves,
+			AccelerationCoins:  accelerationCoinIDs,
 		},
 		Order: ord,
 	}, nil
@@ -1080,6 +1103,14 @@ func (db *BoltDB) UpdateOrderMetaData(oid order.OrderID, md *db.OrderMetaData) e
 			linkedB = md.LinkedOrder[:]
 		}
 
+		var accelerationsB encode.BuildyBytes
+		if len(md.AccelerationCoins) > 0 {
+			accelerationsB = encode.BuildyBytes{0}
+			for _, acceleration := range md.AccelerationCoins {
+				accelerationsB = accelerationsB.AddData(acceleration)
+			}
+		}
+
 		return newBucketPutter(oBkt).
 			put(statusKey, uint16Bytes(uint16(md.Status))).
 			put(updateTimeKey, uint64Bytes(timeNow())).
@@ -1094,6 +1125,7 @@ func (db *BoltDB) UpdateOrderMetaData(oid order.OrderID, md *db.OrderMetaData) e
 			put(optionsKey, config.Data(md.Options)).
 			put(redemptionReservesKey, uint64Bytes(md.RedemptionReserves)).
 			put(refundReservesKey, uint64Bytes(md.RefundReserves)).
+			put(accelerationsKey, accelerationsB).
 			err()
 	})
 }

@@ -6,7 +6,8 @@ import {
   TradeForm,
   PageElement,
   OrderOption as OrderOpt,
-  Match
+  Match,
+  XYRange
 } from './registry'
 
 export const Limit = 1
@@ -222,12 +223,12 @@ class BooleanOrderOption extends OrderOption {
 }
 
 /*
- * XYRangeOrderOption is the handler for an *XYRange from client/asset. XYRange
- * has a slider which allows adjusting the x and y, linearly between two limits.
- * The user can also manually enter values for x or y.
+ * XYRangeOrderOption is an order option that contains an XYRangeHandler.
+ * The logic for handling the slider to is defined in XYRangeHandler so
+ * that the slider can be used without being contained in an order option.
  */
 class XYRangeOrderOption extends OrderOption {
-  control: HTMLElement
+  handler: XYRangeHandler
   x: number
   changed: () => void
 
@@ -237,12 +238,54 @@ class XYRangeOrderOption extends OrderOption {
       disable: () => this.disable()
     })
     this.changed = changed
+    const cfg = opt.xyRange
+    const setVal = order.options[opt.key]
+    this.on = typeof setVal !== 'undefined'
+    if (this.on) {
+      this.node.classList.add('selected')
+      this.x = setVal
+    } else {
+      this.x = opt.default
+    }
+    const onUpdate = (x: number) => { this.order.options[this.opt.key] = x }
+    const onChange = () => { this.changed() }
+    const selected = () => { this.node.classList.add('selected') }
+    this.handler = new XYRangeHandler(cfg, this.x, onUpdate, onChange, selected)
+    this.tmpl.controls.appendChild(this.handler.control)
+  }
+
+  enable () {
+    this.order.options[this.opt.key] = this.x
+    this.changed()
+  }
+
+  disable () {
+    delete this.order.options[this.opt.key]
+    this.changed()
+  }
+}
+
+/*
+ * XYRangeHandler is the handler for an *XYRange from client/asset. XYRange
+ * has a slider which allows adjusting the x and y, linearly between two limits.
+ * The user can also manually enter values for x or y.
+ */
+export class XYRangeHandler {
+  control: HTMLElement
+  x: number
+  updated: (x:number, y:number) => void
+  changed: () => void
+  selected: () => void
+
+  constructor (cfg: XYRange, initVal: number, updated: (x:number, y:number) => void, changed: () => void, selected: () => void, roundY?: boolean) {
     const control = this.control = rangeOptTmpl.cloneNode(true) as HTMLElement
     const tmpl = Doc.parseTemplate(control)
-    const cfg = opt.xyRange
+
+    this.changed = changed
+    this.selected = selected
+    this.updated = updated
+
     const { slider, handle } = tmpl
-    // Append to parent's options div.
-    this.tmpl.controls.appendChild(control)
 
     const rangeX = cfg.end.x - cfg.start.x
     const rangeY = cfg.end.y - cfg.start.y
@@ -250,8 +293,8 @@ class XYRangeOrderOption extends OrderOption {
 
     // r, x, and y will be updated by the various input event handlers. r is
     // x (or y) normalized on its range, e.g. [x_min, x_max] -> [0, 1]
-    let r = normalizeX(opt.default)
-    let x = this.x = opt.default
+    let r = normalizeX(initVal)
+    let x = this.x = initVal
     let y = r * rangeY + cfg.start.y
 
     const number = new Intl.NumberFormat((navigator.languages as string[]), {
@@ -260,12 +303,14 @@ class XYRangeOrderOption extends OrderOption {
     })
 
     // accept needs to be called anytime a handler updates x, y, and r.
-    const accept = (skipStore?: boolean) => {
+    const accept = (skipUpdate?: boolean) => {
+      if (roundY) y = Math.round(y)
       tmpl.x.textContent = number.format(x)
       tmpl.y.textContent = number.format(y)
+      if (roundY) tmpl.y.textContent = `${y}`
       handle.style.left = `calc(${r * 100}% - ${r * 14}px)`
       this.x = x
-      if (!skipStore) this.order.options[this.opt.key] = x
+      if (!skipUpdate) this.updated(x, y)
     }
 
     // Set up the handlers for the x and y text input fields.
@@ -331,7 +376,7 @@ class XYRangeOrderOption extends OrderOption {
     Doc.bind(handle, 'mousedown', (e: MouseEvent) => {
       if (e.button !== 0) return
       e.preventDefault()
-      this.node.classList.add('selected')
+      this.selected()
       const startX = e.pageX
       const w = slider.clientWidth - handle.offsetWidth
       const startLeft = normalizeX(x) * w
@@ -357,28 +402,7 @@ class XYRangeOrderOption extends OrderOption {
     tmpl.rangeLblEnd.textContent = cfg.end.label
     tmpl.xUnit.textContent = cfg.xUnit
     tmpl.yUnit.textContent = cfg.yUnit
-
-    // Set the initial state if this is a selected option.
-    const setVal = order.options[opt.key]
-    this.on = typeof setVal !== 'undefined'
-    if (this.on) {
-      this.node.classList.add('selected')
-      x = setVal
-      r = normalizeX(x)
-      y = r * rangeY + cfg.start.y
-    }
-
     accept(true)
-  }
-
-  enable () {
-    this.order.options[this.opt.key] = this.x
-    this.changed()
-  }
-
-  disable () {
-    delete this.order.options[this.opt.key]
-    this.changed()
   }
 }
 

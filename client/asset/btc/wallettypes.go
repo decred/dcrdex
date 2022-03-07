@@ -63,6 +63,7 @@ type GetTransactionResult struct {
 	BlockHash      string             `json:"blockhash"`
 	BlockIndex     int64              `json:"blockindex"`
 	BlockTime      uint64             `json:"blocktime"`
+	BlockHeight    uint64             `json:"blockheight"`
 	TxID           string             `json:"txid"`
 	Time           uint64             `json:"time"`
 	TimeReceived   uint64             `json:"timereceived"`

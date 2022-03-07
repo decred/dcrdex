@@ -215,4 +215,12 @@ var EnUS = map[string]string{
 	"Maximum Possible Swap Fees":  "Maximum Possible Swap Fees",
 	"max_fee_conditions":          "This is the most you would ever pay in fees on your swap. Fees are normally assessed at a fraction of this rate. The maximum is not subject to changes once your order is placed.",
 	"wallet_logs":                 "Wallet Logs",
+	"accelerate_order":            "Accelerate Order",
+	"acceleration_text":           "In case your swap transactions are stuck, you can accelerate them using the Child Pays For Parent technique. When you submit this form, you will create a transaction that sends the change recieved from initiating swaps to yourself with a higher fee. With the new transaction, the average fee rate of all unmined swap transactions, and the new acceleration transaction, will be the rate that you select below.",
+	"avg_swap_tx_rate":            "Average swap tx fee rate",
+	"current_fee":                 "Current suggested fee rate",
+	"accelerate_success":          `Successfully submitted transaction: <span id="accelerateTxID"></span>`,
+	"accelerate":                  "Accelerate",
+	"acceleration_transactions":   "Acceleration Transactions",
+	"acceleration_cost_msg":       `Increasing the fee rate to <span id="feeRateEstimate"></span> will cost <span id="feeEstimate"></span>`,
 }

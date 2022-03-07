@@ -1354,7 +1354,15 @@ func (c *TCore) Wallets() []*core.WalletState {
 	}
 	return states
 }
-
+func (c *TCore) AccelerateOrder(pw []byte, oidB dex.Bytes, newFeeRate uint64) (string, error) {
+	return "", nil
+}
+func (c *TCore) AccelerationEstimate(oidB dex.Bytes, newFeeRate uint64) (uint64, error) {
+	return 0, nil
+}
+func (c *TCore) PreAccelerateOrder(oidB dex.Bytes) (*core.PreAccelerate, error) {
+	return nil, nil
+}
 func (c *TCore) WalletSettings(assetID uint32) (map[string]string, error) {
 	return c.wallets[assetID].settings, nil
 }

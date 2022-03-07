@@ -302,6 +302,38 @@ func (w *xcWallet) LogFilePath() (string, error) {
 	return logFiler.LogFilePath(), nil
 }
 
+// AccelerateOrder uses the Child-Pays-For-Parent technique to accelerate an
+// order if the wallet is an Accelerator.
+func (w *xcWallet) AccelerateOrder(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, newFeeRate uint64) (asset.Coin, string, error) {
+	accelerator, ok := w.Wallet.(asset.Accelerator)
+	if !ok {
+		return nil, "", errors.New("wallet does not support acceleration")
+	}
+	return accelerator.AccelerateOrder(swapCoins, accelerationCoins, changeCoin, requiredForRemainingSwaps, newFeeRate)
+}
+
+// AccelerationEstimate estimates the cost to accelerate an order if the wallet
+// is an Accelerator.
+func (w *xcWallet) AccelerationEstimate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (uint64, error) {
+	accelerator, ok := w.Wallet.(asset.Accelerator)
+	if !ok {
+		return 0, errors.New("wallet does not support acceleration")
+	}
+
+	return accelerator.AccelerationEstimate(swapCoins, accelerationCoins, changeCoin, requiredForRemainingSwaps, feeSuggestion)
+}
+
+// PreAccelerate gives the user information about accelerating an order if the
+// wallet is an Accelerator.
+func (w *xcWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (currentRate uint64, suggestedRange asset.XYRange, err error) {
+	accelerator, ok := w.Wallet.(asset.Accelerator)
+	if !ok {
+		return 0, asset.XYRange{}, errors.New("wallet does not support acceleration")
+	}
+
+	return accelerator.PreAccelerate(swapCoins, accelerationCoins, changeCoin, requiredForRemainingSwaps, feeSuggestion)
+}
+
 // SwapConfirmations calls (asset.Wallet).SwapConfirmations with a timeout
 // Context. If the coin cannot be located, an asset.CoinNotFoundError is
 // returned. If the coin is located, but recognized as spent, no error is

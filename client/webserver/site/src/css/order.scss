@@ -43,3 +43,39 @@ div.match-card {
   opacity: 0.5;
   font-family: $demi-sans;
 }
+
+#accelerateForm {
+  width: 500px;
+}
+
+.slider-container {
+  border: 1px solid #424242;
+  border-radius: 3px;
+  padding: 4px;
+  margin-top: 8px;
+  opacity: 0.7;
+
+  .xy-range-input {
+    width: 35px;
+    font-size: 14px;
+    height: 16px;
+  }
+
+  .slider {
+    margin: 10px 10px 5px;
+    height: 2px;
+    background-color: grey;
+    position: relative;
+
+    .slider-handle {
+      position: absolute;
+      height: 20px;
+      width: 14px;
+      top: -9px;
+      border-radius: 7px;
+      background-color: #2cce9c;
+      border: 2px solid #424242;
+      cursor: pointer;
+    }
+  }
+}
