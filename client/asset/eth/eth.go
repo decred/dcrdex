@@ -39,7 +39,7 @@ var (
 
 func registerToken(tokenID uint32, desc string) {
 	token := dexeth.Tokens[tokenID]
-	asset.RegisterToken(tokenID, token, &asset.WalletDefinition{
+	asset.RegisterToken(tokenID, token.Token, &asset.WalletDefinition{
 		Type:        "token",
 		Description: desc,
 	})

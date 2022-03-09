@@ -94,12 +94,12 @@ func newTxDataV0() *txDataHandlerV0 {
 }
 
 func (t *txDataHandlerV0) parseInitiateData(calldata []byte) (map[[SecretHashSize]byte]*Initiation, error) {
-	decoded, err := parseCallData(calldata, ABIs[0])
+	decoded, err := ParseCallData(calldata, ABIs[0])
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse call data: %v", err)
 	}
-	if decoded.name != t.initiateFuncName {
-		return nil, fmt.Errorf("expected %v function but got %v", t.initiateFuncName, decoded.name)
+	if decoded.Name != t.initiateFuncName {
+		return nil, fmt.Errorf("expected %v function but got %v", t.initiateFuncName, decoded.Name)
 	}
 	args := decoded.inputs
 	// Any difference in number of args and types than what we expect
@@ -145,12 +145,12 @@ func (t *txDataHandlerV0) parseInitiateData(calldata []byte) (map[[SecretHashSiz
 }
 
 func (t *txDataHandlerV0) parseRedeemData(calldata []byte) (map[[SecretHashSize]byte]*Redemption, error) {
-	decoded, err := parseCallData(calldata, ABIs[0])
+	decoded, err := ParseCallData(calldata, ABIs[0])
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse call data: %v", err)
 	}
-	if decoded.name != t.redeemFuncName {
-		return nil, fmt.Errorf("expected %v function but got %v", t.redeemFuncName, decoded.name)
+	if decoded.Name != t.redeemFuncName {
+		return nil, fmt.Errorf("expected %v function but got %v", t.redeemFuncName, decoded.Name)
 	}
 	args := decoded.inputs
 	// Any difference in number of args and types than what we expect
@@ -189,12 +189,12 @@ func (t *txDataHandlerV0) parseRedeemData(calldata []byte) (map[[SecretHashSize]
 func (t *txDataHandlerV0) parseRefundData(calldata []byte) ([32]byte, error) {
 	var secretHash [32]byte
 
-	decoded, err := parseCallData(calldata, ABIs[0])
+	decoded, err := ParseCallData(calldata, ABIs[0])
 	if err != nil {
 		return secretHash, fmt.Errorf("unable to parse call data: %v", err)
 	}
-	if decoded.name != t.refundFuncName {
-		return secretHash, fmt.Errorf("expected %v function but got %v", t.refundFuncName, decoded.name)
+	if decoded.Name != t.refundFuncName {
+		return secretHash, fmt.Errorf("expected %v function but got %v", t.refundFuncName, decoded.Name)
 	}
 	args := decoded.inputs
 	// Any difference in number of args and types than what we expect

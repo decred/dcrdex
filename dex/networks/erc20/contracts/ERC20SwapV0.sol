@@ -28,7 +28,7 @@ contract ERC20Swap {
     bytes4 private constant TRANSFER_FROM_SELECTOR = bytes4(keccak256("transferFrom(address,address,uint256)"));
     bytes4 private constant TRANSFER_SELECTOR = bytes4(keccak256("transfer(address,uint256)"));
     
-    address public immutable TOKEN_ADDRESS;
+    address public immutable token_address;
 
     // State is a type that hold's a contract's state. Empty is the uninitiated
     // or null value.
@@ -53,7 +53,7 @@ contract ERC20Swap {
     mapping(bytes32 => Swap) public swaps;
 
     constructor(address token) {
-        TOKEN_ADDRESS = token;
+        token_address = token;
     }
 
     // senderIsOrigin ensures that this contract cannot be used by other
@@ -109,7 +109,7 @@ contract ERC20Swap {
 
         bool success;
         bytes memory data;
-        (success, data) = TOKEN_ADDRESS.call(abi.encodeWithSelector(TRANSFER_FROM_SELECTOR, msg.sender, address(this), initVal));
+        (success, data) = token_address.call(abi.encodeWithSelector(TRANSFER_FROM_SELECTOR, msg.sender, address(this), initVal));
         require(success && (data.length == 0 || abi.decode(data, (bool))), 'transfer from failed');
     }
 
@@ -156,7 +156,7 @@ contract ERC20Swap {
 
         bool success;
         bytes memory data;
-        (success, data) = TOKEN_ADDRESS.call(abi.encodeWithSelector(TRANSFER_SELECTOR, msg.sender, amountToRedeem));
+        (success, data) = token_address.call(abi.encodeWithSelector(TRANSFER_SELECTOR, msg.sender, amountToRedeem));
         require(success && (data.length == 0 || abi.decode(data, (bool))), 'transfer failed');
     }
 
@@ -184,7 +184,7 @@ contract ERC20Swap {
 
         bool success;
         bytes memory data;
-        (success, data) = TOKEN_ADDRESS.call(abi.encodeWithSelector(TRANSFER_SELECTOR, msg.sender, swapToRefund.value));
+        (success, data) = token_address.call(abi.encodeWithSelector(TRANSFER_SELECTOR, msg.sender, swapToRefund.value));
         require(success && (data.length == 0 || abi.decode(data, (bool))), 'transfer failed');
     }
 }

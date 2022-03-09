@@ -739,7 +739,7 @@ func (n *nodeClient) getTokenAddress(ctx context.Context) (common.Address, error
 		Context: ctx,
 	}
 
-	return n.tokenSwapContract.TOKENADDRESS(callOpts)
+	return n.tokenSwapContract.TokenAddress(callOpts)
 }
 
 // estimateInitTokenGas checks the amount of gas that is used to redeem

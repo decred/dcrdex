@@ -33,12 +33,14 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-// decodedCallData is an internal type to represent a method call parsed according
+// DecodedCallData is an internal type to represent a method call parsed according
 // to an ABI method signature.
-type decodedCallData struct {
+type DecodedCallData struct {
 	signature string
-	name      string
 	inputs    []decodedArgument
+
+	Name string
+	Args []interface{}
 }
 
 // decodedArgument is an internal type to represent an argument parsed according
@@ -61,17 +63,17 @@ func (arg decodedArgument) String() string {
 }
 
 // String implements stringer interface for decodedCallData
-func (cd decodedCallData) String() string {
+func (cd *DecodedCallData) String() string {
 	args := make([]string, len(cd.inputs))
 	for i, arg := range cd.inputs {
 		args[i] = arg.String()
 	}
-	return fmt.Sprintf("%s(%s)", cd.name, strings.Join(args, ","))
+	return fmt.Sprintf("%s(%s)", cd.Name, strings.Join(args, ","))
 }
 
 // verifySelector checks whether the ABI encoded data blob matches the requested
 // function signature.
-func verifySelector(selector string, calldata []byte) (*decodedCallData, error) {
+func verifySelector(selector string, calldata []byte) (*DecodedCallData, error) {
 	// Parse the selector into an ABI JSON spec
 	abidata, err := parseSelector(selector)
 	if err != nil {
@@ -82,7 +84,7 @@ func verifySelector(selector string, calldata []byte) (*decodedCallData, error) 
 		return nil, fmt.Errorf("invalid method signature (%q): %v", abidata, err)
 	}
 	// Parse the call data according to the requested selector
-	return parseCallData(calldata, &parsedAbi)
+	return ParseCallData(calldata, &parsedAbi)
 }
 
 // selectorRegexp is used to validate that a 4byte database selector corresponds
@@ -123,9 +125,9 @@ func parseSelector(unescapedSelector string) ([]byte, error) {
 	return json.Marshal([]fakeABI{{name, "function", arguments}})
 }
 
-// parseCallData matches the provided call data against the ABI definition and
+// ParseCallData matches the provided call data against the ABI definition and
 // returns a struct containing the actual go-typed values.
-func parseCallData(calldata []byte, abispec *abi.ABI) (*decodedCallData, error) {
+func ParseCallData(calldata []byte, abispec *abi.ABI) (*DecodedCallData, error) {
 	// Validate the call data that it has the 4byte prefix and the rest divisible by 32 bytes
 	if len(calldata) < 4 {
 		return nil, fmt.Errorf("invalid call data, incomplete method signature (%d bytes < 4)", len(calldata))
@@ -145,7 +147,7 @@ func parseCallData(calldata []byte, abispec *abi.ABI) (*decodedCallData, error) 
 		return nil, fmt.Errorf("signature %q matches, but arguments mismatch: %v", method.String(), err)
 	}
 	// Everything valid, assemble the call infos for the signer
-	decoded := decodedCallData{signature: method.Sig, name: method.RawName}
+	decoded := &DecodedCallData{signature: method.Sig, Name: method.RawName, Args: values}
 	for i := 0; i < len(method.Inputs); i++ {
 		decoded.inputs = append(decoded.inputs, decodedArgument{
 			soltype: method.Inputs[i],
@@ -165,5 +167,5 @@ func parseCallData(calldata []byte, abispec *abi.ABI) (*decodedCallData, error) 
 		exp := common.Bytes2Hex(argdata)
 		return nil, fmt.Errorf("WARNING: Supplied data is stuffed with extra data. \nWant %s\nHave %s\nfor method %v", exp, was, method.Sig)
 	}
-	return &decoded, nil
+	return decoded, nil
 }

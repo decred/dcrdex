@@ -41,7 +41,7 @@ var (
 		},
 	}
 
-	VersionedGases = map[uint32]*dex.Gases{
+	VersionedGases = map[uint32]*Gases{
 		0: v0Gases,
 	}
 
@@ -54,7 +54,7 @@ var (
 	}
 )
 
-var v0Gases = &dex.Gases{
+var v0Gases = &Gases{
 	Swap:      135000,
 	SwapAdd:   113000,
 	Redeem:    63000,
@@ -227,64 +227,40 @@ type Redemption struct {
 
 var testTokenID, _ = dex.BipSymbolID("dextt.eth")
 
-var Tokens = map[uint32]*dex.Token{
-	// testTokenID = 'dextt.eth' is the used for the test token from
-	// dex/networks/erc20/contracts/TestToken.sol that is deployed on the simnet
-	// harness, and possibly other networks too if needed for testing.
-	testTokenID: {
-		NetAddresses: map[dex.Network]*dex.TokenAddresses{
-			dex.Mainnet: {
-				Address:       common.Address{},
-				SwapContracts: map[uint32][20]byte{},
-			},
-			dex.Testnet: {
-				Address:       common.Address{},
-				SwapContracts: map[uint32][20]byte{},
-			},
-			dex.Simnet: {
-				Address:       common.Address{},
-				SwapContracts: map[uint32][20]byte{},
-			},
-		},
-		ParentID: EthBipID,
-		Name:     "DCRDEXTestToken",
-		UnitInfo: dex.UnitInfo{
-			AtomicUnit: "Dextoshi",
-			Conventional: dex.Denomination{
-				Unit:             "DEXTT",
-				ConversionFactor: GweiFactor,
-			},
-		},
-		Gas: dex.Gases{
-			Swap:      157_000,
-			SwapAdd:   115_000,
-			Redeem:    70_000,
-			RedeemAdd: 33_000,
-			Refund:    50_000,
-			Approve:   29_000,
-			Transfer:  31_000,
-		},
-	},
+type Gases struct {
+	// Approve is the amount of gas needed to approve the swap contract for
+	// transferring tokens.
+	Approve uint64 `json:"approve"`
+	// Transfer is the amount of gas needed to transfer tokens.
+	Transfer uint64 `json:"transfer"`
+	// Swap is the amount of gas needed to initialize a single ethereum swap.
+	Swap uint64 `json:"swap"`
+	// SwapAdd is the amount of gas needed to initialize additional swaps in
+	// the same transaction.
+	SwapAdd uint64 `json:"swapAdd"`
+	// Redeem is the amount of gas it costs to redeem a swap.
+	Redeem uint64 `json:"redeem"`
+	// RedeemAdd is the amount of gas needed to redeem additional swaps in the
+	// same transaction.
+	RedeemAdd uint64 `json:"redeemAdd"`
+	// Refund is the amount of gas needed to refund a swap.
+	Refund uint64 `json:"refund"`
 }
 
-// VersionedNetworkToken retrieves the token, token address, and swap contract
-// address for the token asset.
-func VersionedNetworkToken(assetID uint32, contractVer uint32, net dex.Network) (token *dex.Token,
-	tokenAddr, contractAddr common.Address, err error) {
+// SwapN calculates the gas needed to initiate n swaps.
+func (g *Gases) SwapN(n int) uint64 {
+	if n <= 0 {
+		return 0
+	}
+	return g.Swap + g.SwapAdd*(uint64(n)-1)
+}
 
-	token, found := Tokens[assetID]
-	if !found {
-		return nil, common.Address{}, common.Address{}, fmt.Errorf("token %d not found", assetID)
+// RedeemN calculates the gas needed to redeem n swaps.
+func (g *Gases) RedeemN(n int) uint64 {
+	if n <= 0 {
+		return 0
 	}
-	addrs, found := token.NetAddresses[net]
-	if !found {
-		return nil, common.Address{}, common.Address{}, fmt.Errorf("token %d has no network %s", assetID, net)
-	}
-	contractAddr, found = addrs.SwapContracts[contractVer]
-	if !found {
-		return nil, common.Address{}, common.Address{}, fmt.Errorf("token %d version %d has no network %s token info", assetID, contractVer, net)
-	}
-	return token, addrs.Address, contractAddr, nil
+	return g.Redeem + g.RedeemAdd*(uint64(n)-1)
 }
 
 // SwapStateFromV0 converts a v0.ETHSwapSwap to a *SwapState.

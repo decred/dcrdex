@@ -548,7 +548,7 @@ func TestRefund(t *testing.T) {
 	}
 
 	gasesV0 := dexeth.VersionedGases[0]
-	gasesV1 := &dex.Gases{Refund: 1e5}
+	gasesV1 := &dexeth.Gases{Refund: 1e5}
 	dexeth.VersionedGases[1] = gasesV1
 
 	var randomSecretHash [32]byte
@@ -2513,7 +2513,7 @@ func TestRefundReserves(t *testing.T) {
 	var maxFeeRateV0 uint64 = 45
 	gasesV0 := dexeth.VersionedGases[0]
 
-	gasesV1 := &dex.Gases{Refund: 1e6}
+	gasesV1 := &dexeth.Gases{Refund: 1e6}
 	dexeth.VersionedGases[1] = gasesV1
 	var maxFeeRateV1 uint64 = 50
 
@@ -2585,7 +2585,7 @@ func TestRedemptionReserves(t *testing.T) {
 	var maxFeeRateV0 uint64 = 45
 	gasesV0 := dexeth.VersionedGases[0]
 
-	gasesV1 := &dex.Gases{Redeem: 1e6, RedeemAdd: 85e5}
+	gasesV1 := &dexeth.Gases{Redeem: 1e6, RedeemAdd: 85e5}
 	dexeth.VersionedGases[1] = gasesV1
 	var maxFeeRateV1 uint64 = 50
 
