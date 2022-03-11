@@ -853,7 +853,7 @@ func (s *WebServer) writeAPIError(w http.ResponseWriter, err error) {
 	if errors.As(err, &cErr) {
 		code = cErr.Code()
 	}
-	
+
 	rawErr := core.Unwrap(err)
 	resp := &standardResponse{
 		OK:   false,
