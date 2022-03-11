@@ -22,20 +22,19 @@ type Token struct {
 	NetTokens map[dex.Network]*NetToken `json:"netAddrs"`
 	// EVMFactor allows for arbitrary ERC20 decimals. For an ERC20 contract,
 	// the relation
-	//    UnitInfo.Conventional.ConversionFactor * Token.EVMFactor = decimals
+	//    math.Log10(UnitInfo.Conventional.ConversionFactor) + Token.EVMFactor = decimals
 	// should hold true.
-	// Since virtually every single asset will use a value of 9 here, a default
-	// value of 9 will be used in AtomicToEVM and EVMToAtomic if EVMFactor is
-	// not set.
-	EVMFactor int64 `json:"decimals"` // default 9
+	// Since most assets will use a value of 9 here, a default value of 9 will
+	// be used in AtomicToEVM and EVMToAtomic if EVMFactor is not set.
+	EVMFactor *int64 `json:"evmFactor"` // default 9
 }
 
 // factor calculates the conversion factor to and from DEX atomic units to the
 // units used for EVM operations.
 func (t *Token) factor() *big.Int {
-	evmFactor := t.EVMFactor
-	if evmFactor == 0 {
-		evmFactor = 9
+	var evmFactor int64 = 9
+	if t.EVMFactor != nil {
+		evmFactor = *t.EVMFactor
 	}
 	return new(big.Int).Exp(big.NewInt(10), big.NewInt(evmFactor), nil)
 }

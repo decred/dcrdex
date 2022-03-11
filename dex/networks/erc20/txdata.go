@@ -46,12 +46,12 @@ func ParseTransferFromData(data []byte) (sender, recipient common.Address, amoun
 		return common.Address{}, common.Address{}, nil, fmt.Errorf("expected second arg of type common.Address but got %T", args[1])
 	}
 
-	value, ok := args[2].(*big.Int)
+	amount, ok = args[2].(*big.Int)
 	if !ok {
 		return common.Address{}, common.Address{}, nil, fmt.Errorf("expected third arg of type *big.Int but got %T", args[2])
 	}
 
-	return sender, recipient, value, nil
+	return sender, recipient, amount, nil
 }
 
 // ParseTransferData parses the calldata used to call the transfer method of an
