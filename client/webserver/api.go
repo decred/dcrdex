@@ -854,10 +854,10 @@ func (s *WebServer) writeAPIError(w http.ResponseWriter, err error) {
 		code = cErr.Code()
 	}
 
-	rawErr := core.Unwrap(err)
+	innerErr := core.UnwrapErr(err)
 	resp := &standardResponse{
 		OK:   false,
-		Msg:  rawErr.Error(),
+		Msg:  innerErr.Error(),
 		Code: code,
 	}
 	log.Error(err.Error())

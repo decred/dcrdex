@@ -49,16 +49,15 @@ const (
 	activeOrdersErr
 )
 
-// Error is an error message, an error code and a wrapped error.
+// Error is an error code and a wrapped error.
 type Error struct {
-	desc    string
-	code    int
-	wrapped error
+	code int
+	err  error
 }
 
 // Error returns the error string. Satisfies the error interface.
 func (e *Error) Error() string {
-	return e.desc
+	return e.err.Error()
 }
 
 // Code returns the error code.
@@ -68,37 +67,22 @@ func (e *Error) Code() *int {
 
 // Unwrap returns the underlying wrapped error.
 func (e *Error) Unwrap() error {
-	return e.wrapped
+	return e.err
 }
 
 // newError is a constructor for a new Error.
 func newError(code int, s string, a ...interface{}) error {
-	var err *Error
-	for _, v := range a {
-		e, ok := v.(error)
-		if ok {
-			err = &Error{
-				desc:    fmt.Sprintf(s, a...),
-				code:    code,
-				wrapped: e,
-			}
-			return err
-		}
+	return &Error{
+		code: code,
+		err:  fmt.Errorf(s, a...), // s may contain a %w verb to wrap an error
 	}
-	err = &Error{
-		desc:    fmt.Sprintf(s, a...),
-		code:    code,
-		wrapped: fmt.Errorf(s, a...),
-	}
-	return err
 }
 
 // codedError converts the error to an Error with the specified code.
 func codedError(code int, err error) error {
 	return &Error{
-		desc:    err.Error(),
-		code:    code,
-		wrapped: err,
+		code: code,
+		err:  err,
 	}
 }
 
@@ -108,17 +92,12 @@ func errorHasCode(err error, code int) bool {
 	return errors.As(err, &e) && e.code == code
 }
 
-// Unwrap returns the result of calling the Unwrap method on err, if err's
-// type contains an Unwrap method returning error.
-// Otherwise, Unwrap returns err.
-func Unwrap(err error) error {
-	for {
-		u, ok := err.(interface {
-			Unwrap() error
-		})
-		if !ok {
-			return err
-		}
-		err = u.Unwrap()
+// UnwrapErr returns the result of calling the Unwrap method on err,
+// until it returns a non-wrapped error.
+func UnwrapErr(err error) error {
+	InnerErr := errors.Unwrap(err)
+	if InnerErr == nil {
+		return err
 	}
+	return UnwrapErr(InnerErr)
 }

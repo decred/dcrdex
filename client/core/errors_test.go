@@ -24,16 +24,14 @@ func TestCoreError(t *testing.T) {
 		want string
 	}{{
 		Error{
-			desc:    "wallet error",
-			code:    walletErr,
-			wrapped: err0,
+			code: walletErr,
+			err:  errors.New("wallet error"),
 		},
 		"wallet error",
 	}, {
 		Error{
-			desc:    "wallet auth error",
-			code:    walletAuthErr,
-			wrapped: err0,
+			code: walletAuthErr,
+			err:  errors.New("wallet auth error"),
 		},
 		"wallet auth error",
 	}}
@@ -46,7 +44,7 @@ func TestCoreError(t *testing.T) {
 		}
 	}
 
-	coreErr := newError(walletErr, "stuff: %v", err0)
+	coreErr := newError(walletErr, "stuff: %w", err0)
 
 	var err1 *Error
 	if !errors.As(coreErr, &err1) {
@@ -65,24 +63,24 @@ func TestCoreError(t *testing.T) {
 	}
 }
 
-func TestUnwrap(t *testing.T) {
-	err1 := errors.New("1")
+func TestUnwrapErr(t *testing.T) {
+	err1 := errors.New("Error 1")
 	err2 := fmt.Errorf("Error 2: %w", err1)
 	err3 := fmt.Errorf("Not wrapped: %v, %d", "other string", 20)
-	erra := newError(walletErr, "wrapped 1: %v", err1)
+	erra := newError(walletErr, "wraps 2: %w", err2)
 
 	testCases := []struct {
 		err  error
 		want error
 	}{
-		{newError(walletErr, "wrapped: %v", err2), err1},
 		{erra, err1},
+		{newError(walletErr, "wraps 2: %w", err2), err1},
+		{newError(walletErr, "wraps 1: %w", err1), err1},
 		{newError(walletErr, "Not wrapped: %v, %d", "other string", 20), err3},
-		{newError(walletErr, "wrap 3: %v", err1), err1},
 	}
 	for i, tc := range testCases {
-		if got := Unwrap(tc.err); got.Error() != tc.want.Error() {
-			t.Errorf("#%d: Unwrap(%v) = %v, want %v", i, tc.err, got.Error(), tc.want.Error())
+		if got := UnwrapErr(tc.err); got.Error() != tc.want.Error() {
+			t.Errorf("#%d: UnwrapErr(%v) = %v, want %v", i, tc.err, got.Error(), tc.want.Error())
 		}
 	}
 }
