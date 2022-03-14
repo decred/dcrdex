@@ -624,9 +624,17 @@ func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
 }
 
 // FeeRate satisfies asset.FeeRater.
-func (dcr *ExchangeWallet) FeeRate() (uint64, error) {
+func (dcr *ExchangeWallet) FeeRate() uint64 {
+	if dcr.wallet.SpvMode() {
+		return 0 // EstimateSmartFeeRate needs dcrd passthrough
+	}
 	// Requesting a rate for 1 confirmation can return unreasonably high rates.
-	return dcr.feeRate(2)
+	rate, err := dcr.feeRate(2)
+	if err != nil {
+		dcr.log.Errorf("Failed to get fee rate: %v", err)
+		return 0
+	}
+	return rate
 }
 
 // FeeRate returns the current optimal fee rate in atoms / byte.
@@ -652,12 +660,19 @@ func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
 // number of confirmations, but falls back to the suggestion or fallbackFeeRate
 // via feeRateWithFallback.
 func (dcr *ExchangeWallet) targetFeeRateWithFallback(confTarget, feeSuggestion uint64) uint64 {
+	// Fee estimation is not available in SPV mode.
+	if dcr.wallet.SpvMode() {
+		return dcr.feeRateWithFallback(feeSuggestion)
+	}
+
 	feeRate, err := dcr.feeRate(confTarget)
-	if err == nil {
+	if err != nil {
+		dcr.log.Errorf("Failed to get fee rate: %v", err)
+	} else if feeRate != 0 {
 		dcr.log.Tracef("Obtained local estimate for %d-conf fee rate, %d", confTarget, feeRate)
 		return feeRate
 	}
-	dcr.log.Tracef("no %d-conf feeRate available: %v", confTarget, err)
+
 	return dcr.feeRateWithFallback(feeSuggestion)
 }
 
@@ -2550,7 +2565,7 @@ func (dcr *ExchangeWallet) PayFee(address string, regFee, feeRate uint64) (asset
 
 // EstimateRegistrationTxFee returns an estimate for the tx fee needed to
 // pay the registration fee using the provided feeRate.
-func (dcr *baseWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
+func (dcr *ExchangeWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
 	const inputCount = 5 // buffer so this estimate is higher than what PayFee uses
 	if feeRate == 0 || feeRate > dcr.feeRateLimit {
 		feeRate = dcr.fallbackFeeRate

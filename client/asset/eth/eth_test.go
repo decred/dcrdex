@@ -479,6 +479,7 @@ func TestFeeRate(t *testing.T) {
 	eth := &ExchangeWallet{
 		node: node,
 		ctx:  ctx,
+		log:  tLogger,
 	}
 
 	maxInt := ^int64(0)
@@ -488,7 +489,6 @@ func TestFeeRate(t *testing.T) {
 		tip            *big.Int
 		netFeeStateErr error
 		wantFeeRate    uint64
-		wantErr        bool
 	}{
 		{
 			name:        "ok",
@@ -498,12 +498,10 @@ func TestFeeRate(t *testing.T) {
 		},
 		{
 			name:           "net fee state error",
-			wantErr:        true,
 			netFeeStateErr: errors.New(""),
 		},
 		{
 			name:    "overflow error",
-			wantErr: true,
 			baseFee: big.NewInt(maxInt),
 			tip:     big.NewInt(1),
 		},
@@ -513,17 +511,7 @@ func TestFeeRate(t *testing.T) {
 		node.baseFee = test.baseFee
 		node.tip = test.tip
 		node.netFeeStateErr = test.netFeeStateErr
-		feeRate, err := eth.FeeRate()
-		if test.wantErr {
-			if err == nil {
-				t.Fatalf("%v: expected error but did not get", test.name)
-			}
-			continue
-		}
-		if err != nil {
-			t.Fatalf("%v: unexpected error: %v", test.name, err)
-		}
-
+		feeRate := eth.FeeRate()
 		if feeRate != test.wantFeeRate {
 			t.Fatalf("%v: expected fee rate %d but got %d", test.name, test.wantFeeRate, feeRate)
 		}

@@ -2730,11 +2730,7 @@ func (c *Core) EstimateRegistrationTxFee(host string, certI interface{}, assetID
 
 	var rate uint64
 	if rater, is := wallet.Wallet.(asset.FeeRater); is {
-		if r, err := rater.FeeRate(); err == nil {
-			rate = r
-		} else {
-			c.log.Warnf("failed to get fee suggestion from %s FeeRater: %v", unbip(assetID), err)
-		}
+		rate = rater.FeeRate()
 	}
 
 	if rate == 0 {
@@ -3810,10 +3806,8 @@ func (c *Core) feeSuggestionAny(assetID uint32, preferredConns ...*dexConnection
 	w, found := c.wallet(assetID)
 	if found && w.connected() {
 		if rater, is := w.feeRater(); is {
-			if r, err := rater.FeeRate(); err == nil {
+			if r := rater.FeeRate(); r != 0 {
 				return r
-			} else {
-				c.log.Warnf("failed to get fee suggestion from %s FeeRater: %v", unbip(assetID), err)
 			}
 		}
 	}
@@ -6497,12 +6491,10 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 // cached, no new requests will be made.
 func (c *Core) cacheRedemptionFeeSuggestion(t *trackedTrade) {
 	if rater, is := t.wallets.toWallet.feeRater(); is {
-		feeRate, err := rater.FeeRate()
-		if err == nil {
+		if feeRate := rater.FeeRate(); feeRate != 0 {
 			atomic.StoreUint64(&t.redeemFeeSuggestion, feeRate)
 			return
 		}
-		c.log.Debugf("unable to retrieve fee rate from FeeRater. falling back to other methods: %v", err)
 	}
 	// Check any book that might have the fee recorded from an epoch_report note
 	// (requires a book subscription).

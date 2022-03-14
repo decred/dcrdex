@@ -1374,10 +1374,11 @@ func (eth *ExchangeWallet) RegFeeConfirmations(ctx context.Context, coinID dex.B
 }
 
 // FeeRate satisfies asset.FeeRater.
-func (eth *ExchangeWallet) FeeRate() (uint64, error) {
+func (eth *ExchangeWallet) FeeRate() uint64 {
 	base, tip, err := eth.node.netFeeState(eth.ctx)
 	if err != nil {
-		return 0, fmt.Errorf("error getting net fee state: %w", err)
+		eth.log.Errorf("Error getting net fee state: %v", err)
+		return 0
 	}
 
 	feeRate := new(big.Int).Add(
@@ -1386,10 +1387,11 @@ func (eth *ExchangeWallet) FeeRate() (uint64, error) {
 
 	feeRateGwei, err := dexeth.WeiToGweiUint64(feeRate)
 	if err != nil {
-		return 0, fmt.Errorf("failed to convert wei to gwei: %w", err)
+		eth.log.Errorf("Failed to convert wei to gwei: %v", err)
+		return 0
 	}
 
-	return feeRateGwei, nil
+	return feeRateGwei
 }
 
 func (eth *ExchangeWallet) checkPeers() {
