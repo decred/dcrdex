@@ -34,8 +34,13 @@ select {
 }
 
 // bootstrap override
-.form-check-input {
-  margin-top: 0.4em;
+thead,
+tbody,
+tfoot,
+tr,
+td,
+th {
+  border-style: none;
 }
 
 // Hide number arrows.

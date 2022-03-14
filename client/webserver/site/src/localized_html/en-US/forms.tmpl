@@ -1,17 +1,17 @@
 {{define "walletConfigTemplates"}}
 <div class="py-2 d-flex justify-content-between align-items-center" data-tmpl="walletSettingsHeader">
   Wallet Settings
-  <div data-tmpl="fileSelector" class="d-inline-block hoverbg pointer fs14"><span class="ico-textfile mr-1"></span> load from file</div>
+  <div data-tmpl="fileSelector" class="d-inline-block hoverbg pointer fs14"><span class="ico-textfile me-1"></span> load from file</div>
   <input data-tmpl="fileInput" type="file" class="form-control select d-none">
 </div>
 <div data-tmpl="allSettings">
   <div data-tmpl="dynamicOpts" class="dynamicopts mb-3">
     <div data-tmpl="textInput" class="px-0 d-flex flex-column justify-content-end">
-      <label class="pl-1 mb-1 small"> <span class="ico-info"></span></label>
+      <label class="form-label ps-1 mb-1 small"> <span class="ico-info"></span></label>
       <input type="text" class="form-control select">
     </div>
     <div data-tmpl="checkbox" class="d-flex align-items-center justify-content-center">
-      <div>
+      <div class="form-check">
         <input class="form-check-input" type="checkbox" value="">
         <label class="form-check-label fs14"> <span class="ico-info fs13"></span></label>
       </div>
@@ -22,14 +22,14 @@
     </div>
   </div>
   <div data-tmpl="showOther" class="d-hide mb-1 pointer d-flex align-items-center justify-content-start">
-    <span data-tmpl="showIcon" class="ico-plus fs8 pl-1"></span>
-    <span data-tmpl="hideIcon" class="ico-minus fs8 pl-1"></span>
-    <span data-tmpl="showHideMsg" class="d-inline-block pl-1 pb-1"></span>
+    <span data-tmpl="showIcon" class="ico-plus fs8 ps-1"></span>
+    <span data-tmpl="hideIcon" class="ico-minus fs8 ps-1"></span>
+    <span data-tmpl="showHideMsg" class="d-inline-block ps-1 pb-1"></span>
   </div>
   <div data-tmpl="otherSettings" class="d-hide">
-    <div data-tmpl="loadedSettingsMsg" class="fs15 pt-3 pb-1 pl-1">&mdash; loaded from file &mdash;</div>
+    <div data-tmpl="loadedSettingsMsg" class="fs15 pt-3 pb-1 ps-1">&mdash; loaded from file &mdash;</div>
     <div data-tmpl="loadedSettings" class="dynamicopts"></div>
-    <div data-tmpl="defaultSettingsMsg" class="fs15 pt-3 pb-1 pl-1">&mdash; defaults &mdash;</div>
+    <div data-tmpl="defaultSettingsMsg" class="fs15 pt-3 pb-1 ps-1">&mdash; defaults &mdash;</div>
     <div data-tmpl="defaultSettings" class="dynamicopts"></div>
   </div>
 </div>
@@ -37,19 +37,19 @@
 {{end}}
 
 {{define "newWalletForm"}}
+<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 <div class="wallet-tabs" data-tmpl="walletTypeTabs">
   <div class="wtab" data-tmpl="walletTabTmpl"></div>
 </div>
 <div class="bordertop py-2 text-center fs22 sans-light position-relative" data-tmpl="header">
   Add a <img data-tmpl="assetLogo" class="asset-logo mx-1"> <span data-tmpl="assetName"></span> Wallet
-  <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 </div>
 <div class="position-relative" data-tmpl="mainForm">
   <div class="flex-center py-3" data-tmpl="oneBttnBox">
     <button class="one-bttn w-auto" data-tmpl="oneBttn">Create!</button>
   </div>
   <div class="py-2 fs14 grey">
-    <span class="hoverbg pointer d-hide" data-tmpl="goBack"><span class="ico-arrowback fs12 mr-1"></span> pick a different asset</span>
+    <span class="hoverbg pointer d-hide" data-tmpl="goBack"><span class="ico-arrowback fs12 me-1"></span> pick a different asset</span>
   </div>
   <div data-tmpl="walletSettings">
     {{template "walletConfigTemplates"}}
@@ -57,20 +57,18 @@
   <hr class="dashed my-2">
   <div class="d-flex justify-content-between align-items-stretch flex-wrap" data-tmpl="auth">
     <div class="col-11 p-0" data-tmpl="newWalletPassBox">
-      <label for="newWalletPass" class="pt-3 pl-1 mb-1">Wallet Password
+      <label for="newWalletPass" class="form-label pt-3 ps-1 mb-1">Wallet Password
         <span class="ico-info" data-tooltip="Leave the password empty if there is no password required for the wallet."></span>
       </label>
       <input type="password" class="form-control select" data-tmpl="newWalletPass" autocomplete="off">
     </div>
     <div class="hide-pw col-11 p-0">
-      <label for="nwAppPass" class="pt-3 pl-1 mb-1">App Password</label>
+      <label for="nwAppPass" class="form-label pt-3 ps-1 mb-1">App Password</label>
       <input type="password" class="form-control select" id="nwAppPass" data-tmpl="appPass" autocomplete="off">
     </div>
     <span class="col-3 hide-pw"></span> {{/* flex dummy */}}
-    <div class="d-flex justify-content-end align-items-end mt-4 col-12 p-0">
-      <div class="flex-grow-1 d-flex justify-content-end align-items-end">
-        <button data-tmpl="submitAdd" type="submit" class="justify-content-center fs15 bg2 selected">Add</button>
-      </div>
+    <div class="d-grid align-items-end col-10 p-0 mt-4">
+      <button data-tmpl="submitAdd" type="submit" class="fs15 bg2 selected">Add</button>
     </div>
   </div>
 
@@ -79,19 +77,19 @@
 {{end}}
 
 {{define "unlockWalletForm"}}
+<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 <div class="px-2 py-1 text-center fs22 text-nowrap sans-light position-relative">
   Unlock
   <img id="uwAssetLogo" class="micro-icon mx-1">
   <span id="uwAssetName"></span>
   Wallet
-  <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 </div>
 {{if .}}
   <div class="fs16">{{.}}</div>
   <hr class="dashed my-4">
 {{end}}
 <div id="uwAppPassBox" class="my-3">
-  <label for="uwAppPass" class="pl-1">App Password</label>
+  <label for="uwAppPass" class="form-label ps-1">App Password</label>
   <div class="fs14 px-1 mb-1">Your app password is always required when performing sensitive wallet operations.</div>
   <input type="password" class="form-control select" id="uwAppPass" autocomplete="off">
 </div>
@@ -103,40 +101,40 @@
 
 {{define "dexAddrForm"}}
 <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
-<div class="flex-center fs24 sans-light"><span class="ico-plus fs12 mr-2"></span> Add a DEX</div>
+<div class="flex-center fs24 sans-light"><span class="ico-plus fs12 me-2"></span> Add a DEX</div>
 <div class="fs20 sans-light">Pick a server</div>
 <div class="d-flex flex-column align-items-stretch mt-1" data-tmpl="knownXCs">
   {{range .KnownExchanges}}
-    <div class="known-exchange" data-host="{{.}}"><img class="micro-icon mr-1" src={{dummyExchangeLogo .}}> {{.}}</div>
+    <div class="known-exchange" data-host="{{.}}"><img class="micro-icon me-1" src={{dummyExchangeLogo .}}> {{.}}</div>
   {{end}}
 </div>
 <div class="px-1 mt-3 fs14 pointer d-flex justify-content-start align-items-center" data-tmpl="showCustom">
   <span class="ico-plus fs11"></span>
-  <div class="pl-2">add a different server</div>
+  <div class="ps-2">add a different server</div>
 </div>
 
 <div data-tmpl="customBox" class="d-hide">
   <hr class="dashed my-2">
   <div class="fs20 sans-light">Add a custom server</div>
   <div>
-    <label for="dexAddr" class="pl-1 mt-2">DEX Address</label>
+    <label for="dexAddr" class="form-label ps-1 mt-2">DEX Address</label>
     <input type="text" class="form-control select" data-tmpl="addr">
   </div>
   <div class="px-1 mt-3 mb-2 fs14 d-hide" data-tmpl="needCert">
     Looks like we don't have an SSL certificate for this DEX. Add the server's certificate to continue.
   </div>
-  <div class="pl-1 mb-1 mt-3 pointer">TLS Certificate</div>
+  <div class="ps-1 mb-1 mt-3 pointer">TLS Certificate</div>
   <input type="file" class="form-control select d-none" data-tmpl="certFile">
-  <div class="pl-1 mt-2 fs15">
+  <div class="ps-1 mt-2 fs15">
     <span data-tmpl="selectedCert"></span>
-    <span class="underline ml-3 pointer d-hide" data-tmpl="removeCert">remove</span>
-    <span class="underline ml-3 pointer" data-tmpl="addCert">add a file</span>
+    <span class="underline ms-3 pointer d-hide" data-tmpl="removeCert">remove</span>
+    <span class="underline ms-3 pointer" data-tmpl="addCert">add a file</span>
   </div>
 </div>
 <div class="d-flex mt-3 d-hide" data-tmpl="auth">
   <div class="col-12 p-0">
     <div data-tmpl="appPWBox" {{if $.UserInfo.PasswordIsCached}}class="d-hide"{{end}}>
-      <label for="dexAddrAppPW" class="pl-1 mb-1">App Password</label>
+      <label for="dexAddrAppPW" class="form-label ps-1 mb-1">App Password</label>
       <input type="password" class="form-control select" id="dexAddrAppPW" data-tmpl="appPW" autocomplete="current-password">
     </div>
   </div>
@@ -159,7 +157,7 @@
       <div class="fs14"><span data-tmpl="confs"></span> confirmations</div>
       <div class="fs14 readygreen" data-tmpl="ready"></div>
     </div>
-    <div class="reg-assets-markets-wrap flex-grow-1 text-left">
+    <div class="reg-assets-markets-wrap flex-grow-1 text-start">
       <table class="reg-asset-markets">
         <thead>
           <tr>
@@ -169,7 +167,7 @@
         </thead>
         <tbody data-tmpl="markets">
           <tr data-tmpl="marketTmpl">
-            <td class="pr-3">
+            <td class="pe-3">
               <div class="d-flex align-items-center">
                 <img class="reg-market-logo" data-tmpl="logo">
                 <span data-tmpl="name"></span>
@@ -191,7 +189,7 @@
     <div class="fs20 sans-light">All markets at</div>
     <span class="fs18" data-tmpl="host"></span>
   </div>
-  <div class="reg-assets-markets-wrap flex-grow-1 text-left">
+  <div class="reg-assets-markets-wrap flex-grow-1 text-start">
     <table class="reg-asset-markets">
       <thead>
         <tr>
@@ -209,11 +207,11 @@
 {{define "loginForm"}}
 <div class="py-1 text-center fs28 sans-light" data-tmpl="header">Log In</div>
 <div class="pb-2">
-  <label for="pw" class="pl-1 mb-1">Password</label>
+  <label for="pw" class="form-label ps-1 mb-1">Password</label>
   <input type="password" class="form-control select" data-tmpl="pw" autocomplete="current-password">
-  <div class="pl-4 pt-2">
+  <div class="form-check pt-2">
     <input class="form-check-input" type="checkbox" data-tmpl="rememberPass" id="logRememberPass">
-    <label for="logRememberPass" class="pl-1">Remember my password</label>
+    <label for="logRememberPass" class="form-label ps-1">Remember my password</label>
   </div>
 </div>
 <div class="d-flex justify-content-center mt-2">
@@ -223,7 +221,7 @@
 {{end}}
 
 {{define "confirmRegistrationForm"}}
-<span class="hoverbg pointer grey" data-tmpl="goBack"><span class="ico-arrowback fs12 mr-1"></span> pick a different asset</span>
+<span class="hoverbg pointer grey" data-tmpl="goBack"><span class="ico-arrowback fs12 me-1"></span> pick a different asset</span>
 <div class="fs22 sans-light reg-conf-msg my-2" data-tmpl="text">
   When you submit this form, funds will be spent from your wallet to pay the registration fee.
 </div>
@@ -234,11 +232,11 @@
   </div>
 
   <div class="flex-center px-3 my-2">
-    <img data-tmpl="logo" class="logo mr-3">
+    <img data-tmpl="logo" class="logo me-3">
     <div class="d-flex flex-column justify-content-start align-items-start">
       <span class="fs16" data-tmpl="host"></span>
       <span>
-        <span data-tmpl="fee" class="fs22 lh1 mr-1"></span>
+        <span data-tmpl="fee" class="fs22 lh1 me-1"></span>
         <span data-tmpl="feeUnit" class="fs16 grey"></span>
       </span>
       <span class="fs14">+ tx fees </span>
@@ -257,28 +255,28 @@
 {{end}}
 
 {{define "authorizeAccountExportForm"}}
+<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 <div class="px-2 py-1 text-center position-relative fs22 sans-light">
   Authorize Export
-  <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 </div>
 <div class="fs16 mt-2">
   Enter your app password to confirm Account export for: <span id="exportAccountHost"></span>.
 </div>
 <hr class="dashed my-4">
 <div>
-  <label for="exportAccountAppPass" class="pl-1 mb-1">Password</label>
+  <label for="exportAccountAppPass" class="form-label ps-1 mb-1">Password</label>
   <input type="password" class="form-control select" id="exportAccountAppPass" autocomplete="current-password">
 </div>
 <div class="d-flex justify-content-end mt-4">
-  <button id="authorizeExportAccountConfirm" type="button" class="col-8 justify-content-center fs15 bg2 selected">Authorize Export</button>
+  <button id="authorizeExportAccountConfirm" type="button" class="justify-content-center fs15 bg2 selected">Authorize Export</button>
 </div>
 <div class="fs15 pt-3 text-center d-hide errcolor" id="exportAccountErr"></div>
 {{end}}
 
 {{define "disableAccountForm"}}
+<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 <div class="px-2 py-1 text-center position-relative fs22 sans-light">
   Disable Account
-  <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 </div>
 <div class="fs16 mt-2">
   Enter your app password to disable account: <span id="disableAccountHost"></span>.
@@ -289,7 +287,7 @@
 </div>
 <hr class="dashed my-4">
 <div>
-  <label for="disableAccountAppPW" class="pl-1 mb-1">Password</label>
+  <label for="disableAccountAppPW" class="form-label ps-1 mb-1">Password</label>
   <input type="password" class="form-control select" id="disableAccountAppPW" autocomplete="current-password">
 </div>
 <div class="d-flex justify-content-center mt-4">
@@ -304,21 +302,21 @@
 <div class="px-2 py-1 text-center position-relative fs22 sans-light">
   Authorize Import
 </div>
-<div class="text-left">
-  <div class="pl-1 mb-1 mt-4 pointer">Account File</div>
+<div class="text-start">
+  <div class="ps-1 mb-1 mt-4 pointer">Account File</div>
   <input type="file" class="form-control select d-none" id="accountFile">
-  <div class="pl-1 mt-2 fs15 text-left hoverbg">
+  <div class="ps-1 mt-2 fs15 text-start hoverbg">
     <span id="selectedAccount"></span>
-    <span class="underline ml-3 pointer d-hide" id="removeAccount">remove</span>
-    <span class="ml-3 pointer" id="addAccount"><span class="ico-textfile mr-1"></span> load from file</span>
+    <span class="underline ms-3 pointer d-hide" id="removeAccount">remove</span>
+    <span class="ms-3 pointer" id="addAccount"><span class="ico-textfile me-1"></span> load from file</span>
   </div>
 </div>
 <hr class="dashed my-4">
-<div class="text-left mt-2{{if $passwordIsCached}} d-hide{{end}}">
+<div class="text-start mt-2{{if $passwordIsCached}} d-hide{{end}}">
   <div class="fs15 mt-2">
     Enter your app password to confirm Account import.
   </div>
-  <label for="importAccountAppPass" class="mb-1 mt-2">Password</label>
+  <label for="importAccountAppPass" class="form-label mb-1 mt-2">Password</label>
   <input type="password" class="form-control select" id="importAccountAppPass" autocomplete="current-password">
 </div>
 <div class="d-flex justify-content-center mt-4">
@@ -333,15 +331,15 @@
   Change Application Password
 </div>
 <div class="mt-2">
-  <label for="appPW" class="pl-1 mb-1">Current Password</label>
+  <label for="appPW" class="form-label ps-1 mb-1">Current Password</label>
   <input type="password" class="form-control select" id="appPW" autocomplete="current-password">
 </div>
 <div class="mt-2">
-  <label for="newAppPW" class="pl-1 mb-1">New Password</label>
+  <label for="newAppPW" class="form-label ps-1 mb-1">New Password</label>
   <input type="password" class="form-control select" id="newAppPW" autocomplete="new-password">
 </div>
 <div class="mt-2">
-  <label for="confirmNewPW" class="pl-1 mb-1">Confirm New Password</label>
+  <label for="confirmNewPW" class="form-label ps-1 mb-1">Confirm New Password</label>
   <input type="password" class="form-control select" id="confirmNewPW" autocomplete="new-password">
 </div>
 <div class="d-flex justify-content-end mt-4">
@@ -365,10 +363,10 @@
 <hr class="dashed mt-2">
 <div class="d-flex flex-row align-items-end {{if $passwordIsCached}}justify-content-end{{end}} pb-4">
   <div class="col-12 p-0 {{if $passwordIsCached}}d-hide{{end}}">
-    <label for="cancelPass" class="pt-3 mb-1">Password</label>
+    <label for="cancelPass" class="form-label pt-3 mb-1">Password</label>
     <input type="password" class="form-control select" id="cancelPass" autocomplete="off">
   </div>
-  <div class="col-12 py-1 {{if not $passwordIsCached}}pl-5{{end}}">
+  <div class="col-12 py-1 {{if not $passwordIsCached}}ps-5{{end}}">
     <button id="cancelSubmit" type="button" class="w-100 fs15 bg2 selected">Submit</button>
   </div>
 </div>
@@ -378,7 +376,7 @@
 <div class="text-center mb-4"><img class="logo" data-tmpl="logo" src="/img/coins/dcr.png"></div>
 <div class="d-flex flex-column align-items-start borderleft mb-5">
   <div class="flex-center flex-row">
-    <div class="icons text-right pr-3">
+    <div class="icons text-end pe-3">
       <span class="ico-check fs16 d-hide" data-tmpl="syncCheck"></span>
       <span class="ico-checkbox d-hide fs14" data-tmpl="syncUncheck"></span>
       <div class="ico-spinner spinner d-hide fs14 d-inline-block" data-tmpl="syncSpinner"></div>
@@ -386,18 +384,18 @@
     <span class="fs20 sans-light">1: Sync the Blockchain</span>
   </div>
   <div class="flex-center mt-1">
-    <span class="fs16 mr-1">Progress:</span>
+    <span class="fs16 me-1">Progress:</span>
     <span class="fs20 mx-1" data-tmpl="progress"></span>
     <span class="fs16 grey">%</span>
   </div>
   <div class="mt-1 flex-center flex-row fs14 d-hide" data-tmpl="syncRemainBox">
-    <span data-tmpl="syncRemain" class="mr-1"></span> remaining
+    <span data-tmpl="syncRemain" class="me-1"></span> remaining
   </div>
 </div>
 
 <div class="d-flex flex-column align-items-start borderleft">
   <div class="flex-center flex-row">
-    <div class="icons text-right pr-3">
+    <div class="icons text-end pe-3">
       <span class="ico-checkbox fs14 d-hide" data-tmpl="balUncheck"></span>
       <span class="ico-check d-hide fs16" data-tmpl="balCheck"></span>
     </div>
@@ -405,12 +403,12 @@
   </div>
   <div class="d-flex flex-column align-items-start" data-tmpl="balanceBox">
     <div class="flex-center mt-1">
-      <span class="fs16 mr-1">Balance:</span>
+      <span class="fs16 me-1">Balance:</span>
       <span class="fs20 mx-1" data-tmpl="balance"></span>
       <span class="fs16 grey unit">XYZ</span>
     </div>
     <div class="mb-2 flex-center flex-row">
-      <span class="fs16 mr-1">Registration fee:</span>
+      <span class="fs16 me-1">Registration fee:</span>
       <span class="fs20 mx-1" data-tmpl="fee"></span>
       <span class="fs16 grey unit">XYZ</span>
     </div>

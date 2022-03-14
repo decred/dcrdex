@@ -208,6 +208,7 @@
     background-color: #0b5831;
     border-radius: 5px;
     animation: glow 1.5s infinite alternate;
+    color: $font-color-dark;
   }
 
   .one-bttn:hover {
@@ -236,7 +237,6 @@ button.form-button {
   padding: 10px;
   border-radius: 3px;
   opacity: 0.9;
-  width: 80%;
   white-space: nowrap;
 
   &:hover {

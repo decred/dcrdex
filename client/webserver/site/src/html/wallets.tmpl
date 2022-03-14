@@ -147,12 +147,12 @@
         <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       </div>
       <div class="mt-3">
-        <label for="withdrawAddr" class="pl-1 mb-1">[[[Address]]]</label>
+        <label for="withdrawAddr" class="form-label ps-1 mb-1">[[[Address]]]</label>
         <input type="text" class="form-control select" id="withdrawAddr">
       </div>
       <div class="d-flex align-items-stretch">
         <div class="mt-2 col-10 p-0">
-          <label for="withdrawAmt" class="pl-1 mb-1">[[[Amount]]]</label>
+          <label for="withdrawAmt" class="form-label ps-1 mb-1">[[[Amount]]]</label>
           <input type="text" class="form-control select" id="withdrawAmt">
         </div>
         <div class="col-14 px-0 py-1 flex-center flex-column fs15 justify-content-between">
@@ -164,10 +164,10 @@
       <div class="fs16 px-4 text-center">[[[Authorize the withdraw with your app password.]]]</div>
       <div class="d-flex mt-3">
         <div class="col-12 p-0">
-          <label for="withdrawPW" class="pl-1 mb-1">[[[Password]]]</label>
+          <label for="withdrawPW" class="form-label ps-1 mb-1">[[[Password]]]</label>
           <input type="password" class="form-control select" id="withdrawPW" autocomplete="off">
         </div>
-        <div class="col-12 p-0 text-right">
+        <div class="col-12 p-0 text-end">
           <div>&nbsp;</div>
           <button id="submitWithdraw" type="button" class="w-75 mt-1 justify-content-center fs15 bg2 selected">[[[Withdraw]]]</button>
         </div>
@@ -188,24 +188,24 @@
         {{template "walletConfigTemplates"}}
       </div>
       <div id="showChangePW" class="py-1 mt-2 pointer d-flex align-items-center justify-content-start">
-        <span id="showIcon" class="ico-plus fs8 pl-1"></span>
-        <span id="hideIcon" class="ico-minus fs8 pl-1"></span>
-        <span id="switchPWMsg" class="d-inline-block pl-1 pb-1"></span>
+        <span id="showIcon" class="ico-plus fs8 ps-1"></span>
+        <span id="hideIcon" class="ico-minus fs8 ps-1"></span>
+        <span id="switchPWMsg" class="d-inline-block ps-1 pb-1"></span>
       </div>
       <div id="changePW" class="py-1">
         <div class="fs15">
           [[[pw_change_instructions]]]
         </div>
         <div class="pt-3">
-          <label for="newPW" class="mb-1">[[[New Wallet Password]]]</label>
+          <label for="newPW" class="form-label mb-1">[[[New Wallet Password]]]</label>
           <input type="password" class="form-control select" id="newPW" autocomplete="new-password">
         </div>
       </div>
 
       <div id="showChangeType" class="py-1 mt-2 pointer d-flex align-items-center justify-content-start">
-        <span id="changeTypeShowIcon" class="ico-plus fs8 pl-1"></span>
-        <span id="changeTypeHideIcon" class="ico-minus fs8 pl-1 d-hide"></span>
-        <span id="changeTypeMsg" class="d-inline-block pl-1 pb-1">[[[change the wallet type]]]</span>
+        <span id="changeTypeShowIcon" class="ico-plus fs8 ps-1"></span>
+        <span id="changeTypeHideIcon" class="ico-minus fs8 ps-1 d-hide"></span>
+        <span id="changeTypeMsg" class="d-inline-block ps-1 pb-1">[[[change the wallet type]]]</span>
       </div>
       <div id="changeWalletType" class="py-1 d-hide">
         <select id="changeWalletTypeSelect"></select>
@@ -215,10 +215,10 @@
       </div>
       <div class="d-flex mt-1 {{if $passwordIsCached}}justify-content-end{{end}}">
         <div class="col-12 p-0 {{if $passwordIsCached}}d-hide{{end}}">
-          <label for="appPW" class="pl-1 mb-1">[[[App Password]]]</label>
+          <label for="appPW" class="form-label ps-1 mb-1">[[[App Password]]]</label>
           <input type="password" class="form-control select" id="appPW" autocomplete="off">
         </div>
-        <div class="col-12 p-0 text-right">
+        <div class="col-12 p-0 text-end">
           <div>&nbsp;</div>
           <button id="submitReconfig" type="button" class="w-75 mt-1 justify-content-center fs15 bg2 selected">[[[Submit]]]</button>
         </div>

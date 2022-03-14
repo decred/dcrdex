@@ -34,23 +34,23 @@ body.dark {
   ::-webkit-calendar-picker-indicator {
     filter: invert(1);
   }
-}
 
-#newWalletForm {
-  .wallet-tabs {
-    .wtab {
-      background-color: $dark_body_bg;
-      border-color: #999;
-      opacity: 0.8;
+  #newWalletForm {
+    .wallet-tabs {
+      .wtab {
+        background-color: $dark_body_bg;
+        border-color: #999;
+        opacity: 0.8;
+      }
+
+      .wtab.selected {
+        opacity: 1;
+        background-color: #263846;
+      }
     }
 
-    .wtab.selected {
-      opacity: 1;
-      background-color: #263846;
+    .bordertop {
+      border-top: solid 1px #999;
     }
-  }
-
-  .bordertop {
-    border-top: solid 1px #999;
   }
 }
