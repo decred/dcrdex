@@ -225,6 +225,11 @@ func startNode(node *node.Node, network dex.Network) (*les.LightEthereum, error)
 
 	ethCfg.SyncMode = downloader.LightSync
 
+	// Eth has a default RPCTxFeeCap of one eth. This prevents txn with a
+	// total gas fee higher than than one eth to fail when sending. Setting
+	// the value to zero removes the limit completely.
+	ethCfg.RPCTxFeeCap = 0
+
 	leth, err := les.New(node, &ethCfg)
 	if err != nil {
 		return nil, err
