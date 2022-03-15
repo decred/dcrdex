@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"math/big"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -38,7 +39,10 @@ var (
 )
 
 func registerToken(tokenID uint32, desc string) {
-	token := dexeth.Tokens[tokenID]
+	token, found := dexeth.Tokens[tokenID]
+	if !found {
+		panic("token " + strconv.Itoa(int(tokenID)) + " not known")
+	}
 	asset.RegisterToken(tokenID, token.Token, &asset.WalletDefinition{
 		Type:        "token",
 		Description: desc,

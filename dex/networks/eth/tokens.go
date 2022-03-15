@@ -53,12 +53,8 @@ func (t *Token) EVMToAtomic(v *big.Int) uint64 {
 	return 0
 }
 
-// NetToken are the addresses associated with the token and it's versioned
-// swap contracts. The addresses are encoded as [20]byte since it works for
-// erc20 on ETH, but a custom interface or maybe an fmt.Stringer might be used
-// to generalize this in the future. We can't encode as common.Address because
-// it would require an lgpl build, and that would preclude the use of the type
-// in higher-level packages like core.
+// NetToken are the addresses associated with the token and its versioned swap
+// contracts.
 type NetToken struct {
 	// Address is the token contract address.
 	Address common.Address `json:"address"`
@@ -73,7 +69,7 @@ type SwapContract struct {
 }
 
 var Tokens = map[uint32]*Token{
-	// testTokenID = 'dextt.eth' is the used for the test token from
+	// testTokenID = 'dextt.eth' is the ID used for the test token from
 	// dex/networks/erc20/contracts/TestToken.sol that is deployed on the simnet
 	// harness, and possibly other networks too if needed for testing.
 	testTokenID: {
