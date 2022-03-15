@@ -1655,6 +1655,26 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 		errs.add("not broadcasting swap while DEX %s connection is down (could be revoked)", t.dc.acct.host)
 		return
 	}
+
+	// Use a higher swap fee rate if a local estimate is higher than the
+	// prescribed rate, but not higher than the funded (max) rate.
+	if highestFeeRate < t.metaData.MaxFeeRate {
+		var freshRate uint64
+		if r, ok := t.wallets.fromWallet.feeRater(); ok {
+			freshRate, _ = r.FeeRate()
+		}
+		if freshRate == 0 { // either not a FeeRater, or FeeRate failed
+			freshRate = t.dc.bestBookFeeSuggestion(fromAsset.ID)
+		}
+		if freshRate > t.metaData.MaxFeeRate {
+			freshRate = t.metaData.MaxFeeRate
+		}
+		if highestFeeRate < freshRate {
+			c.log.Infof("Prescribed %v fee rate %v looks low, using %v",
+				fromAsset.Symbol, highestFeeRate, freshRate)
+			highestFeeRate = freshRate
+		}
+	}
 	// swapMatches is no longer idempotent after this point.
 
 	// Send the swap. If the swap fails, set the swapErr flag for all matches.
