@@ -1,5 +1,4 @@
 //go:build live && lgpl
-// +build live,lgpl
 
 // Run a test server with
 // go test -v -tags live -run Server -timeout 60m

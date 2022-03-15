@@ -2,7 +2,6 @@
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
 //go:build !live
-// +build !live
 
 package rpcserver
 

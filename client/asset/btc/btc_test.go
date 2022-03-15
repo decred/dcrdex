@@ -1,5 +1,4 @@
 //go:build !spvlive
-// +build !spvlive
 
 package btc
 

@@ -1,5 +1,4 @@
 //go:build pgonline
-// +build pgonline
 
 package pg
 

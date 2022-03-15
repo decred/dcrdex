@@ -1,5 +1,4 @@
 //go:build harness
-// +build harness
 
 package core
 

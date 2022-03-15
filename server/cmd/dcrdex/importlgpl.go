@@ -5,7 +5,6 @@
 // burden of go-ethereum's GNU Lesser General Public License.
 
 //go:build lgpl
-// +build lgpl
 
 package main
 
