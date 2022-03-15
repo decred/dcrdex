@@ -81,7 +81,7 @@ type Balancer interface {
 	// CheckBalance checks that the address's account has sufficient balance to
 	// trade the outgoing number of lots (totaling qty) and incoming number of
 	// redeems.
-	CheckBalance(acctAddr string, assetID uint32, qty, lots uint64, redeems int) bool
+	CheckBalance(acctAddr string, assetID, redeemAssetID uint32, qty, lots uint64, redeems int) bool
 }
 
 // Config is the Market configuration.
@@ -309,7 +309,7 @@ ordersLoop:
 
 			if errors.Is(err, asset.CoinNotFoundError) {
 				// spent, exclude this order
-				coin, _ := asset.DecodeCoinID(dex.BipIDSymbol(assetID), lo.Coins[i]) // coin decoding succeeded in CheckUnspent
+				coin, _ := asset.DecodeCoinID(assetID, lo.Coins[i]) // coin decoding succeeded in CheckUnspent
 				log.Warnf("Coin %s not unspent for unfilled order %v. "+
 					"Revoking the order.", coin, lo)
 			} else {
@@ -379,7 +379,7 @@ ordersLoop:
 	if baseIsAcctBased {
 		log.Debugf("Checking %d base asset (%d) balances.", len(baseAcctStats), base)
 		for acctAddr, stats := range baseAcctStats {
-			if !cfg.Balancer.CheckBalance(acctAddr, mktInfo.Base, stats.qty, stats.lots, stats.redeems) {
+			if !cfg.Balancer.CheckBalance(acctAddr, mktInfo.Base, mktInfo.Quote, stats.qty, stats.lots, stats.redeems) {
 				log.Info("%s base asset account failed the startup balance check on the %s market", acctAddr, mktInfo.Name)
 				failedBaseAccts[acctAddr] = true
 			}
@@ -399,7 +399,7 @@ ordersLoop:
 	if quoteIsAcctBased {
 		log.Debugf("Checking %d quote asset (%d) balances.", len(quoteAcctStats), quote)
 		for acctAddr, stats := range quoteAcctStats { // quoteAcctStats is nil for utxo-based quote assets
-			if !cfg.Balancer.CheckBalance(acctAddr, mktInfo.Quote, stats.qty, stats.lots, stats.redeems) {
+			if !cfg.Balancer.CheckBalance(acctAddr, mktInfo.Quote, mktInfo.Base, stats.qty, stats.lots, stats.redeems) {
 				log.Errorf("%s quote asset account failed the startup balance check on the %s market", acctAddr, mktInfo.Name)
 				failedQuoteAccts[acctAddr] = true
 			}
@@ -1054,7 +1054,7 @@ orders:
 			// Final fill amount check in case it was matched after we pulled
 			// the list of unfilled orders from the book.
 			if lo.Filled() == 0 {
-				coin, _ := asset.DecodeCoinID(dex.BipIDSymbol(assetID), lo.Coins[i]) // coin decoding succeeded in CheckUnspent
+				coin, _ := asset.DecodeCoinID(assetID, lo.Coins[i]) // coin decoding succeeded in CheckUnspent
 				log.Warnf("Coin %s not unspent for unfilled order %v. "+
 					"Revoking the order.", coin, lo)
 				m.Unbook(lo)

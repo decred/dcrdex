@@ -28,11 +28,12 @@ import (
 )
 
 func init() {
-	asset.Register(assetName, &Driver{})
+	asset.Register(BipID, &Driver{})
 }
 
 const (
 	version   = 0
+	BipID     = 60
 	assetName = "eth"
 	// The blockPollInterval is the delay between calls to bestBlockHash to
 	// check for new blocks.
@@ -412,6 +413,10 @@ func (eth *Backend) AccountBalance(addrStr string) (uint64, error) {
 		return 0, fmt.Errorf("accountBalance error: %w", err)
 	}
 	return dexeth.WeiToGweiUint64(bigBal)
+}
+
+func (eth *Backend) RedeemSize() uint64 {
+	return dexeth.VersionedGases[0].Redeem
 }
 
 // ValidateSignature checks that the pubkey is correct for the address and

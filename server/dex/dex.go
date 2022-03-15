@@ -299,7 +299,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		symbol := strings.ToLower(assetConf.Symbol)
 
 		// Ensure the symbol is a recognized BIP44 symbol, and retrieve its ID.
-		ID, found := dex.BipSymbolID(symbol)
+		assetID, found := dex.BipSymbolID(symbol)
 		if !found {
 			return nil, fmt.Errorf("asset symbol %q unrecognized", assetConf.Symbol)
 		}
@@ -319,7 +319,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			return nil, fmt.Errorf("max fee rate of 0 is invalid for asset %q", symbol)
 		}
 
-		assetIDs[i] = ID
+		assetIDs[i] = assetID
 	}
 
 	// Check each market's base lot size to see if any asset has different base
@@ -396,42 +396,59 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	assetLogger := cfg.LogBackend.Logger("ASSET")
 	txDataSources := make(map[uint32]auth.TxDataSource)
 	feeMgr := NewFeeManager()
-	for i, assetConf := range cfg.Assets {
+	addAsset := func(assetID uint32, assetConf *AssetConf) error {
 		symbol := strings.ToLower(assetConf.Symbol)
-		assetID := assetIDs[i]
 
-		assetVer, err := asset.Version(symbol)
+		assetVer, err := asset.Version(assetID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to retrieve asset %q version: %w", symbol, err)
+			return fmt.Errorf("failed to retrieve asset %q version: %w", symbol, err)
 		}
 
 		// Create a new asset backend. An asset driver with a name matching the
 		// asset symbol must be available.
 		log.Infof("Starting asset backend %q...", symbol)
 		logger := assetLogger.SubLogger(symbol)
-		be, err := asset.Setup(symbol, assetConf.ConfigPath, logger, cfg.Network)
-		if err != nil {
-			return nil, fmt.Errorf("failed to setup asset %q: %w", symbol, err)
+
+		isToken, parentID := asset.IsToken(assetID)
+		var be asset.Backend
+		if isToken {
+			parent, found := backedAssets[parentID]
+			if !found {
+				return fmt.Errorf("attempting to load token asset %d before parent %d", assetID, parentID)
+			}
+			backer, is := parent.Backend.(asset.TokenBacker)
+			if !is {
+				return fmt.Errorf("token %d parent %d is not a TokenBacker", assetID, parentID)
+			}
+			be, err = backer.TokenBackend(assetID, assetConf.ConfigPath)
+			if err != nil {
+				return fmt.Errorf("failed to setup token %q: %w", symbol, err)
+			}
+		} else {
+			be, err = asset.Setup(assetID, assetConf.ConfigPath, logger, cfg.Network)
+			if err != nil {
+				return fmt.Errorf("failed to setup asset %q: %w", symbol, err)
+			}
 		}
 
 		err = startSubSys(fmt.Sprintf("Asset[%s]", symbol), be)
 		if err != nil {
-			return nil, fmt.Errorf("failed to start asset %q: %w", symbol, err)
+			return fmt.Errorf("failed to start asset %q: %w", symbol, err)
 		}
 
 		if assetConf.RegFee > 0 {
 			// Make sure we can check on fee transactions.
 			fc, ok := be.(FeeCoiner)
 			if !ok {
-				return nil, fmt.Errorf("asset %v is not a FeeCoiner", symbol)
+				return fmt.Errorf("asset %v is not a FeeCoiner", symbol)
 			}
 			// Make sure we can derive addresses from an extended public key.
-			addresser, startChild, err := asset.NewAddresser(symbol, assetConf.RegXPub, storage, cfg.Network)
+			addresser, startChild, err := asset.NewAddresser(assetID, assetConf.RegXPub, storage, cfg.Network)
 			if err != nil {
-				return nil, fmt.Errorf("failed to create fee addresser for asset %v: %w", symbol, err)
+				return fmt.Errorf("failed to create fee addresser for asset %v: %w", symbol, err)
 			}
 			if other := xpubs[assetConf.RegXPub]; other != "" {
-				return nil, fmt.Errorf("reused xpub for assets %v and %v forbidden", other, symbol)
+				return fmt.Errorf("reused xpub for assets %v and %v forbidden", other, symbol)
 			}
 			xpubs[assetConf.RegXPub] = symbol
 			feeAssets[symbol] = &msgjson.FeeAsset{
@@ -445,9 +462,19 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 				symbol, assetConf.RegFee, assetConf.RegConfs, startChild)
 		}
 
-		unitInfo, err := asset.UnitInfo(symbol)
+		unitInfo, err := asset.UnitInfo(assetID)
 		if err != nil {
-			return nil, err
+			return err
+		}
+
+		var redeemSize uint64
+		var coinLocker coinlock.CoinLocker
+
+		accountBalancer, isAccountRedeemer := be.(asset.AccountBalancer)
+		if isAccountRedeemer {
+			redeemSize = accountBalancer.RedeemSize()
+		} else {
+			coinLocker = dexCoinLocker.AssetLocker(assetID).Swap()
 		}
 
 		initTxSize := uint64(be.InitTxSize())
@@ -460,6 +487,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 				MaxFeeRate:   assetConf.MaxFeeRate,
 				SwapSize:     initTxSize,
 				SwapSizeBase: initTxSizeBase,
+				RedeemSize:   redeemSize,
 				SwapConf:     assetConf.SwapConf,
 				UnitInfo:     unitInfo,
 			},
@@ -469,7 +497,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		backedAssets[assetID] = ba
 		lockableAssets[assetID] = &swap.SwapperAsset{
 			BackedAsset: ba,
-			Locker:      dexCoinLocker.AssetLocker(assetID).Swap(),
+			Locker:      coinLocker,
 		}
 		feeMgr.AddFetcher(ba)
 
@@ -483,11 +511,33 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			MaxFeeRate:   assetConf.MaxFeeRate,
 			SwapSize:     initTxSize,
 			SwapSizeBase: initTxSizeBase,
+			RedeemSize:   redeemSize,
 			SwapConf:     uint16(assetConf.SwapConf),
 			UnitInfo:     unitInfo,
 		})
 
 		txDataSources[assetID] = be.TxData
+		return nil
+	}
+
+	// Add base chain assets before tokens.
+	tokens := make(map[uint32]*AssetConf)
+
+	for i, assetConf := range cfg.Assets {
+		assetID := assetIDs[i]
+		if isToken, _ := asset.IsToken(assetID); isToken {
+			tokens[assetID] = assetConf
+			continue
+		}
+		if err := addAsset(assetID, assetConf); err != nil {
+			return nil, err
+		}
+	}
+
+	for assetID, assetConf := range tokens {
+		if err := addAsset(assetID, assetConf); err != nil {
+			return nil, err
+		}
 	}
 
 	for _, mkt := range cfg.Markets {
@@ -605,7 +655,11 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	// marketTunnels map.
 	marketTunnels := make(map[string]market.MarketTunnel, len(cfg.Markets))
 	pendingAccounters := make(map[string]market.PendingAccounter, len(cfg.Markets))
-	dexBalancer := market.NewDEXBalancer(pendingAccounters, backedAssets, swapper)
+
+	dexBalancer, err := market.NewDEXBalancer(pendingAccounters, backedAssets, swapper)
+	if err != nil {
+		return nil, fmt.Errorf("NewDEXBalancer error: %w", err)
+	}
 
 	// Markets
 	usersWithOrders := make(map[account.AccountID]struct{})

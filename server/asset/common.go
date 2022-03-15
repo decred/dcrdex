@@ -113,6 +113,13 @@ type AccountBalancer interface {
 	// etc. must be exactly the same order-to-order, since the address string
 	// is used as a key for various accounting operations throughout DEX.
 	ValidateSignature(addr string, pubkey, msg, sig []byte) error
+	// RedeemSize is the gas used for a single redemption.
+	RedeemSize() uint64
+}
+
+// TokenBacker is implemented by Backends that support degenerate tokens.
+type TokenBacker interface {
+	TokenBackend(assetID uint32, configPath string) (Backend, error)
 }
 
 // Coin represents a transaction input or output.
