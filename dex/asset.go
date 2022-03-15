@@ -150,3 +150,13 @@ func (ui *UnitInfo) ConventionalString(v uint64) string {
 	prec := int(math.Round(math.Log10(float64(c)))) // Assumes integer powers of 10
 	return strconv.FormatFloat(float64(v)/float64(c), 'f', prec, 64)
 }
+
+// Token is a generic representation of a token-type asset.
+type Token struct {
+	// ParentID is the asset ID of the token's parent asset.
+	ParentID uint32 `json:"parentID"`
+	// Name is the display name of the token asset.
+	Name string `json:"name"`
+	// UnitInfo is the UnitInfo for the token.
+	UnitInfo UnitInfo `json:"unitInfo"`
+}

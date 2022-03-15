@@ -138,7 +138,7 @@ func TestCalldataDecoding(t *testing.T) {
 		if err != nil {
 			t.Errorf("test %d: failed to parse abi: %v", i, err)
 		}
-		_, err = parseCallData(common.Hex2Bytes(hexdata), &abi)
+		_, err = ParseCallData(common.Hex2Bytes(hexdata), &abi)
 		if err == nil {
 			t.Errorf("test %d: expected decoding to fail: %s", i, hexdata)
 		}
@@ -165,7 +165,7 @@ func TestCalldataDecoding(t *testing.T) {
 		if err != nil {
 			t.Errorf("test %d: failed to parse abi: %v", i, err)
 		}
-		_, err = parseCallData(common.Hex2Bytes(hexdata), &abi)
+		_, err = ParseCallData(common.Hex2Bytes(hexdata), &abi)
 		if err != nil {
 			t.Errorf("test %d: unexpected failure on input %s:\n %v (%d bytes) ", i, hexdata, err, len(common.Hex2Bytes(hexdata)))
 		}
