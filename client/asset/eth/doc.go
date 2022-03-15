@@ -5,7 +5,6 @@
 // go-ethereum's GNU Lesser General Public License.
 
 //go:build lgpl
-// +build lgpl
 
 // Package eth implements methods to work with ethereum swap contracts and
 // transactions. The LGPL is a more restrictive license that may be more of a

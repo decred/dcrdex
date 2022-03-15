@@ -1,5 +1,4 @@
 //go:build bchlive
-// +build bchlive
 
 // go test -v -tags bchlive -run UTXOStats
 // -----------------------------------

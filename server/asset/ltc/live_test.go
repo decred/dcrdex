@@ -1,5 +1,4 @@
 //go:build ltclive
-// +build ltclive
 
 // go test -v -tags ltclive -run UTXOStats
 // -----------------------------------

@@ -1,5 +1,4 @@
 //go:build lgpl
-// +build lgpl
 
 package eth
 
