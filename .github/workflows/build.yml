@@ -1,22 +1,24 @@
 name: Build and Test
 on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
   build-go:
     name: Go CI
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go: [1.16, 1.17]
+        go: [1.17, 1.18]
     steps:
       - name: Set up Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v3
         with:
           go-version: ${{ matrix.go }}
 
       - name: Check out source
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Install Linters
-        run: "curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.43.0"
+        run: "curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.45.0"
 
       - name: Test
         env:
@@ -30,9 +32,9 @@ jobs:
       matrix:
         node-version: [16.x, 17.x]
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Use nodejs ${{ matrix.node-version }}
-      uses: actions/setup-node@v2
+      uses: actions/setup-node@v3
       with:
         node-version: ${{ matrix.node-version }}
     - name: npm clean-install
