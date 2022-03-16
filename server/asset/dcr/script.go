@@ -6,6 +6,7 @@ package dcr
 import (
 	"fmt"
 
+	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrec/edwards/v2"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -37,8 +38,13 @@ func checkSigS256(msg, pkBytes, sigBytes []byte) error {
 	if err != nil {
 		return fmt.Errorf("error decoding secp256k1 Signature from bytes: %w", err)
 	}
-	if !signature.Verify(msg, pubKey) {
-		return fmt.Errorf("secp256k1 signature verification failed")
+	hash := chainhash.HashB(msg)
+	if !signature.Verify(hash, pubKey) {
+		// This might be a legacy (buggy) client that signed the truncated
+		// message itself. (V0PURGE!)
+		if !signature.Verify(msg, pubKey) {
+			return fmt.Errorf("secp256k1 signature verification failed")
+		}
 	}
 	return nil
 }
@@ -54,8 +60,13 @@ func checkSigEdwards(msg, pkBytes, sigBytes []byte) error {
 	if err != nil {
 		return fmt.Errorf("error decoding edwards Signature from bytes: %w", err)
 	}
-	if !signature.Verify(msg, pubKey) {
-		return fmt.Errorf("edwards signature verification failed")
+	hash := chainhash.HashB(msg)
+	if !signature.Verify(hash, pubKey) {
+		// This might be a legacy (buggy) client that signed the truncated
+		// message itself. (V0PURGE!)
+		if !signature.Verify(msg, pubKey) {
+			return fmt.Errorf("edwards signature verification failed")
+		}
 	}
 	return nil
 }
@@ -71,8 +82,13 @@ func checkSigSchnorr(msg, pkBytes, sigBytes []byte) error {
 	if err != nil {
 		return fmt.Errorf("error decoding schnorr Signature from bytes: %w", err)
 	}
-	if !signature.Verify(msg, pubKey) {
-		return fmt.Errorf("schnorr signature verification failed")
+	hash := chainhash.HashB(msg)
+	if !signature.Verify(hash, pubKey) {
+		// This might be a legacy (buggy) client that signed the truncated
+		// message itself. (V0PURGE!)
+		if !signature.Verify(msg, pubKey) {
+			return fmt.Errorf("schnorr signature verification failed")
+		}
 	}
 	return nil
 }
