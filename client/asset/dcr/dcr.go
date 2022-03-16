@@ -1788,9 +1788,10 @@ func (dcr *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 		return nil, nil, err
 	}
 	defer priv.Zero()
-	signature := ecdsa.Sign(priv, msg)
+	hash := chainhash.HashB(msg) // legacy servers will not accept this signature!
+	signature := ecdsa.Sign(priv, hash)
 	pubkeys = append(pubkeys, priv.PubKey().SerializeCompressed())
-	sigs = append(sigs, signature.Serialize())
+	sigs = append(sigs, signature.Serialize()) // DER format
 	return pubkeys, sigs, nil
 }
 
