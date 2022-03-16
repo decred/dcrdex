@@ -37,7 +37,6 @@ import (
 	serverdex "decred.org/dcrdex/server/dex"
 	"github.com/decred/dcrd/crypto/blake256"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
-	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 )
@@ -97,7 +96,6 @@ var (
 	}
 	tDexPriv            *secp256k1.PrivateKey
 	tDexKey             *secp256k1.PublicKey
-	tDexAccountID       account.AccountID
 	tPW                        = []byte("dexpw")
 	wPW                        = []byte("walletpw")
 	tDexHost                   = "somedex.tld:7232"
@@ -142,9 +140,9 @@ func makeAcker(serializer func(msg *msgjson.Message) msgjson.Signable) func(msg 
 	return func(msg *msgjson.Message, f msgFunc) error {
 		signable := serializer(msg)
 		sigMsg := signable.Serialize()
-		sig := ecdsa.Sign(tDexPriv, sigMsg)
+		sig := signMsg(tDexPriv, sigMsg)
 		ack := &msgjson.Acknowledgement{
-			Sig: sig.Serialize(),
+			Sig: sig,
 		}
 		resp, _ := msgjson.NewResponse(msg.ID, ack, nil)
 		f(resp)
@@ -201,7 +199,7 @@ func tNewAccount(crypter *tCrypter) *dexAccount {
 		encKey:    encKey,
 		dexPubKey: tDexKey,
 		privKey:   privKey,
-		id:        tDexAccountID,
+		id:        account.NewID(privKey.PubKey().SerializeCompressed()),
 		feeCoin:   []byte("somecoin"),
 	}
 }
@@ -1103,6 +1101,13 @@ func (rig *testRig) queueConfig() {
 
 func (rig *testRig) queueRegister(regRes *msgjson.RegisterResult) {
 	rig.ws.queueResponse(msgjson.RegisterRoute, func(msg *msgjson.Message, f msgFunc) error {
+		// The response includes data from the request. Patch the pre-defined
+		// response with the client's pubkey from the request, and then sign the
+		// response, which needs the client pubkey for serialization.
+		reg := new(msgjson.Register)
+		msg.Unmarshal(reg)
+		regRes.ClientPubKey = reg.PubKey
+		sign(tDexPriv, regRes)
 		resp, _ := msgjson.NewResponse(msg.ID, regRes, nil)
 		f(resp)
 		return nil
@@ -1114,9 +1119,8 @@ func (rig *testRig) queueNotifyFee() {
 		req := new(msgjson.NotifyFee)
 		json.Unmarshal(msg.Payload, req)
 		sigMsg := req.Serialize()
-		sig := ecdsa.Sign(tDexPriv, sigMsg)
-		// Shouldn't Sig be dex.Bytes?
-		result := &msgjson.Acknowledgement{Sig: sig.Serialize()}
+		sig := signMsg(tDexPriv, sigMsg)
+		result := &msgjson.Acknowledgement{Sig: sig}
 		resp, _ := msgjson.NewResponse(msg.ID, result, nil)
 		f(resp)
 		return nil
@@ -1170,7 +1174,6 @@ func TestMain(m *testing.M) {
 	tCtx, shutdown = context.WithCancel(context.Background())
 	tDexPriv, _ = secp256k1.GeneratePrivateKey()
 	tDexKey = tDexPriv.PubKey()
-	tDexAccountID = account.NewID(tDexPriv.PubKey().SerializeCompressed())
 
 	doIt := func() int {
 		// Not counted as coverage, must test Archiver constructor explicitly.
@@ -1638,14 +1641,17 @@ func TestRegister(t *testing.T) {
 	// an error (no dupes). Initial state is to return an error.
 	rig.db.acctErr = tErr
 
+	// (*Core).Register does setupCryptoV2 to make the dc.acct.privKey etc., so
+	// we don't know the ClientPubKey here. It must be set in the request
+	// handler configured by queueRegister.
+
 	regRes := &msgjson.RegisterResult{
-		DEXPubKey:    rig.acct.dexPubKey.SerializeCompressed(),
-		ClientPubKey: dex.Bytes{0x1}, // part of the serialization, but not the response
-		Address:      "someaddr",
-		Fee:          tFee,
-		Time:         encode.UnixMilliU(time.Now()),
+		DEXPubKey: rig.acct.dexPubKey.SerializeCompressed(),
+		// ClientPubKey is set in the handler, where the sig is made
+		Address: "someaddr",
+		Fee:     tFee,
+		Time:    encode.UnixMilliU(time.Now()),
 	}
-	sign(tDexPriv, regRes)
 
 	var wg sync.WaitGroup
 	defer wg.Wait() // don't allow fail after TestRegister return
@@ -1858,7 +1864,15 @@ func TestRegister(t *testing.T) {
 	goodSig := regRes.Sig
 	regRes.Sig = []byte("badsig")
 	queueConfigAndConnectUnknownAcct()
-	rig.queueRegister(regRes)
+	rig.ws.queueResponse(msgjson.RegisterRoute, func(msg *msgjson.Message, f msgFunc) error {
+		reg := new(msgjson.Register)
+		msg.Unmarshal(reg)
+		regRes.ClientPubKey = reg.PubKey
+		// NOT re-signing it, just keep badsig
+		resp, _ := msgjson.NewResponse(msg.ID, regRes, nil)
+		f(resp)
+		return nil
+	})
 	run()
 	if !errorHasCode(err, signatureErr) {
 		t.Fatalf("wrong error for bad signature on register response: %v", err)
@@ -2940,6 +2954,7 @@ func TestRefundReserves(t *testing.T) {
 	lo.Force = order.ImmediateTiF
 	loid = lo.ID()
 	msgMatch.OrderID = loid[:]
+	sign(tDexPriv, msgMatch)
 
 	test("partial immediate TiF limit order", reserves/3, func() {
 		matchReq, _ := msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
@@ -2951,14 +2966,17 @@ func TestRefundReserves(t *testing.T) {
 	lo.Force = order.StandingTiF
 	loid = lo.ID()
 	msgMatch.OrderID = loid[:]
+	sign(tDexPriv, msgMatch)
 
 	addMatch := func(side order.MatchSide, status order.MatchStatus, qty uint64) order.MatchID {
+		t.Helper()
 		msgMatch.Side = uint8(side)
 		m := *msgMatch
 		var mid order.MatchID
 		copy(mid[:], encode.RandomBytes(32))
 		m.MatchID = mid[:]
 		m.Quantity = qty
+		sign(tDexPriv, &m)
 		matchReq, _ := msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{&m})
 		if err := handleMatchRoute(tCore, rig.dc, matchReq); err != nil {
 			t.Fatalf("handleMatchRoute error: %v", err)
@@ -2999,6 +3017,7 @@ func TestRefundReserves(t *testing.T) {
 	moid := mo.ID()
 	dbOrder.Order = mo
 	msgMatch.OrderID = moid[:]
+	sign(tDexPriv, msgMatch)
 
 	tracker = newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails, nil, 0, reserves)
@@ -3186,6 +3205,7 @@ func TestRedemptionReserves(t *testing.T) {
 	lo.Force = order.ImmediateTiF
 	loid = lo.ID()
 	msgMatch.OrderID = loid[:]
+	sign(tDexPriv, msgMatch)
 
 	test("partially filled immediate TiF limit order", reserves/3, func() {
 		matchReq, _ := msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
@@ -3202,6 +3222,7 @@ func TestRedemptionReserves(t *testing.T) {
 	moid := mo.ID()
 	dbOrder.Order = mo
 	msgMatch.OrderID = moid[:]
+	sign(tDexPriv, msgMatch)
 
 	tracker = newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails, nil, reserves, 0)
@@ -3225,6 +3246,7 @@ func TestRedemptionReserves(t *testing.T) {
 		copy(mid[:], encode.RandomBytes(32))
 		m.MatchID = mid[:]
 		m.Quantity = qty
+		sign(tDexPriv, &m)
 		matchReq, _ := msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{&m})
 		if err := handleMatchRoute(tCore, rig.dc, matchReq); err != nil {
 			t.Fatalf("handleMatchRoute error: %v", err)
@@ -4200,6 +4222,7 @@ func TestTradeTracking(t *testing.T) {
 	// Make sure that a fee rate higher than our recorded MaxFeeRate results in
 	// an error.
 	msgMatch.FeeRateBase = tMaxFeeRate + 1
+	sign(tDexPriv, msgMatch)
 	msg, _ := msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
 	err = handleMatchRoute(tCore, rig.dc, msg)
 	if err == nil || !strings.Contains(err.Error(), "is > MaxFeeRate") {
@@ -4208,6 +4231,7 @@ func TestTradeTracking(t *testing.T) {
 
 	// Restore fee rate.
 	msgMatch.FeeRateBase = tMaxFeeRate
+	sign(tDexPriv, msgMatch)
 	msg, _ = msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
 
 	// Handle new match as maker with a queued invalid DEX init ack.
@@ -4643,7 +4667,7 @@ func TestTradeTracking(t *testing.T) {
 	tracker.cancel = nil
 	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
 	msgMatch.Side = uint8(order.Maker)
-	sign(tDexPriv, msgMatch)
+	sign(tDexPriv, msgMatch) // Side is not in the serialization but whatever
 	msg, _ = msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
 
 	tracker.metaData.Status = order.OrderStatusEpoch
