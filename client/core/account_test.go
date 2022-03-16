@@ -11,6 +11,8 @@ import (
 
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/server/account"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
 func TestAccountExport(t *testing.T) {
@@ -237,11 +239,12 @@ func TestAccountExportAccountProofError(t *testing.T) {
 }
 
 func buildTestAccount(host string) Account {
+	privKey, _ := secp256k1.GeneratePrivateKey()
 	return Account{
 		Host:          host,
-		AccountID:     tDexAccountID.String(),
+		AccountID:     account.NewID(privKey.PubKey().SerializeCompressed()).String(), // can be anything though
+		PrivKey:       hex.EncodeToString(privKey.Serialize()),
 		DEXPubKey:     hex.EncodeToString(tDexKey.SerializeCompressed()),
-		PrivKey:       hex.EncodeToString(tDexPriv.Serialize()),
 		Cert:          hex.EncodeToString([]byte{0x1}),
 		FeeCoin:       hex.EncodeToString([]byte("somecoin")),
 		FeeProofSig:   hex.EncodeToString(tFeeProofSig),

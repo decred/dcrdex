@@ -6384,8 +6384,8 @@ func convertAssetInfo(ai *msgjson.Asset) *dex.Asset {
 	}
 }
 
-// checkSigS256 checks that the message's signature was created with the
-// private key for the provided secp256k1 public key.
+// checkSigS256 checks that the message's signature was created with the private
+// key for the provided secp256k1 public key on the sha256 hash of the message.
 func checkSigS256(msg, pkBytes, sigBytes []byte) error {
 	pubKey, err := secp256k1.ParsePubKey(pkBytes)
 	if err != nil {
@@ -6405,11 +6405,12 @@ func checkSigS256(msg, pkBytes, sigBytes []byte) error {
 	return nil
 }
 
-// signMsg signs the message with provided private key.
+// signMsg hashes and signs the message with the sha256 hash function and the
+// provided private key.
 func signMsg(privKey *secp256k1.PrivateKey, msg []byte) []byte {
-	// NOTE: legacy servers will not accept this signature:
-	// hash := sha256.Sum256(msg)
-	return ecdsa.Sign(privKey, msg).Serialize()
+	// NOTE: legacy servers will not accept this signature.
+	hash := sha256.Sum256(msg)
+	return ecdsa.Sign(privKey, hash[:]).Serialize()
 }
 
 // sign signs the msgjson.Signable with the provided private key.
