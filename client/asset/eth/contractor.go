@@ -22,7 +22,6 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 // contractor is a translation layer between the abigen bindings and the DEX app.
@@ -38,14 +37,14 @@ type contractor interface {
 	estimateRefundGas(ctx context.Context, secretHash [32]byte) (uint64, error)
 	isRedeemable(secretHash, secret [32]byte) (bool, error)
 	// incomingValue checks if the transaction redeems or refunds to the
-	// contract and sums the incoming value. It is not an error if the
+	// contract and returns the incoming value. It is not an error if the
 	// transaction does not pay to the contract, and the value returned in that
 	// case will always be zero.
 	incomingValue(context.Context, *types.Transaction) (uint64, error)
 	isRefundable(secretHash [32]byte) (bool, error)
 }
 
-type contractorConstructor func(net dex.Network, addr common.Address, ec *ethclient.Client) (contractor, error)
+type contractorConstructor func(net dex.Network, addr common.Address, cb bind.ContractBackend) (contractor, error)
 
 type contractV0 interface {
 	Initiate(opts *bind.TransactOpts, initiations []swapv0.ETHSwapInitiation) (*types.Transaction, error)
@@ -61,24 +60,24 @@ type contractV0 interface {
 type contractorV0 struct {
 	contractV0   // *swapv0.ETHSwap
 	abi          *abi.ABI
-	ec           *ethclient.Client
+	cb           bind.ContractBackend
 	contractAddr common.Address
 	acctAddr     common.Address
 }
 
-func newV0contractor(net dex.Network, acctAddr common.Address, ec *ethclient.Client) (contractor, error) {
+func newV0Contractor(net dex.Network, acctAddr common.Address, cb bind.ContractBackend) (contractor, error) {
 	contractAddr, exists := dexeth.ContractAddresses[0][net]
 	if !exists || contractAddr == (common.Address{}) {
 		return nil, fmt.Errorf("no contract address for version 0, net %s", net)
 	}
-	c, err := swapv0.NewETHSwap(contractAddr, ec)
+	c, err := swapv0.NewETHSwap(contractAddr, cb)
 	if err != nil {
 		return nil, err
 	}
 	return &contractorV0{
 		contractV0:   c,
 		abi:          dexeth.ABIs[0],
-		ec:           ec,
+		cb:           cb,
 		contractAddr: contractAddr,
 		acctAddr:     acctAddr,
 	}, nil
@@ -189,7 +188,7 @@ func (c *contractorV0) estimateRedeemGas(ctx context.Context, secrets [][32]byte
 		return 0, err
 	}
 
-	return c.ec.EstimateGas(ctx, ethereum.CallMsg{
+	return c.cb.EstimateGas(ctx, ethereum.CallMsg{
 		From: c.acctAddr,
 		To:   &c.contractAddr,
 		Data: data,
@@ -202,7 +201,7 @@ func (c *contractorV0) estimateRefundGas(ctx context.Context, secretHash [32]byt
 		return 0, fmt.Errorf("unexpected error packing abi: %v", err)
 	}
 
-	return c.ec.EstimateGas(ctx, ethereum.CallMsg{
+	return c.cb.EstimateGas(ctx, ethereum.CallMsg{
 		From: c.acctAddr,
 		To:   &c.contractAddr,
 		Data: data,
@@ -226,7 +225,7 @@ func (c *contractorV0) estimateInitGas(ctx context.Context, n int) (uint64, erro
 		return 0, nil
 	}
 
-	return c.ec.EstimateGas(ctx, ethereum.CallMsg{
+	return c.cb.EstimateGas(ctx, ethereum.CallMsg{
 		From:  c.acctAddr,
 		To:    &c.contractAddr,
 		Value: big.NewInt(int64(n)),
@@ -262,5 +261,5 @@ func (c *contractorV0) incomingValue(ctx context.Context, tx *types.Transaction)
 }
 
 var contractorConstructors = map[uint32]contractorConstructor{
-	0: newV0contractor,
+	0: newV0Contractor,
 }

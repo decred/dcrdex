@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
-	"sync"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
@@ -34,6 +33,7 @@ import (
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/enode"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
 
 	"github.com/ethereum/go-ethereum/consensus/misc"
@@ -52,16 +52,14 @@ var (
 // nodeClient satisfies the ethFetcher interface. Do not use until Connect is
 // called.
 type nodeClient struct {
-	net          dex.Network
-	log          dex.Logger
-	creds        *accountCredentials
-	p2pSrv       *p2p.Server
-	ec           *ethclient.Client
-	node         *node.Node
-	leth         *les.LightEthereum
-	chainID      *big.Int
-	contractors  map[uint32]contractor
-	nonceSendMtx sync.Mutex
+	net     dex.Network
+	log     dex.Logger
+	creds   *accountCredentials
+	p2pSrv  *p2p.Server
+	ec      *ethclient.Client
+	node    *node.Node
+	leth    *les.LightEthereum
+	chainID *big.Int
 
 	tokenSwapContract     *v0.ERC20Swap
 	tokenSwapContractAddr *common.Address
@@ -77,24 +75,17 @@ func newNodeClient(dir string, net dex.Network, log dex.Logger) (*nodeClient, er
 		return nil, err
 	}
 
-	leth, err := startNode(node, net)
-	if err != nil {
-		return nil, err
-	}
-
 	creds, err := nodeCredentials(node)
 	if err != nil {
 		return nil, err
 	}
 
 	return &nodeClient{
-		chainID:     big.NewInt(chainIDs[net]),
-		node:        node,
-		leth:        leth,
-		creds:       creds,
-		net:         net,
-		log:         log,
-		contractors: make(map[uint32]contractor),
+		chainID: big.NewInt(chainIDs[net]),
+		node:    node,
+		creds:   creds,
+		net:     net,
+		log:     log,
 	}, nil
 }
 
@@ -102,9 +93,18 @@ func (n *nodeClient) address() common.Address {
 	return n.creds.addr
 }
 
+func (n *nodeClient) chainConfig() *params.ChainConfig {
+	return n.leth.ApiBackend.ChainConfig()
+}
+
 // connect connects to a node. It then wraps ethclient's client and
 // bundles commands in a form we can easily use.
-func (n *nodeClient) connect(ctx context.Context) error {
+func (n *nodeClient) connect(ctx context.Context) (err error) {
+	n.leth, err = startNode(n.node, n.net)
+	if err != nil {
+		return err
+	}
+
 	client, err := n.node.Attach()
 	if err != nil {
 		return fmt.Errorf("unable to dial rpc: %v", err)
@@ -122,12 +122,6 @@ func (n *nodeClient) connect(ctx context.Context) error {
 		return err
 	}
 
-	for ver, constructor := range contractorConstructors {
-		if n.contractors[ver], err = constructor(n.net, n.creds.addr, n.ec); err != nil {
-			return fmt.Errorf("error constructor version %d contractor: %v", ver, err)
-		}
-	}
-
 	return nil
 }
 
@@ -143,24 +137,6 @@ func (n *nodeClient) shutdown() {
 	}
 }
 
-// withcontractor runs the provided function with the versioned contractor.
-func (n *nodeClient) withcontractor(ver uint32, f func(contractor) error) error {
-	contractor, found := n.contractors[ver]
-	if !found {
-		return fmt.Errorf("no version %d contractor", ver)
-	}
-	return f(contractor)
-}
-
-// bestBlockHash gets the best block's hash at the time of calling.
-func (n *nodeClient) bestBlockHash(ctx context.Context) (common.Hash, error) {
-	header, err := n.bestHeader(ctx)
-	if err != nil {
-		return common.Hash{}, err
-	}
-	return header.Hash(), nil
-}
-
 func (n *nodeClient) peerCount() uint32 {
 	return uint32(n.p2pSrv.PeerCount())
 }
@@ -168,11 +144,6 @@ func (n *nodeClient) peerCount() uint32 {
 // bestHeader gets the best header at the time of calling.
 func (n *nodeClient) bestHeader(ctx context.Context) (*types.Header, error) {
 	return n.leth.ApiBackend.HeaderByNumber(ctx, rpc.LatestBlockNumber)
-}
-
-// block gets the block identified by hash.
-func (n *nodeClient) block(ctx context.Context, hash common.Hash) (*types.Block, error) {
-	return n.leth.ApiBackend.BlockByHash(ctx, hash)
 }
 
 func (n *nodeClient) stateAt(ctx context.Context, bn rpc.BlockNumber) (*state.StateDB, error) {
@@ -198,68 +169,6 @@ func (n *nodeClient) addressBalance(ctx context.Context, addr common.Address) (*
 	return n.balanceAt(ctx, addr, rpc.LatestBlockNumber)
 }
 
-// balance gets the current and pending balances.
-func (n *nodeClient) balance(ctx context.Context) (*Balance, error) {
-	bal, err := n.balanceAt(ctx, n.creds.addr, rpc.LatestBlockNumber)
-	if err != nil {
-		return nil, fmt.Errorf("pending balance error: %w", err)
-	}
-
-	pendingTxs, err := n.pendingTransactions()
-	if err != nil {
-		return nil, fmt.Errorf("error getting pending txs: %w", err)
-	}
-
-	outgoing := new(big.Int)
-	incoming := new(big.Int)
-	zero := new(big.Int)
-
-	addFees := func(tx *types.Transaction) {
-		gas := new(big.Int).SetUint64(tx.Gas())
-		// For legacy transactions, GasFeeCap returns gas price
-		if gasFeeCap := tx.GasFeeCap(); gasFeeCap != nil {
-			outgoing.Add(outgoing, new(big.Int).Mul(gas, gasFeeCap))
-		} else {
-			n.log.Errorf("unable to calculate fees for tx %s", tx.Hash())
-		}
-	}
-
-	ethSigner := types.LatestSigner(n.leth.ApiBackend.ChainConfig()) // "latest" good for pending
-
-	for _, tx := range pendingTxs {
-		from, _ := ethSigner.Sender(tx) // zero Address on error
-		if from != n.creds.addr {
-			continue
-		}
-		addFees(tx)
-		v := tx.Value()
-		if v.Cmp(zero) == 0 {
-			// If zero value, attempt to find redemptions or refunds that pay
-			// to us.
-			for ver, c := range n.contractors {
-				in, err := c.incomingValue(ctx, tx)
-				if err != nil {
-					n.log.Errorf("version %d contractor incomingValue error: %v", ver, err)
-					continue
-				}
-				if in > 0 {
-					incoming.Add(incoming, dexeth.GweiToWei(in))
-				}
-			}
-		} else {
-			// If non-zero outgoing value, this is a swap or a send of some
-			// type.
-			outgoing.Add(outgoing, v)
-		}
-	}
-
-	return &Balance{
-		Current:    bal,
-		PendingOut: outgoing,
-		PendingIn:  incoming,
-	}, nil
-}
-
 // unlock the account indefinitely.
 func (n *nodeClient) unlock(pw string) error {
 	return n.creds.ks.TimedUnlock(*n.creds.acct, pw, 0)
@@ -274,15 +183,6 @@ func (n *nodeClient) lock() error {
 func (n *nodeClient) locked() bool {
 	status, _ := n.creds.wallet.Status()
 	return status != "Unlocked"
-}
-
-// sendToAddr sends funds to the address.
-func (n *nodeClient) sendToAddr(ctx context.Context, addr common.Address, amt uint64) (*types.Transaction, error) {
-	txOpts, err := n.txOpts(ctx, amt, defaultSendGasLimit, nil)
-	if err != nil {
-		return nil, err
-	}
-	return n.sendTransaction(ctx, txOpts, addr, nil)
 }
 
 // transactionReceipt retrieves the transaction's receipt.
@@ -327,9 +227,6 @@ func (n *nodeClient) addPeer(peerURL string) error {
 func (n *nodeClient) sendTransaction(ctx context.Context, txOpts *bind.TransactOpts,
 	to common.Address, data []byte) (*types.Transaction, error) {
 
-	n.nonceSendMtx.Lock()
-	defer n.nonceSendMtx.Unlock()
-
 	nonce, err := n.leth.ApiBackend.GetPoolNonce(ctx, n.creds.addr)
 	if err != nil {
 		return nil, fmt.Errorf("error getting nonce: %v", err)
@@ -356,14 +253,6 @@ func (n *nodeClient) sendTransaction(ctx context.Context, txOpts *bind.TransactO
 // syncProgress return the current sync progress. Returns no error and nil when not syncing.
 func (n *nodeClient) syncProgress() ethereum.SyncProgress {
 	return n.leth.ApiBackend.SyncProgress()
-}
-
-// swap gets a swap keyed by secretHash in the contract.
-func (n *nodeClient) swap(ctx context.Context, secretHash [32]byte, contractVer uint32) (swap *dexeth.SwapState, err error) {
-	return swap, n.withcontractor(contractVer, func(c contractor) error {
-		swap, err = c.swap(ctx, secretHash)
-		return err
-	})
 }
 
 // signData uses the private key of the address to sign a piece of data.
@@ -396,105 +285,8 @@ func (n *nodeClient) addSignerToOpts(txOpts *bind.TransactOpts) error {
 	return nil
 }
 
-// signTransaction signs a transaction.
-func (n *nodeClient) signTransaction(tx *types.Transaction) (*types.Transaction, error) {
-	return n.creds.ks.SignTx(*n.creds.acct, tx, n.chainID)
-}
-
-// initiate initiates multiple swaps in the same transaction.
-func (n *nodeClient) initiate(ctx context.Context, contracts []*asset.Contract, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
-	gas := dexeth.InitGas(len(contracts), contractVer)
-	var val uint64
-	for _, c := range contracts {
-		val += c.Value
-	}
-	txOpts, _ := n.txOpts(ctx, val, gas, dexeth.GweiToWei(maxFeeRate))
-	n.nonceSendMtx.Lock()
-	defer n.nonceSendMtx.Unlock()
-	nonce, err := n.leth.ApiBackend.GetPoolNonce(ctx, n.creds.addr)
-	if err != nil {
-		return nil, fmt.Errorf("error getting nonce: %v", err)
-	}
-	txOpts.Nonce = new(big.Int).SetUint64(nonce)
-	if err := n.addSignerToOpts(txOpts); err != nil {
-		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
-	}
-	return tx, n.withcontractor(contractVer, func(c contractor) error {
-		tx, err = c.initiate(txOpts, contracts)
-		return err
-	})
-}
-
-// estimateInitGas checks the amount of gas that is used for the
-// initialization.
-func (n *nodeClient) estimateInitGas(ctx context.Context, numSwaps int, contractVer uint32) (gas uint64, err error) {
-	return gas, n.withcontractor(contractVer, func(c contractor) error {
-		gas, err = c.estimateInitGas(ctx, numSwaps)
-		return err
-	})
-}
-
-// estimateRedeemGas checks the amount of gas that is used for the redemption.
-func (n *nodeClient) estimateRedeemGas(ctx context.Context, secrets [][32]byte, contractVer uint32) (gas uint64, err error) {
-	return gas, n.withcontractor(contractVer, func(c contractor) error {
-		gas, err = c.estimateRedeemGas(ctx, secrets)
-		return err
-	})
-}
-
-// estimateRefundGas checks the amount of gas that is used for a refund.
-func (n *nodeClient) estimateRefundGas(ctx context.Context, secretHash [32]byte, contractVer uint32) (gas uint64, err error) {
-	return gas, n.withcontractor(contractVer, func(c contractor) error {
-		gas, err = c.estimateRefundGas(ctx, secretHash)
-		return err
-	})
-}
-
-// redeem redeems a swap contract. Any on-chain failure, such as this secret not
-// matching the hash, will not cause this to error.
-func (n *nodeClient) redeem(ctx context.Context, redemptions []*asset.Redemption, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
-	gas := dexeth.RedeemGas(len(redemptions), contractVer)
-	txOpts, _ := n.txOpts(ctx, 0, gas, dexeth.GweiToWei(maxFeeRate))
-	n.nonceSendMtx.Lock()
-	defer n.nonceSendMtx.Unlock()
-	nonce, err := n.leth.ApiBackend.GetPoolNonce(ctx, n.creds.addr)
-	if err != nil {
-		return nil, fmt.Errorf("error getting nonce: %v", err)
-	}
-	txOpts.Nonce = new(big.Int).SetUint64(nonce)
-	if err := n.addSignerToOpts(txOpts); err != nil {
-		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
-	}
-	return tx, n.withcontractor(contractVer, func(c contractor) error {
-		tx, err = c.redeem(txOpts, redemptions)
-		return err
-	})
-}
-
-// refund refunds a swap contract using the account controlled by the wallet.
-// Any on-chain failure, such as the locktime not being past, will not cause
-// this to error.
-func (n *nodeClient) refund(ctx context.Context, secretHash [32]byte, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
-	gas := dexeth.RefundGas(contractVer)
-	txOpts, _ := n.txOpts(ctx, 0, gas, dexeth.GweiToWei(maxFeeRate))
-	n.nonceSendMtx.Lock()
-	defer n.nonceSendMtx.Unlock()
-	nonce, err := n.leth.ApiBackend.GetPoolNonce(ctx, n.creds.addr)
-	if err != nil {
-		return nil, fmt.Errorf("error getting nonce: %v", err)
-	}
-	txOpts.Nonce = new(big.Int).SetUint64(nonce)
-	if err := n.addSignerToOpts(txOpts); err != nil {
-		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
-	}
-	return tx, n.withcontractor(contractVer, func(c contractor) error {
-		tx, err = c.refund(txOpts, secretHash)
-		return err
-	})
-}
-
-// netFeeState gets the baseFee and tipCap for the next block.
-func (n *nodeClient) netFeeState(ctx context.Context) (baseFees, tipCap *big.Int, err error) {
+// currentFees gets the baseFee and tipCap for the next block.
+func (n *nodeClient) currentFees(ctx context.Context) (baseFees, tipCap *big.Int, err error) {
 	hdr, err := n.bestHeader(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -533,35 +325,34 @@ func (n *nodeClient) getCodeAt(ctx context.Context, contractAddr common.Address)
 // zero, it will be calculated as double the current baseFee. The tip will be
 // added automatically.
 //
-// NOTE: The v0 contract will reuse account nonces if the tx is not yet
-// confirmed. To avoid that be sure to get the next nonce from the light eth
-// node pool api while holding the nodeClient nonceSendMtx and set manually.
-// Hold the mutex until the tx has been sent or errors on sending.
+// NOTE: The nonce included in the txOpts must be sent before txOpts is used
+// again. The caller should ensure that txOpts -> send sequence is sychronized.
 func (n *nodeClient) txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate *big.Int) (*bind.TransactOpts, error) {
-	baseFee, gasTipCap, err := n.netFeeState(ctx)
+	baseFee, gasTipCap, err := n.currentFees(ctx)
 	if maxFeeRate == nil {
 		maxFeeRate = new(big.Int).Mul(baseFee, big.NewInt(2))
 	}
 	if err != nil {
 		return nil, err
 	}
-	return newTxOpts(ctx, n.creds.addr, val, maxGas, maxFeeRate, gasTipCap), nil
+
+	nonce, err := n.leth.ApiBackend.GetPoolNonce(ctx, n.creds.addr)
+	if err != nil {
+		return nil, fmt.Errorf("GetPoolNonce error: %w", err)
+	}
+
+	txOpts := newTxOpts(ctx, n.creds.addr, val, maxGas, maxFeeRate, gasTipCap)
+	txOpts.Nonce = new(big.Int).SetUint64(nonce)
+
+	if err := n.addSignerToOpts(txOpts); err != nil {
+		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
+	}
+
+	return txOpts, nil
 }
 
-// isRedeemable checks if the swap identified by secretHash is redeemable using secret.
-func (n *nodeClient) isRedeemable(secretHash [32]byte, secret [32]byte, contractVer uint32) (redeemable bool, err error) {
-	return redeemable, n.withcontractor(contractVer, func(c contractor) error {
-		redeemable, err = c.isRedeemable(secretHash, secret)
-		return err
-	})
-}
-
-// isRefundable checks if the swap identified by secretHash is refundable.
-func (n *nodeClient) isRefundable(secretHash [32]byte, contractVer uint32) (refundable bool, err error) {
-	return refundable, n.withcontractor(contractVer, func(c contractor) error {
-		refundable, err = c.isRefundable(secretHash)
-		return err
-	})
+func (n *nodeClient) contractBackend() bind.ContractBackend {
+	return n.ec
 }
 
 // transactionConfirmations gets the number of confirmations for the specified
@@ -657,17 +448,6 @@ func (n *nodeClient) initiateToken(ctx context.Context, initiations []ethv0.ETHS
 	// TODO: reject if there is duplicate secret hash
 	// TODO: use estimated gas
 	txOpts, _ := n.txOpts(ctx, 0, 1e6, dexeth.GweiToWei(maxFeeRate))
-	n.nonceSendMtx.Lock()
-	defer n.nonceSendMtx.Unlock()
-	nonce, err := n.leth.ApiBackend.GetPoolNonce(ctx, n.creds.addr)
-	if err != nil {
-		return nil, fmt.Errorf("error getting nonce: %v", err)
-	}
-	txOpts.Nonce = new(big.Int).SetUint64(nonce)
-	if err := n.addSignerToOpts(txOpts); err != nil {
-		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
-	}
-
 	return n.tokenSwapContract.Initiate(txOpts, initiations)
 }
 
@@ -677,13 +457,6 @@ func (n *nodeClient) redeemToken(ctx context.Context, redemptions []ethv0.ETHSwa
 	// TODO: reject if there is duplicate secret hash
 	// TODO: use estimated gas
 	txOpts, _ := n.txOpts(ctx, 0, 300000, dexeth.GweiToWei(maxFeeRate))
-	n.nonceSendMtx.Lock()
-	defer n.nonceSendMtx.Unlock()
-	nonce, err := n.leth.ApiBackend.GetPoolNonce(ctx, n.creds.addr)
-	if err != nil {
-		return nil, fmt.Errorf("error getting nonce: %v", err)
-	}
-	txOpts.Nonce = new(big.Int).SetUint64(nonce)
 	if err := n.addSignerToOpts(txOpts); err != nil {
 		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
 	}
@@ -706,13 +479,6 @@ func (n *nodeClient) tokenIsRedeemable(ctx context.Context, secretHash, secret [
 func (n *nodeClient) refundToken(ctx context.Context, secretHash [32]byte, maxFeeRate uint64) (tx *types.Transaction, err error) {
 	// TODO: use estimated gas
 	txOpts, _ := n.txOpts(ctx, 0, 5e5, dexeth.GweiToWei(maxFeeRate))
-	n.nonceSendMtx.Lock()
-	defer n.nonceSendMtx.Unlock()
-	nonce, err := n.leth.ApiBackend.GetPoolNonce(ctx, n.creds.addr)
-	if err != nil {
-		return nil, fmt.Errorf("error getting nonce: %v", err)
-	}
-	txOpts.Nonce = new(big.Int).SetUint64(nonce)
 	if err := n.addSignerToOpts(txOpts); err != nil {
 		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
 	}
@@ -827,6 +593,24 @@ func (n *nodeClient) estimateRefundTokenGas(ctx context.Context, secretHash [32]
 		Gas:   0,
 		Data:  data,
 	})
+}
+
+func (n *nodeClient) checkTxStatus(ctx context.Context, tx *types.Transaction, txOpts *bind.TransactOpts) (*types.Receipt, error) {
+	// It appears the receipt is only accessible after the tx is mined.
+	receipt, err := n.transactionReceipt(ctx, tx.Hash())
+	if err != nil {
+		return nil, fmt.Errorf("error getting transaction receipt: %v", err)
+	}
+
+	if receipt.Status == 1 {
+		return receipt, nil
+	}
+
+	if receipt.GasUsed == txOpts.GasLimit {
+		return receipt, fmt.Errorf("gas used appears to have exceeded limit of %d", txOpts.GasLimit)
+	}
+
+	return receipt, fmt.Errorf("transaction status failed")
 }
 
 // newTxOpts is a constructor for a TransactOpts.
