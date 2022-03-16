@@ -2184,12 +2184,13 @@ func (btc *baseWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sig
 		return nil, nil, err
 	}
 	pk := privKey.PubKey()
-	sig, err := privKey.Sign(msg)
+	hash := chainhash.HashB(msg) // legacy servers will not accept this signature!
+	sig, err := privKey.Sign(hash)
 	if err != nil {
 		return nil, nil, err
 	}
 	pubkeys = append(pubkeys, pk.SerializeCompressed())
-	sigs = append(sigs, sig.Serialize())
+	sigs = append(sigs, sig.Serialize()) // DER format serialization
 	return
 }
 
