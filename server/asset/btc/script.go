@@ -4,6 +4,7 @@
 package btc
 
 import (
+	"crypto/sha256"
 	"fmt"
 
 	"github.com/btcsuite/btcd/btcec"
@@ -20,8 +21,13 @@ func checkSig(msg, pkBytes, sigBytes []byte) error {
 	if err != nil {
 		return fmt.Errorf("error decoding Signature from bytes: %w", err)
 	}
-	if !signature.Verify(msg, pubKey) {
-		return fmt.Errorf("signature verification failed")
+	hash := sha256.Sum256(msg)
+	if !signature.Verify(hash[:], pubKey) {
+		// This might be a legacy (buggy) client that signed the truncated
+		// message itself. (V0PURGE!)
+		if !signature.Verify(msg, pubKey) {
+			return fmt.Errorf("signature verification failed")
+		}
 	}
 	return nil
 }
