@@ -1838,8 +1838,9 @@ func testSignMessage(t *testing.T, segwit bool, walletType string) {
 	}
 
 	msg := randBytes(36)
+	msgHash := chainhash.HashB(msg)
 	pk := pubKey.SerializeCompressed()
-	signature, err := privKey.Sign(msg)
+	signature, err := privKey.Sign(msgHash)
 	if err != nil {
 		t.Fatalf("signature error: %v", err)
 	}

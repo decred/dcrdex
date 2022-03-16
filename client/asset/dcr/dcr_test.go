@@ -1584,7 +1584,8 @@ func TestSignMessage(t *testing.T) {
 
 	msg := randBytes(36)
 	pk := pubKey.SerializeCompressed()
-	signature := ecdsa.Sign(privKey, msg)
+	msgHash := chainhash.HashB(msg)
+	signature := ecdsa.Sign(privKey, msgHash)
 	sig := signature.Serialize()
 
 	node.privWIF, err = dcrutil.NewWIF(privBytes, tChainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
