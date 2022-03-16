@@ -2118,6 +2118,8 @@ class ExchangeSection {
     this.node = template.cloneNode(true)
     const tmpl = Doc.parseTemplate(this.node)
     tmpl.header.textContent = dex.host
+
+    this.disconnectedIco = tmpl.disconnected
     if (dex.connected) Doc.hide(tmpl.disconnected)
 
     tmpl.mkts.removeChild(tmpl.mktrow)
@@ -2162,8 +2164,8 @@ class ExchangeSection {
 
   /* setConnected sets the visiblity of the disconnected icon. */
   setConnected (isConnected) {
-    if (isConnected) Doc.hide(this.tmpl.disconnected)
-    else Doc.show(this.tmpl.disconnected)
+    if (isConnected) Doc.hide(this.disconnectedIco)
+    else Doc.show(this.disconnectedIco)
   }
 
   /*
