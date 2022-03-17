@@ -6,6 +6,7 @@ package auth
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -253,7 +254,7 @@ func tNewUser(t *testing.T) *tUser {
 }
 
 func (u *tUser) randomSignature() *ecdsa.Signature {
-	return ecdsa.Sign(u.privKey, randBytes(20))
+	return ecdsa.Sign(u.privKey, randBytes(32))
 }
 
 type testRig struct {
@@ -273,6 +274,12 @@ func (s *tSignable) SetSig(b []byte)  { s.sig = b }
 func (s *tSignable) SigBytes() []byte { return s.sig }
 func (s *tSignable) Serialize() []byte {
 	return s.b
+}
+
+func signMsg(priv *secp256k1.PrivateKey, msg []byte) []byte {
+	hash := sha256.Sum256(msg)
+	sig := ecdsa.Sign(priv, hash[:])
+	return sig.Serialize()
 }
 
 func tNewConnect(user *tUser) *msgjson.Connect {
@@ -302,8 +309,8 @@ func queueUser(t *testing.T, user *tUser) *msgjson.Message {
 	rig.storage.acct = &account.Account{ID: user.acctID, PubKey: user.privKey.PubKey()}
 	connect := tNewConnect(user)
 	sigMsg := connect.Serialize()
-	sig := ecdsa.Sign(user.privKey, sigMsg)
-	connect.SetSig(sig.Serialize())
+	sig := signMsg(user.privKey, sigMsg)
+	connect.SetSig(sig)
 	msg, _ := msgjson.NewRequest(comms.NextID(), msgjson.ConnectRoute, connect)
 	return msg
 }
@@ -1037,16 +1044,14 @@ func TestAuth(t *testing.T) {
 	connectUser(t, user)
 
 	msgBytes := randBytes(50)
-	sig := ecdsa.Sign(user.privKey, msgBytes)
-	sigBytes := sig.Serialize()
+	sigBytes := signMsg(user.privKey, msgBytes)
 	err := rig.mgr.Auth(user.acctID, msgBytes, sigBytes)
 	if err != nil {
 		t.Fatalf("unexpected auth error: %v", err)
 	}
 
 	foreigner := tNewUser(t)
-	sig = ecdsa.Sign(foreigner.privKey, msgBytes)
-	sigBytes = sig.Serialize()
+	sigBytes = signMsg(user.privKey, msgBytes)
 	err = rig.mgr.Auth(foreigner.acctID, msgBytes, sigBytes)
 	if err == nil {
 		t.Fatalf("no auth error for foreigner")
@@ -1220,8 +1225,7 @@ func TestConnectErrors(t *testing.T) {
 	// saved to the map.
 	// need to "register" the user first
 	msgBytes := connect.Serialize()
-	sig := ecdsa.Sign(user.privKey, msgBytes)
-	connect.SetSig(sig.Serialize())
+	connect.SetSig(signMsg(user.privKey, msgBytes))
 	encodeMsg()
 	user.conn.sendErr = fmt.Errorf("test error")
 	rpcErr = rig.mgr.handleConnect(user.conn, msg)
@@ -1325,8 +1329,8 @@ func TestHandleRegister(t *testing.T) {
 			Asset:  &assetID,
 		}
 		sigMsg := reg.Serialize()
-		sig := ecdsa.Sign(user.privKey, sigMsg)
-		reg.SetSig(sig.Serialize())
+		sig := signMsg(user.privKey, sigMsg)
+		reg.SetSig(sig)
 		return reg
 	}
 
@@ -1435,8 +1439,8 @@ func TestHandleNotifyFee(t *testing.T) {
 			Time:      encode.UnixMilliU(unixMsNow()),
 		}
 		sigMsg := notify.Serialize()
-		sig := ecdsa.Sign(user.privKey, sigMsg)
-		notify.SetSig(sig.Serialize())
+		sig := signMsg(user.privKey, sigMsg)
+		notify.SetSig(sig)
 		return notify
 	}
 

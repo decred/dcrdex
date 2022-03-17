@@ -532,11 +532,7 @@ func checkSigS256(msg, sig []byte, pubKey *secp256k1.PublicKey) error {
 	}
 	hash := sha256.Sum256(msg)
 	if !signature.Verify(hash[:], pubKey) {
-		// This might be a legacy (buggy) client that signed the truncated
-		// message itself. (V0PURGE!)
-		if !signature.Verify(msg, pubKey) {
-			return fmt.Errorf("secp256k1 signature verification failed")
-		}
+		return fmt.Errorf("secp256k1 signature verification failed")
 	}
 	return nil
 }
@@ -551,11 +547,10 @@ func (auth *AuthManager) Auth(user account.AccountID, msg, sig []byte) error {
 }
 
 // SignMsg signs the message with the DEX private key, returning the DER encoded
-// signature. VOPURGE: This must switch to hashing the msg with sha256 first!
+// signature. SHA256 is used to hash the message before signing it.
 func (auth *AuthManager) SignMsg(msg []byte) []byte {
-	// VOPURGE: Switch to the msg hash, not the message itself that gets
-	// truncated. i.e. hash := sha256.Sum256(msg); Sign(hash[:])
-	return auth.signer.Sign(msg).Serialize()
+	hash := sha256.Sum256(msg)
+	return auth.signer.Sign(hash[:]).Serialize()
 }
 
 // Sign signs the msgjson.Signables with the DEX private key.
