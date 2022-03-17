@@ -23,11 +23,7 @@ func checkSig(msg, pkBytes, sigBytes []byte) error {
 	}
 	hash := sha256.Sum256(msg)
 	if !signature.Verify(hash[:], pubKey) {
-		// This might be a legacy (buggy) client that signed the truncated
-		// message itself. (V0PURGE!)
-		if !signature.Verify(msg, pubKey) {
-			return fmt.Errorf("signature verification failed")
-		}
+		return fmt.Errorf("signature verification failed")
 	}
 	return nil
 }

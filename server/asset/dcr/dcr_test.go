@@ -408,7 +408,8 @@ func s256Auth(msg []byte) *testAuth {
 	if msg == nil {
 		msg = randomBytes(32)
 	}
-	sig := ecdsa.Sign(priv, msg)
+	hash := chainhash.HashB(msg)
+	sig := ecdsa.Sign(priv, hash)
 	return &testAuth{
 		pubkey: pubkey,
 		pkHash: dcrutil.Hash160(pubkey),
@@ -426,7 +427,8 @@ func edwardsAuth(msg []byte) *testAuth {
 	if msg == nil {
 		msg = randomBytes(32)
 	}
-	sig, err := priv.Sign(msg)
+	hash := chainhash.HashB(msg)
+	sig, err := priv.Sign(hash)
 	if err != nil {
 		fmt.Printf("edwardsAuth sign error: %v\n", err)
 	}
@@ -447,7 +449,8 @@ func schnorrAuth(msg []byte) *testAuth {
 	if msg == nil {
 		msg = randomBytes(32)
 	}
-	sig, err := schnorr.Sign(priv, msg)
+	hash := chainhash.HashB(msg)
+	sig, err := schnorr.Sign(priv, hash)
 	if err != nil {
 		fmt.Printf("schnorrAuth sign error: %v\n", err)
 	}
