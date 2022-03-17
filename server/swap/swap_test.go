@@ -6,6 +6,7 @@ package swap
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -177,7 +178,8 @@ func (m *TAuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson.M
 }
 func (m *TAuthManager) Sign(signables ...msgjson.Signable) {
 	for _, signable := range signables {
-		sig := ecdsa.Sign(m.privkey, signable.Serialize())
+		hash := sha256.Sum256(signable.Serialize())
+		sig := ecdsa.Sign(m.privkey, hash[:])
 		signable.SetSig(sig.Serialize())
 	}
 }
@@ -839,7 +841,9 @@ func checkSigS256(msg msgjson.Signable, pubKey *secp256k1.PublicKey) error {
 	if err != nil {
 		return fmt.Errorf("error decoding secp256k1 Signature from bytes: %w", err)
 	}
-	if !signature.Verify(msg.Serialize(), pubKey) {
+	msgB := msg.Serialize()
+	hash := sha256.Sum256(msgB)
+	if !signature.Verify(hash[:], pubKey) {
 		return fmt.Errorf("secp256k1 signature verification failed")
 	}
 	return nil
