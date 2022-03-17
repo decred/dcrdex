@@ -225,8 +225,6 @@ func (s *Signature) SetSig(b []byte) {
 
 // SigBytes returns the signature as a []byte.
 func (s *Signature) SigBytes() []byte {
-	// Assuming the Sig was set with SetSig, there is likely no way to error
-	// here. Ignoring error for now.
 	return s.Sig
 }
 
@@ -966,7 +964,9 @@ func (r *Register) Serialize() []byte {
 // RegisterResult is the result for the response to Register.
 type RegisterResult struct {
 	Signature
-	DEXPubKey    Bytes   `json:"pubkey"`
+	DEXPubKey Bytes `json:"pubkey"`
+	// ClientPubKey is excluded from the JSON payload to save bandwidth. The
+	// client must add it back to verify the server's signature.
 	ClientPubKey Bytes   `json:"-"`
 	AssetID      *uint32 `json:"feeAsset,omitempty"` // default to 42 if not set by server
 	Address      string  `json:"address"`
