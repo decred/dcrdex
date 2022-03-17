@@ -524,7 +524,8 @@ func s256Auth(msg []byte) *testAuth {
 	if msg == nil {
 		msg = randomBytes(32)
 	}
-	sig, err := priv.Sign(msg)
+	hash := sha256.Sum256(msg)
+	sig, err := priv.Sign(hash[:])
 	if err != nil {
 		fmt.Printf("s256Auth sign error: %v\n", err)
 	}

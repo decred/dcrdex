@@ -40,11 +40,7 @@ func checkSigS256(msg, pkBytes, sigBytes []byte) error {
 	}
 	hash := chainhash.HashB(msg)
 	if !signature.Verify(hash, pubKey) {
-		// This might be a legacy (buggy) client that signed the truncated
-		// message itself. (V0PURGE!)
-		if !signature.Verify(msg, pubKey) {
-			return fmt.Errorf("secp256k1 signature verification failed")
-		}
+		return fmt.Errorf("secp256k1 signature verification failed")
 	}
 	return nil
 }
@@ -62,11 +58,7 @@ func checkSigEdwards(msg, pkBytes, sigBytes []byte) error {
 	}
 	hash := chainhash.HashB(msg)
 	if !signature.Verify(hash, pubKey) {
-		// This might be a legacy (buggy) client that signed the truncated
-		// message itself. (V0PURGE!)
-		if !signature.Verify(msg, pubKey) {
-			return fmt.Errorf("edwards signature verification failed")
-		}
+		return fmt.Errorf("edwards signature verification failed")
 	}
 	return nil
 }
@@ -84,11 +76,7 @@ func checkSigSchnorr(msg, pkBytes, sigBytes []byte) error {
 	}
 	hash := chainhash.HashB(msg)
 	if !signature.Verify(hash, pubKey) {
-		// This might be a legacy (buggy) client that signed the truncated
-		// message itself. (V0PURGE!)
-		if !signature.Verify(msg, pubKey) {
-			return fmt.Errorf("schnorr signature verification failed")
-		}
+		return fmt.Errorf("schnorr signature verification failed")
 	}
 	return nil
 }
