@@ -47,7 +47,7 @@ type outputSpenderFinder struct {
 // block between the current best block and the block just before the provided
 // earliestTxTime. Returns asset.CoinNotFoundError if the block containing the
 // output is not found.
-func (dcr *baseWallet) lookupTxOutWithBlockFilters(ctx context.Context, op outPoint, pkScript []byte, earliestTxTime time.Time) (uint32, bool, error) {
+func (dcr *ExchangeWallet) lookupTxOutWithBlockFilters(ctx context.Context, op outPoint, pkScript []byte, earliestTxTime time.Time) (uint32, bool, error) {
 	if len(pkScript) == 0 {
 		return 0, false, fmt.Errorf("cannot perform block filters lookup without a script")
 	}
@@ -77,7 +77,7 @@ func (dcr *baseWallet) lookupTxOutWithBlockFilters(ctx context.Context, op outPo
 
 // externalTxOutput attempts to locate the requested tx output in a mainchain
 // block and if found, returns the output details along with the block details.
-func (dcr *baseWallet) externalTxOutput(ctx context.Context, op outPoint, pkScript []byte, earliestTxTime time.Time) (*outputSpenderFinder, *block, error) {
+func (dcr *ExchangeWallet) externalTxOutput(ctx context.Context, op outPoint, pkScript []byte, earliestTxTime time.Time) (*outputSpenderFinder, *block, error) {
 	dcr.externalTxMtx.Lock()
 	tx := dcr.externalTxCache[op.txHash]
 	if tx == nil {
@@ -122,7 +122,7 @@ func (dcr *baseWallet) externalTxOutput(ctx context.Context, op outPoint, pkScri
 // still part of the mainchain. It is not an error if the block is unknown
 // or invalidated.
 // The tx.blockMtx MUST be locked for writing.
-func (dcr *baseWallet) txBlockFromCache(ctx context.Context, tx *externalTx) (*block, error) {
+func (dcr *ExchangeWallet) txBlockFromCache(ctx context.Context, tx *externalTx) (*block, error) {
 	if tx.block == nil {
 		return nil, nil
 	}
@@ -153,7 +153,7 @@ func (dcr *baseWallet) txBlockFromCache(ctx context.Context, tx *externalTx) (*b
 // previous scan. If the tx block is found, the block hash, height and the tx
 // outputs details are cached; and the block is returned.
 // The tx.blockMtx MUST be locked for writing.
-func (dcr *baseWallet) scanFiltersForTxBlock(ctx context.Context, tx *externalTx, txScripts [][]byte, earliestTxTime time.Time) (*block, error) {
+func (dcr *ExchangeWallet) scanFiltersForTxBlock(ctx context.Context, tx *externalTx, txScripts [][]byte, earliestTxTime time.Time) (*block, error) {
 	// Scan block filters in reverse from the current best block to the last
 	// scanned block. If the last scanned block has been re-orged out of the
 	// mainchain, scan back to the mainchain ancestor of the lastScannedBlock.
@@ -237,7 +237,7 @@ func (dcr *baseWallet) scanFiltersForTxBlock(ctx context.Context, tx *externalTx
 	}
 }
 
-func (dcr *baseWallet) findTxInBlock(ctx context.Context, txHash *chainhash.Hash, txScripts [][]byte, blockHash *chainhash.Hash) (*wire.MsgTx, []*outputSpenderFinder, error) {
+func (dcr *ExchangeWallet) findTxInBlock(ctx context.Context, txHash *chainhash.Hash, txScripts [][]byte, blockHash *chainhash.Hash) (*wire.MsgTx, []*outputSpenderFinder, error) {
 	blockFilter, err := dcr.getBlockFilterV2(ctx, blockHash)
 	if err != nil {
 		return nil, nil, err
@@ -299,7 +299,7 @@ func (dcr *baseWallet) findTxInBlock(ctx context.Context, txHash *chainhash.Hash
 	return msgTx, outputSpenders, nil
 }
 
-func (dcr *baseWallet) isOutputSpent(ctx context.Context, output *outputSpenderFinder) (bool, error) {
+func (dcr *ExchangeWallet) isOutputSpent(ctx context.Context, output *outputSpenderFinder) (bool, error) {
 	// Hold the output.spenderMtx lock for 2 reasons:
 	// 1) To read (and set) the spenderBlock field.
 	// 2) To prevent duplicate spender block scans if the spenderBlock is not
@@ -388,7 +388,7 @@ func (dcr *baseWallet) isOutputSpent(ctx context.Context, output *outputSpenderF
 // If no tx is found to spend the provided output, the hash of the block that
 // was last checked is returned along with any error that may have occurred
 // during the search.
-func (dcr *baseWallet) findTxOutSpender(ctx context.Context, op outPoint, outputPkScript []byte, startBlock *block) (*chainjson.TxRawResult, *chainhash.Hash, error) {
+func (dcr *ExchangeWallet) findTxOutSpender(ctx context.Context, op outPoint, outputPkScript []byte, startBlock *block) (*chainjson.TxRawResult, *chainhash.Hash, error) {
 	var lastScannedHash *chainhash.Hash
 
 	iHeight := startBlock.height
@@ -467,7 +467,7 @@ func (bf *blockFilter) MatchAny(data [][]byte) bool {
 	return bf.v2cfilters.MatchAny(bf.key, data)
 }
 
-func (dcr *baseWallet) getBlockFilterV2(ctx context.Context, blockHash *chainhash.Hash) (*blockFilter, error) {
+func (dcr *ExchangeWallet) getBlockFilterV2(ctx context.Context, blockHash *chainhash.Hash) (*blockFilter, error) {
 	bf, key, err := dcr.wallet.BlockCFilter(ctx, blockHash)
 	if err != nil {
 		return nil, err

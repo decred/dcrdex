@@ -149,19 +149,18 @@ func newTxOutResult(script []byte, value uint64, confs int64) *chainjson.GetTxOu
 	}
 }
 
-func tNewWallet() (*ExchangeWalletFullNode, *tRPCClient, func(), error) {
+func tNewWallet() (*ExchangeWallet, *tRPCClient, func(), error) {
 	client := newTRPCClient()
 	walletCfg := &asset.WalletConfig{
 		TipChange:   func(error) {},
 		PeersChange: func(uint32) {},
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
-	w, err := unconnectedWallet(walletCfg, &Config{Account: "default"}, tChainParams, tLogger)
+	wallet, err := unconnectedWallet(walletCfg, &Config{Account: "default"}, tChainParams, tLogger)
 	if err != nil {
 		shutdown()
 		return nil, nil, nil, err
 	}
-	wallet := &ExchangeWalletFullNode{w}
 	wallet.wallet = &rpcWallet{
 		rpcClient: client,
 		log:       tLogger.SubLogger("trpc"),
@@ -1111,7 +1110,7 @@ func TestFundingCoins(t *testing.T) {
 	ensureGood()
 }
 
-func checkMaxOrder(t *testing.T, wallet *ExchangeWalletFullNode, lots, swapVal, maxFees, estWorstCase, estBestCase, locked uint64) {
+func checkMaxOrder(t *testing.T, wallet *ExchangeWallet, lots, swapVal, maxFees, estWorstCase, estBestCase, locked uint64) {
 	t.Helper()
 	maxOrder, err := wallet.MaxOrder(tLotSize, feeSuggestion, tDCR)
 	if err != nil {

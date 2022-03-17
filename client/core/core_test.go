@@ -914,11 +914,8 @@ type TFeeRater struct {
 	feeRate uint64
 }
 
-func (w *TFeeRater) FeeRate() (uint64, error) {
-	if w.feeRate == 0 {
-		return 0, fmt.Errorf("test fee rate unavailable")
-	}
-	return w.feeRate, nil
+func (w *TFeeRater) FeeRate() uint64 {
+	return w.feeRate
 }
 
 type tCrypterSmart struct {
