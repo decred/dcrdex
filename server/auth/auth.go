@@ -5,6 +5,7 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -64,7 +65,7 @@ type Storage interface {
 	PayAccount(account.AccountID, []byte) error
 }
 
-// Signer signs messages. It is likely a secp256k1.PrivateKey.
+// Signer signs messages. The message must be a 32-byte hash.
 type Signer interface {
 	Sign(hash []byte) *ecdsa.Signature
 	PubKey() *secp256k1.PublicKey
@@ -520,6 +521,26 @@ func (auth *AuthManager) Route(route string, handler func(account.AccountID, *ms
 	})
 }
 
+// Message signing and signature verification.
+
+// checkSigS256 checks that the message's signature was created with the
+// private key for the provided secp256k1 public key.
+func checkSigS256(msg, sig []byte, pubKey *secp256k1.PublicKey) error {
+	signature, err := ecdsa.ParseDERSignature(sig)
+	if err != nil {
+		return fmt.Errorf("error decoding secp256k1 Signature from bytes: %w", err)
+	}
+	hash := sha256.Sum256(msg)
+	if !signature.Verify(hash[:], pubKey) {
+		// This might be a legacy (buggy) client that signed the truncated
+		// message itself. (V0PURGE!)
+		if !signature.Verify(msg, pubKey) {
+			return fmt.Errorf("secp256k1 signature verification failed")
+		}
+	}
+	return nil
+}
+
 // Auth validates the signature/message pair with the users public key.
 func (auth *AuthManager) Auth(user account.AccountID, msg, sig []byte) error {
 	client := auth.user(user)
@@ -529,23 +550,19 @@ func (auth *AuthManager) Auth(user account.AccountID, msg, sig []byte) error {
 	return checkSigS256(msg, sig, client.acct.PubKey)
 }
 
-// Suspended indicates the the user exists (is presently connected) and is
-// suspended. This does not access the persistent storage.
-func (auth *AuthManager) Suspended(user account.AccountID) (found, suspended bool) {
-	client := auth.user(user)
-	if client == nil {
-		// TODO: consider hitting auth.storage.Account(user)
-		return false, true // suspended for practical purposes
-	}
-	return true, client.isSuspended()
+// SignMsg signs the message with the DEX private key, returning the DER encoded
+// signature. VOPURGE: This must switch to hashing the msg with sha256 first!
+func (auth *AuthManager) SignMsg(msg []byte) []byte {
+	// VOPURGE: Switch to the msg hash, not the message itself that gets
+	// truncated. i.e. hash := sha256.Sum256(msg); Sign(hash[:])
+	return auth.signer.Sign(msg).Serialize()
 }
 
 // Sign signs the msgjson.Signables with the DEX private key.
 func (auth *AuthManager) Sign(signables ...msgjson.Signable) {
 	for _, signable := range signables {
-		sigMsg := signable.Serialize()
-		sig := auth.signer.Sign(sigMsg)
-		signable.SetSig(sig.Serialize())
+		sig := auth.SignMsg(signable.Serialize())
+		signable.SetSig(sig)
 	}
 }
 
@@ -864,8 +881,7 @@ func (auth *AuthManager) Penalize(user account.AccountID, lastRule account.Rule,
 	penaltyNote := &msgjson.PenaltyNote{
 		Penalty: penalty,
 	}
-	sig := auth.signer.Sign(penaltyNote.Serialize())
-	penaltyNote.Sig = sig.Serialize()
+	penaltyNote.Sig = auth.SignMsg(penaltyNote.Serialize())
 	note, err := msgjson.NewNotification(msgjson.PenaltyRoute, penaltyNote)
 	if err != nil {
 		return fmt.Errorf("error creating penalty notification: %w", err)
@@ -881,6 +897,17 @@ func (auth *AuthManager) Penalize(user account.AccountID, lastRule account.Rule,
 	log.Debugf("User %v account closed. Last rule broken = %v. Detail: %s", user, lastRule, extraDetails)
 
 	return nil
+}
+
+// Suspended indicates the the user exists (is presently connected) and is
+// suspended. This does not access the persistent storage.
+func (auth *AuthManager) Suspended(user account.AccountID) (found, suspended bool) {
+	client := auth.user(user)
+	if client == nil {
+		// TODO: consider hitting auth.storage.Account(user)
+		return false, true // suspended for practical purposes
+	}
+	return true, client.isSuspended()
 }
 
 // Unban forgives a user, allowing them to resume trading if their score permits
@@ -1286,9 +1313,9 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	conn.Authorized()
 
 	// Sign and send the connect response.
-	sig := auth.signer.Sign(sigMsg)
+	sig := auth.SignMsg(sigMsg)
 	resp := &msgjson.ConnectResult{
-		Sig:                 sig.Serialize(),
+		Sig:                 sig,
 		ActiveOrderStatuses: msgOrderStatuses,
 		ActiveMatches:       msgMatches,
 		Score:               score,
@@ -1622,19 +1649,6 @@ func (auth *AuthManager) handleOrderStatus(conn comms.Link, msg *msgjson.Message
 	err = conn.Send(resp)
 	if err != nil {
 		log.Error("error sending order_status response: " + err.Error())
-	}
-	return nil
-}
-
-// checkSigS256 checks that the message's signature was created with the
-// private key for the provided secp256k1 public key.
-func checkSigS256(msg, sig []byte, pubKey *secp256k1.PublicKey) error {
-	signature, err := ecdsa.ParseDERSignature(sig)
-	if err != nil {
-		return fmt.Errorf("error decoding secp256k1 Signature from bytes: %w", err)
-	}
-	if !signature.Verify(msg, pubKey) {
-		return fmt.Errorf("secp256k1 signature verification failed")
 	}
 	return nil
 }

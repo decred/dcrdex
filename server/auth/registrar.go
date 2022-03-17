@@ -61,7 +61,7 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 		// Prepare, sign, and send response.
 		regRes := &msgjson.RegisterResult{
 			DEXPubKey:    auth.signer.PubKey().SerializeCompressed(),
-			ClientPubKey: register.PubKey,
+			ClientPubKey: register.PubKey, // only for serialization and signature, not sent to client
 			AssetID:      &feeAsset,
 			Address:      feeAddr,
 			Fee:          feeAmt,
