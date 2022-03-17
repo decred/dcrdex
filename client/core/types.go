@@ -22,7 +22,6 @@ import (
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
-	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/decred/dcrd/hdkeychain/v3"
 )
 
@@ -769,8 +768,7 @@ func (a *dexAccount) sign(msg []byte) ([]byte, error) {
 	if a.privKey == nil {
 		return nil, fmt.Errorf("account locked")
 	}
-	sig := ecdsa.Sign(a.privKey, msg)
-	return sig.Serialize(), nil
+	return signMsg(a.privKey, msg), nil
 }
 
 // checkSig checks the signature against the message and the DEX pubkey.

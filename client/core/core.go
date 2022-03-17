@@ -6,6 +6,7 @@ package core
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -2906,6 +2907,9 @@ func (c *Core) register(dc *dexConnection, assetID uint32) (regRes *msgjson.Regi
 		if !bytes.Equal(dc.acct.dexPubKey.SerializeCompressed(), regRes.DEXPubKey) {
 			return nil, false, false, fmt.Errorf("different pubkeys reported by dex in 'config' and 'register' responses")
 		}
+		// Insert our pubkey back into the register result since it is excluded
+		// from the JSON serialization.
+		regRes.ClientPubKey = acctPubKey
 		// Check the DEX server's signature.
 		msg := regRes.Serialize()
 		err = checkSigS256(msg, regRes.DEXPubKey, regRes.Sig)
@@ -6277,17 +6281,27 @@ func checkSigS256(msg, pkBytes, sigBytes []byte) error {
 	if err != nil {
 		return fmt.Errorf("error decoding secp256k1 Signature from bytes: %w", err)
 	}
-	if !signature.Verify(msg, pubKey) {
-		return fmt.Errorf("secp256k1 signature verification failed")
+	hash := sha256.Sum256(msg)
+	if !signature.Verify(hash[:], pubKey) {
+		// Might be an older buggy server. (V0PURGE)
+		if !signature.Verify(msg, pubKey) {
+			return fmt.Errorf("secp256k1 signature verification failed")
+		}
 	}
 	return nil
+}
+
+// signMsg signs the message with provided private key.
+func signMsg(privKey *secp256k1.PrivateKey, msg []byte) []byte {
+	// NOTE: legacy servers will not accept this signature:
+	// hash := sha256.Sum256(msg)
+	return ecdsa.Sign(privKey, msg).Serialize()
 }
 
 // sign signs the msgjson.Signable with the provided private key.
 func sign(privKey *secp256k1.PrivateKey, payload msgjson.Signable) {
 	sigMsg := payload.Serialize()
-	sig := ecdsa.Sign(privKey, sigMsg) // should we be signing the *hash* of the payload?
-	payload.SetSig(sig.Serialize())
+	payload.SetSig(signMsg(privKey, sigMsg))
 }
 
 // stampAndSign time stamps the msgjson.Stampable, and signs it with the given
