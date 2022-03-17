@@ -6630,10 +6630,7 @@ func checkSigS256(msg, pkBytes, sigBytes []byte) error {
 	}
 	hash := sha256.Sum256(msg)
 	if !signature.Verify(hash[:], pubKey) {
-		// Might be an older buggy server. (V0PURGE)
-		if !signature.Verify(msg, pubKey) {
-			return fmt.Errorf("secp256k1 signature verification failed")
-		}
+		return fmt.Errorf("secp256k1 signature verification failed")
 	}
 	return nil
 }
