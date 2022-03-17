@@ -1719,6 +1719,11 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 			delete(form.Config, key)
 		}
 	}
+	// Sometimes core will insert data into the Settings map to communicate
+	// information back to the wallet, so it cannot be nil.
+	if form.Config == nil {
+		form.Config = make(map[string]string)
+	}
 
 	if walletDef.Seeded {
 		if len(walletPW) > 0 {
