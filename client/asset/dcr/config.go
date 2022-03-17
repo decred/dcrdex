@@ -77,6 +77,8 @@ func loadConfig(settings map[string]string, network dex.Network) (*Config, *chai
 	}
 	if cfg.RPCCert == "" {
 		cfg.RPCCert = defaultRPCCert
+	} else {
+		cfg.RPCCert = dex.CleanAndExpandPath(cfg.RPCCert)
 	}
 
 	return cfg, chainParams, nil
