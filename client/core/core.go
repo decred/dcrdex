@@ -939,7 +939,7 @@ func (c *Core) tickAsset(dc *dexConnection, assetID uint32) assetMap {
 func (c *Core) dex(addr string) (*dexConnection, bool, error) {
 	host, err := addrHost(addr)
 	if err != nil {
-		return nil, false, newError(addressParseErr, "error parsing address: %v", err)
+		return nil, false, newError(addressParseErr, "error parsing address: %w", err)
 	}
 
 	// Get the dexConnection and the dex.Asset for each asset.
@@ -1535,7 +1535,7 @@ func (c *Core) connectAndUnlock(crypter encrypt.Crypter, wallet *xcWallet) error
 		// crypter. This case could instead be handled with a refreshUnlock.
 		err := wallet.Unlock(crypter)
 		if err != nil {
-			return newError(walletAuthErr, "failed to unlock %s wallet: %v",
+			return newError(walletAuthErr, "failed to unlock %s wallet: %w",
 				unbip(wallet.AssetID), err)
 		}
 		// Notify new wallet state.
@@ -2046,7 +2046,7 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 	}
 	err = wallet.Unlock(crypter)
 	if err != nil {
-		return newError(walletAuthErr, "failed to unlock %s wallet: %v", unbip(assetID), err)
+		return newError(walletAuthErr, "failed to unlock %s wallet: %w", unbip(assetID), err)
 	}
 
 	state := wallet.state()
@@ -2125,7 +2125,7 @@ func (c *Core) ChangeAppPass(appPW, newAppPW []byte) error {
 
 	outerCrypter, err := c.reCrypter(appPW, creds.OuterKeyParams)
 	if err != nil {
-		return newError(authErr, "old password error: %v", err)
+		return newError(authErr, "old password error: %w", err)
 	}
 	innerKey, err := outerCrypter.Decrypt(creds.EncInnerKey)
 	if err != nil {
@@ -2159,7 +2159,7 @@ func (c *Core) ChangeAppPass(appPW, newAppPW []byte) error {
 func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) error {
 	crypter, err := c.encryptionKey(appPW)
 	if err != nil {
-		return newError(authErr, "ReconfigureWallet password error: %v", err)
+		return newError(authErr, "ReconfigureWallet password error: %w", err)
 	}
 	assetID := form.AssetID
 	walletDef, err := walletDefinition(assetID, form.Type)
@@ -2207,7 +2207,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 
 		exists, err := asset.WalletExists(assetID, form.Type, c.assetDataDirectory(assetID), form.Config, c.net)
 		if err != nil {
-			return newError(existenceCheckErr, "error checking wallet pre-existence: %v", err)
+			return newError(existenceCheckErr, "error checking wallet pre-existence: %w", err)
 		}
 
 		// The password on a seeded wallet is deterministic, based on the seed
@@ -2217,12 +2217,12 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 		if exists {
 			_, pw, err = c.assetSeedAndPass(assetID, crypter)
 			if err != nil {
-				return newError(authErr, "error retrieving wallet password: %v", err)
+				return newError(authErr, "error retrieving wallet password: %w", err)
 			}
 		} else {
 			pw, err = c.createSeededWallet(assetID, crypter, form)
 			if err != nil {
-				return newError(createWalletErr, "error creating new %q-type %s wallet: %v", form.Type, unbip(assetID), err)
+				return newError(createWalletErr, "error creating new %q-type %s wallet: %w", form.Type, unbip(assetID), err)
 			}
 		}
 		dbWallet.EncryptedPW, err = crypter.Encrypt(pw)
@@ -2243,7 +2243,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 	// Reload the wallet with the new settings.
 	wallet, err := c.loadWallet(dbWallet)
 	if err != nil {
-		return newError(walletErr, "error loading wallet for %d -> %s: %v",
+		return newError(walletErr, "error loading wallet for %d -> %s: %w",
 			assetID, unbip(assetID), err)
 	}
 
@@ -2272,7 +2272,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 	}
 	if err := sameWallet(); err != nil {
 		wallet.Disconnect()
-		return newError(walletErr, "new wallet cannot be used with current active trades: %v", err)
+		return newError(walletErr, "new wallet cannot be used with current active trades: %w", err)
 	}
 
 	// If newWalletPW is non-nil, update the wallet's password.
@@ -2294,7 +2294,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 		if err != nil {
 			wallet.Disconnect()
 			return newError(walletAuthErr, "wallet successfully connected, but failed to unlock. "+
-				"reconfiguration not saved: %v", err)
+				"reconfiguration not saved: %w", err)
 		}
 	}
 
@@ -2310,7 +2310,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 	err = c.db.UpdateWallet(dbWallet)
 	if err != nil {
 		wallet.Disconnect()
-		return newError(dbErr, "error saving wallet configuration: %v", err)
+		return newError(dbErr, "error saving wallet configuration: %w", err)
 	}
 
 	// Update all relevant trackedTrades' toWallet and fromWallet.
@@ -2381,7 +2381,7 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 	// Check the app password and get the crypter.
 	crypter, err := c.encryptionKey(appPW)
 	if err != nil {
-		return newError(authErr, "SetWalletPassword password error: %v", err)
+		return newError(authErr, "SetWalletPassword password error: %w", err)
 	}
 
 	// Check that the specified wallet exists.
@@ -2411,7 +2411,7 @@ func (c *Core) setWalletPassword(wallet *xcWallet, newPW []byte, crypter encrypt
 	wasConnected := wallet.connected()
 	if !wasConnected {
 		if err := c.connectAndUpdateWallet(wallet); err != nil {
-			return newError(connectionErr, "SetWalletPassword connection error: %v", err)
+			return newError(connectionErr, "SetWalletPassword connection error: %w", err)
 		}
 	}
 
@@ -2427,12 +2427,12 @@ func (c *Core) setWalletPassword(wallet *xcWallet, newPW []byte, crypter encrypt
 		// Encrypt password if it's not an empty string.
 		encNewPW, err := crypter.Encrypt(newPW)
 		if err != nil {
-			return newError(encryptionErr, "encryption error: %v", err)
+			return newError(encryptionErr, "encryption error: %w", err)
 		}
 		err = wallet.Wallet.Unlock(newPW)
 		if err != nil {
 			return newError(authErr,
-				"setWalletPassword unlocking wallet error, is the new password correct?: %v", err)
+				"setWalletPassword unlocking wallet error, is the new password correct?: %w", err)
 		}
 		wallet.setEncPW(encNewPW)
 	} else {
@@ -2523,11 +2523,11 @@ func (c *Core) isRegistered(host string) bool {
 func (c *Core) tempDexConnection(dexAddr string, certI interface{}) (*dexConnection, error) {
 	host, err := addrHost(dexAddr)
 	if err != nil {
-		return nil, newError(addressParseErr, "error parsing address: %v", err)
+		return nil, newError(addressParseErr, "error parsing address: %w", err)
 	}
 	cert, err := parseCert(host, certI, c.net)
 	if err != nil {
-		return nil, newError(fileReadErr, "failed to parse certificate: %v", err)
+		return nil, newError(fileReadErr, "failed to parse certificate: %w", err)
 	}
 	if c.isRegistered(host) {
 		return nil, newError(dupeDEXErr, "already registered at %s", dexAddr)
@@ -2587,7 +2587,7 @@ func (c *Core) discoverAccount(dc *dexConnection, crypter encrypt.Crypter) (bool
 	for {
 		err := dc.acct.setupCryptoV2(creds, crypter, keyIndex)
 		if err != nil {
-			return false, newError(acctKeyErr, "setupCryptoV2 error: %v", err)
+			return false, newError(acctKeyErr, "setupCryptoV2 error: %w", err)
 		}
 
 		// Discover the account by attempting a 'connect' (authorize) request.
@@ -2603,7 +2603,7 @@ func (c *Core) discoverAccount(dc *dexConnection, crypter encrypt.Crypter) (bool
 				}
 				return false, nil // all good, just go register now
 			}
-			return false, newError(authErr, "unexpected authDEX error: %v", err)
+			return false, newError(authErr, "unexpected authDEX error: %w", err)
 		}
 		if dc.acct.isSuspended {
 			c.log.Infof("HD account key for %s was reported as suspended. Deriving another account key.", dc.acct.host)
@@ -2666,7 +2666,7 @@ func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI interface{}) 
 
 	host, err := addrHost(dexAddr)
 	if err != nil {
-		return nil, false, newError(addressParseErr, "error parsing address: %v", err)
+		return nil, false, newError(addressParseErr, "error parsing address: %w", err)
 	}
 
 	crypter, err := c.encryptionKey(appPW)
@@ -2778,7 +2778,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	}
 	host, err := addrHost(form.Addr)
 	if err != nil {
-		return nil, newError(addressParseErr, "error parsing address: %v", err)
+		return nil, newError(addressParseErr, "error parsing address: %w", err)
 	}
 	if c.isRegistered(host) {
 		return nil, newError(dupeDEXErr, "already registered at %s", form.Addr)
@@ -2801,13 +2801,13 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	if !wallet.unlocked() {
 		err = wallet.Unlock(crypter)
 		if err != nil {
-			return nil, newError(walletAuthErr, "failed to unlock %s wallet: %v", unbip(wallet.AssetID), err)
+			return nil, newError(walletAuthErr, "failed to unlock %s wallet: %w", unbip(wallet.AssetID), err)
 		}
 	}
 
 	cert, err := parseCert(host, form.Cert, c.net)
 	if err != nil {
-		return nil, newError(fileReadErr, "failed to read certificate file from %s: %v", cert, err)
+		return nil, newError(fileReadErr, "failed to read certificate file from %s: %w", cert, err)
 	}
 
 	dc, err := c.connectDEX(&db.AccountInfo{
@@ -2864,7 +2864,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	// Before we do the 'register' request, make sure we have sufficient funds.
 	balance, err := wallet.Balance()
 	if err != nil {
-		return nil, newError(walletErr, "unable to retrieve wallet balance for %v: %v",
+		return nil, newError(walletErr, "unable to retrieve wallet balance for %v: %w",
 			regFeeAssetSymbol, err)
 	}
 	// Just avail==required is not sufficient because of net fees, although that
@@ -2891,7 +2891,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	}
 
 	if err := dc.acct.unlock(crypter); err != nil { // should already be unlocked
-		return nil, newError(authErr, "failed to unlock account: %v", err)
+		return nil, newError(authErr, "failed to unlock account: %w", err)
 	}
 
 	// Check that the fee is non-zero.
@@ -2913,7 +2913,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	feeRate := c.feeSuggestionAny(feeAsset.ID, dc)
 	coin, err := wallet.PayFee(regRes.Address, regRes.Fee, feeRate)
 	if err != nil {
-		return nil, newError(feeSendErr, "error paying registration fee: %v", err)
+		return nil, newError(feeSendErr, "error paying registration fee: %w", err)
 	}
 
 	// Set the dexConnection account fields and save account info to db.
@@ -2983,7 +2983,7 @@ func (c *Core) register(dc *dexConnection, assetID uint32) (regRes *msgjson.Regi
 		msg := regRes.Serialize()
 		err = checkSigS256(msg, regRes.DEXPubKey, regRes.Sig)
 		if err != nil {
-			return nil, false, false, newError(signatureErr, "%s pubkey error: %v", dc.acct.host, err)
+			return nil, false, false, newError(signatureErr, "%s pubkey error: %w", dc.acct.host, err)
 		}
 		// Compatibility with older servers that do not include asset ID.
 		if regRes.AssetID != nil && assetID != *regRes.AssetID {
@@ -3878,7 +3878,7 @@ func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string)
 		return nil, fmt.Errorf("Withdraw password error: %w", err)
 	}
 	if value == 0 {
-		return nil, fmt.Errorf("%s zero withdraw", unbip(assetID))
+		return nil, fmt.Errorf("cannot withdraw zero %s", unbip(assetID))
 	}
 	wallet, found := c.wallet(assetID)
 	if !found {
@@ -4011,7 +4011,7 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 		SelectedOptions: form.Options,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("error getting swap estimate: %v", err)
+		return nil, fmt.Errorf("error getting swap estimate: %w", err)
 	}
 
 	redeemEstimate, err := wallets.toWallet.PreRedeem(&asset.PreRedeemForm{
@@ -4559,7 +4559,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	// Check the servers response signature.
 	err = dc.acct.checkSig(sigMsg, result.Sig)
 	if err != nil {
-		return newError(signatureErr, "DEX signature validation error: %v", err)
+		return newError(signatureErr, "DEX signature validation error: %w", err)
 	}
 
 	var suspended bool
@@ -5488,7 +5488,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 	wsAddr := "wss://" + host + "/ws"
 	wsURL, err := url.Parse(wsAddr)
 	if err != nil {
-		return nil, newError(addressParseErr, "error parsing ws address %s: %v", wsAddr, err)
+		return nil, newError(addressParseErr, "error parsing ws address %s: %w", wsAddr, err)
 	}
 
 	listen := len(temporary) == 0 || !temporary[0]
@@ -5836,7 +5836,7 @@ func handlePenaltyMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	// Check the signature.
 	err = dc.acct.checkSig(note.Serialize(), note.Sig)
 	if err != nil {
-		return newError(signatureErr, "handlePenaltyMsg: DEX signature validation error: %v", err)
+		return newError(signatureErr, "handlePenaltyMsg: DEX signature validation error: %w", err)
 	}
 	t := encode.UnixTimeMilli(int64(note.Penalty.Time))
 	// d := time.Duration(note.Penalty.Duration) * time.Millisecond
@@ -6729,7 +6729,7 @@ func parseCert(host string, certI interface{}, net dex.Network) ([]byte, error) 
 		}
 		cert, err := os.ReadFile(c)
 		if err != nil {
-			return nil, newError(fileReadErr, "failed to read certificate file from %s: %v", c, err)
+			return nil, newError(fileReadErr, "failed to read certificate file from %s: %w", c, err)
 		}
 		return cert, nil
 	case []byte:
@@ -6746,7 +6746,7 @@ func parseCert(host string, certI interface{}, net dex.Network) ([]byte, error) 
 func walletDefinition(assetID uint32, walletType string) (*asset.WalletDefinition, error) {
 	winfo, err := asset.Info(assetID)
 	if err != nil {
-		return nil, newError(assetSupportErr, "asset.Info error: %v", err)
+		return nil, newError(assetSupportErr, "asset.Info error: %w", err)
 	}
 	if walletType == "" {
 		if len(winfo.AvailableWallets) <= winfo.LegacyWalletIndex {

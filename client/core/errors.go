@@ -49,34 +49,40 @@ const (
 	activeOrdersErr
 )
 
-// Error is an error message and an error code.
+// Error is an error code and a wrapped error.
 type Error struct {
-	s    string
 	code int
+	err  error
 }
 
 // Error returns the error string. Satisfies the error interface.
 func (e *Error) Error() string {
-	return e.s
+	return e.err.Error()
 }
 
+// Code returns the error code.
 func (e *Error) Code() *int {
 	return &e.code
+}
+
+// Unwrap returns the underlying wrapped error.
+func (e *Error) Unwrap() error {
+	return e.err
 }
 
 // newError is a constructor for a new Error.
 func newError(code int, s string, a ...interface{}) error {
 	return &Error{
-		s:    fmt.Sprintf(s, a...),
 		code: code,
+		err:  fmt.Errorf(s, a...), // s may contain a %w verb to wrap an error
 	}
 }
 
 // codedError converts the error to an Error with the specified code.
 func codedError(code int, err error) error {
 	return &Error{
-		s:    err.Error(),
 		code: code,
+		err:  err,
 	}
 }
 
@@ -84,4 +90,14 @@ func codedError(code int, err error) error {
 func errorHasCode(err error, code int) bool {
 	var e *Error
 	return errors.As(err, &e) && e.code == code
+}
+
+// UnwrapErr returns the result of calling the Unwrap method on err,
+// until it returns a non-wrapped error.
+func UnwrapErr(err error) error {
+	InnerErr := errors.Unwrap(err)
+	if InnerErr == nil {
+		return err
+	}
+	return UnwrapErr(InnerErr)
 }

@@ -20,7 +20,7 @@ func (c *Core) AccountDisable(pw []byte, addr string) error {
 	// Get dex connection by host.
 	dc, _, err := c.dex(addr)
 	if err != nil {
-		return newError(unknownDEXErr, "error retrieving dex conn: %v", err)
+		return newError(unknownDEXErr, "error retrieving dex conn: %w", err)
 	}
 
 	// Check active orders.
@@ -30,7 +30,7 @@ func (c *Core) AccountDisable(pw []byte, addr string) error {
 
 	err = c.db.DisableAccount(dc.acct.host)
 	if err != nil {
-		return newError(accountDisableErr, "error disabling account: %v", err)
+		return newError(accountDisableErr, "error disabling account: %w", err)
 	}
 	// Stop dexConnection books.
 	dc.cfgMtx.RLock()
@@ -65,7 +65,7 @@ func (c *Core) AccountExport(pw []byte, host string) (*Account, error) {
 	}
 	host, err = addrHost(host)
 	if err != nil {
-		return nil, newError(addressParseErr, "error parsing address: %v", err)
+		return nil, newError(addressParseErr, "error parsing address: %w", err)
 	}
 
 	// Get the dexConnection and the dex.Asset for each asset.
@@ -121,7 +121,7 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 
 	host, err := addrHost(acct.Host)
 	if err != nil {
-		return newError(addressParseErr, "error parsing address: %v", err)
+		return newError(addressParseErr, "error parsing address: %w", err)
 	}
 	accountInfo := db.AccountInfo{Host: host}
 
@@ -163,7 +163,7 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 			delete(c.conns, dc.acct.host)
 			c.connMtx.Unlock()
 		}
-		return newError(accountVerificationErr, "Account not verified for host: %s err: %v", host, err)
+		return newError(accountVerificationErr, "Account not verified for host: %s err: %w", host, err)
 	}
 
 	err = c.db.CreateAccount(&accountInfo)

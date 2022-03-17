@@ -532,7 +532,7 @@ func (c *Core) SyncBook(host string, base, quote uint32) (BookFeed, error) {
 func (c *Core) Book(dex string, base, quote uint32) (*OrderBook, error) {
 	dex, err := addrHost(dex)
 	if err != nil {
-		return nil, newError(addressParseErr, "error parsing address: %v", err)
+		return nil, newError(addressParseErr, "error parsing address: %w", err)
 	}
 	c.connMtx.RLock()
 	dc, found := c.conns[dex]

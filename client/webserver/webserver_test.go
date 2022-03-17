@@ -401,7 +401,7 @@ func TestAPILogin(t *testing.T) {
 
 	// Login error
 	tCore.loginErr = tErr
-	ensure(fmt.Sprintf(`{"ok":false,"msg":"login error: %s"}`, tErr))
+	ensure(fmt.Sprintf(`{"ok":false,"msg":"%s"}`, tErr))
 	tCore.loginErr = nil
 }
 
@@ -488,7 +488,7 @@ func TestAPIInit(t *testing.T) {
 
 	// Initialization error
 	tCore.initErr = tErr
-	ensure(s.apiInit, fmt.Sprintf(`{"ok":false,"msg":"initialization error: %s"}`, tErr))
+	ensure(s.apiInit, fmt.Sprintf(`{"ok":false,"msg":"%s"}`, tErr))
 	tCore.initErr = nil
 }
 
@@ -517,7 +517,7 @@ func TestAPINewWallet(t *testing.T) {
 	tCore.notHas = true
 
 	tCore.createWalletErr = tErr
-	ensure(fmt.Sprintf(`{"ok":false,"msg":"error creating btc wallet: %s"}`, tErr))
+	ensure(fmt.Sprintf(`{"ok":false,"msg":"%s"}`, tErr))
 	tCore.createWalletErr = nil
 
 	tCore.notHas = false
@@ -536,7 +536,7 @@ func TestAPILogout(t *testing.T) {
 
 	// Logout error
 	tCore.logoutErr = tErr
-	ensure(fmt.Sprintf(`{"ok":false,"msg":"logout error: %s"}`, tErr))
+	ensure(fmt.Sprintf(`{"ok":false,"msg":"%s"}`, tErr))
 	tCore.logoutErr = nil
 }
 
@@ -553,7 +553,7 @@ func TestApiGetBalance(t *testing.T) {
 
 	// Logout error
 	tCore.balanceErr = tErr
-	ensure(fmt.Sprintf(`{"ok":false,"msg":"balance error: %s"}`, tErr))
+	ensure(fmt.Sprintf(`{"ok":false,"msg":"%s"}`, tErr))
 	tCore.balanceErr = nil
 }
 
@@ -668,7 +668,7 @@ func TestPasswordCache(t *testing.T) {
 	body := &newWalletForm{
 		Pass: encode.PassBytes(""),
 	}
-	want := `{"ok":false,"msg":"password error: app pass cannot be empty"}`
+	want := `{"ok":false,"msg":"app pass cannot be empty"}`
 	tCore.notHas = true
 	ensureResponse(t, s.apiNewWallet, want, reader, writer, body, nil)
 
