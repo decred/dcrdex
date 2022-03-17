@@ -33,7 +33,7 @@
     <div data-tmpl="defaultSettings" class="dynamicopts"></div>
   </div>
 </div>
-<div data-tmpl="errMsg" class="fs15 pt-3 text-center d-hide errcolor"></div>
+<div data-tmpl="errMsg" class="fs15 pt-3 text-center d-hide errcolor text-break"></div>
 {{end}}
 
 {{define "newWalletForm"}}
@@ -72,7 +72,7 @@
     </div>
   </div>
 
-  <div class="fs15 pt-3 text-center d-hide errcolor" data-tmpl="newWalletErr"></div>
+  <div class="fs15 pt-3 text-center d-hide errcolor text-break" data-tmpl="newWalletErr"></div>
 </div>
 {{end}}
 
@@ -96,7 +96,7 @@
 <div id="submitUnlockDiv" class="d-flex justify-content-end">
   <button id="submitUnlock" type="submit" class="col-8 justify-content-center fs15 bg2 selected">解锁</button>
 </div>
-<div class="fs15 pt-3 text-center d-hide errcolor" id="unlockErr"></div>
+<div class="fs15 pt-3 text-center d-hide errcolor text-break" id="unlockErr"></div>
 {{end}}
 
 {{define "dexAddrForm"}}
@@ -142,7 +142,7 @@
     <button data-tmpl="submit" type="button" class="justify-content-center fs16 bg2 selected">提交</button>
   </div>
 </div>
-<div class="fs15 pt-3 text-center d-hide errcolor" data-tmpl="err"></div>
+<div class="fs15 pt-3 text-center d-hide errcolor text-break" data-tmpl="err"></div>
 {{end}}
 
 {{define "regAssetForm"}}
@@ -217,7 +217,7 @@
 <div class="d-flex justify-content-center mt-2">
   <button data-tmpl="submit" type="button" class="justify-content-center fs15 bg2 selected" id="loginSubmit">提交</button>
 </div>
-<div class="fs15 pt-3 text-center d-hide errcolor" data-tmpl="errMsg"></div>
+<div class="fs15 pt-3 text-center d-hide errcolor text-break" data-tmpl="errMsg"></div>
 {{end}}
 
 {{define "confirmRegistrationForm"}}
@@ -251,7 +251,7 @@
 <div class="flex-center p-3 mt-1">
   <button data-tmpl="submit" class="submit bg2 fs18 selected">注册!</button>
 </div>
-<div class="fs15 pt-3 text-center d-hide errcolor" data-tmpl="regErr"></div>
+<div class="fs15 pt-3 text-center d-hide errcolor text-break" data-tmpl="regErr"></div>
 {{end}}
 
 {{define "authorizeAccountExportForm"}}
@@ -270,7 +270,7 @@
 <div class="d-flex justify-content-end mt-4">
   <button id="authorizeExportAccountConfirm" type="button" class="justify-content-center fs15 bg2 selected">授权转出</button>
 </div>
-<div class="fs15 pt-3 text-center d-hide errcolor" id="exportAccountErr"></div>
+<div class="fs15 pt-3 text-center d-hide errcolor text-break" id="exportAccountErr"></div>
 {{end}}
 
 {{define "disableAccountForm"}}
@@ -293,7 +293,7 @@
 <div class="d-flex justify-content-center mt-4">
   <button id="disableAccountConfirm" type="button" class="justify-content-center fs15 bg2 selected">禁用帐户</button>
 </div>
-<div class="fs15 pt-3 text-center d-hide errcolor" id="disableAccountErr"></div>
+<div class="fs15 pt-3 text-center d-hide errcolor text-break" id="disableAccountErr"></div>
 {{end}}
 
 {{define "authorizeAccountImportForm"}}
@@ -322,7 +322,7 @@
 <div class="d-flex justify-content-center mt-4">
   <button id="authorizeImportAccountConfirm" type="button" class="justify-content-center fs15 bg2 selected">允许导入</button>
 </div>
-<div class="fs15 pt-3 text-center d-hide errcolor" id="importAccountErr"></div>
+<div class="fs15 pt-3 text-center d-hide errcolor text-break" id="importAccountErr"></div>
 {{end}}
 
 {{define "changeAppPWForm"}}
@@ -345,7 +345,7 @@
 <div class="d-flex justify-content-end mt-4">
   <button id="submitNewPW" type="submit" class="col-8 justify-content-center fs15 bg2 selected">提交</button>
 </div>
-<div class="fs15 pt-3 text-center d-hide errcolor" id="changePWErrMsg"></div>
+<div class="fs15 pt-3 text-center d-hide errcolor text-break" id="changePWErrMsg"></div>
 {{end}}
 
 {{define "cancelOrderForm"}}
