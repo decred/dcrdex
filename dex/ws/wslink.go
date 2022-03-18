@@ -105,6 +105,16 @@ func (c *WSLink) Send(msg *msgjson.Message) error {
 	return c.send(msg, nil)
 }
 
+// SendRaw sends the passed bytes to the websocket peer. The actual writing of
+// the message on the peer's link occurs asynchronously. As such, a nil error
+// only indicates that the link is believed to be up.
+func (c *WSLink) SendRaw(b []byte) error {
+	if c.Off() {
+		return ErrPeerDisconnected
+	}
+	return c.sendRaw(b, nil)
+}
+
 // SendNow is like send, but it waits for the message to be written on the
 // peer's link, returning any error from the write.
 func (c *WSLink) SendNow(msg *msgjson.Message) error {
@@ -113,6 +123,20 @@ func (c *WSLink) SendNow(msg *msgjson.Message) error {
 		return err
 	}
 	return <-writeErrChan
+}
+
+// sendRaw sends raw bytes to a peer. Whether or not the peer is connected
+// should be checked before calling.
+func (c *WSLink) sendRaw(b []byte, writeErr chan<- error) error {
+	// NOTE: Without the stopped chan or access to the Context we are now
+	// racing after the c.Off check in the caller.
+	select {
+	case c.outChan <- &sendData{b, writeErr}:
+	case <-c.stopped:
+		return ErrPeerDisconnected
+	}
+
+	return nil
 }
 
 func (c *WSLink) send(msg *msgjson.Message, writeErr chan<- error) error {
@@ -124,15 +148,7 @@ func (c *WSLink) send(msg *msgjson.Message, writeErr chan<- error) error {
 		return err
 	}
 
-	// NOTE: Without the stopped chan or access to the Context we are now racing
-	// after the c.Off check above.
-	select {
-	case c.outChan <- &sendData{b, writeErr}:
-	case <-c.stopped:
-		return ErrPeerDisconnected
-	}
-
-	return nil
+	return c.sendRaw(b, writeErr)
 }
 
 // SendError sends the msgjson.Error to the peer in a ResponsePayload.

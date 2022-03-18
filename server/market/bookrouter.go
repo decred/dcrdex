@@ -5,6 +5,7 @@ package market
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -703,10 +704,17 @@ func (r *BookRouter) sendNote(route string, subs *subscribers, note interface{})
 		return
 	}
 
+	// Marshal and send the bytes to avoid multiple marshals when sending.
+	b, err := json.Marshal(msg)
+	if err != nil {
+		log.Errorf("unable to marshal notification-type Message: %v", err)
+		return
+	}
+
 	var deletes []uint64
 	subs.mtx.RLock()
 	for _, conn := range subs.conns {
-		err := conn.Send(msg)
+		err := conn.SendRaw(b)
 		if err != nil {
 			deletes = append(deletes, conn.ID())
 		}

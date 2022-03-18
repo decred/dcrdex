@@ -6,6 +6,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -229,5 +230,52 @@ func TestWSLink_send(t *testing.T) {
 
 	if lastID != int64(msg.ID-1) {
 		t.Errorf("final message %d not sent, last ID is %d", msg.ID-1, lastID)
+	}
+}
+
+func TestSendRaw(t *testing.T) {
+	tests := []struct {
+		name    string
+		on      uint32
+		stopped chan struct{}
+		outChan chan *sendData
+		wantErr error
+	}{{
+		name:    "ok",
+		stopped: make(chan struct{}),
+		outChan: make(chan *sendData, 1),
+		on:      1,
+	}, {
+		name:    "client stopped",
+		stopped: make(chan struct{}),
+		outChan: make(chan *sendData, 1),
+		wantErr: ErrPeerDisconnected,
+	}, {
+		name: "client stopped before sending",
+		stopped: func() chan struct{} {
+			ch := make(chan struct{})
+			close(ch)
+			return ch
+		}(),
+		outChan: make(chan *sendData),
+		on:      1,
+		wantErr: ErrPeerDisconnected,
+	}}
+	for _, test := range tests {
+		link := WSLink{
+			stopped: test.stopped,
+			on:      test.on,
+			outChan: test.outChan,
+		}
+		err := link.SendRaw(nil)
+		if test.wantErr != nil {
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("%q: expected error %T but got %T", test.name, test.wantErr, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%q: unexpected error %v", test.name, err)
+		}
 	}
 }

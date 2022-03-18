@@ -145,6 +145,7 @@ type TRPCClient struct {
 	ip         dex.IPKey
 	addr       string
 	sendErr    error
+	sendRawErr error
 	requestErr error
 	banished   bool
 	sends      []*msgjson.Message
@@ -160,6 +161,17 @@ func (c *TRPCClient) Authorized()   {}
 func (c *TRPCClient) Send(msg *msgjson.Message) error {
 	c.sends = append(c.sends, msg)
 	return c.sendErr
+}
+func (c *TRPCClient) SendRaw(b []byte) error {
+	if c.sendRawErr != nil {
+		return c.sendRawErr
+	}
+	msg, err := msgjson.DecodeMessage(b)
+	if err != nil {
+		return err
+	}
+	c.sends = append(c.sends, msg)
+	return nil
 }
 func (c *TRPCClient) SendError(id uint64, msg *msgjson.Error) {
 }
