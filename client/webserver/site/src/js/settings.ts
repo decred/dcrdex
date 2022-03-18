@@ -1,21 +1,43 @@
-import { app } from './registry'
 import Doc from './doc'
 import BasePage from './basepage'
 import State from './state'
 import { postJSON } from './http'
 import * as forms from './forms'
 import * as intl from './locales'
+import {
+  app,
+  Exchange,
+  PageElement,
+  PasswordCache,
+  WalletStateNote,
+  BalanceNote
+} from './registry'
 
 const animationLength = 300
 
 export default class SettingsPage extends BasePage {
-  constructor (body) {
+  body: HTMLElement
+  currentDEX: Exchange
+  page: Record<string, PageElement>
+  forms: PageElement[]
+  regAssetForm: forms.FeeAssetSelectionForm
+  confirmRegisterForm: forms.ConfirmRegistrationForm
+  newWalletForm: forms.NewWalletForm
+  walletWaitForm: forms.WalletWaitForm
+  dexAddrForm: forms.DEXAddressForm
+  currentForm: PageElement
+  pwCache: PasswordCache
+  defaultTLSText: string
+  keyup: (e: KeyboardEvent) => void
+
+  constructor (body: HTMLElement) {
     super()
     this.body = body
     this.currentDEX = null
+    this.defaultTLSText = 'none selected'
     const page = this.page = Doc.idDescendants(body)
 
-    this.forms = page.forms.querySelectorAll(':scope > form')
+    this.forms = Doc.applySelector(page.forms, ':scope > form')
 
     Doc.bind(page.darkMode, 'click', () => {
       State.dark(page.darkMode.checked)
@@ -82,7 +104,7 @@ export default class SettingsPage extends BasePage {
     }, () => { this.animateRegAsset(page.walletWait) })
 
     // Enter an address for a new DEX
-    this.dexAddrForm = new forms.DEXAddressForm(page.dexAddrForm, async (xc, certFile) => {
+    this.dexAddrForm = new forms.DEXAddressForm(page.dexAddrForm, async (xc: Exchange, certFile: string) => {
       this.currentDEX = xc
       this.confirmRegisterForm.setExchange(xc, certFile)
       this.walletWaitForm.setExchange(xc)
@@ -124,11 +146,11 @@ export default class SettingsPage extends BasePage {
       page.seedDiv.textContent = ''
     }
 
-    Doc.bind(page.forms, 'mousedown', e => {
+    Doc.bind(page.forms, 'mousedown', (e: MouseEvent) => {
       if (!Doc.mouseInElement(e, this.currentForm)) { closePopups() }
     })
 
-    this.keyup = e => {
+    this.keyup = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         closePopups()
       }
@@ -140,13 +162,13 @@ export default class SettingsPage extends BasePage {
     })
 
     this.notifiers = {
-      walletstate: note => this.walletWaitForm.reportWalletState(note.wallet),
-      balance: note => this.walletWaitForm.reportBalance(note.balance, note.assetID)
+      walletstate: (note: WalletStateNote) => this.walletWaitForm.reportWalletState(note.wallet),
+      balance: (note: BalanceNote) => this.walletWaitForm.reportBalance(note.balance, note.assetID)
     }
   }
 
   // Retrieve an estimate for the tx fee needed to pay the registration fee.
-  async getRegistrationTxFeeEstimate (assetID, form) {
+  async getRegistrationTxFeeEstimate (assetID: number, form: HTMLElement) {
     const cert = await this.getCertFile()
     const loaded = app().loading(form)
     const res = await postJSON('/api/regtxfee', {
@@ -161,7 +183,7 @@ export default class SettingsPage extends BasePage {
     return res.txfee
   }
 
-  async newWalletCreated (assetID) {
+  async newWalletCreated (assetID: number) {
     const user = await app().fetchUser()
     const page = this.page
     const asset = user.assets[assetID]
@@ -179,7 +201,7 @@ export default class SettingsPage extends BasePage {
     await forms.slideSwap(page.newWalletForm, page.walletWait)
   }
 
-  async prepareAccountExport (host, authorizeAccountExportForm) {
+  async prepareAccountExport (host: string, authorizeAccountExportForm: HTMLElement) {
     const page = this.page
     page.exportAccountHost.textContent = host
     page.exportAccountErr.textContent = ''
@@ -190,7 +212,7 @@ export default class SettingsPage extends BasePage {
     }
   }
 
-  async prepareAccountDisable (host, disableAccountForm) {
+  async prepareAccountDisable (host: string, disableAccountForm: HTMLElement) {
     const page = this.page
     page.disableAccountHost.textContent = host
     page.disableAccountErr.textContent = ''
@@ -264,7 +286,7 @@ export default class SettingsPage extends BasePage {
     Doc.show(page.addAccount)
   }
 
-  async prepareAccountImport (authorizeAccountImportForm) {
+  async prepareAccountImport (authorizeAccountImportForm: HTMLElement) {
     const page = this.page
     page.importAccountErr.textContent = ''
     this.showForm(authorizeAccountImportForm)
@@ -333,7 +355,7 @@ export default class SettingsPage extends BasePage {
   }
 
   /* showForm shows a modal form with a little animation. */
-  async showForm (form) {
+  async showForm (form: HTMLElement) {
     const page = this.page
     this.currentForm = form
     this.forms.forEach(form => Doc.hide(form))
@@ -430,7 +452,7 @@ export default class SettingsPage extends BasePage {
   }
 
   /* Swap in the asset selection form and run the animation. */
-  async animateRegAsset (oldForm) {
+  async animateRegAsset (oldForm: HTMLElement) {
     Doc.hide(oldForm)
     const form = this.page.regAssetForm
     this.currentForm = form
@@ -439,7 +461,7 @@ export default class SettingsPage extends BasePage {
   }
 
   /* Swap in the confirmation form and run the animation. */
-  async animateConfirmForm (oldForm) {
+  async animateConfirmForm (oldForm: HTMLElement) {
     this.confirmRegisterForm.animate()
     const form = this.page.confirmRegForm
     this.currentForm = form

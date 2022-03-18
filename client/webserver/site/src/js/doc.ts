@@ -1,4 +1,10 @@
 import * as intl from './locales'
+import {
+  UnitInfo,
+  LayoutMetrics,
+  WalletState,
+  PageElement
+} from './registry'
 
 const parser = new window.DOMParser()
 
@@ -17,7 +23,7 @@ const BipIDs = {
 
 const BipSymbols = Object.values(BipIDs)
 
-const intFormatter = new Intl.NumberFormat(navigator.languages)
+const intFormatter = new Intl.NumberFormat((navigator.languages as string[]))
 
 /* A cache for formatters used for Doc.formatCoinValue. */
 const decimalFormatters = {}
@@ -26,7 +32,7 @@ const decimalFormatters = {}
  * decimalFormatter gets the formatCoinValue formatter for the specified decimal
  * precision.
  */
-function decimalFormatter (prec) {
+function decimalFormatter (prec: number) {
   return formatter(decimalFormatters, 2, prec)
 }
 
@@ -37,7 +43,7 @@ const fullPrecisionFormatters = {}
  * fullPrecisionFormatter gets the formatFullPrecision formatter for the
  * specified decimal precision.
  */
-function fullPrecisionFormatter (prec) {
+function fullPrecisionFormatter (prec: number) {
   return formatter(fullPrecisionFormatters, prec, prec)
 }
 
@@ -45,11 +51,11 @@ function fullPrecisionFormatter (prec) {
  * formatter gets the formatter from the supplied cache if it already exists,
  * else creates it.
  */
-function formatter (formatters, min, max) {
+function formatter (formatters: Record<string, Intl.NumberFormat>, min: number, max: number): Intl.NumberFormat {
   const k = `${min}-${max}`
   let fmt = formatters[k]
   if (!fmt) {
-    fmt = new Intl.NumberFormat(navigator.languages, {
+    fmt = new Intl.NumberFormat((navigator.languages as string[]), {
       minimumFractionDigits: min,
       maximumFractionDigits: max
     })
@@ -62,7 +68,7 @@ function formatter (formatters, min, max) {
  * convertToConventional converts the value in atomic units to conventional
  * units.
  */
-function convertToConventional (v, unitInfo) {
+function convertToConventional (v: number, unitInfo: UnitInfo) {
   let prec = 8
   if (unitInfo) {
     const f = unitInfo.conventional.conversionFactor
@@ -78,22 +84,22 @@ export default class Doc {
    * idel is the element with the specified id that is the descendent of the
    * specified node.
    */
-  static idel (el, id) {
-    return el.querySelector(`#${id}`)
+  static idel (el: Document | Element, id: string): HTMLElement {
+    return el.querySelector(`#${id}`) as HTMLElement
   }
 
   /* bind binds the function to the event for the element. */
-  static bind (el, ev, f) {
+  static bind (el: EventTarget, ev: string, f: (e: Event) => void) {
     el.addEventListener(ev, f)
   }
 
   /* unbind removes the handler for the event from the element. */
-  static unbind (el, ev, f) {
+  static unbind (el: EventTarget, ev: string, f: (e: Event) => void) {
     el.removeEventListener(ev, f)
   }
 
   /* noderize creates a Document object from a string of HTML. */
-  static noderize (html) {
+  static noderize (html: string): Document {
     return parser.parseFromString(html, 'text/html')
   }
 
@@ -101,7 +107,7 @@ export default class Doc {
    * mouseInElement returns true if the position of mouse event, e, is within
    * the bounds of the specified element.
    */
-  static mouseInElement (e, el) {
+  static mouseInElement (e: MouseEvent, el: HTMLElement): boolean {
     const rect = el.getBoundingClientRect()
     return e.pageX >= rect.left && e.pageX <= rect.right &&
       e.pageY >= rect.top && e.pageY <= rect.bottom
@@ -110,7 +116,7 @@ export default class Doc {
   /*
    * layoutMetrics gets information about the elements position on the page.
    */
-  static layoutMetrics (el) {
+  static layoutMetrics (el: HTMLElement): LayoutMetrics {
     const box = el.getBoundingClientRect()
     const docEl = document.documentElement
     const top = box.top + docEl.scrollTop
@@ -128,7 +134,7 @@ export default class Doc {
   }
 
   /* empty removes all child nodes from the specified element. */
-  static empty (...els) {
+  static empty (...els: Element[]) {
     for (const el of els) while (el.firstChild) el.removeChild(el.firstChild)
   }
 
@@ -136,7 +142,7 @@ export default class Doc {
    * hide hides the specified elements. This is accomplished by adding the
    * bootstrap d-hide class to the element. Use Doc.show to undo.
    */
-  static hide (...els) {
+  static hide (...els: Element[]) {
     for (const el of els) el.classList.add('d-hide')
   }
 
@@ -144,17 +150,17 @@ export default class Doc {
    * show shows the specified elements. This is accomplished by removing the
    * bootstrap d-hide class as added with Doc.hide.
    */
-  static show (...els) {
+  static show (...els: Element[]) {
     for (const el of els) el.classList.remove('d-hide')
   }
 
   /* isHidden returns true if the specified element is hidden */
-  static isHidden (el) {
+  static isHidden (el: Element): boolean {
     return el.classList.contains('d-hide')
   }
 
   /* isDisplayed returns true if the specified element is not hidden */
-  static isDisplayed (el) {
+  static isDisplayed (el: Element): boolean {
     return !el.classList.contains('d-hide')
   }
 
@@ -166,7 +172,7 @@ export default class Doc {
    * algorithm. See the Easing object for the available easing algo choices. The
    * default easing algorithm is linear.
    */
-  static async animate (duration, f, easingAlgo) {
+  static async animate (duration: number, f: (progress: number) => void, easingAlgo?: string) {
     const easer = easingAlgo ? Easing[easingAlgo] : Easing.linear
     const start = new Date().getTime()
     const end = start + duration
@@ -181,14 +187,22 @@ export default class Doc {
     f(1)
   }
 
+  static applySelector (ancestor: HTMLElement, k: string): PageElement[] {
+    return Array.from(ancestor.querySelectorAll(k)) as PageElement[]
+  }
+
+  static kids (ancestor: HTMLElement): PageElement[] {
+    return Array.from(ancestor.children) as PageElement[]
+  }
+
   /*
    * idDescendants creates an object mapping to elements which are descendants
    * of the ancestor and have id attributes. Elements are keyed by their id
    * value.
    */
-  static idDescendants (ancestor) {
-    const d = {}
-    for (const el of ancestor.querySelectorAll('[id]')) d[el.id] = el
+  static idDescendants (ancestor: HTMLElement): Record<string, PageElement> {
+    const d: Record<string, PageElement> = {}
+    for (const el of Doc.applySelector(ancestor, '[id]')) d[el.id] = el
     return d
   }
 
@@ -197,7 +211,7 @@ export default class Doc {
    * representation in conventional units. If the value happens to be an
    * integer, no decimals are displayed. Trailing zeros may be truncated.
    */
-  static formatCoinValue (vAtomic, unitInfo) {
+  static formatCoinValue (vAtomic: number, unitInfo?: UnitInfo): string {
     const [v, prec] = convertToConventional(vAtomic, unitInfo)
     if (Number.isInteger(v)) return intFormatter.format(v)
     return decimalFormatter(prec).format(v)
@@ -208,7 +222,7 @@ export default class Doc {
    * representation in conventional units using the full decimal precision
    * associated with the conventional unit's conversion factor.
    */
-  static formatFullPrecision (vAtomic, unitInfo) {
+  static formatFullPrecision (vAtomic: number, unitInfo?: UnitInfo): string {
     const [v, prec] = convertToConventional(vAtomic, unitInfo)
     return fullPrecisionFormatter(prec).format(v)
   }
@@ -218,7 +232,7 @@ export default class Doc {
    * the symbol is not a supported asset, the generic letter logo will be
    * requested instead.
    */
-  static logoPath (symbol) {
+  static logoPath (symbol: string): string {
     if (BipSymbols.indexOf(symbol) === -1) symbol = symbol.substring(0, 1)
     return `/img/coins/${symbol}.png`
   }
@@ -227,7 +241,7 @@ export default class Doc {
   * cleanTemplates removes the elements from the DOM and deletes the id
   * attribute.
   */
-  static cleanTemplates (...tmpls) {
+  static cleanTemplates (...tmpls: HTMLElement[]) {
     tmpls.forEach(tmpl => {
       tmpl.remove()
       tmpl.removeAttribute('id')
@@ -238,7 +252,7 @@ export default class Doc {
   * tmplElement is a helper function for grabbing sub-elements of the market list
   * template.
   */
-  static tmplElement (ancestor, s) {
+  static tmplElement (ancestor: Document | Element, s: string): PageElement {
     return ancestor.querySelector(`[data-tmpl="${s}"]`)
   }
 
@@ -246,9 +260,9 @@ export default class Doc {
   * parseTemplate returns an object of data-tmpl elements, keyed by their
   * data-tmpl values.
   */
-  static parseTemplate (ancestor) {
-    const d = {}
-    for (const el of ancestor.querySelectorAll('[data-tmpl]')) d[el.dataset.tmpl] = el
+  static parseTemplate (ancestor: HTMLElement): Record<string, PageElement> {
+    const d: Record<string, PageElement> = {}
+    for (const el of Doc.applySelector(ancestor, '[data-tmpl]')) d[el.dataset.tmpl] = el
     return d
   }
 
@@ -256,16 +270,16 @@ export default class Doc {
    * timeSince returns a string representation of the duration since the
    * specified unix timestamp.
    */
-  static timeSince (t) {
+  static timeSince (t: number): string {
     return Doc.formatDuration((new Date().getTime()) - t)
   }
 
   /* formatDuration returns a string representation of the duration */
-  static formatDuration (dur) {
+  static formatDuration (dur: number): string {
     let seconds = Math.floor(dur)
     let result = ''
     let count = 0
-    const add = (n, s) => {
+    const add = (n: number, s: string) => {
       if (n > 0 || count > 0) count++
       if (n > 0) result += `${n} ${s} `
       return count >= 2
@@ -293,7 +307,7 @@ export default class Doc {
    * scroll increment/decrement behavior for a wheel action on a
    * number input.
    */
-  static disableMouseWheel (...inputFields) {
+  static disableMouseWheel (...inputFields: Element[]) {
     for (const inputField of inputFields) {
       inputField.addEventListener('wheel', (ev) => {
         ev.preventDefault()
@@ -303,7 +317,7 @@ export default class Doc {
 }
 
 /* Easing algorithms for animations. */
-const Easing = {
+const Easing: Record<string, (t: number) => number> = {
   linear: t => t,
   easeIn: t => t * t,
   easeOut: t => t * (2 - t),
@@ -313,8 +327,11 @@ const Easing = {
 
 /* WalletIcons are used for controlling wallets in various places. */
 export class WalletIcons {
-  constructor (box) {
-    const stateElement = (name) => box.querySelector(`[data-state=${name}]`)
+  icons: Record<string, HTMLElement>
+  status: Element
+
+  constructor (box: HTMLElement) {
+    const stateElement = (name: string) => box.querySelector(`[data-state=${name}]`) as HTMLElement
     this.icons = {}
     this.icons.sleeping = stateElement('sleeping')
     this.icons.locked = stateElement('locked')
@@ -362,7 +379,7 @@ export class WalletIcons {
     if (this.status) this.status.textContent = intl.prep(intl.ID_NOWALLET)
   }
 
-  setSyncing (wallet) {
+  setSyncing (wallet: WalletState) {
     const syncIcon = this.icons.syncing
     if (!wallet || !wallet.running) {
       Doc.hide(syncIcon)
@@ -385,7 +402,7 @@ export class WalletIcons {
   }
 
   /* reads the core.Wallet state and sets the icon visibility. */
-  readWallet (wallet) {
+  readWallet (wallet: WalletState) {
     this.setSyncing(wallet)
     switch (true) {
       case (!wallet):
@@ -407,7 +424,7 @@ export class WalletIcons {
 }
 
 /* sleep can be used by async functions to pause for a specified period. */
-function sleep (ms) {
+function sleep (ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
@@ -418,7 +435,7 @@ const anHour = 3600000
 const aMinute = 60000
 
 /* timeMod returns the quotient and remainder of t / dur. */
-function timeMod (t, dur) {
+function timeMod (t: number, dur: number) {
   const n = Math.floor(t / dur)
   return [n, t - n * dur]
 }

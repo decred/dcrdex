@@ -1,16 +1,47 @@
-import { app } from './registry'
 import Doc from './doc'
 import { postJSON } from './http'
 import State from './state'
 import * as intl from './locales'
 import { RateEncodingFactor } from './orderutil'
+import {
+  app,
+  PasswordCache,
+  SupportedAsset,
+  PageElement,
+  WalletDefinition,
+  ConfigOption,
+  Exchange,
+  Market,
+  UnitInfo,
+  FeeAsset,
+  WalletState,
+  WalletBalance
+} from './registry'
+
+interface ConfigOptionInput extends HTMLInputElement {
+  configOpt: ConfigOption
+}
+
+interface ProgressPoint {
+  stamp: number
+  progress: number
+}
 
 /*
  * NewWalletForm should be used with the "newWalletForm" template. The enclosing
  * <form> element should be the second argument of the constructor.
  */
 export class NewWalletForm {
-  constructor (form, success, pwCache, backFunc) {
+  page: Record<string, PageElement>
+  form: HTMLElement
+  pwCache: PasswordCache
+  success: (assetID: number) => void
+  currentAsset: SupportedAsset
+  pwHiders: HTMLElement[]
+  subform: WalletConfigForm
+  currentWalletType: string
+
+  constructor (form: HTMLElement, success: (assetID: number) => void, pwCache?: PasswordCache, backFunc?: () => void) {
     this.form = form
     this.success = success
     this.pwCache = pwCache
@@ -44,22 +75,24 @@ export class NewWalletForm {
 
   async submit () {
     const page = this.page
-    const pw = page.appPass.value || (this.pwCache ? this.pwCache.pw : '')
+    const appPass = page.appPass as HTMLInputElement
+    const newWalletPass = page.newWalletPass as HTMLInputElement
+    const pw = appPass.value || (this.pwCache ? this.pwCache.pw : '')
     if (!pw && !State.passwordIsCached()) {
       page.newWalletErr.textContent = intl.prep(intl.ID_NO_APP_PASS_ERROR_MSG)
       Doc.show(page.newWalletErr)
       return
     }
     Doc.hide(page.newWalletErr)
-    const assetID = parseInt(this.currentAsset.id)
+    const assetID = this.currentAsset.id
     const createForm = {
       assetID: assetID,
-      pass: page.newWalletPass.value || '',
+      pass: newWalletPass.value || '',
       config: this.subform.map(),
       appPass: pw,
       walletType: this.currentWalletType
     }
-    page.appPass.value = ''
+    appPass.value = ''
     const loaded = app().loading(page.mainForm)
     const res = await postJSON('/api/newwallet', createForm)
     loaded()
@@ -68,11 +101,11 @@ export class NewWalletForm {
       return
     }
     if (this.pwCache) this.pwCache.pw = pw
-    page.newWalletPass.value = ''
+    newWalletPass.value = ''
     this.success(assetID)
   }
 
-  async setAsset (assetID) {
+  async setAsset (assetID: number) {
     const page = this.page
     const asset = app().assets[assetID]
     const tabs = page.walletTypeTabs
@@ -92,24 +125,25 @@ export class NewWalletForm {
     if (asset.info.availablewallets.length > 1) {
       Doc.show(tabs)
       for (const wDef of asset.info.availablewallets) {
-        const tab = page.walletTabTmpl.cloneNode(true)
+        const tab = page.walletTabTmpl.cloneNode(true) as HTMLElement
         tab.dataset.tooltip = wDef.description
         tab.textContent = wDef.tab
         tabs.appendChild(tab)
         Doc.bind(tab, 'click', () => {
-          for (const t of tabs.children) t.classList.remove('selected')
+          for (const t of Doc.kids(tabs)) t.classList.remove('selected')
           tab.classList.add('selected')
           this.update(wDef)
         })
       }
       app().bindTooltips(tabs)
-      tabs.firstChild.classList.add('selected')
+      const first = tabs.firstChild as HTMLElement
+      first.classList.add('selected')
     }
 
     await this.update(walletDef)
   }
 
-  async update (walletDef) {
+  async update (walletDef: WalletDefinition) {
     const page = this.page
     this.currentWalletType = walletDef.type
     const appPwCached = State.passwordIsCached() || (this.pwCache && this.pwCache.pw)
@@ -145,7 +179,7 @@ export class NewWalletForm {
   }
 
   /* setError sets and shows the in-form error message. */
-  async setError (errMsg) {
+  async setError (errMsg: string) {
     this.page.newWalletErr.textContent = errMsg
     Doc.show(this.page.newWalletErr)
   }
@@ -178,7 +212,29 @@ export class NewWalletForm {
  * asset-specific wallet configuration options.
 */
 export class WalletConfigForm {
-  constructor (form, sectionize) {
+  form: HTMLElement
+  configElements: Record<string, HTMLElement>
+  configOpts: ConfigOption[]
+  sectionize: boolean
+  allSettings: PageElement
+  dynamicOpts: PageElement
+  textInputTmpl: PageElement
+  dateInputTmpl: PageElement
+  checkboxTmpl: PageElement
+  fileSelector: PageElement
+  fileInput: PageElement
+  errMsg: PageElement
+  showOther: PageElement
+  showIcon: PageElement
+  hideIcon: PageElement
+  showHideMsg: PageElement
+  otherSettings: PageElement
+  loadedSettingsMsg: PageElement
+  loadedSettings: PageElement
+  defaultSettingsMsg: PageElement
+  defaultSettings: PageElement
+
+  constructor (form: HTMLElement, sectionize: boolean) {
     this.form = form
     // A configElement is a div containing an input and its label.
     this.configElements = {}
@@ -252,7 +308,7 @@ export class WalletConfigForm {
   /*
    * update creates the dynamic form.
    */
-  update (configOpts, assetHasActiveOrders) {
+  update (configOpts: ConfigOption[], assetHasActiveOrders?: boolean) {
     this.configElements = {}
     this.configOpts = configOpts
     Doc.empty(this.dynamicOpts, this.defaultSettings, this.loadedSettings)
@@ -267,14 +323,14 @@ export class WalletConfigForm {
       this.defaultSettings, this.errMsg
     )
     const defaultedOpts = []
-    const addOpt = (box, opt) => {
+    const addOpt = (box: HTMLElement, opt: ConfigOption) => {
       const elID = 'wcfg-' + opt.key
-      let el
-      if (opt.isboolean) el = this.checkboxTmpl.cloneNode(true)
-      else if (opt.isdate) el = this.dateInputTmpl.cloneNode(true)
-      else el = this.textInputTmpl.cloneNode(true)
+      let el: HTMLElement
+      if (opt.isboolean) el = this.checkboxTmpl.cloneNode(true) as HTMLElement
+      else if (opt.isdate) el = this.dateInputTmpl.cloneNode(true) as HTMLElement
+      else el = this.textInputTmpl.cloneNode(true) as HTMLElement
       this.configElements[opt.key] = el
-      const input = el.querySelector('input')
+      const input = el.querySelector('input') as ConfigOptionInput
       input.id = elID
       input.configOpt = opt
       const label = el.querySelector('label')
@@ -285,10 +341,10 @@ export class WalletConfigForm {
       if (opt.description) label.dataset.tooltip = opt.description
       if (opt.isboolean) input.checked = opt.default
       else if (opt.isdate) {
-        const getMinMaxVal = (minMax) => {
+        const getMinMaxVal = (minMax: string | number) => {
           if (!minMax) return undefined
           if (minMax === 'now') return dateToString(new Date())
-          return dateToString(new Date(minMax * 1000))
+          return dateToString(new Date((minMax as number) * 1000))
         }
         input.max = getMinMaxVal(opt.max)
         input.min = getMinMaxVal(opt.min)
@@ -316,7 +372,7 @@ export class WalletConfigForm {
   /*
    * setOtherSettingsViz sets the visibility of the additional settings section.
    */
-  setOtherSettingsViz (visible) {
+  setOtherSettingsViz (visible: boolean) {
     if (visible) {
       Doc.hide(this.showIcon)
       Doc.show(this.hideIcon, this.otherSettings)
@@ -333,15 +389,15 @@ export class WalletConfigForm {
    * sets the inputs value to the corresponding cfg value. A list of matching
    * configElements is returned.
    */
-  setConfig (cfg) {
-    const finds = []
-    this.allSettings.querySelectorAll('input').forEach(input => {
+  setConfig (cfg: Record<string, string>) {
+    const finds: HTMLElement[] = []
+    this.allSettings.querySelectorAll('input').forEach((input: ConfigOptionInput) => {
       const k = input.configOpt.key
       const v = cfg[k]
       if (typeof v === 'undefined') return
       finds.push(this.configElements[k])
       if (input.configOpt.isboolean) input.checked = isTruthyString(v)
-      else if (input.configOpt.isdate) input.valueAsDate = new Date(v * 1000)
+      else if (input.configOpt.isdate) input.valueAsDate = new Date(parseInt(v) * 1000)
       else input.value = v
     })
     return finds
@@ -351,7 +407,7 @@ export class WalletConfigForm {
    * setLoadedConfig sets the input values for the entries in cfg, and moves
    * them to the loadedSettings box.
    */
-  setLoadedConfig (cfg) {
+  setLoadedConfig (cfg: Record<string, string>) {
     const finds = this.setConfig(cfg)
     if (!this.sectionize || finds.length === 0) return
     this.loadedSettings.append(...finds)
@@ -364,9 +420,9 @@ export class WalletConfigForm {
    * map reads all inputs and constructs an object from the configOpt keys and
    * values.
    */
-  map () {
-    const config = {}
-    this.allSettings.querySelectorAll('input').forEach(input => {
+  map (): Record<string, string> {
+    const config: Record<string, string> = {}
+    this.allSettings.querySelectorAll('input').forEach((input: ConfigOptionInput) => {
       if (input.configOpt.isboolean && input.configOpt.key) {
         config[input.configOpt.key] = input.checked ? '1' : '0'
       } else if (input.configOpt.isdate && input.configOpt.key) {
@@ -388,15 +444,15 @@ export class WalletConfigForm {
    * reorder sorts the configElements in the box by the order of the
    * server-provided configOpts array.
    */
-  reorder (box) {
-    const els = {}
-    box.querySelectorAll('input').forEach(el => {
-      const k = el.configOpt.key
-      els[k] = this.configElements[k]
+  reorder (box: HTMLElement) {
+    const inputs: Record<string, HTMLElement> = {}
+    box.querySelectorAll('input').forEach((input: ConfigOptionInput) => {
+      const k = input.configOpt.key
+      inputs[k] = this.configElements[k]
     })
     for (const opt of this.configOpts) {
-      const el = els[opt.key]
-      if (el) box.append(el)
+      const input = inputs[opt.key]
+      if (input) box.append(input)
     }
   }
 }
@@ -406,7 +462,15 @@ export class WalletConfigForm {
  * template.
  */
 export class ConfirmRegistrationForm {
-  constructor (form, success, goBack, pwCache) {
+  form: HTMLElement
+  success: () => void
+  page: Record<string, PageElement>
+  xc: Exchange
+  certFile: string
+  feeAssetID: number
+  pwCache: PasswordCache
+
+  constructor (form: HTMLElement, success: () => void, goBack: () => void, pwCache: PasswordCache) {
     this.form = form
     this.success = success
     this.page = Doc.parseTemplate(form)
@@ -419,7 +483,7 @@ export class ConfirmRegistrationForm {
     bind(form, this.page.submit, () => this.submitForm())
   }
 
-  setExchange (xc, certFile) {
+  setExchange (xc: Exchange, certFile: string) {
     this.xc = xc
     this.certFile = certFile
     const page = this.page
@@ -428,7 +492,7 @@ export class ConfirmRegistrationForm {
     page.host.textContent = xc.host
   }
 
-  setAsset (assetID) {
+  setAsset (assetID: number) {
     const asset = app().assets[assetID]
     const unitInfo = asset.info.unitinfo
     this.feeAssetID = asset.id
@@ -444,7 +508,7 @@ export class ConfirmRegistrationForm {
     const form = this.form
     Doc.animate(400, prog => {
       form.style.transform = `scale(${prog})`
-      form.style.opacity = Math.pow(prog, 4)
+      form.style.opacity = String(Math.pow(prog, 4))
       const offset = `${(1 - prog) * 500}px`
       form.style.top = offset
       form.style.left = offset
@@ -495,7 +559,12 @@ export class ConfirmRegistrationForm {
  * FeeAssetSelectionForm should be used with the "regAssetForm" template.
  */
 export class FeeAssetSelectionForm {
-  constructor (form, success) {
+  form: HTMLElement
+  success: (assetID: number) => void
+  xc: Exchange
+  page: Record<string, PageElement>
+
+  constructor (form: HTMLElement, success: (assetID: number) => void) {
     this.form = form
     this.success = success
     this.xc = null
@@ -503,16 +572,16 @@ export class FeeAssetSelectionForm {
     Doc.cleanTemplates(this.page.marketTmpl, this.page.assetTmpl)
   }
 
-  setExchange (xc) {
+  setExchange (xc: Exchange) {
     this.xc = xc
     const page = this.page
     Doc.empty(page.assets, page.allMarkets)
 
-    const cFactor = ui => ui.conventional.conversionFactor
+    const cFactor = (ui: UnitInfo) => ui.conventional.conversionFactor
 
-    const marketNode = (mkt, excludeIcon) => {
-      const marketNode = page.marketTmpl.cloneNode(true)
-      const marketTmpl = Doc.parseTemplate(marketNode)
+    const marketNode = (mkt: Market, excludeIcon?: number) => {
+      const n = page.marketTmpl.cloneNode(true) as HTMLElement
+      const marketTmpl = Doc.parseTemplate(n)
 
       const baseAsset = xc.assets[mkt.baseid]
       const baseUnitInfo = app().unitInfo(mkt.baseid, xc)
@@ -526,7 +595,7 @@ export class FeeAssetSelectionForm {
         const otherSymbol = xc.assets[excludeBase ? mkt.quoteid : mkt.baseid].symbol
         marketTmpl.logo.src = Doc.logoPath(otherSymbol)
       } else {
-        const otherLogo = marketTmpl.logo.cloneNode(true)
+        const otherLogo = marketTmpl.logo.cloneNode(true) as PageElement
         marketTmpl.logo.src = Doc.logoPath(baseAsset.symbol)
         otherLogo.src = Doc.logoPath(quoteAsset.symbol)
         marketTmpl.logo.parentNode.insertBefore(otherLogo, marketTmpl.logo.nextSibling)
@@ -546,7 +615,7 @@ export class FeeAssetSelectionForm {
         const s = Doc.formatCoinValue(quoteLot, quoteUnitInfo)
         marketTmpl.quoteLotSize.textContent = `(~${s} ${quoteSymbol})`
       }
-      return marketNode
+      return n
     }
 
     for (const [symbol, feeAsset] of Object.entries(xc.regFees)) {
@@ -554,14 +623,14 @@ export class FeeAssetSelectionForm {
       if (!asset) continue
       const haveWallet = asset.wallet
       const unitInfo = asset.info.unitinfo
-      const assetNode = page.assetTmpl.cloneNode(true)
+      const assetNode = page.assetTmpl.cloneNode(true) as HTMLElement
       Doc.bind(assetNode, 'click', () => { this.success(feeAsset.id) })
       const assetTmpl = Doc.parseTemplate(assetNode)
       page.assets.appendChild(assetNode)
       assetTmpl.logo.src = Doc.logoPath(symbol)
       const fee = Doc.formatCoinValue(feeAsset.amount, unitInfo)
       assetTmpl.fee.textContent = `${fee} ${unitInfo.conventional.unit}`
-      assetTmpl.confs.textContent = feeAsset.confs
+      assetTmpl.confs.textContent = String(feeAsset.confs)
       assetTmpl.ready.textContent = haveWallet ? intl.prep(intl.WALLET_READY) : intl.prep(intl.SETUP_NEEDED)
       assetTmpl.ready.classList.add(haveWallet ? 'readygreen' : 'setuporange')
 
@@ -598,7 +667,7 @@ export class FeeAssetSelectionForm {
     const extraMargin = 75
     const extraTop = 50
     const fontSize = 24
-    const regAssetElements = Array.from(page.assets.children)
+    const regAssetElements = Array.from(page.assets.children) as PageElement[]
     regAssetElements.push(page.allmkts)
     form.style.opacity = '0'
 
@@ -620,7 +689,18 @@ export class FeeAssetSelectionForm {
  * in preparation for paying the registration fee.
  */
 export class WalletWaitForm {
-  constructor (form, success, goBack) {
+  form: HTMLElement
+  success: () => void
+  goBack: () => void
+  page: Record<string, PageElement>
+  assetID: number
+  xc: Exchange
+  regFee: FeeAsset
+  progressCache: ProgressPoint[]
+  progressed: boolean
+  funded: boolean
+
+  constructor (form: HTMLElement, success: () => void, goBack: () => void) {
     this.form = form
     this.success = success
     this.page = Doc.parseTemplate(form)
@@ -638,12 +718,12 @@ export class WalletWaitForm {
   }
 
   /* setExchange sets the exchange for which the fee is being paid. */
-  setExchange (xc) {
+  setExchange (xc: Exchange) {
     this.xc = xc
   }
 
   /* setWallet must be called before showing the form. */
-  setWallet (wallet, txFee) {
+  setWallet (wallet: WalletState, txFee: number) {
     this.assetID = wallet.assetID
     this.progressCache = []
     this.progressed = false
@@ -652,7 +732,7 @@ export class WalletWaitForm {
     const asset = app().assets[wallet.assetID]
     const fee = this.regFee = this.xc.regFees[asset.symbol]
 
-    for (const span of this.form.querySelectorAll('.unit')) span.textContent = asset.symbol.toUpperCase()
+    for (const span of Doc.applySelector(this.form, '.unit')) span.textContent = asset.symbol.toUpperCase()
     page.logo.src = Doc.logoPath(asset.symbol)
     page.depoAddr.textContent = wallet.address
     page.fee.textContent = Doc.formatCoinValue(fee.amount, asset.info.unitinfo)
@@ -672,7 +752,7 @@ export class WalletWaitForm {
     Doc.show(wallet.synced ? page.syncCheck : wallet.syncProgress >= 1 ? page.syncSpinner : page.syncUncheck)
     Doc.show(wallet.balance.available > fee.amount ? page.balCheck : page.balUncheck)
 
-    page.progress.textContent = Math.round(wallet.syncProgress * 100)
+    page.progress.textContent = String(Math.round(wallet.syncProgress * 100))
 
     if (wallet.synced) {
       this.progressed = true
@@ -684,7 +764,7 @@ export class WalletWaitForm {
    * reportWalletState sets the progress and balance, ultimately calling the
    * success function if conditions are met.
    */
-  reportWalletState (wallet) {
+  reportWalletState (wallet: WalletState) {
     if (wallet.assetID !== this.assetID) return
     if (this.progressed && this.funded) return
     this.reportProgress(wallet.synced, wallet.syncProgress)
@@ -695,7 +775,7 @@ export class WalletWaitForm {
    * reportBalance sets the balance display and calls success if we go over the
    * threshold.
    */
-  reportBalance (bal, assetID) {
+  reportBalance (bal: WalletBalance, assetID: number) {
     if (this.funded || this.assetID === -1 || this.assetID !== assetID) return
     const page = this.page
     const asset = app().assets[this.assetID]
@@ -716,7 +796,7 @@ export class WalletWaitForm {
    * reportProgress sets the progress display and calls success if we are fully
    * synced.
    */
-  reportProgress (synced, prog) {
+  reportProgress (synced: boolean, prog: number) {
     const page = this.page
     if (synced) {
       page.progress.textContent = '100'
@@ -732,7 +812,7 @@ export class WalletWaitForm {
       Doc.hide(page.syncSpinner)
       Doc.show(page.syncUncheck)
     }
-    page.progress.textContent = Math.round(prog * 100)
+    page.progress.textContent = String(Math.round(prog * 100))
 
     // The remaining time estimate must be based on more than one progress
     // report. We'll cache up to the last 20 and look at the difference between
@@ -761,7 +841,13 @@ export class WalletWaitForm {
 }
 
 export class UnlockWalletForm {
-  constructor (form, success, pwCache) {
+  form: HTMLElement
+  success: () => void
+  pwCache: PasswordCache
+  page: Record<string, PageElement>
+  currentAsset: SupportedAsset
+
+  constructor (form: HTMLElement, success: () => void, pwCache?: PasswordCache) {
     this.page = Doc.idDescendants(form)
     this.form = form
     this.pwCache = pwCache
@@ -770,7 +856,7 @@ export class UnlockWalletForm {
     bind(form, this.page.submitUnlock, () => this.submit())
   }
 
-  setAsset (asset) {
+  setAsset (asset: SupportedAsset) {
     const page = this.page
     this.currentAsset = asset
     page.uwAssetLogo.src = Doc.logoPath(asset.symbol)
@@ -784,7 +870,7 @@ export class UnlockWalletForm {
   /*
    * setError displays an error on the form.
    */
-  setError (msg) {
+  setError (msg: string) {
     this.page.unlockErr.textContent = msg
     Doc.show(this.page.unlockErr)
   }
@@ -793,7 +879,7 @@ export class UnlockWalletForm {
    * showErrorOnly displays only an error on the form. Hides the
    * app pass field and the submit button.
    */
-  showErrorOnly (msg) {
+  showErrorOnly (msg: string) {
     this.setError(msg)
     Doc.hide(this.page.uwAppPassBox)
     Doc.hide(this.page.submitUnlockDiv)
@@ -809,7 +895,7 @@ export class UnlockWalletForm {
     }
     Doc.hide(this.page.unlockErr)
     const open = {
-      assetID: parseInt(this.currentAsset.id),
+      assetID: this.currentAsset.id,
       pass: pw
     }
     page.uwAppPass.value = ''
@@ -827,7 +913,14 @@ export class UnlockWalletForm {
 
 /* DEXAddressForm accepts a DEX address and performs account discovery. */
 export class DEXAddressForm {
-  constructor (form, success, pwCache) {
+  form: HTMLElement
+  success: (xc: Exchange, cert: string) => void
+  pwCache: PasswordCache
+  defaultTLSText: string
+  page: Record<string, PageElement>
+  knownExchanges: HTMLElement[]
+
+  constructor (form: HTMLElement, success: (xc: Exchange, cert: string) => void, pwCache?: PasswordCache) {
     this.form = form
     this.success = success
     this.pwCache = pwCache
@@ -879,11 +972,11 @@ export class DEXAddressForm {
     const form = this.form
     Doc.animate(550, prog => {
       form.style.transform = `scale(${0.9 + 0.1 * prog})`
-      form.style.opacity = Math.pow(prog, 4)
+      form.style.opacity = String(Math.pow(prog, 4))
     }, 'easeOut')
   }
 
-  async checkDEX (addr) {
+  async checkDEX (addr?: string) {
     const page = this.page
     Doc.hide(page.err)
     addr = addr || page.addr.value
@@ -957,7 +1050,13 @@ export class DEXAddressForm {
 
 /* LoginForm is used to sign into the app. */
 export class LoginForm {
-  constructor (form, success, pwCache) {
+  form: HTMLElement
+  success: () => void
+  pwCache: PasswordCache
+  headerTxt: string
+  page: Record<string, PageElement>
+
+  constructor (form: HTMLElement, success: () => void, pwCache?: PasswordCache) {
     this.success = success
     this.form = form
     this.pwCache = pwCache
@@ -971,7 +1070,7 @@ export class LoginForm {
     this.page.pw.focus()
   }
 
-  async submit (e) {
+  async submit () {
     const page = this.page
     Doc.hide(page.errMsg)
     const pw = page.pw.value
@@ -1003,7 +1102,7 @@ export class LoginForm {
     const form = this.form
     Doc.animate(550, prog => {
       form.style.transform = `scale(${0.9 + 0.1 * prog})`
-      form.style.opacity = Math.pow(prog, 4)
+      form.style.opacity = String(Math.pow(prog, 4))
     }, 'easeOut')
   }
 }
@@ -1011,14 +1110,14 @@ export class LoginForm {
 const animationLength = 300
 
 /* Swap form1 for form2 with an animation. */
-export async function slideSwap (form1, form2) {
+export async function slideSwap (form1: HTMLElement, form2: HTMLElement) {
   const shift = document.body.offsetWidth / 2
   await Doc.animate(animationLength, progress => {
     form1.style.right = `${progress * shift}px`
   }, 'easeInHard')
   Doc.hide(form1)
   form1.style.right = '0'
-  form2.style.right = -shift
+  form2.style.right = String(-shift)
   Doc.show(form2)
   if (form2.querySelector('input')) {
     form2.querySelector('input').focus()
@@ -1033,8 +1132,8 @@ export async function slideSwap (form1, form2) {
  * bind binds the click and submit events and prevents page reloading on
  * submission.
  */
-export function bind (form, submitBttn, handler) {
-  const wrapper = e => {
+export function bind (form: HTMLElement, submitBttn: HTMLElement, handler: (e: Event) => void) {
+  const wrapper = (e: Event) => {
     if (e.preventDefault) e.preventDefault()
     handler(e)
   }
@@ -1044,17 +1143,17 @@ export function bind (form, submitBttn, handler) {
 
 // isTruthyString will be true if the provided string is recognized as a
 // value representing true.
-function isTruthyString (s) {
+function isTruthyString (s: string) {
   return s === '1' || s.toLowerCase() === 'true'
 }
 
 // toUnixDate converts a javscript date object to a unix date, which is
 // the number of *seconds* since the start of the epoch.
-function toUnixDate (date) {
+function toUnixDate (date: Date) {
   return Math.floor(date.getTime() / 1000)
 }
 
 // dateToString converts a javascript date object to a YYYY-MM-DD format string.
-function dateToString (date) {
+function dateToString (date: Date) {
   return date.toISOString().split('T')[0]
 }

@@ -1,6 +1,8 @@
 import Doc from './doc'
 import { RateEncodingFactor } from './orderutil'
+import OrderBook from './orderbook'
 import State from './state'
+import { UnitInfo, Market, Candle, CandlesPayload } from './registry'
 
 const bind = Doc.bind
 const unbind = Doc.unbind
@@ -8,7 +10,100 @@ const PIPI = 2 * Math.PI
 const plusChar = String.fromCharCode(59914)
 const minusChar = String.fromCharCode(59915)
 
-const darkTheme = {
+interface Point {
+  x: number
+  y: number
+}
+
+interface MinMax {
+  min: number
+  max: number
+}
+
+interface Label {
+  val: number
+  txt: string
+}
+
+interface LabelSet {
+  widest?: number
+  lbls: Label[]
+}
+
+interface Translator {
+    x: (x: number) => number
+    y: (y: number) => number
+    unx: (x: number) => number
+    uny: (y: number) => number
+    w: (w: number) => number
+    h: (h: number) => number
+    dataCoords?: (f: () => void) => void
+}
+
+export interface MouseReport {
+  rate: number
+  depth: number
+  dotColor: string
+  hoverMarkers: number[]
+}
+
+export interface VolumeReport {
+  buyBase: number
+  buyQuote: number
+  sellBase: number
+  sellQuote: number
+}
+
+export interface DepthReporters {
+  mouse: (r: MouseReport) => void
+  click: (x: number) => void
+  volume: (r: VolumeReport) => void
+  zoom: (z: number) => void
+}
+
+export interface CandleReporters {
+  mouse: (r: Candle) => void
+}
+
+export interface ChartReporters {
+  resize: () => void,
+  click: (e: MouseEvent) => void,
+  zoom: (bigger: boolean) => void
+}
+
+export interface DepthLine {
+  rate: number
+  color: string
+}
+
+export interface DepthMarker {
+  rate: number
+  active: boolean
+}
+
+interface DepthMark extends DepthMarker {
+  qty: number
+  sell: boolean
+}
+
+interface Theme {
+  axisLabel: string
+  gridBorder: string
+  gridLines: string
+  gapLine: string
+  value: string
+  zoom: string
+  zoomHover: string
+  sellLine: string
+  buyLine: string
+  sellFill: string
+  buyFill: string
+  crosshairs: string
+  legendFill: string
+  legendText: string
+}
+
+const darkTheme: Theme = {
   axisLabel: '#b1b1b1',
   gridBorder: '#3a3a3a',
   gridLines: '#2a2a2a',
@@ -25,7 +120,7 @@ const darkTheme = {
   legendText: '#d5d5d5'
 }
 
-const lightTheme = {
+const lightTheme: Theme = {
   axisLabel: '#1b1b1b',
   gridBorder: '#3a3a3a',
   gridLines: '#dadada',
@@ -44,8 +139,24 @@ const lightTheme = {
 
 // Chart is the base class for charts.
 class Chart {
-  constructor (parent) {
+  parent: HTMLElement
+  report: ChartReporters
+  theme: Theme
+  canvas: HTMLCanvasElement
+  visible: boolean
+  ctx: CanvasRenderingContext2D
+  mousePos: Point
+  rect: DOMRect
+  wheelLimiter: number
+  boundResizer: () => void
+  plotRegion: Region
+  xRegion: Region
+  yRegion: Region
+  dataExtents: Extents
+
+  constructor (parent: HTMLElement, reporters: ChartReporters) {
     this.parent = parent
+    this.report = reporters
     this.theme = State.isDark() ? darkTheme : lightTheme
     this.canvas = document.createElement('canvas')
     this.visible = true
@@ -56,7 +167,7 @@ class Chart {
     this.setZoomBttns()
     // Mouse handling
     this.mousePos = null
-    bind(this.canvas, 'mousemove', e => {
+    bind(this.canvas, 'mousemove', (e: MouseEvent) => {
       // this.rect will be set in resize().
       this.mousePos = {
         x: e.clientX - this.rect.left,
@@ -70,13 +181,14 @@ class Chart {
     })
     // Scrolling by wheel is smoother when the rate is slightly limited.
     this.wheelLimiter = null
-    this.wheeled = () => {
-      this.wheelLimiter = setTimeout(() => { this.wheelLimiter = null }, 100)
-    }
-    bind(this.canvas, 'wheel', e => { this.wheel(e) })
+    bind(this.canvas, 'wheel', (e: WheelEvent) => { this.wheel(e) })
     this.boundResizer = () => { this.resize(parent.clientHeight) }
     bind(window, 'resize', this.boundResizer)
-    bind(this.canvas, 'click', e => { this.click(e) })
+    bind(this.canvas, 'click', (e: MouseEvent) => { this.click(e) })
+  }
+
+  wheeled () {
+    this.wheelLimiter = window.setTimeout(() => { this.wheelLimiter = null }, 100)
   }
 
   /* clear the canvas. */
@@ -91,15 +203,17 @@ class Chart {
 
   // setZoomBttns is run before drawing and should be used for setup of zoom
   // buttons.
-  setZoomBttns () {}
+  setZoomBttns () {
+    // should be implemented by inheriting class.
+  }
 
   /* click is the handler for a click event on the canvas. */
-  click (e) {
-    this.clicked(e)
+  click (e: MouseEvent) {
+    this.report.click(e)
   }
 
   /* wheel is a mousewheel event handler. */
-  wheel (e) {
+  wheel (e: WheelEvent) {
     this.zoom(e.deltaY < 0)
     e.preventDefault()
   }
@@ -109,7 +223,7 @@ class Chart {
    * updating the height programatically after the caller sets a style.height
    * but before the clientHeight has been updated.
    */
-  resize (parentHeight) {
+  resize (parentHeight: number) {
     this.canvas.width = this.parent.clientWidth
     this.canvas.height = parentHeight - 20 // magic number derived from a soup of css values.
     const xLblHeight = 30
@@ -124,14 +238,14 @@ class Chart {
     // return nonsense until a render.
     window.requestAnimationFrame(() => {
       this.rect = this.canvas.getBoundingClientRect()
-      this.resized()
+      this.report.resize()
     })
   }
 
   /* zoom is called when the user scrolls the mouse wheel on the canvas. */
-  zoom (bigger) {
+  zoom (bigger: boolean) {
     if (this.wheelLimiter) return
-    this.zoomed(bigger)
+    this.report.zoom(bigger)
   }
 
   /* hide hides the canvas */
@@ -166,9 +280,9 @@ class Chart {
   }
 
   /* plotXLabels applies the provided labels to the x axis and draws the grid. */
-  plotXLabels (labels, minX, maxX, unitLines) {
+  plotXLabels (labels: LabelSet, minX: number, maxX: number, unitLines: string[]) {
     const extents = new Extents(minX, maxX, 0, 1)
-    this.xRegion.plot(extents, (ctx, tools) => {
+    this.xRegion.plot(extents, (ctx: CanvasRenderingContext2D, tools: Translator) => {
       this.applyLabelStyle()
       const centerX = (maxX + minX) / 2
       let lastX = minX
@@ -188,7 +302,7 @@ class Chart {
         ctx.fillText(unitLines[0], tools.x(unitCenter), tools.y(0.5))
       }
     }, true)
-    this.plotRegion.plot(extents, (ctx, tools) => {
+    this.plotRegion.plot(extents, (ctx: CanvasRenderingContext2D, tools: Translator) => {
       ctx.lineWidth = 1
       ctx.strokeStyle = this.theme.gridLines
       labels.lbls.forEach(lbl => {
@@ -201,9 +315,9 @@ class Chart {
    * plotYLabels applies the y labels based on the provided plot region, and
    * draws the grid.
    */
-  plotYLabels (region, labels, minY, maxY, unit) {
+  plotYLabels (region: Region, labels: LabelSet, minY: number, maxY: number, unit: string) {
     const extents = new Extents(0, 1, minY, maxY)
-    this.yRegion.plot(extents, (ctx, tools) => {
+    this.yRegion.plot(extents, (ctx: CanvasRenderingContext2D, tools: Translator) => {
       this.applyLabelStyle()
       const centerY = maxY / 2
       let lastY = 0
@@ -217,7 +331,7 @@ class Chart {
       })
       ctx.fillText(unit, tools.x(0.5), tools.y(unitCenter))
     }, true)
-    region.plot(extents, (ctx, tools) => {
+    region.plot(extents, (ctx: CanvasRenderingContext2D, tools: Translator) => {
       ctx.lineWidth = 1
       ctx.strokeStyle = this.theme.gridLines
       labels.lbls.forEach(lbl => {
@@ -230,7 +344,7 @@ class Chart {
    * doYLabels generates and applies the y-axis labels, based upon the
    * provided plot region.
    */
-  doYLabels (region, step, unit, valFmt) {
+  doYLabels (region: Region, step: number, unit: string, valFmt?: (v: number) => string) {
     const yLabels = makeLabels(this.ctx, region.height(), this.dataExtents.y.min,
       this.dataExtents.y.max, 50, step, unit, valFmt)
 
@@ -248,7 +362,7 @@ class Chart {
 
   // drawFrame draws an outline around the plotRegion.
   drawFrame () {
-    this.plotRegion.plot(new Extents(0, 1, 0, 1), (ctx, tools) => {
+    this.plotRegion.plot(new Extents(0, 1, 0, 1), (ctx: CanvasRenderingContext2D, tools: Translator) => {
       ctx.lineWidth = 1
       ctx.strokeStyle = this.theme.gridBorder
       ctx.beginPath()
@@ -266,8 +380,24 @@ class Chart {
 
 /* DepthChart is a javascript Canvas-based depth chart renderer. */
 export class DepthChart extends Chart {
-  constructor (parent, reporters, zoom) {
-    super(parent)
+  reporters: DepthReporters
+  book: OrderBook
+  zoomLevel: number
+  lotSize: number
+  rateStep: number
+  lines: DepthLine[]
+  markers: Record<string, DepthMarker[]>
+  zoomInBttn: Region
+  zoomOutBttn: Region
+  baseUnit: string
+  quoteUnit: string
+
+  constructor (parent: HTMLElement, reporters: DepthReporters, zoom: number) {
+    super(parent, {
+      resize: () => this.resized(),
+      click: (e: MouseEvent) => this.clicked(e),
+      zoom: (bigger: boolean) => this.zoomed(bigger)
+    })
     this.reporters = reporters
     this.book = null
     this.dataExtents = null
@@ -297,7 +427,7 @@ export class DepthChart extends Chart {
   }
 
   /* zoomed zooms the current view in or out. bigger=true is zoom in. */
-  zoomed (bigger) {
+  zoomed (bigger: boolean) {
     if (!this.zoomLevel) return
     if (!this.book.buys || !this.book.sells) return
     this.wheeled()
@@ -310,7 +440,7 @@ export class DepthChart extends Chart {
   }
 
   /* clicked is the canvas 'click' event handler. */
-  clicked (e) {
+  clicked (e: MouseEvent) {
     if (!this.dataExtents) return
     const x = e.clientX - this.rect.left
     const y = e.clientY - this.rect.y
@@ -326,7 +456,7 @@ export class DepthChart extends Chart {
   }
 
   // set sets the current data set and draws.
-  set (book, lotSize, rateStep, baseUnitInfo, quoteUnitInfo) {
+  set (book: OrderBook, lotSize: number, rateStep: number, baseUnitInfo: UnitInfo, quoteUnitInfo: UnitInfo) {
     this.book = book
     this.lotSize = lotSize / baseUnitInfo.conventional.conversionFactor
     const [qFactor, bFactor] = [quoteUnitInfo.conventional.conversionFactor, baseUnitInfo.conventional.conversionFactor]
@@ -376,12 +506,12 @@ export class DepthChart extends Chart {
     const sellMarkers = [...this.markers.sells]
     buyMarkers.sort((a, b) => b.rate - a.rate)
     sellMarkers.sort((a, b) => a.rate - b.rate)
-    const markers = []
+    const markers: DepthMark[] = []
 
-    const buyDepth = []
-    const buyEpoch = []
-    const sellDepth = []
-    const sellEpoch = []
+    const buyDepth: [number, number][] = []
+    const buyEpoch: [number, number][] = []
+    const sellDepth: [number, number][] = []
+    const sellEpoch: [number, number][] = []
     const volumeReport = {
       buyBase: 0,
       buyQuote: 0,
@@ -461,7 +591,7 @@ export class DepthChart extends Chart {
     this.plotXLabels(xLabels, low, high, [`${this.quoteUnit}/`, this.baseUnit])
 
     // A function to be run at the end if there is legend data to display.
-    let mouseData
+    let mouseData: MouseReport
 
     // Draw the grid.
     this.drawFrame()
@@ -507,7 +637,7 @@ export class DepthChart extends Chart {
         bttnTop + bttnSize
       )
       let hover = mousePos && this.zoomOutBttn.contains(mousePos.x, mousePos.y)
-      this.zoomOutBttn.plot(new Extents(0, 1, 0, 1), (ctx, tools) => {
+      this.zoomOutBttn.plot(new Extents(0, 1, 0, 1), ctx => {
         ctx.font = '12px \'icomoon\''
         ctx.fillStyle = this.theme.zoom
         if (hover) {
@@ -524,7 +654,7 @@ export class DepthChart extends Chart {
         bttnTop + bttnSize
       )
       hover = mousePos && this.zoomInBttn.contains(mousePos.x, mousePos.y)
-      this.zoomInBttn.plot(new Extents(0, 1, 0, 1), (ctx, tools) => {
+      this.zoomInBttn.plot(new Extents(0, 1, 0, 1), ctx => {
         ctx.font = '12px \'icomoon\''
         ctx.fillStyle = this.theme.zoom
         if (hover) {
@@ -536,7 +666,7 @@ export class DepthChart extends Chart {
 
       // Draw a dotted vertical line where the mouse is, and a dot at the level
       // of the depth line.
-      const drawLine = (x, color) => {
+      const drawLine = (x: number, color: string) => {
         if (x > high || x < low) return
         ctx.save()
         ctx.setLineDash([3, 5])
@@ -582,7 +712,7 @@ export class DepthChart extends Chart {
       // side and depth for the x value.
       const dataX = tools.unx(mousePos.x)
       let evalSide = sellDepth
-      let trigger = (ptX) => ptX >= dataX
+      let trigger = (ptX: number) => ptX >= dataX
       let dotColor = this.theme.sellLine
       if (dataX < midGap) {
         evalSide = buyDepth
@@ -595,7 +725,7 @@ export class DepthChart extends Chart {
         if (trigger(pt[0])) break
         bestDepth = pt
       }
-      drawLine(dataX, this.theme.crosshairs, true)
+      drawLine(dataX, this.theme.crosshairs)
       mouseData = {
         rate: dataX,
         depth: bestDepth[1],
@@ -642,10 +772,10 @@ export class DepthChart extends Chart {
   }
 
   /* drawDepth draws a single side's depth chart data. */
-  drawDepth (depth) {
+  drawDepth (depth: [number, number][]) {
     const firstPt = depth[0]
     let y = firstPt[1]
-    let x
+    let x: number
     this.plotRegion.plot(this.dataExtents, (ctx, tools) => {
       tools.dataCoords(() => {
         ctx.beginPath()
@@ -681,22 +811,36 @@ export class DepthChart extends Chart {
   }
 
   /* setLines stores the indicator lines to draw. */
-  setLines (lines) {
+  setLines (lines: DepthLine[]) {
     this.lines = lines
   }
 
   /* setMarkers sets the indicator markers to draw. */
-  setMarkers (markers) {
+  setMarkers (markers: Record<string, DepthMarker[]>) {
     this.markers = markers
   }
 }
 
 /* CandleChart is a candlestick data renderer. */
 export class CandleChart extends Chart {
-  constructor (parent, reporters) {
-    super(parent)
+  reporters: CandleReporters
+  data: CandlesPayload
+  zoomLevel: number
+  numToShow: number
+  candleRegion: Region
+  volumeRegion: Region
+  resizeTimer: number
+  zoomLevels: number[]
+  market: Market
+  rateConversionFactor: number
+
+  constructor (parent: HTMLElement, reporters: CandleReporters) {
+    super(parent, {
+      resize: () => this.resized(),
+      click: (/* e: MouseEvent */) => { this.clicked() },
+      zoom: (bigger: boolean) => this.zoomed(bigger)
+    })
     this.reporters = reporters
-    this.data = null
     this.dataExtents = null
     this.zoomLevel = 1
     this.numToShow = 100
@@ -712,13 +856,15 @@ export class CandleChart extends Chart {
     this.volumeRegion = new Region(this.ctx, volumeExtents)
     // Set a delay on the render to prevent lag.
     if (this.resizeTimer) clearTimeout(this.resizeTimer)
-    this.resizeTimer = setTimeout(() => this.draw(), 100)
+    this.resizeTimer = window.setTimeout(() => this.draw(), 100)
   }
 
-  clicked (e) {}
+  clicked (/* e: MouseEvent */) {
+    // handle clicks
+  }
 
   /* zoomed zooms the current view in or out. bigger=true is zoom in. */
-  zoomed (bigger) {
+  zoomed (bigger: boolean) {
     // bigger actually means fewer candles -> reduce zoomLevels index.
     const idx = this.zoomLevels.indexOf(this.numToShow)
     if (bigger) {
@@ -749,9 +895,9 @@ export class CandleChart extends Chart {
 
     // padding definition and some helper functions to parse candles.
     const candleWidthPadding = 0.2
-    const start = c => truncate(c.endStamp, candleWidth)
-    const end = c => start(c) + candleWidth
-    const paddedStart = c => start(c) + candleWidthPadding * candleWidth
+    const start = (c: Candle) => truncate(c.endStamp, candleWidth)
+    const end = (c: Candle) => start(c) + candleWidth
+    const paddedStart = (c: Candle) => start(c) + candleWidthPadding * candleWidth
     const paddedWidth = (1 - 2 * candleWidthPadding) * candleWidth
 
     const first = candles[0]
@@ -788,7 +934,7 @@ export class CandleChart extends Chart {
     this.drawFrame()
 
     // Highlight the candle if the user mouse is over the canvas.
-    let mouseCandle
+    let mouseCandle: Candle
     if (mousePos) {
       this.plotRegion.plot(new Extents(dataExtents.x.min, dataExtents.x.max, 0, 1), (ctx, tools) => {
         const selectedStartStamp = truncate(tools.unx(mousePos.x), candleWidth)
@@ -818,7 +964,7 @@ export class CandleChart extends Chart {
           const top = yExt.min + (this.xRegion.height() - rangeHeight) / 2
           ctx.fillStyle = this.theme.legendFill
           ctx.strokeStyle = this.theme.gridBorder
-          const rectArgs = [left - xPad, top - yPad, rangeWidth + 2 * xPad, rangeHeight + 2 * yPad]
+          const rectArgs: [number, number, number, number] = [left - xPad, top - yPad, rangeWidth + 2 * xPad, rangeHeight + 2 * yPad]
           ctx.fillRect(...rectArgs)
           ctx.strokeRect(...rectArgs)
           this.applyLabelStyle()
@@ -861,7 +1007,7 @@ export class CandleChart extends Chart {
   }
 
   /* setCandles sets the candle data and redraws the chart. */
-  setCandles (data, market, baseUnitInfo, quoteUnitInfo) {
+  setCandles (data: CandlesPayload, market: Market, baseUnitInfo: UnitInfo, quoteUnitInfo: UnitInfo) {
     this.data = data
     if (!data.candles) return
     this.market = market
@@ -884,11 +1030,14 @@ export class CandleChart extends Chart {
  * getters for related data.
  */
 class Extents {
-  constructor (xMin, xMax, yMin, yMax) {
+  x: MinMax
+  y: MinMax
+
+  constructor (xMin: number, xMax: number, yMin: number, yMax: number) {
     this.setExtents(xMin, xMax, yMin, yMax)
   }
 
-  setExtents (xMin, xMax, yMin, yMax) {
+  setExtents (xMin: number, xMax: number, yMin: number, yMax: number) {
     this.x = {
       min: xMin,
       max: xMax
@@ -899,19 +1048,19 @@ class Extents {
     }
   }
 
-  get xRange () {
+  get xRange (): number {
     return this.x.max - this.x.min
   }
 
-  get midX () {
+  get midX (): number {
     return (this.x.max + this.x.min) / 2
   }
 
-  get yRange () {
+  get yRange (): number {
     return this.y.max - this.y.min
   }
 
-  get midY () {
+  get midY (): number {
     return (this.y.max + this.y.min) / 2
   }
 }
@@ -921,24 +1070,27 @@ class Extents {
  * transformations and restricting drawing to a specified region of the canvas.
  */
 class Region {
-  constructor (context, extents) {
+  context: CanvasRenderingContext2D
+  extents: Extents
+
+  constructor (context: CanvasRenderingContext2D, extents: Extents) {
     this.context = context
     this.extents = extents
   }
 
-  setExtents (xMin, xMax, yMin, yMax) {
+  setExtents (xMin: number, xMax: number, yMin: number, yMax: number) {
     this.extents.setExtents(xMin, xMax, yMin, yMax)
   }
 
-  width () {
+  width (): number {
     return this.extents.xRange
   }
 
-  height () {
+  height (): number {
     return this.extents.yRange
   }
 
-  contains (x, y) {
+  contains (x: number, y: number): boolean {
     const ext = this.extents
     return (x < ext.x.max && x > ext.x.min &&
       y < ext.y.max && y > ext.y.min)
@@ -949,7 +1101,7 @@ class Region {
    * translate data coordinates to canvas coordinates for the specified data
    * Extents. unx and uny translate canvas coordinates to data coordinates.
    */
-  translator (dataExtents) {
+  translator (dataExtents: Extents): Translator {
     const region = this.extents
     const xMin = dataExtents.x.min
     // const xMax = dataExtents.x.max
@@ -964,23 +1116,23 @@ class Region {
     const xFactor = screenW / xRange
     const yFactor = screenH / yRange
     return {
-      x: x => (x - xMin) * xFactor + screenMinX,
-      y: y => screenMaxY - (y - yMin) * yFactor,
-      unx: x => (x - screenMinX) / xFactor + xMin,
-      uny: y => yMin - (y - screenMaxY) / yFactor,
-      w: w => w / xRange * screenW,
-      h: h => -h / yRange * screenH
+      x: (x: number) => (x - xMin) * xFactor + screenMinX,
+      y: (y: number) => screenMaxY - (y - yMin) * yFactor,
+      unx: (x: number) => (x - screenMinX) / xFactor + xMin,
+      uny: (y: number) => yMin - (y - screenMaxY) / yFactor,
+      w: (w: number) => w / xRange * screenW,
+      h: (h: number) => -h / yRange * screenH
     }
   }
 
   /* clear clears the region. */
   clear () {
     const ext = this.extents
-    this.ctx.clearRect(ext.x.min, ext.y.min, ext.xRange, ext.yRange)
+    this.context.clearRect(ext.x.min, ext.y.min, ext.xRange, ext.yRange)
   }
 
   /* plot prepares tools for drawing using data coordinates. */
-  plot (dataExtents, drawFunc, skipMask) {
+  plot (dataExtents: Extents, drawFunc: (ctx: CanvasRenderingContext2D, tools: Translator) => void, skipMask?: boolean) {
     const ctx = this.context
     const region = this.extents
     ctx.save() // Save the original state
@@ -1037,7 +1189,16 @@ class Region {
  * makeLabels attempts to create the appropriate labels for the specified
  * screen size, context, and label spacing.
  */
-function makeLabels (ctx, screenW, min, max, spacingGuess, step, unit, valFmt) {
+function makeLabels (
+  ctx: CanvasRenderingContext2D,
+  screenW: number,
+  min: number,
+  max: number,
+  spacingGuess: number,
+  step: number,
+  unit: string,
+  valFmt?: (v: number) => string
+): LabelSet {
   valFmt = valFmt || formatLabelValue
   const n = screenW / spacingGuess
   const diff = max - min
@@ -1049,7 +1210,7 @@ function makeLabels (ctx, screenW, min, max, spacingGuess, step, unit, valFmt) {
   // The Math.round part is the minimum precision required to see the change in the numbers.
   // The 2 accounts for the precision of the tick.
   const sigFigs = Math.round(Math.log10(absMax / tick)) + 2
-  const pts = []
+  const pts: Label[] = []
   let widest = 0
   while (x < max) {
     x = Number(x.toPrecision(sigFigs))
@@ -1072,7 +1233,7 @@ function makeLabels (ctx, screenW, min, max, spacingGuess, step, unit, valFmt) {
 const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
 
 /* makeCandleTimeLabels prepares labels for candlestick data. */
-function makeCandleTimeLabels (candles, dur, screenW, spacingGuess) {
+function makeCandleTimeLabels (candles: Candle[], dur: number, screenW: number, spacingGuess: number): LabelSet {
   const first = candles[0]
   const last = candles[candles.length - 1]
   const start = truncate(first.endStamp, dur)
@@ -1080,26 +1241,29 @@ function makeCandleTimeLabels (candles, dur, screenW, spacingGuess) {
   const diff = end - start
   const n = Math.min(candles.length, screenW / spacingGuess)
   const tick = truncate(diff / n, dur)
-  if (tick === 0) return console.error('zero tick', dur, diff, n) // probably won't happen, but it'd suck if it did
+  if (tick === 0) {
+    console.error('zero tick', dur, diff, n) // probably won't happen, but it'd suck if it did
+    return null
+  }
   let x = start
   const zoneOffset = new Date().getTimezoneOffset()
-  const dayStamp = x => {
+  const dayStamp = (x: number) => {
     x = x - zoneOffset * 60000
     return x - (x % 86400000)
   }
   let lastDay = dayStamp(start)
   let lastYear = 0 // new Date(start).getFullYear()
-  if (dayStamp(first) === dayStamp(last)) lastDay = 0 // Force at least one day stamp.
+  if (dayStamp(first.endStamp) === dayStamp(last.endStamp)) lastDay = 0 // Force at least one day stamp.
   const pts = []
   let label
   if (dur < 86400000) {
-    label = (d, x) => {
+    label = (d: Date, x: number) => {
       const day = dayStamp(x)
       if (day !== lastDay) return `${months[d.getMonth()]}${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
       else return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
     }
   } else {
-    label = d => {
+    label = (d: Date) => {
       const year = d.getFullYear()
       if (year !== lastYear) return `${months[d.getMonth()]}${d.getDate()} '${String(year).slice(2, 4)}`
       else return `${months[d.getMonth()]}${d.getDate()}`
@@ -1119,12 +1283,12 @@ function makeCandleTimeLabels (candles, dur, screenW, spacingGuess) {
 }
 
 /* The last element of an array. */
-function last (arr) {
+function last (arr: any[]): any {
   return arr[arr.length - 1]
 }
 
 /* line draws a line with the provided context. */
-function line (ctx, x0, y0, x1, y1, skipStroke) {
+function line (ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, skipStroke?: boolean) {
   ctx.beginPath()
   ctx.moveTo(x0, y0)
   ctx.lineTo(x1, y1)
@@ -1132,7 +1296,7 @@ function line (ctx, x0, y0, x1, y1, skipStroke) {
 }
 
 /* dot draws a circle with the provided context. */
-function dot (ctx, x, y, color, radius) {
+function dot (ctx: CanvasRenderingContext2D, x: number, y: number, color: string, radius: number) {
   ctx.fillStyle = color
   ctx.beginPath()
   ctx.arc(x, y, radius, 0, PIPI)
@@ -1140,7 +1304,7 @@ function dot (ctx, x, y, color, radius) {
 }
 
 /* clamp returns v if min <= v <= max, else min or max. */
-function clamp (v, min, max) {
+function clamp (v: number, min: number, max: number): number {
   if (v < min) return min
   if (v > max) return max
   return v
@@ -1153,12 +1317,12 @@ const labelSpecs = {
 }
 
 /* formatLabelValue formats the provided value using the labelSpecs format. */
-function formatLabelValue (x) {
+function formatLabelValue (x: number) {
   return x.toLocaleString('en-us', labelSpecs)
 }
 
 /* floatCompare compares two floats to within a tolerance of  1e-8. */
-function floatCompare (a, b) {
+function floatCompare (a: number, b: number) {
   return withinTolerance(a, b, 1e-8)
 }
 
@@ -1166,10 +1330,10 @@ function floatCompare (a, b) {
  * withinTolerance returns true if the difference between a and b are with
  * the specified tolerance.
  */
-function withinTolerance (a, b, tolerance) {
+function withinTolerance (a: number, b: number, tolerance: number) {
   return Math.abs(a - b) < Math.abs(tolerance)
 }
 
-function truncate (v, w) {
+function truncate (v: number, w: number): number {
   return v - (v % w)
 }

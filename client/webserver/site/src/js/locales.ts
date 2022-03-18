@@ -1,3 +1,5 @@
+type Locale = Record<string, string>
+
 export const ID_NO_PASS_ERROR_MSG = 'ID_NO_PASS_ERROR_MSG'
 export const ID_NO_APP_PASS_ERROR_MSG = 'ID_NO_APP_PASS_ERROR_MSG'
 export const ID_SET_BUTTON_BUY = 'ID_SET_BUTTON_BUY'
@@ -48,7 +50,7 @@ export const ID_KEEP_WALLET_TYPE = 'ID_KEEP_WALLET_TYPE'
 export const WALLET_READY = 'WALLET_READY'
 export const SETUP_NEEDED = 'SETUP_NEEDED'
 
-export const enUS = {
+export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
   [ID_NO_APP_PASS_ERROR_MSG]: 'app password cannot be empty',
   [ID_PASSWORD_NOT_MATCH]: 'passwords do not match',
@@ -100,7 +102,7 @@ export const enUS = {
   [SETUP_NEEDED]: 'Setup Needed'
 }
 
-export const ptBR = {
+export const ptBR: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'senha não pode ser vazia',
   [ID_NO_APP_PASS_ERROR_MSG]: 'senha do app não pode ser vazia',
   [ID_PASSWORD_NOT_MATCH]: 'senhas diferentes',
@@ -152,7 +154,7 @@ export const ptBR = {
   [SETUP_NEEDED]: 'Configuração Necessária'
 }
 
-export const zhCN = {
+export const zhCN: Locale = {
   [ID_NO_PASS_ERROR_MSG]: '密码不能为空',
   [ID_NO_APP_PASS_ERROR_MSG]: '应用密码不能为空',
   [ID_PASSWORD_NOT_MATCH]: '密码不相同',
@@ -200,7 +202,7 @@ export const zhCN = {
   [ID_SETUP_WALLET]: 'Setup' // xxx translate
 }
 
-export const plPL = {
+export const plPL: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'hasło nie może być puste',
   [ID_NO_APP_PASS_ERROR_MSG]: 'hasło aplikacji nie może być puste',
   [ID_PASSWORD_NOT_MATCH]: 'hasła nie są jednakowe',
@@ -252,7 +254,7 @@ export const plPL = {
   [SETUP_NEEDED]: 'Potrzebna konfiguracja'
 }
 
-const localesMap = {
+const localesMap: Record<string, Locale> = {
   'en-us': enUS,
   'pt-br': ptBR,
   'zh-cn': zhCN,
@@ -260,7 +262,7 @@ const localesMap = {
 }
 
 /* locale will hold the locale loaded via setLocale. */
-let locale
+let locale: Locale
 
 const defaultLocale = enUS
 
@@ -272,24 +274,24 @@ const defaultLocale = enUS
 export function setLocale () { locale = localesMap[document.documentElement.lang.toLowerCase()] }
 
 /* prep will format the message to the current locale. */
-export function prep (k, args = undefined) {
+export function prep (k: string, args?: Record<string, string>) {
   return stringTemplateParser(locale[k] || defaultLocale[k], args)
 }
 
 /*
  * stringTemplateParser is a template string matcher, where expression is any
  * text. It switches what is inside double brackets (e.g. 'buy {{ asset }}')
- * for the value described into valueObj. valueObj is an object with keys
+ * for the value described into args. args is an object with keys
  * equal to the placeholder keys. (e.g. {"asset": "dcr"}).
  * So that will be switched for: 'asset dcr'.
  */
-function stringTemplateParser (expression, valueObj) {
+function stringTemplateParser (expression: string, args: Record<string, string>) {
   // templateMatcher matches any text which:
   // is some {{ text }} between two brackets, and a space between them.
   // It is global, therefore it will change all occurrences found.
   // text can be anything, but brackets '{}' and space '\s'
   const templateMatcher = /{{\s?([^{}\s]*)\s?}}/g
-  return expression.replace(templateMatcher, (_, value) => valueObj[value])
+  return expression.replace(templateMatcher, (_, value) => args[value])
 }
 
 window.localeDiscrepancies = () => {

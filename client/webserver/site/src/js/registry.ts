@@ -1,0 +1,506 @@
+declare global {
+  interface Window {
+    log: (...args: any) => void
+    enableLogger: (loggerID: string, enable: boolean) => void
+    recordLogger: (loggerID: string, enable: boolean) => void
+    dumpLogger: (loggerID: string) => void
+    localeDiscrepancies: () => void
+  }
+}
+
+export interface Exchange {
+  host: string
+  acctID: string
+  markets: Record<string, Market>
+  assets: Record<number, Asset>
+  connected: boolean
+  feeAsset: FeeAsset // DEPRECATED. DCR.
+  regFees: Record<string, FeeAsset>
+  pendingFee: PendingFeeState
+  candleDurs: string[]
+}
+
+export interface Candle {
+  startStamp: number
+  endStamp: number
+  matchVolume: number
+  quoteVolume: number
+  highRate: number
+  lowRate: number
+  startRate: number
+  endRate: number
+}
+
+export interface CandlesPayload {
+  dur: string
+  ms: number
+  candles: Candle[]
+}
+
+export interface Market {
+  name: string
+  baseid: number
+  basesymbol: string
+  quoteid: number
+  quotesymbol: string
+  lotsize: number
+  ratestep: number
+  epochlen: number
+  startepoch: number
+  buybuffer: number
+  orders: Order[]
+  spot: Spot
+}
+
+export interface Order {
+  host: string
+  baseID: number
+  baseSymbol: string
+  quoteID: number
+  quoteSymbol: string
+  market: string
+  type: number
+  id: string
+  stamp: number
+  sig: string
+  status: number
+  epoch: number
+  qty: number
+  sell: boolean
+  filled: number
+  matches: Match[]
+  cancelling: boolean
+  canceled: boolean
+  feesPaid: FeeBreakdown
+  fundingCoins: Coin[]
+  lockedamt: number
+  rate: number // limit only
+  tif: number // limit only
+  targetOrderID: string // cancel only
+}
+
+export interface Match {
+  matchID: string
+  status: number
+  active: boolean
+  revoked: boolean
+  rate: number
+  qty: number
+  side: number
+  feeRate: number
+  swap: Coin
+  counterSwap: Coin
+  redeem: Coin
+  counterRedeem: Coin
+  refund: Coin
+  stamp: number
+  isCancel: boolean
+}
+
+export interface Spot {
+  stamp: number
+  baseID: number
+  quoteID: number
+  rate: number
+  bookVolume: number
+  change24: number
+  vol24: number
+}
+
+export interface Asset {
+  id: number
+  symbol: string
+  version: number
+  maxFeeRate: number
+  swapSize: number
+  swapSizeBase: number
+  redeemSize: number
+  swapConf: number
+  unitInfo: UnitInfo
+}
+
+export interface FeeAsset {
+  id: number
+  confs: number
+  amount: number
+}
+
+export interface PendingFeeState {
+  symbol: string
+  assetID: number
+  confs: number
+}
+
+export interface FeeBreakdown {
+  swap: number
+  redemption: number
+}
+
+export interface SupportedAsset {
+  id: number
+  symbol: string
+  wallet: WalletState
+  info: WalletInfo
+}
+
+export interface WalletState {
+  symbol: string
+  assetID: number
+  version: number
+  type: string
+  traits: number
+  open: boolean
+  running: boolean
+  balance: WalletBalance
+  address: string
+  units: string
+  encrypted: boolean
+  peerCount: number
+  synced: boolean
+  syncProgress: number
+}
+
+export interface WalletInfo {
+  name: string
+  version: number
+  availablewallets: WalletDefinition[]
+  emptyidx: number
+  unitinfo: UnitInfo
+}
+
+export interface WalletBalance {
+  available: number
+  immature: number
+  locked: number
+  stamp: string // time.Time
+  orderlocked: number
+  contractlocked: number
+}
+
+export interface WalletDefinition {
+  seeded: boolean
+  type: string
+  tab: string
+  description: string
+  configpath: string
+  configopts: ConfigOption[]
+}
+
+export interface ConfigOption {
+  key: string
+  displayname: string
+  description: string
+  default: any
+  max: any
+  min: any
+  noecho: boolean
+  isboolean: boolean
+  isdate: boolean
+  disablewhenactive: boolean
+  isBirthdayConfig: boolean
+}
+
+export interface Coin {
+  id: string
+  stringID: string
+  assetID: number
+  symbol: string
+  confs: Confirmations
+}
+
+export interface Confirmations {
+  required: number
+  count: number
+}
+
+export interface UnitInfo {
+  atomicUnit: string
+  conventional: Denomination
+  denominations: Denomination[]
+}
+
+export interface Denomination {
+  unit: string
+  conversionFactor: number
+}
+
+export interface User {
+  exchanges: Record<string, Exchange>
+  inited: boolean
+  seedgentime: number
+  assets: Record<number, SupportedAsset>
+  authed: boolean // added by webserver
+  ok: boolean // added by webserver
+}
+
+export interface CoreNote {
+  type: string
+  topic: string
+  subject: string
+  details: string
+  severity: number
+  stamp: number
+  acked: boolean
+  id: string
+  el?: HTMLElement // Added in app
+}
+
+export interface FeePaymentNote extends CoreNote {
+  asset: number
+  confirmations: number
+  dex: string
+}
+
+export interface BalanceNote extends CoreNote {
+  assetID: number
+  balance: WalletBalance
+}
+
+export interface WalletConfigNote extends CoreNote {
+  wallet: WalletState
+}
+
+export type WalletStateNote = WalletConfigNote
+
+export interface SpotPriceNote extends CoreNote {
+  host: string
+  spots: Record<string, Spot>
+}
+
+export interface MatchNote extends CoreNote {
+  orderID: string
+  match: Match
+  host: string
+  marketID: string
+}
+
+export interface ConnEventNote extends CoreNote {
+  host: string
+  connected: boolean
+}
+
+export interface OrderNote extends CoreNote {
+  order: Order
+}
+
+export interface EpochNote extends CoreNote {
+  host: string
+  marketID: string
+  epoch: number
+}
+
+export interface APIResponse {
+  requestSuccessful: boolean
+  ok: boolean
+  msg: string
+  err?: string
+}
+
+export interface LogMessage {
+  time: string
+  msg: string
+}
+
+export interface NoteElement extends HTMLElement {
+  note: CoreNote
+}
+
+export interface BalanceResponse extends APIResponse {
+  balance: WalletBalance
+}
+
+export interface LayoutMetrics {
+  bodyTop: number
+  bodyLeft: number
+  width: number
+  height: number
+  centerX: number
+  centerY: number
+}
+
+export interface PasswordCache {
+  pw: string
+}
+
+export interface PageElement extends HTMLElement {
+  value?: string
+  src?: string
+  files?: FileList
+  checked?: boolean
+  href?: string
+}
+
+export interface BooleanConfig {
+  reason: string
+}
+
+export interface XYRangePoint {
+  label: string
+  x: number
+  y: number
+}
+
+export interface XYRange {
+  start: XYRangePoint
+  end: XYRangePoint
+  xUnit: string
+  yUnit: string
+}
+
+export interface OrderOption extends ConfigOption {
+  boolean: BooleanConfig
+  xyRange: XYRange
+}
+
+export interface SwapEstimate {
+  lots: number
+  value?: number
+  maxFees?: number
+  realisticWorstCase?: number
+  realisticBestCase?: number
+}
+
+export interface RedeemEstimate {
+  realisticBestCase: number
+  realisticWorstCase: number
+}
+
+export interface PreSwap {
+  estimate: SwapEstimate
+  options: OrderOption[]
+}
+
+export interface PreRedeem {
+  estimate: RedeemEstimate
+  options: OrderOption[]
+}
+
+export interface OrderEstimate {
+  swap: PreSwap
+  redeem: PreRedeem
+}
+
+export interface MaxOrderEstimate {
+  swap: SwapEstimate
+  redeem: RedeemEstimate
+}
+
+export interface MaxSell {
+  maxSell: MaxOrderEstimate
+}
+
+export interface MaxBuy {
+  maxBuy: MaxOrderEstimate
+}
+
+export interface TradeForm {
+  host: string
+  isLimit: boolean
+  sell: boolean
+  base: number
+  quote: number
+  qty: number
+  rate: number
+  tifnow: boolean
+  options: Record<string, any>
+}
+
+export interface BookUpdate {
+  action: string
+  host: string
+  marketID: string
+  payload: any
+}
+
+export interface MiniOrder {
+  qty: number
+  qtyAtomic: number
+  rate: number
+  msgRate: number
+  epoch: number
+  sell: boolean
+  token: string
+}
+
+export interface CoreOrderBook {
+  sells: MiniOrder[]
+  buys: MiniOrder[]
+  epoch: MiniOrder[]
+}
+
+export interface MarketOrderBook {
+  base: number
+  quote: number
+  book: CoreOrderBook
+}
+
+export interface RemainderUpdate {
+  token: string
+  qty: number
+  qtyAtomic: number
+}
+
+export interface OrderFilter {
+  n?: number
+  offset?: string
+  hosts: string[]
+  assets: number[]
+  statuses: number[]
+}
+
+export interface Application {
+  assets: Record<number, SupportedAsset>
+  seedGenTime: number
+  user: User
+  header: HTMLElement
+  walletMap: Record<number, WalletState>
+  exchanges: Record<string, Exchange>
+  showPopups: boolean
+  commitHash: string
+  start (): Promise<void>
+  reconnected (): void
+  fetchUser (): Promise<User>
+  loadPage (page: string, data?: any, skipPush?: boolean): Promise<boolean>
+  attach (data: any): void
+  bindTooltips (ancestor: HTMLElement): void
+  attachHeader (): void
+  showDropdown (icon: HTMLElement, dialog: HTMLElement): void
+  ackNotes (): void
+  setNoteTimes (noteList: HTMLElement): void
+  bindInternalNavigation (ancestor: HTMLElement): void
+  storeNotes (): void
+  updateMenuItemsDisplay (): void
+  attachCommon (node: HTMLElement): void
+  updateExchangeRegistration (dexAddr: string, isPaid: boolean, confs?: number, assetID?: number): void
+  handleFeePaymentNote (note: FeePaymentNote): void
+  setNotes (notes: CoreNote[]): void
+  notify (note: CoreNote): void
+  log (loggerID: string, ...msg: any): void
+  prependPokeElement (note: CoreNote): void
+  prependNoteElement (note: CoreNote, skipSave?: boolean): void
+  prependListElement (noteList: HTMLElement, note: CoreNote, el: NoteElement): void
+  makeNote (note: CoreNote): NoteElement
+  makePoke (note: CoreNote): NoteElement
+  loading (el: HTMLElement): () => void
+  orders (host: string, mktID: string): Order[]
+  haveAssetOrders (assetID: number): boolean
+  order (oid: string): Order
+  unitInfo (assetID: number, xc?: Exchange): UnitInfo
+  conventionalRate (baseID: number, quoteID: number, encRate: number): number
+  walletDefinition (assetID: number, walletType: string): WalletDefinition
+  currentWalletDefinition (assetID: number): WalletDefinition
+  fetchBalance (assetID: number): Promise<WalletBalance>
+  checkResponse (resp: APIResponse, skipNote?: boolean): boolean
+  signOut (): Promise<void>
+}
+
+// TODO: Define an interface for Application?
+let application: Application
+
+export function registerApplication (a: Application) {
+  application = a
+}
+
+export function app (): Application {
+  return application
+}

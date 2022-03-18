@@ -12,6 +12,30 @@ import { getJSON, postJSON } from './http'
 import * as ntfn from './notifications'
 import ws from './ws'
 import * as intl from './locales'
+import {
+  User,
+  SupportedAsset,
+  Exchange,
+  WalletState,
+  FeePaymentNote,
+  CoreNote,
+  OrderNote,
+  Market,
+  Order,
+  Match,
+  BalanceNote,
+  WalletConfigNote,
+  MatchNote,
+  ConnEventNote,
+  SpotPriceNote,
+  UnitInfo,
+  WalletDefinition,
+  WalletBalance,
+  LogMessage,
+  NoteElement,
+  BalanceResponse,
+  APIResponse
+} from './registry'
 
 const idel = Doc.idel // = element by id
 const bind = Doc.bind
@@ -22,8 +46,17 @@ const loggersKey = 'loggers'
 const recordersKey = 'recorders'
 const noteCacheSize = 100
 
+interface Page {
+  unload (): void
+  notify (n: CoreNote): void
+}
+
+interface PageClass {
+  new (main: HTMLElement, data: any): Page;
+}
+
 /* constructors is a map to page constructors. */
-const constructors = {
+const constructors: Record<string, PageClass> = {
   login: LoginPage,
   register: RegistrationPage,
   markets: MarketsPage,
@@ -39,14 +72,37 @@ const unauthedPages = ['register', 'login', 'settings']
 
 // Application is the main javascript web application for the Decred DEX client.
 export default class Application {
+  notes: CoreNote[]
+  pokes: CoreNote[]
+  user: User
+  seedGenTime: number
+  commitHash: string
+  showPopups: boolean
+  loggers: Record<string, boolean>
+  recorders: Record<string, LogMessage[]>
+  main: HTMLElement
+  header: HTMLElement
+  assets: Record<number, SupportedAsset>
+  exchanges: Record<string, Exchange>
+  walletMap: Record<number, WalletState>
+  tooltip: HTMLElement
+  page: Record<string, HTMLElement>
+  loadedPage: Page
+  popupNotes: HTMLElement
+  popupTmpl: HTMLElement
+
   constructor () {
     this.notes = []
     this.pokes = []
     // The "user" is a large data structure that contains nearly all state
     // information, including exchanges, markets, wallets, and orders.
     this.user = {
-      accounts: {},
-      wallets: {}
+      exchanges: {},
+      inited: false,
+      seedgentime: 0,
+      assets: {},
+      authed: false,
+      ok: true
     }
     this.seedGenTime = 0
     this.commitHash = process.env.COMMITHASH
@@ -64,7 +120,7 @@ export default class Application {
       return `${loggerID} logger ${state ? 'enabled' : 'disabled'}`
     }
     // Enable logging from anywhere.
-    window.log = (...a) => { this.log(...a) }
+    window.log = (loggerID, ...a) => { this.log(loggerID, ...a) }
 
     // Recorders can record log messages, and then save them to file on request.
     const recorderKeys = State.fetch(recordersKey) || []
@@ -102,7 +158,7 @@ export default class Application {
    */
   async start () {
     // Handle back navigation from the browser.
-    bind(window, 'popstate', (e) => {
+    bind(window, 'popstate', (e: PopStateEvent) => {
       const page = e.state.page
       if (!page && page !== '') return
       this.loadPage(page, e.state.data, true)
@@ -117,7 +173,7 @@ export default class Application {
     // The application is free to respond with a page that differs from the
     // one requested in the omnibox, e.g. routing though a login page. Set the
     // current URL state based on the actual page.
-    const url = new URL(window.location)
+    const url = new URL(window.location.href)
     if (handlerFromPath(url.pathname) !== handler) {
       url.pathname = `/${handler}`
       url.search = ''
@@ -126,13 +182,13 @@ export default class Application {
     // Attach stuff.
     this.attachHeader()
     this.attachCommon(this.header)
-    this.attach()
+    this.attach({})
     // Load recent notifications from Window.localStorage.
     const notes = State.fetch('notifications')
     this.setNotes(notes || [])
     // Connect the websocket and register the notification route.
     ws.connect(getSocketURI(), this.reconnected)
-    ws.registerRoute(notificationRoute, note => {
+    ws.registerRoute(notificationRoute, (note: CoreNote) => {
       this.notify(note)
     })
   }
@@ -149,18 +205,18 @@ export default class Application {
    * Fetch and save the user, which is the primary core state that must be
    * maintained by the Application.
    */
-  async fetchUser () {
-    const user = await getJSON('/api/user')
+  async fetchUser (): Promise<User> {
+    const resp: APIResponse = await getJSON('/api/user')
     // If it's not a page that requires auth, skip the error notification.
     const skipNote = unauthedPages.indexOf(this.main.dataset.handler) > -1
-    if (!this.checkResponse(user, skipNote)) return
+    if (!this.checkResponse(resp, skipNote)) return
+    const user = (resp as any) as User
     this.seedGenTime = user.seedgentime
     this.user = user
     this.assets = user.assets
     this.exchanges = user.exchanges
     this.walletMap = {}
-    this.locale = user.locale
-    for (const [assetID, asset] of Object.entries(user.assets)) {
+    for (const [assetID, asset] of (Object.entries(user.assets) as [any, SupportedAsset][])) {
       if (asset.wallet) {
         this.walletMap[assetID] = asset.wallet
       }
@@ -170,7 +226,7 @@ export default class Application {
   }
 
   /* Load the page from the server. Insert and bind the DOM. */
-  async loadPage (page, data, skipPush) {
+  async loadPage (page: string, data?: any, skipPush?: boolean): Promise<boolean> {
     // Close some menus and tooltips.
     this.tooltip.style.left = '-10000px'
     Doc.hide(this.page.noteBox, this.page.profileBox)
@@ -178,7 +234,7 @@ export default class Application {
     const url = new URL(`/${page}`, window.location.origin)
     const requestedHandler = handlerFromPath(page)
     // Fetch and parse the page.
-    const response = await window.fetch(url)
+    const response = await window.fetch(url.toString())
     if (!response.ok) return false
     const html = await response.text()
     const doc = Doc.noderize(html)
@@ -198,7 +254,7 @@ export default class Application {
   }
 
   /* attach binds the common handlers and calls the page constructor. */
-  attach (data) {
+  attach (data: any) {
     const handlerID = this.main.dataset.handler
     if (!handlerID) {
       console.error('cannot attach to content with no specified handler')
@@ -214,8 +270,8 @@ export default class Application {
     this.bindTooltips(this.main)
   }
 
-  bindTooltips (ancestor) {
-    ancestor.querySelectorAll('[data-tooltip]').forEach(el => {
+  bindTooltips (ancestor: HTMLElement) {
+    ancestor.querySelectorAll('[data-tooltip]').forEach((el: HTMLElement) => {
       bind(el, 'mouseenter', () => {
         this.tooltip.textContent = el.dataset.tooltip
         const lyt = Doc.layoutMetrics(el)
@@ -275,7 +331,7 @@ export default class Application {
     bind(page.innerNoteIcon, 'click', () => { Doc.hide(page.noteBox) })
     bind(page.innerProfileIcon, 'click', () => { Doc.hide(page.profileBox) })
 
-    bind(page.profileSignout, 'click', async e => await this.signOut())
+    bind(page.profileSignout, 'click', async () => await this.signOut())
 
     bind(page.pokeCat, 'click', () => {
       this.setNoteTimes(page.pokeList)
@@ -300,14 +356,14 @@ export default class Application {
    * showDropdown sets the position and visibility of the specified dropdown
    * dialog according to the position of its icon button.
    */
-  showDropdown (icon, dialog) {
+  showDropdown (icon: HTMLElement, dialog: HTMLElement) {
     const ico = icon.getBoundingClientRect()
     Doc.hide(this.page.noteBox, this.page.profileBox)
     Doc.show(dialog)
     dialog.style.right = `${window.innerWidth - ico.left - ico.width + 11}px`
     dialog.style.top = `${ico.top - 9}px`
 
-    const hide = e => {
+    const hide = (e: MouseEvent) => {
       if (!Doc.mouseInElement(e, dialog)) {
         Doc.hide(dialog)
         unbind(document, 'click', hide)
@@ -333,8 +389,8 @@ export default class Application {
     Doc.hide(this.page.noteIndicator)
   }
 
-  setNoteTimes (noteList) {
-    for (const el of Array.from(noteList.children)) {
+  setNoteTimes (noteList: HTMLElement) {
+    for (const el of (Array.from(noteList.children) as NoteElement[])) {
       el.querySelector('span.note-time').textContent = Doc.timeSince(el.note.stamp)
     }
   }
@@ -343,20 +399,20 @@ export default class Application {
    * bindInternalNavigation hijacks navigation by click on any local links that
    * are descendants of ancestor.
    */
-  bindInternalNavigation (ancestor) {
-    const pageURL = new URL(window.location)
+  bindInternalNavigation (ancestor: HTMLElement) {
+    const pageURL = new URL(window.location.href)
     ancestor.querySelectorAll('a').forEach(a => {
       if (!a.href) return
       const url = new URL(a.href)
       if (url.origin === pageURL.origin) {
         const token = url.pathname.substring(1)
-        const params = {}
+        const params: Record<string, string> = {}
         if (url.search) {
           url.searchParams.forEach((v, k) => {
             params[k] = v
           })
         }
-        Doc.bind(a, 'click', e => {
+        Doc.bind(a, 'click', (e: Event) => {
           e.preventDefault()
           this.loadPage(token, params)
         })
@@ -405,7 +461,7 @@ export default class Application {
   }
 
   /* attachCommon scans the provided node and handles some common bindings. */
-  attachCommon (node) {
+  attachCommon (node: HTMLElement) {
     this.bindInternalNavigation(node)
   }
 
@@ -413,7 +469,7 @@ export default class Application {
    * updateExchangeRegistration updates the information for the exchange
    * registration payment
    */
-  updateExchangeRegistration (dexAddr, isPaid, confs, asset) {
+  updateExchangeRegistration (dexAddr: string, isPaid: boolean, confs?: number, assetID?: number) {
     const dex = this.exchanges[dexAddr]
 
     if (isPaid) {
@@ -423,15 +479,15 @@ export default class Application {
       return
     }
 
-    const symbol = this.assets[asset].symbol
-    dex.pendingFee = { confs, asset, symbol }
+    const symbol = this.assets[assetID].symbol
+    dex.pendingFee = { confs, assetID, symbol }
   }
 
   /*
    * handleFeePaymentNote is the handler for the 'feepayment'-type notification, which
    * is used to update the dex registration status.
    */
-  handleFeePaymentNote (note) {
+  handleFeePaymentNote (note: FeePaymentNote) {
     switch (note.topic) {
       case 'RegUpdate':
         this.updateExchangeRegistration(note.dex, false, note.confirmations, note.asset)
@@ -448,7 +504,7 @@ export default class Application {
    * setNotes sets the current notification cache and populates the notification
    * display.
    */
-  setNotes (notes) {
+  setNotes (notes: CoreNote[]) {
     this.log('notes', 'setNotes', notes)
     this.notes = []
     Doc.empty(this.page.noteList)
@@ -462,16 +518,16 @@ export default class Application {
    * notify is the top-level handler for notifications received from the client.
    * Notifications are propagated to the loadedPage.
    */
-  notify (note) {
+  notify (note: CoreNote) {
     // Handle type-specific updates.
     this.log('notes', 'notify', note)
     switch (note.type) {
       case 'order': {
-        const order = note.order
+        const order = (note as OrderNote).order
         const mkt = this.user.exchanges[order.host].markets[order.market]
         // Updates given order in market's orders list if it finds it.
         // Returns a bool which indicates if order was found.
-        const updateOrder = (mkt, ord) => {
+        const updateOrder = (mkt: Market, ord: Order) => {
           for (const i in mkt.orders || []) {
             if (mkt.orders[i].id === ord.id) {
               mkt.orders[i] = ord
@@ -489,19 +545,20 @@ export default class Application {
         break
       }
       case 'balance': {
+        const n: BalanceNote = note as BalanceNote
         const wallet = this.user.assets &&
-          this.user.assets[note.assetID].wallet
-        if (wallet) wallet.balance = note.balance
+          this.user.assets[n.assetID].wallet
+        if (wallet) wallet.balance = n.balance
         break
       }
       case 'feepayment':
-        this.handleFeePaymentNote(note)
+        this.handleFeePaymentNote(note as FeePaymentNote)
         break
       case 'walletstate':
       case 'walletconfig': {
         // assets can be null if failed to connect to dex server.
         if (!this.assets) return
-        const wallet = note.wallet
+        const wallet = (note as WalletConfigNote).wallet
         const asset = this.assets[wallet.assetID]
         asset.wallet = wallet
         this.walletMap[wallet.assetID] = wallet
@@ -510,18 +567,21 @@ export default class Application {
         break
       }
       case 'match': {
-        const ord = this.order(note.orderID)
-        if (ord) updateMatch(ord, note.match)
+        const n = note as MatchNote
+        const ord = this.order(n.orderID)
+        if (ord) updateMatch(ord, n.match)
         break
       }
       case 'conn': {
-        const xc = this.user.exchanges[note.host]
-        if (xc) xc.connected = note.connected
+        const n = note as ConnEventNote
+        const xc = this.user.exchanges[n.host]
+        if (xc) xc.connected = n.connected
         break
       }
       case 'spots': {
-        const xc = this.user.exchanges[note.host]
-        for (const [mktName, spot] of Object.entries(note.spots)) xc.markets[mktName].spot = spot
+        const n = note as SpotPriceNote
+        const xc = this.user.exchanges[n.host]
+        for (const [mktName, spot] of Object.entries(n.spots)) xc.markets[mktName].spot = spot
       }
     }
 
@@ -531,7 +591,7 @@ export default class Application {
     if (note.severity < ntfn.POKE) return
     // Poke notifications have their own display.
     if (this.showPopups) {
-      const span = this.popupTmpl.cloneNode(true)
+      const span = this.popupTmpl.cloneNode(true) as HTMLElement
       Doc.tmplElement(span, 'text').textContent = `${note.subject}: ${note.details}`
       const indicator = Doc.tmplElement(span, 'indicator')
       if (note.severity === ntfn.POKE) {
@@ -542,8 +602,8 @@ export default class Application {
       // These take up screen space. Only show max 5 at a time.
       while (pn.children.length > 5) pn.removeChild(pn.firstChild)
       setTimeout(async () => {
-        await Doc.animate(500, progress => {
-          span.style.opacity = 1 - progress
+        await Doc.animate(500, (progress: number) => {
+          span.style.opacity = String(1 - progress)
         })
         span.remove()
       }, 6000)
@@ -567,7 +627,7 @@ export default class Application {
    * book       Order book feed.
    * ws.........Websocket connection status changes.
    */
-  log (loggerID, ...msg) {
+  log (loggerID: string, ...msg: any) {
     if (this.loggers[loggerID]) console.log(`${nowString()}[${loggerID}]:`, ...msg)
     if (this.recorders[loggerID]) {
       this.recorders[loggerID].push({
@@ -577,14 +637,14 @@ export default class Application {
     }
   }
 
-  prependPokeElement (note) {
+  prependPokeElement (note: CoreNote) {
     this.pokes.push(note)
     while (this.pokes.length > noteCacheSize) this.pokes.shift()
     const el = this.makePoke(note)
     this.prependListElement(this.page.pokeList, note, el)
   }
 
-  prependNoteElement (note, skipSave) {
+  prependNoteElement (note: CoreNote, skipSave?: boolean) {
     this.notes.push(note)
     while (this.notes.length > noteCacheSize) this.notes.shift()
     const noteList = this.page.noteList
@@ -602,12 +662,12 @@ export default class Application {
     const ni = this.page.noteIndicator
     setSeverityClass(ni, severity)
     if (unacked) {
-      ni.textContent = (unacked > noteCacheSize - 1) ? `${noteCacheSize - 1}+` : unacked
+      ni.textContent = String((unacked > noteCacheSize - 1) ? `${noteCacheSize - 1}+` : unacked)
       Doc.show(ni)
     } else Doc.hide(ni)
   }
 
-  prependListElement (noteList, note, el) {
+  prependListElement (noteList: HTMLElement, note: CoreNote, el: NoteElement) {
     note.el = el
     el.note = note
     noteList.prepend(el)
@@ -619,8 +679,8 @@ export default class Application {
    * makeNote constructs a single notification element for the drop-down
    * notification list.
    */
-  makeNote (note) {
-    const el = this.page.noteTmpl.cloneNode(true)
+  makeNote (note: CoreNote): NoteElement {
+    const el = this.page.noteTmpl.cloneNode(true) as NoteElement
     if (note.severity > ntfn.POKE) {
       const cls = note.severity === ntfn.SUCCESS ? 'good' : note.severity === ntfn.WARNING ? 'warn' : 'bad'
       el.querySelector('div.note-indicator').classList.add(cls)
@@ -631,8 +691,8 @@ export default class Application {
     return el
   }
 
-  makePoke (note) {
-    const el = this.page.pokeTmpl.cloneNode(true)
+  makePoke (note: CoreNote): NoteElement {
+    const el = this.page.pokeTmpl.cloneNode(true) as NoteElement
     const d = new Date(note.stamp)
     Doc.tmplElement(el, 'dateTime').textContent = `${d.toLocaleDateString()}, ${d.toLocaleTimeString()}`
     Doc.tmplElement(el, 'details').textContent = `${note.subject}: ${note.details}`
@@ -644,14 +704,14 @@ export default class Application {
    * loading icon. The loader will block all interaction with the specified
    * element until Application.loaded is called.
    */
-  loading (el) {
-    const loader = this.page.loader.cloneNode(true)
+  loading (el: HTMLElement): () => void {
+    const loader = this.page.loader.cloneNode(true) as HTMLElement
     el.appendChild(loader)
     return () => { loader.remove() }
   }
 
   /* orders retrieves a list of orders for the specified dex and market. */
-  orders (host, mktID) {
+  orders (host: string, mktID: string): Order[] {
     let o = this.user.exchanges[host].markets[mktID].orders
     if (!o) {
       o = []
@@ -664,7 +724,7 @@ export default class Application {
    * haveActiveOrders returns whether or not the there are active orders
    * involving a certain asset.
    */
-  haveAssetOrders (assetID) {
+  haveAssetOrders (assetID: number): boolean {
     for (const xc of Object.values(this.user.exchanges)) {
       for (const market of Object.values(xc.markets)) {
         if (!market.orders) continue
@@ -678,7 +738,7 @@ export default class Application {
   }
 
   /* order attempts to locate an order by order ID. */
-  order (oid) {
+  order (oid: string): Order {
     for (const xc of Object.values(this.user.exchanges)) {
       for (const market of Object.values(xc.markets)) {
         if (!market.orders) continue
@@ -694,26 +754,26 @@ export default class Application {
    * [core.Exchange] is provided, and this is not a SupportedAsset, the UnitInfo
    * sent from the exchange's assets map [dex.Asset] will be used.
    */
-  unitInfo (assetID, xc) {
+  unitInfo (assetID: number, xc?: Exchange): UnitInfo {
     const supportedAsset = this.assets[assetID]
     if (supportedAsset) return supportedAsset.info.unitinfo
     return xc.assets[assetID].unitInfo
   }
 
   /* conventionalRate converts the encoded atomic rate to a conventional rate */
-  conventionalRate (baseID, quoteID, encRate) {
+  conventionalRate (baseID: number, quoteID: number, encRate: number): number {
     const [b, q] = [this.unitInfo(baseID), this.unitInfo(quoteID)]
     const r = b.conventional.conversionFactor / q.conventional.conversionFactor
     return encRate / RateEncodingFactor * r
   }
 
-  walletDefinition (assetID, walletType) {
+  walletDefinition (assetID: number, walletType: string): WalletDefinition {
     const assetInfo = this.assets[assetID].info
     if (walletType === '') return assetInfo.availablewallets[assetInfo.emptyidx]
     return assetInfo.availablewallets.filter(def => def.type === walletType)[0]
   }
 
-  currentWalletDefinition (assetID) {
+  currentWalletDefinition (assetID: number): WalletDefinition {
     return this.walletDefinition(assetID, this.assets[assetID].wallet.type)
   }
 
@@ -722,8 +782,8 @@ export default class Application {
    * include the balance, but we're ignoring it, since a balance update
    * notification is received via the Application anyways.
    */
-  async fetchBalance (assetID) {
-    const res = await postJSON('/api/balance', { assetID: assetID })
+  async fetchBalance (assetID: number): Promise<WalletBalance> {
+    const res: BalanceResponse = await postJSON('/api/balance', { assetID: assetID })
     if (!this.checkResponse(res)) {
       throw new Error(`failed to fetch balance for asset ID ${assetID}`)
     }
@@ -736,7 +796,7 @@ export default class Application {
    * message will be displayed in the drop-down notifications and false will be
    * returned.
    */
-  checkResponse (resp, skipNote) {
+  checkResponse (resp: APIResponse, skipNote?: boolean): boolean {
     if (!resp.requestSuccessful || !resp.ok) {
       if (this.user.inited && !skipNote) this.notify(ntfn.make(intl.prep(intl.ID_API_ERROR), resp.msg, ntfn.ERROR))
       return false
@@ -762,7 +822,7 @@ export default class Application {
 }
 
 /* getSocketURI returns the websocket URI for the client. */
-function getSocketURI () {
+function getSocketURI (): string {
   const protocol = (window.location.protocol === 'https:') ? 'wss' : 'ws'
   return `${protocol}://${window.location.host}/ws`
 }
@@ -771,19 +831,19 @@ function getSocketURI () {
  * severityClassMap maps a notification severity level to a CSS class that
  * assigns a background color.
  */
-const severityClassMap = {
+const severityClassMap: Record<number, string> = {
   [ntfn.SUCCESS]: 'good',
   [ntfn.ERROR]: 'bad',
   [ntfn.WARNING]: 'warn'
 }
 
 /* handlerFromPath parses the handler name from the path. */
-function handlerFromPath (path) {
+function handlerFromPath (path: string): string {
   return path.replace(/^\//, '').split('/')[0].split('?')[0].split('#')[0]
 }
 
 /* nowString creates a string formatted like HH:MM:SS.xxx */
-function nowString () {
+function nowString (): string {
   const stamp = new Date()
   const h = stamp.getHours().toString().padStart(2, '0')
   const m = stamp.getMinutes().toString().padStart(2, '0')
@@ -792,13 +852,13 @@ function nowString () {
   return `${h}:${m}:${s}.${ms}`
 }
 
-function setSeverityClass (el, severity) {
+function setSeverityClass (el: HTMLElement, severity: number) {
   el.classList.remove('bad', 'warn', 'good')
   el.classList.add(severityClassMap[severity])
 }
 
 /* updateMatch updates the match in or adds the match to the order. */
-function updateMatch (order, match) {
+function updateMatch (order: Order, match: Match) {
   for (const i in order.matches) {
     const m = order.matches[i]
     if (m.matchID === match.matchID) {

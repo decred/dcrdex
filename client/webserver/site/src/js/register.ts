@@ -1,4 +1,3 @@
-import { app } from './registry'
 import Doc from './doc'
 import BasePage from './basepage'
 import { postJSON } from './http'
@@ -13,12 +12,31 @@ import {
   bind as bindForm
 } from './forms'
 import * as intl from './locales'
+import {
+  app,
+  PasswordCache,
+  Exchange,
+  PageElement,
+  WalletStateNote,
+  BalanceNote
+} from './registry'
 
 export default class RegistrationPage extends BasePage {
-  constructor (body) {
+  body: HTMLElement
+  pwCache: PasswordCache
+  currentDEX: Exchange
+  page: Record<string, PageElement>
+  loginForm: LoginForm
+  dexAddrForm: DEXAddressForm
+  newWalletForm: NewWalletForm
+  regAssetForm: FeeAssetSelectionForm
+  walletWaitForm: WalletWaitForm
+  confirmRegisterForm: ConfirmRegistrationForm
+
+  constructor (body: HTMLElement) {
     super()
     this.body = body
-    this.pwCache = {}
+    this.pwCache = { pw: null }
     this.currentDEX = null
     const page = this.page = Doc.idDescendants(body)
 
@@ -102,8 +120,8 @@ export default class RegistrationPage extends BasePage {
     // Attempt to load the dcrwallet configuration from the default location.
     if (app().user.authed) this.auth()
     this.notifiers = {
-      walletstate: note => this.walletWaitForm.reportWalletState(note.wallet),
-      balance: note => this.walletWaitForm.reportBalance(note.balance, note.assetID)
+      walletstate: (note: WalletStateNote) => this.walletWaitForm.reportWalletState(note.wallet),
+      balance: (note: BalanceNote) => this.walletWaitForm.reportBalance(note.balance, note.assetID)
     }
   }
 
@@ -117,21 +135,21 @@ export default class RegistrationPage extends BasePage {
   }
 
   /* Swap in the asset selection form and run the animation. */
-  async animateRegAsset (oldForm) {
+  async animateRegAsset (oldForm: HTMLElement) {
     Doc.hide(oldForm)
     this.regAssetForm.animate()
     Doc.show(this.page.regAssetForm)
   }
 
   /* Swap in the confirmation form and run the animation. */
-  async animateConfirmForm (oldForm) {
+  async animateConfirmForm (oldForm: HTMLElement) {
     this.confirmRegisterForm.animate()
     Doc.hide(oldForm)
     Doc.show(this.page.confirmRegForm)
   }
 
   // Retrieve an estimate for the tx fee needed to pay the registration fee.
-  async getRegistrationTxFeeEstimate (assetID, form) {
+  async getRegistrationTxFeeEstimate (assetID: number, form: HTMLElement) {
     const cert = await this.getCertFile()
     const loaded = app().loading(form)
     const res = await postJSON('/api/regtxfee', {
@@ -212,7 +230,7 @@ export default class RegistrationPage extends BasePage {
     app().loadPage('markets')
   }
 
-  async newWalletCreated (assetID) {
+  async newWalletCreated (assetID: number) {
     this.regAssetForm.refresh()
     const user = await app().fetchUser()
     const page = this.page
