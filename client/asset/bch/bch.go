@@ -144,6 +144,12 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
 
+	switch cfg.Type {
+	case walletTypeRPC, walletTypeLegacy:
+	default:
+		return nil, fmt.Errorf("unknown wallet type %q", cfg.Type)
+	}
+
 	// Designate the clone ports. These will be overwritten by any explicit
 	// settings in the configuration file. Bitcoin Cash uses the same default
 	// ports as Bitcoin.
