@@ -32,13 +32,15 @@ export default class OrderPage extends BasePage {
   constructor (main: HTMLElement) {
     super()
     const stampers = Doc.applySelector(main, '[data-stamp]')
-    net = parseInt(main.dataset.net)
+    net = parseInt(main.dataset.net || '')
     // Find the order
-    this.orderID = main.dataset.oid
-    this.order = app().order(this.orderID)
+    this.orderID = main.dataset.oid || ''
+    const ord = app().order(this.orderID)
     // app().order can only access active orders. If the order is not active,
     // we'll need to get the data from the database.
-    if (!this.order) this.fetchOrder()
+    if (ord) this.order = ord
+    else this.fetchOrder()
+
     const page = this.page = Doc.idDescendants(main)
 
     if (page.cancelBttn) {
@@ -64,7 +66,7 @@ export default class OrderPage extends BasePage {
 
     const setStamp = () => {
       for (const span of stampers) {
-        span.textContent = Doc.timeSince(parseInt(span.dataset.stamp))
+        span.textContent = Doc.timeSince(parseInt(span.dataset.stamp || ''))
       }
     }
     setStamp()
@@ -159,7 +161,7 @@ export default class OrderPage extends BasePage {
    * 'order' or 'match' notification.
    */
   processMatch (m: Match) {
-    let card: HTMLElement
+    let card: HTMLElement | null = null
     for (const div of Doc.applySelector(this.page.matchBox, '.match-card')) {
       if (div.dataset.matchID === m.matchID) {
         card = div
@@ -172,6 +174,7 @@ export default class OrderPage extends BasePage {
     }
 
     const setCoin = (divName: string, linkName: string, coin: Coin) => {
+      if (!card) return // Ugh
       if (!coin) return
       Doc.show(Doc.tmplElement(card, divName))
       const coinLink = Doc.tmplElement(card, linkName)
@@ -235,13 +238,13 @@ function inSwapCast (m: Match) {
  * data-explorer-id and data-explorer-coin values.
  */
 function setCoinHref (link: PageElement) {
-  const assetExplorer = CoinExplorers[parseInt(link.dataset.explorerId)]
+  const assetExplorer = CoinExplorers[parseInt(link.dataset.explorerId || '')]
   if (!assetExplorer) return
   const formatter = assetExplorer[net]
   if (!formatter) return
   link.classList.remove('plainlink')
   link.classList.add('subtlelink')
-  link.href = formatter(link.dataset.explorerCoin)
+  link.href = formatter(link.dataset.explorerCoin || '')
 }
 
 const CoinExplorers: Record<number, Record<number, (cid: string) => string>> = {

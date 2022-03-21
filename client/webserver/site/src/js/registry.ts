@@ -16,7 +16,7 @@ export interface Exchange {
   connected: boolean
   feeAsset: FeeAsset // DEPRECATED. DCR.
   regFees: Record<string, FeeAsset>
-  pendingFee: PendingFeeState
+  pendingFee: PendingFeeState | null
   candleDurs: string[]
 }
 
@@ -242,7 +242,6 @@ export interface CoreNote {
   stamp: number
   acked: boolean
   id: string
-  el?: HTMLElement // Added in app
 }
 
 export interface FeePaymentNote extends CoreNote {
@@ -328,6 +327,7 @@ export interface PageElement extends HTMLElement {
   files?: FileList
   checked?: boolean
   href?: string
+  htmlFor?: string
 }
 
 export interface BooleanConfig {
@@ -354,10 +354,10 @@ export interface OrderOption extends ConfigOption {
 
 export interface SwapEstimate {
   lots: number
-  value?: number
-  maxFees?: number
-  realisticWorstCase?: number
-  realisticBestCase?: number
+  value: number
+  maxFees: number
+  realisticWorstCase: number
+  realisticBestCase: number
 }
 
 export interface RedeemEstimate {
@@ -459,7 +459,7 @@ export interface Application {
   commitHash: string
   start (): Promise<void>
   reconnected (): void
-  fetchUser (): Promise<User>
+  fetchUser (): Promise<User | void>
   loadPage (page: string, data?: any, skipPush?: boolean): Promise<boolean>
   attach (data: any): void
   bindTooltips (ancestor: HTMLElement): void
@@ -471,7 +471,7 @@ export interface Application {
   storeNotes (): void
   updateMenuItemsDisplay (): void
   attachCommon (node: HTMLElement): void
-  updateExchangeRegistration (dexAddr: string, isPaid: boolean, confs?: number, assetID?: number): void
+  updateExchangeRegistration (dexAddr: string, confs: number, assetID: number): void
   handleFeePaymentNote (note: FeePaymentNote): void
   setNotes (notes: CoreNote[]): void
   notify (note: CoreNote): void
@@ -479,12 +479,10 @@ export interface Application {
   prependPokeElement (note: CoreNote): void
   prependNoteElement (note: CoreNote, skipSave?: boolean): void
   prependListElement (noteList: HTMLElement, note: CoreNote, el: NoteElement): void
-  makeNote (note: CoreNote): NoteElement
-  makePoke (note: CoreNote): NoteElement
   loading (el: HTMLElement): () => void
   orders (host: string, mktID: string): Order[]
   haveAssetOrders (assetID: number): boolean
-  order (oid: string): Order
+  order (oid: string): Order | null
   unitInfo (assetID: number, xc?: Exchange): UnitInfo
   conventionalRate (baseID: number, quoteID: number, encRate: number): number
   walletDefinition (assetID: number, walletType: string): WalletDefinition

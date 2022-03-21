@@ -33,14 +33,13 @@ export default class SettingsPage extends BasePage {
   constructor (body: HTMLElement) {
     super()
     this.body = body
-    this.currentDEX = null
     this.defaultTLSText = 'none selected'
     const page = this.page = Doc.idDescendants(body)
 
     this.forms = Doc.applySelector(page.forms, ':scope > form')
 
     Doc.bind(page.darkMode, 'click', () => {
-      State.dark(page.darkMode.checked)
+      State.dark(page.darkMode.checked || false)
       if (page.darkMode.checked) {
         document.body.classList.add('dark')
       } else {
@@ -49,7 +48,7 @@ export default class SettingsPage extends BasePage {
     })
 
     Doc.bind(page.showPokes, 'click', () => {
-      const show = page.showPokes.checked
+      const show = page.showPokes.checked || false
       State.setCookie('popups', show ? '1' : '0')
       app().showPopups = show
     })
@@ -185,6 +184,7 @@ export default class SettingsPage extends BasePage {
 
   async newWalletCreated (assetID: number) {
     const user = await app().fetchUser()
+    if (!user) return
     const page = this.page
     const asset = user.assets[assetID]
     const wallet = asset.wallet
@@ -271,7 +271,7 @@ export default class SettingsPage extends BasePage {
   async onAccountFileChange () {
     const page = this.page
     const files = page.accountFile.files
-    if (!files.length) return
+    if (!files || !files.length) return
     page.selectedAccount.textContent = files[0].name
     Doc.show(page.removeAccount)
     Doc.hide(page.addAccount)
@@ -299,7 +299,12 @@ export default class SettingsPage extends BasePage {
     page.importAccountAppPass.value = ''
     let accountString = ''
     if (page.accountFile.value) {
-      accountString = await page.accountFile.files[0].text()
+      const files = page.accountFile.files
+      if (!files || !files.length) {
+        console.error('importAccount: no file specified')
+        return
+      }
+      accountString = await files[0].text()
     }
     let account
     try {
@@ -381,7 +386,8 @@ export default class SettingsPage extends BasePage {
   async getCertFile () {
     let cert = ''
     if (this.dexAddrForm.page.certFile.value) {
-      cert = await this.dexAddrForm.page.certFile.files[0].text()
+      const files = this.dexAddrForm.page.certFile.files
+      if (files && files.length) cert = await files[0].text()
     }
     return cert
   }

@@ -43,15 +43,13 @@ type NoteReceiver = (payload: any) => void
 
 class MessageSocket {
   uri: string
-  connection: WebSocket
+  connection: WebSocket | null
   handlers: Record<string, NoteReceiver[]>
   queue: [string, any][]
   maxQlength: number
   reloader: () => void // appears unused
 
   constructor () {
-    this.uri = undefined
-    this.connection = undefined
     this.handlers = {}
     this.queue = []
     this.maxQlength = 5
@@ -88,7 +86,7 @@ class MessageSocket {
   close (reason: string) {
     window.log('ws', 'close, reason:', reason, this.handlers)
     this.handlers = {}
-    this.connection.close()
+    if (this.connection) this.connection.close()
   }
 
   connect (uri: string, reloader: () => void) {
@@ -97,10 +95,11 @@ class MessageSocket {
     let retrys = 0
     const go = () => {
       window.log('ws', `connecting to ${uri}`)
-      let conn = this.connection = new window.WebSocket(uri)
+      let conn: WebSocket | null = this.connection = new window.WebSocket(uri)
+      if (!conn) return
       const timeout = setTimeout(() => {
         // readyState is still WebSocket.CONNECTING. Cancel and trigger onclose.
-        conn.close()
+        if (conn) conn.close()
       }, 500)
 
       // unmarshal message, and forward the message to registered handlers

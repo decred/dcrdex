@@ -68,7 +68,7 @@ function formatter (formatters: Record<string, Intl.NumberFormat>, min: number, 
  * convertToConventional converts the value in atomic units to conventional
  * units.
  */
-function convertToConventional (v: number, unitInfo: UnitInfo) {
+function convertToConventional (v: number, unitInfo?: UnitInfo) {
   let prec = 8
   if (unitInfo) {
     const f = unitInfo.conventional.conversionFactor
@@ -195,6 +195,13 @@ export default class Doc {
     return Array.from(ancestor.children) as PageElement[]
   }
 
+  static safeSelector (ancestor: HTMLElement, k: string): PageElement {
+    const el = ancestor.querySelector(k)
+    if (el) return el as PageElement
+    console.warn(`no element found for selector '${k}' on element ->`, ancestor)
+    return document.createElement('div')
+  }
+
   /*
    * idDescendants creates an object mapping to elements which are descendants
    * of the ancestor and have id attributes. Elements are keyed by their id
@@ -253,7 +260,7 @@ export default class Doc {
   * template.
   */
   static tmplElement (ancestor: Document | Element, s: string): PageElement {
-    return ancestor.querySelector(`[data-tmpl="${s}"]`)
+    return ancestor.querySelector(`[data-tmpl="${s}"]`) || document.createElement('div')
   }
 
   /*
@@ -262,7 +269,7 @@ export default class Doc {
   */
   static parseTemplate (ancestor: HTMLElement): Record<string, PageElement> {
     const d: Record<string, PageElement> = {}
-    for (const el of Doc.applySelector(ancestor, '[data-tmpl]')) d[el.dataset.tmpl] = el
+    for (const el of Doc.applySelector(ancestor, '[data-tmpl]')) d[el.dataset.tmpl || ''] = el
     return d
   }
 
@@ -379,7 +386,7 @@ export class WalletIcons {
     if (this.status) this.status.textContent = intl.prep(intl.ID_NOWALLET)
   }
 
-  setSyncing (wallet: WalletState) {
+  setSyncing (wallet: WalletState | null) {
     const syncIcon = this.icons.syncing
     if (!wallet || !wallet.running) {
       Doc.hide(syncIcon)
@@ -402,12 +409,10 @@ export class WalletIcons {
   }
 
   /* reads the core.Wallet state and sets the icon visibility. */
-  readWallet (wallet: WalletState) {
+  readWallet (wallet: WalletState | null) {
     this.setSyncing(wallet)
+    if (!wallet) return this.nowallet()
     switch (true) {
-      case (!wallet):
-        this.nowallet()
-        break
       case (!wallet.running):
         this.sleeping()
         break

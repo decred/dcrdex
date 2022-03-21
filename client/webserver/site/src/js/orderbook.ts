@@ -44,7 +44,7 @@ export default class OrderBook {
   }
 
   /* findOrder finds an order in a specified side */
-  findOrder (side: MiniOrder[], token: string): [MiniOrder, number] {
+  findOrder (side: MiniOrder[], token: string): [MiniOrder | null, number] {
     for (let i = 0; i < side.length; i++) {
       if (side[i].token === token) {
         return [side[i], i]

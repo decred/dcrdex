@@ -52,11 +52,6 @@ export default class WalletsPage extends BasePage {
   body: HTMLElement
   page: Record<string, PageElement>
   rowInfos: Record<string, RowInfo>
-  displayed: HTMLElement
-  animation: Promise<void>
-  openAsset: number
-  walletAsset: number
-  reconfigAsset: number
   withdrawAsset: SupportedAsset
   newWalletForm: NewWalletForm
   reconfigForm: WalletConfigForm
@@ -65,6 +60,13 @@ export default class WalletsPage extends BasePage {
   keyup: (e: KeyboardEvent) => void
   changeWalletPW: boolean
   depositAsset: number
+  // Methods to switch the item displayed on the right side, with a little
+  // fade-in animation.
+  displayed: HTMLElement
+  animation: Promise<void>
+  openAsset: number
+  walletAsset: number
+  reconfigAsset: number
 
   constructor (body: HTMLElement) {
     super()
@@ -77,12 +79,12 @@ export default class WalletsPage extends BasePage {
     const rows = Doc.applySelector(page.walletTable, 'tr')
     let firstRow
     for (const tr of rows) {
-      const assetID = parseInt(tr.dataset.assetID)
+      const assetID = parseInt(tr.dataset.assetID || '')
       rowInfos[assetID] = {
         assetID: assetID,
         tr: tr,
-        symbol: tr.dataset.symbol,
-        name: tr.dataset.name,
+        symbol: tr.dataset.symbol || '',
+        name: tr.dataset.name || '',
         stateIcons: new WalletIcons(tr),
         actions: {
           connect: getAction(tr, 'connect'),
@@ -103,16 +105,6 @@ export default class WalletsPage extends BasePage {
     page.marketCard.remove()
     page.oneMarket.removeAttribute('id')
     page.oneMarket.remove()
-
-    // Methods to switch the item displayed on the right side, with a little
-    // fade-in animation.
-    this.displayed = null // The currently displayed right-side element.
-    this.animation = null // Store Promise of currently running animation.
-
-    this.openAsset = null
-    this.walletAsset = null
-    this.reconfigAsset = null
-    this.withdrawAsset = null
 
     // Bind the new wallet form.
     this.newWalletForm = new NewWalletForm(page.newWalletForm, () => { this.createWalletSuccess() })
@@ -273,10 +265,10 @@ export default class WalletsPage extends BasePage {
         // Only show markets where this is the base or quote asset.
         if (market.baseid !== assetID && market.quoteid !== assetID) continue
         const mBox = page.oneMarket.cloneNode(true) as HTMLElement
-        mBox.querySelector('span').textContent = prettyMarketName(market)
+        Doc.safeSelector(mBox, 'span').textContent = prettyMarketName(market)
         let counterSymbol = market.basesymbol
         if (market.baseid === assetID) counterSymbol = market.quotesymbol
-        mBox.querySelector('img').src = Doc.logoPath(counterSymbol)
+        Doc.safeSelector(mBox, 'img').src = Doc.logoPath(counterSymbol)
         // Bind the click to a load of the markets page.
         const pageData = { host: host, base: market.baseid, quote: market.quoteid }
         bind(mBox, 'click', () => { app().loadPage('markets', pageData) })
@@ -390,7 +382,7 @@ export default class WalletsPage extends BasePage {
 
   changeWalletType () {
     const page = this.page
-    const walletType = page.changeWalletTypeSelect.value
+    const walletType = page.changeWalletTypeSelect.value || ''
     const walletDef = app().walletDefinition(this.reconfigAsset, walletType)
     this.reconfigForm.update(walletDef.configopts || [])
     this.updateDisplayedReconfigFields(walletDef)
@@ -509,12 +501,12 @@ export default class WalletsPage extends BasePage {
   async withdraw () {
     const page = this.page
     Doc.hide(page.withdrawErr)
-    const assetID = parseInt(page.withdrawForm.dataset.assetID)
+    const assetID = parseInt(page.withdrawForm.dataset.assetID || '')
     const conversionFactor = app().unitInfo(assetID).conventional.conversionFactor
     const open = {
       assetID: assetID,
       address: page.withdrawAddr.value,
-      value: Math.round(parseFloat(page.withdrawAmt.value) * conversionFactor),
+      value: Math.round(parseFloat(page.withdrawAmt.value || '') * conversionFactor),
       pw: page.withdrawPW.value
     }
     const loaded = app().loading(page.withdrawForm)
@@ -540,14 +532,14 @@ export default class WalletsPage extends BasePage {
 
     let walletType = app().currentWalletDefinition(this.reconfigAsset).type
     if (!Doc.isHidden(page.changeWalletType)) {
-      walletType = page.changeWalletTypeSelect.value
+      walletType = page.changeWalletTypeSelect.value || ''
     }
 
     const loaded = app().loading(page.reconfigForm)
     const req: ReconfigRequest = {
       assetID: this.reconfigAsset,
       config: this.reconfigForm.map(),
-      appPW: page.appPW.value,
+      appPW: page.appPW.value || '',
       walletType: walletType
     }
     if (this.changeWalletPW) req.newWalletPW = page.newPW.value
@@ -586,7 +578,7 @@ export default class WalletsPage extends BasePage {
 
   /* handleBalance handles notifications updating a wallet's balance. */
   handleBalanceNote (note: BalanceNote) {
-    const td = this.page.walletTable.querySelector(`[data-balance-target="${note.assetID}"]`)
+    const td = Doc.safeSelector(this.page.walletTable, `[data-balance-target="${note.assetID}"]`)
     td.textContent = Doc.formatFullPrecision(note.balance.available, app().unitInfo(note.assetID))
   }
 

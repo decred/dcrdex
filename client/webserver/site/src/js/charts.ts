@@ -37,7 +37,7 @@ interface Translator {
     uny: (y: number) => number
     w: (w: number) => number
     h: (h: number) => number
-    dataCoords?: (f: () => void) => void
+    dataCoords: (f: () => void) => void
 }
 
 export interface MouseReport {
@@ -55,14 +55,14 @@ export interface VolumeReport {
 }
 
 export interface DepthReporters {
-  mouse: (r: MouseReport) => void
+  mouse: (r: MouseReport | null) => void
   click: (x: number) => void
   volume: (r: VolumeReport) => void
   zoom: (z: number) => void
 }
 
 export interface CandleReporters {
-  mouse: (r: Candle) => void
+  mouse: (r: Candle | null) => void
 }
 
 export interface ChartReporters {
@@ -145,9 +145,9 @@ class Chart {
   canvas: HTMLCanvasElement
   visible: boolean
   ctx: CanvasRenderingContext2D
-  mousePos: Point
+  mousePos: Point | null
   rect: DOMRect
-  wheelLimiter: number
+  wheelLimiter: number | null
   boundResizer: () => void
   plotRegion: Region
   xRegion: Region
@@ -161,7 +161,12 @@ class Chart {
     this.canvas = document.createElement('canvas')
     this.visible = true
     parent.appendChild(this.canvas)
-    this.ctx = this.canvas.getContext('2d')
+    const ctx = this.canvas.getContext('2d')
+    if (!ctx) {
+      console.error('error getting canvas context')
+      return
+    }
+    this.ctx = ctx
     this.ctx.textAlign = 'center'
     this.ctx.textBaseline = 'middle'
     this.setZoomBttns()
@@ -349,7 +354,7 @@ class Chart {
       this.dataExtents.y.max, 50, step, unit, valFmt)
 
     // Reassign the width of the y-label column to accommodate the widest text.
-    const yAxisWidth = yLabels.widest * 1.5
+    const yAxisWidth = (yLabels.widest || 0) * 1.5
     this.yRegion.extents.x.max = yAxisWidth
     this.yRegion.extents.y.max = region.extents.y.max
 
@@ -399,11 +404,7 @@ export class DepthChart extends Chart {
       zoom: (bigger: boolean) => this.zoomed(bigger)
     })
     this.reporters = reporters
-    this.book = null
-    this.dataExtents = null
     this.zoomLevel = zoom
-    this.lotSize = null
-    this.rateStep = null
     this.lines = []
     this.markers = {
       buys: [],
@@ -534,6 +535,7 @@ export class DepthChart extends Chart {
       volumeReport.buyQuote += ord.qty * ord.rate
       while (buyMarkers.length && floatCompare(buyMarkers[0].rate, ord.rate)) {
         const mark = buyMarkers.shift()
+        if (!mark) continue
         markers.push({
           rate: mark.rate,
           qty: ord.epoch ? epochSum : sum,
@@ -559,6 +561,7 @@ export class DepthChart extends Chart {
       volumeReport.sellQuote += ord.qty * ord.rate
       while (sellMarkers.length && floatCompare(sellMarkers[0].rate, ord.rate)) {
         const mark = sellMarkers.shift()
+        if (!mark) continue
         markers.push({
           rate: mark.rate,
           qty: ord.epoch ? epochSum : sum,
@@ -591,7 +594,7 @@ export class DepthChart extends Chart {
     this.plotXLabels(xLabels, low, high, [`${this.quoteUnit}/`, this.baseUnit])
 
     // A function to be run at the end if there is legend data to display.
-    let mouseData: MouseReport
+    let mouseData: MouseReport | null = null
 
     // Draw the grid.
     this.drawFrame()
@@ -762,6 +765,7 @@ export class DepthChart extends Chart {
     // line. This should be drawn after the depths.
     if (mouseData) {
       this.plotRegion.plot(dataExtents, (ctx, tools) => {
+        if (!mouseData) return // For TypeScript. Duh.
         dot(ctx, tools.x(mouseData.rate), tools.y(mouseData.depth), mouseData.dotColor, 5)
       })
     }
@@ -841,7 +845,6 @@ export class CandleChart extends Chart {
       zoom: (bigger: boolean) => this.zoomed(bigger)
     })
     this.reporters = reporters
-    this.dataExtents = null
     this.zoomLevel = 1
     this.numToShow = 100
     this.resize(parent.clientHeight)
@@ -934,7 +937,7 @@ export class CandleChart extends Chart {
     this.drawFrame()
 
     // Highlight the candle if the user mouse is over the canvas.
-    let mouseCandle: Candle
+    let mouseCandle: Candle | null = null
     if (mousePos) {
       this.plotRegion.plot(new Extents(dataExtents.x.min, dataExtents.x.max, 0, 1), (ctx, tools) => {
         const selectedStartStamp = truncate(tools.unx(mousePos.x), candleWidth)
@@ -950,6 +953,7 @@ export class CandleChart extends Chart {
       if (mouseCandle) {
         const yExt = this.xRegion.extents.y
         this.xRegion.plot(new Extents(dataExtents.x.min, dataExtents.x.max, yExt.min, yExt.max), (ctx, tools) => {
+          if (!mouseCandle) return // For TypeScript. Duh.
           this.applyLabelStyle()
           const rangeTxt = `${new Date(start(mouseCandle)).toLocaleString()} - ${new Date(end(mouseCandle)).toLocaleString()}`
           const [xPad, yPad] = [25, 2]
@@ -1121,7 +1125,8 @@ class Region {
       unx: (x: number) => (x - screenMinX) / xFactor + xMin,
       uny: (y: number) => yMin - (y - screenMaxY) / yFactor,
       w: (w: number) => w / xRange * screenW,
-      h: (h: number) => -h / yRange * screenH
+      h: (h: number) => -h / yRange * screenH,
+      dataCoords: () => { /* Added when using plot() */ }
     }
   }
 
@@ -1243,7 +1248,7 @@ function makeCandleTimeLabels (candles: Candle[], dur: number, screenW: number, 
   const tick = truncate(diff / n, dur)
   if (tick === 0) {
     console.error('zero tick', dur, diff, n) // probably won't happen, but it'd suck if it did
-    return null
+    return { lbls: [] }
   }
   let x = start
   const zoneOffset = new Date().getTimezoneOffset()

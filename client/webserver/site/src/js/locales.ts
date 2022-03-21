@@ -275,7 +275,7 @@ export function setLocale () { locale = localesMap[document.documentElement.lang
 
 /* prep will format the message to the current locale. */
 export function prep (k: string, args?: Record<string, string>) {
-  return stringTemplateParser(locale[k] || defaultLocale[k], args)
+  return stringTemplateParser(locale[k] || defaultLocale[k], args || {})
 }
 
 /*

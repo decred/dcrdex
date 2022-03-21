@@ -34,7 +34,7 @@ interface ProgressPoint {
 export class NewWalletForm {
   page: Record<string, PageElement>
   form: HTMLElement
-  pwCache: PasswordCache
+  pwCache: PasswordCache | null
   success: (assetID: number) => void
   currentAsset: SupportedAsset
   pwHiders: HTMLElement[]
@@ -44,8 +44,7 @@ export class NewWalletForm {
   constructor (form: HTMLElement, success: (assetID: number) => void, pwCache?: PasswordCache, backFunc?: () => void) {
     this.form = form
     this.success = success
-    this.pwCache = pwCache
-    this.currentAsset = null
+    this.pwCache = pwCache || null
     const page = this.page = Doc.parseTemplate(form)
     this.pwHiders = Array.from(form.querySelectorAll('.hide-pw'))
     this.refresh()
@@ -284,8 +283,10 @@ export class WalletConfigForm {
   async fileInputChanged () {
     Doc.hide(this.errMsg)
     if (!this.fileInput.value) return
+    const files = this.fileInput.files
+    if (!files || files.length === 0) return
     const loaded = app().loading(this.form)
-    const config = await this.fileInput.files[0].text()
+    const config = await files[0].text()
     if (!config) return
     const res = await postJSON('/api/parseconfig', {
       configtext: config
@@ -333,7 +334,7 @@ export class WalletConfigForm {
       const input = el.querySelector('input') as ConfigOptionInput
       input.id = elID
       input.configOpt = opt
-      const label = el.querySelector('label')
+      const label = Doc.safeSelector(el, 'label')
       label.htmlFor = elID // 'for' attribute, but 'for' is a keyword
       label.prepend(opt.displayname)
       box.appendChild(el)
@@ -342,7 +343,7 @@ export class WalletConfigForm {
       if (opt.isboolean) input.checked = opt.default
       else if (opt.isdate) {
         const getMinMaxVal = (minMax: string | number) => {
-          if (!minMax) return undefined
+          if (!minMax) return ''
           if (minMax === 'now') return dateToString(new Date())
           return dateToString(new Date((minMax as number) * 1000))
         }
@@ -350,7 +351,7 @@ export class WalletConfigForm {
         input.min = getMinMaxVal(opt.min)
         input.valueAsDate = opt.default ? new Date(opt.default * 1000) : new Date()
       } else input.value = opt.default !== null ? opt.default : ''
-      input.disabled = opt.disablewhenactive && assetHasActiveOrders
+      input.disabled = Boolean(opt.disablewhenactive && assetHasActiveOrders)
     }
     for (const opt of this.configOpts) {
       if (this.sectionize && opt.default !== null) defaultedOpts.push(opt)
@@ -474,9 +475,7 @@ export class ConfirmRegistrationForm {
     this.form = form
     this.success = success
     this.page = Doc.parseTemplate(form)
-    this.xc = null
     this.certFile = ''
-    this.feeAssetID = null
     this.pwCache = pwCache
 
     Doc.bind(this.page.goBack, 'click', () => goBack())
@@ -567,7 +566,6 @@ export class FeeAssetSelectionForm {
   constructor (form: HTMLElement, success: (assetID: number) => void) {
     this.form = form
     this.success = success
-    this.xc = null
     this.page = Doc.parseTemplate(form)
     Doc.cleanTemplates(this.page.marketTmpl, this.page.assetTmpl)
   }
@@ -598,7 +596,8 @@ export class FeeAssetSelectionForm {
         const otherLogo = marketTmpl.logo.cloneNode(true) as PageElement
         marketTmpl.logo.src = Doc.logoPath(baseAsset.symbol)
         otherLogo.src = Doc.logoPath(quoteAsset.symbol)
-        marketTmpl.logo.parentNode.insertBefore(otherLogo, marketTmpl.logo.nextSibling)
+        const parent = marketTmpl.logo.parentNode
+        if (parent) parent.insertBefore(otherLogo, marketTmpl.logo.nextSibling)
       }
 
       const baseSymbol = baseAsset.symbol.toUpperCase()
@@ -705,8 +704,6 @@ export class WalletWaitForm {
     this.success = success
     this.page = Doc.parseTemplate(form)
     this.assetID = -1
-    this.xc = null
-    this.regFee = null
     this.progressCache = []
     this.progressed = false
     this.funded = false
@@ -843,15 +840,14 @@ export class WalletWaitForm {
 export class UnlockWalletForm {
   form: HTMLElement
   success: () => void
-  pwCache: PasswordCache
+  pwCache: PasswordCache | null
   page: Record<string, PageElement>
   currentAsset: SupportedAsset
 
   constructor (form: HTMLElement, success: () => void, pwCache?: PasswordCache) {
     this.page = Doc.idDescendants(form)
     this.form = form
-    this.pwCache = pwCache
-    this.currentAsset = null
+    this.pwCache = pwCache || null
     this.success = success
     bind(form, this.page.submitUnlock, () => this.submit())
   }
@@ -915,7 +911,7 @@ export class UnlockWalletForm {
 export class DEXAddressForm {
   form: HTMLElement
   success: (xc: Exchange, cert: string) => void
-  pwCache: PasswordCache
+  pwCache: PasswordCache | null
   defaultTLSText: string
   page: Record<string, PageElement>
   knownExchanges: HTMLElement[]
@@ -923,7 +919,7 @@ export class DEXAddressForm {
   constructor (form: HTMLElement, success: (xc: Exchange, cert: string) => void, pwCache?: PasswordCache) {
     this.form = form
     this.success = success
-    this.pwCache = pwCache
+    this.pwCache = pwCache || null
     this.defaultTLSText = 'none selected'
 
     const page = this.page = Doc.parseTemplate(form)
@@ -988,12 +984,15 @@ export class DEXAddressForm {
 
     let cert = ''
     if (page.certFile.value) {
-      cert = await page.certFile.files[0].text()
+      const files = page.certFile.files
+      if (files && files.length) {
+        cert = await files[0].text()
+      }
     }
 
     let pw = ''
     if (!State.passwordIsCached()) {
-      pw = page.appPW.value || this.pwCache.pw
+      pw = page.appPW.value || (this.pwCache ? this.pwCache.pw : '')
     }
 
     const loaded = app().loading(this.form)
@@ -1032,7 +1031,7 @@ export class DEXAddressForm {
   async onCertFileChange () {
     const page = this.page
     const files = page.certFile.files
-    if (!files.length) return
+    if (!files || !files.length) return
     page.selectedCert.textContent = files[0].name
     Doc.show(page.removeCert)
     Doc.hide(page.addCert)
@@ -1052,16 +1051,16 @@ export class DEXAddressForm {
 export class LoginForm {
   form: HTMLElement
   success: () => void
-  pwCache: PasswordCache
+  pwCache: PasswordCache | null
   headerTxt: string
   page: Record<string, PageElement>
 
   constructor (form: HTMLElement, success: () => void, pwCache?: PasswordCache) {
     this.success = success
     this.form = form
-    this.pwCache = pwCache
+    this.pwCache = pwCache || null
     const page = this.page = Doc.parseTemplate(form)
-    this.headerTxt = page.header.textContent
+    this.headerTxt = page.header.textContent || ''
 
     bind(form, page.submit, () => { this.submit() })
   }
@@ -1073,7 +1072,7 @@ export class LoginForm {
   async submit () {
     const page = this.page
     Doc.hide(page.errMsg)
-    const pw = page.pw.value
+    const pw = page.pw.value || ''
     page.pw.value = ''
     const rememberPass = page.rememberPass.checked
     if (pw === '') {
@@ -1120,7 +1119,7 @@ export async function slideSwap (form1: HTMLElement, form2: HTMLElement) {
   form2.style.right = String(-shift)
   Doc.show(form2)
   if (form2.querySelector('input')) {
-    form2.querySelector('input').focus()
+    Doc.safeSelector(form2, 'input').focus()
   }
   await Doc.animate(animationLength, progress => {
     form2.style.right = `${-shift + progress * shift}px`

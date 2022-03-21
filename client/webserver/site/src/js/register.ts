@@ -36,8 +36,7 @@ export default class RegistrationPage extends BasePage {
   constructor (body: HTMLElement) {
     super()
     this.body = body
-    this.pwCache = { pw: null }
-    this.currentDEX = null
+    this.pwCache = { pw: '' }
     const page = this.page = Doc.idDescendants(body)
 
     // Hide the form closers for the registration process.
@@ -106,7 +105,7 @@ export default class RegistrationPage extends BasePage {
       this.animateRegAsset(page.confirmRegForm)
     }, this.pwCache)
 
-    const currentForm = page.forms.querySelector(':scope > form.selected')
+    const currentForm = Doc.safeSelector(page.forms, ':scope > form.selected')
     currentForm.classList.remove('selected')
     switch (currentForm) {
       case page.loginForm:
@@ -126,7 +125,7 @@ export default class RegistrationPage extends BasePage {
   }
 
   unload () {
-    delete this.pwCache.pw
+    this.pwCache.pw = ''
   }
 
   // auth should be called once user is known to be authed with the server.
@@ -168,7 +167,7 @@ export default class RegistrationPage extends BasePage {
   async setAppPass () {
     const page = this.page
     Doc.hide(page.appPWErrMsg)
-    const pw = page.appPW.value
+    const pw = page.appPW.value || ''
     const pwAgain = page.appPWAgain.value
     if (pw === '') {
       page.appPWErrMsg.textContent = intl.prep(intl.ID_NO_PASS_ERROR_MSG)
@@ -214,7 +213,8 @@ export default class RegistrationPage extends BasePage {
   async getCertFile () {
     let cert = ''
     if (this.dexAddrForm.page.certFile.value) {
-      cert = await this.dexAddrForm.page.certFile.files[0].text()
+      const files = this.dexAddrForm.page.certFile.files
+      if (files && files.length) cert = await files[0].text()
     }
     return cert
   }
@@ -233,6 +233,7 @@ export default class RegistrationPage extends BasePage {
   async newWalletCreated (assetID: number) {
     this.regAssetForm.refresh()
     const user = await app().fetchUser()
+    if (!user) return
     const page = this.page
     const asset = user.assets[assetID]
     const wallet = asset.wallet

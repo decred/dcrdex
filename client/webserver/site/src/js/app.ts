@@ -55,6 +55,10 @@ interface PageClass {
   new (main: HTMLElement, data: any): Page;
 }
 
+interface CoreNotePlus extends CoreNote {
+  el: HTMLElement // Added in app
+}
+
 /* constructors is a map to page constructors. */
 const constructors: Record<string, PageClass> = {
   login: LoginPage,
@@ -72,8 +76,8 @@ const unauthedPages = ['register', 'login', 'settings']
 
 // Application is the main javascript web application for the Decred DEX client.
 export default class Application {
-  notes: CoreNote[]
-  pokes: CoreNote[]
+  notes: CoreNotePlus[]
+  pokes: CoreNotePlus[]
   user: User
   seedGenTime: number
   commitHash: string
@@ -87,7 +91,7 @@ export default class Application {
   walletMap: Record<number, WalletState>
   tooltip: HTMLElement
   page: Record<string, HTMLElement>
-  loadedPage: Page
+  loadedPage: Page | null
   popupNotes: HTMLElement
   popupTmpl: HTMLElement
 
@@ -105,7 +109,7 @@ export default class Application {
       ok: true
     }
     this.seedGenTime = 0
-    this.commitHash = process.env.COMMITHASH
+    this.commitHash = process.env.COMMITHASH || ''
     this.showPopups = State.getCookie('popups') === '1'
     console.log('Decred DEX Client App, Build', this.commitHash.substring(0, 7))
 
@@ -205,10 +209,10 @@ export default class Application {
    * Fetch and save the user, which is the primary core state that must be
    * maintained by the Application.
    */
-  async fetchUser (): Promise<User> {
+  async fetchUser (): Promise<User | void> {
     const resp: APIResponse = await getJSON('/api/user')
     // If it's not a page that requires auth, skip the error notification.
-    const skipNote = unauthedPages.indexOf(this.main.dataset.handler) > -1
+    const skipNote = unauthedPages.indexOf(this.main.dataset.handler || '') > -1
     if (!this.checkResponse(resp, skipNote)) return
     const user = (resp as any) as User
     this.seedGenTime = user.seedgentime
@@ -243,7 +247,7 @@ export default class Application {
     // Append the request to the page history.
     if (!skipPush) {
       const path = delivered === requestedHandler ? url.toString() : `/${delivered}`
-      window.history.pushState({ page: page, data: data }, delivered, path)
+      window.history.pushState({ page: page, data: data }, '', path)
     }
     // Insert page and attach handlers.
     document.title = doc.title
@@ -273,7 +277,7 @@ export default class Application {
   bindTooltips (ancestor: HTMLElement) {
     ancestor.querySelectorAll('[data-tooltip]').forEach((el: HTMLElement) => {
       bind(el, 'mouseenter', () => {
-        this.tooltip.textContent = el.dataset.tooltip
+        this.tooltip.textContent = el.dataset.tooltip || ''
         const lyt = Doc.layoutMetrics(el)
         let left = lyt.centerX - this.tooltip.offsetWidth / 2
         if (left < 0) left = 5
@@ -296,12 +300,13 @@ export default class Application {
     this.header = idel(document.body, 'header')
     this.popupNotes = idel(document.body, 'popupNotes')
     this.popupTmpl = Doc.tmplElement(this.popupNotes, 'note')
-    this.popupTmpl.remove()
+    if (this.popupTmpl) this.popupTmpl.remove()
+    else console.error('popupTmpl element not found')
     this.tooltip = idel(document.body, 'tooltip')
     const page = this.page = Doc.idDescendants(this.header)
-    delete page.noteTmpl.id
+    page.noteTmpl.removeAttribute('id')
     page.noteTmpl.remove()
-    delete page.pokeTmpl.id
+    page.pokeTmpl.removeAttribute('id')
     page.pokeTmpl.remove()
     page.loader.remove()
     Doc.show(page.loader)
@@ -391,7 +396,7 @@ export default class Application {
 
   setNoteTimes (noteList: HTMLElement) {
     for (const el of (Array.from(noteList.children) as NoteElement[])) {
-      el.querySelector('span.note-time').textContent = Doc.timeSince(el.note.stamp)
+      Doc.safeSelector(el, 'span.note-time').textContent = Doc.timeSince(el.note.stamp)
     }
   }
 
@@ -469,18 +474,16 @@ export default class Application {
    * updateExchangeRegistration updates the information for the exchange
    * registration payment
    */
-  updateExchangeRegistration (dexAddr: string, isPaid: boolean, confs?: number, assetID?: number) {
+  updateExchangeRegistration (dexAddr: string, confs: number, assetID: number) {
     const dex = this.exchanges[dexAddr]
-
-    if (isPaid) {
-      // setting the null value in the 'confs' field indicates that the fee
-      // payment was completed
-      dex.pendingFee = null
-      return
-    }
-
     const symbol = this.assets[assetID].symbol
     dex.pendingFee = { confs, assetID, symbol }
+  }
+
+  setDEXPaid (host: string) {
+    // setting the null value in the 'confs' field indicates that the fee
+    // payment was completed
+    this.exchanges[host].pendingFee = null
   }
 
   /*
@@ -490,10 +493,10 @@ export default class Application {
   handleFeePaymentNote (note: FeePaymentNote) {
     switch (note.topic) {
       case 'RegUpdate':
-        this.updateExchangeRegistration(note.dex, false, note.confirmations, note.asset)
+        this.updateExchangeRegistration(note.dex, note.confirmations, note.asset)
         break
       case 'AccountRegistered':
-        this.updateExchangeRegistration(note.dex, true)
+        this.setDEXPaid(note.dex)
         break
       default:
         break
@@ -600,7 +603,7 @@ export default class Application {
       const pn = this.popupNotes
       pn.appendChild(span)
       // These take up screen space. Only show max 5 at a time.
-      while (pn.children.length > 5) pn.removeChild(pn.firstChild)
+      while (pn.children.length > 5) pn.removeChild(pn.firstChild as Node)
       setTimeout(async () => {
         await Doc.animate(500, (progress: number) => {
           span.style.opacity = String(1 - progress)
@@ -637,18 +640,18 @@ export default class Application {
     }
   }
 
-  prependPokeElement (note: CoreNote) {
+  prependPokeElement (cn: CoreNote) {
+    const [el, note] = this.makePoke(cn)
     this.pokes.push(note)
     while (this.pokes.length > noteCacheSize) this.pokes.shift()
-    const el = this.makePoke(note)
     this.prependListElement(this.page.pokeList, note, el)
   }
 
-  prependNoteElement (note: CoreNote, skipSave?: boolean) {
+  prependNoteElement (cn: CoreNote, skipSave?: boolean) {
+    const [el, note] = this.makeNote(cn)
     this.notes.push(note)
     while (this.notes.length > noteCacheSize) this.notes.shift()
     const noteList = this.page.noteList
-    const el = this.makeNote(note)
     this.prependListElement(noteList, note, el)
     if (!skipSave) this.storeNotes()
     // Set the indicator color.
@@ -667,11 +670,10 @@ export default class Application {
     } else Doc.hide(ni)
   }
 
-  prependListElement (noteList: HTMLElement, note: CoreNote, el: NoteElement) {
-    note.el = el
+  prependListElement (noteList: HTMLElement, note: CoreNotePlus, el: NoteElement) {
     el.note = note
     noteList.prepend(el)
-    while (noteList.children.length > noteCacheSize) noteList.removeChild(noteList.lastChild)
+    while (noteList.children.length > noteCacheSize) noteList.removeChild(noteList.lastChild as Node)
     this.setNoteTimes(noteList)
   }
 
@@ -679,24 +681,26 @@ export default class Application {
    * makeNote constructs a single notification element for the drop-down
    * notification list.
    */
-  makeNote (note: CoreNote): NoteElement {
+  makeNote (note: CoreNote): [NoteElement, CoreNotePlus] {
     const el = this.page.noteTmpl.cloneNode(true) as NoteElement
     if (note.severity > ntfn.POKE) {
       const cls = note.severity === ntfn.SUCCESS ? 'good' : note.severity === ntfn.WARNING ? 'warn' : 'bad'
-      el.querySelector('div.note-indicator').classList.add(cls)
+      Doc.safeSelector(el, 'div.note-indicator').classList.add(cls)
     }
 
-    el.querySelector('div.note-subject').textContent = note.subject
-    el.querySelector('div.note-details').textContent = note.details
-    return el
+    Doc.safeSelector(el, 'div.note-subject').textContent = note.subject
+    Doc.safeSelector(el, 'div.note-details').textContent = note.details
+    const np: CoreNotePlus = { el, ...note }
+    return [el, np]
   }
 
-  makePoke (note: CoreNote): NoteElement {
+  makePoke (note: CoreNote): [NoteElement, CoreNotePlus] {
     const el = this.page.pokeTmpl.cloneNode(true) as NoteElement
     const d = new Date(note.stamp)
     Doc.tmplElement(el, 'dateTime').textContent = `${d.toLocaleDateString()}, ${d.toLocaleTimeString()}`
     Doc.tmplElement(el, 'details').textContent = `${note.subject}: ${note.details}`
-    return el
+    const np: CoreNotePlus = { el, ...note }
+    return [el, np]
   }
 
   /*
@@ -738,7 +742,7 @@ export default class Application {
   }
 
   /* order attempts to locate an order by order ID. */
-  order (oid: string): Order {
+  order (oid: string): Order | null {
     for (const xc of Object.values(this.user.exchanges)) {
       for (const market of Object.values(xc.markets)) {
         if (!market.orders) continue
@@ -747,6 +751,7 @@ export default class Application {
         }
       }
     }
+    return null
   }
 
   /*
@@ -757,6 +762,17 @@ export default class Application {
   unitInfo (assetID: number, xc?: Exchange): UnitInfo {
     const supportedAsset = this.assets[assetID]
     if (supportedAsset) return supportedAsset.info.unitinfo
+    if (!xc) {
+      console.error(`no supported asset info for id = ${assetID}, and no exchange info provided`)
+      return {
+        atomicUnit: '',
+        conventional: {
+          unit: '',
+          conversionFactor: 1e8
+        },
+        denominations: []
+      }
+    }
     return xc.assets[assetID].unitInfo
   }
 

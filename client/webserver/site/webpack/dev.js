@@ -5,7 +5,7 @@ module.exports = merge(common, {
   mode: 'development',
   module: {
     rules: [{
-      test: /\.tsx?$/,
+      test: /\.ts$/,
       use: 'ts-loader',
       exclude: /node_modules/,
     }]

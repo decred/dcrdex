@@ -64,7 +64,7 @@ export function hasLiveMatches (order: Order) {
 }
 
 /* statusString converts the order status to a string */
-export function statusString (order: Order) {
+export function statusString (order: Order): string {
   const isLive = hasLiveMatches(order)
   switch (order.status) {
     case StatusUnknown: return intl.prep(intl.ID_UNKNOWN)
@@ -80,6 +80,7 @@ export function statusString (order: Order) {
     case StatusRevoked:
       return isLive ? `${intl.prep(intl.ID_REVOKED)}/${intl.prep(intl.ID_SETTLING)}` : intl.prep(intl.ID_REVOKED)
   }
+  return ''
 }
 
 /* settled sums the quantities of the matches that have completed. */
@@ -395,6 +396,8 @@ export function optionElement (opt: OrderOpt, order: TradeForm, change: () => vo
     default:
       console.error('no option type specified', opt)
   }
+  console.error('unknown option type', opt)
+  return document.createElement('div')
 }
 
 function dexAssetSymbol (host: string, assetID: number) {
