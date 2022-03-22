@@ -254,6 +254,16 @@ func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		}
 	}
 
+	txindex, err := btc.node.CheckTxIndex()
+	if err != nil {
+		btc.shutdown()
+		return nil, fmt.Errorf("bitcoind getindexinfo check failed: %w", err)
+	}
+	if !txindex {
+		btc.shutdown()
+		return nil, errors.New("bitcoind transaction index is not enabled(specify -txindex)")
+	}
+
 	if _, err = btc.estimateFee(btc.node); err != nil {
 		btc.log.Warnf("%s backend started without fee estimation available: %v", btc.name, err)
 	}
