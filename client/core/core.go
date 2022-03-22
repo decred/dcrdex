@@ -4097,8 +4097,8 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 				unbip(w.AssetID))
 		}
 		if !w.synced {
-			return fmt.Errorf("%s still syncing. progress = %.2f", unbip(w.AssetID),
-				w.syncProgress)
+			return fmt.Errorf("%s still syncing. progress = %.2f%%", unbip(w.AssetID),
+				w.syncProgress*100)
 		}
 		return nil
 	}
