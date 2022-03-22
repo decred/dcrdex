@@ -212,8 +212,8 @@ func (ta *TArchivist) SaveRedeemAckSigB(mid db.MarketMatchID, sig []byte) error 
 func (ta *TArchivist) SaveRedeemB(mid db.MarketMatchID, coinID []byte, timestamp int64) error {
 	return nil
 }
-func (ta *TArchivist) SetMatchInactive(mid db.MarketMatchID) error           { return nil }
-func (ta *TArchivist) LoadEpochStats(uint32, uint32, []*candles.Cache) error { return nil }
+func (ta *TArchivist) SetMatchInactive(mid db.MarketMatchID, forgive bool) error { return nil }
+func (ta *TArchivist) LoadEpochStats(uint32, uint32, []*candles.Cache) error     { return nil }
 
 type TCollector struct{}
 
