@@ -435,8 +435,12 @@ type SwapArchiver interface {
 
 	// SetMatchInactive sets the swap as done/inactive. This can be because of a
 	// failed or successfully completed swap, but in practice this will be used
-	// for failed swaps since SaveRedeemB flags the swap as done/inactive.
-	SetMatchInactive(mid MarketMatchID) error
+	// for failed swaps since SaveRedeemB flags the swap as done/inactive. If
+	// the match is being marked as inactive prior to MatchComplete (the match
+	// was revoked) but the user is not at fault, the forgive bool may be set to
+	// true so the outcome will not count against the user who would have the
+	// next action in the swap.
+	SetMatchInactive(mid MarketMatchID, forgive bool) error
 }
 
 // ValidateOrder ensures that the order with the given status for the specified

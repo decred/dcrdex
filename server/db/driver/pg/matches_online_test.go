@@ -533,7 +533,7 @@ func TestMarketMatches(t *testing.T) {
 		MatchID: match.ID(),
 		Base:    base,
 		Quote:   quote,
-	})
+	}, false)
 
 	// This one has txns.
 	mktMatchID := db.MarketMatchID{
@@ -673,7 +673,7 @@ func generateMatch(t *testing.T, matchStatus order.MatchStatus, active bool, mak
 		Active: active,
 	}
 	if !active {
-		archie.SetMatchInactive(mktMatchID)
+		archie.SetMatchInactive(mktMatchID, false)
 	}
 	for iStatus := order.NewlyMatched; iStatus <= matchStatus; iStatus++ {
 		switch iStatus {
@@ -749,7 +749,7 @@ func TestCompletedAndAtFaultMatchStats(t *testing.T) {
 		MatchID: matchLTC.ID(),
 		Base:    limitBuy.Base(),
 		Quote:   limitBuy.Quote(),
-	})
+	}, false)
 	// 7: success
 	matches = append(matches, &matchPair{
 		match: matchLTC,
@@ -758,6 +758,7 @@ func TestCompletedAndAtFaultMatchStats(t *testing.T) {
 			Status: matchLTC.Status,
 		},
 	})
+	// TODO: update with a forgiven one
 
 	epochTime := func(mp *matchPair) int64 {
 		return encode.UnixMilli(mp.match.Epoch.End())
@@ -871,7 +872,7 @@ func TestAllActiveUserMatches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InsertMatch() failed: %v", err)
 	}
-	err = archie.SetMatchInactive(db.MatchID(match)) // set inactive
+	err = archie.SetMatchInactive(db.MatchID(match), false) // set inactive, not forgiven
 	if err != nil {
 		t.Fatalf("SetMatchInactive() failed: %v", err)
 	}
