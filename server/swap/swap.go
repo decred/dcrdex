@@ -1687,20 +1687,9 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 	// checked in processInit. Note that value cannot be checked as transaction
 	// details, which includes the coin/output value, are not yet retrieved.
 
-	// Do not search for the transaction past the inaction deadline. For maker,
-	// this is bTimeout after match request. For taker, this is bTimeout after
-	// maker's swap reached swapConfs.
-	lastEvent := stepInfo.match.time // NewlyMatched - the match request time, not matchTime
-	if stepInfo.step == order.MakerSwapCast {
-		lastEvent = stepInfo.match.makerStatus.swapConfTime()
-	}
+	// Search for the transaction for the full txWaitExpiration, even if it goes
+	// past the inaction deadline. processInit recognizes when it is revoked.
 	expireTime := time.Now().Add(txWaitExpiration).UTC()
-	if lastEvent.IsZero() {
-		log.Warnf("Prematurely received 'init' from %v at step %v. acct = %s, match = %s",
-			makerTaker(stepInfo.actor.isMaker), stepInfo.step, stepInfo.actor.user, stepInfo.match.ID())
-	} else if deadline := lastEvent.Add(s.bTimeout); expireTime.After(deadline) {
-		expireTime = deadline
-	}
 	log.Debugf("Allowing until %v (%v) to locate contract from %v (%v), match %v",
 		expireTime, time.Until(expireTime), makerTaker(stepInfo.actor.isMaker),
 		stepInfo.step, matchID)
@@ -1779,19 +1768,9 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 		}
 	}
 
-	// Do not search for the transaction past the inaction deadline. For maker,
-	// this is bTimeout after taker's swap reached swapConfs. For taker, this is
-	// bTimeout after maker's redeem cast (and redemption request time).
-	lastEvent := stepInfo.match.takerStatus.swapConfTime() // TakerSwapCast
-	if stepInfo.step == order.MakerRedeemed {
-		lastEvent = stepInfo.match.makerStatus.redeemSeenTime()
-	}
+	// Search for the transaction for the full txWaitExpiration, even if it goes
+	// past the inaction deadline. processRedeem recognizes when it is revoked.
 	expireTime := time.Now().Add(txWaitExpiration).UTC()
-	if lastEvent.IsZero() {
-		log.Warnf("Prematurely received 'redeem' from %v at step %v", makerTaker(stepInfo.actor.isMaker), stepInfo.step)
-	} else if deadline := lastEvent.Add(s.bTimeout); expireTime.After(deadline) {
-		expireTime = deadline
-	}
 	log.Debugf("Allowing until %v (%v) to locate redeem from %v (%v), match %v",
 		expireTime, time.Until(expireTime), makerTaker(stepInfo.actor.isMaker),
 		stepInfo.step, matchID)
