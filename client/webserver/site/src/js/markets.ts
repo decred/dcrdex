@@ -1258,7 +1258,7 @@ export default class MarketsPage extends BasePage {
   handleBookOrderRoute (data: BookUpdate) {
     app().log('book', 'handleBookOrderRoute:', data)
     if (data.host !== this.market.dex.host || data.marketID !== this.market.sid) return
-    const order = data.payload
+    const order = data.payload as MiniOrder
     if (order.rate > 0) this.book.add(order)
     this.addTableOrder(order)
     this.updateTitle()
