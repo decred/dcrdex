@@ -336,7 +336,7 @@ func (ts *TStorage) SaveRedeemAckSigB(mid db.MarketMatchID, sig []byte) error {
 func (ts *TStorage) SaveRedeemB(mid db.MarketMatchID, coinID []byte, timestamp int64) error {
 	return nil
 }
-func (ts *TStorage) SetMatchInactive(mid db.MarketMatchID) error { return nil }
+func (ts *TStorage) SetMatchInactive(mid db.MarketMatchID, forgive bool) error { return nil }
 
 type redeemKey struct {
 	redemptionCoin       string
