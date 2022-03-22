@@ -1128,6 +1128,10 @@ func tMatchInfo(maker, taker *tUser, matchQty, matchRate uint64, makerOrder *ord
 		Rate:         matchRate,
 		FeeRateBase:  42,
 		FeeRateQuote: 62,
+		Epoch: order.EpochID{ // make Epoch.End() be now, Idx and Dur not important per se
+			Idx: encode.UnixMilliU(unixMsNow()),
+			Dur: 1,
+		}, // Need Epoch set for lock time
 	}
 	mid := match.ID()
 	maker.matchIDs = append(maker.matchIDs, mid)
@@ -1160,6 +1164,7 @@ func (set *tMatchSet) add(matchInfo *tMatch) *tMatchSet {
 		fmt.Println("!!!tMatchSet taker mismatch!!!")
 	}
 	ms := set.matchSet
+	ms.Epoch = matchInfo.match.Epoch
 	ms.Makers = append(ms.Makers, match.Maker)
 	ms.Amounts = append(ms.Amounts, matchInfo.qty)
 	ms.Rates = append(ms.Rates, matchInfo.rate)
@@ -1187,11 +1192,14 @@ func tMultiMatchSet(matchQtys, rates []uint64, makerSell bool, isMarket bool) *t
 		takerOrder = makeLimitOrder(sum*5/4, rates[0], taker, !makerSell)
 	}
 	set := new(tMatchSet)
+	now := encode.UnixMilliU(unixMsNow())
 	for i, v := range matchQtys {
 		maker := tNewUser("maker" + strconv.Itoa(i))
 		// Alternate market and limit orders
 		makerOrder := makeLimitOrder(v, rates[i], maker, makerSell)
 		matchInfo := tMatchInfo(maker, taker, v, rates[i], makerOrder, takerOrder)
+		matchInfo.match.Epoch.Idx = now
+		matchInfo.match.Epoch.Dur = 1
 		set.add(matchInfo)
 	}
 	return set
