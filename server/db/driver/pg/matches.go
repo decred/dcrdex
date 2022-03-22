@@ -714,6 +714,9 @@ func (a *Archiver) SaveRedeemB(mid db.MarketMatchID, coinID []byte, timestamp in
 
 // SetMatchInactive flags the match as done/inactive. This is not necessary if
 // SaveRedeemAckSigB is run for the match since it will flag the match as done.
-func (a *Archiver) SetMatchInactive(mid db.MarketMatchID) error {
+func (a *Archiver) SetMatchInactive(mid db.MarketMatchID, forgive bool) error {
+	if forgive {
+		return a.updateMatchStmt(mid, internal.SetSwapDoneForgiven, mid.MatchID)
+	} // else leave the forgiven column NULL
 	return a.updateMatchStmt(mid, internal.SetSwapDone, mid.MatchID)
 }

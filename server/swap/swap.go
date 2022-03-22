@@ -118,6 +118,14 @@ type matchTracker struct {
 	takerStatus *swapStatus
 }
 
+// expiredBy returns true if the lock time of either party's *known* swap is
+// before the reference time e.g. time.Now().
+func (mt *matchTracker) expiredBy(ref time.Time) bool {
+	mSwap, tSwap := mt.makerStatus.swap, mt.takerStatus.swap
+	return (tSwap != nil && tSwap.LockTime.Before(ref)) ||
+		(mSwap != nil && mSwap.LockTime.Before(ref))
+}
+
 // A blockNotification is used internally when an asset.Backend reports a new
 // block.
 type blockNotification struct {
@@ -757,7 +765,7 @@ func (s *Swapper) tryConfirmSwap(ctx context.Context, status *swapStatus, confTi
 	}
 	confs, err := status.swap.Confirmations(ctx)
 	if err != nil {
-		// The transaction has become invalid. No reason to do anything.
+		log.Warnf("Unable to get confirmations for swap tx %v: %v", status.swap.TxID(), err)
 		return
 	}
 	// If a swapStatus was created, the asset.Asset is already known to be in
@@ -821,7 +829,11 @@ func (s *Swapper) processBlock(ctx context.Context, block *blockNotification) {
 	}
 }
 
-func (s *Swapper) failMatch(match *matchTracker) {
+// failMatch revokes the match and marks the swap as done for accounting
+// purposes. If userFault is false, there will be no penalty, such as if the
+// failure is because a swap tx lock time expired before required confirmations
+// were reached.
+func (s *Swapper) failMatch(match *matchTracker, userFault bool) {
 	// From the match status, determine maker/taker fault and the corresponding
 	// auth.NoActionStep.
 	var makerFault bool
@@ -851,14 +863,14 @@ func (s *Swapper) failMatch(match *matchTracker) {
 	if makerFault {
 		orderAtFault, otherOrder = match.Maker, match.Taker
 	}
-	log.Debugf("failMatch: swap %v failing (maker fault = %v) at %v",
-		match.ID(), makerFault, match.Status)
+	log.Debugf("failMatch: swap %v failing at %v (%v), user fault = %v",
+		match.ID(), match.Status, misstep, userFault)
 
 	// Record the end of this match's processing.
-	s.storage.SetMatchInactive(db.MatchID(match.Match))
+	s.storage.SetMatchInactive(db.MatchID(match.Match), !userFault)
 
 	// Cancellation rate accounting
-	s.swapDone(orderAtFault, match.Match, true) // will also unbook/revoke order if needed
+	s.swapDone(orderAtFault, match.Match, userFault) // will also unbook/revoke order if needed
 
 	// Accounting for the maker has already taken place if they have redeemed.
 	if match.Status != order.MakerRedeemed {
@@ -866,7 +878,10 @@ func (s *Swapper) failMatch(match *matchTracker) {
 	}
 
 	// Register the failure to act violation, adjusting the user's score.
-	s.authMgr.Inaction(orderAtFault.User(), misstep, db.MatchID(match.Match), match.Quantity, refTime, orderAtFault.ID())
+	if userFault {
+		s.authMgr.Inaction(orderAtFault.User(), misstep, db.MatchID(match.Match),
+			match.Quantity, refTime, orderAtFault.ID())
+	}
 
 	// Send the revoke_match messages, and solicit acks.
 	s.revoke(match)
@@ -902,8 +917,8 @@ func (s *Swapper) checkInactionEventBased() {
 
 		log.Tracef("checkInactionEventBased: match %v (%v)", match.ID(), match.Status)
 
-		failMatch := func() {
-			s.failMatch(match)
+		failMatch := func(fault bool) {
+			s.failMatch(match, fault)
 			deletions = append(deletions, match)
 		}
 
@@ -912,14 +927,34 @@ func (s *Swapper) checkInactionEventBased() {
 			// Maker has not broadcast their swap. They have until match time
 			// plus bTimeout.
 			if tooOld(match.time) {
-				failMatch()
+				failMatch(true)
+			}
+		case order.MakerSwapCast:
+			// If the taker contract's expected lock time would be in the past,
+			// revoke this match with no penalty.
+			expectedTakerLockTime := match.matchTime.Add(s.lockTimeTaker)
+			if expectedTakerLockTime.Before(now) {
+				log.Infof("Revoking match %v at %v because the expected taker swap locktime would be in the past (%v).",
+					match.ID(), match.Status, expectedTakerLockTime)
+				failMatch(false)
+			}
+			// The taker's contract should expire first, but also check the lock
+			// time of the maker's known swap.
+			fallthrough
+		case order.TakerSwapCast:
+			// If either published contract's lock time is already passed,
+			// revoke with no penalty because the swap cannot complete safely.
+			if match.expiredBy(now) {
+				log.Infof("Revoking match %v at %v because at least one published contract has expired.",
+					match.ID(), match.Status)
+				failMatch(false)
 			}
 		case order.MakerRedeemed:
 			// If the maker has redeemed, the taker can redeem immediately, so
 			// check the timeout against the time the Swapper received the
 			// maker's `redeem` request (and sent the taker's 'redemption').
 			if tooOld(match.makerStatus.redeemSeenTime()) {
-				failMatch()
+				failMatch(true)
 			}
 		}
 	}
@@ -972,7 +1007,8 @@ func (s *Swapper) checkInactionBlockBased(assetID uint32) {
 			assetID, match.ID(), match.Status)
 
 		failMatch := func() {
-			s.failMatch(match)
+			// Fail the match, and assign fault if lock times are not passed.
+			s.failMatch(match, !match.expiredBy(now))
 			deletions = append(deletions, match)
 		}
 

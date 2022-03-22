@@ -214,7 +214,10 @@ const (
 		SET bSigAckOfARedeem = $2
 		WHERE matchid = $1;`
 
-	SetSwapDone = `UPDATE %s SET active = FALSE
+	SetSwapDone = `UPDATE %s SET active = FALSE  -- leave forgiven NULL
+		WHERE matchid = $1;`
+
+	SetSwapDoneForgiven = `UPDATE %s SET active = FALSE, forgiven = TRUE
 		WHERE matchid = $1;`
 
 	SelectMatchStatuses = `SELECT takerSell, (takerAccount = $1) AS isTaker, (makerAccount = $1) AS isMaker, matchid, status, aContract, bContract, aContractCoinID,
