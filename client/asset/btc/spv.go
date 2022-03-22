@@ -100,7 +100,8 @@ type btcWallet interface {
 	Unlock(passphrase []byte, lock <-chan time.Time) error
 	Lock()
 	Locked() bool
-	SendOutputs(outputs []*wire.TxOut, keyScope *waddrmgr.KeyScope, account uint32, minconf int32, satPerKb btcutil.Amount, label string) (*wire.MsgTx, error)
+	SendOutputs(outputs []*wire.TxOut, keyScope *waddrmgr.KeyScope, account uint32, minconf int32,
+		satPerKb btcutil.Amount, coinSelectionStrategy wallet.CoinSelectionStrategy, label string) (*wire.MsgTx, error)
 	HaveAddress(a btcutil.Address) (bool, error)
 	Stop()
 	WaitForShutdown()
@@ -820,7 +821,8 @@ func (w *spvWallet) sendToAddress(address string, value, feeRate uint64, subtrac
 	wireOP := wire.NewTxOut(int64(value), pkScript)
 	// converting sats/vB -> sats/kvB
 	feeRateAmt := btcutil.Amount(feeRate * 1e3)
-	tx, err := w.wallet.SendOutputs([]*wire.TxOut{wireOP}, nil, w.acctNum, 0, feeRateAmt, "")
+	tx, err := w.wallet.SendOutputs([]*wire.TxOut{wireOP}, nil, w.acctNum, 0,
+		feeRateAmt, wallet.CoinSelectionLargest, "")
 	if err != nil {
 		return nil, err
 	}
