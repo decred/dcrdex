@@ -1475,6 +1475,17 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
 			fmt.Sprintf("contract error. expected lock time >= %s, got %s", reqLockTime, contract.LockTime))
 		return wait.DontTryAgain
+	} else if remain := time.Until(contract.LockTime); remain < 0 {
+		s.respondError(msg.ID, actor.user, msgjson.ContractError,
+			fmt.Sprintf("contract is correct, but lock time passed %s ago", remain))
+		// Revoke the match proactively before checkInaction gets to it.
+		s.matchMtx.Lock()
+		defer s.matchMtx.Unlock()
+		if _, found := s.matches[stepInfo.match.ID()]; found {
+			s.failMatch(stepInfo.match, false) // no fault
+			s.deleteMatch(stepInfo.match)
+		} // else it's already revoked
+		return wait.DontTryAgain // and don't tell counterparty of expired contract they should not redeem
 	}
 
 	// Update the match.
