@@ -1492,6 +1492,7 @@ type TLink struct {
 	banished    bool
 	on          uint32
 	closed      chan struct{}
+	sendRawErr  error
 }
 
 var linkCounter uint64
@@ -1516,6 +1517,20 @@ func (conn *TLink) Send(msg *msgjson.Message) error {
 	defer conn.mtx.Unlock()
 	if conn.sendErr != nil {
 		return conn.sendErr
+	}
+	conn.sends = append(conn.sends, msg)
+	conn.sendTrigger <- struct{}{}
+	return nil
+}
+func (conn *TLink) SendRaw(b []byte) error {
+	conn.mtx.Lock()
+	defer conn.mtx.Unlock()
+	if conn.sendRawErr != nil {
+		return conn.sendRawErr
+	}
+	msg, err := msgjson.DecodeMessage(b)
+	if err != nil {
+		return err
 	}
 	conn.sends = append(conn.sends, msg)
 	conn.sendTrigger <- struct{}{}
@@ -1977,7 +1992,7 @@ func TestRouter(t *testing.T) {
 	}
 
 	// Send another, but err on the send. Check for unsubscribed
-	link2.sendErr = dummyError
+	link2.sendRawErr = dummyError
 	src1.feed <- sig
 
 	// Wait for (*BookRouter).sendNote to remove the erroring link from the

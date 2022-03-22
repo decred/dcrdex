@@ -621,6 +621,13 @@ func (s *Server) websocketHandler(ctx context.Context, conn ws.Connection, ip de
 // Broadcast sends a message to all connected clients. The message should be a
 // notification. See msgjson.NewNotification.
 func (s *Server) Broadcast(msg *msgjson.Message) {
+	// Marshal and send the bytes to avoid multiple marshals when sending.
+	b, err := json.Marshal(msg)
+	if err != nil {
+		log.Errorf("unable to marshal broadcast Message: %v", err)
+		return
+	}
+
 	s.clientMtx.RLock()
 	defer s.clientMtx.RUnlock()
 
@@ -630,7 +637,7 @@ func (s *Server) Broadcast(msg *msgjson.Message) {
 	}
 
 	for id, cl := range s.clients {
-		if err := cl.Send(msg); err != nil {
+		if err := cl.SendRaw(b); err != nil {
 			log.Debugf("Send to client %d at %s failed: %v", id, cl.Addr(), err)
 			cl.Disconnect() // triggers return of websocketHandler, and removeClient
 		}
