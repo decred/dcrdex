@@ -2828,7 +2828,10 @@ func (btc *baseWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, 
 	msgTx.AddTxOut(txOut)
 
 	if btc.segwit {
-		sigHashes := txscript.NewTxSigHashes(msgTx)
+		// NewTxSigHashes uses the PrevOutFetcher only for detecting a taproot
+		// output, so we can provide a dummy that always returns a wire.TxOut
+		// with a nil pkScript that so IsPayToTaproot returns false.
+		sigHashes := txscript.NewTxSigHashes(msgTx, new(txscript.CannedPrevOutputFetcher))
 		for i, r := range form.Redemptions {
 			contract := contracts[i]
 			redeemSig, redeemPubKey, err := btc.createWitnessSig(msgTx, i, contract, addresses[i], values[i], sigHashes)
@@ -3360,8 +3363,8 @@ func (btc *baseWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract de
 
 	if btc.segwit {
 		// Add the marker and flag weight too.
-		witnessVBtyes := uint64((dexbtc.RefundSigScriptSize + 2 + 3) / 4)
-		size += witnessVBtyes + dexbtc.P2WPKHOutputSize
+		witnessVBytes := uint64((dexbtc.RefundSigScriptSize + 2 + 3) / 4)
+		size += witnessVBytes + dexbtc.P2WPKHOutputSize
 	} else {
 		size += dexbtc.RefundSigScriptSize + dexbtc.P2PKHOutputSize
 	}
@@ -3388,7 +3391,10 @@ func (btc *baseWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract de
 	msgTx.AddTxOut(txOut)
 
 	if btc.segwit {
-		sigHashes := txscript.NewTxSigHashes(msgTx)
+		// NewTxSigHashes uses the PrevOutFetcher only for detecting a taproot
+		// output, so we can provide a dummy that always returns a wire.TxOut
+		// with a nil pkScript that so IsPayToTaproot returns false.
+		sigHashes := txscript.NewTxSigHashes(msgTx, new(txscript.CannedPrevOutputFetcher))
 		refundSig, refundPubKey, err := btc.createWitnessSig(msgTx, 0, contract, sender, val, sigHashes)
 		if err != nil {
 			return nil, fmt.Errorf("createWitnessSig: %w", err)
@@ -4186,15 +4192,6 @@ type blockHeader struct {
 	Time              int64  `json:"time"`
 	MedianTime        int64  `json:"mediantime"`
 	PreviousBlockHash string `json:"previousblockhash"`
-}
-
-// verboseBlockTxs is a partial btcjson.GetBlockVerboseResult with
-// key "rawtx" -> "tx".
-type verboseBlockTxs struct {
-	Hash     string                `json:"hash"`
-	Height   uint64                `json:"height"`
-	NextHash string                `json:"nextblockhash"`
-	Tx       []btcjson.TxRawResult `json:"tx"`
 }
 
 // externalAddress will return a new address for public use.
