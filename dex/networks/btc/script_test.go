@@ -264,10 +264,7 @@ func TestIsDust(t *testing.T) {
 
 func TestExtractScriptAddrs(t *testing.T) {
 	// Invalid script
-	_, nonStd, err := ExtractScriptAddrs(invalidScript, tParams)
-	if err == nil {
-		t.Fatalf("no error for bad script")
-	}
+	_, nonStd, _ := ExtractScriptAddrs(invalidScript, tParams)
 	if !nonStd {
 		t.Errorf("expected non-standard script")
 	}
@@ -428,9 +425,12 @@ func TestInputInfo(t *testing.T) {
 		t.Fatalf("no error for missing redeem script")
 	}
 	// Redeem script must be parseable.
-	_, err = InputInfo(script, invalidScript, tParams)
-	if err == nil {
-		t.Fatalf("no error for unparseable redeem script")
+	spendInfo, err = InputInfo(script, invalidScript, tParams)
+	if err != nil {
+		t.Fatalf("failed to parse non-standard script")
+	}
+	if !spendInfo.NonStandardScript {
+		t.Errorf("non-standard script was not detected as such")
 	}
 }
 
