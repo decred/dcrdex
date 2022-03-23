@@ -1,4 +1,3 @@
-import { app } from './registry'
 import Doc from './doc'
 import BasePage from './basepage'
 import { postJSON } from './http'
@@ -13,13 +12,31 @@ import {
   bind as bindForm
 } from './forms'
 import * as intl from './locales'
+import {
+  app,
+  PasswordCache,
+  Exchange,
+  PageElement,
+  WalletStateNote,
+  BalanceNote
+} from './registry'
 
 export default class RegistrationPage extends BasePage {
-  constructor (body) {
+  body: HTMLElement
+  pwCache: PasswordCache
+  currentDEX: Exchange
+  page: Record<string, PageElement>
+  loginForm: LoginForm
+  dexAddrForm: DEXAddressForm
+  newWalletForm: NewWalletForm
+  regAssetForm: FeeAssetSelectionForm
+  walletWaitForm: WalletWaitForm
+  confirmRegisterForm: ConfirmRegistrationForm
+
+  constructor (body: HTMLElement) {
     super()
     this.body = body
-    this.pwCache = {}
-    this.currentDEX = null
+    this.pwCache = { pw: '' }
     const page = this.page = Doc.idDescendants(body)
 
     // Hide the form closers for the registration process.
@@ -88,7 +105,7 @@ export default class RegistrationPage extends BasePage {
       this.animateRegAsset(page.confirmRegForm)
     }, this.pwCache)
 
-    const currentForm = page.forms.querySelector(':scope > form.selected')
+    const currentForm = Doc.safeSelector(page.forms, ':scope > form.selected')
     currentForm.classList.remove('selected')
     switch (currentForm) {
       case page.loginForm:
@@ -102,13 +119,13 @@ export default class RegistrationPage extends BasePage {
     // Attempt to load the dcrwallet configuration from the default location.
     if (app().user.authed) this.auth()
     this.notifiers = {
-      walletstate: note => this.walletWaitForm.reportWalletState(note.wallet),
-      balance: note => this.walletWaitForm.reportBalance(note.balance, note.assetID)
+      walletstate: (note: WalletStateNote) => this.walletWaitForm.reportWalletState(note.wallet),
+      balance: (note: BalanceNote) => this.walletWaitForm.reportBalance(note.balance, note.assetID)
     }
   }
 
   unload () {
-    delete this.pwCache.pw
+    this.pwCache.pw = ''
   }
 
   // auth should be called once user is known to be authed with the server.
@@ -117,21 +134,21 @@ export default class RegistrationPage extends BasePage {
   }
 
   /* Swap in the asset selection form and run the animation. */
-  async animateRegAsset (oldForm) {
+  async animateRegAsset (oldForm: HTMLElement) {
     Doc.hide(oldForm)
     this.regAssetForm.animate()
     Doc.show(this.page.regAssetForm)
   }
 
   /* Swap in the confirmation form and run the animation. */
-  async animateConfirmForm (oldForm) {
+  async animateConfirmForm (oldForm: HTMLElement) {
     this.confirmRegisterForm.animate()
     Doc.hide(oldForm)
     Doc.show(this.page.confirmRegForm)
   }
 
   // Retrieve an estimate for the tx fee needed to pay the registration fee.
-  async getRegistrationTxFeeEstimate (assetID, form) {
+  async getRegistrationTxFeeEstimate (assetID: number, form: HTMLElement) {
     const cert = await this.getCertFile()
     const loaded = app().loading(form)
     const res = await postJSON('/api/regtxfee', {
@@ -150,7 +167,7 @@ export default class RegistrationPage extends BasePage {
   async setAppPass () {
     const page = this.page
     Doc.hide(page.appPWErrMsg)
-    const pw = page.appPW.value
+    const pw = page.appPW.value || ''
     const pwAgain = page.appPWAgain.value
     if (pw === '') {
       page.appPWErrMsg.textContent = intl.prep(intl.ID_NO_PASS_ERROR_MSG)
@@ -196,7 +213,8 @@ export default class RegistrationPage extends BasePage {
   async getCertFile () {
     let cert = ''
     if (this.dexAddrForm.page.certFile.value) {
-      cert = await this.dexAddrForm.page.certFile.files[0].text()
+      const files = this.dexAddrForm.page.certFile.files
+      if (files && files.length) cert = await files[0].text()
     }
     return cert
   }
@@ -212,9 +230,10 @@ export default class RegistrationPage extends BasePage {
     app().loadPage('markets')
   }
 
-  async newWalletCreated (assetID) {
+  async newWalletCreated (assetID: number) {
     this.regAssetForm.refresh()
     const user = await app().fetchUser()
+    if (!user) return
     const page = this.page
     const asset = user.assets[assetID]
     const wallet = asset.wallet

@@ -1,5 +1,17 @@
+import {
+  MarketOrderBook,
+  MiniOrder
+} from './registry'
+
 export default class OrderBook {
-  constructor (mktBook, baseSymbol, quoteSymbol) {
+  base: number
+  baseSymbol: string
+  quote: number
+  quoteSymbol: string
+  buys: MiniOrder[]
+  sells: MiniOrder[]
+
+  constructor (mktBook: MarketOrderBook, baseSymbol: string, quoteSymbol: string) {
     this.base = mktBook.base
     this.baseSymbol = baseSymbol
     this.quote = mktBook.quote
@@ -10,19 +22,19 @@ export default class OrderBook {
   }
 
   /* add adds an order to the order book. */
-  add (ord) {
+  add (ord: MiniOrder) {
     const side = ord.sell ? this.sells : this.buys
     side.splice(findIdx(side, ord.rate, !ord.sell), 0, ord)
   }
 
   /* remove removes an order from the order book. */
-  remove (token) {
+  remove (token: string) {
     if (this.removeFromSide(this.sells, token)) return
     this.removeFromSide(this.buys, token)
   }
 
   /* removeFromSide removes an order from the list of orders. */
-  removeFromSide (side, token) {
+  removeFromSide (side: MiniOrder[], token: string) {
     const [ord, i] = this.findOrder(side, token)
     if (ord) {
       side.splice(i, 1)
@@ -32,8 +44,8 @@ export default class OrderBook {
   }
 
   /* findOrder finds an order in a specified side */
-  findOrder (side, token) {
-    for (const i in side) {
+  findOrder (side: MiniOrder[], token: string): [MiniOrder | null, number] {
+    for (let i = 0; i < side.length; i++) {
       if (side[i].token === token) {
         return [side[i], i]
       }
@@ -42,7 +54,7 @@ export default class OrderBook {
   }
 
   /* updates the remaining quantity of an order. */
-  updateRemaining (token, qty, qtyAtomic) {
+  updateRemaining (token: string, qty: number, qtyAtomic: number) {
     if (this.updateRemainingSide(this.sells, token, qty, qtyAtomic)) return
     this.updateRemainingSide(this.buys, token, qty, qtyAtomic)
   }
@@ -51,7 +63,7 @@ export default class OrderBook {
    * updateRemainingSide looks for the order in the side and updates the
    * quantity, returning true on success, false if order not found.
    */
-  updateRemainingSide (side, token, qty, qtyAtomic) {
+  updateRemainingSide (side: MiniOrder[], token: string, qty: number, qtyAtomic: number) {
     const ord = this.findOrder(side, token)[0]
     if (ord) {
       ord.qty = qty
@@ -64,8 +76,8 @@ export default class OrderBook {
   /*
    * setEpoch sets the current epoch and clear any orders from previous epochs.
    */
-  setEpoch (epochIdx) {
-    const approve = ord => ord.epoch === undefined || ord.epoch === 0 || ord.epoch === epochIdx
+  setEpoch (epochIdx: number) {
+    const approve = (ord: MiniOrder) => ord.epoch === undefined || ord.epoch === 0 || ord.epoch === epochIdx
     this.sells = this.sells.filter(approve)
     this.buys = this.buys.filter(approve)
   }
@@ -84,7 +96,7 @@ export default class OrderBook {
    * best epoch order if there are only epoch orders, or null if there are no
    * orders.
    */
-  bestGapOrder (side) {
+  bestGapOrder (side: MiniOrder[]) {
     let best = null
     for (const ord of side) {
       if (!ord.epoch) return ord
@@ -107,8 +119,8 @@ export default class OrderBook {
 /*
  * findIdx find the index at which to insert the order into the list of orders.
  */
-function findIdx (side, rate, less) {
-  for (const i in side) {
+function findIdx (side: MiniOrder[], rate: number, less: boolean): number {
+  for (let i = 0; i < side.length; i++) {
     if ((side[i].rate < rate) === less) return i
   }
   return side.length

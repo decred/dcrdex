@@ -7,7 +7,7 @@ const pwKeyCK = 'sessionkey'
 // utilities for setting and retrieving cookies and storing user configuration
 // to localStorage.
 export default class State {
-  static setCookie (cname, cvalue) {
+  static setCookie (cname: string, cvalue: string) {
     const d = new Date()
     // Set cookie to expire in ten years.
     d.setTime(d.getTime() + (86400 * 365 * 10 * 1000))
@@ -18,7 +18,7 @@ export default class State {
   /*
    * getCookie returns the value at the specified cookie name, otherwise null.
    */
-  static getCookie (cname) {
+  static getCookie (cname: string) {
     for (const cstr of document.cookie.split(';')) {
       const [k, v] = cstr.split('=')
       if (k.trim() === cname) return v
@@ -27,7 +27,7 @@ export default class State {
   }
 
   /* dark sets the dark-mode cookie. */
-  static dark (dark) {
+  static dark (dark: boolean) {
     this.setCookie(darkModeCK, dark ? '1' : '0')
     if (dark) {
       document.body.classList.add('dark')
@@ -49,7 +49,7 @@ export default class State {
   }
 
   /* store puts the key-value pair into Window.localStorage. */
-  static store (k, v) {
+  static store (k: string, v: any) {
     window.localStorage.setItem(k, JSON.stringify(v))
   }
 
@@ -66,7 +66,7 @@ export default class State {
   * fetch fetches the value associated with the key in Window.localStorage, or
   * null if the no value exists for the key.
   */
-  static fetch (k) {
+  static fetch (k: string) {
     const v = window.localStorage.getItem(k)
     if (v !== null) {
       return JSON.parse(v)

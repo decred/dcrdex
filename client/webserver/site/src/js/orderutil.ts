@@ -1,6 +1,13 @@
 import Doc from './doc'
 import * as intl from './locales'
-import { app } from './registry'
+import {
+  app,
+  Order,
+  TradeForm,
+  PageElement,
+  OrderOption as OrderOpt,
+  Match
+} from './registry'
 
 export const Limit = 1
 export const Market = 2
@@ -36,11 +43,11 @@ export const Taker = 1
  */
 export const RateEncodingFactor = 1e8
 
-export function sellString (ord) { return ord.sell ? 'sell' : 'buy' }
-export function typeString (ord) { return ord.type === Limit ? (ord.tif === ImmediateTiF ? 'limit (i)' : 'limit') : 'market' }
+export function sellString (ord: Order) { return ord.sell ? 'sell' : 'buy' }
+export function typeString (ord: Order) { return ord.type === Limit ? (ord.tif === ImmediateTiF ? 'limit (i)' : 'limit') : 'market' }
 
 /* isMarketBuy will return true if the order is a market buy order. */
-export function isMarketBuy (ord) {
+export function isMarketBuy (ord: Order) {
   return ord.type === Market && !ord.sell
 }
 
@@ -48,7 +55,7 @@ export function isMarketBuy (ord) {
  * hasLiveMatches returns true if the order has matches that have not completed
  * settlement yet.
  */
-export function hasLiveMatches (order) {
+export function hasLiveMatches (order: Order) {
   if (!order.matches) return false
   for (const match of order.matches) {
     if (!match.revoked && match.status < MakerRedeemed) return true
@@ -57,7 +64,7 @@ export function hasLiveMatches (order) {
 }
 
 /* statusString converts the order status to a string */
-export function statusString (order) {
+export function statusString (order: Order): string {
   const isLive = hasLiveMatches(order)
   switch (order.status) {
     case StatusUnknown: return intl.prep(intl.ID_UNKNOWN)
@@ -73,12 +80,13 @@ export function statusString (order) {
     case StatusRevoked:
       return isLive ? `${intl.prep(intl.ID_REVOKED)}/${intl.prep(intl.ID_SETTLING)}` : intl.prep(intl.ID_REVOKED)
   }
+  return ''
 }
 
 /* settled sums the quantities of the matches that have completed. */
-export function settled (order) {
+export function settled (order: Order) {
   if (!order.matches) return 0
-  const qty = isMarketBuy(order) ? m => m.qty * m.rate / RateEncodingFactor : m => m.qty
+  const qty = isMarketBuy(order) ? (m: Match) => m.qty * m.rate / RateEncodingFactor : (m: Match) => m.qty
   return order.matches.reduce((settled, match) => {
     if (match.isCancel) return settled
     const redeemed = (match.side === Maker && match.status >= MakerRedeemed) ||
@@ -91,7 +99,7 @@ export function settled (order) {
  * matchStatusString is a string used to create a displayable string describing
  * describing the match status.
  */
-export function matchStatusString (status, side) {
+export function matchStatusString (status: number, side: number) {
   switch (status) {
     case NewlyMatched:
       return '(0 / 4) Newly Matched'
@@ -112,11 +120,16 @@ export function matchStatusString (status, side) {
 
 // Having the caller set these vars on load using an exported function makes
 // life easier.
-let orderOptTmpl, booleanOptTmpl, rangeOptTmpl
+let orderOptTmpl: HTMLElement, booleanOptTmpl: HTMLElement, rangeOptTmpl: HTMLElement
 
 // setOptionTemplates sets the package vars for the templates and application.
-export function setOptionTemplates (page) {
+export function setOptionTemplates (page: Record<string, PageElement>) {
   [booleanOptTmpl, rangeOptTmpl, orderOptTmpl] = [page.booleanOptTmpl, page.rangeOptTmpl, page.orderOptTmpl]
+}
+
+interface OptionsReporters {
+  enable: () => void
+  disable: () => void
 }
 
 /*
@@ -125,11 +138,16 @@ export function setOptionTemplates (page) {
  * enable/disable methods when the user manually turns the option on or off.
  */
 class OrderOption {
-  constructor (opt, order, isSwapOption, changed) {
+  opt: OrderOpt
+  order: TradeForm
+  node: HTMLElement
+  tmpl: Record<string, PageElement>
+  on: boolean
+
+  constructor (opt: OrderOpt, order: TradeForm, isSwapOption: boolean, report: OptionsReporters) {
     this.opt = opt
     this.order = order
-    this.changed = changed
-    const node = this.node = orderOptTmpl.cloneNode(true)
+    const node = this.node = orderOptTmpl.cloneNode(true) as HTMLElement
     const tmpl = this.tmpl = Doc.parseTemplate(node)
     tmpl.optName.textContent = opt.displayname
     tmpl.tooltip.dataset.tooltip = opt.description
@@ -143,14 +161,14 @@ class OrderOption {
       if (this.on) return
       this.on = true
       node.classList.add('selected')
-      this.enable()
+      report.enable()
     })
     Doc.bind(tmpl.toggle, 'click', e => {
       if (!this.on) return
       e.stopPropagation()
       this.on = false
       node.classList.remove('selected')
-      this.disable()
+      report.disable()
     })
   }
 
@@ -169,10 +187,17 @@ class OrderOption {
  * client/asset.
  */
 class BooleanOrderOption extends OrderOption {
-  constructor (opt, order, changed, isSwapOption) {
-    super(opt, order, isSwapOption, changed)
+  control: HTMLElement
+  changed: () => void
+
+  constructor (opt: OrderOpt, order: TradeForm, changed: () => void, isSwapOption: boolean) {
+    super(opt, order, isSwapOption, {
+      enable: () => this.enable(),
+      disable: () => this.disable()
+    })
+    this.changed = () => changed()
     const cfg = opt.boolean
-    const control = this.control = booleanOptTmpl.cloneNode(true)
+    const control = this.control = booleanOptTmpl.cloneNode(true) as HTMLElement
     // Append to parent's options div.
     this.tmpl.controls.appendChild(control)
     const tmpl = Doc.parseTemplate(control)
@@ -202,9 +227,17 @@ class BooleanOrderOption extends OrderOption {
  * The user can also manually enter values for x or y.
  */
 class XYRangeOrderOption extends OrderOption {
-  constructor (opt, order, changed, isSwapOption) {
-    super(opt, order, isSwapOption, changed)
-    const control = this.control = rangeOptTmpl.cloneNode(true)
+  control: HTMLElement
+  x: number
+  changed: () => void
+
+  constructor (opt: OrderOpt, order: TradeForm, changed: () => void, isSwapOption: boolean) {
+    super(opt, order, isSwapOption, {
+      enable: () => this.enable(),
+      disable: () => this.disable()
+    })
+    this.changed = changed
+    const control = this.control = rangeOptTmpl.cloneNode(true) as HTMLElement
     const tmpl = Doc.parseTemplate(control)
     const cfg = opt.xyRange
     const { slider, handle } = tmpl
@@ -213,7 +246,7 @@ class XYRangeOrderOption extends OrderOption {
 
     const rangeX = cfg.end.x - cfg.start.x
     const rangeY = cfg.end.y - cfg.start.y
-    const normalizeX = x => (x - cfg.start.x) / rangeX
+    const normalizeX = (x: number) => (x - cfg.start.x) / rangeX
 
     // r, x, and y will be updated by the various input event handlers. r is
     // x (or y) normalized on its range, e.g. [x_min, x_max] -> [0, 1]
@@ -221,13 +254,13 @@ class XYRangeOrderOption extends OrderOption {
     let x = this.x = opt.default
     let y = r * rangeY + cfg.start.y
 
-    const number = new Intl.NumberFormat(navigator.languages, {
+    const number = new Intl.NumberFormat((navigator.languages as string[]), {
       minimumSignificantDigits: 3,
       maximumSignificantDigits: 3
     })
 
     // accept needs to be called anytime a handler updates x, y, and r.
-    const accept = (skipStore) => {
+    const accept = (skipStore?: boolean) => {
       tmpl.x.textContent = number.format(x)
       tmpl.y.textContent = number.format(y)
       handle.style.left = `calc(${r * 100}% - ${r * 14}px)`
@@ -236,7 +269,7 @@ class XYRangeOrderOption extends OrderOption {
     }
 
     // Set up the handlers for the x and y text input fields.
-    const clickOutX = e => {
+    const clickOutX = (e: MouseEvent) => {
       if (e.type !== 'change' && e.target === tmpl.xInput) return
       const s = tmpl.xInput.value
       if (s) {
@@ -265,7 +298,7 @@ class XYRangeOrderOption extends OrderOption {
 
     Doc.bind(tmpl.xInput, 'change', clickOutX)
 
-    const clickOutY = e => {
+    const clickOutY = (e: MouseEvent) => {
       if (e.type !== 'change' && e.target === tmpl.yInput) return
       const s = tmpl.yInput.value
       if (s) {
@@ -295,22 +328,22 @@ class XYRangeOrderOption extends OrderOption {
     Doc.bind(tmpl.yInput, 'change', clickOutY)
 
     // Read the slider.
-    Doc.bind(handle, 'mousedown', e => {
+    Doc.bind(handle, 'mousedown', (e: MouseEvent) => {
       if (e.button !== 0) return
       e.preventDefault()
       this.node.classList.add('selected')
       const startX = e.pageX
       const w = slider.clientWidth - handle.offsetWidth
       const startLeft = normalizeX(x) * w
-      const left = ee => Math.max(Math.min(startLeft + (ee.pageX - startX), w), 0)
-      const trackMouse = ee => {
+      const left = (ee: MouseEvent) => Math.max(Math.min(startLeft + (ee.pageX - startX), w), 0)
+      const trackMouse = (ee: MouseEvent) => {
         ee.preventDefault()
         r = left(ee) / w
         x = r * rangeX + cfg.start.x
         y = r * rangeY + cfg.start.y
         accept()
       }
-      const mouseUp = ee => {
+      const mouseUp = (ee: MouseEvent) => {
         trackMouse(ee)
         Doc.unbind(document, 'mousemove', trackMouse)
         Doc.unbind(document, 'mouseup', mouseUp)
@@ -354,7 +387,7 @@ class XYRangeOrderOption extends OrderOption {
  * client/asset. change is a function with no arguments that is called when the
  * returned option's value has changed.
  */
-export function optionElement (opt, order, change, isSwap) {
+export function optionElement (opt: OrderOpt, order: TradeForm, change: () => void, isSwap: boolean): HTMLElement {
   switch (true) {
     case !!opt.boolean:
       return new BooleanOrderOption(opt, order, change, isSwap).node
@@ -363,10 +396,12 @@ export function optionElement (opt, order, change, isSwap) {
     default:
       console.error('no option type specified', opt)
   }
+  console.error('unknown option type', opt)
+  return document.createElement('div')
 }
 
-function dexAssetSymbol (host, assetID) {
+function dexAssetSymbol (host: string, assetID: number) {
   return app().exchanges[host].assets[assetID].symbol
 }
 
-const clamp = (v, min, max) => v < min ? min : v > max ? max : v
+const clamp = (v: number, min: number, max: number) => v < min ? min : v > max ? max : v

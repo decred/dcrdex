@@ -4,7 +4,10 @@ import BasePage from './basepage'
 import { LoginForm } from './forms'
 
 export default class LoginPage extends BasePage {
-  constructor (body) {
+  form: HTMLElement
+  loginForm: LoginForm
+
+  constructor (body: HTMLElement) {
     super()
     this.form = Doc.idel(body, 'loginForm')
     Doc.show(this.form)
@@ -13,7 +16,7 @@ export default class LoginPage extends BasePage {
   }
 
   /* login submits the sign-in form and parses the result. */
-  async loggedIn (e) {
+  async loggedIn () {
     await app().fetchUser()
     app().loadPage('markets')
   }

@@ -1,10 +1,18 @@
-import { app } from './registry'
 import Doc from './doc'
 import BasePage from './basepage'
-import * as Order from './orderutil'
+import * as OrderUtil from './orderutil'
 import { bind as bindForm } from './forms'
 import { postJSON } from './http'
 import * as intl from './locales'
+import {
+  app,
+  Order,
+  PageElement,
+  OrderNote,
+  MatchNote,
+  Match,
+  Coin
+} from './registry'
 
 const Mainnet = 0
 const Testnet = 1
@@ -12,19 +20,27 @@ const Testnet = 1
 
 const animationLength = 500
 
-let net
+let net: number
 
 export default class OrderPage extends BasePage {
-  constructor (main) {
+  orderID: string
+  order: Order
+  page: Record<string, PageElement>
+  currentForm: HTMLElement
+  secondTicker: number
+
+  constructor (main: HTMLElement) {
     super()
-    const stampers = main.querySelectorAll('[data-stamp]')
-    net = parseInt(main.dataset.net)
+    const stampers = Doc.applySelector(main, '[data-stamp]')
+    net = parseInt(main.dataset.net || '')
     // Find the order
-    this.orderID = main.dataset.oid
-    this.order = app().order(this.orderID)
+    this.orderID = main.dataset.oid || ''
+    const ord = app().order(this.orderID)
     // app().order can only access active orders. If the order is not active,
     // we'll need to get the data from the database.
-    if (!this.order) this.fetchOrder()
+    if (ord) this.order = ord
+    else this.fetchOrder()
+
     const page = this.page = Doc.idDescendants(main)
 
     if (page.cancelBttn) {
@@ -34,7 +50,7 @@ export default class OrderPage extends BasePage {
     }
 
     // If the user clicks outside of a form, it should close the page overlay.
-    Doc.bind(page.forms, 'mousedown', e => {
+    Doc.bind(page.forms, 'mousedown', (e: MouseEvent) => {
       if (!Doc.mouseInElement(e, this.currentForm)) {
         Doc.hide(page.forms)
         page.cancelPass.value = ''
@@ -44,24 +60,24 @@ export default class OrderPage extends BasePage {
     // Cancel order form
     bindForm(page.cancelForm, page.cancelSubmit, async () => { this.submitCancel() })
 
-    main.querySelectorAll('[data-explorer-id]').forEach(link => {
+    main.querySelectorAll('[data-explorer-id]').forEach((link: PageElement) => {
       setCoinHref(link)
     })
 
     const setStamp = () => {
       for (const span of stampers) {
-        span.textContent = Doc.timeSince(parseInt(span.dataset.stamp))
+        span.textContent = Doc.timeSince(parseInt(span.dataset.stamp || ''))
       }
     }
     setStamp()
 
-    this.secondTicker = setInterval(() => {
+    this.secondTicker = window.setInterval(() => {
       setStamp()
     }, 10000) // update every 10 seconds
 
     this.notifiers = {
-      order: note => { this.handleOrderNote(note) },
-      match: note => { this.handleMatchNote(note) }
+      order: (note: OrderNote) => { this.handleOrderNote(note) },
+      match: (note: MatchNote) => { this.handleMatchNote(note) }
     }
   }
 
@@ -81,14 +97,14 @@ export default class OrderPage extends BasePage {
     const order = this.order
     const page = this.page
     const remaining = order.qty - order.filled
-    const asset = Order.isMarketBuy(order) ? app().assets[order.quoteID] : app().assets[order.baseID]
+    const asset = OrderUtil.isMarketBuy(order) ? app().assets[order.quoteID] : app().assets[order.baseID]
     page.cancelRemain.textContent = Doc.formatCoinValue(remaining, asset.info.unitinfo)
     page.cancelUnit.textContent = asset.info.unitinfo.conventional.unit.toUpperCase()
     this.showForm(page.cancelForm)
   }
 
   /* showForm shows a modal form with a little animation. */
-  async showForm (form) {
+  async showForm (form: HTMLElement) {
     this.currentForm = form
     const page = this.page
     Doc.hide(page.cancelForm)
@@ -124,18 +140,18 @@ export default class OrderPage extends BasePage {
    * handleOrderNote is the handler for the 'order'-type notification, which are
    * used to update an order's status.
    */
-  handleOrderNote (note) {
+  handleOrderNote (note: OrderNote) {
     const order = note.order
     const bttn = this.page.cancelBttn
     if (bttn && order.id === this.orderID) {
-      if (bttn && order.status > Order.StatusBooked) Doc.hide(bttn)
-      this.page.status.textContent = Order.statusString(order)
+      if (bttn && order.status > OrderUtil.StatusBooked) Doc.hide(bttn)
+      this.page.status.textContent = OrderUtil.statusString(order)
     }
     for (const m of order.matches || []) this.processMatch(m)
   }
 
   /* handleMatchNote handles a 'match' notification. */
-  handleMatchNote (note) {
+  handleMatchNote (note: MatchNote) {
     if (note.orderID !== this.orderID) return
     this.processMatch(note.match)
   }
@@ -144,9 +160,9 @@ export default class OrderPage extends BasePage {
    * processMatch synchronizes a match's card with a match received in a
    * 'order' or 'match' notification.
    */
-  processMatch (m) {
-    let card
-    for (const div of Array.from(this.page.matchBox.querySelectorAll('.match-card'))) {
+  processMatch (m: Match) {
+    let card: HTMLElement | null = null
+    for (const div of Doc.applySelector(this.page.matchBox, '.match-card')) {
       if (div.dataset.matchID === m.matchID) {
         card = div
         break
@@ -157,7 +173,8 @@ export default class OrderPage extends BasePage {
       return
     }
 
-    const setCoin = (divName, linkName, coin) => {
+    const setCoin = (divName: string, linkName: string, coin: Coin) => {
+      if (!card) return // Ugh
       if (!coin) return
       Doc.show(Doc.tmplElement(card, divName))
       const coinLink = Doc.tmplElement(card, linkName)
@@ -187,7 +204,7 @@ export default class OrderPage extends BasePage {
       Doc.hide(swapSpan, cSwapSpan)
     }
 
-    Doc.tmplElement(card, 'status').textContent = Order.matchStatusString(m.status, m.side)
+    Doc.tmplElement(card, 'status').textContent = OrderUtil.matchStatusString(m.status, m.side)
   }
 }
 
@@ -195,7 +212,7 @@ export default class OrderPage extends BasePage {
  * confirmationString is a string describing the state of confirmations for a
  * coin
  * */
-function confirmationString (coin) {
+function confirmationString (coin: Coin) {
   if (!coin.confs) return ''
   return `${coin.confs.count} / ${coin.confs.required} confirmations`
 }
@@ -204,49 +221,49 @@ function confirmationString (coin) {
  * inCounterSwapCast will be true if we are waiting on confirmations for the
  * counterparty's swap.
  */
-function inCounterSwapCast (m) {
-  return (m.side === Order.Taker && m.status === Order.MakerSwapCast) || (m.side === Order.Maker && m.status === Order.TakerSwapCast)
+function inCounterSwapCast (m: Match) {
+  return (m.side === OrderUtil.Taker && m.status === OrderUtil.MakerSwapCast) || (m.side === OrderUtil.Maker && m.status === OrderUtil.TakerSwapCast)
 }
 
 /*
  * inCounterSwapCast will be true if we are waiting on confirmations for our own
  * swap.
  */
-function inSwapCast (m) {
-  return (m.side === Order.Maker && m.status === Order.MakerSwapCast) || (m.side === Order.Taker && m.status === Order.TakerSwapCast)
+function inSwapCast (m: Match) {
+  return (m.side === OrderUtil.Maker && m.status === OrderUtil.MakerSwapCast) || (m.side === OrderUtil.Taker && m.status === OrderUtil.TakerSwapCast)
 }
 
 /*
  * setCoinHref sets the hyperlink element's href attribute based on its
  * data-explorer-id and data-explorer-coin values.
  */
-function setCoinHref (link) {
-  const assetExplorer = CoinExplorers[parseInt(link.dataset.explorerId)]
+function setCoinHref (link: PageElement) {
+  const assetExplorer = CoinExplorers[parseInt(link.dataset.explorerId || '')]
   if (!assetExplorer) return
   const formatter = assetExplorer[net]
   if (!formatter) return
   link.classList.remove('plainlink')
   link.classList.add('subtlelink')
-  link.href = formatter(link.dataset.explorerCoin)
+  link.href = formatter(link.dataset.explorerCoin || '')
 }
 
-const CoinExplorers = {
+const CoinExplorers: Record<number, Record<number, (cid: string) => string>> = {
   42: { // dcr
-    [Mainnet]: cid => {
+    [Mainnet]: (cid: string) => {
       const [txid, vout] = cid.split(':')
       return `https://explorer.dcrdata.org/tx/${txid}/out/${vout}`
     },
-    [Testnet]: cid => {
+    [Testnet]: (cid: string) => {
       const [txid, vout] = cid.split(':')
       return `https://testnet.dcrdata.org/tx/${txid}/out/${vout}`
     }
   },
   0: { // btc
-    [Mainnet]: cid => `https://bitaps.com/${cid.split(':')[0]}`,
-    [Testnet]: cid => `https://tbtc.bitaps.com/${cid.split(':')[0]}`
+    [Mainnet]: (cid: string) => `https://bitaps.com/${cid.split(':')[0]}`,
+    [Testnet]: (cid: string) => `https://tbtc.bitaps.com/${cid.split(':')[0]}`
   },
   2: { // ltc
-    [Mainnet]: cid => `https://ltc.bitaps.com/${cid.split(':')[0]}`,
-    [Testnet]: cid => `https://tltc.bitaps.com/${cid.split(':')[0]}`
+    [Mainnet]: (cid: string) => `https://ltc.bitaps.com/${cid.split(':')[0]}`,
+    [Testnet]: (cid: string) => `https://tltc.bitaps.com/${cid.split(':')[0]}`
   }
 }

@@ -19,10 +19,9 @@
 //
 // Based on messagesocket_service.js by Jonathan Chappelow @ dcrdata, which is
 // based on ws_events_dispatcher.js by Ismael Celis
-
 const typeRequest = 1
 
-function forward (route, payload, handlers) {
+function forward (route: string, payload: any, handlers: Record<string, ((payload: any) => void)[]>) {
   if (!route && payload.error) {
     const err = payload.error
     console.error(`websocket error (code ${err.code}): ${err.message}`)
@@ -40,26 +39,33 @@ function forward (route, payload, handlers) {
 
 let id = 0
 
+type NoteReceiver = (payload: any) => void
+
 class MessageSocket {
+  uri: string
+  connection: WebSocket | null
+  handlers: Record<string, NoteReceiver[]>
+  queue: [string, any][]
+  maxQlength: number
+  reloader: () => void // appears unused
+
   constructor () {
-    this.uri = undefined
-    this.connection = undefined
     this.handlers = {}
     this.queue = []
     this.maxQlength = 5
   }
 
-  registerRoute (route, handler) {
+  registerRoute (route: string, handler: NoteReceiver) {
     this.handlers[route] = this.handlers[route] || []
     this.handlers[route].push(handler)
   }
 
-  deregisterRoute (route) {
+  deregisterRoute (route: string) {
     this.handlers[route] = []
   }
 
   // request sends a request-type message to the server
-  request (route, payload) {
+  request (route: string, payload: any) {
     if (!this.connection || this.connection.readyState !== window.WebSocket.OPEN) {
       while (this.queue.length > this.maxQlength - 1) this.queue.shift()
       this.queue.push([route, payload])
@@ -77,32 +83,33 @@ class MessageSocket {
     this.connection.send(message)
   }
 
-  close (reason) {
+  close (reason: string) {
     window.log('ws', 'close, reason:', reason, this.handlers)
     this.handlers = {}
-    this.connection.close()
+    if (this.connection) this.connection.close()
   }
 
-  connect (uri, reloader) {
+  connect (uri: string, reloader: () => void) {
     this.uri = uri
     this.reloader = reloader
     let retrys = 0
     const go = () => {
       window.log('ws', `connecting to ${uri}`)
-      let conn = this.connection = new window.WebSocket(uri)
+      let conn: WebSocket | null = this.connection = new window.WebSocket(uri)
+      if (!conn) return
       const timeout = setTimeout(() => {
         // readyState is still WebSocket.CONNECTING. Cancel and trigger onclose.
-        conn.close()
+        if (conn) conn.close()
       }, 500)
 
       // unmarshal message, and forward the message to registered handlers
-      conn.onmessage = (evt) => {
+      conn.onmessage = (evt: MessageEvent) => {
         const message = JSON.parse(evt.data)
         forward(message.route, message.payload, this.handlers)
       }
 
       // Stub out standard functions
-      conn.onclose = (evt) => {
+      conn.onclose = (evt: CloseEvent) => {
         window.log('ws', 'onclose')
         clearTimeout(timeout)
         conn = this.connection = null
@@ -131,7 +138,7 @@ class MessageSocket {
         }
       }
 
-      conn.onerror = (evt) => {
+      conn.onerror = (evt: Event) => {
         window.log('ws', 'onerror:', evt)
         forward('error', evt, this.handlers)
       }

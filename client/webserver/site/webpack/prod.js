@@ -1,14 +1,10 @@
 const { merge } = require('webpack-merge')
 const common = require('./common.js')
 const CssMinimizerPlugin = require('css-minimizer-webpack-plugin')
-const ESLintPlugin = require('eslint-webpack-plugin')
 
 module.exports = merge(common, {
   mode: 'production',
   devtool: 'source-map',
-  plugins: [new ESLintPlugin({
-    formatter: 'stylish'
-  })],
   optimization: {
     usedExports: true,
     minimize: true,
@@ -20,16 +16,18 @@ module.exports = merge(common, {
   module: {
     rules: [
       {
-        test: /\.js$/,
+        test: /\.ts$/,
         exclude: /node_modules/,
         use: {
+          // babel-loader does not fail on type errors. ts-loader does, but we
+          // probably still want to transpile (right?).
           loader: 'babel-loader',
           options: {
             presets: [
               [
-                "@babel/preset-env",
+                "@babel/preset-typescript",
                 {
-                  "exclude": ["@babel/plugin-transform-regenerator"]
+                  "exclude": ["@babel/plugin-transform-typescript"]
                 }
               ]
             ]

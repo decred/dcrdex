@@ -1,3 +1,5 @@
+import { CoreNote } from './registry'
+
 export const IGNORE = 0
 export const DATA = 1
 export const POKE = 2
@@ -13,11 +15,15 @@ export const ERROR = 5
  * if the error is generated during submission of a form, the error should be
  * displayed on or near the form itself, not in the notifications.
  */
-export function make (subject, details, severity) {
+export function make (subject: string, details: string, severity: number): CoreNote {
   return {
     subject: subject,
     details: details,
     severity: severity,
-    stamp: new Date().getTime()
+    stamp: new Date().getTime(),
+    acked: false,
+    type: 'internal',
+    topic: 'internal',
+    id: ''
   }
 }

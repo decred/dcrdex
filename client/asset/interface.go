@@ -119,7 +119,7 @@ type WalletInfo struct {
 	// Version is the Wallet's version number, which is used to signal when
 	// major changes are made to internal details such as coin ID encoding and
 	// contract structure that must be common to a server's.
-	Version uint32
+	Version uint32 `json:"version"`
 	// AvailableWallets is an ordered list of available WalletDefinition. The
 	// first WalletDefinition is considered the default, and might, for instance
 	// be the initial form offered to the user for configuration, with others
