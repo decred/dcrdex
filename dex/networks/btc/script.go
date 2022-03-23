@@ -440,7 +440,7 @@ func ExtractScriptAddrs(script []byte, chainParams *chaincfg.Params) (*BtcScript
 	// For P2SH and non-P2SH multi-sig, pull the addresses from the pubkey script.
 	class, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(script, chainParams)
 	nonStandard := class == txscript.NonStandardTy
-	if err != nil {
+	if err != nil { // txscript.ExtractPkScriptAddrs always returns a nil error now, so this should not happen
 		return nil, nonStandard, fmt.Errorf("ExtractScriptAddrs: %w", err)
 	}
 	if nonStandard {
