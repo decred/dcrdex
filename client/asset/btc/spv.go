@@ -586,23 +586,70 @@ func (w *spvWallet) syncStatus() (*syncStatus, error) {
 	}, nil
 }
 
-// Balances retrieves a wallet's balance details.
+// ownsInputs determines if we own the inputs of the tx.
+func (w *spvWallet) ownsInputs(txid string) bool {
+	txHash, err := chainhash.NewHashFromStr(txid)
+	if err != nil {
+		w.log.Warnf("Error decoding txid %q: %v", txid, err)
+		return false
+	}
+	txDetails, err := w.wallet.walletTransaction(txHash)
+	if err != nil {
+		w.log.Warnf("walletTransaction(%v) error: %v", txid, err)
+		return false
+	}
+
+	for _, txIn := range txDetails.MsgTx.TxIn {
+		_, _, _, _, err = w.wallet.FetchInputInfo(&txIn.PreviousOutPoint)
+		if err != nil {
+			if !errors.Is(err, wallet.ErrNotMine) {
+				w.log.Warnf("FetchInputInfo error: %v", err)
+			}
+			return false
+		}
+	}
+	return true
+}
+
+// balances retrieves a wallet's balance details.
 func (w *spvWallet) balances() (*GetBalancesResult, error) {
+	// Determine trusted vs untrusted coins with listunspent.
+	unspents, err := w.wallet.ListUnspent(0, math.MaxInt32, w.acctName)
+	if err != nil {
+		return nil, fmt.Errorf("error listing unspent outputs: %w", err)
+	}
+	var trusted, untrusted btcutil.Amount
+	for _, txout := range unspents {
+		if txout.Confirmations > 0 || w.ownsInputs(txout.TxID) {
+			trusted += btcutil.Amount(toSatoshi(txout.Amount))
+			continue
+		}
+		untrusted += btcutil.Amount(toSatoshi(txout.Amount))
+	}
+
+	// listunspent does not include immature coinbase outputs or locked outputs.
 	bals, err := w.wallet.CalculateAccountBalances(w.acctNum, 0 /* confs */)
 	if err != nil {
 		return nil, err
 	}
+	w.log.Tracef("Bals: spendable = %v (%v trusted, %v untrusted, %v assumed locked), immature = %v",
+		bals.Spendable, trusted, untrusted, bals.Spendable-trusted-untrusted, bals.ImmatureReward)
+	// Locked outputs would be in wallet.Balances.Spendable. Assume they would
+	// be considered trusted and add them back in.
+	if all := trusted + untrusted; bals.Spendable > all {
+		trusted += bals.Spendable - all
+	}
 
 	return &GetBalancesResult{
 		Mine: Balances{
-			Trusted:   bals.Spendable.ToBTC(),
-			Untrusted: 0, // ? do we need to scan utxos instead ?
+			Trusted:   trusted.ToBTC(),
+			Untrusted: untrusted.ToBTC(),
 			Immature:  bals.ImmatureReward.ToBTC(),
 		},
 	}, nil
 }
 
-// ListUnspent retrieves list of the wallet's UTXOs.
+// listUnspent retrieves list of the wallet's UTXOs.
 func (w *spvWallet) listUnspent() ([]*ListUnspentResult, error) {
 	unspents, err := w.wallet.ListUnspent(0, math.MaxInt32, w.acctName)
 	if err != nil {
@@ -612,43 +659,21 @@ func (w *spvWallet) listUnspent() ([]*ListUnspentResult, error) {
 	for _, utxo := range unspents {
 		// If the utxo is unconfirmed, we should determine whether it's "safe"
 		// by seeing if we control the inputs of its transaction.
-		var safe bool
-		if utxo.Confirmations > 0 {
-			safe = true
-		} else {
-			txHash, err := chainhash.NewHashFromStr(utxo.TxID)
-			if err != nil {
-				return nil, fmt.Errorf("error decoding txid %q: %v", utxo.TxID, err)
-			}
-			txDetails, err := w.wallet.walletTransaction(txHash)
-			if err != nil {
-				return nil, fmt.Errorf("walletTransaction error: %v", err)
-			}
-			// To be "safe", we need to show that we own the inputs for the
-			// utxo's transaction. We'll just try to find one.
-			safe = true
-			// TODO: Keep a cache of our redemption outputs and allow those as
-			// safe inputs.
-			for _, txIn := range txDetails.MsgTx.TxIn {
-				_, _, _, _, err := w.wallet.FetchInputInfo(&txIn.PreviousOutPoint)
-				if err != nil {
-					if !errors.Is(err, wallet.ErrNotMine) {
-						w.log.Warnf("FetchInputInfo error: %v", err)
-					}
-					safe = false
-					break
-				}
-			}
-		}
+		safe := utxo.Confirmations > 0 || w.ownsInputs(utxo.TxID)
 
+		// These hex decodings are unlikely to fail because they come directly
+		// from the listunspent result. Regardless, they should not result in an
+		// error for the caller as we can return the valid utxos.
 		pkScript, err := hex.DecodeString(utxo.ScriptPubKey)
 		if err != nil {
-			return nil, err
+			w.log.Warnf("ScriptPubKey decode failure: %v", err)
+			continue
 		}
 
 		redeemScript, err := hex.DecodeString(utxo.RedeemScript)
 		if err != nil {
-			return nil, err
+			w.log.Warnf("ScriptPubKey decode failure: %v", err)
+			continue
 		}
 
 		res = append(res, &ListUnspentResult{
@@ -708,7 +733,7 @@ func (w *spvWallet) changeAddress() (btcutil.Address, error) {
 	return w.wallet.NewChangeAddress(w.acctNum, waddrmgr.KeyScopeBIP0084)
 }
 
-// AddressPKH gets a new base58-encoded (P2PKH) external address from the
+// addressPKH gets a new base58-encoded (P2PKH) external address from the
 // wallet.
 func (w *spvWallet) addressPKH() (btcutil.Address, error) {
 	return nil, errors.New("unimplemented")
