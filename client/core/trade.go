@@ -844,7 +844,7 @@ func (t *trackedTrade) processCancelMatch(msgMatch *msgjson.Match) error {
 //
 // This method accesses match fields and MUST be called with the trackedTrade
 // mutex lock held for reads.
-func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTracker) (have, needed uint32, changed, spent bool) {
+func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTracker) (have, needed uint32, changed, spent, expired bool) {
 	// Counter-party's swap is the "to" asset.
 	needed = t.wallets.toAsset.SwapConf
 
@@ -854,16 +854,25 @@ func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTra
 		t.dc.log.Warnf("counterPartyConfirms: No AuditInfo available to check!")
 		return
 	}
+
+	wallet := t.wallets.toWallet
 	coin := match.counterSwap.Coin
 
-	var err error
-	have, spent, err = t.wallets.toWallet.SwapConfirmations(ctx, coin.ID(),
+	_, lockTime, err := wallet.LocktimeExpired(match.MetaData.Proof.CounterContract)
+	if err != nil {
+		t.dc.log.Errorf("Error checking if locktime has expired on taker's contract on order %s, "+
+			"match %s: %v", t.ID(), match, err)
+	}
+	expired = time.Until(lockTime) < 0 // not necessarily refundable, but can be at any moment
+
+	have, spent, err = wallet.SwapConfirmations(ctx, coin.ID(),
 		match.MetaData.Proof.CounterContract, match.MetaData.Stamp)
 	if err != nil {
 		if !errors.Is(err, asset.ErrSwapNotInitiated) {
 			// No need to log an error if swap not initiated as this
 			// is expected for newly made swaps involving contracts.
-			t.dc.log.Errorf("Failed to get confirmations of the counter-party's swap %s (%s) for match %s, order %v: %v",
+			t.dc.log.Errorf("Failed to get confirmations of the counter-party's swap %s (%s) "+
+				"for match %s, order %v: %v",
 				coin, t.wallets.toAsset.Symbol, match, t.UID(), err)
 		}
 		return
@@ -1037,6 +1046,12 @@ func (t *trackedTrade) unspentContractAmounts() (amount uint64) {
 // This method accesses match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
 func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) bool {
+	// Quick status check before we bother with the wallet.
+	switch match.Status {
+	case order.TakerSwapCast, order.MakerRedeemed, order.MatchComplete:
+		return false // all swaps already sent
+	}
+
 	if match.swapErr != nil || match.MetaData.Proof.IsRevoked() || match.tickGovernor != nil || match.checkServerRevoke {
 		t.dc.log.Tracef("Match %s not swappable: swapErr = %v, revoked = %v, metered = %t, checkServerRevoke = %v",
 			match, match.swapErr, match.MetaData.Proof.IsRevoked(), match.tickGovernor != nil, match.checkServerRevoke)
@@ -1047,12 +1062,15 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 	// Just a quick check here. We'll perform a more thorough check if there are
 	// actually swappables.
 	if !wallet.locallyUnlocked() {
-		t.dc.log.Errorf("not checking if order %s, match %s is swappable because %s wallet is not unlocked",
+		t.dc.log.Errorf("Order %s, match %s is not swappable because %s wallet is not unlocked",
 			t.ID(), match, unbip(wallet.AssetID))
 		return false
 	}
 
-	if match.Status == order.MakerSwapCast {
+	switch match.Status {
+	case order.NewlyMatched:
+		return match.Side == order.Maker
+	case order.MakerSwapCast:
 		// Get the confirmation count on the maker's coin.
 		if match.Side == order.Taker {
 			toAssetID := t.wallets.toAsset.ID
@@ -1060,19 +1078,31 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 				coinIDString(toAssetID, match.MetaData.Proof.MakerSwap), unbip(toAssetID))
 			// If the maker is the counterparty, we can determine swappability
 			// based on the confirmations.
-			confs, req, changed, spent := t.counterPartyConfirms(ctx, match)
-			ready := confs >= req
-			if changed && !ready {
-				t.dc.log.Debugf("Match %s not yet swappable: current confs = %d, required confs = %d",
-					match, confs, req)
-			}
+			confs, req, changed, spent, expired := t.counterPartyConfirms(ctx, match)
 			if spent {
 				t.dc.log.Errorf("Counter-party's swap is spent before we could broadcast our own")
 				match.MetaData.Proof.SelfRevoked = true
 				return false
 			}
+			if expired {
+				t.dc.log.Errorf("Counter-party's swap expired before we could broadcast our own")
+				match.MetaData.Proof.SelfRevoked = true
+				return false
+			}
+			matchTime := match.matchTime()
+			if lockTime := matchTime.Add(t.lockTimeTaker); time.Until(lockTime) < 0 {
+				t.dc.log.Errorf("Our contract would expire in the past (%v). Revoking.", lockTime)
+				match.MetaData.Proof.SelfRevoked = true
+				return false
+			}
+			ready := confs >= req
+			if changed && !ready {
+				t.dc.log.Infof("Match %s not yet swappable: current confs = %d, required confs = %d",
+					match, confs, req)
+			}
 			return ready
 		}
+
 		// If we're the maker, check the confirmations anyway so we can notify.
 		t.dc.log.Tracef("Checking confirmations on our OWN swap txn %v (%s)...",
 			coinIDString(wallet.AssetID, match.MetaData.Proof.MakerSwap), unbip(wallet.AssetID))
@@ -1084,7 +1114,7 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 			t.dc.log.Errorf("isSwappable: error getting confirmation for our own swap transaction: %v", err)
 		}
 		if spent {
-			t.dc.log.Debugf("our (maker) swap for match %s is being reported as spent, "+
+			t.dc.log.Debugf("Our (maker) swap for match %s is being reported as spent, "+
 				"but we have not seen the counter-party's redemption yet. This could just"+
 				" be network latency.", match)
 		}
@@ -1092,9 +1122,7 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 		t.notify(newMatchNote(TopicConfirms, "", "", db.Data, t, match))
 		return false
 	}
-	if match.Side == order.Maker && match.Status == order.NewlyMatched {
-		return true
-	}
+
 	return false
 }
 
@@ -1104,11 +1132,25 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 // This method accesses match fields and MUST be called with the trackedTrade
 // mutex lock held for reads.
 func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bool {
+	// Quick status check before we bother with the wallet.
+	switch match.Status {
+	case order.NewlyMatched, order.MakerSwapCast:
+		return false // all swaps not yet sent
+	}
+
 	if match.swapErr != nil || len(match.MetaData.Proof.RefundCoin) != 0 || match.tickGovernor != nil {
 		t.dc.log.Tracef("Match %s not redeemable: swapErr = %v, RefundCoin = %v, metered = %t",
 			match, match.swapErr, match.MetaData.Proof.RefundCoin, match.tickGovernor != nil)
 		return false
 	}
+	// NOTE: taker must be able to redeem when revoked! Arguably, maker should
+	// not, and we could check here, but as long as taker contract's is not
+	// expired (locktime passed), the swap may be completed.
+	//
+	// if match.Side == order.Maker && match.MetaData.Proof.IsRevoked() {
+	// 	t.dc.log.Warnf("Revoked match %s not redeemable as maker")
+	// 	return false
+	// }
 
 	wallet := t.wallets.toWallet
 	// Just a quick check here. We'll perform a more thorough check if there are
@@ -1119,22 +1161,29 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bo
 		return false
 	}
 
-	if match.Status == order.TakerSwapCast {
+	switch match.Status {
+	case order.TakerSwapCast:
 		if match.Side == order.Maker {
 			// Check the confirmations on the taker's swap.
-			confs, req, changed, spent := t.counterPartyConfirms(ctx, match)
-			ready := confs >= req
-			if changed && !ready {
-				t.dc.log.Debugf("Match %s not yet redeemable: current confs = %d, required confs = %d",
-					match, confs, req)
-			}
+			confs, req, changed, spent, expired := t.counterPartyConfirms(ctx, match)
 			if spent {
 				t.dc.log.Errorf("Order %s, match %s counter-party's swap is spent before we could redeem", t.ID(), match)
 				match.MetaData.Proof.SelfRevoked = true
 				return false
 			}
+			if expired {
+				t.dc.log.Errorf("Order %s, match %s counter-party's swap expired before we could redeem", t.ID(), match)
+				match.MetaData.Proof.SelfRevoked = true
+				return false
+			}
+			ready := confs >= req
+			if changed && !ready {
+				t.dc.log.Infof("Match %s not yet redeemable: current confs = %d, required confs = %d",
+					match, confs, req)
+			}
 			return ready
 		}
+
 		// If we're the taker, check the confirmations anyway so we can notify.
 		confs, spent, err := t.wallets.fromWallet.SwapConfirmations(ctx, match.MetaData.Proof.TakerSwap,
 			match.MetaData.Proof.ContractData, match.MetaData.Stamp)
@@ -1151,10 +1200,11 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bo
 		match.swapConfirms = int64(confs)
 		t.notify(newMatchNote(TopicConfirms, "", "", db.Data, t, match))
 		return false
+
+	case order.MakerRedeemed:
+		return match.Side == order.Taker
 	}
-	if match.Side == order.Taker && match.Status == order.MakerRedeemed {
-		return true
-	}
+
 	return false
 }
 
@@ -1824,9 +1874,9 @@ func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contr
 	// Send the init request asynchronously.
 	c.wg.Add(1) // So Core does not shut down until we're done with this request.
 	go func() {
+		defer c.wg.Done() // bottom of the stack
 		var err error
 		defer func() {
-			c.wg.Done()
 			atomic.StoreUint32(&match.sendingInitAsync, 0)
 			if err != nil {
 				corder := t.coreOrder()
@@ -2032,7 +2082,9 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 		proof := &match.MetaData.Proof
 		coinID := []byte(coinIDs[i])
 		if match.Side == order.Taker {
-			match.Status = order.MatchComplete // could this cause the match to be retired before the `redeem` request succeeds?
+			// The match won't be retired before the redeem request succeeds
+			// because RedeemSig is required unless the match is revoked.
+			match.Status = order.MatchComplete
 			proof.TakerRedeem = coinID
 		} else {
 			if t.isMarketBuy() {
@@ -2066,9 +2118,9 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 	// Send the redeem request asynchronously.
 	c.wg.Add(1) // So Core does not shut down until we're done with this request.
 	go func() {
+		defer c.wg.Done() // bottom of the stack
 		var err error
 		defer func() {
-			c.wg.Done()
 			atomic.StoreUint32(&match.sendingRedeemAsync, 0)
 			if err != nil {
 				corder := t.coreOrder()
