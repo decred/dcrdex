@@ -83,7 +83,7 @@ var (
 	tUnparseableHost           = string([]byte{0x7f})
 	tSwapFeesPaid       uint64 = 500
 	tRedemptionFeesPaid uint64 = 350
-	tLogger                    = dex.StdOutLogger("TCORE", dex.LevelInfo)
+	tLogger                    = dex.StdOutLogger("TCORE", dex.LevelDebug)
 	tMaxFeeRate         uint64 = 10
 	tWalletInfo                = &asset.WalletInfo{
 		UnitInfo: dex.UnitInfo{
@@ -577,15 +577,18 @@ type TXCWallet struct {
 	preRedeem         *asset.PreRedeem
 	ownsAddress       bool
 	ownsAddressErr    error
+	contractExpired   bool
+	contractLockTime  time.Time
 }
 
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 	w := &TXCWallet{
-		changeCoin:  &tCoin{id: encode.RandomBytes(36)},
-		syncStatus:  func() (synced bool, progress float32, err error) { return true, 1, nil },
-		confs:       make(map[string]uint32),
-		confsErr:    make(map[string]error),
-		ownsAddress: true,
+		changeCoin:       &tCoin{id: encode.RandomBytes(36)},
+		syncStatus:       func() (synced bool, progress float32, err error) { return true, 1, nil },
+		confs:            make(map[string]uint32),
+		confsErr:         make(map[string]error),
+		ownsAddress:      true,
+		contractLockTime: time.Now().Add(time.Minute),
 	}
 	xcWallet := &xcWallet{
 		Wallet:       w,
@@ -718,7 +721,7 @@ func (w *TXCWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroadcas
 }
 
 func (w *TXCWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, error) {
-	return true, time.Now().Add(-time.Minute), nil
+	return w.contractExpired, w.contractLockTime, nil
 }
 
 func (w *TXCWallet) FindRedemption(ctx context.Context, coinID dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {
@@ -4296,7 +4299,7 @@ func TestRefunds(t *testing.T) {
 	// MAKER REFUND, INVALID TAKER COUNTERSWAP
 	//
 
-	matchTime := time.Now()
+	matchTime := time.Now().Truncate(time.Millisecond).UTC()
 	msgMatch := &msgjson.Match{
 		OrderID:    loid[:],
 		MatchID:    mid[:],
@@ -4332,7 +4335,7 @@ func TestRefunds(t *testing.T) {
 	auditQty := calc.BaseToQuote(rate, matchSize)
 	audit, auditInfo := tMsgAudit(loid, mid, addr, auditQty, proof.SecretHash)
 	tBtcWallet.auditInfo = auditInfo
-	auditInfo.Expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeMaker))
+	auditInfo.Expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeMaker).UTC())
 
 	// Check audit errors.
 	tBtcWallet.auditErr = tErr
@@ -4346,11 +4349,17 @@ func TestRefunds(t *testing.T) {
 	tDcrWallet.refundErr = nil
 	tBtcWallet.refundCoin = nil
 	tBtcWallet.refundErr = fmt.Errorf("unexpected call to btcWallet.Refund")
+	// Make the contract appear expired
+	tDcrWallet.contractExpired = true
+	tDcrWallet.contractLockTime = time.Now()
 	checkRefund(tracker, match, matchSize)
+	tDcrWallet.contractExpired = false
+	tDcrWallet.contractLockTime = time.Now().Add(time.Minute)
 
 	// TAKER REFUND, NO MAKER REDEEM
 	//
 	// Reset funding coins in the trackedTrade, wipe change coin.
+	matchTime = time.Now().Truncate(time.Millisecond).UTC()
 	tracker.mtx.Lock()
 	tracker.coins = mapifyCoins(fundCoinsDCR)
 	tracker.coinsLocked = true
@@ -4360,12 +4369,13 @@ func TestRefunds(t *testing.T) {
 	tracker.mtx.Unlock()
 	mid = ordertest.RandomMatchID()
 	msgMatch = &msgjson.Match{
-		OrderID:  loid[:],
-		MatchID:  mid[:],
-		Quantity: matchSize,
-		Rate:     rate,
-		Address:  "counterparty-address",
-		Side:     uint8(order.Taker),
+		OrderID:    loid[:],
+		MatchID:    mid[:],
+		Quantity:   matchSize,
+		Rate:       rate,
+		Address:    "counterparty-address",
+		Side:       uint8(order.Taker),
+		ServerTime: encode.UnixMilliU(matchTime),
 	}
 	sign(tDexPriv, msgMatch)
 	msg, _ = msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
@@ -4430,7 +4440,11 @@ func TestRefunds(t *testing.T) {
 
 	// Attempt refund.
 	rig.db.updateMatchChan = nil
+	tDcrWallet.contractExpired = true
+	tDcrWallet.contractLockTime = time.Now()
 	checkRefund(tracker, match, matchSize)
+	tDcrWallet.contractExpired = false
+	tDcrWallet.contractLockTime = time.Now().Add(time.Minute)
 }
 
 func TestNotifications(t *testing.T) {
