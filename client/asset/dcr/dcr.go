@@ -392,6 +392,7 @@ type ExchangeWallet struct {
 	feeRateLimit     uint64
 	redeemConfTarget uint64
 	useSplitTx       bool
+	acctName         string
 
 	tipMtx     sync.RWMutex
 	currentTip *block
@@ -504,6 +505,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *cha
 		chainParams:         chainParams,
 		tipChange:           cfg.TipChange,
 		peersChange:         cfg.PeersChange,
+		acctName:            dcrCfg.Account,
 		fundingCoins:        make(map[outPoint]*fundingCoin),
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
 		externalTxCache:     make(map[chainhash.Hash]*externalTx),
@@ -591,7 +593,7 @@ func (dcr *ExchangeWallet) OwnsAddress(address string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return dcr.wallet.OwnsAddress(dcr.ctx, addr)
+	return dcr.wallet.OwnsAddress(dcr.ctx, addr, dcr.acctName)
 }
 
 // Balance should return the total available funds in the wallet. Note that
@@ -604,7 +606,7 @@ func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
 	if err != nil {
 		return nil, err
 	}
-	ab, err := dcr.wallet.Balance(dcr.ctx, 0)
+	ab, err := dcr.wallet.Balance(dcr.ctx, 0, dcr.acctName)
 	if err != nil {
 		return nil, err
 	}
@@ -1164,7 +1166,7 @@ func (dcr *ExchangeWallet) fund(enough func(sum uint64, size uint32, unspent *co
 
 // spendableUTXOs generates a slice of spendable *compositeUTXO.
 func (dcr *ExchangeWallet) spendableUTXOs() ([]*compositeUTXO, error) {
-	unspents, err := dcr.wallet.Unspents(dcr.ctx)
+	unspents, err := dcr.wallet.Unspents(dcr.ctx, dcr.acctName)
 	if err != nil {
 		return nil, err
 	}
@@ -1312,7 +1314,7 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 	}
 
 	// Use an internal address for the sized output.
-	addr, err := dcr.wallet.InternalAddress(dcr.ctx)
+	addr, err := dcr.wallet.InternalAddress(dcr.ctx, dcr.acctName)
 	if err != nil {
 		return nil, false, fmt.Errorf("error creating split transaction address: %w", err)
 	}
@@ -1427,7 +1429,7 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	}
 
 	// Check locked outputs for not found coins.
-	lockedOutputs, err := dcr.wallet.LockedOutputs(dcr.ctx)
+	lockedOutputs, err := dcr.wallet.LockedOutputs(dcr.ctx, dcr.acctName)
 	if err != nil {
 		return nil, err
 	}
@@ -1462,7 +1464,7 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 
 	// Some funding coins still not found after checking locked outputs.
 	// Check wallet unspent outputs as last resort. Lock the coins if found.
-	unspents, err := dcr.wallet.Unspents(dcr.ctx)
+	unspents, err := dcr.wallet.Unspents(dcr.ctx, dcr.acctName)
 	if err != nil {
 		return nil, err
 	}
@@ -1531,7 +1533,7 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		totalOut += contract.Value
 		// revokeAddrV2 is the address belonging to the key that will be
 		// used to sign and refund a swap past its encoded refund locktime.
-		revokeAddrV2, err := dcr.wallet.ExternalAddress(dcr.ctx)
+		revokeAddrV2, err := dcr.wallet.ExternalAddress(dcr.ctx, dcr.acctName)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error creating revocation address: %w", err)
 		}
@@ -2422,7 +2424,7 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 	}
 
 	if refundAddr == nil {
-		refundAddr, err = dcr.wallet.ExternalAddress(dcr.ctx)
+		refundAddr, err = dcr.wallet.ExternalAddress(dcr.ctx, dcr.acctName)
 		if err != nil {
 			return nil, fmt.Errorf("error getting new address from the wallet: %w", err)
 		}
@@ -2449,7 +2451,7 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 
 // Address returns an address for the exchange wallet.
 func (dcr *ExchangeWallet) Address() (string, error) {
-	addr, err := dcr.wallet.ExternalAddress(dcr.ctx)
+	addr, err := dcr.wallet.ExternalAddress(dcr.ctx, dcr.acctName)
 	if err != nil {
 		return "", err
 	}
@@ -2464,7 +2466,7 @@ func (dcr *ExchangeWallet) NewAddress() (string, error) {
 
 // Unlock unlocks the exchange wallet.
 func (dcr *ExchangeWallet) Unlock(pw []byte) error {
-	unlocked, err := dcr.wallet.Unlocked(dcr.ctx)
+	unlocked, err := dcr.wallet.Unlocked(dcr.ctx, dcr.acctName)
 	if err != nil {
 		return err
 	}
@@ -2472,18 +2474,18 @@ func (dcr *ExchangeWallet) Unlock(pw []byte) error {
 		return nil
 	}
 
-	return dcr.wallet.Unlock(dcr.ctx, pw)
+	return dcr.wallet.Unlock(dcr.ctx, pw, dcr.acctName)
 }
 
 // Lock locks the exchange wallet.
 func (dcr *ExchangeWallet) Lock() error {
-	return dcr.wallet.Lock(dcr.ctx)
+	return dcr.wallet.Lock(dcr.ctx, dcr.acctName)
 }
 
 // Locked will be true if the wallet is currently locked.
 // Q: why are we ignoring RPC errors in this?
 func (dcr *ExchangeWallet) Locked() bool {
-	unlocked, err := dcr.wallet.Unlocked(dcr.ctx)
+	unlocked, err := dcr.wallet.Unlocked(dcr.ctx, dcr.acctName)
 	if err != nil {
 		dcr.log.Errorf("walletinfo error: %v", err)
 		return false // assume wallet is unlocked?
@@ -2702,7 +2704,7 @@ func (dcr *ExchangeWallet) parseUTXOs(unspents []*walletjson.ListUnspentResult) 
 
 // lockedAtoms is the total value of locked outputs, as locked with LockUnspent.
 func (dcr *ExchangeWallet) lockedAtoms() (uint64, error) {
-	lockedOutpoints, err := dcr.wallet.LockedOutputs(dcr.ctx)
+	lockedOutpoints, err := dcr.wallet.LockedOutputs(dcr.ctx, dcr.acctName)
 	if err != nil {
 		return 0, err
 	}
@@ -2819,7 +2821,7 @@ func msgTxToHex(msgTx *wire.MsgTx) (string, error) {
 }
 
 func (dcr *ExchangeWallet) makeChangeOut(val uint64) (*wire.TxOut, stdaddr.Address, error) {
-	changeAddr, err := dcr.wallet.InternalAddress(dcr.ctx)
+	changeAddr, err := dcr.wallet.InternalAddress(dcr.ctx, dcr.acctName)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating change address: %w", err)
 	}

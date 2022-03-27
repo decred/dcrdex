@@ -68,13 +68,13 @@ type Wallet interface {
 	// tip changes.
 	NotifyOnTipChange(ctx context.Context, cb TipChangeCallback) bool
 	// OwnsAddress checks if the provided address belongs to the Wallet.
-	OwnsAddress(ctx context.Context, addr stdaddr.Address) (bool, error)
+	OwnsAddress(ctx context.Context, addr stdaddr.Address, acctName string) (bool, error)
 	// Balance returns the balance breakdown for the Wallet.
-	Balance(ctx context.Context, confirms int32) (*walletjson.GetAccountBalanceResult, error)
+	Balance(ctx context.Context, confirms int32, acctName string) (*walletjson.GetAccountBalanceResult, error)
 	// LockedOutputs fetches locked outputs for the Wallet.
-	LockedOutputs(ctx context.Context) ([]chainjson.TransactionInput, error)
+	LockedOutputs(ctx context.Context, acctName string) ([]chainjson.TransactionInput, error)
 	// Unspents fetches unspent outputs for the Wallet.
-	Unspents(ctx context.Context) ([]*walletjson.ListUnspentResult, error)
+	Unspents(ctx context.Context, acctName string) ([]*walletjson.ListUnspentResult, error)
 	// LockUnspent locks or unlocks the specified outpoint.
 	LockUnspent(ctx context.Context, unlock bool, ops []*wire.OutPoint) error
 	// UnspentOutput returns information about an unspent tx output, if found
@@ -86,9 +86,9 @@ type Wallet interface {
 	// output cannot be located.
 	UnspentOutput(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8) (*TxOutput, error)
 	// ExternalAddress returns a new external address,
-	ExternalAddress(ctx context.Context) (stdaddr.Address, error)
+	ExternalAddress(ctx context.Context, acctName string) (stdaddr.Address, error)
 	// InternalAddress returns a change address from the Wallet.
-	InternalAddress(ctx context.Context) (stdaddr.Address, error)
+	InternalAddress(ctx context.Context, acctName string) (stdaddr.Address, error)
 	// SignRawTransaction signs the provided transaction. SignRawTransaction
 	// is not used for redemptions, so previous outpoints and scripts should
 	// be known by the wallet.
@@ -118,15 +118,15 @@ type Wallet interface {
 	// BlockFilter fetches the block filter info for the specified block.
 	BlockFilter(ctx context.Context, blockHash *chainhash.Hash) ([gcs.KeySize]byte, *gcs.FilterV2, error)
 	// Unlocked returns true if the Wallet unlocked.
-	Unlocked(ctx context.Context) (bool, error)
+	Unlocked(ctx context.Context, acctName string) (bool, error)
 	// Lock locks the Wallet. ExchangeWallet does not differentiate account
 	// locking vs wallet locking, but the underlying implementation may choose
 	// to lock only the account.
-	Lock(ctx context.Context) error
+	Lock(ctx context.Context, acctName string) error
 	// Unlock unlocks the Wallet. ExchangeWallet does not differentiate account
 	// locking vs wallet locking, but the underlying implementation may choose
 	// to unlock only the account.
-	Unlock(ctx context.Context, passphrase []byte) error
+	Unlock(ctx context.Context, passphrase []byte, acctName string) error
 	// SyncStatus returns the wallet's sync status.
 	SyncStatus(ctx context.Context) (bool, float32, error)
 	// PeerCount returns the number of network peers to which the wallet or its

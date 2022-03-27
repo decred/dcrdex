@@ -53,7 +53,6 @@ type rpcWallet struct {
 	chainParams *chaincfg.Params
 	log         dex.Logger
 	rpcCfg      *rpcclient.ConnConfig
-	acctName    string
 
 	rpcMtx  sync.RWMutex
 	spvMode bool
@@ -155,7 +154,6 @@ func newRPCWallet(cfg *Config, chainParams *chaincfg.Params, logger dex.Logger) 
 	rpcw := &rpcWallet{
 		chainParams: chainParams,
 		log:         log,
-		acctName:    cfg.Account,
 	}
 
 	certs, err := os.ReadFile(cfg.RPCCert)
@@ -364,38 +362,38 @@ func (w *rpcWallet) NotifyOnTipChange(ctx context.Context, cb TipChangeCallback)
 // OwnsAddress uses the validateaddress rpc to check if the provided address
 // belongs to the specified account.
 // Part of the Wallet interface.
-func (w *rpcWallet) OwnsAddress(ctx context.Context, addr stdaddr.Address) (bool, error) {
+func (w *rpcWallet) OwnsAddress(ctx context.Context, addr stdaddr.Address, acctName string) (bool, error) {
 	va, err := w.rpcClient.ValidateAddress(ctx, addr)
 	if err != nil {
 		return false, translateRPCCancelErr(err)
 	}
-	return va.IsMine && va.Account == w.acctName, nil
+	return va.IsMine && va.Account == acctName, nil
 }
 
 // Balance returns the balance breakdown for the specified account.
 // Part of the Wallet interface.
-func (w *rpcWallet) Balance(ctx context.Context, confirms int32) (*walletjson.GetAccountBalanceResult, error) {
-	balances, err := w.rpcClient.GetBalanceMinConf(ctx, w.acctName, int(confirms))
+func (w *rpcWallet) Balance(ctx context.Context, confirms int32, acctName string) (*walletjson.GetAccountBalanceResult, error) {
+	balances, err := w.rpcClient.GetBalanceMinConf(ctx, acctName, int(confirms))
 	if err != nil {
 		return nil, translateRPCCancelErr(err)
 	}
 
 	for i := range balances.Balances {
 		ab := &balances.Balances[i]
-		if ab.AccountName == w.acctName {
+		if ab.AccountName == acctName {
 			return ab, nil
 		}
 	}
 
-	return nil, fmt.Errorf("account not found: %q", w.acctName)
+	return nil, fmt.Errorf("account not found: %q", acctName)
 }
 
 // LockedOutputs fetches locked outputs for the specified account using rpc
 // RawRequest.
 // Part of the Wallet interface.
-func (w *rpcWallet) LockedOutputs(ctx context.Context) ([]chainjson.TransactionInput, error) {
+func (w *rpcWallet) LockedOutputs(ctx context.Context, acctName string) ([]chainjson.TransactionInput, error) {
 	var locked []chainjson.TransactionInput
-	err := w.rpcClientRawRequest(ctx, methodListLockUnspent, anylist{w.acctName}, &locked)
+	err := w.rpcClientRawRequest(ctx, methodListLockUnspent, anylist{acctName}, &locked)
 	return locked, translateRPCCancelErr(err)
 }
 
@@ -413,18 +411,18 @@ func (w *rpcWallet) EstimateSmartFeeRate(ctx context.Context, confTarget int64, 
 // Unspents fetches unspent outputs for the specified account using rpc
 // RawRequest.
 // Part of the Wallet interface.
-func (w *rpcWallet) Unspents(ctx context.Context) ([]*walletjson.ListUnspentResult, error) {
+func (w *rpcWallet) Unspents(ctx context.Context, acctName string) ([]*walletjson.ListUnspentResult, error) {
 	var unspents []*walletjson.ListUnspentResult
 	// minconf, maxconf (rpcdefault=9999999), [address], account
-	params := anylist{0, 9999999, nil, w.acctName}
+	params := anylist{0, 9999999, nil, acctName}
 	err := w.rpcClientRawRequest(ctx, methodListUnspent, params, &unspents)
 	return unspents, err
 }
 
 // InternalAddress returns a change address from the specified account.
 // Part of the Wallet interface.
-func (w *rpcWallet) InternalAddress(ctx context.Context) (stdaddr.Address, error) {
-	addr, err := w.rpcClient.GetRawChangeAddress(ctx, w.acctName, w.chainParams)
+func (w *rpcWallet) InternalAddress(ctx context.Context, acctName string) (stdaddr.Address, error) {
+	addr, err := w.rpcClient.GetRawChangeAddress(ctx, acctName, w.chainParams)
 	return addr, translateRPCCancelErr(err)
 }
 
@@ -484,8 +482,8 @@ func (w *rpcWallet) UnspentOutput(ctx context.Context, txHash *chainhash.Hash, i
 // GetNewAddressGapPolicy returns an address from the specified account using
 // the specified gap policy.
 // Part of the Wallet interface.
-func (w *rpcWallet) ExternalAddress(ctx context.Context) (stdaddr.Address, error) {
-	addr, err := w.rpcClient.GetNewAddressGapPolicy(ctx, w.acctName, dcrwallet.GapPolicyIgnore)
+func (w *rpcWallet) ExternalAddress(ctx context.Context, acctName string) (stdaddr.Address, error) {
+	addr, err := w.rpcClient.GetNewAddressGapPolicy(ctx, acctName, dcrwallet.GapPolicyIgnore)
 	if err != nil {
 		return nil, translateRPCCancelErr(err)
 	}
@@ -664,11 +662,11 @@ func (w *rpcWallet) unlockWallet(ctx context.Context, passphrase string, timeout
 
 // Unlocked returns true if the specified account is unlocked.
 // Part of the Wallet interface.
-func (w *rpcWallet) Unlocked(ctx context.Context) (bool, error) {
+func (w *rpcWallet) Unlocked(ctx context.Context, acctName string) (bool, error) {
 	// First return locked status of the account, falling back to walletinfo if
 	// the account is not individually password protected.
 	var res *walletjson.AccountUnlockedResult
-	res, err := w.rpcClient.AccountUnlocked(ctx, w.acctName)
+	res, err := w.rpcClient.AccountUnlocked(ctx, acctName)
 	if err != nil {
 		return false, err
 	}
@@ -685,7 +683,7 @@ func (w *rpcWallet) Unlocked(ctx context.Context) (bool, error) {
 
 // Lock locks the specified account.
 // Part of the Wallet interface.
-func (w *rpcWallet) Lock(ctx context.Context) error {
+func (w *rpcWallet) Lock(ctx context.Context, acctName string) error {
 	if w.rpcConnector.Disconnected() {
 		return asset.ErrConnectionDown
 	}
@@ -697,7 +695,7 @@ func (w *rpcWallet) Lock(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	res, err := w.rpcClient.AccountUnlocked(ctx, w.acctName)
+	res, err := w.rpcClient.AccountUnlocked(ctx, acctName)
 	if err != nil {
 		return err
 	}
@@ -708,7 +706,7 @@ func (w *rpcWallet) Lock(ctx context.Context) error {
 		return nil
 	}
 
-	err = w.rpcClient.LockAccount(ctx, w.acctName)
+	err = w.rpcClient.LockAccount(ctx, acctName)
 	if isAccountLockedErr(err) {
 		return nil // it's already locked
 	}
@@ -717,8 +715,8 @@ func (w *rpcWallet) Lock(ctx context.Context) error {
 
 // Unlock unlocks the specified account.
 // Part of the Wallet interface.
-func (w *rpcWallet) Unlock(ctx context.Context, pw []byte) error {
-	return translateRPCCancelErr(w.rpcClient.UnlockAccount(ctx, w.acctName, string(pw)))
+func (w *rpcWallet) Unlock(ctx context.Context, pw []byte, acctName string) error {
+	return translateRPCCancelErr(w.rpcClient.UnlockAccount(ctx, acctName, string(pw)))
 }
 
 // SyncStatus returns the wallet's sync status.
