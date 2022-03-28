@@ -67,10 +67,11 @@ type Wallet interface {
 	// notification is unimplemented, monitorBlocks should be used to track
 	// tip changes.
 	NotifyOnTipChange(ctx context.Context, cb TipChangeCallback) bool
-	// OwnsAddress checks if the provided address belongs to the Wallet.
-	OwnsAddress(ctx context.Context, addr stdaddr.Address, acctName string) (bool, error)
-	// Balance returns the balance breakdown for the Wallet.
-	Balance(ctx context.Context, confirms int32, acctName string) (*walletjson.GetAccountBalanceResult, error)
+	// AccountOwnsAddress checks if the provided address belongs to the
+	// specified account.
+	AccountOwnsAddress(ctx context.Context, addr stdaddr.Address, acctName string) (bool, error)
+	// AccountBalance returns the balance breakdown for the speciied account.
+	AccountBalance(ctx context.Context, confirms int32, acctName string) (*walletjson.GetAccountBalanceResult, error)
 	// LockedOutputs fetches locked outputs for the Wallet.
 	LockedOutputs(ctx context.Context, acctName string) ([]chainjson.TransactionInput, error)
 	// Unspents fetches unspent outputs for the Wallet.
@@ -96,12 +97,10 @@ type Wallet interface {
 	// SendRawTransaction broadcasts the provided transaction to the Decred
 	// network.
 	SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
-	// GetBlockHeader returns block header info for the specified block hash.
+	// GetBlockHeader returns block header info for the specified block hash. The
+	// returned block header is a wire.BlockHeader with the addition of the block's
+	// median time.
 	GetBlockHeader(ctx context.Context, blockHash *chainhash.Hash) (*BlockHeader, error)
-	// IsValidMainchain returns true if the block is no orphaned or invalidated,
-	// so if this is not the current best block, the next block's vote bits
-	// should be checked.
-	IsValidMainchain(ctx context.Context, blockHash *chainhash.Hash) (bool, error)
 	// GetBlock returns the *wire.MsgBlock.
 	GetBlock(ctx context.Context, blockHash *chainhash.Hash) (*wire.MsgBlock, error)
 	// GetTransaction returns the details of a wallet tx, if the wallet contains a
@@ -117,16 +116,14 @@ type Wallet interface {
 	GetBlockHash(ctx context.Context, blockHeight int64) (*chainhash.Hash, error)
 	// BlockFilter fetches the block filter info for the specified block.
 	BlockFilter(ctx context.Context, blockHash *chainhash.Hash) ([gcs.KeySize]byte, *gcs.FilterV2, error)
-	// Unlocked returns true if the Wallet unlocked.
-	Unlocked(ctx context.Context, acctName string) (bool, error)
-	// Lock locks the Wallet. ExchangeWallet does not differentiate account
-	// locking vs wallet locking, but the underlying implementation may choose
-	// to lock only the account.
-	Lock(ctx context.Context, acctName string) error
-	// Unlock unlocks the Wallet. ExchangeWallet does not differentiate account
-	// locking vs wallet locking, but the underlying implementation may choose
-	// to unlock only the account.
-	Unlock(ctx context.Context, passphrase []byte, acctName string) error
+	// AccountUnlocked returns true if the account is unlocked.
+	AccountUnlocked(ctx context.Context, acctName string) (bool, error)
+	// LockAccount locks the account.
+	LockAccount(ctx context.Context, acctName string) error
+	// UnlockAccount unlocks the Wallet. ExchangeWallet does not differentiate
+	// account locking vs wallet locking, but the underlying implementation may
+	// choose to unlock only the account.
+	UnlockAccount(ctx context.Context, passphrase []byte, acctName string) error
 	// SyncStatus returns the wallet's sync status.
 	SyncStatus(ctx context.Context) (bool, float32, error)
 	// PeerCount returns the number of network peers to which the wallet or its
@@ -136,11 +133,14 @@ type Wallet interface {
 	AddressPrivKey(ctx context.Context, address stdaddr.Address) (*secp256k1.PrivateKey, error)
 }
 
+// FeeRateEstimator is satisfied by a Wallet that can provide fee rate
+// estimates.
 type FeeRateEstimator interface {
 	// EstimateSmartFeeRate returns a smart feerate estimate.
 	EstimateSmartFeeRate(ctx context.Context, confTarget int64, mode chainjson.EstimateSmartFeeMode) (float64, error)
 }
 
+// Mempooler is satisfied by a Wallet that can provide mempool info.
 type Mempooler interface {
 	// GetRawMempool returns hashes for all txs in a node's mempool.
 	GetRawMempool(ctx context.Context) ([]*chainhash.Hash, error)

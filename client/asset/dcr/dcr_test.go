@@ -227,21 +227,26 @@ func (blockchain *tBlockchain) addRawTx(blockHeight int64, tx *wire.MsgTx) (*cha
 		return nil, nil
 	}
 
+	prevBlockHash := blockchain.mainchain[blockHeight-1]
+
 	// Mined tx. Add to block.
 	block := blockchain.blockAt(blockHeight)
 	if block == nil {
-		block = &wire.MsgBlock{}
+		block = &wire.MsgBlock{
+			Header: wire.BlockHeader{
+				PrevBlock: *prevBlockHash,
+				Height:    uint32(blockHeight),
+				VoteBits:  1,
+			},
+		}
 	}
-	blockFilterBuilder := blockchain.v2CFilterBuilders[block.BlockHash()]
 	block.Transactions = append(block.Transactions, tx)
 	blockHash := block.BlockHash()
+	blockFilterBuilder := blockchain.v2CFilterBuilders[blockHash]
 	blockchain.mainchain[blockHeight] = &blockHash
 	blockchain.verboseBlocks[blockHash] = block
 
-	blockchain.blockHeaders[blockHash] = &wire.BlockHeader{
-		Height: uint32(blockHeight),
-		// PrevBlock: *prevBlockHash,
-	}
+	blockchain.blockHeaders[blockHash] = &block.Header
 
 	// Save prevout and output scripts in block cfilters.
 	if blockFilterBuilder == nil {

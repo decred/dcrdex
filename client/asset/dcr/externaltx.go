@@ -123,7 +123,7 @@ func (dcr *ExchangeWallet) txBlockFromCache(ctx context.Context, tx *externalTx)
 		return nil, nil
 	}
 
-	isMainchain, err := dcr.wallet.IsValidMainchain(ctx, tx.block.hash)
+	_, isMainchain, err := dcr.blockHeader(ctx, tx.block.hash)
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +270,7 @@ func (dcr *ExchangeWallet) findTxInBlock(ctx context.Context, txHash chainhash.H
 	}
 	for _, tx := range blk.Transactions {
 		if tx.TxHash() == txHash {
-			continue // oriignal tx, ignore
+			continue // orignal tx, ignore
 		}
 		for _, txIn := range tx.TxIn {
 			if txIn.PreviousOutPoint.Hash == txHash { // found a spender
@@ -294,7 +294,7 @@ func (dcr *ExchangeWallet) isOutputSpent(ctx context.Context, output *outputSpen
 
 	// Check if this output is known to be spent in a mainchain block.
 	if output.spenderBlock != nil {
-		isMainchain, err := dcr.wallet.IsValidMainchain(ctx, output.spenderBlock.hash)
+		_, isMainchain, err := dcr.blockHeader(ctx, output.spenderBlock.hash)
 		if err != nil {
 			return false, err
 		}
