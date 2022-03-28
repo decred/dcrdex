@@ -258,7 +258,10 @@ func (n *nodeClient) syncProgress() ethereum.SyncProgress {
 // signData uses the private key of the address to sign a piece of data.
 // The wallet must be unlocked to use this function.
 func (n *nodeClient) signData(data []byte) (sig, pubKey []byte, err error) {
-	sig, err = n.creds.ks.SignHash(*n.creds.acct, crypto.Keccak256(data))
+	h := crypto.Keccak256(data)
+	fmt.Println("--signData", data, n.creds.addr)
+
+	sig, err = n.creds.ks.SignHash(*n.creds.acct, h)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -266,7 +269,7 @@ func (n *nodeClient) signData(data []byte) (sig, pubKey []byte, err error) {
 		return nil, nil, fmt.Errorf("unexpected signature length %d", len(sig))
 	}
 
-	pubKey, err = recoverPubkey(crypto.Keccak256(data), sig)
+	pubKey, err = recoverPubkey(h, sig)
 	if err != nil {
 		return nil, nil, fmt.Errorf("SignMessage: error recovering pubkey %w", err)
 	}
@@ -606,7 +609,7 @@ func (n *nodeClient) checkTxStatus(ctx context.Context, tx *types.Transaction, t
 		return receipt, nil
 	}
 
-	if receipt.GasUsed == txOpts.GasLimit {
+	if receipt.GasUsed > txOpts.GasLimit {
 		return receipt, fmt.Errorf("gas used appears to have exceeded limit of %d", txOpts.GasLimit)
 	}
 

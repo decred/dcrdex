@@ -1109,7 +1109,7 @@ func TestSwap(t *testing.T) {
 		coinIDs := make([]dex.Bytes, 0, len(coinAmounts))
 		for _, amt := range coinAmounts {
 			fundingCoinID := createFundingCoin(eth.addr, amt)
-			coinIDs = append(coinIDs, fundingCoinID.ID())
+			coinIDs = append(coinIDs, fundingCoinID.RecoveryID())
 		}
 		return coinIDs
 	}
@@ -2206,7 +2206,7 @@ func TestDriverDecodeCoinID(t *testing.T) {
 
 	// Test funding coin id
 	fundingCoin := createFundingCoin(address, 1000)
-	coinID, err = drv.DecodeCoinID(fundingCoin.ID())
+	coinID, err = drv.DecodeCoinID(fundingCoin.RecoveryID())
 	if err != nil {
 		t.Fatalf("error decoding coin id: %v", err)
 	}

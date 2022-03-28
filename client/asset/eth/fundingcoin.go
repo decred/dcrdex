@@ -30,10 +30,7 @@ func (c *fundingCoin) String() string {
 
 // ID creates a byte slice that can be decoded with decodeFundingCoin.
 func (c *fundingCoin) ID() dex.Bytes {
-	b := make([]byte, fundingCoinIDSize)
-	copy(b[:20], c.addr[:])
-	binary.BigEndian.PutUint64(b[20:28], c.amt)
-	return b
+	return []byte(c.addr.String())
 }
 
 func (c *fundingCoin) Value() uint64 {

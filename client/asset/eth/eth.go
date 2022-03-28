@@ -1491,7 +1491,6 @@ func (eth *ExchangeWallet) balanceWithTxPool() (*Balance, error) {
 
 	addFees := func(tx *types.Transaction) {
 		gas := new(big.Int).SetUint64(tx.Gas())
-		// For legacy transactions, GasFeeCap returns gas price
 		if gasFeeCap := tx.GasFeeCap(); gasFeeCap != nil {
 			outgoing.Add(outgoing, new(big.Int).Mul(gas, gasFeeCap))
 		} else {

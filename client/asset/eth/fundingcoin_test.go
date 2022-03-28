@@ -20,7 +20,7 @@ func TestFundingCoinID(t *testing.T) {
 		addr: address,
 		amt:  100,
 	}
-	encodedFundingCoin := originalFundingCoin.ID()
+	encodedFundingCoin := originalFundingCoin.RecoveryID()
 	decodedFundingCoin, err := decodeFundingCoin(encodedFundingCoin)
 	if err != nil {
 		t.Fatalf("unexpected error decoding swap coin: %v", err)

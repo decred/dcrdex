@@ -659,7 +659,7 @@ func testInitiate(t *testing.T) {
 		}
 
 		expGas := ethGases.SwapN(len(test.swaps))
-		txOpts, _ := ethClient.txOpts(ctx, totalVal, expGas*2, nil)
+		txOpts, _ := ethClient.txOpts(ctx, totalVal, expGas, dexeth.GweiToWei(maxFeeRate))
 		tx, err := c.initiate(txOpts, test.swaps)
 		if err != nil {
 			if test.swapErr {
@@ -682,7 +682,8 @@ func testInitiate(t *testing.T) {
 			t.Fatalf("%s: gas used %d exceeds expected max %d", test.name, receipt.GasUsed, expGas)
 		}
 
-		fmt.Printf("Gas used for %d initiations, success = %t: %d \n", len(test.swaps), test.success, receipt.GasUsed)
+		fmt.Printf("Gas used for %d initiations, success = %t: %d (expected max %d) \n",
+			len(test.swaps), test.success, receipt.GasUsed, expGas)
 
 		gasPrice, err := feesAtBlk(ctx, ethClient, receipt.BlockNumber.Int64())
 		if err != nil {
@@ -693,9 +694,7 @@ func testInitiate(t *testing.T) {
 		wantBal := new(big.Int).Set(originalBal)
 		wantBal.Sub(wantBal, txFee)
 		if test.success {
-			for _, swap := range test.swaps {
-				wantBal.Sub(wantBal, dexeth.GweiToWei(swap.Value))
-			}
+			wantBal.Sub(wantBal, dexeth.GweiToWei(totalVal))
 		}
 		bal, err := balance()
 		if err != nil {
@@ -703,7 +702,7 @@ func testInitiate(t *testing.T) {
 		}
 
 		diff := new(big.Int).Sub(wantBal, bal)
-		if diff.CmpAbs(dexeth.GweiToWei(1)) >= 0 {
+		if diff.CmpAbs(new(big.Int)) != 0 {
 			t.Fatalf("%s: unexpected balance change: want %d got %d gwei, diff = %.9f gwei",
 				test.name, dexeth.WeiToGwei(wantBal), dexeth.WeiToGwei(bal), float64(diff.Int64())/dexeth.GweiFactor)
 		}
@@ -729,10 +728,10 @@ func testInitiate(t *testing.T) {
 
 func TestRedeemGas(t *testing.T) {
 	// Create secrets and secret hashes
-	numSecrets := 9
-	secrets := make([][32]byte, 0, numSecrets)
-	secretHashes := make([][32]byte, 0, numSecrets)
-	for i := 0; i < numSecrets; i++ {
+	const numSwaps = 9
+	secrets := make([][32]byte, 0, numSwaps)
+	secretHashes := make([][32]byte, 0, numSwaps)
+	for i := 0; i < numSwaps; i++ {
 		var secret [32]byte
 		copy(secret[:], encode.RandomBytes(32))
 		secretHash := sha256.Sum256(secret[:])
@@ -743,15 +742,15 @@ func TestRedeemGas(t *testing.T) {
 	// Initiate swaps
 	now := uint64(time.Now().Unix())
 
-	swaps := make([]*asset.Contract, 0, numSecrets)
-	for i := 0; i < numSecrets; i++ {
+	swaps := make([]*asset.Contract, 0, numSwaps)
+	for i := 0; i < numSwaps; i++ {
 		swaps = append(swaps, newContract(now, secretHashes[i], 1))
 	}
 
 	c := simnetContractor
 	pc := participantContractor
 
-	txOpts, _ := ethClient.txOpts(ctx, 0, ethGases.SwapN(len(swaps)), nil)
+	txOpts, _ := ethClient.txOpts(ctx, numSwaps, ethGases.SwapN(len(swaps)), dexeth.GweiToWei(maxFeeRate))
 	_, err := c.initiate(txOpts, swaps)
 	if err != nil {
 		t.Fatalf("Unable to initiate swap: %v ", err)
@@ -773,7 +772,7 @@ func TestRedeemGas(t *testing.T) {
 
 	// Test gas usage of redeem function
 	var previous uint64
-	for i := 0; i < numSecrets; i++ {
+	for i := 0; i < numSwaps; i++ {
 		gas, err := pc.estimateRedeemGas(ctx, secrets[:i+1])
 		if err != nil {
 			t.Fatalf("Error estimating gas for redeem function: %v", err)
@@ -935,7 +934,7 @@ func testRedeem(t *testing.T) {
 			return test.redeemerClient.addressBalance(ctx, test.redeemer.Address)
 		}
 
-		txOpts, _ := test.redeemerClient.txOpts(ctx, optsVal, ethGases.SwapN(len(test.swaps)), nil)
+		txOpts, _ := test.redeemerClient.txOpts(ctx, optsVal, ethGases.SwapN(len(test.swaps)), dexeth.GweiToWei(maxFeeRate))
 		tx, err := test.redeemerContractor.initiate(txOpts, test.swaps)
 		if err != nil {
 			t.Fatalf("%s: initiate error: %v ", test.name, err)
@@ -979,7 +978,7 @@ func testRedeem(t *testing.T) {
 		}
 
 		expGas := ethGases.RedeemN(len(test.redemptions))
-		txOpts, _ = test.redeemerClient.txOpts(ctx, 0, expGas*2, nil)
+		txOpts, _ = test.redeemerClient.txOpts(ctx, 0, expGas*2, dexeth.GweiToWei(maxFeeRate))
 		tx, err = test.redeemerContractor.redeem(txOpts, test.redemptions)
 		if test.expectRedeemErr {
 			if err == nil {
@@ -1034,7 +1033,7 @@ func testRedeem(t *testing.T) {
 		}
 
 		diff := new(big.Int).Sub(wantBal, bal)
-		if diff.CmpAbs(dexeth.GweiToWei(1)) >= 0 {
+		if diff.CmpAbs(new(big.Int)) != 0 {
 			t.Fatalf("%s: unexpected balance change: want %d got %d, diff = %.9f",
 				test.name, dexeth.WeiToGwei(wantBal), dexeth.WeiToGwei(bal), float64(diff.Int64())/dexeth.GweiFactor)
 		}
@@ -1944,11 +1943,6 @@ func TestReplayAttack(t *testing.T) {
 		t.Fatalf("txOpts error: %v", err)
 	}
 
-	err = ethClient.addSignerToOpts(txOpts)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	// Deploy the reentry attack contract.
 	_, _, reentryContract, err := reentryattack.DeployReentryAttack(txOpts, ethClient.ec)
 	if err != nil {
@@ -1993,6 +1987,7 @@ func TestReplayAttack(t *testing.T) {
 		// Set some variables in the contract used for the exploit. This
 		// will fail (silently) due to require(msg.origin == msg.sender)
 		// in the real contract.
+		txOpts, _ := ethClient.txOpts(ctx, 1, defaultSendGasLimit*5, nil)
 		_, err := reentryContract.SetUsUpTheBomb(txOpts, ethSwapContractAddr, secretHash, big.NewInt(inLocktime), participantAddr)
 		if err != nil {
 			t.Fatalf("unable to set up the bomb: %v", err)
@@ -2002,6 +1997,7 @@ func TestReplayAttack(t *testing.T) {
 		}
 	}
 
+	txOpts, _ = ethClient.txOpts(ctx, 1, defaultSendGasLimit*5, nil)
 	txOpts.Value = nil
 	// Siphon funds into the contract.
 	tx, err := reentryContract.AllYourBase(txOpts)
@@ -2028,6 +2024,7 @@ func TestReplayAttack(t *testing.T) {
 	}
 
 	// Send the siphoned funds to us.
+	txOpts, _ = ethClient.txOpts(ctx, 1, defaultSendGasLimit*5, nil)
 	tx, err = reentryContract.AreBelongToUs(txOpts)
 	if err != nil {
 		t.Fatalf("unable to are belong to us: %v", err)
