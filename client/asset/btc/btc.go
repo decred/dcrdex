@@ -69,6 +69,11 @@ const (
 )
 
 var (
+	// ContractSearchLimit is how far back in time AuditContract in SPV mode
+	// will search for a contract if no txData is provided. This should be a
+	// positive duration.
+	ContractSearchLimit = 48 * time.Hour
+
 	// blockTicker is the delay between calls to check for new blocks.
 	blockTicker                  = time.Second
 	peerCountTicker              = 5 * time.Second
@@ -1889,7 +1894,13 @@ func (btc *baseWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sig
 
 // AuditContract retrieves information about a swap contract from the provided
 // txData. The extracted information would be used to audit the counter-party's
-// contract during a swap.
+// contract during a swap. The txData may be empty to attempt retrieval of the
+// transaction output from the network, but it is only ensured to succeed for a
+// full node or, if the tx is confirmed, an SPV wallet. Normally the server
+// should communicate this txData, and the caller can decide to require it. The
+// ability to work with an empty txData is a convenience for recovery tools and
+// testing, and it may change in the future if a GetTxData method is added for
+// this purpose.
 func (btc *baseWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroadcast bool) (*asset.AuditInfo, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
@@ -1901,19 +1912,34 @@ func (btc *baseWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroad
 		return nil, fmt.Errorf("error extracting swap addresses: %w", err)
 	}
 
-	// Perform basic validation using the txData.
-	// It may be worth separating data validation from coin
-	// retrieval at the asset.Wallet interface level.
-	tx, err := msgTxFromBytes(txData)
-	if err != nil {
-		return nil, fmt.Errorf("coin not found, and error encountered decoding tx data: %v", err)
+	// If no tx data is provided, attempt to get the required data (the txOut)
+	// from the wallet. If this is a full node wallet, a simple gettxout RPC is
+	// sufficient with no pkScript or "since" time. If this is an SPV wallet,
+	// only a confirmed counterparty contract can be located, and only one
+	// within ContractSearchLimit. As such, this mode of operation is not
+	// intended for normal server-coordinated operation.
+	var tx *wire.MsgTx
+	var txOut *wire.TxOut
+	if len(txData) == 0 {
+		// Fall back to gettxout, but we won't have the tx to rebroadcast.
+		pkScript, _ := btc.scriptHashScript(contract) // pkScript and since time are unused if full node
+		txOut, _, err = btc.node.getTxOut(txHash, vout, pkScript, time.Now().Add(-ContractSearchLimit))
+		if err != nil || txOut == nil {
+			return nil, fmt.Errorf("error finding unspent contract: %s:%d : %w", txHash, vout, err)
+		}
+	} else {
+		tx, err = msgTxFromBytes(txData)
+		if err != nil {
+			return nil, fmt.Errorf("coin not found, and error encountered decoding tx data: %v", err)
+		}
+		if len(tx.TxOut) <= int(vout) {
+			return nil, fmt.Errorf("specified output %d not found in decoded tx %s", vout, txHash)
+		}
+		txOut = tx.TxOut[vout]
 	}
-	if len(tx.TxOut) <= int(vout) {
-		return nil, fmt.Errorf("specified output %d not found in decoded tx %s", vout, txHash)
-	}
-	txOut := tx.TxOut[vout]
 
-	// Check for standard P2SH.
+	// Check for standard P2SH. NOTE: btc.scriptHashScript(contract) should
+	// equal txOut.PkScript. All we really get from the TxOut is the *value*.
 	scriptClass, addrs, numReq, err := txscript.ExtractPkScriptAddrs(txOut.PkScript, btc.chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting script addresses from '%x': %w", txOut.PkScript, err)
@@ -1950,7 +1976,7 @@ func (btc *baseWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroad
 
 	// Broadcast the transaction, but do not block because this is not required
 	// and does not affect the audit result.
-	if rebroadcast {
+	if rebroadcast && tx != nil {
 		go func() {
 			if hashSent, err := btc.node.sendRawTransaction(tx); err != nil {
 				btc.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
@@ -2163,7 +2189,7 @@ func (btc *baseWallet) tryRedemptionRequests(ctx context.Context, startBlock *ch
 		btc.findRedemptionMtx.RUnlock()
 
 		if len(validReqs) == 0 {
-			iHeight += 1
+			iHeight++
 			continue
 		}
 
@@ -2182,7 +2208,7 @@ func (btc *baseWallet) tryRedemptionRequests(ctx context.Context, startBlock *ch
 			break
 		}
 
-		iHeight += 1
+		iHeight++
 		if iHeight <= tipHeight {
 			if iHash, err = btc.node.getBlockHash(int64(iHeight)); err != nil {
 				// This might be due to a reorg. Don't abandon yet, since
