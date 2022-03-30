@@ -30,16 +30,15 @@ import (
 )
 
 var (
-	tLogger   dex.Logger
-	tCtx      context.Context
-	tLotSize  uint64 = 1e6 // 0.01 BTC
-	tRateStep uint64 = 10
-	tBTC             = &dex.Asset{
+	tLogger  dex.Logger
+	tCtx     context.Context
+	tLotSize uint64 = 1e6 // 0.01 BTC
+	tBTC            = &dex.Asset{
 		ID:           0,
 		Symbol:       "btc",
 		Version:      version,
-		SwapSize:     dexbtc.InitTxSize,
-		SwapSizeBase: dexbtc.InitTxSizeBase,
+		SwapSize:     dexbtc.InitTxSizeSegwit, // patched by tNewWallet, but default to segwit
+		SwapSizeBase: dexbtc.InitTxSizeBaseSegwit,
 		MaxFeeRate:   34,
 		SwapConf:     1,
 	}
@@ -2801,7 +2800,7 @@ func testTryRedemptionRequests(t *testing.T, segwit bool, walletType string) {
 	}
 
 	addBlocks := func(n int) {
-		var h int64 = 0
+		var h int64
 		// Make dummy transactions.
 		for i := 0; i < n; i++ {
 			node.addRawTx(h, otherTx())
