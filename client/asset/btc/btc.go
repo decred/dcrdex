@@ -238,6 +238,18 @@ type BTCCloneCFG struct {
 	// FeeEstimator provides a way to get fees given an RawRequest-enabled
 	// client and a confirmation target.
 	FeeEstimator func(RawRequester, uint64) (uint64, error)
+	// OmitAddressType causes the address type (bech32, legacy) to be omitted
+	// from calls to getnewaddress.
+	OmitAddressType bool
+	// LegacySignTxRPC causes the RPC client to use the signrawtransaction
+	// endpoint instead of the signrawtransactionwithwallet endpoint.
+	LegacySignTxRPC bool
+	// BooleanGetBlockRPC causes the RPC client to use a boolean second argument
+	// for the getblock endpoint, instead of Bitcoin's numeric.
+	BooleanGetBlockRPC bool
+	// SingularWallet signals that the node software supports only one wallet,
+	// so the RPC endpoint does not have a /wallet/{walletname} path.
+	SingularWallet bool
 }
 
 // outPoint is the hash and output index of a transaction output.
@@ -430,12 +442,16 @@ func readRPCWalletConfig(settings map[string]string, symbol string, net dex.Netw
 
 // parseRPCWalletConfig parses a *RPCWalletConfig from the settings map and
 // creates the unconnected *rpcclient.Client.
-func parseRPCWalletConfig(settings map[string]string, symbol string, net dex.Network, ports dexbtc.NetPorts) (*RPCWalletConfig, *rpcclient.Client, error) {
+func parseRPCWalletConfig(settings map[string]string, symbol string, net dex.Network, ports dexbtc.NetPorts, singularWallet bool) (*RPCWalletConfig, *rpcclient.Client, error) {
 	cfg, err := readRPCWalletConfig(settings, symbol, net, ports)
 	if err != nil {
 		return nil, nil, err
 	}
-	endpoint := cfg.RPCBind + "/wallet/" + cfg.WalletName
+	endpoint := cfg.RPCBind
+	if !singularWallet {
+		endpoint += "/wallet/" + cfg.WalletName
+	}
+
 	cl, err := rpcclient.New(&rpcclient.ConnConfig{
 		HTTPPostMode: true,
 		DisableTLS:   true,
@@ -557,7 +573,7 @@ type baseWallet struct {
 	useSplitTx        bool
 	useLegacyBalance  bool
 	segwit            bool
-	legacyRawFeeLimit bool
+	legacyRawFeeLimit bool // wut dis?
 	signNonSegwit     TxInSigner
 	estimateFee       func(RawRequester, uint64) (uint64, error)
 	decodeAddr        dexbtc.AddressDecoder
@@ -704,7 +720,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 // conjunction with ReadCloneParams, to create a ExchangeWallet for other assets
 // with minimal coding.
 func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWalletFullNode, error) {
-	clientCfg, client, err := parseRPCWalletConfig(cfg.WalletCFG.Settings, cfg.Symbol, cfg.Network, cfg.Ports)
+	clientCfg, client, err := parseRPCWalletConfig(cfg.WalletCFG.Settings, cfg.Symbol, cfg.Network, cfg.Ports, cfg.SingularWallet)
 	if err != nil {
 		return nil, err
 	}
@@ -735,8 +751,19 @@ func newRPCWallet(requester RawRequesterWithContext, cfg *BTCCloneCFG, walletCon
 	if err != nil {
 		return nil, err
 	}
-	btc.node = newRPCClient(requester, cfg.Segwit, btc.decodeAddr, cfg.ArglessChangeAddrRPC,
-		cfg.LegacyRawFeeLimit, cfg.MinNetworkVersion, cfg.Logger.SubLogger("RPC"), cfg.ChainParams)
+	btc.node = newRPCClient(&rpcCore{
+		requester:            requester,
+		segwit:               cfg.Segwit,
+		decodeAddr:           btc.decodeAddr,
+		arglessChangeAddrRPC: cfg.ArglessChangeAddrRPC,
+		legacyRawSends:       cfg.LegacyRawFeeLimit,
+		minNetworkVersion:    cfg.MinNetworkVersion,
+		log:                  cfg.Logger.SubLogger("RPC"),
+		chainParams:          cfg.ChainParams,
+		omitAddressType:      cfg.OmitAddressType,
+		legacySignTx:         cfg.LegacySignTxRPC,
+		booleanGetBlock:      cfg.BooleanGetBlockRPC,
+	})
 	return &ExchangeWalletFullNode{btc}, nil
 }
 
@@ -752,11 +779,14 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 
 	// If set in the user config, the fee rate limit will be in units of BTC/KB.
 	// Convert to sats/byte & error if value is smaller than smallest unit.
-	feesLimitPerByte := uint64(defaultFeeRateLimit)
+	feesLimitPerByte := cfg.DefaultFeeRateLimit
+	if feesLimitPerByte == 0 {
+		feesLimitPerByte = defaultFeeRateLimit
+	}
 	if walletCfg.FeeRateLimit > 0 {
 		feesLimitPerByte = toSatoshi(walletCfg.FeeRateLimit / 1000)
 		if feesLimitPerByte == 0 {
-			return nil, fmt.Errorf("Fee rate limit is smaller than smallest unit: %v",
+			return nil, fmt.Errorf("fee rate limit is smaller than smallest unit: %v",
 				walletCfg.FeeRateLimit)
 		}
 	}
@@ -3318,6 +3348,7 @@ func (btc *baseWallet) spendableUTXOs(confs uint32) ([]*compositeUTXO, map[outPo
 	if err != nil {
 		return nil, nil, 0, err
 	}
+
 	utxos, utxoMap, sum, err := convertUnspent(confs, unspents, btc.chainParams)
 	if err != nil {
 		return nil, nil, 0, err
@@ -3342,7 +3373,7 @@ func convertUnspent(confs uint32, unspents []*ListUnspentResult, chainParams *ch
 	utxos := make([]*compositeUTXO, 0, len(unspents))
 	utxoMap := make(map[outPoint]*compositeUTXO, len(unspents))
 	for _, txout := range unspents {
-		if txout.Confirmations >= confs && txout.Safe && txout.Spendable {
+		if txout.Confirmations >= confs && txout.Safe() && txout.Spendable {
 			txHash, err := chainhash.NewHashFromStr(txout.TxID)
 			if err != nil {
 				return nil, nil, 0, fmt.Errorf("error decoding txid in ListUnspentResult: %w", err)

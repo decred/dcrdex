@@ -51,6 +51,9 @@ BCH_ON=$?
 ~/dextest/ltc/harness-ctl/alpha getblockchaininfo &> /dev/null
 LTC_ON=$?
 
+~/dextest/doge/harness-ctl/alpha getblockchaininfo &> /dev/null
+DOGE_ON=$?
+
 ~/dextest/eth/harness-ctl/alpha attach --exec 'eth.blockNumber' > /dev/null
 ETH_ON=$?
 
@@ -113,6 +116,20 @@ EOF
 else echo "WARNING: Ethereum is not running. Configuring dcrdex markets without ETH."
 fi
 
+if [ $DOGE_ON -eq 0 ]; then
+    cat << EOF >> "./markets.json"
+        },
+        {
+            "base": "DCR_simnet",
+            "quote": "DOGE_simnet",
+            "lotSize": 100000000,
+            "rateStep": 1000000,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2
+EOF
+else echo "WARNING: Dogecoin is not running. Configuring dcrdex markets without DOGE."
+fi
+
 cat << EOF >> "./markets.json"
     }
     ],
@@ -171,6 +188,18 @@ if [ $ETH_ON -eq 0 ]; then
             "maxFeeRate": 200,
             "swapConf": 2,
             "configPath": "${TEST_ROOT}/eth/alpha/node/geth.ipc"
+EOF
+fi
+
+if [ $DOGE_ON -eq 0 ]; then
+    cat << EOF >> "./markets.json"
+         },
+        "DOGE_simnet": {
+            "bip44symbol": "doge",
+            "network": "simnet",
+            "maxFeeRate": 20,
+            "swapConf": 2,
+            "configPath": "${TEST_ROOT}/doge/alpha/alpha.conf"
 EOF
 fi
 

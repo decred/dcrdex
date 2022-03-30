@@ -31,6 +31,7 @@ const (
 	methodChangeAddress      = "getrawchangeaddress"
 	methodNewAddress         = "getnewaddress"
 	methodSignTx             = "signrawtransactionwithwallet"
+	methodSignTxLegacy       = "signrawtransaction"
 	methodUnlock             = "walletpassphrase"
 	methodLock               = "walletlock"
 	methodPrivKeyForAddress  = "dumpprivkey"
@@ -68,34 +69,30 @@ type RawRequesterWithContext interface {
 // sent via RawRequest.
 type anylist []interface{}
 
+type rpcCore struct {
+	requester            RawRequesterWithContext
+	segwit               bool
+	decodeAddr           dexbtc.AddressDecoder
+	arglessChangeAddrRPC bool
+	legacyRawSends       bool
+	minNetworkVersion    uint64
+	log                  dex.Logger
+	chainParams          *chaincfg.Params
+	omitAddressType      bool
+	legacySignTx         bool
+	booleanGetBlock      bool
+}
+
 // rpcClient is a bitcoind JSON RPC client that uses rpcclient.Client's
 // RawRequest for wallet-related calls.
 type rpcClient struct {
-	ctx                  context.Context
-	log                  dex.Logger
-	requester            RawRequesterWithContext
-	chainParams          *chaincfg.Params
-	segwit               bool
-	decodeAddr           dexbtc.AddressDecoder
-	minNetworkVersion    uint64
-	arglessChangeAddrRPC bool
-	legacyRawSends       bool
+	*rpcCore
+	ctx context.Context
 }
 
 // newRPCClient is the constructor for a rpcClient.
-func newRPCClient(requester RawRequesterWithContext, segwit bool, addrDecoder dexbtc.AddressDecoder, arglessChangeAddrRPC bool,
-	legacyRawSends bool, minNetworkVersion uint64, logger dex.Logger, chainParams *chaincfg.Params) *rpcClient {
-
-	return &rpcClient{
-		requester:            requester,
-		chainParams:          chainParams,
-		segwit:               segwit,
-		log:                  logger,
-		decodeAddr:           addrDecoder,
-		minNetworkVersion:    minNetworkVersion,
-		arglessChangeAddrRPC: arglessChangeAddrRPC,
-		legacyRawSends:       legacyRawSends,
-	}
+func newRPCClient(cfg *rpcCore) *rpcClient {
+	return &rpcClient{rpcCore: cfg}
 }
 
 func (wc *rpcClient) connect(ctx context.Context, _ *sync.WaitGroup) error {
@@ -205,7 +202,13 @@ func (wc *rpcClient) callHashGetter(method string, args anylist) (*chainhash.Has
 // getBlock fetches the MsgBlock.
 func (wc *rpcClient) getBlock(h chainhash.Hash) (*wire.MsgBlock, error) {
 	var txB dex.Bytes
-	err := wc.call(methodGetBlock, anylist{h.String(), 0}, &txB)
+	args := anylist{h.String()}
+	if wc.booleanGetBlock {
+		args = append(args, false)
+	} else {
+		args = append(args, 0)
+	}
+	err := wc.call(methodGetBlock, args, &txB)
 	if err != nil {
 		return nil, err
 	}
@@ -344,7 +347,11 @@ func (wc *rpcClient) addressWPKH() (btcutil.Address, error) {
 // wallet.
 func (wc *rpcClient) address(aType string) (btcutil.Address, error) {
 	var addrStr string
-	err := wc.call(methodNewAddress, anylist{"", aType}, &addrStr)
+	args := anylist{""}
+	if !wc.omitAddressType {
+		args = append(args, aType)
+	}
+	err := wc.call(methodNewAddress, args, &addrStr)
 	if err != nil {
 		return nil, err
 	}
@@ -358,7 +365,11 @@ func (wc *rpcClient) signTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
 		return nil, fmt.Errorf("tx serialization error: %w", err)
 	}
 	res := new(SignTxResult)
-	err = wc.call(methodSignTx, anylist{hex.EncodeToString(txBytes)}, res)
+	method := methodSignTx
+	if wc.legacySignTx {
+		method = methodSignTxLegacy
+	}
+	err = wc.call(method, anylist{hex.EncodeToString(txBytes)}, res)
 	if err != nil {
 		return nil, fmt.Errorf("tx signing error: %w", err)
 	}

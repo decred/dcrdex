@@ -426,6 +426,11 @@ func CompatibilityCheck(items *CompatibilityItems, chainParams *chaincfg.Params,
 	}
 
 	// P2SH
+	scriptClass := txscript.GetScriptClass(items.P2SHScript)
+	if scriptClass != txscript.ScriptHashTy {
+		t.Fatalf("wrong script class for p2sh script. wanted %s, got %s", txscript.ScriptHashTy, scriptClass)
+	}
+
 	sh := dexbtc.ExtractScriptHash(items.P2SHScript)
 	if sh == nil {
 		t.Fatalf("incompatible P2SH script")
