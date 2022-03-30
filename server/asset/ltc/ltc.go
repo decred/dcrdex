@@ -44,7 +44,7 @@ func init() {
 }
 
 const (
-	version   = 0
+	version   = 1
 	BipID     = 2
 	assetName = "ltc"
 )
@@ -78,7 +78,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 
 	return btc.NewBTCClone(&btc.BackendCloneConfig{
 		Name:        assetName,
-		Segwit:      false, // TODO: Change to true.
+		Segwit:      true,
 		ConfigPath:  configPath,
 		Logger:      logger,
 		Net:         network,
