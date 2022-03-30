@@ -143,7 +143,6 @@ func (c *contractorV0) redeem(txOpts *bind.TransactOpts, redemptions []*asset.Re
 
 func (c *contractorV0) swap(ctx context.Context, secretHash [32]byte) (*dexeth.SwapState, error) {
 	callOpts := &bind.CallOpts{
-		Pending: true,
 		From:    c.acctAddr,
 		Context: ctx,
 	}
