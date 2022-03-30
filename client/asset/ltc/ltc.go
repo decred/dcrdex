@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	version = 0
+	version = 1
 	// BipID is the BIP-0044 asset ID.
 	BipID = 2
 	// defaultFee is the default value for the fallbackfee.
@@ -165,7 +165,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		DefaultFeeRateLimit: defaultFeeRateLimit,
 		LegacyBalance:       true,
 		LegacyRawFeeLimit:   true,
-		Segwit:              false,
+		Segwit:              true,
 	}
 
 	return btc.BTCCloneWallet(cloneCFG)

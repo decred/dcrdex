@@ -23,17 +23,16 @@ import (
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 )
 
-const alphaAddress = "mt9hgfXXbM3x7hewgEAovBwqoMAAnctJ4V"
+// const alphaAddress = "rltc1qjld4f85m96rr77035c5yuhkz8apxlkkla0ftmz"
 
 var (
-	tLotSize  uint64 = 1e6
-	tRateStep uint64 = 10
-	tLTC             = &dex.Asset{
+	tLotSize uint64 = 1e6
+	tLTC            = &dex.Asset{
 		ID:           2,
 		Symbol:       "ltc",
 		Version:      version,
-		SwapSize:     dexbtc.InitTxSize,
-		SwapSizeBase: dexbtc.InitTxSizeBase,
+		SwapSize:     dexbtc.InitTxSizeSegwit,
+		SwapSizeBase: dexbtc.InitTxSizeBaseSegwit,
 		MaxFeeRate:   10,
 		SwapConf:     1,
 	}
