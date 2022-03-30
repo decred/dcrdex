@@ -3,7 +3,10 @@
 
 package btc
 
-import "github.com/btcsuite/btcd/chaincfg/chainhash"
+import (
+	"github.com/btcsuite/btcd/btcjson"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+)
 
 // Tx is information about a transaction. It must satisfy the asset.DEXTx
 // interface to be DEX-compatible.
@@ -63,4 +66,55 @@ func newTransaction(btc *Backend, txHash, blockHash, lastLookup *chainhash.Hash,
 		feeRate:    feeRate,
 		raw:        rawTx,
 	}
+}
+
+// JoinSplit represents a ZCash JoinSplit.
+// https://zips.z.cash/protocol/canopy.pdf section 4.11
+type JoinSplit struct {
+	// Old = input
+	Old uint64 `json:"vpub_oldZat"`
+	// New = output
+	New uint64 `json:"vpub_newZat"`
+}
+
+// VerboseTxExtended is a subset of *btcjson.TxRawResult, with the addition of
+// some asset-specific fields.
+type VerboseTxExtended struct {
+	Hex           string          `json:"hex"`
+	Txid          string          `json:"txid"`
+	Size          int32           `json:"size,omitempty"`
+	Vsize         int32           `json:"vsize,omitempty"`
+	Vin           []*btcjson.Vin  `json:"vin"`
+	Vout          []*btcjson.Vout `json:"vout"`
+	BlockHash     string          `json:"blockhash,omitempty"`
+	Confirmations uint64          `json:"confirmations,omitempty"`
+
+	// ZCash-specific fields.
+
+	VJoinSplit   []*JoinSplit `json:"vjoinsplit"`
+	ValueBalance int64        `json:"valueBalanceZat"`
+
+	// Other fields that could be used but aren't right now.
+
+	// Hash      string `json:"hash,omitempty"`
+	// Weight    int32  `json:"weight,omitempty"`
+	// Version   uint32 `json:"version"`
+	// LockTime  uint32 `json:"locktime"`
+	// Time      int64  `json:"time,omitempty"`
+	// Blocktime int64  `json:"blocktime,omitempty"`
+}
+
+// ShieldedIO sums the ZCash shielded pool inputs and outputs. Will return
+// zeros for non-ZCash-protocol transactions.
+func (tx *VerboseTxExtended) ShieldedIO() (in, out uint64) {
+	for _, js := range tx.VJoinSplit {
+		in += js.New
+		out += js.Old
+	}
+	if tx.ValueBalance > 0 {
+		in += uint64(tx.ValueBalance)
+	} else if tx.ValueBalance < 0 {
+		out += uint64(-1 * tx.ValueBalance)
+	}
+	return
 }

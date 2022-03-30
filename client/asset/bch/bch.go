@@ -170,28 +170,14 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		// https://gist.github.com/markblundeberg/a3aba3c9d610e59c3c49199f697bc38b#making-unmalleable-smart-contracts
 		// https://github.com/bitcoin/bips/blob/master/bip-0062.mediawiki
 		NonSegwitSigner: rawTxInSigner,
-		// The old allowHighFees bool argument to sendrawtransaction.
-		ArglessChangeAddrRPC: true,
+		OmitAddressType: true,
 		// Bitcoin Cash uses estimatefee instead of estimatesmartfee, and even
 		// then, they modified it from the old Bitcoin Core estimatefee by
 		// removing the confirmation target argument.
 		FeeEstimator: estimateFee,
 	}
 
-	xcWallet, err := btc.BTCCloneWallet(cloneCFG)
-	if err != nil {
-		return nil, err
-	}
-
-	return &BCHWallet{
-		ExchangeWalletFullNode: xcWallet,
-	}, nil
-}
-
-// BCHWallet embeds btc.ExchangeWalletFullNode, but re-implements a couple of
-// methods to perform on-the-fly address translation.
-type BCHWallet struct {
-	*btc.ExchangeWalletFullNode
+	return btc.BTCCloneWallet(cloneCFG)
 }
 
 // rawTxSigner signs the transaction using Bitcoin Cash's custom signature
@@ -242,7 +228,7 @@ func translateTx(btcTx *wire.MsgTx) (*bchwire.MsgTx, error) {
 		return nil, err
 	}
 
-	bchTx := bchwire.NewMsgTx(bchwire.TxVersion)
+	bchTx := new(bchwire.MsgTx)
 	err = bchTx.Deserialize(bytes.NewBuffer(txB))
 	if err != nil {
 		return nil, err

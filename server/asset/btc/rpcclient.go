@@ -6,13 +6,11 @@ package btc
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
 	"sort"
-	"strings"
 
 	"decred.org/dcrdex/dex"
 	"github.com/btcsuite/btcd/btcjson"
@@ -51,9 +49,11 @@ type RPCClient struct {
 	ctx                 context.Context
 	requester           RawRequester
 	booleanGetBlockRPC  bool
+	numericGetRawRPC    bool
 	maxFeeBlocks        int
 	arglessFeeEstimates bool
 	blockDeserializer   func([]byte) (*wire.MsgBlock, error)
+	deserializeTx       func([]byte) (*wire.MsgTx, error)
 }
 
 func (rc *RPCClient) callHashGetter(method string, args anylist) (*chainhash.Hash, error) {
@@ -149,20 +149,36 @@ func (rc *RPCClient) GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool
 }
 
 // GetRawTransaction retrieves tx's information.
-func (rc *RPCClient) GetRawTransaction(txHash *chainhash.Hash) (*btcutil.Tx, error) {
-	var txHex string
-	err := rc.call(methodGetRawTransaction, anylist{txHash.String()}, &txHex)
+func (rc *RPCClient) GetRawTransaction(txHash *chainhash.Hash) ([]byte, error) {
+	var txB dex.Bytes
+	args := anylist{txHash.String(), false}
+	if rc.numericGetRawRPC {
+		args[1] = 0
+	}
+	err := rc.call(methodGetRawTransaction, args, &txB)
 	if err != nil {
 		return nil, err
 	}
-	return btcutil.NewTxFromReader(hex.NewDecoder(strings.NewReader(txHex)))
+	return txB, nil
 }
 
 // GetRawTransactionVerbose retrieves the verbose tx information.
-func (rc *RPCClient) GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.TxRawResult, error) {
-	res := new(btcjson.TxRawResult)
-	return res, rc.call(methodGetRawTransaction, anylist{txHash.String(),
-		true}, res)
+func (rc *RPCClient) GetRawTransactionVerbose(txHash *chainhash.Hash) (*VerboseTxExtended, error) {
+	args := anylist{txHash.String(), true}
+	if rc.numericGetRawRPC {
+		args[1] = 1
+	}
+	res := new(VerboseTxExtended)
+	return res, rc.call(methodGetRawTransaction, args, res)
+}
+
+// GetBlockVerboseResult is a subset of *btcjson.GetBlockVerboseResult.
+type GetBlockVerboseResult struct {
+	Hash          string   `json:"hash"`
+	Confirmations int64    `json:"confirmations"`
+	Height        int64    `json:"height"`
+	Tx            []string `json:"tx,omitempty"`
+	PreviousHash  string   `json:"previousblockhash"`
 }
 
 func (rc *RPCClient) GetBlock(blockHash *chainhash.Hash) (*wire.MsgBlock, error) {
@@ -211,12 +227,12 @@ func (rc *RPCClient) getBlockWithVerboseHeader(blockHash *chainhash.Hash) (*wire
 }
 
 // GetBlockVerbose fetches verbose block data for the block with the given hash.
-func (rc *RPCClient) GetBlockVerbose(blockHash *chainhash.Hash) (*btcjson.GetBlockVerboseResult, error) {
+func (rc *RPCClient) GetBlockVerbose(blockHash *chainhash.Hash) (*GetBlockVerboseResult, error) {
 	arg := interface{}(1)
 	if rc.booleanGetBlockRPC {
 		arg = true
 	}
-	res := new(btcjson.GetBlockVerboseResult)
+	res := new(GetBlockVerboseResult)
 	return res, rc.call(methodGetBlock, anylist{blockHash.String(), arg}, res)
 }
 
@@ -362,11 +378,14 @@ out:
 			return 0, context.Canceled
 		}
 
-		utilTx, err := rc.GetRawTransaction(&txHash)
+		txB, err := rc.GetRawTransaction(&txHash)
 		if err != nil {
-			return 0, fmt.Errorf("GetRawTransaction error: %v", err)
+			return 0, fmt.Errorf("GetRawTransaction error: %w", err)
 		}
-		tx := utilTx.MsgTx()
+		tx, err := rc.deserializeTx(txB)
+		if err != nil {
+			return 0, fmt.Errorf("error deserializing tx: %w", err)
+		}
 		for vout := range prevs {
 			if len(tx.TxOut) < vout+1 {
 				return 0, fmt.Errorf("too few outputs")
@@ -432,6 +451,7 @@ func (rc *RPCClient) call(method string, args anylist, thing interface{}) error 
 	if err != nil {
 		return fmt.Errorf("rawrequest error: %w", err)
 	}
+
 	if thing != nil {
 		return json.Unmarshal(b, thing)
 	}

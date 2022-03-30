@@ -18,7 +18,8 @@ const BipIDs = {
   28: 'vtc',
   3: 'doge',
   145: 'bch',
-  60: 'eth'
+  60: 'eth',
+  133: 'zec'
 }
 
 const BipSymbols = Object.values(BipIDs)

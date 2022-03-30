@@ -25,6 +25,7 @@ import (
 
 const (
 	methodGetBalances        = "getbalances"
+	methodGetBalance         = "getbalance"
 	methodListUnspent        = "listunspent"
 	methodLockUnspent        = "lockunspent"
 	methodListLockUnspent    = "listlockunspent"
@@ -75,8 +76,6 @@ type rpcCore struct {
 	segwit                   bool
 	decodeAddr               dexbtc.AddressDecoder
 	stringAddr               dexbtc.AddressStringer
-	deserializeBlock         func([]byte) (*wire.MsgBlock, error)
-	arglessChangeAddrRPC     bool
 	legacyRawSends           bool
 	minNetworkVersion        uint64
 	log                      dex.Logger
@@ -84,8 +83,13 @@ type rpcCore struct {
 	omitAddressType          bool
 	legacySignTx             bool
 	booleanGetBlock          bool
-	legacyValidateAddressRPC bool
 	unlockSpends             bool
+	deserializeTx            func([]byte) (*wire.MsgTx, error)
+	serializeTx              func(*wire.MsgTx) ([]byte, error)
+	deserializeBlock         func([]byte) (*wire.MsgBlock, error)
+	hashTx                   func(*wire.MsgTx) *chainhash.Hash
+	numericGetRawTxRPC       bool
+	legacyValidateAddressRPC bool
 }
 
 // rpcClient is a bitcoind JSON RPC client that uses rpcclient.Client's
@@ -141,7 +145,7 @@ func (wc *rpcClient) estimateSmartFee(confTarget int64, mode *btcjson.EstimateSm
 // SendRawTransactionLegacy broadcasts the transaction with an additional legacy
 // boolean `allowhighfees` argument set to false.
 func (wc *rpcClient) SendRawTransactionLegacy(tx *wire.MsgTx) (*chainhash.Hash, error) {
-	txBytes, err := serializeMsgTx(tx)
+	txBytes, err := wc.serializeTx(tx)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +156,7 @@ func (wc *rpcClient) SendRawTransactionLegacy(tx *wire.MsgTx) (*chainhash.Hash, 
 
 // SendRawTransaction broadcasts the transaction.
 func (wc *rpcClient) SendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) {
-	b, err := serializeMsgTx(tx)
+	b, err := wc.serializeTx(tx)
 	if err != nil {
 		return nil, err
 	}
@@ -305,12 +309,16 @@ func (wc *rpcClient) GetRawMempool() ([]*chainhash.Hash, error) {
 // GetRawTransaction retrieves the MsgTx.
 func (wc *rpcClient) GetRawTransaction(txHash *chainhash.Hash) (*wire.MsgTx, error) {
 	var txB dex.Bytes
-	err := wc.call(methodGetRawTransaction, anylist{txHash.String(), false}, &txB)
+	args := anylist{txHash.String(), false}
+	if wc.numericGetRawTxRPC {
+		args[1] = 0
+	}
+	err := wc.call(methodGetRawTransaction, args, &txB)
 	if err != nil {
 		return nil, err
 	}
-	tx := wire.NewMsgTx(wire.TxVersion)
-	return tx, tx.Deserialize(bytes.NewReader(txB))
+
+	return wc.deserializeTx(txB)
 }
 
 // balances retrieves a wallet's balance details.
@@ -359,7 +367,7 @@ func (wc *rpcClient) changeAddress() (btcutil.Address, error) {
 	var addrStr string
 	var err error
 	switch {
-	case wc.arglessChangeAddrRPC:
+	case wc.omitAddressType:
 		err = wc.call(methodChangeAddress, nil, &addrStr)
 	case wc.segwit:
 		err = wc.call(methodChangeAddress, anylist{"bech32"}, &addrStr)
@@ -401,7 +409,7 @@ func (wc *rpcClient) address(aType string) (btcutil.Address, error) {
 
 // signTx attempts to have the wallet sign the transaction inputs.
 func (wc *rpcClient) signTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
-	txBytes, err := serializeMsgTx(inTx)
+	txBytes, err := wc.serializeTx(inTx)
 	if err != nil {
 		return nil, fmt.Errorf("tx serialization error: %w", err)
 	}
@@ -423,7 +431,7 @@ func (wc *rpcClient) signTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
 		}
 		return nil, fmt.Errorf("signing incomplete. %d signing errors encountered: %s", len(res.Errors), errMsg)
 	}
-	outTx, err := msgTxFromBytes(res.Hex)
+	outTx, err := wc.deserializeTx(res.Hex)
 	if err != nil {
 		return nil, fmt.Errorf("error deserializing transaction response: %w", err)
 	}
@@ -495,7 +503,7 @@ func (wc *rpcClient) GetWalletInfo() (*GetWalletInfoResult, error) {
 }
 
 // GetAddressInfo gets information about the given address by calling
-// getaddressinfo or validateaddress RPC command.
+// getaddressinfo RPC command.
 func (wc *rpcClient) getAddressInfo(addr btcutil.Address, method string) (*GetAddressInfoResult, error) {
 	ai := new(GetAddressInfoResult)
 	addrStr, err := wc.stringAddr(addr, wc.chainParams)
@@ -534,7 +542,7 @@ func (wc *rpcClient) syncStatus() (*syncStatus, error) {
 	return &syncStatus{
 		Target:  int32(chainInfo.Headers),
 		Height:  int32(chainInfo.Blocks),
-		Syncing: chainInfo.InitialBlockDownload || chainInfo.Headers-chainInfo.Blocks > 1,
+		Syncing: chainInfo.syncing(),
 	}, nil
 }
 
@@ -651,7 +659,7 @@ func (wc *rpcClient) findRedemptionsInMempool(ctx context.Context, reqs map[outP
 			logAbandon(fmt.Sprintf("getrawtransaction error for tx hash %v: %v", txHash, err))
 			return
 		}
-		newlyDiscovered := findRedemptionsInTx(ctx, wc.segwit, reqs, tx, wc.chainParams)
+		newlyDiscovered := findRedemptionsInTxWithHasher(ctx, wc.segwit, reqs, tx, wc.chainParams, wc.hashTx)
 		for outPt, res := range newlyDiscovered {
 			discovered[outPt] = res
 		}
@@ -672,7 +680,7 @@ func (wc *rpcClient) searchBlockForRedemptions(ctx context.Context, reqs map[out
 	discovered = make(map[outPoint]*findRedemptionResult, len(reqs))
 
 	for _, msgTx := range msgBlock.Transactions {
-		newlyDiscovered := findRedemptionsInTx(ctx, wc.segwit, reqs, msgTx, wc.chainParams)
+		newlyDiscovered := findRedemptionsInTxWithHasher(ctx, wc.segwit, reqs, msgTx, wc.chainParams, wc.hashTx)
 		for outPt, res := range newlyDiscovered {
 			discovered[outPt] = res
 		}
@@ -713,35 +721,11 @@ func serializeMsgTx(msgTx *wire.MsgTx) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// msgTxFromHex creates a wire.MsgTx by deserializing the hex-encoded
-// transaction.
-func msgTxFromHex(txHex string) (*wire.MsgTx, error) {
-	b, err := hex.DecodeString(txHex)
-	if err != nil {
-		return nil, err
-	}
-	return msgTxFromBytes(b)
-}
-
 // msgTxFromBytes creates a wire.MsgTx by deserializing the transaction.
 func msgTxFromBytes(txB []byte) (*wire.MsgTx, error) {
-	msgTx := wire.NewMsgTx(wire.TxVersion)
+	msgTx := new(wire.MsgTx)
 	if err := msgTx.Deserialize(bytes.NewReader(txB)); err != nil {
 		return nil, err
 	}
 	return msgTx, nil
-}
-
-// txOutFromTxBytes parses the specified *wire.TxOut from the serialized
-// transaction.
-func txOutFromTxBytes(txB []byte, vout uint32) (*wire.TxOut, error) {
-	msgTx, err := msgTxFromBytes(txB)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding transaction bytes: %v", err)
-	}
-
-	if len(msgTx.TxOut) <= int(vout) {
-		return nil, fmt.Errorf("no vout %d in tx %s", vout, msgTx.TxHash())
-	}
-	return msgTx.TxOut[vout], nil
 }

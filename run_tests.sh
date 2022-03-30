@@ -57,6 +57,8 @@ go test "${dumptags[@]}" dcrlive ./server/asset/dcr
 go test "${dumptags[@]}" btclive ./server/asset/btc
 go test "${dumptags[@]}" ltclive ./server/asset/ltc
 go test "${dumptags[@]}" bchlive ./server/asset/bch
+go test "${dumptags[@]}" dogelive ./server/asset/doge
+go test "${dumptags[@]}" zeclive ./server/asset/zec
 go test "${dumptags[@]}" harness,lgpl ./server/asset/eth
 go test "${dumptags[@]}" pgonline ./server/db/driver/pg
 

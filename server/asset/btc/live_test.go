@@ -43,7 +43,9 @@
 package btc
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"testing"
@@ -60,16 +62,32 @@ var (
 )
 
 func TestGetRawTransaction(t *testing.T) {
-	hash, err := chainhash.NewHashFromStr("79275472daabf4e79ef4dea9402841e61743e0080d4dd26a74819cfd64acadf9")
+	expTxB, _ := hex.DecodeString("010000000001017d2cc6700c20cb64879eab415a0f3ba0b" +
+		"d6c51bb2d95e3cc09a8f24c52d0335d0100000000ffffffff02ac2c15000000000017a" +
+		"91431ab6a773ae3e4c857dea6db96ca513a96369f27879364f60100000000220020f52" +
+		"e2cb266ee5919630b79207a3c946f655267eff4a1d3d829a17b5804320649050048304" +
+		"502210088128c387df6642fe56275722dc2a700535eeab88ef1a5ca077815ff538b83e" +
+		"4022010dc3cb58bac19613b69345fed923ff204b36d84d3c325df3ba63f5bab42198b0" +
+		"147304402201bb828e28c5e91fa9af8c80451ee390006f10eded73156d4e7b71937d32" +
+		"76ef102207e28c40aba395b5962d8fb1bfbcf4008888ac44b4c1b85827965ef0c69759" +
+		"e4701483045022100f2c4a38556127f879fe205e7d325a445033e413dbac5fec99e858" +
+		"133b1f37e2602201cd0cde48637beb036b507ee21b387103ff9d93751b6aac51ed4d02" +
+		"77fff78ef018b53210288f5e79b55ab76d7c263628fad475bd4cc4cee466acced9b41f" +
+		"d3a5cb71233a22102b976a06ed75f1931a303f587ccb2b9f18fe07c9d6aaceadb353ef" +
+		"945579e93d52102d5c87f884d6b828e9786d49b4cee87c72e589b14e1668f4dcd40dd2" +
+		"25be16a8621035eca61acb63c8738d5bccd57fb6544ca77dbc13593ce3e6754f8db563" +
+		"05bf16b54ae00000000")
+
+	txHash, err := chainhash.NewHashFromStr("79275472daabf4e79ef4dea9402841e61743e0080d4dd26a74819cfd64acadf9")
 	if err != nil {
 		t.Fatal(err)
 	}
-	tx, err := btc.node.GetRawTransaction(hash)
+	txB, err := btc.node.GetRawTransaction(txHash)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := tx.MsgTx().TxHash(); got != *hash {
-		t.Errorf("Got tx id %v, expected %v", got, hash)
+	if !bytes.Equal(txB, expTxB) {
+		t.Errorf("wrong tx bytes")
 	}
 }
 

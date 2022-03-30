@@ -54,6 +54,9 @@ LTC_ON=$?
 ~/dextest/doge/harness-ctl/alpha getblockchaininfo &> /dev/null
 DOGE_ON=$?
 
+~/dextest/zec/harness-ctl/alpha getblockchaininfo &> /dev/null
+ZEC_ON=$?
+
 ~/dextest/eth/harness-ctl/alpha attach --exec 'eth.blockNumber' > /dev/null
 ETH_ON=$?
 
@@ -130,6 +133,20 @@ EOF
 else echo "WARNING: Dogecoin is not running. Configuring dcrdex markets without DOGE."
 fi
 
+if [ $ZEC_ON -eq 0 ]; then
+    cat << EOF >> "./markets.json"
+        },
+        {
+            "base": "ZEC_simnet",
+            "quote": "BTC_simnet",
+            "lotSize": 100000000,
+            "rateStep": 100000,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2
+EOF
+else echo "WARNING: ZCash is not running. Configuring dcrdex markets without ZEC."
+fi
+
 cat << EOF >> "./markets.json"
     }
     ],
@@ -200,6 +217,18 @@ if [ $DOGE_ON -eq 0 ]; then
             "maxFeeRate": 40000,
             "swapConf": 2,
             "configPath": "${TEST_ROOT}/doge/alpha/alpha.conf"
+EOF
+fi
+
+if [ $ZEC_ON -eq 0 ]; then
+    cat << EOF >> "./markets.json"
+         },
+        "ZEC_simnet": {
+            "bip44symbol": "zec",
+            "network": "simnet",
+            "maxFeeRate": 200,
+            "swapConf": 1,
+            "configPath": "${TEST_ROOT}/zec/alpha/zcash.conf"
 EOF
 fi
 

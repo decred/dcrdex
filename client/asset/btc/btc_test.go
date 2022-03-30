@@ -554,6 +554,16 @@ func makeTxHex(pkScripts []dex.Bytes, inputs []*wire.TxIn) ([]byte, error) {
 	return txBuf.Bytes(), nil
 }
 
+// msgTxFromHex creates a wire.MsgTx by deserializing the hex-encoded
+// transaction.
+func msgTxFromHex(txHex string) (*wire.MsgTx, error) {
+	b, err := hex.DecodeString(txHex)
+	if err != nil {
+		return nil, err
+	}
+	return msgTxFromBytes(b)
+}
+
 func makeRPCVin(txHash *chainhash.Hash, vout uint32, sigScript []byte, witness [][]byte) *wire.TxIn {
 	var rpcWitness []string
 	for _, b := range witness {
