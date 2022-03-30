@@ -2080,8 +2080,11 @@ func TestSwapConfirmation(t *testing.T) {
 
 	ver := uint32(0)
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	checkResult := func(expErr bool, expConfs uint32, expSpent bool) {
-		confs, spent, err := eth.SwapConfirmations(nil, nil, dexeth.EncodeContractData(ver, secretHash), time.Time{})
+		confs, spent, err := eth.SwapConfirmations(ctx, nil, dexeth.EncodeContractData(ver, secretHash), time.Time{})
 		if err != nil {
 			if expErr {
 				return
@@ -2115,7 +2118,7 @@ func TestSwapConfirmation(t *testing.T) {
 
 	// ErrSwapNotInitiated
 	state.State = dexeth.SSNone
-	_, _, err := eth.SwapConfirmations(nil, nil, dexeth.EncodeContractData(0, secretHash), time.Time{})
+	_, _, err := eth.SwapConfirmations(ctx, nil, dexeth.EncodeContractData(0, secretHash), time.Time{})
 	if !errors.Is(err, asset.ErrSwapNotInitiated) {
 		t.Fatalf("expected ErrSwapNotInitiated, got %v", err)
 	}

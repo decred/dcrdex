@@ -65,6 +65,10 @@ const (
 
 	walletTypeDcrwRPC = "dcrwalletRPC"
 	walletTypeLegacy  = "" // dcrwallet RPC prior to wallet types
+
+	// confCheckTimeout is the amount of time allowed to check for
+	// confirmations.
+	confCheckTimeout = 2 * time.Second
 )
 
 var (
@@ -2608,6 +2612,9 @@ func (dcr *ExchangeWallet) SwapConfirmations(ctx context.Context, coinID, contra
 	if err != nil {
 		return 0, false, err
 	}
+
+	ctx, cancel := context.WithTimeout(ctx, confCheckTimeout)
+	defer cancel()
 
 	// Check if we can find the contract onchain without using cfilters.
 	_, confs, spent, err = dcr.lookupTxOutput(ctx, txHash, vout)

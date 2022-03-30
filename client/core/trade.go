@@ -26,8 +26,6 @@ import (
 	"decred.org/dcrdex/dex/wait"
 )
 
-const confCheckTimeout = 2 * time.Second
-
 // ExpirationErr indicates that the wait.TickerQueue has expired a waiter, e.g.
 // a reported coin was not found before the set expiration time.
 type ExpirationErr string

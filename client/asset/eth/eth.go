@@ -63,6 +63,11 @@ const (
 	defaultSendGasLimit = 21_000
 
 	walletTypeGeth = "geth"
+
+	// confCheckTimeout is the amount of time allowed to check for
+	// confirmations. Testing on testnet has shown spikes up to 2.5
+	// seconds. This value may need to be adjusted in the future.
+	confCheckTimeout = 4 * time.Second
 )
 
 var (
@@ -1280,6 +1285,9 @@ func (eth *ExchangeWallet) SwapConfirmations(ctx context.Context, _ dex.Bytes, c
 	if err != nil {
 		return 0, false, err
 	}
+
+	ctx, cancel := context.WithTimeout(ctx, confCheckTimeout)
+	defer cancel()
 
 	hdr, err := eth.node.bestHeader(ctx)
 	if err != nil {
