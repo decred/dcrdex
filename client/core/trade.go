@@ -214,9 +214,9 @@ func (t *trackedTrade) accountRefunder() (asset.AccountLocker, bool) {
 	return ar, is
 }
 
-// lockRedemptionFraction locks the specified fraction of the available
+// lockRefundFraction locks the specified fraction of the available
 // refund reserves. Subsequent calls are additive. If a call to
-// lockRedemptionFraction would put the locked reserves > available reserves,
+// lockRefundFraction would put the locked reserves > available reserves,
 // nothing will be reserved, and an error message is logged.
 func (t *trackedTrade) lockRefundFraction(num, denom uint64) {
 	refunder, is := t.accountRefunder()
@@ -1971,26 +1971,11 @@ func (c *Core) redeemMatches(t *trackedTrade, matches []*matchTracker) error {
 func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *errorSet) {
 	// Collect an asset.Redemption for each match into a slice of redemptions that
 	// will be grouped into a single transaction.
-	matchReserved := func(uint64) uint64 { return 0 }
-	if t.redemptionReserves > 0 {
-		if t.isMarketBuy() {
-			r := applyFraction(1, uint64(len(t.matches)), t.redemptionReserves)
-			matchReserved = func(uint64) uint64 {
-				return r
-			}
-		} else {
-			matchReserved = func(matchQty uint64) uint64 {
-				return applyFraction(matchQty, t.Trade().Quantity, t.redemptionReserves)
-			}
-		}
-	}
-
 	redemptions := make([]*asset.Redemption, 0, len(matches))
 	for _, match := range matches {
 		redemptions = append(redemptions, &asset.Redemption{
-			Spends:           match.counterSwap,
-			Secret:           match.MetaData.Proof.Secret,
-			UnlockedReserves: matchReserved(match.Quantity),
+			Spends: match.counterSwap,
+			Secret: match.MetaData.Proof.Secret,
 		})
 	}
 
@@ -2087,6 +2072,8 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 			match.Status = order.MatchComplete
 			proof.TakerRedeem = coinID
 		} else {
+			// If we are taker we already released the refund
+			// reserves when maker's redemption was found.
 			if t.isMarketBuy() {
 				t.unlockRefundFraction(1, uint64(len(t.matches)))
 			} else {
@@ -2094,6 +2081,11 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 			}
 			match.Status = order.MakerRedeemed
 			proof.MakerRedeem = coinID
+		}
+		if t.isMarketBuy() {
+			t.unlockRedemptionFraction(1, uint64(len(t.matches)))
+		} else {
+			t.unlockRedemptionFraction(match.Quantity, t.Trade().Quantity)
 		}
 		if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
 			errs.add("error storing swap details in database for match %s, coin %s: %v",

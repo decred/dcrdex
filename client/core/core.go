@@ -5948,10 +5948,14 @@ func (c *Core) listen(dc *dexConnection) {
 			for _, trade := range doneTrades {
 				// Log an error if redemption funds are still reserved.
 				trade.mtx.RLock()
-				reserved := trade.redemptionLocked
+				redeemLocked := trade.redemptionLocked
+				refundLocked := trade.refundLocked
 				trade.mtx.RUnlock()
-				if reserved > 0 {
-					dc.log.Errorf("retiring order %s with %d > 0 redemption funds reserved", trade.ID(), reserved)
+				if redeemLocked > 0 {
+					dc.log.Errorf("retiring order %s with %d > 0 redemption funds locked", trade.ID(), redeemLocked)
+				}
+				if refundLocked > 0 {
+					dc.log.Errorf("retiring order %s with %d > 0 refund funds locked", trade.ID(), refundLocked)
 				}
 
 				c.notify(newOrderNote(TopicOrderRetired, "", "", db.Data, trade.coreOrder()))
