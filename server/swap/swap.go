@@ -382,6 +382,12 @@ func (s *Swapper) deleteMatch(mt *matchTracker) {
 	mid := mt.ID()
 	delete(s.matches, mid)
 
+	// Unlock the maker and taker order coins. May be redundant if processBlock
+	// confirmed both swaps, but premature/quick counterparty actions that
+	// advance match status first prevent that.
+	s.unlockOrderCoins(mt.Maker)
+	s.unlockOrderCoins(mt.Taker)
+
 	// Remove the match from both maker's and taker's match maps.
 	maker, taker := mt.Maker.User(), mt.Taker.User()
 	for _, user := range []account.AccountID{maker, taker} {
@@ -2078,9 +2084,6 @@ func (s *Swapper) revoke(match *matchTracker) {
 	route := msgjson.RevokeMatchRoute
 	log.Infof("Sending a '%s' notification to each client for match %v",
 		route, match.ID())
-	// Unlock the maker and taker order coins.
-	s.unlockOrderCoins(match.Taker)
-	s.unlockOrderCoins(match.Maker)
 
 	sendRev := func(mid order.MatchID, ord order.Order) {
 		msg := &msgjson.RevokeMatch{
