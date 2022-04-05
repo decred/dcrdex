@@ -401,8 +401,8 @@ func (s *Swapper) deleteMatch(mt *matchTracker) {
 // specified market. This helps the market compute a user's order size limit.
 func (s *Swapper) UserSwappingAmt(user account.AccountID, base, quote uint32) (amt, count uint64) {
 	s.matchMtx.RLock()
-	defer s.matchMtx.RUnlock()
 	um, found := s.userMatches[user]
+	s.matchMtx.RUnlock()
 	if !found {
 		return
 	}
@@ -897,19 +897,30 @@ func bufferedTicker(ctx context.Context, dur time.Duration) chan struct{} {
 }
 
 func (s *Swapper) tryConfirmSwap(ctx context.Context, status *swapStatus, confTime time.Time) (final bool) {
-	status.mtx.Lock()
-	defer status.mtx.Unlock()
-	if status.swapTime.IsZero() || !status.swapConfirmed.IsZero() {
-		return
+	status.mtx.RLock()
+	if status.swapTime.IsZero() {
+		status.mtx.RUnlock()
+		return // no swap yet to confirm
 	}
+	if !status.swapConfirmed.IsZero() {
+		status.mtx.RUnlock()
+		return true // already confirmed
+	}
+	status.mtx.RUnlock() // Contract.Confirmations can timeout (slow), causing lock contention
+
 	confs, err := status.swap.Confirmations(ctx)
 	if err != nil {
 		log.Warnf("Unable to get confirmations for swap tx %v: %v", status.swap.TxID(), err)
 		return
 	}
-	// If a swapStatus was created, the asset.Asset is already known to be in
-	// the map.
-	swapConf := s.coins[status.swapAsset].SwapConf
+
+	status.mtx.Lock()
+	defer status.mtx.Unlock()
+	if !status.swapConfirmed.IsZero() { // in case a concurrent check already marked it
+		return true
+	}
+
+	swapConf := s.coins[status.swapAsset].SwapConf // swapStatus exists, therefore swapAsset is in the map
 	if confs >= int64(swapConf) {
 		log.Debugf("Swap %v (%s) has reached %d confirmations (%d required)",
 			status.swap, dex.BipIDSymbol(status.swapAsset), confs, swapConf)
@@ -919,14 +930,24 @@ func (s *Swapper) tryConfirmSwap(ctx context.Context, status *swapStatus, confTi
 	return
 }
 
-// processBlock scans the matches and updates match status based on number of
-// confirmations. Once a relevant transaction has the requisite number of
-// confirmations, the next-to-act has only duration (Swapper).bTimeout to
-// broadcast the next transaction in the settlement sequence. The timeout is
-// not evaluated here, but in (Swapper).checkInaction. This method simply sets
-// the appropriate flags in the swapStatus structures.
+func (s *Swapper) matchSlice() []*matchTracker {
+	s.matchMtx.RLock()
+	defer s.matchMtx.RUnlock()
+	matches := make([]*matchTracker, 0, len(s.matches))
+	for _, match := range s.matches {
+		matches = append(matches, match)
+	}
+	return matches
+}
+
+// processBlock scans the matches and updates a swapConfirmed time if the
+// required confirmations are reached. Once a relevant transaction has the
+// requisite number of confirmations, the next-to-act has only duration
+// (Swapper).bTimeout to broadcast the next transaction in the settlement
+// sequence. The timeout is not evaluated here, but in (Swapper).checkInaction.
+// This method simply sets swapConfirmed in the last actor's swapStatus.
 func (s *Swapper) processBlock(ctx context.Context, block *blockNotification) {
-	checkMatch := func(match *matchTracker) {
+	for _, match := range s.matchSlice() {
 		// If it's neither of the match assets, nothing to do.
 		if match.makerStatus.swapAsset != block.assetID &&
 			match.takerStatus.swapAsset != block.assetID {
@@ -943,8 +964,9 @@ func (s *Swapper) processBlock(ctx context.Context, block *blockNotification) {
 			if match.makerStatus.swapAsset != block.assetID {
 				break
 			}
-			// If the maker has broadcast their transaction, the taker's broadcast
-			// timeout starts once the maker's swap has SwapConf confs.
+			// If the maker has broadcast their transaction, the taker's
+			// broadcast timeout starts once the maker's swap has SwapConf
+			// confs.
 			if s.tryConfirmSwap(ctx, match.makerStatus, block.time) {
 				s.unlockOrderCoins(match.Maker)
 			}
@@ -952,19 +974,13 @@ func (s *Swapper) processBlock(ctx context.Context, block *blockNotification) {
 			if match.takerStatus.swapAsset != block.assetID {
 				break
 			}
-			// If the taker has broadcast their transaction, the maker's broadcast
-			// timeout (for redemption) starts once the maker's swap has SwapConf
-			// confs.
+			// If the taker has broadcast their transaction, the maker's
+			// broadcast timeout (for redemption) starts once the taker's swap
+			// has SwapConf confs.
 			if s.tryConfirmSwap(ctx, match.takerStatus, block.time) {
 				s.unlockOrderCoins(match.Taker)
 			}
 		}
-	}
-
-	s.matchMtx.Lock()
-	defer s.matchMtx.Unlock()
-	for _, match := range s.matches {
-		checkMatch(match)
 	}
 }
 
@@ -1026,6 +1042,11 @@ func (s *Swapper) failMatch(match *matchTracker, userFault bool) {
 	s.revoke(match)
 }
 
+type fail struct {
+	match *matchTracker
+	fault bool
+}
+
 // checkInactionEventBased scans the swapStatus structures, checking for actions
 // that are expected in a time frame relative to another event that is not a
 // confirmation time. If a client is found to have not acted when required, a
@@ -1040,7 +1061,7 @@ func (s *Swapper) checkInactionEventBased() {
 		return
 	}
 
-	var deletions []*matchTracker
+	var failures []fail
 
 	// Do time.Since(event) with the same now time for each match.
 	now := time.Now()
@@ -1056,9 +1077,9 @@ func (s *Swapper) checkInactionEventBased() {
 
 		log.Tracef("checkInactionEventBased: match %v (%v)", match.ID(), match.Status)
 
-		failMatch := func(fault bool) {
-			s.failMatch(match, fault)
-			deletions = append(deletions, match)
+		deleteMatch := func(fault bool) {
+			s.deleteMatch(match)
+			failures = append(failures, fail{match, fault}) // to process after map delete
 		}
 
 		switch match.Status {
@@ -1066,7 +1087,7 @@ func (s *Swapper) checkInactionEventBased() {
 			// Maker has not broadcast their swap. They have until match time
 			// plus bTimeout.
 			if tooOld(match.time) {
-				failMatch(true)
+				deleteMatch(true)
 			}
 		case order.MakerSwapCast:
 			// If the taker contract's expected lock time would be in the past,
@@ -1075,38 +1096,43 @@ func (s *Swapper) checkInactionEventBased() {
 			if expectedTakerLockTime.Before(now) {
 				log.Infof("Revoking match %v at %v because the expected taker swap locktime would be in the past (%v).",
 					match.ID(), match.Status, expectedTakerLockTime)
-				failMatch(false)
+				deleteMatch(false)
+			} else if match.expiredBy(now) {
+				// The taker's contract should expire first, but also check the
+				// lock time of the maker's known swap.
+				log.Warnf("Revoking match %v at %v because maker's published contract has expired.",
+					match.ID(), match.Status) // WRN because taker's should expire first
+				deleteMatch(false)
 			}
-			// The taker's contract should expire first, but also check the lock
-			// time of the maker's known swap.
-			fallthrough
 		case order.TakerSwapCast:
 			// If either published contract's lock time is already passed,
 			// revoke with no penalty because the swap cannot complete safely.
 			if match.expiredBy(now) {
 				log.Infof("Revoking match %v at %v because at least one published contract has expired.",
 					match.ID(), match.Status)
-				failMatch(false)
+				deleteMatch(false)
 			}
 		case order.MakerRedeemed:
 			// If the maker has redeemed, the taker can redeem immediately, so
 			// check the timeout against the time the Swapper received the
 			// maker's `redeem` request (and sent the taker's 'redemption').
-			if tooOld(match.makerStatus.redeemSeenTime()) {
-				failMatch(true)
+			if tooOld(match.makerStatus.redeemSeenTime()) { // rlocks swapStatus.mtx
+				deleteMatch(true)
 			}
 		}
 	}
 
+	// Check and delete atomically
 	s.matchMtx.Lock()
-	defer s.matchMtx.Unlock()
-
 	for _, match := range s.matches {
 		checkMatch(match)
 	}
+	s.matchMtx.Unlock()
 
-	for _, match := range deletions {
-		s.deleteMatch(match)
+	// Record failed matches in the DB and auth mgr, unlock coins, and send
+	// revoke_match messages.
+	for _, fail := range failures {
+		s.failMatch(fail.match, fail.fault)
 	}
 }
 
@@ -1124,7 +1150,7 @@ func (s *Swapper) checkInactionBlockBased(assetID uint32) {
 		return
 	}
 
-	var deletions []*matchTracker
+	var failures []fail
 	// Do time.Since(event) with the same now time for each match.
 	now := time.Now()
 	tooOld := func(evt time.Time) bool {
@@ -1145,33 +1171,35 @@ func (s *Swapper) checkInactionBlockBased(assetID uint32) {
 		log.Tracef("checkInactionBlockBased: asset %d, match %v (%v)",
 			assetID, match.ID(), match.Status)
 
-		failMatch := func() {
+		deleteMatch := func() {
 			// Fail the match, and assign fault if lock times are not passed.
-			s.failMatch(match, !match.expiredBy(now))
-			deletions = append(deletions, match)
+			s.deleteMatch(match)
+			failures = append(failures, fail{match, !match.expiredBy(now)})
 		}
 
 		switch match.Status {
 		case order.MakerSwapCast:
-			if tooOld(match.makerStatus.swapConfTime()) {
-				failMatch()
+			if tooOld(match.makerStatus.swapConfTime()) { // rlocks swapStatus.mtx
+				deleteMatch()
 			}
 		case order.TakerSwapCast:
 			if tooOld(match.takerStatus.swapConfTime()) {
-				failMatch()
+				deleteMatch()
 			}
 		}
 	}
 
+	// Check and delete atomically.
 	s.matchMtx.Lock()
-	defer s.matchMtx.Unlock()
-
 	for _, match := range s.matches {
 		checkMatch(match)
 	}
+	s.matchMtx.Unlock()
 
-	for _, match := range deletions {
-		s.deleteMatch(match)
+	// Record failed matches in the DB and auth mgr, unlock coins, and send
+	// revoke_match messages.
+	for _, fail := range failures {
+		s.failMatch(fail.match, fail.fault)
 	}
 }
 
@@ -2060,15 +2088,15 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 		// Store the signature in the matchTracker. These must be collected
 		// before the init steps begin and swap contracts are broadcasted.
 		match.mtx.Lock()
-		log.Debugf("processMatchAcks: storing valid 'match' ack signature from %v (maker=%v) "+
-			"for match %v (status %v)", user, matchInfo.isMaker, matchID, match.Status)
+		status := match.Status
 		if matchInfo.isMaker {
 			match.Sigs.MakerMatch = ack.Sig
 		} else {
 			match.Sigs.TakerMatch = ack.Sig
 		}
 		match.mtx.Unlock()
-
+		log.Debugf("processMatchAcks: storing valid 'match' ack signature from %v (maker=%v) "+
+			"for match %v (status %v)", user, matchInfo.isMaker, matchID, status)
 	}
 
 	// Store the signatures in the DB.
