@@ -486,7 +486,8 @@ func (w *rpcWallet) ExternalAddress(ctx context.Context, acctName string) (stdad
 
 // SignRawTransaction signs the provided transaction using rpc RawRequest.
 // Part of the Wallet interface.
-func (w *rpcWallet) SignRawTransaction(ctx context.Context, baseTx *wire.MsgTx) (*wire.MsgTx, error) {
+func (w *rpcWallet) SignRawTransaction(ctx context.Context, inTx *wire.MsgTx) (*wire.MsgTx, error) {
+	baseTx := inTx.Copy()
 	txHex, err := msgTxToHex(baseTx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode MsgTx: %w", err)
@@ -594,33 +595,34 @@ func (w *rpcWallet) GetBlockHash(ctx context.Context, blockHeight int64) (*chain
 	return bh, translateRPCCancelErr(err)
 }
 
-// BlockFilter fetches the block filter info for the specified block.
+// MatchAnyScript looks for any of the provided scripts in the block specified.
 // Part of the Wallet interface.
-func (w *rpcWallet) BlockFilter(ctx context.Context, blockHash *chainhash.Hash) ([gcs.KeySize]byte, *gcs.FilterV2, error) {
+func (w *rpcWallet) MatchAnyScript(ctx context.Context, blockHash *chainhash.Hash, scripts [][]byte) (bool, error) {
 	var cfRes walletjson.GetCFilterV2Result
 	err := w.rpcClientRawRequest(ctx, methodGetCFilterV2, anylist{blockHash.String()}, &cfRes)
 	if err != nil {
-		return [gcs.KeySize]byte{}, nil, err
+		return false, err
 	}
 
 	bf, key := cfRes.Filter, cfRes.Key
 	filterB, err := hex.DecodeString(bf)
 	if err != nil {
-		return [gcs.KeySize]byte{}, nil, fmt.Errorf("error decoding block filter: %w", err)
+		return false, fmt.Errorf("error decoding block filter: %w", err)
 	}
 	keyB, err := hex.DecodeString(key)
 	if err != nil {
-		return [gcs.KeySize]byte{}, nil, fmt.Errorf("error decoding block filter key: %w", err)
+		return false, fmt.Errorf("error decoding block filter key: %w", err)
 	}
 	filter, err := gcs.FromBytesV2(blockcf2.B, blockcf2.M, filterB)
 	if err != nil {
-		return [gcs.KeySize]byte{}, nil, fmt.Errorf("error deserializing block filter: %w", err)
+		return false, fmt.Errorf("error deserializing block filter: %w", err)
 	}
 
 	var bcf2Key [gcs.KeySize]byte
 	copy(bcf2Key[:], keyB)
 
-	return bcf2Key, filter, nil
+	return filter.MatchAny(bcf2Key, scripts), nil
+
 }
 
 // lockWallet locks the wallet.
@@ -728,8 +730,11 @@ func (w *rpcWallet) AddressPrivKey(ctx context.Context, address stdaddr.Address)
 	if err != nil {
 		return nil, translateRPCCancelErr(err)
 	}
-	priv := secp256k1.PrivKeyFromBytes(wif.PrivKey())
-	return priv, nil
+	var priv secp256k1.PrivateKey
+	if overflow := priv.Key.SetByteSlice(wif.PrivKey()); overflow || priv.Key.IsZero() {
+		return nil, errors.New("invalid private key")
+	}
+	return &priv, nil
 }
 
 // anylist is a list of RPC parameters to be converted to []json.RawMessage and

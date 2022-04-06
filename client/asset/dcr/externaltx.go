@@ -123,12 +123,12 @@ func (dcr *ExchangeWallet) txBlockFromCache(ctx context.Context, tx *externalTx)
 		return nil, nil
 	}
 
-	_, isMainchain, err := dcr.blockHeader(ctx, tx.block.hash)
+	_, _, txBlockStillValid, err := dcr.blockHeader(ctx, tx.block.hash)
 	if err != nil {
 		return nil, err
 	}
 
-	if isMainchain {
+	if txBlockStillValid {
 		dcr.log.Debugf("Cached tx %s is mined in block %d (%s).", tx.hash, tx.block.height, tx.block.hash)
 		return tx.block, nil
 	}
@@ -230,11 +230,11 @@ func (dcr *ExchangeWallet) scanFiltersForTxBlock(ctx context.Context, tx *extern
 }
 
 func (dcr *ExchangeWallet) findTxInBlock(ctx context.Context, txHash chainhash.Hash, txScripts [][]byte, blockHash *chainhash.Hash) (*wire.MsgTx, []*outputSpenderFinder, error) {
-	key, filter, err := dcr.wallet.BlockFilter(ctx, blockHash)
+	bingo, err := dcr.wallet.MatchAnyScript(ctx, blockHash, txScripts)
 	if err != nil {
 		return nil, nil, err
 	}
-	if !filter.MatchAny(key, txScripts) {
+	if !bingo {
 		return nil, nil, nil
 	}
 
@@ -244,7 +244,7 @@ func (dcr *ExchangeWallet) findTxInBlock(ctx context.Context, txHash chainhash.H
 	}
 
 	var msgTx *wire.MsgTx
-	for _, tx := range blk.Transactions {
+	for _, tx := range append(blk.Transactions, blk.STransactions...) {
 		if tx.TxHash() == txHash {
 			dcr.log.Debugf("Found mined tx %s in block %s.", txHash, blk.BlockHash())
 			msgTx = tx
@@ -268,7 +268,7 @@ func (dcr *ExchangeWallet) findTxInBlock(ctx context.Context, txHash chainhash.H
 			lastScannedBlock: blockHash,
 		}
 	}
-	for _, tx := range blk.Transactions {
+	for _, tx := range append(blk.Transactions, blk.STransactions...) {
 		if tx.TxHash() == txHash {
 			continue // orignal tx, ignore
 		}
@@ -294,11 +294,11 @@ func (dcr *ExchangeWallet) isOutputSpent(ctx context.Context, output *outputSpen
 
 	// Check if this output is known to be spent in a mainchain block.
 	if output.spenderBlock != nil {
-		_, isMainchain, err := dcr.blockHeader(ctx, output.spenderBlock.hash)
+		_, _, spenderBlockStillValid, err := dcr.blockHeader(ctx, output.spenderBlock.hash)
 		if err != nil {
 			return false, err
 		}
-		if isMainchain {
+		if spenderBlockStillValid {
 			dcr.log.Debugf("Found cached information for the spender of %s.", output.op)
 			return true, nil
 		}
@@ -368,24 +368,28 @@ func (dcr *ExchangeWallet) isOutputSpent(ctx context.Context, output *outputSpen
 // during the search.
 func (dcr *ExchangeWallet) findTxOutSpender(ctx context.Context, op outPoint, outputPkScript []byte, startBlock *block) (*wire.MsgTx, *chainhash.Hash, int64, error) {
 	var lastScannedHash *chainhash.Hash
+	var lastScannedHeight int64
 
 	iHeight := startBlock.height
 	iHash := startBlock.hash
 	bestBlock := dcr.cachedBestBlock()
 	for {
-		key, filter, err := dcr.wallet.BlockFilter(ctx, iHash)
+		bingo, err := dcr.wallet.MatchAnyScript(ctx, iHash, [][]byte{outputPkScript})
 		if err != nil {
-			return nil, lastScannedHash, 0, err
+			if lastScannedHash != nil {
+				return nil, lastScannedHash, lastScannedHeight, err
+			}
+			return nil, lastScannedHash, lastScannedHeight, err
 		}
 
-		if filter.Match(key, outputPkScript) {
+		if bingo {
 			dcr.log.Debugf("Output %s is likely spent in block %d (%s). Confirming.",
 				op, iHeight, iHash)
 			blk, err := dcr.wallet.GetBlock(ctx, iHash)
 			if err != nil {
-				return nil, lastScannedHash, 0, fmt.Errorf("error retrieving block %s: %w", iHash, err)
+				return nil, lastScannedHash, lastScannedHeight, fmt.Errorf("error retrieving block %s: %w", iHash, err)
 			}
-			for _, tx := range blk.Transactions {
+			for _, tx := range append(blk.Transactions, blk.STransactions...) {
 				if txSpendsOutput(tx, op) {
 					dcr.log.Debugf("Found spender for output %s in block %d (%s), spender tx hash %s.",
 						op, iHeight, iHash, tx.TxHash())
@@ -400,12 +404,13 @@ func (dcr *ExchangeWallet) findTxOutSpender(ctx context.Context, op outPoint, ou
 		}
 
 		// Block does not include the output spender, check the next block.
+		lastScannedHeight = iHeight
+		lastScannedHash = iHash
 		iHeight++
 		nextHash, err := dcr.wallet.GetBlockHash(ctx, iHeight)
 		if err != nil {
-			return nil, iHash, 0, translateRPCCancelErr(err)
+			return nil, lastScannedHash, lastScannedHeight, translateRPCCancelErr(err)
 		}
-		lastScannedHash = iHash
 		iHash = nextHash
 	}
 

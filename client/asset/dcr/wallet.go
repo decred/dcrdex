@@ -13,7 +13,6 @@ import (
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
-	"github.com/decred/dcrd/gcs/v3"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/wire"
@@ -46,6 +45,9 @@ func RegisterCustomWallet(constructor WalletConstructor, def *asset.WalletDefini
 
 type TipChangeCallback func(*chainhash.Hash, int64, error)
 
+// BlockHeader is a wire.BlockHeader with the addition of a MedianTime field.
+// Implementations must fill in the MedianTime field when returning a
+// BlockHeader.
 type BlockHeader struct {
 	*wire.BlockHeader
 	MedianTime int64
@@ -86,13 +88,14 @@ type Wallet interface {
 	// for non-wallet outputs. Returns asset.CoinNotFoundError if the unspent
 	// output cannot be located.
 	UnspentOutput(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8) (*TxOutput, error)
-	// ExternalAddress returns a new external address,
+	// ExternalAddress returns a new external address.
 	ExternalAddress(ctx context.Context, acctName string) (stdaddr.Address, error)
 	// InternalAddress returns a change address from the Wallet.
 	InternalAddress(ctx context.Context, acctName string) (stdaddr.Address, error)
 	// SignRawTransaction signs the provided transaction. SignRawTransaction
 	// is not used for redemptions, so previous outpoints and scripts should
 	// be known by the wallet.
+	// SignRawTransaction should not mutate the input transaction.
 	SignRawTransaction(context.Context, *wire.MsgTx) (*wire.MsgTx, error)
 	// SendRawTransaction broadcasts the provided transaction to the Decred
 	// network.
@@ -114,8 +117,8 @@ type Wallet interface {
 	GetBestBlock(ctx context.Context) (*chainhash.Hash, int64, error)
 	// GetBlockHash returns the hash of the mainchain block at the specified height.
 	GetBlockHash(ctx context.Context, blockHeight int64) (*chainhash.Hash, error)
-	// BlockFilter fetches the block filter info for the specified block.
-	BlockFilter(ctx context.Context, blockHash *chainhash.Hash) ([gcs.KeySize]byte, *gcs.FilterV2, error)
+	// MatchAnyScript looks for any of the provided scripts in the block specified.
+	MatchAnyScript(ctx context.Context, blockHash *chainhash.Hash, scripts [][]byte) (bool, error)
 	// AccountUnlocked returns true if the account is unlocked.
 	AccountUnlocked(ctx context.Context, acctName string) (bool, error)
 	// LockAccount locks the account.
