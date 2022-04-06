@@ -376,9 +376,6 @@ func (dcr *ExchangeWallet) findTxOutSpender(ctx context.Context, op outPoint, ou
 	for {
 		bingo, err := dcr.wallet.MatchAnyScript(ctx, iHash, [][]byte{outputPkScript})
 		if err != nil {
-			if lastScannedHash != nil {
-				return nil, lastScannedHash, lastScannedHeight, err
-			}
 			return nil, lastScannedHash, lastScannedHeight, err
 		}
 
@@ -399,13 +396,14 @@ func (dcr *ExchangeWallet) findTxOutSpender(ctx context.Context, op outPoint, ou
 			dcr.log.Debugf("Output %s is NOT spent in block %d (%s).", op, iHeight, iHash)
 		}
 
+		lastScannedHeight = iHeight
+		lastScannedHash = iHash
+
 		if iHeight >= bestBlock.height { // reached the tip, stop searching
 			break
 		}
 
 		// Block does not include the output spender, check the next block.
-		lastScannedHeight = iHeight
-		lastScannedHash = iHash
 		iHeight++
 		nextHash, err := dcr.wallet.GetBlockHash(ctx, iHeight)
 		if err != nil {
@@ -416,7 +414,7 @@ func (dcr *ExchangeWallet) findTxOutSpender(ctx context.Context, op outPoint, ou
 
 	dcr.log.Debugf("Output %s is NOT spent in blocks %d (%s) to %d (%s).",
 		op, startBlock.height, startBlock.hash, bestBlock.height, bestBlock.hash)
-	return nil, bestBlock.hash, 0, nil // scanned up to best block, no spender found
+	return nil, lastScannedHash, lastScannedHeight, nil // scanned up to best block, no spender found
 }
 
 // txSpendsOutput returns true if the passed tx has an input that spends the

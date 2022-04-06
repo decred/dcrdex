@@ -3188,6 +3188,7 @@ func (dcr *ExchangeWallet) mainchainAncestor(ctx context.Context, blockHash *cha
 
 // blockHeader returns the *BlockHeader for the specified block hash, and a
 // validity bool indicating true when the block has not been stake-invalidated.
+// validity will always be false if mainchain is false.
 func (dcr *ExchangeWallet) blockHeader(ctx context.Context, blockHash *chainhash.Hash) (blockHeader *BlockHeader, valid, mainchain bool, err error) {
 	blockHeader, err = dcr.wallet.GetBlockHeader(ctx, blockHash)
 	if err != nil {
