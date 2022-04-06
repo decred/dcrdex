@@ -191,7 +191,7 @@ func (conn *wsConn) connect(ctx context.Context) error {
 	} else {
 		dialer.Proxy = http.ProxyFromEnvironment
 	}
-	ws, _, err := dialer.Dial(conn.cfg.URL, nil)
+	ws, _, err := dialer.DialContext(ctx, conn.cfg.URL, nil)
 	if err != nil {
 		var e x509.UnknownAuthorityError
 		if errors.As(err, &e) {
