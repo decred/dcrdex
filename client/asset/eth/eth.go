@@ -152,8 +152,12 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 			return "", err
 		}
 		return c.String(), nil
-	case common.AddressLength*2 + 2:
-		return common.HexToAddress(string(coinID)).String(), nil
+	case common.AddressLength * 2, common.AddressLength*2 + 2:
+		hexAddr := string(coinID)
+		if !common.IsHexAddress(hexAddr) {
+			return "", fmt.Errorf("invalid hex address %q", coinID)
+		}
+		return common.HexToAddress(hexAddr).String(), nil
 	}
 	return "", fmt.Errorf("unknown coin ID format: %x", coinID)
 }
@@ -343,9 +347,11 @@ func (eth *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	}
 
 	for ver, constructor := range contractorConstructors {
-		if eth.contractors[ver], err = constructor(eth.net, eth.addr, eth.node.contractBackend()); err != nil {
+		c, err := constructor(eth.net, eth.addr, eth.node.contractBackend())
+		if err != nil {
 			return nil, fmt.Errorf("error constructor version %d contractor: %v", ver, err)
 		}
+		eth.contractors[ver] = c
 	}
 
 	// Initialize the best block.
@@ -596,7 +602,7 @@ func (eth *ExchangeWallet) decodeFundingCoinID(id []byte) (*fundingCoin, error) 
 	}
 
 	if fc.addr != eth.addr {
-		return nil, fmt.Errorf("coin address %x != wallet address %x",
+		return nil, fmt.Errorf("coin address %s != wallet address %s",
 			fc.addr, eth.addr)
 	}
 
@@ -1464,13 +1470,6 @@ func (eth *ExchangeWallet) withContractor(ver uint32, f func(contractor) error) 
 		return fmt.Errorf("no version %d contractor", ver)
 	}
 	return f(contractor)
-}
-
-func (eth *ExchangeWallet) estimateSwapGas(num int, contractVer uint32) (gas uint64, err error) {
-	return gas, eth.withContractor(contractVer, func(c contractor) error {
-		gas, err = c.estimateInitGas(eth.ctx, num)
-		return err
-	})
 }
 
 // balanceWithTxPool gets the current and pending balances.

@@ -13,8 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-const fundingCoinIDSize = 28      // address (20) + amount (8) = 28
-const tokenFundingCoinIDSize = 36 // address (20) + amount (8) + amount (8) = 36
+const fundingCoinIDSize = 28 // address (20) + amount (8) = 28
 
 // fundingCoin is an identifier for a coin which has not yet been sent to the
 // swap contract.
@@ -28,15 +27,20 @@ func (c *fundingCoin) String() string {
 	return fmt.Sprintf("address: %v, amount:%x", c.addr, c.amt)
 }
 
-// ID creates a byte slice that can be decoded with decodeFundingCoin.
+// ID utf-8 encodes the account address. This ID will be sent to the server as
+// part of the an order.
 func (c *fundingCoin) ID() dex.Bytes {
 	return []byte(c.addr.String())
 }
 
+// Value returns the value reserved in the funding coin.
 func (c *fundingCoin) Value() uint64 {
 	return c.amt
 }
 
+// RecoveryID is a byte-encoded address and value of a funding coin. RecoveryID
+// satisfies the asset.RecoveryCoin interface, so this ID will be used as input
+// for (asset.Wallet).FundingCoins.
 func (c *fundingCoin) RecoveryID() dex.Bytes {
 	b := make([]byte, fundingCoinIDSize)
 	copy(b[:20], c.addr[:])

@@ -259,8 +259,6 @@ func (n *nodeClient) syncProgress() ethereum.SyncProgress {
 // The wallet must be unlocked to use this function.
 func (n *nodeClient) signData(data []byte) (sig, pubKey []byte, err error) {
 	h := crypto.Keccak256(data)
-	fmt.Println("--signData", data, n.creds.addr)
-
 	sig, err = n.creds.ks.SignHash(*n.creds.acct, h)
 	if err != nil {
 		return nil, nil, err
@@ -434,11 +432,10 @@ func (n *nodeClient) tokenAllowance(ctx context.Context, tokenAddr common.Addres
 // approveToken approves the token swap contract to spend tokens on behalf of
 // account handled by the wallet.
 func (n *nodeClient) approveToken(ctx context.Context, tokenAddr common.Address, amount *big.Int, maxFeeRate uint64) (tx *types.Transaction, err error) {
-	txOpts, _ := n.txOpts(ctx, 0, 3e5, dexeth.GweiToWei(maxFeeRate))
-	if err := n.addSignerToOpts(txOpts); err != nil {
-		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
+	txOpts, err := n.txOpts(ctx, 0, 3e5, dexeth.GweiToWei(maxFeeRate))
+	if err != nil {
+		return nil, err
 	}
-
 	tokenContract, err := dexerc20.NewIERC20(tokenAddr, n.ec)
 	if err != nil {
 		return nil, err
@@ -459,11 +456,10 @@ func (n *nodeClient) initiateToken(ctx context.Context, initiations []ethv0.ETHS
 func (n *nodeClient) redeemToken(ctx context.Context, redemptions []ethv0.ETHSwapRedemption, maxFeeRate uint64) (tx *types.Transaction, err error) {
 	// TODO: reject if there is duplicate secret hash
 	// TODO: use estimated gas
-	txOpts, _ := n.txOpts(ctx, 0, 300000, dexeth.GweiToWei(maxFeeRate))
-	if err := n.addSignerToOpts(txOpts); err != nil {
-		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
+	txOpts, err := n.txOpts(ctx, 0, 300000, dexeth.GweiToWei(maxFeeRate))
+	if err != nil {
+		return nil, err
 	}
-
 	return n.tokenSwapContract.Redeem(txOpts, redemptions)
 }
 
@@ -481,11 +477,10 @@ func (n *nodeClient) tokenIsRedeemable(ctx context.Context, secretHash, secret [
 // refundToken refunds a token swap.
 func (n *nodeClient) refundToken(ctx context.Context, secretHash [32]byte, maxFeeRate uint64) (tx *types.Transaction, err error) {
 	// TODO: use estimated gas
-	txOpts, _ := n.txOpts(ctx, 0, 5e5, dexeth.GweiToWei(maxFeeRate))
-	if err := n.addSignerToOpts(txOpts); err != nil {
-		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
+	txOpts, err := n.txOpts(ctx, 0, 5e5, dexeth.GweiToWei(maxFeeRate))
+	if err != nil {
+		return nil, err
 	}
-
 	return n.tokenSwapContract.Refund(txOpts, secretHash)
 }
 
@@ -605,15 +600,16 @@ func (n *nodeClient) checkTxStatus(ctx context.Context, tx *types.Transaction, t
 		return nil, fmt.Errorf("error getting transaction receipt: %v", err)
 	}
 
-	if receipt.Status == 1 {
-		return receipt, nil
+	if receipt.Status != types.ReceiptStatusSuccessful {
+		return receipt, fmt.Errorf("transaction status failed")
+
 	}
 
 	if receipt.GasUsed > txOpts.GasLimit {
-		return receipt, fmt.Errorf("gas used appears to have exceeded limit of %d", txOpts.GasLimit)
+		return receipt, fmt.Errorf("gas used, %d, appears to have exceeded limit of %d", receipt.GasUsed, txOpts.GasLimit)
 	}
 
-	return receipt, fmt.Errorf("transaction status failed")
+	return receipt, nil
 }
 
 // newTxOpts is a constructor for a TransactOpts.
