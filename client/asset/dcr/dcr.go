@@ -70,6 +70,11 @@ const (
 )
 
 var (
+	// ContractSearchLimit is how far back in time AuditContract in SPV mode
+	// will search for a contract if no txData is provided. This should be a
+	// positive duration.
+	ContractSearchLimit = 48 * time.Hour
+
 	// blockTicker is the delay between calls to check for new blocks.
 	blockTicker                  = time.Second
 	peerCountTicker              = 5 * time.Second
@@ -1797,9 +1802,15 @@ func (dcr *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 
 // AuditContract retrieves information about a swap contract from the provided
 // txData if it represents a valid transaction that pays to the contract at the
-// specified coinID. An attempt is also made to broadcasted the txData to the
-// blockchain network but it is not necessary that the broadcast succeeds since
-// the contract may have already been broadcasted.
+// specified coinID. The txData may be empty to attempt retrieval of the
+// transaction output from the network, but it is only ensured to succeed for a
+// full node or, if the tx is confirmed, an SPV wallet. Normally the server
+// should communicate this txData, and the caller can decide to require it. The
+// ability to work with an empty txData is a convenience for recovery tools and
+// testing, and it may change in the future if a GetTxData method is added for
+// this purpose. Optionally, attempt is also made to broadcasted the txData to
+// the blockchain network but it is not necessary that the broadcast succeeds
+// since the contract may have already been broadcasted.
 func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroadcast bool) (*asset.AuditInfo, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
@@ -1812,23 +1823,56 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, reb
 		return nil, fmt.Errorf("error extracting swap addresses: %w", err)
 	}
 
-	contractTx, err := msgTxFromBytes(txData)
-	if err != nil {
-		return nil, fmt.Errorf("invalid contract tx data: %w", err)
-	}
-	if err = blockchain.CheckTransactionSanity(contractTx, dcr.chainParams); err != nil {
-		return nil, fmt.Errorf("invalid contract tx data: %w", err)
-	}
-	if checkHash := contractTx.TxHash(); checkHash != *txHash {
-		return nil, fmt.Errorf("invalid contract tx data: expected hash %s, got %s", txHash, checkHash)
-	}
-	if int(vout) >= len(contractTx.TxOut) {
-		return nil, fmt.Errorf("invalid contract tx data: no output at %d", vout)
+	// If no tx data is provided, attempt to get the required data (the txOut)
+	// from the wallet. If this is a full node wallet, a simple gettxout RPC is
+	// sufficient with no pkScript or "since" time. If this is an SPV wallet,
+	// only a confirmed counterparty contract can be located, and only one
+	// within ContractSearchLimit. As such, this mode of operation is not
+	// intended for normal server-coordinated operation.
+	var contractTx *wire.MsgTx
+	var contractTxOut *wire.TxOut
+	var txTree int8
+	if len(txData) == 0 {
+		// Fall back to gettxout, but we won't have the tx to rebroadcast.
+		output, err := dcr.wallet.UnspentOutput(dcr.ctx, txHash, vout, wire.TxTreeUnknown)
+		if err == nil {
+			contractTxOut = output.TxOut
+			txTree = output.Tree
+		} else {
+			// Next, try a block filters scan.
+			scriptAddr, err := stdaddr.NewAddressScriptHashV0(contract, dcr.chainParams)
+			if err != nil {
+				return nil, fmt.Errorf("error encoding script address: %w", err)
+			}
+			_, pkScript := scriptAddr.PaymentScript()
+			outFound, _, err := dcr.externalTxOutput(dcr.ctx, newOutPoint(txHash, vout),
+				pkScript, time.Now().Add(-ContractSearchLimit))
+			if err != nil {
+				return nil, fmt.Errorf("error finding unspent contract: %s:%d : %w", txHash, vout, err)
+			}
+			contractTxOut = outFound.TxOut
+			txTree = outFound.tree
+		}
+	} else {
+		contractTx, err = msgTxFromBytes(txData)
+		if err != nil {
+			return nil, fmt.Errorf("invalid contract tx data: %w", err)
+		}
+		if err = blockchain.CheckTransactionSanity(contractTx, dcr.chainParams); err != nil {
+			return nil, fmt.Errorf("invalid contract tx data: %w", err)
+		}
+		if checkHash := contractTx.TxHash(); checkHash != *txHash {
+			return nil, fmt.Errorf("invalid contract tx data: expected hash %s, got %s", txHash, checkHash)
+		}
+		if int(vout) >= len(contractTx.TxOut) {
+			return nil, fmt.Errorf("invalid contract tx data: no output at %d", vout)
+		}
+		contractTxOut = contractTx.TxOut[vout]
+		txTree = determineTxTree(contractTx)
 	}
 
 	// Validate contract output.
 	// Script must be P2SH, with 1 address and 1 required signature.
-	contractTxOut := contractTx.TxOut[vout]
 	scriptClass, addrs := stdscript.ExtractAddrs(contractTxOut.Version, contractTxOut.PkScript, dcr.chainParams)
 	if scriptClass != stdscript.STScriptHash {
 		return nil, fmt.Errorf("unexpected script class %d", scriptClass)
@@ -1851,7 +1895,7 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, reb
 	// The counter-party should have broadcasted the contract tx but rebroadcast
 	// just in case to ensure that the tx is sent to the network. Do not block
 	// because this is not required and does not affect the audit result.
-	if rebroadcast {
+	if rebroadcast && contractTx != nil {
 		go func() {
 			if hashSent, err := dcr.wallet.SendRawTransaction(dcr.ctx, contractTx, true); err != nil {
 				dcr.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
@@ -1861,7 +1905,6 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, reb
 		}()
 	}
 
-	txTree := determineTxTree(contractTx)
 	return &asset.AuditInfo{
 		Coin:       newOutput(txHash, vout, uint64(contractTxOut.Value), txTree),
 		Contract:   contract,
