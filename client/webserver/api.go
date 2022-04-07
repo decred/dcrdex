@@ -614,13 +614,17 @@ func (s *WebServer) apiAccelerateOrder(w http.ResponseWriter, r *http.Request) {
 		OrderID dex.Bytes        `json:"orderID"`
 		NewRate uint64           `json:"newRate"`
 	}{}
-
 	defer form.Pass.Clear()
 	if !readPost(w, r, &form) {
 		return
 	}
+	pass, err := s.resolvePass(form.Pass, r)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
+		return
+	}
 
-	txID, err := s.core.AccelerateOrder(form.Pass, form.OrderID, form.NewRate)
+	txID, err := s.core.AccelerateOrder(pass, form.OrderID, form.NewRate)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("Accelerate Order error: %w", err))
 		return

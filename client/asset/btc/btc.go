@@ -1949,9 +1949,10 @@ func (btc *baseWallet) AccelerateOrder(swapCoins, accelerationCoins []dex.Bytes,
 	if newChange != nil {
 		newChangeCoin = newChange
 
-		// Checking required for remaining swaps > 0 because this ensures if the previous change
-		// was locked, this one will also be locked. If requiredForRemainingSwaps = 0, but the
-		// change was locked, signedAccelerationTx would have returned an error since this means
+		// Checking required for remaining swaps > 0 because this ensures if
+		// the previous change was locked, this one will also be locked. If
+		// requiredForRemainingSwaps = 0, but the change was locked,
+		// signedAccelerationTx would have returned an error since this means
 		// that the change was locked by another order.
 		if requiredForRemainingSwaps > 0 {
 			err = btc.node.lockUnspent(false, []*output{newChange})
@@ -1989,9 +1990,9 @@ func (btc *baseWallet) AccelerationEstimate(swapCoins, accelerationCoins []dex.B
 	return fee, nil
 }
 
-// PreAccelerate returns the current average fee rate of the unmined swap initiation
-// and acceleration transactions, and also returns a suggested range that the
-// fee rate should be increased to in order to expedite mining.
+// PreAccelerate returns the current average fee rate of the unmined swap
+// initiation and acceleration transactions, and also returns a suggested
+// range that the fee rate should be increased to in order to expedite mining.
 func (btc *baseWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (currentRate uint64, suggestedRange asset.XYRange, err error) {
 	makeError := func(err error) (uint64, asset.XYRange, error) {
 		return 0, asset.XYRange{}, err
@@ -2220,7 +2221,8 @@ func (btc *baseWallet) lookupOutput(txHash *chainhash.Hash, vout uint32) (*outpu
 	return newOutput(txHash, vout, uint64(value)), nil
 }
 
-// changeCanBeAccelerated will return an error if the change cannot be accelerated.
+// changeCanBeAccelerated returns whether or not the change output can be
+// accelerated.
 func (btc *baseWallet) changeCanBeAccelerated(changeTxHash *chainhash.Hash, changeVout uint32, requiredForRemainingSwaps uint64) (bool, error) {
 	lockedUtxos, err := btc.node.listLockUnspent()
 	if err != nil {

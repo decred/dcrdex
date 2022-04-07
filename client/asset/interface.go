@@ -374,21 +374,23 @@ type FeeRater interface {
 // mining of swap transactions.
 type Accelerator interface {
 	// AccelerateOrder uses the Child-Pays-For-Parent technique to accelerate a
-	// chain of swap transactions and previous accelerations. It broadcasts a new
-	// transaction with a fee high enough so that the average fee of all the
-	// unconfirmed transactions in the chain and the new transaction will have
-	// an average fee rate of newFeeRate. requiredForRemainingSwaps is passed
-	// in to ensure that the new change coin will have enough funds to initiate
-	// the additional swaps that will be required to complete the order.
+	// chain of swap transactions and previous accelerations. It broadcasts a
+	// new transaction with a fee high enough so that the average fee of all
+	// the unconfirmed transactions in the chain and the new transaction will
+	// have an average fee rate of newFeeRate. requiredForRemainingSwaps is
+	// passed in to ensure that the new change coin will have enough funds to
+	// initiate the additional swaps that will be required to complete the
+	//  order.
 	AccelerateOrder(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, newFeeRate uint64) (Coin, string, error)
 	// AccelerationEstimate takes the same parameters as AccelerateOrder, but
 	// instead of broadcasting the acceleration transaction, it just returns
 	// the amount of funds that will need to be spent in order to increase the
 	// average fee rate to the desired amount.
 	AccelerationEstimate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, newFeeRate uint64) (uint64, error)
-	// PreAccelerate returns the current average fee rate of the unmined swap initiation
-	// and acceleration transactions, and also returns a suggested range that the
-	// fee rate should be increased to in order to expedite mining.
+	// PreAccelerate returns the current average fee rate of the unmined swap
+	// initiation and acceleration transactions, and also returns a suggested
+	// range that the fee rate should be increased to in order to expedite
+	// mining.
 	PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (currentRate uint64, suggestedRange XYRange, err error)
 }
 

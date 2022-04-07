@@ -2035,7 +2035,7 @@ func (c *Core) RescanWallet(assetID uint32, force bool) error {
 	}
 
 	// Begin potentially asynchronous wallet rescan operation.
-	if err = wallet.Rescan(c.ctx); err != nil {
+	if err = wallet.rescan(c.ctx); err != nil {
 		return err
 	}
 
@@ -6863,7 +6863,7 @@ func (c *Core) WalletLogFilePath(assetID uint32) (string, error) {
 			strings.ToUpper(unbip(assetID)), assetID)
 	}
 
-	return wallet.LogFilePath()
+	return wallet.logFilePath()
 }
 
 func createFile(fileName string) (*os.File, error) {
@@ -7144,7 +7144,7 @@ func (c *Core) AccelerateOrder(pw []byte, oidB dex.Bytes, newFeeRate uint64) (st
 	}
 
 	newChangeCoin, txID, err :=
-		tracker.wallets.fromWallet.AccelerateOrder(swapCoinIDs, accelerationCoins, changeCoinID, requiredForRemainingSwaps, newFeeRate)
+		tracker.wallets.fromWallet.accelerateOrder(swapCoinIDs, accelerationCoins, changeCoinID, requiredForRemainingSwaps, newFeeRate)
 	if err != nil {
 		return "", err
 	}
@@ -7168,7 +7168,7 @@ func (c *Core) AccelerationEstimate(oidB dex.Bytes, newFeeRate uint64) (uint64, 
 		return 0, err
 	}
 
-	accelerationFee, err := tracker.wallets.fromWallet.AccelerationEstimate(swapCoins, accelerationCoins, changeCoin, requiredForRemainingSwaps, newFeeRate)
+	accelerationFee, err := tracker.wallets.fromWallet.accelerationEstimate(swapCoins, accelerationCoins, changeCoin, requiredForRemainingSwaps, newFeeRate)
 	if err != nil {
 		return 0, err
 	}
@@ -7187,7 +7187,7 @@ func (c *Core) PreAccelerateOrder(oidB dex.Bytes) (*PreAccelerate, error) {
 	feeSuggestion := c.feeSuggestionAny(tracker.fromAssetID)
 
 	currentRate, suggestedRange, err :=
-		tracker.wallets.fromWallet.PreAccelerate(swapCoinIDs, accelerationCoins, changeCoinID, requiredForRemainingSwaps, feeSuggestion)
+		tracker.wallets.fromWallet.preAccelerate(swapCoinIDs, accelerationCoins, changeCoinID, requiredForRemainingSwaps, feeSuggestion)
 	if err != nil {
 		return nil, err
 	}
@@ -7228,6 +7228,7 @@ func (c *Core) orderAccelerationParameters(oidB dex.Bytes) (tracker *trackedTrad
 			swapSize := fromAsset.SwapSize
 			lotsRemaining := tracker.Trade().Remaining() / lotSize
 			requiredForRemainingSwaps = lotsRemaining * swapSize * tracker.metaData.MaxFeeRate
+			break
 		}
 	}
 	if tracker == nil {

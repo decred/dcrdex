@@ -866,7 +866,7 @@ func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTra
 	}
 	expired = time.Until(lockTime) < 0 // not necessarily refundable, but can be at any moment
 
-	have, spent, err = wallet.SwapConfirmations(ctx, coin.ID(),
+	have, spent, err = wallet.swapConfirmations(ctx, coin.ID(),
 		match.MetaData.Proof.CounterContract, match.MetaData.Stamp)
 	if err != nil {
 		return fail(fmt.Errorf("failed to get confirmations of the counter-party's swap %s (%s) "+
@@ -1111,7 +1111,7 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 		// If we're the maker, check the confirmations anyway so we can notify.
 		t.dc.log.Tracef("Checking confirmations on our OWN swap txn %v (%s)...",
 			coinIDString(wallet.AssetID, match.MetaData.Proof.MakerSwap), unbip(wallet.AssetID))
-		confs, spent, err := wallet.SwapConfirmations(ctx, match.MetaData.Proof.MakerSwap,
+		confs, spent, err := wallet.swapConfirmations(ctx, match.MetaData.Proof.MakerSwap,
 			match.MetaData.Proof.ContractData, match.MetaData.Stamp)
 		if err != nil && !errors.Is(err, asset.ErrSwapNotInitiated) {
 			// No need to log an error if swap not initiated as this
@@ -1199,7 +1199,7 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bo
 		}
 
 		// If we're the taker, check the confirmations anyway so we can notify.
-		confs, spent, err := t.wallets.fromWallet.SwapConfirmations(ctx, match.MetaData.Proof.TakerSwap,
+		confs, spent, err := t.wallets.fromWallet.swapConfirmations(ctx, match.MetaData.Proof.TakerSwap,
 			match.MetaData.Proof.ContractData, match.MetaData.Stamp)
 		if err != nil && !errors.Is(err, asset.ErrSwapNotInitiated) {
 			// No need to log an error if swap not initiated as this
@@ -1328,7 +1328,7 @@ func (t *trackedTrade) shouldBeginFindRedemption(ctx context.Context, match *mat
 		return false
 	}
 
-	confs, spent, err := t.wallets.fromWallet.SwapConfirmations(ctx, swapCoinID, proof.ContractData, match.MetaData.Stamp)
+	confs, spent, err := t.wallets.fromWallet.swapConfirmations(ctx, swapCoinID, proof.ContractData, match.MetaData.Stamp)
 	if err != nil {
 		if !errors.Is(err, asset.ErrSwapNotInitiated) {
 			// No need to log an error if swap not initiated as this

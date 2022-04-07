@@ -282,9 +282,9 @@ func (w *xcWallet) Disconnect() {
 	w.mtx.Unlock()
 }
 
-// Rescan will initiate a rescan of the wallet if the asset.Wallet
+// rescan will initiate a rescan of the wallet if the asset.Wallet
 // implementation is a Rescanner.
-func (w *xcWallet) Rescan(ctx context.Context) error {
+func (w *xcWallet) rescan(ctx context.Context) error {
 	rescanner, ok := w.Wallet.(asset.Rescanner)
 	if !ok {
 		return errors.New("wallet does not support rescanning")
@@ -292,9 +292,9 @@ func (w *xcWallet) Rescan(ctx context.Context) error {
 	return rescanner.Rescan(ctx)
 }
 
-// LogFilePath returns the path of the wallet's log file if the
+// logFilePath returns the path of the wallet's log file if the
 // asset.Wallet implementation is a LogFiler.
-func (w *xcWallet) LogFilePath() (string, error) {
+func (w *xcWallet) logFilePath() (string, error) {
 	logFiler, ok := w.Wallet.(asset.LogFiler)
 	if !ok {
 		return "", errors.New("wallet does not support getting log file")
@@ -302,9 +302,9 @@ func (w *xcWallet) LogFilePath() (string, error) {
 	return logFiler.LogFilePath(), nil
 }
 
-// AccelerateOrder uses the Child-Pays-For-Parent technique to accelerate an
+// accelerateOrder uses the Child-Pays-For-Parent technique to accelerate an
 // order if the wallet is an Accelerator.
-func (w *xcWallet) AccelerateOrder(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, newFeeRate uint64) (asset.Coin, string, error) {
+func (w *xcWallet) accelerateOrder(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, newFeeRate uint64) (asset.Coin, string, error) {
 	accelerator, ok := w.Wallet.(asset.Accelerator)
 	if !ok {
 		return nil, "", errors.New("wallet does not support acceleration")
@@ -312,9 +312,9 @@ func (w *xcWallet) AccelerateOrder(swapCoins, accelerationCoins []dex.Bytes, cha
 	return accelerator.AccelerateOrder(swapCoins, accelerationCoins, changeCoin, requiredForRemainingSwaps, newFeeRate)
 }
 
-// AccelerationEstimate estimates the cost to accelerate an order if the wallet
+// accelerationEstimate estimates the cost to accelerate an order if the wallet
 // is an Accelerator.
-func (w *xcWallet) AccelerationEstimate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (uint64, error) {
+func (w *xcWallet) accelerationEstimate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (uint64, error) {
 	accelerator, ok := w.Wallet.(asset.Accelerator)
 	if !ok {
 		return 0, errors.New("wallet does not support acceleration")
@@ -323,9 +323,9 @@ func (w *xcWallet) AccelerationEstimate(swapCoins, accelerationCoins []dex.Bytes
 	return accelerator.AccelerationEstimate(swapCoins, accelerationCoins, changeCoin, requiredForRemainingSwaps, feeSuggestion)
 }
 
-// PreAccelerate gives the user information about accelerating an order if the
+// preAccelerate gives the user information about accelerating an order if the
 // wallet is an Accelerator.
-func (w *xcWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (currentRate uint64, suggestedRange asset.XYRange, err error) {
+func (w *xcWallet) preAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (currentRate uint64, suggestedRange asset.XYRange, err error) {
 	accelerator, ok := w.Wallet.(asset.Accelerator)
 	if !ok {
 		return 0, asset.XYRange{}, errors.New("wallet does not support acceleration")
@@ -334,11 +334,11 @@ func (w *xcWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, chang
 	return accelerator.PreAccelerate(swapCoins, accelerationCoins, changeCoin, requiredForRemainingSwaps, feeSuggestion)
 }
 
-// SwapConfirmations calls (asset.Wallet).SwapConfirmations with a timeout
+// swapConfirmations calls (asset.Wallet).SwapConfirmations with a timeout
 // Context. If the coin cannot be located, an asset.CoinNotFoundError is
 // returned. If the coin is located, but recognized as spent, no error is
 // returned.
-func (w *xcWallet) SwapConfirmations(ctx context.Context, coinID []byte, contract []byte, matchTime uint64) (uint32, bool, error) {
+func (w *xcWallet) swapConfirmations(ctx context.Context, coinID []byte, contract []byte, matchTime uint64) (uint32, bool, error) {
 	return w.Wallet.SwapConfirmations(ctx, coinID, contract, encode.UnixTimeMilli(int64(matchTime)))
 }
 
