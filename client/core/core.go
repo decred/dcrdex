@@ -1172,6 +1172,17 @@ type Config struct {
 	TorIsolation bool
 	// Language. A BCP 47 language tag. Default is en-US.
 	Language string
+
+	// NoAutoWalletLock instructs Core to skip locking the wallet on shutdown or
+	// logout. This can be helpful if the user wants the wallet to remain
+	// unlocked. e.g. They started with the wallet unlocked, or they intend to
+	// start Core again and wish to avoid the time to unlock a locked wallet on
+	// startup.
+	NoAutoWalletLock bool // zero value is legacy behavior
+	// NoAutoDBBackup instructs the DB to skip the creation of a backup DB file
+	// on shutdown. This is useful if the consumer is using the BackupDB method,
+	// or simply creating manual backups of the DB file after shutdown.
+	NoAutoDBBackup bool // zero value is legacy behavior
 }
 
 // Core is the core client application. Core manages DEX connections, wallets,
@@ -1234,7 +1245,10 @@ func New(cfg *Config) (*Core, error) {
 	if cfg.Logger == nil {
 		return nil, fmt.Errorf("Core.Config must specify a Logger")
 	}
-	boltDB, err := bolt.NewDB(cfg.DBPath, cfg.Logger.SubLogger("DB"))
+	dbOpts := bolt.Opts{
+		BackupOnShutdown: !cfg.NoAutoDBBackup,
+	}
+	boltDB, err := bolt.NewDB(cfg.DBPath, cfg.Logger.SubLogger("DB"), dbOpts)
 	if err != nil {
 		return nil, fmt.Errorf("database initialization error: %w", err)
 	}
@@ -1431,10 +1445,12 @@ func (c *Core) Run(ctx context.Context) {
 		if !wallet.connected() {
 			continue
 		}
-		symb := strings.ToUpper(unbip(assetID))
-		c.log.Infof("Locking %s wallet", symb)
-		if err := wallet.Lock(5 * time.Second); err != nil {
-			c.log.Errorf("Failed to lock %v wallet: %v", symb, err)
+		if !c.cfg.NoAutoWalletLock {
+			symb := strings.ToUpper(unbip(assetID))
+			c.log.Infof("Locking %s wallet", symb) // no-op if Logout did it
+			if err := wallet.Lock(5 * time.Second); err != nil {
+				c.log.Errorf("Failed to lock %v wallet: %v", symb, err)
+			}
 		}
 		wallet.Disconnect()
 	}
@@ -3802,12 +3818,14 @@ func (c *Core) Logout() error {
 	}
 
 	// Lock wallets
-	for _, w := range c.xcWallets() {
-		if w.connected() {
-			if err := w.Lock(5 * time.Second); err != nil {
-				// A failure to lock the wallet need not block the ability to
-				// lock the DEX accounts or shutdown Core gracefully.
-				c.log.Warnf("Unable to lock %v wallet: %v", unbip(w.AssetID), err)
+	if !c.cfg.NoAutoWalletLock {
+		for _, w := range c.xcWallets() {
+			if w.connected() {
+				if err := w.Lock(5 * time.Second); err != nil {
+					// A failure to lock the wallet need not block the ability to
+					// lock the DEX accounts or shutdown Core gracefully.
+					c.log.Warnf("Unable to lock %v wallet: %v", unbip(w.AssetID), err)
+				}
 			}
 		}
 	}
