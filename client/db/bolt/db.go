@@ -128,18 +128,28 @@ var (
 	backupDir = "backup"
 )
 
+// Opts is a set of options for the DB.
+type Opts struct {
+	BackupOnShutdown bool // default is true
+}
+
+var defaultOpts = Opts{
+	BackupOnShutdown: true,
+}
+
 // BoltDB is a bbolt-based database backend for a DEX client. BoltDB satisfies
 // the db.DB interface defined at decred.org/dcrdex/client/db.
 type BoltDB struct {
 	*bbolt.DB
-	log dex.Logger
+	opts Opts
+	log  dex.Logger
 }
 
 // Check that BoltDB satisfies the db.DB interface.
 var _ dexdb.DB = (*BoltDB)(nil)
 
 // NewDB is a constructor for a *BoltDB.
-func NewDB(dbPath string, logger dex.Logger) (dexdb.DB, error) {
+func NewDB(dbPath string, logger dex.Logger, opts ...Opts) (dexdb.DB, error) {
 	_, err := os.Stat(dbPath)
 	isNew := os.IsNotExist(err)
 
@@ -150,8 +160,12 @@ func NewDB(dbPath string, logger dex.Logger) (dexdb.DB, error) {
 
 	// Release the file lock on exit.
 	bdb := &BoltDB{
-		DB:  db,
-		log: logger,
+		DB:   db,
+		opts: defaultOpts,
+		log:  logger,
+	}
+	if len(opts) > 0 {
+		bdb.opts = opts[0]
 	}
 
 	if err = bdb.makeTopLevelBuckets([][]byte{
@@ -213,11 +227,11 @@ func (db *BoltDB) Run(ctx context.Context) {
 	<-ctx.Done() // wait for shutdown to backup and compact
 
 	// Create a backup in the backups folder.
-	db.log.Infof("Backing up database...")
-	err := db.Backup()
-	if err != nil {
-		db.Close()
-		db.log.Errorf("Unable to backup database: %v", err)
+	if db.opts.BackupOnShutdown {
+		db.log.Infof("Backing up database...")
+		if err := db.Backup(); err != nil {
+			db.log.Errorf("Unable to backup database: %v", err)
+		}
 	}
 
 	// Only compact the current DB file if there is excessive free space, in
@@ -252,9 +266,9 @@ func (db *BoltDB) Run(ctx context.Context) {
 	// Compact the database by writing into a temporary file, closing the source
 	// DB, and overwriting the original with the compacted temporary file.
 	db.log.Infof("Compacting database to reclaim at least %d bytes...", freeBytes)
-	srcPath := db.Path()                    // before db.Close
-	compFile := srcPath + ".tmp"            // deterministic on *same fs*
-	err = db.BackupTo(compFile, true, true) // overwrite and compact
+	srcPath := db.Path()                     // before db.Close
+	compFile := srcPath + ".tmp"             // deterministic on *same fs*
+	err := db.BackupTo(compFile, true, true) // overwrite and compact
 	if err != nil {
 		db.Close()
 		db.log.Errorf("Unable to compact database: %v", err)
