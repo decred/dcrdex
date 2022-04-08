@@ -1964,6 +1964,23 @@ func (c *Core) redeemMatches(t *trackedTrade, matches []*matchTracker) error {
 	return errs.ifAny()
 }
 
+// lcm finds the Least Common Multiple (LCM) via GCD. Use to add fractions. The
+// last two returns should be used to multiply the numerators when adding. a
+// and b cannot be zero.
+func lcm(a, b uint64) (lowest, multA, multB uint64) {
+	// greatest common divisor (GCD) via Euclidean algorithm
+	gcd := func(a, b uint64) uint64 {
+		for b != 0 {
+			t := b
+			b = a % b
+			a = t
+		}
+		return a
+	}
+	cd := gcd(a, b)
+	return a * b / cd, b / cd, a / cd
+}
+
 // redeemMatchGroup will send a transaction redeeming the specified matches.
 //
 // This method modifies match fields and MUST be called with the trackedTrade
@@ -2060,6 +2077,11 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 		)
 	}
 
+	// Find the least common multiplier to use as the denom for adding
+	// reserve fractions.
+	denom, marketMult, limitMult := lcm(uint64(len(t.matches)), t.Trade().Quantity)
+	var refundNum, redeemNum uint64
+
 	// Save redemption details and send the redeem message to the DEX.
 	// Saving the redemption details now makes it possible to resend the
 	// `redeem` request at a later time if sending it now fails.
@@ -2075,17 +2097,17 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 			// If we are taker we already released the refund
 			// reserves when maker's redemption was found.
 			if t.isMarketBuy() {
-				t.unlockRefundFraction(1, uint64(len(t.matches)))
+				refundNum += marketMult // * 1
 			} else {
-				t.unlockRefundFraction(match.Quantity, t.Trade().Quantity)
+				refundNum += match.Quantity * limitMult
 			}
 			match.Status = order.MakerRedeemed
 			proof.MakerRedeem = coinID
 		}
 		if t.isMarketBuy() {
-			t.unlockRedemptionFraction(1, uint64(len(t.matches)))
+			redeemNum += marketMult // * 1
 		} else {
-			t.unlockRedemptionFraction(match.Quantity, t.Trade().Quantity)
+			redeemNum += match.Quantity * limitMult
 		}
 		if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
 			errs.add("error storing swap details in database for match %s, coin %s: %v",
@@ -2093,6 +2115,12 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 		}
 
 		c.sendRedeemAsync(t, match, coinIDs[i], proof.Secret)
+	}
+	if refundNum != 0 {
+		t.unlockRefundFraction(refundNum, denom)
+	}
+	if redeemNum != 0 {
+		t.unlockRedemptionFraction(redeemNum, denom)
 	}
 }
 

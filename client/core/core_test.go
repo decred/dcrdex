@@ -5157,6 +5157,7 @@ func TestResolveActiveTrades(t *testing.T) {
 			Proof:              db.OrderProof{},
 			ChangeCoin:         changeCoinID,
 			RedemptionReserves: redemptionReserves,
+			RefundReserves:     refundReserves,
 		},
 		Order: lo,
 	}
@@ -5240,10 +5241,12 @@ func TestResolveActiveTrades(t *testing.T) {
 			t.Fatalf("%s: expected %d coin loaded, got %d", description, expCoinsLoaded, len(trade.coins))
 		}
 
+		isActive := dbOrder.MetaData.Status == order.OrderStatusBooked || dbOrder.MetaData.Status == order.OrderStatusEpoch
+
 		if lo.T.Sell && ((match.Side == order.Taker && match.Status < order.MatchComplete) ||
 			(match.Side == order.Taker && match.Status < order.MakerRedeemed)) {
-			var reReserveQty uint64 = redemptionReserves
-			if dbOrder.MetaData.Status > order.OrderStatusBooked {
+			var reReserveQty uint64
+			if isActive {
 				reReserveQty = applyFraction(matchQty, qty, redemptionReserves)
 			}
 
@@ -5253,8 +5256,8 @@ func TestResolveActiveTrades(t *testing.T) {
 		}
 
 		if !lo.T.Sell && match.Status < order.MakerRedeemed {
-			var reRefundQty uint64 = refundReserves
-			if dbOrder.MetaData.Status > order.OrderStatusBooked {
+			var reRefundQty uint64
+			if isActive {
 				reRefundQty = applyFraction(matchQty, qty, refundReserves)
 			}
 
@@ -8381,6 +8384,42 @@ func TestDeleteArchivedRecords(t *testing.T) {
 		}
 		if err != nil {
 			t.Fatalf("%q: unexpected failure: %v", test.name, err)
+		}
+	}
+}
+
+func TestLCM(t *testing.T) {
+	tests := []struct {
+		name                                  string
+		a, b, wantDenom, wantMultA, wantMultB uint64
+	}{{
+		name:      "ok 5 and 10",
+		a:         5,
+		b:         10,
+		wantDenom: 10,
+		wantMultA: 2,
+		wantMultB: 1,
+	}, {
+		name:      "ok 3 and 7",
+		a:         3,
+		b:         7,
+		wantDenom: 21,
+		wantMultA: 7,
+		wantMultB: 3,
+	}, {
+		name:      "ok 6 and 34",
+		a:         34,
+		b:         6,
+		wantDenom: 102,
+		wantMultA: 3,
+		wantMultB: 17,
+	}}
+
+	for _, test := range tests {
+		denom, multA, multB := lcm(test.a, test.b)
+		if denom != test.wantDenom || multA != test.wantMultA || multB != test.wantMultB {
+			t.Fatalf("%q: expected %d %d %d but got %d %d %d", test.name,
+				test.wantDenom, test.wantMultA, test.wantMultB, denom, multA, multB)
 		}
 	}
 }

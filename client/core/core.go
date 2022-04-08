@@ -5186,19 +5186,24 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 
 		tracker.wallets = wallets
 
-		lockMatchRedemption := func(match *matchTracker) {
+		// Find the least common multiplier to use as the denom for adding
+		// reserve fractions.
+		denom, marketMult, limitMult := lcm(uint64(len(tracker.matches)), tracker.Trade().Quantity)
+		var refundNum, redeemNum uint64
+
+		addMatchRedemption := func(match *matchTracker) {
 			if tracker.isMarketBuy() {
-				tracker.lockRedemptionFraction(1, uint64(len(tracker.matches)))
+				redeemNum += marketMult // * 1
 			} else {
-				tracker.lockRedemptionFraction(match.Quantity, trade.Quantity)
+				redeemNum += match.Quantity * limitMult
 			}
 		}
 
-		lockMatchRefund := func(match *matchTracker) {
+		addMatchRefund := func(match *matchTracker) {
 			if tracker.isMarketBuy() {
-				tracker.lockRefundFraction(1, uint64(len(tracker.matches)))
+				refundNum += marketMult // * 1
 			} else {
-				tracker.lockRefundFraction(match.Quantity, trade.Quantity)
+				refundNum += match.Quantity * limitMult
 			}
 		}
 
@@ -5218,8 +5223,8 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 					counterSwap = match.MetaData.Proof.TakerSwap
 				}
 				if match.Status < order.MakerRedeemed {
-					lockMatchRedemption(match)
-					lockMatchRefund(match)
+					addMatchRedemption(match)
+					addMatchRefund(match)
 				}
 			} else { // Taker
 				if match.Status < order.TakerSwapCast {
@@ -5230,10 +5235,10 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 					counterSwap = match.MetaData.Proof.MakerSwap
 				}
 				if match.Status < order.MakerRedeemed {
-					lockMatchRefund(match)
+					addMatchRefund(match)
 				}
 				if match.Status < order.MatchComplete {
-					lockMatchRedemption(match)
+					addMatchRedemption(match)
 				}
 			}
 			c.log.Tracef("Trade %v match %v needs coins = %v, needs audit info = %v",
@@ -5349,8 +5354,12 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 		tracker.recalcFilled()
 
 		if isActive {
-			tracker.lockRedemptionFraction(trade.Remaining(), trade.Quantity)
-			tracker.lockRefundFraction(trade.Remaining(), trade.Quantity)
+			if refundNum != 0 {
+				tracker.lockRefundFraction(refundNum, denom)
+			}
+			if redeemNum != 0 {
+				tracker.lockRedemptionFraction(redeemNum, denom)
+			}
 		}
 
 		// Balances should be updated for any orders with locked wallet coins,
