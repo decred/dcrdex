@@ -116,8 +116,8 @@ func newCommonRateSource(fetcher rateFetcher) *commonRateSource {
 // for sample request and response information.
 func fetchCoinpaprikaRates(ctx context.Context, log dex.Logger, assets map[uint32]*SupportedAsset) map[uint32]float64 {
 	fiatRates := make(map[uint32]float64)
-	for assetID, asset := range assets {
-		if asset.Wallet == nil {
+	for assetID, sa := range assets {
+		if sa.Wallet == nil {
 			// we don't want to fetch rates for assets with no wallet.
 			continue
 		}
@@ -130,29 +130,10 @@ func fetchCoinpaprikaRates(ctx context.Context, log dex.Logger, assets map[uint3
 			} `json:"quotes"`
 		})
 
-		slug := fmt.Sprintf("%s-%s", asset.Symbol, asset.Info.Name)
-		// Special handling for asset names with multiple space, e.g Bitcoin Cash.
-		slug = strings.ToLower(strings.ReplaceAll(slug, " ", "-"))
-		reqStr := fmt.Sprintf(coinpaprikaURL, slug)
+		reqStr := fmt.Sprintf(coinpaprikaURL, coinpapSlug(sa.Symbol, sa.Info.Name))
 
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, reqStr, nil)
-		if err != nil {
-			log.Errorf("%s: NewRequestWithContext error: %v", coinpaprika, err)
-			continue
-		}
-
-		resp, err := http.DefaultClient.Do(request)
-		if err != nil {
-			log.Errorf("%s: request failed: %v", coinpaprika, err)
-			continue
-		}
-		defer resp.Body.Close()
-
-		// Read the raw bytes and close the response.
-		reader := io.LimitReader(resp.Body, 1<<20)
-		err = json.NewDecoder(reader).Decode(res)
-		if err != nil {
-			log.Errorf("%s: failed to decode json from %s: %v", coinpaprika, request.URL.String(), err)
+		if err := getInto(ctx, reqStr, res); err != nil {
+			log.Error(err)
 			continue
 		}
 
@@ -178,24 +159,8 @@ func fetchDcrdataRates(ctx context.Context, log dex.Logger, assets map[uint32]*S
 		BtcPrice float64 `json:"btcPrice"`
 	})
 
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, dcrDataURL, nil)
-	if err != nil {
-		log.Errorf("%s: NewRequestWithContext error: %v", dcrdataDotOrg, err)
-		return nil
-	}
-
-	resp, err := http.DefaultClient.Do(request)
-	if err != nil {
-		log.Errorf("%s: request failed: %v", dcrdataDotOrg, err)
-		return nil
-	}
-	defer resp.Body.Close()
-
-	// Read the raw bytes and close the response.
-	reader := io.LimitReader(resp.Body, 1<<20)
-	err = json.NewDecoder(reader).Decode(res)
-	if err != nil {
-		log.Errorf("%s: failed to decode json from %s: %v", dcrdataDotOrg, request.URL.String(), err)
+	if err := getInto(ctx, dcrDataURL, res); err != nil {
+		log.Error(err)
 		return nil
 	}
 
@@ -231,28 +196,34 @@ func fetchMessariRates(ctx context.Context, log dex.Logger, assets map[uint32]*S
 		slug := strings.ToLower(asset.Symbol)
 		reqStr := fmt.Sprintf(messariURL, slug)
 
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, reqStr, nil)
-		if err != nil {
-			log.Errorf("%s: NewRequestWithContext error: %v", dcrdataDotOrg, err)
-			continue
-		}
-
-		resp, err := http.DefaultClient.Do(request)
-		if err != nil {
-			log.Errorf("%s: request error: %v", messari, err)
-			continue
-		}
-		defer resp.Body.Close()
-
-		// Read the raw bytes and close the response.
-		reader := io.LimitReader(resp.Body, 1<<20)
-		err = json.NewDecoder(reader).Decode(res)
-		if err != nil {
-			log.Errorf("%s: failed to decode json from %s: %v", messari, request.URL.String(), err)
+		if err := getInto(ctx, reqStr, res); err != nil {
+			log.Error(err)
 			continue
 		}
 
 		fiatRates[assetID] = res.Data.MarketData.Price
 	}
 	return fiatRates
+}
+
+func coinpapSlug(symbol, name string) string {
+	slug := fmt.Sprintf("%s-%s", symbol, name)
+	// Special handling for asset names with multiple space, e.g Bitcoin Cash.
+	return strings.ToLower(strings.ReplaceAll(slug, " ", "-"))
+}
+
+func getInto(ctx context.Context, url string, thing interface{}) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	reader := io.LimitReader(resp.Body, 1<<20)
+	return json.NewDecoder(reader).Decode(thing)
 }

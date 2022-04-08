@@ -23,6 +23,7 @@ client/cmd/dexc/dexc
 client/cmd/dexcctl/dexcctl
 client/cmd/assetseed/assetseed
 client/cmd/simnet-trade-tests/simnet-trade-tests
+client/cmd/mmbot/mmbot
 docs/examples/rpcclient/rpcclient
 dex/testing/loadbot/loadbot
 bin/

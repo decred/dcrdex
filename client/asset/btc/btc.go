@@ -720,6 +720,20 @@ type swapOptions struct {
 	FeeBump *float64 `ini:"swapfeebump"`
 }
 
+func (s *swapOptions) feeBump() (float64, error) {
+	bump := 1.0
+	if s.FeeBump != nil {
+		bump = *s.FeeBump
+		if bump > 2.0 {
+			return 0, fmt.Errorf("fee bump %f is higher than the 2.0 limit", bump)
+		}
+		if bump < 1.0 {
+			return 0, fmt.Errorf("fee bump %f is lower than 1", bump)
+		}
+	}
+	return bump, nil
+}
+
 // redeemOptions are order options that apply to redemptions.
 type redeemOptions struct {
 	FeeBump *float64 `ini:"redeemfeebump"`
@@ -1606,15 +1620,9 @@ func (btc *baseWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
 	}
 
 	// Parse the configured fee bump.
-	bump := 1.0
-	if customCfg.FeeBump != nil {
-		bump = *customCfg.FeeBump
-		if bump > 2.0 {
-			return nil, fmt.Errorf("fee bump %f is higher than the 2.0 limit", bump)
-		}
-		if bump < 1.0 {
-			return nil, fmt.Errorf("fee bump %f is lower than 1", bump)
-		}
+	bump, err := customCfg.feeBump()
+	if err != nil {
+		return nil, err
 	}
 
 	// Get the estimate using the current configuration.
@@ -1691,6 +1699,55 @@ func (btc *baseWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
 		Estimate: est,
 		Options:  opts,
 	}, nil
+}
+
+// SingleLotSwapFees is a fallback for PreSwap that uses estimation when funds
+// aren't available. The returned fees are the RealisticWorstCase.
+func (btc *baseWallet) SingleLotSwapFees(form *asset.PreSwapForm) (fees uint64, err error) {
+	// Load the user's selected order-time options.
+	customCfg := new(swapOptions)
+	err = config.Unmapify(form.SelectedOptions, customCfg)
+	if err != nil {
+		return 0, fmt.Errorf("error parsing selected swap options: %w", err)
+	}
+
+	// Parse the configured split transaction.
+	split := btc.useSplitTx()
+	if customCfg.Split != nil {
+		split = *customCfg.Split
+	}
+
+	feeBump, err := customCfg.feeBump()
+	if err != nil {
+		return 0, err
+	}
+
+	bumpedNetRate := form.FeeSuggestion
+	if feeBump > 1 {
+		bumpedNetRate = uint64(math.Round(float64(bumpedNetRate) * feeBump))
+	}
+
+	if split {
+		if btc.segwit {
+			fees += (dexbtc.MinimumTxOverhead + dexbtc.RedeemP2WPKHInputSize + dexbtc.P2WPKHOutputSize) * bumpedNetRate
+		} else {
+			fees += (dexbtc.MinimumTxOverhead + dexbtc.RedeemP2PKHInputSize + dexbtc.P2PKHOutputSize) * bumpedNetRate
+		}
+
+	}
+
+	var inputSize uint64
+	if btc.segwit {
+		inputSize = dexbtc.TxInOverhead + 1 + dexbtc.RedeemP2PKHSigScriptSize
+	} else {
+		inputSize = dexbtc.RedeemP2WPKHInputSize
+	}
+
+	nfo := form.AssetConfig
+	swapFunds := calc.RequiredOrderFundsAlt(form.LotSize, inputSize, 1, nfo.SwapSizeBase, nfo.SwapSize, bumpedNetRate)
+	fees += swapFunds - form.LotSize
+
+	return fees, nil
 }
 
 // splitOption constructs an *asset.OrderOption with customized text based on the
@@ -1883,6 +1940,22 @@ func (btc *baseWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, er
 		},
 		Options: opts,
 	}, nil
+}
+
+// SingleLotRedeemFees is a fallback for PreRedeem that uses estimation when
+// funds aren't available. The returned fees are the RealisticWorstCase.
+func (btc *baseWallet) SingleLotRedeemFees(req *asset.PreRedeemForm) (uint64, error) {
+	// For BTC, there are no funds required to redeem, so we'll never actually
+	// end up here unless there are some bad order options, since this method
+	// is a backup for PreRedeem. We'll almost certainly generate the same error
+	// again.
+	form := *req
+	form.Lots = 1
+	preRedeem, err := btc.PreRedeem(&form)
+	if err != nil {
+		return 0, err
+	}
+	return preRedeem.Estimate.RealisticWorstCase, nil
 }
 
 // FundOrder selects coins for use in an order. The coins will be locked, and

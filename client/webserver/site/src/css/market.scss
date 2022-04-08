@@ -699,6 +699,12 @@ div[data-handler=markets] {
   &:not(.listopen) .ico-arrowup {
     display: none;
   }
+
+  #vUnlockPreorder {
+    .ico-locked {
+      font-size: 35px;
+    }
+  }
 }
 
 #headerSpace .market-stats-v1 {

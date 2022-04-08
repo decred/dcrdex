@@ -141,6 +141,12 @@ type clientCore interface {
 	EstimateSendTxFee(address string, assetID uint32, value uint64, subtract bool) (fee uint64, isValidAddress bool, err error)
 	ValidateAddress(address string, assetID uint32) (bool, error)
 	DeleteArchivedRecordsWithBackup(olderThan *time.Time, saveMatchesToFile, saveOrdersToFile bool) (string, int, error)
+	CreateBot(pw []byte, botType string, pgm *core.MakerProgram) (uint64, error)
+	StartBot(pw []byte, pgmID uint64) error
+	StopBot(pgmID uint64) error
+	UpdateBotProgram(pgmID uint64, pgm *core.MakerProgram) error
+	RetireBot(pgmID uint64) error
+	MarketReport(host string, baseID, quoteID uint32) (*core.MarketReport, error)
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -332,6 +338,7 @@ func New(cfg *Config) (*WebServer, error) {
 					webAuth.Get(exportOrderRoute, s.handleExportOrders)
 					webAuth.Get(homeRoute, s.handleHome)
 					webAuth.Get(marketsRoute, s.handleMarkets)
+					webAuth.Get(marketMakerRoute, s.handleMarketMaker)
 				})
 			})
 
@@ -394,6 +401,12 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/validateaddress", s.apiValidateAddress)
 			apiAuth.Post("/txfee", s.apiEstimateSendTxFee)
 			apiAuth.Post("/deletearchivedrecords", s.apiDeleteArchivedRecords)
+			apiAuth.Post("/createbot", s.apiCreateBot)
+			apiAuth.Post("/startbot", s.apiStartBot)
+			apiAuth.Post("/stopbot", s.apiStopBot)
+			apiAuth.Post("/updatebotprogram", s.apiUpdateBotProgram)
+			apiAuth.Post("/retirebot", s.apiRetireBot)
+			apiAuth.Post("/marketreport", s.apiMarketReport)
 		})
 	})
 
@@ -447,6 +460,7 @@ func (s *WebServer) buildTemplates(lang, siteDir string) error {
 		addTemplate("login", bb, "forms").
 		addTemplate("register", bb, "forms").
 		addTemplate("markets", bb, "forms").
+		addTemplate("mm", bb, "forms").
 		addTemplate("wallets", bb, "forms").
 		addTemplate("settings", bb, "forms").
 		addTemplate("orders", bb).

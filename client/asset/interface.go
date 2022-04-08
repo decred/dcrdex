@@ -698,6 +698,17 @@ type Bond struct {
 	RedeemTx []byte
 }
 
+// BotWallet implements some methods that can help bots function.
+type BotWallet interface {
+	// SingleLotSwapFees is a fallback for PreSwap that uses estimation
+	// when funds aren't available. The returned fees are the
+	// RealisticWorstCase.
+	SingleLotSwapFees(*PreSwapForm) (uint64, error)
+	// SingleLotRedeemFees is a fallback for PreRedeem that uses estimation when
+	// funds aren't available. The returned fees are the RealisticWorstCase.
+	SingleLotRedeemFees(*PreRedeemForm) (uint64, error)
+}
+
 // Balance is categorized information about a wallet's balance.
 type Balance struct {
 	// Available is the balance that is available for trading immediately.

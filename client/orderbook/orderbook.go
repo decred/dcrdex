@@ -14,6 +14,9 @@ import (
 	"decred.org/dcrdex/dex/order"
 )
 
+// ErrEmptyOrderbook is returned from MidGap when the order book is empty.
+const ErrEmptyOrderbook = dex.ErrorKind("cannot calculate mid-gap from empty order book")
+
 // Order represents an ask or bid.
 type Order struct {
 	OrderID  order.OrderID
@@ -591,7 +594,7 @@ func (ob *OrderBook) MidGap() (uint64, error) {
 	b, benough := ob.buys.BestNOrders(1)
 	if !senough {
 		if !benough {
-			return 0, fmt.Errorf("cannot calculate mid-gap from empty order book")
+			return 0, ErrEmptyOrderbook
 		}
 		return b[0].Rate, nil
 	}

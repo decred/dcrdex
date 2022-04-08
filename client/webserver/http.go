@@ -31,6 +31,7 @@ const (
 	settingsRoute    = "/settings"
 	ordersRoute      = "/orders"
 	exportOrderRoute = "/orders/export"
+	marketMakerRoute = "/mm"
 )
 
 // sendTemplate processes the template and sends the result.
@@ -117,6 +118,13 @@ type marketTmplData struct {
 func (s *WebServer) handleMarkets(w http.ResponseWriter, r *http.Request) {
 	cArgs := commonArgs(r, "Markets | Decred DEX")
 	s.sendTemplate(w, "markets", &marketTmplData{
+		CommonArguments: *cArgs,
+	})
+}
+
+func (s *WebServer) handleMarketMaker(w http.ResponseWriter, r *http.Request) {
+	cArgs := commonArgs(r, "Market Maker | Decred DEX")
+	s.sendTemplate(w, "mm", &marketTmplData{
 		CommonArguments: *cArgs,
 	})
 }

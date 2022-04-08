@@ -1,0 +1,11 @@
+{
+	"host": "127.0.0.3:5757",
+	"baseID": 42,
+	"quoteID": 0,
+	"lots": 1,
+	"gapStrategy": "percent-plus",
+	"gapFactor": 0.005,
+	"driftTolerance": 0.001,
+	"oracleWeighting": 0.5,
+	"oracleBias": 0
+}

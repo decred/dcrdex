@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/db"
+	dexdb "decred.org/dcrdex/client/db"
 	dbtest "decred.org/dcrdex/client/db/test"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/order"
@@ -510,6 +511,7 @@ func TestOrders(t *testing.T) {
 				SwapFeesPaid:       rand.Uint64(),
 				RedemptionFeesPaid: rand.Uint64(),
 				MaxFeeRate:         rand.Uint64(),
+				ProgramID:          rand.Uint64(),
 			},
 			Order: ord,
 		}
@@ -549,6 +551,9 @@ func TestOrders(t *testing.T) {
 	}
 	if firstOrd.MetaData.MaxFeeRate != mord.MetaData.MaxFeeRate {
 		t.Fatalf("wrong MaxFeeRate. wanted %d, got %d", firstOrd.MetaData.MaxFeeRate, mord.MetaData.MaxFeeRate)
+	}
+	if firstOrd.MetaData.ProgramID != mord.MetaData.ProgramID {
+		t.Fatalf("wrong ProgramID. wanted %d, got %d", firstOrd.MetaData.ProgramID, mord.MetaData.ProgramID)
 	}
 
 	// Check the active orders.
@@ -1615,4 +1620,56 @@ func TestOrderSide(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestBotPrograms(t *testing.T) {
+	boltdb, shutdown := newTestDB(t)
+	defer shutdown()
+
+	type program struct {
+		A int
+		B string
+	}
+
+	inPgm1 := &dexdb.BotProgram{Type: "1", Program: []byte("2")}
+	inPgm2 := &dexdb.BotProgram{Type: "3", Program: []byte("4")}
+
+	pgmID1, err := boltdb.SaveBotProgram(inPgm1)
+	if err != nil {
+		t.Fatalf("error saving program: %v", err)
+	}
+
+	pgmID2, err := boltdb.SaveBotProgram(inPgm2)
+	if err != nil {
+		t.Fatalf("error saving program: %v", err)
+	}
+
+	activePrograms, err := boltdb.ActiveBotPrograms()
+	if err != nil {
+		t.Fatalf("error loading active programs: %v", err)
+	}
+
+	if len(activePrograms) != 2 {
+		t.Fatalf("expected 2 active programs, got %d", len(activePrograms))
+	}
+
+	if err := boltdb.RetireBotProgram(pgmID2); err != nil {
+		t.Fatalf("error retiring bot program: %v", err)
+	}
+
+	activePrograms, _ = boltdb.ActiveBotPrograms()
+	if len(activePrograms) != 1 {
+		t.Fatalf("expected 1 active program after retiring one, but got %d", len(activePrograms))
+	}
+
+	rePgm := activePrograms[pgmID1]
+
+	if rePgm.Type != inPgm1.Type {
+		t.Fatalf("loaded program type does not match %+v != %+v", rePgm.Type, inPgm1.Type)
+	}
+
+	if !bytes.Equal(rePgm.Program, inPgm1.Program) {
+		t.Fatalf("loaded program does not match %+v != %+v", rePgm.Type, inPgm1.Type)
+	}
+
 }

@@ -1,0 +1,40 @@
+\documentclass[]{article}
+\begin{document}
+
+In a buy\textrightarrow sell sequence with a positive gap, we end up with more of the quote asset and less of the base asset. Setting our loss ratio equal to our profit ratio, we get
+
+\[
+\frac{F_B}{L} = \frac{p_sL - p_bL - F_Q}{p_bL}
+\]
+
+where $ F_B $ and $ F_Q $ are the fees accumulated for the base and quote assets respectively, $ p_b $ and $ p_s $ are the buy and sell prices, and $ L $ is the market's lot size.
+
+Rearranging, we get 
+
+\[
+p_bF_B = p_sL - p_bL - F_Q
+\]
+
+Noting that for mid-gap price, $ r $, and half-gap width  $ g $, 
+
+\[
+p_b = r - g
+\]
+\[
+p_s = r + g
+\]
+
+substituting,
+
+\[
+(r - g)F_B = (r + g)L - (r - g)L - F_Q
+\]
+
+and solving for $ g $ yields our break-even half-gap.
+
+
+\[
+g = \frac{rF_B + F_Q}{F_B + 2L}
+\]
+
+\end{document}

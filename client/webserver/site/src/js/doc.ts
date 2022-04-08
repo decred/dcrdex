@@ -27,6 +27,16 @@ const BipSymbols = Object.values(BipIDs)
 
 const intFormatter = new Intl.NumberFormat((navigator.languages as string[]))
 
+const threeSigFigs = new Intl.NumberFormat((navigator.languages as string[]), {
+  minimumSignificantDigits: 3,
+  maximumSignificantDigits: 3
+})
+
+const fiveSigFigs = new Intl.NumberFormat((navigator.languages as string[]), {
+  minimumSignificantDigits: 5,
+  maximumSignificantDigits: 5
+})
+
 /* A cache for formatters used for Doc.formatCoinValue. */
 const decimalFormatters = {}
 
@@ -91,12 +101,12 @@ export default class Doc {
   }
 
   /* bind binds the function to the event for the element. */
-  static bind (el: EventTarget, ev: string, f: (e: Event) => void) {
+  static bind (el: EventTarget, ev: string, f: EventListenerOrEventListenerObject): void {
     el.addEventListener(ev, f)
   }
 
   /* unbind removes the handler for the event from the element. */
-  static unbind (el: EventTarget, ev: string, f: (e: Event) => void) {
+  static unbind (el: EventTarget, ev: string, f: (e: Event) => void): void {
     el.removeEventListener(ev, f)
   }
 
@@ -136,9 +146,31 @@ export default class Doc {
     }
   }
 
+  static descendentMetrics (parent: PageElement, kid: PageElement): LayoutMetrics {
+    const parentMetrics = Doc.layoutMetrics(parent)
+    const kidMetrics = Doc.layoutMetrics(kid)
+    return {
+      bodyTop: kidMetrics.bodyTop - parentMetrics.bodyTop,
+      bodyLeft: kidMetrics.bodyLeft - parentMetrics.bodyLeft,
+      width: kidMetrics.width,
+      height: kidMetrics.height,
+      centerX: kidMetrics.centerX - parentMetrics.bodyLeft,
+      centerY: kidMetrics.centerY - parentMetrics.bodyTop
+    }
+  }
+
   /* empty removes all child nodes from the specified element. */
   static empty (...els: Element[]) {
     for (const el of els) while (el.firstChild) el.removeChild(el.firstChild)
+  }
+
+  /*
+   * setContent removes all child nodes from the specified element and appends
+   * passed elements.
+   */
+  static setContent (ancestor: PageElement, ...kids: PageElement[]) {
+    Doc.empty(ancestor)
+    for (const k of kids) ancestor.appendChild(k)
   }
 
   /*
@@ -223,6 +255,17 @@ export default class Doc {
     const [v, prec] = convertToConventional(vAtomic, unitInfo)
     if (Number.isInteger(v)) return intFormatter.format(v)
     return decimalFormatter(prec).format(v)
+  }
+
+  static formatThreeSigFigs (v: number): string {
+    if (v >= 1000) return intFormatter.format(Math.round(v))
+    return threeSigFigs.format(v)
+  }
+
+  static formatFiveSigFigs (v: number, prec?: number): string {
+    if (v >= 10000) return intFormatter.format(Math.round(v))
+    else if (v < 1e5) return fullPrecisionFormatter(prec ?? 8 /* rate encoding factor */).format(v)
+    return fiveSigFigs.format(v)
   }
 
   /*

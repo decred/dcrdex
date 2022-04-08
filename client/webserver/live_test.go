@@ -446,6 +446,12 @@ func (t *tBookFeed) Candles(dur string) error {
 	return nil
 }
 
+type liveBot struct {
+	botType string
+	pgm     *core.MakerProgram
+	running bool
+}
+
 type TCore struct {
 	reg       *core.RegisterForm
 	inited    bool
@@ -470,6 +476,7 @@ type TCore struct {
 	epochOrders []*core.BookUpdate
 	fiatSources map[string]bool
 	validAddr   bool
+	bots        map[uint64]*liveBot
 }
 
 // TDriver implements the interface required of all exchange wallets.
@@ -521,6 +528,7 @@ func newTCore() *TCore {
 			"Messari":     true,
 			"Coinpaprika": true,
 		},
+		bots: make(map[uint64]*liveBot),
 	}
 }
 
@@ -1586,6 +1594,15 @@ func (c *TCore) User() *core.User {
 	if c.reg != nil {
 		exchanges = tExchanges
 	}
+	bots := make([]*core.BotReport, 0, len(c.bots))
+	for pgmID, bot := range c.bots {
+		bots = append(bots, &core.BotReport{
+			ProgramID: pgmID,
+			Program:   bot.pgm,
+			Running:   bot.running,
+		})
+	}
+
 	user := &core.User{
 		Exchanges:   exchanges,
 		Initialized: c.inited,
@@ -1601,6 +1618,7 @@ func (c *TCore) User() *core.User {
 			145: 114.68,    // bch
 			60:  1_209.51,  // eth
 		},
+		Bots: bots,
 	}
 	return user
 }
@@ -1826,6 +1844,79 @@ func (c *TCore) FiatRateSources() map[string]bool {
 }
 func (c *TCore) DeleteArchivedRecordsWithBackup(olderThan *time.Time, saveMatchesToFile, saveOrdersToFile bool) (string, int, error) {
 	return "/path/to/records", 10, nil
+}
+
+var botCounter uint64
+
+func (c *TCore) CreateBot(pw []byte, botType string, pgm *core.MakerProgram) (uint64, error) {
+	i := atomic.AddUint64(&botCounter, 1)
+	c.bots[i] = &liveBot{
+		botType: botType,
+		pgm:     pgm,
+		running: true,
+	}
+	c.sendBotNote(core.TopicBotCreated, i, true, pgm)
+	return i, nil
+}
+
+func (c *TCore) sendBotNote(topic core.Topic, pgmID uint64, running bool, pgm *core.MakerProgram) {
+	note := db.NewNotification(core.NoteTypeBot, topic, "", "", db.Data)
+	c.noteFeed <- &core.BotNote{
+		Notification: note,
+		Report: &core.BotReport{
+			ProgramID: pgmID,
+			Program:   pgm,
+			Running:   running,
+		},
+	}
+}
+
+func (c *TCore) StartBot(pw []byte, pgmID uint64) error {
+	c.bots[pgmID].running = true
+	c.sendBotNote(core.TopicBotStarted, pgmID, true, c.bots[pgmID].pgm)
+	return nil
+}
+
+func (c *TCore) StopBot(pgmID uint64) error {
+	c.bots[pgmID].running = false
+	c.sendBotNote(core.TopicBotStopped, pgmID, false, c.bots[pgmID].pgm)
+	return nil
+}
+
+func (c *TCore) UpdateBotProgram(pgmID uint64, pgm *core.MakerProgram) error {
+	c.bots[pgmID].pgm = pgm
+	c.sendBotNote(core.TopicBotUpdated, pgmID, c.bots[pgmID].running, pgm)
+	return nil
+}
+
+func (c *TCore) RetireBot(pgmID uint64) error {
+	c.sendBotNote(core.TopicBotRetired, pgmID, false, c.bots[pgmID].pgm)
+	delete(c.bots, pgmID)
+	return nil
+}
+
+func (c *TCore) MarketReport(host string, baseID, quoteID uint32) (*core.MarketReport, error) {
+	return &core.MarketReport{
+		Price:      0.11178,
+		BasisPrice: 0.11178,
+		Oracles: []*core.OracleReport{
+			{
+				Host:     "binance.com",
+				DayVol:   123456,
+				USDVol:   56789,
+				BestBuy:  0.11158,
+				BestSell: 0.11195,
+			},
+			{
+				Host:     "coinbase.com",
+				DayVol:   654321,
+				USDVol:   98765,
+				BestBuy:  0.11157,
+				BestSell: 0.11199,
+			},
+		},
+		BreakEvenSpread: rand.Float64() * 0.2,
+	}, nil
 }
 
 func TestServer(t *testing.T) {

@@ -13,6 +13,7 @@ import {
   Match,
   Coin
 } from './registry'
+import { setOptionTemplates } from './opts'
 
 const Mainnet = 0
 const Testnet = 1
@@ -73,7 +74,7 @@ export default class OrderPage extends BasePage {
       this.refreshOnPopupClose = true
     }
     // Do not call cleanTemplates before creating the AccelerateOrderForm
-    OrderUtil.setOptionTemplates(page)
+    setOptionTemplates(page)
     this.accelerateOrderForm = new AccelerateOrderForm(page.accelerateForm, success)
     Doc.cleanTemplates(page.booleanOptTmpl, page.rangeOptTmpl, page.orderOptTmpl)
 

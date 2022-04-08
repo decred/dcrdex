@@ -59,6 +59,7 @@ var (
 	archivedOrdersBucket   = []byte("orders")
 	activeMatchesBucket    = []byte("activeMatches")
 	archivedMatchesBucket  = []byte("matches")
+	botProgramsBucket      = []byte("botPrograms")
 	walletsBucket          = []byte("wallets")
 	notesBucket            = []byte("notes")
 	versionKey             = []byte("version")
@@ -105,6 +106,7 @@ var (
 	backupDir              = "backup"
 	disabledRateSourceKey  = []byte("disabledRateSources")
 	walletDisabledKey      = []byte("walletDisabled")
+	programKey             = []byte("program")
 )
 
 // BoltDB is a bbolt-based database backend for a DEX client. BoltDB satisfies
@@ -138,6 +140,7 @@ func NewDB(dbPath string, logger dex.Logger) (dexdb.DB, error) {
 		activeOrdersBucket, archivedOrdersBucket,
 		activeMatchesBucket, archivedMatchesBucket,
 		walletsBucket, notesBucket, credentialsBucket,
+		botProgramsBucket,
 	}); err != nil {
 		return nil, err
 	}
@@ -685,39 +688,19 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 			return fmt.Errorf("%s bucket error: %w", whichBkt, err)
 		}
 
-		var linkedB []byte
-		if !md.LinkedOrder.IsZero() {
-			linkedB = md.LinkedOrder[:]
-		}
-
-		var accelerationsB encode.BuildyBytes
-		if len(md.AccelerationCoins) > 0 {
-			accelerationsB = encode.BuildyBytes{0}
-			for _, acceleration := range md.AccelerationCoins {
-				accelerationsB = accelerationsB.AddData(acceleration)
-			}
-		}
-
-		return newBucketPutter(oBkt).
+		err = newBucketPutter(oBkt).
 			put(baseKey, uint32Bytes(ord.Base())).
 			put(quoteKey, uint32Bytes(ord.Quote())).
-			put(statusKey, uint16Bytes(uint16(md.Status))).
 			put(dexKey, []byte(md.Host)).
-			put(updateTimeKey, uint64Bytes(timeNow())).
-			put(proofKey, md.Proof.Encode()).
-			put(changeKey, md.ChangeCoin).
-			put(linkedKey, linkedB).
 			put(typeKey, []byte{byte(ord.Type())}).
 			put(orderKey, order.EncodeOrder(ord)).
-			put(swapFeesKey, uint64Bytes(md.SwapFeesPaid)).
-			put(maxFeeRateKey, uint64Bytes(md.MaxFeeRate)).
-			put(redeemMaxFeeRateKey, uint64Bytes(md.RedeemMaxFeeRate)).
-			put(redemptionFeesKey, uint64Bytes(md.RedemptionFeesPaid)).
-			put(fromVersionKey, uint32Bytes(md.FromVersion)).
-			put(toVersionKey, uint32Bytes(md.ToVersion)).
-			put(optionsKey, config.Data(md.Options)).
-			put(accelerationsKey, accelerationsB).
 			err()
+
+		if err != nil {
+			return err
+		}
+
+		return updateOrderMetaData(oBkt, md)
 	})
 }
 
@@ -1041,6 +1024,11 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 		}
 	}
 
+	var pgmID uint64
+	if pgmB := oBkt.Get(programKey); len(pgmB) == 8 {
+		pgmID = intCoder.Uint64(pgmB)
+	}
+
 	return &dexdb.MetaOrder{
 		MetaData: &dexdb.OrderMetaData{
 			Proof:              *proof,
@@ -1058,6 +1046,7 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 			RedemptionReserves: redemptionReserves,
 			RefundReserves:     refundReserves,
 			AccelerationCoins:  accelerationCoinIDs,
+			ProgramID:          pgmID,
 		},
 		Order: ord,
 	}, nil
@@ -1115,36 +1104,42 @@ func (db *BoltDB) UpdateOrderMetaData(oid order.OrderID, md *dexdb.OrderMetaData
 			return fmt.Errorf("UpdateOrderMetaData: %w", err)
 		}
 
-		var linkedB []byte
-		if !md.LinkedOrder.IsZero() {
-			linkedB = md.LinkedOrder[:]
-		}
-
-		var accelerationsB encode.BuildyBytes
-		if len(md.AccelerationCoins) > 0 {
-			accelerationsB = encode.BuildyBytes{0}
-			for _, acceleration := range md.AccelerationCoins {
-				accelerationsB = accelerationsB.AddData(acceleration)
-			}
-		}
-
-		return newBucketPutter(oBkt).
-			put(statusKey, uint16Bytes(uint16(md.Status))).
-			put(updateTimeKey, uint64Bytes(timeNow())).
-			put(proofKey, md.Proof.Encode()).
-			put(changeKey, md.ChangeCoin).
-			put(linkedKey, linkedB).
-			put(swapFeesKey, uint64Bytes(md.SwapFeesPaid)).
-			put(maxFeeRateKey, uint64Bytes(md.MaxFeeRate)).
-			put(redemptionFeesKey, uint64Bytes(md.RedemptionFeesPaid)).
-			put(fromVersionKey, uint32Bytes(md.FromVersion)).
-			put(toVersionKey, uint32Bytes(md.ToVersion)).
-			put(optionsKey, config.Data(md.Options)).
-			put(redemptionReservesKey, uint64Bytes(md.RedemptionReserves)).
-			put(refundReservesKey, uint64Bytes(md.RefundReserves)).
-			put(accelerationsKey, accelerationsB).
-			err()
+		return updateOrderMetaData(oBkt, md)
 	})
+}
+
+func updateOrderMetaData(bkt *bbolt.Bucket, md *dexdb.OrderMetaData) error {
+	var linkedB []byte
+	if !md.LinkedOrder.IsZero() {
+		linkedB = md.LinkedOrder[:]
+	}
+
+	var accelerationsB encode.BuildyBytes
+	if len(md.AccelerationCoins) > 0 {
+		accelerationsB = encode.BuildyBytes{0}
+		for _, acceleration := range md.AccelerationCoins {
+			accelerationsB = accelerationsB.AddData(acceleration)
+		}
+	}
+
+	return newBucketPutter(bkt).
+		put(statusKey, uint16Bytes(uint16(md.Status))).
+		put(updateTimeKey, uint64Bytes(timeNow())).
+		put(proofKey, md.Proof.Encode()).
+		put(changeKey, md.ChangeCoin).
+		put(linkedKey, linkedB).
+		put(swapFeesKey, uint64Bytes(md.SwapFeesPaid)).
+		put(maxFeeRateKey, uint64Bytes(md.MaxFeeRate)).
+		put(redemptionFeesKey, uint64Bytes(md.RedemptionFeesPaid)).
+		put(fromVersionKey, uint32Bytes(md.FromVersion)).
+		put(toVersionKey, uint32Bytes(md.ToVersion)).
+		put(optionsKey, config.Data(md.Options)).
+		put(redemptionReservesKey, uint64Bytes(md.RedemptionReserves)).
+		put(refundReservesKey, uint64Bytes(md.RefundReserves)).
+		put(accelerationsKey, accelerationsB).
+		put(redeemMaxFeeRateKey, uint64Bytes(md.RedeemMaxFeeRate)).
+		put(programKey, uint64Bytes(md.ProgramID)).
+		err()
 }
 
 // UpdateOrderStatus sets the order status for an order.
@@ -2127,6 +2122,79 @@ func (db *BoltDB) DisabledRateSources() (disabledSources []string, err error) {
 		for _, token := range disabled {
 			if token != "" {
 				disabledSources = append(disabledSources, token)
+			}
+		}
+		return nil
+	})
+}
+
+// SaveBotProgram saves data associated with a bot program. A unique ID
+// is returned that can be used to address this program in future queries.
+func (db *BoltDB) SaveBotProgram(pgm *dexdb.BotProgram) (pgmID uint64, err error) {
+	return pgmID, db.Update(func(tx *bbolt.Tx) error {
+		bkt := tx.Bucket(botProgramsBucket)
+		if bkt == nil {
+			return errors.New("no bot programs bucket")
+		}
+		var err error
+		pgmID, err = bkt.NextSequence()
+		if err != nil {
+			return fmt.Errorf("NextSequence error: %v", err)
+		}
+		return storeBotProgram(bkt, pgmID, pgm)
+	})
+}
+
+func storeBotProgram(bkt *bbolt.Bucket, pgmID uint64, pgm *dexdb.BotProgram) error {
+	k := uint64Bytes(pgmID)
+	pgmBkt, err := bkt.CreateBucketIfNotExists(k)
+	if err != nil {
+		return fmt.Errorf("error creating program bucket: %w", err)
+	}
+
+	return newBucketPutter(pgmBkt).
+		put(typeKey, []byte(pgm.Type)).
+		put(programKey, pgm.Program).
+		err()
+}
+
+// UpdateBotProgram updates the data associated with a running bot program.
+func (db *BoltDB) UpdateBotProgram(pgmID uint64, pgm *dexdb.BotProgram) error {
+	return db.Update(func(tx *bbolt.Tx) error {
+		bkt := tx.Bucket(botProgramsBucket)
+		if bkt == nil {
+			return errors.New("no bot programs bucket")
+		}
+		return storeBotProgram(bkt, pgmID, pgm)
+	})
+}
+
+// RetireBotProgram deletes the bot program from the database.
+func (db *BoltDB) RetireBotProgram(pgmID uint64) error {
+	return db.Update(func(tx *bbolt.Tx) error {
+		bkt := tx.Bucket(botProgramsBucket)
+		if bkt == nil {
+			return errors.New("no bot programs bucket")
+		}
+		return bkt.DeleteBucket(uint64Bytes(pgmID))
+	})
+}
+
+// ActiveBotPrograms loads a list of active bot program IDs.
+func (db *BoltDB) ActiveBotPrograms() (pgms map[uint64]*dexdb.BotProgram, err error) {
+	return pgms, db.View(func(tx *bbolt.Tx) error {
+		bkt := tx.Bucket(botProgramsBucket)
+		if bkt == nil {
+			return errors.New("no bot programs bucket")
+		}
+		pgms = make(map[uint64]*dexdb.BotProgram, bkt.Stats().KeyN)
+
+		c := bkt.Cursor()
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			pgmBkt := bkt.Bucket(k)
+			pgms[intCoder.Uint64(k)] = &dexdb.BotProgram{
+				Type:    string(pgmBkt.Get(typeKey)),
+				Program: pgmBkt.Get(programKey),
 			}
 		}
 		return nil

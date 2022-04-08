@@ -8,6 +8,7 @@ import MarketsPage from './markets'
 import OrdersPage from './orders'
 import OrderPage from './order'
 import DexSettingsPage from './dexsettings'
+import MarketMakerPage from './mm'
 import { RateEncodingFactor, StatusExecuted, hasLiveMatches } from './orderutil'
 import { getJSON, postJSON, Errors } from './http'
 import * as ntfn from './notifications'
@@ -29,6 +30,7 @@ import {
   MatchNote,
   ConnEventNote,
   SpotPriceNote,
+  BotNote,
   UnitInfo,
   WalletDefinition,
   WalletBalance,
@@ -36,7 +38,8 @@ import {
   NoteElement,
   BalanceResponse,
   APIResponse,
-  RateNote
+  RateNote,
+  BotReport
 } from './registry'
 
 const idel = Doc.idel // = element by id
@@ -69,7 +72,8 @@ const constructors: Record<string, PageClass> = {
   settings: SettingsPage,
   orders: OrdersPage,
   order: OrderPage,
-  dexsettings: DexSettingsPage
+  dexsettings: DexSettingsPage,
+  mm: MarketMakerPage
 }
 
 // Application is the main javascript web application for the Decred DEX client.
@@ -590,6 +594,24 @@ export default class Application {
         // markets page reload when it receives a dex conn note.
         if (!xc || !xc.markets) break
         for (const [mktName, spot] of Object.entries(n.spots)) xc.markets[mktName].spot = spot
+        break
+      }
+      case 'fiatrateupdate': {
+        this.fiatRatesMap = (note as RateNote).fiatRates
+        break
+      }
+      case 'bot': {
+        const n = note as BotNote
+        const [r, bots] = [n.report, this.user.bots]
+        const idx = bots.findIndex((report: BotReport) => report.programID === r.programID)
+        switch (n.topic) {
+          case 'BotRetired':
+            if (idx >= 0) bots.splice(idx, 1)
+            break
+          default:
+            if (idx >= 0) bots[idx] = n.report
+            else bots.push(n.report)
+        }
       }
     }
   }

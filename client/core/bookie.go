@@ -395,7 +395,7 @@ func (dc *dexConnection) bookie(marketID string) *bookie {
 // syncBook subscribes to the order book and returns the book and a BookFeed to
 // receive order book updates. The BookFeed must be Close()d when it is no
 // longer in use. Use stopBook to unsubscribed and clean up the feed.
-func (dc *dexConnection) syncBook(base, quote uint32) (BookFeed, error) {
+func (dc *dexConnection) syncBook(base, quote uint32) (*orderbook.OrderBook, BookFeed, error) {
 	dc.cfgMtx.RLock()
 	cfg := dc.cfg
 	dc.cfgMtx.RUnlock()
@@ -408,18 +408,18 @@ func (dc *dexConnection) syncBook(base, quote uint32) (BookFeed, error) {
 	if !found {
 		// Make sure the market exists.
 		if dc.marketConfig(mktID) == nil {
-			return nil, fmt.Errorf("unknown market %s", mktID)
+			return nil, nil, fmt.Errorf("unknown market %s", mktID)
 		}
 
 		obRes, err := dc.subscribe(base, quote)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		booky = newBookie(dc, base, quote, cfg.BinSizes, dc.log.SubLogger(mktID))
 		err = booky.Sync(obRes)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		dc.books[mktID] = booky
 	}
@@ -437,7 +437,7 @@ func (dc *dexConnection) syncBook(base, quote uint32) (BookFeed, error) {
 		},
 	})
 
-	return feed, nil
+	return booky.OrderBook, feed, nil
 }
 
 // subscribe subscribes to the given market's order book via the 'orderbook'
@@ -526,11 +526,16 @@ func (dc *dexConnection) unsubscribe(base, quote uint32) error {
 // receive order book updates. The BookFeed must be Close()d when it is no
 // longer in use.
 func (c *Core) SyncBook(host string, base, quote uint32) (BookFeed, error) {
+	_, feed, err := c.syncBook(host, base, quote)
+	return feed, err
+}
+
+func (c *Core) syncBook(host string, base, quote uint32) (*orderbook.OrderBook, BookFeed, error) {
 	c.connMtx.RLock()
 	dc, found := c.conns[host]
 	c.connMtx.RUnlock()
 	if !found {
-		return nil, fmt.Errorf("unknown DEX '%s'", host)
+		return nil, nil, fmt.Errorf("unknown DEX '%s'", host)
 	}
 
 	return dc.syncBook(base, quote)
