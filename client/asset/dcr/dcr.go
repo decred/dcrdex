@@ -2129,7 +2129,7 @@ func (dcr *ExchangeWallet) findRedemptionsInMempool(contractOutpoints []outPoint
 	}
 
 	mempooler, is := dcr.wallet.(Mempooler)
-	if !is {
+	if !is || dcr.wallet.SpvMode() {
 		return
 	}
 
