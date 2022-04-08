@@ -5241,12 +5241,10 @@ func TestResolveActiveTrades(t *testing.T) {
 			t.Fatalf("%s: expected %d coin loaded, got %d", description, expCoinsLoaded, len(trade.coins))
 		}
 
-		isActive := dbOrder.MetaData.Status == order.OrderStatusBooked || dbOrder.MetaData.Status == order.OrderStatusEpoch
-
 		if lo.T.Sell && ((match.Side == order.Taker && match.Status < order.MatchComplete) ||
 			(match.Side == order.Taker && match.Status < order.MakerRedeemed)) {
-			var reReserveQty uint64
-			if isActive {
+			var reReserveQty uint64 = redemptionReserves
+			if dbOrder.MetaData.Status > order.OrderStatusBooked {
 				reReserveQty = applyFraction(matchQty, qty, redemptionReserves)
 			}
 
@@ -5256,8 +5254,8 @@ func TestResolveActiveTrades(t *testing.T) {
 		}
 
 		if !lo.T.Sell && match.Status < order.MakerRedeemed {
-			var reRefundQty uint64
-			if isActive {
+			var reRefundQty uint64 = refundReserves
+			if dbOrder.MetaData.Status > order.OrderStatusBooked {
 				reRefundQty = applyFraction(matchQty, qty, refundReserves)
 			}
 

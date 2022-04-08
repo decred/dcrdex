@@ -5309,6 +5309,13 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 			}
 		}
 
+		if refundNum != 0 {
+			tracker.lockRefundFraction(refundNum, denom)
+		}
+		if redeemNum != 0 {
+			tracker.lockRedemptionFraction(redeemNum, denom)
+		}
+
 		// Active orders and orders with matches with unsent swaps need funding
 		// coin(s). If they are not found, block new matches and swap attempts.
 		needsCoins := len(matchesNeedingCoins) > 0
@@ -5354,12 +5361,8 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 		tracker.recalcFilled()
 
 		if isActive {
-			if refundNum != 0 {
-				tracker.lockRefundFraction(refundNum, denom)
-			}
-			if redeemNum != 0 {
-				tracker.lockRedemptionFraction(redeemNum, denom)
-			}
+			tracker.lockRedemptionFraction(trade.Remaining(), trade.Quantity)
+			tracker.lockRefundFraction(trade.Remaining(), trade.Quantity)
 		}
 
 		// Balances should be updated for any orders with locked wallet coins,
