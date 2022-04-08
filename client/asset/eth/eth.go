@@ -28,9 +28,11 @@ import (
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/hdkeychain/v3"
 	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/params"
 )
 
 var (
@@ -139,22 +141,25 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Ne
 //   2. An encoded funding coin id which includes the account address and amount.
 //   3. A byte encoded string of the account address.
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
-	txHashID, err := dexeth.DecodeCoinID(coinID)
-	if err == nil {
-		return txHashID.String(), nil
+	switch len(coinID) {
+	case common.HashLength:
+		var txHash common.Hash
+		copy(txHash[:], coinID)
+		return txHash.String(), nil
+	case fundingCoinIDSize:
+		c, err := decodeFundingCoin(coinID)
+		if err != nil {
+			return "", err
+		}
+		return c.String(), nil
+	case common.AddressLength * 2, common.AddressLength*2 + 2:
+		hexAddr := string(coinID)
+		if !common.IsHexAddress(hexAddr) {
+			return "", fmt.Errorf("invalid hex address %q", coinID)
+		}
+		return common.HexToAddress(hexAddr).String(), nil
 	}
-
-	fundingCoinID, err := decodeFundingCoinID(coinID)
-	if err == nil {
-		return fundingCoinID.String(), nil
-	}
-
-	addressID := string(coinID)
-	if len(addressID) == 42 && addressID[0:2] == "0x" {
-		return addressID, nil
-	}
-
-	return "", fmt.Errorf("%x is not a valid ETH coin id", coinID)
+	return "", fmt.Errorf("unknown coin ID format: %x", coinID)
 }
 
 // Info returns basic information about the wallet and asset.
@@ -186,28 +191,24 @@ type Balance struct {
 // satisfied by rpcclient. For testing, it can be satisfied by a stub.
 type ethFetcher interface {
 	address() common.Address
-	balance(ctx context.Context) (*Balance, error)
-	bestBlockHash(ctx context.Context) (common.Hash, error)
 	bestHeader(ctx context.Context) (*types.Header, error)
-	block(ctx context.Context, hash common.Hash) (*types.Block, error)
+	addressBalance(ctx context.Context, addr common.Address) (*big.Int, error)
 	connect(ctx context.Context) error
-	initiate(ctx context.Context, contracts []*asset.Contract, maxFeeRate uint64, contractVer uint32) (*types.Transaction, error)
-	shutdown()
-	syncProgress() ethereum.SyncProgress
+	chainConfig() *params.ChainConfig
 	peerCount() uint32
-	isRedeemable(secretHash, secret [32]byte, contractVer uint32) (bool, error)
-	redeem(ctx context.Context, redemptions []*asset.Redemption, maxFeeRate uint64, contractVer uint32) (*types.Transaction, error)
-	isRefundable(secretHash [32]byte, contractVer uint32) (bool, error)
-	refund(ctx context.Context, secretHash [32]byte, maxFeeRate uint64, contractVer uint32) (*types.Transaction, error)
-	swap(ctx context.Context, secretHash [32]byte, contractVer uint32) (*dexeth.SwapState, error)
+	contractBackend() bind.ContractBackend
 	lock() error
 	locked() bool
 	unlock(pw string) error
-	signData(data []byte) (sig, pubKey []byte, err error)
-	sendToAddr(ctx context.Context, addr common.Address, val uint64) (*types.Transaction, error)
-	transactionConfirmations(context.Context, common.Hash) (uint32, error)
+	pendingTransactions() ([]*types.Transaction, error)
+	shutdown()
 	sendSignedTransaction(ctx context.Context, tx *types.Transaction) error
-	netFeeState(ctx context.Context) (baseFees, tipCap *big.Int, err error)
+	sendTransaction(ctx context.Context, txOpts *bind.TransactOpts, to common.Address, data []byte) (*types.Transaction, error)
+	signData(data []byte) (sig, pubKey []byte, err error)
+	syncProgress() ethereum.SyncProgress
+	transactionConfirmations(context.Context, common.Hash) (uint32, error)
+	txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate *big.Int) (*bind.TransactOpts, error)
+	currentFees(ctx context.Context) (baseFees, tipCap *big.Int, err error)
 }
 
 // Check that ExchangeWallet satisfies the asset.Wallet interface.
@@ -234,7 +235,7 @@ type ExchangeWallet struct {
 	gasFeeLimit   uint64
 
 	tipMtx     sync.RWMutex
-	currentTip *types.Block
+	currentTip *types.Header
 
 	lockedFunds struct {
 		mtx                sync.RWMutex
@@ -245,6 +246,10 @@ type ExchangeWallet struct {
 
 	findRedemptionMtx  sync.RWMutex
 	findRedemptionReqs map[[32]byte]*findRedemptionRequest
+
+	nonceSendMtx sync.Mutex
+
+	contractors map[uint32]contractor // version -> contractor
 }
 
 // Info returns basic information about the wallet and asset.
@@ -320,6 +325,7 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		peersChange:        assetCFG.PeersChange,
 		gasFeeLimit:        gasFeeLimit,
 		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
+		contractors:        make(map[uint32]contractor),
 	}, nil
 }
 
@@ -340,20 +346,24 @@ func (eth *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		return nil, err
 	}
 
-	// Initialize the best block.
-	bestHash, err := eth.node.bestBlockHash(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("error getting best block hash from geth: %w", err)
+	for ver, constructor := range contractorConstructors {
+		c, err := constructor(eth.net, eth.addr, eth.node.contractBackend())
+		if err != nil {
+			return nil, fmt.Errorf("error constructor version %d contractor: %v", ver, err)
+		}
+		eth.contractors[ver] = c
 	}
-	block, err := eth.node.block(ctx, bestHash)
+
+	// Initialize the best block.
+	bestHdr, err := eth.node.bestHeader(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error getting best block from geth: %w", err)
 	}
 	eth.tipMtx.Lock()
-	eth.currentTip = block
+	eth.currentTip = bestHdr
 	eth.tipMtx.Unlock()
-	height := eth.currentTip.NumberU64()
-	atomic.StoreInt64(&eth.tipAtConnect, int64(height))
+	height := eth.currentTip.Number
+	atomic.StoreInt64(&eth.tipAtConnect, height.Int64())
 	eth.log.Infof("Connected to geth, at height %d", height)
 
 	var wg sync.WaitGroup
@@ -470,7 +480,7 @@ func (eth *ExchangeWallet) Balance() (*asset.Balance, error) {
 // balance returns the total available funds in the account.
 // This function expects eth.lockedFunds.mtx to be held.
 func (eth *ExchangeWallet) balance() (*asset.Balance, error) {
-	bal, err := eth.node.balance(eth.ctx)
+	bal, err := eth.balanceWithTxPool()
 	if err != nil {
 		return nil, err
 	}
@@ -576,53 +586,27 @@ func (c *coin) Value() uint64 {
 	return c.value
 }
 
-// fundingCoin is a coin that also implements asset.RecoveryCoin, enabling
-// a custom database record and special handling of the recovery ID for use in
-// later calls to FundingCoin.
-type fundingCoin struct {
-	*coin
-	recoveryID []byte
-}
-
-func (c *fundingCoin) RecoveryID() dex.Bytes {
-	return c.recoveryID[:]
-}
-
-func (c *fundingCoin) String() string {
-	return fmt.Sprintf("{%s:%x}", []byte(c.id), c.recoveryID)
-}
-
 var _ asset.Coin = (*coin)(nil)
+
+func (eth *ExchangeWallet) createFundingCoin(amount uint64) *fundingCoin {
+	return createFundingCoin(eth.addr, amount)
+}
 
 // decodeFundingCoinID decodes a coin id into a coin object. This function ensures
 // that the id contains an encoded fundingCoinID whose address is the same as
 // the one managed by this wallet.
-func (eth *ExchangeWallet) decodeFundingCoinID(id []byte) (*coin, error) {
-	fundingCoinID, err := decodeFundingCoinID(id)
+func (eth *ExchangeWallet) decodeFundingCoinID(id []byte) (*fundingCoin, error) {
+	fc, err := decodeFundingCoin(id)
 	if err != nil {
 		return nil, err
 	}
 
-	if fundingCoinID.Address != eth.addr {
-		return nil, fmt.Errorf("coin address %x != wallet address %x",
-			fundingCoinID.Address, eth.addr)
+	if fc.addr != eth.addr {
+		return nil, fmt.Errorf("coin address %s != wallet address %s",
+			fc.addr, eth.addr)
 	}
 
-	return &coin{
-		id:    fundingCoinID.Encode(),
-		value: fundingCoinID.Amount,
-	}, nil
-}
-
-func (eth *ExchangeWallet) createFundingCoin(amount uint64) *fundingCoin {
-	id := createFundingCoinID(eth.addr, amount)
-	return &fundingCoin{
-		coin: &coin{
-			id:    []byte(eth.addr.String()),
-			value: amount,
-		},
-		recoveryID: id.Encode(),
-	}
+	return fc, nil
 }
 
 // FundOrder selects coins for use in an order. The coins will be locked, and
@@ -658,19 +642,23 @@ func (eth *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 // canceled order.
 func (eth *ExchangeWallet) ReturnCoins(coins asset.Coins) error {
 	var amt uint64
-	for i := range coins {
-		switch c := coins[i].(type) {
+	for _, ci := range coins {
+		amt += ci.Value()
+		var addr common.Address
+		switch c := ci.(type) {
 		case *fundingCoin:
-			amt += c.value
+			addr = c.addr
 		default:
-			return fmt.Errorf("unsupported funding coin type for coin %[1]s: %[1]T", coins[i])
+			return fmt.Errorf("unknown coin type %T", c)
+		}
+		if addr != eth.addr {
+			return fmt.Errorf("coin is not funded by this wallet. coin address %s != our address %s", addr, eth.addr)
 		}
 	}
 
 	eth.lockedFunds.mtx.Lock()
 	defer eth.lockedFunds.mtx.Unlock()
 	eth.unlockFunds(amt, initiationReserve)
-
 	return nil
 }
 
@@ -776,7 +764,7 @@ func (eth *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		return nil, nil, 0, fmt.Errorf("unfunded contract. %d < %d", totalInputValue, totalSpend)
 	}
 
-	tx, err := eth.node.initiate(eth.ctx, swaps.Contracts, swaps.FeeRate, swaps.AssetVersion)
+	tx, err := eth.initiate(eth.ctx, swaps.Contracts, swaps.FeeRate, swaps.AssetVersion)
 	if err != nil {
 		return fail(fmt.Errorf("Swap: initiate error: %w", err))
 	}
@@ -848,7 +836,7 @@ func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 		// are maker (the swap initiator).
 		var secret [32]byte
 		copy(secret[:], redemption.Secret)
-		redeemable, err := eth.node.isRedeemable(secretHash, secret, ver)
+		redeemable, err := eth.isRedeemable(secretHash, secret, ver)
 		if err != nil {
 			return fail(fmt.Errorf("Redeem: failed to check if swap is redeemable: %w", err))
 		}
@@ -857,7 +845,7 @@ func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 				secretHash, secret))
 		}
 
-		swapData, err := eth.node.swap(eth.ctx, secretHash, ver)
+		swapData, err := eth.swap(eth.ctx, secretHash, ver)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("Redeem: error finding swap state: %w", err)
 		}
@@ -870,7 +858,7 @@ func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 
 	// TODO: make sure the amount we locked for redemption is enough to cover the gas
 	// fees.
-	tx, err := eth.node.redeem(eth.ctx, form.Redemptions, form.FeeSuggestion, contractVersion)
+	tx, err := eth.redeem(eth.ctx, form.Redemptions, form.FeeSuggestion, contractVersion)
 	if err != nil {
 		return fail(fmt.Errorf("Redeem: redeem error: %w", err))
 	}
@@ -1041,7 +1029,7 @@ func (eth *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time,
 		return false, time.Time{}, err
 	}
 
-	swap, err := eth.node.swap(eth.ctx, secretHash, contractVer)
+	swap, err := eth.swap(eth.ctx, secretHash, contractVer)
 	if err != nil {
 		return false, time.Time{}, err
 	}
@@ -1153,7 +1141,7 @@ func (eth *ExchangeWallet) findSecret(ctx context.Context, secretHash [32]byte, 
 	// Add a reasonable timeout here.
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	swap, err := eth.node.swap(ctx, secretHash, contractVer)
+	swap, err := eth.swap(ctx, secretHash, contractVer)
 	if err != nil {
 		return nil, err
 	}
@@ -1185,7 +1173,7 @@ func (eth *ExchangeWallet) Refund(_, contract dex.Bytes, feeSuggestion uint64) (
 		eth.unlockFunds(feeSuggestion*dexeth.RefundGas(version), refundReserve)
 	}
 
-	swap, err := eth.node.swap(eth.ctx, secretHash, version)
+	swap, err := eth.swap(eth.ctx, secretHash, version)
 	if err != nil {
 		return nil, err
 	}
@@ -1206,7 +1194,7 @@ func (eth *ExchangeWallet) Refund(_, contract dex.Bytes, feeSuggestion uint64) (
 		return nil, asset.CoinNotFoundError // so caller knows to FindRedemption
 	}
 
-	refundable, err := eth.node.isRefundable(secretHash, version)
+	refundable, err := eth.isRefundable(secretHash, version)
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to check isRefundable: %w", err)
 	}
@@ -1214,7 +1202,7 @@ func (eth *ExchangeWallet) Refund(_, contract dex.Bytes, feeSuggestion uint64) (
 		return nil, fmt.Errorf("Refund: swap with secret hash %x is not refundable", secretHash)
 	}
 
-	tx, err := eth.node.refund(eth.ctx, secretHash, feeSuggestion, version)
+	tx, err := eth.refund(eth.ctx, secretHash, feeSuggestion, version)
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to call refund: %w", err)
 	}
@@ -1259,7 +1247,7 @@ func (eth *ExchangeWallet) PayFee(address string, regFee, _ uint64) (asset.Coin,
 	if avail < need {
 		return nil, fmt.Errorf("not enough funds to pay fee: have %d gwei need %d gwei", avail, need)
 	}
-	tx, err := eth.node.sendToAddr(eth.ctx, common.HexToAddress(address), regFee)
+	tx, err := eth.sendToAddr(common.HexToAddress(address), regFee)
 	if err != nil {
 		return nil, err
 	}
@@ -1286,7 +1274,7 @@ func (eth *ExchangeWallet) SwapConfirmations(ctx context.Context, _ dex.Bytes, c
 		return 0, false, fmt.Errorf("error fetching best header: %w", err)
 	}
 
-	swapData, err := eth.node.swap(ctx, secretHash, contractVer)
+	swapData, err := eth.swap(ctx, secretHash, contractVer)
 	if err != nil {
 		return 0, false, fmt.Errorf("error finding swap state: %w", err)
 	}
@@ -1319,7 +1307,7 @@ func (eth *ExchangeWallet) Withdraw(addr string, value, _ uint64) (asset.Coin, e
 	if avail < value+maxFee {
 		value -= maxFee
 	}
-	tx, err := eth.node.sendToAddr(eth.ctx, common.HexToAddress(addr), value)
+	tx, err := eth.sendToAddr(common.HexToAddress(addr), value)
 	if err != nil {
 		return nil, err
 	}
@@ -1374,7 +1362,7 @@ func (eth *ExchangeWallet) RegFeeConfirmations(ctx context.Context, coinID dex.B
 
 // FeeRate satisfies asset.FeeRater.
 func (eth *ExchangeWallet) FeeRate() uint64 {
-	base, tip, err := eth.node.netFeeState(eth.ctx)
+	base, tip, err := eth.node.currentFees(eth.ctx)
 	if err != nil {
 		eth.log.Errorf("Error getting net fee state: %v", err)
 		return 0
@@ -1437,11 +1425,12 @@ func (eth *ExchangeWallet) monitorBlocks(ctx context.Context) {
 func (eth *ExchangeWallet) checkForNewBlocks() {
 	ctx, cancel := context.WithTimeout(eth.ctx, 2*time.Second)
 	defer cancel()
-	bestHash, err := eth.node.bestBlockHash(ctx)
+	bestHdr, err := eth.node.bestHeader(ctx)
 	if err != nil {
 		go eth.tipChange(fmt.Errorf("failed to get best hash: %w", err))
 		return
 	}
+	bestHash := bestHdr.Hash()
 	// This method is called frequently. Don't hold write lock
 	// unless tip has changed.
 	eth.tipMtx.RLock()
@@ -1451,19 +1440,13 @@ func (eth *ExchangeWallet) checkForNewBlocks() {
 		return
 	}
 
-	newTip, err := eth.node.block(ctx, bestHash)
-	if err != nil {
-		go eth.tipChange(fmt.Errorf("failed to get best block: %w", err))
-		return
-	}
-
 	eth.tipMtx.Lock()
 	defer eth.tipMtx.Unlock()
 
 	prevTip := eth.currentTip
-	eth.currentTip = newTip
-	eth.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.NumberU64(),
-		prevTip.Hash(), newTip.NumberU64(), newTip.Hash())
+	eth.currentTip = bestHdr
+	eth.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.Number,
+		currentTipHash, bestHdr.Number, bestHash)
 	go eth.tipChange(nil)
 	go eth.checkFindRedemptions()
 }
@@ -1478,4 +1461,177 @@ func (eth *ExchangeWallet) checkFindRedemptions() {
 			eth.sendFindRedemptionResult(req, secretHash, secret, nil)
 		}
 	}
+}
+
+// withContractor runs the provided function with the versioned contractor.
+func (eth *ExchangeWallet) withContractor(ver uint32, f func(contractor) error) error {
+	contractor, found := eth.contractors[ver]
+	if !found {
+		return fmt.Errorf("no version %d contractor", ver)
+	}
+	return f(contractor)
+}
+
+// balanceWithTxPool gets the current and pending balances.
+func (eth *ExchangeWallet) balanceWithTxPool() (*Balance, error) {
+	confirmed, err := eth.node.addressBalance(eth.ctx, eth.addr)
+	if err != nil {
+		return nil, fmt.Errorf("balance error: %w", err)
+	}
+
+	pendingTxs, err := eth.node.pendingTransactions()
+	if err != nil {
+		return nil, fmt.Errorf("error getting pending txs: %w", err)
+	}
+
+	outgoing := new(big.Int)
+	incoming := new(big.Int)
+	zero := new(big.Int)
+
+	addFees := func(tx *types.Transaction) {
+		gas := new(big.Int).SetUint64(tx.Gas())
+		if gasFeeCap := tx.GasFeeCap(); gasFeeCap != nil {
+			outgoing.Add(outgoing, new(big.Int).Mul(gas, gasFeeCap))
+		} else {
+			eth.log.Errorf("unable to calculate fees for tx %s", tx.Hash())
+		}
+	}
+
+	ethSigner := types.LatestSigner(eth.node.chainConfig()) // "latest" good for pending
+
+	for _, tx := range pendingTxs {
+		from, _ := ethSigner.Sender(tx) // zero Address on error
+		if from != eth.addr {
+			continue
+		}
+		addFees(tx)
+		v := tx.Value()
+		if v.Cmp(zero) == 0 {
+			// If zero value, attempt to find redemptions or refunds that pay
+			// to us.
+			for ver, c := range eth.contractors {
+				in, err := c.incomingValue(eth.ctx, tx)
+				if err != nil {
+					eth.log.Errorf("version %d contractor incomingValue error: %v", ver, err)
+					continue
+				}
+				if in > 0 {
+					incoming.Add(incoming, dexeth.GweiToWei(in))
+				}
+			}
+		} else {
+			// If non-zero outgoing value, this is a swap or a send of some
+			// type.
+			outgoing.Add(outgoing, v)
+		}
+	}
+
+	return &Balance{
+		Current:    confirmed,
+		PendingOut: outgoing,
+		PendingIn:  incoming,
+	}, nil
+}
+
+// sendToAddr sends funds to the address.
+func (eth *ExchangeWallet) sendToAddr(addr common.Address, amt uint64) (*types.Transaction, error) {
+	eth.nonceSendMtx.Lock()
+	defer eth.nonceSendMtx.Unlock()
+	txOpts, err := eth.node.txOpts(eth.ctx, amt, defaultSendGasLimit, nil)
+	if err != nil {
+		return nil, err
+	}
+	return eth.node.sendTransaction(eth.ctx, txOpts, addr, nil)
+}
+
+// swap gets a swap keyed by secretHash in the contract.
+func (eth *ExchangeWallet) swap(ctx context.Context, secretHash [32]byte, contractVer uint32) (swap *dexeth.SwapState, err error) {
+	return swap, eth.withContractor(contractVer, func(c contractor) error {
+		swap, err = c.swap(ctx, secretHash)
+		return err
+	})
+}
+
+// initiate initiates multiple swaps in the same transaction.
+func (eth *ExchangeWallet) initiate(ctx context.Context, contracts []*asset.Contract, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
+	gas := dexeth.InitGas(len(contracts), contractVer)
+	var val uint64
+	for _, c := range contracts {
+		val += c.Value
+	}
+	eth.nonceSendMtx.Lock()
+	defer eth.nonceSendMtx.Unlock()
+	txOpts, _ := eth.node.txOpts(ctx, val, gas, dexeth.GweiToWei(maxFeeRate))
+	return tx, eth.withContractor(contractVer, func(c contractor) error {
+		tx, err = c.initiate(txOpts, contracts)
+		return err
+	})
+}
+
+// estimateInitGas checks the amount of gas that is used for the
+// initialization.
+func (eth *ExchangeWallet) estimateInitGas(ctx context.Context, numSwaps int, contractVer uint32) (gas uint64, err error) {
+	return gas, eth.withContractor(contractVer, func(c contractor) error {
+		gas, err = c.estimateInitGas(ctx, numSwaps)
+		return err
+	})
+}
+
+// estimateRedeemGas checks the amount of gas that is used for the redemption.
+func (eth *ExchangeWallet) estimateRedeemGas(ctx context.Context, secrets [][32]byte, contractVer uint32) (gas uint64, err error) {
+	return gas, eth.withContractor(contractVer, func(c contractor) error {
+		gas, err = c.estimateRedeemGas(ctx, secrets)
+		return err
+	})
+}
+
+// estimateRefundGas checks the amount of gas that is used for a refund.
+func (eth *ExchangeWallet) estimateRefundGas(ctx context.Context, secretHash [32]byte, contractVer uint32) (gas uint64, err error) {
+	return gas, eth.withContractor(contractVer, func(c contractor) error {
+		gas, err = c.estimateRefundGas(ctx, secretHash)
+		return err
+	})
+}
+
+// redeem redeems a swap contract. Any on-chain failure, such as this secret not
+// matching the hash, will not cause this to error.
+func (eth *ExchangeWallet) redeem(ctx context.Context, redemptions []*asset.Redemption, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
+	eth.nonceSendMtx.Lock()
+	defer eth.nonceSendMtx.Unlock()
+	gas := dexeth.RedeemGas(len(redemptions), contractVer)
+	txOpts, _ := eth.node.txOpts(ctx, 0, gas, dexeth.GweiToWei(maxFeeRate))
+	return tx, eth.withContractor(contractVer, func(c contractor) error {
+		tx, err = c.redeem(txOpts, redemptions)
+		return err
+	})
+}
+
+// refund refunds a swap contract using the account controlled by the wallet.
+// Any on-chain failure, such as the locktime not being past, will not cause
+// this to error.
+func (eth *ExchangeWallet) refund(ctx context.Context, secretHash [32]byte, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
+	eth.nonceSendMtx.Lock()
+	defer eth.nonceSendMtx.Unlock()
+	gas := dexeth.RefundGas(contractVer)
+	txOpts, _ := eth.node.txOpts(ctx, 0, gas, dexeth.GweiToWei(maxFeeRate))
+	return tx, eth.withContractor(contractVer, func(c contractor) error {
+		tx, err = c.refund(txOpts, secretHash)
+		return err
+	})
+}
+
+// isRedeemable checks if the swap identified by secretHash is redeemable using secret.
+func (eth *ExchangeWallet) isRedeemable(secretHash [32]byte, secret [32]byte, contractVer uint32) (redeemable bool, err error) {
+	return redeemable, eth.withContractor(contractVer, func(c contractor) error {
+		redeemable, err = c.isRedeemable(secretHash, secret)
+		return err
+	})
+}
+
+// isRefundable checks if the swap identified by secretHash is refundable.
+func (eth *ExchangeWallet) isRefundable(secretHash [32]byte, contractVer uint32) (refundable bool, err error) {
+	return refundable, eth.withContractor(contractVer, func(c contractor) error {
+		refundable, err = c.isRefundable(secretHash)
+		return err
+	})
 }
