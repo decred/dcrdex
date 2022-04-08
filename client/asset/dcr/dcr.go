@@ -2473,7 +2473,7 @@ func (dcr *ExchangeWallet) Lock() error {
 func (dcr *ExchangeWallet) Locked() bool {
 	unlocked, err := dcr.wallet.AccountUnlocked(dcr.ctx, dcr.acctName)
 	if err != nil {
-		dcr.log.Errorf("error checking wallet lock status %v", err)
+		dcr.log.Errorf("error checking account lock status %v", err)
 		return false // assume wallet is unlocked?
 	}
 	return !unlocked

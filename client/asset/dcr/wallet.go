@@ -123,9 +123,7 @@ type Wallet interface {
 	AccountUnlocked(ctx context.Context, acctName string) (bool, error)
 	// LockAccount locks the account.
 	LockAccount(ctx context.Context, acctName string) error
-	// UnlockAccount unlocks the Wallet. ExchangeWallet does not differentiate
-	// account locking vs wallet locking, but the underlying implementation may
-	// choose to unlock only the account.
+	// UnlockAccount unlocks the account.
 	UnlockAccount(ctx context.Context, passphrase []byte, acctName string) error
 	// SyncStatus returns the wallet's sync status.
 	SyncStatus(ctx context.Context) (bool, float32, error)
