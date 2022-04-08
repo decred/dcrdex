@@ -265,5 +265,19 @@ const CoinExplorers: Record<number, Record<number, (cid: string) => string>> = {
   2: { // ltc
     [Mainnet]: (cid: string) => `https://ltc.bitaps.com/${cid.split(':')[0]}`,
     [Testnet]: (cid: string) => `https://tltc.bitaps.com/${cid.split(':')[0]}`
+  },
+  60: { // eth
+    [Mainnet]: (cid: string) => {
+      if (cid.length === 42) {
+        return `https://etherscan.io/address/${cid}`
+      }
+      return `https://etherscan.io/tx/${cid}`
+    },
+    [Testnet]: (cid: string) => {
+      if (cid.length === 42) {
+        return `https://goerli.etherscan.io/address/${cid}`
+      }
+      return `https://goerli.etherscan.io/tx/${cid}`
+    }
   }
 }
