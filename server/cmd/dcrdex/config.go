@@ -47,6 +47,8 @@ const (
 	defaultDEXPrivKeyFilename  = "sigkey"
 	defaultRPCHost             = "127.0.0.1"
 	defaultRPCPort             = "7232"
+	defaultHSHost              = defaultRPCHost // should be a loopback address
+	defaultHSPort              = "7252"
 	defaultAdminSrvAddr        = "127.0.0.1:6542"
 	defaultMaxUserCancels      = 2
 	defaultBanScore            = 20
@@ -89,6 +91,7 @@ type dexConf struct {
 	RPCCert           string
 	RPCKey            string
 	RPCListen         []string
+	HiddenService     string
 	BroadcastTimeout  time.Duration
 	AltDNSNames       []string
 	LogMaker          *dex.LoggerMaker
@@ -114,10 +117,11 @@ type flagsData struct {
 	Testnet bool `long:"testnet" description:"Use the test network (default mainnet)."`
 	Simnet  bool `long:"simnet" description:"Use the simulation test network (default mainnet)."`
 
-	RPCCert     string   `long:"rpccert" description:"RPC server TLS certificate file."`
-	RPCKey      string   `long:"rpckey" description:"RPC server TLS private key file."`
-	RPCListen   []string `long:"rpclisten" description:"IP addresses on which the RPC server should listen for incoming connections."`
-	AltDNSNames []string `long:"altdnsnames" description:"A list of hostnames to include in the RPC certificate (X509v3 Subject Alternative Name)."`
+	RPCCert       string   `long:"rpccert" description:"RPC server TLS certificate file."`
+	RPCKey        string   `long:"rpckey" description:"RPC server TLS private key file."`
+	RPCListen     []string `long:"rpclisten" description:"IP addresses on which the RPC server should listen for incoming connections."`
+	AltDNSNames   []string `long:"altdnsnames" description:"A list of hostnames to include in the RPC certificate (X509v3 Subject Alternative Name)."`
+	HiddenService string   `long:"hiddenservice" description:"A host:port on which the RPC server should listen for incoming hidden service connections. No TLS is used for these connections."`
 
 	MarketsConfPath  string        `long:"marketsconfpath" description:"Path to the markets configuration JSON file."`
 	BroadcastTimeout time.Duration `long:"bcasttimeout" description:"The broadcast timeout specifies how long clients have to broadcast an expected transaction when it is their turn to act. Matches without the expected action by this time are revoked and the actor is penalized."`
@@ -513,6 +517,13 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		}
 		RPCListen = append(RPCListen, listen)
 	}
+	var HiddenService string
+	if cfg.HiddenService != "" {
+		HiddenService, err = normalizeNetworkAddress(cfg.HiddenService, defaultHSHost, defaultHSPort)
+		if err != nil {
+			return loadConfigError(err)
+		}
+	}
 
 	// Initialize log rotation. This creates the LogDir if needed.
 	if cfg.MaxLogZips < 0 {
@@ -597,6 +608,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		RPCCert:           cfg.RPCCert,
 		RPCKey:            cfg.RPCKey,
 		RPCListen:         RPCListen,
+		HiddenService:     HiddenService,
 		BroadcastTimeout:  cfg.BroadcastTimeout,
 		AltDNSNames:       cfg.AltDNSNames,
 		LogMaker:          logMaker,
