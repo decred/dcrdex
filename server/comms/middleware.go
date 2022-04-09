@@ -21,6 +21,7 @@ type contextKey int
 // These are the keys for different types of values stored in a request context.
 const (
 	ctxThing contextKey = iota
+	ctxListener
 )
 
 // limitRate is rate-limiting middleware that checks whether a request can be

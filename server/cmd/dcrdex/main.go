@@ -160,11 +160,12 @@ func mainCore(ctx context.Context) error {
 		AbsTakerLotLimit:  cfg.AbsTakerLotLimit,
 		DEXPrivKey:        privKey,
 		CommsCfg: &dexsrv.RPCConfig{
-			RPCCert:        cfg.RPCCert,
-			RPCKey:         cfg.RPCKey,
-			ListenAddrs:    cfg.RPCListen,
-			AltDNSNames:    cfg.AltDNSNames,
-			DisableDataAPI: cfg.DisableDataAPI,
+			RPCCert:           cfg.RPCCert,
+			RPCKey:            cfg.RPCKey,
+			ListenAddrs:       cfg.RPCListen,
+			AltDNSNames:       cfg.AltDNSNames,
+			DisableDataAPI:    cfg.DisableDataAPI,
+			HiddenServiceAddr: cfg.HiddenService,
 		},
 		NoResumeSwaps: cfg.NoResumeSwaps,
 	}
