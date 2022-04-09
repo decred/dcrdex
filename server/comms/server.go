@@ -164,6 +164,14 @@ func RegisterHTTP(route string, handler HTTPHandler) {
 // The RPCConfig is the server configuration settings and the only argument
 // to the server's constructor.
 type RPCConfig struct {
+	// HiddenServiceAddr is the local address to which connections from the
+	// local hidden service will connect, e.g. 127.0.0.1:7252. This is not the
+	// .onion address of the hidden service. The TLS key pairs do not apply to
+	// these connections since TLS is not used on the hidden service's listener.
+	// This corresponds to the last component of a HiddenServicePort line in a
+	// torrc config file. e.g. HiddenServicePort 7232 127.0.0.1:7252. Clients
+	// would specify the port preceding this address in the above statement.
+	HiddenServiceAddr string
 	// ListenAddrs are the addresses on which the server will listen.
 	ListenAddrs []string
 	// The location of the TLS keypair files. If they are not already at the
@@ -297,9 +305,35 @@ func NewServer(cfg *RPCConfig) (*Server, error) {
 		return nil, err
 	}
 
+	// Start with the hidden service listener, if specified.
+	var listeners []net.Listener
+	if cfg.HiddenServiceAddr == "" {
+		listeners = make([]net.Listener, 0, len(cfg.ListenAddrs))
+	} else {
+		listeners = make([]net.Listener, 0, 1+len(cfg.ListenAddrs))
+		ipv4ListenAddrs, ipv6ListenAddrs, _, err := parseListeners([]string{cfg.HiddenServiceAddr})
+		if err != nil {
+			return nil, err
+		}
+		for _, addr := range ipv4ListenAddrs {
+			listener, err := net.Listen("tcp4", addr)
+			if err != nil {
+				return nil, fmt.Errorf("cannot listen on %s: %w", addr, err)
+			}
+			listeners = append(listeners, onionListener{listener})
+		}
+		for _, addr := range ipv6ListenAddrs {
+			listener, err := net.Listen("tcp6", addr)
+			if err != nil {
+				return nil, fmt.Errorf("cannot listen on %s: %w", addr, err)
+			}
+			listeners = append(listeners, onionListener{listener})
+		}
+	}
+
 	// Prepare the TLS configuration.
 	tlsConfig := tls.Config{
-		Certificates: []tls.Certificate{keypair},
+		Certificates: []tls.Certificate{keypair}, // TODO: multiple key pairs for virtual hosting
 		MinVersion:   tls.VersionTLS12,
 	}
 	// Parse the specified listen addresses and create the []net.Listener.
@@ -307,18 +341,17 @@ func NewServer(cfg *RPCConfig) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	listeners := make([]net.Listener, 0, len(ipv6ListenAddrs)+len(ipv4ListenAddrs))
 	for _, addr := range ipv4ListenAddrs {
 		listener, err := tls.Listen("tcp4", addr, &tlsConfig)
 		if err != nil {
-			return nil, fmt.Errorf("Can't listen on %s: %w", addr, err)
+			return nil, fmt.Errorf("cannot listen on %s: %w", addr, err)
 		}
 		listeners = append(listeners, listener)
 	}
 	for _, addr := range ipv6ListenAddrs {
 		listener, err := tls.Listen("tcp6", addr, &tlsConfig)
 		if err != nil {
-			return nil, fmt.Errorf("Can't listen on %s: %w", addr, err)
+			return nil, fmt.Errorf("cannot listen on %s: %w", addr, err)
 		}
 		listeners = append(listeners, listener)
 	}
@@ -340,6 +373,8 @@ func NewServer(cfg *RPCConfig) (*Server, error) {
 	}, nil
 }
 
+type onionListener struct{ net.Listener }
+
 // Run starts the server. Run should be called only after all routes are
 // registered.
 func (s *Server) Run(ctx context.Context) {
@@ -353,7 +388,9 @@ func (s *Server) Run(ctx context.Context) {
 		Handler:      mux,
 		ReadTimeout:  rpcTimeoutSeconds * time.Second, // slow requests should not hold connections opened
 		WriteTimeout: rpcTimeoutSeconds * time.Second, // hung responses must die
-		//BaseContext:  func(net.Listener) context.Context { return ctx },
+		BaseContext: func(l net.Listener) context.Context {
+			return context.WithValue(ctx, ctxListener, l) // the actual listener is not very useful, maybe drop it for a dummy type
+		},
 	}
 
 	var wg sync.WaitGroup
@@ -370,6 +407,7 @@ func (s *Server) Run(ctx context.Context) {
 			http.Error(w, "server at maximum capacity", http.StatusServiceUnavailable)
 			return
 		}
+
 		// Check websocket connection count for this IP before upgrading the
 		// conn so we can send an HTTP error code, but check again after
 		// upgrade/hijack so they cannot initiate many simultaneously.
@@ -382,6 +420,13 @@ func (s *Server) Run(ctx context.Context) {
 			log.Errorf("ws connection error: %v", err)
 			return
 		}
+
+		_, isHiddenService := r.Context().Value(ctxListener).(onionListener)
+		if isHiddenService {
+			log.Infof("Hidden service websocket connection starting from %v", r.RemoteAddr) // should be 127.0.0.1
+		}
+		// TODO: give isHiddenService to websocketHandler, possibly with a
+		// special dex.IPKey rather than the one from r.RemoteAddr
 
 		// http.Server.Shutdown waits for connections to complete (such as this
 		// http.HandlerFunc), but not the long running upgraded websocket
