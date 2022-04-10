@@ -163,7 +163,7 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 			delete(c.conns, dc.acct.host)
 			c.connMtx.Unlock()
 		}
-		return newError(accountVerificationErr, "Account not verified for host: %s err: %w", host, err)
+		return newError(accountVerificationErr, "Account not verified for host: %s", host)
 	}
 
 	err = c.db.CreateAccount(&accountInfo)
