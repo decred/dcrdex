@@ -1053,6 +1053,10 @@ type Config struct {
 	// Logger is the Core's logger and is also used to create the sub-loggers
 	// for the asset backends.
 	Logger dex.Logger
+	// Onion is the address (host:port) of a Tor proxy for use with DEX hosts
+	// with a .onion address. To use Tor with regular DEX addresses as well, set
+	// TorProxy.
+	Onion string
 	// TorProxy specifies the address of a Tor proxy server.
 	TorProxy string
 	// TorIsolation specifies whether to enable Tor circuit isolation.
@@ -1120,6 +1124,13 @@ func New(cfg *Config) (*Core, error) {
 		if _, _, err = net.SplitHostPort(cfg.TorProxy); err != nil {
 			return nil, err
 		}
+	}
+	if cfg.Onion != "" {
+		if _, _, err = net.SplitHostPort(cfg.Onion); err != nil {
+			return nil, err
+		}
+	} else { // default to torproxy if onion not set explicitly
+		cfg.Onion = cfg.TorProxy
 	}
 	lang := language.AmericanEnglish
 	if cfg.Language != "" {
@@ -5290,6 +5301,14 @@ func sendOutdatedClientNotification(c *Core, dc *dexConnection) {
 	c.notify(newUpgradeNote(TopicUpgradeNeeded, subject, details, db.WarningLevel))
 }
 
+func isOnionHost(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	return strings.HasSuffix(host, ".onion")
+}
+
 // connectDEX establishes a ws connection to a DEX server using the provided
 // account info, but does not authenticate the connection through the 'connect'
 // route. If temporary is provided and true, the c.listen(dc) goroutine is not
@@ -5302,7 +5321,12 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 	if err != nil {
 		return nil, newError(addressParseErr, "error parsing address: %v", err)
 	}
-	wsAddr := "wss://" + host + "/ws"
+	// The scheme switches gorilla/websocket to use the tls.Config or not.
+	scheme := "wss"
+	if len(acctInfo.Cert) == 0 {
+		scheme = "ws" // only supported for .onion hosts, but could allow private IP too
+	}
+	wsAddr := scheme + "://" + host + "/ws"
 	wsURL, err := url.Parse(wsAddr)
 	if err != nil {
 		return nil, newError(addressParseErr, "error parsing ws address %s: %v", wsAddr, err)
@@ -5334,12 +5358,24 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 		Cert:     acctInfo.Cert,
 		Logger:   c.log.SubLogger(wsURL.String()),
 	}
-	if c.cfg.TorProxy != "" {
+
+	isOnionHost := isOnionHost(wsURL.Host)
+	if isOnionHost || c.cfg.TorProxy != "" {
+		proxyAddr := c.cfg.TorProxy
+		if isOnionHost {
+			if c.cfg.Onion == "" {
+				return nil, errors.New("tor must be configured for .onion addresses")
+			}
+			proxyAddr = c.cfg.Onion
+		}
 		proxy := &socks.Proxy{
-			Addr:         c.cfg.TorProxy,
-			TorIsolation: c.cfg.TorIsolation,
+			Addr:         proxyAddr,
+			TorIsolation: c.cfg.TorIsolation, // need socks.NewPool with isolation???
 		}
 		wsCfg.NetDialContext = proxy.DialContext
+	}
+	if scheme == "ws" && !isOnionHost {
+		return nil, errors.New("a TLS connection is required when not using a hidden service")
 	}
 
 	wsCfg.ConnectEventFunc = func(connected bool) {
@@ -6539,7 +6575,7 @@ func parseCert(host string, certI interface{}, net dex.Network) ([]byte, error) 
 	switch c := certI.(type) {
 	case string:
 		if len(c) == 0 {
-			return CertStore[net][host], nil
+			return CertStore[net][host], nil // not found is ok (try without TLS)
 		}
 		cert, err := os.ReadFile(c)
 		if err != nil {
@@ -6548,9 +6584,11 @@ func parseCert(host string, certI interface{}, net dex.Network) ([]byte, error) 
 		return cert, nil
 	case []byte:
 		if len(c) == 0 {
-			return CertStore[net][host], nil
+			return CertStore[net][host], nil // not found is ok (try without TLS)
 		}
 		return c, nil
+	case nil:
+		return CertStore[net][host], nil // not found is ok (try without TLS)
 	}
 	return nil, fmt.Errorf("not a valid certificate type %T", certI)
 }
