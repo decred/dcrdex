@@ -12,6 +12,10 @@
 .filter-opts {
   padding: 10px 5px 30px 5px;
   position: relative;
+  max-width: 250px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .apply-bttn {

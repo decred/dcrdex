@@ -242,7 +242,7 @@ func buildTestAccount(host string) Account {
 		AccountID:     tDexAccountID.String(),
 		DEXPubKey:     hex.EncodeToString(tDexKey.SerializeCompressed()),
 		PrivKey:       hex.EncodeToString(tDexPriv.Serialize()),
-		Cert:          hex.EncodeToString([]byte{}),
+		Cert:          hex.EncodeToString([]byte{0x1}),
 		FeeCoin:       hex.EncodeToString([]byte("somecoin")),
 		FeeProofSig:   hex.EncodeToString(tFeeProofSig),
 		FeeProofStamp: tFeeProofStamp,

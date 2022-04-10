@@ -1586,7 +1586,7 @@ func TestRegister(t *testing.T) {
 		AppPass: tPW,
 		Fee:     tFee,
 		Asset:   &tFeeAsset,
-		Cert:    []byte{},
+		Cert:    []byte{0x1}, // not empty signals TLS, otherwise no TLS allowed hidden services
 	}
 
 	tWallet.payFeeCoin = &tCoin{id: encode.RandomBytes(36)}
@@ -2143,8 +2143,29 @@ func TestConnectDEX(t *testing.T) {
 		Host: "somedex.com",
 	}
 
-	rig.queueConfig()
 	_, err := tCore.connectDEX(ai)
+	if err == nil {
+		t.Fatalf("expected error for no TLS plain internet DEX host")
+	}
+
+	ai.Host = "somedex13254214214.onion" // not a valid onion host in case we decide to validate them
+	// No onion proxy set => error
+	_, err = tCore.connectDEX(ai)
+	if err == nil {
+		t.Fatalf("expected error with no onion proxy set")
+	}
+
+	rig.queueConfig()
+	tCore.cfg.Onion = "127.0.0.1:9050"
+	_, err = tCore.connectDEX(ai)
+	if err != nil {
+		t.Fatalf("error connecting to onion host with an onion proxy configured: %v", err)
+	}
+
+	rig.queueConfig()
+	ai.Host = "somedex.com"
+	ai.Cert = []byte{0x1}
+	_, err = tCore.connectDEX(ai)
 	if err != nil {
 		t.Fatalf("initial connectDEX error: %v", err)
 	}

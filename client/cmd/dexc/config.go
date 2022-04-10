@@ -96,6 +96,7 @@ type Config struct {
 	ShowVer      bool   `short:"V" long:"version" description:"Display version information and exit"`
 	TorProxy     string `long:"torproxy" description:"Connect via TOR (eg. 127.0.0.1:9050)."`
 	TorIsolation bool   `long:"torisolation" description:"Enable TOR circuit isolation."`
+	Onion        string `long:"onion" description:"Proxy for .onion addresses, if torproxy not set (eg. 127.0.0.1:9050)."`
 	Net          dex.Network
 	CertHosts    []string
 }
