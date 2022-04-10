@@ -16,6 +16,7 @@ div.marketlist {
     text-overflow: ellipsis;
     white-space: nowrap;
     width: 100%;
+    max-width: 250px;
   }
 
   .xc:not(:first-child) .header {

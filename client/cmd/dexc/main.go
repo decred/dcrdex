@@ -96,6 +96,7 @@ func mainCore() error {
 		Logger:       logMaker.Logger("CORE"),
 		TorProxy:     cfg.TorProxy,
 		TorIsolation: cfg.TorIsolation,
+		Onion:        cfg.Onion,
 		Language:     cfg.Language,
 	})
 	if err != nil {
