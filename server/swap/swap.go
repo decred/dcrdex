@@ -1737,9 +1737,9 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 	// Search for the transaction for the full txWaitExpiration, even if it goes
 	// past the inaction deadline. processInit recognizes when it is revoked.
 	expireTime := time.Now().Add(txWaitExpiration).UTC()
-	log.Debugf("Allowing until %v (%v) to locate contract from %v (%v), match %v",
+	log.Debugf("Allowing until %v (%v) to locate contract from %v (%v), match %v, tx %s (%s)",
 		expireTime, time.Until(expireTime), makerTaker(stepInfo.actor.isMaker),
-		stepInfo.step, matchID)
+		stepInfo.step, matchID, coinStr, stepInfo.asset.Symbol)
 
 	// Since we have to consider broadcast latency of the asset's network, run
 	// this as a coin waiter.
@@ -1818,9 +1818,9 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 	// Search for the transaction for the full txWaitExpiration, even if it goes
 	// past the inaction deadline. processRedeem recognizes when it is revoked.
 	expireTime := time.Now().Add(txWaitExpiration).UTC()
-	log.Debugf("Allowing until %v (%v) to locate redeem from %v (%v), match %v",
+	log.Debugf("Allowing until %v (%v) to locate redeem from %v (%v), match %v, tx %s (%s)",
 		expireTime, time.Until(expireTime), makerTaker(stepInfo.actor.isMaker),
-		stepInfo.step, matchID)
+		stepInfo.step, matchID, coinStr, stepInfo.asset.Symbol)
 
 	// Since we have to consider latency, run this as a coin waiter.
 	s.latencyQ.Wait(&wait.Waiter{
