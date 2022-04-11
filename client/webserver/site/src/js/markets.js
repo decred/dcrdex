@@ -725,7 +725,7 @@ export default class MarketsPage extends BasePage {
     this.maxOrderUpdateCounter++
     const mkt = this.market
     const baseWallet = app().assets[mkt.base.id].wallet
-    if (baseWallet.available < mkt.cfg.lotsize) {
+    if (baseWallet.balance.available < mkt.cfg.lotsize) {
       this.setMaxOrder({ lots: 0 })
       return
     }
@@ -1800,12 +1800,12 @@ export default class MarketsPage extends BasePage {
       if (bttn.textContent === this.candleDur) bttn.classList.add('selected')
       else bttn.classList.remove('selected')
     }
-    const { candleCaches, cfg } = this.market
+    const { candleCaches, cfg, baseUnitInfo, quoteUnitInfo } = this.market
     const cache = candleCaches[this.candleDur]
     if (cache) {
       this.depthChart.hide()
       this.candleChart.show()
-      this.candleChart.setCandles(cache, cfg)
+      this.candleChart.setCandles(cache, cfg, baseUnitInfo, quoteUnitInfo)
       return
     }
     this.requestCandles()
