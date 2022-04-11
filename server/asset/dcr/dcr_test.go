@@ -49,11 +49,7 @@ func TestLoadConfig(t *testing.T) {
 	cfg := &config{}
 	parsedCfg := &config{}
 
-	tempDir, err := os.MkdirTemp("", "btctest")
-	if err != nil {
-		t.Fatalf("error creating temporary directory: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 	filePath := filepath.Join(tempDir, "test.conf")
 	rootParser := flags.NewParser(cfg, flags.None)
 	iniParser := flags.NewIniParser(rootParser)
@@ -69,7 +65,7 @@ func TestLoadConfig(t *testing.T) {
 	}
 
 	// Try with just the name. Error expected.
-	err = runCfg(&config{
+	err := runCfg(&config{
 		RPCUser: "somename",
 	})
 	if err == nil {

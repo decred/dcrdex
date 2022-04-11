@@ -44,8 +44,7 @@ func TestUpgrades(t *testing.T) {
 			tc := tc // capture range variable
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				dbPath, cleanup := unpack(t, tc.filename)
-				defer cleanup()
+				dbPath := unpack(t, tc.filename)
 				db, err := bbolt.Open(dbPath, 0600,
 					&bbolt.Options{Timeout: 1 * time.Second})
 				if err != nil {
@@ -66,8 +65,7 @@ func TestUpgrades(t *testing.T) {
 
 func TestUpgradeDB(t *testing.T) {
 	runUpgrade := func(archiveName string) error {
-		dbPath, cleanup := unpack(t, archiveName)
-		defer cleanup()
+		dbPath := unpack(t, archiveName)
 		// NewDB runs upgradeDB.
 		dbi, err := NewDB(dbPath, tLogger)
 		if err != nil {
@@ -326,12 +324,9 @@ func checkVersion(dbtx *bbolt.Tx, expectedVersion uint32) error {
 	return nil
 }
 
-func unpack(t *testing.T, db string) (string, func()) {
+func unpack(t *testing.T, db string) string {
 	t.Helper()
-	d, err := os.MkdirTemp("", "dcrdex_test_upgrades")
-	if err != nil {
-		t.Fatal(err)
-	}
+	d := t.TempDir()
 
 	t.Helper()
 	archive, err := os.Open(filepath.Join("testdata", db))
@@ -352,10 +347,7 @@ func unpack(t *testing.T, db string) (string, func()) {
 	archive.Close()
 	dbFile.Close()
 	if err != nil {
-		os.RemoveAll(d)
 		t.Fatal(err)
 	}
-	return dbPath, func() {
-		os.RemoveAll(d)
-	}
+	return dbPath
 }

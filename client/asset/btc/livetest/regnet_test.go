@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"os"
 	"os/exec"
 	"os/user"
 	"path/filepath"
@@ -61,18 +60,14 @@ func TestWallet(t *testing.T) {
 		SplitTx:   true,
 	})
 
-	spvDir, err := os.MkdirTemp("", "")
-	if err != nil {
-		t.Fatalf("MkdirTemp error: %v", err)
-	}
-	defer os.RemoveAll(spvDir) // clean up
+	spvDir := t.TempDir()
 
 	createWallet := func(cfg *asset.WalletConfig, name string, logger dex.Logger) error {
 		// var seed [32]byte
 		// copy(seed[:], []byte(name))
 		seed := encode.RandomBytes(32)
 
-		err = (&btc.Driver{}).Create(&asset.CreateWalletParams{
+		err := (&btc.Driver{}).Create(&asset.CreateWalletParams{
 			Type:    walletTypeSPV,
 			Seed:    seed[:],
 			Pass:    tPW, // match walletPassword in livetest.go -> Run

@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -38,14 +37,10 @@ func makeConfigPtr() *config {
 func TestConfigParsing(t *testing.T) {
 	var testConfig = defaultConfig()
 
-	tempDir, err := os.MkdirTemp("", "configtest")
-	if err != nil {
-		t.Fatalf("error creating temporary directory: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 	cfgFilePath := filepath.Join(tempDir, "test.conf")
 	cfgFile := ini.Empty()
-	err = cfgFile.ReflectFrom(&testConfig)
+	err := cfgFile.ReflectFrom(&testConfig)
 	if err != nil {
 		t.Fatalf("error creating temporary config file: %v", err)
 	}

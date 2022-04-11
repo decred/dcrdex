@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -305,10 +304,6 @@ func newTestMarket(opts ...interface{}) (*Market, *TArchivist, *TAuth, func(), e
 		preimagesByOrdID: make(map[string]order.Preimage),
 	}
 
-	swapDataDir, err := os.MkdirTemp("", "swapstates")
-	if err != nil {
-		panic(err.Error())
-	}
 	var swapDone func(ord order.Order, match *order.Match, fail bool)
 	swapperCfg := &swap.Config{
 		Assets: map[uint32]*swap.SwapperAsset{
@@ -361,7 +356,6 @@ func newTestMarket(opts ...interface{}) (*Market, *TArchivist, *TAuth, func(), e
 	cleanup := func() {
 		ssw.Stop()
 		ssw.WaitForShutdown()
-		os.RemoveAll(swapDataDir)
 	}
 
 	return mkt, storage, authMgr, cleanup, nil

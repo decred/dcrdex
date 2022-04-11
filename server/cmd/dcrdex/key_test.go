@@ -5,7 +5,6 @@ package main
 
 import (
 	"bytes"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -13,9 +12,7 @@ import (
 )
 
 func Test_createAndStoreKey(t *testing.T) {
-	dir, _ := os.MkdirTemp("", "test")
-	defer os.RemoveAll(dir)
-
+	dir := t.TempDir()
 	file := "newkey"
 
 	tests := []struct {
@@ -61,8 +58,7 @@ func Test_createAndStoreKey(t *testing.T) {
 }
 
 func Test_loadKeyFile(t *testing.T) {
-	dir, _ := os.MkdirTemp("", "test")
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	fullFile := filepath.Join(dir, "newkey")
 	pass := []byte("pass1234")
@@ -119,8 +115,7 @@ func Test_loadKeyFile(t *testing.T) {
 }
 
 func Test_dexKey(t *testing.T) {
-	dir, _ := os.MkdirTemp("", "test")
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	file := "newkey"
 	fullFile := filepath.Join(dir, file)
