@@ -105,31 +105,43 @@ func TestScriptType(t *testing.T) {
 		}
 	}
 
+	parse(addrs.pk1, 0)
+	check("p2pk-IsP2PK", scriptType.IsP2PK(), true)
+	check("p2pk-IsP2PKH", scriptType.IsP2PKH(), false)
+	check("p2pk-IsP2SH", scriptType.IsP2SH(), false)
+	check("p2pk-IsStake", scriptType.IsStake(), false)
+	check("p2pk-IsMultiSig", scriptType.IsMultiSig(), false)
+
 	parse(addrs.pkh, 0)
+	check("p2pkh-IsP2PK", scriptType.IsP2PK(), false)
 	check("p2pkh-IsP2PKH", scriptType.IsP2PKH(), true)
 	check("p2pkh-IsP2SH", scriptType.IsP2SH(), false)
 	check("p2pkh-IsStake", scriptType.IsStake(), false)
 	check("p2pkh-IsMultiSig", scriptType.IsMultiSig(), false)
 
 	parse(addrs.pkh, txscript.OP_SSGEN)
+	check("stakePKH-IsP2PK", scriptType.IsP2PK(), false)
 	check("stakePKH-IsP2PKH", scriptType.IsP2PKH(), true)
 	check("stakePKH-IsP2SH", scriptType.IsP2SH(), false)
 	check("stakePKH-IsStake", scriptType.IsStake(), true)
 	check("stakePKH-IsMultiSig", scriptType.IsMultiSig(), false)
 
 	parse(addrs.edwards, 0)
+	check("edwards-IsP2PK", scriptType.IsP2PK(), false)
 	check("edwards-IsP2PKH", scriptType.IsP2PKH(), true)
 	check("edwards-IsP2SH", scriptType.IsP2SH(), false)
 	check("edwards-IsStake", scriptType.IsStake(), false)
 	check("edwards-IsMultiSig", scriptType.IsMultiSig(), false)
 
 	parse(addrs.schnorrPK, 0)
+	check("schnorrPK-IsP2PK", scriptType.IsP2PK(), true)
 	check("schnorrPK-IsP2PKH", scriptType.IsP2PKH(), false)
 	check("schnorrPK-IsP2SH", scriptType.IsP2SH(), false)
 	check("schnorrPK-IsStake", scriptType.IsStake(), false)
 	check("schnorrPK-IsMultiSig", scriptType.IsMultiSig(), false)
 
 	pkScript, scriptType := parse(addrs.sh, 0)
+	check("p2sh-IsP2PK", scriptType.IsP2PK(), false)
 	check("p2sh-IsP2PKH", scriptType.IsP2PKH(), false)
 	check("p2sh-IsP2SH", scriptType.IsP2SH(), true)
 	check("p2pkh-IsStake", scriptType.IsStake(), false)
@@ -149,6 +161,7 @@ func TestScriptType(t *testing.T) {
 	check("p2pkh-IsStake", scriptType.IsStake(), false)
 
 	pkScript, scriptType = parse(addrs.sh, txscript.OP_SSGEN)
+	check("stake-p2sh-IsP2PK", scriptType.IsP2PK(), false)
 	check("stake-p2sh-IsP2PKH", scriptType.IsP2PKH(), false)
 	check("stake-p2sh-IsP2SH", scriptType.IsP2SH(), true)
 	check("stake-p2pkh-IsStake", scriptType.IsStake(), true)

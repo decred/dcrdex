@@ -96,7 +96,17 @@ func TestParseScriptType(t *testing.T) {
 		}
 	}
 
+	parse(addrs.pk1, nil)
+	check("p2pk-IsP2PK", scriptType.IsP2PK(), true)
+	check("p2pk-IsP2PKH", scriptType.IsP2PKH(), false)
+	check("p2pk-IsP2SH", scriptType.IsP2SH(), false)
+	check("p2pk-IsP2WPKH", scriptType.IsP2WPKH(), false)
+	check("p2pk-IsP2WSH", scriptType.IsP2WSH(), false)
+	check("p2pk-IsMultiSig", scriptType.IsMultiSig(), false)
+	check("p2pk-IsSegwit", scriptType.IsSegwit(), false)
+
 	parse(addrs.pkh, nil)
+	check("p2pkh-IsP2PK", scriptType.IsP2PK(), false)
 	check("p2pkh-IsP2PKH", scriptType.IsP2PKH(), true)
 	check("p2pkh-IsP2SH", scriptType.IsP2SH(), false)
 	check("p2pkh-IsP2WPKH", scriptType.IsP2WPKH(), false)
@@ -105,6 +115,7 @@ func TestParseScriptType(t *testing.T) {
 	check("p2pkh-IsSegwit", scriptType.IsSegwit(), false)
 
 	parse(addrs.wpkh, nil)
+	check("p2wpkh-IsP2PK", scriptType.IsP2PK(), false)
 	check("p2wpkh-IsP2PKH", scriptType.IsP2PKH(), false)
 	check("p2wpkh-IsP2SH", scriptType.IsP2SH(), false)
 	check("p2wpkh-IsP2WPKH", scriptType.IsP2WPKH(), true)
@@ -113,6 +124,7 @@ func TestParseScriptType(t *testing.T) {
 	check("p2wpkh-IsSegwit", scriptType.IsSegwit(), true)
 
 	parse(addrs.sh, addrs.multiSig)
+	check("p2sh-IsP2PK", scriptType.IsP2PK(), false)
 	check("p2sh-IsP2PKH", scriptType.IsP2PKH(), false)
 	check("p2sh-IsP2SH", scriptType.IsP2SH(), true)
 	check("p2sh-IsP2WPKH", scriptType.IsP2WPKH(), false)
@@ -121,6 +133,7 @@ func TestParseScriptType(t *testing.T) {
 	check("p2sh-IsSegwit", scriptType.IsSegwit(), false)
 
 	parse(addrs.wsh, nil)
+	check("p2wsh-IsP2PK", scriptType.IsP2PK(), false)
 	check("p2wsh-IsP2PKH", scriptType.IsP2PKH(), false)
 	check("p2wsh-IsP2SH", scriptType.IsP2SH(), false)
 	check("p2wsh-IsP2WPKH", scriptType.IsP2WPKH(), false)
