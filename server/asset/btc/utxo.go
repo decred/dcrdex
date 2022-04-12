@@ -287,7 +287,7 @@ func (utxo *UTXO) Confirmations(context.Context) (int64, error) {
 		// See if we can find the utxo in another block.
 		newUtxo, err := utxo.btc.utxo(&utxo.tx.hash, utxo.vout, utxo.redeemScript)
 		if err != nil {
-			return -1, fmt.Errorf("utxo block is not mainchain")
+			return -1, fmt.Errorf("utxo error: %w", err)
 		}
 		*utxo = *newUtxo
 		return utxo.Confirmations(context.Background())

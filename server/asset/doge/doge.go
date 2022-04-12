@@ -109,5 +109,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 
 			return uint64(math.Round(r * 1e5)), nil
 		},
+		BooleanGetBlockRPC: true,
+		BlockDeserializer:  dexdoge.DeserializeBlock,
 	})
 }

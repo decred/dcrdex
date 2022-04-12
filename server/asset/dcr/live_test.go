@@ -51,11 +51,13 @@ func TestMain(m *testing.M) {
 
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(context.Background())
-		wg := new(sync.WaitGroup)
+		var wg *sync.WaitGroup
 		defer func() {
 			logger.Infof("Shutting down...")
 			cancel()
-			wg.Wait()
+			if wg != nil {
+				wg.Wait()
+			}
 			logger.Infof("done.")
 		}()
 
@@ -87,7 +89,10 @@ func TestLiveUTXO(t *testing.T) {
 	var txs []*wire.MsgTx
 	type testStats struct {
 		p2pkh          int
+		p2pk           int
 		sp2pkh         int
+		p2pkSchnorr    int
+		p2pkEdwards    int
 		p2pkhSchnorr   int
 		p2pkhEdwards   int
 		p2sh           int
@@ -174,7 +179,7 @@ func TestLiveUTXO(t *testing.T) {
 						stats.p2sh++
 					}
 					continue
-				} else if scriptType&dexdcr.ScriptP2PKH != 0 {
+				} else if scriptType.IsP2PKH() {
 					switch {
 					case scriptType&dexdcr.ScriptSigEdwards != 0:
 						stats.p2pkhEdwards++
@@ -184,6 +189,15 @@ func TestLiveUTXO(t *testing.T) {
 						stats.sp2pkh++
 					default:
 						stats.p2pkh++
+					}
+				} else if scriptType.IsP2PK() {
+					switch {
+					case scriptType&dexdcr.ScriptSigEdwards != 0:
+						stats.p2pkEdwards++
+					case scriptType&dexdcr.ScriptSigSchnorr != 0:
+						stats.p2pkSchnorr++
+					default:
+						stats.p2pk++
 					}
 				}
 				// Check if its an acceptable script type.
@@ -310,6 +324,9 @@ func TestLiveUTXO(t *testing.T) {
 	t.Logf("%d Schnorr P2PKH scripts", stats.p2pkhSchnorr)
 	t.Logf("%d Edwards P2PKH scripts", stats.p2pkhEdwards)
 	t.Logf("%d P2SH scripts", stats.p2sh)
+	t.Logf("%d P2PK scripts", stats.p2pk)
+	t.Logf("%d Schnorr P2PK scripts", stats.p2pkSchnorr)
+	t.Logf("%d Edwards P2PK scripts", stats.p2pkEdwards)
 	t.Logf("%d stake P2SH scripts", stats.sp2sh)
 	t.Logf("%d immature transactions in the last %d blocks", stats.immatureBefore, maturity)
 	t.Logf("%d immature transactions before %d blocks ago", stats.immatureAfter, maturity)
