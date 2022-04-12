@@ -240,6 +240,17 @@ func (dcr *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 			nodeSemver, requiredNodeVersion)
 	}
 
+	// Verify dcrd has tx index enabled (required for getrawtransaction).
+	info, err := dcr.client.GetInfo(ctx)
+	if err != nil {
+		dcr.shutdown()
+		return nil, fmt.Errorf("dcrd getinfo check failed: %w", err)
+	}
+	if !info.TxIndex {
+		dcr.shutdown()
+		return nil, errors.New("dcrd does not have transaction index enabled (specify --txindex)")
+	}
+
 	dcr.log.Infof("Connected to dcrd (JSON-RPC API v%s) on %v", nodeSemver, net)
 
 	dcr.node = dcr.client

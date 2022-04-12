@@ -22,6 +22,7 @@ const (
 	methodGetTxOut          = "gettxout"
 	methodGetRawTransaction = "getrawtransaction"
 	methodGetBlock          = "getblock"
+	methodGetIndexInfo      = "getindexinfo"
 )
 
 // RawRequester is for sending context-aware RPC requests, and has methods for
@@ -73,6 +74,25 @@ func (rc *RPCClient) GetBlockChainInfo() (*GetBlockchainInfoResult, error) {
 		return nil, err
 	}
 	return chainInfo, nil
+}
+
+// txIndexResult models the data returned from the getindexinfo command
+// for txindex.
+// txIndexResult.Txindex is nil if the returned data is an empty json object.
+type txIndexResult struct {
+	TxIndex *struct{} `json:"txindex"`
+}
+
+// checkTxIndex checks if bitcoind transaction index is enabled.
+func (rc *RPCClient) checkTxIndex() (bool, error) {
+	res := new(txIndexResult)
+	err := rc.call(methodGetIndexInfo, anylist{"txindex"}, res)
+	if err != nil {
+		return false, err
+	}
+	// bitcoind returns an empty json object if txindex is not enabled.
+	// It is safe to conclude txindex is enabled if res.Txindex is not nil.
+	return res.TxIndex != nil, nil
 }
 
 // EstimateSmartFee requests the server to estimate a fee level.
