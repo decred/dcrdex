@@ -507,6 +507,9 @@ func (wc *rpcClient) ownsAddress(addr btcutil.Address) (bool, error) {
 	}
 	ai, err := wc.getAddressInfo(addr, method)
 	if err != nil {
+		if isMethodNotFoundErr(err) {
+			return false, nil
+		}
 		return false, err
 	}
 	return ai.IsMine, nil
@@ -689,7 +692,7 @@ func (wc *rpcClient) call(method string, args anylist, thing interface{}) error 
 
 	b, err := wc.requester.RawRequest(wc.ctx, method, params)
 	if err != nil {
-		return fmt.Errorf("rawrequest error: %w", err)
+		return fmt.Errorf("rawrequest (%v) error: %w", method, err)
 	}
 	if thing != nil {
 		return json.Unmarshal(b, thing)
