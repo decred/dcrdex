@@ -4,14 +4,17 @@
 package btc
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
 
+	"decred.org/dcrdex/dex"
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
 )
 
@@ -23,6 +26,7 @@ const (
 	methodGetRawTransaction = "getrawtransaction"
 	methodGetBlock          = "getblock"
 	methodGetIndexInfo      = "getindexinfo"
+	methodGetBlockHeader    = "getblockheader"
 )
 
 // RawRequester is for sending context-aware RPC requests, and has methods for
@@ -37,8 +41,10 @@ type RawRequester interface {
 // RPCClient is a bitcoind wallet RPC client that uses rpcclient.Client's
 // RawRequest for wallet-related calls.
 type RPCClient struct {
-	ctx       context.Context
-	requester RawRequester
+	ctx                    context.Context
+	requester              RawRequester
+	booleanVerboseGetBlock bool
+	blockDeserializer      func([]byte) (*wire.MsgBlock, error)
 }
 
 func (rc *RPCClient) callHashGetter(method string, args anylist) (*chainhash.Hash, error) {
@@ -128,10 +134,51 @@ func (rc *RPCClient) GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.
 		true}, res)
 }
 
-// GetBlockVerbose fetches verbose block data for the specified hash.
+// getBlock fetches raw block data, and the "verbose" block header, for the
+// block with the given hash. The verbose block header return is separate
+// because it contains other useful info like the height and median time that
+// the wire type does not contain.
+func (rc *RPCClient) getBlock(blockHash *chainhash.Hash) (*wire.MsgBlock, *btcjson.GetBlockHeaderVerboseResult, error) {
+	arg := interface{}(0)
+	if rc.booleanVerboseGetBlock {
+		arg = false
+	}
+	var blockB dex.Bytes // UnmarshalJSON hex -> bytes
+	err := rc.call(methodGetBlock, anylist{blockHash.String(), arg}, &blockB)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var msgBlock *wire.MsgBlock
+	if rc.blockDeserializer == nil {
+		msgBlock = &wire.MsgBlock{}
+		if err := msgBlock.Deserialize(bytes.NewReader(blockB)); err != nil {
+			return nil, nil, err
+		}
+	} else {
+		msgBlock, err = rc.blockDeserializer(blockB)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	verboseHeader := new(btcjson.GetBlockHeaderVerboseResult)
+	err = rc.call(methodGetBlockHeader, anylist{blockHash.String(), true}, verboseHeader)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return msgBlock, verboseHeader, nil
+}
+
+// GetBlockVerbose fetches verbose block data for the block with the given hash.
 func (rc *RPCClient) GetBlockVerbose(blockHash *chainhash.Hash) (*btcjson.GetBlockVerboseResult, error) {
+	arg := interface{}(1)
+	if rc.booleanVerboseGetBlock {
+		arg = true
+	}
 	res := new(btcjson.GetBlockVerboseResult)
-	return res, rc.call(methodGetBlock, anylist{blockHash.String(), true}, res)
+	return res, rc.call(methodGetBlock, anylist{blockHash.String(), arg}, res)
 }
 
 // RawRequest is a wrapper func for callers that are not context-enabled.

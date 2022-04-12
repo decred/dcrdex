@@ -5,10 +5,12 @@ package btc
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"testing"
 
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
+	"decred.org/dcrdex/server/asset"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
@@ -207,18 +209,21 @@ out:
 // blockchain literacy. Ideally, the stats will show no scripts which were
 // unparseable by the backend, but the presence of unknowns is not an error.
 func LiveUTXOStats(btc *Backend, t *testing.T) {
-	numToDo := 1000
+	const numToDo = 5000
 	hash, err := btc.node.GetBestBlockHash()
 	if err != nil {
 		t.Fatalf("error getting best block hash: %v", err)
 	}
-	block, err := btc.node.GetBlockVerbose(hash)
+	block, verboseHeader, err := btc.node.getBlock(hash)
 	if err != nil {
 		t.Fatalf("error getting best block verbose: %v", err)
 	}
+	height := verboseHeader.Height
+	t.Logf("Processing block %v (%d)", hash, height)
 	type testStats struct {
 		p2pkh    int
 		p2wpkh   int
+		p2pk     int
 		p2sh     int
 		p2wsh    int
 		zeros    int
@@ -234,24 +239,13 @@ func LiveUTXOStats(btc *Backend, t *testing.T) {
 	var processed int
 out:
 	for {
-		for _, txid := range block.Tx {
-			txHash, err := chainhash.NewHashFromStr(txid)
-			if err != nil {
-				t.Fatalf("error parsing transaction hash from %s: %v", txid, err)
-			}
-			tx, err := btc.node.GetRawTransactionVerbose(txHash)
-			if err != nil {
-				t.Fatalf("error fetching transaction %s: %v", txHash, err)
-			}
-			for vout, txOut := range tx.Vout {
+		for _, msgTx := range block.Transactions {
+			for vout, txOut := range msgTx.TxOut {
 				if txOut.Value == 0 {
 					stats.zeros++
 					continue
 				}
-				pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
-				if err != nil {
-					t.Fatalf("error decoding script from hex %s: %v", txOut.ScriptPubKey.Hex, err)
-				}
+				pkScript := txOut.PkScript
 				scriptType := dexbtc.ParseScriptType(pkScript, nil)
 				if scriptType == dexbtc.ScriptUnsupported {
 					unknowns = append(unknowns, pkScript)
@@ -262,26 +256,32 @@ out:
 				if processed >= numToDo {
 					break out
 				}
+				txhash := msgTx.TxHash()
 				if scriptType.IsP2PKH() {
-					if scriptType.IsSegwit() {
-						stats.p2wpkh++
-					} else {
-						stats.p2pkh++
-					}
+					stats.p2pkh++
+				} else if scriptType.IsP2WPKH() {
+					stats.p2wpkh++
+				} else if scriptType.IsP2SH() {
+					stats.p2sh++
+					continue // no redeem script, can't use the utxo method
+				} else if scriptType.IsP2WSH() {
+					stats.p2wsh++
+					continue // no redeem script, can't use the utxo method
+				} else if scriptType.IsP2PK() { // rare, so last
+					t.Logf("p2pk: txout %v:%d", txhash, vout)
+					stats.p2pk++
 				} else {
-					if scriptType.IsSegwit() {
-						stats.p2wsh++
-					} else {
-						stats.p2sh++
-					}
-				}
-				if scriptType.IsP2SH() {
-					continue
+					stats.unknown++
+					t.Logf("other unknown script type: %v", scriptType)
 				}
 				stats.checked++
-				utxo, err := btc.utxo(txHash, uint32(vout), nil)
+
+				utxo, err := btc.utxo(&txhash, uint32(vout), nil)
 				if err != nil {
-					stats.utxoErr++
+					if !errors.Is(err, asset.CoinNotFoundError) {
+						t.Log(err, txhash)
+						stats.utxoErr++
+					}
 					continue
 				}
 				stats.feeRates = append(stats.feeRates, utxo.FeeRate())
@@ -289,23 +289,25 @@ out:
 				stats.utxoVal += utxo.Value()
 			}
 		}
-		prevHash, err := chainhash.NewHashFromStr(block.PreviousHash)
-		if err != nil {
-			t.Fatalf("error decoding previous block hash: %v", err)
-		}
-		block, err = btc.node.GetBlockVerbose(prevHash)
+		prevHash := block.Header.PrevBlock
+		block, verboseHeader, err = btc.node.getBlock(&prevHash)
 		if err != nil {
 			t.Fatalf("error getting previous block verbose: %v", err)
 		}
+		height = verboseHeader.Height
+		h0 := block.BlockHash()
+		hash = &h0
+		t.Logf("Processing block %v (%d)", hash, height)
 	}
 	t.Logf("%d P2PKH scripts", stats.p2pkh)
 	t.Logf("%d P2WPKH scripts", stats.p2wpkh)
+	t.Logf("%d P2PK scripts", stats.p2pk)
 	t.Logf("%d P2SH scripts", stats.p2sh)
 	t.Logf("%d P2WSH scripts", stats.p2wsh)
 	t.Logf("%d zero-valued outputs", stats.zeros)
-	t.Logf("%d P2(W)PKH UTXOs found of %d checked, %.1f%%", stats.found, stats.checked, float64(stats.found)/float64(stats.checked)*100)
+	t.Logf("%d P2(W)PK(H) UTXOs found of %d checked, %.1f%%", stats.found, stats.checked, float64(stats.found)/float64(stats.checked)*100)
 	t.Logf("total unspent value counted: %.2f", float64(stats.utxoVal)/1e8)
-	t.Logf("%d P2PKH UTXO retrieval errors (likely already spent, OK)", stats.utxoErr)
+	t.Logf("%d P2PK(H) UTXO retrieval errors", stats.utxoErr)
 	numUnknown := len(unknowns)
 	if numUnknown > 0 {
 		numToShow := 5

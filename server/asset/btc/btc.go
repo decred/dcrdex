@@ -130,6 +130,10 @@ type Backend struct {
 	log         dex.Logger
 	decodeAddr  dexbtc.AddressDecoder
 	estimateFee func(*RPCClient) (uint64, error)
+	// booleanGetBlockRPC corresponds to BackendCloneConfig.BooleanGetBlockRPC
+	// field and is used by RPCClient, which is constructed on Connect.
+	booleanGetBlockRPC bool
+	blockDeserializer  func([]byte) (*wire.MsgBlock, error)
 }
 
 // Check that Backend satisfies the Backend interface.
@@ -171,15 +175,17 @@ func newBTC(cloneCfg *BackendCloneConfig, cfg *dexbtc.RPCConfig) *Backend {
 	}
 
 	return &Backend{
-		cfg:         cfg,
-		name:        cloneCfg.Name,
-		blockCache:  newBlockCache(),
-		blockChans:  make(map[chan *asset.BlockUpdate]struct{}),
-		chainParams: cloneCfg.ChainParams,
-		log:         cloneCfg.Logger,
-		segwit:      cloneCfg.Segwit,
-		decodeAddr:  addrDecoder,
-		estimateFee: feeEstimator,
+		cfg:                cfg,
+		name:               cloneCfg.Name,
+		blockCache:         newBlockCache(),
+		blockChans:         make(map[chan *asset.BlockUpdate]struct{}),
+		chainParams:        cloneCfg.ChainParams,
+		log:                cloneCfg.Logger,
+		segwit:             cloneCfg.Segwit,
+		decodeAddr:         addrDecoder,
+		estimateFee:        feeEstimator,
+		booleanGetBlockRPC: cloneCfg.BooleanGetBlockRPC,
+		blockDeserializer:  cloneCfg.BlockDeserializer,
 	}
 }
 
@@ -197,6 +203,11 @@ type BackendCloneConfig struct {
 	// FeeEstimator provides a way to get fees given an RawRequest-enabled
 	// client and a confirmation target.
 	FeeEstimator func(*RPCClient) (uint64, error)
+	// BooleanGetBlockRPC causes the RPC client to use a boolean second argument
+	// for the getblock endpoint, instead of Bitcoin's numeric.
+	BooleanGetBlockRPC bool
+	// BlockDeserializer can be used in place of (*wire.MsgBlock).Deserialize.
+	BlockDeserializer func(blk []byte) (*wire.MsgBlock, error)
 }
 
 // NewBTCClone creates a BTC backend for a set of network parameters and default
@@ -238,8 +249,10 @@ func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	}
 
 	btc.node = &RPCClient{
-		ctx:       ctx,
-		requester: client,
+		ctx:                    ctx,
+		requester:              client,
+		booleanVerboseGetBlock: btc.booleanGetBlockRPC,
+		blockDeserializer:      btc.blockDeserializer,
 	}
 
 	// Prime the cache
