@@ -254,7 +254,7 @@ func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		}
 	}
 
-	if txindex, err := btc.node.CheckTxIndex(); err != nil {
+	if txindex, err := btc.node.checkTxIndex(); err != nil {
 		if !isMethodNotFoundErr(err) {
 			btc.shutdown()
 			return nil, fmt.Errorf("%s getindexinfo check failed: %w", btc.name, err)

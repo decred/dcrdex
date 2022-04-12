@@ -76,16 +76,16 @@ func (rc *RPCClient) GetBlockChainInfo() (*GetBlockchainInfoResult, error) {
 	return chainInfo, nil
 }
 
-// TxIndexResult models the data returned from the getindexinfo command
+// txIndexResult models the data returned from the getindexinfo command
 // for txindex.
-// TxIndexResult.Txindex is nil if the returned data is an empty json object.
-type TxIndexResult struct {
+// txIndexResult.Txindex is nil if the returned data is an empty json object.
+type txIndexResult struct {
 	TxIndex *struct{} `json:"txindex"`
 }
 
-// CheckTxIndex checks if bitcoind transaction index is enabled.
-func (rc *RPCClient) CheckTxIndex() (bool, error) {
-	res := new(TxIndexResult)
+// checkTxIndex checks if bitcoind transaction index is enabled.
+func (rc *RPCClient) checkTxIndex() (bool, error) {
+	res := new(txIndexResult)
 	err := rc.call(methodGetIndexInfo, anylist{"txindex"}, res)
 	if err != nil {
 		return false, err
