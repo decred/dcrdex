@@ -7,7 +7,6 @@ package doge
 import (
 	"testing"
 
-	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/client/asset/btc/livetest"
 	"decred.org/dcrdex/dex"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"

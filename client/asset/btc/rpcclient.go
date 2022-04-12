@@ -40,6 +40,7 @@ const (
 	methodSetTxFee           = "settxfee"
 	methodGetWalletInfo      = "getwalletinfo"
 	methodGetAddressInfo     = "getaddressinfo"
+	methodValidateAddress    = "validateaddress"
 	methodEstimateSmartFee   = "estimatesmartfee"
 	methodSendRawTransaction = "sendrawtransaction"
 	methodGetTxOut           = "gettxout"
@@ -70,17 +71,18 @@ type RawRequesterWithContext interface {
 type anylist []interface{}
 
 type rpcCore struct {
-	requester            RawRequesterWithContext
-	segwit               bool
-	decodeAddr           dexbtc.AddressDecoder
-	arglessChangeAddrRPC bool
-	legacyRawSends       bool
-	minNetworkVersion    uint64
-	log                  dex.Logger
-	chainParams          *chaincfg.Params
-	omitAddressType      bool
-	legacySignTx         bool
-	booleanGetBlock      bool
+	requester                RawRequesterWithContext
+	segwit                   bool
+	decodeAddr               dexbtc.AddressDecoder
+	arglessChangeAddrRPC     bool
+	legacyRawSends           bool
+	minNetworkVersion        uint64
+	log                      dex.Logger
+	chainParams              *chaincfg.Params
+	omitAddressType          bool
+	legacySignTx             bool
+	booleanGetBlock          bool
+	legacyValidateAddressRPC bool
 }
 
 // rpcClient is a bitcoind JSON RPC client that uses rpcclient.Client's
@@ -89,6 +91,8 @@ type rpcClient struct {
 	*rpcCore
 	ctx context.Context
 }
+
+var _ Wallet = (*rpcClient)(nil)
 
 // newRPCClient is the constructor for a rpcClient.
 func newRPCClient(cfg *rpcCore) *rpcClient {
@@ -138,16 +142,47 @@ func (wc *rpcClient) SendRawTransactionLegacy(tx *wire.MsgTx) (*chainhash.Hash, 
 	if err != nil {
 		return nil, err
 	}
+
 	return wc.callHashGetter(methodSendRawTransaction, anylist{
 		hex.EncodeToString(txBytes), false})
 }
 
-// sendRawTransaction sends the MsgTx.
-func (wc *rpcClient) sendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) {
-	if wc.legacyRawSends {
-		return wc.SendRawTransactionLegacy(tx)
+// SendRawTransaction broadcasts the transaction.
+func (wc *rpcClient) SendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) {
+	b, err := serializeMsgTx(tx)
+	if err != nil {
+		return nil, err
 	}
-	return wc.SendRawTransaction(tx)
+	var txid string
+	err = wc.call(methodSendRawTransaction, anylist{hex.EncodeToString(b)}, &txid)
+	if err != nil {
+		return nil, err
+	}
+	return chainhash.NewHashFromStr(txid)
+}
+
+// sendRawTransaction sends the MsgTx.
+func (wc *rpcClient) sendRawTransaction(tx *wire.MsgTx) (txHash *chainhash.Hash, err error) {
+	if wc.legacyRawSends {
+		txHash, err = wc.SendRawTransactionLegacy(tx)
+	} else {
+		txHash, err = wc.SendRawTransaction(tx)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO: lockUnspent should really just take a []*outPoint, since it doesn't
+	// need the value.
+	ops := make([]*output, 0, len(tx.TxIn))
+	for _, txIn := range tx.TxIn {
+		prevOut := &txIn.PreviousOutPoint
+		ops = append(ops, &output{pt: newOutPoint(&prevOut.Hash, prevOut.Index)})
+	}
+	if err := wc.lockUnspent(true, ops); err != nil {
+		wc.log.Warnf("error unlocking spent outputs: %v", err)
+	}
+	return txHash, nil
 }
 
 // getTxOut returns the transaction output info if it's unspent and
@@ -454,15 +489,19 @@ func (wc *rpcClient) GetWalletInfo() (*GetWalletInfoResult, error) {
 }
 
 // GetAddressInfo gets information about the given address by calling
-// getaddressinfo RPC command.
-func (wc *rpcClient) getAddressInfo(addr btcutil.Address) (*GetAddressInfoResult, error) {
+// getaddressinfo or validateaddress RPC command.
+func (wc *rpcClient) getAddressInfo(addr btcutil.Address, method string) (*GetAddressInfoResult, error) {
 	ai := new(GetAddressInfoResult)
-	return ai, wc.call(methodGetAddressInfo, anylist{addr.String()}, ai)
+	return ai, wc.call(method, anylist{addr.String()}, ai)
 }
 
 // ownsAddress indicates if an address belongs to the wallet.
 func (wc *rpcClient) ownsAddress(addr btcutil.Address) (bool, error) {
-	ai, err := wc.getAddressInfo(addr)
+	method := methodGetAddressInfo
+	if wc.legacyValidateAddressRPC {
+		method = methodValidateAddress
+	}
+	ai, err := wc.getAddressInfo(addr, method)
 	if err != nil {
 		return false, err
 	}
@@ -487,20 +526,6 @@ func (wc *rpcClient) syncStatus() (*syncStatus, error) {
 		Height:  int32(chainInfo.Blocks),
 		Syncing: chainInfo.InitialBlockDownload || chainInfo.Headers-chainInfo.Blocks > 1,
 	}, nil
-}
-
-// SendRawTransaction broadcasts the transaction.
-func (wc *rpcClient) SendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) {
-	b, err := serializeMsgTx(tx)
-	if err != nil {
-		return nil, err
-	}
-	var txid string
-	err = wc.call(methodSendRawTransaction, anylist{hex.EncodeToString(b)}, &txid)
-	if err != nil {
-		return nil, err
-	}
-	return chainhash.NewHashFromStr(txid)
 }
 
 // swapConfirmations gets the number of confirmations for the specified coin ID

@@ -247,6 +247,9 @@ type BTCCloneCFG struct {
 	// BooleanGetBlockRPC causes the RPC client to use a boolean second argument
 	// for the getblock endpoint, instead of Bitcoin's numeric.
 	BooleanGetBlockRPC bool
+	// LegacyValidateAddressRPC uses the validateaddress endpoint instead of
+	// getwalletinfo in order to discover ownership of an address.
+	LegacyValidateAddressRPC bool
 	// SingularWallet signals that the node software supports only one wallet,
 	// so the RPC endpoint does not have a /wallet/{walletname} path.
 	SingularWallet bool
@@ -620,7 +623,7 @@ func (btc *ExchangeWalletSPV) Rescan(_ context.Context) error {
 
 // FeeRate satisfies asset.FeeRater.
 func (btc *ExchangeWalletFullNode) FeeRate() uint64 {
-	rate, err := btc.feeRate(nil, 1)
+	rate, err := btc.estimateFee(btc.node, 1)
 	if err != nil {
 		btc.log.Errorf("Failed to get fee rate: %v", err)
 		return 0
@@ -752,17 +755,18 @@ func newRPCWallet(requester RawRequesterWithContext, cfg *BTCCloneCFG, walletCon
 		return nil, err
 	}
 	btc.node = newRPCClient(&rpcCore{
-		requester:            requester,
-		segwit:               cfg.Segwit,
-		decodeAddr:           btc.decodeAddr,
-		arglessChangeAddrRPC: cfg.ArglessChangeAddrRPC,
-		legacyRawSends:       cfg.LegacyRawFeeLimit,
-		minNetworkVersion:    cfg.MinNetworkVersion,
-		log:                  cfg.Logger.SubLogger("RPC"),
-		chainParams:          cfg.ChainParams,
-		omitAddressType:      cfg.OmitAddressType,
-		legacySignTx:         cfg.LegacySignTxRPC,
-		booleanGetBlock:      cfg.BooleanGetBlockRPC,
+		requester:                requester,
+		segwit:                   cfg.Segwit,
+		decodeAddr:               btc.decodeAddr,
+		arglessChangeAddrRPC:     cfg.ArglessChangeAddrRPC,
+		legacyRawSends:           cfg.LegacyRawFeeLimit,
+		minNetworkVersion:        cfg.MinNetworkVersion,
+		log:                      cfg.Logger.SubLogger("RPC"),
+		chainParams:              cfg.ChainParams,
+		omitAddressType:          cfg.OmitAddressType,
+		legacySignTx:             cfg.LegacySignTxRPC,
+		booleanGetBlock:          cfg.BooleanGetBlockRPC,
+		legacyValidateAddressRPC: cfg.LegacyValidateAddressRPC,
 	})
 	return &ExchangeWalletFullNode{btc}, nil
 }

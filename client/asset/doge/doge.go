@@ -4,7 +4,9 @@
 package doge
 
 import (
+	"encoding/json"
 	"fmt"
+	"math"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
@@ -23,6 +25,7 @@ const (
 	defaultFeeRateLimit = 1_000_000
 	minNetworkVersion   = 1140400
 	walletTypeRPC       = "dogecoindRPC"
+	feeConfs            = 10
 )
 
 var (
@@ -138,22 +141,42 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		Simnet:  "18332",
 	}
 	cloneCFG := &btc.BTCCloneCFG{
-		WalletCFG:           cfg,
-		MinNetworkVersion:   minNetworkVersion,
-		WalletInfo:          WalletInfo,
-		Symbol:              "doge",
-		Logger:              logger,
-		Network:             network,
-		ChainParams:         params,
-		Ports:               ports,
-		DefaultFallbackFee:  defaultFee,
-		DefaultFeeRateLimit: defaultFeeRateLimit,
-		LegacyBalance:       true,
-		Segwit:              false,
-		OmitAddressType:     true,
-		LegacySignTxRPC:     true,
-		BooleanGetBlockRPC:  true,
-		SingularWallet:      true,
+		WalletCFG:                cfg,
+		MinNetworkVersion:        minNetworkVersion,
+		WalletInfo:               WalletInfo,
+		Symbol:                   "doge",
+		Logger:                   logger,
+		Network:                  network,
+		ChainParams:              params,
+		Ports:                    ports,
+		DefaultFallbackFee:       defaultFee,
+		DefaultFeeRateLimit:      defaultFeeRateLimit,
+		LegacyBalance:            true,
+		Segwit:                   false,
+		OmitAddressType:          true,
+		LegacySignTxRPC:          true,
+		LegacyValidateAddressRPC: true,
+		BooleanGetBlockRPC:       true,
+		SingularWallet:           true,
+		FeeEstimator: func(cl btc.RawRequester, _ uint64) (uint64, error) {
+			confArg, err := json.Marshal(feeConfs)
+			if err != nil {
+				return 0, err
+			}
+			resp, err := cl.RawRequest("estimatefee", []json.RawMessage{confArg})
+			if err != nil {
+				return 0, err
+			}
+			var feeRate float64
+			err = json.Unmarshal(resp, &feeRate)
+			if err != nil {
+				return 0, err
+			}
+			if feeRate <= 0 {
+				return 0, fmt.Errorf("fee could not be estimated")
+			}
+			return uint64(math.Round(feeRate * 1e5)), nil
+		},
 	}
 
 	return btc.BTCCloneWallet(cloneCFG)
