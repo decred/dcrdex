@@ -688,10 +688,19 @@ func (w *rpcWallet) LockAccount(ctx context.Context, acctName string) error {
 	return translateRPCCancelErr(err)
 }
 
-// UnlockAccount unlocks the specified account.
-// Part of the Wallet interface.
+// UnlockAccount unlocks the specified account or the wallet if account is not
+// encrypted. Part of the Wallet interface.
 func (w *rpcWallet) UnlockAccount(ctx context.Context, pw []byte, acctName string) error {
-	return translateRPCCancelErr(w.rpcClient.UnlockAccount(ctx, acctName, string(pw)))
+	var res *walletjson.AccountUnlockedResult
+	res, err := w.rpcClient.AccountUnlocked(ctx, acctName)
+	if err != nil {
+		return err
+	}
+	if res.Encrypted {
+		return translateRPCCancelErr(w.rpcClient.UnlockAccount(ctx, acctName, string(pw)))
+	}
+	return w.unlockWallet(ctx, string(pw), 0)
+
 }
 
 // SyncStatus returns the wallet's sync status.
