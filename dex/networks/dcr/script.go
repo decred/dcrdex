@@ -42,6 +42,8 @@ const (
 	// + BlockIndex (4 bytes) + sig script var int (at least 1 byte)
 	TxInOverhead = 41 + 8 + 4 + 4 // 57 + at least 1 more
 
+	P2PKSigScriptSize = txsizes.RedeemP2PKSigScriptSize
+
 	P2PKHSigScriptSize = txsizes.RedeemP2PKHSigScriptSize
 	P2PKHInputSize     = TxInOverhead + 1 + P2PKHSigScriptSize // 57 + 1 + 108 = 166
 
@@ -112,6 +114,7 @@ type ScriptType uint8
 
 const (
 	ScriptP2PKH ScriptType = 1 << iota
+	ScriptP2PK
 	ScriptP2SH
 	ScriptStake
 	ScriptMultiSig
@@ -137,6 +140,11 @@ func (s ScriptType) IsStake() bool {
 	return s&ScriptStake != 0
 }
 
+// IsP2PK will return boolean true if the script is a P2PK script.
+func (s ScriptType) IsP2PK() bool {
+	return s&ScriptP2PK != 0
+}
+
 // IsP2PKH will return boolean true if the script is a P2PKH script.
 func (s ScriptType) IsP2PKH() bool {
 	return s&ScriptP2PKH != 0
@@ -151,6 +159,13 @@ func (s ScriptType) IsMultiSig() bool {
 func convertScriptType(st stdscript.ScriptType) ScriptType {
 	var scriptType ScriptType
 	switch st {
+	// P2PK
+	case stdscript.STPubKeyEcdsaSecp256k1:
+		scriptType = ScriptP2PK
+	case stdscript.STPubKeyEd25519:
+		scriptType = ScriptP2PK | ScriptSigEdwards
+	case stdscript.STPubKeySchnorrSecp256k1:
+		scriptType = ScriptP2PK | ScriptSigSchnorr
 	// P2PKH
 	case stdscript.STPubKeyHashEcdsaSecp256k1:
 		scriptType = ScriptP2PKH
@@ -516,6 +531,12 @@ func InputInfo(version uint16, pkScript, redeemScript []byte, chainParams *chain
 	switch {
 	case scriptType == ScriptUnsupported:
 		return nil, dex.UnsupportedScriptError
+	case scriptType.IsP2PK():
+		return &SpendInfo{
+			SigScriptSize: P2PKSigScriptSize,
+			ScriptAddrs:   scriptAddrs,
+			ScriptType:    scriptType,
+		}, nil
 	case scriptType.IsP2PKH():
 		return &SpendInfo{
 			SigScriptSize: P2PKHSigScriptSize,

@@ -229,6 +229,7 @@ type BTCScriptType uint8
 
 const (
 	ScriptP2PKH = 1 << iota
+	ScriptP2PK
 	ScriptP2SH
 	ScriptTypeSegwit
 	ScriptMultiSig
@@ -248,6 +249,11 @@ func (s BTCScriptType) IsP2WSH() bool {
 // IsP2PKH will return boolean true if the script is a P2PKH script.
 func (s BTCScriptType) IsP2PKH() bool {
 	return s&ScriptP2PKH != 0 && s&ScriptTypeSegwit == 0
+}
+
+// IsP2PK will return boolean true if the script is a P2PK script.
+func (s BTCScriptType) IsP2PK() bool {
+	return s&ScriptP2PK != 0 && s&ScriptTypeSegwit == 0
 }
 
 // IsP2WPKH will return boolean true if the script is a P2WPKH script.
@@ -274,6 +280,8 @@ func ParseScriptType(pkScript, redeemScript []byte) BTCScriptType {
 	class := txscript.GetScriptClass(pkScript)
 
 	switch class {
+	case txscript.PubKeyTy:
+		scriptType |= ScriptP2PK
 	case txscript.PubKeyHashTy:
 		scriptType |= ScriptP2PKH
 	case txscript.WitnessV0PubKeyHashTy:
@@ -649,6 +657,9 @@ func InputInfo(pkScript, redeemScript []byte, chainParams *chaincfg.Params) (*Sp
 	// Start with standard P2PKH.
 	var sigScriptSize, witnessWeight int
 	switch {
+	case scriptType.IsP2PK():
+		sigScriptSize = RedeemP2PKSigScriptSize
+		witnessWeight = 0
 	case scriptType.IsP2PKH():
 		sigScriptSize = RedeemP2PKHSigScriptSize
 		witnessWeight = 0

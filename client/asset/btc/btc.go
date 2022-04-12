@@ -3414,7 +3414,16 @@ func convertUnspent(confs uint32, unspents []*ListUnspentResult, chainParams *ch
 
 			nfo, err := dexbtc.InputInfo(txout.ScriptPubKey, txout.RedeemScript, chainParams)
 			if err != nil {
+				if errors.Is(err, dex.UnsupportedScriptError) {
+					continue
+				}
 				return nil, nil, 0, fmt.Errorf("error reading asset info: %w", err)
+			}
+			if nfo.ScriptType == dexbtc.ScriptUnsupported || nfo.NonStandardScript {
+				// InputInfo sets NonStandardScript for P2SH with non-standard
+				// redeem scripts. Don't return these since they cannot fund
+				// arbitrary txns.
+				continue
 			}
 
 			utxo := &compositeUTXO{

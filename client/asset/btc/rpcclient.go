@@ -690,7 +690,7 @@ func (wc *rpcClient) call(method string, args anylist, thing interface{}) error 
 
 	b, err := wc.requester.RawRequest(wc.ctx, method, params)
 	if err != nil {
-		return fmt.Errorf("rawrequest error: %w", err)
+		return fmt.Errorf("rawrequest (%v) error: %w", method, err)
 	}
 	if thing != nil {
 		return json.Unmarshal(b, thing)
