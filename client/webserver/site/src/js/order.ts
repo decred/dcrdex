@@ -279,5 +279,9 @@ const CoinExplorers: Record<number, Record<number, (cid: string) => string>> = {
       }
       return `https://goerli.etherscan.io/tx/${cid}`
     }
+  },
+  3: { // doge
+    [Mainnet]: (cid: string) => `https://dogechain.info/tx/${cid.split(':')[0]}`,
+    [Testnet]: (cid: string) => `https://blockexplorer.one/dogecoin/testnet/tx/${cid.split(':')[0]}`
   }
 }
