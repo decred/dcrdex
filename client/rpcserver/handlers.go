@@ -127,9 +127,7 @@ func handleInit(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	}
 	defer func() {
 		appPass.Clear()
-		if len(seed) > 0 {
-			seed.Clear()
-		}
+		seed.Clear()
 	}()
 	if err := s.core.InitializeClient(appPass, seed); err != nil {
 		errMsg := fmt.Sprintf("unable to initialize client: %v", err)
@@ -206,9 +204,9 @@ func handleOpenWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload 
 	if err != nil {
 		return usage(openWalletRoute, err)
 	}
+	defer form.appPass.Clear()
 
 	err = s.core.OpenWallet(form.assetID, form.appPass)
-	form.appPass.Clear() // AppPass not needed after this, clear
 	if err != nil {
 		errMsg := fmt.Sprintf("error unlocking %s wallet: %v",
 			dex.BipIDSymbol(form.assetID), err)
@@ -609,6 +607,7 @@ func handleAppSeed(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	}
 	defer appPass.Clear()
 	seed, err := s.core.ExportSeed(appPass)
+	defer encode.ClearBytes(seed)
 	if err != nil {
 		errMsg := fmt.Sprintf("unable to retrieve app seed: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCExportSeedError, errMsg)
@@ -616,12 +615,6 @@ func handleAppSeed(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	}
 	// Zero seed and hex representation after use.
 	seedHex := fmt.Sprintf("%x", seed[:])
-	defer func() {
-		for i := range seed {
-			seed[i] = 0
-		}
-		seedHex = ""
-	}()
 
 	return createResponse(appSeedRoute, seedHex, nil)
 }

@@ -1440,6 +1440,7 @@ func (c *Core) encryptionKey(pw []byte) (encrypt.Crypter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("outer key deserialization error: %w", err)
 	}
+	defer outerCrypter.Close()
 	innerKey, err := outerCrypter.Decrypt(creds.EncInnerKey)
 	if err != nil {
 		return nil, fmt.Errorf("inner key decryption error: %w", err)
@@ -1711,6 +1712,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	if err != nil {
 		return err
 	}
+	defer crypter.Close()
 
 	walletDef, err := walletDefinition(assetID, form.Type)
 	if err != nil {
@@ -1821,6 +1823,7 @@ func (c *Core) createSeededWallet(assetID uint32, crypter encrypt.Crypter, form 
 	if err != nil {
 		return nil, err
 	}
+	defer encode.ClearBytes(seed)
 
 	c.log.Infof("Initializing a built-in %s wallet", unbip(assetID))
 	if err = asset.CreateWallet(assetID, &asset.CreateWalletParams{
@@ -2052,6 +2055,7 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 	if err != nil {
 		return err
 	}
+	defer crypter.Close()
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
 		return fmt.Errorf("OpenWallet: wallet not found for %d -> %s: %w", assetID, unbip(assetID), err)
@@ -2173,6 +2177,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 	if err != nil {
 		return newError(authErr, "ReconfigureWallet password error: %w", err)
 	}
+	defer crypter.Close()
 	assetID := form.AssetID
 	walletDef, err := walletDefinition(assetID, form.Type)
 	if err != nil {
@@ -2395,6 +2400,7 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 	if err != nil {
 		return newError(authErr, "SetWalletPassword password error: %w", err)
 	}
+	defer crypter.Close()
 
 	// Check that the specified wallet exists.
 	c.walletMtx.Lock()
@@ -2685,6 +2691,7 @@ func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI interface{}) 
 	if err != nil {
 		return nil, false, codedError(passwordErr, err)
 	}
+	defer crypter.Close()
 
 	var ready bool
 	dc, err := c.tempDexConnection(host, certI)
@@ -2781,6 +2788,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	if err != nil {
 		return nil, codedError(passwordErr, err)
 	}
+	defer crypter.Close()
 	if form.Addr == "" {
 		return nil, newError(emptyHostErr, "no dex address specified")
 	}
@@ -3190,6 +3198,7 @@ func (c *Core) ExportSeed(pw []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ExportSeed password error: %w", err)
 	}
+	defer crypter.Close()
 
 	creds := c.creds()
 	if creds == nil {
@@ -3230,6 +3239,7 @@ func (c *Core) generateCredentials(pw, seed []byte) (encrypt.Crypter, *db.Primar
 	} else if len(seed) != seedLen {
 		return nil, nil, fmt.Errorf("invalid seed length %d. expected %d", len(seed), seedLen)
 	}
+	defer encode.ClearBytes(seed)
 
 	encSeed, err := innerCrypter.Encrypt(seed)
 	if err != nil {
@@ -3273,6 +3283,7 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer crypter.Close()
 
 	// Attempt to connect to and retrieve balance from all known wallets. It is
 	// not an error if we can't connect, unless we need the wallet for active
@@ -3886,6 +3897,7 @@ func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string)
 	if err != nil {
 		return nil, fmt.Errorf("Withdraw password error: %w", err)
 	}
+	defer crypter.Close()
 	if value == 0 {
 		return nil, fmt.Errorf("cannot withdraw zero %s", unbip(assetID))
 	}
@@ -4046,6 +4058,7 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Trade password error: %w", err)
 	}
+	defer crypter.Close()
 	dc, err := c.connectedDEX(form.Host)
 	if err != nil {
 		return nil, err

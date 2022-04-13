@@ -481,6 +481,7 @@ func (s *WebServer) authorize() string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	token := hex.EncodeToString(b)
+	zero(b)
 	s.authMtx.Lock()
 	s.authTokens[token] = true
 	s.authMtx.Unlock()
@@ -589,6 +590,7 @@ func (s *WebServer) getCachedPasswordUsingRequest(r *http.Request) ([]byte, erro
 func (s *WebServer) cacheAppPassword(appPW []byte, authToken string) ([]byte, error) {
 	key := encode.RandomBytes(16)
 	crypter := encrypt.NewCrypter(key)
+	defer crypter.Close()
 	encryptedPass, err := crypter.Encrypt(appPW)
 	if err != nil {
 		return nil, fmt.Errorf("error encrypting password: %v", err)

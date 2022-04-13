@@ -633,6 +633,7 @@ func (a *dexAccount) setupCryptoV2(creds *db.PrimaryCredentials, crypter encrypt
 	if err != nil {
 		return fmt.Errorf("seed decryption error: %w", err)
 	}
+	defer encode.ClearBytes(seed)
 
 	dexPkB := a.dexPubKey.SerializeCompressed()
 	// And because I'm neurotic.
