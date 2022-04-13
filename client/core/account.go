@@ -63,6 +63,7 @@ func (c *Core) AccountExport(pw []byte, host string) (*Account, error) {
 	if err != nil {
 		return nil, codedError(passwordErr, err)
 	}
+	defer crypter.Close()
 	host, err = addrHost(host)
 	if err != nil {
 		return nil, newError(addressParseErr, "error parsing address: %w", err)

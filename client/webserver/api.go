@@ -17,9 +17,12 @@ import (
 	"decred.org/dcrdex/dex/encode"
 )
 
+var zero = encode.ClearBytes
+
 // apiDiscoverAccount is the handler for the '/discoveracct' API request.
 func (s *WebServer) apiDiscoverAccount(w http.ResponseWriter, r *http.Request) {
 	form := new(registrationForm)
+	defer form.Password.Clear()
 	if !readPost(w, r, form) {
 		return
 	}
@@ -29,6 +32,7 @@ func (s *WebServer) apiDiscoverAccount(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
+	defer zero(pass)
 	exchangeInfo, paid, err := s.core.DiscoverAccount(form.Addr, pass, cert)
 	if err != nil {
 		s.writeAPIError(w, err)
@@ -111,6 +115,7 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
+	defer zero(pass)
 	_, err = s.core.Register(&core.RegisterForm{
 		Addr:    reg.Addr,
 		Cert:    []byte(reg.Cert),
@@ -131,10 +136,8 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 // apiNewWallet is the handler for the '/newwallet' API request.
 func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 	form := new(newWalletForm)
-	defer func() {
-		form.AppPW.Clear()
-		form.Pass.Clear()
-	}()
+	defer form.AppPW.Clear()
+	defer form.Pass.Clear()
 	if !readPost(w, r, form) {
 		return
 	}
@@ -148,6 +151,7 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
+	defer zero(pass)
 	// Wallet does not exist yet. Try to create it.
 	err = s.core.CreateWallet(pass, form.Pass, &core.WalletForm{
 		AssetID: form.AssetID,
@@ -206,6 +210,7 @@ func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
+	defer zero(pass)
 	err = s.core.OpenWallet(form.AssetID, pass)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error unlocking %s wallet: %w", unbip(form.AssetID), err))
@@ -275,6 +280,7 @@ func (s *WebServer) apiTrade(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
+	defer zero(pass)
 	ord, err := s.core.Trade(pass, form.Order)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error placing order: %w", err))
@@ -304,6 +310,7 @@ func (s *WebServer) apiAccountExport(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
+	defer zero(pass)
 	account, err := s.core.AccountExport(pass, form.Host)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error exporting account: %w", err))
@@ -325,6 +332,7 @@ func (s *WebServer) apiExportSeed(w http.ResponseWriter, r *http.Request) {
 	form := &struct {
 		Pass encode.PassBytes `json:"pass"`
 	}{}
+	defer form.Pass.Clear()
 	if !readPost(w, r, form) {
 		return
 	}
@@ -334,6 +342,7 @@ func (s *WebServer) apiExportSeed(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("error exporting seed: %w", err))
 		return
 	}
+	defer zero(seed)
 	writeJSON(w, &struct {
 		OK   bool      `json:"ok"`
 		Seed dex.Bytes `json:"seed"`
@@ -356,6 +365,7 @@ func (s *WebServer) apiAccountImport(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
+	defer zero(pass)
 	err = s.core.AccountImport(pass, form.Account)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error importing account: %w", err))
@@ -375,6 +385,7 @@ func (s *WebServer) apiAccountDisable(w http.ResponseWriter, r *http.Request) {
 
 	// Disable account.
 	err := s.core.AccountDisable(form.Pass, form.Host)
+	zero(form.Pass)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error disabling account: %w", err))
 		return
@@ -395,6 +406,7 @@ func (s *WebServer) apiCancel(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
+	defer zero(pass)
 	err = s.core.Cancel(pass, form.OrderID)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error cancelling order %s: %w", form.OrderID, err))
@@ -424,6 +436,7 @@ func (s *WebServer) apiCloseWallet(w http.ResponseWriter, r *http.Request) {
 func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 	init := new(initForm)
 	defer init.Pass.Clear()
+	defer zero(init.Seed)
 	if !readPost(w, r, init) {
 		return
 	}
@@ -646,6 +659,7 @@ func (s *WebServer) apiChangeAppPass(w http.ResponseWriter, r *http.Request) {
 			log.Errorf("unable to cache password: %w", err)
 			clearCookie(pwKeyCK, w)
 		} else {
+			zero(key)
 			setCookie(pwKeyCK, hex.EncodeToString(key), w)
 		}
 	}
@@ -675,6 +689,7 @@ func (s *WebServer) apiReconfig(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
 	}
+	defer zero(pass)
 	// Update wallet settings.
 	err = s.core.ReconfigureWallet(pass, form.NewWalletPW, &core.WalletForm{
 		AssetID: form.AssetID,
@@ -790,9 +805,11 @@ func (s *WebServer) apiPreOrder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp, s.indent)
 }
 
-// apiActuallyLogin logs the user in.
+// apiActuallyLogin logs the user in. login form private data is expected to be
+// cleared by the caller.
 func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login *loginForm) {
 	pass, err := s.resolvePass(login.Pass, r)
+	defer zero(pass)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
 		return
@@ -814,6 +831,7 @@ func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login 
 				return
 			}
 			setCookie(pwKeyCK, hex.EncodeToString(key), w)
+			zero(key)
 		} else {
 			// If dexc was shutdown and restarted, the old pw key cookie might
 			// need to be cleared.
