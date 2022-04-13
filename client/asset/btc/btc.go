@@ -253,6 +253,9 @@ type BTCCloneCFG struct {
 	// SingularWallet signals that the node software supports only one wallet,
 	// so the RPC endpoint does not have a /wallet/{walletname} path.
 	SingularWallet bool
+	// UnlockSpends manually unlocks outputs as they are spent. Most asses will
+	// unlock wallet outputs automatically as they are spent.
+	UnlockSpends bool
 }
 
 // outPoint is the hash and output index of a transaction output.
@@ -767,6 +770,7 @@ func newRPCWallet(requester RawRequesterWithContext, cfg *BTCCloneCFG, walletCon
 		legacySignTx:             cfg.LegacySignTxRPC,
 		booleanGetBlock:          cfg.BooleanGetBlockRPC,
 		legacyValidateAddressRPC: cfg.LegacyValidateAddressRPC,
+		unlockSpends:             cfg.UnlockSpends,
 	})
 	return &ExchangeWalletFullNode{btc}, nil
 }
@@ -1055,7 +1059,7 @@ func (a amount) String() string {
 // via feeRateWithFallback.
 func (btc *baseWallet) targetFeeRateWithFallback(confTarget, feeSuggestion uint64) uint64 {
 	feeRate, err := btc.estimateFee(btc.node, confTarget)
-	if err == nil {
+	if err == nil && feeRate > 0 {
 		btc.log.Tracef("Obtained local estimate for %d-conf fee rate, %d", confTarget, feeRate)
 		return feeRate
 	}

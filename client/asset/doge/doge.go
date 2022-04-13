@@ -158,6 +158,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		LegacyValidateAddressRPC: true,
 		BooleanGetBlockRPC:       true,
 		SingularWallet:           true,
+		UnlockSpends:             true,
 		FeeEstimator: func(cl btc.RawRequester, _ uint64) (uint64, error) {
 			confArg, err := json.Marshal(feeConfs)
 			if err != nil {
@@ -173,7 +174,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 				return 0, err
 			}
 			if feeRate <= 0 {
-				return 0, fmt.Errorf("fee could not be estimated")
+				return 0, nil
 			}
 			return uint64(math.Round(feeRate * 1e5)), nil
 		},

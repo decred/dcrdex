@@ -83,6 +83,7 @@ type rpcCore struct {
 	legacySignTx             bool
 	booleanGetBlock          bool
 	legacyValidateAddressRPC bool
+	unlockSpends             bool
 }
 
 // rpcClient is a bitcoind JSON RPC client that uses rpcclient.Client's
@@ -170,6 +171,9 @@ func (wc *rpcClient) sendRawTransaction(tx *wire.MsgTx) (txHash *chainhash.Hash,
 	}
 	if err != nil {
 		return nil, err
+	}
+	if !wc.unlockSpends {
+		return txHash, nil
 	}
 
 	// TODO: lockUnspent should really just take a []*outPoint, since it doesn't

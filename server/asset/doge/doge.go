@@ -98,7 +98,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 				return 0, err
 			}
 			if r <= 0 {
-				return 0, fmt.Errorf("fee could not be estimated")
+				return 0, nil
 			}
 			return uint64(math.Round(r * 1e8)), nil
 		},
