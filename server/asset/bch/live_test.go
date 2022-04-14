@@ -15,6 +15,10 @@
 // ------------------------------------------
 // Test that fees rates are parsed without error and that a few historical fee
 // rates are correct
+//
+// go test -v -tags bchlive -run TestMedianFeeRates
+// ------------------------------------------
+// Test that a median fee rate can be calculated.
 
 package bch
 
@@ -93,4 +97,8 @@ func TestLiveFees(t *testing.T) {
 		"dc3962fc4d2d7d99646cacc16a23cc49143ea9cfc43128ec986b61e9132b2726": 444,
 		"0de586d0c74780605c36c0f51dcd850d1772f41a92c549e3aa36f9e78e905284": 2604,
 	})
+}
+
+func TestMedianFeeRates(t *testing.T) {
+	btc.TestMedianFeesTheHardWay(bch.Backend, t)
 }

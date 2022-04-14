@@ -29,6 +29,8 @@ import (
 	"github.com/decred/dcrd/rpcclient/v7"
 )
 
+const defaultNoCompetitionRate = 10
+
 // Driver implements asset.Driver.
 type Driver struct{}
 
@@ -109,7 +111,8 @@ func netParams(network dex.Network) (*chaincfg.Params, error) {
 // cache of block data for quick lookups. Backend implements asset.Backend, so
 // provides exported methods for DEX-related blockchain info.
 type Backend struct {
-	cfg *dexbtc.RPCConfig
+	rpcCfg *dexbtc.RPCConfig
+	cfg    *BackendCloneConfig
 	// The asset name (e.g. btc), primarily for logging purposes.
 	name string
 	// segwit should be set to true for blockchains that support segregated
@@ -127,13 +130,20 @@ type Backend struct {
 	chainParams *chaincfg.Params
 	// A logger will be provided by the dex for this backend. All logging should
 	// use the provided logger.
-	log         dex.Logger
-	decodeAddr  dexbtc.AddressDecoder
-	estimateFee func(*RPCClient) (uint64, error)
-	// booleanGetBlockRPC corresponds to BackendCloneConfig.BooleanGetBlockRPC
-	// field and is used by RPCClient, which is constructed on Connect.
-	booleanGetBlockRPC bool
-	blockDeserializer  func([]byte) (*wire.MsgBlock, error)
+	log               dex.Logger
+	decodeAddr        dexbtc.AddressDecoder
+	blockDeserializer func([]byte) (*wire.MsgBlock, error)
+	// fee estimation configuration
+	feeConfs          int64
+	noCompetitionRate uint64
+
+	// The feeCache prevents repeated calculations of the median fee rate
+	// between block changes when estimate(smart)fee is unprimed.
+	feeCache struct {
+		sync.Mutex
+		fee  uint64
+		hash chainhash.Hash
+	}
 }
 
 // Check that Backend satisfies the Backend interface.
@@ -163,29 +173,35 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 	})
 }
 
-func newBTC(cloneCfg *BackendCloneConfig, cfg *dexbtc.RPCConfig) *Backend {
-	feeEstimator := feeRate
-	if cloneCfg.FeeEstimator != nil {
-		feeEstimator = cloneCfg.FeeEstimator
-	}
-
+func newBTC(cloneCfg *BackendCloneConfig, rpcCfg *dexbtc.RPCConfig) *Backend {
 	addrDecoder := btcutil.DecodeAddress
 	if cloneCfg.AddressDecoder != nil {
 		addrDecoder = cloneCfg.AddressDecoder
 	}
 
+	noCompetitionRate := cloneCfg.NoCompetitionFeeRate
+	if noCompetitionRate == 0 {
+		noCompetitionRate = defaultNoCompetitionRate
+	}
+
+	feeConfs := cloneCfg.FeeConfs
+	if feeConfs == 0 {
+		feeConfs = 1
+	}
+
 	return &Backend{
-		cfg:                cfg,
-		name:               cloneCfg.Name,
-		blockCache:         newBlockCache(),
-		blockChans:         make(map[chan *asset.BlockUpdate]struct{}),
-		chainParams:        cloneCfg.ChainParams,
-		log:                cloneCfg.Logger,
-		segwit:             cloneCfg.Segwit,
-		decodeAddr:         addrDecoder,
-		estimateFee:        feeEstimator,
-		booleanGetBlockRPC: cloneCfg.BooleanGetBlockRPC,
-		blockDeserializer:  cloneCfg.BlockDeserializer,
+		rpcCfg:            rpcCfg,
+		cfg:               cloneCfg,
+		name:              cloneCfg.Name,
+		blockCache:        newBlockCache(),
+		blockChans:        make(map[chan *asset.BlockUpdate]struct{}),
+		chainParams:       cloneCfg.ChainParams,
+		log:               cloneCfg.Logger,
+		segwit:            cloneCfg.Segwit,
+		decodeAddr:        addrDecoder,
+		noCompetitionRate: noCompetitionRate,
+		feeConfs:          feeConfs,
+		blockDeserializer: cloneCfg.BlockDeserializer,
 	}
 }
 
@@ -200,11 +216,29 @@ type BackendCloneConfig struct {
 	Net            dex.Network
 	ChainParams    *chaincfg.Params
 	Ports          dexbtc.NetPorts
-	// FeeEstimator provides a way to get fees given an RawRequest-enabled
-	// client and a confirmation target.
-	FeeEstimator func(*RPCClient) (uint64, error)
-	// BooleanGetBlockRPC causes the RPC client to use a boolean second argument
-	// for the getblock endpoint, instead of Bitcoin's numeric.
+	// ManualFeeScan specifies that median block fees should be calculated by
+	// scanning transactions since the getblockstats rpc is not available.
+	// Median block fees are used to estimate fee rates when the cache is not
+	// primed.
+	ManualMedianFee bool
+	// NoCompetitionFeeRate specifies a fee rate to use if estimatesmartfee
+	// or estimatefee aren't ready and the median fee is finding relatively
+	// empty blocks.
+	NoCompetitionFeeRate uint64
+	// DumbFeeEstimates is for asset's whose RPC is estimatefee instead of
+	// estimatesmartfee.
+	DumbFeeEstimates bool
+	// Argsless fee estimates are for assets who don't take an argument for
+	// number of blocks to estimatefee.
+	ArglessFeeEstimates bool
+	// FeeConfs specifies the target number of confirmations to use for
+	// estimate(smart)fee. If not set, default value is 1,
+	FeeConfs int64
+	// MaxFeeBlocks is the maximum number of blocks that can be evaluated for
+	// median fee calculations. If > 100 txs are not seen in the last
+	// MaxFeeBlocks, an ErrNoCompetition is returned. Default value is 5.
+	MaxFeeBlocks int
+	// BooleanGetBlockRPC will pass true instead of 2 as the getblock argument.
 	BooleanGetBlockRPC bool
 	// BlockDeserializer can be used in place of (*wire.MsgBlock).Deserialize.
 	BlockDeserializer func(blk []byte) (*wire.MsgBlock, error)
@@ -240,19 +274,26 @@ func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	client, err := rpcclient.New(&rpcclient.ConnConfig{
 		HTTPPostMode: true,
 		DisableTLS:   true,
-		Host:         btc.cfg.RPCBind,
-		User:         btc.cfg.RPCUser,
-		Pass:         btc.cfg.RPCPass,
+		Host:         btc.rpcCfg.RPCBind,
+		User:         btc.rpcCfg.RPCUser,
+		Pass:         btc.rpcCfg.RPCPass,
 	}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("error creating %q RPC client: %w", btc.name, err)
 	}
 
+	maxFeeBlocks := btc.cfg.MaxFeeBlocks
+	if maxFeeBlocks == 0 {
+		maxFeeBlocks = 5
+	}
+
 	btc.node = &RPCClient{
-		ctx:                    ctx,
-		requester:              client,
-		booleanVerboseGetBlock: btc.booleanGetBlockRPC,
-		blockDeserializer:      btc.blockDeserializer,
+		ctx:                 ctx,
+		requester:           client,
+		booleanGetBlockRPC:  btc.cfg.BooleanGetBlockRPC,
+		maxFeeBlocks:        maxFeeBlocks,
+		arglessFeeEstimates: btc.cfg.ArglessFeeEstimates,
+		blockDeserializer:   btc.blockDeserializer,
 	}
 
 	// Prime the cache
@@ -283,7 +324,7 @@ func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		return nil, fmt.Errorf("%s transaction index is not enabled. Please enable txindex in the node config", btc.name)
 	}
 
-	if _, err = btc.estimateFee(btc.node); err != nil {
+	if _, err = btc.estimateFee(); err != nil {
 		btc.log.Warnf("%s backend started without fee estimation available: %v", btc.name, err)
 	}
 
@@ -519,7 +560,7 @@ func (btc *Backend) InitTxSizeBase() uint32 {
 
 // FeeRate returns the current optimal fee rate in sat / byte.
 func (btc *Backend) FeeRate(_ context.Context) (uint64, error) {
-	return btc.estimateFee(btc.node)
+	return btc.estimateFee()
 }
 
 // Info provides some general information about the backend.
@@ -1097,6 +1138,61 @@ out:
 	}
 }
 
+// estimateFee attempts to get a reasonable tx fee rates (units: atomic/(v)byte)
+// to use for the asset by checking estimate(smart)fee. That call can fail or
+// otherwise be useless on an otherwise perfectly functioning node. In that
+// case, an estimate is calculated from the median fees of the previous
+// block(s).
+func (btc *Backend) estimateFee() (satsPerB uint64, err error) {
+	if btc.cfg.DumbFeeEstimates {
+		satsPerB, err = btc.node.EstimateFee(btc.feeConfs)
+	} else {
+		satsPerB, err = btc.node.EstimateSmartFee(btc.feeConfs, &btcjson.EstimateModeConservative)
+	}
+	if err == nil && satsPerB > 0 {
+		return satsPerB, nil
+	} else if err != nil {
+		btc.log.Tracef("Estimatefee error for %s: %v", btc.name, err)
+	}
+
+	btc.log.Debugf("Fee estimate unavailable for %s. Using median fee.", btc.name)
+
+	tip := btc.blockCache.tipHash()
+
+	btc.feeCache.Lock()
+	defer btc.feeCache.Unlock()
+
+	// If the current block hasn't changed, no need to recalc.
+	if btc.feeCache.hash == tip {
+		btc.log.Tracef("Using cached %s median fee rate", btc.name)
+		return btc.feeCache.fee, nil
+	}
+
+	// Need to revert to the median fee calculation.
+	if btc.cfg.ManualMedianFee {
+		satsPerB, err = btc.node.medianFeesTheHardWay()
+	} else {
+		satsPerB, err = btc.node.medianFeeRate()
+	}
+	if err != nil {
+		if errors.Is(err, ErrNoCompetition) {
+			btc.log.Debugf("Blocks are too empty to calculate %d median fees. Using no-competition rate.", btc.name)
+			btc.feeCache.fee = btc.noCompetitionRate
+			btc.feeCache.hash = tip
+			return btc.noCompetitionRate, nil
+		}
+		return 0, err
+	}
+	if satsPerB < btc.noCompetitionRate {
+		btc.log.Tracef("Calculated %s median fees %d are lower than the no-competition rate %d. Using the latter.",
+			btc.name, satsPerB, btc.noCompetitionRate)
+		satsPerB = btc.noCompetitionRate
+	}
+	btc.feeCache.fee = satsPerB
+	btc.feeCache.hash = tip
+	return satsPerB, nil
+}
+
 // decodeCoinID decodes the coin ID into a tx hash and a vout.
 func decodeCoinID(coinID []byte) (*chainhash.Hash, uint32, error) {
 	if len(coinID) != 36 {
@@ -1141,30 +1237,6 @@ func isMethodNotFoundErr(err error) bool {
 	return errors.As(err, &rpcErr) &&
 		(int(rpcErr.Code) == errRPCMethodNotFound ||
 			strings.Contains(strings.ToLower(rpcErr.Message), "method not found"))
-}
-
-// feeRate returns the current optimal fee rate in sat / byte using the
-// estimatesmartfee RPC.
-func feeRate(node *RPCClient) (uint64, error) {
-	feeResult, err := node.EstimateSmartFee(1, &btcjson.EstimateModeConservative)
-	if err != nil {
-		return 0, err
-	}
-	if len(feeResult.Errors) > 0 {
-		return 0, fmt.Errorf(strings.Join(feeResult.Errors, "; "))
-	}
-	if feeResult.FeeRate == nil {
-		return 0, fmt.Errorf("no fee rate available")
-	}
-	satPerKB, err := btcutil.NewAmount(*feeResult.FeeRate)
-	if err != nil {
-		return 0, err
-	}
-	satPerB := uint64(math.Round(float64(satPerKB) / 1000))
-	if satPerB == 0 {
-		satPerB = 1
-	}
-	return satPerB, nil
 }
 
 // serializeMsgTx serializes the wire.MsgTx.

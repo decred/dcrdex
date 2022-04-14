@@ -5,7 +5,6 @@ package doge
 
 import (
 	"fmt"
-	"math"
 
 	"decred.org/dcrdex/dex"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
@@ -85,31 +84,17 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		// https://github.com/dogecoin/dogecoin/discussions/2264
 		// Looks like Segwit will be false for a little while longer. Should
 		// think about how to transition once activated.
-		Segwit:      false,
-		ConfigPath:  configPath,
-		Logger:      logger,
-		Net:         network,
-		ChainParams: params,
-		Ports:       ports,
-		FeeEstimator: func(cl *btc.RPCClient) (uint64, error) {
-
-			var r float64
-			if err := cl.Call("estimatefee", []interface{}{feeConfs}, &r); err != nil {
-				return 0, err
-			}
-			if r <= 0 {
-				return 0, nil
-			}
-
-			// estimatefee is f#$%ed
-			// https://github.com/decred/dcrdex/pull/1558#discussion_r850061882
-			if r > dexdoge.DefaultFeeRateLimit/1e5 {
-				return dexdoge.DefaultFee, nil
-			}
-
-			return uint64(math.Round(r * 1e5)), nil
-		},
-		BooleanGetBlockRPC: true,
-		BlockDeserializer:  dexdoge.DeserializeBlock,
+		Segwit:               false,
+		ConfigPath:           configPath,
+		Logger:               logger,
+		Net:                  network,
+		ChainParams:          params,
+		Ports:                ports,
+		DumbFeeEstimates:     true,
+		ManualMedianFee:      true,
+		NoCompetitionFeeRate: dexdoge.DefaultFee,
+		MaxFeeBlocks:         50,
+		BooleanGetBlockRPC:   true,
+		BlockDeserializer:    dexdoge.DeserializeBlock,
 	})
 }

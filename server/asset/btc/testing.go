@@ -428,11 +428,6 @@ func CompatibilityCheck(items *CompatibilityItems, chainParams *chaincfg.Params,
 	}
 
 	// P2SH
-	scriptClass := txscript.GetScriptClass(items.P2SHScript)
-	if scriptClass != txscript.ScriptHashTy {
-		t.Fatalf("wrong script class for p2sh script. wanted %s, got %s", txscript.ScriptHashTy, scriptClass)
-	}
-
 	sh := dexbtc.ExtractScriptHash(items.P2SHScript)
 	if sh == nil {
 		t.Fatalf("incompatible P2SH script")
@@ -451,4 +446,23 @@ func CompatibilityCheck(items *CompatibilityItems, chainParams *chaincfg.Params,
 		}
 		checkAddr(items.P2WSHScript, items.WSHAddr)
 	}
+}
+
+func TestMedianFees(btc *Backend, t *testing.T) {
+	// The easy way.
+	medianFees, err := btc.node.medianFeeRate()
+	if err != nil {
+		t.Fatalf("medianFeeRate error: %v", err)
+	}
+	fmt.Printf("medianFeeRate: %v \n", medianFees)
+}
+
+func TestMedianFeesTheHardWay(btc *Backend, t *testing.T) {
+	// The hard way.
+	medianFees, err := btc.node.medianFeesTheHardWay()
+	if err != nil {
+		t.Fatalf("medianFeesTheHardWay error: %v", err)
+	}
+
+	fmt.Printf("medianFeesTheHardWay: %v \n", medianFees)
 }

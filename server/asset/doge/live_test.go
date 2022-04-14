@@ -81,3 +81,7 @@ func TestLiveFees(t *testing.T) {
 		// "9387d8b2097ee23cc3da36daf90262dda9a98eb25063ddddb630cf15513fa9b8": 1,
 	})
 }
+
+func TestMedianFeeRates(t *testing.T) {
+	btc.TestMedianFeesTheHardWay(doge, t)
+}
