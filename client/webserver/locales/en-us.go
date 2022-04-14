@@ -226,4 +226,11 @@ var EnUS = map[string]string{
 	"recent_acceleration_msg":     `Your latest acceleration was only <span id="recentAccelerationTime"></span> minutes ago! Are you sure you want to accelerate?`,
 	"recent_swap_msg":             `Your oldest unconfirmed swap transaction was submitted only <span id="recentSwapTime"></span> minutes ago! Are you sure you want to accelerate?`,
 	"early_acceleration_help_msg": `It will cause no harm to your order, but you might be wasting money. Acceleration is only helpful if the fee rate on an existing unconfirmed transaction has become too low to be mined in the next block, but not if blocks are just being mined slowly. You can confirm this in the block explorer by closing this popup and clicking on your previous transactions.`,
+	"recover":                     "Recover",
+	"recover_wallet":              "Recover Wallet",
+	"recover_warning":             "Recovering your wallet will move all wallet data to a backup folder. You will have to wait until the wallet resyncs with the network, which could potentially take a long time, before you can use the wallet again.",
+	"wallet_actively_used":        "Wallet actively used!",
+	"confirm_force_message":       "This wallet is actively managing orders. After taking this action, it will take a long time to resync your wallet, potentially causing orders to fail. Only take this action if absolutely necessary!",
+	"confirm":                     "Confirm",
+	"cancel":                      "Cancel",
 }

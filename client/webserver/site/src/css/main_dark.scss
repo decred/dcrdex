@@ -67,6 +67,10 @@ body.dark {
     &.selected {
       background-color: #0b5831;
     }
+
+    &.danger {
+      background-color: #c91e1e;
+    }
   }
 
   select,

@@ -20,6 +20,7 @@ const (
 	WalletTraitLogFiler                             // The Wallet allows for downloading of a log file.
 	WalletTraitFeeRater                             // Wallet can provide a fee rate for non-critical transactions
 	WalletTraitAccelerator                          // This wallet can accelerate transactions using the CPFP technique
+	WalletTraitRecoverer                            // The wallet is an asset.Recoverer.
 )
 
 // IsRescanner tests if the WalletTrait has the WalletTraitRescanner bit set.
@@ -52,6 +53,12 @@ func (wt WalletTrait) IsAccelerator() bool {
 	return wt&WalletTraitAccelerator != 0
 }
 
+// IsRecoverer tests if the WalletTrait has the WalletTraitRecoverer bit set,
+// which indicates the wallet implements the Recoverer interface.
+func (wt WalletTrait) IsRecoverer() bool {
+	return wt&WalletTraitRecoverer != 0
+}
+
 // DetermineWalletTraits returns the WalletTrait bitset for the provided Wallet.
 func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(Rescanner); is {
@@ -68,6 +75,9 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	}
 	if _, is := w.(Accelerator); is {
 		t |= WalletTraitAccelerator
+	}
+	if _, is := w.(Recoverer); is {
+		t |= WalletTraitRecoverer
 	}
 	return t
 }
@@ -334,6 +344,16 @@ type Wallet interface {
 // Rescanner is a wallet implementation with rescan functionality.
 type Rescanner interface {
 	Rescan(ctx context.Context) error
+}
+
+// Recoverer is a wallet implementation with recover functionality.
+type Recoverer interface {
+	// GetRecoveryCfg returns information that will help the wallet get back to
+	// its previous state after it is recreated.
+	GetRecoveryCfg() (map[string]string, error)
+	// Move will move all wallet files to a backup directory so the wallet can
+	// be recreated.
+	Move(backupdir string) error
 }
 
 // Sender is a wallet that can send funds to an address, as opposed to

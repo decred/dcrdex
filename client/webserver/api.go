@@ -166,6 +166,33 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
+// apiRecoverWallet is the handler for the '/recoverwallet' API request. Commands
+// a recovery of the specified wallet.
+func (s *WebServer) apiRecoverWallet(w http.ResponseWriter, r *http.Request) {
+	var form struct {
+		AppPW   encode.PassBytes `json:"appPW"`
+		AssetID uint32           `json:"assetID"`
+		Force   bool             `json:"force"`
+	}
+	if !readPost(w, r, &form) {
+		return
+	}
+	status := s.core.WalletState(form.AssetID)
+	if status == nil {
+		s.writeAPIError(w, fmt.Errorf("no wallet for %d -> %s", form.AssetID, unbip(form.AssetID)))
+		return
+	}
+	err := s.core.RecoverWallet(form.AssetID, form.AppPW, form.Force)
+	if err != nil {
+		// NOTE: client may check for code activeOrdersErr to prompt for
+		// override the active orders safety check.
+		s.writeAPIError(w, fmt.Errorf("error recovering %s wallet: %w", unbip(form.AssetID), err))
+		return
+	}
+
+	writeJSON(w, simpleAck(), s.indent)
+}
+
 // apiRescanWallet is the handler for the '/rescanwallet' API request. Commands
 // a rescan of the specified wallet.
 func (s *WebServer) apiRescanWallet(w http.ResponseWriter, r *http.Request) {
@@ -183,9 +210,7 @@ func (s *WebServer) apiRescanWallet(w http.ResponseWriter, r *http.Request) {
 	}
 	err := s.core.RescanWallet(form.AssetID, form.Force)
 	if err != nil {
-		// NOTE: client may may check for code activeOrdersErr to prompt for
-		// override the active orders safety check.
-		s.writeAPIError(w, fmt.Errorf("error unlocking %s wallet: %w", unbip(form.AssetID), err))
+		s.writeAPIError(w, fmt.Errorf("error rescanning %s wallet: %w", unbip(form.AssetID), err))
 		return
 	}
 

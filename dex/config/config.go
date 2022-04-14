@@ -62,3 +62,20 @@ func Unmapify(settings map[string]string, obj interface{}) error {
 	cfgData := Data(settings)
 	return ParseInto(cfgData, obj)
 }
+
+// Mapify takes an interface with ini tags, and parses it into
+// a settings map. obj must be a pointer to a struct.
+func Mapify(obj interface{}) (map[string]string, error) {
+	cfg := ini.Empty()
+	err := ini.ReflectFrom(cfg, obj)
+	if err != nil {
+		return nil, err
+	}
+	cfgKeyValues := make(map[string]string)
+	for _, section := range cfg.Sections() {
+		for _, key := range section.Keys() {
+			cfgKeyValues[key.Name()] = key.String()
+		}
+	}
+	return cfgKeyValues, nil
+}

@@ -212,6 +212,15 @@ func TestConfigParsing(t *testing.T) {
 			t.Fatalf("%s: expected parsed cfg key5 to have '%v', got '%v'", tt.name, tt.expect.parsedCfg.Key5,
 				parsedCfg.Key3)
 		}
+
+		mapifiedCfg, err := Mapify(tt.parsedCfg)
+		if err != nil {
+			t.Fatalf("%s: unexpected error from Mapify: %v", tt.name, err)
+		}
+
+		if len(mapifiedCfg) != 4 {
+			t.Fatalf("%s: expected all keys except ignored to be in map, but got %v", tt.name, len(mapifiedCfg))
+		}
 	}
 }
 

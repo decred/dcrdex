@@ -883,7 +883,7 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 		var orderStatusResults []*msgjson.OrderStatus
 		err := sendRequest(dc.WsConn, msgjson.OrderStatusRoute, orderStatusRequests, &orderStatusResults, DefaultResponseTimeout)
 		if err != nil {
-			dc.log.Errorf("Error retreiving order statuses from DEX %s: %v", dc.acct.host, err)
+			dc.log.Errorf("Error retrieving order statuses from DEX %s: %v", dc.acct.host, err)
 			return
 		}
 
@@ -1456,7 +1456,7 @@ func (c *Core) storeDepositAddress(wdbID []byte, addr string) error {
 	// Store the new address in the DB.
 	dbWallet, err := c.db.Wallet(wdbID)
 	if err != nil {
-		return fmt.Errorf("error retreiving DB wallet: %w", err)
+		return fmt.Errorf("error retrieving DB wallet: %w", err)
 	}
 	dbWallet.Address = addr
 	return c.db.UpdateWallet(dbWallet)
@@ -1875,6 +1875,13 @@ func (c *Core) assetDataDirectory(assetID uint32) string {
 	return filepath.Join(filepath.Dir(c.cfg.DBPath), "assetdb", unbip(assetID))
 }
 
+// assetDataBackupDirectory is a directory for a wallet to use for backups of
+// data. Wallet data is copied here instead of being deleted when recovering a
+// wallet.
+func (c *Core) assetDataBackupDirectory(assetID uint32) string {
+	return filepath.Join(filepath.Dir(c.cfg.DBPath), "assetdb-backup", unbip(assetID))
+}
+
 // loadWallet uses the data from the database to construct a new exchange
 // wallet. The returned wallet is running but not connected.
 func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
@@ -2045,6 +2052,123 @@ func (c *Core) RescanWallet(assetID uint32, force bool) error {
 
 	// Synchronization still running. Launch a status update goroutine.
 	c.startWalletSyncMonitor(wallet)
+
+	return nil
+}
+
+func (c *Core) removeWallet(assetID uint32) {
+	c.walletMtx.Lock()
+	defer c.walletMtx.Unlock()
+	delete(c.wallets, assetID)
+}
+
+// RecoverWallet will retrieve some recovery information from the wallet,
+// which may not be possible if the wallet is too corrupted, disconnect and
+// destroy the old wallet, create a new one, and if the recovery information
+// was retrieved from the old wallet, send this information to the new one.
+// If force is false, this will check for active orders involving this
+// asset before initiating a rescan. WARNING: It is ill-advised to initiate
+// a wallet recovery with active orders unless the wallet db is definitely
+// corrupted and even a rescan will not save it.
+//
+// DO NOT MAKE CONCURRENT CALLS TO THIS FUNCTION WITH THE SAME ASSET.
+func (c *Core) RecoverWallet(assetID uint32, appPW []byte, force bool) error {
+	crypter, err := c.encryptionKey(appPW)
+	if err != nil {
+		return newError(authErr, "RecoverWallet password error: %w", err)
+	}
+	defer crypter.Close()
+
+	if !force {
+		for _, dc := range c.dexConnections() {
+			if dc.hasActiveAssetOrders(assetID) {
+				return newError(activeOrdersErr, "active orders for %v", unbip(assetID))
+			}
+		}
+	}
+
+	oldWallet, found := c.wallet(assetID)
+	if !found {
+		return fmt.Errorf("RecoverWallet: wallet not found for %d -> %s: %w",
+			assetID, unbip(assetID), err)
+	}
+
+	recoverer, isRecoverer := oldWallet.Wallet.(asset.Recoverer)
+	if !isRecoverer {
+		return errors.New("wallet is not a recoverer")
+	}
+	walletDef, err := walletDefinition(assetID, oldWallet.walletType)
+	if err != nil {
+		return err
+	}
+	// Unseeded wallets shouldn't implement the Recoverer interface. This
+	// is just an additional check for safety.
+	if !walletDef.Seeded {
+		return fmt.Errorf("can only recover a seeded wallet")
+	}
+
+	dbWallet, err := c.db.Wallet(oldWallet.dbID)
+	if err != nil {
+		return fmt.Errorf("error retrieving DB wallet: %w", err)
+	}
+
+	seed, pw, err := c.assetSeedAndPass(assetID, crypter)
+	if err != nil {
+		return err
+	}
+	defer encode.ClearBytes(seed)
+	defer encode.ClearBytes(pw)
+
+	if recoveryCfg, err := recoverer.GetRecoveryCfg(); err != nil {
+		c.log.Errorf("RecoverWallet: unable to get recovery config: %v", err)
+	} else {
+		// merge recoveryCfg with dbWallet.Settings
+		for key, val := range recoveryCfg {
+			dbWallet.Settings[key] = val
+		}
+	}
+
+	// Before we pull the plug, remove the wallet from wallets map. Otherwise,
+	// connectedWallet would try to connect it.
+	c.removeWallet(assetID)
+	oldWallet.Disconnect() // wallet now shut down and w.hookedUp == false -> connected() returns false
+
+	if err = recoverer.Move(c.assetDataBackupDirectory(assetID)); err != nil {
+		return fmt.Errorf("failed to move wallet data to backup folder: %w", err)
+	}
+
+	if err = asset.CreateWallet(assetID, &asset.CreateWalletParams{
+		Type:     dbWallet.Type,
+		Seed:     seed,
+		Pass:     pw,
+		Settings: dbWallet.Settings,
+		DataDir:  c.assetDataDirectory(assetID),
+		Net:      c.net,
+		Logger:   c.log.SubLogger("CREATE"),
+	}); err != nil {
+		return fmt.Errorf("error creating wallet: %w", err)
+	}
+
+	newWallet, err := c.loadWallet(dbWallet)
+	if err != nil {
+		return newError(walletErr, "error loading wallet for %d -> %s: %w",
+			assetID, unbip(assetID), err)
+	}
+
+	_, err = c.connectWallet(newWallet)
+	if err != nil {
+		return err
+	}
+
+	c.updateAssetWalletRefs(newWallet)
+
+	err = newWallet.Unlock(crypter)
+	if err != nil {
+		return err
+	}
+
+	state := newWallet.state()
+	c.notify(newWalletStateNote(state))
 
 	return nil
 }
@@ -2330,24 +2454,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 		return newError(dbErr, "error saving wallet configuration: %w", err)
 	}
 
-	// Update all relevant trackedTrades' toWallet and fromWallet.
-	for _, dc := range c.dexConnections() {
-		dc.tradeMtx.RLock()
-		for _, tracker := range dc.trades {
-			tracker.mtx.Lock()
-			if tracker.wallets.fromWallet.AssetID == assetID {
-				tracker.wallets.fromWallet = wallet
-			} else if tracker.wallets.toWallet.AssetID == assetID {
-				tracker.wallets.toWallet = wallet
-			}
-			tracker.mtx.Unlock()
-		}
-		dc.tradeMtx.RUnlock()
-	}
-
-	c.walletMtx.Lock()
-	c.wallets[assetID] = wallet
-	c.walletMtx.Unlock()
+	c.updateAssetWalletRefs(wallet)
 
 	restartOnFail = false
 
@@ -2384,6 +2491,28 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 	}
 
 	return nil
+}
+
+// updateAssetWalletRefs sets all references of an asset's wallet to newWallet.
+func (c *Core) updateAssetWalletRefs(newWallet *xcWallet) {
+	assetID := newWallet.AssetID
+	for _, dc := range c.dexConnections() {
+		dc.tradeMtx.RLock()
+		for _, tracker := range dc.trades {
+			tracker.mtx.Lock()
+			if tracker.wallets.fromWallet.AssetID == assetID {
+				tracker.wallets.fromWallet = newWallet
+			} else if tracker.wallets.toWallet.AssetID == assetID {
+				tracker.wallets.toWallet = newWallet
+			}
+			tracker.mtx.Unlock()
+		}
+		dc.tradeMtx.RUnlock()
+	}
+
+	c.walletMtx.Lock()
+	c.wallets[assetID] = newWallet
+	c.walletMtx.Unlock()
 }
 
 // SetWalletPassword updates the (encrypted) password for the wallet. Returns
@@ -5114,7 +5243,7 @@ func (c *Core) loadDBTrades(dc *dexConnection, crypter encrypt.Crypter, failed m
 	// Parse the active trades and see if any wallets need unlocking.
 	trades, err := c.dbTrackers(dc)
 	if err != nil {
-		return nil, fmt.Errorf("error retreiving active matches: %w", err)
+		return nil, fmt.Errorf("error retrieving active matches: %w", err)
 	}
 
 	errs := newErrorSet(dc.acct.host + ": ")

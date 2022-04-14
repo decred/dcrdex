@@ -82,6 +82,7 @@ type clientCore interface {
 	CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error
 	OpenWallet(assetID uint32, pw []byte) error
 	RescanWallet(assetID uint32, force bool) error
+	RecoverWallet(assetID uint32, appPW []byte, force bool) error
 	CloseWallet(assetID uint32) error
 	ConnectWallet(assetID uint32) error
 	Wallets() []*core.WalletState
@@ -327,6 +328,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/closewallet", s.apiCloseWallet)
 			apiAuth.Post("/connectwallet", s.apiConnectWallet)
 			apiAuth.Post("/rescanwallet", s.apiRescanWallet)
+			apiAuth.Post("/recoverwallet", s.apiRecoverWallet)
 			apiAuth.Post("/trade", s.apiTrade)
 			apiAuth.Post("/cancel", s.apiCancel)
 			apiAuth.Post("/logout", s.apiLogout)

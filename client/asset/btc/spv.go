@@ -79,6 +79,8 @@ const (
 	defaultAcctName    = "default"
 )
 
+var wAddrMgrBkt = []byte("waddrmgr")
+
 // btcWallet is satisfied by *btcwallet.Wallet -> *walletExtender.
 type btcWallet interface {
 	PublishTransaction(tx *wire.MsgTx, label string) error
@@ -127,25 +129,43 @@ type neutrinoService interface {
 
 var _ neutrinoService = (*neutrino.ChainService)(nil)
 
+func extendAddresses(extIdx, intIdx uint32, btcw *wallet.Wallet) error {
+	scopedKeyManager, err := btcw.Manager.FetchScopedKeyManager(waddrmgr.KeyScopeBIP0084)
+	if err != nil {
+		return err
+	}
+
+	return walletdb.Update(btcw.Database(), func(dbtx walletdb.ReadWriteTx) error {
+		ns := dbtx.ReadWriteBucket(wAddrMgrBkt)
+		if extIdx > 0 {
+			scopedKeyManager.ExtendExternalAddresses(ns, defaultAcctNum, extIdx)
+		}
+		if intIdx > 0 {
+			scopedKeyManager.ExtendInternalAddresses(ns, defaultAcctNum, intIdx)
+		}
+		return nil
+	})
+}
+
 // createSPVWallet creates a new SPV wallet.
-func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string, log dex.Logger, net *chaincfg.Params) error {
+func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string, log dex.Logger, extIdx, intIdx uint32, net *chaincfg.Params) error {
 	netDir := filepath.Join(dbDir, net.Name)
 
 	if err := logNeutrino(netDir); err != nil {
-		return fmt.Errorf("error initializing btcwallet+neutrino logging: %v", err)
+		return fmt.Errorf("error initializing btcwallet+neutrino logging: %w", err)
 	}
 
 	logDir := filepath.Join(netDir, logDirName)
 	err := os.MkdirAll(logDir, 0744)
 	if err != nil {
-		return fmt.Errorf("error creating wallet directories: %v", err)
+		return fmt.Errorf("error creating wallet directories: %w", err)
 	}
 
 	loader := wallet.NewLoader(net, netDir, true, 60*time.Second, 250)
 
 	pubPass := []byte(wallet.InsecurePubPassphrase)
 
-	_, err = loader.CreateNewWallet(pubPass, privPass, seed, bday)
+	btcw, err := loader.CreateNewWallet(pubPass, privPass, seed, bday)
 	if err != nil {
 		return fmt.Errorf("CreateNewWallet error: %w", err)
 	}
@@ -156,11 +176,20 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string,
 		}
 	}
 
+	if extIdx > 0 || intIdx > 0 {
+		err = extendAddresses(extIdx, intIdx, btcw)
+		if err != nil {
+			bailOnWallet()
+			return fmt.Errorf("failed to set starting address indexes: %w", err)
+		}
+	}
+
+	// The chain service DB
 	neutrinoDBPath := filepath.Join(netDir, neutrinoDBName)
 	db, err := walletdb.Create("bdb", neutrinoDBPath, true, 5*time.Second)
 	if err != nil {
 		bailOnWallet()
-		return fmt.Errorf("unable to create wallet db at %q: %v", neutrinoDBPath, err)
+		return fmt.Errorf("unable to create neutrino db at %q: %w", neutrinoDBPath, err)
 	}
 	if err = db.Close(); err != nil {
 		bailOnWallet()
@@ -290,7 +319,6 @@ type spvWallet struct {
 	acctName             string
 	netDir               string
 	neutrinoDB           walletdb.DB
-	connectPeers         []string
 
 	txBlocksMtx sync.Mutex
 	txBlocks    map[chainhash.Hash]*hashEntry
@@ -314,7 +342,7 @@ var _ Wallet = (*spvWallet)(nil)
 var _ tipNotifier = (*spvWallet)(nil)
 
 // loadSPVWallet loads an existing wallet.
-func loadSPVWallet(dbDir string, logger dex.Logger, connectPeers []string, chainParams *chaincfg.Params, birthday time.Time, allowAutomaticRescan bool) *spvWallet {
+func loadSPVWallet(dbDir string, logger dex.Logger, chainParams *chaincfg.Params, birthday time.Time, allowAutomaticRescan bool) *spvWallet {
 	return &spvWallet{
 		chainParams:          chainParams,
 		acctNum:              defaultAcctNum,
@@ -323,7 +351,6 @@ func loadSPVWallet(dbDir string, logger dex.Logger, connectPeers []string, chain
 		txBlocks:             make(map[chainhash.Hash]*hashEntry),
 		checkpoints:          make(map[outPoint]*scanCheckpoint),
 		log:                  logger,
-		connectPeers:         connectPeers,
 		tipChan:              make(chan *block, 8),
 		allowAutomaticRescan: allowAutomaticRescan,
 		birthday:             birthday,
@@ -1169,15 +1196,14 @@ func (w *spvWallet) startWallet() error {
 	// mainet and testnet3, add a known reliable persistent peer to be used in
 	// addition to normal DNS seed-based peer discovery.
 	var addPeers []string
+	var connectPeers []string
 	switch w.chainParams.Net {
 	case wire.MainNet:
 		addPeers = []string{"cfilters.ssgen.io"}
 	case wire.TestNet3:
 		addPeers = []string{"dex-test.ssgen.io"}
 	case wire.TestNet, wire.SimNet: // plain "wire.TestNet" is regnet!
-		if len(w.connectPeers) == 0 {
-			w.connectPeers = []string{"localhost:20575"}
-		}
+		connectPeers = []string{"localhost:20575"}
 	}
 	w.log.Debug("Starting neutrino chain service...")
 	chainService, err := neutrino.NewChainService(neutrino.Config{
@@ -1186,7 +1212,7 @@ func (w *spvWallet) startWallet() error {
 		ChainParams:   *w.chainParams,
 		PersistToDisk: true, // keep cfilter headers on disk for efficient rescanning
 		AddPeers:      addPeers,
-		ConnectPeers:  w.connectPeers,
+		ConnectPeers:  connectPeers,
 		// WARNING: PublishTransaction currently uses the entire duration
 		// because if an external bug, but even if the resolved, a typical
 		// inv/getdata round trip is ~4 seconds, so we set this so neutrino does
@@ -1220,7 +1246,7 @@ func (w *spvWallet) startWallet() error {
 
 	if !oldBday.Equal(w.birthday) {
 		err = walletdb.Update(wdb, func(dbtx walletdb.ReadWriteTx) error {
-			ns := dbtx.ReadWriteBucket([]byte("waddrmgr"))
+			ns := dbtx.ReadWriteBucket(wAddrMgrBkt)
 			return btcw.Manager.SetBirthday(ns, w.birthday)
 		})
 		if err != nil {
@@ -1242,6 +1268,33 @@ func (w *spvWallet) startWallet() error {
 	btcw.SynchronizeRPC(w.chainClient)
 
 	return nil
+}
+
+// moveWalletData will move all wallet files to a backup directory.
+func (w *spvWallet) moveWalletData(backupDir string) error {
+	timeString := time.Now().Format("2006-01-02T15:04:05")
+	err := os.MkdirAll(backupDir, 0744)
+	if err != nil {
+		return err
+	}
+	backupFolder := filepath.Join(backupDir, timeString)
+	return os.Rename(w.netDir, backupFolder)
+}
+
+// numDerivedAddresses returns the number of internal and external addresses
+// that the wallet has derived.
+func (w *spvWallet) numDerivedAddresses() (internal, external uint32, err error) {
+	btcw, ok := w.loader.LoadedWallet()
+	if !ok {
+		return 0, 0, err
+	}
+
+	props, err := btcw.AccountProperties(waddrmgr.KeyScopeBIP0084, w.acctNum)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return props.InternalKeyCount, props.ExternalKeyCount, nil
 }
 
 // rescanWalletAsync initiates a full wallet recovery (used address discovery
@@ -1306,8 +1359,8 @@ func (w *spvWallet) forceRescan() {
 	}
 
 	err = walletdb.Update(wdb, func(dbtx walletdb.ReadWriteTx) error {
-		ns := dbtx.ReadWriteBucket([]byte("waddrmgr")) // it'll be fine
-		return btcw.Manager.SetSyncedTo(ns, nil)       // never synced, forcing recover from birthday
+		ns := dbtx.ReadWriteBucket(wAddrMgrBkt)  // it'll be fine
+		return btcw.Manager.SetSyncedTo(ns, nil) // never synced, forcing recover from birthday
 	})
 	if err != nil {
 		w.log.Errorf("Failed to reset wallet manager sync height: %v", err)

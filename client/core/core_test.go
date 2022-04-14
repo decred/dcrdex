@@ -6218,7 +6218,7 @@ func TestAssetBalance(t *testing.T) {
 	tWallet.bal = bal
 	walletBal, err := tCore.AssetBalance(tUTXOAssetA.ID)
 	if err != nil {
-		t.Fatalf("error retreiving asset balance: %v", err)
+		t.Fatalf("error retrieving asset balance: %v", err)
 	}
 	dbtest.MustCompareAssetBalances(t, "zero-conf", bal, &walletBal.Balance.Balance)
 	if walletBal.ContractLocked != 0 {
