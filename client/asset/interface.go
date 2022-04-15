@@ -514,9 +514,6 @@ type Redemption struct {
 	Spends *AuditInfo
 	// Secret is the secret key needed to satisfy the swap contract.
 	Secret dex.Bytes
-	// UnlockedReserves is the amount reserved for redemption for account-based
-	// assets.
-	UnlockedReserves uint64
 }
 
 // RedeemForm is a group of Redemptions. The struct will be

@@ -724,11 +724,6 @@ func TestRefund(t *testing.T) {
 					test.name, dexeth.GweiToWei(feeSuggestion), node.contractor.lastRefund.maxFeeRate)
 			}
 		}
-
-		if test.wantLocked > 0 && eth.lockedFunds.refundReserves != test.wantLocked {
-			t.Fatalf("%v: refund reserves %v != expected %v",
-				test.name, eth.lockedFunds.refundReserves, test.wantLocked)
-		}
 	}
 }
 
@@ -2520,7 +2515,6 @@ func TestRedemptionReserves(t *testing.T) {
 
 	var secretHash [32]byte
 	node.contractor.swapMap[secretHash] = &dexeth.SwapState{}
-	spentCoin := &coin{id: encode.RandomBytes(32)}
 
 	var maxFeeRateV0 uint64 = 45
 	gasesV0 := dexeth.VersionedGases[0]
@@ -2558,31 +2552,6 @@ func TestRedemptionReserves(t *testing.T) {
 	expLock += v1Lock
 	if eth.lockedFunds.redemptionReserves != expLock {
 		t.Fatalf("wrong v1 locked. wanted %d, got %d", expLock, eth.lockedFunds.redemptionReserves)
-	}
-
-	// Redeem two v0.
-	node.contractor.redeemTx = types.NewTx(&types.DynamicFeeTx{})
-	if _, _, _, err = eth.Redeem(&asset.RedeemForm{
-		Redemptions: []*asset.Redemption{{
-			Spends: &asset.AuditInfo{
-				Coin:     spentCoin,
-				Contract: dexeth.EncodeContractData(0, secretHash),
-			},
-			UnlockedReserves: lockPerV0,
-		}, {
-			Spends: &asset.AuditInfo{
-				Coin:     spentCoin,
-				Contract: dexeth.EncodeContractData(0, secretHash),
-			},
-			UnlockedReserves: lockPerV0,
-		}},
-	}); err != nil {
-		t.Fatalf("Redeem error: %v", err)
-	}
-
-	expLock -= lockPerV0 * 2
-	if eth.lockedFunds.redemptionReserves != expLock {
-		t.Fatalf("wrong unreserved. wanted %d, got %d", expLock, eth.lockedFunds.redemptionReserves)
 	}
 }
 

@@ -818,7 +818,7 @@ func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 	}
 
 	var contractVersion uint32 // require a consistent version since this is a single transaction
-	var redeemedValue, unlocked uint64
+	var redeemedValue uint64
 	for i, redemption := range form.Redemptions {
 		// NOTE: redemption.Spends.SecretHash is a dup of the hash extracted
 		// from redemption.Spends.Contract. Even for scriptable UTXO assets, the
@@ -855,7 +855,6 @@ func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 			return nil, nil, 0, fmt.Errorf("Redeem: error finding swap state: %w", err)
 		}
 		redeemedValue += swapData.Value
-		unlocked += redemption.UnlockedReserves
 	}
 
 	outputCoin := eth.createFundingCoin(redeemedValue)
@@ -867,8 +866,6 @@ func (eth *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 	if err != nil {
 		return fail(fmt.Errorf("Redeem: redeem error: %w", err))
 	}
-
-	eth.UnlockRedemptionReserves(unlocked)
 
 	txHash := tx.Hash()
 	txs := make([]dex.Bytes, len(form.Redemptions))
@@ -1172,12 +1169,6 @@ func (eth *ExchangeWallet) Refund(_, contract dex.Bytes, feeSuggestion uint64) (
 		return nil, fmt.Errorf("Refund: failed to decode contract: %w", err)
 	}
 
-	unlockFunds := func() {
-		eth.lockedFunds.mtx.Lock()
-		defer eth.lockedFunds.mtx.Unlock()
-		eth.unlockFunds(feeSuggestion*dexeth.RefundGas(version), refundReserve)
-	}
-
 	swap, err := eth.swap(eth.ctx, secretHash, version)
 	if err != nil {
 		return nil, err
@@ -1190,7 +1181,6 @@ func (eth *ExchangeWallet) Refund(_, contract dex.Bytes, feeSuggestion uint64) (
 		return nil, asset.ErrSwapNotInitiated
 	case dexeth.SSRefunded:
 		eth.log.Infof("Swap with secret hash %x already refunded.", secretHash)
-		unlockFunds()
 		zeroHash := common.Hash{}
 		return zeroHash[:], nil
 	case dexeth.SSRedeemed:
@@ -1211,8 +1201,6 @@ func (eth *ExchangeWallet) Refund(_, contract dex.Bytes, feeSuggestion uint64) (
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to call refund: %w", err)
 	}
-
-	unlockFunds()
 
 	txHash := tx.Hash()
 	return txHash[:], nil

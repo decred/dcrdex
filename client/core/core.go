@@ -5197,19 +5197,24 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 
 		tracker.wallets = wallets
 
-		lockMatchRedemption := func(match *matchTracker) {
+		// Find the least common multiplier to use as the denom for adding
+		// reserve fractions.
+		denom, marketMult, limitMult := lcm(uint64(len(tracker.matches)), tracker.Trade().Quantity)
+		var refundNum, redeemNum uint64
+
+		addMatchRedemption := func(match *matchTracker) {
 			if tracker.isMarketBuy() {
-				tracker.lockRedemptionFraction(1, uint64(len(tracker.matches)))
+				redeemNum += marketMult // * 1
 			} else {
-				tracker.lockRedemptionFraction(match.Quantity, trade.Quantity)
+				redeemNum += match.Quantity * limitMult
 			}
 		}
 
-		lockMatchRefund := func(match *matchTracker) {
+		addMatchRefund := func(match *matchTracker) {
 			if tracker.isMarketBuy() {
-				tracker.lockRefundFraction(1, uint64(len(tracker.matches)))
+				refundNum += marketMult // * 1
 			} else {
-				tracker.lockRefundFraction(match.Quantity, trade.Quantity)
+				refundNum += match.Quantity * limitMult
 			}
 		}
 
@@ -5229,8 +5234,8 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 					counterSwap = match.MetaData.Proof.TakerSwap
 				}
 				if match.Status < order.MakerRedeemed {
-					lockMatchRedemption(match)
-					lockMatchRefund(match)
+					addMatchRedemption(match)
+					addMatchRefund(match)
 				}
 			} else { // Taker
 				if match.Status < order.TakerSwapCast {
@@ -5241,10 +5246,10 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 					counterSwap = match.MetaData.Proof.MakerSwap
 				}
 				if match.Status < order.MakerRedeemed {
-					lockMatchRefund(match)
+					addMatchRefund(match)
 				}
 				if match.Status < order.MatchComplete {
-					lockMatchRedemption(match)
+					addMatchRedemption(match)
 				}
 			}
 			c.log.Tracef("Trade %v match %v needs coins = %v, needs audit info = %v",
@@ -5313,6 +5318,13 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				match.counterSwap = auditInfo
 				continue
 			}
+		}
+
+		if refundNum != 0 {
+			tracker.lockRefundFraction(refundNum, denom)
+		}
+		if redeemNum != 0 {
+			tracker.lockRedemptionFraction(redeemNum, denom)
 		}
 
 		// Active orders and orders with matches with unsent swaps need funding
@@ -5984,10 +5996,14 @@ func (c *Core) listen(dc *dexConnection) {
 			for _, trade := range doneTrades {
 				// Log an error if redemption funds are still reserved.
 				trade.mtx.RLock()
-				reserved := trade.redemptionLocked
+				redeemLocked := trade.redemptionLocked
+				refundLocked := trade.refundLocked
 				trade.mtx.RUnlock()
-				if reserved > 0 {
-					dc.log.Errorf("retiring order %s with %d > 0 redemption funds reserved", trade.ID(), reserved)
+				if redeemLocked > 0 {
+					dc.log.Errorf("retiring order %s with %d > 0 redemption funds locked", trade.ID(), redeemLocked)
+				}
+				if refundLocked > 0 {
+					dc.log.Errorf("retiring order %s with %d > 0 refund funds locked", trade.ID(), refundLocked)
 				}
 
 				c.notify(newOrderNote(TopicOrderRetired, "", "", db.Data, trade.coreOrder()))
