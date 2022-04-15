@@ -3193,40 +3193,35 @@ func (dcr *ExchangeWallet) mainchainAncestor(ctx context.Context, blockHash *cha
 	}
 }
 
-// blockHeader returns the *BlockHeader for the specified block hash, and a
-// validity bool indicating true when the block has not been stake-invalidated.
-// validity will always be false if mainchain is false.
-func (dcr *ExchangeWallet) blockHeader(ctx context.Context, blockHash *chainhash.Hash) (blockHeader *BlockHeader, valid, mainchain bool, err error) {
+// blockHeader returns the *BlockHeader for the specified block hash, and bools
+// indicating if the block is mainchain, and approved by stakeholders.
+// validMainchain will always be false if mainchain is false; mainchain can be
+// true for an invalidated block.
+func (dcr *ExchangeWallet) blockHeader(ctx context.Context, blockHash *chainhash.Hash) (blockHeader *BlockHeader, mainchain, validMainchain bool, err error) {
 	blockHeader, err = dcr.wallet.GetBlockHeader(ctx, blockHash)
 	if err != nil {
 		return nil, false, false, fmt.Errorf("GetBlockHeader error for block %s: %w", blockHash, err)
 	}
-
-	checkHash, err := dcr.wallet.GetBlockHash(ctx, int64(blockHeader.Height))
-	if err != nil {
-		return nil, false, false, fmt.Errorf("error retreiving block hash: %w", err)
-	}
-
-	if blockHash != checkHash {
+	if blockHeader.Confirmations < 0 { // not mainchain, really just == -1, but catch all unexpected
+		dcr.log.Warnf("Block %v is a SIDE CHAIN block at height %d!", blockHash, blockHeader.Height)
 		return blockHeader, false, false, nil
 	}
 
-	// Check if there is a validating block
-	nextHash, err := dcr.wallet.GetBlockHash(ctx, int64(blockHeader.Height+1))
-	if err != nil {
-		if strings.Contains(err.Error(), "item does not exist") { // Assume we are the tip
-			return blockHeader, true, true, nil
-		}
-		return nil, false, false, err
+	// It's mainchain. Now check if there is a validating block.
+	if blockHeader.NextHash == nil { // we're at the tip
+		return blockHeader, true, true, nil
 	}
 
-	nextHeader, err := dcr.wallet.GetBlockHeader(ctx, nextHash)
+	nextHeader, err := dcr.wallet.GetBlockHeader(ctx, blockHeader.NextHash)
 	if err != nil {
 		return nil, false, false, fmt.Errorf("error fetching validating block: %w", err)
 	}
 
-	validated := nextHeader.VoteBits&1 != 0
-	return blockHeader, validated, true, nil
+	validMainchain = nextHeader.VoteBits&1 != 0
+	if !validMainchain {
+		dcr.log.Warnf("Block %v found in mainchain, but stakeholder DISAPPROVED!", blockHash)
+	}
+	return blockHeader, true, validMainchain, nil
 }
 
 func (dcr *ExchangeWallet) cachedBestBlock() block {

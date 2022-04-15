@@ -116,7 +116,7 @@ func (dcr *ExchangeWallet) externalTxOutput(ctx context.Context, op outPoint, pk
 
 // txBlockFromCache returns the block containing this tx if it's known and
 // still part of the mainchain. It is not an error if the block is unknown
-// or invalidated.
+// or invalidated (must check for a nil *block).
 // The tx.blockMtx MUST be locked for writing.
 func (dcr *ExchangeWallet) txBlockFromCache(ctx context.Context, tx *externalTx) (*block, error) {
 	if tx.block == nil {
@@ -128,7 +128,7 @@ func (dcr *ExchangeWallet) txBlockFromCache(ctx context.Context, tx *externalTx)
 		return nil, err
 	}
 
-	if txBlockStillValid {
+	if txBlockStillValid { // both mainchain and not disapproved
 		dcr.log.Debugf("Cached tx %s is mined in block %d (%s).", tx.hash, tx.block.height, tx.block.hash)
 		return tx.block, nil
 	}
@@ -136,7 +136,8 @@ func (dcr *ExchangeWallet) txBlockFromCache(ctx context.Context, tx *externalTx)
 	// Tx block was previously set but seems to have been invalidated.
 	// Clear the tx tree, outputs and block info fields that must have
 	// been previously set.
-	dcr.log.Warnf("Block %s found to contain tx %s has been invalidated.", tx.block.hash, tx.hash)
+	dcr.log.Warnf("Block %s previously found to contain tx %s "+
+		"has been orphaned or disapproved by stakeholders.", tx.block.hash, tx.hash)
 	tx.block = nil
 	tx.tree = -1
 	tx.outputSpenders = nil
@@ -270,7 +271,7 @@ func (dcr *ExchangeWallet) findTxInBlock(ctx context.Context, txHash chainhash.H
 	}
 	for _, tx := range append(blk.Transactions, blk.STransactions...) {
 		if tx.TxHash() == txHash {
-			continue // orignal tx, ignore
+			continue // original tx, ignore
 		}
 		for _, txIn := range tx.TxIn {
 			if txIn.PreviousOutPoint.Hash == txHash { // found a spender
@@ -298,13 +299,14 @@ func (dcr *ExchangeWallet) isOutputSpent(ctx context.Context, output *outputSpen
 		if err != nil {
 			return false, err
 		}
-		if spenderBlockStillValid {
+		if spenderBlockStillValid { // both mainchain and not disapproved
 			dcr.log.Debugf("Found cached information for the spender of %s.", output.op)
 			return true, nil
 		}
 		// Output was previously found to have been spent but the block
 		// containing the spending tx seems to have been invalidated.
-		dcr.log.Warnf("Block %s found to contain spender of output %s has been invalidated.",
+		dcr.log.Warnf("Block %s previously found to contain spender of output %s "+
+			"has been orphaned or disapproved by stakeholders.",
 			output.spenderBlock.hash, output.op)
 		output.spenderBlock = nil
 	}

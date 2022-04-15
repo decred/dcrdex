@@ -392,9 +392,11 @@ func (c *tRPCClient) GetBlockHeaderVerbose(_ context.Context, blockHash *chainha
 		return nil, fmt.Errorf("no test block header found for %s", blockHash)
 	}
 	return &chainjson.GetBlockHeaderVerboseResult{
-		Height:       hdr.Height,
-		Hash:         blockHash.String(),
-		PreviousHash: hdr.PrevBlock.String(),
+		Height:        hdr.Height,
+		Hash:          blockHash.String(),
+		PreviousHash:  hdr.PrevBlock.String(),
+		Confirmations: 1,  // just not -1, which indicates side chain
+		NextHash:      "", // empty string signals that it is tip
 	}, nil
 }
 

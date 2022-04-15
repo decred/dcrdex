@@ -534,9 +534,19 @@ func (w *rpcWallet) GetBlockHeader(ctx context.Context, blockHash *chainhash.Has
 	if err != nil {
 		return nil, err
 	}
+	var nextHash *chainhash.Hash
+	if verboseHdr.NextHash != "" {
+		nextHash, err = chainhash.NewHashFromStr(verboseHdr.NextHash)
+		if err != nil {
+			return nil, fmt.Errorf("invalid next block hash %v: %w",
+				verboseHdr.NextHash, err)
+		}
+	}
 	return &BlockHeader{
-		BlockHeader: hdr,
-		MedianTime:  verboseHdr.MedianTime,
+		BlockHeader:   hdr,
+		MedianTime:    verboseHdr.MedianTime,
+		Confirmations: verboseHdr.Confirmations,
+		NextHash:      nextHash,
 	}, nil
 }
 
