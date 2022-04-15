@@ -50,7 +50,9 @@ type TipChangeCallback func(*chainhash.Hash, int64, error)
 // BlockHeader.
 type BlockHeader struct {
 	*wire.BlockHeader
-	MedianTime int64
+	MedianTime    int64
+	Confirmations int64
+	NextHash      *chainhash.Hash
 }
 
 // Wallet defines methods that the ExchangeWallet uses for communicating with
