@@ -326,7 +326,7 @@ func TestSemVerParsing(t *testing.T) {
 	}}
 
 	for _, test := range tests {
-		major, minor, patch, pre, build, err := parseSemVer(test.ver)
+		major, minor, patch, pre, build, err := ParseSemVer(test.ver)
 		if test.invalid && err == nil {
 			t.Errorf("%q: did not receive expected error", test.ver)
 			continue
