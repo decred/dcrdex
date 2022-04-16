@@ -3163,7 +3163,7 @@ func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
 		return totalSize
 	}
 
-	loadTxsIntoNode := func(txs []*wire.MsgTx, fees []float64, confs []uint64, node *testData, t *testing.T) {
+	loadTxsIntoNode := func(txs []*wire.MsgTx, fees []float64, confs []uint64, node *testData, withinTimeLimit bool, t *testing.T) {
 		t.Helper()
 		if len(txs) != len(fees) || len(txs) != len(confs) {
 			t.Fatalf("len(txs) = %d, len(fees) = %d, len(confs) = %d", len(txs), len(fees), len(confs))
@@ -3178,6 +3178,7 @@ func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
 			serializedTxs = append(serializedTxs, serializedTx)
 		}
 
+		currentTime := time.Now().Unix()
 		for i := range txs {
 			var blockHash string
 			if confs[i] == 1 {
@@ -3189,6 +3190,12 @@ func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
 				BlockHash:     blockHash,
 				Fee:           fees[i],
 				Confirmations: confs[i]}
+
+			if withinTimeLimit {
+				node.getTransactionMap[txs[i].TxHash().String()].Time = uint64(currentTime) - minTimeBeforeAcceleration + 3
+			} else {
+				node.getTransactionMap[txs[i].TxHash().String()].Time = uint64(currentTime) - minTimeBeforeAcceleration - 1000
+			}
 		}
 	}
 
@@ -3427,6 +3434,7 @@ func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
 		confs                     []uint64
 		requiredForRemainingSwaps uint64
 		expectChangeLocked        bool
+		txTimeWithinLimit         bool
 
 		// needed to test AccelerateOrder and AccelerationEstimate
 		expectAccelerateOrderErr      bool
@@ -3635,6 +3643,18 @@ func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
 				},
 			},
 		},
+		{
+			name:                          "tx time within limit",
+			txTimeWithinLimit:             true,
+			changeAmount:                  int64(expectedFees),
+			fees:                          []float64{0.00002, 0.000005, 0.00001, 0.00001},
+			confs:                         confs,
+			newFeeRate:                    50,
+			suggestedFeeRate:              30,
+			expectAccelerationEstimateErr: true,
+			expectAccelerateOrderErr:      true,
+			expectPreAccelerateErr:        true,
+		},
 	}
 
 	for _, test := range tests {
@@ -3663,7 +3683,7 @@ func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
 			addUTXOToNode(utxo.confs, segwit, utxo.amount, node)
 		}
 
-		loadTxsIntoNode(txs, test.fees, test.confs, node, t)
+		loadTxsIntoNode(txs, test.fees, test.confs, node, test.txTimeWithinLimit, t)
 
 		testAccelerateOrder := func() {
 			change, txID, err := wallet.AccelerateOrder(swapCoins, accelerations, changeCoin, test.requiredForRemainingSwaps, test.newFeeRate)
@@ -3830,5 +3850,120 @@ func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
 			}
 		}
 		testPreAccelerate()
+	}
+}
+
+func TestTooEarlyToAcceelrate(t *testing.T) {
+	tests := []struct {
+		name                      string
+		confirmations             []uint64
+		isAcceleration            []bool
+		secondsBeforeNow          []uint64
+		expectTooEarly            bool
+		expectMinTimeToAccelerate int64 // seconds from now +-1
+		expectError               bool
+	}{
+		{
+			name:           "all confirmed",
+			confirmations:  []uint64{2, 2, 1, 1},
+			isAcceleration: []bool{false, true, false, true},
+			secondsBeforeNow: []uint64{
+				minTimeBeforeAcceleration + 1000,
+				minTimeBeforeAcceleration + 800,
+				minTimeBeforeAcceleration + 500,
+				minTimeBeforeAcceleration + 300,
+			},
+			expectError: true,
+		},
+		{
+			name:           "no accelerations, not too early",
+			confirmations:  []uint64{2, 2, 0, 0},
+			isAcceleration: []bool{false, false, false, false},
+			secondsBeforeNow: []uint64{
+				minTimeBeforeAcceleration + 1000,
+				minTimeBeforeAcceleration + 800,
+				minTimeBeforeAcceleration + 500,
+				minTimeBeforeAcceleration + 300,
+			},
+			expectTooEarly:            false,
+			expectMinTimeToAccelerate: -500,
+		},
+		{
+			name:           "acceleration after unconfirmed, not too early",
+			confirmations:  []uint64{2, 2, 0, 0},
+			isAcceleration: []bool{false, false, false, true},
+			secondsBeforeNow: []uint64{
+				minTimeBeforeAcceleration + 1000,
+				minTimeBeforeAcceleration + 800,
+				minTimeBeforeAcceleration + 500,
+				minTimeBeforeAcceleration + 300,
+			},
+			expectTooEarly:            false,
+			expectMinTimeToAccelerate: -300,
+		},
+		{
+			name:           "no accelerations, too early",
+			confirmations:  []uint64{2, 2, 0, 0},
+			isAcceleration: []bool{false, false, false, false},
+			secondsBeforeNow: []uint64{
+				minTimeBeforeAcceleration + 1000,
+				minTimeBeforeAcceleration + 800,
+				minTimeBeforeAcceleration - 300,
+				minTimeBeforeAcceleration - 500,
+			},
+			expectTooEarly:            true,
+			expectMinTimeToAccelerate: 300,
+		},
+		{
+			name:           "acceleration after unconfirmed, too early",
+			confirmations:  []uint64{2, 2, 0, 0},
+			isAcceleration: []bool{false, false, false, true},
+			secondsBeforeNow: []uint64{
+				minTimeBeforeAcceleration + 1000,
+				minTimeBeforeAcceleration + 800,
+				minTimeBeforeAcceleration + 500,
+				minTimeBeforeAcceleration - 300,
+			},
+			expectTooEarly:            true,
+			expectMinTimeToAccelerate: 300,
+		},
+	}
+
+	for _, test := range tests {
+		sortedTxChain := make([]*GetTransactionResult, 0, len(test.confirmations))
+		accelerationCoins := make([]dex.Bytes, 0, len(test.confirmations))
+		now := time.Now().Unix()
+		for i, confs := range test.confirmations {
+			var txHash chainhash.Hash
+			copy(txHash[:], encode.RandomBytes(32))
+			if test.isAcceleration[i] {
+				accelerationCoins = append(accelerationCoins, toCoinID(&txHash, 0))
+			}
+			sortedTxChain = append(sortedTxChain, &GetTransactionResult{
+				TxID:          txHash.String(),
+				Confirmations: confs,
+				Time:          uint64(now) - test.secondsBeforeNow[i],
+			})
+		}
+		tooEarly, minTimeToAccelerate, err := tooEarlyToAccelerate(sortedTxChain, accelerationCoins)
+		if test.expectError {
+			if err == nil {
+				t.Fatalf("%s: expected error but did not get", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", test.name, err)
+		}
+
+		if tooEarly != test.expectTooEarly {
+			t.Fatalf("%s: too early expected: %v, got %v", test.name, test.expectTooEarly, tooEarly)
+		}
+
+		if minTimeToAccelerate > uint64(now+test.expectMinTimeToAccelerate+1) ||
+			minTimeToAccelerate < uint64(now+test.expectMinTimeToAccelerate-1) {
+			t.Fatalf("%s: min time to accelerate expected: %v, got %v",
+				test.name, test.expectMinTimeToAccelerate, minTimeToAccelerate)
+		}
 	}
 }

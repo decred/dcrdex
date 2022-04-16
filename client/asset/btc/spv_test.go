@@ -251,7 +251,8 @@ func (c *tBtcWallet) walletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetail
 	}
 	return &wtxmgr.TxDetails{
 		TxRecord: wtxmgr.TxRecord{
-			MsgTx: *tx,
+			MsgTx:    *tx,
+			Received: time.Unix(int64(txData.Time), 0),
 		},
 		Block: wtxmgr.BlockMeta{
 			Block: wtxmgr.Block{

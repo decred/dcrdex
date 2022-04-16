@@ -72,6 +72,10 @@ const (
 	redeemFeeBumpFee = "redeemfeebump"
 )
 
+const (
+	minTimeBeforeAcceleration uint64 = 3600 // 1 hour
+)
+
 var (
 	// ContractSearchLimit is how far back in time AuditContract in SPV mode
 	// will search for a contract if no txData is provided. This should be a
@@ -586,6 +590,7 @@ type baseWallet struct {
 	estimateFee       func(RawRequester, uint64) (uint64, error) // TODO: resolve the awkwardness of an RPC-oriented func in a generic framework
 	decodeAddr        dexbtc.AddressDecoder
 	stringAddr        dexbtc.AddressStringer
+	net               dex.Network
 
 	tipMtx     sync.RWMutex
 	currentTip *block
@@ -856,6 +861,7 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		decodeAddr:          addrDecoder,
 		stringAddr:          addrStringer,
 		walletInfo:          cfg.WalletInfo,
+		net:                 cfg.Network,
 	}
 
 	if w.estimateFee == nil {
@@ -1931,6 +1937,8 @@ func (btc *baseWallet) fundedTx(coins asset.Coins) (*wire.MsgTx, uint64, []outPo
 // an average fee rate of newFeeRate. requiredForRemainingSwaps is passed
 // in to ensure that the new change coin will have enough funds to initiate
 // the additional swaps that will be required to complete the order.
+//
+// The returned change coin may be nil, and should be checked before use.
 func (btc *baseWallet) AccelerateOrder(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, newFeeRate uint64) (asset.Coin, string, error) {
 	btc.fundingMtx.Lock()
 	defer btc.fundingMtx.Unlock()
@@ -1990,6 +1998,43 @@ func (btc *baseWallet) AccelerationEstimate(swapCoins, accelerationCoins []dex.B
 	return fee, nil
 }
 
+// tooEarlyChecks returns true if minTimeBeforeAcceleration has not passed
+// since either the earliest unconfirmed transaction in the chain, or the
+// latest acceleration transaction. It also returns the minimum time when
+// the user can do an acceleration.
+func tooEarlyToAccelerate(sortedTxChain []*GetTransactionResult, accelerationCoins []dex.Bytes) (bool, uint64, error) {
+	accelerationTxs := make(map[string]bool, len(accelerationCoins))
+	for _, accelerationCoin := range accelerationCoins {
+		txHash, _, err := decodeCoinID(accelerationCoin)
+		if err != nil {
+			return false, 0, err
+		}
+		accelerationTxs[txHash.String()] = true
+	}
+
+	var timeToCompare uint64
+	for _, tx := range sortedTxChain {
+		if tx.Confirmations > 0 {
+			continue
+		}
+		if timeToCompare == 0 {
+			timeToCompare = tx.Time
+			continue
+		}
+		if accelerationTxs[tx.TxID] {
+			timeToCompare = tx.Time
+		}
+	}
+
+	if timeToCompare == 0 {
+		return false, 0, fmt.Errorf("no need to accelerate because all tx are confirmed")
+	}
+
+	currentTime := uint64(time.Now().Unix())
+	minAccelerationTime := timeToCompare + minTimeBeforeAcceleration
+	return minAccelerationTime > currentTime, minAccelerationTime, nil
+}
+
 // PreAccelerate returns the current average fee rate of the unmined swap
 // initiation and acceleration transactions, and also returns a suggested
 // range that the fee rate should be increased to in order to expedite mining.
@@ -2003,12 +2048,9 @@ func (btc *baseWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, c
 		return makeError(err)
 	}
 
-	can, err := btc.changeCanBeAccelerated(changeTxHash, changeVout, requiredForRemainingSwaps)
+	err = btc.changeCanBeAccelerated(changeTxHash, changeVout, requiredForRemainingSwaps)
 	if err != nil {
 		return makeError(err)
-	}
-	if !can {
-		return makeError(errors.New("change cannot be accelerated"))
 	}
 
 	sortedTxChain, err := btc.sortedTxChain(swapCoins, accelerationCoins, changeCoin)
@@ -2029,11 +2071,36 @@ func (btc *baseWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, c
 		swapTxsSize += dexbtc.MsgTxVBytes(msgTx)
 	}
 
+	// Is it safe to assume that transactions will all have some fee?
+	if feesAlreadyPaid == 0 {
+		return makeError(fmt.Errorf("all transactions are already confirmed, no need to accelerate"))
+	}
+
+	if btc.net != dex.Simnet {
+		tooEarly, minAccelerationTime, err := tooEarlyToAccelerate(sortedTxChain, accelerationCoins)
+		if err != nil {
+			return makeError(err)
+		}
+		if tooEarly {
+			minLocalTime := time.Unix(int64(minAccelerationTime), 0).Local()
+			return makeError(fmt.Errorf("cannot accelerate until %v", minLocalTime))
+		}
+	}
+
 	btc.fundingMtx.RLock()
 	utxos, _, utxosVal, err := btc.spendableUTXOs(1)
 	btc.fundingMtx.RUnlock()
 	if err != nil {
 		return makeError(err)
+	}
+
+	// This is to avoid having too many inputs, and causing an error during signing
+	if len(utxos) > 500 {
+		utxos = utxos[len(utxos)-500:]
+		utxosVal = 0
+		for _, utxo := range utxos {
+			utxosVal += utxo.amount
+		}
 	}
 
 	var coins asset.Coins
@@ -2111,12 +2178,9 @@ func (btc *baseWallet) signedAccelerationTx(swapCoins, accelerationCoins []dex.B
 		return makeError(err)
 	}
 
-	can, err := btc.changeCanBeAccelerated(changeTxHash, changeVout, requiredForRemainingSwaps)
+	err = btc.changeCanBeAccelerated(changeTxHash, changeVout, requiredForRemainingSwaps)
 	if err != nil {
 		return makeError(err)
-	}
-	if !can {
-		return makeError(errors.New("change cannot be accelerated"))
 	}
 
 	sortedTxChain, err := btc.sortedTxChain(swapCoins, accelerationCoins, changeCoin)
@@ -2126,12 +2190,27 @@ func (btc *baseWallet) signedAccelerationTx(swapCoins, accelerationCoins []dex.B
 
 	changeOutput, err := btc.lookupOutput(changeTxHash, changeVout)
 	if err != nil {
-		return makeError(nil)
+		return makeError(err)
 	}
 
 	additionalFeesRequired, err := btc.additionalFeesRequired(sortedTxChain, newFeeRate)
 	if err != nil {
 		return makeError(err)
+	}
+
+	if additionalFeesRequired <= 0 {
+		return makeError(fmt.Errorf("no additional fees are required to move the fee rate to %v", newFeeRate))
+	}
+
+	if btc.net != dex.Simnet {
+		tooEarly, minAccelerationTime, err := tooEarlyToAccelerate(sortedTxChain, accelerationCoins)
+		if err != nil {
+			return makeError(err)
+		}
+		if tooEarly {
+			minLocalTime := time.Unix(int64(minAccelerationTime), 0).Local()
+			return makeError(fmt.Errorf("cannot accelerate until %v", minLocalTime))
+		}
 	}
 
 	txSize := dexbtc.MinimumTxOverhead
@@ -2213,8 +2292,8 @@ func (btc *baseWallet) lookupOutput(txHash *chainhash.Hash, vout uint32) (*outpu
 		return nil, err
 	}
 	if len(tx.TxOut) <= int(vout) {
-		return nil, fmt.Errorf("txId %x only has %d outputs. tried to access index %d",
-			&txHash, len(tx.TxOut), vout)
+		return nil, fmt.Errorf("txId %s only has %d outputs. tried to access index %d",
+			txHash, len(tx.TxOut), vout)
 	}
 
 	value := tx.TxOut[vout].Value
@@ -2223,10 +2302,10 @@ func (btc *baseWallet) lookupOutput(txHash *chainhash.Hash, vout uint32) (*outpu
 
 // changeCanBeAccelerated returns whether or not the change output can be
 // accelerated.
-func (btc *baseWallet) changeCanBeAccelerated(changeTxHash *chainhash.Hash, changeVout uint32, requiredForRemainingSwaps uint64) (bool, error) {
+func (btc *baseWallet) changeCanBeAccelerated(changeTxHash *chainhash.Hash, changeVout uint32, requiredForRemainingSwaps uint64) error {
 	lockedUtxos, err := btc.node.listLockUnspent()
 	if err != nil {
-		return false, err
+		return err
 	}
 
 	var changeIsLocked bool
@@ -2238,14 +2317,13 @@ func (btc *baseWallet) changeCanBeAccelerated(changeTxHash *chainhash.Hash, chan
 	}
 
 	if changeIsLocked && requiredForRemainingSwaps == 0 {
-		btc.log.Error("change cannot be accelerated because it is locked by another order")
-		return false, nil
+		return errors.New("change cannot be accelerated because it is locked by another order")
 	}
 
 	if !changeIsLocked {
 		utxos, err := btc.node.listUnspent()
 		if err != nil {
-			return false, err
+			return err
 		}
 
 		var changeIsUnspent bool
@@ -2257,12 +2335,11 @@ func (btc *baseWallet) changeCanBeAccelerated(changeTxHash *chainhash.Hash, chan
 		}
 
 		if !changeIsUnspent {
-			btc.log.Error("change cannot be accelerated because it has already been spent")
-			return false, nil
+			return errors.New("change cannot be accelerated because it has already been spent")
 		}
 	}
 
-	return true, nil
+	return nil
 }
 
 // sortedTxChain takes a list of swap coins, acceleration tx IDs, and a change

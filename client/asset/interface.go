@@ -380,7 +380,9 @@ type Accelerator interface {
 	// have an average fee rate of newFeeRate. requiredForRemainingSwaps is
 	// passed in to ensure that the new change coin will have enough funds to
 	// initiate the additional swaps that will be required to complete the
-	//  order.
+	// order.
+	//
+	// The returned change coin may be nil, and should be checked before use.
 	AccelerateOrder(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, newFeeRate uint64) (Coin, string, error)
 	// AccelerationEstimate takes the same parameters as AccelerateOrder, but
 	// instead of broadcasting the acceleration transaction, it just returns
