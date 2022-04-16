@@ -2002,7 +2002,7 @@ func (btc *baseWallet) AccelerationEstimate(swapCoins, accelerationCoins []dex.B
 // since either the earliest unconfirmed transaction in the chain, or the
 // latest acceleration transaction. It also returns the minimum time when
 // the user can do an acceleration.
-func tooEarlyToAccelerate(sortedTxChain []*GetTransactionResult, accelerationCoins []dex.Bytes) (bool, uint64, error) {
+func tooEarlyToAccelerate(txs []*GetTransactionResult, accelerationCoins []dex.Bytes) (bool, uint64, error) {
 	accelerationTxs := make(map[string]bool, len(accelerationCoins))
 	for _, accelerationCoin := range accelerationCoins {
 		txHash, _, err := decodeCoinID(accelerationCoin)
@@ -2012,22 +2012,28 @@ func tooEarlyToAccelerate(sortedTxChain []*GetTransactionResult, accelerationCoi
 		accelerationTxs[txHash.String()] = true
 	}
 
-	var timeToCompare uint64
-	for _, tx := range sortedTxChain {
+	var latestAcceleration, earliestUnconfirmed uint64
+	for _, tx := range txs {
 		if tx.Confirmations > 0 {
 			continue
 		}
-		if timeToCompare == 0 {
-			timeToCompare = tx.Time
+		if accelerationTxs[tx.TxID] && tx.Time > latestAcceleration {
+			latestAcceleration = tx.Time
 			continue
 		}
-		if accelerationTxs[tx.TxID] {
-			timeToCompare = tx.Time
+		if earliestUnconfirmed == 0 || tx.Time < earliestUnconfirmed {
+			earliestUnconfirmed = tx.Time
 		}
 	}
-
-	if timeToCompare == 0 {
+	if latestAcceleration == 0 && earliestUnconfirmed == 0 {
 		return false, 0, fmt.Errorf("no need to accelerate because all tx are confirmed")
+	}
+
+	var timeToCompare uint64
+	if latestAcceleration != 0 {
+		timeToCompare = latestAcceleration
+	} else {
+		timeToCompare = earliestUnconfirmed
 	}
 
 	currentTime := uint64(time.Now().Unix())
@@ -2053,13 +2059,13 @@ func (btc *baseWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, c
 		return makeError(err)
 	}
 
-	sortedTxChain, err := btc.sortedTxChain(swapCoins, accelerationCoins, changeCoin)
+	txs, err := btc.getTransactions(append(swapCoins, accelerationCoins...))
 	if err != nil {
 		return makeError(fmt.Errorf("failed to sort swap chain: %w", err))
 	}
 
 	var swapTxsSize, feesAlreadyPaid uint64
-	for _, tx := range sortedTxChain {
+	for _, tx := range txs {
 		if tx.Confirmations > 0 {
 			continue
 		}
@@ -2077,7 +2083,7 @@ func (btc *baseWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, c
 	}
 
 	if btc.net != dex.Simnet {
-		tooEarly, minAccelerationTime, err := tooEarlyToAccelerate(sortedTxChain, accelerationCoins)
+		tooEarly, minAccelerationTime, err := tooEarlyToAccelerate(txs, accelerationCoins)
 		if err != nil {
 			return makeError(err)
 		}
@@ -2183,7 +2189,7 @@ func (btc *baseWallet) signedAccelerationTx(swapCoins, accelerationCoins []dex.B
 		return makeError(err)
 	}
 
-	sortedTxChain, err := btc.sortedTxChain(swapCoins, accelerationCoins, changeCoin)
+	txs, err := btc.getTransactions(append(swapCoins, accelerationCoins...))
 	if err != nil {
 		return makeError(fmt.Errorf("failed to sort swap chain: %w", err))
 	}
@@ -2193,7 +2199,7 @@ func (btc *baseWallet) signedAccelerationTx(swapCoins, accelerationCoins []dex.B
 		return makeError(err)
 	}
 
-	additionalFeesRequired, err := btc.additionalFeesRequired(sortedTxChain, newFeeRate)
+	additionalFeesRequired, err := btc.additionalFeesRequired(txs, newFeeRate)
 	if err != nil {
 		return makeError(err)
 	}
@@ -2203,7 +2209,7 @@ func (btc *baseWallet) signedAccelerationTx(swapCoins, accelerationCoins []dex.B
 	}
 
 	if btc.net != dex.Simnet {
-		tooEarly, minAccelerationTime, err := tooEarlyToAccelerate(sortedTxChain, accelerationCoins)
+		tooEarly, minAccelerationTime, err := tooEarlyToAccelerate(txs, accelerationCoins)
 		if err != nil {
 			return makeError(err)
 		}
@@ -2342,17 +2348,14 @@ func (btc *baseWallet) changeCanBeAccelerated(changeTxHash *chainhash.Hash, chan
 	return nil
 }
 
-// sortedTxChain takes a list of swap coins, acceleration tx IDs, and a change
-// coin, and returns a sorted list of transactions. An error is returned if a
-// sorted list of transactions that ends with a transaction containing the change
-// cannot be created using each of the swap coins and acceleration transactions.
-func (btc *baseWallet) sortedTxChain(swapCoins, accelerationCoins []dex.Bytes, change dex.Bytes) ([]*GetTransactionResult, error) {
-	txChain := make([]*GetTransactionResult, 0, len(swapCoins)+len(accelerationCoins))
-	if len(swapCoins) == 0 {
+// getTransactions retrieves the transactions that created coins.
+func (btc *baseWallet) getTransactions(coins []dex.Bytes) ([]*GetTransactionResult, error) {
+	txChain := make([]*GetTransactionResult, 0, len(coins))
+	if len(coins) == 0 {
 		return txChain, nil
 	}
 
-	for _, coinID := range swapCoins {
+	for _, coinID := range coins {
 		txHash, _, err := decodeCoinID(coinID)
 		if err != nil {
 			return nil, err
@@ -2362,85 +2365,6 @@ func (btc *baseWallet) sortedTxChain(swapCoins, accelerationCoins []dex.Bytes, c
 			return nil, err
 		}
 		txChain = append(txChain, getTxRes)
-	}
-
-	for _, coinID := range accelerationCoins {
-		txHash, _, err := decodeCoinID(coinID)
-		if err != nil {
-			return nil, err
-		}
-		getTxRes, err := btc.node.getWalletTransaction(txHash)
-		if err != nil {
-			return nil, err
-		}
-		txChain = append(txChain, getTxRes)
-	}
-
-	msgTxs := make(map[string]*wire.MsgTx, len(txChain))
-	for _, gtr := range txChain {
-		msgTx, err := msgTxFromBytes(gtr.Hex)
-		if err != nil {
-			return nil, err
-		}
-		msgTxs[gtr.TxID] = msgTx
-	}
-
-	changeTxHash, _, err := decodeCoinID(change)
-	if err != nil {
-		return nil, err
-	}
-
-	swap := func(i, j int) {
-		temp := txChain[j]
-		txChain[j] = txChain[i]
-		txChain[i] = temp
-	}
-
-	// sourcesOfTxInputs finds the transaction IDs that the inputs
-	// for a certain transaction come from. If all the transactions
-	// are from the same order, only the first transaction in
-	// the chain can have multiple inputs.
-	sourcesOfTxInputs := func(txID string) (map[string]bool, error) {
-		lastTx, found := msgTxs[txID]
-		if !found {
-			// this should never happen
-			return nil, fmt.Errorf("could not find tx with id: %v", txID)
-		}
-
-		inputSources := make(map[string]bool, len(lastTx.TxIn))
-		for _, in := range lastTx.TxIn {
-			inputSources[in.PreviousOutPoint.Hash.String()] = true
-		}
-		return inputSources, nil
-	}
-
-	// The last tx in the chain must have the same tx hash as the change.
-	for i, tx := range txChain {
-		if tx.TxID == changeTxHash.String() {
-			swap(i, len(txChain)-1)
-			break
-		}
-		if i == len(txChain)-1 {
-			return nil, fmt.Errorf("could not find tx containing change coin")
-		}
-	}
-
-	// We work backwards to find each element of the swap chain.
-	for i := len(txChain) - 2; i >= 0; i-- {
-		lastTxInputs, err := sourcesOfTxInputs(txChain[i+1].TxID)
-		if err != nil {
-			return nil, err
-		}
-
-		for j, getTxRes := range txChain {
-			if lastTxInputs[getTxRes.TxID] {
-				swap(i, j)
-				break
-			}
-			if j == len(txChain)-1 {
-				return nil, errors.New("could not find previous element of sorted chain")
-			}
-		}
 	}
 
 	return txChain, nil

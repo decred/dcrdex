@@ -3853,7 +3853,7 @@ func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
 	}
 }
 
-func TestTooEarlyToAcceelrate(t *testing.T) {
+func TestTooEarlyToAccelerate(t *testing.T) {
 	tests := []struct {
 		name                      string
 		confirmations             []uint64
@@ -3877,26 +3877,26 @@ func TestTooEarlyToAcceelrate(t *testing.T) {
 		},
 		{
 			name:           "no accelerations, not too early",
-			confirmations:  []uint64{2, 2, 0, 0},
+			confirmations:  []uint64{2, 0, 0, 2},
 			isAcceleration: []bool{false, false, false, false},
 			secondsBeforeNow: []uint64{
 				minTimeBeforeAcceleration + 1000,
-				minTimeBeforeAcceleration + 800,
 				minTimeBeforeAcceleration + 500,
 				minTimeBeforeAcceleration + 300,
+				minTimeBeforeAcceleration + 800,
 			},
 			expectTooEarly:            false,
 			expectMinTimeToAccelerate: -500,
 		},
 		{
 			name:           "acceleration after unconfirmed, not too early",
-			confirmations:  []uint64{2, 2, 0, 0},
-			isAcceleration: []bool{false, false, false, true},
+			confirmations:  []uint64{0, 2, 2, 0},
+			isAcceleration: []bool{true, false, false, false},
 			secondsBeforeNow: []uint64{
+				minTimeBeforeAcceleration + 300,
 				minTimeBeforeAcceleration + 1000,
 				minTimeBeforeAcceleration + 800,
 				minTimeBeforeAcceleration + 500,
-				minTimeBeforeAcceleration + 300,
 			},
 			expectTooEarly:            false,
 			expectMinTimeToAccelerate: -300,
