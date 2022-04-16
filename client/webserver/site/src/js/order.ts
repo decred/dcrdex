@@ -408,8 +408,8 @@ const CoinExplorers: Record<number, Record<number, (cid: string) => string>> = {
     }
   },
   0: { // btc
-    [Mainnet]: (cid: string) => `https://bitaps.com/${cid.split(':')[0]}`,
-    [Testnet]: (cid: string) => `https://tbtc.bitaps.com/${cid.split(':')[0]}`
+    [Mainnet]: (cid: string) => `https://mempool.space/tx/${cid.split(':')[0]}`,
+    [Testnet]: (cid: string) => `https://mempool.space/testnet/tx/${cid.split(':')[0]}`
   },
   2: { // ltc
     [Mainnet]: (cid: string) => `https://ltc.bitaps.com/${cid.split(':')[0]}`,
