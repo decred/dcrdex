@@ -64,7 +64,7 @@ var ZhCN = map[string]string{
 	"Epoch":                          "时间", // same as above, just capitalized
 	"Limit Order":                    "限价单",
 	"Market Order":                   "市价单",
-	"reg_status_msg":                 `为了切换到 <span id="regStatusDex"></span>，必须支付注册费 <span id="confReq"></span> 确认书。`,
+	"reg_status_msg":                 `为了切换到 <span id="regStatusDex" class="text-break"></span>，必须支付注册费 <span id="confReq"></span> 确认书。`,
 	"Buy":                            "买",
 	"Sell":                           "卖",
 	"Lot Size":                       "批量",

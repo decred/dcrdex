@@ -64,7 +64,7 @@ var PlPL = map[string]string{
 	"Epoch":                          "Epoka",
 	"Limit Order":                    "Zlecenie oczekujące (limit)",
 	"Market Order":                   "Zlecenie rynkowe (market)",
-	"reg_status_msg":                 `Żeby rozpocząć handel na <span id="regStatusDex"></span>, opłata rejestracyjna potrzebuje <span id="confReq"></span> potwierdzeń.`,
+	"reg_status_msg":                 `Żeby rozpocząć handel na <span id="regStatusDex" class="text-break"></span>, opłata rejestracyjna potrzebuje <span id="confReq"></span> potwierdzeń.`,
 	"Buy":                            "Kupno",
 	"Sell":                           "Sprzedaż",
 	"Lot Size":                       "Rozmiar lotu",
