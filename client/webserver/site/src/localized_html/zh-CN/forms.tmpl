@@ -400,6 +400,10 @@
     <span class="fs20 sans-light">2: Fund the Registration Fee</span>
   </div>
   <div class="d-flex flex-column align-items-start" data-tmpl="balanceBox">
+    <div class="mt-1">
+      <span class="ico-info"></span>
+      <span class="fs14">This is a small one-time anti-spam measure to discourage disruptive behavior like backing out on swaps.</span>
+    </div>
     <div class="flex-center mt-1">
       <span class="fs16 mr-1">余额:</span>
       <span class="fs20 mx-1" data-tmpl="balance"></span>
@@ -410,10 +414,10 @@
       <span class="fs20 mx-1" data-tmpl="fee"></span>
       <span class="fs16 grey unit">XYZ</span>
     </div>
-    <div class="fs14">Your Deposit Address</div>
+    <div class="fs14">Your Wallet's Deposit Address</div>
     <div class="fs14 mono bg0 p-1 select-all" data-tmpl="depoAddr"></div>
-    <span data-tmpl="sendEnough">Make sure you send enough to also cover network fees.</span>
-    <span data-tmpl="sendEnoughWithEst">Send about <span data-tmpl="totalFees"></span> <span class="unit">XYZ</span> here to also cover network fees.</span>
+    <span data-tmpl="sendEnough">Make sure you send enough to also cover network fees. You may deposit as much as you like to your wallet, since only the fee amount will be used in the next step. The deposit must confirm to proceed.</span>
+    <span data-tmpl="sendEnoughWithEst">Deposit at least <span data-tmpl="totalFees"></span> <span class="unit">XYZ</span> to also cover network fees. You may deposit as much as you like to your wallet, since only the required amount will be used in the next step. The deposit must confirm to proceed.</span>
   </div>
 </div>
 
