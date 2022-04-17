@@ -64,7 +64,7 @@ var PtBr = map[string]string{
 	"Epoch":                          "Epoque",
 	"Limit Order":                    "Ordem Limite",
 	"Market Order":                   "Ordem de Mercado",
-	"reg_status_msg":                 `Para poder trocar em <span id="regStatusDex"></span>, o pagamento da taxa de registro é necessário <span id="confReq"></span> confirmações.`,
+	"reg_status_msg":                 `Para poder trocar em <span id="regStatusDex" class="text-break"></span>, o pagamento da taxa de registro é necessário <span id="confReq"></span> confirmações.`,
 	"Buy":                            "Comprar",
 	"Sell":                           "Vender",
 	"Lot Size":                       "Tamanho do Lote",

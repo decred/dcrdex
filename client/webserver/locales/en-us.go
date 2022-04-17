@@ -65,7 +65,7 @@ var EnUS = map[string]string{
 	"Epoch":                          "Epoch",
 	"Limit Order":                    "Limit Order",
 	"Market Order":                   "Market Order",
-	"reg_status_msg":                 `In order to trade at <span id="regStatusDex"></span>, the registration fee payment needs <span id="confReq"></span> confirmations.`,
+	"reg_status_msg":                 `In order to trade at <span id="regStatusDex" class="text-break"></span>, the registration fee payment needs <span id="confReq"></span> confirmations.`,
 	"Buy":                            "Buy",
 	"Sell":                           "Sell",
 	"Lot Size":                       "Lot Size",

@@ -21,7 +21,7 @@
     <div>
       <div id="exchanges" {{if eq (len .UserInfo.Exchanges) 0}} class="d-hide"{{end}}>
         {{range $host, $xc := .UserInfo.Exchanges}}
-          <div class="settings-exchange border1">
+          <div class="settings-exchange text-break border1">
             <span>
               [[[DEX Address]]]: {{$host}}
             </span>
