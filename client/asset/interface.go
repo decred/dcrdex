@@ -348,16 +348,17 @@ type LogFiler interface {
 	LogFilePath() string
 }
 
-// FeeRater is capable of retrieving a non-critical fee rate estimate for an
-// asset. Some SPV wallets, for example, cannot provide a fee rate estimate, so
-// shouldn't implement FeeRater. However, since the mode of external wallets may
-// not be known on construction, only connect, a zero rate may be returned. The
+// FeeRater is capable of retrieving a non-critical fee rate estimate and
+// unit for an asset. Some SPV wallets, for example, cannot provide a fee rate
+// estimate, so shouldn't implement FeeRater.
+// However, since the mode of external wallets may not be known on
+// construction, only connect, a zero rate may be returned. The
 // caller should always check for zero and have a fallback rate. The rates from
 // FeeRate should be used for rates that are not validated by the server
 // (Withdraw, Send, PayFee), and will/should not be used to generate a fee
 // suggestion for swap operations.
 type FeeRater interface {
-	FeeRate() uint64
+	FeeRate() (uint64, string)
 }
 
 // TokenMaster is implemented by assets which support degenerate tokens.

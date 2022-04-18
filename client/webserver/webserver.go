@@ -111,6 +111,7 @@ type clientCore interface {
 	ExportSeed(pw []byte) ([]byte, error)
 	PreOrder(*core.TradeForm) (*core.OrderEstimate, error)
 	WalletLogFilePath(assetID uint32) (string, error)
+	EstimateFeeRate(assetID uint32) (uint64, string, error)
 	EstimateRegistrationTxFee(host string, certI interface{}, assetID uint32) (uint64, error)
 }
 
@@ -342,6 +343,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/exportseed", s.apiExportSeed)
 			apiAuth.Post("/importaccount", s.apiAccountImport)
 			apiAuth.Post("/disableaccount", s.apiAccountDisable)
+			apiAuth.Post("/getfeerate", s.apiEstimateFeeRate)
 		})
 	})
 

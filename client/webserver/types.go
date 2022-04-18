@@ -51,6 +51,9 @@ type registrationTxFeeForm struct {
 	AssetID *uint32 `json:"asset,omitempty"`
 }
 
+type feeRateForm struct {
+	AssetID *uint32 `json:"assetID"`
+}
 // newWalletForm is information necessary to create a new wallet.
 type newWalletForm struct {
 	AssetID    uint32 `json:"assetID"`

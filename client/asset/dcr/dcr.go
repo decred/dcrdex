@@ -622,17 +622,17 @@ func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
 }
 
 // FeeRate satisfies asset.FeeRater.
-func (dcr *ExchangeWallet) FeeRate() uint64 {
+func (dcr *ExchangeWallet) FeeRate() (uint64, string) {
 	if dcr.wallet.SpvMode() {
-		return 0 // EstimateSmartFeeRate needs dcrd passthrough
+		return 0, "" // EstimateSmartFeeRate needs dcrd passthrough
 	}
 	// Requesting a rate for 1 confirmation can return unreasonably high rates.
 	rate, err := dcr.feeRate(2)
 	if err != nil {
 		dcr.log.Errorf("Failed to get fee rate: %v", err)
-		return 0
+		return 0, ""
 	}
-	return rate
+	return rate, "B" 
 }
 
 // FeeRate returns the current optimal fee rate in atoms / byte.

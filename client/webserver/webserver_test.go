@@ -83,6 +83,9 @@ func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) { r
 func (c *TCore) EstimateRegistrationTxFee(host string, certI interface{}, assetID uint32) (uint64, error) {
 	return 0, nil
 }
+func (c *TCore) EstimateFeeRate(assetID uint32) (uint64, string, error) {
+	return 0, "", nil
+}
 func (c *TCore) InitializeClient(pw, seed []byte) error     { return c.initErr }
 func (c *TCore) Login(pw []byte) (*core.LoginResult, error) { return &core.LoginResult{}, c.loginErr }
 func (c *TCore) IsInitialized() bool                        { return c.isInited }

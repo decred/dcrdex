@@ -454,10 +454,21 @@ export default class WalletsPage extends BasePage {
     page.withdrawAvail.textContent = Doc.formatFullPrecision(wallet.balance.available, asset.info.unitinfo)
     page.withdrawLogo.src = Doc.logoPath(asset.symbol)
     page.withdrawName.textContent = asset.info.name
-    // page.withdrawFee.textContent = wallet.feerate
-    // page.withdrawUnit.textContent = wallet.units
     box.dataset.assetID = String(assetID)
     this.animation = this.showBox(box, page.walletPass)
+
+    Doc.hide(page.FeeRate)
+    const res = await postJSON('/api/getfeerate', {
+      assetID: assetID
+    })
+    console.log(res)
+    if (!app().checkResponse(res) || res.feeRate === 0) {
+      page.withdrawFeeRate.textContent = 'unavailable'
+    } else if (res.feeRate > 0) {
+      page.withdrawFeeRate.textContent = res.feeRate
+      page.withdrawUnit.textContent = wallet.units + '/' + res.unit
+    }
+    Doc.show(page.FeeRate)
   }
 
   /* doConnect connects to a wallet via the connectwallet API route. */

@@ -2730,6 +2730,25 @@ func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI interface{}) 
 	return dc.exchangeInfo(), true, nil
 }
 
+// EstimateFeeRate provides an estimate fee rate for assetID.
+func (c *Core) EstimateFeeRate(assetID uint32) (uint64, string, error) {
+	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return 0, "", err
+	}
+
+	var rate uint64
+	var unit string
+	if rater, is := wallet.Wallet.(asset.FeeRater); is {
+		rate, unit = rater.FeeRate()
+	}
+	if rate > 0 {
+		
+	}
+	
+	return rate, unit, nil
+}
+
 // EstimateRegistrationTxFee provides an estimate for the tx fee needed to
 // pay the registration fee for a certain asset. The dex host is required
 // because the dex server is used as a fallback to determine the current
@@ -2742,7 +2761,8 @@ func (c *Core) EstimateRegistrationTxFee(host string, certI interface{}, assetID
 
 	var rate uint64
 	if rater, is := wallet.Wallet.(asset.FeeRater); is {
-		rate = rater.FeeRate()
+		// Ignore unit.
+		rate, _ = rater.FeeRate()
 	}
 
 	if rate == 0 {
@@ -3821,7 +3841,8 @@ func (c *Core) feeSuggestionAny(assetID uint32, preferredConns ...*dexConnection
 	w, found := c.wallet(assetID)
 	if found && w.connected() {
 		if rater, is := w.feeRater(); is {
-			if r := rater.FeeRate(); r != 0 {
+			// Ignore unit.
+			if r, _ := rater.FeeRate(); r != 0 {
 				return r
 			}
 		}
@@ -6547,7 +6568,7 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 // cached, no new requests will be made.
 func (c *Core) cacheRedemptionFeeSuggestion(t *trackedTrade) {
 	if rater, is := t.wallets.toWallet.feeRater(); is {
-		if feeRate := rater.FeeRate(); feeRate != 0 {
+		if feeRate, _ := rater.FeeRate(); feeRate != 0 {
 			atomic.StoreUint64(&t.redeemFeeSuggestion, feeRate)
 			return
 		}
