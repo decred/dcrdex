@@ -13,7 +13,7 @@ mkdir -p bin/dexc-darwin-arm64-${VER}
 
 export CGO_ENABLED=0
 
-LDFLAGS="-s -w -X decred.org/dcrdex/client/cmd/dexc/version.appPreRelease= -X decred.org/dcrdex/client/cmd/dexc/version.appBuild=release"
+LDFLAGS="-s -w -X main.Version=0.5.0+release"
 
 pushd client/cmd/dexc
 GOOS=linux GOARCH=amd64 go build -trimpath -o ../../../bin/dexc-linux-amd64-${VER} -ldflags "$LDFLAGS"
@@ -23,7 +23,7 @@ GOOS=darwin GOARCH=amd64 go build -trimpath -o ../../../bin/dexc-darwin-amd64-${
 GOOS=darwin GOARCH=arm64 go build -trimpath -o ../../../bin/dexc-darwin-arm64-${VER} -ldflags "$LDFLAGS"
 popd
 
-LDFLAGS="-s -w -X main.appPreRelease= -X main.appBuild=release"
+LDFLAGS="-s -w -X main.Version=0.5.0+release"
 
 pushd client/cmd/dexcctl
 GOOS=linux GOARCH=amd64 go build -trimpath -o ../../../bin/dexc-linux-amd64-${VER} -ldflags "$LDFLAGS"

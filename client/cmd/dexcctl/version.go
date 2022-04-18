@@ -4,94 +4,46 @@
 package main
 
 import (
-	"bytes"
-	"fmt"
-	"strings"
+	"decred.org/dcrdex/dex/version"
 )
 
 const (
-	// semanticAlphabet defines the allowed characters for the pre-release
-	// portion of a semantic version string.
-	semanticAlphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-"
-
-	// semanticBuildAlphabet defines the allowed characters for the build
-	// portion of a semantic version string.
-	semanticBuildAlphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-."
+	// appName is the application name.
+	appName string = "dexcctl"
 )
 
-// These constants define the application version and follow the semantic
-// versioning 2.0.0 spec (http://semver.org/).
-const (
-	appName  string = "dexcctl"
-	appMajor uint   = 0
-	appMinor uint   = 5
-	appPatch uint   = 0
-)
-
-// go build -v -ldflags "-X decred.org/dcrdex/client/cmd/dexcctl/main.appPreRelease= -X decred.org/dcrdex/client/cmd/dexcctl/main.appBuild=$(git rev-parse --short HEAD)"
 var (
-	// appPreRelease is defined as a variable so it can be overridden during the
-	// build process. It MUST only contain characters from semanticAlphabet per
-	// the semantic versioning spec.
-	appPreRelease = "pre"
+	// Note for maintainers:
+	//
+	// The expected process for setting the version in releases is as follows:
+	// - Create a release branch of the form 'release-vMAJOR.MINOR'
+	// - Modify the Version variable below on that branch to:
+	//   - Remove the pre-release portion
+	//   - Set the build metadata to 'release'
+	//   - Example: 'Version = "0.5.0+release"'
+	// - Update the Version variable below on the master branch to the next
+	//   expected version while retaining a pre-release of 'pre'
+	//
+	// These steps ensure that building from source produces versions that are
+	// distinct from reproducible builds that override the Version via linker
+	// flags.
 
-	// appBuild is defined as a variable so it can be overridden during the
-	// build process. It MUST only contain characters from semanticBuildAlphabet
-	// per the semantic versioning spec.
-	appBuild = "dev"
+	// Version is the application version per the semantic versioning 2.0.0 spec
+	// (https://semver.org/).
+	//
+	// It is defined as a variable so it can be overridden during the build
+	// process with:
+	// '-ldflags "-X main.Version=fullsemver"'
+	// if needed.
+	//
+	// It MUST be a full semantic version per the semantic versioning spec or
+	// the package will panic at runtime.  Of particular note is the pre-release
+	// and build metadata portions MUST only contain characters from
+	// semanticAlphabet.
+	// NOTE: The Version string is overidden on init.
+	Version = "0.5.0-pre"
 )
 
-// version returns the application version as a properly formed string per the
-// semantic versioning 2.0.0 spec (http://semver.org/).
-func version() string {
-	// Start with the major, minor, and patch versions.
-	version := fmt.Sprintf("%d.%d.%d", appMajor, appMinor, appPatch)
-
-	// Append pre-release version if there is one.  The hyphen called for
-	// by the semantic versioning spec is automatically appended and should
-	// not be contained in the pre-release string.  The pre-release version
-	// is not appended if it contains invalid characters.
-	preRelease := normalizePreRelString(appPreRelease)
-	if preRelease != "" {
-		version = fmt.Sprintf("%s-%s", version, preRelease)
-	}
-
-	// Append build metadata if there is any.  The plus called for
-	// by the semantic versioning spec is automatically appended and should
-	// not be contained in the build metadata string.  The build metadata
-	// string is not appended if it contains invalid characters.
-	build := normalizeBuildString(appBuild)
-	if build != "" {
-		version = fmt.Sprintf("%s+%s", version, build)
-	}
-
-	return version
-}
-
-// normalizeSemString returns the passed string stripped of all characters
-// which are not valid according to the provided semantic versioning alphabet.
-func normalizeSemString(str, alphabet string) string {
-	var result bytes.Buffer
-	for _, r := range str {
-		if strings.ContainsRune(alphabet, r) {
-			result.WriteRune(r)
-		}
-	}
-	return result.String()
-}
-
-// normalizePreRelString returns the passed string stripped of all characters
-// which are not valid according to the semantic versioning guidelines for
-// pre-release strings.  In particular they MUST only contain characters in
-// semanticAlphabet.
-func normalizePreRelString(str string) string {
-	return normalizeSemString(str, semanticAlphabet)
-}
-
-// normalizeBuildString returns the passed string stripped of all characters
-// which are not valid according to the semantic versioning guidelines for build
-// metadata strings.  In particular they MUST only contain characters in
-// semanticBuildAlphabet.
-func normalizeBuildString(str string) string {
-	return normalizeSemString(str, semanticBuildAlphabet)
+func init() {
+	Version = version.Parse(Version)
 }

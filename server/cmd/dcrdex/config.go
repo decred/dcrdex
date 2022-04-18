@@ -288,7 +288,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 	// Show the version and exit if the version flag was specified.
 	if preCfg.ShowVersion {
 		fmt.Printf("%s version %s (Go version %s %s/%s)\n",
-			AppName, Version(), runtime.Version(), runtime.GOOS, runtime.GOARCH)
+			appName, Version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 		os.Exit(0)
 	}
 

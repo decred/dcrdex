@@ -3,11 +3,13 @@
 
 package main
 
-import "decred.org/dcrdex/dex/version"
+import (
+	"decred.org/dcrdex/dex/version"
+)
 
 const (
-	// appName is the application name.
-	appName string = "dcrdex"
+	// appName defines the application name.
+	appName string = "dexc"
 )
 
 var (
