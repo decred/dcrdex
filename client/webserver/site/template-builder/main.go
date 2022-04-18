@@ -38,7 +38,7 @@ func main() {
 		}
 	}
 
-	err = filepath.Walk(templateDir, func(path string, fi os.FileInfo, err error) error {
+	err = filepath.Walk(templateDir, func(_ string, fi os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -46,6 +46,9 @@ func main() {
 			return nil
 		}
 		baseName := fi.Name()
+		if filepath.Ext(baseName) != ".tmpl" {
+			return nil
+		}
 		fmt.Println(baseName)
 		rawTmplPath := filepath.Join(templateDir, baseName)
 		rawTmpl, err := os.ReadFile(rawTmplPath)
