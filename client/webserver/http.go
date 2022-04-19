@@ -244,6 +244,34 @@ func (s *WebServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 	s.sendTemplate(w, "settings", data)
 }
 
+// handleDexSettings is the handler for the '/dexsettings' page request.
+func (s *WebServer) handleDexSettings(w http.ResponseWriter, r *http.Request) {
+	host, err := getHostCtx(r)
+	if err != nil {
+		log.Errorf("error getting host ctx: %v", err)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	exchanges := s.core.Exchanges()
+	exchange, ok := exchanges[host]
+	if !ok {
+		log.Errorf("no exchange with host: %v", host)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	data := &struct {
+		CommonArguments
+		Exchange *core.Exchange
+	}{
+		CommonArguments: *commonArgs(r, fmt.Sprintf("%v Settings | Decred DEX", host)),
+		Exchange:        exchange,
+	}
+
+	s.sendTemplate(w, "dexsettings", data)
+}
+
 type ordersTmplData struct {
 	CommonArguments
 	Assets   map[uint32]*core.SupportedAsset

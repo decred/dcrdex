@@ -215,6 +215,7 @@ var EnUS = map[string]string{
 	"Maximum Possible Swap Fees":  "Maximum Possible Swap Fees",
 	"max_fee_conditions":          "This is the most you would ever pay in fees on your swap. Fees are normally assessed at a fraction of this rate. The maximum is not subject to changes once your order is placed.",
 	"wallet_logs":                 "Wallet Logs",
+<<<<<<< HEAD
 	"accelerate_order":            "Accelerate Order",
 	"acceleration_text":           "If your swap transactions are stuck, you may attempt to accelerate them with an additional transaction. This is helpful when the the fee rate on an existing unconfirmed transaction has become too low to be mined in the next block, but not if blocks are just being mined slowly. When you submit this form, a transaction will be created that sends the change from your own swap initiation transaction to yourself with a higher fee. The effective fee rate of your swap transactions will become the rate you select below. Select a rate that is enough to be included in the next block. Consult a block explorer to be sure.",
 	"effective_swap_tx_rate":      "Effective swap tx fee rate",
@@ -233,4 +234,8 @@ var EnUS = map[string]string{
 	"confirm_force_message":       "This wallet is actively managing orders. After taking this action, it will take a long time to resync your wallet, potentially causing orders to fail. Only take this action if absolutely necessary!",
 	"confirm":                     "Confirm",
 	"cancel":                      "Cancel",
+=======
+	"Update TLS Certificate":      "Update TLS Certificate",
+	"registered dexes":            "Registered Dexes:",
+>>>>>>> client: support server TLS certificate change
 }

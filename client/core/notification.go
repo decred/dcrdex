@@ -6,6 +6,7 @@ package core
 import (
 	"fmt"
 
+	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
@@ -335,8 +336,8 @@ func (on *EpochNotification) String() string {
 // ConnEventNote is a notification regarding individual DEX connection status.
 type ConnEventNote struct {
 	db.Notification
-	Host      string `json:"host"`
-	Connected bool   `json:"connected"`
+	Host             string                 `json:"host"`
+	ConnectionStatus comms.ConnectionStatus `json:"connectionStatus"`
 }
 
 const (
@@ -344,11 +345,11 @@ const (
 	TopicDEXDisconnected Topic = "DEXDisconnected"
 )
 
-func newConnEventNote(topic Topic, subject, host string, connected bool, details string, severity db.Severity) *ConnEventNote {
+func newConnEventNote(topic Topic, subject, host string, status comms.ConnectionStatus, details string, severity db.Severity) *ConnEventNote {
 	return &ConnEventNote{
-		Notification: db.NewNotification(NoteTypeConnEvent, topic, subject, details, severity),
-		Host:         host,
-		Connected:    connected,
+		Notification:     db.NewNotification(NoteTypeConnEvent, topic, subject, details, severity),
+		Host:             host,
+		ConnectionStatus: status,
 	}
 }
 

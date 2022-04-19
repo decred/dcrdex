@@ -300,6 +300,7 @@ export default class WalletsPage extends BasePage {
     page.marketsForLogo.src = Doc.logoPath(app().assets[assetID].symbol)
     for (const [host, xc] of Object.entries(app().user.exchanges)) {
       let count = 0
+      if (!xc.markets) continue
       for (const market of Object.values(xc.markets)) {
         if (market.baseid === assetID || market.quoteid === assetID) count++
       }
@@ -308,6 +309,7 @@ export default class WalletsPage extends BasePage {
       const tmpl = Doc.parseTemplate(marketBox)
       tmpl.dexTitle.textContent = host
       card.appendChild(marketBox)
+      if (!xc.markets) continue
       for (const market of Object.values(xc.markets)) {
         // Only show markets where this is the base or quote asset.
         if (market.baseid !== assetID && market.quoteid !== assetID) continue

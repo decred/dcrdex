@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
@@ -498,15 +499,15 @@ type PendingFeeState struct {
 
 // Exchange represents a single DEX with any number of markets.
 type Exchange struct {
-	Host       string                `json:"host"`
-	AcctID     string                `json:"acctID"`
-	Markets    map[string]*Market    `json:"markets"`
-	Assets     map[uint32]*dex.Asset `json:"assets"`
-	Connected  bool                  `json:"connected"`
-	Fee        *FeeAsset             `json:"feeAsset"` // DEPRECATED. DCR.
-	RegFees    map[string]*FeeAsset  `json:"regFees"`
-	PendingFee *PendingFeeState      `json:"pendingFee,omitempty"`
-	CandleDurs []string              `json:"candleDurs"`
+	Host             string                 `json:"host"`
+	AcctID           string                 `json:"acctID"`
+	Markets          map[string]*Market     `json:"markets"`
+	Assets           map[uint32]*dex.Asset  `json:"assets"`
+	ConnectionStatus comms.ConnectionStatus `json:"connectionStatus"`
+	Fee              *FeeAsset              `json:"feeAsset"` // DEPRECATED. DCR.
+	RegFees          map[string]*FeeAsset   `json:"regFees"`
+	PendingFee       *PendingFeeState       `json:"pendingFee,omitempty"`
+	CandleDurs       []string               `json:"candleDurs"`
 }
 
 // newDisplayID creates a display-friendly market ID for a base/quote ID pair.

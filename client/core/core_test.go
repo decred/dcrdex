@@ -269,7 +269,7 @@ func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, 
 		trades:            make(map[order.OrderID]*trackedTrade),
 		epoch:             map[string]uint64{tDcrBtcMktName: 0},
 		apiVer:            serverdex.PreAPIVersion,
-		connected:         1,
+		connectionStatus:  uint32(comms.Connected),
 		reportingConnects: 1,
 		spots:             make(map[string]*msgjson.Spot),
 	}, conn, acct
@@ -360,7 +360,7 @@ type TDB struct {
 	accountProofErr          error
 	verifyAccountPaid        bool
 	verifyCreateAccount      bool
-	verifyUpdateAccount      bool
+	verifyUpdateAccountInfo  bool
 	accountProofPersisted    *db.AccountProof
 	disabledAcct             *db.AccountInfo
 	disableAccountErr        error
@@ -370,6 +370,7 @@ type TDB struct {
 	recryptErr               error
 	deleteInactiveOrdersErr  error
 	deleteInactiveMatchesErr error
+	updateAccountInfoErr     error
 }
 
 func (tdb *TDB) Run(context.Context) {}
@@ -398,10 +399,10 @@ func (tdb *TDB) DisableAccount(url string) error {
 	return tdb.disableAccountErr
 }
 
-func (tdb *TDB) UpdateAccount(ai *db.AccountInfo) error {
-	tdb.verifyUpdateAccount = true
+func (tdb *TDB) UpdateAccountInfo(ai *db.AccountInfo) error {
+	tdb.verifyUpdateAccountInfo = true
 	tdb.acct = ai
-	return nil
+	return tdb.updateAccountInfoErr
 }
 
 func (tdb *TDB) UpdateOrder(m *db.MetaOrder) error {
@@ -2753,12 +2754,12 @@ wait:
 	rig.dc.acct.unlock(rig.crypter)
 
 	// DEX not connected
-	atomic.StoreUint32(&rig.dc.connected, 0)
+	atomic.StoreUint32(&rig.dc.connectionStatus, uint32(comms.Disconnected))
 	_, err = tCore.Trade(tPW, form)
 	if err == nil {
 		t.Fatalf("no error for disconnected dex")
 	}
-	atomic.StoreUint32(&rig.dc.connected, 1)
+	atomic.StoreUint32(&rig.dc.connectionStatus, uint32(comms.Connected))
 
 	// No base asset
 	form.Base = 12345

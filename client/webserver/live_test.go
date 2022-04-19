@@ -25,6 +25,7 @@ import (
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/client/asset/dcr"
 	"decred.org/dcrdex/client/asset/ltc"
+	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
@@ -303,7 +304,7 @@ var tExchanges = map[string]*core.Exchange{
 			mkid(22, 42):  mkMrkt("mona", "dcr"),
 			mkid(28, 0):   mkMrkt("vtc", "btc"),
 		},
-		Connected: true,
+		ConnectionStatus: comms.Connected,
 		RegFees: map[string]*core.FeeAsset{
 			"dcr": {
 				ID:    42,
@@ -352,7 +353,7 @@ var tExchanges = map[string]*core.Exchange{
 			mkid(0, 2):    mkMrkt("btc", "ltc"),
 			mkid(22, 141): mkMrkt("mona", "kmd"),
 		},
-		Connected: true,
+		ConnectionStatus: comms.Connected,
 		RegFees: map[string]*core.FeeAsset{
 			"dcr": {
 				ID:    42,
@@ -1595,6 +1596,9 @@ func (c *TCore) WalletLogFilePath(uint32) (string, error) {
 	return "", nil
 }
 func (c *TCore) RecoverWallet(uint32, []byte, bool) error {
+	return nil
+}
+func (c *TCore) UpdateCert(string, []byte) error {
 	return nil
 }
 

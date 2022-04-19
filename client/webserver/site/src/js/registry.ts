@@ -8,12 +8,18 @@ declare global {
   }
 }
 
+export enum ConnectionStatus {
+  Disconnected = 0,
+  Connected = 1,
+  InvalidCert = 2,
+}
+
 export interface Exchange {
   host: string
   acctID: string
   markets: Record<string, Market>
   assets: Record<number, Asset>
-  connected: boolean
+  connectionStatus: ConnectionStatus
   feeAsset: FeeAsset // DEPRECATED. DCR.
   regFees: Record<string, FeeAsset>
   pendingFee: PendingFeeState | null
@@ -276,7 +282,7 @@ export interface MatchNote extends CoreNote {
 
 export interface ConnEventNote extends CoreNote {
   host: string
-  connected: boolean
+  connectionStatus: ConnectionStatus
 }
 
 export interface OrderNote extends CoreNote {

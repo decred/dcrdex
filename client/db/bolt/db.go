@@ -522,6 +522,19 @@ func (db *BoltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 	})
 }
 
+// UpdateAccountInfo updates the account info for an existing account with
+// the same Host as the parameter. If no account exists with this host,
+// an error is returned.
+func (db *BoltDB) UpdateAccountInfo(ai *dexdb.AccountInfo) error {
+	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
+		acct := accts.Bucket([]byte(ai.Host))
+		if acct == nil {
+			return fmt.Errorf("account not found for %s", ai.Host)
+		}
+		return acct.Put(accountKey, ai.Encode())
+	})
+}
+
 // deleteAccount removes the account by host.
 func (db *BoltDB) deleteAccount(host string) error {
 	acctKey := []byte(host)

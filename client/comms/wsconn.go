@@ -41,6 +41,15 @@ const (
 	DefaultResponseTimeout = 30 * time.Second
 )
 
+// ConnectionStatus represents the current status of the websocket connection.
+type ConnectionStatus uint32
+
+const (
+	Disconnected ConnectionStatus = iota
+	Connected
+	InvalidCert
+)
+
 // ErrInvalidCert is the error returned when attempting to use an invalid cert
 // to set up a ws connection.
 var ErrInvalidCert = fmt.Errorf("invalid certificate")
@@ -88,7 +97,7 @@ type WsCfg struct {
 	//
 	// NOTE: Disconnect event notifications may lag behind actual
 	// disconnections.
-	ConnectEventFunc func(bool)
+	ConnectEventFunc func(ConnectionStatus)
 
 	// Logger is the logger for the WsConn.
 	Logger dex.Logger
@@ -112,8 +121,8 @@ type wsConn struct {
 	wsMtx sync.Mutex
 	ws    *websocket.Conn
 
-	connectedMtx sync.RWMutex
-	connected    bool
+	connectedMtx     sync.RWMutex
+	connectionStatus ConnectionStatus
 
 	reqMtx       sync.RWMutex
 	respHandlers map[uint64]*responseHandler
@@ -165,18 +174,18 @@ func NewWsConn(cfg *WsCfg) (WsConn, error) {
 func (conn *wsConn) IsDown() bool {
 	conn.connectedMtx.RLock()
 	defer conn.connectedMtx.RUnlock()
-	return !conn.connected
+	return conn.connectionStatus != Connected
 }
 
-// setConnected updates the connection's connected state and runs the
+// setConnectionStatus updates the connection's status and runs the
 // ConnectEventFunc in case of a change.
-func (conn *wsConn) setConnected(connected bool) {
+func (conn *wsConn) setConnectionStatus(status ConnectionStatus) {
 	conn.connectedMtx.Lock()
-	statusChange := conn.connected != connected
-	conn.connected = connected
+	statusChange := conn.connectionStatus != status
+	conn.connectionStatus = status
 	conn.connectedMtx.Unlock()
 	if statusChange && conn.cfg.ConnectEventFunc != nil {
-		conn.cfg.ConnectEventFunc(connected)
+		conn.cfg.ConnectEventFunc(status)
 	}
 }
 
@@ -195,11 +204,13 @@ func (conn *wsConn) connect(ctx context.Context) error {
 	if err != nil {
 		var e x509.UnknownAuthorityError
 		if errors.As(err, &e) {
+			conn.setConnectionStatus(InvalidCert)
 			if conn.tlsCfg == nil {
 				return ErrCertRequired
 			}
 			return ErrInvalidCert
 		}
+		conn.setConnectionStatus(Disconnected)
 		return err
 	}
 
@@ -241,7 +252,7 @@ func (conn *wsConn) connect(ctx context.Context) error {
 	conn.ws = ws
 	conn.wsMtx.Unlock()
 
-	conn.setConnected(true)
+	conn.setConnectionStatus(Connected)
 	conn.wg.Add(1)
 	go func() {
 		defer conn.wg.Done()
@@ -264,7 +275,7 @@ func (conn *wsConn) close() {
 // run as a goroutine. Increment the wg before calling read.
 func (conn *wsConn) read(ctx context.Context) {
 	reconnect := func() {
-		conn.setConnected(false)
+		conn.setConnectionStatus(Disconnected)
 		conn.reconnectCh <- struct{}{}
 	}
 
@@ -416,7 +427,7 @@ func (conn *wsConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	go func() {
 		defer conn.wg.Done()
 		<-ctxInternal.Done()
-		conn.setConnected(false)
+		conn.setConnectionStatus(Disconnected)
 		conn.wsMtx.Lock()
 		if conn.ws != nil {
 			conn.log.Debug("Sending close 1000 (normal) message.")

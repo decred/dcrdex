@@ -134,8 +134,9 @@ type dexConnection struct {
 
 	epochMtx sync.RWMutex
 	epoch    map[string]uint64
-	// connected is a best guess on the ws connection status.
-	connected uint32
+
+	// connectionStatus is a best guess on the ws connection status.
+	connectionStatus uint32
 
 	pendingFeeMtx sync.RWMutex
 	pendingFee    *pendingFeeState
@@ -294,12 +295,14 @@ func (dc *dexConnection) exchangeInfo() *Exchange {
 	dc.cfgMtx.RLock()
 	cfg := dc.cfg
 	dc.cfgMtx.RUnlock()
+	connectionStatus := comms.ConnectionStatus(
+		atomic.LoadUint32(&dc.connectionStatus))
 	if cfg == nil { // no config, assets, or markets data
 		return &Exchange{
-			Host:       dc.acct.host,
-			AcctID:     acctID,
-			Connected:  atomic.LoadUint32(&dc.connected) == 1,
-			PendingFee: dc.getPendingFee(),
+			Host:             dc.acct.host,
+			AcctID:           acctID,
+			ConnectionStatus: connectionStatus,
+			PendingFee:       dc.getPendingFee(),
 		}
 	}
 
@@ -328,16 +331,18 @@ func (dc *dexConnection) exchangeInfo() *Exchange {
 		feeAssets["dcr"] = dcrAsset
 	}
 
+	connectionStatus = comms.ConnectionStatus(
+		atomic.LoadUint32(&dc.connectionStatus))
 	return &Exchange{
-		Host:       dc.acct.host,
-		AcctID:     acctID,
-		Markets:    dc.marketMap(),
-		Assets:     assets,
-		Connected:  atomic.LoadUint32(&dc.connected) == 1,
-		Fee:        dcrAsset,
-		RegFees:    feeAssets,
-		PendingFee: dc.getPendingFee(),
-		CandleDurs: cfg.BinSizes,
+		Host:             dc.acct.host,
+		AcctID:           acctID,
+		Markets:          dc.marketMap(),
+		Assets:           assets,
+		ConnectionStatus: connectionStatus,
+		Fee:              dcrAsset,
+		RegFees:          feeAssets,
+		PendingFee:       dc.getPendingFee(),
+		CandleDurs:       cfg.BinSizes,
 	}
 }
 
@@ -947,10 +952,12 @@ func (c *Core) dex(addr string) (*dexConnection, bool, error) {
 	c.connMtx.RLock()
 	dc, found := c.conns[host]
 	c.connMtx.RUnlock()
-	connected := found && atomic.LoadUint32(&dc.connected) == 1
 	if !found {
 		return nil, false, fmt.Errorf("unknown DEX %s", addr)
 	}
+	connectionStatus := comms.ConnectionStatus(
+		atomic.LoadUint32(&dc.connectionStatus))
+	connected := connectionStatus == comms.Connected
 	return dc, connected, nil
 }
 
@@ -5697,6 +5704,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 		apiVer:            -1,
 		reportingConnects: reporting,
 		spots:             make(map[string]*msgjson.Spot),
+		connectionStatus:  uint32(comms.Disconnected),
 		// On connect, must set: cfg, epoch, and assets.
 	}
 
@@ -5726,8 +5734,8 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 		return nil, errors.New("a TLS connection is required when not using a hidden service")
 	}
 
-	wsCfg.ConnectEventFunc = func(connected bool) {
-		c.handleConnectEvent(dc, connected)
+	wsCfg.ConnectEventFunc = func(status comms.ConnectionStatus) {
+		c.handleConnectEvent(dc, status)
 	}
 	wsCfg.ReconnectSync = func() {
 		go c.handleReconnect(host)
@@ -5881,11 +5889,9 @@ func (dc *dexConnection) broadcastingConnect() bool {
 // lost or established.
 //
 // NOTE: Disconnect event notifications may lag behind actual disconnections.
-func (c *Core) handleConnectEvent(dc *dexConnection, connected bool) {
-	var v uint32
+func (c *Core) handleConnectEvent(dc *dexConnection, status comms.ConnectionStatus) {
 	topic := TopicDEXDisconnected
-	if connected {
-		v = 1
+	if status == comms.Connected {
 		topic = TopicDEXConnected
 	} else {
 		for _, tracker := range dc.trackedTrades() {
@@ -5901,10 +5907,10 @@ func (c *Core) handleConnectEvent(dc *dexConnection, connected bool) {
 			tracker.mtx.Unlock()
 		}
 	}
-	atomic.StoreUint32(&dc.connected, v)
+	atomic.StoreUint32(&dc.connectionStatus, uint32(status))
 	if dc.broadcastingConnect() {
 		subject, details := c.formatDetails(topic, dc.acct.host)
-		dc.notify(newConnEventNote(topic, subject, dc.acct.host, connected, details, db.Poke))
+		dc.notify(newConnEventNote(topic, subject, dc.acct.host, status, details, db.Poke))
 	}
 }
 

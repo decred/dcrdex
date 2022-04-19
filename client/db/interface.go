@@ -34,6 +34,10 @@ type DB interface {
 	Account(host string) (*AccountInfo, error)
 	// CreateAccount saves the AccountInfo.
 	CreateAccount(ai *AccountInfo) error
+	// UpdateAccountInfo updates the account info for an existing account with
+	// the same Host as the parameter. If no account exists with this host,
+	// an error is returned.
+	UpdateAccountInfo(ai *AccountInfo) error
 	// DisableAccount sets the AccountInfo disabled status to true.
 	DisableAccount(host string) error
 	// AccountProof retrieves the AccountPoof value specified by url.

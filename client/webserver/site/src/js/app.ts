@@ -7,6 +7,7 @@ import SettingsPage from './settings'
 import MarketsPage from './markets'
 import OrdersPage from './orders'
 import OrderPage from './order'
+import DexSettingsPage from './dexsettings'
 import { RateEncodingFactor, StatusExecuted, hasLiveMatches } from './orderutil'
 import { getJSON, postJSON } from './http'
 import * as ntfn from './notifications'
@@ -67,7 +68,8 @@ const constructors: Record<string, PageClass> = {
   wallets: WalletsPage,
   settings: SettingsPage,
   orders: OrdersPage,
-  order: OrderPage
+  order: OrderPage,
+  dexsettings: DexSettingsPage
 }
 
 // unathedPages are pages that don't require authorization to load.
@@ -231,6 +233,7 @@ export default class Application {
 
   /* Load the page from the server. Insert and bind the DOM. */
   async loadPage (page: string, data?: any, skipPush?: boolean): Promise<boolean> {
+    console.log('in load page')
     // Close some menus and tooltips.
     this.tooltip.style.left = '-10000px'
     Doc.hide(this.page.noteBox, this.page.profileBox)
@@ -247,6 +250,7 @@ export default class Application {
     // Append the request to the page history.
     if (!skipPush) {
       const path = delivered === requestedHandler ? url.toString() : `/${delivered}`
+      console.log(`data - ${JSON.stringify(data)}`)
       window.history.pushState({ page: page, data: data }, '', path)
     }
     // Insert page and attach handlers.
@@ -419,6 +423,7 @@ export default class Application {
         }
         Doc.bind(a, 'click', (e: Event) => {
           e.preventDefault()
+          console.log('overridden click')
           this.loadPage(token, params)
         })
       }
@@ -578,7 +583,9 @@ export default class Application {
       case 'conn': {
         const n = note as ConnEventNote
         const xc = this.user.exchanges[n.host]
-        if (xc) xc.connected = n.connected
+        if (xc) {
+          xc.connectionStatus = n.connectionStatus
+        }
         break
       }
       case 'spots': {
@@ -730,6 +737,7 @@ export default class Application {
    */
   haveAssetOrders (assetID: number): boolean {
     for (const xc of Object.values(this.user.exchanges)) {
+      if (!xc.markets) continue
       for (const market of Object.values(xc.markets)) {
         if (!market.orders) continue
         for (const ord of market.orders) {

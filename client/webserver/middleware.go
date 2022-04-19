@@ -19,6 +19,7 @@ type ctxID int
 
 const (
 	ctxOID ctxID = iota
+	ctxHost
 )
 
 // securityMiddleware adds security headers to the server responses.
@@ -133,7 +134,29 @@ func (s *WebServer) requireDEXConnection(next http.Handler) http.Handler {
 	})
 }
 
-// orderIDCtx embeds order ID into the request context
+// dexHostCtx embeds the host into the request context.
+func dexHostCtx(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := chi.URLParam(r, "host")
+		ctx := context.WithValue(r.Context(), ctxHost, host)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// getHostCtx interprets the context value at ctxHost as a string host.
+func getHostCtx(r *http.Request) (string, error) {
+	untypedHost := r.Context().Value(ctxHost)
+	if untypedHost == nil {
+		return "", errors.New("host not set in request")
+	}
+	host, ok := untypedHost.(string)
+	if !ok {
+		return "", errors.New("type assertion failed")
+	}
+	return host, nil
+}
+
+// orderIDCtx embeds order ID into the request context.
 func orderIDCtx(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		oid := chi.URLParam(r, "oid")
