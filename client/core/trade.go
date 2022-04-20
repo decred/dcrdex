@@ -1709,8 +1709,7 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 	if highestFeeRate < t.metaData.MaxFeeRate {
 		var freshRate uint64
 		if r, ok := t.wallets.fromWallet.feeRater(); ok {
-			// Ignore unit.
-			freshRate, _ = r.FeeRate()
+			freshRate = r.FeeRate()
 		}
 		if freshRate == 0 { // either not a FeeRater, or FeeRate failed
 			freshRate = t.dc.bestBookFeeSuggestion(fromAsset.ID)

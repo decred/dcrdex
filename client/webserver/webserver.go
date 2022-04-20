@@ -111,7 +111,7 @@ type clientCore interface {
 	ExportSeed(pw []byte) ([]byte, error)
 	PreOrder(*core.TradeForm) (*core.OrderEstimate, error)
 	WalletLogFilePath(assetID uint32) (string, error)
-	EstimateFeeRate(assetID uint32) (uint64, string, error)
+	EstimateFeeRate(assetID uint32) (uint64, error)
 	EstimateRegistrationTxFee(host string, certI interface{}, assetID uint32) (uint64, error)
 }
 

@@ -825,6 +825,10 @@ func (w *TXCWallet) Withdraw(address string, value, feeSuggestion uint64) (asset
 	return w.payFeeCoin, w.payFeeErr
 }
 
+func (w *TXCWallet) FallbackFeeRate() uint64 {
+	return w.payFeeSuggestion
+}
+
 func (w *TXCWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
 	return 0
 }

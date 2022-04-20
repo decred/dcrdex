@@ -523,6 +523,9 @@ func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) {
 	c.reg = r
 	return nil, nil
 }
+func (c *TCore) EstimateFeeRate(assetID uint32) (uint64, error) {
+	return 0, nil
+}
 func (c *TCore) EstimateRegistrationTxFee(host string, certI interface{}, assetID uint32) (uint64, error) {
 	return 0, nil
 }

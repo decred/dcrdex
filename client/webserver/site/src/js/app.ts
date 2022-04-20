@@ -770,7 +770,8 @@ export default class Application {
           unit: '',
           conversionFactor: 1e8
         },
-        denominations: []
+        denominations: [],
+        feeRateUnit: ''
       }
     }
     return xc.assets[assetID].unitInfo

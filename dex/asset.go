@@ -141,6 +141,9 @@ type UnitInfo struct {
 	// Alternatives lists additionally available Denominations, and can be
 	// empty.
 	Alternatives []Denomination `json:"denominations"`
+	// FeeRateUnit is the name associated with the unit used for fee rates.
+	// E.g. satoshis/bytes, atoms/bytes, gwei/gas
+	FeeRateUnit string `json:"feeRateUnit"`
 }
 
 // ConventionalString converts the quantity to conventional units, and returns

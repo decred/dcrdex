@@ -520,6 +520,11 @@ func (eth *ExchangeWallet) MaxOrder(lotSize uint64, feeSuggestion uint64, nfo *d
 	return est, nil
 }
 
+// FallbackFeeRate returns the fallback fee rate.
+func (eth *ExchangeWallet) FallbackFeeRate() uint64 {
+	return defaultGasFee
+}
+
 // PreSwap gets order estimates based on the available funds and the wallet
 // configuration.
 func (eth *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
@@ -1357,11 +1362,12 @@ func (eth *ExchangeWallet) RegFeeConfirmations(ctx context.Context, coinID dex.B
 }
 
 // FeeRate satisfies asset.FeeRater.
-func (eth *ExchangeWallet) FeeRate() (uint64, string) {
+// FeeRate returns the current optimal fee rate in gwei / gas.
+func (eth *ExchangeWallet) FeeRate() uint64 {
 	base, tip, err := eth.node.currentFees(eth.ctx)
 	if err != nil {
 		eth.log.Errorf("Error getting net fee state: %v", err)
-		return 0, ""
+		return 0
 	}
 
 	feeRate := new(big.Int).Add(
@@ -1371,10 +1377,10 @@ func (eth *ExchangeWallet) FeeRate() (uint64, string) {
 	feeRateGwei, err := dexeth.WeiToGweiUint64(feeRate)
 	if err != nil {
 		eth.log.Errorf("Failed to convert wei to gwei: %v", err)
-		return 0, ""
+		return 0
 	}
 
-	return feeRateGwei, "gwei"
+	return feeRateGwei
 }
 
 func (eth *ExchangeWallet) checkPeers() {

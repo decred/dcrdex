@@ -21,4 +21,5 @@ var UnitInfo = dex.UnitInfo{
 			ConversionFactor: 1e2,
 		},
 	},
+	FeeRateUnit: "Sats/B",
 }

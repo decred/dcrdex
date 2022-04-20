@@ -154,6 +154,8 @@ export interface WalletState {
   balance: WalletBalance
   address: string
   units: string
+  feeRateUnits: string
+  fallbackFeeRate: number
   encrypted: boolean
   peerCount: number
   synced: boolean
@@ -217,6 +219,7 @@ export interface UnitInfo {
   atomicUnit: string
   conventional: Denomination
   denominations: Denomination[]
+  feeRateUnit: string
 }
 
 export interface Denomination {

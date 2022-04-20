@@ -16,6 +16,7 @@ var (
 			Unit:             "BCH",
 			ConversionFactor: 1e8,
 		},
+		FeeRateUnit: "Sats/B",
 	}
 	// MainNetParams are the clone parameters for mainnet.
 	MainNetParams = btc.ReadCloneParams(&btc.CloneParams{

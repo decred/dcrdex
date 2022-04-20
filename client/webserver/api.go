@@ -74,18 +74,16 @@ func (s *WebServer) apiEstimateFeeRate(w http.ResponseWriter, r *http.Request) {
 	if !readPost(w, r, form) {
 		return
 	}
-	feeRate, unit, err := s.core.EstimateFeeRate(*form.AssetID)
+	feeRate, err := s.core.EstimateFeeRate(*form.AssetID)
 	if err != nil {
 		s.writeAPIError(w, err)
 		return
 	}
 	resp := struct {
 		OK      bool   `json:"ok"`
-		Unit    string `json:"unit"`
 		FeeRate uint64 `json:"feeRate"`
 	}{
 		OK:      true,
-		Unit:    unit,
 		FeeRate: feeRate,
 	}
 	writeJSON(w, resp, s.indent)

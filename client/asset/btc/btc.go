@@ -603,13 +603,13 @@ func (btc *ExchangeWalletSPV) Rescan(_ context.Context) error {
 }
 
 // FeeRate satisfies asset.FeeRater.
-func (btc *ExchangeWalletFullNode) FeeRate() (uint64, string) {
+func (btc *ExchangeWalletFullNode) FeeRate() uint64 {
 	rate, err := btc.feeRate(nil, 1)
 	if err != nil {
 		btc.log.Errorf("Failed to get fee rate: %v", err)
-		return 0, ""
+		return 0
 	}
-	return rate, btc.sizeUnit()
+	return rate
 }
 
 // LogFilePath returns the path to the neutrino log file.
@@ -2698,6 +2698,11 @@ func (btc *baseWallet) PayFee(address string, regFee, feeRate uint64) (asset.Coi
 		return nil, err
 	}
 	return newOutput(txHash, vout, sent), nil
+}
+
+// FallbackFeeRate returns the fallback fee rate.
+func (btc *baseWallet) FallbackFeeRate() uint64 {
+	return btc.fallbackFeeRate
 }
 
 // EstimateRegistrationTxFee returns an estimate for the tx fee needed to

@@ -622,17 +622,17 @@ func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
 }
 
 // FeeRate satisfies asset.FeeRater.
-func (dcr *ExchangeWallet) FeeRate() (uint64, string) {
+func (dcr *ExchangeWallet) FeeRate() uint64 {
 	if dcr.wallet.SpvMode() {
-		return 0, "" // EstimateSmartFeeRate needs dcrd passthrough
+		return 0 // EstimateSmartFeeRate needs dcrd passthrough
 	}
 	// Requesting a rate for 1 confirmation can return unreasonably high rates.
 	rate, err := dcr.feeRate(2)
 	if err != nil {
 		dcr.log.Errorf("Failed to get fee rate: %v", err)
-		return 0, ""
+		return 0
 	}
-	return rate, "B" 
+	return rate
 }
 
 // FeeRate returns the current optimal fee rate in atoms / byte.
@@ -2501,6 +2501,11 @@ func (dcr *ExchangeWallet) PayFee(address string, regFee, feeRate uint64) (asset
 			"expected %.8f, but %.8f was reported", msgTx.CachedTxHash(), toDCR(regFee), toDCR(sent))
 	}
 	return newOutput(msgTx.CachedTxHash(), 0, regFee, wire.TxTreeRegular), nil
+}
+
+// FallbackFeeRate returns the fallback fee rate.
+func (dcr *ExchangeWallet) FallbackFeeRate() uint64 {
+	return dcr.fallbackFeeRate
 }
 
 // EstimateRegistrationTxFee returns an estimate for the tx fee needed to

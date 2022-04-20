@@ -319,6 +319,8 @@ type Wallet interface {
 	// EstimateRegistrationTxFee returns an estimate for the tx fee needed to
 	// pay the registration fee using the provided feeRate.
 	EstimateRegistrationTxFee(feeRate uint64) uint64
+	// FallbackFeeRate returns the fallback fee rate.
+	FallbackFeeRate() uint64
 }
 
 // Rescanner is a wallet implementation with rescan functionality.
@@ -348,8 +350,8 @@ type LogFiler interface {
 	LogFilePath() string
 }
 
-// FeeRater is capable of retrieving a non-critical fee rate estimate and
-// unit for an asset. Some SPV wallets, for example, cannot provide a fee rate
+// FeeRater is capable of retrieving a non-critical fee rate estimate for an
+// asset. Some SPV wallets, for example, cannot provide a fee rate
 // estimate, so shouldn't implement FeeRater.
 // However, since the mode of external wallets may not be known on
 // construction, only connect, a zero rate may be returned. The
@@ -357,8 +359,9 @@ type LogFiler interface {
 // FeeRate should be used for rates that are not validated by the server
 // (Withdraw, Send, PayFee), and will/should not be used to generate a fee
 // suggestion for swap operations.
+// FeeRate returns the fee rate, in atoms/byte equivalent.
 type FeeRater interface {
-	FeeRate() (uint64, string)
+	FeeRate() uint64
 }
 
 // TokenMaster is implemented by assets which support degenerate tokens.

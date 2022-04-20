@@ -456,17 +456,19 @@ export default class WalletsPage extends BasePage {
     page.withdrawName.textContent = asset.info.name
     box.dataset.assetID = String(assetID)
     this.animation = this.showBox(box, page.walletPass)
+    page.withdrawUnit.textContent = ''
+    page.withdrawFeeRate.textContent = ''
 
     Doc.hide(page.FeeRate)
     const res = await postJSON('/api/getfeerate', {
       assetID: assetID
     })
-    console.log(res)
     if (!app().checkResponse(res) || res.feeRate === 0) {
-      page.withdrawFeeRate.textContent = 'unavailable'
+      page.withdrawFeeRate.textContent = wallet.fallbackFeeRate.toString()
+      page.withdrawUnit.textContent = wallet.feeRateUnits
     } else if (res.feeRate > 0) {
       page.withdrawFeeRate.textContent = res.feeRate
-      page.withdrawUnit.textContent = wallet.units + '/' + res.unit
+      page.withdrawUnit.textContent = wallet.feeRateUnits
     }
     Doc.show(page.FeeRate)
   }
