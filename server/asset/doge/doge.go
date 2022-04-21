@@ -80,8 +80,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 
 	return btc.NewBTCClone(&btc.BackendCloneConfig{
 		Name: assetName,
-		// Segwit may be enabled in v1.15
-		// https://www.reddit.com/r/dogecoindev/comments/7m8zjz/dogecoin_114_segwit_checks/
+		// Segwit may be enabled in v1.21.
 		// If so, it may work differently than Bitcoin.
 		// https://github.com/dogecoin/dogecoin/discussions/2264
 		// Looks like Segwit will be false for a little while longer. Should

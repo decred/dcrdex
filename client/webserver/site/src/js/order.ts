@@ -281,7 +281,7 @@ const CoinExplorers: Record<number, Record<number, (cid: string) => string>> = {
     }
   },
   3: { // doge
-    [Mainnet]: (cid: string) => `https://dogechain.info/tx/${cid.split(':')[0]}`,
+    [Mainnet]: (cid: string) => `https://dogeblocks.com/tx/${cid.split(':')[0]}`,
     [Testnet]: (cid: string) => `https://blockexplorer.one/dogecoin/testnet/tx/${cid.split(':')[0]}`
   }
 }

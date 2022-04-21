@@ -20,12 +20,20 @@ const (
 	version = 0
 	BipID   = 3
 	// The default fee is passed to the user as part of the asset.WalletInfo
-	// structure.
-	defaultFee          = 500000
-	defaultFeeRateLimit = 1_000_000
-	minNetworkVersion   = 1140400
-	walletTypeRPC       = "dogecoindRPC"
-	feeConfs            = 10
+	// structure. For details on DOGE-specific limits, see:
+	// https://github.com/dogecoin/dogecoin/blob/master/doc/fee-recommendation.md
+	// and https://github.com/dogecoin/dogecoin/discussions/2347
+	// Dogecoin Core v1.14.5 adopts proposed fees for tx creation:
+	// https://github.com/dogecoin/dogecoin/releases/tag/v1.14.5
+	// https://github.com/dogecoin/dogecoin/commit/9c6af6d84179e46002338bb5b9a69c6f2367c731
+	// These limits were applied to mining and relay in v1.14.4.
+	defaultFee          = 4_000     // 0.04 DOGE/kB, 4x the 0.01 recommended by dogecoin core (DEFAULT_TRANSACTION_FEE)
+	defaultFeeRateLimit = 50_000    // 0.5 DOGE/kB, where v1.14.5 considers 1.0 DOGE/kB "high" (HIGH_TX_FEE_PER_KB)
+	dustLimit           = 1_000_000 // sats => 0.01 DOGE, the "soft" limit (DEFAULT_DUST_LIMIT)
+
+	minNetworkVersion = 1140500
+	walletTypeRPC     = "dogecoindRPC"
+	feeConfs          = 10
 )
 
 var (
@@ -159,6 +167,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		BooleanGetBlockRPC:       true,
 		SingularWallet:           true,
 		UnlockSpends:             true,
+		ConstantDustLimit:        dustLimit,
 		FeeEstimator: func(cl btc.RawRequester, _ uint64) (uint64, error) {
 			confArg, err := json.Marshal(feeConfs)
 			if err != nil {

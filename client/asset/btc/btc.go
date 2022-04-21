@@ -256,6 +256,10 @@ type BTCCloneCFG struct {
 	// UnlockSpends manually unlocks outputs as they are spent. Most asses will
 	// unlock wallet outputs automatically as they are spent.
 	UnlockSpends bool
+	// ConstantDustLimit is used if an asset enforces a dust limit (minimum
+	// output value) that doesn't depend on the serialized size of the output.
+	// If ConstantDustLimit is zero, dexbtc.IsDust is used.
+	ConstantDustLimit uint64
 }
 
 // outPoint is the hash and output index of a transaction output.
@@ -575,11 +579,11 @@ type baseWallet struct {
 	minNetworkVersion uint64
 	fallbackFeeRate   uint64
 	feeRateLimit      uint64
+	dustLimit         uint64
 	redeemConfTarget  uint64
 	useSplitTx        bool
 	useLegacyBalance  bool
 	segwit            bool
-	legacyRawFeeLimit bool // wut dis?
 	signNonSegwit     TxInSigner
 	estimateFee       func(RawRequester, uint64) (uint64, error)
 	decodeAddr        dexbtc.AddressDecoder
@@ -827,11 +831,11 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		minNetworkVersion:   cfg.MinNetworkVersion,
 		fallbackFeeRate:     fallbackFeesPerByte,
 		feeRateLimit:        feesLimitPerByte,
+		dustLimit:           cfg.ConstantDustLimit,
 		redeemConfTarget:    redeemConfTarget,
 		useSplitTx:          walletCfg.UseSplitTx,
 		useLegacyBalance:    cfg.LegacyBalance,
 		segwit:              cfg.Segwit,
-		legacyRawFeeLimit:   cfg.LegacyRawFeeLimit,
 		signNonSegwit:       nonSegwitSigner,
 		estimateFee:         cfg.FeeEstimator,
 		decodeAddr:          addrDecoder,
@@ -931,6 +935,15 @@ func (btc *baseWallet) shutdown() {
 		delete(btc.findRedemptionQueue, contractOutpoint)
 	}
 	btc.findRedemptionMtx.Unlock()
+}
+
+// IsDust checks if the tx output's value is dust. If the dustLimit is set, it
+// is compared against that, otherwise the formula in dexbtc.IsDust is used.
+func (btc *baseWallet) IsDust(txOut *wire.TxOut, minRelayTxFee uint64) bool {
+	if btc.dustLimit > 0 {
+		return txOut.Value < int64(btc.dustLimit)
+	}
+	return dexbtc.IsDust(txOut, minRelayTxFee)
 }
 
 // getBlockchainInfoResult models the data returned from the getblockchaininfo
@@ -2130,7 +2143,7 @@ func (btc *baseWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, 
 	}
 	txOut := wire.NewTxOut(int64(totalIn-fee), pkScript)
 	// One last check for dust.
-	if dexbtc.IsDust(txOut, feeRate) {
+	if btc.IsDust(txOut, feeRate) {
 		return nil, nil, 0, fmt.Errorf("redeem output is dust")
 	}
 	msgTx.AddTxOut(txOut)
@@ -2687,7 +2700,7 @@ func (btc *baseWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract de
 	}
 	txOut := wire.NewTxOut(int64(val-fee), pkScript)
 	// One last check for dust.
-	if dexbtc.IsDust(txOut, feeRate) {
+	if btc.IsDust(txOut, feeRate) {
 		return nil, fmt.Errorf("refund output is dust")
 	}
 	msgTx.AddTxOut(txOut)
@@ -3218,7 +3231,7 @@ func (btc *baseWallet) signTxAndAddChange(baseTx *wire.MsgTx, addr btcutil.Addre
 	}
 	// If the change is not dust, recompute the signed txn size and iterate on
 	// the fees vs. change amount.
-	changeAdded := !dexbtc.IsDust(changeOutput, feeRate)
+	changeAdded := !btc.IsDust(changeOutput, feeRate)
 	if changeAdded {
 		// Add the change output.
 		vSize0 := dexbtc.MsgTxVBytes(baseTx)
@@ -3258,7 +3271,7 @@ func (btc *baseWallet) signTxAndAddChange(baseTx *wire.MsgTx, addr btcutil.Addre
 			tried[fee] = true
 			fee = reqFee
 			changeOutput.Value = int64(remaining - fee)
-			if dexbtc.IsDust(changeOutput, feeRate) {
+			if btc.IsDust(changeOutput, feeRate) {
 				// Another condition that should be impossible, but check anyway in case
 				// the maximum fee was underestimated causing the first check to be
 				// missed.
@@ -3270,6 +3283,9 @@ func (btc *baseWallet) signTxAndAddChange(baseTx *wire.MsgTx, addr btcutil.Addre
 		}
 
 		totalOut += uint64(changeOutput.Value)
+	} else {
+		btc.log.Debugf("Foregoing change worth up to %v in tx %v because it is dust",
+			changeOutput.Value, msgTx.TxHash())
 	}
 
 	fee := totalIn - totalOut
