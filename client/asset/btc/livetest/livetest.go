@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -29,13 +30,14 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
+	"decred.org/dcrdex/dex/wait"
 )
+
+var tLogger dex.Logger
 
 type WalletConstructor func(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error)
 
-func tBackend(ctx context.Context, t *testing.T, cfg *Config, node, name string,
-	logger dex.Logger, blkFunc func(string, error)) (asset.Wallet, *dex.ConnectionMaster) {
-
+func tBackend(ctx context.Context, t *testing.T, cfg *Config, node, name string, blkFunc func(string, error)) *connectedWallet {
 	t.Helper()
 	user, err := user.Current()
 	if err != nil {
@@ -63,7 +65,7 @@ func tBackend(ctx context.Context, t *testing.T, cfg *Config, node, name string,
 		},
 	}
 
-	w, err := cfg.NewWallet(walletCfg, logger, dex.Regtest)
+	w, err := cfg.NewWallet(walletCfg, tLogger.SubLogger(node+"."+name), dex.Regtest)
 	if err != nil {
 		t.Fatalf("error creating backend: %v", err)
 	}
@@ -74,29 +76,23 @@ func tBackend(ctx context.Context, t *testing.T, cfg *Config, node, name string,
 		t.Fatalf("error connecting backend: %v", err)
 	}
 
-	return w, cm
+	return &connectedWallet{w, cm}
+}
+
+type connectedWallet struct {
+	asset.Wallet
+	cxn *dex.ConnectionMaster
 }
 
 type testRig struct {
-	t                 *testing.T
-	symbol            string
-	backends          map[string]asset.Wallet
-	connectionMasters map[string]*dex.ConnectionMaster
+	t            *testing.T
+	symbol       string
+	firstWallet  *connectedWallet
+	secondWallet *connectedWallet
 }
 
-func (rig *testRig) alpha() asset.Wallet {
-	return rig.backends["alpha"]
-}
-
-// TODO: Test with beta since it's a different node.
-// func (rig *testRig) beta() asset.Wallet {
-// 	return rig.backends["beta"]
-// }
-func (rig *testRig) gamma() asset.Wallet {
-	return rig.backends["gamma"]
-}
 func (rig *testRig) close() {
-	for name, cm := range rig.connectionMasters {
+	close := func(cm *dex.ConnectionMaster) {
 		closed := make(chan struct{})
 		go func() {
 			cm.Disconnect()
@@ -105,9 +101,11 @@ func (rig *testRig) close() {
 		select {
 		case <-closed:
 		case <-time.NewTimer(time.Second * 30).C:
-			rig.t.Fatalf("failed to disconnect from %s", name)
+			rig.t.Fatalf("failed to disconnect")
 		}
 	}
+	close(rig.firstWallet.cxn)
+	close(rig.secondWallet.cxn)
 }
 
 func (rig *testRig) mineAlpha() error {
@@ -120,22 +118,40 @@ func randBytes(l int) []byte {
 	return b
 }
 
+type WalletName struct {
+	Node string
+	Name string
+}
+
 type Config struct {
-	NewWallet WalletConstructor
-	LotSize   uint64
-	Asset     *dex.Asset
-	SplitTx   bool
-	SPV       bool
+	NewWallet    WalletConstructor
+	LotSize      uint64
+	Asset        *dex.Asset
+	SplitTx      bool
+	SPV          bool
+	FirstWallet  *WalletName
+	SecondWallet *WalletName
 }
 
 func Run(t *testing.T, cfg *Config) {
-	tLogger := dex.StdOutLogger("TEST", dex.LevelDebug)
+	tLogger = dex.StdOutLogger("TEST", dex.LevelDebug)
 	tCtx, shutdown := context.WithCancel(context.Background())
 	defer shutdown()
 
 	tStart := time.Now()
 
 	walletPassword := []byte("abc")
+
+	if cfg.FirstWallet == nil {
+		cfg.FirstWallet = &WalletName{Node: "alpha"}
+	}
+
+	if cfg.SecondWallet == nil {
+		cfg.SecondWallet = &WalletName{
+			Node: "alpha",
+			Name: "gamma",
+		}
+	}
 
 	var blockReported uint32
 	blkFunc := func(name string, err error) {
@@ -144,10 +160,8 @@ func Run(t *testing.T, cfg *Config) {
 	}
 
 	rig := &testRig{
-		t:                 t,
-		symbol:            cfg.Asset.Symbol,
-		backends:          make(map[string]asset.Wallet),
-		connectionMasters: make(map[string]*dex.ConnectionMaster, 3),
+		t:      t,
+		symbol: cfg.Asset.Symbol,
 	}
 
 	var expConfs uint32
@@ -165,13 +179,13 @@ func Run(t *testing.T, cfg *Config) {
 	}
 
 	t.Log("Setting up alpha/beta/gamma wallet backends...")
-	rig.backends["alpha"], rig.connectionMasters["alpha"] = tBackend(tCtx, t, cfg, "alpha", "", tLogger.SubLogger("alpha"), blkFunc)
+	rig.firstWallet = tBackend(tCtx, t, cfg, cfg.FirstWallet.Node, cfg.FirstWallet.Name, blkFunc)
 	// rig.backends["beta"], rig.connectionMasters["beta"] = tBackend(tCtx, t, cfg, "beta", "", tLogger.SubLogger("beta"), blkFunc)
-	rig.backends["gamma"], rig.connectionMasters["gamma"] = tBackend(tCtx, t, cfg, "alpha", "gamma", tLogger.SubLogger("gamma"), blkFunc)
+	rig.secondWallet = tBackend(tCtx, t, cfg, cfg.SecondWallet.Node, cfg.SecondWallet.Name, blkFunc)
 	defer rig.close()
 
 	// Unlock the wallet for use.
-	err := rig.alpha().Unlock(walletPassword)
+	err := rig.firstWallet.Unlock(walletPassword)
 	if err != nil {
 		t.Fatalf("error unlocking gamma wallet: %v", err)
 	}
@@ -181,7 +195,7 @@ func Run(t *testing.T, cfg *Config) {
 		// if err := rig.beta().Unlock(walletPassword); err != nil {
 		// 	t.Fatalf("beta Unlock error: %v", err)
 		// }
-		if err := rig.gamma().Unlock(walletPassword); err != nil {
+		if err := rig.secondWallet.Unlock(walletPassword); err != nil {
 			t.Fatalf("gamma Unlock error: %v", err)
 		}
 	}
@@ -201,7 +215,7 @@ func Run(t *testing.T, cfg *Config) {
 	}
 
 	// Check available amount.
-	for name, wallet := range rig.backends {
+	checkAmt := func(name string, wallet *connectedWallet) {
 		bal, err := wallet.Balance()
 		if err != nil {
 			t.Fatalf("error getting available balance: %v", err)
@@ -209,6 +223,8 @@ func Run(t *testing.T, cfg *Config) {
 		tLogger.Infof("%s %f available, %f immature, %f locked",
 			name, float64(bal.Available)/1e8, float64(bal.Immature)/1e8, float64(bal.Locked)/1e8)
 	}
+	checkAmt("first", rig.firstWallet)
+	checkAmt("second", rig.secondWallet)
 
 	ord := &asset.Order{
 		Value:        contractValue * 3,
@@ -224,35 +240,35 @@ func Run(t *testing.T, cfg *Config) {
 
 	// Gamma should only have 10 BTC utxos, so calling fund for less should only
 	// return 1 utxo.
-	utxos, _, err := rig.gamma().FundOrder(ord)
+	utxos, _, err := rig.secondWallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("Funding error: %v", err)
 	}
 	utxo := utxos[0]
 
 	// UTXOs should be locked
-	utxos, _, _ = rig.gamma().FundOrder(ord)
+	utxos, _, _ = rig.secondWallet.FundOrder(ord)
 	if inUTXOs(utxo, utxos) {
 		t.Fatalf("received locked output")
 	}
-	rig.gamma().ReturnCoins([]asset.Coin{utxo})
-	rig.gamma().ReturnCoins(utxos)
+	rig.secondWallet.ReturnCoins([]asset.Coin{utxo})
+	rig.secondWallet.ReturnCoins(utxos)
 	// Make sure we get the first utxo back with Fund.
-	utxos, _, _ = rig.gamma().FundOrder(ord)
+	utxos, _, _ = rig.secondWallet.FundOrder(ord)
 	if !cfg.SplitTx && !inUTXOs(utxo, utxos) {
 		t.Fatalf("unlocked output not returned")
 	}
-	rig.gamma().ReturnCoins(utxos)
+	rig.secondWallet.ReturnCoins(utxos)
 
 	// Get a separate set of UTXOs for each contract.
 	setOrderValue(contractValue)
-	utxos1, _, err := rig.gamma().FundOrder(ord)
+	utxos1, _, err := rig.secondWallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error funding first contract: %v", err)
 	}
 	// Get a separate set of UTXOs for each contract.
 	setOrderValue(contractValue * 2)
-	utxos2, _, err := rig.gamma().FundOrder(ord)
+	utxos2, _, err := rig.secondWallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error funding second contract: %v", err)
 	}
@@ -265,7 +281,7 @@ func Run(t *testing.T, cfg *Config) {
 		time.Sleep(blockWait)
 	}
 
-	address, err := rig.alpha().Address()
+	address, err := rig.firstWallet.Address()
 	if err != nil {
 		t.Fatalf("error getting alpha address: %v", err)
 	}
@@ -296,7 +312,7 @@ func Run(t *testing.T, cfg *Config) {
 
 	tLogger.Info("Testing Swap")
 
-	receipts, _, _, err := rig.gamma().Swap(swaps)
+	receipts, _, _, err := rig.secondWallet.Swap(swaps)
 	if err != nil {
 		t.Fatalf("error sending swap transaction: %v", err)
 	}
@@ -320,7 +336,7 @@ func Run(t *testing.T, cfg *Config) {
 	confContract := receipts[0].Contract()
 	checkConfs := func(n uint32, expSpent bool) {
 		t.Helper()
-		confs, spent, err := rig.gamma().SwapConfirmations(context.Background(), confCoin.ID(), confContract, tStart)
+		confs, spent, err := rig.secondWallet.SwapConfirmations(context.Background(), confCoin.ID(), confContract, tStart)
 		if err != nil {
 			if n > 0 || !errors.Is(err, asset.CoinNotFoundError) {
 				t.Fatalf("error getting %d confs: %v", n, err)
@@ -336,22 +352,43 @@ func Run(t *testing.T, cfg *Config) {
 
 	checkConfs(expConfs, false)
 
+	latencyQ := wait.NewTickerQueue(time.Millisecond * 500)
+	go latencyQ.Run(tCtx)
+
+	getAuditInfo := func(coinID, contract []byte) *asset.AuditInfo {
+		c := make(chan *asset.AuditInfo, 1)
+		latencyQ.Wait(&wait.Waiter{
+			Expiration: time.Now().Add(time.Second * 10),
+			TryFunc: func() bool {
+				ai, err := rig.firstWallet.AuditContract(coinID, contract, nil, false) // no TxData because server gets that for us in practice!
+				if err != nil {
+					if strings.Contains(err.Error(), "error finding unspent contract") {
+						return wait.TryAgain
+					}
+					t.Fatalf("error auditing contract: %v", err)
+				}
+				c <- ai
+				return wait.DontTryAgain
+			},
+			ExpireFunc: func() { t.Fatalf("makeRedemption -> AuditContract timed out") },
+		})
+
+		// Alpha should be able to redeem.
+		return <-c
+	}
+
 	makeRedemption := func(swapVal uint64, receipt asset.Receipt, secret []byte) *asset.Redemption {
 		t.Helper()
 
-		// Alpha should be able to redeem.
-		ci, err := rig.alpha().AuditContract(receipt.Coin().ID(), receipt.Contract(), nil, false) // no TxData because server gets that for us in practice!
-		if err != nil {
-			t.Fatalf("error auditing contract: %v", err)
-		}
-		auditCoin := ci.Coin
-		if ci.Recipient != address {
-			t.Fatalf("wrong address. %s != %s", ci.Recipient, address)
+		ai := getAuditInfo(receipt.Coin().ID(), receipt.Contract())
+		auditCoin := ai.Coin
+		if ai.Recipient != address {
+			t.Fatalf("wrong address. %s != %s", ai.Recipient, address)
 		}
 		if auditCoin.Value() != swapVal {
 			t.Fatalf("wrong contract value. wanted %d, got %d", swapVal, auditCoin.Value())
 		}
-		confs, spent, err := rig.alpha().SwapConfirmations(context.TODO(), receipt.Coin().ID(), receipt.Contract(), tStart)
+		confs, spent, err := rig.firstWallet.SwapConfirmations(tCtx, receipt.Coin().ID(), receipt.Contract(), tStart)
 		if err != nil {
 			t.Fatalf("error getting confirmations: %v", err)
 		}
@@ -361,11 +398,11 @@ func Run(t *testing.T, cfg *Config) {
 		if spent {
 			t.Fatalf("makeRedemption: expected unspent, got spent")
 		}
-		if ci.Expiration.Equal(lockTime) {
-			t.Fatalf("wrong lock time. wanted %s, got %s", lockTime, ci.Expiration)
+		if ai.Expiration.Equal(lockTime) {
+			t.Fatalf("wrong lock time. wanted %s, got %s", lockTime, ai.Expiration)
 		}
 		return &asset.Redemption{
-			Spends: ci,
+			Spends: ai,
 			Secret: secret,
 		}
 	}
@@ -379,7 +416,7 @@ func Run(t *testing.T, cfg *Config) {
 
 	tLogger.Info("Testing Redeem")
 
-	_, _, _, err = rig.alpha().Redeem(&asset.RedeemForm{
+	_, _, _, err = rig.firstWallet.Redeem(&asset.RedeemForm{
 		Redemptions: redemptions,
 	})
 	if err != nil {
@@ -399,10 +436,22 @@ func Run(t *testing.T, cfg *Config) {
 
 	tLogger.Info("Testing FindRedemption")
 
-	_, _, err = rig.gamma().FindRedemption(ctx, swapReceipt.Coin().ID())
-	if err != nil {
-		t.Fatalf("error finding unconfirmed redemption: %v", err)
-	}
+	found := make(chan struct{})
+	latencyQ.Wait(&wait.Waiter{
+		Expiration: time.Now().Add(time.Second * 10),
+		TryFunc: func() bool {
+			ctx, cancel := context.WithTimeout(tCtx, time.Millisecond*5)
+			defer cancel()
+			_, _, err = rig.secondWallet.FindRedemption(ctx, swapReceipt.Coin().ID())
+			if err != nil {
+				return wait.TryAgain
+			}
+			close(found)
+			return wait.DontTryAgain
+		},
+		ExpireFunc: func() { t.Fatalf("mempool FindRedemption timed out") },
+	})
+	<-found
 
 	// Mine a block and find the redemption again.
 	mine()
@@ -411,7 +460,7 @@ func Run(t *testing.T, cfg *Config) {
 	}
 	// Check that there is 1 confirmation on the swap
 	checkConfs(expConfs, true)
-	_, checkKey, err := rig.gamma().FindRedemption(ctx, swapReceipt.Coin().ID())
+	_, checkKey, err := rig.secondWallet.FindRedemption(ctx, swapReceipt.Coin().ID())
 	if err != nil {
 		t.Fatalf("error finding confirmed redemption: %v", err)
 	}
@@ -426,7 +475,7 @@ func Run(t *testing.T, cfg *Config) {
 
 	// Have gamma send a swap contract to the alpha address.
 	setOrderValue(contractValue)
-	utxos, _, _ = rig.gamma().FundOrder(ord)
+	utxos, _, _ = rig.secondWallet.FundOrder(ord)
 	contract := &asset.Contract{
 		Address:    address,
 		Value:      contractValue,
@@ -441,7 +490,7 @@ func Run(t *testing.T, cfg *Config) {
 
 	tLogger.Info("Testing Refund")
 
-	receipts, _, _, err = rig.gamma().Swap(swaps)
+	receipts, _, _, err = rig.secondWallet.Swap(swaps)
 	if err != nil {
 		t.Fatalf("error sending swap transaction: %v", err)
 	}
@@ -458,7 +507,7 @@ func Run(t *testing.T, cfg *Config) {
 		mine()
 	}
 
-	coinID, err := rig.gamma().Refund(swapReceipt.Coin().ID(), swapReceipt.Contract(), 100)
+	coinID, err := rig.secondWallet.Refund(swapReceipt.Coin().ID(), swapReceipt.Contract(), 100)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}
@@ -467,7 +516,7 @@ func Run(t *testing.T, cfg *Config) {
 
 	// Test PayFee
 	const defaultFee = 100
-	coin, err := rig.gamma().PayFee(address, 1e8, defaultFee)
+	coin, err := rig.secondWallet.PayFee(address, 1e8, defaultFee)
 	if err != nil {
 		t.Fatalf("error paying fees: %v", err)
 	}
@@ -476,7 +525,7 @@ func Run(t *testing.T, cfg *Config) {
 	tLogger.Info("Testing Withdraw")
 
 	// Test Withdraw
-	coin, err = rig.gamma().Withdraw(address, 5e7, 100)
+	coin, err = rig.secondWallet.Withdraw(address, cfg.LotSize, 100)
 	if err != nil {
 		t.Fatalf("error withdrawing: %v", err)
 	}

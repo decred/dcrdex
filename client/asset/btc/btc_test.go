@@ -54,6 +54,10 @@ var (
 	feeSuggestion  uint64 = 10
 )
 
+func boolPtr(v bool) *bool {
+	return &v
+}
+
 func btcAddr(segwit bool) btcutil.Address {
 	var addr btcutil.Address
 	if segwit {
@@ -599,8 +603,6 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWalletFullNode, *testD
 		Segwit:              segwit,
 	}
 
-	// rpcClient := newRPCClient(requester, segwit, nil, false, minNetworkVersion, dex.StdOutLogger("RPCTEST", dex.LevelTrace), &chaincfg.MainNetParams)
-
 	var wallet *ExchangeWalletFullNode
 	var err error
 	switch walletType {
@@ -739,7 +741,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 		ScriptPubKey:  tP2PKH,
 		Spendable:     true,
 		Solvable:      true,
-		Safe:          true,
+		SafePtr:       boolPtr(true),
 	}
 	unspents = append(unspents, littleUTXO)
 	node.listUnspent = unspents
@@ -799,7 +801,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 		ScriptPubKey:  tP2PKH,
 		Spendable:     true,
 		Solvable:      true,
-		Safe:          true,
+		SafePtr:       boolPtr(true),
 	}
 	unspents = append(unspents, lottaUTXO)
 	littleUTXO.Confirmations = 1
@@ -864,7 +866,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	}
 
 	// Fund a little bit, with unsafe littleUTXO.
-	littleUTXO.Safe = false
+	littleUTXO.SafePtr = boolPtr(false)
 	littleUTXO.Confirmations = 0
 	node.listUnspent = unspents
 	spendables, _, err := wallet.FundOrder(ord)
@@ -880,7 +882,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	}
 
 	// Now with safe confirmed littleUTXO.
-	littleUTXO.Safe = true
+	littleUTXO.SafePtr = boolPtr(true)
 	littleUTXO.Confirmations = 2
 	node.listUnspent = unspents
 	spendables, _, err = wallet.FundOrder(ord)
@@ -1128,7 +1130,7 @@ func testFundingCoins(t *testing.T, segwit bool, walletType string) {
 		ScriptPubKey: tP2PKH,
 		Spendable:    true,
 		Solvable:     true,
-		Safe:         true,
+		SafePtr:      boolPtr(true),
 		Amount:       1,
 	}
 	unspents := []*ListUnspentResult{p2pkhUnspent}
@@ -1275,7 +1277,7 @@ func TestFundEdges(t *testing.T) {
 		ScriptPubKey:  tP2PKH,
 		Spendable:     true,
 		Solvable:      true,
-		Safe:          true,
+		SafePtr:       boolPtr(true),
 	}
 	unspents := []*ListUnspentResult{p2pkhUnspent}
 	node.listUnspent = unspents
@@ -1362,7 +1364,7 @@ func TestFundEdges(t *testing.T) {
 		RedeemScript:  p2shRedeem,
 		Spendable:     true,
 		Solvable:      true,
-		Safe:          true,
+		SafePtr:       boolPtr(true),
 	}
 	p2pkhUnspent.Amount = float64(halfSwap+backingFees-1) / 1e8
 	unspents = []*ListUnspentResult{p2pkhUnspent, p2shUnspent}
@@ -1393,7 +1395,7 @@ func TestFundEdges(t *testing.T) {
 		ScriptPubKey:  p2wpkhPkScript,
 		Spendable:     true,
 		Solvable:      true,
-		Safe:          true,
+		SafePtr:       boolPtr(true),
 	}
 	unspents = []*ListUnspentResult{p2wpkhUnspent}
 	node.listUnspent = unspents
@@ -1427,7 +1429,7 @@ func TestFundEdges(t *testing.T) {
 		RedeemScript:  p2wpkhRedeemScript,
 		Spendable:     true,
 		Solvable:      true,
-		Safe:          true,
+		SafePtr:       boolPtr(true),
 	}
 	unspents = []*ListUnspentResult{p2wpshUnspent}
 	node.listUnspent = unspents
@@ -1494,7 +1496,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 		ScriptPubKey:  tP2WPKH,
 		Spendable:     true,
 		Solvable:      true,
-		Safe:          true,
+		SafePtr:       boolPtr(true),
 	}
 	unspents := []*ListUnspentResult{p2wpkhUnspent}
 	node.listUnspent = unspents
@@ -2329,7 +2331,7 @@ func testSender(t *testing.T, senderType tSenderType, segwit bool, walletType st
 		Confirmations: 1,
 		Vout:          vout,
 		ScriptPubKey:  pkScript,
-		Safe:          true,
+		SafePtr:       boolPtr(true),
 		Spendable:     true,
 	}}
 	node.listUnspent = unspents
@@ -2685,7 +2687,7 @@ func testPreSwap(t *testing.T, segwit bool, walletType string) {
 		ScriptPubKey:  pkScript,
 		Spendable:     true,
 		Solvable:      true,
-		Safe:          true,
+		SafePtr:       boolPtr(true),
 	}
 	unspents := []*ListUnspentResult{unspent}
 

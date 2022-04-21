@@ -248,5 +248,9 @@ const CoinExplorers = {
   2: { // ltc
     [Mainnet]: cid => `https://ltc.bitaps.com/${cid.split(':')[0]}`,
     [Testnet]: cid => `https://tltc.bitaps.com/${cid.split(':')[0]}`
+  },
+  3: { // doge
+    [Mainnet]: cid => `https://dogeblocks.com/tx/${cid.split(':')[0]}`,
+    [Testnet]: cid => `https://blockexplorer.one/dogecoin/testnet/tx/${cid.split(':')[0]}`
   }
 }

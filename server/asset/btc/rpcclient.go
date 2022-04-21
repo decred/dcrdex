@@ -119,11 +119,18 @@ func (rc *RPCClient) RawRequest(method string, params []json.RawMessage) (json.R
 	return rc.requester.RawRequest(rc.ctx, method, params)
 }
 
+// Call is used to marshal parmeters and send requests to the RPC server via
+// (*rpcclient.Client).RawRequest. If `thing` is non-nil, the result will be
+// marshaled into `thing`.
+func (rc *RPCClient) Call(method string, args []interface{}, thing interface{}) error {
+	return rc.call(method, args, thing)
+}
+
 // anylist is a list of RPC parameters to be converted to []json.RawMessage and
 // sent via RawRequest.
 type anylist []interface{}
 
-// call is used internally to  marshal parmeters and send requests to  the RPC
+// call is used internally to marshal parmeters and send requests to the RPC
 // server via (*rpcclient.Client).RawRequest. If `thing` is non-nil, the result
 // will be marshaled into `thing`.
 func (rc *RPCClient) call(method string, args anylist, thing interface{}) error {

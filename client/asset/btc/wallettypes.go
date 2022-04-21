@@ -31,7 +31,11 @@ type ListUnspentResult struct {
 	RedeemScript  dex.Bytes `json:"redeemScript"`
 	Spendable     bool      `json:"spendable"`
 	Solvable      bool      `json:"solvable"`
-	Safe          bool      `json:"safe"`
+	SafePtr       *bool     `json:"safe"`
+}
+
+func (l *ListUnspentResult) Safe() bool {
+	return l.SafePtr == nil || *l.SafePtr
 }
 
 // SignTxResult models the data from the signrawtransaction command.

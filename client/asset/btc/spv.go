@@ -656,7 +656,7 @@ func (w *spvWallet) listUnspent() ([]*ListUnspentResult, error) {
 			RedeemScript:  redeemScript,
 			Spendable:     utxo.Spendable,
 			// Solvable: ,
-			Safe: safe,
+			SafePtr: &safe,
 		})
 	}
 	return res, nil

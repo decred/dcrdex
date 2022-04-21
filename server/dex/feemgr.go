@@ -85,6 +85,9 @@ func (f *feeFetcher) FeeRate(ctx context.Context) uint64 {
 		log.Errorf("Error retrieving fee rate for %s: %v", f.Symbol, err)
 		return 0 // Do not store as last rate.
 	}
+	if r <= 0 {
+		return 0
+	}
 	if r > f.Asset.MaxFeeRate {
 		r = f.Asset.MaxFeeRate
 	}
