@@ -238,6 +238,28 @@ type BTCCloneCFG struct {
 	// FeeEstimator provides a way to get fees given an RawRequest-enabled
 	// client and a confirmation target.
 	FeeEstimator func(RawRequester, uint64) (uint64, error)
+	// OmitAddressType causes the address type (bech32, legacy) to be omitted
+	// from calls to getnewaddress.
+	OmitAddressType bool
+	// LegacySignTxRPC causes the RPC client to use the signrawtransaction
+	// endpoint instead of the signrawtransactionwithwallet endpoint.
+	LegacySignTxRPC bool
+	// BooleanGetBlockRPC causes the RPC client to use a boolean second argument
+	// for the getblock endpoint, instead of Bitcoin's numeric.
+	BooleanGetBlockRPC bool
+	// LegacyValidateAddressRPC uses the validateaddress endpoint instead of
+	// getwalletinfo in order to discover ownership of an address.
+	LegacyValidateAddressRPC bool
+	// SingularWallet signals that the node software supports only one wallet,
+	// so the RPC endpoint does not have a /wallet/{walletname} path.
+	SingularWallet bool
+	// UnlockSpends manually unlocks outputs as they are spent. Most asses will
+	// unlock wallet outputs automatically as they are spent.
+	UnlockSpends bool
+	// ConstantDustLimit is used if an asset enforces a dust limit (minimum
+	// output value) that doesn't depend on the serialized size of the output.
+	// If ConstantDustLimit is zero, dexbtc.IsDust is used.
+	ConstantDustLimit uint64
 }
 
 // outPoint is the hash and output index of a transaction output.
@@ -430,12 +452,16 @@ func readRPCWalletConfig(settings map[string]string, symbol string, net dex.Netw
 
 // parseRPCWalletConfig parses a *RPCWalletConfig from the settings map and
 // creates the unconnected *rpcclient.Client.
-func parseRPCWalletConfig(settings map[string]string, symbol string, net dex.Network, ports dexbtc.NetPorts) (*RPCWalletConfig, *rpcclient.Client, error) {
+func parseRPCWalletConfig(settings map[string]string, symbol string, net dex.Network, ports dexbtc.NetPorts, singularWallet bool) (*RPCWalletConfig, *rpcclient.Client, error) {
 	cfg, err := readRPCWalletConfig(settings, symbol, net, ports)
 	if err != nil {
 		return nil, nil, err
 	}
-	endpoint := cfg.RPCBind + "/wallet/" + cfg.WalletName
+	endpoint := cfg.RPCBind
+	if !singularWallet {
+		endpoint += "/wallet/" + cfg.WalletName
+	}
+
 	cl, err := rpcclient.New(&rpcclient.ConnConfig{
 		HTTPPostMode: true,
 		DisableTLS:   true,
@@ -553,11 +579,11 @@ type baseWallet struct {
 	minNetworkVersion uint64
 	fallbackFeeRate   uint64
 	feeRateLimit      uint64
+	dustLimit         uint64
 	redeemConfTarget  uint64
 	useSplitTx        bool
 	useLegacyBalance  bool
 	segwit            bool
-	legacyRawFeeLimit bool
 	signNonSegwit     TxInSigner
 	estimateFee       func(RawRequester, uint64) (uint64, error)
 	decodeAddr        dexbtc.AddressDecoder
@@ -604,7 +630,7 @@ func (btc *ExchangeWalletSPV) Rescan(_ context.Context) error {
 
 // FeeRate satisfies asset.FeeRater.
 func (btc *ExchangeWalletFullNode) FeeRate() uint64 {
-	rate, err := btc.feeRate(nil, 1)
+	rate, err := btc.estimateFee(btc.node, 1)
 	if err != nil {
 		btc.log.Errorf("Failed to get fee rate: %v", err)
 		return 0
@@ -704,7 +730,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 // conjunction with ReadCloneParams, to create a ExchangeWallet for other assets
 // with minimal coding.
 func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWalletFullNode, error) {
-	clientCfg, client, err := parseRPCWalletConfig(cfg.WalletCFG.Settings, cfg.Symbol, cfg.Network, cfg.Ports)
+	clientCfg, client, err := parseRPCWalletConfig(cfg.WalletCFG.Settings, cfg.Symbol, cfg.Network, cfg.Ports, cfg.SingularWallet)
 	if err != nil {
 		return nil, err
 	}
@@ -735,8 +761,21 @@ func newRPCWallet(requester RawRequesterWithContext, cfg *BTCCloneCFG, walletCon
 	if err != nil {
 		return nil, err
 	}
-	btc.node = newRPCClient(requester, cfg.Segwit, btc.decodeAddr, cfg.ArglessChangeAddrRPC,
-		cfg.LegacyRawFeeLimit, cfg.MinNetworkVersion, cfg.Logger.SubLogger("RPC"), cfg.ChainParams)
+	btc.node = newRPCClient(&rpcCore{
+		requester:                requester,
+		segwit:                   cfg.Segwit,
+		decodeAddr:               btc.decodeAddr,
+		arglessChangeAddrRPC:     cfg.ArglessChangeAddrRPC,
+		legacyRawSends:           cfg.LegacyRawFeeLimit,
+		minNetworkVersion:        cfg.MinNetworkVersion,
+		log:                      cfg.Logger.SubLogger("RPC"),
+		chainParams:              cfg.ChainParams,
+		omitAddressType:          cfg.OmitAddressType,
+		legacySignTx:             cfg.LegacySignTxRPC,
+		booleanGetBlock:          cfg.BooleanGetBlockRPC,
+		legacyValidateAddressRPC: cfg.LegacyValidateAddressRPC,
+		unlockSpends:             cfg.UnlockSpends,
+	})
 	return &ExchangeWalletFullNode{btc}, nil
 }
 
@@ -752,11 +791,14 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 
 	// If set in the user config, the fee rate limit will be in units of BTC/KB.
 	// Convert to sats/byte & error if value is smaller than smallest unit.
-	feesLimitPerByte := uint64(defaultFeeRateLimit)
+	feesLimitPerByte := cfg.DefaultFeeRateLimit
+	if feesLimitPerByte == 0 {
+		feesLimitPerByte = defaultFeeRateLimit
+	}
 	if walletCfg.FeeRateLimit > 0 {
 		feesLimitPerByte = toSatoshi(walletCfg.FeeRateLimit / 1000)
 		if feesLimitPerByte == 0 {
-			return nil, fmt.Errorf("Fee rate limit is smaller than smallest unit: %v",
+			return nil, fmt.Errorf("fee rate limit is smaller than smallest unit: %v",
 				walletCfg.FeeRateLimit)
 		}
 	}
@@ -789,11 +831,11 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		minNetworkVersion:   cfg.MinNetworkVersion,
 		fallbackFeeRate:     fallbackFeesPerByte,
 		feeRateLimit:        feesLimitPerByte,
+		dustLimit:           cfg.ConstantDustLimit,
 		redeemConfTarget:    redeemConfTarget,
 		useSplitTx:          walletCfg.UseSplitTx,
 		useLegacyBalance:    cfg.LegacyBalance,
 		segwit:              cfg.Segwit,
-		legacyRawFeeLimit:   cfg.LegacyRawFeeLimit,
 		signNonSegwit:       nonSegwitSigner,
 		estimateFee:         cfg.FeeEstimator,
 		decodeAddr:          addrDecoder,
@@ -893,6 +935,15 @@ func (btc *baseWallet) shutdown() {
 		delete(btc.findRedemptionQueue, contractOutpoint)
 	}
 	btc.findRedemptionMtx.Unlock()
+}
+
+// IsDust checks if the tx output's value is dust. If the dustLimit is set, it
+// is compared against that, otherwise the formula in dexbtc.IsDust is used.
+func (btc *baseWallet) IsDust(txOut *wire.TxOut, minRelayTxFee uint64) bool {
+	if btc.dustLimit > 0 {
+		return txOut.Value < int64(btc.dustLimit)
+	}
+	return dexbtc.IsDust(txOut, minRelayTxFee)
 }
 
 // getBlockchainInfoResult models the data returned from the getblockchaininfo
@@ -1021,7 +1072,7 @@ func (a amount) String() string {
 // via feeRateWithFallback.
 func (btc *baseWallet) targetFeeRateWithFallback(confTarget, feeSuggestion uint64) uint64 {
 	feeRate, err := btc.estimateFee(btc.node, confTarget)
-	if err == nil {
+	if err == nil && feeRate > 0 {
 		btc.log.Tracef("Obtained local estimate for %d-conf fee rate, %d", confTarget, feeRate)
 		return feeRate
 	}
@@ -2092,7 +2143,7 @@ func (btc *baseWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, 
 	}
 	txOut := wire.NewTxOut(int64(totalIn-fee), pkScript)
 	// One last check for dust.
-	if dexbtc.IsDust(txOut, feeRate) {
+	if btc.IsDust(txOut, feeRate) {
 		return nil, nil, 0, fmt.Errorf("redeem output is dust")
 	}
 	msgTx.AddTxOut(txOut)
@@ -2649,7 +2700,7 @@ func (btc *baseWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract de
 	}
 	txOut := wire.NewTxOut(int64(val-fee), pkScript)
 	// One last check for dust.
-	if dexbtc.IsDust(txOut, feeRate) {
+	if btc.IsDust(txOut, feeRate) {
 		return nil, fmt.Errorf("refund output is dust")
 	}
 	msgTx.AddTxOut(txOut)
@@ -3180,7 +3231,7 @@ func (btc *baseWallet) signTxAndAddChange(baseTx *wire.MsgTx, addr btcutil.Addre
 	}
 	// If the change is not dust, recompute the signed txn size and iterate on
 	// the fees vs. change amount.
-	changeAdded := !dexbtc.IsDust(changeOutput, feeRate)
+	changeAdded := !btc.IsDust(changeOutput, feeRate)
 	if changeAdded {
 		// Add the change output.
 		vSize0 := dexbtc.MsgTxVBytes(baseTx)
@@ -3220,7 +3271,7 @@ func (btc *baseWallet) signTxAndAddChange(baseTx *wire.MsgTx, addr btcutil.Addre
 			tried[fee] = true
 			fee = reqFee
 			changeOutput.Value = int64(remaining - fee)
-			if dexbtc.IsDust(changeOutput, feeRate) {
+			if btc.IsDust(changeOutput, feeRate) {
 				// Another condition that should be impossible, but check anyway in case
 				// the maximum fee was underestimated causing the first check to be
 				// missed.
@@ -3232,6 +3283,9 @@ func (btc *baseWallet) signTxAndAddChange(baseTx *wire.MsgTx, addr btcutil.Addre
 		}
 
 		totalOut += uint64(changeOutput.Value)
+	} else {
+		btc.log.Debugf("Foregoing change worth up to %v in tx %v because it is dust",
+			changeOutput.Value, msgTx.TxHash())
 	}
 
 	fee := totalIn - totalOut
@@ -3318,6 +3372,7 @@ func (btc *baseWallet) spendableUTXOs(confs uint32) ([]*compositeUTXO, map[outPo
 	if err != nil {
 		return nil, nil, 0, err
 	}
+
 	utxos, utxoMap, sum, err := convertUnspent(confs, unspents, btc.chainParams)
 	if err != nil {
 		return nil, nil, 0, err
@@ -3342,7 +3397,7 @@ func convertUnspent(confs uint32, unspents []*ListUnspentResult, chainParams *ch
 	utxos := make([]*compositeUTXO, 0, len(unspents))
 	utxoMap := make(map[outPoint]*compositeUTXO, len(unspents))
 	for _, txout := range unspents {
-		if txout.Confirmations >= confs && txout.Safe && txout.Spendable {
+		if txout.Confirmations >= confs && txout.Safe() && txout.Spendable {
 			txHash, err := chainhash.NewHashFromStr(txout.TxID)
 			if err != nil {
 				return nil, nil, 0, fmt.Errorf("error decoding txid in ListUnspentResult: %w", err)

@@ -651,7 +651,7 @@ func TestSendWithSubtract(t *testing.T) {
 		ScriptPubKey:  pkScript,
 		Spendable:     true,
 		Solvable:      true,
-		Safe:          true,
+		SafePtr:       boolPtr(true),
 		Amount:        float64(availableFunds) / 1e8,
 	}}
 

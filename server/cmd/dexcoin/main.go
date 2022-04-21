@@ -14,6 +14,7 @@ import (
 	_ "decred.org/dcrdex/server/asset/bch"
 	_ "decred.org/dcrdex/server/asset/btc"
 	_ "decred.org/dcrdex/server/asset/dcr"
+	_ "decred.org/dcrdex/server/asset/doge"
 	_ "decred.org/dcrdex/server/asset/ltc"
 )
 
