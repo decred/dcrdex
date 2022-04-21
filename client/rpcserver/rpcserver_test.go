@@ -155,12 +155,7 @@ func newTServerWErr(t *testing.T, start bool, user, pass string) (*RPCServer, fu
 
 	var shutdown func()
 	ctx, killCtx := context.WithCancel(tCtx)
-	tempDir, err := os.MkdirTemp("", "rpcservertest")
-	if err != nil {
-		killCtx()
-		return nil, nil, fmt.Errorf("error creating temporary directory: %w", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	cert, key := tempDir+"/cert.cert", tempDir+"/key.key"
 	cfg := &Config{
@@ -207,11 +202,7 @@ func TestConnectBindError(t *testing.T) {
 	s0, shutdown := newTServer(t, true, "", "abc")
 	defer shutdown()
 
-	tempDir, err := os.MkdirTemp("", "rpcservertest")
-	if err != nil {
-		t.Fatalf("error creating temporary directory: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	cert, key := tempDir+"/cert.cert", tempDir+"/key.key"
 	cfg := &Config{

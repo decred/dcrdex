@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -2090,8 +2089,7 @@ func TestSwapConfirmation(t *testing.T) {
 func TestDriverOpen(t *testing.T) {
 	drv := &Driver{}
 	logger := dex.StdOutLogger("ETHTEST", dex.LevelOff)
-	tmpDir, _ := os.MkdirTemp("", "")
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	err := CreateWallet(&asset.CreateWalletParams{
 		Type:     walletTypeGeth,
@@ -2142,8 +2140,7 @@ func TestDriverOpen(t *testing.T) {
 
 func TestDriverExists(t *testing.T) {
 	drv := &Driver{}
-	tmpDir, _ := os.MkdirTemp("", "")
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	settings := map[string]string{}
 

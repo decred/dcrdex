@@ -679,11 +679,7 @@ func TestClientResponses(t *testing.T) {
 func TestOnline(t *testing.T) {
 	defer resetRPCRoutes()
 
-	tempDir, err := os.MkdirTemp("", "example")
-	if err != nil {
-		t.Fatalf("TempDir error: %v", err)
-	}
-	defer os.RemoveAll(tempDir) // clean up
+	tempDir := t.TempDir()
 
 	keyPath := filepath.Join(tempDir, "rpc.key")
 	certPath := filepath.Join(tempDir, "rpc.cert")

@@ -81,8 +81,7 @@ var (
 	tLockTimeTaker = 30 * time.Second
 	tLockTimeMaker = 1 * time.Minute
 
-	tLog   = dex.StdOutLogger("TEST", dex.LevelTrace)
-	tmpDir string
+	tLog = dex.StdOutLogger("TEST", dex.LevelTrace)
 )
 
 func readWalletCfgsAndDexCert() error {
@@ -128,9 +127,9 @@ func readWalletCfgsAndDexCert() error {
 	return err
 }
 
-func startClients(ctx context.Context) error {
+func startClients(t testing.TB, ctx context.Context) error {
 	for _, c := range clients {
-		err := c.init(ctx)
+		err := c.init(t, ctx)
 		if err != nil {
 			return err
 		}
@@ -197,13 +196,13 @@ func startClients(ctx context.Context) error {
 	return nil
 }
 
-func setup() (context.CancelFunc, error) {
+func setup(t testing.TB) (context.CancelFunc, error) {
 	err := readWalletCfgsAndDexCert()
 	if err != nil {
 		return func() {}, fmt.Errorf("error reading wallet cfgs or dex cert (harnesses running?): %w", err)
 	}
 	ctx, cancelCtx := context.WithCancel(context.Background())
-	err = startClients(ctx)
+	err = startClients(t, ctx)
 	if err != nil {
 		return cancelCtx, fmt.Errorf("error starting clients: %w", err)
 	}
@@ -216,12 +215,6 @@ func teardown(cancelCtx context.CancelFunc) {
 		c.wg.Wait()
 		c.log("Client %d done", c.id)
 	}
-	if client1.core != nil && client1.core.cfg.DBPath != "" {
-		os.RemoveAll(client1.core.cfg.DBPath)
-	}
-	if client2.core != nil && client2.core.cfg.DBPath != "" {
-		os.RemoveAll(client2.core.cfg.DBPath)
-	}
 }
 
 var sleepFactor time.Duration = 1
@@ -230,8 +223,6 @@ func TestMain(m *testing.M) {
 	if race {
 		sleepFactor = 3
 	}
-	tmpDir, _ = os.MkdirTemp("", "")
-	defer os.RemoveAll(tmpDir)
 	os.Exit(m.Run())
 }
 
@@ -239,7 +230,7 @@ func TestMain(m *testing.M) {
 // trades are completed successfully.
 func TestTradeSuccess(t *testing.T) {
 	tLog.Info("=== SETUP")
-	cancelCtx, err := setup()
+	cancelCtx, err := setup(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +246,7 @@ func TestTradeSuccess(t *testing.T) {
 // trades fail because of the Maker not sending their init swap tx.
 func TestNoMakerSwap(t *testing.T) {
 	tLog.Info("=== SETUP")
-	cancelCtx, err := setup()
+	cancelCtx, err := setup(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +263,7 @@ func TestNoMakerSwap(t *testing.T) {
 // Also ensures that Maker's funds are refunded after locktime expires.
 func TestNoTakerSwap(t *testing.T) {
 	tLog.Info("=== SETUP")
-	cancelCtx, err := setup()
+	cancelCtx, err := setup(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +285,7 @@ func TestNoTakerSwap(t *testing.T) {
 // swap.
 func TestNoMakerRedeem(t *testing.T) {
 	tLog.Info("=== SETUP")
-	cancelCtx, err := setup()
+	cancelCtx, err := setup(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +308,7 @@ func TestNoMakerRedeem(t *testing.T) {
 // TODO: What happens if FindRedemption encounters a refund instead of a redeem?
 func TestMakerGhostingAfterTakerRedeem(t *testing.T) {
 	tLog.Info("=== SETUP")
-	cancelCtx, err := setup()
+	cancelCtx, err := setup(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +428,7 @@ func TestMakerGhostingAfterTakerRedeem(t *testing.T) {
 //   after re-connecting the DEX. Locked coins should be returned.
 func TestOrderStatusReconciliation(t *testing.T) {
 	tLog.Info("=== SETUP")
-	cancelCtx, err := setup()
+	cancelCtx, err := setup(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -752,7 +743,7 @@ func TestOrderStatusReconciliation(t *testing.T) {
 // are retried and the trades complete successfully.
 func TestResendPendingRequests(t *testing.T) {
 	tLog.Info("=== SETUP")
-	cancelCtx, err := setup()
+	cancelCtx, err := setup(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1358,11 +1349,12 @@ func (client *tClient) log(format string, args ...interface{}) {
 
 var clientCounter uint32
 
-func (client *tClient) init(ctx context.Context) error {
+func (client *tClient) init(t testing.TB, ctx context.Context) error {
+	tmpDir := t.TempDir()
 	cNum := atomic.AddUint32(&clientCounter, 1)
 	var err error
 	client.core, err = New(&Config{
-		DBPath: filepath.Join(tmpDir, fmt.Sprintf("dex_%d.db", cNum)),
+		DBPath: filepath.Join(tmpDir, "dex.db"),
 		Net:    dex.Regtest,
 		Logger: dex.StdOutLogger("CORE:"+strconv.Itoa(int(cNum)), dex.LevelTrace),
 	})

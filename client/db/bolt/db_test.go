@@ -26,15 +26,12 @@ func init() {
 }
 
 var (
-	tDir     string
-	tCounter int
-	tLogger  = dex.StdOutLogger("db_TEST", dex.LevelTrace)
+	tLogger = dex.StdOutLogger("db_TEST", dex.LevelTrace)
 )
 
 func newTestDB(t *testing.T) (*BoltDB, func()) {
 	t.Helper()
-	tCounter++
-	dbPath := filepath.Join(tDir, fmt.Sprintf("db%d.db", tCounter))
+	dbPath := filepath.Join(t.TempDir(), "db.db")
 	dbi, err := NewDB(dbPath, tLogger)
 	if err != nil {
 		t.Fatalf("error creating dB: %v", err)
@@ -59,17 +56,7 @@ func newTestDB(t *testing.T) (*BoltDB, func()) {
 
 func TestMain(m *testing.M) {
 	defer os.Stdout.Sync()
-	doIt := func() int {
-		var err error
-		tDir, err = os.MkdirTemp("", "dbtest")
-		if err != nil {
-			fmt.Printf("error creating temporary directory: %v\n", err)
-			return -1
-		}
-		defer os.RemoveAll(tDir)
-		return m.Run()
-	}
-	os.Exit(doIt())
+	os.Exit(m.Run())
 }
 
 func TestBackup(t *testing.T) {

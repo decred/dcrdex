@@ -58,11 +58,7 @@ func TestConfig(t *testing.T) {
 	cfg := &dexbtc.RPCConfig{}
 	parsedCfg := &dexbtc.RPCConfig{}
 
-	tempDir, err := os.MkdirTemp("", "btctest")
-	if err != nil {
-		t.Fatalf("error creating temporary directory: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 	filePath := filepath.Join(tempDir, "test.conf")
 
 	runCfg := func(inCfg *dexbtc.RPCConfig) error {
@@ -85,7 +81,7 @@ func TestConfig(t *testing.T) {
 	}
 
 	// Check that there is an error from an unpopulated configuration.
-	err = runCfg(cfg)
+	err := runCfg(cfg)
 	if err == nil {
 		t.Fatalf("no error for empty config")
 	}

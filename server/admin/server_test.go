@@ -244,14 +244,10 @@ var tPort = 5555
 // If start is true, the Server's Run goroutine is started, and the shutdown
 // func must be called when finished with the Server.
 func newTServer(t *testing.T, start bool, authSHA [32]byte) (*Server, func()) {
-	tmp, err := os.MkdirTemp("", "admin")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmp)
+	tmp := t.TempDir()
 
 	cert, key := filepath.Join(tmp, "tls.cert"), filepath.Join(tmp, "tls.key")
-	err = genCertPair(cert, key)
+	err := genCertPair(cert, key)
 	if err != nil {
 		t.Fatal(err)
 	}
