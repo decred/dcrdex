@@ -2,6 +2,9 @@
 # Set up DCR and BTC wallets and register with the DEX.
 # dcrdex, dexc, and the wallet simnet harnesses should all be running before
 # calling this script.
+#
+# dexc can be built with -ldflags "-X 'decred.org/dcrdex/dex.testLockTimeTaker=30s' -X 'decred.org/dcrdex/dex.testLockTimeMaker=1m'"
+# in order to set simnet locktimes.
 
 set +e
 

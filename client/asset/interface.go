@@ -503,7 +503,7 @@ type Contract struct {
 	Value uint64
 	// SecretHash is the hash of the secret key.
 	SecretHash dex.Bytes
-	// LockTime is the contract lock time.
+	// LockTime is the contract lock time in UNIX seconds.
 	LockTime uint64
 }
 

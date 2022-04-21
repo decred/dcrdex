@@ -1152,9 +1152,9 @@ func TestSwap(t *testing.T) {
 		for i, contract := range swaps.Contracts {
 			// Check that receipts match the contract inputs
 			receipt := receipts[i]
-			if encode.UnixMilliU(receipt.Expiration()) != contract.LockTime {
+			if uint64(receipt.Expiration().Unix()) != contract.LockTime {
 				t.Fatalf("%v: expected expiration %v != expiration %v",
-					testName, encode.UnixTimeMilli(int64(contract.LockTime)), receipts[0].Expiration())
+					testName, time.Unix(int64(contract.LockTime), 0), receipts[0].Expiration())
 			}
 			if receipt.Coin().Value() != contract.Value {
 				t.Fatalf("%v: receipt coin value: %v != expected: %v",
@@ -1225,7 +1225,7 @@ func TestSwap(t *testing.T) {
 	secretHash := sha256.Sum256(secret)
 	secret2 := encode.RandomBytes(32)
 	secretHash2 := sha256.Sum256(secret2)
-	expiration := encode.UnixMilliU(time.Now().Add(time.Hour * 8))
+	expiration := uint64(time.Now().Add(time.Hour * 8).Unix())
 
 	// Ensure error when initializing swap errors
 	node.contractor.initErr = errors.New("")
