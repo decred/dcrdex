@@ -780,7 +780,7 @@ func (eth *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		copy(secretHash[:], swap.SecretHash)
 		receipts = append(receipts,
 			&swapReceipt{
-				expiration:   encode.UnixTimeMilli(int64(swap.LockTime)),
+				expiration:   time.Unix(int64(swap.LockTime), 0),
 				value:        swap.Value,
 				txHash:       txHash,
 				secretHash:   secretHash,
