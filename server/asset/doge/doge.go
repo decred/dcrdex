@@ -92,6 +92,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		ChainParams: params,
 		Ports:       ports,
 		FeeEstimator: func(cl *btc.RPCClient) (uint64, error) {
+
 			var r float64
 			if err := cl.Call("estimatefee", []interface{}{feeConfs}, &r); err != nil {
 				return 0, err
@@ -99,7 +100,14 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 			if r <= 0 {
 				return 0, nil
 			}
-			return uint64(math.Round(r * 1e8)), nil
+
+			// estimatefee is f#$%ed
+			// https://github.com/decred/dcrdex/pull/1558#discussion_r850061882
+			if r > dexdoge.DefaultFeeRateLimit/1e5 {
+				return dexdoge.DefaultFee, nil
+			}
+
+			return uint64(math.Round(r * 1e5)), nil
 		},
 	})
 }

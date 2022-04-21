@@ -19,17 +19,8 @@ import (
 const (
 	version = 0
 	BipID   = 3
-	// The default fee is passed to the user as part of the asset.WalletInfo
-	// structure. For details on DOGE-specific limits, see:
-	// https://github.com/dogecoin/dogecoin/blob/master/doc/fee-recommendation.md
-	// and https://github.com/dogecoin/dogecoin/discussions/2347
-	// Dogecoin Core v1.14.5 adopts proposed fees for tx creation:
-	// https://github.com/dogecoin/dogecoin/releases/tag/v1.14.5
-	// https://github.com/dogecoin/dogecoin/commit/9c6af6d84179e46002338bb5b9a69c6f2367c731
-	// These limits were applied to mining and relay in v1.14.4.
-	defaultFee          = 4_000     // 0.04 DOGE/kB, 4x the 0.01 recommended by dogecoin core (DEFAULT_TRANSACTION_FEE)
-	defaultFeeRateLimit = 50_000    // 0.5 DOGE/kB, where v1.14.5 considers 1.0 DOGE/kB "high" (HIGH_TX_FEE_PER_KB)
-	dustLimit           = 1_000_000 // sats => 0.01 DOGE, the "soft" limit (DEFAULT_DUST_LIMIT)
+
+	dustLimit = 1_000_000 // sats => 0.01 DOGE, the "soft" limit (DEFAULT_DUST_LIMIT)
 
 	minNetworkVersion = 1140500
 	walletTypeRPC     = "dogecoindRPC"
@@ -64,7 +55,7 @@ var (
 			Key:          fallbackFeeKey,
 			DisplayName:  "Fallback fee rate",
 			Description:  "Dogecoin's 'fallbackfee' rate. Units: DOGE/kB",
-			DefaultValue: defaultFee * 1000 / 1e8,
+			DefaultValue: dexdoge.DefaultFee * 1000 / 1e8,
 		},
 		{
 			Key:         "feeratelimit",
@@ -73,7 +64,7 @@ var (
 				"pay on swap transactions. If feeratelimit is lower than a market's " +
 				"maxfeerate, you will not be able to trade on that market with this " +
 				"wallet.  Units: BTC/kB",
-			DefaultValue: defaultFeeRateLimit * 1000 / 1e8,
+			DefaultValue: dexdoge.DefaultFeeRateLimit * 1000 / 1e8,
 		},
 		{
 			Key:         "txsplit",
@@ -157,8 +148,8 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		Network:                  network,
 		ChainParams:              params,
 		Ports:                    ports,
-		DefaultFallbackFee:       defaultFee,
-		DefaultFeeRateLimit:      defaultFeeRateLimit,
+		DefaultFallbackFee:       dexdoge.DefaultFee,
+		DefaultFeeRateLimit:      dexdoge.DefaultFeeRateLimit,
 		LegacyBalance:            true,
 		Segwit:                   false,
 		OmitAddressType:          true,
@@ -184,6 +175,11 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 			}
 			if feeRate <= 0 {
 				return 0, nil
+			}
+			// estimatefee is f#$%ed
+			// https://github.com/decred/dcrdex/pull/1558#discussion_r850061882
+			if feeRate > dexdoge.DefaultFeeRateLimit/1e5 {
+				return dexdoge.DefaultFee, nil
 			}
 			return uint64(math.Round(feeRate * 1e5)), nil
 		},

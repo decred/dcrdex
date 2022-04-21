@@ -9,6 +9,19 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 )
 
+const (
+	// The default fee is passed to the user as part of the asset.WalletInfo
+	// structure. For details on DOGE-specific limits, see:
+	// https://github.com/dogecoin/dogecoin/blob/master/doc/fee-recommendation.md
+	// and https://github.com/dogecoin/dogecoin/discussions/2347
+	// Dogecoin Core v1.14.5 adopts proposed fees for tx creation:
+	// https://github.com/dogecoin/dogecoin/releases/tag/v1.14.5
+	// https://github.com/dogecoin/dogecoin/commit/9c6af6d84179e46002338bb5b9a69c6f2367c731
+	// These limits were applied to mining and relay in v1.14.4.
+	DefaultFee          = 4_000  // 0.04 DOGE/kB, 4x the 0.01 recommended by dogecoin core (DEFAULT_TRANSACTION_FEE)
+	DefaultFeeRateLimit = 50_000 // 0.5 DOGE/kB, where v1.14.5 considers 1.0 DOGE/kB "high" (HIGH_TX_FEE_PER_KB)
+)
+
 var (
 	UnitInfo = dex.UnitInfo{
 		AtomicUnit: "Sats",
