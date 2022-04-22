@@ -656,15 +656,18 @@ func (t *trackedTrade) processCancelMatch(msgMatch *msgjson.Match) error {
 //
 // This method accesses match fields and MUST be called with the trackedTrade
 // mutex lock held for reads.
-func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTracker) (have, needed uint32, changed, spent, expired bool) {
+func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTracker) (have, needed uint32, changed, spent, expired bool, err error) {
+	fail := func(err error) (uint32, uint32, bool, bool, bool, error) {
+		return 0, 0, false, false, false, err
+	}
+
 	// Counter-party's swap is the "to" asset.
 	needed = t.wallets.toAsset.SwapConf
 
 	// Check the confirmations on the counter-party's swap. If counterSwap is
 	// not set, we shouldn't be here, but catch this just in case.
 	if match.counterSwap == nil {
-		t.dc.log.Warnf("counterPartyConfirms: No AuditInfo available to check!")
-		return
+		return fail(errors.New("counterPartyConfirms: No AuditInfo available to check!"))
 	}
 
 	wallet := t.wallets.toWallet
@@ -672,17 +675,17 @@ func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTra
 
 	_, lockTime, err := wallet.LocktimeExpired(match.MetaData.Proof.CounterContract)
 	if err != nil {
-		t.dc.log.Errorf("Error checking if locktime has expired on taker's contract on order %s, "+
-			"match %s: %v", t.ID(), match, err)
+		return fail(fmt.Errorf("error checking if locktime has expired on taker's contract on order %s, "+
+			"match %s: %w", t.ID(), match, err))
 	}
 	expired = time.Until(lockTime) < 0 // not necessarily refundable, but can be at any moment
 
 	have, spent, err = wallet.SwapConfirmations(ctx, coin.ID(),
 		match.MetaData.Proof.CounterContract, match.MetaData.Stamp)
 	if err != nil {
-		t.dc.log.Errorf("Failed to get confirmations of the counter-party's swap %s (%s) for match %s, order %v: %v",
-			coin, t.wallets.toAsset.Symbol, match, t.UID(), err)
-		return
+		return fail(fmt.Errorf("failed to get confirmations of the counter-party's swap %s (%s) "+
+			"for match %s, order %v: %w",
+			coin, t.wallets.toAsset.Symbol, match, t.UID(), err))
 	}
 
 	// Log the pending swap status at new heights only.
@@ -885,7 +888,11 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 				coinIDString(toAssetID, match.MetaData.Proof.MakerSwap), unbip(toAssetID))
 			// If the maker is the counterparty, we can determine swappability
 			// based on the confirmations.
-			confs, req, changed, spent, expired := t.counterPartyConfirms(ctx, match)
+			confs, req, changed, spent, expired, err := t.counterPartyConfirms(ctx, match)
+			if err != nil {
+				t.dc.log.Errorf("isSwappable: %v", err)
+				return false
+			}
 			if spent {
 				t.dc.log.Errorf("Counter-party's swap is spent before we could broadcast our own")
 				match.MetaData.Proof.SelfRevoked = true
@@ -970,7 +977,11 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bo
 	case order.TakerSwapCast:
 		if match.Side == order.Maker {
 			// Check the confirmations on the taker's swap.
-			confs, req, changed, spent, expired := t.counterPartyConfirms(ctx, match)
+			confs, req, changed, spent, expired, err := t.counterPartyConfirms(ctx, match)
+			if err != nil {
+				t.dc.log.Errorf("isRedeemable: %v", err)
+				return false
+			}
 			if spent {
 				t.dc.log.Errorf("Order %s, match %s counter-party's swap is spent before we could redeem", t.ID(), match)
 				match.MetaData.Proof.SelfRevoked = true
