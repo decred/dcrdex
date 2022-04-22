@@ -206,6 +206,8 @@ type BTCCloneCFG struct {
 	// into btcutil.Address. If AddressDecoder is not supplied,
 	// btcutil.DecodeAddress will be used.
 	AddressDecoder dexbtc.AddressDecoder
+	// BlockDeserializer can be used in place of (*wire.MsgBlock).Deserialize.
+	BlockDeserializer func([]byte) (*wire.MsgBlock, error)
 	// ArglessChangeAddrRPC can be true if the getrawchangeaddress takes no
 	// address-type argument.
 	ArglessChangeAddrRPC bool
@@ -710,10 +712,17 @@ func newRPCWallet(requester RawRequesterWithContext, cfg *BTCCloneCFG, walletCon
 	if err != nil {
 		return nil, err
 	}
+
+	blockDeserializer := cfg.BlockDeserializer
+	if blockDeserializer == nil {
+		blockDeserializer = deserializeBlock
+	}
+
 	btc.node = newRPCClient(&rpcCore{
 		requester:                requester,
 		segwit:                   cfg.Segwit,
 		decodeAddr:               btc.decodeAddr,
+		deserializeBlock:         blockDeserializer,
 		arglessChangeAddrRPC:     cfg.ArglessChangeAddrRPC,
 		legacyRawSends:           cfg.LegacyRawFeeLimit,
 		minNetworkVersion:        cfg.MinNetworkVersion,
@@ -3335,4 +3344,9 @@ func findRedemptionsInTx(ctx context.Context, segwit bool, reqs map[outPoint]*fi
 		}
 	}
 	return
+}
+
+func deserializeBlock(b []byte) (*wire.MsgBlock, error) {
+	msgBlock := &wire.MsgBlock{}
+	return msgBlock, msgBlock.Deserialize(bytes.NewReader(b))
 }

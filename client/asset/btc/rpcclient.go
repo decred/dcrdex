@@ -74,6 +74,7 @@ type rpcCore struct {
 	requester                RawRequesterWithContext
 	segwit                   bool
 	decodeAddr               dexbtc.AddressDecoder
+	deserializeBlock         func([]byte) (*wire.MsgBlock, error)
 	arglessChangeAddrRPC     bool
 	legacyRawSends           bool
 	minNetworkVersion        uint64
@@ -240,19 +241,19 @@ func (wc *rpcClient) callHashGetter(method string, args anylist) (*chainhash.Has
 
 // getBlock fetches the MsgBlock.
 func (wc *rpcClient) getBlock(h chainhash.Hash) (*wire.MsgBlock, error) {
-	var txB dex.Bytes
+	var blkB dex.Bytes
 	args := anylist{h.String()}
 	if wc.booleanGetBlock {
 		args = append(args, false)
 	} else {
 		args = append(args, 0)
 	}
-	err := wc.call(methodGetBlock, args, &txB)
+	err := wc.call(methodGetBlock, args, &blkB)
 	if err != nil {
 		return nil, err
 	}
-	msgBlock := &wire.MsgBlock{}
-	return msgBlock, msgBlock.Deserialize(bytes.NewReader(txB))
+
+	return wc.deserializeBlock(blkB)
 }
 
 // getBlockHash returns the hash of the block in the best block chain at the

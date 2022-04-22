@@ -183,6 +183,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 			}
 			return uint64(math.Round(feeRate * 1e5)), nil
 		},
+		BlockDeserializer: dexdoge.DeserializeBlock,
 	}
 
 	return btc.BTCCloneWallet(cloneCFG)
