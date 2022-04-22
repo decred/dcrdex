@@ -197,7 +197,7 @@ if [ $DOGE_ON -eq 0 ]; then
         "DOGE_simnet": {
             "bip44symbol": "doge",
             "network": "simnet",
-            "maxFeeRate": 20,
+            "maxFeeRate": 40000,
             "swapConf": 2,
             "configPath": "${TEST_ROOT}/doge/alpha/alpha.conf"
 EOF
