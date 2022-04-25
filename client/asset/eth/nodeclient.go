@@ -380,25 +380,6 @@ func (n *nodeClient) sendSignedTransaction(ctx context.Context, tx *types.Transa
 	return n.leth.ApiBackend.SendTx(ctx, tx)
 }
 
-func (n *nodeClient) checkTxStatus(ctx context.Context, tx *types.Transaction, txOpts *bind.TransactOpts) (*types.Receipt, error) {
-	// It appears the receipt is only accessible after the tx is mined.
-	receipt, err := n.transactionReceipt(ctx, tx.Hash())
-	if err != nil {
-		return nil, fmt.Errorf("error getting transaction receipt: %v", err)
-	}
-
-	if receipt.Status != types.ReceiptStatusSuccessful {
-		return receipt, fmt.Errorf("transaction status failed")
-
-	}
-
-	if receipt.GasUsed > txOpts.GasLimit {
-		return receipt, fmt.Errorf("gas used, %d, appears to have exceeded limit of %d", receipt.GasUsed, txOpts.GasLimit)
-	}
-
-	return receipt, nil
-}
-
 // newTxOpts is a constructor for a TransactOpts.
 func newTxOpts(ctx context.Context, from common.Address, val, maxGas uint64, maxFeeRate, gasTipCap *big.Int) *bind.TransactOpts {
 	if gasTipCap.Cmp(maxFeeRate) > 0 {

@@ -786,15 +786,17 @@ func testInitiate(t *testing.T, assetID uint32) {
 			t.Fatalf("%s: post-initiate mining error: %v", test.name, err)
 		}
 
-		receipt, err := ethClient.checkTxStatus(ctx, tx, txOpts)
-		if err != nil && test.success {
-			spew.Dump(tx)
-			spew.Dump(receipt)
-			t.Fatalf("%s: failed transaction status: %v", test.name, err)
-		} else if receipt.GasUsed > expGas {
-			t.Fatalf("%s: gas used %d exceeds expected max %d", test.name, receipt.GasUsed, expGas)
+		// It appears the receipt is only accessible after the tx is mined.
+		receipt, err := ethClient.transactionReceipt(ctx, tx.Hash())
+		if err != nil {
+			t.Fatalf("%s: failed retrieving initiate receipt: %v", test.name, err)
 		}
+		spew.Dump(receipt)
 
+		err = checkTxStatus(receipt, txOpts.GasLimit)
+		if err != nil && test.success {
+			t.Fatalf("%s: failed init transaction status: %v", test.name, err)
+		}
 		fmt.Printf("Gas used for %d initiations, success = %t: %d (expected max %d) \n",
 			len(test.swaps), test.success, receipt.GasUsed, expGas)
 
@@ -896,9 +898,15 @@ func testRedeemGas(t *testing.T, assetID uint32) {
 	if err := waitForMined(t, time.Second*8, true); err != nil {
 		t.Fatalf("unexpected error while waiting to mine: %v", err)
 	}
-	_, err = ethClient.checkTxStatus(ctx, tx, txOpts)
+	receipt, err := ethClient.transactionReceipt(ctx, tx.Hash())
 	if err != nil {
-		t.Fatalf("Init transaction failed: %v", err)
+		t.Fatalf("failed retrieving initiate receipt: %v", err)
+	}
+	spew.Dump(receipt)
+
+	err = checkTxStatus(receipt, txOpts.GasLimit)
+	if err != nil {
+		t.Fatalf("failed init transaction status: %v", err)
 	}
 
 	// Make sure swaps were properly initiated
@@ -1103,11 +1111,16 @@ func testRedeem(t *testing.T, assetID uint32) {
 			t.Fatalf("%s: post-init mining error: %v", test.name, err)
 		}
 
-		receipt, err := test.redeemerClient.checkTxStatus(ctx, tx, txOpts)
+		receipt, err := test.redeemerClient.transactionReceipt(ctx, tx.Hash())
+		if err != nil {
+			t.Fatalf("%s: failed to get init receipt: %v", test.name, err)
+		}
+		spew.Dump(receipt)
+
+		err = checkTxStatus(receipt, txOpts.GasLimit)
 		if err != nil {
 			t.Fatalf("%s: failed init transaction status: %v", test.name, err)
 		}
-		spew.Dump(receipt)
 		fmt.Printf("Gas used for %d inits: %d \n", len(test.swaps), receipt.GasUsed)
 
 		for i := range test.swaps {
@@ -1161,14 +1174,17 @@ func testRedeem(t *testing.T, assetID uint32) {
 			t.Fatalf("%s: post-redeem mining error: %v", test.name, err)
 		}
 
-		expSuccess := !test.expectRedeemErr && test.addAmt
-		receipt, err = test.redeemerClient.checkTxStatus(ctx, tx, txOpts)
-		if err != nil && expSuccess {
-			t.Fatalf("%s: failed redeem transaction status: %v", test.name, err)
-		} else if receipt.GasUsed > expGas {
-			t.Fatalf("%s: gas used %d is > expected max %d", test.name, receipt.GasUsed, expGas)
+		receipt, err = test.redeemerClient.transactionReceipt(ctx, tx.Hash())
+		if err != nil {
+			t.Fatalf("%s: failed to get redeem receipt: %v", test.name, err)
 		}
 		spew.Dump(receipt)
+
+		expSuccess := !test.expectRedeemErr && test.addAmt
+		err = checkTxStatus(receipt, txOpts.GasLimit)
+		if err != nil && expSuccess {
+			t.Fatalf("%s: failed redeem transaction status: %v", test.name, err)
+		}
 		fmt.Printf("Gas used for %d redeems, success = %t: %d \n", len(test.swaps), expSuccess, receipt.GasUsed)
 
 		bal, err := balance()
@@ -1436,11 +1452,17 @@ func testRefund(t *testing.T, assetID uint32) {
 			t.Fatalf("%s: post-refund mining error: %v", test.name, err)
 		}
 
-		receipt, err := test.refunderClient.checkTxStatus(ctx, tx, txOpts)
-		if err != nil && test.addAmt {
-			t.Fatalf("%s: failed redeem transaction status: %v", test.name, err)
+		receipt, err := test.refunderClient.transactionReceipt(ctx, tx.Hash())
+		if err != nil {
+			t.Fatalf("%s: failed to get refund receipt: %v", test.name, err)
 		}
 		spew.Dump(receipt)
+
+		err = checkTxStatus(receipt, txOpts.GasLimit)
+		// test.addAmt being true indicates the refund shoud succeed.
+		if err != nil && test.addAmt {
+			t.Fatalf("%s: failed refund transaction status: %v", test.name, err)
+		}
 		fmt.Printf("Gas used for refund, success = %t: %d \n", test.addAmt, receipt.GasUsed)
 
 		// Balance should increase or decrease by a certain amount
