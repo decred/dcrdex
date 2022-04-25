@@ -2663,6 +2663,19 @@ func (w *assetWallet) isRefundable(secretHash [32]byte, contractVer uint32) (ref
 	})
 }
 
+func checkTxStatus(receipt *types.Receipt, gasLimit uint64) error {
+	if receipt.Status != types.ReceiptStatusSuccessful {
+		return fmt.Errorf("transaction status failed")
+
+	}
+
+	if receipt.GasUsed > gasLimit {
+		return fmt.Errorf("gas used, %d, appears to have exceeded limit of %d", receipt.GasUsed, gasLimit)
+	}
+
+	return nil
+}
+
 // getGasEstimate is used to get a gas table for an asset's contract(s). The
 // provided gases, g, should be generous estimates of what the gas might be.
 // Errors are thrown if the provided estimates are too small by more than a
@@ -2779,23 +2792,32 @@ func GetGasEstimates(ctx context.Context, cl *nodeClient, c contractor, maxSwaps
 			return fmt.Errorf("initiate error for %d swaps: %v", n, err)
 		}
 		waitForMined()
-		if r, err := cl.checkTxStatus(ctx, tx, txOpts); err != nil {
+		receipt, err := cl.transactionReceipt(ctx, tx.Hash())
+		if err != nil {
 			return err
-		} else {
-			stats.swaps = append(stats.swaps, r.GasUsed)
 		}
+		if err := checkTxStatus(receipt, txOpts.GasLimit); err != nil {
+			return err
+		}
+		stats.swaps = append(stats.swaps, receipt.GasUsed)
 
 		if isToken {
-			if r, err := cl.checkTxStatus(ctx, approveTx, txOpts); err != nil {
+			receipt, err = cl.transactionReceipt(ctx, approveTx.Hash())
+			if err != nil {
 				return err
-			} else {
-				stats.approves = append(stats.approves, r.GasUsed)
 			}
-			if r, err := cl.checkTxStatus(ctx, transferTx, txOpts); err != nil {
+			if err := checkTxStatus(receipt, txOpts.GasLimit); err != nil {
 				return err
-			} else {
-				stats.transfers = append(stats.transfers, r.GasUsed)
 			}
+			stats.approves = append(stats.approves, receipt.GasUsed)
+			receipt, err = cl.transactionReceipt(ctx, transferTx.Hash())
+			if err != nil {
+				return err
+			}
+			if err := checkTxStatus(receipt, txOpts.GasLimit); err != nil {
+				return err
+			}
+			stats.transfers = append(stats.transfers, receipt.GasUsed)
 		}
 
 		// Estimate a refund
@@ -2823,11 +2845,14 @@ func GetGasEstimates(ctx context.Context, cl *nodeClient, c contractor, maxSwaps
 			return fmt.Errorf("redeem error for %d swaps: %v", n, err)
 		}
 		waitForMined()
-		if r, err := cl.checkTxStatus(ctx, tx, txOpts); err != nil {
+		receipt, err = cl.transactionReceipt(ctx, tx.Hash())
+		if err != nil {
 			return err
-		} else {
-			stats.redeems = append(stats.redeems, r.GasUsed)
 		}
+		if err := checkTxStatus(receipt, txOpts.GasLimit); err != nil {
+			return err
+		}
+		stats.redeems = append(stats.redeems, receipt.GasUsed)
 	}
 	return nil
 }
