@@ -669,7 +669,7 @@ func TestSendWithSubtract(t *testing.T) {
 
 	const availableFunds = 5e8
 	const feeRate = 100
-	const inputSize = dexbtc.RedeemP2PWKHInputTotalSize
+	const inputSize = dexbtc.RedeemP2WPKHInputTotalSize
 	const feesWithChange = (dexbtc.MinimumTxOverhead + 2*dexbtc.P2WPKHOutputSize + inputSize) * feeRate
 	const feesWithoutChange = (dexbtc.MinimumTxOverhead + dexbtc.P2WPKHOutputSize + inputSize) * feeRate
 

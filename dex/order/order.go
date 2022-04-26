@@ -45,7 +45,7 @@ func IDFromHex(sid string) (OrderID, error) {
 	return oid, nil
 }
 
-// IDFromHex converts a byte slice to an OrderID.
+// IDFromBytes converts a byte slice to an OrderID.
 func IDFromBytes(b []byte) (OrderID, error) {
 	if len(b) != OrderIDSize {
 		return OrderID{}, fmt.Errorf("invalid order ID. wanted length %d but got %d", OrderIDSize, len(b))

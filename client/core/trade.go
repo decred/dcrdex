@@ -2783,6 +2783,93 @@ func (t *trackedTrade) returnCoins() {
 	}
 }
 
+// requiredForRemainingSwaps determines the amount of the from asset that is
+// still needed in order initate the remaining swaps in the order.
+func (t *trackedTrade) requiredForRemainingSwaps() (uint64, error) {
+	mkt := t.dc.marketConfig(t.mktID)
+	if mkt == nil {
+		return 0, fmt.Errorf("could not find market: %v", t.mktID)
+	}
+	lotSize := mkt.LotSize
+	swapSize := t.wallets.fromAsset.SwapSize
+
+	var requiredForRemainingSwaps uint64
+
+	if t.metaData.Status <= order.OrderStatusExecuted {
+		if !t.Trade().Sell {
+			requiredForRemainingSwaps += calc.BaseToQuote(t.rate(), t.Trade().Remaining())
+		} else {
+			requiredForRemainingSwaps += t.Trade().Remaining()
+		}
+		lotsRemaining := t.Trade().Remaining() / lotSize
+		requiredForRemainingSwaps += lotsRemaining * swapSize * t.metaData.MaxFeeRate
+	}
+
+	for _, match := range t.matches {
+		if (match.Side == order.Maker && match.Status < order.MakerSwapCast) ||
+			(match.Side == order.Taker && match.Status < order.TakerSwapCast) {
+			if !t.Trade().Sell {
+				requiredForRemainingSwaps += calc.BaseToQuote(match.Rate, match.Quantity)
+			} else {
+				requiredForRemainingSwaps += match.Quantity
+			}
+			requiredForRemainingSwaps += swapSize * t.metaData.MaxFeeRate
+		}
+	}
+
+	return requiredForRemainingSwaps, nil
+}
+
+// orderAccelerationParameters returns the parameters needed to accelerate the
+// swap transactions in this trade.
+// MUST be called with the trackedTrade mutex held.
+func (t *trackedTrade) orderAccelerationParameters() (swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps uint64, err error) {
+	makeError := func(err error) ([]dex.Bytes, []dex.Bytes, dex.Bytes, uint64, error) {
+		return nil, nil, nil, 0, err
+	}
+
+	if t.metaData.ChangeCoin == nil {
+		return makeError(fmt.Errorf("order does not have change which can be accelerated"))
+	}
+
+	if len(t.metaData.AccelerationCoins) >= 10 {
+		return makeError(fmt.Errorf("order has already been accelerated too many times"))
+	}
+
+	requiredForRemainingSwaps, err = t.requiredForRemainingSwaps()
+	if err != nil {
+		return makeError(err)
+	}
+
+	swapCoins = make([]dex.Bytes, 0, len(t.matches))
+	for _, match := range t.matches {
+		if match.Status < order.MakerSwapCast {
+			continue
+		}
+		var swapCoinID order.CoinID
+		if match.Side == order.Maker {
+			swapCoinID = match.MetaData.Proof.MakerSwap
+		} else {
+			if match.Status < order.TakerSwapCast {
+				continue
+			}
+			swapCoinID = match.MetaData.Proof.TakerSwap
+		}
+		swapCoins = append(swapCoins, dex.Bytes(swapCoinID))
+	}
+
+	if len(swapCoins) == 0 {
+		return makeError(fmt.Errorf("cannot accelerate an order without any swaps"))
+	}
+
+	accelerationCoins = make([]dex.Bytes, 0, len(t.metaData.AccelerationCoins))
+	for _, coin := range t.metaData.AccelerationCoins {
+		accelerationCoins = append(accelerationCoins, dex.Bytes(coin))
+	}
+
+	return swapCoins, accelerationCoins, dex.Bytes(t.metaData.ChangeCoin), requiredForRemainingSwaps, nil
+}
+
 // mapifyCoins converts the slice of coins to a map keyed by hex coin ID.
 func mapifyCoins(coins asset.Coins) map[string]asset.Coin {
 	coinMap := make(map[string]asset.Coin, len(coins))

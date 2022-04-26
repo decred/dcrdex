@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -646,9 +648,12 @@ type TXCWallet struct {
 		newFeeRate                uint64
 		requiredForRemainingSwaps uint64
 	}
-	newAccelerationTxID string
-	newChangeCoinID     dex.Bytes
-	accelerateOrderErr  error
+	newAccelerationTxID         string
+	newChangeCoinID             *dex.Bytes
+	preAccelerateSwapRate       uint64
+	preAccelerateSuggestedRange asset.XYRange
+	accelerationEstimate        uint64
+	accelerateOrderErr          error
 }
 
 var _ asset.Accelerator = (*TXCWallet)(nil)
@@ -891,15 +896,57 @@ func (w *TXCWallet) AccelerateOrder(swapCoins, accelerationCoins []dex.Bytes, ch
 		requiredForRemainingSwaps: requiredForRemainingSwaps,
 		newFeeRate:                newFeeRate,
 	}
-	return &tCoin{id: w.newChangeCoinID}, w.newAccelerationTxID, nil
+	if w.newChangeCoinID != nil {
+		return &tCoin{id: *w.newChangeCoinID}, w.newAccelerationTxID, nil
+	}
+
+	return nil, w.newAccelerationTxID, nil
 }
 
 func (w *TXCWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (currentRate uint64, suggestedRange asset.XYRange, err error) {
-	return 0, asset.XYRange{}, nil
+	if w.accelerateOrderErr != nil {
+		return 0, asset.XYRange{}, w.accelerateOrderErr
+	}
+
+	w.accelerationParams = &struct {
+		swapCoins                 []dex.Bytes
+		accelerationCoins         []dex.Bytes
+		changeCoin                dex.Bytes
+		feeSuggestion             uint64
+		newFeeRate                uint64
+		requiredForRemainingSwaps uint64
+	}{
+		swapCoins:                 swapCoins,
+		accelerationCoins:         accelerationCoins,
+		changeCoin:                changeCoin,
+		requiredForRemainingSwaps: requiredForRemainingSwaps,
+		feeSuggestion:             feeSuggestion,
+	}
+
+	return w.preAccelerateSwapRate, w.preAccelerateSuggestedRange, nil
 }
 
-func (w *TXCWallet) AccelerationEstimate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (uint64, error) {
-	return 0, nil
+func (w *TXCWallet) AccelerationEstimate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, newFeeRate uint64) (uint64, error) {
+	if w.accelerateOrderErr != nil {
+		return 0, w.accelerateOrderErr
+	}
+
+	w.accelerationParams = &struct {
+		swapCoins                 []dex.Bytes
+		accelerationCoins         []dex.Bytes
+		changeCoin                dex.Bytes
+		feeSuggestion             uint64
+		newFeeRate                uint64
+		requiredForRemainingSwaps uint64
+	}{
+		swapCoins:                 swapCoins,
+		accelerationCoins:         accelerationCoins,
+		changeCoin:                changeCoin,
+		requiredForRemainingSwaps: requiredForRemainingSwaps,
+		newFeeRate:                newFeeRate,
+	}
+
+	return w.accelerationEstimate, nil
 }
 
 type TAccountLocker struct {
@@ -6061,7 +6108,7 @@ func makeLimitOrder(dc *dexConnection, sell bool, qty, rate uint64) (*order.Limi
 			Quantity: qty,
 			Address:  addr,
 		},
-		Rate:  dcrBtcRateStep,
+		Rate:  rate,
 		Force: order.ImmediateTiF,
 	}
 	dbOrder := &db.MetaOrder{
@@ -7096,133 +7143,494 @@ func TestAccelerateOrder(t *testing.T) {
 	tCore.wallets[tUTXOAssetA.ID] = dcrWallet
 	btcWallet, tBtcWallet := newTWallet(tUTXOAssetB.ID)
 	tCore.wallets[tUTXOAssetB.ID] = btcWallet
-	walletSet, _ := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, false)
 
-	qty := 3 * dcrBtcLotSize
+	buyWalletSet, _ := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, false)
+	sellWalletSet, _ := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, false)
 
-	lo, dbOrder, preImg, addr := makeLimitOrder(dc, false, qty, dcrBtcRateStep*10)
-	dbOrder.MetaData.Status = order.OrderStatusExecuted // so there is no order_status request for this
-	oid := lo.ID()
-	trade := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails, nil, 0, 0)
-
-	dc.trades[trade.ID()] = trade
-
-	match1ID := ordertest.RandomMatchID()
-	match1 := &matchTracker{
-		MetaMatch: db.MetaMatch{
-			MetaData: &db.MatchMetaData{
-				Proof: db.MatchProof{
-					MakerSwap: encode.RandomBytes(32),
-					TakerSwap: encode.RandomBytes(32),
-				},
-			},
-			UserMatch: &order.UserMatch{
-				MatchID: match1ID,
-				Address: addr,
-				Side:    order.Maker,
-				Status:  order.TakerSwapCast,
-			},
-		},
-	}
-	trade.matches[match1ID] = match1
-
-	match2ID := ordertest.RandomMatchID()
-	match2 := &matchTracker{
-		MetaMatch: db.MetaMatch{
-			MetaData: &db.MatchMetaData{
-				Proof: db.MatchProof{
-					MakerSwap: encode.RandomBytes(32),
-					TakerSwap: encode.RandomBytes(32),
-				},
-			},
-			UserMatch: &order.UserMatch{
-				MatchID: match2ID,
-				Address: addr,
-				Side:    order.Taker,
-				Status:  order.TakerSwapCast,
-			},
-		},
-	}
-	trade.matches[match2ID] = match2
-
-	trade.metaData.ChangeCoin = encode.RandomBytes(32)
-	originalChangeCoin := trade.metaData.ChangeCoin
-	trade.metaData.AccelerationCoins = []order.CoinID{encode.RandomBytes(32)}
-	tBtcWallet.newChangeCoinID = encode.RandomBytes(32)
-	tBtcWallet.newAccelerationTxID = hex.EncodeToString(encode.RandomBytes(32))
-
-	txID, err := tCore.AccelerateOrder(tPW, oid.Bytes(), 50)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(tBtcWallet.accelerationParams.swapCoins) != 2 {
-		t.Fatalf("expected 2 swap coins but got %v", len(tBtcWallet.accelerationParams.swapCoins))
-	}
-	expectedSwapCoins := []order.CoinID{match1.MetaMatch.MetaData.Proof.MakerSwap, match2.MetaMatch.MetaData.Proof.TakerSwap}
-	swapCoins := tBtcWallet.accelerationParams.swapCoins
-	if !((bytes.Equal(swapCoins[0], expectedSwapCoins[0]) && bytes.Equal(swapCoins[1], expectedSwapCoins[1])) ||
-		(bytes.Equal(swapCoins[0], expectedSwapCoins[1]) && bytes.Equal(swapCoins[1], expectedSwapCoins[0]))) {
-		t.Fatalf("swap coins not same as expected")
-	}
-
-	if !bytes.Equal(tBtcWallet.accelerationParams.changeCoin, originalChangeCoin) {
-		t.Fatalf("change coin not same as expected %x - %x", tBtcWallet.accelerationParams.changeCoin, trade.metaData.ChangeCoin)
-	}
-
-	accelerationCoins := tBtcWallet.accelerationParams.accelerationCoins
-	if len(accelerationCoins) != 1 {
-		t.Fatalf("expected 1 acceleration tx but got %v", len(accelerationCoins))
-	}
-	if !bytes.Equal(accelerationCoins[0], trade.metaData.AccelerationCoins[0]) {
-		t.Fatalf("acceleration tx id not same as expected")
-	}
-
-	if !bytes.Equal(trade.metaData.ChangeCoin, tBtcWallet.newChangeCoinID) {
-		t.Fatalf("change coin on trade was not updated to return value from AccelerateOrder")
-	}
-	if !bytes.Equal(trade.metaData.AccelerationCoins[len(trade.metaData.AccelerationCoins)-1], tBtcWallet.newChangeCoinID) {
-		t.Fatalf("new acceleration transaction id was not added to the trade")
-	}
-	if txID != tBtcWallet.newAccelerationTxID {
-		t.Fatalf("new acceleration transaction id was not returned from AccelerateOrder")
-	}
-
-	var inCoinsList bool
-	for _, coin := range trade.coins {
-		if bytes.Equal(coin.ID(), tBtcWallet.newChangeCoinID) {
-			inCoinsList = true
+	var newBaseFeeRate uint64 = 55
+	var newQuoteFeeRate uint64 = 65
+	feeRateSource := func(msg *msgjson.Message, f msgFunc) error {
+		var resp *msgjson.Message
+		if string(msg.Payload) == "42" {
+			resp, _ = msgjson.NewResponse(msg.ID, newBaseFeeRate, nil)
+		} else {
+			resp, _ = msgjson.NewResponse(msg.ID, newQuoteFeeRate, nil)
 		}
-	}
-	if !inCoinsList {
-		t.Fatalf("new change coin must be added to the trade.coins slice")
-	}
-
-	// Ensure error with order id with incorrect length
-	_, err = tCore.AccelerateOrder(tPW, encode.RandomBytes(31), 50)
-	if err == nil {
-		t.Fatalf("expected error but did not get")
+		f(resp)
+		return nil
 	}
 
-	// Ensure error with non active order id
-	_, err = tCore.AccelerateOrder(tPW, encode.RandomBytes(order.OrderIDSize), 50)
-	if err == nil {
-		t.Fatalf("expected error but did not get")
+	type testMatch struct {
+		status   order.MatchStatus
+		quantity uint64
+		rate     uint64
+		side     order.MatchSide
 	}
 
-	// Ensure error when wallet method returns an error
-	tBtcWallet.accelerateOrderErr = errors.New("")
-	_, err = tCore.AccelerateOrder(tPW, oid.Bytes(), 50)
-	if err == nil {
-		t.Fatalf("expected error but did not get")
+	tests := []struct {
+		name                       string
+		orderQuantity              uint64
+		orderFilled                uint64
+		orderStatus                order.OrderStatus
+		rate                       uint64
+		sell                       bool
+		previousAccelerations      []order.CoinID
+		matches                    []testMatch
+		expectRequiredForRemaining uint64
+		expectError                bool
+		orderIDIncorrectLength     bool
+		nonActiveOrderID           bool
+		accelerateOrderError       bool
+		nilChangeCoin              bool
+		nilNewChangeCoin           bool
+	}{
+		{
+			name:                       "ok",
+			orderQuantity:              3 * dcrBtcLotSize,
+			orderFilled:                dcrBtcLotSize,
+			previousAccelerations:      []order.CoinID{encode.RandomBytes(32)},
+			orderStatus:                order.OrderStatusExecuted,
+			rate:                       dcrBtcRateStep * 10,
+			expectRequiredForRemaining: 2*tMaxFeeRate*tUTXOAssetB.SwapSize + calc.BaseToQuote(dcrBtcRateStep*10, 2*dcrBtcLotSize),
+			matches: []testMatch{
+				{
+					side:     order.Maker,
+					status:   order.TakerSwapCast,
+					quantity: dcrBtcLotSize,
+					rate:     dcrBtcRateStep * 10,
+				},
+			},
+		},
+		{
+			name:                       "ok - unswapped match, buy",
+			orderQuantity:              8 * dcrBtcLotSize,
+			orderFilled:                5 * dcrBtcLotSize,
+			orderStatus:                order.OrderStatusExecuted,
+			previousAccelerations:      []order.CoinID{encode.RandomBytes(32), encode.RandomBytes(32)},
+			rate:                       dcrBtcRateStep * 10,
+			expectRequiredForRemaining: 4*tMaxFeeRate*tUTXOAssetB.SwapSize + calc.BaseToQuote(dcrBtcRateStep*10, 5*dcrBtcLotSize),
+			matches: []testMatch{
+				{
+					side:     order.Maker,
+					status:   order.TakerSwapCast,
+					quantity: dcrBtcLotSize,
+					rate:     dcrBtcRateStep * 10,
+				},
+				{
+					side:     order.Taker,
+					status:   order.TakerSwapCast,
+					quantity: 2 * dcrBtcLotSize,
+					rate:     dcrBtcRateStep * 10,
+				},
+				{
+					side:     order.Taker,
+					status:   order.MakerSwapCast,
+					quantity: 2 * dcrBtcLotSize,
+					rate:     dcrBtcRateStep * 10,
+				},
+			},
+		},
+		{
+			name:                       "ok - unswapped match, sell",
+			sell:                       true,
+			previousAccelerations:      []order.CoinID{encode.RandomBytes(32), encode.RandomBytes(32)},
+			orderQuantity:              8 * dcrBtcLotSize,
+			orderFilled:                5 * dcrBtcLotSize,
+			orderStatus:                order.OrderStatusExecuted,
+			rate:                       dcrBtcRateStep * 10,
+			expectRequiredForRemaining: 4*tMaxFeeRate*tUTXOAssetB.SwapSize + 5*dcrBtcLotSize,
+			matches: []testMatch{
+				{
+					side:     order.Maker,
+					status:   order.TakerSwapCast,
+					quantity: dcrBtcLotSize,
+					rate:     dcrBtcRateStep * 10,
+				},
+				{
+					side:     order.Taker,
+					status:   order.TakerSwapCast,
+					quantity: 2 * dcrBtcLotSize,
+					rate:     dcrBtcRateStep * 10,
+				},
+				{
+					side:     order.Taker,
+					status:   order.MakerSwapCast,
+					quantity: 2 * dcrBtcLotSize,
+					rate:     dcrBtcRateStep * 10,
+				},
+			},
+		},
+		{
+			name: "10 previous accelerations",
+			sell: true,
+			previousAccelerations: []order.CoinID{encode.RandomBytes(32), encode.RandomBytes(32),
+				encode.RandomBytes(32), encode.RandomBytes(32),
+				encode.RandomBytes(32), encode.RandomBytes(32),
+				encode.RandomBytes(32), encode.RandomBytes(32),
+				encode.RandomBytes(32), encode.RandomBytes(32)},
+			orderQuantity: 8 * dcrBtcLotSize,
+			orderFilled:   5 * dcrBtcLotSize,
+			orderStatus:   order.OrderStatusExecuted,
+			rate:          dcrBtcRateStep * 10,
+			matches: []testMatch{
+				{
+					side:     order.Maker,
+					status:   order.TakerSwapCast,
+					quantity: dcrBtcLotSize,
+					rate:     dcrBtcRateStep * 10,
+				},
+			},
+			expectError: true,
+		},
+		{
+			name:          "no matches",
+			orderQuantity: 3 * dcrBtcLotSize,
+			orderFilled:   dcrBtcLotSize,
+			orderStatus:   order.OrderStatusExecuted,
+			rate:          dcrBtcRateStep * 10,
+			matches:       []testMatch{},
+			expectError:   true,
+		},
+		{
+			name:          "no swap coins",
+			orderQuantity: 3 * dcrBtcLotSize,
+			orderFilled:   dcrBtcLotSize,
+			orderStatus:   order.OrderStatusExecuted,
+			rate:          dcrBtcRateStep * 10,
+			matches: []testMatch{{
+				side:     order.Taker,
+				status:   order.MakerSwapCast,
+				quantity: 2 * dcrBtcLotSize,
+				rate:     dcrBtcRateStep * 10,
+			}},
+			expectError: true,
+		},
+		{
+			name:          "incorrect length order id",
+			orderQuantity: 3 * dcrBtcLotSize,
+			orderFilled:   dcrBtcLotSize,
+			orderStatus:   order.OrderStatusExecuted,
+			rate:          dcrBtcRateStep * 10,
+			matches: []testMatch{
+				{
+					side:     order.Maker,
+					status:   order.TakerSwapCast,
+					quantity: dcrBtcLotSize,
+					rate:     dcrBtcRateStep * 10,
+				},
+			},
+			orderIDIncorrectLength: true,
+			expectError:            true,
+		},
+		{
+			name:          "incorrect length order id",
+			orderQuantity: 3 * dcrBtcLotSize,
+			orderFilled:   dcrBtcLotSize,
+			orderStatus:   order.OrderStatusExecuted,
+			rate:          dcrBtcRateStep * 10,
+			matches: []testMatch{
+				{
+					side:     order.Maker,
+					status:   order.TakerSwapCast,
+					quantity: dcrBtcLotSize,
+					rate:     dcrBtcRateStep * 10,
+				},
+			},
+			nonActiveOrderID: true,
+			expectError:      true,
+		},
+		{
+			name:          "accelerate order err",
+			orderQuantity: 3 * dcrBtcLotSize,
+			orderFilled:   dcrBtcLotSize,
+			orderStatus:   order.OrderStatusExecuted,
+			rate:          dcrBtcRateStep * 10,
+			matches: []testMatch{
+				{
+					side:     order.Maker,
+					status:   order.TakerSwapCast,
+					quantity: dcrBtcLotSize,
+					rate:     dcrBtcRateStep * 10,
+				},
+			},
+			accelerateOrderError: true,
+			expectError:          true,
+		},
+		{
+			name:          "nil change coin",
+			orderQuantity: 3 * dcrBtcLotSize,
+			orderFilled:   dcrBtcLotSize,
+			orderStatus:   order.OrderStatusExecuted,
+			rate:          dcrBtcRateStep * 10,
+			matches: []testMatch{
+				{
+					side:     order.Maker,
+					status:   order.TakerSwapCast,
+					quantity: dcrBtcLotSize,
+					rate:     dcrBtcRateStep * 10,
+				},
+			},
+			nilChangeCoin: true,
+			expectError:   true,
+		},
+		{
+			name:                       "nil new change coin",
+			orderQuantity:              3 * dcrBtcLotSize,
+			orderFilled:                dcrBtcLotSize,
+			orderStatus:                order.OrderStatusExecuted,
+			rate:                       dcrBtcRateStep * 10,
+			expectRequiredForRemaining: 2*tMaxFeeRate*tUTXOAssetB.SwapSize + calc.BaseToQuote(dcrBtcRateStep*10, 2*dcrBtcLotSize),
+			matches: []testMatch{
+				{
+					side:     order.Maker,
+					status:   order.TakerSwapCast,
+					quantity: dcrBtcLotSize,
+					rate:     dcrBtcRateStep * 10,
+				},
+			},
+			nilNewChangeCoin: true,
+		},
 	}
 
-	// Ensure error when change coin is not set
-	trade.metaData.ChangeCoin = nil
-	_, err = tCore.AccelerateOrder(tPW, oid.Bytes(), 50)
-	if err == nil {
-		t.Fatalf("expected error but did not get")
+	for _, test := range tests {
+		tBtcWallet.accelerateOrderErr = nil
+		lo, dbOrder, preImg, addr := makeLimitOrder(dc, test.sell, test.orderQuantity, test.rate)
+		dbOrder.MetaData.Status = test.orderStatus // so there is no order_status request for this
+		oid := lo.ID()
+		var walletSet *walletSet
+		if test.sell {
+			walletSet = sellWalletSet
+		} else {
+			walletSet = buyWalletSet
+		}
+		trade := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+			rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails, nil, 0, 0)
+		dc.trades[trade.ID()] = trade
+		trade.Trade().AddFill(test.orderFilled)
+
+		trade.metaData.ChangeCoin = encode.RandomBytes(32)
+		originalChangeCoin := trade.metaData.ChangeCoin
+		trade.metaData.AccelerationCoins = test.previousAccelerations
+		newChangeCoinID := dex.Bytes(encode.RandomBytes(32))
+		if test.nilNewChangeCoin {
+			tBtcWallet.newChangeCoinID = nil
+		} else {
+			tBtcWallet.newChangeCoinID = &newChangeCoinID
+		}
+		tBtcWallet.newAccelerationTxID = hex.EncodeToString(encode.RandomBytes(32))
+		trade.matches = make(map[order.MatchID]*matchTracker)
+		expectedSwapCoins := make([]order.CoinID, 0, len(test.matches))
+		for _, testMatch := range test.matches {
+			matchID := ordertest.RandomMatchID()
+			match := &matchTracker{
+				MetaMatch: db.MetaMatch{
+					MetaData: &db.MatchMetaData{
+						Proof: db.MatchProof{
+							MakerSwap: encode.RandomBytes(32),
+							TakerSwap: encode.RandomBytes(32),
+						},
+					},
+					UserMatch: &order.UserMatch{
+						MatchID:  matchID,
+						Address:  addr,
+						Side:     testMatch.side,
+						Status:   testMatch.status,
+						Quantity: testMatch.quantity,
+						Rate:     testMatch.rate,
+					},
+				},
+			}
+			if testMatch.side == order.Maker && testMatch.status >= order.MakerSwapCast {
+				expectedSwapCoins = append(expectedSwapCoins, match.MetaData.Proof.MakerSwap)
+			}
+			if testMatch.side == order.Taker && testMatch.status >= order.TakerSwapCast {
+				expectedSwapCoins = append(expectedSwapCoins, match.MetaData.Proof.TakerSwap)
+			}
+			trade.matches[matchID] = match
+		}
+		orderIDBytes := oid.Bytes()
+		if test.orderIDIncorrectLength {
+			orderIDBytes = encode.RandomBytes(31)
+		}
+		if test.nonActiveOrderID {
+			orderIDBytes = encode.RandomBytes(32)
+		}
+		if test.accelerateOrderError {
+			tBtcWallet.accelerateOrderErr = errors.New("")
+		}
+		if test.nilChangeCoin {
+			trade.metaData.ChangeCoin = nil
+		}
+
+		checkCommonCallValues := func() {
+			t.Helper()
+			swapCoins := tBtcWallet.accelerationParams.swapCoins
+			if len(swapCoins) != len(expectedSwapCoins) {
+				t.Fatalf("expected %d swap coins but got %d", len(expectedSwapCoins), len(swapCoins))
+			}
+
+			sort.Slice(swapCoins, func(i, j int) bool { return bytes.Compare(swapCoins[i], swapCoins[j]) > 0 })
+			sort.Slice(expectedSwapCoins, func(i, j int) bool { return bytes.Compare(expectedSwapCoins[i], expectedSwapCoins[j]) > 0 })
+
+			for i := range swapCoins {
+				if !bytes.Equal(swapCoins[i], expectedSwapCoins[i]) {
+					t.Fatalf("expected swap coins not the same as actual")
+				}
+			}
+
+			changeCoin := tBtcWallet.accelerationParams.changeCoin
+			if !bytes.Equal(changeCoin, originalChangeCoin) {
+				t.Fatalf("change coin not same as expected %x - %x", changeCoin, trade.metaData.ChangeCoin)
+			}
+
+			accelerationCoins := tBtcWallet.accelerationParams.accelerationCoins
+			if len(accelerationCoins) != len(test.previousAccelerations) {
+				t.Fatalf("expected 1 acceleration tx but got %v", len(accelerationCoins))
+			}
+			for i := range accelerationCoins {
+				if !bytes.Equal(accelerationCoins[i], test.previousAccelerations[i]) {
+					t.Fatalf("expected acceleration coin not the same as actual")
+				}
+			}
+		}
+
+		checkRequiredForRemainingSwaps := func() {
+			t.Helper()
+			if tBtcWallet.accelerationParams.requiredForRemainingSwaps != test.expectRequiredForRemaining {
+				t.Fatalf("expected requiredForRemainingSwaps %d, but got %d", test.expectRequiredForRemaining,
+					tBtcWallet.accelerationParams.requiredForRemainingSwaps)
+			}
+		}
+
+		testAccelerateOrder := func() {
+			newFeeRate := rand.Uint64()
+			txID, err := tCore.AccelerateOrder(tPW, orderIDBytes, newFeeRate)
+			if test.expectError {
+				if err == nil {
+					t.Fatalf("expected error, but did not get")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			checkCommonCallValues()
+			checkRequiredForRemainingSwaps()
+
+			if test.nilNewChangeCoin {
+				if tBtcWallet.newChangeCoinID != nil {
+					t.Fatalf("expected coin on order to be nil, but got %x", tBtcWallet.newChangeCoinID)
+				}
+			} else {
+				if !bytes.Equal(trade.metaData.ChangeCoin, *tBtcWallet.newChangeCoinID) {
+					t.Fatalf("change coin on trade was not updated to return value from AccelerateOrder")
+				}
+				if !bytes.Equal(trade.metaData.AccelerationCoins[len(trade.metaData.AccelerationCoins)-1], *tBtcWallet.newChangeCoinID) {
+					t.Fatalf("new acceleration transaction id was not added to the trade")
+				}
+
+				var inCoinsList bool
+				for _, coin := range trade.coins {
+					if bytes.Equal(coin.ID(), *tBtcWallet.newChangeCoinID) {
+						inCoinsList = true
+					}
+				}
+				if !inCoinsList {
+					t.Fatalf("new change coin must be added to the trade.coins slice")
+				}
+			}
+			if txID != tBtcWallet.newAccelerationTxID {
+				t.Fatalf("new acceleration transaction id was not returned from AccelerateOrder")
+			}
+			if newFeeRate != tBtcWallet.accelerationParams.newFeeRate {
+				t.Fatalf("%s: expected new fee rate %d, but got %d", test.name,
+					newFeeRate, tBtcWallet.accelerationParams.newFeeRate)
+			}
+		}
+
+		testPreAccelerate := func() {
+			rig.ws.queueResponse(msgjson.FeeRateRoute, feeRateSource)
+			tBtcWallet.preAccelerateSwapRate = rand.Uint64()
+			tBtcWallet.preAccelerateSuggestedRange = asset.XYRange{
+				Start: asset.XYRangePoint{
+					Label: "startLabel",
+					X:     rand.Float64(),
+					Y:     rand.Float64(),
+				},
+				End: asset.XYRangePoint{
+					Label: "endLabel",
+					X:     rand.Float64(),
+					Y:     rand.Float64(),
+				},
+				XUnit: "x",
+				YUnit: "y",
+			}
+
+			preAccelerate, err := tCore.PreAccelerateOrder(orderIDBytes)
+			if test.expectError {
+				if err == nil {
+					t.Fatalf("expected error, but did not get")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("%s: unexpected error: %v", test.name, err)
+			}
+
+			checkCommonCallValues()
+			checkRequiredForRemainingSwaps()
+
+			if !test.sell && preAccelerate.SuggestedRate != newQuoteFeeRate {
+				t.Fatalf("%s: expected fee suggestion to be %d, but got %d",
+					test.name, newQuoteFeeRate, preAccelerate.SuggestedRate)
+			}
+			if test.sell && preAccelerate.SuggestedRate != newBaseFeeRate {
+				t.Fatalf("%s: expected fee suggestion to be %d, but got %d",
+					test.name, newBaseFeeRate, preAccelerate.SuggestedRate)
+			}
+			if preAccelerate.SwapRate != tBtcWallet.preAccelerateSwapRate {
+				t.Fatalf("%s: expected pre accelerate swap rate %d, but got %d",
+					test.name, tBtcWallet.preAccelerateSwapRate, preAccelerate.SwapRate)
+			}
+			if !reflect.DeepEqual(preAccelerate.SuggestedRange,
+				tBtcWallet.preAccelerateSuggestedRange) {
+				t.Fatalf("%s: PreAccelerate suggested range not same as expected",
+					test.name)
+			}
+		}
+
+		testMaxAcceleration := func() {
+			t.Helper()
+			tBtcWallet.accelerationEstimate = rand.Uint64()
+			newFeeRate := rand.Uint64()
+			estimate, err := tCore.AccelerationEstimate(orderIDBytes, newFeeRate)
+			if test.expectError {
+				if err == nil {
+					t.Fatalf("expected error, but did not get")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("%s: unexpected error: %v", test.name, err)
+			}
+
+			checkCommonCallValues()
+			checkRequiredForRemainingSwaps()
+
+			if newFeeRate != tBtcWallet.accelerationParams.newFeeRate {
+				t.Fatalf("%s: expected new fee rate %d, but got %d", test.name,
+					newFeeRate, tBtcWallet.accelerationParams.newFeeRate)
+			}
+			if estimate != tBtcWallet.accelerationEstimate {
+				t.Fatalf("%s: expected acceleration estimate %d, but got %d",
+					test.name, tBtcWallet.accelerationEstimate, estimate)
+			}
+		}
+
+		testPreAccelerate()
+		testMaxAcceleration()
+		testAccelerateOrder()
 	}
 }
 

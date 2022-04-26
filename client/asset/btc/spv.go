@@ -1799,14 +1799,14 @@ func (w *spvWallet) getTransaction(txHash *chainhash.Hash) (*GetTransactionResul
 
 	// TODO: The serialized transaction is already in the DB, so
 	// reserializing can be avoided here.
-	txBuf, err := serializeMsgTx(&details.MsgTx)
+	txRaw, err := serializeMsgTx(&details.MsgTx)
 	if err != nil {
 		return nil, err
 	}
 
 	ret := &GetTransactionResult{
 		TxID:         txHash.String(),
-		Hex:          txBuf, // 'Hex' field name is a lie, kinda
+		Hex:          txRaw, // 'Hex' field name is a lie, kinda
 		Time:         uint64(details.Received.Unix()),
 		TimeReceived: uint64(details.Received.Unix()),
 	}

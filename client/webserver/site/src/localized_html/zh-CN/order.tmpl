@@ -229,10 +229,10 @@
         Accelerate Order
       </div>
       <div id=accelerateMainDiv>
-        In case your swap transactions are stuck, you can accelerate them using the Child Pays For Parent technique. When you submit this form, you will create a transaction that sends the change recieved from initiating swaps to yourself with a higher fee. With the new transaction, the average fee rate of all unmined swap transactions, and the new acceleration transaction, will be the rate that you select below.
+        If your swap transactions are stuck, you may attempt to accelerate them with an additional transaction. This is helpful when the the fee rate on an existing unconfirmed transaction has become too low to be mined in the next block, but not if blocks are just being mined slowly. When you submit this form, a transaction will be created that sends the change from your own swap initiation transaction to yourself with a higher fee. With the new transaction, the average fee rate of all unconfirmed swap transactions for this order, plus the new acceleration transaction, will be the rate that you select below. This effective rate should be at least enough to be included in the next block.
         <br />
         <div class="text-center fs17 sans-light position-relative">
-          Average swap tx fee rate: <span id="accelerateAvgFeeRate"></span>
+          Effective swap tx fee rate: <span id="accelerateAvgFeeRate"></span>
         </div>
         <div class="text-center fs17 sans-light position-relative">
           Current suggested fee rate: <span id="accelerateCurrentFeeRate"></span>
@@ -240,7 +240,7 @@
         <div id="sliderContainer" class="slider-container">
         </div>
         <div id="feeEstimateDiv" class="text-center fs17 sans-light position-relative d-hide">
-          Increasing the fee rate to <span id="feeRateEstimate"></span> will cost <span id="feeEstimate"></span>
+          Increasing the effective fee rate to <span id="feeRateEstimate"></span> will cost <span id="feeEstimate"></span>
         </div>
         <hr class="dashed mt-2">
         <div class="d-flex flex-row align-items-end {{if $passwordIsCached}}justify-content-end{{end}} pb-4">

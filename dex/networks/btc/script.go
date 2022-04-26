@@ -170,14 +170,19 @@ const (
 	// NOTE: witness data is not script.
 	RedeemP2WPKHInputWitnessWeight = 1 + 1 + DERSigLength + 1 + 33 // 109
 
-	// RedeemP2PKHInputTotalSize is the worst case size of a transaction
+	// RedeemP2WPKHInputTotalSize is the worst case size of a transaction
 	// input redeeming a P2WPKH output and the corresponding witness data.
 	// It is calculated as:
 	//
 	// 41 vbytes base tx input
-	// 109wu witness +  2wu segwit marker and flag = 28 vbytes
+	// 109wu witness = 28 vbytes
 	// total = 69 vbytes
-	RedeemP2PWKHInputTotalSize = RedeemP2WPKHInputSize + ((RedeemP2WPKHInputWitnessWeight + 2 + 3) / 4)
+	RedeemP2WPKHInputTotalSize = RedeemP2WPKHInputSize +
+		(RedeemP2WPKHInputWitnessWeight+(witnessWeight-1))/witnessWeight
+
+	// SigwitMarkerAndFlagWeight is the 2 bytes of overhead witness data
+	// added to every segwit transaction.
+	SegwitMarkerAndFlagWeight = 2
 
 	// RedeemP2WSHInputWitnessWeight depends on the number of redeem scrpit and
 	// number of signatures.
@@ -227,7 +232,8 @@ const (
 	// 41 vbytes base tx input
 	// 109wu witness +  2wu segwit marker and flag = 28 vbytes
 	// total = 153 vbytes
-	InitTxSizeSegwit = InitTxSizeBaseSegwit + RedeemP2PWKHInputTotalSize
+	InitTxSizeSegwit = InitTxSizeBaseSegwit + RedeemP2WPKHInputSize +
+		(SegwitMarkerAndFlagWeight+RedeemP2WPKHInputWitnessWeight+(witnessWeight-1))/witnessWeight
 
 	witnessWeight = blockchain.WitnessScaleFactor
 )

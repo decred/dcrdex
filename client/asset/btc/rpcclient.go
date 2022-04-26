@@ -704,7 +704,7 @@ func (wc *rpcClient) call(method string, args anylist, thing interface{}) error 
 }
 
 // serializeMsgTx serializes the wire.MsgTx.
-func serializeMsgTx(msgTx *wire.MsgTx) (dex.Bytes, error) {
+func serializeMsgTx(msgTx *wire.MsgTx) ([]byte, error) {
 	buf := bytes.NewBuffer(make([]byte, 0, msgTx.SerializeSize()))
 	err := msgTx.Serialize(buf)
 	if err != nil {

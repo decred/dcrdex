@@ -61,7 +61,7 @@ const (
 	// splitTxBaggageSegwit it the analogue of splitTxBaggage for segwit.
 	// We include the 2 bytes for marker and flag.
 	splitTxBaggageSegwit = dexbtc.MinimumTxOverhead + 2*dexbtc.P2WPKHOutputSize +
-		dexbtc.RedeemP2PWKHInputTotalSize
+		dexbtc.RedeemP2WPKHInputSize + ((dexbtc.RedeemP2WPKHInputWitnessWeight + dexbtc.SegwitMarkerAndFlagWeight + 3) / 4)
 
 	walletTypeLegacy = ""
 	walletTypeRPC    = "bitcoindRPC"
@@ -1470,7 +1470,6 @@ func (btc *baseWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, er
 // FundOrder selects coins for use in an order. The coins will be locked, and
 // will not be returned in subsequent calls to FundOrder or calculated in calls
 // to Available, unless they are unlocked with ReturnCoins.
-// The returned []dex.Bytes contains the redeem scripts for the selected coins.
 // Equal number of coins and redeemed scripts must be returned. A nil or empty
 // dex.Bytes should be appended to the redeem scripts collection for coins with
 // no redeem script.
@@ -1763,7 +1762,7 @@ func (btc *baseWallet) split(value uint64, lots uint64, outputs []*output,
 func (btc *baseWallet) splitBaggageFees(maxFeeRate uint64) (swapInputSize, baggage uint64) {
 	if btc.segwit {
 		baggage = maxFeeRate * splitTxBaggageSegwit
-		swapInputSize = dexbtc.RedeemP2PWKHInputTotalSize
+		swapInputSize = dexbtc.RedeemP2WPKHInputTotalSize
 		return
 	}
 	baggage = maxFeeRate * splitTxBaggage
@@ -1930,6 +1929,123 @@ func (btc *baseWallet) fundedTx(coins asset.Coins) (*wire.MsgTx, uint64, []outPo
 	return baseTx, totalIn, pts, nil
 }
 
+// signedAccelerationTx returns a signed transaction that sends funds to a
+// change address controlled by this wallet. This new transaction will have
+// a fee high enough to make the average fee of the unmined swapCoins and
+// accelerationTxs to be newFeeRate.
+func (btc *baseWallet) signedAccelerationTx(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, newFeeRate uint64) (*wire.MsgTx, *output, uint64, error) {
+	makeError := func(err error) (*wire.MsgTx, *output, uint64, error) {
+		return nil, nil, 0, err
+	}
+
+	changeTxHash, changeVout, err := decodeCoinID(changeCoin)
+	if err != nil {
+		return makeError(err)
+	}
+
+	err = btc.changeCanBeAccelerated(changeTxHash, changeVout, requiredForRemainingSwaps)
+	if err != nil {
+		return makeError(err)
+	}
+
+	txs, err := btc.getTransactions(append(swapCoins, accelerationCoins...))
+	if err != nil {
+		return makeError(fmt.Errorf("failed to sort swap chain: %w", err))
+	}
+
+	changeOutput, err := btc.lookupOutput(changeTxHash, changeVout)
+	if err != nil {
+		return makeError(err)
+	}
+
+	additionalFeesRequired, err := btc.additionalFeesRequired(txs, newFeeRate)
+	if err != nil {
+		return makeError(err)
+	}
+
+	if additionalFeesRequired <= 0 {
+		return makeError(fmt.Errorf("no additional fees are required to move the fee rate to %v", newFeeRate))
+	}
+
+	if btc.net != dex.Simnet {
+		tooEarly, minAccelerationTime, err := tooEarlyToAccelerate(txs, accelerationCoins)
+		if err != nil {
+			return makeError(err)
+		}
+		if tooEarly {
+			minLocalTime := time.Unix(int64(minAccelerationTime), 0).Local()
+			return makeError(fmt.Errorf("cannot accelerate until %v", minLocalTime))
+		}
+	}
+
+	txSize := uint64(dexbtc.MinimumTxOverhead)
+	if btc.segwit {
+		txSize += dexbtc.RedeemP2WPKHInputTotalSize
+	} else {
+		txSize += dexbtc.RedeemP2PKHInputSize
+	}
+	if requiredForRemainingSwaps > 0 {
+		if btc.segwit {
+			txSize += dexbtc.P2WPKHOutputSize
+		} else {
+			txSize += dexbtc.P2PKHOutputSize
+		}
+	}
+
+	fundsRequired := additionalFeesRequired + requiredForRemainingSwaps + txSize*newFeeRate
+
+	var additionalInputs asset.Coins
+	if fundsRequired > changeOutput.value {
+		// If change not enough, need to use other UTXOs.
+		utxos, _, _, err := btc.spendableUTXOs(1)
+		if err != nil {
+			return makeError(err)
+		}
+
+		_, _, additionalInputs, _, _, _, err = fund(utxos, func(inputSize, inputsVal uint64) bool {
+			txSize := dexbtc.MinimumTxOverhead + inputSize
+
+			// input is the change input that we must use
+			if btc.segwit {
+				txSize += dexbtc.RedeemP2WPKHInputTotalSize
+			} else {
+				txSize += dexbtc.RedeemP2PKHInputSize
+			}
+
+			if requiredForRemainingSwaps > 0 {
+				if btc.segwit {
+					txSize += dexbtc.P2WPKHOutputSize
+				} else {
+					txSize += dexbtc.P2PKHOutputSize
+				}
+			}
+
+			totalFees := additionalFeesRequired + txSize*newFeeRate
+			return totalFees+requiredForRemainingSwaps <= inputsVal+changeOutput.value
+		})
+		if err != nil {
+			return makeError(fmt.Errorf("failed to fund acceleration tx: %w", err))
+		}
+	}
+
+	baseTx, totalIn, _, err := btc.fundedTx(append(additionalInputs, changeOutput))
+	if err != nil {
+		return makeError(err)
+	}
+
+	changeAddr, err := btc.node.changeAddress()
+	if err != nil {
+		return makeError(fmt.Errorf("error creating change address: %w", err))
+	}
+
+	tx, output, txFee, err := btc.signTxAndAddChange(baseTx, changeAddr, totalIn, additionalFeesRequired, newFeeRate)
+	if err != nil {
+		return makeError(err)
+	}
+
+	return tx, output, txFee + additionalFeesRequired, nil
+}
+
 // AccelerateOrder uses the Child-Pays-For-Parent technique to accelerate a
 // chain of swap transactions and previous accelerations. It broadcasts a new
 // transaction with a fee high enough so that the average fee of all the
@@ -1943,6 +2059,11 @@ func (btc *baseWallet) AccelerateOrder(swapCoins, accelerationCoins []dex.Bytes,
 	btc.fundingMtx.Lock()
 	defer btc.fundingMtx.Unlock()
 
+	changeTxHash, changeVout, err := decodeCoinID(changeCoin)
+	if err != nil {
+		return nil, "", err
+	}
+
 	signedTx, newChange, _, err := btc.signedAccelerationTx(swapCoins, accelerationCoins, changeCoin, requiredForRemainingSwaps, newFeeRate)
 	if err != nil {
 		return nil, "", err
@@ -1953,34 +2074,38 @@ func (btc *baseWallet) AccelerateOrder(swapCoins, accelerationCoins []dex.Bytes,
 		return nil, "", err
 	}
 
-	var newChangeCoin asset.Coin
-	if newChange != nil {
-		newChangeCoin = newChange
+	// Delete the old change from the cache
+	delete(btc.fundingCoins, newOutPoint(changeTxHash, changeVout))
 
-		// Checking required for remaining swaps > 0 because this ensures if
-		// the previous change was locked, this one will also be locked. If
-		// requiredForRemainingSwaps = 0, but the change was locked,
-		// signedAccelerationTx would have returned an error since this means
-		// that the change was locked by another order.
-		if requiredForRemainingSwaps > 0 {
-			err = btc.node.lockUnspent(false, []*output{newChange})
-			if err != nil {
-				// The transaction is already broadcasted, so don't fail now.
-				btc.log.Errorf("failed to lock change output: %v", err)
-			}
+	if newChange == nil {
+		return nil, signedTx.TxHash().String(), nil
+	}
 
-			// Log it as a fundingCoin, since it is expected that this will be
-			// chained into further matches.
-			btc.fundingCoins[newChange.pt] = &utxo{
-				txHash:  newChange.txHash(),
-				vout:    newChange.vout(),
-				address: newChange.String(),
-				amount:  newChange.value,
-			}
+	// Checking required for remaining swaps > 0 because this ensures if
+	// the previous change was locked, this one will also be locked. If
+	// requiredForRemainingSwaps = 0, but the change was locked,
+	// signedAccelerationTx would have returned an error since this means
+	// that the change was locked by another order.
+	if requiredForRemainingSwaps > 0 {
+		err = btc.node.lockUnspent(false, []*output{newChange})
+		if err != nil {
+			// The transaction is already broadcasted, so don't fail now.
+			btc.log.Errorf("failed to lock change output: %v", err)
+		}
+
+		// Log it as a fundingCoin, since it is expected that this will be
+		// chained into further matches.
+		btc.fundingCoins[newChange.pt] = &utxo{
+			txHash:  newChange.txHash(),
+			vout:    newChange.vout(),
+			address: newChange.String(),
+			amount:  newChange.value,
 		}
 	}
 
-	return newChangeCoin, signedTx.TxHash().String(), err
+	// return nil error since tx is already broadcast, and core needs to update
+	// the change coin
+	return newChange, signedTx.TxHash().String(), nil
 }
 
 // AccelerationEstimate takes the same parameters as AccelerateOrder, but
@@ -2044,7 +2169,12 @@ func tooEarlyToAccelerate(txs []*GetTransactionResult, accelerationCoins []dex.B
 // PreAccelerate returns the current average fee rate of the unmined swap
 // initiation and acceleration transactions, and also returns a suggested
 // range that the fee rate should be increased to in order to expedite mining.
-func (btc *baseWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (currentRate uint64, suggestedRange asset.XYRange, err error) {
+// The feeSuggestion argument is the current prevailing network rate. It is
+// used to help determine the suggestedRange, which is a range meant to give
+// the user a good amount of flexibility in determining the post acceleration
+// effective fee rate, but still not allowing them to pick something
+// outrageously high.
+func (btc *baseWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (currentEffectiveRate uint64, suggestedRange asset.XYRange, err error) {
 	makeError := func(err error) (uint64, asset.XYRange, error) {
 		return 0, asset.XYRange{}, err
 	}
@@ -2138,152 +2268,45 @@ func (btc *baseWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, c
 	}
 
 	maxRate := (changeOutput.value + feesAlreadyPaid + utxosVal - requiredForRemainingSwaps) / (newChangeTxSize + swapTxsSize)
-	currentRate = feesAlreadyPaid / swapTxsSize
+	currentEffectiveRate = feesAlreadyPaid / swapTxsSize
 
-	if maxRate <= currentRate {
-		return makeError(fmt.Errorf("cannot accelerate, max rate %v <= current rate %v", maxRate, currentRate))
+	if maxRate <= currentEffectiveRate {
+		return makeError(fmt.Errorf("cannot accelerate, max rate %v <= current rate %v", maxRate, currentEffectiveRate))
 	}
 
-	maxSuggestion := currentRate * 5
-	if feeSuggestion*5 > maxSuggestion {
-		maxSuggestion = feeSuggestion * 5
+	// The suggested range will be the min and max of the slider that is
+	// displayed on the UI. The minimum of the range is 1 higher than the
+	// current effective range of the swap transactions. The max of the range
+	// will be the maximum of 5x the current effective rate, or 5x the current
+	// prevailing network rate. This is a completely arbitrary choice, but in
+	// this way the user will definitely be able to accelerate at least 5x the
+	// original rate, and even if the prevailing network rate is much higher
+	// than the current effective rate, they will still have a comformtable
+	// buffer above the prevailing network rate.
+	const scalingFactor = 5
+	maxSuggestion := currentEffectiveRate * scalingFactor
+	if feeSuggestion > currentEffectiveRate {
+		maxSuggestion = feeSuggestion * scalingFactor
 	}
 	if maxRate < maxSuggestion {
 		maxSuggestion = maxRate
 	}
-
 	suggestedRange = asset.XYRange{
 		Start: asset.XYRangePoint{
 			Label: "Min",
-			X:     float64(currentRate+1) / float64(currentRate),
-			Y:     float64(currentRate + 1),
+			X:     float64(currentEffectiveRate+1) / float64(currentEffectiveRate),
+			Y:     float64(currentEffectiveRate + 1),
 		},
 		End: asset.XYRangePoint{
 			Label: "Max",
-			X:     float64(maxSuggestion) / float64(currentRate),
+			X:     float64(maxSuggestion) / float64(currentEffectiveRate),
 			Y:     float64(maxSuggestion),
 		},
 		XUnit: "X",
 		YUnit: btc.walletInfo.UnitInfo.AtomicUnit + "/" + btc.sizeUnit(),
 	}
 
-	return currentRate, suggestedRange, nil
-}
-
-// signedAccelerationTx returns a signed transaction that sends funds to a
-// change address controlled by this wallet. This new transaction will have
-// a fee high enough to make the average fee of the unmined swapCoins and
-// accelerationTxs to be newFeeRate.
-func (btc *baseWallet) signedAccelerationTx(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, newFeeRate uint64) (*wire.MsgTx, *output, uint64, error) {
-	makeError := func(err error) (*wire.MsgTx, *output, uint64, error) {
-		return nil, nil, 0, err
-	}
-
-	changeTxHash, changeVout, err := decodeCoinID(changeCoin)
-	if err != nil {
-		return makeError(err)
-	}
-
-	err = btc.changeCanBeAccelerated(changeTxHash, changeVout, requiredForRemainingSwaps)
-	if err != nil {
-		return makeError(err)
-	}
-
-	txs, err := btc.getTransactions(append(swapCoins, accelerationCoins...))
-	if err != nil {
-		return makeError(fmt.Errorf("failed to sort swap chain: %w", err))
-	}
-
-	changeOutput, err := btc.lookupOutput(changeTxHash, changeVout)
-	if err != nil {
-		return makeError(err)
-	}
-
-	additionalFeesRequired, err := btc.additionalFeesRequired(txs, newFeeRate)
-	if err != nil {
-		return makeError(err)
-	}
-
-	if additionalFeesRequired <= 0 {
-		return makeError(fmt.Errorf("no additional fees are required to move the fee rate to %v", newFeeRate))
-	}
-
-	if btc.net != dex.Simnet {
-		tooEarly, minAccelerationTime, err := tooEarlyToAccelerate(txs, accelerationCoins)
-		if err != nil {
-			return makeError(err)
-		}
-		if tooEarly {
-			minLocalTime := time.Unix(int64(minAccelerationTime), 0).Local()
-			return makeError(fmt.Errorf("cannot accelerate until %v", minLocalTime))
-		}
-	}
-
-	txSize := dexbtc.MinimumTxOverhead
-	if btc.segwit {
-		txSize += dexbtc.RedeemP2PWKHInputTotalSize
-	} else {
-		txSize += dexbtc.RedeemP2PKHInputSize
-	}
-	if requiredForRemainingSwaps > 0 {
-		if btc.segwit {
-			txSize += dexbtc.P2WPKHOutputSize
-		} else {
-			txSize += dexbtc.P2PKHOutputSize
-		}
-	}
-	fundsRequired := additionalFeesRequired + requiredForRemainingSwaps + uint64(txSize)*newFeeRate
-
-	var additionalInputs asset.Coins
-	if fundsRequired > changeOutput.value {
-		// If change not enough, need to use other UTXOs.
-		utxos, _, _, err := btc.spendableUTXOs(1)
-		if err != nil {
-			return makeError(err)
-		}
-
-		_, _, additionalInputs, _, _, _, err = fund(utxos, func(inputSize, inputsVal uint64) bool {
-			txSize := dexbtc.MinimumTxOverhead + inputSize
-
-			// input is the change input that we must use
-			if btc.segwit {
-				txSize += dexbtc.RedeemP2PWKHInputTotalSize
-			} else {
-				txSize += dexbtc.RedeemP2PKHInputSize
-			}
-
-			if requiredForRemainingSwaps > 0 {
-				if btc.segwit {
-					txSize += dexbtc.P2WPKHOutputSize
-				} else {
-					txSize += dexbtc.P2PKHOutputSize
-				}
-			}
-
-			totalFees := additionalFeesRequired + txSize*newFeeRate
-			return totalFees+requiredForRemainingSwaps <= inputsVal+changeOutput.value
-		})
-		if err != nil {
-			return makeError(fmt.Errorf("failed to fund acceleration tx: %w", err))
-		}
-	}
-
-	baseTx, totalIn, _, err := btc.fundedTx(append(additionalInputs, changeOutput))
-	if err != nil {
-		return makeError(err)
-	}
-
-	changeAddr, err := btc.node.changeAddress()
-	if err != nil {
-		return makeError(fmt.Errorf("error creating change address: %w", err))
-	}
-
-	tx, output, txFee, err := btc.signTxAndAddChange(baseTx, changeAddr, totalIn, additionalFeesRequired, newFeeRate)
-	if err != nil {
-		return makeError(err)
-	}
-
-	return tx, output, txFee + additionalFeesRequired, nil
+	return currentEffectiveRate, suggestedRange, nil
 }
 
 // lookupOutput looks up the value of a transaction output and creates an

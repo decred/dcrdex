@@ -606,8 +606,7 @@ func (s *WebServer) apiOrders(w http.ResponseWriter, r *http.Request) {
 	}, s.indent)
 }
 
-// apiAccelerateOrder uses the Child-Pays-For-Parent technique to speen up an
-// order.
+// apiAccelerateOrder speeds up the mining of transactions in an order.
 func (s *WebServer) apiAccelerateOrder(w http.ResponseWriter, r *http.Request) {
 	form := struct {
 		Pass    encode.PassBytes `json:"pw"`
