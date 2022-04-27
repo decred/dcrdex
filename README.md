@@ -1,7 +1,7 @@
 # <img src="docs/images/logo_wide_v1.svg" alt="DCRDEX" width="250">
 
 [![Build Status](https://github.com/decred/dcrdex/workflows/Build%20and%20Test/badge.svg)](https://github.com/decred/dcrdex/actions)
-[![ISC License](https://img.shields.io/badge/license-Blue_Oak-007788.svg)](http://copyfree.org)
+[![ISC License](https://img.shields.io/badge/license-Blue_Oak-007788.svg)](https://blueoakcouncil.org/license/1.0.0)
 [![GoDoc](https://img.shields.io/badge/go.dev-reference-blue.svg?logo=go&logoColor=lightblue)](https://pkg.go.dev/decred.org/dcrdex)
 
 ## What is DEX?

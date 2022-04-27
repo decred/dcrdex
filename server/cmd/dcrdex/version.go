@@ -38,7 +38,7 @@ var (
 	// the package will panic at runtime.  Of particular note is the pre-release
 	// and build metadata portions MUST only contain characters from
 	// semanticAlphabet.
-	// NOTE: The Version string is overidden on init.
+	// NOTE: The Version string is overridden on init.
 	Version = "0.5.0-pre"
 )
 
