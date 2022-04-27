@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	// appName is the application name.
-	appName string = "dexcctl"
+	// appName defines the application name.
+	appName string = "dexc"
 )
 
 var (

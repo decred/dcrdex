@@ -81,7 +81,7 @@ func mainCore(ctx context.Context) error {
 	}
 
 	// Display app version.
-	log.Infof("%s version %v (Go version %s)", AppName, Version(), runtime.Version())
+	log.Infof("%s version %v (Go version %s)", appName, Version, runtime.Version())
 	log.Infof("dcrdex starting for network: %s", cfg.Network)
 	log.Infof("swap locktimes config: maker %s, taker %s",
 		dex.LockTimeMaker(cfg.Network), dex.LockTimeTaker(cfg.Network))

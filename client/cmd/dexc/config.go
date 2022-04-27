@@ -11,7 +11,6 @@ import (
 	"runtime"
 
 	"decred.org/dcrdex/client/asset"
-	"decred.org/dcrdex/client/cmd/dexc/version"
 	"decred.org/dcrdex/dex"
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/slog"
@@ -136,7 +135,7 @@ func configure() (*Config, error) {
 	// Show the version and exit if the version flag was specified.
 	if preCfg.ShowVer {
 		fmt.Printf("%s version %s (Go version %s %s/%s)\n",
-			version.AppName, version.Version(), runtime.Version(), runtime.GOOS, runtime.GOARCH)
+			appName, Version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 		os.Exit(0)
 	}
 
