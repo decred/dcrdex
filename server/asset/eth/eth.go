@@ -398,12 +398,12 @@ func (eth *AssetBackend) InitTxSize() uint32 {
 	return eth.initTxSize
 }
 
-// InitTxSizeBase is the same as InitTxSize for ETH.
+// InitTxSizeBase is the same as (dex.Asset).SwapSize for asset.
 func (eth *AssetBackend) InitTxSizeBase() uint32 {
 	return eth.initTxSize
 }
 
-// InitTxSizeBase is the same as InitTxSize for ETH.
+// RedeemSize is the same as (dex.Asset).RedeemSize for the asset.
 func (eth *AssetBackend) RedeemSize() uint64 {
 	return eth.redeemSize
 }
@@ -486,7 +486,7 @@ func (eth *AssetBackend) sendBlockUpdate(u *asset.BlockUpdate) {
 }
 
 // ValidateContract ensures that contractData encodes both the expected contract
-// version targeted and the secret hash.
+// version and a secret hash.
 func (eth *ETHBackend) ValidateContract(contractData []byte) error {
 	ver, _, err := dexeth.DecodeContractData(contractData)
 	if err != nil { // ensures secretHash is proper length
@@ -499,6 +499,8 @@ func (eth *ETHBackend) ValidateContract(contractData []byte) error {
 	return nil
 }
 
+// ValidateContract ensures that contractData encodes both the expected swap
+// contract version and a secret hash.
 func (eth *TokenBackend) ValidateContract(contractData []byte) error {
 	ver, _, err := dexeth.DecodeContractData(contractData)
 	if err != nil { // ensures secretHash is proper length
