@@ -2,7 +2,6 @@
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
 //go:build lgpl
-// +build lgpl
 
 package eth
 
@@ -25,11 +24,6 @@ type swapContract interface {
 	Swap(context.Context, [32]byte) (*dexeth.SwapState, error)
 }
 
-// tokenAddresser exposes the TokenAddress method of a token swap contract.
-type tokenAddresser interface {
-	TokenAddress(*bind.CallOpts) (common.Address, error)
-}
-
 // erc2Contract exposes methods of a token's ERC20 contract.
 type erc20Contract interface {
 	BalanceOf(*bind.CallOpts, common.Address) (*big.Int, error)
@@ -39,9 +33,7 @@ type erc20Contract interface {
 type tokener struct {
 	*registeredToken
 	swapContract
-	tokenAddresser
 	erc20Contract
-	ver                     uint32
 	contractAddr, tokenAddr common.Address
 }
 
@@ -66,22 +58,23 @@ func newTokener(ctx context.Context, assetID uint32, net dex.Network, be bind.Co
 		return nil, err
 	}
 
+	boundAddr, err := es.TokenAddress(readOnlyCallOpts(ctx, false))
+	if err != nil {
+		return nil, fmt.Errorf("error retrieving bound address for %s version %d contract: %w",
+			token.Name, token.ver, err)
+	}
+
+	if boundAddr != netToken.Address {
+		return nil, fmt.Errorf("wrong bound address for %s version %d contract. wanted %s, got %s",
+			token.Name, token.ver, netToken.Address, boundAddr)
+	}
+
 	tkn := &tokener{
-		ver:             0,
 		registeredToken: token,
 		swapContract:    &swapSourceV0{es},
-		tokenAddresser:  es,
 		erc20Contract:   erc20,
 		contractAddr:    swapContract.Address,
 		tokenAddr:       netToken.Address,
-	}
-
-	if boundAddr, err := tkn.tokenAddress(ctx); err != nil {
-		return nil, fmt.Errorf("error retrieving bound address for %s version %d contract: %w",
-			token.Name, token.ver, err)
-	} else if boundAddr != netToken.Address {
-		return nil, fmt.Errorf("wrong bound address for %s version %d contract. wanted %s, got %s",
-			token.Name, token.ver, netToken.Address, boundAddr)
 	}
 
 	return tkn, nil
@@ -110,14 +103,9 @@ func (t *tokener) swapped(txData []byte) *big.Int {
 	return dexeth.GweiToWei(v)
 }
 
-// tokenAddress fetches the token address bound to the swap contract.
-func (t *tokener) tokenAddress(ctx context.Context) (common.Address, error) {
-	return t.tokenAddresser.TokenAddress(readOnlyCallOpts(ctx))
-}
-
 // balanceOf checks the account's token balance.
 func (t *tokener) balanceOf(ctx context.Context, addr common.Address) (*big.Int, error) {
-	return t.BalanceOf(readOnlyCallOpts(ctx), addr)
+	return t.BalanceOf(readOnlyCallOpts(ctx, false), addr)
 }
 
 // swapContractV0 represents a version 0 swap contract for ETH or a token.
@@ -134,7 +122,7 @@ type swapSourceV0 struct {
 // Swap translates the version 0 swap data to the more general SwapState to
 // satisfy the swapSource interface.
 func (s *swapSourceV0) Swap(ctx context.Context, secretHash [32]byte) (*dexeth.SwapState, error) {
-	state, err := s.contract.Swap(readOnlyCallOpts(ctx), secretHash)
+	state, err := s.contract.Swap(readOnlyCallOpts(ctx, true), secretHash)
 	if err != nil {
 		return nil, fmt.Errorf("Swap error: %w", err)
 	}
@@ -142,9 +130,9 @@ func (s *swapSourceV0) Swap(ctx context.Context, secretHash [32]byte) (*dexeth.S
 }
 
 // readOnlyCallOpts is the CallOpts used for read-only contract method calls.
-func readOnlyCallOpts(ctx context.Context) *bind.CallOpts {
+func readOnlyCallOpts(ctx context.Context, includePending bool) *bind.CallOpts {
 	return &bind.CallOpts{
-		Pending: true,
+		Pending: includePending,
 		Context: ctx,
 	}
 }

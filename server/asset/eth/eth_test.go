@@ -13,6 +13,7 @@ import (
 	"errors"
 	"math/big"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -167,10 +168,11 @@ func tNewBackend(assetID uint32) (*AssetBackend, *testNode) {
 	node := &testNode{}
 	return &AssetBackend{
 		baseBackend: &baseBackend{
-			net:  dex.Simnet,
-			node: node,
-			log:  tLogger,
+			net:        dex.Simnet,
+			node:       node,
+			baseLogger: tLogger,
 		},
+		log:        tLogger.SubLogger(strings.ToUpper(dex.BipIDSymbol(assetID))),
 		assetID:    assetID,
 		blockChans: make(map[chan *asset.BlockUpdate]struct{}),
 	}, node
@@ -691,12 +693,25 @@ func testValidateContract(t *testing.T, assetID uint32) {
 		secretHash: make([]byte, dexeth.SecretHashSize),
 		wantErr:    true,
 	}}
+
+	type contractValidator interface {
+		ValidateContract([]byte) error
+	}
+
 	for _, test := range tests {
 		eth, _ := tNewBackend(assetID)
+		var cv contractValidator
+		if assetID == BipID {
+			cv = &ETHBackend{eth}
+		} else {
+			cv = &TokenBackend{eth}
+		}
+
 		swapData := make([]byte, 4+len(test.secretHash))
 		binary.BigEndian.PutUint32(swapData[:4], test.ver)
 		copy(swapData[4:], test.secretHash)
-		err := eth.ValidateContract(swapData)
+
+		err := cv.ValidateContract(swapData)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)
@@ -789,7 +804,8 @@ func TestPoll(t *testing.T) {
 	}}
 
 	for _, test := range tests {
-		eth, node := tNewBackend(BipID)
+		be, node := tNewBackend(BipID)
+		eth := &ETHBackend{be}
 		node.bestHdr = test.bestHdr
 		node.bestHdrErr = test.bestHdrErr
 		node.hdrByHeight = test.hdrByHeight

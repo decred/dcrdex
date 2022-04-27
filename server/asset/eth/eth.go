@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
@@ -86,7 +87,6 @@ const (
 	BipID              = 60
 	ethContractVersion = 0
 	version            = 0
-	assetName          = "eth"
 	// The blockPollInterval is the delay between calls to bestBlockHash to
 	// check for new blocks.
 	blockPollInterval = time.Second
@@ -94,8 +94,7 @@ const (
 
 var (
 	_ asset.Driver      = (*Driver)(nil)
-	_ asset.Driver      = (*Driver)(nil)
-	_ asset.TokenBacker = (*AssetBackend)(nil)
+	_ asset.TokenBacker = (*ETHBackend)(nil)
 
 	backendInfo = &asset.BackendInfo{
 		SupportsDynamicTxFee: true,
@@ -144,6 +143,7 @@ type TokenDriver struct {
 	token *dex.Token
 }
 
+// TokenInfo returns details for a token asset.
 func (d *TokenDriver) TokenInfo() *dex.Token {
 	return d.token
 }
@@ -189,18 +189,19 @@ type baseBackend struct {
 
 	// A logger will be provided by the DEX. All logging should use the provided
 	// logger.
-	log dex.Logger
+	baseLogger dex.Logger
 
-	tokens map[uint32]*AssetBackend
+	tokens map[uint32]*TokenBackend
 }
 
 // AssetBackend is an asset backend for Ethereum. It has methods for fetching output
-// information and subscribing to block updates. It maintains a cache of block
-// data for quick lookups. Backend implements asset.Backend, so provides
-// exported methods for DEX-related blockchain info.
+// information and subscribing to block updates.
+// AssetBackend implements asset.Backend, so provides exported methods for
+// DEX-related blockchain info.
 type AssetBackend struct {
 	*baseBackend
 	assetID uint32
+	log     dex.Logger
 
 	// The backend provides block notification channels through the BlockChannel
 	// method.
@@ -214,15 +215,27 @@ type AssetBackend struct {
 	contractAddr common.Address
 }
 
+// ETHBackend implements some Ethereum-specific methods.
+type ETHBackend struct {
+	*AssetBackend
+}
+
+// TokenBackend implements some token-specific methods.
+type TokenBackend struct {
+	*AssetBackend
+}
+
 // Check that Backend satisfies the Backend interface.
-var _ asset.Backend = (*AssetBackend)(nil)
+var _ asset.Backend = (*TokenBackend)(nil)
+var _ asset.Backend = (*ETHBackend)(nil)
 
 // Check that Backend satisfies the AccountBalancer interface.
-var _ asset.AccountBalancer = (*AssetBackend)(nil)
+var _ asset.AccountBalancer = (*TokenBackend)(nil)
+var _ asset.AccountBalancer = (*ETHBackend)(nil)
 
 // unconnectedETH returns a Backend without a node. The node should be set
 // before use.
-func unconnectedETH(logger dex.Logger, net dex.Network) (*AssetBackend, error) {
+func unconnectedETH(logger dex.Logger, net dex.Network) (*ETHBackend, error) {
 	// TODO: At some point multiple contracts will need to be used, at
 	// least for transitory periods when updating the contract, and
 	// possibly a random contract setup, and so this section will need to
@@ -231,29 +244,29 @@ func unconnectedETH(logger dex.Logger, net dex.Network) (*AssetBackend, error) {
 	if !exists || contractAddr == (common.Address{}) {
 		return nil, fmt.Errorf("no eth contract for version 0, net %s", net)
 	}
-	return &AssetBackend{
+	return &ETHBackend{&AssetBackend{
 		baseBackend: &baseBackend{
-			net:    net,
-			log:    logger,
-			tokens: make(map[uint32]*AssetBackend),
+			net:        net,
+			baseLogger: logger,
+			tokens:     make(map[uint32]*TokenBackend),
 		},
+		log:          logger.SubLogger("ETH"),
 		contractAddr: contractAddr,
 		blockChans:   make(map[chan *asset.BlockUpdate]struct{}),
 		initTxSize:   uint32(dexeth.InitGas(1, ethContractVersion)),
 		redeemSize:   dexeth.RedeemGas(1, ethContractVersion),
 		assetID:      BipID,
-	}, nil
+	}}, nil
 }
 
 // NewBackend is the exported constructor by which the DEX will import the
 // Backend.
-func NewBackend(ipc string, logger dex.Logger, net dex.Network) (*AssetBackend, error) {
-
+func NewBackend(ipc string, logger dex.Logger, net dex.Network) (*ETHBackend, error) {
 	switch net {
 	case dex.Simnet:
 	case dex.Testnet:
 	case dex.Mainnet:
-		// TODO: Allow.
+		// TODO: Allow. When?
 		return nil, fmt.Errorf("eth cannot be used on mainnet")
 	default:
 		return nil, fmt.Errorf("unknown network ID: %d", net)
@@ -276,23 +289,7 @@ func (eth *baseBackend) shutdown() {
 }
 
 // Connect connects to the node RPC server and initializes some variables.
-func (eth *AssetBackend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
-	if eth.assetID != BipID {
-		if eth.baseBackend.ctx == nil || eth.baseBackend.ctx.Err() != nil {
-			return nil, fmt.Errorf("parent asset not connected")
-		}
-		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			select {
-			case <-ctx.Done():
-			case <-eth.baseBackend.ctx.Done():
-			}
-		}()
-		return &wg, nil
-	}
-
+func (eth *ETHBackend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	eth.baseBackend.ctx = ctx
 
 	if err := eth.node.connect(ctx); err != nil {
@@ -318,11 +315,29 @@ func (eth *AssetBackend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	return &wg, nil
 }
 
+// Connect for TokenBackend just waits for context cancellation and closes the
+// WaitGroup.
+func (eth *TokenBackend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
+	if eth.baseBackend.ctx == nil || eth.baseBackend.ctx.Err() != nil {
+		return nil, fmt.Errorf("parent asset not connected")
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		select {
+		case <-ctx.Done():
+		case <-eth.baseBackend.ctx.Done():
+		}
+	}()
+	return &wg, nil
+}
+
 // TokenBackend creates an *AssetBackend for a token. Part of the
 // asset.TokenBacker interface.
-func (eth *AssetBackend) TokenBackend(assetID uint32, configPath string) (asset.Backend, error) {
-	if eth.assetID != BipID {
-		return nil, fmt.Errorf("only ETH backend can create token backends")
+func (eth *ETHBackend) TokenBackend(assetID uint32, configPath string) (asset.Backend, error) {
+	if _, found := eth.baseBackend.tokens[assetID]; found {
+		return nil, fmt.Errorf("asset %d backend already loaded", assetID)
 	}
 
 	_, _, swapContract, err := networkToken(assetID, eth.net)
@@ -347,14 +362,15 @@ func (eth *AssetBackend) TokenBackend(assetID uint32, configPath string) (asset.
 	if err := eth.node.loadToken(eth.ctx, assetID); err != nil {
 		return nil, fmt.Errorf("error loading token for asset ID %d: %w", assetID, err)
 	}
-	be := &AssetBackend{
+	be := &TokenBackend{&AssetBackend{
 		baseBackend:  eth.baseBackend,
+		log:          eth.baseLogger.SubLogger(strings.ToUpper(dex.BipIDSymbol(assetID))),
 		assetID:      assetID,
 		blockChans:   make(map[chan *asset.BlockUpdate]struct{}),
 		initTxSize:   uint32(gases.Swap),
 		redeemSize:   gases.Redeem,
 		contractAddr: swapContract.Address,
-	}
+	}}
 	eth.baseBackend.tokens[assetID] = be
 	return be, nil
 }
@@ -432,7 +448,7 @@ func (eth *baseBackend) ValidateFeeRate(contract *asset.Contract, reqFeeRate uin
 	coin := contract.Coin
 	sc, ok := coin.(*swapCoin)
 	if !ok {
-		eth.log.Error("eth contract coin type must be a swapCoin but got %T", sc)
+		eth.baseLogger.Error("eth contract coin type must be a swapCoin but got %T", sc)
 		return false
 	}
 
@@ -471,17 +487,22 @@ func (eth *AssetBackend) sendBlockUpdate(u *asset.BlockUpdate) {
 
 // ValidateContract ensures that contractData encodes both the expected contract
 // version targeted and the secret hash.
-func (eth *AssetBackend) ValidateContract(contractData []byte) error {
+func (eth *ETHBackend) ValidateContract(contractData []byte) error {
 	ver, _, err := dexeth.DecodeContractData(contractData)
 	if err != nil { // ensures secretHash is proper length
 		return err
 	}
 
-	if eth.assetID == BipID {
-		if ver != version {
-			return fmt.Errorf("incorrect swap contract version %d, wanted %d", ver, version)
-		}
-		return nil
+	if ver != version {
+		return fmt.Errorf("incorrect swap contract version %d, wanted %d", ver, version)
+	}
+	return nil
+}
+
+func (eth *TokenBackend) ValidateContract(contractData []byte) error {
+	ver, _, err := dexeth.DecodeContractData(contractData)
+	if err != nil { // ensures secretHash is proper length
+		return err
 	}
 
 	token, _, _, err := networkToken(eth.assetID, eth.net)
@@ -642,7 +663,7 @@ func (eth *baseBackend) ValidateSignature(addr string, pubkey, msg, sig []byte) 
 // poll pulls the best hash from an eth node and compares that to a stored
 // hash. If the same does nothing. If different, updates the stored hash and
 // notifies listeners on block chans.
-func (eth *AssetBackend) poll(ctx context.Context) {
+func (eth *ETHBackend) poll(ctx context.Context) {
 	best := &eth.bestHash
 	send := func(reorg bool, err error) {
 		if err != nil {
@@ -713,20 +734,19 @@ func (eth *AssetBackend) poll(ctx context.Context) {
 }
 
 // run processes the queue and monitors the application context.
-func (eth *AssetBackend) run(ctx context.Context) {
+func (eth *ETHBackend) run(ctx context.Context) {
 	// Shut down the RPC client on ctx.Done().
 	defer eth.shutdown()
 
 	blockPoll := time.NewTicker(blockPollInterval)
 	defer blockPoll.Stop()
 
-out:
 	for {
 		select {
 		case <-blockPoll.C:
 			eth.poll(ctx)
 		case <-ctx.Done():
-			break out
+			return
 		}
 	}
 }

@@ -37,7 +37,7 @@ type rpcclient struct {
 	ipc string
 	// ec wraps a *rpc.Client with some useful calls.
 	ec *ethclient.Client
-	// c is a direct client for raw calls.
+	// caller is a client for raw calls not implemented by *ethclient.Client.
 	caller ContextCaller
 	// swapContract is the current ETH swapContract.
 	swapContract swapContract

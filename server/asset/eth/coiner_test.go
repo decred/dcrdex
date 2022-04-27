@@ -68,8 +68,8 @@ func TestNewRedeemCoin(t *testing.T) {
 		}
 		eth := &AssetBackend{
 			baseBackend: &baseBackend{
-				node: node,
-				log:  tLogger,
+				node:       node,
+				baseLogger: tLogger,
 			},
 			contractAddr: *contractAddr,
 			initTxSize:   uint32(dexeth.InitGas(1, 0)),
@@ -193,8 +193,8 @@ func TestNewSwapCoin(t *testing.T) {
 		}
 		eth := &AssetBackend{
 			baseBackend: &baseBackend{
-				node: node,
-				log:  tLogger,
+				node:       node,
+				baseLogger: tLogger,
 			},
 			contractAddr: *contractAddr,
 			initTxSize:   uint32(dexeth.InitGas(1, 0)),
@@ -316,8 +316,8 @@ func TestConfirmations(t *testing.T) {
 		}
 		eth := &AssetBackend{
 			baseBackend: &baseBackend{
-				node: node,
-				log:  tLogger,
+				node:       node,
+				baseLogger: tLogger,
 			},
 			contractAddr: *contractAddr,
 			initTxSize:   uint32(dexeth.InitGas(1, 0)),
