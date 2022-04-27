@@ -678,6 +678,7 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 		synced:       true,
 		syncProgress: 1,
 		pw:           tPW,
+		traits:       asset.DetermineWalletTraits(w),
 	}
 
 	return xcWallet, w
@@ -903,9 +904,9 @@ func (w *TXCWallet) AccelerateOrder(swapCoins, accelerationCoins []dex.Bytes, ch
 	return nil, w.newAccelerationTxID, nil
 }
 
-func (w *TXCWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (currentRate uint64, suggestedRange asset.XYRange, err error) {
+func (w *TXCWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (uint64, asset.XYRange, *asset.EarlyAcceleration, error) {
 	if w.accelerateOrderErr != nil {
-		return 0, asset.XYRange{}, w.accelerateOrderErr
+		return 0, asset.XYRange{}, nil, w.accelerateOrderErr
 	}
 
 	w.accelerationParams = &struct {
@@ -923,7 +924,7 @@ func (w *TXCWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, chan
 		feeSuggestion:             feeSuggestion,
 	}
 
-	return w.preAccelerateSwapRate, w.preAccelerateSuggestedRange, nil
+	return w.preAccelerateSwapRate, w.preAccelerateSuggestedRange, nil, nil
 }
 
 func (w *TXCWallet) AccelerationEstimate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, newFeeRate uint64) (uint64, error) {
@@ -947,6 +948,10 @@ func (w *TXCWallet) AccelerationEstimate(swapCoins, accelerationCoins []dex.Byte
 	}
 
 	return w.accelerationEstimate, nil
+}
+
+func (w *TXCWallet) CanAccelerate() bool {
+	return true
 }
 
 type TAccountLocker struct {

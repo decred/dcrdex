@@ -23,10 +23,16 @@ const animationLength = 500
 
 let net: number
 
+interface EarlyAcceleration {
+  timePast: number,
+  wasAcceleration: boolean
+}
+
 interface PreAccelerate {
   swapRate: number
   suggestedRate: number
   suggestedRange: XYRange
+  earlyAcceleration?: EarlyAcceleration
 }
 
 export default class OrderPage extends BasePage {
@@ -37,6 +43,8 @@ export default class OrderPage extends BasePage {
   secondTicker: number
   acceleratedRate: number
   refreshOnPopupClose: boolean
+  earlyAcceleration?: EarlyAcceleration
+  earlyAccelerationAlreadyDisplayed: boolean
 
   constructor (main: HTMLElement) {
     super()
@@ -73,6 +81,9 @@ export default class OrderPage extends BasePage {
       this.showAccelerateForm()
     })
     Doc.bind(page.accelerateSubmit, 'click', () => {
+      this.submitAccelerate()
+    })
+    Doc.bind(page.submitEarlyConfirm, 'click', () => {
       this.submitAccelerate()
     })
     this.showAccelerationDiv()
@@ -195,9 +206,11 @@ export default class OrderPage extends BasePage {
       this.showForm(page.accelerateForm)
       return
     }
-    Doc.hide(page.accelerateMsgDiv, page.preAccelerateErr, page.accelerateErr, page.feeEstimateDiv)
-    Doc.show(page.accelerateMainDiv, page.accelerateSuccess)
+    Doc.hide(page.accelerateMsgDiv, page.preAccelerateErr, page.accelerateErr, page.feeEstimateDiv, page.earlyAccelerationDiv)
+    Doc.show(page.accelerateMainDiv, page.accelerateSuccess, page.configureAccelerationDiv)
     const preAccelerate: PreAccelerate = res.preAccelerate
+    this.earlyAcceleration = preAccelerate.earlyAcceleration
+    this.earlyAccelerationAlreadyDisplayed = false
     page.accelerateAvgFeeRate.textContent = `${preAccelerate.swapRate} ${preAccelerate.suggestedRange.yUnit}`
     page.accelerateCurrentFeeRate.textContent = `${preAccelerate.suggestedRate} ${preAccelerate.suggestedRange.yUnit}`
     OrderUtil.setOptionTemplates(page)
@@ -248,6 +261,24 @@ export default class OrderPage extends BasePage {
       orderID: order.id,
       newRate: this.acceleratedRate
     }
+    if (this.earlyAcceleration && !this.earlyAccelerationAlreadyDisplayed) {
+      page.recentAccelerationTime.textContent = `${Math.floor(this.earlyAcceleration.timePast / 60)}`
+      page.recentSwapTime.textContent = `${Math.floor(this.earlyAcceleration.timePast / 60)}`
+      if (this.earlyAcceleration.wasAcceleration) {
+        Doc.show(page.recentAccelerationMsg)
+        Doc.hide(page.recentSwapMsg)
+        page.recentAccelerationTime.textContent = `${Math.floor(this.earlyAcceleration.timePast / 60)}`
+      } else {
+        Doc.show(page.recentSwapMsg)
+        Doc.hide(page.recentAccelerationMsg)
+        page.recentSwapTime.textContent = `${Math.floor(this.earlyAcceleration.timePast / 60)}`
+      }
+      this.earlyAccelerationAlreadyDisplayed = true
+      Doc.hide(page.configureAccelerationDiv)
+      Doc.show(page.earlyAccelerationDiv)
+      this.earlyAccelerationAlreadyDisplayed = true
+      return
+    }
     page.acceleratePass.value = ''
     const loaded = app().loading(page.accelerateForm)
     const res = await postJSON('/api/accelerateorder', req)
@@ -259,7 +290,8 @@ export default class OrderPage extends BasePage {
       Doc.show(page.accelerateMsgDiv, page.accelerateSuccess)
     } else {
       page.accelerateErr.textContent = `Error accelerating order: ${res.msg}`
-      Doc.show(page.accelerateErr)
+      Doc.hide(page.earlyAccelerationDiv)
+      Doc.show(page.accelerateErr, page.configureAccelerationDiv)
     }
   }
 

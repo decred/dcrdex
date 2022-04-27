@@ -229,27 +229,40 @@
         [[[accelerate_order]]]
       </div>
       <div id=accelerateMainDiv>
-        [[[acceleration_text]]]
-        <br />
-        <div class="text-center fs17 sans-light position-relative">
-          [[[effective_swap_tx_rate]]]: <span id="accelerateAvgFeeRate"></span>
-        </div>
-        <div class="text-center fs17 sans-light position-relative">
-          [[[current_fee]]]: <span id="accelerateCurrentFeeRate"></span>
-        </div>
-        <div id="sliderContainer" class="slider-container">
-        </div>
-        <div id="feeEstimateDiv" class="text-center fs17 sans-light position-relative d-hide">
-          [[[acceleration_cost_msg]]]
-        </div>
-        <hr class="dashed mt-2">
-        <div class="d-flex flex-row align-items-end {{if $passwordIsCached}}justify-content-end{{end}} pb-4">
-          <div class="col-12 p-0 {{if $passwordIsCached}}d-hide{{end}}">
-            <label for="acceleratePass" class="pt-3 mb-1">[[[Password]]]</label>
-            <input type="password" class="form-control select" id="acceleratePass" autocomplete="off">
+        <div id="configureAccelerationDiv">
+          [[[acceleration_text]]]
+          <br />
+          <div class="text-center fs17 sans-light position-relative">
+            [[[effective_swap_tx_rate]]]: <span id="accelerateAvgFeeRate"></span>
           </div>
-          <div class="col-12 pt-2 {{if not $passwordIsCached}}px-5{{end}}">
-            <button id="accelerateSubmit" type="button" class="w-100 fs15 bg2 selected">[[[Submit]]]</button>
+          <div class="text-center fs17 sans-light position-relative">
+            [[[current_fee]]]: <span id="accelerateCurrentFeeRate"></span>
+          </div>
+          <div id="sliderContainer" class="slider-container">
+          </div>
+          <div id="feeEstimateDiv" class="text-center fs17 sans-light position-relative d-hide">
+            [[[acceleration_cost_msg]]]
+          </div>
+          <hr class="dashed mt-2">
+          <div class="d-flex flex-row align-items-end {{if $passwordIsCached}}justify-content-end{{end}} pb-4">
+            <div class="col-12 p-0 {{if $passwordIsCached}}d-hide{{end}}">
+              <label for="acceleratePass" class="pt-3 mb-1">[[[Password]]]</label>
+              <input type="password" class="form-control select" id="acceleratePass" autocomplete="off">
+            </div>
+            <div class="col-12 pt-2 {{if not $passwordIsCached}}px-5{{end}}">
+              <button id="accelerateSubmit" type="button" class="w-100 fs15 bg2 selected">[[[Submit]]]</button>
+            </div>
+          </div>
+        </div>
+        <div class="d-hide" id="earlyAccelerationDiv">
+          <div id="recentAccelerationMsg">[[[recent_acceleration_msg]]]</div>
+          <div id="recentSwapMsg">[[[recent_swap_msg]]]</div>
+          <br/>
+          [[[early_acceleration_help_msg]]]
+          <div class="d-flex flex-row align-items-end justify-content-end pb-4">
+            <div class="col-12 pt-2">
+              <button id="submitEarlyConfirm" type="button" class="w-100 fs15 bg2 selected">[[[Submit]]]</button>
+            </div>
           </div>
         </div>
         <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="accelerateErr"></div>

@@ -370,6 +370,21 @@ type FeeRater interface {
 	FeeRate() uint64
 }
 
+// EarlyAcceleration is returned from the PreAccelerate function to inform the
+// user that either their last acceleration or oldest swap transaction happened
+// very recently, and that they should double check that they really want to do
+// an acceleration.
+type EarlyAcceleration struct {
+	// TimePast is the amount of seconds that has past since either the previous
+	// acceleration, or the oldest unmined swap transaction was submitted to
+	// the blockchain.
+	TimePast uint64 `json:"timePast"`
+	// WasAccelerated is true if the action that took place TimePast seconds
+	// ago was an acceleration. If false, the oldest unmined swap transaction
+	// in the order was submitted TimePast seconds ago.
+	WasAcclerated bool `json:"wasAccelerated"`
+}
+
 // Accelerator is implemented by wallets which support acceleration of the
 // mining of swap transactions.
 type Accelerator interface {
@@ -390,10 +405,12 @@ type Accelerator interface {
 	// average fee rate to the desired amount.
 	AccelerationEstimate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, newFeeRate uint64) (uint64, error)
 	// PreAccelerate returns the current average fee rate of the unmined swap
-	// initiation and acceleration transactions, and also returns a suggested
+	// initiation and acceleration transactions, a suggested
 	// range that the fee rate should be increased to in order to expedite
-	// mining.
-	PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (currentRate uint64, suggestedRange XYRange, err error)
+	// mining, and also optionally an EarlyAcceleration notification if
+	// the user's previous acceleration on this order or the earliest
+	// unmined transaction in this order happened very recently.
+	PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (uint64, XYRange, *EarlyAcceleration, error)
 	// CanAccelerate returns whether or not the wallet can accelerate. Ideally
 	// we would know this just by whether or not the wallet implements this
 	// interface, but since all bitcoin clones use the same implementation

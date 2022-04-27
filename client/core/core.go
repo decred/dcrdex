@@ -7220,16 +7220,17 @@ func (c *Core) PreAccelerateOrder(oidB dex.Bytes) (*PreAccelerate, error) {
 		return nil, err
 	}
 
-	currentRate, suggestedRange, err :=
+	currentRate, suggestedRange, earlyAcceleration, err :=
 		tracker.wallets.fromWallet.preAccelerate(swapCoinIDs, accelerationCoins, changeCoinID, requiredForRemainingSwaps, feeSuggestion)
 	if err != nil {
 		return nil, err
 	}
 
 	return &PreAccelerate{
-		SwapRate:       currentRate,
-		SuggestedRate:  feeSuggestion,
-		SuggestedRange: suggestedRange,
+		SwapRate:          currentRate,
+		SuggestedRate:     feeSuggestion,
+		SuggestedRange:    suggestedRange,
+		EarlyAcceleration: earlyAcceleration,
 	}, nil
 }
 

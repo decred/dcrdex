@@ -1474,6 +1474,7 @@ func (btc *baseWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, er
 // FundOrder selects coins for use in an order. The coins will be locked, and
 // will not be returned in subsequent calls to FundOrder or calculated in calls
 // to Available, unless they are unlocked with ReturnCoins.
+// The returned []dex.Bytes contains the redeem scripts for the selected coins.
 // Equal number of coins and redeemed scripts must be returned. A nil or empty
 // dex.Bytes should be appended to the redeem scripts collection for coins with
 // no redeem script.
@@ -1971,17 +1972,6 @@ func (btc *baseWallet) signedAccelerationTx(swapCoins, accelerationCoins []dex.B
 		return makeError(fmt.Errorf("no additional fees are required to move the fee rate to %v", newFeeRate))
 	}
 
-	if btc.net != dex.Simnet {
-		tooEarly, minAccelerationTime, err := tooEarlyToAccelerate(txs, accelerationCoins)
-		if err != nil {
-			return makeError(err)
-		}
-		if tooEarly {
-			minLocalTime := time.Unix(int64(minAccelerationTime), 0).Local()
-			return makeError(fmt.Errorf("cannot accelerate until %v", minLocalTime))
-		}
-	}
-
 	txSize := uint64(dexbtc.MinimumTxOverhead)
 	if btc.segwit {
 		txSize += dexbtc.RedeemP2WPKHInputTotalSize
@@ -2141,16 +2131,17 @@ func (btc *baseWallet) AccelerationEstimate(swapCoins, accelerationCoins []dex.B
 	return fee, nil
 }
 
-// tooEarlyChecks returns true if minTimeBeforeAcceleration has not passed
+// tooEarlyToAccelerate returns true if minTimeBeforeAcceleration has not passed
 // since either the earliest unconfirmed transaction in the chain, or the
-// latest acceleration transaction. It also returns the minimum time when
-// the user can do an acceleration.
-func tooEarlyToAccelerate(txs []*GetTransactionResult, accelerationCoins []dex.Bytes) (bool, uint64, error) {
+// latest acceleration transaction. It also returns the time that passed since
+// either of these events, and whether or not the event was an acceleration
+// transaction.
+func tooEarlyToAccelerate(txs []*GetTransactionResult, accelerationCoins []dex.Bytes) (bool, bool, uint64, error) {
 	accelerationTxs := make(map[string]bool, len(accelerationCoins))
 	for _, accelerationCoin := range accelerationCoins {
 		txHash, _, err := decodeCoinID(accelerationCoin)
 		if err != nil {
-			return false, 0, err
+			return false, false, 0, err
 		}
 		accelerationTxs[txHash.String()] = true
 	}
@@ -2169,19 +2160,20 @@ func tooEarlyToAccelerate(txs []*GetTransactionResult, accelerationCoins []dex.B
 		}
 	}
 	if latestAcceleration == 0 && earliestUnconfirmed == 0 {
-		return false, 0, fmt.Errorf("no need to accelerate because all tx are confirmed")
+		return false, false, 0, fmt.Errorf("no need to accelerate because all tx are confirmed")
 	}
 
-	var timeToCompare uint64
+	var actionTime uint64
+	var wasAccelerated bool
 	if latestAcceleration != 0 {
-		timeToCompare = latestAcceleration
+		wasAccelerated = true
+		actionTime = latestAcceleration
 	} else {
-		timeToCompare = earliestUnconfirmed
+		actionTime = earliestUnconfirmed
 	}
 
 	currentTime := uint64(time.Now().Unix())
-	minAccelerationTime := timeToCompare + minTimeBeforeAcceleration
-	return minAccelerationTime > currentTime, minAccelerationTime, nil
+	return actionTime+minTimeBeforeAcceleration > currentTime, wasAccelerated, currentTime - actionTime, nil
 }
 
 // PreAccelerate returns the current average fee rate of the unmined swap
@@ -2192,9 +2184,9 @@ func tooEarlyToAccelerate(txs []*GetTransactionResult, accelerationCoins []dex.B
 // the user a good amount of flexibility in determining the post acceleration
 // effective fee rate, but still not allowing them to pick something
 // outrageously high.
-func (btc *baseWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (currentEffectiveRate uint64, suggestedRange asset.XYRange, err error) {
-	makeError := func(err error) (uint64, asset.XYRange, error) {
-		return 0, asset.XYRange{}, err
+func (btc *baseWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (uint64, asset.XYRange, *asset.EarlyAcceleration, error) {
+	makeError := func(err error) (uint64, asset.XYRange, *asset.EarlyAcceleration, error) {
+		return 0, asset.XYRange{}, nil, err
 	}
 
 	if !btc.supportsCPFP {
@@ -2234,14 +2226,15 @@ func (btc *baseWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, c
 		return makeError(fmt.Errorf("all transactions are already confirmed, no need to accelerate"))
 	}
 
-	if btc.net != dex.Simnet {
-		tooEarly, minAccelerationTime, err := tooEarlyToAccelerate(txs, accelerationCoins)
-		if err != nil {
-			return makeError(err)
-		}
-		if tooEarly {
-			minLocalTime := time.Unix(int64(minAccelerationTime), 0).Local()
-			return makeError(fmt.Errorf("cannot accelerate until %v", minLocalTime))
+	var earlyAcceleration *asset.EarlyAcceleration
+	tooEarly, isAcceleration, timePast, err := tooEarlyToAccelerate(txs, accelerationCoins)
+	if err != nil {
+		return makeError(err)
+	}
+	if tooEarly {
+		earlyAcceleration = &asset.EarlyAcceleration{
+			TimePast:      timePast,
+			WasAcclerated: isAcceleration,
 		}
 	}
 
@@ -2290,7 +2283,7 @@ func (btc *baseWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, c
 	}
 
 	maxRate := (changeOutput.value + feesAlreadyPaid + utxosVal - requiredForRemainingSwaps) / (newChangeTxSize + swapTxsSize)
-	currentEffectiveRate = feesAlreadyPaid / swapTxsSize
+	currentEffectiveRate := feesAlreadyPaid / swapTxsSize
 
 	if maxRate <= currentEffectiveRate {
 		return makeError(fmt.Errorf("cannot accelerate, max rate %v <= current rate %v", maxRate, currentEffectiveRate))
@@ -2313,7 +2306,7 @@ func (btc *baseWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, c
 	if maxRate < maxSuggestion {
 		maxSuggestion = maxRate
 	}
-	suggestedRange = asset.XYRange{
+	suggestedRange := asset.XYRange{
 		Start: asset.XYRangePoint{
 			Label: "Min",
 			X:     float64(currentEffectiveRate+1) / float64(currentEffectiveRate),
@@ -2328,7 +2321,7 @@ func (btc *baseWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, c
 		YUnit: btc.walletInfo.UnitInfo.AtomicUnit + "/" + btc.sizeUnit(),
 	}
 
-	return currentEffectiveRate, suggestedRange, nil
+	return currentEffectiveRate, suggestedRange, earlyAcceleration, nil
 }
 
 // lookupOutput looks up the value of a transaction output and creates an

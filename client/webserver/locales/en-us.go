@@ -223,4 +223,7 @@ var EnUS = map[string]string{
 	"accelerate":                  "Accelerate",
 	"acceleration_transactions":   "Acceleration Transactions",
 	"acceleration_cost_msg":       `Increasing the effective fee rate to <span id="feeRateEstimate"></span> will cost <span id="feeEstimate"></span>`,
+	"recent_acceleration_msg":     `Your latest acceleration was only <span id="recentAccelerationTime"></span> minutes ago! Are you sure you want to accelerate?`,
+	"recent_swap_msg":             `Your oldest unconfirmed swap transaction was submitted only <span id="recentSwapTime"></span> minutes ago! Are you sure you want to accelerate?`,
+	"early_acceleration_help_msg": `It will cause no harm to your order, but you might be wasting money. Acceleration is only helpful if the fee rate on an existing unconfirmed transaction has become too low to be mined in the next block, but not if blocks are just being mined slowly. You can confirm this in the block explorer by closing this popup and clicking on your previous transactions.`,
 }

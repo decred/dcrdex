@@ -626,6 +626,7 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWalletFullNode, *testD
 		DefaultFallbackFee:  defaultFee,
 		DefaultFeeRateLimit: defaultFeeRateLimit,
 		Segwit:              segwit,
+		SupportsCPFP:        true,
 	}
 
 	var wallet *ExchangeWalletFullNode
@@ -3320,7 +3321,6 @@ func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
 			ScriptPubKey:  scriptPubKey,
 			Spendable:     true,
 			Solvable:      true,
-			Safe:          true,
 		})
 
 		var prevChainHash chainhash.Hash
@@ -3444,6 +3444,7 @@ func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
 		// needed to test PreAccelerate
 		suggestedFeeRate       uint64
 		expectPreAccelerateErr bool
+		expectTooEarly         bool
 	}{
 		{
 			name:                          "change not in utxo set",
@@ -3644,16 +3645,14 @@ func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
 			},
 		},
 		{
-			name:                          "tx time within limit",
-			txTimeWithinLimit:             true,
-			changeAmount:                  int64(expectedFees),
-			fees:                          []float64{0.00002, 0.000005, 0.00001, 0.00001},
-			confs:                         confs,
-			newFeeRate:                    50,
-			suggestedFeeRate:              30,
-			expectAccelerationEstimateErr: true,
-			expectAccelerateOrderErr:      true,
-			expectPreAccelerateErr:        true,
+			name:              "tx time within limit",
+			txTimeWithinLimit: true,
+			expectTooEarly:    true,
+			changeAmount:      int64(expectedFees),
+			fees:              []float64{0.00002, 0.000005, 0.00001, 0.00001},
+			confs:             confs,
+			newFeeRate:        50,
+			suggestedFeeRate:  30,
 		},
 	}
 
@@ -3783,7 +3782,7 @@ func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
 		testAccelerationEstimate()
 
 		testPreAccelerate := func() {
-			currentRate, suggestedRange, err := wallet.PreAccelerate(swapCoins, accelerations, changeCoin, test.requiredForRemainingSwaps, test.suggestedFeeRate)
+			currentRate, suggestedRange, earlyAcceleration, err := wallet.PreAccelerate(swapCoins, accelerations, changeCoin, test.requiredForRemainingSwaps, test.suggestedFeeRate)
 			if test.expectPreAccelerateErr {
 				if err == nil {
 					t.Fatalf("%s: expected PreAccelerate error but did not get", test.name)
@@ -3792,6 +3791,10 @@ func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
 			}
 			if err != nil {
 				t.Fatalf("%s: unexpected error: %v", test.name, err)
+			}
+
+			if test.expectTooEarly != (earlyAcceleration != nil) {
+				t.Fatalf("%s: expected early acceleration %v, but got %v", test.name, test.expectTooEarly, earlyAcceleration)
 			}
 
 			var totalSize, totalFee uint64
@@ -3855,13 +3858,14 @@ func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
 
 func TestTooEarlyToAccelerate(t *testing.T) {
 	tests := []struct {
-		name                      string
-		confirmations             []uint64
-		isAcceleration            []bool
-		secondsBeforeNow          []uint64
-		expectTooEarly            bool
-		expectMinTimeToAccelerate int64 // seconds from now +-1
-		expectError               bool
+		name                  string
+		confirmations         []uint64
+		isAcceleration        []bool
+		secondsBeforeNow      []uint64
+		expectTooEarly        bool
+		expectTimePast        uint64
+		expectWasAcceleration bool
+		expectError           bool
 	}{
 		{
 			name:           "all confirmed",
@@ -3885,8 +3889,8 @@ func TestTooEarlyToAccelerate(t *testing.T) {
 				minTimeBeforeAcceleration + 300,
 				minTimeBeforeAcceleration + 800,
 			},
-			expectTooEarly:            false,
-			expectMinTimeToAccelerate: -500,
+			expectTooEarly: false,
+			expectTimePast: minTimeBeforeAcceleration + 500,
 		},
 		{
 			name:           "acceleration after unconfirmed, not too early",
@@ -3898,8 +3902,8 @@ func TestTooEarlyToAccelerate(t *testing.T) {
 				minTimeBeforeAcceleration + 800,
 				minTimeBeforeAcceleration + 500,
 			},
-			expectTooEarly:            false,
-			expectMinTimeToAccelerate: -300,
+			expectTooEarly: false,
+			expectTimePast: minTimeBeforeAcceleration + 300,
 		},
 		{
 			name:           "no accelerations, too early",
@@ -3911,8 +3915,9 @@ func TestTooEarlyToAccelerate(t *testing.T) {
 				minTimeBeforeAcceleration - 300,
 				minTimeBeforeAcceleration - 500,
 			},
-			expectTooEarly:            true,
-			expectMinTimeToAccelerate: 300,
+			expectTooEarly:        true,
+			expectWasAcceleration: false,
+			expectTimePast:        minTimeBeforeAcceleration - 300,
 		},
 		{
 			name:           "acceleration after unconfirmed, too early",
@@ -3924,8 +3929,9 @@ func TestTooEarlyToAccelerate(t *testing.T) {
 				minTimeBeforeAcceleration + 500,
 				minTimeBeforeAcceleration - 300,
 			},
-			expectTooEarly:            true,
-			expectMinTimeToAccelerate: 300,
+			expectTooEarly:        true,
+			expectWasAcceleration: true,
+			expectTimePast:        minTimeBeforeAcceleration - 300,
 		},
 	}
 
@@ -3945,7 +3951,7 @@ func TestTooEarlyToAccelerate(t *testing.T) {
 				Time:          uint64(now) - test.secondsBeforeNow[i],
 			})
 		}
-		tooEarly, minTimeToAccelerate, err := tooEarlyToAccelerate(sortedTxChain, accelerationCoins)
+		tooEarly, wasAcceleration, actionTime, err := tooEarlyToAccelerate(sortedTxChain, accelerationCoins)
 		if test.expectError {
 			if err == nil {
 				t.Fatalf("%s: expected error but did not get", test.name)
@@ -3960,10 +3966,15 @@ func TestTooEarlyToAccelerate(t *testing.T) {
 			t.Fatalf("%s: too early expected: %v, got %v", test.name, test.expectTooEarly, tooEarly)
 		}
 
-		if minTimeToAccelerate > uint64(now+test.expectMinTimeToAccelerate+1) ||
-			minTimeToAccelerate < uint64(now+test.expectMinTimeToAccelerate-1) {
-			t.Fatalf("%s: min time to accelerate expected: %v, got %v",
-				test.name, test.expectMinTimeToAccelerate, minTimeToAccelerate)
+		if actionTime > test.expectTimePast+1 ||
+			actionTime < test.expectTimePast-1 {
+			t.Fatalf("%s: action time expected: %v, got %v",
+				test.name, test.expectTimePast, actionTime)
+		}
+
+		// If it is not too early, it doesn't matter what the wasAcceleration return value is
+		if tooEarly && wasAcceleration != test.expectWasAcceleration {
+			t.Fatalf("%s: expect was acceleration %v, but got %v", test.name, test.expectWasAcceleration, wasAcceleration)
 		}
 	}
 }

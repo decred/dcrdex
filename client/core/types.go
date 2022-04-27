@@ -914,7 +914,8 @@ type OrderEstimate struct {
 // PreAccelerate gives information that the user can use to decide on
 // how much to accelerate stuck swap transactions in an order.
 type PreAccelerate struct {
-	SwapRate       uint64        `json:"swapRate"`
-	SuggestedRate  uint64        `json:"suggestedRate"`
-	SuggestedRange asset.XYRange `json:"suggestedRange"`
+	SwapRate          uint64                   `json:"swapRate"`
+	SuggestedRate     uint64                   `json:"suggestedRate"`
+	SuggestedRange    asset.XYRange            `json:"suggestedRange"`
+	EarlyAcceleration *asset.EarlyAcceleration `json:"earlyAcceleration,omitempty"`
 }
