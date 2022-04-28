@@ -236,6 +236,18 @@ export default class Doc {
   }
 
   /*
+   * formatFiatConversion formats the value in atomic units to its representation in
+   * conventional units and returns the fiat value as a string.
+   */
+  static formatFiatConversion (vAtomic: number, rate: number, unitInfo?: UnitInfo): string {
+    if (!rate || rate === 0) return 'unavailable'
+    const prec = 2
+    const [v] = convertToConventional(vAtomic, unitInfo)
+    const value = v * rate
+    return fullPrecisionFormatter(prec).format(value)
+  }
+
+  /*
    * logoPath creates a path to a png logo for the specified ticker symbol. If
    * the symbol is not a supported asset, the generic letter logo will be
    * requested instead.

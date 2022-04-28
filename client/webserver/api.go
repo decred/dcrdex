@@ -1068,6 +1068,23 @@ func (s *WebServer) apiUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, response, s.indent)
 }
 
+// apiToggleRateSource handles the /toggleratesource API request.
+func (s *WebServer) apiToggleRateSource(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		Disable bool   `json:"disable"`
+		Source  string `json:"source"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+	err := s.core.ToggleRateSourceStatus(form.Source, form.Disable)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error disabling/enabling rate source: %w", err))
+		return
+	}
+	writeJSON(w, simpleAck(), s.indent)
+}
+
 // writeAPIError logs the formatted error and sends a standardResponse with the
 // error message.
 func (s *WebServer) writeAPIError(w http.ResponseWriter, err error) {

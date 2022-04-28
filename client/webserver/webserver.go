@@ -120,6 +120,8 @@ type clientCore interface {
 	UpdateCert(host string, cert []byte) error
 	UpdateDEXHost(oldHost, newHost string, appPW []byte, certI interface{}) (*core.Exchange, error)
 	WalletRestorationInfo(pw []byte, assetID uint32) ([]*asset.WalletRestoration, error)
+	ToggleRateSourceStatus(src string, disable bool) error
+	FiatRateSources() map[string]bool
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -359,6 +361,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/updatecert", s.apiUpdateCert)
 			apiAuth.Post("/updatedexhost", s.apiUpdateDEXHost)
 			apiAuth.Post("/restorewalletinfo", s.apiRestoreWalletInfo)
+			apiAuth.Post("/toggleratesource", s.apiToggleRateSource)
 		})
 	})
 

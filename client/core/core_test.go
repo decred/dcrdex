@@ -32,7 +32,6 @@ import (
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
-	"decred.org/dcrdex/dex/order/test"
 	ordertest "decred.org/dcrdex/dex/order/test"
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
@@ -530,7 +529,12 @@ func (tdb *TDB) SetSeedGenerationTime(time uint64) error {
 func (tdb *TDB) SeedGenerationTime() (uint64, error) {
 	return 0, nil
 }
-
+func (tdb *TDB) DisabledRateSources() ([]string, error) {
+	return nil, nil
+}
+func (tdb *TDB) SaveDisabledRateSources(disableSources []string) error {
+	return nil
+}
 func (tdb *TDB) Recrypt(creds *db.PrimaryCredentials, oldCrypter, newCrypter encrypt.Crypter) (
 	walletUpdates map[uint32][]byte, acctUpdates map[string][]byte, err error) {
 
@@ -1084,6 +1088,13 @@ func randomMsgMarket() (baseAsset, quoteAsset *msgjson.Asset) {
 	return randomAsset(), randomAsset()
 }
 
+func tFetcher(_ context.Context, log dex.Logger, _ map[uint32]*SupportedAsset) map[uint32]float64 {
+	fiatRates := make(map[uint32]float64)
+	fiatRates[tUTXOAssetA.ID] = 45
+	fiatRates[tUTXOAssetB.ID] = 32000
+	return fiatRates
+}
+
 type testRig struct {
 	shutdown func()
 	core     *Core
@@ -1158,6 +1169,8 @@ func newTestRig() *testRig {
 
 			locale:        enUS,
 			localePrinter: message.NewPrinter(language.AmericanEnglish),
+
+			fiatRateSources: make(map[string]*commonRateSource),
 		},
 		db:      tdb,
 		queue:   queue,
@@ -4839,7 +4852,7 @@ func TestReconcileTrades(t *testing.T) {
 			clientOrders: []*trackedTrade{},
 			serverOrders: []*msgjson.OrderStatus{
 				{
-					ID:     test.RandomOrderID().Bytes(),
+					ID:     ordertest.RandomOrderID().Bytes(),
 					Status: uint16(order.OrderStatusBooked),
 				},
 			},
@@ -9264,5 +9277,110 @@ func TestLCM(t *testing.T) {
 			t.Fatalf("%q: expected %d %d %d but got %d %d %d", test.name,
 				test.wantDenom, test.wantMultA, test.wantMultB, denom, multA, multB)
 		}
+	}
+}
+
+func TestToggleRateSourceStatus(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	tCore := rig.core
+
+	tests := []struct {
+		name, source  string
+		wantErr, init bool
+	}{{
+		name:    "Invalid rate source",
+		source:  "binance",
+		wantErr: true,
+	}, {
+		name:    "ok valid source",
+		source:  messari,
+		wantErr: false,
+	}, {
+		name:    "ok already disabled/not initialized || enabled",
+		source:  messari,
+		wantErr: false,
+	}}
+
+	// Test disabling fiat rate source.
+	for _, test := range tests {
+		err := tCore.ToggleRateSourceStatus(test.source, true)
+		if test.wantErr != (err != nil) {
+			t.Fatalf("%s: wantErr = %t, err = %v", test.name, test.wantErr, err)
+		}
+	}
+
+	// Test enabling fiat rate source.
+	for _, test := range tests {
+		if test.init {
+			tCore.fiatRateSources[test.source] = newCommonRateSource(tFetcher)
+		}
+		err := tCore.ToggleRateSourceStatus(test.source, false)
+		if test.wantErr != (err != nil) {
+			t.Fatalf("%s: wantErr = %t, err = %v", test.name, test.wantErr, err)
+		}
+	}
+}
+
+func TestFiatRateSources(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	tCore := rig.core
+	supportedFetchers := len(fiatRateFetchers)
+	rateSources := tCore.FiatRateSources()
+	if len(rateSources) != supportedFetchers {
+		t.Fatalf("Expected %d number of fiat rate source/fetchers", supportedFetchers)
+	}
+}
+
+func TestFiatConversions(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	tCore := rig.core
+	ctx, cancel := context.WithCancel(tCore.ctx)
+	tCore.stopFiatRateFetching = cancel
+
+	// No fiat rate source initialized
+	fiatRates := tCore.fiatConversions()
+	if len(fiatRates) != 0 {
+		t.Fatal("Unexpected asset rate values.")
+	}
+
+	// Initialize fiat rate sources.
+	for token := range fiatRateFetchers {
+		tCore.fiatRateSources[token] = newCommonRateSource(tFetcher)
+	}
+
+	// Fetch fiat rates.
+	tCore.wg.Add(1)
+	go func() {
+		defer tCore.wg.Done()
+		tCore.refreshFiatRates(ctx)
+	}()
+	tCore.wg.Wait()
+
+	// Expects assets fiat rate values.
+	fiatRates = tCore.fiatConversions()
+	if len(fiatRates) != 2 {
+		t.Fatal("Expected assets fiat rate for two assets")
+	}
+
+	// fiat rates for assets can expire, and fiat rate fetchers can be
+	// removed if expired.
+	for token, source := range tCore.fiatRateSources {
+		source.fiatRates[tUTXOAssetA.ID].lastUpdate = time.Now().Add(-time.Minute)
+		source.fiatRates[tUTXOAssetB.ID].lastUpdate = time.Now().Add(-time.Minute)
+		if source.isExpired(55 * time.Second) {
+			delete(tCore.fiatRateSources, token)
+		}
+	}
+
+	fiatRates = tCore.fiatConversions()
+	if len(fiatRates) != 0 {
+		t.Fatal("Unexpected assets fiat rate values, expected to ignore expired fiat rates.")
+	}
+
+	if len(tCore.fiatRateSources) != 0 {
+		t.Fatal("Expected fiat conversion to be disabled, all rate source data has expired.")
 	}
 }

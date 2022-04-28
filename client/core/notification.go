@@ -28,6 +28,7 @@ const (
 	NoteTypeSecurity     = "security"
 	NoteTypeUpgrade      = "upgrade"
 	NoteTypeDEXAuth      = "dex_auth"
+	NoteTypeFiatRates    = "fiatrateupdate"
 )
 
 func (c *Core) logNote(n Notification) {
@@ -352,6 +353,21 @@ func newConnEventNote(topic Topic, subject, host string, status comms.Connection
 		Notification:     db.NewNotification(NoteTypeConnEvent, topic, subject, details, severity),
 		Host:             host,
 		ConnectionStatus: status,
+	}
+}
+
+// fiatRatesNote is an update of fiat rate data for assets.
+type fiatRatesNote struct {
+	db.Notification
+	FiatRates map[uint32]float64 `json:"fiatRates"`
+}
+
+const TopicFiatRatesUpdate Topic = "fiatrateupdate"
+
+func newFiatRatesUpdate(rates map[uint32]float64) *fiatRatesNote {
+	return &fiatRatesNote{
+		Notification: db.NewNotification(NoteTypeFiatRates, TopicFiatRatesUpdate, "", "", db.Data),
+		FiatRates:    rates,
 	}
 }
 
