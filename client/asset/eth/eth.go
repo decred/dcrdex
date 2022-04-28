@@ -942,10 +942,9 @@ func (w *TokenWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, err
 	ethToLock := cfg.MaxFeeRate * g.Swap * ord.MaxSwapCount
 	coin := w.createTokenFundingCoin(ord.Value, ethToLock)
 
-	ethWallet := w.parent
-	ethWallet.lockedFunds.mtx.Lock()
-	err = ethWallet.lockFunds(ethToLock, initiationReserve)
-	ethWallet.lockedFunds.mtx.Unlock()
+	w.parent.lockedFunds.mtx.Lock()
+	err = w.parent.lockFunds(ethToLock, initiationReserve)
+	w.parent.lockedFunds.mtx.Unlock()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1112,10 +1111,9 @@ func (w *TokenWallet) ReturnCoins(coins asset.Coins) error {
 		fees += c.fees
 	}
 	if fees > 0 {
-		ethWallet := w.parent
-		ethWallet.lockedFunds.mtx.Lock()
+		w.parent.lockedFunds.mtx.Lock()
 		w.parent.unlockFunds(fees, initiationReserve)
-		ethWallet.lockedFunds.mtx.Unlock()
+		w.parent.lockedFunds.mtx.Unlock()
 	}
 	w.lockedFunds.mtx.Lock()
 	w.unlockFunds(amt, initiationReserve)

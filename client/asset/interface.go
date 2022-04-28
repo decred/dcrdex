@@ -487,7 +487,7 @@ type Swaps struct {
 	// subsequent matches.
 	LockChange bool
 	// AssetConfig contains the asset version and fee configuration for the DEX.
-	// NOTE: Only on Config field is supported, so only orders from the same
+	// NOTE: Only one Config field is supported, so only orders from the same
 	// host can be batched. We could consider moving this field to the Contract
 	// and Wallets could batch compatible swaps internally.
 	AssetConfig *dex.Asset
