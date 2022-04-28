@@ -300,11 +300,20 @@ type TokenWallet struct {
 	cfg      *tokenWalletConfig
 	parent   *AssetWallet
 	approval atomic.Value
+	token    *dexeth.Token
 }
 
 // Info returns basic information about the wallet and asset.
-func (*baseWallet) Info() *asset.WalletInfo {
+func (*ETHWallet) Info() *asset.WalletInfo {
 	return WalletInfo
+}
+
+// Info returns basic information about the wallet and asset.
+func (w *TokenWallet) Info() *asset.WalletInfo {
+	return &asset.WalletInfo{
+		Name:     w.token.Name,
+		UnitInfo: w.token.UnitInfo,
+	}
 }
 
 // CreateWallet creates a new internal ETH wallet and stores the private key
@@ -545,6 +554,7 @@ func (w *ETHWallet) OpenTokenWallet(tokenID uint32, settings map[string]string, 
 		AssetWallet: aw,
 		cfg:         cfg,
 		parent:      w.AssetWallet,
+		token:       token,
 	}, nil
 }
 
