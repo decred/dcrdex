@@ -125,6 +125,11 @@ function send(from, to, amt) {
 }
 EOF
 
+cat > "${NODES_ROOT}/harness-ctl/sendtoaddress" <<EOF
+"${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/send.js --exec send(\"${ALPHA_ADDRESS}\",\"\$1\",\$2*1e18)"
+EOF
+chmod +x "${NODES_ROOT}/harness-ctl/sendtoaddress"
+
 cat > "${NODES_ROOT}/harness-ctl/deploy.js" <<EOF
 function deploy(from, contract) {
   tx = personal.sendTransaction({from:"0x"+from,data:"0x"+contract,gasPrice:82000000000}, "${PASSWORD}")

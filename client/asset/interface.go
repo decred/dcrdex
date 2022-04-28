@@ -376,9 +376,9 @@ type TokenMaster interface {
 type AccountLocker interface {
 	// ReserveNRedemption is used when preparing funding for an order that
 	// redeems to an account-based asset. The wallet will set aside the
-	// appropriate amount of funds so that we can redeem N swaps on the
-	// specified version of the asset, at the specified fee rate. It is an
-	// error to request funds > spendable balance.
+	// appropriate amount of funds so that we can redeem N swaps using the fee
+	// and version configuration specified in the dex.Asset. It is an error to
+	// request funds > spendable balance.
 	ReserveNRedemptions(n uint64, dexRedeemCfg *dex.Asset) (uint64, error)
 	// ReReserveRedemption is used when reconstructing existing orders on
 	// startup. It is an error to request funds > spendable balance.
@@ -386,11 +386,11 @@ type AccountLocker interface {
 	// UnlockRedemptionReserves is used to return funds reserved for redemption
 	// when an order is canceled or otherwise completed unfilled.
 	UnlockRedemptionReserves(uint64)
-	// ReserveNRefunds is used when preparing funding for an order that
-	// refunds to an account-based asset. The wallet will set aside the
-	// appropriate amount of funds so that we can refund N swaps on the
-	// specified version of the asset, at the specified fee rate. It is
-	// an error to request funds > spendable balance.
+	// ReserveNRefunds is used when preparing funding for an order that refunds
+	// to an account-based asset. The wallet will set aside the appropriate
+	// amount of funds so that we can refund N swaps using the fee and version
+	// configuration specified in the dex.Asset. It is an error to request funds
+	// > spendable balance.
 	ReserveNRefunds(n uint64, dexSwapCfg *dex.Asset) (uint64, error)
 	// ReReserveRefund is used when reconstructing existing orders on
 	// startup. It is an error to request funds > spendable balance.
@@ -486,10 +486,10 @@ type Swaps struct {
 	// LockChange can be set to true if the change should be locked for
 	// subsequent matches.
 	LockChange bool
-	// AssetConfig is the swap protocol version, which may indicate a specific
-	// contract or form of contract. NOTE: Depending on the asset, batch swaps
-	// may force each Contract to use the same version, but conceptually this
-	// should perhaps be in Contract with SecretHash.
+	// AssetConfig contains the asset version and fee configuration for the DEX.
+	// NOTE: Only on Config field is supported, so only orders from the same
+	// host can be batched. We could consider moving this field to the Contract
+	// and Wallets could batch compatible swaps internally.
 	AssetConfig *dex.Asset
 	// Options are OrderOptions set or selected by the user at order time.
 	Options map[string]string

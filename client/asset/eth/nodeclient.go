@@ -380,38 +380,6 @@ func (n *nodeClient) sendSignedTransaction(ctx context.Context, tx *types.Transa
 	return n.leth.ApiBackend.SendTx(ctx, tx)
 }
 
-// tokenBalance checks the token balance of the account handled by the wallet.
-func (w *AssetWallet) tokenBalance() (bal *big.Int, err error) {
-	// We don't care about the version.
-	return bal, w.withTokenContractor(w.assetID, contractVersionNewest, func(c tokenContractor) error {
-		bal, err = c.balance(w.ctx)
-		return err
-	})
-}
-
-// tokenAllowance checks the amount of tokens that the swap contract is approved
-// to spend on behalf of the account handled by the wallet.
-func (w *AssetWallet) tokenAllowance() (allowance *big.Int, err error) {
-	return allowance, w.withTokenContractor(w.assetID, contractVersionNewest, func(c tokenContractor) error {
-		allowance, err = c.allowance(w.ctx)
-		return err
-	})
-}
-
-// approveToken approves the token swap contract to spend tokens on behalf of
-// account handled by the wallet.
-func (w *AssetWallet) approveToken(amount *big.Int, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
-	txOpts, err := w.node.txOpts(w.ctx, 0, approveGas, dexeth.GweiToWei(maxFeeRate))
-	if err != nil {
-		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
-	}
-
-	return tx, w.withTokenContractor(w.assetID, contractVer, func(c tokenContractor) error {
-		tx, err = c.approve(txOpts, amount)
-		return err
-	})
-}
-
 func (n *nodeClient) checkTxStatus(ctx context.Context, tx *types.Transaction, txOpts *bind.TransactOpts) (*types.Receipt, error) {
 	// It appears the receipt is only accessible after the tx is mined.
 	receipt, err := n.transactionReceipt(ctx, tx.Hash())

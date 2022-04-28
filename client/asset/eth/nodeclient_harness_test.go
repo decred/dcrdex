@@ -400,7 +400,6 @@ func TestTokenContract(t *testing.T) {
 	t.Run("testInitiateToken", func(t *testing.T) { testInitiate(t, testTokenID) })
 	t.Run("testRedeemToken", func(t *testing.T) { testRedeem(t, testTokenID) })
 	t.Run("testRefundToken", func(t *testing.T) { testRefund(t, testTokenID) })
-	t.Run("testGetTokenAddress", testGetTokenAddress)
 
 }
 
@@ -1509,17 +1508,6 @@ func testApproveAllowance(t *testing.T) {
 	if allowance.Cmp(new(big.Int)) == 0 {
 		t.Fatalf("expected allowance > 0")
 	}
-}
-
-func testGetTokenAddress(t *testing.T) {
-	addr, err := simnetTokenContractor.tokenAddress(ctx)
-	if err != nil {
-		t.Fatalf("Error getting token address: %v", err)
-	}
-	if addr != testTokenContractAddr {
-		t.Fatalf("Wrong contract retrieved from contract. wanted %s, got %s", testTokenContractAddr, addr)
-	}
-	fmt.Println("Token Address: ", addr)
 }
 
 func testTransferGas(t *testing.T) {

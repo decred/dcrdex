@@ -193,7 +193,11 @@ func TestRedeemV0(t *testing.T) {
 
 func TestSwapV0(t *testing.T) {
 	abiContract := &tContractV0{}
-	c := contractorV0{contractV0: abiContract, evmify: dexeth.GweiToWei}
+	c := contractorV0{
+		contractV0: abiContract,
+		evmify:     dexeth.GweiToWei,
+		atomize:    dexeth.WeiToGwei,
+	}
 
 	var secret [32]byte
 	const valGwei = 123_456
