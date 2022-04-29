@@ -364,7 +364,16 @@ func (w *rpcWallet) AddressInfo(ctx context.Context, address string) (*AddressIn
 	if err != nil {
 		return nil, translateRPCCancelErr(err)
 	}
-	return &AddressInfo{Account: res.Account, Branch: res.Branch}, nil
+	if !res.IsValid {
+		return nil, fmt.Errorf("address is invalid")
+	}
+	if !res.IsMine {
+		return nil, fmt.Errorf("address does not belong to this wallet")
+	}
+	if res.Branch == nil {
+		return nil, fmt.Errorf("no account branch info for address")
+	}
+	return &AddressInfo{Account: res.Account, Branch: *res.Branch}, nil
 }
 
 // AccountOwnsAddress checks if the provided address belongs to the specified

@@ -88,18 +88,22 @@ var (
 		{
 			Key:         "account",
 			DisplayName: "Account Name",
-			Description: "dcrwallet account name, should be the mixed account if mixing is enabled on the wallet",
+			Description: "Primary dcrwallet account name for trading. If automatic mixing of trading funds is " +
+				"desired, this should be the wallet's mixed account and the other accounts should be set too. " +
+				"See wallet documentation for mixing wallet setup instructions.",
 		},
 		{
 			Key:         "unmixedaccount",
 			DisplayName: "Change Account Name",
-			Description: "dcrwallet change account name, if mixing is enabled on the wallet",
+			Description: "dcrwallet change account name. This and the 'Temporary Trading Account' should only be " +
+				"set if mixing is enabled on the wallet. If set, deposit addresses will be from this account and will " +
+				"be mixed before being available to trade.",
 		},
 		{
 			Key:         "tradingaccount",
-			DisplayName: "Dedicated Trading Account",
-			Description: "dcrwallet account to temporarily store unmixed funds that will be used to " +
-				"fund swaps, if mixing is enabled on the wallet",
+			DisplayName: "Temporary Trading Account",
+			Description: "dcrwallet account to temporarily store split tx outputs or change from chained swaps in " +
+				"multi-lot orders. This should be set if Change Account Name is set.",
 		},
 		{
 			Key:         "username",
@@ -522,11 +526,20 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *cha
 	// If set, the account names will be validated on Connect.
 	if (dcrCfg.UnmixedAccount != "" && dcrCfg.TradingAccount == "") ||
 		(dcrCfg.UnmixedAccount == "" && dcrCfg.TradingAccount != "") {
-
 		return nil, fmt.Errorf("'Change Account Name' and 'Dedicated Trading Account' MUST "+
 			"be set to treat %q as a mixed account. If %q is not a mixed account, values should NOT "+
 			"be set for 'Change Account Name' and 'Dedicated Trading Account'",
 			dcrCfg.PrimaryAccount, dcrCfg.PrimaryAccount)
+	}
+	if dcrCfg.UnmixedAccount != "" {
+		switch {
+		case strings.EqualFold(dcrCfg.PrimaryAccount, dcrCfg.UnmixedAccount):
+			return nil, fmt.Errorf("Primary Account should not be the same as Change Account")
+		case strings.EqualFold(dcrCfg.PrimaryAccount, dcrCfg.TradingAccount):
+			return nil, fmt.Errorf("Primary Account should not be the same as Dedicated Trading Account")
+		case strings.EqualFold(dcrCfg.TradingAccount, dcrCfg.UnmixedAccount):
+			return nil, fmt.Errorf("Dedicated Trading Account should not be the same as Change Account")
+		}
 	}
 
 	return &ExchangeWallet{
@@ -590,9 +603,9 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		if acct == "" {
 			continue
 		}
-		_, err = dcr.wallet.AccountBalance(ctx, 0, acct)
+		_, err = dcr.wallet.AccountUnlocked(ctx, acct)
 		if err != nil {
-			return nil, fmt.Errorf("unexpected account balance error for %q account: %v", acct, err)
+			return nil, fmt.Errorf("unexpected AccountUnlocked error for %q account: %v", acct, err)
 		}
 	}
 
@@ -679,29 +692,30 @@ func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
 		Locked: locked + toAtoms(ab.LockedByTickets), // + all funds in trading account
 	}
 
-	// If mixing is enabled, consider ...
+	if dcr.unmixedAccount == "" {
+		return bal, nil
+	}
+
+	// Mixing is enabled, consider ...
 	// 1) trading account spendable (-locked) as available,
 	// 2) all unmixed funds as immature, and
 	// 3) all locked utxos in the trading account as locked (for swapping).
-	if dcr.unmixedAccount != "" {
-		tradingAcctBal, err := dcr.wallet.AccountBalance(dcr.ctx, 0, dcr.tradingAccount)
-		if err != nil {
-			return nil, err
-		}
-		tradingAcctLocked, err := dcr.lockedAtoms(dcr.tradingAccount)
-		if err != nil {
-			return nil, err
-		}
-		unmixedAcctBal, err := dcr.wallet.AccountBalance(dcr.ctx, 0, dcr.unmixedAccount)
-		if err != nil {
-			return nil, err
-		}
-
-		bal.Available += (toAtoms(tradingAcctBal.Spendable) - tradingAcctLocked)
-		bal.Immature += toAtoms(unmixedAcctBal.Total)
-		bal.Locked += tradingAcctLocked
+	tradingAcctBal, err := dcr.wallet.AccountBalance(dcr.ctx, 0, dcr.tradingAccount)
+	if err != nil {
+		return nil, err
+	}
+	tradingAcctLocked, err := dcr.lockedAtoms(dcr.tradingAccount)
+	if err != nil {
+		return nil, err
+	}
+	unmixedAcctBal, err := dcr.wallet.AccountBalance(dcr.ctx, 0, dcr.unmixedAccount)
+	if err != nil {
+		return nil, err
 	}
 
+	bal.Available += toAtoms(tradingAcctBal.Spendable) - tradingAcctLocked
+	bal.Immature += toAtoms(unmixedAcctBal.Total)
+	bal.Locked += tradingAcctLocked
 	return bal, nil
 }
 
@@ -1485,8 +1499,10 @@ func (dcr *ExchangeWallet) lockFundingCoins(fCoins []*fundingCoin) error {
 	return nil
 }
 
-// ReturnCoins unlocks coins. This would be necessary in the case of a
-// canceled order.
+// ReturnCoins unlocks coins. This would be necessary in the case of a canceled
+// order. Coins belonging to the tradingAcct, if configured, are transferred to
+// the unmixed account with the exception of unspent split tx outputs which are
+// kept in the tradingAcct and may later be used to fund future orders.
 func (dcr *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 	dcr.fundingMtx.Lock()
 	returnedCoins, err := dcr.returnCoins(unspents)
@@ -1501,7 +1517,7 @@ func (dcr *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 	// This doesn't apply to unspent split tx outputs, which should
 	// remain in the trading account and be selected from there for
 	// funding future orders.
-	coinsToTransfer := make([]asset.Coin, 0)
+	var coinsToTransfer []asset.Coin
 	for _, coin := range returnedCoins {
 		if coin.addr == "" {
 			txOut, err := dcr.wallet.UnspentOutput(dcr.ctx, coin.op.txHash(), coin.op.vout(), coin.op.tree)
@@ -1524,7 +1540,7 @@ func (dcr *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 		// internal branch of the trading account. This excludes unspent
 		// split tx outputs which are sent to the external branch of the
 		// trading account.
-		if addrInfo.Branch != nil && *addrInfo.Branch == acctInternalBranch && addrInfo.Account == dcr.tradingAccount {
+		if addrInfo.Branch == acctInternalBranch && addrInfo.Account == dcr.tradingAccount {
 			coinsToTransfer = append(coinsToTransfer, coin.op)
 		}
 	}
@@ -1543,7 +1559,8 @@ func (dcr *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 	return nil
 }
 
-// returnCoins is ReturnCoins but without locking fundingMtx.
+// returnCoins unlocks coins and removes them from the fundingCoins map.
+// Requires fundingMtx to be write-locked.
 func (dcr *ExchangeWallet) returnCoins(unspents asset.Coins) ([]*fundingCoin, error) {
 	if len(unspents) == 0 {
 		return nil, fmt.Errorf("cannot return zero coins")
@@ -1562,6 +1579,7 @@ func (dcr *ExchangeWallet) returnCoins(unspents asset.Coins) ([]*fundingCoin, er
 		if fCoin, ok := dcr.fundingCoins[op.pt]; ok {
 			fundingCoins = append(fundingCoins, fCoin)
 		} else {
+			dcr.log.Warnf("returning coin %s that is not cached as a funding coin", op)
 			fundingCoins = append(fundingCoins, &fundingCoin{op: op})
 		}
 		delete(dcr.fundingCoins, op.pt)
@@ -3026,12 +3044,7 @@ func (dcr *ExchangeWallet) sendAll(coins asset.Coins, destAcct string) (*wire.Ms
 	txOut := newTxOut(int64(totalIn), payScriptVer, payScript)
 	baseTx.AddTxOut(txOut)
 
-	feeRate, err := dcr.feeRate(2)
-	if err != nil {
-		dcr.log.Debugf("sendAll feeRate error: %v, using fallbackFeeRate", err)
-		feeRate = dcr.fallbackFeeRate
-	}
-
+	feeRate := dcr.targetFeeRateWithFallback(2, 0)
 	tx, err := dcr.sendWithReturn(baseTx, feeRate, 0) // subtract from vout 0
 	return tx, uint64(txOut.Value), err
 }

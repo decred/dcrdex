@@ -57,7 +57,7 @@ type BlockHeader struct {
 
 type AddressInfo struct {
 	Account string
-	Branch  *uint32
+	Branch  uint32
 }
 
 // Wallet defines methods that the ExchangeWallet uses for communicating with
