@@ -16,6 +16,7 @@ import (
 	"context"
 	"testing"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"github.com/ethereum/go-ethereum"
@@ -23,13 +24,15 @@ import (
 )
 
 var (
-	homeDir          = os.Getenv("HOME")
-	ipc              = filepath.Join(homeDir, "dextest/eth/alpha/node/geth.ipc")
-	contractAddrFile = filepath.Join(homeDir, "dextest", "eth", "eth_swap_contract_address.txt")
-	alphaAddress     = "18d65fb8d60c1199bb1ad381be47aa692b482605"
-	gammaAddress     = "41293c2032bac60aa747374e966f79f575d42379"
-	ethClient        = new(rpcclient)
-	ctx              context.Context
+	homeDir            = os.Getenv("HOME")
+	ipc                = filepath.Join(homeDir, "dextest/eth/alpha/node/geth.ipc")
+	contractAddrFile   = filepath.Join(homeDir, "dextest", "eth", "eth_swap_contract_address.txt")
+	tokenSwapAddrFile  = filepath.Join(homeDir, "dextest", "eth", "erc20_swap_contract_address.txt")
+	tokenErc20AddrFile = filepath.Join(homeDir, "dextest", "eth", "test_token_contract_address.txt")
+	alphaAddress       = "18d65fb8d60c1199bb1ad381be47aa692b482605"
+	gammaAddress       = "41293c2032bac60aa747374e966f79f575d42379"
+	ethClient          *rpcclient
+	ctx                context.Context
 )
 
 func TestMain(m *testing.M) {
@@ -37,29 +40,27 @@ func TestMain(m *testing.M) {
 	run := func() (int, error) {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(context.Background())
+		ethClient = newRPCClient(dex.Simnet, ipc)
 		defer func() {
 			cancel()
 			ethClient.shutdown()
 		}()
-		ctx, cancel = context.WithCancel(context.Background())
-		defer func() {
-			cancel()
-			ethClient.shutdown()
-		}()
-		addrBytes, err := os.ReadFile(contractAddrFile)
-		if err != nil {
-			return 1, fmt.Errorf("error reading contract address: %v", err)
+
+		dexeth.ContractAddresses[0][dex.Simnet] = getContractAddrFromFile(contractAddrFile)
+
+		netToken := dexeth.Tokens[testTokenID].NetTokens[dex.Simnet]
+		netToken.Address = getContractAddrFromFile(tokenErc20AddrFile)
+		netToken.SwapContracts[0].Address = getContractAddrFromFile(tokenSwapAddrFile)
+		registerToken(testTokenID, 0)
+
+		if err := ethClient.connect(ctx); err != nil {
+			return 1, fmt.Errorf("Connect error: %w", err)
 		}
-		addrLen := len(addrBytes)
-		if addrLen == 0 {
-			return 1, fmt.Errorf("no contract address found at %v", contractAddrFile)
+
+		if err := ethClient.loadToken(ctx, testTokenID); err != nil {
+			return 1, fmt.Errorf("loadToken error: %w", err)
 		}
-		addrStr := string(addrBytes[:addrLen-1])
-		contractAddr := common.HexToAddress(addrStr)
-		fmt.Printf("Contract address is %v\n", addrStr)
-		if err := ethClient.connect(ctx, ipc, &contractAddr); err != nil {
-			return 1, fmt.Errorf("Connect error: %v", err)
-		}
+
 		return m.Run(), nil
 	}
 	exitCode, err := run()
@@ -107,7 +108,7 @@ func TestSuggestGasTipCap(t *testing.T) {
 func TestSwap(t *testing.T) {
 	var secretHash [32]byte
 	copy(secretHash[:], encode.RandomBytes(32))
-	_, err := ethClient.swap(ctx, secretHash)
+	_, err := ethClient.swap(ctx, BipID, secretHash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,19 +125,29 @@ func TestTransaction(t *testing.T) {
 }
 
 func TestAccountBalance(t *testing.T) {
+	t.Run("eth", func(t *testing.T) { testAccountBalance(t, BipID) })
+	t.Run("token", func(t *testing.T) { testAccountBalance(t, testTokenID) })
+}
+
+func testAccountBalance(t *testing.T, assetID uint32) {
 	addr := common.HexToAddress(alphaAddress)
 	const vGwei = 1e7
 
-	balBefore, err := ethClient.accountBalance(ctx, addr)
+	balBefore, err := ethClient.accountBalance(ctx, assetID, addr)
 	if err != nil {
 		t.Fatalf("accountBalance error: %v", err)
 	}
 
-	if err := tmuxSend(alphaAddress, gammaAddress, vGwei); err != nil {
+	if assetID == BipID {
+		err = tmuxSend(alphaAddress, gammaAddress, vGwei)
+	} else {
+		err = tmuxSendToken(gammaAddress, vGwei)
+	}
+	if err != nil {
 		t.Fatalf("send error: %v", err)
 	}
 
-	balAfter, err := ethClient.accountBalance(ctx, addr)
+	balAfter, err := ethClient.accountBalance(ctx, assetID, addr)
 	if err != nil {
 		t.Fatalf("accountBalance error: %v", err)
 	}
@@ -158,4 +169,22 @@ func tmuxRun(cmd string) error {
 
 func tmuxSend(from, to string, v uint64) error {
 	return tmuxRun(fmt.Sprintf("./alpha attach --preload send.js --exec \"send(\\\"%s\\\",\\\"%s\\\",%s)\"", from, to, dexeth.GweiToWei(v)))
+}
+
+func tmuxSendToken(to string, v uint64) error {
+	return tmuxRun(fmt.Sprintf("./alpha attach --preload loadTestToken.js --exec \"testToken.transfer(\\\"0x%s\\\",%s)\"", to, dexeth.GweiToWei(v)))
+}
+
+func getContractAddrFromFile(fileName string) common.Address {
+	addrBytes, err := os.ReadFile(fileName)
+	if err != nil {
+		panic(fmt.Sprintf("error reading contract address: %v", err))
+	}
+	addrLen := len(addrBytes)
+	if addrLen == 0 {
+		panic(fmt.Sprintf("no contract address found at %v", fileName))
+	}
+	addrStr := string(addrBytes[:addrLen-1])
+	address := common.HexToAddress(addrStr)
+	return address
 }

@@ -21,7 +21,7 @@ var _ asset.Coin = (*swapCoin)(nil)
 var _ asset.Coin = (*redeemCoin)(nil)
 
 type baseCoin struct {
-	backend      *Backend
+	backend      *AssetBackend
 	secretHash   [32]byte
 	gasFeeCap    uint64
 	gasTipCap    uint64
@@ -29,6 +29,7 @@ type baseCoin struct {
 	value        uint64
 	txData       []byte
 	serializedTx []byte
+	contractVer  uint32
 }
 
 type swapCoin struct {
@@ -49,7 +50,7 @@ type redeemCoin struct {
 // it in the mempool. It also tells us all the data we need to confirm a tx
 // will do what we expect if mined and satisfies contract constraints. These
 // fields are verified when the Confirmations method is called.
-func (eth *Backend) newSwapCoin(coinID []byte, contractData []byte) (*swapCoin, error) {
+func (eth *AssetBackend) newSwapCoin(coinID []byte, contractData []byte) (*swapCoin, error) {
 	bc, err := eth.baseCoin(coinID, contractData)
 	if err != nil {
 		return nil, err
@@ -84,7 +85,7 @@ func (eth *Backend) newSwapCoin(coinID []byte, contractData []byte) (*swapCoin, 
 // TODO: The redeemCoin's Confirmation method is never used by the current
 // swapper implementation. Might consider an API change for
 // asset.Backend.Redemption.
-func (eth *Backend) newRedeemCoin(coinID []byte, contractData []byte) (*redeemCoin, error) {
+func (eth *AssetBackend) newRedeemCoin(coinID []byte, contractData []byte) (*redeemCoin, error) {
 	bc, err := eth.baseCoin(coinID, contractData)
 	if err != nil {
 		return nil, err
@@ -110,12 +111,12 @@ func (eth *Backend) newRedeemCoin(coinID []byte, contractData []byte) (*redeemCo
 }
 
 // The baseCoin is basic tx and swap contract data.
-func (eth *Backend) baseCoin(coinID []byte, contractData []byte) (*baseCoin, error) {
+func (eth *AssetBackend) baseCoin(coinID []byte, contractData []byte) (*baseCoin, error) {
 	txHash, err := dexeth.DecodeCoinID(coinID)
 	if err != nil {
 		return nil, err
 	}
-	tx, _, err := eth.node.transaction(eth.rpcCtx, txHash)
+	tx, _, err := eth.node.transaction(eth.ctx, txHash)
 	if err != nil {
 		if errors.Is(err, ethereum.NotFound) {
 			return nil, asset.CoinNotFoundError
@@ -184,6 +185,7 @@ func (eth *Backend) baseCoin(coinID []byte, contractData []byte) (*baseCoin, err
 		value:        value,
 		txData:       tx.Data(),
 		serializedTx: serializedTx,
+		contractVer:  contractVer,
 	}, nil
 }
 
@@ -197,7 +199,7 @@ func (eth *Backend) baseCoin(coinID []byte, contractData []byte) (*baseCoin, err
 // and the same account and nonce, effectively voiding the transaction we
 // expected to be mined.
 func (c *swapCoin) Confirmations(ctx context.Context) (int64, error) {
-	swap, err := c.backend.node.swap(ctx, c.secretHash)
+	swap, err := c.backend.node.swap(ctx, c.backend.assetID, c.secretHash)
 	if err != nil {
 		return -1, err
 	}
@@ -240,7 +242,7 @@ func (c *swapCoin) Confirmations(ctx context.Context) (int64, error) {
 }
 
 func (c *redeemCoin) Confirmations(ctx context.Context) (int64, error) {
-	swap, err := c.backend.node.swap(ctx, c.secretHash)
+	swap, err := c.backend.node.swap(ctx, c.backend.assetID, c.secretHash)
 	if err != nil {
 		return -1, err
 	}

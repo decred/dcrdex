@@ -93,9 +93,14 @@ var Tokens = map[uint32]*Token{
 				SwapContracts: map[uint32]*SwapContract{},
 			},
 			dex.Simnet: {
+				// ERC20 token contract address. The simnet harness writes this
+				// address to file. Live tests must populate this field.
 				Address: common.Address{},
 				SwapContracts: map[uint32]*SwapContract{
 					0: {
+						// Swap contract address. The simnet harness writes this
+						// address to file. Live tests must populate this field.
+						Address: common.Address{},
 						Gas: Gases{
 							Swap:      174_000,
 							SwapAdd:   115_000,
