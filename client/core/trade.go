@@ -1745,12 +1745,12 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 	// A more sophisticated solution might involve tracking the error time too
 	// and trying again in certain circumstances.
 	swaps := &asset.Swaps{
-		Inputs:       inputs,
-		Contracts:    contracts,
-		FeeRate:      highestFeeRate,
-		LockChange:   lockChange,
-		AssetVersion: t.metaData.FromVersion,
-		Options:      t.options,
+		Inputs:      inputs,
+		Contracts:   contracts,
+		FeeRate:     highestFeeRate,
+		LockChange:  lockChange,
+		AssetConfig: t.wallets.fromAsset,
+		Options:     t.options,
 	}
 	receipts, change, fees, err := t.wallets.fromWallet.Swap(swaps)
 	if err != nil {

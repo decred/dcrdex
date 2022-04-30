@@ -701,7 +701,7 @@ func (w *TXCWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error
 	return w.fundingCoins, w.fundRedeemScripts, w.fundingCoinErr
 }
 
-func (w *TXCWallet) MaxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asset) (*asset.SwapEstimate, error) {
+func (w *TXCWallet) MaxOrder(*asset.MaxOrderForm) (*asset.SwapEstimate, error) {
 	return nil, nil
 }
 
@@ -883,7 +883,7 @@ func newTAccountLocker(assetID uint32) (*xcWallet, *TAccountLocker) {
 	return xcWallet, accountLocker
 }
 
-func (w *TAccountLocker) ReserveNRedemptions(n, feeRate uint64, assetVer uint32) (uint64, error) {
+func (w *TAccountLocker) ReserveNRedemptions(n uint64, dexSwapCfg *dex.Asset) (uint64, error) {
 	return w.reserveNRedemptions, w.reserveNRedemptionsErr
 }
 
@@ -896,7 +896,7 @@ func (w *TAccountLocker) UnlockRedemptionReserves(v uint64) {
 	w.redemptionUnlocked += v
 }
 
-func (w *TAccountLocker) ReserveNRefunds(n, feeRate uint64, assetVer uint32) (uint64, error) {
+func (w *TAccountLocker) ReserveNRefunds(n uint64, dexRedeemCfg *dex.Asset) (uint64, error) {
 	return w.reserveNRefunds, w.reserveNRefundsErr
 }
 

@@ -1108,8 +1108,8 @@ func (btc *baseWallet) feeRateWithFallback(feeSuggestion uint64) uint64 {
 // associated with nfo.MaxFeeRate. For quote assets, the caller will have to
 // calculate lotSize based on a rate conversion from the base asset's lot size.
 // lotSize must not be zero and will cause a panic if so.
-func (btc *baseWallet) MaxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asset) (*asset.SwapEstimate, error) {
-	_, maxEst, err := btc.maxOrder(lotSize, feeSuggestion, nfo)
+func (btc *baseWallet) MaxOrder(ord *asset.MaxOrderForm) (*asset.SwapEstimate, error) {
+	_, maxEst, err := btc.maxOrder(ord.LotSize, ord.FeeSuggestion, ord.AssetConfig)
 	return maxEst, err
 }
 

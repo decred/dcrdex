@@ -1088,7 +1088,7 @@ func TestFundingCoins(t *testing.T) {
 
 func checkMaxOrder(t *testing.T, wallet *ExchangeWallet, lots, swapVal, maxFees, estWorstCase, estBestCase, locked uint64) {
 	t.Helper()
-	maxOrder, err := wallet.MaxOrder(tLotSize, feeSuggestion, tDCR)
+	_, maxOrder, err := wallet.maxOrder(tLotSize, feeSuggestion, tDCR)
 	if err != nil {
 		t.Fatalf("MaxOrder error: %v", err)
 	}
@@ -2459,8 +2459,9 @@ func TestPreRedeem(t *testing.T) {
 	defer shutdown()
 
 	preRedeem, err := wallet.PreRedeem(&asset.PreRedeemForm{
-		LotSize: 123456, // Doesn't actually matter
-		Lots:    5,
+		LotSize:     123456, // Doesn't actually matter
+		Lots:        5,
+		AssetConfig: tDCR,
 	})
 	// Shouldn't actually be any path to error.
 	if err != nil {

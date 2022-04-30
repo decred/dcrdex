@@ -213,7 +213,7 @@ type Wallet interface {
 	// the fees associated with the Asset.MaxFeeRate. For quote assets, lotSize
 	// will be an estimate based on current market conditions. lotSize should
 	// not be zero.
-	MaxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asset) (*SwapEstimate, error)
+	MaxOrder(*MaxOrderForm) (*SwapEstimate, error)
 	// PreSwap gets a pre-swap estimate for the specified order size.
 	PreSwap(*PreSwapForm) (*PreSwap, error)
 	// PreRedeem gets a pre-redeem estimate for the specified order size.
@@ -376,22 +376,22 @@ type TokenMaster interface {
 type AccountLocker interface {
 	// ReserveNRedemption is used when preparing funding for an order that
 	// redeems to an account-based asset. The wallet will set aside the
-	// appropriate amount of funds so that we can redeem N swaps on the
-	// specified version of the asset, at the specified fee rate. It is an
-	// error to request funds > spendable balance.
-	ReserveNRedemptions(n, feeRate uint64, assetVer uint32) (uint64, error)
+	// appropriate amount of funds so that we can redeem N swaps using the fee
+	// and version configuration specified in the dex.Asset. It is an error to
+	// request funds > spendable balance.
+	ReserveNRedemptions(n uint64, dexRedeemCfg *dex.Asset) (uint64, error)
 	// ReReserveRedemption is used when reconstructing existing orders on
 	// startup. It is an error to request funds > spendable balance.
 	ReReserveRedemption(amt uint64) error
 	// UnlockRedemptionReserves is used to return funds reserved for redemption
 	// when an order is canceled or otherwise completed unfilled.
 	UnlockRedemptionReserves(uint64)
-	// ReserveNRefunds is used when preparing funding for an order that
-	// refunds to an account-based asset. The wallet will set aside the
-	// appropriate amount of funds so that we can refund N swaps on the
-	// specified version of the asset, at the specified fee rate. It is
-	// an error to request funds > spendable balance.
-	ReserveNRefunds(n, feeRate uint64, assetVer uint32) (uint64, error)
+	// ReserveNRefunds is used when preparing funding for an order that refunds
+	// to an account-based asset. The wallet will set aside the appropriate
+	// amount of funds so that we can refund N swaps using the fee and version
+	// configuration specified in the dex.Asset. It is an error to request funds
+	// > spendable balance.
+	ReserveNRefunds(n uint64, dexSwapCfg *dex.Asset) (uint64, error)
 	// ReReserveRefund is used when reconstructing existing orders on
 	// startup. It is an error to request funds > spendable balance.
 	ReReserveRefund(uint64) error
@@ -486,11 +486,11 @@ type Swaps struct {
 	// LockChange can be set to true if the change should be locked for
 	// subsequent matches.
 	LockChange bool
-	// AssetVersion is the swap protocol version, which may indicate a specific
-	// contract or form of contract. NOTE: Depending on the asset, batch swaps
-	// may force each Contract to use the same version, but conceptually this
-	// should perhaps be in Contract with SecretHash.
-	AssetVersion uint32
+	// AssetConfig contains the asset version and fee configuration for the DEX.
+	// NOTE: Only one Config field is supported, so only orders from the same
+	// host can be batched. We could consider moving this field to the Contract
+	// and Wallets could batch compatible swaps internally.
+	AssetConfig *dex.Asset
 	// Options are OrderOptions set or selected by the user at order time.
 	Options map[string]string
 }
@@ -547,7 +547,8 @@ type Order struct {
 	// DEXConfig holds values specific to and provided by a particular server.
 	// Info about fee rates and swap transaction sizes is used internally to
 	// calculate the funding required to cover fees.
-	DEXConfig *dex.Asset
+	DEXConfig    *dex.Asset
+	RedeemConfig *dex.Asset
 	// Immediate should be set to true if this is for an order that is not a
 	// standing order, likely a market order or a limit order with immediate
 	// time-in-force.
