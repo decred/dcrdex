@@ -106,7 +106,7 @@ type testNode struct {
 	tContractor     *tContractor
 	tokenContractor *tTokenContractor
 	contractor      contractor
-	tokenParent     *AssetWallet // only set for tokens
+	tokenParent     *assetWallet // only set for tokens
 }
 
 func newBalance(current, in, out uint64) *Balance {
@@ -373,19 +373,20 @@ func TestCheckForNewBlocks(t *testing.T) {
 		node.bestHdr = test.bestHeader
 		node.bestHdrErr = test.blockErr
 		w := &ETHWallet{
-			AssetWallet: &AssetWallet{
+			assetWallet: &assetWallet{
 				baseWallet: &baseWallet{
 					node: node,
 					addr: node.address(),
 					ctx:  ctx,
 					log:  tLogger,
 				},
+				log:       tLogger.SubLogger("ETH"),
 				tipChange: tipChange,
 				assetID:   BipID,
 			},
 			currentTip: header0,
 		}
-		w.wallets = map[uint32]*AssetWallet{BipID: w.AssetWallet}
+		w.wallets = map[uint32]*assetWallet{BipID: w.assetWallet}
 		w.checkForNewBlocks(tipChange)
 
 		if test.hasTipChange {
@@ -504,7 +505,7 @@ func newTestNode(assetID uint32) *testNode {
 	}
 }
 
-func tAssetWallet(assetID uint32) (asset.Wallet, *AssetWallet, *testNode, context.CancelFunc) {
+func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *testNode, context.CancelFunc) {
 	node := newTestNode(assetID)
 	ctx, cancel := context.WithCancel(context.Background())
 	var c contractor = node.tContractor
@@ -512,7 +513,7 @@ func tAssetWallet(assetID uint32) (asset.Wallet, *AssetWallet, *testNode, contex
 		c = node.tokenContractor
 	}
 
-	aw := &AssetWallet{
+	aw := &assetWallet{
 		baseWallet: &baseWallet{
 			addr:        node.addr,
 			net:         dex.Simnet,
@@ -521,35 +522,37 @@ func tAssetWallet(assetID uint32) (asset.Wallet, *AssetWallet, *testNode, contex
 			log:         tLogger,
 			gasFeeLimit: defaultGasFeeLimit,
 		},
+		log:                tLogger.SubLogger(strings.ToUpper(dex.BipIDSymbol(assetID))),
 		assetID:            assetID,
 		contractors:        map[uint32]contractor{0: c},
 		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
 		evmify:             dexeth.GweiToWei,
 		atomize:            dexeth.WeiToGwei,
 	}
-	aw.wallets = map[uint32]*AssetWallet{
+	aw.wallets = map[uint32]*assetWallet{
 		BipID: aw,
 	}
 
 	var w asset.Wallet
 	if assetID == BipID {
-		w = &ETHWallet{AssetWallet: aw}
-		aw.wallets = map[uint32]*AssetWallet{
+		w = &ETHWallet{assetWallet: aw}
+		aw.wallets = map[uint32]*assetWallet{
 			BipID: aw,
 		}
 	} else {
-		node.tokenParent = &AssetWallet{
+		node.tokenParent = &assetWallet{
 			baseWallet:  aw.baseWallet,
+			log:         tLogger.SubLogger("ETH"),
 			contractors: map[uint32]contractor{0: node.tContractor},
 			assetID:     BipID,
 			atomize:     dexeth.WeiToGwei,
 		}
 		w = &TokenWallet{
-			AssetWallet: aw,
+			assetWallet: aw,
 			cfg:         &tokenWalletConfig{},
 			parent:      node.tokenParent,
 		}
-		aw.wallets = map[uint32]*AssetWallet{
+		aw.wallets = map[uint32]*assetWallet{
 			testTokenID: aw,
 			BipID:       node.tokenParent,
 		}
@@ -648,7 +651,7 @@ func TestBalance(t *testing.T) {
 			assetID = testTokenID
 		}
 
-		_, eth, node, shutdown := tAssetWallet(assetID)
+		_, eth, node, shutdown := tassetWallet(assetID)
 		defer shutdown()
 
 		if test.token {
@@ -762,7 +765,7 @@ func TestRefund(t *testing.T) {
 }
 
 func testRefund(t *testing.T, assetID uint32) {
-	_, eth, node, shutdown := tAssetWallet(assetID)
+	_, eth, node, shutdown := tassetWallet(assetID)
 	defer shutdown()
 
 	const feeSuggestion = 100
@@ -945,7 +948,7 @@ func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 }
 
 func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
-	w, eth, node, shutdown := tAssetWallet(assetID)
+	w, eth, node, shutdown := tassetWallet(assetID)
 	defer shutdown()
 	walletBalanceGwei := uint64(dexeth.GweiFactor)
 	fromAsset := tETH
@@ -957,7 +960,7 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 		node.tokenParent.node.(*testNode).bal = dexeth.GweiToWei(walletBalanceGwei)
 	}
 
-	checkBalance := func(wallet *AssetWallet, expectedAvailable, expectedLocked uint64, testName string) {
+	checkBalance := func(wallet *assetWallet, expectedAvailable, expectedLocked uint64, testName string) {
 		t.Helper()
 		balance, err := wallet.Balance()
 		if err != nil {
@@ -1109,7 +1112,7 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 	}
 	eth.gasFeeLimit = tmpGasFeeLimit
 
-	w2, eth2, _, shutdown2 := tAssetWallet(assetID)
+	w2, eth2, _, shutdown2 := tassetWallet(assetID)
 	defer shutdown2()
 	eth2.node = node
 	eth2.contractors[0] = node.tokenContractor
@@ -1355,7 +1358,7 @@ func TestPreSwap(t *testing.T) {
 			assetCfg = tToken
 		}
 
-		w, _, node, shutdown := tAssetWallet(assetID)
+		w, _, node, shutdown := tassetWallet(assetID)
 		defer shutdown()
 
 		if test.token {
@@ -1411,7 +1414,7 @@ func TestSwap(t *testing.T) {
 }
 
 func testSwap(t *testing.T, assetID uint32) {
-	w, eth, node, shutdown := tAssetWallet(assetID)
+	w, eth, node, shutdown := tassetWallet(assetID)
 	defer shutdown()
 
 	receivingAddress := "0x2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27"
@@ -1666,7 +1669,7 @@ func testSwap(t *testing.T, assetID uint32) {
 }
 
 func TestPreRedeem(t *testing.T) {
-	w, _, _, shutdown := tAssetWallet(BipID)
+	w, _, _, shutdown := tassetWallet(BipID)
 	defer shutdown()
 
 	form := &asset.PreRedeemForm{
@@ -1686,7 +1689,7 @@ func TestPreRedeem(t *testing.T) {
 	}
 
 	// Token
-	w, _, node, shutdown2 := tAssetWallet(testTokenID)
+	w, _, node, shutdown2 := tassetWallet(testTokenID)
 	defer shutdown2()
 
 	form.AssetConfig = tToken
@@ -1723,7 +1726,7 @@ func TestRedeem(t *testing.T) {
 }
 
 func testRedeem(t *testing.T, assetID uint32) {
-	w, eth, node, shutdown := tAssetWallet(assetID)
+	w, eth, node, shutdown := tassetWallet(assetID)
 	defer shutdown()
 
 	// Test with a non-zero contract version to ensure it makes it into the receipt
@@ -2101,7 +2104,7 @@ func TestMaxOrder(t *testing.T) {
 			assetID = testTokenID
 		}
 
-		w, _, node, shutdown := tAssetWallet(assetID)
+		w, _, node, shutdown := tassetWallet(assetID)
 		defer shutdown()
 
 		if test.token {
@@ -2179,7 +2182,7 @@ func TestAuditContract(t *testing.T) {
 }
 
 func testAuditContract(t *testing.T, assetID uint32) {
-	_, eth, _, shutdown := tAssetWallet(assetID)
+	_, eth, _, shutdown := tassetWallet(assetID)
 	defer shutdown()
 
 	numSecretHashes := 3
@@ -2437,7 +2440,7 @@ func TestSignMessage(t *testing.T) {
 	defer cancel()
 
 	node := newTestNode(BipID)
-	eth := &AssetWallet{
+	eth := &assetWallet{
 		baseWallet: &baseWallet{
 			node: node,
 			addr: node.address(),
@@ -2474,7 +2477,7 @@ func TestSignMessage(t *testing.T) {
 }
 
 func TestSwapConfirmation(t *testing.T) {
-	_, eth, node, shutdown := tAssetWallet(BipID)
+	_, eth, node, shutdown := tassetWallet(BipID)
 	defer shutdown()
 
 	var secretHash [32]byte
@@ -2570,7 +2573,7 @@ func TestDriverOpen(t *testing.T) {
 	}
 	eth, ok := wallet.(*ETHWallet)
 	if !ok {
-		t.Fatalf("failed to cast wallet as AssetWallet")
+		t.Fatalf("failed to cast wallet as assetWallet")
 	}
 	if eth.gasFeeLimit != defaultGasFeeLimit {
 		t.Fatalf("expected gasFeeLimit to be default, but got %v", eth.gasFeeLimit)
@@ -2585,7 +2588,7 @@ func TestDriverOpen(t *testing.T) {
 	}
 	eth, ok = wallet.(*ETHWallet)
 	if !ok {
-		t.Fatalf("failed to cast wallet as AssetWallet")
+		t.Fatalf("failed to cast wallet as assetWallet")
 	}
 	if eth.gasFeeLimit != 150 {
 		t.Fatalf("expected gasFeeLimit to be 150, but got %v", eth.gasFeeLimit)
@@ -2690,7 +2693,7 @@ func TestDriverDecodeCoinID(t *testing.T) {
 }
 
 func TestLocktimeExpired(t *testing.T) {
-	_, eth, node, shutdown := tAssetWallet(BipID)
+	_, eth, node, shutdown := tassetWallet(BipID)
 	defer shutdown()
 
 	var secretHash [32]byte
@@ -2765,7 +2768,7 @@ func TestFindRedemption(t *testing.T) {
 }
 
 func testFindRedemption(t *testing.T, assetID uint32) {
-	_, eth, node, shutdown := tAssetWallet(assetID)
+	_, eth, node, shutdown := tassetWallet(assetID)
 	defer shutdown()
 
 	var secret [32]byte
@@ -2907,7 +2910,7 @@ func TestRefundReserves(t *testing.T) {
 }
 
 func testRefundReserves(t *testing.T, assetID uint32) {
-	wi, eth, node, shutdown := tAssetWallet(assetID)
+	wi, eth, node, shutdown := tassetWallet(assetID)
 	defer shutdown()
 
 	w := wi.(asset.AccountLocker)
@@ -2936,6 +2939,7 @@ func testRefundReserves(t *testing.T, assetID uint32) {
 		tc := *tokenContracts[0]
 		tc.Gas = *gasesV1
 		tokenContracts[1] = &tc
+		node.tokenContractor.bal = dexeth.GweiToWei(1e9)
 		defer delete(tokenContracts, 1)
 	}
 
@@ -2980,7 +2984,7 @@ func testRefundReserves(t *testing.T, assetID uint32) {
 	}
 
 	// Reserve more than available should return an error
-	err = w.ReReserveRefund(1e9)
+	err = w.ReReserveRefund(1e9 + 1)
 	if err == nil {
 		t.Fatalf("expected an error but did not get")
 	}
@@ -3001,7 +3005,7 @@ func TestRedemptionReserves(t *testing.T) {
 }
 
 func testRedemptionReserves(t *testing.T, assetID uint32) {
-	wi, eth, node, shutdown := tAssetWallet(assetID)
+	wi, eth, node, shutdown := tassetWallet(assetID)
 	defer shutdown()
 
 	w := wi.(asset.AccountLocker)
@@ -3101,7 +3105,7 @@ func TestPayFee(t *testing.T) {
 }
 
 func testPayFee(t *testing.T, assetID uint32) {
-	w, eth, node, shutdown := tAssetWallet(assetID)
+	w, eth, node, shutdown := tassetWallet(assetID)
 	defer shutdown()
 
 	tx := tTx(0, 0, 0, &testAddressA, nil)
@@ -3178,7 +3182,7 @@ func TestWithdraw(t *testing.T) {
 }
 
 func testWithdraw(t *testing.T, assetID uint32) {
-	w, eth, node, shutdown := tAssetWallet(assetID)
+	w, eth, node, shutdown := tassetWallet(assetID)
 	defer shutdown()
 
 	tx := tTx(0, 0, 0, &testAddressA, nil)

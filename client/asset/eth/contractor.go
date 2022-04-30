@@ -348,7 +348,6 @@ func newV0TokenContractor(net dex.Network, assetID uint32, acctAddr common.Addre
 	}
 
 	if boundAddr, err := c.TokenAddress(&bind.CallOpts{
-		Pending: true,
 		Context: context.TODO(),
 	}); err != nil {
 		return nil, fmt.Errorf("error reading bound token address: %w", err)
@@ -385,6 +384,7 @@ func (c *tokenContractorV0) balance(ctx context.Context) (*big.Int, error) {
 // allowance exposes the read-only allowance method of the erc20 token contract.
 func (c *tokenContractorV0) allowance(ctx context.Context) (*big.Int, error) {
 	callOpts := &bind.CallOpts{
+		Pending: true,
 		From:    c.acctAddr,
 		Context: ctx,
 	}

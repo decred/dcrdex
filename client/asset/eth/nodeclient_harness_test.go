@@ -246,6 +246,11 @@ func TestMain(m *testing.M) {
 			return 1, fmt.Errorf("newV0TokenContractor error: %w", err)
 		}
 
+		// I don't know why this is needed for the participant client but not
+		// the initiator. Without this, we'll get a bind.ErrNoCode from
+		// (*BoundContract).Call while calling (*ERC20Swap).TokenAddress.
+		time.Sleep(time.Second)
+
 		if participantTokenContractor, err = newV0TokenContractor(dex.Simnet, testTokenID, participantAddr, participantEthClient.contractBackend()); err != nil {
 			return 1, fmt.Errorf("participant newV0TokenContractor error: %w", err)
 		}
