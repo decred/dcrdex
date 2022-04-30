@@ -29,6 +29,7 @@ const (
 	NoteTypeUpgrade      = "upgrade"
 	NoteTypeDEXAuth      = "dex_auth"
 	NoteTypeFiatRates    = "fiatrateupdate"
+	NoteTypeCreateWallet = "createwallet"
 )
 
 func (c *Core) logNote(n Notification) {
@@ -183,7 +184,6 @@ const (
 	TopicFeeCoinError            Topic = "FeeCoinError"
 	TopicWalletConnectionWarning Topic = "WalletConnectionWarning"
 	TopicWalletUnlockError       Topic = "WalletUnlockError"
-	TopicWalletPeersWarning      Topic = "WalletPeersWarning"
 	TopicWalletCommsWarning      Topic = "WalletCommsWarning"
 	TopicWalletPeersRestored     Topic = "WalletPeersRestored"
 )
@@ -439,6 +439,7 @@ type WalletConfigNote struct {
 const (
 	TopicWalletConfigurationUpdated Topic = "WalletConfigurationUpdated"
 	TopicWalletPasswordUpdated      Topic = "WalletPasswordUpdated"
+	TopicWalletPeersWarning         Topic = "WalletPeersWarning"
 )
 
 func newWalletConfigNote(topic Topic, subject, details string, severity db.Severity, walletState *WalletState) *WalletConfigNote {
@@ -483,7 +484,7 @@ func newServerNotifyNote(topic Topic, subject, details string, severity db.Sever
 	}
 }
 
-// UpgradeNote is a notification containing a .
+// UpgradeNote is a notification regarding an outdated client.
 type UpgradeNote struct {
 	db.Notification
 }
@@ -495,5 +496,24 @@ const (
 func newUpgradeNote(topic Topic, subject, details string, severity db.Severity) *UpgradeNote {
 	return &UpgradeNote{
 		Notification: db.NewNotification(NoteTypeUpgrade, topic, subject, details, severity),
+	}
+}
+
+// WalletCreationNote is a notification regarding asynchronous wallet creation.
+type WalletCreationNote struct {
+	db.Notification
+	AssetID uint32 `json:"assetID"`
+}
+
+const (
+	TopicQueuedCreationFailed  Topic = "QueuedCreationFailed"
+	TopicQueuedCreationSuccess Topic = "QueuedCreationSuccess"
+	TopicCreationQueued        Topic = "CreationQueued"
+)
+
+func newWalletCreationNote(topic Topic, subject, details string, severity db.Severity, assetID uint32) *WalletCreationNote {
+	return &WalletCreationNote{
+		Notification: db.NewNotification(NoteTypeCreateWallet, topic, subject, details, severity),
+		AssetID:      assetID,
 	}
 }

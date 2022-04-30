@@ -21,7 +21,8 @@
       <div class="order-datum">
         <div>Rynek</div>
         <a href="/markets?host={{$ord.Host}}&base={{$ord.BaseID}}&quote={{$ord.QuoteID}}" class="plainlink hoverbg">
-          {{template "microIcon" $ord.BaseSymbol}} {{template "microIcon" $ord.QuoteSymbol}} {{toUpper $ord.BaseSymbol}}-{{toUpper $ord.QuoteSymbol}}
+          {{template "microIcon" $ord.BaseSymbol}} {{template "microIcon" $ord.QuoteSymbol}}
+          <span id="mktBaseSymbol">{{toUpper $ord.BaseSymbol}}</span>-<span id="mktQuoteSymbol">{{toUpper $ord.QuoteSymbol}}</span>
         </a>
       </div>
       <div class="order-datum">

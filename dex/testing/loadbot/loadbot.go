@@ -59,6 +59,7 @@ const (
 	doge             = "doge"
 	bch              = "bch"
 	zec              = "zec"
+	dextt            = "dextt.eth"
 	maxOrderLots     = 10
 	ethFeeRate       = 200 // gwei
 )
@@ -67,6 +68,7 @@ var (
 	dcrID, _    = dex.BipSymbolID(dcr)
 	btcID, _    = dex.BipSymbolID(btc)
 	ethID, _    = dex.BipSymbolID(eth)
+	dexttID, _  = dex.BipSymbolID(dextt)
 	ltcID, _    = dex.BipSymbolID(ltc)
 	dogeID, _   = dex.BipSymbolID(doge)
 	bchID, _    = dex.BipSymbolID(bch)
@@ -109,6 +111,7 @@ var (
 
 func init() {
 	rand.Seed(time.Now().UnixNano())
+	dexeth.MaybeReadSimnetAddrs()
 }
 
 // process stores a long running command and the funcion to stop it on shutdown.
@@ -151,7 +154,7 @@ func rpcAddr(symbol, node string) string {
 		key = "rpclisten"
 	case btc, ltc, bch, zec, doge:
 		key = "rpcport"
-	case eth:
+	case eth, dextt:
 		key = "ListenAddr"
 	}
 
@@ -216,11 +219,19 @@ func (res *harnessResult) String() string {
 	return fmt.Sprintf("response from harness command %q: %s", res.cmd, res.output)
 }
 
+func harnessSymbol(symbol string) string {
+	switch symbol {
+	case dextt:
+		return eth
+	}
+	return symbol
+}
+
 // harnessCtl will run the command from the harness-ctl directory for the
 // specified symbol. ctx shadows the global context. The global context is not
 // used because stopping some nodes will occur after it is canceled.
 func harnessCtl(ctx context.Context, symbol, cmd string, args ...string) <-chan *harnessResult {
-	dir := filepath.Join(dextestDir, symbol, "harness-ctl")
+	dir := filepath.Join(dextestDir, harnessSymbol(symbol), "harness-ctl")
 	c := make(chan *harnessResult)
 	go func() {
 		fullCmd := strings.Join(append([]string{cmd}, args...), " ")
@@ -253,7 +264,7 @@ func harnessProcessCtl(symbol string, stopFn func(context.Context), cmd string, 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	dir := filepath.Join(dextestDir, symbol, "harness-ctl")
+	dir := filepath.Join(dextestDir, harnessSymbol(symbol), "harness-ctl")
 	// Killing the process with ctx or process.Kill *sometimes* does not
 	// seem to stop the coin daemon. Kill later with an rpc "stop" command
 	// contained in the stop function.
@@ -423,8 +434,13 @@ func run() error {
 		return fmt.Errorf("failed to find %q market in harness config. Available markets: %s", market, strings.Join(markets, ", "))
 	}
 
-	baseAssetCfg = mktsCfg.Assets[fmt.Sprintf("%s_simnet", strings.ToUpper(baseSymbol))]
-	quoteAssetCfg = mktsCfg.Assets[fmt.Sprintf("%s_simnet", strings.ToUpper(quoteSymbol))]
+	shortSymbol := func(s string) string {
+		parts := strings.Split(s, ".")
+		return parts[0]
+	}
+
+	baseAssetCfg = mktsCfg.Assets[fmt.Sprintf("%s_simnet", strings.ToUpper(shortSymbol(baseSymbol)))]
+	quoteAssetCfg = mktsCfg.Assets[fmt.Sprintf("%s_simnet", strings.ToUpper(shortSymbol(quoteSymbol)))]
 	if baseAssetCfg == nil || quoteAssetCfg == nil {
 		return errors.New("asset configuration missing from markets.json")
 	}
@@ -453,7 +469,7 @@ func run() error {
 			args = []string{"getnewaddress"}
 		case dcr:
 			args = []string{"getnewaddress", "default", "ignore"}
-		case eth:
+		case eth, dextt:
 			args = []string{"attach", `--exec eth.accounts[1]`}
 		default:
 			return "", fmt.Errorf("getAddress: unknown symbol %q", symbol)
@@ -487,7 +503,7 @@ func run() error {
 			<-harnessCtl(ctx, dcr, "./alpha", "walletpassphrase", "abc", "0")
 			<-harnessCtl(ctx, dcr, "./beta", "walletpassphrase", "abc", "0") // creating new accounts requires wallet unlocked
 			<-harnessCtl(ctx, dcr, "./beta", "unlockaccount", "default", "abc")
-		case eth, zec:
+		case eth, zec, dextt:
 			// eth unlocking for send, so no need to here. Mining
 			// accounts are always unlocked. zec is unlocked already.
 		default:
@@ -584,7 +600,7 @@ func run() error {
 				oldPort := pair.cfg["rpcport"]
 				walletAddr = "127.0.0.1:" + oldPort
 				pair.cfg["rpcport"] = port
-			case ethID:
+			case ethID, dexttID:
 				oldPort := pair.cfg["ListenAddr"]
 				walletAddr = fmt.Sprintf("127.0.0.1%s", oldPort)
 				pair.cfg["ListenAddr"] = fmt.Sprintf(":%s", port)
@@ -661,9 +677,12 @@ type marketsDotJSON struct {
 // loadNodeConfig loads the INI configuration for the specified node into a
 // map[string]string.
 func loadNodeConfig(symbol, node string) map[string]string {
-	cfgPath := filepath.Join(dextestDir, symbol, node, node+".conf")
-	if symbol == eth {
-		cfgPath = filepath.Join(dextestDir, symbol, node, "node", "eth.conf")
+	var cfgPath string
+	switch symbol {
+	case eth, dextt:
+		cfgPath = filepath.Join(dextestDir, harnessSymbol(symbol), node, "node", "eth.conf")
+	default:
+		cfgPath = filepath.Join(dextestDir, harnessSymbol(symbol), node, node+".conf")
 	}
 	cfg, err := config.Parse(cfgPath)
 	if err != nil {

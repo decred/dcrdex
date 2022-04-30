@@ -34,7 +34,7 @@ import (
 
 const (
 	contractVersionNewest = ^uint32(0)
-	approveGas            = 3e5
+	approveGas            = 4e5
 )
 
 var (

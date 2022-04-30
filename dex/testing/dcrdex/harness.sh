@@ -125,6 +125,14 @@ if [ $ETH_ON -eq 0 ]; then
             "rateStep": 1000,
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2
+        },
+        {
+            "base": "DCR_simnet",
+            "quote": "DEXTT_simnet",
+            "lotSize": 100000000,
+            "rateStep": 100000,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2
 EOF
 else echo "WARNING: Ethereum is not running. Configuring dcrdex markets without ETH."
 fi
@@ -215,6 +223,12 @@ if [ $ETH_ON -eq 0 ]; then
             "maxFeeRate": 200,
             "swapConf": 2,
             "configPath": "${TEST_ROOT}/eth/alpha/node/geth.ipc"
+        },
+        "DEXTT_simnet": {
+            "bip44symbol": "dextt.eth",
+            "network": "simnet",
+            "maxFeeRate": 200,
+            "swapConf": 2
 EOF
 fi
 

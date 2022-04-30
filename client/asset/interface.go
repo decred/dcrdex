@@ -498,15 +498,25 @@ type Accelerator interface {
 	PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (uint64, *XYRange, *EarlyAcceleration, error)
 }
 
+// TokenConfig is required to OpenTokenWallet.
+type TokenConfig struct {
+	// AssetID of the token.
+	AssetID uint32
+	// Settings correspond to Token.Definition.ConfigOpts.
+	Settings map[string]string
+	// TipChange will be called after the parent's TipChange.
+	TipChange func(error)
+	// PeersChange will be called after the parent's PeersChange.
+	PeersChange func(uint32, error)
+}
+
 // TokenMaster is implemented by assets which support degenerate tokens.
 type TokenMaster interface {
 	// CreateTokenWallet creates a wallet for the specified token asset. The
 	// settings correspond to the Token.Definition.ConfigOpts.
 	CreateTokenWallet(assetID uint32, settings map[string]string) error
-	// OpenTokenWallet opens a wallet for the specified token asset. The
-	// settings correspond to the Token.Definition.ConfigOpts. The tipChange
-	// function will be called after the parent's tipChange function.
-	OpenTokenWallet(assetID uint32, settings map[string]string, tipChange func(error)) (Wallet, error)
+	// OpenTokenWallet opens a wallet for the specified token asset.
+	OpenTokenWallet(cfg *TokenConfig) (Wallet, error)
 }
 
 // AccountLocker is a wallet in which redemptions and refunds require a wallet

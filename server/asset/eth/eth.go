@@ -80,7 +80,7 @@ func init() {
 		},
 	})
 
-	// registerToken(testTokenID, 0)
+	registerToken(testTokenID, 0)
 }
 
 const (
@@ -394,18 +394,18 @@ func (eth *baseBackend) TxData(coinID []byte) ([]byte, error) {
 }
 
 // InitTxSize is an upper limit on the gas used for an initiation.
-func (eth *AssetBackend) InitTxSize() uint32 {
-	return eth.initTxSize
+func (be *AssetBackend) InitTxSize() uint32 {
+	return be.initTxSize
 }
 
 // InitTxSizeBase is the same as (dex.Asset).SwapSize for asset.
-func (eth *AssetBackend) InitTxSizeBase() uint32 {
-	return eth.initTxSize
+func (be *AssetBackend) InitTxSizeBase() uint32 {
+	return be.initTxSize
 }
 
 // RedeemSize is the same as (dex.Asset).RedeemSize for the asset.
-func (eth *AssetBackend) RedeemSize() uint64 {
-	return eth.redeemSize
+func (be *AssetBackend) RedeemSize() uint64 {
+	return be.redeemSize
 }
 
 // FeeRate returns the current optimal fee rate in gwei / gas.
@@ -464,23 +464,23 @@ func (eth *baseBackend) ValidateFeeRate(contract *asset.Contract, reqFeeRate uin
 // BlockChannel creates and returns a new channel on which to receive block
 // updates. If the returned channel is ever blocking, there will be no error
 // logged from the eth package. Part of the asset.Backend interface.
-func (eth *AssetBackend) BlockChannel(size int) <-chan *asset.BlockUpdate {
+func (be *AssetBackend) BlockChannel(size int) <-chan *asset.BlockUpdate {
 	c := make(chan *asset.BlockUpdate, size)
-	eth.blockChansMtx.Lock()
-	defer eth.blockChansMtx.Unlock()
-	eth.blockChans[c] = struct{}{}
+	be.blockChansMtx.Lock()
+	defer be.blockChansMtx.Unlock()
+	be.blockChans[c] = struct{}{}
 	return c
 }
 
 // sendBlockUpdate sends the BlockUpdate to all subscribers.
-func (eth *AssetBackend) sendBlockUpdate(u *asset.BlockUpdate) {
-	eth.blockChansMtx.RLock()
-	defer eth.blockChansMtx.RUnlock()
-	for c := range eth.blockChans {
+func (be *AssetBackend) sendBlockUpdate(u *asset.BlockUpdate) {
+	be.blockChansMtx.RLock()
+	defer be.blockChansMtx.RUnlock()
+	for c := range be.blockChans {
 		select {
 		case c <- u:
 		default:
-			eth.log.Error("failed to send block update on blocking channel")
+			be.log.Error("failed to send block update on blocking channel")
 		}
 	}
 }
@@ -520,10 +520,10 @@ func (eth *TokenBackend) ValidateContract(contractData []byte) error {
 
 // Contract is part of the asset.Backend interface. The contractData bytes
 // encodes both the contract version targeted and the secret hash.
-func (eth *AssetBackend) Contract(coinID, contractData []byte) (*asset.Contract, error) {
+func (be *AssetBackend) Contract(coinID, contractData []byte) (*asset.Contract, error) {
 	// newSwapCoin validates the contractData, extracting version, secret hash,
 	// counterparty address, and locktime. The supported version is enforced.
-	sc, err := eth.newSwapCoin(coinID, contractData)
+	sc, err := be.newSwapCoin(coinID, contractData)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create coiner: %w", err)
 	}
@@ -531,7 +531,7 @@ func (eth *AssetBackend) Contract(coinID, contractData []byte) (*asset.Contract,
 	// Confirmations performs some extra swap status checks if the the tx is
 	// mined. For init coins, this uses the contract account's state (if it is
 	// mined) to verify the value, counterparty, and lock time.
-	_, err = sc.Confirmations(eth.ctx)
+	_, err = sc.Confirmations(be.ctx)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get confirmations: %v", err)
 	}
@@ -580,18 +580,18 @@ func (eth *baseBackend) Synced() (bool, error) {
 // Redemption returns a coin that represents a contract redemption. redeemCoinID
 // should be the transaction that sent a redemption, while contractCoinID is the
 // swap contract this redemption redeems.
-func (eth *AssetBackend) Redemption(redeemCoinID, _, contractData []byte) (asset.Coin, error) {
+func (be *AssetBackend) Redemption(redeemCoinID, _, contractData []byte) (asset.Coin, error) {
 	// newRedeemCoin uses the contract account's state to validate the
 	// contractData, extracting version, secret, and secret hash. The supported
 	// version is enforced.
-	rc, err := eth.newRedeemCoin(redeemCoinID, contractData)
+	rc, err := be.newRedeemCoin(redeemCoinID, contractData)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create coiner: %w", err)
 	}
 
 	// Confirmations performs some extra swap status checks if the the tx
 	// is mined. For redeem coins, this is just a swap state check.
-	_, err = rc.Confirmations(eth.ctx)
+	_, err = rc.Confirmations(be.ctx)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get confirmations: %v", err)
 	}
@@ -614,8 +614,8 @@ func (eth *baseBackend) CheckAddress(addr string) bool {
 
 // AccountBalance retrieves the current account balance, including the effects
 // of known unmined transactions.
-func (eth *AssetBackend) AccountBalance(addrStr string) (uint64, error) {
-	bigBal, err := eth.node.accountBalance(eth.ctx, eth.assetID, common.HexToAddress(addrStr))
+func (be *AssetBackend) AccountBalance(addrStr string) (uint64, error) {
+	bigBal, err := be.node.accountBalance(be.ctx, be.assetID, common.HexToAddress(addrStr))
 	if err != nil {
 		return 0, fmt.Errorf("accountBalance error: %w", err)
 	}

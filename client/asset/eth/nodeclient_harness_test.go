@@ -85,9 +85,6 @@ const (
 
 var (
 	homeDir                     = os.Getenv("HOME")
-	ethSwapContractAddrFile     = filepath.Join(homeDir, "dextest", "eth", "eth_swap_contract_address.txt")
-	tokenSwapContractAddrFile   = filepath.Join(homeDir, "dextest", "eth", "erc20_swap_contract_address.txt")
-	testTokenContractAddrFile   = filepath.Join(homeDir, "dextest", "eth", "test_token_contract_address.txt")
 	simnetWalletDir             = filepath.Join(homeDir, "dextest", "eth", "client_rpc_tests", "simnet")
 	participantWalletDir        = filepath.Join(homeDir, "dextest", "eth", "client_rpc_tests", "participant")
 	testnetWalletDir            = filepath.Join(homeDir, "ethtest", "testnet_contract_tests", "walletA")
@@ -208,20 +205,6 @@ out:
 	return nil
 }
 
-func getContractAddrFromFile(fileName string) (common.Address, error) {
-	addrBytes, err := os.ReadFile(fileName)
-	if err != nil {
-		return common.Address{}, fmt.Errorf("error reading contract address: %v", err)
-	}
-	addrLen := len(addrBytes)
-	if addrLen == 0 {
-		return common.Address{}, fmt.Errorf("no contract address found at %v", fileName)
-	}
-	addrStr := string(addrBytes[:addrLen-1])
-	address := common.HexToAddress(addrStr)
-	return address, nil
-}
-
 func runSimnet(m *testing.M) (int, error) {
 	// Create dir if none yet exists. This persists for the life of the
 	// testing harness.
@@ -235,25 +218,10 @@ func runSimnet(m *testing.M) (int, error) {
 	}
 
 	// ETH swap contract.
-	ethSwapContractAddr, err = getContractAddrFromFile(ethSwapContractAddrFile)
-	if err != nil {
-		return 1, err
-	}
-	dexeth.ContractAddresses[0][dex.Simnet] = ethSwapContractAddr
-	fmt.Printf("ETH swap contract address is %v\n", ethSwapContractAddr)
-	tokenSwapContractAddr, err = getContractAddrFromFile(tokenSwapContractAddrFile)
-	if err != nil {
-		return 1, err
-	}
-	fmt.Printf("Token swap contract addr is %v\n", tokenSwapContractAddr)
-	testTokenContractAddr, err = getContractAddrFromFile(testTokenContractAddrFile)
-	if err != nil {
-		return 1, err
-	}
-	fmt.Printf("Test token contract addr is %v\n", testTokenContractAddr)
 	token := dexeth.Tokens[testTokenID].NetTokens[dex.Simnet]
-	token.Address = testTokenContractAddr
-	token.SwapContracts[0].Address = tokenSwapContractAddr
+	fmt.Printf("ETH swap contract address is %v\n", dexeth.ContractAddresses[0][dex.Simnet])
+	fmt.Printf("Token swap contract addr is %v\n", token.SwapContracts[0].Address)
+	fmt.Printf("Test token contract addr is %v\n", token.Address)
 
 	err = setupWallet(simnetWalletDir, simnetWalletSeed, "localhost:30355", dex.Simnet)
 	if err != nil {
@@ -482,6 +450,7 @@ func runTestnet(m *testing.M) (int, error) {
 }
 
 func TestMain(m *testing.M) {
+	dexeth.MaybeReadSimnetAddrs()
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithCancel(context.Background())
 	c := make(chan os.Signal, 1)

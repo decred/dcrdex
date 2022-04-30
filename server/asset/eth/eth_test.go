@@ -185,7 +185,6 @@ func TestMain(m *testing.M) {
 	doIt := func() int {
 		defer shutdown()
 		dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts[0].Address = common.BytesToAddress(encode.RandomBytes(20))
-		registerToken(testTokenID, 0)
 		return m.Run()
 	}
 	os.Exit(doIt())

@@ -39,6 +39,7 @@ import {
   PreSwap,
   PreRedeem,
   WalletStateNote,
+  WalletCreationNote,
   SpotPriceNote,
   FeePaymentNote,
   OrderNote,
@@ -82,6 +83,8 @@ const percentFormatter = new Intl.NumberFormat(document.documentElement.lang, {
   maximumFractionDigits: 2
 })
 
+const parentIDNone = 0xFFFFFFFF
+
 interface MetaOrder {
   row: HTMLElement
   order: Order
@@ -115,13 +118,18 @@ interface CurrentMarket {
 
 interface BalanceWidgetElement {
   id: number
+  parentID: number
   cfg: Asset | null
   logo: PageElement
+  symbol: PageElement
   avail: PageElement
   newWalletRow: PageElement
   newWalletBttn: PageElement
+  walletPendingRow: PageElement
   locked: PageElement
   immature: PageElement
+  parentBal: PageElement
+  parentIcon: PageElement
   unsupported: PageElement
   expired: PageElement
   connect: PageElement
@@ -131,7 +139,7 @@ interface BalanceWidgetElement {
 }
 
 interface LoadTracker {
-  loaded: () => void,
+  loaded: () => void
   timer: number
 }
 
@@ -644,8 +652,8 @@ export default class MarketsPage extends BasePage {
 
   setOrderBttnText () {
     if (this.isSell()) {
-      this.page.submitBttn.textContent = intl.prep(intl.ID_SET_BUTTON_SELL, { asset: this.market.baseCfg.symbol.toUpperCase() })
-    } else this.page.submitBttn.textContent = intl.prep(intl.ID_SET_BUTTON_BUY, { asset: this.market.baseCfg.symbol.toUpperCase() })
+      this.page.submitBttn.textContent = intl.prep(intl.ID_SET_BUTTON_SELL, { asset: Doc.shortSymbol(this.market.baseCfg.symbol) })
+    } else this.page.submitBttn.textContent = intl.prep(intl.ID_SET_BUTTON_BUY, { asset: Doc.shortSymbol(this.market.baseCfg.symbol) })
   }
 
   setCandleDurBttns () {
@@ -987,11 +995,11 @@ export default class MarketsPage extends BasePage {
     // Could add the estimatedFees here, but that might also be
     // confusing.
     const [fromAsset, toAsset] = sell ? [this.market.base, this.market.quote] : [this.market.quote, this.market.base]
-    page.maxFromAmt.textContent = Doc.formatCoinValue(maxOrder.value || 0, fromAsset.info.unitinfo)
+    page.maxFromAmt.textContent = Doc.formatCoinValue(maxOrder.value || 0, fromAsset.unitInfo)
     page.maxFromTicker.textContent = fromAsset.symbol.toUpperCase()
     // Could subtract the maxOrder.redemptionFees here.
     const toConversion = sell ? this.adjustedRate() / OrderUtil.RateEncodingFactor : OrderUtil.RateEncodingFactor / this.adjustedRate()
-    page.maxToAmt.textContent = Doc.formatCoinValue((maxOrder.value || 0) * toConversion, toAsset.info.unitinfo)
+    page.maxToAmt.textContent = Doc.formatCoinValue((maxOrder.value || 0) * toConversion, toAsset.unitInfo)
     page.maxToTicker.textContent = toAsset.symbol.toUpperCase()
   }
 
@@ -1245,8 +1253,14 @@ export default class MarketsPage extends BasePage {
 
     page.lotSize.textContent = Doc.formatCoinValue(market.cfg.lotsize, market.baseUnitInfo)
     page.rateStep.textContent = Doc.formatCoinValue(market.cfg.ratestep / market.rateConversionFactor)
-    this.baseUnits.forEach(el => { el.textContent = b.symbol.toUpperCase() })
-    this.quoteUnits.forEach(el => { el.textContent = q.symbol.toUpperCase() })
+    this.baseUnits.forEach(el => {
+      Doc.empty(el)
+      el.appendChild(Doc.symbolize(b.symbol))
+    })
+    this.quoteUnits.forEach(el => {
+      Doc.empty(el)
+      el.appendChild(Doc.symbolize(q.symbol))
+    })
     this.balanceWgt.setWallets(host, b.id, q.id)
     this.setMarketBuyOrderEstimate()
     this.refreshActiveOrders()
@@ -1399,9 +1413,9 @@ export default class MarketsPage extends BasePage {
       const orderDesc = `Limit ${buySellStr} Order`
       page.vOrderType.textContent = order.tifnow ? orderDesc + ' (immediate)' : orderDesc
       page.vRate.textContent = Doc.formatCoinValue(order.rate / this.market.rateConversionFactor)
-      page.vQty.textContent = Doc.formatCoinValue(order.qty, baseAsset.info.unitinfo)
+      page.vQty.textContent = Doc.formatCoinValue(order.qty, baseAsset.unitInfo)
       const total = order.rate / OrderUtil.RateEncodingFactor * order.qty
-      page.vTotal.textContent = Doc.formatCoinValue(total, quoteAsset.info.unitinfo)
+      page.vTotal.textContent = Doc.formatCoinValue(total, quoteAsset.unitInfo)
       // Format total fiat value.
       this.showFiatValue(quoteAsset.id, total, page.vFiatTotal)
     } else {
@@ -1417,7 +1431,7 @@ export default class MarketsPage extends BasePage {
       if (gap) {
         Doc.show(page.vMarketEstimate)
         const received = order.sell ? order.qty * gap : order.qty / gap
-        page.vmToTotal.textContent = Doc.formatCoinValue(received, toAsset.info.unitinfo)
+        page.vmToTotal.textContent = Doc.formatCoinValue(received, toAsset.unitInfo)
         page.vmToAsset.textContent = toAsset.symbol.toUpperCase()
         // Format recieved value to fiat equivalent.
         this.showFiatValue(toAsset.id, received, page.vmTotalFiat)
@@ -1643,7 +1657,7 @@ export default class MarketsPage extends BasePage {
     const page = this.page
     const remaining = order.qty - order.filled
     const asset = OrderUtil.isMarketBuy(order) ? this.market.quote : this.market.base
-    page.cancelRemain.textContent = Doc.formatCoinValue(remaining, asset.info.unitinfo)
+    page.cancelRemain.textContent = Doc.formatCoinValue(remaining, asset.unitInfo)
     page.cancelUnit.textContent = asset.symbol.toUpperCase()
     Doc.hide(page.cancelErr)
     this.showForm(page.cancelForm)
@@ -1668,7 +1682,6 @@ export default class MarketsPage extends BasePage {
     this.currentCreate = asset
     this.newWalletForm.setAsset(asset.id)
     this.showForm(page.newWalletForm)
-    this.newWalletForm.loadDefaults()
   }
 
   /*
@@ -1698,6 +1711,9 @@ export default class MarketsPage extends BasePage {
     this.showVerify()
   }
 
+  /*
+   * handlePriceUpdate is the handler for the 'spots' notification.
+   */
   handlePriceUpdate (note: SpotPriceNote) {
     const xcSection = this.marketList.xcSection(note.host)
     if (!xcSection) return
@@ -2417,8 +2433,8 @@ class MarketRow {
     const tmpl = this.tmpl = Doc.parseTemplate(this.node)
     tmpl.baseIcon.src = Doc.logoPath(mkt.basesymbol)
     tmpl.quoteIcon.src = Doc.logoPath(mkt.quotesymbol)
-    tmpl.baseSymbol.textContent = mkt.basesymbol.toUpperCase()
-    tmpl.quoteSymbol.textContent = mkt.quotesymbol.toUpperCase()
+    tmpl.baseSymbol.appendChild(Doc.symbolize(mkt.basesymbol))
+    tmpl.quoteSymbol.appendChild(Doc.symbolize(mkt.quotesymbol))
     this.setSpot(mkt.spot)
   }
 
@@ -2436,7 +2452,7 @@ class MarketRow {
     const baseAsset = app().assets[mkt.baseid]
     if (baseAsset) {
       Doc.show(tmpl.bottomRow)
-      tmpl.assetName.textContent = baseAsset.info.name
+      tmpl.assetName.textContent = baseAsset.name
       tmpl.price.textContent = Doc.formatCoinValue(spot.rate / this.rateConversionFactor)
     }
   }
@@ -2452,19 +2468,25 @@ class MarketRow {
 class BalanceWidget {
   base: BalanceWidgetElement
   quote: BalanceWidgetElement
+  parentRow: PageElement
   dex: Exchange
 
   constructor (table: HTMLElement) {
     const els = Doc.idDescendants(table)
     this.base = {
       id: 0,
+      parentID: parentIDNone,
       cfg: null,
       logo: els.baseImg,
+      symbol: els.balBaseSymbol,
       avail: els.baseAvail,
       newWalletRow: els.baseNewWalletRow,
       newWalletBttn: els.baseNewButton,
+      walletPendingRow: els.baseWalletPendingRow,
       locked: els.baseLocked,
       immature: els.baseImmature,
+      parentBal: els.baseParent,
+      parentIcon: els.baseParentLogo,
       unsupported: els.baseUnsupported,
       expired: els.baseExpired,
       connect: els.baseConnect,
@@ -2474,13 +2496,18 @@ class BalanceWidget {
     }
     this.quote = {
       id: 0,
+      parentID: parentIDNone,
       cfg: null,
       logo: els.quoteImg,
+      symbol: els.balQuoteSymbol,
       avail: els.quoteAvail,
       newWalletRow: els.quoteNewWalletRow,
       newWalletBttn: els.quoteNewButton,
+      walletPendingRow: els.quoteWalletPendingRow,
       locked: els.quoteLocked,
       immature: els.quoteImmature,
+      parentBal: els.quoteParent,
+      parentIcon: els.quoteParentLogo,
       unsupported: els.quoteUnsupported,
       expired: els.quoteExpired,
       connect: els.quoteConnect,
@@ -2488,10 +2515,12 @@ class BalanceWidget {
       iconBox: els.quoteWalletState,
       stateIcons: new WalletIcons(els.quoteWalletState)
     }
+    this.parentRow = els.parentBalance
 
     app().registerNoteFeeder({
       balance: (note: BalanceNote) => { this.updateAsset(note.assetID) },
-      walletstate: (note: WalletStateNote) => { this.updateAsset(note.wallet.assetID) }
+      walletstate: (note: WalletStateNote) => { this.updateAsset(note.wallet.assetID) },
+      createwallet: (note: WalletCreationNote) => { this.updateAsset(note.assetID) }
     })
   }
 
@@ -2499,11 +2528,19 @@ class BalanceWidget {
    * setWallet sets the balance widget to display data for specified market.
    */
   setWallets (host: string, baseID: number, quoteID: number) {
+    const parentID = (assetID: number) => {
+      const asset = app().assets[assetID]
+      if (asset?.token) return asset.token.parentID
+      return parentIDNone
+    }
     this.dex = app().user.exchanges[host]
     this.base.id = baseID
+    this.base.parentID = parentID(baseID)
     this.base.cfg = this.dex.assets[baseID]
     this.quote.id = quoteID
+    this.quote.parentID = parentID(quoteID)
     this.quote.cfg = this.dex.assets[quoteID]
+    Doc.hide(this.parentRow)
     this.updateWallet(this.base)
     this.updateWallet(this.quote)
   }
@@ -2518,9 +2555,12 @@ class BalanceWidget {
     // Just hide everything to start.
     Doc.hide(
       side.newWalletRow, side.avail, side.immature, side.locked,
-      side.expired, side.unsupported, side.connect, side.spinner, side.iconBox
+      side.expired, side.unsupported, side.connect, side.spinner, side.iconBox,
+      side.walletPendingRow, side.parentIcon
     )
     side.logo.src = Doc.logoPath(side.cfg.symbol)
+    Doc.empty(side.symbol)
+    side.symbol.appendChild(Doc.symbolize(side.cfg.symbol))
     // Handle an unsupported asset.
     if (!asset) {
       Doc.show(side.unsupported)
@@ -2531,8 +2571,20 @@ class BalanceWidget {
     side.stateIcons.readWallet(wallet)
     // Handle no wallet configured.
     if (!wallet) {
+      if (asset.walletCreationPending) {
+        Doc.show(side.walletPendingRow)
+        return
+      }
       Doc.show(side.newWalletRow)
       return
+    }
+    // Parent asset
+    side.parentBal.textContent = '—'
+    if (asset.token) {
+      Doc.show(this.parentRow, side.parentIcon)
+      const { wallet: { balance }, unitInfo, symbol } = app().assets[asset.token.parentID]
+      side.parentBal.textContent = Doc.formatCoinValue(balance.available, unitInfo)
+      side.parentIcon.src = Doc.logoPath(symbol)
     }
     const bal = wallet.balance
     // Handle not connected and no balance known for the DEX.
@@ -2549,9 +2601,9 @@ class BalanceWidget {
     }
     // We have a wallet and a DEX-specific balance. Set all of the fields.
     Doc.show(side.avail, side.immature, side.locked)
-    side.avail.textContent = Doc.formatCoinValue(bal.available, asset.info.unitinfo)
-    side.locked.textContent = Doc.formatCoinValue((bal.locked + bal.contractlocked), asset.info.unitinfo)
-    side.immature.textContent = Doc.formatCoinValue(bal.immature, asset.info.unitinfo)
+    side.avail.textContent = Doc.formatCoinValue(bal.available, asset.unitInfo)
+    side.locked.textContent = Doc.formatCoinValue((bal.locked + bal.contractlocked), asset.unitInfo)
+    side.immature.textContent = Doc.formatCoinValue(bal.immature, asset.unitInfo)
     // If the current balance update time is older than an hour, show the
     // expiration icon. Request a balance update, if possible.
     const expired = new Date().getTime() - new Date(bal.stamp).getTime() > anHour
@@ -2559,6 +2611,13 @@ class BalanceWidget {
       Doc.show(side.expired)
       if (wallet.running) app().fetchBalance(side.id)
     } else Doc.hide(side.expired)
+  }
+
+  /* updateParent updates the side's parent asset balance. */
+  updateParent (side: BalanceWidgetElement) {
+    const { wallet: { balance }, unitInfo, symbol } = app().assets[side.parentID]
+    side.parentBal.textContent = Doc.formatCoinValue(balance.available, unitInfo)
+    side.parentIcon.src = Doc.logoPath(symbol)
   }
 
   /*
@@ -2569,6 +2628,8 @@ class BalanceWidget {
   updateAsset (assetID: number) {
     if (assetID === this.base.id) this.updateWallet(this.base)
     else if (assetID === this.quote.id) this.updateWallet(this.quote)
+    if (assetID === this.base.parentID) this.updateParent(this.base)
+    if (assetID === this.quote.parentID) this.updateParent(this.quote)
   }
 }
 

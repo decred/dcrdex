@@ -50,8 +50,8 @@ type redeemCoin struct {
 // it in the mempool. It also tells us all the data we need to confirm a tx
 // will do what we expect if mined and satisfies contract constraints. These
 // fields are verified when the Confirmations method is called.
-func (eth *AssetBackend) newSwapCoin(coinID []byte, contractData []byte) (*swapCoin, error) {
-	bc, err := eth.baseCoin(coinID, contractData)
+func (be *AssetBackend) newSwapCoin(coinID []byte, contractData []byte) (*swapCoin, error) {
+	bc, err := be.baseCoin(coinID, contractData)
 	if err != nil {
 		return nil, err
 	}
@@ -66,12 +66,14 @@ func (eth *AssetBackend) newSwapCoin(coinID []byte, contractData []byte) (*swapC
 		return nil, fmt.Errorf("tx %v does not contain initiation with secret hash %x", bc.txHash, bc.secretHash)
 	}
 
-	var sum uint64
-	for _, in := range inits {
-		sum += in.Value
-	}
-	if bc.value < sum {
-		return nil, fmt.Errorf("tx %s value < sum of inits. %d < %d", bc.txHash, bc.value, sum)
+	if be.assetID == BipID {
+		var sum uint64
+		for _, in := range inits {
+			sum += in.Value
+		}
+		if bc.value < sum {
+			return nil, fmt.Errorf("tx %s value < sum of inits. %d < %d", bc.txHash, bc.value, sum)
+		}
 	}
 
 	return &swapCoin{
@@ -85,8 +87,8 @@ func (eth *AssetBackend) newSwapCoin(coinID []byte, contractData []byte) (*swapC
 // TODO: The redeemCoin's Confirmation method is never used by the current
 // swapper implementation. Might consider an API change for
 // asset.Backend.Redemption.
-func (eth *AssetBackend) newRedeemCoin(coinID []byte, contractData []byte) (*redeemCoin, error) {
-	bc, err := eth.baseCoin(coinID, contractData)
+func (be *AssetBackend) newRedeemCoin(coinID []byte, contractData []byte) (*redeemCoin, error) {
+	bc, err := be.baseCoin(coinID, contractData)
 	if err != nil {
 		return nil, err
 	}
@@ -111,12 +113,12 @@ func (eth *AssetBackend) newRedeemCoin(coinID []byte, contractData []byte) (*red
 }
 
 // The baseCoin is basic tx and swap contract data.
-func (eth *AssetBackend) baseCoin(coinID []byte, contractData []byte) (*baseCoin, error) {
+func (be *AssetBackend) baseCoin(coinID []byte, contractData []byte) (*baseCoin, error) {
 	txHash, err := dexeth.DecodeCoinID(coinID)
 	if err != nil {
 		return nil, err
 	}
-	tx, _, err := eth.node.transaction(eth.ctx, txHash)
+	tx, _, err := be.node.transaction(be.ctx, txHash)
 	if err != nil {
 		if errors.Is(err, ethereum.NotFound) {
 			return nil, asset.CoinNotFoundError
@@ -137,7 +139,7 @@ func (eth *AssetBackend) baseCoin(coinID []byte, contractData []byte) (*baseCoin
 		return nil, fmt.Errorf("contract version %d not supported, only %d", contractVer, version)
 	}
 	contractAddr := tx.To()
-	if *contractAddr != eth.contractAddr {
+	if *contractAddr != be.contractAddr {
 		return nil, fmt.Errorf("contract address is not supported: %v", contractAddr)
 	}
 
@@ -177,7 +179,7 @@ func (eth *AssetBackend) baseCoin(coinID []byte, contractData []byte) (*baseCoin
 	}
 
 	return &baseCoin{
-		backend:      eth,
+		backend:      be,
 		secretHash:   secretHash,
 		gasFeeCap:    gasFeeCapGwei,
 		gasTipCap:    gasTipCapGwei,

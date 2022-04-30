@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -188,9 +189,12 @@ func (m *Mantle) fatalError(s string, a ...interface{}) {
 func (m *Mantle) order(sell bool, qty, rate uint64) error {
 	_, err := m.Trade(pass, coreLimitOrder(sell, qty, rate))
 	if err != nil {
-		if isOverLimitError(err) {
+		switch {
+		case isOverLimitError(err):
 			m.log.Infof("Over-limit error. Order not placed.")
-		} else {
+		case isApprovalPendingError(err):
+			m.log.Infof("Approval-pending error. Order not placed")
+		default:
 			m.fatalError("Trade error (limit order, sell = %t, qty = %d, rate = %d): %v", sell, qty, rate, err)
 		}
 		return err
@@ -221,7 +225,7 @@ func (m *Mantle) orderMetered(ords []*orderReq, dur time.Duration) {
 		return m.order(ord.sell, ord.qty, ord.rate)
 	}
 	err := placeOrder()
-	if isOverLimitError(err) {
+	if isOverLimitError(err) || isApprovalPendingError(err) {
 		return
 	}
 	if len(ords) == 0 {
@@ -235,7 +239,7 @@ func (m *Mantle) orderMetered(ords []*orderReq, dur time.Duration) {
 			select {
 			case <-ticker.C:
 				err := placeOrder()
-				if isOverLimitError(err) {
+				if isOverLimitError(err) || isApprovalPendingError(err) {
 					return
 				}
 				if len(ords) == 0 {
@@ -255,7 +259,7 @@ func (m *Mantle) marketOrder(sell bool, qty uint64) {
 	mo.IsLimit = false
 	_, err := m.Trade(pass, mo)
 	if err != nil {
-		if isOverLimitError(err) {
+		if isOverLimitError(err) || isApprovalPendingError(err) {
 			m.log.Infof("Over-limit error. Order not placed.")
 		} else {
 			m.fatalError("Trade error (market order, sell = %t, qty = %d: %v", sell, qty, err)
@@ -289,7 +293,7 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 	name := randomToken()
 	var rpcPort string
 	switch symbol {
-	case eth:
+	case eth, dextt:
 		// Nothing to do here for internal wallets.
 	case dcr:
 		cmdOut := <-harnessCtl(ctx, symbol, fmt.Sprintf("./%s", node), "createnewaccount", name)
@@ -366,35 +370,67 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 	}
 	w := newBotWallet(symbol, node, name, rpcPort, walletPass, minFunds, maxFunds, numCoins)
 	m.wallets[w.assetID] = w
-	err := m.CreateWallet(pass, walletPass, w.form)
-	if err != nil {
-		m.fatalError("Mantle %s failed to create wallet: %v", m.name, err)
-		return
-	}
-	m.log.Infof("created wallet %s:%s on node %s", symbol, name, node)
-	coreWallet := m.WalletState(w.assetID)
-	if coreWallet == nil {
-		m.fatalError("Failed to retrieve WalletState for newly created %s wallet, node %s", symbol, node)
-		return
-	}
-	w.address = coreWallet.Address
-	if numCoins < 1 {
-		return
-	}
 
-	if numCoins != 0 {
-		chunk := (maxFunds + minFunds) / 2 / uint64(numCoins)
-		for i := 0; i < numCoins; i++ {
-			if err = send(symbol, node, coreWallet.Address, chunk); err != nil {
-				m.fatalError(err.Error())
-				return
+	createWallet := func(walletPW []byte, form *core.WalletForm, nCoins int) (string, error) {
+		err := m.CreateWallet(pass, walletPW, form)
+		if err != nil {
+			return "", fmt.Errorf("Mantle %s failed to create wallet: %v", m.name, err)
+		}
+		walletSymbol := dex.BipIDSymbol(form.AssetID)
+		m.log.Infof("created wallet %s:%s on node %s", walletSymbol, name, node)
+		coreWallet := m.WalletState(form.AssetID)
+		if coreWallet == nil {
+			return "", fmt.Errorf("Failed to retrieve WalletState for newly created %s wallet, node %s", walletSymbol, node)
+		}
+		addr := coreWallet.Address
+		if numCoins < 1 {
+			return addr, nil
+		}
+
+		deadline := time.After(time.Second * 30)
+		for {
+			s := m.WalletState(form.AssetID)
+			if s.Synced {
+				break
+			}
+			select {
+			case <-time.After(time.Second):
+			case <-ctx.Done():
+				return "", context.Canceled
+			case <-deadline:
+				return "", fmt.Errorf("timed out waiting for wallet to sync")
 			}
 		}
+
+		if nCoins != 0 {
+			chunk := (maxFunds + minFunds) / 2 / uint64(nCoins)
+			for i := 0; i < nCoins; i++ {
+				if err = send(walletSymbol, node, addr, chunk); err != nil {
+					return "", err
+				}
+			}
+		}
+		<-harnessCtl(ctx, walletSymbol, fmt.Sprintf("./mine-%s", node), "1")
+
+		return addr, nil
+	}
+
+	var err error
+	if w.parentForm != nil {
+		// Create the parent asset
+		if w.parentAddress, err = createWallet(walletPass, w.parentForm, 1); err != nil {
+			m.fatalError("error creating parent asset wallet: %v", err)
+			return
+		}
+		walletPass = nil
+	}
+
+	if w.address, err = createWallet(walletPass, w.form, numCoins); err != nil {
+		m.fatalError(err.Error())
+		return
 	}
 	<-mine(symbol, node)
 
-	// Wallet syncing time. If not synced within five seconds trading will fail.
-	time.Sleep(time.Second * 5)
 }
 
 func send(symbol, node, addr string, val uint64) error {
@@ -417,7 +453,9 @@ func send(symbol, node, addr string, val uint64) error {
 	case eth:
 		// eth values are always handled as gwei, so multiply by 1e9
 		// here to convert to wei.
-		res = <-harnessCtl(ctx, symbol, fmt.Sprintf("./%s", node), "attach", fmt.Sprintf("--exec personal.sendTransaction({from:eth.accounts[1],to:\"%s\",gasPrice:200e9,value:%de9},\"%s\")", addr, val, pass))
+		res = <-harnessCtl(ctx, symbol, "./sendtoaddress", addr, strconv.FormatFloat(float64(val)/1e9, 'f', 9, 64))
+	case dextt:
+		res = <-harnessCtl(ctx, symbol, "./sendTokens", addr, strconv.FormatFloat(float64(val)/1e9, 'f', 9, 64))
 	default:
 		return fmt.Errorf("send unknown symbol %q", symbol)
 	}
@@ -430,6 +468,8 @@ func (m *Mantle) replenishBalances() {
 	for _, w := range m.wallets {
 		m.replenishBalance(w)
 	}
+	// TODO: Check balance in parent wallets? We send them some initial funds,
+	// and maybe that's enough for our purposes, since it just covers fees.
 }
 
 // replenishBalance will bring the balance with allowable limits by requesting
@@ -549,16 +589,18 @@ func randomToken() string {
 // botWallet is the local wallet representation. Mantle uses the botWallet to
 // keep the Core wallet's balance within allowable range.
 type botWallet struct {
-	form     *core.WalletForm
-	name     string
-	node     string
-	symbol   string
-	pass     []byte
-	assetID  uint32
-	minFunds uint64
-	maxFunds uint64
-	address  string
-	numCoins int
+	form          *core.WalletForm
+	parentForm    *core.WalletForm
+	name          string
+	node          string
+	symbol        string
+	pass          []byte
+	assetID       uint32
+	minFunds      uint64
+	maxFunds      uint64
+	address       string
+	parentAddress string
+	numCoins      int
 }
 
 // newBotWallet is the constructor for a botWallet. For a botWallet created
@@ -567,7 +609,7 @@ type botWallet struct {
 // Set numCoins to at least twice the the maximum number of (booked + epoch)
 // orders the wallet is expected to support.
 func newBotWallet(symbol, node, name string, port string, pass []byte, minFunds, maxFunds uint64, numCoins int) *botWallet {
-	var form *core.WalletForm
+	var form, parentForm *core.WalletForm
 	switch symbol {
 	case dcr:
 		form = &core.WalletForm{
@@ -636,7 +678,7 @@ func newBotWallet(symbol, node, name string, port string, pass []byte, minFunds,
 				"rpcport":     port,
 			},
 		}
-	case eth:
+	case eth, dextt:
 		form = &core.WalletForm{
 			Type:    "geth",
 			AssetID: ethID,
@@ -647,17 +689,26 @@ func newBotWallet(symbol, node, name string, port string, pass []byte, minFunds,
 				"rpcport":     port,
 			},
 		}
+		if symbol == dextt {
+			parentForm = form
+			form = &core.WalletForm{
+				Type:       "token",
+				AssetID:    dexttID,
+				ParentForm: form,
+			}
+		}
 	}
 	return &botWallet{
-		form:     form,
-		name:     name,
-		node:     node,
-		symbol:   symbol,
-		pass:     pass,
-		assetID:  form.AssetID,
-		minFunds: minFunds,
-		maxFunds: maxFunds,
-		numCoins: numCoins,
+		form:       form,
+		parentForm: parentForm,
+		name:       name,
+		node:       node,
+		symbol:     symbol,
+		pass:       pass,
+		assetID:    form.AssetID,
+		minFunds:   minFunds,
+		maxFunds:   maxFunds,
+		numCoins:   numCoins,
 	}
 }
 
@@ -670,4 +721,11 @@ func isOverLimitError(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "order quantity exceeds user limit")
+}
+
+func isApprovalPendingError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "an approval is already pending")
 }

@@ -147,8 +147,19 @@ export interface FeeBreakdown {
 export interface SupportedAsset {
   id: number
   symbol: string
+  name: string
   wallet: WalletState
-  info: WalletInfo
+  info?: WalletInfo
+  token?: Token
+  unitInfo: UnitInfo
+  walletCreationPending: boolean
+}
+
+export interface Token {
+  parentID: number
+  name: string
+  unitInfo: UnitInfo
+  definition: WalletDefinition
 }
 
 export interface WalletState {
@@ -208,6 +219,7 @@ export interface ConfigOption {
   disablewhenactive: boolean
   isBirthdayConfig: boolean
   noauth: boolean
+  regAsset?: number
 }
 
 export interface Coin {
@@ -275,6 +287,10 @@ export interface WalletConfigNote extends CoreNote {
 }
 
 export type WalletStateNote = WalletConfigNote
+
+export interface WalletCreationNote extends CoreNote {
+  assetID: number
+}
 
 export interface SpotPriceNote extends CoreNote {
   host: string

@@ -2,8 +2,7 @@
 
 package core
 
-// The btc, dcr and dcrdex harnesses should be running before executing this
-// test.
+// The asset and dcrdex harnesses should be running before executing this test.
 //
 // The dcrdex harness rebuilds the dcrdex binary with dex.testLockTimeTaker=30s
 // and dex.testLockTimeMaker=1m before running the binary, making it possible
@@ -26,6 +25,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -63,6 +63,7 @@ var (
 
 	tLockTimeTaker = 30 * time.Second
 	tLockTimeMaker = 1 * time.Minute
+	testTokenID, _ = dex.BipSymbolID("dextt.eth")
 )
 
 type SimWalletType int
@@ -86,6 +87,7 @@ type assetConfig struct {
 	symbol           string
 	conversionFactor uint64
 	valFmt           func(interface{}) string
+	isToken          bool
 }
 
 var testLookup = map[string]func(s *simulationTest) error{
@@ -214,12 +216,14 @@ func RunSimulationTest(cfg *SimulationConfig) error {
 			symbol:           cfg.BaseSymbol,
 			conversionFactor: baseUnitInfo.Conventional.ConversionFactor,
 			valFmt:           valFormatter(baseUnitInfo.ConventionalString),
+			isToken:          asset.TokenInfo(baseID) != nil,
 		},
 		quote: &assetConfig{
 			id:               quoteID,
 			symbol:           cfg.QuoteSymbol,
 			conversionFactor: quoteUnitInfo.Conventional.ConversionFactor,
 			valFmt:           valFormatter(quoteUnitInfo.ConventionalString),
+			isToken:          asset.TokenInfo(quoteID) != nil,
 		},
 		regAsset:   regAsset,
 		marketName: marketName(baseID, quoteID),
@@ -271,40 +275,73 @@ func (s *simulationTest) startClients() error {
 		}
 		c.log.Infof("Core initialized")
 
+		createWallet := func(pass []byte, fund bool, form *WalletForm) error {
+			err = c.core.CreateWallet(c.appPass, pass, form)
+			if err != nil {
+				return err
+			}
+			c.log.Infof("Connected %s wallet (fund = %v)", unbip(form.AssetID), fund)
+			if fund {
+				hctrl := newHarnessCtrl(form.AssetID)
+				// eth needs the headers to be new in order to
+				// count itself synced, so mining a few blocks here.
+				hctrl.mineBlocks(s.ctx, 1)
+				c.log.Infof("Waiting for %s wallet to sync", unbip(form.AssetID))
+				synced := make(chan error)
+				go func() {
+					tStart := time.Now()
+					for time.Since(tStart) < time.Second*30 {
+						if c.core.WalletState(form.AssetID).Synced {
+							synced <- nil
+							return
+						}
+						time.Sleep(time.Second)
+					}
+					synced <- fmt.Errorf("wallet never synced")
+				}()
+				if err := <-synced; err != nil {
+					return fmt.Errorf("wallet never synced")
+				}
+				c.log.Infof("%s wallet synced and ready to use", unbip(form.AssetID))
+
+				// Fund new wallet.
+				c.log.Infof("Funding %s wallet", unbip(form.AssetID))
+				address := c.core.WalletState(form.AssetID).Address
+				amts := []int{10, 18, 5, 7, 1, 15, 3, 25}
+				if err := hctrl.fund(s.ctx, address, amts); err != nil {
+					return fmt.Errorf("fund error: %w", err)
+				}
+				hctrl.mineBlocks(s.ctx, 2)
+				// Tip change after block filtering scan takes the wallet time.
+				time.Sleep(2 * time.Second * sleepFactor)
+			}
+			return nil
+		}
+
 		// connect wallets
 		for assetID, wallet := range c.wallets {
 			os.RemoveAll(c.core.assetDataDirectory(assetID))
 
 			c.log.Infof("Creating %s %s-type wallet. config = %+v", dex.BipIDSymbol(assetID), wallet.walletType, wallet.config)
 
-			err = c.core.CreateWallet(c.appPass, wallet.pass, &WalletForm{
-				Type:    wallet.walletType,
+			pw := wallet.pass
+
+			if wallet.parent != nil {
+				if err := createWallet(pw, wallet.fund, wallet.parent); err != nil {
+					return fmt.Errorf("error creating parent %s wallet: %w", dex.BipIDSymbol(wallet.parent.AssetID), err)
+				}
+				// For degen assets, the pass is only for the parent.
+				pw = nil
+			}
+
+			if err := createWallet(pw, wallet.fund, &WalletForm{
 				AssetID: assetID,
 				Config:  wallet.config,
-			})
-			if err != nil {
+				Type:    wallet.walletType,
+			}); err != nil {
 				return err
 			}
-			c.log.Infof("Connected %s wallet (fund = %v)", unbip(assetID), wallet.fund)
 
-			if wallet.fund {
-				hctrl := newHarnessCtrl(assetID)
-				// eth needs the headers to be new in order to
-				// count itself synced, so mining a few blocks here.
-				hctrl.mineBlocks(s.ctx, 1)
-				c.log.Infof("Waiting for %s wallet to sync", unbip(assetID))
-				for !c.core.WalletState(assetID).Synced {
-					time.Sleep(time.Second)
-				}
-				c.log.Infof("%s wallet synced and ready to use", unbip(assetID))
-
-				// Fund new wallet.
-				c.log.Infof("Funding wallet")
-				address := c.core.WalletState(assetID).Address
-				amts := []int{10, 18, 5, 7, 1, 15, 3, 25}
-				hctrl.fund(s.ctx, address, amts)
-				hctrl.mineBlocks(s.ctx, 2)
-			}
 		}
 
 		// Tip change after block filtering scan takes the wallet time, even
@@ -985,6 +1022,9 @@ func (s *simulationTest) simpleTradeTest(qty, rate uint64, finalStatus order.Mat
 		return fmt.Errorf("Both client 1 and 2 cannot be sellers")
 	}
 
+	stopMiners := s.runMiners()
+	defer stopMiners()
+
 	c1OrderID, c2OrderID, err := s.placeTestOrders(qty, rate)
 	if err != nil {
 		return err
@@ -1090,12 +1130,37 @@ func (s *simulationTest) monitorOrderMatchingAndTradeNeg(ctx context.Context, cl
 	tracker.mtx.RLock()
 	client.log.Infof("%d match(es) received for order %s", len(tracker.matches), tracker.token())
 	for _, match := range tracker.matches {
-		client.log.Infof("%s on match %s, amount %v %s", match.Side.String(), token(match.MatchID.Bytes()),
+		client.log.Infof("%s on match %s, amount %s %s", match.Side.String(), token(match.MatchID.Bytes()),
 			s.base.valFmt(match.Quantity), s.base.symbol)
 	}
 	tracker.mtx.RUnlock()
 
 	return s.monitorTrackedTrade(client, tracker, finalStatus)
+}
+
+func (s *simulationTest) runMiners() context.CancelFunc {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	runMiner := func(a *assetConfig, swapConfs uint32) {
+		ctrl := newHarnessCtrl(a.id)
+		go func() {
+			for {
+				ctrl.mineBlocks(s.ctx, swapConfs)
+				// wait between 1 and 5 seconds.
+				delay := time.Duration(rand.Float64()*float64(time.Second)*4) + time.Second
+				select {
+				case <-time.After(delay):
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+
+	runMiner(s.base, 1)
+	runMiner(s.quote, 1)
+
+	return cancel
 }
 
 func (s *simulationTest) monitorTrackedTrade(client *simulationClient, tracker *trackedTrade, finalStatus order.MatchStatus) error {
@@ -1116,6 +1181,7 @@ func (s *simulationTest) monitorTrackedTrade(client *simulationClient, tracker *
 
 	// run a repeated check for match status changes to mine blocks as necessary.
 	maxTradeDuration := 2 * time.Minute
+
 	tryUntil(s.ctx, maxTradeDuration, func() bool {
 		var completedTrades int
 		tracker.mtx.Lock()
@@ -1176,7 +1242,9 @@ func (s *simulationTest) monitorTrackedTrade(client *simulationClient, tracker *
 
 			if assetToMine != nil {
 				assetID, nBlocks := assetToMine.ID, assetToMine.SwapConf
-				time.Sleep(2 * sleepFactor * time.Second)
+				sleep := 2 * sleepFactor * time.Second
+				client.log.Infof("sleeping for %s to catch up", sleep)
+				time.Sleep(sleep)
 				err := newHarnessCtrl(assetID).mineBlocks(s.ctx, nBlocks)
 				if err == nil {
 					var actor order.MatchSide
@@ -1392,14 +1460,19 @@ type marketConfig struct {
 }
 
 type harnessCtrl struct {
-	dir, fundStr    string
-	blockMultiplier uint32
+	dir, fundCmd, fundStr string
+	blockMultiplier       uint32
 }
 
 func (hc *harnessCtrl) run(ctx context.Context, cmd string, args ...string) error {
 	command := exec.CommandContext(ctx, cmd, args...)
 	command.Dir = hc.dir
-	return command.Run()
+	r, err := command.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("exec error: running %q from directory %q, err = %q, output = %q",
+			command, command.Dir, err, string(r))
+	}
+	return nil
 }
 
 func (hc *harnessCtrl) mineBlocks(ctx context.Context, n uint32) error {
@@ -1411,7 +1484,7 @@ func (hc *harnessCtrl) fund(ctx context.Context, address string, amts []int) err
 	for _, amt := range amts {
 		fs := fmt.Sprintf(hc.fundStr, address, amt)
 		strs := strings.Split(fs, "_")
-		err := hc.run(ctx, "./alpha", strs...)
+		err := hc.run(ctx, hc.fundCmd, strs...)
 		if err != nil {
 			return err
 		}
@@ -1420,25 +1493,32 @@ func (hc *harnessCtrl) fund(ctx context.Context, address string, amts []int) err
 }
 
 func newHarnessCtrl(assetID uint32) *harnessCtrl {
-	var (
-		fundStr                = "sendtoaddress_%s_%d"
-		blockMultiplier uint32 = 1
-	)
+
 	switch assetID {
 	case dcr.BipID, btc.BipID, ltc.BipID, bch.BipID, doge.BipID, zec.BipID:
+		return &harnessCtrl{
+			dir:             filepath.Join(dextestDir, dex.BipIDSymbol(assetID), "harness-ctl"),
+			fundCmd:         "./alpha",
+			fundStr:         "sendtoaddress_%s_%d",
+			blockMultiplier: 1,
+		}
 	case eth.BipID:
 		// Sending with values of .1 eth.
-		fundStr = `attach_--exec personal.sendTransaction({from:eth.accounts[1],to:"%s",gasPrice:200e9,value:%de17},"abc")`
-		blockMultiplier = 4
-	default:
-		panic(fmt.Sprintf("unknown asset %d for harness control", assetID))
+		return &harnessCtrl{
+			dir:             filepath.Join(dextestDir, dex.BipIDSymbol(assetID), "harness-ctl"),
+			fundCmd:         "./sendtoaddress",
+			fundStr:         "%s_%d",
+			blockMultiplier: 4,
+		}
+	case testTokenID:
+		return &harnessCtrl{
+			dir:             filepath.Join(dextestDir, dex.BipIDSymbol(eth.BipID), "harness-ctl"),
+			fundCmd:         "./sendTokens",
+			fundStr:         "%s_%d",
+			blockMultiplier: 4,
+		}
 	}
-	dir := filepath.Join(dextestDir, dex.BipIDSymbol(assetID), "harness-ctl")
-	return &harnessCtrl{
-		dir:             dir,
-		fundStr:         fundStr,
-		blockMultiplier: blockMultiplier,
-	}
+	panic(fmt.Sprintf("unknown asset %d for harness control", assetID))
 }
 
 type tWallet struct {
@@ -1447,6 +1527,7 @@ type tWallet struct {
 	walletType string // type is a keyword
 	fund       bool
 	hc         *harnessCtrl
+	parent     *WalletForm
 }
 
 var cloneTypes = map[uint32]string{
@@ -1502,6 +1583,17 @@ func ethWallet() (*tWallet, error) {
 	return &tWallet{
 		fund:       true,
 		walletType: "geth",
+	}, nil
+}
+
+func dexttWallet() (*tWallet, error) {
+	return &tWallet{
+		fund:       true,
+		walletType: "token",
+		parent: &WalletForm{
+			Type:    "geth",
+			AssetID: eth.BipID,
+		},
 	}, nil
 }
 
@@ -1596,6 +1688,8 @@ func (s *simulationTest) newClient(name string, cl *SimClient) (*simulationClien
 			tw, err = btcWallet(wt, node)
 		case eth.BipID:
 			tw, err = ethWallet()
+		case testTokenID:
+			tw, err = dexttWallet()
 		case ltc.BipID:
 			tw, err = ltcWallet(wt, node)
 		case bch.BipID:
@@ -1840,6 +1934,16 @@ func (s *simulationTest) updateBalances(client *simulationClient) error {
 	client.log.Infof("updating balances")
 	client.balances = make(map[uint32]uint64, len(client.wallets))
 	setBalance := func(a *assetConfig) error {
+		if parent := client.wallets[a.id].parent; parent != nil {
+			parentSymbol := dex.BipIDSymbol(parent.AssetID)
+			parentBalance, err := client.core.AssetBalance(parent.AssetID)
+			if err != nil {
+				return fmt.Errorf("error getting parent %s balance: %w", parentSymbol, err)
+			}
+			client.log.Infof("parent %s available %s, immature %s, locked %s", parentSymbol,
+				a.valFmt(parentBalance.Available), a.valFmt(parentBalance.Immature), a.valFmt(parentBalance.Locked))
+		}
+
 		balances, err := client.core.AssetBalance(a.id)
 		if err != nil {
 			return err
@@ -1899,7 +2003,11 @@ func (s *simulationTest) assertBalanceChanges(client *simulationClient) error {
 	checkDiff := func(a *assetConfig, expDiff, fees int64) error {
 		// actual diff will likely be less than expected because of tx fees
 		// TODO: account for actual fee(s) or use a more realistic fee estimate.
-		expVal := expDiff - fees
+		expVal := expDiff
+		if !a.isToken {
+			expVal -= fees
+		}
+
 		minExpectedDiff, maxExpectedDiff := int64(float64(expVal)*0.95), int64(float64(expVal)*1.05)
 
 		// diffs can be negative
