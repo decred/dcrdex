@@ -145,6 +145,15 @@ type Wallet interface {
 	AddressPrivKey(ctx context.Context, address stdaddr.Address) (*secp256k1.PrivateKey, error)
 }
 
+// tipNotifier can be implemented if the Wallet is able to provide a stream of
+// blocks as they are finished being processed.
+// DRAFT NOTE: This is alternative to NotifyOnTipChange. I prefer this method,
+// and would vote to export this interface and get rid of NotifyOnTipChange.
+// @itswisdomagain might be using the current API though.
+type tipNotifier interface {
+	tipFeed() <-chan *block
+}
+
 // FeeRateEstimator is satisfied by a Wallet that can provide fee rate
 // estimates.
 type FeeRateEstimator interface {

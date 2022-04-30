@@ -171,7 +171,7 @@ func (s *Server) connect(ctx context.Context, conn ws.Connection, addr string) {
 func (s *Server) Notify(route string, payload interface{}) {
 	msg, err := msgjson.NewNotification(route, payload)
 	if err != nil {
-		s.log.Errorf("notification encoding error: %v", err)
+		s.log.Errorf("%q notification encoding error: %v", route, err)
 		return
 	}
 	s.clientsMtx.RLock()

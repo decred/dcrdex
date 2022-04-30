@@ -17,11 +17,13 @@ require (
 	github.com/davecgh/go-spew v1.1.1
 	github.com/dchest/blake2b v1.0.0
 	github.com/decred/base58 v1.0.4
+	github.com/decred/dcrd/addrmgr/v2 v2.0.0
 	github.com/decred/dcrd/blockchain/stake/v4 v4.0.0
 	github.com/decred/dcrd/blockchain/v4 v4.0.0
 	github.com/decred/dcrd/certgen v1.1.1
 	github.com/decred/dcrd/chaincfg/chainhash v1.0.3
 	github.com/decred/dcrd/chaincfg/v3 v3.1.1
+	github.com/decred/dcrd/connmgr/v3 v3.1.0
 	github.com/decred/dcrd/crypto/blake256 v1.0.0
 	github.com/decred/dcrd/dcrec v1.0.0
 	github.com/decred/dcrd/dcrec/edwards/v2 v2.0.2

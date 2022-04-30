@@ -27,6 +27,7 @@ import (
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	walletjson "decred.org/dcrwallet/v2/rpc/jsonrpc/types"
 	"decred.org/dcrwallet/v2/wallet"
+	_ "decred.org/dcrwallet/v2/wallet/drivers/bdb"
 	"github.com/decred/dcrd/blockchain/stake/v4"
 	"github.com/decred/dcrd/blockchain/v4"
 	"github.com/decred/dcrd/chaincfg/chainhash"
@@ -63,6 +64,7 @@ const (
 
 	walletTypeDcrwRPC = "dcrwalletRPC"
 	walletTypeLegacy  = "" // dcrwallet RPC prior to wallet types
+	walletTypeSPV     = "SPV"
 
 	// confCheckTimeout is the amount of time allowed to check for
 	// confirmations.
@@ -84,7 +86,49 @@ var (
 	blockTicker                  = time.Second
 	peerCountTicker              = 5 * time.Second
 	conventionalConversionFactor = float64(dexdcr.UnitInfo.Conventional.ConversionFactor)
-	configOpts                   = []*asset.ConfigOption{
+	walletBlockAllowance         = time.Second * 10
+
+	walletOpts = []*asset.ConfigOption{
+		{
+			Key:         "fallbackfee",
+			DisplayName: "Fallback fee rate",
+			Description: "The fee rate to use for fee payment and withdrawals when " +
+				"estimatesmartfee is not available. Units: DCR/kB",
+			DefaultValue: defaultFee * 1000 / 1e8,
+		},
+		{
+			Key:         "feeratelimit",
+			DisplayName: "Highest acceptable fee rate",
+			Description: "This is the highest network fee rate you are willing to " +
+				"pay on swap transactions. If feeratelimit is lower than a market's " +
+				"maxfeerate, you will not be able to trade on that market with this " +
+				"wallet.  Units: DCR/kB",
+			DefaultValue: defaultFeeRateLimit * 1000 / 1e8,
+		},
+		{
+			Key:         "redeemconftarget",
+			DisplayName: "Redeem confirmation target",
+			Description: "The target number of blocks for the redeem transaction " +
+				"to get a confirmation. Used to set the transaction's fee rate." +
+				" (default: 1 block)",
+			DefaultValue: defaultRedeemConfTarget,
+		},
+		{
+			Key:         "txsplit",
+			DisplayName: "Pre-size funding inputs",
+			Description: "When placing an order, create a \"split\" transaction to " +
+				"fund the order without locking more of the wallet balance than " +
+				"necessary. Otherwise, excess funds may be reserved to fund the order " +
+				"until the first swap contract is broadcast during match settlement, or " +
+				"the order is canceled. This an extra transaction for which network " +
+				"mining fees are paid.  Used only for standing-type orders, e.g. " +
+				"limit orders without immediate time-in-force.",
+			IsBoolean:    true,
+			DefaultValue: false,
+		},
+	}
+
+	rpcOpts = []*asset.ConfigOption{
 		{
 			Key:         "account",
 			DisplayName: "Account Name",
@@ -128,55 +172,45 @@ var (
 			Description:  "Path to the dcrwallet TLS certificate file",
 			DefaultValue: filepath.Join(dcrwHomeDir, "rpc.cert"),
 		},
-		{
-			Key:         "fallbackfee",
-			DisplayName: "Fallback fee rate",
-			Description: "The fee rate to use for sending or withdrawing funds and fee payment" +
-				"estimatesmartfee is not available. Units: DCR/kB",
-			DefaultValue: defaultFee * 1000 / 1e8,
-		},
-		{
-			Key:         "feeratelimit",
-			DisplayName: "Highest acceptable fee rate",
-			Description: "This is the highest network fee rate you are willing to " +
-				"pay on swap transactions. If feeratelimit is lower than a market's " +
-				"maxfeerate, you will not be able to trade on that market with this " +
-				"wallet.  Units: DCR/kB",
-			DefaultValue: defaultFeeRateLimit * 1000 / 1e8,
-		},
-		{
-			Key:         "redeemconftarget",
-			DisplayName: "Redeem confirmation target",
-			Description: "The target number of blocks for the redeem transaction " +
-				"to get a confirmation. Used to set the transaction's fee rate." +
-				" (default: 1 block)",
-			DefaultValue: defaultRedeemConfTarget,
-		},
-		{
-			Key:         "txsplit",
-			DisplayName: "Pre-size funding inputs",
-			Description: "When placing an order, create a \"split\" transaction to " +
-				"fund the order without locking more of the wallet balance than " +
-				"necessary. Otherwise, excess funds may be reserved to fund the order " +
-				"until the first swap contract is broadcast during match settlement, or " +
-				"the order is canceled. This an extra transaction for which network " +
-				"mining fees are paid.  Used only for standing-type orders, e.g. " +
-				"limit orders without immediate time-in-force.",
-			IsBoolean: true,
-		},
 	}
+
+	spvOpts = []*asset.ConfigOption{{
+		Key:         "walletbirthday",
+		DisplayName: "Wallet Birthday",
+		Description: "This is the date the wallet starts scanning the blockchain " +
+			"for transactions related to this wallet. If reconfiguring an existing " +
+			"wallet, this may start a rescan if the new birthday is older. This " +
+			"option is disabled if there are currently active DCR trades.",
+		DefaultValue: defaultWalletBirthdayUnix,
+		MaxValue:     "now",
+		// This MinValue must be removed if we start supporting importing private keys
+		MinValue:          defaultWalletBirthdayUnix,
+		IsDate:            true,
+		DisableWhenActive: true,
+		IsBirthdayConfig:  true,
+	}}
+
 	// WalletInfo defines some general information about a Decred wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:     "Decred",
 		Version:  version,
 		UnitInfo: dexdcr.UnitInfo,
-		AvailableWallets: []*asset.WalletDefinition{{
-			Type:              walletTypeDcrwRPC,
-			Tab:               "External",
-			Description:       "Connect to dcrwallet",
-			DefaultConfigPath: defaultConfigPath,
-			ConfigOpts:        configOpts,
-		}},
+		AvailableWallets: []*asset.WalletDefinition{
+			{
+				Type:        walletTypeSPV,
+				Tab:         "Native",
+				Description: "Use the built-in SPV wallet",
+				ConfigOpts:  append(spvOpts, walletOpts...),
+				Seeded:      true,
+			},
+			{
+				Type:              walletTypeDcrwRPC,
+				Tab:               "External",
+				Description:       "Connect to dcrwallet",
+				DefaultConfigPath: defaultConfigPath,
+				ConfigOpts:        append(rpcOpts, walletOpts...),
+			},
+		},
 	}
 	swapFeeBumpKey   = "swapfeebump"
 	splitKey         = "swapsplit"
@@ -360,6 +394,7 @@ type Driver struct{}
 
 // Check that Driver implements asset.Driver.
 var _ asset.Driver = (*Driver)(nil)
+var _ asset.Creator = (*Driver)(nil)
 
 // Open creates the DCR exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
@@ -380,8 +415,56 @@ func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
 }
 
+// Exists checks the existence of the wallet. Part of the Creator interface.
+func (d *Driver) Exists(walletType, dataDir string, _ map[string]string, net dex.Network) (bool, error) {
+	if walletType != walletTypeSPV {
+		return false, fmt.Errorf("no Bitcoin wallet of type %q available", walletType)
+	}
+
+	chainParams, err := parseChainParams(net)
+	if err != nil {
+		return false, err
+	}
+	netDir := filepath.Join(dataDir, chainParams.Name)
+	// timeout and recoverWindow arguments borrowed from btcwallet directly.
+	return walletExists(netDir)
+}
+
+// Create creates a new SPV wallet.
+func (d *Driver) Create(params *asset.CreateWalletParams) error {
+	if params.Type != walletTypeSPV {
+		return fmt.Errorf("SPV is the only seeded wallet type. required = %q, requested = %q", walletTypeSPV, params.Type)
+	}
+	if len(params.Seed) == 0 {
+		return errors.New("wallet seed cannot be empty")
+	}
+	if len(params.DataDir) == 0 {
+		return errors.New("must specify wallet data directory")
+	}
+	chainParams, err := parseChainParams(params.Net)
+	if err != nil {
+		return fmt.Errorf("error parsing chain params: %w", err)
+	}
+
+	recoveryCfg := new(RecoveryCfg)
+	err = config.Unmapify(params.Settings, recoveryCfg)
+	if err != nil {
+		return err
+	}
+
+	return createSPVWallet(params.Pass, params.Seed, params.DataDir, params.Logger,
+		recoveryCfg.NumExternalAddresses, recoveryCfg.NumInternalAddresses, chainParams)
+}
+
 func init() {
 	asset.Register(BipID, &Driver{})
+}
+
+// RecoveryCfg is the information that is transferred from the old wallet
+// to the new one when the wallet is recovered.
+type RecoveryCfg struct {
+	NumExternalAddresses uint32 `ini:"numexternaladdr"`
+	NumInternalAddresses uint32 `ini:"numinternaladdr"`
 }
 
 // swapOptions captures the available Swap options. Tagged to be used with
@@ -468,7 +551,8 @@ type findRedemptionResult struct {
 func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (*ExchangeWallet, error) {
 	// loadConfig will set fields if defaults are used and set the chainParams
 	// variable.
-	walletCfg, chainParams, err := loadConfig(cfg.Settings, network)
+	walletCfg := new(WalletConfig)
+	chainParams, err := loadConfig(cfg.Settings, network, walletCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -478,19 +562,27 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, err
 	}
 
-	// Set dcr.wallet using either the default rpcWallet or a custom wallet.
-	if cfg.Type == walletTypeDcrwRPC || cfg.Type == walletTypeLegacy {
-		dcr.wallet, err = newRPCWallet(walletCfg, chainParams, logger)
+	switch {
+	case cfg.Type == walletTypeDcrwRPC || cfg.Type == walletTypeLegacy:
+		dcr.wallet, err = newRPCWallet(cfg.Settings, chainParams, logger)
 		if err != nil {
 			return nil, err
 		}
-	} else if makeCustomWallet, ok := customWalletConstructors[cfg.Type]; ok {
-		dcr.wallet, err = makeCustomWallet(cfg.Settings, chainParams, logger)
+	case cfg.Type == walletTypeSPV:
+		dcr.primaryAcct = defaultAcctName
+		dcr.wallet, err = openSPVWallet(cfg.Settings, cfg.DataDir, chainParams, logger)
 		if err != nil {
-			return nil, fmt.Errorf("custom wallet setup error: %v", err)
+			return nil, err
 		}
-	} else {
-		return nil, fmt.Errorf("unknown wallet type %q", cfg.Type)
+	default:
+		if makeCustomWallet, ok := customWalletConstructors[cfg.Type]; ok {
+			dcr.wallet, err = makeCustomWallet(cfg.Settings, chainParams, logger)
+			if err != nil {
+				return nil, fmt.Errorf("custom wallet setup error: %v", err)
+			}
+		} else {
+			return nil, fmt.Errorf("unknown wallet type %q", cfg.Type)
+		}
 	}
 
 	return dcr, nil
@@ -498,7 +590,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 
 // unconnectedWallet returns an ExchangeWallet without a base wallet. The wallet
 // should be set before use.
-func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *chaincfg.Params, logger dex.Logger) (*ExchangeWallet, error) {
+func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *WalletConfig, chainParams *chaincfg.Params, logger dex.Logger) (*ExchangeWallet, error) {
 	// If set in the user config, the fallback fee will be in units of DCR/kB.
 	// Convert to atoms/B.
 	fallbackFeesPerByte := toAtoms(dcrCfg.FallbackFeeRate / 1000)
@@ -561,6 +653,29 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *cha
 		feeRateLimit:        feesLimitPerByte,
 		redeemConfTarget:    redeemConfTarget,
 		useSplitTx:          dcrCfg.UseSplitTx,
+	}, nil
+}
+
+// openSPVWallet opens the previously created native SPV wallet.
+func openSPVWallet(settings map[string]string, dataDir string, chainParams *chaincfg.Params, log dex.Logger) (*spvWallet, error) {
+	walletCfg := new(WalletConfig)
+	err := config.Unmapify(settings, walletCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	// allowAutomaticRescan := !walletCfg.ActivelyUsed
+
+	return &spvWallet{
+		acctNum:     defaultAcct,
+		acctName:    defaultAcctName,
+		netDir:      filepath.Join(dataDir, chainParams.Name),
+		chainParams: chainParams,
+		log:         log.SubLogger("SPV"),
+		blockCache: blockCache{
+			blocks: make(map[chainhash.Hash]*cachedBlock),
+		},
+		tipChan: make(chan *block, 1),
 	}, nil
 }
 
@@ -3345,33 +3460,87 @@ func (dcr *ExchangeWallet) monitorPeers(ctx context.Context) {
 func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 	ticker := time.NewTicker(blockTicker)
 	defer ticker.Stop()
+
+	var walletBlock <-chan *block
+	if notifier, isNotifier := dcr.wallet.(tipNotifier); isNotifier {
+		walletBlock = notifier.tipFeed()
+	}
+
+	// A polledBlock is a block found during polling, but whose broadcast has
+	// been queued in anticipation of a wallet notification.
+	type polledBlock struct {
+		*block
+		queue *time.Timer
+	}
+
+	// queuedBlock is the currently queued, polling-discovered block that will
+	// be broadcast after a timeout if the wallet doesn't send the matching
+	// notification.
+	var queuedBlock *polledBlock
+
 	for {
 		select {
 		case <-ticker.C:
-			dcr.checkForNewBlocks()
+			ctx, cancel := context.WithTimeout(dcr.ctx, 2*time.Second)
+			defer cancel()
+			newTip, err := dcr.getBestBlock(ctx)
+			if err != nil {
+				dcr.handleTipChange(nil, 0, fmt.Errorf("failed to get best block: %w", err))
+				return
+			}
+
+			dcr.tipMtx.RLock()
+			sameTip := dcr.currentTip.hash.IsEqual(newTip.hash)
+			dcr.tipMtx.RUnlock()
+
+			if sameTip {
+				continue
+			}
+			// hdr, err := dcr.wallet.GetBlockHeader(ctx, newTipHash)
+			// if err != nil {
+			// 	go dcr.tipChange(fmt.Errorf("error setting new tip: %w", err))
+			// 	continue
+			// }
+
+			if walletBlock == nil {
+				dcr.handleTipChange(newTip.hash, newTip.height, nil)
+				continue
+			}
+			// Queue it for reporting, but don't send it right away. Give the
+			// wallet a chance to provide their block update. SPV wallet may
+			// need more time after storing the block header to fetch and
+			// scan filters and issue the FilteredBlockConnected report.
+			if queuedBlock != nil {
+				queuedBlock.queue.Stop()
+			}
+			blockAllowance := walletBlockAllowance
+			synced, _, err := dcr.wallet.SyncStatus(ctx)
+			if err != nil {
+				dcr.log.Errorf("Error retrieving sync status before queuing polled block: %v", err)
+			} else if !synced {
+				blockAllowance *= 10
+			}
+			queuedBlock = &polledBlock{
+				block: newTip,
+				queue: time.AfterFunc(blockAllowance, func() {
+					dcr.log.Warnf("Reporting a block found in polling that the wallet apparently "+
+						"never reported: %d %s. If you see this message repeatedly, it may indicate "+
+						"an issue with the wallet.", newTip.height, newTip.hash)
+					dcr.handleTipChange(newTip.hash, newTip.height, nil)
+				}),
+			}
+		case walletTip := <-walletBlock:
+			if queuedBlock != nil && walletTip.height >= queuedBlock.height {
+				if !queuedBlock.queue.Stop() && walletTip.hash == queuedBlock.hash {
+					continue
+				}
+				queuedBlock = nil
+			}
+			dcr.handleTipChange(walletTip.hash, walletTip.height, nil)
+
 		case <-ctx.Done():
 			return
 		}
-	}
-}
-
-// checkForNewBlocks checks for new blocks. When a tip change is detected, the
-// tipChange callback function is invoked and a goroutine is started to check
-// if any contracts in the findRedemptionQueue are redeemed in the new blocks.
-func (dcr *ExchangeWallet) checkForNewBlocks() {
-	ctx, cancel := context.WithTimeout(dcr.ctx, 2*time.Second)
-	defer cancel()
-	newTip, err := dcr.getBestBlock(ctx)
-	if err != nil {
-		dcr.handleTipChange(nil, 0, fmt.Errorf("failed to get best block: %w", err))
-		return
-	}
-
-	dcr.tipMtx.RLock()
-	sameTip := dcr.currentTip.hash.IsEqual(newTip.hash)
-	dcr.tipMtx.RUnlock()
-	if !sameTip {
-		dcr.handleTipChange(newTip.hash, newTip.height, nil)
 	}
 }
 
