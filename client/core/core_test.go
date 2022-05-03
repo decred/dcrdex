@@ -362,7 +362,7 @@ type TDB struct {
 	verifyCreateAccount      bool
 	verifyUpdateAccountInfo  bool
 	accountProofPersisted    *db.AccountProof
-	disabledAcct             *db.AccountInfo
+	disabledHost             *string
 	disableAccountErr        error
 	creds                    *db.PrimaryCredentials
 	setCredsErr              error
@@ -394,8 +394,7 @@ func (tdb *TDB) CreateAccount(ai *db.AccountInfo) error {
 }
 
 func (tdb *TDB) DisableAccount(url string) error {
-	acct, _ := tdb.Account(url)
-	tdb.disabledAcct = acct
+	tdb.disabledHost = &url
 	return tdb.disableAccountErr
 }
 

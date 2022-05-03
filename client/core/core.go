@@ -2794,6 +2794,35 @@ func (c *Core) discoverAccount(dc *dexConnection, crypter encrypt.Crypter) (bool
 	return true, nil // great, just stay connected
 }
 
+// dexWithPubKeyExists checks whether or not there is a non-disabled account
+// for a dex that has pubKey.
+func (c *Core) dexWithPubKeyExists(pubKey *secp256k1.PublicKey) (bool, string) {
+	for _, dc := range c.dexConnections() {
+		if dc.acct.dexPubKey == nil {
+			continue
+		}
+
+		if dc.acct.dexPubKey.IsEqual(pubKey) {
+			return true, dc.acct.host
+		}
+	}
+
+	return false, ""
+}
+
+// upgradeConnection promotes a temporary dex connection and starts listening
+// to the messages it receives.
+func (c *Core) upgradeConnection(dc *dexConnection) {
+	if atomic.CompareAndSwapUint32(&dc.reportingConnects, 0, 1) {
+		c.wg.Add(1)
+		go c.listen(dc)
+		go dc.subPriceFeed()
+	}
+	c.connMtx.Lock()
+	c.conns[dc.acct.host] = dc
+	c.connMtx.Unlock()
+}
+
 // DiscoverAccount fetches the DEX server's config, and if the server supports
 // the new deterministic account derivation scheme by providing its public key
 // in the config response, DiscoverAccount also checks if the account is already
@@ -2832,15 +2861,8 @@ func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI interface{}) 
 				dc.connMaster.Disconnect()
 				return
 			}
-			// Promote this dexConnection and start listening for messages.
-			atomic.StoreUint32(&dc.reportingConnects, 1)
-			c.wg.Add(1)
-			go c.listen(dc)
-			go dc.subPriceFeed()
 
-			c.connMtx.Lock()
-			c.conns[dc.acct.host] = dc
-			c.connMtx.Unlock()
+			c.upgradeConnection(dc)
 		}()
 	}
 	if err != nil {
@@ -2851,6 +2873,15 @@ func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI interface{}) 
 	// but discovery can conclude we do not have an HD account with this DEX.
 	if dc.acct.dexPubKey == nil {
 		return dc.exchangeInfo(), false, nil
+	}
+
+	// Don't allow registering for another dex with the same pubKey. There can only
+	// be one dex connection per pubKey. UpdateDEXHost must be called to connect to
+	// the same dex using a different host name.
+	exists, host := c.dexWithPubKeyExists(dc.acct.dexPubKey)
+	if exists {
+		return nil, false,
+			fmt.Errorf("the dex at %v is the same dex as %v. Use Update Host to switch host names", host, dexAddr)
 	}
 
 	// Setup our account keys and attempt to authorize with the DEX.
@@ -3028,6 +3059,10 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		return nil, err
 	}
 	if paid { // would have gotten this from discoverAccount
+		c.connMtx.Lock()
+		c.conns[dc.acct.host] = dc
+		c.connMtx.Unlock()
+
 		registrationComplete = true
 		// register already promoted the connection
 		return &RegisterResult{FeeID: hex.EncodeToString(dc.acct.feeCoin), ReqConfirms: 0}, nil
@@ -3203,18 +3238,6 @@ func (c *Core) register(dc *dexConnection, assetID uint32) (regRes *msgjson.Regi
 			if err != nil {
 				return nil, true, false, fmt.Errorf("error authorizing pre-paid account: %w", err)
 			}
-
-			// If called from DiscoverAccount, where a temporary connection is used,
-			// promote this dexConnection and start listening for messages.
-			if atomic.CompareAndSwapUint32(&dc.reportingConnects, 0, 1) {
-				c.wg.Add(1)
-				go c.listen(dc)
-				go dc.subPriceFeed()
-			}
-
-			c.connMtx.Lock()
-			c.conns[dc.acct.host] = dc
-			c.connMtx.Unlock()
 
 			return nil, true, false, nil
 		}

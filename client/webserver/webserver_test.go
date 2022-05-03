@@ -192,6 +192,9 @@ func (c *TCore) RecoverWallet(uint32, []byte, bool) error {
 func (c *TCore) UpdateCert(string, []byte) error {
 	return nil
 }
+func (c *TCore) UpdateDEXHost(string, string, []byte, interface{}) (*core.Exchange, error) {
+	return nil, nil
+}
 
 type TWriter struct {
 	b []byte

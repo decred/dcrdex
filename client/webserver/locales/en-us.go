@@ -236,4 +236,5 @@ var EnUS = map[string]string{
 	"Update TLS Certificate":      "Update TLS Certificate",
 	"registered dexes":            "Registered Dexes:",
 	"successful_cert_update":      "Successfully updated certificate!",
+	"update dex host":             "Update DEX Host",
 }

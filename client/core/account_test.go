@@ -10,6 +10,7 @@ import (
 
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -145,9 +146,11 @@ func TestAccountDisable(t *testing.T) {
 		defer rig.shutdown()
 		tCore := rig.core
 		rig.crypter.(*tCrypter).recryptErr = test.recryptErr
+		rig.db.disabledHost = nil
 		rig.db.disableAccountErr = test.disableAcctErr
 		tCore.connMtx.Lock()
 		tCore.conns[tDexHost].trades = test.activeTrades
+
 		if test.loseConns {
 			// Lose the dexConnection
 			delete(tCore.conns, tDexHost)
@@ -170,12 +173,12 @@ func TestAccountDisable(t *testing.T) {
 		if _, found := tCore.conns[test.host]; found {
 			t.Fatal("found disabled account dex connection")
 		}
-		if rig.db.disabledAcct == nil {
+		if rig.db.disabledHost == nil {
 			t.Fatal("expected execution of db.DisableAccount")
 		}
-		if rig.db.disabledAcct.Host == test.host {
+		if *rig.db.disabledHost != test.host {
 			t.Fatalf("expected db disabled account to match test host, want: %v"+
-				" got: %v", test.host, rig.db.disabledAcct.Host)
+				" got: %v", test.host, *rig.db.disabledHost)
 		}
 	}
 }
@@ -252,6 +255,98 @@ func TestUpdateCert(t *testing.T) {
 		}
 		if !bytes.Equal(randomCert, rig.db.acct.Cert) {
 			t.Fatalf("%s: expected account to be updated with cert but it was not", test.name)
+		}
+	}
+}
+
+func TestUpdateDEXHost(t *testing.T) {
+	newPrivKey, _ := secp256k1.GeneratePrivateKey()
+	newPubKey := newPrivKey.PubKey()
+	newHost := "newhost.com:123"
+
+	tests := []struct {
+		name        string
+		oldHost     string
+		feePending  bool
+		expectError bool
+		newPubKey   *secp256k1.PublicKey
+	}{
+		{
+			name:      "ok",
+			oldHost:   tDexHost,
+			newPubKey: tDexKey,
+		},
+		{
+			name:        "new host has different pub key",
+			oldHost:     tDexHost,
+			newPubKey:   newPubKey,
+			expectError: true,
+		},
+		{
+			name:        "trying to update host that doesn't exist",
+			oldHost:     "hostdoesntexist.com:123",
+			newPubKey:   tDexKey,
+			expectError: true,
+		},
+		{
+			name:        "old dc still fee pending",
+			oldHost:     tDexHost,
+			newPubKey:   tDexKey,
+			feePending:  true,
+			expectError: true,
+		},
+	}
+
+	for _, test := range tests {
+		rig := newTestRig()
+		tCore := rig.core
+		rig.db.acct.Paid = true
+		rig.db.acct.FeeCoin = encode.RandomBytes(32)
+		rig.db.acct.Host = tDexHost
+
+		tCore.connMtx.Lock()
+		tCore.conns[rig.acct.host] = rig.dc
+		tCore.connMtx.Unlock()
+
+		rig.dc.pendingFee = nil
+		if test.feePending {
+			rig.dc.setPendingFee(42, 1)
+		}
+
+		rig.queueConfig()
+		rig.queueConnect(nil, []*msgjson.Match{}, []*msgjson.OrderStatus{}, false)
+		rig.dc.cfg.DEXPubKey = test.newPubKey.SerializeCompressed()
+
+		_, err := tCore.UpdateDEXHost(test.oldHost, newHost, tPW, []byte{11, 11})
+		if test.expectError {
+			if err == nil {
+				t.Fatalf("%s: expected error but did not get", err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%s: unepected error: %v", test.name, err)
+		}
+
+		if len(tCore.conns) != 1 {
+			t.Fatalf("%s: expected conns map to have 1 entry but got %d", test.name, len(tCore.conns))
+		}
+
+		if _, ok := tCore.conns[newHost]; !ok {
+			t.Fatalf("%s: new host was not added to connections map", test.name)
+		}
+
+		if rig.db.disabledHost == nil {
+			t.Fatalf("%s: expected execution of db.DisableAccount", test.name)
+		}
+		if *rig.db.disabledHost != rig.acct.host {
+			t.Fatalf("%s: expected db disabled account to match test host, want: %v"+
+				" got: %v", test.name, rig.acct.host, rig.db.disabledHost)
+		}
+
+		if rig.db.acct.Host != newHost {
+			t.Fatalf("%s: expected newly create host %v to match test host %v",
+				test.name, rig.db.acct.Host, newHost)
 		}
 	}
 }
