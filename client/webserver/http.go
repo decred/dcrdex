@@ -88,19 +88,24 @@ type registerTmplData struct {
 
 // handleRegister is the handler for the '/register' page request.
 func (s *WebServer) handleRegister(w http.ResponseWriter, r *http.Request) {
+	common := commonArgs(r, "Register | Decred DEX")
 	s.sendTemplate(w, "register", &registerTmplData{
-		CommonArguments: *commonArgs(r, "Register | Decred DEX"),
-		KnownExchanges:  s.knownExchanges(),
+		CommonArguments: *common,
+		KnownExchanges:  s.knownUnregisteredExchanges(common.UserInfo.Exchanges),
 	})
 }
 
-func (s *WebServer) knownExchanges() []string {
+// knownUnregisteredExchanges returns all the known exchanges that
+// the user has not registered for.
+func (s *WebServer) knownUnregisteredExchanges(registeredExchanges map[string]*core.Exchange) []string {
 	certs := core.CertStore[s.core.Network()]
-	knownExchanges := make([]string, 0, len(certs))
+	exchanges := make([]string, 0, len(certs))
 	for host := range certs {
-		knownExchanges = append(knownExchanges, host)
+		if _, alreadyRegistered := registeredExchanges[host]; !alreadyRegistered {
+			exchanges = append(exchanges, host)
+		}
 	}
-	return knownExchanges
+	return exchanges
 }
 
 // marketResult is the template data for the `/markets` page request.
@@ -234,12 +239,13 @@ func (s *WebServer) handleGenerateQRCode(w http.ResponseWriter, r *http.Request)
 
 // handleSettings is the handler for the '/settings' page request.
 func (s *WebServer) handleSettings(w http.ResponseWriter, r *http.Request) {
+	common := commonArgs(r, "Settings | Decred DEX")
 	data := &struct {
 		CommonArguments
 		KnownExchanges []string
 	}{
-		CommonArguments: *commonArgs(r, "Settings | Decred DEX"),
-		KnownExchanges:  s.knownExchanges(),
+		CommonArguments: *common,
+		KnownExchanges:  s.knownUnregisteredExchanges(common.UserInfo.Exchanges),
 	}
 	s.sendTemplate(w, "settings", data)
 }
@@ -260,12 +266,15 @@ func (s *WebServer) handleDexSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	common := *commonArgs(r, fmt.Sprintf("%v Settings | Decred DEX", host))
 	data := &struct {
 		CommonArguments
-		Exchange *core.Exchange
+		Exchange       *core.Exchange
+		KnownExchanges []string
 	}{
-		CommonArguments: *commonArgs(r, fmt.Sprintf("%v Settings | Decred DEX", host)),
+		CommonArguments: common,
 		Exchange:        exchange,
+		KnownExchanges:  s.knownUnregisteredExchanges(common.UserInfo.Exchanges),
 	}
 
 	s.sendTemplate(w, "dexsettings", data)

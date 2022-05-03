@@ -7,7 +7,8 @@ import * as forms from './forms'
 import {
   app,
   PageElement,
-  ConnectionStatus
+  ConnectionStatus,
+  Exchange
 } from './registry'
 
 const animationLength = 300
@@ -19,6 +20,7 @@ export default class DexSettingsPage extends BasePage {
   page: Record<string, PageElement>
   host: string
   keyup: (e: KeyboardEvent) => void
+  dexAddrForm: forms.DEXAddressForm
 
   constructor (body: HTMLElement) {
     super()
@@ -30,7 +32,12 @@ export default class DexSettingsPage extends BasePage {
     Doc.bind(page.exportDexBtn, 'click', () => this.prepareAccountExport(page.authorizeAccountExportForm))
     Doc.bind(page.disableAcctBtn, 'click', () => this.prepareAccountDisable(page.disableAccountForm))
     Doc.bind(page.updateCertBtn, 'click', () => page.certFileInput.click())
+    Doc.bind(page.updateHostBtn, 'click', () => this.prepareUpdateHost())
     Doc.bind(page.certFileInput, 'change', () => this.onCertFileChange())
+
+    this.dexAddrForm = new forms.DEXAddressForm(page.dexAddrForm, async (xc: Exchange) => {
+      window.location.assign(`/dexsettings/${xc.host}`)
+    }, undefined, this.host)
 
     forms.bind(page.authorizeAccountExportForm, page.authorizeExportAccountConfirm, () => this.exportAccount())
     forms.bind(page.disableAccountForm, page.disableAccountConfirm, () => this.disableAccount())
@@ -139,6 +146,12 @@ export default class DexSettingsPage extends BasePage {
     page.disableAccountHost.textContent = this.host
     page.disableAccountErr.textContent = ''
     this.showForm(disableAccountForm)
+  }
+
+  async prepareUpdateHost () {
+    const page = this.page
+    this.dexAddrForm.refresh()
+    this.showForm(page.dexAddrForm)
   }
 
   async onCertFileChange () {

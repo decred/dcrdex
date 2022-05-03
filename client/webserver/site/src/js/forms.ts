@@ -1083,8 +1083,9 @@ export class DEXAddressForm {
   defaultTLSText: string
   page: Record<string, PageElement>
   knownExchanges: HTMLElement[]
+  dexToUpdate?: string
 
-  constructor (form: HTMLElement, success: (xc: Exchange, cert: string) => void, pwCache?: PasswordCache) {
+  constructor (form: HTMLElement, success: (xc: Exchange, cert: string) => void, pwCache?: PasswordCache, dexToUpdate?: string) {
     this.form = form
     this.success = success
     this.pwCache = pwCache || null
@@ -1117,18 +1118,32 @@ export class DEXAddressForm {
     }
 
     bind(form, page.submit, () => this.checkDEX())
+
+    if (dexToUpdate) {
+      Doc.hide(page.addDexHdr)
+      Doc.show(page.updateDexHdr)
+      this.dexToUpdate = dexToUpdate
+    }
+
     this.refresh()
   }
 
   refresh () {
     const page = this.page
     page.addr.value = ''
+    page.appPW.value = ''
     this.clearCertFile()
+    Doc.hide(page.err)
     const hidePWBox = State.passwordIsCached() || (this.pwCache && this.pwCache.pw)
     if (hidePWBox) Doc.hide(page.appPWBox, page.auth)
     else Doc.show(page.appPWBox, page.auth)
-    Doc.hide(page.customBox)
-    Doc.show(page.showCustom)
+    if (this.knownExchanges.length === 0 || this.dexToUpdate) {
+      Doc.show(page.customBox, page.auth)
+      Doc.hide(page.showCustom, page.knownXCs, page.pickServerMsg, page.addCustomMsg)
+    } else {
+      Doc.hide(page.customBox)
+      Doc.show(page.showCustom)
+    }
     for (const div of this.knownExchanges) div.classList.remove('selected')
   }
 
@@ -1150,7 +1165,6 @@ export class DEXAddressForm {
       Doc.show(page.err)
       return
     }
-
     let cert = ''
     if (page.certFile.value) {
       const files = page.certFile.files
@@ -1158,19 +1172,29 @@ export class DEXAddressForm {
         cert = await files[0].text()
       }
     }
-
     let pw = ''
     if (!State.passwordIsCached()) {
       pw = page.appPW.value || (this.pwCache ? this.pwCache.pw : '')
     }
-
+    let endpoint : string, req: any
+    if (this.dexToUpdate) {
+      endpoint = '/api/updatedexhost'
+      req = {
+        newHost: addr,
+        cert: cert,
+        pw: pw,
+        oldHost: this.dexToUpdate
+      }
+    } else {
+      endpoint = '/api/discoveracct'
+      req = {
+        addr: addr,
+        cert: cert,
+        pass: pw
+      }
+    }
     const loaded = app().loading(this.form)
-
-    const res = await postJSON('/api/discoveracct', {
-      addr: addr,
-      cert: cert,
-      pass: pw
-    })
+    const res = await postJSON(endpoint, req)
     loaded()
     if (!app().checkResponse(res, true)) {
       if (res.msg === 'certificate required') {
@@ -1179,16 +1203,13 @@ export class DEXAddressForm {
         page.err.textContent = res.msg
         Doc.show(page.err)
       }
-
       return
     }
-
-    if (res.paid) {
+    if (!this.dexToUpdate && res.paid) {
       await app().fetchUser()
       app().loadPage('markets')
       return
     }
-
     if (this.pwCache) this.pwCache.pw = pw
     this.success(res.xc, cert)
   }

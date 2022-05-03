@@ -418,6 +418,40 @@ func (s *WebServer) apiUpdateCert(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
+func (s *WebServer) apiUpdateDEXHost(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		Pass    encode.PassBytes `json:"pw"`
+		OldHost string           `json:"oldHost"`
+		NewHost string           `json:"newHost"`
+		Cert    string           `json:"cert"`
+	}{}
+	defer form.Pass.Clear()
+	if !readPost(w, r, form) {
+		return
+	}
+	pass, err := s.resolvePass(form.Pass, r)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
+		return
+	}
+	defer zero(pass)
+	cert := []byte(form.Cert)
+	exchange, err := s.core.UpdateDEXHost(form.OldHost, form.NewHost, pass, cert)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error updating host: %w", err))
+		return
+	}
+
+	resp := struct {
+		OK       bool           `json:"ok"`
+		Exchange *core.Exchange `json:"xc,omitempty"`
+	}{
+		OK:       true,
+		Exchange: exchange,
+	}
+	writeJSON(w, resp, s.indent)
+}
+
 // apiAccountDisable is the handler for the '/disableaccount' API request.
 func (s *WebServer) apiAccountDisable(w http.ResponseWriter, r *http.Request) {
 	form := new(accountDisableForm)

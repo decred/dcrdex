@@ -32,7 +32,7 @@ func mainCore(ctx context.Context) error {
 	// Parse the configuration file, and setup logger.
 	cfg, opts, err := loadConfig()
 	if err != nil {
-		fmt.Printf("Failed to load dcrdata config: %s\n", err.Error())
+		fmt.Printf("Failed to load dcrdex config: %s\n", err.Error())
 		return err
 	}
 	defer func() {

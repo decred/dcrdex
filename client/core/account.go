@@ -9,6 +9,31 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
+// disconnectDEX unsubscribes from the dex's orderbooks, ends the connection
+// with the dex, and removes it from the connection map.
+func (c *Core) disconnectDEX(dc *dexConnection) {
+	// Stop dexConnection books.
+	dc.cfgMtx.RLock()
+	for _, m := range dc.cfg.Markets {
+		// Empty bookie's feeds map, close feeds' channels & stop close timers.
+		dc.booksMtx.Lock()
+		if b, found := dc.books[m.Name]; found {
+			b.closeFeeds()
+			if b.closeTimer != nil {
+				b.closeTimer.Stop()
+			}
+		}
+		dc.booksMtx.Unlock()
+		dc.stopBook(m.Base, m.Quote)
+	}
+	dc.cfgMtx.RUnlock()
+	// Disconnect and delete connection from map.
+	dc.connMaster.Disconnect()
+	c.connMtx.Lock()
+	delete(c.conns, dc.acct.host)
+	c.connMtx.Unlock()
+}
+
 // AccountDisable is used to disable an account by given host and application
 // password.
 func (c *Core) AccountDisable(pw []byte, addr string) error {
@@ -33,27 +58,8 @@ func (c *Core) AccountDisable(pw []byte, addr string) error {
 	if err != nil {
 		return newError(accountDisableErr, "error disabling account: %w", err)
 	}
-	// Stop dexConnection books.
-	dc.cfgMtx.RLock()
-	for _, m := range dc.cfg.Markets {
-		// Empty bookie's feeds map, close feeds' channels & stop close timers.
-		dc.booksMtx.Lock()
-		if b, found := dc.books[m.Name]; found {
-			b.closeFeeds()
-			if b.closeTimer != nil {
-				b.closeTimer.Stop()
-			}
-		}
-		dc.booksMtx.Unlock()
 
-		dc.stopBook(m.Base, m.Quote)
-	}
-	dc.cfgMtx.RUnlock()
-	// Disconnect and delete connection from map.
-	dc.connMaster.Disconnect()
-	c.connMtx.Lock()
-	delete(c.conns, dc.acct.host)
-	c.connMtx.Unlock()
+	c.disconnectDEX(dc)
 
 	return nil
 }
@@ -213,4 +219,73 @@ func (c *Core) UpdateCert(host string, cert []byte) error {
 	}
 
 	return nil
+}
+
+// UpdateDEXHost updates the host for a connection to a dex. The dex at oldHost
+// and newHost must be the same dex, which means that the dex at both hosts use
+// the same public key.
+func (c *Core) UpdateDEXHost(oldHost, newHost string, appPW []byte, certI interface{}) (*Exchange, error) {
+	if oldHost == newHost {
+		return nil, errors.New("old host and new host are the same")
+	}
+
+	crypter, err := c.encryptionKey(appPW)
+	if err != nil {
+		return nil, codedError(passwordErr, err)
+	}
+
+	oldDc, _, err := c.dex(oldHost)
+	if err != nil {
+		return nil, err
+	}
+
+	if oldDc.hasActiveOrders() {
+		return nil, fmt.Errorf("cannot update host while dex has active orders")
+	}
+
+	if oldDc.acct.dexPubKey == nil {
+		return nil, fmt.Errorf("cannot update host if dex public key is nil")
+	}
+
+	if oldDc.getPendingFee() != nil {
+		// The notify fee code will have to be completely refactored to allow
+		// this.
+		return nil, fmt.Errorf("host cannot be updated while registration fee is pending")
+	}
+
+	var updatedHost bool
+	newDc, err := c.tempDexConnection(newHost, certI)
+	if newDc != nil { // (re)connect loop may be running even if err != nil
+		defer func() {
+			// Either disconnect or promote this connection.
+			if !updatedHost {
+				newDc.connMaster.Disconnect()
+				return
+			}
+			c.upgradeConnection(newDc)
+		}()
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if !newDc.acct.dexPubKey.IsEqual(oldDc.acct.dexPubKey) {
+		return nil, fmt.Errorf("the dex at %s does not have the same public key as %s",
+			oldHost, newHost)
+	}
+
+	c.disconnectDEX(oldDc)
+
+	_, err = c.discoverAccount(newDc, crypter)
+	if err != nil {
+		return nil, err
+	}
+
+	err = c.db.DisableAccount(oldDc.acct.host)
+	if err != nil {
+		return nil, newError(accountDisableErr, "error disabling account: %w", err)
+	}
+
+	updatedHost = true
+	return newDc.exchangeInfo(), nil
 }
