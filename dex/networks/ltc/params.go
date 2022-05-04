@@ -7,7 +7,16 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/networks/btc"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 )
+
+func mustHash(hash string) *chainhash.Hash {
+	h, err := chainhash.NewHashFromStr(hash)
+	if err != nil {
+		panic(err.Error())
+	}
+	return h
+}
 
 var (
 	UnitInfo = dex.UnitInfo{
@@ -27,6 +36,7 @@ var (
 		Net:              0xdbb6c0fb,
 		HDPrivateKeyID:   [4]byte{0x04, 0x88, 0xad, 0xe4}, // starts with xprv
 		HDPublicKeyID:    [4]byte{0x04, 0x88, 0xb2, 0x1e}, // starts with xpub
+		GenesisHash:      mustHash("12a765e31ffd4059bada1e25190f6e98c99d9714d334efa41a195a7e7e04bfe2"),
 	})
 	// TestNet4Params are the clone parameters for testnet.
 	TestNet4Params = btc.ReadCloneParams(&btc.CloneParams{
@@ -38,6 +48,7 @@ var (
 		Net:              0xf1c8d2fd,
 		HDPrivateKeyID:   [4]byte{0x04, 0x35, 0x83, 0x94}, // starts with tprv
 		HDPublicKeyID:    [4]byte{0x04, 0x35, 0x87, 0xcf}, // starts with tpub
+		GenesisHash:      mustHash("4966625a4b2851d9fdee139e56211a0d88575f59ed816ff5e6a63deb4e3e29a0"),
 	})
 	// RegressionNetParams are the clone parameters for simnet.
 	RegressionNetParams = btc.ReadCloneParams(&btc.CloneParams{
@@ -54,6 +65,7 @@ var (
 		Net:            0x9acb0442,
 		HDPrivateKeyID: [4]byte{0x04, 0x35, 0x83, 0x94}, // starts with tprv
 		HDPublicKeyID:  [4]byte{0x04, 0x35, 0x87, 0xcf}, // starts with tpub
+		GenesisHash:    mustHash("530827f38f93b43ed12af0b3ad25a288dc02ed74d6d7857862df51fc56c416f9"),
 	})
 )
 

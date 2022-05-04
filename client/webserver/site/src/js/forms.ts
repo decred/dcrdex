@@ -197,6 +197,7 @@ export class NewWalletForm {
     // No default config files for seeded assets right now.
     const walletDef = app().walletDefinition(this.currentAsset.id, this.currentWalletType)
     if (walletDef.seeded) return
+    if (walletDef.configpath === '') return
     const loaded = app().loading(this.form)
     const res = await postJSON('/api/defaultwalletcfg', {
       assetID: this.currentAsset.id,

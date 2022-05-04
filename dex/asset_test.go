@@ -47,3 +47,28 @@ func TestConventionalString(t *testing.T) {
 		}
 	}
 }
+
+func Test_IntDivUp(t *testing.T) {
+	tests := []struct {
+		val, div int64
+		want     int64
+	}{
+		{-1, 2, 0},
+		{-1, 1, -1},
+		{0, 1, 0},
+		{1, 1, 1},
+		{1, 2, 1},
+		{3, 2, 2},
+		{3, 500, 1},
+		{1500, 500, 3},
+		{1501, 500, 4},
+		{23000, 1000, 23},
+		{23105, 1000, 24},
+		{24000, 1000, 24},
+	}
+	for _, tt := range tests {
+		if got := IntDivUp(tt.val, tt.div); got != tt.want {
+			t.Errorf("intDivUp() = %v, want %v", got, tt.want)
+		}
+	}
+}

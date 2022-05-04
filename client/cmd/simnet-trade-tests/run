@@ -10,11 +10,15 @@ case $1 in
     ;;
 
   dcrspvbtc)
-    ./simnet-trade-tests --base1node trading1 --base2node trading2 -base1spv ${@:2}
+    ./simnet-trade-tests --base1node trading1 --base2node trading2 -base1type spv ${@:2}
     ;;
 
   dcrbtcspv)
-    ./simnet-trade-tests --base1node trading1 --base2node trading2 --quote1spv ${@:2}
+    ./simnet-trade-tests --base1node trading1 --base2node trading2 --quote1type spv ${@:2}
+    ;;
+
+  dcrbtcelectrum)
+    ./simnet-trade-tests --base1node trading1 --base2node trading2 --quote1type electrum ${@:2}
     ;;
 
   bchdcr)
@@ -25,6 +29,11 @@ case $1 in
   ltcdcr)
     ./simnet-trade-tests --base ltc --quote dcr --quote1node trading1 --quote2node trading2 \
 		--regasset dcr ${@:2}
+    ;;
+
+  ltcelectrumdcr)
+    ./simnet-trade-tests --base ltc --quote dcr --quote1node trading1 --quote2node trading2 \
+		--base1type electrum --regasset dcr ${@:2}
     ;;
 
   dcrdoge)
@@ -50,8 +59,10 @@ The following pre-configured tests are available. Be sure to run the appropriate
 dcrbtc - RPC wallets on DCR-BTC market
 dcrspvbtc - Decred SPV wallet and Bitcoin RPC wallet on DCR-BTC
 dcrbtcspv - Decred RPC wallet and Bitcoin SPV wallet on DCR-BTC market
+dcrbtcelectrum - Decred RPC wallet and Bitcoin Electrum wallet on DCR-BTC market
 bchdcr - RPC wallets on BCH-DCR market
 ltcdcr - RPC wallets on LTC-DCR market
+ltcelectrumdcr - Litecoin Electrum wallet and Decred RPC wallet on LTC-DCR market
 dcrdoge - RPC wallets on DCR-DOGE market
 dcreth - Decred RPC wallet and Ethereum native wallet on DCR-ETH market
 zecbtc - RPC wallets on ZEC-BTC market

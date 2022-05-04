@@ -30,10 +30,11 @@ const (
 	BipID = 145
 	// The default fee is passed to the user as part of the asset.WalletInfo
 	// structure.
-	defaultFee        = 100
-	minNetworkVersion = 221100
-	walletTypeRPC     = "bitcoindRPC"
-	walletTypeLegacy  = ""
+	defaultFee         = 100
+	minNetworkVersion  = 221100
+	walletTypeRPC      = "bitcoindRPC"
+	walletTypeLegacy   = ""
+	walletTypeElectrum = "electrumRPC"
 )
 
 var (
@@ -43,12 +44,14 @@ var (
 		Simnet:  "18443",
 	}
 	fallbackFeeKey = "fallbackfee"
-	configOpts     = []*asset.ConfigOption{
+	walletNameOpt  = []*asset.ConfigOption{ // slice for easy appends
 		{
 			Key:         "walletname",
 			DisplayName: "Wallet Name",
 			Description: "The wallet name",
 		},
+	}
+	commonOpts = []*asset.ConfigOption{
 		{
 			Key:         "rpcuser",
 			DisplayName: "JSON-RPC Username",
@@ -86,19 +89,30 @@ var (
 			IsBoolean: true,
 		},
 	}
+	rpcWalletDefinition = &asset.WalletDefinition{
+		Type:              walletTypeRPC,
+		Tab:               "Bitcoin Cash Node (external)",
+		Description:       "Connect to bitcoind (the BCH fork)",
+		DefaultConfigPath: dexbtc.SystemConfigPath("bitcoin"), // Same as bitcoin. That's dumb.
+		ConfigOpts:        append(walletNameOpt, commonOpts...),
+	}
+	electrumWalletDefinition = &asset.WalletDefinition{
+		Type:        walletTypeElectrum,
+		Tab:         "Electron Cash  (external)",
+		Description: "Use an external Electron Cash (BCH Electrum fork) Wallet",
+		// json: DefaultConfigPath: filepath.Join(btcutil.AppDataDir("electrom-cash", false), "config"), // maybe?
+		ConfigOpts: commonOpts,
+	}
 	// WalletInfo defines some general information about a Bitcoin Cash wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:    "Bitcoin Cash",
 		Version: version,
 		// Same as bitcoin. That's dumb.
 		UnitInfo: dexbch.UnitInfo,
-		AvailableWallets: []*asset.WalletDefinition{{
-			Type:              walletTypeRPC,
-			Tab:               "External",
-			Description:       "Connect to bitcoind",
-			DefaultConfigPath: dexbtc.SystemConfigPath("bitcoin"), // Same as bitcoin. That's dumb.
-			ConfigOpts:        configOpts,
-		}},
+		AvailableWallets: []*asset.WalletDefinition{
+			rpcWalletDefinition,
+			// electrumWalletDefinition, // getinfo RPC needs backport: https://github.com/Electron-Cash/Electron-Cash/pull/2399
+		},
 	}
 )
 
@@ -144,12 +158,6 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
 
-	switch cfg.Type {
-	case walletTypeRPC, walletTypeLegacy:
-	default:
-		return nil, fmt.Errorf("unknown wallet type %q", cfg.Type)
-	}
-
 	// Designate the clone ports. These will be overwritten by any explicit
 	// settings in the configuration file. Bitcoin Cash uses the same default
 	// ports as Bitcoin.
@@ -172,7 +180,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		AddressStringer: dexbch.EncodeCashAddress,
 		// Bitcoin Cash has a custom signature hash algorithm. Since they don't
 		// have segwit, Bitcoin Cash implemented a variation of the withdrawn
-		// BIP0062 that utilizes Shnorr signatures.
+		// BIP0062 that utilizes Schnorr signatures.
 		// https://gist.github.com/markblundeberg/a3aba3c9d610e59c3c49199f697bc38b#making-unmalleable-smart-contracts
 		// https://github.com/bitcoin/bips/blob/master/bip-0062.mediawiki
 		NonSegwitSigner: rawTxInSigner,
@@ -183,7 +191,18 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		FeeEstimator: estimateFee,
 	}
 
-	return btc.BTCCloneWallet(cloneCFG)
+	switch cfg.Type {
+	case walletTypeRPC, walletTypeLegacy:
+		return btc.BTCCloneWallet(cloneCFG)
+	// case walletTypeElectrum:
+	// 	logger.Warnf("\n\nUNTESTED Bitcoin Cash ELECTRUM WALLET IMPLEMENTATION! DO NOT USE ON mainnet!\n\n")
+	// 	cloneCFG.FeeEstimator = nil        // Electrum can do it, use the feeRate method
+	// 	cloneCFG.LegacyBalance = false
+	// 	cloneCFG.Ports = dexbtc.NetPorts{} // no default ports for Electrum wallet
+	// 	return btc.ElectrumWallet(cloneCFG)
+	default:
+		return nil, fmt.Errorf("unknown wallet type %q", cfg.Type)
+	}
 }
 
 // rawTxSigner signs the transaction using Bitcoin Cash's custom signature

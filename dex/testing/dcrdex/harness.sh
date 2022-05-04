@@ -93,8 +93,8 @@ if [ $LTC_ON -eq 0 ]; then
         {
             "base": "LTC_simnet",
             "quote": "DCR_simnet",
-            "lotSize": 10000000,
-            "rateStep": 1000000,
+            "lotSize": 50000000,
+            "rateStep": 100000,
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2
 EOF

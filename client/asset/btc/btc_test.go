@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -478,9 +479,6 @@ func (c *testData) addRawTx(blockHeight int64, tx *wire.MsgTx) (*chainhash.Hash,
 	defer c.blockchainMtx.Unlock()
 	blockHash, found := c.mainchain[blockHeight]
 	if !found {
-		var newHash chainhash.Hash
-		copy(newHash[:], randBytes(32))
-		blockHash = &newHash
 		prevBlock := &chainhash.Hash{}
 		if blockHeight > 0 {
 			var exists bool
@@ -489,9 +487,12 @@ func (c *testData) addRawTx(blockHeight int64, tx *wire.MsgTx) (*chainhash.Hash,
 				prevBlock = &chainhash.Hash{}
 			}
 		}
-		header := wire.NewBlockHeader(0, prevBlock, &chainhash.Hash{}, 1, 2)
+		nonce, bits := rand.Uint32(), rand.Uint32()
+		header := wire.NewBlockHeader(0, prevBlock, &chainhash.Hash{} /* lie, maybe fix this */, bits, nonce)
 		header.Timestamp = generateTestBlockTime(blockHeight)
-		msgBlock := wire.NewMsgBlock(header)
+		msgBlock := wire.NewMsgBlock(header) // only now do we know the block hash
+		hash := msgBlock.BlockHash()
+		blockHash = &hash
 		c.verboseBlocks[blockHash.String()] = &msgBlockWithHeight{
 			msgBlock: msgBlock,
 			height:   blockHeight,
@@ -558,19 +559,10 @@ func makeTxHex(pkScripts []dex.Bytes, inputs []*wire.TxIn) ([]byte, error) {
 // msgTxFromHex creates a wire.MsgTx by deserializing the hex-encoded
 // transaction.
 func msgTxFromHex(txHex string) (*wire.MsgTx, error) {
-	b, err := hex.DecodeString(txHex)
-	if err != nil {
-		return nil, err
-	}
-	return msgTxFromBytes(b)
+	return deserializeMsgTx(hex.NewDecoder(strings.NewReader(txHex)))
 }
 
 func makeRPCVin(txHash *chainhash.Hash, vout uint32, sigScript []byte, witness [][]byte) *wire.TxIn {
-	var rpcWitness []string
-	for _, b := range witness {
-		rpcWitness = append(rpcWitness, hex.EncodeToString(b))
-	}
-
 	return wire.NewTxIn(wire.NewOutPoint(txHash, vout), sigScript, witness)
 }
 
@@ -623,6 +615,7 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWalletFullNode, *testD
 			select {
 			case data.tipChanged <- struct{}{}:
 			default:
+				fmt.Println("BACKED UP tipChanged channel!!!")
 			}
 		},
 		PeersChange: func(num uint32, err error) {
@@ -649,7 +642,6 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWalletFullNode, *testD
 	case walletTypeSPV:
 		w, err := newUnconnectedWallet(cfg, &WalletConfig{})
 		if err == nil {
-			wallet = &ExchangeWalletFullNode{w}
 			neutrinoClient := &tNeutrinoClient{data}
 			spvw := &spvWallet{
 				chainParams: &chaincfg.MainNetParams,
@@ -664,7 +656,13 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWalletFullNode, *testD
 				loader:      nil,
 			}
 			spvw.birthdayV.Store(time.Time{})
-			wallet.node = spvw
+			w.node = spvw
+			wallet = &ExchangeWalletFullNode{
+				intermediaryWallet: &intermediaryWallet{
+					baseWallet:  w,
+					tipRedeemer: spvw,
+				},
+			} // ? ExchangeWalletSPV
 		}
 	}
 
@@ -805,13 +803,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 		"any": {
 			BlockHash:  blockHash.String(),
 			BlockIndex: blockHeight,
-			Details: []*WalletTxDetails{
-				{
-					Amount: float64(lockedVal) / 1e8,
-					Vout:   1,
-				},
-			},
-			Hex: txBuf.Bytes(),
+			Hex:        txBuf.Bytes(),
 		}}
 
 	bal, err = wallet.Balance()
@@ -921,6 +913,11 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 		t.Fatalf("expected spendable of value %d, got %d", lottaFunds, v)
 	}
 
+	// Return/unlock the reserved coins to avoid warning in subsequent tests
+	// about fundingCoins map containing the coins already. i.e.
+	// "Known order-funding coin %v returned by listunspent"
+	_ = wallet.ReturnCoins(spendables)
+
 	// Now with safe confirmed littleUTXO.
 	littleUTXO.SafePtr = boolPtr(true)
 	littleUTXO.Confirmations = 2
@@ -936,6 +933,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	if v != littleFunds {
 		t.Fatalf("expected spendable of value %d, got %d", littleFunds, v)
 	}
+	_ = wallet.ReturnCoins(spendables)
 
 	// Adding a fee bump should now require the larger UTXO.
 	ord.Options = map[string]string{swapFeeBumpKey: "1.5"}
@@ -952,10 +950,6 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	}
 	ord.Options = nil
 	littleUTXO.Confirmations = 0
-
-	// Return/unlock the reserved coins to avoid warning in subsequent tests
-	// about fundingCoins map containing the coins already. i.e.
-	// "Known order-funding coin %v returned by listunspent"
 	_ = wallet.ReturnCoins(spendables)
 
 	// Make lottaOrder unconfirmed like littleOrder, favoring little now.
@@ -1074,6 +1068,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	if len(coins) != 1 {
 		t.Fatalf("forced split failed - coin count != 1")
 	}
+	_ = wallet.ReturnCoins(coins)
 
 	// // Hit some error paths.
 
@@ -1115,10 +1110,11 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	node.sendErr = nil
 
 	// Success again.
-	_, _, err = wallet.FundOrder(ord)
+	spendables, _, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error for split tx recovery run")
 	}
+	_ = wallet.ReturnCoins(spendables)
 }
 
 // Since ReturnCoins takes the asset.Coin interface, make sure any interface
@@ -1243,13 +1239,9 @@ func testFundingCoins(t *testing.T, segwit bool, walletType string) {
 		{TxID: p2pkhUnspent.TxID, Vout: p2pkhUnspent.Vout},
 	}
 	node.listUnspent = []*ListUnspentResult{}
+	txRaw, _ := serializeMsgTx(tx)
 	getTxRes := &GetTransactionResult{
-		Details: []*WalletTxDetails{
-			{
-				Vout:   p2pkhUnspent.Vout,
-				Amount: p2pkhUnspent.Amount,
-			},
-		},
+		Hex: txRaw,
 	}
 
 	node.getTransactionMap = map[string]*GetTransactionResult{
@@ -1365,10 +1357,11 @@ func TestFundEdges(t *testing.T) {
 
 	checkMax(lots, swapVal, backingFees, totalBytes*feeSuggestion, bestCaseBytes*feeSuggestion, swapVal+backingFees)
 
-	_, _, err = wallet.FundOrder(ord)
+	spendables, _, err := wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error when should be enough funding in single p2pkh utxo: %v", err)
 	}
+	_ = wallet.ReturnCoins(spendables)
 
 	// For a split transaction, we would need to cover the splitTxBaggage as
 	// well.
@@ -1390,6 +1383,8 @@ func TestFundEdges(t *testing.T) {
 	if coins[0].Value() != v {
 		t.Fatalf("split performed when baggage wasn't covered")
 	}
+	_ = wallet.ReturnCoins(spendables)
+
 	// Just enough.
 	v = swapVal + backingFees
 	p2pkhUnspent.Amount = float64(v) / 1e8
@@ -1404,6 +1399,7 @@ func TestFundEdges(t *testing.T) {
 	if coins[0].Value() == v {
 		t.Fatalf("split performed when baggage wasn't covered")
 	}
+	_ = wallet.ReturnCoins(spendables)
 	node.walletCfg.useSplitTx = false
 
 	// P2SH(P2PKH) p2sh pkScript = 23 bytes, p2pkh pkScript (redeemscript) = 25 bytes
@@ -1441,6 +1437,7 @@ func TestFundEdges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error when should be enough funding in two utxos: %v", err)
 	}
+	_ = wallet.ReturnCoins(spendables)
 
 	// P2WPKH witness: RedeemP2WPKHInputWitnessWeight = 109
 	// P2WPKH input size = overhead(40) + no sigScript(1+0) + witness(ceil(109/4)) = 69 vbytes
@@ -1471,6 +1468,7 @@ func TestFundEdges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error when should be enough funding in single p2wpkh utxo: %v", err)
 	}
+	_ = wallet.ReturnCoins(spendables)
 
 	// P2WSH(P2WPKH)
 	//  p2wpkh redeem script length, btc.P2WPKHPkScriptSize: 22
@@ -1505,6 +1503,7 @@ func TestFundEdges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error when should be enough funding in single p2wsh utxo: %v", err)
 	}
+	_ = wallet.ReturnCoins(spendables)
 }
 
 func TestFundEdgesSegwit(t *testing.T) {
@@ -1581,10 +1580,11 @@ func TestFundEdgesSegwit(t *testing.T) {
 
 	checkMax(lots, swapVal, backingFees, totalBytes*feeSuggestion, bestCaseBytes*feeSuggestion, swapVal+backingFees)
 
-	_, _, err = wallet.FundOrder(ord)
+	spendables, _, err := wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error when should be enough funding in single p2wpkh utxo: %v", err)
 	}
+	_ = wallet.ReturnCoins(spendables)
 
 	// For a split transaction, we would need to cover the splitTxBaggage as
 	// well.
@@ -1604,6 +1604,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 	if coins[0].Value() != v {
 		t.Fatalf("split performed when baggage wasn't covered")
 	}
+	_ = wallet.ReturnCoins(spendables)
 	// Now get the split.
 	v = swapVal + backingFees
 	p2wpkhUnspent.Amount = float64(v) / 1e8
@@ -1615,6 +1616,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error funding split tx: %v", err)
 	}
+	_ = wallet.ReturnCoins(spendables)
 	if coins[0].Value() == v {
 		t.Fatalf("split performed when baggage wasn't covered")
 	}
@@ -2054,7 +2056,7 @@ func testFindRedemption(t *testing.T, segwit bool, walletType string) {
 	otherTxHash, _ := chainhash.NewHashFromStr(otherTxid)
 	contractVout := uint32(1)
 
-	secret, _, pkScript, contract, addr, contractAddr, _ := makeSwapContract(segwit, time.Hour*12)
+	secret, _, pkScript, contract, addr, _, _ := makeSwapContract(segwit, time.Hour*12)
 	otherScript, _ := txscript.PayToAddrScript(addr)
 
 	var redemptionWitness, otherWitness [][]byte
@@ -2084,14 +2086,7 @@ func testFindRedemption(t *testing.T, segwit bool, walletType string) {
 	getTxRes := &GetTransactionResult{
 		BlockHash:  blockHash.String(),
 		BlockIndex: contractHeight,
-		Details: []*WalletTxDetails{
-			{
-				Address:  contractAddr.String(),
-				Category: TxCatSend,
-				Vout:     contractVout,
-			},
-		},
-		Hex: txHex,
+		Hex:        txHex,
 	}
 	node.getTransactionMap = map[string]*GetTransactionResult{
 		"any": getTxRes}
@@ -3173,7 +3168,7 @@ func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
 		changeOutputAmounts[3] = changeVal
 		swapAmount := int64(2e6)
 		for i := 2; i >= 0; i-- {
-			var changeAmount int64 = int64(toSatoshi(fees[i+1])) + changeOutputAmounts[i+1]
+			changeAmount := int64(toSatoshi(fees[i+1])) + changeOutputAmounts[i+1]
 			if !(i == 1 && addAcceleration) {
 				changeAmount += swapAmount
 			}
@@ -3309,7 +3304,6 @@ func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
 			TxID:          tx.TxHash().String(),
 			Hex:           unspentTxHex,
 			BlockHash:     blockHash,
-			Fee:           1e6,
 			Confirmations: uint64(confs)}
 	}
 
@@ -4108,7 +4102,7 @@ func TestReconfigure(t *testing.T) {
 	shutdown()
 
 	reconfigurer := &tReconfigurer{rpcClient: wallet.node.(*rpcClient)}
-	wallet.node = reconfigurer
+	wallet.baseWallet.node = reconfigurer
 
 	cfg := &asset.WalletConfig{
 		Settings: map[string]string{

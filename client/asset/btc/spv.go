@@ -61,6 +61,7 @@ import (
 const (
 	WalletTransactionNotFound = dex.ErrorKind("wallet transaction not found")
 	SpentStatusUnknown        = dex.ErrorKind("spend status not known")
+	// NOTE: possibly unexport the two above error kinds.
 
 	// defaultBroadcastWait is long enough for btcwallet's PublishTransaction
 	// method to record the outgoing transaction and queue it for broadcasting.
@@ -818,16 +819,14 @@ func (w *spvWallet) changeAddress() (btcutil.Address, error) {
 	return w.wallet.NewChangeAddress(w.acctNum, waddrmgr.KeyScopeBIP0084)
 }
 
-// addressPKH gets a new base58-encoded (P2PKH) external address from the
+// externalAddress gets a new bech32-encoded (P2WPKH) external address from the
 // wallet.
-func (w *spvWallet) addressPKH() (btcutil.Address, error) {
-	return nil, errors.New("unimplemented")
+func (w *spvWallet) externalAddress() (btcutil.Address, error) {
+	return w.wallet.NewAddress(w.acctNum, waddrmgr.KeyScopeBIP0084)
 }
 
-// addressWPKH gets a new bech32-encoded (P2WPKH) external address from the
-// wallet.
-func (w *spvWallet) addressWPKH() (btcutil.Address, error) {
-	return w.wallet.NewAddress(w.acctNum, waddrmgr.KeyScopeBIP0084)
+func (w *spvWallet) refundAddress() (btcutil.Address, error) {
+	return w.externalAddress()
 }
 
 // signTx attempts to have the wallet sign the transaction inputs.
@@ -1095,6 +1094,14 @@ func (w *spvWallet) getBlockHeader(blockHash *chainhash.Hash) (*blockHeader, err
 		Height:        int64(blockHeight),
 		Time:          hdr.Timestamp.Unix(),
 	}, nil
+}
+
+func (w *spvWallet) getBestBlockHeader() (*blockHeader, error) {
+	hash, err := w.getBestBlockHash()
+	if err != nil {
+		return nil, err
+	}
+	return w.getBlockHeader(hash)
 }
 
 func (w *spvWallet) logFilePath() string {
@@ -1782,13 +1789,6 @@ func (w *spvWallet) matchPkScript(blockHash *chainhash.Hash, scripts [][]byte) (
 	return matchFound, nil
 }
 
-// getWalletTransaction checks the wallet database for the specified
-// transaction. Only transactions with output scripts that pay to the wallet or
-// transactions that spend wallet outputs are stored in the wallet database.
-func (w *spvWallet) getWalletTransaction(txHash *chainhash.Hash) (*GetTransactionResult, error) {
-	return w.getTransaction(txHash)
-}
-
 // searchBlockForRedemptions attempts to find spending info for the specified
 // contracts by searching every input of all txs in the provided block range.
 func (w *spvWallet) searchBlockForRedemptions(ctx context.Context, reqs map[outPoint]*findRedemptionReq,
@@ -1858,10 +1858,12 @@ func (w *spvWallet) confirmations(txHash *chainhash.Hash, vout uint32) (blockHas
 	return blockHash, confs, false, SpentStatusUnknown
 }
 
-// getTransaction retrieves the specified wallet-related transaction.
-// This is pretty much a copy-past from btcwallet 'gettransaction' JSON-RPC
+// getWalletTransaction checks the wallet database for the specified
+// transaction. Only transactions with output scripts that pay to the wallet or
+// transactions that spend wallet outputs are stored in the wallet database.
+// This is pretty much copy-paste from btcwallet 'gettransaction' JSON-RPC
 // handler.
-func (w *spvWallet) getTransaction(txHash *chainhash.Hash) (*GetTransactionResult, error) {
+func (w *spvWallet) getWalletTransaction(txHash *chainhash.Hash) (*GetTransactionResult, error) {
 	// Option # 1 just copies from UnstableAPI.TxDetails. Duplicating the
 	// unexported bucket key feels dirty.
 	//
@@ -1878,13 +1880,17 @@ func (w *spvWallet) getTransaction(txHash *chainhash.Hash) (*GetTransactionResul
 	// This is what the JSON-RPC does (and has since at least May 2018).
 	details, err := w.wallet.walletTransaction(txHash)
 	if err != nil {
+		if errors.Is(err, WalletTransactionNotFound) {
+			return nil, asset.CoinNotFoundError // for the asset.Wallet interface
+		}
 		return nil, err
 	}
 
 	syncBlock := w.wallet.syncedTo()
 
-	// TODO: The serialized transaction is already in the DB, so
-	// reserializing can be avoided here.
+	// TODO: The serialized transaction is already in the DB, so reserializing
+	// might be avoided here. According to btcwallet, details.SerializedTx is
+	// "optional" (?), but we might check for it.
 	txRaw, err := serializeMsgTx(&details.MsgTx)
 	if err != nil {
 		return nil, err
@@ -1900,74 +1906,35 @@ func (w *spvWallet) getTransaction(txHash *chainhash.Hash) (*GetTransactionResul
 	if details.Block.Height != -1 {
 		ret.BlockHash = details.Block.Hash.String()
 		ret.BlockTime = uint64(details.Block.Time.Unix())
-		ret.BlockHeight = uint64(details.Block.Height)
+		// ret.BlockHeight = uint64(details.Block.Height)
 		ret.Confirmations = uint64(confirms(details.Block.Height, syncBlock.Height))
 	}
 
-	var (
-		debitTotal  btcutil.Amount
-		creditTotal btcutil.Amount // Excludes change
-		fee         btcutil.Amount
-		feeF64      float64
-	)
-	for _, deb := range details.Debits {
-		debitTotal += deb.Amount
-	}
-	for _, cred := range details.Credits {
-		if !cred.Change {
-			creditTotal += cred.Amount
-		}
-	}
-	// Fee can only be determined if every input is a debit.
-	if len(details.Debits) == len(details.MsgTx.TxIn) {
-		var outputTotal btcutil.Amount
-		for _, output := range details.MsgTx.TxOut {
-			outputTotal += btcutil.Amount(output.Value)
-		}
-		fee = debitTotal - outputTotal
-		feeF64 = fee.ToBTC()
-	}
-
-	if len(details.Debits) == 0 {
-		// Credits must be set later, but since we know the full length
-		// of the details slice, allocate it with the correct cap.
-		ret.Details = make([]*WalletTxDetails, 0, len(details.Credits))
-	} else {
-		ret.Details = make([]*WalletTxDetails, 1, len(details.Credits)+1)
-
-		ret.Details[0] = &WalletTxDetails{
-			Category: "send",
-			Amount:   (-debitTotal).ToBTC(), // negative since it is a send
-			Fee:      feeF64,
-		}
-		ret.Fee = feeF64
-	}
-
-	credCat := wallet.RecvCategory(details, syncBlock.Height, w.chainParams).String()
-	for _, cred := range details.Credits {
-		// Change is ignored.
-		if cred.Change {
-			continue
-		}
-
-		var address string
-		_, addrs, _, err := txscript.ExtractPkScriptAddrs(
-			details.MsgTx.TxOut[cred.Index].PkScript, w.chainParams)
-		if err == nil && len(addrs) == 1 {
-			addr := addrs[0]
-			address = addr.EncodeAddress()
-		}
-
-		ret.Details = append(ret.Details, &WalletTxDetails{
-			Address:  address,
-			Category: WalletTxCategory(credCat),
-			Amount:   cred.Amount.ToBTC(),
-			Vout:     cred.Index,
-		})
-	}
-
-	ret.Amount = creditTotal.ToBTC()
 	return ret, nil
+
+	/*
+		var debitTotal, creditTotal btcutil.Amount // credits excludes change
+		for _, deb := range details.Debits {
+			debitTotal += deb.Amount
+		}
+		for _, cred := range details.Credits {
+			if !cred.Change {
+				creditTotal += cred.Amount
+			}
+		}
+
+		// Fee can only be determined if every input is a debit.
+		if len(details.Debits) == len(details.MsgTx.TxIn) {
+			var outputTotal btcutil.Amount
+			for _, output := range details.MsgTx.TxOut {
+				outputTotal += btcutil.Amount(output.Value)
+			}
+			ret.Fee = (debitTotal - outputTotal).ToBTC()
+		}
+
+		ret.Amount = creditTotal.ToBTC()
+		return ret, nil
+	*/
 }
 
 // walletExtender gives us access to a handful of fields or methods on
@@ -2030,7 +1997,7 @@ func (w *walletExtender) signTransaction(tx *wire.MsgTx) error {
 		txIn.SignatureScript = nil
 		txIn.Witness = nil
 	}
-	return walletdb.View(w.Database(), func(dbtx walletdb.ReadTx) error {
+	return walletdb.View(w.Database(), func(dbtx walletdb.ReadTx) error { // what is the db tx for?
 		return txauthor.AddAllInputScripts(tx, prevPkScripts, inputValues, &secretSource{w, w.chainParams})
 	})
 }

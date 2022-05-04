@@ -29,3 +29,5 @@ dex/testing/loadbot/loadbot
 bin/
 client/webserver/site/template-builder/template-builder
 dex/testing/btc/harnesschain.tar.gz
+client/asset/btc/electrum/example/server/server
+client/asset/btc/electrum/example/wallet/wallet

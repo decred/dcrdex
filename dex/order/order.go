@@ -420,7 +420,7 @@ type Trade struct {
 	Coins    []CoinID
 	Sell     bool
 	Quantity uint64
-	Address  string
+	Address  string // TODO: provide later, maybe in the match ack
 
 	// FillAmt is not part of the order's serialization.
 	fillAmtMtx sync.RWMutex

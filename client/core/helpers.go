@@ -494,6 +494,9 @@ func (m *matchReader) SwapConfirmString() string {
 	if confs == nil || confs.Required == 0 {
 		return ""
 	}
+	if confs.Count < 0 {
+		return "confirmations unknown"
+	}
 	return fmt.Sprintf("%d / %d confirmations", confs.Count, confs.Required)
 }
 
@@ -517,6 +520,9 @@ func (m *matchReader) CounterSwapConfirmString() string {
 	confs := m.CounterSwap.Confs
 	if confs == nil || confs.Required == 0 {
 		return ""
+	}
+	if confs.Count < 0 {
+		return "confirmations unknown"
 	}
 	return fmt.Sprintf("%d / %d confirmations", confs.Count, confs.Required)
 }

@@ -38,6 +38,9 @@ func (c *Core) logNote(n Notification) {
 		return
 	default:
 	}
+	if n.Subject() == "" && n.Details() == "" {
+		return
+	}
 
 	logFun := c.log.Warnf // default in case the Severity level is unknown to notify
 	switch n.Severity() {
