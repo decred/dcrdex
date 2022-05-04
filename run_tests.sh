@@ -52,7 +52,7 @@ go test "${dumptags[@]}" harness ./client/asset/btc/livetest
 go test "${dumptags[@]}" harness ./client/asset/ltc
 go test "${dumptags[@]}" harness ./client/asset/bch
 go test "${dumptags[@]}" harness,lgpl ./client/asset/eth
-go test "${dumptags[@]}" harness ./client/core
+go test "${dumptags[@]}" harness,lgpl ./client/core
 go test "${dumptags[@]}" dcrlive ./server/asset/dcr
 go test "${dumptags[@]}" btclive ./server/asset/btc
 go test "${dumptags[@]}" ltclive ./server/asset/ltc

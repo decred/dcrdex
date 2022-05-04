@@ -407,10 +407,6 @@ func TestCheckForNewBlocks(t *testing.T) {
 }
 
 func TestSyncStatus(t *testing.T) {
-	fourthSyncProg := &ethereum.SyncProgress{
-		CurrentBlock: 25,
-		HighestBlock: 100,
-	}
 	tests := []struct {
 		name                string
 		syncProg            ethereum.SyncProgress
@@ -419,20 +415,35 @@ func TestSyncStatus(t *testing.T) {
 		wantErr, wantSynced bool
 		wantRatio           float32
 	}{{
-		name:       "ok synced",
+		name: "ok synced",
+		syncProg: ethereum.SyncProgress{
+			CurrentBlock: 25,
+			HighestBlock: 25,
+		},
 		wantRatio:  1,
 		wantSynced: true,
 	}, {
-		name:      "ok syncing",
-		syncProg:  *fourthSyncProg,
+		name: "ok syncing",
+		syncProg: ethereum.SyncProgress{
+			CurrentBlock: 25,
+			HighestBlock: 100,
+		},
 		wantRatio: 0.25,
 	}, {
-		name:    "ok header too old",
+		name: "ok header too old",
+		syncProg: ethereum.SyncProgress{
+			CurrentBlock: 25,
+			HighestBlock: 25,
+		},
 		subSecs: dexeth.MaxBlockInterval + 1,
 	}, {
 		name:       "best header error",
 		bestHdrErr: errors.New(""),
-		wantErr:    true,
+		syncProg: ethereum.SyncProgress{
+			CurrentBlock: 25,
+			HighestBlock: 25,
+		},
+		wantErr: true,
 	}}
 
 	for _, test := range tests {
