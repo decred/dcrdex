@@ -15,24 +15,27 @@ import (
 	"github.com/btcsuite/btcd/wire"
 )
 
+// Wallet is the interface that BTC wallet backends must implement. TODO: plumb
+// all requests with a context.Context.
 type Wallet interface {
-	RawRequester
+	RawRequester // for estimateFee calls
 	connect(ctx context.Context, wg *sync.WaitGroup) error
-	estimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error)
+	estimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error) // TODO: ditch these btcjson types when killing the RawRequester
 	sendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error)
 	getTxOut(txHash *chainhash.Hash, index uint32, pkScript []byte, startTime time.Time) (*wire.TxOut, uint32, error)
 	getBlockHash(blockHeight int64) (*chainhash.Hash, error)
-	getBlockHeight(*chainhash.Hash) (int32, error)
 	getBestBlockHash() (*chainhash.Hash, error)
 	getBestBlockHeight() (int32, error)
 	medianTime() (time.Time, error)
 	balances() (*GetBalancesResult, error)
-	listUnspent() ([]*ListUnspentResult, error)
+	listUnspent() ([]*ListUnspentResult, error) // must not return locked coins
 	lockUnspent(unlock bool, ops []*output) error
 	listLockUnspent() ([]*RPCOutpoint, error)
-	changeAddress() (btcutil.Address, error)
-	addressPKH() (btcutil.Address, error)
-	addressWPKH() (btcutil.Address, error)
+	changeAddress() (btcutil.Address, error) // warning: don't just use the Stringer if there's a "recode" function for a clone e.g. BCH
+	externalAddress() (btcutil.Address, error)
+	// The refund addresses are almost never used, so we might tolerate some
+	// address reuse if the backend requires.
+	refundAddress() (btcutil.Address, error)
 	signTx(inTx *wire.MsgTx) (*wire.MsgTx, error)
 	privKeyForAddress(addr string) (*btcec.PrivateKey, error)
 	walletUnlock(pw []byte) error
@@ -42,13 +45,26 @@ type Wallet interface {
 	syncStatus() (*syncStatus, error)
 	peerCount() (uint32, error)
 	swapConfirmations(txHash *chainhash.Hash, vout uint32, contract []byte, startTime time.Time) (confs uint32, spent bool, err error)
-	getBlockHeader(blockHash *chainhash.Hash) (*blockHeader, error)
-	ownsAddress(addr btcutil.Address) (bool, error)
+	getBestBlockHeader() (*blockHeader, error)
+	ownsAddress(addr btcutil.Address) (bool, error) // this should probably just take a string
 	getWalletTransaction(txHash *chainhash.Hash) (*GetTransactionResult, error)
+	reconfigure(walletCfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error)
+}
+
+type tipRedemptionWallet interface {
+	Wallet
+	getBlockHeight(*chainhash.Hash) (int32, error)
+	getBlockHeader(blockHash *chainhash.Hash) (*blockHeader, error)
+	getBlock(h chainhash.Hash) (*wire.MsgBlock, error)
 	searchBlockForRedemptions(ctx context.Context, reqs map[outPoint]*findRedemptionReq, blockHash chainhash.Hash) (discovered map[outPoint]*findRedemptionResult)
 	findRedemptionsInMempool(ctx context.Context, reqs map[outPoint]*findRedemptionReq) (discovered map[outPoint]*findRedemptionResult)
-	getBlock(h chainhash.Hash) (*wire.MsgBlock, error)
-	reconfigure(walletCfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error)
+}
+
+// walletTxChecker provide a fast wallet tx query when block info not needed.
+// This should be treated as an optimization method, where getWalletTransaction
+// may always be used in its place if it does not exists.
+type walletTxChecker interface {
+	checkWalletTx(txid string) ([]byte, uint32, error)
 }
 
 // tipNotifier can be implemented if the Wallet is able to provide a stream of

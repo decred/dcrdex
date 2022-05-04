@@ -55,43 +55,28 @@ type SignTxError struct {
 	Error     string    `json:"error"`
 }
 
-// GetTransactionResult models the data from the gettransaction command.
+// GetTransactionResult models the required data from the gettransaction
+// command. Several fields from the bitcoind/btcwallet response that are both
+// unneeded and difficult to satisfy are omitted. e.g. the native btcwallet and
+// the external Electrum backends must jump through hoops to reproduce certain
+// fields that are not strictly necessary.
 type GetTransactionResult struct {
-	Amount         float64            `json:"amount"`
-	Fee            float64            `json:"fee"`
-	Confirmations  uint64             `json:"confirmations"`
-	BlockHash      string             `json:"blockhash"`
-	BlockIndex     int64              `json:"blockindex"`
-	BlockTime      uint64             `json:"blocktime"`
-	BlockHeight    uint64             `json:"blockheight"`
-	TxID           string             `json:"txid"`
-	Time           uint64             `json:"time"`
-	TimeReceived   uint64             `json:"timereceived"`
-	BipReplaceable string             `json:"bip125-replaceable"`
-	Hex            dex.Bytes          `json:"hex"`
-	Details        []*WalletTxDetails `json:"details"`
-}
-
-// WalletTxCategory is the tx output category set in WalletTxDetails.
-type WalletTxCategory string
-
-const (
-	TxCatSend     WalletTxCategory = "send"
-	TxCatReceive  WalletTxCategory = "receive"
-	TxCatGenerate WalletTxCategory = "generate"
-	TxCatImmature WalletTxCategory = "immature"
-	TxCatOrphan   WalletTxCategory = "orphan"
-)
-
-// WalletTxDetails models the details data from the gettransaction command.
-type WalletTxDetails struct {
-	Address   string           `json:"address"`
-	Category  WalletTxCategory `json:"category"`
-	Amount    float64          `json:"amount"`
-	Label     string           `json:"label"`
-	Vout      uint32           `json:"vout"`
-	Fee       float64          `json:"fee"`
-	Abandoned bool             `json:"abandoned"`
+	// The meaning of Amount and Fee for "wallet" transactions is iffy (and they
+	// are unused), so we are going to ignore them.  We have the raw tx (Hex) if
+	// it is necessary to compute amounts from the inputs and outputs.
+	// Amount         float64   `json:"amount"`
+	// Fee            float64   `json:"fee"`
+	Confirmations uint64 `json:"confirmations"`
+	BlockHash     string `json:"blockhash"`
+	BlockIndex    int64  `json:"blockindex"` // unused, consider commenting
+	BlockTime     uint64 `json:"blocktime"`
+	// BlockHeight   uint64    `json:"blockheight"` // unused, potentially work to obtain
+	TxID         string    `json:"txid"`
+	Time         uint64    `json:"time"`
+	TimeReceived uint64    `json:"timereceived"`
+	Hex          dex.Bytes `json:"hex"` // []byte, although it marshals/unmarshals a hex string
+	// BipReplaceable string    `json:"bip125-replaceable"` // unused
+	// Details        []*WalletTxDetails `json:"details"` // unused, and nearly impossible to satisfy in a generic interface
 }
 
 // RPCOutpoint is used to specify outputs to lock in calls to lockunspent.

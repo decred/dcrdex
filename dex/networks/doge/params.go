@@ -7,6 +7,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/networks/btc"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 )
 
 const (
@@ -21,6 +22,14 @@ const (
 	DefaultFee          = 4_000  // 0.04 DOGE/kB, 4x the 0.01 recommended by dogecoin core (DEFAULT_TRANSACTION_FEE)
 	DefaultFeeRateLimit = 50_000 // 0.5 DOGE/kB, where v1.14.5 considers 1.0 DOGE/kB "high" (HIGH_TX_FEE_PER_KB)
 )
+
+func mustHash(hash string) *chainhash.Hash {
+	h, err := chainhash.NewHashFromStr(hash)
+	if err != nil {
+		panic(err.Error())
+	}
+	return h
+}
 
 var (
 	UnitInfo = dex.UnitInfo{
@@ -37,6 +46,7 @@ var (
 		ScriptHashAddrID: 0x16,
 		CoinbaseMaturity: 30,
 		Net:              0xc0c0c0c0,
+		GenesisHash:      mustHash("1a91e3dace36e2be3bf030a65679fe821aa1d6ef92e7c9902eb318182c355691"),
 	})
 	// TestNet4Params are the clone parameters for testnet.
 	TestNet4Params = btc.ReadCloneParams(&btc.CloneParams{
@@ -44,6 +54,7 @@ var (
 		ScriptHashAddrID: 0xc4,
 		CoinbaseMaturity: 30,
 		Net:              0xfcc1b7dc,
+		GenesisHash:      mustHash("bb0a78264637406b6360aad926284d544d7049f45189db5664f3c4d07350559e"),
 	})
 	// RegressionNetParams are the clone parameters for simnet.
 	RegressionNetParams = btc.ReadCloneParams(&btc.CloneParams{
@@ -55,7 +66,8 @@ var (
 		// btcd/chaincfg.Register, where it is checked to prevent duplicate
 		// registration, so our only requirement is that it is unique. This one
 		// was just generated with a prng.
-		Net: 0xfabfb5da,
+		Net:         0xfabfb5da,
+		GenesisHash: nil, // TODO or unused with simnet?
 	})
 )
 

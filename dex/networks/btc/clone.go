@@ -6,6 +6,7 @@ package btc
 import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 )
 
@@ -28,6 +29,7 @@ func ReadCloneParams(cloneParams *CloneParams) *chaincfg.Params {
 		Net:              wire.BitcoinNet(cloneParams.Net),
 		HDPrivateKeyID:   cloneParams.HDPrivateKeyID,
 		HDPublicKeyID:    cloneParams.HDPublicKeyID,
+		GenesisHash:      cloneParams.GenesisHash,
 	}
 }
 
@@ -50,7 +52,8 @@ type CloneParams struct {
 	// spending a coinbase input can be spent.
 	CoinbaseMaturity uint16
 	// Net is the network identifier, e.g. wire.BitcoinNet.
-	Net uint32
+	Net         uint32
+	GenesisHash *chainhash.Hash
 	// HDPrivateKeyID and HDPublicKeyID are the BIP32 hierarchical deterministic
 	// extended key magic sequences. They are ONLY required if there is a need
 	// to derive addresses from an extended key, such as if the asset is being

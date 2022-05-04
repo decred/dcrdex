@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/decred/dcrd/dcrjson/v4" // for dcrjson.RPCError returns from rpcclient
 )
 
 const (
@@ -58,6 +60,30 @@ const (
 	methodGetNetworkInfo     = "getnetworkinfo"
 	methodGetBlockchainInfo  = "getblockchaininfo"
 )
+
+// isTxNotFoundErr will return true if the error indicates that the requested
+// transaction is not known. The error must be dcrjson.RPCError with a numeric
+// code equal to btcjson.ErrRPCNoTxInfo. WARNING: This is specific to errors
+// from an RPC to a bitcoind (or clone) using dcrd's rpcclient!
+func isTxNotFoundErr(err error) bool {
+	// We are using dcrd's client with Bitcoin Core, so errors will be of type
+	// dcrjson.RPCError, but numeric codes should come from btcjson.
+	const errRPCNoTxInfo = int(btcjson.ErrRPCNoTxInfo)
+	var rpcErr *dcrjson.RPCError
+	return errors.As(err, &rpcErr) && int(rpcErr.Code) == errRPCNoTxInfo
+}
+
+// isMethodNotFoundErr will return true if the error indicates that the RPC
+// method was not found by the RPC server. The error must be dcrjson.RPCError
+// with a numeric code equal to btcjson.ErrRPCMethodNotFound.Code or a message
+// containing "method not found".
+func isMethodNotFoundErr(err error) bool {
+	var errRPCMethodNotFound = int(btcjson.ErrRPCMethodNotFound.Code)
+	var rpcErr *dcrjson.RPCError
+	return errors.As(err, &rpcErr) &&
+		(int(rpcErr.Code) == errRPCMethodNotFound ||
+			strings.Contains(strings.ToLower(rpcErr.Message), "method not found"))
+}
 
 // RawRequester defines decred's rpcclient RawRequest func where all RPC
 // requests sent through. For testing, it can be satisfied by a stub.
@@ -343,12 +369,17 @@ func (wc *rpcClient) getBestBlockHash() (*chainhash.Hash, error) {
 }
 
 // getBestBlockHeight returns the height of the top mainchain block.
-func (wc *rpcClient) getBestBlockHeight() (int32, error) {
+func (wc *rpcClient) getBestBlockHeader() (*blockHeader, error) {
 	tipHash, err := wc.getBestBlockHash()
 	if err != nil {
-		return -1, err
+		return nil, err
 	}
-	header, err := wc.getBlockHeader(tipHash)
+	return wc.getBlockHeader(tipHash)
+}
+
+// getBestBlockHeight returns the height of the top mainchain block.
+func (wc *rpcClient) getBestBlockHeight() (int32, error) {
+	header, err := wc.getBestBlockHeader()
 	if err != nil {
 		return -1, err
 	}
@@ -478,16 +509,15 @@ func (wc *rpcClient) changeAddress() (btcutil.Address, error) {
 	return wc.decodeAddr(addrStr, wc.chainParams)
 }
 
-// AddressPKH gets a new base58-encoded (P2PKH) external address from the
-// wallet.
-func (wc *rpcClient) addressPKH() (btcutil.Address, error) {
+func (wc *rpcClient) externalAddress() (btcutil.Address, error) {
+	if wc.segwit {
+		return wc.address("bech32")
+	}
 	return wc.address("legacy")
 }
 
-// addressWPKH gets a new bech32-encoded (P2WPKH) external address from the
-// wallet.
-func (wc *rpcClient) addressWPKH() (btcutil.Address, error) {
-	return wc.address("bech32")
+func (wc *rpcClient) refundAddress() (btcutil.Address, error) {
+	return wc.externalAddress()
 }
 
 // address is used internally for fetching addresses of various types from the
@@ -714,6 +744,9 @@ func (wc *rpcClient) getWalletTransaction(txHash *chainhash.Hash) (*GetTransacti
 	tx := new(GetTransactionResult)
 	err := wc.call(methodGetTransaction, anylist{txHash.String()}, tx)
 	if err != nil {
+		if isTxNotFoundErr(err) {
+			return nil, asset.CoinNotFoundError
+		}
 		return nil, err
 	}
 	return tx, nil
@@ -985,23 +1018,4 @@ func call(ctx context.Context, r RawRequesterWithContext, method string, args an
 		return json.Unmarshal(b, thing)
 	}
 	return nil
-}
-
-// serializeMsgTx serializes the wire.MsgTx.
-func serializeMsgTx(msgTx *wire.MsgTx) ([]byte, error) {
-	buf := bytes.NewBuffer(make([]byte, 0, msgTx.SerializeSize()))
-	err := msgTx.Serialize(buf)
-	if err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-// msgTxFromBytes creates a wire.MsgTx by deserializing the transaction.
-func msgTxFromBytes(txB []byte) (*wire.MsgTx, error) {
-	msgTx := new(wire.MsgTx)
-	if err := msgTx.Deserialize(bytes.NewReader(txB)); err != nil {
-		return nil, err
-	}
-	return msgTx, nil
 }

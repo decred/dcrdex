@@ -818,6 +818,10 @@ func (w *TXCWallet) DepositAddress() (string, error) {
 	return "", w.addrErr
 }
 
+func (w *TXCWallet) RedemptionAddress() (string, error) {
+	return "", w.addrErr
+}
+
 func (w *TXCWallet) NewAddress() (string, error) {
 	return "", w.addrErr
 }

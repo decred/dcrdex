@@ -50,6 +50,7 @@ go build -tags harness,lgpl -o /dev/null ./client/cmd/simnet-trade-tests
 dumptags=(-c -o /dev/null -tags)
 go test "${dumptags[@]}" live,lgpl ./client/webserver
 go test "${dumptags[@]}" harness ./client/asset/dcr
+go test "${dumptags[@]}" electrumlive ./client/asset/btc
 go test "${dumptags[@]}" harness ./client/asset/btc/livetest
 go test "${dumptags[@]}" harness ./client/asset/ltc
 go test "${dumptags[@]}" harness ./client/asset/bch

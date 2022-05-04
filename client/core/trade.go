@@ -581,7 +581,7 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 			prefix:          t.Prefix(),
 			trade:           trade,
 			MetaMatch:       *t.makeMetaMatch(msgMatch),
-			counterConfirms: -1,
+			counterConfirms: -1, // initially unknown, log first check
 			lastExpireDur:   365 * 24 * time.Hour,
 		}
 		match.Status = order.NewlyMatched // these must be new matches
@@ -958,11 +958,12 @@ func (t *trackedTrade) isActive() bool {
 
 	// Status of all matches for the order.
 	for _, match := range t.matches {
-		proof := &match.MetaData.Proof
-		t.dc.log.Tracef("Checking match %s (%v) in status %v. "+
-			"Order: %v, Refund coin: %v, ContractData: %x, Revoked: %v", match,
-			match.Side, match.Status, t.ID(),
-			proof.RefundCoin, proof.ContractData, proof.IsRevoked())
+		// For debugging issues with match status and steps:
+		// proof := &match.MetaData.Proof
+		// t.dc.log.Tracef("Checking match %s (%v) in status %v. "+
+		// 	"Order: %v, Refund coin: %v, ContractData: %x, Revoked: %v", match,
+		// 	match.Side, match.Status, t.ID(),
+		// 	proof.RefundCoin, proof.ContractData, proof.IsRevoked())
 		if t.matchIsActive(match) {
 			return true
 		}
@@ -1042,8 +1043,8 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 	}
 
 	if match.swapErr != nil || match.MetaData.Proof.IsRevoked() || match.tickGovernor != nil || match.checkServerRevoke {
-		t.dc.log.Tracef("Match %s not swappable: swapErr = %v, revoked = %v, metered = %t, checkServerRevoke = %v",
-			match, match.swapErr, match.MetaData.Proof.IsRevoked(), match.tickGovernor != nil, match.checkServerRevoke)
+		// t.dc.log.Tracef("Match %s not swappable: swapErr = %v, revoked = %v, metered = %t, checkServerRevoke = %v",
+		// 	match, match.swapErr, match.MetaData.Proof.IsRevoked(), match.tickGovernor != nil, match.checkServerRevoke)
 		return false
 	}
 
@@ -1062,9 +1063,6 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 	case order.MakerSwapCast:
 		// Get the confirmation count on the maker's coin.
 		if match.Side == order.Taker {
-			toAssetID := t.wallets.toAsset.ID
-			t.dc.log.Tracef("Checking confirmations on COUNTERPARTY swap txn %v (%s)...",
-				coinIDString(toAssetID, match.MetaData.Proof.MakerSwap), unbip(toAssetID))
 			// If the maker is the counterparty, we can determine swappability
 			// based on the confirmations.
 			confs, req, changed, spent, expired, err := t.counterPartyConfirms(ctx, match)
@@ -1078,18 +1076,18 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 				return false
 			}
 			if spent {
-				t.dc.log.Errorf("Counter-party's swap is spent before we could broadcast our own")
+				t.dc.log.Errorf("Counter-party's swap is spent before we could broadcast our own. REVOKING!")
 				match.MetaData.Proof.SelfRevoked = true
 				return false
 			}
 			if expired {
-				t.dc.log.Errorf("Counter-party's swap expired before we could broadcast our own")
+				t.dc.log.Errorf("Counter-party's swap expired before we could broadcast our own. REVOKING!")
 				match.MetaData.Proof.SelfRevoked = true
 				return false
 			}
 			matchTime := match.matchTime()
 			if lockTime := matchTime.Add(t.lockTimeTaker); time.Until(lockTime) < 0 {
-				t.dc.log.Errorf("Our contract would expire in the past (%v). Revoking.", lockTime)
+				t.dc.log.Errorf("Our contract would expire in the past (%v). REVOKING!", lockTime)
 				match.MetaData.Proof.SelfRevoked = true
 				return false
 			}
@@ -1102,8 +1100,6 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 		}
 
 		// If we're the maker, check the confirmations anyway so we can notify.
-		t.dc.log.Tracef("Checking confirmations on our OWN swap txn %v (%s)...",
-			coinIDString(wallet.AssetID, match.MetaData.Proof.MakerSwap), unbip(wallet.AssetID))
 		confs, spent, err := wallet.swapConfirmations(ctx, match.MetaData.Proof.MakerSwap,
 			match.MetaData.Proof.ContractData, match.MetaData.Stamp)
 		if err != nil && !errors.Is(err, asset.ErrSwapNotInitiated) {
@@ -1312,9 +1308,9 @@ func (t *trackedTrade) shouldBeginFindRedemption(ctx context.Context, match *mat
 	}
 	swapCoinID := proof.TakerSwap
 	if match.Side != order.Taker || len(swapCoinID) == 0 || len(proof.MakerRedeem) > 0 || len(proof.RefundCoin) > 0 {
-		t.dc.log.Tracef(
-			"Not finding redemption for match %s: side = %s, swapErr = %v, TakerSwap = %v RefundCoin = %v",
-			match, match.Side, match.swapErr, proof.TakerSwap, proof.RefundCoin)
+		// t.dc.log.Tracef(
+		// 	"Not finding redemption for match %s: side = %s, swapErr = %v, TakerSwap = %v RefundCoin = %v",
+		// 	match, match.Side, match.swapErr, proof.TakerSwap, proof.RefundCoin)
 		return false
 	}
 	if match.cancelRedemptionSearch != nil { // already finding redemption

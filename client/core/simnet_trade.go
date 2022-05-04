@@ -64,12 +64,20 @@ var (
 	tLockTimeMaker = 1 * time.Minute
 )
 
+type SimWalletType int
+
+const (
+	WTCoreClone SimWalletType = iota + 1
+	WTSPVNative
+	WTElectrum
+)
+
 // SimClient is the configuration for the client's wallets.
 type SimClient struct {
-	BaseSPV   bool
-	QuoteSPV  bool
-	BaseNode  string
-	QuoteNode string
+	BaseWalletType  SimWalletType
+	QuoteWalletType SimWalletType
+	BaseNode        string
+	QuoteNode       string
 }
 
 type assetConfig struct {
@@ -129,14 +137,25 @@ type simulationTest struct {
 	clients    []*simulationClient
 }
 
+func (s *simulationTest) waitALittleBit() {
+	sleep := 4 * time.Second
+	if s.client1.BaseWalletType == WTElectrum || s.client1.QuoteWalletType == WTElectrum ||
+		s.client2.BaseWalletType == WTElectrum || s.client2.QuoteWalletType == WTElectrum {
+		sleep = 7 * time.Second
+	}
+	time.Sleep(sleep * sleepFactor)
+}
+
 // RunSimulationTest runs one or more simulations tests, based on the provided
 // SimulationConfig.
 func RunSimulationTest(cfg *SimulationConfig) error {
-	if !cfg.Client1.BaseSPV && !cfg.Client2.BaseSPV && cfg.Client1.BaseNode == cfg.Client2.BaseNode {
+	if cfg.Client1.BaseWalletType == WTCoreClone && cfg.Client2.BaseWalletType == WTCoreClone &&
+		cfg.Client1.BaseNode == cfg.Client2.BaseNode {
 		return fmt.Errorf("the %s RPC wallets for both clients are the same", cfg.BaseSymbol)
 	}
 
-	if !cfg.Client1.QuoteSPV && !cfg.Client2.QuoteSPV && cfg.Client1.QuoteNode == cfg.Client2.QuoteNode {
+	if cfg.Client1.QuoteWalletType == WTCoreClone && cfg.Client2.QuoteWalletType == WTCoreClone &&
+		cfg.Client1.QuoteNode == cfg.Client2.QuoteNode {
 		return fmt.Errorf("the %s RPC wallets for both clients are the same", cfg.QuoteSymbol)
 	}
 
@@ -284,10 +303,16 @@ func (s *simulationTest) startClients() error {
 				amts := []int{10, 18, 5, 7, 1, 15, 3, 25}
 				hctrl.fund(s.ctx, address, amts)
 				hctrl.mineBlocks(s.ctx, 2)
-				// Tip change after block filtering scan takes the wallet time.
-				time.Sleep(2 * time.Second * sleepFactor)
 			}
 		}
+
+		// Tip change after block filtering scan takes the wallet time, even
+		// longer for Electrum.
+		sleep := 2 * time.Second
+		if c.BaseWalletType == WTElectrum || c.QuoteWalletType == WTElectrum {
+			sleep = 6 * time.Second
+		}
+		time.Sleep(sleep * sleepFactor)
 
 		err = s.registerDEX(c)
 		if err != nil {
@@ -460,7 +485,7 @@ func testMakerGhostingAfterTakerRedeem(s *simulationTest) error {
 	// has been spent but the spending tx is still in mempool. This
 	// will cause the txout to be included in the wallets locked
 	// balance, causing a higher than actual balance report.
-	time.Sleep(4 * sleepFactor * time.Second)
+	s.waitALittleBit()
 
 	for _, client := range s.clients {
 		if err = s.assertBalanceChanges(client); err != nil {
@@ -933,7 +958,7 @@ func testResendPendingRequests(s *simulationTest) error {
 	// has been spent but the spending tx is still in mempool. This
 	// will cause the txout to be included in the wallet's locked
 	// balance, causing a higher than actual balance report.
-	time.Sleep(4 * sleepFactor * time.Second)
+	s.waitALittleBit()
 
 	for _, client := range s.clients {
 		if err = s.assertBalanceChanges(client); err != nil {
@@ -986,7 +1011,7 @@ func (s *simulationTest) simpleTradeTest(qty, rate uint64, finalStatus order.Mat
 	// has been spent but the spending tx is still in mempool. This
 	// will cause the txout to be included in the wallets locked
 	// balance, causing a higher than actual balance report.
-	time.Sleep(4 * sleepFactor * time.Second)
+	s.waitALittleBit()
 
 	for _, client := range s.clients {
 		if err = s.assertBalanceChanges(client); err != nil {
@@ -1060,7 +1085,7 @@ func (s *simulationTest) monitorOrderMatchingAndTradeNeg(ctx context.Context, cl
 	tracker.mtx.RLock()
 	client.log.Infof("%d match(es) received for order %s", len(tracker.matches), tracker.token())
 	for _, match := range tracker.matches {
-		client.log.Infof("%s on match %s, amount %f %s", match.Side.String(), token(match.MatchID.Bytes()),
+		client.log.Infof("%s on match %s, amount %v %s", match.Side.String(), token(match.MatchID.Bytes()),
 			s.base.valFmt(match.Quantity), s.base.symbol)
 	}
 	tracker.mtx.RUnlock()
@@ -1311,7 +1336,7 @@ func (s *simulationTest) checkAndWaitForRefunds(ctx context.Context, client *sim
 			}
 		}
 	}
-	time.Sleep(4 * sleepFactor * time.Second)
+	s.waitALittleBit()
 
 	client.expectBalanceDiffs = refundAmts
 	err = s.assertBalanceChanges(client)
@@ -1419,12 +1444,24 @@ type tWallet struct {
 	hc         *harnessCtrl
 }
 
-func dcrWallet(useSPV bool, node string) (*tWallet, error) {
-	if useSPV {
+var cloneTypes = map[uint32]string{
+	0:   "bitcoindRPC",
+	2:   "litecoindRPC",
+	145: "bitcoindRPC", // yes, same as btc
+	3:   "dogecoindRPC",
+	133: "zcashdRPC",
+}
+
+func dcrWallet(wt SimWalletType, node string) (*tWallet, error) {
+	switch wt {
+	case WTSPVNative:
 		return &tWallet{
 			walletType: "SPV",
 			fund:       true,
 		}, nil
+	case WTCoreClone:
+	default:
+		return nil, fmt.Errorf("invalid wallet type: %v", wt)
 	}
 
 	cfg, err := config.Parse(filepath.Join(dextestDir, "dcr", node, fmt.Sprintf("%s.conf", node)))
@@ -1439,16 +1476,16 @@ func dcrWallet(useSPV bool, node string) (*tWallet, error) {
 	}, nil
 }
 
-func btcWallet(useSPV bool, node string) (*tWallet, error) {
-	return btcCloneWallet(btc.BipID, useSPV, node, "bitcoindRPC")
+func btcWallet(wt SimWalletType, node string) (*tWallet, error) {
+	return btcCloneWallet(btc.BipID, node, wt)
 }
 
-func ltcWallet(node string) (*tWallet, error) {
-	return btcCloneWallet(ltc.BipID, false, node, "litecoindRPC")
+func ltcWallet(wt SimWalletType, node string) (*tWallet, error) {
+	return btcCloneWallet(ltc.BipID, node, wt)
 }
 
-func bchWallet(useSPV bool, node string) (*tWallet, error) {
-	return btcCloneWallet(bch.BipID, useSPV, node, "bitcoindRPC")
+func bchWallet(wt SimWalletType, node string) (*tWallet, error) {
+	return btcCloneWallet(bch.BipID, node, wt)
 }
 
 func ethWallet() (*tWallet, error) {
@@ -1458,12 +1495,33 @@ func ethWallet() (*tWallet, error) {
 	}, nil
 }
 
-func btcCloneWallet(assetID uint32, useSPV bool, node string, rpcWalletType string) (*tWallet, error) {
-	if useSPV {
+func btcCloneWallet(assetID uint32, node string, wt SimWalletType) (*tWallet, error) {
+	switch wt {
+	case WTSPVNative:
 		return &tWallet{
 			walletType: "SPV",
 			fund:       true,
 		}, nil
+	case WTElectrum:
+		// dex/testing/btc/electrum.sh
+		cfg, err := config.Parse(filepath.Join(dextestDir, "electrum", dex.BipIDSymbol(assetID), "client-config.ini"))
+		if err != nil {
+			return nil, err
+		}
+		return &tWallet{
+			walletType: "electrumRPC",
+			pass:       []byte("abc"),
+			config:     cfg,
+			fund:       true,
+		}, nil
+	case WTCoreClone:
+	default:
+		return nil, fmt.Errorf("invalid wallet type: %v", wt)
+	}
+
+	rpcWalletType, ok := cloneTypes[assetID]
+	if !ok {
+		return nil, fmt.Errorf("invalid wallet type %v for asset %v", wt, assetID)
 	}
 
 	parentNode := node
@@ -1502,29 +1560,29 @@ func btcCloneWallet(assetID uint32, useSPV bool, node string, rpcWalletType stri
 }
 
 func dogeWallet(node string) (*tWallet, error) {
-	return btcCloneWallet(doge.BipID, false, node, "dogecoindRPC")
+	return btcCloneWallet(doge.BipID, node, WTCoreClone)
 }
 
 func zecWallet(node string) (*tWallet, error) {
-	return btcCloneWallet(zec.BipID, false, node, "zcashdRPC")
+	return btcCloneWallet(zec.BipID, node, WTCoreClone)
 }
 
 func (s *simulationTest) newClient(name string, cl *SimClient) (*simulationClient, error) {
 	wallets := make(map[uint32]*tWallet, 2)
-	addWallet := func(assetID uint32, useSPV bool, node string) error {
+	addWallet := func(assetID uint32, wt SimWalletType, node string) error {
 		var tw *tWallet
 		var err error
 		switch assetID {
 		case dcr.BipID:
-			tw, err = dcrWallet(useSPV, node)
+			tw, err = dcrWallet(wt, node)
 		case btc.BipID:
-			tw, err = btcWallet(useSPV, node)
+			tw, err = btcWallet(wt, node)
 		case eth.BipID:
 			tw, err = ethWallet()
 		case ltc.BipID:
-			tw, err = ltcWallet(node)
+			tw, err = ltcWallet(wt, node)
 		case bch.BipID:
-			tw, err = bchWallet(useSPV, node)
+			tw, err = bchWallet(wt, node)
 		case doge.BipID:
 			tw, err = dogeWallet(node)
 		case zec.BipID:
@@ -1538,20 +1596,20 @@ func (s *simulationTest) newClient(name string, cl *SimClient) (*simulationClien
 		wallets[assetID] = tw
 		return nil
 	}
-	if err := addWallet(s.base.id, cl.BaseSPV, cl.BaseNode); err != nil {
+	if err := addWallet(s.base.id, cl.BaseWalletType, cl.BaseNode); err != nil {
 		return nil, err
 	}
-	if err := addWallet(s.quote.id, cl.QuoteSPV, cl.QuoteNode); err != nil {
+	if err := addWallet(s.quote.id, cl.QuoteWalletType, cl.QuoteNode); err != nil {
 		return nil, err
 	}
 	return &simulationClient{
+		SimClient:       cl,
 		name:            name,
 		log:             s.log.SubLogger(name),
 		appPass:         []byte(fmt.Sprintf("client-%s", name)),
 		wallets:         wallets,
 		processedStatus: make(map[order.MatchID]order.MatchStatus),
 	}, nil
-
 }
 
 type simulationClient struct {

@@ -781,18 +781,24 @@ func TestTryBlocksWithNotifier(t *testing.T) {
 		t.Fatalf("got a first block")
 	}
 
+	// Feed (*baseWallet).watchBlocks:
+	// (*spvWallet).getBestBlockHeader -> (*spvWallet).getBestBlockHash -> (*tBtcWallet).syncedTo -> (*testData).bestBlock [mainchain]
+	// (*spvWallet).getBestBlockHeader -> (*spvWallet).getBlockHeader -> (*testData).getBlock [verboseBlocks]
+
 	var tipHeight int64
-	addBlock := func() *block {
+	addBlock := func() *block { // update the mainchain and verboseBlocks testData fields
 		tipHeight++
 		h, _ := node.addRawTx(tipHeight, dummyTx())
 		return &block{tipHeight, *h}
 	}
 
 	// Start with no blocks so that we're not synced.
+	node.blockchainMtx.Lock()
 	node.getBlockchainInfo = &getBlockchainInfoResult{
 		Headers: 2,
 		Blocks:  0,
 	}
+	node.blockchainMtx.Unlock()
 
 	addBlock()
 
@@ -804,7 +810,7 @@ func TestTryBlocksWithNotifier(t *testing.T) {
 		t.Fatalf("got block that should've been cached")
 	}
 
-	// And it won't come through after a sigle block allowance, because we're
+	// And it won't come through after a single block allowance, because we're
 	// not synced.
 	if getNote(walletBlockAllowance * 2) {
 		t.Fatal("block didn't wait for the syncing mode allowance")

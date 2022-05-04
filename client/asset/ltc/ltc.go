@@ -25,6 +25,7 @@ const (
 	minNetworkVersion   = 210201
 	walletTypeRPC       = "litecoindRPC"
 	walletTypeLegacy    = ""
+	walletTypeElectrum  = "electrumRPC"
 )
 
 var (
@@ -33,12 +34,14 @@ var (
 		Testnet: "19332",
 		Simnet:  "19443",
 	}
-	configOpts = []*asset.ConfigOption{
+	walletNameOpt = []*asset.ConfigOption{ // slice for easy appends
 		{
 			Key:         "walletname",
 			DisplayName: "Wallet Name",
 			Description: "The wallet name",
 		},
+	}
+	commonOpts = []*asset.ConfigOption{
 		{
 			Key:         "rpcuser",
 			DisplayName: "JSON-RPC Username",
@@ -93,18 +96,29 @@ var (
 			IsBoolean: true,
 		},
 	}
+	rpcWalletDefinition = &asset.WalletDefinition{
+		Type:              walletTypeRPC,
+		Tab:               "Litecoin Core (external)",
+		Description:       "Connect to litecoind",
+		DefaultConfigPath: dexbtc.SystemConfigPath("litecoin"),
+		ConfigOpts:        append(walletNameOpt, commonOpts...),
+	}
+	electrumWalletDefinition = &asset.WalletDefinition{
+		Type:        walletTypeElectrum,
+		Tab:         "Electrum-LTC (external)",
+		Description: "Use an external Electrum-LTC Wallet",
+		// json: DefaultConfigPath: filepath.Join(btcutil.AppDataDir("electrum-ltc", false), "config"), // e.g. ~/.electrum-ltc/config		ConfigOpts:        append(rpcOpts, commonOpts...),
+		ConfigOpts: commonOpts,
+	}
 	// WalletInfo defines some general information about a Litecoin wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:     "Litecoin",
 		Version:  version,
 		UnitInfo: dexltc.UnitInfo,
-		AvailableWallets: []*asset.WalletDefinition{{
-			Type:              walletTypeRPC,
-			Tab:               "External",
-			Description:       "Connect to litecoind",
-			DefaultConfigPath: dexbtc.SystemConfigPath("litecoin"),
-			ConfigOpts:        configOpts,
-		}},
+		AvailableWallets: []*asset.WalletDefinition{
+			rpcWalletDefinition,
+			electrumWalletDefinition,
+		},
 	}
 )
 
@@ -150,12 +164,6 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
 
-	switch cfg.Type {
-	case walletTypeRPC, walletTypeLegacy:
-	default:
-		return nil, fmt.Errorf("unknown wallet type %q", cfg.Type)
-	}
-
 	// Designate the clone ports. These will be overwritten by any explicit
 	// settings in the configuration file.
 	cloneCFG := &btc.BTCCloneCFG{
@@ -175,5 +183,13 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		BlockDeserializer:   dexltc.DeserializeBlockBytes,
 	}
 
-	return btc.BTCCloneWallet(cloneCFG)
+	switch cfg.Type {
+	case walletTypeRPC, walletTypeLegacy:
+		return btc.BTCCloneWallet(cloneCFG)
+	case walletTypeElectrum:
+		cloneCFG.Ports = dexbtc.NetPorts{} // no default ports
+		return btc.ElectrumWallet(cloneCFG)
+	default:
+		return nil, fmt.Errorf("unknown wallet type %q", cfg.Type)
+	}
 }

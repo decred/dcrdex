@@ -1992,6 +1992,12 @@ func (eth *baseWallet) DepositAddress() (string, error) {
 	return eth.addr.String(), nil
 }
 
+// RedemptionAddress gets an address for use in redeeming the counterparty's
+// swap. This would be included in their swap initialization.
+func (eth *baseWallet) RedemptionAddress() (string, error) {
+	return eth.addr.String(), nil
+}
+
 // TODO: Lock, Unlock, and Locked should probably be part of an optional
 // asset.Authenticator interface that isn't implemented by token wallets.
 // This is easy to accomplish here, but would require substantial updates to

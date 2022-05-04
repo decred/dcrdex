@@ -160,3 +160,17 @@ type Token struct {
 	// UnitInfo is the UnitInfo for the token.
 	UnitInfo UnitInfo `json:"unitInfo"`
 }
+
+// IntDivUp divides two integers, rounding up, without using floating point
+// conversion. This will panic if the denominator is zero, just like regular
+// integer division. This function should be used instead of ad hoc solutions or
+// being lazy with floating point math.
+func IntDivUp(val, div int64) int64 {
+	// https://github.com/rust-lang/rust/blob/343889b7234bf786e2bc673029467052f22fca08/library/core/src/num/uint_macros.rs#L2061
+	q, rem := val/div, val%div
+	if (rem > 0 && div > 0) || (rem < 0 && div < 0) {
+		q++
+	}
+	return q
+	// return (val + div - 1) / div
+}
