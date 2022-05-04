@@ -6,8 +6,12 @@ RPC_USER="user"
 RPC_PASS="pass"
 ALPHA_LISTEN_PORT="23764"
 BETA_LISTEN_PORT="23765"
-ALPHA_RPC_PORT="23766"
-BETA_RPC_PORT="23767"
+DELTA_LISTEN_PORT="23766"
+GAMMA_LISTEN_PORT="23767"
+ALPHA_RPC_PORT="23768"
+BETA_RPC_PORT="23769"
+DELTA_RPC_PORT="23770"
+GAMMA_RPC_PORT="23771"
 ALPHA_MINING_ADDR="mjzB71SzfAi8BwNvobPZ983d8vCdxuQD2i"
 BETA_MINING_ADDR="mwL7ypWCMEhBhGcsqWNwkvAasuXP3duXQk"
 
@@ -18,6 +22,8 @@ SOURCE_DIR=$(pwd)
 
 ALPHA_DIR="${NODES_ROOT}/alpha"
 BETA_DIR="${NODES_ROOT}/beta"
+DELTA_DIR="${NODES_ROOT}/delta"
+GAMMA_DIR="${NODES_ROOT}/gamma"
 HARNESS_DIR="${NODES_ROOT}/harness-ctl"
 
 echo "Writing node config files"
@@ -28,6 +34,10 @@ WALLET_PASSWORD="abc"
 ALPHA_CLI_CFG="-rpcport=${ALPHA_RPC_PORT} -regtest=1 -rpcuser=user -rpcpassword=pass"
 
 BETA_CLI_CFG="-rpcport=${BETA_RPC_PORT} -regtest=1 -rpcuser=user -rpcpassword=pass"
+
+DELTA_CLI_CFG="-rpcport=${DELTA_RPC_PORT} -regtest=1 -rpcuser=user -rpcpassword=pass"
+
+GAMMA_CLI_CFG="-rpcport=${GAMMA_RPC_PORT} -regtest=1 -rpcuser=user -rpcpassword=pass"
 
 # DONE can be used in a send-keys call along with a `wait-for btc` command to
 # wait for process termination.
@@ -46,6 +56,8 @@ mkdir -p ${ALPHA_DIR}/regtest
 cp ${SOURCE_DIR}/alpha_wallet.dat ${ALPHA_DIR}/regtest/wallet.dat
 mkdir -p ${BETA_DIR}/regtest
 cp ${SOURCE_DIR}/beta_wallet.dat ${BETA_DIR}/regtest/wallet.dat
+mkdir -p ${DELTA_DIR}
+mkdir -p ${GAMMA_DIR}
 
 cd ${NODES_ROOT} && tmux new-session -d -s $SESSION $SHELL
 
@@ -74,6 +86,24 @@ datadir=${BETA_DIR}
 txindex=1
 regtest=1
 rpcport=${BETA_RPC_PORT}
+EOF
+
+cat > "${DELTA_DIR}/delta.conf" <<EOF
+rpcuser=user
+rpcpassword=pass
+datadir=${DELTA_DIR}
+txindex=1
+regtest=1
+rpcport=${DELTA_RPC_PORT}
+EOF
+
+cat > "${GAMMA_DIR}/gamma.conf" <<EOF
+rpcuser=user
+rpcpassword=pass
+datadir=${GAMMA_DIR}
+txindex=1
+regtest=1
+rpcport=${GAMMA_RPC_PORT}
 EOF
 
 ################################################################################
@@ -110,12 +140,46 @@ tmux send-keys -t $SESSION:1 "${DAEMON} -rpcuser=user -rpcpassword=pass \
 sleep 3
 
 ################################################################################
+# Setup the delta node.
+################################################################################
+
+tmux new-window -t $SESSION:2 -n 'delta' $SHELL
+tmux send-keys -t $SESSION:2 "set +o history" C-m
+tmux send-keys -t $SESSION:2 "cd ${DELTA_DIR}" C-m
+
+echo "Starting simnet delta node"
+tmux send-keys -t $SESSION:2 "${DAEMON} -rpcuser=user -rpcpassword=pass \
+  -rpcport=${DELTA_RPC_PORT} -datadir=${DELTA_DIR} -txindex=1 -regtest=1 \
+  -debug=rpc -debug=net -debug=mempool -debug=walletdb -debug=addrman -debug=mempoolrej \
+  -whitelist=127.0.0.0/8 -whitelist=::1 \
+  -port=${DELTA_LISTEN_PORT} -fallbackfee=0.00001 -printtoconsole; \
+  tmux wait-for -S delta${SYMBOL}" C-m
+sleep 3
+
+################################################################################
+# Setup the gamma node.
+################################################################################
+
+tmux new-window -t $SESSION:3 -n 'gamma' $SHELL
+tmux send-keys -t $SESSION:3 "set +o history" C-m
+tmux send-keys -t $SESSION:3 "cd ${GAMMA_DIR}" C-m
+
+echo "Starting simnet gamma node"
+tmux send-keys -t $SESSION:3 "${DAEMON} -rpcuser=user -rpcpassword=pass \
+  -rpcport=${GAMMA_RPC_PORT} -datadir=${GAMMA_DIR} -txindex=1 -regtest=1 \
+  -debug=rpc -debug=net -debug=mempool -debug=walletdb -debug=addrman -debug=mempoolrej \
+  -whitelist=127.0.0.0/8 -whitelist=::1 \
+  -port=${GAMMA_LISTEN_PORT} -fallbackfee=0.00001 -printtoconsole; \
+  tmux wait-for -S gamma${SYMBOL}" C-m
+sleep 3
+
+################################################################################
 # Setup the harness-ctl directory
 ################################################################################
 
-tmux new-window -t $SESSION:2 -n 'harness-ctl' $SHELL
-tmux send-keys -t $SESSION:2 "set +o history" C-m
-tmux send-keys -t $SESSION:2 "cd ${HARNESS_DIR}" C-m
+tmux new-window -t $SESSION:4 -n 'harness-ctl' $SHELL
+tmux send-keys -t $SESSION:4 "set +o history" C-m
+tmux send-keys -t $SESSION:4 "cd ${HARNESS_DIR}" C-m
 sleep 1
 
 cd ${HARNESS_DIR}
@@ -143,6 +207,18 @@ cat > "./mine-beta" <<EOF
 ${CLI} ${BETA_CLI_CFG} generatetoaddress \$1 ${BETA_MINING_ADDR}
 EOF
 chmod +x "./mine-beta"
+
+cat > "./delta" <<EOF
+#!/usr/bin/env bash
+${CLI} ${DELTA_CLI_CFG} "\$@"
+EOF
+chmod +x "./delta"
+
+cat > "./gamma" <<EOF
+#!/usr/bin/env bash
+${CLI} ${GAMMA_CLI_CFG} "\$@"
+EOF
+chmod +x "./gamma"
 
 cat > "./reorg" <<EOF
 #!/usr/bin/env bash
@@ -172,6 +248,9 @@ cat > "${HARNESS_DIR}/quit" <<EOF
 #!/usr/bin/env bash
 tmux send-keys -t $SESSION:0 C-c
 tmux send-keys -t $SESSION:1 C-c
+tmux send-keys -t $SESSION:2 C-c
+tmux send-keys -t $SESSION:3 C-c
+tmux send-keys -t $SESSION:4 C-c
 tmux wait-for alpha${SYMBOL}
 tmux wait-for beta${SYMBOL}
 # seppuku
@@ -182,29 +261,31 @@ chmod +x "${HARNESS_DIR}/quit"
 ################################################################################
 # Generate the first block
 ################################################################################
-tmux send-keys -t $SESSION:2 "./beta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
+tmux send-keys -t $SESSION:4 "./beta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
+tmux send-keys -t $SESSION:4 "./delta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
+tmux send-keys -t $SESSION:4 "./gamma addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
 # This timeout is apparently critical. Give the nodes time to sync.
 sleep 1
 
-tmux send-keys -t $SESSION:2 "./alpha walletpassphrase ${WALLET_PASSWORD} 100000000${DONE}" C-m\; ${WAIT}
-tmux send-keys -t $SESSION:2 "./beta walletpassphrase ${WALLET_PASSWORD} 100000000${DONE}" C-m\; ${WAIT}
+tmux send-keys -t $SESSION:4 "./alpha walletpassphrase ${WALLET_PASSWORD} 100000000${DONE}" C-m\; ${WAIT}
+tmux send-keys -t $SESSION:4 "./beta walletpassphrase ${WALLET_PASSWORD} 100000000${DONE}" C-m\; ${WAIT}
 
 echo "Generating 400 blocks for alpha"
-tmux send-keys -t $SESSION:2 "./alpha generatetoaddress 400 ${ALPHA_MINING_ADDR}${DONE}" C-m\; ${WAIT}
+tmux send-keys -t $SESSION:4 "./alpha generatetoaddress 400 ${ALPHA_MINING_ADDR}${DONE}" C-m\; ${WAIT}
 
 #################################################################################
 # Send beta some coin
 ################################################################################
 
 # Send the beta wallet some dough.
-echo "Sending 8,400,000 BTC to beta in 8 blocks"
+echo "Sending 8,400,000 DOGE to beta in 8 blocks"
 for i in 1000000 1800000 500000 700000 100000 1500000 300000 2500000
 do
-    tmux send-keys -t $SESSION:2 "./alpha sendtoaddress ${BETA_MINING_ADDR} ${i}${DONE}" C-m\; ${WAIT}
+    tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${BETA_MINING_ADDR} ${i}${DONE}" C-m\; ${WAIT}
 done
 
-tmux send-keys -t $SESSION:2 "./mine-alpha 2${DONE}" C-m\; ${WAIT}
+tmux send-keys -t $SESSION:4 "./mine-alpha 2${DONE}" C-m\; ${WAIT}
 
 # Reenable history and attach to the control session.
-tmux send-keys -t $SESSION:2 "set -o history" C-m
+tmux send-keys -t $SESSION:4 "set -o history" C-m
 tmux attach-session -t $SESSION
