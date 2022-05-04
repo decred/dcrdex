@@ -2219,8 +2219,8 @@ func (eth *baseWallet) SyncStatus() (bool, float32, error) {
 	// and after it has finished. In order to discern when syncing has begun,
 	// check that the best header came in under dexeth.MaxBlockInterval.
 	prog := eth.node.syncProgress()
-	syncing := prog.CurrentBlock >= prog.HighestBlock
-	if !syncing {
+	syncing := prog.CurrentBlock < prog.HighestBlock || prog.HighestBlock == 0
+	if syncing {
 		var ratio float32
 		if prog.HighestBlock != 0 {
 			ratio = float32(prog.CurrentBlock) / float32(prog.HighestBlock)

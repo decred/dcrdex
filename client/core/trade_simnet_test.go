@@ -1,4 +1,4 @@
-//go:build harness
+//go:build harness && lgpl
 
 package core
 
@@ -24,11 +24,12 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -37,46 +38,52 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/client/asset/bch"
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/client/asset/dcr"
+	"decred.org/dcrdex/client/asset/doge"
+	"decred.org/dcrdex/client/asset/eth"
+	"decred.org/dcrdex/client/asset/ltc"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
+	dexsrv "decred.org/dcrdex/server/dex"
 	"golang.org/x/sync/errgroup"
 )
 
-const conversionFactor = 1e8
+const (
+	// testBaseSymbol and testQuoteSymbol can be changed to test different
+	// supported assets. The simnet dcrdex must have the correct market.
+	// Current supported assets are btc, dcr, ltc, doge, bch, and eth.
+	testBaseSymbol  = "dcr"
+	testQuoteSymbol = "btc"
+
+	// registerWithQuoteAsset can be set to true to pay register fees with
+	// the quote asset rather than the default base asset.
+	registerWithQuoteAsset = false
+)
 
 var (
-	client1 = &tClient{
-		id:      1,
-		appPass: []byte("client1"),
-		wallets: map[uint32]*tWallet{
-			dcr.BipID: dcrWallet("trading1"),
-			btc.BipID: btcWallet("beta", ""), // beta default ("") is encrypted, delta is not
-		},
-		processedStatus: make(map[order.MatchID]order.MatchStatus),
-	}
-	client2 = &tClient{
-		id:      2,
-		appPass: []byte("client2"),
-		wallets: map[uint32]*tWallet{
-			dcr.BipID: dcrWallet("trading2"),
-			btc.BipID: {created: true, _type: "SPV"}, // the btc/spv startWallet method auto connects to the alpha node for spv syncing
-		},
-		processedStatus: make(map[order.MatchID]order.MatchStatus),
-	}
-	clients = []*tClient{client1, client2}
+	client1, client2 *tClient
+	clients          []*tClient
+
+	testBaseID, testQuoteID uint32
+	conversionFactors       = make(map[uint32]uint64)
+	testMarket              = fmt.Sprintf("%s_%s", testBaseSymbol, testQuoteSymbol)
 
 	dexHost = "127.0.0.1:17273"
 	dexCert []byte
 
-	// dex/testing/harness.sh => markets.json settings
-	lotSize  uint64 = 10e8 // 10 DCR
-	rateStep uint64 = 100  // 0.00000100 BTC/DCR
+	homeDir         = os.Getenv("HOME")
+	dextestDir      = filepath.Join(homeDir, "dextest")
+	dexCertPath     = filepath.Join(dextestDir, "dcrdex", "rpc.cert")
+	marketsConfPath = filepath.Join(dextestDir, "dcrdex", "markets.json")
+	lotSize         uint64
+	rateStep        uint64
 
 	tLockTimeTaker = 30 * time.Second
 	tLockTimeMaker = 1 * time.Minute
@@ -84,8 +91,30 @@ var (
 	tLog = dex.StdOutLogger("TEST", dex.LevelTrace)
 )
 
+func init() {
+	var found bool
+	testBaseID, found = dex.BipSymbolID(testBaseSymbol)
+	if !found {
+		panic(fmt.Sprintf("base asset %q not found", testBaseSymbol))
+	}
+	testQuoteID, found = dex.BipSymbolID(testQuoteSymbol)
+	if !found {
+		panic(fmt.Sprintf("quote asset %q not found", testQuoteSymbol))
+	}
+	ui, err := asset.UnitInfo(testBaseID)
+	if err != nil {
+		panic(fmt.Sprintf("cannot get base %q unit info: %v", testBaseSymbol, err))
+	}
+	conversionFactors[testBaseID] = ui.Conventional.ConversionFactor
+	ui, err = asset.UnitInfo(testQuoteID)
+	if err != nil {
+		panic(fmt.Sprintf("cannot get quote %q unit info: %v", testQuoteSymbol, err))
+	}
+	conversionFactors[testQuoteID] = ui.Conventional.ConversionFactor
+}
+
 func readWalletCfgsAndDexCert() error {
-	readCert := func(path string) ([]byte, error) {
+	readFile := func(path string) ([]byte, error) {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil, err
@@ -93,37 +122,60 @@ func readWalletCfgsAndDexCert() error {
 		return data, nil
 	}
 
-	user, err := user.Current()
+	mktsJSON, err := readFile(marketsConfPath)
 	if err != nil {
 		return err
 	}
 
-	for _, client := range clients {
-		dcrw, btcw := client.wallets[dcr.BipID], client.wallets[btc.BipID]
-		if dcrw.created {
-			dcrw.config = map[string]string{}
-		} else {
-			dcrw.config, err = config.Parse(filepath.Join(user.HomeDir, "dextest", "dcr", dcrw.daemon, dcrw.daemon+".conf"))
-			if err != nil {
-				return err
-			}
-		}
-
-		if btcw.created {
-			btcw.config = map[string]string{}
-		} else {
-			btcw.config, err = config.Parse(filepath.Join(user.HomeDir, "dextest", "btc", btcw.daemon, btcw.daemon+".conf"))
-			if err != nil {
-				return err
-			}
-		}
-
-		dcrw.config["account"] = dcrw.account
-		btcw.config["walletname"] = btcw.walletName
+	var conf marketConfig
+	err = json.Unmarshal(mktsJSON, &conf)
+	if err != nil {
+		return err
 	}
 
-	dexCertPath := filepath.Join(user.HomeDir, "dextest", "dcrdex", "rpc.cert")
-	dexCert, err = readCert(dexCertPath)
+	var found bool
+	for _, mkt := range conf.Markets {
+		getSymbol := func(name string) (string, error) {
+			asset, ok := conf.Assets[name]
+			if !ok {
+				return "", fmt.Errorf("config does not have an asset that matches %s", name)
+			}
+			return strings.ToLower(asset.Symbol), nil
+		}
+		baseSymbol, err := getSymbol(mkt.Base)
+		if err != nil {
+			return err
+		}
+		if baseSymbol != testBaseSymbol {
+			continue
+		}
+		quoteSymbol, err := getSymbol(mkt.Quote)
+		if err != nil {
+			return err
+		}
+		if quoteSymbol != testQuoteSymbol {
+			continue
+		}
+		found = true
+		lotSize = mkt.LotSize
+		rateStep = mkt.RateStep
+		break
+	}
+	if !found {
+		return fmt.Errorf("cound not find market in markets json for base %q and quote %q", testBaseSymbol, testQuoteSymbol)
+	}
+
+	client1, err = newTClient(1)
+	if err != nil {
+		return err
+	}
+	client2, err = newTClient(2)
+	if err != nil {
+		return err
+	}
+	clients = []*tClient{client1, client2}
+
+	dexCert, err = readFile(dexCertPath)
 	return err
 }
 
@@ -154,34 +206,32 @@ func startClients(t testing.TB, ctx context.Context) error {
 			os.RemoveAll(c.core.assetDataDirectory(assetID))
 
 			err = c.core.CreateWallet(c.appPass, wallet.pass, &WalletForm{
-				Type:    wallet._type,
+				Type:    wallet.walletType,
 				AssetID: assetID,
 				Config:  wallet.config,
 			})
 			if err != nil {
 				return err
 			}
-			c.log("Connected %s wallet (created/builtin = %v)", unbip(assetID), wallet.created)
+			c.log("Connected %s wallet (fund = %v)", unbip(assetID), wallet.fund)
 
-			if wallet.created {
+			if wallet.fund {
+				hctrl := newHarnessCtrl(assetID)
+				// eth needs the headers to be new in order to
+				// count itself synced, so mining a few blocks here.
+				hctrl.mineBlocks(ctx, 1)
 				c.log("Waiting for %s wallet to sync", unbip(assetID))
 				for !c.core.WalletState(assetID).Synced {
 					time.Sleep(time.Second)
 				}
 				c.log("%s wallet synced and ready to use", unbip(assetID))
 
-				// Fund newly created wallet.
-				c.log("Funding newly created SPV wallet")
+				// Fund new wallet.
+				c.log("Funding wallet")
 				address := c.core.WalletState(assetID).Address
 				amts := []int{10, 18, 5, 7, 1, 15, 3, 25}
-				cmds := make([]string, len(amts))
-				for i, amt := range amts {
-					cmds[i] = fmt.Sprintf("./alpha sendtoaddress %s %d", address, amt)
-				}
-				err = tmuxRun(assetID, strings.Join(cmds, " && ")+" && ./mine-alpha 2")
-				if err != nil {
-					return err
-				}
+				hctrl.fund(ctx, address, amts)
+				hctrl.mineBlocks(ctx, 2)
 				// Tip change after block filtering scan takes the wallet time.
 				time.Sleep(2 * time.Second * sleepFactor)
 			}
@@ -237,7 +287,7 @@ func TestTradeSuccess(t *testing.T) {
 	tLog.Info("=== SETUP COMPLETED")
 	defer teardown(cancelCtx)
 
-	var qty, rate uint64 = 2 * lotSize, 150 * rateStep // 20 DCR at 0.00015 BTC/DCR
+	var qty, rate uint64 = 2 * lotSize, 150 * rateStep
 	client1.isSeller, client2.isSeller = true, false
 	simpleTradeTest(t, qty, rate, order.MatchComplete)
 }
@@ -253,7 +303,7 @@ func TestNoMakerSwap(t *testing.T) {
 	tLog.Info("=== SETUP COMPLETED")
 	defer teardown(cancelCtx)
 
-	var qty, rate uint64 = 1 * lotSize, 100 * rateStep // 10 DCR at 0.0001 BTC/DCR
+	var qty, rate uint64 = 1 * lotSize, 100 * rateStep
 	client1.isSeller, client2.isSeller = false, true
 	simpleTradeTest(t, qty, rate, order.NewlyMatched)
 }
@@ -270,7 +320,7 @@ func TestNoTakerSwap(t *testing.T) {
 	tLog.Info("=== SETUP COMPLETED")
 	defer teardown(cancelCtx)
 
-	var qty, rate uint64 = 3 * lotSize, 200 * rateStep // 30 DCR at 0.0002 BTC/DCR
+	var qty, rate uint64 = 3 * lotSize, 200 * rateStep
 	client1.isSeller, client2.isSeller = true, false
 	simpleTradeTest(t, qty, rate, order.MakerSwapCast)
 }
@@ -292,7 +342,7 @@ func TestNoMakerRedeem(t *testing.T) {
 	tLog.Info("=== SETUP COMPLETED")
 	defer teardown(cancelCtx)
 
-	var qty, rate uint64 = 1 * lotSize, 250 * rateStep // 10 DCR at 0.00025 BTC/DCR
+	var qty, rate uint64 = 1 * lotSize, 250 * rateStep
 	client1.isSeller, client2.isSeller = true, false
 	simpleTradeTest(t, qty, rate, order.TakerSwapCast)
 }
@@ -315,7 +365,7 @@ func TestMakerGhostingAfterTakerRedeem(t *testing.T) {
 	tLog.Info("=== SETUP COMPLETED")
 	defer teardown(cancelCtx)
 
-	var qty, rate uint64 = 1 * lotSize, 250 * rateStep // 10 DCR at 0.00025 BTC/DCR
+	var qty, rate uint64 = 1 * lotSize, 250 * rateStep
 	client1.isSeller, client2.isSeller = true, false
 
 	c1OrderID, c2OrderID, err := placeTestOrders(qty, rate)
@@ -448,13 +498,13 @@ func TestOrderStatusReconciliation(t *testing.T) {
 
 	// Record client 2's locked balance before placing trades
 	// to determine the amount locked for the placed trades.
-	c2Balance, err := client2.core.AssetBalance(dcr.BipID) // client 2 is seller in dcr-btc market
+	c2Balance, err := client2.core.AssetBalance(testBaseID) // client 2 is seller
 	if err != nil {
 		t.Fatalf("client 2 pre-trade balance error %v", err)
 	}
 	preTradeLockedBalance := c2Balance.Locked
 
-	rate := 100 * rateStep // 10_000 (0.0001 BTC/DCR)
+	rate := 100 * rateStep
 
 	// Place an order for client 1, qty=2*lotSize, rate=100*rateStep
 	// This order should get matched to either or both of these client 2
@@ -662,7 +712,7 @@ func TestOrderStatusReconciliation(t *testing.T) {
 	c2dc.tradeMtx.RUnlock()
 
 	// Check trade-locked amount before disconnecting.
-	c2Balance, err = client2.core.AssetBalance(dcr.BipID) // client 2 is seller in dcr-btc market
+	c2Balance, err = client2.core.AssetBalance(testBaseID) // client 2 is seller
 	if err != nil {
 		t.Fatalf("client 2 pre-disconnect balance error %v", err)
 	}
@@ -724,7 +774,7 @@ func TestOrderStatusReconciliation(t *testing.T) {
 	halfBTimeout := time.Millisecond * time.Duration(c2dc.cfg.BroadcastTimeout/2)
 	time.Sleep(halfBTimeout)
 
-	c2Balance, err = client2.core.AssetBalance(dcr.BipID) // client 2 is seller in dcr-btc market
+	c2Balance, err = client2.core.AssetBalance(testBaseID) // client 2 is seller
 	if err != nil {
 		t.Fatalf("client 2 post-reconnect balance error %v", err)
 	}
@@ -750,7 +800,7 @@ func TestResendPendingRequests(t *testing.T) {
 	tLog.Info("=== SETUP COMPLETED")
 	defer teardown(cancelCtx)
 
-	var qty, rate uint64 = 1 * lotSize, 250 * rateStep // 10 DCR at 0.00025 BTC/DCR
+	var qty, rate uint64 = 1 * lotSize, 250 * rateStep
 	client1.isSeller, client2.isSeller = true, false
 
 	c1OrderID, c2OrderID, err := placeTestOrders(qty, rate)
@@ -967,7 +1017,7 @@ func placeTestOrders(qty, rate uint64) (string, string, error) {
 		// Reset the expected balance changes for this client, to be updated
 		// later in the monitorTrackedTrade function as swaps and redeems are
 		// executed.
-		client.expectBalanceDiffs = map[uint32]int64{dcr.BipID: 0, btc.BipID: 0}
+		client.expectBalanceDiffs = map[uint32]int64{testBaseID: 0, testQuoteID: 0}
 	}
 
 	c1OrderID, err := client1.placeOrder(qty, rate, false)
@@ -1006,8 +1056,10 @@ func monitorOrderMatchingAndTradeNeg(ctx context.Context, client *tClient, order
 	tracker.mtx.RLock()
 	client.log("%d match(es) received for order %s", len(tracker.matches), tracker.token())
 	for _, match := range tracker.matches {
-		client.log("%s on match %s, amount %.8f %s", match.Side.String(),
-			token(match.MatchID.Bytes()), fmtAmt(match.Quantity), unbip(tracker.Base()))
+		precisionStr := fmt.Sprintf("%%s on match %%s, amount %%.%vf %%s",
+			math.Log10(float64(conversionFactors[tracker.Base()])))
+		client.log(precisionStr, match.Side.String(), token(match.MatchID.Bytes()),
+			fmtAmt(match.Quantity, tracker.Base()), unbip(tracker.Base()))
 	}
 	tracker.mtx.RUnlock()
 
@@ -1022,10 +1074,10 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 			amt = calc.BaseToQuote(rate, qty)
 		}
 		if isSwap {
-			client.log("updated %s balance diff with -%f", unbip(assetID), fmtAmt(amt))
+			client.log("updated %s balance diff with -%f", unbip(assetID), fmtAmt(amt, assetID))
 			client.expectBalanceDiffs[assetID] -= int64(amt)
 		} else {
-			client.log("updated %s balance diff with +%f", unbip(assetID), fmtAmt(amt))
+			client.log("updated %s balance diff with +%f", unbip(assetID), fmtAmt(amt, assetID))
 			client.expectBalanceDiffs[assetID] += int64(amt)
 		}
 	}
@@ -1093,7 +1145,7 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 			if assetToMine != nil {
 				assetID, nBlocks := assetToMine.ID, assetToMine.SwapConf
 				time.Sleep(2 * sleepFactor * time.Second)
-				err := mineBlocks(assetID, nBlocks)
+				err := newHarnessCtrl(assetID).mineBlocks(ctx, nBlocks)
 				if err == nil {
 					var actor order.MatchSide
 					if swapOrRedeem == "redeem" {
@@ -1140,7 +1192,7 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string) error {
 	// check if client has pending refunds
 	client.log("checking if refunds are necessary")
-	refundAmts := map[uint32]int64{dcr.BipID: 0, btc.BipID: 0}
+	refundAmts := map[uint32]int64{testBaseID: 0, testQuoteID: 0}
 	var furthestLockTime time.Time
 
 	hasRefundableSwap := func(match *matchTracker) bool {
@@ -1185,8 +1237,10 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 		return nil
 	}
 
-	client.log("Found refundable swaps worth %.8f dcr and %.8f btc",
-		fmtAmt(refundAmts[dcr.BipID]), fmtAmt(refundAmts[btc.BipID]))
+	precisionStr := fmt.Sprintf("Found refundable swaps worth %%.%vf %%s and %%.%vf %%s",
+		math.Log10(float64(conversionFactors[testBaseID])), math.Log10(float64(conversionFactors[testQuoteID])))
+	client.log(precisionStr, fmtAmt(refundAmts[testBaseID], testBaseID), testBaseSymbol,
+		fmtAmt(refundAmts[testQuoteID], testQuoteID), testQuoteSymbol)
 
 	// wait for refunds to be executed
 	now := time.Now()
@@ -1200,28 +1254,28 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 		}
 	}
 
-	// btc and dcr swaps cannot be refunded until the MedianTimePast is greater
-	// than the swap locktime. The MedianTimePast is calculated by taking
-	// the timestamps of the last 11 blocks and finding the median. Mining
-	// 6 blocks on the chain a second from now will ensure that the MedianTimePast
-	// will be greater than the furthest swap locktime, thereby lifting the
-	// time lock on all these swaps.
+	// swaps cannot be refunded until the MedianTimePast is greater than
+	// the swap locktime. The MedianTimePast is calculated by taking the
+	// timestamps of the last 11 blocks and finding the median. Mining 6
+	// blocks on the chain a second from now will ensure that the
+	// MedianTimePast will be greater than the furthest swap locktime,
+	// thereby lifting the time lock on all these swaps.
 	mineMedian := func(assetID uint32) error {
 		time.Sleep(sleepFactor * time.Second)
-		if err := mineBlocks(assetID, 6); err != nil {
-			return fmt.Errorf("client %d: error mining 6 btc blocks for swap refunds: %v",
-				client.id, err)
+		if err := newHarnessCtrl(assetID).mineBlocks(ctx, 6); err != nil {
+			return fmt.Errorf("client %d: error mining 6 %s blocks for swap refunds: %v",
+				client.id, unbip(assetID), err)
 		}
 		client.log("Mined 6 blocks for assetID %d to expire swap locktimes", assetID)
 		return nil
 	}
-	if refundAmts[btc.BipID] > 0 {
-		if err := mineMedian(btc.BipID); err != nil {
+	if refundAmts[testQuoteID] > 0 {
+		if err := mineMedian(testQuoteID); err != nil {
 			return err
 		}
 	}
-	if refundAmts[dcr.BipID] > 0 {
-		if err := mineMedian(dcr.BipID); err != nil {
+	if refundAmts[testBaseID] > 0 {
+		if err := mineMedian(testBaseID); err != nil {
 			return err
 		}
 	}
@@ -1252,7 +1306,7 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 	// confirm that balance changes are as expected.
 	for assetID, expectedBalanceDiff := range refundAmts {
 		if expectedBalanceDiff > 0 {
-			if err = mineBlocks(assetID, 1); err != nil {
+			if err := newHarnessCtrl(assetID).mineBlocks(ctx, 1); err != nil {
 				return fmt.Errorf("%s mine error %v", unbip(assetID), err)
 			}
 		}
@@ -1262,8 +1316,10 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 	client.expectBalanceDiffs = refundAmts
 	err = client.assertBalanceChanges()
 	if err == nil {
-		client.log("successfully refunded swaps worth %.8f dcr and %.8f btc",
-			fmtAmt(refundAmts[dcr.BipID]), fmtAmt(refundAmts[btc.BipID]))
+		precisionStr := fmt.Sprintf("successfully refunded swaps worth %%.%vf %%s and %%.%vf %%s",
+			math.Log10(float64(conversionFactors[testBaseID])), math.Log10(float64(conversionFactors[testQuoteID])))
+		client.log(precisionStr, fmtAmt(refundAmts[testBaseID], testBaseID), testBaseSymbol,
+			fmtAmt(refundAmts[testQuoteID], testQuoteID), testQuoteSymbol)
 	}
 	return err
 }
@@ -1293,34 +1349,202 @@ func tryUntil(ctx context.Context, tryDuration time.Duration, tryFn func() bool)
 HELPER TYPES, FUNCTIONS AND METHODS
 ************************************/
 
+// marketConfig taken from dcrdex/server/cmd/dcrdex/settings.go
+type marketConfig struct {
+	Markets []*struct {
+		Base           string  `json:"base"`
+		Quote          string  `json:"quote"`
+		LotSize        uint64  `json:"lotSize"`
+		RateStep       uint64  `json:"rateStep"`
+		Duration       uint64  `json:"epochDuration"`
+		MBBuffer       float64 `json:"marketBuyBuffer"`
+		BookedLotLimit uint32  `json:"userBookedLotLimit"`
+	} `json:"markets"`
+	Assets map[string]*dexsrv.AssetConf `json:"assets"`
+}
+
+type harnessCtrl struct {
+	dir, fundStr    string
+	blockMultiplier uint32
+}
+
+func (hc *harnessCtrl) run(ctx context.Context, cmd string, args ...string) error {
+	command := exec.CommandContext(ctx, cmd, args...)
+	command.Dir = hc.dir
+	return command.Run()
+}
+
+func (hc *harnessCtrl) mineBlocks(ctx context.Context, n uint32) error {
+	n *= hc.blockMultiplier
+	return hc.run(ctx, "./mine-alpha", fmt.Sprintf("%d", n))
+}
+
+func (hc *harnessCtrl) fund(ctx context.Context, address string, amts []int) error {
+	for _, amt := range amts {
+		fs := fmt.Sprintf(hc.fundStr, address, amt)
+		strs := strings.Split(fs, "_")
+		err := hc.run(ctx, "./alpha", strs...)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func newHarnessCtrl(assetID uint32) *harnessCtrl {
+	var (
+		fundStr                = "sendtoaddress_%s_%d"
+		blockMultiplier uint32 = 1
+	)
+	switch assetID {
+	case dcr.BipID, btc.BipID, ltc.BipID, bch.BipID, doge.BipID:
+	case eth.BipID:
+		// Sending with values of .1 eth.
+		fundStr = `attach_--exec personal.sendTransaction({from:eth.accounts[1],to:"%s",gasPrice:200e9,value:%de17},"abc")`
+		blockMultiplier = 4
+	default:
+		panic(fmt.Sprintf("unknown asset %d for harness control", assetID))
+	}
+	dir := filepath.Join(dextestDir, dex.BipIDSymbol(assetID), "harness-ctl")
+	return &harnessCtrl{
+		dir:             dir,
+		fundStr:         fundStr,
+		blockMultiplier: blockMultiplier,
+	}
+}
+
 type tWallet struct {
-	daemon     string // indicates conf (beta.conf)
-	account    string // for dcr wallets
-	walletName string // for btc wallets, put into config map
 	pass       []byte
 	config     map[string]string
-	_type      string // type is a keyword
-	created    bool
+	walletType string // type is a keyword
+	fund       bool
+	hc         *harnessCtrl
 }
 
-func dcrWallet(daemon string) *tWallet {
-	return &tWallet{
-		daemon:  daemon,
-		account: "default",
-		pass:    []byte("abc"),
+func dcrWallet(position int) (*tWallet, error) {
+	daemon := fmt.Sprintf("trading%d", position)
+	cfg, err := config.Parse(filepath.Join(dextestDir, "dcr", daemon, fmt.Sprintf("%s.conf", daemon)))
+	if err != nil {
+		return nil, err
 	}
+	cfg["account"] = "default"
+	return &tWallet{
+		pass:   []byte("abc"),
+		config: cfg,
+	}, nil
 }
 
-func btcWallet(daemon, walletName string) *tWallet {
-	pass := "abc"
-	if walletName == "delta" || walletName == "gamma" {
-		pass = ""
+func btcWallet(position int) (*tWallet, error) {
+	cfg := make(map[string]string)
+	if position == 1 {
+		var err error
+		cfg, err = config.Parse(filepath.Join(dextestDir, "btc", "beta", "beta.conf"))
+		if err != nil {
+			return nil, err
+		}
+		return &tWallet{
+			pass:   []byte("abc"),
+			config: cfg,
+		}, nil
 	}
 	return &tWallet{
-		daemon:     daemon,
-		walletName: walletName,
-		pass:       []byte(pass),
+		walletType: "SPV",
+		fund:       true,
+		config:     cfg,
+	}, nil
+}
+
+func ethWallet(_ int) (*tWallet, error) {
+	return &tWallet{
+		fund:       true,
+		walletType: "geth",
+	}, nil
+}
+
+func btcCloneWallet(position int, assetID uint32) (*tWallet, error) {
+	var (
+		err  error
+		pass []byte
+		cfg  map[string]string
+	)
+	switch position {
+	case 1:
+		cfg, err = config.Parse(filepath.Join(dextestDir, dex.BipIDSymbol(assetID), "alpha", "alpha.conf"))
+		if err != nil {
+			return nil, err
+		}
+		cfg["walletname"] = "gamma"
+	case 2:
+		cfg, err = config.Parse(filepath.Join(dextestDir, dex.BipIDSymbol(assetID), "beta", "beta.conf"))
+		if err != nil {
+			return nil, err
+		}
+		pass = []byte("abc")
 	}
+	return &tWallet{
+		pass:   pass,
+		config: cfg,
+	}, nil
+}
+
+func dogeWallet(position int) (*tWallet, error) {
+	var daemon string
+	switch position {
+	case 1:
+		daemon = "delta"
+	case 2:
+		daemon = "gamma"
+	}
+	cfg, err := config.Parse(filepath.Join(dextestDir, "doge", daemon, fmt.Sprintf("%s.conf", daemon)))
+	if err != nil {
+		return nil, err
+	}
+	return &tWallet{
+		config: cfg,
+		fund:   true,
+	}, nil
+}
+
+func newTClient(position int) (*tClient, error) {
+	wallets := make(map[uint32]*tWallet, 2)
+	addWallet := func(assetID uint32) error {
+		var (
+			tw  *tWallet
+			err error
+		)
+		switch assetID {
+		case dcr.BipID:
+			tw, err = dcrWallet(position)
+		case btc.BipID:
+			tw, err = btcWallet(position)
+		case eth.BipID:
+			tw, err = ethWallet(position)
+		case ltc.BipID, bch.BipID:
+			tw, err = btcCloneWallet(position, assetID)
+		case doge.BipID:
+			tw, err = dogeWallet(position)
+		default:
+			return fmt.Errorf("no method to create wallet for asset %d", assetID)
+		}
+		if err != nil {
+			return err
+		}
+		wallets[assetID] = tw
+		return nil
+	}
+	if err := addWallet(testBaseID); err != nil {
+		return nil, err
+	}
+	if err := addWallet(testQuoteID); err != nil {
+		return nil, err
+	}
+	return &tClient{
+		id:              position,
+		appPass:         []byte(fmt.Sprintf("client%d", position)),
+		wallets:         wallets,
+		processedStatus: make(map[order.MatchID]order.MatchStatus),
+	}, nil
+
 }
 
 type tClient struct {
@@ -1361,9 +1585,6 @@ func (client *tClient) init(t testing.TB, ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// Remove backup database.
-	backup := filepath.Join(tmpDir, "backup")
-	os.RemoveAll(backup)
 
 	client.core.lockTimeTaker = tLockTimeTaker
 	client.core.lockTimeMaker = tLockTimeMaker
@@ -1384,9 +1605,16 @@ func (client *tClient) registerDEX(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	feeAsset := dexConf.RegFees["dcr"]
+	feeAssetSymbol := testBaseSymbol
+	feeAssetID := testBaseID
+	if registerWithQuoteAsset {
+		feeAssetSymbol = testQuoteSymbol
+		feeAssetID = testQuoteID
+	}
+
+	feeAsset := dexConf.RegFees[feeAssetSymbol]
 	if feeAsset == nil {
-		return errors.New("dcr not supported!")
+		return fmt.Errorf("%s not supported for fees!", feeAssetSymbol)
 	}
 	dexFee := feeAsset.Amt
 	assetID := feeAsset.ID
@@ -1404,12 +1632,13 @@ func (client *tClient) registerDEX(ctx context.Context) error {
 	}
 	client.log("Sent registration fee to DEX %s", dexHost)
 
-	// Mine drc block(s) to mark fee as paid.
-	err = mineBlocks(dcr.BipID, uint32(regRes.ReqConfirms))
+	// Mine block(s) to mark fee as paid.
+
+	err = newHarnessCtrl(feeAssetID).mineBlocks(ctx, uint32(regRes.ReqConfirms))
 	if err != nil {
 		return err
 	}
-	client.log("Mined %d dcr blocks for fee payment confirmation", regRes.ReqConfirms)
+	client.log("Mined %d %s blocks for fee payment confirmation", regRes.ReqConfirms, feeAssetSymbol)
 
 	// Wait up to bTimeout+12 seconds for fee payment. notify_fee times out
 	// after bTimeout+10 seconds.
@@ -1491,17 +1720,15 @@ func (n *notificationReader) find(ctx context.Context, waitDuration time.Duratio
 
 func (client *tClient) placeOrder(qty, rate uint64, tifNow bool) (string, error) {
 	dc := client.dc()
-	dcrBtcMkt := dc.marketConfig("dcr_btc")
-	if dcrBtcMkt == nil {
-		return "", fmt.Errorf("no dcr_btc market found")
+	mkt := dc.marketConfig(testMarket)
+	if mkt == nil {
+		return "", fmt.Errorf("no %s market found", testMarket)
 	}
-	baseAsset := dc.assets[dcrBtcMkt.Base]
-	quoteAsset := dc.assets[dcrBtcMkt.Quote]
 
 	tradeForm := &TradeForm{
 		Host:    dexHost,
-		Base:    baseAsset.ID,
-		Quote:   quoteAsset.ID,
+		Base:    testBaseID,
+		Quote:   testQuoteID,
 		IsLimit: true,
 		Sell:    client.isSeller,
 		Qty:     qty,
@@ -1509,9 +1736,11 @@ func (client *tClient) placeOrder(qty, rate uint64, tifNow bool) (string, error)
 		TifNow:  tifNow,
 	}
 
-	qtyStr := fmt.Sprintf("%.8f %s", fmtAmt(qty), baseAsset.Symbol)
-	rateStr := fmt.Sprintf("%.8f %s/%s", fmtAmt(rate), quoteAsset.Symbol,
-		baseAsset.Symbol)
+	precisionStr := fmt.Sprintf("%%.%vf %%s", math.Log10(float64(conversionFactors[testBaseID])))
+	qtyStr := fmt.Sprintf(precisionStr, fmtAmt(qty, testBaseID), testBaseSymbol)
+	precisionStr = fmt.Sprintf("%%.%vf %%s", math.Log10(float64(conversionFactors[testQuoteID])))
+	rateStr := fmt.Sprintf(precisionStr, fmtAmt(rate, testQuoteID), testQuoteSymbol,
+		testBaseSymbol)
 
 	ord, err := client.core.Trade(client.appPass, tradeForm)
 	if err != nil {
@@ -1532,7 +1761,7 @@ func (client *tClient) updateBalances() error {
 		}
 		client.balances[assetID] = balances.Available + balances.Immature + balances.Locked
 		client.log("%s available %f, immature %f, locked %f", unbip(assetID),
-			fmtAmt(balances.Available), fmtAmt(balances.Immature), fmtAmt(balances.Locked))
+			fmtAmt(balances.Available, assetID), fmtAmt(balances.Immature, assetID), fmtAmt(balances.Locked, assetID))
 	}
 	return nil
 }
@@ -1556,17 +1785,21 @@ func (client *tClient) assertBalanceChanges() error {
 	for assetID, expectedDiff := range client.expectBalanceDiffs {
 		// actual diff will likely be less than expected because of tx fees
 		// TODO: account for actual fee(s) or use a more realistic fee estimate.
-		minExpectedDiff, maxExpectedDiff := expectedDiff-conversionFactor, expectedDiff
+		minExpectedDiff, maxExpectedDiff := expectedDiff-int64(conversionFactors[assetID]), expectedDiff
 		if expectedDiff == 0 {
 			minExpectedDiff, maxExpectedDiff = 0, 0 // no tx fees
 		}
 		balanceDiff := int64(client.balances[assetID] - prevBalances[assetID])
 		if balanceDiff < minExpectedDiff || balanceDiff > maxExpectedDiff {
-			return fmt.Errorf("[client %d] %s balance change not in expected range %.8f - %.8f, got %.8f",
-				client.id, unbip(assetID), fmtAmt(minExpectedDiff), fmtAmt(maxExpectedDiff), fmtAmt(balanceDiff))
+			precisionStr := fmt.Sprintf("[client %%d] %%s balance change not in expected range %%.%[1]vf - %%.%[1]vf, got %%.%[1]vf",
+				math.Log10(float64(conversionFactors[assetID])))
+			return fmt.Errorf(precisionStr, client.id, unbip(assetID), fmtAmt(minExpectedDiff,
+				assetID), fmtAmt(maxExpectedDiff, assetID), fmtAmt(balanceDiff, assetID))
 		}
-		client.log("%s balance change %.8f is in expected range of %.8f - %.8f",
-			unbip(assetID), fmtAmt(balanceDiff), fmtAmt(minExpectedDiff), fmtAmt(maxExpectedDiff))
+		precisionStr := fmt.Sprintf("%%s balance change %%.%[1]vf is in expected range of %%.%[1]vf - %%.%[1]vf",
+			math.Log10(float64(conversionFactors[assetID])))
+		client.log(precisionStr, unbip(assetID), fmtAmt(balanceDiff, assetID),
+			fmtAmt(minExpectedDiff, assetID), fmtAmt(maxExpectedDiff, assetID))
 	}
 	return nil
 }
@@ -1611,35 +1844,12 @@ func (client *tClient) disconnectWallets() {
 	client.core.walletMtx.Unlock()
 }
 
-func mineBlocks(assetID, blocks uint32) error {
-	return tmuxRun(assetID, fmt.Sprintf("./mine-alpha %d", blocks))
-}
-
-func tmuxRun(assetID uint32, cmd string) error {
-	var tmuxWindow string
-	switch assetID {
-	case dcr.BipID:
-		tmuxWindow = "dcr-harness:0"
-	case btc.BipID:
-		tmuxWindow = "btc-harness:2"
-	default:
-		return fmt.Errorf("can't mine blocks for unknown asset %d", assetID)
-	}
-
-	cmd += "; tmux wait-for -S harnessdone"
-	err := exec.Command("tmux", "send-keys", "-t", tmuxWindow, cmd, "C-m").Run() // ; wait-for harnessdone
-	if err != nil {
-		return nil
-	}
-	return exec.Command("tmux", "wait-for", "harnessdone").Run()
-}
-
-func fmtAmt(anyAmt interface{}) float64 {
+func fmtAmt(anyAmt interface{}, assetID uint32) float64 {
 	if amt, ok := anyAmt.(uint64); ok {
-		return float64(amt) / conversionFactor
+		return float64(amt) / float64(conversionFactors[assetID])
 	}
 	if amt, ok := anyAmt.(int64); ok {
-		return float64(amt) / conversionFactor
+		return float64(amt) / float64(conversionFactors[assetID])
 	}
 	panic(fmt.Sprintf("invalid call to fmtAmt with %v", anyAmt))
 }
