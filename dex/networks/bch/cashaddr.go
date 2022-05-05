@@ -19,8 +19,17 @@ func RecodeCashAddress(addr string, net *chaincfg.Params) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return EncodeCashAddress(btcAddr, net)
+}
 
+// EncodeCashAddress converts a btcutil.Address that the BTC backend into a Cash
+// Address string. For example, if a pkScript was decoded to a btcutil.Address,
+// the correct address string would not be from the Address' String method, but
+// from EncodeCashAddress. This is more direct than doing
+// RecodeCashAddress(addr.String()), which needlessly decodes the string.
+func EncodeCashAddress(btcAddr btcutil.Address, net *chaincfg.Params) (string, error) {
 	var bchAddr bchutil.Address
+	var err error
 	switch at := btcAddr.(type) {
 	case *btcutil.AddressPubKeyHash:
 		bchAddr, err = bchutil.NewAddressPubKeyHash(btcAddr.ScriptAddress(), convertParams(net))

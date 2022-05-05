@@ -74,6 +74,7 @@ type rpcCore struct {
 	requester                RawRequesterWithContext
 	segwit                   bool
 	decodeAddr               dexbtc.AddressDecoder
+	stringAddr               dexbtc.AddressStringer
 	deserializeBlock         func([]byte) (*wire.MsgBlock, error)
 	arglessChangeAddrRPC     bool
 	legacyRawSends           bool
@@ -395,7 +396,7 @@ func (wc *rpcClient) address(aType string) (btcutil.Address, error) {
 	if err != nil {
 		return nil, err
 	}
-	return wc.decodeAddr(addrStr, wc.chainParams)
+	return wc.decodeAddr(addrStr, wc.chainParams) // we should consider returning a string
 }
 
 // signTx attempts to have the wallet sign the transaction inputs.
@@ -497,7 +498,11 @@ func (wc *rpcClient) GetWalletInfo() (*GetWalletInfoResult, error) {
 // getaddressinfo or validateaddress RPC command.
 func (wc *rpcClient) getAddressInfo(addr btcutil.Address, method string) (*GetAddressInfoResult, error) {
 	ai := new(GetAddressInfoResult)
-	return ai, wc.call(method, anylist{addr.String()}, ai)
+	addrStr, err := wc.stringAddr(addr, wc.chainParams)
+	if err != nil {
+		return nil, err
+	}
+	return ai, wc.call(method, anylist{addrStr}, ai)
 }
 
 // ownsAddress indicates if an address belongs to the wallet.

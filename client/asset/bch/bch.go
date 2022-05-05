@@ -159,9 +159,11 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		DefaultFallbackFee: defaultFee,
 		Segwit:             false,
 		LegacyBalance:      true,
-		// Bitcoin Cash uses the Cash Address encoding, which is Bech32, but
-		// not indicative of segwit. We provide a custom encoder.
-		AddressDecoder: dexbch.DecodeCashAddress,
+		// Bitcoin Cash uses the Cash Address encoding, which is Bech32, but not
+		// indicative of segwit. We provide a custom encoder and decode to go
+		// to/from a btcutil.Address and a string.
+		AddressDecoder:  dexbch.DecodeCashAddress,
+		AddressStringer: dexbch.EncodeCashAddress,
 		// Bitcoin Cash has a custom signature hash algorithm. Since they don't
 		// have segwit, Bitcoin Cash implemented a variation of the withdrawn
 		// BIP0062 that utilizes Shnorr signatures.
@@ -190,31 +192,6 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 // methods to perform on-the-fly address translation.
 type BCHWallet struct {
 	*btc.ExchangeWalletFullNode
-}
-
-// Address converts the Bitcoin base58-encoded address returned by the embedded
-// ExchangeWallet into a Cash Address.
-func (bch *BCHWallet) Address() (string, error) {
-	btcAddrStr, err := bch.ExchangeWalletFullNode.Address()
-	if err != nil {
-		return "", err
-	}
-	return dexbch.RecodeCashAddress(btcAddrStr, bch.Net())
-}
-
-// AuditContract modifies the *asset.Contract returned by the ExchangeWallet
-// AuditContract method by converting the Recipient to the Cash Address
-// encoding.
-func (bch *BCHWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroadcast bool) (*asset.AuditInfo, error) { // AuditInfo has address
-	ai, err := bch.ExchangeWalletFullNode.AuditContract(coinID, contract, txData, rebroadcast)
-	if err != nil {
-		return nil, err
-	}
-	ai.Recipient, err = dexbch.RecodeCashAddress(ai.Recipient, bch.Net())
-	if err != nil {
-		return nil, err
-	}
-	return ai, nil
 }
 
 // rawTxSigner signs the transaction using Bitcoin Cash's custom signature

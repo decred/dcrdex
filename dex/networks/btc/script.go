@@ -647,7 +647,7 @@ func InputInfo(pkScript, redeemScript []byte, chainParams *chaincfg.Params) (*Sp
 	}
 	if nonStandard {
 		return &SpendInfo{
-			// SigScriptSize and WitnessSizecannot be determined, leave zero.
+			// SigScriptSize and WitnessSize cannot be determined, leave zero.
 			ScriptAddrs:       scriptAddrs,
 			ScriptType:        scriptType,
 			NonStandardScript: true,

@@ -12,6 +12,11 @@ import (
 // AddressDecoder decodes a string address to a btcutil.Address.
 type AddressDecoder func(addr string, net *chaincfg.Params) (btcutil.Address, error)
 
+// AddressStringer converts the btcutil.Address into a string address. This may
+// be different from using (btcutil.Address).String when there is a special
+// encoding such as a BCH "Cash Address".
+type AddressStringer func(btcutil.Address, *chaincfg.Params) (string, error)
+
 // ReadCloneParams translates a CloneParams into a btcsuite chaincfg.Params.
 func ReadCloneParams(cloneParams *CloneParams) *chaincfg.Params {
 	return &chaincfg.Params{

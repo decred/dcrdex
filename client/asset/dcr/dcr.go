@@ -235,24 +235,16 @@ func (op *output) wireOutPoint() *wire.OutPoint {
 
 // auditInfo is information about a swap contract on the blockchain, not
 // necessarily created by this wallet, as would be returned from AuditContract.
-// auditInfo satisfies the asset.AuditInfo interface.
 type auditInfo struct {
 	output     *output
 	secretHash []byte
 	contract   []byte
-	recipient  stdaddr.Address
+	recipient  stdaddr.Address // unused?
 	expiration time.Time
 }
 
-// Recipient is a base58 string for the contract's receiving address. Part of
-// the asset.AuditInfo interface.
-func (ci *auditInfo) Recipient() string {
-	return ci.recipient.String()
-}
-
 // Expiration is the expiration time of the contract, which is the earliest time
-// that a refund can be issued for an un-redeemed contract. Part of the
-// asset.AuditInfo interface.
+// that a refund can be issued for an un-redeemed contract.
 func (ci *auditInfo) Expiration() time.Time {
 	return ci.expiration
 }
@@ -262,8 +254,7 @@ func (ci *auditInfo) Contract() dex.Bytes {
 	return ci.contract
 }
 
-// Coin returns the output as an asset.Coin. Part of the asset.AuditInfo
-// interface.
+// Coin returns the output as an asset.Coin.
 func (ci *auditInfo) Coin() asset.Coin {
 	return ci.output
 }
@@ -291,9 +282,9 @@ func convertAuditInfo(ai *asset.AuditInfo, chainParams *chaincfg.Params) (*audit
 	}
 
 	return &auditInfo{
-		output:     op,            //     *output
-		recipient:  recip,         //  btcutil.Address
-		contract:   ai.Contract,   //   []byte
+		output:     op,            // *output
+		recipient:  recip,         // btcutil.Address
+		contract:   ai.Contract,   // []byte
 		secretHash: ai.SecretHash, // []byte
 		expiration: ai.Expiration, // time.Time
 	}, nil
