@@ -228,7 +228,11 @@ type BTCCloneCFG struct {
 	// AddressDecoder is an optional argument that can decode an address string
 	// into btcutil.Address. If AddressDecoder is not supplied,
 	// btcutil.DecodeAddress will be used.
-	AddressDecoder dexbtc.AddressDecoder
+	AddressDecoder dexbtc.AddressDecoder // string => btcutil.Address
+	// AddressStringer is an optional argument that can encode a btcutil.Address
+	// into an address string. If AddressStringer is not supplied, the
+	// (btcutil.Address).String method will be used.
+	AddressStringer dexbtc.AddressStringer // btcutil.Address => string, may be an override or just the String method
 	// BlockDeserializer can be used in place of (*wire.MsgBlock).Deserialize.
 	BlockDeserializer func([]byte) (*wire.MsgBlock, error)
 	// ArglessChangeAddrRPC can be true if the getrawchangeaddress takes no
@@ -332,27 +336,19 @@ func (op *output) wireOutPoint() *wire.OutPoint {
 // auditInfo is information about a swap contract on that blockchain.
 type auditInfo struct {
 	output     *output
-	recipient  btcutil.Address
+	recipient  btcutil.Address // caution: use stringAddr, not the Stringer
 	contract   []byte
 	secretHash []byte
 	expiration time.Time
 }
 
-// Recipient returns a base58 string for the contract's receiving address. Part
-// of the asset.AuditInfo interface.
-func (ci *auditInfo) Recipient() string {
-	return ci.recipient.String()
-}
-
 // Expiration returns the expiration time of the contract, which is the earliest
-// time that a refund can be issued for an un-redeemed contract. Part of the
-// asset.AuditInfo interface.
+// time that a refund can be issued for an un-redeemed contract.
 func (ci *auditInfo) Expiration() time.Time {
 	return ci.expiration
 }
 
-// Coin returns the output as an asset.Coin. Part of the asset.AuditInfo
-// interface.
+// Coin returns the output as an asset.Coin.
 func (ci *auditInfo) Coin() asset.Coin {
 	return ci.output
 }
@@ -587,8 +583,9 @@ type baseWallet struct {
 	useLegacyBalance  bool
 	segwit            bool
 	signNonSegwit     TxInSigner
-	estimateFee       func(RawRequester, uint64) (uint64, error)
+	estimateFee       func(RawRequester, uint64) (uint64, error) // TODO: resolve the awkwardness of an RPC-oriented func in a generic framework
 	decodeAddr        dexbtc.AddressDecoder
+	stringAddr        dexbtc.AddressStringer
 
 	tipMtx     sync.RWMutex
 	currentTip *block
@@ -773,6 +770,7 @@ func newRPCWallet(requester RawRequesterWithContext, cfg *BTCCloneCFG, walletCon
 		requester:                requester,
 		segwit:                   cfg.Segwit,
 		decodeAddr:               btc.decodeAddr,
+		stringAddr:               btc.stringAddr,
 		deserializeBlock:         blockDeserializer,
 		arglessChangeAddrRPC:     cfg.ArglessChangeAddrRPC,
 		legacyRawSends:           cfg.LegacyRawFeeLimit,
@@ -824,6 +822,13 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		addrDecoder = cfg.AddressDecoder
 	}
 
+	addrStringer := cfg.AddressStringer
+	if cfg.AddressStringer == nil {
+		addrStringer = func(addr btcutil.Address, _ *chaincfg.Params) (string, error) {
+			return addr.String(), nil
+		}
+	}
+
 	nonSegwitSigner := rawTxInSig
 	if cfg.NonSegwitSigner != nil {
 		nonSegwitSigner = cfg.NonSegwitSigner
@@ -848,6 +853,7 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		signNonSegwit:       nonSegwitSigner,
 		estimateFee:         cfg.FeeEstimator,
 		decodeAddr:          addrDecoder,
+		stringAddr:          addrStringer,
 		walletInfo:          cfg.WalletInfo,
 	}
 
@@ -885,12 +891,6 @@ func openSPVWallet(cfg *BTCCloneCFG) (*ExchangeWalletSPV, error) {
 // Info returns basic information about the wallet and asset.
 func (btc *baseWallet) Info() *asset.WalletInfo {
 	return btc.walletInfo
-}
-
-// Net returns the ExchangeWallet's *chaincfg.Params. This is not part of the
-// asset.Wallet interface, but is provided as a convenience for embedding types.
-func (btc *baseWallet) Net() *chaincfg.Params {
-	return btc.chainParams
 }
 
 // Connect connects the wallet to the RPC server. Satisfies the dex.Connector
@@ -1705,6 +1705,10 @@ func (btc *baseWallet) split(value uint64, lots uint64, outputs []*output,
 	if err != nil {
 		return nil, false, fmt.Errorf("error creating split transaction address: %w", err)
 	}
+	addrStr, err := btc.stringAddr(addr, btc.chainParams)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to stringify the change address: %w", err)
+	}
 
 	reqFunds := calc.RequiredOrderFundsAlt(value, swapInputSize, lots, nfo.SwapSizeBase, nfo.SwapSize, bumpedMaxRate)
 
@@ -1734,7 +1738,7 @@ func (btc *baseWallet) split(value uint64, lots uint64, outputs []*output,
 	fundingCoins = map[outPoint]*utxo{op.pt: {
 		txHash:  op.txHash(),
 		vout:    op.vout(),
-		address: addr.String(),
+		address: addrStr,
 		amount:  reqFunds,
 	}}
 
@@ -2054,12 +2058,18 @@ func (btc *baseWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, ui
 			btc.log.Errorf("failed to lock change output: %v", err)
 		}
 
+		addrStr, err := btc.stringAddr(changeAddr, btc.chainParams)
+		if err != nil {
+			btc.log.Errorf("Failed to stringify address %v (default encoding): %v", changeAddr, err)
+			addrStr = changeAddr.String() // may or may not be able to retrieve the private keys for the next swap!
+		}
+
 		// Log it as a fundingCoin, since it is expected that this will be
 		// chained into further matches.
 		btc.fundingCoins[change.pt] = &utxo{
 			txHash:  change.txHash(),
 			vout:    change.vout(),
-			address: changeAddr.String(),
+			address: addrStr,
 			amount:  change.value,
 		}
 	}
@@ -2217,9 +2227,9 @@ func (btc *baseWallet) convertAuditInfo(ai *asset.AuditInfo) (*auditInfo, error)
 	}
 
 	return &auditInfo{
-		output:     newOutput(txHash, vout, ai.Coin.Value()), //     *output
-		recipient:  recip,                                    //  btcutil.Address
-		contract:   ai.Contract,                              //   []byte
+		output:     newOutput(txHash, vout, ai.Coin.Value()), // *output
+		recipient:  recip,                                    // btcutil.Address
+		contract:   ai.Contract,                              // []byte
 		secretHash: ai.SecretHash,                            // []byte
 		expiration: ai.Expiration,                            // time.Time
 	}, nil
@@ -2348,9 +2358,15 @@ func (btc *baseWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroad
 		}()
 	}
 
+	addrStr, err := btc.stringAddr(receiver, btc.chainParams)
+	if err != nil {
+		btc.log.Errorf("Failed to stringify receiver address %v (default): %v", receiver, err)
+		addrStr = receiver.String() // potentially misleading AuditInfo.Recipient
+	}
+
 	return &asset.AuditInfo{
 		Coin:       newOutput(txHash, vout, uint64(txOut.Value)),
-		Recipient:  receiver.String(),
+		Recipient:  addrStr,
 		Contract:   contract,
 		SecretHash: secretHash,
 		Expiration: time.Unix(int64(stamp), 0).UTC(),
@@ -2741,7 +2757,7 @@ func (btc *baseWallet) Address() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return addr.String(), nil
+	return btc.stringAddr(addr, btc.chainParams)
 }
 
 // NewAddress returns a new address from the wallet. This satisfies the
@@ -3245,8 +3261,9 @@ func (btc *baseWallet) signTxAndAddChange(baseTx *wire.MsgTx, addr btcutil.Addre
 		// Add the change output.
 		vSize0 := dexbtc.MsgTxVBytes(baseTx)
 		baseTx.AddTxOut(changeOutput)
-		changeSize := dexbtc.MsgTxVBytes(baseTx) - vSize0 // may be dexbtc.P2WPKHOutputSize
-		btc.log.Debugf("Change output size = %d, addr = %s", changeSize, addr.String())
+		changeSize := dexbtc.MsgTxVBytes(baseTx) - vSize0   // may be dexbtc.P2WPKHOutputSize
+		addrStr, _ := btc.stringAddr(addr, btc.chainParams) // just for logging
+		btc.log.Debugf("Change output size = %d, addr = %s", changeSize, addrStr)
 
 		vSize += changeSize
 		fee := feeRate * vSize
@@ -3328,7 +3345,11 @@ func (btc *baseWallet) broadcastTx(signedTx *wire.MsgTx) error {
 // createSig creates and returns the serialized raw signature and compressed
 // pubkey for a transaction input signature.
 func (btc *baseWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, addr btcutil.Address, val uint64) (sig, pubkey []byte, err error) {
-	privKey, err := btc.node.privKeyForAddress(addr.String())
+	addrStr, err := btc.stringAddr(addr, btc.chainParams)
+	if err != nil {
+		return nil, nil, err
+	}
+	privKey, err := btc.node.privKeyForAddress(addrStr)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -3343,8 +3364,11 @@ func (btc *baseWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, addr 
 // input and the pubkey associated with the address.
 func (btc *baseWallet) createWitnessSig(tx *wire.MsgTx, idx int, pkScript []byte,
 	addr btcutil.Address, val uint64, sigHashes *txscript.TxSigHashes) (sig, pubkey []byte, err error) {
-
-	privKey, err := btc.node.privKeyForAddress(addr.String())
+	addrStr, err := btc.stringAddr(addr, btc.chainParams)
+	if err != nil {
+		return nil, nil, err
+	}
+	privKey, err := btc.node.privKeyForAddress(addrStr)
 	if err != nil {
 		return nil, nil, err
 	}
