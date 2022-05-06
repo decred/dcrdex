@@ -78,7 +78,7 @@ func TestCashAddr(t *testing.T) {
 
 	}
 
-	nets := []*chaincfg.Params{MainNetParams, TestNet3Params, RegressionNetParams}
+	nets := []*chaincfg.Params{MainNetParams, TestNet4Params, RegressionNetParams}
 	for _, net := range nets {
 		// Check the lowest and highest possible hashes.
 		checkHash(net, lowB)

@@ -66,8 +66,8 @@ func convertParams(btcParams *chaincfg.Params) *bchchaincfg.Params {
 	switch btcParams.Net {
 	case MainNetParams.Net:
 		return &bchchaincfg.MainNetParams
-	case TestNet3Params.Net:
-		return &bchchaincfg.TestNet3Params
+	case TestNet4Params.Net:
+		return &bchchaincfg.TestNet4Params
 	case RegressionNetParams.Net:
 		return &bchchaincfg.RegressionNetParams
 	}

@@ -26,14 +26,14 @@ var (
 		CoinbaseMaturity: 100,
 		Net:              0xe8f3e1e3,
 	})
-	// TestNet3Params are the clone parameters for testnet.
-	TestNet3Params = btc.ReadCloneParams(&btc.CloneParams{
-		Name:             "testnet3",
+	// TestNet4Params are the clone parameters for testnet4.
+	TestNet4Params = btc.ReadCloneParams(&btc.CloneParams{
+		Name:             "testnet4",
 		PubKeyHashAddrID: 0x6f,
 		ScriptHashAddrID: 0xc4,
 		Bech32HRPSegwit:  "bchtest",
 		CoinbaseMaturity: 100,
-		Net:              0xf4f3e5f4,
+		Net:              0xafdab7e2,
 	})
 	// RegressionNetParams are the clone parameters for simnet.
 	RegressionNetParams = btc.ReadCloneParams(&btc.CloneParams{
@@ -52,7 +52,7 @@ var (
 )
 
 func init() {
-	for _, params := range []*chaincfg.Params{MainNetParams, TestNet3Params, RegressionNetParams} {
+	for _, params := range []*chaincfg.Params{MainNetParams, TestNet4Params, RegressionNetParams} {
 		err := chaincfg.Register(params)
 		if err != nil {
 			panic("failed to register bch parameters: " + err.Error())

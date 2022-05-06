@@ -59,7 +59,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 	case dex.Mainnet:
 		params = dexbch.MainNetParams
 	case dex.Testnet:
-		params = dexbch.TestNet3Params
+		params = dexbch.TestNet4Params
 	case dex.Regtest:
 		params = dexbch.RegressionNetParams
 	default:
@@ -71,7 +71,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 	// ports as Bitcoin.
 	ports := dexbtc.NetPorts{
 		Mainnet: "8332",
-		Testnet: "18332",
+		Testnet: "28332",
 		Simnet:  "18443",
 	}
 
