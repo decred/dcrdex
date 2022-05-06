@@ -450,9 +450,9 @@ func (m *Mantle) replenishBalance(w *botWallet) {
 		// Send some back to the alpha address.
 		amt := bal.Available - wantBal
 		m.log.Debugf("Sending %s back to %s alpha node", valString(amt, w.symbol), w.symbol)
-		_, err := m.Withdraw(pass, w.assetID, amt, returnAddress(w.symbol, alpha))
+		_, err := m.Send(pass, w.assetID, amt, returnAddress(w.symbol, alpha), false)
 		if err != nil {
-			m.fatalError("failed to withdraw funds to alpha: %v", err)
+			m.fatalError("failed to send funds to alpha: %v", err)
 		}
 	}
 }

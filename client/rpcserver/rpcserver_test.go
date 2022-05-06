@@ -54,6 +54,7 @@ type TCore struct {
 	cancelErr                error
 	coin                     asset.Coin
 	withdrawErr              error
+	sendErr                  error
 	logoutErr                error
 	book                     *core.OrderBook
 	bookErr                  error
@@ -124,7 +125,10 @@ func (c *TCore) Wallets() []*core.WalletState {
 func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 	return c.walletState
 }
-func (c *TCore) Withdraw(pw []byte, assetID uint32, value uint64, addr string) (asset.Coin, error) {
+func (c *TCore) Send(pw []byte, assetID uint32, value uint64, addr string, subtract bool) (asset.Coin, error) {
+	if !subtract {
+		return c.coin, c.sendErr
+	}
 	return c.coin, c.withdrawErr
 }
 func (c *TCore) ExportSeed(pw []byte) ([]byte, error) {

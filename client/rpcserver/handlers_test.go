@@ -747,7 +747,7 @@ func (tCoin) Confirmations(context.Context) (uint32, error) {
 	return 0, nil
 }
 
-func TestHandleWithdraw(t *testing.T) {
+func TestHandleSendAndWithdraw(t *testing.T) {
 	pw := encode.PassBytes("password123")
 	params := &RawParams{
 		PWArgs: []encode.PassBytes{pw},
@@ -757,6 +757,8 @@ func TestHandleWithdraw(t *testing.T) {
 			"abc",
 		},
 	}
+
+	// Test handleWithdraw.
 	tests := []struct {
 		name        string
 		params      *RawParams
@@ -790,6 +792,46 @@ func TestHandleWithdraw(t *testing.T) {
 		}
 		r := &RPCServer{core: tc}
 		payload := handleWithdraw(r, test.params)
+		res := ""
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Test handleSend.
+	sendTests := []struct {
+		name        string
+		params      *RawParams
+		walletState *core.WalletState
+		coin        asset.Coin
+		sendErr     error
+		wantErrCode int
+	}{{
+		name:        "ok",
+		params:      params,
+		walletState: &core.WalletState{},
+		coin:        tCoin{},
+		wantErrCode: -1,
+	}, {
+		name:        "core.Send error",
+		params:      params,
+		walletState: &core.WalletState{},
+		coin:        tCoin{},
+		sendErr:     errors.New("error"),
+		wantErrCode: msgjson.RPCSendError,
+	}, {
+		name:        "bad params",
+		params:      &RawParams{},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+	for _, test := range sendTests {
+		tc := &TCore{
+			walletState: test.walletState,
+			coin:        test.coin,
+			sendErr:     test.sendErr,
+		}
+		r := &RPCServer{core: tc}
+		payload := handleSend(r, test.params)
 		res := ""
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatal(err)

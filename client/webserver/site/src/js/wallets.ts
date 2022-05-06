@@ -19,13 +19,14 @@ const bind = Doc.bind
 const animationLength = 300
 const traitNewAddresser = 1 << 1
 const traitLogFiler = 1 << 2
-const traitRecoverer = 1 << 4
+const traitRecoverer = 1 << 5
 const activeOrdersErrCode = 35
+const traitWithdrawer = 1 << 6
 
 interface Actions {
   connect: HTMLElement
   unlock: HTMLElement
-  withdraw: HTMLElement
+  send: HTMLElement
   deposit: HTMLElement
   create: HTMLElement
   rescan: HTMLElement
@@ -60,7 +61,7 @@ export default class WalletsPage extends BasePage {
   body: HTMLElement
   page: Record<string, PageElement>
   rowInfos: Record<string, RowInfo>
-  withdrawAsset: SupportedAsset
+  sendAsset: SupportedAsset
   newWalletForm: NewWalletForm
   reconfigForm: WalletConfigForm
   unlockForm: UnlockWalletForm
@@ -108,7 +109,7 @@ export default class WalletsPage extends BasePage {
         actions: {
           connect: getAction(tr, 'connect'),
           unlock: getAction(tr, 'unlock'),
-          withdraw: getAction(tr, 'withdraw'),
+          send: getAction(tr, 'send'),
           deposit: getAction(tr, 'deposit'),
           create: getAction(tr, 'create'),
           rescan: getAction(tr, 'rescan'),
@@ -134,8 +135,8 @@ export default class WalletsPage extends BasePage {
     // Bind the wallet unlock form.
     this.unlockForm = new UnlockWalletForm(page.unlockWalletForm, () => { this.openWalletSuccess() })
 
-    // Bind the withdraw form.
-    bindForm(page.withdrawForm, page.submitWithdraw, () => { this.withdraw() })
+    // Bind the Send form.
+    bindForm(page.sendForm, page.submitSendForm, () => { this.send() })
 
     // Bind the wallet reconfiguration submission.
     bindForm(page.reconfigForm, page.submitReconfig, () => this.reconfig())
@@ -182,7 +183,7 @@ export default class WalletsPage extends BasePage {
         f(assetID, asset)
       }
       bind(a.connect, 'click', e => { run(e, this.doConnect.bind(this)) })
-      bind(a.withdraw, 'click', e => { run(e, this.showWithdraw.bind(this)) })
+      bind(a.send, 'click', e => { run(e, this.showSendForm.bind(this)) })
       bind(a.deposit, 'click', e => { run(e, this.showDeposit.bind(this)) })
       bind(a.create, 'click', e => { run(e, this.showNewWallet.bind(this)) })
       bind(a.rescan, 'click', e => { run(e, this.rescanWallet.bind(this)) })
@@ -194,11 +195,12 @@ export default class WalletsPage extends BasePage {
     // New deposit address button.
     bind(page.newDepAddrBttn, 'click', async () => { this.newDepositAddress() })
 
-    // Clicking on the available amount on the withdraw form populates the
+    // Clicking on the available amount on the Send form populates the
     // amount field.
-    bind(page.withdrawAvail, 'click', () => {
-      const asset = this.withdrawAsset
-      page.withdrawAmt.value = String(asset.wallet.balance.available / asset.info.unitinfo.conventional.conversionFactor)
+    bind(page.sendAvail, 'click', () => {
+      const asset = this.sendAsset
+      page.sendAmt.value = String(asset.wallet.balance.available / asset.info.unitinfo.conventional.conversionFactor)
+      page.subtractCheckBox.checked = true
     })
 
     // A link on the wallet reconfiguration form to show/hide the password field.
@@ -438,7 +440,7 @@ export default class WalletsPage extends BasePage {
     const wallet = app().walletMap[assetID]
     if ((wallet.traits & traitLogFiler) !== 0) Doc.show(page.downloadLogs)
     else Doc.hide(page.downloadLogs)
-    if ((wallet.traits & traitRecoverer)) Doc.show(page.recoverWallet)
+    if ((wallet.traits & traitRecoverer) !== 0) Doc.show(page.recoverWallet)
     else Doc.hide(page.recoverWallet)
 
     page.recfgAssetLogo.src = Doc.logoPath(asset.symbol)
@@ -517,26 +519,40 @@ export default class WalletsPage extends BasePage {
     page.qrcode.src = `/generateqrcode?address=${res.address}`
   }
 
-  /* Show the form to withdraw funds. */
-  async showWithdraw (assetID: number) {
+  /* Show the form to either send or withdraw funds. */
+  async showSendForm (assetID: number) {
     const page = this.page
-    const box = page.withdrawForm
-    const asset = this.withdrawAsset = app().assets[assetID]
+    const box = page.sendForm
+    const asset = this.sendAsset = app().assets[assetID]
     this.lastFormAsset = assetID
     const wallet = app().walletMap[assetID]
     if (!wallet) {
-      app().notify(ntfn.make('Cannot withdraw.', `No wallet found for ${asset.info.name}`, ntfn.ERROR))
+      app().notify(ntfn.make('Cannot send/withdraw.', `No wallet found for ${asset.info.name}`, ntfn.ERROR))
     }
     await this.hideBox()
-    page.withdrawAddr.value = ''
-    page.withdrawAmt.value = ''
-    page.withdrawPW.value = ''
 
-    page.withdrawAvail.textContent = Doc.formatFullPrecision(wallet.balance.available, asset.info.unitinfo)
-    page.withdrawLogo.src = Doc.logoPath(asset.symbol)
-    page.withdrawName.textContent = asset.info.name
-    // page.withdrawFee.textContent = wallet.feerate
-    // page.withdrawUnit.textContent = wallet.units
+    Doc.hide(page.senderOnlyHelpText)
+    Doc.hide(page.toggleSubtract)
+    page.subtractCheckBox.checked = false
+
+    const isWithdrawer = (wallet.traits & traitWithdrawer) !== 0
+    if (!isWithdrawer) {
+      Doc.show(page.senderOnlyHelpText)
+      page.subtractCheckBox.checked = false
+    } else {
+      Doc.show(page.toggleSubtract)
+    }
+
+    page.sendAddr.value = ''
+    page.sendAmt.value = ''
+    page.sendPW.value = ''
+
+    page.sendErr.textContent = ''
+    page.sendAvail.textContent = Doc.formatFullPrecision(wallet.balance.available, asset.info.unitinfo)
+    page.sendLogo.src = Doc.logoPath(asset.symbol)
+    page.sendName.textContent = asset.info.name
+    // page.sendFee.textContent = wallet.feerate
+    // page.sendUnit.textContent = wallet.units
     box.dataset.assetID = String(assetID)
     this.animation = this.showBox(box, page.walletPass)
   }
@@ -559,7 +575,7 @@ export default class WalletsPage extends BasePage {
     this.showMarkets(rowInfo.assetID)
     const a = rowInfo.actions
     Doc.hide(a.create)
-    Doc.show(a.withdraw, a.deposit, a.settings)
+    Doc.show(a.send, a.deposit, a.settings)
     await app().fetchUser()
     if (app().walletMap[rowInfo.assetID].encrypted) {
       Doc.show(a.lock)
@@ -570,7 +586,7 @@ export default class WalletsPage extends BasePage {
   async openWalletSuccess () {
     const rowInfo = this.rowInfos[this.openAsset]
     const a = rowInfo.actions
-    Doc.show(a.withdraw, a.deposit)
+    Doc.show(a.send, a.deposit)
     Doc.hide(a.unlock, a.connect)
     if (app().walletMap[rowInfo.assetID].encrypted) {
       Doc.show(a.lock)
@@ -578,24 +594,26 @@ export default class WalletsPage extends BasePage {
     this.showMarkets(this.openAsset)
   }
 
-  /* withdraw submits the withdrawal form to the API. */
-  async withdraw () {
+  /* send submits the send form to the API. */
+  async send () {
     const page = this.page
-    Doc.hide(page.withdrawErr)
-    const assetID = parseInt(page.withdrawForm.dataset.assetID || '')
+    Doc.hide(page.sendErr)
+    const assetID = parseInt(page.sendForm.dataset.assetID || '')
+    const subtract = page.subtractCheckBox.checked || false
     const conversionFactor = app().unitInfo(assetID).conventional.conversionFactor
     const open = {
       assetID: assetID,
-      address: page.withdrawAddr.value,
-      value: Math.round(parseFloat(page.withdrawAmt.value || '') * conversionFactor),
-      pw: page.withdrawPW.value
+      address: page.sendAddr.value,
+      subtract: subtract,
+      value: Math.round(parseFloat(page.sendAmt.value || '') * conversionFactor),
+      pw: page.sendPW.value
     }
-    const loaded = app().loading(page.withdrawForm)
-    const res = await postJSON('/api/withdraw', open)
+    const loaded = app().loading(page.sendForm)
+    const res = await postJSON('/api/send', open)
     loaded()
     if (!app().checkResponse(res, true)) {
-      page.withdrawErr.textContent = res.msg
-      Doc.show(page.withdrawErr)
+      page.sendErr.textContent = res.msg
+      Doc.show(page.sendErr)
       return
     }
     this.showMarkets(assetID)
@@ -644,7 +662,7 @@ export default class WalletsPage extends BasePage {
     loaded()
     if (!app().checkResponse(res)) return
     const a = asset.actions
-    Doc.hide(a.withdraw, a.lock, a.deposit)
+    Doc.hide(a.send, a.lock, a.deposit)
     Doc.show(a.unlock)
   }
 

@@ -532,20 +532,27 @@ func Run(t *testing.T, cfg *Config) {
 	c, _ := asset.DecodeCoinID(cfg.Asset.ID, coinID)
 	tLogger.Infof("Refunded with %s", c)
 
-	// Test PayFee
+	// Test Send.
 	const defaultFee = 100
-	coin, err := rig.secondWallet.PayFee(address, 1e8, defaultFee)
+	tLogger.Info("Testing Send")
+	coin, err := rig.secondWallet.Send(address, cfg.LotSize, 100)
 	if err != nil {
-		t.Fatalf("error paying fees: %v", err)
+		t.Fatalf("error sending: %v", err)
 	}
-	tLogger.Infof("Fee paid with %s", coin.String())
+	if coin.Value() != cfg.LotSize {
+		t.Fatalf("Expected %d got %d", cfg.LotSize, coin.Value())
+	}
+	tLogger.Infof("Sent with %s", coin.String())
 
+	// Test Withdraw.
+	withdrawer, _ := rig.secondWallet.Wallet.(asset.Withdrawer)
 	tLogger.Info("Testing Withdraw")
-
-	// Test Withdraw
-	coin, err = rig.secondWallet.Withdraw(address, cfg.LotSize, 100)
+	coin, err = withdrawer.Withdraw(address, cfg.LotSize, 100)
 	if err != nil {
 		t.Fatalf("error withdrawing: %v", err)
+	}
+	if coin.Value() >= cfg.LotSize {
+		t.Fatalf("Expected less than %d got %d", cfg.LotSize, coin.Value())
 	}
 	tLogger.Infof("Withdrew with %s", coin.String())
 

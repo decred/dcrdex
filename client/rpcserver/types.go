@@ -140,8 +140,8 @@ type cancelForm struct {
 	orderID dex.Bytes
 }
 
-// withdrawForm is information necessary to withdraw funds.
-type withdrawForm struct {
+// sendOrWithdrawForm is information necessary to send or withdraw funds.
+type sendOrWithdrawForm struct {
 	appPass encode.PassBytes
 	assetID uint32
 	value   uint64
@@ -431,7 +431,7 @@ func parseCancelArgs(params *RawParams) (*cancelForm, error) {
 	return &cancelForm{appPass: params.PWArgs[0], orderID: oidB}, nil
 }
 
-func parseWithdrawArgs(params *RawParams) (*withdrawForm, error) {
+func parseSendOrWithdrawArgs(params *RawParams) (*sendOrWithdrawForm, error) {
 	if err := checkNArgs(params, []int{1}, []int{3}); err != nil {
 		return nil, err
 	}
@@ -443,7 +443,7 @@ func parseWithdrawArgs(params *RawParams) (*withdrawForm, error) {
 	if err != nil {
 		return nil, err
 	}
-	req := &withdrawForm{
+	req := &sendOrWithdrawForm{
 		appPass: params.PWArgs[0],
 		assetID: uint32(assetID),
 		value:   value,

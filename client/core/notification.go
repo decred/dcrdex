@@ -15,7 +15,7 @@ import (
 // Notifications should use the following note type strings.
 const (
 	NoteTypeFeePayment   = "feepayment"
-	NoteTypeWithdraw     = "withdraw"
+	NoteTypeSend         = "send"
 	NoteTypeOrder        = "order"
 	NoteTypeMatch        = "match"
 	NoteTypeEpoch        = "epoch"
@@ -197,19 +197,19 @@ func newFeePaymentNoteWithConfirmations(topic Topic, subject, details string, se
 	return feePmtNt
 }
 
-// WithdrawNote is a notification regarding a requested withdraw.
-type WithdrawNote struct {
+// SendNote is a notification regarding a requested send or withdraw.
+type SendNote struct {
 	db.Notification
 }
 
 const (
-	TopicWithdrawError Topic = "WithdrawError"
-	TopicWithdrawSend  Topic = "WithdrawSend"
+	TopicSendError   Topic = "SendError"
+	TopicSendSuccess Topic = "SendSuccess"
 )
 
-func newWithdrawNote(topic Topic, subject, details string, severity db.Severity) *WithdrawNote {
-	return &WithdrawNote{
-		Notification: db.NewNotification(NoteTypeWithdraw, topic, subject, details, severity),
+func newSendNote(topic Topic, subject, details string, severity db.Severity) *SendNote {
+	return &SendNote{
+		Notification: db.NewNotification(NoteTypeSend, topic, subject, details, severity),
 	}
 }
 

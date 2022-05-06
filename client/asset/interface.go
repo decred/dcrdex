@@ -11,7 +11,7 @@ import (
 )
 
 // WalletTrait is a bitset indicating various optional wallet features, such as
-// the presence of auxiliary methods like Rescan and Send.
+// the presence of auxiliary methods like Rescan, Withdraw and Sweep.
 type WalletTrait uint64
 
 const (
@@ -21,6 +21,8 @@ const (
 	WalletTraitFeeRater                             // Wallet can provide a fee rate for non-critical transactions
 	WalletTraitAccelerator                          // This wallet can accelerate transactions using the CPFP technique
 	WalletTraitRecoverer                            // The wallet is an asset.Recoverer.
+	WalletTraitWithdrawer                           // The Wallet can withdraw a specific amount from an exchange wallet.
+	WalletTraitSweeper                              // The Wallet can sweep all the funds, leaving no change.
 )
 
 // IsRescanner tests if the WalletTrait has the WalletTraitRescanner bit set.
@@ -59,6 +61,18 @@ func (wt WalletTrait) IsRecoverer() bool {
 	return wt&WalletTraitRecoverer != 0
 }
 
+// IsWithdrawer tests if the WalletTrait has the WalletTraitSender bit set,
+// which indicates the presence of a Withdraw method.
+func (wt WalletTrait) IsWithdrawer() bool {
+	return wt&WalletTraitWithdrawer != 0
+}
+
+// IsSweeper test if the WalletTrait has the WalletTraitSweeper bit set, which
+// indicates the presence of a Sweep method.
+func (wt WalletTrait) IsSweeper() bool {
+	return wt&WalletTraitSweeper != 0
+}
+
 // DetermineWalletTraits returns the WalletTrait bitset for the provided Wallet.
 func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(Rescanner); is {
@@ -78,6 +92,12 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	}
 	if _, is := w.(Recoverer); is {
 		t |= WalletTraitRecoverer
+	}
+	if _, is := w.(Withdrawer); is {
+		t |= WalletTraitWithdrawer
+	}
+	if _, is := w.(Sweeper); is {
+		t |= WalletTraitSweeper
 	}
 	return t
 }
@@ -318,9 +338,6 @@ type Wallet interface {
 	Lock() error
 	// Locked will be true if the wallet is currently locked.
 	Locked() bool
-	// PayFee sends the dex registration fee. Transaction fees are in addition to
-	// the registration fee, and the feeSuggestion is gotten from the server.
-	PayFee(address string, feeAmt, feeRate uint64) (Coin, error)
 	// SwapConfirmations gets the number of confirmations and the spend status
 	// for the specified swap. If the swap was not funded by this wallet, and
 	// it is already spent, you may see CoinNotFoundError.
@@ -330,9 +347,6 @@ type Wallet interface {
 	// The contract and matchTime are provided so that wallets may search for
 	// the coin using light filters.
 	SwapConfirmations(ctx context.Context, coinID dex.Bytes, contract dex.Bytes, matchTime time.Time) (confs uint32, spent bool, err error)
-	// Withdraw withdraws funds to the specified address. Fees are subtracted
-	// from the value.
-	Withdraw(address string, value, feeRate uint64) (Coin, error)
 	// ValidateSecret checks that the secret hashes to the secret hash.
 	ValidateSecret(secret, secretHash []byte) bool
 	// SyncStatus is information about the blockchain sync status. It should
@@ -343,6 +357,9 @@ type Wallet interface {
 	// payment. This method need not be supported by all assets. Those assets
 	// which do no support DEX registration fees will return an ErrUnsupported.
 	RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error)
+	// Send sends the exact value to the specified address. This is different
+	// from Withdraw, which subtracts the tx fees from the amount sent.
+	Send(address string, value, feeSuggestion uint64) (Coin, error)
 	// EstimateRegistrationTxFee returns an estimate for the tx fee needed to
 	// pay the registration fee using the provided feeRate.
 	EstimateRegistrationTxFee(feeRate uint64) uint64
@@ -363,10 +380,12 @@ type Recoverer interface {
 	Move(backupdir string) error
 }
 
-// Sender is a wallet that can send funds to an address, as opposed to
-// withdrawing a certain amount from the source wallet/account.
-type Sender interface {
-	Send(address string, value, feeSuggestion uint64) (Coin, error)
+// Withdrawer is a wallet that can withdraw a certain amount from the
+// source wallet/account.
+type Withdrawer interface {
+	// Withdraw withdraws funds to the specified address. Fees are subtracted
+	// from the value.
+	Withdraw(address string, value, feeSuggestion uint64) (Coin, error)
 }
 
 // Sweeper is a wallet that can clear the entire balance of the wallet/account
@@ -391,7 +410,7 @@ type LogFiler interface {
 // not be known on construction, only connect, a zero rate may be returned. The
 // caller should always check for zero and have a fallback rate. The rates from
 // FeeRate should be used for rates that are not validated by the server
-// (Withdraw, Send, PayFee), and will/should not be used to generate a fee
+// Withdraw and Send, and will/should not be used to generate a fee
 // suggestion for swap operations.
 type FeeRater interface {
 	FeeRate() uint64

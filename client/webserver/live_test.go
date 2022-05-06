@@ -1426,7 +1426,7 @@ func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 	}
 }
 
-func (c *TCore) Withdraw(pw []byte, assetID uint32, value uint64, address string) (asset.Coin, error) {
+func (c *TCore) Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (asset.Coin, error) {
 	return &tCoin{id: []byte{0xde, 0xc7, 0xed}}, nil
 }
 

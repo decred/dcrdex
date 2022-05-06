@@ -3110,89 +3110,12 @@ func ethToWei(v uint64) *big.Int {
 	return new(big.Int).Mul(bigV, big.NewInt(dexeth.GweiFactor))
 }
 
-func TestPayFee(t *testing.T) {
-	t.Run("eth", func(t *testing.T) { testPayFee(t, BipID) })
-	t.Run("token", func(t *testing.T) { testPayFee(t, testTokenID) })
+func TestSend(t *testing.T) {
+	t.Run("eth", func(t *testing.T) { testSend(t, BipID) })
+	t.Run("token", func(t *testing.T) { testSend(t, testTokenID) })
 }
 
-func testPayFee(t *testing.T, assetID uint32) {
-	w, eth, node, shutdown := tassetWallet(assetID)
-	defer shutdown()
-
-	tx := tTx(0, 0, 0, &testAddressA, nil)
-	txHash := tx.Hash()
-
-	node.sendTxTx = tx
-	node.tokenContractor.transferTx = tx
-
-	maxFeeRate, _ := eth.recommendedMaxFeeRate(eth.ctx)
-	txFees := dexeth.WeiToGwei(maxFeeRate) * defaultSendGasLimit
-	transferFees := dexeth.WeiToGwei(maxFeeRate) * tokenGases.Transfer
-
-	const regFees = 10e9
-
-	tests := []struct {
-		name              string
-		regFeeAdj         uint64
-		txFeeAdj          uint64
-		token             bool
-		balErr, sendTxErr error
-		wantErr           bool
-	}{{
-		name: "ok",
-	}, {
-		name:     "low fees",
-		txFeeAdj: 1,
-		wantErr:  true,
-	}, {
-		name:    "balance error",
-		balErr:  errors.New(""),
-		wantErr: true,
-	}, {
-		name:      "not enough",
-		regFeeAdj: 1,
-		wantErr:   true,
-	}, {
-		name:      "sendToAddr error",
-		sendTxErr: errors.New(""),
-		wantErr:   true,
-	}}
-
-	for _, test := range tests {
-
-		node.balErr = test.balErr
-		node.sendTxErr = test.sendTxErr
-		node.tokenContractor.transferErr = test.sendTxErr
-
-		if assetID == BipID {
-			node.bal = dexeth.GweiToWei(regFees + txFees - test.txFeeAdj - test.regFeeAdj)
-		} else {
-			node.tokenContractor.bal = dexeth.GweiToWei(regFees - test.regFeeAdj)
-			node.bal = dexeth.GweiToWei(transferFees - test.txFeeAdj)
-		}
-
-		coin, err := w.PayFee(testAddressA.String(), regFees, 0)
-		if test.wantErr {
-			if err == nil {
-				t.Fatalf("expected error for test %q", test.name)
-			}
-			continue
-		}
-		if err != nil {
-			t.Fatalf("unexpected error for test %q: %v", test.name, err)
-		}
-		if !bytes.Equal(txHash[:], coin.ID()) {
-			t.Fatal("coin is not the tx hash")
-		}
-	}
-}
-
-func TestWithdraw(t *testing.T) {
-	t.Run("eth", func(t *testing.T) { testWithdraw(t, BipID) })
-	t.Run("token", func(t *testing.T) { testWithdraw(t, testTokenID) })
-}
-
-func testWithdraw(t *testing.T, assetID uint32) {
+func testSend(t *testing.T, assetID uint32) {
 	w, eth, node, shutdown := tassetWallet(assetID)
 	defer shutdown()
 
@@ -3207,30 +3130,41 @@ func testWithdraw(t *testing.T, assetID uint32) {
 	tokenFees := dexeth.WeiToGwei(maxFeeRate) * tokenGases.Transfer
 
 	const val = 10e9
-
+	const testAddr = "dd93b447f7eBCA361805eBe056259853F3912E04"
 	tests := []struct {
 		name              string
 		sendAdj, feeAdj   uint64
 		balErr, sendTxErr error
+		addr              string
 		wantErr           bool
 	}{{
 		name: "ok",
+		addr: testAddr,
 	}, {
 		name:    "balance error",
 		balErr:  errors.New(""),
 		wantErr: true,
+		addr:    testAddr,
 	}, {
 		name:    "not enough",
 		sendAdj: 1,
 		wantErr: true,
+		addr:    testAddr,
 	}, {
 		name:    "low fees",
 		feeAdj:  1,
 		wantErr: true,
+		addr:    testAddr,
 	}, {
 		name:      "sendToAddr error",
 		sendTxErr: errors.New(""),
 		wantErr:   true,
+		addr:      testAddr,
+	}, {
+		name:      "Invalid address",
+		sendTxErr: errors.New("invalid hex address error"),
+		wantErr:   true,
+		addr:      "",
 	}}
 
 	for _, test := range tests {
@@ -3245,8 +3179,7 @@ func testWithdraw(t *testing.T, assetID uint32) {
 			node.tokenContractor.bal = dexeth.GweiToWei(val - test.sendAdj)
 			node.bal = dexeth.GweiToWei(tokenFees - test.feeAdj)
 		}
-
-		coin, err := w.Withdraw("", val, 0)
+		coin, err := w.Send(test.addr, val, 0)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %v", test.name)

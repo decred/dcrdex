@@ -1459,7 +1459,7 @@ func TestHandleNotifyFee(t *testing.T) {
 	// When the process makes it to the chainwaiter, it needs to be handled by
 	// getting the Send message. While the chainwaiter can run asynchronously,
 	// the first attempt is actually synchronous, so not need for synchronization
-	// as long as there is no PayFee error.
+	// as long as there is no Send error.
 	doWaiter := func(msg *msgjson.Message) *msgjson.Error {
 		t.Helper()
 		msgErr := rig.mgr.handleNotifyFee(user.conn, msg)

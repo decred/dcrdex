@@ -60,14 +60,14 @@ var enUS = map[Topic]*translation{
 		template: "%v wallet has no network peers!",
 	},
 	// [ticker, error]
-	TopicWithdrawError: {
-		subject:  "Withdraw error",
-		template: "Error encountered during %s withdraw: %v",
+	TopicSendError: {
+		subject:  "Send error",
+		template: "Error encountered while sending %s: %v",
 	},
 	// [ticker, coin ID]
-	TopicWithdrawSend: {
-		subject:  "Withdraw sent",
-		template: "Withdraw of %s has completed successfully. Coin ID = %s",
+	TopicSendSuccess: {
+		subject:  "Send Successful",
+		template: "Sending %s has completed successfully. Coin ID = %s",
 	},
 	// [error]
 	TopicOrderLoadFailure: {
@@ -346,12 +346,12 @@ var ptBR = map[Topic]*translation{
 		template: "Conectado com carteira para completar o registro em %s, mas falha ao destrancar: %v",
 	},
 	// [ticker, error]
-	TopicWithdrawError: {
+	TopicSendError: {
 		subject:  "Erro Retirada",
 		template: "Erro encontrado durante retirada de %s: %v",
 	},
 	// [ticker, coin ID]
-	TopicWithdrawSend: {
+	TopicSendSuccess: {
 		template: "Retirada de %s foi completada com sucesso. ID da moeda = %s",
 		subject:  "Retirada Enviada",
 	},
@@ -633,12 +633,12 @@ var zhCN = map[Topic]*translation{
 		template: "与 decred 钱包连接以在 %s 上完成注册，但无法解锁： %v", // alt. 已连接到 Decred 钱包以在 %s 完成注册，但无法解锁：%v
 	},
 	// [ticker, error]
-	TopicWithdrawError: {
+	TopicSendError: {
 		subject:  "提款错误",
 		template: "在 %s 提取过程中遇到错误: %v", // alt. 删除 %s 时遇到错误： %v
 	},
 	// [ticker, coin ID]
-	TopicWithdrawSend: {
+	TopicSendSuccess: {
 		subject:  "提款已发送",
 		template: "%s 的提款已成功完成。硬币 ID = %s",
 	},
@@ -919,12 +919,12 @@ var plPL = map[Topic]*translation{
 		template: "Połączono z portfelem Decred, aby dokończyć rejestrację na %s, lecz próba odblokowania portfela nie powiodła się: %v",
 	},
 	// [ticker, error]
-	TopicWithdrawError: {
+	TopicSendError: {
 		subject:  "Błąd wypłaty środków",
 		template: "Wystąpił błąd przy wypłacaniu %s: %v",
 	},
 	// [ticker, coin ID]
-	TopicWithdrawSend: {
+	TopicSendSuccess: {
 		subject:  "Wypłata zrealizowana",
 		template: "Wypłata %s została zrealizowana pomyślnie. ID monety = %s",
 	},

@@ -131,7 +131,7 @@ var (
 		{
 			Key:         "fallbackfee",
 			DisplayName: "Fallback fee rate",
-			Description: "The fee rate to use for fee payment and withdrawals when " +
+			Description: "The fee rate to use for sending or withdrawing funds and fee payment" +
 				"estimatesmartfee is not available. Units: DCR/kB",
 			DefaultValue: defaultFee * 1000 / 1e8,
 		},
@@ -435,6 +435,7 @@ type ExchangeWallet struct {
 // Check that ExchangeWallet satisfies the Wallet interface.
 var _ asset.Wallet = (*ExchangeWallet)(nil)
 var _ asset.FeeRater = (*ExchangeWallet)(nil)
+var _ asset.Withdrawer = (*ExchangeWallet)(nil)
 
 type block struct {
 	height int64
@@ -1449,16 +1450,16 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 	dcr.fundingMtx.Lock()         // before generating the new output in sendCoins
 	defer dcr.fundingMtx.Unlock() // after locking it (wallet and map)
 
-	msgTx, net, err := dcr.sendCoins(addr, coins, reqFunds, splitFeeRate, false)
+	msgTx, sentVal, err := dcr.sendCoins(addr, coins, reqFunds, splitFeeRate, false)
 	if err != nil {
 		return nil, false, fmt.Errorf("error sending split transaction: %w", err)
 	}
 
-	if net != reqFunds {
-		dcr.log.Errorf("split - total sent %.8f does not match expected %.8f", toDCR(net), toDCR(reqFunds))
+	if sentVal != reqFunds {
+		dcr.log.Errorf("split - total sent %.8f does not match expected %.8f", toDCR(sentVal), toDCR(reqFunds))
 	}
 
-	op := newOutput(msgTx.CachedTxHash(), 0, net, wire.TxTreeRegular)
+	op := newOutput(msgTx.CachedTxHash(), 0, sentVal, wire.TxTreeRegular)
 
 	// Lock the funding coin.
 	err = dcr.lockFundingCoins([]*fundingCoin{{
@@ -2731,30 +2732,10 @@ func (dcr *ExchangeWallet) Locked() bool {
 	return false
 }
 
-// PayFee sends the dex registration fee. Transaction fees are in addition to
-// the registration fee, and the fee rate is taken from the DEX configuration.
-func (dcr *ExchangeWallet) PayFee(address string, regFee, feeRate uint64) (asset.Coin, error) {
-	addr, err := stdaddr.DecodeAddress(address, dcr.chainParams)
-	if err != nil {
-		return nil, err
-	}
-	// TODO: Evaluate SendToAddress and how it deals with the change output
-	// address index to see if it can be used here instead.
-	msgTx, sent, err := dcr.sendRegFee(addr, regFee, dcr.feeRateWithFallback(feeRate))
-	if err != nil {
-		return nil, err
-	}
-	if sent != regFee {
-		return nil, fmt.Errorf("transaction %s was sent, but the reported value sent was unexpected. "+
-			"expected %.8f, but %.8f was reported", msgTx.CachedTxHash(), toDCR(regFee), toDCR(sent))
-	}
-	return newOutput(msgTx.CachedTxHash(), 0, regFee, wire.TxTreeRegular), nil
-}
-
 // EstimateRegistrationTxFee returns an estimate for the tx fee needed to
 // pay the registration fee using the provided feeRate.
 func (dcr *ExchangeWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
-	const inputCount = 5 // buffer so this estimate is higher than what PayFee uses
+	const inputCount = 5 // buffer so this estimate is higher than actual reg tx fee.
 	if feeRate == 0 || feeRate > dcr.feeRateLimit {
 		feeRate = dcr.fallbackFeeRate
 	}
@@ -2762,17 +2743,33 @@ func (dcr *ExchangeWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
 }
 
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
-// the value.
+// the value. feeRate is in units of atoms/byte.
+// Withdraw satisfies asset.Withdrawer.
 func (dcr *ExchangeWallet) Withdraw(address string, value, feeRate uint64) (asset.Coin, error) {
 	addr, err := stdaddr.DecodeAddress(address, dcr.chainParams)
 	if err != nil {
 		return nil, err
 	}
-	msgTx, net, err := dcr.sendMinusFees(addr, value, dcr.feeRateWithFallback(feeRate))
+	msgTx, sentVal, err := dcr.withdraw(addr, value, dcr.feeRateWithFallback(feeRate))
 	if err != nil {
 		return nil, err
 	}
-	return newOutput(msgTx.CachedTxHash(), 0, net, wire.TxTreeRegular), nil
+	return newOutput(msgTx.CachedTxHash(), 0, sentVal, wire.TxTreeRegular), nil
+}
+
+// Send sends the exact value to the specified address. This is different from
+// Withdraw, which subtracts the tx fees from the amount sent. feeRate is in
+// units of atoms/byte.
+func (dcr *ExchangeWallet) Send(address string, value, feeRate uint64) (asset.Coin, error) {
+	addr, err := stdaddr.DecodeAddress(address, dcr.chainParams)
+	if err != nil {
+		return nil, err
+	}
+	msgTx, sentVal, err := dcr.sendToAddress(addr, value, dcr.feeRateWithFallback(feeRate))
+	if err != nil {
+		return nil, err
+	}
+	return newOutput(msgTx.CachedTxHash(), 0, sentVal, wire.TxTreeRegular), nil
 }
 
 // ValidateSecret checks that the secret satisfies the contract.
@@ -2970,37 +2967,37 @@ func (dcr *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 	return newOutput(txHash, vout, coin.Value(), wire.TxTreeUnknown), nil
 }
 
-// sendMinusFees sends the amount to the address. Fees are subtracted from the
+// withdraw sends the amount to the address. Fees are subtracted from the
 // sent value.
-func (dcr *ExchangeWallet) sendMinusFees(addr stdaddr.Address, val, feeRate uint64) (*wire.MsgTx, uint64, error) {
+func (dcr *ExchangeWallet) withdraw(addr stdaddr.Address, val, feeRate uint64) (*wire.MsgTx, uint64, error) {
 	if val == 0 {
-		return nil, 0, fmt.Errorf("cannot send value = 0")
+		return nil, 0, fmt.Errorf("cannot withdraw value = 0")
 	}
 	enough := func(sum uint64, size uint32, unspent *compositeUTXO) bool {
 		return sum+toAtoms(unspent.rpc.Amount) >= val
 	}
 	coins, _, _, _, err := dcr.fund(enough)
 	if err != nil {
-		return nil, 0, fmt.Errorf("unable to send %s DCR to address %s with feeRate %d atoms/byte: %w",
+		return nil, 0, fmt.Errorf("unable to withdraw %s DCR to address %s with feeRate %d atoms/byte: %w",
 			amount(val), addr, feeRate, err)
 	}
 	return dcr.sendCoins(addr, coins, val, feeRate, true)
 }
 
-// sendRegFee sends the registration fee to the address. Transaction fees will
-// be in addition to the registration fee and the output will be the zeroth
-// output.
-func (dcr *ExchangeWallet) sendRegFee(addr stdaddr.Address, regFee, netFeeRate uint64) (*wire.MsgTx, uint64, error) {
+// sendToAddress sends an exact amount to an address. Transaction fees will be
+// in addition to the sent amount, and the output will be the zeroth output.
+// TODO: Just use the sendtoaddress rpc since dcrwallet respects locked utxos.
+func (dcr *ExchangeWallet) sendToAddress(addr stdaddr.Address, amt, feeRate uint64) (*wire.MsgTx, uint64, error) {
 	enough := func(sum uint64, size uint32, unspent *compositeUTXO) bool {
-		txFee := uint64(size+unspent.input.Size()) * netFeeRate
-		return sum+toAtoms(unspent.rpc.Amount) >= regFee+txFee
+		txFee := uint64(size+unspent.input.Size()) * feeRate
+		return sum+toAtoms(unspent.rpc.Amount) >= amt+txFee
 	}
 	coins, _, _, _, err := dcr.fund(enough)
 	if err != nil {
-		return nil, 0, fmt.Errorf("Unable to pay registration fee of %s DCR with fee rate of %d atoms/byte: %w",
-			amount(regFee), netFeeRate, err)
+		return nil, 0, fmt.Errorf("Unable to send %s DCR with fee rate of %d atoms/byte: %w",
+			amount(amt), feeRate, err)
 	}
-	return dcr.sendCoins(addr, coins, regFee, netFeeRate, false)
+	return dcr.sendCoins(addr, coins, amt, feeRate, false)
 }
 
 // sendCoins sends the amount to the address as the zeroth output, spending the
@@ -3023,7 +3020,13 @@ func (dcr *ExchangeWallet) sendCoins(addr stdaddr.Address, coins asset.Coins, va
 	}
 
 	tx, err := dcr.sendWithReturn(baseTx, feeRate, feeSource)
-	return tx, uint64(txOut.Value), err
+	if err != nil {
+		if _, retErr := dcr.returnCoins(coins); retErr != nil {
+			dcr.log.Errorf("Failed to unlock coins: %v", retErr)
+		}
+		return nil, 0, err
+	}
+	return tx, uint64(tx.TxOut[0].Value), err
 }
 
 // sendAll sends the maximum sendable amount (total input amount minus fees) to
@@ -3125,7 +3128,7 @@ func (dcr *ExchangeWallet) signTxAndAddChange(baseTx *wire.MsgTx, feeRate uint64
 
 	minFee := feeRate * size
 	if subtractFrom == -1 && minFee > remaining {
-		return nil, nil, "", 0, fmt.Errorf("not enough funds to cover minimum fee rate. %s < %s",
+		return nil, nil, "", 0, fmt.Errorf("not enough funds to cover minimum fee rate. %s > %s",
 			amount(minFee), amount(remaining))
 	}
 	if int(subtractFrom) >= len(baseTx.TxOut) {
