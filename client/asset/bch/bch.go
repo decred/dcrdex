@@ -39,7 +39,7 @@ const (
 var (
 	netPorts = dexbtc.NetPorts{
 		Mainnet: "8332",
-		Testnet: "18332",
+		Testnet: "28332",
 		Simnet:  "18443",
 	}
 	fallbackFeeKey = "fallbackfee"
@@ -137,7 +137,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	case dex.Mainnet:
 		params = dexbch.MainNetParams
 	case dex.Testnet:
-		params = dexbch.TestNet3Params
+		params = dexbch.TestNet4Params
 	case dex.Regtest:
 		params = dexbch.RegressionNetParams
 	default:
