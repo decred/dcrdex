@@ -950,10 +950,6 @@ func (w *TXCWallet) AccelerationEstimate(swapCoins, accelerationCoins []dex.Byte
 	return w.accelerationEstimate, nil
 }
 
-func (w *TXCWallet) CanAccelerate() bool {
-	return true
-}
-
 type TAccountLocker struct {
 	*TXCWallet
 	reserveNRedemptions    uint64

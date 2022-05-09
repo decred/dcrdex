@@ -626,7 +626,6 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWalletFullNode, *testD
 		DefaultFallbackFee:  defaultFee,
 		DefaultFeeRateLimit: defaultFeeRateLimit,
 		Segwit:              segwit,
-		SupportsCPFP:        true,
 	}
 
 	var wallet *ExchangeWalletFullNode
@@ -3120,11 +3119,13 @@ func TestAccelerateOrder(t *testing.T) {
 }
 
 func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
-	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
+	w, node, shutdown, err := tNewWallet(segwit, walletType)
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	wallet := &ExchangeWalletAccelerator{w}
 
 	var blockHash100 chainhash.Hash
 	copy(blockHash100[:], encode.RandomBytes(32))

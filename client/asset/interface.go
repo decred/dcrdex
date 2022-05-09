@@ -66,7 +66,7 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(FeeRater); is {
 		t |= WalletTraitFeeRater
 	}
-	if a, is := w.(Accelerator); is && a.CanAccelerate() {
+	if _, is := w.(Accelerator); is {
 		t |= WalletTraitAccelerator
 	}
 	return t
@@ -411,11 +411,6 @@ type Accelerator interface {
 	// the user's previous acceleration on this order or the earliest
 	// unmined transaction in this order happened very recently.
 	PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (uint64, XYRange, *EarlyAcceleration, error)
-	// CanAccelerate returns whether or not the wallet can accelerate. Ideally
-	// we would know this just by whether or not the wallet implements this
-	// interface, but since all bitcoin clones use the same implementation
-	// and some of them do not support acceleration, this function is needed.
-	CanAccelerate() bool
 }
 
 // TokenMaster is implemented by assets which support degenerate tokens.
