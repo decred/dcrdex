@@ -533,11 +533,11 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *cha
 	}
 	if dcrCfg.UnmixedAccount != "" {
 		switch {
-		case strings.EqualFold(dcrCfg.PrimaryAccount, dcrCfg.UnmixedAccount):
+		case dcrCfg.PrimaryAccount == dcrCfg.UnmixedAccount:
 			return nil, fmt.Errorf("Primary Account should not be the same as Change Account")
-		case strings.EqualFold(dcrCfg.PrimaryAccount, dcrCfg.TradingAccount):
+		case dcrCfg.PrimaryAccount == dcrCfg.TradingAccount:
 			return nil, fmt.Errorf("Primary Account should not be the same as Dedicated Trading Account")
-		case strings.EqualFold(dcrCfg.TradingAccount, dcrCfg.UnmixedAccount):
+		case dcrCfg.TradingAccount == dcrCfg.UnmixedAccount:
 			return nil, fmt.Errorf("Dedicated Trading Account should not be the same as Change Account")
 		}
 	}
@@ -3095,7 +3095,7 @@ func (dcr *ExchangeWallet) makeChangeOut(changeAcct string, val uint64) (*wire.T
 
 // sendWithReturn sends the unsigned transaction, adding a change output unless
 // the amount is dust. subtractFrom indicates the output from which fees should
-// be subtraced, where -1 indicates fees should come out of a change output.
+// be subtracted, where -1 indicates fees should come out of a change output.
 func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, feeRate uint64, subtractFrom int32) (*wire.MsgTx, error) {
 	signedTx, _, _, _, err := dcr.signTxAndAddChange(baseTx, feeRate, subtractFrom, dcr.depositAccount())
 	if err != nil {
@@ -3108,7 +3108,7 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, feeRate uint64, su
 
 // signTxAndAddChange signs the passed msgTx, adding a change output that pays
 // an address from the specified changeAcct, unless the change amount is dust.
-// subtractFrom indicates the output from which fees should be subtraced, where
+// subtractFrom indicates the output from which fees should be subtracted, where
 // -1 indicates fees should come out of a change output.
 func (dcr *ExchangeWallet) signTxAndAddChange(baseTx *wire.MsgTx, feeRate uint64, subtractFrom int32, changeAcct string) (*wire.MsgTx, *output, string, uint64, error) {
 	// Sign the transaction to get an initial size estimate and calculate
