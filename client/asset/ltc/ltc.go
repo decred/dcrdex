@@ -22,7 +22,7 @@ const (
 	defaultFee = 10
 	// defaultFeeRateLimit is the default value for the feeratelimit.
 	defaultFeeRateLimit = 100
-	minNetworkVersion   = 210100
+	minNetworkVersion   = 210201
 	walletTypeRPC       = "litecoindRPC"
 	walletTypeLegacy    = ""
 )
@@ -172,6 +172,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		LegacyBalance:       false,
 		LegacyRawFeeLimit:   false,
 		Segwit:              true,
+		BlockDeserializer:   dexltc.DeserializeBlockBytes,
 	}
 
 	return btc.BTCCloneWallet(cloneCFG)
