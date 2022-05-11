@@ -10,13 +10,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:dcrdex/main.dart';
 
 void main() {
-  testWidgets('Register page', (WidgetTester tester) async {
+// TODO: Fix tests.
+  testWidgets('App', (WidgetTester tester) async {
     // Build our app and trigger a frame.
-    await tester.pumpWidget(const App());
+    await tester.pumpWidget(const DexcApp());
 
     // Verify that the app starts with the Register page.
     expect(find.text('Set App Password'), findsOneWidget);
-
-    // TODO: Test the register form.
   });
 }

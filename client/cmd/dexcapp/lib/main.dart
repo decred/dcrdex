@@ -1,27 +1,33 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'pages/register.dart';
+import 'libcore/libcore.dart';
+import 'appwindow.dart';
+import 'routes/register.dart';
 
 void main() {
-  runApp(const App());
+  var err = libcore.start();
+  if (err != null && err.isNotEmpty) {
+    debugPrint(err); // TODO: Show error in UI.
+    exit(1);
+  }
+
+  runApp(const DexcApp());
 }
 
-class App extends StatelessWidget {
-  const App({Key? key}) : super(key: key);
+class DexcApp extends StatelessWidget {
+  const DexcApp({Key? key}) : super(key: key);
 
   // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'DCRDEX',
-      theme: ThemeData(
-        primarySwatch: Colors.blue, // toolBar color
-      ),
-      home: Scaffold(
-        body: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0),
-          child: const RegisterWidget(),
-        ),
-      ),
-    );
+    final Widget startPage;
+    if (libcore.isInitialized() == 0) {
+      startPage = const RegisterRoute();
+    } else {
+      // TODO: Show login route.
+      startPage = const Text('dex client is already initialized');
+    }
+
+    return AppWindow(homeRoute: startPage);
   }
 }
