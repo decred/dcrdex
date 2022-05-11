@@ -233,7 +233,6 @@ export default class Application {
 
   /* Load the page from the server. Insert and bind the DOM. */
   async loadPage (page: string, data?: any, skipPush?: boolean): Promise<boolean> {
-    console.log('in load page')
     // Close some menus and tooltips.
     this.tooltip.style.left = '-10000px'
     Doc.hide(this.page.noteBox, this.page.profileBox)
@@ -250,7 +249,6 @@ export default class Application {
     // Append the request to the page history.
     if (!skipPush) {
       const path = delivered === requestedHandler ? url.toString() : `/${delivered}`
-      console.log(`data - ${JSON.stringify(data)}`)
       window.history.pushState({ page: page, data: data }, '', path)
     }
     // Insert page and attach handlers.
@@ -423,7 +421,6 @@ export default class Application {
         }
         Doc.bind(a, 'click', (e: Event) => {
           e.preventDefault()
-          console.log('overridden click')
           this.loadPage(token, params)
         })
       }

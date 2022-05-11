@@ -149,7 +149,6 @@ export default class DexSettingsPage extends BasePage {
     const files = page.certFileInput.files
     let cert
     if (files && files.length) cert = await files[0].text()
-    console.log(cert)
     if (!cert) return
     const req = { host: this.host, cert: cert }
     const loaded = app().loading(this.body)
@@ -158,6 +157,9 @@ export default class DexSettingsPage extends BasePage {
     if (!app().checkResponse(res, true)) {
       page.errMsg.textContent = res.msg
       Doc.show(page.errMsg)
+    } else {
+      Doc.show(page.updateCertMsg)
+      setTimeout(() => { Doc.hide(page.updateCertMsg) }, 5000)
     }
   }
 

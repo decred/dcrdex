@@ -75,6 +75,7 @@ type clientCore interface {
 	websocket.Core
 	Network() dex.Network
 	Exchanges() map[string]*core.Exchange
+	Exchange(host string) (*core.Exchange, error)
 	Register(*core.RegisterForm) (*core.RegisterResult, error)
 	Login(pw []byte) (*core.LoginResult, error)
 	InitializeClient(pw, seed []byte) error

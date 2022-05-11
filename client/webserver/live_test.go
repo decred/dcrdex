@@ -495,6 +495,14 @@ func (c *TCore) Network() dex.Network { return dex.Mainnet }
 
 func (c *TCore) Exchanges() map[string]*core.Exchange { return tExchanges }
 
+func (c *TCore) Exchange(host string) (*core.Exchange, error) {
+	exchange, ok := tExchanges[host]
+	if !ok {
+		return nil, fmt.Errorf("no exchange at %v", host)
+	}
+	return exchange, nil
+}
+
 func (c *TCore) InitializeClient(pw, seed []byte) error {
 	randomDelay()
 	c.inited = true

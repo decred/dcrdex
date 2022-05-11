@@ -71,8 +71,9 @@ type TCore struct {
 	notOpen          bool
 }
 
-func (c *TCore) Network() dex.Network                 { return dex.Mainnet }
-func (c *TCore) Exchanges() map[string]*core.Exchange { return nil }
+func (c *TCore) Network() dex.Network                         { return dex.Mainnet }
+func (c *TCore) Exchanges() map[string]*core.Exchange         { return nil }
+func (c *TCore) Exchange(host string) (*core.Exchange, error) { return nil, nil }
 func (c *TCore) GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange, error) {
 	return nil, c.getDEXConfigErr // TODO along with test for apiUser / Exchanges() / User()
 }

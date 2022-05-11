@@ -253,10 +253,9 @@ func (s *WebServer) handleDexSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	exchanges := s.core.Exchanges()
-	exchange, ok := exchanges[host]
-	if !ok {
-		log.Errorf("no exchange with host: %v", host)
+	exchange, err := s.core.Exchange(host)
+	if err != nil {
+		log.Errorf("error getting exchange: %v", err)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}

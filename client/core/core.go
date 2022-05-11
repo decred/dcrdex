@@ -295,8 +295,7 @@ func (dc *dexConnection) exchangeInfo() *Exchange {
 	dc.cfgMtx.RLock()
 	cfg := dc.cfg
 	dc.cfgMtx.RUnlock()
-	connectionStatus := comms.ConnectionStatus(
-		atomic.LoadUint32(&dc.connectionStatus))
+	connectionStatus := comms.ConnectionStatus(atomic.LoadUint32(&dc.connectionStatus))
 	if cfg == nil { // no config, assets, or markets data
 		return &Exchange{
 			Host:             dc.acct.host,
@@ -955,8 +954,7 @@ func (c *Core) dex(addr string) (*dexConnection, bool, error) {
 	if !found {
 		return nil, false, fmt.Errorf("unknown DEX %s", addr)
 	}
-	connectionStatus := comms.ConnectionStatus(
-		atomic.LoadUint32(&dc.connectionStatus))
+	connectionStatus := comms.ConnectionStatus(atomic.LoadUint32(&dc.connectionStatus))
 	connected := connectionStatus == comms.Connected
 	return dc, connected, nil
 }
@@ -1403,6 +1401,16 @@ func (c *Core) Network() dex.Network {
 // orders.
 func (c *Core) Exchanges() map[string]*Exchange {
 	return c.exchangeMap()
+}
+
+// Exchange returns an exchange with a certain host. It returns an error if
+// no exchange exists at that host.
+func (c *Core) Exchange(host string) (*Exchange, error) {
+	exchange, ok := c.Exchanges()[host]
+	if !ok {
+		return nil, fmt.Errorf("no exchange with host %s exists", host)
+	}
+	return exchange, nil
 }
 
 // dexConnections creates a slice of the *dexConnection in c.conns.

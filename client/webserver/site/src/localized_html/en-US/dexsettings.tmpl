@@ -5,8 +5,8 @@
   <span class="settings-gear ico-settings"></span>
   <h2 class="text-break">{{.Exchange.Host}}</h2>
   <div class="d-flex justify-content-center">
-    <span class="fs24 mx-2 connection ico-connection d-hide" id="connectedIcon"></span>
-    <span class="fs24 mx-2 disconnected ico-disconnected d-hide" id="disconnectedIcon"></span>
+    <span class="fs20 mx-2 connection ico-connection d-hide" id="connectedIcon"></span>
+    <span class="fs20 mx-2 disconnected ico-disconnected d-hide" id="disconnectedIcon"></span>
     <h4 id="connectionStatus"></h4>
   </div>
   <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="errMsg"></div>
@@ -20,6 +20,7 @@
     <div>
       <input type="file" class="form-control select d-none" id="certFileInput">
       <button id="updateCertBtn" class="bg2 selected">Update TLS Certificate</button>
+      <span class="update-cert-msg mx-2 d-hide" id="updateCertMsg">Successfully updated certificate!</span>
     </div>
   </div>
 
