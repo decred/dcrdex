@@ -68,9 +68,9 @@ const (
 	// confirmations.
 	confCheckTimeout = 2 * time.Second
 
-	// acctInternalBranch is the child number used when performing BIP0044
-	// style hierarchical deterministic key derivation for the internal
-	// branch of an account.
+	// acctInternalBranch is the child number used when performing BIP0044 style
+	// hierarchical deterministic key derivation for the internal branch of an
+	// account.
 	acctInternalBranch uint32 = 1
 )
 
@@ -521,15 +521,15 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *cha
 	}
 	logger.Tracef("Redeem conf target set to %d blocks", redeemConfTarget)
 
-	// Both UnmixedAccount and TradingAccount must be provided if primary account
-	// is a mixed account. Providing one but not the other is bad configuration.
-	// If set, the account names will be validated on Connect.
+	// Both UnmixedAccount and TradingAccount must be provided if primary
+	// account is a mixed account. Providing one but not the other is bad
+	// configuration. If set, the account names will be validated on Connect.
 	if (dcrCfg.UnmixedAccount != "" && dcrCfg.TradingAccount == "") ||
 		(dcrCfg.UnmixedAccount == "" && dcrCfg.TradingAccount != "") {
 		return nil, fmt.Errorf("'Change Account Name' and 'Dedicated Trading Account' MUST "+
-			"be set to treat %q as a mixed account. If %q is not a mixed account, values should NOT "+
-			"be set for 'Change Account Name' and 'Dedicated Trading Account'",
-			dcrCfg.PrimaryAccount, dcrCfg.PrimaryAccount)
+			"be set to treat %[1]q as a mixed account. If %[1]q is not a mixed account, values "+
+			"should NOT be set for 'Change Account Name' and 'Dedicated Trading Account'",
+			dcrCfg.PrimaryAccount)
 	}
 	if dcrCfg.UnmixedAccount != "" {
 		switch {
@@ -651,9 +651,9 @@ func (dcr *ExchangeWallet) depositAccount() string {
 	return dcr.primaryAcct
 }
 
-// fundingAccounts returns the primary account along with any configured
-// trading account which may contain spendable outputs (split tx outputs
-// or chained swap change).
+// fundingAccounts returns the primary account along with any configured trading
+// account which may contain spendable outputs (split tx outputs or chained swap
+// change).
 func (dcr *ExchangeWallet) fundingAccounts() []string {
 	if dcr.unmixedAccount == "" {
 		return []string{dcr.primaryAcct}
@@ -1272,10 +1272,9 @@ func (dcr *ExchangeWallet) spendableUTXOs() ([]*compositeUTXO, error) {
 		return nil, err
 	}
 	if dcr.tradingAccount != "" {
-		// Trading account may contain spendable utxos such as
-		// unspent split tx outputs that are unlocked/returned.
-		// TODO: Care should probably be taken to ensure only
-		// unspent split tx outputs are selected and other
+		// Trading account may contain spendable utxos such as unspent split tx
+		// outputs that are unlocked/returned. TODO: Care should probably be
+		// taken to ensure only unspent split tx outputs are selected and other
 		// unmixed outputs in the trading account are ignored.
 		tradingAcctSpendables, err := dcr.wallet.Unspents(dcr.ctx, dcr.tradingAccount)
 		if err != nil {
@@ -1287,8 +1286,8 @@ func (dcr *ExchangeWallet) spendableUTXOs() ([]*compositeUTXO, error) {
 		return nil, fmt.Errorf("insufficient funds. 0 DCR available to spend in account %q", dcr.primaryAcct)
 	}
 
-	// Parse utxos to include script size for spending input.
-	// Returned utxos will be sorted in ascending order by amount (smallest first).
+	// Parse utxos to include script size for spending input. Returned utxos
+	// will be sorted in ascending order by amount (smallest first).
 	utxos, err := dcr.parseUTXOs(unspents)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing unspent outputs: %w", err)
@@ -1426,13 +1425,12 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 		return coins, false, nil
 	}
 
-	// Generate an address to receive the sized output. If mixing is
-	// enabled on the wallet, generate the address from the external
-	// branch of the trading account. The external branch is used so
-	// that if this split output isn't spent, it won't be transferred
-	// to the unmixed account for re-mixing. Instead, it'll simply be
-	// unlocked in the trading account and can thus be used to fund
-	// future orders.
+	// Generate an address to receive the sized output. If mixing is enabled on
+	// the wallet, generate the address from the external branch of the trading
+	// account. The external branch is used so that if this split output isn't
+	// spent, it won't be transferred to the unmixed account for re-mixing.
+	// Instead, it'll simply be unlocked in the trading account and can thus be
+	// used to fund future orders.
 	addr, err := func() (stdaddr.Address, error) {
 		if dcr.tradingAccount != "" {
 			return dcr.wallet.ExternalAddress(dcr.ctx, dcr.tradingAccount)
@@ -1511,12 +1509,11 @@ func (dcr *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 		return err
 	}
 
-	// If any of these coins belong to the trading account, transfer
-	// them to the unmixed account to be re-mixed into the primary
-	// account before being re-selected for funding future orders.
-	// This doesn't apply to unspent split tx outputs, which should
-	// remain in the trading account and be selected from there for
-	// funding future orders.
+	// If any of these coins belong to the trading account, transfer them to the
+	// unmixed account to be re-mixed into the primary account before being
+	// re-selected for funding future orders. This doesn't apply to unspent
+	// split tx outputs, which should remain in the trading account and be
+	// selected from there for funding future orders.
 	var coinsToTransfer []asset.Coin
 	for _, coin := range returnedCoins {
 		if coin.addr == "" {
@@ -1533,13 +1530,12 @@ func (dcr *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 		}
 		addrInfo, err := dcr.wallet.AddressInfo(dcr.ctx, coin.addr)
 		if err != nil {
-			dcr.log.Errorf("wallet.ValidateAddress error for returned coin %s: %v", coin.op, err)
+			dcr.log.Errorf("wallet.AddressInfo error for returned coin %s: %v", coin.op, err)
 			continue
 		}
-		// Move this coin to the unmixed account if it was sent to the
-		// internal branch of the trading account. This excludes unspent
-		// split tx outputs which are sent to the external branch of the
-		// trading account.
+		// Move this coin to the unmixed account if it was sent to the internal
+		// branch of the trading account. This excludes unspent split tx outputs
+		// which are sent to the external branch of the trading account.
 		if addrInfo.Branch == acctInternalBranch && addrInfo.Account == dcr.tradingAccount {
 			coinsToTransfer = append(coinsToTransfer, coin.op)
 		}
@@ -1769,8 +1765,8 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	// the individual swap refund txs are prepared and signed.
 	changeAcct := dcr.depositAccount()
 	if swaps.LockChange && dcr.tradingAccount != "" {
-		// Change will likely be used to fund more swaps,
-		// send to trading account.
+		// Change will likely be used to fund more swaps, send to trading
+		// account.
 		changeAcct = dcr.tradingAccount
 	}
 	msgTx, change, changeAddr, fees, err := dcr.signTxAndAddChange(baseTx, feeRate, -1, changeAcct)
@@ -2674,8 +2670,8 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 	return msgTx, nil
 }
 
-// DepositAddress returns an address for depositing funds into the
-// exchange wallet.
+// DepositAddress returns an address for depositing funds into the exchange
+// wallet.
 func (dcr *ExchangeWallet) DepositAddress() (string, error) {
 	addr, err := dcr.wallet.ExternalAddress(dcr.ctx, dcr.depositAccount())
 	if err != nil {
