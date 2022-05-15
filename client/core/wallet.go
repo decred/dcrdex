@@ -233,8 +233,10 @@ func (w *xcWallet) connected() bool {
 // flag to true, and validates the deposit address. Use Disconnect to cleanly
 // shutdown the wallet.
 func (w *xcWallet) Connect() error {
-	// No parent context; use Disconnect instead.
-	err := w.connector.Connect(context.Background())
+	// No parent context; use Disconnect instead. Also note that there's no
+	// reconnect loop for wallet like with the server Connectors, so we use
+	// ConnectOnce so that the ConnectionMaster's On method will report false.
+	err := w.connector.ConnectOnce(context.Background())
 	if err != nil {
 		return err
 	}
