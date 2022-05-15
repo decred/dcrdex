@@ -138,10 +138,10 @@ func (s *Server) connect(ctx context.Context, conn ws.Connection, addr string) {
 	// sending before it is connected.
 	s.clientsMtx.Lock()
 	cm := dex.NewConnectionMaster(cl)
-	err := cm.Connect(ctx)
+	err := cm.ConnectOnce(ctx) // we discard the cm anyway, but good practice
 	if err != nil {
 		s.clientsMtx.Unlock()
-		s.log.Errorf("websocketHandler client Connect: %v")
+		s.log.Errorf("websocketHandler client connect: %v", err)
 		return
 	}
 

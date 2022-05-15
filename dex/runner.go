@@ -99,14 +99,31 @@ func NewConnectionMaster(c Connector) *ConnectionMaster {
 }
 
 // Connect connects the Connector, and returns any initial connection error. Use
-// Disconnect to shut down the Connector.
+// Disconnect to shut down the Connector. Even if Connect returns a non-nil
+// error, On will report true until Disconnect is called. You would use Connect
+// if the wrapped Connector has a reconnect loop to continually attempt to
+// establish a connection even if the initial attempt fails. Use ConnectOnce if
+// the Connector should be given one chance to connect before being considered
+// not to be "on". If the ConnectionMaster is discarded on error, it is not
+// important which method is used.
 func (c *ConnectionMaster) Connect(ctx context.Context) (err error) {
 	c.init(ctx)
 	c.mtx.Lock()
 	c.wg, err = c.connector.Connect(c.ctx)
 	c.mtx.Unlock()
-	if err != nil {
-		c.cancel() // otherwise On() says true
+	// NOTE: Even if err is non-nil, we can't cancel the internal context
+	// because the connector may be attempting to reconnect. The caller should
+	// decide to let it go or to call Disconnect.
+	return err
+}
+
+// ConnectOnce is like Connect, but on error the internal status is updated so
+// that the On method returns false. This method may be used if an error from
+// the Connector is terminal. The caller may also use Connect if they cancel the
+// parent context or call Disconnect.
+func (c *ConnectionMaster) ConnectOnce(ctx context.Context) (err error) {
+	if err = c.Connect(ctx); err != nil {
+		c.cancel()
 	}
 	return err
 }

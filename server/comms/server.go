@@ -713,11 +713,14 @@ func (s *Server) disconnectClients() {
 func (s *Server) addClient(ctx context.Context, client *wsLink) (*dex.ConnectionMaster, error) {
 	s.clientMtx.Lock()
 	defer s.clientMtx.Unlock()
+	cm := dex.NewConnectionMaster(client)
+	if err := cm.ConnectOnce(ctx); err != nil {
+		return nil, err
+	}
 	client.id = s.counter
 	s.counter++
 	s.clients[client.id] = client
-	cm := dex.NewConnectionMaster(client)
-	return cm, cm.Connect(ctx)
+	return cm, nil
 }
 
 // Remove the client from the map.
