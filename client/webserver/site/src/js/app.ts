@@ -755,6 +755,29 @@ export default class Application {
   }
 
   /*
+   * canAccelerateOrder returns true if the "from" wallet of the order
+   * supports acceleration, and if the order has unconfirmed swap
+   * transactions.
+   */
+  canAccelerateOrder (order: Order): boolean {
+    const walletTraitAccelerator = 1 << 4
+    let fromAssetID
+    if (order.sell) fromAssetID = order.baseID
+    else fromAssetID = order.quoteID
+    const wallet = this.walletMap[fromAssetID]
+    if (!wallet || !(wallet.traits & walletTraitAccelerator)) return false
+    if (order.matches) {
+      for (let i = 0; i < order.matches.length; i++) {
+        const match = order.matches[i]
+        if (match.swap && match.swap.confs && match.swap.confs.count === 0) {
+          return true
+        }
+      }
+    }
+    return false
+  }
+
+  /*
    * unitInfo fetches unit info [dex.UnitInfo] for the asset. If xc
    * [core.Exchange] is provided, and this is not a SupportedAsset, the UnitInfo
    * sent from the exchange's assets map [dex.Asset] will be used.

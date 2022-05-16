@@ -1,7 +1,7 @@
 import Doc from './doc'
 import BasePage from './basepage'
 import * as OrderUtil from './orderutil'
-import { bind as bindForm } from './forms'
+import { bind as bindForm, AccelerateOrderForm } from './forms'
 import { postJSON } from './http'
 import * as intl from './locales'
 import {
@@ -11,8 +11,7 @@ import {
   OrderNote,
   MatchNote,
   Match,
-  Coin,
-  XYRange
+  Coin
 } from './registry'
 
 const Mainnet = 0
@@ -23,28 +22,14 @@ const animationLength = 500
 
 let net: number
 
-interface EarlyAcceleration {
-  timePast: number,
-  wasAcceleration: boolean
-}
-
-interface PreAccelerate {
-  swapRate: number
-  suggestedRate: number
-  suggestedRange: XYRange
-  earlyAcceleration?: EarlyAcceleration
-}
-
 export default class OrderPage extends BasePage {
   orderID: string
   order: Order
   page: Record<string, PageElement>
   currentForm: HTMLElement
   secondTicker: number
-  acceleratedRate: number
   refreshOnPopupClose: boolean
-  earlyAcceleration?: EarlyAcceleration
-  earlyAccelerationAlreadyDisplayed: boolean
+  accelerateOrderForm: AccelerateOrderForm
 
   constructor (main: HTMLElement) {
     super()
@@ -76,17 +61,17 @@ export default class OrderPage extends BasePage {
       })
     }
 
-    Doc.cleanTemplates(page.rangeOptTmpl)
     Doc.bind(page.accelerateBttn, 'click', () => {
       this.showAccelerateForm()
     })
-    Doc.bind(page.accelerateSubmit, 'click', () => {
-      this.submitAccelerate()
-    })
-    Doc.bind(page.submitEarlyConfirm, 'click', () => {
-      this.submitAccelerate()
-    })
-    this.showAccelerationDiv()
+
+    this.showAccelerationButton()
+    const success = () => {
+      this.refreshOnPopupClose = true
+    }
+    // Do not call cleanTemplates before creating the AccelerateOrderForm
+    this.accelerateOrderForm = new AccelerateOrderForm(page.accelerateForm, success)
+    Doc.cleanTemplates(page.rangeOptTmpl)
 
     // If the user clicks outside of a form, it should close the page overlay.
     Doc.bind(page.forms, 'mousedown', (e: MouseEvent) => {
@@ -160,141 +145,6 @@ export default class OrderPage extends BasePage {
     form.style.right = '0px'
   }
 
-  /*
-   * showAccelerationDiv shows the acceleration button if the "from" asset's
-   * wallet supports acceleration and the order has unconfirmed swap transactions
-   */
-  showAccelerationDiv () {
-    const order = this.order
-    if (!order) return
-    const page = this.page
-    const canAccelerateOrder: () => boolean = () => {
-      const walletTraitAccelerator = 1 << 4
-      let fromAssetID
-      if (order.sell) fromAssetID = order.baseID
-      else fromAssetID = order.quoteID
-      const wallet = app().walletMap[fromAssetID]
-      if (!wallet || !(wallet.traits & walletTraitAccelerator)) return false
-      if (order.matches) {
-        for (let i = 0; i < order.matches.length; i++) {
-          const match = order.matches[i]
-          if (match.swap && match.swap.confs && match.swap.confs.count === 0) {
-            return true
-          }
-        }
-      }
-      return false
-    }
-    if (canAccelerateOrder()) Doc.show(page.accelerateDiv)
-    else Doc.hide(page.accelerateDiv)
-  }
-
-  /* showAccelerateForm shows a form to accelerate an order */
-  async showAccelerateForm () {
-    const page = this.page
-    const order = this.order
-    while (page.sliderContainer.firstChild) {
-      page.sliderContainer.removeChild(page.sliderContainer.firstChild)
-    }
-    const loaded = app().loading(page.accelerateDiv)
-    const res = await postJSON('/api/preaccelerate', order.id)
-    loaded()
-    if (!app().checkResponse(res)) {
-      page.preAccelerateErr.textContent = `Error accelerating order: ${res.msg}`
-      Doc.hide(page.accelerateMainDiv, page.accelerateSuccess)
-      Doc.show(page.accelerateMsgDiv, page.preAccelerateErr)
-      this.showForm(page.accelerateForm)
-      return
-    }
-    Doc.hide(page.accelerateMsgDiv, page.preAccelerateErr, page.accelerateErr, page.feeEstimateDiv, page.earlyAccelerationDiv)
-    Doc.show(page.accelerateMainDiv, page.accelerateSuccess, page.configureAccelerationDiv)
-    const preAccelerate: PreAccelerate = res.preAccelerate
-    this.earlyAcceleration = preAccelerate.earlyAcceleration
-    this.earlyAccelerationAlreadyDisplayed = false
-    page.accelerateAvgFeeRate.textContent = `${preAccelerate.swapRate} ${preAccelerate.suggestedRange.yUnit}`
-    page.accelerateCurrentFeeRate.textContent = `${preAccelerate.suggestedRate} ${preAccelerate.suggestedRange.yUnit}`
-    OrderUtil.setOptionTemplates(page)
-    this.acceleratedRate = preAccelerate.suggestedRange.start.y
-    const updated = (_: number, newY: number) => { this.acceleratedRate = newY }
-    const changed = async () => {
-      const req = {
-        orderID: order.id,
-        newRate: this.acceleratedRate
-      }
-      const loaded = app().loading(page.sliderContainer)
-      const res = await postJSON('/api/accelerationestimate', req)
-      loaded()
-      if (!app().checkResponse(res)) {
-        page.accelerateErr.textContent = `Error estimating acceleration fee: ${res.msg}`
-        Doc.show(page.accelerateErr)
-        return
-      }
-      page.feeRateEstimate.textContent = `${this.acceleratedRate} ${preAccelerate.suggestedRange.yUnit}`
-      let assetID
-      let assetSymbol
-      if (order.sell) {
-        assetID = order.baseID
-        assetSymbol = order.baseSymbol
-      } else {
-        assetID = order.quoteID
-        assetSymbol = order.quoteSymbol
-      }
-      const unitInfo = app().unitInfo(assetID)
-      page.feeEstimate.textContent = `${res.fee / unitInfo.conventional.conversionFactor} ${assetSymbol}`
-      Doc.show(page.feeEstimateDiv)
-    }
-    const selected = () => { /* do nothing */ }
-    const roundY = true
-    const rangeHandler = new OrderUtil.XYRangeHandler(preAccelerate.suggestedRange,
-      preAccelerate.suggestedRange.start.x, updated, changed, selected, roundY)
-    page.sliderContainer.appendChild(rangeHandler.control)
-    changed()
-    this.showForm(page.accelerateForm)
-  }
-
-  /* submitAccelerate sends a request to accelerate an order */
-  async submitAccelerate () {
-    const order = this.order
-    const page = this.page
-    const req = {
-      pw: page.acceleratePass.value,
-      orderID: order.id,
-      newRate: this.acceleratedRate
-    }
-    if (this.earlyAcceleration && !this.earlyAccelerationAlreadyDisplayed) {
-      page.recentAccelerationTime.textContent = `${Math.floor(this.earlyAcceleration.timePast / 60)}`
-      page.recentSwapTime.textContent = `${Math.floor(this.earlyAcceleration.timePast / 60)}`
-      if (this.earlyAcceleration.wasAcceleration) {
-        Doc.show(page.recentAccelerationMsg)
-        Doc.hide(page.recentSwapMsg)
-        page.recentAccelerationTime.textContent = `${Math.floor(this.earlyAcceleration.timePast / 60)}`
-      } else {
-        Doc.show(page.recentSwapMsg)
-        Doc.hide(page.recentAccelerationMsg)
-        page.recentSwapTime.textContent = `${Math.floor(this.earlyAcceleration.timePast / 60)}`
-      }
-      this.earlyAccelerationAlreadyDisplayed = true
-      Doc.hide(page.configureAccelerationDiv)
-      Doc.show(page.earlyAccelerationDiv)
-      this.earlyAccelerationAlreadyDisplayed = true
-      return
-    }
-    page.acceleratePass.value = ''
-    const loaded = app().loading(page.accelerateForm)
-    const res = await postJSON('/api/accelerateorder', req)
-    loaded()
-    if (app().checkResponse(res)) {
-      this.refreshOnPopupClose = true
-      page.accelerateTxID.textContent = res.txID
-      Doc.hide(page.accelerateMainDiv, page.preAccelerateErr, page.accelerateErr)
-      Doc.show(page.accelerateMsgDiv, page.accelerateSuccess)
-    } else {
-      page.accelerateErr.textContent = `Error accelerating order: ${res.msg}`
-      Doc.hide(page.earlyAccelerationDiv)
-      Doc.show(page.accelerateErr, page.configureAccelerationDiv)
-    }
-  }
-
   /* submitCancel submits a cancellation for the order. */
   async submitCancel () {
     // this will be the page.cancelSubmit button (evt.currentTarget)
@@ -315,6 +165,26 @@ export default class OrderPage extends BasePage {
   }
 
   /*
+   * showAccelerationButton shows the acceleration button if the order can
+   * be accelerated.
+   */
+  showAccelerationButton () {
+    const order = this.order
+    if (!order) return
+    const page = this.page
+    if (app().canAccelerateOrder(order)) Doc.show(page.accelerateBttn, page.actionsLabel)
+    else Doc.hide(page.accelerateBttn, page.actionsLabel)
+  }
+
+  /* showAccelerateForm shows a form to accelerate an order */
+  async showAccelerateForm () {
+    const loaded = app().loading(this.page.accelerateBttn)
+    this.accelerateOrderForm.refresh(this.order)
+    loaded()
+    this.showForm(this.page.accelerateForm)
+  }
+
+  /*
    * handleOrderNote is the handler for the 'order'-type notification, which are
    * used to update an order's status.
    */
@@ -328,7 +198,7 @@ export default class OrderPage extends BasePage {
       page.status.textContent = OrderUtil.statusString(order)
     }
     for (const m of order.matches || []) this.processMatch(m)
-    this.showAccelerationDiv()
+    this.showAccelerationButton()
   }
 
   /* handleMatchNote handles a 'match' notification. */

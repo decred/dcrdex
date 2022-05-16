@@ -372,6 +372,78 @@
 </div>
 {{end}}
 
+{{define "accelerateForm"}}
+{{$passwordIsCached := .UserInfo.PasswordIsCached}}
+<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+<div class="text-center fs22 sans-light position-relative">
+  Accelerate Order
+</div>
+<div id=accelerateMainDiv>
+  <div id="configureAccelerationDiv">
+    If your swap transactions are stuck, you may attempt to accelerate them with an additional transaction. This is helpful when the the fee rate on an existing unconfirmed transaction has become too low to be mined in the next block, but not if blocks are just being mined slowly. When you submit this form, a transaction will be created that sends the change from your own swap initiation transaction to yourself with a higher fee. The effective fee rate of your swap transactions will become the rate you select below. Select a rate that is enough to be included in the next block. Consult a block explorer to be sure.
+    <br />
+    <div class="text-center fs17 sans-light position-relative">
+      Effective swap tx fee rate: <span id="accelerateAvgFeeRate"></span>
+    </div>
+    <div class="text-center fs17 sans-light position-relative">
+      Current suggested fee rate: <span id="accelerateCurrentFeeRate"></span>
+    </div>
+    <div id="sliderContainer" class="slider-container">
+    </div>
+    <div id="feeEstimateDiv" class="text-center fs17 sans-light position-relative d-hide">
+      Increasing the effective fee rate to <span id="feeRateEstimate"></span> will cost <span id="feeEstimate"></span>
+    </div>
+    <hr class="dashed mt-2">
+    <div class="d-flex flex-row align-items-end {{if $passwordIsCached}}justify-content-end{{end}} pb-4">
+      <div class="col-12 p-0 {{if $passwordIsCached}}d-hide{{end}}">
+        <label for="acceleratePass" class="pt-3 mb-1">密码</label>
+        <input type="password" class="form-control select" id="acceleratePass" autocomplete="off">
+      </div>
+      <div class="col-12 pt-2 {{if not $passwordIsCached}}px-5{{end}}">
+        <button id="accelerateSubmit" type="button" class="w-100 fs15 bg2 selected">提交</button>
+      </div>
+    </div>
+  </div>
+  <div class="d-hide" id="earlyAccelerationDiv">
+    <div id="recentAccelerationMsg">Your latest acceleration was only <span id="recentAccelerationTime"></span> minutes ago! Are you sure you want to accelerate?</div>
+    <div id="recentSwapMsg">Your oldest unconfirmed swap transaction was submitted only <span id="recentSwapTime"></span> minutes ago! Are you sure you want to accelerate?</div>
+    <br/>
+    It will cause no harm to your order, but you might be wasting money. Acceleration is only helpful if the fee rate on an existing unconfirmed transaction has become too low to be mined in the next block, but not if blocks are just being mined slowly. You can confirm this in the block explorer by closing this popup and clicking on your previous transactions.
+    <div class="d-flex flex-row align-items-end justify-content-end pb-4">
+      <div class="col-12 pt-2">
+        <button id="submitEarlyConfirm" type="button" class="w-100 fs15 bg2 selected">提交</button>
+      </div>
+    </div>
+  </div>
+  <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="accelerateErr"></div>
+</div>
+<div id="rangeOptTmpl">
+  <div class="d-flex flex-nowrap fs12">
+    <span data-tmpl="rangeLblStart"></span>
+    <div data-tmpl="slider" class="slider flex-grow-1">
+      <div data-tmpl="handle" class="slider-handle"></div>
+    </div>
+    <span data-tmpl="rangeLblEnd"></span>
+  </div>
+  <div class="d-flex justify-content-between align-items-center fs14">
+    <span>
+      <input type="text" pattern="[0-9]+([\.,][0-9]+)?" data-tmpl="xInput" class="xy-range-input d-hide">
+      <span data-tmpl="x" class="pointer"></span> <span data-tmpl="xUnit"></span>
+    </span>
+    <span>
+      <input type="text" pattern="[0-9]+([\.,][0-9]+)?" data-tmpl="yInput" class="xy-range-input d-hide">
+      <span data-tmpl="y" class="pointer"></span> <span data-tmpl="yUnit"></span>
+    </span>
+  </div>
+</div>
+<div id="accelerateMsgDiv" class="d-hide">
+  <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="preAccelerateErr"></div>
+  <div class="fs15 pt-3 text-left d-hide text-break" id="accelerateSuccess">
+    Successfully submitted transaction: <span id="accelerateTxID"></span>
+  </div>
+</div>
+{{end}}
+
 {{define "waitingForWalletForm"}}
 <div class="text-center mb-4"><img class="logo" data-tmpl="logo" src="/img/coins/dcr.png"></div>
 <div class="d-flex flex-column align-items-start borderleft mb-5">

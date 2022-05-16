@@ -12,7 +12,7 @@ import {
   DepthMarker
 } from './charts'
 import { postJSON } from './http'
-import { NewWalletForm, UnlockWalletForm, bind as bindForm } from './forms'
+import { NewWalletForm, UnlockWalletForm, AccelerateOrderForm, bind as bindForm } from './forms'
 import * as OrderUtil from './orderutil'
 import ws from './ws'
 import * as intl from './locales'
@@ -173,6 +173,7 @@ export default class MarketsPage extends BasePage {
   keyup: (e: KeyboardEvent) => void
   secondTicker: number
   candlesLoading: LoadTracker | null
+  accelerateOrderForm: AccelerateOrderForm
 
   constructor (main: HTMLElement, data: any) {
     super()
@@ -209,6 +210,11 @@ export default class MarketsPage extends BasePage {
       mouse: c => { this.reportMouseCandle(c) }
     }
     this.candleChart = new CandleChart(page.marketChart, candleReporters)
+
+    const success = () => { /* do nothing */ }
+    // Do not call cleanTemplates before creating the AccelerateOrderForm
+    this.accelerateOrderForm = new AccelerateOrderForm(page.accelerateForm, success)
+    Doc.cleanTemplates(page.rangeOptTmpl)
 
     // TODO: Store user's state and reload last known configuration.
     this.candleChart.hide()
@@ -1130,6 +1136,16 @@ export default class MarketsPage extends BasePage {
           this.showCancel(row, ord.id)
         })
       }
+
+      const accelerateBttn = Doc.tmplElement(row, 'accelerateBttn')
+      bind(accelerateBttn, 'click', e => {
+        e.stopPropagation()
+        this.showAccelerate(ord)
+      })
+      if (app().canAccelerateOrder(ord)) {
+        Doc.show(accelerateBttn)
+      }
+
       const side = Doc.tmplElement(row, 'side')
       side.classList.add(ord.sell ? 'sellcolor' : 'buycolor')
       const link = Doc.tmplElement(row, 'link')
@@ -1320,7 +1336,8 @@ export default class MarketsPage extends BasePage {
   async showForm (form: HTMLElement) {
     this.currentForm = form
     const page = this.page
-    Doc.hide(page.unlockWalletForm, page.verifyForm, page.newWalletForm, page.cancelForm, page.vDetailPane)
+    Doc.hide(page.unlockWalletForm, page.verifyForm, page.newWalletForm,
+      page.cancelForm, page.vDetailPane, page.accelerateForm)
     form.style.right = '10000px'
     Doc.show(page.forms, form)
     const shift = (page.forms.offsetWidth + form.offsetWidth) / 2
@@ -1591,6 +1608,14 @@ export default class MarketsPage extends BasePage {
     }
   }
 
+  /* showAccelerate shows the accelerate order form. */
+  showAccelerate (order: Order) {
+    const loaded = app().loading(this.main)
+    this.accelerateOrderForm.refresh(order)
+    loaded()
+    this.showForm(this.page.accelerateForm)
+  }
+
   /* showCreate shows the new wallet creation form. */
   showCreate (asset: SupportedAsset) {
     const page = this.page
@@ -1669,14 +1694,12 @@ export default class MarketsPage extends BasePage {
     if (!metaOrder) return this.refreshActiveOrders()
     const oldStatus = metaOrder.status
     metaOrder.order = order
-    const bttn = Doc.tmplElement(metaOrder.row, 'cancelBttn')
-    if (note.topic === 'MissedCancel') {
-      Doc.show(bttn)
-    }
-    if (order.filled === order.qty) {
-      // Remove the cancellation button.
-      Doc.hide(bttn)
-    }
+    const cancelBttn = Doc.tmplElement(metaOrder.row, 'cancelBttn')
+    if (note.topic === 'MissedCancel') Doc.show(cancelBttn)
+    if (order.filled === order.qty) Doc.hide(cancelBttn)
+    const accelerateBttn = Doc.tmplElement(metaOrder.row, 'accelerateBttn')
+    if (app().canAccelerateOrder(order)) Doc.show(accelerateBttn)
+    else Doc.hide(accelerateBttn)
     this.updateUserOrderRow(metaOrder.row, order)
     // Only reset markers if there is a change, since the chart is redrawn.
     if ((oldStatus === OrderUtil.StatusEpoch && order.status === OrderUtil.StatusBooked) ||
