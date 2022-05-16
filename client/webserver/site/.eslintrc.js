@@ -24,6 +24,7 @@ module.exports = {
     'no-console': ['off'],
     'no-alert': 'error',
     'no-eval': 'error',
-    'no-implied-eval': 'error'
+    'no-implied-eval': 'error',
+    'object-shorthand': 'off'
   }
 }
