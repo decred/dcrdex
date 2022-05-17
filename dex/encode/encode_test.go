@@ -46,7 +46,17 @@ func TestBuildyBytes(t *testing.T) {
 }
 
 func TestDecodeBlob(t *testing.T) {
+	almostLongBlob := RandomBytes(254)
 	longBlob := RandomBytes(255)
+	longBlob2 := RandomBytes(555)
+	longestUint16Blob := RandomBytes(65535)
+	longerBlob := RandomBytes(65536)
+	longerBlob2 := RandomBytes(65599)
+	megaBlob := RandomBytes(12_345_678)
+	almostLargestBlob := RandomBytes(maxDataLen - 1)
+	largestBlob := RandomBytes(maxDataLen)
+	// tooLargeBlob tested after the loop, recovering the expected panic
+
 	type test struct {
 		v       byte
 		b       []byte
@@ -65,9 +75,49 @@ func TestDecodeBlob(t *testing.T) {
 			exp: [][]byte{tB, tC},
 		},
 		{
+			v:   250,
+			b:   BuildyBytes{250}.AddData(tA).AddData(almostLongBlob),
+			exp: [][]byte{tA, almostLongBlob},
+		},
+		{
 			v:   255,
 			b:   BuildyBytes{255}.AddData(tA).AddData(longBlob),
 			exp: [][]byte{tA, longBlob},
+		},
+		{
+			v:   255,
+			b:   BuildyBytes{255}.AddData(tA).AddData(longBlob2),
+			exp: [][]byte{tA, longBlob2},
+		},
+		{
+			v:   255,
+			b:   BuildyBytes{255}.AddData(tA).AddData(longestUint16Blob),
+			exp: [][]byte{tA, longestUint16Blob},
+		},
+		{
+			v:   255,
+			b:   BuildyBytes{255}.AddData(tA).AddData(longerBlob),
+			exp: [][]byte{tA, longerBlob},
+		},
+		{
+			v:   255,
+			b:   BuildyBytes{255}.AddData(tA).AddData(longerBlob2),
+			exp: [][]byte{tA, longerBlob2},
+		},
+		{
+			v:   255,
+			b:   BuildyBytes{255}.AddData(tA).AddData(megaBlob),
+			exp: [][]byte{tA, megaBlob},
+		},
+		{
+			v:   255,
+			b:   BuildyBytes{255}.AddData(tA).AddData(almostLargestBlob),
+			exp: [][]byte{tA, almostLargestBlob},
+		},
+		{
+			v:   255,
+			b:   BuildyBytes{255}.AddData(tA).AddData(largestBlob),
+			exp: [][]byte{tA, largestBlob},
 		},
 		{
 			b:       []byte{0x01, 0x02}, // missing two bytes
@@ -95,4 +145,14 @@ func TestDecodeBlob(t *testing.T) {
 			}
 		}
 	}
+
+	tooLargeBlob := RandomBytes(maxDataLen + 1)
+	func() {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Errorf("no panic encoding data that's too large")
+			}
+		}()
+		BuildyBytes{255}.AddData(tA).AddData(tooLargeBlob)
+	}()
 }

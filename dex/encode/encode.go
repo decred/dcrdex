@@ -10,19 +10,21 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"time"
 )
 
 var (
-	// IntCoder is the DEX-wide integer byte-encoding order.
+	// IntCoder is the DEX-wide integer byte-encoding order. IntCoder must be
+	// BigEndian so that variable length data encodings work as intended.
 	IntCoder = binary.BigEndian
 	// A byte-slice representation of boolean false.
 	ByteFalse = []byte{0}
 	// A byte-slice representation of boolean true.
-	ByteTrue = []byte{1}
-	maxU16   = int(^uint16(0))
-	bEqual   = bytes.Equal
+	ByteTrue   = []byte{1}
+	bEqual     = bytes.Equal
+	maxDataLen = 0x00fe_ffff // top two bytes in big endian stop at 254, signalling 32-bit len
 )
 
 // Uint64Bytes converts the uint16 to a length-2, big-endian encoded byte slice.
@@ -122,10 +124,20 @@ func ExtractPushes(b []byte, preAlloc ...int) ([][]byte, error) {
 		b = b[1:]
 		if l == 255 {
 			if len(b) < 2 {
-				return nil, fmt.Errorf("2 bytes not available for uint16 data length")
+				return nil, fmt.Errorf("2 bytes not available for data length")
 			}
 			l = int(IntCoder.Uint16(b[:2]))
-			b = b[2:]
+			if l < 255 {
+				// This indicates it's really a uint32 capped at 0x00fe_ffff, and
+				// we are looking at the top two bytes. Decode all four.
+				if len(b) < 4 {
+					return nil, fmt.Errorf("4 bytes not available for 32-bit data length")
+				}
+				l = int(IntCoder.Uint32(b[:4]))
+				b = b[4:]
+			} else { // includes 255
+				b = b[2:]
+			}
 		}
 		if len(b) < l {
 			return nil, fmt.Errorf("data too short for pop of %d bytes", l)
@@ -172,12 +184,25 @@ type BuildyBytes []byte
 func (b BuildyBytes) AddData(d []byte) BuildyBytes {
 	l := len(d)
 	var lBytes []byte
-	if l > 0xff-1 {
-		if l > maxU16 {
-			panic("cannot use addData for pushes > 65535 bytes")
+	if l >= 0xff {
+		if l > maxDataLen {
+			panic("cannot use addData for pushes > 16711679 bytes")
 		}
-		i := make([]byte, 2)
-		IntCoder.PutUint16(i, uint16(l))
+		var i []byte
+		if l > math.MaxUint16 { // not >= since that is historically in 2 bytes
+			// We are retrofitting for data longer than 65535 bytes, so we
+			// cannot switch to uint32 at 65535 itself since it is possible
+			// there is data of exactly that length already stored using just
+			// two bytes to encode the length. Thus, the decoder should inspect
+			// the top two bytes (big endian), switching to uint32 if under 255.
+			// Therefore, the highest length with this scheme is 0x00fe_ffff
+			// (16,711,679 bytes).
+			i = make([]byte, 4)
+			IntCoder.PutUint32(i, uint32(l))
+		} else { // includes MaxUint16 for historical reasons
+			i = make([]byte, 2)
+			IntCoder.PutUint16(i, uint16(l))
+		}
 		lBytes = append([]byte{0xff}, i...)
 	} else {
 		lBytes = []byte{byte(l)}
