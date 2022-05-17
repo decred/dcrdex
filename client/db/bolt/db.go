@@ -1013,7 +1013,7 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 	}
 
 	var accelerationCoinIDs []order.CoinID
-	accelerationsB := oBkt.Get(accelerationsKey)
+	accelerationsB := getCopy(oBkt, accelerationsKey)
 	if len(accelerationsB) > 0 {
 		_, coinIDs, err := encode.DecodeBlob(accelerationsB)
 		if err != nil {

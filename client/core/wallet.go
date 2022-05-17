@@ -325,10 +325,10 @@ func (w *xcWallet) accelerationEstimate(swapCoins, accelerationCoins []dex.Bytes
 
 // preAccelerate gives the user information about accelerating an order if the
 // wallet is an Accelerator.
-func (w *xcWallet) preAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (uint64, asset.XYRange, *asset.EarlyAcceleration, error) {
+func (w *xcWallet) preAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (uint64, *asset.XYRange, *asset.EarlyAcceleration, error) {
 	accelerator, ok := w.Wallet.(asset.Accelerator)
 	if !ok {
-		return 0, asset.XYRange{}, nil, errors.New("wallet does not support acceleration")
+		return 0, &asset.XYRange{}, nil, errors.New("wallet does not support acceleration")
 	}
 
 	return accelerator.PreAccelerate(swapCoins, accelerationCoins, changeCoin, requiredForRemainingSwaps, feeSuggestion)

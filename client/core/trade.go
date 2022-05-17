@@ -2843,18 +2843,15 @@ func (t *trackedTrade) orderAccelerationParameters() (swapCoins, accelerationCoi
 
 	swapCoins = make([]dex.Bytes, 0, len(t.matches))
 	for _, match := range t.matches {
-		if match.Status < order.MakerSwapCast {
+		var swapCoinID order.CoinID
+		if match.Side == order.Maker && match.Status >= order.MakerSwapCast {
+			swapCoinID = match.MetaData.Proof.MakerSwap
+		} else if match.Side == order.Taker && match.Status >= order.TakerSwapCast {
+			swapCoinID = match.MetaData.Proof.TakerSwap
+		} else {
 			continue
 		}
-		var swapCoinID order.CoinID
-		if match.Side == order.Maker {
-			swapCoinID = match.MetaData.Proof.MakerSwap
-		} else {
-			if match.Status < order.TakerSwapCast {
-				continue
-			}
-			swapCoinID = match.MetaData.Proof.TakerSwap
-		}
+
 		swapCoins = append(swapCoins, dex.Bytes(swapCoinID))
 	}
 

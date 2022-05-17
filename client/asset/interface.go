@@ -47,7 +47,7 @@ func (wt WalletTrait) IsFeeRater() bool {
 }
 
 // IsAccelerator tests if the WalletTrait has the WalletTraitAccelerator bit set,
-// which indicates the presence of a Accelerate method.
+// which indicates the presence of an Accelerate method.
 func (wt WalletTrait) IsAccelerator() bool {
 	return wt&WalletTraitAccelerator != 0
 }
@@ -382,20 +382,22 @@ type EarlyAcceleration struct {
 	// WasAccelerated is true if the action that took place TimePast seconds
 	// ago was an acceleration. If false, the oldest unmined swap transaction
 	// in the order was submitted TimePast seconds ago.
-	WasAcclerated bool `json:"wasAccelerated"`
+	WasAccelerated bool `json:"wasAccelerated"`
 }
 
 // Accelerator is implemented by wallets which support acceleration of the
 // mining of swap transactions.
 type Accelerator interface {
 	// AccelerateOrder uses the Child-Pays-For-Parent technique to accelerate a
-	// chain of swap transactions and previous accelerations. It broadcasts a
-	// new transaction with a fee high enough so that the average fee of all
-	// the unconfirmed transactions in the chain and the new transaction will
-	// have an average fee rate of newFeeRate. requiredForRemainingSwaps is
-	// passed in to ensure that the new change coin will have enough funds to
-	// initiate the additional swaps that will be required to complete the
-	// order.
+	// chain of swap transactions and previous accelerations. It broadcasts a new
+	// transaction with a fee high enough so that the average fee of all the
+	// unconfirmed transactions in the chain and the new transaction will have
+	// an average fee rate of newFeeRate. The changeCoin argument is the latest
+	// chhange in the order. It must be the input in the acceleration transaction
+	// in order for the order to be accelerated. requiredForRemainingSwaps is the
+	// amount of funds required to complete the rest of the swaps in the order.
+	// The change output of the acceleration transaction will have at least
+	// this amount.
 	//
 	// The returned change coin may be nil, and should be checked before use.
 	AccelerateOrder(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, newFeeRate uint64) (Coin, string, error)
@@ -405,12 +407,14 @@ type Accelerator interface {
 	// average fee rate to the desired amount.
 	AccelerationEstimate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, newFeeRate uint64) (uint64, error)
 	// PreAccelerate returns the current average fee rate of the unmined swap
-	// initiation and acceleration transactions, a suggested
-	// range that the fee rate should be increased to in order to expedite
-	// mining, and also optionally an EarlyAcceleration notification if
-	// the user's previous acceleration on this order or the earliest
-	// unmined transaction in this order happened very recently.
-	PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (uint64, XYRange, *EarlyAcceleration, error)
+	// initiation and acceleration transactions, and also returns a suggested
+	// range that the fee rate should be increased to in order to expedite mining.
+	// The feeSuggestion argument is the current prevailing network rate. It is
+	// used to help determine the suggestedRange, which is a range meant to give
+	// the user a good amount of flexibility in determining the post acceleration
+	// effective fee rate, but still not allowing them to pick something
+	// outrageously high.
+	PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (uint64, *XYRange, *EarlyAcceleration, error)
 }
 
 // TokenMaster is implemented by assets which support degenerate tokens.

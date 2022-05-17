@@ -904,9 +904,9 @@ func (w *TXCWallet) AccelerateOrder(swapCoins, accelerationCoins []dex.Bytes, ch
 	return nil, w.newAccelerationTxID, nil
 }
 
-func (w *TXCWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (uint64, asset.XYRange, *asset.EarlyAcceleration, error) {
+func (w *TXCWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (uint64, *asset.XYRange, *asset.EarlyAcceleration, error) {
 	if w.accelerateOrderErr != nil {
-		return 0, asset.XYRange{}, nil, w.accelerateOrderErr
+		return 0, nil, nil, w.accelerateOrderErr
 	}
 
 	w.accelerationParams = &struct {
@@ -924,7 +924,7 @@ func (w *TXCWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, chan
 		feeSuggestion:             feeSuggestion,
 	}
 
-	return w.preAccelerateSwapRate, w.preAccelerateSuggestedRange, nil, nil
+	return w.preAccelerateSwapRate, &w.preAccelerateSuggestedRange, nil, nil
 }
 
 func (w *TXCWallet) AccelerationEstimate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, newFeeRate uint64) (uint64, error) {

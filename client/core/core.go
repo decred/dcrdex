@@ -7136,7 +7136,6 @@ func (c *Core) AccelerateOrder(pw []byte, oidB dex.Bytes, newFeeRate uint64) (st
 	if err != nil {
 		return "", err
 	}
-
 	tracker, err := c.findActiveOrder(oid)
 	if err != nil {
 		return "", err
@@ -7226,10 +7225,15 @@ func (c *Core) PreAccelerateOrder(oidB dex.Bytes) (*PreAccelerate, error) {
 		return nil, err
 	}
 
+	if suggestedRange == nil {
+		// this should never happen
+		return nil, fmt.Errorf("suggested range is nil")
+	}
+
 	return &PreAccelerate{
 		SwapRate:          currentRate,
 		SuggestedRate:     feeSuggestion,
-		SuggestedRange:    suggestedRange,
+		SuggestedRange:    *suggestedRange,
 		EarlyAcceleration: earlyAcceleration,
 	}, nil
 }
