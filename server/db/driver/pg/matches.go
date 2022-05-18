@@ -31,8 +31,8 @@ func (a *Archiver) matchTableName(match *order.Match) (string, error) {
 // can actually be forgiven (inactive, not already forgiven, and not in
 // MatchComplete status).
 func (a *Archiver) ForgiveMatchFail(mid order.MatchID) (bool, error) {
-	for m := range a.markets {
-		stmt := fmt.Sprintf(internal.ForgiveMatchFail, fullMatchesTableName(a.dbName, m))
+	for schema := range a.markets {
+		stmt := fmt.Sprintf(internal.ForgiveMatchFail, fullMatchesTableName(a.dbName, schema))
 		N, err := sqlExec(a.db, stmt, mid)
 		if err != nil { // not just no rows updated
 			return false, err
@@ -49,8 +49,8 @@ func (a *Archiver) ForgiveMatchFail(mid order.MatchID) (bool, error) {
 func (a *Archiver) ActiveSwaps() ([]*db.SwapDataFull, error) {
 	var sd []*db.SwapDataFull
 
-	for m, mkt := range a.markets {
-		matchesTableName := fullMatchesTableName(a.dbName, m)
+	for schema, mkt := range a.markets {
+		matchesTableName := fullMatchesTableName(a.dbName, schema)
 		ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
 		matches, swapData, err := activeSwaps(ctx, a.db, matchesTableName)
 		cancel()
@@ -140,8 +140,8 @@ func activeSwaps(ctx context.Context, dbe *sql.DB, tableName string) (matches []
 func (a *Archiver) CompletedAndAtFaultMatchStats(aid account.AccountID, lastN int) ([]*db.MatchOutcome, error) {
 	var outcomes []*db.MatchOutcome
 
-	for m, mkt := range a.markets {
-		matchesTableName := fullMatchesTableName(a.dbName, m)
+	for schema, mkt := range a.markets {
+		matchesTableName := fullMatchesTableName(a.dbName, schema)
 		ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
 		matchOutcomes, err := completedAndAtFaultMatches(ctx, a.db, matchesTableName, aid, lastN, mkt.Base, mkt.Quote)
 		cancel()
@@ -410,8 +410,8 @@ func (a *Archiver) AllActiveUserMatches(aid account.AccountID) ([]*db.MatchData,
 	defer cancel()
 
 	var matches []*db.MatchData
-	for m := range a.markets {
-		matchesTableName := fullMatchesTableName(a.dbName, m)
+	for schema := range a.markets {
+		matchesTableName := fullMatchesTableName(a.dbName, schema)
 		mdM, err := userMatches(ctx, a.db, matchesTableName, aid, false)
 		if err != nil {
 			return nil, err

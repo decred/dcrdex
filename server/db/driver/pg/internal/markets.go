@@ -10,8 +10,8 @@ const (
 	// tables.
 	CreateMarketsTable = `CREATE TABLE IF NOT EXISTS %s (
 		name TEXT PRIMARY KEY,
-		base INT2,
-		quote INT2,
+		base INT8,
+		quote INT8,
 		lot_size INT8
 	)`
 

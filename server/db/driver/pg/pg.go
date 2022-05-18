@@ -139,7 +139,7 @@ func NewArchiverForRead(ctx context.Context, cfg *Config) (*Archiver, error) {
 
 	mktMap := make(map[string]*dex.MarketInfo, len(cfg.MarketCfg))
 	for _, mkt := range cfg.MarketCfg {
-		mktMap[mkt.Name] = mkt
+		mktMap[marketSchema(mkt.Name)] = mkt
 	}
 
 	return &Archiver{
@@ -197,16 +197,17 @@ func (a *Archiver) Close() error {
 }
 
 func (a *Archiver) marketSchema(base, quote uint32) (string, error) {
-	marketSchema, err := dex.MarketName(base, quote)
+	marketName, err := dex.MarketName(base, quote)
 	if err != nil {
 		return "", err
 	}
-	_, found := a.markets[marketSchema]
+	schema := marketSchema(marketName)
+	_, found := a.markets[schema]
 	if !found {
 		return "", db.ArchiveError{
 			Code:   db.ErrUnsupportedMarket,
-			Detail: fmt.Sprintf(`archiver does not support the market "%s"`, marketSchema),
+			Detail: fmt.Sprintf(`archiver does not support the market "%s"`, schema),
 		}
 	}
-	return marketSchema, nil
+	return schema, nil
 }

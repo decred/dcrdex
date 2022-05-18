@@ -6,6 +6,7 @@ package pg
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
@@ -59,7 +60,8 @@ func newMarket(db *sql.DB, marketsTableName string, mkt *dex.MarketInfo) error {
 	return nil
 }
 
-func createMarketTables(db *sql.DB, marketUID string) error {
+func createMarketTables(db *sql.DB, marketName string) error {
+	marketUID := marketSchema(marketName)
 	newMarket, err := createSchema(db, marketUID)
 	if err != nil {
 		return err
@@ -82,4 +84,9 @@ func createMarketTables(db *sql.DB, marketUID string) error {
 	}
 
 	return nil
+}
+
+func marketSchema(marketName string) string {
+	// '$' separator might only work with PostgreSQL.
+	return strings.ReplaceAll(marketName, ".", "$")
 }
