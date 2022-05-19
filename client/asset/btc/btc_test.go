@@ -3938,6 +3938,25 @@ func testGetTxFee(t *testing.T, segwit bool, walletType string) {
 			},
 			expectErr: true,
 		},
+		{
+			name: "tx out > in error",
+			tx: &wire.MsgTx{
+				TxIn: []*wire.TxIn{{
+					PreviousOutPoint: wire.OutPoint{
+						Hash:  inputTx.TxHash(),
+						Index: 0,
+					}},
+					{PreviousOutPoint: wire.OutPoint{
+						Hash:  inputTx.TxHash(),
+						Index: 2,
+					}},
+				},
+				TxOut: []*wire.TxOut{{
+					Value: 8e6,
+				}},
+			},
+			expectErr: true,
+		},
 	}
 
 	for _, test := range tests {

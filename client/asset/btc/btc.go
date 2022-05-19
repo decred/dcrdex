@@ -590,7 +590,6 @@ type baseWallet struct {
 	estimateFee       func(RawRequester, uint64) (uint64, error) // TODO: resolve the awkwardness of an RPC-oriented func in a generic framework
 	decodeAddr        dexbtc.AddressDecoder
 	stringAddr        dexbtc.AddressStringer
-	net               dex.Network
 
 	tipMtx     sync.RWMutex
 	currentTip *block
@@ -871,7 +870,6 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		decodeAddr:          addrDecoder,
 		stringAddr:          addrStringer,
 		walletInfo:          cfg.WalletInfo,
-		net:                 cfg.Network,
 	}
 
 	if w.estimateFee == nil {
@@ -1965,9 +1963,6 @@ func (btc *baseWallet) lookupWalletTxOutput(txHash *chainhash.Hash, vout uint32)
 // returned slice will be in the same order as the argument.
 func (btc *baseWallet) getTransactions(coins []dex.Bytes) ([]*GetTransactionResult, error) {
 	txs := make([]*GetTransactionResult, 0, len(coins))
-	if len(coins) == 0 {
-		return txs, nil
-	}
 
 	for _, coinID := range coins {
 		txHash, _, err := decodeCoinID(coinID)
@@ -2005,6 +2000,11 @@ func (btc *baseWallet) getTxFee(tx *wire.MsgTx) (uint64, error) {
 				tx.TxHash(), txIn.PreviousOutPoint.Index, prevMsgTx.TxHash(), len(prevMsgTx.TxOut))
 		}
 		in += uint64(prevMsgTx.TxOut[int(txIn.PreviousOutPoint.Index)].Value)
+	}
+
+	if in < out {
+		return 0, fmt.Errorf("tx %x has value of inputs %d < value of outputs %d",
+			tx.TxHash(), in, out)
 	}
 
 	return in - out, nil
@@ -2067,10 +2067,9 @@ func (btc *baseWallet) changeCanBeAccelerated(change *output, remainingSwaps boo
 		if utxo.TxID == changeTxHash && utxo.Vout == change.pt.vout {
 			if !remainingSwaps {
 				return errors.New("change locked by another order")
-			} else {
-				// change is locked by this order
-				return nil
 			}
+			// change is locked by this order
+			return nil
 		}
 	}
 
