@@ -182,7 +182,9 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 
 // rawTxSigner signs the transaction using Bitcoin Cash's custom signature
 // hash and signing algorithm.
-func rawTxInSigner(btcTx *wire.MsgTx, idx int, subScript []byte, hashType txscript.SigHashType, btcKey *btcec.PrivateKey, val uint64) ([]byte, error) {
+func rawTxInSigner(btcTx *wire.MsgTx, idx int, subScript []byte, hashType txscript.SigHashType,
+	btcKey *btcec.PrivateKey, vals []int64, _ [][]byte) ([]byte, error) {
+
 	bchTx, err := translateTx(btcTx)
 	if err != nil {
 		return nil, fmt.Errorf("btc->bch wire.MsgTx translation error: %v", err)
@@ -190,7 +192,7 @@ func rawTxInSigner(btcTx *wire.MsgTx, idx int, subScript []byte, hashType txscri
 
 	bchKey, _ := bchec.PrivKeyFromBytes(bchec.S256(), btcKey.Serialize())
 
-	return bchscript.RawTxInECDSASignature(bchTx, idx, subScript, bchscript.SigHashType(uint32(hashType)), bchKey, int64(val))
+	return bchscript.RawTxInECDSASignature(bchTx, idx, subScript, bchscript.SigHashType(uint32(hashType)), bchKey, vals[idx])
 }
 
 // serializeBtcTx serializes the wire.MsgTx.

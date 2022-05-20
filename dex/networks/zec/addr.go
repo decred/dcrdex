@@ -7,8 +7,8 @@ import (
 	"crypto/sha256"
 	"fmt"
 
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcutil"
 	"github.com/decred/base58"
 )
 

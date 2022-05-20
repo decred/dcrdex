@@ -206,8 +206,11 @@ var (
 	}
 )
 
-// TxInSigner is a transaction input signer.
-type TxInSigner func(tx *wire.MsgTx, idx int, subScript []byte, hashType txscript.SigHashType, key *btcec.PrivateKey, val uint64) ([]byte, error)
+// TxInSigner is a transaction input signer. In addition to the standard Bitcoin
+// arguments, TxInSigner receives all values and pubkey scripts for previous
+// outpoints spent in this transaction.
+type TxInSigner func(tx *wire.MsgTx, idx int, subScript []byte, hashType txscript.SigHashType,
+	key *btcec.PrivateKey, vals []int64, prevScripts [][]byte) ([]byte, error)
 
 // BTCCloneCFG holds clone specific parameters.
 type BTCCloneCFG struct {
@@ -718,7 +721,7 @@ func (btc *ExchangeWalletSPV) Rescan(_ context.Context) error {
 func (btc *ExchangeWalletFullNode) FeeRate() uint64 {
 	rate, err := btc.estimateFee(btc.node, 1)
 	if err != nil {
-		btc.log.Errorf("Failed to get fee rate: %v", err)
+		btc.log.Tracef("Failed to get fee rate: %v", err)
 		return 0
 	}
 	return rate
@@ -2820,9 +2823,10 @@ func (btc *baseWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, 
 	// Create a transaction that spends the referenced contract.
 	msgTx := wire.NewMsgTx(btc.txVersion())
 	var totalIn uint64
-	var contracts [][]byte
-	var addresses []btcutil.Address
-	var values []uint64
+	contracts := make([][]byte, 0, len(form.Redemptions))
+	prevScripts := make([][]byte, 0, len(form.Redemptions))
+	addresses := make([]btcutil.Address, 0, len(form.Redemptions))
+	values := make([]int64, 0, len(form.Redemptions))
 	for _, r := range form.Redemptions {
 		if r.Spends == nil {
 			return nil, nil, 0, fmt.Errorf("no audit info")
@@ -2844,11 +2848,16 @@ func (btc *baseWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, 
 		if !bytes.Equal(checkSecretHash[:], secretHash) {
 			return nil, nil, 0, fmt.Errorf("secret hash mismatch")
 		}
+		pkScript, err := btc.scriptHashScript(contract)
+		if err != nil {
+			return nil, nil, 0, fmt.Errorf("error constructs p2sh script: %v", err)
+		}
+		prevScripts = append(prevScripts, pkScript)
 		addresses = append(addresses, receiver)
 		contracts = append(contracts, contract)
 		txIn := wire.NewTxIn(cinfo.output.wireOutPoint(), nil, nil)
 		msgTx.AddTxIn(txIn)
-		values = append(values, cinfo.output.value)
+		values = append(values, int64(cinfo.output.value))
 		totalIn += cinfo.output.value
 	}
 
@@ -2916,7 +2925,7 @@ func (btc *baseWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, 
 	} else {
 		for i, r := range form.Redemptions {
 			contract := contracts[i]
-			redeemSig, redeemPubKey, err := btc.createSig(msgTx, i, contract, addresses[i], values[i])
+			redeemSig, redeemPubKey, err := btc.createSig(msgTx, i, contract, addresses[i], values, prevScripts)
 			if err != nil {
 				return nil, nil, 0, err
 			}
@@ -3464,18 +3473,20 @@ func (btc *baseWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract de
 	msgTx.AddTxOut(txOut)
 
 	if btc.segwit {
-		// NewTxSigHashes uses the PrevOutFetcher only for detecting a taproot
-		// output, so we can provide a dummy that always returns a wire.TxOut
-		// with a nil pkScript that so IsPayToTaproot returns false.
 		sigHashes := txscript.NewTxSigHashes(msgTx, new(txscript.CannedPrevOutputFetcher))
-		refundSig, refundPubKey, err := btc.createWitnessSig(msgTx, 0, contract, sender, val, sigHashes)
+		refundSig, refundPubKey, err := btc.createWitnessSig(msgTx, 0, contract, sender, int64(val), sigHashes)
 		if err != nil {
 			return nil, fmt.Errorf("createWitnessSig: %w", err)
 		}
 		txIn.Witness = dexbtc.RefundP2WSHContract(contract, refundSig, refundPubKey)
 
 	} else {
-		refundSig, refundPubKey, err := btc.createSig(msgTx, 0, contract, sender, val)
+		prevScript, err := btc.scriptHashScript(contract)
+		if err != nil {
+			return nil, fmt.Errorf("error constructing p2sh script: %w", err)
+		}
+
+		refundSig, refundPubKey, err := btc.createSig(msgTx, 0, contract, sender, []int64{int64(val)}, [][]byte{prevScript})
 		if err != nil {
 			return nil, fmt.Errorf("createSig: %w", err)
 		}
@@ -4096,7 +4107,7 @@ func (btc *baseWallet) txOutFromTxBytes(txB []byte, vout uint32) (*wire.TxOut, e
 
 // createSig creates and returns the serialized raw signature and compressed
 // pubkey for a transaction input signature.
-func (btc *baseWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, addr btcutil.Address, val uint64) (sig, pubkey []byte, err error) {
+func (btc *baseWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, addr btcutil.Address, vals []int64, pkScripts [][]byte) (sig, pubkey []byte, err error) {
 	addrStr, err := btc.stringAddr(addr, btc.chainParams)
 	if err != nil {
 		return nil, nil, err
@@ -4107,7 +4118,7 @@ func (btc *baseWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, addr 
 		return nil, nil, err
 	}
 
-	sig, err = btc.signNonSegwit(tx, idx, pkScript, txscript.SigHashAll, privKey, val)
+	sig, err = btc.signNonSegwit(tx, idx, pkScript, txscript.SigHashAll, privKey, vals, pkScripts)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -4118,7 +4129,7 @@ func (btc *baseWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, addr 
 // createWitnessSig creates and returns a signature for the witness of a segwit
 // input and the pubkey associated with the address.
 func (btc *baseWallet) createWitnessSig(tx *wire.MsgTx, idx int, pkScript []byte,
-	addr btcutil.Address, val uint64, sigHashes *txscript.TxSigHashes) (sig, pubkey []byte, err error) {
+	addr btcutil.Address, val int64, sigHashes *txscript.TxSigHashes) (sig, pubkey []byte, err error) {
 	addrStr, err := btc.stringAddr(addr, btc.chainParams)
 	if err != nil {
 		return nil, nil, err
@@ -4127,7 +4138,7 @@ func (btc *baseWallet) createWitnessSig(tx *wire.MsgTx, idx int, pkScript []byte
 	if err != nil {
 		return nil, nil, err
 	}
-	sig, err = txscript.RawTxInWitnessSignature(tx, sigHashes, idx, int64(val),
+	sig, err = txscript.RawTxInWitnessSignature(tx, sigHashes, idx, val,
 		pkScript, txscript.SigHashAll, privKey)
 
 	if err != nil {
@@ -4259,15 +4270,14 @@ func (btc *baseWallet) lockedSats() (uint64, error) {
 
 // wireBytes dumps the serialized transaction bytes.
 func (btc *baseWallet) wireBytes(tx *wire.MsgTx) []byte {
-	buf := bytes.NewBuffer(make([]byte, 0, tx.SerializeSize()))
-	err := tx.Serialize(buf)
+	b, err := btc.serializeTx(tx)
 	// wireBytes is just used for logging, and a serialization error is
 	// extremely unlikely, so just log the error and return the nil bytes.
 	if err != nil {
 		btc.log.Errorf("error serializing %s transaction: %v", btc.symbol, err)
 		return nil
 	}
-	return buf.Bytes()
+	return b
 }
 
 // GetBestBlockHeight is exported for use by clone wallets. Not part of the
@@ -4384,7 +4394,9 @@ func toBTC(v uint64) float64 {
 
 // rawTxInSig signs the transaction in input using the standard bitcoin
 // signature hash and ECDSA algorithm.
-func rawTxInSig(tx *wire.MsgTx, idx int, pkScript []byte, hashType txscript.SigHashType, key *btcec.PrivateKey, _ uint64) ([]byte, error) {
+func rawTxInSig(tx *wire.MsgTx, idx int, pkScript []byte, hashType txscript.SigHashType,
+	key *btcec.PrivateKey, _ []int64, _ [][]byte) ([]byte, error) {
+
 	return txscript.RawTxInSignature(tx, idx, pkScript, txscript.SigHashAll, key)
 }
 

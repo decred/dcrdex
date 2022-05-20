@@ -16,6 +16,7 @@ require (
 	github.com/btcsuite/btcwallet/wtxmgr v1.5.0
 	github.com/davecgh/go-spew v1.1.1
 	github.com/dchest/blake2b v1.0.0
+	github.com/decred/base58 v1.0.3
 	github.com/decred/dcrd/blockchain/stake/v4 v4.0.0
 	github.com/decred/dcrd/blockchain/v4 v4.0.0
 	github.com/decred/dcrd/certgen v1.1.1
@@ -53,8 +54,6 @@ require (
 	golang.org/x/time v0.0.0-20220411224347-583f2d630306
 	gopkg.in/ini.v1 v1.62.0
 )
-
-require github.com/decred/base58 v1.0.3
 
 require (
 	decred.org/cspp/v2 v2.0.0 // indirect

@@ -62,7 +62,7 @@ cd ${NODES_ROOT} && tmux new-session -d -s $SESSION $SHELL
 # programs. I would use them here, but bitcoind seems to have some issues
 # reading from the file when using regtest.
 
-cat > "${ALPHA_DIR}/zcash.conf" <<EOF
+cat > "${ALPHA_DIR}/alpha.conf" <<EOF
 rpcuser=user
 rpcpassword=pass
 txindex=1
@@ -76,9 +76,10 @@ nuparams=76b809bb:1
 nuparams=2bb40e60:1
 nuparams=f5b9230b:1
 nuparams=e9ff75a6:2
+nuparams=c2d6d0b4:3
 EOF
 
-cat > "${BETA_DIR}/zcash.conf" <<EOF
+cat > "${BETA_DIR}/beta.conf" <<EOF
 rpcuser=user
 rpcpassword=pass
 txindex=1
@@ -90,6 +91,7 @@ nuparams=76b809bb:1
 nuparams=2bb40e60:1
 nuparams=f5b9230b:1
 nuparams=e9ff75a6:2
+nuparams=c2d6d0b4:3
 EOF
 
 ################################################################################
@@ -101,7 +103,7 @@ tmux send-keys -t $SESSION:0 "set +o history" C-m
 tmux send-keys -t $SESSION:0 "cd ${ALPHA_DIR}" C-m
 echo "Starting simnet alpha node"
 tmux send-keys -t $SESSION:0 "${DAEMON} -rpcuser=user -rpcpassword=pass \
-  -rpcport=${ALPHA_RPC_PORT} -datadir=${ALPHA_DIR} \
+  -rpcport=${ALPHA_RPC_PORT} -datadir=${ALPHA_DIR} -conf=alpha.conf \
   -debug=rpc -debug=net -debug=mempool -debug=walletdb -debug=addrman -debug=mempoolrej \
   -whitelist=127.0.0.0/8 -whitelist=::1 \
   -txindex=1 -regtest=1 -port=${ALPHA_LISTEN_PORT} -fallbackfee=0.00001 \
@@ -118,7 +120,7 @@ tmux send-keys -t $SESSION:1 "cd ${BETA_DIR}" C-m
 
 echo "Starting simnet beta node"
 tmux send-keys -t $SESSION:1 "${DAEMON} -rpcuser=user -rpcpassword=pass \
-  -rpcport=${BETA_RPC_PORT} -datadir=${BETA_DIR} -txindex=1 -regtest=1 \
+  -rpcport=${BETA_RPC_PORT} -datadir=${BETA_DIR} -conf=beta.conf -txindex=1 -regtest=1 \
   -debug=rpc -debug=net -debug=mempool -debug=walletdb -debug=addrman -debug=mempoolrej \
   -whitelist=127.0.0.0/8 -whitelist=::1 \
   -port=${BETA_LISTEN_PORT} -fallbackfee=0.00001 -printtoconsole; \

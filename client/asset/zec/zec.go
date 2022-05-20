@@ -7,18 +7,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/dex"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	dexzec "decred.org/dcrdex/dex/networks/zec"
-	"github.com/btcsuite/btcd/btcec"
+	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcutil"
 )
 
 const (
@@ -28,8 +30,13 @@ const (
 	// structure.
 	defaultFee          = 10
 	defaultFeeRateLimit = 1000
-	minNetworkVersion   = 4060051
+	minNetworkVersion   = 5000050
 	walletTypeRPC       = "zcashdRPC"
+
+	mainnetNU5ActivationHeight        = 1687104
+	testnetNU5ActivationHeight        = 1842420
+	testnetSaplingActivationHeight    = 280000
+	testnetOverwinterActivationHeight = 207500
 )
 
 var (
@@ -92,6 +99,7 @@ var (
 			Description:       "Connect to zcashcoind",
 			DefaultConfigPath: dexbtc.SystemConfigPath("zcash"),
 			ConfigOpts:        configOpts,
+			NoAuth:            true,
 		}},
 	}
 )
@@ -149,7 +157,6 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 		Simnet:  "18232",
 	}
 	var w *btc.ExchangeWalletFullNode
-	nu5Activated := net == dex.Simnet
 	cloneCFG := &btc.BTCCloneCFG{
 		WalletCFG:                cfg,
 		MinNetworkVersion:        minNetworkVersion,
@@ -200,35 +207,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 			return &h
 		},
 		TxVersion: func() int32 {
-			const mainnetNU5ActivationHeight = 1687104
-			const testnetNU5ActivationHeight = 1842420
-
-			if nu5Activated {
-				return dexzec.VersionNU5
-			}
-
-			bestHeight, err := w.GetBestBlockHeight()
-			if err != nil {
-				logger.Errorf("Error getting best height for tx version calculation: %v", err)
-				return dexzec.VersionNU5
-			}
-
-			h := bestHeight + 1
-
-			switch net {
-			case dex.Mainnet:
-				if h >= mainnetNU5ActivationHeight {
-					nu5Activated = true
-				}
-			case dex.Testnet:
-				if h >= testnetNU5ActivationHeight {
-					nu5Activated = true
-				}
-			}
-			if nu5Activated {
-				return dexzec.VersionNU5
-			}
-			return dexzec.VersionSapling
+			return dexzec.VersionNU5
 		},
 	}
 
@@ -247,7 +226,8 @@ func zecTx(tx *wire.MsgTx) *dexzec.Tx {
 // get up to speed, and forget about simnet.
 // See https://github.com/zcash/zcash/issues/2552
 func estimateFee(node btc.RawRequester, confTarget uint64) (uint64, error) {
-	resp, err := node.RawRequest("estimatefee", nil)
+	const feeConfs = 10
+	resp, err := node.RawRequest("estimatefee", []json.RawMessage{[]byte(strconv.Itoa(feeConfs))})
 	if err != nil {
 		return 0, err
 	}
@@ -264,25 +244,15 @@ func estimateFee(node btc.RawRequester, confTarget uint64) (uint64, error) {
 
 // signTx signs the transaction input with ZCash's BLAKE-2B sighash digest.
 // Won't work with shielded or blended transactions.
-func signTx(btcTx *wire.MsgTx, idx int, pkScript []byte, hashType txscript.SigHashType, key *btcec.PrivateKey, amt uint64) ([]byte, error) {
+func signTx(btcTx *wire.MsgTx, idx int, pkScript []byte, hashType txscript.SigHashType,
+	key *btcec.PrivateKey, amts []int64, prevScripts [][]byte) ([]byte, error) {
+
 	tx := zecTx(btcTx)
-	cache, err := NewTxSigHashes(tx)
-	if err != nil {
-		return nil, fmt.Errorf("NewTxSigHashes error: %v", err)
-	}
 
-	// Compare with zcash/zcash TransactionSignatureCreator::CreateSig
-	// also zcash_transaction_transparent_signature_digest()
-
-	_, sigHash, err := signatureHash(pkScript, cache, hashType, tx, idx, int64(amt), dexzec.ConsensusBranchCanopy)
+	sigHash, err := tx.SignatureDigest(idx, hashType, amts, prevScripts)
 	if err != nil {
 		return nil, fmt.Errorf("sighash calculation error: %v", err)
 	}
 
-	signature, err := key.Sign(sigHash)
-	if err != nil {
-		return nil, fmt.Errorf("cannot sign tx input: %s", err)
-	}
-
-	return append(signature.Serialize(), byte(hashType)), nil
+	return append(ecdsa.Sign(key, sigHash[:]).Serialize(), byte(hashType)), nil
 }

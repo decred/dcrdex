@@ -116,6 +116,8 @@ func (wc *rpcClient) connect(ctx context.Context, _ *sync.WaitGroup) error {
 	if netVer < wc.minNetworkVersion {
 		return fmt.Errorf("reported node version %d is less than minimum %d", netVer, wc.minNetworkVersion)
 	}
+	// TODO: codeVer is actually asset-dependent. ZCash, for example, is at
+	// 170100. So we're just lucking out here, really.
 	if codeVer < minProtocolVersion {
 		return fmt.Errorf("node software out of date. version %d is less than minimum %d", codeVer, minProtocolVersion)
 	}
@@ -149,7 +151,6 @@ func (wc *rpcClient) SendRawTransactionLegacy(tx *wire.MsgTx) (*chainhash.Hash, 
 	if err != nil {
 		return nil, err
 	}
-
 	return wc.callHashGetter(methodSendRawTransaction, anylist{
 		hex.EncodeToString(txBytes), false})
 }
@@ -418,6 +419,7 @@ func (wc *rpcClient) signTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
 	if wc.legacySignTx {
 		method = methodSignTxLegacy
 	}
+
 	err = wc.call(method, anylist{hex.EncodeToString(txBytes)}, res)
 	if err != nil {
 		return nil, fmt.Errorf("tx signing error: %w", err)

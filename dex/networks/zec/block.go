@@ -48,7 +48,8 @@ func DeserializeBlock(b []byte) (*Block, error) {
 		tx := &Tx{MsgTx: new(wire.MsgTx)}
 
 		if err := tx.ZecDecode(r); err != nil {
-			return nil, err
+			blockHash := zecBlock.BlockHash()
+			return nil, fmt.Errorf("error decoding tx at index %d in block %s: %w", i, blockHash, err)
 		}
 		zecBlock.MsgBlock.Transactions = append(zecBlock.MsgBlock.Transactions, tx.MsgTx)
 		zecBlock.Transactions = append(zecBlock.Transactions, tx)
@@ -67,11 +68,11 @@ func (z *Block) decodeBlockHeader(r io.Reader) error {
 	}
 	hdr.Version = int32(nVersion)
 
-	if err = readInternalByteOrder(r, hdr.PrevBlock[:]); err != nil {
+	if _, err = io.ReadFull(r, hdr.PrevBlock[:]); err != nil {
 		return err
 	}
 
-	if err := readInternalByteOrder(r, hdr.MerkleRoot[:]); err != nil {
+	if _, err := io.ReadFull(r, hdr.MerkleRoot[:]); err != nil {
 		return err
 	}
 

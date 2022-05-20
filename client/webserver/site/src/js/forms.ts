@@ -166,7 +166,8 @@ export class NewWalletForm {
       page.newWalletPass.value = ''
       page.submitAdd.textContent = intl.prep(intl.ID_CREATE)
     } else {
-      Doc.show(page.auth, page.newWalletPassBox)
+      Doc.show(page.auth)
+      if (!walletDef.noauth) Doc.show(page.newWalletPassBox)
       page.submitAdd.textContent = intl.prep(intl.ID_ADD)
     }
 

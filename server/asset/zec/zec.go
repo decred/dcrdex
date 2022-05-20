@@ -11,9 +11,9 @@ import (
 	dexzec "decred.org/dcrdex/dex/networks/zec"
 	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/asset/btc"
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcutil"
 )
 
 // Driver implements asset.Driver.

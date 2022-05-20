@@ -228,7 +228,7 @@ if [ $ZEC_ON -eq 0 ]; then
             "network": "simnet",
             "maxFeeRate": 200,
             "swapConf": 1,
-            "configPath": "${TEST_ROOT}/zec/alpha/zcash.conf"
+            "configPath": "${TEST_ROOT}/zec/alpha/alpha.conf"
 EOF
 fi
 

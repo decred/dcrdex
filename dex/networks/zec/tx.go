@@ -10,7 +10,9 @@ import (
 	"io"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/dchest/blake2b"
 )
 
 const (
@@ -20,8 +22,9 @@ const (
 	VersionNU5           = 5
 	MaxExpiryHeight      = 499999999 // https://zips.z.cash/zip-0203
 
-	versionSaplingGroupID = 0x892f2085
-	versionNU5GroupID     = 0x26A7270A
+	versionOverwinterGroupID = 0x03C48270
+	versionSaplingGroupID    = 0x892f2085
+	versionNU5GroupID        = 0x26A7270A
 
 	overwinterMask = ^uint32(1 << 31)
 	pver           = 0
@@ -30,19 +33,29 @@ const (
 var (
 	// Little-endian encoded CONSENSUS_BRANCH_IDs.
 	// https://zcash.readthedocs.io/en/latest/rtd_pages/nu_dev_guide.html#canopy
-	ConsensusBranchNoUpgrade  = [4]byte{0x00, 0x00, 0x00, 0x00} // 0
-	ConsensusBranchOverwinter = [4]byte{0x19, 0x1B, 0xA8, 0x5B} // 207500
-	ConsensusBranchSapling    = [4]byte{0xBB, 0x09, 0xB8, 0x76} // 280000
-	ConsensusBranchBlossom    = [4]byte{0x60, 0x0E, 0xB4, 0x2B} // 653600
-	ConsensusBranchHeartwood  = [4]byte{0x0B, 0x23, 0xB9, 0xF5} // 903000
-	ConsensusBranchCanopy     = [4]byte{0xA6, 0x75, 0xFF, 0xE9} // 1046400, tesnet: 1028500
-	ConsensusBranchNU5        = [4]byte{0xB4, 0xD0, 0xD6, 0xC2} // 1687104, testnet: 1842420
+	ConsensusBranchNU5 = [4]byte{0xB4, 0xD0, 0xD6, 0xC2} // 1687104, testnet: 1842420
+
+	emptySaplingDigest = [32]byte{0x6f, 0x2f, 0xc8, 0xf9, 0x8f, 0xea, 0xfd, 0x94,
+		0xe7, 0x4a, 0x0d, 0xf4, 0xbe, 0xd7, 0x43, 0x91, 0xee, 0x0b, 0x5a, 0x69,
+		0x94, 0x5e, 0x4c, 0xed, 0x8c, 0xa8, 0xa0, 0x95, 0x20, 0x6f, 0x00, 0xae}
+
+	emptyOrchardDigest = [32]byte{0x9f, 0xbe, 0x4e, 0xd1, 0x3b, 0x0c, 0x08, 0xe6,
+		0x71, 0xc1, 0x1a, 0x34, 0x07, 0xd8, 0x4e, 0x11, 0x17, 0xcd, 0x45, 0x02,
+		0x8a, 0x2e, 0xee, 0x1b, 0x9f, 0xea, 0xe7, 0x8b, 0x48, 0xa6, 0xe2, 0xc1}
 )
 
-// Tx is a ZCash-adapted MsgTx.
+// Tx is a ZCash-adapted MsgTx. Tx will decode any version transaction, but will
+// not save most data for shielded transactions.
+// Tx can only produce tx hashes for unshielded transactions. Tx can only create
+// signature hashes for unshielded version 5 transactions.
 type Tx struct {
 	*wire.MsgTx
-	ExpiryHeight uint32
+	ExpiryHeight        uint32
+	NSpendsSapling      uint64
+	NOutputsSapling     uint64
+	ValueBalanceSapling uint64
+	NActionsOrchard     uint64
+	NJoinSplit          uint64
 }
 
 // NewTxFromMsgTx creates a Tx embedding the MsgTx, and adding ZCash-specific
@@ -57,8 +70,227 @@ func NewTxFromMsgTx(tx *wire.MsgTx, expiryHeight uint32) *Tx {
 
 // TxHash generates the Hash for the transaction.
 func (tx *Tx) TxHash() chainhash.Hash {
+	if tx.Version == 5 {
+		txHash, _ := tx.txHashV5()
+		return txHash
+	}
 	b, _ := tx.Bytes()
 	return chainhash.DoubleHashH(b)
+}
+
+func (tx *Tx) txHashV5() (_ chainhash.Hash, err error) {
+	td, err := tx.transparentDigest()
+	if err != nil {
+		return
+	}
+	return tx.txDigestV5(td)
+}
+
+// SignatureDigest produces a hash of tx data suitable for signing.
+// SignatureDigest only works correctly for unshielded version 5 transactions.
+func (tx *Tx) SignatureDigest(vin int, hashType txscript.SigHashType, vals []int64, prevScripts [][]byte) (_ [32]byte, err error) {
+	td, err := tx.transparentSigDigest(vin, hashType, vals, prevScripts)
+	if err != nil {
+		return
+	}
+	return tx.txDigestV5(td)
+}
+
+// txDigestV5 produces hashes of transaction data in accordance with ZIP-244.
+func (tx *Tx) txDigestV5(transparentPart [32]byte) (_ chainhash.Hash, err error) {
+	hd, err := tx.headerDigest()
+	if err != nil {
+		return
+	}
+	b := make([]byte, 128)
+	copy(b[:32], hd[:])
+	copy(b[32:64], transparentPart[:])
+	copy(b[64:96], emptySaplingDigest[:])
+	copy(b[96:], emptyOrchardDigest[:])
+	h, err := blake2bHash(b, append([]byte("ZcashTxHash_"), ConsensusBranchNU5[:]...))
+	if err != nil {
+		return
+	}
+	var txHash chainhash.Hash
+	copy(txHash[:], h[:])
+	return txHash, nil
+}
+
+func (tx *Tx) headerDigest() ([32]byte, error) {
+	b := make([]byte, 20)
+	copy(b[:4], uint32Bytes(uint32(tx.Version)|(1<<31)))
+	copy(b[4:8], uint32Bytes(versionNU5GroupID))
+	copy(b[8:12], ConsensusBranchNU5[:])
+	copy(b[12:16], uint32Bytes(tx.LockTime))
+	copy(b[16:], uint32Bytes(tx.ExpiryHeight))
+	return blake2bHash(b, []byte("ZTxIdHeadersHash"))
+}
+
+func (tx *Tx) transparentDigest() (h [32]byte, err error) {
+	prevoutsDigest, err := tx.calcHashPrevOuts()
+	if err != nil {
+		return
+	}
+
+	seqDigest, err := tx.hashSequence()
+	if err != nil {
+		return
+	}
+
+	outputsDigest, err := tx.hashOutputs()
+	if err != nil {
+		return
+	}
+
+	b := make([]byte, 96)
+	copy(b[:32], prevoutsDigest[:])
+	copy(b[32:64], seqDigest[:])
+	copy(b[64:], outputsDigest[:])
+	return blake2bHash(b, []byte("ZTxIdTranspaHash"))
+}
+
+func (tx *Tx) transparentSigDigest(vin int, hashType txscript.SigHashType, vals []int64, prevScripts [][]byte) (h [32]byte, err error) {
+	buf := bytes.NewBuffer(make([]byte, 0, 193))
+
+	buf.Write([]byte{byte(hashType)})
+
+	anyoneCanPay := hashType&txscript.SigHashAnyOneCanPay > 0
+
+	prevoutsDigest, err := tx.hashPrevOutsSig(anyoneCanPay)
+	if err != nil {
+		return
+	}
+	buf.Write(prevoutsDigest[:])
+
+	amtsDigest, err := tx.hashAmountsSig(anyoneCanPay, vals)
+	if err != nil {
+		return
+	}
+	buf.Write(amtsDigest[:])
+
+	prevScriptsDigest, err := tx.hashPrevScriptsSig(anyoneCanPay, prevScripts)
+	if err != nil {
+		return
+	}
+	buf.Write(prevScriptsDigest[:])
+
+	seqsDigest, err := tx.hashSequenceSig(anyoneCanPay)
+	if err != nil {
+		return
+	}
+	buf.Write(seqsDigest[:])
+
+	outputsDigest, err := tx.hashOutputsSig(anyoneCanPay)
+	if err != nil {
+		return
+	}
+	buf.Write(outputsDigest[:])
+
+	txInsDigest, err := tx.hashTxInSig(vin, vals[vin], prevScripts[vin])
+	if err != nil {
+		return
+	}
+	buf.Write(txInsDigest[:])
+
+	return blake2bHash(buf.Bytes(), []byte("ZTxIdTranspaHash"))
+}
+
+func (tx *Tx) calcHashPrevOuts() ([32]byte, error) {
+	var buf bytes.Buffer
+	for _, in := range tx.TxIn {
+		buf.Write(in.PreviousOutPoint.Hash[:])
+		var b [4]byte
+		binary.LittleEndian.PutUint32(b[:], in.PreviousOutPoint.Index)
+		buf.Write(b[:])
+	}
+	return blake2bHash(buf.Bytes(), []byte("ZTxIdPrevoutHash"))
+}
+
+func (tx *Tx) hashPrevOutsSig(anyoneCanPay bool) ([32]byte, error) {
+	if anyoneCanPay {
+		return blake2bHash([]byte{}, []byte("ZTxIdPrevoutHash"))
+	}
+	return tx.calcHashPrevOuts()
+}
+
+func (tx *Tx) hashAmountsSig(anyoneCanPay bool, vals []int64) ([32]byte, error) {
+	if anyoneCanPay {
+		return blake2bHash([]byte{}, []byte("ZTxTrAmountsHash"))
+	}
+	b := make([]byte, 0, 8*len(vals))
+	for _, v := range vals {
+		b = append(b, int64Bytes(v)...)
+	}
+	return blake2bHash(b, []byte("ZTxTrAmountsHash"))
+}
+
+func (tx *Tx) hashPrevScriptsSig(anyoneCanPay bool, prevScripts [][]byte) (_ [32]byte, err error) {
+	if anyoneCanPay {
+		return blake2bHash([]byte{}, []byte("ZTxTrScriptsHash"))
+	}
+	buf := new(bytes.Buffer)
+	for _, s := range prevScripts {
+		if err = wire.WriteVarBytes(buf, pver, s); err != nil {
+			return
+		}
+	}
+
+	return blake2bHash(buf.Bytes(), []byte("ZTxTrScriptsHash"))
+}
+
+func (tx *Tx) hashSequence() ([32]byte, error) {
+	var b bytes.Buffer
+	for _, in := range tx.TxIn {
+		var buf [4]byte
+		binary.LittleEndian.PutUint32(buf[:], in.Sequence)
+		b.Write(buf[:])
+	}
+	return blake2bHash(b.Bytes(), []byte("ZTxIdSequencHash"))
+}
+
+func (tx *Tx) hashSequenceSig(anyoneCanPay bool) (h [32]byte, err error) {
+	if anyoneCanPay {
+		return blake2bHash([]byte{}, []byte("ZTxIdSequencHash"))
+	}
+	return tx.hashSequence()
+}
+
+func (tx *Tx) hashOutputs() (_ [32]byte, err error) {
+	var b bytes.Buffer
+	for _, out := range tx.TxOut {
+		if err = wire.WriteTxOut(&b, 0, 0, out); err != nil {
+			return chainhash.Hash{}, err
+		}
+	}
+	return blake2bHash(b.Bytes(), []byte("ZTxIdOutputsHash"))
+}
+
+func (tx *Tx) hashOutputsSig(anyoneCanPay bool) (_ [32]byte, err error) {
+	if anyoneCanPay {
+		return blake2bHash([]byte{}, []byte("ZTxIdOutputsHash"))
+	}
+	return tx.hashOutputs()
+}
+
+func (tx *Tx) hashTxInSig(idx int, prevVal int64, prevScript []byte) (h [32]byte, err error) {
+	if len(tx.TxIn) <= idx {
+		return h, fmt.Errorf("no input at index %d", idx)
+	}
+	txIn := tx.TxIn[idx]
+
+	// prev_hash 32 + prev_index 4 + prev_value 8 + script_pub_key var_int+L (size) + nSequence 4
+	b := bytes.NewBuffer(make([]byte, 0, 50+len(prevScript)))
+
+	b.Write(txIn.PreviousOutPoint.Hash[:])
+	b.Write(uint32Bytes(txIn.PreviousOutPoint.Index))
+	b.Write(int64Bytes(prevVal))
+	if err = wire.WriteVarBytes(b, pver, prevScript); err != nil {
+		return
+	}
+	b.Write(uint32Bytes(txIn.Sequence))
+
+	return blake2bHash(b.Bytes(), []byte("Zcash___TxInHash"))
+
 }
 
 // Bytes encodes the receiver to w using the bitcoin protocol encoding.
@@ -66,24 +298,30 @@ func (tx *Tx) TxHash() chainhash.Hash {
 // See Serialize for encoding transactions to be stored to disk, such as in a
 // database, as opposed to encoding transactions for the wire.
 // msg.Version must be 4 or 5.
-func (tx *Tx) Bytes() (txB []byte, err error) {
+func (tx *Tx) Bytes() (_ []byte, err error) {
 	w := new(bytes.Buffer)
-	if tx.Version != VersionSapling && tx.Version != VersionNU5 {
-		return nil, fmt.Errorf("only version 4 (sapling) & 5 (NU5) supported")
+	header := uint32(tx.Version)
+	if tx.Version >= VersionOverwinter {
+		header |= 1 << 31
 	}
 
-	if err = putUint32(w, uint32(tx.Version)|(1<<31)); err != nil {
+	if err = putUint32(w, header); err != nil {
 		return nil, fmt.Errorf("error writing version: %w", err)
 	}
 
-	var groupID uint32 = versionSaplingGroupID
-	if tx.Version == VersionNU5 {
-		groupID = versionNU5GroupID
-	}
+	if tx.Version >= VersionOverwinter {
+		var groupID uint32 = versionOverwinterGroupID
+		switch tx.Version {
+		case VersionSapling:
+			groupID = versionSaplingGroupID
+		case VersionNU5:
+			groupID = versionNU5GroupID
+		}
 
-	// nVersionGroupId
-	if err = putUint32(w, groupID); err != nil {
-		return nil, fmt.Errorf("error writing nVersionGroupId: %w", err)
+		// nVersionGroupId
+		if err = putUint32(w, groupID); err != nil {
+			return nil, fmt.Errorf("error writing nVersionGroupId: %w", err)
+		}
 	}
 
 	if tx.Version == VersionNU5 {
@@ -127,34 +365,40 @@ func (tx *Tx) Bytes() (txB []byte, err error) {
 		}
 	}
 
-	if tx.Version == VersionSapling {
+	if tx.Version <= VersionSapling {
 		// lock_time
 		if err = putUint32(w, tx.LockTime); err != nil {
 			return nil, fmt.Errorf("error writing lock_time: %w", err)
 		}
 
-		// nExpiryHeight
-		if err = putUint32(w, tx.ExpiryHeight); err != nil {
-			return nil, fmt.Errorf("error writing nExpiryHeight: %w", err)
+		if tx.Version >= VersionOverwinter {
+			// nExpiryHeight
+			if err = putUint32(w, tx.ExpiryHeight); err != nil {
+				return nil, fmt.Errorf("error writing nExpiryHeight: %w", err)
+			}
 		}
+	}
 
+	if tx.Version == VersionSapling {
 		// valueBalanceSapling
 		if err = putUint64(w, 0); err != nil {
 			return nil, fmt.Errorf("error writing valueBalanceSapling: %w", err)
 		}
 	}
 
-	// nSpendsSapling
-	if err = wire.WriteVarInt(w, pver, 0); err != nil {
-		return nil, fmt.Errorf("error writing nSpendsSapling: %w", err)
+	if tx.Version >= VersionSapling {
+		// nSpendsSapling
+		if err = wire.WriteVarInt(w, pver, 0); err != nil {
+			return nil, fmt.Errorf("error writing nSpendsSapling: %w", err)
+		}
+
+		// nOutputsSapling
+		if err = wire.WriteVarInt(w, pver, 0); err != nil {
+			return nil, fmt.Errorf("error writing nOutputsSapling: %w", err)
+		}
 	}
 
-	// nOutputsSapling
-	if err = wire.WriteVarInt(w, pver, 0); err != nil {
-		return nil, fmt.Errorf("error writing nOutputsSapling: %w", err)
-	}
-
-	if tx.Version == VersionSapling {
+	if tx.Version >= VersionPreOverwinter && tx.Version <= VersionSapling {
 		// nJoinSplit
 		if err = wire.WriteVarInt(w, pver, 0); err != nil {
 			return nil, fmt.Errorf("error writing nJoinSplit: %w", err)
@@ -164,17 +408,14 @@ func (tx *Tx) Bytes() (txB []byte, err error) {
 
 	// NU 5
 
-	// valueBalanceSapling for NU5. Sapling was above.
-	if err = putUint64(w, 0); err != nil {
-		return nil, fmt.Errorf("error writing NU5 valueBalanceSapling: %w", err)
-	}
-
 	// no anchorSapling, because nSpendsSapling = 0
-	// no bindingSigSapling, because nSpendsSapling + nOutputsSapling = 0
+	// no bindingSigSapling or valueBalanceSapling, because nSpendsSapling + nOutputsSapling = 0
 
-	// nActionsOrchard
-	if err = wire.WriteVarInt(w, pver, 0); err != nil {
-		return nil, fmt.Errorf("error writing nActionsOrchard: %w", err)
+	if tx.Version == VersionNU5 {
+		// nActionsOrchard
+		if err = wire.WriteVarInt(w, pver, 0); err != nil {
+			return nil, fmt.Errorf("error writing nActionsOrchard: %w", err)
+		}
 	}
 
 	// vActionsOrchard, flagsOrchard, valueBalanceOrchard, anchorOrchard,
@@ -191,6 +432,12 @@ func DeserializeTx(b []byte) (*Tx, error) {
 	if err := tx.ZecDecode(r); err != nil {
 		return nil, err
 	}
+
+	remains, _ := io.ReadAll(r)
+	if len(remains) > 0 {
+		return nil, fmt.Errorf("incomplete deserialization. %d bytes remaining", len(remains))
+	}
+
 	return tx, nil
 }
 
@@ -206,11 +453,11 @@ func (tx *Tx) ZecDecode(r io.Reader) (err error) {
 	ver &= overwinterMask // Clear the overwinter bit
 	tx.Version = int32(ver)
 
-	if ver > VersionNU5 {
+	if tx.Version > VersionNU5 {
 		return fmt.Errorf("unsupported tx version %d > 4", ver)
 	}
 
-	if ver >= VersionSapling {
+	if ver >= VersionOverwinter {
 		// nVersionGroupId uint32
 		if err = discardBytes(r, 4); err != nil {
 			return fmt.Errorf("error reading nVersionGroupId: %w", err)
@@ -275,7 +522,7 @@ func (tx *Tx) ZecDecode(r io.Reader) (err error) {
 	}
 
 	// That's it for pre-overwinter.
-	if ver < 2 {
+	if ver < VersionPreOverwinter {
 		return nil
 	}
 
@@ -286,35 +533,35 @@ func (tx *Tx) ZecDecode(r io.Reader) (err error) {
 			return fmt.Errorf("error reading valueBalanceSpending: %w", err)
 		}
 
-		if nSpendsSapling, err := wire.ReadVarInt(r, pver); err != nil {
+		if tx.NSpendsSapling, err = wire.ReadVarInt(r, pver); err != nil {
 			return fmt.Errorf("error reading nSpendsSapling: %w", err)
-		} else if nSpendsSapling > 0 {
+		} else if tx.NSpendsSapling > 0 {
 			// vSpendsSapling - discard
 			bindingSigRequired = true
-			if err = discardBytes(r, int64(nSpendsSapling*384)); err != nil {
+			if err = discardBytes(r, int64(tx.NSpendsSapling*384)); err != nil {
 				return fmt.Errorf("error reading vSpendsSapling: %w", err)
 			}
 		}
 
-		if nOutputsSapling, err := wire.ReadVarInt(r, pver); err != nil {
+		if tx.NOutputsSapling, err = wire.ReadVarInt(r, pver); err != nil {
 			return fmt.Errorf("error reading nOutputsSapling: %w", err)
-		} else if nOutputsSapling > 0 {
+		} else if tx.NOutputsSapling > 0 {
 			// vOutputsSapling - discard
 			bindingSigRequired = true
-			if err = discardBytes(r, int64(nOutputsSapling*948)); err != nil {
+			if err = discardBytes(r, int64(tx.NOutputsSapling*948)); err != nil {
 				return fmt.Errorf("error reading vOutputsSapling: %w", err)
 			}
 		}
 	}
 
-	if ver < VersionNU5 {
-		if nJoinSplit, err := wire.ReadVarInt(r, pver); err != nil {
+	if ver <= VersionSapling && ver >= VersionPreOverwinter {
+		if tx.NJoinSplit, err = wire.ReadVarInt(r, pver); err != nil {
 			return fmt.Errorf("error reading nJoinSplit: %w", err)
-		} else if nJoinSplit > 0 {
+		} else if tx.NJoinSplit > 0 {
 			// vJoinSplit - discard
-			sz := 1802 * nJoinSplit
+			sz := 1802 * tx.NJoinSplit
 			if ver == 4 {
-				sz = 1698 * nJoinSplit
+				sz = 1698 * tx.NJoinSplit
 			}
 			if err = discardBytes(r, int64(sz)); err != nil {
 				return fmt.Errorf("error reading vJoinSplit: %w", err)
@@ -331,47 +578,54 @@ func (tx *Tx) ZecDecode(r io.Reader) (err error) {
 		}
 	} else { // NU5
 		// nSpendsSapling
-		nSpendsSapling, err := wire.ReadVarInt(r, pver)
+		tx.NSpendsSapling, err = wire.ReadVarInt(r, pver)
 		if err != nil {
 			return fmt.Errorf("error reading nSpendsSapling: %w", err)
-		} else if nSpendsSapling > 0 {
+		} else if tx.NSpendsSapling > 0 {
 			// vSpendsSapling - discard
 			bindingSigRequired = true
-			if err = discardBytes(r, int64(nSpendsSapling*96)); err != nil {
+			if err = discardBytes(r, int64(tx.NSpendsSapling*96)); err != nil {
 				return fmt.Errorf("error reading vSpendsSapling: %w", err)
 			}
 		}
 
 		// nOutputsSapling
-		if nOutputsSapling, err := wire.ReadVarInt(r, pver); err != nil {
+		tx.NOutputsSapling, err = wire.ReadVarInt(r, pver)
+		if err != nil {
 			return fmt.Errorf("error reading nSpendsSapling: %w", err)
-		} else if nOutputsSapling > 0 {
+		} else if tx.NOutputsSapling > 0 {
 			// vOutputsSapling - discard
 			bindingSigRequired = true
-			if err = discardBytes(r, int64(nOutputsSapling*756)); err != nil {
+			if err = discardBytes(r, int64(tx.NOutputsSapling*756)); err != nil {
 				return fmt.Errorf("error reading vOutputsSapling: %w", err)
 			}
 		}
-		// valueBalanceSpending uint64
-		if err = discardBytes(r, 8); err != nil {
-			return fmt.Errorf("error reading valueBalanceSpending: %w", err)
+
+		if tx.NOutputsSapling+tx.NSpendsSapling > 0 {
+			// valueBalanceSpending uint64
+			if err = discardBytes(r, 8); err != nil {
+				return fmt.Errorf("error reading valueBalanceSpending: %w", err)
+			}
 		}
 
-		if nSpendsSapling > 0 {
+		if tx.NSpendsSapling > 0 {
 			// anchorSapling
 			if err = discardBytes(r, 32); err != nil {
 				return fmt.Errorf("error reading anchorSapling: %w", err)
 			}
 			// vSpendProofsSapling
-			if err = discardBytes(r, int64(nSpendsSapling*192)); err != nil {
+			if err = discardBytes(r, int64(tx.NSpendsSapling*192)); err != nil {
 				return fmt.Errorf("error reading vSpendProofsSapling: %w", err)
 			}
 			// vSpendAuthSigsSapling
-			if err = discardBytes(r, int64(nSpendsSapling*64)); err != nil {
+			if err = discardBytes(r, int64(tx.NSpendsSapling*64)); err != nil {
 				return fmt.Errorf("error reading vSpendAuthSigsSapling: %w", err)
 			}
+		}
+
+		if tx.NOutputsSapling > 0 {
 			// vOutputProofsSapling
-			if err = discardBytes(r, int64(nSpendsSapling*192)); err != nil {
+			if err = discardBytes(r, int64(tx.NOutputsSapling*192)); err != nil {
 				return fmt.Errorf("error reading vOutputProofsSapling: %w", err)
 			}
 		}
@@ -392,17 +646,17 @@ func (tx *Tx) ZecDecode(r io.Reader) (err error) {
 	// NU5-only fields below.
 
 	// nActionsOrchard
-	nActionsOrchard, err := wire.ReadVarInt(r, pver)
+	tx.NActionsOrchard, err = wire.ReadVarInt(r, pver)
 	if err != nil {
 		return fmt.Errorf("error reading bindingSigSapling: %w", err)
 	}
 
-	if nActionsOrchard == 0 {
+	if tx.NActionsOrchard == 0 {
 		return nil
 	}
 
 	// vActionsOrchard
-	if err = discardBytes(r, int64(nActionsOrchard*820)); err != nil {
+	if err = discardBytes(r, int64(tx.NActionsOrchard*820)); err != nil {
 		return fmt.Errorf("error reading vActionsOrchard: %w", err)
 	}
 
@@ -433,7 +687,7 @@ func (tx *Tx) ZecDecode(r io.Reader) (err error) {
 	}
 
 	// vSpendAuthSigsOrchard
-	if err = discardBytes(r, int64(nActionsOrchard*64)); err != nil {
+	if err = discardBytes(r, int64(tx.NActionsOrchard*64)); err != nil {
 		return fmt.Errorf("error reading vSpendAuthSigsOrchard: %w", err)
 	}
 
@@ -471,19 +725,33 @@ func writeOutPoint(w io.Writer, version int32, op *wire.OutPoint) error {
 	return putUint32(w, op.Index)
 }
 
-// putUint32 writes a little-endian encoded uint32 to the Writer.
-func putUint32(w io.Writer, v uint32) error {
+func uint32Bytes(v uint32) []byte {
 	b := make([]byte, 4)
 	binary.LittleEndian.PutUint32(b, v)
-	_, err := w.Write(b)
+	return b
+}
+
+// putUint32 writes a little-endian encoded uint32 to the Writer.
+func putUint32(w io.Writer, v uint32) error {
+	_, err := w.Write(uint32Bytes(v))
 	return err
+}
+
+func uint64Bytes(v uint64) []byte {
+	b := make([]byte, 8)
+	binary.LittleEndian.PutUint64(b, v)
+	return b
+}
+
+func int64Bytes(v int64) []byte {
+	buf := new(bytes.Buffer)
+	binary.Write(buf, binary.LittleEndian, v)
+	return buf.Bytes()
 }
 
 // putUint32 writes a little-endian encoded uint64 to the Writer.
 func putUint64(w io.Writer, v uint64) error {
-	b := make([]byte, 8)
-	binary.LittleEndian.PutUint64(b, v)
-	_, err := w.Write(b)
+	_, err := w.Write(uint64Bytes(v))
 	return err
 }
 
@@ -572,6 +840,23 @@ func discardBytes(r io.Reader, n int64) error {
 		return fmt.Errorf("only discarded %d of %d bytes", m, n)
 	}
 	return nil
+}
+
+// blake2bHash is a BLAKE-2B hash of the data with the specified personalization
+// key.
+func blake2bHash(data, personalizationKey []byte) (_ [32]byte, err error) {
+	bHash, err := blake2b.New(&blake2b.Config{Size: 32, Person: personalizationKey})
+	if err != nil {
+		return
+	}
+
+	if _, err = bHash.Write(data); err != nil {
+		return
+	}
+
+	var h [32]byte
+	copy(h[:], bHash.Sum(nil))
+	return h, err
 }
 
 // CalcTxSize calculates the size of a ZCash transparent transaction. CalcTxSize
