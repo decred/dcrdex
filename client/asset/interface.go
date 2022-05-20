@@ -393,7 +393,7 @@ type Accelerator interface {
 	// transaction with a fee high enough so that the average fee of all the
 	// unconfirmed transactions in the chain and the new transaction will have
 	// an average fee rate of newFeeRate. The changeCoin argument is the latest
-	// chhange in the order. It must be the input in the acceleration transaction
+	// change in the order. It must be the input in the acceleration transaction
 	// in order for the order to be accelerated. requiredForRemainingSwaps is the
 	// amount of funds required to complete the rest of the swaps in the order.
 	// The change output of the acceleration transaction will have at least

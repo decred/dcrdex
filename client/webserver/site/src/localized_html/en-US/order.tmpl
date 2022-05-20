@@ -204,7 +204,7 @@
       <div class="text-start">Funding Coins</div>
       <div class="fs14 text-start">
         {{range $ord.FundingCoins}}
-          <a class="plainlink mono" data-explorer-id="{{$ord.FromID}}" data-explorer-coin="{{.StringID}}">{{.StringID}}</a><br>
+          <a target="_blank" class="plainlink mono" data-explorer-id="{{$ord.FromID}}" data-explorer-coin="{{.StringID}}">{{.StringID}}</a><br>
         {{end}}
       </div>
     </div>
@@ -213,7 +213,7 @@
       <div class="text-start">Acceleration Transactions</div>
       <div class="fs14 text-start">
         {{range $ord.AccelerationCoins}}
-          <a class="plainlink mono" data-explorer-id="{{$ord.FromID}}" data-explorer-coin="{{.StringID}}">{{.StringID}}</a><br>
+          <a target="_blank" class="plainlink mono" data-explorer-id="{{$ord.FromID}}" data-explorer-coin="{{.StringID}}">{{.StringID}}</a><br>
         {{end}}
       </div>
     </div>
