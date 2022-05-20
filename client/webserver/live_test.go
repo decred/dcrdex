@@ -1594,6 +1594,9 @@ func (c *TCore) ExportSeed(pw []byte) ([]byte, error) {
 func (c *TCore) WalletLogFilePath(uint32) (string, error) {
 	return "", nil
 }
+func (c *TCore) RecoverWallet(uint32, []byte, bool) error {
+	return nil
+}
 
 func TestServer(t *testing.T) {
 	// Register dummy drivers for unimplemented assets.

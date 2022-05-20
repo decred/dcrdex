@@ -19,6 +19,8 @@ const bind = Doc.bind
 const animationLength = 300
 const traitNewAddresser = 1 << 1
 const traitLogFiler = 1 << 2
+const traitRecoverer = 1 << 4
+const activeOrdersErrCode = 35
 
 interface Actions {
   connect: HTMLElement
@@ -48,6 +50,12 @@ interface ReconfigRequest {
   appPW: string
 }
 
+interface RescanRecoveryRequest {
+  assetID: number
+  appPW?: string
+  force?: boolean
+}
+
 export default class WalletsPage extends BasePage {
   body: HTMLElement
   page: Record<string, PageElement>
@@ -67,11 +75,21 @@ export default class WalletsPage extends BasePage {
   openAsset: number
   walletAsset: number
   reconfigAsset: number
+  forms: PageElement[]
+  forceReq: RescanRecoveryRequest
+  forceUrl: string
+  currentForm: PageElement
 
   constructor (body: HTMLElement) {
     super()
     this.body = body
     const page = this.page = Doc.idDescendants(body)
+
+    this.forms = Doc.applySelector(page.forms, ':scope > form')
+    page.forms.querySelectorAll('.form-closer').forEach(el => {
+      Doc.bind(el, 'click', () => { this.closePopups() })
+    })
+    Doc.bind(page.cancelForce, 'click', () => { this.closePopups() })
 
     // Read the document, storing some info about each asset's row.
     const getAction = (row: HTMLElement, name: string) => row.querySelector(`[data-action=${name}]`) as HTMLElement
@@ -134,14 +152,25 @@ export default class WalletsPage extends BasePage {
       })
     })
 
+    Doc.bind(page.forms, 'mousedown', (e: MouseEvent) => {
+      if (!Doc.mouseInElement(e, this.currentForm)) { this.closePopups() }
+    })
+
     this.keyup = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        this.showMarkets(this.lastFormAsset)
+        if (Doc.isDisplayed(this.page.forms)) {
+          this.closePopups()
+        } else {
+          this.showMarkets(this.lastFormAsset)
+        }
       }
     }
     bind(document, 'keyup', this.keyup)
 
     bind(page.downloadLogs, 'click', async () => { this.downloadLogs() })
+    bind(page.recoverWallet, 'click', async () => { this.showRecoverWallet() })
+    bindForm(page.recoverWalletConfirm, page.recoverWalletSubmit, () => { this.recoverWallet() })
+    bindForm(page.confirmForce, page.confirmForceSubmit, async () => { this.confirmForceSubmit() })
 
     // Bind buttons
     for (const [k, asset] of Object.entries(rowInfos)) {
@@ -199,6 +228,10 @@ export default class WalletsPage extends BasePage {
     }
   }
 
+  closePopups () {
+    Doc.hide(this.page.forms)
+  }
+
   /*
    * setPWSettingViz sets the visibility of the password field section.
    */
@@ -236,6 +269,20 @@ export default class WalletsPage extends BasePage {
     }, 'easeOut')
     box.style.opacity = '1'
     this.displayed = box
+  }
+
+  /* showForm shows a modal form with a little animation. */
+  async showForm (form: PageElement) {
+    const page = this.page
+    this.currentForm = form
+    this.forms.forEach(form => Doc.hide(form))
+    form.style.right = '10000px'
+    Doc.show(page.forms, form)
+    const shift = (page.forms.offsetWidth + form.offsetWidth) / 2
+    await Doc.animate(animationLength, progress => {
+      form.style.right = `${(1 - progress) * shift}px`
+    }, 'easeOutHard')
+    form.style.right = '0'
   }
 
   /*
@@ -291,12 +338,27 @@ export default class WalletsPage extends BasePage {
 
   async rescanWallet (assetID: number) {
     const loaded = app().loading(this.body)
-    const res = await postJSON('/api/rescanwallet', {
-      assetID: assetID,
-      force: false // TODO input arg
-    })
+    const url = '/api/rescanwallet'
+    const req = { assetID: assetID }
+    const res = await postJSON(url, req)
     loaded()
+    if (res.code === activeOrdersErrCode) {
+      this.forceUrl = url
+      this.forceReq = req
+      this.showConfirmForce()
+      return
+    }
     app().checkResponse(res)
+  }
+
+  showConfirmForce () {
+    Doc.hide(this.page.confirmForceErr)
+    this.showForm(this.page.confirmForce)
+  }
+
+  showRecoverWallet () {
+    Doc.hide(this.page.recoverWalletErr)
+    this.showForm(this.page.recoverWalletConfirm)
   }
 
   /* Show the open wallet form if the password is not cached, and otherwise
@@ -359,6 +421,8 @@ export default class WalletsPage extends BasePage {
     const wallet = app().walletMap[assetID]
     if ((wallet.traits & traitLogFiler) !== 0) Doc.show(page.downloadLogs)
     else Doc.hide(page.downloadLogs)
+    if ((wallet.traits & traitRecoverer)) Doc.show(page.recoverWallet)
+    else Doc.hide(page.recoverWallet)
 
     page.recfgAssetLogo.src = Doc.logoPath(asset.symbol)
     page.recfgAssetName.textContent = asset.info.name
@@ -574,6 +638,48 @@ export default class WalletsPage extends BasePage {
     url.search = search.toString()
     url.pathname = '/wallets/logfile'
     window.open(url.toString())
+  }
+
+  async recoverWallet () {
+    const page = this.page
+    Doc.hide(page.recoverWalletErr)
+    const req = {
+      assetID: this.reconfigAsset,
+      appPW: page.recoverWalletPW.value
+    }
+    page.recoverWalletPW.value = ''
+    const url = '/api/recoverwallet'
+    const loaded = app().loading(page.forms)
+    const res = await postJSON(url, req)
+    loaded()
+    if (res.code === activeOrdersErrCode) {
+      this.forceUrl = url
+      this.forceReq = req
+      this.showConfirmForce()
+    } else if (app().checkResponse(res)) {
+      this.closePopups()
+    } else {
+      page.recoverWalletErr.textContent = res.msg
+      Doc.show(page.recoverWalletErr)
+    }
+  }
+
+  /*
+   * confirmForceSubmit resubmits either the recover or rescan requests with
+   * force set to true. These two requests require force to be set to true if
+   * they are called while the wallet is managing active orders.
+   */
+  async confirmForceSubmit () {
+    const page = this.page
+    this.forceReq.force = true
+    const loaded = app().loading(page.forms)
+    const res = await postJSON(this.forceUrl, this.forceReq)
+    loaded()
+    if (app().checkResponse(res)) this.closePopups()
+    else {
+      page.confirmForceErr.textContent = res.msg
+      Doc.show(page.confirmForceErr)
+    }
   }
 
   /* handleBalance handles notifications updating a wallet's balance. */

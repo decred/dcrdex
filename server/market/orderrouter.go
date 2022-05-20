@@ -515,7 +515,7 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 						coin.ID, fundingAsset.Symbol)
 					return true, nil
 				}
-				log.Errorf("Error retreiving limit order funding coin ID %s. user = %s: %v", coin.ID, user, err)
+				log.Errorf("Error retrieving limit order funding coin ID %s. user = %s: %v", coin.ID, user, err)
 				return false, msgjson.NewError(msgjson.FundingError, fmt.Sprintf("error retrieving coin ID %v", coin.ID))
 			}
 

@@ -82,3 +82,8 @@ table.wallets {
 #depositAddress {
   user-select: all;
 }
+
+#recoverWalletConfirm,
+#confirmForce {
+  width: 400px;
+}

@@ -185,6 +185,9 @@ func (c *TCore) AccelerationEstimate(oidB dex.Bytes, newFeeRate uint64) (uint64,
 func (c *TCore) PreAccelerateOrder(oidB dex.Bytes) (*core.PreAccelerate, error) {
 	return nil, nil
 }
+func (c *TCore) RecoverWallet(uint32, []byte, bool) error {
+	return nil
+}
 
 type TWriter struct {
 	b []byte

@@ -419,7 +419,6 @@ type WalletConfig struct {
 	RedeemConfTarget uint64  `ini:"redeemconftarget"`
 	ActivelyUsed     bool    `ini:"special:activelyUsed"` //injected by core
 	WalletName       string  `ini:"walletname"`           // RPC
-	Peer             string  `ini:"peer"`                 // SPV
 	Birthday         uint64  `ini:"walletbirthday"`       // SPV
 }
 
@@ -523,7 +522,14 @@ func (d *Driver) Create(params *asset.CreateWalletParams) error {
 		return err
 	}
 
-	return createSPVWallet(params.Pass, params.Seed, walletCfg.adjustedBirthday(), params.DataDir, params.Logger, chainParams)
+	recoveryCfg := new(RecoveryCfg)
+	err = config.Unmapify(params.Settings, recoveryCfg)
+	if err != nil {
+		return err
+	}
+
+	return createSPVWallet(params.Pass, params.Seed, walletCfg.adjustedBirthday(), params.DataDir,
+		params.Logger, recoveryCfg.NumExternalAddresses, recoveryCfg.NumInternalAddresses, chainParams)
 }
 
 // Open opens or connects to the BTC exchange wallet. Start the wallet with its
@@ -626,6 +632,49 @@ var _ asset.Accelerator = (*ExchangeWalletSPV)(nil)
 var _ asset.Rescanner = (*ExchangeWalletSPV)(nil)
 var _ asset.FeeRater = (*ExchangeWalletFullNode)(nil)
 var _ asset.LogFiler = (*ExchangeWalletSPV)(nil)
+var _ asset.Recoverer = (*ExchangeWalletSPV)(nil)
+
+// RecoveryCfg is the information that is transferred from the old wallet
+// to the new one when the wallet is recovered.
+type RecoveryCfg struct {
+	NumExternalAddresses uint32 `ini:"numexternaladdr"`
+	NumInternalAddresses uint32 `ini:"numinternaladdr"`
+}
+
+// GetRecoveryCfg returns information that will help the wallet get
+// back to its previous state after it is recreated. Part of the
+// Recoverer interface.
+func (btc *ExchangeWalletSPV) GetRecoveryCfg() (map[string]string, error) {
+	w := btc.node.(*spvWallet)
+
+	internal, external, err := w.numDerivedAddresses()
+	if err != nil {
+		return nil, err
+	}
+
+	reCfg := &RecoveryCfg{
+		NumInternalAddresses: internal,
+		NumExternalAddresses: external,
+	}
+	cfg, err := config.Mapify(reCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
+}
+
+// Destroy will delete all the wallet files so the wallet can be recreated.
+// Part of the Recoverer interface.
+func (btc *ExchangeWalletSPV) Move(backupDir string) error {
+	w := btc.node.(*spvWallet)
+	err := w.moveWalletData(backupDir)
+	if err != nil {
+		return fmt.Errorf("unable to move wallet data: %w", err)
+	}
+
+	return nil
+}
 
 // Rescan satisfies the asset.Rescanner interface, and issues a rescan wallet
 // command if the backend is an SPV wallet.
@@ -892,13 +941,8 @@ func openSPVWallet(cfg *BTCCloneCFG) (*ExchangeWalletSPV, error) {
 		return nil, err
 	}
 
-	var peers []string
-	if walletCfg.Peer != "" {
-		peers = append(peers, walletCfg.Peer)
-	}
-
 	allowAutomaticRescan := !walletCfg.ActivelyUsed
-	btc.node = loadSPVWallet(cfg.WalletCFG.DataDir, cfg.Logger.SubLogger("SPV"), peers, cfg.ChainParams, walletCfg.adjustedBirthday(), allowAutomaticRescan)
+	btc.node = loadSPVWallet(cfg.WalletCFG.DataDir, cfg.Logger.SubLogger("SPV"), cfg.ChainParams, walletCfg.adjustedBirthday(), allowAutomaticRescan)
 
 	return &ExchangeWalletSPV{baseWallet: btc}, nil
 }
@@ -3585,7 +3629,7 @@ func (btc *baseWallet) watchBlocks(ctx context.Context) {
 				blockAllowance := walletBlockAllowance
 				syncStatus, err := btc.node.syncStatus()
 				if err != nil {
-					btc.log.Errorf("Error retreiving sync status before queuing polled block: %v", err)
+					btc.log.Errorf("Error retrieving sync status before queuing polled block: %v", err)
 				} else if syncStatus.Syncing {
 					blockAllowance *= 10
 				}

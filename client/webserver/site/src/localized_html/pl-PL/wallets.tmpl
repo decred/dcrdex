@@ -225,7 +225,49 @@
       </div>
       <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="reconfigErr"></div>
       <hr class="dashed my-2">
-      <button id="downloadLogs" type="button" class="w-25 mt-1 justify-content-center fs15 bg2">Wallet Logs</button>
+      <div class="d-flex flex-row">
+        <button id="downloadLogs" type="button" class="w-25 mt-1 mx-1 justify-content-center fs15 bg2">Wallet Logs</button>
+        <button id="recoverWallet" type="button" class="danger w-25 mx-1 mt-1 justify-content-center fs15 bg2">Recover</button>
+      </div>
+    </form>
+  </div>
+
+  {{- /* POP-UP FORMS */ -}}
+  <div id="forms" class="d-hide">
+
+    {{- /* CONFIRM FORCE FORM */ -}}
+    <form class="d-hide" id="confirmForce">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="px-2 py-1 text-center position-relative fs22 sans-light">
+        Wallet actively used!
+      </div>
+      <div class="fs15 text-left mt-2">
+        This wallet is actively managing orders. After taking this action, it will take a long time to resync your wallet, potentially causing orders to fail. Only take this action if absolutely necessary!
+      </div>
+      <div class="d-flex justify-content-end mt-4">
+        <button id="cancelForce" type="button" class="justify-content-center fs15 bg2 danger mx-1">Cancel</button>
+        <button id="confirmForceSubmit" type="button" class="justify-content-center fs15 bg2 selected mx-2">Confirm</button>
+      </div>
+      <div class="fs15 pt-3 text-center d-hide errcolor" id="confirmForceErr"></div>
+    </form>
+
+    {{- /* RECOVER WALLET AUTHORIZATION */ -}}
+    <form class="d-hide" id="recoverWalletConfirm">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="px-2 py-1 text-center position-relative fs22 sans-light">
+        Recover Wallet
+      </div>
+      <div class="fs15 text-left mt-2">
+        Recovering your wallet will move all wallet data to a backup folder. You will have to wait until the wallet resyncs with the network, which could potentially take a long time, before you can use the wallet again.
+      </div>
+      <div class="text-left mt-2">
+        <label for="recoverWalletPW" class="form-label pl-1 mb-1">Password</label>
+        <input type="password" class="form-control select" id="recoverWalletPW" autocomplete="current-password">
+      </div>
+      <div class="d-flex justify-content-end mt-4">
+        <button id="recoverWalletSubmit" type="button" class="justify-content-center fs15 bg2 selected">Wyślij</button>
+      </div>
+      <div class="fs15 pt-3 text-center d-hide errcolor" id="recoverWalletErr"></div>
     </form>
   </div>
 </div>
