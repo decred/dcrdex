@@ -285,6 +285,9 @@ type OrderMetaData struct {
 	// to this order, and determining how many more possible refunds there
 	// could be.
 	RefundReserves uint64
+	// AccelerationCoins keeps track of all the change coins generated from doing
+	// accelerations on this order.
+	AccelerationCoins []order.CoinID
 }
 
 // MetaMatch is a match and its metadata.

@@ -1799,16 +1799,14 @@ func (w *spvWallet) getTransaction(txHash *chainhash.Hash) (*GetTransactionResul
 
 	// TODO: The serialized transaction is already in the DB, so
 	// reserializing can be avoided here.
-	var txBuf bytes.Buffer
-	txBuf.Grow(details.MsgTx.SerializeSize())
-	err = details.MsgTx.Serialize(&txBuf)
+	txRaw, err := serializeMsgTx(&details.MsgTx)
 	if err != nil {
 		return nil, err
 	}
 
 	ret := &GetTransactionResult{
 		TxID:         txHash.String(),
-		Hex:          txBuf.Bytes(), // 'Hex' field name is a lie, kinda
+		Hex:          txRaw, // 'Hex' field name is a lie, kinda
 		Time:         uint64(details.Received.Unix()),
 		TimeReceived: uint64(details.Received.Unix()),
 	}
@@ -1816,6 +1814,7 @@ func (w *spvWallet) getTransaction(txHash *chainhash.Hash) (*GetTransactionResul
 	if details.Block.Height != -1 {
 		ret.BlockHash = details.Block.Hash.String()
 		ret.BlockTime = uint64(details.Block.Time.Unix())
+		ret.BlockHeight = uint64(details.Block.Height)
 		ret.Confirmations = uint64(confirms(details.Block.Height, syncBlock.Height))
 	}
 

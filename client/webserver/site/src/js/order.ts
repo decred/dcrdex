@@ -1,7 +1,7 @@
 import Doc from './doc'
 import BasePage from './basepage'
 import * as OrderUtil from './orderutil'
-import { bind as bindForm } from './forms'
+import { bind as bindForm, AccelerateOrderForm } from './forms'
 import { postJSON } from './http'
 import * as intl from './locales'
 import {
@@ -28,6 +28,8 @@ export default class OrderPage extends BasePage {
   page: Record<string, PageElement>
   currentForm: HTMLElement
   secondTicker: number
+  refreshOnPopupClose: boolean
+  accelerateOrderForm: AccelerateOrderForm
 
   constructor (main: HTMLElement) {
     super()
@@ -43,15 +45,41 @@ export default class OrderPage extends BasePage {
 
     const page = this.page = Doc.idDescendants(main)
 
+    page.forms.querySelectorAll('.form-closer').forEach(el => {
+      Doc.bind(el, 'click', () => {
+        if (this.refreshOnPopupClose) {
+          location.replace(location.href)
+          return
+        }
+        Doc.hide(page.forms)
+      })
+    })
+
     if (page.cancelBttn) {
       Doc.bind(page.cancelBttn, 'click', () => {
         this.showForm(page.cancelForm)
       })
     }
 
+    Doc.bind(page.accelerateBttn, 'click', () => {
+      this.showAccelerateForm()
+    })
+
+    this.showAccelerationButton()
+    const success = () => {
+      this.refreshOnPopupClose = true
+    }
+    // Do not call cleanTemplates before creating the AccelerateOrderForm
+    this.accelerateOrderForm = new AccelerateOrderForm(page.accelerateForm, success)
+    Doc.cleanTemplates(page.rangeOptTmpl)
+
     // If the user clicks outside of a form, it should close the page overlay.
     Doc.bind(page.forms, 'mousedown', (e: MouseEvent) => {
       if (!Doc.mouseInElement(e, this.currentForm)) {
+        if (this.refreshOnPopupClose) {
+          location.reload()
+          return
+        }
         Doc.hide(page.forms)
         page.cancelPass.value = ''
       }
@@ -107,7 +135,7 @@ export default class OrderPage extends BasePage {
   async showForm (form: HTMLElement) {
     this.currentForm = form
     const page = this.page
-    Doc.hide(page.cancelForm)
+    Doc.hide(page.cancelForm, page.accelerateForm)
     form.style.right = '10000px'
     Doc.show(page.forms, form)
     const shift = (page.forms.offsetWidth + form.offsetWidth) / 2
@@ -137,17 +165,40 @@ export default class OrderPage extends BasePage {
   }
 
   /*
+   * showAccelerationButton shows the acceleration button if the order can
+   * be accelerated.
+   */
+  showAccelerationButton () {
+    const order = this.order
+    if (!order) return
+    const page = this.page
+    if (app().canAccelerateOrder(order)) Doc.show(page.accelerateBttn, page.actionsLabel)
+    else Doc.hide(page.accelerateBttn, page.actionsLabel)
+  }
+
+  /* showAccelerateForm shows a form to accelerate an order */
+  async showAccelerateForm () {
+    const loaded = app().loading(this.page.accelerateBttn)
+    this.accelerateOrderForm.refresh(this.order)
+    loaded()
+    this.showForm(this.page.accelerateForm)
+  }
+
+  /*
    * handleOrderNote is the handler for the 'order'-type notification, which are
    * used to update an order's status.
    */
   handleOrderNote (note: OrderNote) {
+    const page = this.page
     const order = note.order
-    const bttn = this.page.cancelBttn
+    this.order = order
+    const bttn = page.cancelBttn
     if (bttn && order.id === this.orderID) {
       if (bttn && order.status > OrderUtil.StatusBooked) Doc.hide(bttn)
-      this.page.status.textContent = OrderUtil.statusString(order)
+      page.status.textContent = OrderUtil.statusString(order)
     }
     for (const m of order.matches || []) this.processMatch(m)
+    this.showAccelerationButton()
   }
 
   /* handleMatchNote handles a 'match' notification. */
@@ -259,8 +310,8 @@ const CoinExplorers: Record<number, Record<number, (cid: string) => string>> = {
     }
   },
   0: { // btc
-    [Mainnet]: (cid: string) => `https://bitaps.com/${cid.split(':')[0]}`,
-    [Testnet]: (cid: string) => `https://tbtc.bitaps.com/${cid.split(':')[0]}`
+    [Mainnet]: (cid: string) => `https://mempool.space/tx/${cid.split(':')[0]}`,
+    [Testnet]: (cid: string) => `https://mempool.space/testnet/tx/${cid.split(':')[0]}`
   },
   2: { // ltc
     [Mainnet]: (cid: string) => `https://ltc.bitaps.com/${cid.split(':')[0]}`,

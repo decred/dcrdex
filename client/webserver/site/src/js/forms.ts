@@ -2,7 +2,7 @@ import Doc from './doc'
 import { postJSON } from './http'
 import State from './state'
 import * as intl from './locales'
-import { RateEncodingFactor } from './orderutil'
+import * as OrderUtil from './orderutil'
 import {
   app,
   PasswordCache,
@@ -15,7 +15,9 @@ import {
   UnitInfo,
   FeeAsset,
   WalletState,
-  WalletBalance
+  WalletBalance,
+  Order,
+  XYRange
 } from './registry'
 
 interface ConfigOptionInput extends HTMLInputElement {
@@ -610,7 +612,7 @@ export class FeeAssetSelectionForm {
       if (mkt.spot) {
         Doc.show(marketTmpl.quoteLotSize)
         const r = cFactor(quoteUnitInfo) / cFactor(baseUnitInfo)
-        const quoteLot = mkt.lotsize * mkt.spot.rate / RateEncodingFactor * r
+        const quoteLot = mkt.lotsize * mkt.spot.rate / OrderUtil.RateEncodingFactor * r
         const s = Doc.formatCoinValue(quoteLot, quoteUnitInfo)
         marketTmpl.quoteLotSize.textContent = `(~${s} ${quoteSymbol})`
       }
@@ -904,6 +906,169 @@ export class UnlockWalletForm {
     }
     if (this.pwCache) this.pwCache.pw = pw
     this.success()
+  }
+}
+
+interface EarlyAcceleration {
+  timePast: number,
+  wasAcceleration: boolean
+}
+
+interface PreAccelerate {
+  swapRate: number
+  suggestedRate: number
+  suggestedRange: XYRange
+  earlyAcceleration?: EarlyAcceleration
+}
+
+/*
+ * AccelerateOrderForm is used to submit an acceleration request for an order.
+ */
+export class AccelerateOrderForm {
+  form: HTMLElement
+  page: Record<string, PageElement>
+  order: Order
+  acceleratedRate: number
+  earlyAcceleration?: EarlyAcceleration
+  currencyUnit: string
+  success: () => void
+
+  constructor (form: HTMLElement, success: () => void) {
+    this.form = form
+    this.success = success
+    const page = this.page = Doc.idDescendants(form)
+
+    Doc.bind(page.accelerateSubmit, 'click', () => {
+      this.submit()
+    })
+    Doc.bind(page.submitEarlyConfirm, 'click', () => {
+      this.sendAccelerateRequest()
+    })
+  }
+
+  /*
+   * displayEarlyAccelerationMsg displays a message asking for confirmation
+   * when the user tries to submit an acceleration transaction very soon after
+   * the swap transaction was broadcast, or very soon after a previous
+   * acceleration.
+   */
+  displayEarlyAccelerationMsg () {
+    const page = this.page
+    // this is checked in submit, but another check is needed for ts compiler
+    if (!this.earlyAcceleration) return
+    page.recentAccelerationTime.textContent = `${Math.floor(this.earlyAcceleration.timePast / 60)}`
+    page.recentSwapTime.textContent = `${Math.floor(this.earlyAcceleration.timePast / 60)}`
+    if (this.earlyAcceleration.wasAcceleration) {
+      Doc.show(page.recentAccelerationMsg)
+      Doc.hide(page.recentSwapMsg)
+      page.recentAccelerationTime.textContent = `${Math.floor(this.earlyAcceleration.timePast / 60)}`
+    } else {
+      Doc.show(page.recentSwapMsg)
+      Doc.hide(page.recentAccelerationMsg)
+      page.recentSwapTime.textContent = `${Math.floor(this.earlyAcceleration.timePast / 60)}`
+    }
+    Doc.hide(page.configureAccelerationDiv, page.accelerateErr)
+    Doc.show(page.earlyAccelerationDiv)
+  }
+
+  // sendAccelerateRequest makes an accelerateorder request to the client
+  // backend.
+  async sendAccelerateRequest () {
+    const order = this.order
+    const page = this.page
+    const req = {
+      pw: page.acceleratePass.value,
+      orderID: order.id,
+      newRate: this.acceleratedRate
+    }
+    page.acceleratePass.value = ''
+    const loaded = app().loading(page.accelerateMainDiv)
+    const res = await postJSON('/api/accelerateorder', req)
+    loaded()
+    if (app().checkResponse(res)) {
+      page.accelerateTxID.textContent = res.txID
+      Doc.hide(page.accelerateMainDiv, page.preAccelerateErr, page.accelerateErr)
+      Doc.show(page.accelerateMsgDiv, page.accelerateSuccess)
+      this.success()
+    } else {
+      page.accelerateErr.textContent = `Error accelerating order: ${res.msg}`
+      Doc.hide(page.earlyAccelerationDiv)
+      Doc.show(page.accelerateErr, page.configureAccelerationDiv)
+    }
+  }
+
+  // submit is called when the submit button is clicked.
+  async submit () {
+    if (this.earlyAcceleration) {
+      this.displayEarlyAccelerationMsg()
+    } else {
+      this.sendAccelerateRequest()
+    }
+  }
+
+  // refresh should be called before the form is displayed. It makes a
+  // preaccelerate request to the client backend and sets up the form
+  // based on the results.
+  async refresh (order: Order) {
+    const page = this.page
+    this.order = order
+    const res = await postJSON('/api/preaccelerate', order.id)
+    if (!app().checkResponse(res)) {
+      page.preAccelerateErr.textContent = `Error accelerating order: ${res.msg}`
+      Doc.hide(page.accelerateMainDiv, page.accelerateSuccess)
+      Doc.show(page.accelerateMsgDiv, page.preAccelerateErr)
+      return
+    }
+    Doc.hide(page.accelerateMsgDiv, page.preAccelerateErr, page.accelerateErr, page.feeEstimateDiv, page.earlyAccelerationDiv)
+    Doc.show(page.accelerateMainDiv, page.accelerateSuccess, page.configureAccelerationDiv)
+    const preAccelerate: PreAccelerate = res.preAccelerate
+    this.earlyAcceleration = preAccelerate.earlyAcceleration
+    this.currencyUnit = preAccelerate.suggestedRange.yUnit
+    page.accelerateAvgFeeRate.textContent = `${preAccelerate.swapRate} ${preAccelerate.suggestedRange.yUnit}`
+    page.accelerateCurrentFeeRate.textContent = `${preAccelerate.suggestedRate} ${preAccelerate.suggestedRange.yUnit}`
+    OrderUtil.setOptionTemplates(page)
+    this.acceleratedRate = preAccelerate.suggestedRange.start.y
+    const selected = () => { /* do nothing */ }
+    const roundY = true
+    const updateRate = (_: number, newY: number) => { this.acceleratedRate = newY }
+    const rangeHandler = new OrderUtil.XYRangeHandler(preAccelerate.suggestedRange,
+      preAccelerate.suggestedRange.start.x, updateRate, () => this.updateAccelerationEstimate(), selected, roundY)
+    Doc.empty(page.sliderContainer)
+    page.sliderContainer.appendChild(rangeHandler.control)
+    this.updateAccelerationEstimate()
+  }
+
+  // updateAccelerationEstimate makes an accelerateestimate request to the
+  // client backend using the curretly selected rate on the slider, and
+  // displays the results.
+  async updateAccelerationEstimate () {
+    const page = this.page
+    const order = this.order
+    const req = {
+      orderID: order.id,
+      newRate: this.acceleratedRate
+    }
+    const loaded = app().loading(page.sliderContainer)
+    const res = await postJSON('/api/accelerationestimate', req)
+    loaded()
+    if (!app().checkResponse(res)) {
+      page.accelerateErr.textContent = `Error estimating acceleration fee: ${res.msg}`
+      Doc.show(page.accelerateErr)
+      return
+    }
+    page.feeRateEstimate.textContent = `${this.acceleratedRate} ${this.currencyUnit}`
+    let assetID
+    let assetSymbol
+    if (order.sell) {
+      assetID = order.baseID
+      assetSymbol = order.baseSymbol
+    } else {
+      assetID = order.quoteID
+      assetSymbol = order.quoteSymbol
+    }
+    const unitInfo = app().unitInfo(assetID)
+    page.feeEstimate.textContent = `${res.fee / unitInfo.conventional.conversionFactor} ${assetSymbol}`
+    Doc.show(page.feeEstimateDiv)
   }
 }
 

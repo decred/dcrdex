@@ -281,30 +281,31 @@ func matchFromMetaMatchWithConfs(ord order.Order, metaMatch *db.MetaMatch, swapC
 // Order is core's general type for an order. An order may be a market, limit,
 // or cancel order. Some fields are only relevant to particular order types.
 type Order struct {
-	Host          string            `json:"host"`
-	BaseID        uint32            `json:"baseID"`
-	BaseSymbol    string            `json:"baseSymbol"`
-	QuoteID       uint32            `json:"quoteID"`
-	QuoteSymbol   string            `json:"quoteSymbol"`
-	MarketID      string            `json:"market"`
-	Type          order.OrderType   `json:"type"`
-	ID            dex.Bytes         `json:"id"`
-	Stamp         uint64            `json:"stamp"`
-	Sig           dex.Bytes         `json:"sig"`
-	Status        order.OrderStatus `json:"status"`
-	Epoch         uint64            `json:"epoch"`
-	Qty           uint64            `json:"qty"`
-	Sell          bool              `json:"sell"`
-	Filled        uint64            `json:"filled"`
-	Matches       []*Match          `json:"matches"`
-	Cancelling    bool              `json:"cancelling"`
-	Canceled      bool              `json:"canceled"`
-	FeesPaid      *FeeBreakdown     `json:"feesPaid"`
-	FundingCoins  []*Coin           `json:"fundingCoins"`
-	LockedAmt     uint64            `json:"lockedamt"`
-	Rate          uint64            `json:"rate"`          // limit only
-	TimeInForce   order.TimeInForce `json:"tif"`           // limit only
-	TargetOrderID dex.Bytes         `json:"targetOrderID"` // cancel only
+	Host              string            `json:"host"`
+	BaseID            uint32            `json:"baseID"`
+	BaseSymbol        string            `json:"baseSymbol"`
+	QuoteID           uint32            `json:"quoteID"`
+	QuoteSymbol       string            `json:"quoteSymbol"`
+	MarketID          string            `json:"market"`
+	Type              order.OrderType   `json:"type"`
+	ID                dex.Bytes         `json:"id"`
+	Stamp             uint64            `json:"stamp"`
+	Sig               dex.Bytes         `json:"sig"`
+	Status            order.OrderStatus `json:"status"`
+	Epoch             uint64            `json:"epoch"`
+	Qty               uint64            `json:"qty"`
+	Sell              bool              `json:"sell"`
+	Filled            uint64            `json:"filled"`
+	Matches           []*Match          `json:"matches"`
+	Cancelling        bool              `json:"cancelling"`
+	Canceled          bool              `json:"canceled"`
+	FeesPaid          *FeeBreakdown     `json:"feesPaid"`
+	FundingCoins      []*Coin           `json:"fundingCoins"`
+	LockedAmt         uint64            `json:"lockedamt"`
+	AccelerationCoins []*Coin           `json:"accelerationCoins"`
+	Rate              uint64            `json:"rate"`          // limit only
+	TimeInForce       order.TimeInForce `json:"tif"`           // limit only
+	TargetOrderID     dex.Bytes         `json:"targetOrderID"` // cancel only
 }
 
 // FeeBreakdown is categorized fee information.
@@ -362,6 +363,11 @@ func coreOrderFromTrade(ord order.Order, metaData *db.OrderMetaData) *Order {
 		fundingCoins = append(fundingCoins, NewCoin(fromID, trade.Coins[i]))
 	}
 
+	accelerationCoins := make([]*Coin, 0, len(metaData.AccelerationCoins))
+	for _, coinID := range metaData.AccelerationCoins {
+		accelerationCoins = append(accelerationCoins, NewCoin(fromID, coinID))
+	}
+
 	corder := &Order{
 		Host:        metaData.Host,
 		BaseID:      baseID,
@@ -385,7 +391,8 @@ func coreOrderFromTrade(ord order.Order, metaData *db.OrderMetaData) *Order {
 			Swap:       metaData.SwapFeesPaid,
 			Redemption: metaData.RedemptionFeesPaid,
 		},
-		FundingCoins: fundingCoins,
+		FundingCoins:      fundingCoins,
+		AccelerationCoins: accelerationCoins,
 	}
 
 	return corder
@@ -902,4 +909,13 @@ type MaxOrderEstimate struct {
 type OrderEstimate struct {
 	Swap   *asset.PreSwap   `json:"swap"`
 	Redeem *asset.PreRedeem `json:"redeem"`
+}
+
+// PreAccelerate gives information that the user can use to decide on
+// how much to accelerate stuck swap transactions in an order.
+type PreAccelerate struct {
+	SwapRate          uint64                   `json:"swapRate"`
+	SuggestedRate     uint64                   `json:"suggestedRate"`
+	SuggestedRange    asset.XYRange            `json:"suggestedRange"`
+	EarlyAcceleration *asset.EarlyAcceleration `json:"earlyAcceleration,omitempty"`
 }

@@ -372,6 +372,78 @@
 </div>
 {{end}}
 
+{{define "accelerateForm"}}
+{{$passwordIsCached := .UserInfo.PasswordIsCached}}
+<div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+<div class="text-center fs22 sans-light position-relative">
+  [[[accelerate_order]]]
+</div>
+<div id=accelerateMainDiv>
+  <div id="configureAccelerationDiv">
+    [[[acceleration_text]]]
+    <br />
+    <div class="text-center fs17 sans-light position-relative">
+      [[[effective_swap_tx_rate]]]: <span id="accelerateAvgFeeRate"></span>
+    </div>
+    <div class="text-center fs17 sans-light position-relative">
+      [[[current_fee]]]: <span id="accelerateCurrentFeeRate"></span>
+    </div>
+    <div id="sliderContainer" class="slider-container">
+    </div>
+    <div id="feeEstimateDiv" class="text-center fs17 sans-light position-relative d-hide">
+      [[[acceleration_cost_msg]]]
+    </div>
+    <hr class="dashed mt-2">
+    <div class="d-flex flex-row align-items-end {{if $passwordIsCached}}justify-content-end{{end}} pb-4">
+      <div class="col-12 p-0 {{if $passwordIsCached}}d-hide{{end}}">
+        <label for="acceleratePass" class="pt-3 mb-1">[[[Password]]]</label>
+        <input type="password" class="form-control select" id="acceleratePass" autocomplete="off">
+      </div>
+      <div class="col-12 pt-2 {{if not $passwordIsCached}}px-5{{end}}">
+        <button id="accelerateSubmit" type="button" class="w-100 fs15 bg2 selected">[[[Submit]]]</button>
+      </div>
+    </div>
+  </div>
+  <div class="d-hide" id="earlyAccelerationDiv">
+    <div id="recentAccelerationMsg">[[[recent_acceleration_msg]]]</div>
+    <div id="recentSwapMsg">[[[recent_swap_msg]]]</div>
+    <br/>
+    [[[early_acceleration_help_msg]]]
+    <div class="d-flex flex-row align-items-end justify-content-end pb-4">
+      <div class="col-12 pt-2">
+        <button id="submitEarlyConfirm" type="button" class="w-100 fs15 bg2 selected">[[[Submit]]]</button>
+      </div>
+    </div>
+  </div>
+  <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="accelerateErr"></div>
+</div>
+<div id="rangeOptTmpl">
+  <div class="d-flex flex-nowrap fs12">
+    <span data-tmpl="rangeLblStart"></span>
+    <div data-tmpl="slider" class="slider flex-grow-1">
+      <div data-tmpl="handle" class="slider-handle"></div>
+    </div>
+    <span data-tmpl="rangeLblEnd"></span>
+  </div>
+  <div class="d-flex justify-content-between align-items-center fs14">
+    <span>
+      <input type="text" pattern="[0-9]+([\.,][0-9]+)?" data-tmpl="xInput" class="xy-range-input d-hide">
+      <span data-tmpl="x" class="pointer"></span> <span data-tmpl="xUnit"></span>
+    </span>
+    <span>
+      <input type="text" pattern="[0-9]+([\.,][0-9]+)?" data-tmpl="yInput" class="xy-range-input d-hide">
+      <span data-tmpl="y" class="pointer"></span> <span data-tmpl="yUnit"></span>
+    </span>
+  </div>
+</div>
+<div id="accelerateMsgDiv" class="d-hide">
+  <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="preAccelerateErr"></div>
+  <div class="fs15 pt-3 text-left d-hide text-break" id="accelerateSuccess">
+    [[[accelerate_success]]]
+  </div>
+</div>
+{{end}}
+
 {{define "waitingForWalletForm"}}
 <div class="text-center mb-4"><img class="logo" data-tmpl="logo" src="/img/coins/dcr.png"></div>
 <div class="d-flex flex-column align-items-start borderleft mb-5">

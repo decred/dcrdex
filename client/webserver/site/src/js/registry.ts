@@ -73,6 +73,7 @@ export interface Order {
   canceled: boolean
   feesPaid: FeeBreakdown
   fundingCoins: Coin[]
+  accelerationCoins: Coin[]
   lockedamt: number
   rate: number // limit only
   tif: number // limit only
@@ -483,6 +484,7 @@ export interface Application {
   orders (host: string, mktID: string): Order[]
   haveAssetOrders (assetID: number): boolean
   order (oid: string): Order | null
+  canAccelerateOrder(order: Order): boolean
   unitInfo (assetID: number, xc?: Exchange): UnitInfo
   conventionalRate (baseID: number, quoteID: number, encRate: number): number
   walletDefinition (assetID: number, walletType: string): WalletDefinition

@@ -389,6 +389,7 @@
                   <td data-tmpl="settled"></td>
                   <td data-tmpl="status"></td>
                   <td class="last text-end">
+                    <span data-tmpl="accelerateBttn" class="ico-rocket d-hide" data-tooltip="accelerate order"></span>
                     <span data-tmpl="cancelBttn" class="ico-cross d-hide" data-tooltip="[[[cancel order]]]"></span>
                     <a data-tmpl="link" class="ico-open fs13 pointer ms-2 plainlink" data-tooltip="[[[order details]]]"></a>
                   </td>
@@ -653,7 +654,9 @@
       <form class="d-hide" id="cancelForm" autocomplete="off">
         {{template "cancelOrderForm" .}}
       </form>
-
+      <form class="d-hide" id="accelerateForm">
+        {{template "accelerateForm" .}}
+      </form>
     </div>
   </div>
 

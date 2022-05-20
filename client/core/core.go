@@ -2035,7 +2035,7 @@ func (c *Core) RescanWallet(assetID uint32, force bool) error {
 	}
 
 	// Begin potentially asynchronous wallet rescan operation.
-	if err = wallet.Rescan(c.ctx); err != nil {
+	if err = wallet.rescan(c.ctx); err != nil {
 		return err
 	}
 
@@ -3473,11 +3473,10 @@ func (c *Core) coreOrderFromMetaOrder(mOrd *db.MetaOrder) (*Order, error) {
 
 // Order fetches a single user order.
 func (c *Core) Order(oidB dex.Bytes) (*Order, error) {
-	if len(oidB) != order.OrderIDSize {
-		return nil, fmt.Errorf("wrong oid string length. wanted %d, got %d", order.OrderIDSize, len(oidB))
+	oid, err := order.IDFromBytes(oidB)
+	if err != nil {
+		return nil, err
 	}
-	var oid order.OrderID
-	copy(oid[:], oidB)
 	// See if its an active order first.
 	var tracker *trackedTrade
 	for _, dc := range c.dexConnections() {
@@ -3494,6 +3493,7 @@ func (c *Core) Order(oidB dex.Bytes) (*Order, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving order %s: %w", oid, err)
 	}
+
 	return c.coreOrderFromMetaOrder(mOrd)
 }
 
@@ -4534,11 +4534,10 @@ func (c *Core) Cancel(pw []byte, oidB dex.Bytes) error {
 		return fmt.Errorf("Cancel password error: %w", err)
 	}
 
-	if len(oidB) != order.OrderIDSize {
-		return fmt.Errorf("wrong order ID length. wanted %d, got %d", order.OrderIDSize, len(oidB))
+	oid, err := order.IDFromBytes(oidB)
+	if err != nil {
+		return err
 	}
-	var oid order.OrderID
-	copy(oid[:], oidB)
 
 	for _, dc := range c.dexConnections() {
 		found, err := c.tryCancel(dc, oid)
@@ -6144,12 +6143,10 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 		return fmt.Errorf("preimage request parsing error: %w", err)
 	}
 
-	if len(req.OrderID) != order.OrderIDSize {
-		return fmt.Errorf("invalid order ID in preimage request")
+	oid, err := order.IDFromBytes(req.OrderID)
+	if err != nil {
+		return err
 	}
-
-	var oid order.OrderID
-	copy(oid[:], req.OrderID)
 
 	// NEW protocol with commitment specified.
 	if len(req.Commitment) == order.CommitmentSize {
@@ -6790,12 +6787,10 @@ func validateOrderResponse(dc *dexConnection, result *msgjson.OrderResult, ord o
 		return fmt.Errorf("signature error. order abandoned")
 	}
 	ord.SetTime(encode.UnixTimeMilli(int64(result.ServerTime)))
-	// Check the order ID
-	if len(result.OrderID) != order.OrderIDSize {
-		return fmt.Errorf("failed ID length check. order abandoned")
+	checkID, err := order.IDFromBytes(result.OrderID)
+	if err != nil {
+		return err
 	}
-	var checkID order.OrderID
-	copy(checkID[:], result.OrderID)
 	oid := ord.ID()
 	if oid != checkID {
 		return fmt.Errorf("failed ID match. order abandoned")
@@ -6862,7 +6857,7 @@ func (c *Core) WalletLogFilePath(assetID uint32) (string, error) {
 			strings.ToUpper(unbip(assetID)), assetID)
 	}
 
-	return wallet.LogFilePath()
+	return wallet.logFilePath()
 }
 
 func createFile(fileName string) (*os.File, error) {
@@ -7127,4 +7122,130 @@ func (c *Core) DeleteArchivedRecords(olderThan *time.Time, matchesFile, ordersFi
 		return fmt.Errorf("unable to delete orders: %v", err)
 	}
 	return nil
+}
+
+// AccelerateOrder will use the Child-Pays-For-Parent technique to accelerate
+// the swap transactions in an order.
+func (c *Core) AccelerateOrder(pw []byte, oidB dex.Bytes, newFeeRate uint64) (string, error) {
+	_, err := c.encryptionKey(pw)
+	if err != nil {
+		return "", fmt.Errorf("AccelerateOrder password error: %w", err)
+	}
+
+	oid, err := order.IDFromBytes(oidB)
+	if err != nil {
+		return "", err
+	}
+	tracker, err := c.findActiveOrder(oid)
+	if err != nil {
+		return "", err
+	}
+
+	if !tracker.wallets.fromWallet.traits.IsAccelerator() {
+		return "", fmt.Errorf("the %s wallet is not an accelerator",
+			tracker.wallets.fromAsset.Symbol)
+	}
+
+	tracker.mtx.Lock()
+	defer tracker.mtx.Unlock()
+
+	swapCoinIDs, accelerationCoins, changeCoinID, requiredForRemainingSwaps, err := tracker.orderAccelerationParameters()
+	if err != nil {
+		return "", err
+	}
+
+	newChangeCoin, txID, err :=
+		tracker.wallets.fromWallet.accelerateOrder(swapCoinIDs, accelerationCoins, changeCoinID, requiredForRemainingSwaps, newFeeRate)
+	if err != nil {
+		return "", err
+	}
+	if newChangeCoin != nil {
+		tracker.metaData.ChangeCoin = order.CoinID(newChangeCoin.ID())
+		tracker.coins[newChangeCoin.ID().String()] = newChangeCoin
+	} else {
+		tracker.metaData.ChangeCoin = nil
+	}
+	tracker.metaData.AccelerationCoins = append(tracker.metaData.AccelerationCoins, tracker.metaData.ChangeCoin)
+	return txID, tracker.db.UpdateOrderMetaData(oid, tracker.metaData)
+}
+
+// AccelerationEstimate returns the amount of funds that would be needed to
+// accelerate the swap transactions in an order to a desired fee rate.
+func (c *Core) AccelerationEstimate(oidB dex.Bytes, newFeeRate uint64) (uint64, error) {
+	oid, err := order.IDFromBytes(oidB)
+	if err != nil {
+		return 0, err
+	}
+
+	tracker, err := c.findActiveOrder(oid)
+	if err != nil {
+		return 0, err
+	}
+	tracker.mtx.RLock()
+	defer tracker.mtx.RUnlock()
+
+	swapCoins, accelerationCoins, changeCoin, requiredForRemainingSwaps, err := tracker.orderAccelerationParameters()
+	if err != nil {
+		return 0, err
+	}
+
+	accelerationFee, err := tracker.wallets.fromWallet.accelerationEstimate(swapCoins, accelerationCoins, changeCoin, requiredForRemainingSwaps, newFeeRate)
+	if err != nil {
+		return 0, err
+	}
+
+	return accelerationFee, nil
+}
+
+// PreAccelerateOrder returns information the user can use to decide how much
+// to accelerate stuck swap transactions in an order.
+func (c *Core) PreAccelerateOrder(oidB dex.Bytes) (*PreAccelerate, error) {
+	oid, err := order.IDFromBytes(oidB)
+	if err != nil {
+		return nil, err
+	}
+
+	tracker, err := c.findActiveOrder(oid)
+	if err != nil {
+		return nil, err
+	}
+
+	feeSuggestion := c.feeSuggestionAny(tracker.fromAssetID)
+
+	tracker.mtx.RLock()
+	defer tracker.mtx.RUnlock()
+	swapCoinIDs, accelerationCoins, changeCoinID, requiredForRemainingSwaps, err := tracker.orderAccelerationParameters()
+	if err != nil {
+		return nil, err
+	}
+
+	currentRate, suggestedRange, earlyAcceleration, err :=
+		tracker.wallets.fromWallet.preAccelerate(swapCoinIDs, accelerationCoins, changeCoinID, requiredForRemainingSwaps, feeSuggestion)
+	if err != nil {
+		return nil, err
+	}
+
+	if suggestedRange == nil {
+		// this should never happen
+		return nil, fmt.Errorf("suggested range is nil")
+	}
+
+	return &PreAccelerate{
+		SwapRate:          currentRate,
+		SuggestedRate:     feeSuggestion,
+		SuggestedRange:    *suggestedRange,
+		EarlyAcceleration: earlyAcceleration,
+	}, nil
+}
+
+// findActiveOrder will search the dex connections for an active order by order
+// id. An error is returned if it cannot be found.
+func (c *Core) findActiveOrder(oid order.OrderID) (*trackedTrade, error) {
+	for _, dc := range c.dexConnections() {
+		tracker, _, _ := dc.findOrder(oid)
+		if tracker != nil {
+			return tracker, nil
+		}
+	}
+	return nil, fmt.Errorf("could not find active order with order id: %s", oid)
 }

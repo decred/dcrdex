@@ -866,7 +866,7 @@ func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTra
 	}
 	expired = time.Until(lockTime) < 0 // not necessarily refundable, but can be at any moment
 
-	have, spent, err = wallet.SwapConfirmations(ctx, coin.ID(),
+	have, spent, err = wallet.swapConfirmations(ctx, coin.ID(),
 		match.MetaData.Proof.CounterContract, match.MetaData.Stamp)
 	if err != nil {
 		return fail(fmt.Errorf("failed to get confirmations of the counter-party's swap %s (%s) "+
@@ -1111,7 +1111,7 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 		// If we're the maker, check the confirmations anyway so we can notify.
 		t.dc.log.Tracef("Checking confirmations on our OWN swap txn %v (%s)...",
 			coinIDString(wallet.AssetID, match.MetaData.Proof.MakerSwap), unbip(wallet.AssetID))
-		confs, spent, err := wallet.SwapConfirmations(ctx, match.MetaData.Proof.MakerSwap,
+		confs, spent, err := wallet.swapConfirmations(ctx, match.MetaData.Proof.MakerSwap,
 			match.MetaData.Proof.ContractData, match.MetaData.Stamp)
 		if err != nil && !errors.Is(err, asset.ErrSwapNotInitiated) {
 			// No need to log an error if swap not initiated as this
@@ -1199,7 +1199,7 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bo
 		}
 
 		// If we're the taker, check the confirmations anyway so we can notify.
-		confs, spent, err := t.wallets.fromWallet.SwapConfirmations(ctx, match.MetaData.Proof.TakerSwap,
+		confs, spent, err := t.wallets.fromWallet.swapConfirmations(ctx, match.MetaData.Proof.TakerSwap,
 			match.MetaData.Proof.ContractData, match.MetaData.Stamp)
 		if err != nil && !errors.Is(err, asset.ErrSwapNotInitiated) {
 			// No need to log an error if swap not initiated as this
@@ -1328,7 +1328,7 @@ func (t *trackedTrade) shouldBeginFindRedemption(ctx context.Context, match *mat
 		return false
 	}
 
-	confs, spent, err := t.wallets.fromWallet.SwapConfirmations(ctx, swapCoinID, proof.ContractData, match.MetaData.Stamp)
+	confs, spent, err := t.wallets.fromWallet.swapConfirmations(ctx, swapCoinID, proof.ContractData, match.MetaData.Stamp)
 	if err != nil {
 		if !errors.Is(err, asset.ErrSwapNotInitiated) {
 			// No need to log an error if swap not initiated as this
@@ -2781,6 +2781,90 @@ func (t *trackedTrade) returnCoins() {
 			t.changeLocked = false
 		}
 	}
+}
+
+// requiredForRemainingSwaps determines the amount of the from asset that is
+// still needed in order initate the remaining swaps in the order.
+func (t *trackedTrade) requiredForRemainingSwaps() (uint64, error) {
+	mkt := t.dc.marketConfig(t.mktID)
+	if mkt == nil {
+		return 0, fmt.Errorf("could not find market: %v", t.mktID)
+	}
+	lotSize := mkt.LotSize
+	swapSize := t.wallets.fromAsset.SwapSize
+
+	var requiredForRemainingSwaps uint64
+
+	if t.metaData.Status <= order.OrderStatusExecuted {
+		if !t.Trade().Sell {
+			requiredForRemainingSwaps += calc.BaseToQuote(t.rate(), t.Trade().Remaining())
+		} else {
+			requiredForRemainingSwaps += t.Trade().Remaining()
+		}
+		lotsRemaining := t.Trade().Remaining() / lotSize
+		requiredForRemainingSwaps += lotsRemaining * swapSize * t.metaData.MaxFeeRate
+	}
+
+	for _, match := range t.matches {
+		if (match.Side == order.Maker && match.Status < order.MakerSwapCast) ||
+			(match.Side == order.Taker && match.Status < order.TakerSwapCast) {
+			if !t.Trade().Sell {
+				requiredForRemainingSwaps += calc.BaseToQuote(match.Rate, match.Quantity)
+			} else {
+				requiredForRemainingSwaps += match.Quantity
+			}
+			requiredForRemainingSwaps += swapSize * t.metaData.MaxFeeRate
+		}
+	}
+
+	return requiredForRemainingSwaps, nil
+}
+
+// orderAccelerationParameters returns the parameters needed to accelerate the
+// swap transactions in this trade.
+// MUST be called with the trackedTrade mutex held.
+func (t *trackedTrade) orderAccelerationParameters() (swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps uint64, err error) {
+	makeError := func(err error) ([]dex.Bytes, []dex.Bytes, dex.Bytes, uint64, error) {
+		return nil, nil, nil, 0, err
+	}
+
+	if t.metaData.ChangeCoin == nil {
+		return makeError(fmt.Errorf("order does not have change which can be accelerated"))
+	}
+
+	if len(t.metaData.AccelerationCoins) >= 10 {
+		return makeError(fmt.Errorf("order has already been accelerated too many times"))
+	}
+
+	requiredForRemainingSwaps, err = t.requiredForRemainingSwaps()
+	if err != nil {
+		return makeError(err)
+	}
+
+	swapCoins = make([]dex.Bytes, 0, len(t.matches))
+	for _, match := range t.matches {
+		var swapCoinID order.CoinID
+		if match.Side == order.Maker && match.Status >= order.MakerSwapCast {
+			swapCoinID = match.MetaData.Proof.MakerSwap
+		} else if match.Side == order.Taker && match.Status >= order.TakerSwapCast {
+			swapCoinID = match.MetaData.Proof.TakerSwap
+		} else {
+			continue
+		}
+
+		swapCoins = append(swapCoins, dex.Bytes(swapCoinID))
+	}
+
+	if len(swapCoins) == 0 {
+		return makeError(fmt.Errorf("cannot accelerate an order without any swaps"))
+	}
+
+	accelerationCoins = make([]dex.Bytes, 0, len(t.metaData.AccelerationCoins))
+	for _, coin := range t.metaData.AccelerationCoins {
+		accelerationCoins = append(accelerationCoins, dex.Bytes(coin))
+	}
+
+	return swapCoins, accelerationCoins, dex.Bytes(t.metaData.ChangeCoin), requiredForRemainingSwaps, nil
 }
 
 // mapifyCoins converts the slice of coins to a map keyed by hex coin ID.
