@@ -110,6 +110,10 @@ func (c *ConnectionMaster) Connect(ctx context.Context) (err error) {
 	c.init(ctx)
 	c.mtx.Lock()
 	c.wg, err = c.connector.Connect(c.ctx)
+	if c.wg == nil { // don't expect a waitgroup if Connect errored
+		c.wg = new(sync.WaitGroup) // don't let Disconnect or Wait panic
+		c.cancel()                 // we're not "On"
+	}
 	c.mtx.Unlock()
 	// NOTE: Even if err is non-nil, we can't cancel the internal context
 	// because the connector may be attempting to reconnect. The caller should

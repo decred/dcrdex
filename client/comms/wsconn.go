@@ -121,8 +121,7 @@ type wsConn struct {
 	wsMtx sync.Mutex
 	ws    *websocket.Conn
 
-	connectedMtx     sync.RWMutex
-	connectionStatus ConnectionStatus
+	connectionStatus uint32 // atomic
 
 	reqMtx       sync.RWMutex
 	respHandlers map[uint64]*responseHandler
@@ -172,18 +171,14 @@ func NewWsConn(cfg *WsCfg) (WsConn, error) {
 
 // IsDown indicates if the connection is known to be down.
 func (conn *wsConn) IsDown() bool {
-	conn.connectedMtx.RLock()
-	defer conn.connectedMtx.RUnlock()
-	return conn.connectionStatus != Connected
+	return atomic.LoadUint32(&conn.connectionStatus) != uint32(Connected)
 }
 
 // setConnectionStatus updates the connection's status and runs the
 // ConnectEventFunc in case of a change.
 func (conn *wsConn) setConnectionStatus(status ConnectionStatus) {
-	conn.connectedMtx.Lock()
-	statusChange := conn.connectionStatus != status
-	conn.connectionStatus = status
-	conn.connectedMtx.Unlock()
+	oldStatus := atomic.SwapUint32(&conn.connectionStatus, uint32(status))
+	statusChange := oldStatus != uint32(status)
 	if statusChange && conn.cfg.ConnectEventFunc != nil {
 		conn.cfg.ConnectEventFunc(status)
 	}
@@ -417,13 +412,30 @@ func (conn *wsConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	var ctxInternal context.Context
 	ctxInternal, conn.cancel = context.WithCancel(ctx)
 
-	conn.wg.Add(1)
+	err := conn.connect(ctxInternal)
+	if err != nil {
+		// If the certificate is invalid or missing, do not start the reconnect
+		// loop, and return an error with no WaitGroup.
+		if errors.Is(err, ErrInvalidCert) || errors.Is(err, ErrCertRequired) {
+			conn.cancel()
+			conn.wg.Wait() // probably a no-op
+			close(conn.readCh)
+			return nil, err
+		}
+
+		// The read loop would normally trigger keepAlive, but it wasn't started
+		// on account of a connect error.
+		conn.log.Errorf("Initial connection failed, starting reconnect loop: %v", err)
+		time.AfterFunc(5*time.Second, func() {
+			conn.reconnectCh <- struct{}{}
+		})
+	}
+
+	conn.wg.Add(2)
 	go func() {
 		defer conn.wg.Done()
 		conn.keepAlive(ctxInternal)
 	}()
-
-	conn.wg.Add(1)
 	go func() {
 		defer conn.wg.Done()
 		<-ctxInternal.Done()
@@ -437,16 +449,6 @@ func (conn *wsConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 
 		close(conn.readCh) // signal to MessageSource receivers that the wsConn is dead
 	}()
-
-	err := conn.connect(ctxInternal)
-	if err != nil {
-		// The read loop would normally trigger keepAlive, but it wasn't started
-		// on account of a connect error.
-		conn.log.Errorf("Initial connection failed, starting reconnect loop: %v", err)
-		time.AfterFunc(5*time.Second, func() {
-			conn.reconnectCh <- struct{}{}
-		})
-	}
 
 	return &conn.wg, err
 }
