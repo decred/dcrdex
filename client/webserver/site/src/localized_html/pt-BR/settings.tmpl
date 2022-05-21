@@ -2,9 +2,7 @@
 {{template "top" .}}
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div id="main" data-handler="settings" class="text-center py-5 overflow-y-auto">
-
   <span class="settings-gear ico-settings"></span><br>
-
   <div class="settings">
     <div class="form-check">
       <input class="form-check-input" type="checkbox" value="" id="darkMode"{{if .UserInfo.DarkMode}} checked{{end}}>
@@ -20,26 +18,13 @@
     </div>
     <div>
       <div id="exchanges" {{if eq (len .UserInfo.Exchanges) 0}} class="d-hide"{{end}}>
+        <h5>Registered Dexes:</h5>
         {{range $host, $xc := .UserInfo.Exchanges}}
-          <div class="settings-exchange text-break border1">
-            <span>
-              Endereço DEX: {{$host}}
-            </span>
-            <br>
-            ID da Conta: <span class="fs12">
-            {{if eq (len $xc.AcctID) 0}}
-              &lt;login to show&gt;
-            {{else}}
-              {{$xc.AcctID}}
-              <br>
-            {{end}}</span>
-            <button data-tmpl="exportAccount-{{$host}}" class="bg0 {{if eq (len $xc.AcctID) 0}}d-hide{{end}}">Exportar Conta</button>
-            <button data-tmpl="disableAccount-{{$host}}" class="bg0 {{if eq (len $xc.AcctID) 0}}d-hide{{end}}">Desativar Conta</button>
-          </div>
+          <a href="/dexsettings/{{$host}}"><button class="bg2 selected"><div class=text-break>{{$host}}<span class="dex-settings-icon ico-settings"></span></div></button></a>
         {{end}}
       </div>
       <br>
-      <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
+      <div {{if not .UserInfo.Authed}} class="d-hide"{{end}}>
         <p>
         O cliente da DEX suporta simultâneos números de servidores DEX.
         </p>
@@ -74,11 +59,6 @@
       {{template "confirmRegistrationForm"}}
     </form>
 
-    {{- /* AUTHORIZE EXPORT ACCOUNT */ -}}
-    <form class="d-hide" id="authorizeAccountExportForm">
-      {{template "authorizeAccountExportForm"}}
-    </form>
-
     {{- /* AUTHORIZE IMPORT ACCOUNT */ -}}
     <form class="d-hide" id="authorizeAccountImportForm">
       {{template "authorizeAccountImportForm" .}}
@@ -87,11 +67,6 @@
     {{- /* NEW WALLET */ -}}
     <form class="d-hide" id="newWalletForm">
       {{template "newWalletForm" }}
-    </form>
-
-    {{- /* DISABLE ACCOUNT */ -}}
-    <form class="d-hide" id="disableAccountForm">
-      {{template "disableAccountForm"}}
     </form>
 
     {{- /* CHANGE APP PASSWORD */ -}}

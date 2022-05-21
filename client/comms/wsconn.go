@@ -41,6 +41,15 @@ const (
 	DefaultResponseTimeout = 30 * time.Second
 )
 
+// ConnectionStatus represents the current status of the websocket connection.
+type ConnectionStatus uint32
+
+const (
+	Disconnected ConnectionStatus = iota
+	Connected
+	InvalidCert
+)
+
 // ErrInvalidCert is the error returned when attempting to use an invalid cert
 // to set up a ws connection.
 var ErrInvalidCert = fmt.Errorf("invalid certificate")
@@ -88,7 +97,7 @@ type WsCfg struct {
 	//
 	// NOTE: Disconnect event notifications may lag behind actual
 	// disconnections.
-	ConnectEventFunc func(bool)
+	ConnectEventFunc func(ConnectionStatus)
 
 	// Logger is the logger for the WsConn.
 	Logger dex.Logger
@@ -112,8 +121,7 @@ type wsConn struct {
 	wsMtx sync.Mutex
 	ws    *websocket.Conn
 
-	connectedMtx sync.RWMutex
-	connected    bool
+	connectionStatus uint32 // atomic
 
 	reqMtx       sync.RWMutex
 	respHandlers map[uint64]*responseHandler
@@ -163,20 +171,16 @@ func NewWsConn(cfg *WsCfg) (WsConn, error) {
 
 // IsDown indicates if the connection is known to be down.
 func (conn *wsConn) IsDown() bool {
-	conn.connectedMtx.RLock()
-	defer conn.connectedMtx.RUnlock()
-	return !conn.connected
+	return atomic.LoadUint32(&conn.connectionStatus) != uint32(Connected)
 }
 
-// setConnected updates the connection's connected state and runs the
+// setConnectionStatus updates the connection's status and runs the
 // ConnectEventFunc in case of a change.
-func (conn *wsConn) setConnected(connected bool) {
-	conn.connectedMtx.Lock()
-	statusChange := conn.connected != connected
-	conn.connected = connected
-	conn.connectedMtx.Unlock()
+func (conn *wsConn) setConnectionStatus(status ConnectionStatus) {
+	oldStatus := atomic.SwapUint32(&conn.connectionStatus, uint32(status))
+	statusChange := oldStatus != uint32(status)
 	if statusChange && conn.cfg.ConnectEventFunc != nil {
-		conn.cfg.ConnectEventFunc(connected)
+		conn.cfg.ConnectEventFunc(status)
 	}
 }
 
@@ -195,11 +199,13 @@ func (conn *wsConn) connect(ctx context.Context) error {
 	if err != nil {
 		var e x509.UnknownAuthorityError
 		if errors.As(err, &e) {
+			conn.setConnectionStatus(InvalidCert)
 			if conn.tlsCfg == nil {
 				return ErrCertRequired
 			}
 			return ErrInvalidCert
 		}
+		conn.setConnectionStatus(Disconnected)
 		return err
 	}
 
@@ -241,7 +247,7 @@ func (conn *wsConn) connect(ctx context.Context) error {
 	conn.ws = ws
 	conn.wsMtx.Unlock()
 
-	conn.setConnected(true)
+	conn.setConnectionStatus(Connected)
 	conn.wg.Add(1)
 	go func() {
 		defer conn.wg.Done()
@@ -264,7 +270,7 @@ func (conn *wsConn) close() {
 // run as a goroutine. Increment the wg before calling read.
 func (conn *wsConn) read(ctx context.Context) {
 	reconnect := func() {
-		conn.setConnected(false)
+		conn.setConnectionStatus(Disconnected)
 		conn.reconnectCh <- struct{}{}
 	}
 
@@ -406,17 +412,34 @@ func (conn *wsConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	var ctxInternal context.Context
 	ctxInternal, conn.cancel = context.WithCancel(ctx)
 
-	conn.wg.Add(1)
+	err := conn.connect(ctxInternal)
+	if err != nil {
+		// If the certificate is invalid or missing, do not start the reconnect
+		// loop, and return an error with no WaitGroup.
+		if errors.Is(err, ErrInvalidCert) || errors.Is(err, ErrCertRequired) {
+			conn.cancel()
+			conn.wg.Wait() // probably a no-op
+			close(conn.readCh)
+			return nil, err
+		}
+
+		// The read loop would normally trigger keepAlive, but it wasn't started
+		// on account of a connect error.
+		conn.log.Errorf("Initial connection failed, starting reconnect loop: %v", err)
+		time.AfterFunc(5*time.Second, func() {
+			conn.reconnectCh <- struct{}{}
+		})
+	}
+
+	conn.wg.Add(2)
 	go func() {
 		defer conn.wg.Done()
 		conn.keepAlive(ctxInternal)
 	}()
-
-	conn.wg.Add(1)
 	go func() {
 		defer conn.wg.Done()
 		<-ctxInternal.Done()
-		conn.setConnected(false)
+		conn.setConnectionStatus(Disconnected)
 		conn.wsMtx.Lock()
 		if conn.ws != nil {
 			conn.log.Debug("Sending close 1000 (normal) message.")
@@ -426,16 +449,6 @@ func (conn *wsConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 
 		close(conn.readCh) // signal to MessageSource receivers that the wsConn is dead
 	}()
-
-	err := conn.connect(ctxInternal)
-	if err != nil {
-		// The read loop would normally trigger keepAlive, but it wasn't started
-		// on account of a connect error.
-		conn.log.Errorf("Initial connection failed, starting reconnect loop: %v", err)
-		time.AfterFunc(5*time.Second, func() {
-			conn.reconnectCh <- struct{}{}
-		})
-	}
 
 	return &conn.wg, err
 }

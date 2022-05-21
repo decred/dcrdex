@@ -75,6 +75,7 @@ type clientCore interface {
 	websocket.Core
 	Network() dex.Network
 	Exchanges() map[string]*core.Exchange
+	Exchange(host string) (*core.Exchange, error)
 	Register(*core.RegisterForm) (*core.RegisterResult, error)
 	Login(pw []byte) (*core.LoginResult, error)
 	InitializeClient(pw, seed []byte) error
@@ -116,6 +117,7 @@ type clientCore interface {
 	PreAccelerateOrder(oidB dex.Bytes) (*core.PreAccelerate, error)
 	AccelerateOrder(pw []byte, oidB dex.Bytes, newFeeRate uint64) (string, error)
 	AccelerationEstimate(oidB dex.Bytes, newFeeRate uint64) (uint64, error)
+	UpdateCert(host string, cert []byte) error
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -268,6 +270,7 @@ func New(cfg *Config) (*WebServer, error) {
 		// after initial setup.
 		web.Get(registerRoute, s.handleRegister)
 		web.Get(settingsRoute, s.handleSettings)
+		web.With(dexHostCtx).Get("/dexsettings/{host}", s.handleDexSettings)
 
 		web.Get("/generateqrcode", s.handleGenerateQRCode)
 
@@ -350,6 +353,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/accelerateorder", s.apiAccelerateOrder)
 			apiAuth.Post("/preaccelerate", s.apiPreAccelerate)
 			apiAuth.Post("/accelerationestimate", s.apiAccelerationEstimate)
+			apiAuth.Post("/updatecert", s.apiUpdateCert)
 		})
 	})
 
@@ -424,7 +428,8 @@ func (s *WebServer) buildTemplates(lang string) error {
 		addTemplate("wallets", bb, "forms").
 		addTemplate("settings", bb, "forms").
 		addTemplate("orders", bb).
-		addTemplate("order", bb, "forms")
+		addTemplate("order", bb, "forms").
+		addTemplate("dexsettings", bb, "forms")
 	return s.html.buildErr()
 }
 

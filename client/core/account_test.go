@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -175,6 +176,82 @@ func TestAccountDisable(t *testing.T) {
 		if rig.db.disabledAcct.Host == test.host {
 			t.Fatalf("expected db disabled account to match test host, want: %v"+
 				" got: %v", test.host, rig.db.disabledAcct.Host)
+		}
+	}
+}
+
+func TestUpdateCert(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	rig.db.acct.Paid = true
+	rig.db.acct.FeeCoin = encode.RandomBytes(32)
+
+	tests := []struct {
+		name                 string
+		host                 string
+		acctErr              bool
+		updateAccountInfoErr bool
+		queueConfig          bool
+		expectError          bool
+	}{
+		{
+			name:        "ok",
+			host:        rig.db.acct.Host,
+			queueConfig: true,
+		},
+		{
+			name:        "connect error",
+			host:        rig.db.acct.Host,
+			queueConfig: false,
+			expectError: true,
+		},
+		{
+			name:        "db get account error",
+			host:        rig.db.acct.Host,
+			queueConfig: true,
+			acctErr:     true,
+			expectError: true,
+		},
+		{
+			name:                 "db update account err",
+			host:                 rig.db.acct.Host,
+			queueConfig:          true,
+			updateAccountInfoErr: true,
+			expectError:          true,
+		},
+	}
+
+	for _, test := range tests {
+		rig.db.verifyUpdateAccountInfo = false
+		if test.updateAccountInfoErr {
+			rig.db.updateAccountInfoErr = errors.New("")
+		} else {
+			rig.db.updateAccountInfoErr = nil
+		}
+		if test.acctErr {
+			rig.db.acctErr = errors.New("")
+		} else {
+			rig.db.acctErr = nil
+		}
+		randomCert := encode.RandomBytes(32)
+		if test.queueConfig {
+			rig.queueConfig()
+		}
+		err := tCore.UpdateCert(test.host, randomCert)
+		if test.expectError {
+			if err == nil {
+				t.Fatalf("%s: expected error but did not get", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", test.name, err)
+		}
+		if !rig.db.verifyUpdateAccountInfo {
+			t.Fatalf("%s: expected update account to be called but it was not", test.name)
+		}
+		if !bytes.Equal(randomCert, rig.db.acct.Cert) {
+			t.Fatalf("%s: expected account to be updated with cert but it was not", test.name)
 		}
 	}
 }

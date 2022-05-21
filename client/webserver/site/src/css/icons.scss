@@ -56,10 +56,6 @@
   content: "\e902";
 }
 
-.ico-rocket::before {
-  content: "\e9a5";
-}
-
 .ico-profile::before {
   content: "\e903";
 }
@@ -114,4 +110,12 @@
 
 .ico-checkbox::before {
   content: "\e90d";
+}
+
+.ico-connection::before {
+  content: "\e90e";
+}
+
+.ico-rocket::before {
+  content: "\e90f";
 }

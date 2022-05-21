@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 
 	"decred.org/dcrdex/client/db"
@@ -186,6 +187,29 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 		if err != nil {
 			return codedError(dbErr, err)
 		}
+	}
+
+	return nil
+}
+
+// UpdateCert attempts to connect to a server using a new TLS certificate. If
+// the connection is successful, then the cert in the database is updated.
+func (c *Core) UpdateCert(host string, cert []byte) error {
+	accountInfo, err := c.db.Account(host)
+	if err != nil {
+		return err
+	}
+
+	accountInfo.Cert = cert
+
+	_, connected := c.connectAccount(accountInfo)
+	if !connected {
+		return errors.New("failed to connect using new cert")
+	}
+
+	err = c.db.UpdateAccountInfo(accountInfo)
+	if err != nil {
+		return fmt.Errorf("failed to update account info: %w", err)
 	}
 
 	return nil

@@ -233,4 +233,7 @@ var EnUS = map[string]string{
 	"confirm_force_message":       "This wallet is actively managing orders. After taking this action, it will take a long time to resync your wallet, potentially causing orders to fail. Only take this action if absolutely necessary!",
 	"confirm":                     "Confirm",
 	"cancel":                      "Cancel",
+	"Update TLS Certificate":      "Update TLS Certificate",
+	"registered dexes":            "Registered Dexes:",
+	"successful_cert_update":      "Successfully updated certificate!",
 }

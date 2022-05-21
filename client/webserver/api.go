@@ -400,6 +400,24 @@ func (s *WebServer) apiAccountImport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
+func (s *WebServer) apiUpdateCert(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		Host string `json:"host"`
+		Cert string `json:"cert"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+
+	err := s.core.UpdateCert(form.Host, []byte(form.Cert))
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error updating cert: %w", err))
+		return
+	}
+
+	writeJSON(w, simpleAck(), s.indent)
+}
+
 // apiAccountDisable is the handler for the '/disableaccount' API request.
 func (s *WebServer) apiAccountDisable(w http.ResponseWriter, r *http.Request) {
 	form := new(accountDisableForm)

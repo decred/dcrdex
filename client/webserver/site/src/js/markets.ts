@@ -48,7 +48,8 @@ import {
   RemainderUpdate,
   ConnEventNote,
   Spot,
-  OrderOption
+  OrderOption,
+  ConnectionStatus
 } from './registry'
 
 const bind = Doc.bind
@@ -245,6 +246,7 @@ export default class MarketsPage extends BasePage {
     // Prepare the list of markets.
     this.marketList = new MarketList(page.marketList)
     for (const xc of this.marketList.xcSections) {
+      if (!xc.marketRows) continue
       for (const row of xc.marketRows) {
         bind(row.node, 'click', () => {
           this.setMarket(xc.host, row.mkt.baseid, row.mkt.quoteid)
@@ -620,7 +622,7 @@ export default class MarketsPage extends BasePage {
 
     // If dex is not connected to server, is not possible to know fee
     // registration status.
-    if (!dex.connected) return
+    if (dex.connectionStatus !== ConnectionStatus.Connected) return
 
     this.updateRegistrationStatusView()
 
@@ -671,7 +673,7 @@ export default class MarketsPage extends BasePage {
     // If we have not yet connected, there is no dex.assets or any other
     // exchange data, so just put up a message and wait for the connection to be
     // established, at which time handleConnNote will refresh and reload.
-    if (!dex.connected) {
+    if (dex.connectionStatus !== ConnectionStatus.Connected) {
       // TODO: Figure out why this was like this.
       // this.market = { dex: dex }
 
@@ -1737,7 +1739,7 @@ export default class MarketsPage extends BasePage {
   }
 
   setBalanceVisibility () {
-    if (this.market.dex.connected) {
+    if (this.market.dex.connectionStatus === ConnectionStatus.Connected) {
       Doc.show(this.page.balanceTable)
     } else {
       Doc.hide(this.page.balanceTable)
@@ -1749,7 +1751,7 @@ export default class MarketsPage extends BasePage {
     this.setBalanceVisibility()
     // if connection to dex server fails, it is not possible to retrieve
     // markets.
-    if (!this.market.dex.connected) return
+    if (this.market.dex.connectionStatus !== ConnectionStatus.Connected) return
     this.balanceWgt.updateAsset(note.assetID)
     // If there's a balance update, refresh the max order section.
     const mkt = this.market
@@ -2070,7 +2072,7 @@ export default class MarketsPage extends BasePage {
    */
   async handleConnNote (note: ConnEventNote) {
     this.marketList.setConnectionStatus(note)
-    if (note.connected) {
+    if (note.connectionStatus === ConnectionStatus.Connected) {
       // Having been disconnected from a DEX server, anything may have changed,
       // or this may be the first opportunity to get the server's config, so
       // fetch it all before reloading the markets page.
@@ -2259,7 +2261,7 @@ class MarketList {
   setConnectionStatus (note: ConnEventNote) {
     const xcSection = this.xcSection(note.host)
     if (!xcSection) return console.error(`setConnectionStatus: no exchange section for ${note.host}`)
-    xcSection.setConnected(note.connected)
+    xcSection.setConnected(note.connectionStatus === ConnectionStatus.Connected)
   }
 
   /*
@@ -2290,7 +2292,7 @@ class ExchangeSection {
     tmpl.header.textContent = dex.host
 
     this.disconnectedIco = tmpl.disconnected
-    if (dex.connected) Doc.hide(tmpl.disconnected)
+    if (dex.connectionStatus === ConnectionStatus.Connected) Doc.hide(tmpl.disconnected)
 
     tmpl.mkts.removeChild(tmpl.mktrow)
     // If disconnected is not possible to get the markets from the server.
@@ -2311,6 +2313,7 @@ class ExchangeSection {
    * symbol first, quote symbol second.
    */
   sortedMarkets () {
+    if (!this.marketRows) return []
     return [...this.marketRows].sort((a, b) => a.name < b.name ? -1 : 1)
   }
 

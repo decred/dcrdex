@@ -84,6 +84,13 @@ func (c *TCore) CloseWallet(assetID uint32) error {
 	return c.closeWalletErr
 }
 func (c *TCore) Exchanges() (exchanges map[string]*core.Exchange) { return c.exchanges }
+func (c *TCore) Exchange(host string) (*core.Exchange, error) {
+	exchange, ok := c.exchanges[host]
+	if !ok {
+		return nil, fmt.Errorf("no exchange at %v", host)
+	}
+	return exchange, nil
+}
 func (c *TCore) InitializeClient(pw, seed []byte) error {
 	return c.initializeClientErr
 }

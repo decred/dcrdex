@@ -134,8 +134,9 @@ type dexConnection struct {
 
 	epochMtx sync.RWMutex
 	epoch    map[string]uint64
-	// connected is a best guess on the ws connection status.
-	connected uint32
+
+	// connectionStatus is a best guess on the ws connection status.
+	connectionStatus uint32
 
 	pendingFeeMtx sync.RWMutex
 	pendingFee    *pendingFeeState
@@ -162,6 +163,11 @@ func (dc *dexConnection) running(mkt string) bool {
 		return false // not found means not running
 	}
 	return mktCfg.Running()
+}
+
+// status returns the status of the connection to the dex.
+func (dc *dexConnection) status() comms.ConnectionStatus {
+	return comms.ConnectionStatus(atomic.LoadUint32(&dc.connectionStatus))
 }
 
 func (dc *dexConnection) feeAsset(assetID uint32) *msgjson.FeeAsset {
@@ -296,10 +302,10 @@ func (dc *dexConnection) exchangeInfo() *Exchange {
 	dc.cfgMtx.RUnlock()
 	if cfg == nil { // no config, assets, or markets data
 		return &Exchange{
-			Host:       dc.acct.host,
-			AcctID:     acctID,
-			Connected:  atomic.LoadUint32(&dc.connected) == 1,
-			PendingFee: dc.getPendingFee(),
+			Host:             dc.acct.host,
+			AcctID:           acctID,
+			ConnectionStatus: dc.status(),
+			PendingFee:       dc.getPendingFee(),
 		}
 	}
 
@@ -329,15 +335,15 @@ func (dc *dexConnection) exchangeInfo() *Exchange {
 	}
 
 	return &Exchange{
-		Host:       dc.acct.host,
-		AcctID:     acctID,
-		Markets:    dc.marketMap(),
-		Assets:     assets,
-		Connected:  atomic.LoadUint32(&dc.connected) == 1,
-		Fee:        dcrAsset,
-		RegFees:    feeAssets,
-		PendingFee: dc.getPendingFee(),
-		CandleDurs: cfg.BinSizes,
+		Host:             dc.acct.host,
+		AcctID:           acctID,
+		Markets:          dc.marketMap(),
+		Assets:           assets,
+		ConnectionStatus: dc.status(),
+		Fee:              dcrAsset,
+		RegFees:          feeAssets,
+		PendingFee:       dc.getPendingFee(),
+		CandleDurs:       cfg.BinSizes,
 	}
 }
 
@@ -947,11 +953,10 @@ func (c *Core) dex(addr string) (*dexConnection, bool, error) {
 	c.connMtx.RLock()
 	dc, found := c.conns[host]
 	c.connMtx.RUnlock()
-	connected := found && atomic.LoadUint32(&dc.connected) == 1
 	if !found {
 		return nil, false, fmt.Errorf("unknown DEX %s", addr)
 	}
-	return dc, connected, nil
+	return dc, dc.status() == comms.Connected, nil
 }
 
 // Get the *dexConnection for the the host. Return an error if the DEX is not
@@ -1395,7 +1400,22 @@ func (c *Core) Network() dex.Network {
 // Exchanges creates a map of *Exchange keyed by host, including markets and
 // orders.
 func (c *Core) Exchanges() map[string]*Exchange {
-	return c.exchangeMap()
+	dcs := c.dexConnections()
+	infos := make(map[string]*Exchange, len(dcs))
+	for _, dc := range dcs {
+		infos[dc.acct.host] = dc.exchangeInfo()
+	}
+	return infos
+}
+
+// Exchange returns an exchange with a certain host. It returns an error if
+// no exchange exists at that host.
+func (c *Core) Exchange(host string) (*Exchange, error) {
+	dc, _, err := c.dex(host)
+	if err != nil {
+		return nil, err
+	}
+	return dc.exchangeInfo(), nil
 }
 
 // dexConnections creates a slice of the *dexConnection in c.conns.
@@ -1407,17 +1427,6 @@ func (c *Core) dexConnections() []*dexConnection {
 		conns = append(conns, conn)
 	}
 	return conns
-}
-
-// exchangeMap creates a map of *Exchange keyed by host, including markets and
-// orders.
-func (c *Core) exchangeMap() map[string]*Exchange {
-	dcs := c.dexConnections()
-	infos := make(map[string]*Exchange, len(dcs))
-	for _, dc := range dcs {
-		infos[dc.acct.host] = dc.exchangeInfo()
-	}
-	return infos
 }
 
 // wallet gets the wallet for the specified asset ID in a thread-safe way.
@@ -1693,7 +1702,7 @@ func (c *Core) assetMap() map[uint32]*SupportedAsset {
 func (c *Core) User() *User {
 	return &User{
 		Assets:             c.assetMap(),
-		Exchanges:          c.exchangeMap(),
+		Exchanges:          c.Exchanges(),
 		Initialized:        c.IsInitialized(),
 		SeedGenerationTime: c.seedGenerationTime,
 	}
@@ -4943,7 +4952,8 @@ func (c *Core) initialize() {
 // connectAccount makes a connection to the DEX for the given account. If a
 // non-nil dexConnection is returned, it was inserted into the conns map even if
 // the initial connection attempt failed (connected == false), and the connect
-// retry / keepalive loop is active.
+// retry / keepalive loop is active. If there was already a dexConnection, it is
+// first stopped.
 func (c *Core) connectAccount(acct *db.AccountInfo) (dc *dexConnection, connected bool) {
 	if !acct.Paid && len(acct.FeeCoin) == 0 {
 		// Register should have set this when creating the account that was
@@ -4958,6 +4968,23 @@ func (c *Core) connectAccount(acct *db.AccountInfo) (dc *dexConnection, connecte
 		c.log.Errorf("skipping loading of %s due to address parse error: %v", host, err)
 		return
 	}
+
+	c.connMtx.RLock()
+	if dc := c.conns[host]; dc != nil {
+		dc.connMaster.Disconnect()
+		dc.acct.lock()
+		dc.booksMtx.Lock()
+		for m, b := range dc.books {
+			b.closeFeeds()
+			if b.closeTimer != nil {
+				b.closeTimer.Stop()
+			}
+			delete(dc.books, m)
+		}
+		dc.booksMtx.Unlock()
+	} // leave it in the map so it remains listed if connectDEX fails
+	c.connMtx.RUnlock()
+
 	dc, err = c.connectDEX(acct)
 	if dc == nil {
 		c.log.Errorf("Cannot connect to DEX %s: %v", host, err)
@@ -5697,6 +5724,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 		apiVer:            -1,
 		reportingConnects: reporting,
 		spots:             make(map[string]*msgjson.Spot),
+		connectionStatus:  uint32(comms.Disconnected),
 		// On connect, must set: cfg, epoch, and assets.
 	}
 
@@ -5726,8 +5754,8 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 		return nil, errors.New("a TLS connection is required when not using a hidden service")
 	}
 
-	wsCfg.ConnectEventFunc = func(connected bool) {
-		c.handleConnectEvent(dc, connected)
+	wsCfg.ConnectEventFunc = func(status comms.ConnectionStatus) {
+		c.handleConnectEvent(dc, status)
 	}
 	wsCfg.ReconnectSync = func() {
 		go c.handleReconnect(host)
@@ -5741,6 +5769,14 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 
 	dc.WsConn = conn
 	dc.connMaster = dex.NewConnectionMaster(conn)
+
+	// At this point, we have a valid dexConnection object whether or not we can
+	// actually connect. In any return below, we return the dexConnection so it
+	// may be tracked in the c.conns map (and listed as a known DEX). TODO:
+	// split the above code into a dexConnection constructor, and the below into
+	// a startDexConnection function so we don't have the anti-pattern of
+	// returning a non-nil object with a non-nil error and requiring the caller
+	// to check both!
 
 	// Start listening for messages. The listener stops when core shuts down or
 	// the dexConnection's ConnectionMaster is shut down. This goroutine should
@@ -5881,11 +5917,9 @@ func (dc *dexConnection) broadcastingConnect() bool {
 // lost or established.
 //
 // NOTE: Disconnect event notifications may lag behind actual disconnections.
-func (c *Core) handleConnectEvent(dc *dexConnection, connected bool) {
-	var v uint32
+func (c *Core) handleConnectEvent(dc *dexConnection, status comms.ConnectionStatus) {
 	topic := TopicDEXDisconnected
-	if connected {
-		v = 1
+	if status == comms.Connected {
 		topic = TopicDEXConnected
 	} else {
 		for _, tracker := range dc.trackedTrades() {
@@ -5901,10 +5935,10 @@ func (c *Core) handleConnectEvent(dc *dexConnection, connected bool) {
 			tracker.mtx.Unlock()
 		}
 	}
-	atomic.StoreUint32(&dc.connected, v)
+	atomic.StoreUint32(&dc.connectionStatus, uint32(status))
 	if dc.broadcastingConnect() {
 		subject, details := c.formatDetails(topic, dc.acct.host)
-		dc.notify(newConnEventNote(topic, subject, dc.acct.host, connected, details, db.Poke))
+		dc.notify(newConnEventNote(topic, subject, dc.acct.host, status, details, db.Poke))
 	}
 }
 

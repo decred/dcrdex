@@ -1,0 +1,41 @@
+{{define "dexsettings"}}
+{{template "top" .}}
+{{$passwordIsCached := .UserInfo.PasswordIsCached}}
+<div id="main" data-handler="dexsettings" data-host="{{.Exchange.Host}}" class="text-center py-5 overflow-y-auto">
+  <span class="settings-gear ico-settings"></span>
+  <div class="flex-center fs28 text-break">{{.Exchange.Host}}</div>
+  <div class="flex-center fs16 mb-2">
+    <span class="me-2 connection ico-connection d-hide" id="connectedIcon"></span>
+    <span class="disconnected ico-disconnected d-hide" id="disconnectedIcon"></span>
+    <h4 id="connectionStatus"></h4>
+  </div>
+  <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="errMsg"></div>
+  <div class="settings">
+    <div>
+      <button id="exportDexBtn" class="bg2 selected">Export Account</button>
+    </div>
+    <div>
+      <button id="disableAcctBtn" class="bg2 selected">Disable Account</button>
+    </div>
+    <div>
+      <input type="file" class="form-control select d-none" id="certFileInput">
+      <button id="updateCertBtn" class="bg2 selected">Update TLS Certificate</button>
+      <span class="update-cert-msg mx-2 d-hide" id="updateCertMsg">Successfully updated certificate!</span>
+    </div>
+  </div>
+
+  <div id="forms" class="d-hide">
+    {{- /* DISABLE ACCOUNT */ -}}
+    <form class="d-hide" id="disableAccountForm">
+      {{template "disableAccountForm"}}
+    </form>
+
+    {{- /* AUTHORIZE EXPORT ACCOUNT */ -}}
+    <form class="d-hide" id="authorizeAccountExportForm">
+      {{template "authorizeAccountExportForm"}}
+    </form>
+  </div>
+
+</div>
+{{template "bottom"}}
+{{end}}

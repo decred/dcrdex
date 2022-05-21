@@ -7,6 +7,7 @@ import SettingsPage from './settings'
 import MarketsPage from './markets'
 import OrdersPage from './orders'
 import OrderPage from './order'
+import DexSettingsPage from './dexsettings'
 import { RateEncodingFactor, StatusExecuted, hasLiveMatches } from './orderutil'
 import { getJSON, postJSON } from './http'
 import * as ntfn from './notifications'
@@ -67,7 +68,8 @@ const constructors: Record<string, PageClass> = {
   wallets: WalletsPage,
   settings: SettingsPage,
   orders: OrdersPage,
-  order: OrderPage
+  order: OrderPage,
+  dexsettings: DexSettingsPage
 }
 
 // unathedPages are pages that don't require authorization to load.
@@ -578,7 +580,7 @@ export default class Application {
       case 'conn': {
         const n = note as ConnEventNote
         const xc = this.user.exchanges[n.host]
-        if (xc) xc.connected = n.connected
+        if (xc) xc.connectionStatus = n.connectionStatus
         break
       }
       case 'spots': {
@@ -730,6 +732,7 @@ export default class Application {
    */
   haveAssetOrders (assetID: number): boolean {
     for (const xc of Object.values(this.user.exchanges)) {
+      if (!xc.markets) continue
       for (const market of Object.values(xc.markets)) {
         if (!market.orders) continue
         for (const ord of market.orders) {

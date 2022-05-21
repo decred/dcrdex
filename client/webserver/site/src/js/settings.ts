@@ -111,21 +111,6 @@ export default class SettingsPage extends BasePage {
       this.animateRegAsset(page.dexAddrForm)
     })
 
-    forms.bind(page.authorizeAccountExportForm, page.authorizeExportAccountConfirm, () => this.exportAccount())
-    forms.bind(page.disableAccountForm, page.disableAccountConfirm, () => this.disableAccount())
-
-    const exchangesDiv = page.exchanges
-    if (typeof app().user.exchanges !== 'undefined') {
-      for (const host of Object.keys(app().user.exchanges)) {
-        // Bind export account button click event.
-        const exportAccountButton = Doc.tmplElement(exchangesDiv, `exportAccount-${host}`)
-        Doc.bind(exportAccountButton, 'click', () => this.prepareAccountExport(host, page.authorizeAccountExportForm))
-        // Bind disable account button click event.
-        const disableAccountButton = Doc.tmplElement(exchangesDiv, `disableAccount-${host}`)
-        Doc.bind(disableAccountButton, 'click', () => this.prepareAccountDisable(host, page.disableAccountForm))
-      }
-    }
-
     Doc.bind(page.importAccount, 'click', () => this.prepareAccountImport(page.authorizeAccountImportForm))
     forms.bind(page.authorizeAccountImportForm, page.authorizeImportAccountConfirm, () => this.importAccount())
 
@@ -199,73 +184,6 @@ export default class SettingsPage extends BasePage {
     this.walletWaitForm.setWallet(wallet, txFee)
     this.currentForm = page.walletWait
     await forms.slideSwap(page.newWalletForm, page.walletWait)
-  }
-
-  async prepareAccountExport (host: string, authorizeAccountExportForm: HTMLElement) {
-    const page = this.page
-    page.exportAccountHost.textContent = host
-    page.exportAccountErr.textContent = ''
-    if (State.passwordIsCached()) {
-      this.exportAccount()
-    } else {
-      this.showForm(authorizeAccountExportForm)
-    }
-  }
-
-  async prepareAccountDisable (host: string, disableAccountForm: HTMLElement) {
-    const page = this.page
-    page.disableAccountHost.textContent = host
-    page.disableAccountErr.textContent = ''
-    this.showForm(disableAccountForm)
-  }
-
-  // exportAccount exports and downloads the account info.
-  async exportAccount () {
-    const page = this.page
-    const pw = page.exportAccountAppPass.value
-    const host = page.exportAccountHost.textContent
-    page.exportAccountAppPass.value = ''
-    const req = {
-      pw,
-      host
-    }
-    const loaded = app().loading(this.body)
-    const res = await postJSON('/api/exportaccount', req)
-    loaded()
-    if (!app().checkResponse(res)) {
-      page.exportAccountErr.textContent = res.msg
-      Doc.show(page.exportAccountErr)
-      return
-    }
-    const accountForExport = JSON.parse(JSON.stringify(res.account))
-    const a = document.createElement('a')
-    a.setAttribute('download', 'dcrAccount-' + host + '.json')
-    a.setAttribute('href', 'data:text/json,' + JSON.stringify(accountForExport, null, 2))
-    a.click()
-    Doc.hide(page.forms)
-  }
-
-  // disableAccount disables the account associated with the provided host.
-  async disableAccount () {
-    const page = this.page
-    const pw = page.disableAccountAppPW.value
-    const host = page.disableAccountHost.textContent
-    page.disableAccountAppPW.value = ''
-    const req = {
-      pw,
-      host
-    }
-    const loaded = app().loading(this.body)
-    const res = await postJSON('/api/disableaccount', req)
-    loaded()
-    if (!app().checkResponse(res, true)) {
-      page.disableAccountErr.textContent = res.msg
-      Doc.show(page.disableAccountErr)
-      return
-    }
-    Doc.hide(page.forms)
-    // Initial method of removing disabled account.
-    window.location.reload()
   }
 
   async onAccountFileChange () {

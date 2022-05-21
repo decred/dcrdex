@@ -45,6 +45,7 @@ import (
 	"decred.org/dcrdex/client/asset/doge"
 	"decred.org/dcrdex/client/asset/eth"
 	"decred.org/dcrdex/client/asset/ltc"
+	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
@@ -727,7 +728,7 @@ func TestOrderStatusReconciliation(t *testing.T) {
 	disconnectTimeout := 10 * sleepFactor * time.Second
 	disconnected := client2.notes.find(context.Background(), disconnectTimeout, func(n Notification) bool {
 		connNote, ok := n.(*ConnEventNote)
-		return ok && connNote.Host == dexHost && !connNote.Connected
+		return ok && connNote.Host == dexHost && connNote.ConnectionStatus != comms.Connected
 	})
 	if !disconnected {
 		t.Fatalf("client 2 dex not disconnected after %v", disconnectTimeout)
