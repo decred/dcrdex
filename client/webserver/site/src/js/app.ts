@@ -580,9 +580,7 @@ export default class Application {
       case 'conn': {
         const n = note as ConnEventNote
         const xc = this.user.exchanges[n.host]
-        if (xc) {
-          xc.connectionStatus = n.connectionStatus
-        }
+        if (xc) xc.connectionStatus = n.connectionStatus
         break
       }
       case 'spots': {

@@ -1411,11 +1411,11 @@ func (c *Core) Exchanges() map[string]*Exchange {
 // Exchange returns an exchange with a certain host. It returns an error if
 // no exchange exists at that host.
 func (c *Core) Exchange(host string) (*Exchange, error) {
-	exchange, ok := c.Exchanges()[host]
-	if !ok {
-		return nil, fmt.Errorf("no exchange with host %s exists", host)
+	dc, _, err := c.dex(host)
+	if err != nil {
+		return nil, err
 	}
-	return exchange, nil
+	return dc.exchangeInfo(), nil
 }
 
 // dexConnections creates a slice of the *dexConnection in c.conns.
@@ -4952,7 +4952,8 @@ func (c *Core) initialize() {
 // connectAccount makes a connection to the DEX for the given account. If a
 // non-nil dexConnection is returned, it was inserted into the conns map even if
 // the initial connection attempt failed (connected == false), and the connect
-// retry / keepalive loop is active.
+// retry / keepalive loop is active. If there was already a dexConnection, it is
+// first stopped.
 func (c *Core) connectAccount(acct *db.AccountInfo) (dc *dexConnection, connected bool) {
 	if !acct.Paid && len(acct.FeeCoin) == 0 {
 		// Register should have set this when creating the account that was
@@ -4967,6 +4968,23 @@ func (c *Core) connectAccount(acct *db.AccountInfo) (dc *dexConnection, connecte
 		c.log.Errorf("skipping loading of %s due to address parse error: %v", host, err)
 		return
 	}
+
+	c.connMtx.RLock()
+	if dc := c.conns[host]; dc != nil {
+		dc.connMaster.Disconnect()
+		dc.acct.lock()
+		dc.booksMtx.Lock()
+		for m, b := range dc.books {
+			b.closeFeeds()
+			if b.closeTimer != nil {
+				b.closeTimer.Stop()
+			}
+			delete(dc.books, m)
+		}
+		dc.booksMtx.Unlock()
+	} // leave it in the map so it remains listed if connectDEX fails
+	c.connMtx.RUnlock()
+
 	dc, err = c.connectDEX(acct)
 	if dc == nil {
 		c.log.Errorf("Cannot connect to DEX %s: %v", host, err)
