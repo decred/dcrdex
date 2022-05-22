@@ -15,6 +15,10 @@
 // ------------------------------------------
 // Test that fees rates are parsed without error and that a few historical fee
 // rates are correct
+//
+// go test -v -tags dogelive -run TestMedianFeeRates
+// ------------------------------------------
+// Test the median fee rate calculation.
 
 package doge
 
@@ -36,6 +40,7 @@ var (
 func TestMain(m *testing.M) {
 	// Wrap everything for defers.
 	doIt := func() int {
+		maxFeeBlocks = 1000
 		logger := dex.StdOutLogger("DOGETEST", dex.LevelTrace)
 		dexAsset, err := NewBackend("", logger, dex.Mainnet)
 		if err != nil {
@@ -51,7 +56,7 @@ func TestMain(m *testing.M) {
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
-		wg, err := dexAsset.Connect(ctx)
+		wg, err := doge.Connect(ctx)
 		if err != nil {
 			fmt.Printf("Connect failed: %v", err)
 			return 1

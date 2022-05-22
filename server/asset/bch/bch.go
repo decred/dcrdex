@@ -14,6 +14,8 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 )
 
+var maxFeeBlocks = 3
+
 // Driver implements asset.Driver.
 type Driver struct{}
 
@@ -91,6 +93,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		// in units of BCH/byte.
 		ManualMedianFee:      true,
 		NoCompetitionFeeRate: 2,
+		MaxFeeBlocks:         maxFeeBlocks,
 		ArglessFeeEstimates:  true,
 	})
 	if err != nil {

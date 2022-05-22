@@ -33,7 +33,7 @@ const (
 	methodGetBlockHeader    = "getblockheader"
 	methodGetBlockStats     = "getblockstats"
 
-	ErrNoCompetition = dex.ErrorKind("no competition")
+	errNoCompetition = dex.ErrorKind("no competition")
 )
 
 // RawRequester is for sending context-aware RPC requests, and has methods for
@@ -165,11 +165,7 @@ func (rc *RPCClient) GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.
 		true}, res)
 }
 
-// getBlock fetches raw block data, and the "verbose" block header, for the
-// block with the given hash. The verbose block header return is separate
-// because it contains other useful info like the height and median time that
-// the wire type does not contain.
-func (rc *RPCClient) getBlock(blockHash *chainhash.Hash) (*wire.MsgBlock, *btcjson.GetBlockHeaderVerboseResult, error) {
+func (rc *RPCClient) GetBlock(blockHash *chainhash.Hash) (*wire.MsgBlock, error) {
 	arg := interface{}(0)
 	if rc.booleanGetBlockRPC {
 		arg = false
@@ -177,20 +173,32 @@ func (rc *RPCClient) getBlock(blockHash *chainhash.Hash) (*wire.MsgBlock, *btcjs
 	var blockB dex.Bytes // UnmarshalJSON hex -> bytes
 	err := rc.call(methodGetBlock, anylist{blockHash.String(), arg}, &blockB)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	var msgBlock *wire.MsgBlock
 	if rc.blockDeserializer == nil {
 		msgBlock = &wire.MsgBlock{}
 		if err := msgBlock.Deserialize(bytes.NewReader(blockB)); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	} else {
 		msgBlock, err = rc.blockDeserializer(blockB)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
+	}
+	return msgBlock, nil
+}
+
+// getBlockWithVerboseHeader fetches raw block data, and the "verbose" block
+// header, for the block with the given hash. The verbose block header return is
+// separate because it contains other useful info like the height and median
+// time that the wire type does not contain.
+func (rc *RPCClient) getBlockWithVerboseHeader(blockHash *chainhash.Hash) (*wire.MsgBlock, *btcjson.GetBlockHeaderVerboseResult, error) {
+	msgBlock, err := rc.GetBlock(blockHash)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	verboseHeader := new(btcjson.GetBlockHeaderVerboseResult)
@@ -248,7 +256,7 @@ func (rc *RPCClient) medianFeeRate() (uint64, error) {
 	var weight uint64
 	for txCount < 101 {
 		if blocksChecked >= rc.maxFeeBlocks {
-			return 0, ErrNoCompetition
+			return 0, errNoCompetition
 		}
 
 		if err := rc.call(methodGetBlockStats, anylist{blockHash.String(), categories}, &res); err != nil {
@@ -288,7 +296,7 @@ func (rc *RPCClient) medianFeeRate() (uint64, error) {
 // medianFeesTheHardWay calculates the median fees from the previous block(s).
 // medianFeesTheHardWay is used for assets that don't have a getblockstats RPC,
 // and is only useful for non-segwit assets.
-func (rc *RPCClient) medianFeesTheHardWay() (uint64, error) {
+func (rc *RPCClient) medianFeesTheHardWay(ctx context.Context) (uint64, error) {
 	const numTxs = 101
 
 	iHash, err := rc.GetBestBlockHash()
@@ -297,42 +305,36 @@ func (rc *RPCClient) medianFeesTheHardWay() (uint64, error) {
 	}
 
 	txs := make([]*wire.MsgTx, 0, numTxs)
+
+	// prev_out_tx_hash -> prev_out_index -> value
 	prevOuts := make(map[chainhash.Hash]map[int]int64, numTxs)
 
 	var blocksChecked int
 
 out:
 	for len(txs) < numTxs {
-		blocksChecked++
-		if blocksChecked > rc.maxFeeBlocks {
-			return 0, ErrNoCompetition
+		if ctx.Err() != nil {
+			return 0, context.Canceled
 		}
 
-		blk, err := rc.GetBlockVerbose(iHash)
+		blocksChecked++
+		if blocksChecked > rc.maxFeeBlocks {
+			return 0, errNoCompetition
+		}
+
+		blk, err := rc.GetBlock(iHash)
 		if err != nil {
 			return 0, err
 		}
 
-		if len(blk.Tx) == 0 {
+		if len(blk.Transactions) == 0 {
 			return 0, fmt.Errorf("no transactions?")
 		}
 
-		rawTxs := blk.Tx[1:] // skip coinbase
+		rawTxs := blk.Transactions[1:] // skip coinbase
 		rand.Shuffle(len(rawTxs), func(i, j int) { rawTxs[i], rawTxs[j] = rawTxs[j], rawTxs[i] })
 
-		for _, txid := range rawTxs {
-			txHash, err := chainhash.NewHashFromStr(txid)
-			if err != nil {
-				return 0, err
-			}
-
-			utilTx, err := rc.GetRawTransaction(txHash)
-			if err != nil {
-				return 0, err
-			}
-
-			tx := utilTx.MsgTx()
-
+		for _, tx := range rawTxs {
 			for _, vin := range tx.TxIn {
 				prevOut := vin.PreviousOutPoint
 				prevs := prevOuts[prevOut.Hash]
@@ -340,7 +342,9 @@ out:
 					prevs = make(map[int]int64, 1)
 					prevOuts[prevOut.Hash] = prevs
 				}
-				prevs[int(prevOut.Index)] = 0 // placeholder
+				// Create a placeholder. Value will be set after all previous
+				// outpoints for the tx are recorded.
+				prevs[int(prevOut.Index)] = 0
 			}
 			txs = append(txs, tx)
 
@@ -349,14 +353,15 @@ out:
 			}
 		}
 
-		iHash, err = chainhash.NewHashFromStr(blk.PreviousHash)
-		if err != nil {
-			return 0, err
-		}
+		iHash = &blk.Header.PrevBlock
 	}
 
 	// Fetch all the previous outpoints and log the values.
 	for txHash, prevs := range prevOuts {
+		if ctx.Err() != nil {
+			return 0, context.Canceled
+		}
+
 		utilTx, err := rc.GetRawTransaction(&txHash)
 		if err != nil {
 			return 0, fmt.Errorf("GetRawTransaction error: %v", err)
@@ -371,8 +376,8 @@ out:
 	}
 
 	// Do math.
-	rates := make([]uint64, 0, numTxs)
-	for _, tx := range txs {
+	rates := make([]uint64, numTxs)
+	for i, tx := range txs {
 		var in, out int64
 		for _, vin := range tx.TxIn {
 			prevOut := vin.PreviousOutPoint
@@ -389,7 +394,7 @@ out:
 		if sz == 0 {
 			return 0, fmt.Errorf("size 0 tx %s", tx.TxHash())
 		}
-		rates = append(rates, uint64(fees)/uint64(sz))
+		rates[i] = uint64(fees) / uint64(sz)
 	}
 	sort.Slice(rates, func(i, j int) bool { return rates[i] < rates[j] })
 	return rates[len(rates)/2], nil

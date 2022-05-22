@@ -14,6 +14,8 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 )
 
+var maxFeeBlocks = 50
+
 // Driver implements asset.Driver.
 type Driver struct{}
 
@@ -93,7 +95,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		DumbFeeEstimates:     true,
 		ManualMedianFee:      true,
 		NoCompetitionFeeRate: dexdoge.DefaultFee,
-		MaxFeeBlocks:         50,
+		MaxFeeBlocks:         maxFeeBlocks,
 		BooleanGetBlockRPC:   true,
 		BlockDeserializer:    dexdoge.DeserializeBlock,
 	})

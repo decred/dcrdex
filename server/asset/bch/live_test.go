@@ -49,6 +49,8 @@ func TestMain(m *testing.M) {
 		homeDir := btcutil.AppDataDir("bch", false)
 		configPath := filepath.Join(homeDir, "bitcoin.conf")
 
+		maxFeeBlocks = 1000
+
 		dexAsset, err := NewBackend(configPath, logger, dex.Mainnet)
 		if err != nil {
 			fmt.Printf("NewBackend error: %v\n", err)

@@ -4,6 +4,7 @@
 package btc
 
 import (
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -214,7 +215,7 @@ func LiveUTXOStats(btc *Backend, t *testing.T) {
 	if err != nil {
 		t.Fatalf("error getting best block hash: %v", err)
 	}
-	block, verboseHeader, err := btc.node.getBlock(hash)
+	block, verboseHeader, err := btc.node.getBlockWithVerboseHeader(hash)
 	if err != nil {
 		t.Fatalf("error getting best block verbose: %v", err)
 	}
@@ -290,7 +291,7 @@ out:
 			}
 		}
 		prevHash := block.Header.PrevBlock
-		block, verboseHeader, err = btc.node.getBlock(&prevHash)
+		block, verboseHeader, err = btc.node.getBlockWithVerboseHeader(&prevHash)
 		if err != nil {
 			t.Fatalf("error getting previous block verbose: %v", err)
 		}
@@ -459,7 +460,7 @@ func TestMedianFees(btc *Backend, t *testing.T) {
 
 func TestMedianFeesTheHardWay(btc *Backend, t *testing.T) {
 	// The hard way.
-	medianFees, err := btc.node.medianFeesTheHardWay()
+	medianFees, err := btc.node.medianFeesTheHardWay(context.Background())
 	if err != nil {
 		t.Fatalf("medianFeesTheHardWay error: %v", err)
 	}

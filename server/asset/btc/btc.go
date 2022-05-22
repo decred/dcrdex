@@ -82,6 +82,7 @@ var (
 	// check for new blocks.
 	blockPollInterval            = time.Second
 	conventionalConversionFactor = float64(dexbtc.UnitInfo.Conventional.ConversionFactor)
+	defaultMaxFeeBlocks          = 3
 )
 
 const (
@@ -236,7 +237,8 @@ type BackendCloneConfig struct {
 	FeeConfs int64
 	// MaxFeeBlocks is the maximum number of blocks that can be evaluated for
 	// median fee calculations. If > 100 txs are not seen in the last
-	// MaxFeeBlocks, an ErrNoCompetition is returned. Default value is 5.
+	// MaxFeeBlocks, then the NoCompetitionRate will be returned as the median
+	// fee.
 	MaxFeeBlocks int
 	// BooleanGetBlockRPC will pass true instead of 2 as the getblock argument.
 	BooleanGetBlockRPC bool
@@ -284,7 +286,7 @@ func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 
 	maxFeeBlocks := btc.cfg.MaxFeeBlocks
 	if maxFeeBlocks == 0 {
-		maxFeeBlocks = 5
+		maxFeeBlocks = defaultMaxFeeBlocks
 	}
 
 	btc.node = &RPCClient{
@@ -324,7 +326,7 @@ func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		return nil, fmt.Errorf("%s transaction index is not enabled. Please enable txindex in the node config", btc.name)
 	}
 
-	if _, err = btc.estimateFee(); err != nil {
+	if _, err = btc.estimateFee(ctx); err != nil {
 		btc.log.Warnf("%s backend started without fee estimation available: %v", btc.name, err)
 	}
 
@@ -559,8 +561,8 @@ func (btc *Backend) InitTxSizeBase() uint32 {
 }
 
 // FeeRate returns the current optimal fee rate in sat / byte.
-func (btc *Backend) FeeRate(_ context.Context) (uint64, error) {
-	return btc.estimateFee()
+func (btc *Backend) FeeRate(ctx context.Context) (uint64, error) {
+	return btc.estimateFee(ctx)
 }
 
 // Info provides some general information about the backend.
@@ -1143,7 +1145,7 @@ out:
 // otherwise be useless on an otherwise perfectly functioning node. In that
 // case, an estimate is calculated from the median fees of the previous
 // block(s).
-func (btc *Backend) estimateFee() (satsPerB uint64, err error) {
+func (btc *Backend) estimateFee(ctx context.Context) (satsPerB uint64, err error) {
 	if btc.cfg.DumbFeeEstimates {
 		satsPerB, err = btc.node.EstimateFee(btc.feeConfs)
 	} else {
@@ -1170,12 +1172,12 @@ func (btc *Backend) estimateFee() (satsPerB uint64, err error) {
 
 	// Need to revert to the median fee calculation.
 	if btc.cfg.ManualMedianFee {
-		satsPerB, err = btc.node.medianFeesTheHardWay()
+		satsPerB, err = btc.node.medianFeesTheHardWay(ctx)
 	} else {
 		satsPerB, err = btc.node.medianFeeRate()
 	}
 	if err != nil {
-		if errors.Is(err, ErrNoCompetition) {
+		if errors.Is(err, errNoCompetition) {
 			btc.log.Debugf("Blocks are too empty to calculate %d median fees. Using no-competition rate.", btc.name)
 			btc.feeCache.fee = btc.noCompetitionRate
 			btc.feeCache.hash = tip
