@@ -4,9 +4,7 @@
 package bch
 
 import (
-	"encoding/json"
 	"fmt"
-	"math"
 
 	"decred.org/dcrdex/dex"
 	dexbch "decred.org/dcrdex/dex/networks/bch"
@@ -15,6 +13,8 @@ import (
 	"decred.org/dcrdex/server/asset/btc"
 	"github.com/btcsuite/btcd/chaincfg"
 )
+
+var maxFeeBlocks = 3
 
 // Driver implements asset.Driver.
 type Driver struct{}
@@ -80,15 +80,21 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 	}
 
 	be, err := btc.NewBTCClone(&btc.BackendCloneConfig{
-		Name:           assetName,
-		Segwit:         false,
-		ConfigPath:     configPath,
-		AddressDecoder: dexbch.DecodeCashAddress,
-		Logger:         logger,
-		Net:            network,
-		ChainParams:    params,
-		Ports:          ports,
-		FeeEstimator:   estimateFee,
+		Name:             assetName,
+		Segwit:           false,
+		ConfigPath:       configPath,
+		AddressDecoder:   dexbch.DecodeCashAddress,
+		Logger:           logger,
+		Net:              network,
+		ChainParams:      params,
+		Ports:            ports,
+		DumbFeeEstimates: true,
+		// Bitcoin cash actually has getblockstats, but the RPC returns floats
+		// in units of BCH/byte.
+		ManualMedianFee:      true,
+		NoCompetitionFeeRate: 2,
+		MaxFeeBlocks:         maxFeeBlocks,
+		ArglessFeeEstimates:  true,
 	})
 	if err != nil {
 		return nil, err
@@ -117,22 +123,4 @@ func (bch *BCHBackend) Contract(coinID []byte, redeemScript []byte) (*asset.Cont
 		return nil, err
 	}
 	return contract, nil
-}
-
-// estimateFee estimates the network transaction fee rate using the estimatefee
-// RPC.
-func estimateFee(node *btc.RPCClient) (uint64, error) {
-	resp, err := node.RawRequest("estimatefee", nil)
-	if err != nil {
-		return 0, err
-	}
-	var feeRate float64
-	err = json.Unmarshal(resp, &feeRate)
-	if err != nil {
-		return 0, err
-	}
-	if feeRate <= 0 {
-		return 0, fmt.Errorf("fee could not be estimated")
-	}
-	return uint64(math.Round(feeRate * 1e5)), nil
 }

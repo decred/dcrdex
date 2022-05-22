@@ -77,12 +77,17 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 	}
 
 	return btc.NewBTCClone(&btc.BackendCloneConfig{
-		Name:        assetName,
-		Segwit:      true,
-		ConfigPath:  configPath,
-		Logger:      logger,
-		Net:         network,
-		ChainParams: params,
-		Ports:       ports,
+		Name:                 assetName,
+		Segwit:               true,
+		ConfigPath:           configPath,
+		Logger:               logger,
+		Net:                  network,
+		ChainParams:          params,
+		Ports:                ports,
+		NoCompetitionFeeRate: 10,
+		// It looks like if you set it to 1, litecoind just returns data for 2
+		// anyway.
+		FeeConfs:     2,
+		MaxFeeBlocks: 20,
 	})
 }

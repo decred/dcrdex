@@ -1,5 +1,8 @@
 //go:build btclive
 
+// To run tests against a node on another machine, you can create a config file
+// and specify the path with the environmental variable DEX_BTC_CONFIGPATH.
+
 // Since at least one live test runs for an hour, you should run live tests
 // individually using the -run flag. All of these tests will only run with the
 // 'btclive' build tag, specified with the -tags flag.
@@ -25,6 +28,10 @@
 // Test that fees rates are parsed without error and that a few historical fee
 // rates are correct.
 //
+// go test -v -tags btclive -run TestMedianFeeRates
+// ------------------------------------------
+// Test that the median-fee feeRate fallback calculation works.
+//
 // This last test does not pass. Leave as a code example for now.
 // go test -v -tags btclive -run Plugin
 // ------------------------------------------
@@ -43,6 +50,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 )
 
@@ -69,7 +77,8 @@ func TestMain(m *testing.M) {
 	// Wrap everything for defers.
 	doIt := func() int {
 		logger := dex.StdOutLogger("BTCTEST", dex.LevelTrace)
-		dexAsset, err := NewBackend("", logger, dex.Mainnet)
+
+		dexAsset, err := NewBackend(os.Getenv("DEX_BTC_CONFIGPATH"), logger, dex.Mainnet)
 		if err != nil {
 			fmt.Printf("NewBackend error: %v\n", err)
 			return 1
@@ -155,6 +164,18 @@ func TestLiveFees(t *testing.T) {
 		"f3e3e209672fc057bd896c0f703f092a251fa4dca09d062a0223f760661b8187": 506,
 		"a1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d": 4191,
 	})
+}
+
+func TestMedianFeeRates(t *testing.T) {
+	TestMedianFees(btc, t)
+	TestMedianFeesTheHardWay(btc, t)
+	// Just for comparison
+	feeRate, err := btc.node.EstimateSmartFee(1, &btcjson.EstimateModeConservative)
+	if err != nil {
+		fmt.Printf("EstimateSmartFee unavailable: %v \n", err)
+	} else {
+		fmt.Printf("EstimateSmartFee: %d \n", feeRate)
+	}
 }
 
 // This test does not pass yet.

@@ -15,6 +15,10 @@
 // ------------------------------------------
 // Test that fees rates are parsed without error and that a few historical fee
 // rates are correct
+//
+// go test -v -tags ltclive -run TestMedianFeeRates
+// ------------------------------------------
+// Test that a median fee rate can be calculated.
 
 package ltc
 
@@ -86,4 +90,8 @@ func TestLiveFees(t *testing.T) {
 		"6e7bfce6aee69312629b1f60afe6dcef02f367207642f2dc380a554c21181eb2": 888,
 		"9387d8b2097ee23cc3da36daf90262dda9a98eb25063ddddb630cf15513fa9b8": 1,
 	})
+}
+
+func TestMedianFeeRates(t *testing.T) {
+	btc.TestMedianFees(ltc, t)
 }

@@ -4,6 +4,7 @@
 package btc
 
 import (
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -214,7 +215,7 @@ func LiveUTXOStats(btc *Backend, t *testing.T) {
 	if err != nil {
 		t.Fatalf("error getting best block hash: %v", err)
 	}
-	block, verboseHeader, err := btc.node.getBlock(hash)
+	block, verboseHeader, err := btc.node.getBlockWithVerboseHeader(hash)
 	if err != nil {
 		t.Fatalf("error getting best block verbose: %v", err)
 	}
@@ -290,7 +291,7 @@ out:
 			}
 		}
 		prevHash := block.Header.PrevBlock
-		block, verboseHeader, err = btc.node.getBlock(&prevHash)
+		block, verboseHeader, err = btc.node.getBlockWithVerboseHeader(&prevHash)
 		if err != nil {
 			t.Fatalf("error getting previous block verbose: %v", err)
 		}
@@ -428,11 +429,6 @@ func CompatibilityCheck(items *CompatibilityItems, chainParams *chaincfg.Params,
 	}
 
 	// P2SH
-	scriptClass := txscript.GetScriptClass(items.P2SHScript)
-	if scriptClass != txscript.ScriptHashTy {
-		t.Fatalf("wrong script class for p2sh script. wanted %s, got %s", txscript.ScriptHashTy, scriptClass)
-	}
-
 	sh := dexbtc.ExtractScriptHash(items.P2SHScript)
 	if sh == nil {
 		t.Fatalf("incompatible P2SH script")
@@ -451,4 +447,23 @@ func CompatibilityCheck(items *CompatibilityItems, chainParams *chaincfg.Params,
 		}
 		checkAddr(items.P2WSHScript, items.WSHAddr)
 	}
+}
+
+func TestMedianFees(btc *Backend, t *testing.T) {
+	// The easy way.
+	medianFees, err := btc.node.medianFeeRate()
+	if err != nil {
+		t.Fatalf("medianFeeRate error: %v", err)
+	}
+	fmt.Printf("medianFeeRate: %v \n", medianFees)
+}
+
+func TestMedianFeesTheHardWay(btc *Backend, t *testing.T) {
+	// The hard way.
+	medianFees, err := btc.node.medianFeesTheHardWay(context.Background())
+	if err != nil {
+		t.Fatalf("medianFeesTheHardWay error: %v", err)
+	}
+
+	fmt.Printf("medianFeesTheHardWay: %v \n", medianFees)
 }
