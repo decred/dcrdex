@@ -2484,7 +2484,7 @@ func (t *trackedTrade) searchAuditInfo(match *matchTracker, coinID []byte, contr
 	tLastWarning := time.Now()
 	t.latencyQ.Wait(&wait.Waiter{
 		Expiration: time.Now().Add(24 * time.Hour), // effectively forever
-		TryFunc: func() bool {
+		TryFunc: func() wait.TryDirective {
 			var err error
 			auditInfo, err = t.wallets.toWallet.AuditContract(coinID, contract, txData, true)
 			if err == nil {

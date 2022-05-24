@@ -359,7 +359,7 @@ func Run(t *testing.T, cfg *Config) {
 		c := make(chan *asset.AuditInfo, 1)
 		latencyQ.Wait(&wait.Waiter{
 			Expiration: time.Now().Add(time.Second * 10),
-			TryFunc: func() bool {
+			TryFunc: func() wait.TryDirective {
 				ai, err := rig.firstWallet.AuditContract(coinID, contract, nil, false) // no TxData because server gets that for us in practice!
 				if err != nil {
 					if strings.Contains(err.Error(), "error finding unspent contract") {
@@ -439,7 +439,7 @@ func Run(t *testing.T, cfg *Config) {
 	found := make(chan struct{})
 	latencyQ.Wait(&wait.Waiter{
 		Expiration: time.Now().Add(time.Second * 10),
-		TryFunc: func() bool {
+		TryFunc: func() wait.TryDirective {
 			ctx, cancel := context.WithTimeout(tCtx, time.Millisecond*5)
 			defer cancel()
 			_, _, err = rig.secondWallet.FindRedemption(ctx, swapReceipt.Coin().ID(), nil)
