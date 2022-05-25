@@ -27,8 +27,10 @@ import (
 )
 
 var (
-	// The coin waiter will query for transaction data every recheckInterval.
-	recheckInterval = time.Second * 3
+	// The coin waiter will initially query for transaction data every
+	// fastRecheckInterval, but will eventually taper to taperedRecheckInterval.
+	fastRecheckInterval    = time.Second * 3
+	taperedRecheckInterval = time.Second * 30
 	// txWaitExpiration is the longest the Swapper will wait for a coin waiter.
 	// This could be thought of as the maximum allowable backend latency.
 	txWaitExpiration = 2 * time.Minute
@@ -211,7 +213,7 @@ type Swapper struct {
 	lockTimeTaker time.Duration
 	lockTimeMaker time.Duration
 	// latencyQ is a queue for coin waiters to deal with network latency.
-	latencyQ *wait.TickerQueue
+	latencyQ *wait.TaperingTickerQueue
 
 	// handlerMtx should be read-locked for the duration of the comms route
 	// handlers (handleInit and handleRedeem) and Negotiate. This blocks
@@ -272,7 +274,7 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 		storage:       cfg.Storage,
 		authMgr:       authMgr,
 		swapDone:      cfg.SwapDone,
-		latencyQ:      wait.NewTickerQueue(recheckInterval),
+		latencyQ:      wait.NewTaperingTickerQueue(fastRecheckInterval, taperedRecheckInterval),
 		matches:       make(map[order.MatchID]*matchTracker),
 		userMatches:   make(map[account.AccountID]map[order.MatchID]*matchTracker),
 		acctMatches:   acctMatches,
@@ -1405,7 +1407,7 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 // audited by the Swapper, the counter-party is informed with an 'audit'
 // request. This method is run as a coin waiter, hence the return value
 // indicates if future attempts should be made to check coin status.
-func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepInfo *stepInformation) bool {
+func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepInfo *stepInformation) wait.TryDirective {
 	// Validate the swap contract
 	chain := stepInfo.asset.Backend
 	actor, counterParty := stepInfo.actor, stepInfo.counterParty
@@ -1597,7 +1599,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 // processRedeem processes a 'redeem' request from a client. processRedeem does
 // not perform user authentication, which is handled in handleRedeem before
 // processRedeem is invoked. This method is run as a coin waiter.
-func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, stepInfo *stepInformation) bool {
+func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, stepInfo *stepInformation) wait.TryDirective {
 	// TODO(consider): Extract secret from initiator's (maker's) redemption
 	// transaction. The Backend would need a method identify the component of
 	// the redemption transaction that contains the secret and extract it. In a
@@ -1860,7 +1862,7 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 	// this as a coin waiter.
 	s.latencyQ.Wait(&wait.Waiter{
 		Expiration: expireTime,
-		TryFunc: func() bool {
+		TryFunc: func() wait.TryDirective {
 			return s.processInit(msg, params, stepInfo)
 		},
 		ExpireFunc: func() {
@@ -1940,7 +1942,7 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 	// Since we have to consider latency, run this as a coin waiter.
 	s.latencyQ.Wait(&wait.Waiter{
 		Expiration: expireTime,
-		TryFunc: func() bool {
+		TryFunc: func() wait.TryDirective {
 			return s.processRedeem(msg, params, stepInfo)
 		},
 		ExpireFunc: func() {

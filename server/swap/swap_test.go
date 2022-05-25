@@ -64,7 +64,7 @@ type tUser struct {
 }
 
 func tickMempool() {
-	time.Sleep(recheckInterval * 3 / 2)
+	time.Sleep(fastRecheckInterval * 3 / 2)
 }
 
 func timeOutMempool() {
@@ -111,12 +111,21 @@ type TAuthManager struct {
 	authErr     error
 	privkey     *secp256k1.PrivateKey
 	reqs        map[account.AccountID][]*TRequest
-	newReq      chan struct{}
 	resps       map[account.AccountID][]*msgjson.Message
 	ntfns       map[account.AccountID][]*msgjson.Message
 	newNtfn     chan struct{}
 	suspensions map[account.AccountID]account.Rule
 	newSuspend  chan struct{}
+	swapID      uint64
+	// Use swapReceived if you need to synchronize error responses to init
+	// requests.
+	swapReceived chan struct{}
+	auditReq     chan struct{}
+	redeemID     uint64
+	// Use redeemReceived if you need to synchronize error responses to redeem
+	// requests.
+	redeemReceived chan struct{}
+	redemptionReq  chan struct{}
 }
 
 func newTAuthManager() *TAuthManager {
@@ -143,6 +152,12 @@ func (m *TAuthManager) Send(user account.AccountID, msg *msgjson.Message) error 
 	if msg.Route == "" {
 		// response
 		m.resps[user] = append(l, msg)
+		if m.redeemReceived != nil && msg.ID == m.redeemID {
+			m.redeemReceived <- struct{}{}
+		}
+		if m.swapReceived != nil && msg.ID == m.swapID {
+			m.swapReceived <- struct{}{}
+		}
 	} else {
 		// notification
 		m.ntfns[user] = append(l, msg)
@@ -171,8 +186,11 @@ func (m *TAuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson.M
 		l = make([]*TRequest, 0, 1)
 	}
 	m.reqs[user] = append(l, tReq)
-	if m.newReq != nil {
-		m.newReq <- struct{}{}
+	switch {
+	case m.auditReq != nil && msg.Route == msgjson.AuditRoute:
+		m.auditReq <- struct{}{}
+	case m.redemptionReq != nil && msg.Route == msgjson.RedemptionRoute:
+		m.redemptionReq <- struct{}{}
 	}
 	return nil
 }
@@ -625,6 +643,22 @@ func (rig *testRig) getTracker() *matchTracker {
 	return rig.swapper.matches[rig.matchInfo.matchID]
 }
 
+// waitChans waits on the specified channels sequentially in the order given.
+// nil channels are ignored.
+func (rig *testRig) waitChans(tag string, chans ...chan struct{}) error {
+	for _, c := range chans {
+		if c == nil {
+			continue
+		}
+		select {
+		case <-c:
+		case <-time.After(time.Second):
+			return fmt.Errorf("%s timed out", tag)
+		}
+	}
+	return nil
+}
+
 // Taker: Acknowledge the servers match notification.
 func (rig *testRig) ackMatch_maker(checkSig bool) (err error) {
 	matchInfo := rig.matchInfo
@@ -658,13 +692,6 @@ func (rig *testRig) ackMatch_taker(checkSig bool) error {
 }
 
 func (rig *testRig) ackMatch(user *tUser, oid order.OrderID, counterAddr string) error {
-	if rig.auth.newReq != nil {
-		select {
-		case <-rig.auth.newReq:
-		default:
-			return fmt.Errorf("no match ntfn")
-		}
-	}
 	req := rig.auth.getReq(user.acct)
 	if req == nil {
 		return fmt.Errorf("failed to find match notification for %s", user.lbl)
@@ -739,9 +766,13 @@ func (rig *testRig) sendSwap_maker(checkStatus bool) (err error) {
 		return fmt.Errorf("error sending maker swap transaction: %w", err)
 	}
 	matchInfo.db.makerSwap = swap
-	tracker := rig.getTracker()
 	// Check the match status.
 	if checkStatus {
+		// The taker ultimately gets an audit request. Synchronize with that.
+		if err := rig.waitChans("maker swap -> received -> taker audit request", nil, rig.auth.swapReceived, rig.auth.auditReq); err != nil {
+			return err
+		}
+		tracker := rig.getTracker()
 		if tracker.Status != order.MakerSwapCast {
 			return fmt.Errorf("unexpected swap status %d after maker swap notification", tracker.Status)
 		}
@@ -765,9 +796,13 @@ func (rig *testRig) sendSwap_taker(checkStatus bool) (err error) {
 	if err != nil {
 		return err
 	}
-	tracker := rig.getTracker()
 	// Check the match status.
 	if checkStatus {
+		// The maker ultimately gets an audit request.
+		if err := rig.waitChans("maker audit request", nil, rig.auth.swapReceived, rig.auth.auditReq); err != nil {
+			return err
+		}
+		tracker := rig.getTracker()
 		if tracker.Status != order.TakerSwapCast {
 			return fmt.Errorf("unexpected swap status %d after taker swap notification", tracker.Status)
 		}
@@ -787,6 +822,7 @@ func (rig *testRig) sendSwap(user *tUser, oid order.OrderID, recipient string) (
 	} else {
 		rig.abcNode.setContract(swap.coin, false)
 	}
+	rig.auth.swapID = swap.req.ID
 	rpcErr := rig.swapper.handleInit(user.acct, swap.req)
 	if rpcErr != nil {
 		resp, _ := msgjson.NewResponse(swap.req.ID, nil, rpcErr)
@@ -800,13 +836,6 @@ func (rig *testRig) sendSwap(user *tUser, oid order.OrderID, recipient string) (
 // acknowledged separately with ackAudit_taker.
 func (rig *testRig) auditSwap_taker() error {
 	matchInfo := rig.matchInfo
-	if rig.auth.newReq != nil {
-		select {
-		case <-rig.auth.newReq:
-		default:
-			return fmt.Errorf("no taker audit request")
-		}
-	}
 	req := rig.auth.getReq(matchInfo.taker.acct)
 	matchInfo.db.takerAudit = req
 	if req == nil {
@@ -819,13 +848,6 @@ func (rig *testRig) auditSwap_taker() error {
 // acknowledged separately with ackAudit_maker.
 func (rig *testRig) auditSwap_maker() error {
 	matchInfo := rig.matchInfo
-	if rig.auth.newReq != nil {
-		select {
-		case <-rig.auth.newReq:
-		default:
-			return fmt.Errorf("no maker audit request")
-		}
-	}
 	req := rig.auth.getReq(matchInfo.maker.acct)
 	matchInfo.db.makerAudit = req
 	if req == nil {
@@ -925,9 +947,13 @@ func (rig *testRig) ackAudit(user *tUser, req *TRequest) error {
 func (rig *testRig) redeem_maker(checkStatus bool) error {
 	matchInfo := rig.matchInfo
 	matchInfo.db.makerRedeem = rig.redeem(matchInfo.maker, matchInfo.makerOID)
-	tracker := rig.getTracker()
 	// Check the match status
 	if checkStatus {
+		// The taker ultimately gets a redemption request.
+		if err := rig.waitChans("maker redeem -> received -> redeption to taker", rig.auth.redeemReceived, rig.auth.redemptionReq); err != nil {
+			return err
+		}
+		tracker := rig.getTracker()
 		if tracker.Status != order.MakerRedeemed {
 			return fmt.Errorf("unexpected swap status %d after maker redeem notification", tracker.Status)
 		}
@@ -943,9 +969,12 @@ func (rig *testRig) redeem_maker(checkStatus bool) error {
 func (rig *testRig) redeem_taker(checkStatus bool) error {
 	matchInfo := rig.matchInfo
 	matchInfo.db.takerRedeem = rig.redeem(matchInfo.taker, matchInfo.takerOID)
-	tracker := rig.getTracker()
 	// Check the match status
 	if checkStatus {
+		if err := rig.waitChans("taker redeem -> received", rig.auth.redeemReceived); err != nil {
+			return err
+		}
+		tracker := rig.getTracker()
 		if tracker != nil {
 			return fmt.Errorf("expected match to be removed, found it, in status %v", tracker.Status)
 		}
@@ -966,6 +995,7 @@ func (rig *testRig) redeem(user *tUser, oid order.OrderID) *tRedeem {
 	} else {
 		rig.xyzNode.setRedemption(redeem.coin, redeem.cpSwapCoin, false)
 	}
+	rig.auth.redeemID = redeem.req.ID
 	rpcErr := rig.swapper.handleRedeem(user.acct, redeem.req)
 	if rpcErr != nil {
 		msg, _ := msgjson.NewResponse(redeem.req.ID, nil, rpcErr)
@@ -993,13 +1023,6 @@ func (rig *testRig) ackRedemption_taker(checkSig bool) error {
 func (rig *testRig) ackRedemption(user *tUser, oid order.OrderID, redeem *tRedeem) error {
 	if redeem == nil {
 		return fmt.Errorf("nil redeem info")
-	}
-	if rig.auth.newReq != nil {
-		select {
-		case <-rig.auth.newReq:
-		default:
-			return fmt.Errorf("no redemption request")
-		}
 	}
 	req := rig.auth.getReq(user.acct)
 	if req == nil {
@@ -1388,7 +1411,8 @@ func rpcErrorChecker(t *testing.T, rig *testRig, code int) func(*tUser, ...strin
 }
 
 func TestMain(m *testing.M) {
-	recheckInterval = time.Millisecond * 40
+	fastRecheckInterval = time.Millisecond * 40
+	taperedRecheckInterval = time.Millisecond * 40
 	txWaitExpiration = time.Millisecond * 200
 	logger := dex.StdOutLogger("TEST", dex.LevelTrace)
 	UseLogger(logger)
@@ -1457,9 +1481,9 @@ func TestSwaps(t *testing.T) {
 	rig, cleanup := tNewTestRig(nil)
 	defer cleanup()
 
-	// For N matches, Negotiate sends up to 2*N requests. The "three match set"
-	// sends 4: one for taker and 3 for makers.
-	rig.auth.newReq = make(chan struct{}, 4)
+	rig.auth.auditReq = make(chan struct{}, 1)
+	rig.auth.redeemReceived = make(chan struct{}, 1)
+	rig.auth.redemptionReq = make(chan struct{}, 1)
 
 	for _, makerSell := range []bool{true, false} {
 		sellStr := " buy"
@@ -1511,7 +1535,7 @@ func TestInvalidFeeRate(t *testing.T) {
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
 
-	rig.auth.newReq = make(chan struct{}, 2) // Negotiate sends 2 requests, one for each party assuming different users matched
+	rig.auth.swapReceived = make(chan struct{}, 1)
 
 	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
 
@@ -1523,6 +1547,9 @@ func TestInvalidFeeRate(t *testing.T) {
 		t.Fatal(err)
 	}
 	timeOutMempool()
+	if err := rig.waitChans("invalid fee rate", rig.auth.swapReceived); err != nil {
+		t.Fatalf("error waiting for response: %v", err)
+	}
 	// Should have an rpc error.
 	msg, resp := rig.auth.getResp(matchInfo.maker.acct)
 	if msg == nil {
@@ -1539,7 +1566,10 @@ func TestTxWaiters(t *testing.T) {
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
 
-	rig.auth.newReq = make(chan struct{}, 2) // Negotiate sends 2 requests, one for each party assuming different users matched
+	rig.auth.auditReq = make(chan struct{}, 1)
+	rig.auth.redeemReceived = make(chan struct{}, 1)
+	rig.auth.redemptionReq = make(chan struct{}, 1)
+	rig.auth.swapReceived = make(chan struct{}, 1)
 
 	ensureNilErr := makeEnsureNilErr(t)
 	dummyError := fmt.Errorf("test error")
@@ -1562,9 +1592,12 @@ func TestTxWaiters(t *testing.T) {
 	// Set a non-latency error.
 	rig.abcNode.setContractErr(dummyError)
 	rig.sendSwap_maker(false)
+	if err := rig.waitChans("maker contract error", rig.auth.swapReceived); err != nil {
+		t.Fatalf("error waiting for maker swap error response: %v", err)
+	}
 	msg, _ := rig.auth.getResp(matchInfo.maker.acct)
 	if msg == nil {
-		t.Fatalf("no response for erroneous maker swap. err")
+		t.Fatalf("no response for erroneous maker swap")
 	}
 
 	// Set an error for the maker's swap asset
@@ -1575,6 +1608,9 @@ func TestTxWaiters(t *testing.T) {
 		t.Fatal(err)
 	}
 	timeOutMempool()
+	if err := rig.waitChans("maker mempool timeout error", rig.auth.swapReceived); err != nil {
+		t.Fatalf("error waiting for maker swap error response: %v", err)
+	}
 	// Should have an rpc error.
 	msg, resp := rig.auth.getResp(matchInfo.maker.acct)
 	if msg == nil {
@@ -1600,6 +1636,9 @@ func TestTxWaiters(t *testing.T) {
 	// Non-latency error.
 	rig.xyzNode.setContractErr(dummyError)
 	rig.sendSwap_taker(false)
+	if err := rig.waitChans("taker contract error", rig.auth.swapReceived); err != nil {
+		t.Fatalf("error waiting for taker swap error response: %v", err)
+	}
 	msg, _ = rig.auth.getResp(matchInfo.taker.acct)
 	if msg == nil {
 		t.Fatalf("no response for erroneous taker swap")
@@ -1617,6 +1656,10 @@ func TestTxWaiters(t *testing.T) {
 	// Clear the error.
 	rig.xyzNode.setContractErr(nil)
 	tickMempool()
+	if err := rig.waitChans("taker mempool timeout error", rig.auth.swapReceived); err != nil {
+		t.Fatalf("error waiting for taker timeout error response: %v", err)
+	}
+
 	msg, resp = rig.auth.getResp(matchInfo.taker.acct)
 	if msg == nil {
 		t.Fatalf("no response for ok taker swap")
@@ -1633,6 +1676,7 @@ func TestTxWaiters(t *testing.T) {
 
 	// Set a transaction error for the maker's redemption.
 	rig.xyzNode.setRedemptionErr(asset.CoinNotFoundError)
+
 	ensureNilErr(rig.redeem_maker(false))
 	tickMempool()
 	tickMempool()
@@ -1643,6 +1687,9 @@ func TestTxWaiters(t *testing.T) {
 	// Clear the error.
 	rig.xyzNode.setRedemptionErr(nil)
 	tickMempool()
+	if err := rig.waitChans("maker redemption error", rig.auth.redeemReceived); err != nil {
+		t.Fatalf("error waiting for taker timeout error response: %v", err)
+	}
 	msg, resp = rig.auth.getResp(matchInfo.maker.acct)
 	if msg == nil {
 		t.Fatalf("no response for erroneous maker redeem")
@@ -1659,6 +1706,9 @@ func TestTxWaiters(t *testing.T) {
 	rig.abcNode.setRedemptionErr(asset.CoinNotFoundError)
 	ensureNilErr(rig.redeem_taker(false))
 	timeOutMempool()
+	if err := rig.waitChans("taker redemption timeout", rig.auth.redeemReceived); err != nil {
+		t.Fatalf("error waiting for taker timeout error response: %v", err)
+	}
 	msg, _ = rig.auth.getResp(matchInfo.taker.acct)
 	if msg == nil {
 		t.Fatalf("no response for erroneous taker redeem")
@@ -1685,7 +1735,8 @@ func TestBroadcastTimeouts(t *testing.T) {
 	defer cleanup()
 
 	rig.auth.newSuspend = make(chan struct{}, 1)
-	rig.auth.newReq = make(chan struct{}, 2)  // Negotiate sends 2 requests, one for each party assuming different users matched
+	rig.auth.auditReq = make(chan struct{}, 1)
+	rig.auth.redemptionReq = make(chan struct{}, 1)
 	rig.auth.newNtfn = make(chan struct{}, 2) // 2 revoke_match requests
 
 	ensureNilErr := makeEnsureNilErr(t)
@@ -1830,6 +1881,11 @@ func TestSigErrors(t *testing.T) {
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
 
+	rig.auth.auditReq = make(chan struct{}, 1)
+	rig.auth.redemptionReq = make(chan struct{}, 1)
+	rig.auth.redeemReceived = make(chan struct{}, 1)
+	rig.auth.swapReceived = make(chan struct{}, 1)
+
 	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}) // pushes a new req to m.reqs
 	ensureNilErr := makeEnsureNilErr(t)
 
@@ -1853,13 +1909,17 @@ func TestSigErrors(t *testing.T) {
 		tReq = rig.auth.getReq(user.acct)
 		apply(user) // put them back now that we have a copy
 	}
-	testAction := func(stepFunc func(bool) error, user *tUser) {
+	testAction := func(stepFunc func(bool) error, user *tUser, failChans ...chan struct{}) {
+		t.Helper()
 		// First do it with an auth error.
 		rig.auth.authErr = dummyError
 		stash(user) // make a copy of this user's next req/resp pair
 		// The error will be pulled from the auth manager.
 		_ = stepFunc(false) // getReq => req.respFunc(..., tNewResponse()) => send error to client (m.resps)
-		ensureSigErr(user)  // getResp
+		if err := rig.waitChans("testAction", failChans...); err != nil {
+			t.Fatalf("testAction failChan wait error: %v", err)
+		}
+		ensureSigErr(user) // getResp
 		// Again with no auth error to go to the next step.
 		rig.auth.authErr = nil
 		apply(user) // restore the initial live request
@@ -1869,15 +1929,15 @@ func TestSigErrors(t *testing.T) {
 	// 1 live match, 2 pending client acks
 	testAction(rig.ackMatch_maker, maker)
 	testAction(rig.ackMatch_taker, taker)
-	testAction(rig.sendSwap_maker, maker)
+	testAction(rig.sendSwap_maker, maker, rig.auth.swapReceived)
 	ensureNilErr(rig.auditSwap_taker())
 	testAction(rig.ackAudit_taker, taker)
-	testAction(rig.sendSwap_taker, taker)
+	testAction(rig.sendSwap_taker, taker, rig.auth.swapReceived)
 	ensureNilErr(rig.auditSwap_maker())
 	testAction(rig.ackAudit_maker, maker)
-	testAction(rig.redeem_maker, maker)
+	testAction(rig.redeem_maker, maker, rig.auth.redeemReceived)
 	testAction(rig.ackRedemption_taker, taker)
-	testAction(rig.redeem_taker, taker)
+	testAction(rig.redeem_taker, taker, rig.auth.redeemReceived)
 }
 
 func TestMalformedSwap(t *testing.T) {
@@ -1886,6 +1946,8 @@ func TestMalformedSwap(t *testing.T) {
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
 
+	rig.auth.swapReceived = make(chan struct{}, 1)
+
 	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
 	ensureNilErr := makeEnsureNilErr(t)
 	checkContractErr := rpcErrorChecker(t, rig, msgjson.ContractError)
@@ -1893,25 +1955,32 @@ func TestMalformedSwap(t *testing.T) {
 	ensureNilErr(rig.ackMatch_maker(true))
 	ensureNilErr(rig.ackMatch_taker(true))
 
+	ensureErr := func(tag string) {
+		ensureNilErr(rig.sendSwap_maker(false))
+		if err := rig.waitChans(tag, rig.auth.swapReceived); err != nil {
+			t.Fatalf("error waiting for %q error: %v", tag, err)
+		}
+	}
+
 	// Bad contract value
 	tValSpoofer = 2
-	ensureNilErr(rig.sendSwap_maker(false))
+	ensureErr("bad maker contract")
 	checkContractErr(matchInfo.maker, "expected contract value to be")
 	tValSpoofer = 1
 	// Bad contract recipient
 	tRecipientSpoofer = "2"
-	ensureNilErr(rig.sendSwap_maker(false))
+	ensureErr("bad recipient")
 	checkContractErr(matchInfo.maker, "incorrect recipient")
 	tRecipientSpoofer = ""
 	// Bad locktime
 	tLockTimeSpoofer = time.Unix(1, 0)
-	ensureNilErr(rig.sendSwap_maker(false))
+	ensureErr("bad locktime")
 	checkContractErr(matchInfo.maker, "expected lock time")
 	tLockTimeSpoofer = time.Time{}
 
 	// Low fee, unconfirmed
 	rig.abcNode.invalidFeeRate = true
-	ensureNilErr(rig.sendSwap_maker(false))
+	ensureErr("low fee")
 	checkContractErr(matchInfo.maker, "low tx fee")
 
 	// Works with low fee, but now a confirmation.

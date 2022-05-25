@@ -587,7 +587,7 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 	log.Tracef("Searching for %s coins %v for new order", fundingAsset.Symbol, coinStrs)
 	r.latencyQ.Wait(&wait.Waiter{
 		Expiration: time.Now().Add(fundingTxWait),
-		TryFunc: func() bool {
+		TryFunc: func() wait.TryDirective {
 			tryAgain, msgErr := checkCoins()
 			if tryAgain {
 				return wait.TryAgain

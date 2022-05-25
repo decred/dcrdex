@@ -280,7 +280,7 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 
 	auth.latencyQ.Wait(&wait.Waiter{
 		Expiration: time.Now().Add(txWaitExpiration),
-		TryFunc: func() bool {
+		TryFunc: func() wait.TryDirective {
 			res := auth.validateFee(conn, msg.ID, acctID, notifyFee, assetID, regAddr)
 			if res == wait.DontTryAgain {
 				removeWaiter()
@@ -298,7 +298,7 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 // validateFee is a coin waiter that validates a client's notifyFee request and
 // responds with an Acknowledgement.
 func (auth *AuthManager) validateFee(conn comms.Link, msgID uint64, acctID account.AccountID,
-	notifyFee *msgjson.NotifyFee, assetID uint32, regAddr string) bool {
+	notifyFee *msgjson.NotifyFee, assetID uint32, regAddr string) wait.TryDirective {
 	// If there is a problem, respond with an error.
 	var msgErr *msgjson.Error
 	defer func() {
