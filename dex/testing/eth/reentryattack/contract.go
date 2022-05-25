@@ -4,6 +4,7 @@
 package reentryattack
 
 import (
+	"errors"
 	"math/big"
 	"strings"
 
@@ -17,6 +18,7 @@ import (
 
 // Reference imports to suppress errors if they are not otherwise used.
 var (
+	_ = errors.New
 	_ = big.NewInt
 	_ = strings.NewReader
 	_ = ethereum.NotFound
@@ -26,28 +28,31 @@ var (
 	_ = event.NewSubscription
 )
 
-// ReentryAttackABI is the input ABI used to generate the binding from.
-const ReentryAttackABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"stateMutability\":\"payable\",\"type\":\"fallback\"},{\"inputs\":[],\"name\":\"allYourBase\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"areBelongToUs\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"owner\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"es\",\"type\":\"address\"},{\"internalType\":\"bytes32\",\"name\":\"sh\",\"type\":\"bytes32\"},{\"internalType\":\"uint256\",\"name\":\"refundTimestamp\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"participant\",\"type\":\"address\"}],\"name\":\"setUsUpTheBomb\",\"outputs\":[],\"stateMutability\":\"payable\",\"type\":\"function\"}]"
-
-// ReentryAttackFuncSigs maps the 4-byte function signature to its string representation.
-var ReentryAttackFuncSigs = map[string]string{
-	"8f110770": "allYourBase()",
-	"627599ee": "areBelongToUs()",
-	"8da5cb5b": "owner()",
-	"b9ce28a4": "setUsUpTheBomb(address,bytes32,uint256,address)",
+// ReentryAttackMetaData contains all meta data concerning the ReentryAttack contract.
+var ReentryAttackMetaData = &bind.MetaData{
+	ABI: "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"stateMutability\":\"payable\",\"type\":\"fallback\"},{\"inputs\":[],\"name\":\"allYourBase\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"areBelongToUs\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"owner\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"es\",\"type\":\"address\"},{\"internalType\":\"bytes32\",\"name\":\"sh\",\"type\":\"bytes32\"},{\"internalType\":\"uint256\",\"name\":\"refundTimestamp\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"participant\",\"type\":\"address\"}],\"name\":\"setUsUpTheBomb\",\"outputs\":[],\"stateMutability\":\"payable\",\"type\":\"function\"}]",
+	Bin: "0x608060405234801561001057600080fd5b50600080546001600160a01b0319163317905561029b806100326000396000f3fe60806040526004361061003f5760003560e01c8063627599ee146100595780638da5cb5b1461006e5780638f110770146100aa578063b9ce28a4146100bf575b674563918244f40000471015610057576100576100d2565b005b34801561006557600080fd5b5061005761013b565b34801561007a57600080fd5b5060005461008e906001600160a01b031681565b6040516001600160a01b03909116815260200160405180910390f35b3480156100b657600080fd5b506100576100d2565b6100576100cd36600461021f565b610178565b600254600154604051633924fddb60e11b81526001600160a01b0390921691637249fbb6916101079160040190815260200190565b600060405180830381600087803b15801561012157600080fd5b505af1158015610135573d6000803e3d6000fd5b50505050565b600080546040516001600160a01b03909116914780156108fc02929091818181858888f19350505050158015610175573d6000803e3d6000fd5b50565b600280546001600160a01b0319166001600160a01b03868116918217909255600185905560405163ae05214760e01b8152600481018590526024810186905291831660448301529063ae0521479034906064016000604051808303818588803b1580156101e457600080fd5b505af11580156101f8573d6000803e3d6000fd5b505050505050505050565b80356001600160a01b038116811461021a57600080fd5b919050565b6000806000806080858703121561023557600080fd5b61023e85610203565b9350602085013592506040850135915061025a60608601610203565b90509295919450925056fea264697066735822122087499ba0a295a21147299615f7103b3bdfdc6292cd039ba269f142f15ff8105e64736f6c63430008060033",
 }
 
+// ReentryAttackABI is the input ABI used to generate the binding from.
+// Deprecated: Use ReentryAttackMetaData.ABI instead.
+var ReentryAttackABI = ReentryAttackMetaData.ABI
+
 // ReentryAttackBin is the compiled bytecode used for deploying new contracts.
-var ReentryAttackBin = "0x608060405234801561001057600080fd5b50600080546001600160a01b0319163317905561029b806100326000396000f3fe60806040526004361061003f5760003560e01c8063627599ee146100595780638da5cb5b1461006e5780638f110770146100aa578063b9ce28a4146100bf575b674563918244f40000471015610057576100576100d2565b005b34801561006557600080fd5b5061005761013b565b34801561007a57600080fd5b5060005461008e906001600160a01b031681565b6040516001600160a01b03909116815260200160405180910390f35b3480156100b657600080fd5b506100576100d2565b6100576100cd36600461021f565b610178565b600254600154604051633924fddb60e11b81526001600160a01b0390921691637249fbb6916101079160040190815260200190565b600060405180830381600087803b15801561012157600080fd5b505af1158015610135573d6000803e3d6000fd5b50505050565b600080546040516001600160a01b03909116914780156108fc02929091818181858888f19350505050158015610175573d6000803e3d6000fd5b50565b600280546001600160a01b0319166001600160a01b03868116918217909255600185905560405163ae05214760e01b8152600481018590526024810186905291831660448301529063ae0521479034906064016000604051808303818588803b1580156101e457600080fd5b505af11580156101f8573d6000803e3d6000fd5b505050505050505050565b80356001600160a01b038116811461021a57600080fd5b919050565b6000806000806080858703121561023557600080fd5b61023e85610203565b9350602085013592506040850135915061025a60608601610203565b90509295919450925056fea264697066735822122087499ba0a295a21147299615f7103b3bdfdc6292cd039ba269f142f15ff8105e64736f6c63430008060033"
+// Deprecated: Use ReentryAttackMetaData.Bin instead.
+var ReentryAttackBin = ReentryAttackMetaData.Bin
 
 // DeployReentryAttack deploys a new Ethereum contract, binding an instance of ReentryAttack to it.
 func DeployReentryAttack(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, *types.Transaction, *ReentryAttack, error) {
-	parsed, err := abi.JSON(strings.NewReader(ReentryAttackABI))
+	parsed, err := ReentryAttackMetaData.GetAbi()
 	if err != nil {
 		return common.Address{}, nil, nil, err
 	}
+	if parsed == nil {
+		return common.Address{}, nil, nil, errors.New("GetABI returned nil")
+	}
 
-	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(ReentryAttackBin), backend)
+	address, tx, contract, err := bind.DeployContract(auth, *parsed, common.FromHex(ReentryAttackBin), backend)
 	if err != nil {
 		return common.Address{}, nil, nil, err
 	}
@@ -311,14 +316,14 @@ func (_ReentryAttack *ReentryAttackTransactorSession) Fallback(calldata []byte) 
 	return _ReentryAttack.Contract.Fallback(&_ReentryAttack.TransactOpts, calldata)
 }
 
-// EthswapABI is the input ABI used to generate the binding from.
-const EthswapABI = "[{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"refundTimestamp\",\"type\":\"uint256\"},{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"},{\"internalType\":\"address\",\"name\":\"participant\",\"type\":\"address\"}],\"name\":\"initiate\",\"outputs\":[],\"stateMutability\":\"payable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"}],\"name\":\"refund\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]"
-
-// EthswapFuncSigs maps the 4-byte function signature to its string representation.
-var EthswapFuncSigs = map[string]string{
-	"ae052147": "initiate(uint256,bytes32,address)",
-	"7249fbb6": "refund(bytes32)",
+// EthswapMetaData contains all meta data concerning the Ethswap contract.
+var EthswapMetaData = &bind.MetaData{
+	ABI: "[{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"refundTimestamp\",\"type\":\"uint256\"},{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"},{\"internalType\":\"address\",\"name\":\"participant\",\"type\":\"address\"}],\"name\":\"initiate\",\"outputs\":[],\"stateMutability\":\"payable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"bytes32\",\"name\":\"secretHash\",\"type\":\"bytes32\"}],\"name\":\"refund\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]",
 }
+
+// EthswapABI is the input ABI used to generate the binding from.
+// Deprecated: Use EthswapMetaData.ABI instead.
+var EthswapABI = EthswapMetaData.ABI
 
 // Ethswap is an auto generated Go binding around an Ethereum contract.
 type Ethswap struct {
