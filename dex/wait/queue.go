@@ -181,7 +181,7 @@ func (q *TaperingTickerQueue) Run(ctx context.Context) {
 	defer wg.Wait()
 
 	runWaiter := func(w *taperingWaiter) {
-		wg.Done()
+		defer wg.Done()
 		if w.TryFunc() == DontTryAgain {
 			return
 		}

@@ -323,7 +323,7 @@ func (auth *AuthManager) validateFee(conn comms.Link, msgID uint64, acctID accou
 			Code:    msgjson.FeeError,
 			Message: "unsupported asset",
 		}
-		return true
+		return wait.DontTryAgain
 	}
 
 	coinID := notifyFee.CoinID
