@@ -123,9 +123,4 @@ func TestTaperingQueue(t *testing.T) {
 			t.Fatalf("wrong result order expected %+x, got %+x", expOrder, resultOrder)
 		}
 	}
-
-	remaining := len(q.waiters)
-	if remaining != 0 {
-		t.Fatalf("%d remaining waiters", remaining)
-	}
 }

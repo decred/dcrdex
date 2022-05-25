@@ -139,7 +139,6 @@ type taperingWaiter struct {
 // not successful, the delay between attempts will grow longer and longer up
 // to a configurable maximum.
 type TaperingTickerQueue struct {
-	waiters         []*taperingWaiter
 	fastestInterval time.Duration
 	slowestInterval time.Duration
 	queueWaiter     chan *taperingWaiter
@@ -152,7 +151,6 @@ type TaperingTickerQueue struct {
 // slowestInterval (at fullyTapered).
 func NewTaperingTickerQueue(fastestInterval, slowestInterval time.Duration) *TaperingTickerQueue {
 	return &TaperingTickerQueue{
-		waiters:         make([]*taperingWaiter, 0, 100),
 		fastestInterval: fastestInterval,
 		slowestInterval: slowestInterval,
 		queueWaiter:     make(chan *taperingWaiter, 16),
@@ -177,7 +175,13 @@ func (q *TaperingTickerQueue) Wait(waiter *Waiter) {
 func (q *TaperingTickerQueue) Run(ctx context.Context) {
 	taper := float64(q.slowestInterval - q.fastestInterval)
 
+	waiters := make([]*taperingWaiter, 0, 100)
+
+	var wg sync.WaitGroup
+	defer wg.Wait()
+
 	runWaiter := func(w *taperingWaiter) {
+		wg.Done()
 		if w.TryFunc() == DontTryAgain {
 			return
 		}
@@ -211,30 +215,31 @@ func (q *TaperingTickerQueue) Run(ctx context.Context) {
 
 	for {
 		var tick <-chan time.Time
-		if len(q.waiters) > 0 {
-			tick = time.After(time.Until(q.waiters[0].nextTick))
+		if len(waiters) > 0 {
+			tick = time.After(time.Until(waiters[0].nextTick))
 		}
 
 		select {
 		case <-tick:
 			// Remove the next waiter from the slice. runWaiter will re-insert
 			// with a new nextTick time if it sees TryAgain.
-			w := q.waiters[0]
-			q.waiters = q.waiters[1:]
-
+			w := waiters[0]
+			waiters = waiters[1:]
+			wg.Add(1)
 			go runWaiter(w)
 
 		case w := <-q.queueWaiter:
 			// A little optimization if this waiter would fire immediately, but
 			// it works to append regardless.
 			if time.Until(w.nextTick) <= 0 {
+				wg.Add(1)
 				go runWaiter(w)
 				continue
 			}
 
-			q.waiters = append(q.waiters, w)
-			sort.Slice(q.waiters, func(i, j int) bool {
-				return q.waiters[i].nextTick.Before(q.waiters[j].nextTick) // ascending, next tick first
+			waiters = append(waiters, w)
+			sort.Slice(waiters, func(i, j int) bool {
+				return waiters[i].nextTick.Before(waiters[j].nextTick) // ascending, next tick first
 			})
 			// NOTE: timer leaked until it fires - consider NewTimer and Stop here
 
