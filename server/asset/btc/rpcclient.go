@@ -42,17 +42,22 @@ type RawRequester interface {
 	WaitForShutdown()
 }
 
+// BlockFeeTransactions is a function that fetches a set of FeeTx, used to
+// calculate median-fees manually.
+type BlockFeeTransactions func(rc *RPCClient, blockHash *chainhash.Hash) (feeTxs []FeeTx, prevBlock chainhash.Hash, err error)
+
 // RPCClient is a bitcoind wallet RPC client that uses rpcclient.Client's
 // RawRequest for wallet-related calls.
 type RPCClient struct {
-	ctx                 context.Context
-	requester           RawRequester
-	booleanGetBlockRPC  bool
-	numericGetRawRPC    bool
-	maxFeeBlocks        int
-	arglessFeeEstimates bool
-	blockDeserializer   func([]byte) (*wire.MsgBlock, error)
-	deserializeTx       func([]byte) (*wire.MsgTx, error)
+	ctx                  context.Context
+	requester            RawRequester
+	booleanGetBlockRPC   bool
+	maxFeeBlocks         int
+	arglessFeeEstimates  bool
+	numericGetRawRPC     bool
+	blockDeserializer    func([]byte) (*wire.MsgBlock, error)
+	deserializeTx        func([]byte) (*wire.MsgTx, error)
+	blockFeeTransactions BlockFeeTransactions
 }
 
 func (rc *RPCClient) callHashGetter(method string, args anylist) (*chainhash.Hash, error) {
@@ -180,13 +185,21 @@ type GetBlockVerboseResult struct {
 	PreviousHash  string   `json:"previousblockhash"`
 }
 
-func (rc *RPCClient) GetBlock(blockHash *chainhash.Hash) (*wire.MsgBlock, error) {
+func (rc *RPCClient) GetRawBlock(blockHash *chainhash.Hash) ([]byte, error) {
 	arg := interface{}(0)
 	if rc.booleanGetBlockRPC {
 		arg = false
 	}
 	var blockB dex.Bytes // UnmarshalJSON hex -> bytes
 	err := rc.call(methodGetBlock, anylist{blockHash.String(), arg}, &blockB)
+	if err != nil {
+		return nil, err
+	}
+	return blockB, nil
+}
+
+func (rc *RPCClient) GetMsgBlock(blockHash *chainhash.Hash) (*wire.MsgBlock, error) {
+	blockB, err := rc.GetRawBlock(blockHash)
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +224,7 @@ func (rc *RPCClient) GetBlock(blockHash *chainhash.Hash) (*wire.MsgBlock, error)
 // separate because it contains other useful info like the height and median
 // time that the wire type does not contain.
 func (rc *RPCClient) getBlockWithVerboseHeader(blockHash *chainhash.Hash) (*wire.MsgBlock, *btcjson.GetBlockHeaderVerboseResult, error) {
-	msgBlock, err := rc.GetBlock(blockHash)
+	msgBlock, err := rc.GetMsgBlock(blockHash)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -308,6 +321,76 @@ func (rc *RPCClient) medianFeeRate() (uint64, error) {
 	return uint64(math.Round(float64(weight) / float64(txCount))), nil
 }
 
+// FeeTx is a representation of a transaction that 1) has zero or more previous
+// outpoints to fetch, and 2) given the requested outpoints, can report its tx
+// fee rate, in Sats/byte.
+type FeeTx interface {
+	PrevOuts() []wire.OutPoint
+	FeeRate(map[chainhash.Hash]map[int]int64) (uint64, error)
+}
+
+// btcFeeTx is the FeeTx for a standard Bitcoin MsgTx.
+type btcFeeTx struct {
+	*wire.MsgTx
+}
+
+var _ FeeTx = (*btcFeeTx)(nil)
+
+// PrevOuts returns a list of previous outpoints for this tx.
+func (tx *btcFeeTx) PrevOuts() []wire.OutPoint {
+	ops := make([]wire.OutPoint, len(tx.TxIn))
+	for i, txIn := range tx.TxIn {
+		ops[i] = txIn.PreviousOutPoint
+	}
+	return ops
+}
+
+// FeeRate calculates this tx's fee rate.
+func (tx *btcFeeTx) FeeRate(prevOuts map[chainhash.Hash]map[int]int64) (uint64, error) {
+	var in, out int64
+	for i, vin := range tx.TxIn {
+		prevOut := vin.PreviousOutPoint
+		outs, found := prevOuts[prevOut.Hash]
+		if !found {
+			return 0, fmt.Errorf("no prevout tx %s for %s:%d", prevOut.Hash, tx.TxHash(), i)
+		}
+		v, found := outs[int(prevOut.Index)]
+		if !found {
+			return 0, fmt.Errorf("no prevout vout %s:%d for %s:%d", prevOut.Hash, prevOut.Index, tx.TxHash(), i)
+		}
+		in += v
+	}
+	for _, vout := range tx.TxOut {
+		out += vout.Value
+	}
+	fees := in - out
+	if fees < 0 {
+		return 0, fmt.Errorf("fees < 0 for tx %s", tx.TxHash())
+	}
+	sz := tx.SerializeSize()
+	if sz == 0 {
+		return 0, fmt.Errorf("size 0 tx %s", tx.TxHash())
+	}
+	return uint64(math.Round(float64(fees) / float64(sz))), nil
+}
+
+func btcBlockFeeTransactions(rc *RPCClient, blockHash *chainhash.Hash) (feeTxs []FeeTx, prevBlock chainhash.Hash, err error) {
+	blk, err := rc.GetMsgBlock(blockHash)
+	if err != nil {
+		return nil, chainhash.Hash{}, err
+	}
+
+	if len(blk.Transactions) == 0 {
+		return nil, chainhash.Hash{}, fmt.Errorf("no transactions?")
+	}
+
+	feeTxs = make([]FeeTx, len(blk.Transactions)-1)
+	for i, msgTx := range blk.Transactions[1:] { // skip coinbase
+		feeTxs[i] = &btcFeeTx{msgTx}
+	}
+	return feeTxs, blk.Header.PrevBlock, nil
+}
+
 // medianFeesTheHardWay calculates the median fees from the previous block(s).
 // medianFeesTheHardWay is used for assets that don't have a getblockstats RPC,
 // and is only useful for non-segwit assets.
@@ -319,7 +402,7 @@ func (rc *RPCClient) medianFeesTheHardWay(ctx context.Context) (uint64, error) {
 		return 0, err
 	}
 
-	txs := make([]*wire.MsgTx, 0, numTxs)
+	txs := make([]FeeTx, 0, numTxs)
 
 	// prev_out_tx_hash -> prev_out_index -> value
 	prevOuts := make(map[chainhash.Hash]map[int]int64, numTxs)
@@ -337,21 +420,15 @@ out:
 			return 0, errNoCompetition
 		}
 
-		blk, err := rc.GetBlock(iHash)
+		feeTxs, prevBlock, err := rc.blockFeeTransactions(rc, iHash)
 		if err != nil {
 			return 0, err
 		}
 
-		if len(blk.Transactions) == 0 {
-			return 0, fmt.Errorf("no transactions?")
-		}
+		rand.Shuffle(len(feeTxs), func(i, j int) { feeTxs[i], feeTxs[j] = feeTxs[j], feeTxs[i] })
 
-		rawTxs := blk.Transactions[1:] // skip coinbase
-		rand.Shuffle(len(rawTxs), func(i, j int) { rawTxs[i], rawTxs[j] = rawTxs[j], rawTxs[i] })
-
-		for _, tx := range rawTxs {
-			for _, vin := range tx.TxIn {
-				prevOut := vin.PreviousOutPoint
+		for _, tx := range feeTxs {
+			for _, prevOut := range tx.PrevOuts() {
 				prevs := prevOuts[prevOut.Hash]
 				if len(prevs) == 0 {
 					prevs = make(map[int]int64, 1)
@@ -368,7 +445,7 @@ out:
 			}
 		}
 
-		iHash = &blk.Header.PrevBlock
+		iHash = &prevBlock
 	}
 
 	// Fetch all the previous outpoints and log the values.
@@ -379,12 +456,14 @@ out:
 
 		txB, err := rc.GetRawTransaction(&txHash)
 		if err != nil {
-			return 0, fmt.Errorf("GetRawTransaction error: %w", err)
+			return 0, fmt.Errorf("GetRawTransaction error: %v", err)
 		}
+
 		tx, err := rc.deserializeTx(txB)
 		if err != nil {
-			return 0, fmt.Errorf("error deserializing tx: %w", err)
+			return 0, fmt.Errorf("error deserializing tx: %v", err)
 		}
+
 		for vout := range prevs {
 			if len(tx.TxOut) < vout+1 {
 				return 0, fmt.Errorf("too few outputs")
@@ -396,24 +475,13 @@ out:
 	// Do math.
 	rates := make([]uint64, numTxs)
 	for i, tx := range txs {
-		var in, out int64
-		for _, vin := range tx.TxIn {
-			prevOut := vin.PreviousOutPoint
-			in += prevOuts[prevOut.Hash][int(prevOut.Index)]
+		r, err := tx.FeeRate(prevOuts)
+		if err != nil {
+			return 0, err
 		}
-		for _, vout := range tx.TxOut {
-			out += vout.Value
-		}
-		fees := in - out
-		if fees < 0 {
-			return 0, fmt.Errorf("fees < 0 for tx %s", tx.TxHash())
-		}
-		sz := tx.SerializeSize()
-		if sz == 0 {
-			return 0, fmt.Errorf("size 0 tx %s", tx.TxHash())
-		}
-		rates[i] = uint64(fees) / uint64(sz)
+		rates[i] = r
 	}
+
 	sort.Slice(rates, func(i, j int) bool { return rates[i] < rates[j] })
 	return rates[len(rates)/2], nil
 }

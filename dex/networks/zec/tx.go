@@ -28,6 +28,9 @@ const (
 
 	overwinterMask = ^uint32(1 << 31)
 	pver           = 0
+
+	overwinterJoinSplitSize = 1802
+	saplingJoinSplitSize    = 1698
 )
 
 var (
@@ -44,6 +47,11 @@ var (
 		0x8a, 0x2e, 0xee, 0x1b, 0x9f, 0xea, 0xe7, 0x8b, 0x48, 0xa6, 0xe2, 0xc1}
 )
 
+// JoinSplit is only the new and old fields of a vJoinSplit.
+type JoinSplit struct {
+	Old, New uint64
+}
+
 // Tx is a ZCash-adapted MsgTx. Tx will decode any version transaction, but will
 // not save most data for shielded transactions.
 // Tx can only produce tx hashes for unshielded transactions. Tx can only create
@@ -53,9 +61,12 @@ type Tx struct {
 	ExpiryHeight        uint32
 	NSpendsSapling      uint64
 	NOutputsSapling     uint64
-	ValueBalanceSapling uint64
+	ValueBalanceSapling int64
 	NActionsOrchard     uint64
+	SizeProofsOrchard   uint64
 	NJoinSplit          uint64
+	VJoinSplit          []*JoinSplit
+	ValueBalanceOrchard int64
 }
 
 // NewTxFromMsgTx creates a Tx embedding the MsgTx, and adding ZCash-specific
@@ -528,9 +539,9 @@ func (tx *Tx) ZecDecode(r io.Reader) (err error) {
 
 	var bindingSigRequired bool
 	if ver == VersionSapling {
-		// valueBalanceSpending uint64
-		if err = discardBytes(r, 8); err != nil {
-			return fmt.Errorf("error reading valueBalanceSpending: %w", err)
+		// valueBalanceSapling uint64
+		if tx.ValueBalanceSapling, err = readInt64(r); err != nil {
+			return fmt.Errorf("error reading valueBalanceSapling: %w", err)
 		}
 
 		if tx.NSpendsSapling, err = wire.ReadVarInt(r, pver); err != nil {
@@ -559,12 +570,27 @@ func (tx *Tx) ZecDecode(r io.Reader) (err error) {
 			return fmt.Errorf("error reading nJoinSplit: %w", err)
 		} else if tx.NJoinSplit > 0 {
 			// vJoinSplit - discard
-			sz := 1802 * tx.NJoinSplit
-			if ver == 4 {
-				sz = 1698 * tx.NJoinSplit
-			}
-			if err = discardBytes(r, int64(sz)); err != nil {
-				return fmt.Errorf("error reading vJoinSplit: %w", err)
+			tx.VJoinSplit = make([]*JoinSplit, 0, tx.NJoinSplit)
+			for i := uint64(0); i < tx.NJoinSplit; i++ {
+				sz := overwinterJoinSplitSize
+				if ver == 4 {
+					sz = saplingJoinSplitSize
+				}
+				old, err := readUint64(r)
+				if err != nil {
+					return fmt.Errorf("error reading joinsplit old: %w", err)
+				}
+				new, err := readUint64(r)
+				if err != nil {
+					return fmt.Errorf("error reading joinsplit new: %w", err)
+				}
+				tx.VJoinSplit = append(tx.VJoinSplit, &JoinSplit{
+					Old: old,
+					New: new,
+				})
+				if err = discardBytes(r, int64(sz-16)); err != nil {
+					return fmt.Errorf("error reading vJoinSplit: %w", err)
+				}
 			}
 			// joinSplitPubKey
 			if err = discardBytes(r, 32); err != nil {
@@ -666,7 +692,7 @@ func (tx *Tx) ZecDecode(r io.Reader) (err error) {
 	}
 
 	// valueBalanceOrchard uint64
-	if err = discardBytes(r, 8); err != nil {
+	if tx.ValueBalanceOrchard, err = readInt64(r); err != nil {
 		return fmt.Errorf("error reading valueBalanceOrchard: %w", err)
 	}
 
@@ -676,13 +702,13 @@ func (tx *Tx) ZecDecode(r io.Reader) (err error) {
 	}
 
 	// sizeProofsOrchard
-	sizeProofsOrchard, err := wire.ReadVarInt(r, pver)
+	tx.SizeProofsOrchard, err = wire.ReadVarInt(r, pver)
 	if err != nil {
 		return fmt.Errorf("error reading sizeProofsOrchard: %w", err)
 	}
 
 	// proofsOrchard
-	if err = discardBytes(r, int64(sizeProofsOrchard)); err != nil {
+	if err = discardBytes(r, int64(tx.SizeProofsOrchard)); err != nil {
 		return fmt.Errorf("error reading proofsOrchard: %w", err)
 	}
 
@@ -697,6 +723,71 @@ func (tx *Tx) ZecDecode(r io.Reader) (err error) {
 	}
 
 	return nil
+}
+
+// SerializeSize is the size of the transaction when serialized.
+func (tx *Tx) SerializeSize() uint64 {
+	var sz uint64 = 4 // header
+	ver := tx.Version
+	sz += uint64(wire.VarIntSerializeSize(uint64(len(tx.TxIn)))) // tx_in_count
+	for _, txIn := range tx.TxIn {                               // tx_in
+		sz += 32 /* prev hash */ + 4 /* prev index */ + 4 /* sequence */
+		sz += uint64(wire.VarIntSerializeSize(uint64(len(txIn.SignatureScript))) + len(txIn.SignatureScript))
+	}
+	sz += uint64(wire.VarIntSerializeSize(uint64(len(tx.TxOut)))) // tx_out_count
+	for _, txOut := range tx.TxOut {                              // tx_out
+		sz += 8 /* value */
+		sz += uint64(wire.VarIntSerializeSize(uint64(len(txOut.PkScript))) + len(txOut.PkScript))
+	}
+	sz += 4 // lockTime
+
+	// join-splits are only versions 2 to 4.
+	if ver >= VersionPreOverwinter && ver < VersionNU5 {
+		sz += uint64(wire.VarIntSerializeSize(tx.NJoinSplit))
+		if tx.NJoinSplit > 0 {
+			if ver < VersionSapling {
+				sz += tx.NJoinSplit * overwinterJoinSplitSize
+			} else {
+				sz += tx.NJoinSplit * saplingJoinSplitSize
+			}
+			sz += 32 // joinSplitPubKey
+			sz += 64 // joinSplitSig
+		}
+	}
+
+	if ver >= VersionOverwinter {
+		sz += 4 // nExpiryHeight
+		sz += 4 // nVersionGroupId
+	}
+
+	if ver >= VersionSapling {
+		sz += 8                                                    // valueBalanceSapling
+		sz += uint64(wire.VarIntSerializeSize(tx.NSpendsSapling))  // nSpendsSapling
+		sz += 384 * tx.NSpendsSapling                              // vSpendsSapling
+		sz += uint64(wire.VarIntSerializeSize(tx.NOutputsSapling)) // nOutputsSapling
+		sz += 948 * tx.NOutputsSapling                             // vOutputsSapling
+		if tx.NSpendsSapling+tx.NOutputsSapling > 0 {
+			sz += 64 // bindingSigSapling
+		}
+	}
+
+	if ver == VersionNU5 {
+		// With nSpendsSapling = 0 and nOutputsSapling = 0
+		sz += 4                                                    // nConsensusBranchId
+		sz += uint64(wire.VarIntSerializeSize(tx.NActionsOrchard)) // nActionsOrchard
+		if tx.NActionsOrchard > 0 {
+			sz += tx.NActionsOrchard * 820                               // vActionsOrchard
+			sz++                                                         // flagsOrchard
+			sz += 8                                                      // valueBalanceOrchard
+			sz += 32                                                     // anchorOrchard
+			sz += uint64(wire.VarIntSerializeSize(tx.SizeProofsOrchard)) // sizeProofsOrchard
+			sz += tx.SizeProofsOrchard                                   // proofsOrchard
+			sz += 64 * tx.NActionsOrchard                                // vSpendAuthSigsOrchard
+			sz += 64                                                     // bindingSigOrchard
+
+		}
+	}
+	return sz
 }
 
 // writeTxIn encodes ti to the bitcoin protocol encoding for a transaction
@@ -771,6 +862,14 @@ func readUint64(r io.Reader) (uint64, error) {
 		return 0, err
 	}
 	return binary.LittleEndian.Uint64(b), nil
+}
+
+func readInt64(r io.Reader) (int64, error) {
+	u, err := readUint64(r)
+	if err != nil {
+		return 0, err
+	}
+	return int64(u), nil
 }
 
 // readTxIn reads the next sequence of bytes from r as a transaction input.
@@ -862,35 +961,5 @@ func blake2bHash(data, personalizationKey []byte) (_ [32]byte, err error) {
 // CalcTxSize calculates the size of a ZCash transparent transaction. CalcTxSize
 // won't return accurate results for shielded or blended transactions.
 func CalcTxSize(tx *wire.MsgTx) uint64 {
-	var sz uint64 = 4 // header
-	ver := tx.Version
-	sz += uint64(wire.VarIntSerializeSize(uint64(len(tx.TxIn)))) // tx_in_count
-	for _, txIn := range tx.TxIn {                               // tx_in
-		sz += 32 /* prev hash */ + 4 /* prev index */ + 4 /* sequence */
-		sz += uint64(wire.VarIntSerializeSize(uint64(len(txIn.SignatureScript))) + len(txIn.SignatureScript))
-	}
-	sz += uint64(wire.VarIntSerializeSize(uint64(len(tx.TxOut)))) // tx_out_count
-	for _, txOut := range tx.TxOut {                              // tx_out
-		sz += 8 /* value */
-		sz += uint64(wire.VarIntSerializeSize(uint64(len(txOut.PkScript))) + len(txOut.PkScript))
-	}
-	sz += 4 // lockTime
-	if ver >= VersionOverwinter {
-		sz += 4 // nExpiryHeight
-		if ver < VersionNU5 {
-			sz++ // nJoinSplit. removed in NU5
-		}
-	}
-	if ver >= VersionSapling {
-		sz += 4 // nVersionGroupId
-		sz += 8 // valueBalanceSapling
-		sz++    // nSpendsSapling varint
-		sz++    // nOutputsSapling varint
-	}
-	if ver == VersionNU5 {
-		// With nSpendsSapling = 0 and nOutputsSapling = 0
-		sz += 4 // nConsensusBranchId
-		sz++    // nActionsOrchard
-	}
-	return sz
+	return (&Tx{MsgTx: tx}).SerializeSize()
 }

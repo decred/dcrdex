@@ -4,7 +4,9 @@
 package zec
 
 import (
+	"encoding/hex"
 	"fmt"
+	"math"
 
 	"decred.org/dcrdex/dex"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
@@ -13,6 +15,7 @@ import (
 	"decred.org/dcrdex/server/asset/btc"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 )
 
@@ -94,23 +97,20 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		AddressDecoder: func(addr string, net *chaincfg.Params) (btcutil.Address, error) {
 			return dexzec.DecodeAddress(addr, addrParams, btcParams)
 		},
-		DumbFeeEstimates: true,
-		ManualMedianFee:  true,
-		// NoCompetitionFeeRate is not based on zcashd DEFAULT_MIN_RELAY_TX_FEE,
-		// because that rate is 0.1 zats/byte. Looking at a block explorer, it
-		// appears that typical rates actually are very low, and sometimes under
-		// 1 zat/byte, but not usually.
-		NoCompetitionFeeRate: 2,
-		TxDeserializer: func(txB []byte) (*wire.MsgTx, error) {
-			zecTx, err := dexzec.DeserializeTx(txB)
+		InitTxSize:     dexzec.InitTxSize,
+		InitTxSizeBase: dexzec.InitTxSizeBase,
+		TxDeserializer: func(b []byte) (*wire.MsgTx, error) {
+			zecTx, err := dexzec.DeserializeTx(b)
 			if err != nil {
 				return nil, err
 			}
 			return zecTx.MsgTx, nil
 		},
-		InitTxSize:       dexzec.InitTxSize,
-		InitTxSizeBase:   dexzec.InitTxSizeBase,
-		NumericGetRawRPC: true,
+		DumbFeeEstimates:     true,
+		ManualMedianFee:      true,
+		BlockFeeTransactions: blockFeeTransactions,
+		NumericGetRawRPC:     true,
+		ShieldedIO:           shieldedIO,
 	})
 	if err != nil {
 		return nil, err
@@ -145,4 +145,117 @@ func (be *ZECBackend) Contract(coinID []byte, redeemScript []byte) (*asset.Contr
 		return nil, err
 	}
 	return contract, nil
+}
+
+func blockFeeTransactions(rc *btc.RPCClient, blockHash *chainhash.Hash) (feeTxs []btc.FeeTx, prevBlock chainhash.Hash, err error) {
+	blockB, err := rc.GetRawBlock(blockHash)
+	if err != nil {
+		return nil, chainhash.Hash{}, err
+	}
+
+	blk, err := dexzec.DeserializeBlock(blockB)
+	if err != nil {
+		return nil, chainhash.Hash{}, err
+	}
+
+	if len(blk.Transactions) == 0 {
+		return nil, chainhash.Hash{}, fmt.Errorf("block %s has no transactions", blockHash)
+	}
+
+	feeTxs = make([]btc.FeeTx, 0, len(blk.Transactions)-1)
+	for _, tx := range blk.Transactions[1:] { // skip coinbase
+		feeTx, err := newFeeTx(tx)
+		if err != nil {
+			return nil, chainhash.Hash{}, fmt.Errorf("error parsing fee tx: %w", err)
+		}
+		feeTxs = append(feeTxs, feeTx)
+	}
+
+	return feeTxs, blk.Header.PrevBlock, nil
+}
+
+// feeTx implements FeeTx for manual median-fee calculations.
+type feeTx struct {
+	size           uint64
+	prevOuts       []wire.OutPoint
+	shieldedIn     uint64
+	transparentOut uint64
+	shieldedOut    uint64
+}
+
+var _ btc.FeeTx = (*feeTx)(nil)
+
+func newFeeTx(zecTx *dexzec.Tx) (*feeTx, error) {
+	var transparentOut uint64
+	for _, out := range zecTx.TxOut {
+		transparentOut += uint64(out.Value)
+	}
+	prevOuts := make([]wire.OutPoint, len(zecTx.TxOut))
+	for _, in := range zecTx.TxIn {
+		prevOuts = append(prevOuts, in.PreviousOutPoint)
+	}
+	var shieldedIn, shieldedOut uint64
+	for _, js := range zecTx.VJoinSplit {
+		shieldedIn += js.New
+		shieldedOut += js.Old
+	}
+	if zecTx.ValueBalanceSapling > 0 {
+		shieldedIn += uint64(zecTx.ValueBalanceSapling)
+	} else if zecTx.ValueBalanceSapling < 0 {
+		shieldedOut += uint64(-1 * zecTx.ValueBalanceSapling)
+	}
+	if zecTx.ValueBalanceOrchard > 0 {
+		shieldedIn += uint64(zecTx.ValueBalanceOrchard)
+	} else if zecTx.ValueBalanceOrchard < 0 {
+		shieldedOut += uint64(-1 * zecTx.ValueBalanceOrchard)
+	}
+
+	return &feeTx{
+		size:           zecTx.SerializeSize(),
+		transparentOut: transparentOut,
+		shieldedOut:    shieldedOut,
+		shieldedIn:     shieldedIn,
+		prevOuts:       prevOuts,
+	}, nil
+}
+
+func (tx *feeTx) PrevOuts() []wire.OutPoint {
+	return tx.prevOuts
+}
+
+func (tx *feeTx) FeeRate(prevOuts map[chainhash.Hash]map[int]int64) (uint64, error) {
+	var transparentIn uint64
+	for _, op := range tx.prevOuts {
+		outs, found := prevOuts[op.Hash]
+		if !found {
+			return 0, fmt.Errorf("previous outpoint tx not found for %+v", op)
+		}
+		prevOutValue, found := outs[int(op.Index)]
+		if !found {
+			return 0, fmt.Errorf("previous outpoint vout not found for %+v", op)
+		}
+		transparentIn += uint64(prevOutValue)
+	}
+	in := tx.shieldedIn + transparentIn
+	out := tx.shieldedOut + tx.transparentOut
+	if out > in {
+		return 0, fmt.Errorf("out > in. %d > %d", out, in)
+	}
+	return uint64(math.Round(float64(in-out) / float64(tx.size))), nil
+}
+
+func shieldedIO(tx *btc.VerboseTxExtended) (in, out uint64, err error) {
+	txB, err := hex.DecodeString(tx.Hex)
+	if err != nil {
+		return 0, 0, fmt.Errorf("hex.DecodeString error: %w", err)
+	}
+	zecTx, err := dexzec.DeserializeTx(txB)
+	if err != nil {
+		return 0, 0, fmt.Errorf("DeserializeTx error: %w", err)
+	}
+	feeTx, err := newFeeTx(zecTx)
+	if err != nil {
+		return 0, 0, err
+	}
+	return feeTx.shieldedIn, feeTx.shieldedOut, nil
 }

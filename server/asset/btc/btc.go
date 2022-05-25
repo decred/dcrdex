@@ -133,16 +133,17 @@ type Backend struct {
 	// use the provided logger.
 	log        dex.Logger
 	decodeAddr dexbtc.AddressDecoder
-	// fee estimation configuration
-	feeConfs          int64
-	noCompetitionRate uint64
 	// booleanGetBlockRPC corresponds to BackendCloneConfig.BooleanGetBlockRPC
 	// field and is used by RPCClient, which is constructed on Connect.
 	booleanGetBlockRPC bool
 	blockDeserializer  func([]byte) (*wire.MsgBlock, error)
-	initTxSize         uint32
-	initTxSizeBase     uint32
 	numericGetRawRPC   bool
+	// fee estimation configuration
+	feeConfs          int64
+	noCompetitionRate uint64
+
+	initTxSize     uint32
+	initTxSizeBase uint32
 
 	// The feeCache prevents repeated calculations of the median fee rate
 	// between block changes when estimate(smart)fee is unprimed.
@@ -224,9 +225,9 @@ func newBTC(cloneCfg *BackendCloneConfig, rpcCfg *dexbtc.RPCConfig) *Backend {
 		log:                cloneCfg.Logger,
 		segwit:             cloneCfg.Segwit,
 		decodeAddr:         addrDecoder,
-		booleanGetBlockRPC: cloneCfg.BooleanGetBlockRPC,
 		noCompetitionRate:  noCompetitionRate,
 		feeConfs:           feeConfs,
+		booleanGetBlockRPC: cloneCfg.BooleanGetBlockRPC,
 		blockDeserializer:  cloneCfg.BlockDeserializer,
 		numericGetRawRPC:   cloneCfg.NumericGetRawRPC,
 		initTxSize:         initTxSize,
@@ -252,7 +253,7 @@ type BackendCloneConfig struct {
 	ManualMedianFee bool
 	// NoCompetitionFeeRate specifies a fee rate to use if estimatesmartfee
 	// or estimatefee aren't ready and the median fee is finding relatively
-	// empty blocks. Sats/byte.
+	// empty blocks.
 	NoCompetitionFeeRate uint64
 	// DumbFeeEstimates is for asset's whose RPC is estimatefee instead of
 	// estimatesmartfee.
@@ -272,11 +273,19 @@ type BackendCloneConfig struct {
 	BooleanGetBlockRPC bool
 	// BlockDeserializer can be used in place of (*wire.MsgBlock).Deserialize.
 	BlockDeserializer func(blk []byte) (*wire.MsgBlock, error)
-	TxDeserializer    func([]byte) (*wire.MsgTx, error)
+	// TxDeserializer is an optional function used to deserialize a transaction.
+	// TxDeserializer is only used if ManualMedianFee is true.
+	TxDeserializer func([]byte) (*wire.MsgTx, error)
+	// BlockFeeTransactions is a function to fetch a set of FeeTx and a previous
+	// block hash for a specific block.
+	BlockFeeTransactions BlockFeeTransactions
 	// NumericGetRawRPC uses a numeric boolean indicator for the
 	// getrawtransaction RPC.
 	NumericGetRawRPC bool
-
+	// ShieldedIO is a function to read a transaction and calculate the shielded
+	// input and output amounts. This is a temporary measure until zcashd
+	// encodes valueBalanceOrchard in their getrawtransaction RPC results.
+	ShieldedIO     func(tx *VerboseTxExtended) (in, out uint64, err error)
 	InitTxSize     uint32
 	InitTxSizeBase uint32
 }
@@ -329,15 +338,21 @@ func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		txDeserializer = msgTxFromBytes
 	}
 
+	blockFeeTransactions := btc.cfg.BlockFeeTransactions
+	if blockFeeTransactions == nil {
+		blockFeeTransactions = btcBlockFeeTransactions
+	}
+
 	btc.node = &RPCClient{
-		ctx:                 ctx,
-		requester:           client,
-		booleanGetBlockRPC:  btc.cfg.BooleanGetBlockRPC,
-		numericGetRawRPC:    btc.numericGetRawRPC,
-		maxFeeBlocks:        maxFeeBlocks,
-		arglessFeeEstimates: btc.cfg.ArglessFeeEstimates,
-		blockDeserializer:   btc.blockDeserializer,
-		deserializeTx:       txDeserializer,
+		ctx:                  ctx,
+		requester:            client,
+		booleanGetBlockRPC:   btc.booleanGetBlockRPC,
+		maxFeeBlocks:         maxFeeBlocks,
+		arglessFeeEstimates:  btc.cfg.ArglessFeeEstimates,
+		blockDeserializer:    btc.blockDeserializer,
+		numericGetRawRPC:     btc.numericGetRawRPC,
+		deserializeTx:        txDeserializer,
+		blockFeeTransactions: blockFeeTransactions,
 	}
 
 	// Prime the cache
@@ -878,7 +893,17 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *VerboseTxExte
 
 	// Parse inputs and outputs, storing only what's needed.
 	inputs := make([]txIn, 0, len(verboseTx.Vin))
-	sumIn, sumOut := verboseTx.ShieldedIO()
+
+	// sumIn, sumOut := verboseTx.ShieldedIO()
+	var sumIn, sumOut uint64
+	if btc.cfg.ShieldedIO != nil {
+		var err error
+		sumIn, sumOut, err = btc.cfg.ShieldedIO(verboseTx)
+		if err != nil {
+			return nil, fmt.Errorf("ShieldedIO error: %w", err)
+		}
+	}
+
 	var isCoinbase bool
 	for vin, input := range verboseTx.Vin {
 		isCoinbase = input.Coinbase != ""
@@ -1190,8 +1215,6 @@ func (btc *Backend) estimateFee(ctx context.Context) (satsPerB uint64, err error
 	}
 	if err == nil && satsPerB > 0 {
 		return satsPerB, nil
-	} else if err != nil {
-		btc.log.Tracef("Estimatefee error for %s: %v", btc.name, err)
 	}
 
 	btc.log.Debugf("Fee estimate unavailable for %s. Using median fee.", btc.name)
@@ -1203,7 +1226,7 @@ func (btc *Backend) estimateFee(ctx context.Context) (satsPerB uint64, err error
 
 	// If the current block hasn't changed, no need to recalc.
 	if btc.feeCache.hash == tip {
-		btc.log.Tracef("Using cached %s median fee rate", btc.name)
+		// btc.log.Tracef("Using cached %s median fee rate", btc.name)
 		return btc.feeCache.fee, nil
 	}
 

@@ -25,11 +25,21 @@ var (
 
 func TestTxDeserializeV2(t *testing.T) {
 	// testnet tx 66bd29f14043843327fae377bd47659c6f02efd3aa62992a6ffa15ddd5fcbaff
-	_, err := DeserializeTx(v2JoinSplit)
+	tx, err := DeserializeTx(v2JoinSplit)
 	if err != nil {
 		t.Fatalf("error decoding tx: %v", err)
 	}
-	// We can't validate the hash since we don't save the vJoinSplit data.
+	if len(tx.VJoinSplit) != 1 {
+		t.Fatalf("expected 1 vJoinSplit. saw %d", len(tx.VJoinSplit))
+	}
+	if tx.SerializeSize() != uint64(len(v2JoinSplit)) {
+		t.Fatalf("wrong serialized size. wanted %d, got %d", len(v2JoinSplit), tx.SerializeSize())
+	}
+	js := tx.VJoinSplit[0]
+	const expNew = 5338489
+	if js.New != expNew {
+		t.Fatalf("wrong joinsplit new. expected %d, got %d", expNew, js.New)
+	}
 }
 
 func TestTxDeserializeV3(t *testing.T) {
@@ -42,6 +52,9 @@ func TestTxDeserializeV3(t *testing.T) {
 	if tx.TxHash().String() != expHash {
 		t.Fatalf("wrong v3 hash")
 	}
+	if tx.SerializeSize() != uint64(len(v3Tx)) {
+		t.Fatalf("wrong serialized size. wanted %d, got %d", len(v3Tx), tx.SerializeSize())
+	}
 }
 
 func TestTxDeserializeV4(t *testing.T) {
@@ -53,6 +66,9 @@ func TestTxDeserializeV4(t *testing.T) {
 	const expHash = "fb70397806afddcc07b9607e844ff29f2fb09e9972a051c3fe4d56fe18147e77"
 	if tx.TxHash().String() != expHash {
 		t.Fatalf("wrong v4 hash")
+	}
+	if tx.SerializeSize() != uint64(len(unshieldedSaplingTx)) {
+		t.Fatalf("wrong serialized size. wanted %d, got %d", len(unshieldedSaplingTx), tx.SerializeSize())
 	}
 
 	if len(tx.TxIn) != 1 {
@@ -107,6 +123,9 @@ func TestTxDeserializeV5(t *testing.T) {
 	if tx.TxHash().String() != expHash {
 		t.Fatalf("wrong v5 hash")
 	}
+	if tx.SerializeSize() != uint64(len(unshieldedOrchardTx)) {
+		t.Fatalf("wrong serialized size. wanted %d, got %d", len(unshieldedOrchardTx), tx.SerializeSize())
+	}
 
 	serializedTx, err := tx.Bytes()
 	if err != nil {
@@ -121,8 +140,12 @@ func TestTxDeserializeV5(t *testing.T) {
 
 func TestShieldedTx(t *testing.T) {
 	// Just make sure it doesn't error.
-	if _, err := DeserializeTx(shieldedSaplingTx); err != nil {
+	tx, err := DeserializeTx(shieldedSaplingTx)
+	if err != nil {
 		t.Fatalf("error decoding tx: %v", err)
+	}
+	if tx.SerializeSize() != uint64(len(shieldedSaplingTx)) {
+		t.Fatalf("wrong serialized size. wanted %d, got %d", len(shieldedSaplingTx), tx.SerializeSize())
 	}
 }
 

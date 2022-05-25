@@ -91,8 +91,10 @@ type VerboseTxExtended struct {
 
 	// ZCash-specific fields.
 
-	VJoinSplit   []*JoinSplit `json:"vjoinsplit"`
-	ValueBalance int64        `json:"valueBalanceZat"`
+	VJoinSplit          []*JoinSplit `json:"vjoinsplit"`
+	ValueBalanceSapling int64        `json:"valueBalanceZat"` // Sapling pool
+	// ValueBalanceOrchard is disabled until zcashd encodes valueBalanceOrchard.
+	ValueBalanceOrchard int64 `json:"valueBalanceOrchardZat"` // Orchard pool
 
 	// Other fields that could be used but aren't right now.
 
@@ -104,17 +106,25 @@ type VerboseTxExtended struct {
 	// Blocktime int64  `json:"blocktime,omitempty"`
 }
 
-// ShieldedIO sums the ZCash shielded pool inputs and outputs. Will return
-// zeros for non-ZCash-protocol transactions.
-func (tx *VerboseTxExtended) ShieldedIO() (in, out uint64) {
-	for _, js := range tx.VJoinSplit {
-		in += js.New
-		out += js.Old
-	}
-	if tx.ValueBalance > 0 {
-		in += uint64(tx.ValueBalance)
-	} else if tx.ValueBalance < 0 {
-		out += uint64(-1 * tx.ValueBalance)
-	}
-	return
-}
+// Currently disabled because the verbose getrawtransaction results for ZCash
+// do not includee the valueBalanceOrchard yet.
+// https://github.com/zcash/zcash/pull/5969
+// // ShieldedIO sums the ZCash shielded pool inputs and outputs. Will return
+// // zeros for non-ZCash-protocol transactions.
+// func (tx *VerboseTxExtended) ShieldedIO() (in, out uint64) {
+// 	for _, js := range tx.VJoinSplit {
+// 		in += js.New
+// 		out += js.Old
+// 	}
+// 	if tx.ValueBalanceSapling > 0 {
+// 		in += uint64(tx.ValueBalanceSapling)
+// 	} else if tx.ValueBalanceSapling < 0 {
+// 		out += uint64(-1 * tx.ValueBalanceSapling)
+// 	}
+// 	if tx.ValueBalanceOrchard > 0 {
+// 		in += uint64(tx.ValueBalanceOrchard)
+// 	} else if tx.ValueBalanceOrchard < 0 {
+// 		out += uint64(-1 * tx.ValueBalanceOrchard)
+// 	}
+// 	return
+// }
