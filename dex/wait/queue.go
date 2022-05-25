@@ -112,6 +112,9 @@ out:
 	}
 }
 
+// tick speed is piecewise linear, constant at fastestInterval at or below
+// fullSpeedTicks, linear from fastestInterval to slowestInterval between
+// fullSpeedTicks and fullyTapered, and slowestInterval beyond that.
 const (
 	// fullSpeedTicks is the number of attempts that will be made with the
 	// configured fastestInterval delay. After fullSpeedTicks, the retry speed
@@ -136,11 +139,10 @@ type taperingWaiter struct {
 // not successful, the delay between attempts will grow longer and longer up
 // to a configurable maximum.
 type TaperingTickerQueue struct {
-	waiterMtx       sync.Mutex
 	waiters         []*taperingWaiter
 	fastestInterval time.Duration
 	slowestInterval time.Duration
-	recalcTimer     chan struct{}
+	queueWaiter     chan *taperingWaiter
 }
 
 // NewTaperingTickerQueue is a constructor for a TaperingTicketQueue. The
@@ -153,7 +155,7 @@ func NewTaperingTickerQueue(fastestInterval, slowestInterval time.Duration) *Tap
 		waiters:         make([]*taperingWaiter, 0, 100),
 		fastestInterval: fastestInterval,
 		slowestInterval: slowestInterval,
-		recalcTimer:     make(chan struct{}, 1),
+		queueWaiter:     make(chan *taperingWaiter, 16),
 	}
 }
 
@@ -168,26 +170,14 @@ func (q *TaperingTickerQueue) Wait(waiter *Waiter) {
 	// We don't want the caller to hang here, so we won't call TryFunc. Instead
 	// set the nextTick as now and the run loop will call it in a goroutine
 	// immediately.
-	q.insert(&taperingWaiter{Waiter: waiter}, time.Now())
-}
-
-// insert inserts the waiter, setting its nextTick under waiterMtx lock, and
-// sorts the waiters by time until nextTick.
-func (q *TaperingTickerQueue) insert(w *taperingWaiter, nextTick time.Time) {
-	q.waiterMtx.Lock()
-	w.nextTick = nextTick
-	q.waiters = append(q.waiters, w)
-	sort.Slice(q.waiters, func(i, j int) bool { return q.waiters[i].nextTick.Before(q.waiters[j].nextTick) })
-	q.waiterMtx.Unlock()
-	q.recalcTimer <- struct{}{}
+	q.queueWaiter <- &taperingWaiter{Waiter: waiter, nextTick: time.Now()}
 }
 
 // Run runs the primary wait loop until the context is canceled.
 func (q *TaperingTickerQueue) Run(ctx context.Context) {
-
 	taper := float64(q.slowestInterval - q.fastestInterval)
 
-	runWaiter := func(w *taperingWaiter, n int) {
+	runWaiter := func(w *taperingWaiter) {
 		if w.TryFunc() == DontTryAgain {
 			return
 		}
@@ -200,10 +190,10 @@ func (q *TaperingTickerQueue) Run(ctx context.Context) {
 
 		var nextTick time.Time
 		switch {
-		case n <= fullSpeedTicks:
+		case w.tick <= fullSpeedTicks:
 			nextTick = time.Now().Add(q.fastestInterval)
-		case n < fullyTapered: // ramp up the interval
-			prog := float64(n-fullSpeedTicks) / (fullyTapered - fullSpeedTicks)
+		case w.tick < fullyTapered: // ramp up the interval
+			prog := float64(w.tick-fullSpeedTicks) / (fullyTapered - fullSpeedTicks)
 			interval := q.fastestInterval + time.Duration(math.Round(prog*taper))
 			nextTick = time.Now().Add(interval)
 		default:
@@ -212,31 +202,42 @@ func (q *TaperingTickerQueue) Run(ctx context.Context) {
 		if nextTick.After(w.Expiration) {
 			nextTick = w.Expiration
 		}
-		q.insert(w, nextTick)
+
+		w.nextTick = nextTick
+		w.tick++
+
+		q.queueWaiter <- w // send it back to the queue
 	}
 
 	for {
-		q.waiterMtx.Lock()
-		var nextTick <-chan time.Time
+		var tick <-chan time.Time
 		if len(q.waiters) > 0 {
-			nextTick = time.After(time.Until(q.waiters[0].nextTick))
+			tick = time.After(time.Until(q.waiters[0].nextTick))
 		}
-		q.waiterMtx.Unlock()
 
 		select {
-		case <-nextTick:
-			q.waiterMtx.Lock()
-			// No need to check length. This loop is the only place waiters can
-			// be removed from the slice and it's sychronous.
+		case <-tick:
+			// Remove the next waiter from the slice. runWaiter will re-insert
+			// with a new nextTick time if it sees TryAgain.
 			w := q.waiters[0]
-			tick := w.tick
-			w.tick++
-			// Remove the waiter from the slice. runWaiter will re-insert if
-			// it sees TryAgain.
 			q.waiters = q.waiters[1:]
-			q.waiterMtx.Unlock()
-			go runWaiter(w, tick)
-		case <-q.recalcTimer:
+
+			go runWaiter(w)
+
+		case w := <-q.queueWaiter:
+			// A little optimization if this waiter would fire immediately, but
+			// it works to append regardless.
+			if time.Until(w.nextTick) <= 0 {
+				go runWaiter(w)
+				continue
+			}
+
+			q.waiters = append(q.waiters, w)
+			sort.Slice(q.waiters, func(i, j int) bool {
+				return q.waiters[i].nextTick.Before(q.waiters[j].nextTick) // ascending, next tick first
+			})
+			// NOTE: timer leaked until it fires - consider NewTimer and Stop here
+
 		case <-ctx.Done():
 			return
 		}

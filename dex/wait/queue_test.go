@@ -64,7 +64,6 @@ func TestTaper(t *testing.T) {
 
 func TestTaperingQueue(t *testing.T) {
 	q := NewTaperingTickerQueue(time.Millisecond, time.Millisecond*5)
-	q.recalcTimer = make(chan struct{}, 5)
 
 	var waiterNumber int
 	var resultMtx sync.Mutex
@@ -102,9 +101,18 @@ func TestTaperingQueue(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
-	go q.Run(ctx)
+	var wgQ sync.WaitGroup
+	wgQ.Add(1)
+	go func() {
+		defer wgQ.Done()
+		q.Run(ctx)
+	}()
 
+	// Wait for each waiter to get done, then stop the ticker queue itself and
+	// wait for it.
 	wg.Wait()
+	cancel()
+	wgQ.Wait()
 
 	if len(resultOrder) != len(expOrder) {
 		t.Fatalf("only %d of %d results received", len(resultOrder), len(expOrder))
@@ -116,9 +124,7 @@ func TestTaperingQueue(t *testing.T) {
 		}
 	}
 
-	q.waiterMtx.Lock()
 	remaining := len(q.waiters)
-	q.waiterMtx.Unlock()
 	if remaining != 0 {
 		t.Fatalf("%d remaining waiters", remaining)
 	}
