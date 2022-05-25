@@ -4,7 +4,6 @@
 package encode
 
 import (
-	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
@@ -22,9 +21,10 @@ var (
 	// A byte-slice representation of boolean false.
 	ByteFalse = []byte{0}
 	// A byte-slice representation of boolean true.
-	ByteTrue   = []byte{1}
-	bEqual     = bytes.Equal
-	maxDataLen = 0x00fe_ffff // top two bytes in big endian stop at 254, signalling 32-bit len
+	ByteTrue = []byte{1}
+	// MaxDataLen is the largest byte slice that can be stored when using
+	// (BuildyBytes).AddData.
+	MaxDataLen = 0x00fe_ffff // top two bytes in big endian stop at 254, signalling 32-bit len
 )
 
 // Uint64Bytes converts the uint16 to a length-2, big-endian encoded byte slice.
@@ -167,9 +167,9 @@ func DecodeBlob(b []byte, preAlloc ...int) (byte, [][]byte, error) {
 
 // BuildyBytes is a byte-slice with an AddData method for building linearly
 // encoded 2D byte slices. The AddData method supports chaining. The canonical
-// use case is to create "versioned blobs", where the BuildyBytes is instantated
-// with a single version byte, and then data pushes are added using the AddData
-// method. Example use:
+// use case is to create "versioned blobs", where the BuildyBytes is
+// instantiated with a single version byte, and then data pushes are added using
+// the AddData method. Example use:
 //
 //   version := 0
 //   b := BuildyBytes{version}.AddData(data1).AddData(data2)
@@ -180,12 +180,13 @@ func DecodeBlob(b []byte, preAlloc ...int) (byte, [][]byte, error) {
 type BuildyBytes []byte
 
 // AddData adds the data to the BuildyBytes, and returns the new BuildyBytes.
-// The data has hard-coded length limit of uint16_max = 65535 bytes.
+// The data has hard-coded length limit of MaxDataLen = 16711679 bytes. The
+// caller should ensure the data is not larger since AddData panics if it is.
 func (b BuildyBytes) AddData(d []byte) BuildyBytes {
 	l := len(d)
 	var lBytes []byte
 	if l >= 0xff {
-		if l > maxDataLen {
+		if l > MaxDataLen {
 			panic("cannot use addData for pushes > 16711679 bytes")
 		}
 		var i []byte

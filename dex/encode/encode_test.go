@@ -1,10 +1,12 @@
 package encode
 
 import (
+	"bytes"
 	"testing"
 )
 
 var (
+	bEqual = bytes.Equal
 	tEmpty = []byte{}
 	tA     = []byte{0xaa}
 	tB     = []byte{0xbb, 0xbb}
@@ -53,8 +55,8 @@ func TestDecodeBlob(t *testing.T) {
 	longerBlob := RandomBytes(65536)
 	longerBlob2 := RandomBytes(65599)
 	megaBlob := RandomBytes(12_345_678)
-	almostLargestBlob := RandomBytes(maxDataLen - 1)
-	largestBlob := RandomBytes(maxDataLen)
+	almostLargestBlob := RandomBytes(MaxDataLen - 1)
+	largestBlob := RandomBytes(MaxDataLen)
 	// tooLargeBlob tested after the loop, recovering the expected panic
 
 	type test struct {
@@ -146,7 +148,7 @@ func TestDecodeBlob(t *testing.T) {
 		}
 	}
 
-	tooLargeBlob := RandomBytes(maxDataLen + 1)
+	tooLargeBlob := RandomBytes(MaxDataLen + 1)
 	func() {
 		defer func() {
 			if r := recover(); r == nil {
