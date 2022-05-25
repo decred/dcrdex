@@ -551,9 +551,11 @@ export default class Application {
       }
       case 'balance': {
         const n: BalanceNote = note as BalanceNote
-        const wallet = this.user.assets &&
-          this.user.assets[n.assetID].wallet
-        if (wallet) wallet.balance = n.balance
+        const asset = this.user.assets[n.assetID]
+        // Balance updates can come before the user is fetched after login.
+        if (!asset) break
+        const w = asset.wallet
+        if (w) w.balance = n.balance
         break
       }
       case 'feepayment':
@@ -586,6 +588,8 @@ export default class Application {
       case 'spots': {
         const n = note as SpotPriceNote
         const xc = this.user.exchanges[n.host]
+        // Spots can come before the user is fetched after login.
+        if (!xc) break
         for (const [mktName, spot] of Object.entries(n.spots)) xc.markets[mktName].spot = spot
       }
     }
