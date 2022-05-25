@@ -45,7 +45,7 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
-	"decred.org/dcrdex/internal/eth/reentryattack"
+	"decred.org/dcrdex/dex/testing/eth/reentryattack"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"

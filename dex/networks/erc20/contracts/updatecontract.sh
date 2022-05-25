@@ -14,7 +14,8 @@ fi
 
 VERSION=$1
 PKG_NAME=v${VERSION}
-SOLIDITY_FILE=./ERC20SwapV${VERSION}.sol
+CONTRACT_NAME=ERC20Swap
+SOLIDITY_FILE=./${CONTRACT_NAME}V${VERSION}.sol
 TEST_TOKEN=./TestToken.sol
 if [ ! -f ${SOLIDITY_FILE} ]
 then
@@ -29,8 +30,8 @@ fi
 
 mkdir temp
 
-solc --bin-runtime --optimize ${SOLIDITY_FILE} -o ./temp/
-BYTECODE=$(<./temp/ERC20Swap.bin-runtime)
+solc --abi --bin --bin-runtime --overwrite --optimize ${SOLIDITY_FILE} -o ./temp/
+BYTECODE=$(<./temp/${CONTRACT_NAME}.bin-runtime)
 
 cat > "./${PKG_NAME}/BinRuntimeV${VERSION}.go" <<EOF
 // Code generated - DO NOT EDIT.
@@ -38,14 +39,14 @@ cat > "./${PKG_NAME}/BinRuntimeV${VERSION}.go" <<EOF
 
 package ${PKG_NAME}
 
-const ERC20SwapRuntimeBin = "${BYTECODE}"
+const ${CONTRACT_NAME}RuntimeBin = "${BYTECODE}"
 EOF
 
 CONTRACT_FILE=./${PKG_NAME}/contract.go 
-abigen --sol ${SOLIDITY_FILE} --pkg ${PKG_NAME} --out ${CONTRACT_FILE}
+abigen --abi ./temp/${CONTRACT_NAME}.abi --bin ./temp/${CONTRACT_NAME}.bin \
+ --pkg ${PKG_NAME} --type ${CONTRACT_NAME} --out ./${PKG_NAME}/contract.go
 
-solc --bin --optimize ${SOLIDITY_FILE} -o ./temp
-BYTECODE=$(<./temp/ERC20Swap.bin)
+BYTECODE=$(<./temp/${CONTRACT_NAME}.bin)
 
 solc --bin --optimize ${TEST_TOKEN} -o ./temp
 TEST_TOKEN_BYTECODE=$(<./temp/TestToken.bin)

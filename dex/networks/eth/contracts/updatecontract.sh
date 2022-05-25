@@ -14,7 +14,8 @@ fi
 
 VERSION=$1
 PKG_NAME=v${VERSION}
-SOLIDITY_FILE=./ETHSwapV${VERSION}.sol
+CONTRACT_NAME=ETHSwap
+SOLIDITY_FILE=./${CONTRACT_NAME}V${VERSION}.sol
 if [ ! -f ${SOLIDITY_FILE} ]
 then
     echo "${SOLIDITY_FILE} does not exist" >&2
@@ -23,8 +24,8 @@ fi
 
 mkdir temp
 
-solc --bin-runtime --optimize ${SOLIDITY_FILE} -o ./temp/
-BYTECODE=$(<./temp/ETHSwap.bin-runtime)
+solc --abi --bin --bin-runtime --overwrite --optimize ${SOLIDITY_FILE} -o ./temp/
+BYTECODE=$(<./temp/${CONTRACT_NAME}.bin-runtime)
 
 cat > "./${PKG_NAME}/BinRuntimeV${VERSION}.go" <<EOF
 // Code generated - DO NOT EDIT.
@@ -32,13 +33,13 @@ cat > "./${PKG_NAME}/BinRuntimeV${VERSION}.go" <<EOF
 
 package ${PKG_NAME}
 
-const ETHSwapRuntimeBin = "${BYTECODE}"
+const ${CONTRACT_NAME}RuntimeBin = "${BYTECODE}"
 EOF
 
-abigen --sol ${SOLIDITY_FILE} --pkg ${PKG_NAME} --out ./${PKG_NAME}/contract.go
+abigen --abi ./temp/${CONTRACT_NAME}.abi --bin ./temp/${CONTRACT_NAME}.bin --pkg ${PKG_NAME} \
+ --type ${CONTRACT_NAME} --out ./${PKG_NAME}/contract.go
 
-solc --bin --optimize ${SOLIDITY_FILE} -o ./temp
-BYTECODE=$(<./temp/ETHSwap.bin)
+BYTECODE=$(<./temp/${CONTRACT_NAME}.bin)
 sed -i.tmp "s/ETH_SWAP_V${VERSION}=.*/ETH_SWAP_V${VERSION}=\"${BYTECODE}\"/" ../../../testing/eth/harness.sh
 # mac needs a temp file specified above.
 rm ../../../testing/eth/harness.sh.tmp
