@@ -14,6 +14,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/meter"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/wait"
@@ -34,6 +35,11 @@ var (
 	// txWaitExpiration is the longest the Swapper will wait for a coin waiter.
 	// This could be thought of as the maximum allowable backend latency.
 	txWaitExpiration = 2 * time.Minute
+	// minBlockPeriod is the minimum delay between block-triggered
+	// confirmation/inaction checks. This helps with limiting notification
+	// bursts when blocks are generated closely together (e.g. in Ethereum
+	// occasionally several blocks are generated in a single second).
+	minBlockPeriod = time.Second * 10
 )
 
 func unixMsNow() time.Time {
@@ -735,34 +741,46 @@ func (s *Swapper) Run(ctx context.Context) {
 	// Start a listen loop for each asset's block channel. Normal shutdown stops
 	// this before the main loop since this sends to the main loop.
 	blockNotes := make(chan *blockNotification, 32*len(s.coins))
-	for assetID, lockable := range s.coins {
+	addAsset := func(assetID uint32, blockSource <-chan *asset.BlockUpdate) {
+		errOut, errIn := meter.DelayedRelay(ctxHelpers, minBlockPeriod, 32)
 		wgHelpers.Add(1)
-		go func(assetID uint32, blockSource <-chan *asset.BlockUpdate) {
+		go func() {
 			defer wgHelpers.Done()
 			for {
 				select {
 				case blk, ok := <-blockSource:
 					if !ok {
 						log.Errorf("Asset %d has closed the block channel.", assetID)
-						// Should not happen. Keep running until cancel.
-						continue
+						return
 					}
-					// Do not block on anomalous return of main loop, which is
-					// the s.block receiver.
+
+					select {
+					case errIn <- blk.Err:
+					default: // if blocking, the relay is either metering anyway or spewing errors
+					}
+
+				case blkErr, ok := <-errOut: // nils are metered and aggregated
+					if !ok { // relay stopped
+						return
+					}
 					select {
 					case <-mainLoop:
-						return // ctxHelpers is being canceled anyway
+						return
 					case blockNotes <- &blockNotification{
 						time:    time.Now().UTC(),
 						assetID: assetID,
-						err:     blk.Err,
+						err:     blkErr,
 					}:
 					}
+
 				case <-ctxHelpers.Done():
 					return
 				}
 			}
-		}(assetID, lockable.Backend.BlockChannel(32))
+		}()
+	}
+	for assetID, lockable := range s.coins {
+		addAsset(assetID, lockable.Backend.BlockChannel(32))
 	}
 
 	// Start the queue of coinwaiters for the init and redeem handlers. The
@@ -780,6 +798,11 @@ func (s *Swapper) Run(ctx context.Context) {
 	bcastBlockTrigger := make(chan uint32, 32*len(s.coins))
 	scheduleInactionCheck := func(assetID uint32) {
 		time.AfterFunc(s.bTimeout, func() {
+			// TODO: This pattern would still send the block trigger half of the
+			// time if the ctxMaster is canceled.
+			if ctxMaster.Err() != nil {
+				return
+			}
 			select {
 			case bcastBlockTrigger <- assetID: // all checks run in main loop
 			case <-ctxMaster.Done():

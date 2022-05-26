@@ -50,8 +50,9 @@ var (
 		0x90, 0xbc, 0xbd, 0xda, 0x5a, 0x76, 0xf9, 0x1e, 0x60, 0xa1, 0x56, 0x99,
 		0x46, 0x34, 0xe9, 0x1c, 0xaa, 0xaa, 0xaa, 0xaa,
 	}
-	acctCounter uint32
-	dexPrivKey  *secp256k1.PrivateKey
+	acctCounter   uint32
+	dexPrivKey    *secp256k1.PrivateKey
+	tBcastTimeout time.Duration
 )
 
 type tUser struct {
@@ -605,7 +606,7 @@ func tNewTestRig(matchInfo *tMatch) (*testRig, func()) {
 		},
 		Storage:          storage,
 		AuthManager:      authMgr,
-		BroadcastTimeout: txWaitExpiration * 5,
+		BroadcastTimeout: tBcastTimeout,
 		LockTimeTaker:    dex.LockTimeTaker(dex.Testnet),
 		LockTimeMaker:    dex.LockTimeMaker(dex.Testnet),
 		SwapDone:         func(ord order.Order, match *order.Match, fail bool) {},
@@ -1414,6 +1415,8 @@ func TestMain(m *testing.M) {
 	fastRecheckInterval = time.Millisecond * 40
 	taperedRecheckInterval = time.Millisecond * 40
 	txWaitExpiration = time.Millisecond * 200
+	tBcastTimeout = txWaitExpiration * 5
+	minBlockPeriod = tBcastTimeout / 3
 	logger := dex.StdOutLogger("TEST", dex.LevelTrace)
 	UseLogger(logger)
 	db.UseLogger(logger)
