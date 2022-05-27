@@ -4,8 +4,6 @@ go 1.18
 
 replace decred.org/dcrdex => ../../../
 
-replace github.com/gcash/neutrino => github.com/buck54321/neutrino-bch v0.0.0-20220616193517-b8fcce55a27c
-
 require (
 	decred.org/dcrdex v0.0.0-20220620230547-1283356d184b
 	github.com/Shopify/toxiproxy/v2 v2.4.0
@@ -108,6 +106,20 @@ require (
 	github.com/lightningnetwork/lnd/queue v1.0.1 // indirect
 	github.com/lightningnetwork/lnd/ticker v1.0.0 // indirect
 	github.com/lightningnetwork/lnd/tlv v1.0.2 // indirect
+	github.com/ltcsuite/lnd/clock v0.0.0-20200822020009-1a001cbb895a // indirect
+	github.com/ltcsuite/lnd/queue v1.0.3 // indirect
+	github.com/ltcsuite/lnd/ticker v1.0.1 // indirect
+	github.com/ltcsuite/ltcd v0.22.1-beta // indirect
+	github.com/ltcsuite/ltcd/btcec/v2 v2.1.0 // indirect
+	github.com/ltcsuite/ltcd/ltcutil v1.1.0 // indirect
+	github.com/ltcsuite/ltcd/ltcutil/psbt v1.1.0-1 // indirect
+	github.com/ltcsuite/ltcwallet v0.13.1 // indirect
+	github.com/ltcsuite/ltcwallet/wallet/txauthor v1.1.0 // indirect
+	github.com/ltcsuite/ltcwallet/wallet/txrules v1.2.0 // indirect
+	github.com/ltcsuite/ltcwallet/wallet/txsizes v1.1.0 // indirect
+	github.com/ltcsuite/ltcwallet/walletdb v1.3.5 // indirect
+	github.com/ltcsuite/ltcwallet/wtxmgr v1.5.0 // indirect
+	github.com/ltcsuite/neutrino v0.13.2 // indirect
 	github.com/mattn/go-colorable v0.1.12 // indirect
 	github.com/mattn/go-isatty v0.0.14 // indirect
 	github.com/mattn/go-runewidth v0.0.12 // indirect

@@ -36,6 +36,11 @@ case $1 in
 		--regasset dcr ${@:2}
     ;;
 
+  ltcspvdcr)
+    ./simnet-trade-tests --base ltc --quote dcr --quote1node trading1 --quote2node trading2 \
+		--regasset dcr --base1type spv ${@:2}
+    ;;
+
   ltcelectrumdcr)
     ./simnet-trade-tests --base ltc --quote dcr --quote1node trading1 --quote2node trading2 \
 		--base1type electrum --regasset dcr ${@:2}
@@ -72,6 +77,7 @@ dcrbtcelectrum - Decred RPC wallet and Bitcoin Electrum wallet on DCR-BTC market
 bchdcr - RPC wallets on BCH-DCR market
 bchspvdcr - Bitcoin Cash SPV wallet and Decred RPC Wallet on BCH-DCR market
 ltcdcr - RPC wallets on LTC-DCR market
+ltcspvdcr - Litecoin SPV wallet and Decred RPC Wallet on LTC-DCR market
 ltcelectrumdcr - Litecoin Electrum wallet and Decred RPC wallet on LTC-DCR market
 dcrdoge - RPC wallets on DCR-DOGE market
 dcreth - Decred RPC wallet and Ethereum native wallet on DCR-ETH market
