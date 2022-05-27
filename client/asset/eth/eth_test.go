@@ -433,7 +433,7 @@ func TestSyncStatus(t *testing.T) {
 		name: "ok header too old",
 		syncProg: ethereum.SyncProgress{
 			CurrentBlock: 25,
-			HighestBlock: 25,
+			HighestBlock: 0,
 		},
 		subSecs: dexeth.MaxBlockInterval + 1,
 	}, {
@@ -441,7 +441,7 @@ func TestSyncStatus(t *testing.T) {
 		bestHdrErr: errors.New(""),
 		syncProg: ethereum.SyncProgress{
 			CurrentBlock: 25,
-			HighestBlock: 25,
+			HighestBlock: 0,
 		},
 		wantErr: true,
 	}}
