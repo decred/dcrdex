@@ -2215,12 +2215,17 @@ func (*baseWallet) ValidateSecret(secret, secretHash []byte) bool {
 
 // SyncStatus is information about the blockchain sync status.
 func (eth *baseWallet) SyncStatus() (bool, float32, error) {
-	// node.syncProgress will return a zero value both before syncing has begun
-	// and after it has finished. In order to discern when syncing has begun,
-	// check that the best header came in under dexeth.MaxBlockInterval.
 	prog := eth.node.syncProgress()
-	syncing := prog.CurrentBlock < prog.HighestBlock || prog.HighestBlock == 0
-	if syncing {
+	if prog.HighestBlock != 0 {
+		// HighestBlock was set. This means syncing started and is
+		// finished if CurrentBlock is higher. CurrentBlock will
+		// continue to go up even if we are not in a syncing state.
+		// HighestBlock will not.
+		if prog.CurrentBlock >= prog.HighestBlock {
+			return eth.node.peerCount() > 0, 1.0, nil
+		}
+
+		// We are certain we are syncing and can return progress.
 		var ratio float32
 		if prog.HighestBlock != 0 {
 			ratio = float32(prog.CurrentBlock) / float32(prog.HighestBlock)
@@ -2228,8 +2233,13 @@ func (eth *baseWallet) SyncStatus() (bool, float32, error) {
 		return false, ratio, nil
 	}
 
-	// According to syncProgress we are at the highest network block, but check
-	// the time since the block.
+	// HighestBlock is zero if syncing never happened or if it just hasn't
+	// started. Syncing only happens if the light node gets a header that
+	// is over one block higher than the current block or the server
+	// indicates a reorg. It's possible that a light client never enters a
+	// syncing state. In order to discern if syncing has begun when
+	// HighestBlock is not set, check that the best header came in under
+	// dexeth.MaxBlockInterval and guess.
 	bh, err := eth.node.bestHeader(eth.ctx)
 	if err != nil {
 		return false, 0, err

@@ -573,8 +573,7 @@ func syncClient(cl *nodeClient) error {
 		}
 		prog := cl.syncProgress()
 		if isTestnet {
-			syncing := prog.CurrentBlock != prog.HighestBlock || prog.HighestBlock == 0
-			if !syncing {
+			if prog.HighestBlock == 0 {
 				bh, err := cl.bestHeader(ctx)
 				if err != nil {
 					return err
@@ -584,8 +583,13 @@ func syncClient(cl *nodeClient) error {
 				if timeDiff < dexeth.MaxBlockInterval {
 					return nil
 				}
+			} else if prog.CurrentBlock >= prog.HighestBlock {
+				return nil
 			}
 		} else {
+			// If client has ever synced, assume synced with
+			// harness. This avoids checking the header time which
+			// is probably old.
 			if prog.CurrentBlock > 20 {
 				return nil
 			}
