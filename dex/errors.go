@@ -37,3 +37,46 @@ func NewError(err error, detail string) Error {
 		detail:  detail,
 	}
 }
+
+// ErrorCloser is used to synchronize shutdown when an error is encountered in a
+// multi-step process. After each successful step, a shutdown routine can be
+// scheduled with Add. If Success is not signaled before Done, the shutdown
+// routines will be run in the reverse order that they are added.
+type ErrorCloser struct {
+	log     Logger
+	closers []func() error
+	success bool
+}
+
+// NewErrorCloser creates a new ErrorCloser.
+func NewErrorCloser(log Logger) *ErrorCloser {
+	return &ErrorCloser{
+		log:     log,
+		closers: make([]func() error, 0, 3),
+	}
+}
+
+// Add adds a new function to the queue. If Success is not called before Done,
+// the Add'ed functions will be run in the reverse order that they were added.
+func (e *ErrorCloser) Add(closer func() error) {
+	e.closers = append(e.closers, closer)
+}
+
+// Success cancels the running of any Add'ed functions.
+func (e *ErrorCloser) Success() {
+	e.success = true
+}
+
+// Done signals that the ErrorClose can run its registered functions if success
+// has not yet been flagged.
+func (e *ErrorCloser) Done() {
+	if e.success {
+		return
+	}
+
+	for i := len(e.closers) - 1; i >= 0; i-- {
+		if err := e.closers[i](); err != nil {
+			e.log.Errorf("error running shutdown function %d: %v", i, err)
+		}
+	}
+}

@@ -83,8 +83,8 @@ const (
 
 var wAddrMgrBkt = []byte("waddrmgr")
 
-// btcWallet is satisfied by *btcwallet.Wallet -> *walletExtender.
-type btcWallet interface {
+// BTCWallet is satisfied by *btcwallet.Wallet -> *walletExtender.
+type BTCWallet interface {
 	PublishTransaction(tx *wire.MsgTx, label string) error
 	CalculateAccountBalances(account uint32, confirms int32) (wallet.Balances, error)
 	ListUnspent(minconf, maxconf int32, acctName string) ([]*btcjson.ListUnspentResult, error)
@@ -95,34 +95,43 @@ type btcWallet interface {
 	LockedOutpoints() []btcjson.TransactionInput
 	NewChangeAddress(account uint32, scope waddrmgr.KeyScope) (btcutil.Address, error)
 	NewAddress(account uint32, scope waddrmgr.KeyScope) (btcutil.Address, error)
-	SignTransaction(tx *wire.MsgTx, hashType txscript.SigHashType, additionalPrevScriptsadditionalPrevScripts map[wire.OutPoint][]byte,
-		additionalKeysByAddress map[string]*btcutil.WIF, p2shRedeemScriptsByAddress map[string][]byte) ([]wallet.SignatureError, error)
 	PrivKeyForAddress(a btcutil.Address) (*btcec.PrivateKey, error)
-	Database() walletdb.DB
 	Unlock(passphrase []byte, lock <-chan time.Time) error
 	Lock()
 	Locked() bool
 	SendOutputs(outputs []*wire.TxOut, keyScope *waddrmgr.KeyScope, account uint32, minconf int32,
 		satPerKb btcutil.Amount, coinSelectionStrategy wallet.CoinSelectionStrategy, label string) (*wire.MsgTx, error)
 	HaveAddress(a btcutil.Address) (bool, error)
-	Stop()
 	WaitForShutdown()
 	ChainSynced() bool // currently unused
-	SynchronizeRPC(chainClient chain.Interface)
-	// walletExtender methods
-	walletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetails, error)
-	syncedTo() waddrmgr.BlockStamp
-	signTransaction(*wire.MsgTx) error
-	txNotifications() wallet.TransactionNotificationsClient
+	AccountProperties(scope waddrmgr.KeyScope, acct uint32) (*waddrmgr.AccountProperties, error)
+	// The below methods are not implemented by *wallet.Wallet, so must be
+	// implemented by the BTCWallet implementation.
+	WalletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetails, error)
+	SyncedTo() waddrmgr.BlockStamp
+	SignTx(*wire.MsgTx) error
+	BlockNotifications(context.Context) <-chan *BlockNotification
+	RescanAsync() error
+	ForceRescan()
+	Start() (SPVService, error)
+	Stop()
+	Reconfigure(*asset.WalletConfig, string) (bool, error)
+	Birthday() time.Time
 }
 
-var _ btcWallet = (*walletExtender)(nil)
+// BlockNotification is block hash and height delivered by a BTCWallet when it
+// is finished processing a block.
+type BlockNotification struct {
+	Hash   chainhash.Hash
+	Height int32
+}
 
-// neutrinoService is satisfied by *neutrino.ChainService.
-type neutrinoService interface {
+// SPVService is satisfied by *neutrino.ChainService, with the exception of the
+// Peers method, which has a generic interface in place of neutrino.ServerPeer.
+type SPVService interface {
 	GetBlockHash(int64) (*chainhash.Hash, error)
 	BestBlock() (*headerfs.BlockStamp, error)
-	Peers() []*neutrino.ServerPeer
+	Peers() []SPVPeer
 	GetBlockHeight(hash *chainhash.Hash) (int32, error)
 	GetBlockHeader(*chainhash.Hash) (*wire.BlockHeader, error)
 	GetCFilter(blockHash chainhash.Hash, filterType wire.FilterType, options ...neutrino.QueryOption) (*gcs.Filter, error)
@@ -130,7 +139,32 @@ type neutrinoService interface {
 	Stop() error
 }
 
-var _ neutrinoService = (*neutrino.ChainService)(nil)
+// SPVPeer is satisfied by *neutrino.ServerPeer, but is generalized to
+// accommodate underlying implementations other than lightninglabs/neutrino.
+type SPVPeer interface {
+	StartingHeight() int32
+	LastBlock() int32
+}
+
+// btcChainService wraps *neutrino.ChainService in order to translate the
+// neutrino.ServerPeer to the SPVPeer interface type.
+type btcChainService struct {
+	*neutrino.ChainService
+}
+
+func (s *btcChainService) Peers() []SPVPeer {
+	rawPeers := s.ChainService.Peers()
+	peers := make([]SPVPeer, 0, len(rawPeers))
+	for _, p := range rawPeers {
+		peers = append(peers, p)
+	}
+	return peers
+}
+
+var _ SPVService = (*btcChainService)(nil)
+
+// BTCWalletConstructor is a function to construct a BTCWallet.
+type BTCWalletConstructor func(dir string, cfg *WalletConfig, chainParams *chaincfg.Params, log dex.Logger) BTCWallet
 
 func extendAddresses(extIdx, intIdx uint32, btcw *wallet.Wallet) error {
 	scopedKeyManager, err := btcw.Manager.FetchScopedKeyManager(waddrmgr.KeyScopeBIP0084)
@@ -151,20 +185,21 @@ func extendAddresses(extIdx, intIdx uint32, btcw *wallet.Wallet) error {
 }
 
 // createSPVWallet creates a new SPV wallet.
-func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string, log dex.Logger, extIdx, intIdx uint32, net *chaincfg.Params) error {
-	netDir := filepath.Join(dbDir, net.Name)
+func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dataDir string, log dex.Logger, extIdx, intIdx uint32, net *chaincfg.Params) error {
 
-	if err := logNeutrino(netDir); err != nil {
+	dir := filepath.Join(dataDir, net.Name, "spv")
+
+	if err := logNeutrino(dir); err != nil {
 		return fmt.Errorf("error initializing btcwallet+neutrino logging: %w", err)
 	}
 
-	logDir := filepath.Join(netDir, logDirName)
+	logDir := filepath.Join(dir, logDirName)
 	err := os.MkdirAll(logDir, 0744)
 	if err != nil {
 		return fmt.Errorf("error creating wallet directories: %w", err)
 	}
 
-	loader := wallet.NewLoader(net, netDir, true, 60*time.Second, 250)
+	loader := wallet.NewLoader(net, dir, true, 60*time.Second, 250)
 
 	pubPass := []byte(wallet.InsecurePubPassphrase)
 
@@ -188,7 +223,7 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string,
 	}
 
 	// The chain service DB
-	neutrinoDBPath := filepath.Join(netDir, neutrinoDBName)
+	neutrinoDBPath := filepath.Join(dir, neutrinoDBName)
 	db, err := walletdb.Create("bdb", neutrinoDBPath, true, 5*time.Second)
 	if err != nil {
 		bailOnWallet()
@@ -212,9 +247,9 @@ var (
 )
 
 // logRotator initializes a rotating file logger.
-func logRotator(netDir string) (*rotator.Rotator, error) {
+func logRotator(dir string) (*rotator.Rotator, error) {
 	const maxLogRolls = 8
-	logDir := filepath.Join(netDir, logDirName)
+	logDir := filepath.Join(dir, logDirName)
 	if err := os.MkdirAll(logDir, 0744); err != nil {
 		return nil, fmt.Errorf("error creating log directory: %w", err)
 	}
@@ -231,12 +266,12 @@ func logRotator(netDir string) (*rotator.Rotator, error) {
 // there are concurrency issues with that since btcd and btcwallet have
 // unsupervised goroutines still running after shutdown. So we leave the rotator
 // running at the risk of losing some logs.
-func logNeutrino(netDir string) error {
+func logNeutrino(dir string) error {
 	if !atomic.CompareAndSwapUint32(&loggingInited, 0, 1) {
 		return nil
 	}
 
-	logSpinner, err := logRotator(netDir)
+	logSpinner, err := logRotator(dir)
 	if err != nil {
 		return fmt.Errorf("error initializing log rotator: %w", err)
 	}
@@ -309,19 +344,15 @@ func (w logWriter) Write(p []byte) (n int, err error) {
 // Bitcoin wallet. spvWallet controls an instance of btcwallet.Wallet directly
 // and does not run or connect to the RPC server.
 type spvWallet struct {
-	chainParams *chaincfg.Params
-	wallet      btcWallet
-	cl          neutrinoService
-	chainClient *chain.NeutrinoClient
-	birthdayV   atomic.Value // time.Time
-	// if allowAutomaticRescan is true, if when connect is called, spvWallet.birthday
-	// is earlier than the birthday stored in the btcwallet database, the transaction
-	// history will be wiped and a rescan will start.
-	allowAutomaticRescan bool
-	acctNum              uint32
-	acctName             string
-	netDir               string
-	neutrinoDB           walletdb.DB
+	chainParams  *chaincfg.Params
+	cfg          *WalletConfig
+	wallet       BTCWallet
+	cl           SPVService
+	acctNum      uint32
+	acctName     string
+	dir          string
+	newBTCWallet BTCWalletConstructor
+	decodeAddr   dexbtc.AddressDecoder
 
 	txBlocksMtx sync.Mutex
 	txBlocks    map[chainhash.Hash]*hashEntry
@@ -329,63 +360,41 @@ type spvWallet struct {
 	checkpointMtx sync.Mutex
 	checkpoints   map[outPoint]*scanCheckpoint
 
-	log    dex.Logger
-	loader *wallet.Loader
+	log dex.Logger
 
 	tipChan            chan *block
 	syncTarget         int32
 	lastPrenatalHeight int32
-
-	// rescanStarting is set while reloading the wallet and dropping
-	// transactions from the wallet db.
-	rescanStarting uint32 // atomic
 }
 
 var _ Wallet = (*spvWallet)(nil)
 var _ tipNotifier = (*spvWallet)(nil)
 
-// loadSPVWallet loads an existing wallet.
-func loadSPVWallet(dbDir string, logger dex.Logger, chainParams *chaincfg.Params, birthday time.Time, allowAutomaticRescan bool) *spvWallet {
-	spvw := &spvWallet{
-		chainParams:          chainParams,
-		acctNum:              defaultAcctNum,
-		acctName:             defaultAcctName,
-		netDir:               filepath.Join(dbDir, chainParams.Name),
-		txBlocks:             make(map[chainhash.Hash]*hashEntry),
-		checkpoints:          make(map[outPoint]*scanCheckpoint),
-		log:                  logger,
-		tipChan:              make(chan *block, 8),
-		allowAutomaticRescan: allowAutomaticRescan,
-	}
-	spvw.birthdayV.Store(birthday)
-	return spvw
-}
-
-func (w *spvWallet) birthday() time.Time {
-	return w.birthdayV.Load().(time.Time)
-}
-
 // reconfigure attempts to reconfigure the rpcClient for the new settings. Live
 // reconfiguration is only attempted if the new wallet type is walletTypeSPV. An
 // error is generated if the birthday is reduced and the special_activelyUsed
 // flag is set.
-func (w *spvWallet) reconfigure(cfg *asset.WalletConfig, _ /* currentAddress */ string) (restartRequired bool, err error) {
+func (w *spvWallet) reconfigure(cfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error) {
 	if cfg.Type != walletTypeSPV {
 		restartRequired = true
 		return
 	}
+	return w.wallet.Reconfigure(cfg, currentAddress)
+}
+
+func (w *walletExtender) Reconfigure(cfg *asset.WalletConfig, _ /* currentAddress */ string) (restartRequired bool, err error) {
 
 	parsedCfg := new(WalletConfig)
 	if err = config.Unmapify(cfg.Settings, parsedCfg); err != nil {
 		return
 	}
 
-	newBday := parsedCfg.adjustedBirthday()
-	if newBday.Equal(w.birthday()) {
+	newBday := parsedCfg.AdjustedBirthday()
+	if newBday.Equal(w.Birthday()) {
 		// It's the only setting we care about.
 		return
 	}
-	rescanRequired := newBday.Before(w.birthday())
+	rescanRequired := newBday.Before(w.Birthday())
 	if rescanRequired && parsedCfg.ActivelyUsed {
 		return false, errors.New("cannot decrease the birthday with active orders")
 	}
@@ -394,7 +403,7 @@ func (w *spvWallet) reconfigure(cfg *asset.WalletConfig, _ /* currentAddress */ 
 	}
 	w.birthdayV.Store(newBday)
 	if rescanRequired {
-		if err = w.rescanWalletAsync(); err != nil {
+		if err = w.RescanAsync(); err != nil {
 			return false, fmt.Errorf("error initiating rescan after birthday adjustment: %w", err)
 		}
 	}
@@ -551,7 +560,7 @@ func (w *spvWallet) getBlockHeight(h *chainhash.Hash) (int32, error) {
 }
 
 func (w *spvWallet) getBestBlockHash() (*chainhash.Hash, error) {
-	blk := w.wallet.syncedTo()
+	blk := w.wallet.SyncedTo()
 	return &blk.Hash, nil
 }
 
@@ -561,7 +570,7 @@ func (w *spvWallet) getBestBlockHash() (*chainhash.Hash, error) {
 // getChainHeight, which indicates the height that the chain service has reached
 // in its retrieval of block headers and compact filter headers.
 func (w *spvWallet) getBestBlockHeight() (int32, error) {
-	return w.wallet.syncedTo().Height, nil
+	return w.wallet.SyncedTo().Height, nil
 }
 
 // getChainStamp satisfies chainStamper for manual median time calculations.
@@ -575,7 +584,7 @@ func (w *spvWallet) getChainStamp(blockHash *chainhash.Hash) (stamp time.Time, p
 
 // medianTime is the median time for the current best block.
 func (w *spvWallet) medianTime() (time.Time, error) {
-	blk := w.wallet.syncedTo()
+	blk := w.wallet.SyncedTo()
 	return calcMedianTime(w, &blk.Hash)
 }
 
@@ -631,12 +640,12 @@ func (w *spvWallet) syncStatus() (*syncStatus, error) {
 	var synced bool
 	var blk *block
 	// Wallet address manager sync height.
-	if chainBlk.Timestamp.After(w.birthday()) {
+	if chainBlk.Timestamp.After(w.wallet.Birthday()) {
 		// After the wallet's birthday, the wallet address manager should begin
 		// syncing. Although block time stamps are not necessarily monotonically
 		// increasing, this is a reasonable condition at which the wallet's sync
 		// height should be consulted instead of the chain service's height.
-		walletBlock := w.wallet.syncedTo()
+		walletBlock := w.wallet.SyncedTo()
 		if walletBlock.Height == 0 {
 			// The wallet is about to start its sync, so just return the last
 			// chain service height prior to wallet birthday until it begins.
@@ -679,7 +688,7 @@ func (w *spvWallet) ownsInputs(txid string) bool {
 		w.log.Warnf("Error decoding txid %q: %v", txid, err)
 		return false
 	}
-	txDetails, err := w.wallet.walletTransaction(txHash)
+	txDetails, err := w.wallet.WalletTransaction(txHash)
 	if err != nil {
 		w.log.Warnf("walletTransaction(%v) error: %v", txid, err)
 		return false
@@ -833,13 +842,13 @@ func (w *spvWallet) refundAddress() (btcutil.Address, error) {
 func (w *spvWallet) signTx(tx *wire.MsgTx) (*wire.MsgTx, error) {
 	// Can't use btcwallet.Wallet.SignTransaction, because it doesn't work for
 	// segwit transactions (for real?).
-	return tx, w.wallet.signTransaction(tx)
+	return tx, w.wallet.SignTx(tx)
 }
 
 // privKeyForAddress retrieves the private key associated with the specified
 // address.
 func (w *spvWallet) privKeyForAddress(addr string) (*btcec.PrivateKey, error) {
-	a, err := btcutil.DecodeAddress(addr, w.chainParams)
+	a, err := w.decodeAddr(addr, w.chainParams)
 	if err != nil {
 		return nil, err
 	}
@@ -860,7 +869,7 @@ func (w *spvWallet) Lock() error {
 // sendToAddress sends the amount to the address. feeRate is in units of
 // sats/byte.
 func (w *spvWallet) sendToAddress(address string, value, feeRate uint64, subtract bool) (*chainhash.Hash, error) {
-	addr, err := btcutil.DecodeAddress(address, w.chainParams)
+	addr, err := w.decodeAddr(address, w.chainParams)
 	if err != nil {
 		return nil, err
 	}
@@ -965,7 +974,7 @@ func (w *spvWallet) sendWithSubtract(pkScript []byte, value, feeRate uint64) (*c
 	}
 	tx.AddTxOut(wireOP)
 
-	if err := w.wallet.signTransaction(tx); err != nil {
+	if err := w.wallet.SignTx(tx); err != nil {
 		return nil, fmt.Errorf("signing error: %w", err)
 	}
 
@@ -1173,28 +1182,24 @@ func (w *spvWallet) getBestBlockHeader() (*blockHeader, error) {
 }
 
 func (w *spvWallet) logFilePath() string {
-	return filepath.Join(w.netDir, logDirName, logFileName)
+	return filepath.Join(w.dir, logDirName, logFileName)
 }
 
 // connect will start the wallet and begin syncing.
-func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) error {
-	if err := logNeutrino(w.netDir); err != nil {
-		return fmt.Errorf("error initializing btcwallet+neutrino logging: %v", err)
-	}
-
-	err := w.startWallet()
+func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) (err error) {
+	w.wallet = w.newBTCWallet(w.dir, w.cfg, w.chainParams, w.log)
+	w.cl, err = w.wallet.Start()
 	if err != nil {
 		return err
 	}
 
-	txNotes := w.wallet.txNotifications()
+	blockNotes := w.wallet.BlockNotifications(ctx)
 
 	// Nanny for the caches checkpoints and txBlocks caches.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		defer w.stop()
-		defer txNotes.Done()
+		defer w.wallet.Stop()
 
 		ticker := time.NewTicker(time.Minute * 20)
 		defer ticker.Stop()
@@ -1218,29 +1223,19 @@ func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) error {
 				}
 				w.checkpointMtx.Unlock()
 
-			case note := <-txNotes.C:
-				if len(note.AttachedBlocks) > 0 {
-					lastBlock := note.AttachedBlocks[len(note.AttachedBlocks)-1]
-					syncTarget := atomic.LoadInt32(&w.syncTarget)
+			case blk := <-blockNotes:
+				syncTarget := atomic.LoadInt32(&w.syncTarget)
+				if syncTarget == 0 || (blk.Height < syncTarget && blk.Height%10_000 != 0) {
+					continue
+				}
 
-					for ib := range note.AttachedBlocks {
-						for _, nt := range note.AttachedBlocks[ib].Transactions {
-							w.log.Debugf("Block %d contains wallet transaction %v", note.AttachedBlocks[ib].Height, nt.Hash)
-						}
-					}
-
-					if syncTarget == 0 || (lastBlock.Height < syncTarget && lastBlock.Height%10_000 != 0) {
-						continue
-					}
-
-					select {
-					case w.tipChan <- &block{
-						hash:   *lastBlock.Hash,
-						height: int64(lastBlock.Height),
-					}:
-					default:
-						w.log.Warnf("tip report channel was blocking")
-					}
+				select {
+				case w.tipChan <- &block{
+					hash:   blk.Hash,
+					height: int64(blk.Height),
+				}:
+				default:
+					w.log.Warnf("tip report channel was blocking")
 				}
 
 			case <-ctx.Done():
@@ -1254,43 +1249,37 @@ func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) error {
 
 // startWallet initializes the *btcwallet.Wallet and its supporting players and
 // starts syncing.
-func (w *spvWallet) startWallet() error {
+func (w *walletExtender) Start() (SPVService, error) {
+	if err := logNeutrino(w.dir); err != nil {
+		return nil, fmt.Errorf("error initializing btcwallet+neutrino logging: %v", err)
+	}
 	// timeout and recoverWindow arguments borrowed from btcwallet directly.
-	w.loader = wallet.NewLoader(w.chainParams, w.netDir, true, 60*time.Second, 250)
+	w.loader = wallet.NewLoader(w.chainParams, w.dir, true, 60*time.Second, 250)
 
 	exists, err := w.loader.WalletExists()
 	if err != nil {
-		return fmt.Errorf("error verifying wallet existence: %v", err)
+		return nil, fmt.Errorf("error verifying wallet existence: %v", err)
 	}
 	if !exists {
-		return errors.New("wallet not found")
+		return nil, errors.New("wallet not found")
 	}
 
 	w.log.Debug("Starting native BTC wallet...")
 	btcw, err := w.loader.OpenExistingWallet([]byte(wallet.InsecurePubPassphrase), false)
 	if err != nil {
-		return fmt.Errorf("couldn't load wallet: %w", err)
+		return nil, fmt.Errorf("couldn't load wallet: %w", err)
 	}
 
-	bailOnWallet := func() {
-		if err := w.loader.UnloadWallet(); err != nil {
-			w.log.Errorf("Error unloading wallet: %v", err)
-		}
-	}
+	errCloser := dex.NewErrorCloser(w.log)
+	defer errCloser.Done()
+	errCloser.Add(w.loader.UnloadWallet)
 
-	neutrinoDBPath := filepath.Join(w.netDir, neutrinoDBName)
+	neutrinoDBPath := filepath.Join(w.dir, neutrinoDBName)
 	w.neutrinoDB, err = walletdb.Create("bdb", neutrinoDBPath, true, wallet.DefaultDBTimeout)
 	if err != nil {
-		bailOnWallet()
-		return fmt.Errorf("unable to create wallet db at %q: %v", neutrinoDBPath, err)
+		return nil, fmt.Errorf("unable to create wallet db at %q: %v", neutrinoDBPath, err)
 	}
-
-	bailOnWalletAndDB := func() {
-		if err := w.neutrinoDB.Close(); err != nil {
-			w.log.Errorf("Error closing neutrino database: %v", err)
-		}
-		bailOnWallet()
-	}
+	errCloser.Add(w.neutrinoDB.Close)
 
 	// Depending on the network, we add some addpeers or a connect peer. On
 	// regtest, if the peers haven't been explicitly set, add the simnet harness
@@ -1308,8 +1297,8 @@ func (w *spvWallet) startWallet() error {
 		connectPeers = []string{"localhost:20575"}
 	}
 	w.log.Debug("Starting neutrino chain service...")
-	chainService, err := neutrino.NewChainService(neutrino.Config{
-		DataDir:       w.netDir,
+	w.cl, err = neutrino.NewChainService(neutrino.Config{
+		DataDir:       w.dir,
 		Database:      w.neutrinoDB,
 		ChainParams:   *w.chainParams,
 		PersistToDisk: true, // keep cfilter headers on disk for efficient rescanning
@@ -1322,52 +1311,44 @@ func (w *spvWallet) startWallet() error {
 		BroadcastTimeout: 6 * time.Second,
 	})
 	if err != nil {
-		bailOnWalletAndDB()
-		return fmt.Errorf("couldn't create Neutrino ChainService: %v", err)
+		return nil, fmt.Errorf("couldn't create Neutrino ChainService: %v", err)
 	}
+	errCloser.Add(w.cl.Stop)
 
-	bailOnEverything := func() {
-		if err := chainService.Stop(); err != nil {
-			w.log.Errorf("Error closing neutrino chain service: %v", err)
-		}
-		bailOnWalletAndDB()
-	}
-
-	w.cl = chainService
-	w.chainClient = chain.NewNeutrinoClient(w.chainParams, chainService)
-	w.wallet = &walletExtender{btcw, w.chainParams}
+	w.chainClient = chain.NewNeutrinoClient(w.chainParams, w.cl)
+	w.Wallet = btcw
 
 	oldBday := btcw.Manager.Birthday()
 
-	performRescan := w.birthday().Before(oldBday)
+	performRescan := w.Birthday().Before(oldBday)
 	if performRescan && !w.allowAutomaticRescan {
-		bailOnWalletAndDB()
-		return errors.New("cannot set earlier birthday while there are active deals")
+		return nil, errors.New("cannot set earlier birthday while there are active deals")
 	}
 
-	if !oldBday.Equal(w.birthday()) {
-		if err := w.updateDBBirthday(w.birthday()); err != nil {
+	if !oldBday.Equal(w.Birthday()) {
+		if err := w.updateDBBirthday(w.Birthday()); err != nil {
 			w.log.Errorf("Failed to reset wallet manager birthday: %v", err)
 			performRescan = false
 		}
 	}
 
 	if performRescan {
-		w.forceRescan()
+		w.ForceRescan()
 	}
 
 	if err = w.chainClient.Start(); err != nil { // lazily starts connmgr
-		bailOnEverything()
-		return fmt.Errorf("couldn't start Neutrino client: %v", err)
+		return nil, fmt.Errorf("couldn't start Neutrino client: %v", err)
 	}
 
 	w.log.Info("Synchronizing wallet with network...")
 	btcw.SynchronizeRPC(w.chainClient)
 
-	return nil
+	errCloser.Success()
+
+	return &btcChainService{w.cl}, nil
 }
 
-func (w *spvWallet) updateDBBirthday(bday time.Time) error {
+func (w *walletExtender) updateDBBirthday(bday time.Time) error {
 	btcw, isLoaded := w.loader.LoadedWallet()
 	if !isLoaded {
 		return fmt.Errorf("wallet not loaded")
@@ -1386,18 +1367,13 @@ func (w *spvWallet) moveWalletData(backupDir string) error {
 		return err
 	}
 	backupFolder := filepath.Join(backupDir, timeString)
-	return os.Rename(w.netDir, backupFolder)
+	return os.Rename(w.dir, backupFolder)
 }
 
 // numDerivedAddresses returns the number of internal and external addresses
 // that the wallet has derived.
 func (w *spvWallet) numDerivedAddresses() (internal, external uint32, err error) {
-	btcw, ok := w.loader.LoadedWallet()
-	if !ok {
-		return 0, 0, err
-	}
-
-	props, err := btcw.AccountProperties(waddrmgr.KeyScopeBIP0084, w.acctNum)
+	props, err := w.wallet.AccountProperties(waddrmgr.KeyScopeBIP0084, w.acctNum)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -1405,59 +1381,46 @@ func (w *spvWallet) numDerivedAddresses() (internal, external uint32, err error)
 	return props.InternalKeyCount, props.ExternalKeyCount, nil
 }
 
-// rescanWalletAsync initiates a full wallet recovery (used address discovery
+// RescanAsync initiates a full wallet recovery (used address discovery
 // and transaction scanning) by stopping the btcwallet, dropping the transaction
 // history from the wallet db, resetting the synced-to height of the wallet
 // manager, restarting the wallet and its chain client, and finally commanding
 // the wallet to resynchronize, which starts asynchronous wallet recovery.
 // Progress of the rescan should be monitored with syncStatus. During the rescan
 // wallet balances and known transactions may not be reported accurately or
-// located. The neutrinoService is not stopped, so most spvWallet methods will
+// located. The SPVService is not stopped, so most spvWallet methods will
 // continue to work without error, but methods using the btcWallet will likely
 // return incorrect results or errors.
-func (w *spvWallet) rescanWalletAsync() error {
+func (w *walletExtender) RescanAsync() error {
 	if !atomic.CompareAndSwapUint32(&w.rescanStarting, 0, 1) {
-		return errors.New("rescan already in progress")
+		w.log.Error("rescan already in progress")
 	}
 	defer atomic.StoreUint32(&w.rescanStarting, 0)
-
-	// Stop the wallet, but do not use w.loader.UnloadWallet because it also
-	// closes the database.
-	btcw, ok := w.loader.LoadedWallet()
-	if !ok {
-		return errors.New("wallet not loaded")
-	}
-
 	w.log.Info("Stopping wallet and chain client...")
-	btcw.Stop() // stops Wallet and chainClient (not chainService)
-	btcw.WaitForShutdown()
+	w.Wallet.Stop() // stops Wallet and chainClient (not chainService)
+	w.Wallet.WaitForShutdown()
 	w.chainClient.WaitForShutdown()
 
-	w.forceRescan()
+	w.ForceRescan()
 
 	w.log.Info("Starting wallet...")
-	btcw.Start()
+	w.Wallet.Start()
 
 	if err := w.chainClient.Start(); err != nil {
 		return fmt.Errorf("couldn't start Neutrino client: %v", err)
 	}
 
 	w.log.Info("Synchronizing wallet with network...")
-	btcw.SynchronizeRPC(w.chainClient)
+	w.Wallet.SynchronizeRPC(w.chainClient)
 	return nil
 }
 
-// forceRescan forces a full rescan with active address discovery on wallet
+// ForceRescan forces a full rescan with active address discovery on wallet
 // restart by dropping the complete transaction history and setting the
 // "synced to" field to nil. See the btcwallet/cmd/dropwtxmgr app for more
 // information.
-func (w *spvWallet) forceRescan() {
-	btcw, ok := w.loader.LoadedWallet()
-	if !ok {
-		w.log.Errorf("wallet not loaded")
-		return
-	}
-	wdb := btcw.Database()
+func (w *walletExtender) ForceRescan() {
+	wdb := w.Wallet.Database()
 
 	w.log.Info("Dropping transaction history to perform full rescan...")
 	err := wallet.DropTransactionHistory(wdb, false)
@@ -1467,8 +1430,8 @@ func (w *spvWallet) forceRescan() {
 	}
 
 	err = walletdb.Update(wdb, func(dbtx walletdb.ReadWriteTx) error {
-		ns := dbtx.ReadWriteBucket(wAddrMgrBkt)  // it'll be fine
-		return btcw.Manager.SetSyncedTo(ns, nil) // never synced, forcing recover from birthday
+		ns := dbtx.ReadWriteBucket(wAddrMgrBkt)      // it'll be fine
+		return w.Wallet.Manager.SetSyncedTo(ns, nil) // never synced, forcing recover from birthday
 	})
 	if err != nil {
 		w.log.Errorf("Failed to reset wallet manager sync height: %v", err)
@@ -1476,7 +1439,7 @@ func (w *spvWallet) forceRescan() {
 }
 
 // stop stops the wallet and database threads.
-func (w *spvWallet) stop() {
+func (w *walletExtender) Stop() {
 	w.log.Info("Unloading wallet")
 	if err := w.loader.UnloadWallet(); err != nil {
 		w.log.Errorf("UnloadWallet error: %v", err)
@@ -1494,6 +1457,8 @@ func (w *spvWallet) stop() {
 	if err := w.neutrinoDB.Close(); err != nil {
 		w.log.Errorf("wallet db close error: %v", err)
 	}
+
+	// NOTE: Do we need w.Wallet.Stop()
 
 	w.log.Info("SPV wallet closed")
 }
@@ -1688,7 +1653,7 @@ func (w *spvWallet) scanFilters(txHash *chainhash.Hash, vout uint32, pkScript []
 // known to be spent, no *wire.TxOut and no error will be returned.
 func (w *spvWallet) getTxOut(txHash *chainhash.Hash, vout uint32, pkScript []byte, startTime time.Time) (*wire.TxOut, uint32, error) {
 	// Check for a wallet transaction first
-	txDetails, err := w.wallet.walletTransaction(txHash)
+	txDetails, err := w.wallet.WalletTransaction(txHash)
 	var blockHash *chainhash.Hash
 	if err != nil && !errors.Is(err, WalletTransactionNotFound) {
 		return nil, 0, fmt.Errorf("walletTransaction error: %w", err)
@@ -1748,7 +1713,7 @@ func (w *spvWallet) getTxOut(txHash *chainhash.Hash, vout uint32, pkScript []byt
 // filterScanFromHeight scans BIP158 filters beginning at the specified block
 // height until the tip, or until a spending transaction is found.
 func (w *spvWallet) filterScanFromHeight(txHash chainhash.Hash, vout uint32, pkScript []byte, startBlockHeight int32, checkPt *filterScanResult) (*filterScanResult, error) {
-	walletBlock := w.wallet.syncedTo() // where cfilters are received and processed
+	walletBlock := w.wallet.SyncedTo() // where cfilters are received and processed
 	tip := walletBlock.Height
 
 	res := checkPt
@@ -1904,7 +1869,7 @@ func (w *spvWallet) findRedemptionsInMempool(ctx context.Context, reqs map[outPo
 // confirmations looks for the confirmation count and spend status on a
 // transaction output that pays to this wallet.
 func (w *spvWallet) confirmations(txHash *chainhash.Hash, vout uint32) (blockHash *chainhash.Hash, confs uint32, spent bool, err error) {
-	details, err := w.wallet.walletTransaction(txHash)
+	details, err := w.wallet.WalletTransaction(txHash)
 	if err != nil {
 		return nil, 0, false, err
 	}
@@ -1946,7 +1911,7 @@ func (w *spvWallet) getWalletTransaction(txHash *chainhash.Hash) (*GetTransactio
 
 	// Option #2
 	// This is what the JSON-RPC does (and has since at least May 2018).
-	details, err := w.wallet.walletTransaction(txHash)
+	details, err := w.wallet.WalletTransaction(txHash)
 	if err != nil {
 		if errors.Is(err, WalletTransactionNotFound) {
 			return nil, asset.CoinNotFoundError // for the asset.Wallet interface
@@ -1954,7 +1919,7 @@ func (w *spvWallet) getWalletTransaction(txHash *chainhash.Hash) (*GetTransactio
 		return nil, err
 	}
 
-	syncBlock := w.wallet.syncedTo()
+	syncBlock := w.wallet.SyncedTo()
 
 	// TODO: The serialized transaction is already in the DB, so reserializing
 	// might be avoided here. According to btcwallet, details.SerializedTx is
@@ -2010,10 +1975,47 @@ func (w *spvWallet) getWalletTransaction(txHash *chainhash.Hash) (*GetTransactio
 type walletExtender struct {
 	*wallet.Wallet
 	chainParams *chaincfg.Params
+	log         dex.Logger
+	dir         string
+	birthdayV   atomic.Value // time.Time
+	// if allowAutomaticRescan is true, if when connect is called,
+	// spvWallet.birthday is earlier than the birthday stored in the btcwallet
+	// database, the transaction history will be wiped and a rescan will start.
+	allowAutomaticRescan bool
+
+	// Below fields are populated in Start.
+	loader      *wallet.Loader
+	chainClient *chain.NeutrinoClient
+	cl          *neutrino.ChainService
+	neutrinoDB  walletdb.DB
+
+	// rescanStarting is set while reloading the wallet and dropping
+	// transactions from the wallet db.
+	rescanStarting uint32 // atomic
+}
+
+var _ BTCWallet = (*walletExtender)(nil)
+
+// newExtendedWallet is the BTCWalletConstructor for Bitcoin.
+func newExtendedWallet(dir string, cfg *WalletConfig,
+	chainParams *chaincfg.Params, log dex.Logger) BTCWallet {
+
+	w := &walletExtender{
+		dir:                  dir,
+		chainParams:          chainParams,
+		log:                  log,
+		allowAutomaticRescan: !cfg.ActivelyUsed,
+	}
+	w.birthdayV.Store(cfg.AdjustedBirthday())
+	return w
+}
+
+func (w *walletExtender) Birthday() time.Time {
+	return w.birthdayV.Load().(time.Time)
 }
 
 // walletTransaction pulls the transaction from the database.
-func (w *walletExtender) walletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetails, error) {
+func (w *walletExtender) WalletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetails, error) {
 	details, err := wallet.UnstableAPI(w.Wallet).TxDetails(txHash)
 	if err != nil {
 		return nil, err
@@ -2025,8 +2027,8 @@ func (w *walletExtender) walletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDe
 	return details, nil
 }
 
-func (w *walletExtender) syncedTo() waddrmgr.BlockStamp {
-	return w.Manager.SyncedTo()
+func (w *walletExtender) SyncedTo() waddrmgr.BlockStamp {
+	return w.Wallet.Manager.SyncedTo()
 }
 
 // getWalletBirthdayBlock retrieves the wallet's birthday block.
@@ -2050,11 +2052,13 @@ func (w *walletExtender) syncedTo() waddrmgr.BlockStamp {
 // }
 
 // signTransaction signs the transaction inputs.
-func (w *walletExtender) signTransaction(tx *wire.MsgTx) error {
+func (w *walletExtender) SignTx(tx *wire.MsgTx) error {
 	var prevPkScripts [][]byte
 	var inputValues []btcutil.Amount
 	for _, txIn := range tx.TxIn {
-		_, txOut, _, _, err := w.FetchInputInfo(&txIn.PreviousOutPoint)
+		// NOTE: The BitcoinCash implementation of BTCWallet ONLY produces the
+		// *wire.TxOut.
+		_, txOut, _, _, err := w.Wallet.FetchInputInfo(&txIn.PreviousOutPoint)
 		if err != nil {
 			return err
 		}
@@ -2068,9 +2072,30 @@ func (w *walletExtender) signTransaction(tx *wire.MsgTx) error {
 	return txauthor.AddAllInputScripts(tx, prevPkScripts, inputValues, &secretSource{w, w.chainParams})
 }
 
-// txNotifications gives access to the NotificationServer's tx notifications.
-func (w *walletExtender) txNotifications() wallet.TransactionNotificationsClient {
-	return w.NtfnServer.TransactionNotifications()
+func (w *walletExtender) BlockNotifications(ctx context.Context) <-chan *BlockNotification {
+	cl := w.Wallet.NtfnServer.TransactionNotifications()
+	ch := make(chan *BlockNotification, 1)
+	go func() {
+		defer cl.Done()
+		for {
+			select {
+			case note := <-cl.C:
+				if len(note.AttachedBlocks) > 0 {
+					lastBlock := note.AttachedBlocks[len(note.AttachedBlocks)-1]
+					select {
+					case ch <- &BlockNotification{
+						Hash:   *lastBlock.Hash,
+						Height: lastBlock.Height,
+					}:
+					default:
+					}
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return ch
 }
 
 // secretSource is used to locate keys and redemption scripts while signing a
@@ -2087,7 +2112,7 @@ func (s *secretSource) ChainParams() *chaincfg.Params {
 
 // GetKey fetches a private key for the specified address.
 func (s *secretSource) GetKey(addr btcutil.Address) (*btcec.PrivateKey, bool, error) {
-	ma, err := s.w.AddressInfo(addr)
+	ma, err := s.w.Wallet.AddressInfo(addr)
 	if err != nil {
 		return nil, false, err
 	}
@@ -2108,7 +2133,7 @@ func (s *secretSource) GetKey(addr btcutil.Address) (*btcec.PrivateKey, bool, er
 
 // GetScript fetches the redemption script for the specified p2sh/p2wsh address.
 func (s *secretSource) GetScript(addr btcutil.Address) ([]byte, error) {
-	ma, err := s.w.AddressInfo(addr)
+	ma, err := s.w.Wallet.AddressInfo(addr)
 	if err != nil {
 		return nil, err
 	}

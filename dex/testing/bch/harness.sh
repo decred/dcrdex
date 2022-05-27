@@ -23,5 +23,7 @@ export DELTA_WALLET_SEED="cURsyTZ8icuTHwWxSfTC2Geu2F6dMRtnzt1gvSaxHdc9Zf6eviJN"
 export DELTA_ADDRESS="bchreg:qzhru360ks09fgzuh0ycpvslslvpj72ulqlw5j6ksy"
 # $1 is the node to create with. $2 is the wallet name
 export NEW_WALLET_CMD="./\$1 createwallet \$2"
+export GODAEMON="bchd"
+export GOCLIENT="bchctl"
 # Run the harness
 ../btc/base-harness.sh

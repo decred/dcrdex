@@ -6,12 +6,15 @@ package bch
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
+	"path/filepath"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/config"
 	dexbch "decred.org/dcrdex/dex/networks/bch"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -19,8 +22,10 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/gcash/bchd/bchec"
-	bchscript "github.com/gcash/bchd/txscript"
+	bchchaincfg "github.com/gcash/bchd/chaincfg"
+	bchtxscript "github.com/gcash/bchd/txscript"
 	bchwire "github.com/gcash/bchd/wire"
+	"github.com/gcash/bchwallet/wallet"
 )
 
 const (
@@ -33,6 +38,7 @@ const (
 	defaultFee         = 100
 	minNetworkVersion  = 221100
 	walletTypeRPC      = "bitcoindRPC"
+	walletTypeSPV      = "SPV"
 	walletTypeLegacy   = ""
 	walletTypeElectrum = "electrumRPC"
 )
@@ -43,66 +49,30 @@ var (
 		Testnet: "28332",
 		Simnet:  "18443",
 	}
-	fallbackFeeKey = "fallbackfee"
-	walletNameOpt  = []*asset.ConfigOption{ // slice for easy appends
-		{
-			Key:         "walletname",
-			DisplayName: "Wallet Name",
-			Description: "The wallet name",
-		},
-	}
-	commonOpts = []*asset.ConfigOption{
-		{
-			Key:         "rpcuser",
-			DisplayName: "JSON-RPC Username",
-			Description: "Bitcoin Cash 'rpcuser' setting",
-		},
-		{
-			Key:         "rpcpassword",
-			DisplayName: "JSON-RPC Password",
-			Description: "Bitcoin Cash 'rpcpassword' setting",
-			NoEcho:      true,
-		},
-		{
-			Key:         "rpcbind",
-			DisplayName: "JSON-RPC Address",
-			Description: "<addr> or <addr>:<port> (default 'localhost')",
-		},
-		{
-			Key:         "rpcport",
-			DisplayName: "JSON-RPC Port",
-			Description: "Port for RPC connections (if not set in Address)",
-		},
-		{
-			Key:          fallbackFeeKey,
-			DisplayName:  "Fallback fee rate",
-			Description:  "Bitcoin Cash 'fallbackfee' rate. Units: BCH/kB",
-			DefaultValue: defaultFee * 1000 / 1e8,
-		},
-		{
-			Key:         "txsplit",
-			DisplayName: "Pre-split funding inputs",
-			Description: "When placing an order, create a \"split\" transaction to fund the order without locking more of the wallet balance than " +
-				"necessary. Otherwise, excess funds may be reserved to fund the order until the first swap contract is broadcast " +
-				"during match settlement, or the order is canceled. This an extra transaction for which network mining fees are paid. " +
-				"Used only for standing-type orders, e.g. limit orders without immediate time-in-force.",
-			IsBoolean: true,
-		},
-	}
+
 	rpcWalletDefinition = &asset.WalletDefinition{
 		Type:              walletTypeRPC,
-		Tab:               "Bitcoin Cash Node (external)",
-		Description:       "Connect to bitcoind (the BCH fork)",
+		Tab:               "External",
+		Description:       "Connect to bitcoind",
 		DefaultConfigPath: dexbtc.SystemConfigPath("bitcoin"), // Same as bitcoin. That's dumb.
-		ConfigOpts:        append(walletNameOpt, commonOpts...),
+		ConfigOpts:        append(btc.RPCConfigOpts("Bitcoin Cash", ""), btc.CommonConfigOpts("BCH")...),
 	}
+	spvWalletDefinition = &asset.WalletDefinition{
+		Type:        walletTypeSPV,
+		Tab:         "Native",
+		Description: "Use the built-in SPV wallet",
+		ConfigOpts:  append(btc.SPVConfigOpts("BCH"), btc.CommonConfigOpts("BCH")...),
+		Seeded:      true,
+	}
+
 	electrumWalletDefinition = &asset.WalletDefinition{
 		Type:        walletTypeElectrum,
 		Tab:         "Electron Cash  (external)",
 		Description: "Use an external Electron Cash (BCH Electrum fork) Wallet",
 		// json: DefaultConfigPath: filepath.Join(btcutil.AppDataDir("electrom-cash", false), "config"), // maybe?
-		ConfigOpts: commonOpts,
+		ConfigOpts: btc.CommonConfigOpts("BCH"),
 	}
+
 	// WalletInfo defines some general information about a Bitcoin Cash wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:    "Bitcoin Cash",
@@ -110,6 +80,7 @@ var (
 		// Same as bitcoin. That's dumb.
 		UnitInfo: dexbch.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{
+			spvWalletDefinition,
 			rpcWalletDefinition,
 			// electrumWalletDefinition, // getinfo RPC needs backport: https://github.com/Electron-Cash/Electron-Cash/pull/2399
 		},
@@ -143,17 +114,70 @@ func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
 }
 
+// Exists checks the existence of the wallet. Part of the Creator interface, so
+// only used for wallets with WalletDefinition.Seeded = true.
+func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
+	if walletType != walletTypeSPV {
+		return false, fmt.Errorf("no Bitcoin wallet of type %q available", walletType)
+	}
+
+	chainParams, err := parseChainParams(net)
+	if err != nil {
+		return false, err
+	}
+	netDir := filepath.Join(dataDir, chainParams.Name, "spv")
+	// recoverWindow argument borrowed from bchwallet directly.
+	loader := wallet.NewLoader(chainParams, netDir, true, 250)
+	return loader.WalletExists()
+}
+
+// Create creates a new SPV wallet.
+func (d *Driver) Create(params *asset.CreateWalletParams) error {
+	if params.Type != walletTypeSPV {
+		return fmt.Errorf("SPV is the only seeded wallet type. required = %q, requested = %q", walletTypeSPV, params.Type)
+	}
+	if len(params.Seed) == 0 {
+		return errors.New("wallet seed cannot be empty")
+	}
+	if len(params.DataDir) == 0 {
+		return errors.New("must specify wallet data directory")
+	}
+	chainParams, err := parseChainParams(params.Net)
+	if err != nil {
+		return fmt.Errorf("error parsing chain: %w", err)
+	}
+
+	walletCfg := new(btc.WalletConfig)
+	err = config.Unmapify(params.Settings, walletCfg)
+	if err != nil {
+		return err
+	}
+
+	recoveryCfg := new(btc.RecoveryCfg)
+	err = config.Unmapify(params.Settings, recoveryCfg)
+	if err != nil {
+		return err
+	}
+
+	return createSPVWallet(params.Pass, params.Seed, walletCfg.AdjustedBirthday(), params.DataDir,
+		params.Logger, recoveryCfg.NumExternalAddresses, recoveryCfg.NumInternalAddresses, chainParams)
+}
+
 // NewWallet is the exported constructor by which the DEX will import the
 // exchange wallet.
 func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
-	var params *chaincfg.Params
+	var cloneParams *chaincfg.Params
+	var bchParams *bchchaincfg.Params
 	switch network {
 	case dex.Mainnet:
-		params = dexbch.MainNetParams
+		cloneParams = dexbch.MainNetParams
+		bchParams = &bchchaincfg.MainNetParams
 	case dex.Testnet:
-		params = dexbch.TestNet4Params
+		cloneParams = dexbch.TestNet4Params
+		bchParams = &bchchaincfg.TestNet4Params
 	case dex.Regtest:
-		params = dexbch.RegressionNetParams
+		cloneParams = dexbch.RegressionNetParams
+		bchParams = &bchchaincfg.RegressionNetParams
 	default:
 		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
@@ -168,11 +192,11 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		Symbol:             "bch",
 		Logger:             logger,
 		Network:            network,
-		ChainParams:        params,
+		ChainParams:        cloneParams,
 		Ports:              netPorts,
 		DefaultFallbackFee: defaultFee,
 		Segwit:             false,
-		LegacyBalance:      true,
+		LegacyBalance:      cfg.Type != walletTypeSPV,
 		LegacySendToAddr:   true,
 		// Bitcoin Cash uses the Cash Address encoding, which is Bech32, but not
 		// indicative of segwit. We provide a custom encoder and decode to go
@@ -203,9 +227,12 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	// 	cloneCFG.LegacyBalance = false
 	// 	cloneCFG.Ports = dexbtc.NetPorts{} // no default ports for Electrum wallet
 	// 	return btc.ElectrumWallet(cloneCFG)
-	default:
-		return nil, fmt.Errorf("unknown wallet type %q", cfg.Type)
+	case walletTypeSPV:
+		return btc.OpenSPVWallet(cloneCFG, func(dir string, cfg *btc.WalletConfig, btcParams *chaincfg.Params, log dex.Logger) btc.BTCWallet {
+			return openSPVWallet(dir, cfg, btcParams, bchParams, log)
+		})
 	}
+	return nil, fmt.Errorf("wallet type %q not known", cfg.Type)
 }
 
 // rawTxSigner signs the transaction using Bitcoin Cash's custom signature
@@ -220,7 +247,7 @@ func rawTxInSigner(btcTx *wire.MsgTx, idx int, subScript []byte, hashType txscri
 
 	bchKey, _ := bchec.PrivKeyFromBytes(bchec.S256(), btcKey.Serialize())
 
-	return bchscript.RawTxInECDSASignature(bchTx, idx, subScript, bchscript.SigHashType(uint32(hashType)), bchKey, vals[idx])
+	return bchtxscript.RawTxInECDSASignature(bchTx, idx, subScript, bchtxscript.SigHashType(uint32(hashType)), bchKey, vals[idx])
 }
 
 // serializeBtcTx serializes the wire.MsgTx.

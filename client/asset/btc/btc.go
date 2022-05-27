@@ -98,36 +98,6 @@ var (
 	peerCountTicker              = 5 * time.Second
 	walletBlockAllowance         = time.Second * 10
 	conventionalConversionFactor = float64(dexbtc.UnitInfo.Conventional.ConversionFactor)
-	rpcOpts                      = []*asset.ConfigOption{
-		{
-			Key:         "walletname",
-			DisplayName: "Wallet Name",
-			Description: "The wallet name",
-		},
-		{
-			Key:         "rpcuser",
-			DisplayName: "JSON-RPC Username",
-			Description: "Bitcoin's 'rpcuser' setting",
-		},
-		{
-			Key:         "rpcpassword",
-			DisplayName: "JSON-RPC Password",
-			Description: "Bitcoin's 'rpcpassword' setting",
-			NoEcho:      true,
-		},
-		{
-			Key:          "rpcbind",
-			DisplayName:  "JSON-RPC Address",
-			Description:  "<addr> or <addr>:<port> (default 'localhost')",
-			DefaultValue: "127.0.0.1",
-		},
-		{
-			Key:          "rpcport",
-			DisplayName:  "JSON-RPC Port",
-			Description:  "Port for RPC connections (if not set in rpcbind)",
-			DefaultValue: "8332",
-		},
-	}
 
 	electrumOpts = []*asset.ConfigOption{
 		{
@@ -159,37 +129,60 @@ var (
 	defaultWalletBirthdayUnix = 1622668320
 	defaultWalletBirthday     = time.Unix(int64(defaultWalletBirthdayUnix), 0)
 
-	spvOpts = []*asset.ConfigOption{{
-		Key:         "walletbirthday",
-		DisplayName: "Wallet Birthday",
-		Description: "This is the date the wallet starts scanning the blockchain " +
-			"for transactions related to this wallet. If reconfiguring an existing " +
-			"wallet, this may start a rescan if the new birthday is older. This " +
-			"option is disabled if there are currently active BTC trades.",
-		DefaultValue: defaultWalletBirthdayUnix,
-		MaxValue:     "now",
-		// This MinValue must be removed if we start supporting importing private keys
-		MinValue:          defaultWalletBirthdayUnix,
-		IsDate:            true,
-		DisableWhenActive: true,
-		IsBirthdayConfig:  true,
-	}}
+	rpcWalletDefinition = &asset.WalletDefinition{
+		Type:              walletTypeRPC,
+		Tab:               "External",
+		Description:       "Connect to bitcoind",
+		DefaultConfigPath: dexbtc.SystemConfigPath("bitcoin"),
+		ConfigOpts:        append(RPCConfigOpts("Bitcoin", "8332"), CommonConfigOpts("BTC")...),
+	}
+	spvWalletDefinition = &asset.WalletDefinition{
+		Type:        walletTypeSPV,
+		Tab:         "Native",
+		Description: "Use the built-in SPV wallet",
+		ConfigOpts:  append(SPVConfigOpts("BTC"), CommonConfigOpts("BTC")...),
+		Seeded:      true,
+	}
 
-	commonOpts = []*asset.ConfigOption{
+	electrumWalletDefinition = &asset.WalletDefinition{
+		Type:        walletTypeElectrum,
+		Tab:         "Electrum (external)",
+		Description: "Use an external Electrum Wallet",
+		// json: DefaultConfigPath: filepath.Join(btcutil.AppDataDir("electrum", false), "config"), // e.g. ~/.electrum/config
+		ConfigOpts: append(electrumOpts, CommonConfigOpts("BTC")...),
+	}
+
+	// WalletInfo defines some general information about a Bitcoin wallet.
+	WalletInfo = &asset.WalletInfo{
+		Name:     "Bitcoin",
+		Version:  version,
+		UnitInfo: dexbtc.UnitInfo,
+		AvailableWallets: []*asset.WalletDefinition{
+			spvWalletDefinition,
+			rpcWalletDefinition,
+			electrumWalletDefinition,
+		},
+		LegacyWalletIndex: 1,
+	}
+)
+
+// CommonConfigOpts are the common options that the Wallets recognize.
+func CommonConfigOpts(symbol string /* upper-case */) []*asset.ConfigOption {
+	return []*asset.ConfigOption{
 		{
 			Key:         "fallbackfee",
 			DisplayName: "Fallback fee rate",
-			Description: "The fee rate to use for sending or withdrawing funds and fee payment when" +
-				" estimatesmartfee is not available. Units: BTC/kB",
+			Description: fmt.Sprintf("The fee rate to use for sending or withdrawing funds and fee payment when"+
+				" estimatesmartfee is not available. Units: %s/kB", symbol),
 			DefaultValue: defaultFee * 1000 / 1e8,
 		},
 		{
 			Key:         "feeratelimit",
 			DisplayName: "Highest acceptable fee rate",
-			Description: "This is the highest network fee rate you are willing to " +
-				"pay on swap transactions. If feeratelimit is lower than a market's " +
-				"maxfeerate, you will not be able to trade on that market with this " +
-				"wallet.  Units: BTC/kB",
+			Description: fmt.Sprintf("This is the highest network fee rate you are willing to "+
+				"pay on swap transactions. If feeratelimit is lower than a market's "+
+				"maxfeerate, you will not be able to trade on that market with this "+
+				"wallet.  Units: %s/kB", symbol),
 			DefaultValue: defaultFeeRateLimit * 1000 / 1e8,
 		},
 		{
@@ -222,43 +215,61 @@ var (
 			IsBoolean: true,
 		},
 	}
-	rpcWalletDefinition = &asset.WalletDefinition{
-		Type:              walletTypeRPC,
-		Tab:               "Bitcoin Core (external)",
-		Description:       "Connect to bitcoind",
-		DefaultConfigPath: dexbtc.SystemConfigPath("bitcoin"),
-		ConfigOpts:        append(rpcOpts, commonOpts...),
-	}
-	spvWalletDefinition = &asset.WalletDefinition{
-		Type:        walletTypeSPV,
-		Tab:         "Native",
-		Description: "Use the built-in SPV wallet",
-		ConfigOpts:  append(spvOpts, commonOpts...),
-		Seeded:      true,
-	}
-	electrumWalletDefinition = &asset.WalletDefinition{
-		Type:        walletTypeElectrum,
-		Tab:         "Electrum (external)",
-		Description: "Use an external Electrum Wallet",
-		// json: DefaultConfigPath: filepath.Join(btcutil.AppDataDir("electrum", false), "config"), // e.g. ~/.electrum/config
-		ConfigOpts: append(electrumOpts, commonOpts...),
-	}
+}
 
-	// WalletInfo defines some general information about a Bitcoin wallet.
-	WalletInfo = &asset.WalletInfo{
-		Name:     "Bitcoin",
-		Version:  version,
-		UnitInfo: dexbtc.UnitInfo,
-		AvailableWallets: []*asset.WalletDefinition{
-			spvWalletDefinition,
-			rpcWalletDefinition, // LegacyWalletIndex
-			electrumWalletDefinition,
+// SPVConfigOpts are the options common to built-in SPV wallets.
+func SPVConfigOpts(symbol string) []*asset.ConfigOption {
+	return []*asset.ConfigOption{{
+		Key:         "walletbirthday",
+		DisplayName: "Wallet Birthday",
+		Description: fmt.Sprintf("This is the date the wallet starts scanning the blockchain "+
+			"for transactions related to this wallet. If reconfiguring an existing "+
+			"wallet, this may start a rescan if the new birthday is older. This "+
+			"option is disabled if there are currently active %s trades.", symbol),
+		DefaultValue: defaultWalletBirthdayUnix,
+		MaxValue:     "now",
+		// This MinValue must be removed if we start supporting importing private keys
+		MinValue:          defaultWalletBirthdayUnix,
+		IsDate:            true,
+		DisableWhenActive: true,
+		IsBirthdayConfig:  true,
+	}}
+}
+
+// RPCConfigOpts are the settings that are used to connect to and external RPC
+// wallet.
+func RPCConfigOpts(name, rpcPort string) []*asset.ConfigOption {
+	return []*asset.ConfigOption{
+		{
+			Key:         "walletname",
+			DisplayName: "Wallet Name",
+			Description: "The wallet name",
 		},
-		LegacyWalletIndex: 1,
+		{
+			Key:         "rpcuser",
+			DisplayName: "JSON-RPC Username",
+			Description: fmt.Sprintf("%s's 'rpcuser' setting", name),
+		},
+		{
+			Key:         "rpcpassword",
+			DisplayName: "JSON-RPC Password",
+			Description: fmt.Sprintf("%s's 'rpcpassword' setting", name),
+			NoEcho:      true,
+		},
+		{
+			Key:          "rpcbind",
+			DisplayName:  "JSON-RPC Address",
+			Description:  "<addr> or <addr>:<port> (default 'localhost')",
+			DefaultValue: "127.0.0.1",
+		},
+		{
+			Key:          "rpcport",
+			DisplayName:  "JSON-RPC Port",
+			Description:  "Port for RPC connections (if not set in rpcbind)",
+			DefaultValue: rpcPort,
+		},
 	}
-
-	client http.Client
-)
+}
 
 // TxInSigner is a transaction input signer. In addition to the standard Bitcoin
 // arguments, TxInSigner receives all values and pubkey scripts for previous
@@ -513,9 +524,9 @@ type WalletConfig struct {
 	ApiFeeFallback   bool    `ini:"apifeefallback"`
 }
 
-// adjustedBirthday converts WalletConfig.Birthday to a time.Time, and adjusts
+// AdjustedBirthday converts WalletConfig.Birthday to a time.Time, and adjusts
 // it so that defaultWalletBirthday <= WalletConfig.Bithday <= now.
-func (cfg *WalletConfig) adjustedBirthday() time.Time {
+func (cfg *WalletConfig) AdjustedBirthday() time.Time {
 	bday := time.Unix(int64(cfg.Birthday), 0)
 	now := time.Now()
 	if defaultWalletBirthday.After(bday) {
@@ -624,9 +635,9 @@ func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, 
 	if err != nil {
 		return false, err
 	}
-	netDir := filepath.Join(dataDir, chainParams.Name)
+	dir := filepath.Join(dataDir, chainParams.Name, "spv")
 	// timeout and recoverWindow arguments borrowed from btcwallet directly.
-	loader := wallet.NewLoader(chainParams, netDir, true, 60*time.Second, 250)
+	loader := wallet.NewLoader(chainParams, dir, true, 60*time.Second, 250)
 	return loader.WalletExists()
 }
 
@@ -663,7 +674,7 @@ func (d *Driver) Create(params *asset.CreateWalletParams) error {
 		return err
 	}
 
-	return createSPVWallet(params.Pass, params.Seed, cfg.adjustedBirthday(), params.DataDir,
+	return createSPVWallet(params.Pass, params.Seed, cfg.AdjustedBirthday(), params.DataDir,
 		params.Logger, cfg.NumExternalAddresses, cfg.NumInternalAddresses, chainParams)
 }
 
@@ -867,7 +878,7 @@ func (btc *ExchangeWalletSPV) Rescan(_ context.Context) error {
 	w := btc.node.(*spvWallet)
 	atomic.StoreInt64(&btc.tipAtConnect, 0) // for progress
 	// Caller should start calling SyncStatus on a ticker.
-	return w.rescanWalletAsync()
+	return w.wallet.RescanAsync()
 }
 
 // FeeRate satisfies asset.FeeRater.
@@ -959,7 +970,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 
 	switch cfg.Type {
 	case walletTypeSPV:
-		return openSPVWallet(cloneCFG)
+		return OpenSPVWallet(cloneCFG, newExtendedWallet)
 	case walletTypeRPC, walletTypeLegacy:
 		rpcWallet, err := BTCCloneWallet(cloneCFG)
 		if err != nil {
@@ -1122,8 +1133,8 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 	return w, nil
 }
 
-// openSPVWallet opens the previously created native SPV wallet.
-func openSPVWallet(cfg *BTCCloneCFG) (*ExchangeWalletSPV, error) {
+// OpenSPVWallet opens the previously created native SPV wallet.
+func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*ExchangeWalletSPV, error) {
 	walletCfg := new(WalletConfig)
 	err := config.Unmapify(cfg.WalletCFG.Settings, walletCfg)
 	if err != nil {
@@ -1135,15 +1146,27 @@ func openSPVWallet(cfg *BTCCloneCFG) (*ExchangeWalletSPV, error) {
 		return nil, err
 	}
 
-	allowAutomaticRescan := !walletCfg.ActivelyUsed
-	node := loadSPVWallet(cfg.WalletCFG.DataDir, cfg.Logger.SubLogger("SPV"), cfg.ChainParams, walletCfg.adjustedBirthday(), allowAutomaticRescan)
-	btc.node = node
+	spvw := &spvWallet{
+		chainParams:  cfg.ChainParams,
+		cfg:          walletCfg,
+		acctNum:      defaultAcctNum,
+		acctName:     defaultAcctName,
+		dir:          filepath.Join(cfg.WalletCFG.DataDir, cfg.ChainParams.Name, "spv"),
+		txBlocks:     make(map[chainhash.Hash]*hashEntry),
+		checkpoints:  make(map[outPoint]*scanCheckpoint),
+		log:          cfg.Logger.SubLogger("SPV"),
+		tipChan:      make(chan *block, 8),
+		newBTCWallet: walletConstructor,
+		decodeAddr:   btc.decodeAddr,
+	}
+
+	btc.node = spvw
 
 	return &ExchangeWalletSPV{
 		intermediaryWallet: &intermediaryWallet{
 			baseWallet:     btc,
-			txFeeEstimator: node,
-			tipRedeemer:    node,
+			txFeeEstimator: spvw,
+			tipRedeemer:    spvw,
 		},
 	}, nil
 }
@@ -1433,7 +1456,7 @@ func externalFeeEstimator(ctx context.Context, net dex.Network) (uint64, error) 
 	if err != nil {
 		return 0, err
 	}
-	httpResponse, err := client.Do(r)
+	httpResponse, err := http.DefaultClient.Do(r)
 	if err != nil {
 		return 0, err
 	}
@@ -4571,7 +4594,6 @@ func convertUnspent(confs uint32, unspents []*ListUnspentResult, chainParams *ch
 				// arbitrary txns.
 				continue
 			}
-
 			utxo := &compositeUTXO{
 				utxo: &utxo{
 					txHash:  txHash,
