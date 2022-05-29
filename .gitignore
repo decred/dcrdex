@@ -22,6 +22,7 @@ node_modules/
 client/cmd/dexc/dexc
 client/cmd/dexcctl/dexcctl
 client/cmd/assetseed/assetseed
+client/cmd/simnet-trade-tests/simnet-trade-tests
 docs/examples/rpcclient/rpcclient
 wiki
 dex/testing/loadbot/loadbot

@@ -1,4 +1,4 @@
-//go:build !race && harness
+//go:build !race && (harness || simnet_trade_test)
 
 package core
 

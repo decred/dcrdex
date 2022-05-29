@@ -1,0 +1,45 @@
+#!/bin/bash
+set -e
+
+go build -tags lgpl,simnet_trade_test
+
+case $1 in
+
+  dcrbtc)
+    ./simnet-trade-tests --base1node trading1 --base2node trading2 ${@:2}
+    ;;
+
+  dcrbtcspv)
+    ./simnet-trade-tests --base1node trading1 --base2node trading2 --quote1spv ${@:2}
+    ;;
+
+  bchdcr)
+    ./simnet-trade-tests --base bch  --quote dcr --quote1node trading1 --quote2node trading2 \
+		--regasset dcr ${@:2}
+    ;;
+
+  ltcdcr)
+    ./simnet-trade-tests --base ltc --quote dcr --quote1node trading1 --quote2node trading2 \
+		--regasset dcr ${@:2}
+    ;;
+
+  dcrdoge)
+    ./simnet-trade-tests --base1node trading1 --base2node trading2 --quote doge ${@:2}
+    ;;
+
+  dcreth)
+    ./simnet-trade-tests --base1node trading1 --base2node trading2 --quote eth ${@:2}
+    ;;
+
+  list)
+    ./simnet-trade-tests --list
+    ;;
+
+  help)
+    ./simnet-trade-tests --help
+    ;;
+
+  *)
+    echo -n "unknown program"
+    ;;
+esac
