@@ -40,7 +40,7 @@ var PtBr = map[string]string{
 	"export_app_pw_msg":              "Informe a senha para confirmar exportação de conta",
 	"Disable Account":                "Desativar Conta",
 	"disable_app_pw_msg":             "Informe sua senha para desativar conta",
-	"disable_irreversible":           `<span class="red">Nota:</span> Esta ação é irreversível - após uma conta ser desativada esta não pode mais ser reativada.`,
+	"disable_dex_server":             "Este servidor DEX pode ser reativado (você não terá que pagar a taxa) a qualquer momento no futuro, adicionando-o novamente.",
 	"Authorize Import":               "Autorizar Importação",
 	"app_pw_import_msg":              "Informe sua senha do app para confirmar importação da conta",
 	"Account File":                   "Arquivo da Conta",
