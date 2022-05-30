@@ -353,7 +353,8 @@ func (w *rpcWallet) NotifyOnTipChange(ctx context.Context, cb TipChangeCallback)
 	return false
 }
 
-// AddressInfo returns information for the provided address.
+// AddressInfo returns information for the provided address. It is an error
+// if the address is not owned by the wallet.
 // Part of the Wallet interface.
 func (w *rpcWallet) AddressInfo(ctx context.Context, address string) (*AddressInfo, error) {
 	a, err := stdaddr.DecodeAddress(address, w.chainParams)
@@ -387,7 +388,7 @@ func (w *rpcWallet) AccountOwnsAddress(ctx context.Context, addr stdaddr.Address
 	return va.IsMine && va.Account == acctName, nil
 }
 
-// AccountBalance returns the balance breakdown for the speciied account.
+// AccountBalance returns the balance breakdown for the specified account.
 // Part of the Wallet interface.
 func (w *rpcWallet) AccountBalance(ctx context.Context, confirms int32, acctName string) (*walletjson.GetAccountBalanceResult, error) {
 	balances, err := w.rpcClient.GetBalanceMinConf(ctx, acctName, int(confirms))

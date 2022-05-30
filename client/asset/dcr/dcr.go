@@ -103,7 +103,7 @@ var (
 			Key:         "tradingaccount",
 			DisplayName: "Temporary Trading Account",
 			Description: "dcrwallet account to temporarily store split tx outputs or change from chained swaps in " +
-				"multi-lot orders. This should be set if Change Account Name is set.",
+				"multi-lot orders. This should only be set if 'Change Account Name' is set.",
 		},
 		{
 			Key:         "username",
@@ -400,13 +400,16 @@ type redeemOptions struct {
 // client app communicates with the Decred blockchain and wallet. ExchangeWallet
 // satisfies the dex.Wallet interface.
 type ExchangeWallet struct {
-	ctx              context.Context // the asset subsystem starts with Connect(ctx)
-	wallet           Wallet
-	chainParams      *chaincfg.Params
-	log              dex.Logger
-	primaryAcct      string
-	unmixedAccount   string // mixing-enabled wallets only
-	tradingAccount   string // mixing-enabled wallets only
+	ctx            context.Context // the asset subsystem starts with Connect(ctx)
+	wallet         Wallet
+	chainParams    *chaincfg.Params
+	log            dex.Logger
+	primaryAcct    string
+	unmixedAccount string // mixing-enabled wallets only
+	// tradingAccount (mixing-enabled wallets only) stores utxos reserved for
+	// executing order matches, the external branch stores split tx outputs,
+	// internal branch stores chained (non-final) swap change.
+	tradingAccount   string
 	tipChange        func(error)
 	lastPeerCount    uint32
 	peersChange      func(uint32)
@@ -526,9 +529,9 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *cha
 	// configuration. If set, the account names will be validated on Connect.
 	if (dcrCfg.UnmixedAccount != "" && dcrCfg.TradingAccount == "") ||
 		(dcrCfg.UnmixedAccount == "" && dcrCfg.TradingAccount != "") {
-		return nil, fmt.Errorf("'Change Account Name' and 'Dedicated Trading Account' MUST "+
+		return nil, fmt.Errorf("'Change Account Name' and 'Temporary Trading Account' MUST "+
 			"be set to treat %[1]q as a mixed account. If %[1]q is not a mixed account, values "+
-			"should NOT be set for 'Change Account Name' and 'Dedicated Trading Account'",
+			"should NOT be set for 'Change Account Name' and 'Temporary Trading Account'",
 			dcrCfg.PrimaryAccount)
 	}
 	if dcrCfg.UnmixedAccount != "" {
@@ -536,9 +539,9 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *cha
 		case dcrCfg.PrimaryAccount == dcrCfg.UnmixedAccount:
 			return nil, fmt.Errorf("Primary Account should not be the same as Change Account")
 		case dcrCfg.PrimaryAccount == dcrCfg.TradingAccount:
-			return nil, fmt.Errorf("Primary Account should not be the same as Dedicated Trading Account")
+			return nil, fmt.Errorf("Primary Account should not be the same as Temporary Trading Account")
 		case dcrCfg.TradingAccount == dcrCfg.UnmixedAccount:
-			return nil, fmt.Errorf("Dedicated Trading Account should not be the same as Change Account")
+			return nil, fmt.Errorf("Temporary Trading Account should not be the same as Change Account")
 		}
 	}
 
@@ -605,7 +608,7 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		}
 		_, err = dcr.wallet.AccountUnlocked(ctx, acct)
 		if err != nil {
-			return nil, fmt.Errorf("unexpected AccountUnlocked error for %q account: %v", acct, err)
+			return nil, fmt.Errorf("unexpected AccountUnlocked error for %q account: %w", acct, err)
 		}
 	}
 
@@ -686,10 +689,10 @@ func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
 		return nil, err
 	}
 	bal := &asset.Balance{
-		Available: toAtoms(ab.Spendable) - locked, // funds in main account - funds locked in main account
+		Available: toAtoms(ab.Spendable) - locked,
 		Immature: toAtoms(ab.ImmatureCoinbaseRewards) +
-			toAtoms(ab.ImmatureStakeGeneration), // + all funds in unmixed account
-		Locked: locked + toAtoms(ab.LockedByTickets), // + all funds in trading account
+			toAtoms(ab.ImmatureStakeGeneration),
+		Locked: locked + toAtoms(ab.LockedByTickets),
 	}
 
 	if dcr.unmixedAccount == "" {
@@ -1574,11 +1577,11 @@ func (dcr *ExchangeWallet) returnCoins(unspents asset.Coins) ([]*fundingCoin, er
 		ops = append(ops, op.wireOutPoint()) // op.tree may be wire.TxTreeUnknown, but that's fine since wallet.LockUnspent doesn't rely on it
 		if fCoin, ok := dcr.fundingCoins[op.pt]; ok {
 			fundingCoins = append(fundingCoins, fCoin)
+			delete(dcr.fundingCoins, op.pt)
 		} else {
 			dcr.log.Warnf("returning coin %s that is not cached as a funding coin", op)
 			fundingCoins = append(fundingCoins, &fundingCoin{op: op})
 		}
-		delete(dcr.fundingCoins, op.pt)
 	}
 
 	return fundingCoins, dcr.wallet.LockUnspent(dcr.ctx, true, ops)

@@ -55,6 +55,7 @@ type BlockHeader struct {
 	NextHash      *chainhash.Hash
 }
 
+// AddressInfo is the source account and branch info for an address.
 type AddressInfo struct {
 	Account string
 	Branch  uint32
@@ -76,12 +77,13 @@ type Wallet interface {
 	// notification is unimplemented, monitorBlocks should be used to track
 	// tip changes.
 	NotifyOnTipChange(ctx context.Context, cb TipChangeCallback) bool
-	// AddressInfo returns information for the provided address.
+	// AddressInfo returns information for the provided address. It is an error
+	// if the address is not owned by the wallet.
 	AddressInfo(ctx context.Context, address string) (*AddressInfo, error)
 	// AccountOwnsAddress checks if the provided address belongs to the
 	// specified account.
 	AccountOwnsAddress(ctx context.Context, addr stdaddr.Address, acctName string) (bool, error)
-	// AccountBalance returns the balance breakdown for the speciied account.
+	// AccountBalance returns the balance breakdown for the specified account.
 	AccountBalance(ctx context.Context, confirms int32, acctName string) (*walletjson.GetAccountBalanceResult, error)
 	// LockedOutputs fetches locked outputs for the Wallet.
 	LockedOutputs(ctx context.Context, acctName string) ([]chainjson.TransactionInput, error)
