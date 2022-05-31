@@ -455,7 +455,7 @@ func Run(t *testing.T, cfg *Config) {
 	latencyQ.Wait(&wait.Waiter{
 		Expiration: time.Now().Add(time.Second * 10),
 		TryFunc: func() wait.TryDirective {
-			ctx, cancel := context.WithTimeout(tCtx, time.Millisecond*5)
+			ctx, cancel := context.WithTimeout(tCtx, time.Second)
 			defer cancel()
 			_, _, err = rig.secondWallet.FindRedemption(ctx, swapReceipt.Coin().ID(), nil)
 			if err != nil {

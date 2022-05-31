@@ -16,7 +16,7 @@ require (
 	github.com/btcsuite/btcwallet/wtxmgr v1.5.0
 	github.com/davecgh/go-spew v1.1.1
 	github.com/dchest/blake2b v1.0.0
-	github.com/decred/base58 v1.0.3
+	github.com/decred/base58 v1.0.4
 	github.com/decred/dcrd/blockchain/stake/v4 v4.0.0
 	github.com/decred/dcrd/blockchain/v4 v4.0.0
 	github.com/decred/dcrd/certgen v1.1.1

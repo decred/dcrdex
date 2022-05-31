@@ -1238,7 +1238,7 @@ func (btc *Backend) estimateFee(ctx context.Context) (satsPerB uint64, err error
 	}
 	if err != nil {
 		if errors.Is(err, errNoCompetition) {
-			btc.log.Debugf("Blocks are too empty to calculate %d median fees. Using no-competition rate.", btc.name)
+			btc.log.Debugf("Blocks are too empty to calculate %s median fees. Using no-competition rate.", btc.name)
 			btc.feeCache.fee = btc.noCompetitionRate
 			btc.feeCache.hash = tip
 			return btc.noCompetitionRate, nil

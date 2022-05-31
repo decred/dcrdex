@@ -31,6 +31,16 @@ const (
 
 	overwinterJoinSplitSize = 1802
 	saplingJoinSplitSize    = 1698
+
+	pkTransparentDigest = "ZTxIdTranspaHash"
+	pkPrevOuts          = "ZTxIdPrevoutHash"
+	pkAmounts           = "ZTxTrAmountsHash"
+	pkPrevScripts       = "ZTxTrScriptsHash"
+	pkSequence          = "ZTxIdSequencHash"
+	pkOutputs           = "ZTxIdOutputsHash"
+	pkTxIn              = "Zcash___TxInHash"
+	pkV5TxDigest        = "ZcashTxHash_"
+	pkHeader            = "ZTxIdHeadersHash"
 )
 
 var (
@@ -118,7 +128,7 @@ func (tx *Tx) txDigestV5(transparentPart [32]byte) (_ chainhash.Hash, err error)
 	copy(b[32:64], transparentPart[:])
 	copy(b[64:96], emptySaplingDigest[:])
 	copy(b[96:], emptyOrchardDigest[:])
-	h, err := blake2bHash(b, append([]byte("ZcashTxHash_"), ConsensusBranchNU5[:]...))
+	h, err := blake2bHash(b, append([]byte(pkV5TxDigest), ConsensusBranchNU5[:]...))
 	if err != nil {
 		return
 	}
@@ -134,7 +144,7 @@ func (tx *Tx) headerDigest() ([32]byte, error) {
 	copy(b[8:12], ConsensusBranchNU5[:])
 	copy(b[12:16], uint32Bytes(tx.LockTime))
 	copy(b[16:], uint32Bytes(tx.ExpiryHeight))
-	return blake2bHash(b, []byte("ZTxIdHeadersHash"))
+	return blake2bHash(b, []byte(pkHeader))
 }
 
 func (tx *Tx) transparentDigest() (h [32]byte, err error) {
@@ -157,7 +167,7 @@ func (tx *Tx) transparentDigest() (h [32]byte, err error) {
 	copy(b[:32], prevoutsDigest[:])
 	copy(b[32:64], seqDigest[:])
 	copy(b[64:], outputsDigest[:])
-	return blake2bHash(b, []byte("ZTxIdTranspaHash"))
+	return blake2bHash(b, []byte(pkTransparentDigest))
 }
 
 func (tx *Tx) transparentSigDigest(vin int, hashType txscript.SigHashType, vals []int64, prevScripts [][]byte) (h [32]byte, err error) {
@@ -203,7 +213,7 @@ func (tx *Tx) transparentSigDigest(vin int, hashType txscript.SigHashType, vals 
 	}
 	buf.Write(txInsDigest[:])
 
-	return blake2bHash(buf.Bytes(), []byte("ZTxIdTranspaHash"))
+	return blake2bHash(buf.Bytes(), []byte(pkTransparentDigest))
 }
 
 func (tx *Tx) calcHashPrevOuts() ([32]byte, error) {
@@ -214,30 +224,30 @@ func (tx *Tx) calcHashPrevOuts() ([32]byte, error) {
 		binary.LittleEndian.PutUint32(b[:], in.PreviousOutPoint.Index)
 		buf.Write(b[:])
 	}
-	return blake2bHash(buf.Bytes(), []byte("ZTxIdPrevoutHash"))
+	return blake2bHash(buf.Bytes(), []byte(pkPrevOuts))
 }
 
 func (tx *Tx) hashPrevOutsSig(anyoneCanPay bool) ([32]byte, error) {
 	if anyoneCanPay {
-		return blake2bHash([]byte{}, []byte("ZTxIdPrevoutHash"))
+		return blake2bHash([]byte{}, []byte(pkPrevOuts))
 	}
 	return tx.calcHashPrevOuts()
 }
 
 func (tx *Tx) hashAmountsSig(anyoneCanPay bool, vals []int64) ([32]byte, error) {
 	if anyoneCanPay {
-		return blake2bHash([]byte{}, []byte("ZTxTrAmountsHash"))
+		return blake2bHash([]byte{}, []byte(pkAmounts))
 	}
 	b := make([]byte, 0, 8*len(vals))
 	for _, v := range vals {
 		b = append(b, int64Bytes(v)...)
 	}
-	return blake2bHash(b, []byte("ZTxTrAmountsHash"))
+	return blake2bHash(b, []byte(pkAmounts))
 }
 
 func (tx *Tx) hashPrevScriptsSig(anyoneCanPay bool, prevScripts [][]byte) (_ [32]byte, err error) {
 	if anyoneCanPay {
-		return blake2bHash([]byte{}, []byte("ZTxTrScriptsHash"))
+		return blake2bHash([]byte{}, []byte(pkPrevScripts))
 	}
 	buf := new(bytes.Buffer)
 	for _, s := range prevScripts {
@@ -246,7 +256,7 @@ func (tx *Tx) hashPrevScriptsSig(anyoneCanPay bool, prevScripts [][]byte) (_ [32
 		}
 	}
 
-	return blake2bHash(buf.Bytes(), []byte("ZTxTrScriptsHash"))
+	return blake2bHash(buf.Bytes(), []byte(pkPrevScripts))
 }
 
 func (tx *Tx) hashSequence() ([32]byte, error) {
@@ -256,12 +266,12 @@ func (tx *Tx) hashSequence() ([32]byte, error) {
 		binary.LittleEndian.PutUint32(buf[:], in.Sequence)
 		b.Write(buf[:])
 	}
-	return blake2bHash(b.Bytes(), []byte("ZTxIdSequencHash"))
+	return blake2bHash(b.Bytes(), []byte(pkSequence))
 }
 
 func (tx *Tx) hashSequenceSig(anyoneCanPay bool) (h [32]byte, err error) {
 	if anyoneCanPay {
-		return blake2bHash([]byte{}, []byte("ZTxIdSequencHash"))
+		return blake2bHash([]byte{}, []byte(pkSequence))
 	}
 	return tx.hashSequence()
 }
@@ -273,12 +283,12 @@ func (tx *Tx) hashOutputs() (_ [32]byte, err error) {
 			return chainhash.Hash{}, err
 		}
 	}
-	return blake2bHash(b.Bytes(), []byte("ZTxIdOutputsHash"))
+	return blake2bHash(b.Bytes(), []byte(pkOutputs))
 }
 
 func (tx *Tx) hashOutputsSig(anyoneCanPay bool) (_ [32]byte, err error) {
 	if anyoneCanPay {
-		return blake2bHash([]byte{}, []byte("ZTxIdOutputsHash"))
+		return blake2bHash([]byte{}, []byte(pkOutputs))
 	}
 	return tx.hashOutputs()
 }
@@ -300,7 +310,7 @@ func (tx *Tx) hashTxInSig(idx int, prevVal int64, prevScript []byte) (h [32]byte
 	}
 	b.Write(uint32Bytes(txIn.Sequence))
 
-	return blake2bHash(b.Bytes(), []byte("Zcash___TxInHash"))
+	return blake2bHash(b.Bytes(), []byte(pkTxIn))
 
 }
 
@@ -359,7 +369,7 @@ func (tx *Tx) Bytes() (_ []byte, err error) {
 
 	// tx_in
 	for vin, ti := range tx.TxIn {
-		if err = writeTxIn(w, tx.Version, ti); err != nil {
+		if err = writeTxIn(w, ti); err != nil {
 			return nil, fmt.Errorf("error writing tx_in %d: %w", vin, err)
 		}
 	}
@@ -444,9 +454,9 @@ func DeserializeTx(b []byte) (*Tx, error) {
 		return nil, err
 	}
 
-	remains, _ := io.ReadAll(r)
-	if len(remains) > 0 {
-		return nil, fmt.Errorf("incomplete deserialization. %d bytes remaining", len(remains))
+	remains := r.Len()
+	if remains > 0 {
+		return nil, fmt.Errorf("incomplete deserialization. %d bytes remaining", remains)
 	}
 
 	return tx, nil
@@ -792,8 +802,8 @@ func (tx *Tx) SerializeSize() uint64 {
 
 // writeTxIn encodes ti to the bitcoin protocol encoding for a transaction
 // input (TxIn) to w.
-func writeTxIn(w io.Writer, version int32, ti *wire.TxIn) error {
-	err := writeOutPoint(w, version, &ti.PreviousOutPoint)
+func writeTxIn(w io.Writer, ti *wire.TxIn) error {
+	err := writeOutPoint(w, &ti.PreviousOutPoint)
 	if err != nil {
 		return err
 	}
@@ -808,7 +818,7 @@ func writeTxIn(w io.Writer, version int32, ti *wire.TxIn) error {
 
 // writeOutPoint encodes op to the bitcoin protocol encoding for an OutPoint
 // to w.
-func writeOutPoint(w io.Writer, version int32, op *wire.OutPoint) error {
+func writeOutPoint(w io.Writer, op *wire.OutPoint) error {
 	_, err := w.Write(op.Hash[:])
 	if err != nil {
 		return err
@@ -835,12 +845,10 @@ func uint64Bytes(v uint64) []byte {
 }
 
 func int64Bytes(v int64) []byte {
-	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.LittleEndian, v)
-	return buf.Bytes()
+	return uint64Bytes(uint64(v))
 }
 
-// putUint32 writes a little-endian encoded uint64 to the Writer.
+// putUint64 writes a little-endian encoded uint64 to the Writer.
 func putUint64(w io.Writer, v uint64) error {
 	_, err := w.Write(uint64Bytes(v))
 	return err

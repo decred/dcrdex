@@ -3363,7 +3363,7 @@ func (btc *baseWallet) tryRedemptionRequests(ctx context.Context, startBlock *ch
 	}
 	if err := searchCtx.Err(); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			btc.log.Error("mempool search exceeded %s time limit", searchDur)
+			btc.log.Errorf("mempool search exceeded %s time limit", searchDur)
 		} else {
 			btc.log.Error("mempool search was cancelled")
 		}
