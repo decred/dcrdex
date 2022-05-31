@@ -762,8 +762,8 @@ type orderCompStamped struct {
 func (a *Archiver) CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error) {
 	var ords []orderCompStamped
 
-	for m := range a.markets {
-		tableName := fullOrderTableName(a.dbName, m, false) // NOT active table
+	for schema := range a.markets {
+		tableName := fullOrderTableName(a.dbName, schema, false) // NOT active table
 		ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
 		mktOids, err := completedUserOrders(ctx, a.db, tableName, aid, N)
 		cancel()
@@ -850,15 +850,15 @@ func (a *Archiver) PreimageStats(user account.AccountID, lastN int) ([]*db.Preim
 		return rows.Err()
 	}
 
-	for m := range a.markets {
+	for schema := range a.markets {
 		// archived trade orders
-		stmt := fmt.Sprintf(internal.PreimageResultsLastN, fullOrderTableName(a.dbName, m, false))
+		stmt := fmt.Sprintf(internal.PreimageResultsLastN, fullOrderTableName(a.dbName, schema, false))
 		if err := queryOutcomes(stmt); err != nil {
 			return nil, err
 		}
 
 		// archived cancel orders
-		stmt = fmt.Sprintf(internal.CancelPreimageResultsLastN, fullCancelOrderTableName(a.dbName, m, false))
+		stmt = fmt.Sprintf(internal.CancelPreimageResultsLastN, fullCancelOrderTableName(a.dbName, schema, false))
 		if err := queryOutcomes(stmt); err != nil {
 			return nil, err
 		}
@@ -1151,8 +1151,8 @@ func (a *Archiver) UserOrderStatuses(aid account.AccountID, base, quote uint32, 
 // active orders for a user across all markets.
 func (a *Archiver) ActiveUserOrderStatuses(aid account.AccountID) ([]*db.OrderStatus, error) {
 	var orders []*db.OrderStatus
-	for m := range a.markets {
-		tableName := fullOrderTableName(a.dbName, m, true) // active table
+	for schema := range a.markets {
+		tableName := fullOrderTableName(a.dbName, schema, true) // active table
 		mktOrders, err := a.userOrderStatusesFromTable(tableName, aid, nil)
 		if err != nil {
 			return nil, err

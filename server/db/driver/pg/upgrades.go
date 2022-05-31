@@ -17,7 +17,7 @@ import (
 	"decred.org/dcrdex/server/db/driver/pg/internal"
 )
 
-const dbVersion = 3
+const dbVersion = 4
 
 // The number of upgrades defined MUST be equal to dbVersion.
 var upgrades = []func(db *sql.Tx) error{
@@ -35,6 +35,10 @@ var upgrades = []func(db *sql.Tx) error{
 
 	// v3 upgrade adds the fee_asset column to the accounts table.
 	v3Upgrade,
+
+	// v4 upgrade updates the markets tables to use a integer type that can
+	// accommodate a 32-bit unsigned integer.
+	v4Upgrade,
 }
 
 // v1Upgrade adds the schema_version column and removes the state_hash column
@@ -276,6 +280,14 @@ func v3Upgrade(tx *sql.Tx) error {
 	// Set existing rows fee_asset to 42, Decred's asset ID, since prior to this
 	// upgrade, only DCR was accepted for registration.
 	_, err = tx.Exec(`UPDATE ` + accountsTableName + ` SET fee_asset = 42;`) // not as default in ALTER
+	return err
+}
+
+func v4Upgrade(tx *sql.Tx) (err error) {
+	if _, err = tx.Exec("ALTER TABLE markets ALTER COLUMN base TYPE INT8;"); err != nil {
+		return
+	}
+	_, err = tx.Exec("ALTER TABLE markets ALTER COLUMN quote TYPE INT8;")
 	return err
 }
 
