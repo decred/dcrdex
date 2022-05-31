@@ -90,5 +90,5 @@ func createMarketTables(db *sql.DB, marketName string) error {
 // PostgreSQL character '$'.
 func marketSchema(marketName string) string {
 	// '$' separator might only work with PostgreSQL.
-	return strings.ReplaceAll(marketName, ".", "$")
+	return strings.ReplaceAll(marketName, ".", "TKN")
 }
