@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/dex"
@@ -85,6 +86,9 @@ type swapStatus struct {
 	swapAsset   uint32
 	redeemAsset uint32
 
+	swapSearching   uint32 // atomic
+	redeemSearching uint32 // atomic
+
 	mtx sync.RWMutex
 	// The time that the swap coordinator sees the transaction.
 	swapTime time.Time
@@ -104,10 +108,32 @@ func (ss *swapStatus) String() string {
 		ss.swapAsset, ss.redeemAsset, ss.swapTime, ss.swap, ss.swapConfirmed, ss.redeemTime, ss.redemption)
 }
 
+func (ss *swapStatus) startSwapSearch() bool {
+	return atomic.CompareAndSwapUint32(&ss.swapSearching, 0, 1)
+}
+
+func (ss *swapStatus) endSwapSearch() {
+	atomic.StoreUint32(&ss.swapSearching, 0)
+}
+
+func (ss *swapStatus) startRedeemSearch() bool {
+	return atomic.CompareAndSwapUint32(&ss.redeemSearching, 0, 1)
+}
+
+func (ss *swapStatus) endRedeemSearch() {
+	atomic.StoreUint32(&ss.redeemSearching, 0)
+}
+
 func (ss *swapStatus) swapConfTime() time.Time {
 	ss.mtx.RLock()
 	defer ss.mtx.RUnlock()
 	return ss.swapConfirmed
+}
+
+func (ss *swapStatus) contractState() (known, confirmed bool) {
+	ss.mtx.RLock()
+	defer ss.mtx.RUnlock()
+	return ss.swap != nil, !ss.swapConfirmed.IsZero()
 }
 
 func (ss *swapStatus) redeemSeenTime() time.Time {
@@ -897,17 +923,14 @@ func bufferedTicker(ctx context.Context, dur time.Duration) chan struct{} {
 }
 
 func (s *Swapper) tryConfirmSwap(ctx context.Context, status *swapStatus, confTime time.Time) (final bool) {
-	status.mtx.RLock()
-	if status.swapTime.IsZero() {
-		status.mtx.RUnlock()
+	if known, confirmed := status.contractState(); !known {
 		return // no swap yet to confirm
-	}
-	if !status.swapConfirmed.IsZero() {
-		status.mtx.RUnlock()
+	} else if confirmed {
 		return true // already confirmed
 	}
-	status.mtx.RUnlock() // Contract.Confirmations can timeout (slow), causing lock contention
 
+	// Swap known means status.swap is set, and that it will not be replaced
+	// because we are gating processInit with the swapSearching semaphore.
 	confs, err := status.swap.Confirmations(ctx)
 	if err != nil {
 		log.Warnf("Unable to get confirmations for swap tx %v: %v", status.swap.TxID(), err)
@@ -1324,7 +1347,7 @@ func (s *Swapper) step(user account.AccountID, matchID order.MatchID) (*stepInfo
 	}
 
 	// Verify that the user specified is the actor for this step.
-	if actor.user != user {
+	if actor.user != user { // NOTE: self-trade slips past this
 		return nil, &msgjson.Error{
 			Code:    msgjson.SettlementSequenceError,
 			Message: "expected other party to act",
@@ -1344,16 +1367,16 @@ func (s *Swapper) step(user account.AccountID, matchID order.MatchID) (*stepInfo
 	}
 
 	return &stepInformation{
-		match: match,
-		actor: actor,
+		match:        match,
+		actor:        actor,
+		counterParty: counterParty,
 		// By the time a match is created, the presence of the asset in the map
 		// has already been verified.
-		asset:        s.coins[actor.swapAsset].BackedAsset,
-		counterParty: counterParty,
-		isBaseAsset:  isBaseAsset,
-		step:         match.Status,
-		nextStep:     nextStep,
-		checkVal:     checkVal,
+		asset:       s.coins[actor.swapAsset].BackedAsset,
+		isBaseAsset: isBaseAsset,
+		step:        match.Status,
+		nextStep:    nextStep,
+		checkVal:    checkVal,
 	}, nil
 }
 
@@ -1459,9 +1482,10 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 // request. This method is run as a coin waiter, hence the return value
 // indicates if future attempts should be made to check coin status.
 func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepInfo *stepInformation) wait.TryDirective {
+	actor, counterParty := stepInfo.actor, stepInfo.counterParty
+
 	// Validate the swap contract
 	chain := stepInfo.asset.Backend
-	actor, counterParty := stepInfo.actor, stepInfo.counterParty
 	contract, err := chain.Contract(params.CoinID, params.Contract)
 	if err != nil {
 		if errors.Is(err, asset.CoinNotFoundError) {
@@ -1580,7 +1604,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	}
 
 	actor.status.mtx.Lock()
-	actor.status.swap = contract
+	actor.status.swap = contract // swap should not be set already (handleInit should gate)
 	actor.status.swapTime = swapTime
 	actor.status.mtx.Unlock()
 
@@ -1868,8 +1892,16 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 
 	// init requests should only be sent when contracts are still required, in
 	// the correct sequence, and by the correct party.
-	switch stepInfo.match.Status {
+	switch stepInfo.step {
 	case order.NewlyMatched, order.MakerSwapCast:
+		// Ensure we only start one coin waiter for this swap. This is an atomic
+		// CAS, so it must ultimately be followed by endSwapSearch().
+		if !stepInfo.actor.status.startSwapSearch() {
+			return &msgjson.Error{
+				Code:    msgjson.DuplicateRequestError, // not really a sequence error since they are still the "actor"
+				Message: "already received a swap contract, search in progress",
+			}
+		}
 	default:
 		return &msgjson.Error{
 			Code:    msgjson.SettlementSequenceError,
@@ -1880,6 +1912,7 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 	// Validate the coinID and contract script before starting a coin waiter.
 	coinStr, err := stepInfo.asset.Backend.ValidateCoinID(params.CoinID)
 	if err != nil {
+		stepInfo.actor.status.endSwapSearch() // not gonna start the search
 		// TODO: ensure Backends provide sanitized errors or type information to
 		// provide more details to the client.
 		return &msgjson.Error{
@@ -1889,6 +1922,7 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 	}
 	err = stepInfo.asset.Backend.ValidateContract(params.Contract)
 	if err != nil {
+		stepInfo.actor.status.endSwapSearch() // not gonna start the search
 		log.Debugf("ValidateContract (asset %v, coin %v) failure: %v", stepInfo.asset.Symbol, coinStr, err)
 		// TODO: ensure Backends provide sanitized errors or type information to
 		// provide more details to the client.
@@ -1914,9 +1948,14 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 	s.latencyQ.Wait(&wait.Waiter{
 		Expiration: expireTime,
 		TryFunc: func() wait.TryDirective {
-			return s.processInit(msg, params, stepInfo)
+			res := s.processInit(msg, params, stepInfo)
+			if res == wait.DontTryAgain {
+				stepInfo.actor.status.endSwapSearch() // contract now recorded
+			}
+			return res
 		},
 		ExpireFunc: func() {
+			stepInfo.actor.status.endSwapSearch() // allow init retries
 			// NOTE: We may consider a shorter expire time so the client can
 			// receive warning that there may be node or wallet connectivity
 			// trouble while they still have a chance to fix it.
@@ -1970,11 +2009,32 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 	if rpcErr != nil {
 		return rpcErr
 	}
+
+	// redeem requests should only be sent when all contracts have been
+	// received, in the correct sequence, and by the correct party.
+	switch stepInfo.step {
+	case order.TakerSwapCast, order.MakerRedeemed:
+		// Ensure we only start one coin waiter for this redeem. This is an
+		// atomic CAS, so it must ultimately be followed by endRedeemSearch().
+		if !stepInfo.actor.status.startRedeemSearch() {
+			return &msgjson.Error{
+				Code:    msgjson.DuplicateRequestError, // not really a sequence error since they are still the "actor"
+				Message: "already received a redeem transaction, search in progress",
+			}
+		}
+	default: // also includes MatchComplete
+		return &msgjson.Error{
+			Code:    msgjson.SettlementSequenceError,
+			Message: "swap contracts not yet received",
+		}
+	}
+
 	// Validate the redeem coin ID before starting a wait. This does not
 	// check the blockchain, but does ensure the CoinID can be decoded for the
 	// asset before starting up a coin waiter.
 	coinStr, err := stepInfo.asset.Backend.ValidateCoinID(params.CoinID)
 	if err != nil {
+		stepInfo.actor.status.endRedeemSearch()
 		// TODO: ensure Backends provide sanitized errors or type information to
 		// provide more details to the client.
 		return &msgjson.Error{
@@ -1994,9 +2054,14 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 	s.latencyQ.Wait(&wait.Waiter{
 		Expiration: expireTime,
 		TryFunc: func() wait.TryDirective {
-			return s.processRedeem(msg, params, stepInfo)
+			res := s.processRedeem(msg, params, stepInfo)
+			if res == wait.DontTryAgain {
+				stepInfo.actor.status.endRedeemSearch()
+			}
+			return res
 		},
 		ExpireFunc: func() {
+			stepInfo.actor.status.endRedeemSearch()
 			// NOTE: We may consider a shorter expire time so the client can
 			// receive warning that there may be node or wallet connectivity
 			// trouble while they still have a chance to fix it.
