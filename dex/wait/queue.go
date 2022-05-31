@@ -37,6 +37,9 @@ type Waiter struct {
 	TryFunc func() TryDirective
 	// ExpireFunc is a function to run in the case that the Waiter expires.
 	ExpireFunc func()
+
+	// Consider: EndFunc that runs after: (1) TryFunc returns DontTryAgain, (2)
+	// ExpireFunc is run, or (3) the queue shuts down.
 }
 
 // TickerQueue is a Waiter manager that checks a function periodically until
@@ -74,6 +77,15 @@ func (q *TickerQueue) Wait(w *Waiter) {
 
 // Run runs the primary wait loop until the context is canceled.
 func (q *TickerQueue) Run(ctx context.Context) {
+	// Expire any waiters left on shutdown.
+	defer func() {
+		q.waiterMtx.Lock()
+		for _, w := range q.waiters {
+			w.ExpireFunc()
+		}
+		q.waiters = q.waiters[:0]
+		q.waiterMtx.Unlock()
+	}()
 	// The latencyTicker triggers a check of all waitFunc functions.
 	latencyTicker := time.NewTicker(q.recheckInterval)
 	defer latencyTicker.Stop()
@@ -244,6 +256,9 @@ func (q *TaperingTickerQueue) Run(ctx context.Context) {
 			// NOTE: timer leaked until it fires - consider NewTimer and Stop here
 
 		case <-ctx.Done():
+			for _, w := range waiters {
+				w.ExpireFunc() // early, but still ending prior to DontTryAgain
+			}
 			return
 		}
 	}

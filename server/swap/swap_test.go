@@ -1610,6 +1610,20 @@ func TestTxWaiters(t *testing.T) {
 	if err := rig.sendSwap_maker(false); err != nil {
 		t.Fatal(err)
 	}
+
+	// Duplicate init request should get rejected.
+	dupSwapReq := *matchInfo.db.makerSwap.req
+	dupSwapReq.ID = nextID() // same content but new request ID
+	rpcErr := rig.swapper.handleInit(matchInfo.maker.acct, &dupSwapReq)
+	if rpcErr == nil {
+		t.Fatal("should have rejected the duplicate init request")
+	}
+	if rpcErr.Code != msgjson.DuplicateRequestError {
+		t.Errorf("duplicate init request expected code %d, got %d",
+			msgjson.DuplicateRequestError, rpcErr.Code)
+	}
+
+	// Now timeout the initial search.
 	timeOutMempool()
 	if err := rig.waitChans("maker mempool timeout error", rig.auth.swapReceived); err != nil {
 		t.Fatalf("error waiting for maker swap error response: %v", err)
@@ -1995,6 +2009,9 @@ func TestMalformedSwap(t *testing.T) {
 	// Back to NewlyMatched
 	tracker := rig.getTracker()
 	tracker.Status = order.NewlyMatched
+	// We're rewinding time to send the same init again. To support this hack,
+	// wait for swapSearching to clear.
+	time.Sleep(200 * time.Millisecond)
 
 	// And works with adequate fee and 0 confs.
 	ensureNilErr(rig.sendSwap_maker(true))
