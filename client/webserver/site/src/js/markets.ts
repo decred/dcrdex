@@ -645,8 +645,8 @@ export default class MarketsPage extends BasePage {
 
   setOrderBttnText () {
     if (this.isSell()) {
-      this.page.submitBttn.textContent = intl.prep(intl.ID_SET_BUTTON_SELL, { asset: this.market.base.symbol.toUpperCase() })
-    } else this.page.submitBttn.textContent = intl.prep(intl.ID_SET_BUTTON_BUY, { asset: this.market.base.symbol.toUpperCase() })
+      this.page.submitBttn.textContent = intl.prep(intl.ID_SET_BUTTON_SELL, { asset: this.market.baseCfg.symbol.toUpperCase() })
+    } else this.page.submitBttn.textContent = intl.prep(intl.ID_SET_BUTTON_BUY, { asset: this.market.baseCfg.symbol.toUpperCase() })
   }
 
   setCandleDurBttns () {
