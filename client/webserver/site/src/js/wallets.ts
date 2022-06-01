@@ -90,6 +90,7 @@ export default class WalletsPage extends BasePage {
       Doc.bind(el, 'click', () => { this.closePopups() })
     })
     Doc.bind(page.cancelForce, 'click', () => { this.closePopups() })
+    Doc.bind(page.copyAddressBtn, 'click', () => { this.copyAddress() })
 
     // Read the document, storing some info about each asset's row.
     const getAction = (row: HTMLElement, name: string) => row.querySelector(`[data-action=${name}]`) as HTMLElement
@@ -230,6 +231,10 @@ export default class WalletsPage extends BasePage {
 
   closePopups () {
     Doc.hide(this.page.forms)
+  }
+
+  copyAddress () {
+    navigator.clipboard.writeText(this.page.depositAddress.textContent || '')
   }
 
   /*
