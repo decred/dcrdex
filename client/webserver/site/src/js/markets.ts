@@ -1588,8 +1588,19 @@ export default class MarketsPage extends BasePage {
       pw: page.cancelPass.value
     }
     page.cancelPass.value = ''
+    // Toggle the loader and submit button.
+    page.cancelSubmit.classList.add('d-hide')
+    page.cancelLoader.classList.remove('d-hide')
     const res = await postJSON('/api/cancel', req)
-    if (!app().checkResponse(res)) return
+    page.cancelSubmit.classList.remove('d-hide')
+    page.cancelLoader.classList.add('d-hide')
+    // Display error on confirmation modal.
+    if (!app().checkResponse(res, true)) {
+      page.cancelErr.textContent = res.msg
+      Doc.show(page.cancelErr)
+      return
+    }
+    // Hide confirmation modal only on success.
     Doc.hide(cancelData.bttn, page.forms)
     order.cancelling = true
   }
