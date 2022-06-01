@@ -253,14 +253,14 @@ func (w *xcWallet) Connect() error {
 	defer w.mtx.Unlock()
 	haveAddress := w.address != ""
 	if haveAddress {
-		haveAddress, err = w.OwnsAddress(w.address)
+		haveAddress, err = w.OwnsDepositAddress(w.address)
 		if err != nil {
 			w.connector.Disconnect()
 			return err
 		}
 	}
 	if !haveAddress {
-		w.address, err = w.Address()
+		w.address, err = w.DepositAddress()
 		if err != nil {
 			w.connector.Disconnect()
 			return fmt.Errorf("%s Wallet.Address error: %w", unbip(w.AssetID), err)

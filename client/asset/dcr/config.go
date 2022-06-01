@@ -31,7 +31,9 @@ var (
 // Config holds the parameters needed to initialize an RPC connection to a dcr
 // wallet. Default values are used for RPCListen and/or RPCCert if not set.
 type Config struct {
-	Account          string  `ini:"account"`
+	PrimaryAccount   string  `ini:"account"`
+	UnmixedAccount   string  `ini:"unmixedaccount"`
+	TradingAccount   string  `ini:"tradingaccount"`
 	RPCUser          string  `ini:"username"`
 	RPCPass          string  `ini:"password"`
 	RPCListen        string  `ini:"rpclisten"`

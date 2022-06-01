@@ -691,7 +691,7 @@ func (w *TXCWallet) Info() *asset.WalletInfo {
 	}
 }
 
-func (w *TXCWallet) OwnsAddress(address string) (bool, error) {
+func (w *TXCWallet) OwnsDepositAddress(address string) (bool, error) {
 	return w.ownsAddress, w.ownsAddressErr
 }
 
@@ -809,7 +809,7 @@ func (w *TXCWallet) Refund(refundCoin dex.Bytes, refundContract dex.Bytes, feeSu
 	return w.refundCoin, w.refundErr
 }
 
-func (w *TXCWallet) Address() (string, error) {
+func (w *TXCWallet) DepositAddress() (string, error) {
 	return "", w.addrErr
 }
 

@@ -281,7 +281,7 @@ func Run(t *testing.T, cfg *Config) {
 		time.Sleep(blockWait)
 	}
 
-	address, err := rig.firstWallet.Address()
+	address, err := rig.firstWallet.DepositAddress()
 	if err != nil {
 		t.Fatalf("error getting alpha address: %v", err)
 	}

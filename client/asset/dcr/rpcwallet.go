@@ -353,6 +353,30 @@ func (w *rpcWallet) NotifyOnTipChange(ctx context.Context, cb TipChangeCallback)
 	return false
 }
 
+// AddressInfo returns information for the provided address. It is an error
+// if the address is not owned by the wallet.
+// Part of the Wallet interface.
+func (w *rpcWallet) AddressInfo(ctx context.Context, address string) (*AddressInfo, error) {
+	a, err := stdaddr.DecodeAddress(address, w.chainParams)
+	if err != nil {
+		return nil, err
+	}
+	res, err := w.client().ValidateAddress(ctx, a)
+	if err != nil {
+		return nil, translateRPCCancelErr(err)
+	}
+	if !res.IsValid {
+		return nil, fmt.Errorf("address is invalid")
+	}
+	if !res.IsMine {
+		return nil, fmt.Errorf("address does not belong to this wallet")
+	}
+	if res.Branch == nil {
+		return nil, fmt.Errorf("no account branch info for address")
+	}
+	return &AddressInfo{Account: res.Account, Branch: *res.Branch}, nil
+}
+
 // AccountOwnsAddress checks if the provided address belongs to the specified
 // account.
 // Part of the Wallet interface.
@@ -364,7 +388,7 @@ func (w *rpcWallet) AccountOwnsAddress(ctx context.Context, addr stdaddr.Address
 	return va.IsMine && va.Account == acctName, nil
 }
 
-// AccountBalance returns the balance breakdown for the speciied account.
+// AccountBalance returns the balance breakdown for the specified account.
 // Part of the Wallet interface.
 func (w *rpcWallet) AccountBalance(ctx context.Context, confirms int32, acctName string) (*walletjson.GetAccountBalanceResult, error) {
 	balances, err := w.rpcClient.GetBalanceMinConf(ctx, acctName, int(confirms))

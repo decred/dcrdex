@@ -2410,7 +2410,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 	// keys held within the new wallet.
 	sameWallet := func() error {
 		if c.assetHasActiveOrders(wallet.AssetID) {
-			owns, err := wallet.OwnsAddress(oldDepositAddr)
+			owns, err := wallet.OwnsDepositAddress(oldDepositAddr)
 			if err != nil {
 				return err
 			}
@@ -4289,7 +4289,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	}
 
 	// Get an address for the swap contract.
-	addr, err := toWallet.Address()
+	addr, err := toWallet.DepositAddress()
 	if err != nil {
 		return nil, 0, codedError(walletErr, fmt.Errorf("%s Address error: %w", wallets.toAsset.Symbol, err))
 	}

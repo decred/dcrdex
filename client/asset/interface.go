@@ -301,10 +301,12 @@ type Wallet interface {
 	// known when the init transaction was created. The client should store this
 	// information for persistence across sessions.
 	Refund(coinID, contract dex.Bytes, feeSuggestion uint64) (dex.Bytes, error)
-	// Address returns an address for the exchange wallet.
-	Address() (string, error)
-	// OwnsAddress indicates if an address belongs to the wallet.
-	OwnsAddress(address string) (bool, error)
+	// DepositAddress returns an address for depositing funds into the
+	// exchange wallet.
+	DepositAddress() (string, error)
+	// OwnsDepositAddress indicates if the provided address can be used
+	// to deposit funds into the wallet.
+	OwnsDepositAddress(address string) (bool, error)
 	// Unlock unlocks the exchange wallet.
 	Unlock(pw []byte) error
 	// Lock locks the exchange wallet.

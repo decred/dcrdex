@@ -67,6 +67,11 @@ const (
 	// confCheckTimeout is the amount of time allowed to check for
 	// confirmations.
 	confCheckTimeout = 2 * time.Second
+
+	// acctInternalBranch is the child number used when performing BIP0044 style
+	// hierarchical deterministic key derivation for the internal branch of an
+	// account.
+	acctInternalBranch uint32 = 1
 )
 
 var (
@@ -83,7 +88,22 @@ var (
 		{
 			Key:         "account",
 			DisplayName: "Account Name",
-			Description: "dcrwallet account name",
+			Description: "Primary dcrwallet account name for trading. If automatic mixing of trading funds is " +
+				"desired, this should be the wallet's mixed account and the other accounts should be set too. " +
+				"See wallet documentation for mixing wallet setup instructions.",
+		},
+		{
+			Key:         "unmixedaccount",
+			DisplayName: "Change Account Name",
+			Description: "dcrwallet change account name. This and the 'Temporary Trading Account' should only be " +
+				"set if mixing is enabled on the wallet. If set, deposit addresses will be from this account and will " +
+				"be mixed before being available to trade.",
+		},
+		{
+			Key:         "tradingaccount",
+			DisplayName: "Temporary Trading Account",
+			Description: "dcrwallet account to temporarily store split tx outputs or change from chained swaps in " +
+				"multi-lot orders. This should only be set if 'Change Account Name' is set.",
 		},
 		{
 			Key:         "username",
@@ -380,10 +400,16 @@ type redeemOptions struct {
 // client app communicates with the Decred blockchain and wallet. ExchangeWallet
 // satisfies the dex.Wallet interface.
 type ExchangeWallet struct {
-	ctx              context.Context // the asset subsystem starts with Connect(ctx)
-	wallet           Wallet
-	chainParams      *chaincfg.Params
-	log              dex.Logger
+	ctx            context.Context // the asset subsystem starts with Connect(ctx)
+	wallet         Wallet
+	chainParams    *chaincfg.Params
+	log            dex.Logger
+	primaryAcct    string
+	unmixedAccount string // mixing-enabled wallets only
+	// tradingAccount (mixing-enabled wallets only) stores utxos reserved for
+	// executing order matches, the external branch stores split tx outputs,
+	// internal branch stores chained (non-final) swap change.
+	tradingAccount   string
 	tipChange        func(error)
 	lastPeerCount    uint32
 	peersChange      func(uint32)
@@ -391,7 +417,6 @@ type ExchangeWallet struct {
 	feeRateLimit     uint64
 	redeemConfTarget uint64
 	useSplitTx       bool
-	acctName         string
 
 	tipMtx     sync.RWMutex
 	currentTip *block
@@ -499,12 +524,35 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, chainParams *cha
 	}
 	logger.Tracef("Redeem conf target set to %d blocks", redeemConfTarget)
 
+	// Both UnmixedAccount and TradingAccount must be provided if primary
+	// account is a mixed account. Providing one but not the other is bad
+	// configuration. If set, the account names will be validated on Connect.
+	if (dcrCfg.UnmixedAccount != "" && dcrCfg.TradingAccount == "") ||
+		(dcrCfg.UnmixedAccount == "" && dcrCfg.TradingAccount != "") {
+		return nil, fmt.Errorf("'Change Account Name' and 'Temporary Trading Account' MUST "+
+			"be set to treat %[1]q as a mixed account. If %[1]q is not a mixed account, values "+
+			"should NOT be set for 'Change Account Name' and 'Temporary Trading Account'",
+			dcrCfg.PrimaryAccount)
+	}
+	if dcrCfg.UnmixedAccount != "" {
+		switch {
+		case dcrCfg.PrimaryAccount == dcrCfg.UnmixedAccount:
+			return nil, fmt.Errorf("Primary Account should not be the same as Change Account")
+		case dcrCfg.PrimaryAccount == dcrCfg.TradingAccount:
+			return nil, fmt.Errorf("Primary Account should not be the same as Temporary Trading Account")
+		case dcrCfg.TradingAccount == dcrCfg.UnmixedAccount:
+			return nil, fmt.Errorf("Temporary Trading Account should not be the same as Change Account")
+		}
+	}
+
 	return &ExchangeWallet{
 		log:                 logger,
 		chainParams:         chainParams,
+		primaryAcct:         dcrCfg.PrimaryAccount,
+		unmixedAccount:      dcrCfg.UnmixedAccount,
+		tradingAccount:      dcrCfg.TradingAccount,
 		tipChange:           cfg.TipChange,
 		peersChange:         cfg.PeersChange,
-		acctName:            dcrCfg.Account,
 		fundingCoins:        make(map[outPoint]*fundingCoin),
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
 		externalTxCache:     make(map[chainhash.Hash]*externalTx),
@@ -553,6 +601,17 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		}
 	}()
 
+	// Validate accounts early on to prevent errors later.
+	for _, acct := range []string{dcr.primaryAcct, dcr.unmixedAccount, dcr.tradingAccount} {
+		if acct == "" {
+			continue
+		}
+		_, err = dcr.wallet.AccountUnlocked(ctx, acct)
+		if err != nil {
+			return nil, fmt.Errorf("unexpected AccountUnlocked error for %q account: %w", acct, err)
+		}
+	}
+
 	// Initialize the best block.
 	dcr.tipMtx.Lock()
 	dcr.currentTip, err = dcr.getBestBlock(ctx)
@@ -586,13 +645,33 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	return &wg, nil
 }
 
-// OwnsAddress indicates if an address belongs to the wallet.
-func (dcr *ExchangeWallet) OwnsAddress(address string) (bool, error) {
+// depositAccount returns the account that may be used to receive funds into
+// the wallet, either by a direct deposit action or via redemption or refund.
+func (dcr *ExchangeWallet) depositAccount() string {
+	if dcr.unmixedAccount != "" {
+		return dcr.unmixedAccount
+	}
+	return dcr.primaryAcct
+}
+
+// fundingAccounts returns the primary account along with any configured trading
+// account which may contain spendable outputs (split tx outputs or chained swap
+// change).
+func (dcr *ExchangeWallet) fundingAccounts() []string {
+	if dcr.unmixedAccount == "" {
+		return []string{dcr.primaryAcct}
+	}
+	return []string{dcr.primaryAcct, dcr.tradingAccount}
+}
+
+// OwnsDepositAddress indicates if the provided address can be used to deposit
+// funds into the wallet.
+func (dcr *ExchangeWallet) OwnsDepositAddress(address string) (bool, error) {
 	addr, err := stdaddr.DecodeAddress(address, dcr.chainParams)
 	if err != nil {
 		return false, err
 	}
-	return dcr.wallet.AccountOwnsAddress(dcr.ctx, addr, dcr.acctName)
+	return dcr.wallet.AccountOwnsAddress(dcr.ctx, addr, dcr.depositAccount())
 }
 
 // Balance should return the total available funds in the wallet. Note that
@@ -601,20 +680,46 @@ func (dcr *ExchangeWallet) OwnsAddress(address string) (bool, error) {
 // includes potentially untrusted 0-conf utxos, consider prioritizing confirmed
 // utxos when funding an order.
 func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
-	locked, err := dcr.lockedAtoms()
+	locked, err := dcr.lockedAtoms(dcr.primaryAcct)
 	if err != nil {
 		return nil, err
 	}
-	bal, err := dcr.wallet.AccountBalance(dcr.ctx, 0, dcr.acctName)
+	ab, err := dcr.wallet.AccountBalance(dcr.ctx, 0, dcr.primaryAcct)
 	if err != nil {
 		return nil, err
 	}
-	return &asset.Balance{
-		Available: toAtoms(bal.Spendable) - locked,
-		Immature: toAtoms(bal.ImmatureCoinbaseRewards) +
-			toAtoms(bal.ImmatureStakeGeneration),
-		Locked: locked + toAtoms(bal.LockedByTickets),
-	}, nil
+	bal := &asset.Balance{
+		Available: toAtoms(ab.Spendable) - locked,
+		Immature: toAtoms(ab.ImmatureCoinbaseRewards) +
+			toAtoms(ab.ImmatureStakeGeneration),
+		Locked: locked + toAtoms(ab.LockedByTickets),
+	}
+
+	if dcr.unmixedAccount == "" {
+		return bal, nil
+	}
+
+	// Mixing is enabled, consider ...
+	// 1) trading account spendable (-locked) as available,
+	// 2) all unmixed funds as immature, and
+	// 3) all locked utxos in the trading account as locked (for swapping).
+	tradingAcctBal, err := dcr.wallet.AccountBalance(dcr.ctx, 0, dcr.tradingAccount)
+	if err != nil {
+		return nil, err
+	}
+	tradingAcctLocked, err := dcr.lockedAtoms(dcr.tradingAccount)
+	if err != nil {
+		return nil, err
+	}
+	unmixedAcctBal, err := dcr.wallet.AccountBalance(dcr.ctx, 0, dcr.unmixedAccount)
+	if err != nil {
+		return nil, err
+	}
+
+	bal.Available += toAtoms(tradingAcctBal.Spendable) - tradingAcctLocked
+	bal.Immature += toAtoms(unmixedAcctBal.Total)
+	bal.Locked += tradingAcctLocked
+	return bal, nil
 }
 
 // FeeRate satisfies asset.FeeRater.
@@ -1119,7 +1224,7 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 		splitCoins, split, err := dcr.split(ord.Value, ord.MaxSwapCount, coins,
 			inputsSize, splitFeeRate, bumpedMaxRate, ord.DEXConfig)
 		if err != nil {
-			if errRet := dcr.returnCoins(coins); errRet != nil {
+			if _, errRet := dcr.returnCoins(coins); errRet != nil {
 				dcr.log.Warnf("Failed to unlock funding coins %v: %v", coins, errRet)
 			}
 			return nil, nil, err
@@ -1165,16 +1270,27 @@ func (dcr *ExchangeWallet) fund(enough func(sum uint64, size uint32, unspent *co
 
 // spendableUTXOs generates a slice of spendable *compositeUTXO.
 func (dcr *ExchangeWallet) spendableUTXOs() ([]*compositeUTXO, error) {
-	unspents, err := dcr.wallet.Unspents(dcr.ctx, dcr.acctName)
+	unspents, err := dcr.wallet.Unspents(dcr.ctx, dcr.primaryAcct)
 	if err != nil {
 		return nil, err
 	}
+	if dcr.tradingAccount != "" {
+		// Trading account may contain spendable utxos such as unspent split tx
+		// outputs that are unlocked/returned. TODO: Care should probably be
+		// taken to ensure only unspent split tx outputs are selected and other
+		// unmixed outputs in the trading account are ignored.
+		tradingAcctSpendables, err := dcr.wallet.Unspents(dcr.ctx, dcr.tradingAccount)
+		if err != nil {
+			return nil, err
+		}
+		unspents = append(unspents, tradingAcctSpendables...)
+	}
 	if len(unspents) == 0 {
-		return nil, fmt.Errorf("insufficient funds. 0 DCR available to spend in account %q", dcr.acctName)
+		return nil, fmt.Errorf("insufficient funds. 0 DCR available to spend in account %q", dcr.primaryAcct)
 	}
 
-	// Parse utxos to include script size for spending input.
-	// Returned utxos will be sorted in ascending order by amount (smallest first).
+	// Parse utxos to include script size for spending input. Returned utxos
+	// will be sorted in ascending order by amount (smallest first).
 	utxos, err := dcr.parseUTXOs(unspents)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing unspent outputs: %w", err)
@@ -1312,8 +1428,18 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 		return coins, false, nil
 	}
 
-	// Use an internal address for the sized output.
-	addr, err := dcr.wallet.InternalAddress(dcr.ctx, dcr.acctName)
+	// Generate an address to receive the sized output. If mixing is enabled on
+	// the wallet, generate the address from the external branch of the trading
+	// account. The external branch is used so that if this split output isn't
+	// spent, it won't be transferred to the unmixed account for re-mixing.
+	// Instead, it'll simply be unlocked in the trading account and can thus be
+	// used to fund future orders.
+	addr, err := func() (stdaddr.Address, error) {
+		if dcr.tradingAccount != "" {
+			return dcr.wallet.ExternalAddress(dcr.ctx, dcr.tradingAccount)
+		}
+		return dcr.wallet.InternalAddress(dcr.ctx, dcr.primaryAcct)
+	}()
 	if err != nil {
 		return nil, false, fmt.Errorf("error creating split transaction address: %w", err)
 	}
@@ -1344,7 +1470,7 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 	}
 
 	// Unlock the spent coins.
-	err = dcr.returnCoins(coins)
+	_, err = dcr.returnCoins(coins)
 	if err != nil {
 		dcr.log.Errorf("error returning coins spent in split transaction %v", coins)
 	}
@@ -1374,31 +1500,91 @@ func (dcr *ExchangeWallet) lockFundingCoins(fCoins []*fundingCoin) error {
 	return nil
 }
 
-// ReturnCoins unlocks coins. This would be necessary in the case of a
-// canceled order.
+// ReturnCoins unlocks coins. This would be necessary in the case of a canceled
+// order. Coins belonging to the tradingAcct, if configured, are transferred to
+// the unmixed account with the exception of unspent split tx outputs which are
+// kept in the tradingAcct and may later be used to fund future orders.
 func (dcr *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 	dcr.fundingMtx.Lock()
-	defer dcr.fundingMtx.Unlock()
-	return dcr.returnCoins(unspents)
+	returnedCoins, err := dcr.returnCoins(unspents)
+	dcr.fundingMtx.Unlock()
+	if err != nil || dcr.unmixedAccount == "" {
+		return err
+	}
+
+	// If any of these coins belong to the trading account, transfer them to the
+	// unmixed account to be re-mixed into the primary account before being
+	// re-selected for funding future orders. This doesn't apply to unspent
+	// split tx outputs, which should remain in the trading account and be
+	// selected from there for funding future orders.
+	var coinsToTransfer []asset.Coin
+	for _, coin := range returnedCoins {
+		if coin.addr == "" {
+			txOut, err := dcr.wallet.UnspentOutput(dcr.ctx, coin.op.txHash(), coin.op.vout(), coin.op.tree)
+			if err != nil {
+				dcr.log.Errorf("wallet.UnspentOutput error for returned coin %s: %v", coin.op, err)
+				continue
+			}
+			if len(txOut.Addresses) == 0 {
+				dcr.log.Errorf("no address in gettxout response for returned coin %s", coin.op)
+				continue
+			}
+			coin.addr = txOut.Addresses[0]
+		}
+		addrInfo, err := dcr.wallet.AddressInfo(dcr.ctx, coin.addr)
+		if err != nil {
+			dcr.log.Errorf("wallet.AddressInfo error for returned coin %s: %v", coin.op, err)
+			continue
+		}
+		// Move this coin to the unmixed account if it was sent to the internal
+		// branch of the trading account. This excludes unspent split tx outputs
+		// which are sent to the external branch of the trading account.
+		if addrInfo.Branch == acctInternalBranch && addrInfo.Account == dcr.tradingAccount {
+			coinsToTransfer = append(coinsToTransfer, coin.op)
+		}
+	}
+
+	if len(coinsToTransfer) > 0 {
+		tx, totalSent, err := dcr.sendAll(coinsToTransfer, dcr.unmixedAccount)
+		if err != nil {
+			dcr.log.Errorf("unable to transfer unlocked swapped change from temp trading "+
+				"account to unmixed account: %v", err)
+		} else {
+			dcr.log.Infof("Transferred %s from temp trading account to unmixed account in tx %s.",
+				dcrutil.Amount(totalSent), tx.TxHash())
+		}
+	}
+
+	return nil
 }
 
-// returnCoins is ReturnCoins but without locking fundingMtx.
-func (dcr *ExchangeWallet) returnCoins(unspents asset.Coins) error {
+// returnCoins unlocks coins and removes them from the fundingCoins map.
+// Requires fundingMtx to be write-locked.
+func (dcr *ExchangeWallet) returnCoins(unspents asset.Coins) ([]*fundingCoin, error) {
 	if len(unspents) == 0 {
-		return fmt.Errorf("cannot return zero coins")
+		return nil, fmt.Errorf("cannot return zero coins")
 	}
+
 	ops := make([]*wire.OutPoint, 0, len(unspents))
+	fundingCoins := make([]*fundingCoin, 0, len(unspents))
 
 	dcr.log.Debugf("returning coins %s", unspents)
 	for _, unspent := range unspents {
 		op, err := dcr.convertCoin(unspent)
 		if err != nil {
-			return fmt.Errorf("error converting coin: %w", err)
+			return nil, fmt.Errorf("error converting coin: %w", err)
 		}
 		ops = append(ops, op.wireOutPoint()) // op.tree may be wire.TxTreeUnknown, but that's fine since wallet.LockUnspent doesn't rely on it
-		delete(dcr.fundingCoins, op.pt)
+		if fCoin, ok := dcr.fundingCoins[op.pt]; ok {
+			fundingCoins = append(fundingCoins, fCoin)
+			delete(dcr.fundingCoins, op.pt)
+		} else {
+			dcr.log.Warnf("returning coin %s that is not cached as a funding coin", op)
+			fundingCoins = append(fundingCoins, &fundingCoin{op: op})
+		}
 	}
-	return dcr.wallet.LockUnspent(dcr.ctx, true, ops)
+
+	return fundingCoins, dcr.wallet.LockUnspent(dcr.ctx, true, ops)
 }
 
 // FundingCoins gets funding coins for the coin IDs. The coins are locked. This
@@ -1428,67 +1614,73 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	}
 
 	// Check locked outputs for not found coins.
-	lockedOutputs, err := dcr.wallet.LockedOutputs(dcr.ctx, dcr.acctName)
-	if err != nil {
-		return nil, err
-	}
-	for _, output := range lockedOutputs {
-		txHash, err := chainhash.NewHashFromStr(output.Txid)
+	for _, acct := range dcr.fundingAccounts() {
+		lockedOutputs, err := dcr.wallet.LockedOutputs(dcr.ctx, acct)
 		if err != nil {
-			return nil, fmt.Errorf("error decoding txid from rpc server %s: %w", output.Txid, err)
+			return nil, err
 		}
-		pt := newOutPoint(txHash, output.Vout)
-		if !notFound[pt] {
-			continue
-		}
-		txOut, err := dcr.wallet.UnspentOutput(dcr.ctx, txHash, output.Vout, output.Tree)
-		if err != nil {
-			return nil, fmt.Errorf("gettxout error for locked output %v: %w", pt.String(), err)
-		}
-		var address string
-		if len(txOut.Addresses) > 0 {
-			address = txOut.Addresses[0]
-		}
-		coin := newOutput(txHash, output.Vout, toAtoms(output.Amount), output.Tree)
-		coins = append(coins, coin)
-		dcr.fundingCoins[pt] = &fundingCoin{
-			op:   coin,
-			addr: address,
-		}
-		delete(notFound, pt)
-		if len(notFound) == 0 {
-			return coins, nil
+		for _, output := range lockedOutputs {
+			txHash, err := chainhash.NewHashFromStr(output.Txid)
+			if err != nil {
+				return nil, fmt.Errorf("error decoding txid from rpc server %s: %w", output.Txid, err)
+			}
+			pt := newOutPoint(txHash, output.Vout)
+			if !notFound[pt] {
+				continue
+			}
+			txOut, err := dcr.wallet.UnspentOutput(dcr.ctx, txHash, output.Vout, output.Tree)
+			if err != nil {
+				return nil, fmt.Errorf("gettxout error for locked output %v: %w", pt.String(), err)
+			}
+			var address string
+			if len(txOut.Addresses) > 0 {
+				address = txOut.Addresses[0]
+			}
+			coin := newOutput(txHash, output.Vout, toAtoms(output.Amount), output.Tree)
+			coins = append(coins, coin)
+			dcr.fundingCoins[pt] = &fundingCoin{
+				op:   coin,
+				addr: address,
+			}
+			delete(notFound, pt)
+			if len(notFound) == 0 {
+				return coins, nil
+			}
 		}
 	}
 
 	// Some funding coins still not found after checking locked outputs.
 	// Check wallet unspent outputs as last resort. Lock the coins if found.
-	unspents, err := dcr.wallet.Unspents(dcr.ctx, dcr.acctName)
-	if err != nil {
-		return nil, err
-	}
 	coinsToLock := make([]*wire.OutPoint, 0, len(notFound))
-	for _, txout := range unspents {
-		txHash, err := chainhash.NewHashFromStr(txout.TxID)
+	for _, acct := range dcr.fundingAccounts() {
+		unspents, err := dcr.wallet.Unspents(dcr.ctx, acct)
 		if err != nil {
-			return nil, fmt.Errorf("error decoding txid from rpc server %s: %w", txout.TxID, err)
+			return nil, err
 		}
-		pt := newOutPoint(txHash, txout.Vout)
-		if !notFound[pt] {
-			continue
-		}
-		coinsToLock = append(coinsToLock, wire.NewOutPoint(txHash, txout.Vout, txout.Tree))
-		coin := newOutput(txHash, txout.Vout, toAtoms(txout.Amount), txout.Tree)
-		coins = append(coins, coin)
-		dcr.fundingCoins[pt] = &fundingCoin{
-			op:   coin,
-			addr: txout.Address,
-		}
-		delete(notFound, pt)
-		if len(notFound) == 0 {
-			break
+		for _, txout := range unspents {
+			txHash, err := chainhash.NewHashFromStr(txout.TxID)
+			if err != nil {
+				return nil, fmt.Errorf("error decoding txid from rpc server %s: %w", txout.TxID, err)
+			}
+			pt := newOutPoint(txHash, txout.Vout)
+			if !notFound[pt] {
+				continue
+			}
+			coinsToLock = append(coinsToLock, wire.NewOutPoint(txHash, txout.Vout, txout.Tree))
+			coin := newOutput(txHash, txout.Vout, toAtoms(txout.Amount), txout.Tree)
+			coins = append(coins, coin)
+			dcr.fundingCoins[pt] = &fundingCoin{
+				op:   coin,
+				addr: txout.Address,
+			}
+			delete(notFound, pt)
+			if len(notFound) == 0 {
+				break
+			}
 		}
 	}
+
+	// Return an error if some coins are still not found.
 	if len(notFound) != 0 {
 		ids := make([]string, 0, len(notFound))
 		for pt := range notFound {
@@ -1496,8 +1688,9 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 		}
 		return nil, fmt.Errorf("funding coins not found: %s", strings.Join(ids, ", "))
 	}
+
 	dcr.log.Debugf("Locking funding coins that were unlocked %v", coinsToLock)
-	err = dcr.wallet.LockUnspent(dcr.ctx, false, coinsToLock)
+	err := dcr.wallet.LockUnspent(dcr.ctx, false, coinsToLock)
 	if err != nil {
 		return nil, err
 	}
@@ -1532,7 +1725,7 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		totalOut += contract.Value
 		// revokeAddrV2 is the address belonging to the key that will be
 		// used to sign and refund a swap past its encoded refund locktime.
-		revokeAddrV2, err := dcr.wallet.ExternalAddress(dcr.ctx, dcr.acctName)
+		revokeAddrV2, err := dcr.wallet.ExternalAddress(dcr.ctx, dcr.depositAccount())
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error creating revocation address: %w", err)
 		}
@@ -1573,7 +1766,13 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	defer dcr.fundingMtx.Unlock() // hold until after returnCoins and lockFundingCoins(change)
 	// Sign the tx but don't send the transaction yet until
 	// the individual swap refund txs are prepared and signed.
-	msgTx, change, changeAddr, fees, err := dcr.signTxAndAddChange(baseTx, feeRate, -1)
+	changeAcct := dcr.depositAccount()
+	if swaps.LockChange && dcr.tradingAccount != "" {
+		// Change will likely be used to fund more swaps, send to trading
+		// account.
+		changeAcct = dcr.tradingAccount
+	}
+	msgTx, change, changeAddr, fees, err := dcr.signTxAndAddChange(baseTx, feeRate, -1, changeAcct)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -1605,7 +1804,7 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	}
 
 	// Return spent outputs.
-	err = dcr.returnCoins(swaps.Inputs)
+	_, err = dcr.returnCoins(swaps.Inputs)
 	if err != nil {
 		dcr.log.Errorf("error unlocking swapped coins", swaps.Inputs)
 	}
@@ -1693,7 +1892,7 @@ func (dcr *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 	}
 
 	// Send the funds back to the exchange wallet.
-	txOut, _, err := dcr.makeChangeOut(totalIn - fee)
+	txOut, _, err := dcr.makeChangeOut(dcr.depositAccount(), totalIn-fee)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -2400,7 +2599,7 @@ func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes, feeSuggestion uint
 	return toCoinID(refundHash, 0), nil
 }
 
-// refundTx crates and signs a contract`s refund transaction. If refundAddr is
+// refundTx crates and signs a contract's refund transaction. If refundAddr is
 // not supplied, one will be requested from the wallet. If val is not supplied
 // it will be retrieved with gettxout.
 func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refundAddr stdaddr.Address, feeSuggestion uint64) (*wire.MsgTx, error) {
@@ -2449,7 +2648,7 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 	}
 
 	if refundAddr == nil {
-		refundAddr, err = dcr.wallet.ExternalAddress(dcr.ctx, dcr.acctName)
+		refundAddr, err = dcr.wallet.ExternalAddress(dcr.ctx, dcr.depositAccount())
 		if err != nil {
 			return nil, fmt.Errorf("error getting new address from the wallet: %w", err)
 		}
@@ -2474,9 +2673,10 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 	return msgTx, nil
 }
 
-// Address returns an address for the exchange wallet.
-func (dcr *ExchangeWallet) Address() (string, error) {
-	addr, err := dcr.wallet.ExternalAddress(dcr.ctx, dcr.acctName)
+// DepositAddress returns an address for depositing funds into the exchange
+// wallet.
+func (dcr *ExchangeWallet) DepositAddress() (string, error) {
+	addr, err := dcr.wallet.ExternalAddress(dcr.ctx, dcr.depositAccount())
 	if err != nil {
 		return "", err
 	}
@@ -2486,36 +2686,49 @@ func (dcr *ExchangeWallet) Address() (string, error) {
 // NewAddress returns a new address from the wallet. This satisfies the
 // NewAddresser interface.
 func (dcr *ExchangeWallet) NewAddress() (string, error) {
-	return dcr.Address()
+	return dcr.DepositAddress()
 }
 
 // Unlock unlocks the exchange wallet.
 func (dcr *ExchangeWallet) Unlock(pw []byte) error {
-	unlocked, err := dcr.wallet.AccountUnlocked(dcr.ctx, dcr.acctName)
-	if err != nil {
-		return err
+	for _, acct := range dcr.fundingAccounts() {
+		unlocked, err := dcr.wallet.AccountUnlocked(dcr.ctx, acct)
+		if err != nil {
+			return err
+		}
+		if unlocked {
+			continue // attempt to unlock the other account
+		}
+		err = dcr.wallet.UnlockAccount(dcr.ctx, pw, acct)
+		if err != nil {
+			return err
+		}
 	}
-	if unlocked {
-		return nil
-	}
-
-	return dcr.wallet.UnlockAccount(dcr.ctx, pw, dcr.acctName)
+	return nil
 }
 
 // Lock locks the exchange wallet.
 func (dcr *ExchangeWallet) Lock() error {
-	return dcr.wallet.LockAccount(dcr.ctx, dcr.acctName)
+	if dcr.unmixedAccount != "" {
+		return nil // don't lock if mixing is enabled
+	}
+	return dcr.wallet.LockAccount(dcr.ctx, dcr.primaryAcct)
 }
 
 // Locked will be true if the wallet is currently locked.
 // Q: why are we ignoring RPC errors in this?
 func (dcr *ExchangeWallet) Locked() bool {
-	unlocked, err := dcr.wallet.AccountUnlocked(dcr.ctx, dcr.acctName)
-	if err != nil {
-		dcr.log.Errorf("error checking account lock status %v", err)
-		return false // assume wallet is unlocked?
+	for _, acct := range dcr.fundingAccounts() {
+		unlocked, err := dcr.wallet.AccountUnlocked(dcr.ctx, acct)
+		if err != nil {
+			dcr.log.Errorf("error checking account lock status %v", err)
+			unlocked = false // assume wallet is unlocked?
+		}
+		if !unlocked {
+			return true // Locked is true if any of the funding accounts is locked.
+		}
 	}
-	return !unlocked
+	return false
 }
 
 // PayFee sends the dex registration fee. Transaction fees are in addition to
@@ -2731,8 +2944,8 @@ func (dcr *ExchangeWallet) parseUTXOs(unspents []*walletjson.ListUnspentResult) 
 }
 
 // lockedAtoms is the total value of locked outputs, as locked with LockUnspent.
-func (dcr *ExchangeWallet) lockedAtoms() (uint64, error) {
-	lockedOutpoints, err := dcr.wallet.LockedOutputs(dcr.ctx, dcr.acctName)
+func (dcr *ExchangeWallet) lockedAtoms(acct string) (uint64, error) {
+	lockedOutpoints, err := dcr.wallet.LockedOutputs(dcr.ctx, acct)
 	if err != nil {
 		return 0, err
 	}
@@ -2813,6 +3026,28 @@ func (dcr *ExchangeWallet) sendCoins(addr stdaddr.Address, coins asset.Coins, va
 	return tx, uint64(txOut.Value), err
 }
 
+// sendAll sends the maximum sendable amount (total input amount minus fees) to
+// the provided account as a single output, spending the specified coins.
+func (dcr *ExchangeWallet) sendAll(coins asset.Coins, destAcct string) (*wire.MsgTx, uint64, error) {
+	addr, err := dcr.wallet.InternalAddress(dcr.ctx, destAcct)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	baseTx := wire.NewMsgTx()
+	totalIn, err := dcr.addInputCoins(baseTx, coins)
+	if err != nil {
+		return nil, 0, err
+	}
+	payScriptVer, payScript := addr.PaymentScript()
+	txOut := newTxOut(int64(totalIn), payScriptVer, payScript)
+	baseTx.AddTxOut(txOut)
+
+	feeRate := dcr.targetFeeRateWithFallback(2, 0)
+	tx, err := dcr.sendWithReturn(baseTx, feeRate, 0) // subtract from vout 0
+	return tx, uint64(txOut.Value), err
+}
+
 // newTxOut returns a new transaction output with the given parameters.
 func newTxOut(amount int64, pkScriptVer uint16, pkScript []byte) *wire.TxOut {
 	return &wire.TxOut{
@@ -2848,8 +3083,8 @@ func msgTxToHex(msgTx *wire.MsgTx) (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-func (dcr *ExchangeWallet) makeChangeOut(val uint64) (*wire.TxOut, stdaddr.Address, error) {
-	changeAddr, err := dcr.wallet.InternalAddress(dcr.ctx, dcr.acctName)
+func (dcr *ExchangeWallet) makeChangeOut(changeAcct string, val uint64) (*wire.TxOut, stdaddr.Address, error) {
+	changeAddr, err := dcr.wallet.InternalAddress(dcr.ctx, changeAcct)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating change address: %w", err)
 	}
@@ -2859,9 +3094,9 @@ func (dcr *ExchangeWallet) makeChangeOut(val uint64) (*wire.TxOut, stdaddr.Addre
 
 // sendWithReturn sends the unsigned transaction, adding a change output unless
 // the amount is dust. subtractFrom indicates the output from which fees should
-// be subtraced, where -1 indicates fees should come out of a change output.
+// be subtracted, where -1 indicates fees should come out of a change output.
 func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, feeRate uint64, subtractFrom int32) (*wire.MsgTx, error) {
-	signedTx, _, _, _, err := dcr.signTxAndAddChange(baseTx, feeRate, subtractFrom)
+	signedTx, _, _, _, err := dcr.signTxAndAddChange(baseTx, feeRate, subtractFrom, dcr.depositAccount())
 	if err != nil {
 		return nil, err
 	}
@@ -2870,10 +3105,11 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, feeRate uint64, su
 	return signedTx, err
 }
 
-// signTxAndAddChange signs the passed msgTx, adding a change output unless the
-// amount is dust. subtractFrom indicates the output from which fees should be
-// subtraced, where -1 indicates fees should come out of a change output.
-func (dcr *ExchangeWallet) signTxAndAddChange(baseTx *wire.MsgTx, feeRate uint64, subtractFrom int32) (*wire.MsgTx, *output, string, uint64, error) {
+// signTxAndAddChange signs the passed msgTx, adding a change output that pays
+// an address from the specified changeAcct, unless the change amount is dust.
+// subtractFrom indicates the output from which fees should be subtracted, where
+// -1 indicates fees should come out of a change output.
+func (dcr *ExchangeWallet) signTxAndAddChange(baseTx *wire.MsgTx, feeRate uint64, subtractFrom int32, changeAcct string) (*wire.MsgTx, *output, string, uint64, error) {
 	// Sign the transaction to get an initial size estimate and calculate
 	// whether a change output would be dust.
 	sigCycles := 1
@@ -2914,7 +3150,7 @@ func (dcr *ExchangeWallet) signTxAndAddChange(baseTx *wire.MsgTx, feeRate uint64
 				baseTx.TxOut[subtractFrom].Value -= int64(minFeeWithChange)
 				remaining += minFeeWithChange
 			}
-			changeOutput, changeAddress, err = dcr.makeChangeOut(changeValue)
+			changeOutput, changeAddress, err = dcr.makeChangeOut(changeAcct, changeValue)
 			if err != nil {
 				return nil, nil, "", 0, err
 			}
