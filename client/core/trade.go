@@ -320,24 +320,17 @@ func (t *trackedTrade) reservesToUnlock(num, denom, reserves, reservesLocked uin
 		// Order is executed, so no changes should be expected. If there were
 		// zero matches, the return is expected to be fraction 1 / 1, so no
 		// reason to add handling for that case.
-		// Figure out what the smallest expected unlock amount should be and
-		// divide it by 2. Any remainder less than that is dust.
-		smallestShare := ^uint64(0)
-		shrink := func(num, denom uint64) {
-			v := applyFraction(num, denom, reserves)
-			if v < smallestShare {
-				smallestShare = v
-			}
+		mkt := t.dc.marketConfig(t.mktID)
+		if mkt == nil {
+			t.dc.log.Errorf("reservesToUnlock: could not find market: %v", t.mktID)
+			return 0
 		}
-		remain := t.Trade().Remaining()
+		lotSize := mkt.LotSize
 		qty := t.Trade().Quantity
-		if remain > 0 {
-			shrink(remain, qty)
-		}
-		for _, m := range t.matches {
-			shrink(m.Quantity, qty)
-		}
-		isDust = reservesLocked < applyFraction(smallestShare, qty*2, reserves)
+		// Dust if remaining reserved is less than the amount needed to
+		// reserve one lot, which would be the smallest trade. Flooring
+		// to avoid rounding issues.
+		isDust = reservesLocked < uint64(math.Floor(float64(lotSize)/float64(qty)*float64(reserves)))
 	}
 	if isDust {
 		unlock += reservesLocked

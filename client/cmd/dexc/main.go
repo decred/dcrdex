@@ -80,6 +80,9 @@ func mainCore() error {
 		log.Infof("Logging with UTC time stamps. Current local time is %v",
 			time.Now().Local().Format("15:04:05 MST"))
 	}
+	log.Infof("dexc starting for network: %s", cfg.Net)
+	log.Infof("Swap locktimes config: maker %s, taker %s",
+		dex.LockTimeMaker(cfg.Net), dex.LockTimeTaker(cfg.Net))
 
 	defer func() {
 		if pv := recover(); pv != nil {
