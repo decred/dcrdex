@@ -1650,7 +1650,7 @@ func TestServer(t *testing.T) {
 
 	s, err := New(&Config{
 		Core:       tCore,
-		Addr:       ":54321",
+		Addr:       "[::1]:54321",
 		Logger:     logger,
 		ReloadHTML: true,
 		HttpProf:   true,
