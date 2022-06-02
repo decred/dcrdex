@@ -2966,7 +2966,8 @@ func TestRefundReserves(t *testing.T) {
 	rate := dcrBtcRateStep * 100
 
 	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, qty, rate)
-	lo.BaseAsset = tACCTAsset.ID
+	lo.BaseAsset = tUTXOAssetB.ID
+	lo.QuoteAsset = tACCTAsset.ID
 	lo.Force = order.StandingTiF
 	loid := lo.ID()
 
@@ -3217,7 +3218,8 @@ func TestRedemptionReserves(t *testing.T) {
 	rate := dcrBtcRateStep * 100
 
 	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, qty, rate)
-	lo.BaseAsset = tACCTAsset.ID
+	lo.BaseAsset = tUTXOAssetB.ID
+	lo.QuoteAsset = tACCTAsset.ID
 	lo.Force = order.StandingTiF
 	loid := lo.ID()
 
