@@ -183,8 +183,10 @@ func TestHandleHelp(t *testing.T) {
 }
 
 func TestHandleVersion(t *testing.T) {
-	payload := handleVersion(nil, nil)
-	res := ""
+	tc := &TCore{}
+	r := &RPCServer{core: tc, dexcVersion: &SemVersion{}}
+	payload := handleVersion(r, nil)
+	res := &VersionResponse{}
 	if err := verifyResponse(payload, &res, -1); err != nil {
 		t.Fatal(err)
 	}
