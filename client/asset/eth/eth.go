@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -118,6 +119,12 @@ var (
 	unlimitedAllowanceReplenishThreshold = new(big.Int).Div(unlimitedAllowance, big.NewInt(2))
 
 	findRedemptionCoinID = []byte("FindRedemption Coin")
+
+	seedDerivationPath = []uint32{hdkeychain.HardenedKeyStart + 44,
+		hdkeychain.HardenedKeyStart + 60,
+		hdkeychain.HardenedKeyStart,
+		0,
+		0}
 )
 
 // WalletConfig are wallet-level configuration settings.
@@ -238,6 +245,7 @@ var _ asset.Wallet = (*TokenWallet)(nil)
 var _ asset.AccountLocker = (*ETHWallet)(nil)
 var _ asset.AccountLocker = (*TokenWallet)(nil)
 var _ asset.TokenMaster = (*ETHWallet)(nil)
+var _ asset.WalletRestorer = (*assetWallet)(nil)
 
 type baseWallet struct {
 	ctx         context.Context // the asset subsystem starts with Connect(ctx)
@@ -333,13 +341,7 @@ func CreateWallet(createWalletParams *asset.CreateWalletParams) error {
 		return err
 	}
 
-	// m/44'/60'/0'/0/0
-	path := []uint32{hdkeychain.HardenedKeyStart + 44,
-		hdkeychain.HardenedKeyStart + 60,
-		hdkeychain.HardenedKeyStart,
-		0,
-		0}
-	extKey, err := keygen.GenDeepChild(createWalletParams.Seed, path)
+	extKey, err := keygen.GenDeepChild(createWalletParams.Seed, seedDerivationPath)
 	defer extKey.Zero()
 	if err != nil {
 		return err
@@ -2033,7 +2035,29 @@ func (w *TokenWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
 		return math.MaxUint64
 	}
 	return g.Transfer * feeRate
+}
 
+// RestorationInfo returns information about how to restore the wallet in
+// various external wallets.
+func (w *assetWallet) RestorationInfo(seed []byte) ([]*asset.WalletRestoration, error) {
+	extKey, err := keygen.GenDeepChild(seed, seedDerivationPath)
+	defer extKey.Zero()
+	if err != nil {
+		return nil, err
+	}
+	privateKey, err := extKey.SerializedPrivKey()
+	defer encode.ClearBytes(privateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return []*asset.WalletRestoration{
+		&asset.WalletRestoration{
+			Target:       "MetaMask",
+			Seed:         hex.EncodeToString(privateKey),
+			Instructions: "1. Open the settings menu\n2. Select \"Import Account\"\n3. Make sure \"Private Key\" is selected and paste the seed into the box",
+		},
+	}, nil
 }
 
 // SwapConfirmations gets the number of confirmations and the spend status

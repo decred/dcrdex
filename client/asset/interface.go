@@ -23,6 +23,7 @@ const (
 	WalletTraitRecoverer                            // The wallet is an asset.Recoverer.
 	WalletTraitWithdrawer                           // The Wallet can withdraw a specific amount from an exchange wallet.
 	WalletTraitSweeper                              // The Wallet can sweep all the funds, leaving no change.
+	WalletTraitRestorer                             // The wallet is an asset.WalletRestorer
 )
 
 // IsRescanner tests if the WalletTrait has the WalletTraitRescanner bit set.
@@ -73,6 +74,12 @@ func (wt WalletTrait) IsSweeper() bool {
 	return wt&WalletTraitSweeper != 0
 }
 
+// IsRestorer test if the WalletTrait has the WalletTraitRestorer bit set, which
+// indicates the wallet implements the WalletRestorer interface.
+func (wt WalletTrait) IsRestorer() bool {
+	return wt&WalletTraitRestorer != 0
+}
+
 // DetermineWalletTraits returns the WalletTrait bitset for the provided Wallet.
 func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(Rescanner); is {
@@ -98,6 +105,9 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	}
 	if _, is := w.(Sweeper); is {
 		t |= WalletTraitSweeper
+	}
+	if _, is := w.(WalletRestorer); is {
+		t |= WalletTraitRestorer
 	}
 	return t
 }
@@ -414,6 +424,22 @@ type LogFiler interface {
 // suggestion for swap operations.
 type FeeRater interface {
 	FeeRate() uint64
+}
+
+// WalletRestoration contains all the information needed for a user to restore
+// their wallet in an external wallet.
+type WalletRestoration struct {
+	Target       string `json:"target"`
+	Seed         string `json:"seed"`
+	Instructions string `json:"instructions"`
+}
+
+// WalletRestorer is a wallet which gives information about how to restore
+// itself in external wallet software.
+type WalletRestorer interface {
+	// RestorationInfo returns information about how to restore the wallet in
+	// various external wallets.
+	RestorationInfo(seed []byte) ([]*WalletRestoration, error)
 }
 
 // EarlyAcceleration is returned from the PreAccelerate function to inform the

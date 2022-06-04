@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
@@ -448,6 +449,34 @@ func (s *WebServer) apiUpdateDEXHost(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK:       true,
 		Exchange: exchange,
+	}
+
+	writeJSON(w, resp, s.indent)
+}
+
+// apiRestoreWalletInfo is the handler for the '/restorewalletinfo' API
+// request.
+func (s *WebServer) apiRestoreWalletInfo(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		AssetID uint32
+		Pass    encode.PassBytes
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+
+	info, err := s.core.WalletRestorationInfo(form.Pass, form.AssetID)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error updating cert: %w", err))
+		return
+	}
+
+	resp := struct {
+		OK              bool                       `json:"ok"`
+		RestorationInfo []*asset.WalletRestoration `json:"restorationinfo,omitempty"`
+	}{
+		OK:              true,
+		RestorationInfo: info,
 	}
 	writeJSON(w, resp, s.indent)
 }

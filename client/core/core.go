@@ -7048,6 +7048,39 @@ func (c *Core) WalletLogFilePath(assetID uint32) (string, error) {
 	return wallet.logFilePath()
 }
 
+// WalletRestorationInfo returns information about how to restore the currently
+// loaded wallet for assetID in various external wallet software. This function
+// will return an error if the currently loaded wallet for assetID does not
+// implement the WalletRestorer interface.
+func (c *Core) WalletRestorationInfo(pw []byte, assetID uint32) ([]*asset.WalletRestoration, error) {
+	crypter, err := c.encryptionKey(pw)
+	if err != nil {
+		return nil, fmt.Errorf("WalletRestorationInfo password error: %w", err)
+	}
+
+	seed, _, err := c.assetSeedAndPass(assetID, crypter)
+	if err != nil {
+		return nil, fmt.Errorf("assetSeedAndPass error: %w", err)
+	}
+
+	wallet, found := c.wallet(assetID)
+	if !found {
+		return nil, fmt.Errorf("no wallet configured for asset %d", assetID)
+	}
+
+	restorer, ok := wallet.Wallet.(asset.WalletRestorer)
+	if !ok {
+		return nil, fmt.Errorf("wallet for asset %d cannot be restored", assetID)
+	}
+
+	restorationInfo, err := restorer.RestorationInfo(seed)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get restoration info for wallet %w", err)
+	}
+
+	return restorationInfo, nil
+}
+
 func createFile(fileName string) (*os.File, error) {
 	if fileName == "" {
 		return nil, errors.New("no file path specified for creating")

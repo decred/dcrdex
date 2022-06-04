@@ -20,8 +20,12 @@ const animationLength = 300
 const traitNewAddresser = 1 << 1
 const traitLogFiler = 1 << 2
 const traitRecoverer = 1 << 5
-const activeOrdersErrCode = 35
 const traitWithdrawer = 1 << 6
+const traitRestorer = 1 << 8
+
+const activeOrdersErrCode = 35
+
+const exportWalletRetypeText = 'I will not use any external wallet while I have active trades in the DEX'
 
 interface Actions {
   connect: HTMLElement
@@ -57,6 +61,12 @@ interface RescanRecoveryRequest {
   force?: boolean
 }
 
+interface WalletRestoration {
+  target: string
+  seed: string
+  instructions: string
+}
+
 export default class WalletsPage extends BasePage {
   body: HTMLElement
   page: Record<string, PageElement>
@@ -80,11 +90,15 @@ export default class WalletsPage extends BasePage {
   forceReq: RescanRecoveryRequest
   forceUrl: string
   currentForm: PageElement
+  restoreInfoCard: HTMLElement
 
   constructor (body: HTMLElement) {
     super()
     this.body = body
     const page = this.page = Doc.idDescendants(body)
+
+    this.restoreInfoCard = page.restoreInfoCard.cloneNode(true) as HTMLElement
+    page.restoreInfoCard.remove()
 
     this.forms = Doc.applySelector(page.forms, ':scope > form')
     page.forms.querySelectorAll('.form-closer').forEach(el => {
@@ -170,7 +184,10 @@ export default class WalletsPage extends BasePage {
     bind(document, 'keyup', this.keyup)
 
     bind(page.downloadLogs, 'click', async () => { this.downloadLogs() })
+    bind(page.exportWallet, 'click', async () => { this.displayExportWalletDisclaimer() })
     bind(page.recoverWallet, 'click', async () => { this.showRecoverWallet() })
+    bindForm(page.exportWalletAuth, page.exportWalletAuthSubmit, async () => { this.exportWalletAuthSubmit() })
+    bindForm(page.exportWalletDisclaimer, page.disclaimerSubmit, async () => { this.disclaimerSubmit() })
     bindForm(page.recoverWalletConfirm, page.recoverWalletSubmit, () => { this.recoverWallet() })
     bindForm(page.confirmForce, page.confirmForceSubmit, async () => { this.confirmForceSubmit() })
 
@@ -445,6 +462,8 @@ export default class WalletsPage extends BasePage {
     else Doc.hide(page.downloadLogs)
     if ((wallet.traits & traitRecoverer) !== 0) Doc.show(page.recoverWallet)
     else Doc.hide(page.recoverWallet)
+    if ((wallet.traits & traitRestorer)) Doc.show(page.exportWallet)
+    else Doc.hide(page.exportWallet)
 
     page.recfgAssetLogo.src = Doc.logoPath(asset.symbol)
     page.recfgAssetName.textContent = asset.info.name
@@ -676,6 +695,75 @@ export default class WalletsPage extends BasePage {
     url.search = search.toString()
     url.pathname = '/wallets/logfile'
     window.open(url.toString())
+  }
+
+  // displayExportWalletDisclaimer displays a popup which prompts the user to
+  // retype a text confirming that they understand the risks of exporting the
+  // wallet.
+  async displayExportWalletDisclaimer () {
+    const page = this.page
+    Doc.hide(page.disclaimerErr)
+    page.disclaimerInput.value = ''
+    page.retypeText.textContent = exportWalletRetypeText
+    this.showForm(page.exportWalletDisclaimer)
+  }
+
+  // disclaimerSubmit checks that the user correctly retyped the text, and if
+  // so loads a popup where they have to input their password in order to
+  // see their wallet seed.
+  async disclaimerSubmit () {
+    const page = this.page
+    const inputValueMatches : () => boolean = () => {
+      const inputValue = page.disclaimerInput.value
+      if (!inputValue) return false
+      return inputValue.trim().toLowerCase() === exportWalletRetypeText.trim().toLowerCase()
+    }
+    Doc.hide(page.exportWalletErr)
+    page.exportWalletPW.value = ''
+    if (inputValueMatches()) this.showForm(page.exportWalletAuth)
+    else {
+      page.disclaimerErr.textContent = 'Your entry does not match'
+      Doc.show(page.disclaimerErr)
+    }
+  }
+
+  // exportWalletAuthSubmit is called after the user enters their password to
+  // authorize looking up the information to restore their wallet in an
+  // external wallet.
+  async exportWalletAuthSubmit () {
+    const page = this.page
+    const req = {
+      assetID: this.reconfigAsset,
+      pass: page.exportWalletPW.value
+    }
+    const url = '/api/restorewalletinfo'
+    const loaded = app().loading(page.forms)
+    const res = await postJSON(url, req)
+    loaded()
+    if (app().checkResponse(res)) {
+      this.displayRestoreWalletInfo(res.restorationinfo)
+    } else {
+      page.exportWalletErr.textContent = res.msg
+      Doc.show(page.exportWalletErr)
+    }
+  }
+
+  // displayRestoreWalletInfo displays the information needed to restore a
+  // wallet in external wallets.
+  async displayRestoreWalletInfo (info: WalletRestoration[]) {
+    const page = this.page
+    while (page.restoreInfoCardsList.firstChild) {
+      page.restoreInfoCardsList.removeChild(page.restoreInfoCardsList.firstChild)
+    }
+    info.forEach((wr: WalletRestoration) => {
+      const card = this.restoreInfoCard.cloneNode(true) as HTMLElement
+      const tmpl = Doc.parseTemplate(card)
+      tmpl.name.textContent = wr.target
+      tmpl.seed.textContent = wr.seed
+      tmpl.instructions.textContent = wr.instructions
+      page.restoreInfoCardsList.appendChild(card)
+    })
+    this.showForm(page.restoreWalletInfo)
   }
 
   async recoverWallet () {
