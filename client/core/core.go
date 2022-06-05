@@ -2305,26 +2305,28 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 		return newError(authErr, "ReconfigureWallet password error: %w", err)
 	}
 	defer crypter.Close()
+
 	assetID := form.AssetID
+
 	walletDef, err := walletDefinition(assetID, form.Type)
 	if err != nil {
 		return err
 	}
+	if walletDef.Seeded && newWalletPW != nil {
+		return newError(passwordErr, "cannot set a password on a built-in(seeded) wallet")
+	}
+
 	oldWallet, found := c.wallet(assetID)
 	if !found {
 		return newError(missingWalletErr, "%d -> %s wallet not found",
 			assetID, unbip(assetID))
 	}
-
 	oldDef, err := walletDefinition(assetID, oldWallet.walletType)
 	if err != nil {
 		return fmt.Errorf("failed to locate old wallet definition: %v", err)
 	}
-
-	if walletDef.Seeded && newWalletPW != nil {
-		return newError(passwordErr, "cannot set a password on a built-in wallet")
-	}
 	oldDepositAddr := oldWallet.currentDepositAddress()
+
 	dbWallet := &db.Wallet{
 		Type:        form.Type,
 		AssetID:     oldWallet.AssetID,
@@ -2345,10 +2347,6 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 	}()
 
 	if walletDef.Seeded {
-		if newWalletPW != nil {
-			return newError(passwordErr, "cannot set a password on a seeded wallet")
-		}
-
 		exists, err := asset.WalletExists(assetID, form.Type, c.assetDataDirectory(assetID), form.Config, c.net)
 		if err != nil {
 			return newError(existenceCheckErr, "error checking wallet pre-existence: %w", err)
