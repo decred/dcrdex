@@ -57,7 +57,12 @@ const (
 	// timeout is known (e.g. startup with down server).
 	defaultTickInterval = 30 * time.Second
 
-	marketBuyRedemptionSlippageBuffer = 2
+	// When placing a market buy order, there is no way to know for certain how
+	// many matches it can make, so to reserve extra funds for the refunds and
+	// redemptions (if the respective assets require said reserves), we multiply
+	// the estimate obtained from the current mid-market price by this value. If
+	// no market price is available, this value is used directly.
+	marketBuyReservesSlippageBuffer = 5
 )
 
 var (
@@ -816,16 +821,9 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 			}
 		}
 		// If we're updating an order from an active state to executed,
-		// canceled, or revoked, return the remaining quantity.
-		if newStatus >= order.OrderStatusExecuted && trade.Trade().Remaining() > 0 &&
-			(!trade.isMarketBuy() || len(trade.matches) == 0) {
-			if trade.isMarketBuy() {
-				trade.unlockRedemptionFraction(1, 1)
-				trade.unlockRefundFraction(1, 1)
-			} else {
-				trade.unlockRedemptionFraction(trade.Trade().Remaining(), trade.Trade().Quantity)
-				trade.unlockRefundFraction(trade.Trade().Remaining(), trade.Trade().Quantity)
-			}
+		// canceled, or revoked, release reserves for matches that won't happen.
+		if newStatus >= order.OrderStatusExecuted {
+			trade.unreserveUnfilled()
 		}
 		// Now update the trade.
 		if err := trade.db.UpdateOrder(trade.metaOrder()); err != nil {
@@ -4388,6 +4386,14 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	if !dc.running(mktID) {
 		return nil, 0, newError(marketErr, "%s market trading is suspended", mktID)
 	}
+	// Check for some invalid market configurations.
+	if mktConf.EpochLen == 0 {
+		return nil, 0, codedError(marketErr, errors.New("zero epoch duration"))
+	}
+	lotSize := mktConf.LotSize
+	if lotSize == 0 {
+		return nil, 0, codedError(marketErr, errors.New("zero lot size"))
+	}
 
 	rate, qty := form.Rate, form.Qty
 	if form.IsLimit && rate == 0 {
@@ -4442,7 +4448,6 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	}
 
 	// Fund the order and prepare the coins.
-	lotSize := mktConf.LotSize
 	fundQty := qty
 	lots := qty / lotSize
 	if form.IsLimit && !form.Sell {
@@ -4454,14 +4459,11 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 
 	// Market buy order
 	if !form.IsLimit && !form.Sell {
-		// There is some ambiguity here about whether the specified quantity for
-		// a market buy order should include projected fees, or whether fees
-		// should be in addition to the quantity. If the fees should be
-		// additional to the order quantity (the approach taken here), we should
-		// try to estimate the number of lots based on the current market. If
-		// the market is not synced, fall back to a single-lot estimate, with
-		// the knowledge that such an estimate means that the specified amount
-		// might not all be available for matching once fees are considered.
+		// Since quantity for an order does not include projected fees, try to
+		// estimate the number of lots based on the current market rate. If the
+		// market is not synced, fall back to a single-lot estimate, with the
+		// knowledge that such an estimate means that the specified amount might
+		// not all be available for matching once fees are considered.
 		lots = 1
 		book := dc.bookie(mktID)
 		if book != nil {
@@ -4471,7 +4473,6 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 			if err == nil {
 				baseQty := calc.QuoteToBase(midGap, fundQty)
 				lots = baseQty / lotSize
-				redemptionRefundLots = lots * marketBuyRedemptionSlippageBuffer
 				if lots == 0 {
 					err = newError(orderParamsErr,
 						"order quantity is too low for current market rates. "+
@@ -4484,6 +4485,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 				return nil, 0, newError(orderParamsErr, "cannot estimate redemption count")
 			}
 		}
+		redemptionRefundLots = lots * marketBuyReservesSlippageBuffer
 	}
 
 	if lots == 0 {
@@ -4495,7 +4497,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		Value:         fundQty,
 		MaxSwapCount:  lots,
 		DEXConfig:     wallets.fromAsset,
-		RedeemConfig:  wallets.toAsset,
+		RedeemConfig:  wallets.toAsset, // needed when doing swaps like erc20 <-> eth or erc20 <-> erc20
 		Immediate:     isImmediate,
 		FeeSuggestion: c.feeSuggestion(dc, wallets.fromAsset.ID),
 		Options:       form.Options,
@@ -4587,8 +4589,8 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	// Everything is ready. Send the order.
 	route, msgOrder, msgTrade := messageOrder(ord, msgCoins)
 
-	// If the to asset is an AccountLocker, we need to lock up redemption
-	// funds.
+	// If the "to" asset is an AccountLocker, we need to lock up funds for
+	// redemptions and refunds.
 	var redemptionReserves uint64
 	if isAccountRedemption {
 		pubKeys, sigs, err := toWallet.SignMessage(nil, msgOrder.Serialize())
@@ -4611,6 +4613,11 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 				accountRedeemer.UnlockRedemptionReserves(redemptionReserves)
 			}
 		}()
+		if redemptionReserves%redemptionRefundLots != 0 {
+			c.log.Warnf("%v redemption reserves %d not a multiple of lot count %d",
+				unbip(toWallet.AssetID), redemptionReserves, redemptionRefundLots)
+			// return nil, 0, newError(walletErr, ...)
+		}
 	}
 
 	// If the from asset is an AccountLocker, we need to lock up refund funds.
@@ -4625,6 +4632,11 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 				accountRefunder.UnlockRefundReserves(refundReserves)
 			}
 		}()
+		if refundReserves%redemptionRefundLots != 0 {
+			c.log.Warnf("%v refund reserves %d not a multiple of lot count %d",
+				unbip(toWallet.AssetID), refundReserves, redemptionRefundLots)
+			// return nil, 0, newError(walletErr, ...)
+		}
 	}
 
 	// A non-nil changeID indicates that this is an account based coin. The
@@ -4668,19 +4680,19 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	// Store the order.
 	dbOrder := &db.MetaOrder{
 		MetaData: &db.OrderMetaData{
-			Status:           order.OrderStatusEpoch,
-			Host:             dc.acct.host,
-			MaxFeeRate:       wallets.fromAsset.MaxFeeRate,
-			RedeemMaxFeeRate: wallets.toAsset.MaxFeeRate,
+			Status: order.OrderStatusEpoch,
+			Host:   dc.acct.host,
 			Proof: db.OrderProof{
 				DEXSig:   result.Sig,
 				Preimage: preImg[:],
 			},
-			FromVersion:        wallets.fromAsset.Version,
-			ToVersion:          wallets.toAsset.Version,
-			Options:            form.Options,
-			RedemptionReserves: redemptionReserves,
-			ChangeCoin:         changeID,
+			LotSize:          lotSize,
+			ChangeCoin:       changeID,
+			MaxFeeRate:       wallets.fromAsset.MaxFeeRate,
+			RedeemMaxFeeRate: wallets.toAsset.MaxFeeRate,
+			FromVersion:      wallets.fromAsset.Version,
+			ToVersion:        wallets.toAsset.Version,
+			Options:          form.Options,
 		},
 		Order: ord,
 	}
@@ -4691,11 +4703,11 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	}
 
 	// Prepare and store the tracker and get the core.Order to return.
-	tracker := newTrackedTrade(dbOrder, preImg, dc, dc.marketEpochDuration(mktID), c.lockTimeTaker, c.lockTimeMaker,
-		c.db, c.latencyQ, wallets, coins, c.notify, c.formatDetails, form.Options, redemptionReserves, refundReserves)
-
-	tracker.redemptionLocked = tracker.redemptionReserves
-	tracker.refundLocked = tracker.refundReserves
+	tracker := newTrackedTrade(dbOrder, preImg, dc, c.lockTimeTaker, c.lockTimeMaker,
+		c.db, c.latencyQ, wallets, coins, c.notify, c.formatDetails, form.Options)
+	// We reserved with the wallets before submitting, now make the counters.
+	tracker.refundRes = newReservesCounter(uint32(redemptionRefundLots), refundReserves)
+	tracker.redeemRes = newReservesCounter(uint32(redemptionRefundLots), redemptionReserves)
 
 	if recoveryCoin != nil {
 		tracker.change = recoveryCoin
@@ -5089,7 +5101,7 @@ func (c *Core) initialize() {
 		return "s"
 	}
 	for _, dc := range c.dexConnections() {
-		activeOrders, _ := c.dbOrders(dc) // non-nil error will load 0 orders, and any subsequent db error will cause a shutdown on dex auth or sooner
+		activeOrders, _ := c.dbOrders(dc.acct.host) // non-nil error will load 0 orders, and any subsequent db error will cause a shutdown on dex auth or sooner
 		if n := len(activeOrders); n > 0 {
 			c.log.Warnf("\n\n\t ****  IMPORTANT: You have %d active order%s on %s. LOGIN immediately!  **** \n", n, pluralize(n), dc.acct.host)
 		}
@@ -5246,11 +5258,11 @@ func (c *Core) reFee(wallet *xcWallet, dc *dexConnection) {
 	c.verifyRegistrationFee(wallet.AssetID, dc, acctInfo.FeeCoin, confs, reqConfs)
 }
 
-func (c *Core) dbOrders(dc *dexConnection) ([]*db.MetaOrder, error) {
+func (c *Core) dbOrders(host string) ([]*db.MetaOrder, error) {
 	// Prepare active orders, according to the DB.
-	dbOrders, err := c.db.ActiveDEXOrders(dc.acct.host)
+	dbOrders, err := c.db.ActiveDEXOrders(host)
 	if err != nil {
-		return nil, fmt.Errorf("database error when fetching orders for %s: %w", dc.acct.host, err)
+		return nil, fmt.Errorf("database error when fetching orders for %s: %w", host, err)
 	}
 	c.log.Infof("Loaded %d active orders.", len(dbOrders))
 
@@ -5265,9 +5277,9 @@ func (c *Core) dbOrders(dc *dexConnection) ([]*db.MetaOrder, error) {
 		return false
 	}
 
-	activeMatchOrders, err := c.db.DEXOrdersWithActiveMatches(dc.acct.host)
+	activeMatchOrders, err := c.db.DEXOrdersWithActiveMatches(host)
 	if err != nil {
-		return nil, fmt.Errorf("database error fetching active match orders for %s: %w", dc.acct.host, err)
+		return nil, fmt.Errorf("database error fetching active match orders for %s: %w", host, err)
 	}
 	c.log.Infof("Loaded %d active match orders", len(activeMatchOrders))
 	for _, oid := range activeMatchOrders {
@@ -5276,7 +5288,7 @@ func (c *Core) dbOrders(dc *dexConnection) ([]*db.MetaOrder, error) {
 		}
 		dbOrder, err := c.db.Order(oid)
 		if err != nil {
-			return nil, fmt.Errorf("database error fetching order %s for %s: %w", oid, dc.acct.host, err)
+			return nil, fmt.Errorf("database error fetching order %s for %s: %w", oid, host, err)
 		}
 		dbOrders = append(dbOrders, dbOrder)
 	}
@@ -5290,7 +5302,7 @@ func (c *Core) dbOrders(dc *dexConnection) ([]*db.MetaOrder, error) {
 // trackers. Use resumeTrades with the app Crypter to prepare wallets and coins.
 func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, error) {
 	// Prepare active orders, according to the DB.
-	dbOrders, err := c.dbOrders(dc)
+	dbOrders, err := c.dbOrders(dc.acct.host)
 	if err != nil {
 		return nil, err
 	}
@@ -5316,16 +5328,23 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		}
 
 		mktID := marketName(ord.Base(), ord.Quote())
-		if dc.marketConfig(mktID) == nil {
+		mktConf := dc.marketConfig(mktID)
+		if mktConf == nil {
 			c.log.Errorf("Active %s order retrieved for unknown market %s", oid, mktID)
-			continue
+			// NOTE: This is an issue if DEX initial connect on startup failed
+			// (there's no config), requiring another Login call after connect.
+			continue // is it strictly needed to prep the trackedTrade?
+		}
+		if dbOrder.MetaData.LotSize == 0 { // legacy order (user upgraded with an active order!)
+			dbOrder.MetaData.LotSize = mktConf.LotSize
 		}
 
 		var preImg order.Preimage
 		copy(preImg[:], dbOrder.MetaData.Proof.Preimage)
-		tracker := newTrackedTrade(dbOrder, preImg, dc, dc.marketEpochDuration(mktID), c.lockTimeTaker,
-			c.lockTimeMaker, c.db, c.latencyQ, nil, nil, c.notify, c.formatDetails,
-			dbOrder.MetaData.Options, dbOrder.MetaData.RedemptionReserves, dbOrder.MetaData.RefundReserves)
+		tracker := newTrackedTrade(dbOrder, preImg, dc, c.lockTimeTaker, c.lockTimeMaker,
+			c.db, c.latencyQ, nil, nil, c.notify, c.formatDetails, dbOrder.MetaData.Options)
+		// resumeTrades will call tracker.reserveRedeems and reserveRefunds
+		// after match processing.
 		trackers[dbOrder.Order.ID()] = tracker
 
 		// Get matches.
@@ -5478,6 +5497,8 @@ func (c *Core) loadDBTrades(dc *dexConnection, crypter encrypt.Crypter, failed m
 // resumeTrades recovers the states of active trades and matches, including
 // loading audit info needed to finish swaps and funding coins needed to create
 // new matches on an order.
+// NOTE: all trackedTrades should be for the same dexConnection, awkward since
+// there's a trackedTrade.dc field. This func sig is a relic.
 func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMap {
 	var tracker *trackedTrade
 	notifyErr := func(topic Topic, args ...interface{}) {
@@ -5515,7 +5536,8 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 			continue
 		}
 
-		// See if the order is 100% filled.
+		tracker.recalcFilled() // set filled amount (for Remaining)
+
 		trade := tracker.Trade()
 		// Make sure we have the necessary wallets.
 		wallets, err := c.walletSet(dc, tracker.Base(), tracker.Quote(), trade.Sell)
@@ -5526,32 +5548,16 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 
 		tracker.wallets = wallets
 
-		// Find the least common multiplier to use as the denom for adding
-		// reserve fractions.
-		denom, marketMult, limitMult := lcm(uint64(len(tracker.matches)), tracker.Trade().Quantity)
-		var refundNum, redeemNum uint64
-
-		addMatchRedemption := func(match *matchTracker) {
-			if tracker.isMarketBuy() {
-				redeemNum += marketMult // * 1
-			} else {
-				redeemNum += match.Quantity * limitMult
-			}
-		}
-
-		addMatchRefund := func(match *matchTracker) {
-			if tracker.isMarketBuy() {
-				refundNum += marketMult // * 1
-			} else {
-				refundNum += match.Quantity * limitMult
-			}
-		}
+		// Count the number of refunds and redeems we will need to plan for with
+		// this trade. First we count based on the active matches, then we
+		// account for the unfilled portion of the order if it can still match.
+		var refundCount, redeemCount uint32
 
 		// If matches haven't redeemed, but the counter-swap has been received,
 		// reload the audit info.
-		isActive := tracker.metaData.Status == order.OrderStatusBooked || tracker.metaData.Status == order.OrderStatusEpoch
 		var matchesNeedingCoins []*matchTracker
 		for _, match := range tracker.matches {
+			lots := uint32(match.Quantity / tracker.metaData.LotSize)
 			var needsAuditInfo bool
 			var counterSwap []byte
 			if match.Side == order.Maker {
@@ -5562,9 +5568,10 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 					needsAuditInfo = true // maker needs AuditInfo for takers contract
 					counterSwap = match.MetaData.Proof.TakerSwap
 				}
+				// As maker, plan for a refund until we have redeemed theirs.
 				if match.Status < order.MakerRedeemed {
-					addMatchRedemption(match)
-					addMatchRefund(match)
+					redeemCount += lots
+					refundCount += lots
 				}
 			} else { // Taker
 				if match.Status < order.TakerSwapCast {
@@ -5574,13 +5581,15 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 					needsAuditInfo = true // taker needs AuditInfo for maker's contract
 					counterSwap = match.MetaData.Proof.MakerSwap
 				}
+				// As taker plan for a refund until they have redeemed ours.
 				if match.Status < order.MakerRedeemed {
-					addMatchRefund(match)
+					refundCount += lots
 				}
 				if match.Status < order.MatchComplete {
-					addMatchRedemption(match)
+					redeemCount += lots
 				}
 			}
+
 			c.log.Tracef("Trade %v match %v needs coins = %v, needs audit info = %v",
 				tracker.ID(), match.MatchID, len(matchesNeedingCoins) > 0, needsAuditInfo)
 			if needsAuditInfo {
@@ -5649,12 +5658,22 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 			}
 		}
 
-		if refundNum != 0 {
-			tracker.lockRefundFraction(refundNum, denom)
+		// If new matches can still be made for the order, reserve any funds
+		// needed to process those matches (e.g. for refund and redeem gas).
+		isActive := tracker.metaData.Status == order.OrderStatusBooked || tracker.metaData.Status == order.OrderStatusEpoch
+		if isActive {
+			maxLotsRemaining := uint32(trade.Remaining() / tracker.metaData.LotSize)
+			// If this is a market buy, it can only be in epoch status here.
+			// Since the quantity is in units of the quote asset, the number of
+			// matches remaining can only be estimated.
+			if tracker.isMarketBuy() { // resume with epoch market buy - rare!
+				maxLotsRemaining = marketBuyReservesSlippageBuffer // TODO: check midGap and convert units
+			}
+			redeemCount += maxLotsRemaining
+			refundCount += maxLotsRemaining
 		}
-		if redeemNum != 0 {
-			tracker.lockRedemptionFraction(redeemNum, denom)
-		}
+		tracker.reserveRedeems(redeemCount)
+		tracker.reserveRefunds(refundCount)
 
 		// Active orders and orders with matches with unsent swaps need funding
 		// coin(s). If they are not found, block new matches and swap attempts.
@@ -5696,13 +5715,6 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 					tracker.coins = mapifyCoins(coins)
 				}
 			}
-		}
-
-		tracker.recalcFilled()
-
-		if isActive {
-			tracker.lockRedemptionFraction(trade.Remaining(), trade.Quantity)
-			tracker.lockRefundFraction(trade.Remaining(), trade.Quantity)
 		}
 
 		// Balances should be updated for any orders with locked wallet coins,
@@ -6336,7 +6348,7 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	copy(matchID[:], revocation.MatchID)
 
 	tracker.mtx.Lock()
-	err = tracker.revokeMatch(c.ctx, matchID, true)
+	err = tracker.revokeMatch(matchID, true)
 	tracker.mtx.Unlock()
 	if err != nil {
 		return fmt.Errorf("unable to revoke match %s for order %s: %w", matchID, tracker.ID(), err)
@@ -6481,21 +6493,7 @@ func (c *Core) listen(dc *dexConnection) {
 
 		if len(doneTrades) > 0 {
 			dc.tradeMtx.Lock()
-
 			for _, trade := range doneTrades {
-				// Log an error if redemption funds are still reserved.
-				trade.mtx.RLock()
-				redeemLocked := trade.redemptionLocked
-				refundLocked := trade.refundLocked
-				trade.mtx.RUnlock()
-				if redeemLocked > 0 {
-					dc.log.Errorf("retiring order %s with %d > 0 redemption funds locked", trade.ID(), redeemLocked)
-				}
-				if refundLocked > 0 {
-					dc.log.Errorf("retiring order %s with %d > 0 refund funds locked", trade.ID(), refundLocked)
-				}
-
-				c.notify(newOrderNote(TopicOrderRetired, "", "", db.Data, trade.coreOrder()))
 				delete(dc.trades, trade.ID())
 			}
 			dc.tradeMtx.Unlock()
@@ -6505,10 +6503,12 @@ func (c *Core) listen(dc *dexConnection) {
 		// there were not unlocked at an earlier time.
 		updatedAssets := make(assetMap)
 		for _, trade := range doneTrades {
-			trade.mtx.Lock()
 			c.log.Infof("Retiring inactive order %v in status %v", trade.ID(), trade.metaData.Status)
+			trade.mtx.Lock()
 			trade.returnCoins()
 			trade.mtx.Unlock()
+			trade.unreserveAll()
+			c.notify(newOrderNote(TopicOrderRetired, "", "", db.Data, trade.coreOrder()))
 			updatedAssets.count(trade.wallets.fromAsset.ID)
 		}
 

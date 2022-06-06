@@ -72,6 +72,7 @@ var (
 	orderIDKey             = []byte("orderID")
 	matchIDKey             = []byte("matchID")
 	proofKey               = []byte("proof")
+	lotSizeKey             = []byte("lotSize")
 	activeKey              = []byte("active")
 	dexKey                 = []byte("dex")
 	updateTimeKey          = []byte("utime")
@@ -99,8 +100,6 @@ var (
 	fromVersionKey         = []byte("fromVersion")
 	toVersionKey           = []byte("toVersion")
 	optionsKey             = []byte("options")
-	redemptionReservesKey  = []byte("redemptionReservesKey")
-	refundReservesKey      = []byte("refundReservesKey")
 	byteTrue               = encode.ByteTrue
 	backupDir              = "backup"
 	disabledRateSourceKey  = []byte("disabledRateSources")
@@ -700,18 +699,21 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 		return newBucketPutter(oBkt).
 			put(baseKey, uint32Bytes(ord.Base())).
 			put(quoteKey, uint32Bytes(ord.Quote())).
+			put(typeKey, []byte{byte(ord.Type())}).
+			put(orderKey, order.EncodeOrder(ord)).
 			put(statusKey, uint16Bytes(uint16(md.Status))).
 			put(dexKey, []byte(md.Host)).
 			put(updateTimeKey, uint64Bytes(timeNow())).
 			put(proofKey, md.Proof.Encode()).
+			put(lotSizeKey, uint64Bytes(md.LotSize)).
 			put(changeKey, md.ChangeCoin).
 			put(linkedKey, linkedB).
-			put(typeKey, []byte{byte(ord.Type())}).
-			put(orderKey, order.EncodeOrder(ord)).
 			put(swapFeesKey, uint64Bytes(md.SwapFeesPaid)).
+			put(redemptionFeesKey, uint64Bytes(md.RedemptionFeesPaid)).
 			put(maxFeeRateKey, uint64Bytes(md.MaxFeeRate)).
 			put(redeemMaxFeeRateKey, uint64Bytes(md.RedeemMaxFeeRate)).
-			put(redemptionFeesKey, uint64Bytes(md.RedemptionFeesPaid)).
+			put(fromVersionKey, uint32Bytes(md.FromVersion)).
+			put(toVersionKey, uint32Bytes(md.ToVersion)).
 			put(optionsKey, config.Data(md.Options)).
 			put(accelerationsKey, accelerationsB).
 			err()
@@ -981,16 +983,9 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 		return nil, fmt.Errorf("error decoding order proof for %x: %w", oid, err)
 	}
 
-	var redemptionReserves uint64
-	redemptionReservesB := oBkt.Get(redemptionReservesKey)
-	if len(redemptionReservesB) == 8 {
-		redemptionReserves = intCoder.Uint64(redemptionReservesB)
-	}
-
-	var refundReserves uint64
-	refundReservesB := oBkt.Get(refundReservesKey)
-	if len(refundReservesB) == 8 {
-		refundReserves = intCoder.Uint64(refundReservesB)
+	var lotSize uint64 // may be zero for older orders
+	if lotSizeB := oBkt.Get(lotSizeKey); len(lotSizeB) == 8 {
+		lotSize = intCoder.Uint64(lotSizeB)
 	}
 
 	var linkedID order.OrderID
@@ -1040,20 +1035,19 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 
 	return &dexdb.MetaOrder{
 		MetaData: &dexdb.OrderMetaData{
-			Proof:              *proof,
 			Status:             order.OrderStatus(intCoder.Uint16(oBkt.Get(statusKey))),
 			Host:               string(getCopy(oBkt, dexKey)),
+			Proof:              *proof,
+			LotSize:            lotSize,
 			ChangeCoin:         getCopy(oBkt, changeKey),
 			LinkedOrder:        linkedID,
 			SwapFeesPaid:       intCoder.Uint64(oBkt.Get(swapFeesKey)),
+			RedemptionFeesPaid: intCoder.Uint64(oBkt.Get(redemptionFeesKey)),
 			MaxFeeRate:         maxFeeRate,
 			RedeemMaxFeeRate:   redeemMaxFeeRate,
-			RedemptionFeesPaid: intCoder.Uint64(oBkt.Get(redemptionFeesKey)),
 			FromVersion:        fromVersion,
 			ToVersion:          toVersion,
 			Options:            options,
-			RedemptionReserves: redemptionReserves,
-			RefundReserves:     refundReserves,
 			AccelerationCoins:  accelerationCoinIDs,
 		},
 		Order: ord,
@@ -1104,7 +1098,9 @@ func updateOrderBucket(ob, archivedOB *bbolt.Bucket, oid order.OrderID, status o
 	return oBkt, nil
 }
 
-// UpdateOrderMetaData updates the order metadata, not including the Host.
+// UpdateOrderMetaData updates the order metadata, not including the static
+// fields including Host, MaxFeeRate, LotSize, ToVersion, and FromVersion, all
+// of which are only set by UpdateOrder.
 func (db *BoltDB) UpdateOrderMetaData(oid order.OrderID, md *dexdb.OrderMetaData) error {
 	return db.ordersUpdate(func(ob, archivedOB *bbolt.Bucket) error {
 		oBkt, err := updateOrderBucket(ob, archivedOB, oid, md.Status)
@@ -1132,13 +1128,8 @@ func (db *BoltDB) UpdateOrderMetaData(oid order.OrderID, md *dexdb.OrderMetaData
 			put(changeKey, md.ChangeCoin).
 			put(linkedKey, linkedB).
 			put(swapFeesKey, uint64Bytes(md.SwapFeesPaid)).
-			put(maxFeeRateKey, uint64Bytes(md.MaxFeeRate)).
 			put(redemptionFeesKey, uint64Bytes(md.RedemptionFeesPaid)).
-			put(fromVersionKey, uint32Bytes(md.FromVersion)).
-			put(toVersionKey, uint32Bytes(md.ToVersion)).
 			put(optionsKey, config.Data(md.Options)).
-			put(redemptionReservesKey, uint64Bytes(md.RedemptionReserves)).
-			put(refundReservesKey, uint64Bytes(md.RefundReserves)).
 			put(accelerationsKey, accelerationsB).
 			err()
 	})

@@ -509,33 +509,32 @@ type TokenMaster interface {
 	OpenTokenWallet(assetID uint32, settings map[string]string, tipChange func(error)) (Wallet, error)
 }
 
-// AccountLocker is a wallet in which redemptions and refunds require a wallet
-// to have available balance to pay fees.
-type AccountLocker interface {
+// RedeemReserver is a wallet in which redemptions require a wallet to have
+// available balance to pay fees.
+type RedeemReserver interface {
 	// ReserveNRedemption is used when preparing funding for an order that
 	// redeems to an account-based asset. The wallet will set aside the
 	// appropriate amount of funds so that we can redeem N swaps using the fee
 	// and version configuration specified in the dex.Asset. It is an error to
 	// request funds > spendable balance.
-	ReserveNRedemptions(n uint64, dexRedeemCfg *dex.Asset) (uint64, error)
-	// ReReserveRedemption is used when reconstructing existing orders on
-	// startup. It is an error to request funds > spendable balance.
-	ReReserveRedemption(amt uint64) error
+	ReserveNRedemptions(n uint64, dexRedeemCfg *dex.Asset) (uint64, error) // TODO: don't pass a *dex.Asset, just a version and maxFeeRate
 	// UnlockRedemptionReserves is used to return funds reserved for redemption
 	// when an order is canceled or otherwise completed unfilled.
 	UnlockRedemptionReserves(uint64)
+}
+
+// RefundReserver is a wallet in which refunds require a wallet to have
+// available balance to pay fees.
+type RefundReserver interface {
 	// ReserveNRefunds is used when preparing funding for an order that refunds
 	// to an account-based asset. The wallet will set aside the appropriate
 	// amount of funds so that we can refund N swaps using the fee and version
 	// configuration specified in the dex.Asset. It is an error to request funds
 	// > spendable balance.
 	ReserveNRefunds(n uint64, dexSwapCfg *dex.Asset) (uint64, error)
-	// ReReserveRefund is used when reconstructing existing orders on
-	// startup. It is an error to request funds > spendable balance.
-	ReReserveRefund(uint64) error
 	// UnlockRefundReserves is used to return funds reserved for refunds
 	// when an order was cancelled or revoked before a swap was initiated,
-	// completed successully, or after a refund was done.
+	// completed successfully, or after a refund was done.
 	UnlockRefundReserves(uint64)
 }
 
@@ -546,6 +545,15 @@ type LiveReconfigurer interface {
 	// requires a restart, the Wallet should still validate as much
 	// configuration as possible.
 	Reconfigure(ctx context.Context, cfg *WalletConfig, currentAddress string) (restartRequired bool, err error)
+}
+
+// AccountLocker is a wallet in which redemptions and refunds require a wallet
+// to have available balance to pay fees.
+type AccountLocker interface {
+	RedeemReserver
+	RefundReserver
+	// Why not a generic UnlockReserves(uint64) if we don't do e.g.
+	// UnlockNRefunds(uint32)?
 }
 
 // Balance is categorized information about a wallet's balance.
@@ -694,7 +702,10 @@ type Order struct {
 	// DEXConfig holds values specific to and provided by a particular server.
 	// Info about fee rates and swap transaction sizes is used internally to
 	// calculate the funding required to cover fees.
-	DEXConfig    *dex.Asset
+	DEXConfig *dex.Asset
+	// RedeemConfig is required in case the redeemed asset burns the same kind
+	// of funds required by the swapped asset or requires an allowance to be
+	// set. May be nil if it is unrelated to the funding asset.
 	RedeemConfig *dex.Asset
 	// Immediate should be set to true if this is for an order that is not a
 	// standing order, likely a market order or a limit order with immediate

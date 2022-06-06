@@ -796,10 +796,10 @@ func (w *assetWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, dexSwapC
 }
 
 // allowanceGasRequired estimates the gas that is required to issue an approval
-// for a token. If the dexRedeemCfg is not for a fee-family erc20 asset, no
-// error is returned and the return value will be zero.
+// for a token. If the dexRedeemCfg is nil or is not for a fee-family erc20
+// asset, no error is returned and the return value will be zero.
 func (w *assetWallet) allowanceGasRequired(dexRedeemCfg *dex.Asset) (uint64, error) {
-	if dexRedeemCfg.ID == BipID {
+	if dexRedeemCfg == nil || dexRedeemCfg.ID == BipID {
 		return 0, nil
 	}
 	redeemWallet := w.wallet(dexRedeemCfg.ID)
@@ -813,7 +813,7 @@ func (w *assetWallet) allowanceGasRequired(dexRedeemCfg *dex.Asset) (uint64, err
 	// No reason to do anything if the allowance is > the unlimited
 	// allowance approval threshold.
 	if currentAllowance.Cmp(unlimitedAllowanceReplenishThreshold) < 0 {
-		return redeemWallet.approvalGas(unlimitedAllowance, dexRedeemCfg)
+		return redeemWallet.approvalGas(unlimitedAllowance, dexRedeemCfg.Version)
 	}
 	return 0, nil
 }
@@ -962,7 +962,7 @@ type gasEstimate struct {
 	// are zero.
 	dexeth.Gases
 	// Additional fields are based on live estimates of the swap.
-	oneGas, nGas, nSwap, nRedeem, nRefund uint64
+	oneGas, nGas, nSwap, nRedeem, nRefund uint64 // nRefund unused?
 }
 
 // initGasEstimate gets the best available gas estimate for n initiations. A
@@ -977,6 +977,7 @@ func (w *assetWallet) initGasEstimate(n int, dexSwapCfg, dexRedeemCfg *dex.Asset
 	}
 
 	est.Refund = g.Refund
+	// est.nRefund = n * g.Refund // ?
 
 	est.Swap, est.nSwap, err = w.swapGas(n, dexSwapCfg)
 	if err != nil {
@@ -985,6 +986,10 @@ func (w *assetWallet) initGasEstimate(n int, dexSwapCfg, dexRedeemCfg *dex.Asset
 
 	est.oneGas = est.Swap + est.Redeem
 	est.nGas = est.nSwap + est.nRedeem
+
+	if dexRedeemCfg == nil {
+		return // redeeming asset is not ETH or an ETH token
+	}
 
 	if redeemW := w.wallet(dexRedeemCfg.ID); redeemW != nil {
 		est.Redeem, est.nRedeem, err = redeemW.redeemGas(n, dexRedeemCfg)
@@ -1058,10 +1063,10 @@ func (w *assetWallet) redeemGas(n int, nfo *dex.Asset) (oneGas, nGas uint64, err
 // the greater of the asset's registered value and a live estimate. It is an
 // error if a live estimate cannot be retrieved, which will be the case if the
 // user's eth balance is insufficient to cover tx fees for the approval.
-func (w *assetWallet) approvalGas(newGas *big.Int, cfg *dex.Asset) (uint64, error) {
-	ourGas := w.gases(cfg.Version)
+func (w *assetWallet) approvalGas(newGas *big.Int, ver uint32) (uint64, error) {
+	ourGas := w.gases(ver)
 	if ourGas == nil {
-		return 0, fmt.Errorf("no gases known for %d version %d", w.assetID, cfg.Version)
+		return 0, fmt.Errorf("no gases known for %d version %d", w.assetID, ver)
 	}
 
 	approveGas := ourGas.Approve
@@ -1556,7 +1561,7 @@ func (w *TokenWallet) maybeApproveTokenSwapContract(dexRedeemCfg *dex.Asset, red
 	if err != nil {
 		return fmt.Errorf("error getting eth balance: %w", err)
 	}
-	approveGas, err := w.approvalGas(unlimitedAllowance, dexRedeemCfg)
+	approveGas, err := w.approvalGas(unlimitedAllowance, dexRedeemCfg.Version)
 	if err != nil {
 		return fmt.Errorf("error estimating allowance gas: %w", err)
 	}
@@ -1608,7 +1613,7 @@ func (w *assetWallet) approveToken(amount *big.Int, maxFeeRate uint64, contractV
 
 // ReserveNRedemptions locks funds for redemption. It is an error if there
 // is insufficient spendable balance. Part of the AccountLocker interface.
-func (w *ETHWallet) ReserveNRedemptions(n uint64, dexRedeemCfg *dex.Asset) (uint64, error) {
+func (w *ETHWallet) ReserveNRedemptions(n uint64, dexRedeemCfg *dex.Asset) (uint64, error) { // TODO: dexSwapCfg -> maxFeeRate, version
 	g := w.gases(dexRedeemCfg.Version)
 	if g == nil {
 		return 0, fmt.Errorf("no gas table")
@@ -1677,7 +1682,7 @@ func (w *TokenWallet) ReReserveRedemption(req uint64) error {
 
 // ReserveNRefunds locks funds for doing refunds. It is an error if there
 // is insufficient spendable balance. Part of the AccountLocker interface.
-func (w *ETHWallet) ReserveNRefunds(n uint64, dexSwapCfg *dex.Asset) (uint64, error) {
+func (w *ETHWallet) ReserveNRefunds(n uint64, dexSwapCfg *dex.Asset) (uint64, error) { // TODO: dexSwapCfg -> maxFeeRate, version
 	g := w.gases(dexSwapCfg.Version)
 	if g == nil {
 		return 0, errors.New("no gas table")
@@ -1719,20 +1724,6 @@ func (w *TokenWallet) UnlockRefundReserves(reserves uint64) {
 
 func unlockRefundReserves(w *assetWallet, reserves uint64) {
 	w.unlockFunds(reserves, refundReserve)
-}
-
-// ReReserveRefund checks out an amount for doing refunds. Use ReReserveRefund
-// after initializing a new assetWallet. Part of the AccountLocker
-// interface.
-func (w *ETHWallet) ReReserveRefund(req uint64) error {
-	return w.lockFunds(req, refundReserve)
-}
-
-// ReReserveRefund checks out an amount for doing refunds. Use ReReserveRefund
-// after initializing a new assetWallet. Part of the AccountLocker
-// interface.
-func (w *TokenWallet) ReReserveRefund(req uint64) error {
-	return w.parent.lockFunds(req, refundReserve)
 }
 
 // SignMessage signs the message with the private key associated with the

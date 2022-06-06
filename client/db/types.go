@@ -244,6 +244,9 @@ type OrderMetaData struct {
 	Host string
 	// Proof is the signatures and other verification-related data for the order.
 	Proof OrderProof
+	// LotSize is the market's lot size at the time the order was placed. This
+	// is stored in case server changes lot size and we restart.
+	LotSize uint64
 	// ChangeCoin is a change coin from a match. Change coins are "daisy-chained"
 	// for matches. All funding coins go into the first match, and the change coin
 	// from the initiation transaction is used to fund the next match. The
@@ -271,20 +274,6 @@ type OrderMetaData struct {
 	ToVersion uint32
 	// Options are the options offered by the wallet and selected by the user.
 	Options map[string]string
-	// RedemptionReserves is the amount of funds reserved by the wallet to pay
-	// the transaction fees for all the possible redemptions in this order.
-	// The amount that should be locked at any point can be determined by
-	// checking the status of the order and the status of all matches related
-	// to this order, and determining how many more possible redemptions there
-	// could be.
-	RedemptionReserves uint64
-	// RedemptionRefunds is the amount of funds reserved by the wallet to pay
-	// the transaction fees for all the possible refunds in this order.
-	// The amount that should be locked at any point can be determined by
-	// checking the status of the order and the status of all matches related
-	// to this order, and determining how many more possible refunds there
-	// could be.
-	RefundReserves uint64
 	// AccelerationCoins keeps track of all the change coins generated from doing
 	// accelerations on this order.
 	AccelerationCoins []order.CoinID

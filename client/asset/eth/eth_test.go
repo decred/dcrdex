@@ -3206,7 +3206,8 @@ func testRefundReserves(t *testing.T, assetID uint32) {
 
 	w := wi.(asset.AccountLocker)
 
-	node.bal = dexeth.GweiToWei(1e9)
+	balGwei := uint64(1e9)
+	node.bal = dexeth.GweiToWei(balGwei)
 	node.refundable = true
 	node.swapVers = map[uint32]struct{}{0: {}}
 
@@ -3275,16 +3276,16 @@ func testRefundReserves(t *testing.T, assetID uint32) {
 	}
 
 	// Reserve more than available should return an error
-	err = w.ReReserveRefund(1e9 + 1)
+	_, err = w.ReserveNRefunds(balGwei/lockPerV1+1, &assetV1)
 	if err == nil {
 		t.Fatalf("expected an error but did not get")
 	}
 
-	err = w.ReReserveRefund(5e6)
+	_, err = w.ReserveNRefunds(1, &assetV1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	expLock += 5e6
+	expLock += lockPerV1
 	if feeWallet.lockedFunds.refundReserves != expLock {
 		t.Fatalf("incorrect amount locked. wanted %d, got %d", expLock, feeWallet.lockedFunds.refundReserves)
 	}
