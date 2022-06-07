@@ -230,12 +230,11 @@ func run(ctx context.Context) error {
 		var verResp rpcserver.VersionResponse
 		err = json.Unmarshal(resp.Result, &verResp)
 		if err != nil {
-			fmt.Printf("Unable to check RPC server compatibility: failed to unmarshal result: %v\n", err)
-			return nil
+			return fmt.Errorf("Unable to check RPC server compatibility: failed to unmarshal result: %v\n", err)
 		}
 
 		if !dex.SemverCompatible(requiredRPCServerVersion, *verResp.RPCServerVer) {
-			fmt.Printf("%s is not compatible with dexc RPC server: required RPC server version - %s, dexc RPC server version - %s\n",
+			return fmt.Errorf("%s is not compatible with dexc RPC server: required RPC server version - %s, dexc RPC server version - %s\n",
 				appName, requiredRPCServerVersion.String(), verResp.RPCServerVer.String())
 		}
 	}

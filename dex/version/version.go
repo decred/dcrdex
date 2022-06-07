@@ -5,7 +5,6 @@
 package version
 
 import (
-	"bytes"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -110,10 +109,10 @@ func Parse(version string) string {
 
 // NormalizeString returns the passed string stripped of all characters which
 // are not valid according to the semantic versioning guidelines for pre-release
-// and build metadata strings.  In particular they MUST only contain characters
+// and build metadata strings. In particular they MUST only contain characters
 // in semanticAlphabet.
 func NormalizeString(str string) string {
-	var result bytes.Buffer
+	var result strings.Builder
 	for _, r := range str {
 		if strings.ContainsRune(semanticAlphabet, r) {
 			result.WriteRune(r)

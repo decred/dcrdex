@@ -31,16 +31,16 @@ import (
 )
 
 const (
-	// rpcSemver is the RPC server's semantic API version.
-	// Move major up one for breaking changes. Move minor for
-	// backwards compatible features. Move patch for bug fixes.
-	// Dexcctl requiredRPCSemVer should be kept up to date with this version.
+	// rpcSemver is the RPC server's semantic API version. Move major up one for
+	// breaking changes. Move minor for backwards compatible features. Move
+	// patch for bug fixes. Dexcctl requiredRPCSemVer should be kept up to date
+	// with this version.
 	rpcSemverMajor uint32 = 0
 	rpcSemverMinor uint32 = 2
 	rpcSemverPatch uint32 = 0
-	// rpcTimeoutSeconds is the number of seconds a connection to the
-	// RPC server is allowed to stay open without authenticating before it
-	// is closed.
+
+	// rpcTimeoutSeconds is the number of seconds a connection to the RPC server
+	// is allowed to stay open without authenticating before it is closed.
 	rpcTimeoutSeconds = 10
 )
 
@@ -122,8 +122,8 @@ func writeJSON(w http.ResponseWriter, thing interface{}) {
 	writeJSONWithStatus(w, thing, http.StatusOK)
 }
 
-// writeJSONWithStatus marshals the provided interface and writes the bytes to the
-// ResponseWriter with the specified response code.
+// writeJSONWithStatus marshals the provided interface and writes the bytes to
+// the ResponseWriter with the specified response code.
 func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	b, err := json.Marshal(thing)
