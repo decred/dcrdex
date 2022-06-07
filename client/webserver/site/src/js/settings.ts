@@ -291,15 +291,6 @@ export default class SettingsPage extends BasePage {
     form.style.right = '0'
   }
 
-  /* clearCertFile cleanup certFile value and selectedCert text */
-  clearCertFile () {
-    const page = this.page
-    page.certFile.value = ''
-    page.selectedCert.textContent = this.defaultTLSText
-    Doc.hide(page.removeCert)
-    Doc.show(page.addCert)
-  }
-
   /* gets the contents of the cert file */
   async getCertFile () {
     let cert = ''
@@ -319,8 +310,6 @@ export default class SettingsPage extends BasePage {
   /* Called after successful registration to a DEX. */
   async registerDEXSuccess () {
     const page = this.page
-    page.dexAddr.value = ''
-    this.clearCertFile()
     Doc.hide(page.forms)
     await app().fetchUser()
     // Initial method of displaying added dex.

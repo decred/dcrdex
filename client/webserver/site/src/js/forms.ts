@@ -1120,6 +1120,7 @@ export class DEXAddressForm {
   refresh () {
     const page = this.page
     page.addr.value = ''
+    this.clearCertFile()
     const hidePWBox = State.passwordIsCached() || (this.pwCache && this.pwCache.pw)
     if (hidePWBox) Doc.hide(page.appPWBox, page.auth)
     else Doc.show(page.appPWBox, page.auth)
