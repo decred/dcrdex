@@ -2228,7 +2228,9 @@ class MarketList {
   /* exists will be true if the specified market exists. */
   exists (host: string, baseID: number, quoteID: number) {
     const xc = this.xcSection(host)
-    if (!xc) return false
+    // If connecting to an offline server the client is not able to get xc.marketRows.
+    // Therefore we must check for it.
+    if (!xc || !xc.marketRows) return false
     for (const mkt of xc.marketRows) {
       if (mkt.baseID === baseID && mkt.quoteID === quoteID) return true
     }
