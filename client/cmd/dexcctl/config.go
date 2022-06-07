@@ -85,6 +85,7 @@ func configure() (*config, []string, bool, error) {
 	if cfg.ShowVersion {
 		fmt.Printf("%s version %s (Go version %s %s/%s)\n", appName,
 			Version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+		fmt.Printf("%s required RPC server version: %s\n", appName, requiredRPCServerVersion.String())
 		return nil, nil, stop, nil
 	}
 

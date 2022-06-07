@@ -138,15 +138,19 @@ func handleInit(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	return createResponse(initRoute, &res, nil)
 }
 
-// handleVersion handles requests for version. It takes no arguments and returns
-// the semver.
-func handleVersion(_ *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
-	res := &versionResponse{
-		Major: rpcSemverMajor,
-		Minor: rpcSemverMinor,
-		Patch: rpcSemverPatch,
+// handleVersion handles requests for version. It returns the rpc server version
+// and dexc version.
+func handleVersion(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
+	result := &VersionResponse{
+		RPCServerVer: &dex.Semver{
+			Major: rpcSemverMajor,
+			Minor: rpcSemverMinor,
+			Patch: rpcSemverPatch,
+		},
+		DexcVersion: s.dexcVersion,
 	}
-	return createResponse(versionRoute, res.String(), nil)
+
+	return createResponse(versionRoute, result, nil)
 }
 
 // handleNewWallet handles requests for newwallet.

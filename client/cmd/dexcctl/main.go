@@ -26,6 +26,13 @@ const (
 	listCmdMessage  = "Specify -l to list available commands"
 )
 
+var (
+	// requiredRPCServerVersion is the least version of the dexc RPC server that
+	// this dexcctl package can work with. It should be updated whenever a
+	// dexcctl change requires an updated RPC server.
+	requiredRPCServerVersion = dex.Semver{Major: 0, Minor: 2, Patch: 0}
+)
+
 func main() {
 	// Create a context that is canceled when a shutdown signal is received.
 	ctx := withShutdownCancel(context.Background())
@@ -215,6 +222,21 @@ func run(ctx context.Context) error {
 		fmt.Println(str)
 	} else if strResult != "null" {
 		fmt.Println(strResult)
+	}
+
+	// If this is a version check command, go the extra mile and check for
+	// compatibility.
+	if args[0] == "version" {
+		var verResp rpcserver.VersionResponse
+		err = json.Unmarshal(resp.Result, &verResp)
+		if err != nil {
+			return fmt.Errorf("Unable to check RPC server compatibility: failed to unmarshal result: %v\n", err)
+		}
+
+		if !dex.SemverCompatible(requiredRPCServerVersion, *verResp.RPCServerVer) {
+			return fmt.Errorf("%s is not compatible with dexc RPC server: required RPC server version - %s, dexc RPC server version - %s\n",
+				appName, requiredRPCServerVersion.String(), verResp.RPCServerVer.String())
+		}
 	}
 	return nil
 }

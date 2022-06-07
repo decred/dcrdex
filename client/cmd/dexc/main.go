@@ -27,6 +27,7 @@ import (
 	"decred.org/dcrdex/client/rpcserver"
 	"decred.org/dcrdex/client/webserver"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/version"
 )
 
 func main() {
@@ -137,15 +138,37 @@ func mainCore() error {
 	}()
 
 	if cfg.RPCOn {
+		// Prepare dexc version for use with rpc server.
+		dexcMajor, dexcMinor, dexcPatch, dexcPreRel, dexcBuildMeta, err := version.ParseSemVer(Version)
+		if err != nil {
+			return fmt.Errorf("failed to parse %s version: %w", appName, err)
+		}
+
+		runtimeVer := strings.Replace(runtime.Version(), ".", "-", -1)
+		runBuildMeta := version.NormalizeString(runtimeVer)
+		build := version.NormalizeString(dexcBuildMeta)
+		if build != "" {
+			dexcBuildMeta = fmt.Sprintf("%s.%s", build, runBuildMeta)
+		}
+		dexcVersion := &rpcserver.SemVersion{
+			VersionString: Version,
+			Major:         dexcMajor,
+			Minor:         dexcMinor,
+			Patch:         dexcPatch,
+			Prerelease:    dexcPreRel,
+			BuildMetadata: dexcBuildMeta,
+		}
+
 		rpcserver.SetLogger(logMaker.Logger("RPC"))
 		rpcCfg := &rpcserver.Config{
-			Core:      clientCore,
-			Addr:      cfg.RPCAddr,
-			User:      cfg.RPCUser,
-			Pass:      cfg.RPCPass,
-			Cert:      cfg.RPCCert,
-			Key:       cfg.RPCKey,
-			CertHosts: cfg.CertHosts,
+			Core:        clientCore,
+			Addr:        cfg.RPCAddr,
+			User:        cfg.RPCUser,
+			Pass:        cfg.RPCPass,
+			Cert:        cfg.RPCCert,
+			Key:         cfg.RPCKey,
+			DexcVersion: dexcVersion,
+			CertHosts:   cfg.CertHosts,
 		}
 		rpcSrv, err := rpcserver.New(rpcCfg)
 		if err != nil {

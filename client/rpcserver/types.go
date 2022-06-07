@@ -32,16 +32,20 @@ type RawParams struct {
 	Args   []string           `json:"args"`
 }
 
-// versionResponse holds a semver version JSON object.
-type versionResponse struct {
-	Major uint32 `json:"major"`
-	Minor uint32 `json:"minor"`
-	Patch uint32 `json:"patch"`
+// VersionResponse holds dexc and dexc rpc server version.
+type VersionResponse struct {
+	RPCServerVer *dex.Semver `json:"rpcServerVersion"`
+	DexcVersion  *SemVersion `json:"dexcVersion"`
 }
 
-// String satisfies the Stringer interface.
-func (vr versionResponse) String() string {
-	return fmt.Sprintf("%d.%d.%d", vr.Major, vr.Minor, vr.Patch)
+// SemVersion holds a semver version JSON object.
+type SemVersion struct {
+	VersionString string `json:"versionString"`
+	Major         uint32 `json:"major"`
+	Minor         uint32 `json:"minor"`
+	Patch         uint32 `json:"patch"`
+	Prerelease    string `json:"prerelease,omitempty"`
+	BuildMetadata string `json:"buildMetadata,omitempty"`
 }
 
 // tradeResponse is used when responding to the trade route.

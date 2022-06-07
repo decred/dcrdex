@@ -31,16 +31,17 @@ import (
 )
 
 const (
-	// rpcTimeoutSeconds is the number of seconds a connection to the
-	// RPC server is allowed to stay open without authenticating before it
-	// is closed.
-	rpcTimeoutSeconds = 10
+	// rpcSemver is the RPC server's semantic API version. Move major up one for
+	// breaking changes. Move minor for backwards compatible features. Move
+	// patch for bug fixes. Dexcctl requiredRPCSemVer should be kept up to date
+	// with this version.
+	rpcSemverMajor uint32 = 0
+	rpcSemverMinor uint32 = 2
+	rpcSemverPatch uint32 = 0
 
-	// RPC version. Move major up one for breaking changes. Move minor for
-	// backwards compatible features. Move patch for bug fixes.
-	rpcSemverMajor = 0
-	rpcSemverMinor = 2
-	rpcSemverPatch = 0
+	// rpcTimeoutSeconds is the number of seconds a connection to the RPC server
+	// is allowed to stay open without authenticating before it is closed.
+	rpcTimeoutSeconds = 10
 )
 
 var (
@@ -79,14 +80,15 @@ type clientCore interface {
 // RPCServer is a single-client http and websocket server enabling a JSON
 // interface to the DEX client.
 type RPCServer struct {
-	core      clientCore
-	mux       *chi.Mux
-	wsServer  *websocket.Server
-	addr      string
-	tlsConfig *tls.Config
-	srv       *http.Server
-	authSHA   [32]byte
-	wg        sync.WaitGroup
+	core        clientCore
+	mux         *chi.Mux
+	wsServer    *websocket.Server
+	addr        string
+	tlsConfig   *tls.Config
+	srv         *http.Server
+	authSHA     [32]byte
+	wg          sync.WaitGroup
+	dexcVersion *SemVersion
 }
 
 // genCertPair generates a key/cert pair to the paths provided.
@@ -120,8 +122,8 @@ func writeJSON(w http.ResponseWriter, thing interface{}) {
 	writeJSONWithStatus(w, thing, http.StatusOK)
 }
 
-// writeJSONWithStatus marshals the provided interface and writes the bytes to the
-// ResponseWriter with the specified response code.
+// writeJSONWithStatus marshals the provided interface and writes the bytes to
+// the ResponseWriter with the specified response code.
 func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	b, err := json.Marshal(thing)
@@ -169,6 +171,7 @@ func (s *RPCServer) handleJSON(w http.ResponseWriter, r *http.Request) {
 type Config struct {
 	Core                        clientCore
 	Addr, User, Pass, Cert, Key string
+	DexcVersion                 *SemVersion
 	CertHosts                   []string
 }
 
@@ -217,12 +220,13 @@ func New(cfg *Config) (*RPCServer, error) {
 
 	// Make the server.
 	s := &RPCServer{
-		core:      cfg.Core,
-		mux:       mux,
-		srv:       httpServer,
-		addr:      cfg.Addr,
-		tlsConfig: tlsConfig,
-		wsServer:  websocket.New(cfg.Core, log.SubLogger("WS")),
+		core:        cfg.Core,
+		mux:         mux,
+		srv:         httpServer,
+		addr:        cfg.Addr,
+		tlsConfig:   tlsConfig,
+		dexcVersion: cfg.DexcVersion,
+		wsServer:    websocket.New(cfg.Core, log.SubLogger("WS")),
 	}
 
 	// Create authSHA to verify requests against.
