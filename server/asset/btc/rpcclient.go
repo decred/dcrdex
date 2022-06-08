@@ -31,6 +31,7 @@ const (
 	methodGetBlockStats     = "getblockstats"
 
 	errNoCompetition = dex.ErrorKind("no competition")
+	errNoFeeRate     = dex.ErrorKind("fee rate could not be estimated")
 )
 
 // RawRequester is for sending context-aware RPC requests, and has methods for
@@ -121,7 +122,7 @@ func (rc *RPCClient) EstimateSmartFee(confTarget int64, mode *btcjson.EstimateSm
 		return 0, err
 	}
 	if res.FeeRate == nil || *res.FeeRate <= 0 {
-		return 0, fmt.Errorf("fee rate couldn't be estimated")
+		return 0, errNoFeeRate
 	}
 	return uint64(math.Round(*res.FeeRate * 1e5)), nil
 }
@@ -137,7 +138,7 @@ func (rc *RPCClient) EstimateFee(confTarget int64) (uint64, error) {
 		return 0, err
 	}
 	if feeRate <= 0 {
-		return 0, fmt.Errorf("fee could not be estimated")
+		return 0, errNoFeeRate
 	}
 	return uint64(math.Round(feeRate * 1e5)), nil
 }

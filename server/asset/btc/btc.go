@@ -377,14 +377,14 @@ func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		// getindexinfo method is not currently supported by
 		// pre 0.21 versions of bitcoind, and some forks of
 		// bitcoin core (litecoin).
-		btc.log.Warnf("The getindexinfo RPC is unavailable for %s. Please ensure txindex is enabled in the node config.", btc.name)
+		btc.log.Warnf("The getindexinfo RPC is unavailable. Please ensure txindex is enabled in the node config.")
 	} else if !txindex {
 		btc.shutdown()
 		return nil, fmt.Errorf("%s transaction index is not enabled. Please enable txindex in the node config", btc.name)
 	}
 
 	if _, err = btc.estimateFee(ctx); err != nil {
-		btc.log.Warnf("%s backend started without fee estimation available: %v", btc.name, err)
+		btc.log.Warnf("Backend started without fee estimation available: %v", err)
 	}
 
 	var wg sync.WaitGroup
@@ -631,7 +631,7 @@ func (*Backend) ValidateFeeRate(contract *asset.Contract, reqFeeRate uint64) boo
 func (btc *Backend) CheckAddress(addr string) bool {
 	_, err := btc.decodeAddr(addr, btc.chainParams)
 	if err != nil {
-		btc.log.Errorf("CheckAddress error for %s %s: %v", btc.name, addr, err)
+		btc.log.Errorf("CheckAddress for %s failed: %v", addr, err)
 	}
 	return err == nil
 }
@@ -1215,9 +1215,9 @@ func (btc *Backend) estimateFee(ctx context.Context) (satsPerB uint64, err error
 	}
 	if err == nil && satsPerB > 0 {
 		return satsPerB, nil
+	} else if err != nil && !errors.Is(err, errNoFeeRate) {
+		btc.log.Debugf("Estimate fee failure: %v", err)
 	}
-
-	btc.log.Debugf("Fee estimate unavailable for %s. Using median fee.", btc.name)
 
 	tip := btc.blockCache.tipHash()
 
@@ -1226,7 +1226,6 @@ func (btc *Backend) estimateFee(ctx context.Context) (satsPerB uint64, err error
 
 	// If the current block hasn't changed, no need to recalc.
 	if btc.feeCache.hash == tip {
-		// btc.log.Tracef("Using cached %s median fee rate", btc.name)
 		return btc.feeCache.fee, nil
 	}
 
@@ -1238,7 +1237,8 @@ func (btc *Backend) estimateFee(ctx context.Context) (satsPerB uint64, err error
 	}
 	if err != nil {
 		if errors.Is(err, errNoCompetition) {
-			btc.log.Debugf("Blocks are too empty to calculate %s median fees. Using no-competition rate.", btc.name)
+			btc.log.Debugf("Blocks are too empty to calculate median fees. "+
+				"Using no-competition rate (%d).", btc.noCompetitionRate)
 			btc.feeCache.fee = btc.noCompetitionRate
 			btc.feeCache.hash = tip
 			return btc.noCompetitionRate, nil
@@ -1246,8 +1246,8 @@ func (btc *Backend) estimateFee(ctx context.Context) (satsPerB uint64, err error
 		return 0, err
 	}
 	if satsPerB < btc.noCompetitionRate {
-		btc.log.Tracef("Calculated %s median fees %d are lower than the no-competition rate %d. Using the latter.",
-			btc.name, satsPerB, btc.noCompetitionRate)
+		btc.log.Debugf("Calculated median fees %d are lower than the no-competition rate %d. Using the latter.",
+			satsPerB, btc.noCompetitionRate)
 		satsPerB = btc.noCompetitionRate
 	}
 	btc.feeCache.fee = satsPerB
