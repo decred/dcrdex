@@ -9,8 +9,13 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"os/user"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"decred.org/dcrdex/dex/config"
 
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/decred/dcrd/chaincfg/chainhash" // just for the array type, not its methods
@@ -20,16 +25,38 @@ import (
 // TestOnlineDeserializeBlock attempts to deserialize every testnet4 LTC block
 // from 1000 blocks prior to mweb to the chain tip.
 func TestOnlineDeserializeBlock(t *testing.T) {
+	cfg := struct {
+		RPCUser string `ini:"rpcuser"`
+		RPCPass string `ini:"rpcpassword"`
+	}{}
+	usr, _ := user.Current()
+	if err := config.ParseInto(filepath.Join(usr.HomeDir, ".litecoin", "litecoin.conf"), &cfg); err != nil {
+		t.Fatalf("config.ParseInto error: %v", err)
+	}
 	client, err := rpcclient.New(&rpcclient.ConnConfig{
 		HTTPPostMode: true,
 		DisableTLS:   true,
-		Host:         "127.0.0.1:19332", // testnet4
-		User:         "user",            // set me
-		Pass:         "pass",            // set me
+		Host:         "127.0.0.1:19332", // testnet4, mainnet is 9332
+		User:         cfg.RPCUser,
+		Pass:         cfg.RPCPass,
 	}, nil)
 	if err != nil {
 		t.Fatalf("error creating RPC client: %v", err)
 	}
+
+	msg, err := client.RawRequest(context.Background(), "getblockchaininfo", nil)
+	if err != nil {
+		t.Fatalf("getblockchaininfo: %v", err)
+	}
+	gbci := &struct {
+		Chain string `json:"chain"`
+	}{}
+	err = json.Unmarshal(msg, &gbci)
+	if err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	isTestNet := gbci.Chain == "test"
+	t.Log("Network:", gbci.Chain)
 
 	makeParams := func(args ...interface{}) []json.RawMessage {
 		params := make([]json.RawMessage, 0, len(args))
@@ -73,7 +100,11 @@ func TestOnlineDeserializeBlock(t *testing.T) {
 
 	// start 1000 blocks prior to mweb testnet blocks
 	// 2215586 for mainnet, 2214584 for testnet4
-	for iBlk := int64(2214584); ; iBlk++ {
+	var startBlk, numBlocks int64 = 2214584, 2000
+	if isTestNet {
+		numBlocks = 12000 // testnet blocks are empty and fast
+	}
+	for iBlk := startBlk; iBlk <= startBlk+numBlocks; iBlk++ {
 		hash, err := client.GetBlockHash(context.Background(), iBlk)
 		if err != nil {
 			if strings.Contains(err.Error(), "height out of range") {
@@ -87,7 +118,7 @@ func TestOnlineDeserializeBlock(t *testing.T) {
 			t.Fatalf("Unmarshal (%d): %v", iBlk, err)
 		}
 		if iBlk%500 == 0 {
-			t.Log(iBlk)
+			fmt.Println(iBlk)
 		}
 		gbv := getBlkVerbose(hash)
 		if len(blk.Transactions) != len(gbv.Tx) {
