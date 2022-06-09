@@ -4,7 +4,10 @@
 package main
 
 import (
+	"fmt"
 	"sync"
+
+	"decred.org/dcrdex/dex/calc"
 )
 
 // runCompound runs the 'compound' program, consisting of 2 (5/3) unmetered
@@ -36,18 +39,24 @@ func runCompound() {
 // runHeavy runs the 'heavy' program, consisting of 2 (12/6) metered
 // sideStackers, 2 (8/4) unmetered sideStackers, and a 5-order sniper.
 func runHeavy() {
-	// Gotta get some major funding to the beta wallets. We'll need something
-	// like 15000 DCR and 150 BTC in the beta nodes.
-	var btcPer uint64 = 150e8 / 10 / 5
-	var dcrPer uint64 = 15000e8 / 10 / 5
+	// Gotta get some major funding to the beta wallets.
+	var base uint64 = 100 * lotSize
+	var quote uint64 = calc.BaseToQuote(uint64(defaultMidGap*rateEncFactor), base)
 	log.Infof("loading the beta node wallets")
 	for i := 0; i < 10; i++ {
 		for j := 0; j < 5; j++ {
-			<-harnessCtl(btc, "./alpha", "sendtoaddress", betaAddrBTC, valString(btcPer))
-			<-harnessCtl(dcr, "./alpha", "sendtoaddress", betaAddrDCR, valString(dcrPer))
+			if err := send(baseSymbol, alpha, betaAddrBase, quote); err != nil {
+				panic(fmt.Errorf("unable to send funds to quote asset: %v", err))
+			}
+			if err := send(quoteSymbol, alpha, betaAddrQuote, base); err != nil {
+				panic(fmt.Errorf("unable to send funds to base asset: %v", err))
+			}
 		}
-		<-mineAlpha(btc)
-		<-mineAlpha(dcr)
+		<-mine(quoteSymbol, alpha)
+		<-mine(baseSymbol, alpha)
+		if ctx.Err() != nil {
+			return
+		}
 	}
 
 	go blockEvery2()

@@ -4,10 +4,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
+	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -22,8 +25,7 @@ import (
 // to runTrader will get its own *Mantle, which embed *core.Core and provides
 // some additional utilities.
 type Trader interface {
-	// SetupWallets should create the Trader's wallets. It is an error if a
-	// Decred wallet is not created by SetupWallets.
+	// SetupWallets creates the Trader's wallets.
 	SetupWallets(*Mantle)
 	// HandleNotification is a receiver for core.Notifications. The Trader will
 	// use the provided *Mantle to perform any requisite actions in response to
@@ -36,7 +38,7 @@ type Trader interface {
 // runTrader is the LoadBot workhorse. Creates a new mantle and runs the Trader.
 // runTrader will block until the ctx is canceled.
 func runTrader(t Trader, name string) {
-	m, err := NewMantle(name)
+	m, err := newMantle(name)
 	if err != nil {
 		log.Errorf("failed to create new Mantle: %v", err)
 		return
@@ -47,13 +49,25 @@ func runTrader(t Trader, name string) {
 	if ctx.Err() != nil {
 		return
 	}
+	cert := filepath.Join(dextestDir, "dcrdex", "rpc.cert")
+	exchange, err := m.GetDEXConfig(hostAddr, cert)
+	if err != nil {
+		m.fatalError("unable to get dex config: %v", err)
+		return
+	}
+	feeAsset := exchange.RegFees[unbip(regAsset)]
+	if feeAsset == nil {
+		m.fatalError("dex does not support asset %v for registration", unbip(regAsset))
+		return
+	}
+	fee := feeAsset.Amt
 
 	_, err = m.Register(&core.RegisterForm{
 		Addr:    hostAddr,
 		AppPass: pass,
-		Fee:     defaultRegFee,
-		Asset:   &defaultRegAsset,
-		Cert:    filepath.Join(dextestDir, "dcrdex", "rpc.cert"),
+		Fee:     fee,
+		Asset:   &regAsset,
+		Cert:    cert,
 	})
 	if err != nil {
 		m.fatalError("registration error: %v", err)
@@ -75,7 +89,7 @@ out:
 					// Even if we're not going to use it, we need to subscribe
 					// to a book feed and keep the channel empty, so that we
 					// can keep receiving book feed notifications.
-					bookFeed, err := m.SyncBook(hostAddr, dcrID, btcID)
+					bookFeed, err := m.SyncBook(hostAddr, baseID, quoteID)
 					if err != nil {
 						m.fatalError("SyncBook error: %v", err)
 						return
@@ -96,7 +110,7 @@ out:
 				}
 			case *core.EpochNotification:
 				m.log.Debugf("Epoch note received: %s", mustJSON(note))
-				if n.MarketID == dcrBtcMarket {
+				if n.MarketID == market {
 					m.replenishBalances()
 				}
 			case *core.MatchNote:
@@ -126,10 +140,15 @@ type Mantle struct {
 	wallets map[uint32]*botWallet
 }
 
-// NewMantle is a constructor for a *Mantle. Each Mantle has its own core. The
+// newMantle is a constructor for a *Mantle. Each Mantle has its own core. The
 // embedded Core is initialized, but not registered.
-func NewMantle(name string) (*Mantle, error) {
-	dbPath := filepath.Join(botDir, "mantle_"+name+".db")
+func newMantle(name string) (*Mantle, error) {
+	coreDir := filepath.Join(botDir, "mantle_"+name)
+	err := os.MkdirAll(coreDir, 0700)
+	if err != nil {
+		return nil, fmt.Errorf("error creating core directory: %v", err)
+	}
+	dbPath := filepath.Join(coreDir, "core.db")
 	c, err := core.New(&core.Config{
 		DBPath: dbPath,
 		Net:    dex.Simnet,
@@ -165,7 +184,7 @@ func (m *Mantle) fatalError(s string, a ...interface{}) {
 	quit()
 }
 
-// order places an order on the dcr_btc market.
+// order places an order on the market.
 func (m *Mantle) order(sell bool, qty, rate uint64) error {
 	_, err := m.Trade(pass, coreLimitOrder(sell, qty, rate))
 	if err != nil {
@@ -192,7 +211,6 @@ type orderReq struct {
 // order is placed at now + dur - (dur / n). This is a convenience so that the
 // caller can target n orders per epoch with a dur = mkt.EpochDuration, and
 // avoid the simultaneous order at the beginning of the next epoch.
-// order places an order on the dcr_btc market.
 func (m *Mantle) orderMetered(ords []*orderReq, dur time.Duration) {
 	if len(ords) == 0 {
 		return
@@ -231,7 +249,7 @@ func (m *Mantle) orderMetered(ords []*orderReq, dur time.Duration) {
 	}()
 }
 
-// order places an order on the dcr_btc market.
+// marketOrder places an order on the market.
 func (m *Mantle) marketOrder(sell bool, qty uint64) {
 	mo := coreLimitOrder(sell, qty, 0)
 	mo.IsLimit = false
@@ -247,9 +265,9 @@ func (m *Mantle) marketOrder(sell bool, qty uint64) {
 	atomic.AddUint32(&orderCounter, 1)
 }
 
-// book gets the dcr_btc book, or kills LoadBot on error.
+// book gets the book, or kills LoadBot on error.
 func (m *Mantle) book() *core.OrderBook {
-	book, err := m.Book(hostAddr, dcrID, btcID)
+	book, err := m.Book(hostAddr, baseID, quoteID)
 	if err != nil {
 		m.fatalError("sideStacker error getting order book: %v", err)
 		return &core.OrderBook{}
@@ -257,10 +275,10 @@ func (m *Mantle) book() *core.OrderBook {
 	return book
 }
 
-// truncatedMidGap is the dcr_btc mid-gap value truncated to the next lowest
+// truncatedMidGap is the market mid-gap value truncated to the next lowest
 // multiple of BTC rate-step.
 func (m *Mantle) truncatedMidGap() uint64 {
-	midGap := midGap(m.book(), rateStep)
+	midGap := midGap(m.book())
 	return truncate(int64(midGap), int64(rateStep))
 }
 
@@ -269,15 +287,74 @@ func (m *Mantle) truncatedMidGap() uint64 {
 func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, numCoins int) {
 	// Generate a name for this wallet.
 	name := randomToken()
-	cmdOut := <-harnessCtl(symbol, "./new-wallet", node, name)
-	if cmdOut.err != nil {
-		m.fatalError("%s new-wallet error: %v", symbol, cmdOut.err)
-		return
+	switch symbol {
+	case eth:
+		// Nothing to do here for internal wallets.
+	case dcr:
+		cmdOut := <-harnessCtl(ctx, symbol, fmt.Sprintf("./%s", node), "createnewaccount", name)
+		if cmdOut.err != nil {
+			m.fatalError("%s create account error: %v", symbol, cmdOut.err)
+			return
+		}
+		// Even though the harnessCtl is synchronous, I've still observed some
+		// issues with trying to create the wallet immediately.
+		<-time.After(time.Second)
+	case ltc, bch, btc:
+		cmdOut := <-harnessCtl(ctx, symbol, "./new-wallet", node, name)
+		if cmdOut.err != nil {
+			m.fatalError("%s create account error: %v", symbol, cmdOut.err)
+			return
+		}
+		<-time.After(time.Second)
+	case doge, zec:
+		// Some coins require a totally new node. Create it and monitor
+		// it. Shut it down with the stop function before exiting.
+		addrs, err := findOpenAddrs(2)
+		if err != nil {
+			m.fatalError("unable to find open ports: %v", err)
+			return
+		}
+		addrPort := addrs[0].String()
+		_, rpcPort, err := net.SplitHostPort(addrPort)
+		if err != nil {
+			m.fatalError("unable to split addr and port: %v", err)
+			return
+		}
+		addrPort = addrs[1].String()
+		_, networkPort, err := net.SplitHostPort(addrPort)
+		if err != nil {
+			m.fatalError("unable to split addr and port: %v", err)
+			return
+		}
+
+		// NOTE: The exec package seems to listen for a SIGINT and call
+		// cmd.Process.Kill() when it happens. Because of this it seems
+		// zec will error when we run the stop-wallet script because the
+		// node already shut down when killing with ctrl-c. doge however
+		// does not respect the kill command and still needs the wallet
+		// to be stopped here. So, it is probably fine to ignore the
+		// error returned from stop-wallet.
+		stopFn := func(ctx context.Context) {
+			<-harnessCtl(ctx, symbol, "./stop-wallet", rpcPort)
+		}
+		if err = harnessProcessCtl(symbol, stopFn, "./start-wallet", name, rpcPort, networkPort); err != nil {
+			m.fatalError("%s create account error: %v", symbol, err)
+			return
+		}
+		<-time.After(time.Second * 3)
+		if symbol == zec {
+			<-time.After(time.Second * 10)
+		}
+		// Connect the new node to the alpha node.
+		cmdOut := <-harnessCtl(ctx, symbol, "./connect-alpha", rpcPort)
+		if cmdOut.err != nil {
+			m.fatalError("%s create account error: %v", symbol, cmdOut.err)
+			return
+		}
+		<-time.After(time.Second)
+	default:
+		m.fatalError("createWallet: symbol %s unknown", symbol)
 	}
-	m.log.Infof("created wallet %s:%s on node %s", symbol, name, node)
-	// Even though the harnessCtl is synchronous, I've still observed some
-	// issues with trying to create the wallet immediately.
-	<-time.After(time.Second)
 
 	var walletPass []byte
 	if symbol == dcr {
@@ -290,6 +367,7 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 		m.fatalError("Mantle %s failed to create wallet: %v", m.name, err)
 		return
 	}
+	m.log.Infof("created wallet %s:%s on node %s", symbol, name, node)
 	coreWallet := m.WalletState(w.assetID)
 	if coreWallet == nil {
 		m.fatalError("Failed to retrieve WalletState for newly created %s wallet, node %s", symbol, node)
@@ -300,12 +378,35 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 		return
 	}
 
-	chunk := maxFunds/uint64(numCoins) + 1
-	for i := 0; i < numCoins; i++ {
-		<-harnessCtl(symbol, fmt.Sprintf("./%s", node), "sendtoaddress", coreWallet.Address, valString(chunk))
+	if numCoins != 0 {
+		chunk := (maxFunds + minFunds) / 2 / uint64(numCoins)
+		for i := 0; i < numCoins; i++ {
+			if err = send(symbol, node, coreWallet.Address, chunk); err != nil {
+				m.fatalError(err.Error())
+				return
+			}
+		}
 	}
-	<-harnessCtl(symbol, fmt.Sprintf("./mine-%s", node), "1")
-	time.Sleep(time.Second)
+	<-harnessCtl(ctx, symbol, fmt.Sprintf("./mine-%s", node), "1")
+
+	// Wallet syncing time. If not synced within five seconds trading will fail.
+	time.Sleep(time.Second * 5)
+}
+
+func send(symbol, node, addr string, val uint64) error {
+	var res *harnessResult
+	switch symbol {
+	case btc, dcr, ltc, doge, bch, zec:
+		res = <-harnessCtl(ctx, symbol, fmt.Sprintf("./%s", node), "sendtoaddress", addr, valString(val, symbol))
+	case eth:
+		// eth values are always handled as gwei, so multiply by 1e9
+		// here to convert to wei.
+		res = <-harnessCtl(ctx, symbol, fmt.Sprintf("./%s", node), "attach", fmt.Sprintf("--exec personal.sendTransaction({from:eth.accounts[1],to:\"%s\",gasPrice:200e9,value:%de9},\"%s\")", addr, val, pass))
+	default:
+		return fmt.Errorf("send unknown symbol %q", symbol)
+	}
+	return res.err
+
 }
 
 // replenishBalances will run replenishBalance for all wallets.
@@ -327,23 +428,24 @@ func (m *Mantle) replenishBalance(w *botWallet) {
 	}
 
 	m.log.Debugf("Balance note received for %s (minFunds = %s, maxFunds = %s): %s",
-		w.symbol, valString(w.minFunds), valString(w.maxFunds), mustJSON(bal))
+		w.symbol, valString(w.minFunds, w.symbol), valString(w.maxFunds, w.symbol), mustJSON(bal))
 
-	effectiveMax := w.maxFunds + (w.maxFunds - w.minFunds)
+	// If over or under max, make the average of the two.
+	wantBal := (w.maxFunds + w.minFunds) / 2
 
 	if bal.Available < w.minFunds {
-		chunk := (w.maxFunds - bal.Available) / uint64(w.numCoins)
+		chunk := (wantBal - bal.Available) / uint64(w.numCoins)
 		for i := 0; i < w.numCoins; i++ {
-			m.log.Debugf("Requesting %s from %s alpha node", valString(chunk), w.symbol)
-			cmdOut := <-harnessCtl(w.symbol, "./alpha", "sendtoaddress", w.address, valString(chunk))
-			if cmdOut.err != nil {
-				m.fatalError("error refreshing balance for %s: %v", w.symbol, cmdOut.err)
+			m.log.Debugf("Requesting %s from %s alpha node", valString(chunk, w.symbol), w.symbol)
+			if err = send(w.symbol, alpha, w.address, chunk); err != nil {
+				m.fatalError("error refreshing balance for %s: %v", w.symbol, err)
+				return
 			}
 		}
-	} else if bal.Available > effectiveMax {
+	} else if bal.Available > w.maxFunds {
 		// Send some back to the alpha address.
-		amt := bal.Available - w.maxFunds
-		m.log.Debugf("Sending %s back to %s alpha node", valString(amt), w.symbol)
+		amt := bal.Available - wantBal
+		m.log.Debugf("Sending %s back to %s alpha node", valString(amt, w.symbol), w.symbol)
 		_, err := m.Withdraw(pass, w.assetID, amt, returnAddress(w.symbol, alpha))
 		if err != nil {
 			m.fatalError("failed to withdraw funds to alpha: %v", err)
@@ -361,25 +463,21 @@ func mustJSON(thing interface{}) string {
 	return string(s)
 }
 
-// Convert the conventional units value to atoms/sats.
-func encodeRate(v float64) uint64 {
-	return uint64(math.Round(v * conventionalConversionFactor))
-}
-
 // valString returns a string representation of the value in conventional
 // units.
-func valString(v uint64) string {
-	return fmt.Sprintf("%.8f", float64(v)/1e8)
+func valString(v uint64, assetSymbol string) string {
+	precisionStr := fmt.Sprintf("%%.%vf", math.Log10(float64(conversionFactors[assetSymbol])))
+	return fmt.Sprintf(precisionStr, float64(v)/float64(conversionFactors[assetSymbol]))
 }
 
-// coreOrder creates a *core.Order for dcr_btc.
+// coreOrder creates a *core.Order.
 func coreLimitOrder(sell bool, qty, rate uint64) *core.TradeForm {
 	return &core.TradeForm{
 		Host:    hostAddr,
 		IsLimit: true,
 		Sell:    sell,
-		Base:    dcrID,
-		Quote:   btcID,
+		Base:    baseID,
+		Quote:   quoteID,
 		Qty:     qty,
 		Rate:    rate,
 		TifNow:  false,
@@ -387,19 +485,22 @@ func coreLimitOrder(sell bool, qty, rate uint64) *core.TradeForm {
 }
 
 // midGap parses the provided order book for the mid-gap price. If the book
-// is empty, a default value of rateStep * midGapMultiplier is returned instead.
-func midGap(book *core.OrderBook, rateStep uint64) uint64 {
+// is empty, a default value is returned instead.
+func midGap(book *core.OrderBook) uint64 {
+	if keepMidGap {
+		return uint64(defaultMidGap * rateEncFactor)
+	}
 	if len(book.Sells) > 0 {
 		if len(book.Buys) > 0 {
-			return encodeRate((book.Buys[0].Rate + book.Sells[0].Rate) / 2)
+			return (book.Buys[0].MsgRate + book.Sells[0].MsgRate) / 2
 		}
-		return encodeRate(book.Sells[0].Rate)
+		return book.Sells[0].MsgRate
 	} else {
 		if len(book.Buys) > 0 {
-			return encodeRate(book.Buys[0].Rate)
+			return book.Buys[0].MsgRate
 		}
 	}
-	return truncate(defaultBtcPerDcr*1e8, int64(rateStep))
+	return uint64(defaultMidGap * rateEncFactor)
 }
 
 // truncate rounds the provided v down to an integer-multiple of mod.
@@ -469,6 +570,61 @@ func newBotWallet(symbol, node, name string, pass []byte, minFunds, maxFunds uin
 		form = &core.WalletForm{
 			Type:    "bitcoindRPC",
 			AssetID: btcID,
+			Config: map[string]string{
+				"walletname":  name,
+				"rpcuser":     "user",
+				"rpcpassword": "pass",
+				"rpcport":     rpcAddr(symbol, node),
+			},
+		}
+	case ltc:
+		form = &core.WalletForm{
+			Type:    "litecoindRPC",
+			AssetID: ltcID,
+			Config: map[string]string{
+				"walletname":  name,
+				"rpcuser":     "user",
+				"rpcpassword": "pass",
+				"rpcport":     rpcAddr(symbol, node),
+			},
+		}
+	case bch:
+		form = &core.WalletForm{
+			Type:    "bitcoindRPC",
+			AssetID: bchID,
+			Config: map[string]string{
+				"walletname":  name,
+				"rpcuser":     "user",
+				"rpcpassword": "pass",
+				"rpcport":     rpcAddr(symbol, node),
+			},
+		}
+	case zec:
+		form = &core.WalletForm{
+			Type:    "zcashdRPC",
+			AssetID: zecID,
+			Config: map[string]string{
+				"walletname":  name,
+				"rpcuser":     "user",
+				"rpcpassword": "pass",
+				"rpcport":     rpcAddr(symbol, node),
+			},
+		}
+	case doge:
+		form = &core.WalletForm{
+			Type:    "dogecoindRPC",
+			AssetID: dogeID,
+			Config: map[string]string{
+				"walletname":  name,
+				"rpcuser":     "user",
+				"rpcpassword": "pass",
+				"rpcport":     rpcAddr(symbol, node),
+			},
+		}
+	case eth:
+		form = &core.WalletForm{
+			Type:    "geth",
+			AssetID: ethID,
 			Config: map[string]string{
 				"walletname":  name,
 				"rpcuser":     "user",

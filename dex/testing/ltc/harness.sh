@@ -23,5 +23,7 @@ export RESTART_AFTER_ENCRYPT="1"
 export EXTRA_ARGS="-blockfilterindex=1 -peerblockfilters=1 -rpcserialversion=2"
 export CREATE_DEFAULT_WALLET="1"
 export NEEDS_MWEB_PEGIN_ACTIVATION="1"
+# $1 is the node to create with. $2 is the wallet name
+export NEW_WALLET_CMD="./\$1 createwallet \$2"
 # Run the harness
 ../btc/base-harness.sh

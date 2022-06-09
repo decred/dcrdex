@@ -76,14 +76,14 @@ func (s *sideStacker) SetupWallets(m *Mantle) {
 	defer setupWalletsMtx.Unlock()
 	maxActiveOrders := 2 * (s.numStanding + s.ordsPerEpoch)
 	baseCoins, quoteCoins, minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := walletConfig(maxOrderLots, maxActiveOrders, s.seller)
-	m.createWallet(dcr, s.node, minBaseQty, maxBaseQty, baseCoins)
-	m.createWallet(btc, s.node, minQuoteQty, maxQuoteQty, quoteCoins)
+	m.createWallet(baseSymbol, s.node, minBaseQty, maxBaseQty, baseCoins)
+	m.createWallet(quoteSymbol, s.node, minQuoteQty, maxQuoteQty, quoteCoins)
 	m.log.Infof("Side Stacker has been initialized with %d target standing orders, %d orders "+
-		"per epoch, %s to %s dcr balance, and %s to %s btc balance, %d initial dcr coins, %d initial btc coins",
-		s.numStanding, s.ordsPerEpoch, valString(minBaseQty), valString(maxBaseQty),
-		valString(minQuoteQty), valString(maxQuoteQty), baseCoins, quoteCoins)
-	<-mineAlpha(btc)
-	<-mineAlpha(dcr)
+		"per epoch, %s to %s %s balance, and %s to %s %s balance, %d initial %s coins, %d initial %s coins",
+		s.numStanding, s.ordsPerEpoch, valString(minBaseQty, baseSymbol), valString(maxBaseQty, baseSymbol), baseSymbol,
+		valString(minQuoteQty, quoteSymbol), valString(maxQuoteQty, quoteSymbol), quoteSymbol, baseCoins, baseSymbol, quoteCoins, quoteSymbol)
+	<-mine(baseSymbol, alpha)
+	<-mine(quoteSymbol, alpha)
 }
 
 // HandleNotification is part of the Trader interface.
@@ -91,7 +91,7 @@ func (s *sideStacker) HandleNotification(m *Mantle, note core.Notification) {
 	switch n := note.(type) {
 	case *core.EpochNotification:
 		m.log.Debugf("Epoch note received: %s", mustJSON(note))
-		if n.MarketID == dcrBtcMarket {
+		if n.MarketID == market {
 			// delay the orders, since the epoch note comes before the order
 			// book updates associated with the last epoch. Ideally, we want a
 			// notification telling us when we have received all order book
@@ -117,8 +117,7 @@ func (s *sideStacker) HandleNotification(m *Mantle, note core.Notification) {
 
 func (s *sideStacker) stack(m *Mantle) {
 	book := m.book()
-	rateStep := rateStep
-	midGap := midGap(book, rateStep)
+	midGap := midGap(book)
 	rateTweak := func() int64 {
 		return int64(rand.Float64() * stackerSpread * float64(midGap))
 	}
@@ -195,7 +194,7 @@ func (s *sideStacker) cancellableOrders(m *Mantle) (
 
 	xcs := m.Exchanges()
 	xc := xcs[hostAddr]
-	mkt := xc.Markets[dcrBtcMarket]
+	mkt := xc.Markets[market]
 	for _, ord := range mkt.Orders {
 		cancellable := ord.Status == order.OrderStatusBooked && !ord.Cancelling
 		if ord.Status < order.OrderStatusExecuted && cancellable {
@@ -213,20 +212,44 @@ func (s *sideStacker) cancellableOrders(m *Mantle) (
 
 func walletConfig(maxLots, maxActiveOrds int, sell bool) (baseCoins, quoteCoins int, minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty uint64) {
 	numCoins := maxActiveOrds
-	maxBaseQty = uint64(maxLots) * uint64(numCoins) * lotSize
-	defaultRate := truncate(defaultBtcPerDcr*1e8, int64(rateStep))
-	maxQuoteQty = calc.BaseToQuote(defaultRate, maxBaseQty)
-	minBaseQty = 2e8 // At least have to cover the registration fee.
-	if sell {
-		minBaseQty = maxBaseQty / 2
-		baseCoins = numCoins
-	} else {
-		// Convert the quantities to the quote asset
-		defaultRate := truncate(defaultBtcPerDcr*1e8, int64(rateStep))
-		maxQuoteQty := calc.BaseToQuote(defaultRate, maxBaseQty)
-		minQuoteQty = maxQuoteQty / 2
-		baseCoins = 1 // Gotta pay fees.
-		quoteCoins = numCoins
+	maxOrders := uint64(maxLots) * uint64(maxActiveOrds)
+	minBaseQty = maxOrders * lotSize
+	minQuoteQty = calc.BaseToQuote(uint64(defaultMidGap*rateEncFactor), minBaseQty)
+	// Ensure enough for registration fees.
+	if minBaseQty < 2e8 {
+		minBaseQty = 2e8
 	}
+	if minQuoteQty < 2e8 {
+		minQuoteQty = 2e8
+	}
+	quoteCoins, baseCoins = 1, 1
+	if sell {
+		baseCoins = numCoins
+		// eth fee estimation calls for more reserves. Refunds and
+		// redeems also need reserves.
+		if quoteSymbol == eth {
+			quoteCoins = numCoins
+			add := ethRedeemFee * maxOrders
+			minQuoteQty += add
+		}
+		if baseSymbol == eth {
+			add := ethInitFee * maxOrders
+			minBaseQty += add
+		}
+	} else {
+		quoteCoins = numCoins
+		// eth fee estimation calls for more reserves. Refunds and
+		// redeems also need reserves.
+		if baseSymbol == eth {
+			baseCoins = numCoins
+			add := ethRedeemFee * maxOrders
+			minBaseQty += add
+		}
+		if quoteSymbol == eth {
+			add := ethInitFee * maxOrders
+			minQuoteQty += add
+		}
+	}
+	maxBaseQty, maxQuoteQty = 2*minBaseQty, 2*minQuoteQty
 	return
 }

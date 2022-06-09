@@ -219,12 +219,6 @@ tmux kill-session
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/quit"
 
-cat > "${NODES_ROOT}/harness-ctl/new-wallet" <<EOF
-#!/usr/bin/env bash
-./\$1 createnewaccount \$2
-EOF
-chmod +x "${NODES_ROOT}/harness-ctl/new-wallet"
-
 echo "Writing node config files"
 ################################################################################
 # Configuration Files
