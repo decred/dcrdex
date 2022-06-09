@@ -7057,11 +7057,13 @@ func (c *Core) WalletRestorationInfo(pw []byte, assetID uint32) ([]*asset.Wallet
 	if err != nil {
 		return nil, fmt.Errorf("WalletRestorationInfo password error: %w", err)
 	}
+	defer crypter.Close()
 
 	seed, _, err := c.assetSeedAndPass(assetID, crypter)
 	if err != nil {
 		return nil, fmt.Errorf("assetSeedAndPass error: %w", err)
 	}
+	defer encode.ClearBytes(seed)
 
 	wallet, found := c.wallet(assetID)
 	if !found {

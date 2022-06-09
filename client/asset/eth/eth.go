@@ -120,11 +120,13 @@ var (
 
 	findRedemptionCoinID = []byte("FindRedemption Coin")
 
-	seedDerivationPath = []uint32{hdkeychain.HardenedKeyStart + 44,
-		hdkeychain.HardenedKeyStart + 60,
-		hdkeychain.HardenedKeyStart,
-		0,
-		0}
+	seedDerivationPath = []uint32{
+		hdkeychain.HardenedKeyStart + 44, // purpose 44' for HD wallets
+		hdkeychain.HardenedKeyStart + 60, // eth coin type 60'
+		hdkeychain.HardenedKeyStart,      // account 0'
+		0,                                // branch 0
+		0,                                // index 0
+	}
 )
 
 // WalletConfig are wallet-level configuration settings.
@@ -342,11 +344,10 @@ func CreateWallet(createWalletParams *asset.CreateWalletParams) error {
 	}
 
 	extKey, err := keygen.GenDeepChild(createWalletParams.Seed, seedDerivationPath)
-	defer extKey.Zero()
 	if err != nil {
 		return err
 	}
-
+	defer extKey.Zero()
 	privateKey, err := extKey.SerializedPrivKey()
 	defer encode.ClearBytes(privateKey)
 	if err != nil {
@@ -2041,10 +2042,10 @@ func (w *TokenWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
 // various external wallets.
 func (w *assetWallet) RestorationInfo(seed []byte) ([]*asset.WalletRestoration, error) {
 	extKey, err := keygen.GenDeepChild(seed, seedDerivationPath)
-	defer extKey.Zero()
 	if err != nil {
 		return nil, err
 	}
+	defer extKey.Zero()
 	privateKey, err := extKey.SerializedPrivKey()
 	defer encode.ClearBytes(privateKey)
 	if err != nil {
@@ -2053,9 +2054,14 @@ func (w *assetWallet) RestorationInfo(seed []byte) ([]*asset.WalletRestoration, 
 
 	return []*asset.WalletRestoration{
 		&asset.WalletRestoration{
-			Target:       "MetaMask",
-			Seed:         hex.EncodeToString(privateKey),
-			Instructions: "1. Open the settings menu\n2. Select \"Import Account\"\n3. Make sure \"Private Key\" is selected and paste the seed into the box",
+			Target: "MetaMask",
+			Seed:   hex.EncodeToString(privateKey),
+			Instructions: "Accounts can be imported by private key only if MetaMask has already be initialized. " +
+				"If this is your first time installing MetaMask, create a new wallet and secret recovery phrase. " +
+				"Then, to import your DEX account into MetaMask, follow the steps below:\n" +
+				`1. Open the settings menu
+				 2. Select "Import Account"
+				 3. Make sure "Private Key" is selected, and paste the private key above into the box`,
 		},
 	}, nil
 }

@@ -461,6 +461,7 @@ func (s *WebServer) apiRestoreWalletInfo(w http.ResponseWriter, r *http.Request)
 		AssetID uint32
 		Pass    encode.PassBytes
 	}{}
+	defer form.Pass.Clear()
 	if !readPost(w, r, form) {
 		return
 	}
@@ -491,7 +492,6 @@ func (s *WebServer) apiAccountDisable(w http.ResponseWriter, r *http.Request) {
 
 	// Disable account.
 	err := s.core.AccountDisable(form.Pass, form.Host)
-	zero(form.Pass)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error disabling account: %w", err))
 		return
