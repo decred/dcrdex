@@ -5,6 +5,11 @@
 The LoadBot is a load tester for dcrdex. LoadBot works by running one or more
 Trader routines, each with their own *core.Core (actually, a *Mantle) and
 wallets.
+
+Build with server locktimes in mind.
+i.e. -ldflags "-X 'decred.org/dcrdex/dex.testLockTimeTaker=30s' -X 'decred.org/dcrdex/dex.testLockTimeMaker=1m'"
+
+Supported assets are bch, btc, dcr, doge, eth, ltc, and zec.
 */
 
 package main
@@ -16,127 +21,170 @@ import (
 	"flag"
 	"fmt"
 	"math/rand"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
 	"os/user"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
+	_ "decred.org/dcrdex/client/asset/bch"
 	_ "decred.org/dcrdex/client/asset/btc"
 	_ "decred.org/dcrdex/client/asset/dcr"
+	_ "decred.org/dcrdex/client/asset/doge"
+	_ "decred.org/dcrdex/client/asset/eth"
+	_ "decred.org/dcrdex/client/asset/ltc"
+	_ "decred.org/dcrdex/client/asset/zec"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
-	dexbtc "decred.org/dcrdex/dex/networks/btc"
+	dexeth "decred.org/dcrdex/dex/networks/eth"
 	dexsrv "decred.org/dcrdex/server/dex"
-	toxiproxy "github.com/Shopify/toxiproxy/client"
+	toxiproxy "github.com/Shopify/toxiproxy/v2/client"
 )
 
 const (
-	dcrBtcMarket     = "dcr_btc"
+	rateEncFactor    = calc.RateEncodingFactor
 	defaultBtcPerDcr = 0.000878
 	startPort        = 34560
 	alpha            = "alpha"
 	beta             = "beta"
 	btc              = "btc"
 	dcr              = "dcr"
+	eth              = "eth"
+	ltc              = "ltc"
+	doge             = "doge"
+	bch              = "bch"
+	zec              = "zec"
 	maxOrderLots     = 10
+	ethFeeRate       = 200 // gwei
 )
 
 var (
-	dcrID, _ = dex.BipSymbolID("dcr")
-	btcID, _ = dex.BipSymbolID("btc")
-	// ltcID, _    = dex.BipSymbolID("ltc") // TODO
-	loggerMaker                  *dex.LoggerMaker
-	hostAddr                     = "127.0.0.1:17273"
-	pass                         = []byte("abc")
-	log                          dex.Logger
-	unbip                        = dex.BipIDSymbol
-	portCounter                  uint32
-	conventionalConversionFactor = float64(dexbtc.UnitInfo.Conventional.ConversionFactor)
+	dcrID, _    = dex.BipSymbolID(dcr)
+	btcID, _    = dex.BipSymbolID(btc)
+	ethID, _    = dex.BipSymbolID(eth)
+	ltcID, _    = dex.BipSymbolID(ltc)
+	dogeID, _   = dex.BipSymbolID(doge)
+	bchID, _    = dex.BipSymbolID(bch)
+	zecID, _    = dex.BipSymbolID(zec)
+	loggerMaker *dex.LoggerMaker
+	hostAddr    = "127.0.0.1:17273"
+	pass        = []byte("abc")
+	log         dex.Logger
+	unbip       = dex.BipIDSymbol
 
 	usr, _     = user.Current()
 	dextestDir = filepath.Join(usr.HomeDir, "dextest")
 	botDir     = filepath.Join(dextestDir, "loadbot")
 
-	defaultRegFee   uint64 = 1e8
-	defaultRegAsset uint32 = dcrID
-	ctx, quit              = context.WithCancel(context.Background())
+	ctx, quit = context.WithCancel(context.Background())
 
-	alphaAddrDCR, betaAddrDCR, alphaAddrBTC, betaAddrBTC string
-	alphaCfgDCR, betaCfgDCR,
-	alphaCfgBTC, betaCfgBTC map[string]string
+	alphaAddrBase, betaAddrBase, alphaAddrQuote, betaAddrQuote, market, baseSymbol, quoteSymbol string
+	alphaCfgBase, betaCfgBase,
+	alphaCfgQuote, betaCfgQuote map[string]string
 
-	dcrAssetCfg, btcAssetCfg   *dexsrv.AssetConf
-	orderCounter, matchCounter uint32
-	epochDuration              uint64
-	lotSize                    uint64
-	rateStep                   uint64
+	baseAssetCfg, quoteAssetCfg                           *dexsrv.AssetConf
+	orderCounter, matchCounter, baseID, quoteID, regAsset uint32
+	epochDuration                                         uint64
+	lotSize                                               uint64
+	rateStep                                              uint64
+	conversionFactors                                     = make(map[string]uint64)
+
+	ethInitFee                     = (dexeth.InitGas(1, 0) + dexeth.RefundGas(0)) * ethFeeRate
+	ethRedeemFee                   = dexeth.RedeemGas(1, 0) * ethFeeRate
+	defaultMidGap, marketBuyBuffer float64
+	keepMidGap                     bool
+
+	processesMtx = sync.Mutex{}
+	processes    = []*process{}
 )
 
 func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
+// process stores a long running command and the funcion to stop it on shutdown.
+type process struct {
+	cmd    *exec.Cmd
+	stopFn func(ctx context.Context)
+}
+
+// findOpenAddrs finds unused addresses.
+func findOpenAddrs(n int) ([]net.Addr, error) {
+	addrs := make([]net.Addr, 0, n)
+	for i := 0; i < n; i++ {
+		addr, err := net.ResolveTCPAddr("tcp", "localhost:0")
+		if err != nil {
+			return nil, err
+		}
+
+		l, err := net.ListenTCP("tcp", addr)
+		if err != nil {
+			return nil, err
+		}
+		defer l.Close()
+		addrs = append(addrs, l.Addr())
+	}
+
+	return addrs, nil
+}
+
 // rpcAddr is the RPC address needed for creation of a wallet connected to the
 // specified asset node. For Decred, this is the dcrwallet 'rpclisten'
 // configuration parameter.For Bitcoin, its the 'rpcport' parameter.
 func rpcAddr(symbol, node string) string {
+	var key string
+
 	switch symbol {
 	case dcr:
-		switch node {
-		case alpha:
-			return alphaCfgDCR["rpclisten"]
-		case beta:
-			return betaCfgDCR["rpclisten"]
-		}
-	case btc:
-		switch node {
-		case alpha:
-			return alphaCfgBTC["rpcport"]
-		case beta:
-			return betaCfgBTC["rpcport"]
-		}
+		key = "rpclisten"
+	case btc, ltc, bch, zec, doge:
+		key = "rpcport"
+	case eth:
+		key = "ListenAddr"
 	}
-	panic("rpcAddr: unknown symbol-node combo " + symbol + "-" + node)
+
+	if symbol == baseSymbol {
+		if node == alpha {
+			return alphaCfgBase[key]
+		}
+		return betaCfgBase[key]
+	}
+	if node == alpha {
+		return alphaCfgQuote[key]
+	}
+	return betaCfgQuote[key]
 }
 
 // returnAddress is an address for the specified node's wallet. returnAddress
 // is used when a wallet accumulates more than the max allowed for some asset.
 //
 func returnAddress(symbol, node string) string {
-	switch symbol {
-	case dcr:
-		switch node {
-		case alpha:
-			return alphaAddrDCR
-		case beta:
-			return betaAddrDCR
+	if symbol == baseSymbol {
+		if node == alpha {
+			return alphaAddrBase
 		}
-	case btc:
-		switch node {
-		case alpha:
-			return alphaAddrBTC
-		case beta:
-			return betaAddrBTC
-		}
+		return betaAddrBase
 	}
-	panic("returnAddress: unknown symbol-node combo " + symbol + "-" + node)
+	if node == alpha {
+		return alphaAddrQuote
+	}
+	return betaAddrQuote
 }
 
-// mineAlpha will mine a single block on the alpha node of the asset indicated
-// by symbol.
-func mineAlpha(symbol string) <-chan *harnessResult {
-	return harnessCtl(symbol, "./mine-alpha", "1")
-}
-
-// mineBeta will mine a single block on the beta node of the asset indicated
-// by symbol.
-func mineBeta(symbol string) <-chan *harnessResult {
-	return harnessCtl(symbol, "./mine-beta", "1")
+// mine will mine a single block on the node and asset indicated.
+func mine(symbol, node string) <-chan *harnessResult {
+	n := 1
+	// geth may not include some tx at first because ???. Mine more.
+	if symbol == eth {
+		n = 4
+	}
+	return harnessCtl(ctx, symbol, fmt.Sprintf("./mine-%s", node), fmt.Sprintf("%d", n))
 }
 
 // harnessResult is the result of a harnessCtl command.
@@ -155,8 +203,9 @@ func (res *harnessResult) String() string {
 }
 
 // harnessCtl will run the command from the harness-ctl directory for the
-// specified symbol.
-func harnessCtl(symbol, cmd string, args ...string) <-chan *harnessResult {
+// specified symbol. ctx shadows the global context. The global context is not
+// used because stopping some nodes will occur after it is canceled.
+func harnessCtl(ctx context.Context, symbol, cmd string, args ...string) <-chan *harnessResult {
 	dir := filepath.Join(dextestDir, symbol, "harness-ctl")
 	c := make(chan *harnessResult)
 	go func() {
@@ -181,18 +230,87 @@ func harnessCtl(symbol, cmd string, args ...string) <-chan *harnessResult {
 	return c
 }
 
+// harnessProcessCtl will run the long running command from the harness-ctl
+// directory for the specified symbol. The command and stop function are saved
+// to a global slice for stopping later.
+func harnessProcessCtl(symbol string, stopFn func(context.Context), cmd string, args ...string) error {
+	processesMtx.Lock()
+	defer processesMtx.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	dir := filepath.Join(dextestDir, symbol, "harness-ctl")
+	// Killing the process with ctx or process.Kill *sometimes* does not
+	// seem to stop the coin daemon. Kill later with an rpc "stop" command
+	// contained in the stop function.
+	command := exec.Command(cmd, args...)
+	command.Dir = dir
+	p := &process{
+		cmd:    command,
+		stopFn: stopFn,
+	}
+	if err := command.Start(); err != nil {
+		return fmt.Errorf("unable to start process: %v", err)
+	}
+	processes = append(processes, p)
+	return nil
+}
+
 // nextAddr returns a new address, as well as the selected port, both as
 // strings.
-func nextAddr() (string, string) {
-	port := strconv.Itoa(int(atomic.AddUint32(&portCounter, 1) + startPort))
-	return "127.0.0.1:" + port, port
+func nextAddr() (addrPort, port string, err error) {
+	addrs, err := findOpenAddrs(1)
+	if err != nil {
+		return "", "", err
+	}
+	addrPort = addrs[0].String()
+	_, port, err = net.SplitHostPort(addrPort)
+	if err != nil {
+		return "", "", err
+	}
+	return addrPort, port, nil
+}
+
+// shutdown stops some long running processes.
+func shutdown() {
+	processesMtx.Lock()
+	defer processesMtx.Unlock()
+	for _, p := range processes {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+		defer cancel()
+		p.stopFn(ctx)
+		if err := p.cmd.Wait(); err != nil {
+			fmt.Printf("failed to wait for stopped process: %v\n", err)
+		}
+	}
 }
 
 func main() {
+	// Catch ctrl+c for a clean shutdown.
+	killChan := make(chan os.Signal, 1)
+	signal.Notify(killChan, os.Interrupt)
+	go func() {
+		<-killChan
+		quit()
+	}()
+	if err := run(); err != nil {
+		println(err.Error())
+		quit()
+		os.Exit(1)
+	}
+	quit()
+	os.Exit(0)
+}
+
+func run() error {
+	defer shutdown()
 	var programName string
-	var debug, trace, latency500, shaky500, slow100, spotty20 bool
+	var debug, trace, latency500, shaky500, slow100, spotty20, registerWithQuote bool
 	var m, n int
 	flag.StringVar(&programName, "p", "", "the bot program to run")
+	flag.StringVar(&market, "mkt", "dcr_btc", "the market to run on")
+	flag.BoolVar(&registerWithQuote, "rwq", false, "pay the register fee with the quote asset (default is base)")
+	flag.BoolVar(&keepMidGap, "kmg", false, "disallow mid gap drift")
 	flag.BoolVar(&latency500, "latency500", false, "add 500 ms of latency to downstream comms for wallets and server")
 	flag.BoolVar(&shaky500, "shaky500", false, "add 500 ms +/- 500ms of latency to downstream comms for wallets and server")
 	flag.BoolVar(&slow100, "slow100", false, "limit bandwidth on all server and wallet connections to 100 kB/s")
@@ -204,8 +322,7 @@ func main() {
 	flag.Parse()
 
 	if programName == "" {
-		fmt.Println("no program set. use `-p program-name` to set the bot's program")
-		return
+		return errors.New("no program set. use `-p program-name` to set the bot's program")
 	}
 
 	// Parse the default log level and create initialize logging.
@@ -217,88 +334,168 @@ func main() {
 		logLevel = "trace"
 	}
 
-	// Get the server harness configuration file. We'll want these parameters
-	// before we get them from 'config'.
+	symbols := strings.Split(market, "_")
+	if len(symbols) != 2 {
+		return fmt.Errorf("invalid market %q", market)
+	}
+	baseSymbol = strings.ToLower(symbols[0])
+	quoteSymbol = strings.ToLower(symbols[1])
+
+	var found bool
+	baseID, found = dex.BipSymbolID(baseSymbol)
+	if !found {
+		return fmt.Errorf("base asset %q not found", baseSymbol)
+	}
+	quoteID, found = dex.BipSymbolID(quoteSymbol)
+	if !found {
+		return fmt.Errorf("quote asset %q not found", quoteSymbol)
+	}
+	regAsset = baseID
+	if registerWithQuote {
+		regAsset = quoteID
+	}
+	ui, err := asset.UnitInfo(baseID)
+	if err != nil {
+		return fmt.Errorf("cannot get base %q unit info: %v", baseSymbol, err)
+	}
+	conversionFactors[baseSymbol] = ui.Conventional.ConversionFactor
+	ui, err = asset.UnitInfo(quoteID)
+	if err != nil {
+		return fmt.Errorf("cannot get quote %q unit info: %v", quoteSymbol, err)
+	}
+	conversionFactors[quoteSymbol] = ui.Conventional.ConversionFactor
+
 	f, err := os.ReadFile(filepath.Join(dextestDir, "dcrdex", "markets.json"))
 	if err != nil {
-		fmt.Println("error reading simnet dcrdex markets.json file:", err)
-		return
+		return fmt.Errorf("error reading simnet dcrdex markets.json file: %v", err)
 	}
-	var mktsCfg *marketsDotJSON
+	var mktsCfg marketsDotJSON
 	err = json.Unmarshal(f, &mktsCfg)
 	if err != nil {
-		fmt.Println("error unmarshaling markets.json:", err)
-		return
-	}
-	for _, mkt := range mktsCfg.Markets {
-		if mkt.Base == "DCR_simnet" && mkt.Quote == "BTC_simnet" {
-			epochDuration = mkt.Duration
-			lotSize = mkt.LotSize
-			rateStep = mkt.RateStep
-		}
-	}
-	if epochDuration == 0 {
-		fmt.Println("failed to find dcr_btc market in harness config")
-		return
+		return fmt.Errorf("error unmarshaling markets.json: %v", err)
 	}
 
-	btcAssetCfg = mktsCfg.Assets["BTC_simnet"]
-	dcrAssetCfg = mktsCfg.Assets["DCR_simnet"]
-	if dcrAssetCfg == nil || btcAssetCfg == nil {
-		fmt.Println("asset configuration missing from markets.json")
-		return
+	markets := make([]string, len(mktsCfg.Markets))
+	for i, mkt := range mktsCfg.Markets {
+		getSymbol := func(name string) (string, error) {
+			asset, ok := mktsCfg.Assets[name]
+			if !ok {
+				return "", fmt.Errorf("config does not have an asset that matches %s", name)
+			}
+			return strings.ToLower(asset.Symbol), nil
+		}
+		bs, err := getSymbol(mkt.Base)
+		if err != nil {
+			return err
+		}
+		qs, err := getSymbol(mkt.Quote)
+		if err != nil {
+			return err
+		}
+		markets[i] = fmt.Sprintf("%s_%s", bs, qs)
+		if qs != quoteSymbol || bs != baseSymbol {
+			continue
+		}
+		lotSize = mkt.LotSize
+		rateStep = mkt.RateStep
+		epochDuration = mkt.Duration
+		marketBuyBuffer = mkt.MBBuffer
+		break
+	}
+	// Adjust to be comparable to the dcr_btc market.
+	defaultMidGap = defaultBtcPerDcr * float64(rateStep) / 100
+
+	if epochDuration == 0 {
+		return fmt.Errorf("failed to find %q market in harness config. Available markets: %s", market, strings.Join(markets, ", "))
+	}
+
+	baseAssetCfg = mktsCfg.Assets[fmt.Sprintf("%s_simnet", strings.ToUpper(baseSymbol))]
+	quoteAssetCfg = mktsCfg.Assets[fmt.Sprintf("%s_simnet", strings.ToUpper(quoteSymbol))]
+	if baseAssetCfg == nil || quoteAssetCfg == nil {
+		return errors.New("asset configuration missing from markets.json")
 	}
 
 	// Load the asset node configs. We'll need the wallet RPC addresses.
 	// Note that the RPC address may be modified if toxiproxy is used below.
-	alphaCfgDCR = loadNodeConfig(dcr, alpha)
-	betaCfgDCR = loadNodeConfig(dcr, beta)
-	alphaCfgBTC = loadNodeConfig(btc, alpha)
-	betaCfgBTC = loadNodeConfig(btc, beta)
+	alphaCfgBase = loadNodeConfig(baseSymbol, alpha)
+	betaCfgBase = loadNodeConfig(baseSymbol, beta)
+	alphaCfgQuote = loadNodeConfig(quoteSymbol, alpha)
+	betaCfgQuote = loadNodeConfig(quoteSymbol, beta)
 
 	loggerMaker, err = dex.NewLoggerMaker(os.Stdout, logLevel)
 	if err != nil {
-		fmt.Println("error creating LoggerMaker:", err)
+		return fmt.Errorf("error creating LoggerMaker: %v", err)
 	}
 	log /* global */ = loggerMaker.NewLogger("LOADBOT", dex.LevelInfo)
 
 	log.Infof("Running program %s", programName)
 
-	getAddress := func(symbol, cmd string, args ...string) string {
-		res := <-harnessCtl(symbol, cmd, args...)
-		if res.err != nil {
-			log.Errorf("error getting %s address: %v", symbol, res.err)
+	getAddress := func(symbol, node string) (string, error) {
+		var args []string
+		switch symbol {
+		case btc, ltc:
+			args = []string{"getnewaddress", "''", "bech32"}
+		case doge, bch, zec:
+			args = []string{"getnewaddress"}
+		case dcr:
+			args = []string{"getnewaddress", "default", "ignore"}
+		case eth:
+			args = []string{"attach", `--exec eth.accounts[1]`}
+		default:
+			return "", fmt.Errorf("getAddress: unknown symbol %q", symbol)
 		}
-		return res.output
+		res := <-harnessCtl(ctx, symbol, fmt.Sprintf("./%s", node), args...)
+		if res.err != nil {
+			return "", fmt.Errorf("error getting %s address: %v", symbol, res.err)
+		}
+		return res.output, nil
 	}
 
-	alphaAddrDCR = getAddress(dcr, "./alpha", "getnewaddress", "default", "ignore")
-	betaAddrDCR = getAddress(dcr, "./beta", "getnewaddress", "default", "ignore")
-	alphaAddrBTC = getAddress(btc, "./alpha", "getnewaddress", "''", "bech32")
-	betaAddrBTC = getAddress(btc, "./beta", "getnewaddress", "''", "bech32")
+	if alphaAddrBase, err = getAddress(baseSymbol, alpha); err != nil {
+		return err
+	}
+	if betaAddrBase, err = getAddress(baseSymbol, beta); err != nil {
+		return err
+	}
+	if alphaAddrQuote, err = getAddress(quoteSymbol, alpha); err != nil {
+		return err
+	}
+	if betaAddrQuote, err = getAddress(quoteSymbol, beta); err != nil {
+		return err
+	}
+
+	unlockWallets := func(symbol string) error {
+		switch symbol {
+		case btc, ltc, doge, bch:
+			<-harnessCtl(ctx, symbol, "./alpha", "walletpassphrase", "abc", "4294967295")
+			<-harnessCtl(ctx, symbol, "./beta", "walletpassphrase", "abc", "4294967295")
+		case dcr:
+			<-harnessCtl(ctx, dcr, "./alpha", "walletpassphrase", "abc", "0")
+			<-harnessCtl(ctx, dcr, "./beta", "walletpassphrase", "abc", "0") // creating new accounts requires wallet unlocked
+			<-harnessCtl(ctx, dcr, "./beta", "unlockaccount", "default", "abc")
+		case eth, zec:
+			// eth unlocking for send, so no need to here. Mining
+			// accounts are always unlocked. zec is unlocked already.
+		default:
+			return fmt.Errorf("unlockWallets: unknown symbol %q", symbol)
+		}
+		return nil
+	}
 
 	// Unlock wallets, since they may have been locked on a previous shutdown.
-	<-harnessCtl(dcr, "./alpha", "walletpassphrase", "abc", "0")
-	<-harnessCtl(dcr, "./beta", "walletpassphrase", "abc", "0") // creating new accounts requires wallet unlocked
-	<-harnessCtl(dcr, "./beta", "unlockaccount", "default", "abc")
-	<-harnessCtl(btc, "./alpha", "walletpassphrase", "abc", "4294967295")
-	<-harnessCtl(btc, "./beta", "walletpassphrase", "abc", "4294967295")
+	if err = unlockWallets(baseSymbol); err != nil {
+		return err
+	}
+	if err = unlockWallets(quoteSymbol); err != nil {
+		return err
+	}
 
 	// Clean up the directory.
 	os.RemoveAll(botDir)
 	err = os.MkdirAll(botDir, 0700)
 	if err != nil {
-		log.Errorf("error creating loadbot directory: %v", err)
-		return
+		return fmt.Errorf("error creating loadbot directory: %v", err)
 	}
-
-	// Catch ctrl+c for a clean shutdown.
-	killChan := make(chan os.Signal, 1)
-	signal.Notify(killChan, os.Interrupt)
-	go func() {
-		<-killChan
-		quit()
-	}()
 
 	// Run any specified network conditions.
 	var toxics toxiproxy.Toxics
@@ -353,30 +550,36 @@ func main() {
 			assetID uint32
 			cfg     map[string]string
 		}{
-			{dcrID, alphaCfgDCR},
-			{dcrID, betaCfgDCR},
-			{btcID, alphaCfgBTC},
-			{btcID, betaCfgBTC},
+			{baseID, alphaCfgBase},
+			{baseID, betaCfgBase},
+			{quoteID, alphaCfgQuote},
+			{quoteID, betaCfgQuote},
 		}
 
 		for _, pair := range pairs {
 			var walletAddr, newAddr string
-			newAddr, port := nextAddr()
+			newAddr, port, err := nextAddr()
+			if err != nil {
+				return fmt.Errorf("unable to get a new port: %v", err)
+			}
 			switch pair.assetID {
 			case dcrID:
 				walletAddr = pair.cfg["rpclisten"]
 				pair.cfg["rpclisten"] = newAddr
-			case btcID:
+			case btcID, ltcID, dogeID, bchID:
 				oldPort := pair.cfg["rpcport"]
 				walletAddr = "127.0.0.1:" + oldPort
 				pair.cfg["rpcport"] = port
+			case ethID:
+				oldPort := pair.cfg["ListenAddr"]
+				walletAddr = fmt.Sprintf("127.0.0.1%s", oldPort)
+				pair.cfg["ListenAddr"] = fmt.Sprintf(":%s", port)
 			}
 			for _, toxic := range toxics {
 				name := fmt.Sprintf("%s_%d_%s", toxic.Name, pair.assetID, port)
 				proxy, err := toxiClient.CreateProxy(name, newAddr, walletAddr)
 				if err != nil {
-					log.Errorf("failed to create %s proxy: %v", toxic.Name, err)
-					return
+					return fmt.Errorf("failed to create %s proxy: %v", toxic.Name, err)
 				}
 				defer proxy.Delete()
 			}
@@ -384,11 +587,13 @@ func main() {
 
 		for _, toxic := range toxics {
 			log.Infof("Adding network condition %s", toxic.Name)
-			newAddr, _ := nextAddr()
+			newAddr, _, err := nextAddr()
+			if err != nil {
+				return fmt.Errorf("unable to get a new port: %v", err)
+			}
 			proxy, err := toxiClient.CreateProxy("dcrdex_"+toxic.Name, newAddr, hostAddr)
 			if err != nil {
-				log.Errorf("failed to create %s proxy for host: %v", toxic.Name, err)
-				return
+				return fmt.Errorf("failed to create %s proxy for host: %v", toxic.Name, err)
 			}
 			hostAddr = newAddr
 			defer proxy.Delete()
@@ -423,6 +628,7 @@ func main() {
 		log.Infof("LoadBot ran for %s, during which time %d orders were placed, resulting in %d separate matches, a rate of %.3g matches / minute",
 			since, orderCounter, matchCounter, rate)
 	}
+	return nil
 }
 
 // marketsDotJSON models the server's markets.json configuration file.
@@ -442,6 +648,9 @@ type marketsDotJSON struct {
 // map[string]string.
 func loadNodeConfig(symbol, node string) map[string]string {
 	cfgPath := filepath.Join(dextestDir, symbol, node, node+".conf")
+	if symbol == eth {
+		cfgPath = filepath.Join(dextestDir, symbol, node, "node", "eth.conf")
+	}
 	cfg, err := config.Parse(cfgPath)
 	if err != nil {
 		panic(fmt.Sprintf("error parsing harness config file at %s: %v", cfgPath, err))

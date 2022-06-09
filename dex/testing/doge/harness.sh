@@ -184,6 +184,35 @@ sleep 1
 
 cd ${HARNESS_DIR}
 
+# start-wallet, connect-alpha, and stop-wallet are used by loadbot to set up and
+# run new wallets.
+cat > "./start-wallet" <<EOF
+#!/usr/bin/env bash
+
+mkdir ${NODES_ROOT}/\$1
+
+printf "rpcuser=user\nrpcpassword=pass\ndatadir=${DELTA_DIR}\ntxindex=1\nregtest=1\nrpcport=\$2\n" > ${NODES_ROOT}/\$1/\$1.conf
+
+${DAEMON} -rpcuser=user -rpcpassword=pass \
+-rpcport=\$2 -datadir=${NODES_ROOT}/\$1 -txindex=1 -regtest=1 \
+-debug=rpc -debug=net -debug=mempool -debug=walletdb -debug=addrman -debug=mempoolrej \
+-whitelist=127.0.0.0/8 -whitelist=::1 \
+-port=\$3 -fallbackfee=0.00001 -printtoconsole
+EOF
+chmod +x "./start-wallet"
+
+cat > "./connect-alpha" <<EOF
+#!/usr/bin/env bash
+${CLI} -rpcport=\$1 -regtest=1 -rpcuser=user -rpcpassword=pass addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add
+EOF
+chmod +x "./connect-alpha"
+
+cat > "./stop-wallet" <<EOF
+#!/usr/bin/env bash
+${CLI} -rpcport=\$1 -regtest=1 -rpcuser=user -rpcpassword=pass stop
+EOF
+chmod +x "./stop-wallet"
+
 cat > "./alpha" <<EOF
 #!/usr/bin/env bash
 ${CLI} ${ALPHA_CLI_CFG} "\$@"
@@ -237,12 +266,6 @@ echo "Reconnecting beta to alpha"
 sleep 2
 EOF
 chmod +x "./reorg"
-
-cat > "./new-wallet" <<EOF
-#!/usr/bin/env bash
-./\$1 createwallet \$2
-EOF
-chmod +x "./new-wallet"
 
 cat > "${HARNESS_DIR}/quit" <<EOF
 #!/usr/bin/env bash

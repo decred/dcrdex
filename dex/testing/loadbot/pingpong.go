@@ -36,12 +36,12 @@ func runPingPong(n int) {
 func (p *pingPonger) SetupWallets(m *Mantle) {
 	numCoins := 4
 	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig(numCoins)
-	m.createWallet(dcr, alpha, minBaseQty, maxBaseQty, numCoins)
-	m.createWallet(btc, alpha, minQuoteQty, maxQuoteQty, numCoins)
-	m.log.Infof("Ping Ponger has been initialized with %s to %s dcr balance, "+
-		"and %s to %s btc balance, %d initial funding coins",
-		valString(minBaseQty), valString(maxBaseQty),
-		valString(minQuoteQty), valString(maxQuoteQty), numCoins)
+	m.createWallet(baseSymbol, alpha, minBaseQty, maxBaseQty, numCoins)
+	m.createWallet(quoteSymbol, alpha, minQuoteQty, maxQuoteQty, numCoins)
+	m.log.Infof("Ping Ponger has been initialized with %s to %s %s balance, "+
+		"and %s to %s %s balance, %d initial funding coins",
+		valString(minBaseQty, baseSymbol), valString(maxBaseQty, baseSymbol), baseSymbol,
+		valString(minQuoteQty, quoteSymbol), valString(maxQuoteQty, quoteSymbol), quoteSymbol, numCoins)
 }
 
 // HandleNotification is part of the Trader interface.

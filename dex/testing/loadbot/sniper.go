@@ -32,13 +32,13 @@ func newSniper(maxOrdsPerEpoch int) *sniper {
 func (s *sniper) SetupWallets(m *Mantle) {
 	numCoins := 3 * s.maxOrdsPerEpoch
 	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig(numCoins)
-	m.createWallet(dcr, alpha, minBaseQty, maxBaseQty, numCoins)
-	m.createWallet(btc, alpha, minQuoteQty, maxQuoteQty, numCoins)
+	m.createWallet(baseSymbol, alpha, minBaseQty, maxBaseQty, numCoins)
+	m.createWallet(quoteSymbol, alpha, minQuoteQty, maxQuoteQty, numCoins)
 
 	m.log.Infof("Sniper has been initialized with %d max orders per epoch"+
-		"per epoch, %s to %s dcr balance, and %s to %s btc balance, %d initial funding coins",
-		s.maxOrdsPerEpoch, valString(minBaseQty), valString(maxBaseQty),
-		valString(minQuoteQty), valString(maxQuoteQty), numCoins)
+		"per epoch, %s to %s %s balance, and %s to %s %s balance, %d initial funding coins",
+		s.maxOrdsPerEpoch, valString(minBaseQty, baseSymbol), valString(maxBaseQty, baseSymbol), baseSymbol,
+		valString(minQuoteQty, quoteSymbol), valString(maxQuoteQty, quoteSymbol), quoteSymbol, numCoins)
 
 }
 
@@ -46,7 +46,7 @@ func (s *sniper) SetupWallets(m *Mantle) {
 func (s *sniper) HandleNotification(m *Mantle, note core.Notification) {
 	switch n := note.(type) {
 	case *core.EpochNotification:
-		if n.MarketID == dcrBtcMarket {
+		if n.MarketID == market {
 			// delay the sniper, since the epoch note comes before the order
 			// book updates associated with the last epoch.
 			go func() {
@@ -91,11 +91,8 @@ func (s *sniper) snipe(m *Mantle) {
 	for _, ord := range targets {
 		qty := ord.QtyAtomic
 		if !sell {
-			if qty/lotSize == 1 {
-				qty *= 2
-			}
-			qty = calc.BaseToQuote(encodeRate(ord.Rate), qty)
-
+			qty = calc.BaseToQuote(ord.MsgRate, qty)
+			qty = uint64(float64(qty) * marketBuyBuffer)
 		}
 		m.marketOrder(sell, qty)
 	}
@@ -104,10 +101,24 @@ func (s *sniper) snipe(m *Mantle) {
 func symmetricWalletConfig(numCoins int) (
 	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty uint64) {
 
-	maxBaseQty = maxOrderLots * uint64(numCoins) * lotSize
-	minBaseQty = maxBaseQty / 2
-	defaultRate := truncate(defaultBtcPerDcr*1e8, int64(rateStep))
-	maxQuoteQty = calc.BaseToQuote(defaultRate, maxBaseQty)
-	minQuoteQty = maxQuoteQty / 2
+	minBaseQty = uint64(maxOrderLots) * uint64(numCoins) * lotSize
+	minQuoteQty = calc.BaseToQuote(uint64(defaultMidGap*rateEncFactor), minBaseQty)
+	// Ensure enough for registration fees.
+	if minBaseQty < 2e8 {
+		minBaseQty = 2e8
+	}
+	if minQuoteQty < 2e8 {
+		minQuoteQty = 2e8
+	}
+	// eth fee estimation calls for more reserves.
+	if quoteSymbol == eth {
+		add := (ethRedeemFee + ethInitFee) * uint64(maxOrderLots)
+		minQuoteQty += add
+	}
+	if baseSymbol == eth {
+		add := (ethRedeemFee + ethInitFee) * uint64(maxOrderLots)
+		minBaseQty += add
+	}
+	maxBaseQty, maxQuoteQty = minBaseQty*2, minQuoteQty*2
 	return
 }

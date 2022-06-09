@@ -170,7 +170,7 @@ chmod +x "./reorg"
 
 cat > "./new-wallet" <<EOF
 #!/usr/bin/env bash
-./\$1 createwallet \$2
+${NEW_WALLET_CMD}
 EOF
 chmod +x "./new-wallet"
 
