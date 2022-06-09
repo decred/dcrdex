@@ -366,10 +366,11 @@
     <label for="cancelPass" class="form-label pt-3 mb-1">Hasło</label>
     <input type="password" class="form-control select" id="cancelPass" autocomplete="off">
   </div>
-  <div class="col-12 py-1 {{if not $passwordIsCached}}ps-5{{end}}">
-    <button id="cancelSubmit" type="button" class="w-100 fs15 bg2 selected">Wyślij</button>
+  <div class="col-12 py-1 {{if not $passwordIsCached}}ps-5{{end}} position-relative">
+    <button id="cancelSubmit" type="button" class="w-100 fs15 bg2 selected position-relative d-inline-block">Wyślij</button>
   </div>
 </div>
+<div class="fs15 pt-3 text-center d-hide errcolor" id="cancelErr"></div>
 {{end}}
 
 {{define "accelerateForm"}}
