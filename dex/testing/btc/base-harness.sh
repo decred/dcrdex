@@ -168,10 +168,17 @@ sleep 2
 EOF
 chmod +x "./reorg"
 
+if [ "$LONG_CREATEWALLET" ] ; then
 cat > "./new-wallet" <<EOF
 #!/usr/bin/env bash
-./\$1 createwallet \$2
+./\$1 -named createwallet wallet_name=\$2 descriptors=false
 EOF
+else
+cat > "./new-wallet" <<EOF
+#!/usr/bin/env bash
+./\$1 createwallet \$
+EOF
+fi
 chmod +x "./new-wallet"
 
 cat > "${HARNESS_DIR}/quit" <<EOF
@@ -241,14 +248,22 @@ else
   # Setup the gamma wallet
   ################################################################################
   echo "Creating the gamma wallet"
-  tmux send-keys -t $SESSION:2 "./alpha createwallet gamma${DONE}" C-m\; ${WAIT}
+  if [ "$LONG_CREATEWALLET" ] ; then
+    tmux send-keys -t $SESSION:2 "./alpha -named createwallet wallet_name=gamma descriptors=false blank=true${DONE}" C-m\; ${WAIT}
+  else
+    tmux send-keys -t $SESSION:2 "./alpha createwallet gamma${DONE}" C-m\; ${WAIT}
+  fi
   tmux send-keys -t $SESSION:2 "./gamma sethdseed true ${GAMMA_WALLET_SEED}${DONE}" C-m\; ${WAIT}
 
   ################################################################################
   # Create the delta wallet
   ################################################################################
   echo "Creating the delta wallet"
-  tmux send-keys -t $SESSION:2 "./beta createwallet delta${DONE}" C-m\; ${WAIT}
+  if [ "$LONG_CREATEWALLET" ] ; then
+    tmux send-keys -t $SESSION:2 "./beta -named createwallet wallet_name=delta descriptors=false blank=true${DONE}" C-m\; ${WAIT}
+  else
+    tmux send-keys -t $SESSION:2 "./beta createwallet delta${DONE}" C-m\; ${WAIT}
+  fi
   tmux send-keys -t $SESSION:2 "./delta sethdseed true ${DELTA_WALLET_SEED}${DONE}" C-m\; ${WAIT}
 
   #################################################################################
