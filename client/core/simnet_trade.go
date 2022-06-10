@@ -26,7 +26,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -76,6 +75,7 @@ type assetConfig struct {
 	id               uint32
 	symbol           string
 	conversionFactor uint64
+	valFmt           func(interface{}) string
 }
 
 var testLookup = map[string]func(s *simulationTest) error{
@@ -159,17 +159,40 @@ func RunSimulationTest(cfg *SimulationConfig) error {
 	if cfg.RegistrationAsset == cfg.QuoteSymbol {
 		regAsset = quoteID
 	}
+	valFormatter := func(valFmt func(uint64) string) func(interface{}) string {
+		return func(vi interface{}) string {
+			var vu uint64
+			var negative bool
+			switch vt := vi.(type) {
+			case uint64:
+				vu = vt
+			case int64:
+				if negative = vt < 0; negative {
+					vu = uint64(-vt)
+				} else {
+					vu = uint64(vt)
+				}
+			}
+			if negative {
+				return "-" + valFmt(vu)
+			}
+			return valFmt(vu)
+		}
+	}
+
 	s := &simulationTest{
 		log: cfg.Logger,
 		base: &assetConfig{
 			id:               baseID,
 			symbol:           cfg.BaseSymbol,
 			conversionFactor: baseUnitInfo.Conventional.ConversionFactor,
+			valFmt:           valFormatter(baseUnitInfo.ConventionalString),
 		},
 		quote: &assetConfig{
 			id:               quoteID,
 			symbol:           cfg.QuoteSymbol,
 			conversionFactor: quoteUnitInfo.Conventional.ConversionFactor,
+			valFmt:           valFormatter(quoteUnitInfo.ConventionalString),
 		},
 		regAsset:   regAsset,
 		marketName: marketName(baseID, quoteID),
@@ -225,7 +248,7 @@ func (s *simulationTest) startClients() error {
 		for assetID, wallet := range c.wallets {
 			os.RemoveAll(c.core.assetDataDirectory(assetID))
 
-			s.log.Infof("Creating %s %s-type wallet. config = %+v", dex.BipIDSymbol(assetID), wallet.walletType, wallet.config)
+			c.log.Infof("Creating %s %s-type wallet. config = %+v", dex.BipIDSymbol(assetID), wallet.walletType, wallet.config)
 
 			err = c.core.CreateWallet(c.appPass, wallet.pass, &WalletForm{
 				Type:    wallet.walletType,
@@ -293,13 +316,6 @@ func (s *simulationTest) setup(cl1, cl2 *SimClient) (err error) {
 		return fmt.Errorf("error starting clients: %w", err)
 	}
 	return nil
-}
-
-func (s *simulationTest) conversionFactor(assetID uint32) uint64 {
-	if assetID == s.quote.id {
-		return s.quote.conversionFactor
-	}
-	return s.base.conversionFactor
 }
 
 var sleepFactor time.Duration = 1
@@ -1032,10 +1048,8 @@ func (s *simulationTest) monitorOrderMatchingAndTradeNeg(ctx context.Context, cl
 	tracker.mtx.RLock()
 	client.log.Infof("%d match(es) received for order %s", len(tracker.matches), tracker.token())
 	for _, match := range tracker.matches {
-		precisionStr := fmt.Sprintf("%%s on match %%s, amount %%.%vf %%s",
-			math.Log10(float64(s.base.conversionFactor)))
-		client.log.Infof(precisionStr, match.Side.String(), token(match.MatchID.Bytes()),
-			s.fmtAmt(match.Quantity, tracker.Base()), unbip(tracker.Base()))
+		client.log.Infof("%s on match %s, amount %f %s", match.Side.String(), token(match.MatchID.Bytes()),
+			s.base.valFmt(match.Quantity), s.base.symbol)
 	}
 	tracker.mtx.RUnlock()
 
@@ -1043,19 +1057,19 @@ func (s *simulationTest) monitorOrderMatchingAndTradeNeg(ctx context.Context, cl
 }
 
 func (s *simulationTest) monitorTrackedTrade(client *simulationClient, tracker *trackedTrade, finalStatus order.MatchStatus) error {
-	recordBalanceChanges := func(assetID uint32, isSwap bool, qty, rate uint64) {
-		amt := qty
+	recordBalanceChanges := func(isSwap bool, qty, rate uint64) {
+		amt := int64(qty)
+		a := s.base
 		if client.isSeller != isSwap {
 			// use quote amt for seller redeem and buyer swap
-			amt = calc.BaseToQuote(rate, qty)
+			amt = int64(calc.BaseToQuote(rate, qty))
+			a = s.quote
 		}
 		if isSwap {
-			client.log.Infof("updated %s balance diff with -%f", unbip(assetID), s.fmtAmt(amt, assetID))
-			client.expectBalanceDiffs[assetID] -= int64(amt)
-		} else {
-			client.log.Infof("updated %s balance diff with +%f", unbip(assetID), s.fmtAmt(amt, assetID))
-			client.expectBalanceDiffs[assetID] += int64(amt)
+			amt *= -1
 		}
+		client.log.Infof("updated %s balance diff with %s", a.symbol, a.valFmt(amt))
+		client.expectBalanceDiffs[a.id] += amt
 	}
 
 	// run a repeated check for match status changes to mine blocks as necessary.
@@ -1101,7 +1115,7 @@ func (s *simulationTest) monitorTrackedTrade(client *simulationClient, tracker *
 				side == order.Taker && status == order.TakerSwapCast:
 				// Record expected balance changes if we've just sent a swap.
 				// Do NOT mine blocks until counter-party captures status change.
-				recordBalanceChanges(tracker.wallets.fromAsset.ID, true, match.Quantity, match.Rate)
+				recordBalanceChanges(true, match.Quantity, match.Rate)
 
 			case side == order.Maker && status == order.TakerSwapCast,
 				side == order.Taker && status == order.MakerSwapCast:
@@ -1112,7 +1126,7 @@ func (s *simulationTest) monitorTrackedTrade(client *simulationClient, tracker *
 
 			case side == order.Maker && status == order.MakerRedeemed,
 				status == order.MatchComplete && (side == order.Taker || lastStatus != order.MakerRedeemed): // allow MatchComplete for Maker if lastStatus != order.MakerRedeemed
-				recordBalanceChanges(tracker.wallets.toAsset.ID, false, match.Quantity, match.Rate)
+				recordBalanceChanges(false, match.Quantity, match.Rate)
 				// Mine blocks for redemption since counter-party does not wait
 				// for redeem tx confirmations before performing follow-up action.
 				assetToMine, swapOrRedeem = tracker.wallets.toAsset, "redeem"
@@ -1213,10 +1227,8 @@ func (s *simulationTest) checkAndWaitForRefunds(ctx context.Context, client *sim
 		return nil
 	}
 
-	precisionStr := fmt.Sprintf("Found refundable swaps worth %%.%vf %%s and %%.%vf %%s",
-		math.Log10(float64(s.base.conversionFactor)), math.Log10(float64(s.base.id)))
-	client.log.Infof(precisionStr, s.fmtAmt(refundAmts[s.base.id], s.base.id), s.base.symbol,
-		s.fmtAmt(refundAmts[s.quote.id], s.quote.id), s.quote.symbol)
+	client.log.Infof("Found refundable swaps worth %s %s and %s %s", s.base.valFmt(refundAmts[s.base.id]),
+		s.base.symbol, s.quote.valFmt(refundAmts[s.quote.id]), s.quote.symbol)
 
 	// wait for refunds to be executed
 	now := time.Now()
@@ -1292,10 +1304,8 @@ func (s *simulationTest) checkAndWaitForRefunds(ctx context.Context, client *sim
 	client.expectBalanceDiffs = refundAmts
 	err = s.assertBalanceChanges(client)
 	if err == nil {
-		precisionStr := fmt.Sprintf("successfully refunded swaps worth %%.%vf %%s and %%.%vf %%s",
-			math.Log10(float64(s.base.conversionFactor)), math.Log10(float64(s.quote.conversionFactor)))
-		client.log.Infof(precisionStr, s.fmtAmt(refundAmts[s.base.id], s.base.id), s.base.symbol,
-			s.fmtAmt(refundAmts[s.quote.id], s.quote.id), s.quote.symbol)
+		client.log.Infof("successfully refunded swaps worth %s %s and %s %s", s.base.valFmt(refundAmts[s.base.id]),
+			s.base.symbol, s.quote.valFmt(refundAmts[s.quote.id]))
 	}
 	return err
 }
@@ -1441,11 +1451,22 @@ func btcCloneWallet(assetID uint32, useSPV bool, node string, rpcWalletType stri
 	pass := []byte("abc")
 	switch node {
 	case "gamma":
-		parentNode = "alpha"
 		pass = nil
 	case "delta":
-		parentNode = "beta"
 		pass = nil
+	}
+
+	switch assetID {
+	case doge.BipID: // , zec.BipID:
+	// dogecoind doesn't support > 1 wallet, so gamma and delta
+	// have their own nodes.
+	default:
+		switch node {
+		case "gamma":
+			parentNode = "alpha"
+		case "delta":
+			parentNode = "beta"
+		}
 	}
 
 	cfg, err := config.Parse(filepath.Join(dextestDir, dex.BipIDSymbol(assetID), parentNode, parentNode+".conf"))
@@ -1706,12 +1727,6 @@ func (s *simulationTest) placeOrder(client *simulationClient, qty, rate uint64, 
 		TifNow:  tifNow,
 	}
 
-	precisionStr := fmt.Sprintf("%%.%vf %%s", math.Log10(float64(s.base.conversionFactor)))
-	qtyStr := fmt.Sprintf(precisionStr, s.fmtAmt(qty, s.base.id), s.base.symbol)
-	precisionStr = fmt.Sprintf("%%.%vf %%s", math.Log10(float64(s.quote.conversionFactor)))
-	rateStr := fmt.Sprintf(precisionStr, s.fmtAmt(rate, s.quote.id), s.quote.symbol,
-		s.base.symbol)
-
 	ord, err := client.core.Trade(client.appPass, tradeForm)
 	if err != nil {
 		return "", err
@@ -1719,23 +1734,30 @@ func (s *simulationTest) placeOrder(client *simulationClient, qty, rate uint64, 
 
 	client.lastOrder = ord.ID
 
-	client.log.Infof("placed order %sing %s at %s (%s)", sellString(client.isSeller), qtyStr, rateStr, ord.ID[:8])
+	r := calc.ConventionalRateAlt(rate, s.base.conversionFactor, s.quote.conversionFactor)
+
+	client.log.Infof("placed order %sing %s %s at %s %s (%s)", sellString(client.isSeller),
+		s.base.valFmt(qty), s.base.symbol, r, s.quote.symbol, ord.ID[:8])
 	return ord.ID.String(), nil
 }
 
 func (s *simulationTest) updateBalances(client *simulationClient) error {
 	client.log.Infof("updating balances")
 	client.balances = make(map[uint32]uint64, len(client.wallets))
-	for assetID := range client.wallets {
-		balances, err := client.core.AssetBalance(assetID)
+	setBalance := func(a *assetConfig) error {
+		balances, err := client.core.AssetBalance(a.id)
 		if err != nil {
 			return err
 		}
-		client.balances[assetID] = balances.Available + balances.Immature + balances.Locked
-		client.log.Infof("%s available %f, immature %f, locked %f", unbip(assetID),
-			s.fmtAmt(balances.Available, assetID), s.fmtAmt(balances.Immature, assetID), s.fmtAmt(balances.Locked, assetID))
+		client.balances[a.id] = balances.Available + balances.Immature + balances.Locked
+		client.log.Infof("%s available %s, immature %s, locked %s", a.symbol,
+			a.valFmt(balances.Available), a.valFmt(balances.Immature), a.valFmt(balances.Locked))
+		return nil
 	}
-	return nil
+	if err := setBalance(s.base); err != nil {
+		return err
+	}
+	return setBalance(s.quote)
 }
 
 func (s *simulationTest) assertBalanceChanges(client *simulationClient) error {
@@ -1770,15 +1792,10 @@ func (s *simulationTest) assertBalanceChanges(client *simulationClient) error {
 		return err
 	}
 
-	for assetID, expectedDiff := range client.expectBalanceDiffs {
-		fees := baseFees
-		if assetID == s.quote.id {
-			fees = quoteFees
-		}
-		conversionFactor := s.conversionFactor(assetID)
+	checkDiff := func(a *assetConfig, expDiff, fees int64) error {
 		// actual diff will likely be less than expected because of tx fees
 		// TODO: account for actual fee(s) or use a more realistic fee estimate.
-		expVal := expectedDiff - fees
+		expVal := expDiff - fees
 		minExpectedDiff, maxExpectedDiff := int64(float64(expVal)*0.95), int64(float64(expVal)*1.05)
 
 		// diffs can be negative
@@ -1786,19 +1803,22 @@ func (s *simulationTest) assertBalanceChanges(client *simulationClient) error {
 			minExpectedDiff, maxExpectedDiff = maxExpectedDiff, minExpectedDiff
 		}
 
-		balanceDiff := int64(client.balances[assetID] - prevBalances[assetID])
+		balanceDiff := int64(client.balances[a.id]) - int64(prevBalances[a.id])
 		if balanceDiff < minExpectedDiff || balanceDiff > maxExpectedDiff {
-			precisionStr := fmt.Sprintf("[client %%s] %%s balance change not in expected range %%.%[1]vf - %%.%[1]vf, got %%.%[1]vf",
-				math.Log10(float64(conversionFactor)))
-			return fmt.Errorf(precisionStr, client.name, unbip(assetID), s.fmtAmt(minExpectedDiff,
-				assetID), s.fmtAmt(maxExpectedDiff, assetID), s.fmtAmt(balanceDiff, assetID))
+			// precisionStr := fmt.Sprintf(,
+			// 	math.Log10(float64(conversionFactor)))
+			return fmt.Errorf("%s balance change not in expected range %s - %s, got %s", a.symbol,
+				a.valFmt(minExpectedDiff), a.valFmt(maxExpectedDiff), a.valFmt(balanceDiff))
 		}
-		precisionStr := fmt.Sprintf("%%s balance change %%.%[1]vf is in expected range of %%.%[1]vf - %%.%[1]vf",
-			math.Log10(float64(conversionFactor)))
-		client.log.Infof(precisionStr, unbip(assetID), s.fmtAmt(balanceDiff, assetID),
-			s.fmtAmt(minExpectedDiff, assetID), s.fmtAmt(maxExpectedDiff, assetID))
+		client.log.Infof("%s balance change %s is in expected range of %s - %s", a.symbol,
+			a.valFmt(balanceDiff), a.valFmt(minExpectedDiff), a.valFmt(maxExpectedDiff))
+		return nil
 	}
-	return nil
+
+	if err := checkDiff(s.base, client.expectBalanceDiffs[s.base.id], baseFees); err != nil {
+		return err
+	}
+	return checkDiff(s.quote, client.expectBalanceDiffs[s.quote.id], quoteFees)
 }
 
 func (client *simulationClient) dc() *dexConnection {
@@ -1839,17 +1859,6 @@ func (client *simulationClient) disconnectWallets() {
 		wallet.Disconnect()
 	}
 	client.core.walletMtx.Unlock()
-}
-
-func (s *simulationTest) fmtAmt(anyAmt interface{}, assetID uint32) float64 {
-
-	if amt, ok := anyAmt.(uint64); ok {
-		return float64(amt) / float64(s.conversionFactor(assetID))
-	}
-	if amt, ok := anyAmt.(int64); ok {
-		return float64(amt) / float64(s.conversionFactor(assetID))
-	}
-	panic(fmt.Sprintf("invalid call to fmtAmt with %v", anyAmt))
 }
 
 func init() {
