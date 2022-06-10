@@ -1,4 +1,4 @@
-//go:build simnet_trade_test && lgpl
+//go:build harness && lgpl
 
 package main
 
@@ -21,7 +21,7 @@ func main() {
 	flag.StringVar(&quote1Node, "quote1node", "beta", "the harness node to connect to for the first client's quote asset. only RPC wallets")
 	flag.StringVar(&base2Node, "base2node", "gamma", "the harness node to connect to for the second client's base asset. only RPC wallets")
 	flag.StringVar(&quote2Node, "quote2node", "gamma", "the harness node to connect to for the second client's quote asset. only RPC wallets")
-	flag.StringVar(&regAsset, "regasset", "gamma", "the harness node to connect to for the second client's quote asset. only RPC wallets")
+	flag.StringVar(&regAsset, "regasset", "", "the asset to use for registration. default is base asset")
 	flag.BoolVar(&base1SPV, "base1spv", false, "use SPV wallet for the first client's base asset")
 	flag.BoolVar(&quote1SPV, "quote1spv", false, "use SPV wallet for the first client's quote asset")
 	flag.BoolVar(&base2SPV, "base2spv", false, "use SPV wallet for the second client's base asset")

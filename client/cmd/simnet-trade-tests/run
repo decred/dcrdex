@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-go build -tags lgpl,simnet_trade_test
+go build -tags lgpl,harness
 
 case $1 in
 
@@ -31,12 +31,28 @@ case $1 in
     ./simnet-trade-tests --base1node trading1 --base2node trading2 --quote eth ${@:2}
     ;;
 
-  list)
-    ./simnet-trade-tests --list
-    ;;
-
-  help)
+  help|--help|-h)
     ./simnet-trade-tests --help
+    cat <<EOF
+
+---------------------
+
+The following markets are available. Be sure to run the appropriate harnesses before running the dcrdex server harness.
+
+dcrbtc
+dcrbtcspv
+bchdcr
+ltcdcr
+dcrdoge
+dcreth
+
+---------------------
+
+One or more of the following tests can be run by specifying one or more -t flags. Default is ['success'].
+
+EOF
+
+    ./simnet-trade-tests --list
     ;;
 
   *)

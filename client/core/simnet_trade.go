@@ -1,4 +1,4 @@
-//go:build simnet_trade_test && lgpl
+//go:build harness && lgpl
 
 package core
 

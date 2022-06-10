@@ -278,9 +278,9 @@ tmux send-keys -t $SESSION:4 "./alpha generatetoaddress 400 ${ALPHA_MINING_ADDR}
 ################################################################################
 
 DELTA_ADDR=`./delta getnewaddress`
-echo "delta address = '${DELTA_MINING_ADDR}'"
+echo "delta address = '${DELTA_ADDR}'"
 GAMMA_ADDR=`./gamma getnewaddress`
-echo "gamma address = '${GAMMA_MINING_ADDR}'"
+echo "gamma address = '${GAMMA_ADDR}'"
 
 # Send the beta wallet some dough.
 echo "Sending 8,400,000 DOGE to lazy wallets in 8 blocks"
