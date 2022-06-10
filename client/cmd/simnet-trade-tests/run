@@ -37,14 +37,14 @@ case $1 in
 
 ---------------------
 
-The following markets are available. Be sure to run the appropriate harnesses before running the dcrdex server harness.
+The following pre-configured tests are available. Be sure to run the appropriate harnesses before running the dcrdex server harness.
 
-dcrbtc
-dcrbtcspv
-bchdcr
-ltcdcr
-dcrdoge
-dcreth
+dcrbtc - RPC wallets on DCR-BTC market
+dcrbtcspv - Decred RPC wallet and Bitcoin SPV wallet on DCR-BTC market
+bchdcr - RPC wallets on BCH-DCR market
+ltcdcr - RPC wallets on LTC-DCR market
+dcrdoge - RPC wallets on DCR-DOGE market
+dcreth - Decred RPC wallet and Ethereum native wallet on DCR-ETH market
 
 ---------------------
 
