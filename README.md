@@ -284,16 +284,16 @@ as `dexc` (e.g. `/opt/dcrdex/dexc` and `/opt/dcrdex/site`).
 docker build -t user/dcrdex -f client/Dockerfile .
 ```
 
-**Create docker volume**
-
-```
-docker volume create --name=dcrdex_data
-```
-
 **Run image**
 
+For `mainnet`:
 ```
-docker run -d --rm -p 127.0.0.1:5758:5758 -v dcrdex_data:/root/.dexc user/dcrdex
+docker run --rm -p 127.0.0.1:5758:5758 -v dcrdex_data:/root/.dexc user/dcrdex --webaddr=0.0.0.0:5758
+```
+
+For `testnet`:
+```
+docker run --rm -p 127.0.0.1:5758:5758 -v dcrdex_data:/root/.dexc user/dcrdex --webaddr=0.0.0.0:5758 --testnet
 ```
 
 ## DEX Specification
