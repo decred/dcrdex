@@ -4,6 +4,7 @@
 package rpcserver
 
 import (
+	"decred.org/dcrwallet/v2/walletseed"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -39,6 +40,7 @@ const (
 	rescanWalletRoute          = "rescanwallet"
 	withdrawRoute              = "withdraw"
 	appSeedRoute               = "appseed"
+	appSeedPhraseRoute         = "appseedphrase"
 	deleteArchivedRecordsRoute = "deletearchivedrecords"
 )
 
@@ -91,6 +93,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	rescanWalletRoute:          handleRescanWallet,
 	withdrawRoute:              handleWithdraw,
 	appSeedRoute:               handleAppSeed,
+	appSeedPhraseRoute:         handleAppSeedPhrase,
 	deleteArchivedRecordsRoute: handleDeleteArchivedRecords,
 }
 
@@ -129,7 +132,6 @@ func handleInit(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		appPass.Clear()
 		seed.Clear()
 	}()
-	// TODO - seed phrase
 	if err := s.core.InitializeClient(appPass, seed); err != nil {
 		errMsg := fmt.Sprintf("unable to initialize client: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCInitError, errMsg)
@@ -618,10 +620,31 @@ func handleAppSeed(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		resErr := msgjson.NewError(msgjson.RPCExportSeedError, errMsg)
 		return createResponse(appSeedRoute, nil, resErr)
 	}
-	// Zero seed and hex representation after use.
 	seedHex := fmt.Sprintf("%x", seed[:])
+	defer encode.ClearBytes([]byte(seedHex))
 
 	return createResponse(appSeedRoute, seedHex, nil)
+}
+
+// handleAppSeedPhrase handles requests for the app seed phrase. *msgjson.ResponsePayload.Error
+// is empty if successful.
+func handleAppSeedPhrase(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	appPass, err := parseAppSeedArgs(params)
+	if err != nil {
+		return usage(appSeedPhraseRoute, err)
+	}
+	defer appPass.Clear()
+	seed, err := s.core.ExportSeed(appPass)
+	defer encode.ClearBytes(seed)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to retrieve app seed: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCExportSeedError, errMsg)
+		return createResponse(appSeedPhraseRoute, nil, resErr)
+	}
+	seedPhrase := walletseed.EncodeMnemonic(seed)
+	defer encode.ClearBytes([]byte(seedPhrase))
+
+	return createResponse(appSeedPhraseRoute, seedPhrase, nil)
 }
 
 // handleDeleteArchivedRecords handles requests for deleting archived records.
@@ -1123,5 +1146,14 @@ needed to complete a swap.`,
     appPass (string): The DEX client password.`,
 		returns: `Returns:
     string: The application's seed as hex.`,
+	},
+	appSeedPhraseRoute: {
+		pwArgsShort: `"appPass"`,
+		cmdSummary: `Show the application's seed phrase. It is recommended to not store seed phrase
+  digitally. Make a copy on paper with pencil and keep it safe.`,
+		pwArgsLong: `Password Args:
+    appPass (string): The DEX client password.`,
+		returns: `Returns:
+    string: The application's seed phrase as a list of words.`,
 	},
 }

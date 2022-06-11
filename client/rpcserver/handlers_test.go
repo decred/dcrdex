@@ -237,6 +237,20 @@ func TestHandleInit(t *testing.T) {
 		params:      &RawParams{PWArgs: []encode.PassBytes{pw}},
 		wantErrCode: -1,
 	}, {
+		name: "ok (with seed phrase)",
+		params: &RawParams{
+			PWArgs: []encode.PassBytes{pw},
+			Args:   []string{"quota passenger lockup pharmacy acme cumbersome crucial revenue peachy exodus tiger amusement freedom tobacco cranky quantity music speculate goggles insurgent crowfoot corrosion dropper document quadrant commando woodlark underfoot mural Eskimo tactics Babylon atlas tobacco accrue stethoscope virus Ohio tapeworm bravado solo exodus baboon leprosy briefcase vacancy blackjack asteroid beeswax onlooker keyboard voyager kiwi whimsical snapline impartial treadmill everyday aimless Medusa deckhand hazardous drunken midsummer stormy"},
+		},
+		wantErrCode: -1,
+	}, {
+		name: "ok (with seed)",
+		params: &RawParams{
+			PWArgs: []encode.PassBytes{pw},
+			Args:   []string{"9fa97faf033e43ca905be20767e041bd85d66d7e423a4f4f9d30feeb8457de1112e002d7f79de01bc55b14852bf1210d1b9e7af77cfac175e958088b496d518f"},
+		},
+		wantErrCode: -1,
+	}, {
 		name:                "core.InitializeClient error",
 		params:              &RawParams{PWArgs: []encode.PassBytes{pw}},
 		initializeClientErr: errors.New("error"),
@@ -244,6 +258,13 @@ func TestHandleInit(t *testing.T) {
 	}, {
 		name:        "bad params",
 		params:      &RawParams{},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}, {
+		name: "bad seed param",
+		params: &RawParams{
+			PWArgs: []encode.PassBytes{pw},
+			Args:   []string{"neither seed phrase nor seed"},
+		},
 		wantErrCode: msgjson.RPCArgumentsError,
 	}}
 	for _, test := range tests {
@@ -1097,6 +1118,44 @@ func TestHandleAppSeed(t *testing.T) {
 			t.Fatalf("expected ff but got %v", res)
 		}
 
+	}
+}
+
+func TestHandleAppSeedPhrase(t *testing.T) {
+	params := &RawParams{
+		PWArgs: []encode.PassBytes{encode.PassBytes("abc")},
+	}
+	tests := []struct {
+		name          string
+		params        *RawParams
+		exportSeedErr error
+		wantErrCode   int
+	}{{
+		name:        "ok",
+		params:      params,
+		wantErrCode: -1,
+	}, {
+		name:          "core.ExportSeed error",
+		params:        params,
+		exportSeedErr: errors.New("error"),
+		wantErrCode:   msgjson.RPCExportSeedError,
+	}, {
+		name:        "bad params",
+		params:      &RawParams{},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{exportSeed: []byte{255}, exportSeedErr: test.exportSeedErr}
+		r := &RPCServer{core: tc}
+		payload := handleAppSeedPhrase(r, test.params)
+		res := ""
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+		res = strings.ToLower(res)
+		if test.wantErrCode == -1 && res != "zulu recipe" {
+			t.Fatalf("expected `zulu recipe` but got %v", res)
+		}
 	}
 }
 

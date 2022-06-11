@@ -4,6 +4,7 @@
 package rpcserver
 
 import (
+	"decred.org/dcrwallet/v2/walletseed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -252,15 +253,23 @@ func parseInitArgs(params *RawParams) (encode.PassBytes, encode.PassBytes, error
 	if len(params.PWArgs[0]) == 0 {
 		return nil, nil, fmt.Errorf("app password cannot be empty")
 	}
-	var seed encode.PassBytes
-	if len(params.Args) == 1 {
-		var err error
-		seed, err = hex.DecodeString(params.Args[0])
-		if err != nil {
-			return nil, nil, fmt.Errorf("invalid seed format")
-		}
+
+	if len(params.Args) != 1 {
+		return params.PWArgs[0], nil, nil
 	}
-	return params.PWArgs[0], seed, nil
+
+	// Otherwise, seed phrase or seed argument is present.
+
+	seed, err := hex.DecodeString(params.Args[0])
+	if err == nil && len(seed) == 64 {
+		return params.PWArgs[0], seed, nil
+	}
+	pSeed, err := walletseed.DecodeUserInput(params.Args[0])
+	if err == nil {
+		return params.PWArgs[0], pSeed, nil
+	}
+
+	return nil, nil, fmt.Errorf("supplied args[0] satisfies neither seed phrase nor seed format, args[0]: %s", params.Args[0])
 }
 
 func parseLoginArgs(params *RawParams) (encode.PassBytes, error) {
