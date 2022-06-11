@@ -307,8 +307,8 @@ DELTA_ADDR=`./delta getnewaddress`
 GAMMA_ADDR=`./gamma getnewaddress`
 
 # Send the lazy wallets some dough.
-echo "Sending 84 ZEC to beta in 8 blocks"
-for i in 10 18 5 7 1 15 3 25
+echo "Sending 174 ZEC to beta in 8 blocks"
+for i in 100 18 5 7 1 15 3 25
 do
     tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${BETA_ADDR} ${i}${DONE}" C-m\; ${WAIT}
     tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${DELTA_ADDR} ${i}${DONE}" C-m\; ${WAIT}

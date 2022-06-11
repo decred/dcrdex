@@ -42,6 +42,7 @@ import (
 	"decred.org/dcrdex/client/asset/doge"
 	"decred.org/dcrdex/client/asset/eth"
 	"decred.org/dcrdex/client/asset/ltc"
+	"decred.org/dcrdex/client/asset/zec"
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
@@ -89,11 +90,17 @@ var testLookup = map[string]func(s *simulationTest) error{
 }
 
 func SimTests() []string {
-	tests := make([]string, 0, len(testLookup))
-	for name := range testLookup {
-		tests = append(tests, name)
+	// Use this slice instead of the generating from the testLookup map so that
+	// the order doesn't change.
+	return []string{
+		"success",
+		"nomakerswap",
+		"notakerswap",
+		"nomakerredeem",
+		"makerghost",
+		"orderstatus",
+		"resendpending",
 	}
-	return tests
 }
 
 // SimulationConfig is the test configuration.
@@ -294,6 +301,11 @@ func (s *simulationTest) startClients() error {
 	}
 
 	mktCfg := dc.marketConfig(s.marketName)
+
+	if mktCfg == nil {
+		return fmt.Errorf("market %s not found", s.marketName)
+	}
+
 	s.lotSize = mktCfg.LotSize
 	s.rateStep = mktCfg.RateStep
 
@@ -512,7 +524,7 @@ func testOrderStatusReconciliation(s *simulationTest) error {
 	//            will always be partially matched (3*lotSize matched or
 	//            1*lotSize matched, if Order 2 is matched first).
 	waiter.Go(func() error {
-		_, err := s.placeOrder(s.client1, 3*s.rateStep, rate, false)
+		_, err := s.placeOrder(s.client1, 3*s.lotSize, rate, false)
 		if err != nil {
 			return fmt.Errorf("client 1 place order error: %v", err)
 		}
@@ -1383,7 +1395,7 @@ func newHarnessCtrl(assetID uint32) *harnessCtrl {
 		blockMultiplier uint32 = 1
 	)
 	switch assetID {
-	case dcr.BipID, btc.BipID, ltc.BipID, bch.BipID, doge.BipID:
+	case dcr.BipID, btc.BipID, ltc.BipID, bch.BipID, doge.BipID, zec.BipID:
 	case eth.BipID:
 		// Sending with values of .1 eth.
 		fundStr = `attach_--exec personal.sendTransaction({from:eth.accounts[1],to:"%s",gasPrice:200e9,value:%de17},"abc")`
@@ -1449,15 +1461,12 @@ func btcCloneWallet(assetID uint32, useSPV bool, node string, rpcWalletType stri
 
 	parentNode := node
 	pass := []byte("abc")
-	switch node {
-	case "gamma":
-		pass = nil
-	case "delta":
+	if node == "gamma" || node == "delta" || assetID == zec.BipID {
 		pass = nil
 	}
 
 	switch assetID {
-	case doge.BipID: // , zec.BipID:
+	case doge.BipID, zec.BipID:
 	// dogecoind doesn't support > 1 wallet, so gamma and delta
 	// have their own nodes.
 	default:
@@ -1489,6 +1498,10 @@ func dogeWallet(node string) (*tWallet, error) {
 	return btcCloneWallet(doge.BipID, false, node, "dogecoindRPC")
 }
 
+func zecWallet(node string) (*tWallet, error) {
+	return btcCloneWallet(zec.BipID, false, node, "zcashdRPC")
+}
+
 func (s *simulationTest) newClient(name string, cl *SimClient) (*simulationClient, error) {
 	wallets := make(map[uint32]*tWallet, 2)
 	addWallet := func(assetID uint32, useSPV bool, node string) error {
@@ -1509,6 +1522,8 @@ func (s *simulationTest) newClient(name string, cl *SimClient) (*simulationClien
 			tw, err = bchWallet(useSPV, node)
 		case doge.BipID:
 			tw, err = dogeWallet(node)
+		case zec.BipID:
+			tw, err = zecWallet(node)
 		default:
 			return fmt.Errorf("no method to create wallet for asset %d", assetID)
 		}
@@ -1736,8 +1751,8 @@ func (s *simulationTest) placeOrder(client *simulationClient, qty, rate uint64, 
 
 	r := calc.ConventionalRateAlt(rate, s.base.conversionFactor, s.quote.conversionFactor)
 
-	client.log.Infof("placed order %sing %s %s at %s %s (%s)", sellString(client.isSeller),
-		s.base.valFmt(qty), s.base.symbol, r, s.quote.symbol, ord.ID[:8])
+	client.log.Infof("placed order %sing %s %s at %f %s/%s (%s)", sellString(client.isSeller),
+		s.base.valFmt(qty), s.base.symbol, r, s.quote.symbol, s.base.symbol, ord.ID[:8])
 	return ord.ID.String(), nil
 }
 
