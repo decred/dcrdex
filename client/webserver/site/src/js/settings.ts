@@ -127,7 +127,7 @@ export default class SettingsPage extends BasePage {
     const closePopups = () => {
       Doc.hide(page.forms)
       page.exportSeedPW.value = ''
-      page.seedDiv.textContent = ''
+      page.seedPhraseDiv.textContent = ''
     }
 
     Doc.bind(page.forms, 'mousedown', (e: MouseEvent) => {
@@ -273,7 +273,7 @@ export default class SettingsPage extends BasePage {
       return
     }
     page.exportSeedPW.value = ''
-    page.seedDiv.textContent = res.seed
+    page.seedPhraseDiv.textContent = res.seedPhrase
     this.showForm(page.authorizeSeedDisplay)
   }
 

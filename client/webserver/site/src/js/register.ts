@@ -45,8 +45,25 @@ export default class RegistrationPage extends BasePage {
     // SET APP PASSWORD
     bindForm(page.appPWForm, page.appPWSubmit, () => this.setAppPass())
     Doc.bind(page.showSeedRestore, 'click', () => {
-      Doc.show(page.seedRestore)
+      Doc.hide(page.seedPhraseRestore)
+      // seed input method is chosen, seed phrase must be empty for server to
+      // handle restoration request properly.
+      // TODO
+      // page.seedPhraseRestore.textContent = ''
+      page.seedInput.value = ''
       Doc.hide(page.showSeedRestore)
+      Doc.show(page.seedRestore)
+      Doc.show(page.showSeedPhraseRestore)
+    })
+    Doc.bind(page.showSeedPhraseRestore, 'click', () => {
+      Doc.hide(page.seedRestore)
+      // seed phrase input method is chosen, seed must be empty for server to
+      // handle restoration request properly.
+      // page.seedRestore.textContent = ''
+      page.seedInput.value = ''
+      Doc.hide(page.showSeedPhraseRestore)
+      Doc.show(page.seedPhraseRestore)
+      Doc.show(page.showSeedRestore)
     })
 
     this.loginForm = new LoginForm(page.loginForm, async () => {
@@ -189,10 +206,12 @@ export default class RegistrationPage extends BasePage {
     page.appPWAgain.value = ''
     const loaded = app().loading(page.appPWForm)
     const seed = page.seedInput.value
+    const seedPhrase = page.seedPhraseInput.value
     const rememberPass = page.rememberPass.checked
     const res = await postJSON('/api/init', {
       pass: pw,
       seed,
+      seedPhrase,
       rememberPass
     })
     loaded()

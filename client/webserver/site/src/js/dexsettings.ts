@@ -38,7 +38,7 @@ export default class DexSettingsPage extends BasePage {
     const closePopups = () => {
       Doc.hide(page.forms)
       page.exportSeedPW.value = ''
-      page.seedDiv.textContent = ''
+      page.seedPhraseDiv.textContent = ''
     }
 
     Doc.bind(page.forms, 'mousedown', (e: MouseEvent) => {

@@ -4,6 +4,7 @@
 package webserver
 
 import (
+	"decred.org/dcrwallet/v2/walletseed"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -362,18 +363,25 @@ func (s *WebServer) apiExportSeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Close = true
+
 	seed, err := s.core.ExportSeed(form.Pass)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error exporting seed: %w", err))
 		return
 	}
 	defer zero(seed)
+
+	seedPhrase := walletseed.EncodeMnemonic(seed)
+	defer zero([]byte(seedPhrase))
+
 	writeJSON(w, &struct {
 		OK   bool      `json:"ok"`
 		Seed dex.Bytes `json:"seed"`
+		SeedPhrase string `json:"seedPhrase"`
 	}{
 		OK:   true,
 		Seed: seed,
+		SeedPhrase: seedPhrase,
 	}, s.indent)
 }
 
@@ -480,10 +488,28 @@ func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 	init := new(initForm)
 	defer init.Pass.Clear()
 	defer zero(init.Seed)
+	defer zero([]byte(init.SeedPhrase))
 	if !readPost(w, r, init) {
 		return
 	}
-	err := s.core.InitializeClient(init.Pass, init.Seed)
+
+	if len(init.Seed) > 0 && init.SeedPhrase != "" {
+		s.writeAPIError(w, fmt.Errorf("provide either seed phrase or seed, not both"))
+		return
+	}
+
+	seed := init.Seed
+	if init.SeedPhrase != "" {
+		pSeed, err := walletseed.DecodeUserInput(init.SeedPhrase)
+		if err != nil {
+			s.writeAPIError(w, fmt.Errorf("seed phrase can't be decoded: %w", err))
+			return
+		}
+		defer zero(pSeed)
+		seed = pSeed
+	}
+
+	err := s.core.InitializeClient(init.Pass, seed)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("initialization error: %w", err))
 		return

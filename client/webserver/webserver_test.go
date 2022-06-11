@@ -496,6 +496,7 @@ func TestAPIInit(t *testing.T) {
 
 	goodBody := &loginForm{
 		Pass: encode.PassBytes("def"),
+		SeedPhrase   : "some seed phrase",
 	}
 	body = goodBody
 	ensure(s.apiInit, `{"ok":true,"notes":null}`)

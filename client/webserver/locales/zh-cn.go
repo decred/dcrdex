@@ -162,7 +162,9 @@ var ZhCN = map[string]string{
 	"Balance":                "余额", // alt. 平衡
 	"Actions":                "操作", // alt. 动作
 	"Restoration Seed":       "恢复种子",
+	"Restoration Seed Phrase": "Restoration Seed Phrase",
 	"Restore from seed":      "从种子恢复",
+	"Restore from seed phrase": "Restore from seed phrase",
 	"Import Account":         "导入帐户",
 	"no_wallet":              "未连接钱包", // alt. 没有钱包
 	"create_a_x_wallet":      "创建{{.Info.Name}}钱包",

@@ -129,6 +129,7 @@ func handleInit(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		appPass.Clear()
 		seed.Clear()
 	}()
+	// TODO - seed phrase
 	if err := s.core.InitializeClient(appPass, seed); err != nil {
 		errMsg := fmt.Sprintf("unable to initialize client: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCInitError, errMsg)
