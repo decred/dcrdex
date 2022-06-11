@@ -383,8 +383,10 @@ func (c *tokenContractorV0) balance(ctx context.Context) (*big.Int, error) {
 
 // allowance exposes the read-only allowance method of the erc20 token contract.
 func (c *tokenContractorV0) allowance(ctx context.Context) (*big.Int, error) {
+	// See if we support the pending state.
+	_, pendingUnavailable := c.cb.(*multiRPCClient)
 	callOpts := &bind.CallOpts{
-		Pending: true,
+		Pending: !pendingUnavailable,
 		From:    c.acctAddr,
 		Context: ctx,
 	}

@@ -220,8 +220,10 @@ export interface ConfigOption {
   isdate: boolean
   disablewhenactive: boolean
   isBirthdayConfig: boolean
+  repeatable: string
   noauth: boolean
   regAsset?: number
+  required: boolean
 }
 
 export interface Coin {

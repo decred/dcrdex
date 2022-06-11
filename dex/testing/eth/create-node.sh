@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Script for creating eth nodes.
-set -e
+set -ex
 
 # The following are required script arguments.
 TMUX_WIN_ID=$1
@@ -29,6 +29,11 @@ cat > "${NODES_ROOT}/harness-ctl/${NAME}" <<EOF
 geth --datadir="${NODE_DIR}" \$*
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/${NAME}"
+
+HTTP_OPT=""
+if [ "$NAME" = "delta" ]; then
+  HTTP_OPT="--http --http.port ${DELTA_HTTP_PORT} --ws --ws.port ${DELTA_WS_PORT} --ws.api \"db,eth,net,web3,personal,txpool,admin\""
+fi
 
 # Write mine script if CHAIN_ADDRESS is present.
 if [ "${CHAIN_ADDRESS}" != "_" ]; then
@@ -137,6 +142,6 @@ else
   # Start the eth node listening restricted to localhost and our custom
   # configuration file.
   tmux send-keys -t "$TMUX_WIN_ID" "${NODES_ROOT}/harness-ctl/${NAME} --nodiscover " \
-	  "--config ${NODE_DIR}/eth.conf --verbosity 5 2>&1 | tee " \
+	  "--config ${NODE_DIR}/eth.conf --verbosity 5 ${HTTP_OPT} 2>&1 | tee " \
 	  "${NODE_DIR}/${NAME}.log" C-m
 fi

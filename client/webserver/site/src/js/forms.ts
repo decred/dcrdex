@@ -312,7 +312,14 @@ export class NewWalletForm {
     })
     // Either this is a walletDef for a token's uncreated parent asset, or this
     // is the definition for the token.
-    const noWalletPWNeeded = walletDef.seeded || Boolean(this.current.asset.token)
+    let containsRequired = false
+    for (const opt of configOpts) {
+      if (opt.required) {
+        containsRequired = true
+        break
+      }
+    }
+    const noWalletPWNeeded = !containsRequired && (walletDef.seeded || Boolean(this.current.asset.token))
     if (appPwCached && noWalletPWNeeded) {
       Doc.show(page.oneBttnBox)
     } else if (noWalletPWNeeded) {
@@ -392,13 +399,15 @@ interface ConfigFormOptions {
   assetHasActiveOrders?: boolean
 }
 
+let repeatableCounter = 0
+
 /*
  * WalletConfigForm is a dynamically generated sub-form for setting
  * asset-specific wallet configuration options.
 */
 export class WalletConfigForm {
   form: HTMLElement
-  configElements: Record<string, HTMLElement>
+  configElements: [ConfigOption, HTMLElement][]
   configOpts: ConfigOption[]
   sectionize: boolean
   allSettings: PageElement
@@ -406,6 +415,7 @@ export class WalletConfigForm {
   textInputTmpl: PageElement
   dateInputTmpl: PageElement
   checkboxTmpl: PageElement
+  repeatableTmpl: PageElement
   fileSelector: PageElement
   fileInput: PageElement
   errMsg: PageElement
@@ -418,11 +428,12 @@ export class WalletConfigForm {
   loadedSettings: PageElement
   defaultSettingsMsg: PageElement
   defaultSettings: PageElement
+  formOpts: ConfigFormOptions
 
   constructor (form: HTMLElement, sectionize: boolean) {
     this.form = form
     // A configElement is a div containing an input and its label.
-    this.configElements = {}
+    this.configElements = []
     // configOpts is the wallet options provided by core.
     this.configOpts = []
     this.sectionize = sectionize
@@ -436,6 +447,8 @@ export class WalletConfigForm {
     this.dateInputTmpl.remove()
     this.checkboxTmpl = Doc.tmplElement(form, 'checkbox')
     this.checkboxTmpl.remove()
+    this.repeatableTmpl = Doc.tmplElement(form, 'repeatableInput')
+    this.repeatableTmpl.remove()
     this.fileSelector = Doc.tmplElement(form, 'fileSelector')
     this.fileInput = Doc.tmplElement(form, 'fileInput')
     this.errMsg = Doc.tmplElement(form, 'errMsg')
@@ -492,14 +505,62 @@ export class WalletConfigForm {
     if (loadedOpts + defaultOpts === 0) Doc.hide(this.showOther, this.otherSettings)
   }
 
+  addOpt (box: HTMLElement, opt: ConfigOption, insertAfter?: PageElement, n?: number): PageElement {
+    const elID = 'wcfg-' + opt.key + (n ? String(n) : '')
+    let el: HTMLElement
+    if (opt.isboolean) el = this.checkboxTmpl.cloneNode(true) as HTMLElement
+    else if (opt.isdate) el = this.dateInputTmpl.cloneNode(true) as HTMLElement
+    else if (opt.repeatable) {
+      el = this.repeatableTmpl.cloneNode(true) as HTMLElement
+      el.classList.add('repeatable')
+      Doc.bind(Doc.tmplElement(el, 'add'), 'click', () => {
+        repeatableCounter++
+        this.addOpt(box, opt, el, repeatableCounter)
+      })
+    } else el = this.textInputTmpl.cloneNode(true) as HTMLElement
+    this.configElements.push([opt, el])
+    const input = el.querySelector('input') as ConfigOptionInput
+    input.id = elID
+    const label = Doc.safeSelector(el, 'label')
+    label.htmlFor = elID // 'for' attribute, but 'for' is a keyword
+    label.prepend(opt.displayname)
+    if (typeof this.formOpts.assetID === 'number') {
+      const logo = new window.Image(15, 15)
+      logo.src = Doc.logoPathFromID(this.formOpts.assetID || -1)
+      label.prepend(logo)
+      opt.regAsset = this.formOpts.assetID // Signal for map filtering
+    }
+    if (insertAfter) insertAfter.after(el)
+    else box.appendChild(el)
+    if (opt.noecho) {
+      input.type = 'password'
+      input.autocomplete = 'off'
+    }
+    if (opt.description) label.dataset.tooltip = opt.description
+    if (opt.isboolean) input.checked = opt.default
+    else if (opt.isdate) {
+      const getMinMaxVal = (minMax: string | number) => {
+        if (!minMax) return ''
+        if (minMax === 'now') return dateToString(new Date())
+        return dateToString(new Date((minMax as number) * 1000))
+      }
+      input.max = getMinMaxVal(opt.max)
+      input.min = getMinMaxVal(opt.min)
+      input.valueAsDate = opt.default ? new Date(opt.default * 1000) : new Date()
+    } else input.value = opt.default !== null ? opt.default : ''
+    input.disabled = Boolean(opt.disablewhenactive && this.formOpts.assetHasActiveOrders)
+    return el
+  }
+
   /*
    * update creates the dynamic form.
    */
   update (configOpts: ConfigOption[] | null, formOpts: ConfigFormOptions) {
+    this.formOpts = formOpts
     configOpts = configOpts || []
     if (formOpts.skipClear) this.configOpts.push(...configOpts)
     else {
-      this.configElements = {}
+      this.configElements = []
       this.configOpts = configOpts
       Doc.empty(this.dynamicOpts, this.defaultSettings, this.loadedSettings)
     }
@@ -514,51 +575,13 @@ export class WalletConfigForm {
       this.defaultSettings, this.errMsg
     )
     const defaultedOpts = []
-    const addOpt = (box: HTMLElement, opt: ConfigOption) => {
-      const elID = 'wcfg-' + opt.key
-      let el: HTMLElement
-      if (opt.isboolean) el = this.checkboxTmpl.cloneNode(true) as HTMLElement
-      else if (opt.isdate) el = this.dateInputTmpl.cloneNode(true) as HTMLElement
-      else el = this.textInputTmpl.cloneNode(true) as HTMLElement
-      this.configElements[opt.key] = el
-      const input = el.querySelector('input') as ConfigOptionInput
-      input.id = elID
-      input.configOpt = opt
-      const label = Doc.safeSelector(el, 'label')
-      label.htmlFor = elID // 'for' attribute, but 'for' is a keyword
-      label.prepend(opt.displayname)
-      if (typeof formOpts.assetID !== 'undefined') {
-        const logo = new window.Image(15, 15)
-        logo.src = Doc.logoPathFromID(formOpts.assetID)
-        label.prepend(logo)
-        opt.regAsset = formOpts.assetID // Signal for map filtering
-      }
-      box.appendChild(el)
-      if (opt.noecho) {
-        input.type = 'password'
-        input.autocomplete = 'off'
-      }
-      if (opt.description) label.dataset.tooltip = opt.description
-      if (opt.isboolean) input.checked = opt.default
-      else if (opt.isdate) {
-        const getMinMaxVal = (minMax: string | number) => {
-          if (!minMax) return ''
-          if (minMax === 'now') return dateToString(new Date())
-          return dateToString(new Date((minMax as number) * 1000))
-        }
-        input.max = getMinMaxVal(opt.max)
-        input.min = getMinMaxVal(opt.min)
-        input.valueAsDate = opt.default ? new Date(opt.default * 1000) : new Date()
-      } else input.value = opt.default !== null ? opt.default : ''
-      input.disabled = Boolean(opt.disablewhenactive && formOpts.assetHasActiveOrders)
-    }
     for (const opt of this.configOpts) {
       if (this.sectionize && opt.default !== null) defaultedOpts.push(opt)
-      else addOpt(this.dynamicOpts, opt)
+      else this.addOpt(this.dynamicOpts, opt)
     }
     if (defaultedOpts.length) {
       for (const opt of defaultedOpts) {
-        addOpt(this.defaultSettings, opt)
+        this.addOpt(this.defaultSettings, opt)
       }
       Doc.show(this.showOther, this.defaultSettingsMsg, this.defaultSettings)
     } else {
@@ -589,17 +612,43 @@ export class WalletConfigForm {
    * sets the inputs value to the corresponding cfg value. A list of matching
    * configElements is returned.
    */
-  setConfig (cfg: Record<string, string>) {
+  setConfig (cfg: Record<string, string>): HTMLElement[] {
     const finds: HTMLElement[] = []
-    this.allSettings.querySelectorAll('input').forEach((input: ConfigOptionInput) => {
-      const k = input.configOpt.key
-      const v = cfg[k]
-      if (typeof v === 'undefined') return
-      finds.push(this.configElements[k])
-      if (input.configOpt.isboolean) input.checked = isTruthyString(v)
-      else if (input.configOpt.isdate) input.valueAsDate = new Date(parseInt(v) * 1000)
+    const handledRepeatables: Record<string, boolean> = {}
+    const removes: [ConfigOption, PageElement][] = []
+    for (const r of [...this.configElements]) {
+      const [opt, el] = r
+      const v = cfg[opt.key]
+      if (v === undefined) continue
+      if (opt.repeatable) {
+        if (handledRepeatables[opt.key]) {
+          removes.push(r)
+          continue
+        }
+        handledRepeatables[opt.key] = true
+        const vals = v.split(opt.repeatable)
+        const firstVal = vals[0]
+        finds.push(el)
+        Doc.safeSelector(el, 'input').value = firstVal
+        for (let i = 1; i < vals.length; i++) {
+          repeatableCounter++
+          const newEl = this.addOpt(el.parentElement as PageElement, opt, el, repeatableCounter)
+          Doc.safeSelector(newEl, 'input').value = vals[i]
+          finds.push(newEl)
+        }
+        continue
+      }
+      finds.push(el)
+      const input = Doc.safeSelector(el, 'input') as HTMLInputElement
+      if (opt.isboolean) input.checked = isTruthyString(v)
+      else if (opt.isdate) input.valueAsDate = new Date(parseInt(v) * 1000)
       else input.value = v
-    })
+    }
+    for (const r of removes) {
+      const i = this.configElements.indexOf(r)
+      if (i >= 0) this.configElements.splice(i, 1)
+    }
+
     return finds
   }
 
@@ -622,9 +671,9 @@ export class WalletConfigForm {
    */
   map (assetID: number): Record<string, string> {
     const config: Record<string, string> = {}
-    this.allSettings.querySelectorAll('input').forEach((input: ConfigOptionInput) => {
-      const opt = input.configOpt
-      if (opt.regAsset !== undefined && opt.regAsset !== assetID) return
+    for (const [opt, el] of this.configElements) {
+      const input = Doc.safeSelector(el, 'input') as HTMLInputElement
+      if (opt.regAsset !== undefined && opt.regAsset !== assetID) continue
       if (opt.isboolean && opt.key) {
         config[opt.key] = input.checked ? '1' : '0'
       } else if (opt.isdate && opt.key) {
@@ -633,12 +682,12 @@ export class WalletConfigForm {
         let date = input.value ? toUnixDate(new Date(input.value)) : 0
         if (date < minDate) date = minDate
         else if (date > maxDate) date = maxDate
-        config[input.configOpt.key] = '' + date
+        config[opt.key] = '' + date
       } else if (input.value) {
-        config[input.configOpt.key] = input.value
+        if (opt.repeatable && config[opt.key]) config[opt.key] += opt.repeatable + input.value
+        else config[opt.key] = input.value
       }
-    })
-
+    }
     return config
   }
 
@@ -647,14 +696,16 @@ export class WalletConfigForm {
    * server-provided configOpts array.
    */
   reorder (box: HTMLElement) {
-    const inputs: Record<string, HTMLElement> = {}
+    const inputs: Record<string, HTMLElement[]> = {}
     box.querySelectorAll('input').forEach((input: ConfigOptionInput) => {
       const k = input.configOpt.key
-      inputs[k] = this.configElements[k]
+      const els = []
+      for (const [opt, el] of this.configElements) if (opt.key === k) els.push(el)
+      inputs[k] = els
     })
     for (const opt of this.configOpts) {
-      const input = inputs[opt.key]
-      if (input) box.append(input)
+      const els = inputs[opt.key] || []
+      for (const el of els) box.append(el)
     }
   }
 }

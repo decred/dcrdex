@@ -226,11 +226,17 @@ type ConfigOption struct {
 	// UI will display the current date.
 	MaxValue          interface{} `json:"max"`
 	MinValue          interface{} `json:"min"`
-	NoEcho            bool        `json:"noecho"`
-	IsBoolean         bool        `json:"isboolean"`
-	IsDate            bool        `json:"isdate"`
-	DisableWhenActive bool        `json:"disablewhenactive"`
-	IsBirthdayConfig  bool        `json:"isBirthdayConfig"`
+	Options           map[string]*ConfigOption
+	NoEcho            bool `json:"noecho"`
+	IsBoolean         bool `json:"isboolean"`
+	IsDate            bool `json:"isdate"`
+	DisableWhenActive bool `json:"disablewhenactive"`
+	IsBirthdayConfig  bool `json:"isBirthdayConfig"`
+	// Repeatable signals a text input that can be duplicated and submitted
+	// multiple times, with the specified delimiter used to encode the data
+	// in the settings map.
+	Repeatable string `json:"repeatable"`
+	Required   bool   `json:"required"`
 }
 
 const (

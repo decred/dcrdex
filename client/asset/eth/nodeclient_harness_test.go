@@ -32,6 +32,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -45,6 +46,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -64,22 +66,13 @@ const (
 
 	// The following constants are related to testnet testing.
 
-	// isTestnet can be set to true to perform tests on the goerli testnet.
-	// May need some setup including sending testnet coins to the addresses
-	// and a lengthy sync. Wallet addresses are the same as simnet. All
-	// wait and lock times are multiplied by testnetSecPerBlock. Tests may
-	// need to be run with a high --timeout=2h for the initial sync.
-	//
-	// Only for non-token tests, so run with --run=TestGroupName.
-	//
-	// TODO: Make this also work for token tests.
-	isTestnet = false
 	// testnetWalletSeed and testnetParticipantWalletSeed are required for
 	// use on testnet and can be any 256 bit hex. If the wallets created by
 	// these seeds do not have enough funds to test, addresses that need
 	// funds will be printed.
 	testnetWalletSeed            = ""
 	testnetParticipantWalletSeed = ""
+
 	// addPeer is optional and will be added if set. It should looks
 	// something like enode://1565e5bc2...2c3300e9@127.0.0.1:30303
 	// Be sure the full node is run with --light.serve ##
@@ -93,16 +86,19 @@ var (
 	testnetWalletDir            = filepath.Join(homeDir, "ethtest", "testnet_contract_tests", "walletA")
 	testnetParticipantWalletDir = filepath.Join(homeDir, "ethtest", "testnet_contract_tests", "walletB")
 	alphaNodeDir                = filepath.Join(homeDir, "dextest", "eth", "alpha", "node")
+	alphaIPCFile                = filepath.Join(alphaNodeDir, "geth.ipc")
+	betaNodeDir                 = filepath.Join(homeDir, "dextest", "eth", "beta", "node")
+	betaIPCFile                 = filepath.Join(betaNodeDir, "geth.ipc")
 	ctx                         context.Context
 	tLogger                     = dex.StdOutLogger("ETHTEST", dex.LevelCritical)
 	simnetWalletSeed            = "0812f5244004217452059e2fd11603a511b5d0870ead753df76c966ce3c71531"
 	simnetAddr                  common.Address
 	simnetAcct                  *accounts.Account
-	ethClient                   *nodeClient
+	ethClient                   ethFetcher
 	participantWalletSeed       = "a897afbdcba037c8c735cc63080558a30d72851eb5a3d05684400ec4123a2d00"
 	participantAddr             common.Address
 	participantAcct             *accounts.Account
-	participantEthClient        *nodeClient
+	participantEthClient        ethFetcher
 	ethSwapContractAddr         common.Address
 	simnetID                    int64 = 42
 	simnetContractor            contractor
@@ -116,6 +112,21 @@ var (
 	// block currently. Is set in code to testnetSecPerBlock if runing on
 	// testnet.
 	secPerBlock = time.Second
+	// If you are testing on testnet, you must specify the rpcNode.
+	rpcNode string
+	// useRPC can be set to true to test the RPC clients.
+	useRPC = false
+
+	// isTestnet can be set to true to perform tests on the goerli testnet.
+	// May need some setup including sending testnet coins to the addresses
+	// and a lengthy sync. Wallet addresses are the same as simnet. All
+	// wait and lock times are multiplied by testnetSecPerBlock. Tests may
+	// need to be run with a high --timeout=2h for the initial sync.
+	//
+	// Only for non-token tests, so run with --run=TestGroupName.
+	//
+	// TODO: Make this also work for token tests.
+	isTestnet = false
 )
 
 func newContract(stamp uint64, secretHash [32]byte, val uint64) *asset.Contract {
@@ -138,7 +149,7 @@ func newRedeem(secret, secretHash [32]byte) *asset.Redemption {
 
 // waitForReceipt waits for a tx. This is useful on testnet when a tx may be "missing"
 // due to reorg. Wait for a few blocks to find the main chain and hopefully our tx.
-func waitForReceipt(t *testing.T, nc *nodeClient, tx *types.Transaction) (*types.Receipt, error) {
+func waitForReceipt(t *testing.T, nc ethFetcher, tx *types.Transaction) (*types.Receipt, error) {
 	t.Helper()
 	hash := tx.Hash()
 	// Waiting as much as five blocks.
@@ -167,7 +178,7 @@ func waitForReceipt(t *testing.T, nc *nodeClient, tx *types.Transaction) (*types
 
 // waitForMined will multiply the time limit by testnetSecPerBlock for
 // testnet and mine blocks when on simnet.
-func waitForMined(t *testing.T, nBlock int, waitTimeLimit bool) error {
+func waitForMined(t *testing.T, cl ethFetcher, nBlock int, waitTimeLimit bool) error {
 	t.Helper()
 	if !isTestnet {
 		err := exec.Command("geth", "--datadir="+alphaNodeDir, "attach", "--exec", "miner.start()").Run()
@@ -187,6 +198,7 @@ out:
 		case <-timesUp:
 			return errors.New("timed out")
 		case <-time.After(time.Second):
+			// TODO RPC
 			txsa, err := ethClient.pendingTransactions()
 			if err != nil {
 				return fmt.Errorf("initiator pendingTransactions error: %v", err)
@@ -204,6 +216,94 @@ out:
 		<-timesUp
 	}
 	return nil
+}
+
+func prepareRPCClient(name, dataDir, endpoint string, net dex.Network) (*multiRPCClient, *accounts.Account, error) {
+	ethCfg, err := ethChainConfig(net)
+	if err != nil {
+		return nil, nil, err
+	}
+	cfg := ethCfg.Genesis.Config
+
+	c, err := newMultiRPCClient(dataDir, []string{endpoint}, tLogger.SubLogger(name), cfg, big.NewInt(chainIDs[net]), net)
+	if err != nil {
+		return nil, nil, fmt.Errorf("(%s) newNodeClient error: %v", name, err)
+	}
+	if err := c.connect(ctx); err != nil {
+		return nil, nil, fmt.Errorf("(%s) connect error: %v", name, err)
+	}
+	return c, c.creds.acct, nil
+}
+
+func prepareTestRPCClients(initiatorDir, participantDir string, net dex.Network) (err error) {
+	initiatorEndpoint, participantEndpoint := alphaIPCFile, betaIPCFile
+	if net == dex.Testnet {
+		if rpcNode == "" {
+			return fmt.Errorf("rpcNode must be specified for testnet")
+		}
+		initiatorEndpoint, participantEndpoint = rpcNode, rpcNode
+	}
+
+	ethClient, simnetAcct, err = prepareRPCClient("initiator", initiatorDir, initiatorEndpoint, net)
+	if err != nil {
+		return err
+	}
+
+	participantEthClient, participantAcct, err = prepareRPCClient("participant", participantDir, participantEndpoint, net)
+	if err != nil {
+		ethClient.shutdown()
+		return err
+	}
+
+	fmt.Println("initiator address is", ethClient.address())
+	fmt.Println("participant address is", participantEthClient.address())
+	return nil
+}
+
+func prepareNodeClient(name, dataDir string, net dex.Network) (*nodeClient, *accounts.Account, error) {
+	c, err := newNodeClient(getWalletDir(dataDir, net), net, tLogger.SubLogger(name))
+	if err != nil {
+		return nil, nil, fmt.Errorf("(%s) newNodeClient error: %v", name, err)
+	}
+	if err := c.connect(ctx); err != nil {
+		return nil, nil, fmt.Errorf("(%s) connect error: %v", name, err)
+	}
+
+	accts, err := exportAccountsFromNode(c.node)
+	if err != nil {
+		c.shutdown()
+		return nil, nil, fmt.Errorf("(%s) account export error: %v", name, err)
+	}
+	if len(accts) != 1 {
+		c.shutdown()
+		return nil, nil, fmt.Errorf("(%s) expected 1 account to be exported but got %v", name, len(accts))
+	}
+
+	if addPeer != "" {
+		if err = c.addPeer(addPeer); err != nil {
+			c.shutdown()
+			return nil, nil, fmt.Errorf("initiator unable to add peer: %w", err)
+		}
+	}
+
+	return c, &accts[0], nil
+}
+
+func prepareTestNodeClients(initiatorDir, participantDir string, net dex.Network) (err error) {
+	ethClient, simnetAcct, err = prepareNodeClient("initiator", initiatorDir, net)
+	if err != nil {
+		return err
+	}
+
+	participantEthClient, participantAcct, err = prepareNodeClient("participant", participantDir, net)
+	if err != nil {
+		ethClient.shutdown()
+		return err
+	}
+
+	fmt.Println("initiator address is", ethClient.address())
+	fmt.Println("participant address is", participantEthClient.address())
+	return
 }
 
 func runSimnet(m *testing.M) (int, error) {
@@ -235,27 +335,17 @@ func runSimnet(m *testing.M) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	ethClient, err = newNodeClient(getWalletDir(simnetWalletDir, dex.Simnet), dex.Simnet, tLogger.SubLogger("initiator"))
-	if err != nil {
-		return 1, fmt.Errorf("newNodeClient initiator error: %v", err)
+
+	if useRPC {
+		err = prepareTestRPCClients(simnetWalletDir, participantWalletDir, dex.Simnet)
+	} else {
+		err = prepareTestNodeClients(simnetWalletDir, participantWalletDir, dex.Simnet)
 	}
-	if err := ethClient.connect(ctx); err != nil {
-		return 1, fmt.Errorf("connect error: %v\n", err)
+	if err != nil {
+		return 1, err
 	}
 	defer ethClient.shutdown()
-
-	fmt.Println("initiator address is", ethClient.address())
-
-	participantEthClient, err = newNodeClient(getWalletDir(participantWalletDir, dex.Simnet), dex.Simnet, tLogger.SubLogger("participant"))
-	if err != nil {
-		return 1, fmt.Errorf("newNodeClient participant error: %v", err)
-	}
-	if err := participantEthClient.connect(ctx); err != nil {
-		return 1, fmt.Errorf("connect error: %v\n", err)
-	}
 	defer participantEthClient.shutdown()
-
-	fmt.Println("participant address is", participantEthClient.address())
 
 	if err := syncClient(ethClient); err != nil {
 		return 1, fmt.Errorf("error initializing initiator client: %v", err)
@@ -264,23 +354,7 @@ func runSimnet(m *testing.M) (int, error) {
 		return 1, fmt.Errorf("error initializing participant client: %v", err)
 	}
 
-	accts, err := exportAccountsFromNode(ethClient.node)
-	if err != nil {
-		return 1, err
-	}
-	if len(accts) != 1 {
-		return 1, fmt.Errorf("expected 1 account to be exported but got %v", len(accts))
-	}
-	simnetAcct = &accts[0]
 	simnetAddr = simnetAcct.Address
-	accts, err = exportAccountsFromNode(participantEthClient.node)
-	if err != nil {
-		return 1, err
-	}
-	if len(accts) != 1 {
-		return 1, fmt.Errorf("expected 1 account to be exported but got %v", len(accts))
-	}
-	participantAcct = &accts[0]
 	participantAddr = participantAcct.Address
 
 	if simnetContractor, err = newV0Contractor(dex.Simnet, simnetAddr, ethClient.contractBackend()); err != nil {
@@ -383,35 +457,11 @@ func runTestnet(m *testing.M) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	ethClient, err = newNodeClient(getWalletDir(testnetWalletDir, dex.Testnet), dex.Testnet, tLogger.SubLogger("initiator"))
-	if err != nil {
-		return 1, fmt.Errorf("newNodeClient initiator error: %v", err)
-	}
-	if err := ethClient.connect(ctx); err != nil {
-		return 1, fmt.Errorf("connect error: %v\n", err)
+	if err = prepareTestNodeClients(testnetWalletDir, testnetParticipantWalletDir, dex.Testnet); err != nil {
+		return 1, err
 	}
 	defer ethClient.shutdown()
-
-	fmt.Println("initiator address is", ethClient.address())
-
-	participantEthClient, err = newNodeClient(getWalletDir(testnetParticipantWalletDir, dex.Testnet), dex.Testnet, tLogger.SubLogger("participant"))
-	if err != nil {
-		return 1, fmt.Errorf("newNodeClient participant error: %v", err)
-	}
-	if err := participantEthClient.connect(ctx); err != nil {
-		return 1, fmt.Errorf("connect error: %v\n", err)
-	}
 	defer participantEthClient.shutdown()
-
-	fmt.Println("participant address is", participantEthClient.address())
-	if addPeer != "" {
-		if err := ethClient.addPeer(addPeer); err != nil {
-			return 1, fmt.Errorf("unable to add peer: %v", err)
-		}
-		if err := participantEthClient.addPeer(addPeer); err != nil {
-			return 1, fmt.Errorf("unable to add peer: %v", err)
-		}
-	}
 
 	fmt.Println("Testnet nodes starting sync, this may take a while...")
 	wg := sync.WaitGroup{}
@@ -435,23 +485,7 @@ func runTestnet(m *testing.M) (int, error) {
 	}
 	fmt.Println("Testnet nodes synced!!")
 
-	accts, err := exportAccountsFromNode(ethClient.node)
-	if err != nil {
-		return 1, err
-	}
-	if len(accts) != 1 {
-		return 1, fmt.Errorf("expected 1 account to be exported but got %v", len(accts))
-	}
-	simnetAcct = &accts[0]
 	simnetAddr = simnetAcct.Address
-	accts, err = exportAccountsFromNode(participantEthClient.node)
-	if err != nil {
-		return 1, err
-	}
-	if len(accts) != 1 {
-		return 1, fmt.Errorf("expected 1 account to be exported but got %v", len(accts))
-	}
-	participantAcct = &accts[0]
 	participantAddr = participantAcct.Address
 
 	if simnetContractor, err = newV0Contractor(dex.Testnet, simnetAddr, ethClient.contractBackend()); err != nil {
@@ -486,6 +520,27 @@ func runTestnet(m *testing.M) (int, error) {
 
 func TestMain(m *testing.M) {
 	dexeth.MaybeReadSimnetAddrs()
+	targs := make(map[string]string)
+	for _, param := range strings.Split(os.Getenv("TARGS"), " ") {
+		if param == "" {
+			continue
+		}
+		var arg string
+		a := strings.Split(param, "=")
+		if len(a) > 1 {
+			param = a[0]
+			arg = strings.Join(a[1:], "=")
+		}
+		targs[strings.TrimLeft(param, "-")] = arg
+	}
+
+	if _, exists := targs["rpc"]; exists {
+		useRPC = true
+	}
+	if _, exists := targs["testnet"]; exists {
+		isTestnet = true
+	}
+
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithCancel(context.Background())
 	c := make(chan os.Signal, 1)
@@ -512,17 +567,20 @@ func TestMain(m *testing.M) {
 }
 
 func setupWallet(walletDir, seed, listenAddress string, net dex.Network) error {
-	settings := map[string]string{
-		"nodelistenaddr": listenAddress,
+	walletType := walletTypeGeth
+	if useRPC {
+		walletType = walletTypeRPC
 	}
 	seedB, _ := hex.DecodeString(seed)
 	createWalletParams := asset.CreateWalletParams{
-		Type:     walletTypeGeth,
-		Seed:     seedB,
-		Pass:     []byte(pw),
-		Settings: settings,
-		DataDir:  walletDir,
-		Net:      net,
+		Type: walletType,
+		Seed: seedB,
+		Pass: []byte(pw),
+		Settings: map[string]string{
+			"nodelistenaddr": listenAddress,
+		},
+		DataDir: walletDir,
+		Net:     net,
 	}
 	return CreateWallet(&createWalletParams)
 }
@@ -548,7 +606,7 @@ func prepareTokenClients(t *testing.T) {
 	}
 
 	time.Sleep(1) // Give txs time to propagate.
-	if err := waitForMined(t, 8, true); err != nil {
+	if err := waitForMined(t, participantEthClient, 8, true); err != nil {
 		t.Fatalf("unexpected error while waiting to mine approval block: %v", err)
 	}
 
@@ -565,7 +623,7 @@ func prepareTokenClients(t *testing.T) {
 	spew.Dump(receipt2)
 }
 
-func syncClient(cl *nodeClient) error {
+func syncClient(cl ethFetcher) error {
 	giveUpAt := 60
 	if isTestnet {
 		giveUpAt = 10000
@@ -574,7 +632,10 @@ func syncClient(cl *nodeClient) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		prog := cl.syncProgress()
+		prog, err := cl.syncProgress(ctx)
+		if err != nil {
+			return err
+		}
 		if isTestnet {
 			if prog.HighestBlock == 0 {
 				bh, err := cl.bestHeader(ctx)
@@ -668,7 +729,11 @@ func TestTokenAccess(t *testing.T) {
 }
 
 func testAddPeer(t *testing.T) {
-	if err := ethClient.addPeer(alphaNode); err != nil {
+	c, is := ethClient.(*nodeClient)
+	if !is {
+		t.Skip("add peer not supported for RPC clients")
+	}
+	if err := c.addPeer(alphaNode); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -759,7 +824,8 @@ func testSendTransaction(t *testing.T) {
 	txHash = tx.Hash()
 
 	confs, err := ethClient.transactionConfirmations(ctx, txHash)
-	if err != nil {
+	// CoinNotFoundError OK for RPC wallet until mined.
+	if err != nil && !(useRPC && errors.Is(err, asset.CoinNotFoundError)) {
 		t.Fatalf("transactionConfirmations error: %v", err)
 	}
 	if confs != 0 {
@@ -767,7 +833,7 @@ func testSendTransaction(t *testing.T) {
 	}
 
 	spew.Dump(tx)
-	if err := waitForMined(t, 10, false); err != nil {
+	if err := waitForMined(t, ethClient, 10, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -784,7 +850,10 @@ func testHeaderByHash(t *testing.T) {
 	// Checking a random hash should result in no header.
 	var txHash common.Hash
 	copy(txHash[:], encode.RandomBytes(32))
-	hdr := ethClient.headerByHash(txHash)
+	hdr, err := ethClient.headerByHash(ctx, txHash)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if hdr != nil {
 		t.Fatal("expected nil header for nonexistant hash")
 	}
@@ -796,7 +865,11 @@ func testHeaderByHash(t *testing.T) {
 
 	txHash = bestHdr.Hash()
 
-	hdrHash := ethClient.headerByHash(txHash).Hash()
+	hdr, err = ethClient.headerByHash(ctx, txHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hdrHash := hdr.Hash()
 	if !bytes.Equal(hdrHash[:], txHash[:]) {
 		t.Fatal("hashes not equal")
 	}
@@ -811,13 +884,29 @@ func testSendSignedTransaction(t *testing.T) {
 		t.Fatalf("no CoinNotFoundError")
 	}
 
-	nonce, err := ethClient.leth.ApiBackend.GetPoolNonce(ctx, ethClient.creds.addr)
-	if err != nil {
-		t.Fatalf("error getting nonce: %v", err)
+	var nonce uint64
+	var chainID *big.Int
+	var ks *keystore.KeyStore
+	switch c := ethClient.(type) {
+	case *nodeClient:
+		nonce, err = c.leth.ApiBackend.GetPoolNonce(ctx, c.creds.addr)
+		if err != nil {
+			t.Fatalf("error getting nonce: %v", err)
+		}
+		ks = c.creds.ks
+		chainID = c.chainID
+	case *multiRPCClient:
+		nonce, err = c.nextNonce(ctx)
+		if err != nil {
+			t.Fatalf("error getting nonce: %v", err)
+		}
+		ks = c.creds.ks
+		chainID = c.chainID
 	}
+
 	tx := types.NewTx(&types.DynamicFeeTx{
 		To:        &simnetAddr,
-		ChainID:   ethClient.chainID,
+		ChainID:   chainID,
 		Nonce:     nonce,
 		Gas:       21000,
 		GasFeeCap: dexeth.GweiToWei(maxFeeRate),
@@ -825,7 +914,7 @@ func testSendSignedTransaction(t *testing.T) {
 		Value:     dexeth.GweiToWei(1),
 		Data:      []byte{},
 	})
-	tx, err = ethClient.creds.ks.SignTx(*simnetAcct, tx, ethClient.chainID)
+	tx, err = ks.SignTx(*simnetAcct, tx, chainID)
 
 	err = ethClient.sendSignedTransaction(ctx, tx)
 	if err != nil {
@@ -835,7 +924,8 @@ func testSendSignedTransaction(t *testing.T) {
 	txHash = tx.Hash()
 
 	confs, err := ethClient.transactionConfirmations(ctx, txHash)
-	if err != nil {
+	// CoinNotFoundError OK for RPC wallet until mined.
+	if err != nil && !(useRPC && errors.Is(err, asset.CoinNotFoundError)) {
 		t.Fatalf("transactionConfirmations error: %v", err)
 	}
 	if confs != 0 {
@@ -843,7 +933,7 @@ func testSendSignedTransaction(t *testing.T) {
 	}
 
 	spew.Dump(tx)
-	if err := waitForMined(t, 10, false); err != nil {
+	if err := waitForMined(t, ethClient, 10, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -862,7 +952,7 @@ func testTransactionReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := waitForMined(t, 10, false); err != nil {
+	if err := waitForMined(t, ethClient, 10, false); err != nil {
 		t.Fatal(err)
 	}
 	receipt, err := waitForReceipt(t, ethClient, tx)
@@ -893,7 +983,11 @@ func testSwap(t *testing.T, assetID uint32) {
 }
 
 func testSyncProgress(t *testing.T) {
-	spew.Dump(ethClient.syncProgress())
+	p, err := ethClient.syncProgress(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spew.Dump(p)
 }
 
 func testInitiateGas(t *testing.T, assetID uint32) {
@@ -938,8 +1032,14 @@ func testInitiateGas(t *testing.T, assetID uint32) {
 
 // feesAtBlk calculates the gas fee at blkNum. This adds the base fee at blkNum
 // to a minimum gas tip cap.
-func feesAtBlk(ctx context.Context, n *nodeClient, blkNum int64) (fees *big.Int, err error) {
-	hdr, err := n.leth.ApiBackend.HeaderByNumber(ctx, rpc.BlockNumber(blkNum))
+func feesAtBlk(ctx context.Context, n ethFetcher, blkNum int64) (fees *big.Int, err error) {
+	var hdr *types.Header
+	switch c := n.(type) {
+	case *nodeClient:
+		hdr, err = c.leth.ApiBackend.HeaderByNumber(ctx, rpc.BlockNumber(blkNum))
+	case *multiRPCClient:
+		hdr, err = c.HeaderByNumber(ctx, big.NewInt(blkNum))
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1146,7 +1246,7 @@ func testInitiate(t *testing.T, assetID uint32) {
 			t.Fatalf("%s: initiate error: %v", test.name, err)
 		}
 
-		if err := waitForMined(t, 10, false); err != nil {
+		if err := waitForMined(t, ethClient, 10, false); err != nil {
 			t.Fatalf("%s: post-initiate mining error: %v", test.name, err)
 		}
 
@@ -1261,7 +1361,7 @@ func testRedeemGas(t *testing.T, assetID uint32) {
 	if err != nil {
 		t.Fatalf("Unable to initiate swap: %v ", err)
 	}
-	if err := waitForMined(t, 8, true); err != nil {
+	if err := waitForMined(t, ethClient, 8, true); err != nil {
 		t.Fatalf("unexpected error while waiting to mine: %v", err)
 	}
 	receipt, err := waitForReceipt(t, ethClient, tx)
@@ -1340,7 +1440,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 	tests := []struct {
 		name               string
 		sleepNBlocks       int
-		redeemerClient     *nodeClient
+		redeemerClient     ethFetcher
 		redeemer           *accounts.Account
 		redeemerContractor contractor
 		swaps              []*asset.Contract
@@ -1474,7 +1574,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		}
 
 		// This waitForMined will always take test.sleepNBlocks to complete.
-		if err := waitForMined(t, test.sleepNBlocks, true); err != nil {
+		if err := waitForMined(t, test.redeemerClient, test.sleepNBlocks, true); err != nil {
 			t.Fatalf("%s: post-init mining error: %v", test.name, err)
 		}
 
@@ -1537,7 +1637,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		}
 		spew.Dump(tx)
 
-		if err := waitForMined(t, 10, false); err != nil {
+		if err := waitForMined(t, test.redeemerClient, 10, false); err != nil {
 			t.Fatalf("%s: post-redeem mining error: %v", test.name, err)
 		}
 
@@ -1644,7 +1744,7 @@ func testRefundGas(t *testing.T, assetID uint32) {
 	if err != nil {
 		t.Fatalf("Unable to initiate swap: %v ", err)
 	}
-	if err := waitForMined(t, 8, true); err != nil {
+	if err := waitForMined(t, ethClient, 8, true); err != nil {
 		t.Fatalf("unexpected error while waiting to mine: %v", err)
 	}
 
@@ -1690,7 +1790,7 @@ func testRefund(t *testing.T, assetID uint32) {
 	tests := []struct {
 		name                         string
 		refunder                     *accounts.Account
-		refunderClient               *nodeClient
+		refunderClient               ethFetcher
 		refunderContractor           contractor
 		finalState                   dexeth.SwapStep
 		addAmt, redeem, isRefundable bool
@@ -1736,6 +1836,7 @@ func testRefund(t *testing.T, assetID uint32) {
 
 	for _, test := range tests {
 		balance := func() (*big.Int, error) {
+
 			return test.refunderClient.addressBalance(ctx, test.refunder.Address)
 		}
 
@@ -1768,7 +1869,7 @@ func testRefund(t *testing.T, assetID uint32) {
 		}
 
 		if test.redeem {
-			if err := waitForMined(t, sleepForNBlocks, false); err != nil {
+			if err := waitForMined(t, ethClient, sleepForNBlocks, false); err != nil {
 				t.Fatalf("%s: pre-redeem mining error: %v", test.name, err)
 			}
 
@@ -1780,7 +1881,7 @@ func testRefund(t *testing.T, assetID uint32) {
 		}
 
 		// This waitForMined will always take test.sleep to complete.
-		if err := waitForMined(t, sleepForNBlocks, true); err != nil {
+		if err := waitForMined(t, participantEthClient, sleepForNBlocks, true); err != nil {
 			t.Fatalf("unexpected post-init mining error for test %v: %v", test.name, err)
 		}
 
@@ -1819,7 +1920,7 @@ func testRefund(t *testing.T, assetID uint32) {
 			t.Fatalf("%s: unexpected pending in balance %d", test.name, in)
 		}
 
-		if err := waitForMined(t, 10, false); err != nil {
+		if err := waitForMined(t, test.refunderClient, 10, false); err != nil {
 			t.Fatalf("%s: post-refund mining error: %v", test.name, err)
 		}
 
@@ -1850,6 +1951,7 @@ func testRefund(t *testing.T, assetID uint32) {
 		wantBal := new(big.Int).Set(originalBal)
 		if test.addAmt {
 			wantBal.Add(wantBal, dexeth.GweiToWei(amt))
+
 		}
 
 		if isETH {
@@ -1894,7 +1996,7 @@ func testApproveAllowance(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := waitForMined(t, 10, false); err != nil {
+	if err := waitForMined(t, ethClient, 10, false); err != nil {
 		t.Fatalf("post approve mining error: %v", err)
 	}
 
@@ -1929,28 +2031,32 @@ func testApproveGas(t *testing.T) {
 }
 
 func TestReplayAttack(t *testing.T) {
-	err := ethClient.unlock(pw)
+	cl, is := ethClient.(*nodeClient)
+	if !is {
+		t.Skip("TestReplayAttack not configured for RPC")
+	}
+	err := cl.unlock(pw)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	txOpts, err := ethClient.txOpts(ctx, 1, defaultSendGasLimit*5, nil)
+	txOpts, err := cl.txOpts(ctx, 1, defaultSendGasLimit*5, nil)
 	if err != nil {
 		t.Fatalf("txOpts error: %v", err)
 	}
 
-	ethClient.addSignerToOpts(txOpts)
+	cl.addSignerToOpts(txOpts)
 
 	// Deploy the reentry attack contract.
-	_, _, reentryContract, err := reentryattack.DeployReentryAttack(txOpts, ethClient.ec)
+	_, _, reentryContract, err := reentryattack.DeployReentryAttack(txOpts, cl.ec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := waitForMined(t, 10, false); err != nil {
+	if err := waitForMined(t, cl, 10, false); err != nil {
 		t.Fatal(err)
 	}
 
-	originalContractBal, err := ethClient.addressBalance(ctx, ethSwapContractAddr)
+	originalContractBal, err := cl.addressBalance(ctx, ethSwapContractAddr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1966,36 +2072,36 @@ func TestReplayAttack(t *testing.T) {
 		if i != 4 {
 			inLocktime := uint64(time.Now().Add(time.Hour).Unix())
 
-			txOpts, _ := ethClient.txOpts(ctx, 1, ethGases.SwapN(1), nil)
+			txOpts, _ := cl.txOpts(ctx, 1, ethGases.SwapN(1), nil)
 			_, err = simnetContractor.initiate(txOpts, []*asset.Contract{newContract(inLocktime, secretHash, 1)})
 			if err != nil {
 				t.Fatalf("unable to initiate swap: %v ", err)
 			}
 
-			if err := waitForMined(t, 10, false); err != nil {
+			if err := waitForMined(t, cl, 10, false); err != nil {
 				t.Fatal(err)
 			}
 			continue
 		}
 
-		intermediateContractVal, _ := ethClient.addressBalance(ctx, ethSwapContractAddr)
+		intermediateContractVal, _ := cl.addressBalance(ctx, ethSwapContractAddr)
 		t.Logf("intermediate contract value %d", dexeth.WeiToGwei(intermediateContractVal))
 
 		inLocktime := time.Now().Add(-1 * time.Second).Unix()
 		// Set some variables in the contract used for the exploit. This
 		// will fail (silently) due to require(msg.origin == msg.sender)
 		// in the real contract.
-		txOpts, _ := ethClient.txOpts(ctx, 1, defaultSendGasLimit*5, nil)
+		txOpts, _ := cl.txOpts(ctx, 1, defaultSendGasLimit*5, nil)
 		_, err := reentryContract.SetUsUpTheBomb(txOpts, ethSwapContractAddr, secretHash, big.NewInt(inLocktime), participantAddr)
 		if err != nil {
 			t.Fatalf("unable to set up the bomb: %v", err)
 		}
-		if err = waitForMined(t, 10, false); err != nil {
+		if err = waitForMined(t, cl, 10, false); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	txOpts, _ = ethClient.txOpts(ctx, 1, defaultSendGasLimit*5, nil)
+	txOpts, _ = cl.txOpts(ctx, 1, defaultSendGasLimit*5, nil)
 	txOpts.Value = nil
 	// Siphon funds into the contract.
 	tx, err := reentryContract.AllYourBase(txOpts)
@@ -2003,31 +2109,28 @@ func TestReplayAttack(t *testing.T) {
 		t.Fatalf("unable to get all your base: %v", err)
 	}
 	spew.Dump(tx)
-	if err = waitForMined(t, 10, false); err != nil {
+	if err = waitForMined(t, ethClient, 10, false); err != nil {
 		t.Fatal(err)
 	}
 	receipt, err := waitForReceipt(t, ethClient, tx)
-	if err != nil {
-		t.Fatalf("unable to get receipt: %v", err)
-	}
 	spew.Dump(receipt)
 
-	if err = waitForMined(t, 10, false); err != nil {
+	if err = waitForMined(t, cl, 10, false); err != nil {
 		t.Fatal(err)
 	}
 
-	originalAcctBal, err := ethClient.addressBalance(ctx, simnetAddr)
+	originalAcctBal, err := cl.addressBalance(ctx, simnetAddr)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Send the siphoned funds to us.
-	txOpts, _ = ethClient.txOpts(ctx, 1, defaultSendGasLimit*5, nil)
+	txOpts, _ = cl.txOpts(ctx, 1, defaultSendGasLimit*5, nil)
 	tx, err = reentryContract.AreBelongToUs(txOpts)
 	if err != nil {
 		t.Fatalf("unable to are belong to us: %v", err)
 	}
-	if err = waitForMined(t, 10, false); err != nil {
+	if err = waitForMined(t, ethClient, 10, false); err != nil {
 		t.Fatal(err)
 	}
 	receipt, err = waitForReceipt(t, ethClient, tx)
@@ -2035,7 +2138,7 @@ func TestReplayAttack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	gasPrice, err := feesAtBlk(ctx, ethClient, receipt.BlockNumber.Int64())
+	gasPrice, err := feesAtBlk(ctx, cl, receipt.BlockNumber.Int64())
 	if err != nil {
 		t.Fatalf("feesAtBlk error: %v", err)
 	}
@@ -2043,7 +2146,7 @@ func TestReplayAttack(t *testing.T) {
 	txFee := new(big.Int).Mul(bigGasUsed, gasPrice)
 	wantBal := new(big.Int).Sub(originalAcctBal, txFee)
 
-	acctBal, err := ethClient.addressBalance(ctx, simnetAddr)
+	acctBal, err := cl.addressBalance(ctx, simnetAddr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2076,7 +2179,7 @@ func TestReplayAttack(t *testing.T) {
 
 	// The contract should hold four more ether because initiation of one
 	// swap failed.
-	contractBal, err := ethClient.addressBalance(ctx, ethSwapContractAddr)
+	contractBal, err := cl.addressBalance(ctx, ethSwapContractAddr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2165,7 +2268,11 @@ func TestReplayAttack(t *testing.T) {
 }*/
 
 func testGetCodeAt(t *testing.T) {
-	byteCode, err := ethClient.getCodeAt(ctx, ethSwapContractAddr)
+	cl, is := ethClient.(*nodeClient)
+	if !is {
+		t.Skip("getCode tests only run for nodeClient")
+	}
+	byteCode, err := cl.getCodeAt(ctx, ethSwapContractAddr)
 	if err != nil {
 		t.Fatalf("Failed to get bytecode: %v", err)
 	}
@@ -2201,7 +2308,7 @@ func testSignMessage(t *testing.T) {
 func TestTokenGasEstimates(t *testing.T) {
 	prepareTokenClients(t)
 	if err := GetGasEstimates(ctx, ethClient, simnetTokenContractor, 5, tokenGases, func() {
-		if err := waitForMined(t, 10, false); err != nil {
+		if err := waitForMined(t, ethClient, 10, false); err != nil {
 			t.Fatalf("mining error: %v", err)
 		}
 	}); err != nil {
@@ -2219,7 +2326,7 @@ func TestConfirmedNonce(t *testing.T) {
 func TestTokenGasEstimatesParticipant(t *testing.T) {
 	prepareTokenClients(t)
 	if err := GetGasEstimates(ctx, participantEthClient, participantTokenContractor, 5, tokenGases, func() {
-		if err := waitForMined(t, 10, false); err != nil {
+		if err := waitForMined(t, participantEthClient, 10, false); err != nil {
 			t.Fatalf("mining error: %v", err)
 		}
 	}); err != nil {

@@ -196,10 +196,7 @@ func prepareNode(cfg *nodeConfig) (*node.Node, error) {
 	return node, nil
 }
 
-// var simnetGenesis *core.Genesis
-
-// startNode starts a geth node.
-func startNode(node *node.Node, network dex.Network) (*les.LightEthereum, error) {
+func ethChainConfig(network dex.Network) (c ethconfig.Config, err error) {
 	ethCfg := ethconfig.Defaults
 	switch network {
 	case dex.Simnet:
@@ -207,7 +204,7 @@ func startNode(node *node.Node, network dex.Network) (*les.LightEthereum, error)
 		genesisFile := filepath.Join(homeDir, "dextest", "eth", "genesis.json")
 		genesis, err := dexeth.LoadGenesisFile(genesisFile)
 		if err != nil {
-			return nil, fmt.Errorf("error reading genesis file: %v", err)
+			return c, fmt.Errorf("error reading genesis file: %v", err)
 		}
 		ethCfg.Genesis = genesis
 		ethCfg.NetworkId = genesis.Config.ChainID.Uint64()
@@ -217,9 +214,18 @@ func startNode(node *node.Node, network dex.Network) (*les.LightEthereum, error)
 	case dex.Mainnet:
 		// urls = params.MainnetBootnodes
 		// TODO: Allow.
-		return nil, fmt.Errorf("eth cannot be used on mainnet")
+		return c, fmt.Errorf("eth cannot be used on mainnet")
 	default:
-		return nil, fmt.Errorf("unknown network ID: %d", uint8(network))
+		return c, fmt.Errorf("unknown network ID: %d", uint8(network))
+	}
+	return ethCfg, nil
+}
+
+// startNode starts a geth node.
+func startNode(node *node.Node, network dex.Network) (*les.LightEthereum, error) {
+	ethCfg, err := ethChainConfig(network)
+	if err != nil {
+		return nil, err
 	}
 
 	ethCfg.SyncMode = downloader.LightSync
@@ -244,7 +250,7 @@ func startNode(node *node.Node, network dex.Network) (*les.LightEthereum, error)
 // importKeyToNode imports an private key into an ethereum node that can be
 // unlocked with password.
 func importKeyToNode(node *node.Node, privateKey, password []byte) error {
-	ecdsaPrivateKey, err := crypto.ToECDSA(privateKey)
+	priv, err := crypto.ToECDSA(privateKey)
 	if err != nil {
 		return err
 	}
@@ -253,12 +259,17 @@ func importKeyToNode(node *node.Node, privateKey, password []byte) error {
 		return fmt.Errorf("importKeyToNode: expected at least 1 keystore backend")
 	}
 	ks := backends[0].(*keystore.KeyStore)
+
+	return importKeyToKeyStore(ks, priv, password)
+}
+
+func importKeyToKeyStore(ks *keystore.KeyStore, priv *ecdsa.PrivateKey, pw []byte) error {
 	accounts := ks.Accounts()
 	if len(accounts) == 0 {
-		_, err = ks.ImportECDSA(ecdsaPrivateKey, string(password))
+		_, err := ks.ImportECDSA(priv, string(pw))
 		return err
 	} else if len(accounts) == 1 {
-		address := crypto.PubkeyToAddress(ecdsaPrivateKey.PublicKey)
+		address := crypto.PubkeyToAddress(priv.PublicKey)
 		if !bytes.Equal(accounts[0].Address.Bytes(), address.Bytes()) {
 			errMsg := "importKeyToNode: attemping to import account to eth wallet: %v, " +
 				"but node already contains imported account: %v"
@@ -267,7 +278,6 @@ func importKeyToNode(node *node.Node, privateKey, password []byte) error {
 	} else {
 		return fmt.Errorf("importKeyToNode: eth wallet keystore contains %v accounts", accounts)
 	}
-
 	return nil
 }
 
@@ -293,6 +303,16 @@ func nodeCredentials(node *node.Node) (*accountCredentials, error) {
 	if err != nil {
 		return nil, fmt.Errorf("exportKeyStoreFromNode error: %v", err)
 	}
+	return credentialsFromKeyStore(ks)
+}
+
+func pathCredentials(dir string) (*accountCredentials, error) {
+	// TODO: Use StandardScryptN and StandardScryptP?
+	return credentialsFromKeyStore(keystore.NewKeyStore(dir, keystore.LightScryptN, keystore.LightScryptP))
+
+}
+
+func credentialsFromKeyStore(ks *keystore.KeyStore) (*accountCredentials, error) {
 	accts := ks.Accounts()
 	if len(accts) != 1 {
 		return nil, fmt.Errorf("unexpected number of accounts, %d", len(accts))
@@ -308,6 +328,28 @@ func nodeCredentials(node *node.Node) (*accountCredentials, error) {
 		addr:   acct.Address,
 		wallet: wallets[0],
 	}, nil
+}
+
+func signData(creds *accountCredentials, data []byte) (sig, pubKey []byte, err error) {
+	h := crypto.Keccak256(data)
+	sig, err = creds.ks.SignHash(*creds.acct, h)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(sig) != 65 {
+		return nil, nil, fmt.Errorf("unexpected signature length %d", len(sig))
+	}
+
+	pubKey, err = recoverPubkey(h, sig)
+	if err != nil {
+		return nil, nil, fmt.Errorf("SignMessage: error recovering pubkey %w", err)
+	}
+
+	// Lop off the "recovery id", since we already recovered the pub key and
+	// it's not used for validation.
+	sig = sig[:64]
+
+	return
 }
 
 //

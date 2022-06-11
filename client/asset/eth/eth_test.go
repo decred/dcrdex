@@ -1,4 +1,4 @@
-//go:build !harness && lgpl
+//go:build !harness && !rpclive && lgpl
 
 // These tests will not be run if the harness build tag is set.
 
@@ -205,8 +205,8 @@ func (n *testNode) lock() error {
 func (n *testNode) locked() bool {
 	return false
 }
-func (n *testNode) syncProgress() ethereum.SyncProgress {
-	return n.syncProg
+func (n *testNode) syncProgress(context.Context) (*ethereum.SyncProgress, error) {
+	return &n.syncProg, nil
 }
 func (n *testNode) peerCount() uint32 {
 	return 1
@@ -250,8 +250,8 @@ func (n *testNode) transactionConfirmations(context.Context, common.Hash) (uint3
 	return 0, nil
 }
 
-func (n *testNode) headerByHash(txHash common.Hash) *types.Header {
-	return n.hdrByHash
+func (n *testNode) headerByHash(_ context.Context, txHash common.Hash) (*types.Header, error) {
+	return n.hdrByHash, nil
 }
 
 func (n *testNode) transactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, *types.Transaction, error) {
