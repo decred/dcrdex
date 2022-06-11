@@ -115,7 +115,11 @@ func (rig *testRig) close() {
 }
 
 func (rig *testRig) mineAlpha() error {
-	return exec.Command("tmux", "send-keys", "-t", rig.symbol+"-harness:2", "./mine-alpha 1", "C-m").Run()
+	tmuxWindow := rig.symbol + "-harness:2"
+	if rig.symbol == "zec" {
+		tmuxWindow = rig.symbol + "-harness:4"
+	}
+	return exec.Command("tmux", "send-keys", "-t", tmuxWindow, "./mine-alpha 1", "C-m").Run()
 }
 
 func randBytes(l int) []byte {
@@ -190,7 +194,6 @@ func Run(t *testing.T, cfg *Config) {
 
 	t.Log("Setting up alpha/beta/gamma wallet backends...")
 	rig.firstWallet = tBackend(tCtx, t, cfg, cfg.FirstWallet, blkFunc)
-	// rig.backends["beta"], rig.connectionMasters["beta"] = tBackend(tCtx, t, cfg, "beta", "", tLogger.SubLogger("beta"), blkFunc)
 	rig.secondWallet = tBackend(tCtx, t, cfg, cfg.SecondWallet, blkFunc)
 	defer rig.close()
 

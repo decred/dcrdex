@@ -209,6 +209,8 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 		TxVersion: func() int32 {
 			return dexzec.VersionNU5
 		},
+		// https://github.com/zcash/zcash/pull/6005
+		ManualMedianTime: true,
 	}
 
 	var err error

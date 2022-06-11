@@ -292,6 +292,8 @@ type BTCCloneCFG struct {
 	// TxVersion is an optional function that returns a version to use for
 	// new transactions.
 	TxVersion func() int32
+	// ManualMedianTime causes the median time to be calculated manually.
+	ManualMedianTime bool
 }
 
 // outPoint is the hash and output index of a transaction output.
@@ -868,6 +870,7 @@ func newRPCWallet(requester RawRequesterWithContext, cfg *BTCCloneCFG, walletCon
 		hashTx:                   btc.hashTx,
 		numericGetRawTxRPC:       cfg.NumericGetRawRPC,
 		legacyValidateAddressRPC: cfg.LegacyValidateAddressRPC,
+		manualMedianTime:         cfg.ManualMedianTime,
 	})
 	return &ExchangeWalletFullNode{btc}, nil
 }
@@ -3123,16 +3126,11 @@ func (btc *baseWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, err
 		return false, time.Time{}, fmt.Errorf("error extracting contract locktime: %w", err)
 	}
 	contractExpiry := time.Unix(int64(locktime), 0).UTC()
-	bestBlockHash, err := btc.node.getBestBlockHash()
+	medianTime, err := btc.node.medianTime()
 	if err != nil {
-		return false, time.Time{}, fmt.Errorf("get best block hash error: %w", err)
+		return false, time.Time{}, fmt.Errorf("error getting median time: %w", err)
 	}
-	bestBlockHeader, err := btc.node.getBlockHeader(bestBlockHash)
-	if err != nil {
-		return false, time.Time{}, fmt.Errorf("get best block header error: %w", err)
-	}
-	bestBlockMedianTime := time.Unix(bestBlockHeader.MedianTime, 0).UTC()
-	return bestBlockMedianTime.After(contractExpiry), contractExpiry, nil
+	return medianTime.After(contractExpiry), contractExpiry, nil
 }
 
 // FindRedemption watches for the input that spends the specified contract
@@ -4298,7 +4296,6 @@ type blockHeader struct {
 	Confirmations     int64  `json:"confirmations"`
 	Height            int64  `json:"height"`
 	Time              int64  `json:"time"`
-	MedianTime        int64  `json:"mediantime"`
 	PreviousBlockHash string `json:"previousblockhash"`
 }
 

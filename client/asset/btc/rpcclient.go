@@ -90,6 +90,7 @@ type rpcCore struct {
 	hashTx                   func(*wire.MsgTx) *chainhash.Hash
 	numericGetRawTxRPC       bool
 	legacyValidateAddressRPC bool
+	manualMedianTime         bool
 }
 
 // rpcClient is a bitcoind JSON RPC client that uses rpcclient.Client's
@@ -285,6 +286,35 @@ func (wc *rpcClient) getBestBlockHeight() (int32, error) {
 		return -1, err
 	}
 	return int32(header.Height), nil
+}
+
+// getChainStamp satisfies chainStamper for manual median time calculations.
+func (wc *rpcClient) getChainStamp(blockHash *chainhash.Hash) (stamp time.Time, prevHash *chainhash.Hash, err error) {
+	hdr, err := wc.getBlockHeader(blockHash)
+	if err != nil {
+		return
+	}
+	prevHash, err = chainhash.NewHashFromStr(hdr.PreviousBlockHash)
+	if err != nil {
+		return
+	}
+	return time.Unix(hdr.Time, 0).UTC(), prevHash, nil
+}
+
+// medianTime is the median time for the current best block.
+func (wc *rpcClient) medianTime() (stamp time.Time, err error) {
+	tipHash, err := wc.getBestBlockHash()
+	if err != nil {
+		return
+	}
+	if wc.manualMedianTime {
+		return calcMedianTime(wc, tipHash)
+	}
+	hdr, err := wc.getRPCBlockHeader(tipHash)
+	if err != nil {
+		return
+	}
+	return time.Unix(hdr.MedianTime, 0).UTC(), nil
 }
 
 // GetRawMempool returns the hashes of all transactions in the memory pool.
@@ -568,15 +598,31 @@ func (wc *rpcClient) swapConfirmations(txHash *chainhash.Hash, vout uint32, _ []
 	return uint32(tx.Confirmations), true, nil
 }
 
-// getBlockHeader gets the block header for the specified block hash.
-func (wc *rpcClient) getBlockHeader(blockHash *chainhash.Hash) (*blockHeader, error) {
-	blkHeader := new(blockHeader)
+// rpcBlockHeader adds a MedianTime field to blockHeader.
+type rpcBlockHeader struct {
+	blockHeader
+	MedianTime int64 `json:"mediantime"`
+}
+
+// getBlockHeader gets the *rpcBlockHeader for the specified block hash.
+func (wc *rpcClient) getRPCBlockHeader(blockHash *chainhash.Hash) (*rpcBlockHeader, error) {
+	blkHeader := new(rpcBlockHeader)
 	err := wc.call(methodGetBlockHeader,
 		anylist{blockHash.String(), true}, blkHeader)
 	if err != nil {
 		return nil, err
 	}
+
 	return blkHeader, nil
+}
+
+// getBlockHeader gets the *blockHeader for the specified block hash.
+func (wc *rpcClient) getBlockHeader(blockHash *chainhash.Hash) (*blockHeader, error) {
+	hdr, err := wc.getRPCBlockHeader(blockHash)
+	if err != nil {
+		return nil, err
+	}
+	return &hdr.blockHeader, nil
 }
 
 // getBlockHeight gets the mainchain height for the specified block.
