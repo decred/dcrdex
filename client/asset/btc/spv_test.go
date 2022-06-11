@@ -457,7 +457,7 @@ func TestSwapConfirmations(t *testing.T) {
 	node.confsSpent = true
 	txB, _ := serializeMsgTx(swapTx)
 	node.getTransactionMap = map[string]*GetTransactionResult{
-		"any": &GetTransactionResult{
+		"any": {
 			BlockHash:  swapBlockHash.String(),
 			BlockIndex: swapHeight,
 			Hex:        txB,
@@ -593,7 +593,7 @@ func TestGetTxOut(t *testing.T) {
 
 	// Wallet transaction found
 	node.getTransactionErr = nil
-	node.getTransactionMap = map[string]*GetTransactionResult{"any": &GetTransactionResult{
+	node.getTransactionMap = map[string]*GetTransactionResult{"any": {
 		BlockHash: blockHash.String(),
 		Hex:       txB,
 	}}

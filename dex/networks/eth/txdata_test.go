@@ -67,13 +67,13 @@ func TestParseInitiateDataV0(t *testing.T) {
 	locktime := int64(1632112916)
 
 	initiations := []*Initiation{
-		&Initiation{
+		{
 			LockTime:    time.Unix(locktime, 0),
 			SecretHash:  secretHashA,
 			Participant: participantAddr,
 			Value:       1,
 		},
-		&Initiation{
+		{
 			LockTime:    time.Unix(locktime, 0),
 			SecretHash:  secretHashB,
 			Participant: participantAddr,
@@ -164,11 +164,11 @@ func TestParseRedeemDataV0(t *testing.T) {
 	copy(secretB[:], mustParseHex("2c0a304c9321402dc11cbb5898b9f2af3029ce1c76ec6702c4cd5bb965fd3e73"))
 
 	redemptions := []*Redemption{
-		&Redemption{
+		{
 			Secret:     secretA,
 			SecretHash: secretHashA,
 		},
-		&Redemption{
+		{
 			Secret:     secretB,
 			SecretHash: secretHashB,
 		},

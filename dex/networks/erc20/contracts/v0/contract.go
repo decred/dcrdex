@@ -8,13 +8,13 @@ import (
 	"math/big"
 	"strings"
 
+	ethv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/event"
-	ethv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.

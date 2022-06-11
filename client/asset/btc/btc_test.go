@@ -790,7 +790,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	blockHash, _ := node.addRawTx(blockHeight, msgTx)
 
 	node.getTransactionMap = map[string]*GetTransactionResult{
-		"any": &GetTransactionResult{
+		"any": {
 			BlockHash:  blockHash.String(),
 			BlockIndex: blockHeight,
 			Details: []*WalletTxDetails{
@@ -2377,7 +2377,7 @@ func testSender(t *testing.T, senderType tSenderType, segwit bool, walletType st
 
 	node.sendToAddress = txHash.String()
 	node.getTransactionMap = map[string]*GetTransactionResult{
-		"any": &GetTransactionResult{
+		"any": {
 			BlockHash:  blockHash.String(),
 			BlockIndex: blockHeight,
 			Hex:        txB,
@@ -2542,7 +2542,7 @@ func testConfirmations(t *testing.T, segwit bool, walletType string) {
 	txB, _ := serializeMsgTx(tx)
 
 	node.getTransactionMap = map[string]*GetTransactionResult{
-		"any": &GetTransactionResult{
+		"any": {
 			BlockHash: blockHash.String(),
 			Hex:       txB,
 		}}
@@ -3867,7 +3867,7 @@ func testGetTxFee(t *testing.T, segwit bool, walletType string) {
 	}
 
 	node.getTransactionMap = map[string]*GetTransactionResult{
-		"any": &GetTransactionResult{
+		"any": {
 			Hex: txBytes,
 		},
 	}
