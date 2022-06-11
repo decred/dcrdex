@@ -27,7 +27,7 @@ func simpleAck() *standardResponse {
 type initForm struct {
 	Pass         encode.PassBytes `json:"pass"`
 	Seed         dex.Bytes        `json:"seed,omitempty"`
-	SeedPhrase         string        `json:"seedPhrase,omitempty"`
+	SeedPhrase   string           `json:"seedPhrase,omitempty"`
 	RememberPass bool             `json:"rememberPass"`
 }
 
@@ -35,7 +35,6 @@ type initForm struct {
 type loginForm struct {
 	Pass         encode.PassBytes `json:"pass"`
 	RememberPass bool             `json:"rememberPass"`
-	SeedPhrase         string        `json:"seedPhrase,omitempty"`
 }
 
 // registrationForm is used to register a new DEX account.

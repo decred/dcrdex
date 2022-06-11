@@ -495,8 +495,7 @@ func TestAPIInit(t *testing.T) {
 	ensure(s.apiIsInitialized, `{"ok":true,"initialized":true}`)
 
 	goodBody := &loginForm{
-		Pass: encode.PassBytes("def"),
-		SeedPhrase   : "some seed phrase",
+		Pass:       encode.PassBytes("def"),
 	}
 	body = goodBody
 	ensure(s.apiInit, `{"ok":true,"notes":null}`)

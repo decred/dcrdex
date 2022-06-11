@@ -191,7 +191,7 @@ var PtBr = map[string]string{
 	"add a different server":      "Adicionar um servidor diferente",
 	"Add a custom server":         "Adicionar um servidor personalizado",
 	"plus tx fees":                "+ tx fees",
-	"Export Seed Phrase":                 "Exportar Seed",
+	"Export Seed Phrase":          "Exportar Seed",
 	"Total":                       "Total",
 	"Trading":                     "Trocando",
 	"Receiving Approximately":     "Recebendo aproximadamente",

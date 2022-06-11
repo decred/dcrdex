@@ -4,7 +4,6 @@
 package webserver
 
 import (
-	"decred.org/dcrwallet/v2/walletseed"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -16,6 +15,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrwallet/v2/walletseed"
 )
 
 var zero = encode.ClearBytes
@@ -375,12 +375,12 @@ func (s *WebServer) apiExportSeed(w http.ResponseWriter, r *http.Request) {
 	defer zero([]byte(seedPhrase))
 
 	writeJSON(w, &struct {
-		OK   bool      `json:"ok"`
-		Seed dex.Bytes `json:"seed"`
-		SeedPhrase string `json:"seedPhrase"`
+		OK         bool      `json:"ok"`
+		Seed       dex.Bytes `json:"seed"`
+		SeedPhrase string    `json:"seedPhrase"`
 	}{
-		OK:   true,
-		Seed: seed,
+		OK:         true,
+		Seed:       seed,
 		SeedPhrase: seedPhrase,
 	}, s.indent)
 }
