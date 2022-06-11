@@ -157,7 +157,7 @@ var ZhCN = map[string]string{
 	"seed_implore_msg":         "Write down your application seed phrase and make a copy.",
 	"View Application Seed":    "查看应用种子",
 	"Remember my password":     "记住我的密码",
-	"pw_for_seed":                 "Application seed can be used to restore your DEX accounts and native wallets. Make sure nobody else can see your screen.",
+	"pw_for_seed":              "Application seed can be used to restore your DEX accounts and native wallets. Make sure nobody else can see your screen.",
 	"Asset":                    "列表", // alt. 活动
 	"Balance":                  "余额", // alt. 平衡
 	"Actions":                  "操作", // alt. 动作
