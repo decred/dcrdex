@@ -11,7 +11,14 @@ HARNESS_DIR="${NODES_ROOT}/harness-ctl"
 echo "Writing node config files"
 mkdir -p "${HARNESS_DIR}"
 
+if [ -n "$HARNESS_VER" ]; then
+  HARNESS_VER_FILE="${NODES_ROOT}/v${HARNESS_VER}"
+fi
+
 WALLET_PASSWORD="abc"
+
+[ -z "${ALPHA_WALLET_SEED}" ] && ALPHA_DESCRIPTOR_WALLET="true" || ALPHA_DESCRIPTOR_WALLET="false"
+[ -z "${BETA_WALLET_SEED}"  ] && BETA_DESCRIPTOR_WALLET="true" || BETA_DESCRIPTOR_WALLET="false"
 
 ALPHA_CLI_CFG="-rpcwallet= -rpcport=${ALPHA_RPC_PORT} -regtest=1 -rpcuser=user -rpcpassword=pass"
 
@@ -36,10 +43,25 @@ if [ -f ./harnesschain.tar.gz ]; then
   CHAIN_LOADED=1
   echo "Seeding alpha chain from compressed file"
   tar -xzf ./harnesschain.tar.gz -C ${NODES_ROOT}
-else
+  if [[ -n "$HARNESS_VER_FILE"  && ! -f "$HARNESS_VER_FILE" ]]; then
+    echo "Harness archive outdated! Deleting it."
+    rm -rf harnesschain.tar.gz "${NODES_ROOT}"
+    mkdir -p "${HARNESS_DIR}"
+    CHAIN_LOADED=
+  fi
+fi
+
+if [ ! "$CHAIN_LOADED" ]; then
   mkdir -p "${ALPHA_DIR}"
   mkdir -p "${BETA_DIR}"
+  if [ -n "$HARNESS_VER_FILE" ]; then
+    touch "${HARNESS_VER_FILE}"
+  fi
+  FULLCHAINFILE=$(cd $(dirname "${BASH_SOURCE[0]:-$0}") && pwd)/harnesschain.tar.gz
 fi
+
+# If there are any descriptor files, copy them to the nodes root folder.
+cp desc-*.json ${NODES_ROOT} 2> /dev/null || true
 
 cd ${NODES_ROOT} && tmux new-session -d -s $SESSION $SHELL
 
@@ -185,9 +207,6 @@ tmux kill-session
 EOF
 chmod +x "${HARNESS_DIR}/quit"
 
-################################################################################
-# Have to generate a block before calling sethdseed
-################################################################################
 if [ "$CHAIN_LOADED" ] ; then
   tmux send-keys -t $SESSION:2 "./alpha loadwallet gamma${DONE}" C-m\; ${WAIT}
   tmux send-keys -t $SESSION:2 "./beta loadwallet delta${DONE}" C-m\; ${WAIT}
@@ -200,13 +219,19 @@ else
   # This timeout is apparently critical. Give the nodes time to sync.
   sleep 2
 
+  ################################################################################
+  # Have to generate a block before calling sethdseed
+  ################################################################################
   echo "Generating the genesis block"
   tmux send-keys -t $SESSION:2 "./alpha generatetoaddress 1 ${ALPHA_MINING_ADDR}${DONE}" C-m\; ${WAIT}
   sleep 2
 
-  if [ "$CREATE_DEFAULT_WALLET" ] ; then
-    tmux send-keys -t $SESSION:2 "./alpha createwallet \"\" false true ${WALLET_PASSWORD} false false true${DONE}" C-m\; ${WAIT}
-    tmux send-keys -t $SESSION:2 "./beta createwallet \"\" false true ${WALLET_PASSWORD} false false true${DONE}" C-m\; ${WAIT}
+  if [ "$CREATE_DEFAULT_WALLET" ] ; then # bitcoin core v0.21+ does not create default wallet automatically
+    # Note that assets requiring CREATE_DEFAULT_WALLET also support named args.
+    # Create these as "blank" wallets since sethdseed or importdescriptors
+    # will follow.
+    tmux send-keys -t $SESSION:2 "./alpha -named createwallet wallet_name= blank=true passphrase=\"${WALLET_PASSWORD}\" descriptors=${ALPHA_DESCRIPTOR_WALLET}${DONE}" C-m\; ${WAIT}
+    tmux send-keys -t $SESSION:2 "./beta -named createwallet wallet_name= blank=true passphrase=\"${WALLET_PASSWORD}\" descriptors=${BETA_DESCRIPTOR_WALLET}${DONE}" C-m\; ${WAIT}
   else
     echo "Encrypting the alpha wallet (may take a minute)"
     tmux send-keys -t $SESSION:2 "./alpha encryptwallet ${WALLET_PASSWORD}${DONE}" C-m\; ${WAIT}
@@ -235,28 +260,46 @@ else
   fi
 
   tmux send-keys -t $SESSION:2 "./alpha walletpassphrase ${WALLET_PASSWORD} 100000000${DONE}" C-m\; ${WAIT}
-  echo "Setting private key for alpha"
-  tmux send-keys -t $SESSION:2 "./alpha sethdseed true ${ALPHA_WALLET_SEED}${DONE}" C-m\; ${WAIT}
+  echo "Setting private keys for alpha"
+  if [ -z "$ALPHA_WALLET_SEED" ]; then
+    tmux send-keys -t $SESSION:2 "./alpha importdescriptors \$(< ../desc-alpha.json)${DONE}" C-m\; ${WAIT}
+  else
+    tmux send-keys -t $SESSION:2 "./alpha sethdseed true ${ALPHA_WALLET_SEED}${DONE}" C-m\; ${WAIT}
+  fi
 
   tmux send-keys -t $SESSION:2 "./beta walletpassphrase ${WALLET_PASSWORD} 100000000${DONE}" C-m\; ${WAIT}
-  echo "Setting private key for beta"
-  tmux send-keys -t $SESSION:2 "./beta sethdseed true ${BETA_WALLET_SEED}${DONE}" C-m\; ${WAIT}
+  echo "Setting private keys for beta"
+  if [ -z "$BETA_WALLET_SEED" ]; then
+    tmux send-keys -t $SESSION:2 "./beta importdescriptors \$(< ../desc-beta.json)${DONE}" C-m\; ${WAIT}
+  else
+    tmux send-keys -t $SESSION:2 "./beta sethdseed true ${BETA_WALLET_SEED}${DONE}" C-m\; ${WAIT}
+  fi
 
   ################################################################################
   # Setup the gamma wallet
   ################################################################################
   echo "Creating the gamma wallet"
-  # TODO: with Bitcoin Core v23 createwallet makes a descriptor wallet by default,
-  # which we cannot use yet, so all the createwallet options will be needed.
-  tmux send-keys -t $SESSION:2 "./alpha createwallet gamma${DONE}" C-m\; ${WAIT}
-  tmux send-keys -t $SESSION:2 "./gamma sethdseed true ${GAMMA_WALLET_SEED}${DONE}" C-m\; ${WAIT}
+  if [ -z "$GAMMA_WALLET_SEED"  ]; then
+    tmux send-keys -t $SESSION:2 "./alpha -named createwallet wallet_name=gamma blank=true descriptors=true${DONE}" C-m\; ${WAIT}
+    tmux send-keys -t $SESSION:2 "./gamma importdescriptors \$(< ../desc-gamma.json)${DONE}" C-m\; ${WAIT}
+  else
+    # Use new-wallet since BCH does not support named parameters (or
+    # descriptors), while the descriptor enabled assets all support named.
+    tmux send-keys -t $SESSION:2 "./new-wallet alpha gamma${DONE}" C-m\; ${WAIT}
+    tmux send-keys -t $SESSION:2 "./gamma sethdseed true ${GAMMA_WALLET_SEED}${DONE}" C-m\; ${WAIT}
+  fi
 
   ################################################################################
   # Create the delta wallet
   ################################################################################
   echo "Creating the delta wallet"
-  tmux send-keys -t $SESSION:2 "./beta createwallet delta${DONE}" C-m\; ${WAIT}
-  tmux send-keys -t $SESSION:2 "./delta sethdseed true ${DELTA_WALLET_SEED}${DONE}" C-m\; ${WAIT}
+  if [ -z "$DELTA_WALLET_SEED" ]; then
+    tmux send-keys -t $SESSION:2 "./beta -named createwallet wallet_name=delta blank=true descriptors=true${DONE}" C-m\; ${WAIT}
+    tmux send-keys -t $SESSION:2 "./delta importdescriptors \$(< ../desc-delta.json)${DONE}" C-m\; ${WAIT}
+  else
+    tmux send-keys -t $SESSION:2 "./new-wallet beta delta${DONE}" C-m\; ${WAIT}
+    tmux send-keys -t $SESSION:2 "./delta sethdseed true ${DELTA_WALLET_SEED}${DONE}" C-m\; ${WAIT}
+  fi
 
   #################################################################################
   # Generate addresses
@@ -314,6 +357,14 @@ done
 
 tmux send-keys -t $SESSION:2 "./mine-alpha 2${DONE}" C-m\; ${WAIT}
 
+set +x
+if [ ! "$CHAIN_LOADED" ]; then
+  echo "**********************************************************************"
+  echo "You may wish to recreate your harnesschain.tar.gz file AFTER stopping the nodes:"
+  echo "  cd ${NODES_ROOT}"
+  echo "  tar czf ${FULLCHAINFILE} alpha beta v${HARNESS_VER}"
+  echo "**********************************************************************"
+fi
 
 # Reenable history and attach to the control session.
 tmux send-keys -t $SESSION:2 "set -o history" C-m

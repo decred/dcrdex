@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -41,6 +42,7 @@ const (
 	methodSetTxFee           = "settxfee"
 	methodGetWalletInfo      = "getwalletinfo"
 	methodGetAddressInfo     = "getaddressinfo"
+	methodListDescriptors    = "listdescriptors"
 	methodValidateAddress    = "validateaddress"
 	methodEstimateSmartFee   = "estimatesmartfee"
 	methodSendRawTransaction = "sendrawtransaction"
@@ -97,7 +99,8 @@ type rpcCore struct {
 // RawRequest for wallet-related calls.
 type rpcClient struct {
 	*rpcCore
-	ctx context.Context
+	ctx         context.Context
+	descriptors bool // set on connect like ctx
 }
 
 var _ Wallet = (*rpcClient)(nil)
@@ -126,9 +129,9 @@ func (wc *rpcClient) connect(ctx context.Context, _ *sync.WaitGroup) error {
 	if err != nil {
 		return fmt.Errorf("getwalletinfo failure: %w", err)
 	}
-	if wiRes.Descriptors {
-		return fmt.Errorf("descriptor wallets are not supported, see " +
-			"https://bitcoincore.org/en/releases/0.21.0/#experimental-descriptor-wallets")
+	wc.descriptors = wiRes.Descriptors
+	if wc.descriptors {
+		wc.log.Debug("Using a descriptor wallet.")
 	}
 	return nil
 }
@@ -470,19 +473,176 @@ func (wc *rpcClient) signTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
 	return outTx, nil
 }
 
+func (wc *rpcClient) listDescriptors(private bool) (*listDescriptorsResult, error) {
+	descriptors := new(listDescriptorsResult)
+	return descriptors, wc.call(methodListDescriptors, anylist{private}, descriptors)
+}
+
 // privKeyForAddress retrieves the private key associated with the specified
 // address.
 func (wc *rpcClient) privKeyForAddress(addr string) (*btcec.PrivateKey, error) {
-	var keyHex string
-	err := wc.call(methodPrivKeyForAddress, anylist{addr}, &keyHex)
-	if err != nil {
-		return nil, err
+	// Descriptor wallets do not have dumpprivkey.
+	if !wc.descriptors {
+		var keyHex string
+		err := wc.call(methodPrivKeyForAddress, anylist{addr}, &keyHex)
+		if err != nil {
+			return nil, err
+		}
+		wif, err := btcutil.DecodeWIF(keyHex)
+		if err != nil {
+			return nil, err
+		}
+		return wif.PrivKey, nil
 	}
-	wif, err := btcutil.DecodeWIF(keyHex)
-	if err != nil {
-		return nil, err
+
+	// With descriptor wallets, we have to get the address' descriptor from
+	// getaddressinfo, parse out its key origin (fingerprint of the master
+	// private key followed by derivation path to the address) and the pubkey of
+	// the address itself. Then we get the private key using listdescriptors
+	// private=true, which returns a set of master private keys and derivation
+	// paths, one of which corresponds to the fingerprint and path from
+	// getaddressinfo. When the parent master private key is identified, we
+	// derive the private key for the address.
+	ai := new(GetAddressInfoResult)
+	if err := wc.call(methodGetAddressInfo, anylist{addr}, ai); err != nil {
+		return nil, fmt.Errorf("getaddressinfo RPC failure: %w", err)
 	}
-	return wif.PrivKey, nil
+	wc.log.Tracef("Address %v descriptor: %v", addr, ai.Descriptor)
+	desc, err := dexbtc.ParseDescriptor(ai.Descriptor)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse descriptor %q: %w", ai.Descriptor, err)
+	}
+	if desc.KeyOrigin == nil {
+		return nil, errors.New("address descriptor has no key origin")
+	}
+	// For addresses from imported private keys that have no derivation path in
+	// the key origin, we inspect private keys of type KeyWIFPriv. For addresses
+	// with a derivation path, we match KeyExtended private keys based on the
+	// master key fingerprint and derivation path.
+	fp, addrPath := desc.KeyOrigin.Fingerprint, desc.KeyOrigin.Steps
+	// Should match:
+	//   fp, path = ai.HDMasterFingerprint, ai.HDKeyPath
+	//   addrPath, _, err = dexbtc.ParsePath(path)
+	bareKey := len(addrPath) == 0
+
+	if desc.KeyFmt != dexbtc.KeyHexPub {
+		return nil, fmt.Errorf("not a hexadecimal pubkey: %v", desc.Key)
+	}
+	// The key was validated by ParseDescriptor, but check again.
+	addrPubKeyB, err := hex.DecodeString(desc.Key)
+	if err != nil {
+		return nil, fmt.Errorf("address pubkey not hexadecimal: %w", err)
+	}
+	addrPubKey, err := btcec.ParsePubKey(addrPubKeyB)
+	if err != nil {
+		return nil, fmt.Errorf("invalid pubkey for address: %w", err)
+	}
+	addrPubKeyC := addrPubKey.SerializeCompressed() // may or may not equal addrPubKeyB
+
+	// Get the private key descriptors.
+	masterDescs, err := wc.listDescriptors(true)
+	if err != nil {
+		return nil, fmt.Errorf("listdescriptors RPC failure: %w", err)
+	}
+
+	// We're going to decode a number of private keys that we need to zero.
+	var toClear []interface{ Zero() }
+	defer func() {
+		for _, k := range toClear {
+			k.Zero()
+		}
+	}() // surprisingly, much cleaner than making the loop body below into a function
+	deferZero := func(z interface{ Zero() }) { toClear = append(toClear, z) }
+
+masters:
+	for _, d := range masterDescs.Descriptors {
+		masterDesc, err := dexbtc.ParseDescriptor(d.Descriptor)
+		if err != nil {
+			wc.log.Errorf("Failed to parse descriptor %q: %v", d.Descriptor, err)
+			continue // unexpected, but check the others
+		}
+		if bareKey { // match KeyHexPub -> KeyWIFPriv
+			if masterDesc.KeyFmt != dexbtc.KeyWIFPriv {
+				continue
+			}
+			wif, err := btcutil.DecodeWIF(masterDesc.Key)
+			if err != nil {
+				wc.log.Errorf("Invalid WIF private key: %v", err)
+				continue // ParseDescriptor already validated it, so shouldn't happen
+			}
+			if !bytes.Equal(addrPubKeyC, wif.PrivKey.PubKey().SerializeCompressed()) {
+				continue // not the one
+			}
+			return wif.PrivKey, nil
+		}
+
+		// match KeyHexPub -> [fingerprint/path]KeyExtended
+		if masterDesc.KeyFmt != dexbtc.KeyExtended {
+			continue
+		}
+		// Break the key into its parts and compute the fingerprint of the
+		// master private key.
+		xPriv, fingerprint, pathStr, isRange, err := dexbtc.ParseKeyExtended(masterDesc.Key)
+		if err != nil {
+			wc.log.Debugf("Failed to parse descriptor extended key: %v", err)
+			continue
+		}
+		deferZero(xPriv)
+		if fingerprint != fp {
+			continue
+		}
+		if !xPriv.IsPrivate() { // imported xpub with no private key?
+			wc.log.Debugf("Not an extended private key. Fingerprint: %v", fingerprint)
+			continue
+		}
+		// NOTE: After finding the xprv with the matching fingerprint, we could
+		// skip to checking the private key for a match instead of first
+		// matching the path. Let's just check the path too since fingerprint
+		// collision are possible, and the different address types are allowed
+		// to use descriptors with different fingerprints.
+		if !isRange {
+			continue // imported?
+		}
+		path, _, err := dexbtc.ParsePath(pathStr)
+		if err != nil {
+			wc.log.Debugf("Failed to parse descriptor extended key path %q: %v", pathStr, err)
+			continue
+		}
+		if len(addrPath) != len(path)+1 { // addrPath includes index of self
+			continue
+		}
+		for i := range path {
+			if addrPath[i] != path[i] {
+				continue masters // different path
+			}
+		}
+
+		// NOTE: We could conceivably cache the extended private key for this
+		// address range/branch, but it could be a security risk:
+		// childIdx := addrPath[len(addrPath)-1]
+		// branch, err := dexbtc.DeepChild(xPriv, path)
+		// child, err := branch.Derive(childIdx)
+		child, err := dexbtc.DeepChild(xPriv, addrPath)
+		if err != nil {
+			return nil, fmt.Errorf("address key derivation failed: %v", err) // any point in checking the rest?
+		}
+		deferZero(child)
+		privkey, err := child.ECPrivKey()
+		if err != nil { // only errors if the extended key is not private
+			return nil, err // hdkeychain.ErrNotPrivExtKey
+		}
+		// That's the private key, but do a final check that the pubkey matches
+		// the "pubkey" field of the getaddressinfo response.
+		pubkey := privkey.PubKey().SerializeCompressed()
+		if !bytes.Equal(pubkey, addrPubKeyC) {
+			wc.log.Warnf("Derived wrong pubkey for address %v from matching descriptor %v: %x != %x",
+				addr, d.Descriptor, pubkey, addrPubKey)
+			continue // theoretically could be a fingerprint collision (see KeyOrigin docs)
+		}
+		return privkey, nil
+	}
+
+	return nil, errors.New("no private key found for address")
 }
 
 // getWalletTransaction retrieves the JSON-RPC gettransaction result.
@@ -736,9 +896,9 @@ func (wc *rpcClient) searchBlockForRedemptions(ctx context.Context, reqs map[out
 	return
 }
 
-// call is used internally to marshal parmeters and send requests to the RPC
-// server via (*rpcclient.Client).RawRequest. If `thing` is non-nil, the result
-// will be marshaled into `thing`.
+// call is used internally to marshal parameters and send requests to the RPC
+// server via (*rpcclient.Client).RawRequest. If thing is non-nil, the result
+// will be marshaled into thing.
 func (wc *rpcClient) call(method string, args anylist, thing interface{}) error {
 	params := make([]json.RawMessage, 0, len(args))
 	for i := range args {

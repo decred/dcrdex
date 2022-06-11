@@ -132,7 +132,35 @@ type GetWalletInfoResult struct {
 	Descriptors bool `json:"descriptors"` // Descriptor wallets that do not support dumpprivkey
 }
 
-// GetAddressInfoResult models the data from the getaddressinfo command.
+// GetAddressInfoResult models some of the data from the getaddressinfo command.
 type GetAddressInfoResult struct {
-	IsMine bool `json:"ismine"`
+	IsMine     bool   `json:"ismine"`
+	Descriptor string `json:"desc"` // e.g. "wpkh([b940190e/84'/1'/0'/0/0]0300034...)#0pfw7rck"
+
+	// The following fields are unused by DEX, but modeled here for completeness
+	// and debugging:
+
+	ParentDesc          string `json:"parent_desc"`         // e.g. "wpkh([b940190e/84'/1'/0']tpubDCo.../0/*)#xn4kr3dw" meaning range of external addresses
+	HDKeyPath           string `json:"hdkeypath"`           // e.g. "m/84'/1'/0'/0/0"
+	HDMasterFingerprint string `json:"hdmasterfingerprint"` // e.g. "b940190e"
+}
+
+type listDescriptorsResult struct {
+	WalletName  string `json:"wallet_name"`
+	Descriptors []*struct {
+		Descriptor string `json:"desc"` // public or private depending on private RPC arg
+
+		// The following fields are unused in this package, but they are modeled
+		// here for completeness and debugging:
+
+		TimeStamp int64 `json:"timestamp"` // creation time
+		// Active makes it the descriptor for the corresponding output
+		// type/externality e.g. wpkh. Must be true for "ranged" descriptors,
+		// which are those for address derivation. Conversely, imported single
+		// private keys are not active.
+		Active   bool    `json:"active"`
+		Internal bool    `json:"internal"` // i.e. change, only set when active
+		Range    []int64 `json:"range"`    // set for ranged descriptors, pertains to gap limit and current index
+		Next     int64   `json:"next"`     // next index to addresses generation; only set for ranged descriptors
+	} `json:"descriptors"`
 }

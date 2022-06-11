@@ -3002,6 +3002,7 @@ func (btc *baseWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sig
 	if err != nil {
 		return nil, nil, err
 	}
+	defer privKey.Zero()
 	pk := privKey.PubKey()
 	hash := chainhash.HashB(msg) // legacy servers will not accept this signature!
 	sig := ecdsa.Sign(privKey, hash)
@@ -3508,7 +3509,22 @@ func (btc *baseWallet) DepositAddress() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return btc.stringAddr(addr, btc.chainParams)
+	addrStr, err := btc.stringAddr(addr, btc.chainParams)
+	if err != nil {
+		return "", err
+	}
+	if btc.Locked() {
+		return addrStr, nil
+	}
+	// If the wallet is unlocked, be extra cautious and ensure the wallet gave
+	// us an address for which we can retrieve the private keys, regardless of
+	// what ownsAddress would say.
+	priv, err := btc.node.privKeyForAddress(addrStr)
+	if err != nil {
+		return "", fmt.Errorf("private key unavailable for address %v: %w", addrStr, err)
+	}
+	priv.Zero()
+	return addrStr, nil
 }
 
 // NewAddress returns a new address from the wallet. This satisfies the
@@ -4120,6 +4136,7 @@ func (btc *baseWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, addr 
 	if err != nil {
 		return nil, nil, err
 	}
+	defer privKey.Zero()
 
 	sig, err = btc.signNonSegwit(tx, idx, pkScript, txscript.SigHashAll, privKey, vals, pkScripts)
 	if err != nil {
@@ -4141,6 +4158,7 @@ func (btc *baseWallet) createWitnessSig(tx *wire.MsgTx, idx int, pkScript []byte
 	if err != nil {
 		return nil, nil, err
 	}
+	defer privKey.Zero()
 	sig, err = txscript.RawTxInWitnessSignature(tx, sigHashes, idx, val,
 		pkScript, txscript.SigHashAll, privKey)
 
