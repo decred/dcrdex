@@ -154,10 +154,10 @@ var ZhCN = map[string]string{
 	"New Wallet Password":      "新钱包密码",
 	"pw_change_warn":           "注意：在有活跃交易或预订订单时切换到不同的钱包可能会导致资金丢失。",
 	"Show more options":        "显示更多选项",
-	"seed_implore_msg":         "请注意。您需要写下种子并保存副本。如果您无法访问此计算机或发生任何其它问题，您可以使用该种子反向访问您的DEX帐户和注册钱包。请将帐户备份与种子分开保存。",
+	"seed_implore_msg":         "Write down your application seed phrase and make a copy.",
 	"View Application Seed":    "查看应用种子",
 	"Remember my password":     "记住我的密码",
-	"pw_for_seed":              "输入您的应用密码以显示您的种子。确保没有其它人可以看到您的屏幕。",
+	"pw_for_seed":                 "Application seed can be used to restore your DEX accounts and native wallets. Make sure nobody else can see your screen.",
 	"Asset":                    "列表", // alt. 活动
 	"Balance":                  "余额", // alt. 平衡
 	"Actions":                  "操作", // alt. 动作

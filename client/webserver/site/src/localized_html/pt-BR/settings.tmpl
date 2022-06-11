@@ -36,7 +36,7 @@
         <button id="changeAppPW" class="bg2 selected">Trocar Senha do aplicativo</button>
     </div>
     <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
-      Você deve ser cuidadoso. Escreva sua semente e salve uma cópia. Caso você perca acesso a essa maquina ou algum outra problema ocorra, você poderá usar sua semente recupear acesso a sua conta DEX e carteiras regitrada. Algumas contas antigas não podem ser recuperadas, e apesar de novas ou não, é uma boa prática salvar backup das contas de forma separada da semente.<br>
+      Write down your application seed phrase and make a copy.<br>
       <button id="exportSeed" class="fs15 bg2 selected">Ver semente da aplicação</button>
     </div>
     <div>ID da Build: <span id="commitHash" class="mono"></span></div>
@@ -81,7 +81,7 @@
         Exportar Seed
       </div>
       <div class="fs15 text-start mt-2">
-        Informar sua senha do aplicativo para mostrar sua seed. Tenha certeza que mais ninguém pode ver sua tela.
+        Application seed can be used to restore your DEX accounts and native wallets. Make sure nobody else can see your screen.
       </div>
       <div class="text-start mt-2">
         <label for="exportSeedPW" class="ps-1 mb-1">Senha</label>

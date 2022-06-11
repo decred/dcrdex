@@ -36,7 +36,7 @@
         <button id="changeAppPW" class="bg2 selected">Zmień hasło aplikacji</button>
     </div>
     <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
-      Zapisz ziarno aplikacji dokładnie na kartce papieru i zachowaj jego kopię. Jeśli stracisz dostęp do tego urządzenia lub niezbędnych plików aplikacji, ziarno to umożliwi Ci przywrócenie kont DEX oraz wbudowanych portfeli. Niektóre starsze konta nie mogę być przywrócone ta metodą, i niezależenie od tego, czy konto jest nowe, czy stare, zachowanie kopii swoich kluczy w dodatku do ziarna jest zawsze dobrą praktyką.<br>
+      Write down your application seed phrase and make a copy.<br>
       <button id="exportSeed" class="fs15 bg2 selected">Wyświetl ziarno aplikacji</button>
     </div>
     <div>ID builda: <span id="commitHash" class="mono"></span></div>
@@ -81,7 +81,7 @@
         Eksportuj ziarno
       </div>
       <div class="fs15 text-start mt-2">
-        Enter your app password to show your seed phrase. Make sure nobody else can see your screen.
+        Application seed can be used to restore your DEX accounts and native wallets. Make sure nobody else can see your screen.
       </div>
       <div class="text-start mt-2">
         <label for="exportSeedPW" class="ps-1 mb-1">Hasło</label>
