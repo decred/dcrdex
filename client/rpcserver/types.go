@@ -4,7 +4,6 @@
 package rpcserver
 
 import (
-	"decred.org/dcrwallet/v2/walletseed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,6 +16,7 @@ import (
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrwallet/v2/walletseed"
 )
 
 // An orderID is a 256 bit number encoded as a hex string.

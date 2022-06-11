@@ -4,7 +4,6 @@
 package rpcserver
 
 import (
-	"decred.org/dcrwallet/v2/walletseed"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -16,6 +15,7 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrwallet/v2/walletseed"
 )
 
 // routes

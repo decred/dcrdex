@@ -260,7 +260,7 @@ func TestHandleInit(t *testing.T) {
 		params:      &RawParams{},
 		wantErrCode: msgjson.RPCArgumentsError,
 	}, {
-		name: "bad seed param",
+		name: "bad seed phrase (or seed) param",
 		params: &RawParams{
 			PWArgs: []encode.PassBytes{pw},
 			Args:   []string{"neither seed phrase nor seed"},
