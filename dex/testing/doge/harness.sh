@@ -49,7 +49,7 @@ SESSION="${SYMBOL}-harness"
 SHELL=$(which bash)
 
 ################################################################################
-# Load prepared wallet if the files exist.
+# Load prepared wallets.
 ################################################################################
 
 mkdir -p ${ALPHA_DIR}/regtest
@@ -277,11 +277,18 @@ tmux send-keys -t $SESSION:4 "./alpha generatetoaddress 400 ${ALPHA_MINING_ADDR}
 # Send beta some coin
 ################################################################################
 
+DELTA_ADDR=`./delta getnewaddress`
+echo "delta address = '${DELTA_ADDR}'"
+GAMMA_ADDR=`./gamma getnewaddress`
+echo "gamma address = '${GAMMA_ADDR}'"
+
 # Send the beta wallet some dough.
-echo "Sending 8,400,000 DOGE to beta in 8 blocks"
+echo "Sending 8,400,000 DOGE to lazy wallets in 8 blocks"
 for i in 1000000 1800000 500000 700000 100000 1500000 300000 2500000
 do
     tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${BETA_MINING_ADDR} ${i}${DONE}" C-m\; ${WAIT}
+    tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${DELTA_ADDR} ${i}${DONE}" C-m\; ${WAIT}
+    tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${GAMMA_ADDR} ${i}${DONE}" C-m\; ${WAIT}
 done
 
 tmux send-keys -t $SESSION:4 "./mine-alpha 2${DONE}" C-m\; ${WAIT}
