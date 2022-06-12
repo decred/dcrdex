@@ -276,9 +276,9 @@ While `dexc` may be run from within the git workspace as described above, the
 may be copied into a different folder as long as `site` is in the same directory
 as `dexc` (e.g. `/opt/dcrdex/dexc` and `/opt/dcrdex/site`).
 
-### Docker
+### Dex client (dexc) in Docker
 
-**Build the docker image**
+**Build docker image**
 
 ```
 docker build -t user/dcrdex -f client/Dockerfile .
