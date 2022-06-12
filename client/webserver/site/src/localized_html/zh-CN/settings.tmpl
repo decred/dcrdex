@@ -36,7 +36,7 @@
         <button id="changeAppPW" class="bg2 selected">更改应用密码</button>
     </div>
     <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
-      Write down your application seed phrase and make a copy.<br>
+      请注意。您需要写下种子并保存副本。如果您无法访问此计算机或发生任何其它问题，您可以使用该种子反向访问您的DEX帐户和注册钱包。请将帐户备份与种子分开保存。<br>
       <button id="exportSeed" class="fs15 bg2 selected">查看应用种子</button>
     </div>
     <div>创建ID: <span id="commitHash" class="mono"></span></div>
@@ -74,14 +74,14 @@
       {{template "changeAppPWForm"}}
     </form>
 
-    {{- /* EXPORT SEED PHRASE AUTHORIZATION */ -}}
+    {{- /* EXPORT SEED AUTHORIZATION */ -}}
     <form class="d-hide" id="exportSeedAuth">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <div class="py-1 text-center position-relative fs22 sans-light">
-        Export Seed Phrase
+        Export Seed
       </div>
       <div class="fs15 text-start mt-2">
-        Application seed can be used to restore your DEX accounts and native wallets. Make sure nobody else can see your screen.
+        输入您的应用密码以显示您的种子。确保没有其它人可以看到您的屏幕。
       </div>
       <div class="text-start mt-2">
         <label for="exportSeedPW" class="ps-1 mb-1">密码</label>
