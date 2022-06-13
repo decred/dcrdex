@@ -3320,6 +3320,8 @@ func (btc *baseWallet) tryRedemptionRequests(ctx context.Context, startBlock *ch
 				btc.log.Critical("Request not found in undiscovered map. This shouldn't be possible.")
 				continue
 			}
+			redeemTxID, redeemTxInput, _ := decodeCoinID(res.redemptionCoinID)
+			btc.log.Debugf("Found redemption %s:%d", redeemTxID, redeemTxInput)
 			req.success(res)
 			delete(undiscovered, outPt)
 		}

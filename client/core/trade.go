@@ -2284,6 +2284,10 @@ func (t *trackedTrade) findMakersRedemption(match *matchTracker) {
 			t.dc.log.Errorf("waitForRedemptions: error storing match info in database: %v", err)
 		}
 
+		t.dc.log.Infof("Found redemption of contract %s (%s) for order %s, match %s. Redeem: %v",
+			coinIDString(fromAsset.ID, swapCoinID), fromAsset.Symbol, t.ID(), match,
+			coinIDString(fromAsset.ID, redemptionCoinID))
+
 		subject, details := t.formatDetails(TopicMatchRecovered,
 			fromAsset.Symbol, coinIDString(fromAsset.ID, redemptionCoinID), match)
 		t.notify(newOrderNote(TopicMatchRecovered, subject, details, db.Poke, t.coreOrderInternal()))
