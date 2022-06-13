@@ -191,6 +191,7 @@ export interface WalletDefinition {
   description: string
   configpath: string
   configopts: ConfigOption[]
+  noauth: boolean
 }
 
 export interface ConfigOption {
@@ -205,6 +206,7 @@ export interface ConfigOption {
   isdate: boolean
   disablewhenactive: boolean
   isBirthdayConfig: boolean
+  noauth: boolean
 }
 
 export interface Coin {

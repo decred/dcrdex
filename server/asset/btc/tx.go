@@ -3,7 +3,10 @@
 
 package btc
 
-import "github.com/btcsuite/btcd/chaincfg/chainhash"
+import (
+	"github.com/btcsuite/btcd/btcjson"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+)
 
 // Tx is information about a transaction. It must satisfy the asset.DEXTx
 // interface to be DEX-compatible.
@@ -64,3 +67,64 @@ func newTransaction(btc *Backend, txHash, blockHash, lastLookup *chainhash.Hash,
 		raw:        rawTx,
 	}
 }
+
+// JoinSplit represents a ZCash JoinSplit.
+// https://zips.z.cash/protocol/canopy.pdf section 4.11
+type JoinSplit struct {
+	// Old = input
+	Old uint64 `json:"vpub_oldZat"`
+	// New = output
+	New uint64 `json:"vpub_newZat"`
+}
+
+// VerboseTxExtended is a subset of *btcjson.TxRawResult, with the addition of
+// some asset-specific fields.
+type VerboseTxExtended struct {
+	Hex           string          `json:"hex"`
+	Txid          string          `json:"txid"`
+	Size          int32           `json:"size,omitempty"`
+	Vsize         int32           `json:"vsize,omitempty"`
+	Vin           []*btcjson.Vin  `json:"vin"`
+	Vout          []*btcjson.Vout `json:"vout"`
+	BlockHash     string          `json:"blockhash,omitempty"`
+	Confirmations uint64          `json:"confirmations,omitempty"`
+
+	// ZCash-specific fields.
+
+	VJoinSplit          []*JoinSplit `json:"vjoinsplit"`
+	ValueBalanceSapling int64        `json:"valueBalanceZat"` // Sapling pool
+	// ValueBalanceOrchard is disabled until zcashd encodes valueBalanceOrchard.
+	ValueBalanceOrchard int64 `json:"valueBalanceOrchardZat"` // Orchard pool
+
+	// Other fields that could be used but aren't right now.
+
+	// Hash      string `json:"hash,omitempty"`
+	// Weight    int32  `json:"weight,omitempty"`
+	// Version   uint32 `json:"version"`
+	// LockTime  uint32 `json:"locktime"`
+	// Time      int64  `json:"time,omitempty"`
+	// Blocktime int64  `json:"blocktime,omitempty"`
+}
+
+// Currently disabled because the verbose getrawtransaction results for ZCash
+// do not includee the valueBalanceOrchard yet.
+// https://github.com/zcash/zcash/pull/5969
+// // ShieldedIO sums the ZCash shielded pool inputs and outputs. Will return
+// // zeros for non-ZCash-protocol transactions.
+// func (tx *VerboseTxExtended) ShieldedIO() (in, out uint64) {
+// 	for _, js := range tx.VJoinSplit {
+// 		in += js.New
+// 		out += js.Old
+// 	}
+// 	if tx.ValueBalanceSapling > 0 {
+// 		in += uint64(tx.ValueBalanceSapling)
+// 	} else if tx.ValueBalanceSapling < 0 {
+// 		out += uint64(-1 * tx.ValueBalanceSapling)
+// 	}
+// 	if tx.ValueBalanceOrchard > 0 {
+// 		in += uint64(tx.ValueBalanceOrchard)
+// 	} else if tx.ValueBalanceOrchard < 0 {
+// 		out += uint64(-1 * tx.ValueBalanceOrchard)
+// 	}
+// 	return
+// }

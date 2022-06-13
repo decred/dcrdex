@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 )
 
@@ -57,7 +56,7 @@ func (cache *blockCache) atHeight(height uint32) (*cachedBlock, bool) {
 // Add a block to the blockCache. This method will translate the RPC result
 // to a cachedBlock, returning the cachedBlock. If the block is not orphaned, it
 // will be added to the mainchain.
-func (cache *blockCache) add(block *btcjson.GetBlockVerboseResult) (*cachedBlock, error) {
+func (cache *blockCache) add(block *GetBlockVerboseResult) (*cachedBlock, error) {
 	cache.mtx.Lock()
 	defer cache.mtx.Unlock()
 	hash, err := chainhash.NewHashFromStr(block.Hash)

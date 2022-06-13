@@ -62,7 +62,7 @@ func TestMain(m *testing.M) {
 		}()
 
 		var err error
-		dcr, err = NewBackend("", logger, dex.Testnet)
+		dcr, err = NewBackend("", logger, dex.Mainnet)
 		if err != nil {
 			fmt.Printf("NewBackend error: %v\n", err)
 			return 1

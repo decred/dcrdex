@@ -2,6 +2,8 @@ package btc
 
 import (
 	"context"
+	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -22,6 +24,7 @@ type Wallet interface {
 	getBlockHeight(*chainhash.Hash) (int32, error)
 	getBestBlockHash() (*chainhash.Hash, error)
 	getBestBlockHeight() (int32, error)
+	medianTime() (time.Time, error)
 	balances() (*GetBalancesResult, error)
 	listUnspent() ([]*ListUnspentResult, error)
 	lockUnspent(unlock bool, ops []*output) error
@@ -48,4 +51,44 @@ type Wallet interface {
 
 type tipNotifier interface {
 	tipFeed() <-chan *block
+}
+
+// chainStamper is a source of the timestamp and the previous block hash for a
+// specified block. A chainStamper is used to manually calculate the median time
+// for a block.
+type chainStamper interface {
+	getChainStamp(*chainhash.Hash) (stamp time.Time, prevHash *chainhash.Hash, err error)
+}
+
+const medianTimeBlocks = 11
+
+// calcMedianTime calculates the median time of the previous 11 block headers.
+// The median time is used for validating time-locked transactions. See notes in
+// btcd/blockchain (*blockNode).CalcPastMedianTime() regarding incorrectly
+// calculated median time for blocks 1, 3, 5, 7, and 9.
+func calcMedianTime(stamper chainStamper, blockHash *chainhash.Hash) (time.Time, error) {
+	timestamps := make([]int64, 0, medianTimeBlocks)
+
+	zeroHash := chainhash.Hash{}
+
+	h := blockHash
+	for i := 0; i < medianTimeBlocks; i++ {
+		stamp, prevHash, err := stamper.getChainStamp(h)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("BlockHeader error for hash %q: %v", h, err)
+		}
+		timestamps = append(timestamps, stamp.Unix())
+
+		if *prevHash == zeroHash {
+			break
+		}
+		h = prevHash
+	}
+
+	sort.Slice(timestamps, func(i, j int) bool {
+		return timestamps[i] < timestamps[j]
+	})
+
+	medianTimestamp := timestamps[len(timestamps)/2]
+	return time.Unix(medianTimestamp, 0), nil
 }

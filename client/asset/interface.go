@@ -124,6 +124,11 @@ type WalletDefinition struct {
 	// description for each option. This can be used to request config info from
 	// users e.g. via dynamically generated GUI forms.
 	ConfigOpts []*ConfigOption `json:"configopts"`
+	// NoAuth can be set true to hide the wallet password field during wallet
+	// creation.
+	// TODO: Use an asset.Authenticator interface and WalletTraits to do this
+	// instead.
+	NoAuth bool `json:"noauth"`
 }
 
 // Token combines the generic dex.Token with a WalletDefinition.

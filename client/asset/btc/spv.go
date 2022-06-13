@@ -521,6 +521,21 @@ func (w *spvWallet) getBestBlockHeight() (int32, error) {
 	return w.wallet.syncedTo().Height, nil
 }
 
+// getChainStamp satisfies chainStamper for manual median time calculations.
+func (w *spvWallet) getChainStamp(blockHash *chainhash.Hash) (stamp time.Time, prevHash *chainhash.Hash, err error) {
+	hdr, err := w.cl.GetBlockHeader(blockHash)
+	if err != nil {
+		return
+	}
+	return hdr.Timestamp, &hdr.PrevBlock, nil
+}
+
+// medianTime is the median time for the current best block.
+func (w *spvWallet) medianTime() (time.Time, error) {
+	blk := w.wallet.syncedTo()
+	return calcMedianTime(w, &blk.Hash)
+}
+
 // getChainHeight is only for confirmations since it does not reflect the wallet
 // manager's sync height, just the chain service.
 func (w *spvWallet) getChainHeight() (int32, error) {
@@ -1015,11 +1030,6 @@ func (w *spvWallet) getBlockHeader(blockHash *chainhash.Hash) (*blockHeader, err
 		return nil, err
 	}
 
-	medianTime, err := w.calcMedianTime(blockHash)
-	if err != nil {
-		return nil, err
-	}
-
 	tip, err := w.cl.BestBlock()
 	if err != nil {
 		return nil, fmt.Errorf("BestBlock error: %v", err)
@@ -1035,41 +1045,7 @@ func (w *spvWallet) getBlockHeader(blockHash *chainhash.Hash) (*blockHeader, err
 		Confirmations: int64(confirms(blockHeight, tip.Height)),
 		Height:        int64(blockHeight),
 		Time:          hdr.Timestamp.Unix(),
-		MedianTime:    medianTime.Unix(),
 	}, nil
-}
-
-const medianTimeBlocks = 11
-
-// calcMedianTime calculates the median time of the previous 11 block headers.
-// The median time is used for validating time-locked transactions. See notes in
-// btcd/blockchain (*blockNode).CalcPastMedianTime() regarding incorrectly
-// calculated median time for blocks 1, 3, 5, 7, and 9.
-func (w *spvWallet) calcMedianTime(blockHash *chainhash.Hash) (time.Time, error) {
-	timestamps := make([]int64, 0, medianTimeBlocks)
-
-	zeroHash := chainhash.Hash{}
-
-	h := blockHash
-	for i := 0; i < medianTimeBlocks; i++ {
-		hdr, err := w.cl.GetBlockHeader(h)
-		if err != nil {
-			return time.Time{}, fmt.Errorf("BlockHeader error for hash %q: %v", h, err)
-		}
-		timestamps = append(timestamps, hdr.Timestamp.Unix())
-
-		if hdr.PrevBlock == zeroHash {
-			break
-		}
-		h = &hdr.PrevBlock
-	}
-
-	sort.Slice(timestamps, func(i, j int) bool {
-		return timestamps[i] < timestamps[j]
-	})
-
-	medianTimestamp := timestamps[len(timestamps)/2]
-	return time.Unix(medianTimestamp, 0), nil
 }
 
 func (w *spvWallet) logFilePath() string {

@@ -37,23 +37,29 @@ var tLogger dex.Logger
 
 type WalletConstructor func(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error)
 
-func tBackend(ctx context.Context, t *testing.T, cfg *Config, node, name string, blkFunc func(string, error)) *connectedWallet {
+func tBackend(ctx context.Context, t *testing.T, cfg *Config, walletName *WalletName, blkFunc func(string, error)) *connectedWallet {
 	t.Helper()
 	user, err := user.Current()
 	if err != nil {
 		t.Fatalf("error getting current user: %v", err)
 	}
-	cfgPath := filepath.Join(user.HomeDir, "dextest", cfg.Asset.Symbol, node, node+".conf")
+
+	fileName := walletName.Filename
+	if fileName == "" {
+		fileName = walletName.Node + ".conf"
+	}
+
+	cfgPath := filepath.Join(user.HomeDir, "dextest", cfg.Asset.Symbol, walletName.Node, fileName)
 	settings, err := config.Parse(cfgPath)
 	if err != nil {
 		t.Fatalf("error reading config options: %v", err)
 	}
-	settings["walletname"] = name
+	settings["walletname"] = walletName.Name
 	if cfg.SplitTx {
 		settings["txsplit"] = "1"
 	}
 
-	reportName := fmt.Sprintf("%s:%s-%s", cfg.Asset.Symbol, node, name)
+	reportName := fmt.Sprintf("%s:%s-%s", cfg.Asset.Symbol, walletName.Node, walletName.Name)
 
 	walletCfg := &asset.WalletConfig{
 		Settings: settings,
@@ -65,7 +71,7 @@ func tBackend(ctx context.Context, t *testing.T, cfg *Config, node, name string,
 		},
 	}
 
-	w, err := cfg.NewWallet(walletCfg, tLogger.SubLogger(node+"."+name), dex.Regtest)
+	w, err := cfg.NewWallet(walletCfg, tLogger.SubLogger(walletName.Node+"."+walletName.Name), dex.Regtest)
 	if err != nil {
 		t.Fatalf("error creating backend: %v", err)
 	}
@@ -109,7 +115,11 @@ func (rig *testRig) close() {
 }
 
 func (rig *testRig) mineAlpha() error {
-	return exec.Command("tmux", "send-keys", "-t", rig.symbol+"-harness:2", "./mine-alpha 1", "C-m").Run()
+	tmuxWindow := rig.symbol + "-harness:2"
+	if rig.symbol == "zec" {
+		tmuxWindow = rig.symbol + "-harness:4"
+	}
+	return exec.Command("tmux", "send-keys", "-t", tmuxWindow, "./mine-alpha 1", "C-m").Run()
 }
 
 func randBytes(l int) []byte {
@@ -121,6 +131,9 @@ func randBytes(l int) []byte {
 type WalletName struct {
 	Node string
 	Name string
+	// Filename is optional. If specified, it will be used instead of
+	// [node].conf.
+	Filename string
 }
 
 type Config struct {
@@ -131,6 +144,7 @@ type Config struct {
 	SPV          bool
 	FirstWallet  *WalletName
 	SecondWallet *WalletName
+	Unencrypted  bool
 }
 
 func Run(t *testing.T, cfg *Config) {
@@ -179,24 +193,25 @@ func Run(t *testing.T, cfg *Config) {
 	}
 
 	t.Log("Setting up alpha/beta/gamma wallet backends...")
-	rig.firstWallet = tBackend(tCtx, t, cfg, cfg.FirstWallet.Node, cfg.FirstWallet.Name, blkFunc)
-	// rig.backends["beta"], rig.connectionMasters["beta"] = tBackend(tCtx, t, cfg, "beta", "", tLogger.SubLogger("beta"), blkFunc)
-	rig.secondWallet = tBackend(tCtx, t, cfg, cfg.SecondWallet.Node, cfg.SecondWallet.Name, blkFunc)
+	rig.firstWallet = tBackend(tCtx, t, cfg, cfg.FirstWallet, blkFunc)
+	rig.secondWallet = tBackend(tCtx, t, cfg, cfg.SecondWallet, blkFunc)
 	defer rig.close()
 
 	// Unlock the wallet for use.
-	err := rig.firstWallet.Unlock(walletPassword)
-	if err != nil {
-		t.Fatalf("error unlocking gamma wallet: %v", err)
-	}
+	if !cfg.Unencrypted {
+		err := rig.firstWallet.Unlock(walletPassword)
+		if err != nil {
+			t.Fatalf("error unlocking gamma wallet: %v", err)
+		}
 
-	if cfg.SPV {
-		// // The test expects beta and gamma to be unlocked.
-		// if err := rig.beta().Unlock(walletPassword); err != nil {
-		// 	t.Fatalf("beta Unlock error: %v", err)
-		// }
-		if err := rig.secondWallet.Unlock(walletPassword); err != nil {
-			t.Fatalf("gamma Unlock error: %v", err)
+		if cfg.SPV {
+			// // The test expects beta and gamma to be unlocked.
+			// if err := rig.beta().Unlock(walletPassword); err != nil {
+			// 	t.Fatalf("beta Unlock error: %v", err)
+			// }
+			if err := rig.secondWallet.Unlock(walletPassword); err != nil {
+				t.Fatalf("gamma Unlock error: %v", err)
+			}
 		}
 	}
 
@@ -365,12 +380,15 @@ func Run(t *testing.T, cfg *Config) {
 					if strings.Contains(err.Error(), "error finding unspent contract") {
 						return wait.TryAgain
 					}
+					c <- nil
 					t.Fatalf("error auditing contract: %v", err)
 				}
 				c <- ai
 				return wait.DontTryAgain
 			},
-			ExpireFunc: func() { t.Fatalf("makeRedemption -> AuditContract timed out") },
+			ExpireFunc: func() {
+				t.Fatalf("makeRedemption -> AuditContract timed out")
+			},
 		})
 
 		// Alpha should be able to redeem.
@@ -440,7 +458,7 @@ func Run(t *testing.T, cfg *Config) {
 	latencyQ.Wait(&wait.Waiter{
 		Expiration: time.Now().Add(time.Second * 10),
 		TryFunc: func() wait.TryDirective {
-			ctx, cancel := context.WithTimeout(tCtx, time.Millisecond*5)
+			ctx, cancel := context.WithTimeout(tCtx, time.Second)
 			defer cancel()
 			_, _, err = rig.secondWallet.FindRedemption(ctx, swapReceipt.Coin().ID(), nil)
 			if err != nil {

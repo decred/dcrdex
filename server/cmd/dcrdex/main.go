@@ -23,6 +23,7 @@ import (
 	_ "decred.org/dcrdex/server/asset/dcr"  // register dcr asset
 	_ "decred.org/dcrdex/server/asset/doge" // register doge asset
 	_ "decred.org/dcrdex/server/asset/ltc"  // register ltc asset
+	_ "decred.org/dcrdex/server/asset/zec"  // register zec asset
 	dexsrv "decred.org/dcrdex/server/dex"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
