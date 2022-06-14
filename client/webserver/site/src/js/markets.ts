@@ -340,7 +340,7 @@ export default class MarketsPage extends BasePage {
     bindForm(page.cancelForm, page.cancelSubmit, async () => { this.submitCancel() })
     // Order detail view
     Doc.bind(page.vFeeDetails, 'click', () => this.showForm(page.vDetailPane))
-    Doc.bind(page.closeDetailPane, 'click', () => this.showForm(page.verifyForm))
+    Doc.bind(page.closeDetailPane, 'click', () => this.showVerifyForm())
     // Bind active orders list's header sort events.
     page.liveTable.querySelectorAll('[data-ordercol]')
       .forEach((th: HTMLElement) => bind(th, 'click', () => setOrdersSortCol(th.dataset.ordercol || '')))
@@ -388,7 +388,7 @@ export default class MarketsPage extends BasePage {
 
     // If the user clicks outside of a form, it should close the page overlay.
     bind(page.forms, 'mousedown', (e: MouseEvent) => {
-      if (Doc.isDisplayed(page.vDetailPane) && !Doc.mouseInElement(e, page.vDetailPane)) return this.showForm(page.verifyForm)
+      if (Doc.isDisplayed(page.vDetailPane) && !Doc.mouseInElement(e, page.vDetailPane)) return this.showVerifyForm()
       if (!Doc.mouseInElement(e, this.currentForm)) {
         closePopups()
       }
@@ -1354,7 +1354,7 @@ export default class MarketsPage extends BasePage {
     const page = this.page
     this.openAsset = asset
     this.openFunc = f
-    this.unlockForm.setAsset(app().assets[asset.id])
+    this.unlockForm.refresh(app().assets[asset.id])
     this.showForm(page.unlockWalletForm)
     page.uwAppPass.focus()
   }
@@ -1428,7 +1428,7 @@ export default class MarketsPage extends BasePage {
       page.vSubmit.classList.add(buyBtnClass)
       page.vSubmit.classList.remove(sellBtnClass)
     }
-    this.showForm(page.verifyForm)
+    this.showVerifyForm()
     page.vPass.focus()
 
     if (baseAsset.wallet.open && quoteAsset.wallet.open) this.preOrder(order)
@@ -1437,6 +1437,13 @@ export default class MarketsPage extends BasePage {
       if (State.passwordIsCached()) this.unlockWalletsForEstimates('')
       else Doc.show(page.vUnlockPreorder)
     }
+  }
+
+  /* showVerifyForm displays form to verify an order */
+  async showVerifyForm () {
+    const page = this.page
+    Doc.hide(page.vErr)
+    this.showForm(page.verifyForm)
   }
 
   /*
@@ -1611,6 +1618,7 @@ export default class MarketsPage extends BasePage {
     const asset = OrderUtil.isMarketBuy(order) ? this.market.quote : this.market.base
     page.cancelRemain.textContent = Doc.formatCoinValue(remaining, asset.info.unitinfo)
     page.cancelUnit.textContent = asset.symbol.toUpperCase()
+    Doc.hide(page.cancelErr)
     this.showForm(page.cancelForm)
     page.cancelPass.focus()
     this.cancelData = {
