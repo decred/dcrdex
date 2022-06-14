@@ -393,7 +393,7 @@ export default class WalletsPage extends BasePage {
     const page = this.page
     this.openAsset = this.lastFormAsset = assetID
     await this.hideBox()
-    this.unlockForm.setAsset(app().assets[assetID])
+    this.unlockForm.refresh(app().assets[assetID])
     if (errorMsg) this.unlockForm.showErrorOnly(errorMsg)
     this.animation = this.showBox(page.unlockWalletForm, page.walletPass)
   }

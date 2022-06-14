@@ -855,12 +855,14 @@ export class UnlockWalletForm {
     bind(form, this.page.submitUnlock, () => this.submit())
   }
 
-  setAsset (asset: SupportedAsset) {
+  refresh (asset: SupportedAsset) {
     const page = this.page
     this.currentAsset = asset
     page.uwAssetLogo.src = Doc.logoPath(asset.symbol)
     page.uwAssetName.textContent = asset.info.name
     page.uwAppPass.value = ''
+    page.unlockErr.textContent = ''
+    Doc.hide(page.unlockErr)
     const hidePWBox = State.passwordIsCached() || (this.pwCache && this.pwCache.pw)
     if (hidePWBox) Doc.hide(page.uwAppPassBox)
     else Doc.show(page.uwAppPassBox)
