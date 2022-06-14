@@ -2981,7 +2981,15 @@ func (dcr *ExchangeWallet) withdraw(addr stdaddr.Address, val, feeRate uint64) (
 		return nil, 0, fmt.Errorf("unable to withdraw %s DCR to address %s with feeRate %d atoms/byte: %w",
 			amount(val), addr, feeRate, err)
 	}
-	return dcr.sendCoins(addr, coins, val, feeRate, true)
+
+	msgTx, sentVal, err := dcr.sendCoins(addr, coins, val, feeRate, true)
+	if err != nil {
+		if _, retErr := dcr.returnCoins(coins); retErr != nil {
+			dcr.log.Errorf("Failed to unlock coins: %v", retErr)
+		}
+		return nil, 0, err
+	}
+	return msgTx, sentVal, nil
 }
 
 // sendToAddress sends an exact amount to an address. Transaction fees will be
@@ -2997,7 +3005,15 @@ func (dcr *ExchangeWallet) sendToAddress(addr stdaddr.Address, amt, feeRate uint
 		return nil, 0, fmt.Errorf("Unable to send %s DCR with fee rate of %d atoms/byte: %w",
 			amount(amt), feeRate, err)
 	}
-	return dcr.sendCoins(addr, coins, amt, feeRate, false)
+
+	msgTx, sentVal, err := dcr.sendCoins(addr, coins, amt, feeRate, false)
+	if err != nil {
+		if _, retErr := dcr.returnCoins(coins); retErr != nil {
+			dcr.log.Errorf("Failed to unlock coins: %v", retErr)
+		}
+		return nil, 0, err
+	}
+	return msgTx, sentVal, nil
 }
 
 // sendCoins sends the amount to the address as the zeroth output, spending the
@@ -3021,9 +3037,6 @@ func (dcr *ExchangeWallet) sendCoins(addr stdaddr.Address, coins asset.Coins, va
 
 	tx, err := dcr.sendWithReturn(baseTx, feeRate, feeSource)
 	if err != nil {
-		if _, retErr := dcr.returnCoins(coins); retErr != nil {
-			dcr.log.Errorf("Failed to unlock coins: %v", retErr)
-		}
 		return nil, 0, err
 	}
 	return tx, uint64(tx.TxOut[0].Value), err

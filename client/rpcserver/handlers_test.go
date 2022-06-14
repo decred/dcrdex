@@ -758,48 +758,7 @@ func TestHandleSendAndWithdraw(t *testing.T) {
 		},
 	}
 
-	// Test handleWithdraw.
 	tests := []struct {
-		name        string
-		params      *RawParams
-		walletState *core.WalletState
-		coin        asset.Coin
-		withdrawErr error
-		wantErrCode int
-	}{{
-		name:        "ok",
-		params:      params,
-		walletState: &core.WalletState{},
-		coin:        tCoin{},
-		wantErrCode: -1,
-	}, {
-		name:        "core.Withdraw error",
-		params:      params,
-		walletState: &core.WalletState{},
-		coin:        tCoin{},
-		withdrawErr: errors.New("error"),
-		wantErrCode: msgjson.RPCWithdrawError,
-	}, {
-		name:        "bad params",
-		params:      &RawParams{},
-		wantErrCode: msgjson.RPCArgumentsError,
-	}}
-	for _, test := range tests {
-		tc := &TCore{
-			walletState: test.walletState,
-			coin:        test.coin,
-			withdrawErr: test.withdrawErr,
-		}
-		r := &RPCServer{core: tc}
-		payload := handleWithdraw(r, test.params)
-		res := ""
-		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	// Test handleSend.
-	sendTests := []struct {
 		name        string
 		params      *RawParams
 		walletState *core.WalletState
@@ -813,18 +772,35 @@ func TestHandleSendAndWithdraw(t *testing.T) {
 		coin:        tCoin{},
 		wantErrCode: -1,
 	}, {
-		name:        "core.Send error",
+		name:        "Send error",
 		params:      params,
 		walletState: &core.WalletState{},
 		coin:        tCoin{},
 		sendErr:     errors.New("error"),
-		wantErrCode: msgjson.RPCSendError,
+		wantErrCode: msgjson.RPCFundTransferError,
 	}, {
 		name:        "bad params",
 		params:      &RawParams{},
 		wantErrCode: msgjson.RPCArgumentsError,
 	}}
-	for _, test := range sendTests {
+
+	// Test handleWithdraw.
+	for _, test := range tests {
+		tc := &TCore{
+			walletState: test.walletState,
+			coin:        test.coin,
+			sendErr:     test.sendErr,
+		}
+		r := &RPCServer{core: tc}
+		payload := handleWithdraw(r, test.params)
+		res := ""
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Test handleSend.
+	for _, test := range tests {
 		tc := &TCore{
 			walletState: test.walletState,
 			coin:        test.coin,

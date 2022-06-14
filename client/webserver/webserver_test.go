@@ -422,7 +422,12 @@ func TestAPILogin(t *testing.T) {
 	tCore.loginErr = nil
 }
 
-func TestAPISend(t *testing.T) {
+func TestAPISendAndAPIWithdraw(t *testing.T) {
+	testAPISendAndAPIWithdraw(t, true)
+	testAPISendAndAPIWithdraw(t, false)
+}
+
+func testAPISendAndAPIWithdraw(t *testing.T, withdraw bool) {
 	writer := new(TWriter)
 	var body interface{}
 	reader := new(TReader)
@@ -435,7 +440,11 @@ func TestAPISend(t *testing.T) {
 		if err != nil {
 			t.Fatalf("error creating request: %v", err)
 		}
-		s.apiSend(writer, req)
+		if !withdraw {
+			s.apiSend(writer, req)
+		} else {
+			s.apiWithdraw(writer, req)
+		}
 		if len(writer.b) == 0 {
 			t.Fatalf("no response")
 		}
@@ -463,10 +472,10 @@ func TestAPISend(t *testing.T) {
 	}
 	tCore.notHas = false
 
-	// withdraw error
+	// Send/Withdraw error
 	tCore.sendErr = tErr
 	if isOK() {
-		t.Fatalf("no error for Send error")
+		t.Fatalf("no error for Send/Withdraw error")
 	}
 	tCore.sendErr = nil
 

@@ -424,37 +424,33 @@ func handleCancel(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 // handleWithdraw handles requests for withdraw. *msgjson.ResponsePayload.Error
 // is empty if successful.
 func handleWithdraw(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseSendOrWithdrawArgs(params)
-	if err != nil {
-		return usage(withdrawRoute, err)
-	}
-	defer form.appPass.Clear()
-	coin, err := s.core.Send(form.appPass, form.assetID, form.value, form.address, true)
-	if err != nil {
-		errMsg := fmt.Sprintf("unable to withdraw: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCWithdrawError, errMsg)
-		return createResponse(withdrawRoute, nil, resErr)
-	}
-	res := coin.String()
-	return createResponse(withdrawRoute, &res, nil)
+	return send(s, params, withdrawRoute)
 }
 
 // handleSend handles the request for send. *msgjson.ResponsePayload.Error
 // is empty if successful.
 func handleSend(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	return send(s, params, sendRoute)
+}
+
+func send(s *RPCServer, params *RawParams, route string) *msgjson.ResponsePayload {
 	form, err := parseSendOrWithdrawArgs(params)
 	if err != nil {
-		return usage(sendRoute, err)
+		return usage(route, err)
 	}
 	defer form.appPass.Clear()
-	coin, err := s.core.Send(form.appPass, form.assetID, form.value, form.address, false)
+	subtract := false
+	if route == withdrawRoute {
+		subtract = true
+	}
+	coin, err := s.core.Send(form.appPass, form.assetID, form.value, form.address, subtract)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to send: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCSendError, errMsg)
-		return createResponse(sendRoute, nil, resErr)
+		errMsg := fmt.Sprintf("unable to %s: %v", err, route)
+		resErr := msgjson.NewError(msgjson.RPCFundTransferError, errMsg)
+		return createResponse(route, nil, resErr)
 	}
 	res := coin.String()
-	return createResponse(sendRoute, &res, nil)
+	return createResponse(route, &res, nil)
 }
 
 // handleRescanWallet handles requests to rescan a wallet. This may trigger an

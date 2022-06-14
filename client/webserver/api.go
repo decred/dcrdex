@@ -863,6 +863,18 @@ func (s *WebServer) apiReconfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
+// apiWithdraw handles the 'withdraw' API request. This end-point is Deprecated.
+// Use the 'send' end-point.
+func (s *WebServer) apiWithdraw(w http.ResponseWriter, r *http.Request) {
+	form := new(sendOrWithdrawForm)
+	defer form.Pass.Clear()
+	if !readPost(w, r, form) {
+		return
+	}
+	form.Subtract = true
+	s.send(w, r, form)
+}
+
 // apiSend handles the 'send' API request.
 func (s *WebServer) apiSend(w http.ResponseWriter, r *http.Request) {
 	form := new(sendOrWithdrawForm)
@@ -870,6 +882,10 @@ func (s *WebServer) apiSend(w http.ResponseWriter, r *http.Request) {
 	if !readPost(w, r, form) {
 		return
 	}
+	s.send(w, r, form)
+}
+
+func (s *WebServer) send(w http.ResponseWriter, r *http.Request, form *sendOrWithdrawForm) {
 	state := s.core.WalletState(form.AssetID)
 	if state == nil {
 		s.writeAPIError(w, fmt.Errorf("no wallet found for %s", unbip(form.AssetID)))

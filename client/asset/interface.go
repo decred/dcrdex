@@ -359,7 +359,7 @@ type Wallet interface {
 	RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error)
 	// Send sends the exact value to the specified address. This is different
 	// from Withdraw, which subtracts the tx fees from the amount sent.
-	Send(address string, value, feeSuggestion uint64) (Coin, error)
+	Send(address string, value, feeRate uint64) (Coin, error)
 	// EstimateRegistrationTxFee returns an estimate for the tx fee needed to
 	// pay the registration fee using the provided feeRate.
 	EstimateRegistrationTxFee(feeRate uint64) uint64
@@ -385,13 +385,13 @@ type Recoverer interface {
 type Withdrawer interface {
 	// Withdraw withdraws funds to the specified address. Fees are subtracted
 	// from the value.
-	Withdraw(address string, value, feeSuggestion uint64) (Coin, error)
+	Withdraw(address string, value, feeRate uint64) (Coin, error)
 }
 
 // Sweeper is a wallet that can clear the entire balance of the wallet/account
 // to an address. Similar to Withdraw, but no input value is required.
 type Sweeper interface {
-	Sweep(address string, feeSuggestion uint64) (Coin, error)
+	Sweep(address string, feeRate uint64) (Coin, error)
 }
 
 // NewAddresser is a wallet that can generate new deposit addresses.

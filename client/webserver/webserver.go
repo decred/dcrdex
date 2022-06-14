@@ -343,6 +343,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/walletsettings", s.apiWalletSettings)
 			apiAuth.Post("/orders", s.apiOrders)
 			apiAuth.Post("/order", s.apiOrder)
+			apiAuth.Post("/withdraw", s.apiWithdraw) // Deprecated.
 			apiAuth.Post("/send", s.apiSend)
 			apiAuth.Post("/maxbuy", s.apiMaxBuy)
 			apiAuth.Post("/maxsell", s.apiMaxSell)
