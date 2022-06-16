@@ -198,17 +198,22 @@ if [ "$CHAIN_LOADED" ] ; then
 else
   tmux send-keys -t $SESSION:2 "./beta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
   # This timeout is apparently critical. Give the nodes time to sync.
-  sleep 1
+  sleep 2
 
   echo "Generating the genesis block"
   tmux send-keys -t $SESSION:2 "./alpha generatetoaddress 1 ${ALPHA_MINING_ADDR}${DONE}" C-m\; ${WAIT}
-  sleep 1
+  sleep 2
 
-  echo "Encrypting the alpha wallet (may take a minute)"
-  tmux send-keys -t $SESSION:2 "./alpha encryptwallet ${WALLET_PASSWORD}${DONE}" C-m\; ${WAIT}
+  if [ "$CREATE_DEFAULT_WALLET" ] ; then
+    tmux send-keys -t $SESSION:2 "./alpha createwallet \"\" false true ${WALLET_PASSWORD} false false true${DONE}" C-m\; ${WAIT}
+    tmux send-keys -t $SESSION:2 "./beta createwallet \"\" false true ${WALLET_PASSWORD} false false true${DONE}" C-m\; ${WAIT}
+  else
+    echo "Encrypting the alpha wallet (may take a minute)"
+    tmux send-keys -t $SESSION:2 "./alpha encryptwallet ${WALLET_PASSWORD}${DONE}" C-m\; ${WAIT}
 
-  echo "Encrypting the beta wallet"
-  tmux send-keys -t $SESSION:2 "./beta encryptwallet ${WALLET_PASSWORD}${DONE}" C-m\; ${WAIT}
+    echo "Encrypting the beta wallet"
+    tmux send-keys -t $SESSION:2 "./beta encryptwallet ${WALLET_PASSWORD}${DONE}" C-m\; ${WAIT}
+  fi
 
 
   #################################################################################
@@ -241,6 +246,8 @@ else
   # Setup the gamma wallet
   ################################################################################
   echo "Creating the gamma wallet"
+  # TODO: with Bitcoin Core v23 createwallet makes a descriptor wallet by default,
+  # which we cannot use yet, so all the createwallet options will be needed.
   tmux send-keys -t $SESSION:2 "./alpha createwallet gamma${DONE}" C-m\; ${WAIT}
   tmux send-keys -t $SESSION:2 "./gamma sethdseed true ${GAMMA_WALLET_SEED}${DONE}" C-m\; ${WAIT}
 
@@ -267,8 +274,17 @@ else
   tmux send-keys -t $SESSION:2 "./delta getnewaddress${DONE}" C-m\; ${WAIT}
   tmux send-keys -t $SESSION:2 "./delta getnewaddress \"\" \"legacy\"${DONE}" C-m\; ${WAIT}
 
-  echo "Generating 400 blocks for alpha"
-  tmux send-keys -t $SESSION:2 "./alpha generatetoaddress 400 ${ALPHA_MINING_ADDR}${DONE}" C-m\; ${WAIT}
+  if [ "$NEEDS_MWEB_PEGIN_ACTIVATION" ] ; then
+    ./alpha generatetoaddress 16 ${BETA_MINING_ADDR}
+    HEIGHT=$(./alpha getblockcount)
+    ./alpha generatetoaddress $((432 - $HEIGHT - 1)) ${ALPHA_MINING_ADDR}
+    MWADDR=$(./alpha getnewaddress mweb-peg-in mweb)
+    ./alpha sendtoaddress ${MWADDR} 1.234 && sleep 1
+    ./alpha generatetoaddress 3 ${ALPHA_MINING_ADDR}
+  else
+    echo "Generating 400 blocks for alpha"
+    tmux send-keys -t $SESSION:2 "./alpha generatetoaddress 400 ${ALPHA_MINING_ADDR}${DONE}" C-m\; ${WAIT}
+  fi
 
   #################################################################################
   # Send gamma and delta some coin

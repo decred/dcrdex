@@ -20,5 +20,6 @@ export GAMMA_ADDRESS="bcrt1qh6m8v7czylaz8tzeaxxjqjhqgs0ruu0lu44ksy"
 export DELTA_WALLET_SEED="cURsyTZ8icuTHwWxSfTC2Geu2F6dMRtnzt1gvSaxHdc9Zf6eviJN"
 export DELTA_ADDRESS="bcrt1q4clywna5re22qh9mexqty8u8mqvhjh8cwhp5ms"
 export EXTRA_ARGS="--blockfilterindex --peerblockfilters --rpcbind=0.0.0.0 --rpcallowip=0.0.0.0/0"
+export CREATE_DEFAULT_WALLET="1"
 # Run the harness
 ./base-harness.sh

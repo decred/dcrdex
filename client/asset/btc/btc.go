@@ -3172,6 +3172,7 @@ func (btc *baseWallet) FindRedemption(ctx context.Context, coinID, _ dex.Bytes) 
 
 	var blockHeight int32
 	if blockHash != nil {
+		btc.log.Infof("FindRedemption - Checking block %v for swap %v", blockHash, outPt)
 		blockHeight, err = btc.checkRedemptionBlockDetails(outPt, blockHash, pkScript)
 		if err != nil {
 			return exitError("GetBlockHeight for redemption %s error: %v", outPt, err)
@@ -3311,6 +3312,7 @@ func (btc *baseWallet) tryRedemptionRequests(ctx context.Context, startBlock *ch
 			continue
 		}
 
+		btc.log.Debugf("tryRedemptionRequests - Checking block %v for redemptions...", iHash)
 		discovered := btc.node.searchBlockForRedemptions(ctx, validReqs, *iHash)
 		for outPt, res := range discovered {
 			req, found := undiscovered[outPt]
@@ -3318,6 +3320,8 @@ func (btc *baseWallet) tryRedemptionRequests(ctx context.Context, startBlock *ch
 				btc.log.Critical("Request not found in undiscovered map. This shouldn't be possible.")
 				continue
 			}
+			redeemTxID, redeemTxInput, _ := decodeCoinID(res.redemptionCoinID)
+			btc.log.Debugf("Found redemption %s:%d", redeemTxID, redeemTxInput)
 			req.success(res)
 			delete(undiscovered, outPt)
 		}

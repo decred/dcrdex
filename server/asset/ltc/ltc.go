@@ -84,6 +84,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		Net:                  network,
 		ChainParams:          params,
 		Ports:                ports,
+		BlockDeserializer:    dexltc.DeserializeBlockBytes,
 		NoCompetitionFeeRate: 10,
 		// It looks like if you set it to 1, litecoind just returns data for 2
 		// anyway.
