@@ -2245,7 +2245,6 @@ func (eth *baseWallet) Locked() bool {
 // pay the registration fee using the provided feeRate.
 func (w *ETHWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
 	return feeRate * defaultSendGasLimit
-
 }
 
 // EstimateRegistrationTxFee returns an estimate for the tx fee needed to
@@ -2257,6 +2256,73 @@ func (w *TokenWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
 		return math.MaxUint64
 	}
 	return g.Transfer * feeRate
+}
+
+// EstimateSendTxFee returns a tx fee estimate for sending provided amount using
+// the provided feeRate.
+func (w *ETHWallet) EstimateSendTxFee(value, _ uint64, subtract bool) (fee uint64, err error) {
+	if subtract {
+		return 0, fmt.Errorf("wallet does not support checking network fee for withdrawal")
+	}
+	bal, err := w.Balance()
+	if err != nil {
+		return 0, nil
+	}
+	avail := bal.Available
+	if avail < value {
+		return 0, fmt.Errorf("not enough funds to send: have %d gwei need %d gwei", avail, value)
+	}
+
+	maxFeeRate, err := w.recommendedMaxFeeRate(w.ctx)
+	if err != nil {
+		return 0, fmt.Errorf("error getting max fee rate: %w", err)
+	}
+
+	maxFee := defaultSendGasLimit * dexeth.WeiToGwei(maxFeeRate)
+	if avail < value+maxFee {
+		return 0, fmt.Errorf("not enough funds to send: cannot cover value %d, max fee of %d gwei", value, maxFee)
+	}
+
+	return maxFee, nil
+}
+
+// EstimateSendTxFee returns a tx fee estimate for sending provided amount using
+// the provided feeRate.
+func (w *TokenWallet) EstimateSendTxFee(value, _ uint64, subtract bool) (fee uint64, err error) {
+	if subtract {
+		return 0, fmt.Errorf("wallet does not support checking network fee for withdrawal.")
+	}
+	bal, err := w.Balance()
+	if err != nil {
+		return 0, nil
+	}
+	avail := bal.Available
+	if avail < value {
+		return 0, fmt.Errorf("not enough tokens: have %d gwei need %d gwei", avail, value)
+	}
+
+	ethBal, err := w.parent.Balance()
+	if err != nil {
+		return 0, fmt.Errorf("error getting base chain balance: %w", err)
+	}
+
+	g := w.gases(contractVersionNewest)
+	if g == nil {
+		return 0, fmt.Errorf("gas table not found")
+	}
+
+	maxFeeRate, err := w.recommendedMaxFeeRate(w.ctx)
+	if err != nil {
+		return 0, fmt.Errorf("error getting max fee rate: %w", err)
+	}
+
+	estFee := dexeth.WeiToGwei(maxFeeRate) * g.Transfer
+	if ethBal.Available < estFee {
+		return 0, fmt.Errorf("insufficient balance to cover token transfer fees. %d < %d",
+			ethBal.Available, estFee)
+	}
+
+	return estFee, nil
 }
 
 // RestorationInfo returns information about how to restore the wallet in

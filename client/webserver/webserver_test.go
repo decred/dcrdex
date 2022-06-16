@@ -71,6 +71,8 @@ type TCore struct {
 	notRunning       bool
 	notOpen          bool
 	rateSourceErr    error
+	estFee           uint64
+	estFeeErr        error
 }
 
 func (c *TCore) Network() dex.Network                         { return dex.Mainnet }
@@ -138,6 +140,9 @@ func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 }
 func (c *TCore) Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (asset.Coin, error) {
 	return &tCoin{id: []byte{0xde, 0xc7, 0xed}}, c.sendErr
+}
+func (c *TCore) EstimateSendTxFee(assetID uint32, value uint64, subtract bool) (fee uint64, err error) {
+	return c.estFee, c.estFeeErr
 }
 func (c *TCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error) {
 	oType := order.LimitOrderType
@@ -793,4 +798,30 @@ func TestAPI_ToggleRatesource(t *testing.T) {
 		tCore.rateSourceErr = test.wantErr
 		ensureResponse(t, s.apiToggleRateSource, test.want, reader, writer, body, nil)
 	}
+}
+
+func TestAPIEstimateSendTxFee(t *testing.T) {
+	s, tCore, shutdown, err := newTServer(t, false)
+	if err != nil {
+		t.Fatalf("error starting server: %v", err)
+	}
+	defer shutdown()
+
+	writer := new(TWriter)
+	reader := new(TReader)
+	testID := uint32(42)
+
+	body := &sendTxFeeForm{
+		Value:    1e8,
+		Subtract: false,
+		AssetID:  &testID,
+	}
+
+	want := `{"ok":true,"txfee":10000}`
+	tCore.estFee = 10000
+	ensureResponse(t, s.apiEstimateSendTxFee, want, reader, writer, body, nil)
+
+	want = fmt.Sprintf(`{"ok":false,"msg":"%s"}`, tErr)
+	tCore.estFeeErr = tErr
+	ensureResponse(t, s.apiEstimateSendTxFee, want, reader, writer, body, nil)
 }

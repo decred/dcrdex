@@ -4435,6 +4435,96 @@ func (btc *baseWallet) createWitnessSig(tx *wire.MsgTx, idx int, pkScript []byte
 	return sig, privKey.PubKey().SerializeCompressed(), nil
 }
 
+// EstimateSendTxFee returns a tx fee estimate for sending or withdrawing the
+// provided amount using the provided feeRate.
+func (btc *baseWallet) EstimateSendTxFee(sendAmount, feeRate uint64, subtract bool) (fee uint64, err error) {
+	if sendAmount == 0 {
+		return 0, fmt.Errorf("cannot check fee: send amount = 0")
+	}
+
+	// Retrieve balance for final check.
+	bal, err := btc.Balance()
+	if err != nil {
+		return 0, err
+	}
+
+	feeRate = btc.feeRateWithFallback(feeRate)
+
+	minTxSize := uint64(dexbtc.MinimumTxOverhead + btc.outputSize())
+
+	// If subtract is true, select enough inputs for sendAmount. Fees will be taken
+	// from the sendAmount. If not, select enough inputs to cover minimum fees.
+	enough := func(inputsSize, sum uint64) bool {
+		if subtract {
+			return sum >= sendAmount
+		}
+		minFee := (minTxSize + inputsSize) * feeRate
+		return sum >= sendAmount+minFee
+	}
+	utxos, _, _, err := btc.spendableUTXOs(0)
+	if err != nil {
+		return 0, err
+	}
+	totalIn, vSize, _, _, _, _, err := fund(utxos, enough)
+	if err != nil {
+		return 0, err
+	}
+
+	txSize := minTxSize + uint64(vSize)
+	estFee := feeRate * txSize
+	remaining := totalIn - sendAmount
+
+	// Check if there will be a change output if there is enough remaining.
+	changeFee := uint64(btc.outputSize()) * feeRate
+	changeValue := remaining - estFee - changeFee
+	if subtract {
+		// fees are already included in sendAmount, anything else is change.
+		changeValue = remaining
+	}
+
+	var finalFee uint64
+	if isDust, err := btc.changeIsDust(changeValue, feeRate); err != nil {
+		return 0, err
+	} else if isDust {
+		// remaining cannot cover a non-dust change and the fee for the change.
+		finalFee = estFee + remaining
+	} else {
+		// additional fee will be paid for non-dust change
+		finalFee = estFee + changeFee
+	}
+
+	// Check if wallet has enough to cover sendAmount and finalFee.
+	if !subtract && bal.Available < sendAmount+finalFee {
+		return 0, fmt.Errorf("insufficient balance to cover total spend. %d < %d",
+			bal.Available, sendAmount+finalFee)
+	}
+	return finalFee, nil
+}
+
+// outputSize returns the size for a single output.
+func (btc *baseWallet) outputSize() int {
+	if btc.segwit {
+		return dexbtc.P2WPKHOutputSize
+	}
+	return dexbtc.P2PKHOutputSize
+}
+
+// changeIsDust checks if changeValue is dust value using the provided feeRate.
+func (btc *baseWallet) changeIsDust(changeValue uint64, feeRate uint64) (isDust bool, err error) {
+	// Grab a change addresss.
+	changeAddr, err := btc.node.changeAddress()
+	if err != nil {
+		return false, err
+	}
+	// Create a change output.
+	changeScript, err := txscript.PayToAddrScript(changeAddr)
+	if err != nil {
+		return false, fmt.Errorf("error creating change script: %w", err)
+	}
+	changeOutput := wire.NewTxOut(int64(changeValue), changeScript)
+	return btc.IsDust(changeOutput, feeRate), nil
+}
+
 type utxo struct {
 	txHash  *chainhash.Hash
 	vout    uint32

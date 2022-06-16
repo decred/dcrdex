@@ -262,4 +262,9 @@ var EnUS = map[string]string{
 	"No Recent Activity":          "No Recent Activity",
 	"Recent asset_name Activity":  "Recent <span data-asset-name=1></span> Activity",
 	"Other Actions":               "Other Actions",
+	"estimated_transaction_fee":   "Estimated Transaction Fee",
+	"estimated_total_spend":       "Estimated Total Spend",
+	"estimated_balance":           "Estimated Balance",
+	"sending":                     "Sending",
+	"transfer":                    "Transfer",
 }

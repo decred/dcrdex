@@ -4444,6 +4444,65 @@ func TestMarshalMonitoredTx(t *testing.T) {
 	}
 }
 
+func TestEstimateSendTxFee(t *testing.T) {
+	t.Run("eth", func(t *testing.T) { testEstimateSendTxFee(t, BipID) })
+	t.Run("token", func(t *testing.T) { testEstimateSendTxFee(t, testTokenID) })
+}
+
+func testEstimateSendTxFee(t *testing.T, assetID uint32) {
+	w, eth, node, shutdown := tassetWallet(assetID)
+	defer shutdown()
+
+	maxFeeRate, _ := eth.recommendedMaxFeeRate(eth.ctx)
+	ethFees := dexeth.WeiToGwei(maxFeeRate) * defaultSendGasLimit
+	tokenFees := dexeth.WeiToGwei(maxFeeRate) * tokenGases.Transfer
+
+	const val = 10e9
+	tests := []struct {
+		name            string
+		sendAdj, feeAdj uint64
+		wantErr         bool
+	}{{
+		name: "ok",
+	}, {
+		name:    "not enough",
+		sendAdj: 1,
+		wantErr: true,
+	}, {
+		name:    "low fees",
+		feeAdj:  1,
+		wantErr: true,
+	}}
+
+	for _, test := range tests {
+		if assetID == BipID {
+			node.bal = dexeth.GweiToWei(val + ethFees - test.sendAdj - test.feeAdj)
+		} else {
+			node.tokenContractor.bal = dexeth.GweiToWei(val - test.sendAdj)
+			node.bal = dexeth.GweiToWei(tokenFees - test.feeAdj)
+		}
+		estimate, err := w.EstimateSendTxFee(val, 0, false)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %v", test.name)
+			}
+			continue
+		}
+		if assetID == BipID {
+			if estimate != ethFees {
+				t.Fatalf("expected fees to be %v, got %v", ethFees, estimate)
+			}
+		} else {
+			if estimate != tokenFees {
+				t.Fatalf("expected fees to be %v, got %v", ethFees, estimate)
+			}
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %v: %v", test.name, err)
+		}
+	}
+}
+
 func parseRecoveryID(c asset.Coin) []byte {
 	return c.(asset.RecoveryCoin).RecoveryID()
 }

@@ -51,6 +51,12 @@ type registrationTxFeeForm struct {
 	AssetID *uint32 `json:"asset,omitempty"`
 }
 
+type sendTxFeeForm struct {
+	Value    uint64  `json:"value"`
+	Subtract bool    `json:"subtract"`
+	AssetID  *uint32 `json:"assetID,omitempty"`
+}
+
 type walletConfig struct {
 	AssetID    uint32 `json:"assetID"`
 	WalletType string `json:"walletType"`

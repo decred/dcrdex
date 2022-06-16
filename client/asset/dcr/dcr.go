@@ -3609,6 +3609,77 @@ func (dcr *ExchangeWallet) signTxAndAddChange(baseTx *wire.MsgTx, feeRate uint64
 	return msgTx, change, changeAddr, lastFee, nil
 }
 
+// EstimateSendTxFee returns a tx fee estimate for sending or withdrawing the
+// provided amount using the provided feeRate.
+func (dcr *ExchangeWallet) EstimateSendTxFee(sendAmount, feeRate uint64, subtract bool) (fee uint64, err error) {
+	if sendAmount == 0 {
+		return 0, fmt.Errorf("cannot check fee: send amount= 0")
+	}
+
+	// Retrieve balance for final check.
+	bal, err := dcr.Balance()
+	if err != nil {
+		return 0, err
+	}
+
+	feeRate = dcr.feeRateWithFallback(feeRate)
+
+	// Keep a consistent view of spendable and locked coins in the wallet and
+	// the fundingCoins map to make this safe for concurrent use.
+	dcr.fundingMtx.Lock()
+	defer dcr.fundingMtx.Unlock()
+
+	minTxSize := uint32(dexdcr.MsgTxOverhead + dexdcr.P2PKHOutputSize)
+
+	// If subtract, select enough inputs for amount because the fees will be
+	// taken from the amount, else select enough inputs to cover minimum fees.
+	enough := func(sum uint64, inputSize uint32, unspent *compositeUTXO) bool {
+		if subtract {
+			return sum+toAtoms(unspent.rpc.Amount) >= sendAmount
+		}
+		minFee := uint64(minTxSize+inputSize+unspent.input.Size()) * feeRate
+		return sum+toAtoms(unspent.rpc.Amount) >= sendAmount+minFee
+	}
+
+	utxos, err := dcr.spendableUTXOs()
+	if err != nil {
+		return 0, err
+	}
+
+	totalIn, vSize, _, _, _, err := dcr.tryFund(utxos, enough)
+	if err != nil {
+		return 0, err
+	}
+
+	txSize := minTxSize + vSize
+	estFee := uint64(txSize) * feeRate
+	remaining := totalIn - sendAmount
+
+	// Check if there will be a change output if there is enough remaining.
+	changeFee := dexdcr.P2PKHOutputSize * feeRate
+	changeValue := remaining - estFee - changeFee
+	if subtract {
+		// fees are already included in sendAmount, anything else is change.
+		changeValue = remaining
+	}
+
+	var finalFee uint64
+	if dexdcr.IsDustVal(dexdcr.P2PKHOutputSize, changeValue, feeRate) {
+		// remaining cannot cover a non-dust change and the fee for the change.
+		finalFee = estFee + remaining
+	} else {
+		// additional fee will be paid for non-dust change
+		finalFee = estFee + changeFee
+	}
+
+	// Check if wallet has enough to cover sendAmount and finalFee.
+	if !subtract && bal.Available < sendAmount+finalFee {
+		return 0, fmt.Errorf("insufficient balance to cover total spend. %d < %d",
+			bal.Available, sendAmount+finalFee)
+	}
+	return finalFee, nil
+}
+
 func (dcr *ExchangeWallet) broadcastTx(signedTx *wire.MsgTx) error {
 	txHash, err := dcr.wallet.SendRawTransaction(dcr.ctx, signedTx, false)
 	if err != nil {

@@ -4524,11 +4524,30 @@ func (c *Core) Send(pw []byte, assetID uint32, value uint64, address string, sub
 		return nil, err
 	}
 
-	subject, details := c.formatDetails(TopicSendSuccess, unbip(assetID), coin)
+	sentValue := wallet.Info().UnitInfo.ConventionalString(coin.Value())
+	subject, details := c.formatDetails(TopicSendSuccess, sentValue, unbip(assetID), address, coin)
 	c.notify(newSendNote(TopicSendSuccess, subject, details, db.Success))
 
 	c.updateAssetBalance(assetID)
 	return coin, nil
+}
+
+// EstimateSendTxFee returns an estimate of the tx fee needed to send or
+// withdraw the specified amount.
+func (c *Core) EstimateSendTxFee(assetID uint32, amount uint64, subtract bool) (fee uint64, err error) {
+	if amount == 0 {
+		return 0, fmt.Errorf("cannot check fee for zero %s", unbip(assetID))
+	}
+	wallet, found := c.wallet(assetID)
+	if !found {
+		return 0, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
+	}
+	if subtract {
+		if _, isWithdrawer := wallet.Wallet.(asset.Withdrawer); !isWithdrawer {
+			return 0, fmt.Errorf("wallet does not support checking network fee for withdrawal")
+		}
+	}
+	return wallet.Wallet.EstimateSendTxFee(amount, c.feeSuggestionAny(assetID), subtract)
 }
 
 func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {

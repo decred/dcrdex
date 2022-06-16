@@ -73,6 +73,27 @@ func (s *WebServer) apiEstimateRegistrationTxFee(w http.ResponseWriter, r *http.
 	writeJSON(w, resp, s.indent)
 }
 
+// apiEstimateSendTxFee is the handler for the '/txfee' API request.
+func (s *WebServer) apiEstimateSendTxFee(w http.ResponseWriter, r *http.Request) {
+	form := new(sendTxFeeForm)
+	if !readPost(w, r, form) {
+		return
+	}
+	txFee, err := s.core.EstimateSendTxFee(*form.AssetID, form.Value, form.Subtract)
+	if err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+	resp := struct {
+		OK    bool   `json:"ok"`
+		TxFee uint64 `json:"txfee"`
+	}{
+		OK:    true,
+		TxFee: txFee,
+	}
+	writeJSON(w, resp, s.indent)
+}
+
 // apiGetDEXInfo is the handler for the '/getdexinfo' API request.
 func (s *WebServer) apiGetDEXInfo(w http.ResponseWriter, r *http.Request) {
 	form := new(registrationForm)

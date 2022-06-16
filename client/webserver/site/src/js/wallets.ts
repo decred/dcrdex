@@ -116,8 +116,12 @@ export default class WalletsPage extends BasePage {
     // Bind the wallet unlock form.
     this.unlockForm = new UnlockWalletForm(page.unlockWalletForm, (assetID: number) => this.openWalletSuccess(assetID, page.unlockWalletForm))
 
-    // Bind the Send form.
-    bindForm(page.sendForm, page.submitSendForm, () => { this.send() })
+    // Bind the send form.
+    bindForm(page.sendForm, page.submitSendForm, async () => { this.stepSend() })
+    // Send confirmation form.
+    bindForm(page.vSendForm, page.vSend, async () => { this.send() })
+    // Cancel send confirmation form.
+    bindForm(page.vSendForm, page.vCancelSend, () => { this.cancelSend() })
 
     // Bind the wallet reconfiguration submission.
     bindForm(page.reconfigForm, page.submitReconfig, () => this.reconfig())
@@ -213,6 +217,68 @@ export default class WalletsPage extends BasePage {
       .catch((reason) => {
         console.error('Unable to copy: ', reason)
       })
+  }
+
+  // stepSend makes a request to get an estimated fee and displays the confirm
+  // send form.
+  async stepSend () {
+    const page = this.page
+    page.vSendFee.textContent = '0.00000000'
+    page.vSendDestinationAmt.textContent = '0.00000000'
+    page.vTotalSend.textContent = '0.00000000'
+    page.vSendErr.textContent = ''
+    page.vSendAddr.textContent = ''
+    const assetID = parseInt(page.sendForm.dataset.assetID || '')
+    const subtract = page.subtractCheckBox.checked || false
+    const conversionFactor = app().unitInfo(assetID).conventional.conversionFactor
+    const value = Math.round(parseFloat(page.sendAmt.value || '') * conversionFactor)
+    // We don't want to be on the confirm page without at least an address.
+    if (page.sendAddr.value === '') {
+      page.sendErr.textContent = 'address field cannot be empty'
+      return
+    }
+    const open = {
+      assetID: assetID,
+      subtract: subtract,
+      value: value
+    }
+
+    const wallet = app().walletMap[assetID]
+    page.vSendSymbol.textContent = wallet.symbol
+    page.vSendLogo.src = Doc.logoPath(wallet.symbol)
+
+    const loaded = app().loading(page.sendForm)
+    const res = await postJSON('/api/txfee', open)
+    loaded()
+    if (!app().checkResponse(res)) {
+      page.sendErr.textContent = res.msg
+      return
+    } else if (res.txfee === 0) {
+      page.vSendErr.textContent = 'Fee estimation currently unavailable.'
+      Doc.hide(page.sendForm)
+      await this.showBox(page.vSendForm)
+      return
+    }
+
+    page.vSendFee.textContent = Doc.formatFullPrecision(res.txfee, app().unitInfo(assetID))
+    page.vSendDestinationAmt.textContent = Doc.formatFullPrecision(value - res.txfee, app().unitInfo(assetID))
+    page.vTotalSend.textContent = Doc.formatFullPrecision(value, app().unitInfo(assetID))
+    page.vSendAddr.textContent = page.sendAddr.value || ''
+    page.balanceAfterSend.textContent = Doc.formatFullPrecision(wallet.balance.available - value, app().unitInfo(assetID))
+    Doc.show(page.approxSign)
+    if (!subtract) {
+      Doc.hide(page.approxSign)
+      page.vSendDestinationAmt.textContent = Doc.formatFullPrecision(value, app().unitInfo(assetID))
+      page.vTotalSend.textContent = Doc.formatFullPrecision(value + res.txfee, app().unitInfo(assetID))
+      page.balanceAfterSend.textContent = Doc.formatFullPrecision(wallet.balance.available - (value + res.txfee), app().unitInfo(assetID))
+    }
+    this.showBox(page.vSendForm)
+  }
+
+  // cancelSend displays the send form if user wants to make modification.
+  async cancelSend () {
+    Doc.hide(this.page.vSendForm)
+    await this.showBox(this.page.sendForm)
   }
 
   /*
@@ -733,23 +799,27 @@ export default class WalletsPage extends BasePage {
   /* send submits the send form to the API. */
   async send (): Promise<void> {
     const page = this.page
-    Doc.hide(page.sendErr)
     const assetID = parseInt(page.sendForm.dataset.assetID ?? '')
     const subtract = page.subtractCheckBox.checked ?? false
     const conversionFactor = app().unitInfo(assetID).conventional.conversionFactor
+    const pw = page.vSendPw.value || ''
+    page.vSendPw.value = ''
+    if (pw === '') {
+      page.vSendErr.textContent = intl.prep(intl.ID_NO_PASS_ERROR_MSG)
+      return
+    }
     const open = {
       assetID: assetID,
       address: page.sendAddr.value,
       subtract: subtract,
       value: Math.round(parseFloat(page.sendAmt.value ?? '') * conversionFactor),
-      pw: page.sendPW.value
+      pw: pw
     }
-    const loaded = app().loading(page.sendForm)
+    const loaded = app().loading(page.vSendForm)
     const res = await postJSON('/api/send', open)
     loaded()
     if (!app().checkResponse(res)) {
-      page.sendErr.textContent = res.msg
-      Doc.show(page.sendErr)
+      page.vSendErr.textContent = res.msg
       return
     }
     const name = app().assets[assetID].name
