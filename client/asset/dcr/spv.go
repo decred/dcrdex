@@ -106,6 +106,7 @@ type extendedWallet struct {
 	*wallet.Wallet
 }
 
+// TxDetails exposes the (UnstableApi).TxDetails method.
 func (w *extendedWallet) TxDetails(ctx context.Context, txHash *chainhash.Hash) (*udb.TxDetails, error) {
 	return wallet.UnstableAPI(w.Wallet).TxDetails(ctx, txHash)
 }
@@ -117,7 +118,7 @@ type spvWallet struct {
 	db          wallet.DB
 	acctNum     uint32
 	acctName    string
-	netDir      string
+	dir         string
 	chainParams *chaincfg.Params
 	log         dex.Logger
 	spv         spvSyncer // *spv.Syncer
@@ -132,24 +133,23 @@ type spvWallet struct {
 var _ Wallet = (*spvWallet)(nil)
 var _ tipNotifier = (*spvWallet)(nil)
 
-func createSPVWallet(pw, seed []byte, dbDir string, log dex.Logger, extIdx, intIdx uint32, chainParams *chaincfg.Params) error {
-	netDir := filepath.Join(dbDir, chainParams.Name)
+func createSPVWallet(pw, seed []byte, dataDir string, log dex.Logger, extIdx, intIdx uint32, chainParams *chaincfg.Params) error {
+	dir := filepath.Join(dataDir, chainParams.Name, "spv")
 
-	if err := initLogging(netDir); err != nil {
+	if err := initLogging(dir); err != nil {
 		return fmt.Errorf("error initializing dcrwallet logging: %w", err)
 	}
 
-	if exists, err := walletExists(netDir); err != nil {
+	if exists, err := walletExists(dir); err != nil {
 		return err
 	} else if exists {
-		return fmt.Errorf("wallet already exists")
+		return fmt.Errorf("wallet at %q already exists", dir)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	dbPath := filepath.Join(netDir, walletDbName)
-
+	dbPath := filepath.Join(dir, walletDbName)
 	exists, err := fileExists(dbPath)
 	if err != nil {
 		return fmt.Errorf("error checking file existence for %q: %w", dbPath, err)
@@ -159,16 +159,16 @@ func createSPVWallet(pw, seed []byte, dbDir string, log dex.Logger, extIdx, intI
 	}
 
 	// Ensure the data directory for the network exists.
-	if err := checkCreateDir(netDir); err != nil {
+	if err := checkCreateDir(dir); err != nil {
 		return fmt.Errorf("checkCreateDir error: %w", err)
 	}
 
 	// At this point it is asserted that there is no existing database file, and
 	// deleting anything won't destroy a wallet in use.  Defer a function that
-	// attempts to remove any written database file if this function errors.
+	// attempts to remove any wallet remnants.
 	defer func() {
 		if err != nil {
-			_ = os.Remove(dbPath)
+			_ = os.Remove(dir)
 		}
 	}()
 
@@ -185,13 +185,13 @@ func createSPVWallet(pw, seed []byte, dbDir string, log dex.Logger, extIdx, intI
 	}
 
 	// Open the newly-created wallet.
-	w, err := wallet.Open(ctx, walletConfig(db, chainParams))
+	w, err := wallet.Open(ctx, newWalletConfig(db, chainParams))
 	if err != nil {
 		return fmt.Errorf("wallet.Open error: %w", err)
 	}
 
 	defer func() {
-		if err = db.Close(); err != nil {
+		if err := db.Close(); err != nil {
 			fmt.Println("Error closing database:", err)
 		}
 	}()
@@ -224,23 +224,24 @@ func createSPVWallet(pw, seed []byte, dbDir string, log dex.Logger, extIdx, intI
 }
 
 func (w *spvWallet) startWallet(ctx context.Context) error {
-	if err := initLogging(w.netDir); err != nil {
+	if err := initLogging(w.dir); err != nil {
 		return fmt.Errorf("error initializing dcrwallet logging: %w", err)
 	}
 
-	dbPath := filepath.Join(w.netDir, walletDbName)
-	db, err := wallet.OpenDB(dbDriver, dbPath)
+	db, err := wallet.OpenDB(dbDriver, filepath.Join(w.dir, walletDbName))
 	if err != nil {
 		return fmt.Errorf("wallet.OpenDB error: %w", err)
 	}
 
-	dcrw, err := wallet.Open(ctx, walletConfig(db, w.chainParams))
+	dcrw, err := wallet.Open(ctx, newWalletConfig(db, w.chainParams))
 	if err != nil {
 		// If this function does not return to completion the database must be
-		// closed.  Otherwise, because the database is locked on opens, any
+		// closed.  Otherwise, because the database is locked on open, any
 		// other attempts to open the wallet will hang, and there is no way to
 		// recover since this db handle would be leaked.
-		db.Close()
+		if err := db.Close(); err != nil {
+			w.log.Errorf("Uh oh. Failed to close the database: %v", err)
+		}
 		return fmt.Errorf("wallet.Open error: %w", err)
 	}
 	w.dcrWallet = &extendedWallet{dcrw}
@@ -252,7 +253,7 @@ func (w *spvWallet) startWallet(ctx context.Context) error {
 		connectPeers = []string{"localhost:19560"}
 	}
 
-	spv := newSpvSyncer(dcrw, w.netDir, connectPeers)
+	spv := newSpvSyncer(dcrw, w.dir, connectPeers)
 	w.spv = spv
 
 	w.wg.Add(2)
@@ -561,7 +562,7 @@ func (w *spvWallet) SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allo
 	return w.PublishTransaction(ctx, tx, w.spv)
 }
 
-// GetBlockHeader returns block header info for the specified block hash. The
+// GetBlockHeader generates a *BlockHeader for the specified block hash. The
 // returned block header is a wire.BlockHeader with the addition of the block's
 // median time and other auxiliary information.
 func (w *spvWallet) GetBlockHeader(ctx context.Context, blockHash *chainhash.Hash) (*BlockHeader, error) {
@@ -577,7 +578,7 @@ func (w *spvWallet) GetBlockHeader(ctx context.Context, blockHash *chainhash.Has
 
 	_, tipHeight := w.MainChainTip(ctx)
 	if tipHeight < int32(hdr.Height) {
-		return nil, fmt.Errorf("sumpin's wrong with our tip")
+		return nil, errors.New("sumpin's wrong with our tip")
 	}
 
 	var nextHash *chainhash.Hash
@@ -647,7 +648,7 @@ func (w *spvWallet) GetBlock(ctx context.Context, blockHash *chainhash.Hash) (*w
 // tx with the provided hash. Returns asset.CoinNotFoundError if the tx is not
 // found in the wallet.
 // Part of the Wallet interface.
-func (w *spvWallet) GetTransaction(ctx context.Context, txHash *chainhash.Hash) (*walletjson.GetTransactionResult, error) {
+func (w *spvWallet) GetTransaction(ctx context.Context, txHash *chainhash.Hash) (*WalletTransaction, error) {
 	// copy-pasted from dcrwallet/internal/rpc/jsonrpc/methods.go
 	txd, err := w.dcrWallet.TxDetails(ctx, txHash)
 	if errors.Is(err, walleterrors.NotExist) {
@@ -665,25 +666,18 @@ func (w *spvWallet) GetTransaction(ctx context.Context, txHash *chainhash.Hash) 
 		return nil, err
 	}
 
-	ret := walletjson.GetTransactionResult{
-		TxID:            txHash.String(),
-		Hex:             b.String(),
-		Time:            txd.Received.Unix(),
-		TimeReceived:    txd.Received.Unix(),
-		WalletConflicts: []string{}, // Not saved
+	ret := WalletTransaction{
+		Hex: b.String(),
 	}
 
 	if txd.Block.Height != -1 {
 		ret.BlockHash = txd.Block.Hash.String()
-		ret.BlockTime = txd.Block.Time.Unix()
 		ret.Confirmations = int64(tipHeight - txd.Block.Height + 1)
 	}
 
 	var (
 		debitTotal  dcrutil.Amount
 		creditTotal dcrutil.Amount
-		fee         dcrutil.Amount
-		negFeeF64   float64
 	)
 	for _, deb := range txd.Debits {
 		debitTotal += deb.Amount
@@ -697,11 +691,7 @@ func (w *spvWallet) GetTransaction(ctx context.Context, txHash *chainhash.Hash) 
 		for _, output := range txd.MsgTx.TxOut {
 			outputTotal += dcrutil.Amount(output.Value)
 		}
-		fee = debitTotal - outputTotal
-		negFeeF64 = (-fee).ToCoin()
 	}
-	ret.Amount = (creditTotal - debitTotal).ToCoin()
-	ret.Fee = negFeeF64
 
 	details, err := w.ListTransactionDetails(ctx, txHash)
 	if err != nil {
@@ -909,7 +899,7 @@ func extendAddresses(ctx context.Context, extIdx, intIdx uint32, dcrw *wallet.Wa
 	return nil
 }
 
-func walletConfig(db wallet.DB, chainParams *chaincfg.Params) *wallet.Config {
+func newWalletConfig(db wallet.DB, chainParams *chaincfg.Params) *wallet.Config {
 	return &wallet.Config{
 		DB:              db,
 		GapLimit:        defaultGapLimit,
@@ -943,8 +933,7 @@ func checkCreateDir(path string) error {
 // walletExists returns whether a file exists at the loader's database path.
 // This may return an error for unexpected I/O failures.
 func walletExists(dbDir string) (bool, error) {
-	dbPath := filepath.Join(dbDir, walletDbName)
-	exists, err := fileExists(dbPath)
+	exists, err := fileExists(filepath.Join(dbDir, walletDbName))
 	if err != nil {
 		return false, err
 	}

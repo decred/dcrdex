@@ -32,9 +32,7 @@ var (
 	defaultWalletBirthday     = time.Unix(int64(defaultWalletBirthdayUnix), 0)
 )
 
-// Config holds the parameters needed to initialize an RPC connection to a dcr
-// wallet. Default values are used for RPCListen and/or RPCCert if not set.
-type WalletConfig struct {
+type walletConfig struct {
 	PrimaryAccount   string  `ini:"account"`
 	UnmixedAccount   string  `ini:"unmixedaccount"`
 	TradingAccount   string  `ini:"tradingaccount"`
@@ -45,15 +43,16 @@ type WalletConfig struct {
 	ActivelyUsed     bool    `ini:"special:activelyUsed"` //injected by core
 }
 
-type RPCConfig struct {
+type rpcConfig struct {
+	Account   string `ini:"account"`
 	RPCUser   string `ini:"username"`
 	RPCPass   string `ini:"password"`
 	RPCListen string `ini:"rpclisten"`
 	RPCCert   string `ini:"rpccert"`
 }
 
-func loadRPCConfig(settings map[string]string, network dex.Network) (*RPCConfig, *chaincfg.Params, error) {
-	cfg := new(RPCConfig)
+func loadRPCConfig(settings map[string]string, network dex.Network) (*rpcConfig, *chaincfg.Params, error) {
+	cfg := new(rpcConfig)
 	chainParams, err := loadConfig(settings, network, cfg)
 	if err != nil {
 		return nil, nil, err

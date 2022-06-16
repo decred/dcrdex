@@ -9,6 +9,10 @@ case $1 in
     ./simnet-trade-tests --base1node trading1 --base2node trading2 ${@:2}
     ;;
 
+  dcrspvbtc)
+    ./simnet-trade-tests --base1node trading1 --base2node trading2 -base1spv ${@:2}
+    ;;
+
   dcrbtcspv)
     ./simnet-trade-tests --base1node trading1 --base2node trading2 --quote1spv ${@:2}
     ;;

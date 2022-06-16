@@ -418,7 +418,7 @@ func (d *Driver) Info() *asset.WalletInfo {
 // Exists checks the existence of the wallet. Part of the Creator interface.
 func (d *Driver) Exists(walletType, dataDir string, _ map[string]string, net dex.Network) (bool, error) {
 	if walletType != walletTypeSPV {
-		return false, fmt.Errorf("no Bitcoin wallet of type %q available", walletType)
+		return false, fmt.Errorf("no Decred wallet of type %q available", walletType)
 	}
 
 	chainParams, err := parseChainParams(net)
@@ -426,7 +426,6 @@ func (d *Driver) Exists(walletType, dataDir string, _ map[string]string, net dex
 		return false, err
 	}
 	netDir := filepath.Join(dataDir, chainParams.Name)
-	// timeout and recoverWindow arguments borrowed from btcwallet directly.
 	return walletExists(netDir)
 }
 
@@ -551,10 +550,15 @@ type findRedemptionResult struct {
 func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (*ExchangeWallet, error) {
 	// loadConfig will set fields if defaults are used and set the chainParams
 	// variable.
-	walletCfg := new(WalletConfig)
+	walletCfg := new(walletConfig)
 	chainParams, err := loadConfig(cfg.Settings, network, walletCfg)
 	if err != nil {
 		return nil, err
+	}
+
+	// DRAFT NOTE: Maybe?
+	if walletCfg.PrimaryAccount == "" {
+		walletCfg.PrimaryAccount = defaultAcctName
 	}
 
 	dcr, err := unconnectedWallet(cfg, walletCfg, chainParams, logger)
@@ -562,14 +566,13 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, err
 	}
 
-	switch {
-	case cfg.Type == walletTypeDcrwRPC || cfg.Type == walletTypeLegacy:
+	switch cfg.Type {
+	case walletTypeDcrwRPC, walletTypeLegacy:
 		dcr.wallet, err = newRPCWallet(cfg.Settings, chainParams, logger)
 		if err != nil {
 			return nil, err
 		}
-	case cfg.Type == walletTypeSPV:
-		dcr.primaryAcct = defaultAcctName
+	case walletTypeSPV:
 		dcr.wallet, err = openSPVWallet(cfg.Settings, cfg.DataDir, chainParams, logger)
 		if err != nil {
 			return nil, err
@@ -590,7 +593,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 
 // unconnectedWallet returns an ExchangeWallet without a base wallet. The wallet
 // should be set before use.
-func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *WalletConfig, chainParams *chaincfg.Params, logger dex.Logger) (*ExchangeWallet, error) {
+func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParams *chaincfg.Params, logger dex.Logger) (*ExchangeWallet, error) {
 	// If set in the user config, the fallback fee will be in units of DCR/kB.
 	// Convert to atoms/B.
 	fallbackFeesPerByte := toAtoms(dcrCfg.FallbackFeeRate / 1000)
@@ -620,8 +623,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *WalletConfig, chainParam
 	// Both UnmixedAccount and TradingAccount must be provided if primary
 	// account is a mixed account. Providing one but not the other is bad
 	// configuration. If set, the account names will be validated on Connect.
-	if (dcrCfg.UnmixedAccount != "" && dcrCfg.TradingAccount == "") ||
-		(dcrCfg.UnmixedAccount == "" && dcrCfg.TradingAccount != "") {
+	if (dcrCfg.UnmixedAccount == "") != (dcrCfg.TradingAccount == "") {
 		return nil, fmt.Errorf("'Change Account Name' and 'Temporary Trading Account' MUST "+
 			"be set to treat %[1]q as a mixed account. If %[1]q is not a mixed account, values "+
 			"should NOT be set for 'Change Account Name' and 'Temporary Trading Account'",
@@ -658,10 +660,17 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *WalletConfig, chainParam
 
 // openSPVWallet opens the previously created native SPV wallet.
 func openSPVWallet(settings map[string]string, dataDir string, chainParams *chaincfg.Params, log dex.Logger) (*spvWallet, error) {
-	walletCfg := new(WalletConfig)
+	walletCfg := new(walletConfig)
 	err := config.Unmapify(settings, walletCfg)
 	if err != nil {
 		return nil, err
+	}
+
+	dir := filepath.Join(dataDir, chainParams.Name, "spv")
+	if exists, err := walletExists(dir); err != nil {
+		return nil, err
+	} else if !exists {
+		return nil, fmt.Errorf("wallet at %q doesn't exists", dir)
 	}
 
 	// allowAutomaticRescan := !walletCfg.ActivelyUsed
@@ -669,7 +678,7 @@ func openSPVWallet(settings map[string]string, dataDir string, chainParams *chai
 	return &spvWallet{
 		acctNum:     defaultAcct,
 		acctName:    defaultAcctName,
-		netDir:      filepath.Join(dataDir, chainParams.Name),
+		dir:         dir,
 		chainParams: chainParams,
 		log:         log.SubLogger("SPV"),
 		blockCache: blockCache{
@@ -3496,11 +3505,6 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 			if sameTip {
 				continue
 			}
-			// hdr, err := dcr.wallet.GetBlockHeader(ctx, newTipHash)
-			// if err != nil {
-			// 	go dcr.tipChange(fmt.Errorf("error setting new tip: %w", err))
-			// 	continue
-			// }
 
 			if walletBlock == nil {
 				dcr.handleTipChange(newTip.hash, newTip.height, nil)

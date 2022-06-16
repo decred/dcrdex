@@ -141,12 +141,11 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func(), error) {
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
 
-	wallet, err := unconnectedWallet(walletCfg, &WalletConfig{PrimaryAccount: tAcctName}, tChainParams, tLogger)
+	wallet, err := unconnectedWallet(walletCfg, &walletConfig{PrimaryAccount: tAcctName}, tChainParams, tLogger)
 	if err != nil {
 		shutdown()
 		return nil, nil, nil, err
 	}
-	wallet.primaryAcct = tAcctName
 	wallet.wallet = &rpcWallet{
 		rpcClient: client,
 		log:       tLogger.SubLogger("trpc"),
