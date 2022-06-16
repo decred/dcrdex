@@ -7,9 +7,9 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "watch": "webpack --watch --config webpack/dev.js",
     "analyze": "webpack --config webpack/analyze.js",
-    "build": "./node_modules/.bin/tsc && webpack --config webpack/prod.js --progress --color",
-    "lint": "./node_modules/.bin/tsc && ./node_modules/.bin/eslint src --ext .js --ext .ts",
-    "check-types": "./node_modules/.bin/tsc"
+    "build": "npm exec tsc && webpack --config webpack/prod.js --progress --color",
+    "lint": "npm exec tsc && npm exec -- eslint src --ext .js --ext .ts",
+    "check-types": "npm exec tsc"
   },
   "keywords": [],
   "author": "The Decred developers",
