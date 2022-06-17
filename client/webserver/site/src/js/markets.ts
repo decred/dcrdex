@@ -215,7 +215,6 @@ export default class MarketsPage extends BasePage {
     const success = () => { /* do nothing */ }
     // Do not call cleanTemplates before creating the AccelerateOrderForm
     this.accelerateOrderForm = new AccelerateOrderForm(page.accelerateForm, success)
-    Doc.cleanTemplates(page.rangeOptTmpl)
 
     // TODO: Store user's state and reload last known configuration.
     this.candleChart.hide()
@@ -240,8 +239,8 @@ export default class MarketsPage extends BasePage {
     }
 
     // Prepare templates for the buy and sell tables and the user's order table.
-    Doc.cleanTemplates(page.rowTemplate, page.liveTemplate, page.durBttnTemplate, page.booleanOptTmpl, page.rangeOptTmpl, page.orderOptTmpl)
     OrderUtil.setOptionTemplates(page)
+    Doc.cleanTemplates(page.rowTemplate, page.liveTemplate, page.durBttnTemplate, page.booleanOptTmpl, page.rangeOptTmpl, page.orderOptTmpl)
 
     // Prepare the list of markets.
     this.marketList = new MarketList(page.marketList)
@@ -1786,12 +1785,9 @@ export default class MarketsPage extends BasePage {
   async submitOrder () {
     const page = this.page
     Doc.hide(page.orderErr, page.vErr)
-    const order = this.parseOrder()
+    const order = this.currentOrder
     const pw = page.vPass.value
     page.vPass.value = ''
-    // order options must be a string -> string map.
-    const stringyOptions: Record<string, string> = {}
-    for (const [k, v] of Object.entries(order.options)) stringyOptions[k] = JSON.stringify(v)
     const req = {
       order: wireOrder(order),
       pw: pw

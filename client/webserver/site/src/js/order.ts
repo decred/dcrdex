@@ -70,8 +70,9 @@ export default class OrderPage extends BasePage {
       this.refreshOnPopupClose = true
     }
     // Do not call cleanTemplates before creating the AccelerateOrderForm
+    OrderUtil.setOptionTemplates(page)
     this.accelerateOrderForm = new AccelerateOrderForm(page.accelerateForm, success)
-    Doc.cleanTemplates(page.rangeOptTmpl)
+    Doc.cleanTemplates(page.booleanOptTmpl, page.rangeOptTmpl, page.orderOptTmpl)
 
     // If the user clicks outside of a form, it should close the page overlay.
     Doc.bind(page.forms, 'mousedown', (e: MouseEvent) => {

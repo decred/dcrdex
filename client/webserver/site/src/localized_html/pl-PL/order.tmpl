@@ -12,7 +12,6 @@
       <span class="fs18">{{$ord.ID}}</span>
       <span class="float-end me-2"><a href="/orders" class="d-inline-block subtlelink fs15"><span class="fs12 ico-textfile"></span> wyświetl wszystkie zlecenia</a></span>
     </div>
-
     {{- /* DATA CARDS */ -}}
     <div class="d-flex flex-wrap">
       <div class="order-datum">
@@ -219,7 +218,9 @@
     </div>
 
   </div>
-
+  <div id="vOrderOpts">
+    {{template "orderOptionTemplates"}}
+  </div>
   <div id="forms" class="d-hide">
     <form class="d-hide" id="cancelForm" autocomplete="off">
       {{template "cancelOrderForm" .}}
