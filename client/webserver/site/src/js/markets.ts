@@ -193,7 +193,7 @@ export default class MarketsPage extends BasePage {
     }
     this.hovers = []
     // 'Your Orders' list sort key and direction.
-    this.ordersSortKey = 'stamp'
+    this.ordersSortKey = 'submitTime'
     // 1 if sorting ascendingly, -1 if sorting descendingly.
     this.ordersSortDirection = 1
     // store original title so we can re-append it when updating market value.
@@ -492,7 +492,7 @@ export default class MarketsPage extends BasePage {
     this.secondTicker = window.setInterval(() => {
       for (const metaOrder of Object.values(this.metaOrders)) {
         const td = Doc.tmplElement(metaOrder.row, 'age')
-        td.textContent = Doc.timeSince(metaOrder.order.stamp)
+        td.textContent = Doc.timeSince(metaOrder.order.submitTime)
       }
     }, 1000)
 
@@ -1083,8 +1083,8 @@ export default class MarketsPage extends BasePage {
    */
   ordersSortCompare () {
     switch (this.ordersSortKey) {
-      case 'stamp':
-        return (a: Order, b: Order) => this.ordersSortDirection * (b.stamp - a.stamp)
+      case 'submitTime':
+        return (a: Order, b: Order) => this.ordersSortDirection * (b.submitTime - a.submitTime)
       case 'rate':
         return (a: Order, b: Order) => this.ordersSortDirection * (a.rate - b.rate)
       case 'qty':
@@ -1165,7 +1165,7 @@ export default class MarketsPage extends BasePage {
   updateUserOrderRow (tr: HTMLElement, ord: Order) {
     updateDataCol(tr, 'type', OrderUtil.typeString(ord))
     updateDataCol(tr, 'side', OrderUtil.sellString(ord))
-    updateDataCol(tr, 'age', Doc.timeSince(ord.stamp))
+    updateDataCol(tr, 'age', Doc.timeSince(ord.submitTime))
     updateDataCol(tr, 'rate', Doc.formatCoinValue(ord.rate / this.market.rateConversionFactor))
     updateDataCol(tr, 'qty', Doc.formatCoinValue(ord.qty, this.market.baseUnitInfo))
     updateDataCol(tr, 'filled', `${(ord.filled / ord.qty * 100).toFixed(1)}%`)

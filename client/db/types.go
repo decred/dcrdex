@@ -358,6 +358,7 @@ type MatchMetaData struct {
 	// Stamp is the match time (ms UNIX), according to the server's 'match'
 	// request timestamp.
 	Stamp uint64
+	// TODO: ReceiveTime uint64 -- local time stamp for match age and time display
 }
 
 // MatchAuth holds the DEX signatures and timestamps associated with the

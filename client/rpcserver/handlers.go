@@ -560,6 +560,7 @@ func parseCoreOrder(co *core.Order, b, q uint32) *myOrder {
 		Type:        co.Type.String(),
 		Sell:        co.Sell,
 		Stamp:       co.Stamp,
+		SubmitTime:  co.SubmitTime,
 		Age:         age.String(),
 		Rate:        co.Rate,
 		Quantity:    co.Qty,
@@ -1079,7 +1080,8 @@ needed to complete a swap.`,
       "id" (string): The order's unique hex ID.
       "type" (string): The type of order. "limit", "market", or "cancel".
       "sell" (string): Whether this order is selling.
-      "stamp" (int): Time the order was made in milliseconds since 00:00:00 Jan 1 1970.
+      "stamp" (int): Server's time stamp of the order in milliseconds since 00:00:00 Jan 1 1970.
+      "submitTime" (int): Time of order submission, also in milliseconds.
       "age" (string): The time that this order has been active in human readable form.
       "rate" (int): The exchange rate limit. Limit orders only. Units: quote
         asset per unit base asset.

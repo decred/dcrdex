@@ -154,7 +154,7 @@ type Match struct {
 	Redeem        *Coin             `json:"redeem,omitempty"`
 	CounterRedeem *Coin             `json:"counterRedeem,omitempty"`
 	Refund        *Coin             `json:"refund,omitempty"`
-	Stamp         uint64            `json:"stamp"`
+	Stamp         uint64            `json:"stamp"` // Server's time stamp - we have no local time recorded
 	IsCancel      bool              `json:"isCancel"`
 }
 
@@ -290,7 +290,8 @@ type Order struct {
 	MarketID          string            `json:"market"`
 	Type              order.OrderType   `json:"type"`
 	ID                dex.Bytes         `json:"id"`
-	Stamp             uint64            `json:"stamp"`
+	Stamp             uint64            `json:"stamp"` // Server's time stamp
+	SubmitTime        uint64            `json:"submitTime"`
 	Sig               dex.Bytes         `json:"sig"`
 	Status            order.OrderStatus `json:"status"`
 	Epoch             uint64            `json:"epoch"`
@@ -338,6 +339,7 @@ func coreOrderFromTrade(ord order.Order, metaData *db.OrderMetaData) *Order {
 			Type:          prefix.OrderType,
 			ID:            ord.ID().Bytes(),
 			Stamp:         encode.UnixMilliU(prefix.ServerTime),
+			SubmitTime:    encode.UnixMilliU(prefix.ClientTime),
 			Sig:           metaData.Proof.DEXSig,
 			Status:        metaData.Status,
 			FeesPaid:      new(FeeBreakdown),
@@ -379,6 +381,7 @@ func coreOrderFromTrade(ord order.Order, metaData *db.OrderMetaData) *Order {
 		Type:        prefix.OrderType,
 		ID:          ord.ID().Bytes(),
 		Stamp:       encode.UnixMilliU(prefix.ServerTime),
+		SubmitTime:  encode.UnixMilliU(prefix.ClientTime),
 		Sig:         metaData.Proof.DEXSig,
 		Status:      metaData.Status,
 		Rate:        rate,
