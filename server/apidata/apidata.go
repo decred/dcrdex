@@ -12,7 +12,6 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/candles"
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/matcher"
@@ -145,7 +144,7 @@ func (s *DataAPI) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matche
 
 	// Encode the spot price.
 	spot := &msgjson.Spot{
-		Stamp:    encode.UnixMilliU(time.Now()),
+		Stamp:    uint64(time.Now().UnixMilli()),
 		BaseID:   base,
 		QuoteID:  quote,
 		Rate:     stats.EndRate,

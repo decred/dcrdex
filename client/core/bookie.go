@@ -16,7 +16,6 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/candles"
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -683,7 +682,7 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	// SuspendTime == 0 means suspending now.
 	if sp.SuspendTime != 0 {
 		// This is just a warning about a scheduled suspension.
-		suspendTime := encode.UnixTimeMilli(int64(sp.SuspendTime))
+		suspendTime := time.UnixMilli(int64(sp.SuspendTime))
 		subject, detail := c.formatDetails(TopicMarketSuspendScheduled, sp.MarketID, dc.acct.host, suspendTime)
 		c.notify(newServerNotifyNote(TopicMarketSuspendScheduled, subject, detail, db.WarningLevel))
 		return nil
@@ -773,7 +772,7 @@ func handleTradeResumptionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	if rs.ResumeTime != 0 {
 		// This is just a notice about a scheduled resumption.
 		dc.setMarketStartEpoch(rs.MarketID, rs.StartEpoch, false) // set the start epoch, leaving any final/persist data
-		resTime := encode.UnixTimeMilli(int64(rs.ResumeTime))
+		resTime := time.UnixMilli(int64(rs.ResumeTime))
 		subject, detail := c.formatDetails(TopicMarketResumeScheduled, rs.MarketID, dc.acct.host, resTime)
 		c.notify(newServerNotifyNote(TopicMarketResumeScheduled, subject, detail, db.WarningLevel))
 		return nil

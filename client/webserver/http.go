@@ -17,7 +17,6 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 	qrcode "github.com/skip2/go-qrcode"
 )
@@ -380,7 +379,7 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 	for _, ord := range ords {
 		ordReader := s.orderReader(ord)
 
-		timestamp := encode.UnixTimeMilli(int64(ord.Stamp)).Local().Format(time.RFC3339Nano)
+		timestamp := time.UnixMilli(int64(ord.Stamp)).Local().Format(time.RFC3339Nano)
 		err = csvWriter.Write([]string{
 			ord.Host,                      // Host
 			ord.BaseSymbol,                // Base

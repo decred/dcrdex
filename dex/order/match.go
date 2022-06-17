@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex/calc"
-	"decred.org/dcrdex/dex/encode"
 	"github.com/decred/dcrd/crypto/blake256"
 )
 
@@ -152,7 +151,7 @@ type EpochID struct {
 
 // End is the end time of the epoch.
 func (e *EpochID) End() time.Time {
-	return encode.UnixTimeMilli(int64((e.Idx + 1) * e.Dur))
+	return time.UnixMilli(int64((e.Idx + 1) * e.Dur))
 }
 
 // Match represents a match between two orders.

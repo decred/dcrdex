@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
@@ -348,7 +347,7 @@ func (s *Server) apiResume(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		resTime = encode.UnixTimeMilli(resTimeMs)
+		resTime = time.UnixMilli(resTimeMs)
 		if time.Until(resTime) < 0 {
 			http.Error(w, fmt.Sprintf("specified market resume time is in the past: %v", resTime),
 				http.StatusBadRequest)
@@ -396,7 +395,7 @@ func (s *Server) apiSuspend(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		suspTime = encode.UnixTimeMilli(suspTimeMs)
+		suspTime = time.UnixMilli(suspTimeMs)
 		if time.Until(suspTime) < 0 {
 			http.Error(w, fmt.Sprintf("specified market suspend time is in the past: %v", suspTime),
 				http.StatusBadRequest)

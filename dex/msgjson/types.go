@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/server/account"
 )
 
@@ -1046,7 +1045,7 @@ type Market struct {
 // EpochLen, and FinalEpoch (if set).
 func (m *Market) Running() bool {
 	dur := m.EpochLen
-	now := encode.UnixMilliU(time.Now())
+	now := uint64(time.Now().UnixMilli())
 	start := m.StartEpoch * dur
 	end := m.FinalEpoch * dur
 	return now >= start && (now < end || end < start) // end < start detects obsolete end

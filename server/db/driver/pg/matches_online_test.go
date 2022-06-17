@@ -760,7 +760,7 @@ func TestCompletedAndAtFaultMatchStats(t *testing.T) {
 	// TODO: update with a forgiven one
 
 	epochTime := func(mp *matchPair) int64 {
-		return encode.UnixMilli(mp.match.Epoch.End())
+		return mp.match.Epoch.End().UnixMilli()
 	}
 
 	tests := []struct {

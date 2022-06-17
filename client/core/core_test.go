@@ -1742,7 +1742,7 @@ func TestRegister(t *testing.T) {
 		// ClientPubKey is set in the handler, where the sig is made
 		Address: "someaddr",
 		Fee:     tFee,
-		Time:    encode.UnixMilliU(time.Now()),
+		Time:    uint64(time.Now().UnixMilli()),
 	}
 
 	var wg sync.WaitGroup
@@ -2229,7 +2229,7 @@ func TestLogin(t *testing.T) {
 		MatchID:    extraID[:],
 		Side:       uint8(order.Taker),
 		Status:     uint8(order.MakerSwapCast),
-		ServerTime: encode.UnixMilliU(matchTime),
+		ServerTime: uint64(matchTime.UnixMilli()),
 	}
 
 	// The extra match is already at MakerSwapCast, and we're the taker, which
@@ -4307,7 +4307,7 @@ func TestTradeTracking(t *testing.T) {
 		Rate:       rate,
 		Address:    "counterparty-address",
 		Side:       uint8(order.Maker),
-		ServerTime: encode.UnixMilliU(matchTime),
+		ServerTime: uint64(matchTime.UnixMilli()),
 	}
 	counterSwapID := encode.RandomBytes(36)
 	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID}}}
@@ -4535,7 +4535,7 @@ func TestTradeTracking(t *testing.T) {
 		Rate:       rate,
 		Address:    "counterparty-address",
 		Side:       uint8(order.Taker),
-		ServerTime: encode.UnixMilliU(matchTime),
+		ServerTime: uint64(matchTime.UnixMilli()),
 	}
 	sign(tDexPriv, msgMatch)
 	msg, _ = msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
@@ -5092,7 +5092,7 @@ func TestRefunds(t *testing.T) {
 		Rate:       rate,
 		Address:    "counterparty-address",
 		Side:       uint8(order.Maker),
-		ServerTime: encode.UnixMilliU(matchTime),
+		ServerTime: uint64(matchTime.UnixMilli()),
 	}
 	swapID := encode.RandomBytes(36)
 	contract := encode.RandomBytes(36)
@@ -5160,7 +5160,7 @@ func TestRefunds(t *testing.T) {
 		Rate:       rate,
 		Address:    "counterparty-address",
 		Side:       uint8(order.Taker),
-		ServerTime: encode.UnixMilliU(matchTime),
+		ServerTime: uint64(matchTime.UnixMilli()),
 	}
 	sign(tDexPriv, msgMatch)
 	msg, _ = msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
@@ -5772,7 +5772,7 @@ func convertMsgPrefix(msgPrefix *msgjson.Prefix, oType order.OrderType) order.Pr
 		BaseAsset:  msgPrefix.Base,
 		QuoteAsset: msgPrefix.Quote,
 		OrderType:  oType,
-		ClientTime: encode.UnixTimeMilli(int64(msgPrefix.ClientTime)),
+		ClientTime: time.UnixMilli(int64(msgPrefix.ClientTime)),
 		//ServerTime set in epoch queue processing pipeline.
 		Commit: commit,
 	}
@@ -5798,7 +5798,7 @@ func convertMsgTrade(msgTrade *msgjson.Trade) order.Trade {
 
 func orderResponse(msgID uint64, msgPrefix msgjson.Stampable, ord order.Order, badSig, noID, badID bool) *msgjson.Message {
 	orderTime := time.Now()
-	timeStamp := encode.UnixMilliU(orderTime)
+	timeStamp := uint64(orderTime.UnixMilli())
 	msgPrefix.Stamp(timeStamp)
 	sign(tDexPriv, msgPrefix)
 	if badSig {
@@ -5826,7 +5826,7 @@ func tMsgAudit(oid order.OrderID, mid order.MatchID, recipient string, val uint6
 	if secretHash == nil {
 		secretHash = encode.RandomBytes(32)
 	}
-	auditStamp := encode.UnixMilliU(time.Now())
+	auditStamp := uint64(time.Now().UnixMilli())
 	audit := &msgjson.Audit{
 		OrderID:  oid[:],
 		MatchID:  mid[:],
@@ -6295,7 +6295,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 		return &msgjson.TradeSuspension{
 			MarketID:    tDcrBtcMktName,
 			FinalEpoch:  100,
-			SuspendTime: encode.UnixMilliU(time.Now().Add(time.Millisecond * 20)),
+			SuspendTime: uint64(time.Now().Add(time.Millisecond * 20).UnixMilli()),
 			Persist:     false, // Make sure the coins are returned.
 		}
 	}
@@ -6510,7 +6510,7 @@ func TestHandleTradeResumptionMsg(t *testing.T) {
 	mktConf.FinalEpoch = mktConf.StartEpoch + 1 // long since closed
 	rig.dc.cfgMtx.Unlock()
 
-	resumeTime = encode.UnixMilliU(time.Now().Add(time.Hour))
+	resumeTime = uint64(time.Now().Add(time.Hour).UnixMilli())
 	payload = newPayload()
 	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.ResumptionRoute, payload)
 	err = handleTradeResumptionMsg(rig.core, rig.dc, req)
@@ -6525,7 +6525,7 @@ func TestHandleTradeResumptionMsg(t *testing.T) {
 	}
 
 	// Resume the market immediately.
-	resumeTime = encode.UnixMilliU(time.Now())
+	resumeTime = uint64(time.Now().UnixMilli())
 	payload = newPayload()
 	payload.ResumeTime = 0 // resume now, not scheduled
 	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.ResumptionRoute, payload)
@@ -7699,7 +7699,7 @@ func TestMatchStatusResolution(t *testing.T) {
 		isMaker := match.Side == order.Maker
 		match.MetaData.Proof.Auth = db.MatchAuth{}
 		auth := &match.MetaData.Proof.Auth
-		auth.MatchStamp = encode.UnixMilliU(matchTime)
+		auth.MatchStamp = uint64(matchTime.UnixMilli())
 		if status >= order.MakerSwapCast {
 			if isMaker {
 				auth.InitSig = tBytes
@@ -8159,8 +8159,8 @@ func TestSuspectTrades(t *testing.T) {
 				MetaData: &db.MatchMetaData{
 					Proof: db.MatchProof{
 						Auth: db.MatchAuth{
-							MatchStamp: encode.UnixMilliU(time.Now()),
-							AuditStamp: encode.UnixMilliU(time.Now()),
+							MatchStamp: uint64(time.Now().UnixMilli()),
+							AuditStamp: uint64(time.Now().UnixMilli()),
 						},
 					},
 				},

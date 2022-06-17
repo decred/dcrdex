@@ -24,8 +24,8 @@ func EncodePrefix(p *Prefix) []byte {
 		AddData(uint32B(p.BaseAsset)).
 		AddData(uint32B(p.QuoteAsset)).
 		AddData([]byte{byte(p.OrderType)}).
-		AddData(uint64B(unixMilliU(p.ClientTime))).
-		AddData(uint64B(unixMilliU(p.ServerTime))).
+		AddData(uint64B(uint64(p.ClientTime.UnixMilli()))).
+		AddData(uint64B(uint64(p.ServerTime.UnixMilli()))).
 		AddData(p.Commit[:])
 }
 

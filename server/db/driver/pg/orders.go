@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
@@ -1328,7 +1327,7 @@ func (a *Archiver) revokeGeneratedCancelsForUser(ctx context.Context, dbe *sql.D
 			continue
 		}
 
-		ords = append(ords, cancelExecStamped{oid, target, encode.UnixMilli(revokeTime)})
+		ords = append(ords, cancelExecStamped{oid, target, revokeTime.UnixMilli()})
 	}
 
 	if err = rows.Err(); err != nil {

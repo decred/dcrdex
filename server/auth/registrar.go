@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
@@ -65,7 +64,7 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 			AssetID:      &feeAsset,
 			Address:      feeAddr,
 			Fee:          feeAmt,
-			Time:         encode.UnixMilliU(unixMsNow()),
+			Time:         uint64(time.Now().UnixMilli()),
 		}
 		auth.Sign(regRes)
 

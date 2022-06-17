@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/wait"
@@ -435,16 +434,14 @@ func (auth *AuthManager) ExpectUsers(users map[account.AccountID]struct{}, withi
 // RecordCancel records a user's executed cancel order, including the canceled
 // order ID, and the time when the cancel was executed.
 func (auth *AuthManager) RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time) {
-	tMS := encode.UnixMilli(t)
-	auth.recordOrderDone(user, oid, &target, tMS)
+	auth.recordOrderDone(user, oid, &target, t.UnixMilli())
 }
 
 // RecordCompletedOrder records a user's completed order, where completed means
 // a swap involving the order was successfully completed and the order is no
 // longer on the books if it ever was.
 func (auth *AuthManager) RecordCompletedOrder(user account.AccountID, oid order.OrderID, t time.Time) {
-	tMS := encode.UnixMilli(t)
-	auth.recordOrderDone(user, oid, nil, tMS)
+	auth.recordOrderDone(user, oid, nil, t.UnixMilli())
 }
 
 // recordOrderDone an order that has finished processing. This can be a cancel
@@ -710,7 +707,7 @@ func (auth *AuthManager) registerMatchOutcome(user account.AccountID, misstep No
 	matchOutcomes, found := auth.matchOutcomes[user]
 	if found {
 		matchOutcomes.add(&matchOutcome{
-			time:    encode.UnixMilli(refTime),
+			time:    refTime.UnixMilli(),
 			mid:     mmid.MatchID,
 			outcome: violation,
 			value:   value,
@@ -784,7 +781,7 @@ func (auth *AuthManager) registerPreimageOutcome(user account.AccountID, miss bo
 	piOutcomes, found := auth.preimgOutcomes[user]
 	if found {
 		piOutcomes.add(&preimageOutcome{
-			time: encode.UnixMilli(refTime),
+			time: refTime.UnixMilli(),
 			oid:  oid,
 			miss: miss,
 		})
@@ -869,7 +866,7 @@ func (auth *AuthManager) Penalize(user account.AccountID, lastRule account.Rule,
 	details = fmt.Sprintf("%s\nLast Broken Rule Details: %s\n%s", details, lastRule.Description(), extraDetails)
 	penalty := &msgjson.Penalty{
 		Rule:     lastRule,
-		Time:     encode.UnixMilliU(time.Now()),
+		Time:     uint64(time.Now().UnixMilli()),
 		Duration: uint64(lastRule.Duration().Milliseconds()),
 		Details:  details,
 	}
@@ -1288,7 +1285,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 			MatchID:      match.ID[:],
 			Quantity:     match.Quantity,
 			Rate:         match.Rate,
-			ServerTime:   encode.UnixMilliU(match.Epoch.End()),
+			ServerTime:   uint64(match.Epoch.End().UnixMilli()),
 			Address:      addr,
 			FeeRateBase:  match.BaseRate,  // contract txn fee rate if user is selling
 			FeeRateQuote: match.QuoteRate, // contract txn fee rate if user is buying

@@ -581,7 +581,7 @@ type Balance struct {
 func (b *Balance) Encode() []byte {
 	return versionedBytes(0).
 		AddData(encodeAssetBalance(&b.Balance)).
-		AddData(uint64Bytes(encode.UnixMilliU(b.Stamp)))
+		AddData(uint64Bytes(uint64(b.Stamp.UnixMilli())))
 }
 
 // DecodeBalance decodes the versioned blob to a *Balance.
@@ -611,7 +611,7 @@ func decodeBalance_v0(pushes [][]byte) (*Balance, error) {
 
 	return &Balance{
 		Balance: *bal,
-		Stamp:   encode.UnixTimeMilli(int64(intCoder.Uint64(pushes[1]))),
+		Stamp:   time.UnixMilli(int64(intCoder.Uint64(pushes[1]))),
 	}, nil
 }
 
@@ -866,7 +866,7 @@ func (n *Notification) Acked() bool {
 // Stamp sets the notification timestamp. If NewNotification is used to
 // construct the Notification, the timestamp will already be set.
 func (n *Notification) Stamp() {
-	n.TimeStamp = encode.UnixMilliU(time.Now())
+	n.TimeStamp = uint64(time.Now().UnixMilli())
 	n.Id = n.ID()
 }
 

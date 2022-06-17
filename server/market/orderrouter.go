@@ -14,7 +14,6 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/wait"
@@ -285,7 +284,7 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 			BaseAsset:  limit.Base,
 			QuoteAsset: limit.Quote,
 			OrderType:  order.LimitOrderType,
-			ClientTime: encode.UnixTimeMilli(int64(limit.ClientTime)),
+			ClientTime: time.UnixMilli(int64(limit.ClientTime)),
 			//ServerTime set in epoch queue processing pipeline.
 			Commit: commit,
 		},
@@ -374,7 +373,7 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 			BaseAsset:  market.Base,
 			QuoteAsset: market.Quote,
 			OrderType:  order.MarketOrderType,
-			ClientTime: encode.UnixTimeMilli(int64(market.ClientTime)),
+			ClientTime: time.UnixMilli(int64(market.ClientTime)),
 			//ServerTime set in epoch queue processing pipeline.
 			Commit: commit,
 		},
@@ -749,7 +748,7 @@ func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message)
 			BaseAsset:  cancel.Base,
 			QuoteAsset: cancel.Quote,
 			OrderType:  order.CancelOrderType,
-			ClientTime: encode.UnixTimeMilli(int64(cancel.ClientTime)),
+			ClientTime: time.UnixMilli(int64(cancel.ClientTime)),
 			//ServerTime set in epoch queue processing pipeline.
 			Commit: commit,
 		},
@@ -875,7 +874,7 @@ func (r *OrderRouter) extractMarketDetails(prefix *msgjson.Prefix, trade *msgjso
 
 // checkTimes validates the timestamps in an order prefix.
 func checkTimes(prefix *msgjson.Prefix) *msgjson.Error {
-	offset := encode.UnixMilli(time.Now()) - int64(prefix.ClientTime)
+	offset := time.Now().UnixMilli() - int64(prefix.ClientTime)
 	if offset < 0 {
 		offset *= -1
 	}

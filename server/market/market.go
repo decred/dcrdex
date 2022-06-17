@@ -15,7 +15,6 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/ws"
@@ -515,7 +514,7 @@ func (m *Market) Suspend(asSoonAs time.Time, persistBook bool) (finalEpochIdx in
 	dur := int64(m.EpochDuration())
 
 	epochEnd := func(idx int64) time.Time {
-		start := encode.UnixTimeMilli(idx * dur)
+		start := time.UnixMilli(idx * dur)
 		return start.Add(time.Duration(dur) * time.Millisecond)
 	}
 
@@ -538,7 +537,7 @@ func (m *Market) Suspend(asSoonAs time.Time, persistBook bool) (finalEpochIdx in
 		finalEpochEnd = soonestEnd
 	} else {
 		// Suspend at the end of the epoch that includes the target time.
-		ms := encode.UnixMilli(asSoonAs)
+		ms := asSoonAs.UnixMilli()
 		finalEpochIdx = ms / dur
 		// Allow stopping at boundary, prior to the epoch starting at this time.
 		if ms%dur == 0 {
@@ -564,10 +563,10 @@ func (m *Market) ResumeEpoch(asSoonAs time.Time) (startEpochIdx int64) {
 
 	dur := int64(m.EpochDuration())
 
-	now := encode.UnixMilli(time.Now())
+	now := time.Now().UnixMilli()
 	nextEpochIdx := 1 + now/dur
 
-	ms := encode.UnixMilli(asSoonAs)
+	ms := asSoonAs.UnixMilli()
 	startEpochIdx = 1 + ms/dur
 
 	if startEpochIdx < nextEpochIdx {
@@ -779,7 +778,7 @@ func (m *Market) processCancelOrderWhileSuspended(rec *orderRecord, errChan chan
 	}
 
 	dur := int64(m.EpochDuration())
-	now := encode.UnixMilli(time.Now())
+	now := time.Now().UnixMilli()
 	epochIdx := now / dur
 	if err := m.storage.NewArchivedCancel(co, epochIdx, dur); err != nil {
 		errChan <- err
@@ -842,7 +841,7 @@ func (m *Market) processCancelOrderWhileSuspended(rec *orderRecord, errChan chan
 
 // matchNotifications creates a pair of msgjson.Match from a match.
 func matchNotifications(match *order.Match) (makerMsg *msgjson.Match, takerMsg *msgjson.Match) {
-	stamp := encode.UnixMilliU(time.Now())
+	stamp := uint64(time.Now().UnixMilli())
 	return &msgjson.Match{
 			OrderID:      idToBytes(match.Maker.ID()),
 			MatchID:      idToBytes(match.ID()),
@@ -1126,7 +1125,7 @@ func (m *Market) SwapDone(ord order.Order, match *order.Match, fail bool) {
 	compTime := time.Now().UTC()
 	m.auth.RecordCompletedOrder(ord.User(), oid, compTime)
 	// Record the successful completion time.
-	if err := m.storage.SetOrderCompleteTime(ord, encode.UnixMilli(compTime)); err != nil {
+	if err := m.storage.SetOrderCompleteTime(ord, compTime.UnixMilli()); err != nil {
 		if db.IsErrGeneralFailure(err) {
 			log.Errorf("fatal error with SetOrderCompleteTime for order %v: %v", ord, err)
 			return
@@ -1436,7 +1435,7 @@ func (m *Market) Run(ctx context.Context) {
 	nextEpochIdx := m.startEpochIdx
 	if nextEpochIdx == 0 {
 		log.Warnf("Run: startEpochIdx not set. Starting at the next epoch.")
-		now := encode.UnixMilli(time.Now())
+		now := time.Now().UnixMilli()
 		nextEpochIdx = 1 + now/int64(m.EpochDuration())
 		m.startEpochIdx = nextEpochIdx
 	}
@@ -2370,7 +2369,7 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 		MktQuote:       m.marketInfo.Quote,
 		Idx:            epoch.Epoch,
 		Dur:            epoch.Duration,
-		MatchTime:      encode.UnixMilli(matchTime),
+		MatchTime:      matchTime.UnixMilli(),
 		CSum:           cSum,
 		Seed:           seed,
 		OrdersRevealed: oidsRevealed,
