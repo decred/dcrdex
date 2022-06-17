@@ -21,7 +21,6 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/candles"
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/order/test"
@@ -546,8 +545,8 @@ func TestMarket_Suspend(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	startEpochIdx := 2 + encode.UnixMilli(time.Now())/epochDurationMSec
-	startEpochTime := encode.UnixTimeMilli(startEpochIdx * epochDurationMSec)
+	startEpochIdx := 2 + time.Now().UnixMilli()/epochDurationMSec
+	startEpochTime := time.UnixMilli(startEpochIdx * epochDurationMSec)
 	midPrevEpochTime := startEpochTime.Add(time.Duration(-epochDurationMSec/2) * time.Millisecond)
 
 	// ~----|-------|-------|-------|
@@ -587,7 +586,7 @@ func TestMarket_Suspend(t *testing.T) {
 
 	// Set a new suspend time, in the future this time.
 	nextEpochIdx := startEpochIdx + 1
-	nextEpochTime := encode.UnixTimeMilli(nextEpochIdx * epochDurationMSec)
+	nextEpochTime := time.UnixMilli(nextEpochIdx * epochDurationMSec)
 
 	// Just before second epoch start.
 	finalIdx, finalTime = mkt.Suspend(nextEpochTime.Add(-1*time.Millisecond), persist)
@@ -634,8 +633,8 @@ func TestMarket_Suspend(t *testing.T) {
 	mkt.FeedDone(feed)
 
 	// Start up again (consumer resumes the Market manually)
-	startEpochIdx = 1 + encode.UnixMilli(time.Now())/epochDurationMSec
-	startEpochTime = encode.UnixTimeMilli(startEpochIdx * epochDurationMSec)
+	startEpochIdx = 1 + time.Now().UnixMilli()/epochDurationMSec
+	startEpochTime = time.UnixMilli(startEpochIdx * epochDurationMSec)
 
 	wg.Add(1)
 	go func() {
@@ -684,8 +683,8 @@ func TestMarket_Suspend_Persist(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	startEpochIdx := 2 + encode.UnixMilli(time.Now())/epochDurationMSec
-	//startEpochTime := encode.UnixTimeMilli(startEpochIdx * epochDurationMSec)
+	startEpochIdx := 2 + time.Now().UnixMilli()/epochDurationMSec
+	//startEpochTime := time.UnixMilli(startEpochIdx * epochDurationMSec)
 
 	// ~----|-------|-------|-------|
 	// ^now ^prev   ^start  ^next
@@ -749,8 +748,8 @@ func TestMarket_Suspend_Persist(t *testing.T) {
 
 	// Start it up again.
 	feed := mkt.OrderFeed()
-	startEpochIdx = 1 + encode.UnixMilli(time.Now())/epochDurationMSec
-	//startEpochTime = encode.UnixTimeMilli(startEpochIdx * epochDurationMSec)
+	startEpochIdx = 1 + time.Now().UnixMilli()/epochDurationMSec
+	//startEpochTime = time.UnixMilli(startEpochIdx * epochDurationMSec)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -821,13 +820,13 @@ func TestMarket_Run(t *testing.T) {
 	// Check that start is delayed by an unsynced backend. Tell the Market to
 	// start
 	atomic.StoreUint32(&oRig.dcr.synced, 0)
-	nowEpochIdx := encode.UnixMilli(time.Now())/epochDurationMSec + 1
+	nowEpochIdx := time.Now().UnixMilli()/epochDurationMSec + 1
 
 	unsyncedEpochIdx := nowEpochIdx + 1
-	unsyncedEpochTime := encode.UnixTimeMilli(unsyncedEpochIdx * epochDurationMSec)
+	unsyncedEpochTime := time.UnixMilli(unsyncedEpochIdx * epochDurationMSec)
 
 	startEpochIdx := unsyncedEpochIdx + 1
-	startEpochTime := encode.UnixTimeMilli(startEpochIdx * epochDurationMSec)
+	startEpochTime := time.UnixMilli(startEpochIdx * epochDurationMSec)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -870,7 +869,7 @@ func TestMarket_Run(t *testing.T) {
 				BaseAsset:  limit.Base,
 				QuoteAsset: limit.Quote,
 				OrderType:  order.LimitOrderType,
-				ClientTime: encode.UnixTimeMilli(clientTimeMSec),
+				ClientTime: time.UnixMilli(clientTimeMSec),
 				Commit:     commit,
 			},
 			T: order.Trade{
@@ -1004,7 +1003,7 @@ func TestMarket_Run(t *testing.T) {
 	loID := oRecord.order.ID()
 	piCo := test.RandomPreimage()
 	commit = piCo.Commit()
-	cancelTime := encode.UnixMilli(time.Now())
+	cancelTime := time.Now().UnixMilli()
 	cancelMsg := &msgjson.CancelOrder{
 		Prefix: msgjson.Prefix{
 			AccountID:  aid[:],
@@ -1024,7 +1023,7 @@ func TestMarket_Run(t *testing.T) {
 				BaseAsset:  limit.Base,
 				QuoteAsset: limit.Quote,
 				OrderType:  order.CancelOrderType,
-				ClientTime: encode.UnixTimeMilli(cancelTime),
+				ClientTime: time.UnixMilli(cancelTime),
 				Commit:     commit,
 			},
 			TargetOrderID: loID,
@@ -1049,7 +1048,7 @@ func TestMarket_Run(t *testing.T) {
 	commitBadCo := piBadCo.Commit()
 	coWrongAccount.Commit = commitBadCo
 	coWrongAccount.AccountID = otherAccount
-	coWrongAccount.ClientTime = encode.UnixTimeMilli(cancelTime)
+	coWrongAccount.ClientTime = time.UnixMilli(cancelTime)
 	cancelMsg.Commit = commitBadCo[:]
 	coRecordWrongAccount := orderRecord{
 		msgID: nextMsgID(),
@@ -1082,7 +1081,7 @@ func TestMarket_Run(t *testing.T) {
 	cancelMsg.Commit = commit[:]
 	coDup := newCancel()
 	coDup.Commit = commit
-	coDup.ClientTime = encode.UnixTimeMilli(cancelTime)
+	coDup.ClientTime = time.UnixMilli(cancelTime)
 	coRecordDup := orderRecord{
 		msgID: nextMsgID(),
 		req:   cancelMsg,
@@ -1486,7 +1485,7 @@ func TestMarket_Cancelable(t *testing.T) {
 	auth.handlePreimageDone = make(chan struct{}, 1)
 
 	epochDurationMSec := int64(mkt.EpochDuration())
-	startEpochIdx := 1 + encode.UnixMilli(time.Now().Truncate(time.Millisecond))/epochDurationMSec
+	startEpochIdx := 1 + time.Now().UnixMilli()/epochDurationMSec
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -1529,7 +1528,7 @@ func TestMarket_Cancelable(t *testing.T) {
 				BaseAsset:  limitMsg.Base,
 				QuoteAsset: limitMsg.Quote,
 				OrderType:  order.LimitOrderType,
-				ClientTime: encode.UnixTimeMilli(clientTimeMSec),
+				ClientTime: time.UnixMilli(clientTimeMSec),
 				Commit:     commit,
 			},
 			T: order.Trade{
@@ -1832,8 +1831,8 @@ func TestMarket_CancelWhileSuspended(t *testing.T) {
 
 	// Start the market
 	epochDurationMSec := int64(mkt.EpochDuration())
-	startEpochIdx := 2 + encode.UnixMilli(time.Now())/epochDurationMSec
-	startEpochTime := encode.UnixTimeMilli(startEpochIdx * epochDurationMSec)
+	startEpochIdx := 2 + time.Now().UnixMilli()/epochDurationMSec
+	startEpochTime := time.UnixMilli(startEpochIdx * epochDurationMSec)
 	go mkt.Start(ctx, startEpochIdx)
 	<-time.After(time.Until(startEpochTime.Add(50 * time.Millisecond)))
 	if !mkt.Running() {
@@ -1855,7 +1854,7 @@ func TestMarket_CancelWhileSuspended(t *testing.T) {
 	loID := lo.ID()
 	piCo := test.RandomPreimage()
 	commit := piCo.Commit()
-	cancelTime := encode.UnixMilli(time.Now())
+	cancelTime := time.Now().UnixMilli()
 	aid := buyer3.Acct
 	cancelMsg := &msgjson.CancelOrder{
 		Prefix: msgjson.Prefix{
@@ -1875,7 +1874,7 @@ func TestMarket_CancelWhileSuspended(t *testing.T) {
 				BaseAsset:  lo.Base(),
 				QuoteAsset: lo.Quote(),
 				OrderType:  order.CancelOrderType,
-				ClientTime: encode.UnixTimeMilli(cancelTime),
+				ClientTime: time.UnixMilli(cancelTime),
 				Commit:     commit,
 			},
 			TargetOrderID: loID,

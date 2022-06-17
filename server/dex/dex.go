@@ -14,7 +14,6 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/candles"
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
@@ -719,7 +718,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 
 	// Set start epoch index for each market. Also create BookSources for the
 	// BookRouter, and MarketTunnels for the OrderRouter.
-	now := encode.UnixMilli(time.Now())
+	now := time.Now().UnixMilli()
 	bookSources := make(map[string]market.BookSource, len(cfg.Markets))
 	cfgMarkets := make([]*msgjson.Market, 0, len(cfg.Markets))
 	for name, mkt := range markets {
@@ -905,7 +904,7 @@ func (dm *DEX) SuspendMarket(name string, tSusp time.Time, persistBooks bool) (s
 	note, errMsg := msgjson.NewNotification(msgjson.SuspensionRoute, msgjson.TradeSuspension{
 		MarketID:    name,
 		FinalEpoch:  uint64(suspEpoch.Idx),
-		SuspendTime: encode.UnixMilliU(suspEpoch.End),
+		SuspendTime: uint64(suspEpoch.End.UnixMilli()),
 		Persist:     persistBooks,
 	})
 	if errMsg != nil {
@@ -966,7 +965,7 @@ func (dm *DEX) ResumeMarket(name string, asSoonAs time.Time) (startEpoch int64, 
 
 	// Configure the start epoch with the Market.
 	startTimeMS := int64(epochLen) * startEpoch
-	startTime = encode.UnixTimeMilli(startTimeMS)
+	startTime = time.UnixMilli(startTimeMS)
 	mkt.SetStartEpochIdx(startEpoch)
 
 	// Relaunch the market.

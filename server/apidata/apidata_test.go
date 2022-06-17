@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex/candles"
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/matcher"
 )
@@ -87,7 +86,7 @@ func TestReportEpoch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddMarketSource error: %v", err)
 	}
-	epoch := encode.UnixMilliU(time.Now()) / mktSrc.EpochDuration()
+	epoch := uint64(time.Now().UnixMilli()) / mktSrc.EpochDuration()
 	epochsPerDay := uint64(time.Hour*24/time.Millisecond) / mktSrc.EpochDuration()
 	epochYesterday := epoch - epochsPerDay - 1
 	// initial success

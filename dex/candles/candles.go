@@ -6,7 +6,6 @@ package candles
 import (
 	"time"
 
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 )
 
@@ -109,7 +108,7 @@ func (c *Cache) WireCandles(count int) *msgjson.WireCandles {
 // responsible for making sure that dur >> binSize, otherwise the results will
 // be of little value.
 func (c *Cache) Delta(since time.Time) (changePct float64, vol uint64) {
-	cutoff := encode.UnixMilliU(since)
+	cutoff := uint64(since.UnixMilli())
 	sz := len(c.Candles)
 	if sz == 0 {
 		return 0, 0

@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/crypto/blake256"
 )
@@ -214,7 +213,7 @@ type Order interface {
 }
 
 // zeroTime is the Unix time for a Time where IsZero() == true.
-var zeroTime = unixMilli(time.Time{})
+var zeroTime = time.Time{}.UnixMilli()
 
 // An order's ID is computed as the Blake-256 hash of the serialized order.
 func calcOrderID(order Order) OrderID {
@@ -345,7 +344,7 @@ func (p *Prefix) serializeSize() int {
 // Time returns the order prefix's server time as a UNIX epoch time in
 // milliseconds.
 func (p *Prefix) Time() int64 {
-	return unixMilli(p.ServerTime)
+	return p.ServerTime.UnixMilli()
 }
 
 // SetTime sets the order prefix's server time.
@@ -382,11 +381,11 @@ func (p *Prefix) Serialize() []byte {
 	offset++
 
 	// client time
-	binary.BigEndian.PutUint64(b[offset:offset+8], unixMilliU(p.ClientTime))
+	binary.BigEndian.PutUint64(b[offset:offset+8], uint64(p.ClientTime.UnixMilli()))
 	offset += 8
 
 	// server time
-	binary.BigEndian.PutUint64(b[offset:offset+8], unixMilliU(p.ServerTime))
+	binary.BigEndian.PutUint64(b[offset:offset+8], uint64(p.ServerTime.UnixMilli()))
 	offset += 8
 
 	// commitment
@@ -809,8 +808,3 @@ func ExtractAddress(ord Order) string {
 	}
 	return trade.Address
 }
-
-// Some commonly used time transformations.
-var unixMilli = encode.UnixMilli
-var unixMilliU = encode.UnixMilliU
-var unixTimeMilli = encode.UnixTimeMilli

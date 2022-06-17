@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 )
 
@@ -469,7 +469,7 @@ func (m *matchReader) OrderPortion() string {
 
 // TimeString is a formatted string of the match's timestamp.
 func (m *matchReader) TimeString() string {
-	t := encode.UnixTimeMilli(int64(m.Stamp)).Local()
+	t := time.UnixMilli(int64(m.Stamp)).Local()
 	return t.Format("Jan 2 2006, 15:04:05 MST")
 }
 

@@ -15,7 +15,6 @@ import (
 	"decred.org/dcrdex/client/db"
 	dbtest "decred.org/dcrdex/client/db/test"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
 	"go.etcd.io/bbolt"
@@ -700,7 +699,7 @@ func TestOrderFilters(t *testing.T) {
 				P: order.Prefix{
 					BaseAsset:  base,
 					QuoteAsset: quote,
-					ServerTime: encode.UnixTimeMilli(stamp),
+					ServerTime: time.UnixMilli(stamp),
 				},
 			},
 		}
@@ -1333,7 +1332,7 @@ func TestDeleteInactiveMatches(t *testing.T) {
 	t.Logf("%d milliseconds to insert %d account MetaMatch", time.Since(tStart)/time.Millisecond, numToDo)
 
 	var (
-		olderThan  = encode.UnixTimeMilli(int64(stamp))
+		olderThan  = time.UnixMilli(int64(stamp))
 		matchN     = 0
 		perMatchFn = func(mtch *db.MetaMatch, isSell bool) error {
 			matchN++

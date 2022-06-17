@@ -544,7 +544,7 @@ func parseCoreOrder(co *core.Order, b, q uint32) *myOrder {
 		}
 		return ms, settled
 	}
-	srvTime := encode.UnixTimeMilli(int64(co.Stamp))
+	srvTime := time.UnixMilli(int64(co.Stamp))
 	age := time.Since(srvTime).Round(time.Millisecond)
 	cancelling := co.Cancelling
 	// If the order is executed, canceled, or revoked, it is no longer cancelling.

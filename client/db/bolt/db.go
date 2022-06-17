@@ -1845,7 +1845,7 @@ func (db *BoltDB) DeleteInactiveOrders(ctx context.Context, olderThan *time.Time
 		olderThanB []byte
 	)
 	if olderThan != nil {
-		olderThanB = uint64Bytes(encode.UnixMilliU(*olderThan))
+		olderThanB = uint64Bytes(uint64(olderThan.UnixMilli()))
 	} else {
 		olderThanB = uint64Bytes(timeNow())
 	}
@@ -1986,7 +1986,7 @@ func (db *BoltDB) DeleteInactiveMatches(ctx context.Context, olderThan *time.Tim
 		olderThanB []byte
 	)
 	if olderThan != nil {
-		olderThanB = uint64Bytes(encode.UnixMilliU(*olderThan))
+		olderThanB = uint64Bytes(uint64(olderThan.UnixMilli()))
 	} else {
 		olderThanB = uint64Bytes(timeNow())
 	}
@@ -2077,7 +2077,7 @@ func (db *BoltDB) DeleteInactiveMatches(ctx context.Context, olderThan *time.Tim
 
 // timeNow is the current unix timestamp in milliseconds.
 func timeNow() uint64 {
-	return encode.UnixMilliU(time.Now())
+	return uint64(time.Now().UnixMilli())
 }
 
 // A couple of common bbolt functions.

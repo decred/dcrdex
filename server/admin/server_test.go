@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
@@ -81,8 +80,8 @@ func (c *TCore) ResumeMarket(name string, tRes time.Time) (startEpoch int64, sta
 		err = fmt.Errorf("unknown market %s", name)
 		return
 	}
-	tMkt.resumeEpoch = 1 + encode.UnixMilli(tRes)/int64(tMkt.dur)
-	tMkt.resumeTime = encode.UnixTimeMilli(tMkt.resumeEpoch * int64(tMkt.dur))
+	tMkt.resumeEpoch = 1 + tRes.UnixMilli()/int64(tMkt.dur)
+	tMkt.resumeTime = time.UnixMilli(tMkt.resumeEpoch * int64(tMkt.dur))
 	return tMkt.resumeEpoch, tMkt.resumeTime, nil
 }
 func (c *TCore) SuspendMarket(name string, tSusp time.Time, persistBooks bool) (suspEpoch *market.SuspendEpoch, err error) {
@@ -92,7 +91,7 @@ func (c *TCore) SuspendMarket(name string, tSusp time.Time, persistBooks bool) (
 		return
 	}
 	tMkt.persist = persistBooks
-	tMkt.suspend.Idx = encode.UnixMilli(tSusp)
+	tMkt.suspend.Idx = tSusp.UnixMilli()
 	tMkt.suspend.End = tSusp.Add(time.Millisecond)
 	return tMkt.suspend, nil
 }
@@ -393,7 +392,7 @@ func TestMarkets(t *testing.T) {
 	}
 
 	// Set suspend data.
-	tMkt.suspend = &market.SuspendEpoch{Idx: 12345, End: encode.UnixTimeMilli(int64(dur) * idx)}
+	tMkt.suspend = &market.SuspendEpoch{Idx: 12345, End: time.UnixMilli(int64(dur) * idx)}
 	tMkt.persist = true
 
 	w = httptest.NewRecorder()
@@ -905,7 +904,7 @@ func TestSuspend(t *testing.T) {
 	}
 
 	var zeroTime time.Time
-	wantIdx := encode.UnixMilli(zeroTime)
+	wantIdx := zeroTime.UnixMilli()
 	if suspRes.FinalEpoch != wantIdx {
 		t.Errorf("incorrect final epoch index. got %d, expected %d",
 			suspRes.FinalEpoch, tMkt.suspend.Idx)
@@ -951,7 +950,7 @@ func TestSuspend(t *testing.T) {
 
 	// Good suspend time, one minute in the future
 	w = httptest.NewRecorder()
-	tMsFuture := encode.UnixMilli(time.Now().Add(time.Minute))
+	tMsFuture := time.Now().Add(time.Minute).UnixMilli()
 	r, _ = http.NewRequest("GET", fmt.Sprintf("https://localhost/market/%v/suspend?t=%d", name, tMsFuture), nil)
 	r.RemoteAddr = "localhost"
 
@@ -971,7 +970,7 @@ func TestSuspend(t *testing.T) {
 			suspRes.FinalEpoch, tMsFuture)
 	}
 
-	wantFinal = encode.UnixTimeMilli(tMsFuture + 1)
+	wantFinal = time.UnixMilli(tMsFuture + 1)
 	if !suspRes.SuspendTime.Equal(wantFinal) {
 		t.Errorf("incorrect suspend time. got %v, expected %v",
 			suspRes.SuspendTime, wantFinal)

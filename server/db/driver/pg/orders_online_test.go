@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
@@ -474,7 +473,7 @@ func TestFlushBook(t *testing.T) {
 			t.Errorf("got epoch index %d, expected %d", epochIdx, exemptEpochIdx)
 		}
 
-		ords = append(ords, cancelExecStamped{oid, target, encode.UnixMilli(revokeTime)})
+		ords = append(ords, cancelExecStamped{oid, target, revokeTime.UnixMilli()})
 	}
 
 	if err = rows.Err(); err != nil {
@@ -1586,7 +1585,7 @@ func TestCompletedUserOrders(t *testing.T) {
 	}
 
 	nowMs := func() int64 {
-		return encode.UnixMilli(time.Now().Truncate(time.Millisecond))
+		return time.Now().UnixMilli()
 	}
 
 	// Two orders, different accounts, DCR-BTC.
@@ -1797,12 +1796,12 @@ func TestExecutedCancelsForUser(t *testing.T) {
 	if coOut.ID() != coID {
 		t.Errorf("incorrect cancel order ID. got %v, expected %v", coOut.ID(), coID)
 	}
-	if coOut.Time() != encode.UnixMilli(coTime) {
-		t.Errorf("incorrect cancel time. got %x, expected %x", coOut.Time(), encode.UnixMilli(coTime))
+	if coTimeMs := coTime.UnixMilli(); coOut.Time() != coTimeMs {
+		t.Errorf("incorrect cancel time. got %d, expected %d", coOut.Time(), coTimeMs)
 	}
 
 	// Store the epoch.
-	matchTime := encode.UnixMilli(time.Now().Truncate(time.Millisecond))
+	matchTime := time.Now().UnixMilli()
 	err = archie.InsertEpoch(&db.EpochResults{
 		MktBase:        mktInfo.Base,
 		MktQuote:       mktInfo.Quote,
@@ -1855,8 +1854,8 @@ func TestExecutedCancelsForUser(t *testing.T) {
 	if targets[1] != lo.ID() {
 		t.Errorf("incorrect target for executed cancel %v, expected %v", targets[1], lo.ID())
 	}
-	if compTimes[1] != encode.UnixMilli(coTime) {
-		t.Errorf("incorrect exec time for executed cancel %v, expected %v", compTimes[1], encode.UnixMilli(coTime))
+	if coTimeMs := coTime.UnixMilli(); compTimes[1] != coTimeMs {
+		t.Errorf("incorrect exec time for executed cancel %v, expected %v", compTimes[1], coTimeMs)
 	}
 
 	// test the limit
@@ -1904,7 +1903,7 @@ func TestExecutedCancelsForUser(t *testing.T) {
 	}
 
 	// Store the epoch.
-	matchTime3 := encode.UnixMilli(time.Now().Truncate(time.Millisecond))
+	matchTime3 := time.Now().UnixMilli()
 	err = archie.InsertEpoch(&db.EpochResults{
 		MktBase:        mktInfo.Base,
 		MktQuote:       mktInfo.Quote,

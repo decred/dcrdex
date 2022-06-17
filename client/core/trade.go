@@ -103,7 +103,7 @@ type matchTracker struct {
 
 // matchTime returns the match's match time as a time.Time.
 func (m *matchTracker) matchTime() time.Time {
-	return encode.UnixTimeMilli(int64(m.MetaData.Proof.Auth.MatchStamp)).UTC()
+	return time.UnixMilli(int64(m.MetaData.Proof.Auth.MatchStamp)).UTC()
 }
 
 // trackedCancel is information necessary to track a cancel order. A
@@ -347,7 +347,7 @@ func (t *trackedTrade) isMarketBuy() bool {
 }
 
 func (t *trackedTrade) epochIdx() uint64 {
-	return encode.UnixMilliU(t.Prefix().ServerTime) / t.epochLen
+	return uint64(t.Prefix().ServerTime.UnixMilli()) / t.epochLen
 }
 
 // cancelEpochIdx gives the epoch index of any cancel associated cancel order.
@@ -356,7 +356,7 @@ func (t *trackedTrade) cancelEpochIdx() uint64 {
 	if t.cancel == nil {
 		return 0
 	}
-	return encode.UnixMilliU(t.cancel.Prefix().ServerTime) / t.epochLen
+	return uint64(t.cancel.Prefix().ServerTime.UnixMilli()) / t.epochLen
 }
 
 func (t *trackedTrade) verifyCSum(csum []byte, epochIdx uint64) error {
@@ -923,7 +923,7 @@ func (t *trackedTrade) deleteStaleCancelOrder() {
 	}
 
 	stamp := t.cancel.ServerTime
-	epoch := order.EpochID{Idx: encode.UnixMilliU(stamp) / t.epochLen, Dur: t.epochLen}
+	epoch := order.EpochID{Idx: uint64(stamp.UnixMilli()) / t.epochLen, Dur: t.epochLen}
 	epochEnd := epoch.End()
 	if time.Since(epochEnd).Milliseconds() < int64(2*t.epochLen) {
 		return // not stuck, yet
@@ -1760,7 +1760,7 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 				// It is possible that AuditStamp could be zero if we're
 				// recovering during startup or after a DEX reconnect. In that
 				// case, allow three retries before giving up.
-				lastActionTime = encode.UnixTimeMilli(int64(auditStamp))
+				lastActionTime = time.UnixMilli(int64(auditStamp))
 			}
 			if time.Since(lastActionTime) < bTimeout ||
 				(auditStamp == 0 && match.swapErrCount < tickCheckDivisions) {
@@ -1936,7 +1936,7 @@ func (c *Core) sendInitAsync(t *trackedTrade, match *matchTracker, coinID, contr
 		t.mtx.Lock()
 		auth := &match.MetaData.Proof.Auth
 		auth.InitSig = ack.Sig
-		auth.InitStamp = encode.UnixMilliU(time.Now())
+		auth.InitStamp = uint64(time.Now().UnixMilli())
 		err = t.db.UpdateMatch(&match.MetaMatch)
 		if err != nil {
 			err = fmt.Errorf("error storing init ack sig in database: %v", err)
@@ -2052,7 +2052,7 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 			if match.Side == order.Taker {
 				lastActionStamp = match.MetaData.Proof.Auth.RedemptionStamp
 			}
-			lastActionTime := encode.UnixTimeMilli(int64(lastActionStamp))
+			lastActionTime := time.UnixMilli(int64(lastActionStamp))
 			// Try to wait until about the next auto-tick to try again.
 			waitTime := tickInterval * 3 / 4
 			if time.Since(lastActionTime) > bTimeout ||
@@ -2200,7 +2200,7 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 		t.mtx.Lock()
 		auth := &match.MetaData.Proof.Auth
 		auth.RedeemSig = ack.Sig
-		auth.RedeemStamp = encode.UnixMilliU(time.Now())
+		auth.RedeemStamp = uint64(time.Now().UnixMilli())
 		if match.Side == order.Maker {
 			// As maker, this is the end. However, this diverges from server,
 			// which still needs taker's redeem.

@@ -1080,8 +1080,8 @@ func makeLimitOrder(qty, rate uint64, user *tUser, makerSell bool) *order.LimitO
 			BaseAsset:  ABCID,
 			QuoteAsset: XYZID,
 			OrderType:  order.LimitOrderType,
-			ClientTime: encode.UnixTimeMilli(1566497654000),
-			ServerTime: encode.UnixTimeMilli(1566497655000),
+			ClientTime: time.UnixMilli(1566497654000),
+			ServerTime: time.UnixMilli(1566497655000),
 		},
 		T: order.Trade{
 			Sell:     makerSell,
@@ -1099,8 +1099,8 @@ func makeMarketOrder(qty uint64, user *tUser, makerSell bool) *order.MarketOrder
 			BaseAsset:  ABCID,
 			QuoteAsset: XYZID,
 			OrderType:  order.LimitOrderType,
-			ClientTime: encode.UnixTimeMilli(1566497654000),
-			ServerTime: encode.UnixTimeMilli(1566497655000),
+			ClientTime: time.UnixMilli(1566497654000),
+			ServerTime: time.UnixMilli(1566497655000),
 		},
 		T: order.Trade{
 			Sell:     makerSell,
@@ -1201,7 +1201,7 @@ func tMatchInfo(maker, taker *tUser, matchQty, matchRate uint64, makerOrder *ord
 		FeeRateBase:  42,
 		FeeRateQuote: 62,
 		Epoch: order.EpochID{ // make Epoch.End() be now, Idx and Dur not important per se
-			Idx: encode.UnixMilliU(unixMsNow()),
+			Idx: uint64(time.Now().UnixMilli()),
 			Dur: 1,
 		}, // Need Epoch set for lock time
 	}
@@ -1264,7 +1264,7 @@ func tMultiMatchSet(matchQtys, rates []uint64, makerSell bool, isMarket bool) *t
 		takerOrder = makeLimitOrder(sum*5/4, rates[0], taker, !makerSell)
 	}
 	set := new(tMatchSet)
-	now := encode.UnixMilliU(unixMsNow())
+	now := uint64(time.Now().UnixMilli())
 	for i, v := range matchQtys {
 		maker := tNewUser("maker" + strconv.Itoa(i))
 		// Alternate market and limit orders
@@ -1326,7 +1326,7 @@ func tNewSwap(matchInfo *tMatch, oid order.OrderID, recipient string, user *tUse
 		MatchID: matchInfo.matchID[:],
 		// We control what the backend returns, so the txid doesn't matter right now.
 		CoinID: coinID,
-		//Time:     encode.UnixMilliU(unixMsNow()),
+		//Time:     uint64(time.Now().UnixMilli()),
 		Contract: dirtyEncode(script),
 	})
 
@@ -1362,7 +1362,7 @@ func tNewRedeem(matchInfo *tMatch, oid order.OrderID, user *tUser) *tRedeem {
 		OrderID: oid[:],
 		MatchID: matchInfo.matchID[:],
 		CoinID:  coinID,
-		//Time:    encode.UnixMilliU(unixMsNow()),
+		//Time:    uint64(time.Now().UnixMilli()),
 	})
 	var cpSwapCoin *asset.Contract
 	switch user.acct {

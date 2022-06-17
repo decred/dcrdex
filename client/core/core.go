@@ -1009,7 +1009,7 @@ func (dc *dexConnection) marketEpoch(mktID string, stamp time.Time) uint64 {
 	if epochLen == 0 {
 		return 0
 	}
-	return encode.UnixMilliU(stamp) / epochLen
+	return uint64(stamp.UnixMilli()) / epochLen
 }
 
 // fetchFeeRate gets an asset's fee rate estimate from the server.
@@ -3149,7 +3149,7 @@ func (c *Core) register(dc *dexConnection, assetID uint32) (regRes *msgjson.Regi
 	acctPubKey := dc.acct.privKey.PubKey().SerializeCompressed()
 	dexReg := &msgjson.Register{
 		PubKey: acctPubKey,
-		Time:   encode.UnixMilliU(time.Now()),
+		Time:   uint64(time.Now().UnixMilli()),
 		Asset:  &assetID,
 	}
 	regRes = new(msgjson.RegisterResult)
@@ -4712,7 +4712,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	payload := &msgjson.Connect{
 		AccountID:  acctID[:],
 		APIVersion: 0,
-		Time:       encode.UnixMilliU(time.Now()),
+		Time:       uint64(time.Now().UnixMilli()),
 	}
 	sigMsg := payload.Serialize()
 	sig, err := dc.acct.sign(sigMsg)
@@ -6088,7 +6088,7 @@ func handlePenaltyMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	if err != nil {
 		return newError(signatureErr, "handlePenaltyMsg: DEX signature validation error: %w", err)
 	}
-	t := encode.UnixTimeMilli(int64(note.Penalty.Time))
+	t := time.UnixMilli(int64(note.Penalty.Time))
 	// d := time.Duration(note.Penalty.Duration) * time.Millisecond
 
 	subject, details := c.formatDetails(TopicPenalized, dc.acct.host, note.Penalty.Rule, t, note.Penalty.Details)
@@ -6830,7 +6830,7 @@ func sign(privKey *secp256k1.PrivateKey, payload msgjson.Signable) {
 // stampAndSign time stamps the msgjson.Stampable, and signs it with the given
 // private key.
 func stampAndSign(privKey *secp256k1.PrivateKey, payload msgjson.Stampable) {
-	payload.Stamp(encode.UnixMilliU(time.Now()))
+	payload.Stamp(uint64(time.Now().UnixMilli()))
 	sign(privKey, payload)
 }
 
@@ -6880,7 +6880,7 @@ func messagePrefix(prefix *order.Prefix) *msgjson.Prefix {
 		Base:       prefix.BaseAsset,
 		Quote:      prefix.QuoteAsset,
 		OrderType:  oType,
-		ClientTime: encode.UnixMilliU(prefix.ClientTime),
+		ClientTime: uint64(prefix.ClientTime.UnixMilli()),
 		Commit:     prefix.Commit[:],
 	}
 }
@@ -6964,7 +6964,7 @@ func validateOrderResponse(dc *dexConnection, result *msgjson.OrderResult, ord o
 	if err != nil {
 		return fmt.Errorf("signature error. order abandoned")
 	}
-	ord.SetTime(encode.UnixTimeMilli(int64(result.ServerTime)))
+	ord.SetTime(time.UnixMilli(int64(result.ServerTime)))
 	checkID, err := order.IDFromBytes(result.OrderID)
 	if err != nil {
 		return err
@@ -7104,7 +7104,7 @@ func (c *Core) deleteOrderFn(ordersFileStr string) (perOrderFn func(*db.MetaOrde
 			QuoteUnitInfo: quoteUnitInfo,
 		}
 
-		timestamp := encode.UnixTimeMilli(int64(cord.Stamp)).Local().Format(time.RFC3339Nano)
+		timestamp := time.UnixMilli(int64(cord.Stamp)).Local().Format(time.RFC3339Nano)
 		err = csvWriter.Write([]string{
 			cord.Host,                     // Host
 			ord.Order.ID().String(),       // Order ID
@@ -7221,7 +7221,7 @@ func deleteMatchFn(matchesFileStr string) (perMatchFn func(*db.MetaMatch, bool) 
 			return fmt.Errorf("unable to format maker's refund: %v", err)
 		}
 
-		timestamp := encode.UnixTimeMilli(int64(mtch.MetaData.Stamp)).Local().Format(time.RFC3339Nano)
+		timestamp := time.UnixMilli(int64(mtch.MetaData.Stamp)).Local().Format(time.RFC3339Nano)
 		err = csvWriter.Write([]string{
 			mtch.MetaData.DEX,                                 // Host
 			dex.BipIDSymbol(base),                             // Base

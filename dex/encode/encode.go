@@ -77,26 +77,6 @@ func ClearBytes(b []byte) {
 	}
 }
 
-// UnixMilli returns the elapsed time in milliseconds since the Unix Epoch for
-// the given time as an int64. The Location does not matter.
-func UnixMilli(t time.Time) int64 {
-	return t.Unix()*1e3 + int64(t.Nanosecond())/1e6
-}
-
-// UnixMilliU returns the elapsed time in milliseconds since the Unix Epoch for
-// the given time as a uint64. The Location does not matter.
-func UnixMilliU(t time.Time) uint64 {
-	return uint64(t.Unix()*1e3) + uint64(t.Nanosecond())/1e6
-}
-
-// UnixTimeMilli returns a Time for an elapsed time in milliseconds since the
-// Unix Epoch. The time will have Location set to UTC.
-func UnixTimeMilli(msEpoch int64) time.Time {
-	sec := msEpoch / 1000
-	msec := msEpoch % 1000
-	return time.Unix(sec, msec*1e6).UTC()
-}
-
 // DropMilliseconds returns the time truncated to the previous second.
 func DropMilliseconds(t time.Time) time.Time {
 	return t.Truncate(time.Second)
@@ -105,7 +85,7 @@ func DropMilliseconds(t time.Time) time.Time {
 // DecodeUTime interprets bytes as a uint64 millisecond Unix timestamp and
 // creates a time.Time.
 func DecodeUTime(b []byte) time.Time {
-	return UnixTimeMilli(int64(IntCoder.Uint64(b)))
+	return time.UnixMilli(int64(IntCoder.Uint64(b)))
 }
 
 // ExtractPushes parses the linearly-encoded 2D byte slice into a slice of

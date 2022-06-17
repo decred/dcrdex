@@ -95,7 +95,7 @@ func userOrders(mktID string) (ords []*core.Order) {
 		filled := uint64(rand.Float64() * float64(qty))
 		orderType := order.OrderType(rand.Intn(2) + 1)
 		status := order.OrderStatusEpoch
-		epoch := encode.UnixMilliU(time.Now()) / uint64(epochDuration.Milliseconds())
+		epoch := uint64(time.Now().UnixMilli()) / uint64(epochDuration.Milliseconds())
 		isLimit := orderType == order.LimitOrderType
 		if rand.Float32() > 0.5 {
 			epoch -= 1
@@ -118,7 +118,7 @@ func userOrders(mktID string) (ords []*core.Order) {
 		ords = append(ords, &core.Order{
 			ID:     ordertest.RandomOrderID().Bytes(),
 			Type:   orderType,
-			Stamp:  encode.UnixMilliU(time.Now()) - uint64(rand.Float64()*600_000),
+			Stamp:  uint64(time.Now().UnixMilli()) - uint64(rand.Float64()*600_000),
 			Status: status,
 			Epoch:  epoch,
 			Rate:   rate,
@@ -172,7 +172,7 @@ func mkMrkt(base, quote string) *core.Market {
 		EpochLen:        uint64(epochDuration.Milliseconds()),
 		Orders:          userOrders(mktID),
 		SpotPrice: &msgjson.Spot{
-			Stamp:   encode.UnixMilliU(time.Now()),
+			Stamp:   uint64(time.Now().UnixMilli()),
 			BaseID:  baseID,
 			QuoteID: quoteID,
 			Rate:    rate,
@@ -228,7 +228,7 @@ func mkid(b, q uint32) string {
 }
 
 func getEpoch() uint64 {
-	return encode.UnixMilliU(time.Now()) / uint64(epochDuration.Milliseconds())
+	return uint64(time.Now().UnixMilli()) / uint64(epochDuration.Milliseconds())
 }
 
 func randomOrder(sell bool, maxQty, midGap, marketWidth float64, epoch bool) *core.MiniOrder {
@@ -543,7 +543,7 @@ var orderAssets = []string{"dcr", "btc", "ltc", "doge", "mona", "vtc"}
 
 func (c *TCore) Orders(filter *core.OrderFilter) ([]*core.Order, error) {
 	var spacing uint64 = 60 * 60 * 1000 / 2 // half an hour
-	t := encode.UnixMilliU(time.Now())
+	t := uint64(time.Now().UnixMilli())
 
 	cords := make([]*core.Order, 0, filter.N)
 	for i := 0; i < int(filter.N); i++ {
@@ -739,7 +739,7 @@ func makeCoreOrder() *core.Order {
 	status := order.OrderStatus(rand.Intn(int(order.OrderStatusRevoked-1))) + 1
 
 	stamp := func() uint64 {
-		return encode.UnixMilliU(time.Now().Add(-time.Second * time.Duration(rand.Intn(60*60))))
+		return uint64(time.Now().Add(-time.Second * time.Duration(rand.Intn(60*60))).UnixMilli())
 	}
 
 	cord := &core.Order{
@@ -960,8 +960,8 @@ func candle(mkt *core.Market, dur time.Duration, stamp time.Time) *msgjson.Candl
 	quoteVol := calc.BaseToQuote(end, vol)
 
 	return &msgjson.Candle{
-		StartStamp:  encode.UnixMilliU(stamp.Truncate(dur)),
-		EndStamp:    encode.UnixMilliU(stamp),
+		StartStamp:  uint64(stamp.Truncate(dur).UnixMilli()),
+		EndStamp:    uint64(stamp.UnixMilli()),
 		MatchVolume: vol,
 		QuoteVolume: quoteVol,
 		HighRate:    high,
@@ -974,13 +974,13 @@ func candle(mkt *core.Market, dur time.Duration, stamp time.Time) *msgjson.Candl
 func candleStats(lotSize, rateStep uint64, candleDur time.Duration, stamp time.Time) (high, low, start, end, vol uint64) {
 	freq := math.Pi * 2 / float64(candleDur.Milliseconds()*20)
 	maxVol := 1e5 * float64(lotSize)
-	volFactor := (math.Sin(float64(encode.UnixMilliU(stamp))*freq/2) + 1) / 2
+	volFactor := (math.Sin(float64(stamp.UnixMilli())*freq/2) + 1) / 2
 	vol = uint64(maxVol * volFactor)
 
-	waveFactor := (math.Sin(float64(encode.UnixMilliU(stamp))*freq) + 1) / 2
+	waveFactor := (math.Sin(float64(stamp.UnixMilli())*freq) + 1) / 2
 	priceVariation := 1e5 * float64(rateStep)
 	priceFloor := 0.5 * priceVariation
-	startWaveFactor := (math.Sin(float64(encode.UnixMilliU(stamp.Truncate(candleDur)))*freq) + 1) / 2
+	startWaveFactor := (math.Sin(float64(stamp.Truncate(candleDur).UnixMilli())*freq) + 1) / 2
 	start = uint64(startWaveFactor*priceVariation + priceFloor)
 	end = uint64(waveFactor*priceVariation + priceFloor)
 
@@ -1440,7 +1440,7 @@ func (c *TCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error) {
 	return &core.Order{
 		ID:    ordertest.RandomOrderID().Bytes(),
 		Type:  oType,
-		Stamp: encode.UnixMilliU(time.Now()),
+		Stamp: uint64(time.Now().UnixMilli()),
 		Rate:  form.Rate,
 		Qty:   form.Qty,
 		Sell:  form.Sell,
@@ -1503,7 +1503,7 @@ out:
 				Host:         dexAddr,
 				Notification: db.NewNotification(core.NoteTypeSpots, core.TopicSpotsUpdate, "", "", db.Data),
 				Spots: map[string]*msgjson.Spot{mktID: {
-					Stamp:   encode.UnixMilliU(time.Now()),
+					Stamp:   uint64(time.Now().UnixMilli()),
 					BaseID:  baseID,
 					QuoteID: quoteID,
 					Rate:    rate,

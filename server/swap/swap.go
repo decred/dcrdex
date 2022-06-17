@@ -588,7 +588,7 @@ func (s *Swapper) restoreActiveSwaps(allowPartial bool) error {
 				return fmt.Errorf("unable to find swap out coin %x for asset %d: %w", swapCoin, assetID, err)
 			}
 			ss.swap = swap
-			ss.swapTime = encode.UnixTimeMilli(ssd.SwapTime)
+			ss.swapTime = time.UnixMilli(ssd.SwapTime)
 
 			swapConfs, err := swap.Confirmations(context.Background())
 			if err != nil {
@@ -607,7 +607,7 @@ func (s *Swapper) restoreActiveSwaps(allowPartial bool) error {
 				return fmt.Errorf("unable to find redeem in coin %x for asset %d: %w", redeemCoin, assetID, err)
 			}
 			ss.redemption = redeem
-			ss.redeemTime = encode.UnixTimeMilli(ssd.RedeemTime)
+			ss.redeemTime = time.UnixMilli(ssd.RedeemTime)
 		}
 
 		return nil
@@ -1587,7 +1587,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		storFn = s.storage.SaveContractA
 	}
 	mktMatch := db.MatchID(stepInfo.match.Match)
-	swapTimeMs := encode.UnixMilli(swapTime)
+	swapTimeMs := swapTime.UnixMilli()
 	err = storFn(mktMatch, params.Contract, params.CoinID, swapTimeMs)
 	if err != nil {
 		log.Errorf("saving swap contract (match id=%v, maker=%v) failed: %v",
@@ -1775,7 +1775,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		}
 	}
 
-	redeemTimeMs := encode.UnixMilli(redeemTime)
+	redeemTimeMs := redeemTime.UnixMilli()
 	err = storFn(db.MatchID(match.Match), params.CoinID, redeemTimeMs)
 	if err != nil {
 		log.Errorf("saving redeem transaction (match id=%v, maker=%v) failed: %v",
@@ -2300,7 +2300,7 @@ func matchNotifications(match *matchTracker) (makerMsg *msgjson.Match, takerMsg 
 		makerAddr = order.ExtractAddress(match.Maker)
 	}
 
-	stamp := encode.UnixMilliU(match.matchTime)
+	stamp := uint64(match.matchTime.UnixMilli())
 	return &msgjson.Match{
 			OrderID:      idToBytes(match.Maker.ID()),
 			MatchID:      idToBytes(match.ID()),

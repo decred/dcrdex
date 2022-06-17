@@ -558,7 +558,7 @@ func parseDeleteArchivedRecordsArgs(params *RawParams) (form *deleteRecordsForm,
 		if err != nil {
 			return nil, fmt.Errorf("invalid older than time %q: %v", olderThanStr, err)
 		}
-		t := encode.UnixTimeMilli(olderThanMs)
+		t := time.UnixMilli(olderThanMs)
 		form.olderThan = &t
 	}
 	return form, nil

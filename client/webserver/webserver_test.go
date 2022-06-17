@@ -137,7 +137,7 @@ func (c *TCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error) {
 	}
 	return &core.Order{
 		Type:  oType,
-		Stamp: encode.UnixMilliU(time.Now()),
+		Stamp: uint64(time.Now().UnixMilli()),
 		Rate:  form.Rate,
 		Qty:   form.Qty,
 		Sell:  form.Sell,

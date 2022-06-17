@@ -6,8 +6,6 @@ package candles
 import (
 	"testing"
 	"time"
-
-	"decred.org/dcrdex/dex/encode"
 )
 
 const fiveMins = 5 * 60 * 1000
@@ -141,8 +139,8 @@ func TestCache(t *testing.T) {
 }
 
 func TestDelta(t *testing.T) {
-	tNow := time.Now()
-	now := encode.UnixMilliU(tNow)
+	tNow := time.Now().Truncate(time.Millisecond)
+	now := uint64(tNow.UnixMilli())
 	aDayAgo := now - 86400*1000
 
 	c := NewCache(5, fiveMins)

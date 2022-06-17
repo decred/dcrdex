@@ -286,7 +286,7 @@ func tNewConnect(user *tUser) *msgjson.Connect {
 	return &msgjson.Connect{
 		AccountID:  user.acctID[:],
 		APIVersion: 0,
-		Time:       encode.UnixMilliU(unixMsNow()),
+		Time:       uint64(time.Now().UnixMilli()),
 	}
 }
 
@@ -840,8 +840,8 @@ func TestConnect(t *testing.T) {
 	if msgMatch.FeeRateBase != matchData.BaseRate {
 		t.Fatal("active match base fee rate mismatch: ", msgMatch.FeeRateBase, " != ", matchData.BaseRate)
 	}
-	if msgMatch.ServerTime != encode.UnixMilliU(matchTime) {
-		t.Fatal("active match time mismatch: ", msgMatch.ServerTime, " != ", encode.UnixMilliU(matchTime))
+	if msgMatch.ServerTime != uint64(matchTime.UnixMilli()) {
+		t.Fatal("active match time mismatch: ", msgMatch.ServerTime, " != ", uint64(matchTime.UnixMilli()))
 	}
 
 	// Send a request to the client.
@@ -942,8 +942,8 @@ func TestAccountErrors(t *testing.T) {
 	if match.FeeRateBase != matchData.BaseRate {
 		t.Fatal("wrong base fee rate: ", match.FeeRateBase, " != ", matchData.BaseRate)
 	}
-	if match.ServerTime != encode.UnixMilliU(matchTime) {
-		t.Fatal("wrong match time: ", match.ServerTime, " != ", encode.UnixMilliU(matchTime))
+	if match.ServerTime != uint64(matchTime.UnixMilli()) {
+		t.Fatal("wrong match time: ", match.ServerTime, " != ", uint64(matchTime.UnixMilli()))
 	}
 
 	// unpaid account.
@@ -1325,7 +1325,7 @@ func TestHandleRegister(t *testing.T) {
 		assetID := uint32(42)
 		reg := &msgjson.Register{
 			PubKey: user.privKey.PubKey().SerializeCompressed(),
-			Time:   encode.UnixMilliU(unixMsNow()),
+			Time:   uint64(time.Now().UnixMilli()),
 			Asset:  &assetID,
 		}
 		sigMsg := reg.Serialize()
@@ -1436,7 +1436,7 @@ func TestHandleNotifyFee(t *testing.T) {
 		notify := &msgjson.NotifyFee{
 			AccountID: user.acctID[:],
 			CoinID:    coinid,
-			Time:      encode.UnixMilliU(unixMsNow()),
+			Time:      uint64(time.Now().UnixMilli()),
 		}
 		sigMsg := notify.Serialize()
 		sig := signMsg(user.privKey, sigMsg)
@@ -1578,7 +1578,6 @@ func TestAuthManager_RecordCancel_RecordCompletedOrder(t *testing.T) {
 		if isCancel != cancel {
 			t.Errorf("order marked as cancel=%v, expected %v", isCancel, cancel)
 		}
-		//tMS := encode.UnixMilli(tCompleted)
 		if ord.time != timestamp {
 			t.Errorf("completed order time mismatch. got %v, expected %v",
 				ord.time, timestamp)
@@ -1588,7 +1587,7 @@ func TestAuthManager_RecordCancel_RecordCompletedOrder(t *testing.T) {
 	client.mtx.Lock()
 	ord := client.recentOrders.orders[0]
 	client.mtx.Unlock()
-	checkOrd(ord, oid, false, encode.UnixMilli(tCompleted))
+	checkOrd(ord, oid, false, tCompleted.UnixMilli())
 
 	// another
 	oid = newOrderID()
@@ -1608,7 +1607,7 @@ func TestAuthManager_RecordCancel_RecordCompletedOrder(t *testing.T) {
 	client.mtx.Lock()
 	ord = client.recentOrders.orders[1]
 	client.mtx.Unlock()
-	checkOrd(ord, oid, false, encode.UnixMilli(tCompleted))
+	checkOrd(ord, oid, false, tCompleted.UnixMilli())
 
 	// now a cancel
 	coid := newOrderID()
@@ -1628,7 +1627,7 @@ func TestAuthManager_RecordCancel_RecordCompletedOrder(t *testing.T) {
 	client.mtx.Lock()
 	ord = client.recentOrders.orders[2]
 	client.mtx.Unlock()
-	checkOrd(ord, coid, true, encode.UnixMilli(tCompleted))
+	checkOrd(ord, coid, true, tCompleted.UnixMilli())
 }
 
 func TestMatchStatus(t *testing.T) {
