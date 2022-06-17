@@ -68,6 +68,7 @@ export interface Order {
   type: number
   id: string
   stamp: number
+  submitTime: number
   sig: string
   status: number
   epoch: number

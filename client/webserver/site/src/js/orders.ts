@@ -138,8 +138,8 @@ export default class OrdersPage extends BasePage {
       set('status', OrderUtil.statusString(ord))
       set('filled', `${(ord.filled / ord.qty * 100).toFixed(1)}%`)
       set('settled', `${(OrderUtil.settled(ord) / ord.qty * 100).toFixed(1)}%`)
-      const dateTime = new Date(ord.stamp).toLocaleString()
-      set('time', `${Doc.timeSince(ord.stamp)} ago, ${dateTime}`)
+      const dateTime = new Date(ord.submitTime).toLocaleString()
+      set('time', `${Doc.timeSince(ord.submitTime)} ago, ${dateTime}`)
       const link = Doc.tmplElement(tr, 'link')
       link.href = `order/${ord.id}`
       app().bindInternalNavigation(tr)
