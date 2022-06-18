@@ -4055,7 +4055,7 @@ func (c *Core) feeSuggestion(dc *dexConnection, assetID uint32) (feeSuggestion u
 }
 
 // Withdraw initiates a withdraw from an exchange wallet. The client password
-// must be provided as an additional verification.This method is DEPRECATED. Use
+// must be provided as an additional verification. This method is DEPRECATED. Use
 // Send with the subtract option instead.
 func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string) (asset.Coin, error) {
 	return c.Send(pw, assetID, value, address, true)

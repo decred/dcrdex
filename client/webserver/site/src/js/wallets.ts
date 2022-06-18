@@ -200,7 +200,10 @@ export default class WalletsPage extends BasePage {
     bind(page.sendAvail, 'click', () => {
       const asset = this.sendAsset
       page.sendAmt.value = String(asset.wallet.balance.available / asset.info.unitinfo.conventional.conversionFactor)
-      page.subtractCheckBox.checked = true
+      // Ensure we don't check subtract checkbox for assets that don't have a
+      // withdraw method.
+      if ((asset.wallet.traits & traitWithdrawer) === 0) page.subtractCheckBox.checked = false
+      else page.subtractCheckBox.checked = true
     })
 
     // A link on the wallet reconfiguration form to show/hide the password field.

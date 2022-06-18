@@ -2748,7 +2748,7 @@ func (dcr *ExchangeWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
 func (dcr *ExchangeWallet) Withdraw(address string, value, feeRate uint64) (asset.Coin, error) {
 	addr, err := stdaddr.DecodeAddress(address, dcr.chainParams)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid address: %s", address)
 	}
 	msgTx, sentVal, err := dcr.withdraw(addr, value, dcr.feeRateWithFallback(feeRate))
 	if err != nil {
@@ -2763,7 +2763,7 @@ func (dcr *ExchangeWallet) Withdraw(address string, value, feeRate uint64) (asse
 func (dcr *ExchangeWallet) Send(address string, value, feeRate uint64) (asset.Coin, error) {
 	addr, err := stdaddr.DecodeAddress(address, dcr.chainParams)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid address: %s", address)
 	}
 	msgTx, sentVal, err := dcr.sendToAddress(addr, value, dcr.feeRateWithFallback(feeRate))
 	if err != nil {

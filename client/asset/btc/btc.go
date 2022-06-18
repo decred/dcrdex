@@ -3561,7 +3561,7 @@ func (btc *baseWallet) ValidateSecret(secret, secretHash []byte) bool {
 func (btc *baseWallet) send(address string, val uint64, feeRate uint64, subtract bool) (*chainhash.Hash, uint32, uint64, error) {
 	addr, err := btc.decodeAddr(address, btc.chainParams)
 	if err != nil {
-		return nil, 0, 0, fmt.Errorf("address decode error: %w", err)
+		return nil, 0, 0, fmt.Errorf("invalid address: %s", address)
 	}
 	pay2script, err := txscript.PayToAddrScript(addr)
 	if err != nil {
