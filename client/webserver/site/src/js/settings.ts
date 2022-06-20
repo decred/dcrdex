@@ -301,12 +301,6 @@ export default class SettingsPage extends BasePage {
     return cert
   }
 
-  /* gets the dex address input by the user */
-  getDexAddr () {
-    const page = this.page
-    return page.dexAddr.value
-  }
-
   /* Called after successful registration to a DEX. */
   async registerDEXSuccess () {
     const page = this.page
