@@ -92,3 +92,9 @@ table.wallets {
   cursor: pointer;
   color: #a8a8a8;
 }
+
+#copyAlert {
+  margin-left: 9px;
+  position: absolute;
+  z-index: 1;
+}
