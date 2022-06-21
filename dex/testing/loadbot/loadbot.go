@@ -50,7 +50,6 @@ import (
 const (
 	rateEncFactor    = calc.RateEncodingFactor
 	defaultBtcPerDcr = 0.000878
-	startPort        = 34560
 	alpha            = "alpha"
 	beta             = "beta"
 	btc              = "btc"
@@ -136,7 +135,10 @@ func findOpenAddrs(n int) ([]net.Addr, error) {
 
 // rpcAddr is the RPC address needed for creation of a wallet connected to the
 // specified asset node. For Decred, this is the dcrwallet 'rpclisten'
-// configuration parameter.For Bitcoin, its the 'rpcport' parameter.
+// configuration parameter. For Bitcoin, its the 'rpcport' parameter. WARNING:
+// with the "singular wallet" assets like zec and doge, this port may not be for
+// fresh nodes created with the start-wallet script, just the alpha and beta
+// nodes' wallets.
 func rpcAddr(symbol, node string) string {
 	var key string
 
@@ -163,7 +165,6 @@ func rpcAddr(symbol, node string) string {
 
 // returnAddress is an address for the specified node's wallet. returnAddress
 // is used when a wallet accumulates more than the max allowed for some asset.
-//
 func returnAddress(symbol, node string) string {
 	if symbol == baseSymbol {
 		if node == alpha {

@@ -287,6 +287,7 @@ func (m *Mantle) truncatedMidGap() uint64 {
 func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, numCoins int) {
 	// Generate a name for this wallet.
 	name := randomToken()
+	var rpcPort string
 	switch symbol {
 	case eth:
 		// Nothing to do here for internal wallets.
@@ -315,7 +316,7 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 			return
 		}
 		addrPort := addrs[0].String()
-		_, rpcPort, err := net.SplitHostPort(addrPort)
+		_, rpcPort, err = net.SplitHostPort(addrPort)
 		if err != nil {
 			m.fatalError("unable to split addr and port: %v", err)
 			return
@@ -360,7 +361,10 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 	if symbol == dcr {
 		walletPass = pass
 	}
-	w := newBotWallet(symbol, node, name, walletPass, minFunds, maxFunds, numCoins)
+	if rpcPort == "" {
+		rpcPort = rpcAddr(symbol, node)
+	}
+	w := newBotWallet(symbol, node, name, rpcPort, walletPass, minFunds, maxFunds, numCoins)
 	m.wallets[w.assetID] = w
 	err := m.CreateWallet(pass, walletPass, w.form)
 	if err != nil {
@@ -495,10 +499,9 @@ func midGap(book *core.OrderBook) uint64 {
 			return (book.Buys[0].MsgRate + book.Sells[0].MsgRate) / 2
 		}
 		return book.Sells[0].MsgRate
-	} else {
-		if len(book.Buys) > 0 {
-			return book.Buys[0].MsgRate
-		}
+	}
+	if len(book.Buys) > 0 {
+		return book.Buys[0].MsgRate
 	}
 	return uint64(defaultMidGap * rateEncFactor)
 }
@@ -551,7 +554,7 @@ type botWallet struct {
 // once per epoch, if it falls outside of the range [minFunds, maxFunds].
 // Set numCoins to at least twice the the maximum number of (booked + epoch)
 // orders the wallet is expected to support.
-func newBotWallet(symbol, node, name string, pass []byte, minFunds, maxFunds uint64, numCoins int) *botWallet {
+func newBotWallet(symbol, node, name string, port string, pass []byte, minFunds, maxFunds uint64, numCoins int) *botWallet {
 	var form *core.WalletForm
 	switch symbol {
 	case dcr:
@@ -563,7 +566,7 @@ func newBotWallet(symbol, node, name string, pass []byte, minFunds, maxFunds uin
 				"username":  "user",
 				"password":  "pass",
 				"rpccert":   filepath.Join(dextestDir, "dcr/"+node+"/rpc.cert"),
-				"rpclisten": rpcAddr(symbol, node),
+				"rpclisten": port,
 			},
 		}
 	case btc:
@@ -574,7 +577,7 @@ func newBotWallet(symbol, node, name string, pass []byte, minFunds, maxFunds uin
 				"walletname":  name,
 				"rpcuser":     "user",
 				"rpcpassword": "pass",
-				"rpcport":     rpcAddr(symbol, node),
+				"rpcport":     port,
 			},
 		}
 	case ltc:
@@ -585,7 +588,7 @@ func newBotWallet(symbol, node, name string, pass []byte, minFunds, maxFunds uin
 				"walletname":  name,
 				"rpcuser":     "user",
 				"rpcpassword": "pass",
-				"rpcport":     rpcAddr(symbol, node),
+				"rpcport":     port,
 			},
 		}
 	case bch:
@@ -596,7 +599,7 @@ func newBotWallet(symbol, node, name string, pass []byte, minFunds, maxFunds uin
 				"walletname":  name,
 				"rpcuser":     "user",
 				"rpcpassword": "pass",
-				"rpcport":     rpcAddr(symbol, node),
+				"rpcport":     port,
 			},
 		}
 	case zec:
@@ -607,7 +610,7 @@ func newBotWallet(symbol, node, name string, pass []byte, minFunds, maxFunds uin
 				"walletname":  name,
 				"rpcuser":     "user",
 				"rpcpassword": "pass",
-				"rpcport":     rpcAddr(symbol, node),
+				"rpcport":     port,
 			},
 		}
 	case doge:
@@ -618,7 +621,7 @@ func newBotWallet(symbol, node, name string, pass []byte, minFunds, maxFunds uin
 				"walletname":  name,
 				"rpcuser":     "user",
 				"rpcpassword": "pass",
-				"rpcport":     rpcAddr(symbol, node),
+				"rpcport":     port,
 			},
 		}
 	case eth:
@@ -629,7 +632,7 @@ func newBotWallet(symbol, node, name string, pass []byte, minFunds, maxFunds uin
 				"walletname":  name,
 				"rpcuser":     "user",
 				"rpcpassword": "pass",
-				"rpcport":     rpcAddr(symbol, node),
+				"rpcport":     port,
 			},
 		}
 	}
