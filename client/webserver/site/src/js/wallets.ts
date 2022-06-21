@@ -236,10 +236,15 @@ export default class WalletsPage extends BasePage {
   async copyAddress () {
     const page = this.page
     navigator.clipboard.writeText(page.depositAddress.textContent || '')
-    Doc.show(page.copyAlert)
-    setTimeout(() => {
-      Doc.hide(page.copyAlert)
-    }, 800)
+      .then(() => {
+        Doc.show(page.copyAlert)
+        setTimeout(() => {
+          Doc.hide(page.copyAlert)
+        }, 800)
+      })
+      .catch((reason) => {
+        console.error('Unable to copy: ', reason)
+      })
   }
 
   /*
