@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -309,9 +310,8 @@ ordersLoop:
 
 			if errors.Is(err, asset.CoinNotFoundError) {
 				// spent, exclude this order
-				coin, _ := asset.DecodeCoinID(assetID, lo.Coins[i]) // coin decoding succeeded in CheckUnspent
 				log.Warnf("Coin %s not unspent for unfilled order %v. "+
-					"Revoking the order.", coin, lo)
+					"Revoking the order.", fmtCoinID(assetID, lo.Coins[i]), lo)
 			} else {
 				// other failure (coinID decode, RPC, etc.)
 				return nil, fmt.Errorf("unexpected error checking coinID %v for order %v: %w",
@@ -1054,9 +1054,8 @@ orders:
 			// Final fill amount check in case it was matched after we pulled
 			// the list of unfilled orders from the book.
 			if lo.Filled() == 0 {
-				coin, _ := asset.DecodeCoinID(assetID, lo.Coins[i]) // coin decoding succeeded in CheckUnspent
 				log.Warnf("Coin %s not unspent for unfilled order %v. "+
-					"Revoking the order.", coin, lo)
+					"Revoking the order.", fmtCoinID(assetID, lo.Coins[i]), lo)
 				m.Unbook(lo)
 				unbooked = append(unbooked, lo)
 			}
@@ -1589,24 +1588,26 @@ func (m *Market) Run(ctx context.Context) {
 
 }
 
-func (m *Market) coinsLocked(o order.Order) []order.CoinID {
+func (m *Market) coinsLocked(o order.Order) ([]order.CoinID, uint32) {
 	if o.Type() == order.CancelOrderType {
-		return nil
+		return nil, 0
 	}
 
 	locker := m.coinLockerQuote
+	assetID := m.marketInfo.Quote
 	if o.Trade().Trade().Sell {
 		locker = m.coinLockerBase
+		assetID = m.marketInfo.Base
 	}
 
 	if locker == nil { // Not utxo-based
-		return nil
+		return nil, 0
 	}
 
 	// Check if this order is known by the locker.
 	lockedCoins := locker.OrderCoinsLocked(o.ID())
 	if len(lockedCoins) > 0 {
-		return lockedCoins
+		return lockedCoins, assetID
 	}
 
 	// Check the individual coins.
@@ -1615,7 +1616,7 @@ func (m *Market) coinsLocked(o order.Order) []order.CoinID {
 			lockedCoins = append(lockedCoins, coin)
 		}
 	}
-	return lockedCoins
+	return lockedCoins, assetID
 }
 
 func (m *Market) lockOrderCoins(o order.Order) {
@@ -1838,10 +1839,9 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 	}
 
 	// Ensure that the received order does not use locked coins.
-	lockedCoins := m.coinsLocked(ord)
-	if len(lockedCoins) > 0 {
-		log.Debugf("processOrder: Order %v submitted with already-locked coins: %v",
-			ord, lockedCoins)
+	if lockedCoins, assetID := m.coinsLocked(ord); len(lockedCoins) > 0 {
+		log.Debugf("processOrder: Order %v submitted with already-locked %s coins: %v",
+			ord, strings.ToUpper(dex.BipIDSymbol(assetID)), fmtCoinIDs(assetID, lockedCoins))
 		errChan <- ErrInvalidOrder
 		return nil
 	}

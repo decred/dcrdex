@@ -191,13 +191,13 @@ cat > "./start-wallet" <<EOF
 
 mkdir ${NODES_ROOT}/\$1
 
-printf "rpcuser=user\nrpcpassword=pass\ndatadir=${DELTA_DIR}\ntxindex=1\nregtest=1\nrpcport=\$2\n" > ${NODES_ROOT}/\$1/\$1.conf
+printf "rpcuser=user\nrpcpassword=pass\ndatadir=${NODES_ROOT}/\$1\ntxindex=1\nregtest=1\nrpcport=\$2\n" > ${NODES_ROOT}/\$1/\$1.conf
 
 ${DAEMON} -rpcuser=user -rpcpassword=pass \
 -rpcport=\$2 -datadir=${NODES_ROOT}/\$1 -txindex=1 -regtest=1 \
 -debug=rpc -debug=net -debug=mempool -debug=walletdb -debug=addrman -debug=mempoolrej \
 -whitelist=127.0.0.0/8 -whitelist=::1 \
--port=\$3 -fallbackfee=0.00001 -printtoconsole
+-port=\$3 -fallbackfee=0.00001
 EOF
 chmod +x "./start-wallet"
 
@@ -273,7 +273,6 @@ tmux send-keys -t $SESSION:0 C-c
 tmux send-keys -t $SESSION:1 C-c
 tmux send-keys -t $SESSION:2 C-c
 tmux send-keys -t $SESSION:3 C-c
-tmux send-keys -t $SESSION:4 C-c
 tmux wait-for alpha${SYMBOL}
 tmux wait-for beta${SYMBOL}
 # seppuku

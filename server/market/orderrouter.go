@@ -953,6 +953,16 @@ func fmtCoinID(assetID uint32, coinID []byte) string {
 	return strID
 }
 
+// fmtCoinIDs is like fmtCoinID but for a slice of CoinIDs, printing with
+// default Go slice formatting like "[coin1 coin2 ...]".
+func fmtCoinIDs(assetID uint32, coinIDs []order.CoinID) string {
+	out := make([]string, len(coinIDs))
+	for i := range coinIDs {
+		out[i] = fmtCoinID(assetID, coinIDs[i])
+	}
+	return fmt.Sprint(out)
+}
+
 func safeMidGap(tunnel MarketTunnel) uint64 {
 	midGap := tunnel.MidGap()
 	if midGap == 0 {

@@ -515,7 +515,7 @@ func TestMarket_Book(t *testing.T) {
 		t.Errorf("revoke not recorded in storage")
 	}
 
-	if lockedCoins := mkt.coinsLocked(bestBuy); lockedCoins != nil {
+	if lockedCoins, _ := mkt.coinsLocked(bestBuy); lockedCoins != nil {
 		t.Errorf("unbooked order still has locked coins: %v", lockedCoins)
 	}
 

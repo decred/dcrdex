@@ -26,6 +26,16 @@ go build -o ${DCRDEX_DATA_DIR}/dcrdex -ldflags \
 EOF
 chmod +x "${DCRDEX_DATA_DIR}/build"
 
+cat > "${DCRDEX_DATA_DIR}/build-lock" <<EOF
+#!/usr/bin/env bash
+cd ${HARNESS_DIR}/../../../server/cmd/dcrdex/
+go build -o ${DCRDEX_DATA_DIR}/dcrdex -ldflags \
+    "-X 'decred.org/dcrdex/dex.testLockTimeTaker=\${1:-3m}' \
+    -X 'decred.org/dcrdex/dex.testLockTimeMaker=\${2:-6m}'" \
+    --tags lgpl
+EOF
+chmod +x "${DCRDEX_DATA_DIR}/build-lock"
+
 "${DCRDEX_DATA_DIR}/build"
 
 cd "${DCRDEX_DATA_DIR}"
