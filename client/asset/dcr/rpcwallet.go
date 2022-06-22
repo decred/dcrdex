@@ -17,7 +17,6 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrwallet/v2/rpc/client/dcrwallet"
 	walletjson "decred.org/dcrwallet/v2/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
@@ -138,9 +137,9 @@ type rpcClient interface {
 // of the rpcWallet. The rpcClient isn't connected to the server yet, use the
 // Connect method of the returned *rpcWallet to connect the rpcClient to the
 // server.
-func newRPCWallet(settings map[string]string, chainParams *chaincfg.Params, logger dex.Logger) (*rpcWallet, error) {
-	cfg := new(rpcConfig)
-	if err := config.Unmapify(settings, cfg); err != nil {
+func newRPCWallet(settings map[string]string, logger dex.Logger, net dex.Network) (*rpcWallet, error) {
+	cfg, chainParams, err := loadRPCConfig(settings, net)
+	if err != nil {
 		return nil, fmt.Errorf("error parsing config: %w", err)
 	}
 

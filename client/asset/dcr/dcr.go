@@ -170,7 +170,7 @@ var (
 			Key:          "rpccert",
 			DisplayName:  "TLS Certificate",
 			Description:  "Path to the dcrwallet TLS certificate file",
-			DefaultValue: filepath.Join(dcrwHomeDir, "rpc.cert"),
+			DefaultValue: defaultRPCCert,
 		},
 	}
 
@@ -425,8 +425,8 @@ func (d *Driver) Exists(walletType, dataDir string, _ map[string]string, net dex
 	if err != nil {
 		return false, err
 	}
-	netDir := filepath.Join(dataDir, chainParams.Name)
-	return walletExists(netDir)
+
+	return walletExists(filepath.Join(dataDir, chainParams.Name, "spv"))
 }
 
 // Create creates a new SPV wallet.
@@ -451,8 +451,8 @@ func (d *Driver) Create(params *asset.CreateWalletParams) error {
 		return err
 	}
 
-	return createSPVWallet(params.Pass, params.Seed, params.DataDir, params.Logger,
-		recoveryCfg.NumExternalAddresses, recoveryCfg.NumInternalAddresses, chainParams)
+	return createSPVWallet(params.Pass, params.Seed, params.DataDir, recoveryCfg.NumExternalAddresses,
+		recoveryCfg.NumInternalAddresses, chainParams)
 }
 
 func init() {
@@ -568,7 +568,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 
 	switch cfg.Type {
 	case walletTypeDcrwRPC, walletTypeLegacy:
-		dcr.wallet, err = newRPCWallet(cfg.Settings, chainParams, logger)
+		dcr.wallet, err = newRPCWallet(cfg.Settings, logger, network)
 		if err != nil {
 			return nil, err
 		}

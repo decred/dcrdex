@@ -41,12 +41,11 @@ import (
 )
 
 const (
-	defaultGapLimit                = uint32(20)
-	defaultAllowHighFees           = false
-	defaultRelayFeePerKb           = 1e4
-	defaultAccountGapLimit         = 10
-	defaultDisableCoinTypeUpgrades = false
-	defaultManualTickets           = false
+	defaultGapLimit        = uint32(100)
+	defaultAllowHighFees   = false
+	defaultRelayFeePerKb   = 1e4
+	defaultAccountGapLimit = 10
+	defaultManualTickets   = false
 
 	defaultAcct     = 0
 	defaultAcctName = "default"
@@ -80,6 +79,7 @@ type dcrWallet interface {
 	UnlockAccount(ctx context.Context, account uint32, passphrase []byte) error
 	LoadPrivateKey(ctx context.Context, addr stdaddr.Address) (key *secp256k1.PrivateKey, zero func(), err error)
 	TxDetails(ctx context.Context, txHash *chainhash.Hash) (*udb.TxDetails, error)
+	// TODO: Rescan and DiscoverActiveAddresses can be used for a Rescanner.
 }
 
 // Interface for *spv.Syncer so that we can test with a stub.
@@ -133,7 +133,7 @@ type spvWallet struct {
 var _ Wallet = (*spvWallet)(nil)
 var _ tipNotifier = (*spvWallet)(nil)
 
-func createSPVWallet(pw, seed []byte, dataDir string, log dex.Logger, extIdx, intIdx uint32, chainParams *chaincfg.Params) error {
+func createSPVWallet(pw, seed []byte, dataDir string, extIdx, intIdx uint32, chainParams *chaincfg.Params) error {
 	dir := filepath.Join(dataDir, chainParams.Name, "spv")
 
 	if err := initLogging(dir); err != nil {
@@ -571,7 +571,7 @@ func (w *spvWallet) GetBlockHeader(ctx context.Context, blockHash *chainhash.Has
 		return nil, err
 	}
 
-	medianTime, err := w.medianTime(ctx, blockHash)
+	medianTime, err := w.medianTime(ctx, hdr)
 	if err != nil {
 		return nil, err
 	}
@@ -598,14 +598,10 @@ func (w *spvWallet) GetBlockHeader(ctx context.Context, blockHash *chainhash.Has
 }
 
 // medianTime calculates a blocks median time, which is the median of the
-// timstamps of the previous 11 blocks.
-func (w *spvWallet) medianTime(ctx context.Context, blockHash *chainhash.Hash) (int64, error) {
+// timestamps of the previous 11 blocks.
+func (w *spvWallet) medianTime(ctx context.Context, iBlkHeader *wire.BlockHeader) (int64, error) {
 	// Calculate past median time. Look at the last 11 blocks, starting
 	// with the requested block, which is consistent with dcrd.
-	iBlkHeader, err := w.dcrWallet.BlockHeader(ctx, blockHash)
-	if err != nil {
-		return 0, err
-	}
 	const numStamp = 11
 	timestamps := make([]int64, 0, numStamp)
 	for {
@@ -613,6 +609,7 @@ func (w *spvWallet) medianTime(ctx context.Context, blockHash *chainhash.Hash) (
 		if iBlkHeader.Height == 0 || len(timestamps) == numStamp {
 			break
 		}
+		var err error
 		iBlkHeader, err = w.dcrWallet.BlockHeader(ctx, &iBlkHeader.PrevBlock)
 		if err != nil {
 			return 0, fmt.Errorf("info not found for previous block: %v", err)
@@ -673,24 +670,6 @@ func (w *spvWallet) GetTransaction(ctx context.Context, txHash *chainhash.Hash) 
 	if txd.Block.Height != -1 {
 		ret.BlockHash = txd.Block.Hash.String()
 		ret.Confirmations = int64(tipHeight - txd.Block.Height + 1)
-	}
-
-	var (
-		debitTotal  dcrutil.Amount
-		creditTotal dcrutil.Amount
-	)
-	for _, deb := range txd.Debits {
-		debitTotal += deb.Amount
-	}
-	for _, cred := range txd.Credits {
-		creditTotal += cred.Amount
-	}
-	// Fee can only be determined if every input is a debit.
-	if len(txd.Debits) == len(txd.MsgTx.TxIn) {
-		var outputTotal dcrutil.Amount
-		for _, output := range txd.MsgTx.TxOut {
-			outputTotal += dcrutil.Amount(output.Value)
-		}
 	}
 
 	details, err := w.ListTransactionDetails(ctx, txHash)
@@ -825,7 +804,7 @@ func (w *spvWallet) cacheBlock(block *wire.MsgBlock) {
 	}
 }
 
-// cachedBlock retreives the MsgBlock from the cache, if it's been cached, else
+// cachedBlock retrieves the MsgBlock from the cache, if it's been cached, else
 // nil.
 func (w *spvWallet) cachedBlock(blockHash *chainhash.Hash) *wire.MsgBlock {
 	w.blockCache.Lock()
@@ -871,29 +850,12 @@ func newSpvSyncer(w *wallet.Wallet, netDir string, connectPeers []string) *spv.S
 // extended to the specified indices. This can be used at wallet restoration to
 // ensure that no duplicates are encountered with existing but unused addresses.
 func extendAddresses(ctx context.Context, extIdx, intIdx uint32, dcrw *wallet.Wallet) error {
-	currentExt, currentInt, err := dcrw.BIP0044BranchNextIndexes(ctx, defaultAcct)
-	if err != nil {
-		return err
+	if err := dcrw.SyncLastReturnedAddress(ctx, defaultAcct, udb.ExternalBranch, extIdx); err != nil {
+		return fmt.Errorf("error syncing external branch index: %w", err)
 	}
 
-	toGo := currentExt - extIdx
-	if toGo > 0 {
-		for i := uint32(0); i < toGo; i++ {
-			_, err := dcrw.NewExternalAddress(ctx, defaultAcct)
-			if err != nil {
-				return fmt.Errorf("NewExternalAddress error: %w", err)
-			}
-		}
-	}
-
-	toGo = currentInt - intIdx
-	if toGo > 0 {
-		for i := uint32(0); i < toGo; i++ {
-			_, err := dcrw.NewInternalAddress(ctx, defaultAcct)
-			if err != nil {
-				return fmt.Errorf("NewInternalAddress error: %w", err)
-			}
-		}
+	if err := dcrw.SyncLastReturnedAddress(ctx, defaultAcct, udb.InternalBranch, intIdx); err != nil {
+		return fmt.Errorf("error syncing internal branch index: %w", err)
 	}
 
 	return nil
@@ -921,10 +883,8 @@ func checkCreateDir(path string) error {
 		} else {
 			return fmt.Errorf("error checking directory: %s", err)
 		}
-	} else {
-		if !fi.IsDir() {
-			return fmt.Errorf("path '%s' is not a directory", path)
-		}
+	} else if !fi.IsDir() {
+		return fmt.Errorf("path '%s' is not a directory", path)
 	}
 
 	return nil
@@ -933,11 +893,7 @@ func checkCreateDir(path string) error {
 // walletExists returns whether a file exists at the loader's database path.
 // This may return an error for unexpected I/O failures.
 func walletExists(dbDir string) (bool, error) {
-	exists, err := fileExists(filepath.Join(dbDir, walletDbName))
-	if err != nil {
-		return false, err
-	}
-	return exists, nil
+	return fileExists(filepath.Join(dbDir, walletDbName))
 }
 
 func fileExists(filePath string) (bool, error) {

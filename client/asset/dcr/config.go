@@ -6,7 +6,6 @@ package dcr
 import (
 	"fmt"
 	"path/filepath"
-	"time"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
@@ -29,7 +28,6 @@ var (
 
 	// May 26, 2022
 	defaultWalletBirthdayUnix = 1653599386
-	defaultWalletBirthday     = time.Unix(int64(defaultWalletBirthdayUnix), 0)
 )
 
 type walletConfig struct {
