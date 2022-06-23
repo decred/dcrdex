@@ -3,7 +3,7 @@ set -ex
 
 dir=$(pwd)
 # list of all modules to test
-modules="."
+modules=". ./dex/testing/loadbot"
 
 GV=$(go version | sed "s/^.*go\([0-9.]*\).*/\1/")
 echo "Go version: $GV"
@@ -39,13 +39,14 @@ do
 	env GORACE="halt_on_error=1" go test --tags lgpl -race -short -count 1 ./...
 done
 
+cd "$dir"
+
 # -race in go tests above requires cgo, but disable it for the compile tests below
 export CGO_ENABLED=0
 go build ./...
 go build -tags lgpl ./...
 go build -tags harness,lgpl -o /dev/null ./client/cmd/simnet-trade-tests 
 
-cd "$dir"
 dumptags=(-c -o /dev/null -tags)
 go test "${dumptags[@]}" live,lgpl ./client/webserver
 go test "${dumptags[@]}" harness ./client/asset/dcr

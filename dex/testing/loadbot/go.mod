@@ -5,7 +5,7 @@ go 1.17
 replace decred.org/dcrdex => ../../../
 
 require (
-	decred.org/dcrdex v0.1.3
+	decred.org/dcrdex v0.0.0-20220620230547-1283356d184b
 	github.com/Shopify/toxiproxy/v2 v2.4.0
 )
 
