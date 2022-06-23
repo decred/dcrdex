@@ -238,17 +238,11 @@ func (q *TaperingTickerQueue) Run(ctx context.Context) {
 			w := waiters[0]
 			waiters = waiters[1:]
 			wg.Add(1)
-			go runWaiter(w)
+			go runWaiter(w) // note: async, so the next one could run its TryFunc first!
 
 		case w := <-q.queueWaiter:
-			// A little optimization if this waiter would fire immediately, but
-			// it works to append regardless.
-			if time.Until(w.nextTick) <= 0 {
-				wg.Add(1)
-				go runWaiter(w)
-				continue
-			}
-
+			// Even if this waiter would fire immediately
+			// (time.Until(w.nextTick) <= 0), append it into the waiter queue.
 			waiters = append(waiters, w)
 			sort.Slice(waiters, func(i, j int) bool {
 				return waiters[i].nextTick.Before(waiters[j].nextTick) // ascending, next tick first
