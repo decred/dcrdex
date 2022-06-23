@@ -2,7 +2,7 @@
 
 // This is a simplified version of OpenZeppelin Contracts v4.4.0 (token/ERC20/ERC20.sol).
 
-pragma solidity = 0.8.6;
+pragma solidity = 0.8.15;
 
 contract TestToken {
     mapping(address => uint256) private _balances;

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BlueOak-1.0.0
 // pragma should be as specific as possible to allow easier validation.
-pragma solidity = 0.8.6;
+pragma solidity = 0.8.15;
 
 // ETHSwap creates a contract to be deployed on an ethereum network. In
 // order to save on gas fees, a separate ERC20Swap contract is deployed
