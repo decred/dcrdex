@@ -233,8 +233,18 @@ export default class WalletsPage extends BasePage {
     Doc.hide(this.page.forms)
   }
 
-  copyAddress () {
-    navigator.clipboard.writeText(this.page.depositAddress.textContent || '')
+  async copyAddress () {
+    const page = this.page
+    navigator.clipboard.writeText(page.depositAddress.textContent || '')
+      .then(() => {
+        Doc.show(page.copyAlert)
+        setTimeout(() => {
+          Doc.hide(page.copyAlert)
+        }, 800)
+      })
+      .catch((reason) => {
+        console.error('Unable to copy: ', reason)
+      })
   }
 
   /*
