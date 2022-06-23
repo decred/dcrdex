@@ -518,45 +518,8 @@
           <div class="grey fs18 text-start">Options</div>
 
           <div id="vOrderOpts">
-            {{- /* Order Option Templates */ -}}
-            <div id="orderOptTmpl" class="order-opt d-flex align-items-start">
-              <div data-tmpl="toggle" class="opt-check selected"></div>
-              <div class="flex-grow-1" data-tmpl="controls">
-                <div class="d-flex align-items-center">
-                  <span data-tmpl="optName" class="flex-grow-1 text-start fs16 ps-2"></span>
-                  <span data-tmpl="tooltip" class="ico-info me-2" data-tooltip="Prevent temporary overlocking of funds"></span>
-                  <img data-tmpl="chainIcon" class="micro-icon me-1">
-                </div>
-
-                <div id="booleanOptTmpl" class="d-flex justify-content-between align-items-center fs14 ps-2">
-                  <span data-tmpl="reason"></span>
-                </div>
-
-                <div id="rangeOptTmpl">
-                  <div class="d-flex flex-nowrap fs12">
-                    <span data-tmpl="rangeLblStart"></span>
-                    <div data-tmpl="slider" class="slider flex-grow-1">
-                      <div data-tmpl="handle" class="slider-handle"></div>
-                    </div>
-                    <span data-tmpl="rangeLblEnd"></span>
-                  </div>
-
-                  <div class="d-flex justify-content-between align-items-center fs14">
-                    <span>
-                      <input type="text" pattern="[0-9]+([\.,][0-9]+)?" data-tmpl="xInput" class="xy-range-input d-hide">
-                      <span data-tmpl="x" class="pointer"></span> <span data-tmpl="xUnit"></span>
-                    </span>
-                    <span>
-                      <input type="text" pattern="[0-9]+([\.,][0-9]+)?" data-tmpl="yInput" class="xy-range-input d-hide">
-                      <span data-tmpl="y" class="pointer"></span> <span data-tmpl="yUnit"></span>
-                    </span>
-                  </div>
-                </div>
-
-              </div>
-            </div>
+            {{template "orderOptionTemplates"}}
           </div>
-
         </div> {{- /* END id="vPreorder" */ -}}
 
         <div id="vUnlockPreorder">

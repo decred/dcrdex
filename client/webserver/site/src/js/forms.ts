@@ -1029,7 +1029,6 @@ export class AccelerateOrderForm {
     this.currencyUnit = preAccelerate.suggestedRange.yUnit
     page.accelerateAvgFeeRate.textContent = `${preAccelerate.swapRate} ${preAccelerate.suggestedRange.yUnit}`
     page.accelerateCurrentFeeRate.textContent = `${preAccelerate.suggestedRate} ${preAccelerate.suggestedRange.yUnit}`
-    OrderUtil.setOptionTemplates(page)
     this.acceleratedRate = preAccelerate.suggestedRange.start.y
     const selected = () => { /* do nothing */ }
     const roundY = true
