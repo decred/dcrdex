@@ -247,7 +247,10 @@ class XYRangeOrderOption extends OrderOption {
     } else {
       this.x = opt.default
     }
-    const onUpdate = (x: number) => { this.order.options[this.opt.key] = x }
+    const onUpdate = (x: number) => {
+      this.x = x
+      this.order.options[this.opt.key] = x
+    }
     const onChange = () => { this.changed() }
     const selected = () => { this.node.classList.add('selected') }
     this.handler = new XYRangeHandler(cfg, this.x, onUpdate, onChange, selected)
