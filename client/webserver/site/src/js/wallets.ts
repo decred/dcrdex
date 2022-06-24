@@ -25,8 +25,6 @@ const traitRestorer = 1 << 8
 
 const activeOrdersErrCode = 35
 
-const exportWalletRetypeText = 'I will not use any external wallet while I have active trades in the DEX'
-
 interface Actions {
   connect: HTMLElement
   unlock: HTMLElement
@@ -97,8 +95,8 @@ export default class WalletsPage extends BasePage {
     this.body = body
     const page = this.page = Doc.idDescendants(body)
 
+    Doc.cleanTemplates(page.restoreInfoCard)
     this.restoreInfoCard = page.restoreInfoCard.cloneNode(true) as HTMLElement
-    page.restoreInfoCard.remove()
 
     this.forms = Doc.applySelector(page.forms, ':scope > form')
     page.forms.querySelectorAll('.form-closer').forEach(el => {
@@ -704,7 +702,6 @@ export default class WalletsPage extends BasePage {
     const page = this.page
     Doc.hide(page.disclaimerErr)
     page.disclaimerInput.value = ''
-    page.retypeText.textContent = exportWalletRetypeText
     this.showForm(page.exportWalletDisclaimer)
   }
 
@@ -716,7 +713,12 @@ export default class WalletsPage extends BasePage {
     const inputValueMatches : () => boolean = () => {
       const inputValue = page.disclaimerInput.value
       if (!inputValue) return false
-      return inputValue.trim().toLowerCase() === exportWalletRetypeText.trim().toLowerCase()
+      if (!page.retypeText.textContent) {
+        // this is needed to satisfy the typescript compiler
+        console.error('retypeText not populated')
+        return false
+      }
+      return inputValue.trim().toLowerCase() === page.retypeText.textContent.trim().toLowerCase()
     }
     Doc.hide(page.exportWalletErr)
     page.exportWalletPW.value = ''
@@ -752,17 +754,15 @@ export default class WalletsPage extends BasePage {
   // wallet in external wallets.
   async displayRestoreWalletInfo (info: WalletRestoration[]) {
     const page = this.page
-    while (page.restoreInfoCardsList.firstChild) {
-      page.restoreInfoCardsList.removeChild(page.restoreInfoCardsList.firstChild)
-    }
-    info.forEach((wr: WalletRestoration) => {
+    Doc.empty(page.restoreInfoCardsList)
+    for (const wr of info) {
       const card = this.restoreInfoCard.cloneNode(true) as HTMLElement
       const tmpl = Doc.parseTemplate(card)
       tmpl.name.textContent = wr.target
       tmpl.seed.textContent = wr.seed
       tmpl.instructions.textContent = wr.instructions
       page.restoreInfoCardsList.appendChild(card)
-    })
+    }
     this.showForm(page.restoreWalletInfo)
   }
 
