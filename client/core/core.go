@@ -3743,9 +3743,7 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEs
 }
 
 // MaxSell is the maximum-sized *OrderEstimate for a sell order on the specified
-// market. Redemption estimates are based on the provided rate. If a rate of
-// zero is specified, the orderbook's mid-gap rate will be used for the
-// estimate.
+// market.
 func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, error) {
 	baseAsset, quoteAsset, baseWallet, quoteWallet, err := c.marketWallets(host, base, quote)
 	if err != nil {
