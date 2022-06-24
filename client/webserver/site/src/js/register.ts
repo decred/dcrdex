@@ -16,9 +16,7 @@ import {
   app,
   PasswordCache,
   Exchange,
-  PageElement,
-  WalletStateNote,
-  BalanceNote
+  PageElement
 } from './registry'
 
 export default class RegistrationPage extends BasePage {
@@ -118,10 +116,6 @@ export default class RegistrationPage extends BasePage {
 
     // Attempt to load the dcrwallet configuration from the default location.
     if (app().user.authed) this.auth()
-    this.notifiers = {
-      walletstate: (note: WalletStateNote) => this.walletWaitForm.reportWalletState(note.wallet),
-      balance: (note: BalanceNote) => this.walletWaitForm.reportBalance(note.balance, note.assetID)
-    }
   }
 
   unload () {

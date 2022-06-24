@@ -464,15 +464,14 @@ export default class MarketsPage extends BasePage {
     })
 
     // Notification filters.
-    this.notifiers = {
+    app().registerNoteFeeder({
       order: (note: OrderNote) => { this.handleOrderNote(note) },
       epoch: (note: EpochNote) => { this.handleEpochNote(note) },
       conn: (note: ConnEventNote) => { this.handleConnNote(note) },
       balance: (note: BalanceNote) => { this.handleBalanceNote(note) },
       feepayment: (note: FeePaymentNote) => { this.handleFeePayment(note) },
-      walletstate: (note: WalletStateNote) => { this.handleWalletStateNote(note) },
       spots: (note: SpotPriceNote) => { this.handlePriceUpdate(note) }
-    }
+    })
 
     // Fetch the first market in the list, or the users last selected market, if
     // it exists.
@@ -1670,14 +1669,6 @@ export default class MarketsPage extends BasePage {
     this.showVerify()
   }
 
-  /*
-   * handleWalletStateNote is the handler for the 'walletstate' notification
-   * type.
-   */
-  handleWalletStateNote (note: WalletStateNote) {
-    this.balanceWgt.updateAsset(note.wallet.assetID)
-  }
-
   handlePriceUpdate (note: SpotPriceNote) {
     const xcSection = this.marketList.xcSection(note.host)
     if (!xcSection) return
@@ -1768,7 +1759,6 @@ export default class MarketsPage extends BasePage {
     // if connection to dex server fails, it is not possible to retrieve
     // markets.
     if (this.market.dex.connectionStatus !== ConnectionStatus.Connected) return
-    this.balanceWgt.updateAsset(note.assetID)
     // If there's a balance update, refresh the max order section.
     const mkt = this.market
     const avail = note.balance.available
@@ -2462,6 +2452,11 @@ class BalanceWidget {
       iconBox: els.quoteWalletState,
       stateIcons: new WalletIcons(els.quoteWalletState)
     }
+
+    app().registerNoteFeeder({
+      balance: (note: BalanceNote) => { this.updateAsset(note.assetID) },
+      walletstate: (note: WalletStateNote) => { this.updateAsset(note.wallet.assetID) }
+    })
   }
 
   /*

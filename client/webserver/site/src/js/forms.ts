@@ -16,8 +16,10 @@ import {
   FeeAsset,
   WalletState,
   WalletBalance,
+  BalanceNote,
   Order,
-  XYRange
+  XYRange,
+  WalletStateNote
 } from './registry'
 
 interface ConfigOptionInput extends HTMLInputElement {
@@ -714,6 +716,11 @@ export class WalletWaitForm {
     Doc.bind(this.page.goBack, 'click', () => {
       this.assetID = -1
       goBack()
+    })
+
+    app().registerNoteFeeder({
+      walletstate: (note: WalletStateNote) => this.reportWalletState(note.wallet),
+      balance: (note: BalanceNote) => this.reportBalance(note.balance, note.assetID)
     })
   }
 

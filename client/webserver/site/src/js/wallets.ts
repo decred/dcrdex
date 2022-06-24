@@ -227,11 +227,11 @@ export default class WalletsPage extends BasePage {
     if (!firstRow) return
     this.showMarkets(firstRow.assetID)
 
-    this.notifiers = {
+    app().registerNoteFeeder({
       balance: (note: BalanceNote) => { this.handleBalanceNote(note) },
       walletstate: (note: WalletStateNote) => { this.handleWalletStateNote(note) },
       walletconfig: (note: WalletStateNote) => { this.handleWalletStateNote(note) }
-    }
+    })
   }
 
   closePopups () {
