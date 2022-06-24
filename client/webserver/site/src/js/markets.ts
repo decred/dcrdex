@@ -887,8 +887,7 @@ export default class MarketsPage extends BasePage {
     if (mkt.maxSellRequested) return
     mkt.maxSellRequested = true
     // We only fetch pre-sell once per balance update, so don't delay.
-    const rate = this.isLimit() ? this.adjustedRate() : 0
-    this.scheduleMaxEstimate('/api/maxsell', { rate }, 0, (res: MaxSell) => {
+    this.scheduleMaxEstimate('/api/maxsell', {}, 0, (res: MaxSell) => {
       mkt.maxSellRequested = false
       mkt.maxSell = res.maxSell
       mkt.sellBalance = baseWallet.balance.available

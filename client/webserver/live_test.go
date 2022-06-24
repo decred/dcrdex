@@ -580,7 +580,7 @@ func (c *TCore) MaxBuy(host string, base, quote uint32, rate uint64) (*core.MaxO
 	}, nil
 }
 
-func (c *TCore) MaxSell(host string, base, quote uint32, rate uint64) (*core.MaxOrderEstimate, error) {
+func (c *TCore) MaxSell(host string, base, quote uint32) (*core.MaxOrderEstimate, error) {
 	mktID, _ := dex.MarketName(base, quote)
 	lotSize := tExchanges[host].Markets[mktID].LotSize
 	midGap, maxQty := getMarketStats(mktID)

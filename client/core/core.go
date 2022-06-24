@@ -3728,7 +3728,6 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEs
 	}
 
 	preRedeem, err := baseWallet.PreRedeem(&asset.PreRedeemForm{
-		LotSize:       lotSize,
 		Lots:          maxBuy.Lots,
 		FeeSuggestion: redeemFeeSuggestion,
 		AssetConfig:   baseAsset,
@@ -3747,7 +3746,7 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEs
 // market. Redemption estimates are based on the provided rate. If a rate of
 // zero is specified, the orderbook's mid-gap rate will be used for the
 // estimate.
-func (c *Core) MaxSell(host string, base, quote uint32, rate uint64) (*MaxOrderEstimate, error) {
+func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, error) {
 	baseAsset, quoteAsset, baseWallet, quoteWallet, err := c.marketWallets(host, base, quote)
 	if err != nil {
 		return nil, err
@@ -3793,17 +3792,7 @@ func (c *Core) MaxSell(host string, base, quote uint32, rate uint64) (*MaxOrderE
 		return nil, fmt.Errorf("%s wallet MaxOrder error: %v", unbip(base), err)
 	}
 
-	if rate == 0 {
-		rate, err = book.MidGap()
-		if err != nil {
-			return nil, fmt.Errorf("error calculating market rate for %s at %s: %v", mktID, host, err)
-		}
-	}
-
-	lotSize = calc.BaseToQuote(rate, lotSize)
-
 	preRedeem, err := quoteWallet.PreRedeem(&asset.PreRedeemForm{
-		LotSize:       lotSize,
 		Lots:          maxSell.Lots,
 		FeeSuggestion: redeemFeeSuggestion,
 	})
@@ -4206,13 +4195,13 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 		return nil, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", unbip(wallets.toAsset.ID), form.Host)
 	}
 
-	fromLotSize, toLotSize := lotSize, calc.BaseToQuote(rate, lotSize)
+	swapLotSize := lotSize
 	if !form.Sell {
-		fromLotSize, toLotSize = toLotSize, fromLotSize
+		swapLotSize = calc.BaseToQuote(rate, lotSize)
 	}
 
 	swapEstimate, err := wallets.fromWallet.PreSwap(&asset.PreSwapForm{
-		LotSize:         fromLotSize,
+		LotSize:         swapLotSize,
 		Lots:            lots,
 		AssetConfig:     wallets.fromAsset,
 		RedeemConfig:    wallets.toAsset,
@@ -4225,7 +4214,6 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 	}
 
 	redeemEstimate, err := wallets.toWallet.PreRedeem(&asset.PreRedeemForm{
-		LotSize:         toLotSize,
 		Lots:            lots,
 		FeeSuggestion:   redeemFeeSuggestion,
 		SelectedOptions: form.Options,

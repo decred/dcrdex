@@ -938,12 +938,11 @@ func (s *WebServer) apiMaxSell(w http.ResponseWriter, r *http.Request) {
 		Host  string `json:"host"`
 		Base  uint32 `json:"base"`
 		Quote uint32 `json:"quote"`
-		Rate  uint64 `json:"rate"`
 	}{}
 	if !readPost(w, r, form) {
 		return
 	}
-	maxSell, err := s.core.MaxSell(form.Host, form.Base, form.Quote, form.Rate)
+	maxSell, err := s.core.MaxSell(form.Host, form.Base, form.Quote)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("max order estimation error: %w", err))
 		return

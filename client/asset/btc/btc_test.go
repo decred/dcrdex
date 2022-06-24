@@ -2813,7 +2813,6 @@ func testPreRedeem(t *testing.T, segwit bool, walletType string) {
 	defer shutdown()
 
 	preRedeem, err := wallet.PreRedeem(&asset.PreRedeemForm{
-		LotSize:     123456, // Doesn't actually matter
 		Lots:        5,
 		AssetConfig: tBTC,
 	})

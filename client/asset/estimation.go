@@ -72,10 +72,6 @@ type PreSwap struct {
 
 // PreRedeemForm can be used to get a redemption estimate.
 type PreRedeemForm struct {
-	// LotSize is the lot size for the calculation. For quote assets, LotSize
-	// should be based on either the user's limit order rate, or some measure
-	// of the current market rate.
-	LotSize uint64
 	// Lots is the number of lots in the order.
 	Lots uint64
 	// FeeSuggestion is a suggested fee from the server.

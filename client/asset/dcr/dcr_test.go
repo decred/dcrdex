@@ -2508,7 +2508,6 @@ func TestPreRedeem(t *testing.T) {
 	defer shutdown()
 
 	preRedeem, err := wallet.PreRedeem(&asset.PreRedeemForm{
-		LotSize:     123456, // Doesn't actually matter
 		Lots:        5,
 		AssetConfig: tDCR,
 	})

@@ -1684,7 +1684,6 @@ func TestPreRedeem(t *testing.T) {
 	defer shutdown()
 
 	form := &asset.PreRedeemForm{
-		LotSize:       123456,
 		Lots:          5,
 		FeeSuggestion: 100,
 		AssetConfig:   tETH,
