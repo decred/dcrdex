@@ -61,9 +61,9 @@ export default class DexSettingsPage extends BasePage {
       Doc.bind(el, 'click', () => { closePopups() })
     })
 
-    this.notifiers = {
+    app().registerNoteFeeder({
       conn: () => { this.setConnectionStatus() }
-    }
+    })
 
     this.setConnectionStatus()
   }

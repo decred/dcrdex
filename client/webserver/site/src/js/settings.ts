@@ -8,9 +8,7 @@ import {
   app,
   Exchange,
   PageElement,
-  PasswordCache,
-  WalletStateNote,
-  BalanceNote
+  PasswordCache
 } from './registry'
 
 const animationLength = 300
@@ -144,11 +142,6 @@ export default class SettingsPage extends BasePage {
     page.forms.querySelectorAll('.form-closer').forEach(el => {
       Doc.bind(el, 'click', () => { closePopups() })
     })
-
-    this.notifiers = {
-      walletstate: (note: WalletStateNote) => this.walletWaitForm.reportWalletState(note.wallet),
-      balance: (note: BalanceNote) => this.walletWaitForm.reportBalance(note.balance, note.assetID)
-    }
   }
 
   // Retrieve an estimate for the tx fee needed to pay the registration fee.

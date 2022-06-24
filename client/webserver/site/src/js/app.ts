@@ -49,7 +49,6 @@ const noteCacheSize = 100
 
 interface Page {
   unload (): void
-  notify (n: CoreNote): void
 }
 
 interface PageClass {
@@ -96,6 +95,7 @@ export default class Application {
   loadedPage: Page | null
   popupNotes: HTMLElement
   popupTmpl: HTMLElement
+  noteReceivers: Record<string, (n: CoreNote) => void>[]
 
   constructor () {
     this.notes = []
@@ -112,6 +112,7 @@ export default class Application {
     }
     this.seedGenTime = 0
     this.commitHash = process.env.COMMITHASH || ''
+    this.noteReceivers = []
     this.showPopups = State.getCookie('popups') === '1'
     console.log('Decred DEX Client App, Build', this.commitHash.substring(0, 7))
 
@@ -255,6 +256,7 @@ export default class Application {
     document.title = doc.title
     this.main.replaceWith(main)
     this.main = main
+    this.noteReceivers = []
     this.attach(data)
     return true
   }
@@ -595,7 +597,15 @@ export default class Application {
     }
 
     // Inform the page.
-    if (this.loadedPage) this.loadedPage.notify(note)
+    for (const feeder of this.noteReceivers) {
+      const f = feeder[note.type]
+      if (!f) continue
+      try {
+        f(note)
+      } catch (error) {
+        console.error('note feeder error:', error.message ? error.message : error)
+      }
+    }
     // Discard data notifications.
     if (note.severity < ntfn.POKE) return
     // Poke notifications have their own display.
@@ -620,6 +630,14 @@ export default class Application {
     // Success and higher severity go to the bell dropdown.
     if (note.severity === ntfn.POKE) this.prependPokeElement(note)
     else this.prependNoteElement(note)
+  }
+
+  /*
+   * registerNoteFeeder registers a feeder for core notifications. The feeder
+   * will be de-registered when a new page is loaded.
+   */
+  registerNoteFeeder (receivers: Record<string, (n: CoreNote) => void>) {
+    this.noteReceivers.push(receivers)
   }
 
   /*

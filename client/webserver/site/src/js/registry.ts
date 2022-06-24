@@ -501,6 +501,7 @@ export interface Application {
   fetchBalance (assetID: number): Promise<WalletBalance>
   checkResponse (resp: APIResponse, skipNote?: boolean): boolean
   signOut (): Promise<void>
+  registerNoteFeeder (receivers: Record<string, (n: CoreNote) => void>): void
 }
 
 // TODO: Define an interface for Application?

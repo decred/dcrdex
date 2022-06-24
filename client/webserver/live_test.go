@@ -1627,8 +1627,8 @@ func TestServer(t *testing.T) {
 	register := false
 	forceDisconnectWallet = true
 	gapWidthFactor = 0.2
-	randomPokes = true
-	randomNotes = true
+	randomPokes = false
+	randomNotes = false
 	numUserOrders = 40
 
 	var shutdown context.CancelFunc

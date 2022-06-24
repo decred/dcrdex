@@ -104,10 +104,10 @@ export default class OrderPage extends BasePage {
       setStamp()
     }, 10000) // update every 10 seconds
 
-    this.notifiers = {
+    app().registerNoteFeeder({
       order: (note: OrderNote) => { this.handleOrderNote(note) },
       match: (note: MatchNote) => { this.handleMatchNote(note) }
-    }
+    })
   }
 
   unload () {
