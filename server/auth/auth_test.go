@@ -122,8 +122,15 @@ func (s *TStorage) setRatioData(dat *ratioData) {
 func (s *TStorage) CompletedUserOrders(aid account.AccountID, _ int) (oids []order.OrderID, compTimes []int64, err error) {
 	return s.ratio.oidsCompleted, s.ratio.timesCompleted, nil
 }
-func (s *TStorage) ExecutedCancelsForUser(aid account.AccountID, _ int) (oids, targets []order.OrderID, execTimes []int64, err error) {
-	return s.ratio.oidsCancels, s.ratio.oidsCanceled, s.ratio.timesCanceled, nil
+func (s *TStorage) ExecutedCancelsForUser(aid account.AccountID, _ int) (cancels []*db.CancelRecord, err error) {
+	for i := range s.ratio.oidsCanceled {
+		cancels = append(cancels, &db.CancelRecord{
+			ID:        s.ratio.oidsCancels[i],
+			TargetID:  s.ratio.oidsCanceled[i],
+			MatchTime: s.ratio.timesCanceled[i],
+		})
+	}
+	return cancels, nil
 }
 
 // TSigner satisfies the Signer interface
@@ -1630,7 +1637,7 @@ func TestAuthManager_RecordCancel_RecordCompletedOrder(t *testing.T) {
 	// now a cancel
 	coid := newOrderID()
 	tCompleted = tCompleted.Add(time.Millisecond) // newer
-	rig.mgr.RecordCancel(user.acctID, coid, oid, tCompleted)
+	rig.mgr.RecordCancel(user.acctID, coid, oid, 1, tCompleted)
 
 	client.mtx.Lock()
 	total, cancels = client.recentOrders.counts()
