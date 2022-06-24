@@ -522,7 +522,7 @@ func TestParseCancelArgs(t *testing.T) {
 	}
 }
 
-func TestParseWithdrawArgs(t *testing.T) {
+func TestParseSendOrWithdrawArgs(t *testing.T) {
 	paramsWithArgs := func(id, value string) *RawParams {
 		pw := encode.PassBytes("password123")
 		pwArgs := []encode.PassBytes{pw}
@@ -546,7 +546,7 @@ func TestParseWithdrawArgs(t *testing.T) {
 		wantErr: errArgs,
 	}}
 	for _, test := range tests {
-		res, err := parseWithdrawArgs(test.params)
+		res, err := parseSendOrWithdrawArgs(test.params)
 		if test.wantErr != nil {
 			if errors.Is(err, test.wantErr) {
 				continue

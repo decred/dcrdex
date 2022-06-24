@@ -38,6 +38,7 @@ const (
 	walletsRoute               = "wallets"
 	rescanWalletRoute          = "rescanwallet"
 	withdrawRoute              = "withdraw"
+	sendRoute                  = "send"
 	appSeedRoute               = "appseed"
 	deleteArchivedRecordsRoute = "deletearchivedrecords"
 )
@@ -90,6 +91,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	walletsRoute:               handleWallets,
 	rescanWalletRoute:          handleRescanWallet,
 	withdrawRoute:              handleWithdraw,
+	sendRoute:                  handleSend,
 	appSeedRoute:               handleAppSeed,
 	deleteArchivedRecordsRoute: handleDeleteArchivedRecords,
 }
@@ -422,19 +424,33 @@ func handleCancel(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 // handleWithdraw handles requests for withdraw. *msgjson.ResponsePayload.Error
 // is empty if successful.
 func handleWithdraw(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parseWithdrawArgs(params)
+	return send(s, params, withdrawRoute)
+}
+
+// handleSend handles the request for send. *msgjson.ResponsePayload.Error
+// is empty if successful.
+func handleSend(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	return send(s, params, sendRoute)
+}
+
+func send(s *RPCServer, params *RawParams, route string) *msgjson.ResponsePayload {
+	form, err := parseSendOrWithdrawArgs(params)
 	if err != nil {
-		return usage(withdrawRoute, err)
+		return usage(route, err)
 	}
 	defer form.appPass.Clear()
-	coin, err := s.core.Withdraw(form.appPass, form.assetID, form.value, form.address)
+	subtract := false
+	if route == withdrawRoute {
+		subtract = true
+	}
+	coin, err := s.core.Send(form.appPass, form.assetID, form.value, form.address, subtract)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to withdraw: %v", err)
-		resErr := msgjson.NewError(msgjson.RPCWithdrawError, errMsg)
-		return createResponse(withdrawRoute, nil, resErr)
+		errMsg := fmt.Sprintf("unable to %s: %v", err, route)
+		resErr := msgjson.NewError(msgjson.RPCFundTransferError, errMsg)
+		return createResponse(route, nil, resErr)
 	}
 	res := coin.String()
-	return createResponse(withdrawRoute, &res, nil)
+	return createResponse(route, &res, nil)
 }
 
 // handleRescanWallet handles requests to rescan a wallet. This may trigger an
@@ -998,7 +1014,7 @@ needed to complete a swap.`,
 	withdrawRoute: {
 		pwArgsShort: `"appPass"`,
 		argsShort:   `assetID value "address"`,
-		cmdSummary:  `Withdraw value from an exchange wallet to address.`,
+		cmdSummary:  `Withdraw value from an exchange wallet to address. Fees are subtracted from the value.`,
 		pwArgsLong: `Password Args:
     appPass (string): The DEX client password.`,
 		argsLong: `Args:
@@ -1008,6 +1024,22 @@ needed to complete a swap.`,
     value (int): The amount to withdraw in units of the asset's smallest
       denomination (e.g. satoshis, atoms, etc.)"
     address (string): The address to which withdrawn funds are sent.`,
+		returns: `Returns:
+    string: "[coin ID]"`,
+	},
+	sendRoute: {
+		pwArgsShort: `"appPass"`,
+		argsShort:   `assetID value "address"`,
+		cmdSummary:  `Sends exact value from an exchange wallet to address.`,
+		pwArgsLong: `Password Args:
+    appPass (string): The DEX client password.`,
+		argsLong: `Args:
+    assetID (int): The asset's BIP-44 registered coin index. Used to identify
+      which wallet to withdraw from. e.g. 42 for DCR. See
+      https://github.com/satoshilabs/slips/blob/master/slip-0044.md
+    value (int): The amount to send in units of the asset's smallest
+      denomination (e.g. satoshis, atoms, etc.)"
+    address (string): The address to which funds are sent.`,
 		returns: `Returns:
     string: "[coin ID]"`,
 	},

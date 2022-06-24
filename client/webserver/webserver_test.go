@@ -65,7 +65,7 @@ type TCore struct {
 	openWalletErr    error
 	closeWalletErr   error
 	rescannWalletErr error
-	withdrawErr      error
+	sendErr          error
 	notHas           bool
 	notRunning       bool
 	notOpen          bool
@@ -127,8 +127,8 @@ func (c *TCore) User() *core.User { return nil }
 func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 	return make(map[uint32]*core.SupportedAsset)
 }
-func (c *TCore) Withdraw(pw []byte, assetID uint32, value uint64, address string) (asset.Coin, error) {
-	return &tCoin{id: []byte{0xde, 0xc7, 0xed}}, c.withdrawErr
+func (c *TCore) Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (asset.Coin, error) {
+	return &tCoin{id: []byte{0xde, 0xc7, 0xed}}, c.sendErr
 }
 func (c *TCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error) {
 	oType := order.LimitOrderType
@@ -422,7 +422,12 @@ func TestAPILogin(t *testing.T) {
 	tCore.loginErr = nil
 }
 
-func TestAPIWithdraw(t *testing.T) {
+func TestAPISendAndAPIWithdraw(t *testing.T) {
+	testAPISendAndAPIWithdraw(t, true)
+	testAPISendAndAPIWithdraw(t, false)
+}
+
+func testAPISendAndAPIWithdraw(t *testing.T, withdraw bool) {
 	writer := new(TWriter)
 	var body interface{}
 	reader := new(TReader)
@@ -435,7 +440,11 @@ func TestAPIWithdraw(t *testing.T) {
 		if err != nil {
 			t.Fatalf("error creating request: %v", err)
 		}
-		s.apiWithdraw(writer, req)
+		if !withdraw {
+			s.apiSend(writer, req)
+		} else {
+			s.apiWithdraw(writer, req)
+		}
 		if len(writer.b) == 0 {
 			t.Fatalf("no response")
 		}
@@ -447,7 +456,7 @@ func TestAPIWithdraw(t *testing.T) {
 		return resp.OK
 	}
 
-	body = &withdrawForm{
+	body = &sendOrWithdrawForm{
 		Pass: encode.PassBytes("dummyAppPass"),
 	}
 
@@ -463,12 +472,12 @@ func TestAPIWithdraw(t *testing.T) {
 	}
 	tCore.notHas = false
 
-	// withdraw error
-	tCore.withdrawErr = tErr
+	// Send/Withdraw error
+	tCore.sendErr = tErr
 	if isOK() {
-		t.Fatalf("no error for Withdraw error")
+		t.Fatalf("no error for Send/Withdraw error")
 	}
-	tCore.withdrawErr = nil
+	tCore.sendErr = nil
 
 	// re-success
 	if !isOK() {

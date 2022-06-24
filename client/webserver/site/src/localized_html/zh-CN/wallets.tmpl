@@ -28,7 +28,7 @@
     {{$ready := and $w.Running $w.Open}}
     <button data-action="connect"{{if $w.Running}} class="d-hide"{{end}}>连接</button>
     <button data-action="unlock"{{if $w.Open}} class="d-hide"{{end}}>解锁</button>
-    <button data-action="withdraw"{{if not $ready}} class="d-hide"{{end}}>提款</button>
+    <button data-action="send"{{if not $ready}} class="d-hide"{{end}}>Send</button>
     <button data-action="deposit"{{if not $ready}} class="d-hide"{{end}}>存款</button>
     <button data-action="lock"{{if or (not $ready) (not $w.Encrypted)}} class="d-hide"{{end}}>锁定</button>
     <button data-action="rescan"{{if not $w.Traits.IsRescanner}} class="d-hide"{{end}}>Rescan</button>
@@ -37,7 +37,7 @@
   {{else}}
     <button data-action="connect" class="d-hide">连接</button>
     <button data-action="unlock" class="d-hide">解锁</button>
-    <button data-action="withdraw" class="d-hide">提款</button>
+    <button data-action="send" class="d-hide">Send</button>
     <button data-action="deposit" class="d-hide">存款</button>
     <button data-action="lock" class="d-hide">锁定</button>
     <button data-action="rescan" class="d-hide">Rescan</button>
@@ -142,41 +142,48 @@
       <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="depositErr"></div>
     </div>
 
-    {{- /* WITHDRAW */ -}}
-    <form class="pb-3 d-hide" id="withdrawForm" autocomplete="off">
+    {{- /* Send Form */ -}}
+    <form class="pb-3 d-hide" id="sendForm" autocomplete="off">
       <div class="py-1 text-center position-relative fs22 sans-light">
-        提款
-        <img id="withdrawLogo" class="micro-icon mx-1">
-        <span id="withdrawName"></span>
+        Send
+        <img id="sendLogo" class="micro-icon mx-1">
+        <span id="sendName"></span>
         <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       </div>
       <div class="mt-3">
-        <label for="withdrawAddr" class="form-label ps-1 mb-1">地址</label>
-        <input type="text" class="form-control select" id="withdrawAddr">
+        <label for="sendAddr" class="form-label ps-1 mb-1">地址</label>
+        <input type="text" class="form-control select" id="sendAddr">
       </div>
       <div class="d-flex align-items-stretch">
         <div class="mt-2 col-10 p-0">
-          <label for="withdrawAmt" class="form-label ps-1 mb-1">金额</label>
-          <input type="text" class="form-control select" id="withdrawAmt">
+          <label for="sendAmt" class="form-label ps-1 mb-1">金额</label>
+          <input type="text" class="form-control select" id="sendAmt">
         </div>
         <div class="col-14 px-0 py-1 flex-center flex-column fs15 justify-content-between">
-          <div class="d-inline pt-3"><span class="pointer" id="withdrawAvail"></span> 可用</div>
-          <!-- <div class="d-inline">tx fees: <span id="withdrawFee"></span> <span id="withdrawUnit"></span>/byte</div> -->
+          <div class="d-inline pt-3"><span class="pointer" id="sendAvail"></span> 可用</div>
+          <!-- <div class="d-inline">tx fees: <span id="sendFee"></span> <span id="sendUnit"></span>/byte</div> -->
         </div>
       </div>
+      <div id="toggleSubtract" class="form-check pt-2">
+           <input class="form-check-input" type="checkbox" id="subtractCheckBox">
+           <label for="subtractCheckBox" class="form-label ps-1">Subtract fees from amount sent.</label>
+      </div>
+      <div id="senderOnlyHelpText" class="pt-2">
+      <p>The network fees will not be subtracted from the sent amount. Ensure you have enough in your wallet to cover fees.</p>
+      </div>
       <hr class="dashed my-4">
-      <div class="fs16 px-4 text-center">使用您的应用密码授权取款。</div>
+      <div class="fs16 px-4 text-center">Authorize the transfer with your app password.</div>
       <div class="d-flex mt-3">
         <div class="col-12 p-0">
-          <label for="withdrawPW" class="form-label ps-1 mb-1">密码</label>
-          <input type="password" class="form-control select" id="withdrawPW" autocomplete="off">
+          <label for="sendPW" class="form-label ps-1 mb-1">密码</label>
+          <input type="password" class="form-control select" id="sendPW" autocomplete="off">
         </div>
         <div class="col-12 p-0 text-end">
           <div>&nbsp;</div>
-          <button id="submitWithdraw" type="button" class="w-75 mt-1 justify-content-center fs15 bg2 selected">提款</button>
+          <button id="submitSendForm" type="button" class="w-75 mt-1 justify-content-center fs15 bg2 selected">Send</button>
         </div>
       </div>
-      <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="withdrawErr"></div>
+      <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="sendErr"></div>
     </form>
     
     {{- /* RECONFIGURE WALLET */ -}}

@@ -3092,7 +3092,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		"Do NOT manually send funds to this address even if this fails.",
 		regRes.Address, dc.acct.id, regRes.Fee, regFeeAssetSymbol)
 	feeRate := c.feeSuggestionAny(feeAsset.ID, dc)
-	coin, err := wallet.PayFee(regRes.Address, regRes.Fee, feeRate)
+	coin, err := wallet.Send(regRes.Address, regRes.Fee, feeRate)
 	if err != nil {
 		return nil, newError(feeSendErr, "error paying registration fee: %w", err)
 	}
@@ -4055,15 +4055,24 @@ func (c *Core) feeSuggestion(dc *dexConnection, assetID uint32) (feeSuggestion u
 }
 
 // Withdraw initiates a withdraw from an exchange wallet. The client password
-// must be provided as an additional verification.
+// must be provided as an additional verification. This method is DEPRECATED. Use
+// Send with the subtract option instead.
 func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string) (asset.Coin, error) {
+	return c.Send(pw, assetID, value, address, true)
+}
+
+// Send initiates either send or withdraw from an exchange wallet. if subtract
+// is true, fees are subtracted from the value else fees are taken from the
+// exchange wallet. The client password must be provided as an additional
+// verification.
+func (c *Core) Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (asset.Coin, error) {
 	crypter, err := c.encryptionKey(pw)
 	if err != nil {
-		return nil, fmt.Errorf("Withdraw password error: %w", err)
+		return nil, fmt.Errorf("password error: %w", err)
 	}
 	defer crypter.Close()
 	if value == 0 {
-		return nil, fmt.Errorf("cannot withdraw zero %s", unbip(assetID))
+		return nil, fmt.Errorf("cannot send/withdraw zero %s", unbip(assetID))
 	}
 	wallet, found := c.wallet(assetID)
 	if !found {
@@ -4073,16 +4082,26 @@ func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string)
 	if err != nil {
 		return nil, err
 	}
+
+	var coin asset.Coin
 	feeSuggestion := c.feeSuggestionAny(assetID)
-	coin, err := wallet.Withdraw(address, value, feeSuggestion)
+	if !subtract {
+		coin, err = wallet.Wallet.Send(address, value, feeSuggestion)
+	} else {
+		if withdrawer, isWithdrawer := wallet.Wallet.(asset.Withdrawer); isWithdrawer {
+			coin, err = withdrawer.Withdraw(address, value, feeSuggestion)
+		} else {
+			return nil, fmt.Errorf("wallet does not support subtracting network fee from withdraw amount")
+		}
+	}
 	if err != nil {
-		subject, details := c.formatDetails(TopicWithdrawError, unbip(assetID), err)
-		c.notify(newWithdrawNote(TopicWithdrawError, subject, details, db.ErrorLevel))
+		subject, details := c.formatDetails(TopicSendError, unbip(assetID), err)
+		c.notify(newSendNote(TopicSendError, subject, details, db.ErrorLevel))
 		return nil, err
 	}
 
-	subject, details := c.formatDetails(TopicWithdrawSend, unbip(assetID), coin)
-	c.notify(newWithdrawNote(TopicWithdrawSend, subject, details, db.Success))
+	subject, details := c.formatDetails(TopicSendSuccess, unbip(assetID), coin)
+	c.notify(newSendNote(TopicSendSuccess, subject, details, db.Success))
 
 	c.updateAssetBalance(assetID)
 	return coin, nil

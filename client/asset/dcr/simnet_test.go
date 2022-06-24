@@ -425,10 +425,10 @@ func runTest(t *testing.T, splitTx bool) {
 		t.Fatalf("refund error: %v", err)
 	}
 
-	// Test PayFee
-	coin, err := rig.beta().PayFee(alphaAddress, 1e8, defaultFee)
+	// Test Send
+	coin, err := rig.beta().Send(alphaAddress, 1e8, defaultFee)
 	if err != nil {
-		t.Fatalf("error paying fees: %v", err)
+		t.Fatalf("error sending fees: %v", err)
 	}
 	tLogger.Infof("fee paid with tx %s", coin.String())
 

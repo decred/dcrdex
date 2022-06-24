@@ -35,7 +35,7 @@ const (
 	RPCArgumentsError                    // 17
 	RPCTradeError                        // 18
 	RPCCancelError                       // 19
-	RPCWithdrawError                     // 20
+	RPCFundTransferError                 // 20
 	RPCOrderBookError                    // 21
 	SignatureError                       // 22
 	SerializationError                   // 23

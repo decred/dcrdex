@@ -2000,89 +2000,6 @@ func (eth *baseWallet) Locked() bool {
 	return eth.node.locked()
 }
 
-// PayFee sends the dex registration fee. Transaction fees are in addition to
-// the registration fee, and the fee rate is taken from the DEX configuration.
-func (w *ETHWallet) PayFee(addr string, regFee, feeSuggestion uint64) (asset.Coin, error) {
-	if !common.IsHexAddress(addr) {
-		return nil, fmt.Errorf("invalid hex address %q", addr)
-	}
-
-	bal, err := w.Balance()
-	if err != nil {
-		return nil, err
-	}
-	avail := bal.Available
-
-	maxFeeRate := dexeth.GweiToWei(feeSuggestion)
-	if feeSuggestion == 0 {
-		maxFeeRate, err = w.recommendedMaxFeeRate(w.ctx)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	maxFee := dexeth.WeiToGwei(maxFeeRate) * defaultSendGasLimit
-	need := regFee + maxFee
-	if avail < need {
-		return nil, fmt.Errorf("not enough funds to pay fee: have %d gwei need %d gwei", avail, need)
-	}
-
-	tx, err := w.sendToAddr(common.HexToAddress(addr), regFee, maxFeeRate)
-	if err != nil {
-		return nil, err
-	}
-	txHash := tx.Hash()
-	return &coin{id: txHash, value: regFee}, nil
-}
-
-// PayFee sends the dex registration fee. Transaction fees are in addition to
-// the registration fee, and the fee rate is taken from the DEX configuration.
-func (w *TokenWallet) PayFee(addr string, regFee, feeSuggestion uint64) (asset.Coin, error) {
-	if !common.IsHexAddress(addr) {
-		return nil, fmt.Errorf("invalid hex address %q", addr)
-	}
-
-	bal, err := w.Balance()
-	if err != nil {
-		return nil, err
-	}
-	avail := bal.Available
-
-	maxFeeRate := dexeth.GweiToWei(feeSuggestion)
-	if feeSuggestion == 0 {
-		maxFeeRate, err = w.recommendedMaxFeeRate(w.ctx)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if avail < regFee {
-		return nil, fmt.Errorf("not enough tokens: have %d gwei need %d gwei", avail, regFee)
-	}
-	ethBal, err := w.parent.Balance()
-	if err != nil {
-		return nil, fmt.Errorf("error getting base chain balance: %w", err)
-	}
-
-	g := w.gases(contractVersionNewest)
-	if g == nil {
-		return nil, fmt.Errorf("gas table not found")
-	}
-
-	maxFee := dexeth.WeiToGwei(maxFeeRate) * g.Transfer
-	if ethBal.Available < maxFee {
-		return nil, fmt.Errorf("insufficient balance to cover token transfer fees. %d < %d",
-			ethBal.Available, maxFee)
-	}
-
-	tx, err := w.sendToAddr(common.HexToAddress(addr), regFee, maxFeeRate)
-	if err != nil {
-		return nil, err
-	}
-	txHash := tx.Hash()
-	return &coin{id: txHash, value: regFee}, nil
-}
-
 // EstimateRegistrationTxFee returns an estimate for the tx fee needed to
 // pay the registration fee using the provided feeRate.
 func (w *ETHWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
@@ -2133,24 +2050,28 @@ func (w *assetWallet) SwapConfirmations(ctx context.Context, _ dex.Bytes, contra
 	return
 }
 
-// Withdraw withdraws funds to the specified address.
-func (w *ETHWallet) Withdraw(addr string, value, _ uint64) (asset.Coin, error) {
+// Send sends the exact value to the specified address.
+func (w *ETHWallet) Send(addr string, value, _ uint64) (asset.Coin, error) {
+	if !common.IsHexAddress(addr) {
+		return nil, fmt.Errorf("invalid hex address %q", addr)
+	}
+
 	bal, err := w.Balance()
 	if err != nil {
 		return nil, err
 	}
 	avail := bal.Available
 	if avail < value {
-		return nil, fmt.Errorf("not enough funds to withdraw: have %d gwei need %d gwei", avail, value)
+		return nil, fmt.Errorf("not enough funds to send: have %d gwei need %d gwei", avail, value)
 	}
 	maxFeeRate, err := w.recommendedMaxFeeRate(w.ctx)
 	if err != nil {
-		return nil, fmt.Errorf("error getting max fee rate: %v", err)
+		return nil, fmt.Errorf("error getting max fee rate: %w", err)
 	}
 
 	maxFee := defaultSendGasLimit * dexeth.WeiToGwei(maxFeeRate)
 	if avail < value+maxFee {
-		return nil, fmt.Errorf("not enough funds to withdraw: cannot cover value %d, max fee of %d gwei", value, maxFee)
+		return nil, fmt.Errorf("not enough funds to send: cannot cover value %d, max fee of %d gwei", value, maxFee)
 	}
 	// TODO: Subtract option.
 	// if avail < value+maxFee {
@@ -2165,24 +2086,22 @@ func (w *ETHWallet) Withdraw(addr string, value, _ uint64) (asset.Coin, error) {
 	return &coin{id: txHash, value: value}, nil
 }
 
-// Withdraw withdraws funds to the specified address.
-func (w *TokenWallet) Withdraw(addr string, value, _ uint64) (asset.Coin, error) {
+// Send sends the exact value to the specified address. The fees are taken
+// from the parent wallet.
+func (w *TokenWallet) Send(addr string, value, _ uint64) (asset.Coin, error) {
+	if !common.IsHexAddress(addr) {
+		return nil, fmt.Errorf("invalid hex address %q", addr)
+	}
+
 	bal, err := w.Balance()
 	if err != nil {
 		return nil, err
 	}
 	avail := bal.Available
 	if avail < value {
-		return nil, fmt.Errorf("not enough funds to withdraw: have %d gwei need %d gwei", avail, value)
-	}
-	maxFeeRate, err := w.recommendedMaxFeeRate(w.ctx)
-	if err != nil {
-		return nil, fmt.Errorf("error getting max fee rate: %v", err)
-	}
-
-	if avail < value {
 		return nil, fmt.Errorf("not enough tokens: have %d gwei need %d gwei", avail, value)
 	}
+
 	ethBal, err := w.parent.Balance()
 	if err != nil {
 		return nil, fmt.Errorf("error getting base chain balance: %w", err)
@@ -2191,6 +2110,11 @@ func (w *TokenWallet) Withdraw(addr string, value, _ uint64) (asset.Coin, error)
 	g := w.gases(contractVersionNewest)
 	if g == nil {
 		return nil, fmt.Errorf("gas table not found")
+	}
+
+	maxFeeRate, err := w.recommendedMaxFeeRate(w.ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error getting max fee rate: %w", err)
 	}
 
 	maxFee := dexeth.WeiToGwei(maxFeeRate) * g.Transfer
