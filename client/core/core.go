@@ -3744,8 +3744,10 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEs
 }
 
 // MaxSell is the maximum-sized *OrderEstimate for a sell order on the specified
-// market.
-func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, error) {
+// market. Redemption estimates are based on the provided rate. If a rate of
+// zero is specified, the orderbook's mid-gap rate will be used for the
+// estimate.
+func (c *Core) MaxSell(host string, base, quote uint32, rate uint64) (*MaxOrderEstimate, error) {
 	baseAsset, quoteAsset, baseWallet, quoteWallet, err := c.marketWallets(host, base, quote)
 	if err != nil {
 		return nil, err
@@ -3791,11 +3793,14 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, erro
 		return nil, fmt.Errorf("%s wallet MaxOrder error: %v", unbip(base), err)
 	}
 
-	midGap, err := book.MidGap()
-	if err != nil {
-		return nil, fmt.Errorf("error calculating market rate for %s at %s: %v", mktID, host, err)
+	if rate == 0 {
+		rate, err = book.MidGap()
+		if err != nil {
+			return nil, fmt.Errorf("error calculating market rate for %s at %s: %v", mktID, host, err)
+		}
 	}
-	lotSize = calc.BaseToQuote(midGap, lotSize)
+
+	lotSize = calc.BaseToQuote(rate, lotSize)
 
 	preRedeem, err := quoteWallet.PreRedeem(&asset.PreRedeemForm{
 		LotSize:       lotSize,

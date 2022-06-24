@@ -1457,6 +1457,10 @@ func (dcr *ExchangeWallet) tryFund(utxos []*compositeUTXO, enough func(sum uint6
 		return nil
 	}
 
+	isEnoughWith := func(utxo *compositeUTXO) bool {
+		return enough(sum, size, utxo)
+	}
+
 	tryUTXOs := func(minconf int64) (ok bool, err error) {
 		sum, size = 0, 0
 		coins, spents, redeemScripts = nil, nil, nil
@@ -1473,22 +1477,25 @@ func (dcr *ExchangeWallet) tryFund(utxos []*compositeUTXO, enough func(sum uint6
 			if len(okUTXOs) == 0 {
 				return false, nil
 			}
-			// On each loop, find the smallest UTXO that is enough.
-			for _, txout := range okUTXOs {
-				if enough(sum, size, txout) {
-					if err = addUTXO(txout); err != nil {
-						return false, err
-					}
-					return true, nil
-				}
+
+			// Check if the largest output is too small.
+			lastUTXO := okUTXOs[len(okUTXOs)-1]
+			if !isEnoughWith(lastUTXO) {
+				addUTXO(lastUTXO)
+				okUTXOs = okUTXOs[0 : len(okUTXOs)-1]
+				continue
 			}
-			// No single UTXO was large enough. Add the largest (the last
-			// output) and continue.
-			if err = addUTXO(okUTXOs[len(okUTXOs)-1]); err != nil {
+
+			// We only need one then. Find it.
+			idx := sort.Search(len(okUTXOs), func(i int) bool {
+				return isEnoughWith(okUTXOs[i])
+			})
+			// No need to check idx == -1. We already verified that the last
+			// utxo passes above.
+			if err = addUTXO(okUTXOs[idx]); err != nil {
 				return false, err
 			}
-			// Pop the utxo.
-			okUTXOs = okUTXOs[:len(okUTXOs)-1]
+			return true, nil
 		}
 	}
 
@@ -1497,6 +1504,7 @@ func (dcr *ExchangeWallet) tryFund(utxos []*compositeUTXO, enough func(sum uint6
 	if err != nil {
 		return 0, 0, nil, nil, nil, err
 	}
+
 	// Fallback to allowing 0-conf outputs.
 	if !ok {
 		ok, err = tryUTXOs(0)
