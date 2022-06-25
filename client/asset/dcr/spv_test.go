@@ -31,8 +31,8 @@ type tDcrWallet struct {
 	wallet.NetworkBackend
 	knownAddr      wallet.KnownAddress
 	knownAddrErr   error
-	dontHaveAddr   bool
-	haveAddrErr    error
+	txsByHash      []*wire.MsgTx
+	txsByHashErr   error
 	acctBal        wallet.Balances
 	acctBalErr     error
 	lockedPts      []chainjson.TransactionInput
@@ -79,10 +79,6 @@ type tDcrWallet struct {
 
 func (w *tDcrWallet) KnownAddress(ctx context.Context, a stdaddr.Address) (wallet.KnownAddress, error) {
 	return w.knownAddr, w.knownAddrErr
-}
-
-func (w *tDcrWallet) HaveAddress(ctx context.Context, a stdaddr.Address) (bool, error) {
-	return !w.dontHaveAddr, w.haveAddrErr
 }
 
 func (w *tDcrWallet) AccountBalance(ctx context.Context, account uint32, confirms int32) (wallet.Balances, error) {
@@ -186,6 +182,12 @@ func (w *tDcrWallet) Blocks(ctx context.Context, blockHashes []*chainhash.Hash) 
 	return w.spvBlocks, w.spvBlocksErr
 }
 
+func (w *tDcrWallet) GetTransactionsByHashes(ctx context.Context, txHashes []*chainhash.Hash) (
+	txs []*wire.MsgTx, notFound []*wire.InvVect, err error) {
+
+	return w.txsByHash, nil, w.txsByHashErr
+}
+
 func tNewSpvWallet() (*spvWallet, *tDcrWallet) {
 	dcrw := &tDcrWallet{
 		blockHeader:    make(map[chainhash.Hash]*wire.BlockHeader),
@@ -205,6 +207,7 @@ func tNewSpvWallet() (*spvWallet, *tDcrWallet) {
 type tKnownAddress struct {
 	stdaddr.Address
 	acctName string
+	acctType wallet.AccountKind // 0-value is AccountKindBIP0044
 }
 
 func (a *tKnownAddress) AccountName() string {
@@ -212,7 +215,7 @@ func (a *tKnownAddress) AccountName() string {
 }
 
 func (a *tKnownAddress) AccountKind() wallet.AccountKind {
-	return wallet.AccountKindBIP0044
+	return a.acctType
 }
 
 func (a *tKnownAddress) ScriptLen() int { return 1 }
@@ -251,21 +254,14 @@ func TestAccountOwnsAddress(t *testing.T) {
 	}
 	kaddr.acctName = tAcctName
 
-	// HaveAddress error
-	dcrw.haveAddrErr = tErr
-	if _, err := w.AccountOwnsAddress(tCtx, tPKHAddr, ""); err == nil {
-		t.Fatal("no error for HaveAddress error")
-	}
-	dcrw.haveAddrErr = nil
-
-	// Dont have
-	dcrw.dontHaveAddr = true
+	// Wrong type
+	kaddr.acctType = wallet.AccountKindImportedXpub
 	if have, err := w.AccountOwnsAddress(tCtx, tPKHAddr, ""); err != nil {
 		t.Fatalf("don't have trial failed: %v", err)
 	} else if have {
 		t.Fatal("have, but shouldn't")
 	}
-	dcrw.dontHaveAddr = false
+	kaddr.acctType = wallet.AccountKindBIP0044
 }
 
 func TestAccountBalance(t *testing.T) {
@@ -712,23 +708,23 @@ func TestMatchAnyScript(t *testing.T) {
 func TestGetRawTransaction(t *testing.T) {
 	w, dcrw := tNewSpvWallet()
 
-	dcrw.txDetails = &udb.TxDetails{}
+	dcrw.txsByHash = []*wire.MsgTx{{}}
 
 	if _, err := w.GetRawTransaction(tCtx, nil); err != nil {
 		t.Fatalf("intitial GetRawTransaction error: %v", err)
 	}
 
 	// TxDetails NotExist error
-	dcrw.txDetailsErr = walleterrors.NotExist
+	dcrw.txsByHash = []*wire.MsgTx{}
 	if _, err := w.GetRawTransaction(tCtx, nil); !errors.Is(err, asset.CoinNotFoundError) {
 		t.Fatalf("expected asset.CoinNotFoundError, got %v", err)
 	}
+	dcrw.txsByHash = []*wire.MsgTx{{}}
 
 	// TxDetails generic error
-	dcrw.txDetailsErr = tErr
+	dcrw.txsByHashErr = tErr
 	if _, err := w.GetRawTransaction(tCtx, nil); err == nil {
 		t.Fatalf("expected TxDetail generic error to propagate")
 	}
-	dcrw.txDetailsErr = nil
-
+	dcrw.txsByHashErr = nil
 }

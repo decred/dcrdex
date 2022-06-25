@@ -556,7 +556,8 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, err
 	}
 
-	// DRAFT NOTE: Maybe?
+	// dcrwallet doesn't accept an empty string as an account name. Use the
+	// default value.
 	if walletCfg.PrimaryAccount == "" {
 		walletCfg.PrimaryAccount = defaultAcctName
 	}

@@ -1,3 +1,6 @@
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org/license/1.0.0.
+
 package dcr
 
 import (
@@ -57,7 +60,6 @@ const (
 
 type dcrWallet interface {
 	KnownAddress(ctx context.Context, a stdaddr.Address) (wallet.KnownAddress, error)
-	HaveAddress(ctx context.Context, a stdaddr.Address) (bool, error)
 	AccountBalance(ctx context.Context, account uint32, confirms int32) (wallet.Balances, error)
 	LockedOutpoints(ctx context.Context, accountName string) ([]chainjson.TransactionInput, error)
 	ListUnspent(ctx context.Context, minconf, maxconf int32, addresses map[string]struct{}, accountName string) ([]*walletjson.ListUnspentResult, error)
@@ -79,6 +81,7 @@ type dcrWallet interface {
 	UnlockAccount(ctx context.Context, account uint32, passphrase []byte) error
 	LoadPrivateKey(ctx context.Context, addr stdaddr.Address) (key *secp256k1.PrivateKey, zero func(), err error)
 	TxDetails(ctx context.Context, txHash *chainhash.Hash) (*udb.TxDetails, error)
+	GetTransactionsByHashes(ctx context.Context, txHashes []*chainhash.Hash) (txs []*wire.MsgTx, notFound []*wire.InvVect, err error)
 	// TODO: Rescan and DiscoverActiveAddresses can be used for a Rescanner.
 }
 
@@ -377,6 +380,8 @@ func (w *spvWallet) NotifyOnTipChange(ctx context.Context, cb TipChangeCallback)
 	return false
 }
 
+// AddressInfo returns information for the provided address. It is an error if
+// the address is not owned by the wallet.
 func (w *spvWallet) AddressInfo(ctx context.Context, addrStr string) (*AddressInfo, error) {
 	addr, err := stdaddr.DecodeAddress(addrStr, w.chainParams)
 	if err != nil {
@@ -405,14 +410,13 @@ func (w *spvWallet) AccountOwnsAddress(ctx context.Context, addr stdaddr.Address
 	if ka.AccountName() != w.acctName {
 		return false, nil
 	}
-	own, err := w.HaveAddress(ctx, addr)
-	if err != nil {
-		return false, fmt.Errorf("HaveAddress error: %w", err)
+	if kind := ka.AccountKind(); kind != wallet.AccountKindBIP0044 && kind != wallet.AccountKindImported {
+		return false, nil
 	}
-	return own, nil
+	return true, nil
 }
 
-// AccountBalance returns the balance breakdown for the speciied account.
+// AccountBalance returns the balance breakdown for the specified account.
 // Part of the Wallet interface.
 func (w *spvWallet) AccountBalance(ctx context.Context, confirms int32, _ string) (*walletjson.GetAccountBalanceResult, error) {
 	bal, err := w.dcrWallet.AccountBalance(ctx, w.acctNum, confirms)
@@ -447,16 +451,13 @@ func (w *spvWallet) Unspents(ctx context.Context, _ string) ([]*walletjson.ListU
 // LockUnspent locks or unlocks the specified outpoint.
 // Part of the Wallet interface.
 func (w *spvWallet) LockUnspent(ctx context.Context, unlock bool, ops []*wire.OutPoint) error {
+	fun := w.LockOutpoint
 	if unlock {
-		for _, op := range ops {
-			w.UnlockOutpoint(&op.Hash, op.Index)
-		}
-		return nil
+		fun = w.UnlockOutpoint
 	}
 	for _, op := range ops {
-		w.LockOutpoint(&op.Hash, op.Index)
+		fun(&op.Hash, op.Index)
 	}
-
 	return nil
 }
 
@@ -525,11 +526,10 @@ func (w *spvWallet) UnspentOutput(ctx context.Context, txHash *chainhash.Hash, i
 
 // ExternalAddress returns an external address using GapPolicyIgnore.
 // Part of the Wallet interface.
-//
-// NOTE: Why GapPolicyIgnore instead of GapPolicyWrap? Can we recover from an
-// ignored gap policy without extreme measures?
+// Using GapPolicyWrap here, introducing a relatively small risk of address
+// reuse, but improving wallet recoverability.
 func (w *spvWallet) ExternalAddress(ctx context.Context, _ string) (stdaddr.Address, error) {
-	return w.NewExternalAddress(ctx, w.acctNum, wallet.WithGapPolicyIgnore())
+	return w.NewExternalAddress(ctx, w.acctNum, wallet.WithGapPolicyWrap())
 }
 
 // InternalAddress returns an internal address using GapPolicyIgnore.
@@ -707,13 +707,14 @@ func (w *spvWallet) MatchAnyScript(ctx context.Context, blockHash *chainhash.Has
 // asset.CoinNotFoundError if the tx is not found.
 // Part of the Wallet interface.
 func (w *spvWallet) GetRawTransaction(ctx context.Context, txHash *chainhash.Hash) (*wire.MsgTx, error) {
-	txd, err := w.dcrWallet.TxDetails(ctx, txHash)
-	if errors.Is(err, walleterrors.NotExist) {
-		return nil, asset.CoinNotFoundError
-	} else if err != nil {
+	txs, _, err := w.dcrWallet.GetTransactionsByHashes(ctx, []*chainhash.Hash{txHash})
+	if err != nil {
 		return nil, err
 	}
-	return &txd.MsgTx, nil
+	if len(txs) != 1 {
+		return nil, asset.CoinNotFoundError
+	}
+	return txs[0], nil
 }
 
 // GetBestBlock returns the hash and height of the wallet's best block.
