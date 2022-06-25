@@ -23,7 +23,10 @@ export default class OrderBook {
 
   /* add adds an order to the order book. */
   add (ord: MiniOrder) {
-    if (ord.qtyAtomic === 0) return
+    if (ord.qtyAtomic === 0) {
+      window.log('zeroqty', 'zero quantity order encountered', ord)
+      return
+    }
     const side = ord.sell ? this.sells : this.buys
     side.splice(findIdx(side, ord.rate, !ord.sell), 0, ord)
   }
