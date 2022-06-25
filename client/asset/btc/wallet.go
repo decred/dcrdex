@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/btcutil"
@@ -47,6 +48,7 @@ type Wallet interface {
 	searchBlockForRedemptions(ctx context.Context, reqs map[outPoint]*findRedemptionReq, blockHash chainhash.Hash) (discovered map[outPoint]*findRedemptionResult)
 	findRedemptionsInMempool(ctx context.Context, reqs map[outPoint]*findRedemptionReq) (discovered map[outPoint]*findRedemptionResult)
 	getBlock(h chainhash.Hash) (*wire.MsgBlock, error)
+	reconfigure(walletCfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error)
 }
 
 // tipNotifier can be implemented if the Wallet is able to provide a stream of

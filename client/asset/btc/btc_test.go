@@ -129,6 +129,7 @@ type msgBlockWithHeight struct {
 }
 
 type testData struct {
+	walletCfg     *baseWalletConfig
 	badSendHash   *chainhash.Hash
 	sendErr       error
 	sentRawTx     *wire.MsgTx
@@ -644,13 +645,13 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWalletFullNode, *testD
 	var err error
 	switch walletType {
 	case walletTypeRPC:
-		wallet, err = newRPCWallet(&tRawRequester{data}, cfg, &WalletConfig{})
+		wallet, err = newRPCWallet(&tRawRequester{data}, cfg, &RPCWalletConfig{})
 	case walletTypeSPV:
 		w, err := newUnconnectedWallet(cfg, &WalletConfig{})
 		if err == nil {
 			wallet = &ExchangeWalletFullNode{w}
 			neutrinoClient := &tNeutrinoClient{data}
-			wallet.node = &spvWallet{
+			spvw := &spvWallet{
 				chainParams: &chaincfg.MainNetParams,
 				wallet:      &tBtcWallet{data},
 				cl:          neutrinoClient,
@@ -662,8 +663,12 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWalletFullNode, *testD
 				log:         cfg.Logger.SubLogger("SPV"),
 				loader:      nil,
 			}
+			spvw.birthdayV.Store(time.Time{})
+			wallet.node = spvw
 		}
 	}
+
+	data.walletCfg = wallet.cfgV.Load().(*baseWalletConfig)
 
 	if err != nil {
 		shutdown()
@@ -1018,7 +1023,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	// Prepare for a split transaction.
 	baggageFees := tBTC.MaxFeeRate * splitTxBaggage
 	node.changeAddr = tP2WPKHAddr
-	wallet.useSplitTx = true
+	node.walletCfg.useSplitTx = true
 	// No error when no split performed cuz math.
 	coins, _, err := wallet.FundOrder(ord)
 	if err != nil {
@@ -1062,7 +1067,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	_ = wallet.ReturnCoins(coins)
 
 	// The split should also be added if we set the option at order time.
-	wallet.useSplitTx = false
+	node.walletCfg.useSplitTx = false
 	ord.Options = map[string]string{splitKey: "true"}
 	coins, _, err = wallet.FundOrder(ord)
 	if err != nil {
@@ -1379,7 +1384,7 @@ func TestFundEdges(t *testing.T) {
 
 	// For a split transaction, we would need to cover the splitTxBaggage as
 	// well.
-	wallet.useSplitTx = true
+	node.walletCfg.useSplitTx = true
 	node.changeAddr = tP2WPKHAddr
 	node.signFunc = func(tx *wire.MsgTx) {
 		signFunc(tx, 0, wallet.segwit)
@@ -1411,7 +1416,7 @@ func TestFundEdges(t *testing.T) {
 	if coins[0].Value() == v {
 		t.Fatalf("split performed when baggage wasn't covered")
 	}
-	wallet.useSplitTx = false
+	node.walletCfg.useSplitTx = false
 
 	// P2SH(P2PKH) p2sh pkScript = 23 bytes, p2pkh pkScript (redeemscript) = 25 bytes
 	// sigScript = signature(1 + 73) + pubkey(1 + 33) + redeemscript(1 + 25) = 134
@@ -1598,7 +1603,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 
 	// For a split transaction, we would need to cover the splitTxBaggage as
 	// well.
-	wallet.useSplitTx = true
+	node.walletCfg.useSplitTx = true
 	node.changeAddr = tP2WPKHAddr
 	node.signFunc = func(tx *wire.MsgTx) {
 		signFunc(tx, 0, wallet.segwit)
@@ -1628,7 +1633,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 	if coins[0].Value() == v {
 		t.Fatalf("split performed when baggage wasn't covered")
 	}
-	wallet.useSplitTx = false
+	node.walletCfg.useSplitTx = false
 }
 
 func TestSwap(t *testing.T) {
@@ -2443,7 +2448,7 @@ func TestEstimateRegistrationTxFee(t *testing.T) {
 }
 
 func testEstimateRegistrationTxFee(t *testing.T, segwit bool, walletType string) {
-	wallet, _, shutdown, err := tNewWallet(segwit, walletType)
+	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
 	defer shutdown()
 	if err != nil {
 		t.Fatal(err)
@@ -2451,8 +2456,8 @@ func testEstimateRegistrationTxFee(t *testing.T, segwit bool, walletType string)
 
 	const inputCount = 5
 	const txSize = dexbtc.MinimumTxOverhead + 2*dexbtc.P2PKHOutputSize + inputCount*dexbtc.RedeemP2PKHInputSize
-	wallet.feeRateLimit = 100
-	wallet.fallbackFeeRate = 30
+	node.walletCfg.feeRateLimit = 100
+	node.walletCfg.fallbackFeeRate = 30
 
 	estimate := wallet.EstimateRegistrationTxFee(50)
 	if estimate != 50*txSize {
@@ -2460,13 +2465,13 @@ func testEstimateRegistrationTxFee(t *testing.T, segwit bool, walletType string)
 	}
 
 	estimate = wallet.EstimateRegistrationTxFee(0)
-	if estimate != wallet.fallbackFeeRate*txSize {
-		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate*txSize, estimate)
+	if estimate != wallet.fallbackFeeRate()*txSize {
+		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate()*txSize, estimate)
 	}
 
-	estimate = wallet.EstimateRegistrationTxFee(wallet.feeRateLimit + 1)
-	if estimate != wallet.fallbackFeeRate*txSize {
-		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate*txSize, estimate)
+	estimate = wallet.EstimateRegistrationTxFee(wallet.feeRateLimit() + 1)
+	if estimate != wallet.fallbackFeeRate()*txSize {
+		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate()*txSize, estimate)
 	}
 }
 

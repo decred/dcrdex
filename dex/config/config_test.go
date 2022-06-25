@@ -262,3 +262,60 @@ func DataConversion(t *testing.T) {
 		t.Fatalf("map-cfg-obh: expected value for key 'key5' not to change, changed to '%s'", cfg.Key5)
 	}
 }
+
+func TestParseIntoEmbeddedStructs(t *testing.T) {
+	type BB struct {
+		B int `ini:"b"`
+	}
+
+	settings := map[string]string{
+		"a": "1",
+		"b": "2",
+	}
+
+	// Embedded value.
+	cfg := &struct {
+		A int `ini:"a"`
+		BB
+	}{}
+
+	if err := Unmapify(settings, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.A != 1 {
+		t.Fatalf("a = %d =/= 1", cfg.A)
+	}
+	if cfg.B != 2 {
+		t.Fatalf("a = %d =/= 2", cfg.B)
+	}
+
+	// Embedded non-nil pointer.
+	cfg2 := &struct {
+		A int `ini:"a"`
+		*BB
+	}{
+		BB: &BB{},
+	}
+
+	if err := Unmapify(settings, cfg2); err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg2.A != 1 {
+		t.Fatalf("a = %d =/= 1", cfg2.A)
+	}
+	if cfg2.B != 2 {
+		t.Fatalf("a = %d =/= 2", cfg2.B)
+	}
+
+	// nil pointer ignored. No error.
+	cfg3 := &struct {
+		A int `ini:"a"`
+		*BB
+	}{}
+
+	if err := Unmapify(settings, cfg3); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -477,8 +477,8 @@ export default class WalletsPage extends BasePage {
       Doc.show(page.reconfigErr)
       return
     }
-    const assetHasActiveOrders = app().haveAssetOrders(assetID)
-    this.reconfigForm.update(currentDef.configopts || [], assetHasActiveOrders)
+    const walletIsActive = app().walletIsActive(assetID)
+    this.reconfigForm.update(currentDef.configopts || [], walletIsActive)
     this.reconfigForm.setConfig(res.map)
     this.updateDisplayedReconfigFields(currentDef)
   }

@@ -1919,7 +1919,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	}
 
 	walletCfg.Settings[asset.SpecialSettingActivelyUsed] =
-		strconv.FormatBool(c.assetHasActiveOrders(dbWallet.AssetID))
+		strconv.FormatBool(c.walletIsActive(dbWallet.AssetID))
 	defer delete(walletCfg.Settings, asset.SpecialSettingActivelyUsed)
 
 	logger := c.log.SubLogger(unbip(assetID))
@@ -1966,6 +1966,20 @@ func (c *Core) WalletState(assetID uint32) *WalletState {
 func (c *Core) assetHasActiveOrders(assetID uint32) bool {
 	for _, dc := range c.dexConnections() {
 		if dc.hasActiveAssetOrders(assetID) {
+			return true
+		}
+	}
+	return false
+}
+
+// walletIsActive combines assetHasActiveOrders with a check for pending
+// registration fee payments.
+func (c *Core) walletIsActive(assetID uint32) bool {
+	if c.assetHasActiveOrders(assetID) {
+		return true
+	}
+	for _, dc := range c.dexConnections() {
+		if pf := dc.getPendingFee(); pf != nil && pf.AssetID == assetID {
 			return true
 		}
 	}
@@ -2036,8 +2050,8 @@ func (c *Core) startWalletSyncMonitor(wallet *xcWallet) {
 // orders unless as a last ditch effort to get the wallet to recognize a
 // transaction needed to complete a swap.
 func (c *Core) RescanWallet(assetID uint32, force bool) error {
-	if !force && c.assetHasActiveOrders(assetID) {
-		return newError(activeOrdersErr, "active orders for %v", unbip(assetID))
+	if !force && c.walletIsActive(assetID) {
+		return newError(activeOrdersErr, "active orders or registration fee payments for %v", unbip(assetID))
 	}
 
 	wallet, err := c.connectedWallet(assetID)
@@ -2323,6 +2337,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 		return newError(missingWalletErr, "%d -> %s wallet not found",
 			assetID, unbip(assetID))
 	}
+
 	oldDef, err := walletDefinition(assetID, oldWallet.walletType)
 	if err != nil {
 		return fmt.Errorf("failed to locate old wallet definition: %v", err)
@@ -2337,6 +2352,84 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 		EncryptedPW: oldWallet.encPW(),
 		Address:     oldDepositAddr,
 	}
+
+	storeWithBalance := func(w *xcWallet) error {
+		balances, err := c.walletBalance(w)
+		if err != nil {
+			c.log.Warnf("Error getting balance for wallet %s: %v", unbip(assetID), err)
+			// Do not fail in case this requires an unlocked wallet.
+		} else {
+			w.setBalance(balances)              // update xcWallet's WalletBalance
+			dbWallet.Balance = balances.Balance // store the db.Balance
+		}
+
+		err = c.db.UpdateWallet(dbWallet)
+		if err != nil {
+			return newError(dbErr, "error saving wallet configuration: %w", err)
+		}
+
+		c.notify(newBalanceNote(assetID, balances)) // redundant with wallet config note?
+		subject, details := c.formatDetails(TopicWalletConfigurationUpdated, unbip(assetID), w.address)
+		c.notify(newWalletConfigNote(TopicWalletConfigurationUpdated, subject, details, db.Success, w.state()))
+
+		return nil
+	}
+
+	clearTickGovernors := func() {
+		for _, dc := range c.dexConnections() {
+			dc.tradeMtx.RLock()
+			for _, t := range dc.trades {
+				if t.Base() != assetID && t.Quote() != assetID {
+					continue
+				}
+				isFromAsset := t.wallets.fromAsset.ID == assetID
+				t.mtx.Lock()
+				for _, m := range t.matches {
+					if m.tickGovernor != nil &&
+						((m.suspectSwap && isFromAsset) || (m.suspectRedeem && !isFromAsset)) {
+
+						m.tickGovernor.Stop()
+						m.tickGovernor = nil
+					}
+				}
+				t.mtx.Unlock()
+			}
+			dc.tradeMtx.RUnlock()
+		}
+	}
+
+	// See if the wallet offers a quick path.
+	if configurer, is := oldWallet.Wallet.(asset.LiveReconfigurer); is {
+		if restart, err := configurer.Reconfigure(c.ctx, &asset.WalletConfig{
+			Type:     form.Type,
+			Settings: form.Config,
+			DataDir:  c.assetDataDirectory(assetID),
+		}, oldWallet.currentDepositAddress()); err != nil {
+			return err
+		} else if !restart {
+			// Config was updated without a need to restart.
+			if owns, err := oldWallet.OwnsDepositAddress(oldWallet.currentDepositAddress()); err != nil {
+				return newError(walletErr, "error checking deposit address after live config update: %w", err)
+			} else if !owns {
+				if dbWallet.Address, err = oldWallet.refreshDepositAddress(); err != nil {
+					return newError(newAddrErr, "error refreshing deposit address after live config update: %w", err)
+				}
+			}
+			if !walletDef.Seeded && newWalletPW != nil {
+				if err = c.setWalletPassword(oldWallet, newWalletPW, crypter); err != nil {
+					return newError(walletAuthErr, "failed to update password: %v", err)
+				}
+			}
+			if err = storeWithBalance(oldWallet); err != nil {
+				return err
+			}
+			clearTickGovernors()
+			c.log.Infof("%s wallet configuration updated without a restart 👍", unbip(assetID))
+			return nil
+		}
+	}
+
+	c.log.Infof("%s wallet configuration update will require a restart", unbip(assetID))
 
 	var restartOnFail bool
 
@@ -2379,8 +2472,8 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 			restartOnFail = true
 		}
 	} else if newWalletPW == nil && oldDef.Seeded {
-		// If we're switching from a seeded wallet and no password was provided,
-		// use empty string = wallet not encrypted.
+		// If we're switching from a seeded wallet to a non-seeded wallet and no
+		// password was provided, use empty string = wallet not encrypted.
 		newWalletPW = []byte{}
 	}
 
@@ -2403,13 +2496,13 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 	// If there are active trades, make sure they can be settled by the
 	// keys held within the new wallet.
 	sameWallet := func() error {
-		if c.assetHasActiveOrders(wallet.AssetID) {
+		if c.walletIsActive(assetID) {
 			owns, err := wallet.OwnsDepositAddress(oldDepositAddr)
 			if err != nil {
 				return err
 			}
 			if !owns {
-				return errors.New("new wallet does not own old deposit address")
+				return errors.New("new wallet in active use does not own the old deposit address. abandoning configuration update")
 			}
 		}
 		return nil
@@ -2442,19 +2535,9 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 		}
 	}
 
-	balances, err := c.walletBalance(wallet)
-	if err != nil {
-		c.log.Warnf("Error getting balance for wallet %s: %v", unbip(assetID), err)
-		// Do not fail in case this requires an unlocked wallet.
-	} else {
-		wallet.setBalance(balances)         // update xcWallet's WalletBalance
-		dbWallet.Balance = balances.Balance // store the db.Balance
-	}
-
-	err = c.db.UpdateWallet(dbWallet)
-	if err != nil {
+	if err = storeWithBalance(wallet); err != nil {
 		wallet.Disconnect()
-		return newError(dbErr, "error saving wallet configuration: %w", err)
+		return err
 	}
 
 	c.updateAssetWalletRefs(wallet)
@@ -2467,31 +2550,14 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 		go oldWallet.Disconnect()
 	}
 
-	c.notify(newBalanceNote(assetID, balances)) // redundant with wallet config note?
-	subject, details := c.formatDetails(TopicWalletConfigurationUpdated, unbip(assetID), wallet.address)
-	c.notify(newWalletConfigNote(TopicWalletConfigurationUpdated, subject, details, db.Success, wallet.state()))
+	// reReserveFunding is likely a no-op because of the walletIsActive check
+	// above, and because of the way current LiveReconfigurers are implemented.
+	// For forward compatibility though, if a LiveReconfigurer with active
+	// orders indicates restart and the new wallet still owns the keys, we can
+	// end up here and we need to re-reserve.
+	go c.reReserveFunding(wallet)
 
-	// Clear any existing tickGovernors for suspect matches.
-	for _, dc := range c.dexConnections() {
-		dc.tradeMtx.RLock()
-		for _, t := range dc.trades {
-			if t.Base() != assetID && t.Quote() != assetID {
-				continue
-			}
-			isFromAsset := t.wallets.fromAsset.ID == assetID
-			t.mtx.Lock()
-			for _, m := range t.matches {
-				if m.tickGovernor != nil &&
-					((m.suspectSwap && isFromAsset) || (m.suspectRedeem && !isFromAsset)) {
-
-					m.tickGovernor.Stop()
-					m.tickGovernor = nil
-				}
-			}
-			t.mtx.Unlock()
-		}
-		dc.tradeMtx.RUnlock()
-	}
+	clearTickGovernors()
 
 	return nil
 }
@@ -5595,6 +5661,159 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 		c.notify(newOrderNote(TopicOrderLoaded, "", "", db.Data, tracker.coreOrder()))
 	}
 	return relocks
+}
+
+// reReserveFunding reserves funding coins for a newly instantiated wallet.
+// reReserveFunding is closely modeled on resumeTrades, so see resumeTrades for
+// docs.
+func (c *Core) reReserveFunding(w *xcWallet) {
+
+	markUnfunded := func(trade *trackedTrade, matches []*matchTracker) {
+		trade.changeLocked = false
+		trade.coinsLocked = false
+		for _, match := range matches {
+			match.swapErr = errors.New("no funding coins for swap")
+		}
+	}
+
+	for _, dc := range c.dexConnections() {
+		for _, tracker := range dc.trackedTrades() {
+			// TODO: Consider tokens
+			if tracker.Base() != w.AssetID && tracker.Quote() != w.AssetID {
+				continue
+			}
+
+			notifyErr := func(topic Topic, args ...interface{}) {
+				subject, detail := c.formatDetails(topic, args...)
+				c.notify(newOrderNote(topic, subject, detail, db.ErrorLevel, tracker.coreOrderInternal()))
+			}
+
+			trade := tracker.Trade()
+
+			fromID := tracker.Quote()
+			if trade.Sell {
+				fromID = tracker.Base()
+			}
+
+			denom, marketMult, limitMult := lcm(uint64(len(tracker.matches)), trade.Quantity)
+			var refundNum, redeemNum uint64
+
+			addMatchRedemption := func(match *matchTracker) {
+				if tracker.isMarketBuy() {
+					redeemNum += marketMult // * 1
+				} else {
+					redeemNum += match.Quantity * limitMult
+				}
+			}
+
+			addMatchRefund := func(match *matchTracker) {
+				if tracker.isMarketBuy() {
+					refundNum += marketMult // * 1
+				} else {
+					refundNum += match.Quantity * limitMult
+				}
+			}
+
+			isActive := tracker.metaData.Status == order.OrderStatusBooked || tracker.metaData.Status == order.OrderStatusEpoch
+			var matchesNeedingCoins []*matchTracker
+			for _, match := range tracker.matches {
+				if match.Side == order.Maker {
+					if match.Status < order.MakerSwapCast {
+						matchesNeedingCoins = append(matchesNeedingCoins, match)
+					}
+					if match.Status < order.MakerRedeemed {
+						addMatchRedemption(match)
+						addMatchRefund(match)
+					}
+				} else { // Taker
+					if match.Status < order.TakerSwapCast {
+						matchesNeedingCoins = append(matchesNeedingCoins, match)
+					}
+					if match.Status < order.MakerRedeemed {
+						addMatchRefund(match)
+					}
+					if match.Status < order.MatchComplete {
+						addMatchRedemption(match)
+					}
+				}
+			}
+
+			if c.ctx.Err() != nil {
+				return
+			}
+
+			// Prepare funding coins, but don't update tracker until the mutex
+			// is locked.
+			needsCoins := len(matchesNeedingCoins) > 0
+			// nil coins = no locking required, empty coins = something went
+			// wrong, non-empty means locking required.
+			var coins asset.Coins
+			if fromID == w.AssetID && (isActive || needsCoins) {
+				coins = []asset.Coin{} // should already be
+				coinIDs := trade.Coins
+				if len(tracker.metaData.ChangeCoin) != 0 {
+					coinIDs = []order.CoinID{tracker.metaData.ChangeCoin}
+				}
+				if len(coinIDs) == 0 {
+					notifyErr(TopicOrderCoinError, tracker.token())
+					markUnfunded(tracker, matchesNeedingCoins) // bug - no user resolution
+				} else {
+					byteIDs := make([]dex.Bytes, 0, len(coinIDs))
+					for _, cid := range coinIDs {
+						byteIDs = append(byteIDs, []byte(cid))
+					}
+					var err error
+					coins, err = w.FundingCoins(byteIDs)
+					if err != nil || len(coins) == 0 {
+						notifyErr(TopicOrderCoinFetchError, tracker.token(), unbip(fromID), err)
+						c.log.Warnf("(re-reserve) Check the status of your %s wallet and the coins logged above! "+
+							"Resolve the wallet issue if possible and restart the DEX client.",
+							strings.ToUpper(unbip(fromID)))
+						c.log.Warnf("(re-reserve) Unfunded order %v will be revoked if %d active matches don't get funding coins!",
+							tracker.ID(), len(matchesNeedingCoins))
+					}
+				}
+			}
+
+			tracker.mtx.Lock()
+
+			// Refund and redemption reserves for active matches. Doing this
+			// under mutex lock, but noting that the underlying calls to
+			// ReReserveRedemption and ReReserveRefund could potentially involve
+			// long-running RPC calls.
+			if fromID == w.AssetID {
+				tracker.refundLocked = 0
+				if refundNum != 0 {
+					tracker.lockRefundFraction(refundNum, denom)
+				}
+			} else {
+				tracker.redemptionLocked = 0
+				if redeemNum != 0 {
+					tracker.lockRedemptionFraction(redeemNum, denom)
+				}
+			}
+
+			// Funding coins
+			if coins != nil {
+				tracker.coinsLocked = len(coins) > 0
+				tracker.coins = mapifyCoins(coins)
+			}
+
+			// Refund and redemption reserves for booked orders.
+
+			tracker.recalcFilled() // Make sure Remaining is accurate.
+
+			if isActive {
+				if fromID == w.AssetID {
+					tracker.lockRefundFraction(trade.Remaining(), trade.Quantity)
+				} else {
+					tracker.lockRedemptionFraction(trade.Remaining(), trade.Quantity)
+				}
+			}
+
+			tracker.mtx.Unlock()
+		}
+	}
 }
 
 // generateDEXMaps creates the associated assets, market and epoch maps of the
