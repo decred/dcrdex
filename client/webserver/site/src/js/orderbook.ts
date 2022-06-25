@@ -23,6 +23,21 @@ export default class OrderBook {
 
   /* add adds an order to the order book. */
   add (ord: MiniOrder) {
+    if (ord.qtyAtomic === 0) {
+      // TODO: Somebody, for the love of god, figure out why the hell this helps
+      // with the ghost orders problem. As far as I know, this order is a booked
+      // order that had more than one match in an epoch and completely filled.
+      // Because the first match didn't exhaust the order, there would be a
+      // 'update_remaining' notification scheduled for the order. But by the
+      // time OrderRouter generates the notification long after matching, the
+      // order has zero qty left to fill. It's all good though, kinda, because
+      // the notification is quickly followed with an 'unbook_order'
+      // notification. I have tried my damnedest to catch an update_remaining
+      // note without an accompanying unbook_order note, and have thus failed.
+      // Yet, this fix somehow seems to work. It's infuriating, tbh.
+      window.log('zeroqty', 'zero quantity order encountered', ord)
+      return
+    }
     const side = ord.sell ? this.sells : this.buys
     side.splice(findIdx(side, ord.rate, !ord.sell), 0, ord)
   }
