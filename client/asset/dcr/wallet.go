@@ -111,16 +111,16 @@ type Wallet interface {
 	// SendRawTransaction broadcasts the provided transaction to the Decred
 	// network.
 	SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
-	// GetBlockHeader returns block header info for the specified block hash. The
-	// returned block header is a wire.BlockHeader with the addition of the block's
-	// median time.
+	// GetBlockHeader generates a *BlockHeader for the specified block hash. The
+	// returned block header is a wire.BlockHeader with the addition of the
+	// block's median time.
 	GetBlockHeader(ctx context.Context, blockHash *chainhash.Hash) (*BlockHeader, error)
 	// GetBlock returns the *wire.MsgBlock.
 	GetBlock(ctx context.Context, blockHash *chainhash.Hash) (*wire.MsgBlock, error)
 	// GetTransaction returns the details of a wallet tx, if the wallet contains a
 	// tx with the provided hash. Returns asset.CoinNotFoundError if the tx is not
 	// found in the wallet.
-	GetTransaction(ctx context.Context, txHash *chainhash.Hash) (*walletjson.GetTransactionResult, error)
+	GetTransaction(ctx context.Context, txHash *chainhash.Hash) (*WalletTransaction, error)
 	// GetRawTransaction returns details of the tx with the provided hash.
 	// Returns asset.CoinNotFoundError if the tx is not found.
 	GetRawTransaction(ctx context.Context, txHash *chainhash.Hash) (*wire.MsgTx, error)
@@ -143,6 +143,23 @@ type Wallet interface {
 	PeerCount(ctx context.Context) (uint32, error)
 	// AddressPrivKey fetches the privkey for the specified address.
 	AddressPrivKey(ctx context.Context, address stdaddr.Address) (*secp256k1.PrivateKey, error)
+}
+
+// WalletTransaction is a pared down version of walletjson.GetTransactionResult.
+type WalletTransaction struct {
+	Confirmations int64
+	BlockHash     string
+	Details       []walletjson.GetTransactionDetailsResult
+	Hex           string
+}
+
+// tipNotifier can be implemented if the Wallet is able to provide a stream of
+// blocks as they are finished being processed.
+// DRAFT NOTE: This is alternative to NotifyOnTipChange. I prefer this method,
+// and would vote to export this interface and get rid of NotifyOnTipChange.
+// @itswisdomagain might be using the current API though.
+type tipNotifier interface {
+	tipFeed() <-chan *block
 }
 
 // FeeRateEstimator is satisfied by a Wallet that can provide fee rate

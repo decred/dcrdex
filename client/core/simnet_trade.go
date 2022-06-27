@@ -1419,7 +1419,14 @@ type tWallet struct {
 	hc         *harnessCtrl
 }
 
-func dcrWallet(node string) (*tWallet, error) {
+func dcrWallet(useSPV bool, node string) (*tWallet, error) {
+	if useSPV {
+		return &tWallet{
+			walletType: "SPV",
+			fund:       true,
+		}, nil
+	}
+
 	cfg, err := config.Parse(filepath.Join(dextestDir, "dcr", node, fmt.Sprintf("%s.conf", node)))
 	if err != nil {
 		return nil, err
@@ -1505,13 +1512,11 @@ func zecWallet(node string) (*tWallet, error) {
 func (s *simulationTest) newClient(name string, cl *SimClient) (*simulationClient, error) {
 	wallets := make(map[uint32]*tWallet, 2)
 	addWallet := func(assetID uint32, useSPV bool, node string) error {
-		var (
-			tw  *tWallet
-			err error
-		)
+		var tw *tWallet
+		var err error
 		switch assetID {
 		case dcr.BipID:
-			tw, err = dcrWallet(node)
+			tw, err = dcrWallet(useSPV, node)
 		case btc.BipID:
 			tw, err = btcWallet(useSPV, node)
 		case eth.BipID:

@@ -137,7 +137,12 @@ type rpcClient interface {
 // of the rpcWallet. The rpcClient isn't connected to the server yet, use the
 // Connect method of the returned *rpcWallet to connect the rpcClient to the
 // server.
-func newRPCWallet(cfg *Config, chainParams *chaincfg.Params, logger dex.Logger) (*rpcWallet, error) {
+func newRPCWallet(settings map[string]string, logger dex.Logger, net dex.Network) (*rpcWallet, error) {
+	cfg, chainParams, err := loadRPCConfig(settings, net)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing config: %w", err)
+	}
+
 	// Check rpc connection config values
 	missing := ""
 	if cfg.RPCUser == "" {
@@ -347,9 +352,7 @@ func (w *rpcWallet) SpvMode() bool {
 // the wallet sees new mainchain blocks. The return value indicates if this
 // notification can be provided.
 // Part of the Wallet interface.
-func (w *rpcWallet) NotifyOnTipChange(ctx context.Context, cb TipChangeCallback) bool {
-	// TODO: Consider implementing tip change notifications using the rpcclient
-	// websocket OnBlockConnected notification.
+func (w *rpcWallet) NotifyOnTipChange(ctx context.Context, _ TipChangeCallback) bool {
 	return false
 }
 
@@ -497,8 +500,8 @@ func (w *rpcWallet) UnspentOutput(ctx context.Context, txHash *chainhash.Hash, i
 	return nil, asset.CoinNotFoundError
 }
 
-// GetNewAddressGapPolicy returns an address from the specified account using
-// the specified gap policy.
+// ExternalAddress returns an external address from the specified account using
+// GapPolicyIgnore.
 // Part of the Wallet interface.
 func (w *rpcWallet) ExternalAddress(ctx context.Context, acctName string) (stdaddr.Address, error) {
 	addr, err := w.rpcClient.GetNewAddressGapPolicy(ctx, acctName, dcrwallet.GapPolicyIgnore)
@@ -546,7 +549,7 @@ func (w *rpcWallet) SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allo
 	return hash, translateRPCCancelErr(err)
 }
 
-// GetBlockHeader returns block header info for the specified block hash. The
+// GetBlockHeader generates a *BlockHeader for the specified block hash. The
 // returned block header is a wire.BlockHeader with the addition of the block's
 // median time.
 func (w *rpcWallet) GetBlockHeader(ctx context.Context, blockHash *chainhash.Hash) (*BlockHeader, error) {
@@ -585,7 +588,7 @@ func (w *rpcWallet) GetBlock(ctx context.Context, blockHash *chainhash.Hash) (*w
 // tx with the provided hash. Returns asset.CoinNotFoundError if the tx is not
 // found in the wallet.
 // Part of the Wallet interface.
-func (w *rpcWallet) GetTransaction(ctx context.Context, txHash *chainhash.Hash) (*walletjson.GetTransactionResult, error) {
+func (w *rpcWallet) GetTransaction(ctx context.Context, txHash *chainhash.Hash) (*WalletTransaction, error) {
 	tx, err := w.client().GetTransaction(ctx, txHash)
 	if err != nil {
 		if isTxNotFoundErr(err) {
@@ -593,7 +596,12 @@ func (w *rpcWallet) GetTransaction(ctx context.Context, txHash *chainhash.Hash) 
 		}
 		return nil, fmt.Errorf("error finding transaction %s in wallet: %w", txHash, translateRPCCancelErr(err))
 	}
-	return tx, nil
+	return &WalletTransaction{
+		Confirmations: tx.Confirmations,
+		BlockHash:     tx.BlockHash,
+		Details:       tx.Details,
+		Hex:           tx.Hex,
+	}, nil
 }
 
 // GetRawTransaction returns details of the tx with the provided hash. Returns

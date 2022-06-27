@@ -245,6 +245,7 @@ github.com/deckarep/golang-set v1.8.0/go.mod h1:5nI87KwE7wgsBU1F4GKAw2Qod7p5kyS3
 github.com/decred/base58 v1.0.3/go.mod h1:pXP9cXCfM2sFLb2viz2FNIdeMWmZDBKG3ZBYbiSM78E=
 github.com/decred/base58 v1.0.4 h1:QJC6B0E0rXOPA8U/kw2rP+qiRJsUaE2Er+pYb3siUeA=
 github.com/decred/base58 v1.0.4/go.mod h1:jJswKPEdvpFpvf7dsDvFZyLT22xZ9lWqEByX38oGd9E=
+github.com/decred/dcrd/addrmgr/v2 v2.0.0 h1:ui8zpM+of+peJo19XGnFgwtrEK/boTyZpFzzqVUIWFk=
 github.com/decred/dcrd/addrmgr/v2 v2.0.0/go.mod h1:5g9jPzBSQotmSnPri4oc1n5VVgWzPLlXwbr6HGoUVrg=
 github.com/decred/dcrd/blockchain/stake/v4 v4.0.0 h1:PwoCjCTbRvDUZKKs6N2Haus8XcbVXCJ9iGVs8C9sKwQ=
 github.com/decred/dcrd/blockchain/stake/v4 v4.0.0/go.mod h1:bOgG7YTbTOWQgtHLL2l1Y9gBHIuM86zwVcQtsoGlZlQ=
@@ -260,6 +261,7 @@ github.com/decred/dcrd/chaincfg/chainhash v1.0.3/go.mod h1:BpbrGgrPTr3YJYRN3Bm+D
 github.com/decred/dcrd/chaincfg/v3 v3.1.0/go.mod h1:4XF9nlx2NeGD4xzw1+L0DGICZMl0a5rKV8nnuHLgk8o=
 github.com/decred/dcrd/chaincfg/v3 v3.1.1 h1:Ki8kq5IXGmjriiQyPCrCTF1aZSBiORb91/Sr5xW4otw=
 github.com/decred/dcrd/chaincfg/v3 v3.1.1/go.mod h1:4XF9nlx2NeGD4xzw1+L0DGICZMl0a5rKV8nnuHLgk8o=
+github.com/decred/dcrd/connmgr/v3 v3.1.0 h1:M197w+xsZQ8CVidigrchoab31wWRUlZhudQDDlq7/Gk=
 github.com/decred/dcrd/connmgr/v3 v3.1.0/go.mod h1:NVzQpMSu87fzwEgYmoz+xfVHI6un4+xMkvcMoDjdaRs=
 github.com/decred/dcrd/crypto/blake256 v1.0.0 h1:/8DMNYp9SGi5f0w7uCm6d6M4OU2rGFK09Y2A4Xv7EE0=
 github.com/decred/dcrd/crypto/blake256 v1.0.0/go.mod h1:sQl2p6Y26YV+ZOcSTP6thNdn47hh8kt6rqSlvmrXFAc=

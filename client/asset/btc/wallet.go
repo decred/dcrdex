@@ -49,6 +49,8 @@ type Wallet interface {
 	getBlock(h chainhash.Hash) (*wire.MsgBlock, error)
 }
 
+// tipNotifier can be implemented if the Wallet is able to provide a stream of
+// blocks as they are finished being processed.
 type tipNotifier interface {
 	tipFeed() <-chan *block
 }

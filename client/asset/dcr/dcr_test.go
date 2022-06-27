@@ -140,7 +140,8 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func(), error) {
 		PeersChange: func(uint32) {},
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
-	wallet, err := unconnectedWallet(walletCfg, &Config{PrimaryAccount: tAcctName}, tChainParams, tLogger)
+
+	wallet, err := unconnectedWallet(walletCfg, &walletConfig{PrimaryAccount: tAcctName}, tChainParams, tLogger)
 	if err != nil {
 		shutdown()
 		return nil, nil, nil, err
