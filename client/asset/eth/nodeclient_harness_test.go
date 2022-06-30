@@ -15,10 +15,6 @@
 // TODO: Running these tests many times on simnet eventually results in all
 // transactions returning "unexpected error for test ok: exceeds block gas
 // limit". Find out why that is.
-//
-// TODO: Running tests on the goerli testnet, specifically the contract tests,
-// will randomly fail because a transaction receipt cannot be retrieved. This
-// may be inevitable because we are using a light node. Verify this.
 
 package eth
 
@@ -57,11 +53,10 @@ import (
 )
 
 const (
-	alphaNode                 = "enode://897c84f6e4f18195413c1d02927e6a4093f5e7574b52bdec6f20844c4f1f6dd3f16036a9e600bd8681ab50fd8dd144df4a6ba9dd8722bb578a86aaa8222c964f@127.0.0.1:30304"
-	alphaAddr                 = "18d65fb8d60c1199bb1ad381be47aa692b482605"
-	pw                        = "bee75192465cef9f8ab1198093dfed594e93ae810ccbbf2b3b12e1771cc6cb19"
-	maxFeeRate         uint64 = 200 // gwei per gas
-	testnetSecPerBlock        = 15
+	alphaNode         = "enode://897c84f6e4f18195413c1d02927e6a4093f5e7574b52bdec6f20844c4f1f6dd3f16036a9e600bd8681ab50fd8dd144df4a6ba9dd8722bb578a86aaa8222c964f@127.0.0.1:30304"
+	alphaAddr         = "18d65fb8d60c1199bb1ad381be47aa692b482605"
+	pw                = "bee75192465cef9f8ab1198093dfed594e93ae810ccbbf2b3b12e1771cc6cb19"
+	maxFeeRate uint64 = 200 // gwei per gas
 
 	// The following constants are related to testnet testing.
 
@@ -117,12 +112,11 @@ var (
 	participantTokenContractor  tokenContractor
 	ethGases                    = dexeth.VersionedGases[0]
 	tokenGases                  = &dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts[0].Gas
-	// waitForMined is set based on testnet or simnet.
-	waitForMined = waitForMinedSimnet
+	testnetSecPerBlock          = 15 * time.Second
 	// secPerBlock is one for simnet, because it takes one second to mine a
 	// block currently. Is set in code to testnetSecPerBlock if runing on
 	// testnet.
-	secPerBlock = 1
+	secPerBlock = time.Second
 )
 
 func newContract(stamp uint64, secretHash [32]byte, val uint64) *asset.Contract {
@@ -143,16 +137,49 @@ func newRedeem(secret, secretHash [32]byte) *asset.Redemption {
 	}
 }
 
-func waitForMinedSimnet(t *testing.T, nc *nodeClient, timeLimit time.Duration, waitTimeLimit bool) error {
+// waitForReceipt waits for a tx. This is useful on testnet when a tx may be "missing"
+// due to reorg. Wait for a few blocks to find the main chain and hopefully our tx.
+func waitForReceipt(t *testing.T, nc *nodeClient, tx *types.Transaction) (*types.Receipt, error) {
 	t.Helper()
-	err := exec.Command("geth", "--datadir="+alphaNodeDir, "attach", "--exec", "miner.start()").Run()
-	if err != nil {
-		return err
+	hash := tx.Hash()
+	// Waiting as much as five blocks.
+	timesUp := time.After(5 * secPerBlock)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Second):
+			receipt, err := nc.transactionReceipt(ctx, hash)
+			if err != nil {
+				if errors.Is(err, asset.CoinNotFoundError) {
+					continue
+				}
+				return nil, err
+			}
+			spew.Dump(receipt)
+			return receipt, nil
+		case <-timesUp:
+			spew.Dump(tx)
+			return nil, errors.New("wait for receipt timed out, txn might be missing due to reorg, " +
+				"check the preceding tx for a bad nonce or low gas cap")
+		}
 	}
-	defer func() {
-		_ = exec.Command("geth", "--datadir="+alphaNodeDir, "attach", "--exec", "miner.stop()").Run()
-	}()
-	timesUp := time.After(timeLimit)
+}
+
+// waitForMined will multiply the time limit by testnetSecPerBlock for
+// testnet and mine blocks when on simnet.
+func waitForMined(t *testing.T, nBlock int, waitTimeLimit bool) error {
+	t.Helper()
+	if !isTestnet {
+		err := exec.Command("geth", "--datadir="+alphaNodeDir, "attach", "--exec", "miner.start()").Run()
+		if err != nil {
+			return err
+		}
+		defer func() {
+			_ = exec.Command("geth", "--datadir="+alphaNodeDir, "attach", "--exec", "miner.stop()").Run()
+		}()
+	}
+	timesUp := time.After(time.Duration(nBlock) * secPerBlock)
 out:
 	for {
 		select {
@@ -161,7 +188,7 @@ out:
 		case <-timesUp:
 			return errors.New("timed out")
 		case <-time.After(time.Second):
-			txsa, err := nc.pendingTransactions()
+			txsa, err := ethClient.pendingTransactions()
 			if err != nil {
 				return fmt.Errorf("initiator pendingTransactions error: %v", err)
 			}
@@ -174,34 +201,6 @@ out:
 			}
 		}
 	}
-	if waitTimeLimit {
-		<-timesUp
-	}
-	return nil
-}
-
-// waitForMinedTestnet will multiply the time limit by testnetSecPerBlock.
-func waitForMinedTestnet(t *testing.T, nc *nodeClient, timeLimit time.Duration, waitTimeLimit bool) error {
-	t.Helper()
-	timesUp := time.After(timeLimit * testnetSecPerBlock)
-out:
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timesUp:
-			return errors.New("timed out")
-		case <-time.After(time.Second * testnetSecPerBlock):
-			txs, err := nc.pendingTransactions()
-			if err != nil {
-				return err
-			}
-			if len(txs) == 0 {
-				break out
-			}
-		}
-	}
-
 	if waitTimeLimit {
 		<-timesUp
 	}
@@ -369,7 +368,6 @@ func runTestnet(m *testing.M) (int, error) {
 	if err != nil {
 		return 1, fmt.Errorf("error creating testnet participant wallet dir: %v", err)
 	}
-	waitForMined = waitForMinedTestnet
 	secPerBlock = testnetSecPerBlock
 	ethSwapContractAddr = dexeth.ContractAddresses[0][dex.Testnet]
 	fmt.Printf("ETH swap contract address is %v\n", ethSwapContractAddr)
@@ -544,18 +542,18 @@ func prepareTokenClients(t *testing.T) {
 		t.Fatalf("participant approveToken error: %v", err)
 	}
 
-	time.Sleep(1) // waitForMined only looks at alpha's tx pool. Give txs time to propagate.
-	if err := waitForMined(t, participantEthClient, time.Second*8, true); err != nil {
+	time.Sleep(1) // Give txs time to propagate.
+	if err := waitForMined(t, 8, true); err != nil {
 		t.Fatalf("unexpected error while waiting to mine approval block: %v", err)
 	}
 
-	receipt1, err := ethClient.transactionReceipt(ctx, tx1.Hash())
+	receipt1, err := waitForReceipt(t, ethClient, tx1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	spew.Dump(receipt1)
 
-	receipt2, err := participantEthClient.transactionReceipt(ctx, tx2.Hash())
+	receipt2, err := waitForReceipt(t, participantEthClient, tx2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -760,7 +758,7 @@ func testSendTransaction(t *testing.T) {
 	}
 
 	spew.Dump(tx)
-	if err := waitForMined(t, ethClient, time.Second*10, false); err != nil {
+	if err := waitForMined(t, 10, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -814,7 +812,7 @@ func testSendSignedTransaction(t *testing.T) {
 	}
 
 	spew.Dump(tx)
-	if err := waitForMined(t, ethClient, time.Second*10, false); err != nil {
+	if err := waitForMined(t, 10, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -833,10 +831,10 @@ func testTransactionReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := waitForMined(t, ethClient, time.Second*10, false); err != nil {
+	if err := waitForMined(t, 10, false); err != nil {
 		t.Fatal(err)
 	}
-	receipt, err := ethClient.transactionReceipt(ctx, tx.Hash())
+	receipt, err := waitForReceipt(t, ethClient, tx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1062,12 +1060,12 @@ func testInitiate(t *testing.T, assetID uint32) {
 			t.Fatalf("%s: initiate error: %v", test.name, err)
 		}
 
-		if err := waitForMined(t, ethClient, time.Second*10, false); err != nil {
+		if err := waitForMined(t, 10, false); err != nil {
 			t.Fatalf("%s: post-initiate mining error: %v", test.name, err)
 		}
 
 		// It appears the receipt is only accessible after the tx is mined.
-		receipt, err := ethClient.transactionReceipt(ctx, tx.Hash())
+		receipt, err := waitForReceipt(t, ethClient, tx)
 		if err != nil {
 			t.Fatalf("%s: failed retrieving initiate receipt: %v", test.name, err)
 		}
@@ -1177,10 +1175,10 @@ func testRedeemGas(t *testing.T, assetID uint32) {
 	if err != nil {
 		t.Fatalf("Unable to initiate swap: %v ", err)
 	}
-	if err := waitForMined(t, ethClient, time.Second*8, true); err != nil {
+	if err := waitForMined(t, 8, true); err != nil {
 		t.Fatalf("unexpected error while waiting to mine: %v", err)
 	}
-	receipt, err := ethClient.transactionReceipt(ctx, tx.Hash())
+	receipt, err := waitForReceipt(t, ethClient, tx)
 	if err != nil {
 		t.Fatalf("failed retrieving initiate receipt: %v", err)
 	}
@@ -1233,7 +1231,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 	if assetID != BipID {
 		prepareTokenClients(t)
 	}
-	lockTime := uint64(time.Now().Add(time.Second * 12 * time.Duration(secPerBlock)).Unix())
+	lockTime := uint64(time.Now().Add(12 * secPerBlock).Unix())
 	numSecrets := 10
 	secrets := make([][32]byte, 0, numSecrets)
 	secretHashes := make([][32]byte, 0, numSecrets)
@@ -1255,7 +1253,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 
 	tests := []struct {
 		name               string
-		sleep              time.Duration
+		sleepNBlocks       int
 		redeemerClient     *nodeClient
 		redeemer           *accounts.Account
 		redeemerContractor contractor
@@ -1268,7 +1266,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 	}{
 		{
 			name:               "ok before locktime",
-			sleep:              time.Second * 8,
+			sleepNBlocks:       8,
 			redeemerClient:     participantEthClient,
 			redeemer:           participantAcct,
 			redeemerContractor: pc,
@@ -1280,7 +1278,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		},
 		{
 			name:               "ok two before locktime",
-			sleep:              time.Second * 8,
+			sleepNBlocks:       8,
 			redeemerClient:     participantEthClient,
 			redeemer:           participantAcct,
 			redeemerContractor: pc,
@@ -1300,7 +1298,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		},
 		{
 			name:               "ok after locktime",
-			sleep:              time.Second * 16,
+			sleepNBlocks:       16,
 			redeemerClient:     participantEthClient,
 			redeemer:           participantAcct,
 			redeemerContractor: pc,
@@ -1312,7 +1310,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		},
 		{
 			name:               "bad redeemer",
-			sleep:              time.Second * 8,
+			sleepNBlocks:       8,
 			redeemerClient:     ethClient,
 			redeemer:           simnetAcct,
 			redeemerContractor: c,
@@ -1324,7 +1322,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		},
 		{
 			name:               "bad secret",
-			sleep:              time.Second * 8,
+			sleepNBlocks:       8,
 			redeemerClient:     participantEthClient,
 			redeemer:           participantAcct,
 			redeemerContractor: pc,
@@ -1337,7 +1335,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		{
 			name:               "duplicate secret hashes",
 			expectRedeemErr:    true,
-			sleep:              time.Second * 8,
+			sleepNBlocks:       8,
 			redeemerClient:     participantEthClient,
 			redeemer:           participantAcct,
 			redeemerContractor: pc,
@@ -1389,12 +1387,12 @@ func testRedeem(t *testing.T, assetID uint32) {
 			t.Fatalf("%s: initiate error: %v ", test.name, err)
 		}
 
-		// This waitForMined will always take test.sleep to complete.
-		if err := waitForMined(t, ethClient, test.sleep, true); err != nil {
+		// This waitForMined will always take test.sleepNBlocks to complete.
+		if err := waitForMined(t, test.sleepNBlocks, true); err != nil {
 			t.Fatalf("%s: post-init mining error: %v", test.name, err)
 		}
 
-		receipt, err := test.redeemerClient.transactionReceipt(ctx, tx.Hash())
+		receipt, err := waitForReceipt(t, test.redeemerClient, tx)
 		if err != nil {
 			t.Fatalf("%s: failed to get init receipt: %v", test.name, err)
 		}
@@ -1453,11 +1451,11 @@ func testRedeem(t *testing.T, assetID uint32) {
 		}
 		spew.Dump(tx)
 
-		if err := waitForMined(t, test.redeemerClient, time.Second*10, false); err != nil {
+		if err := waitForMined(t, 10, false); err != nil {
 			t.Fatalf("%s: post-redeem mining error: %v", test.name, err)
 		}
 
-		receipt, err = test.redeemerClient.transactionReceipt(ctx, tx.Hash())
+		receipt, err = waitForReceipt(t, test.redeemerClient, tx)
 		if err != nil {
 			t.Fatalf("%s: failed to get redeem receipt: %v", test.name, err)
 		}
@@ -1560,7 +1558,7 @@ func testRefundGas(t *testing.T, assetID uint32) {
 	if err != nil {
 		t.Fatalf("Unable to initiate swap: %v ", err)
 	}
-	if err := waitForMined(t, ethClient, time.Second*8, true); err != nil {
+	if err := waitForMined(t, 8, true); err != nil {
 		t.Fatalf("unexpected error while waiting to mine: %v", err)
 	}
 
@@ -1602,7 +1600,7 @@ func testRefund(t *testing.T, assetID uint32) {
 		gases = tokenGases
 		c, pc = simnetTokenContractor, participantTokenContractor
 	}
-	sleepFor := time.Second * 8
+	sleepForNBlocks := 8
 	tests := []struct {
 		name                         string
 		refunder                     *accounts.Account
@@ -1684,7 +1682,7 @@ func testRefund(t *testing.T, assetID uint32) {
 		}
 
 		if test.redeem {
-			if err := waitForMined(t, ethClient, sleepFor, false); err != nil {
+			if err := waitForMined(t, sleepForNBlocks, false); err != nil {
 				t.Fatalf("%s: pre-redeem mining error: %v", test.name, err)
 			}
 
@@ -1696,7 +1694,7 @@ func testRefund(t *testing.T, assetID uint32) {
 		}
 
 		// This waitForMined will always take test.sleep to complete.
-		if err := waitForMined(t, ethClient, sleepFor, true); err != nil {
+		if err := waitForMined(t, sleepForNBlocks, true); err != nil {
 			t.Fatalf("unexpected post-init mining error for test %v: %v", test.name, err)
 		}
 
@@ -1735,11 +1733,11 @@ func testRefund(t *testing.T, assetID uint32) {
 			t.Fatalf("%s: unexpected pending in balance %d", test.name, in)
 		}
 
-		if err := waitForMined(t, test.refunderClient, time.Second*10, false); err != nil {
+		if err := waitForMined(t, 10, false); err != nil {
 			t.Fatalf("%s: post-refund mining error: %v", test.name, err)
 		}
 
-		receipt, err := test.refunderClient.transactionReceipt(ctx, tx.Hash())
+		receipt, err := waitForReceipt(t, test.refunderClient, tx)
 		if err != nil {
 			t.Fatalf("%s: failed to get refund receipt: %v", test.name, err)
 		}
@@ -1810,7 +1808,7 @@ func testApproveAllowance(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := waitForMined(t, ethClient, time.Second*10, false); err != nil {
+	if err := waitForMined(t, 10, false); err != nil {
 		t.Fatalf("post approve mining error: %v", err)
 	}
 
@@ -1865,7 +1863,7 @@ func TestReplayAttack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := waitForMined(t, ethClient, time.Second*10, false); err != nil {
+	if err := waitForMined(t, 10, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1891,7 +1889,7 @@ func TestReplayAttack(t *testing.T) {
 				t.Fatalf("unable to initiate swap: %v ", err)
 			}
 
-			if err := waitForMined(t, ethClient, time.Second*10, false); err != nil {
+			if err := waitForMined(t, 10, false); err != nil {
 				t.Fatal(err)
 			}
 			continue
@@ -1909,7 +1907,7 @@ func TestReplayAttack(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unable to set up the bomb: %v", err)
 		}
-		if err = waitForMined(t, ethClient, time.Second*10, false); err != nil {
+		if err = waitForMined(t, 10, false); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1922,16 +1920,16 @@ func TestReplayAttack(t *testing.T) {
 		t.Fatalf("unable to get all your base: %v", err)
 	}
 	spew.Dump(tx)
-	if err = waitForMined(t, ethClient, time.Second*10, false); err != nil {
+	if err = waitForMined(t, 10, false); err != nil {
 		t.Fatal(err)
 	}
-	receipt, err := ethClient.transactionReceipt(ctx, tx.Hash())
+	receipt, err := waitForReceipt(t, ethClient, tx)
 	if err != nil {
 		t.Fatalf("unable to get receipt: %v", err)
 	}
 	spew.Dump(receipt)
 
-	if err = waitForMined(t, ethClient, time.Second*10, false); err != nil {
+	if err = waitForMined(t, 10, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1946,10 +1944,10 @@ func TestReplayAttack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to are belong to us: %v", err)
 	}
-	if err = waitForMined(t, ethClient, time.Second*10, false); err != nil {
+	if err = waitForMined(t, 10, false); err != nil {
 		t.Fatal(err)
 	}
-	receipt, err = ethClient.transactionReceipt(ctx, tx.Hash())
+	receipt, err = waitForReceipt(t, ethClient, tx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2049,7 +2047,7 @@ func testSignMessage(t *testing.T) {
 func TestTokenGasEstimates(t *testing.T) {
 	prepareTokenClients(t)
 	if err := GetGasEstimates(ctx, ethClient, simnetTokenContractor, 5, tokenGases, func() {
-		if err := waitForMined(t, ethClient, time.Second*10, false); err != nil {
+		if err := waitForMined(t, 10, false); err != nil {
 			t.Fatalf("mining error: %v", err)
 		}
 	}); err != nil {
@@ -2060,7 +2058,7 @@ func TestTokenGasEstimates(t *testing.T) {
 func TestTokenGasEstimatesParticipant(t *testing.T) {
 	prepareTokenClients(t)
 	if err := GetGasEstimates(ctx, participantEthClient, participantTokenContractor, 5, tokenGases, func() {
-		if err := waitForMined(t, participantEthClient, time.Second*10, false); err != nil {
+		if err := waitForMined(t, 10, false); err != nil {
 			t.Fatalf("mining error: %v", err)
 		}
 	}); err != nil {
