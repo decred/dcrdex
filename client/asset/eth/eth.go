@@ -1439,17 +1439,23 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet) ([]
 
 	g := w.gases(contractVer)
 	if g == nil {
-		return nil, nil, 0, fmt.Errorf("no gas table")
+		return fail(fmt.Errorf("no gas table"))
 	}
 
-	// Get a redemption gas estimate.
+	if feeWallet == nil {
+		feeWallet = w
+	}
+	bal, err := feeWallet.Balance()
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("error getting balance in excessive gas fee recovery: %v", err)
+	}
+
+	gasLimit, gasFeeCap := g.Redeem*n, form.FeeSuggestion
+	originalFundsReserved := gasLimit * gasFeeCap
 	gasEst, err := w.estimateRedeemGas(w.ctx, secrets, contractVer)
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("error getting redemption estimate: %v", err)
+		return fail(fmt.Errorf("error getting redemption estimate: %w", err))
 	}
-
-	// If our estimate is higher than the calculated limit
-	gasLimit := g.Redeem * n
 	if gasEst > gasLimit {
 		// This is sticky. We only reserved so much for redemption, so accepting
 		// a gas limit higher than anticipated could potentially mess us up. On
@@ -1459,24 +1465,35 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet) ([]
 		candidateLimit := gasEst * 11 / 10 // Add 10% for good measure.
 		// Cannot be more than double.
 		if candidateLimit > gasLimit*2 {
-			return nil, nil, 0, fmt.Errorf("cannot recover from excessive gas estimate %d > 2 * %d", candidateLimit, gasLimit)
+			return fail(fmt.Errorf("cannot recover from excessive gas estimate %d > 2 * %d", candidateLimit, gasLimit))
 		}
-		additionalGas := candidateLimit - gasLimit
-		if feeWallet == nil {
-			feeWallet = w
-		}
-		bal, err := feeWallet.Balance()
-		if err != nil {
-			return nil, nil, 0, fmt.Errorf("error getting balance in excessive gas fee recovery: %v", err)
-		}
-		if bal.Available < additionalGas {
-			return nil, nil, 0, fmt.Errorf("no balance available for gas overshoot recovery. %d < %d", bal.Available, additionalGas)
+		additionalFundsNeeded := (candidateLimit - gasLimit) * form.FeeSuggestion
+		if bal.Available < additionalFundsNeeded {
+			return fail(fmt.Errorf("no balance available for gas overshoot recovery. %d < %d", bal.Available, additionalFundsNeeded))
 		}
 		w.log.Warnf("live gas estimate %d exceeded expected max value %d. using higher limit %d for redemption", gasEst, gasLimit, candidateLimit)
 		gasLimit = candidateLimit
 	}
 
-	tx, err := w.redeem(w.ctx, w.assetID, form.Redemptions, form.FeeSuggestion, gasLimit, contractVer)
+	// If the base fee is higher than the FeeSuggestion we attempt to increase
+	// the gasFeeCap to 2*baseFee. If we don't have enough funds, we use the
+	// funds we have available.
+	baseFee, _, err := w.node.currentFees(w.ctx)
+	if err != nil {
+		return fail(fmt.Errorf("Error getting net fee state: %w", err))
+	}
+	baseFeeGwei := dexeth.WeiToGwei(baseFee)
+	if baseFeeGwei > form.FeeSuggestion {
+		additionalFundsNeeded := (2 * baseFeeGwei * gasLimit) - originalFundsReserved
+		if bal.Available > additionalFundsNeeded {
+			gasFeeCap = 2 * baseFeeGwei
+		} else {
+			gasFeeCap = (bal.Available + originalFundsReserved) / gasLimit
+		}
+		w.log.Warnf("base fee %d > server max fee rate %d. using %d as gas fee cap for redemption", baseFeeGwei, form.FeeSuggestion, gasFeeCap)
+	}
+
+	tx, err := w.redeem(w.ctx, w.assetID, form.Redemptions, gasFeeCap, gasLimit, contractVer)
 	if err != nil {
 		return fail(fmt.Errorf("Redeem: redeem error: %w", err))
 	}
