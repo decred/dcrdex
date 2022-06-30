@@ -177,10 +177,13 @@ func (n *nodeClient) locked() bool {
 func (n *nodeClient) transactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
 	tx, blockHash, _, index, err := n.leth.ApiBackend.GetTransaction(ctx, txHash)
 	if err != nil {
+		if errors.Is(err, ethereum.NotFound) {
+			return nil, asset.CoinNotFoundError
+		}
 		return nil, err
 	}
 	if tx == nil {
-		return nil, fmt.Errorf("transaction %v not found", txHash)
+		return nil, fmt.Errorf("%w: transaction %v not found", asset.CoinNotFoundError, txHash)
 	}
 	receipts, err := n.leth.ApiBackend.GetReceipts(ctx, blockHash)
 	if err != nil {
