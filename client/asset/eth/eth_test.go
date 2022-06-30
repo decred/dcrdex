@@ -210,26 +210,28 @@ func (n *testNode) transactionConfirmations(context.Context, common.Hash) (uint3
 }
 
 type tContractor struct {
-	gasEstimates  *dexeth.Gases
-	swapMap       map[[32]byte]*dexeth.SwapState
-	swapErr       error
-	initTx        *types.Transaction
-	initErr       error
-	redeemTx      *types.Transaction
-	redeemErr     error
-	refundTx      *types.Transaction
-	refundErr     error
-	initGasErr    error
-	redeemGasErr  error
-	refundGasErr  error
-	redeemable    bool
-	redeemableErr error
-	valueIn       map[common.Hash]uint64
-	valueOut      map[common.Hash]uint64
-	valueErr      error
-	refundable    bool
-	refundableErr error
-	lastRefund    struct {
+	gasEstimates      *dexeth.Gases
+	swapMap           map[[32]byte]*dexeth.SwapState
+	swapErr           error
+	initTx            *types.Transaction
+	initErr           error
+	redeemTx          *types.Transaction
+	redeemErr         error
+	refundTx          *types.Transaction
+	refundErr         error
+	initGasErr        error
+	redeemGasErr      error
+	refundGasErr      error
+	redeemGasOverride *uint64
+	redeemable        bool
+	redeemableErr     error
+	valueIn           map[common.Hash]uint64
+	valueOut          map[common.Hash]uint64
+	valueErr          error
+	refundable        bool
+	refundableErr     error
+	lastRedeemOpts    *bind.TransactOpts
+	lastRefund        struct {
 		// tx          *types.Transaction
 		secretHash [32]byte
 		maxFeeRate *big.Int
@@ -253,6 +255,7 @@ func (c *tContractor) initiate(*bind.TransactOpts, []*asset.Contract) (*types.Tr
 }
 
 func (c *tContractor) redeem(txOpts *bind.TransactOpts, redeems []*asset.Redemption) (*types.Transaction, error) {
+	c.lastRedeemOpts = txOpts
 	return c.redeemTx, c.redeemErr
 }
 
@@ -267,6 +270,9 @@ func (c *tContractor) estimateInitGas(ctx context.Context, n int) (uint64, error
 }
 
 func (c *tContractor) estimateRedeemGas(ctx context.Context, secrets [][32]byte) (uint64, error) {
+	if c.redeemGasOverride != nil {
+		return *c.redeemGasOverride, nil
+	}
 	return c.gasEstimates.RedeemN(len(secrets)), c.redeemGasErr
 }
 
@@ -1748,8 +1754,6 @@ func testRedeem(t *testing.T, assetID uint32) {
 	defer delete(dexeth.VersionedGases, 1)
 	defer delete(tokenContracts, 1)
 
-	node.bal = dexeth.GweiToWei(10e9)
-
 	contractorV1 := &tContractor{
 		swapMap:      make(map[[32]byte]*dexeth.SwapState, 1),
 		gasEstimates: ethGases,
@@ -1789,18 +1793,260 @@ func testRedeem(t *testing.T, assetID uint32) {
 	addSwapToSwapMap(secretHashes[0], 1e9, dexeth.SSInitiated)
 	addSwapToSwapMap(secretHashes[1], 1e9, dexeth.SSInitiated)
 
+	var redeemGas uint64
+	if assetID == BipID {
+		redeemGas = ethGases.Redeem
+	} else {
+		redeemGas = tokenGases.Redeem
+	}
+	var higherGasEstimate uint64 = redeemGas * 2 * 12 / 10                     // 120% of estimate
+	var doubleGasEstimate uint64 = (redeemGas * 2 * 2) * 10 / 11               // 200% of estimate after 10% increase
+	var moreThanDoubleGasEstimate uint64 = (redeemGas * 2 * 21 / 10) * 10 / 11 // > 200% of estimate after 10% increase
+	// additionalFundsNeeded calculates the amount of available funds that we be
+	// needed to use a higher gas estimate than the original, and double the base
+	// fee if it is higher than the server's max fee rate.
+	additionalFundsNeeded := func(feeSuggestion, baseFee, gasEstimate, numRedeems uint64) uint64 {
+		originalReserves := feeSuggestion * redeemGas * numRedeems
+
+		var gasFeeCap, gasLimit uint64
+		if gasEstimate > redeemGas {
+			gasLimit = gasEstimate * 11 / 10
+		} else {
+			gasLimit = redeemGas * numRedeems
+		}
+
+		if baseFee > feeSuggestion {
+			gasFeeCap = 2 * baseFee
+		} else {
+			gasFeeCap = feeSuggestion
+		}
+
+		amountRequired := gasFeeCap * gasLimit
+
+		return amountRequired - originalReserves
+	}
+
 	tests := []struct {
-		name            string
-		form            asset.RedeemForm
-		redeemErr       error
-		isRedeemable    bool
-		isRedeemableErr error
-		expectError     bool
+		name              string
+		form              asset.RedeemForm
+		redeemErr         error
+		isRedeemable      bool
+		isRedeemableErr   error
+		ethBal            *big.Int
+		baseFee           *big.Int
+		redeemGasOverride *uint64
+		expectedGasFeeCap *big.Int
+		expectError       bool
 	}{
 		{
-			name:         "ok",
-			expectError:  false,
-			isRedeemable: true,
+			name:              "ok",
+			expectError:       false,
+			isRedeemable:      true,
+			ethBal:            dexeth.GweiToWei(10e9),
+			baseFee:           dexeth.GweiToWei(100),
+			expectedGasFeeCap: dexeth.GweiToWei(100),
+			form: asset.RedeemForm{
+				Redemptions: []*asset.Redemption{
+					{
+						Spends: &asset.AuditInfo{
+							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
+							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
+							Coin: &coin{
+								id: randomHash(),
+							},
+						},
+						Secret: secrets[0][:],
+					},
+					{
+						Spends: &asset.AuditInfo{
+							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
+							SecretHash: secretHashes[1][:],
+							Coin: &coin{
+								id: randomHash(),
+							},
+						},
+						Secret: secrets[1][:],
+					},
+				},
+				FeeSuggestion: 100,
+			},
+		},
+		{
+			name:              "higher gas estimate than reserved",
+			expectError:       false,
+			isRedeemable:      true,
+			ethBal:            dexeth.GweiToWei(additionalFundsNeeded(100, 50, higherGasEstimate, 2)),
+			baseFee:           dexeth.GweiToWei(100),
+			expectedGasFeeCap: dexeth.GweiToWei(100),
+			redeemGasOverride: &higherGasEstimate,
+			form: asset.RedeemForm{
+				Redemptions: []*asset.Redemption{
+					{
+						Spends: &asset.AuditInfo{
+							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
+							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
+							Coin: &coin{
+								id: randomHash(),
+							},
+						},
+						Secret: secrets[0][:],
+					},
+					{
+						Spends: &asset.AuditInfo{
+							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
+							SecretHash: secretHashes[1][:],
+							Coin: &coin{
+								id: randomHash(),
+							},
+						},
+						Secret: secrets[1][:],
+					},
+				},
+				FeeSuggestion: 100,
+			},
+		},
+		{
+			name:              "gas estimate double reserved",
+			expectError:       false,
+			isRedeemable:      true,
+			ethBal:            dexeth.GweiToWei(10e9),
+			baseFee:           dexeth.GweiToWei(100),
+			expectedGasFeeCap: dexeth.GweiToWei(100),
+			redeemGasOverride: &doubleGasEstimate,
+			form: asset.RedeemForm{
+				Redemptions: []*asset.Redemption{
+					{
+						Spends: &asset.AuditInfo{
+							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
+							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
+							Coin: &coin{
+								id: randomHash(),
+							},
+						},
+						Secret: secrets[0][:],
+					},
+					{
+						Spends: &asset.AuditInfo{
+							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
+							SecretHash: secretHashes[1][:],
+							Coin: &coin{
+								id: randomHash(),
+							},
+						},
+						Secret: secrets[1][:],
+					},
+				},
+				FeeSuggestion: 100,
+			},
+		},
+		{
+			name:              "gas estimate more than double reserved",
+			expectError:       true,
+			isRedeemable:      true,
+			ethBal:            dexeth.GweiToWei(additionalFundsNeeded(100, 50, moreThanDoubleGasEstimate, 2)),
+			baseFee:           dexeth.GweiToWei(100),
+			redeemGasOverride: &moreThanDoubleGasEstimate,
+			form: asset.RedeemForm{
+				Redemptions: []*asset.Redemption{
+					{
+						Spends: &asset.AuditInfo{
+							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
+							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
+							Coin: &coin{
+								id: randomHash(),
+							},
+						},
+						Secret: secrets[0][:],
+					},
+					{
+						Spends: &asset.AuditInfo{
+							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
+							SecretHash: secretHashes[1][:],
+							Coin: &coin{
+								id: randomHash(),
+							},
+						},
+						Secret: secrets[1][:],
+					},
+				},
+				FeeSuggestion: 100,
+			},
+		},
+		{
+			name:              "higher gas estimate than reserved, balance too low",
+			expectError:       true,
+			isRedeemable:      true,
+			ethBal:            dexeth.GweiToWei(additionalFundsNeeded(100, 50, higherGasEstimate, 2) - 1),
+			baseFee:           dexeth.GweiToWei(100),
+			redeemGasOverride: &higherGasEstimate,
+			form: asset.RedeemForm{
+				Redemptions: []*asset.Redemption{
+					{
+						Spends: &asset.AuditInfo{
+							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
+							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
+							Coin: &coin{
+								id: randomHash(),
+							},
+						},
+						Secret: secrets[0][:],
+					},
+					{
+						Spends: &asset.AuditInfo{
+							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
+							SecretHash: secretHashes[1][:],
+							Coin: &coin{
+								id: randomHash(),
+							},
+						},
+						Secret: secrets[1][:],
+					},
+				},
+				FeeSuggestion: 100,
+			},
+		},
+		{
+			name:              "base fee > fee suggestion",
+			expectError:       false,
+			isRedeemable:      true,
+			ethBal:            dexeth.GweiToWei(additionalFundsNeeded(100, 200, higherGasEstimate, 2)),
+			baseFee:           dexeth.GweiToWei(150),
+			expectedGasFeeCap: dexeth.GweiToWei(300),
+			redeemGasOverride: &higherGasEstimate,
+			form: asset.RedeemForm{
+				Redemptions: []*asset.Redemption{
+					{
+						Spends: &asset.AuditInfo{
+							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
+							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
+							Coin: &coin{
+								id: randomHash(),
+							},
+						},
+						Secret: secrets[0][:],
+					},
+					{
+						Spends: &asset.AuditInfo{
+							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
+							SecretHash: secretHashes[1][:],
+							Coin: &coin{
+								id: randomHash(),
+							},
+						},
+						Secret: secrets[1][:],
+					},
+				},
+				FeeSuggestion: 100,
+			},
+		},
+		{
+			name:              "base fee > fee suggestion, not enough for 2x base fee",
+			expectError:       false,
+			isRedeemable:      true,
+			ethBal:            dexeth.GweiToWei(additionalFundsNeeded(100, 149, higherGasEstimate, 2)),
+			baseFee:           dexeth.GweiToWei(150),
+			expectedGasFeeCap: dexeth.GweiToWei(298),
+			redeemGasOverride: &higherGasEstimate,
 			form: asset.RedeemForm{
 				Redemptions: []*asset.Redemption{
 					{
@@ -1831,6 +2077,9 @@ func testRedeem(t *testing.T, assetID uint32) {
 			name:         "not redeemable",
 			expectError:  true,
 			isRedeemable: false,
+			ethBal:       dexeth.GweiToWei(10e9),
+			baseFee:      dexeth.GweiToWei(100),
+
 			form: asset.RedeemForm{
 				Redemptions: []*asset.Redemption{
 					{
@@ -1861,6 +2110,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 			name:            "isRedeemable error",
 			expectError:     true,
 			isRedeemable:    true,
+			ethBal:          dexeth.GweiToWei(10e9),
+			baseFee:         dexeth.GweiToWei(100),
 			isRedeemableErr: errors.New(""),
 			form: asset.RedeemForm{
 				Redemptions: []*asset.Redemption{
@@ -1893,6 +2144,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 			redeemErr:    errors.New(""),
 			isRedeemable: true,
 			expectError:  true,
+			ethBal:       dexeth.GweiToWei(10e9),
+			baseFee:      dexeth.GweiToWei(100),
 			form: asset.RedeemForm{
 				Redemptions: []*asset.Redemption{
 					{
@@ -1913,6 +2166,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 			name:         "swap not found in contract",
 			isRedeemable: true,
 			expectError:  true,
+			ethBal:       dexeth.GweiToWei(10e9),
+			baseFee:      dexeth.GweiToWei(100),
 			form: asset.RedeemForm{
 				Redemptions: []*asset.Redemption{
 					{
@@ -1931,6 +2186,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 		},
 		{
 			name:         "empty redemptions slice error",
+			ethBal:       dexeth.GweiToWei(10e9),
+			baseFee:      dexeth.GweiToWei(100),
 			isRedeemable: true,
 			expectError:  true,
 			form: asset.RedeemForm{
@@ -1944,6 +2201,10 @@ func testRedeem(t *testing.T, assetID uint32) {
 		contractorV1.redeemErr = test.redeemErr
 		contractorV1.redeemable = test.isRedeemable
 		contractorV1.redeemableErr = test.isRedeemableErr
+		contractorV1.redeemGasOverride = test.redeemGasOverride
+
+		node.bal = test.ethBal
+		node.baseFee = test.baseFee
 
 		txs, out, fees, err := w.Redeem(&test.form)
 		if test.expectError {
@@ -1971,6 +2232,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			t.Fatalf("%v: expected fees %d, but got %d", test.name, expectedFees, fees)
 		}
 
+		// Check that value of output coin is as axpected
 		var totalSwapValue uint64
 		for _, redemption := range test.form.Redemptions {
 			_, secretHash, err := dexeth.DecodeContractData(redemption.Spends.Contract)
@@ -1982,10 +2244,29 @@ func testRedeem(t *testing.T, assetID uint32) {
 			swap := contractorV1.swapMap[secretHash]
 			totalSwapValue += swap.Value
 		}
-
 		if out.Value() != totalSwapValue {
 			t.Fatalf("expected coin value to be %d but got %d",
 				totalSwapValue, out.Value())
+		}
+
+		// Check that gas limit in the transaction is as expected
+		var expectedGasLimit uint64
+		if test.redeemGasOverride == nil {
+			if assetID == BipID {
+				expectedGasLimit = ethGases.Redeem * uint64(len(test.form.Redemptions))
+			} else {
+				expectedGasLimit = tokenGases.Redeem * uint64(len(test.form.Redemptions))
+			}
+		} else {
+			expectedGasLimit = *test.redeemGasOverride * 11 / 10
+		}
+		if contractorV1.lastRedeemOpts.GasLimit != expectedGasLimit {
+			t.Fatalf("%s: expected gas limit %d, but got %d", test.name, expectedGasLimit, contractorV1.lastRedeemOpts.GasLimit)
+		}
+
+		// Check that the gas fee cap in the transaction is as expected
+		if contractorV1.lastRedeemOpts.GasFeeCap.Cmp(test.expectedGasFeeCap) != 0 {
+			t.Fatalf("%s: expected gas fee cap %v, but got %v", test.name, test.expectedGasFeeCap, contractorV1.lastRedeemOpts.GasFeeCap)
 		}
 	}
 }
