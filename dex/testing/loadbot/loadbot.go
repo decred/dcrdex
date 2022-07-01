@@ -99,8 +99,12 @@ var (
 	defaultMidGap, marketBuyBuffer float64
 	keepMidGap                     bool
 
-	processesMtx = sync.Mutex{}
-	processes    = []*process{}
+	processesMtx sync.Mutex
+	processes    []*process
+
+	// zecSendMtx prevents sending funds too soon after mining a block and
+	// the harness choosing spent outputs for zcash.
+	zecSendMtx sync.Mutex
 )
 
 func init() {
@@ -181,9 +185,18 @@ func returnAddress(symbol, node string) string {
 // mine will mine a single block on the node and asset indicated.
 func mine(symbol, node string) <-chan *harnessResult {
 	n := 1
-	// geth may not include some tx at first because ???. Mine more.
-	if symbol == eth {
+	switch symbol {
+	case eth:
+		// geth may not include some tx at first because ???. Mine more.
 		n = 4
+	case zec:
+		// zcash has a problem selecting unused utxo for a second when
+		// also mining. https://github.com/zcash/zcash/issues/6045
+		zecSendMtx.Lock()
+		defer func() {
+			time.Sleep(time.Second)
+			zecSendMtx.Unlock()
+		}()
 	}
 	return harnessCtl(ctx, symbol, fmt.Sprintf("./mine-%s", node), fmt.Sprintf("%d", n))
 }
@@ -449,7 +462,7 @@ func run() error {
 		if res.err != nil {
 			return "", fmt.Errorf("error getting %s address: %v", symbol, res.err)
 		}
-		return res.output, nil
+		return strings.Trim(res.output, `"`), nil
 	}
 
 	if alphaAddrBase, err = getAddress(baseSymbol, alpha); err != nil {
