@@ -391,7 +391,7 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 			}
 		}
 	}
-	<-harnessCtl(ctx, symbol, fmt.Sprintf("./mine-%s", node), "1")
+	<-mine(symbol, node)
 
 	// Wallet syncing time. If not synced within five seconds trading will fail.
 	time.Sleep(time.Second * 5)
@@ -400,8 +400,20 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 func send(symbol, node, addr string, val uint64) error {
 	var res *harnessResult
 	switch symbol {
-	case btc, dcr, ltc, doge, bch, zec:
+	case btc, dcr, ltc, doge, bch:
 		res = <-harnessCtl(ctx, symbol, fmt.Sprintf("./%s", node), "sendtoaddress", addr, valString(val, symbol))
+	case zec:
+		// sendtoaddress will choose spent outputs if a block was
+		// recently mined. Use the zecSendMtx to ensure we have waited
+		// a sec after mining.
+		//
+		// TODO: This is not great and does not allow for multiple
+		// loadbots to run on zec at once. Find a better way to avoid
+		// double spends. Alternatively, wait for zec to fix this and
+		// remove the lock https://github.com/zcash/zcash/issues/6045
+		zecSendMtx.Lock()
+		res = <-harnessCtl(ctx, symbol, fmt.Sprintf("./%s", node), "sendtoaddress", addr, valString(val, symbol))
+		zecSendMtx.Unlock()
 	case eth:
 		// eth values are always handled as gwei, so multiply by 1e9
 		// here to convert to wei.
