@@ -494,7 +494,7 @@ type ExchangeWallet struct {
 	tradingAccount   string
 	tipChange        func(error)
 	lastPeerCount    uint32
-	peersChange      func(uint32)
+	peersChange      func(uint32, error)
 	fallbackFeeRate  uint64
 	feeRateLimit     uint64
 	redeemConfTarget uint64
@@ -1529,11 +1529,11 @@ func (dcr *ExchangeWallet) tryFund(utxos []*compositeUTXO, enough func(sum uint6
 // sent (true) or if the original coins were returned unmodified (false).
 //
 // A split transaction nets additional network bytes consisting of
-// - overhead from 1 transaction
-// - 1 extra signed p2pkh-spending input. The split tx has the fundingCoins as
-//   inputs now, but we'll add the input that spends the sized coin that will go
-//   into the first swap
-// - 2 additional p2pkh outputs for the split tx sized output and change
+//   - overhead from 1 transaction
+//   - 1 extra signed p2pkh-spending input. The split tx has the fundingCoins as
+//     inputs now, but we'll add the input that spends the sized coin that will go
+//     into the first swap
+//   - 2 additional p2pkh outputs for the split tx sized output and change
 //
 // If the fees associated with this extra baggage are more than the excess
 // amount that would be locked if a split transaction were not used, then the
@@ -3450,13 +3450,13 @@ func (dcr *ExchangeWallet) checkPeers() {
 		prevPeer := atomic.SwapUint32(&dcr.lastPeerCount, 0)
 		if prevPeer != 0 {
 			dcr.log.Errorf("Failed to get peer count: %v", err)
-			dcr.peersChange(0)
+			dcr.peersChange(0, err)
 		}
 		return
 	}
 	prevPeer := atomic.SwapUint32(&dcr.lastPeerCount, numPeers)
 	if prevPeer != numPeers {
-		dcr.peersChange(numPeers)
+		dcr.peersChange(numPeers, nil)
 	}
 }
 

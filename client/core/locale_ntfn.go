@@ -55,9 +55,19 @@ var enUS = map[Topic]*translation{
 		template: "Connected to wallet to complete registration at %s, but failed to unlock: %v",
 	},
 	// [asset name]
+	TopicWalletCommsWarning: {
+		subject:  "Wallet connection issue",
+		template: "Unable to communicate with %v wallet! Reason: %q",
+	},
+	// [asset name]
 	TopicWalletPeersWarning: {
 		subject:  "Wallet network issue",
 		template: "%v wallet has no network peers!",
+	},
+	// [asset name]
+	TopicWalletPeersRestored: {
+		subject:  "Wallet connectivity restored",
+		template: "%v wallet has reestablished connectivity.",
 	},
 	// [ticker, error]
 	TopicSendError: {

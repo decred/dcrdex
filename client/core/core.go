@@ -750,15 +750,17 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 // reconcileTrades compares the statuses of orders in the dc.trades map to the
 // statuses returned by the server on `connect`, updating the statuses of the
 // tracked trades where applicable e.g.
-// - Booked orders that were tracked as Epoch are updated to status Booked.
-// - Orders thought to be active in the dc.trades map but not returned by the
-//   server are updated to Executed, Canceled or Revoked.
+//   - Booked orders that were tracked as Epoch are updated to status Booked.
+//   - Orders thought to be active in the dc.trades map but not returned by the
+//     server are updated to Executed, Canceled or Revoked.
+//
 // Setting the order status appropriately now, especially for inactive orders,
 // ensures that...
-// - the affected trades can be retired once the trade ticker (in core.listen)
-//   observes that there are no active matches for the trades.
-// - coins are unlocked either as the affected trades' matches are swapped or
-//   revoked (for trades with active matches), or when the trades are retired.
+//   - the affected trades can be retired once the trade ticker (in core.listen)
+//     observes that there are no active matches for the trades.
+//   - coins are unlocked either as the affected trades' matches are swapped or
+//     revoked (for trades with active matches), or when the trades are retired.
+//
 // Also purges "stale" cancel orders if the targeted order is returned in the
 // server's `connect` response. See *trackedTrade.deleteStaleCancelOrder for
 // the definition of a stale cancel order.
@@ -1908,9 +1910,9 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 			// of deadlocking a Core method that calls Wallet.Disconnect.
 			go c.tipChange(assetID, err)
 		},
-		PeersChange: func(numPeers uint32) {
+		PeersChange: func(numPeers uint32, err error) {
 			if atomic.LoadUint32(&ready) == 1 {
-				go c.peerChange(wallet, numPeers)
+				go c.peerChange(wallet, numPeers, err)
 			}
 		},
 		DataDir: c.assetDataDirectory(assetID),
@@ -6679,9 +6681,11 @@ func (c *Core) removeWaiter(id string) {
 // zero, a resync monitor goroutine is launched to poll SyncStatus until the
 // wallet has caught up with its network. The monitor goroutine will regularly
 // emit wallet state notes, and once sync has been restored, a wallet balance
-// note will be emitted.
-func (c *Core) peerChange(w *xcWallet, numPeers uint32) {
-	if numPeers == 0 {
+// note will be emitted. If err is non-nil, numPeers should be zero.
+func (c *Core) peerChange(w *xcWallet, numPeers uint32, err error) {
+	if err != nil {
+		c.log.Warnf("%s wallet communication issue: %q", unbip(w.AssetID), err.Error())
+	} else if numPeers == 0 {
 		c.log.Warnf("Wallet for asset %s has zero network peers!", unbip(w.AssetID))
 	} else {
 		c.log.Tracef("New peer count for asset %s: %v", unbip(w.AssetID), numPeers)
@@ -6698,11 +6702,21 @@ func (c *Core) peerChange(w *xcWallet, numPeers uint32) {
 	// When we get peers after having none, start waiting for re-sync, otherwise
 	// leave synced alone.
 	if wasDisconnected && numPeers > 0 {
+		subject, details := c.formatDetails(TopicWalletPeersRestored, w.Info().Name)
+		c.notify(newWalletConfigNote(TopicWalletPeersRestored, subject, details,
+			db.Success, w.state()))
 		c.startWalletSyncMonitor(w)
-	} else if numPeers == 0 && !wasDisconnected {
-		subject, details := c.formatDetails(TopicWalletPeersWarning, w.Info().Name)
-		c.notify(newWalletConfigNote(TopicWalletPeersWarning, subject, details,
-			db.WarningLevel, w.state()))
+	} else if (numPeers == 0 || err != nil) && !wasDisconnected {
+		if err != nil {
+			subject, details := c.formatDetails(TopicWalletCommsWarning,
+				w.Info().Name, err.Error())
+			c.notify(newWalletConfigNote(TopicWalletCommsWarning, subject, details,
+				db.ErrorLevel, w.state()))
+		} else {
+			subject, details := c.formatDetails(TopicWalletPeersWarning, w.Info().Name)
+			c.notify(newWalletConfigNote(TopicWalletPeersWarning, subject, details,
+				db.WarningLevel, w.state()))
+		}
 	}
 
 	// Send a WalletStateNote in case Synced or anything else has changed.

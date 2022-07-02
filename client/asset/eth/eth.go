@@ -149,12 +149,12 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Ne
 
 // DecodeCoinID creates a human-readable representation of a coin ID for Ethereum.
 // In ETH there are 3 possible coin IDs:
-//   1. A transaction hash. 32 bytes
-//   2. An encoded ETH funding coin id which includes the account address and
-//      amount. 20 + 8 = 28 bytes
-//   3. An encoded token funding coin id which includes the account address, an
-//      a token value, and fees. 20 + 8 + 8 = 36 bytes
-//   4. A byte encoded string of the account address. 40 or 42 (with 0x) bytes
+//  1. A transaction hash. 32 bytes
+//  2. An encoded ETH funding coin id which includes the account address and
+//     amount. 20 + 8 = 28 bytes
+//  3. An encoded token funding coin id which includes the account address, an
+//     a token value, and fees. 20 + 8 + 8 = 36 bytes
+//  4. A byte encoded string of the account address. 40 or 42 (with 0x) bytes
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 	switch len(coinID) {
 	case common.HashLength:
@@ -289,7 +289,7 @@ type ETHWallet struct {
 	*assetWallet
 
 	lastPeerCount uint32
-	peersChange   func(uint32)
+	peersChange   func(uint32, error)
 
 	tipMtx     sync.RWMutex
 	currentTip *types.Header
@@ -2221,7 +2221,7 @@ func (eth *ETHWallet) checkPeers() {
 	numPeers := eth.node.peerCount()
 	prevPeer := atomic.SwapUint32(&eth.lastPeerCount, numPeers)
 	if prevPeer != numPeers {
-		eth.peersChange(numPeers)
+		eth.peersChange(numPeers, nil)
 	}
 }
 
