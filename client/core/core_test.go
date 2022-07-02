@@ -2713,13 +2713,13 @@ func TestTrade(t *testing.T) {
 	// dcrWallet.mtx.Lock()
 	// dcrWallet.peerCount = 0
 	// dcrWallet.mtx.Unlock()
-	tCore.peerChange(dcrWallet, 0)
+	tCore.peerChange(dcrWallet, 0, nil)
 	_, err = tCore.Trade(tPW, form)
 	if err == nil {
 		t.Fatalf("no error for no peers")
 	}
 	ch := tCore.NotificationFeed() // detect when sync goroutine completes
-	tCore.peerChange(dcrWallet, 1)
+	tCore.peerChange(dcrWallet, 1, nil)
 
 	// Wait for the balance update note when the sync status goroutine flags the
 	// wallet as synced and returns.

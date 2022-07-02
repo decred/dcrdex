@@ -137,7 +137,7 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func(), error) {
 	client := newTRPCClient()
 	walletCfg := &asset.WalletConfig{
 		TipChange:   func(error) {},
-		PeersChange: func(uint32) {},
+		PeersChange: func(uint32, error) {},
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
 

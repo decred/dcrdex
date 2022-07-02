@@ -621,7 +621,7 @@ type baseWallet struct {
 	symbol            string
 	tipChange         func(error)
 	lastPeerCount     uint32
-	peersChange       func(uint32)
+	peersChange       func(uint32, error)
 	minNetworkVersion uint64
 	dustLimit         uint64
 	useLegacyBalance  bool
@@ -1809,11 +1809,11 @@ func fund(utxos []*compositeUTXO, enough func(uint64, uint64) bool) (
 // sent (true) or if the original coins were returned unmodified (false).
 //
 // A split transaction nets additional network bytes consisting of
-// - overhead from 1 transaction
-// - 1 extra signed p2wpkh-spending input. The split tx has the fundingCoins as
-//   inputs now, but we'll add the input that spends the sized coin that will go
-//   into the first swap if the split tx does not add excess baggage
-// - 2 additional p2wpkh outputs for the split tx sized output and change
+//   - overhead from 1 transaction
+//   - 1 extra signed p2wpkh-spending input. The split tx has the fundingCoins as
+//     inputs now, but we'll add the input that spends the sized coin that will go
+//     into the first swap if the split tx does not add excess baggage
+//   - 2 additional p2wpkh outputs for the split tx sized output and change
 //
 // If the fees associated with this extra baggage are more than the excess
 // amount that would be locked if a split transaction were not used, then the
@@ -3666,13 +3666,13 @@ func (btc *baseWallet) checkPeers() {
 		prevPeer := atomic.SwapUint32(&btc.lastPeerCount, 0)
 		if prevPeer != 0 {
 			btc.log.Errorf("Failed to get peer count: %v", err)
-			btc.peersChange(0)
+			btc.peersChange(0, err)
 		}
 		return
 	}
 	prevPeer := atomic.SwapUint32(&btc.lastPeerCount, numPeers)
 	if prevPeer != numPeers {
-		btc.peersChange(numPeers)
+		btc.peersChange(numPeers, nil)
 	}
 }
 

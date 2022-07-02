@@ -66,8 +66,8 @@ func tBackend(ctx context.Context, t *testing.T, cfg *Config, walletName *Wallet
 		TipChange: func(err error) {
 			blkFunc(reportName, err)
 		},
-		PeersChange: func(num uint32) {
-			fmt.Println("peer count: ", num)
+		PeersChange: func(num uint32, err error) {
+			fmt.Printf("peer count = %d, err = %v", num, err)
 		},
 	}
 

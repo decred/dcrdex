@@ -235,7 +235,7 @@ type WalletConfig struct {
 	// PeersChange is a function that will be called when the number of
 	// wallet/node peers changes, or the wallet fails to get the count. This
 	// should not be called prior to Connect of the constructed wallet.
-	PeersChange func(uint32)
+	PeersChange func(uint32, error)
 	// DataDir is a filesystem directory the the wallet may use for persistent
 	// storage.
 	DataDir string
