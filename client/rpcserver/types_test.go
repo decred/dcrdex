@@ -392,11 +392,12 @@ func TestTradeArgs(t *testing.T) {
 			"1",            // 5. Qty
 			"1",            // 6. Rate
 			"true",         // 7. TifNow
+			"gas_price=23", // 8. Options
 		}}
 	paramsWith := func(idx int, thing string) *RawParams {
 		newParams := &RawParams{
 			PWArgs: make([]encode.PassBytes, 1),
-			Args:   make([]string, 8),
+			Args:   make([]string, 9),
 		}
 		copy(newParams.PWArgs, goodParams.PWArgs)
 		copy(newParams.Args, goodParams.Args)
@@ -438,6 +439,10 @@ func TestTradeArgs(t *testing.T) {
 		name:    "tifnow not bool",
 		params:  paramsWith(7, "blue"),
 		wantErr: errArgs,
+	}, {
+		name:    "options not map[string]string",
+		params:  paramsWith(8, "blue"),
+		wantErr: errArgs,
 	}}
 	for _, test := range tests {
 		reg, err := parseTradeArgs(test.params)
@@ -476,6 +481,9 @@ func TestTradeArgs(t *testing.T) {
 		}
 		if fmt.Sprint(reg.srvForm.TifNow) != test.params.Args[7] {
 			t.Fatalf("TifNow doesn't match")
+		}
+		if fmt.Sprintf("%s=%s", "gas_price", reg.srvForm.Options["gas_price"]) != test.params.Args[8] {
+			t.Fatalf("Options doesn't match")
 		}
 	}
 }

@@ -665,6 +665,7 @@ func TestHandleTrade(t *testing.T) {
 			"1",            // 5. Qty
 			"1",            // 6. Rate
 			"true",         // 7. TifNow
+			"gas_price=23", // 8. Options
 		}}
 	tests := []struct {
 		name        string
