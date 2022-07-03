@@ -1481,7 +1481,9 @@ func (dcr *ExchangeWallet) tryFund(utxos []*compositeUTXO, enough func(sum uint6
 			// Check if the largest output is too small.
 			lastUTXO := okUTXOs[len(okUTXOs)-1]
 			if !isEnoughWith(lastUTXO) {
-				addUTXO(lastUTXO)
+				if err = addUTXO(lastUTXO); err != nil {
+					return false, err
+				}
 				okUTXOs = okUTXOs[0 : len(okUTXOs)-1]
 				continue
 			}
