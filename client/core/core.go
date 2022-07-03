@@ -3728,7 +3728,6 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEs
 	}
 
 	preRedeem, err := baseWallet.PreRedeem(&asset.PreRedeemForm{
-		LotSize:       lotSize,
 		Lots:          maxBuy.Lots,
 		FeeSuggestion: redeemFeeSuggestion,
 		AssetConfig:   baseAsset,
@@ -3791,14 +3790,7 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, erro
 		return nil, fmt.Errorf("%s wallet MaxOrder error: %v", unbip(base), err)
 	}
 
-	midGap, err := book.MidGap()
-	if err != nil {
-		return nil, fmt.Errorf("error calculating market rate for %s at %s: %v", mktID, host, err)
-	}
-	lotSize = calc.BaseToQuote(midGap, lotSize)
-
 	preRedeem, err := quoteWallet.PreRedeem(&asset.PreRedeemForm{
-		LotSize:       lotSize,
 		Lots:          maxSell.Lots,
 		FeeSuggestion: redeemFeeSuggestion,
 	})
@@ -4201,13 +4193,13 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 		return nil, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", unbip(wallets.toAsset.ID), form.Host)
 	}
 
-	fromLotSize, toLotSize := lotSize, calc.BaseToQuote(rate, lotSize)
+	swapLotSize := lotSize
 	if !form.Sell {
-		fromLotSize, toLotSize = toLotSize, fromLotSize
+		swapLotSize = calc.BaseToQuote(rate, lotSize)
 	}
 
 	swapEstimate, err := wallets.fromWallet.PreSwap(&asset.PreSwapForm{
-		LotSize:         fromLotSize,
+		LotSize:         swapLotSize,
 		Lots:            lots,
 		AssetConfig:     wallets.fromAsset,
 		RedeemConfig:    wallets.toAsset,
@@ -4220,7 +4212,6 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 	}
 
 	redeemEstimate, err := wallets.toWallet.PreRedeem(&asset.PreRedeemForm{
-		LotSize:         toLotSize,
 		Lots:            lots,
 		FeeSuggestion:   redeemFeeSuggestion,
 		SelectedOptions: form.Options,

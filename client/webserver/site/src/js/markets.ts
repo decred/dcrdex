@@ -102,6 +102,7 @@ interface CurrentMarket {
   quote: SupportedAsset
   baseUnitInfo: UnitInfo
   quoteUnitInfo: UnitInfo
+  maxSellRequested: boolean
   maxSell: MaxOrderEstimate | null
   sellBalance: number
   buyBalance: number
@@ -707,6 +708,7 @@ export default class MarketsPage extends BasePage {
       quoteUnitInfo: qui,
       maxSell: null,
       maxBuys: {},
+      maxSellRequested: false,
       candleCaches: {},
       baseCfg,
       quoteCfg,
@@ -872,7 +874,6 @@ export default class MarketsPage extends BasePage {
    * preSell populates the max order message for the largest available sell.
    */
   preSell () {
-    this.maxOrderUpdateCounter++
     const mkt = this.market
     const baseWallet = app().assets[mkt.base.id].wallet
     if (baseWallet.balance.available < mkt.cfg.lotsize) {
@@ -883,8 +884,11 @@ export default class MarketsPage extends BasePage {
       this.setMaxOrder(mkt.maxSell.swap)
       return
     }
+    if (mkt.maxSellRequested) return
+    mkt.maxSellRequested = true
     // We only fetch pre-sell once per balance update, so don't delay.
     this.scheduleMaxEstimate('/api/maxsell', {}, 0, (res: MaxSell) => {
+      mkt.maxSellRequested = false
       mkt.maxSell = res.maxSell
       mkt.sellBalance = baseWallet.balance.available
       this.setMaxOrder(res.maxSell.swap)
@@ -895,7 +899,6 @@ export default class MarketsPage extends BasePage {
    * preBuy populates the max order message for the largest available buy.
    */
   preBuy () {
-    this.maxOrderUpdateCounter++
     const mkt = this.market
     const rate = this.adjustedRate()
     const quoteWallet = app().assets[mkt.quote.id].wallet
@@ -910,8 +913,8 @@ export default class MarketsPage extends BasePage {
     }
     // 0 delay for first fetch after balance update or market change, otherwise
     // meter these at 1 / sec.
-    const delay = mkt.maxBuys ? 1000 : 0
-    this.scheduleMaxEstimate('/api/maxbuy', { rate: rate }, delay, (res: MaxBuy) => {
+    const delay = Object.keys(mkt.maxBuys).length ? 350 : 0
+    this.scheduleMaxEstimate('/api/maxbuy', { rate }, delay, (res: MaxBuy) => {
       mkt.maxBuys[rate] = res.maxBuy
       mkt.buyBalance = app().assets[mkt.quote.id].wallet.balance.available
       this.setMaxOrder(res.maxBuy.swap)
@@ -935,6 +938,7 @@ export default class MarketsPage extends BasePage {
     Doc.hide(page.maxAboveZero)
     page.maxFromLots.textContent = intl.prep(intl.ID_CALCULATING)
     page.maxFromLotsLbl.textContent = ''
+    this.maxOrderUpdateCounter++
     const counter = this.maxOrderUpdateCounter
     this.maxEstimateTimer = window.setTimeout(async () => {
       this.maxEstimateTimer = null

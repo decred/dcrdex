@@ -1756,18 +1756,23 @@ func fund(utxos []*compositeUTXO, enough func(uint64, uint64) bool) (
 			if len(okUTXOs) == 0 {
 				return false
 			}
-			// On each loop, find the smallest UTXO that is enough.
-			for _, txout := range okUTXOs {
-				if isEnoughWith(txout) {
-					addUTXO(txout)
-					return true
-				}
+
+			// Check if the largest output is too small.
+			lastUTXO := okUTXOs[len(okUTXOs)-1]
+			if !isEnoughWith(lastUTXO) {
+				addUTXO(lastUTXO)
+				okUTXOs = okUTXOs[0 : len(okUTXOs)-1]
+				continue
 			}
-			// No single UTXO was large enough. Add the largest (the last
-			// output) and continue.
-			addUTXO(okUTXOs[len(okUTXOs)-1])
-			// Pop the utxo.
-			okUTXOs = okUTXOs[:len(okUTXOs)-1]
+
+			// We only need one then. Find it.
+			idx := sort.Search(len(okUTXOs), func(i int) bool {
+				return isEnoughWith(okUTXOs[i])
+			})
+			// No need to check idx == len(okUTXOs). We already verified that the last
+			// utxo passes above.
+			addUTXO(okUTXOs[idx])
+			return true
 		}
 	}
 
