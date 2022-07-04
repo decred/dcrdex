@@ -209,9 +209,10 @@ func checkBoolArg(arg, name string) (bool, error) {
 }
 
 func checkMapArg(arg, name string) (map[string]string, error) {
-	m, err := config.Parse([]byte(arg))
+	m := make(map[string]string)
+	err := json.Unmarshal([]byte(arg), &m)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s must be a map[string]string: %v", errArgs, name, err)
+		return nil, fmt.Errorf("%w: %s must be a JSON-encoded map[string]string: %v", errArgs, name, err)
 	}
 	return m, nil
 }
