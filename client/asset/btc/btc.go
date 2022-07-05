@@ -430,15 +430,15 @@ func (r *swapReceipt) SignedRefund() dex.Bytes {
 
 // RPCConfig adds a wallet name to the basic configuration.
 type RPCConfig struct {
-	dexbtc.RPCConfig
-	WalletName string `ini:"walletname"` // RPC
+	dexbtc.RPCConfig `ini:",extends"`
+	WalletName       string `ini:"walletname"`
 }
 
 // RPCWalletConfig is a combination of RPCConfig and WalletConfig. Used for a
 // wallet based on a bitcoind-like RPC API.
 type RPCWalletConfig struct {
-	RPCConfig
-	WalletConfig
+	RPCConfig    `ini:",extends"`
+	WalletConfig `ini:",extends"`
 }
 
 // WalletConfig are wallet-level configuration settings.
@@ -535,8 +535,8 @@ func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, 
 
 // createConfig combines the configuration settings used for wallet creation.
 type createConfig struct {
-	WalletConfig
-	RecoveryCfg
+	WalletConfig `ini:",extends"`
+	RecoveryCfg  `ini:",extends"`
 }
 
 // Create creates a new SPV wallet.

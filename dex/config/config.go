@@ -6,7 +6,6 @@ package config
 import (
 	"bytes"
 	"fmt"
-	"reflect"
 
 	"gopkg.in/ini.v1"
 )
@@ -40,49 +39,12 @@ func ParseInto(cfgPathOrData, obj interface{}) error {
 		return err
 	}
 	for _, section := range cfgFile.Sections() {
-		err := mapToFlattened(section, obj)
+		err := section.MapTo(obj)
 		if err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-func mapToFlattened(section *ini.Section, obj interface{}) error {
-	// First map it to the struct itself.
-	if err := section.MapTo(obj); err != nil {
-		return err
-	}
-
-	objv := reflect.ValueOf(obj)
-	for objv.Kind() == reflect.Ptr {
-		objv = objv.Elem()
-	}
-	if objv.Kind() != reflect.Struct {
-		return fmt.Errorf("cannot map to non-struct")
-	}
-
-	for i := 0; i < objv.NumField(); i++ {
-		v := objv.Field(i)
-		switch v.Kind() {
-		case reflect.Struct:
-			// Only traverse embedded structs.
-			if objv.Type().Field(i).Anonymous {
-				if err := mapToFlattened(section, v.Addr().Interface()); err != nil {
-					return err
-				}
-			}
-		case reflect.Ptr:
-			elem := v.Elem()
-			if elem.Kind() == reflect.Struct && !v.IsNil() {
-				if err := mapToFlattened(section, v.Interface()); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	return nil
-
 }
 
 // Data generates a config []byte data from a settings map.
