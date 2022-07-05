@@ -441,7 +441,7 @@ type WalletConfig struct {
 	FallbackFeeRate  float64 `ini:"fallbackfee"`
 	FeeRateLimit     float64 `ini:"feeratelimit"`
 	RedeemConfTarget uint64  `ini:"redeemconftarget"`
-	ActivelyUsed     bool    `ini:"special:activelyUsed"` //injected by core
+	ActivelyUsed     bool    `ini:"special:activelyUsed"` // injected by core
 	WalletName       string  `ini:"walletname"`           // RPC
 	Birthday         uint64  `ini:"walletbirthday"`       // SPV
 }
@@ -547,6 +547,10 @@ func (d *Driver) Create(params *asset.CreateWalletParams) error {
 	if err != nil {
 		return err
 	}
+	_, err = readBaseWalletConfig(walletCfg)
+	if err != nil {
+		return err
+	}
 
 	recoveryCfg := new(RecoveryCfg)
 	err = config.Unmapify(params.Settings, recoveryCfg)
@@ -595,6 +599,14 @@ func init() {
 	asset.Register(BipID, &Driver{})
 }
 
+// baseWalletConfig is the config params for the base wallet.
+type baseWalletConfig struct {
+	fallbackFeeRate  uint64 // atoms/byte
+	feeRateLimit     uint64 // atoms/byte
+	redeemConfTarget uint64
+	useSplitTx       bool
+}
+
 // baseWallet is a wallet backend for Bitcoin. The backend is how the DEX
 // client app communicates with the BTC blockchain and wallet. baseWallet
 // satisfies the dex.Wallet interface.
@@ -611,11 +623,7 @@ type baseWallet struct {
 	lastPeerCount     uint32
 	peersChange       func(uint32)
 	minNetworkVersion uint64
-	fallbackFeeRate   uint64
-	feeRateLimit      uint64
 	dustLimit         uint64
-	redeemConfTarget  uint64
-	useSplitTx        bool
 	useLegacyBalance  bool
 	zecStyleBalance   bool
 	segwit            bool
@@ -628,6 +636,7 @@ type baseWallet struct {
 	hashTx            func(*wire.MsgTx) *chainhash.Hash
 	stringAddr        dexbtc.AddressStringer
 	txVersion         func() int32
+	*baseWalletConfig
 
 	tipMtx     sync.RWMutex
 	currentTip *block
@@ -876,36 +885,45 @@ func newRPCWallet(requester RawRequesterWithContext, cfg *BTCCloneCFG, walletCon
 	return &ExchangeWalletFullNode{btc}, nil
 }
 
-func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWallet, error) {
+func readBaseWalletConfig(walletCfg *WalletConfig) (*baseWalletConfig, error) {
+	cfg := &baseWalletConfig{}
+	// if values not specified, use defaults. As they are validated as BTC/KB,
+	// we need to convert first.
+	if walletCfg.FallbackFeeRate == 0 {
+		walletCfg.FallbackFeeRate = float64(defaultFee) * 1000 / 1e8
+	}
+	if walletCfg.FeeRateLimit == 0 {
+		walletCfg.FeeRateLimit = float64(defaultFeeRateLimit) * 1000 / 1e8
+	}
+	if walletCfg.RedeemConfTarget == 0 {
+		walletCfg.RedeemConfTarget = defaultRedeemConfTarget
+	}
 	// If set in the user config, the fallback fee will be in conventional units
 	// per kB, e.g. BTC/kB. Translate that to sats/byte.
-	fallbackFeesPerByte := toSatoshi(walletCfg.FallbackFeeRate / 1000)
-	if fallbackFeesPerByte == 0 {
-		fallbackFeesPerByte = cfg.DefaultFallbackFee
+	cfg.fallbackFeeRate = toSatoshi(walletCfg.FallbackFeeRate / 1000)
+	if cfg.fallbackFeeRate == 0 {
+		return nil, fmt.Errorf("fallback fee rate limit is smaller than the minimum 1000 sats/byte: %v",
+			walletCfg.FallbackFeeRate)
 	}
-	cfg.Logger.Tracef("Fallback fees set at %d %s/vbyte",
-		fallbackFeesPerByte, cfg.WalletInfo.UnitInfo.AtomicUnit)
-
 	// If set in the user config, the fee rate limit will be in units of BTC/KB.
 	// Convert to sats/byte & error if value is smaller than smallest unit.
-	feesLimitPerByte := cfg.DefaultFeeRateLimit
-	if feesLimitPerByte == 0 {
-		feesLimitPerByte = defaultFeeRateLimit
+	cfg.feeRateLimit = toSatoshi(walletCfg.FeeRateLimit / 1000)
+	if cfg.feeRateLimit == 0 {
+		return nil, fmt.Errorf("fee rate limit is smaller than the minimum 1000 sats/byte: %v",
+			walletCfg.FeeRateLimit)
 	}
-	if walletCfg.FeeRateLimit > 0 {
-		feesLimitPerByte = toSatoshi(walletCfg.FeeRateLimit / 1000)
-		if feesLimitPerByte == 0 {
-			return nil, fmt.Errorf("fee rate limit is smaller than smallest unit: %v",
-				walletCfg.FeeRateLimit)
-		}
-	}
-	cfg.Logger.Tracef("Fees rate limit set at %d sats/byte", feesLimitPerByte)
 
-	redeemConfTarget := walletCfg.RedeemConfTarget
-	if redeemConfTarget == 0 {
-		redeemConfTarget = defaultRedeemConfTarget
+	cfg.redeemConfTarget = walletCfg.RedeemConfTarget
+	cfg.useSplitTx = walletCfg.UseSplitTx
+
+	return cfg, nil
+}
+
+func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWallet, error) {
+	baseCfg, err := readBaseWalletConfig(walletCfg)
+	if err != nil {
+		return nil, err
 	}
-	cfg.Logger.Tracef("Redeem conf target set to %d blocks", redeemConfTarget)
 
 	addrDecoder := btcutil.DecodeAddress
 	if cfg.AddressDecoder != nil {
@@ -956,11 +974,7 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		fundingCoins:        make(map[outPoint]*utxo),
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
 		minNetworkVersion:   cfg.MinNetworkVersion,
-		fallbackFeeRate:     fallbackFeesPerByte,
-		feeRateLimit:        feesLimitPerByte,
 		dustLimit:           cfg.ConstantDustLimit,
-		redeemConfTarget:    redeemConfTarget,
-		useSplitTx:          walletCfg.UseSplitTx,
 		useLegacyBalance:    cfg.LegacyBalance,
 		zecStyleBalance:     cfg.ZECStyleBalance,
 		segwit:              cfg.Segwit,
@@ -974,6 +988,7 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		hashTx:              txHasher,
 		calcTxSize:          txSizeCalculator,
 		txVersion:           txVersion,
+		baseWalletConfig:    baseCfg,
 	}
 
 	if w.estimateFee == nil {
