@@ -71,6 +71,7 @@ cd "$dir"
 # check linters
 golangci-lint run --disable-all --deadline=10m \
   --out-format=github-actions,colored-line-number \
+  --enable=gofmt \
   --enable=goimports \
   --enable=govet \
   --enable=gosimple \
