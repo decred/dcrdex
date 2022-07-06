@@ -2054,14 +2054,15 @@ func (w *assetWallet) RestorationInfo(seed []byte) ([]*asset.WalletRestoration, 
 
 	return []*asset.WalletRestoration{
 		&asset.WalletRestoration{
-			Target: "MetaMask",
-			Seed:   hex.EncodeToString(privateKey),
+			Target:   "MetaMask",
+			Seed:     hex.EncodeToString(privateKey),
+			SeedName: "Private Key",
 			Instructions: "Accounts can be imported by private key only if MetaMask has already be initialized. " +
 				"If this is your first time installing MetaMask, create a new wallet and secret recovery phrase. " +
 				"Then, to import your DEX account into MetaMask, follow the steps below:\n" +
 				`1. Open the settings menu
 				 2. Select "Import Account"
-				 3. Make sure "Private Key" is selected, and paste the private key above into the box`,
+				 3. Make sure "Private Key" is selected, and enter the private key above into the box`,
 		},
 	}, nil
 }

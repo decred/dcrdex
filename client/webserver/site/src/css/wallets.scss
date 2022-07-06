@@ -99,7 +99,13 @@ table.wallets {
 }
 
 #restoreWalletInfo,
-#exportWalletDisclaimer,
 #exportWalletAuth {
   width: 450px;
+}
+
+.warning-text {
+  text-decoration: underline;
+  text-decoration-color: #d11414;
+  color: #d11414;
+  font-size: bold;
 }

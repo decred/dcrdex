@@ -62,6 +62,7 @@ interface RescanRecoveryRequest {
 interface WalletRestoration {
   target: string
   seed: string
+  seedName: string
   instructions: string
 }
 
@@ -182,10 +183,9 @@ export default class WalletsPage extends BasePage {
     bind(document, 'keyup', this.keyup)
 
     bind(page.downloadLogs, 'click', async () => { this.downloadLogs() })
-    bind(page.exportWallet, 'click', async () => { this.displayExportWalletDisclaimer() })
+    bind(page.exportWallet, 'click', async () => { this.displayExportWalletAuth() })
     bind(page.recoverWallet, 'click', async () => { this.showRecoverWallet() })
     bindForm(page.exportWalletAuth, page.exportWalletAuthSubmit, async () => { this.exportWalletAuthSubmit() })
-    bindForm(page.exportWalletDisclaimer, page.disclaimerSubmit, async () => { this.disclaimerSubmit() })
     bindForm(page.recoverWalletConfirm, page.recoverWalletSubmit, () => { this.recoverWallet() })
     bindForm(page.confirmForce, page.confirmForceSubmit, async () => { this.confirmForceSubmit() })
 
@@ -695,38 +695,13 @@ export default class WalletsPage extends BasePage {
     window.open(url.toString())
   }
 
-  // displayExportWalletDisclaimer displays a popup which prompts the user to
-  // retype a text confirming that they understand the risks of exporting the
-  // wallet.
-  async displayExportWalletDisclaimer () {
+  // displayExportWalletAuth displays a form to warn the user about the
+  // dangers of exporting a wallet, and asks them to enter their password.
+  async displayExportWalletAuth () {
     const page = this.page
-    Doc.hide(page.disclaimerErr)
-    page.disclaimerInput.value = ''
-    this.showForm(page.exportWalletDisclaimer)
-  }
-
-  // disclaimerSubmit checks that the user correctly retyped the text, and if
-  // so loads a popup where they have to input their password in order to
-  // see their wallet seed.
-  async disclaimerSubmit () {
-    const page = this.page
-    const inputValueMatches : () => boolean = () => {
-      const inputValue = page.disclaimerInput.value
-      if (!inputValue) return false
-      if (!page.retypeText.textContent) {
-        // this is needed to satisfy the typescript compiler
-        console.error('retypeText not populated')
-        return false
-      }
-      return inputValue.trim().toLowerCase() === page.retypeText.textContent.trim().toLowerCase()
-    }
     Doc.hide(page.exportWalletErr)
     page.exportWalletPW.value = ''
-    if (inputValueMatches()) this.showForm(page.exportWalletAuth)
-    else {
-      page.disclaimerErr.textContent = 'Your entry does not match'
-      Doc.show(page.disclaimerErr)
-    }
+    this.showForm(page.exportWalletAuth)
   }
 
   // exportWalletAuthSubmit is called after the user enters their password to
@@ -743,6 +718,7 @@ export default class WalletsPage extends BasePage {
     const res = await postJSON(url, req)
     loaded()
     if (app().checkResponse(res)) {
+      page.exportWalletPW.value = ''
       this.displayRestoreWalletInfo(res.restorationinfo)
     } else {
       page.exportWalletErr.textContent = res.msg
@@ -760,6 +736,7 @@ export default class WalletsPage extends BasePage {
       const tmpl = Doc.parseTemplate(card)
       tmpl.name.textContent = wr.target
       tmpl.seed.textContent = wr.seed
+      tmpl.seedName.textContent = `${wr.seedName}:`
       tmpl.instructions.textContent = wr.instructions
       page.restoreInfoCardsList.appendChild(card)
     }

@@ -7072,7 +7072,7 @@ func (c *Core) WalletRestorationInfo(pw []byte, assetID uint32) ([]*asset.Wallet
 
 	restorer, ok := wallet.Wallet.(asset.WalletRestorer)
 	if !ok {
-		return nil, fmt.Errorf("wallet for asset %d cannot be restored", assetID)
+		return nil, fmt.Errorf("wallet for asset %d doesn't support exporting functionality", assetID)
 	}
 
 	restorationInfo, err := restorer.RestorationInfo(seed)

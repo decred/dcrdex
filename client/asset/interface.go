@@ -429,8 +429,11 @@ type FeeRater interface {
 // WalletRestoration contains all the information needed for a user to restore
 // their wallet in an external wallet.
 type WalletRestoration struct {
-	Target       string `json:"target"`
-	Seed         string `json:"seed"`
+	Target string `json:"target"`
+	Seed   string `json:"seed"`
+	// SeedName is the name of the seed used for this particular wallet, i.e
+	// Private Key.
+	SeedName     string `json:"seedName"`
 	Instructions string `json:"instructions"`
 }
 
