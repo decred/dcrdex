@@ -73,4 +73,7 @@ if [ "$VERSION" -eq "0" ]; then
 
   perl -0pi -e 's/\/\/ ERC20SwapSwap[^}]*}\n\n//' $CONTRACT_FILE
   perl -0pi -e 's/ERC20SwapSwap/ethv0.ETHSwapSwap/g' $CONTRACT_FILE
+
+  # Reorder the imports since we rewrote go-ethereum/event to a dcrdex package.
+  gofmt -s -w "$CONTRACT_FILE"
 fi
