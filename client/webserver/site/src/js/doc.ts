@@ -175,18 +175,7 @@ export default class Doc {
    * default easing algorithm is linear.
    */
   static async animate (duration: number, f: (progress: number) => void, easingAlgo?: string) {
-    const easer = easingAlgo ? Easing[easingAlgo] : Easing.linear
-    const start = new Date().getTime()
-    const end = start + duration
-    const range = end - start
-    const frameDuration = 1000 / FPS
-    let now = start
-    while (now < end) {
-      f(easer((now - start) / range))
-      await sleep(frameDuration)
-      now = new Date().getTime()
-    }
-    f(1)
+    await new Animation(duration, f, easingAlgo).wait()
   }
 
   static applySelector (ancestor: HTMLElement, k: string): PageElement[] {
@@ -304,7 +293,7 @@ export default class Doc {
   * tmplElement is a helper function for grabbing sub-elements of the market list
   * template.
   */
-  static tmplElement (ancestor: Document | Element, s: string): PageElement {
+  static tmplElement (ancestor: Document | HTMLElement, s: string): PageElement {
     return ancestor.querySelector(`[data-tmpl="${s}"]`) || document.createElement('div')
   }
 
@@ -368,13 +357,70 @@ export default class Doc {
   }
 }
 
+export class Animation {
+  done: (() => void) | undefined
+  endAnimation: boolean
+  thread: Promise<void>
+  Forever: number
+
+  constructor (duration: number, f: (progress: number) => void, easingAlgo?: string, done?: () => void) {
+    this.done = done
+    this.thread = this.run(duration, f, easingAlgo)
+  }
+
+  async run (duration: number, f: (progress: number) => void, easingAlgo?: string) {
+    duration = duration >= 0 ? duration : 1000 * 86400 * 365 * 10 // 10 years, in ms
+    const easer = easingAlgo ? Easing[easingAlgo] : Easing.linear
+    const start = new Date().getTime()
+    const end = start + duration
+    const range = end - start
+    const frameDuration = 1000 / FPS
+    let now = start
+    this.endAnimation = false
+    while (now < end) {
+      if (this.endAnimation) return this.runCompletionFunction()
+      f(easer((now - start) / range))
+      await sleep(frameDuration)
+      now = new Date().getTime()
+    }
+    f(1)
+    this.runCompletionFunction()
+  }
+
+  async wait () {
+    await this.thread
+  }
+
+  stop () {
+    this.endAnimation = true
+  }
+
+  async stopAndWait () {
+    this.stop()
+    await this.wait()
+  }
+
+  runCompletionFunction () {
+    if (this.done) this.done()
+  }
+}
+// Animation.Forever = -1
+
 /* Easing algorithms for animations. */
-const Easing: Record<string, (t: number) => number> = {
+export const Easing: Record<string, (t: number) => number> = {
   linear: t => t,
   easeIn: t => t * t,
   easeOut: t => t * (2 - t),
   easeInHard: t => t * t * t,
-  easeOutHard: t => (--t) * t * t + 1
+  easeOutHard: t => (--t) * t * t + 1,
+  easeOutElastic: t => {
+    const c4 = (2 * Math.PI) / 3
+    return t === 0
+      ? 0
+      : t === 1
+        ? 1
+        : Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * c4) + 1
+  }
 }
 
 /* WalletIcons are used for controlling wallets in various places. */

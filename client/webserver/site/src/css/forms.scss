@@ -245,10 +245,6 @@ button.form-button {
   }
 }
 
-#rightBox > form button {
-  @extend .form-button;
-}
-
 #forms {
   @extend .stylish-overflow;
   @extend .flex-center;
@@ -272,26 +268,6 @@ button.form-button {
     button {
       @extend .form-button;
     }
-  }
-}
-
-#marketsBox {
-  min-width: 225px;
-  max-width: 425px;
-
-  .market-box {
-    border: 1px solid #777;
-    margin-bottom: 20px;
-
-    .logo {
-      width: 25px;
-      height: 25px;
-    }
-  }
-
-  #marketsForLogo {
-    width: 22px;
-    height: 22px;
   }
 }
 

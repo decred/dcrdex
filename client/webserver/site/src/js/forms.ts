@@ -1101,12 +1101,12 @@ export class WalletWaitForm {
 
 export class UnlockWalletForm {
   form: HTMLElement
-  success: () => void
+  success: (assetID: number) => void
   pwCache: PasswordCache | null
   page: Record<string, PageElement>
   currentAsset: SupportedAsset
 
-  constructor (form: HTMLElement, success: () => void, pwCache?: PasswordCache) {
+  constructor (form: HTMLElement, success: (assetID: number) => void, pwCache?: PasswordCache) {
     this.page = Doc.idDescendants(form)
     this.form = form
     this.pwCache = pwCache || null
@@ -1153,9 +1153,10 @@ export class UnlockWalletForm {
       Doc.show(page.unlockErr)
       return
     }
+    const assetID = this.currentAsset.id
     Doc.hide(this.page.unlockErr)
     const open = {
-      assetID: this.currentAsset.id,
+      assetID: assetID,
       pass: pw
     }
     page.uwAppPass.value = ''
@@ -1167,7 +1168,7 @@ export class UnlockWalletForm {
       return
     }
     if (this.pwCache) this.pwCache.pw = pw
-    this.success()
+    this.success(assetID)
   }
 }
 

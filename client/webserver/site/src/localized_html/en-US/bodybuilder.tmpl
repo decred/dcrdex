@@ -5,10 +5,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   {{- /* The above 2 meta tags *must* come first in the head; any other head content must come *after* these tags */ -}}
-  <link rel="icon" href="/img/favicon.png?v=AK4XS4">
+  <link rel="icon" href="/img/favicon.png?v=AK4XS55">
   <meta name="description" content="Decred DEX Client Web Portal">
   <title>{{.Title}}</title>
-  <link href="/css/style.css?v=EDTXQ1D" rel="stylesheet">
+  <link href="/css/style.css?v=GHTDEG55" rel="stylesheet">
 </head>
 <body {{if .UserInfo.DarkMode}} class="dark"{{end}}>
   <div class="popup-notes" id="popupNotes">
@@ -25,7 +25,8 @@
 <header id=header class="maintop">
   {{$authed := .UserInfo.Authed}}
   {{$marketsReady := and $authed (gt (len .UserInfo.Exchanges) 0)}}
-  <a href="/" class="logo"></a>
+  <a href="/" class="logo d-none d-md-block"></a>
+  <a href="/" class="logo-icon d-block d-md-none"></a>
   <div class="mainlinks fs18 offwhite">
 
     <a href="/markets" class="demi hoverbright{{if not $marketsReady}} d-hide{{end}}" id="marketsMenuEntry">Markets</a>
@@ -85,7 +86,7 @@
 {{end}}
 
 {{define "bottom"}}
-<script src="/js/entry.js?v=EDTXQ1D"></script>
+<script src="/js/entry.js?v=GHTDEG55"></script>
 </body>
 </html>
 {{end}}

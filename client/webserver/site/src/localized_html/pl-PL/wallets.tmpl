@@ -1,154 +1,222 @@
-{{define "stateIcons"}}
-  {{$w := .Wallet}}
-  {{if $w}}
-    {{$ready := and $w.Running $w.Open}}
-    <span data-state="sleeping" class="ico-sleeping fs17 grey{{if $w.Running}} d-hide{{end}}"></span>
-    <span data-state="locked" class="ico-locked grey{{if or $ready (not $w.Running)}} d-hide{{end}}"></span>
-    <span data-state="unlocked" class="ico-unlocked{{if not $ready}} d-hide{{end}}"></span>
-    <span data-state="nowallet" class="ico-cross fs12 red d-hide"></span>
-    <span data-state="syncing" 
-      class="ico-sync fs12{{if or (not $w.Running) $w.Synced}} d-hide{{end}}"
-      data-tooltip="wallet is {{printf "%.2f" (x100  $w.SyncProgress)}}% synced"></span>
-    <span data-state="nopeers" class="ico-disconnected fs17 d-hide" data-tooltip="no peers!"></span>
-    <span data-state="status" class="txt-status">{{if $w.Open}}gotowy{{else if $w.Running}}zablokowane{{else}}wyłączony{{end}}</span>
-  {{else}}
-    <span data-state="sleeping" class="ico-sleeping fs17 grey d-hide"></span>
-    <span data-state="locked" class="ico-locked grey d-hide"></span>
-    <span data-state="unlocked" class="ico-unlocked d-hide"></span>
-    <span data-state="nowallet" class="ico-cross fs12 red"></span>
-    <span data-state="syncing" class="ico-sync fs12 d-hide"></span>
-    <span data-state="nopeers" class="ico-disconnected fs17 d-hide"></span>
-    <span data-state="status" class="txt-status">brak portfela</span>
-  {{end}}
-{{end}}
-
-{{define "actionButtons"}}
-  {{$w := .Wallet}}
-  {{if $w}}
-    {{$ready := and $w.Running $w.Open}}
-    <button data-action="connect"{{if $w.Running}} class="d-hide"{{end}}>Połącz</button>
-    <button data-action="unlock"{{if $w.Open}} class="d-hide"{{end}}>Odblokuj</button>
-    <button data-action="send"{{if not $ready}} class="d-hide"{{end}}>Send</button>
-    <button data-action="deposit"{{if not $ready}} class="d-hide"{{end}}>Zdeponuj</button>
-    <button data-action="lock"{{if or (not $ready) (not $w.Encrypted)}} class="d-hide"{{end}}>Zablokuj</button>
-    <button data-action="rescan"{{if not $w.Traits.IsRescanner}} class="d-hide"{{end}}>Rescan</button>
-    <button data-action="create" class="d-hide">Utwórz portfel {{.Name}}</button>
-    <div data-action="createPending" class="d-inline-block fs16 ico-spinner spinner d-hide"></div>
-    <span data-action="settings" class="ico-settings fs20 pointer"></span>
-  {{else}}
-    <button data-action="connect" class="d-hide">Połącz</button>
-    <button data-action="unlock" class="d-hide">Odblokuj</button>
-    <button data-action="send" class="d-hide">Send</button>
-    <button data-action="deposit" class="d-hide">Zdeponuj</button>
-    <button data-action="lock" class="d-hide">Zablokuj</button>
-    <button data-action="rescan" class="d-hide">Rescan</button>
-    <button data-action="create"{{if .WalletCreationPending}} class="d-hide"{{end}}>Utwórz portfel {{.Name}}</button>
-    <div data-action="createPending" class="d-inline-block fs16 ico-spinner spinner{{if not .WalletCreationPending}} d-hide{{end}}"></div>
-    <span data-action="settings" class="ico-settings fs20 pointer d-hide"></span>
-  {{end}}
-{{end}}
-
 {{define "wallets"}}
-{{template "top" .}}
-<div id="main" data-handler="wallets" class="main">
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
-
-  {{- /* LEFT SIDE */ -}}
-  <div class="col-14">
-    <h3 class="p-3">Portfele</h3>
-    <table class="wallets">
-      <thead>
-        <tr>
-          <th>Aktywo <span id="assetArrow"></span></th>
-          <th>Saldo <span id="balanceArrow"></span></th>
-          <th>Status <span id="statusArrow"></span></th>
-          <th>Czynności</th>
-        </tr>
-      </thead>
-      {{/* TODO: Move the wallet table element generation to Javascript */}}
-      <tbody id="walletTable">
-        {{range .Assets}}
-        <tr data-asset-i-d="{{.ID}}" data-symbol="{{.Symbol}}" data-name="{{.Name}}">
-          <td>
-            <img src="{{logoPath .Symbol}}" class="mini-icon">
-            <span class="fs20">{{.Name}} </span>
-            <span class="fs15"> (<span data-tmpl=symbol>{{toUpper .Symbol}}</span>)</span>
-          </td>
-         <td>
-            {{if .Wallet}}
-            <div data-balance-target="{{.ID}}">
-              {{.UnitInfo.ConventionalString .Wallet.Balance.Available}}
-            </div>
-            <div class="d-hide d-flex"><span data-conversion-target={{.ID}}></span>USD</span>
-            </div>
-            {{else}}
-              0.00000000
-            {{end}}
-          </td>
-          <td class="status-col fs16">
-            {{template "stateIcons" .}}
-          </td>
-          <td>
-            {{template "actionButtons" .}}
-          </td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
-  </div>
-
-  {{- /* RIGHT SIDE */ -}}
-  <div id="rightBox" class="col-10 px-2 py-5 d-flex justify-content-center align-items-start text-break overflow-auto">
-
-    {{- /* AVAILABLE MARKETS (for selected asset) */ -}}
-    <div id="marketsBox" class="d-hide">
-      <div class="fs22 text-center py-1 fs24 sans-light"><img id="marketsForLogo"> <span id="marketsFor"></span> Rynki</div>
-      <div id="marketsCard">
-        <div id="marketCard" class="market-box p-3">
-          <div class="px-2 text-center fs18" data-tmpl="dexTitle"></div>
-          <div class="d-flex justify-content-center align-items-start flex-wrap" data-tmpl="markets">
-            <div class="asset-market hoverbg pointer m-2 px-2 py-1 d-flex flex-column align-items-center" id="oneMarket">
-              <img class="logo" data-tmpl=logo>
-              <span class="mt-1 fs14 demi"><span data-tmpl=baseSymbol></span>-<span data-tmpl=quoteSymbol></span></span>
-            </div>
-          </div>
+{{template "top" .}}
+<div id="main" data-handler="wallets" class="walletspage flex-grow-1 position-relative">
+  <div class="fill-abs d-flex align-items-stretch">
+    {{- /* ASSET SELECT */ -}}
+    <div class="d-flex flex-column align-items-stretch stylish-overflow bg1 invisible" id="assetSelect">
+      <div id="iconSelectTmpl" class="icon-select d-flex align-items-stretch">
+        <img data-tmpl="img">
+        <div class="d-none d-md-flex flex-column justify-content-around ps-2">
+          <span class="fs15 lh1 text-nowrap" data-tmpl="name"></span>
+          <span class="fs15 lh1" data-tmpl="balance"></span>
+          <span class="fs13 lh1" data-tmpl="fiat" class="d-hide"></span>
+          <span class="fs13 lh1" data-tmpl="noWallet">Create a Wallet</span>
         </div>
       </div>
     </div>
+
+    <div class="flex-grow-1 position-relative">
+      <div class="fill-abs d-flex flex-column flex-lg-row flex-wrap-lg flex-nowrap-xxl stylish-overflow no-overflow-xxl">
+        {{- /* WALLET DETAILS */ -}}
+        <div class="col-24 col-lg-12 col-xxl-8 d-flex stylish-overflow-lg invisible" id="walletDetailsBox">
+          <div class="my-auto w-100 flex-center flex-column py-3">
+            <div class="flex-center">
+              <img id="assetLogo">
+              <div class="ms-2 fs28 sans-light" id="assetName" data-asset-name="1"></div>
+            </div>
+            <div id="createWalletBox" class="my-2">
+              <button class="py-1 px-2 hoverbg fs18" id="createWallet">Utwórz portfel <span data-asset-name=1></span></button>
+            </div>
+            <div id="balanceBox">
+              <span id="balance" class="fs35"></span>
+              <span id="balanceUnit" class="fs24 grey ms-1 pb-1"></span>
+            </div>
+            <div id="fiatBalanceBox" class="fs14 grey flex-center">
+              ~ <span id="fiatBalance" class="mx-1 lh1"></span> USD
+            </div>
+
+            <div class="d-flex align-items-start align-items-stretch mt-2 flex-column flex-md-row mw-90p" id="walletDetails">
+              <div class="d-flex flex-column align-items-stretch flex-grow-1" id="balanceBreakdownBox">
+                <div>
+                  <table id="balanceTable" class="fs15 mt-2 w-100">
+                    <tbody id="balanceDetailBox">
+                      <tr id="balanceDetailRow">
+                        <td data-tmpl="category" class="grey"></td>
+                        <td data-tmpl="subBalance"></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div id="sendReceive" class="d-flex w-100 justify-content-between fs22 mt-3">
+                  <button id="receive" class="flex-center hoverbg me-3">
+                    <span class="ico-qrcode fs14"></span>
+                    <span class="fs16 ms-2">Receive</span>
+                  </button>
+                  <button id="send" class="flex-center hoverbg ms-3">
+                    <span class="ico-send fs14"></span>
+                    <span class="fs16 ms-2">Send</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="d-flex justify-content-start align-items-start flex-column flex-grow-1" id="walletInfo">
+                <table id="walletInfoTable" class="fs15 mt-2 w-100">
+                  <tbody>
+                    <tr id="statusLocked">
+                      <td class="grey">Status</td>
+                      <td><span class="ico-locked fs14 me-2"></span>Locked</td>
+                    </tr>
+                    <tr id="statusReady">
+                      <td class="grey">Status</td>
+                      <td><span class="ico-unlocked fs14 me-2"></span>Ready</td>
+                    </tr>
+                    <tr id="statusOff">
+                      <td class="grey">Status</td>
+                      <td><span class="ico-sleeping fs14 me-2"></span>Off</td>
+                    </tr>
+                    <tr id="unlockBttnBox">
+                      <td colspan="2" class="pb-2">
+                        <button id="unlockBttn" class="fs14 p-1 hoverbg">Odblokuj</button>
+                      </td>
+                    </tr>
+                    <tr id="lockBttnBox">
+                      <td colspan="2" class="pb-2">
+                        <button id="lockBttn" class="fs14 p-1 hoverbg">Zablokuj</button>
+                      </td>
+                    </tr>
+                    <tr id="connectBttnBox">
+                      <td colspan="2" class="pb-2">
+                        <button id="connectBttn" class="fs14 p-1 hoverbg">Połącz</button>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td class="grey text-nowrap">Wallet Type</td>
+                      <td id="walletType"></td>
+                    </tr>
+                    <tr id="peerCountBox">
+                      <td class="grey text-nowrap">Peer Count</td>
+                      <td id="peerCount"></td>
+                    </tr>
+                    <tr id="syncProgressBox">
+                      <td class="grey text-nowrap">Sync Progress</td>
+                      <td id="syncProgress"></td>
+                    </tr>
+                    <tr id="reconfigureBox">
+                      <td colspan="2" class="pt-2">
+                        <button id="reconfigureBttn" class="fs15 hoverbg p-1">
+                          <span class="ico-settings"></span>
+                          Settings
+                        </button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>{{/* END WALLET DETAILS */}}
+
+        {{- /* MARKETS OVERVIEW */ -}}
+        <div class="col-24 col-lg-12 col-xxl-8 d-flex stylish-overflow-lg bg1-lg border-top-lt-lg invisible" id="marketsOverviewBox">
+          <div class="m-auto flex-center flex-column w-100 py-3">
+            <div class="d-flex align-items-start flex-column mw-90p">
+              <span class="fs28 sans-light mb-2"><span data-asset-name=1></span> Markets</span>
+              <table id="availableMarketsTable" class="w-100">
+                <thead>
+                  <tr>
+                    <th>Rynek</th>
+                    <th class="d-none d-md-table-cell d-lg-none d-xxl-table-cell">Host</th>
+                    <th>Cena</th>
+                    <th>Volume</th>
+                  </tr>
+                </thead>
+                <tbody id="availableMarkets" class="fs17">
+                  <tr id="marketRow" class="hoverbg pointer">
+                    <td>
+                      <img data-tmpl="baseLogo">
+                      <img data-tmpl="quoteLogo">
+                      <span class="demi">
+                        <span data-tmpl="baseSymbol"></span>-<span data-tmpl="quoteSymbol"></span>
+                      </span>
+                    </td>
+                    <td class="d-none d-md-table-cell d-lg-none d-xxl-table-cell"><div data-tmpl="host" class="short-host"></div></td>
+                    <td>
+                      <span data-tmpl="price"></span>
+                      <span class="fs13 grey">
+                        <sup data-tmpl="priceQuoteUnit" class></sup>/<sub data-tmpl="priceBaseUnit"></sub>
+                      </span>
+                    </td>
+                    <td data-tmpl="volume">
+                      <span data-tmpl="volume"></span>
+                      <span data-tmpl="volumeUnit" class="fs15 grey"></span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>{{/* END MARKETS OVERVIEW */}}
+
+        {{- /* RECENT ORDERS */ -}}
+        <div class="col-24 col-xxl-8 d-flex stylish-overflow-lg border-top-lt-xxl invisible" id="orderActivityBox">
+          <div class="my-auto flex-center w-100 py-3" id="orderActivity">
+            <div class="d-flex align-items-start flex-column mw-90p">
+              <span class="fs28 sans-light mb-2">Recent <span data-asset-name=1></span> Activity</span>
+              <table id="ordersTable" class="my-auto" class="w-100">
+                <thead>
+                  <tr>
+                    <th>Wymiana</th>
+                    <th>Status</th>
+                    <th class="d-none d-md-table-cell">Zrealizowane</th>
+                    <th>Wiek</th>
+                    <th></th> {{/* Link */}}
+                  </tr>
+                </thead>
+                <tbody id="recentOrders">
+                  <tr id="recentOrderTmpl">
+                    <td data-tmpl="trade" class="text-nowrap">
+                      <span data-tmpl="fromQty"></span>
+                      <img data-tmpl="fromLogo" class="micro-icon">
+                      <span data-tmpl="fromSymbol" class="d-none d-md-inline"></span>
+                      <span>&rarr;</span>
+                      <span data-tmpl="toQty"></span>
+                      <img data-tmpl="toLogo" class="micro-icon">
+                      <span data-tmpl="toSymbol" class="d-none d-md-inline"></span>
+                    </td>
+                    <td data-tmpl="status"></td>
+                    <td data-tmpl="filled" class="d-none d-md-table-cell"></td>
+                    <td data-tmpl="age" class="text-nowrap"></td>
+                    <td><a class="ico-open fs14 pointer plainlink" data-tmpl="link"></a></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="m-auto flex-center flex-column w-100" id="noActivity">
+            No Recent Activity
+          </div>
+        </div>{{/* END RECENT ORDERS */}}
+      </div>
+    </div>
+  </div>{{/* END MAIN CONTENT */}}
+
+  {{- /* POP-UP FORMS */ -}}
+  <div id="forms" class="d-hide">
+
+    <form id="checkmarkForm" class="flex-center flex-column">
+      <div id="checkmarkBox" class="flex-center">
+        <span class="ico-check" id="checkmark"></span>
+      </div>
+      <div id="successMessage" class="fs22"></div>
+    </form>
 
     {{- /* NEW WALLET */ -}}
     <form class="position-relative d-hide" id="newWalletForm" autocomplete="off">
       {{template "newWalletForm"}}
     </form>
 
-    {{- /* UNLOCK WALLET */ -}}
-    <form class="position-relative d-hide" id="unlockWalletForm" autocomplete="off">
-      {{template "unlockWalletForm"}}
-    </form>
-
-    {{- /* DEPOSIT ADDRESS */ -}}
-    <div class="text-center fs20 d-hide" id="deposit">
-      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
-      <div class="px-2 py-1 mb-2 text-center position-relative fs22 sans-light">
-        Zdeponuj
-        <img id="depositLogo" class="micro-icon mx-1">
-        <span id="depositName"></span>
-      </div>
-      <div class="d-inline">
-        <img class="mb-3" id="qrcode" />
-        <div class="mono bg0 p-2 fs15">
-          <span id="depositAddress"></span>
-          <span id="copyAddressBtn" class="ico-copy mt-2 ml-2 fs18"></span>
-          <span id="copyAlert" class="d-hide">Copied!</span>
-        </div>
-      </div>
-      <div class="my-3">
-        <button id="newDepAddrBttn" type="button" class=" px-2 justify-content-center fs15 bg2 selected">Nowy adres do depozytów</button>
-      </div>
-      <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="depositErr"></div>
-    </div>
-
-    {{- /* Send Form */ -}}
+    {{- /* SEND */ -}}
     <form class="pb-3 d-hide" id="sendForm" autocomplete="off">
       <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <div class="py-1 text-center position-relative fs22 sans-light">
@@ -172,8 +240,8 @@
       </div>
       <span class="mt-2 d-hide">~<span id="sendValue" class="mx-1"></span>USD</span>
       <div id="toggleSubtract" class="form-check pt-2">
-           <input class="form-check-input" type="checkbox" id="subtractCheckBox">
-           <label for="subtractCheckBox" class="form-label ps-1">Subtract fees from amount sent.</label>
+          <input class="form-check-input" type="checkbox" id="subtractCheckBox">
+          <label for="subtractCheckBox" class="form-label ps-1">Subtract fees from amount sent.</label>
       </div>
       <div id="senderOnlyHelpText" class="pt-2">
       <p>The network fees will not be subtracted from the sent amount. Ensure you have enough in your wallet to cover fees.</p>
@@ -192,7 +260,32 @@
       </div>
       <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="sendErr"></div>
     </form>
-    
+
+    {{- /* DEPOSIT ADDRESS */ -}}
+    <form class="position-relative flex-center flex-column fs20 d-hide" id="deposit">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="px-2 py-1 mb-2 text-center position-relative fs22 sans-light">
+        Zdeponuj
+        <img id="depositLogo" class="micro-icon mx-1">
+        <span id="depositName"></span>
+      </div>
+      <img class="mb-3" id="qrcode" />
+      <div class="mono bg0 p-2 fs15">
+        <span id="depositAddress"></span>
+        <span id="copyAddressBtn" class="ico-copy mt-2 ml-2 fs18"></span>
+        <span id="copyAlert" class="d-hide">Copied!</span>
+      </div>
+      <div class="my-3">
+        <button id="newDepAddrBttn" type="button" class=" px-2 justify-content-center fs15 bg2 selected">Nowy adres do depozytów</button>
+      </div>
+      <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="depositErr"></div>
+    </form>
+
+    {{- /* UNLOCK WALLET */ -}}
+    <form class="position-relative d-hide" id="unlockWalletForm" autocomplete="off">
+      {{template "unlockWalletForm"}}
+    </form>
+
     {{- /* RECONFIGURE WALLET */ -}}
     <form class="pb-3 d-hide mt-3" id="reconfigForm" autocomplete="off">
       <div class="form-closer recfg-form hoverbg"><span class="ico-cross"></span></div>
@@ -205,12 +298,12 @@
       <div class="py-1 mt-2" id="reconfigInputs">
         {{template "walletConfigTemplates"}}
       </div>
-      <div id="showChangePW" class="py-1 mt-2 pointer d-flex align-items-center justify-content-start">
+      <div id="showChangePW" class="mt-2 pointer d-flex align-items-center justify-content-start">
         <span id="showIcon" class="ico-plus fs8 ps-1"></span>
         <span id="hideIcon" class="ico-minus fs8 ps-1"></span>
         <span id="switchPWMsg" class="d-inline-block ps-1 pb-1"></span>
       </div>
-      <div id="changePW" class="py-1">
+      <div id="changePW">
         <div class="fs15">
           Zmiana poniższego hasła nie powoduje zmiany hasła do Twojego oprogramowania portfela. Skorzystaj z tego formularza, aby zaktualizować klienta DEX po tym, jak zmienisz hasło do swojego oprogramowania portfela.
         </div>
@@ -220,16 +313,16 @@
         </div>
       </div>
 
-      <div id="showChangeType" class="py-1 mt-2 pointer d-flex align-items-center justify-content-start">
+      <div id="showChangeType" class="my-2 pointer d-flex align-items-center justify-content-start">
         <span id="changeTypeShowIcon" class="ico-plus fs8 ps-1"></span>
         <span id="changeTypeHideIcon" class="ico-minus fs8 ps-1 d-hide"></span>
         <span id="changeTypeMsg" class="d-inline-block ps-1 pb-1">zmień typ portfela</span>
       </div>
-      <div id="changeWalletType" class="py-1 d-hide">
+      <div id="changeWalletType" class="d-hide mb-3">
+        <div class="my-2">
+          Uwaga: Zmiana portfela podczas gdy trwają wymiany może spowodować utratę środków.
+        </div>
         <select id="changeWalletTypeSelect"></select>
-      </div>
-      <div class="my-2">
-        Uwaga: Zmiana portfela podczas gdy trwają wymiany może spowodować utratę środków.
       </div>
       <div class="d-flex mt-1 {{if $passwordIsCached}}justify-content-end{{end}}">
         <div class="col-12 p-0 {{if $passwordIsCached}}d-hide{{end}}">
@@ -238,21 +331,19 @@
         </div>
         <div class="col-12 p-0 text-end">
           <div>&nbsp;</div>
-          <button id="submitReconfig" type="button" class="w-75 mt-1 justify-content-center fs15 bg2 selected">Wyślij</button>
+          <button id="submitReconfig" type="button" class="w-75 mb-1 justify-content-center fs15 bg2 selected">Wyślij</button>
         </div>
       </div>
       <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="reconfigErr"></div>
       <hr class="dashed my-2">
-      <div class="d-flex flex-row">
-        <button id="downloadLogs" type="button" class="w-25 mt-1 mx-1 justify-content-center fs15 bg2">Wallet Logs</button>
+      <div class="sans-light fs17">Other Actions</div>
+      <div class="d-flex flex-row fs15 pt-1">
+        <button id="downloadLogs" type="button" class="p-1 me-2 hoverbg">Wallet Logs</button>
         <button id="exportWallet" type="button" class="w-25 mx-1 mt-1 justify-content-center fs15 bg2">Export Wallet</button>
-        <button id="recoverWallet" type="button" class="danger w-25 mx-1 mt-1 justify-content-center fs15 bg2">Recover</button>
+        <button id="recoverWallet" type="button" class="danger p-1 me-2 hoverbg">Recover</button>
+        <button id="rescanWallet" type="button" class="danger p-1 me-2 hoverbg">Rescan</button>
       </div>
     </form>
-  </div>
-
-  {{- /* POP-UP FORMS */ -}}
-  <div id="forms" class="d-hide">
 
     {{- /* CONFIRM FORCE FORM */ -}}
     <form class="d-hide" id="confirmForce">

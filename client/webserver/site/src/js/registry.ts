@@ -110,7 +110,7 @@ export interface Spot {
   baseID: number
   quoteID: number
   rate: number
-  bookVolume: number
+  bookVolume: number // Unused?
   change24: number
   vol24: number
 }
@@ -194,6 +194,7 @@ export interface WalletBalance {
   stamp: string // time.Time
   orderlocked: number
   contractlocked: number
+  other: Record<string, number>
 }
 
 export interface WalletDefinition {

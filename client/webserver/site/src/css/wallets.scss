@@ -1,35 +1,49 @@
-table.wallets {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0 3px;
-  font-size: 16px;
-
-  tbody tr {
-    background-color: $light_bg_1;
+.walletspage {
+  .grey {
+    color: #999;
   }
 
-  th {
-    padding: 5px 10px;
+  .ico-unlocked {
+    color: #1e7d11;
   }
 
-  td {
-    border-width: 1px;
-    border-color: #aaa;
-    border-style: solid none;
-    padding: 7px 10px;
+  .market-select-logo {
+    width: 20px;
+    height: 20px;
   }
 
-  td:last-child {
-    border-style: solid solid solid none;
+  .short-host {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 175px;
   }
 
-  td:first-child {
-    border-style: solid none solid solid;
+  .mw-90p {
+    min-width: 90%;
   }
 
-  th:last-child,
-  td:last-child {
-    text-align: right;
+  .bg1 {
+    background-color: #0e0c1b;
+  }
+
+  .border-top-lt-xxl,
+  .border-top-lt-lg {
+    border-top: 1px solid #7777;
+  }
+
+  #depositAddress {
+    user-select: all;
+  }
+
+  #recoverWalletConfirm,
+  #confirmForce {
+    width: 400px;
+  }
+
+  #copyAddressBtn:hover {
+    cursor: pointer;
+    color: #a8a8a8;
   }
 
   img {
@@ -37,64 +51,199 @@ table.wallets {
     margin-right: 5px;
   }
 
-  button {
-    background-color: white;
-    border-radius: 3px;
-    font-size: 14px;
-    border: 1px solid #7776;
+  #copyAlert {
+    margin-left: 12px;
+    position: absolute;
   }
 
-  button:not(:last-child) {
-    margin-right: 5px;
-  }
+  #assetSelect {
+    .icon-select {
+      padding: 15px;
+      cursor: pointer;
 
-  td.status-col {
-    text-align: left;
-
-    span {
-      margin-right: 10px;
+      & > img {
+        width: 40px;
+        height: 40px;
+      }
     }
 
-    span.txt-status {
+    .icon-select.nowallet {
+      opacity: 0.6;
+
+      [data-tmpl=balance] {
+        display: none;
+      }
+    }
+
+    .icon-select:hover,
+    .icon-select.selected {
+      opacity: 1;
+      background-color: #fff1;
+    }
+  }
+
+  #assetLogo {
+    width: 35px;
+    height: 35px;
+  }
+
+  #assetName {
+    font-size: 35px;
+  }
+
+  #sendReceive > button {
+    border-radius: 3px;
+  }
+
+  table#balanceTable {
+    td {
+      padding: 2px 0;
+      line-height: 1;
+    }
+
+    td:last-child {
+      text-align: right;
+    }
+  }
+
+  #balanceBreakdownBox {
+    padding-bottom: 25px;
+  }
+
+  #walletInfo {
+    padding-top: 25px;
+    border-top: solid 1px #777;
+
+    table#walletInfoTable {
+      width: 100%;
+
+      td {
+        padding: 2px 5px 2px 0;
+        line-height: 1;
+
+        &:last-child {
+          text-align: right;
+        }
+      }
+    }
+  }
+
+  #availableMarketsTable {
+    img {
+      width: 15px;
+      height: 15px;
+      margin: 2px;
+    }
+
+    & > button {
+      border-radius: 3px;
+    }
+
+    th {
+      font-size: 15px;
+      padding: 5px 0;
+    }
+
+    td:not(:last-child) {
+      padding-right: 10px;
+    }
+
+    tr {
+      border-bottom: 1px solid #7773;
+    }
+  }
+
+  table#ordersTable {
+    th {
       font-size: 15px;
     }
 
-    .red {
-      color: #bd4646;
+    td,
+    th {
+      padding: 3px 10px;
     }
 
-    .grey {
-      color: #999;
+    tr {
+      border-bottom: 1px solid #7773;
+    }
+
+    tbody {
+      font-size: 15px;
+
+      // tr:nth-child(even) {
+      //   background-color: #7772;
+      // }
+
+      tr:hover {
+        background-color: #7774;
+      }
     }
   }
 
-  .ico-unlocked {
-    color: #1e7d11;
+  #checkmarkBox {
+    width: 100px;
+    height: 100px;
   }
 }
 
-#marketBox {
-  position: relative;
-  max-width: 80%;
+@include media-breakpoint-up(xxl) {
+  .no-overflow-xxl {
+    overflow: hidden;
+  }
+
+  .walletspage {
+    .border-top-lt-xxl {
+      border-top: none;
+    }
+
+    .flex-nowrap-xxl {
+      flex-wrap: nowrap;
+    }
+  }
 }
 
-#depositAddress {
-  user-select: all;
+@include media-breakpoint-up(lg) {
+  .fill-abs-lg {
+    @include fill-abs;
+  }
+
+  .stylish-overflow-lg {
+    @include stylish-overflow;
+  }
+
+  .walletspage {
+    .bg1-lg {
+      background-color: #0e0c1b;
+    }
+
+    .border-top-lt-lg {
+      border-top: none;
+    }
+  }
+
+  .flex-wrap-lg {
+    flex-wrap: wrap;
+  }
 }
 
-#recoverWalletConfirm,
-#confirmForce {
-  width: 400px;
-}
+@include media-breakpoint-up(md) {
+  .walletspage {
+    #walletInfo {
+      padding-top: 0;
+      padding-left: 25px;
+      border-top: none;
+      border-left: solid 1px #777;
 
-#copyAddressBtn:hover {
-  cursor: pointer;
-  color: #a8a8a8;
-}
+      table#walletInfoTable {
+        width: auto;
+      }
+    }
+  }
 
-#copyAlert {
-  margin-left: 12px;
-  position: absolute;
+  #balanceBreakdownBox {
+    padding-right: 25px;
+    padding-bottom: 0;
+  }
 }
 
 #restoreWalletInfo,

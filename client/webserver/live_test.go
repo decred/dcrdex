@@ -41,8 +41,9 @@ import (
 )
 
 const (
-	firstDEX  = "somedex.com"
-	secondDEX = "thisdexwithalongname.com"
+	firstDEX           = "somedex.com"
+	secondDEX          = "thisdexwithalongname.com"
+	unsupportedAssetID = 141 // kmd
 )
 
 var (
@@ -60,6 +61,7 @@ var (
 	conversionFactor      = dexbtc.UnitInfo.Conventional.ConversionFactor
 	delayBalance          = false
 	doubleCreateAsyncErr  = false
+	randomizeOrdersCount  = false
 )
 
 func dummySettings() map[string]string {
@@ -296,16 +298,16 @@ func miniOrderFromCoreOrder(ord *core.Order) *core.MiniOrder {
 }
 
 var dexAssets = map[uint32]*dex.Asset{
-	0:     mkDexAsset("btc"),
-	2:     mkDexAsset("ltc"),
-	42:    mkDexAsset("dcr"),
-	22:    mkDexAsset("mona"),
-	28:    mkDexAsset("vtc"),
-	141:   mkDexAsset("kmd"),
-	3:     mkDexAsset("doge"),
-	145:   mkDexAsset("bch"),
-	60:    mkDexAsset("eth"),
-	60000: mkDexAsset("dextt.eth"),
+	0:                  mkDexAsset("btc"),
+	2:                  mkDexAsset("ltc"),
+	42:                 mkDexAsset("dcr"),
+	22:                 mkDexAsset("mona"),
+	28:                 mkDexAsset("vtc"),
+	unsupportedAssetID: mkDexAsset("kmd"),
+	3:                  mkDexAsset("doge"),
+	145:                mkDexAsset("bch"),
+	60:                 mkDexAsset("eth"),
+	60000:              mkDexAsset("dextt.eth"),
 }
 
 var tExchanges = map[string]*core.Exchange{
@@ -361,8 +363,8 @@ var tExchanges = map[string]*core.Exchange{
 				Confs: 10,
 				Amt:   1e11,
 			},
-			"kmd": { // Not-supported by client
-				ID:    141,
+			"kmd": { // Not-supported
+				ID:    unsupportedAssetID,
 				Confs: 10,
 				Amt:   1e12,
 			},
@@ -374,9 +376,9 @@ var tExchanges = map[string]*core.Exchange{
 		Assets: dexAssets,
 		AcctID: "0123456789abcdef",
 		Markets: map[string]*core.Market{
-			mkid(42, 28):  mkMrkt("dcr", "vtc"),
-			mkid(0, 2):    mkMrkt("btc", "ltc"),
-			mkid(22, 141): mkMrkt("mona", "kmd"),
+			mkid(42, 28):                 mkMrkt("dcr", "vtc"),
+			mkid(0, 2):                   mkMrkt("btc", "ltc"),
+			mkid(22, unsupportedAssetID): mkMrkt("mona", "kmd"),
 		},
 		ConnectionStatus: comms.Connected,
 		RegFees: map[string]*core.FeeAsset{
@@ -590,6 +592,13 @@ func (c *TCore) Orders(filter *core.OrderFilter) ([]*core.Order, error) {
 	var spacing uint64 = 60 * 60 * 1000 / 2 // half an hour
 	t := uint64(time.Now().UnixMilli())
 
+	if randomizeOrdersCount {
+		if rand.Float32() < 0.25 {
+			return []*core.Order{}, nil
+		}
+		filter.N = rand.Intn(filter.N + 1)
+	}
+
 	cords := make([]*core.Order, 0, filter.N)
 	for i := 0; i < int(filter.N); i++ {
 		cord := makeCoreOrder()
@@ -748,6 +757,9 @@ func makeCoreOrder() *core.Order {
 	}
 	mkts := make([]*core.Market, 0, len(tExchanges[host].Markets))
 	for _, mkt := range tExchanges[host].Markets {
+		if mkt.BaseID == unsupportedAssetID || mkt.QuoteID == unsupportedAssetID {
+			continue
+		}
 		mkts = append(mkts, mkt)
 	}
 	mkt := mkts[rand.Intn(len(mkts))]
@@ -1647,10 +1659,10 @@ out:
 			}
 
 			// randomize the balance
-			if baseID != 141 && baseConnected { // komodo unsupported
+			if baseID != unsupportedAssetID && baseConnected { // komodo unsupported
 				c.noteFeed <- randomBalanceNote(baseID)
 			}
-			if quoteID != 141 && quoteConnected { // komodo unsupported
+			if quoteID != unsupportedAssetID && quoteConnected { // komodo unsupported
 				c.noteFeed <- randomBalanceNote(quoteID)
 			}
 
@@ -1758,10 +1770,10 @@ func (c *TCore) FiatRateSources() map[string]bool {
 
 func TestServer(t *testing.T) {
 	// Register dummy drivers for unimplemented assets.
-	asset.Register(22, &TDriver{})  // mona
-	asset.Register(28, &TDriver{})  // vtc
-	asset.Register(141, &TDriver{}) // kmd
-	asset.Register(3, &TDriver{})   // doge
+	asset.Register(22, &TDriver{})                 // mona
+	asset.Register(28, &TDriver{})                 // vtc
+	asset.Register(unsupportedAssetID, &TDriver{}) // kmd
+	asset.Register(3, &TDriver{})                  // doge
 
 	tinfos = map[uint32]*asset.Token{
 		60000: asset.TokenInfo(60000),
@@ -1770,8 +1782,8 @@ func TestServer(t *testing.T) {
 	numBuys = 10
 	numSells = 10
 	feedPeriod = 5000 * time.Millisecond
-	initialize := false
-	register := false
+	initialize := true
+	register := true
 	forceDisconnectWallet = true
 	gapWidthFactor = 0.2
 	randomPokes = false
@@ -1779,6 +1791,7 @@ func TestServer(t *testing.T) {
 	numUserOrders = 40
 	delayBalance = true
 	doubleCreateAsyncErr = false
+	randomizeOrdersCount = true
 
 	var shutdown context.CancelFunc
 	tCtx, shutdown = context.WithCancel(context.Background())
