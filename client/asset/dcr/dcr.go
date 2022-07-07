@@ -3498,52 +3498,62 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 	// notification.
 	var queuedBlock *polledBlock
 
+	// checkTip captures queuedBlock and walletBlock.
+	checkTip := func() {
+		ctx, cancel := context.WithTimeout(dcr.ctx, 4*time.Second)
+		defer cancel()
+
+		newTip, err := dcr.getBestBlock(ctx)
+		if err != nil {
+			dcr.handleTipChange(nil, 0, fmt.Errorf("failed to get best block: %w", err))
+			return
+		}
+
+		dcr.tipMtx.RLock()
+		sameTip := dcr.currentTip.hash.IsEqual(newTip.hash)
+		dcr.tipMtx.RUnlock()
+
+		if sameTip {
+			return
+		}
+
+		if walletBlock == nil {
+			dcr.handleTipChange(newTip.hash, newTip.height, nil)
+			return
+		}
+
+		// Queue it for reporting, but don't send it right away. Give the wallet
+		// a chance to provide their block update. SPV wallet may need more time
+		// after storing the block header to fetch and scan filters and issue
+		// the FilteredBlockConnected report.
+		if queuedBlock != nil {
+			queuedBlock.queue.Stop()
+		}
+		blockAllowance := walletBlockAllowance
+		ctx, cancel = context.WithTimeout(dcr.ctx, 4*time.Second)
+		synced, _, err := dcr.wallet.SyncStatus(ctx)
+		cancel()
+		if err != nil {
+			dcr.log.Errorf("Error retrieving sync status before queuing polled block: %v", err)
+		} else if !synced {
+			blockAllowance *= 10
+		}
+		queuedBlock = &polledBlock{
+			block: newTip,
+			queue: time.AfterFunc(blockAllowance, func() {
+				dcr.log.Warnf("Reporting a block found in polling that the wallet apparently "+
+					"never reported: %s (%d). If you see this message repeatedly, it may indicate "+
+					"an issue with the wallet.", newTip.hash, newTip.height)
+				dcr.handleTipChange(newTip.hash, newTip.height, nil)
+			}),
+		}
+	}
+
 	for {
 		select {
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(dcr.ctx, 2*time.Second)
-			defer cancel()
-			newTip, err := dcr.getBestBlock(ctx)
-			if err != nil {
-				dcr.handleTipChange(nil, 0, fmt.Errorf("failed to get best block: %w", err))
-				return
-			}
+			checkTip()
 
-			dcr.tipMtx.RLock()
-			sameTip := dcr.currentTip.hash.IsEqual(newTip.hash)
-			dcr.tipMtx.RUnlock()
-
-			if sameTip {
-				continue
-			}
-
-			if walletBlock == nil {
-				dcr.handleTipChange(newTip.hash, newTip.height, nil)
-				continue
-			}
-			// Queue it for reporting, but don't send it right away. Give the
-			// wallet a chance to provide their block update. SPV wallet may
-			// need more time after storing the block header to fetch and
-			// scan filters and issue the FilteredBlockConnected report.
-			if queuedBlock != nil {
-				queuedBlock.queue.Stop()
-			}
-			blockAllowance := walletBlockAllowance
-			synced, _, err := dcr.wallet.SyncStatus(ctx)
-			if err != nil {
-				dcr.log.Errorf("Error retrieving sync status before queuing polled block: %v", err)
-			} else if !synced {
-				blockAllowance *= 10
-			}
-			queuedBlock = &polledBlock{
-				block: newTip,
-				queue: time.AfterFunc(blockAllowance, func() {
-					dcr.log.Warnf("Reporting a block found in polling that the wallet apparently "+
-						"never reported: %d %s. If you see this message repeatedly, it may indicate "+
-						"an issue with the wallet.", newTip.height, newTip.hash)
-					dcr.handleTipChange(newTip.hash, newTip.height, nil)
-				}),
-			}
 		case walletTip := <-walletBlock:
 			if queuedBlock != nil && walletTip.height >= queuedBlock.height {
 				if !queuedBlock.queue.Stop() && walletTip.hash == queuedBlock.hash {
