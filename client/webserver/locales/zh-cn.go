@@ -40,7 +40,7 @@ var ZhCN = map[string]string{
 	"export_app_pw_msg":              "输入密码以确认帐户导出",
 	"Disable Account":                "禁用帐户",
 	"disable_app_pw_msg":             "输入您的密码以禁用帐户",
-	"disable_irreversible":           `<span class="red">注意：</span>此操作是不可逆的 - 帐户停用后将无法再重新激活。`,
+	"disable_dex_server":             "该 DEX 服务器可能会在未来任何时候通过再次添加重新启用（您无需支付费用）。", // RETRANSLATE
 	"Authorize Import":               "允许导入",
 	"app_pw_import_msg":              "输入应用密码以确认帐户的导入",
 	"Account File":                   "帐户文件",

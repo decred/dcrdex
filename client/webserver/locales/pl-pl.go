@@ -40,7 +40,7 @@ var PlPL = map[string]string{
 	"export_app_pw_msg":              "Podaj hasło aplikacji, aby potwierdzić eksport konta dla",
 	"Disable Account":                "Zablokuj konto",
 	"disable_app_pw_msg":             "Podaj hasło aplikacji, aby zablokowac konto",
-	"disable_irreversible":           `<span class="red">Uwaga:</span> Ta czynność jest nieodwracalna - zablokowanego konta nie można później odblokować.`,
+	"disable_dex_server":             "Ten serwer DEX może zostać ponownie włączony (nie będziesz musiał płacić opłaty) w dowolnym momencie w przyszłości, dodając go ponownie.",
 	"Authorize Import":               "Zatwierdź import",
 	"app_pw_import_msg":              "Podaj hasło aplikacji, aby potwierdzić import konta",
 	"Account File":                   "Plik konta",

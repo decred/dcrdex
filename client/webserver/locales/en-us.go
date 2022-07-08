@@ -41,7 +41,7 @@ var EnUS = map[string]string{
 	"export_app_pw_msg":              "Enter your app password to confirm Account export for",
 	"Disable Account":                "Disable Account",
 	"disable_app_pw_msg":             "Enter your app password to disable account",
-	"disable_irreversible":           `<span class="red">Note:</span> This action is irreversible - once an account is disabled it can't be re-enabled.`,
+	"disable_dex_server":             "This DEX server may be re-enabled (you won't have to pay the fee) at any time in the future by adding it again.",
 	"Authorize Import":               "Authorize Import",
 	"app_pw_import_msg":              "Enter your app password to confirm Account import",
 	"Account File":                   "Account File",
