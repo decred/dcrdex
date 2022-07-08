@@ -3,7 +3,7 @@ div.marketlist {
   border-right: 1px solid #626262;
   z-index: 99;
   background-color: #dbdbdb;
-  min-width: 175px;
+  min-width: 190px;
 
   .selected {
     border-style: solid none;
@@ -78,7 +78,7 @@ label.market-search {
 
   input {
     border: none;
-    max-width: 75px;
+    width: 100%;
   }
 
   span {
