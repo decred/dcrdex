@@ -834,6 +834,10 @@ func (w *spvWallet) sendToAddress(address string, value, feeRate uint64, subtrac
 	}
 
 	wireOP := wire.NewTxOut(int64(value), pkScript)
+	if dexbtc.IsDust(wireOP, feeRate) {
+		return nil, errors.New("output value is dust")
+	}
+
 	// converting sats/vB -> sats/kvB
 	feeRateAmt := btcutil.Amount(feeRate * 1e3)
 	tx, err := w.wallet.SendOutputs([]*wire.TxOut{wireOP}, nil, w.acctNum, 0,
@@ -915,6 +919,9 @@ func (w *spvWallet) sendWithSubtract(pkScript []byte, value, feeRate uint64) (*c
 	}
 
 	wireOP := wire.NewTxOut(int64(send), pkScript)
+	if dexbtc.IsDust(wireOP, feeRate) {
+		return nil, errors.New("output value is dust")
+	}
 	tx.AddTxOut(wireOP)
 
 	if err := w.wallet.signTransaction(tx); err != nil {
