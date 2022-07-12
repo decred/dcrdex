@@ -973,7 +973,7 @@ Registration is complete after the fee transaction has been confirmed.`,
     rate (int): The atoms quote asset to pay/accept per unit base asset. e.g.
       156000 satoshi/DCR for the DCR(base)_BTC(quote).
     immediate (bool): Require immediate match. Do not book the order.
-	options (string): A JSON-encoded string->string mapping of additional
+    options (string): A JSON-encoded string->string mapping of additional
        trade options.`,
 		returns: `Returns:
     obj: The order details.
