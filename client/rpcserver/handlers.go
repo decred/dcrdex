@@ -812,8 +812,8 @@ var helpMsgs = map[string]helpMsg{
     assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
       See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
     walletType (string): The wallet type.
-     path (string): Optional. The path to a configuration file.
-     settings (string): A JSON-encoded string->string mapping of additional
+    path (string): Optional. The path to a configuration file.
+    settings (string): A JSON-encoded string->string mapping of additional
        configuration settings. These settings take precedence over any settings
        parsed from file. e.g. '{"account":"default"}' for Decred accounts, and
        '{"walletname":""}' for the default Bitcoin wallet where bitcoind's listwallets RPC gives possible walletnames.`,
@@ -972,7 +972,9 @@ Registration is complete after the fee transaction has been confirmed.`,
     qty (int): The number of units to buy/sell. Must be a multiple of the lot size.
     rate (int): The atoms quote asset to pay/accept per unit base asset. e.g.
       156000 satoshi/DCR for the DCR(base)_BTC(quote).
-    immediate (bool): Require immediate match. Do not book the order.`,
+    immediate (bool): Require immediate match. Do not book the order.
+    options (string): A JSON-encoded string->string mapping of additional
+       trade options.`,
 		returns: `Returns:
     obj: The order details.
     {

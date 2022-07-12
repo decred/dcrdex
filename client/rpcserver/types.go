@@ -208,6 +208,15 @@ func checkBoolArg(arg, name string) (bool, error) {
 	return b, nil
 }
 
+func checkMapArg(arg, name string) (map[string]string, error) {
+	m := make(map[string]string)
+	err := json.Unmarshal([]byte(arg), &m)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s must be a JSON-encoded map[string]string: %v", errArgs, name, err)
+	}
+	return m, nil
+}
+
 func parseDiscoverAcctArgs(params *RawParams) (*discoverAcctForm, error) {
 	if err := checkNArgs(params, []int{1}, []int{1, 2}); err != nil {
 		return nil, err
@@ -369,7 +378,7 @@ func parseRegisterArgs(params *RawParams) (*core.RegisterForm, error) {
 }
 
 func parseTradeArgs(params *RawParams) (*tradeForm, error) {
-	if err := checkNArgs(params, []int{1}, []int{8}); err != nil {
+	if err := checkNArgs(params, []int{1}, []int{9}); err != nil {
 		return nil, err
 	}
 	isLimit, err := checkBoolArg(params.Args[1], "isLimit")
@@ -400,6 +409,10 @@ func parseTradeArgs(params *RawParams) (*tradeForm, error) {
 	if err != nil {
 		return nil, err
 	}
+	options, err := checkMapArg(params.Args[8], "options")
+	if err != nil {
+		return nil, err
+	}
 	req := &tradeForm{
 		appPass: params.PWArgs[0],
 		srvForm: &core.TradeForm{
@@ -411,6 +424,7 @@ func parseTradeArgs(params *RawParams) (*tradeForm, error) {
 			Qty:     qty,
 			Rate:    rate,
 			TifNow:  tifnow,
+			Options: options,
 		},
 	}
 	return req, nil
