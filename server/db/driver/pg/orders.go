@@ -696,18 +696,21 @@ func (a *Archiver) StorePreimage(ord order.Order, pi order.Preimage) error {
 	return nil
 }
 
-// SetOrderCompleteTime sets the swap completion time for an existing order.
+// SetOrderCompleteTime sets the successful swap completion time for an existing
+// order. It is an error if the order is not in executed status.
 func (a *Archiver) SetOrderCompleteTime(ord order.Order, compTimeMs int64) error {
 	status, orderType, _, err := a.orderStatus(ord)
 	if err != nil {
 		return err
 	}
 
-	if status != orderStatusExecuted /*status.active()*/ {
-		log.Warnf("Attempting to set swap completion time for active order %v", ord.UID())
+	if status != orderStatusExecuted { // complete_time is only set for executed orders, not canceled or revoked
+		log.Warnf("Attempting to set swap completion time for order %v in status %v, not executed",
+			ord.UID(), status)
 		return db.ArchiveError{
-			Code:   db.ErrOrderNotExecuted,
-			Detail: fmt.Sprintf("unable to set completed time for order %v not in executed status ", ord.UID()),
+			Code: db.ErrOrderNotExecuted,
+			Detail: fmt.Sprintf("unable to set completed time for order %v in status %v, not executed",
+				ord.UID(), status),
 		}
 	}
 

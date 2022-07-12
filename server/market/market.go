@@ -1078,8 +1078,8 @@ func (m *Market) SwapDone(ord order.Order, match *order.Match, fail bool) {
 	defer m.bookMtx.Unlock()
 	settling, found := m.settling[oid]
 	if !found {
-		// Order was canceled or already had failed swap, and was removed from
-		// the map. No more settling amount tracking needed.
+		// Order was canceled, revoked, or already had failed swap, and was
+		// removed from the map. No more settling amount tracking needed.
 		return
 	}
 	if settling < match.Quantity {
@@ -2161,6 +2161,13 @@ func (m *Market) prepEpoch(orders []order.Order, epochEnd time.Time) (cSum []byt
 func (m *Market) UnbookUserOrders(user account.AccountID) {
 	m.bookMtx.Lock()
 	removedBuys, removedSells := m.book.RemoveUserOrders(user)
+	// No order completion credit in SwapDone for revoked orders:
+	for _, lo := range removedSells {
+		delete(m.settling, lo.ID())
+	}
+	for _, lo := range removedBuys {
+		delete(m.settling, lo.ID())
+	}
 	m.bookMtx.Unlock()
 
 	total := len(removedBuys) + len(removedSells)
@@ -2203,6 +2210,7 @@ func (m *Market) Unbook(lo *order.LimitOrder) bool {
 	// Ensure we do not unbook during matching.
 	m.bookMtx.Lock()
 	_, removed := m.book.Remove(lo.ID())
+	delete(m.settling, lo.ID()) // no order completion credit in SwapDone for revoked orders
 	m.bookMtx.Unlock()
 
 	m.unlockOrderCoins(lo)
@@ -2339,7 +2347,9 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 		}
 	}
 	for _, oid := range canceled {
-		delete(m.settling, oid) // may still be settling, but we don't care anymore
+		// There may still be swaps settling, but we don't care anymore because
+		// there is no completion credit on a canceled order.
+		delete(m.settling, oid)
 	}
 	m.bookMtx.Unlock()
 
