@@ -1404,7 +1404,8 @@ export default class MarketsPage extends BasePage {
       Doc.hide(page.verifyLimit)
       Doc.show(page.verifyMarket)
       page.vOrderType.textContent = `Market ${buySellStr} Order`
-      page.vmFromTotal.textContent = Doc.formatCoinValue(order.qty / 1e8)
+      const ui = order.sell ? this.market.baseUnitInfo : this.market.quoteUnitInfo
+      page.vmFromTotal.textContent = Doc.formatCoinValue(order.qty, ui)
       page.vmFromAsset.textContent = fromAsset.symbol.toUpperCase()
       const gap = this.midGap()
       if (gap) {
@@ -1556,30 +1557,36 @@ export default class MarketsPage extends BasePage {
 
   /* setFeeEstimates sets all of the pre-order estimate fields */
   setFeeEstimates (swap: PreSwap, redeem: PreRedeem, order: TradeForm) {
-    const page = this.page
+    const { page, market } = this
+    const { baseUnitInfo, quoteUnitInfo, rateConversionFactor } = market
     const swapped = swap.estimate.value || 0
     const fmtPct = percentFormatter.format
+
+    let [toUI, fromUI] = [baseUnitInfo, quoteUnitInfo]
+    if (this.currentOrder.sell) {
+      [fromUI, toUI] = [toUI, fromUI]
+    }
 
     // Set swap fee estimates in the details pane.
     const bestSwapPct = swap.estimate.realisticBestCase / swapped * 100
     page.vSwapFeesLowPct.textContent = `${fmtPct(bestSwapPct)}%`
-    page.vSwapFeesLow.textContent = Doc.formatCoinValue(swap.estimate.realisticBestCase / 1e8)
+    page.vSwapFeesLow.textContent = Doc.formatCoinValue(swap.estimate.realisticBestCase, fromUI)
     const worstSwapPct = swap.estimate.realisticWorstCase / swapped * 100
     page.vSwapFeesHighPct.textContent = `${fmtPct(worstSwapPct)}%`
-    page.vSwapFeesHigh.textContent = Doc.formatCoinValue(swap.estimate.realisticWorstCase / 1e8)
+    page.vSwapFeesHigh.textContent = Doc.formatCoinValue(swap.estimate.realisticWorstCase, fromUI)
     page.vSwapFeesMaxPct.textContent = `${fmtPct(swap.estimate.maxFees / swapped * 100)}%`
-    page.vSwapFeesMax.textContent = Doc.formatCoinValue(swap.estimate.maxFees / 1e8)
+    page.vSwapFeesMax.textContent = Doc.formatCoinValue(swap.estimate.maxFees, fromUI)
 
     // Set redemption fee estimates in the details pane.
     const midGap = this.midGap()
-    const estRate = midGap || order.rate / 1e8
+    const estRate = midGap || order.rate / rateConversionFactor
     const received = order.sell ? swapped * estRate : swapped / estRate
     const bestRedeemPct = redeem.estimate.realisticBestCase / received * 100
     page.vRedeemFeesLowPct.textContent = `${fmtPct(bestRedeemPct)}%`
-    page.vRedeemFeesLow.textContent = Doc.formatCoinValue(redeem.estimate.realisticBestCase / 1e8)
+    page.vRedeemFeesLow.textContent = Doc.formatCoinValue(redeem.estimate.realisticBestCase, toUI)
     const worstRedeemPct = redeem.estimate.realisticWorstCase / received * 100
     page.vRedeemFeesHighPct.textContent = `${fmtPct(worstRedeemPct)}%`
-    page.vRedeemFeesHigh.textContent = Doc.formatCoinValue(redeem.estimate.realisticWorstCase / 1e8)
+    page.vRedeemFeesHigh.textContent = Doc.formatCoinValue(redeem.estimate.realisticWorstCase, toUI)
 
     // Set the summary percent, which is a simple addition of swap and redeem
     // loss percents.
@@ -2307,7 +2314,12 @@ class ExchangeSection {
     // If disconnected is not possible to get the markets from the server.
     if (!dex.markets) return
 
-    this.marketRows = Object.values(dex.markets).map(mkt => new MarketRow(tmpl.mktrow, mkt))
+    this.marketRows = Object.values(dex.markets).map(mkt => {
+      const bui = app().unitInfo(mkt.baseid, dex)
+      const qui = app().unitInfo(mkt.quoteid, dex)
+      const rateConversionFactor = OrderUtil.RateEncodingFactor / bui.conventional.conversionFactor * qui.conventional.conversionFactor
+      return new MarketRow(tmpl.mktrow, mkt, rateConversionFactor)
+    })
 
     // for (const mkt of Object.values(dex.markets)) {
     //   this.marketRows.push(new MarketRow(tmpl.mktrow, mkt))
@@ -2373,14 +2385,16 @@ class MarketRow {
   lotSize: number
   rateStep: number
   tmpl: Record<string, PageElement>
+  rateConversionFactor: number
 
-  constructor (template: HTMLElement, mkt: Market) {
+  constructor (template: HTMLElement, mkt: Market, rateConversionFactor: number) {
     this.mkt = mkt
     this.name = mkt.name
     this.baseID = mkt.baseid
     this.quoteID = mkt.quoteid
     this.lotSize = mkt.lotsize
     this.rateStep = mkt.ratestep
+    this.rateConversionFactor = rateConversionFactor
     this.node = template.cloneNode(true) as HTMLElement
     const tmpl = this.tmpl = Doc.parseTemplate(this.node)
     tmpl.baseIcon.src = Doc.logoPath(mkt.basesymbol)
@@ -2405,7 +2419,7 @@ class MarketRow {
     if (baseAsset) {
       Doc.show(tmpl.bottomRow)
       tmpl.assetName.textContent = baseAsset.info.name
-      tmpl.price.textContent = Doc.formatCoinValue(spot.rate / 1e8)
+      tmpl.price.textContent = Doc.formatCoinValue(spot.rate / this.rateConversionFactor)
     }
   }
 }
