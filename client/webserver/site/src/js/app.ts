@@ -811,15 +811,7 @@ export default class Application {
     const supportedAsset = this.assets[assetID]
     if (supportedAsset) return supportedAsset.info.unitinfo
     if (!xc) {
-      console.error(`no supported asset info for id = ${assetID}, and no exchange info provided`)
-      return {
-        atomicUnit: '',
-        conventional: {
-          unit: '',
-          conversionFactor: 1e8
-        },
-        denominations: []
-      }
+      throw Error(`no supported asset info for id = ${assetID}, and no exchange info provided`)
     }
     return xc.assets[assetID].unitInfo
   }
