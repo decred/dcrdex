@@ -667,6 +667,7 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 		ownsAddress:      true,
 		contractLockTime: time.Now().Add(time.Minute),
 	}
+	var broadcasting uint32 = 1
 	xcWallet := &xcWallet{
 		Wallet:       w,
 		connector:    dex.NewConnectionMaster(w),
@@ -679,6 +680,7 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 		syncProgress: 1,
 		pw:           tPW,
 		traits:       asset.DetermineWalletTraits(w),
+		broadcasting: &broadcasting,
 	}
 
 	return xcWallet, w

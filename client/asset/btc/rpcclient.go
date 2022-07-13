@@ -162,8 +162,8 @@ func (wc *rpcClient) reconfigure(cfg *asset.WalletConfig, currentAddress string)
 
 	// Check the RPC configuration.
 	newCfg := &parsedCfg.RPCConfig
-	if err := dexbtc.CheckRPCConfig(&newCfg.RPCConfig, wc.cloneParams.WalletInfo.Name, wc.cloneParams.Network, wc.cloneParams.Ports); err != nil {
-		return false, err
+	if err = dexbtc.CheckRPCConfig(&newCfg.RPCConfig, wc.cloneParams.WalletInfo.Name, wc.cloneParams.Network, wc.cloneParams.Ports); err != nil {
+		return
 	}
 
 	// If the RPC configuration has changed, try to update the client.

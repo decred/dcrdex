@@ -1133,7 +1133,6 @@ func (btc *baseWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig,
 	if !restart {
 		// No restart required. Just update the configuration.
 		btc.cfgV.Store(newCfg)
-		return false, nil
 	}
 
 	return restart, nil

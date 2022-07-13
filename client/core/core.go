@@ -1897,7 +1897,7 @@ func (c *Core) assetDataBackupDirectory(assetID uint32) string {
 // wallet. The returned wallet is running but not connected.
 func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	var wallet *xcWallet
-	var ready uint32 // in case asset.Open tries to call PeersChange before actually starting
+	broadcasting := new(uint32) // in case asset.Open tries to call PeersChange before actually starting
 	// Create the client/asset.Wallet.
 	assetID := dbWallet.AssetID
 	walletCfg := &asset.WalletConfig{
@@ -1911,7 +1911,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 			go c.tipChange(assetID, err)
 		},
 		PeersChange: func(numPeers uint32, err error) {
-			if atomic.LoadUint32(&ready) == 1 {
+			if atomic.LoadUint32(broadcasting) == 1 {
 				go c.peerChange(wallet, numPeers, err)
 			}
 		},
@@ -1939,13 +1939,14 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 			OrderLocked:    orderLockedAmt,
 			ContractLocked: contractLockedAmt,
 		},
-		encPass:    dbWallet.EncryptedPW,
-		address:    dbWallet.Address,
-		dbID:       dbWallet.ID(),
-		walletType: dbWallet.Type,
-		traits:     asset.DetermineWalletTraits(w),
+		encPass:      dbWallet.EncryptedPW,
+		address:      dbWallet.Address,
+		dbID:         dbWallet.ID(),
+		walletType:   dbWallet.Type,
+		traits:       asset.DetermineWalletTraits(w),
+		broadcasting: broadcasting,
 	}
-	atomic.StoreUint32(&ready, 1)
+	atomic.StoreUint32(broadcasting, 1)
 	return wallet, nil
 }
 
@@ -2002,7 +2003,10 @@ func (c *Core) walletCheckAndNotify(w *xcWallet) bool {
 	w.synced = synced
 	w.syncProgress = progress
 	w.mtx.Unlock()
-	c.notify(newWalletStateNote(w.state()))
+
+	if atomic.LoadUint32(w.broadcasting) == 1 {
+		c.notify(newWalletStateNote(w.state()))
+	}
 	if synced && !wasSynced {
 		c.updateWalletBalance(w)
 		c.log.Infof("Wallet synced for asset %s", unbip(w.AssetID))
@@ -2484,6 +2488,16 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 			assetID, unbip(assetID), err)
 	}
 
+	// Block PeersChange until we know this wallet is ready.
+	atomic.StoreUint32(wallet.broadcasting, 0)
+	var success bool
+	defer func() {
+		if success {
+			atomic.StoreUint32(wallet.broadcasting, 1)
+			c.walletCheckAndNotify(wallet)
+		}
+	}()
+
 	// Must connect to ensure settings are good. This comes before
 	// setWalletPassword since it would use connectAndUpdateWallet, which
 	// performs additional deposit address validation and balance updates that
@@ -2543,6 +2557,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 	c.updateAssetWalletRefs(wallet)
 
 	restartOnFail = false
+	success = true
 
 	if oldWallet.connected() {
 		// NOTE: Cannot lock the wallet backend because it may be the same as

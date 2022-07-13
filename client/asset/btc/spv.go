@@ -389,12 +389,12 @@ func (w *spvWallet) reconfigure(cfg *asset.WalletConfig, _ /* currentAddress */ 
 		return false, errors.New("cannot decrease the birthday with active orders")
 	}
 	if err := w.updateDBBirthday(newBday); err != nil {
-		return false, fmt.Errorf("error storing new birthday")
+		return false, fmt.Errorf("error storing new birthday: %w", err)
 	}
 	w.birthdayV.Store(newBday)
 	if rescanRequired {
 		if err = w.rescanWalletAsync(); err != nil {
-			return false, fmt.Errorf("error initiating rescan after birthday adjustment")
+			return false, fmt.Errorf("error initiating rescan after birthday adjustment: %w", err)
 		}
 	}
 	return

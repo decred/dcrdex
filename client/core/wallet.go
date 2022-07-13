@@ -55,6 +55,8 @@ type xcWallet struct {
 	hookedUp     bool
 	synced       bool
 	syncProgress float32
+
+	broadcasting *uint32
 }
 
 // encPW returns xcWallet's encrypted password.
