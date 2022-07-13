@@ -262,6 +262,7 @@ func TestWsConn(t *testing.T) {
 	noCertConnMaster := dex.NewConnectionMaster(noCertConn)
 	err = noCertConnMaster.Connect(ctx)
 	noCertConnMaster.Disconnect()
+	fmt.Printf("ERRORR _____ %v\n ____ \n", err)
 	if err == nil || !errors.Is(err, ErrCertRequired) {
 		t.Fatalf("failed to get ErrCertRequired for no cert connection")
 	}
