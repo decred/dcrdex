@@ -270,13 +270,25 @@
       <div class="text-center">para</div>
       <div id="vSendAddr" class="text-center font-weight-bold"></div>
       <hr class="dashed mt-2">
-      <div class="d-flex align-items-center justify-content-between">Estimated Transaction Fee: <span
-          id="vSendFee"></span></div>
+      <div class="d-flex align-items-center justify-content-between">Estimated Transaction Fee: 
+       <span id="vSendFee"></span>
+      </div>
+      <span class="d-flex d-hide justify-content-end grey fs14">
+       ~<span id="vSendFeeFiat" class="mx-1"></span>USD
+      </span>
       <hr class="dashed mt-2">
-      <div class="d-flex align-items-center justify-content-between">Estimated Total Spend: <span
-          id="vTotalSend"></span></div>
-      <div class="d-flex align-items-center justify-content-between">Estimated Balance: <span
-          id="balanceAfterSend"></span></div>
+      <div class="d-flex align-items-center justify-content-between">Estimated Total Spend: 
+       <span id="vTotalSend"></span>
+      </div>
+      <span class="d-flex d-hide justify-content-end grey fs14">
+       ~<span id="vTotalSendFiat" class="mx-1"></span>USD
+      </span>
+      <div class="d-flex align-items-center justify-content-between">Estimated Balance After: 
+       <span id="balanceAfterSend"></span>
+      </div>
+      <span class="d-flex d-hide justify-content-end grey fs14">
+       ~<span id="balanceAfterSendFiat" class="mx-1"></span>USD
+      </span>
       <hr class="dashed my-4">
        <div class="fs16 px-4 text-center">Authorize the transfer with your app password.</div>
         <div class="input-group mt-2">

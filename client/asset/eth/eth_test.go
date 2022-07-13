@@ -4450,38 +4450,38 @@ func TestEstimateSendTxFee(t *testing.T) {
 }
 
 func testEstimateSendTxFee(t *testing.T, assetID uint32) {
-	w, eth, node, shutdown := tassetWallet(assetID)
+	w, eth, _, shutdown := tassetWallet(assetID)
 	defer shutdown()
 
 	maxFeeRate, _ := eth.recommendedMaxFeeRate(eth.ctx)
 	ethFees := dexeth.WeiToGwei(maxFeeRate) * defaultSendGasLimit
 	tokenFees := dexeth.WeiToGwei(maxFeeRate) * tokenGases.Transfer
 
+	const testAddr = "dd93b447f7eBCA361805eBe056259853F3912E04"
+
 	const val = 10e9
 	tests := []struct {
-		name            string
-		sendAdj, feeAdj uint64
-		wantErr         bool
+		name, addr string
+		val        uint64
+		wantErr    bool
 	}{{
 		name: "ok",
+		addr: testAddr,
+		val:  val,
 	}, {
-		name:    "not enough",
-		sendAdj: 1,
+		name:    "invalid address",
+		addr:    "invlaidaddress",
+		val:     val,
 		wantErr: true,
 	}, {
-		name:    "low fees",
-		feeAdj:  1,
+		name:    "zero send amount",
+		addr:    testAddr,
+		val:     0,
 		wantErr: true,
 	}}
 
 	for _, test := range tests {
-		if assetID == BipID {
-			node.bal = dexeth.GweiToWei(val + ethFees - test.sendAdj - test.feeAdj)
-		} else {
-			node.tokenContractor.bal = dexeth.GweiToWei(val - test.sendAdj)
-			node.bal = dexeth.GweiToWei(tokenFees - test.feeAdj)
-		}
-		estimate, err := w.EstimateSendTxFee(val, 0, false)
+		estimate, err := w.EstimateSendTxFee(test.addr, test.val, 0, false)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %v", test.name)

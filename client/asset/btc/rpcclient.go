@@ -59,6 +59,7 @@ const (
 	methodGetBlockHeader     = "getblockheader"
 	methodGetNetworkInfo     = "getnetworkinfo"
 	methodGetBlockchainInfo  = "getblockchaininfo"
+	methodFundRawTransaction = "fundrawtransaction"
 )
 
 // isTxNotFoundErr will return true if the error indicates that the requested
@@ -787,6 +788,35 @@ func (wc *rpcClient) sendToAddress(address string, value, feeRate uint64, subtra
 		return nil, err
 	}
 	return chainhash.NewHashFromStr(txid)
+}
+
+func (wc *rpcClient) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract bool) (txfee uint64, err error) {
+	txBytes, err := wc.serializeTx(tx)
+	if err != nil {
+		return 0, fmt.Errorf("tx serialization error: %w", err)
+	}
+
+	// 1e-5 = 1e-8 for satoshis * 1000 for kB.
+	feeRateOption := float64(feeRate) / 1e5
+	options := &btcjson.FundRawTransactionOpts{
+		FeeRate:    &feeRateOption,
+		ChangeType: &btcjson.ChangeTypeBech32,
+	}
+	if subtract {
+		options.SubtractFeeFromOutputs = []int{0}
+	}
+	if !wc.segwit {
+		options.ChangeType = &btcjson.ChangeTypeLegacy
+	}
+
+	res := &btcjson.FundRawTransactionResult{}
+	err = wc.call(methodFundRawTransaction, anylist{hex.EncodeToString(txBytes), options, false}, &res)
+	if err != nil {
+		return 0, fmt.Errorf("error calculating transaction fee: %w", err)
+	}
+
+	txfee = toSatoshi(res.Fee.ToBTC())
+	return
 }
 
 // GetWalletInfo gets the getwalletinfo RPC result.

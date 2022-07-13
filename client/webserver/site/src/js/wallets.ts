@@ -121,7 +121,7 @@ export default class WalletsPage extends BasePage {
     // Send confirmation form.
     bindForm(page.vSendForm, page.vSend, async () => { this.send() })
     // Cancel send confirmation form.
-    bindForm(page.vSendForm, page.vCancelSend, () => { this.cancelSend() })
+    Doc.bind(page.vCancelSend, 'click', () => { this.cancelSend() })
 
     // Bind the wallet reconfiguration submission.
     bindForm(page.reconfigForm, page.submitReconfig, () => this.reconfig())
@@ -238,13 +238,14 @@ export default class WalletsPage extends BasePage {
       return
     }
     const open = {
+      addr: page.sendAddr.value,
       assetID: assetID,
       subtract: subtract,
       value: value
     }
 
     const wallet = app().walletMap[assetID]
-    page.vSendSymbol.textContent = wallet.symbol
+    page.vSendSymbol.textContent = wallet.symbol.toUpperCase()
     page.vSendLogo.src = Doc.logoPath(wallet.symbol)
 
     const loaded = app().loading(page.sendForm)
@@ -261,22 +262,38 @@ export default class WalletsPage extends BasePage {
     }
 
     page.vSendFee.textContent = Doc.formatFullPrecision(res.txfee, app().unitInfo(assetID))
+    this.showFiatValue(assetID, res.txfee, page.vSendFeeFiat)
     page.vSendDestinationAmt.textContent = Doc.formatFullPrecision(value - res.txfee, app().unitInfo(assetID))
     page.vTotalSend.textContent = Doc.formatFullPrecision(value, app().unitInfo(assetID))
+    this.showFiatValue(assetID, value, page.vTotalSendFiat)
     page.vSendAddr.textContent = page.sendAddr.value || ''
-    page.balanceAfterSend.textContent = Doc.formatFullPrecision(wallet.balance.available - value, app().unitInfo(assetID))
+    const bal = wallet.balance.available - value
+    page.balanceAfterSend.textContent = Doc.formatFullPrecision(bal, app().unitInfo(assetID))
+    this.showFiatValue(assetID, bal, page.balanceAfterSendFiat)
     Doc.show(page.approxSign)
     if (!subtract) {
       Doc.hide(page.approxSign)
       page.vSendDestinationAmt.textContent = Doc.formatFullPrecision(value, app().unitInfo(assetID))
-      page.vTotalSend.textContent = Doc.formatFullPrecision(value + res.txfee, app().unitInfo(assetID))
-      page.balanceAfterSend.textContent = Doc.formatFullPrecision(wallet.balance.available - (value + res.txfee), app().unitInfo(assetID))
+      const totalSend = value + res.txfee
+      page.vTotalSend.textContent = Doc.formatFullPrecision(totalSend, app().unitInfo(assetID))
+      this.showFiatValue(assetID, value, page.vTotalSendFiat)
+      const bal = wallet.balance.available - totalSend
+      // handle edge cases where bal is not enough to cover totalSend.
+      // we don't want a minus display of user bal.
+      if (bal <= 0) {
+        page.balanceAfterSend.textContent = Doc.formatFullPrecision(0, app().unitInfo(assetID))
+        this.showFiatValue(assetID, 0, page.balanceAfterSendFiat)
+      } else {
+        page.balanceAfterSend.textContent = Doc.formatFullPrecision(bal, app().unitInfo(assetID))
+        this.showFiatValue(assetID, bal, page.balanceAfterSendFiat)
+      }
     }
     this.showBox(page.vSendForm)
   }
 
   // cancelSend displays the send form if user wants to make modification.
   async cancelSend () {
+    this.page.sendErr.textContent = ''
     Doc.hide(this.page.vSendForm)
     await this.showBox(this.page.sendForm)
   }
@@ -761,7 +778,6 @@ export default class WalletsPage extends BasePage {
 
     page.sendAddr.value = ''
     page.sendAmt.value = ''
-    page.sendPW.value = ''
     page.sendErr.textContent = ''
     this.showFiatValue(assetID, 0, page.sendValue)
     page.sendAvail.textContent = Doc.formatFullPrecision(wallet.balance.available, ui)

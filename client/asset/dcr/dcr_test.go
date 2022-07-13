@@ -2735,6 +2735,7 @@ func TestEstimateSendTxFee(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	addr := tPKHAddr.String()
 	node.changeAddr = tPKHAddr
 	var unspentVal uint64 = 100e8
 	unspents := make([]walletjson.ListUnspentResult, 0)
@@ -2779,7 +2780,7 @@ func TestEstimateSendTxFee(t *testing.T) {
 
 	// This should return fee estimate for one output.
 	addUtxo(unspentVal, 1, false)
-	estimate, err := wallet.EstimateSendTxFee(unspentVal, optimalFeeRate, true)
+	estimate, err := wallet.EstimateSendTxFee(addr, unspentVal, optimalFeeRate, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2788,7 +2789,7 @@ func TestEstimateSendTxFee(t *testing.T) {
 	}
 
 	// This should return fee estimate for two output.
-	estimate, err = wallet.EstimateSendTxFee(unspentVal/2, optimalFeeRate, true)
+	estimate, err = wallet.EstimateSendTxFee(addr, unspentVal/2, optimalFeeRate, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2797,7 +2798,7 @@ func TestEstimateSendTxFee(t *testing.T) {
 	}
 
 	// This should return an error, not enough funds to cover fees.
-	_, err = wallet.EstimateSendTxFee(unspentVal, optimalFeeRate, false)
+	_, err = wallet.EstimateSendTxFee(addr, unspentVal, optimalFeeRate, false)
 	if err == nil {
 		t.Fatal("Expected error not enough to cover funds required")
 	}
@@ -2806,11 +2807,23 @@ func TestEstimateSendTxFee(t *testing.T) {
 	addUtxo(dust, 0, true)
 	// This should return fee estimate for one output with dust added to fee.
 	estFeeWithDust := estFee + 100
-	estimate, err = wallet.EstimateSendTxFee(unspentVal, optimalFeeRate, true)
+	estimate, err = wallet.EstimateSendTxFee(addr, unspentVal, optimalFeeRate, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if estimate != estFeeWithDust {
 		t.Fatalf("expected estimate to be %v, got %v)", estFeeWithDust, estimate)
+	}
+
+	// Invalid address
+	_, err = wallet.EstimateSendTxFee("invalidsendaddress", unspentVal, optimalFeeRate, true)
+	if err == nil {
+		t.Fatal("Expected error for invalid send address")
+	}
+
+	// Zero send amount
+	_, err = wallet.EstimateSendTxFee(addr, 0, optimalFeeRate, true)
+	if err == nil {
+		t.Fatal("Expected error, send amount is zero")
 	}
 }

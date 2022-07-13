@@ -4534,7 +4534,7 @@ func (c *Core) Send(pw []byte, assetID uint32, value uint64, address string, sub
 
 // EstimateSendTxFee returns an estimate of the tx fee needed to send or
 // withdraw the specified amount.
-func (c *Core) EstimateSendTxFee(assetID uint32, amount uint64, subtract bool) (fee uint64, err error) {
+func (c *Core) EstimateSendTxFee(address string, assetID uint32, amount uint64, subtract bool) (fee uint64, err error) {
 	if amount == 0 {
 		return 0, fmt.Errorf("cannot check fee for zero %s", unbip(assetID))
 	}
@@ -4547,7 +4547,7 @@ func (c *Core) EstimateSendTxFee(assetID uint32, amount uint64, subtract bool) (
 			return 0, fmt.Errorf("wallet does not support checking network fee for withdrawal")
 		}
 	}
-	return wallet.Wallet.EstimateSendTxFee(amount, c.feeSuggestionAny(assetID), subtract)
+	return wallet.Wallet.EstimateSendTxFee(address, amount, c.feeSuggestionAny(assetID), subtract)
 }
 
 func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {

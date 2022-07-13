@@ -1248,6 +1248,14 @@ func (btc *baseWallet) IsDust(txOut *wire.TxOut, minRelayTxFee uint64) bool {
 	return dexbtc.IsDust(txOut, minRelayTxFee)
 }
 
+// IsDustVal is like IsDust but only needs the tx size, value and if segwit.
+func (btc *baseWallet) IsDustVal(txSize, value, minRelayTxFee uint64, segwit bool) bool {
+	if btc.dustLimit > 0 {
+		return value < btc.dustLimit
+	}
+	return dexbtc.IsDustVal(txSize, value, minRelayTxFee, segwit)
+}
+
 // getBlockchainInfoResult models the data returned from the getblockchaininfo
 // command.
 type getBlockchainInfoResult struct {
@@ -4437,92 +4445,27 @@ func (btc *baseWallet) createWitnessSig(tx *wire.MsgTx, idx int, pkScript []byte
 
 // EstimateSendTxFee returns a tx fee estimate for sending or withdrawing the
 // provided amount using the provided feeRate.
-func (btc *baseWallet) EstimateSendTxFee(sendAmount, feeRate uint64, subtract bool) (fee uint64, err error) {
+func (btc *baseWallet) EstimateSendTxFee(address string, sendAmount, feeRate uint64, subtract bool) (uint64, error) {
 	if sendAmount == 0 {
 		return 0, fmt.Errorf("cannot check fee: send amount = 0")
 	}
-
-	// Retrieve balance for final check.
-	bal, err := btc.Balance()
+	addr, err := btcutil.DecodeAddress(address, btc.chainParams)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("invalid address: %s", address)
 	}
 
-	feeRate = btc.feeRateWithFallback(feeRate)
-
-	minTxSize := uint64(dexbtc.MinimumTxOverhead + btc.outputSize())
-
-	// If subtract is true, select enough inputs for sendAmount. Fees will be taken
-	// from the sendAmount. If not, select enough inputs to cover minimum fees.
-	enough := func(inputsSize, sum uint64) bool {
-		if subtract {
-			return sum >= sendAmount
-		}
-		minFee := (minTxSize + inputsSize) * feeRate
-		return sum >= sendAmount+minFee
-	}
-	utxos, _, _, err := btc.spendableUTXOs(0)
+	pkScript, err := txscript.PayToAddrScript(addr)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("error generating pubkey script: %w", err)
 	}
-	totalIn, vSize, _, _, _, _, err := fund(utxos, enough)
-	if err != nil {
-		return 0, err
-	}
-
-	txSize := minTxSize + uint64(vSize)
-	estFee := feeRate * txSize
-	remaining := totalIn - sendAmount
-
-	// Check if there will be a change output if there is enough remaining.
-	changeFee := uint64(btc.outputSize()) * feeRate
-	changeValue := remaining - estFee - changeFee
-	if subtract {
-		// fees are already included in sendAmount, anything else is change.
-		changeValue = remaining
+	wireOP := wire.NewTxOut(int64(sendAmount), pkScript)
+	if dexbtc.IsDust(wireOP, feeRate) {
+		return 0, errors.New("output value is dust")
 	}
 
-	var finalFee uint64
-	if isDust, err := btc.changeIsDust(changeValue, feeRate); err != nil {
-		return 0, err
-	} else if isDust {
-		// remaining cannot cover a non-dust change and the fee for the change.
-		finalFee = estFee + remaining
-	} else {
-		// additional fee will be paid for non-dust change
-		finalFee = estFee + changeFee
-	}
-
-	// Check if wallet has enough to cover sendAmount and finalFee.
-	if !subtract && bal.Available < sendAmount+finalFee {
-		return 0, fmt.Errorf("insufficient balance to cover total spend. %d < %d",
-			bal.Available, sendAmount+finalFee)
-	}
-	return finalFee, nil
-}
-
-// outputSize returns the size for a single output.
-func (btc *baseWallet) outputSize() int {
-	if btc.segwit {
-		return dexbtc.P2WPKHOutputSize
-	}
-	return dexbtc.P2PKHOutputSize
-}
-
-// changeIsDust checks if changeValue is dust value using the provided feeRate.
-func (btc *baseWallet) changeIsDust(changeValue uint64, feeRate uint64) (isDust bool, err error) {
-	// Grab a change addresss.
-	changeAddr, err := btc.node.changeAddress()
-	if err != nil {
-		return false, err
-	}
-	// Create a change output.
-	changeScript, err := txscript.PayToAddrScript(changeAddr)
-	if err != nil {
-		return false, fmt.Errorf("error creating change script: %w", err)
-	}
-	changeOutput := wire.NewTxOut(int64(changeValue), changeScript)
-	return btc.IsDust(changeOutput, feeRate), nil
+	tx := wire.NewMsgTx(wire.TxVersion)
+	tx.AddTxOut(wireOP)
+	return btc.node.estimateSendTxFee(tx, btc.feeRateWithFallback(feeRate), subtract)
 }
 
 type utxo struct {

@@ -141,7 +141,7 @@ func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 func (c *TCore) Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (asset.Coin, error) {
 	return &tCoin{id: []byte{0xde, 0xc7, 0xed}}, c.sendErr
 }
-func (c *TCore) EstimateSendTxFee(assetID uint32, value uint64, subtract bool) (fee uint64, err error) {
+func (c *TCore) EstimateSendTxFee(addr string, assetID uint32, value uint64, subtract bool) (fee uint64, err error) {
 	return c.estFee, c.estFeeErr
 }
 func (c *TCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error) {
@@ -812,6 +812,7 @@ func TestAPIEstimateSendTxFee(t *testing.T) {
 	testID := uint32(42)
 
 	body := &sendTxFeeForm{
+		Addr:     "addr",
 		Value:    1e8,
 		Subtract: false,
 		AssetID:  &testID,

@@ -79,7 +79,7 @@ func (s *WebServer) apiEstimateSendTxFee(w http.ResponseWriter, r *http.Request)
 	if !readPost(w, r, form) {
 		return
 	}
-	txFee, err := s.core.EstimateSendTxFee(*form.AssetID, form.Value, form.Subtract)
+	txFee, err := s.core.EstimateSendTxFee(form.Addr, *form.AssetID, form.Value, form.Subtract)
 	if err != nil {
 		s.writeAPIError(w, err)
 		return

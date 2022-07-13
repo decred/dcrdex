@@ -3611,23 +3611,17 @@ func (dcr *ExchangeWallet) signTxAndAddChange(baseTx *wire.MsgTx, feeRate uint64
 
 // EstimateSendTxFee returns a tx fee estimate for sending or withdrawing the
 // provided amount using the provided feeRate.
-func (dcr *ExchangeWallet) EstimateSendTxFee(sendAmount, feeRate uint64, subtract bool) (fee uint64, err error) {
+func (dcr *ExchangeWallet) EstimateSendTxFee(address string, sendAmount, feeRate uint64, subtract bool) (fee uint64, err error) {
 	if sendAmount == 0 {
-		return 0, fmt.Errorf("cannot check fee: send amount= 0")
+		return 0, fmt.Errorf("cannot check fee: send amount = 0")
 	}
 
-	// Retrieve balance for final check.
-	bal, err := dcr.Balance()
+	_, err = stdaddr.DecodeAddress(address, dcr.chainParams)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("invalid address: %s", address)
 	}
 
 	feeRate = dcr.feeRateWithFallback(feeRate)
-
-	// Keep a consistent view of spendable and locked coins in the wallet and
-	// the fundingCoins map to make this safe for concurrent use.
-	dcr.fundingMtx.Lock()
-	defer dcr.fundingMtx.Unlock()
 
 	minTxSize := uint32(dexdcr.MsgTxOverhead + dexdcr.P2PKHOutputSize)
 
@@ -3641,19 +3635,23 @@ func (dcr *ExchangeWallet) EstimateSendTxFee(sendAmount, feeRate uint64, subtrac
 		return sum+toAtoms(unspent.rpc.Amount) >= sendAmount+minFee
 	}
 
+	// Keep a consistent view of spendable and locked coins in the wallet and
+	// the fundingCoins map to make this safe for concurrent use.
+	dcr.fundingMtx.Lock()
 	utxos, err := dcr.spendableUTXOs()
+	dcr.fundingMtx.Unlock()
 	if err != nil {
 		return 0, err
 	}
 
-	totalIn, vSize, _, _, _, err := dcr.tryFund(utxos, enough)
+	sum, inputsSize, _, _, _, err := dcr.tryFund(utxos, enough)
 	if err != nil {
 		return 0, err
 	}
 
-	txSize := minTxSize + vSize
+	txSize := minTxSize + inputsSize
 	estFee := uint64(txSize) * feeRate
-	remaining := totalIn - sendAmount
+	remaining := sum - sendAmount
 
 	// Check if there will be a change output if there is enough remaining.
 	changeFee := dexdcr.P2PKHOutputSize * feeRate
@@ -3670,12 +3668,6 @@ func (dcr *ExchangeWallet) EstimateSendTxFee(sendAmount, feeRate uint64, subtrac
 	} else {
 		// additional fee will be paid for non-dust change
 		finalFee = estFee + changeFee
-	}
-
-	// Check if wallet has enough to cover sendAmount and finalFee.
-	if !subtract && bal.Available < sendAmount+finalFee {
-		return 0, fmt.Errorf("insufficient balance to cover total spend. %d < %d",
-			bal.Available, sendAmount+finalFee)
 	}
 	return finalFee, nil
 }

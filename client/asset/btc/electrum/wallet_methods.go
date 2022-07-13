@@ -10,31 +10,34 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/btcsuite/btcd/btcjson"
 )
 
 const (
-	methodCommands          = "commands" // list of supported methods
-	methodGetInfo           = "getinfo"
-	methodGetServers        = "getservers"
-	methodGetFeeRate        = "getfeerate"
-	methodCreateNewAddress  = "createnewaddress" // beyond gap limit, makes recovery difficult
-	methodGetUnusedAddress  = "getunusedaddress"
-	methodGetAddressHistory = "getaddresshistory"
-	methodGetAddressUnspent = "getaddressunspent"
-	methodGetTransaction    = "gettransaction"
-	methodListUnspent       = "listunspent"
-	methodGetPrivateKeys    = "getprivatekeys"
-	methodPayTo             = "payto"
-	methodBroadcast         = "broadcast"
-	methodAddLocalTx        = "addtransaction"
-	methodRemoveLocalTx     = "removelocaltx"
-	methodGetTxStatus       = "get_tx_status" // only wallet txns
-	methodGetBalance        = "getbalance"
-	methodIsMine            = "ismine"
-	methodValidateAddress   = "validateaddress"
-	methodSignTransaction   = "signtransaction"
-	methodFreezeUTXO        = "freeze_utxo"
-	methodUnfreezeUTXO      = "unfreeze_utxo"
+	methodCommands           = "commands" // list of supported methods
+	methodGetInfo            = "getinfo"
+	methodGetServers         = "getservers"
+	methodGetFeeRate         = "getfeerate"
+	methodCreateNewAddress   = "createnewaddress" // beyond gap limit, makes recovery difficult
+	methodGetUnusedAddress   = "getunusedaddress"
+	methodGetAddressHistory  = "getaddresshistory"
+	methodGetAddressUnspent  = "getaddressunspent"
+	methodGetTransaction     = "gettransaction"
+	methodListUnspent        = "listunspent"
+	methodGetPrivateKeys     = "getprivatekeys"
+	methodPayTo              = "payto"
+	methodBroadcast          = "broadcast"
+	methodAddLocalTx         = "addtransaction"
+	methodRemoveLocalTx      = "removelocaltx"
+	methodGetTxStatus        = "get_tx_status" // only wallet txns
+	methodGetBalance         = "getbalance"
+	methodIsMine             = "ismine"
+	methodValidateAddress    = "validateaddress"
+	methodSignTransaction    = "signtransaction"
+	methodFreezeUTXO         = "freeze_utxo"
+	methodUnfreezeUTXO       = "unfreeze_utxo"
+	methodFundRawTransaction = "fundrawtransaction"
 )
 
 // Commands gets a list of the supported wallet RPCs.
@@ -275,6 +278,15 @@ func (wc *WalletClient) GetBalance(ctx context.Context) (*Balance, error) {
 		Unconfirmed: float64(res.Unconfirmed),
 		Immature:    float64(res.Immature),
 	}, nil
+}
+
+func (wc *WalletClient) EstimateSendTxFee(ctx context.Context, txHex string, options interface{}, segwit bool) (fee float64, err error) {
+	res := &btcjson.FundRawTransactionResult{}
+	err = wc.Call(ctx, methodFundRawTransaction, positional{txHex, options, segwit}, &res)
+	if err != nil {
+		return 0, fmt.Errorf("error calculating transaction fee: %w", err)
+	}
+	return res.Fee.ToBTC(), nil
 }
 
 // payto(self, destination, amount, fee=None, feerate=None, from_addr=None, from_coins=None, change_addr=None,

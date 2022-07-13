@@ -187,6 +187,7 @@ type testData struct {
 	confsSpent        bool
 	confsErr          error
 	walletTxSpent     bool
+	txFee             uint64
 }
 
 func newTestData() *testData {
@@ -464,6 +465,16 @@ func (c *tRawRequester) RawRequest(_ context.Context, method string, params []js
 		return json.Marshal(c.setTxFee)
 	case methodListUnspent:
 		return encodeOrError(c.listUnspent, c.listUnspentErr)
+	case methodFundRawTransaction:
+		b, _ := serializeMsgTx(wire.NewMsgTx(wire.TxVersion))
+		resp := &struct {
+			Transaction string  `json:"hex"`
+			Fee         float64 `json:"fee"`
+		}{
+			Transaction: hex.EncodeToString(b),
+			Fee:         toBTC(c.txFee),
+		}
+		return json.Marshal(resp)
 	}
 	panic("method not registered: " + method)
 }
@@ -2469,6 +2480,7 @@ func testEstimateSendTxFee(t *testing.T, segwit bool, walletType string) {
 	defer shutdown()
 
 	addr := btcAddr(segwit)
+	sendAddr := addr.String()
 	node.changeAddr = btcAddr(segwit).String()
 	pkScript, _ := txscript.PayToAddrScript(addr)
 
@@ -2488,6 +2500,9 @@ func testEstimateSendTxFee(t *testing.T, segwit bool, walletType string) {
 	bals.Mine.Trusted = float64(unspentVal)
 	unspentSats := toSatoshi(unspents[0].Amount)
 
+	tx := wire.NewMsgTx(wire.TxVersion)
+	tx.AddTxOut(wire.NewTxOut(int64(unspentSats), pkScript))
+
 	// single ouptput size.
 	opSize := dexbtc.P2PKHOutputSize
 	if segwit {
@@ -2504,11 +2519,12 @@ func testEstimateSendTxFee(t *testing.T, segwit bool, walletType string) {
 			(witnessWeight-1))/witnessWeight
 	}
 
-	txSize := dexbtc.MinimumTxOverhead + bSize + opSize
+	txSize := bSize + tx.SerializeSize()
 	minEstFee := optimalFeeRate * uint64(txSize)
 
 	// This should return fee estimate for one output.
-	estimate, err := wallet.EstimateSendTxFee(unspentSats, optimalFeeRate, true)
+	node.txFee = minEstFee
+	estimate, err := wallet.EstimateSendTxFee(sendAddr, unspentSats, optimalFeeRate, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2518,7 +2534,8 @@ func testEstimateSendTxFee(t *testing.T, segwit bool, walletType string) {
 
 	// This should return fee estimate for two output.
 	minEstFeeWithEstChangeFee := uint64(txSize+opSize) * optimalFeeRate
-	estimate, err = wallet.EstimateSendTxFee(unspentSats/2, optimalFeeRate, false)
+	node.txFee = minEstFeeWithEstChangeFee
+	estimate, err = wallet.EstimateSendTxFee(sendAddr, unspentSats/2, optimalFeeRate, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2526,22 +2543,35 @@ func testEstimateSendTxFee(t *testing.T, segwit bool, walletType string) {
 		t.Fatalf("expected estimate to be %v, got %v)", minEstFeeWithEstChangeFee, estimate)
 	}
 
-	// This should return an error, not enough funds to cover fees.
-	_, err = wallet.EstimateSendTxFee(unspentSats, optimalFeeRate, false)
-	if err == nil {
-		t.Fatal("Expected error not enough to cover funds required")
-	}
-
 	dust := 0.00000016
 	node.listUnspent[0].Amount += dust
 	// This should return fee estimate for one output with dust added to fee.
 	minFeeWithDust := minEstFee + toSatoshi(dust)
-	estimate, err = wallet.EstimateSendTxFee(unspentSats, optimalFeeRate, true)
+	node.txFee = minFeeWithDust
+	estimate, err = wallet.EstimateSendTxFee(sendAddr, unspentSats, optimalFeeRate, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if estimate != minFeeWithDust {
 		t.Fatalf("expected estimate to be %v, got %v)", minFeeWithDust, estimate)
+	}
+
+	// Invalid address
+	_, err = wallet.EstimateSendTxFee("invalidsendAddr", unspentSats, optimalFeeRate, true)
+	if err == nil {
+		t.Fatal("Expected an error for invalid send address")
+	}
+
+	// Zero send amount
+	_, err = wallet.EstimateSendTxFee(sendAddr, 0, optimalFeeRate, true)
+	if err == nil {
+		t.Fatal("Expected an error for zero send amount")
+	}
+
+	// Output value is dust.
+	_, err = wallet.EstimateSendTxFee(sendAddr, 500, optimalFeeRate, true)
+	if err == nil {
+		t.Fatal("Expected an error for dust output")
 	}
 }
 

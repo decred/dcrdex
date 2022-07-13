@@ -2258,52 +2258,40 @@ func (w *TokenWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
 	return g.Transfer * feeRate
 }
 
-// EstimateSendTxFee returns a tx fee estimate for sending provided amount using
-// the provided feeRate.
-func (w *ETHWallet) EstimateSendTxFee(value, _ uint64, subtract bool) (fee uint64, err error) {
+// isValidSend is a helper function for both token and ETH wallet. It returns an
+// error if subtract is true, addr is invalid or value is zero.
+func isValidSend(addr string, value uint64, subtract bool) error {
+	if value == 0 {
+		return fmt.Errorf("cannot send zero amount")
+	}
+	if !common.IsHexAddress(addr) {
+		return fmt.Errorf("invalid hex address %q", addr)
+	}
 	if subtract {
-		return 0, fmt.Errorf("wallet does not support checking network fee for withdrawal")
+		return fmt.Errorf("wallet does not support subtracting network fee from send amount")
 	}
-	bal, err := w.Balance()
-	if err != nil {
-		return 0, nil
-	}
-	avail := bal.Available
-	if avail < value {
-		return 0, fmt.Errorf("not enough funds to send: have %d gwei need %d gwei", avail, value)
+	return nil
+}
+
+// EstimateSendTxFee returns a tx fee estimate for a send tx. The provided fee
+// rate is ignored since all sends will use an internally derived fee rate.
+func (w *ETHWallet) EstimateSendTxFee(addr string, value, _ uint64, subtract bool) (uint64, error) {
+	if err := isValidSend(addr, value, subtract); err != nil {
+		return 0, err
 	}
 
 	maxFeeRate, err := w.recommendedMaxFeeRate(w.ctx)
 	if err != nil {
 		return 0, fmt.Errorf("error getting max fee rate: %w", err)
 	}
-
-	maxFee := defaultSendGasLimit * dexeth.WeiToGwei(maxFeeRate)
-	if avail < value+maxFee {
-		return 0, fmt.Errorf("not enough funds to send: cannot cover value %d, max fee of %d gwei", value, maxFee)
-	}
-
-	return maxFee, nil
+	return defaultSendGasLimit * dexeth.WeiToGwei(maxFeeRate), nil
 }
 
-// EstimateSendTxFee returns a tx fee estimate for sending provided amount using
-// the provided feeRate.
-func (w *TokenWallet) EstimateSendTxFee(value, _ uint64, subtract bool) (fee uint64, err error) {
-	if subtract {
-		return 0, fmt.Errorf("wallet does not support checking network fee for withdrawal.")
-	}
-	bal, err := w.Balance()
-	if err != nil {
-		return 0, nil
-	}
-	avail := bal.Available
-	if avail < value {
-		return 0, fmt.Errorf("not enough tokens: have %d gwei need %d gwei", avail, value)
-	}
-
-	ethBal, err := w.parent.Balance()
-	if err != nil {
-		return 0, fmt.Errorf("error getting base chain balance: %w", err)
+// EstimateSendTxFee returns a tx fee estimate for a send tx. The provided fee
+// rate is ignored since all sends will use an internally derived fee rate.
+func (w *TokenWallet) EstimateSendTxFee(addr string, value, _ uint64, subtract bool) (fee uint64, err error) {
+	if err := isValidSend(addr, value, subtract); err != nil {
+		return 0, err
 	}
 
 	g := w.gases(contractVersionNewest)
@@ -2315,14 +2303,7 @@ func (w *TokenWallet) EstimateSendTxFee(value, _ uint64, subtract bool) (fee uin
 	if err != nil {
 		return 0, fmt.Errorf("error getting max fee rate: %w", err)
 	}
-
-	estFee := dexeth.WeiToGwei(maxFeeRate) * g.Transfer
-	if ethBal.Available < estFee {
-		return 0, fmt.Errorf("insufficient balance to cover token transfer fees. %d < %d",
-			ethBal.Available, estFee)
-	}
-
-	return estFee, nil
+	return g.Transfer * dexeth.WeiToGwei(maxFeeRate), nil
 }
 
 // RestorationInfo returns information about how to restore the wallet in
@@ -2391,10 +2372,11 @@ func (w *assetWallet) SwapConfirmations(ctx context.Context, coinID dex.Bytes, c
 	return
 }
 
-// Send sends the exact value to the specified address.
+// Send sends the exact value to the specified address. The provided fee rate is
+// ignored since all sends will use an internally derived fee rate.
 func (w *ETHWallet) Send(addr string, value, _ uint64) (asset.Coin, error) {
-	if !common.IsHexAddress(addr) {
-		return nil, fmt.Errorf("invalid hex address %q", addr)
+	if err := isValidSend(addr, value, false); err != nil {
+		return nil, err
 	}
 
 	bal, err := w.Balance()
@@ -2412,7 +2394,7 @@ func (w *ETHWallet) Send(addr string, value, _ uint64) (asset.Coin, error) {
 
 	maxFee := defaultSendGasLimit * dexeth.WeiToGwei(maxFeeRate)
 	if avail < value+maxFee {
-		return nil, fmt.Errorf("not enough funds to send: cannot cover value %d, max fee of %d gwei", value, maxFee)
+		return nil, fmt.Errorf("available funds %d gwei cannot cover value being sent: need %d gwei + %d gwei max fee", avail, value, maxFee)
 	}
 	// TODO: Subtract option.
 	// if avail < value+maxFee {
@@ -2427,11 +2409,12 @@ func (w *ETHWallet) Send(addr string, value, _ uint64) (asset.Coin, error) {
 	return &coin{id: txHash, value: value}, nil
 }
 
-// Send sends the exact value to the specified address. The fees are taken
-// from the parent wallet.
+// Send sends the exact value to the specified address. Fees are taken from the
+// parent wallet. The provided fee rate is ignored since all sends will use an
+// internally derived fee rate.
 func (w *TokenWallet) Send(addr string, value, _ uint64) (asset.Coin, error) {
-	if !common.IsHexAddress(addr) {
-		return nil, fmt.Errorf("invalid hex address %q", addr)
+	if err := isValidSend(addr, value, false); err != nil {
+		return nil, err
 	}
 
 	bal, err := w.Balance()

@@ -264,7 +264,7 @@ var EnUS = map[string]string{
 	"Other Actions":               "Other Actions",
 	"estimated_transaction_fee":   "Estimated Transaction Fee",
 	"estimated_total_spend":       "Estimated Total Spend",
-	"estimated_balance":           "Estimated Balance",
+	"estimated_balance":           "Estimated Balance After",
 	"sending":                     "Sending",
 	"transfer":                    "Transfer",
 }

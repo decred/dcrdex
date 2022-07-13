@@ -972,6 +972,69 @@ func (w *spvWallet) sendWithSubtract(pkScript []byte, value, feeRate uint64) (*c
 	return w.sendRawTransaction(tx)
 }
 
+// estimateSendTxFee callers should provide at least one output value.
+func (w *spvWallet) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract bool) (fee uint64, err error) {
+	minTxSize := uint64(tx.SerializeSize())
+	txOut := tx.TxOut[0]
+	sendAmount := uint64(txOut.Value)
+
+	// If subtract is true, select enough inputs for sendAmount. Fees will be taken
+	// from the sendAmount. If not, select enough inputs to cover minimum fees.
+	enough := func(inputsSize, sum uint64) bool {
+		if subtract {
+			return sum >= sendAmount
+		}
+		minFee := (minTxSize + inputsSize) * feeRate
+		return sum >= sendAmount+minFee
+	}
+
+	unspents, err := w.listUnspent()
+	if err != nil {
+		return 0, fmt.Errorf("error listing unspent outputs: %w", err)
+	}
+
+	utxos, _, _, err := convertUnspent(0, unspents, w.chainParams)
+	if err != nil {
+		return 0, fmt.Errorf("error converting unspent outputs: %w", err)
+	}
+
+	sum, inputsSize, _, _, _, _, err := fund(utxos, enough)
+	if err != nil {
+		return 0, err
+	}
+
+	txSize := minTxSize + uint64(inputsSize)
+	estFee := feeRate * txSize
+	remaining := sum - sendAmount
+
+	// Check if there will be a change output if there is enough remaining.
+	changeFee := uint64(dexbtc.P2WPKHOutputSize) * feeRate
+	changeValue := remaining - estFee - changeFee
+	if subtract {
+		// fees are already included in sendAmount, anything else is change.
+		changeValue = remaining
+	}
+
+	var finalFee uint64
+
+	if dexbtc.IsDustVal(dexbtc.P2WPKHOutputSize, changeValue, feeRate, true) {
+		// remaining cannot cover a non-dust change and the fee for the change.
+		finalFee = estFee + remaining
+	} else {
+		// additional fee will be paid for non-dust change
+		finalFee = estFee + changeFee
+	}
+
+	if subtract {
+		txOut.Value -= int64(finalFee)
+	}
+	if dexbtc.IsDustVal(minTxSize, uint64(txOut.Value), feeRate, true) {
+		return 0, errors.New("output value is dust")
+	}
+
+	return finalFee, nil
+}
+
 // swapConfirmations attempts to get the number of confirmations and the spend
 // status for the specified tx output. For swap outputs that were not generated
 // by this wallet, startTime must be supplied to limit the search. Use the match
