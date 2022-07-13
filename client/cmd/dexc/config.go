@@ -89,7 +89,8 @@ type Config struct {
 	NoWeb        bool   `long:"noweb" description:"disable the web server."`
 	Testnet      bool   `long:"testnet" description:"use testnet"`
 	Simnet       bool   `long:"simnet" description:"use simnet"`
-	ReloadHTML   bool   `long:"reload-html" description:"Reload the webserver's page template with every request. For development purposes."`
+	ReloadHTML   bool   `long:"reload-html" description:"(DEPRECATED) Reload the webserver's page template from disk with every request. Prevents use of any embedded UI files. For development purposes. This is deprecated. Use --no-embed-site instead."`
+	NoEmbedSite  bool   `long:"no-embed-site" description:"Use on-disk UI files instead of embedded resources. This also reloads the html template with every request. For development purposes."`
 	DebugLevel   string `long:"log" description:"Logging level {trace, debug, info, warn, error, critical}"`
 	LocalLogs    bool   `long:"loglocal" description:"Use local time zone time stamps in log entries."`
 	CPUProfile   string `long:"cpuprofile" description:"File for CPU profiling."`
@@ -213,6 +214,11 @@ func configure() (*Config, error) {
 
 	if cfg.DBPath == "" {
 		cfg.DBPath = defaultDBPath
+	}
+
+	if cfg.ReloadHTML {
+		fmt.Println("The --reload-html switch is deprecated. Use --no-embed-site instead, which has the same reloading effect.")
+		cfg.NoEmbedSite = cfg.ReloadHTML
 	}
 
 	return cfg, nil

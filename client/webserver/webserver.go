@@ -6,11 +6,14 @@ package webserver
 import (
 	"context"
 	"crypto/rand"
+	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"mime"
 	"net"
 	"net/http"
 	"os"
@@ -57,6 +60,9 @@ const (
 	// The basis for content-security-policy. connect-src must be the final
 	// directive so that it can be reliably supplemented on startup.
 	baseCSP = "default-src 'none'; script-src 'self'; img-src 'self' data:; style-src 'self'; font-src 'self'; connect-src 'self'"
+	// site is the common prefix for the site resources with respect to this
+	// webserver package.
+	site = "site"
 )
 
 var (
@@ -68,6 +74,12 @@ var (
 var (
 	log   dex.Logger
 	unbip = dex.BipIDSymbol
+
+	//go:embed site/src/localized_html/*/*.tmpl
+	siteRes embed.FS
+
+	//go:embed site/dist site/src/img site/src/font
+	staticSiteRes embed.FS
 )
 
 // clientCore is satisfied by core.Core.
@@ -126,9 +138,9 @@ type clientCore interface {
 
 var _ clientCore = (*core.Core)(nil)
 
-// cachedPassword consists of the seralized crypter and an encrypted password.
-// A key stored in the cookies is used to deserialize the crypter, then
-// the crypter is used to decrypt the password.
+// cachedPassword consists of the serialized crypter and an encrypted password.
+// A key stored in the cookies is used to deserialize the crypter, then the
+// crypter is used to decrypt the password.
 type cachedPassword struct {
 	EncryptedPass     []byte
 	SerializedCrypter []byte
@@ -140,73 +152,85 @@ type Config struct {
 	CustomSiteDir string
 	Language      string
 	Logger        dex.Logger
-	ReloadHTML    bool
-	HttpProf      bool
+	// NoEmbed indicates to serve files from the system disk rather than the
+	// embedded files. Since this is a developer setting, this also implies
+	// reloading of templates on each request. Note that only embedded files
+	// should be used by default since site files from older distributions may
+	// be present on the disk. When NoEmbed is true, this also implies reloading
+	// and execution of html templates on each request.
+	NoEmbed  bool
+	HttpProf bool
 }
 
 // WebServer is a single-client http and websocket server enabling a browser
 // interface to the DEX client.
 type WebServer struct {
-	wsServer   *websocket.Server
-	mux        *chi.Mux
-	core       clientCore
-	addr       string
-	csp        string
-	srv        *http.Server
-	html       *templates
-	indent     bool
-	siteDir    string
-	reloadHTML bool
+	wsServer *websocket.Server
+	mux      *chi.Mux
+	core     clientCore
+	addr     string
+	csp      string
+	srv      *http.Server
+	html     *templates
+	indent   bool
 
 	authMtx         sync.RWMutex
 	authTokens      map[string]bool
 	cachedPasswords map[string]*cachedPassword // cached passwords keyed by auth token
 }
 
-// New is the constructor for a new WebServer. customSiteDir can be left blank,
-// in which case a handful of default locations will be checked. This will work
-// in most cases.
+// New is the constructor for a new WebServer. CustomSiteDir in the Config can
+// be left blank, in which case a handful of default locations will be checked.
+// This will work in most cases.
 func New(cfg *Config) (*WebServer, error) {
 	log = cfg.Logger
 
-	// Look for the "site" folder in the executable's path, the working
-	// directory, or the source path relative to [repo root]/client/cmd/dexc.
-	execPath, err := os.Executable() // e.g. /usr/bin/dexc
-	if err != nil {
-		return nil, fmt.Errorf("unable to locate executable path: %w", err)
-	}
-	execPath, err = filepath.EvalSymlinks(execPath) // e.g. /opt/decred/dex/dexc
-	if err != nil {
-		return nil, fmt.Errorf("unable to locate executable path: %w", err)
-	}
-	execPath = filepath.Dir(execPath) // e.g. /opt/decred/dex
-
-	// executable path
-	var siteDir string
-	absDir, _ := filepath.Abs("site")
-	for _, dir := range []string{
-		cfg.CustomSiteDir,
-		filepath.Join(execPath, "site"),
-		absDir,
-		filepath.Clean(filepath.Join(execPath, "../../webserver/site")),
-	} {
-		if dir == "" {
-			continue
+	// Only look for files on disk if NoEmbed is set. This is necessary since
+	// site files from older distributions may be present.
+	var siteDir string // empty signals embedded files only
+	if cfg.NoEmbed {
+		// Look for the "site" folder in the executable's path, the working
+		// directory, or relative to [repo root]/client/cmd/dexc.
+		execPath, err := os.Executable() // e.g. /usr/bin/dexc
+		if err != nil {
+			return nil, fmt.Errorf("unable to locate executable path: %w", err)
 		}
-		log.Debugf("Looking for site in %s", dir)
-		if folderExists(dir) {
-			siteDir = dir
-			break
+		execPath, err = filepath.EvalSymlinks(execPath) // e.g. /opt/decred/dex/dexc
+		if err != nil {
+			return nil, fmt.Errorf("unable to locate executable path: %w", err)
 		}
-	}
+		execPath = filepath.Dir(execPath) // e.g. /opt/decred/dex
 
-	if siteDir == "" {
-		return nil, fmt.Errorf("no HTML template files found. "+
-			"Place the 'site' folder in the executable's directory %q or the working directory, "+
-			"or run dexc from within the client/cmd/dexc source workspace folder, or specify the"+
-			"'sitedir' configuration directive to dexc.", execPath)
+		absDir, _ := filepath.Abs(site)
+		for _, dir := range []string{
+			cfg.CustomSiteDir,
+			filepath.Join(execPath, site),
+			absDir,
+			filepath.Clean(filepath.Join(execPath, "../../webserver/site")),
+		} {
+			if dir == "" {
+				continue
+			}
+			log.Debugf("Looking for site in %s", dir)
+			if folderExists(dir) {
+				siteDir = dir
+				break
+			}
+		}
+
+		if siteDir == "" {
+			return nil, fmt.Errorf("no HTML template files found. "+
+				"Place the 'site' folder in the executable's directory %q or the working directory, "+
+				"or run dexc from within the client/cmd/dexc source workspace folder, or specify the"+
+				"'sitedir' configuration directive to dexc.", execPath)
+		}
+
+		log.Infof("Located \"site\" folder at %v", siteDir)
+	} else {
+		// Developer should remember to rebuild the Go binary if they modify any
+		// frontend files, otherwise they should run with --no-embed-site.
+		log.Debugf("Using embedded site resources.")
 	}
-	log.Infof("Located \"site\" folder at %v", siteDir)
 
 	// Create an HTTP router.
 	mux := chi.NewRouter()
@@ -222,8 +246,6 @@ func New(cfg *Config) (*WebServer, error) {
 		mux:             mux,
 		srv:             httpServer,
 		addr:            cfg.Addr,
-		siteDir:         siteDir,
-		reloadHTML:      cfg.ReloadHTML,
 		wsServer:        websocket.New(cfg.Core, log.SubLogger("WS")),
 		authTokens:      make(map[string]bool),
 		cachedPasswords: make(map[string]*cachedPassword),
@@ -233,9 +255,8 @@ func New(cfg *Config) (*WebServer, error) {
 	if lang == "" {
 		lang = "en-US"
 	}
-
-	if err := s.buildTemplates(lang); err != nil {
-		return nil, fmt.Errorf("error loading en localized templates: %v", err)
+	if err := s.buildTemplates(lang, siteDir); err != nil {
+		return nil, fmt.Errorf("error loading localized html templates: %v", err)
 	}
 
 	// Middleware
@@ -366,35 +387,52 @@ func New(cfg *Config) (*WebServer, error) {
 	})
 
 	// Files
-	fileServer(mux, "/js", filepath.Join(siteDir, "dist"), "text/javascript")
-	fileServer(mux, "/css", filepath.Join(siteDir, "dist"), "text/css")
-	fileServer(mux, "/img", filepath.Join(siteDir, "src/img"), "")
-	fileServer(mux, "/font", filepath.Join(siteDir, "src/font"), "")
+	fileServer(mux, "/js", siteDir, "dist", "text/javascript")
+	fileServer(mux, "/css", siteDir, "dist", "text/css")
+	fileServer(mux, "/img", siteDir, "src/img", "")
+	fileServer(mux, "/font", siteDir, "src/font", "")
 
 	return s, nil
 }
 
-func (s *WebServer) buildTemplates(lang string) error {
-	langs := make([]language.Tag, 0, 1)
-	dirs := make([]string, 0, 1)
-	var match string
+// buildTemplates prepares the HTML templates, which are executed and served in
+// sendTemplate. An empty siteDir indicates that the embedded templates in the
+// siteRes FS should be used. If siteDir is set, the templates will be loaded
+// from disk.
+func (s *WebServer) buildTemplates(lang, siteDir string) error {
+	embedded := siteDir == ""
 
-	htmlDir := filepath.Join(s.siteDir, "src", "localized_html")
-
-	fileInfos, err := os.ReadDir(htmlDir)
+	// Find the subfolder with a matching language tag. First, list the contents
+	// of the localized_html folder, which contains sub-folders with language
+	// tags as their names.
+	var htmlDir string
+	var fileInfos []fs.DirEntry
+	var err error
+	if embedded {
+		htmlDir = filepath.Join(site, "src", "localized_html")
+		fileInfos, err = siteRes.ReadDir(htmlDir)
+	} else {
+		htmlDir = filepath.Join(siteDir, "src", "localized_html")
+		fileInfos, err = os.ReadDir(htmlDir)
+	}
 	if err != nil {
 		return fmt.Errorf("ReadDir error: %w", err)
 	}
 
+	// Try to match lang with the folder names.
+	var match string
+	langs := make([]language.Tag, 0, 1)
+	dirs := make([]string, 0, 1)
 	for _, fi := range fileInfos {
 		if !fi.IsDir() {
 			continue
 		}
-		if fi.Name() == lang {
+		if fi.Name() == lang { // exact match
 			match = fi.Name()
 			break
 		}
 
+		// Get a BCP 47 tag for the folder name for subsequent fuzzing matching.
 		tag, err := language.Parse(fi.Name())
 		if err != nil {
 			log.Warnf("error parsing language tag %q: %v", fi.Name(), err)
@@ -404,6 +442,7 @@ func (s *WebServer) buildTemplates(lang string) error {
 		dirs = append(dirs, fi.Name())
 	}
 
+	// If no exact match, attempt a fuzzy match with language.Matcher.
 	if match == "" {
 		// Try to identify candidate languages.
 		acceptLang, err := language.Parse(lang)
@@ -426,10 +465,15 @@ func (s *WebServer) buildTemplates(lang string) error {
 
 	tmplDir := filepath.Join(htmlDir, match)
 
-	log.Infof("Using HTML templates in %s", tmplDir)
+	// Report the selected folder.
+	printDir := tmplDir
+	if embedded { // pseudo-prefix embedded path, without filepath.Clean
+		printDir = "<embedded>" + string(filepath.Separator) + tmplDir
+	}
+	log.Infof("Using localized HTML templates in %s", printDir)
 
 	bb := "bodybuilder"
-	s.html = newTemplates(tmplDir, match, s.reloadHTML).
+	s.html = newTemplates(tmplDir, match, embedded).
 		addTemplate("login", bb, "forms").
 		addTemplate("register", bb, "forms").
 		addTemplate("markets", bb, "forms").
@@ -687,11 +731,28 @@ func extractUserInfo(r *http.Request) *userInfo {
 	return user
 }
 
-// fileServer sets up a http.FileServer handler to serve static files from a
-// path on the file system. Directory listings are denied, as are URL paths
-// containing "..".
-func fileServer(r chi.Router, pathRoot, fsRoot, contentType string) {
-	if strings.ContainsAny(pathRoot, "{}*") {
+func serveFile(w http.ResponseWriter, r *http.Request, fullFilePath string) {
+	// Generate the full file system path and test for existence.
+	fi, err := os.Stat(fullFilePath)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Deny directory listings
+	if fi.IsDir() {
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		return
+	}
+
+	http.ServeFile(w, r, fullFilePath)
+}
+
+// fileServer is a file server for files in subDir with the parent folder
+// siteDire. An empty siteDir means embedded files only are served. The
+// pathPrefix is stripped from the request path when locating the file.
+func fileServer(r chi.Router, pathPrefix, siteDir, subDir, forceContentType string) {
+	if strings.ContainsAny(pathPrefix, "{}*") {
 		panic("FileServer does not permit URL parameters.")
 	}
 
@@ -708,7 +769,7 @@ func fileServer(r chi.Router, pathRoot, fsRoot, contentType string) {
 			r.URL.Path = upath
 		}
 		// Strip the path prefix and clean the path.
-		upath = path.Clean(strings.TrimPrefix(upath, pathRoot))
+		upath = path.Clean(strings.TrimPrefix(upath, pathPrefix))
 
 		// Deny directory listings (http.ServeFile recognizes index.html and
 		// attempts to serve the directory contents instead).
@@ -717,41 +778,78 @@ func fileServer(r chi.Router, pathRoot, fsRoot, contentType string) {
 			return
 		}
 
-		// Generate the full file system path and test for existence.
-		fullFilePath := filepath.Join(fsRoot, upath)
-		fi, err := os.Stat(fullFilePath)
+		// On Windows, a common registry misconfiguration leads to
+		// mime.TypeByExtension setting an incorrect type for .js files, causing
+		// the browser to refuse to execute the JavaScript. The following
+		// workaround may be removed when Go 1.19 becomes the minimum required
+		// version: https://go-review.googlesource.com/c/go/+/406894
+		// https://github.com/golang/go/issues/32350
+		if forceContentType != "" {
+			w.Header().Set("Content-Type", forceContentType)
+		}
+
+		// If siteDir is set, use system file system only.
+		if siteDir != "" {
+			fullFilePath := filepath.Join(siteDir, subDir, upath)
+			serveFile(w, r, fullFilePath)
+			return
+		}
+
+		// Use the embedded files only.
+		fs := http.FS(staticSiteRes) // so f is an http.File instead of fs.File
+		f, err := fs.Open(path.Join(site, subDir, upath))
 		if err != nil {
 			http.NotFound(w, r)
 			return
 		}
+		defer f.Close()
 
-		// Deny directory listings
-		if fi.IsDir() {
-			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		// return in case it is a directory
+		stat, err := f.Stat()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if stat.IsDir() {
+			http.NotFound(w, r)
 			return
 		}
 
-		// Ran into a Windows quirk where net was setting the content-type
-		// incorrectly based on a bad registry value or something. This should
-		// prevent that. It's most important for javascript files, because we
-		// add a nosniff header and the browser would refuse to execute a js
-		// file with the wrong header.
-		if contentType != "" {
-			w.Header().Set("Content-Type", contentType)
+		if forceContentType == "" {
+			// http.ServeFile would do the following type detection.
+			contentType := mime.TypeByExtension(filepath.Ext(upath))
+			if contentType == "" {
+				// Sniff out the content type. See http.serveContent.
+				var buf [512]byte
+				n, _ := io.ReadFull(f, buf[:])
+				contentType = http.DetectContentType(buf[:n])
+				_, err = f.Seek(0, io.SeekStart) // rewind to output whole file
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			}
+			if contentType != "" {
+				w.Header().Set("Content-Type", contentType)
+			} // else don't set it (plain)
 		}
 
-		http.ServeFile(w, r, fullFilePath)
+		_, err = io.Copy(w, f)
+		if err != nil {
+			log.Errorf("Writing response for path %q failed: %v", r.URL.Path, err)
+			// Too late to write to header with error code.
+		}
 	}
 
 	// For the chi.Mux, make sure a path that ends in "/" and append a "*".
-	muxRoot := pathRoot
-	if pathRoot != "/" && pathRoot[len(pathRoot)-1] != '/' {
-		r.Get(pathRoot, http.RedirectHandler(pathRoot+"/", 301).ServeHTTP)
+	muxRoot := pathPrefix
+	if pathPrefix != "/" && pathPrefix[len(pathPrefix)-1] != '/' {
+		r.Get(pathPrefix, http.RedirectHandler(pathPrefix+"/", 301).ServeHTTP)
 		muxRoot += "/"
 	}
 	muxRoot += "*"
 
-	// Mount the http.HandlerFunc on the pathRoot.
+	// Mount the http.HandlerFunc on the pathPrefix.
 	r.Get(muxRoot, hf)
 }
 
