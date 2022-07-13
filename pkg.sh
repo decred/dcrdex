@@ -13,6 +13,14 @@ mkdir -p bin/dexc-darwin-arm64-v${VER}
 
 export CGO_ENABLED=0
 
+# Generate the localized_html and build the webpack bundle prior to building the
+# webserver package, which embeds the files.
+pushd client/webserver/site
+go generate # should be a no-op
+npm ci
+npm run build
+popd
+
 LDFLAGS="-s -w -X main.Version=${VER}+release"
 
 pushd client/cmd/dexc
@@ -33,25 +41,19 @@ GOOS=darwin GOARCH=amd64 go build -trimpath -o ../../../bin/dexc-darwin-amd64-v$
 GOOS=darwin GOARCH=arm64 go build -trimpath -o ../../../bin/dexc-darwin-arm64-v${VER} -ldflags "$LDFLAGS"
 popd
 
-pushd client/webserver/site
-go generate # should be a no-op
-npm ci
-npm run build
-popd
+echo "Files embedded in the Go webserver package:"
+go list -f '{{ .EmbedFiles }}' decred.org/dcrdex/client/webserver
+# NOTE: before embedding, we needed to grab: dist, src/font, src/html,
+# src/localized_html, src/img.
 
-rm -rf bin/site
-mkdir -p bin/site/src
-pushd client/webserver/site
-cp -R dist ../../../bin/site
-cp -R src/font src/html src/localized_html src/img ../../../bin/site/src
-popd
+# rm -rf bin/site
+# mkdir -p bin/site/src
+# pushd client/webserver/site
+# cp -R dist ../../../bin/site
+# cp -R src/font src/html src/localized_html src/img ../../../bin/site/src
+# popd
 
 pushd bin
-cp -R site dexc-windows-amd64-v${VER}
-cp -R site dexc-darwin-amd64-v${VER}
-cp -R site dexc-darwin-arm64-v${VER}
-cp -R site dexc-linux-amd64-v${VER}
-cp -R site dexc-linux-arm64-v${VER}
 zip -9 -r -q dexc-windows-amd64-v${VER}.zip dexc-windows-amd64-v${VER}
 tar -I 'gzip -9' --owner=0 --group=0 -cf dexc-linux-amd64-v${VER}.tar.gz dexc-linux-amd64-v${VER}
 tar -I 'gzip -9' --owner=0 --group=0 -cf dexc-linux-arm64-v${VER}.tar.gz dexc-linux-arm64-v${VER}

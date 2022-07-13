@@ -335,9 +335,10 @@ func TestNew_siteError(t *testing.T) {
 
 	c := &TCore{}
 	_, err = New(&Config{
-		Core:   c,
-		Addr:   "127.0.0.1:0",
-		Logger: tLogger,
+		Core:    c,
+		Addr:    "127.0.0.1:0",
+		Logger:  tLogger,
+		NoEmbed: true, // this tests locating on-disk files, not the embedded ones
 	})
 	if err == nil || !strings.HasPrefix(err.Error(), "no HTML template files found") {
 		t.Errorf("Should have failed to start with no site folder.")

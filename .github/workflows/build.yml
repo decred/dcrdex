@@ -24,6 +24,8 @@ jobs:
         env:
           GO111MODULE: "on"
         run: |
+          mkdir -p client/webserver/site/dist
+          touch client/webserver/site/dist/placeholder
           ./run_tests.sh
   build-js:
     name: Build JS
