@@ -199,7 +199,7 @@ func mainCore() error {
 			Addr:          cfg.WebAddr,
 			CustomSiteDir: cfg.SiteDir,
 			Logger:        logMaker.Logger("WEB"),
-			ReloadHTML:    cfg.ReloadHTML,
+			NoEmbed:       cfg.NoEmbedSite,
 			HttpProf:      cfg.HTTPProfile,
 			Language:      cfg.Language,
 		})
