@@ -2365,9 +2365,20 @@ func (btc *baseWallet) splitBaggageFees(maxFeeRate uint64) (swapInputSize, bagga
 // ReturnCoins unlocks coins. This would be used in the case of a canceled or
 // partially filled order. Part of the asset.Wallet interface.
 func (btc *baseWallet) ReturnCoins(unspents asset.Coins) error {
+	if unspents == nil { // not just empty to make this harder to do accidentally
+		btc.log.Debugf("Returning all coins.")
+		btc.fundingMtx.Lock()
+		defer btc.fundingMtx.Unlock()
+		if err := btc.node.lockUnspent(true, nil); err != nil {
+			return err
+		}
+		btc.fundingCoins = make(map[outPoint]*utxo)
+		return nil
+	}
 	if len(unspents) == 0 {
 		return fmt.Errorf("cannot return zero coins")
 	}
+
 	ops := make([]*output, 0, len(unspents))
 	btc.log.Debugf("returning coins %s", unspents)
 	btc.fundingMtx.Lock()
