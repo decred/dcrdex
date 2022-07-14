@@ -179,7 +179,7 @@ func (ord *OrderReader) SideString() string {
 
 func (ord *OrderReader) percent(filter func(match *Match) bool) string {
 	var sum uint64
-	if ord.Sell {
+	if ord.Sell || ord.IsMarketBuy() {
 		sum = ord.sumFrom(filter)
 	} else {
 		sum = ord.sumTo(filter)
