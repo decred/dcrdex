@@ -4146,10 +4146,6 @@ func TestReconfigure(t *testing.T) {
 		t.Fatal("restart = true not propagated")
 	}
 	reconfigurer.restart = false
-	// Redeem target should be unchanged because a restart is expected.
-	if wallet.redeemConfTarget() != 3 {
-		t.Fatal("redeemconftarget updated for restart = true", wallet.redeemConfTarget())
-	}
 
 	// One last success, and make sure baseWalletConfig is updated.
 	if _, err := wallet.Reconfigure(tCtx, cfg, ""); err != nil {

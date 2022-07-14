@@ -162,17 +162,14 @@ func (wc *rpcClient) reconfigure(cfg *asset.WalletConfig, currentAddress string)
 
 	// Check the RPC configuration.
 	newCfg := &parsedCfg.RPCConfig
-	if err = dexbtc.CheckRPCConfig(&newCfg.RPCConfig, wc.cloneParams.WalletInfo.Name, wc.cloneParams.Network, wc.cloneParams.Ports); err != nil {
+	if err = dexbtc.CheckRPCConfig(&newCfg.RPCConfig, wc.cloneParams.WalletInfo.Name,
+		wc.cloneParams.Network, wc.cloneParams.Ports); err != nil {
 		return
 	}
 
 	// If the RPC configuration has changed, try to update the client.
 	oldCfg := wc.rpcConfig
-	if newCfg.RPCBind != oldCfg.RPCBind ||
-		newCfg.RPCUser != oldCfg.RPCUser ||
-		newCfg.RPCPass != oldCfg.RPCPass ||
-		newCfg.WalletName != oldCfg.WalletName {
-
+	if *newCfg != *oldCfg {
 		cl, err := newRPCConnection(parsedCfg, wc.cloneParams.SingularWallet)
 		if err != nil {
 			return false, fmt.Errorf("error creating RPC client with new credentials: %v", err)
@@ -180,10 +177,13 @@ func (wc *rpcClient) reconfigure(cfg *asset.WalletConfig, currentAddress string)
 
 		// If the wallet is in active use, check the supplied address.
 		if parsedCfg.ActivelyUsed {
+			// We can't use wc.ownsAddress because the rpcClient still has the
+			// old requester stored, so we'll call directly.
 			method := methodGetAddressInfo
 			if wc.legacyValidateAddressRPC {
 				method = methodValidateAddress
 			}
+
 			ai := new(GetAddressInfoResult)
 			if err := call(wc.ctx, cl, method, anylist{currentAddress}, ai); err != nil {
 				return false, fmt.Errorf("error getting address info with new RPC credentials: %w", err)
@@ -193,6 +193,7 @@ func (wc *rpcClient) reconfigure(cfg *asset.WalletConfig, currentAddress string)
 		}
 
 		wc.requesterV.Store(cl)
+		wc.rpcConfig = newCfg
 
 		// No restart required
 	}

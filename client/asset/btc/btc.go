@@ -465,6 +465,40 @@ func (cfg *WalletConfig) adjustedBirthday() time.Time {
 	}
 }
 
+func readBaseWalletConfig(walletCfg *WalletConfig) (*baseWalletConfig, error) {
+	cfg := &baseWalletConfig{}
+	// if values not specified, use defaults. As they are validated as BTC/KB,
+	// we need to convert first.
+	if walletCfg.FallbackFeeRate == 0 {
+		walletCfg.FallbackFeeRate = float64(defaultFee) * 1000 / 1e8
+	}
+	if walletCfg.FeeRateLimit == 0 {
+		walletCfg.FeeRateLimit = float64(defaultFeeRateLimit) * 1000 / 1e8
+	}
+	if walletCfg.RedeemConfTarget == 0 {
+		walletCfg.RedeemConfTarget = defaultRedeemConfTarget
+	}
+	// If set in the user config, the fallback fee will be in conventional units
+	// per kB, e.g. BTC/kB. Translate that to sats/byte.
+	cfg.fallbackFeeRate = toSatoshi(walletCfg.FallbackFeeRate / 1000)
+	if cfg.fallbackFeeRate == 0 {
+		return nil, fmt.Errorf("fallback fee rate limit is smaller than the minimum 1000 sats/byte: %v",
+			walletCfg.FallbackFeeRate)
+	}
+	// If set in the user config, the fee rate limit will be in units of BTC/KB.
+	// Convert to sats/byte & error if value is smaller than smallest unit.
+	cfg.feeRateLimit = toSatoshi(walletCfg.FeeRateLimit / 1000)
+	if cfg.feeRateLimit == 0 {
+		return nil, fmt.Errorf("fee rate limit is smaller than the minimum 1000 sats/byte: %v",
+			walletCfg.FeeRateLimit)
+	}
+
+	cfg.redeemConfTarget = walletCfg.RedeemConfTarget
+	cfg.useSplitTx = walletCfg.UseSplitTx
+
+	return cfg, nil
+}
+
 // readRPCWalletConfig parses the settings map into a *RPCWalletConfig.
 func readRPCWalletConfig(settings map[string]string, symbol string, net dex.Network, ports dexbtc.NetPorts) (cfg *RPCWalletConfig, err error) {
 	cfg = new(RPCWalletConfig)
@@ -614,40 +648,6 @@ type baseWalletConfig struct {
 	feeRateLimit     uint64 // atoms/byte
 	redeemConfTarget uint64
 	useSplitTx       bool
-}
-
-func readBaseWalletConfig(walletCfg *WalletConfig) (*baseWalletConfig, error) {
-	cfg := &baseWalletConfig{}
-	// if values not specified, use defaults. As they are validated as BTC/KB,
-	// we need to convert first.
-	if walletCfg.FallbackFeeRate == 0 {
-		walletCfg.FallbackFeeRate = float64(defaultFee) * 1000 / 1e8
-	}
-	if walletCfg.FeeRateLimit == 0 {
-		walletCfg.FeeRateLimit = float64(defaultFeeRateLimit) * 1000 / 1e8
-	}
-	if walletCfg.RedeemConfTarget == 0 {
-		walletCfg.RedeemConfTarget = defaultRedeemConfTarget
-	}
-	// If set in the user config, the fallback fee will be in conventional units
-	// per kB, e.g. BTC/kB. Translate that to sats/byte.
-	cfg.fallbackFeeRate = toSatoshi(walletCfg.FallbackFeeRate / 1000)
-	if cfg.fallbackFeeRate == 0 {
-		return nil, fmt.Errorf("fallback fee rate limit is smaller than the minimum 1000 sats/byte: %v",
-			walletCfg.FallbackFeeRate)
-	}
-	// If set in the user config, the fee rate limit will be in units of BTC/KB.
-	// Convert to sats/byte & error if value is smaller than smallest unit.
-	cfg.feeRateLimit = toSatoshi(walletCfg.FeeRateLimit / 1000)
-	if cfg.feeRateLimit == 0 {
-		return nil, fmt.Errorf("fee rate limit is smaller than the minimum 1000 sats/byte: %v",
-			walletCfg.FeeRateLimit)
-	}
-
-	cfg.redeemConfTarget = walletCfg.RedeemConfTarget
-	cfg.useSplitTx = walletCfg.UseSplitTx
-
-	return cfg, nil
 }
 
 // baseWallet is a wallet backend for Bitcoin. The backend is how the DEX
@@ -1130,11 +1130,7 @@ func (btc *baseWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig,
 		return false, err
 	}
 
-	if !restart {
-		// No restart required. Just update the configuration.
-		btc.cfgV.Store(newCfg)
-	}
-
+	btc.cfgV.Store(newCfg) // probably won't matter if restart/reinit required
 	return restart, nil
 }
 
