@@ -1896,10 +1896,25 @@ func (c *Core) assetDataBackupDirectory(assetID uint32) string {
 // loadWallet uses the data from the database to construct a new exchange
 // wallet. The returned wallet is running but not connected.
 func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
-	var wallet *xcWallet
-	broadcasting := new(uint32) // in case asset.Open tries to call PeersChange before actually starting
 	// Create the client/asset.Wallet.
 	assetID := dbWallet.AssetID
+
+	// Construct the unconnected xcWallet.
+	contractLockedAmt, orderLockedAmt := c.lockedAmounts(assetID)
+	wallet := &xcWallet{
+		AssetID: assetID,
+		balance: &WalletBalance{
+			Balance:        dbWallet.Balance,
+			OrderLocked:    orderLockedAmt,
+			ContractLocked: contractLockedAmt,
+		},
+		encPass:      dbWallet.EncryptedPW,
+		address:      dbWallet.Address,
+		dbID:         dbWallet.ID(),
+		walletType:   dbWallet.Type,
+		broadcasting: new(uint32),
+	}
+
 	walletCfg := &asset.WalletConfig{
 		Type:     dbWallet.Type,
 		Settings: dbWallet.Settings,
@@ -1911,9 +1926,8 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 			go c.tipChange(assetID, err)
 		},
 		PeersChange: func(numPeers uint32, err error) {
-			if atomic.LoadUint32(broadcasting) == 1 {
-				go c.peerChange(wallet, numPeers, err)
-			}
+			// We shouldn't get any peerChange messages before connecting, but
+			go c.peerChange(wallet, numPeers, err)
 		},
 		DataDir: c.assetDataDirectory(assetID),
 	}
@@ -1928,25 +1942,10 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		return nil, fmt.Errorf("error opening wallet: %w", err)
 	}
 
-	// Construct the unconnected xcWallet.
-	contractLockedAmt, orderLockedAmt := c.lockedAmounts(assetID)
-	wallet = &xcWallet{ // captured by the PeersChange closure
-		Wallet:    w,
-		connector: dex.NewConnectionMaster(w),
-		AssetID:   assetID,
-		balance: &WalletBalance{
-			Balance:        dbWallet.Balance,
-			OrderLocked:    orderLockedAmt,
-			ContractLocked: contractLockedAmt,
-		},
-		encPass:      dbWallet.EncryptedPW,
-		address:      dbWallet.Address,
-		dbID:         dbWallet.ID(),
-		walletType:   dbWallet.Type,
-		traits:       asset.DetermineWalletTraits(w),
-		broadcasting: broadcasting,
-	}
-	atomic.StoreUint32(broadcasting, 1)
+	wallet.Wallet = w
+	wallet.connector = dex.NewConnectionMaster(w)
+	wallet.traits = asset.DetermineWalletTraits(w)
+	atomic.StoreUint32(wallet.broadcasting, 1)
 	return wallet, nil
 }
 
@@ -6940,21 +6939,25 @@ func (c *Core) peerChange(w *xcWallet, numPeers uint32, err error) {
 		c.notify(newWalletConfigNote(TopicWalletPeersRestored, subject, details,
 			db.Success, w.state()))
 		c.startWalletSyncMonitor(w)
-	} else if (numPeers == 0 || err != nil) && !wasDisconnected {
-		if err != nil {
-			subject, details := c.formatDetails(TopicWalletCommsWarning,
-				w.Info().Name, err.Error())
-			c.notify(newWalletConfigNote(TopicWalletCommsWarning, subject, details,
-				db.ErrorLevel, w.state()))
-		} else {
-			subject, details := c.formatDetails(TopicWalletPeersWarning, w.Info().Name)
-			c.notify(newWalletConfigNote(TopicWalletPeersWarning, subject, details,
-				db.WarningLevel, w.state()))
-		}
 	}
 
 	// Send a WalletStateNote in case Synced or anything else has changed.
-	c.notify(newWalletStateNote(w.state()))
+	if atomic.LoadUint32(w.broadcasting) == 1 {
+		if (numPeers == 0 || err != nil) && !wasDisconnected {
+			if err != nil {
+				subject, details := c.formatDetails(TopicWalletCommsWarning,
+					w.Info().Name, err.Error())
+				c.notify(newWalletConfigNote(TopicWalletCommsWarning, subject, details,
+					db.ErrorLevel, w.state()))
+			} else {
+				subject, details := c.formatDetails(TopicWalletPeersWarning, w.Info().Name)
+				c.notify(newWalletConfigNote(TopicWalletPeersWarning, subject, details,
+					db.WarningLevel, w.state()))
+			}
+		}
+
+		c.notify(newWalletStateNote(w.state()))
+	}
 }
 
 // tipChange is called by a wallet backend when the tip block changes, or when
