@@ -2053,7 +2053,7 @@ func (w *assetWallet) RestorationInfo(seed []byte) ([]*asset.WalletRestoration, 
 	}
 
 	return []*asset.WalletRestoration{
-		&asset.WalletRestoration{
+		{
 			Target:   "MetaMask",
 			Seed:     hex.EncodeToString(privateKey),
 			SeedName: "Private Key",
