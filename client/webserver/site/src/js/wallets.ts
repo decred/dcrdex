@@ -20,8 +20,10 @@ const animationLength = 300
 const traitNewAddresser = 1 << 1
 const traitLogFiler = 1 << 2
 const traitRecoverer = 1 << 5
-const activeOrdersErrCode = 35
 const traitWithdrawer = 1 << 6
+const traitRestorer = 1 << 8
+
+const activeOrdersErrCode = 35
 
 interface Actions {
   connect: HTMLElement
@@ -57,6 +59,13 @@ interface RescanRecoveryRequest {
   force?: boolean
 }
 
+interface WalletRestoration {
+  target: string
+  seed: string
+  seedName: string
+  instructions: string
+}
+
 export default class WalletsPage extends BasePage {
   body: HTMLElement
   page: Record<string, PageElement>
@@ -80,11 +89,15 @@ export default class WalletsPage extends BasePage {
   forceReq: RescanRecoveryRequest
   forceUrl: string
   currentForm: PageElement
+  restoreInfoCard: HTMLElement
 
   constructor (body: HTMLElement) {
     super()
     this.body = body
     const page = this.page = Doc.idDescendants(body)
+
+    Doc.cleanTemplates(page.restoreInfoCard)
+    this.restoreInfoCard = page.restoreInfoCard.cloneNode(true) as HTMLElement
 
     this.forms = Doc.applySelector(page.forms, ':scope > form')
     page.forms.querySelectorAll('.form-closer').forEach(el => {
@@ -170,7 +183,9 @@ export default class WalletsPage extends BasePage {
     bind(document, 'keyup', this.keyup)
 
     bind(page.downloadLogs, 'click', async () => { this.downloadLogs() })
+    bind(page.exportWallet, 'click', async () => { this.displayExportWalletAuth() })
     bind(page.recoverWallet, 'click', async () => { this.showRecoverWallet() })
+    bindForm(page.exportWalletAuth, page.exportWalletAuthSubmit, async () => { this.exportWalletAuthSubmit() })
     bindForm(page.recoverWalletConfirm, page.recoverWalletSubmit, () => { this.recoverWallet() })
     bindForm(page.confirmForce, page.confirmForceSubmit, async () => { this.confirmForceSubmit() })
 
@@ -445,6 +460,8 @@ export default class WalletsPage extends BasePage {
     else Doc.hide(page.downloadLogs)
     if ((wallet.traits & traitRecoverer) !== 0) Doc.show(page.recoverWallet)
     else Doc.hide(page.recoverWallet)
+    if ((wallet.traits & traitRestorer)) Doc.show(page.exportWallet)
+    else Doc.hide(page.exportWallet)
 
     page.recfgAssetLogo.src = Doc.logoPath(asset.symbol)
     page.recfgAssetName.textContent = asset.info.name
@@ -676,6 +693,54 @@ export default class WalletsPage extends BasePage {
     url.search = search.toString()
     url.pathname = '/wallets/logfile'
     window.open(url.toString())
+  }
+
+  // displayExportWalletAuth displays a form to warn the user about the
+  // dangers of exporting a wallet, and asks them to enter their password.
+  async displayExportWalletAuth () {
+    const page = this.page
+    Doc.hide(page.exportWalletErr)
+    page.exportWalletPW.value = ''
+    this.showForm(page.exportWalletAuth)
+  }
+
+  // exportWalletAuthSubmit is called after the user enters their password to
+  // authorize looking up the information to restore their wallet in an
+  // external wallet.
+  async exportWalletAuthSubmit () {
+    const page = this.page
+    const req = {
+      assetID: this.reconfigAsset,
+      pass: page.exportWalletPW.value
+    }
+    const url = '/api/restorewalletinfo'
+    const loaded = app().loading(page.forms)
+    const res = await postJSON(url, req)
+    loaded()
+    if (app().checkResponse(res)) {
+      page.exportWalletPW.value = ''
+      this.displayRestoreWalletInfo(res.restorationinfo)
+    } else {
+      page.exportWalletErr.textContent = res.msg
+      Doc.show(page.exportWalletErr)
+    }
+  }
+
+  // displayRestoreWalletInfo displays the information needed to restore a
+  // wallet in external wallets.
+  async displayRestoreWalletInfo (info: WalletRestoration[]) {
+    const page = this.page
+    Doc.empty(page.restoreInfoCardsList)
+    for (const wr of info) {
+      const card = this.restoreInfoCard.cloneNode(true) as HTMLElement
+      const tmpl = Doc.parseTemplate(card)
+      tmpl.name.textContent = wr.target
+      tmpl.seed.textContent = wr.seed
+      tmpl.seedName.textContent = `${wr.seedName}:`
+      tmpl.instructions.textContent = wr.instructions
+      page.restoreInfoCardsList.appendChild(card)
+    }
+    this.showForm(page.restoreWalletInfo)
   }
 
   async recoverWallet () {

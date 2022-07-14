@@ -1612,6 +1612,9 @@ func (c *TCore) UpdateCert(string, []byte) error {
 func (c *TCore) UpdateDEXHost(string, string, []byte, interface{}) (*core.Exchange, error) {
 	return nil, nil
 }
+func (c *TCore) WalletRestorationInfo(pw []byte, assetID uint32) ([]*asset.WalletRestoration, error) {
+	return nil, nil
+}
 
 func TestServer(t *testing.T) {
 	// Register dummy drivers for unimplemented assets.

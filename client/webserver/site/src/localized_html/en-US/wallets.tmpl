@@ -238,6 +238,7 @@
       <hr class="dashed my-2">
       <div class="d-flex flex-row">
         <button id="downloadLogs" type="button" class="w-25 mt-1 mx-1 justify-content-center fs15 bg2">Wallet Logs</button>
+        <button id="exportWallet" type="button" class="w-25 mx-1 mt-1 justify-content-center fs15 bg2">Export Wallet</button>
         <button id="recoverWallet" type="button" class="danger w-25 mx-1 mt-1 justify-content-center fs15 bg2">Recover</button>
       </div>
     </form>
@@ -280,6 +281,59 @@
       </div>
       <div class="fs15 pt-3 text-center d-hide errcolor" id="recoverWalletErr"></div>
     </form>
+
+    {{- /* EXPORT WALLET AUTHORIZATION */ -}}
+    <form class="d-hide" id="exportWalletAuth">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="py-1 text-center position-relative fs22 sans-light">
+        Export Wallet
+      </div>
+      <div class="fs15 text-start mt-2">
+        Enter your app password to show the wallet seed. Make sure nobody else can see your screen. If anyone gets access to the wallet seed, they will be able to steal all of your funds.
+      </div>
+      <div id="exportDisclaimer" class="fs15 text-start mt-2">
+        <span class="warning-text">Using an externally restored wallet while you have active trades running in the DEX could result in failed trades and LOST FUNDS.</span> It is recommended that you do not export your wallet unless you are an experienced user and you know what are doing.
+      </div>
+      <div class="text-start mt-2">
+        <label for="exportWalletPW" class="ps-1 mb-1">Password</label>
+        <input type="password" class="form-control select" id="exportWalletPW" autocomplete="current-password">
+      </div>
+      <div class="d-flex justify-content-end mt-4">
+        <button id="exportWalletAuthSubmit" type="button" class="justify-content-center fs15 bg2 selected">Show Me</button>
+      </div>
+      <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="exportWalletErr"></div>
+    </form>
+
+    {{- /* RESTORE WALLET INFO */ -}}
+    <form class="d-hide" id="restoreWalletInfo">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="px-2 py-1 text-center position-relative fs22 sans-light">
+        Export Wallet
+      </div>
+      <div class="fs15 text-start mt-2">
+        Below are the seeds needed to restore your wallet in some popular external wallets. DO NOT make transactions with your external wallet while you have active trades running on the DEX.
+      </div>
+      <div class="fs15 text-start mt-2 warning-text">
+        Copy/Pasting a wallet seed is a potential security risk. Do this at your own risk.
+      </div>
+      <hr />
+      <div id="restoreInfoCardsList">
+        <div id="restoreInfoCard">
+          <span data-tmpl="name" class="text-left position-relative fs20 sans-light bold underline"></span>
+          <br />
+          <span data-tmpl="seedName"></span>
+          <br />
+          <div>
+            <span data-tmpl="seed" class="mono fs14"></span>
+          </div>
+          <span>Instructions:</span>
+          <br />
+          <span data-tmpl="instructions" class="sans-light text-break preline"></span>
+          <hr />
+        </div>
+      </div>
+    </form>
+
   </div>
 </div>
 {{template "bottom"}}

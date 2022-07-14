@@ -238,4 +238,9 @@ var EnUS = map[string]string{
 	"successful_cert_update":      "Successfully updated certificate!",
 	"update dex host":             "Update DEX Host",
 	"copied":                      "Copied!",
+	"export_wallet":               "Export Wallet",
+	"pw_for_wallet_seed":          "Enter your app password to show the wallet seed. Make sure nobody else can see your screen. If anyone gets access to the wallet seed, they will be able to steal all of your funds.",
+	"export_wallet_disclaimer":    `<span class="warning-text">Using an externally restored wallet while you have active trades running in the DEX could result in failed trades and LOST FUNDS.</span> It is recommended that you do not export your wallet unless you are an experienced user and you know what are doing.`,
+	"export_wallet_msg":           "Below are the seeds needed to restore your wallet in some popular external wallets. DO NOT make transactions with your external wallet while you have active trades running on the DEX.",
+	"clipboard_warning":           "Copy/Pasting a wallet seed is a potential security risk. Do this at your own risk.",
 }

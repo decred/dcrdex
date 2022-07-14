@@ -20,10 +20,10 @@ func (*RootKeyParams) HDPubKeyVersion() [4]byte {
 // GenDeepChild derives the leaf of a path of children from a root extended key.
 func GenDeepChild(seed []byte, kids []uint32) (*hdkeychain.ExtendedKey, error) {
 	root, err := hdkeychain.NewMaster(seed, &RootKeyParams{})
-	defer root.Zero()
 	if err != nil {
 		return nil, err
 	}
+	defer root.Zero()
 	genChild := func(parent *hdkeychain.ExtendedKey, childIdx uint32) (*hdkeychain.ExtendedKey, error) {
 		err := hdkeychain.ErrInvalidChild
 		for err == hdkeychain.ErrInvalidChild {

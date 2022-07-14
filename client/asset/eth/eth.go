@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -118,6 +119,14 @@ var (
 	unlimitedAllowanceReplenishThreshold = new(big.Int).Div(unlimitedAllowance, big.NewInt(2))
 
 	findRedemptionCoinID = []byte("FindRedemption Coin")
+
+	seedDerivationPath = []uint32{
+		hdkeychain.HardenedKeyStart + 44, // purpose 44' for HD wallets
+		hdkeychain.HardenedKeyStart + 60, // eth coin type 60'
+		hdkeychain.HardenedKeyStart,      // account 0'
+		0,                                // branch 0
+		0,                                // index 0
+	}
 )
 
 // WalletConfig are wallet-level configuration settings.
@@ -238,6 +247,7 @@ var _ asset.Wallet = (*TokenWallet)(nil)
 var _ asset.AccountLocker = (*ETHWallet)(nil)
 var _ asset.AccountLocker = (*TokenWallet)(nil)
 var _ asset.TokenMaster = (*ETHWallet)(nil)
+var _ asset.WalletRestorer = (*assetWallet)(nil)
 
 type baseWallet struct {
 	ctx         context.Context // the asset subsystem starts with Connect(ctx)
@@ -333,18 +343,11 @@ func CreateWallet(createWalletParams *asset.CreateWalletParams) error {
 		return err
 	}
 
-	// m/44'/60'/0'/0/0
-	path := []uint32{hdkeychain.HardenedKeyStart + 44,
-		hdkeychain.HardenedKeyStart + 60,
-		hdkeychain.HardenedKeyStart,
-		0,
-		0}
-	extKey, err := keygen.GenDeepChild(createWalletParams.Seed, path)
-	defer extKey.Zero()
+	extKey, err := keygen.GenDeepChild(createWalletParams.Seed, seedDerivationPath)
 	if err != nil {
 		return err
 	}
-
+	defer extKey.Zero()
 	privateKey, err := extKey.SerializedPrivKey()
 	defer encode.ClearBytes(privateKey)
 	if err != nil {
@@ -2033,7 +2036,35 @@ func (w *TokenWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
 		return math.MaxUint64
 	}
 	return g.Transfer * feeRate
+}
 
+// RestorationInfo returns information about how to restore the wallet in
+// various external wallets.
+func (w *assetWallet) RestorationInfo(seed []byte) ([]*asset.WalletRestoration, error) {
+	extKey, err := keygen.GenDeepChild(seed, seedDerivationPath)
+	if err != nil {
+		return nil, err
+	}
+	defer extKey.Zero()
+	privateKey, err := extKey.SerializedPrivKey()
+	defer encode.ClearBytes(privateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return []*asset.WalletRestoration{
+		{
+			Target:   "MetaMask",
+			Seed:     hex.EncodeToString(privateKey),
+			SeedName: "Private Key",
+			Instructions: "Accounts can be imported by private key only if MetaMask has already be initialized. " +
+				"If this is your first time installing MetaMask, create a new wallet and secret recovery phrase. " +
+				"Then, to import your DEX account into MetaMask, follow the steps below:\n" +
+				`1. Open the settings menu
+				 2. Select "Import Account"
+				 3. Make sure "Private Key" is selected, and enter the private key above into the box`,
+		},
+	}, nil
 }
 
 // SwapConfirmations gets the number of confirmations and the spend status
