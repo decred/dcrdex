@@ -469,9 +469,9 @@ func (wc *rpcClient) listUnspent() ([]*ListUnspentResult, error) {
 
 // lockUnspent locks and unlocks outputs for spending. An output that is part of
 // an order, but not yet spent, should be locked until spent or until the order
-// is  canceled or fails.
+// is canceled or fails.
 func (wc *rpcClient) lockUnspent(unlock bool, ops []*output) error {
-	var rpcops []*RPCOutpoint // To clear all, this must be nil, not empty slice.
+	var rpcops []*RPCOutpoint // To clear all, this must be nil->null, not empty slice.
 	for _, op := range ops {
 		rpcops = append(rpcops, &RPCOutpoint{
 			TxID: op.txHash().String(),

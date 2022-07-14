@@ -1183,6 +1183,9 @@ type Config struct {
 	// on shutdown. This is useful if the consumer is using the BackupDB method,
 	// or simply creating manual backups of the DB file after shutdown.
 	NoAutoDBBackup bool // zero value is legacy behavior
+	// UnlockCoinsOnLogin indicates that on wallet connect during login, or on
+	// creation of a new wallet, all coins with the wallet should be unlocked.
+	UnlockCoinsOnLogin bool
 }
 
 // Core is the core client application. Core manages DEX connections, wallets,
@@ -1926,6 +1929,12 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	dbWallet.Address, err = c.connectWallet(wallet)
 	if err != nil {
 		return err
+	}
+
+	if c.cfg.UnlockCoinsOnLogin {
+		if err = wallet.ReturnCoins(nil); err != nil {
+			c.log.Errorf("Failed to unlock all %s wallet coins: %v", unbip(wallet.AssetID), err)
+		}
 	}
 
 	initErr := func(s string, a ...interface{}) error {
@@ -3741,6 +3750,11 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 					c.notify(newWalletConfigNote(TopicWalletConnectionWarning, subject, err.Error(),
 						db.ErrorLevel, wallet.state()))
 					return
+				}
+				if c.cfg.UnlockCoinsOnLogin {
+					if err = wallet.ReturnCoins(nil); err != nil {
+						c.log.Errorf("Failed to unlock all %s wallet coins: %v", unbip(wallet.AssetID), err)
+					}
 				}
 			}
 			atomic.AddUint32(&connectCount, 1)

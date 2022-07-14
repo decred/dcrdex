@@ -1830,8 +1830,24 @@ func (dcr *ExchangeWallet) lockFundingCoins(fCoins []*fundingCoin) error {
 // ReturnCoins unlocks coins. This would be necessary in the case of a canceled
 // order. Coins belonging to the tradingAcct, if configured, are transferred to
 // the unmixed account with the exception of unspent split tx outputs which are
-// kept in the tradingAcct and may later be used to fund future orders.
+// kept in the tradingAcct and may later be used to fund future orders. If
+// called with a nil slice, all coins are returned and none are moved to the
+// unmixed account.
 func (dcr *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
+	if unspents == nil { // not just empty to make this harder to do accidentally
+		dcr.log.Debugf("Returning all coins.")
+		dcr.fundingMtx.Lock()
+		defer dcr.fundingMtx.Unlock()
+		if err := dcr.wallet.LockUnspent(dcr.ctx, true, nil); err != nil {
+			return err
+		}
+		dcr.fundingCoins = make(map[outPoint]*fundingCoin)
+		return nil
+	}
+	if len(unspents) == 0 {
+		return fmt.Errorf("cannot return zero coins")
+	}
+
 	dcr.fundingMtx.Lock()
 	returnedCoins, err := dcr.returnCoins(unspents)
 	dcr.fundingMtx.Unlock()

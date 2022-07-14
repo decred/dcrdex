@@ -274,7 +274,11 @@ type Wallet interface {
 	// PreRedeem gets a pre-redeem estimate for the specified order size.
 	PreRedeem(*PreRedeemForm) (*PreRedeem, error)
 	// ReturnCoins unlocks coins. This would be necessary in the case of a
-	// canceled order.
+	// canceled order. A nil Coins slice indicates to unlock all coins that the
+	// wallet may have locked, a syntax that should always be followed by
+	// FundingCoins for any active orders, and is thus only appropriate at time
+	// of login. Unlocking all coins is likely only useful for external wallets
+	// whose lifetime is longer than the asset.Wallet instance.
 	ReturnCoins(Coins) error
 	// FundingCoins gets funding coins for the coin IDs. The coins are locked.
 	// This method might be called to reinitialize an order from data stored

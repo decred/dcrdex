@@ -1149,6 +1149,16 @@ func TestReturnCoins(t *testing.T) {
 		t.Fatalf("no error for zero coins")
 	}
 
+	// nil unlocks all
+	wallet.fundingCoins[outPoint{*tTxHash, 0}] = &utxo{}
+	err = wallet.ReturnCoins(nil)
+	if err != nil {
+		t.Fatalf("error for nil coins: %v", err)
+	}
+	if len(wallet.fundingCoins) != 0 {
+		t.Errorf("all funding coins not unlocked")
+	}
+
 	// Have the RPC return negative response.
 	node.lockUnspentErr = tErr
 	err = wallet.ReturnCoins(coins)
