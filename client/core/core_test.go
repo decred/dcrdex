@@ -1089,10 +1089,10 @@ func randomMsgMarket() (baseAsset, quoteAsset *msgjson.Asset) {
 }
 
 func tFetcher(_ context.Context, log dex.Logger, _ map[uint32]*SupportedAsset) map[uint32]float64 {
-	fiatRates := make(map[uint32]float64)
-	fiatRates[tUTXOAssetA.ID] = 45
-	fiatRates[tUTXOAssetB.ID] = 32000
-	return fiatRates
+	return map[uint32]float64{
+		tUTXOAssetA.ID: 45,
+		tUTXOAssetB.ID: 32000,
+	}
 }
 
 type testRig struct {

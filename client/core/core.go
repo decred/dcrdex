@@ -1278,17 +1278,14 @@ func (c *Core) Run(ctx context.Context) {
 		}
 
 		// Construct enabled fiat rate sources.
+	fetchers:
 		for token, rateFetcher := range fiatRateFetchers {
-			var isDisabled bool
 			for _, v := range disabledSources {
 				if token == v {
-					isDisabled = true
-					break
+					continue fetchers
 				}
 			}
-			if !isDisabled {
-				c.fiatRateSources[token] = newCommonRateSource(rateFetcher)
-			}
+			c.fiatRateSources[token] = newCommonRateSource(rateFetcher)
 		}
 
 		// Start goroutine for fiat rate fetcher's if we have at least one source.
@@ -7776,71 +7773,53 @@ func (c *Core) fetchFiatExchangeRates() {
 	ctx, cancel := context.WithCancel(c.ctx)
 	c.stopFiatRateFetching = cancel
 
+	c.log.Debug("starting fiat rate fetching")
+
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
-		tick := time.NewTimer(0) // starts rate fetching immediately.
+		tick := time.NewTimer(fiatRateRequestInterval)
+		defer tick.Stop()
 		for {
+
+			c.refreshFiatRates(ctx)
+
 			select {
 			case <-ctx.Done():
-				tick.Stop()
 				return
 			case <-tick.C:
-				c.refreshFiatRates(ctx)
 			}
-			tick = c.nextRateSourceTick()
 		}
 	}()
 }
 
 // refreshFiatRates refreshes the fiat rates for rate sources whose values have
-// not been updated since fiatRateRequestInterval.
+// not been updated since fiatRateRequestInterval. It also checks if fiat rates
+// are expired and does some clean-up.
 func (c *Core) refreshFiatRates(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
 
 	var wg sync.WaitGroup
 	supportedAssets := c.SupportedAssets()
-	timeNow := time.Now()
-	c.ratesMtx.Lock()
+	c.ratesMtx.RLock()
 	for _, source := range c.fiatRateSources {
-		if time.Since(source.lastRequest) > fiatRateRequestInterval {
-			wg.Add(1)
-			go func(source *commonRateSource) {
-				source.lastRequest = timeNow
-				defer wg.Done()
-				source.refreshRates(ctx, c.log, supportedAssets)
-			}(source)
-		}
+		wg.Add(1)
+		go func(source *commonRateSource) {
+			defer wg.Done()
+			source.refreshRates(ctx, c.log, supportedAssets)
+		}(source)
 	}
-	c.ratesMtx.Unlock()
+	c.ratesMtx.RUnlock()
 	wg.Wait()
+
+	// Remove expired rate source if any.
+	c.removeExpiredRateSources()
 
 	fiatRatesMap := c.fiatConversions()
 	if len(fiatRatesMap) != 0 {
 		c.notify(newFiatRatesUpdate(fiatRatesMap))
 	}
-}
-
-// nextRateSourceTick checks the fiat rate source's last request, and calculates
-// when the next cycle should run.
-func (c *Core) nextRateSourceTick() *time.Timer {
-	c.ratesMtx.RLock()
-	defer c.ratesMtx.RUnlock()
-
-	minTick := 10 * time.Second
-	tOldest := time.Now()
-	for _, source := range c.fiatRateSources {
-		t := source.lastRequest
-		if t.Before(tOldest) {
-			tOldest = t
-		}
-	}
-	tilNext := fiatRateRequestInterval - time.Since(tOldest)
-	if tilNext < minTick {
-		tilNext = minTick
-	}
-	return time.NewTimer(tilNext)
 }
 
 // FiatRateSources returns a list of fiat rate sources and their individual
@@ -7856,24 +7835,17 @@ func (c *Core) FiatRateSources() map[string]bool {
 }
 
 // fiatConversions returns fiat rate for all supported assets that have a
-// wallet. It also checks if fiat rates are expired and does some clean-up.
+// wallet.
 func (c *Core) fiatConversions() map[uint32]float64 {
-	supportedAssets := c.SupportedAssets()
+	supportedAssets := asset.Assets()
 
 	c.ratesMtx.RLock()
 	defer c.ratesMtx.RUnlock()
-	disabledCount := 0
 	fiatRatesMap := make(map[uint32]float64, len(supportedAssets))
 	for assetID := range supportedAssets {
 		var rateSum float64
-		var sources int32
-		for token, source := range c.fiatRateSources {
-			// Remove fiat rate source with expired exchange rate data.
-			if source.isExpired(fiatRateDataExpiry) {
-				delete(c.fiatRateSources, token)
-				disabledCount++
-				continue
-			}
+		var sources int
+		for _, source := range c.fiatRateSources {
 			rateInfo := source.assetRate(assetID)
 			if rateInfo != nil && time.Since(rateInfo.lastUpdate) < fiatRateDataExpiry {
 				sources++
@@ -7884,12 +7856,6 @@ func (c *Core) fiatConversions() map[uint32]float64 {
 			fiatRatesMap[assetID] = rateSum / float64(sources) // get average rate.
 		}
 	}
-
-	// Ensure disabled fiat rate fetchers are saved to database.
-	if disabledCount > 0 {
-		c.saveDisabledRateSources()
-	}
-
 	return fiatRatesMap
 }
 
@@ -7904,32 +7870,33 @@ func (c *Core) ToggleRateSourceStatus(source string, disable bool) error {
 
 // enableRateSource enables a fiat rate source.
 func (c *Core) enableRateSource(source string) error {
-	c.ratesMtx.Lock()
-	defer c.ratesMtx.Unlock()
-
 	// Check if it's an invalid rate source or it is already enabled.
 	rateFetcher, found := fiatRateFetchers[source]
 	if !found {
 		return errors.New("cannot enable unknown fiat rate source")
-	} else if c.fiatRateSources[source] != nil {
+	}
+
+	c.ratesMtx.Lock()
+	defer c.ratesMtx.Unlock()
+	if c.fiatRateSources[source] != nil {
 		return nil // already enabled.
 	}
 
 	// Build fiat rate source.
-	c.fiatRateSources[source] = newCommonRateSource(rateFetcher)
+	rateSource := newCommonRateSource(rateFetcher)
+	c.fiatRateSources[source] = rateSource
 
 	// If this is our first fiat rate source, start fiat rate fetcher goroutine,
 	// else fetch rates.
 	if len(c.fiatRateSources) == 1 {
 		c.fetchFiatExchangeRates()
 	} else {
-		source := c.fiatRateSources[source]
-		supportedAssets := c.SupportedAssets()
-		go func(source *commonRateSource) {
+		go func() {
+			supportedAssets := c.SupportedAssets() // not with ratesMtx locked!
 			ctx, cancel := context.WithTimeout(c.ctx, 4*time.Second)
 			defer cancel()
-			source.refreshRates(ctx, c.log, supportedAssets)
-		}(source)
+			rateSource.refreshRates(ctx, c.log, supportedAssets)
+		}()
 	}
 
 	// Update disabled fiat rate source.
@@ -7941,15 +7908,17 @@ func (c *Core) enableRateSource(source string) error {
 
 // disableRateSource disables a fiat rate source.
 func (c *Core) disableRateSource(source string) error {
-	c.ratesMtx.Lock()
-	defer c.ratesMtx.Unlock()
-
 	// Check if it's an invalid fiat rate source or it is already
 	// disabled.
 	_, found := fiatRateFetchers[source]
 	if !found {
 		return errors.New("cannot disable unknown fiat rate source")
-	} else if c.fiatRateSources[source] == nil {
+	}
+
+	c.ratesMtx.Lock()
+	defer c.ratesMtx.Unlock()
+
+	if c.fiatRateSources[source] == nil {
 		return nil // already disabled.
 	}
 
@@ -7961,6 +7930,27 @@ func (c *Core) disableRateSource(source string) error {
 
 	c.log.Infof("Disabled %s from fetching fiat rates.", source)
 	return nil
+}
+
+// removeExpiredRateSources disables expired fiat rate source.
+func (c *Core) removeExpiredRateSources() {
+	c.ratesMtx.Lock()
+	defer c.ratesMtx.Unlock()
+
+	// Remove fiat rate source with expired exchange rate data.
+	var disabledSources []string
+	for token, source := range c.fiatRateSources {
+		if source.isExpired(fiatRateDataExpiry) {
+			delete(c.fiatRateSources, token)
+			disabledSources = append(disabledSources, token)
+		}
+	}
+
+	// Ensure disabled fiat rate fetchers are saved to database.
+	if len(disabledSources) > 0 {
+		c.saveDisabledRateSources()
+		c.log.Warnf("Expired rate source(s) has been disabled: %v", strings.Join(disabledSources, ", "))
+	}
 }
 
 // saveDisabledRateSources saves disabled fiat rate sources to database and
@@ -7978,6 +7968,7 @@ func (c *Core) saveDisabledRateSources() {
 	if len(c.fiatRateSources) == 0 && c.stopFiatRateFetching != nil {
 		c.stopFiatRateFetching()
 		c.stopFiatRateFetching = nil
+		c.log.Debug("shutting down rate fetching")
 	}
 
 	err := c.db.SaveDisabledRateSources(disabled)

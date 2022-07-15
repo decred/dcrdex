@@ -572,7 +572,7 @@ export default class Application {
       case 'walletstate':
       case 'walletconfig': {
         // assets can be null if failed to connect to dex server.
-        if (!this.assets) break
+        if (!this.assets) return
         const wallet = (note as WalletConfigNote).wallet
         const asset = this.assets[wallet.assetID]
         asset.wallet = wallet
@@ -580,8 +580,8 @@ export default class Application {
         const bal = wallet.balance.available
         const balances = this.main.querySelectorAll(`[data-balance-target="${wallet.assetID}"]`)
         balances.forEach(el => { el.textContent = Doc.formatFullPrecision(bal, asset.info.unitinfo) })
-      }
         break
+      }
       case 'match': {
         const n = note as MatchNote
         const ord = this.order(n.orderID)

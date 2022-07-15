@@ -133,7 +133,7 @@ type DB interface {
 	// DisabledRateSources retrieves disabled fiat rate sources from the
 	// database.
 	DisabledRateSources() ([]string, error)
-	// SaveDisabledRateSources saves disabled fiat rate sources in the
-	// database.
+	// SaveDisabledRateSources saves disabled fiat rate sources in the database.
+	// A source name must not contain a comma.
 	SaveDisabledRateSources(disabledSources []string) error
 }

@@ -24,7 +24,8 @@ const (
 	// fiatRateDataExpiry : Any data older than fiatRateDataExpiry will be discarded.
 	fiatRateDataExpiry = 60 * time.Minute
 
-	// Tokens. Used to identify fiat rate source.
+	// Tokens. Used to identify fiat rate source, source name must not contain a
+	// comma.
 	messari       = "Messari"
 	coinpaprika   = "Coinpaprika"
 	dcrdataDotOrg = "dcrdata"
@@ -56,26 +57,28 @@ type fiatRateInfo struct {
 type rateFetcher func(context context.Context, logger dex.Logger, assets map[uint32]*SupportedAsset) map[uint32]float64
 
 type commonRateSource struct {
-	lastRequest time.Time
-	fetchRates  rateFetcher
+	fetchRates rateFetcher
 
 	mtx       sync.RWMutex
 	fiatRates map[uint32]*fiatRateInfo
 }
 
 // isExpired checks the last update time for all fiat rates against the
-// provided expiryTime.
+// provided expiryTime. This only returns true if all rates are expired.
 func (source *commonRateSource) isExpired(expiryTime time.Duration) bool {
+	now := time.Now()
+
 	source.mtx.RLock()
 	defer source.mtx.RUnlock()
-	var expiredCount int
+	if len(source.fiatRates) == 0 {
+		return false
+	}
 	for _, rateInfo := range source.fiatRates {
-		if time.Since(rateInfo.lastUpdate) > expiryTime {
-			expiredCount++
+		if now.Sub(rateInfo.lastUpdate) < expiryTime {
+			return false // one not expired is enough
 		}
 	}
-	totalFiatRate := len(source.fiatRates)
-	return expiredCount == totalFiatRate && totalFiatRate != 0
+	return true
 }
 
 // assetRate returns the fiat rate information for the assetID specified. The
@@ -89,12 +92,13 @@ func (source *commonRateSource) assetRate(assetID uint32) *fiatRateInfo {
 // refreshRates updates the last update time and the rate information for assets.
 func (source *commonRateSource) refreshRates(ctx context.Context, logger dex.Logger, assets map[uint32]*SupportedAsset) {
 	fiatRates := source.fetchRates(ctx, logger, assets)
+	now := time.Now()
 	source.mtx.Lock()
 	defer source.mtx.Unlock()
 	for assetID, fiatRate := range fiatRates {
 		source.fiatRates[assetID] = &fiatRateInfo{
 			rate:       fiatRate,
-			lastUpdate: time.Now(),
+			lastUpdate: now,
 		}
 	}
 }
