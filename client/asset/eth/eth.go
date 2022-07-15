@@ -37,6 +37,7 @@ import (
 	ethmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/tyler-smith/go-bip39"
 )
 
 func registerToken(tokenID uint32, desc string) {
@@ -328,6 +329,20 @@ func (w *TokenWallet) Info() *asset.WalletInfo {
 	}
 }
 
+// genWalletSeed uses the wallet seed passed from core as the entropy for
+// generating a BIP-39 mnemonic. Then it returns the wallet seed generated
+// from the mnemonic which can be used to derive a private key.
+func genWalletSeed(entropy []byte) ([]byte, error) {
+	if len(entropy) != 32 {
+		return nil, fmt.Errorf("wallet entropy must be 32 bytes long")
+	}
+	mnemonic, err := bip39.NewMnemonic(entropy)
+	if err != nil {
+		return nil, fmt.Errorf("error deriving mnemonic: %w", err)
+	}
+	return bip39.NewSeed(mnemonic, ""), nil
+}
+
 // CreateWallet creates a new internal ETH wallet and stores the private key
 // derived from the wallet seed.
 func CreateWallet(createWalletParams *asset.CreateWalletParams) error {
@@ -343,7 +358,13 @@ func CreateWallet(createWalletParams *asset.CreateWalletParams) error {
 		return err
 	}
 
-	extKey, err := keygen.GenDeepChild(createWalletParams.Seed, seedDerivationPath)
+	walletSeed, err := genWalletSeed(createWalletParams.Seed)
+	if err != nil {
+		return err
+	}
+	defer encode.ClearBytes(walletSeed)
+
+	extKey, err := keygen.GenDeepChild(walletSeed, seedDerivationPath)
 	if err != nil {
 		return err
 	}
@@ -2047,7 +2068,13 @@ func (w *TokenWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
 // RestorationInfo returns information about how to restore the wallet in
 // various external wallets.
 func (w *assetWallet) RestorationInfo(seed []byte) ([]*asset.WalletRestoration, error) {
-	extKey, err := keygen.GenDeepChild(seed, seedDerivationPath)
+	walletSeed, err := genWalletSeed(seed)
+	if err != nil {
+		return nil, err
+	}
+	defer encode.ClearBytes(walletSeed)
+
+	extKey, err := keygen.GenDeepChild(walletSeed, seedDerivationPath)
 	if err != nil {
 		return nil, err
 	}
