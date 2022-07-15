@@ -141,7 +141,7 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func(), error) {
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
 
-	wallet, err := unconnectedWallet(walletCfg, &walletConfig{PrimaryAccount: tAcctName}, tChainParams, tLogger)
+	wallet, err := unconnectedWallet(walletCfg, &walletConfig{PrimaryAccount: tAcctName}, tChainParams, tLogger, dex.Simnet)
 	if err != nil {
 		shutdown()
 		return nil, nil, nil, err
