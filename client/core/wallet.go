@@ -55,6 +55,14 @@ type xcWallet struct {
 	hookedUp     bool
 	synced       bool
 	syncProgress float32
+
+	// When wallets are being reconfigured and especially when the wallet type
+	// or host is being changed, we want to supress "walletstate" notes to
+	// prevent subscribers from prematurely adopting the new WalletState before
+	// the new wallet is fully validated and added to the Core wallets map.
+	// Walletstate notes during reconfiguration can come from the sync loop or
+	// from the PeersChange callback.
+	broadcasting *uint32
 }
 
 // encPW returns xcWallet's encrypted password.

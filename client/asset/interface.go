@@ -533,6 +533,15 @@ type AccountLocker interface {
 	UnlockRefundReserves(uint64)
 }
 
+// LiveReconfigurer is a wallet that can possibly handle a reconfiguration
+// without the need for re-initialization.
+type LiveReconfigurer interface {
+	// Reconfigure attempts to reconfigure the wallet. If reconfiguration
+	// requires a restart, the Wallet should still validate as much
+	// configuration as possible.
+	Reconfigure(ctx context.Context, cfg *WalletConfig, currentAddress string) (restartRequired bool, err error)
+}
+
 // Balance is categorized information about a wallet's balance.
 type Balance struct {
 	// Available is the balance that is available for trading immediately.

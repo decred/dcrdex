@@ -766,6 +766,16 @@ export default class Application {
     return false
   }
 
+  walletIsActive (assetID: number): boolean {
+    if (this.haveAssetOrders(assetID)) return true
+    for (const xc of Object.values(this.user.exchanges)) {
+      if (xc.pendingFee && xc.pendingFee.assetID === assetID) {
+        return true
+      }
+    }
+    return false
+  }
+
   /* order attempts to locate an order by order ID. */
   order (oid: string): Order | null {
     for (const xc of Object.values(this.user.exchanges)) {

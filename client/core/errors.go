@@ -47,6 +47,7 @@ const (
 	existenceCheckErr
 	createWalletErr
 	activeOrdersErr
+	newAddrErr
 )
 
 // Error is an error code and a wrapped error.

@@ -34,6 +34,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/config"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcjson"
@@ -311,7 +312,7 @@ type spvWallet struct {
 	wallet      btcWallet
 	cl          neutrinoService
 	chainClient *chain.NeutrinoClient
-	birthday    time.Time
+	birthdayV   atomic.Value // time.Time
 	// if allowAutomaticRescan is true, if when connect is called, spvWallet.birthday
 	// is earlier than the birthday stored in the btcwallet database, the transaction
 	// history will be wiped and a rescan will start.
@@ -344,7 +345,7 @@ var _ tipNotifier = (*spvWallet)(nil)
 
 // loadSPVWallet loads an existing wallet.
 func loadSPVWallet(dbDir string, logger dex.Logger, chainParams *chaincfg.Params, birthday time.Time, allowAutomaticRescan bool) *spvWallet {
-	return &spvWallet{
+	spvw := &spvWallet{
 		chainParams:          chainParams,
 		acctNum:              defaultAcctNum,
 		acctName:             defaultAcctName,
@@ -354,8 +355,49 @@ func loadSPVWallet(dbDir string, logger dex.Logger, chainParams *chaincfg.Params
 		log:                  logger,
 		tipChan:              make(chan *block, 8),
 		allowAutomaticRescan: allowAutomaticRescan,
-		birthday:             birthday,
 	}
+	spvw.birthdayV.Store(birthday)
+	return spvw
+}
+
+func (w *spvWallet) birthday() time.Time {
+	return w.birthdayV.Load().(time.Time)
+}
+
+// reconfigure attempts to reconfigure the rpcClient for the new settings. Live
+// reconfiguration is only attempted if the new wallet type is walletTypeSPV. An
+// error is generated if the birthday is reduced and the special:activelyUsed
+// flag is set.
+func (w *spvWallet) reconfigure(cfg *asset.WalletConfig, _ /* currentAddress */ string) (restartRequired bool, err error) {
+	if cfg.Type != walletTypeSPV {
+		restartRequired = true
+		return
+	}
+
+	parsedCfg := new(WalletConfig)
+	if err = config.Unmapify(cfg.Settings, parsedCfg); err != nil {
+		return
+	}
+
+	newBday := parsedCfg.adjustedBirthday()
+	if newBday.Equal(w.birthday()) {
+		// It's the only setting we care about.
+		return
+	}
+	rescanRequired := newBday.Before(w.birthday())
+	if rescanRequired && parsedCfg.ActivelyUsed {
+		return false, errors.New("cannot decrease the birthday with active orders")
+	}
+	if err := w.updateDBBirthday(newBday); err != nil {
+		return false, fmt.Errorf("error storing new birthday: %w", err)
+	}
+	w.birthdayV.Store(newBday)
+	if rescanRequired {
+		if err = w.rescanWalletAsync(); err != nil {
+			return false, fmt.Errorf("error initiating rescan after birthday adjustment: %w", err)
+		}
+	}
+	return
 }
 
 // tipFeed satisfies the tipNotifier interface, signaling that *spvWallet
@@ -588,7 +630,7 @@ func (w *spvWallet) syncStatus() (*syncStatus, error) {
 	var synced bool
 	var blk *block
 	// Wallet address manager sync height.
-	if chainBlk.Timestamp.After(w.birthday) {
+	if chainBlk.Timestamp.After(w.birthday()) {
 		// After the wallet's birthday, the wallet address manager should begin
 		// syncing. Although block time stamps are not necessarily monotonically
 		// increasing, this is a reasonable condition at which the wallet's sync
@@ -1221,20 +1263,15 @@ func (w *spvWallet) startWallet() error {
 	w.wallet = &walletExtender{btcw, w.chainParams}
 
 	oldBday := btcw.Manager.Birthday()
-	wdb := btcw.Database()
 
-	performRescan := w.birthday.Before(oldBday)
+	performRescan := w.birthday().Before(oldBday)
 	if performRescan && !w.allowAutomaticRescan {
 		bailOnWalletAndDB()
 		return errors.New("cannot set earlier birthday while there are active deals")
 	}
 
-	if !oldBday.Equal(w.birthday) {
-		err = walletdb.Update(wdb, func(dbtx walletdb.ReadWriteTx) error {
-			ns := dbtx.ReadWriteBucket(wAddrMgrBkt)
-			return btcw.Manager.SetBirthday(ns, w.birthday)
-		})
-		if err != nil {
+	if !oldBday.Equal(w.birthday()) {
+		if err := w.updateDBBirthday(w.birthday()); err != nil {
 			w.log.Errorf("Failed to reset wallet manager birthday: %v", err)
 			performRescan = false
 		}
@@ -1253,6 +1290,17 @@ func (w *spvWallet) startWallet() error {
 	btcw.SynchronizeRPC(w.chainClient)
 
 	return nil
+}
+
+func (w *spvWallet) updateDBBirthday(bday time.Time) error {
+	btcw, isLoaded := w.loader.LoadedWallet()
+	if !isLoaded {
+		return fmt.Errorf("wallet not loaded")
+	}
+	return walletdb.Update(btcw.Database(), func(dbtx walletdb.ReadWriteTx) error {
+		ns := dbtx.ReadWriteBucket(wAddrMgrBkt)
+		return btcw.Manager.SetBirthday(ns, bday)
+	})
 }
 
 // moveWalletData will move all wallet files to a backup directory.

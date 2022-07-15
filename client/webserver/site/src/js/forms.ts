@@ -314,7 +314,7 @@ export class WalletConfigForm {
   /*
    * update creates the dynamic form.
    */
-  update (configOpts: ConfigOption[], assetHasActiveOrders?: boolean) {
+  update (configOpts: ConfigOption[], walletIsActive?: boolean) {
     this.configElements = {}
     this.configOpts = configOpts
     Doc.empty(this.dynamicOpts, this.defaultSettings, this.loadedSettings)
@@ -356,7 +356,7 @@ export class WalletConfigForm {
         input.min = getMinMaxVal(opt.min)
         input.valueAsDate = opt.default ? new Date(opt.default * 1000) : new Date()
       } else input.value = opt.default !== null ? opt.default : ''
-      input.disabled = Boolean(opt.disablewhenactive && assetHasActiveOrders)
+      input.disabled = Boolean(opt.disablewhenactive && walletIsActive)
     }
     for (const opt of this.configOpts) {
       if (this.sectionize && opt.default !== null) defaultedOpts.push(opt)

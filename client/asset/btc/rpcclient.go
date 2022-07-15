@@ -11,10 +11,12 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/config"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcjson"
@@ -74,7 +76,9 @@ type RawRequesterWithContext interface {
 type anylist []interface{}
 
 type rpcCore struct {
-	requester                RawRequesterWithContext
+	rpcConfig                *RPCConfig
+	cloneParams              *BTCCloneCFG
+	requesterV               atomic.Value // RawRequesterWithContext
 	segwit                   bool
 	decodeAddr               dexbtc.AddressDecoder
 	stringAddr               dexbtc.AddressStringer
@@ -93,6 +97,10 @@ type rpcCore struct {
 	numericGetRawTxRPC       bool
 	legacyValidateAddressRPC bool
 	manualMedianTime         bool
+}
+
+func (c *rpcCore) requester() RawRequesterWithContext {
+	return c.requesterV.Load().(RawRequesterWithContext)
 }
 
 // rpcClient is a bitcoind JSON RPC client that uses rpcclient.Client's
@@ -136,9 +144,65 @@ func (wc *rpcClient) connect(ctx context.Context, _ *sync.WaitGroup) error {
 	return nil
 }
 
+// reconfigure attempts to reconfigure the rpcClient for the new settings. Live
+// reconfiguration is only attempted if the new wallet type is walletTypeRPC. If
+// the special:activelyUsed flag is set, reconfigure will fail if we can't
+// validate ownership of the current deposit address.
+func (wc *rpcClient) reconfigure(cfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error) {
+	// rpcClient only handles walletTypeRPC.
+	if cfg.Type != walletTypeRPC {
+		restartRequired = true
+		return
+	}
+
+	parsedCfg := new(RPCWalletConfig)
+	if err = config.Unmapify(cfg.Settings, parsedCfg); err != nil {
+		return
+	}
+
+	// Check the RPC configuration.
+	newCfg := &parsedCfg.RPCConfig
+	if err = dexbtc.CheckRPCConfig(&newCfg.RPCConfig, wc.cloneParams.WalletInfo.Name,
+		wc.cloneParams.Network, wc.cloneParams.Ports); err != nil {
+		return
+	}
+
+	// If the RPC configuration has changed, try to update the client.
+	oldCfg := wc.rpcConfig
+	if *newCfg != *oldCfg {
+		cl, err := newRPCConnection(parsedCfg, wc.cloneParams.SingularWallet)
+		if err != nil {
+			return false, fmt.Errorf("error creating RPC client with new credentials: %v", err)
+		}
+
+		// If the wallet is in active use, check the supplied address.
+		if parsedCfg.ActivelyUsed {
+			// We can't use wc.ownsAddress because the rpcClient still has the
+			// old requester stored, so we'll call directly.
+			method := methodGetAddressInfo
+			if wc.legacyValidateAddressRPC {
+				method = methodValidateAddress
+			}
+
+			ai := new(GetAddressInfoResult)
+			if err := call(wc.ctx, cl, method, anylist{currentAddress}, ai); err != nil {
+				return false, fmt.Errorf("error getting address info with new RPC credentials: %w", err)
+			} else if !ai.IsMine {
+				return false, errors.New("cannot reconfigure to a new RPC wallet during active use")
+			}
+		}
+
+		wc.requesterV.Store(cl)
+		wc.rpcConfig = newCfg
+
+		// No restart required
+	}
+	return
+}
+
 // RawRequest passes the request to the wallet's RawRequester.
 func (wc *rpcClient) RawRequest(method string, params []json.RawMessage) (json.RawMessage, error) {
-	return wc.requester.RawRequest(wc.ctx, method, params)
+	return wc.requester().RawRequest(wc.ctx, method, params)
 }
 
 // estimateSmartFee requests the server to estimate a fee level based on the
@@ -900,6 +964,10 @@ func (wc *rpcClient) searchBlockForRedemptions(ctx context.Context, reqs map[out
 // server via (*rpcclient.Client).RawRequest. If thing is non-nil, the result
 // will be marshaled into thing.
 func (wc *rpcClient) call(method string, args anylist, thing interface{}) error {
+	return call(wc.ctx, wc.requester(), method, args, thing)
+}
+
+func call(ctx context.Context, r RawRequesterWithContext, method string, args anylist, thing interface{}) error {
 	params := make([]json.RawMessage, 0, len(args))
 	for i := range args {
 		p, err := json.Marshal(args[i])
@@ -909,7 +977,7 @@ func (wc *rpcClient) call(method string, args anylist, thing interface{}) error 
 		params = append(params, p)
 	}
 
-	b, err := wc.requester.RawRequest(wc.ctx, method, params)
+	b, err := r.RawRequest(ctx, method, params)
 	if err != nil {
 		return fmt.Errorf("rawrequest (%v) error: %w", method, err)
 	}

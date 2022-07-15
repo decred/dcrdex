@@ -129,6 +129,7 @@ type msgBlockWithHeight struct {
 }
 
 type testData struct {
+	walletCfg     *baseWalletConfig
 	badSendHash   *chainhash.Hash
 	sendErr       error
 	sentRawTx     *wire.MsgTx
@@ -607,7 +608,7 @@ func makeSwapContract(segwit bool, lockTimeOffset time.Duration) (secret []byte,
 	return
 }
 
-func tNewWallet(segwit bool, walletType string) (*ExchangeWalletFullNode, *testData, func(), error) {
+func tNewWallet(segwit bool, walletType string) (*ExchangeWalletFullNode, *testData, func()) {
 	if segwit {
 		tBTC.SwapSize = dexbtc.InitTxSizeSegwit
 		tBTC.SwapSizeBase = dexbtc.InitTxSizeBaseSegwit
@@ -644,13 +645,13 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWalletFullNode, *testD
 	var err error
 	switch walletType {
 	case walletTypeRPC:
-		wallet, err = newRPCWallet(&tRawRequester{data}, cfg, &WalletConfig{})
+		wallet, err = newRPCWallet(&tRawRequester{data}, cfg, &RPCWalletConfig{})
 	case walletTypeSPV:
 		w, err := newUnconnectedWallet(cfg, &WalletConfig{})
 		if err == nil {
 			wallet = &ExchangeWalletFullNode{w}
 			neutrinoClient := &tNeutrinoClient{data}
-			wallet.node = &spvWallet{
+			spvw := &spvWallet{
 				chainParams: &chaincfg.MainNetParams,
 				wallet:      &tBtcWallet{data},
 				cl:          neutrinoClient,
@@ -662,18 +663,22 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWalletFullNode, *testD
 				log:         cfg.Logger.SubLogger("SPV"),
 				loader:      nil,
 			}
+			spvw.birthdayV.Store(time.Time{})
+			wallet.node = spvw
 		}
 	}
 
+	data.walletCfg = wallet.cfgV.Load().(*baseWalletConfig)
+
 	if err != nil {
 		shutdown()
-		return nil, nil, nil, err
+		panic(err.Error())
 	}
 	// Initialize the best block.
 	bestHash, err := wallet.node.getBestBlockHash()
 	if err != nil {
 		shutdown()
-		return nil, nil, nil, err
+		panic(err.Error())
 	}
 	wallet.tipMtx.Lock()
 	wallet.currentTip = &block{
@@ -691,7 +696,7 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWalletFullNode, *testD
 		shutdown()
 		wg.Wait()
 	}
-	return wallet, data, shutdownAndWait, nil
+	return wallet, data, shutdownAndWait
 }
 
 func mustMarshal(thing interface{}) []byte {
@@ -737,11 +742,8 @@ func TestAvailableFund(t *testing.T) {
 }
 
 func testAvailableFund(t *testing.T, segwit bool, walletType string) {
-	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
+	wallet, node, shutdown := tNewWallet(segwit, walletType)
 	defer shutdown()
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	// With an empty list returned, there should be no error, but the value zero
 	// should be returned.
@@ -1018,7 +1020,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	// Prepare for a split transaction.
 	baggageFees := tBTC.MaxFeeRate * splitTxBaggage
 	node.changeAddr = tP2WPKHAddr
-	wallet.useSplitTx = true
+	node.walletCfg.useSplitTx = true
 	// No error when no split performed cuz math.
 	coins, _, err := wallet.FundOrder(ord)
 	if err != nil {
@@ -1062,7 +1064,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	_ = wallet.ReturnCoins(coins)
 
 	// The split should also be added if we set the option at order time.
-	wallet.useSplitTx = false
+	node.walletCfg.useSplitTx = false
 	ord.Options = map[string]string{splitKey: "true"}
 	coins, _, err = wallet.FundOrder(ord)
 	if err != nil {
@@ -1133,17 +1135,14 @@ func (c *tCoin) String() string { return hex.EncodeToString(c.id) }
 func (c *tCoin) Value() uint64  { return 100 }
 
 func TestReturnCoins(t *testing.T) {
-	wallet, node, shutdown, err := tNewWallet(true, walletTypeRPC)
+	wallet, node, shutdown := tNewWallet(true, walletTypeRPC)
 	defer shutdown()
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	// Test it with the local output type.
 	coins := asset.Coins{
 		newOutput(tTxHash, 0, 1),
 	}
-	err = wallet.ReturnCoins(coins)
+	err := wallet.ReturnCoins(coins)
 	if err != nil {
 		t.Fatalf("error with output type coins: %v", err)
 	}
@@ -1175,11 +1174,8 @@ func TestFundingCoins(t *testing.T) {
 }
 
 func testFundingCoins(t *testing.T, segwit bool, walletType string) {
-	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
+	wallet, node, shutdown := tNewWallet(segwit, walletType)
 	defer shutdown()
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	const vout = 1
 	const txBlockHeight = 3
@@ -1295,11 +1291,8 @@ func checkSwapEstimate(t *testing.T, est *asset.SwapEstimate, lots, swapVal, max
 }
 
 func TestFundEdges(t *testing.T) {
-	wallet, node, shutdown, err := tNewWallet(false, walletTypeRPC)
+	wallet, node, shutdown := tNewWallet(false, walletTypeRPC)
 	defer shutdown()
-	if err != nil {
-		t.Fatal(err)
-	}
 	swapVal := uint64(1e7)
 	lots := swapVal / tLotSize
 
@@ -1362,7 +1355,7 @@ func TestFundEdges(t *testing.T) {
 	checkMax(lots-1, swapVal-tLotSize, backingFees-feeReduction, totalBytes*feeSuggestion-estFeeReduction,
 		(bestCaseBytes-swapOutputSize)*feeSuggestion, swapVal+backingFees-1)
 
-	_, _, err = wallet.FundOrder(ord)
+	_, _, err := wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error when not enough funds in single p2pkh utxo")
 	}
@@ -1379,7 +1372,7 @@ func TestFundEdges(t *testing.T) {
 
 	// For a split transaction, we would need to cover the splitTxBaggage as
 	// well.
-	wallet.useSplitTx = true
+	node.walletCfg.useSplitTx = true
 	node.changeAddr = tP2WPKHAddr
 	node.signFunc = func(tx *wire.MsgTx) {
 		signFunc(tx, 0, wallet.segwit)
@@ -1411,7 +1404,7 @@ func TestFundEdges(t *testing.T) {
 	if coins[0].Value() == v {
 		t.Fatalf("split performed when baggage wasn't covered")
 	}
-	wallet.useSplitTx = false
+	node.walletCfg.useSplitTx = false
 
 	// P2SH(P2PKH) p2sh pkScript = 23 bytes, p2pkh pkScript (redeemscript) = 25 bytes
 	// sigScript = signature(1 + 73) + pubkey(1 + 33) + redeemscript(1 + 25) = 134
@@ -1515,11 +1508,8 @@ func TestFundEdges(t *testing.T) {
 }
 
 func TestFundEdgesSegwit(t *testing.T) {
-	wallet, node, shutdown, err := tNewWallet(true, walletTypeRPC)
+	wallet, node, shutdown := tNewWallet(true, walletTypeRPC)
 	defer shutdown()
-	if err != nil {
-		t.Fatal(err)
-	}
 	swapVal := uint64(1e7)
 	lots := swapVal / tLotSize
 
@@ -1581,7 +1571,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 	checkMax(lots-1, swapVal-tLotSize, backingFees-feeReduction, totalBytes*feeSuggestion-estFeeReduction,
 		(bestCaseBytes-swapOutputSize)*feeSuggestion, swapVal+backingFees-1)
 
-	_, _, err = wallet.FundOrder(ord)
+	_, _, err := wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error when not enough funds in single p2wpkh utxo")
 	}
@@ -1598,7 +1588,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 
 	// For a split transaction, we would need to cover the splitTxBaggage as
 	// well.
-	wallet.useSplitTx = true
+	node.walletCfg.useSplitTx = true
 	node.changeAddr = tP2WPKHAddr
 	node.signFunc = func(tx *wire.MsgTx) {
 		signFunc(tx, 0, wallet.segwit)
@@ -1628,7 +1618,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 	if coins[0].Value() == v {
 		t.Fatalf("split performed when baggage wasn't covered")
 	}
-	wallet.useSplitTx = false
+	node.walletCfg.useSplitTx = false
 }
 
 func TestSwap(t *testing.T) {
@@ -1636,11 +1626,8 @@ func TestSwap(t *testing.T) {
 }
 
 func testSwap(t *testing.T, segwit bool, walletType string) {
-	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
+	wallet, node, shutdown := tNewWallet(segwit, walletType)
 	defer shutdown()
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	swapVal := toSatoshi(5)
 	coins := asset.Coins{
@@ -1770,11 +1757,8 @@ func TestRedeem(t *testing.T) {
 }
 
 func testRedeem(t *testing.T, segwit bool, walletType string) {
-	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
+	wallet, node, shutdown := tNewWallet(segwit, walletType)
 	defer shutdown()
-	if err != nil {
-		t.Fatal(err)
-	}
 	swapVal := toSatoshi(5)
 
 	secret, _, _, contract, addr, _, lockTime := makeSwapContract(segwit, time.Hour*12)
@@ -1894,11 +1878,8 @@ func TestSignMessage(t *testing.T) {
 }
 
 func testSignMessage(t *testing.T, segwit bool, walletType string) {
-	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
+	wallet, node, shutdown := tNewWallet(segwit, walletType)
 	defer shutdown()
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	vout := uint32(5)
 	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
@@ -1989,11 +1970,8 @@ func TestAuditContract(t *testing.T) {
 }
 
 func testAuditContract(t *testing.T, segwit bool, walletType string) {
-	wallet, _, shutdown, err := tNewWallet(segwit, walletType)
+	wallet, _, shutdown := tNewWallet(segwit, walletType)
 	defer shutdown()
-	if err != nil {
-		t.Fatal(err)
-	}
 	secretHash, _ := hex.DecodeString("5124208c80d33507befa517c08ed01aa8d33adbf37ecd70fb5f9352f7a51a88d")
 	lockTime := time.Now().Add(time.Hour * 12)
 	addr, _ := btcutil.DecodeAddress(tP2PKHAddr, &chaincfg.MainNetParams)
@@ -2068,11 +2046,8 @@ func TestFindRedemption(t *testing.T) {
 }
 
 func testFindRedemption(t *testing.T, segwit bool, walletType string) {
-	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
+	wallet, node, shutdown := tNewWallet(segwit, walletType)
 	defer shutdown()
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	contractHeight := node.GetBestBlockHeight() + 1
 	otherTxid := "7a7b3b5c3638516bc8e7f19b4a3dec00f052a599fed5036c2b89829de2367bb6"
@@ -2204,11 +2179,8 @@ func TestRefund(t *testing.T) {
 }
 
 func testRefund(t *testing.T, segwit bool, walletType string) {
-	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
+	wallet, node, shutdown := tNewWallet(segwit, walletType)
 	defer shutdown()
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	_, _, pkScript, contract, addr, _, _ := makeSwapContract(segwit, time.Hour*12)
 
@@ -2315,16 +2287,13 @@ func TestLockUnlock(t *testing.T) {
 }
 
 func testLockUnlock(t *testing.T, segwit bool, walletType string) {
-	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
+	wallet, node, shutdown := tNewWallet(segwit, walletType)
 	defer shutdown()
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	pw := []byte("pass")
 
 	// just checking that the errors come through.
-	err = wallet.Unlock(pw)
+	err := wallet.Unlock(pw)
 	if err != nil {
 		t.Fatalf("unlock error: %v", err)
 	}
@@ -2357,11 +2326,8 @@ const (
 )
 
 func testSender(t *testing.T, senderType tSenderType, segwit bool, walletType string) {
-	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
+	wallet, node, shutdown := tNewWallet(segwit, walletType)
 	defer shutdown()
-	if err != nil {
-		t.Fatal(err)
-	}
 	const feeSuggestion = 100
 	sender := func(addr string, val uint64) (asset.Coin, error) {
 		return wallet.Send(addr, val, defaultFee)
@@ -2410,7 +2376,7 @@ func testSender(t *testing.T, senderType tSenderType, segwit bool, walletType st
 		signFunc(tx, 0, wallet.segwit)
 	}
 
-	_, err = sender(addr.String(), toSatoshi(fee))
+	_, err := sender(addr.String(), toSatoshi(fee))
 	if err != nil {
 		t.Fatalf("send error: %v", err)
 	}
@@ -2443,16 +2409,13 @@ func TestEstimateRegistrationTxFee(t *testing.T) {
 }
 
 func testEstimateRegistrationTxFee(t *testing.T, segwit bool, walletType string) {
-	wallet, _, shutdown, err := tNewWallet(segwit, walletType)
+	wallet, node, shutdown := tNewWallet(segwit, walletType)
 	defer shutdown()
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	const inputCount = 5
 	const txSize = dexbtc.MinimumTxOverhead + 2*dexbtc.P2PKHOutputSize + inputCount*dexbtc.RedeemP2PKHInputSize
-	wallet.feeRateLimit = 100
-	wallet.fallbackFeeRate = 30
+	node.walletCfg.feeRateLimit = 100
+	node.walletCfg.fallbackFeeRate = 30
 
 	estimate := wallet.EstimateRegistrationTxFee(50)
 	if estimate != 50*txSize {
@@ -2460,13 +2423,13 @@ func testEstimateRegistrationTxFee(t *testing.T, segwit bool, walletType string)
 	}
 
 	estimate = wallet.EstimateRegistrationTxFee(0)
-	if estimate != wallet.fallbackFeeRate*txSize {
-		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate*txSize, estimate)
+	if estimate != wallet.fallbackFeeRate()*txSize {
+		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate()*txSize, estimate)
 	}
 
-	estimate = wallet.EstimateRegistrationTxFee(wallet.feeRateLimit + 1)
-	if estimate != wallet.fallbackFeeRate*txSize {
-		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate*txSize, estimate)
+	estimate = wallet.EstimateRegistrationTxFee(wallet.feeRateLimit() + 1)
+	if estimate != wallet.fallbackFeeRate()*txSize {
+		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate()*txSize, estimate)
 	}
 }
 
@@ -2487,11 +2450,8 @@ func TestConfirmations(t *testing.T) {
 }
 
 func testConfirmations(t *testing.T, segwit bool, walletType string) {
-	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
+	wallet, node, shutdown := tNewWallet(segwit, walletType)
 	defer shutdown()
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	// coinID := make([]byte, 36)
 	// copy(coinID[:32], tTxHash[:])
@@ -2520,7 +2480,7 @@ func testConfirmations(t *testing.T, segwit bool, walletType string) {
 	matchTime := swapBlock.Header.Timestamp
 
 	// Bad coin id
-	_, _, err = wallet.SwapConfirmations(context.Background(), randBytes(35), contract, matchTime)
+	_, _, err := wallet.SwapConfirmations(context.Background(), randBytes(35), contract, matchTime)
 	if err == nil {
 		t.Fatalf("no error for bad coin ID")
 	}
@@ -2574,11 +2534,8 @@ func TestSendEdges(t *testing.T) {
 }
 
 func testSendEdges(t *testing.T, segwit bool, walletType string) {
-	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
+	wallet, node, shutdown := tNewWallet(segwit, walletType)
 	defer shutdown()
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	const feeRate uint64 = 3
 
@@ -2661,11 +2618,8 @@ func TestSyncStatus(t *testing.T) {
 }
 
 func testSyncStatus(t *testing.T, segwit bool, walletType string) {
-	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
+	wallet, node, shutdown := tNewWallet(segwit, walletType)
 	defer shutdown()
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	// full node
 	node.getBlockchainInfo = &getBlockchainInfoResult{
@@ -2726,11 +2680,8 @@ func TestPreSwap(t *testing.T) {
 }
 
 func testPreSwap(t *testing.T, segwit bool, walletType string) {
-	wallet, node, shutdown, err := tNewWallet(segwit, walletType)
+	wallet, node, shutdown := tNewWallet(segwit, walletType)
 	defer shutdown()
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	// See math from TestFundEdges. 10 lots with max fee rate of 34 sats/vbyte.
 
@@ -2809,7 +2760,7 @@ func TestPreRedeem(t *testing.T) {
 }
 
 func testPreRedeem(t *testing.T, segwit bool, walletType string) {
-	wallet, _, shutdown, _ := tNewWallet(segwit, walletType)
+	wallet, _, shutdown := tNewWallet(segwit, walletType)
 	defer shutdown()
 
 	preRedeem, err := wallet.PreRedeem(&asset.PreRedeemForm{
@@ -2833,7 +2784,7 @@ func TestTryRedemptionRequests(t *testing.T) {
 }
 
 func testTryRedemptionRequests(t *testing.T, segwit bool, walletType string) {
-	wallet, node, shutdown, _ := tNewWallet(segwit, walletType)
+	wallet, node, shutdown := tNewWallet(segwit, walletType)
 	defer shutdown()
 
 	const swapVout = 1
@@ -3129,11 +3080,8 @@ func TestAccelerateOrder(t *testing.T) {
 }
 
 func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
-	w, node, shutdown, err := tNewWallet(segwit, walletType)
+	w, node, shutdown := tNewWallet(segwit, walletType)
 	defer shutdown()
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	wallet := &ExchangeWalletAccelerator{w}
 
@@ -3854,11 +3802,8 @@ func TestGetTxFee(t *testing.T) {
 }
 
 func testGetTxFee(t *testing.T, segwit bool, walletType string) {
-	w, node, shutdown, err := tNewWallet(segwit, walletType)
+	w, node, shutdown := tNewWallet(segwit, walletType)
 	defer shutdown()
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	inputTx := &wire.MsgTx{
 		TxIn: []*wire.TxIn{{}},
@@ -4143,5 +4088,71 @@ func TestTooEarlyToAccelerate(t *testing.T) {
 			test.expectedReturn.WasAccelerated != earlyAcceleration.WasAccelerated {
 			t.Fatalf("%s: expected %+v, got %+v", test.name, test.expectedReturn, earlyAcceleration)
 		}
+	}
+}
+
+type tReconfigurer struct {
+	*rpcClient
+	restart bool
+	err     error
+}
+
+func (r *tReconfigurer) reconfigure(walletCfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error) {
+	return r.restart, r.err
+}
+
+func TestReconfigure(t *testing.T) {
+	wallet, _, shutdown := tNewWallet(false, walletTypeRPC)
+	// We don't need the wallet running, and we need to write to the node field,
+	// which is used in the block loop.
+	shutdown()
+
+	reconfigurer := &tReconfigurer{rpcClient: wallet.node.(*rpcClient)}
+	wallet.node = reconfigurer
+
+	cfg := &asset.WalletConfig{
+		Settings: map[string]string{
+			"redeemconftarget": "3",
+		},
+	}
+
+	restart, err := wallet.Reconfigure(tCtx, cfg, "")
+	if err != nil {
+		t.Fatalf("initial Reconfigure error: %v", err)
+	}
+	if restart {
+		t.Fatal("restart = false not propagated")
+	}
+	if wallet.redeemConfTarget() != 3 {
+		t.Fatal("redeemconftarget not updated", wallet.redeemConfTarget())
+	}
+
+	cfg.Settings["redeemconftarget"] = "2"
+
+	reconfigurer.err = tErr
+	if _, err = wallet.Reconfigure(tCtx, cfg, ""); err == nil {
+		t.Fatal("node reconfigure error not propagated")
+	}
+	reconfigurer.err = nil
+	// Redeem target should be unchanged
+	if wallet.redeemConfTarget() != 3 {
+		t.Fatal("redeemconftarget updated for node reconfigure error", wallet.redeemConfTarget())
+	}
+
+	reconfigurer.restart = true
+	if restart, err := wallet.Reconfigure(tCtx, cfg, ""); err != nil {
+		t.Fatal("Reconfigure error for restart = true")
+	} else if !restart {
+		t.Fatal("restart = true not propagated")
+	}
+	reconfigurer.restart = false
+
+	// One last success, and make sure baseWalletConfig is updated.
+	if _, err := wallet.Reconfigure(tCtx, cfg, ""); err != nil {
+		t.Fatalf("Reconfigure error for final success: %v", err)
+	}
+	// Redeem target should be changed now.
+	if wallet.redeemConfTarget() != 2 {
+		t.Fatal("redeemconftarget not updated in final success", wallet.redeemConfTarget())
 	}
 }

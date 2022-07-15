@@ -428,11 +428,17 @@ func (r *swapReceipt) SignedRefund() dex.Bytes {
 	return r.signedRefund
 }
 
+// RPCConfig adds a wallet name to the basic configuration.
+type RPCConfig struct {
+	dexbtc.RPCConfig `ini:",extends"`
+	WalletName       string `ini:"walletname"`
+}
+
 // RPCWalletConfig is a combination of RPCConfig and WalletConfig. Used for a
 // wallet based on a bitcoind-like RPC API.
 type RPCWalletConfig struct {
-	dexbtc.RPCConfig
-	WalletConfig
+	RPCConfig    `ini:",extends"`
+	WalletConfig `ini:",extends"`
 }
 
 // WalletConfig are wallet-level configuration settings.
@@ -442,7 +448,6 @@ type WalletConfig struct {
 	FeeRateLimit     float64 `ini:"feeratelimit"`
 	RedeemConfTarget uint64  `ini:"redeemconftarget"`
 	ActivelyUsed     bool    `ini:"special:activelyUsed"` // injected by core
-	WalletName       string  `ini:"walletname"`           // RPC
 	Birthday         uint64  `ini:"walletbirthday"`       // SPV
 }
 
@@ -460,18 +465,48 @@ func (cfg *WalletConfig) adjustedBirthday() time.Time {
 	}
 }
 
+func readBaseWalletConfig(walletCfg *WalletConfig) (*baseWalletConfig, error) {
+	cfg := &baseWalletConfig{}
+	// if values not specified, use defaults. As they are validated as BTC/KB,
+	// we need to convert first.
+	if walletCfg.FallbackFeeRate == 0 {
+		walletCfg.FallbackFeeRate = float64(defaultFee) * 1000 / 1e8
+	}
+	if walletCfg.FeeRateLimit == 0 {
+		walletCfg.FeeRateLimit = float64(defaultFeeRateLimit) * 1000 / 1e8
+	}
+	if walletCfg.RedeemConfTarget == 0 {
+		walletCfg.RedeemConfTarget = defaultRedeemConfTarget
+	}
+	// If set in the user config, the fallback fee will be in conventional units
+	// per kB, e.g. BTC/kB. Translate that to sats/byte.
+	cfg.fallbackFeeRate = toSatoshi(walletCfg.FallbackFeeRate / 1000)
+	if cfg.fallbackFeeRate == 0 {
+		return nil, fmt.Errorf("fallback fee rate limit is smaller than the minimum 1000 sats/byte: %v",
+			walletCfg.FallbackFeeRate)
+	}
+	// If set in the user config, the fee rate limit will be in units of BTC/KB.
+	// Convert to sats/byte & error if value is smaller than smallest unit.
+	cfg.feeRateLimit = toSatoshi(walletCfg.FeeRateLimit / 1000)
+	if cfg.feeRateLimit == 0 {
+		return nil, fmt.Errorf("fee rate limit is smaller than the minimum 1000 sats/byte: %v",
+			walletCfg.FeeRateLimit)
+	}
+
+	cfg.redeemConfTarget = walletCfg.RedeemConfTarget
+	cfg.useSplitTx = walletCfg.UseSplitTx
+
+	return cfg, nil
+}
+
 // readRPCWalletConfig parses the settings map into a *RPCWalletConfig.
 func readRPCWalletConfig(settings map[string]string, symbol string, net dex.Network, ports dexbtc.NetPorts) (cfg *RPCWalletConfig, err error) {
 	cfg = new(RPCWalletConfig)
-	err = config.Unmapify(settings, &cfg.WalletConfig)
+	err = config.Unmapify(settings, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing wallet config: %w", err)
+		return nil, fmt.Errorf("error parsing rpc wallet config: %w", err)
 	}
-	err = config.Unmapify(settings, &cfg.RPCConfig)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing rpc config: %w", err)
-	}
-	err = dexbtc.CheckRPCConfig(&cfg.RPCConfig, symbol, net, ports)
+	err = dexbtc.CheckRPCConfig(&cfg.RPCConfig.RPCConfig, symbol, net, ports)
 	return
 }
 
@@ -479,27 +514,33 @@ func readRPCWalletConfig(settings map[string]string, symbol string, net dex.Netw
 // creates the unconnected *rpcclient.Client.
 func parseRPCWalletConfig(settings map[string]string, symbol string, net dex.Network,
 	ports dexbtc.NetPorts, singularWallet bool) (*RPCWalletConfig, *rpcclient.Client, error) {
-
 	cfg, err := readRPCWalletConfig(settings, symbol, net, ports)
 	if err != nil {
 		return nil, nil, err
 	}
+
+	cl, err := newRPCConnection(cfg, singularWallet)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return cfg, cl, nil
+}
+
+// newRPCConnection creates a new RPC client.
+func newRPCConnection(cfg *RPCWalletConfig, singularWallet bool) (*rpcclient.Client, error) {
 	endpoint := cfg.RPCBind
 	if !singularWallet {
 		endpoint += "/wallet/" + cfg.WalletName
 	}
 
-	cl, err := rpcclient.New(&rpcclient.ConnConfig{
+	return rpcclient.New(&rpcclient.ConnConfig{
 		HTTPPostMode: true,
 		DisableTLS:   true,
 		Host:         endpoint,
 		User:         cfg.RPCUser,
 		Pass:         cfg.RPCPass,
 	}, nil)
-	if err != nil {
-		return nil, nil, err
-	}
-	return cfg, cl, nil
 }
 
 // Driver implements asset.Driver.
@@ -526,6 +567,12 @@ func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, 
 	return loader.WalletExists()
 }
 
+// createConfig combines the configuration settings used for wallet creation.
+type createConfig struct {
+	WalletConfig `ini:",extends"`
+	RecoveryCfg  `ini:",extends"`
+}
+
 // Create creates a new SPV wallet.
 func (d *Driver) Create(params *asset.CreateWalletParams) error {
 	if params.Type != walletTypeSPV {
@@ -542,24 +589,19 @@ func (d *Driver) Create(params *asset.CreateWalletParams) error {
 		return fmt.Errorf("error parsing chain: %w", err)
 	}
 
-	walletCfg := new(WalletConfig)
-	err = config.Unmapify(params.Settings, walletCfg)
-	if err != nil {
-		return err
-	}
-	_, err = readBaseWalletConfig(walletCfg)
+	cfg := new(createConfig)
+	err = config.Unmapify(params.Settings, cfg)
 	if err != nil {
 		return err
 	}
 
-	recoveryCfg := new(RecoveryCfg)
-	err = config.Unmapify(params.Settings, recoveryCfg)
+	_, err = readBaseWalletConfig(&cfg.WalletConfig)
 	if err != nil {
 		return err
 	}
 
-	return createSPVWallet(params.Pass, params.Seed, walletCfg.adjustedBirthday(), params.DataDir,
-		params.Logger, recoveryCfg.NumExternalAddresses, recoveryCfg.NumInternalAddresses, chainParams)
+	return createSPVWallet(params.Pass, params.Seed, cfg.adjustedBirthday(), params.DataDir,
+		params.Logger, cfg.NumExternalAddresses, cfg.NumInternalAddresses, chainParams)
 }
 
 // Open opens or connects to the BTC exchange wallet. Start the wallet with its
@@ -599,7 +641,8 @@ func init() {
 	asset.Register(BipID, &Driver{})
 }
 
-// baseWalletConfig is the config params for the base wallet.
+// baseWalletConfig is the validated, unit-converted, user-configurable wallet
+// settings.
 type baseWalletConfig struct {
 	fallbackFeeRate  uint64 // atoms/byte
 	feeRateLimit     uint64 // atoms/byte
@@ -613,9 +656,12 @@ type baseWalletConfig struct {
 type baseWallet struct {
 	// 64-bit atomic variables first. See
 	// https://golang.org/pkg/sync/atomic/#pkg-note-BUG
-	tipAtConnect      int64
+	tipAtConnect int64
+
+	cfgV              atomic.Value // *baseWalletConfig
 	node              Wallet
 	walletInfo        *asset.WalletInfo
+	cloneParams       *BTCCloneCFG
 	chainParams       *chaincfg.Params
 	log               dex.Logger
 	symbol            string
@@ -636,7 +682,6 @@ type baseWallet struct {
 	hashTx            func(*wire.MsgTx) *chainhash.Hash
 	stringAddr        dexbtc.AddressStringer
 	txVersion         func() int32
-	*baseWalletConfig
 
 	tipMtx     sync.RWMutex
 	currentTip *block
@@ -647,6 +692,22 @@ type baseWallet struct {
 
 	findRedemptionMtx   sync.RWMutex
 	findRedemptionQueue map[outPoint]*findRedemptionReq
+}
+
+func (w *baseWallet) fallbackFeeRate() uint64 {
+	return w.cfgV.Load().(*baseWalletConfig).fallbackFeeRate
+}
+
+func (w *baseWallet) feeRateLimit() uint64 {
+	return w.cfgV.Load().(*baseWalletConfig).feeRateLimit
+}
+
+func (w *baseWallet) redeemConfTarget() uint64 {
+	return w.cfgV.Load().(*baseWalletConfig).redeemConfTarget
+}
+
+func (w *baseWallet) useSplitTx() bool {
+	return w.cfgV.Load().(*baseWalletConfig).useSplitTx
 }
 
 // ExchangeWalletSPV embeds a ExchangeWallet, but also provides the Rescan
@@ -840,7 +901,7 @@ func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWalletFullNode, error) {
 		return nil, err
 	}
 
-	btc, err := newRPCWallet(client, cfg, &clientCfg.WalletConfig)
+	btc, err := newRPCWallet(client, cfg, clientCfg)
 	if err != nil {
 		return nil, fmt.Errorf("error creating %s ExchangeWallet: %v", cfg.Symbol,
 			err)
@@ -850,8 +911,8 @@ func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWalletFullNode, error) {
 }
 
 // newRPCWallet creates the ExchangeWallet and starts the block monitor.
-func newRPCWallet(requester RawRequesterWithContext, cfg *BTCCloneCFG, walletConfig *WalletConfig) (*ExchangeWalletFullNode, error) {
-	btc, err := newUnconnectedWallet(cfg, walletConfig)
+func newRPCWallet(requester RawRequesterWithContext, cfg *BTCCloneCFG, parsedCfg *RPCWalletConfig) (*ExchangeWalletFullNode, error) {
+	btc, err := newUnconnectedWallet(cfg, &parsedCfg.WalletConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -861,8 +922,9 @@ func newRPCWallet(requester RawRequesterWithContext, cfg *BTCCloneCFG, walletCon
 		blockDeserializer = deserializeBlock
 	}
 
-	btc.node = newRPCClient(&rpcCore{
-		requester:                requester,
+	core := &rpcCore{
+		rpcConfig:                &parsedCfg.RPCConfig,
+		cloneParams:              cfg,
 		segwit:                   cfg.Segwit,
 		decodeAddr:               btc.decodeAddr,
 		stringAddr:               btc.stringAddr,
@@ -881,42 +943,11 @@ func newRPCWallet(requester RawRequesterWithContext, cfg *BTCCloneCFG, walletCon
 		numericGetRawTxRPC:       cfg.NumericGetRawRPC,
 		legacyValidateAddressRPC: cfg.LegacyValidateAddressRPC,
 		manualMedianTime:         cfg.ManualMedianTime,
-	})
+	}
+	core.requesterV.Store(requester)
+
+	btc.node = newRPCClient(core)
 	return &ExchangeWalletFullNode{btc}, nil
-}
-
-func readBaseWalletConfig(walletCfg *WalletConfig) (*baseWalletConfig, error) {
-	cfg := &baseWalletConfig{}
-	// if values not specified, use defaults. As they are validated as BTC/KB,
-	// we need to convert first.
-	if walletCfg.FallbackFeeRate == 0 {
-		walletCfg.FallbackFeeRate = float64(defaultFee) * 1000 / 1e8
-	}
-	if walletCfg.FeeRateLimit == 0 {
-		walletCfg.FeeRateLimit = float64(defaultFeeRateLimit) * 1000 / 1e8
-	}
-	if walletCfg.RedeemConfTarget == 0 {
-		walletCfg.RedeemConfTarget = defaultRedeemConfTarget
-	}
-	// If set in the user config, the fallback fee will be in conventional units
-	// per kB, e.g. BTC/kB. Translate that to sats/byte.
-	cfg.fallbackFeeRate = toSatoshi(walletCfg.FallbackFeeRate / 1000)
-	if cfg.fallbackFeeRate == 0 {
-		return nil, fmt.Errorf("fallback fee rate limit is smaller than the minimum 1000 sats/byte: %v",
-			walletCfg.FallbackFeeRate)
-	}
-	// If set in the user config, the fee rate limit will be in units of BTC/KB.
-	// Convert to sats/byte & error if value is smaller than smallest unit.
-	cfg.feeRateLimit = toSatoshi(walletCfg.FeeRateLimit / 1000)
-	if cfg.feeRateLimit == 0 {
-		return nil, fmt.Errorf("fee rate limit is smaller than the minimum 1000 sats/byte: %v",
-			walletCfg.FeeRateLimit)
-	}
-
-	cfg.redeemConfTarget = walletCfg.RedeemConfTarget
-	cfg.useSplitTx = walletCfg.UseSplitTx
-
-	return cfg, nil
 }
 
 func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWallet, error) {
@@ -968,6 +999,7 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 	w := &baseWallet{
 		symbol:              cfg.Symbol,
 		chainParams:         cfg.ChainParams,
+		cloneParams:         cfg,
 		log:                 cfg.Logger,
 		tipChange:           cfg.WalletCFG.TipChange,
 		peersChange:         cfg.WalletCFG.PeersChange,
@@ -988,8 +1020,8 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		hashTx:              txHasher,
 		calcTxSize:          txSizeCalculator,
 		txVersion:           txVersion,
-		baseWalletConfig:    baseCfg,
 	}
+	w.cfgV.Store(baseCfg)
 
 	if w.estimateFee == nil {
 		w.estimateFee = w.feeRate
@@ -1073,6 +1105,33 @@ func (btc *baseWallet) shutdown() {
 		delete(btc.findRedemptionQueue, contractOutpoint)
 	}
 	btc.findRedemptionMtx.Unlock()
+}
+
+// Reconfigure attempts to reconfigure the wallet.
+func (btc *baseWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, currentAddress string) (restart bool, err error) {
+	// See what the node says.
+	restart, err = btc.node.reconfigure(cfg, currentAddress)
+	if err != nil {
+		return false, err
+	}
+
+	parsedCfg := new(RPCWalletConfig)
+	if err = config.Unmapify(cfg.Settings, parsedCfg); err != nil {
+		return false, err
+	}
+	walletCfg := &parsedCfg.WalletConfig
+
+	// Make sure the configuration parameters are valid. If restart is required,
+	// this validates the configuration parameters, preventing an ugly surprise
+	// when the caller attempts to open the wallet. If no restart is required,
+	// we'll swap out the configuration parameters right away.
+	newCfg, err := readBaseWalletConfig(walletCfg)
+	if err != nil {
+		return false, err
+	}
+
+	btc.cfgV.Store(newCfg) // probably won't matter if restart/reinit required
+	return restart, nil
 }
 
 // IsDust checks if the tx output's value is dust. If the dustLimit is set, it
@@ -1248,13 +1307,13 @@ func (btc *baseWallet) targetFeeRateWithFallback(confTarget, feeSuggestion uint6
 // limits. If not, the configured fallbackFeeRate is returned and a warning
 // logged.
 func (btc *baseWallet) feeRateWithFallback(feeSuggestion uint64) uint64 {
-	if feeSuggestion > 0 && feeSuggestion < btc.feeRateLimit {
+	if feeSuggestion > 0 && feeSuggestion < btc.feeRateLimit() {
 		btc.log.Tracef("feeRateWithFallback using caller's suggestion for fee rate, %d.",
 			feeSuggestion)
 		return feeSuggestion
 	}
 	btc.log.Warnf("Unable to get optimal fee rate, using fallback of %d", btc.fallbackFeeRate)
-	return btc.fallbackFeeRate
+	return btc.fallbackFeeRate()
 }
 
 // MaxOrder generates information about the maximum order size and associated
@@ -1286,7 +1345,7 @@ func (btc *baseWallet) maxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asset) (
 	basicFee := nfo.SwapSize * nfo.MaxFeeRate
 	lots := avail / (lotSize + basicFee)
 	for lots > 0 {
-		est, _, _, err := btc.estimateSwap(lots, lotSize, feeSuggestion, utxos, nfo, btc.useSplitTx, 1.0)
+		est, _, _, err := btc.estimateSwap(lots, lotSize, feeSuggestion, utxos, nfo, btc.useSplitTx(), 1.0)
 		// The only failure mode of estimateSwap -> btc.fund is when there is
 		// not enough funds, so if an error is encountered, count down the lots
 		// and repeat until we have enough.
@@ -1333,7 +1392,7 @@ func (btc *baseWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
 	}
 
 	// Parse the configured split transaction.
-	split := btc.useSplitTx
+	split := btc.useSplitTx()
 	if customCfg.Split != nil {
 		split = *customCfg.Split
 	}
@@ -1465,7 +1524,7 @@ func (btc *baseWallet) splitOption(req *asset.PreSwapForm, utxos []*compositeUTX
 			Key:          splitKey,
 			DisplayName:  "Pre-size Funds",
 			Description:  desc,
-			DefaultValue: btc.useSplitTx,
+			DefaultValue: btc.useSplitTx(),
 			IsBoolean:    true,
 		},
 		Boolean: &asset.BooleanConfig{
@@ -1548,7 +1607,7 @@ func (btc *baseWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, utxos [
 // PreRedeem generates an estimate of the range of redemption fees that could
 // be assessed.
 func (btc *baseWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, error) {
-	feeRate := btc.targetFeeRateWithFallback(btc.redeemConfTarget, req.FeeSuggestion)
+	feeRate := btc.targetFeeRateWithFallback(btc.redeemConfTarget(), req.FeeSuggestion)
 	// Best is one transaction with req.Lots inputs and 1 output.
 	var best uint64 = dexbtc.MinimumTxOverhead
 	// Worst is req.Lots transactions, each with one input and one output.
@@ -1636,16 +1695,16 @@ func (btc *baseWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, er
 	if ord.FeeSuggestion > ord.DEXConfig.MaxFeeRate {
 		return nil, nil, fmt.Errorf("fee suggestion %d > max fee rate %d", ord.FeeSuggestion, ord.DEXConfig.MaxFeeRate)
 	}
-	if ord.FeeSuggestion > btc.feeRateLimit {
-		return nil, nil, fmt.Errorf("suggested fee > configured limit. %d > %d", ord.FeeSuggestion, btc.feeRateLimit)
+	if ord.FeeSuggestion > btc.feeRateLimit() {
+		return nil, nil, fmt.Errorf("suggested fee > configured limit. %d > %d", ord.FeeSuggestion, btc.feeRateLimit())
 	}
 	// Check wallets fee rate limit against server's max fee rate
-	if btc.feeRateLimit < ord.DEXConfig.MaxFeeRate {
+	if btc.feeRateLimit() < ord.DEXConfig.MaxFeeRate {
 		return nil, nil, fmt.Errorf(
 			"%v: server's max fee rate %v higher than configued fee rate limit %v",
 			ord.DEXConfig.Symbol,
 			ord.DEXConfig.MaxFeeRate,
-			btc.feeRateLimit)
+			btc.feeRateLimit())
 	}
 
 	customCfg := new(swapOptions)
@@ -1681,7 +1740,7 @@ func (btc *baseWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, er
 		return nil, nil, fmt.Errorf("error funding swap value of %s: %w", amount(ord.Value), err)
 	}
 
-	useSplit := btc.useSplitTx
+	useSplit := btc.useSplitTx()
 	if customCfg.Split != nil {
 		useSplit = *customCfg.Split
 	}
@@ -1695,7 +1754,7 @@ func (btc *baseWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, er
 			// TODO
 			// 1.0: Error when no suggestion.
 			// return nil, nil, fmt.Errorf("cannot do a split transaction without a fee rate suggestion from the server")
-			splitFeeRate = btc.targetFeeRateWithFallback(btc.redeemConfTarget, 0)
+			splitFeeRate = btc.targetFeeRateWithFallback(btc.redeemConfTarget(), 0)
 			// We PreOrder checked this as <= MaxFeeRate, so use that as an
 			// upper limit.
 			if splitFeeRate > ord.DEXConfig.MaxFeeRate {
@@ -2901,7 +2960,7 @@ func (btc *baseWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, 
 		return nil, nil, 0, fmt.Errorf("error parsing selected swap options: %w", err)
 	}
 
-	rawFeeRate := btc.targetFeeRateWithFallback(btc.redeemConfTarget, form.FeeSuggestion)
+	rawFeeRate := btc.targetFeeRateWithFallback(btc.redeemConfTarget(), form.FeeSuggestion)
 	feeRate, err := calcBumpedRate(rawFeeRate, customCfg.FeeBump)
 	if err != nil {
 		btc.log.Errorf("calcBumpRate error: %v", err)
@@ -3557,8 +3616,8 @@ func (btc *baseWallet) NewAddress() (string, error) {
 // pay the registration fee using the provided feeRate.
 func (btc *baseWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
 	const inputCount = 5 // buffer so this estimate is higher than actual reg tx fee.
-	if feeRate == 0 || feeRate > btc.feeRateLimit {
-		feeRate = btc.fallbackFeeRate
+	if feeRate == 0 || feeRate > btc.feeRateLimit() {
+		feeRate = btc.fallbackFeeRate()
 	}
 	return (dexbtc.MinimumTxOverhead + 2*dexbtc.P2PKHOutputSize + inputCount*dexbtc.RedeemP2PKHInputSize) * feeRate
 }

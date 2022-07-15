@@ -667,6 +667,7 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 		ownsAddress:      true,
 		contractLockTime: time.Now().Add(time.Minute),
 	}
+	var broadcasting uint32 = 1
 	xcWallet := &xcWallet{
 		Wallet:       w,
 		connector:    dex.NewConnectionMaster(w),
@@ -679,6 +680,7 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 		syncProgress: 1,
 		pw:           tPW,
 		traits:       asset.DetermineWalletTraits(w),
+		broadcasting: &broadcasting,
 	}
 
 	return xcWallet, w
@@ -1007,6 +1009,16 @@ type TFeeRater struct {
 
 func (w *TFeeRater) FeeRate() uint64 {
 	return w.feeRate
+}
+
+type TLiveReconfigurer struct {
+	*TXCWallet
+	restart     bool
+	reconfigErr error
+}
+
+func (r *TLiveReconfigurer) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error) {
+	return r.restart, r.reconfigErr
 }
 
 type tCrypterSmart struct {
@@ -5249,27 +5261,17 @@ func TestNotifications(t *testing.T) {
 	}
 }
 
-func TestResolveActiveTrades(t *testing.T) {
-	rig := newTestRig()
-	defer rig.shutdown()
-	tCore := rig.core
+func generateMatch(rig *testRig, baseID, quoteID uint32) (uint64, *order.LimitOrder, *db.MetaOrder, *db.MetaMatch, *tCoin) {
+	const redemptionReserves = 50
+	const refundReserves = 75
 
-	btcWallet, tBtcWallet := newTWallet(tUTXOAssetB.ID)
-	tCore.wallets[tUTXOAssetB.ID] = btcWallet
-
-	ethWallet, tEthWallet := newTAccountLocker(tACCTAsset.ID)
-	tCore.wallets[tACCTAsset.ID] = ethWallet
-
-	rig.acct.auth(false) // Short path through initializeDEXConnections
-
-	// Create an order
 	qty := dcrBtcLotSize * 5
 	rate := dcrBtcRateStep * 5
 	lo := &order.LimitOrder{
 		P: order.Prefix{
 			OrderType:  order.LimitOrderType,
-			BaseAsset:  tUTXOAssetB.ID,
-			QuoteAsset: tACCTAsset.ID,
+			BaseAsset:  baseID,
+			QuoteAsset: quoteID,
 			ClientTime: time.Now(),
 			ServerTime: time.Now(),
 			Commit:     ordertest.RandomCommitment(),
@@ -5282,11 +5284,8 @@ func TestResolveActiveTrades(t *testing.T) {
 		Force: order.StandingTiF, // we're calling it booked in OrderMetaData
 	}
 
-	oid := lo.ID()
 	changeCoinID := encode.RandomBytes(36)
 	changeCoin := &tCoin{id: changeCoinID}
-	const redemptionReserves = 50
-	const refundReserves = 75
 
 	dbOrder := &db.MetaOrder{
 		MetaData: &db.OrderMetaData{
@@ -5300,10 +5299,7 @@ func TestResolveActiveTrades(t *testing.T) {
 		Order: lo,
 	}
 
-	// Need to return an order from db.ActiveDEXOrders
-	rig.db.activeDEXOrders = []*db.MetaOrder{dbOrder}
-	rig.db.orderOrders[oid] = dbOrder
-
+	oid := lo.ID()
 	mid := ordertest.RandomMatchID()
 	addr := ordertest.RandomAddress()
 	matchQty := qty - dcrBtcLotSize
@@ -5319,8 +5315,8 @@ func TestResolveActiveTrades(t *testing.T) {
 				},
 			},
 			DEX:   tDexHost,
-			Base:  tUTXOAssetB.ID,
-			Quote: tACCTAsset.ID,
+			Base:  baseID,
+			Quote: quoteID,
 		},
 		UserMatch: &order.UserMatch{
 			OrderID:  oid,
@@ -5332,136 +5328,22 @@ func TestResolveActiveTrades(t *testing.T) {
 			Side:     order.Taker,
 		},
 	}
+
+	// Need to return an order from db.ActiveDEXOrders
+	rig.db.activeDEXOrders = []*db.MetaOrder{dbOrder}
+	rig.db.orderOrders[oid] = dbOrder
+
 	rig.db.activeMatchOIDs = []order.OrderID{oid}
 	rig.db.matchesForOID = []*db.MetaMatch{match}
-	tBtcWallet.fundingCoins = asset.Coins{changeCoin}
-	tEthWallet.fundingCoins = asset.Coins{changeCoin}
 
-	// reset
-	reset := func() {
-		rig.acct.lock()
-		btcWallet.Lock(time.Second)
-		ethWallet.Lock(time.Second)
-		tEthWallet.reservedRedemption = 0
-		tEthWallet.reservedRefund = 0
-		rig.dc.trades = make(map[order.OrderID]*trackedTrade)
-	}
+	return qty, lo, dbOrder, match, changeCoin
+}
 
-	// Ensure the order is good, and reset the state.
-	ensureGood := func(tag string, expCoinsLoaded int) {
-		t.Helper()
-		description := fmt.Sprintf("%s: side = %s, order status = %s, match status = %s",
-			tag, match.Side, dbOrder.MetaData.Status, match.Status)
-		_, err := tCore.Login(tPW)
-		if err != nil {
-			t.Fatalf("%s: login error: %v", description, err)
-		}
+var (
+	activeStatuses   = []order.OrderStatus{order.OrderStatusEpoch, order.OrderStatusBooked}
+	inactiveStatuses = []order.OrderStatus{order.OrderStatusExecuted, order.OrderStatusCanceled, order.OrderStatusRevoked}
 
-		if !btcWallet.unlocked() {
-			t.Fatalf("%s: btc wallet not unlocked", description)
-		}
-
-		if !ethWallet.unlocked() {
-			t.Fatalf("%s: eth wallet not unlocked", description)
-		}
-
-		trade, found := rig.dc.trades[oid]
-		if !found {
-			t.Fatalf("%s: trade with expected order id not found. len(trades) = %d", description, len(rig.dc.trades))
-		}
-
-		_, found = trade.matches[mid]
-		if !found {
-			t.Fatalf("%s: trade with expected order id not found. len(matches) = %d", description, len(trade.matches))
-		}
-
-		if len(trade.coins) != expCoinsLoaded {
-			t.Fatalf("%s: expected %d coin loaded, got %d", description, expCoinsLoaded, len(trade.coins))
-		}
-
-		if lo.T.Sell && ((match.Side == order.Taker && match.Status < order.MatchComplete) ||
-			(match.Side == order.Taker && match.Status < order.MakerRedeemed)) {
-			var reReserveQty uint64 = redemptionReserves
-			if dbOrder.MetaData.Status > order.OrderStatusBooked {
-				reReserveQty = applyFraction(matchQty, qty, redemptionReserves)
-			}
-
-			if tEthWallet.reservedRedemption != reReserveQty {
-				t.Fatalf("%s: redemption funds not reserved, %d != %d", description, tEthWallet.reservedRedemption, reReserveQty)
-			}
-		}
-
-		if !lo.T.Sell && match.Status < order.MakerRedeemed {
-			var reRefundQty uint64 = refundReserves
-			if dbOrder.MetaData.Status > order.OrderStatusBooked {
-				reRefundQty = applyFraction(matchQty, qty, refundReserves)
-			}
-
-			if tEthWallet.reservedRefund != reRefundQty {
-				t.Fatalf("%s: refund funds not reserved, %d != %d", description, tEthWallet.reservedRefund, reRefundQty)
-			}
-		}
-
-		reset()
-	}
-
-	ensureGood("initial", 1)
-
-	// Ensure a failure AND reset. err != nil just helps to make sure that we're
-	// hitting errors in resolveActiveTrades, which sends errors as
-	// notifications, vs somewhere else.
-	ensureFail := func(tag string) {
-		t.Helper()
-		_, err := tCore.Login(tPW)
-		if err != nil || len(rig.dc.trades) != 0 {
-			t.Fatalf("%s: no error. err = %v, len(trades) = %d", tag, err, len(rig.dc.trades))
-		}
-		reset()
-	}
-
-	// NEGATIVE PATHS
-
-	// No base wallet
-	delete(tCore.wallets, tUTXOAssetB.ID)
-	ensureFail("missing base")
-	tCore.wallets[tUTXOAssetB.ID] = btcWallet
-
-	// Base wallet unlock errors
-	tBtcWallet.unlockErr = tErr
-	tBtcWallet.locked = true
-	ensureFail("base unlock")
-	tBtcWallet.unlockErr = nil
-	tBtcWallet.locked = false
-
-	// No quote wallet
-	delete(tCore.wallets, tUTXOAssetB.ID)
-	ensureFail("missing quote")
-	tCore.wallets[tUTXOAssetB.ID] = btcWallet
-
-	// Quote wallet unlock errors
-	tEthWallet.unlockErr = tErr
-	tEthWallet.locked = true
-	ensureFail("quote unlock")
-	tEthWallet.unlockErr = nil
-	tEthWallet.locked = false
-
-	// Funding coin error still puts it in the trades map, just with no coins
-	// locked.
-	tBtcWallet.fundingCoinErr = tErr
-	ensureGood("funding coin", 0)
-	tBtcWallet.fundingCoinErr = nil
-
-	// No matches
-	rig.db.activeMatchOIDSErr = tErr
-	ensureFail("matches error")
-	rig.db.activeMatchOIDSErr = nil
-
-	// POSITIVE PATHS
-
-	activeStatuses := []order.OrderStatus{order.OrderStatusEpoch, order.OrderStatusBooked}
-	inactiveStatuses := []order.OrderStatus{order.OrderStatusExecuted, order.OrderStatusCanceled, order.OrderStatusRevoked}
-
-	tests := []struct {
+	reservationTests = []struct {
 		name          string
 		sell          bool
 		side          []order.MatchSide
@@ -5562,8 +5444,152 @@ func TestResolveActiveTrades(t *testing.T) {
 			expectedCoins: 0,
 		},
 	}
+)
 
-	for _, tt := range tests {
+func TestResolveActiveTrades(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	tCore := rig.core
+
+	rig.acct.auth(false) // Short path through initializeDEXConnections
+
+	utxoAsset /* base */, acctAsset /* quote */ := tUTXOAssetB, tACCTAsset
+
+	btcWallet, tBtcWallet := newTWallet(utxoAsset.ID)
+	tCore.wallets[utxoAsset.ID] = btcWallet
+
+	ethWallet, tEthWallet := newTAccountLocker(acctAsset.ID)
+	tCore.wallets[acctAsset.ID] = ethWallet
+
+	// Create an order
+	qty, lo, dbOrder, match, changeCoin := generateMatch(rig, utxoAsset.ID, acctAsset.ID)
+	redemptionReserves, refundReserves := dbOrder.MetaData.RedemptionReserves, dbOrder.MetaData.RefundReserves
+
+	tBtcWallet.fundingCoins = asset.Coins{changeCoin}
+	tEthWallet.fundingCoins = asset.Coins{changeCoin}
+
+	// reset
+	reset := func() {
+		rig.acct.lock()
+		btcWallet.Lock(time.Second)
+		ethWallet.Lock(time.Second)
+		tEthWallet.reservedRedemption = 0
+		tEthWallet.reservedRefund = 0
+		rig.dc.trades = make(map[order.OrderID]*trackedTrade)
+	}
+
+	// Ensure the order is good, and reset the state.
+	ensureGood := func(tag string, expCoinsLoaded int) {
+		t.Helper()
+		description := fmt.Sprintf("%s: side = %s, order status = %s, match status = %s",
+			tag, match.Side, dbOrder.MetaData.Status, match.Status)
+		_, err := tCore.Login(tPW)
+		if err != nil {
+			t.Fatalf("%s: login error: %v", description, err)
+		}
+
+		if !btcWallet.unlocked() {
+			t.Fatalf("%s: btc wallet not unlocked", description)
+		}
+
+		if !ethWallet.unlocked() {
+			t.Fatalf("%s: eth wallet not unlocked", description)
+		}
+
+		trade, found := rig.dc.trades[lo.ID()]
+		if !found {
+			t.Fatalf("%s: trade with expected order id not found. len(trades) = %d", description, len(rig.dc.trades))
+		}
+
+		_, found = trade.matches[match.MatchID]
+		if !found {
+			t.Fatalf("%s: trade with expected order id not found. len(matches) = %d", description, len(trade.matches))
+		}
+
+		if len(trade.coins) != expCoinsLoaded {
+			t.Fatalf("%s: expected %d coin loaded, got %d", description, expCoinsLoaded, len(trade.coins))
+		}
+
+		if lo.T.Sell && ((match.Side == order.Taker && match.Status < order.MatchComplete) ||
+			(match.Side == order.Taker && match.Status < order.MakerRedeemed)) {
+			var reReserveQty uint64 = redemptionReserves
+			if dbOrder.MetaData.Status > order.OrderStatusBooked {
+				reReserveQty = applyFraction(match.Quantity, qty, redemptionReserves)
+			}
+
+			if tEthWallet.reservedRedemption != reReserveQty {
+				t.Fatalf("%s: redemption funds not reserved, %d != %d", description, tEthWallet.reservedRedemption, reReserveQty)
+			}
+		}
+
+		if !lo.T.Sell && match.Status < order.MakerRedeemed {
+			var reRefundQty uint64 = refundReserves
+			if dbOrder.MetaData.Status > order.OrderStatusBooked {
+				reRefundQty = applyFraction(match.Quantity, qty, refundReserves)
+			}
+
+			if tEthWallet.reservedRefund != reRefundQty {
+				t.Fatalf("%s: refund funds not reserved, %d != %d", description, tEthWallet.reservedRefund, reRefundQty)
+			}
+		}
+
+		reset()
+	}
+
+	ensureGood("initial", 1)
+
+	// Ensure a failure AND reset. err != nil just helps to make sure that we're
+	// hitting errors in resolveActiveTrades, which sends errors as
+	// notifications, vs somewhere else.
+	ensureFail := func(tag string) {
+		t.Helper()
+		_, err := tCore.Login(tPW)
+		if err != nil || len(rig.dc.trades) != 0 {
+			t.Fatalf("%s: no error. err = %v, len(trades) = %d", tag, err, len(rig.dc.trades))
+		}
+		reset()
+	}
+
+	// NEGATIVE PATHS
+
+	// No base wallet
+	delete(tCore.wallets, utxoAsset.ID)
+	ensureFail("missing base")
+	tCore.wallets[utxoAsset.ID] = btcWallet
+
+	// Base wallet unlock errors
+	tBtcWallet.unlockErr = tErr
+	tBtcWallet.locked = true
+	ensureFail("base unlock")
+	tBtcWallet.unlockErr = nil
+	tBtcWallet.locked = false
+
+	// No quote wallet
+	delete(tCore.wallets, acctAsset.ID)
+	ensureFail("missing quote")
+	tCore.wallets[acctAsset.ID] = ethWallet
+
+	// Quote wallet unlock errors
+	tEthWallet.unlockErr = tErr
+	tEthWallet.locked = true
+	ensureFail("quote unlock")
+	tEthWallet.unlockErr = nil
+	tEthWallet.locked = false
+
+	// Funding coin error still puts it in the trades map, just with no coins
+	// locked.
+	tBtcWallet.fundingCoinErr = tErr
+	ensureGood("funding coin", 0)
+	tBtcWallet.fundingCoinErr = nil
+
+	// No matches
+	rig.db.activeMatchOIDSErr = tErr
+	ensureFail("matches error")
+	rig.db.activeMatchOIDSErr = nil
+
+	// POSITIVE PATHS
+
+	for _, tt := range reservationTests {
 		lo.T.Sell = tt.sell
 		if tt.sell {
 			dbOrder.MetaData.RefundReserves = 0
@@ -5583,6 +5609,127 @@ func TestResolveActiveTrades(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestReReserveFunding(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	tCore := rig.core
+
+	rig.acct.auth(false) // Short path through initializeDEXConnections
+
+	utxoAsset /* base */, acctAsset /* quote */ := tUTXOAssetB, tACCTAsset
+
+	btcWallet, tBtcWallet := newTWallet(utxoAsset.ID)
+	tCore.wallets[utxoAsset.ID] = btcWallet
+
+	ethWallet, tEthWallet := newTAccountLocker(acctAsset.ID)
+	tCore.wallets[acctAsset.ID] = ethWallet
+
+	// Create an order
+	qty, lo, dbOrder, match, changeCoin := generateMatch(rig, utxoAsset.ID, acctAsset.ID)
+	redemptionReserves, refundReserves := dbOrder.MetaData.RedemptionReserves, dbOrder.MetaData.RefundReserves
+
+	tBtcWallet.fundingCoins = asset.Coins{changeCoin}
+	tEthWallet.fundingCoins = asset.Coins{changeCoin}
+
+	oid := lo.ID()
+
+	tracker := &trackedTrade{
+		Order:    lo,
+		dc:       rig.dc,
+		metaData: dbOrder.MetaData,
+		matches: map[order.MatchID]*matchTracker{
+			match.MatchID: {
+				MetaMatch: db.MetaMatch{
+					MetaData: &db.MatchMetaData{},
+					UserMatch: &order.UserMatch{
+						OrderID:  lo.ID(),
+						MatchID:  match.MatchID,
+						Status:   order.NewlyMatched,
+						Side:     order.Maker,
+						Quantity: match.Quantity,
+					},
+				},
+				prefix: lo.Prefix(),
+				trade:  lo.Trade(),
+				// counterConfirms: -1,
+			},
+		},
+		coins:              map[string]asset.Coin{"changecoinid": changeCoin},
+		redemptionReserves: redemptionReserves,
+		refundReserves:     refundReserves,
+	}
+
+	rig.dc.trades = map[order.OrderID]*trackedTrade{
+		oid: tracker,
+	}
+
+	// reset
+	reset := func() {
+		tEthWallet.reservedRedemption = 0
+		tEthWallet.reservedRefund = 0
+		tracker.redemptionLocked = 0
+		tracker.refundLocked = 0
+	}
+
+	run := func(tag string) {
+		t.Helper()
+		description := fmt.Sprintf("%s: side = %s, order status = %s, match status = %s",
+			tag, match.Side, dbOrder.MetaData.Status, match.Status)
+
+		tCore.reReserveFunding(btcWallet)
+		tCore.reReserveFunding(ethWallet)
+
+		if lo.T.Sell && ((match.Side == order.Taker && match.Status < order.MatchComplete) ||
+			(match.Side == order.Taker && match.Status < order.MakerRedeemed)) {
+			var reReserveQty uint64 = redemptionReserves
+			if dbOrder.MetaData.Status > order.OrderStatusBooked {
+				reReserveQty = applyFraction(match.Quantity, qty, redemptionReserves)
+			}
+
+			if tEthWallet.reservedRedemption != reReserveQty {
+				t.Fatalf("%s: redemption funds not reserved, %d != %d", description, tEthWallet.reservedRedemption, reReserveQty)
+			}
+		}
+
+		if !lo.T.Sell && match.Status < order.MakerRedeemed {
+			var reRefundQty uint64 = refundReserves
+			if dbOrder.MetaData.Status > order.OrderStatusBooked {
+				reRefundQty = applyFraction(match.Quantity, qty, refundReserves)
+			}
+
+			if tEthWallet.reservedRefund != reRefundQty {
+				t.Fatalf("%s: refund funds not reserved, %d != %d", description, tEthWallet.reservedRefund, reRefundQty)
+			}
+		}
+
+		reset()
+	}
+
+	for _, tt := range reservationTests {
+
+		lo.T.Sell = tt.sell
+		tracker.wallets, _ = tCore.walletSet(rig.dc, utxoAsset.ID, acctAsset.ID, tt.sell)
+		if tt.sell {
+			dbOrder.MetaData.RefundReserves = 0
+			dbOrder.MetaData.RedemptionReserves = redemptionReserves
+		} else {
+			dbOrder.MetaData.RefundReserves = refundReserves
+			dbOrder.MetaData.RedemptionReserves = 0
+		}
+		for _, side := range tt.side {
+			match.Side = side
+			for _, orderStatus := range tt.orderStatuses {
+				dbOrder.MetaData.Status = orderStatus
+				for _, matchStatus := range tt.matchStatuses {
+					match.Status = matchStatus
+					run(tt.name)
+				}
+			}
+		}
+	}
+
 }
 
 func TestCompareServerMatches(t *testing.T) {
@@ -6736,10 +6883,11 @@ func TestReconfigureWallet(t *testing.T) {
 			"abc": "123",
 		},
 	}
+	const assetID uint32 = 54321
+	xyzWallet, tXyzWallet := newTWallet(assetID)
 	newSettings := map[string]string{
 		"def": "456",
 	}
-	var assetID uint32 = 54321
 
 	form := &WalletForm{
 		AssetID: assetID,
@@ -6758,11 +6906,9 @@ func TestReconfigureWallet(t *testing.T) {
 	// Missing wallet error
 	err = tCore.ReconfigureWallet(tPW, nil, form)
 	if !errorHasCode(err, assetSupportErr) {
-		t.Fatalf("wrong error for missing wallet: %v", err)
+		t.Fatalf("wrong error for missing wallet definition: %v", err)
 	}
 
-	xyzWallet, tXyzWallet := newTWallet(assetID)
-	tCore.wallets[assetID] = xyzWallet
 	walletDef := &asset.WalletDefinition{
 		Type:   "type",
 		Seeded: true,
@@ -6781,6 +6927,14 @@ func TestReconfigureWallet(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer xyzWallet.Disconnect()
+
+	// Missing wallet error
+	err = tCore.ReconfigureWallet(tPW, nil, form)
+	if !errorHasCode(err, missingWalletErr) {
+		t.Fatalf("wrong error for missing wallet: %v", err)
+	}
+
+	tCore.wallets[assetID] = xyzWallet
 
 	// Errors for seeded wallets.
 	walletDef.Seeded = true
@@ -6869,6 +7023,58 @@ func TestReconfigureWallet(t *testing.T) {
 	if !errorHasCode(err, walletErr) {
 		t.Fatalf("wrong error when expecting not owned wallet error: %v", err)
 	}
+
+	// Leave the ownsAddress false, but swap out a LiveReconfigurer and ensure
+	// the restart = false path passes.
+	liveReconfigurer := &TLiveReconfigurer{TXCWallet: tXyzWallet}
+	xyzWallet.Wallet = liveReconfigurer
+	if err = tCore.ReconfigureWallet(tPW, nil, form); err != nil {
+		t.Fatalf("ReconfigureWallet error for short path: %v", err)
+	}
+
+	// But restart = true should still fail for live orders.
+	liveReconfigurer.restart = true
+	err = tCore.ReconfigureWallet(tPW, nil, form)
+	if !errorHasCode(err, walletErr) {
+		t.Fatalf("wrong error when expecting not owned wallet error: %v", err)
+	}
+	liveReconfigurer.restart = false
+
+	// OwnsAddress error
+	liveReconfigurer.ownsAddressErr = tErr
+	err = tCore.ReconfigureWallet(tPW, nil, form)
+	if !errorHasCode(err, walletErr) {
+		t.Fatalf("wrong error when expecting ownsAddress wallet error without restart: %v", err)
+	}
+	liveReconfigurer.ownsAddressErr = nil
+
+	// Refresh address error
+	liveReconfigurer.addrErr = tErr
+	err = tCore.ReconfigureWallet(tPW, nil, form)
+	if !errorHasCode(err, newAddrErr) {
+		t.Fatalf("wrong error when expecting address refresh error without restart: %v", err)
+	}
+	liveReconfigurer.addrErr = nil
+
+	// Password error for non-seeded wallet with password.
+	// from above: walletDef.Seeded = false
+	liveReconfigurer.unlockErr = tErr
+	err = tCore.ReconfigureWallet(tPW, append(tPW, 5), form)
+	if !errorHasCode(err, walletAuthErr) {
+		t.Fatalf("wrong error when expecting new password error without restart: %v", err)
+	}
+	liveReconfigurer.unlockErr = nil
+
+	// DB error for restartless path.
+	rig.db.updateWalletErr = tErr
+	err = tCore.ReconfigureWallet(tPW, nil, form)
+	if !errorHasCode(err, dbErr) {
+		t.Fatalf("wrong error when db update error without restart: %v", err)
+	}
+	rig.db.updateWalletErr = nil
+
+	// End LiveReconfigurer tests.
+	xyzWallet.Wallet = tXyzWallet
 	tXyzWallet.ownsAddress = true
 
 	// Success updating settings.
