@@ -3875,6 +3875,7 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, erro
 	preRedeem, err := quoteWallet.PreRedeem(&asset.PreRedeemForm{
 		Lots:          maxSell.Lots,
 		FeeSuggestion: redeemFeeSuggestion,
+		AssetConfig:   quoteAsset,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%s PreRedeem error: %v", unbip(quote), err)
