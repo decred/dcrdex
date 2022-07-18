@@ -50,17 +50,17 @@ type xcWallet struct {
 	balance      *WalletBalance
 	pw           encode.PassBytes
 	address      string
-	peerCount    uint32
+	peerCount    int32  // -1 means no count yet
 	monitored    uint32 // startWalletSyncMonitor goroutines monitoring sync status
 	hookedUp     bool
 	synced       bool
 	syncProgress float32
 
 	// When wallets are being reconfigured and especially when the wallet type
-	// or host is being changed, we want to supress "walletstate" notes to
+	// or host is being changed, we want to suppress "walletstate" notes to
 	// prevent subscribers from prematurely adopting the new WalletState before
 	// the new wallet is fully validated and added to the Core wallets map.
-	// Walletstate notes during reconfiguration can come from the sync loop or
+	// WalletState notes during reconfiguration can come from the sync loop or
 	// from the PeersChange callback.
 	broadcasting *uint32
 }
@@ -173,6 +173,10 @@ func (w *xcWallet) locallyUnlocked() bool {
 
 // state returns the current WalletState.
 func (w *xcWallet) state() *WalletState {
+	var peerCount uint32
+	if w.peerCount > 0 { // -1 initially
+		peerCount = uint32(w.peerCount)
+	}
 	w.mtx.RLock()
 	defer w.mtx.RUnlock()
 	winfo := w.Info()
@@ -186,7 +190,7 @@ func (w *xcWallet) state() *WalletState {
 		Address:      w.address,
 		Units:        winfo.UnitInfo.AtomicUnit,
 		Encrypted:    len(w.encPass) > 0,
-		PeerCount:    w.peerCount,
+		PeerCount:    peerCount,
 		Synced:       w.synced,
 		SyncProgress: w.syncProgress,
 		WalletType:   w.walletType,
