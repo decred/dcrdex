@@ -9,9 +9,12 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
+	"net/http"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -74,6 +77,12 @@ const (
 	// hierarchical deterministic key derivation for the internal branch of an
 	// account.
 	acctInternalBranch uint32 = 1
+
+	// externalApiUrl is the URL of the external API in case of fallback.
+	externalApiUrl = "https://explorer.dcrdata.org/insight/api"
+	// testnetExternalApiUrl is the URL of the testnet external API in case of
+	// fallback.
+	testnetExternalApiUrl = "https://testnet.dcrdata.org/insight/api"
 )
 
 var (
@@ -123,6 +132,15 @@ var (
 				"the order is canceled. This an extra transaction for which network " +
 				"mining fees are paid.  Used only for standing-type orders, e.g. " +
 				"limit orders without immediate time-in-force.",
+			IsBoolean:    true,
+			DefaultValue: false,
+		},
+		{
+			Key:         "apifeefallback",
+			DisplayName: "External fee rate estimates",
+			Description: "Allow fee rate estimation from a block explorer API. " +
+				"This is useful as a fallback for SPV wallets and RPC wallets " +
+				"that have recently been started.",
 			IsBoolean:    true,
 			DefaultValue: false,
 		},
@@ -215,6 +233,7 @@ var (
 	swapFeeBumpKey   = "swapfeebump"
 	splitKey         = "swapsplit"
 	redeemFeeBumpFee = "redeemfeebump"
+	client           http.Client
 )
 
 // outPoint is the hash and output index of a transaction output.
@@ -499,6 +518,8 @@ type ExchangeWallet struct {
 	feeRateLimit     uint64
 	redeemConfTarget uint64
 	useSplitTx       bool
+	apiFeeFallback   bool
+	network          dex.Network
 
 	tipMtx     sync.RWMutex
 	currentTip *block
@@ -562,7 +583,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		walletCfg.PrimaryAccount = defaultAcctName
 	}
 
-	dcr, err := unconnectedWallet(cfg, walletCfg, chainParams, logger)
+	dcr, err := unconnectedWallet(cfg, walletCfg, chainParams, logger, network)
 	if err != nil {
 		return nil, err
 	}
@@ -594,7 +615,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 
 // unconnectedWallet returns an ExchangeWallet without a base wallet. The wallet
 // should be set before use.
-func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParams *chaincfg.Params, logger dex.Logger) (*ExchangeWallet, error) {
+func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParams *chaincfg.Params, logger dex.Logger, network dex.Network) (*ExchangeWallet, error) {
 	// If set in the user config, the fallback fee will be in units of DCR/kB.
 	// Convert to atoms/B.
 	fallbackFeesPerByte := toAtoms(dcrCfg.FallbackFeeRate / 1000)
@@ -656,6 +677,8 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParam
 		feeRateLimit:        feesLimitPerByte,
 		redeemConfTarget:    redeemConfTarget,
 		useSplitTx:          dcrCfg.UseSplitTx,
+		apiFeeFallback:      dcrCfg.ApiFeeFallback,
+		network:             network,
 	}, nil
 }
 
@@ -850,50 +873,103 @@ func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
 
 // FeeRate satisfies asset.FeeRater.
 func (dcr *ExchangeWallet) FeeRate() uint64 {
-	if dcr.wallet.SpvMode() {
-		return 0 // EstimateSmartFeeRate needs dcrd passthrough
-	}
-	// Requesting a rate for 1 confirmation can return unreasonably high rates.
-	rate, err := dcr.feeRate(2)
+	const confTarget = 2
+	rate, err := dcr.feeRate(confTarget)
 	if err != nil {
-		dcr.log.Errorf("Failed to get fee rate: %v", err)
-		return 0
+		dcr.log.Errorf("feeRate error: %v", err)
 	}
 	return rate
 }
 
 // FeeRate returns the current optimal fee rate in atoms / byte.
 func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
-	feeEstimator, is := dcr.wallet.(FeeRateEstimator)
-	if !is {
-		return 0, fmt.Errorf("fee rate estimation unavailable")
-	}
 	// estimatesmartfee 1 returns extremely high rates on DCR.
 	if confTarget < 2 {
 		confTarget = 2
 	}
-	estimatedFeeRate, err := feeEstimator.EstimateSmartFeeRate(dcr.ctx, int64(confTarget), chainjson.EstimateSmartFeeConservative)
+	if feeEstimator, is := dcr.wallet.(FeeRateEstimator); is {
+		ratePerKB, err := feeEstimator.EstimateSmartFeeRate(dcr.ctx, int64(confTarget), chainjson.EstimateSmartFeeConservative)
+		if err == nil {
+			return convertFeeToUint(ratePerKB)
+		} else {
+			dcr.log.Errorf("Failed to get fee rate with estimate smart fee rate: %v", err)
+		}
+	}
+	// Either SPV wallet or EstimateSmartFeeRate failed.
+	if !dcr.apiFeeFallback {
+		return 0, fmt.Errorf("fee rate estimation unavailable")
+	}
+	dcr.log.Debug("Retrieving fee rate from external API")
+	ratePerKB, err := externalFeeEstimator(dcr.ctx, dcr.network, confTarget)
 	if err != nil {
+		dcr.log.Errorf("Failed to get fee rate from external API: %v", err)
 		return 0, err
 	}
-	atomsPerKB, err := dcrutil.NewAmount(estimatedFeeRate) // atomsPerKB is 0 when err != nil
+	// convert fee to atoms Per kB and error if it is greater than fee rate
+	// limit.
+	atomsPerKB, err := convertFeeToUint(ratePerKB)
+	if err != nil {
+		dcr.log.Errorf("Failed to convert fee to atoms: %v", err)
+		return 0, err
+	}
+	if atomsPerKB > dcr.feeRateLimit {
+		dcr.log.Errorf("Fee rate greater than fee rate limit: %v", atomsPerKB)
+		return 0, err
+	}
+	return atomsPerKB, nil
+}
+
+// convertFeeToUint converts a estimated feeRate from dcr/kB to atoms/kb.
+func convertFeeToUint(estimatedFeeRate float64) (uint64, error) {
+	if estimatedFeeRate == 0 {
+		return 0, nil
+	}
+	atomsPerKB, err := dcrutil.NewAmount(estimatedFeeRate) // atomsPerkB is 0 when err != nil
 	if err != nil {
 		return 0, err
 	}
 	// Add 1 extra atom/byte, which is both extra conservative and prevents a
-	// zero value if the atoms/KB is less than 1000.
-	return 1 + uint64(atomsPerKB)/1000, nil // dcrPerKB * 1e8 / 1e3
+	// zero value if the atoms/kB is less than 1000.
+	return 1 + uint64(atomsPerKB)/1000, nil // dcrPerkB * 1e8 / 1e3
+}
+
+// externalFeeEstimator gets the fee rate from the external API
+func externalFeeEstimator(ctx context.Context, net dex.Network, nb uint64) (float64, error) {
+	var url string
+	if net == dex.Testnet {
+		url = testnetExternalApiUrl
+	} else {
+		url = externalApiUrl
+	}
+	url = url + "/utils/estimatefee?nbBlocks=" + strconv.FormatUint(nb, 10)
+	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, err
+	}
+	httpResponse, err := client.Do(r)
+	if err != nil {
+		return 0, err
+	}
+	c := make(map[uint64]float64)
+	reader := io.LimitReader(httpResponse.Body, 1<<14)
+	err = json.NewDecoder(reader).Decode(&c)
+	httpResponse.Body.Close()
+	if err != nil {
+		return 0, err
+	}
+	estimatedFeeRate, ok := c[nb]
+	if !ok {
+		return 0, errors.New("no fee rate for requested number of blocks")
+	}
+	return estimatedFeeRate, nil
 }
 
 // targetFeeRateWithFallback attempts to get a fresh fee rate for the target
 // number of confirmations, but falls back to the suggestion or fallbackFeeRate
 // via feeRateWithFallback.
 func (dcr *ExchangeWallet) targetFeeRateWithFallback(confTarget, feeSuggestion uint64) uint64 {
-	// Fee estimation is not available in SPV mode.
-	if dcr.wallet.SpvMode() {
-		return dcr.feeRateWithFallback(feeSuggestion)
-	}
-
 	feeRate, err := dcr.feeRate(confTarget)
 	if err != nil {
 		dcr.log.Errorf("Failed to get fee rate: %v", err)
