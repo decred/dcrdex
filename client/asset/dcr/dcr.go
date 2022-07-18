@@ -905,17 +905,32 @@ func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
 		dcr.log.Errorf("Failed to get fee rate from external API: %v", err)
 		return 0, err
 	}
-	return convertFeeToUint(ratePerKB)
+	// convert fee to atoms Per kB and error if it is greater than fee rate
+	// limit.
+	atomsPerKB, err := convertFeeToUint(ratePerKB)
+	if err != nil {
+		dcr.log.Errorf("Failed to convert fee to atoms: %v", err)
+		return 0, err
+	}
+	if atomsPerKB > dcr.feeRateLimit {
+		dcr.log.Errorf("Fee rate greater than fee rate limit: %v", atomsPerKB)
+		return 0, err
+	}
+	return atomsPerKB, nil
 }
 
+// convertFeeToUint converts a estimated feeRate from dcr/kB to atoms/kb.
 func convertFeeToUint(estimatedFeeRate float64) (uint64, error) {
-	atomsPerKB, err := dcrutil.NewAmount(estimatedFeeRate) // atomsPerKB is 0 when err != nil
+	if estimatedFeeRate == 0 {
+		return 0, nil
+	}
+	atomsPerKB, err := dcrutil.NewAmount(estimatedFeeRate) // atomsPerkB is 0 when err != nil
 	if err != nil {
 		return 0, err
 	}
 	// Add 1 extra atom/byte, which is both extra conservative and prevents a
-	// zero value if the atoms/KB is less than 1000.
-	return 1 + uint64(atomsPerKB)/1000, nil // dcrPerKB * 1e8 / 1e3
+	// zero value if the atoms/kB is less than 1000.
+	return 1 + uint64(atomsPerKB)/1000, nil // dcrPerkB * 1e8 / 1e3
 }
 
 // externalFeeEstimator gets the fee rate from the external API
@@ -955,11 +970,6 @@ func externalFeeEstimator(ctx context.Context, net dex.Network, nb uint64) (floa
 // number of confirmations, but falls back to the suggestion or fallbackFeeRate
 // via feeRateWithFallback.
 func (dcr *ExchangeWallet) targetFeeRateWithFallback(confTarget, feeSuggestion uint64) uint64 {
-	// Fee estimation is not available in SPV mode.
-	if dcr.wallet.SpvMode() {
-		return dcr.feeRateWithFallback(feeSuggestion)
-	}
-
 	feeRate, err := dcr.feeRate(confTarget)
 	if err != nil {
 		dcr.log.Errorf("Failed to get fee rate: %v", err)
