@@ -24,7 +24,6 @@ client/cmd/dexcctl/dexcctl
 client/cmd/assetseed/assetseed
 client/cmd/simnet-trade-tests/simnet-trade-tests
 docs/examples/rpcclient/rpcclient
-/wiki
 dex/testing/loadbot/loadbot
 bin/
 client/webserver/site/template-builder/template-builder
