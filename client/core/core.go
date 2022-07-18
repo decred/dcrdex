@@ -1949,6 +1949,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		},
 		encPass:      dbWallet.EncryptedPW,
 		address:      dbWallet.Address,
+		peerCount:    -1, // no count yet
 		dbID:         dbWallet.ID(),
 		walletType:   dbWallet.Type,
 		broadcasting: new(uint32),
@@ -4414,7 +4415,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		}
 		w.mtx.RLock()
 		defer w.mtx.RUnlock()
-		if w.peerCount == 0 {
+		if w.peerCount < 1 {
 			return fmt.Errorf("%s wallet has no network peers (check your network or firewall)",
 				unbip(w.AssetID))
 		}
@@ -6965,15 +6966,16 @@ func (c *Core) peerChange(w *xcWallet, numPeers uint32, err error) {
 	}
 
 	w.mtx.Lock()
-	wasDisconnected := w.peerCount == 0
-	w.peerCount = numPeers
+	wasDisconnected := w.peerCount == 0 // excludes no count (-1)
+	w.peerCount = int32(numPeers)
 	if numPeers == 0 {
 		w.synced = false
 	}
 	w.mtx.Unlock()
 
 	// When we get peers after having none, start waiting for re-sync, otherwise
-	// leave synced alone.
+	// leave synced alone. This excludes the unknown state (-1) prior to the
+	// initial peer count report.
 	if wasDisconnected && numPeers > 0 {
 		subject, details := c.formatDetails(TopicWalletPeersRestored, w.Info().Name)
 		c.notify(newWalletConfigNote(TopicWalletPeersRestored, subject, details,
@@ -6983,7 +6985,7 @@ func (c *Core) peerChange(w *xcWallet, numPeers uint32, err error) {
 
 	// Send a WalletStateNote in case Synced or anything else has changed.
 	if atomic.LoadUint32(w.broadcasting) == 1 {
-		if (numPeers == 0 || err != nil) && !wasDisconnected {
+		if (numPeers == 0 || err != nil) && !wasDisconnected { // was connected or initial report
 			if err != nil {
 				subject, details := c.formatDetails(TopicWalletCommsWarning,
 					w.Info().Name, err.Error())
