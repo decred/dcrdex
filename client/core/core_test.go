@@ -2737,8 +2737,8 @@ func TestTrade(t *testing.T) {
 		t.Fatalf("no error for closing BTC wallet with active orders")
 	}
 
-	// We want to set peerCount to 0, but we'll do this the hard way to ensure
-	// the peerChange handler works as intended.
+	// We want to set peerCount to 0 (from 1), but we'll do this the hard way to
+	// ensure the peerChange handler works as intended.
 	// dcrWallet.mtx.Lock()
 	// dcrWallet.peerCount = 0
 	// dcrWallet.mtx.Unlock()

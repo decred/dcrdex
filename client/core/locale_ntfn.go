@@ -54,7 +54,7 @@ var enUS = map[Topic]*translation{
 		subject:  "Wallet unlock error",
 		template: "Connected to wallet to complete registration at %s, but failed to unlock: %v",
 	},
-	// [asset name]
+	// [asset name, error message]
 	TopicWalletCommsWarning: {
 		subject:  "Wallet connection issue",
 		template: "Unable to communicate with %v wallet! Reason: %q",
