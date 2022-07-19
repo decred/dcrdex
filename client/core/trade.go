@@ -118,6 +118,23 @@ type trackedCancel struct {
 	}
 }
 
+type feeStamped struct {
+	sync.RWMutex
+	rate  uint64
+	stamp time.Time
+}
+
+func (fs *feeStamped) get() uint64 {
+	fs.RLock()
+	defer fs.RUnlock()
+	return fs.rate
+}
+
+// freshRedeemFeeAge is the expiry age for cached redeem fee rates, past which
+// fetchFeeFromOracle should be used to refresh the rate. See
+// cacheRedemptionFeeSuggestion.
+const freshRedeemFeeAge = time.Minute
+
 // trackedTrade is an order (issued by this client), its matches, and its cancel
 // order, if applicable. The trackedTrade has methods for handling requests
 // from the DEX to progress match negotiation.
@@ -125,11 +142,10 @@ type trackedTrade struct {
 	// redeemFeeSuggestion is cached fee suggestion for redemption. We can't
 	// request a fee suggestion at redeem time because it would require making
 	// the full redemption routine async (TODO?). This fee suggestion is
-	// intentionally not stored as part of the db.OrderMetaData, and should
-	// be repopulated if the client is restarted.
-	// Used with atomic. Leave redeemFeeSuggestion as the first field in
-	// trackedTrade.
-	redeemFeeSuggestion uint64
+	// intentionally not stored as part of the db.OrderMetaData, and should be
+	// repopulated if the client is restarted.
+	redeemFeeSuggestion feeStamped
+
 	order.Order
 	// mtx protects all read-write fields of the trackedTrade and the
 	// matchTrackers in the matches map.
@@ -196,6 +212,57 @@ func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnec
 		refundReserves:     refundReserves,
 	}
 	return t
+}
+
+// cacheRedemptionFeeSuggestion sets the redeemFeeSuggestion for the
+// trackedTrade. If a request to the server for the fee suggestion must be made,
+// the request will be run in a goroutine, i.e. the field is not necessarily set
+// when this method returns. If there is a synced book, the estimate will always
+// be updated. If there is no synced book, but a non-zero fee suggestion is
+// already cached, no new requests will be made.
+func (t *trackedTrade) cacheRedemptionFeeSuggestion() {
+	now := time.Now()
+
+	t.redeemFeeSuggestion.Lock()
+	defer t.redeemFeeSuggestion.Unlock()
+
+	if now.Sub(t.redeemFeeSuggestion.stamp) < freshRedeemFeeAge {
+		return
+	}
+
+	set := func(rate uint64) {
+		t.redeemFeeSuggestion.rate = rate
+		t.redeemFeeSuggestion.stamp = now
+	}
+
+	// Use the wallet's rate first. Note that this could make a costly request
+	// to an external fee oracle if an internal estimate is not available and
+	// the wallet settings permit external API requests.
+	if rater, is := t.wallets.toWallet.feeRater(); is {
+		if feeRate := rater.FeeRate(); feeRate != 0 {
+			set(feeRate)
+			return
+		}
+	}
+
+	// Check any book that might have the fee recorded from an epoch_report note
+	// (requires a book subscription).
+	redeemAsset := t.wallets.toAsset.ID
+	feeSuggestion := t.dc.bestBookFeeSuggestion(redeemAsset)
+	if feeSuggestion > 0 {
+		set(feeSuggestion)
+		return
+	}
+
+	// Fetch it from the server. Last resort!
+	go func() {
+		feeSuggestion = t.dc.fetchFeeRate(redeemAsset)
+		if feeSuggestion > 0 {
+			t.redeemFeeSuggestion.Lock()
+			set(feeSuggestion)
+			t.redeemFeeSuggestion.Unlock()
+		}
+	}()
 }
 
 // accountRedeemer is equivalent to calling
@@ -1345,7 +1412,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	c.resendPendingRequests(t)
 
 	// Make sure we have a redemption fee suggestion cached.
-	c.cacheRedemptionFeeSuggestion(t)
+	t.cacheRedemptionFeeSuggestion()
 
 	// Check all matches and send swap, redeem or refund as necessary.
 	var sent, quoteSent, received, quoteReceived uint64
@@ -1363,13 +1430,13 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		}
 		switch {
 		case t.isSwappable(c.ctx, match):
-			t.dc.log.Debugf("Swappable match %s for order %v (%v)", match, t.ID(), side)
+			c.log.Debugf("Swappable match %s for order %v (%v)", match, t.ID(), side)
 			swaps = append(swaps, match)
 			sent += match.Quantity
 			quoteSent += calc.BaseToQuote(match.Rate, match.Quantity)
 
 		case t.isRedeemable(c.ctx, match):
-			t.dc.log.Debugf("Redeemable match %s for order %v (%v)", match, t.ID(), side)
+			c.log.Debugf("Redeemable match %s for order %v (%v)", match, t.ID(), side)
 			redeems = append(redeems, match)
 			received += match.Quantity
 			quoteReceived += calc.BaseToQuote(match.Rate, match.Quantity)
@@ -1379,11 +1446,11 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		// If we've already started redemption search for this match, the search
 		// will be aborted if/when auto-refund succeeds.
 		case t.isRefundable(match):
-			t.dc.log.Debugf("Refundable match %s for order %v (%v)", match, t.ID(), side)
+			c.log.Debugf("Refundable match %s for order %v (%v)", match, t.ID(), side)
 			refunds = append(refunds, match)
 
 		case t.shouldBeginFindRedemption(c.ctx, match):
-			t.dc.log.Debugf("Ready to find counter-party redemption for match %s, order %v (%v)", match, t.ID(), side)
+			c.log.Debugf("Ready to find counter-party redemption for match %s, order %v (%v)", match, t.ID(), side)
 			t.findMakersRedemption(match)
 		}
 	}
@@ -1999,16 +2066,15 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 		})
 	}
 
-	// Don't use (*Core).feeSuggestion here, since can incur an RPC request.
-	// If we don't have a synced book, use t.redemption
-	// t.redeemFeeSuggestion is updated every tick and uses a rate directly
-	// from our wallet, if available. Only go looking for one if we don't have
-	// one cached.
+	// Try not to use (*Core).feeSuggestion here, since it can incur an RPC
+	// request to the server. t.redeemFeeSuggestion is updated every tick and
+	// uses a rate directly from our wallet, if available. Only go looking for
+	// one if we don't have one cached.
 	var feeSuggestion uint64
 	if _, is := t.accountRedeemer(); is {
 		feeSuggestion = t.metaData.RedeemMaxFeeRate
 	} else {
-		feeSuggestion = atomic.LoadUint64(&t.redeemFeeSuggestion)
+		feeSuggestion = t.redeemFeeSuggestion.get()
 	}
 	if feeSuggestion == 0 {
 		feeSuggestion = t.dc.bestBookFeeSuggestion(t.wallets.toAsset.ID)
@@ -2018,7 +2084,7 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 	redeemWallet, redeemAsset := t.wallets.toWallet, t.wallets.toAsset // this is our redeem
 	coinIDs, outCoin, fees, err := redeemWallet.Redeem(&asset.RedeemForm{
 		Redemptions:   redemptions,
-		FeeSuggestion: feeSuggestion,
+		FeeSuggestion: feeSuggestion, // fallback - wallet will try to get a rate internally for configured redeem conf target
 		Options:       t.options,
 	})
 	// If an error was encountered, fail all of the matches. A failed match will
@@ -2302,7 +2368,7 @@ func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, 
 
 	for _, match := range matches {
 		if len(match.MetaData.Proof.RefundCoin) != 0 {
-			t.dc.log.Errorf("attempted to execute duplicate refund for match %s, side %s, status %s",
+			c.log.Errorf("attempted to execute duplicate refund for match %s, side %s, status %s",
 				match, match.Side, match.Status)
 			continue
 		}
@@ -2320,24 +2386,24 @@ func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, 
 			swapCoinID = dex.Bytes(match.MetaData.Proof.TakerSwap)
 			matchFailureReason = "no valid redemption received from Maker"
 		default:
-			t.dc.log.Errorf("attempted to execute invalid refund for match %s, side %s, status %s",
+			c.log.Errorf("attempted to execute invalid refund for match %s, side %s, status %s",
 				match, match.Side, match.Status)
 			continue
 		}
 
 		swapCoinString := coinIDString(refundAsset.ID, swapCoinID)
-		t.dc.log.Infof("Refunding %s contract %s for match %s (%s)",
+		c.log.Infof("Refunding %s contract %s for match %s (%s)",
 			refundAsset.Symbol, swapCoinString, match, matchFailureReason)
 
-		var feeSuggestion uint64
+		var feeRate uint64
 		if _, is := t.accountRefunder(); is {
-			feeSuggestion = t.metaData.MaxFeeRate
+			feeRate = t.metaData.MaxFeeRate
 		}
-		if feeSuggestion == 0 {
-			feeSuggestion = c.feeSuggestionAny(refundAsset.ID)
+		if feeRate == 0 {
+			feeRate = c.feeSuggestionAny(refundAsset.ID) // includes wallet itself
 		}
 
-		refundCoin, err := refundWallet.Refund(swapCoinID, contractToRefund, feeSuggestion)
+		refundCoin, err := refundWallet.Refund(swapCoinID, contractToRefund, feeRate)
 		if err != nil {
 			// CRITICAL - Refund must indicate if the swap is spent (i.e.
 			// redeemed already) so that as taker we will start the
@@ -2347,7 +2413,7 @@ func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, 
 				// Could not find the contract coin, which means it has been
 				// spent. Unless the locktime is expired, we would have already
 				// started FindRedemption for this contract.
-				t.dc.log.Debugf("Failed to refund %s contract %s, already redeemed. Beginning find redemption.",
+				c.log.Debugf("Failed to refund %s contract %s, already redeemed. Beginning find redemption.",
 					refundAsset.Symbol, swapCoinString)
 				t.findMakersRedemption(match)
 			} else {

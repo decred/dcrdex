@@ -4305,12 +4305,12 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 		}
 	}
 
-	swapFeeSuggestion := c.feeSuggestion(dc, wallets.fromAsset.ID)
+	swapFeeSuggestion := c.feeSuggestion(dc, wallets.fromAsset.ID) // server rates only for the swap init
 	if swapFeeSuggestion == 0 {
 		return nil, fmt.Errorf("failed to get swap fee suggestion for %s at %s", unbip(wallets.fromAsset.ID), form.Host)
 	}
 
-	redeemFeeSuggestion := c.feeSuggestionAny(wallets.toAsset.ID)
+	redeemFeeSuggestion := c.feeSuggestionAny(wallets.toAsset.ID) // wallet rate or server rate
 	if redeemFeeSuggestion == 0 {
 		return nil, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", unbip(wallets.toAsset.ID), form.Host)
 	}
@@ -4325,7 +4325,7 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 		Lots:            lots,
 		AssetConfig:     wallets.fromAsset,
 		RedeemConfig:    wallets.toAsset,
-		Immediate:       (form.IsLimit && form.TifNow),
+		Immediate:       form.IsLimit && form.TifNow,
 		FeeSuggestion:   swapFeeSuggestion,
 		SelectedOptions: form.Options,
 	})
@@ -7040,42 +7040,6 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 	// status changes.
 	assets.count(assetID)
 	c.updateBalances(assets)
-}
-
-// cacheRedemptionFeeSuggestion sets the redeemFeeSuggestion for the
-// trackedTrade. If a request for the fee suggestion must be made, the request
-// will be run in a goroutine, i.e. the field is not necessarily set when this
-// method returns. If there is a synced book, the estimate will always be
-// updated. If there is no synced book, but a non-zero fee suggestion is already
-// cached, no new requests will be made.
-func (c *Core) cacheRedemptionFeeSuggestion(t *trackedTrade) {
-	if rater, is := t.wallets.toWallet.feeRater(); is {
-		if feeRate := rater.FeeRate(); feeRate != 0 {
-			atomic.StoreUint64(&t.redeemFeeSuggestion, feeRate)
-			return
-		}
-	}
-	// Check any book that might have the fee recorded from an epoch_report note
-	// (requires a book subscription).
-	redeemAsset := t.wallets.toAsset.ID
-	feeSuggestion := t.dc.bestBookFeeSuggestion(redeemAsset)
-	if feeSuggestion > 0 {
-		atomic.StoreUint64(&t.redeemFeeSuggestion, feeSuggestion)
-		return
-	}
-	// Don't request it if we already have one.
-	// TODO: declare the rate stale at some point and fetch a new one.
-	if atomic.LoadUint64(&t.redeemFeeSuggestion) != 0 {
-		return
-	}
-	// Fetch it from the server.
-	go func() {
-		c.log.Tracef("Fetching fee rate for %v", unbip(redeemAsset))
-		feeSuggestion = t.dc.fetchFeeRate(redeemAsset)
-		if feeSuggestion > 0 {
-			atomic.StoreUint64(&t.redeemFeeSuggestion, feeSuggestion)
-		}
-	}()
 }
 
 // convertAssetInfo converts from a *msgjson.Asset to the nearly identical

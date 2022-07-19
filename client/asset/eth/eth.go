@@ -1943,7 +1943,7 @@ func (w *assetWallet) findSecret(secretHash [32]byte, contractVer uint32) ([]byt
 
 // Refund refunds a contract. This can only be used after the time lock has
 // expired.
-func (w *assetWallet) Refund(_, contract dex.Bytes, feeSuggestion uint64) (dex.Bytes, error) {
+func (w *assetWallet) Refund(_, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
 	version, secretHash, err := dexeth.DecodeContractData(contract)
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to decode contract: %w", err)
@@ -1977,7 +1977,7 @@ func (w *assetWallet) Refund(_, contract dex.Bytes, feeSuggestion uint64) (dex.B
 		return nil, fmt.Errorf("Refund: swap with secret hash %x is not refundable", secretHash)
 	}
 
-	tx, err := w.refund(secretHash, feeSuggestion, version)
+	tx, err := w.refund(secretHash, feeRate, version)
 	if err != nil {
 		return nil, fmt.Errorf("Refund: failed to call refund: %w", err)
 	}

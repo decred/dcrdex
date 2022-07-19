@@ -422,6 +422,10 @@ func (w *rpcWallet) LockedOutputs(ctx context.Context, acctName string) ([]chain
 // estimatesmartfee rpc.
 // Part of the Wallet interface.
 func (w *rpcWallet) EstimateSmartFeeRate(ctx context.Context, confTarget int64, mode chainjson.EstimateSmartFeeMode) (float64, error) {
+	// estimatesmartfee 1 returns extremely high rates (e.g. 0.00817644).
+	if confTarget < 2 {
+		confTarget = 2
+	}
 	estimateFeeResult, err := w.client().EstimateSmartFee(ctx, confTarget, mode)
 	if err != nil {
 		return 0, translateRPCCancelErr(err)

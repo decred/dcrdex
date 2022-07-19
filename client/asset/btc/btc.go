@@ -1354,9 +1354,10 @@ func (btc *baseWallet) feeRate(_ RawRequester, confTarget uint64) (uint64, error
 	if err != nil {
 		return 0, err
 	}
-	// Add 1 extra sat/byte, which is both extra conservative and prevents a
-	// zero value if the sat/KB is less than 1000.
-	return 1 + uint64(satPerKB)/1000, nil
+	if satPerKB <= 0 {
+		return 0, fmt.Errorf("invalid fee rate %v", satPerKB)
+	}
+	return uint64(dex.IntDivUp(int64(satPerKB), 1000)), nil
 }
 
 type amount uint64
@@ -1682,7 +1683,10 @@ func (btc *baseWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, utxos [
 // PreRedeem generates an estimate of the range of redemption fees that could
 // be assessed.
 func (btc *baseWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, error) {
-	feeRate := btc.targetFeeRateWithFallback(btc.redeemConfTarget(), req.FeeSuggestion)
+	feeRate := req.FeeSuggestion
+	if feeRate == 0 {
+		feeRate = btc.targetFeeRateWithFallback(btc.redeemConfTarget(), 0)
+	}
 	// Best is one transaction with req.Lots inputs and 1 output.
 	var best uint64 = dexbtc.MinimumTxOverhead
 	// Worst is req.Lots transactions, each with one input and one output.
@@ -2950,7 +2954,8 @@ func (btc *baseWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, ui
 	receipts := make([]asset.Receipt, 0, swapCount)
 	for i, contract := range swaps.Contracts {
 		output := newOutput(txHash, uint32(i), contract.Value)
-		signedRefundTx, err := btc.refundTx(output.txHash(), output.vout(), contracts[i], contract.Value, refundAddrs[i], swaps.FeeRate)
+		signedRefundTx, err := btc.refundTx(output.txHash(), output.vout(), contracts[i],
+			contract.Value, refundAddrs[i], swaps.FeeRate)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error creating refund tx: %w", err)
 		}
@@ -3571,7 +3576,7 @@ func (btc *intermediaryWallet) tryRedemptionRequests(ctx context.Context, startB
 // wallet does not store it, even though it was known when the init transaction
 // was created. The client should store this information for persistence across
 // sessions.
-func (btc *baseWallet) Refund(coinID, contract dex.Bytes, feeSuggestion uint64) (dex.Bytes, error) {
+func (btc *baseWallet) Refund(coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
@@ -3580,6 +3585,10 @@ func (btc *baseWallet) Refund(coinID, contract dex.Bytes, feeSuggestion uint64) 
 	pkScript, err := btc.scriptHashScript(contract)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing pubkey script: %w", err)
+	}
+
+	if feeRate == 0 {
+		feeRate = btc.targetFeeRateWithFallback(2, 0)
 	}
 
 	// TODO: I'd recommend not passing a pkScript without a limited startTime
@@ -3597,7 +3606,7 @@ func (btc *baseWallet) Refund(coinID, contract dex.Bytes, feeSuggestion uint64) 
 	if utxo == nil {
 		return nil, asset.CoinNotFoundError // spent
 	}
-	msgTx, err := btc.refundTx(txHash, vout, contract, uint64(utxo.Value), nil, feeSuggestion)
+	msgTx, err := btc.refundTx(txHash, vout, contract, uint64(utxo.Value), nil, feeRate)
 	if err != nil {
 		return nil, fmt.Errorf("error creating refund tx: %w", err)
 	}
@@ -3616,14 +3625,13 @@ func (btc *baseWallet) Refund(coinID, contract dex.Bytes, feeSuggestion uint64) 
 
 // refundTx creates and signs a contract`s refund transaction. If refundAddr is
 // not supplied, one will be requested from the wallet.
-func (btc *baseWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract dex.Bytes, val uint64, refundAddr btcutil.Address, feeSuggestion uint64) (*wire.MsgTx, error) {
+func (btc *baseWallet) refundTx(txHash *chainhash.Hash, vout uint32, contract dex.Bytes, val uint64, refundAddr btcutil.Address, feeRate uint64) (*wire.MsgTx, error) {
 	sender, _, lockTime, _, err := dexbtc.ExtractSwapDetails(contract, btc.segwit, btc.chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting swap addresses: %w", err)
 	}
 
 	// Create the transaction that spends the contract.
-	feeRate := btc.targetFeeRateWithFallback(2, feeSuggestion) // meh level urgency
 	msgTx := wire.NewMsgTx(btc.txVersion())
 	msgTx.LockTime = uint32(lockTime)
 	prevOut := wire.NewOutPoint(txHash, vout)
