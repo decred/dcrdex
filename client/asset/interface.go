@@ -335,7 +335,7 @@ type Wallet interface {
 	// the unspent coin info as the wallet does not store it, even though it was
 	// known when the init transaction was created. The client should store this
 	// information for persistence across sessions.
-	Refund(coinID, contract dex.Bytes, feeSuggestion uint64) (dex.Bytes, error)
+	Refund(coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error)
 	// DepositAddress returns an address for depositing funds into the exchange
 	// wallet.
 	DepositAddress() (string, error)
@@ -667,12 +667,12 @@ type Redemption struct {
 // expanded in in-progress work to accommodate order-time options.
 type RedeemForm struct {
 	Redemptions []*Redemption
-	// FeeSuggestion is a suggested fee from the server. For redemptions, the
-	// suggestion is provided as a convenience for wallets without full
-	// chain backing which cannot get an estimate otherwise. Since this is the
-	// redemption, there is no obligation on the client to use the fee
-	// suggestion in any way, but obviously fees that are too low may result in
-	// the redemption getting stuck in mempool.
+	// FeeSuggestion is a suggested fee rate. For redemptions, the suggestion is
+	// just a fallback if an internal estimate using the wallet's redeem confirm
+	// block target setting is not available. Since this is the redemption,
+	// there is no obligation on the client to use the fee suggestion in any
+	// way, but obviously fees that are too low may result in the redemption
+	// getting stuck in mempool.
 	FeeSuggestion uint64
 	Options       map[string]string
 }

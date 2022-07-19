@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/rand"
 	"os"
 	"sync"
@@ -2544,5 +2545,69 @@ func TestEstimateRegistrationTxFee(t *testing.T) {
 	estimate = wallet.EstimateRegistrationTxFee(wallet.feeRateLimit + 1)
 	if estimate != wallet.fallbackFeeRate*txSize {
 		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate*txSize, estimate)
+	}
+}
+
+func Test_dcrPerKBToAtomsPerByte(t *testing.T) {
+	tests := []struct {
+		name             string
+		estimatedFeeRate float64
+		want             uint64
+		wantErr          bool
+	}{
+		{
+			"catch negative", // but caller should check
+			-0.0002,
+			0,
+			true,
+		},
+		{
+			"ok 0", // but caller should check
+			0.0,
+			0,
+			false,
+		},
+		{
+			"ok 10",
+			0.0001,
+			10,
+			false,
+		},
+		{
+			"ok 11",
+			0.00011,
+			11,
+			false,
+		},
+		{
+			"ok 1",
+			0.00001,
+			1,
+			false,
+		},
+		{
+			"ok 1 rounded up",
+			0.000002,
+			1,
+			false,
+		},
+		{
+			"catch NaN err",
+			math.NaN(),
+			0,
+			true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := dcrPerKBToAtomsPerByte(tt.estimatedFeeRate)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("dcrPerKBToAtomsPerByte() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("dcrPerKBToAtomsPerByte() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

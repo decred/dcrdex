@@ -83,6 +83,10 @@ const (
 	// testnetExternalApiUrl is the URL of the testnet external API in case of
 	// fallback.
 	testnetExternalApiUrl = "https://testnet.dcrdata.org/insight/api"
+
+	// freshFeeAge is the expiry age for cached fee rates of external origin,
+	// past which fetchFeeFromOracle should be used to refresh the rate.
+	freshFeeAge = time.Minute
 )
 
 var (
@@ -497,6 +501,11 @@ type redeemOptions struct {
 	FeeBump *float64 `ini:"redeemfeebump"`
 }
 
+type feeStamped struct {
+	rate  uint64
+	stamp time.Time
+}
+
 // ExchangeWallet is a wallet backend for Decred. The backend is how the DEX
 // client app communicates with the Decred blockchain and wallet. ExchangeWallet
 // satisfies the dex.Wallet interface.
@@ -505,6 +514,7 @@ type ExchangeWallet struct {
 	wallet         Wallet
 	chainParams    *chaincfg.Params
 	log            dex.Logger
+	network        dex.Network
 	primaryAcct    string
 	unmixedAccount string // mixing-enabled wallets only
 	// tradingAccount (mixing-enabled wallets only) stores utxos reserved for
@@ -519,7 +529,10 @@ type ExchangeWallet struct {
 	redeemConfTarget uint64
 	useSplitTx       bool
 	apiFeeFallback   bool
-	network          dex.Network
+
+	oracleFeesMtx sync.Mutex
+	oracleFees    map[uint64]feeStamped // conf target => fee rate
+	oracleFailing bool
 
 	tipMtx     sync.RWMutex
 	currentTip *block
@@ -665,6 +678,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParam
 	return &ExchangeWallet{
 		log:                 logger,
 		chainParams:         chainParams,
+		network:             network,
 		primaryAcct:         dcrCfg.PrimaryAccount,
 		unmixedAccount:      dcrCfg.UnmixedAccount,
 		tradingAccount:      dcrCfg.TradingAccount,
@@ -678,7 +692,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParam
 		redeemConfTarget:    redeemConfTarget,
 		useSplitTx:          dcrCfg.UseSplitTx,
 		apiFeeFallback:      dcrCfg.ApiFeeFallback,
-		network:             network,
+		oracleFees:          make(map[uint64]feeStamped),
 	}, nil
 }
 
@@ -873,75 +887,98 @@ func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
 
 // FeeRate satisfies asset.FeeRater.
 func (dcr *ExchangeWallet) FeeRate() uint64 {
-	const confTarget = 2
+	const confTarget = 2 // 1 historically gives crazy rates
 	rate, err := dcr.feeRate(confTarget)
-	if err != nil {
+	if err != nil { // log and return 0
 		dcr.log.Errorf("feeRate error: %v", err)
 	}
 	return rate
 }
 
-// FeeRate returns the current optimal fee rate in atoms / byte.
+// feeRate returns the current optimal fee rate in atoms / byte.
 func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
-	// estimatesmartfee 1 returns extremely high rates on DCR.
-	if confTarget < 2 {
-		confTarget = 2
-	}
-	if feeEstimator, is := dcr.wallet.(FeeRateEstimator); is {
-		ratePerKB, err := feeEstimator.EstimateSmartFeeRate(dcr.ctx, int64(confTarget), chainjson.EstimateSmartFeeConservative)
-		if err == nil {
-			return convertFeeToUint(ratePerKB)
-		} else {
-			dcr.log.Errorf("Failed to get fee rate with estimate smart fee rate: %v", err)
+	if feeEstimator, is := dcr.wallet.(FeeRateEstimator); is && !dcr.wallet.SpvMode() {
+		dcrPerKB, err := feeEstimator.EstimateSmartFeeRate(dcr.ctx, int64(confTarget), chainjson.EstimateSmartFeeConservative)
+		if err == nil && dcrPerKB > 0 {
+			return dcrPerKBToAtomsPerByte(dcrPerKB)
+		}
+		if err != nil {
+			dcr.log.Warnf("Failed to get local fee rate estimate: %v", err)
+		} else { // dcrPerKB == 0
+			dcr.log.Warnf("Local fee estimate is zero.")
 		}
 	}
+
 	// Either SPV wallet or EstimateSmartFeeRate failed.
 	if !dcr.apiFeeFallback {
-		return 0, fmt.Errorf("fee rate estimation unavailable")
+		return 0, fmt.Errorf("fee rate estimation unavailable and external API is disabled")
 	}
-	dcr.log.Debug("Retrieving fee rate from external API")
-	ratePerKB, err := externalFeeEstimator(dcr.ctx, dcr.network, confTarget)
+
+	now := time.Now()
+
+	dcr.oracleFeesMtx.Lock()
+	defer dcr.oracleFeesMtx.Unlock()
+	oracleFee := dcr.oracleFees[confTarget]
+	if now.Sub(oracleFee.stamp) < freshFeeAge {
+		return oracleFee.rate, nil
+	}
+	if dcr.oracleFailing {
+		return 0, errors.New("fee rate oracle is in a temporary failing state")
+	}
+
+	dcr.log.Debugf("Retrieving fee rate from external fee oracle for %d target blocks", confTarget)
+	dcrPerKB, err := fetchFeeFromOracle(dcr.ctx, dcr.network, confTarget)
 	if err != nil {
-		dcr.log.Errorf("Failed to get fee rate from external API: %v", err)
-		return 0, err
+		// Flag the oracle as failing so subsequent requests don't also try and
+		// fail after the request timeout. Remove the flag after a bit.
+		dcr.oracleFailing = true
+		time.AfterFunc(freshFeeAge, func() {
+			dcr.oracleFeesMtx.Lock()
+			dcr.oracleFailing = false
+			dcr.oracleFeesMtx.Unlock()
+		})
+		return 0, fmt.Errorf("external fee rate API failure: %v", err)
 	}
-	// convert fee to atoms Per kB and error if it is greater than fee rate
-	// limit.
-	atomsPerKB, err := convertFeeToUint(ratePerKB)
+	if dcrPerKB <= 0 {
+		return 0, fmt.Errorf("invalid fee rate %f from fee oracle", dcrPerKB)
+	}
+	// Convert to atoms/B and error if it is greater than fee rate limit.
+	atomsPerByte, err := dcrPerKBToAtomsPerByte(dcrPerKB)
 	if err != nil {
-		dcr.log.Errorf("Failed to convert fee to atoms: %v", err)
 		return 0, err
 	}
-	if atomsPerKB > dcr.feeRateLimit {
-		dcr.log.Errorf("Fee rate greater than fee rate limit: %v", atomsPerKB)
-		return 0, err
+	if atomsPerByte > dcr.feeRateLimit {
+		return 0, fmt.Errorf("fee rate from external API greater than fee rate limit: %v > %v",
+			atomsPerByte, dcr.feeRateLimit)
 	}
-	return atomsPerKB, nil
+	dcr.oracleFees[confTarget] = feeStamped{atomsPerByte, now}
+	return atomsPerByte, nil
 }
 
-// convertFeeToUint converts a estimated feeRate from dcr/kB to atoms/kb.
-func convertFeeToUint(estimatedFeeRate float64) (uint64, error) {
-	if estimatedFeeRate == 0 {
-		return 0, nil
+// dcrPerKBToAtomsPerByte converts a estimated feeRate from dcr/KB to atoms/B.
+func dcrPerKBToAtomsPerByte(dcrPerkB float64) (uint64, error) {
+	// The caller should check for non-positive numbers, but don't allow
+	// underflow when converting to an unsigned integer.
+	if dcrPerkB < 0 {
+		return 0, fmt.Errorf("negative fee rate")
 	}
-	atomsPerKB, err := dcrutil.NewAmount(estimatedFeeRate) // atomsPerkB is 0 when err != nil
+	// dcrPerkB * 1e8 / 1e3 => atomsPerB
+	atomsPerKB, err := dcrutil.NewAmount(dcrPerkB)
 	if err != nil {
 		return 0, err
 	}
-	// Add 1 extra atom/byte, which is both extra conservative and prevents a
-	// zero value if the atoms/kB is less than 1000.
-	return 1 + uint64(atomsPerKB)/1000, nil // dcrPerkB * 1e8 / 1e3
+	return uint64(dex.IntDivUp(int64(atomsPerKB), 1000)), nil
 }
 
-// externalFeeEstimator gets the fee rate from the external API
-func externalFeeEstimator(ctx context.Context, net dex.Network, nb uint64) (float64, error) {
+// fetchFeeFromOracle gets the fee rate from the external API.
+func fetchFeeFromOracle(ctx context.Context, net dex.Network, nb uint64) (float64, error) {
 	var url string
 	if net == dex.Testnet {
 		url = testnetExternalApiUrl
-	} else {
+	} else { // mainnet and simnet
 		url = externalApiUrl
 	}
-	url = url + "/utils/estimatefee?nbBlocks=" + strconv.FormatUint(nb, 10)
+	url += "/utils/estimatefee?nbBlocks=" + strconv.FormatUint(nb, 10)
 	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
 	r, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -959,11 +996,11 @@ func externalFeeEstimator(ctx context.Context, net dex.Network, nb uint64) (floa
 	if err != nil {
 		return 0, err
 	}
-	estimatedFeeRate, ok := c[nb]
+	dcrPerKB, ok := c[nb]
 	if !ok {
 		return 0, errors.New("no fee rate for requested number of blocks")
 	}
-	return estimatedFeeRate, nil
+	return dcrPerKB, nil
 }
 
 // targetFeeRateWithFallback attempts to get a fresh fee rate for the target
@@ -974,7 +1011,7 @@ func (dcr *ExchangeWallet) targetFeeRateWithFallback(confTarget, feeSuggestion u
 	if err != nil {
 		dcr.log.Errorf("Failed to get fee rate: %v", err)
 	} else if feeRate != 0 {
-		dcr.log.Tracef("Obtained local estimate for %d-conf fee rate, %d", confTarget, feeRate)
+		dcr.log.Tracef("Obtained estimate for %d-conf fee rate, %d", confTarget, feeRate)
 		return feeRate
 	}
 
@@ -986,11 +1023,10 @@ func (dcr *ExchangeWallet) targetFeeRateWithFallback(confTarget, feeSuggestion u
 // logged.
 func (dcr *ExchangeWallet) feeRateWithFallback(feeSuggestion uint64) uint64 {
 	if feeSuggestion > 0 && feeSuggestion < dcr.feeRateLimit {
-		dcr.log.Tracef("feeRateWithFallback using caller's suggestion for fee rate, %d. Local estimate unavailable",
-			feeSuggestion)
+		dcr.log.Tracef("Using caller's suggestion for fee rate, %d", feeSuggestion)
 		return feeSuggestion
 	}
-	dcr.log.Warnf("Unable to get optimal fee rate, using fallback of %d", dcr.fallbackFeeRate)
+	dcr.log.Warnf("No usable fee rate suggestion. Using fallback of %d", dcr.fallbackFeeRate)
 	return dcr.fallbackFeeRate
 }
 
@@ -1001,9 +1037,9 @@ func (a amount) String() string {
 }
 
 // MaxOrder generates information about the maximum order size and associated
-// fees that the wallet can support for the given DEX configuration. The fees are an
-// estimate based on current network conditions, and will be <= the fees
-// associated with nfo.MaxFeeRate. For quote assets, the caller will have to
+// fees that the wallet can support for the given DEX configuration. The
+// provided FeeSuggestion is used directly, and should be an estimate based on
+// current network conditions. For quote assets, the caller will have to
 // calculate lotSize based on a rate conversion from the base asset's lot size.
 // lotSize must not be zero and will cause a panic if so.
 func (dcr *ExchangeWallet) MaxOrder(ord *asset.MaxOrderForm) (*asset.SwapEstimate, error) {
@@ -1275,7 +1311,10 @@ func (dcr *ExchangeWallet) splitOption(req *asset.PreSwapForm, utxos []*composit
 // PreRedeem generates an estimate of the range of redemption fees that could
 // be assessed.
 func (dcr *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, error) {
-	feeRate := dcr.targetFeeRateWithFallback(dcr.redeemConfTarget, req.FeeSuggestion)
+	feeRate := req.FeeSuggestion
+	if feeRate == 0 { // or just document that the caller must set it?
+		feeRate = dcr.targetFeeRateWithFallback(dcr.redeemConfTarget, req.FeeSuggestion)
+	}
 	// Best is one transaction with req.Lots inputs and 1 output.
 	var best uint64 = dexdcr.MsgTxOverhead
 	// Worst is req.Lots transactions, each with one input and one output.
@@ -1538,7 +1577,7 @@ func (dcr *ExchangeWallet) tryFund(utxos []*compositeUTXO, enough func(sum uint6
 	}
 
 	tryUTXOs := func(minconf int64) (ok bool, err error) {
-		sum, size = 0, 0
+		sum, size = 0, 0 // size is only sum of inputs size, not including tx overhead or outputs
 		coins, spents, redeemScripts = nil, nil, nil
 
 		okUTXOs := make([]*compositeUTXO, 0, len(utxos)) // over-allocate
@@ -2042,7 +2081,8 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 }
 
 // Redeem sends the redemption transaction, which may contain more than one
-// redemption.
+// redemption. FeeSuggestion is just a fallback if an internal estimate using
+// the wallet's redeem confirm block target setting is not available.
 func (dcr *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uint64, error) {
 	// Create a transaction that spends the referenced contract.
 	msgTx := wire.NewMsgTx()
@@ -2788,13 +2828,19 @@ func (dcr *ExchangeWallet) fatalFindRedemptionsError(err error, contractOutpoint
 
 // Refund refunds a contract. This can only be used after the time lock has
 // expired. This MUST return an asset.CoinNotFoundError error if the coin is
-// spent.
+// spent. If the provided fee rate is zero, an internal estimate will be used,
+// otherwise it will be used directly, but this behavior may change.
 // NOTE: The contract cannot be retrieved from the unspent coin info as the
 // wallet does not store it, even though it was known when the init transaction
 // was created. The client should store this information for persistence across
 // sessions.
-func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes, feeSuggestion uint64) (dex.Bytes, error) {
-	msgTx, err := dcr.refundTx(coinID, contract, 0, nil, feeSuggestion)
+func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
+	// Caller should provide a non-zero fee rate, so we could just do
+	// dcr.feeRateWithFallback(feeRate), but be permissive for now.
+	if feeRate == 0 {
+		feeRate = dcr.targetFeeRateWithFallback(2, 0)
+	}
+	msgTx, err := dcr.refundTx(coinID, contract, 0, nil, feeRate)
 	if err != nil {
 		return nil, fmt.Errorf("error creating refund tx: %w", err)
 	}
@@ -2814,7 +2860,7 @@ func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes, feeSuggestion uint
 // refundTx crates and signs a contract's refund transaction. If refundAddr is
 // not supplied, one will be requested from the wallet. If val is not supplied
 // it will be retrieved with gettxout.
-func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refundAddr stdaddr.Address, feeSuggestion uint64) (*wire.MsgTx, error) {
+func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refundAddr stdaddr.Address, feeRate uint64) (*wire.MsgTx, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
@@ -2842,7 +2888,6 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 	}
 
 	// Create the transaction that spends the contract.
-	feeRate := dcr.targetFeeRateWithFallback(2, feeSuggestion)
 	msgTx := wire.NewMsgTx()
 	msgTx.LockTime = uint32(lockTime)
 	prevOut := wire.NewOutPoint(txHash, vout, wire.TxTreeRegular)
@@ -3211,10 +3256,11 @@ func (dcr *ExchangeWallet) withdraw(addr stdaddr.Address, val, feeRate uint64) (
 
 // sendToAddress sends an exact amount to an address. Transaction fees will be
 // in addition to the sent amount, and the output will be the zeroth output.
-// TODO: Just use the sendtoaddress rpc since dcrwallet respects locked utxos.
+// TODO: Just use the sendtoaddress rpc since dcrwallet respects locked utxos!
 func (dcr *ExchangeWallet) sendToAddress(addr stdaddr.Address, amt, feeRate uint64) (*wire.MsgTx, uint64, error) {
+	baseSize := uint32(dexdcr.MsgTxOverhead + dexdcr.P2PKHOutputSize*2) // may be extra if change gets omitted (see signTxAndAddChange)
 	enough := func(sum uint64, size uint32, unspent *compositeUTXO) bool {
-		txFee := uint64(size+unspent.input.Size()) * feeRate
+		txFee := uint64(baseSize+size+unspent.input.Size()) * feeRate
 		return sum+toAtoms(unspent.rpc.Amount) >= amt+txFee
 	}
 	coins, _, _, _, err := dcr.fund(enough)
@@ -3358,8 +3404,8 @@ func (dcr *ExchangeWallet) signTxAndAddChange(baseTx *wire.MsgTx, feeRate uint64
 
 	minFee := feeRate * size
 	if subtractFrom == -1 && minFee > remaining {
-		return nil, nil, "", 0, fmt.Errorf("not enough funds to cover minimum fee rate. %s > %s",
-			amount(minFee), amount(remaining))
+		return nil, nil, "", 0, fmt.Errorf("not enough funds to cover minimum fee rate of %v atoms/B: %s > %s remaining",
+			feeRate, amount(minFee), amount(remaining))
 	}
 	if int(subtractFrom) >= len(baseTx.TxOut) {
 		return nil, nil, "", 0, fmt.Errorf("invalid subtractFrom output %d for tx with %d outputs",
