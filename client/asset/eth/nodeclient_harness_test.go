@@ -44,6 +44,7 @@ import (
 	"decred.org/dcrdex/dex/testing/eth/reentryattack"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -919,6 +920,47 @@ func feesAtBlk(ctx context.Context, n *nodeClient, blkNum int64) (fees *big.Int,
 	return tip.Add(tip, hdr.BaseFee), nil
 }
 
+// initiateOverflow is just like *contractorV0.initiate but sets the first swap
+// value to a max uint256 minus one emv unit.
+func initiateOverflow(c *contractorV0, txOpts *bind.TransactOpts, contracts []*asset.Contract) (*types.Transaction, error) {
+	inits := make([]swapv0.ETHSwapInitiation, 0, len(contracts))
+	secrets := make(map[[32]byte]bool, len(contracts))
+
+	for i, contract := range contracts {
+		if len(contract.SecretHash) != dexeth.SecretHashSize {
+			return nil, fmt.Errorf("wrong secret hash length. wanted %d, got %d", dexeth.SecretHashSize, len(contract.SecretHash))
+		}
+
+		var secretHash [32]byte
+		copy(secretHash[:], contract.SecretHash)
+
+		if secrets[secretHash] {
+			return nil, fmt.Errorf("secret hash %s is a duplicate", contract.SecretHash)
+		}
+		secrets[secretHash] = true
+
+		if !common.IsHexAddress(contract.Address) {
+			return nil, fmt.Errorf("%q is not an address", contract.Address)
+		}
+
+		val := c.evmify(contract.Value)
+		if i == 0 {
+			val = big.NewInt(2)
+			val.Exp(val, big.NewInt(256), nil)
+			val.Sub(val, c.evmify(1))
+			fmt.Println(val)
+		}
+		inits = append(inits, swapv0.ETHSwapInitiation{
+			RefundTimestamp: big.NewInt(int64(contract.LockTime)),
+			SecretHash:      secretHash,
+			Participant:     common.HexToAddress(contract.Address),
+			Value:           val,
+		})
+	}
+
+	return c.contractV0.Initiate(txOpts, inits)
+}
+
 func testInitiate(t *testing.T, assetID uint32) {
 	if assetID != BipID {
 		prepareTokenClients(t)
@@ -958,10 +1000,10 @@ func testInitiate(t *testing.T, assetID uint32) {
 	now := uint64(time.Now().Unix())
 
 	tests := []struct {
-		name    string
-		swaps   []*asset.Contract
-		success bool
-		swapErr bool
+		name              string
+		swaps             []*asset.Contract
+		success, overflow bool
+		swapErr           bool
 	}{
 		{
 			name:    "1 swap ok",
@@ -1001,23 +1043,23 @@ func testInitiate(t *testing.T, assetID uint32) {
 				newContract(0, secretHashes[4], 1),
 			},
 		},
-		// {
-		// 	// Preventing this used to need explicit checks before solidity 0.8, but now the
-		// 	// compiler checks for integer overflows by default.
-		// 	name:    "integer overflow attack",
-		// 	success: false,
-		// 	txValue: 999,
-		// 	swaps: []*asset.Contract{
-		// 		newContract(now, secretHashes[5], maxInt),
-		// 		newContract(now, secretHashes[6], 1000),
-		// 	},
-		// },
+		{
+			// Preventing this used to need explicit checks before solidity 0.8, but now the
+			// compiler checks for integer overflows by default.
+			name:     "value addition overflows",
+			success:  false,
+			overflow: true,
+			swaps: []*asset.Contract{
+				newContract(now, secretHashes[5], 0), // Will be set to max uint256 - 1 evm unit
+				newContract(now, secretHashes[6], 3),
+			},
+		},
 		{
 			name:    "swap with 0 value",
 			success: false,
 			swaps: []*asset.Contract{
-				newContract(now, secretHashes[5], 0),
-				newContract(now, secretHashes[6], 1),
+				newContract(now, secretHashes[7], 0),
+				newContract(now, secretHashes[8], 1),
 			},
 		},
 	}
@@ -1050,9 +1092,18 @@ func testInitiate(t *testing.T, assetID uint32) {
 			}
 		}
 
+		if test.overflow {
+			optsVal = 2
+		}
+
 		expGas := gases.SwapN(len(test.swaps))
 		txOpts, _ := ethClient.txOpts(ctx, optsVal, expGas, dexeth.GweiToWei(maxFeeRate))
-		tx, err := c.initiate(txOpts, test.swaps)
+		var tx *types.Transaction
+		if test.overflow {
+			tx, err = initiateOverflow(c.(*contractorV0), txOpts, test.swaps)
+		} else {
+			tx, err = c.initiate(txOpts, test.swaps)
+		}
 		if err != nil {
 			if test.swapErr {
 				continue
