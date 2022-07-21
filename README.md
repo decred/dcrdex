@@ -239,7 +239,7 @@ for more details about how atomic swaps work.
 ### Dependencies
 
 1. [Go 1.17 or 1.18](https://golang.org/doc/install)
-2. [Node 16 or 17](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) is used to bundle resources for the browser interface. It's important to note that the DEX client has no external javascript dependencies. The client doesn't import any Node packages. We only use Node to lint and compile our own javascript and css resources.
+2. [Node 16 or 17](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) is used to bundle resources for the browser interface. It's important to note that the DEX client has no external JavaScript dependencies. The client doesn't import any Node packages. We only use Node to lint and compile our own JavaScript and css resources.
 3. [dcrd](https://github.com/decred/dcrd) and [dcrwallet](https://github.com/decred/dcrwallet), installed from the [v1.7.x release binaries](https://github.com/decred/decred-release/releases), or built from the `release-v1.7` branches.
 4. [Bitcoin Core v0.21.x or v22.x](https://bitcoincore.org/en/download/) (bitcoind or bitcoin-qt) wallet. If you use v22, you must **not** use a "descriptor" wallet.
 5. At least 2 GB of available system memory.
