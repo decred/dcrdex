@@ -5754,6 +5754,7 @@ func (c *Core) reReserveFunding(w *xcWallet) {
 				c.notify(newOrderNote(topic, subject, detail, db.ErrorLevel, tracker.coreOrderInternal()))
 			}
 
+			tracker.recalcFilled() // Make sure Remaining is accurate.
 			trade := tracker.Trade()
 
 			fromID := tracker.Quote()
@@ -5761,45 +5762,48 @@ func (c *Core) reReserveFunding(w *xcWallet) {
 				fromID = tracker.Base()
 			}
 
-			denom, marketMult, limitMult := lcm(uint64(len(tracker.matches)), trade.Quantity)
-			var refundNum, redeemNum uint64
-
-			addMatchRedemption := func(match *matchTracker) {
-				if tracker.isMarketBuy() {
-					redeemNum += marketMult // * 1
+			// Count the number of refunds and redeems we will need to plan for
+			// with this trade. First we count based on the active matches, then
+			// we account for the unfilled portion of the order if it can still
+			// match.
+			var refundCount, redeemCount uint32
+			if tracker.metaData.LotSize == 0 {
+				// A legacy order and the user upgraded with an active order,
+				// but this would have been patched on load in dbTrackers.
+				mktID := marketName(tracker.Base(), tracker.Quote())
+				mktConf := dc.marketConfig(mktID)
+				if mktConf == nil { // no reserves for this unlucky order, but where is the market!?!
+					c.log.Warnf("No market config for market %v", mktID)
 				} else {
-					redeemNum += match.Quantity * limitMult
+					tracker.metaData.LotSize = mktConf.LotSize
 				}
 			}
-
-			addMatchRefund := func(match *matchTracker) {
-				if tracker.isMarketBuy() {
-					refundNum += marketMult // * 1
-				} else {
-					refundNum += match.Quantity * limitMult
-				}
-			}
-
 			isActive := tracker.metaData.Status == order.OrderStatusBooked || tracker.metaData.Status == order.OrderStatusEpoch
 			var matchesNeedingCoins []*matchTracker
 			for _, match := range tracker.matches {
+				if tracker.metaData.LotSize == 0 {
+					break
+				}
+				lots := uint32(match.Quantity / tracker.metaData.LotSize)
 				if match.Side == order.Maker {
 					if match.Status < order.MakerSwapCast {
 						matchesNeedingCoins = append(matchesNeedingCoins, match)
 					}
+					// As maker, plan for a refund until we have redeemed theirs.
 					if match.Status < order.MakerRedeemed {
-						addMatchRedemption(match)
-						addMatchRefund(match)
+						redeemCount += lots
+						refundCount += lots
 					}
 				} else { // Taker
 					if match.Status < order.TakerSwapCast {
 						matchesNeedingCoins = append(matchesNeedingCoins, match)
 					}
+					// As taker plan for a refund until they have redeemed ours.
 					if match.Status < order.MakerRedeemed {
-						addMatchRefund(match)
+						refundCount += lots
 					}
 					if match.Status < order.MatchComplete {
-						addMatchRedemption(match)
+						redeemCount += lots
 					}
 				}
 			}
@@ -5843,38 +5847,32 @@ func (c *Core) reReserveFunding(w *xcWallet) {
 
 			tracker.mtx.Lock()
 
-			// Refund and redemption reserves for active matches. Doing this
-			// under mutex lock, but noting that the underlying calls to
-			// ReReserveRedemption and ReReserveRefund could potentially involve
-			// long-running RPC calls.
+			// If new matches can still be made for the order (booked or epoch),
+			// reserve any funds needed to process those matches (e.g. for
+			// refund and redeem gas). Doing this under mutex lock, but the
+			// underlying calls to ReserveNRefunds and ReserveNRedemptions could
+			// potentially involve long-running RPC calls.
+			if isActive && tracker.metaData.LotSize != 0 {
+				maxLotsRemaining := uint32(trade.Remaining() / tracker.metaData.LotSize)
+				// If this is a market buy, it can only be in epoch status here.
+				// Since the quantity is in units of the quote asset, the number of
+				// matches remaining can only be estimated.
+				if tracker.isMarketBuy() { // resume with epoch market buy - rare!
+					maxLotsRemaining = marketBuyReservesSlippageBuffer // TODO: check midGap and convert units
+				}
+				redeemCount += maxLotsRemaining
+				refundCount += maxLotsRemaining
+			}
 			if fromID == w.AssetID {
-				tracker.refundLocked = 0
-				if refundNum != 0 {
-					tracker.lockRefundFraction(refundNum, denom)
-				}
+				tracker.reserveRefunds(refundCount)
 			} else {
-				tracker.redemptionLocked = 0
-				if redeemNum != 0 {
-					tracker.lockRedemptionFraction(redeemNum, denom)
-				}
+				tracker.reserveRedeems(redeemCount)
 			}
 
 			// Funding coins
 			if coins != nil {
 				tracker.coinsLocked = len(coins) > 0
 				tracker.coins = mapifyCoins(coins)
-			}
-
-			// Refund and redemption reserves for booked orders.
-
-			tracker.recalcFilled() // Make sure Remaining is accurate.
-
-			if isActive {
-				if fromID == w.AssetID {
-					tracker.lockRefundFraction(trade.Remaining(), trade.Quantity)
-				} else {
-					tracker.lockRedemptionFraction(trade.Remaining(), trade.Quantity)
-				}
 			}
 
 			tracker.mtx.Unlock()

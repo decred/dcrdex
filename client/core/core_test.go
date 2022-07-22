@@ -6935,8 +6935,10 @@ func TestReconfigureWallet(t *testing.T) {
 		matches: map[order.MatchID]*matchTracker{
 			{}: match,
 		},
-		metaData: &db.OrderMetaData{},
-		dc:       rig.dc,
+		metaData: &db.OrderMetaData{
+			LotSize: dcrBtcLotSize,
+		},
+		dc: rig.dc,
 	}
 
 	// Error checking if wallet owns address.
