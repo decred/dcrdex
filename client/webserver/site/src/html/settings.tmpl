@@ -16,6 +16,24 @@
         [[[Show pop-up notifications]]]
       </label>
     </div>
+    <div {{if not .UserInfo.Authed}} class="d-hide"{{end}}>
+    <span>Fiat Currency: </span><span id="fiatCurrency">{{.FiatCurrency}}</span>
+    </div>
+    <div id="fiatRateSources" {{if not .UserInfo.Authed}} class="d-hide"{{end}}>
+    <span class="mb-2" data-tooltip="Sources may provide fiat exchange rates for different subsets of assets.
+     You should select all sources that are acceptable to get fiat exchange rates for the most assets. 
+     Assets with fiat rates from multiple sources will use the average from all of those sources.
+     Note: dcrdate provides fiat exchange rates for only BTC and DCR.">
+     [[[fiat_exchange_rate_sources]]]:
+    <span class="ico-info"></span>
+    </span>
+    {{range $source, $enabled := .FiatRateSources}}
+    <div class="form-check">
+      <input class="form-check-input" type="checkbox" value="{{$source}}" id="{{$source}}" {{if $enabled}} checked {{end}}>
+      <label class="form-check-label" for="{{$source}}">{{$source}}</label>
+    </div>
+    {{end}}
+    </div>
     <div>
       <div id="exchanges" {{if eq (len .UserInfo.Exchanges) 0}} class="d-hide"{{end}}>
         <h5>[[[registered dexes]]]</h5>

@@ -12,9 +12,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
-	"decred.org/dcrdex/client/db"
 	dexdb "decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
@@ -103,6 +103,7 @@ var (
 	refundReservesKey      = []byte("refundReservesKey")
 	byteTrue               = encode.ByteTrue
 	backupDir              = "backup"
+	disabledRateSourceKey  = []byte("disabledRateSources")
 )
 
 // BoltDB is a bbolt-based database backend for a DEX client. BoltDB satisfies
@@ -878,7 +879,7 @@ func (fs filterSet) check(oidB []byte, oBkt *bbolt.Bucket) bool {
 
 // Orders fetches a slice of orders, sorted by descending time, and filtered
 // with the provided OrderFilter. Orders does not return cancel orders.
-func (db *BoltDB) Orders(orderFilter *db.OrderFilter) (ords []*dexdb.MetaOrder, err error) {
+func (db *BoltDB) Orders(orderFilter *dexdb.OrderFilter) (ords []*dexdb.MetaOrder, err error) {
 	// Default filter is just to exclude cancel orders.
 	filters := filterSet{
 		func(oidB []byte, oBkt *bbolt.Bucket) bool {
@@ -1104,7 +1105,7 @@ func updateOrderBucket(ob, archivedOB *bbolt.Bucket, oid order.OrderID, status o
 }
 
 // UpdateOrderMetaData updates the order metadata, not including the Host.
-func (db *BoltDB) UpdateOrderMetaData(oid order.OrderID, md *db.OrderMetaData) error {
+func (db *BoltDB) UpdateOrderMetaData(oid order.OrderID, md *dexdb.OrderMetaData) error {
 	return db.ordersUpdate(func(ob, archivedOB *bbolt.Bucket) error {
 		oBkt, err := updateOrderBucket(ob, archivedOB, oid, md.Status)
 		if err != nil {
@@ -1483,7 +1484,7 @@ func (db *BoltDB) SetWalletPassword(wid []byte, newEncPW []byte) error {
 }
 
 // UpdateBalance updates balance in the wallet bucket.
-func (db *BoltDB) UpdateBalance(wid []byte, bal *db.Balance) error {
+func (db *BoltDB) UpdateBalance(wid []byte, bal *dexdb.Balance) error {
 	return db.walletsUpdate(func(master *bbolt.Bucket) error {
 		wBkt := master.Bucket(wid)
 		if wBkt == nil {
@@ -1534,7 +1535,7 @@ func makeWallet(wBkt *bbolt.Bucket) (*dexdb.Wallet, error) {
 
 	balB := getCopy(wBkt, balanceKey)
 	if balB != nil {
-		bal, err := db.DecodeBalance(balB)
+		bal, err := dexdb.DecodeBalance(balB)
 		if err != nil {
 			return nil, fmt.Errorf("DecodeBalance error: %w", err)
 		}
@@ -1838,7 +1839,7 @@ func (idx *timeIndexNewest) add(t uint64, k []byte, b *bbolt.Bucket) {
 // operations. Optionally accepts a time to delete orders with a later time
 // stamp. Accepts an optional function to perform on deleted orders.
 func (db *BoltDB) DeleteInactiveOrders(ctx context.Context, olderThan *time.Time,
-	perOrderFn func(ords *db.MetaOrder) error) error {
+	perOrderFn func(ords *dexdb.MetaOrder) error) error {
 	const batchSize = 1000
 	var (
 		finished   bool
@@ -1979,7 +1980,7 @@ func orderSide(tx *bbolt.Tx, oid order.OrderID) (sell bool, err error) {
 // operations. Optionally accepts a time to delete matchess with a later time
 // stamp. Accepts an optional function to perform on deleted matches.
 func (db *BoltDB) DeleteInactiveMatches(ctx context.Context, olderThan *time.Time,
-	perMatchFn func(mtch *db.MetaMatch, isSell bool) error) error {
+	perMatchFn func(mtch *dexdb.MetaMatch, isSell bool) error) error {
 	const batchSize = 1000
 	var (
 		finished   bool
@@ -2073,6 +2074,41 @@ func (db *BoltDB) DeleteInactiveMatches(ctx context.Context, olderThan *time.Tim
 		}
 	}
 	return nil
+}
+
+// SaveDisabledRateSources updates disabled fiat rate sources.
+func (db *BoltDB) SaveDisabledRateSources(disabledSources []string) error {
+	return db.Update(func(tx *bbolt.Tx) error {
+		bkt := tx.Bucket(appBucket)
+		if bkt == nil {
+			return fmt.Errorf("failed to open %s bucket", string(appBucket))
+		}
+		return bkt.Put(disabledRateSourceKey, []byte(strings.Join(disabledSources, ",")))
+	})
+}
+
+// DisabledRateSources retrieves a map of disabled fiat rate sources.
+func (db *BoltDB) DisabledRateSources() (disabledSources []string, err error) {
+	return disabledSources, db.View(func(tx *bbolt.Tx) error {
+		bkt := tx.Bucket(appBucket)
+		if bkt == nil {
+			return fmt.Errorf("no %s bucket", string(appBucket))
+		}
+
+		disabledString := string(bkt.Get(disabledRateSourceKey))
+		if disabledString == "" {
+			return nil
+		}
+
+		disabled := strings.Split(disabledString, ",")
+		disabledSources = make([]string, len(disabled))
+		for _, token := range disabled {
+			if token != "" {
+				disabledSources = append(disabledSources, token)
+			}
+		}
+		return nil
+	})
 }
 
 // timeNow is the current unix timestamp in milliseconds.

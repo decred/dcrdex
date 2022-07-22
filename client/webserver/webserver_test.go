@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -69,6 +70,7 @@ type TCore struct {
 	notHas           bool
 	notRunning       bool
 	notOpen          bool
+	rateSourceErr    error
 }
 
 func (c *TCore) Network() dex.Network                         { return dex.Mainnet }
@@ -84,6 +86,13 @@ func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) { r
 func (c *TCore) EstimateRegistrationTxFee(host string, certI interface{}, assetID uint32) (uint64, error) {
 	return 0, nil
 }
+func (c *TCore) ToggleRateSourceStatus(src string, disable bool) error {
+	return c.rateSourceErr
+}
+func (c *TCore) FiatRateSources() map[string]bool {
+	return nil
+}
+
 func (c *TCore) InitializeClient(pw, seed []byte) error     { return c.initErr }
 func (c *TCore) Login(pw []byte) (*core.LoginResult, error) { return &core.LoginResult{}, c.loginErr }
 func (c *TCore) IsInitialized() bool                        { return c.isInited }
@@ -521,7 +530,7 @@ func TestAPIInit(t *testing.T) {
 	tCore.initErr = nil
 }
 
-// TODO: TesAPIGetDEXInfo
+// TODO: TestAPIGetDEXInfo
 
 func TestAPINewWallet(t *testing.T) {
 	writer := new(TWriter)
@@ -711,5 +720,76 @@ func TestPasswordCache(t *testing.T) {
 
 	if len(s.cachedPasswords) != 0 {
 		t.Fatal("logout should clear all cached passwords")
+	}
+}
+
+func TestAPI_ToggleRatesource(t *testing.T) {
+	s, tCore, shutdown, err := newTServer(t, false)
+	if err != nil {
+		t.Fatalf("error starting server: %v", err)
+	}
+	defer shutdown()
+	writer := new(TWriter)
+	reader := new(TReader)
+
+	type rateSourceForm struct {
+		Disable bool   `json:"disable"`
+		Source  string `json:"source"`
+	}
+
+	// Test enabling fiat rate sources.
+	enableTests := []struct {
+		name, source, want string
+		wantErr            error
+	}{{
+		name:    "Invalid rate source",
+		source:  "binance",
+		wantErr: errors.New("cannot enable unkown fiat rate source"),
+		want:    `{"ok":false,"msg":"cannot enable unkown fiat rate source"}`,
+	}, {
+		name:   "ok valid source",
+		source: "dcrdata",
+		want:   `{"ok":true}`,
+	}, {
+		name:   "ok already initialized",
+		source: "dcrdata",
+		want:   `{"ok":true}`,
+	}}
+
+	for _, test := range enableTests {
+		body := &rateSourceForm{
+			Disable: false,
+			Source:  test.source,
+		}
+		tCore.rateSourceErr = test.wantErr
+		ensureResponse(t, s.apiToggleRateSource, test.want, reader, writer, body, nil)
+	}
+
+	// Test disabling fiat rate sources.
+	disableTests := []struct {
+		name, source, want string
+		wantErr            error
+	}{{
+		name:    "Invalid rate source",
+		source:  "binance",
+		wantErr: errors.New("cannot disable unkown fiat rate source"),
+		want:    `{"ok":false,"msg":"cannot disable unkown fiat rate source"}`,
+	}, {
+		name:   "ok valid source",
+		source: "Messari",
+		want:   `{"ok":true}`,
+	}, {
+		name:   "ok already disabled/not initialized",
+		source: "Messari",
+		want:   `{"ok":true}`,
+	}}
+
+	for _, test := range disableTests {
+		body := &rateSourceForm{
+			Disable: true,
+			Source:  test.source,
+		}
+		tCore.rateSourceErr = test.wantErr
+		ensureResponse(t, s.apiToggleRateSource, test.want, reader, writer, body, nil)
 	}
 }

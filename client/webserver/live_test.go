@@ -436,6 +436,7 @@ type TCore struct {
 	noteFeed    chan core.Notification
 	orderMtx    sync.Mutex
 	epochOrders []*core.BookUpdate
+	fiatSources map[string]bool
 }
 
 // TDriver implements the interface required of all exchange wallets.
@@ -481,6 +482,11 @@ func newTCore() *TCore {
 			145: randomBalance(145),
 		},
 		noteFeed: make(chan core.Notification, 1),
+		fiatSources: map[string]bool{
+			"dcrdata":     true,
+			"Messari":     true,
+			"Coinpaprika": true,
+		},
 	}
 }
 
@@ -1400,6 +1406,17 @@ func (c *TCore) User() *core.User {
 		Exchanges:   exchanges,
 		Initialized: c.inited,
 		Assets:      c.SupportedAssets(),
+		FiatRates: map[uint32]float64{
+			0:   21_208.61, // btc
+			2:   59.08,     // ltc
+			42:  25.46,     // dcr
+			22:  0.5117,    // mona
+			28:  0.1599,    // vtc
+			141: 0.2048,    // kmd
+			3:   0.06769,   // doge
+			145: 114.68,    // bch
+			60:  1_209.51,  // eth
+		},
 	}
 	return user
 }
@@ -1614,6 +1631,13 @@ func (c *TCore) UpdateDEXHost(string, string, []byte, interface{}) (*core.Exchan
 }
 func (c *TCore) WalletRestorationInfo(pw []byte, assetID uint32) ([]*asset.WalletRestoration, error) {
 	return nil, nil
+}
+func (c *TCore) ToggleRateSourceStatus(src string, disable bool) error {
+	c.fiatSources[src] = !disable
+	return nil
+}
+func (c *TCore) FiatRateSources() map[string]bool {
+	return c.fiatSources
 }
 
 func TestServer(t *testing.T) {

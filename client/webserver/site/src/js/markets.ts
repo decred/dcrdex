@@ -1399,7 +1399,10 @@ export default class MarketsPage extends BasePage {
       page.vOrderType.textContent = order.tifnow ? orderDesc + ' (immediate)' : orderDesc
       page.vRate.textContent = Doc.formatCoinValue(order.rate / this.market.rateConversionFactor)
       page.vQty.textContent = Doc.formatCoinValue(order.qty, baseAsset.info.unitinfo)
-      page.vTotal.textContent = Doc.formatCoinValue(order.rate / OrderUtil.RateEncodingFactor * order.qty, quoteAsset.info.unitinfo)
+      const total = order.rate / OrderUtil.RateEncodingFactor * order.qty
+      page.vTotal.textContent = Doc.formatCoinValue(total, quoteAsset.info.unitinfo)
+      // Format total fiat value.
+      this.showFiatValue(quoteAsset.id, total, page.vFiatTotal)
     } else {
       Doc.hide(page.verifyLimit)
       Doc.show(page.verifyMarket)
@@ -1407,12 +1410,16 @@ export default class MarketsPage extends BasePage {
       const ui = order.sell ? this.market.baseUnitInfo : this.market.quoteUnitInfo
       page.vmFromTotal.textContent = Doc.formatCoinValue(order.qty, ui)
       page.vmFromAsset.textContent = fromAsset.symbol.toUpperCase()
+      // Format fromAsset fiat value.
+      this.showFiatValue(fromAsset.id, order.qty, page.vmFromTotalFiat)
       const gap = this.midGap()
       if (gap) {
         Doc.show(page.vMarketEstimate)
         const received = order.sell ? order.qty * gap : order.qty / gap
         page.vmToTotal.textContent = Doc.formatCoinValue(received, toAsset.info.unitinfo)
         page.vmToAsset.textContent = toAsset.symbol.toUpperCase()
+        // Format recieved value to fiat equivalent.
+        this.showFiatValue(toAsset.id, received, page.vmTotalFiat)
       } else {
         Doc.hide(page.vMarketEstimate)
       }
@@ -1439,6 +1446,16 @@ export default class MarketsPage extends BasePage {
       Doc.hide(page.vPreorder)
       if (State.passwordIsCached()) this.unlockWalletsForEstimates('')
       else Doc.show(page.vUnlockPreorder)
+    }
+  }
+
+  // showFiatValue displays the fiat equivalent for an order quantity.
+  showFiatValue (assetID: number, qty: number, display: PageElement) {
+    if (display) {
+      const rate = app().fiatRatesMap[assetID]
+      display.textContent = Doc.formatFiatConversion(qty, rate, app().unitInfo(assetID))
+      if (rate) Doc.show(display.parentElement as Element)
+      else Doc.hide(display.parentElement as Element)
     }
   }
 

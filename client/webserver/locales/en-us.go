@@ -243,4 +243,5 @@ var EnUS = map[string]string{
 	"export_wallet_disclaimer":    `<span class="warning-text">Using an externally restored wallet while you have active trades running in the DEX could result in failed trades and LOST FUNDS.</span> It is recommended that you do not export your wallet unless you are an experienced user and you know what are doing.`,
 	"export_wallet_msg":           "Below are the seeds needed to restore your wallet in some popular external wallets. DO NOT make transactions with your external wallet while you have active trades running on the DEX.",
 	"clipboard_warning":           "Copy/Pasting a wallet seed is a potential security risk. Do this at your own risk.",
+	"fiat_exchange_rate_sources":  "Fiat Exchange Rate Sources",
 }

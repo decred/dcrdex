@@ -130,4 +130,10 @@ type DB interface {
 	SetSeedGenerationTime(time uint64) error
 	// SeedGenerationTime fetches the time when the app seed was generated.
 	SeedGenerationTime() (uint64, error)
+	// DisabledRateSources retrieves disabled fiat rate sources from the
+	// database.
+	DisabledRateSources() ([]string, error)
+	// SaveDisabledRateSources saves disabled fiat rate sources in the database.
+	// A source name must not contain a comma.
+	SaveDisabledRateSources(disabledSources []string) error
 }

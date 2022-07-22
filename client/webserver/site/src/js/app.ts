@@ -35,7 +35,8 @@ import {
   LogMessage,
   NoteElement,
   BalanceResponse,
-  APIResponse
+  APIResponse,
+  RateNote
 } from './registry'
 
 const idel = Doc.idel // = element by id
@@ -90,6 +91,7 @@ export default class Application {
   assets: Record<number, SupportedAsset>
   exchanges: Record<string, Exchange>
   walletMap: Record<number, WalletState>
+  fiatRatesMap: Record<number, number>
   tooltip: HTMLElement
   page: Record<string, HTMLElement>
   loadedPage: Page | null
@@ -101,12 +103,14 @@ export default class Application {
     this.notes = []
     this.pokes = []
     // The "user" is a large data structure that contains nearly all state
-    // information, including exchanges, markets, wallets, and orders.
+    // information, including exchanges, markets, wallets, orders and exchange
+    // rates for assets.
     this.user = {
       exchanges: {},
       inited: false,
       seedgentime: 0,
       assets: {},
+      fiatRates: {},
       authed: false,
       ok: true
     }
@@ -223,11 +227,13 @@ export default class Application {
     this.assets = user.assets
     this.exchanges = user.exchanges
     this.walletMap = {}
+    this.fiatRatesMap = user.fiatRates
     for (const [assetID, asset] of (Object.entries(user.assets) as [any, SupportedAsset][])) {
       if (asset.wallet) {
         this.walletMap[assetID] = asset.wallet
       }
     }
+
     this.updateMenuItemsDisplay()
     return user
   }
@@ -571,8 +577,9 @@ export default class Application {
         const asset = this.assets[wallet.assetID]
         asset.wallet = wallet
         this.walletMap[wallet.assetID] = wallet
+        const bal = wallet.balance.available
         const balances = this.main.querySelectorAll(`[data-balance-target="${wallet.assetID}"]`)
-        balances.forEach(el => { el.textContent = Doc.formatFullPrecision(wallet.balance.available, asset.info.unitinfo) })
+        balances.forEach(el => { el.textContent = Doc.formatFullPrecision(bal, asset.info.unitinfo) })
         break
       }
       case 'match': {
@@ -593,6 +600,10 @@ export default class Application {
         // Spots can come before the user is fetched after login.
         if (!xc) break
         for (const [mktName, spot] of Object.entries(n.spots)) xc.markets[mktName].spot = spot
+        break
+      }
+      case 'fiatrateupdate': {
+        this.fiatRatesMap = (note as RateNote).fiatRates
       }
     }
 
