@@ -3007,7 +3007,7 @@ func TestLocktimeExpired(t *testing.T) {
 
 	ensureResult := func(tag string, expErr, expExpired bool) {
 		t.Helper()
-		expired, _, err := eth.LocktimeExpired(contract)
+		expired, _, err := eth.LocktimeExpired(context.Background(), contract)
 		switch {
 		case err != nil:
 			if !expErr {

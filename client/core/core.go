@@ -925,8 +925,12 @@ func (c *Core) tickAsset(dc *dexConnection, assetID uint32) assetMap {
 	}
 	dc.tradeMtx.RUnlock()
 
+	updated := make(assetMap)
 	updateChan := make(chan assetMap)
 	for _, trade := range assetTrades {
+		if c.ctx.Err() != nil { // don't fail each one in sequence if shutting down
+			return updated
+		}
 		trade := trade // bad go, bad
 		go func() {
 			newUpdates, err := c.tick(trade)
@@ -937,7 +941,6 @@ func (c *Core) tickAsset(dc *dexConnection, assetID uint32) assetMap {
 		}()
 	}
 
-	updated := make(assetMap)
 	for range assetTrades {
 		updated.merge(<-updateChan)
 	}
@@ -6513,6 +6516,9 @@ func (c *Core) listen(dc *dexConnection) {
 		}
 
 		for _, trade := range activeTrades {
+			if c.ctx.Err() != nil { // don't fail each one in sequence if shutting down
+				return
+			}
 			newUpdates, err := c.tick(trade)
 			if err != nil {
 				c.log.Error(err)

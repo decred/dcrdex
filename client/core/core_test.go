@@ -801,7 +801,7 @@ func (w *TXCWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroadcas
 	return w.auditInfo, w.auditErr
 }
 
-func (w *TXCWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, error) {
+func (w *TXCWallet) LocktimeExpired(_ context.Context, contract dex.Bytes) (bool, time.Time, error) {
 	return w.contractExpired, w.contractLockTime, nil
 }
 
@@ -5052,7 +5052,7 @@ func TestRefunds(t *testing.T) {
 			checkStatus("taker swapped", match, order.TakerSwapCast)
 		}
 		// Confirm isRefundable = true.
-		if !tracker.isRefundable(match) {
+		if !tracker.isRefundable(tCore.ctx, match) {
 			t.Fatalf("%s's swap not refundable", match.Side)
 		}
 		// Check refund.
@@ -5065,7 +5065,7 @@ func TestRefunds(t *testing.T) {
 			t.Fatalf("expected %d refund amount, got %d", expectAmt, amtRefunded)
 		}
 		// Confirm isRefundable = false.
-		if tracker.isRefundable(match) {
+		if tracker.isRefundable(tCore.ctx, match) {
 			t.Fatalf("%s's swap refundable after being refunded", match.Side)
 		}
 		// Expect refund re-attempt to not refund any coin.

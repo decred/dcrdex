@@ -2449,7 +2449,7 @@ func (dcr *ExchangeWallet) lookupTxOutput(ctx context.Context, txHash *chainhash
 
 // LocktimeExpired returns true if the specified contract's locktime has
 // expired, making it possible to issue a Refund.
-func (dcr *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, error) {
+func (dcr *ExchangeWallet) LocktimeExpired(ctx context.Context, contract dex.Bytes) (bool, time.Time, error) {
 	_, _, locktime, _, err := dexdcr.ExtractSwapDetails(contract, dcr.chainParams)
 	if err != nil {
 		return false, time.Time{}, fmt.Errorf("error extracting contract locktime: %w", err)
@@ -2458,7 +2458,7 @@ func (dcr *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time,
 	dcr.tipMtx.RLock()
 	blockHash := dcr.currentTip.hash
 	dcr.tipMtx.RUnlock()
-	hdr, err := dcr.wallet.GetBlockHeader(dcr.ctx, blockHash)
+	hdr, err := dcr.wallet.GetBlockHeader(ctx, blockHash)
 	if err != nil {
 		return false, time.Time{}, fmt.Errorf("unable to retrieve the block header: %w", err)
 	}
@@ -3628,12 +3628,12 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 
 	// checkTip captures queuedBlock and walletBlock.
 	checkTip := func() {
-		ctx, cancel := context.WithTimeout(dcr.ctx, 4*time.Second)
-		defer cancel()
+		ctxInternal, cancel0 := context.WithTimeout(ctx, 4*time.Second)
+		defer cancel0()
 
-		newTip, err := dcr.getBestBlock(ctx)
+		newTip, err := dcr.getBestBlock(ctxInternal)
 		if err != nil {
-			dcr.handleTipChange(nil, 0, fmt.Errorf("failed to get best block: %w", err))
+			dcr.handleTipChange(ctx, nil, 0, fmt.Errorf("failed to get best block: %w", err))
 			return
 		}
 
@@ -3646,7 +3646,7 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 		}
 
 		if walletBlock == nil {
-			dcr.handleTipChange(newTip.hash, newTip.height, nil)
+			dcr.handleTipChange(ctx, newTip.hash, newTip.height, nil)
 			return
 		}
 
@@ -3658,9 +3658,9 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 			queuedBlock.queue.Stop()
 		}
 		blockAllowance := walletBlockAllowance
-		ctx, cancel = context.WithTimeout(dcr.ctx, 4*time.Second)
-		synced, _, err := dcr.wallet.SyncStatus(ctx)
-		cancel()
+		ctxInternal, cancel1 := context.WithTimeout(ctx, 4*time.Second)
+		defer cancel1()
+		synced, _, err := dcr.wallet.SyncStatus(ctxInternal)
 		if err != nil {
 			dcr.log.Errorf("Error retrieving sync status before queuing polled block: %v", err)
 		} else if !synced {
@@ -3672,7 +3672,7 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 				dcr.log.Warnf("Reporting a block found in polling that the wallet apparently "+
 					"never reported: %s (%d). If you see this message repeatedly, it may indicate "+
 					"an issue with the wallet.", newTip.hash, newTip.height)
-				dcr.handleTipChange(newTip.hash, newTip.height, nil)
+				dcr.handleTipChange(ctx, newTip.hash, newTip.height, nil)
 			}),
 		}
 	}
@@ -3689,15 +3689,20 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 				}
 				queuedBlock = nil
 			}
-			dcr.handleTipChange(walletTip.hash, walletTip.height, nil)
+			dcr.handleTipChange(ctx, walletTip.hash, walletTip.height, nil)
 
 		case <-ctx.Done():
+			return
+		}
+
+		// Ensure context cancellation takes priority before the next iteration.
+		if ctx.Err() != nil {
 			return
 		}
 	}
 }
 
-func (dcr *ExchangeWallet) handleTipChange(newTipHash *chainhash.Hash, newTipHeight int64, err error) {
+func (dcr *ExchangeWallet) handleTipChange(ctx context.Context, newTipHash *chainhash.Hash, newTipHeight int64, err error) {
 	if err != nil {
 		go dcr.tipChange(err)
 		return
@@ -3732,7 +3737,7 @@ func (dcr *ExchangeWallet) handleTipChange(newTipHash *chainhash.Hash, newTipHei
 	// Redemption search would typically resume from prevTipHeight + 1 unless the
 	// previous tip was re-orged out of the mainchain, in which case redemption
 	// search will resume from the mainchain ancestor of the previous tip.
-	prevTipHeader, isMainchain, _, err := dcr.blockHeader(dcr.ctx, prevTip.hash)
+	prevTipHeader, isMainchain, _, err := dcr.blockHeader(ctx, prevTip.hash)
 	if err != nil {
 		// Redemption search cannot continue reliably without knowing if there
 		// was a reorg, cancel all find redemption requests in queue.
@@ -3748,7 +3753,7 @@ func (dcr *ExchangeWallet) handleTipChange(newTipHash *chainhash.Hash, newTipHei
 		// that is the immediate ancestor to the previous tip.
 		ancestorBlockHash := &prevTipHeader.PrevBlock
 		for {
-			aBlock, isMainchain, _, err := dcr.blockHeader(dcr.ctx, ancestorBlockHash)
+			aBlock, isMainchain, _, err := dcr.blockHeader(ctx, ancestorBlockHash)
 			if err != nil {
 				notifyFatalFindRedemptionError("Error getting block header %s: %w", ancestorBlockHash, err)
 				return

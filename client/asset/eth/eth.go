@@ -1827,13 +1827,13 @@ func (eth *baseWallet) AuditContract(coinID, contract, serializedTx dex.Bytes, r
 
 // LocktimeExpired returns true if the specified contract's locktime has
 // expired, making it possible to issue a Refund.
-func (w *assetWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, error) {
+func (w *assetWallet) LocktimeExpired(ctx context.Context, contract dex.Bytes) (bool, time.Time, error) {
 	contractVer, secretHash, err := dexeth.DecodeContractData(contract)
 	if err != nil {
 		return false, time.Time{}, err
 	}
 
-	swap, err := w.swap(w.ctx, secretHash, contractVer)
+	swap, err := w.swap(ctx, secretHash, contractVer)
 	if err != nil {
 		return false, time.Time{}, err
 	}
@@ -1843,7 +1843,7 @@ func (w *assetWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, erro
 		return false, time.Time{}, asset.ErrSwapNotInitiated
 	}
 
-	header, err := w.node.bestHeader(w.ctx)
+	header, err := w.node.bestHeader(ctx)
 	if err != nil {
 		return false, time.Time{}, err
 	}
