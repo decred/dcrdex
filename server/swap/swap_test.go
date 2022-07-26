@@ -750,7 +750,7 @@ func (rig *testRig) checkMatchNotification(msg *msgjson.Message, oid order.Order
 // helper to check the swap status for specified user.
 func (rig *testRig) checkSwapStatusChange(wantStatus order.MatchStatus, user *tUser) error {
 	// Swap counterparty ultimately gets an audit request. Synchronize with that.
-	if err := rig.waitChans("counterparty received our swap -> counterparty audit request", nil, rig.auth.swapReceived, rig.auth.auditReq); err != nil {
+	if err := rig.waitChans("server received our swap -> counterparty audit request", nil, rig.auth.swapReceived, rig.auth.auditReq); err != nil {
 		return err
 	}
 	tracker := rig.getTracker()
@@ -2037,7 +2037,7 @@ func TestRetrySwapInit(t *testing.T) {
 			return
 		}
 		// TODO - maybe also check status hasn't changed, similar to how it's done in checkSwapStatusChange.
-		ensureNilErr(rig.waitChans("counterparty received our swap", rig.auth.swapReceived))
+		ensureNilErr(rig.waitChans("server received our swap", rig.auth.swapReceived))
 		ensureDupRequestErr(matchInfo.maker)
 
 		if time.Since(startWaitingTime) > 10*time.Second {
