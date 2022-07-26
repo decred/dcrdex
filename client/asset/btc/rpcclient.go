@@ -165,6 +165,10 @@ func (wc *rpcClient) connect(ctx context.Context, _ *sync.WaitGroup) error {
 	}
 	wc.descriptors = wiRes.Descriptors
 	if wc.descriptors {
+		if netVer < minDescriptorVersion {
+			return fmt.Errorf("reported node version %d is less than minimum %d"+
+				" for descriptor wallets", netVer, minDescriptorVersion)
+		}
 		wc.log.Debug("Using a descriptor wallet.")
 	}
 	return nil
