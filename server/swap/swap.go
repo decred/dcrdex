@@ -2122,7 +2122,7 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 	}
 	if len(matches) != len(acks) {
 		s.respondError(msg.ID, user, msgjson.AckCountError,
-			fmt.Sprintf("expected %d acknowledgements, got %d", len(acks), len(matches)))
+			fmt.Sprintf("expected %d acknowledgements, got %d", len(matches), len(acks)))
 		return
 	}
 
