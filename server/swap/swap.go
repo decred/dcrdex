@@ -986,12 +986,11 @@ func (s *Swapper) processBlock(ctx context.Context, block *blockNotification) {
 			return
 		}
 
-		// Lock the matchTracker so the following checks and updates are atomic
-		// with respect to Status.
 		match.mtx.RLock()
-		defer match.mtx.RUnlock()
+		status := match.Status
+		match.mtx.RUnlock()
 
-		switch match.Status {
+		switch status {
 		case order.MakerSwapCast:
 			if match.makerStatus.swapAsset != block.assetID {
 				break
@@ -1486,7 +1485,7 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 }
 
 // processInit processes the `init` RPC request, which is used to inform the DEX
-// of a newly broadcast swap transaction. Once the transaction is seen and and
+// of a newly broadcast swap transaction. Once the transaction is seen and
 // audited by the Swapper, the counter-party is informed with an 'audit'
 // request. This method is run as a coin waiter, hence the return value
 // indicates if future attempts should be made to check coin status.
@@ -1649,7 +1648,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	s.authMgr.Sign(auditParams)
 	notification, err := msgjson.NewRequest(comms.NextID(), msgjson.AuditRoute, auditParams)
 	if err != nil {
-		// This is likely an impossibly condition.
+		// This is likely an impossible condition.
 		log.Errorf("error creating audit request: %v", err)
 		return wait.DontTryAgain
 	}
@@ -1665,8 +1664,6 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	// Send the 'audit' request to the counter-party.
 	log.Debugf("processInit: sending contract 'audit' request to counterparty %v (%s) "+
 		"for match %v", ack.user, makerTaker(ack.isMaker), matchID)
-	// Send the request.
-
 	// The counterparty will audit the contract by retrieving it, which may
 	// involve them waiting for up to the broadcast timeout before responding,
 	// so the user gets at least s.bTimeout to the request.

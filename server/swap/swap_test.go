@@ -282,7 +282,8 @@ func (m *TAuthManager) pushResp(id account.AccountID, msg *msgjson.Message) {
 	m.resps[id] = append([]*msgjson.Message{msg}, m.resps[id]...)
 }
 
-func (m *TAuthManager) getResp(id account.AccountID) (msg *msgjson.Message, resp *msgjson.ResponsePayload) {
+// pop front
+func (m *TAuthManager) popResp(id account.AccountID) (msg *msgjson.Message, resp *msgjson.ResponsePayload) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	msgs := m.resps[id]
@@ -746,9 +747,25 @@ func (rig *testRig) checkMatchNotification(msg *msgjson.Message, oid order.Order
 	return nil
 }
 
+// helper to check the swap status for specified user.
+func (rig *testRig) checkSwapStatusChange(wantStatus order.MatchStatus, user *tUser) error {
+	// Swap counterparty ultimately gets an audit request. Synchronize with that.
+	if err := rig.waitChans("counterparty received our swap -> counterparty audit request", nil, rig.auth.swapReceived, rig.auth.auditReq); err != nil {
+		return err
+	}
+	tracker := rig.getTracker()
+	tracker.mtx.RLock()
+	status := tracker.Status
+	tracker.mtx.RUnlock()
+	if status != wantStatus {
+		return fmt.Errorf("unexpected swap status %d after maker swap notification", status)
+	}
+	return rig.checkSuccessResponse(user, "init")
+}
+
 // Can be used to ensure that a non-error response is returned from the swapper.
-func (rig *testRig) checkResponse(user *tUser, txType string) error {
-	msg, resp := rig.auth.getResp(user.acct)
+func (rig *testRig) checkSuccessResponse(user *tUser, txType string) error {
+	msg, resp := rig.auth.popResp(user.acct)
 	if msg == nil {
 		return fmt.Errorf("unexpected nil response to %s's '%s'", user.lbl, txType)
 	}
@@ -766,20 +783,8 @@ func (rig *testRig) sendSwap_maker(checkStatus bool) (err error) {
 		return fmt.Errorf("error sending maker swap transaction: %w", err)
 	}
 	matchInfo.db.makerSwap = swap
-	// Check the match status.
 	if checkStatus {
-		// The taker ultimately gets an audit request. Synchronize with that.
-		if err := rig.waitChans("maker swap -> received -> taker audit request", nil, rig.auth.swapReceived, rig.auth.auditReq); err != nil {
-			return err
-		}
-		tracker := rig.getTracker()
-		if tracker.Status != order.MakerSwapCast {
-			return fmt.Errorf("unexpected swap status %d after maker swap notification", tracker.Status)
-		}
-		err := rig.checkResponse(matchInfo.maker, "init")
-		if err != nil {
-			return err
-		}
+		return rig.checkSwapStatusChange(order.MakerSwapCast, matchInfo.maker)
 	}
 	return nil
 }
@@ -796,20 +801,8 @@ func (rig *testRig) sendSwap_taker(checkStatus bool) (err error) {
 	if err != nil {
 		return err
 	}
-	// Check the match status.
 	if checkStatus {
-		// The maker ultimately gets an audit request.
-		if err := rig.waitChans("maker audit request", nil, rig.auth.swapReceived, rig.auth.auditReq); err != nil {
-			return err
-		}
-		tracker := rig.getTracker()
-		if tracker.Status != order.TakerSwapCast {
-			return fmt.Errorf("unexpected swap status %d after taker swap notification", tracker.Status)
-		}
-		err := rig.checkResponse(matchInfo.taker, "init")
-		if err != nil {
-			return err
-		}
+		return rig.checkSwapStatusChange(order.TakerSwapCast, matchInfo.taker)
 	}
 	return nil
 }
@@ -822,11 +815,13 @@ func (rig *testRig) sendSwap(user *tUser, oid order.OrderID, recipient string) (
 	} else {
 		rig.abcNode.setContract(swap.coin, false)
 	}
+	rig.auth.mtx.Lock()
 	rig.auth.swapID = swap.req.ID
+	rig.auth.mtx.Unlock()
 	rpcErr := rig.swapper.handleInit(user.acct, swap.req)
 	if rpcErr != nil {
 		resp, _ := msgjson.NewResponse(swap.req.ID, nil, rpcErr)
-		rig.auth.Send(user.acct, resp)
+		_ = rig.auth.Send(user.acct, resp)
 		return nil, fmt.Errorf("%s swap rpc error. code: %d, msg: %s", user.lbl, rpcErr.Code, rpcErr.Message)
 	}
 	return swap, nil
@@ -947,17 +942,18 @@ func (rig *testRig) ackAudit(user *tUser, req *TRequest) error {
 func (rig *testRig) redeem_maker(checkStatus bool) error {
 	matchInfo := rig.matchInfo
 	matchInfo.db.makerRedeem = rig.redeem(matchInfo.maker, matchInfo.makerOID)
+	// TODO - use same pattern as for swaps to simplify if body below.
 	// Check the match status
 	if checkStatus {
 		// The taker ultimately gets a redemption request.
-		if err := rig.waitChans("maker redeem -> received -> redeption to taker", rig.auth.redeemReceived, rig.auth.redemptionReq); err != nil {
+		if err := rig.waitChans("maker redeem -> received -> redemption to taker", rig.auth.redeemReceived, rig.auth.redemptionReq); err != nil {
 			return err
 		}
 		tracker := rig.getTracker()
 		if tracker.Status != order.MakerRedeemed {
 			return fmt.Errorf("unexpected swap status %d after maker redeem notification", tracker.Status)
 		}
-		err := rig.checkResponse(matchInfo.maker, "redeem")
+		err := rig.checkSuccessResponse(matchInfo.maker, "redeem")
 		if err != nil {
 			return err
 		}
@@ -978,7 +974,7 @@ func (rig *testRig) redeem_taker(checkStatus bool) error {
 		if tracker != nil {
 			return fmt.Errorf("expected match to be removed, found it, in status %v", tracker.Status)
 		}
-		err := rig.checkResponse(matchInfo.taker, "redeem")
+		err := rig.checkSuccessResponse(matchInfo.taker, "redeem")
 		if err != nil {
 			return err
 		}
@@ -1394,7 +1390,7 @@ func makeEnsureNilErr(t *testing.T) func(error) {
 func rpcErrorChecker(t *testing.T, rig *testRig, code int) func(*tUser, ...string) {
 	return func(user *tUser, grep ...string) {
 		t.Helper()
-		msg, resp := rig.auth.getResp(user.acct)
+		msg, resp := rig.auth.popResp(user.acct)
 		if msg == nil {
 			t.Fatalf("no response for %s", user.lbl)
 		}
@@ -1553,7 +1549,7 @@ func TestInvalidFeeRate(t *testing.T) {
 		t.Fatalf("error waiting for response: %v", err)
 	}
 	// Should have an rpc error.
-	msg, resp := rig.auth.getResp(matchInfo.maker.acct)
+	msg, resp := rig.auth.popResp(matchInfo.maker.acct)
 	if msg == nil {
 		t.Fatalf("no response for missing tx after timeout")
 	}
@@ -1597,7 +1593,7 @@ func TestTxWaiters(t *testing.T) {
 	if err := rig.waitChans("maker contract error", rig.auth.swapReceived); err != nil {
 		t.Fatalf("error waiting for maker swap error response: %v", err)
 	}
-	msg, _ := rig.auth.getResp(matchInfo.maker.acct)
+	msg, _ := rig.auth.popResp(matchInfo.maker.acct)
 	if msg == nil {
 		t.Fatalf("no response for erroneous maker swap")
 	}
@@ -1628,7 +1624,7 @@ func TestTxWaiters(t *testing.T) {
 		t.Fatalf("error waiting for maker swap error response: %v", err)
 	}
 	// Should have an rpc error.
-	msg, resp := rig.auth.getResp(matchInfo.maker.acct)
+	msg, resp := rig.auth.popResp(matchInfo.maker.acct)
 	if msg == nil {
 		t.Fatalf("no response for missing tx after timeout")
 	}
@@ -1655,7 +1651,7 @@ func TestTxWaiters(t *testing.T) {
 	if err := rig.waitChans("taker contract error", rig.auth.swapReceived); err != nil {
 		t.Fatalf("error waiting for taker swap error response: %v", err)
 	}
-	msg, _ = rig.auth.getResp(matchInfo.taker.acct)
+	msg, _ = rig.auth.popResp(matchInfo.taker.acct)
 	if msg == nil {
 		t.Fatalf("no response for erroneous taker swap")
 	}
@@ -1665,7 +1661,7 @@ func TestTxWaiters(t *testing.T) {
 	// Wait a tick
 	tickMempool()
 	// There should not be a response yet.
-	msg, _ = rig.auth.getResp(matchInfo.taker.acct)
+	msg, _ = rig.auth.popResp(matchInfo.taker.acct)
 	if msg != nil {
 		t.Fatalf("unexpected response for latent taker swap")
 	}
@@ -1676,7 +1672,7 @@ func TestTxWaiters(t *testing.T) {
 		t.Fatalf("error waiting for taker timeout error response: %v", err)
 	}
 
-	msg, resp = rig.auth.getResp(matchInfo.taker.acct)
+	msg, resp = rig.auth.popResp(matchInfo.taker.acct)
 	if msg == nil {
 		t.Fatalf("no response for ok taker swap")
 	}
@@ -1696,7 +1692,7 @@ func TestTxWaiters(t *testing.T) {
 	ensureNilErr(rig.redeem_maker(false))
 	tickMempool()
 	tickMempool()
-	msg, _ = rig.auth.getResp(matchInfo.maker.acct)
+	msg, _ = rig.auth.popResp(matchInfo.maker.acct)
 	if msg != nil {
 		t.Fatalf("unexpected response for latent maker redeem")
 	}
@@ -1706,7 +1702,7 @@ func TestTxWaiters(t *testing.T) {
 	if err := rig.waitChans("maker redemption error", rig.auth.redeemReceived); err != nil {
 		t.Fatalf("error waiting for taker timeout error response: %v", err)
 	}
-	msg, resp = rig.auth.getResp(matchInfo.maker.acct)
+	msg, resp = rig.auth.popResp(matchInfo.maker.acct)
 	if msg == nil {
 		t.Fatalf("no response for erroneous maker redeem")
 	}
@@ -1725,7 +1721,7 @@ func TestTxWaiters(t *testing.T) {
 	if err := rig.waitChans("taker redemption timeout", rig.auth.redeemReceived); err != nil {
 		t.Fatalf("error waiting for taker timeout error response: %v", err)
 	}
-	msg, _ = rig.auth.getResp(matchInfo.taker.acct)
+	msg, _ = rig.auth.popResp(matchInfo.taker.acct)
 	if msg == nil {
 		t.Fatalf("no response for erroneous taker redeem")
 	}
@@ -1921,7 +1917,7 @@ func TestSigErrors(t *testing.T) {
 		}
 	}
 	stash := func(user *tUser) {
-		msg, _ = rig.auth.getResp(user.acct)
+		msg, _ = rig.auth.popResp(user.acct)
 		tReq = rig.auth.getReq(user.acct)
 		apply(user) // put them back now that we have a copy
 	}
@@ -1935,7 +1931,7 @@ func TestSigErrors(t *testing.T) {
 		if err := rig.waitChans("testAction", failChans...); err != nil {
 			t.Fatalf("testAction failChan wait error: %v", err)
 		}
-		ensureSigErr(user) // getResp
+		ensureSigErr(user) // popResp
 		// Again with no auth error to go to the next step.
 		rig.auth.authErr = nil
 		apply(user) // restore the initial live request
@@ -1972,10 +1968,9 @@ func TestMalformedSwap(t *testing.T) {
 	ensureNilErr(rig.ackMatch_taker(true))
 
 	ensureErr := func(tag string) {
+		t.Helper()
 		ensureNilErr(rig.sendSwap_maker(false))
-		if err := rig.waitChans(tag, rig.auth.swapReceived); err != nil {
-			t.Fatalf("error waiting for %q error: %v", tag, err)
-		}
+		ensureNilErr(rig.waitChans(tag, rig.auth.swapReceived))
 	}
 
 	// Bad contract value
@@ -2002,18 +1997,54 @@ func TestMalformedSwap(t *testing.T) {
 	// Works with low fee, but now a confirmation.
 	tConfsSpoofer = 1
 	ensureNilErr(rig.sendSwap_maker(true))
-	rig.abcNode.invalidFeeRate = false
-	tConfsSpoofer = 0 // back to 0
+}
 
-	// Back to NewlyMatched
-	tracker := rig.getTracker()
-	tracker.Status = order.NewlyMatched
-	// We're rewinding time to send the same init again. To support this hack,
-	// wait for swapSearching to clear.
-	time.Sleep(200 * time.Millisecond)
+func TestRetrySwapInit(t *testing.T) {
+	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
+	matchInfo := set.matchInfos[0]
+	rig, cleanup := tNewTestRig(matchInfo)
+	defer cleanup()
 
-	// And works with adequate fee and 0 confs.
+	rig.auth.swapReceived = make(chan struct{}, 1)
+
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+	ensureNilErr := makeEnsureNilErr(t)
+	ensureDupRequestErr := rpcErrorChecker(t, rig, msgjson.DuplicateRequestError)
+
+	ensureNilErr(rig.ackMatch_maker(true))
+	ensureNilErr(rig.ackMatch_taker(true))
+
 	ensureNilErr(rig.sendSwap_maker(true))
+
+	tracker := rig.getTracker()
+	// We're "rewinding time" back NewlyMatched status to be able to retry sending
+	// the same init request again.
+	tracker.mtx.Lock()
+	tracker.Status = order.NewlyMatched
+	tracker.mtx.Unlock()
+
+	// We need to wait for swapSearching semaphore (it coordinates init request
+	// handling) to clear, so our retry request should eventually work (it has
+	// adequate fee and 0 confs).
+	startWaitingTime := time.Now()
+	for {
+		// We might get a couple of duplicate init request errors here, in that case
+		// we simply retry request later.
+		err := rig.sendSwap_maker(false)
+		if err == nil {
+			// We are done, finally got a retry attempt that worked.
+			ensureNilErr(rig.checkSwapStatusChange(order.MakerSwapCast, matchInfo.maker))
+			return
+		}
+		// TODO - maybe also check status hasn't changed, similar to how it's done in checkSwapStatusChange.
+		ensureNilErr(rig.waitChans("counterparty received our swap", rig.auth.swapReceived))
+		ensureDupRequestErr(matchInfo.maker)
+
+		if time.Since(startWaitingTime) > 10*time.Second {
+			t.Fatalf("timed out waiting for retrying init request to succeed, err: %v", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 func TestBadParams(t *testing.T) {
@@ -2160,7 +2191,9 @@ func TestAccountTracking(t *testing.T) {
 	tracker.Status = order.MatchComplete
 	checkStats(takerAddr, 0, 0, 0)
 
+	rig.swapper.matchMtx.Lock()
 	rig.swapper.deleteMatch(tracker)
+	rig.swapper.matchMtx.Unlock()
 	if len(rig.swapper.acctMatches[ACCTID]) > 0 {
 		t.Fatalf("account tracking not deleted for removed match")
 	}
