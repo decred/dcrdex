@@ -53,8 +53,10 @@ const (
 	// redeem transaction.
 	defaultRedeemConfTarget = 2
 
-	minNetworkVersion  = 190000
+	minNetworkVersion  = 210000
 	minProtocolVersion = 70015
+	// version which descriptor wallets have been introduced.
+	minDescriptorVersion = 220000
 
 	// splitTxBaggage is the total number of additional bytes associated with
 	// using a split transaction to fund a swap.
