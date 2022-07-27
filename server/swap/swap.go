@@ -1422,7 +1422,7 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	ack := new(msgjson.Acknowledgement)
 	err := msg.UnmarshalResult(ack)
 	if err != nil {
-		s.respondError(msg.ID, acker.user, msgjson.RPCParseError, "error parsing acknowledgment")
+		s.respondError(msg.ID, acker.user, msgjson.RPCParseError, fmt.Sprintf("error parsing acknowledgment: %v", err))
 		return
 	}
 	// Note: ack.MatchID unused, but could be checked against acker.match.ID().
@@ -1477,7 +1477,8 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	if !acker.isMaker {
 		acker.match.Sigs.TakerRedeem = ack.Sig
 		if err = s.storage.SaveRedeemAckSigB(mktMatch, ack.Sig); err != nil {
-			s.respondError(msg.ID, acker.user, msgjson.UnknownMarketError, "internal server error")
+			s.respondError(msg.ID, acker.user, msgjson.UnknownMarketError,
+				fmt.Sprintf("internal server error: %v", err))
 			log.Errorf("SaveRedeemAckSigB failed for match %v: %v", mktMatch.String(), err)
 			return
 		}
@@ -1504,7 +1505,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 			stepInfo.match.ID(), actor, params.CoinID, params.Contract, err)
 		actor.status.mtx.RUnlock()
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
-			"redemption error")
+			fmt.Sprintf("contract error encountered: %v", err))
 		return wait.DontTryAgain
 	}
 
@@ -1595,7 +1596,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		log.Errorf("saving swap contract (match id=%v, maker=%v) failed: %v",
 			matchID, actor.isMaker, err)
 		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError,
-			"internal server error")
+			fmt.Sprintf("internal server error: %v", err))
 		// TODO: revoke the match without penalties instead of retrying forever?
 		return wait.TryAgain
 	}
@@ -1718,7 +1719,8 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		log.Warnf("Redemption error encountered for match %s, actor %s, using coin ID %v to satisfy contract at %x: %v",
 			stepInfo.match.ID(), actor, params.CoinID, cpSwapCoin, err)
 		actor.status.mtx.RUnlock()
-		s.respondError(msg.ID, actor.user, msgjson.RedemptionError, "redemption error")
+		s.respondError(msg.ID, actor.user, msgjson.RedemptionError,
+			fmt.Sprintf("redemption error encountered: %v", err))
 		return wait.DontTryAgain
 	}
 
@@ -2117,7 +2119,7 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 	err := msg.UnmarshalResult(&acks)
 	if err != nil {
 		s.respondError(msg.ID, user, msgjson.RPCParseError,
-			"error parsing match request acknowledgment")
+			fmt.Sprintf("error parsing match request acknowledgment: %v", err))
 		return
 	}
 	if len(matches) != len(acks) {
@@ -2187,7 +2189,7 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 			log.Errorf("saving match ack signature (match id=%v, maker=%v) failed: %v",
 				matchID, matchInfo.isMaker, err)
 			s.respondError(msg.ID, matchInfo.user, msgjson.UnknownMarketError,
-				"internal server error")
+				fmt.Sprintf("internal server error: %v", err))
 			// TODO: revoke the match without penalties?
 			return
 		}

@@ -2034,7 +2034,7 @@ func TestRetrySwapInit(t *testing.T) {
 		if err == nil {
 			// We are done, finally got a retry attempt that worked.
 			ensureNilErr(rig.checkSwapStatusChange(order.MakerSwapCast, matchInfo.maker))
-			return
+			break
 		}
 		// TODO - maybe also check status hasn't changed, similar to how it's done in checkSwapStatusChange.
 		ensureNilErr(rig.waitChans("server received our swap", rig.auth.swapReceived))
