@@ -754,9 +754,7 @@ func (rig *testRig) checkSwapStatusChange(wantStatus order.MatchStatus, user *tU
 		return err
 	}
 	tracker := rig.getTracker()
-	tracker.mtx.RLock()
 	status := tracker.Status
-	tracker.mtx.RUnlock()
 	if status != wantStatus {
 		return fmt.Errorf("unexpected swap status %d after maker swap notification", status)
 	}
@@ -815,9 +813,7 @@ func (rig *testRig) sendSwap(user *tUser, oid order.OrderID, recipient string) (
 	} else {
 		rig.abcNode.setContract(swap.coin, false)
 	}
-	rig.auth.mtx.Lock()
 	rig.auth.swapID = swap.req.ID
-	rig.auth.mtx.Unlock()
 	rpcErr := rig.swapper.handleInit(user.acct, swap.req)
 	if rpcErr != nil {
 		resp, _ := msgjson.NewResponse(swap.req.ID, nil, rpcErr)
