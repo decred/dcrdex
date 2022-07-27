@@ -289,11 +289,11 @@ const (
 )
 
 func newMatchNote(topic Topic, subject, details string, severity db.Severity, t *trackedTrade, match *matchTracker) *MatchNote {
-	var counterConfs int64
-	if match.counterConfirms > 0 {
+	_, counterConfs := match.confirms()
+	if counterConfs < 0 {
 		// This can be -1 before it is actually checked, but for purposes of the
 		// match note, it should be non-negative.
-		counterConfs = match.counterConfirms
+		counterConfs = 0
 	}
 	return &MatchNote{
 		Notification: db.NewNotification(NoteTypeMatch, topic, subject, details, severity),

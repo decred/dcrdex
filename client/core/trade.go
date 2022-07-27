@@ -38,6 +38,17 @@ var _ (fmt.Stringer) = (*matchTracker)(nil)
 
 // A matchTracker is used to negotiate a match.
 type matchTracker struct {
+	// counterConfirms records the last known confirms of the counterparty swap.
+	// This is set in isSwappable for taker, isRedeemable for maker. -1 means
+	// the confirms have not yet been checked (or logged). swapConfirms is for
+	// your own swap. For safe access, use the matchTracker methods: confirms,
+	// setSwapConfirms, and setCounterConfirms.
+	counterConfirms int64 // atomic
+	swapConfirms    int64 // atomic
+
+	// The first group of fields below should be accessed with the parent
+	// trackedTrade's mutex locked, excluding the atomic fields.
+
 	db.MetaMatch
 	// swapErr is an error set when we have given up hope on broadcasting a swap
 	// tx for a match. This can happen if 1) the swap has been attempted
@@ -45,10 +56,6 @@ type matchTracker struct {
 	// broadcast timeout, or 2) a match data was found to be in a nonsensical
 	// state during startup.
 	swapErr error
-	// tickGovernor can be set non-nil to prevent swaps or redeems from
-	// being attempted for a match. Typically, the *Timer comes from an
-	// AfterFunc that itself nils the tickGovernor.
-	tickGovernor *time.Timer
 	// swapErrCount counts the swap attempts. It is used in recovery.
 	swapErrCount int
 	// redeemErrCount counts the redeem attempts. It is used in recovery.
@@ -76,34 +83,85 @@ type matchTracker struct {
 	prefix      *order.Prefix
 	trade       *order.Trade
 	counterSwap *asset.AuditInfo
-
 	// cancelRedemptionSearch should be set when taker starts searching for
 	// maker's redemption. Required to cancel a find redemption attempt if
 	// taker successfully executes a refund.
 	cancelRedemptionSearch context.CancelFunc
 
-	// The following fields facilitate useful logging, while not being spammy.
+	// The fields below need to be modified without the parent trackedTrade's
+	// mutex being write locked, so they have dedicated mutexes.
 
-	// counterConfirms records the last known confirms of the counterparty swap.
-	// This is set in isSwappable for taker, isRedeemable for maker. -1 means
-	// the confirms have not yet been checked (or logged).
-	counterConfirms int64
-	swapConfirms    int64
 	// lastExpireDur is the most recently logged time until expiry of the
 	// party's own contract. This may be negative if expiry has passed, but it
-	// is not yet refundable due to other consensus rules. This is set in
+	// is not yet refundable due to other consensus rules. This is used only by
 	// isRefundable. Initialize this to a very large value to guarantee that it
-	// will be logged on the first check or when 0.
-	lastExpireDur time.Duration
+	// will be logged on the first check or when 0. This facilitates useful
+	// logging, while not being spammy.
+	lastExpireDurMtx sync.Mutex
+	lastExpireDur    time.Duration
+
+	// Certain exceptions that control swap actions are commonly accessed
+	// together, and these share a single mutex. See the exceptions and
+	// delayTicks methods.
+	exceptionMtx sync.RWMutex
+	// tickGovernor can be set non-nil to prevent swaps or redeems from being
+	// attempted for a match. Typically, the Timer comes from an AfterFunc that
+	// itself nils the tickGovernor. Guarded by exceptionMtx.
+	tickGovernor *time.Timer
 	// checkServerRevoke is set to make sure that a taker will not prematurely
-	// send an initialization until it is confirmed with the server that the
-	// match is not revoked.
+	// send an initialization until it is confirmed with the server (see
+	// authDEX) that the match is not revoked. This should be set on reconnect
+	// for all taker matches in MakerSwapCast. Guarded by exceptionMtx.
 	checkServerRevoke bool
 }
 
 // matchTime returns the match's match time as a time.Time.
 func (m *matchTracker) matchTime() time.Time {
 	return time.UnixMilli(int64(m.MetaData.Proof.Auth.MatchStamp)).UTC()
+}
+
+// setExpireDur records the last known duration until expiry if the difference
+// from the previous recorded duration is at least the provided log interval
+// threshold. The return indicates if it was updated (and should be logged by
+// the caller).
+func (m *matchTracker) setExpireDur(expireDur, logInterval time.Duration) (intervalPassed bool) {
+	m.lastExpireDurMtx.Lock()
+	defer m.lastExpireDurMtx.Unlock()
+	if m.lastExpireDur-expireDur < logInterval {
+		return false // too soon
+	}
+	m.lastExpireDur = expireDur
+	return true // ok to log
+}
+
+func (m *matchTracker) exceptions() (ticksGoverned, checkServerRevoke bool) {
+	m.exceptionMtx.RLock()
+	defer m.exceptionMtx.RUnlock()
+	return m.tickGovernor != nil, m.checkServerRevoke
+}
+
+// delayTicks sets the tickGovernor to prevent retrying too quickly after an
+// error.
+func (m *matchTracker) delayTicks(waitTime time.Duration) {
+	m.exceptionMtx.Lock()
+	m.tickGovernor = time.AfterFunc(waitTime, func() {
+		m.exceptionMtx.Lock()
+		m.tickGovernor = nil
+		m.exceptionMtx.Unlock()
+	})
+	m.exceptionMtx.Unlock()
+}
+
+func (m *matchTracker) confirms() (mine, theirs int64) {
+	return atomic.LoadInt64(&m.swapConfirms), atomic.LoadInt64(&m.counterConfirms)
+}
+
+func (m *matchTracker) setSwapConfirms(mine int64) {
+	atomic.StoreInt64(&m.swapConfirms, mine)
+}
+
+func (m *matchTracker) setCounterConfirms(theirs int64) (was int64) {
+	return atomic.SwapInt64(&m.counterConfirms, theirs)
 }
 
 // trackedCancel is information necessary to track a cancel order. A
@@ -145,6 +203,8 @@ type trackedTrade struct {
 	// intentionally not stored as part of the db.OrderMetaData, and should be
 	// repopulated if the client is restarted.
 	redeemFeeSuggestion feeStamped
+
+	ticking uint32 // atomic, prevent multiple concurrent ticks
 
 	order.Order
 	// mtx protects all read-write fields of the trackedTrade and the
@@ -469,16 +529,6 @@ func (t *trackedTrade) broadcastTimeout() time.Duration {
 	return time.Millisecond * time.Duration(t.dc.cfg.BroadcastTimeout)
 }
 
-// delayTicks sets the tickGovernor to prevent retrying too quickly after an
-// error.
-func (t *trackedTrade) delayTicks(m *matchTracker, waitTime time.Duration) {
-	m.tickGovernor = time.AfterFunc(waitTime, func() {
-		t.mtx.Lock()
-		defer t.mtx.Unlock()
-		m.tickGovernor = nil
-	})
-}
-
 // coreOrder constructs a *core.Order for the tracked order.Order. If the trade
 // has a cancel order associated with it, the cancel order will be returned,
 // otherwise the second returned *Order will be nil.
@@ -499,8 +549,10 @@ func (t *trackedTrade) coreOrderInternal() *Order {
 	corder.LockedAmt = t.lockedAmount()
 
 	for _, mt := range t.matches {
-		corder.Matches = append(corder.Matches, matchFromMetaMatchWithConfs(t,
-			&mt.MetaMatch, mt.swapConfirms, int64(t.wallets.fromAsset.SwapConf), mt.counterConfirms, int64(t.wallets.toAsset.SwapConf)))
+		swapConfs, counterConfs := mt.confirms()
+		corder.Matches = append(corder.Matches, matchFromMetaMatchWithConfs(t, &mt.MetaMatch,
+			swapConfs, int64(t.wallets.fromAsset.SwapConf),
+			counterConfs, int64(t.wallets.toAsset.SwapConf)))
 	}
 	return corder
 }
@@ -935,9 +987,8 @@ func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTra
 	}
 
 	// Log the pending swap status at new heights only.
-	if match.counterConfirms != int64(have) {
-		match.counterConfirms = int64(have)
-		changed = true
+	was := match.setCounterConfirms(int64(have))
+	if changed = was != int64(have); changed {
 		t.notify(newMatchNote(TopicCounterConfirms, "", "", db.Data, t, match))
 	}
 
@@ -1100,19 +1151,30 @@ func (t *trackedTrade) unspentContractAmounts() (amount uint64) {
 // isSwappable will be true if the match is ready for a swap transaction to be
 // broadcast.
 //
+// In certain situations, the match should be revoked and the return will
+// indicate this. In particular, the situations are when the match is in
+// MakerSwapCast on the taker side and the maker's swap is found to be either
+// spent or expired, or if our future contract would have an expiry in the past.
+// Such matches are also not swappable.
+//
 // This method accesses match fields and MUST be called with the trackedTrade
-// mutex lock held for writes.
-func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) bool {
+// mutex lock held for reads.
+func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) (ready, shouldRevoke bool) {
 	// Quick status check before we bother with the wallet.
 	switch match.Status {
 	case order.TakerSwapCast, order.MakerRedeemed, order.MatchComplete:
-		return false // all swaps already sent
+		return false, false // all swaps already sent
 	}
 
-	if match.swapErr != nil || match.MetaData.Proof.IsRevoked() || match.tickGovernor != nil || match.checkServerRevoke {
-		// t.dc.log.Tracef("Match %s not swappable: swapErr = %v, revoked = %v, metered = %t, checkServerRevoke = %v",
-		// 	match, match.swapErr, match.MetaData.Proof.IsRevoked(), match.tickGovernor != nil, match.checkServerRevoke)
-		return false
+	if match.swapErr != nil || match.MetaData.Proof.IsRevoked() {
+		// t.dc.log.Tracef("Match %s not swappable: swapErr = %v, revoked = %v",
+		// 	match, match.swapErr, match.MetaData.Proof.IsRevoked())
+		return false, false
+	}
+	if ticksGoverned, checkServerRevoke := match.exceptions(); ticksGoverned || checkServerRevoke {
+		// t.dc.log.Tracef("Match %s not swappable: metered = %t, checkServerRevoke = %v",
+		// 	match, ticksGoverned, checkServerRevoke)
+		return false, false
 	}
 
 	wallet := t.wallets.fromWallet
@@ -1121,12 +1183,12 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 	if !wallet.locallyUnlocked() {
 		t.dc.log.Errorf("Order %s, match %s is not swappable because %s wallet is not unlocked",
 			t.ID(), match, unbip(wallet.AssetID))
-		return false
+		return false, false
 	}
 
 	switch match.Status {
 	case order.NewlyMatched:
-		return match.Side == order.Maker
+		return match.Side == order.Maker, false
 	case order.MakerSwapCast:
 		// Get the confirmation count on the maker's coin.
 		if match.Side == order.Taker {
@@ -1140,30 +1202,36 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 					// expected for newly made swaps involving contracts.
 					t.dc.log.Errorf("isSwappable: %v", err)
 				}
-				return false
+				return false, false
 			}
 			if spent {
+				if match.MetaData.Proof.SelfRevoked {
+					return false, false // already self-revoked
+				}
 				t.dc.log.Errorf("Counter-party's swap is spent before we could broadcast our own. REVOKING!")
-				match.MetaData.Proof.SelfRevoked = true
-				return false
+				return false, true // REVOKE!
 			}
 			if expired {
+				if match.MetaData.Proof.SelfRevoked {
+					return false, false // already self-revoked
+				}
 				t.dc.log.Errorf("Counter-party's swap expired before we could broadcast our own. REVOKING!")
-				match.MetaData.Proof.SelfRevoked = true
-				return false
+				return false, true // REVOKE!
 			}
 			matchTime := match.matchTime()
 			if lockTime := matchTime.Add(t.lockTimeTaker); time.Until(lockTime) < 0 {
+				if match.MetaData.Proof.SelfRevoked {
+					return false, false // already self-revoked
+				}
 				t.dc.log.Errorf("Our contract would expire in the past (%v). REVOKING!", lockTime)
-				match.MetaData.Proof.SelfRevoked = true
-				return false
+				return false, true // REVOKE!
 			}
 			ready := confs >= req
 			if changed && !ready {
 				t.dc.log.Infof("Match %s not yet swappable: current confs = %d, required confs = %d",
 					match, confs, req)
 			}
-			return ready
+			return ready, false
 		}
 
 		// If we're the maker, check the confirmations anyway so we can notify.
@@ -1179,38 +1247,47 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 				"but we have not seen the counter-party's redemption yet. This could just"+
 				" be network latency.", match)
 		}
-		match.swapConfirms = int64(confs)
+		match.setSwapConfirms(int64(confs))
 		t.notify(newMatchNote(TopicConfirms, "", "", db.Data, t, match))
-		return false
+		return false, false
 	}
 
-	return false
+	return false, false
 }
 
 // isRedeemable will be true if the match is ready for our redemption to be
 // broadcast.
 //
+// In certain situations, the match should be revoked and the return will
+// indicate this. In particular, the situations are when the match is in
+// TakerSwapCast on the Maker side and the taker's swap is found to be either
+// spent or expired. Such matches are also not redeemable.
+//
 // This method accesses match fields and MUST be called with the trackedTrade
-// mutex lock held for writes.
-func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bool {
+// mutex lock held for reads.
+func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) (ready, shouldRevoke bool) {
 	// Quick status check before we bother with the wallet.
 	switch match.Status {
 	case order.NewlyMatched, order.MakerSwapCast:
-		return false // all swaps not yet sent
+		return false, false // all swaps not yet sent
 	}
 
-	if match.swapErr != nil || len(match.MetaData.Proof.RefundCoin) != 0 || match.tickGovernor != nil {
-		t.dc.log.Tracef("Match %s not redeemable: swapErr = %v, RefundCoin = %v, metered = %t",
-			match, match.swapErr, match.MetaData.Proof.RefundCoin, match.tickGovernor != nil)
-		return false
+	if match.swapErr != nil || len(match.MetaData.Proof.RefundCoin) != 0 {
+		t.dc.log.Tracef("Match %s not redeemable: swapErr = %v, RefundCoin = %v",
+			match, match.swapErr, match.MetaData.Proof.RefundCoin)
+		return false, false
 	}
-	// NOTE: taker must be able to redeem when revoked! Arguably, maker should
-	// not, and we could check here, but as long as taker contract's is not
-	// expired (locktime passed), the swap may be completed.
+	if ticksGoverned, _ := match.exceptions(); ticksGoverned {
+		t.dc.log.Tracef("Match %s not redeemable: ticks metered", match, match.swapErr)
+		return false, false
+	}
+	// NOTE: Taker must be able to redeem when revoked!  As maker, only block
+	// redeem if we have determined that the counterparty swap was either spent
+	// or expired, as indicated by SelfRevoked. (maybe)
 	//
-	// if match.Side == order.Maker && match.MetaData.Proof.IsRevoked() {
-	// 	t.dc.log.Warnf("Revoked match %s not redeemable as maker")
-	// 	return false
+	// if match.Side == order.Maker && match.MetaData.Proof.SelfRevoked {
+	// 	t.dc.log.Debugf("Revoked match %s not redeemable as maker.", match)
+	// 	return false, false
 	// }
 
 	wallet := t.wallets.toWallet
@@ -1219,7 +1296,7 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bo
 	if !wallet.locallyUnlocked() {
 		t.dc.log.Errorf("not checking if order %s, match %s is redeemable because %s wallet is not unlocked",
 			t.ID(), match, unbip(wallet.AssetID))
-		return false
+		return false, false
 	}
 
 	switch match.Status {
@@ -1234,24 +1311,28 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bo
 					// expected for newly made swaps involving contracts.
 					t.dc.log.Errorf("isRedeemable: %v", err)
 				}
-				return false
+				return false, false
 			}
 			if spent {
-				t.dc.log.Errorf("Order %s, match %s counter-party's swap is spent before we could redeem", t.ID(), match)
-				match.MetaData.Proof.SelfRevoked = true
-				return false
+				if match.MetaData.Proof.SelfRevoked {
+					return false, false // already self-revoked
+				}
+				t.dc.log.Warnf("Order %s, match %s counter-party's swap is spent before we could redeem", t.ID(), match)
+				return false, true // REVOKE!
 			}
 			if expired {
-				t.dc.log.Errorf("Order %s, match %s counter-party's swap expired before we could redeem", t.ID(), match)
-				match.MetaData.Proof.SelfRevoked = true
-				return false
+				if match.MetaData.Proof.SelfRevoked {
+					return false, false // already self-revoked
+				}
+				t.dc.log.Warnf("Order %s, match %s counter-party's swap expired before we could redeem", t.ID(), match)
+				return false, true // REVOKE!
 			}
 			ready := confs >= req
 			if changed && !ready {
 				t.dc.log.Infof("Match %s not yet redeemable: current confs = %d, required confs = %d",
 					match, confs, req)
 			}
-			return ready
+			return ready, false
 		}
 
 		// If we're the taker, check the confirmations anyway so we can notify.
@@ -1267,29 +1348,29 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bo
 				"but we have not seen the counter-party's redemption yet. This could just"+
 				" be network latency.", match)
 		}
-		match.swapConfirms = int64(confs)
+		match.setSwapConfirms(int64(confs))
 		t.notify(newMatchNote(TopicConfirms, "", "", db.Data, t, match))
-		return false
+		return false, false
 
 	case order.MakerRedeemed:
-		return match.Side == order.Taker
+		return match.Side == order.Taker, false
 	}
 
-	return false
+	return false, false
 }
 
 // isRefundable will be true if all of the following are true:
-// - We have broadcasted a swap contract (matchProof.ContractData != nil).
-// - Neither party has redeemed (matchStatus < order.MakerRedeemed).
-//   For Maker, this means we've not redeemed. For Taker, this means we've
-//   not been notified of / we haven't yet found the Maker's redeem.
-// - Our swap's locktime has expired.
+//   - We have broadcasted a swap contract (matchProof.ContractData != nil).
+//   - Neither party has redeemed (matchStatus < order.MakerRedeemed).
+//     For Maker, this means we've not redeemed. For Taker, this means we've
+//     not been notified of / we haven't yet found the Maker's redeem.
+//   - Our swap's locktime has expired.
 //
 // Those checks are skipped and isRefundable is false if we've already
 // executed a refund or our refund-to wallet is locked.
 //
 // This method modifies match fields and MUST be called with the trackedTrade
-// mutex lock held for writes.
+// mutex lock held for reads.
 func (t *trackedTrade) isRefundable(ctx context.Context, match *matchTracker) bool {
 	if match.refundErr != nil || len(match.MetaData.Proof.RefundCoin) != 0 {
 		t.dc.log.Tracef("Match %s not refundable: refundErr = %v, RefundCoin = %v",
@@ -1334,12 +1415,9 @@ func (t *trackedTrade) isRefundable(ctx context.Context, match *matchTracker) bo
 	if expiresIn <= 0 {
 		logInterval = 5 * time.Minute
 	}
-	if match.lastExpireDur-expiresIn < logInterval {
-		return false
+	if !match.setExpireDur(expiresIn, logInterval) {
+		return false // too recently logged
 	}
-
-	// Record this log event's expiry duration.
-	match.lastExpireDur = expiresIn
 
 	swapCoinID := match.MetaData.Proof.TakerSwap
 	if match.Side == order.Maker {
@@ -1364,15 +1442,14 @@ func (t *trackedTrade) isRefundable(ctx context.Context, match *matchTracker) bo
 // shouldBeginFindRedemption will be true if we are the Taker on this match,
 // we've broadcasted a swap, our swap has gotten the required confs, the match
 // was revoked without receiving a valid notification of Maker's redeem and
-// we've not refunded our swap.
+// we've not refunded our swap. Only revoked matches should begin a redemption
+// search, so the caller may skip this check (and not begin the search) if the
+// match is revoked or will be revoked.
 //
 // This method accesses match fields and MUST be called with the trackedTrade
 // mutex lock held for reads.
 func (t *trackedTrade) shouldBeginFindRedemption(ctx context.Context, match *matchTracker) bool {
-	proof := &match.MetaData.Proof
-	if !proof.IsRevoked() {
-		return false // Only auto-find redemption for revoked/failed matches.
-	}
+	proof := &match.MetaData.Proof // revoked flags may not be updated yet, so don't enforce it
 	swapCoinID := proof.TakerSwap
 	if match.Side != order.Taker || len(swapCoinID) == 0 || len(proof.MakerRedeem) > 0 || len(proof.RefundCoin) > 0 {
 		// t.dc.log.Tracef(
@@ -1397,35 +1474,38 @@ func (t *trackedTrade) shouldBeginFindRedemption(ctx context.Context, match *mat
 	if spent { // NOTE: spent may not be accurate for SPV wallet, so this should not be a requirement.
 		t.dc.log.Infof("Swap contract for revoked match %s, order %s is spent. Will begin search for redemption", match, t.ID())
 	}
-	return confs >= t.wallets.fromAsset.SwapConf || spent
+	return spent || confs >= t.wallets.fromAsset.SwapConf
 }
 
 // tick will check for and perform any match actions necessary.
 func (c *Core) tick(t *trackedTrade) (assetMap, error) {
+	assets := make(assetMap) // callers expect non-nil map even on error :(
+
+	if !atomic.CompareAndSwapUint32(&t.ticking, 0, 1) {
+		// Another tick is running for this trade. Return so we don't block on
+		// t.mtx.Lock, and don't run concurrent checks since the results may
+		// become inaccurate when/if the other goroutine begins acting, and we
+		// MUST NOT take the same action twice.
+		c.log.Tracef("Skipping concurrent tick for trade %v", t.ID())
+		return assets, nil
+	}
+	defer atomic.StoreUint32(&t.ticking, 0)
+
 	tStart := time.Now()
-	var dLock time.Duration // time blocked by t.mtx.Lock()
 	defer func() {
 		if eTime := time.Since(tStart); eTime > 500*time.Millisecond {
-			c.log.Debugf("Slow tick: trade %v processed in %v, blocked for %v",
-				t.ID(), eTime, dLock)
+			c.log.Debugf("Slow tick: trade %v processed in %v",
+				t.ID(), eTime)
 		}
 	}()
-
-	t.mtx.Lock()
-	defer t.mtx.Unlock()
-	dLock = time.Since(tStart)
-
-	var swaps, redeems, refunds []*matchTracker
-	assets := make(assetMap) // callers expect non-nil map even on error
-
-	// Check all matches for and resend pending requests as necessary.
-	c.resendPendingRequests(t)
 
 	// Make sure we have a redemption fee suggestion cached.
 	t.cacheRedemptionFeeSuggestion()
 
+	var swaps, redeems, refunds, revokes, searches []*matchTracker
 	var sent, quoteSent, received, quoteReceived uint64
-	checkMatch := func(match *matchTracker) error {
+
+	checkMatch := func(match *matchTracker) error { // only errors on context.DeadlineExceeded or context.Canceled
 		side := match.Side
 		if (side == order.Maker && match.Status >= order.MakerRedeemed) ||
 			(side == order.Taker && match.Status >= order.MatchComplete) {
@@ -1438,29 +1518,43 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 			return nil // either refunded or revoked requiring no action on this side of the match
 		}
 
+		// Inform shouldBeginFindRedemption without modifying the MatchProof.
+		revoked := match.MetaData.Proof.IsRevoked()
+
 		// The trackedTrade mutex is locked, so we must not hang forever. Give
 		// this a generous timeout because it may be necessary to retrieve full
-		// blocks, and catch timeout/shutdown after each check.
-		ctx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
+		// blocks, and catch timeout/shutdown after each check. Individual
+		// requests can have shorter timeouts of their own. This is cumulative.
+		ctx, cancel := context.WithTimeout(c.ctx, 40*time.Second)
 		defer cancel()
 
-		if t.isSwappable(ctx, match) {
+		ok, revoke := t.isSwappable(ctx, match) // rejects revoked matches
+		if ok {
 			c.log.Debugf("Swappable match %s for order %v (%v)", match, t.ID(), side)
 			swaps = append(swaps, match)
 			sent += match.Quantity
 			quoteSent += calc.BaseToQuote(match.Rate, match.Quantity)
 			return nil
 		}
+		if revoke {
+			revokes = append(revokes, match) // may still need refund/redeem, continue
+			revoked = true
+		}
 		if ctx.Err() != nil { // may be here because of timeout or shutdown
 			return ctx.Err()
 		}
 
-		if t.isRedeemable(ctx, match) {
+		ok, revoke = t.isRedeemable(ctx, match) // does not reject revoked matches
+		if ok {
 			c.log.Debugf("Redeemable match %s for order %v (%v)", match, t.ID(), side)
 			redeems = append(redeems, match)
 			received += match.Quantity
 			quoteReceived += calc.BaseToQuote(match.Rate, match.Quantity)
 			return nil
+		}
+		if revoke {
+			revokes = append(revokes, match) // may still need refund/redeem, continue
+			revoked = true
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -1470,7 +1564,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		// Ensures that redemption search is not started if locktime has expired.
 		// If we've already started redemption search for this match, the search
 		// will be aborted if/when auto-refund succeeds.
-		if t.isRefundable(ctx, match) {
+		if t.isRefundable(ctx, match) { // does not matter if revoked
 			c.log.Debugf("Refundable match %s for order %v (%v)", match, t.ID(), side)
 			refunds = append(refunds, match)
 			return nil
@@ -1479,51 +1573,94 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 			return ctx.Err()
 		}
 
-		if t.shouldBeginFindRedemption(ctx, match) {
+		// A redemption search should only be done for a revoked match, but
+		// MatchProof may not be updated, so we enforce that here.
+		if revoked && t.shouldBeginFindRedemption(ctx, match) {
 			c.log.Debugf("Ready to find counter-party redemption for match %s, order %v (%v)", match, t.ID(), side)
-			t.findMakersRedemption(c.ctx, match) // async search, not on the timeout
+			searches = append(searches, match)
 			return nil
 		}
 
 		return ctx.Err()
 	}
 
+	// Begin checks under read-only lock.
+	t.mtx.RLock()
+	// Check all matches for and resend pending requests as necessary.
+	c.resendPendingRequests(t)
+
 	// Check all matches and send swap, redeem, or refund as necessary.
 	for _, match := range t.matches {
-		if err := checkMatch(match); err != nil {
-			return assets, err
+		err := checkMatch(match)
+		if err == nil {
+			continue
 		}
-	}
+		// With a timeout or shutdown, all this trade's matches will have the same
+		// fate, so return now.
 
-	fromID := t.wallets.fromAsset.ID
+		t.mtx.RUnlock()
+
+		if len(revokes) != 0 {
+			// Still flag any "should revoke"s for IsRevoked() and to fast track
+			// the next tick. NOTE: See the TODO below regarding revokeMatch.
+			t.mtx.Lock()
+			defer t.mtx.Unlock()
+			for _, rm := range revokes {
+				rm.MetaData.Proof.SelfRevoked = true
+			}
+		}
+
+		return assets, err
+	}
+	// End checks under read-only lock.
+	t.mtx.RUnlock()
+
 	if len(swaps) > 0 || len(refunds) > 0 {
-		assets.count(fromID)
+		assets.count(t.wallets.fromAsset.ID)
 	}
-	errs := newErrorSet(t.dc.acct.host + " tick: ")
+	if len(redeems) > 0 {
+		assets.count(t.wallets.toAsset.ID)
+		assets.count(t.fromAssetID) // update ContractLocked balance
+	}
 
-	// TODO: Wallet requests below may still hang if there are no internal
-	// timeouts. We should give each asset.Wallet method a context arg. However,
-	// if the requests in the checks above just succeeded, the wallet is likely
-	// to be responsive below.
+	if len(swaps) == 0 && len(refunds) == 0 && len(redeems) == 0 &&
+		len(revokes) == 0 && len(searches) == 0 {
+		return assets, nil // nothing to do, don't acquire the write-lock
+	}
+
+	// Wallet requests below may still hang if there are no internal timeouts.
+	// We should consider giving each asset.Wallet method a context arg.
+	// However, if the requests in the checks above just succeeded, the wallets
+	// are likely to be responsive below.
+
+	// Take the actions that will modify the match.
+	errs := newErrorSet(t.dc.acct.host + " tick: ")
+	t.mtx.Lock()
+	defer t.mtx.Unlock()
+
+	for _, match := range revokes {
+		match.MetaData.Proof.SelfRevoked = true
+		// TODO: maybe revokeMatch() instead of just setting the flag? If this
+		// match is in refunds or redeems (or a redemption search is running),
+		// the match will still be updated after those actions are taken.
+		// Otherwise, we'll be waiting for a revokeMatch call from either
+		// handleRevokeMatchMsg or resolveMatchConflicts (on reconnect).
+	}
 
 	if len(swaps) > 0 {
 		didUnlock, err := t.wallets.fromWallet.refreshUnlock()
-		if err != nil {
-			// Just log it and try anyway.
+		if err != nil { // Just log it and try anyway.
 			c.log.Errorf("refreshUnlock error swapping %s: %v", t.wallets.fromAsset.Symbol, err)
 		}
 		if didUnlock {
-			c.log.Infof("Unexpected unlock needed for the %s wallet while sending a swap", t.wallets.fromAsset.Symbol)
+			c.log.Infof("Unexpected unlock needed for the %s wallet to send a swap", t.wallets.fromAsset.Symbol)
 		}
 		qty := sent
 		if !t.Trade().Sell {
 			qty = quoteSent
 		}
 		err = c.swapMatches(t, swaps)
-
-		// swapMatches might modify the matches, so don't get the *Order for
-		// notifications before swapMatches.
-		corder := t.coreOrderInternal()
+		corder := t.coreOrderInternal() // after swapMatches modifies matches
 		ui := t.wallets.fromWallet.Info().UnitInfo
 		if err != nil {
 			errs.addErr(err)
@@ -1537,16 +1674,12 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 
 	if len(redeems) > 0 {
 		didUnlock, err := t.wallets.toWallet.refreshUnlock()
-		if err != nil {
-			// Just log it and try anyway.
+		if err != nil { // Just log it and try anyway.
 			c.log.Errorf("refreshUnlock error redeeming %s: %v", t.wallets.toAsset.Symbol, err)
 		}
 		if didUnlock {
-			c.log.Infof("Unexpected unlock needed for the %s wallet while sending a redemption", t.wallets.toAsset.Symbol)
+			c.log.Infof("Unexpected unlock needed for the %s wallet to send a redemption", t.wallets.toAsset.Symbol)
 		}
-		toAsset := t.wallets.toAsset.ID
-		assets.count(toAsset)
-		assets.count(t.fromAssetID) // update the from wallet balance to reduce contractlocked balance
 		qty := received
 		if t.Trade().Sell {
 			qty = quoteReceived
@@ -1568,8 +1701,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 
 	if len(refunds) > 0 {
 		didUnlock, err := t.wallets.fromWallet.refreshUnlock()
-		if err != nil {
-			// Just log it and try anyway.
+		if err != nil { // Just log it and try anyway.
 			c.log.Errorf("refreshUnlock error refunding %s: %v", t.wallets.fromAsset.Symbol, err)
 		}
 		if didUnlock {
@@ -1590,6 +1722,12 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		}
 	}
 
+	if len(searches) > 0 {
+		for _, match := range searches {
+			t.findMakersRedemption(c.ctx, match) // async search, just set cancelRedemptionSearch
+		}
+	}
+
 	return assets, errs.ifAny()
 }
 
@@ -1597,7 +1735,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 // sending the `init` or `redeem` request where necessary.
 //
 // This method modifies match fields and MUST be called with the trackedTrade
-// mutex lock held for writes.
+// mutex lock held for reads.
 func (c *Core) resendPendingRequests(t *trackedTrade) {
 	for _, match := range t.matches {
 		proof, auth := &match.MetaData.Proof, &match.MetaData.Proof.Auth
@@ -1663,9 +1801,11 @@ func (t *trackedTrade) revoke() {
 	}
 }
 
-// revokeMatch sets the status as revoked for the specified match. revokeMatch
-// must be called with the mtx write-locked.
-func (t *trackedTrade) revokeMatch(ctx context.Context, matchID order.MatchID, fromServer bool) error {
+// revokeMatch sets the status as revoked for the specified match, emits an
+// Order note with TopicMatchRevoked, returns any unneeded funding coins, and
+// unlocks and reserves for refunds and redeems (for AccountLocker wallet
+// types like eth). revokeMatch must be called with the mtx write-locked.
+func (t *trackedTrade) revokeMatch(matchID order.MatchID, fromServer bool) error {
 	var revokedMatch *matchTracker
 	for _, match := range t.matches {
 		if match.MatchID == matchID {
@@ -1693,12 +1833,11 @@ func (t *trackedTrade) revokeMatch(ctx context.Context, matchID order.MatchID, f
 	subject, details := t.formatDetails(TopicMatchRevoked, token(matchID[:]))
 	t.notify(newOrderNote(TopicMatchRevoked, subject, details, db.WarningLevel, corder))
 
-	// Unlock coins if we're not expecting future matches for this
-	// trade and there are no matches that MAY later require sending
-	// swaps.
+	// Unlock coins if we're not expecting future matches for this trade and
+	// there are no matches that MAY later require sending swaps.
 	t.maybeReturnCoins()
 
-	// Return unused redemption reserves.
+	// Return unused and unneeded redemption reserves.
 	if (revokedMatch.Side == order.Taker && (revokedMatch.Status < order.TakerSwapCast)) ||
 		(revokedMatch.Side == order.Maker && revokedMatch.Status < order.MakerSwapCast) {
 
@@ -1873,7 +2012,7 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 			}
 			if time.Since(lastActionTime) < bTimeout ||
 				(auditStamp == 0 && match.swapErrCount < tickCheckDivisions) {
-				t.delayTicks(match, tickInterval*3/4)
+				match.delayTicks(tickInterval * 3 / 4)
 			} else {
 				// If we can't get a swap out before the broadcast timeout, just
 				// quit. We could also self-revoke here, but we're also
@@ -2170,7 +2309,7 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 				// we do want the user to recover.
 				waitTime = 15 * time.Minute
 			}
-			t.delayTicks(match, waitTime)
+			match.delayTicks(waitTime)
 		}
 		errs.add("error sending redeem transaction: %v", err)
 		return
@@ -2356,7 +2495,7 @@ func (t *trackedTrade) findMakersRedemption(ctx context.Context, match *matchTra
 			// Ignore the error if we've refunded, the error would likely be context
 			// canceled or secret parse error (if redemption search encountered the
 			// refund before the search could be canceled).
-			if ctx.Err() != nil || len(match.MetaData.Proof.RefundCoin) == 0 {
+			if len(match.MetaData.Proof.RefundCoin) == 0 {
 				t.dc.log.Errorf("Error finding redemption of taker's %s contract %s (%s) for order %s, match %s: %v.",
 					fromAsset.Symbol, coinIDString(fromAsset.ID, swapCoinID), swapContract, t.ID(), match, err)
 			}
@@ -2464,7 +2603,7 @@ func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, 
 					refundAsset.Symbol, swapCoinString)
 				t.findMakersRedemption(c.ctx, match)
 			} else {
-				t.delayTicks(match, time.Minute*5)
+				match.delayTicks(time.Minute * 5)
 				errs.add("error sending refund tx for match %s, swap coin %s: %v",
 					match, swapCoinString, err)
 				if match.Status == order.TakerSwapCast && match.Side == order.Taker {
@@ -2819,10 +2958,10 @@ func (t *trackedTrade) processMakersRedemption(match *matchTracker, coinID, secr
 }
 
 // Coins will be returned if
-// - the trade status is not OrderStatusEpoch or OrderStatusBooked, that is to
-//   say, there won't be future matches for this order.
-// - there are no matches in the trade that MAY later require sending swaps,
-//   that is to say, all matches have been either swapped or revoked.
+//   - the trade status is not OrderStatusEpoch or OrderStatusBooked, that is to
+//     say, there won't be future matches for this order.
+//   - there are no matches in the trade that MAY later require sending swaps,
+//     that is to say, all matches have been either swapped or revoked.
 //
 // This method modifies match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.

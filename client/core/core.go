@@ -678,7 +678,9 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 				extra = append(extra, msgMatch)
 				continue
 			}
+			mt.exceptionMtx.Lock()
 			mt.checkServerRevoke = false
+			mt.exceptionMtx.Unlock()
 			if mt.Status != order.MatchStatus(msgMatch.Status) {
 				conflict := statusConflicts[oid]
 				if conflict == nil {
@@ -6227,16 +6229,18 @@ func (c *Core) handleConnectEvent(dc *dexConnection, status comms.ConnectionStat
 		topic = TopicDEXConnected
 	} else {
 		for _, tracker := range dc.trackedTrades() {
-			tracker.mtx.Lock()
+			tracker.mtx.RLock()
 			for _, match := range tracker.matches {
 				// Make sure that a taker will not prematurely send an
 				// initialization until it is confirmed with the server
 				// that the match is not revoked.
 				if match.Side == order.Taker && match.Status == order.MakerSwapCast {
+					match.exceptionMtx.Lock()
 					match.checkServerRevoke = true
+					match.exceptionMtx.Unlock()
 				}
 			}
-			tracker.mtx.Unlock()
+			tracker.mtx.RUnlock()
 		}
 	}
 	atomic.StoreUint32(&dc.connectionStatus, uint32(status))
@@ -6340,7 +6344,7 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	copy(matchID[:], revocation.MatchID)
 
 	tracker.mtx.Lock()
-	err = tracker.revokeMatch(c.ctx, matchID, true)
+	err = tracker.revokeMatch(matchID, true)
 	tracker.mtx.Unlock()
 	if err != nil {
 		return fmt.Errorf("unable to revoke match %s for order %s: %w", matchID, tracker.ID(), err)
