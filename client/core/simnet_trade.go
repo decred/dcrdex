@@ -49,6 +49,7 @@ import (
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
+	dexdoge "decred.org/dcrdex/dex/networks/doge"
 	"decred.org/dcrdex/dex/order"
 	dexsrv "decred.org/dcrdex/server/dex"
 	"golang.org/x/sync/errgroup"
@@ -1452,6 +1453,11 @@ var cloneTypes = map[uint32]string{
 	133: "zcashdRPC",
 }
 
+// accountBIPs is a map of account based assets. Used in fee estimation.
+var accountBIPs = map[uint32]bool{
+	eth.BipID: true,
+}
+
 func dcrWallet(wt SimWalletType, node string) (*tWallet, error) {
 	switch wt {
 	case WTSPVNative:
@@ -1532,7 +1538,7 @@ func btcCloneWallet(assetID uint32, node string, wt SimWalletType) (*tWallet, er
 
 	switch assetID {
 	case doge.BipID, zec.BipID:
-	// dogecoind doesn't support > 1 wallet, so gamma and delta
+	// dogecoind and zcash don't support > 1 wallet, so gamma and delta
 	// have their own nodes.
 	default:
 		switch node {
@@ -1550,6 +1556,13 @@ func btcCloneWallet(assetID uint32, node string, wt SimWalletType) (*tWallet, er
 
 	if parentNode != node {
 		cfg["walletname"] = node
+	}
+
+	// doge fees are slightly higher than others. Leaving this as 0 will
+	// apply bitcoin limits.
+	if assetID == doge.BipID {
+		cfg["fallbackfee"] = fmt.Sprintf("%f", dexdoge.DefaultFee*1000/1e8)
+		cfg["feeratelimit"] = fmt.Sprintf("%f", dexdoge.DefaultFeeRateLimit*1000/1e8)
 	}
 
 	return &tWallet{
@@ -1856,6 +1869,15 @@ func (s *simulationTest) assertBalanceChanges(client *simulationClient) error {
 		} else {
 			quoteFees = int64(fees.Swap)
 			baseFees = int64(fees.Redemption)
+		}
+		// eth based assets will grossly overestimate swap fees here.
+		// An esimate of 200 gwei/gas is used but actual on simnet is
+		// always almost 2 gwei/gas.
+		if accountBIPs[ord.BaseID] {
+			baseFees /= 100
+		}
+		if accountBIPs[ord.QuoteID] {
+			quoteFees /= 100
 		}
 	}
 
