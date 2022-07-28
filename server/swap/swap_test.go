@@ -2011,6 +2011,27 @@ func TestMalformedSwap(t *testing.T) {
 func TestRetriesDuringSwap(t *testing.T) {
 	rig, cleanup := tNewTestRig(nil)
 	defer cleanup()
+
+	ensureNilErr := makeEnsureNilErr(t)
+	// retryUntilSuccess will retry action until success or timeout.
+	retryUntilSuccess := func(action func() error, onSuccess, onFail func()) {
+		startWaitingTime := time.Now()
+		for {
+			err := action()
+			if err == nil {
+				// We are done, finally got a retry attempt that worked.
+				onSuccess()
+				break
+			}
+			onFail()
+
+			if time.Since(startWaitingTime) > 10*time.Second {
+				t.Fatalf("timed out retrying, err: %v", err)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+
 	match := tPerfectLimitLimit(uint64(1e8), uint64(1e8), false)
 	rig.matches = match
 	rig.matchInfo = match.matchInfos[0]
@@ -2019,8 +2040,6 @@ func TestRetriesDuringSwap(t *testing.T) {
 	rig.auth.redeemReceived = make(chan struct{}, 1)
 	rig.auth.redemptionReq = make(chan struct{}, 1)
 	rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet})
-
-	ensureNilErr := makeEnsureNilErr(t)
 
 	ensureNilErr(rig.ackMatch_maker(true))
 	ensureNilErr(rig.ackMatch_taker(true))
@@ -2031,31 +2050,25 @@ func TestRetriesDuringSwap(t *testing.T) {
 	// We're "rewinding time" back NewlyMatched status to be able to retry sending
 	// the same init request again.
 	tracker.Status = order.NewlyMatched
-	// We need to wait for swapSearching semaphore (it coordinates init request
-	// handling) to clear, so our retry request should eventually work (it has
-	// adequate fee and 0 confs).
-	startWaitingTime := time.Now()
-	for {
+	retryUntilSuccess(func() error {
 		// We might get a couple of duplicate init request errors here, in that case
 		// we simply retry request later.
-		err := rig.sendSwap_maker(false)
-		if err == nil {
-			// We are done, finally got a retry attempt that worked.
-			ensureNilErr(rig.ensureSwapStatus("server received our swap -> counterparty got audit request",
-				order.MakerSwapCast, rig.auth.swapReceived, rig.auth.auditReq))
-			ensureNilErr(rig.checkServerResponseSuccess(rig.matchInfo.maker))
-			ensureNilErr(rig.auditSwap_taker())
-			break
-		}
+		// We need to wait for swapSearching semaphore (it coordinates init request
+		// handling) to clear, so our retry request should eventually work (it has
+		// adequate fee and 0 confs).
+		return rig.sendSwap_maker(false)
+	}, func() {
+		// On success, executes once.
+		ensureNilErr(rig.ensureSwapStatus("server received our swap -> counterparty got audit request",
+			order.MakerSwapCast, rig.auth.swapReceived, rig.auth.auditReq))
+		ensureNilErr(rig.checkServerResponseSuccess(rig.matchInfo.maker))
+		ensureNilErr(rig.auditSwap_taker())
+	}, func() {
+		// On every failure.
 		ensureNilErr(rig.ensureSwapStatus("server received our swap",
 			order.NewlyMatched, rig.auth.swapReceived))
 		ensureNilErr(rig.checkServerResponseFail(rig.matchInfo.maker, msgjson.DuplicateRequestError))
-
-		if time.Since(startWaitingTime) > 10*time.Second {
-			t.Fatalf("timed out waiting for retrying init request to succeed, err: %v", err)
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
+	})
 
 	ensureNilErr(rig.ackAudit_taker(true))
 	ensureNilErr(rig.sendSwap_taker(true))
@@ -2064,31 +2077,25 @@ func TestRetriesDuringSwap(t *testing.T) {
 	// We're "rewinding time" back MakerSwapCast status to be able to retry sending
 	// the same init request again.
 	tracker.Status = order.MakerSwapCast
-	// We need to wait for swapSearching semaphore (it coordinates init request
-	// handling) to clear, so our retry request should eventually work (it has
-	// adequate fee and 0 confs).
-	startWaitingTime = time.Now()
-	for {
+	retryUntilSuccess(func() error {
 		// We might get a couple of duplicate init request errors here, in that case
 		// we simply retry request later.
-		err := rig.sendSwap_taker(false)
-		if err == nil {
-			// We are done, finally got a retry attempt that worked.
-			ensureNilErr(rig.ensureSwapStatus("server received our swap -> counterparty got audit request",
-				order.TakerSwapCast, rig.auth.swapReceived, rig.auth.auditReq))
-			ensureNilErr(rig.checkServerResponseSuccess(rig.matchInfo.taker))
-			ensureNilErr(rig.auditSwap_maker())
-			break
-		}
+		// We need to wait for swapSearching semaphore (it coordinates init request
+		// handling) to clear, so our retry request should eventually work (it has
+		// adequate fee and 0 confs).
+		return rig.sendSwap_taker(false)
+	}, func() {
+		// On success, executes once.
+		ensureNilErr(rig.ensureSwapStatus("server received our swap -> counterparty got audit request",
+			order.TakerSwapCast, rig.auth.swapReceived, rig.auth.auditReq))
+		ensureNilErr(rig.checkServerResponseSuccess(rig.matchInfo.taker))
+		ensureNilErr(rig.auditSwap_maker())
+	}, func() {
+		// On every failure.
 		ensureNilErr(rig.ensureSwapStatus("server received our swap",
 			order.MakerSwapCast, rig.auth.swapReceived))
 		ensureNilErr(rig.checkServerResponseFail(rig.matchInfo.taker, msgjson.DuplicateRequestError))
-
-		if time.Since(startWaitingTime) > 10*time.Second {
-			t.Fatalf("timed out waiting for retrying init request to succeed, err: %v", err)
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
+	})
 
 	ensureNilErr(rig.ackAudit_maker(true))
 
@@ -2098,30 +2105,24 @@ func TestRetriesDuringSwap(t *testing.T) {
 	// We're "rewinding time" back TakerSwapCast status to be able to retry sending
 	// the same redeem request again.
 	tracker.Status = order.TakerSwapCast
-	// We need to wait for redeemSearching semaphore (it coordinates redeem request
-	// handling) to clear, so our retry request should eventually work.
-	startWaitingTime = time.Now()
-	for {
+	retryUntilSuccess(func() error {
 		// We might get a couple of duplicate redeem request errors here, in that case
 		// we simply retry request later.
-		err := rig.redeem_maker(false)
-		if err == nil {
-			// We are done, finally got a retry attempt that worked.
-			ensureNilErr(rig.ensureSwapStatus("server received our redeem -> counterparty got redemption request",
-				order.MakerRedeemed, rig.auth.redeemReceived, rig.auth.redemptionReq))
-			ensureNilErr(rig.checkServerResponseSuccess(rig.matchInfo.maker))
-			ensureNilErr(rig.ackRedemption_taker(true))
-			break
-		}
+		// We need to wait for redeemSearching semaphore (it coordinates redeem request
+		// handling) to clear, so our retry request should eventually work.
+		return rig.redeem_maker(false)
+	}, func() {
+		// On success, executes once.
+		ensureNilErr(rig.ensureSwapStatus("server received our redeem -> counterparty got redemption request",
+			order.MakerRedeemed, rig.auth.redeemReceived, rig.auth.redemptionReq))
+		ensureNilErr(rig.checkServerResponseSuccess(rig.matchInfo.maker))
+		ensureNilErr(rig.ackRedemption_taker(true))
+	}, func() {
+		// On every failure.
 		ensureNilErr(rig.ensureSwapStatus("server received our redeem",
 			order.TakerSwapCast, rig.auth.redeemReceived))
 		ensureNilErr(rig.checkServerResponseFail(rig.matchInfo.maker, msgjson.DuplicateRequestError))
-
-		if time.Since(startWaitingTime) > 10*time.Second {
-			t.Fatalf("timed out waiting for retrying init request to succeed, err: %v", err)
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
+	})
 
 	ensureNilErr(rig.redeem_taker(true))
 	// We can't easily "rewind time" (like we are doing above) after taker
