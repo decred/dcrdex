@@ -1726,7 +1726,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 
 	newStatus := stepInfo.nextStep
 
-	// NOTE: redemption.FeeRate is not checked since the counter party is not
+	// NOTE: redemption.FeeRate is not checked since the counterparty is not
 	// inconvenienced by slow confirmation of the redemption.
 
 	// Modify the match's swapStatuses, but only if the match wasn't revoked

@@ -242,7 +242,7 @@ func (m *TAuthManager) flushPenalty(user account.AccountID) (found bool, rule ac
 }
 
 // pop front
-func (m *TAuthManager) getReq(id account.AccountID) *TRequest {
+func (m *TAuthManager) popReq(id account.AccountID) *TRequest {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	reqs := m.reqs[id]
@@ -693,7 +693,7 @@ func (rig *testRig) ackMatch_taker(checkSig bool) error {
 }
 
 func (rig *testRig) ackMatch(user *tUser, oid order.OrderID, counterAddr string) error {
-	req := rig.auth.getReq(user.acct)
+	req := rig.auth.popReq(user.acct)
 	if req == nil {
 		return fmt.Errorf("failed to find match notification for %s", user.lbl)
 	}
@@ -711,7 +711,7 @@ func (rig *testRig) ackMatch(user *tUser, oid order.OrderID, counterAddr string)
 	return nil
 }
 
-// helper to check the match notifications.
+// Helper to check the match notifications.
 func (rig *testRig) checkMatchNotification(msg *msgjson.Message, oid order.OrderID, counterAddr string) error {
 	matchInfo := rig.matchInfo
 	var notes []*msgjson.Match
@@ -747,25 +747,26 @@ func (rig *testRig) checkMatchNotification(msg *msgjson.Message, oid order.Order
 	return nil
 }
 
-// helper to check the swap status for specified user.
-func (rig *testRig) checkSwapStatusChange(wantStatus order.MatchStatus, user *tUser) error {
-	// Swap counterparty ultimately gets an audit request. Synchronize with that.
-	if err := rig.waitChans("server received our swap -> counterparty audit request", nil, rig.auth.swapReceived, rig.auth.auditReq); err != nil {
+// Helper to check the swap status for specified user.
+// Swap counterparty usually gets a request from server notifying that it's time
+// for his turn. Synchronize with that before checking status change.
+func (rig *testRig) ensureSwapStatus(tag string, wantStatus order.MatchStatus, waitOn ...chan struct{}) error {
+	if err := rig.waitChans(tag, waitOn...); err != nil {
 		return err
 	}
 	tracker := rig.getTracker()
 	status := tracker.Status
 	if status != wantStatus {
-		return fmt.Errorf("unexpected swap status %d after maker swap notification", status)
+		return fmt.Errorf("unexpected swap status %d after maker swap notification, wanted: %s", status, wantStatus)
 	}
-	return rig.checkSuccessResponse(user, "init")
+	return nil
 }
 
 // Can be used to ensure that a non-error response is returned from the swapper.
-func (rig *testRig) checkSuccessResponse(user *tUser, txType string) error {
+func (rig *testRig) checkServerResponseSuccess(user *tUser) error {
 	msg, resp := rig.auth.popResp(user.acct)
 	if msg == nil {
-		return fmt.Errorf("unexpected nil response to %s's '%s'", user.lbl, txType)
+		return fmt.Errorf("unexpected nil response to %s's request", user.lbl)
 	}
 	if resp.Error != nil {
 		return fmt.Errorf("%s swap rpc error. code: %d, msg: %s", user.lbl, resp.Error.Code, resp.Error.Message)
@@ -773,34 +774,67 @@ func (rig *testRig) checkSuccessResponse(user *tUser, txType string) error {
 	return nil
 }
 
-// Maker: Send swap transaction.
-func (rig *testRig) sendSwap_maker(checkStatus bool) (err error) {
-	matchInfo := rig.matchInfo
-	swap, err := rig.sendSwap(matchInfo.maker, matchInfo.makerOID, matchInfo.taker.addr)
-	if err != nil {
-		return fmt.Errorf("error sending maker swap transaction: %w", err)
+// Can be used to ensure that an error response is returned from the swapper.
+func (rig *testRig) checkServerResponseFail(user *tUser, code int, grep ...string) error {
+	msg, resp := rig.auth.popResp(user.acct)
+	if msg == nil {
+		return fmt.Errorf("no response for %s", user.lbl)
 	}
-	matchInfo.db.makerSwap = swap
-	if checkStatus {
-		return rig.checkSwapStatusChange(order.MakerSwapCast, matchInfo.maker)
+	if resp.Error == nil {
+		return fmt.Errorf("no error for %s", user.lbl)
+	}
+	if resp.Error.Code != code {
+		return fmt.Errorf("wrong error code for %s. expected %d, got %d", user.lbl, code, resp.Error.Code)
+	}
+	if len(grep) > 0 && !strings.Contains(resp.Error.Message, grep[0]) {
+		return fmt.Errorf("error missing the message %q", grep[0])
 	}
 	return nil
 }
 
-// Taker: Send swap transaction.
-func (rig *testRig) sendSwap_taker(checkStatus bool) (err error) {
+// Maker: Send swap transaction (swap init request).
+func (rig *testRig) sendSwap_maker(expectSuccess bool) (err error) {
 	matchInfo := rig.matchInfo
-	taker := matchInfo.taker
-	swap, err := rig.sendSwap(taker, matchInfo.takerOID, matchInfo.maker.addr)
+	swap, err := rig.sendSwap(matchInfo.maker, matchInfo.makerOID, matchInfo.taker.addr)
 	if err != nil {
-		return fmt.Errorf("error sending taker swap transaction: %w", err)
+		return fmt.Errorf("error sending maker swap request: %w", err)
+	}
+	matchInfo.db.makerSwap = swap
+	if expectSuccess {
+		err = rig.ensureSwapStatus("server received our swap -> counterparty got audit request",
+			order.MakerSwapCast, rig.auth.swapReceived, rig.auth.auditReq)
+		if err != nil {
+			return fmt.Errorf("ensure swap status: %w", err)
+		}
+		err = rig.checkServerResponseSuccess(matchInfo.maker)
+		if err != nil {
+			return fmt.Errorf("check server response success: %w", err)
+		}
+	}
+	return nil
+}
+
+// Taker: Send swap transaction (swap init request)..
+func (rig *testRig) sendSwap_taker(expectSuccess bool) (err error) {
+	matchInfo := rig.matchInfo
+	swap, err := rig.sendSwap(matchInfo.taker, matchInfo.takerOID, matchInfo.maker.addr)
+	if err != nil {
+		return fmt.Errorf("error sending taker swap request: %w", err)
 	}
 	matchInfo.db.takerSwap = swap
 	if err != nil {
 		return err
 	}
-	if checkStatus {
-		return rig.checkSwapStatusChange(order.TakerSwapCast, matchInfo.taker)
+	if expectSuccess {
+		err = rig.ensureSwapStatus("server received our swap -> counterparty got audit request",
+			order.TakerSwapCast, rig.auth.swapReceived, rig.auth.auditReq)
+		if err != nil {
+			return fmt.Errorf("ensure swap status: %w", err)
+		}
+		err = rig.checkServerResponseSuccess(matchInfo.taker)
+		if err != nil {
+			return fmt.Errorf("check server response success: %w", err)
+		}
 	}
 	return nil
 }
@@ -827,7 +861,7 @@ func (rig *testRig) sendSwap(user *tUser, oid order.OrderID, recipient string) (
 // acknowledged separately with ackAudit_taker.
 func (rig *testRig) auditSwap_taker() error {
 	matchInfo := rig.matchInfo
-	req := rig.auth.getReq(matchInfo.taker.acct)
+	req := rig.auth.popReq(matchInfo.taker.acct)
 	matchInfo.db.takerAudit = req
 	if req == nil {
 		return fmt.Errorf("failed to find audit request for taker after maker's init")
@@ -839,7 +873,7 @@ func (rig *testRig) auditSwap_taker() error {
 // acknowledged separately with ackAudit_maker.
 func (rig *testRig) auditSwap_maker() error {
 	matchInfo := rig.matchInfo
-	req := rig.auth.getReq(matchInfo.maker.acct)
+	req := rig.auth.popReq(matchInfo.maker.acct)
 	matchInfo.db.makerAudit = req
 	if req == nil {
 		return fmt.Errorf("failed to find audit request for maker after taker's init")
@@ -935,50 +969,52 @@ func (rig *testRig) ackAudit(user *tUser, req *TRequest) error {
 }
 
 // Maker: Redeem taker's swap transaction.
-func (rig *testRig) redeem_maker(checkStatus bool) error {
+func (rig *testRig) redeem_maker(expectSuccess bool) error {
 	matchInfo := rig.matchInfo
-	matchInfo.db.makerRedeem = rig.redeem(matchInfo.maker, matchInfo.makerOID)
-	// TODO - use same pattern as for swaps to simplify if body below.
-	// Check the match status
-	if checkStatus {
-		// The taker ultimately gets a redemption request.
-		if err := rig.waitChans("maker redeem -> received -> redemption to taker", rig.auth.redeemReceived, rig.auth.redemptionReq); err != nil {
-			return err
-		}
-		tracker := rig.getTracker()
-		if tracker.Status != order.MakerRedeemed {
-			return fmt.Errorf("unexpected swap status %d after maker redeem notification", tracker.Status)
-		}
-		err := rig.checkSuccessResponse(matchInfo.maker, "redeem")
+	redeem, err := rig.redeem(matchInfo.maker, matchInfo.makerOID)
+	if err != nil {
+		return fmt.Errorf("error sending maker redeem request: %w", err)
+	}
+	matchInfo.db.makerRedeem = redeem
+	if expectSuccess {
+		err = rig.ensureSwapStatus("server received our redeem -> counterparty got redemption request",
+			order.MakerRedeemed, rig.auth.redeemReceived, rig.auth.redemptionReq)
 		if err != nil {
-			return err
+			return fmt.Errorf("ensure swap status: %w", err)
+		}
+		err = rig.checkServerResponseSuccess(matchInfo.maker)
+		if err != nil {
+			return fmt.Errorf("check server response success: %w", err)
 		}
 	}
 	return nil
 }
 
 // Taker: Redeem maker's swap transaction.
-func (rig *testRig) redeem_taker(checkStatus bool) error {
+func (rig *testRig) redeem_taker(expectSuccess bool) error {
 	matchInfo := rig.matchInfo
-	matchInfo.db.takerRedeem = rig.redeem(matchInfo.taker, matchInfo.takerOID)
-	// Check the match status
-	if checkStatus {
-		if err := rig.waitChans("taker redeem -> received", rig.auth.redeemReceived); err != nil {
+	redeem, err := rig.redeem(matchInfo.taker, matchInfo.takerOID)
+	if err != nil {
+		return fmt.Errorf("error sending taker redeem request: %w", err)
+	}
+	matchInfo.db.takerRedeem = redeem
+	if expectSuccess {
+		if err := rig.waitChans("server received our redeem", rig.auth.redeemReceived); err != nil {
 			return err
 		}
 		tracker := rig.getTracker()
 		if tracker != nil {
 			return fmt.Errorf("expected match to be removed, found it, in status %v", tracker.Status)
 		}
-		err := rig.checkSuccessResponse(matchInfo.taker, "redeem")
+		err = rig.checkServerResponseSuccess(matchInfo.taker)
 		if err != nil {
-			return err
+			return fmt.Errorf("check server response success: %w", err)
 		}
 	}
 	return nil
 }
 
-func (rig *testRig) redeem(user *tUser, oid order.OrderID) *tRedeem {
+func (rig *testRig) redeem(user *tUser, oid order.OrderID) (*tRedeem, error) {
 	matchInfo := rig.matchInfo
 	redeem := tNewRedeem(matchInfo, oid, user)
 	if isQuoteSwap(user, matchInfo.match) {
@@ -990,10 +1026,11 @@ func (rig *testRig) redeem(user *tUser, oid order.OrderID) *tRedeem {
 	rig.auth.redeemID = redeem.req.ID
 	rpcErr := rig.swapper.handleRedeem(user.acct, redeem.req)
 	if rpcErr != nil {
-		msg, _ := msgjson.NewResponse(redeem.req.ID, nil, rpcErr)
-		rig.auth.Send(user.acct, msg)
+		resp, _ := msgjson.NewResponse(redeem.req.ID, nil, rpcErr)
+		_ = rig.auth.Send(user.acct, resp)
+		return nil, fmt.Errorf("%s swap rpc error. code: %d, msg: %s", user.lbl, rpcErr.Code, rpcErr.Message)
 	}
-	return redeem
+	return redeem, nil
 }
 
 // Taker: Acknowledge the DEX 'redemption' request.
@@ -1016,7 +1053,7 @@ func (rig *testRig) ackRedemption(user *tUser, oid order.OrderID, redeem *tRedee
 	if redeem == nil {
 		return fmt.Errorf("nil redeem info")
 	}
-	req := rig.auth.getReq(user.acct)
+	req := rig.auth.popReq(user.acct)
 	if req == nil {
 		return fmt.Errorf("failed to find audit request for %s after counterparty's init", user.lbl)
 	}
@@ -1377,27 +1414,6 @@ func makeEnsureNilErr(t *testing.T) func(error) {
 		t.Helper()
 		if err != nil {
 			t.Fatalf(err.Error())
-		}
-	}
-}
-
-// Create a closure that will call t.Fatal if a user doesn't have an
-// msgjson.RPCError of the correct type.
-func rpcErrorChecker(t *testing.T, rig *testRig, code int) func(*tUser, ...string) {
-	return func(user *tUser, grep ...string) {
-		t.Helper()
-		msg, resp := rig.auth.popResp(user.acct)
-		if msg == nil {
-			t.Fatalf("no response for %s", user.lbl)
-		}
-		if resp.Error == nil {
-			t.Fatalf("no error for %s", user.lbl)
-		}
-		if resp.Error.Code != code {
-			t.Fatalf("wrong error code for %s. expected %d, got %d", user.lbl, msgjson.SignatureError, resp.Error.Code)
-		}
-		if len(grep) > 0 && !strings.Contains(resp.Error.Message, grep[0]) {
-			t.Fatalf("error missing the message %q", grep[0])
 		}
 	}
 }
@@ -1897,10 +1913,6 @@ func TestSigErrors(t *testing.T) {
 	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}) // pushes a new req to m.reqs
 	ensureNilErr := makeEnsureNilErr(t)
 
-	// ensureSigErr makes sure that the specified user has a signature error
-	// response from the swapper.
-	ensureSigErr := rpcErrorChecker(t, rig, msgjson.SignatureError)
-
 	// We need a way to restore the state of the queue after testing an auth error.
 	var tReq *TRequest
 	var msg *msgjson.Message
@@ -1914,7 +1926,7 @@ func TestSigErrors(t *testing.T) {
 	}
 	stash := func(user *tUser) {
 		msg, _ = rig.auth.popResp(user.acct)
-		tReq = rig.auth.getReq(user.acct)
+		tReq = rig.auth.popReq(user.acct)
 		apply(user) // put them back now that we have a copy
 	}
 	testAction := func(stepFunc func(bool) error, user *tUser, failChans ...chan struct{}) {
@@ -1923,11 +1935,13 @@ func TestSigErrors(t *testing.T) {
 		rig.auth.authErr = dummyError
 		stash(user) // make a copy of this user's next req/resp pair
 		// The error will be pulled from the auth manager.
-		_ = stepFunc(false) // getReq => req.respFunc(..., tNewResponse()) => send error to client (m.resps)
+		_ = stepFunc(false) // popReq => req.respFunc(..., tNewResponse()) => send error to client (m.resps)
 		if err := rig.waitChans("testAction", failChans...); err != nil {
 			t.Fatalf("testAction failChan wait error: %v", err)
 		}
-		ensureSigErr(user) // popResp
+		// ensureSigErr makes sure that the specified user has a signature error
+		// response from the swapper.
+		ensureNilErr(rig.checkServerResponseFail(user, msgjson.SignatureError))
 		// Again with no auth error to go to the next step.
 		rig.auth.authErr = nil
 		apply(user) // restore the initial live request
@@ -1958,7 +1972,6 @@ func TestMalformedSwap(t *testing.T) {
 
 	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
 	ensureNilErr := makeEnsureNilErr(t)
-	checkContractErr := rpcErrorChecker(t, rig, msgjson.ContractError)
 
 	ensureNilErr(rig.ackMatch_maker(true))
 	ensureNilErr(rig.ackMatch_taker(true))
@@ -1972,53 +1985,52 @@ func TestMalformedSwap(t *testing.T) {
 	// Bad contract value
 	tValSpoofer = 2
 	ensureErr("bad maker contract")
-	checkContractErr(matchInfo.maker, "expected contract value to be")
+	ensureNilErr(rig.checkServerResponseFail(matchInfo.maker, msgjson.ContractError))
 	tValSpoofer = 1
 	// Bad contract recipient
 	tRecipientSpoofer = "2"
 	ensureErr("bad recipient")
-	checkContractErr(matchInfo.maker, "incorrect recipient")
+	ensureNilErr(rig.checkServerResponseFail(matchInfo.maker, msgjson.ContractError))
 	tRecipientSpoofer = ""
 	// Bad locktime
 	tLockTimeSpoofer = time.Unix(1, 0)
 	ensureErr("bad locktime")
-	checkContractErr(matchInfo.maker, "expected lock time")
+	ensureNilErr(rig.checkServerResponseFail(matchInfo.maker, msgjson.ContractError))
 	tLockTimeSpoofer = time.Time{}
 
 	// Low fee, unconfirmed
 	rig.abcNode.invalidFeeRate = true
 	ensureErr("low fee")
-	checkContractErr(matchInfo.maker, "low tx fee")
+	ensureNilErr(rig.checkServerResponseFail(matchInfo.maker, msgjson.ContractError))
 
 	// Works with low fee, but now a confirmation.
 	tConfsSpoofer = 1
 	ensureNilErr(rig.sendSwap_maker(true))
 }
 
-func TestRetrySwapInit(t *testing.T) {
-	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
-	matchInfo := set.matchInfos[0]
-	rig, cleanup := tNewTestRig(matchInfo)
+func TestRetriesDuringSwap(t *testing.T) {
+	rig, cleanup := tNewTestRig(nil)
 	defer cleanup()
-
+	match := tPerfectLimitLimit(uint64(1e8), uint64(1e8), false)
+	rig.matches = match
+	rig.matchInfo = match.matchInfos[0]
 	rig.auth.swapReceived = make(chan struct{}, 1)
+	rig.auth.auditReq = make(chan struct{}, 1)
+	rig.auth.redeemReceived = make(chan struct{}, 1)
+	rig.auth.redemptionReq = make(chan struct{}, 1)
+	rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet})
 
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
 	ensureNilErr := makeEnsureNilErr(t)
-	ensureDupRequestErr := rpcErrorChecker(t, rig, msgjson.DuplicateRequestError)
 
 	ensureNilErr(rig.ackMatch_maker(true))
 	ensureNilErr(rig.ackMatch_taker(true))
 
 	ensureNilErr(rig.sendSwap_maker(true))
-
+	ensureNilErr(rig.auditSwap_taker())
 	tracker := rig.getTracker()
 	// We're "rewinding time" back NewlyMatched status to be able to retry sending
 	// the same init request again.
-	tracker.mtx.Lock()
 	tracker.Status = order.NewlyMatched
-	tracker.mtx.Unlock()
-
 	// We need to wait for swapSearching semaphore (it coordinates init request
 	// handling) to clear, so our retry request should eventually work (it has
 	// adequate fee and 0 confs).
@@ -2029,18 +2041,103 @@ func TestRetrySwapInit(t *testing.T) {
 		err := rig.sendSwap_maker(false)
 		if err == nil {
 			// We are done, finally got a retry attempt that worked.
-			ensureNilErr(rig.checkSwapStatusChange(order.MakerSwapCast, matchInfo.maker))
+			ensureNilErr(rig.ensureSwapStatus("server received our swap -> counterparty got audit request",
+				order.MakerSwapCast, rig.auth.swapReceived, rig.auth.auditReq))
+			ensureNilErr(rig.checkServerResponseSuccess(rig.matchInfo.maker))
+			ensureNilErr(rig.auditSwap_taker())
 			break
 		}
-		// TODO - maybe also check status hasn't changed, similar to how it's done in checkSwapStatusChange.
-		ensureNilErr(rig.waitChans("server received our swap", rig.auth.swapReceived))
-		ensureDupRequestErr(matchInfo.maker)
+		ensureNilErr(rig.ensureSwapStatus("server received our swap",
+			order.NewlyMatched, rig.auth.swapReceived))
+		ensureNilErr(rig.checkServerResponseFail(rig.matchInfo.maker, msgjson.DuplicateRequestError))
 
 		if time.Since(startWaitingTime) > 10*time.Second {
 			t.Fatalf("timed out waiting for retrying init request to succeed, err: %v", err)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+
+	ensureNilErr(rig.ackAudit_taker(true))
+	ensureNilErr(rig.sendSwap_taker(true))
+	ensureNilErr(rig.auditSwap_maker())
+	tracker = rig.getTracker()
+	// We're "rewinding time" back MakerSwapCast status to be able to retry sending
+	// the same init request again.
+	tracker.Status = order.MakerSwapCast
+	// We need to wait for swapSearching semaphore (it coordinates init request
+	// handling) to clear, so our retry request should eventually work (it has
+	// adequate fee and 0 confs).
+	startWaitingTime = time.Now()
+	for {
+		// We might get a couple of duplicate init request errors here, in that case
+		// we simply retry request later.
+		err := rig.sendSwap_taker(false)
+		if err == nil {
+			// We are done, finally got a retry attempt that worked.
+			ensureNilErr(rig.ensureSwapStatus("server received our swap -> counterparty got audit request",
+				order.TakerSwapCast, rig.auth.swapReceived, rig.auth.auditReq))
+			ensureNilErr(rig.checkServerResponseSuccess(rig.matchInfo.taker))
+			ensureNilErr(rig.auditSwap_maker())
+			break
+		}
+		ensureNilErr(rig.ensureSwapStatus("server received our swap",
+			order.MakerSwapCast, rig.auth.swapReceived))
+		ensureNilErr(rig.checkServerResponseFail(rig.matchInfo.taker, msgjson.DuplicateRequestError))
+
+		if time.Since(startWaitingTime) > 10*time.Second {
+			t.Fatalf("timed out waiting for retrying init request to succeed, err: %v", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	ensureNilErr(rig.ackAudit_maker(true))
+
+	ensureNilErr(rig.redeem_maker(true))
+	ensureNilErr(rig.ackRedemption_taker(true))
+	tracker = rig.getTracker()
+	// We're "rewinding time" back TakerSwapCast status to be able to retry sending
+	// the same redeem request again.
+	tracker.Status = order.TakerSwapCast
+	// We need to wait for redeemSearching semaphore (it coordinates redeem request
+	// handling) to clear, so our retry request should eventually work.
+	startWaitingTime = time.Now()
+	for {
+		// We might get a couple of duplicate redeem request errors here, in that case
+		// we simply retry request later.
+		err := rig.redeem_maker(false)
+		if err == nil {
+			// We are done, finally got a retry attempt that worked.
+			ensureNilErr(rig.ensureSwapStatus("server received our redeem -> counterparty got redemption request",
+				order.MakerRedeemed, rig.auth.redeemReceived, rig.auth.redemptionReq))
+			ensureNilErr(rig.checkServerResponseSuccess(rig.matchInfo.maker))
+			ensureNilErr(rig.ackRedemption_taker(true))
+			break
+		}
+		ensureNilErr(rig.ensureSwapStatus("server received our redeem",
+			order.TakerSwapCast, rig.auth.redeemReceived))
+		ensureNilErr(rig.checkServerResponseFail(rig.matchInfo.maker, msgjson.DuplicateRequestError))
+
+		if time.Since(startWaitingTime) > 10*time.Second {
+			t.Fatalf("timed out waiting for retrying init request to succeed, err: %v", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	ensureNilErr(rig.redeem_taker(true))
+	// We can't easily "rewind time" (like we are doing above) after taker
+	// successfully redeemed (because server gets rid of this match), so
+	// just check that any subsequent redeem request retry will just return
+	// "unknown match" error.
+	err := rig.redeem_taker(false)
+	if err == nil {
+		t.Fatalf("expected 2nd redeem request to fail after 1st one succeeded")
+	}
+	ensureNilErr(rig.waitChans("server received our redeem", rig.auth.redeemReceived))
+	tracker = rig.getTracker()
+	if tracker != nil {
+		t.Fatalf("expected match to be removed, found it, in status %v", tracker.Status)
+	}
+	ensureNilErr(rig.checkServerResponseFail(rig.matchInfo.taker, msgjson.RPCUnknownMatch))
 }
 
 func TestBadParams(t *testing.T) {
@@ -2058,8 +2155,7 @@ func TestBadParams(t *testing.T) {
 		isMaker: true,
 		isAudit: true,
 	}
-	checkParseErr := rpcErrorChecker(t, rig, msgjson.RPCParseError)
-	checkAckCountErr := rpcErrorChecker(t, rig, msgjson.AckCountError)
+	ensureNilErr := makeEnsureNilErr(t)
 
 	ackArr := make([]*msgjson.Acknowledgement, 0)
 	matches := []*messageAcker{
@@ -2075,13 +2171,13 @@ func TestBadParams(t *testing.T) {
 	msg, _ := msgjson.NewResponse(1, nil, nil)
 	msg.Payload = json.RawMessage(`{"result":?}`)
 	swapper.processAck(msg, acker)
-	checkParseErr(user)
+	ensureNilErr(rig.checkServerResponseFail(user, msgjson.RPCParseError))
 	swapper.processMatchAcks(user.acct, msg, []*messageAcker{})
-	checkParseErr(user)
+	ensureNilErr(rig.checkServerResponseFail(user, msgjson.RPCParseError))
 
 	msg, _ = msgjson.NewResponse(1, encodedAckArray(), nil)
 	swapper.processMatchAcks(user.acct, msg, matches)
-	checkAckCountErr(user)
+	ensureNilErr(rig.checkServerResponseFail(user, msgjson.AckCountError))
 }
 
 func TestCancel(t *testing.T) {
@@ -2096,7 +2192,7 @@ func TestCancel(t *testing.T) {
 	}
 	// The user should have two match requests.
 	user := matchInfo.maker
-	req := rig.auth.getReq(user.acct)
+	req := rig.auth.popReq(user.acct)
 	if req == nil {
 		t.Fatalf("no request sent from Negotiate")
 	}
