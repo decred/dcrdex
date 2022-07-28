@@ -1477,8 +1477,8 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	if !acker.isMaker {
 		acker.match.Sigs.TakerRedeem = ack.Sig
 		if err = s.storage.SaveRedeemAckSigB(mktMatch, ack.Sig); err != nil {
-			s.respondError(msg.ID, acker.user, msgjson.UnknownMarketError,
-				fmt.Sprintf("internal server error: %v", err))
+			s.respondError(msg.ID, acker.user, msgjson.RPCInternalError,
+				"internal server error")
 			log.Errorf("SaveRedeemAckSigB failed for match %v: %v", mktMatch.String(), err)
 			return
 		}
@@ -1595,8 +1595,8 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	if err != nil {
 		log.Errorf("saving swap contract (match id=%v, maker=%v) failed: %v",
 			matchID, actor.isMaker, err)
-		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError,
-			fmt.Sprintf("internal server error: %v", err))
+		s.respondError(msg.ID, actor.user, msgjson.RPCInternalError,
+			"internal server error")
 		// TODO: revoke the match without penalties instead of retrying forever?
 		return wait.TryAgain
 	}
@@ -1705,7 +1705,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	if !chain.ValidateSecret(params.Secret, cpContract) {
 		log.Infof("Secret validation failed (match id=%v, maker=%v, secret=%v)",
 			matchID, actor.isMaker, params.Secret)
-		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError, "secret validation failed")
+		s.respondError(msg.ID, actor.user, msgjson.InvalidRequestError, "secret validation failed")
 		return wait.DontTryAgain
 	}
 	redemption, err := chain.Redemption(params.CoinID, cpSwapCoin, cpContract)
@@ -2189,7 +2189,7 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 			log.Errorf("saving match ack signature (match id=%v, maker=%v) failed: %v",
 				matchID, matchInfo.isMaker, err)
 			s.respondError(msg.ID, matchInfo.user, msgjson.UnknownMarketError,
-				fmt.Sprintf("internal server error: %v", err))
+				"internal server error")
 			// TODO: revoke the match without penalties?
 			return
 		}

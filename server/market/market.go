@@ -2039,8 +2039,8 @@ func (m *Market) handlePreimageResp(msg *msgjson.Message, reqData *piData) {
 		log.Errorf("StorePreimage: %v", err)
 		// Fatal backend error. New swaps will not begin, but pass the preimage
 		// along so that it does not appear as a miss to collectPreimages.
-		m.respondError(msg.ID, reqData.ord.User(), msgjson.UnknownMarketError,
-			fmt.Sprintf("internal server error: %v", err))
+		m.respondError(msg.ID, reqData.ord.User(), msgjson.RPCInternalError,
+			"internal server error")
 	}
 
 	sendPI(&pi)
