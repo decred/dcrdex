@@ -84,6 +84,16 @@ export function statusString (order: Order): string {
   return ''
 }
 
+/* filled sums the quantities of non-cancel matches available. */
+export function filled (order: Order) {
+  if (!order.matches) return 0
+  const qty = isMarketBuy(order) ? (m: Match) => m.qty * m.rate / RateEncodingFactor : (m: Match) => m.qty
+  return order.matches.reduce((filled, match) => {
+    if (match.isCancel) return filled
+    return filled + qty(match)
+  }, 0)
+}
+
 /* settled sums the quantities of the matches that have completed. */
 export function settled (order: Order) {
   if (!order.matches) return 0

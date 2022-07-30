@@ -140,29 +140,31 @@ func (ord *OrderReader) SettledPercent() string {
 	return ord.percent(settledFilter)
 }
 
-// FilledFrom is the sum filled in units of the outgoing asset.
+// FilledFrom is the sum filled in units of the outgoing asset. Excludes cancel
+// matches.
 func (ord *OrderReader) FilledFrom() string {
 	if ord.Sell {
-		return formatQty(ord.sumFrom(filledFilter), ord.BaseUnitInfo)
+		return formatQty(ord.sumFrom(filledNonCancelFilter), ord.BaseUnitInfo)
 	}
-	return formatQty(ord.sumFrom(filledFilter), ord.QuoteUnitInfo)
+	return formatQty(ord.sumFrom(filledNonCancelFilter), ord.QuoteUnitInfo)
 }
 
-// FilledTo is the sum filled in units of the incoming asset.
+// FilledTo is the sum filled in units of the incoming asset. Excludes cancel
+// matches.
 func (ord *OrderReader) FilledTo() string {
 	if ord.Sell {
-		return formatQty(ord.sumTo(filledFilter), ord.QuoteUnitInfo)
+		return formatQty(ord.sumTo(filledNonCancelFilter), ord.QuoteUnitInfo)
 	}
-	return formatQty(ord.sumTo(filledFilter), ord.BaseUnitInfo)
+	return formatQty(ord.sumTo(filledNonCancelFilter), ord.BaseUnitInfo)
 }
 
 // FilledPercent is the percent of the order that has filled, without percent
-// sign.
+// sign. Excludes cancel matches.
 func (ord *OrderReader) FilledPercent() string {
 	if ord.Type == order.CancelOrderType {
 		return ""
 	}
-	return ord.percent(filledFilter)
+	return ord.percent(filledNonCancelFilter)
 }
 
 // SideString is "sell" for sell orders, "buy" for buy orders, and "" for
@@ -370,8 +372,6 @@ func settlingFilter(match *Match) bool {
 	return (match.Side == order.Taker && match.Status < order.MatchComplete) ||
 		(match.Side == order.Maker && match.Status < order.MakerRedeemed)
 }
-
-func filledFilter(match *Match) bool { return true }
 
 func filledNonCancelFilter(match *Match) bool {
 	return !match.IsCancel
