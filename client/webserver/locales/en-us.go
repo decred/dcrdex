@@ -262,9 +262,12 @@ var EnUS = map[string]string{
 	"No Recent Activity":          "No Recent Activity",
 	"Recent asset_name Activity":  "Recent <span data-asset-name=1></span> Activity",
 	"Other Actions":               "Other Actions",
-	"estimated_transaction_fee":   "Estimated Transaction Fee",
+	"estimated_fee":               "Estimated Fee",
 	"estimated_total_spend":       "Estimated Total Spend",
 	"estimated_balance":           "Estimated Balance After",
+	"max_estimated_send":          "Max Estimated Send",
+	"max_estimated_send_fee":      "Max Estimated Send Fee",
 	"sending":                     "Sending",
 	"transfer":                    "Transfer",
+	"invalid_address":             "Note: You have to provide a valid address before proceeding.",
 }

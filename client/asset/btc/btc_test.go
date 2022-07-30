@@ -670,8 +670,9 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWalletFullNode, *testD
 			w.node = spvw
 			wallet = &ExchangeWalletFullNode{
 				intermediaryWallet: &intermediaryWallet{
-					baseWallet:  w,
-					tipRedeemer: spvw,
+					baseWallet:     w,
+					txFeeEstimator: spvw,
+					tipRedeemer:    spvw,
 				},
 			} // ? ExchangeWalletSPV
 		}
@@ -2524,7 +2525,8 @@ func testEstimateSendTxFee(t *testing.T, segwit bool, walletType string) {
 
 	// This should return fee estimate for one output.
 	node.txFee = minEstFee
-	estimate, err := wallet.EstimateSendTxFee(sendAddr, unspentSats, optimalFeeRate, true)
+
+	estimate, _, err := wallet.EstimateSendTxFee(sendAddr, unspentSats, optimalFeeRate, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2535,7 +2537,7 @@ func testEstimateSendTxFee(t *testing.T, segwit bool, walletType string) {
 	// This should return fee estimate for two output.
 	minEstFeeWithEstChangeFee := uint64(txSize+opSize) * optimalFeeRate
 	node.txFee = minEstFeeWithEstChangeFee
-	estimate, err = wallet.EstimateSendTxFee(sendAddr, unspentSats/2, optimalFeeRate, false)
+	estimate, _, err = wallet.EstimateSendTxFee(sendAddr, unspentSats/2, optimalFeeRate, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2548,7 +2550,7 @@ func testEstimateSendTxFee(t *testing.T, segwit bool, walletType string) {
 	// This should return fee estimate for one output with dust added to fee.
 	minFeeWithDust := minEstFee + toSatoshi(dust)
 	node.txFee = minFeeWithDust
-	estimate, err = wallet.EstimateSendTxFee(sendAddr, unspentSats, optimalFeeRate, true)
+	estimate, _, err = wallet.EstimateSendTxFee(sendAddr, unspentSats, optimalFeeRate, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2557,19 +2559,25 @@ func testEstimateSendTxFee(t *testing.T, segwit bool, walletType string) {
 	}
 
 	// Invalid address
-	_, err = wallet.EstimateSendTxFee("invalidsendAddr", unspentSats, optimalFeeRate, true)
-	if err == nil {
+	_, valid, _ := wallet.EstimateSendTxFee("invalidsendAddr", unspentSats, optimalFeeRate, true)
+	if valid {
 		t.Fatal("Expected an error for invalid send address")
 	}
 
+	// Successful estimation without an address
+	_, _, err = wallet.EstimateSendTxFee("", unspentSats, optimalFeeRate, true)
+	if err != nil {
+		t.Fatal("Unexpected error for estimation without an address")
+	}
+
 	// Zero send amount
-	_, err = wallet.EstimateSendTxFee(sendAddr, 0, optimalFeeRate, true)
+	_, _, err = wallet.EstimateSendTxFee(sendAddr, 0, optimalFeeRate, true)
 	if err == nil {
 		t.Fatal("Expected an error for zero send amount")
 	}
 
 	// Output value is dust.
-	_, err = wallet.EstimateSendTxFee(sendAddr, 500, optimalFeeRate, true)
+	_, _, err = wallet.EstimateSendTxFee(sendAddr, 500, optimalFeeRate, true)
 	if err == nil {
 		t.Fatal("Expected an error for dust output")
 	}

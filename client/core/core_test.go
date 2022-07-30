@@ -665,6 +665,7 @@ type TXCWallet struct {
 
 	estFee    uint64
 	estFeeErr error
+	validAddr bool
 }
 
 var _ asset.Accelerator = (*TXCWallet)(nil)
@@ -869,8 +870,12 @@ func (w *TXCWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
 	return 0
 }
 
-func (w *TXCWallet) EstimateSendTxFee(address string, value, feeRate uint64, subtract bool) (fee uint64, err error) {
-	return w.estFee, w.estFeeErr
+func (w *TXCWallet) ValidateAddress(address string) bool {
+	return w.validAddr
+}
+
+func (w *TXCWallet) EstimateSendTxFee(address string, value, feeRate uint64, subtract bool) (fee uint64, isValidAddress bool, err error) {
+	return w.estFee, true, w.estFeeErr
 }
 
 func (w *TXCWallet) ValidateSecret(secret, secretHash []byte) bool {
@@ -9785,6 +9790,33 @@ func TestFiatConversions(t *testing.T) {
 	}
 }
 
+func TestValidateAddress(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	tCore := rig.core
+
+	wallet, tWallet := newTWallet(tUTXOAssetA.ID)
+	tCore.wallets[tUTXOAssetA.ID] = wallet
+
+	tests := []struct {
+		name string
+		addr string
+	}{{
+		name: "valid address",
+		addr: "randomvalidaddress",
+	}, {
+		name: "invalid address",
+		addr: "",
+	}}
+	for _, test := range tests {
+		tWallet.validAddr = test.addr != ""
+		valid := tCore.ValidateAddress(test.addr, tUTXOAssetA.ID)
+		if test.addr != "" != valid {
+			t.Fatalf("Got wrong response for address validation, got %v expected %v", valid, test.addr != "")
+		}
+	}
+}
+
 func TestEstimateSendTxFee(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
@@ -9814,7 +9846,7 @@ func TestEstimateSendTxFee(t *testing.T) {
 		if test.wantErr {
 			tWallet.estFeeErr = tErr
 		}
-		estimate, err := tCore.EstimateSendTxFee("addr", tUTXOAssetA.ID, 1e8, false)
+		estimate, _, err := tCore.EstimateSendTxFee("addr", tUTXOAssetA.ID, 1e8, false)
 		if test.wantErr {
 			if err != nil {
 				continue

@@ -137,7 +137,8 @@ type clientCore interface {
 	WalletRestorationInfo(pw []byte, assetID uint32) ([]*asset.WalletRestoration, error)
 	ToggleRateSourceStatus(src string, disable bool) error
 	FiatRateSources() map[string]bool
-	EstimateSendTxFee(address string, assetID uint32, value uint64, subtract bool) (fee uint64, err error)
+	EstimateSendTxFee(address string, assetID uint32, value uint64, subtract bool) (fee uint64, isValidAddress bool, err error)
+	ValidateAddress(address string, assetID uint32) bool
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -387,6 +388,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/updatedexhost", s.apiUpdateDEXHost)
 			apiAuth.Post("/restorewalletinfo", s.apiRestoreWalletInfo)
 			apiAuth.Post("/toggleratesource", s.apiToggleRateSource)
+			apiAuth.Post("/validateaddress", s.apiValidateAddress)
 			apiAuth.Post("/txfee", s.apiEstimateSendTxFee)
 		})
 	})

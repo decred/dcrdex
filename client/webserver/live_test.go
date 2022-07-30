@@ -466,6 +466,7 @@ type TCore struct {
 	orderMtx    sync.Mutex
 	epochOrders []*core.BookUpdate
 	fiatSources map[string]bool
+	validAddr   bool
 }
 
 // TDriver implements the interface required of all exchange wallets.
@@ -583,8 +584,11 @@ func (c *TCore) EstimateRegistrationTxFee(host string, certI interface{}, assetI
 	}
 	return txFee, nil
 }
-func (c *TCore) EstimateSendTxFee(addr string, assetID uint32, value uint64, subtract bool) (fee uint64, err error) {
-	return 0, nil
+func (c *TCore) ValidateAddress(address string, assetID uint32) bool {
+	return c.validAddr
+}
+func (c *TCore) EstimateSendTxFee(addr string, assetID uint32, value uint64, subtract bool) (fee uint64, isValidAddress bool, err error) {
+	return 0, true, nil
 }
 func (c *TCore) Login([]byte) (*core.LoginResult, error) { return &core.LoginResult{}, nil }
 func (c *TCore) IsInitialized() bool                     { return true }

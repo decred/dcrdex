@@ -4469,19 +4469,14 @@ func testEstimateSendTxFee(t *testing.T, assetID uint32) {
 		addr: testAddr,
 		val:  val,
 	}, {
-		name:    "invalid address",
-		addr:    "invlaidaddress",
-		val:     val,
-		wantErr: true,
-	}, {
-		name:    "zero send amount",
-		addr:    testAddr,
-		val:     0,
-		wantErr: true,
+		name: "ok: empty address",
+		addr: "",
+		val:  val,
 	}}
 
 	for _, test := range tests {
-		estimate, err := w.EstimateSendTxFee(test.addr, test.val, 0, false)
+		txFeeEstimator := w.(asset.TxFeeEstimator)
+		estimate, _, err := txFeeEstimator.EstimateSendTxFee(test.addr, test.val, 0, false)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %v", test.name)

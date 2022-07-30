@@ -564,6 +564,7 @@ var _ asset.Wallet = (*ExchangeWallet)(nil)
 var _ asset.FeeRater = (*ExchangeWallet)(nil)
 var _ asset.Withdrawer = (*ExchangeWallet)(nil)
 var _ asset.LiveReconfigurer = (*ExchangeWallet)(nil)
+var _ asset.TxFeeEstimator = (*ExchangeWallet)(nil)
 
 type block struct {
 	height int64
@@ -3609,21 +3610,42 @@ func (dcr *ExchangeWallet) signTxAndAddChange(baseTx *wire.MsgTx, feeRate uint64
 	return msgTx, change, changeAddr, lastFee, nil
 }
 
+// ValidateAddress checks that the provided address is valid.
+func (dcr *ExchangeWallet) ValidateAddress(address string) bool {
+	_, err := stdaddr.DecodeAddress(address, dcr.chainParams)
+	return err == nil
+}
+
+// dummyP2PKHScript only has to be a valid 25-byte pay-to-pubkey-hash pkScript
+// for EstimateSendTxFee when an empty or invalid address is provided.
+var dummyP2PKHScript = []byte{0x76, 0xa9, 0x14, 0xe4, 0x28, 0x61, 0xa,
+	0xfc, 0xd0, 0x4e, 0x21, 0x94, 0xf7, 0xe2, 0xcc, 0xf8,
+	0x58, 0x7a, 0xc9, 0xe7, 0x2c, 0x79, 0x7b, 0x88, 0xac,
+}
+
 // EstimateSendTxFee returns a tx fee estimate for sending or withdrawing the
 // provided amount using the provided feeRate.
-func (dcr *ExchangeWallet) EstimateSendTxFee(address string, sendAmount, feeRate uint64, subtract bool) (fee uint64, err error) {
+func (dcr *ExchangeWallet) EstimateSendTxFee(address string, sendAmount, feeRate uint64, subtract bool) (fee uint64, isValidAddress bool, err error) {
 	if sendAmount == 0 {
-		return 0, fmt.Errorf("cannot check fee: send amount = 0")
-	}
-
-	_, err = stdaddr.DecodeAddress(address, dcr.chainParams)
-	if err != nil {
-		return 0, fmt.Errorf("invalid address: %s", address)
+		return 0, false, fmt.Errorf("cannot check fee: send amount = 0")
 	}
 
 	feeRate = dcr.feeRateWithFallback(feeRate)
 
-	minTxSize := uint32(dexdcr.MsgTxOverhead + dexdcr.P2PKHOutputSize)
+	var pkScript []byte
+	var payScriptVer uint16
+	if addr, err := stdaddr.DecodeAddress(address, dcr.chainParams); err == nil {
+		payScriptVer, pkScript = addr.PaymentScript()
+		isValidAddress = true
+	} else {
+		// use a dummy 25-byte p2pkh script
+		pkScript = dummyP2PKHScript
+	}
+
+	tx := wire.NewMsgTx()
+
+	tx.AddTxOut(newTxOut(int64(sendAmount), payScriptVer, pkScript)) // payScriptVer is default zero
+	minTxSize := uint32(tx.SerializeSize())
 
 	// If subtract, select enough inputs for amount because the fees will be
 	// taken from the amount, else select enough inputs to cover minimum fees.
@@ -3641,12 +3663,12 @@ func (dcr *ExchangeWallet) EstimateSendTxFee(address string, sendAmount, feeRate
 	utxos, err := dcr.spendableUTXOs()
 	dcr.fundingMtx.Unlock()
 	if err != nil {
-		return 0, err
+		return 0, isValidAddress, err
 	}
 
 	sum, inputsSize, _, _, _, err := dcr.tryFund(utxos, enough)
 	if err != nil {
-		return 0, err
+		return 0, isValidAddress, err
 	}
 
 	txSize := minTxSize + inputsSize
@@ -3669,7 +3691,7 @@ func (dcr *ExchangeWallet) EstimateSendTxFee(address string, sendAmount, feeRate
 		// additional fee will be paid for non-dust change
 		finalFee = estFee + changeFee
 	}
-	return finalFee, nil
+	return finalFee, isValidAddress, nil
 }
 
 func (dcr *ExchangeWallet) broadcastTx(signedTx *wire.MsgTx) error {

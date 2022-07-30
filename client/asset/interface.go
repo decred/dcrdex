@@ -395,10 +395,16 @@ type Wallet interface {
 	// EstimateRegistrationTxFee returns an estimate for the tx fee needed to
 	// pay the registration fee using the provided feeRate.
 	EstimateRegistrationTxFee(feeRate uint64) uint64
+	// ValidateAddress checks that the provided address is valid.
+	ValidateAddress(address string) bool
+}
+
+// TxFeeEstimator is a wallet implementation with fee estimation functionality.
+type TxFeeEstimator interface {
 	// EstimateSendTxFee returns a tx fee estimate for sending or withdrawing
 	// the provided amount using the provided feeRate. This uses actual utxos to
 	// calculate the tx fee where possible.
-	EstimateSendTxFee(address string, value, feeRate uint64, subtract bool) (fee uint64, err error)
+	EstimateSendTxFee(address string, value, feeRate uint64, subtract bool) (fee uint64, isValidAddress bool, err error)
 }
 
 // Rescanner is a wallet implementation with rescan functionality.

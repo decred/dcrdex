@@ -49,7 +49,6 @@ type Wallet interface {
 	ownsAddress(addr btcutil.Address) (bool, error) // this should probably just take a string
 	getWalletTransaction(txHash *chainhash.Hash) (*GetTransactionResult, error)
 	reconfigure(walletCfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error)
-	estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract bool) (fee uint64, err error)
 }
 
 type tipRedemptionWallet interface {
@@ -59,6 +58,10 @@ type tipRedemptionWallet interface {
 	getBlock(h chainhash.Hash) (*wire.MsgBlock, error)
 	searchBlockForRedemptions(ctx context.Context, reqs map[outPoint]*findRedemptionReq, blockHash chainhash.Hash) (discovered map[outPoint]*findRedemptionResult)
 	findRedemptionsInMempool(ctx context.Context, reqs map[outPoint]*findRedemptionReq) (discovered map[outPoint]*findRedemptionResult)
+}
+
+type txFeeEstimator interface {
+	estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract bool) (fee uint64, err error)
 }
 
 // walletTxChecker provide a fast wallet tx query when block info not needed.

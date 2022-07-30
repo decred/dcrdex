@@ -73,6 +73,7 @@ type TCore struct {
 	rateSourceErr    error
 	estFee           uint64
 	estFeeErr        error
+	validAddr        bool
 }
 
 func (c *TCore) Network() dex.Network                         { return dex.Mainnet }
@@ -141,8 +142,11 @@ func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 func (c *TCore) Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (asset.Coin, error) {
 	return &tCoin{id: []byte{0xde, 0xc7, 0xed}}, c.sendErr
 }
-func (c *TCore) EstimateSendTxFee(addr string, assetID uint32, value uint64, subtract bool) (fee uint64, err error) {
-	return c.estFee, c.estFeeErr
+func (w *TCore) ValidateAddress(address string, assetID uint32) bool {
+	return w.validAddr
+}
+func (c *TCore) EstimateSendTxFee(addr string, assetID uint32, value uint64, subtract bool) (fee uint64, isValidAddress bool, err error) {
+	return c.estFee, true, c.estFeeErr
 }
 func (c *TCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error) {
 	oType := order.LimitOrderType
@@ -800,6 +804,34 @@ func TestAPI_ToggleRatesource(t *testing.T) {
 	}
 }
 
+func TestAPIValidateAddress(t *testing.T) {
+	s, tCore, shutdown, err := newTServer(t, false)
+	if err != nil {
+		t.Fatalf("error starting server: %v", err)
+	}
+	defer shutdown()
+
+	writer := new(TWriter)
+	reader := new(TReader)
+	testID := uint32(42)
+
+	body := &struct {
+		Addr    string  `json:"addr"`
+		AssetID *uint32 `json:"assetID"`
+	}{
+		Addr:    "addr",
+		AssetID: &testID,
+	}
+
+	want := `{"ok":true}`
+	tCore.validAddr = true
+	ensureResponse(t, s.apiValidateAddress, want, reader, writer, body, nil)
+
+	want = `{"ok":false}`
+	tCore.validAddr = false
+	ensureResponse(t, s.apiValidateAddress, want, reader, writer, body, nil)
+}
+
 func TestAPIEstimateSendTxFee(t *testing.T) {
 	s, tCore, shutdown, err := newTServer(t, false)
 	if err != nil {
@@ -818,7 +850,7 @@ func TestAPIEstimateSendTxFee(t *testing.T) {
 		AssetID:  &testID,
 	}
 
-	want := `{"ok":true,"txfee":10000}`
+	want := `{"ok":true,"txfee":10000,"validaddress":true}`
 	tCore.estFee = 10000
 	ensureResponse(t, s.apiEstimateSendTxFee, want, reader, writer, body, nil)
 

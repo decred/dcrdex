@@ -60,7 +60,6 @@ type electrumWalletClient interface {
 	GetRawTransaction(ctx context.Context, txid string) ([]byte, error) // wallet method
 	GetAddressHistory(ctx context.Context, addr string) ([]*electrum.GetAddressHistoryResult, error)
 	GetAddressUnspent(ctx context.Context, addr string) ([]*electrum.GetAddressUnspentResult, error)
-	EstimateSendTxFee(ctx context.Context, txHex string, options interface{}, segwit bool) (fee float64, err error)
 }
 
 type electrumNetworkClient interface {
@@ -1253,36 +1252,6 @@ func (ew *electrumWallet) sendToAddress(address string, value, feeRate uint64, s
 		return nil, err
 	}
 	return chainhash.NewHashFromStr(txid)
-}
-
-// part of btc.Wallet interface.
-func (ew *electrumWallet) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract bool) (fee uint64, err error) {
-	txBytes, err := ew.serializeTx(tx)
-	if err != nil {
-		return 0, fmt.Errorf("tx serialization error: %w", err)
-	}
-
-	// 1e-5 = 1e-8 for satoshis * 1000 for kB.
-	feeRateOption := float64(feeRate) / 1e5
-	options := &btcjson.FundRawTransactionOpts{
-		FeeRate:    &feeRateOption,
-		ChangeType: &btcjson.ChangeTypeBech32,
-	}
-	if subtract {
-		options.SubtractFeeFromOutputs = []int{0}
-	}
-	if !ew.segwit {
-		options.ChangeType = &btcjson.ChangeTypeLegacy
-	}
-
-	txFee, err := ew.wallet.EstimateSendTxFee(ew.ctx, hex.EncodeToString(txBytes), options, false)
-	if err != nil {
-		return 0, err
-	}
-
-	fee = toSatoshi(txFee)
-
-	return
 }
 
 func (ew *electrumWallet) sweep(ctx context.Context, address string, feeRate uint64) ([]byte, error) {

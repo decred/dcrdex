@@ -4532,22 +4532,37 @@ func (c *Core) Send(pw []byte, assetID uint32, value uint64, address string, sub
 	return coin, nil
 }
 
-// EstimateSendTxFee returns an estimate of the tx fee needed to send or
-// withdraw the specified amount.
-func (c *Core) EstimateSendTxFee(address string, assetID uint32, amount uint64, subtract bool) (fee uint64, err error) {
-	if amount == 0 {
-		return 0, fmt.Errorf("cannot check fee for zero %s", unbip(assetID))
+// ValidateAddress checks that the provided address is valid.
+func (c *Core) ValidateAddress(address string, assetID uint32) bool {
+	if address == "" {
+		return false
 	}
 	wallet, found := c.wallet(assetID)
 	if !found {
-		return 0, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
+		return false
+	}
+	return wallet.Wallet.ValidateAddress(address)
+}
+
+// EstimateSendTxFee returns an estimate of the tx fee needed to send or
+// withdraw the specified amount.
+func (c *Core) EstimateSendTxFee(address string, assetID uint32, amount uint64, subtract bool) (fee uint64, isValidAddress bool, err error) {
+	if amount == 0 {
+		return 0, false, fmt.Errorf("cannot check fee for zero %s", unbip(assetID))
+	}
+	wallet, found := c.wallet(assetID)
+	if !found {
+		return 0, false, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
 	}
 	if subtract {
 		if _, isWithdrawer := wallet.Wallet.(asset.Withdrawer); !isWithdrawer {
-			return 0, fmt.Errorf("wallet does not support checking network fee for withdrawal")
+			return 0, false, fmt.Errorf("wallet does not support checking network fee for withdrawal")
 		}
 	}
-	return wallet.Wallet.EstimateSendTxFee(address, amount, c.feeSuggestionAny(assetID), subtract)
+	if txfeeEstimator, ok := wallet.Wallet.(asset.TxFeeEstimator); ok {
+		return txfeeEstimator.EstimateSendTxFee(address, amount, c.feeSuggestionAny(assetID), subtract)
+	}
+	return 0, wallet.Wallet.ValidateAddress(address), nil
 }
 
 func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {

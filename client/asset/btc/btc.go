@@ -780,6 +780,7 @@ func (w *baseWallet) apiFeeFallback() bool {
 
 type intermediaryWallet struct {
 	*baseWallet
+	txFeeEstimator
 	tipRedeemer tipRedemptionWallet
 }
 
@@ -809,6 +810,7 @@ var _ asset.Rescanner = (*ExchangeWalletSPV)(nil)
 var _ asset.FeeRater = (*ExchangeWalletFullNode)(nil)
 var _ asset.LogFiler = (*ExchangeWalletSPV)(nil)
 var _ asset.Recoverer = (*ExchangeWalletSPV)(nil)
+var _ asset.TxFeeEstimator = (*intermediaryWallet)(nil)
 
 // RecoveryCfg is the information that is transferred from the old wallet
 // to the new one when the wallet is recovered.
@@ -1025,8 +1027,9 @@ func newRPCWallet(requester RawRequesterWithContext, cfg *BTCCloneCFG, parsedCfg
 	btc.node = node
 	return &ExchangeWalletFullNode{
 		intermediaryWallet: &intermediaryWallet{
-			baseWallet:  btc,
-			tipRedeemer: node,
+			baseWallet:     btc,
+			txFeeEstimator: node,
+			tipRedeemer:    node,
 		},
 	}, nil
 }
@@ -1131,8 +1134,9 @@ func openSPVWallet(cfg *BTCCloneCFG) (*ExchangeWalletSPV, error) {
 
 	return &ExchangeWalletSPV{
 		intermediaryWallet: &intermediaryWallet{
-			baseWallet:  btc,
-			tipRedeemer: node,
+			baseWallet:     btc,
+			txFeeEstimator: node,
+			tipRedeemer:    node,
 		},
 	}, nil
 }
@@ -4443,29 +4447,50 @@ func (btc *baseWallet) createWitnessSig(tx *wire.MsgTx, idx int, pkScript []byte
 	return sig, privKey.PubKey().SerializeCompressed(), nil
 }
 
+// ValidateAddress checks that the provided address is valid.
+func (btc *baseWallet) ValidateAddress(address string) bool {
+	_, err := btc.decodeAddr(address, btc.chainParams)
+	return err == nil
+}
+
+// dummyP2PKHScript only has to be a valid 25-byte pay-to-pubkey-hash pkScript
+// for EstimateSendTxFee when an empty or invalid address is provided.
+var dummyP2PKHScript = []byte{0x76, 0xa9, 0x14, 0xe4, 0x28, 0x61, 0xa,
+	0xfc, 0xd0, 0x4e, 0x21, 0x94, 0xf7, 0xe2, 0xcc, 0xf8,
+	0x58, 0x7a, 0xc9, 0xe7, 0x2c, 0x79, 0x7b, 0x88, 0xac,
+}
+
 // EstimateSendTxFee returns a tx fee estimate for sending or withdrawing the
 // provided amount using the provided feeRate.
-func (btc *baseWallet) EstimateSendTxFee(address string, sendAmount, feeRate uint64, subtract bool) (uint64, error) {
+func (btc *intermediaryWallet) EstimateSendTxFee(address string, sendAmount, feeRate uint64, subtract bool) (fee uint64, isValidAddress bool, err error) {
 	if sendAmount == 0 {
-		return 0, fmt.Errorf("cannot check fee: send amount = 0")
-	}
-	addr, err := btcutil.DecodeAddress(address, btc.chainParams)
-	if err != nil {
-		return 0, fmt.Errorf("invalid address: %s", address)
+		return 0, false, fmt.Errorf("cannot check fee: send amount = 0")
 	}
 
-	pkScript, err := txscript.PayToAddrScript(addr)
-	if err != nil {
-		return 0, fmt.Errorf("error generating pubkey script: %w", err)
+	var pkScript []byte
+	if addr, err := btc.decodeAddr(address, btc.chainParams); err == nil {
+		pkScript, err = txscript.PayToAddrScript(addr)
+		if err != nil {
+			return 0, isValidAddress, fmt.Errorf("error generating pubkey script: %w", err)
+		}
+		isValidAddress = true
+	} else {
+		// use a dummy 25-byte p2pkh script
+		pkScript = dummyP2PKHScript
 	}
+
 	wireOP := wire.NewTxOut(int64(sendAmount), pkScript)
 	if dexbtc.IsDust(wireOP, feeRate) {
-		return 0, errors.New("output value is dust")
+		return 0, isValidAddress, errors.New("output value is dust")
 	}
 
 	tx := wire.NewMsgTx(wire.TxVersion)
 	tx.AddTxOut(wireOP)
-	return btc.node.estimateSendTxFee(tx, btc.feeRateWithFallback(feeRate), subtract)
+	fee, err = btc.estimateSendTxFee(tx, btc.feeRateWithFallback(feeRate), subtract)
+	if err != nil {
+		return 0, isValidAddress, err
+	}
+	return
 }
 
 type utxo struct {

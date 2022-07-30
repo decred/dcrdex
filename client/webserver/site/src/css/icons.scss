@@ -34,6 +34,8 @@
 
 .ico-check::before {
   content: "\ea10";
+  display: inline-block;
+  color: $buycolor_light;
 }
 
 .ico-bell::before {
