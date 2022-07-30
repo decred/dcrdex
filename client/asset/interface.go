@@ -143,6 +143,9 @@ const (
 	// ErrSwapRefunded is returned from ConfirmRedemption when the swap has
 	// been refunded before the user could redeem.
 	ErrSwapRefunded = dex.ErrorKind("swap refunded")
+	// ErrNotEnoughConfirms is returned when a transaction is confirmed,
+	// but does not have enough confirmations to be trusted.
+	ErrNotEnoughConfirms = dex.ErrorKind("transaction does not have enough confirmations")
 
 	// InternalNodeLoggerName is the name for a logger that is used to fine
 	// tune log levels for only loggers using this name.
@@ -455,6 +458,24 @@ type NewAddresser interface {
 // LogFiler is a wallet that allows for downloading of its log file.
 type LogFiler interface {
 	LogFilePath() string
+}
+
+// DynamicSwapOrRedemptionFeeChecker defines methods that accept an initiation
+// or redemption coinID and returns the fee spent on the transaction along with
+// the secrets included in the tx. Returns asset.CoinNotFoundError for unmined
+// txn. Returns asset.ErrNotEnoughConfirms for txn with too few confirmations.
+// Will also error if the secret in the contractData is not found in the
+// transaction secrets.
+type DynamicSwapOrRedemptionFeeChecker interface {
+	// RedemptionConfirmer methods are not currently used. However, a
+	// RedemptionConfirmer adds the necessity to wait for redemption
+	// confirmations that the DynamicSwapOrRedemptionFeeChecker depends on
+	// and will not work properly without them.
+	RedemptionConfirmer
+	// DynamicSwapFeesPaid returns fees for initiation transactions.
+	DynamicSwapFeesPaid(ctx context.Context, coinID, contractData dex.Bytes) (fee uint64, secretHashes [][]byte, err error)
+	// DynamicRedemptionFeesPaid returns fees for redemption transactions.
+	DynamicRedemptionFeesPaid(ctx context.Context, coinID, contractData dex.Bytes) (fee uint64, secretHashes [][]byte, err error)
 }
 
 // FeeRater is capable of retrieving a non-critical fee rate estimate for an

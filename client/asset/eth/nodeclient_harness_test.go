@@ -104,8 +104,6 @@ var (
 	participantAcct             *accounts.Account
 	participantEthClient        *nodeClient
 	ethSwapContractAddr         common.Address
-	tokenSwapContractAddr       common.Address
-	testTokenContractAddr       common.Address
 	simnetID                    int64 = 42
 	simnetContractor            contractor
 	participantContractor       contractor
@@ -150,7 +148,7 @@ func waitForReceipt(t *testing.T, nc *nodeClient, tx *types.Transaction) (*types
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-time.After(time.Second):
-			receipt, err := nc.transactionReceipt(ctx, hash)
+			receipt, _, err := nc.transactionReceipt(ctx, hash)
 			if err != nil {
 				if errors.Is(err, asset.CoinNotFoundError) {
 					continue
@@ -607,8 +605,13 @@ func syncClient(cl *nodeClient) error {
 }
 
 func TestBasicRetrieval(t *testing.T) {
+	if !t.Run("testAddressesHaveFunds", testAddressesHaveFundsFn(100_000 /* gwei */)) {
+		t.Fatal("not enough funds")
+	}
 	t.Run("testBestHeader", testBestHeader)
 	t.Run("testPendingTransactions", testPendingTransactions)
+	t.Run("testHeaderByHash", testHeaderByHash)
+	t.Run("testTransactionReceipt", testTransactionReceipt)
 }
 
 func TestPeering(t *testing.T) {
@@ -624,7 +627,6 @@ func TestAccount(t *testing.T) {
 	t.Run("testAddressBalance", testAddressBalance)
 	t.Run("testSendTransaction", testSendTransaction)
 	t.Run("testSendSignedTransaction", testSendSignedTransaction)
-	t.Run("testTransactionReceipt", testTransactionReceipt)
 	t.Run("testSignMessage", testSignMessage)
 }
 
@@ -775,6 +777,28 @@ func testSendTransaction(t *testing.T) {
 	}
 	if confs == 0 {
 		t.Fatalf("zero confs after mining")
+	}
+}
+
+func testHeaderByHash(t *testing.T) {
+	// Checking a random hash should result in no header.
+	var txHash common.Hash
+	copy(txHash[:], encode.RandomBytes(32))
+	hdr := ethClient.headerByHash(txHash)
+	if hdr != nil {
+		t.Fatal("expected nil header for nonexistant hash")
+	}
+
+	bestHdr, err := ethClient.bestHeader(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	txHash = bestHdr.Hash()
+
+	hdrHash := ethClient.headerByHash(txHash).Hash()
+	if !bytes.Equal(hdrHash[:], txHash[:]) {
+		t.Fatal("hashes not equal")
 	}
 }
 

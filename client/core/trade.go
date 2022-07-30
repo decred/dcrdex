@@ -1286,6 +1286,134 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) (re
 	return false, false
 }
 
+// checkSwapFeeConfirms returns whether the swap fee confirmations should be
+// checked.
+//
+// This method accesses match fields and MUST be called with the trackedTrade
+// mutex lock held for reads.
+func (t *trackedTrade) checkSwapFeeConfirms(match *matchTracker) bool {
+	if match.MetaData.Proof.SwapFeeConfirmed {
+		return false
+	}
+	_, dynamic := t.wallets.fromWallet.Wallet.(asset.DynamicSwapOrRedemptionFeeChecker)
+	if !dynamic {
+		// Confirmed will be set in the db.
+		return true
+	}
+	if match.Side == order.Maker {
+		return match.Status >= order.MakerSwapCast
+	}
+	return match.Status >= order.TakerSwapCast
+}
+
+// checkRedemptionFeeConfirms returns whether the swap fee confirmations should
+// be checked.
+//
+// This method accesses match fields and MUST be called with the trackedTrade
+// mutex lock held for reads.
+func (t *trackedTrade) checkRedemptionFeeConfirms(match *matchTracker) bool {
+	if match.MetaData.Proof.RedemptionFeeConfirmed {
+		return false
+	}
+	_, dynamic := t.wallets.toWallet.Wallet.(asset.DynamicSwapOrRedemptionFeeChecker)
+	if !dynamic {
+		// Confirmed will be set in the db.
+		return true
+	}
+	if match.Side == order.Maker {
+		return match.Status >= order.MakerRedeemed
+	}
+	return match.Status >= order.MatchComplete
+}
+
+// updateDynamicSwapOrRedemptionFeesPaid updates the fees used for dynamic fee
+// checker transactions. We do not know the exact fees the tx will use until
+// they are mined, so this waits until they are mined and updates the value for
+// the entire trade.
+//
+// NOTE: As long as init and redemption confirms add up to more than two this
+// method will fire as expected before the swap is determined in Confirmed
+// status. The asset.DynamicSwapOrRedemptionFeeChecker interface requires the
+// asset.RedemptionConfirmer interface to ensure this for redemptions.
+func (t *trackedTrade) updateDynamicSwapOrRedemptionFeesPaid(ctx context.Context, match *matchTracker, isInit bool) {
+	wallet := t.wallets.fromWallet
+	if !isInit {
+		wallet = t.wallets.toWallet
+	}
+	stopChecks := func() {
+		if isInit {
+			match.MetaData.Proof.SwapFeeConfirmed = true
+		} else {
+			match.MetaData.Proof.RedemptionFeeConfirmed = true
+		}
+		err := t.db.UpdateOrderMetaData(t.ID(), t.metaData)
+		if err != nil {
+			t.dc.log.Errorf("Error updating order metadata for order %s: %v", t.ID(), err)
+		}
+	}
+	feeChecker, dynamic := wallet.Wallet.(asset.DynamicSwapOrRedemptionFeeChecker)
+	if !dynamic {
+		stopChecks()
+		return
+	}
+	txType := "swap"
+	if !isInit {
+		txType = "redemption"
+	}
+	var coinID, contractData []byte
+	// Check if a swap or redeem coin id has been populated in the
+	// match tracker. If it has we ask the wallet for the fees paid
+	// and add that to either the total swap or redeem fees for the
+	// trade.
+	if isInit {
+		coinID = []byte(match.MetaData.Proof.MakerSwap)
+		if match.Side != order.Maker {
+			coinID = []byte(match.MetaData.Proof.TakerSwap)
+		}
+		contractData = match.MetaData.Proof.ContractData
+	} else {
+		coinID = []byte(match.MetaData.Proof.MakerRedeem)
+		if match.Side != order.Maker {
+			coinID = []byte(match.MetaData.Proof.TakerRedeem)
+		}
+		contractData = match.MetaData.Proof.CounterContract
+	}
+	secretHash := match.MetaData.Proof.SecretHash
+	if len(coinID) == 0 {
+		// If there is no coin ID yet and the match was revoked, assume
+		// the transaction will never happen.
+		if match.MetaData.Proof.IsRevoked() {
+			stopChecks()
+		}
+		return
+	}
+	checkFees := feeChecker.DynamicSwapFeesPaid
+	if !isInit {
+		checkFees = feeChecker.DynamicRedemptionFeesPaid
+	}
+	actualSwapFees, secrets, err := checkFees(ctx, coinID, contractData)
+	if err != nil {
+		if errors.Is(err, asset.CoinNotFoundError) || errors.Is(err, asset.ErrNotEnoughConfirms) {
+			return
+		}
+		t.dc.log.Errorf("Failed to determine actual %s transaction fees paid for "+
+			"match %s: %v", txType, match, err)
+		return
+	}
+	// Only add the tx fee once.
+	if !bytes.Equal(secrets[0], secretHash) {
+		stopChecks()
+		return
+	}
+	if isInit {
+		t.metaData.SwapFeesPaid += actualSwapFees
+	} else {
+		t.metaData.RedemptionFeesPaid += actualSwapFees
+	}
+	stopChecks()
+	t.notify(newOrderNote(TopicOrderStatusUpdate, "", "", db.Data, t.coreOrderInternal()))
+}
+
 // isRedeemable will be true if the match is ready for our redemption to be
 // broadcast.
 //
@@ -1555,7 +1683,8 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	// Make sure we have a redemption fee suggestion cached.
 	t.cacheRedemptionFeeSuggestion()
 
-	var swaps, redeems, refunds, revokes, searches, redemptionConfirms []*matchTracker
+	var swaps, redeems, refunds, revokes, searches, redemptionConfirms,
+		dynamicSwapFeeConfirms, dynamicRedemptionFeeConfirms []*matchTracker
 	var sent, quoteSent, received, quoteReceived uint64
 
 	checkMatch := func(match *matchTracker) error { // only errors on context.DeadlineExceeded or context.Canceled
@@ -1596,6 +1725,10 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 			return ctx.Err()
 		}
 
+		if t.checkSwapFeeConfirms(match) {
+			dynamicSwapFeeConfirms = append(dynamicSwapFeeConfirms, match)
+		}
+
 		ok, revoke = t.isRedeemable(ctx, match) // does not reject revoked matches
 		if ok {
 			c.log.Debugf("Redeemable match %s for order %v (%v)", match, t.ID(), side)
@@ -1610,6 +1743,10 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+
+		if t.checkRedemptionFeeConfirms(match) {
+			dynamicRedemptionFeeConfirms = append(dynamicRedemptionFeeConfirms, match)
 		}
 
 		// Check refundability before checking if to start finding redemption.
@@ -1681,7 +1818,8 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	}
 
 	if !rmCancel && len(swaps) == 0 && len(refunds) == 0 && len(redeems) == 0 &&
-		len(revokes) == 0 && len(searches) == 0 && len(redemptionConfirms) == 0 {
+		len(revokes) == 0 && len(searches) == 0 && len(redemptionConfirms) == 0 &&
+		len(dynamicSwapFeeConfirms) == 0 && len(dynamicRedemptionFeeConfirms) == 0 {
 		return assets, nil // nothing to do, don't acquire the write-lock
 	}
 
@@ -1793,6 +1931,14 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		for _, match := range redemptionConfirms {
 			t.confirmRedemption(match)
 		}
+	}
+
+	for _, match := range dynamicSwapFeeConfirms {
+		t.updateDynamicSwapOrRedemptionFeesPaid(c.ctx, match, true)
+	}
+
+	for _, match := range dynamicRedemptionFeeConfirms {
+		t.updateDynamicSwapOrRedemptionFeesPaid(c.ctx, match, false)
 	}
 
 	return assets, errs.ifAny()
@@ -2123,7 +2269,9 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 	// would have been spent and unlocked.
 	t.coinsLocked = false
 	t.changeLocked = lockChange
-	t.metaData.SwapFeesPaid += fees
+	if _, dynamic := t.wallets.fromWallet.Wallet.(asset.DynamicSwapOrRedemptionFeeChecker); !dynamic {
+		t.metaData.SwapFeesPaid += fees // dynamic tx wallets don't know the fees paid until mining
+	}
 
 	if change == nil {
 		t.metaData.ChangeCoin = nil
@@ -2385,7 +2533,9 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 	c.log.Infof("Broadcasted redeem transaction spending %d contracts for order %v, paying to %s (%s)",
 		len(redemptions), t.ID(), outCoin, redeemAsset.Symbol)
 
-	t.metaData.RedemptionFeesPaid += fees
+	if _, dynamic := t.wallets.toWallet.Wallet.(asset.DynamicSwapOrRedemptionFeeChecker); !dynamic {
+		t.metaData.RedemptionFeesPaid += fees // dynamic tx wallets don't know the fees paid until mining
+	}
 
 	err = t.db.UpdateOrderMetaData(t.ID(), t.metaData)
 	if err != nil {

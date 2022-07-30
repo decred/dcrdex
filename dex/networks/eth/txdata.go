@@ -45,7 +45,7 @@ func ParseRedeemData(calldata []byte, contractVersion uint32) (map[[SecretHashSi
 // ParseRefundData parses the calldata used to call the refund function of a
 // specific version of the swap contract. It returns the secret hash and errors
 // if the call data does not call refund with expected argument types.
-func ParseRefundData(calldata []byte, contractVersion uint32) ([32]byte, error) {
+func ParseRefundData(calldata []byte, contractVersion uint32) ([SecretHashSize]byte, error) {
 	txDataHandler, ok := txDataHandlers[contractVersion]
 	if !ok {
 		return [32]byte{}, fmt.Errorf("contract version %v does not exist", contractVersion)

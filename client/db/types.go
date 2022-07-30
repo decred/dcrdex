@@ -428,26 +428,30 @@ type MatchProof struct {
 	Auth            MatchAuth
 	ServerRevoked   bool
 	SelfRevoked     bool
+	// SwapFeeConfirmed indicate the fees for this match have been
+	// confirmed and the value added to the trade.
+	SwapFeeConfirmed bool
+	// RedemptionFeeConfirmed indicate the fees for this match have been
+	// confirmed and the value added to the trade.
+	RedemptionFeeConfirmed bool
+}
+
+func boolByte(b bool) []byte {
+	if b {
+		return []byte{1}
+	}
+	return []byte{0}
 }
 
 // MatchProofVer is the current serialization version of a MatchProof.
 const (
-	MatchProofVer    = 2
-	matchProofPushes = 22
+	MatchProofVer    = 3
+	matchProofPushes = 24
 )
 
 // Encode encodes the MatchProof to a versioned blob.
 func (p *MatchProof) Encode() []byte {
 	auth := p.Auth
-	srvRevoked := encode.ByteFalse
-	if p.ServerRevoked {
-		srvRevoked = encode.ByteTrue
-	}
-	selfRevoked := encode.ByteFalse
-	if p.SelfRevoked {
-		selfRevoked = encode.ByteTrue
-	}
-
 	return versionedBytes(MatchProofVer).
 		AddData(p.ContractData).
 		AddData(p.CounterContract).
@@ -468,9 +472,11 @@ func (p *MatchProof) Encode() []byte {
 		AddData(uint64Bytes(auth.RedeemStamp)).
 		AddData(auth.RedemptionSig).
 		AddData(uint64Bytes(auth.RedemptionStamp)).
-		AddData(srvRevoked).
-		AddData(selfRevoked).
-		AddData(p.CounterTxData)
+		AddData(boolByte(p.ServerRevoked)).
+		AddData(boolByte(p.SelfRevoked)).
+		AddData(p.CounterTxData).
+		AddData(boolByte(p.SwapFeeConfirmed)).
+		AddData(boolByte(p.RedemptionFeeConfirmed))
 }
 
 // DecodeMatchProof decodes the versioned blob to a *MatchProof.
@@ -480,7 +486,10 @@ func DecodeMatchProof(b []byte) (*MatchProof, uint8, error) {
 		return nil, 0, err
 	}
 	switch ver {
-	case 2: // MatchProofVer
+	case 3: // MatchProofVer
+		proof, err := decodeMatchProof_v3(pushes)
+		return proof, ver, err
+	case 2:
 		proof, err := decodeMatchProof_v2(pushes)
 		return proof, ver, err
 	case 1:
@@ -504,6 +513,13 @@ func decodeMatchProof_v1(pushes [][]byte) (*MatchProof, error) {
 }
 
 func decodeMatchProof_v2(pushes [][]byte) (*MatchProof, error) {
+	// Add the MatchProof SwapFeeConfirmed and RedemptionFeeConfirmed bytes.
+	// True because all fees until now are comfirmed.
+	pushes = append(pushes, encode.ByteTrue, encode.ByteTrue)
+	return decodeMatchProof_v3(pushes)
+}
+
+func decodeMatchProof_v3(pushes [][]byte) (*MatchProof, error) {
 	if len(pushes) != matchProofPushes {
 		return nil, fmt.Errorf("DecodeMatchProof: expected %d pushes, got %d",
 			matchProofPushes, len(pushes))
@@ -531,8 +547,10 @@ func decodeMatchProof_v2(pushes [][]byte) (*MatchProof, error) {
 			RedemptionSig:   pushes[17],
 			RedemptionStamp: intCoder.Uint64(pushes[18]),
 		},
-		ServerRevoked: bytes.Equal(pushes[19], encode.ByteTrue),
-		SelfRevoked:   bytes.Equal(pushes[20], encode.ByteTrue),
+		ServerRevoked:          bytes.Equal(pushes[19], encode.ByteTrue),
+		SelfRevoked:            bytes.Equal(pushes[20], encode.ByteTrue),
+		SwapFeeConfirmed:       bytes.Equal(pushes[21], encode.ByteTrue),
+		RedemptionFeeConfirmed: bytes.Equal(pushes[22], encode.ByteTrue),
 	}, nil
 }
 
