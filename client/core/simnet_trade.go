@@ -146,7 +146,20 @@ func (s *simulationTest) waitALittleBit() {
 		s.client2.BaseWalletType == WTElectrum || s.client2.QuoteWalletType == WTElectrum {
 		sleep = 7 * time.Second
 	}
-	time.Sleep(sleep * sleepFactor)
+	sleep *= sleepFactor
+	feeSleep := time.Millisecond * time.Duration(s.client1.dc().cfg.BroadcastTimeout/2)
+	if sleep < feeSleep {
+		// eth based assets need to wait for txn to be mined for fees
+		// to be populated here.
+		for bipID, _ := range s.client1.wallets {
+			if accountBIPs[bipID] {
+				sleep = feeSleep
+				s.client1.log.Infof("Waiting for paid order fees to be populated (%s).", sleep)
+				break
+			}
+		}
+	}
+	time.Sleep(sleep)
 }
 
 // RunSimulationTest runs one or more simulations tests, based on the provided
@@ -1979,15 +1992,6 @@ func (s *simulationTest) assertBalanceChanges(client *simulationClient) error {
 		} else {
 			quoteFees = int64(fees.Swap)
 			baseFees = int64(fees.Redemption)
-		}
-		// eth based assets will grossly overestimate swap fees here.
-		// An esimate of 200 gwei/gas is used but actual on simnet is
-		// always almost 2 gwei/gas.
-		if accountBIPs[ord.BaseID] {
-			baseFees /= 100
-		}
-		if accountBIPs[ord.QuoteID] {
-			quoteFees /= 100
 		}
 	}
 

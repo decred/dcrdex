@@ -9913,3 +9913,101 @@ func TestEstimateSendTxFee(t *testing.T) {
 		}
 	}
 }
+
+type TDynamicSwapOrRedemptionFeeChecker struct {
+	*TXCWallet
+	tfpPaid         uint64
+	tfpSecretHashes [][]byte
+	tfpErr          error
+}
+
+func (dtfc *TDynamicSwapOrRedemptionFeeChecker) DynamicSwapFeesPaid(ctx context.Context, coinID, contractData dex.Bytes) (uint64, [][]byte, error) {
+	return dtfc.tfpPaid, dtfc.tfpSecretHashes, dtfc.tfpErr
+}
+func (dtfc *TDynamicSwapOrRedemptionFeeChecker) DynamicRedemptionFeesPaid(ctx context.Context, coinID, contractData dex.Bytes) (uint64, [][]byte, error) {
+	return dtfc.tfpPaid, dtfc.tfpSecretHashes, dtfc.tfpErr
+}
+
+var _ asset.DynamicSwapOrRedemptionFeeChecker = (*TDynamicSwapOrRedemptionFeeChecker)(nil)
+
+func TestUpdateFeesPaid(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tests := []struct {
+		name                   string
+		paid                   uint64
+		init, swapWallets      bool
+		tfpErr, updateOrderErr error
+	}{{
+		name: "ok init",
+		paid: 1,
+		init: true,
+	}, {
+		name:        "ok redeem",
+		paid:        1,
+		swapWallets: true,
+	}, {
+		name: "not dynamic",
+	}, {
+		name:   "TransactionFeesPaid error other than coin not found",
+		init:   true,
+		tfpErr: errors.New("other error"),
+	}}
+	for _, test := range tests {
+		acctWallet, tWallet := newTWallet(tACCTAsset.ID)
+		dynamicFeeChecker := &TDynamicSwapOrRedemptionFeeChecker{TXCWallet: tWallet}
+		acctWallet.Wallet = dynamicFeeChecker
+		tWallet.confs["00"] = 10
+
+		utxoWallet, _ := newTWallet(tUTXOAssetA.ID)
+
+		wallets := &walletSet{
+			fromWallet: acctWallet,
+			toWallet:   utxoWallet,
+		}
+		if test.swapWallets {
+			wallets.fromWallet, wallets.toWallet = wallets.toWallet, wallets.fromWallet
+		}
+
+		dc := &dexConnection{
+			acct: tNewAccount(&tCrypter{}),
+			log:  tLogger,
+		}
+		lo, _, _, _ := makeLimitOrder(dc, true, 0, 0)
+		tracker := &trackedTrade{
+			wallets:  wallets,
+			dc:       dc,
+			metaData: new(db.OrderMetaData),
+			db:       new(TDB),
+			Order:    lo,
+			notify:   func(Notification) {},
+		}
+		tracker.SetTime(time.Now())
+		dynamicFeeChecker.tfpPaid = 1
+		dynamicFeeChecker.tfpErr = test.tfpErr
+		dynamicFeeChecker.tfpSecretHashes = [][]byte{{0}}
+		matchID := ordertest.RandomMatchID()
+		match := &matchTracker{
+			MetaMatch: db.MetaMatch{
+				UserMatch: &order.UserMatch{MatchID: matchID},
+				MetaData: &db.MatchMetaData{
+					Proof: db.MatchProof{
+						TakerSwap:   []byte{0},
+						MakerSwap:   []byte{0},
+						MakerRedeem: []byte{0},
+						TakerRedeem: []byte{0},
+						SecretHash:  []byte{0},
+					},
+				},
+			},
+		}
+		tracker.updateDynamicSwapOrRedemptionFeesPaid(ctx, match, test.init)
+		got := tracker.metaData.SwapFeesPaid
+		if !test.init {
+			got = tracker.metaData.RedemptionFeesPaid
+		}
+		if got != test.paid {
+			t.Fatalf("%s: want %d but got %d fees paid", test.name, test.paid, got)
+		}
+	}
+}

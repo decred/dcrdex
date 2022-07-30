@@ -134,6 +134,10 @@ func (n *nodeClient) bestHeader(ctx context.Context) (*types.Header, error) {
 	return n.leth.ApiBackend.HeaderByNumber(ctx, rpc.LatestBlockNumber)
 }
 
+func (n *nodeClient) headerByHash(txHash common.Hash) *types.Header {
+	return n.leth.BlockChain().GetHeaderByHash(txHash)
+}
+
 func (n *nodeClient) stateAt(ctx context.Context, bn rpc.BlockNumber) (*state.StateDB, error) {
 	state, _, err := n.leth.ApiBackend.StateAndHeaderByNumberOrHash(ctx, rpc.BlockNumberOrHashWithNumber(bn))
 	if err != nil {
@@ -174,29 +178,29 @@ func (n *nodeClient) locked() bool {
 }
 
 // transactionReceipt retrieves the transaction's receipt.
-func (n *nodeClient) transactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
+func (n *nodeClient) transactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, *types.Transaction, error) {
 	tx, blockHash, _, index, err := n.leth.ApiBackend.GetTransaction(ctx, txHash)
 	if err != nil {
 		if errors.Is(err, ethereum.NotFound) {
-			return nil, asset.CoinNotFoundError
+			return nil, nil, asset.CoinNotFoundError
 		}
-		return nil, err
+		return nil, nil, err
 	}
 	if tx == nil {
-		return nil, fmt.Errorf("%w: transaction %v not found", asset.CoinNotFoundError, txHash)
+		return nil, nil, fmt.Errorf("%w: transaction %v not found", asset.CoinNotFoundError, txHash)
 	}
 	receipts, err := n.leth.ApiBackend.GetReceipts(ctx, blockHash)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(receipts) <= int(index) {
-		return nil, fmt.Errorf("no receipt at index %d in block %s for tx %s", index, blockHash, txHash)
+		return nil, nil, fmt.Errorf("no receipt at index %d in block %s for tx %s", index, blockHash, txHash)
 	}
 	receipt := receipts[index]
 	if receipt == nil {
-		return nil, fmt.Errorf("nil receipt at index %d in block %s for tx %s", index, blockHash, txHash)
+		return nil, nil, fmt.Errorf("nil receipt at index %d in block %s for tx %s", index, blockHash, txHash)
 	}
-	return receipt, nil
+	return receipt, tx, nil
 }
 
 // pendingTransactions returns pending transactions.
@@ -358,6 +362,9 @@ func (n *nodeClient) getTransaction(ctx context.Context, txHash common.Hash) (*t
 	}
 	tx, _, blockHeight, _, err := n.leth.ApiBackend.GetTransaction(ctx, txHash)
 	if err != nil {
+		if errors.Is(err, ethereum.NotFound) {
+			return nil, 0, asset.CoinNotFoundError
+		}
 		return nil, 0, err
 	}
 	if tx != nil {

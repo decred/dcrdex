@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -89,31 +90,33 @@ type tGetTxRes struct {
 }
 
 type testNode struct {
-	acct           *accounts.Account
-	addr           common.Address
-	connectErr     error
-	bestHdr        *types.Header
-	bestHdrErr     error
-	syncProg       ethereum.SyncProgress
-	bal            *big.Int
-	balErr         error
-	signDataErr    error
-	privKey        *ecdsa.PrivateKey
-	swapVers       map[uint32]struct{} // For SwapConfirmations -> swap. TODO for other contractor methods
-	swapMap        map[[32]byte]*dexeth.SwapState
-	refundable     bool
-	baseFee        *big.Int
-	tip            *big.Int
-	netFeeStateErr error
-	confNonce      uint64
-	confNonceErr   error
-	getTxRes       *types.Transaction
-	getTxResMap    map[common.Hash]*tGetTxRes
-	getTxHeight    int64
-	getTxErr       error
-	receipt        *types.Receipt
-	receiptErr     error
-
+	acct            *accounts.Account
+	addr            common.Address
+	connectErr      error
+	bestHdr         *types.Header
+	bestHdrErr      error
+	syncProg        ethereum.SyncProgress
+	bal             *big.Int
+	balErr          error
+	signDataErr     error
+	privKey         *ecdsa.PrivateKey
+	swapVers        map[uint32]struct{} // For SwapConfirmations -> swap. TODO for other contractor methods
+	swapMap         map[[32]byte]*dexeth.SwapState
+	refundable      bool
+	baseFee         *big.Int
+	tip             *big.Int
+	netFeeStateErr  error
+	confNonce       uint64
+	confNonceErr    error
+	getTxRes        *types.Transaction
+	getTxResMap     map[common.Hash]*tGetTxRes
+	getTxHeight     int64
+	getTxErr        error
+	receipt         *types.Receipt
+	receiptTx       *types.Transaction
+	receiptErr      error
+	hdrByHash       *types.Header
+	txReceipt       *types.Receipt
 	lastSignedTx    *types.Transaction
 	sendTxTx        *types.Transaction
 	sendTxErr       error
@@ -247,8 +250,12 @@ func (n *testNode) transactionConfirmations(context.Context, common.Hash) (uint3
 	return 0, nil
 }
 
-func (n *testNode) transactionReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, error) {
-	return n.receipt, n.receiptErr
+func (n *testNode) headerByHash(txHash common.Hash) *types.Header {
+	return n.hdrByHash
+}
+
+func (n *testNode) transactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, *types.Transaction, error) {
+	return n.receipt, n.receiptTx, n.receiptErr
 }
 
 type tContractor struct {
@@ -4522,6 +4529,195 @@ func testEstimateSendTxFee(t *testing.T, assetID uint32) {
 		}
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", test.name, err)
+		}
+	}
+}
+
+func TestSwapOrRedemptionFeesPaid(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	node := &testNode{}
+	bw := &baseWallet{node: node}
+	coinID, secretHA, secretHB := encode.RandomBytes(32), encode.RandomBytes(32), encode.RandomBytes(32)
+	contractDataFn := func(ver uint32, secretH []byte) []byte {
+		s := [32]byte{}
+		copy(s[:], secretH)
+		return dexeth.EncodeContractData(ver, s)
+	}
+	rcpt := &types.Receipt{
+		GasUsed: 100,
+	}
+	hdr := &types.Header{
+		BaseFee: dexeth.GweiToWei(2),
+		Number:  big.NewInt(1),
+	}
+	hdrConfirms := &types.Header{Number: big.NewInt(11)}
+	initFn := func(secretHs [][]byte) []byte {
+		inits := make([]*dexeth.Initiation, 0, len(secretHs))
+		for i := range secretHs {
+			s := [32]byte{}
+			copy(s[:], secretHs[i])
+			init := &dexeth.Initiation{
+				SecretHash: s,
+				Value:      big.NewInt(0),
+			}
+			inits = append(inits, init)
+		}
+		data, err := packInitiateDataV0(inits)
+		if err != nil {
+			t.Fatalf("problem packing inits: %v", err)
+		}
+		return data
+	}
+	redeemFn := func(secretHs [][]byte) []byte {
+		redeems := make([]*dexeth.Redemption, 0, len(secretHs))
+		for i := range secretHs {
+			s := [32]byte{}
+			copy(s[:], secretHs[i])
+			redeem := &dexeth.Redemption{
+				SecretHash: s,
+			}
+			redeems = append(redeems, redeem)
+		}
+		data, err := packRedeemDataV0(redeems)
+		if err != nil {
+			t.Fatalf("problem packing redeems: %v", err)
+		}
+		return data
+	}
+	abFn := func() [][]byte {
+		return [][]byte{secretHA, secretHB}
+	}
+	sortedFn := func() [][]byte {
+		ab := abFn()
+		sort.Slice(ab, func(i, j int) bool { return bytes.Compare(ab[i], ab[j]) < 0 })
+		return ab
+	}
+	tests := []struct {
+		name                   string
+		coinID, contractData   []byte
+		isInit, wantErr        bool
+		receipt                *types.Receipt
+		receiptTx              *types.Transaction
+		receiptErr, bestHdrErr error
+		hdrByHash, bestHdr     *types.Header
+		wantSecrets            [][]byte
+		wantFee                uint64
+	}{{
+		name:         "ok init",
+		coinID:       coinID,
+		contractData: contractDataFn(0, secretHA),
+		isInit:       true,
+		receipt:      rcpt,
+		receiptTx:    tTx(200, 2, 0, nil, initFn(abFn())),
+		hdrByHash:    hdr,
+		bestHdr:      hdrConfirms,
+		wantSecrets:  sortedFn(),
+		wantFee:      400,
+	}, {
+		name:         "ok redeem",
+		coinID:       coinID,
+		contractData: contractDataFn(0, secretHB),
+		receipt:      rcpt,
+		receiptTx:    tTx(200, 3, 0, nil, redeemFn(abFn())),
+		hdrByHash:    hdr,
+		bestHdr:      hdrConfirms,
+		wantSecrets:  sortedFn(),
+		wantFee:      500,
+	}, {
+		name:         "bad contract data",
+		coinID:       coinID,
+		contractData: nil,
+		wantErr:      true,
+	}, {
+		name:         "receipt error",
+		coinID:       coinID,
+		contractData: contractDataFn(0, secretHA),
+		receiptErr:   errors.New(""),
+		wantErr:      true,
+	}, {
+		name:         "nil header",
+		coinID:       coinID,
+		contractData: contractDataFn(0, secretHA),
+		receipt:      rcpt,
+		receiptTx:    tTx(200, 2, 0, nil, initFn(abFn())),
+		bestHdr:      hdrConfirms,
+		wantErr:      true,
+	}, {
+		name:         "best header error",
+		coinID:       coinID,
+		contractData: contractDataFn(0, secretHA),
+		receipt:      rcpt,
+		hdrByHash:    hdr,
+		bestHdrErr:   errors.New(""),
+		wantErr:      true,
+	}, {
+		name:         "not enough confirms",
+		coinID:       coinID,
+		contractData: contractDataFn(0, secretHA),
+		receipt:      rcpt,
+		hdrByHash:    hdr,
+		bestHdr:      hdr,
+		wantErr:      true,
+	}, {
+		name:         "bad init data",
+		coinID:       coinID,
+		contractData: contractDataFn(0, secretHA),
+		isInit:       true,
+		receipt:      rcpt,
+		receiptTx:    tTx(200, 2, 0, nil, nil),
+		hdrByHash:    hdr,
+		bestHdr:      hdrConfirms,
+		wantErr:      true,
+	}, {
+		name:         "bad redeem data",
+		coinID:       coinID,
+		contractData: contractDataFn(0, secretHA),
+		receipt:      rcpt,
+		receiptTx:    tTx(200, 2, 0, nil, nil),
+		hdrByHash:    hdr,
+		bestHdr:      hdrConfirms,
+		wantErr:      true,
+	}, {
+		name:         "secret hash not found",
+		coinID:       coinID,
+		contractData: contractDataFn(0, secretHB),
+		isInit:       true,
+		receipt:      rcpt,
+		receiptTx:    tTx(200, 2, 0, nil, initFn([][]byte{secretHA})),
+		hdrByHash:    hdr,
+		bestHdr:      hdrConfirms,
+		wantErr:      true,
+	}}
+	for _, test := range tests {
+		node.receipt = test.receipt
+		node.receiptTx = test.receiptTx
+		node.receiptErr = test.receiptErr
+		node.hdrByHash = test.hdrByHash
+		node.bestHdr = test.bestHdr
+		node.bestHdrErr = test.bestHdrErr
+		fee, secretHs, err := bw.swapOrRedemptionFeesPaid(ctx, test.coinID, test.contractData, test.isInit)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("%q: expected error", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%q: unexpected error: %v", test.name, err)
+		}
+		if test.wantFee != fee {
+			t.Fatalf("%q: wanted fee %d but got %d", test.name, test.wantFee, fee)
+		}
+		if len(test.wantSecrets) != len(secretHs) {
+			t.Fatalf("%q: wanted %d secrets but got %d", test.name, len(test.wantSecrets), len(secretHs))
+		}
+		for i := range test.wantSecrets {
+			sGot := secretHs[i]
+			sWant := test.wantSecrets[i]
+			if !bytes.Equal(sGot, sWant) {
+				t.Fatalf("%q: wanted secret %x but got %x at position %d", test.name, sWant, sGot, i)
+			}
 		}
 	}
 }

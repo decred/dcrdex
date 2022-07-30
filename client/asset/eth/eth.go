@@ -16,6 +16,7 @@ import (
 	"math"
 	"math/big"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -71,7 +72,8 @@ const (
 	// confCheckTimeout is the amount of time allowed to check for
 	// confirmations. Testing on testnet has shown spikes up to 2.5
 	// seconds. This value may need to be adjusted in the future.
-	confCheckTimeout = 4 * time.Second
+	confCheckTimeout                 = 4 * time.Second
+	dynamicSwapOrRedemptionFeesConfs = 2
 )
 
 var (
@@ -229,6 +231,7 @@ type ethFetcher interface {
 	connect(ctx context.Context) error
 	peerCount() uint32
 	contractBackend() bind.ContractBackend
+	headerByHash(txHash common.Hash) *types.Header
 	lock() error
 	locked() bool
 	pendingTransactions() ([]*types.Transaction, error)
@@ -243,7 +246,7 @@ type ethFetcher interface {
 	currentFees(ctx context.Context) (baseFees, tipCap *big.Int, err error)
 	unlock(pw string) error
 	getConfirmedNonce(context.Context, int64) (uint64, error)
-	transactionReceipt(context.Context, common.Hash) (*types.Receipt, error)
+	transactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, *types.Transaction, error)
 }
 
 // monitoredTx is used to keep track of redemption transactions that have not
@@ -330,6 +333,8 @@ var _ asset.LiveReconfigurer = (*ETHWallet)(nil)
 var _ asset.LiveReconfigurer = (*TokenWallet)(nil)
 var _ asset.TxFeeEstimator = (*ETHWallet)(nil)
 var _ asset.TxFeeEstimator = (*TokenWallet)(nil)
+var _ asset.DynamicSwapOrRedemptionFeeChecker = (*ETHWallet)(nil)
+var _ asset.DynamicSwapOrRedemptionFeeChecker = (*TokenWallet)(nil)
 
 type baseWallet struct {
 	ctx  context.Context // the asset subsystem starts with Connect(ctx)
@@ -2542,6 +2547,92 @@ func (eth *baseWallet) SyncStatus() (bool, float32, error) {
 	return eth.node.peerCount() > 0, 1.0, nil
 }
 
+// DynamicSwapFeesPaid returns fees for initiation transactions. Part of the
+// asset.DynamicSwapOrRedemptionFeeChecker interface.
+func (eth *assetWallet) DynamicSwapFeesPaid(ctx context.Context, coinID, contractData dex.Bytes) (fee uint64, secretHashes [][]byte, err error) {
+	return eth.swapOrRedemptionFeesPaid(ctx, coinID, contractData, true)
+}
+
+// DynamicRedemptionFeesPaid returns fees for redemption transactions. Part of
+// the asset.DynamicSwapOrRedemptionFeeChecker interface.
+func (eth *assetWallet) DynamicRedemptionFeesPaid(ctx context.Context, coinID, contractData dex.Bytes) (fee uint64, secretHashes [][]byte, err error) {
+	return eth.swapOrRedemptionFeesPaid(ctx, coinID, contractData, false)
+}
+
+// swapOrRedemptionFeesPaid returns exactly how much gwei was used to send an
+// initiation or redemption transaction. It also returns the secret hashes
+// included with this init or redeem. Secret hashes are sorted so returns are
+// always the same, but the order may not be the same as they exist in the
+// transaction on chain. The transaction must be already mined for this
+// function to work. Returns asset.CoinNotFoundError for unmined txn. Returns
+// asset.ErrNotEnoughConfirms for txn with too few confirmations. Will also
+// error if the secret hash in the contractData is not found in the transaction
+// secret hashes.
+func (eth *baseWallet) swapOrRedemptionFeesPaid(ctx context.Context, coinID, contractData dex.Bytes,
+	isInit bool) (fee uint64, secretHashes [][]byte, err error) {
+	contractVer, secretHash, err := dexeth.DecodeContractData(contractData)
+	if err != nil {
+		return 0, nil, err
+	}
+	var txHash common.Hash
+	copy(txHash[:], coinID)
+	receipt, tx, err := eth.node.transactionReceipt(ctx, txHash)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	hdr := eth.node.headerByHash(receipt.BlockHash)
+	if hdr == nil {
+		return 0, nil, fmt.Errorf("header for hash %v not found", receipt.BlockHash)
+	}
+
+	bestHdr, err := eth.node.bestHeader(ctx)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	confs := bestHdr.Number.Int64() - hdr.Number.Int64() + 1
+	if confs < dynamicSwapOrRedemptionFeesConfs {
+		return 0, nil, asset.ErrNotEnoughConfirms
+	}
+
+	effectiveGasPrice := new(big.Int).Add(hdr.BaseFee, tx.EffectiveGasTipValue(hdr.BaseFee))
+	bigFees := new(big.Int).Mul(effectiveGasPrice, big.NewInt(int64(receipt.GasUsed)))
+	if isInit {
+		inits, err := dexeth.ParseInitiateData(tx.Data(), contractVer)
+		if err != nil {
+			return 0, nil, fmt.Errorf("invalid initiate data: %v", err)
+		}
+		secretHashes = make([][]byte, 0, len(inits))
+		for k := range inits {
+			copyK := k
+			secretHashes = append(secretHashes, copyK[:])
+		}
+	} else {
+		redeems, err := dexeth.ParseRedeemData(tx.Data(), contractVer)
+		if err != nil {
+			return 0, nil, fmt.Errorf("invalid redeem data: %v", err)
+		}
+		secretHashes = make([][]byte, 0, len(redeems))
+		for k := range redeems {
+			copyK := k
+			secretHashes = append(secretHashes, copyK[:])
+		}
+	}
+	sort.Slice(secretHashes, func(i, j int) bool { return bytes.Compare(secretHashes[i], secretHashes[j]) < 0 })
+	var found bool
+	for i := range secretHashes {
+		if bytes.Equal(secretHash[:], secretHashes[i]) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return 0, nil, fmt.Errorf("secret hash %x not found in transaction", secretHash)
+	}
+	return dexeth.WeiToGwei(bigFees), secretHashes, nil
+}
+
 // RegFeeConfirmations gets the number of confirmations for the specified
 // transaction.
 func (eth *baseWallet) RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error) {
@@ -2553,7 +2644,7 @@ func (eth *baseWallet) RegFeeConfirmations(ctx context.Context, coinID dex.Bytes
 // recommendedMaxFeeRate finds a recommended max fee rate using the somewhat
 // standard baseRate * 2 + tip formula.
 func (eth *baseWallet) recommendedMaxFeeRate(ctx context.Context) (*big.Int, error) {
-	base, tip, err := eth.node.currentFees(eth.ctx)
+	base, tip, err := eth.node.currentFees(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("Error getting net fee state: %v", err)
 	}
@@ -3018,7 +3109,7 @@ func (w *assetWallet) confirmRedemptionWithoutMonitoredTx(txHash common.Hash, re
 		}
 	}
 	if confirmations >= txConfsNeededToConfirm {
-		receipt, err := w.node.transactionReceipt(w.ctx, txHash)
+		receipt, _, err := w.node.transactionReceipt(w.ctx, txHash)
 		if err != nil {
 			return nil, err
 		}
@@ -3113,7 +3204,7 @@ func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Rede
 		}
 	}
 	if confirmations >= txConfsNeededToConfirm {
-		receipt, err := w.node.transactionReceipt(w.ctx, txHash)
+		receipt, _, err := w.node.transactionReceipt(w.ctx, txHash)
 		if err != nil {
 			return nil, err
 		}
@@ -3573,7 +3664,7 @@ func GetGasEstimates(ctx context.Context, cl *nodeClient, c contractor, maxSwaps
 			return fmt.Errorf("initiate error for %d swaps: %v", n, err)
 		}
 		waitForMined()
-		receipt, err := cl.transactionReceipt(ctx, tx.Hash())
+		receipt, _, err := cl.transactionReceipt(ctx, tx.Hash())
 		if err != nil {
 			return err
 		}
@@ -3583,7 +3674,7 @@ func GetGasEstimates(ctx context.Context, cl *nodeClient, c contractor, maxSwaps
 		stats.swaps = append(stats.swaps, receipt.GasUsed)
 
 		if isToken {
-			receipt, err = cl.transactionReceipt(ctx, approveTx.Hash())
+			receipt, _, err = cl.transactionReceipt(ctx, approveTx.Hash())
 			if err != nil {
 				return err
 			}
@@ -3591,7 +3682,7 @@ func GetGasEstimates(ctx context.Context, cl *nodeClient, c contractor, maxSwaps
 				return err
 			}
 			stats.approves = append(stats.approves, receipt.GasUsed)
-			receipt, err = cl.transactionReceipt(ctx, transferTx.Hash())
+			receipt, _, err = cl.transactionReceipt(ctx, transferTx.Hash())
 			if err != nil {
 				return err
 			}
@@ -3626,7 +3717,7 @@ func GetGasEstimates(ctx context.Context, cl *nodeClient, c contractor, maxSwaps
 			return fmt.Errorf("redeem error for %d swaps: %v", n, err)
 		}
 		waitForMined()
-		receipt, err = cl.transactionReceipt(ctx, tx.Hash())
+		receipt, _, err = cl.transactionReceipt(ctx, tx.Hash())
 		if err != nil {
 			return err
 		}
