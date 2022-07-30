@@ -185,8 +185,6 @@ func (q *TaperingTickerQueue) Wait(waiter *Waiter) {
 
 // Run runs the primary wait loop until the context is canceled.
 func (q *TaperingTickerQueue) Run(ctx context.Context) {
-	taper := float64(q.slowestInterval - q.fastestInterval)
-
 	waiters := make([]*taperingWaiter, 0, 100)
 
 	var wg sync.WaitGroup
@@ -194,6 +192,7 @@ func (q *TaperingTickerQueue) Run(ctx context.Context) {
 
 	runWaiter := func(w *taperingWaiter) {
 		defer wg.Done()
+
 		if w.TryFunc() == DontTryAgain {
 			return
 		}
@@ -204,31 +203,27 @@ func (q *TaperingTickerQueue) Run(ctx context.Context) {
 			return
 		}
 
-		var nextTick time.Time
-		switch {
-		case w.tick <= fullSpeedTicks:
-			nextTick = time.Now().Add(q.fastestInterval)
-		case w.tick < fullyTapered: // ramp up the interval
-			prog := float64(w.tick-fullSpeedTicks) / (fullyTapered - fullSpeedTicks)
-			interval := q.fastestInterval + time.Duration(math.Round(prog*taper))
-			nextTick = time.Now().Add(interval)
-		default:
-			nextTick = time.Now().Add(q.slowestInterval)
-		}
-		if nextTick.After(w.Expiration) {
-			nextTick = w.Expiration
-		}
-
-		w.nextTick = nextTick
 		w.tick++
+		w.nextTick = nextTick(w.tick, q.slowestInterval, q.fastestInterval,
+			time.Now(), w.Expiration)
 
 		q.queueWaiter <- w // send it back to the queue
 	}
+	maybeStop := func(timer *time.Timer) {
+		if timer != nil {
+			timer.Stop()
+		}
+	}
 
+	var (
+		tick  <-chan time.Time
+		timer *time.Timer
+	)
 	for {
-		var tick <-chan time.Time
 		if len(waiters) > 0 {
-			tick = time.After(time.Until(waiters[0].nextTick))
+			maybeStop(timer)
+			timer = time.NewTimer(time.Until(waiters[0].nextTick))
+			tick = timer.C
 		}
 
 		select {
@@ -253,14 +248,37 @@ func (q *TaperingTickerQueue) Run(ctx context.Context) {
 			sort.Slice(waiters, func(i, j int) bool {
 				return waiters[i].nextTick.Before(waiters[j].nextTick) // ascending, next tick first
 			})
-			// NOTE: timer leaked until it fires - consider NewTimer and Stop here
 
 		case <-ctx.Done():
+			maybeStop(timer)
 			for _, w := range waiters {
 				w.ExpireFunc() // early, but still ending prior to DontTryAgain
 			}
 			return
 		}
 	}
+}
 
+func nextTick(
+	nextTick int,
+	slowestInterval, fastestInterval time.Duration,
+	now, expiration time.Time,
+) time.Time {
+	var nextTickTime time.Time
+	switch {
+	case nextTick < fullSpeedTicks:
+		nextTickTime = now.Add(fastestInterval)
+	case nextTick < fullyTapered: // ramp up the interval
+		prog := float64(nextTick+1-fullSpeedTicks) / (fullyTapered - fullSpeedTicks)
+		taper := float64(slowestInterval - fastestInterval)
+		interval := fastestInterval + time.Duration(math.Round(prog*taper))
+		nextTickTime = now.Add(interval)
+	default:
+		nextTickTime = now.Add(slowestInterval)
+	}
+
+	if nextTickTime.After(expiration) {
+		return expiration
+	}
+	return nextTickTime
 }
