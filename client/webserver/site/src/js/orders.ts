@@ -136,7 +136,7 @@ export default class OrdersPage extends BasePage {
       set('type', `${OrderUtil.typeString(ord)} ${OrderUtil.sellString(ord)}`)
       set('rate', Doc.formatCoinValue(app().conventionalRate(ord.baseID, ord.quoteID, ord.rate)))
       set('status', OrderUtil.statusString(ord))
-      set('filled', `${(ord.filled / ord.qty * 100).toFixed(1)}%`)
+      set('filled', `${(OrderUtil.filled(ord) / ord.qty * 100).toFixed(1)}%`)
       set('settled', `${(OrderUtil.settled(ord) / ord.qty * 100).toFixed(1)}%`)
       const dateTime = new Date(ord.submitTime).toLocaleString()
       set('time', `${Doc.timeSince(ord.submitTime)} ago, ${dateTime}`)

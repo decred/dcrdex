@@ -1105,7 +1105,7 @@ export default class MarketsPage extends BasePage {
           ((OrderUtil.settled(a) * 100 / a.qty) - (OrderUtil.settled(b) * 100 / b.qty))
       case 'filled':
         return (a: Order, b: Order) => this.ordersSortDirection *
-          ((a.filled * 100 / a.qty) - (b.filled * 100 / b.qty))
+          ((OrderUtil.filled(a) * 100 / a.qty) - (OrderUtil.filled(b) * 100 / b.qty))
     }
   }
 
@@ -1170,7 +1170,7 @@ export default class MarketsPage extends BasePage {
     updateDataCol(tr, 'age', Doc.timeSince(ord.submitTime))
     updateDataCol(tr, 'rate', Doc.formatCoinValue(ord.rate / this.market.rateConversionFactor))
     updateDataCol(tr, 'qty', Doc.formatCoinValue(ord.qty, this.market.baseUnitInfo))
-    updateDataCol(tr, 'filled', `${(ord.filled / ord.qty * 100).toFixed(1)}%`)
+    updateDataCol(tr, 'filled', `${(OrderUtil.filled(ord) / ord.qty * 100).toFixed(1)}%`)
     updateDataCol(tr, 'settled', `${(OrderUtil.settled(ord) / ord.qty * 100).toFixed(1)}%`)
     updateDataCol(tr, 'status', OrderUtil.statusString(ord))
   }
