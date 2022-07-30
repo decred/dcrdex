@@ -352,6 +352,19 @@ func makeEnsureErr(t *testing.T) func(rpcErr *msgjson.Error, tag string, code in
 	}
 }
 
+func waitFor(pred func() bool, timeout time.Duration) (fail bool) {
+	tStart := time.Now()
+	for {
+		if pred() {
+			return false
+		}
+		if time.Since(tStart) > timeout {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 var (
 	tCheckFeeAddr         = "DsaAKsMvZ6HrqhmbhLjV9qVbPkkzF5daowT"
 	tCheckFeeVal   uint64 = 500_000_000
@@ -1290,21 +1303,13 @@ func TestHandleResponse(t *testing.T) {
 	newID := comms.NextID()
 	client.logReq(newID, func(comms.Link, *msgjson.Message) {},
 		0, func() { t.Log("expired (ok)") })
-	// Wait in a loop until response handler expires.
-	startWaitingTime := time.Now()
-	for {
+	// Wait until response handler expires.
+	if waitFor(func() bool {
 		client.mtx.Lock()
-		if len(client.respHandlers) == 0 {
-			// We are done, handler-expiration must have happened.
-			client.mtx.Unlock()
-			break
-		}
-		client.mtx.Unlock()
-
-		if time.Since(startWaitingTime) > 10*time.Second {
-			t.Fatalf("timed out retrying, expected 0 response handlers, found %d", len(client.respHandlers))
-		}
-		time.Sleep(time.Millisecond)
+		defer client.mtx.Unlock()
+		return len(client.respHandlers) == 0
+	}, 10*time.Second) {
+		t.Fatalf("expected 0 response handlers, found %d", len(client.respHandlers))
 	}
 	client.mtx.Lock()
 	if client.respHandlers[newID] != nil {
