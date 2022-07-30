@@ -575,7 +575,7 @@ func (auth *AuthManager) Send(user account.AccountID, msg *msgjson.Message) erro
 	err := client.conn.Send(msg)
 	if err != nil {
 		log.Debugf("error sending on link: %v", err)
-		// Remove client asssuming connection is broken, requiring reconnect.
+		// Remove client assuming connection is broken, requiring reconnect.
 		auth.removeClient(client)
 		// client.conn.Disconnect() // async removal
 	}
@@ -615,7 +615,7 @@ func (auth *AuthManager) request(user account.AccountID, msg *msgjson.Message, f
 		// timer so that it does not eventually fire and run the expire func.
 		// The caller receives a non-nil error to deal with it.
 		client.respHandler(msg.ID) // drop the removed handler
-		// Remove client asssuming connection is broken, requiring reconnect.
+		// Remove client assuming connection is broken, requiring reconnect.
 		auth.removeClient(client)
 		// client.conn.Disconnect() // async removal
 	}
@@ -1171,7 +1171,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		oldClient.mtx.Unlock()
 	}
 
-	// Retrieve the user's N latest finished (completed or canceled orders)
+	// Retrieve the user's N latest finished (completed or canceled) orders
 	// and store them in a latestOrders.
 	latestFinished, err := auth.loadRecentFinishedOrders(acctInfo.ID, cancelThreshWindow)
 	if err != nil {
