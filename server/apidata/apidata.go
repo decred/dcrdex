@@ -55,7 +55,6 @@ type DataAPI struct {
 
 	cacheMtx     sync.RWMutex
 	marketCaches map[string]map[uint64]*candles.Cache
-	cache5min    *candles.Cache
 }
 
 // NewDataAPI is the constructor for a new DataAPI.
@@ -90,12 +89,6 @@ func (s *DataAPI) AddMarketSource(mkt MarketSource) error {
 		cache := candles.NewCache(candles.CacheSize, binSize)
 		cacheList = append(cacheList, cache)
 		binCaches[binSize] = cache
-		if binSize == bin5min {
-			s.cache5min = cache
-		}
-	}
-	if s.cache5min == nil {
-		panic("no 5-minute cache")
 	}
 	err = s.db.LoadEpochStats(mkt.Base(), mkt.Quote(), cacheList)
 	if err != nil {
@@ -118,17 +111,19 @@ func (s *DataAPI) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matche
 	}
 
 	// Add the candlestick.
-	s.cacheMtx.Lock()
-	mktCaches := s.marketCaches[mktName]
-	if mktCaches == nil {
-		s.cacheMtx.Unlock()
-		return nil, fmt.Errorf("unknown market %q", mktName)
-	}
-	epochDur := s.epochDurations[mktName]
-	startStamp := epochIdx * epochDur
-	endStamp := startStamp + epochDur
-	for _, cache := range mktCaches {
-		cache.Add(&candles.Candle{
+	addCandle := func() (change24 float64, vol24 uint64, err error) {
+		s.cacheMtx.Lock()
+		defer s.cacheMtx.Unlock()
+		mktCaches := s.marketCaches[mktName]
+		if mktCaches == nil {
+			return 0, 0, fmt.Errorf("unknown market %q", mktName)
+		}
+		epochDur := s.epochDurations[mktName]
+		startStamp := epochIdx * epochDur
+		endStamp := startStamp + epochDur
+		var cache5min *candles.Cache
+		const fiveMins = uint64(time.Minute * 5 / time.Millisecond)
+		candle := &candles.Candle{
 			StartStamp:  startStamp,
 			EndStamp:    endStamp,
 			MatchVolume: stats.MatchVolume,
@@ -137,10 +132,24 @@ func (s *DataAPI) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matche
 			LowRate:     stats.LowRate,
 			StartRate:   stats.StartRate,
 			EndRate:     stats.EndRate,
-		})
+		}
+		for dur, cache := range mktCaches {
+			if dur == fiveMins {
+				cache5min = cache
+			}
+			cache.Add(candle)
+		}
+		if cache5min == nil {
+			return 0, 0, fmt.Errorf("no 5 minute cache")
+		}
+		change24, vol24 = cache5min.Delta(time.Now().Add(-time.Hour * 24))
+		return
 	}
-	change24, vol24 := s.cache5min.Delta(time.Now().Add(-time.Hour * 24))
-	s.cacheMtx.Unlock()
+
+	change24, vol24, err := addCandle()
+	if err != nil {
+		return nil, err
+	}
 
 	// Encode the spot price.
 	spot := &msgjson.Spot{
