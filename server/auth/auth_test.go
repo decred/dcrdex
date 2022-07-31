@@ -352,6 +352,19 @@ func makeEnsureErr(t *testing.T) func(rpcErr *msgjson.Error, tag string, code in
 	}
 }
 
+func waitFor(pred func() bool, timeout time.Duration) (fail bool) {
+	tStart := time.Now()
+	for {
+		if pred() {
+			return false
+		}
+		if time.Since(tStart) > timeout {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 var (
 	tCheckFeeAddr         = "DsaAKsMvZ6HrqhmbhLjV9qVbPkkzF5daowT"
 	tCheckFeeVal   uint64 = 500_000_000
@@ -1290,21 +1303,26 @@ func TestHandleResponse(t *testing.T) {
 	newID := comms.NextID()
 	client.logReq(newID, func(comms.Link, *msgjson.Message) {},
 		0, func() { t.Log("expired (ok)") })
-	time.Sleep(time.Millisecond) // expire Timer func run in goroutine
-	client.mtx.Lock()
-	if len(client.respHandlers) != 0 {
+	// Wait until response handler expires.
+	if waitFor(func() bool {
+		client.mtx.Lock()
+		defer client.mtx.Unlock()
+		return len(client.respHandlers) == 0
+	}, 10*time.Second) {
 		t.Fatalf("expected 0 response handlers, found %d", len(client.respHandlers))
 	}
+	client.mtx.Lock()
 	if client.respHandlers[newID] != nil {
 		t.Fatalf("response handler should have been expired")
 	}
 	client.mtx.Unlock()
 
-	// After logging a new request, there should still only be one. A short
-	// sleep is added because the cleanup is run as a goroutine.
+	// After logging a new request, there should still be exactly one response handler
+	// present. A short sleep is added to give a chance for clean-up running in a
+	// separate go-routine to finish before we continue asserting on the result.
 	newID = comms.NextID()
 	client.logReq(newID, func(comms.Link, *msgjson.Message) {}, time.Hour, noop)
-	time.Sleep(time.Millisecond) // expire Timer func run in goroutine
+	time.Sleep(time.Millisecond)
 	client.mtx.Lock()
 	if len(client.respHandlers) != 1 {
 		t.Fatalf("expected 1 response handler, found %d", len(client.respHandlers))
