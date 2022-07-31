@@ -755,8 +755,8 @@ func TestTryBlocksWithNotifier(t *testing.T) {
 	defaultWalletBlockAllowance := walletBlockAllowance
 	defaultBlockTicker := blockTicker
 
-	walletBlockAllowance = 30 * time.Millisecond
-	blockTicker = 5 * time.Millisecond
+	walletBlockAllowance = 300 * time.Millisecond
+	blockTicker = 50 * time.Millisecond
 
 	defer func() {
 		walletBlockAllowance = defaultWalletBlockAllowance
