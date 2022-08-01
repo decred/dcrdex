@@ -5493,6 +5493,7 @@ func TestResolveActiveTrades(t *testing.T) {
 		tEthWallet.reservedRedemption = 0
 		tEthWallet.reservedRefund = 0
 		rig.dc.trades = make(map[order.OrderID]*trackedTrade)
+		tCore.loginWg = nil
 	}
 
 	// Ensure the order is good, and reset the state.

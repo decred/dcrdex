@@ -1094,6 +1094,7 @@ type Config struct {
 type Core struct {
 	ctx           context.Context
 	wg            sync.WaitGroup
+	loginWg       *sync.WaitGroup
 	ready         chan struct{}
 	cfg           *Config
 	log           dex.Logger
@@ -3559,6 +3560,32 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	}
 	defer crypter.Close()
 
+	loginResult := func() *LoginResult {
+		dexStats := c.initializeDEXConnections(crypter)
+		notes, err := c.db.NotificationsN(100)
+		if err != nil {
+			c.log.Errorf("Login -> NotificationsN error: %v", err)
+		}
+
+		return &LoginResult{
+			Notifications: notes,
+			DEXes:         dexStats,
+		}
+	}
+
+	if c.loginWg != nil {
+		// User already sent a login request or is already logged in.
+		c.loginWg.Wait()
+		return loginResult(), err
+	}
+
+	// Connecting and loading wallets might take time, we don't want users
+	// sending multiple login requests when wallets are connecting in a
+	// goroutine.
+	c.loginWg = &sync.WaitGroup{}
+	c.loginWg.Add(1)
+	defer c.loginWg.Done()
+
 	// Attempt to connect to and retrieve balance from all known wallets. It is
 	// not an error if we can't connect, unless we need the wallet for active
 	// trades, but that condition is checked later in resolveActiveTrades.
@@ -3601,17 +3628,7 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 		c.log.Infof("loaded %d incomplete orders", loaded)
 	}
 
-	dexStats := c.initializeDEXConnections(crypter)
-	notes, err := c.db.NotificationsN(100)
-	if err != nil {
-		c.log.Errorf("Login -> NotificationsN error: %v", err)
-	}
-
-	result := &LoginResult{
-		Notifications: notes,
-		DEXes:         dexStats,
-	}
-	return result, nil
+	return loginResult(), nil
 }
 
 // initializePrimaryCredentials sets the PrimaryCredential fields after the DB
@@ -3689,6 +3706,7 @@ func (c *Core) Logout() error {
 		dc.acct.lock()
 	}
 
+	c.loginWg = nil
 	return nil
 }
 
