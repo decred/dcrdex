@@ -1098,6 +1098,7 @@ type Core struct {
 	ctx           context.Context
 	wg            sync.WaitGroup
 	ready         chan struct{}
+	loginSlot     chan struct{}
 	cfg           *Config
 	log           dex.Logger
 	db            db.DB
@@ -1217,6 +1218,7 @@ func New(cfg *Config) (*Core, error) {
 		credentials:   creds,
 		ready:         make(chan struct{}),
 		log:           cfg.Logger,
+		loginSlot:     make(chan struct{}, 1),
 		db:            boltDB,
 		conns:         make(map[string]*dexConnection),
 		wallets:       make(map[uint32]*xcWallet),
@@ -3563,6 +3565,54 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	}
 	defer crypter.Close()
 
+	loginResult := func() *LoginResult {
+		// NOTE: initializeDEXConnections will do authDEX and a 'connect'
+		// request only if NOT already dc.acct.authed().
+		dexStats := c.initializeDEXConnections(crypter)
+		notes, err := c.db.NotificationsN(100)
+		if err != nil {
+			c.log.Errorf("Login -> NotificationsN error: %v", err)
+		}
+
+		return &LoginResult{
+			Notifications: notes,
+			DEXes:         dexStats,
+		}
+	}
+
+	// Connecting and loading wallets might take time, but we don't want
+	// concurrent wallet connect attempts running, especially for native wallets
+	// that use the same file system resources. NOTE: The following channel
+	// mechanism similar to the following, and it does suggest some design
+	// issues, described below.
+	//
+	// !c.loginMtx.TryLock() {
+	//  c.loginMtx.Lock()
+	//  defer c.loginMtx.Lock()
+	//  return loginResult(), err
+	// }
+	defer func() { <-c.loginSlot }() // remove the peg from the slot when done
+	select {
+	case c.loginSlot <- struct{}{}: // full login
+	default:
+		c.log.Warnf("Login already running! Waiting for it to complete.")
+		// Just wait and take the short path.
+		c.loginSlot <- struct{}{}
+		return loginResult(), err
+	}
+	// The design issue that requires this is that we require multiple Login
+	// calls to succeed without a Logout between them. To properly solve this,
+	// Login would actually error if already logged in. However:
+	//  1. Login gives "restart" capabilities for loading and resuming trades.
+	//  2. We lack a mechanism for repeated callers (e.g. impatient HTTP
+	//     requests or sessions from other browsers) to get the result from the
+	//     already-running Login.
+	//
+	// Fundamentally, we need to separate the following notions:
+	//  1. login to Core (credentials check, get cookies)
+	//  2. Core initialization (prep internal state, e.g. loading data from DB)
+	//  3. login to the server (initializeDEXConnections > authDEX).
+
 	// Attempt to connect to and retrieve balance from all known wallets. It is
 	// not an error if we can't connect, unless we need the wallet for active
 	// trades, but that condition is checked later in resolveActiveTrades.
@@ -3605,17 +3655,7 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 		c.log.Infof("loaded %d incomplete orders", loaded)
 	}
 
-	dexStats := c.initializeDEXConnections(crypter)
-	notes, err := c.db.NotificationsN(100)
-	if err != nil {
-		c.log.Errorf("Login -> NotificationsN error: %v", err)
-	}
-
-	result := &LoginResult{
-		Notifications: notes,
-		DEXes:         dexStats,
-	}
-	return result, nil
+	return loginResult(), nil
 }
 
 // initializePrimaryCredentials sets the PrimaryCredential fields after the DB

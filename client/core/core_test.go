@@ -1147,11 +1147,12 @@ func newTestRig() *testRig {
 	rig := &testRig{
 		shutdown: shutdown,
 		core: &Core{
-			ctx:      ctx,
-			cfg:      &Config{},
-			db:       tdb,
-			log:      tLogger,
-			latencyQ: queue,
+			ctx:       ctx,
+			cfg:       &Config{},
+			db:        tdb,
+			log:       tLogger,
+			loginSlot: make(chan struct{}, 1),
+			latencyQ:  queue,
 			conns: map[string]*dexConnection{
 				tDexHost: dc,
 			},
