@@ -1,0 +1,795 @@
+==Client (dexc) ==
+
+==RPC==
+
+The client (dexc) can be controlled via its remote procedure call (RPC) interface.
+
+==HTTPS==
+
+All HTTP requests sent to the RPC server must contain basic auth with a
+user:password pair that the client's RPC interface will accept.
+
+Communication is done using [https://golang.org/pkg/crypto/tls/ tls].
+
+Requests must be constructed as specified in [https://github.com/decred/dcrdex/blob/master/spec/comm.mediawiki/#Message_Protocol Message Protocol]
+
+===Payload===
+
+All requests use the same payload structure. All individual arguments are strings.
+Return values vary.
+
+<code>payload</code>
+{|
+! field !! type   !! description
+|-
+| PWArgs  || &#91;string&#93; || An array of password arguments. Can be null.
+|-
+| args    || &#91;string&#93; || An array of arguments. Can be null.
+|}
+
+Arguments in arrays are positional and must be placed in the order they appear
+here. If an argument is optional, but a placeholder is needed, an empty
+string "" can be used. Arguments have a pseudo-type. For example,
+if boolean, the argument must be the string representation of a truthy value. i.e.
+"true" or "1"
+
+Returns will come with an error if there was a problem. If arguments could not
+be parsed, a help message for that specific route/command is returned.
+
+
+===Help===
+
+Print a help message.
+
+'''Request route:''' <code>help</code>
+
+<code>args</code>
+{|
+! name !! pseudo-type !! description
+|-
+| cmd || string  || Optional. The command to print help for.
+|-
+| includePasswords || bool || Optional. Default is false. Whether to include password arguments in the returned help. Passwords are hidden when using dexcctl.
+|}
+
+'''Response'''
+
+The response will contain a help message based on the arguments.
+
+<code>payload</code>
+{|
+! type !! description
+|-
+| string ||  The help message for command.
+|}
+
+
+===Version===
+
+Print the DEX client rpcserver version. Accepts no arguments
+
+'''Request route:''' <code>version</code>
+
+'''Response'''
+
+The response will contain the semver as a string. i.e. "1.0.0"
+
+<code>payload</code>
+{|
+! type !! description
+|-
+| string || The DEX client rpcserver version.
+|}
+
+
+===Init===
+
+Initialize the client with a password.
+
+'''Request route:''' <code>init</code>
+
+<code>PWArgs</code>
+{|
+! name !! type !! description
+|-
+| appPass || string  || The DEX client password.
+|}
+
+'''Response'''
+
+The response will contain a message.
+
+<code>payload</code>
+{|
+! type !! description
+|-
+| string || The message "app initialized".
+|}
+
+
+===Get Fee===
+
+Print a help message.
+
+'''Request route:''' <code>getfee</code>
+
+<code>args</code>
+{|
+! name !! pseudo-type !! description
+|-
+| dex || string  || The DEX address for which the registration fee should be retrieved.
+|-
+| cert || string || Optional. The TLS certificate path.
+|}
+
+'''Response'''
+
+The response will contain the fee.
+
+<code>payload</code>
+{|
+! type !! description
+|-
+| object || The getFee result.
+|}
+
+'''JSON GetFeeResult object'''
+
+{|
+! field   !! type   !! description
+|-
+| fee      || int   || The DEX registration fee.
+|}
+
+
+===New Wallet===
+
+Connect to a new wallet.
+
+'''Request route:''' <code>newwallet</code>
+
+<code>PWArgs</code>
+{|
+! name !! type !! description
+|-
+| appPass || string  || The DEX client password.
+|-
+| walletPass || string  || The wallet's password. The client will encrypt and store this.
+|}
+
+<code>args</code>
+{|
+! name !! pseudo-type !! description
+|-
+| cmd || string  || Optional. The command to print help for.
+|-
+| assetID  || int || The asset's BIP-44 registered coin index. e.g. 42 for DCR. See [https://github.com/satoshilabs/slips/blob/master/slip-0044.md slip0044]
+|-
+| path     || string  || Optional. Text from a configuration file.
+|-
+| settings || object  || Optional. A JSON-encoded string->string mapping of additional configuration settings. These settings take precedence over any settings parsed from file. e.g. '{"account":"default"}' for Decred accounts, and '{"walletname":""}' for the default Bitcoin wallet where bitcoind's listwallets RPC gives possible walletnames.
+|}
+
+'''Response'''
+
+The response will contain a message.
+
+<code>payload</code>
+{|
+! type !! description
+|-
+| string ||  The message "&#91;coin symbol&#93; wallet created and unlocked".
+|}
+
+
+===Open Wallet===
+
+Unlock an existing wallet for one year.
+
+'''Request route:''' <code>openwallet</code>
+
+<code>PWArgs</code>
+{|
+! name !! type !! description
+|-
+| appPass || string  || The DEX client password.
+|}
+
+<code>args</code>
+{|
+! name !! pseudo-type !! description
+|-
+| assetID  || int || The asset's BIP-44 registered coin index. e.g. 42 for DCR. See [https://github.com/satoshilabs/slips/blob/master/slip-0044.md slip0044]
+|}
+
+'''Response'''
+
+The response will contain a message.
+
+<code>payload</code>
+{|
+! type !! description
+|-
+| string ||  The message "&#91;coin symbol&#93; wallet unlocked".
+|}
+
+
+===Close Wallet===
+
+Lock an existing wallet.
+
+'''Request route:''' <code>lockwallet</code>
+
+<code>args</code>
+{|
+! name !! pseudo-type !! description
+|-
+| assetID  || int || The asset's BIP-44 registered coin index. e.g. 42 for DCR. See [https://github.com/satoshilabs/slips/blob/master/slip-0044.md slip0044]
+|}
+
+'''Response'''
+
+The response will contain a message.
+
+<code>payload</code>
+{|
+! type !! description
+|-
+| string ||  The message "&#91;coin symbol&#93; wallet locked".
+|}
+
+
+===Wallets===
+
+Get information about all wallets registered with the client. Accepts no arguments.
+
+'''Request route:''' <code>wallets</code>
+
+'''Response'''
+
+The response will contain an array of information for each wallet.
+
+<code>payload</code>
+{|
+! type !! description
+|-
+| &#91;object&#93; || A list of '''WalletInfo''' objects (described below).
+|}
+
+'''JSON WalletInfo object'''
+
+{|
+! field   !! type   !! description
+|-
+| symbol  || string || The coin symbol.
+|-
+| assetID || int    || The asset's BIP-44 registered coin index. e.g. 42 for DCR. See [https://github.com/satoshilabs/slips/blob/master/slip-0044.md slip0044]
+|-
+| open    || bool   || Whether the wallet is unlocked.
+|-
+| running || bool   || Whether the wallet is running.
+|-
+| updated || int    || Unix time of last balance update. Seconds since 00:00:00 Jan 1 1970.
+|-
+| balance || object || A Balance object (described below).
+|-
+| address || string || A wallet address.
+|-
+| feerate || int    || The fee rate.
+|-
+| units   || string || Unit of measure for amounts.
+|}
+
+'''JSON Balance object'''
+
+{|
+! field   !! type   !! description
+|-
+| available || int || The balance available for funding orders case.
+|-
+| immature  || int || Balance that requires confirmations before use.
+|-
+| locked    || int || The total locked balance.
+|-
+| stamp     || string || Time stamp.
+|}
+
+
+===Register===
+
+Register for a DEX. An OK response does not mean that registration is complete.
+Registration is complete after the fee transaction has been confirmed.
+
+'''Request route:''' <code>register</code>
+
+<code>PWArgs</code>
+{|
+! name !! type !! description
+|-
+| appPass || string  || The DEX client password.
+|}
+
+<code>args</code>
+{|
+! name !! pseudo-type !! description
+|-
+| addr || string  || The DEX address to register for.
+|-
+| fee  || int  || The DEX fee.
+|-
+| cert || string  || Optional. The TLS certificate.
+|}
+
+'''Response'''
+
+The response will contain a RegisterResult object.
+
+<code>payload</code>
+{|
+! type !! description
+|-
+| object ||  The RegisterResult (described below).
+|}
+
+'''JSON RegisterResult object'''
+
+{|
+! field   !! type   !! description
+|-
+| feeID       || string || The fee transaction's ID and output index.
+|-
+| reqConfirms || int || The number of confirmations required to start trading.
+|}
+
+
+===Exchanges===
+
+Detailed information about known exchanges and markets. Arguments not accepted.
+
+'''Request route:''' <code>exchanges</code>
+
+'''Response'''
+
+The response will contain an Exchanges object.
+
+<code>payload</code>
+{|
+! type !! description
+|-
+| object ||  An Exchanges object (described below).
+|}
+
+'''JSON Exchanges object'''
+
+{|
+! field   !! type   !! description
+|-
+| &#91;DEX host&#93; || object || Repeating. An Exchange object (described below)
+|}
+
+'''JSON Exchange object'''
+
+{|
+! field   !! type   !! description
+|-
+| markets       || object || A Markets object (described below).
+|-
+| assets        || object || An Assets object (described below).
+|-
+| confsrequired || int || The number of confirmations needed for the registration fee payment.
+|-
+| confs         || int || The current number of confirmations for the registration fee payment. This is only present during the registration process.
+|}
+
+'''JSON Markets object'''
+
+{|
+! field   !! type   !! description
+|-
+| &#91;assetSymbol-assetSymbol&#93; || object || Repeating. A Market object (described below)
+|}
+
+'''JSON Market object'''
+
+{|
+! field   !! type   !! description
+|-
+| baseid      || int || The base asset ID.
+|-
+| basesymbol  || string || The base ticker symbol.
+|-
+| quoteid     || int || The quote asset ID.
+|-
+| quotesymbol || string || The quote asset ID symbol,
+|-
+| epochlen    || int || Duration of a epoch in milliseconds.
+|-
+| startepoch  || int || Time of start of the last epoch in milliseconds since 00:00:00 Jan 1 1970.
+|-
+| buybuffer   || float || The minimum order size for a market buy order.
+|}
+
+'''JSON Assets object'''
+
+{|
+! field   !! type   !! description
+|-
+| &#91;assetID&#93; || object || Repeating. An Asset object (described below)
+|}
+
+'''JSON Asset object'''
+
+{|
+! field   !! type   !! description
+|-
+| symbol       || string || The asset's coin symbol.
+|-
+| lotSize      || int || The amount of units of a coin in one lot.
+|-
+| rateStep     || int || the price rate increment in atoms.
+|-
+| feeRate      || int || The transaction fee in atoms per byte.
+|-
+| swapSize     || int || The size of a swap transaction in bytes.
+|-
+| swapSizeBase || int || The size of a swap transaction minus inputs in bytes.
+|-
+| swapConf     || int || The number of confirmations needed to confirm trade transactions.
+|}
+
+
+===Login===
+
+Attempt to login to all registered DEX servers.
+
+'''Request route:''' <code>login</code>
+
+<code>PWArgs</code>
+{|
+! name !! type !! description
+|-
+| appPass || string  || The DEX client password.
+|}
+
+'''Response'''
+
+The response will contain a LoginResult.
+
+<code>payload</code>
+{|
+! type !! description
+|-
+| object ||  The LoginResult (described below).
+|}
+
+'''JSON LoginResult object'''
+
+{|
+! field   !! type   !! description
+|-
+| notification || &#91;object&#93; || A list of Notification objects (described below).
+|-
+| dexes        || &#91;object&#93; || A list of Dex objects (described below).
+|}
+
+'''JSON Notification object'''
+
+{|
+! field   !! type   !! description
+|-
+| type     || string || The notification type.
+|-
+| subject  || string || A clarification of type.
+|-
+| details  || string || The notification details.
+|-
+| severity || int || The importance of the notification on a scale of 0 through 5.
+|-
+| stamp    || int || Unix time of the notification. Seconds since 00:00:00 Jan 1 1970.
+|-
+| acked    || bool || Whether the notification was acknowledged.
+|-
+| id       || string || A unique hex ID.
+|}
+
+'''JSON DEX object'''
+
+{|
+! field   !! type   !! description
+|-
+| host     || string || The DEX address.
+|-
+| acctID   || string || A unique hex ID.
+|-
+| authed   || bool || If successfully authenticated with the DEX.
+|-
+| autherr  || string || Omitted if authed. If not authed, the reason.
+|-
+| tradeIDs || &#91;string&#93; || An array of active trade IDs.
+|}
+
+
+===Trade===
+
+Make an order to buy or sell an asset.
+
+'''Request route:''' <code>trade</code>
+
+<code>PWArgs</code>
+{|
+! name !! type !! description
+|-
+| appPass || string  || The DEX client password.
+|}
+
+<code>args</code>
+{|
+! name !! pseudo-type !! description
+|-
+| host      || string || The DEX to trade on.
+|-
+| isLimit   || bool || Whether the order is a limit order.
+|-
+| sell      || bool || Whether the order is selling.
+|-
+| base      || int || The BIP-44 coin index for the market's base asset.
+|-
+| quote     || int || The BIP-44 coin index for the market's quote asset.
+|-
+| qty       || int || The number of units to buy/sell. Must be a multiple of the lot size.
+|-
+| rate      || int || The atoms quote asset to pay/accept per unit base asset. e.g. 156000 satoshi/DCR for the DCR(base)_BTC(quote).
+|-
+| immediate || bool || Require immediate match. Do not book the order.
+|}
+
+'''Response'''
+
+The response will contain an OrderDetails.
+
+<code>payload</code>
+{|
+! type !! description
+|-
+| object ||  An OrderDetails object (describled below).
+|}
+
+'''JSON OrderDetails object'''
+
+{|
+! field   !! type   !! description
+|-
+| orderid || string || The order's unique hex identifier.
+|-
+| sig     || string || The DEX's signature of the order information.
+|-
+| stamp   || int || The time the order was signed in milliseconds since 00:00:00 Jan 1 1970.
+|}
+
+
+===Cancel===
+
+Cancel an order.
+
+'''Request route:''' <code>cancel</code>
+
+<code>PWArgs</code>
+{|
+! name !! type !! description
+|-
+| appPass || string  || The DEX client password.
+|}
+
+<code>args</code>
+{|
+! name !! pseudo-type !! description
+|-
+| orderID || string  || The hex ID of the order to cancel.
+|}
+
+'''Response'''
+
+The response will contain a message.
+
+<code>payload</code>
+{|
+! type !! description
+|-
+| string ||  The message "canceled order &#91;order ID&#93;".
+|}
+
+
+===Withdraw===
+
+Withdraw value from an exchange wallet to address.
+
+'''Request route:''' <code>withdraw</code>
+
+<code>PWArgs</code>
+{|
+! name !! type !! description
+|-
+| appPass || string  || The DEX client password.
+|}
+
+<code>args</code>
+{|
+! name !! pseudo-type !! description
+|-
+| assetID || int || The asset's BIP-44 registered coin index. Used to identify which wallet to withdraw from. e.g. 42 for DCR. See [https://github.com/satoshilabs/slips/blob/master/slip-0044.md slip0044]
+|-
+| value   || int || The amount to withdraw in units of the asset's smallest denomination (e.g. satoshis, atoms, etc.)
+|-
+| address || string || The address to which withdrawn funds are sent.
+|}
+
+'''Response'''
+
+The response will contain coin ID of the withdraw transaction.
+
+<code>payload</code>
+{|
+! type !! description
+|-
+| string ||  "&#91;coin ID&#93;".
+|}
+
+
+===Logout===
+
+Logout the DEX client. Accepts no arguments.
+
+'''Request route:''' <code>logout</code>
+
+'''Response'''
+
+The response will contain a message.
+
+<code>payload</code>
+{|
+! type !! description
+|-
+| string || The message "goodbye"
+|}
+
+
+===Order Book===
+
+Retrieve all orders for a market.
+
+'''Request route:''' <code>orderbook</code>
+
+<code>args</code>
+{|
+! name !! pseudo-type !! description
+|-
+| host    || string || The DEX to retrieve the order book from.
+|-
+| base    || int || The BIP-44 coin index for the market's base asset.
+|-
+| quote   || int || The BIP-44 coin index for the market's quote asset.
+|-
+| nOrders || int || Optional. Default is 0, which returns all orders. The number of orders from the top of buys and sells to return. Epoch orders are not truncated.
+|}
+
+'''Response'''
+
+The response will contain an OrderBook object.
+
+<code>payload</code>
+{|
+! type !! description
+|-
+| object ||  An OrderBook object (described below).
+|}
+
+'''JSON OrderBook object'''
+
+{|
+! field   !! type   !! description
+|-
+| sells || &#91;object&#93; || An array of booked MiniOrder objects (described below).
+|-
+| buys  || &#91;object&#93; || An array of booked buy MiniOrder objects.
+|-
+| epoch || &#91;object&#93; || An array of epoch MiniOrder objects. Epoch orders include all kinds of orders, even those that cannot or may not be booked. They are not truncated.
+|}
+
+'''JSON MiniOrder object'''
+
+{|
+! field   !! type   !! description
+|-
+| qty   || float || The number of coins base asset being bought or sold.
+|-
+| rate  || float || The coins quote asset to accept per coin base asset.
+|-
+| sell  || bool || Whether this order is a sell order.
+|-
+| token || string || The first 8 bytes of the order id, coded in hex.
+|-
+| epoch || int || Only present for epoch orders. The order's epoch.
+|}
+
+
+===My Orders===
+
+Fetch all active and recently executed orders belonging to the user.
+
+'''Request route:''' <code>myorders</code>
+
+<code>args</code>
+{|
+! name !! pseudo-type !! description
+|-
+| host  || string || Optional. The DEX to show orders from.
+|-
+| base  || int || Optional. The BIP-44 coin index for the market's base asset.
+|-
+| quote || int || Optional. The BIP-44 coin index for the market's quote asset.
+|}
+
+'''Response'''
+
+The response will contain a list of Order objects.
+
+<code>payload</code>
+{|
+! type !! description
+|-
+| &#91;object&#93; ||  A list of Order objects (described below).
+|}
+
+'''JSON Order object'''
+
+{|
+! field   !! type   !! description
+|-
+| host       || string || The DEX address.
+|-
+| marketName || string || The market's name. e.g. "DCR_BTC".
+|-
+| baseID     || int || The market's base asset BIP-44 coin index. e.g. 42 for DCR.
+|-
+| quoteID    || int || The market's quote asset BIP-44 coin index. e.g. 0 for BTC.
+|-
+| id         || string || The order's unique hex ID.
+|-
+| type       || string || The type of order. "limit", "market", or "cancel".
+|-
+| sell       || string || Whether this order is selling.
+|-
+| stamp      || int || Time the order was made in milliseconds since 00:00:00 Jan 1 1970.
+|-
+| age        || string || The time that this order has been active in human readable form.
+|-
+| rate       || int || The exchange rate limit. Limit orders only. Units: quote asset per unit base asset.
+|-
+| quantity   || int || The amount being traded.
+|-
+| filled     || int || The order quantity that has matched.
+|-
+| settled    || int || The sum quantity of all completed matches.
+|-
+| status     || string || The status of the order. "epoch", "booked", "executed", "canceled", or "revoked".
+|-
+| cancelling || bool || Whether this order is in the process of cancelling.
+|-
+| canceled   || bool || Whether this order has been canceled.
+|-
+| tif        || string || "immediate" if this limit order will only match for one epoch. "standing" if the order can continue matching until filled or cancelled.
+|}
+
+==WebSocket==
+
+A connection to the WebSocket server can be made through the RPC server. The
+websocket server server allows for notifications from a market and other long
+running operations.
+
+Connect by providing proper credentials and a valid header when visiting
+"wss://&#91;RPC Server Address&#93;/ws".
+
+==Examples==
+
+An example of setting up both an https and wss connection to the RPC server can
+be found [https://github.com/decred/dcrdex/blob/master/docs/examples/rpcclient here]
