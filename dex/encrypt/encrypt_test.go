@@ -72,6 +72,35 @@ func TestDecrypt(t *testing.T) {
 
 }
 
+func FuzzDecrypt(f *testing.F) {
+	seeds := [][]byte{
+		[]byte("4kliaOCha2"),
+		[]byte("123456"),
+		[]byte("23Fgfge34"),
+		[]byte("asdfgth#4"),
+	}
+
+	for _, seed := range seeds {
+		f.Add(rand.Intn(100), seed)
+	}
+
+	f.Fuzz(func(t *testing.T, n int, a []byte) {
+		crypter := NewCrypter(a)
+		thing := randB(n)
+		encThing, err := crypter.Encrypt(thing)
+		if err != nil {
+			t.Fatalf("Encrypt error: %v", err)
+		}
+		reThing, err := crypter.Decrypt(encThing)
+		if err != nil {
+			t.Fatalf("Decrypt error: %v", err)
+		}
+		if !bytes.Equal(thing, reThing) {
+			t.Fatalf("%x != %x", thing, reThing)
+		}
+	})
+}
+
 func TestSerialize(t *testing.T) {
 	pw := []byte("20O6KcujCU")
 	crypter := NewCrypter(pw)
