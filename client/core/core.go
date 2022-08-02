@@ -7743,10 +7743,9 @@ func (c *Core) fetchFiatExchangeRates() {
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
-		tick := time.NewTimer(fiatRateRequestInterval)
+		tick := time.NewTicker(fiatRateRequestInterval)
 		defer tick.Stop()
 		for {
-
 			c.refreshFiatRates(ctx)
 
 			select {
