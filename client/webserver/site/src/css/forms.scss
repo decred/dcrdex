@@ -269,11 +269,6 @@ button.form-button {
     text-align: left;
     position: relative;
 
-    div.form-closer {
-      right: 20px;
-      top: 35px;
-    }
-
     button {
       @extend .form-button;
     }
