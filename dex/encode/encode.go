@@ -151,8 +151,8 @@ func DecodeBlob(b []byte, preAlloc ...int) (byte, [][]byte, error) {
 // instantiated with a single version byte, and then data pushes are added using
 // the AddData method. Example use:
 //
-//   version := 0
-//   b := BuildyBytes{version}.AddData(data1).AddData(data2)
+//	version := 0
+//	b := BuildyBytes{version}.AddData(data1).AddData(data2)
 //
 // The versioned blob can be decoded with DecodeBlob to separate the version
 // byte and the "payload". BuildyBytes has some similarities to dcrd's

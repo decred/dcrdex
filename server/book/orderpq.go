@@ -411,8 +411,9 @@ func (pq *OrderPQ) Reheap() {
 }
 
 // Insert will add an element, while respecting the queue's capacity.
-//   if (have order already), fail
-//   else (not at capacity), push the order onto the heap
+//
+//	if (have order already), fail
+//	else (not at capacity), push the order onto the heap
 //
 // If the queue is at capacity, it will automatically reallocate with an
 // increased capacity. See the Cap method.

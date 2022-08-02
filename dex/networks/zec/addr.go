@@ -77,7 +77,8 @@ func EncodeAddress(btcAddr btcutil.Address, addrParams *AddressParams) (string, 
 }
 
 // b58Encode base-58 encodes the address with the serialization
-//   addrID | input | 4-bytes of double-sha256 checksum
+//
+//	addrID | input | 4-bytes of double-sha256 checksum
 func b58Encode(input []byte, addrID [2]byte) string {
 	b := make([]byte, 0, 2+len(input)+4)
 	b = append(b, addrID[:]...)

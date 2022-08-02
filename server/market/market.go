@@ -106,18 +106,18 @@ type Config struct {
 // including order status, history, cancellation statistics, etc.
 //
 // The Market performs the following:
-// - Receiving and validating new order data (amounts vs. lot size, check fees,
-//   utxos, sufficient market buy buffer, etc.).
-// - Putting incoming orders into the current epoch queue.
-// - Maintain an order book, which must also implement matcher.Booker.
-// - Initiate order matching via matcher.Match(book, currentQueue)
-// - During and/or after matching:
+//  1. Receive and validate new order data (amounts vs. lot size, check fees,
+//     utxos, sufficient market buy buffer, etc.).
+//  2. Put incoming orders into the current epoch queue.
+//  3. Maintain an order book, which must also implement matcher.Booker.
+//  4. Initiate order matching with matcher.Match(book, currentQueue)
+//  5. During and/or after matching:
 //     * update the book (remove orders, add new standing orders, etc.)
 //     * retire/archive the epoch queue
 //     * publish the matches (and order book changes?)
 //     * initiate swaps for each match (possibly groups of related matches)
-// - Cycle the epochs.
-// - Recording all events with the archivist
+//  6. Cycle the epochs.
+//  7. Record all events with the archivist.
 type Market struct {
 	marketInfo *dex.MarketInfo
 
@@ -2286,6 +2286,7 @@ func (m *Market) getFeeRate(assetID uint32, f FeeFetcher) uint64 {
 //  3. Unlock coins with the book lock for unbooked and failed orders.
 //  4. Lock coins with the swap lock.
 //  5. Initiate the swap negotiation via the Market's Swapper.
+//
 // The EpochQueue's Orders map must not be modified by another goroutine.
 func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateSignal) {
 	// Ensure the epoch has actually completed preimage collection. This can

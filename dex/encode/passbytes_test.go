@@ -48,17 +48,19 @@ func randomString(length int) string {
 
 // TestMarshalUnmarshal generates random strings and ensures that, with the
 // exception of strings containing invalid chars such as `\xe2`,
-// - each string can be marshalled directly into a JSON-encoded byte slice,
-// - the JSON-encoded byte slice can be unmarshalled into a `PassBytes` ptr,
-// - the string representation of the `PassBytes` is the same as the original
-//   string.
+//   - each string can be marshalled directly into a JSON-encoded byte slice,
+//   - the JSON-encoded byte slice can be unmarshalled into a `PassBytes` ptr,
+//   - the string representation of the `PassBytes` is the same as the original
+//     string.
+//
 // TestMarshalUnmarshal also creates a test object with each string
 // and ensures that
-// - the test object can be marshalled into a JSON-encoded byte slice,
-// - the JSON-encoded byte slice can be unmarshalled into another object having
-//   a `PassBytes` field,
-// - the string value of the second object's PassBytes field is the same as the
-//   original string.
+//   - the test object can be marshalled into a JSON-encoded byte slice,
+//   - the JSON-encoded byte slice can be unmarshalled into another object
+//     having a `PassBytes` field,
+//   - the string value of the second object's PassBytes field is the same as
+//     the original string.
+//
 // TestMarshalUnmarshal also ensures that marshalling strings with invalid chars
 // produces an error.
 func TestMarshalUnmarshal(t *testing.T) {

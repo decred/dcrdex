@@ -879,8 +879,9 @@ func (n *Notification) DBNote() *Notification {
 
 // String generates a compact human-readable representation of the Notification
 // that is suitable for logging. For example:
-//   |SUCCESS| (fee payment) Fee paid - Waiting for 2 confirmations before trading at https://superdex.tld:7232
-//   |DATA| (boring event) Subject without details
+//
+//	|SUCCESS| (fee payment) Fee paid - Waiting for 2 confirmations before trading at https://superdex.tld:7232
+//	|DATA| (boring event) Subject without details
 func (n *Notification) String() string {
 	// In case type and/or detail or empty strings, adjust the formatting to
 	// avoid extra whitespace.

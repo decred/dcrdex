@@ -726,14 +726,14 @@ type helpMsg struct {
 // helpMsgs are a map of routes to help messages. They are broken down into six
 // sections.
 // In descending order:
-// 1. Password argument example inputs. These are arguments the caller may not
-//    want to echo listed in order of input.
-// 2. Argument example inputs. These are non-sensitive arguments listed in order
-//    of input.
-// 3. A description of the command.
-// 4. An extensive breakdown of the password arguments.
-// 5. An extensive breakdown of the arguments.
-// 6. An extensive breakdown of the returned values.
+//  1. Password argument example inputs. These are arguments the caller may not
+//     want to echo listed in order of input.
+//  2. Argument example inputs. These are non-sensitive arguments listed in
+//     order of input.
+//  3. A description of the command.
+//  4. An extensive breakdown of the password arguments.
+//  5. An extensive breakdown of the arguments.
+//  6. An extensive breakdown of the returned values.
 var helpMsgs = map[string]helpMsg{
 	helpRoute: {
 		pwArgsShort: ``,                           // password args example input

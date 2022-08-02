@@ -371,12 +371,12 @@ type MatchArchiver interface {
 //
 // For each match, a successful swap will generate the following data that must
 // be stored:
-// - 5 client signatures. Both parties sign the data to acknowledge (1) the
-//   match ack, and (2) the counterparty's contract script and contract
-//   transaction. Plus the taker acks the maker's redemption transaction.
-// - 2 swap contracts and the associated transaction outputs (more generally,
-//   coinIDs), one on each party's blockchain.
-// - 2 redemption transaction outputs (coinIDs).
+//   - 5 client signatures. Both parties sign the data to acknowledge (1) the
+//     match ack, and (2) the counterparty's contract script and contract
+//     transaction. Plus the taker acks the maker's redemption transaction.
+//   - 2 swap contracts and the associated transaction outputs (more generally,
+//     coinIDs), one on each party's blockchain.
+//   - 2 redemption transaction outputs (coinIDs).
 //
 // The methods for saving this data are defined below in the order in which the
 // data is expected from the parties.
