@@ -504,21 +504,25 @@ func testMakerGhostingAfterTakerRedeem(s *simulationTest) error {
 // considers an order as active when it no longer is. The expectation is that
 // the client can infer the correct order status for such orders and update
 // accordingly. The following scenarios are simulated and tested:
+//
 // Order 1:
-// - Standing order, preimage not revealed, "missed" revoke_order note.
-// - Expect order status to stay at Epoch status before going AWOL and to become
-//   Revoked after re-connecting the DEX. Locked coins should be returned.
+//   - Standing order, preimage not revealed, "missed" revoke_order note.
+//   - Expect order status to stay at Epoch status before going AWOL and to
+//     become Revoked after re-connecting the DEX. Locked coins should be
+//     returned.
+//
 // Order 2:
-// - Non-standing order, preimage revealed, "missed" nomatch or match request (if
-//   matched).
-// - Expect order status to stay at Epoch status before going AWOL and to become
-//   Executed after re-connecting the DEX, even if the order was matched and the
-//   matches got revoked due to client inaction.
+//   - Non-standing order, preimage revealed, "missed" nomatch or match request
+//     (if matched).
+//   - Expect order status to stay at Epoch status before going AWOL and to
+//     become Executed after re-connecting the DEX, even if the order was
+//     matched and the matches got revoked due to client inaction.
+//
 // Order 3:
-// - Standing order, partially matched, booked, revoked due to inaction on a
-//   match.
-// - Expect order status to be Booked before going AWOL and to become Revoked
-//   after re-connecting the DEX. Locked coins should be returned.
+//   - Standing order, partially matched, booked, revoked due to inaction on a
+//     match.
+//   - Expect order status to be Booked before going AWOL and to become Revoked
+//     after re-connecting the DEX. Locked coins should be returned.
 func testOrderStatusReconciliation(s *simulationTest) error {
 	for _, client := range s.clients {
 		if err := s.updateBalances(client); err != nil {

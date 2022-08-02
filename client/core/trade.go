@@ -1279,11 +1279,11 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bo
 }
 
 // isRefundable will be true if all of the following are true:
-// - We have broadcasted a swap contract (matchProof.ContractData != nil).
-// - Neither party has redeemed (matchStatus < order.MakerRedeemed).
-//   For Maker, this means we've not redeemed. For Taker, this means we've
-//   not been notified of / we haven't yet found the Maker's redeem.
-// - Our swap's locktime has expired.
+//   - We have broadcasted a swap contract (matchProof.ContractData != nil).
+//   - Neither party has redeemed (matchStatus < order.MakerRedeemed).
+//     For Maker, this means we've not redeemed. For Taker, this means we've
+//     not been notified of / we haven't yet found the Maker's redeem.
+//   - Our swap's locktime has expired.
 //
 // Those checks are skipped and isRefundable is false if we've already
 // executed a refund or our refund-to wallet is locked.
@@ -2819,10 +2819,10 @@ func (t *trackedTrade) processMakersRedemption(match *matchTracker, coinID, secr
 }
 
 // Coins will be returned if
-// - the trade status is not OrderStatusEpoch or OrderStatusBooked, that is to
-//   say, there won't be future matches for this order.
-// - there are no matches in the trade that MAY later require sending swaps,
-//   that is to say, all matches have been either swapped or revoked.
+//   - the trade status is not OrderStatusEpoch or OrderStatusBooked, that is to
+//     say, there won't be future matches for this order.
+//   - there are no matches in the trade that MAY later require sending swaps,
+//     that is to say, all matches have been either swapped or revoked.
 //
 // This method modifies match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.

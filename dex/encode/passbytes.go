@@ -112,10 +112,11 @@ func isUTF8Encoded(data []byte) bool {
 // parseJSONEncodedDataAsUTF8Bytes parses the provided JSON-encoded data into a
 // UTF8-encoded byte slice.
 // Returns an error if any of the following conditions is hit:
-// - `data` is not a valid JSON encoding
-// - `data` is not quoted
-// - `data` contains a byte or byte sequence that cannot be parsed into a
-//    UTF8-encoded byte or byte sequence.
+//   - `data` is not a valid JSON encoding
+//   - `data` is not quoted
+//   - `data` contains a byte or byte sequence that cannot be parsed into a
+//     UTF8-encoded byte or byte sequence.
+//
 // Inspired by encoding/json.(*decodeState).unquoteBytes.
 func parseJSONEncodedDataAsUTF8Bytes(data []byte) ([]byte, error) {
 	if len(data) < 2 || data[0] != '"' || data[len(data)-1] != '"' {

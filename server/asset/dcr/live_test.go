@@ -342,7 +342,7 @@ func TestLiveUTXO(t *testing.T) {
 }
 
 // TestCacheAdvantage compares the speed of requesting blocks from the RPC vs.
-//  using the cache to provide justification the added complexity.
+// using the cache to provide justification the added complexity.
 func TestCacheAdvantage(t *testing.T) {
 	client := dcr.client
 	nextHash, _, err := client.GetBestBlock(ctx)

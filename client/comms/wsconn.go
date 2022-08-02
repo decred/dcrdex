@@ -522,16 +522,16 @@ func (conn *wsConn) Request(msg *msgjson.Message, f func(*msgjson.Message)) erro
 //
 // For example, to wait on a response or timeout:
 //
-// errChan := make(chan error, 1)
-// err := conn.RequestWithTimeout(reqMsg, func(msg *msgjson.Message) {
-//     errChan <- msg.UnmarshalResult(responseStructPointer)
-// }, timeout, func() {
-//     errChan <- fmt.Errorf("timed out waiting for '%s' response.", route)
-// })
-// if err != nil {
-//     return err // request error
-// }
-// return <-errChan // timeout or response error
+//	errChan := make(chan error, 1)
+//	err := conn.RequestWithTimeout(reqMsg, func(msg *msgjson.Message) {
+//	    errChan <- msg.UnmarshalResult(responseStructPointer)
+//	}, timeout, func() {
+//	    errChan <- fmt.Errorf("timed out waiting for '%s' response.", route)
+//	})
+//	if err != nil {
+//	    return err // request error
+//	}
+//	return <-errChan // timeout or response error
 func (conn *wsConn) RequestWithTimeout(msg *msgjson.Message, f func(*msgjson.Message), expireTime time.Duration, expire func()) error {
 	if msg.Type != msgjson.Request {
 		return fmt.Errorf("Message is not a request: %v", msg.Type)

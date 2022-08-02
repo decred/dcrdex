@@ -19,7 +19,8 @@ var (
 
 // BaseToQuote computes a quote asset amount based on a base asset amount
 // and an integer representation of the price rate. That is,
-//    quoteAmt = rate * baseAmt / atomsPerCoin
+//
+//	quoteAmt = rate * baseAmt / atomsPerCoin
 func BaseToQuote(rate uint64, base uint64) (quote uint64) {
 	bigRate := big.NewInt(int64(rate))
 	bigBase := big.NewInt(int64(base))
@@ -30,7 +31,8 @@ func BaseToQuote(rate uint64, base uint64) (quote uint64) {
 
 // QuoteToBase computes a base asset amount based on a quote asset amount
 // and an integer representation of the price rate. That is,
-//    baseAmt = quoteAmt * atomsPerCoin / rate
+//
+//	baseAmt = quoteAmt * atomsPerCoin / rate
 func QuoteToBase(rate uint64, quote uint64) (base uint64) {
 	if rate == 0 {
 		return 0 // caller handle rate==0, but don't panic
