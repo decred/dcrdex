@@ -53,7 +53,7 @@ If available for the latest release, the
 [**dcrinstall**](https://docs.decred.org/wallets/cli/cli-installation/) tool
 will install everything you need, and help set up your Decred wallet. Just run
 dcrinstall from the command line with `--dcrdex` appended to the command shown
-on the linked page for your operating system. Otherwise see the latest DCRDEX
+on the linked page for your operating system. Otherwise, see the latest DCRDEX
 releases [on Github](https://github.com/decred/dcrdex/releases) for source code
 or pre-compiled standalone packages.
 
@@ -109,8 +109,8 @@ and/or blockchain software, adapt as necessary.
 ### Prerequisites
 
 External wallet software is not required for most assets, just the DEX client!
-The native light wallets are simplest and best option for most users. But if
-using external wallets, they should be running and synced before staring DEX.
+The native light wallets are the simplest and best option for most users. But if
+using external wallets, they should be running and synced before starting DEX.
 
 Unless you use Decrediton to start DEX, you will need a web browser to open the
 DEX client user interface as described in the next section.
@@ -124,8 +124,8 @@ other assets including: Bitcoin, Decred, Litecoin, ZCash, Dogecoin, Bitcoin
 Cash. The following release will include Ethereum support with a native light
 wallet.
 
-1. For Bitcoin, [Bitcoin Core v0.21 or v22 or v23](https://bitcoincore.org/en/download/) (bitcoind or bitcoin-qt) wallet. Descriptor wallets are not supported in v0.21. Alternatively, you man use the native light wallet.
-2. For Decred, [dcrd](https://github.com/decred/dcrd) and [dcrwallet](https://github.com/decred/dcrwallet), installed from the [v1.7.x release binaries](https://github.com/decred/decred-release/releases), or built from the `release-v1.7` branches. Alternatively you may use Decrediton or the dcrwallet application in SPV mode, or the native light wallet.
+1. For Bitcoin, [Bitcoin Core v0.21 or v22 or v23](https://bitcoincore.org/en/download/) (bitcoind or bitcoin-qt) wallet. Descriptor wallets are not supported in v0.21. Alternatively, you can use the native light wallet.
+2. For Decred, [dcrd](https://github.com/decred/dcrd) and [dcrwallet](https://github.com/decred/dcrwallet), installed from the [v1.7.x release binaries](https://github.com/decred/decred-release/releases), or built from the `release-v1.7` branches. Alternatively, you may use Decrediton or the dcrwallet application in SPV mode, or the native light wallet.
 3. For Litecoin, [Litecoin Core v0.21.x](https://litecoin.org/). Alternatively,
 you may use an external Electrum-LTC wallet with the name "default_wallet".
 4. For Dogecoin, [Dogecoin Core v1.14.5+](https://dogecoin.com/).
@@ -140,31 +140,39 @@ you may use an external Electrum-LTC wallet with the name "default_wallet".
 2. In your web browser, navigate to http://localhost:5758. Skip this step if
    using Decrediton.
 
-[//]: # "TODO: either update or remove all of these screenshots for the current UI!"
+[//]: # "TODO: update with a few screenshots for the new steps below"
 
-<img src="docs/images/omnibar-client.png" width="250">
+1. Set your new **client application password**. You will use this password to
+   perform all future security-sensitive client operations, including
+   registering, signing in, and trading.
 
-3. Create your **client application password**. You will use this password to perform all future security-sensitive client operations, including registering, signing in, and trading.
+2. Choose the DEX server you would like to use. Either click one of the
+   pre-defined hosts such as **dex.decred.org**, or enter the address of a known
+   server that you would like to use.
 
-<img src="docs/images/client-pw.png" width="250">
+3. The DEX server will support paying the one time setup fee in one or more
+   assets. (This is a nominal amount just to discourage abuse and maintain a
+   good experience for all users. No further fees are collected on trades.) At
+   this point you should select the asset you wish to use, and then configure
+   the wallet. After the wallet is configured, the form will give you the first
+   deposit address for the wallet and the minimum amount you should deposit to
+   be able to pay the fee. NOTE: This is your own local wallet, and you can send
+   as much as you like to the wallet since *only* the amount required for the
+   fee will be spent when registering in the next step. The remaining balance
+   will be available for trading or may be withdrawn.
 
-4. Connect to your Decred wallet. If using Decrediton, this will have been done for you The client will auto-fill most of your wallet settings, but you will need to specify the account name. If you haven't already, follow the instructions above to create a trading account. If you really, really want to trade on the default wallet account, the account name is `default`. Enter the wallet password, which is the password you set up with **dcrwallet**. Enter the app password you created in step 3.
+4. Once the wallet is synchronized and has at least enough to pay the server's
+   defined fee, you just click the button to submit the registration request.
 
-<img src="docs/images/decred-reg.png" width="250">
+5. You will then be taken to the **markets view**, where you must wait for
+   confirmations on your registration fee transaction, at which time your client
+   will automatically complete authentication with that server. While waiting,
+   you may create additional wallets either directly from the displayed market
+   or on the Wallets page accessible from the navigation bar at the top.
 
-5. Enter the dex address of your choice, probably **dex.decred.org**.
-
-<img src="docs/images/add-dex-reg.png" width="250">
-
-6. Check the registration fee, and enter your password one more time to authorize payment.
-
-<img src="docs/images/confirm-reg.png" width="250">
-
-7. On the **markets view**, wait for confirmations on your registration fee, at which time your client will automatically complete authentication with the server you are using.  While waiting, you may create additional wallets either directly from the displayed market or on the Wallets page accessible from the navigation bar at the top.
-
-<img src="docs/images/create-btc.png" width="250">
-
-8. And that's it! The form to Buy/Sell will appear, and you can being placing orders. Go to the Wallets page to obtain addresses for your wallets so that you can send yourself funds to trade.
+6. And that's it! The form to Buy/Sell will appear, and you can begin placing
+   orders. Go to the Wallets page to obtain addresses for your wallets so that
+   you can send yourself funds to trade.
 
 ## Important Stuff to Know
 
@@ -195,7 +203,7 @@ reach out
 DEX does not collect any fees on the trades, but since all swap transactions
 occur on-chain and are created directly by the users, they will pay network
 transaction fees. Transaction fees vary based on how orders are matched. Fee
-estimates are show prior to order creation, and the realized fees are displayed
+estimates are shown prior to order creation, and the realized fees are displayed
 on the order details page.
 
 To ensure that on-chain transaction fees do not eat a significant portion of the
@@ -311,7 +319,7 @@ issued to **Core** for execution. **dexcctl** also requires **dexc**.
 1. Linux or MacOS
 2. [Go >= 1.17](https://golang.org/doc/install)
 3. [PostgreSQL 11+](https://www.postgresql.org/download/), [tuned](https://pgtune.leopard.in.ua/) and running.
-4. Decred (dcrd) and Bitcoin (bitcoind) full nodes, and any other assets full nodes, both with `txindex` enabled.
+4. Decred (dcrd) and Bitcoin (bitcoind) full nodes, and any other assets' full nodes, both with `txindex` enabled.
 
 ### Set up the database
 
