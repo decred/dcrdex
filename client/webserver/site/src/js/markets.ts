@@ -902,6 +902,7 @@ export default class MarketsPage extends BasePage {
     const mkt = this.market
     const rate = this.adjustedRate()
     const quoteWallet = app().assets[mkt.quote.id].wallet
+    if (!quoteWallet) return
     const aLot = mkt.cfg.lotsize * (rate / OrderUtil.RateEncodingFactor)
     if (quoteWallet.balance.available < aLot) {
       this.setMaxOrder(null)
