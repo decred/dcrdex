@@ -1094,6 +1094,7 @@ type Config struct {
 type Core struct {
 	ctx           context.Context
 	wg            sync.WaitGroup
+	mtx           sync.RWMutex
 	loginWg       *sync.WaitGroup
 	ready         chan struct{}
 	cfg           *Config
@@ -3573,7 +3574,11 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 		}
 	}
 
-	if c.loginWg != nil {
+	c.mtx.RLock()
+	loginWg := c.loginWg
+	c.mtx.RUnlock()
+
+	if loginWg != nil {
 		// User already sent a login request or is already logged in.
 		c.loginWg.Wait()
 		return loginResult(), err
@@ -3582,8 +3587,10 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	// Connecting and loading wallets might take time, we don't want users
 	// sending multiple login requests when wallets are connecting in a
 	// goroutine.
+	c.mtx.Lock()
 	c.loginWg = &sync.WaitGroup{}
 	c.loginWg.Add(1)
+	c.mtx.Unlock()
 	defer c.loginWg.Done()
 
 	// Attempt to connect to and retrieve balance from all known wallets. It is
@@ -3706,7 +3713,9 @@ func (c *Core) Logout() error {
 		dc.acct.lock()
 	}
 
+	c.mtx.Lock()
 	c.loginWg = nil
+	c.mtx.Unlock()
 	return nil
 }
 
