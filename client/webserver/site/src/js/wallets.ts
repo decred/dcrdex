@@ -615,13 +615,8 @@ export default class WalletsPage extends BasePage {
   async createWalletSuccess () {
     const rowInfo = this.rowInfos[this.walletAsset]
     this.showMarkets(rowInfo.assetID)
-    const a = rowInfo.actions
-    Doc.hide(a.create)
-    Doc.show(a.send, a.deposit, a.settings)
     await app().fetchUser()
-    if (app().walletMap[rowInfo.assetID].encrypted) {
-      Doc.show(a.lock)
-    }
+    await app().loadPage('wallets')
   }
 
   /* openWalletSuccess is the success callback for wallet unlocking. */
