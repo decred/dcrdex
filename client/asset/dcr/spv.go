@@ -405,6 +405,9 @@ func (w *spvWallet) AddressInfo(ctx context.Context, addrStr string) (*AddressIn
 func (w *spvWallet) AccountOwnsAddress(ctx context.Context, addr stdaddr.Address, _ string) (bool, error) {
 	ka, err := w.KnownAddress(ctx, addr)
 	if err != nil {
+		if errors.Is(err, walleterrors.NotExist) {
+			return false, nil
+		}
 		return false, fmt.Errorf("KnownAddress error: %w", err)
 	}
 	if ka.AccountName() != w.acctName {
