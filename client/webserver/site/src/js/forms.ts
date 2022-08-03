@@ -1466,7 +1466,7 @@ export class DEXAddressForm {
     }
     if (!this.dexToUpdate && res.paid) {
       await app().fetchUser()
-      app().loadPage('markets')
+      await app().loadPage('markets')
       return
     }
     if (this.pwCache) this.pwCache.pw = pw

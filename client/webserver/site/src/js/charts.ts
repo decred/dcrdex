@@ -1207,6 +1207,7 @@ function makeLabels (
   valFmt = valFmt || formatLabelValue
   const n = screenW / spacingGuess
   const diff = max - min
+  if (n < 1 || diff <= 0) return { lbls: [] }
   const tickGuess = diff / n
   // make the tick spacing a multiple of the step
   const tick = tickGuess + step - (tickGuess % step)
