@@ -1402,8 +1402,19 @@ func (t *trackedTrade) shouldBeginFindRedemption(ctx context.Context, match *mat
 
 // tick will check for and perform any match actions necessary.
 func (c *Core) tick(t *trackedTrade) (assetMap, error) {
+	tStart := time.Now()
+	var dLock time.Duration // time blocked by t.mtx.Lock()
+	defer func() {
+		if eTime := time.Since(tStart); eTime > 500*time.Millisecond {
+			c.log.Debugf("Slow tick: trade %v processed in %v, blocked for %v",
+				t.ID(), eTime, dLock)
+		}
+	}()
+
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
+	dLock = time.Since(tStart)
+
 	var swaps, redeems, refunds []*matchTracker
 	assets := make(assetMap) // callers expect non-nil map even on error
 
