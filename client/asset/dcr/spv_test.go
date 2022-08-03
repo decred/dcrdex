@@ -238,7 +238,15 @@ func TestAccountOwnsAddress(t *testing.T) {
 		t.Fatal("failed initial success. have = false")
 	}
 
-	// KnownAddress error
+	// Foreign address
+	dcrw.knownAddrErr = walleterrors.NotExist
+	if have, err := w.AccountOwnsAddress(tCtx, tPKHAddr, ""); err != nil {
+		t.Fatalf("unexpected error when should just be have = false for foreign address: %v", err)
+	} else if have {
+		t.Fatalf("shouldn't have, but have for foreign address")
+	}
+
+	// Other KnownAddress error
 	dcrw.knownAddrErr = tErr
 	if _, err := w.AccountOwnsAddress(tCtx, tPKHAddr, ""); err == nil {
 		t.Fatal("no error for KnownAddress error")
