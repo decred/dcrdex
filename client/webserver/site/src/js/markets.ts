@@ -2125,7 +2125,7 @@ export default class MarketsPage extends BasePage {
       // or this may be the first opportunity to get the server's config, so
       // fetch it all before reloading the markets page.
       await app().fetchUser()
-      app().loadPage('markets')
+      await app().loadPage('markets')
     }
   }
 

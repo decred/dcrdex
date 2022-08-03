@@ -214,7 +214,7 @@ export default class RegistrationPage extends BasePage {
   /* Called after successful registration to a DEX. */
   async registerDEXSuccess () {
     await app().fetchUser()
-    app().loadPage('markets')
+    await app().loadPage('markets')
   }
 
   async newWalletCreated (assetID: number) {
