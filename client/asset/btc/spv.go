@@ -1997,9 +1997,7 @@ func (w *walletExtender) signTransaction(tx *wire.MsgTx) error {
 		txIn.SignatureScript = nil
 		txIn.Witness = nil
 	}
-	return walletdb.View(w.Database(), func(dbtx walletdb.ReadTx) error { // what is the db tx for?
-		return txauthor.AddAllInputScripts(tx, prevPkScripts, inputValues, &secretSource{w, w.chainParams})
-	})
+	return txauthor.AddAllInputScripts(tx, prevPkScripts, inputValues, &secretSource{w, w.chainParams})
 }
 
 // txNotifications gives access to the NotificationServer's tx notifications.
