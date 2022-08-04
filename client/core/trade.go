@@ -46,6 +46,15 @@ type matchTracker struct {
 	counterConfirms int64 // atomic
 	swapConfirms    int64 // atomic
 
+	// sendingInitAsync indicates if this match's init request is being sent to
+	// the server and awaiting a response. No attempts will be made to send
+	// another init request for this match while one is already active.
+	sendingInitAsync uint32 // atomic
+	// sendingRedeemAsync indicates if this match's redeem request is being sent
+	// to the server and awaiting a response. No attempts will be made to send
+	// another redeem request for this match while one is already active.
+	sendingRedeemAsync uint32 // atomic
+
 	// The first group of fields below should be accessed with the parent
 	// trackedTrade's mutex locked, excluding the atomic fields.
 
@@ -68,14 +77,6 @@ type matchTracker struct {
 	// trying to redeem this match. If suspectRedeem is true, the match will not
 	// be grouped when attempting future redemptions.
 	suspectRedeem bool
-	// sendingInitAsync indicates if this match's init request is being sent to
-	// the server and awaiting a response. No attempts will be made to send
-	// another init request for this match while one is already active.
-	sendingInitAsync uint32 // atomic
-	// sendingRedeemAsync indicates if this match's redeem request is being sent
-	// to the server and awaiting a response. No attempts will be made to send
-	// another redeem request for this match while one is already active.
-	sendingRedeemAsync uint32 // atomic
 	// refundErr will be set to true if we attempt a refund and get a
 	// CoinNotFoundError, indicating there is nothing to refund and the
 	// counterparty redemption search should be attempted. Prevents retries.
@@ -204,7 +205,7 @@ type trackedTrade struct {
 	// repopulated if the client is restarted.
 	redeemFeeSuggestion feeStamped
 
-	ticking uint32 // atomic, prevent multiple concurrent ticks
+	tickLock sync.Mutex // prevent multiple concurrent ticks, but allow them to queue
 
 	order.Order
 	// mtx protects all read-write fields of the trackedTrade and the
@@ -1205,24 +1206,15 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) (re
 				return false, false
 			}
 			if spent {
-				if match.MetaData.Proof.SelfRevoked {
-					return false, false // already self-revoked
-				}
 				t.dc.log.Errorf("Counter-party's swap is spent before we could broadcast our own. REVOKING!")
 				return false, true // REVOKE!
 			}
 			if expired {
-				if match.MetaData.Proof.SelfRevoked {
-					return false, false // already self-revoked
-				}
 				t.dc.log.Errorf("Counter-party's swap expired before we could broadcast our own. REVOKING!")
 				return false, true // REVOKE!
 			}
 			matchTime := match.matchTime()
 			if lockTime := matchTime.Add(t.lockTimeTaker); time.Until(lockTime) < 0 {
-				if match.MetaData.Proof.SelfRevoked {
-					return false, false // already self-revoked
-				}
 				t.dc.log.Errorf("Our contract would expire in the past (%v). REVOKING!", lockTime)
 				return false, true // REVOKE!
 			}
@@ -1481,23 +1473,23 @@ func (t *trackedTrade) shouldBeginFindRedemption(ctx context.Context, match *mat
 func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	assets := make(assetMap) // callers expect non-nil map even on error :(
 
-	if !atomic.CompareAndSwapUint32(&t.ticking, 0, 1) {
-		// Another tick is running for this trade. Return so we don't block on
-		// t.mtx.Lock, and don't run concurrent checks since the results may
-		// become inaccurate when/if the other goroutine begins acting, and we
-		// MUST NOT take the same action twice.
-		c.log.Tracef("Skipping concurrent tick for trade %v", t.ID())
-		return assets, nil
-	}
-	defer atomic.StoreUint32(&t.ticking, 0)
-
 	tStart := time.Now()
+	var tLock time.Duration
 	defer func() {
 		if eTime := time.Since(tStart); eTime > 500*time.Millisecond {
-			c.log.Debugf("Slow tick: trade %v processed in %v",
-				t.ID(), eTime)
+			c.log.Debugf("Slow tick: trade %v processed in %v, blocked for %v",
+				t.ID(), eTime, tLock)
 		}
 	}()
+
+	// Another tick may be running for this trade. We have a mutex just for this
+	// so we don't have to write-lock t.mtx.Lock, which would block many other
+	// actions such as isActive. We can't just run concurrent checks since the
+	// results may become inaccurate when/if the other goroutine begins acting,
+	// and we MUST NOT take the same action twice.
+	t.tickLock.Lock()
+	defer t.tickLock.Unlock()
+	tLock = time.Since(tStart)
 
 	// Make sure we have a redemption fee suggestion cached.
 	t.cacheRedemptionFeeSuggestion()
@@ -1589,17 +1581,17 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	// Check all matches for and resend pending requests as necessary.
 	c.resendPendingRequests(t)
 
-	// Check all matches and send swap, redeem, or refund as necessary.
+	// Check all matches and then swap, redeem, or refund as necessary.
+	var err error
 	for _, match := range t.matches {
-		err := checkMatch(match)
-		if err == nil {
-			continue
+		if err = checkMatch(match); err != nil {
+			break
 		}
-		// With a timeout or shutdown, all this trade's matches will have the same
-		// fate, so return now.
+	}
+	// End checks under read-only lock.
+	t.mtx.RUnlock()
 
-		t.mtx.RUnlock()
-
+	if err != nil {
 		if len(revokes) != 0 {
 			// Still flag any "should revoke"s for IsRevoked() and to fast track
 			// the next tick. NOTE: See the TODO below regarding revokeMatch.
@@ -1609,11 +1601,8 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 				rm.MetaData.Proof.SelfRevoked = true
 			}
 		}
-
 		return assets, err
 	}
-	// End checks under read-only lock.
-	t.mtx.RUnlock()
 
 	if len(swaps) > 0 || len(refunds) > 0 {
 		assets.count(t.wallets.fromAsset.ID)

@@ -2425,24 +2425,24 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 
 	clearTickGovernors := func() {
 		for _, dc := range c.dexConnections() {
-			dc.tradeMtx.RLock()
-			for _, t := range dc.trades {
+			for _, t := range dc.trackedTrades() {
 				if t.Base() != assetID && t.Quote() != assetID {
 					continue
 				}
 				isFromAsset := t.wallets.fromAsset.ID == assetID
-				t.mtx.Lock()
-				for _, m := range t.matches {
+				t.mtx.RLock()
+				for _, m := range t.matches { // maybe range t.activeMatches()
+					m.exceptionMtx.Lock()
 					if m.tickGovernor != nil &&
 						((m.suspectSwap && isFromAsset) || (m.suspectRedeem && !isFromAsset)) {
 
 						m.tickGovernor.Stop()
 						m.tickGovernor = nil
 					}
+					m.exceptionMtx.Unlock()
 				}
-				t.mtx.Unlock()
+				t.mtx.RUnlock()
 			}
-			dc.tradeMtx.RUnlock()
 		}
 	}
 
