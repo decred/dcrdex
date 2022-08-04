@@ -142,45 +142,98 @@ wallet.
 5. **ZCash.** [zcashd v5.1](https://z.cash/download/).
 6. **Bitcoin Cash.** [Bitcoin Cash Node v24+](https://bitcoincashnode.org/en/)
 
-### Connect Wallets and Register
+### Initial Setup
 
 1. Start the client. Either go to the "DEX" tab within Decrediton, or with the
    standalone client, open a command prompt in the folder containing the
    pre-compiled dexc client files and run `./dexc` (`dexc.exe` on Windows).
+
 2. In your web browser, navigate to http://localhost:5758. Skip this step if
    using Decrediton.
 
-[//]: # "TODO: update with a few screenshots for the new steps below"
+   <img src="docs/images/omnibar-client.png" width="320">
 
-1. Set your new **client application password**. You will use this password to
+3. Set your new **client application password**. You will use this password to
    perform all future security-sensitive client operations, including
    registering, signing in, and trading.
 
-2. Choose the DEX server you would like to use. Either click one of the
+   <img src="docs/images/client-pw.png" width="320">
+
+4. Choose the DEX server you would like to use. Either click one of the
    pre-defined hosts such as **dex.decred.org**, or enter the address of a known
    server that you would like to use.
 
-3. The DEX server will offer a choice of assets with which to pay the one-time
-   setup fee. (This is a nominal amount just to discourage abuse and maintain a
-   good experience for all users. No further fees are collected on trades.)
-   Select the asset you wish to use, and then configure the wallet. After the
-   wallet is configured, the form will give you the first deposit address for
-   the wallet and the minimum amount you should deposit to be able to pay the
-   fee. NOTE: This is your own local wallet, and you can send as much as you
+   <img src="docs/images/add-dex-reg.png" width="320">
+
+   The above example shows a local server when in simnet mode (a developer network).
+
+5. The DEX server will show all offered markets, and a choice of assets with
+   which to pay the one-time setup fee. (This is a nominal amount just to
+   discourage abuse and maintain a good experience for all users. No further
+   fees are collected on trades.) Select the asset you wish to use.
+
+   <img src="docs/images/choose-fee.png" width="400">
+
+6. Choose the type of wallet to use. In this screenshot, we choose a native BTC
+   wallet and click "Create!". The wallet will begin to synchronize with the
+   asset's network.
+
+   <img src="docs/images/create-btc.png" width="360">
+
+   NOTE: This is your own **self-hosted** wallet. The wallet's address keys are
+   derived from the DEX application's "seed", which you may backup from the
+   Settings page at any time.
+
+7. The next form will show you synchronization progress, and give you the first
+   deposit address for the wallet and the minimum amount you should deposit to
+   be able to pay the fee. After sending to your address, the transaction **must
+   confirm** (i.e. be mined in a block) before the form will update your
+   balance. This form will be skipped of the wallet is already funded and
+   synchronized.
+
+   <img src="docs/images/sync-fund-btc.png" width="360">
+
+   **IMPORTANT**: This is your own local wallet, and you can send as much as you
    like to the wallet since *only* the amount required for the fee will be spent
-   when registering in the next step. The remaining balance will be available
-   for trading or may be withdrawn.
+   in the next step. The remaining balance will be available for trading or may
+   be withdrawn later. In the case of the screenshot above, the form indicates
+   that for the client to make a fee payment transaction for the amount 0.001
+   BTC, the wallet should be funded with "at least 0.00100823 BTC to also cover
+   network fees".  For example, you can send yourself 5 BTC and only the
+   required amount will be spent on the registration fee, with the remainder in
+   the wallet's balance, which can then be traded or sent to another wallet.
+   Since this fee estimate can change as network conditions fluctuate, you
+   should deposit as much as you wish to trade.
 
-4. Once the wallet is synchronized and has at least enough to pay the server's
-   defined fee, click the button to submit the registration request.
+8. Once the wallet is synchronized and has at least enough to pay the server's
+   defined fee, the form will update, and you should click the button to submit
+   the registration request and transmit the fee amount.
 
-5. You will then be taken to the **markets view**, where you must wait for
-   confirmations on your registration fee transaction, at which time your client
-   will automatically complete authentication with that server. While waiting,
-   you may create additional wallets either directly from the displayed market
-   or on the Wallets page accessible from the navigation bar at the top.
+   <img src="docs/images/register-button.png" width="360">
 
-6. And that's it! The form to Buy/Sell will appear, and you can begin placing
+9. You will then be taken to the **markets view**, where you must wait for
+   confirmations on your registration fee transaction generated in the previous
+   step, at which time your client will automatically complete authentication
+   with that server.
+
+   <img src="docs/images/wait-for-confs.png" width="360">
+
+   Note the remainder of the 5 BTC deposited in the available balance after the
+   fee was paid.
+
+   While waiting, you may create additional wallets either directly from the
+   displayed market or on the Wallets page accessible from the navigation bar at
+   the top. This is also a good time to retrieve your application "seed", as
+   described in the next step.
+
+10. At any time you can go to the Settings page via the "gears" icon in the top
+    navigation bar to retrieve the application seed that was generated when
+    initializing the application in the first dialog. This seed is used to
+    restore your DEX accounts and any native wallets, so keep it safe.
+
+    <img src="docs/images/view-seed.png" width="360">
+
+11. That's it! Use the Buy/Sell form on the Markets page to begin placing
    orders. Go to the Wallets page to obtain addresses for your wallets so that
    you can send yourself funds to trade.
 
