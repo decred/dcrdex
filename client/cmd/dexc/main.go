@@ -228,13 +228,30 @@ func mainCore() error {
 // shutdown if there are. The return value indicates if it is safe to stop Core
 // or if the user has confirmed they want to shutdown with active orders.
 func promptShutdown(clientCore *core.Core) bool {
-	err := clientCore.Logout()
-	if err == nil {
-		return true
-	}
-	if !errors.Is(err, core.ActiveOrdersLogoutErr) {
-		log.Errorf("unable to logout: %v", err)
-		return true
+	log.Infof("Attempting to logout...")
+	// Do not allow Logout hanging to prevent shutdown.
+	res := make(chan bool, 1)
+	go func() {
+		// Only block logout if err is ActiveOrdersLogoutErr.
+		var ok bool
+		err := clientCore.Logout()
+		if err == nil {
+			ok = true
+		} else if !errors.Is(err, core.ActiveOrdersLogoutErr) {
+			log.Errorf("Unexpected logout error: %v", err)
+			ok = true
+		} // else not ok => prompt
+		res <- ok
+	}()
+
+	select {
+	case <-time.After(10 * time.Second):
+		log.Errorf("Timeout waiting for Logout. Allowing shutdown, but you likely have active orders!")
+		return true // cancel all the contexts, hopefully breaking whatever deadlock
+	case ok := <-res:
+		if ok {
+			return true
+		}
 	}
 
 	fmt.Print("You have active orders. Shutting down now may result in failed swaps and account penalization.\n" +

@@ -3321,13 +3321,13 @@ func (btc *baseWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroad
 
 // LocktimeExpired returns true if the specified contract's locktime has
 // expired, making it possible to issue a Refund.
-func (btc *baseWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, error) {
+func (btc *baseWallet) LocktimeExpired(_ context.Context, contract dex.Bytes) (bool, time.Time, error) {
 	_, _, locktime, _, err := dexbtc.ExtractSwapDetails(contract, btc.segwit, btc.chainParams)
 	if err != nil {
 		return false, time.Time{}, fmt.Errorf("error extracting contract locktime: %w", err)
 	}
 	contractExpiry := time.Unix(int64(locktime), 0).UTC()
-	medianTime, err := btc.node.medianTime()
+	medianTime, err := btc.node.medianTime() // TODO: pass ctx
 	if err != nil {
 		return false, time.Time{}, fmt.Errorf("error getting median time: %w", err)
 	}

@@ -919,7 +919,7 @@ func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTra
 	wallet := t.wallets.toWallet
 	coin := match.counterSwap.Coin
 
-	_, lockTime, err := wallet.LocktimeExpired(match.MetaData.Proof.CounterContract)
+	_, lockTime, err := wallet.LocktimeExpired(ctx, match.MetaData.Proof.CounterContract)
 	if err != nil {
 		return fail(fmt.Errorf("error checking if locktime has expired on taker's contract on order %s, "+
 			"match %s: %w", t.ID(), match, err))
@@ -1191,7 +1191,7 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) boo
 // broadcast.
 //
 // This method accesses match fields and MUST be called with the trackedTrade
-// mutex lock held for reads.
+// mutex lock held for writes.
 func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bool {
 	// Quick status check before we bother with the wallet.
 	switch match.Status {
@@ -1290,7 +1290,7 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bo
 //
 // This method modifies match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
-func (t *trackedTrade) isRefundable(match *matchTracker) bool {
+func (t *trackedTrade) isRefundable(ctx context.Context, match *matchTracker) bool {
 	if match.refundErr != nil || len(match.MetaData.Proof.RefundCoin) != 0 {
 		t.dc.log.Tracef("Match %s not refundable: refundErr = %v, RefundCoin = %v",
 			match, match.refundErr, match.MetaData.Proof.RefundCoin)
@@ -1313,7 +1313,7 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 	}
 
 	// Issue a refund if our swap's locktime has expired.
-	swapLocktimeExpired, contractExpiry, err := wallet.LocktimeExpired(match.MetaData.Proof.ContractData)
+	swapLocktimeExpired, contractExpiry, err := wallet.LocktimeExpired(ctx, match.MetaData.Proof.ContractData)
 	if err != nil {
 		if !errors.Is(err, asset.ErrSwapNotInitiated) {
 			// No need to log an error as this is expected for newly
@@ -1402,11 +1402,21 @@ func (t *trackedTrade) shouldBeginFindRedemption(ctx context.Context, match *mat
 
 // tick will check for and perform any match actions necessary.
 func (c *Core) tick(t *trackedTrade) (assetMap, error) {
+	tStart := time.Now()
+	var dLock time.Duration // time blocked by t.mtx.Lock()
+	defer func() {
+		if eTime := time.Since(tStart); eTime > 500*time.Millisecond {
+			c.log.Debugf("Slow tick: trade %v processed in %v, blocked for %v",
+				t.ID(), eTime, dLock)
+		}
+	}()
+
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
+	dLock = time.Since(tStart)
+
 	var swaps, redeems, refunds []*matchTracker
-	assets := make(assetMap)
-	errs := newErrorSet(t.dc.acct.host + " tick: ")
+	assets := make(assetMap) // callers expect non-nil map even on error
 
 	// Check all matches for and resend pending requests as necessary.
 	c.resendPendingRequests(t)
@@ -1414,44 +1424,74 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	// Make sure we have a redemption fee suggestion cached.
 	t.cacheRedemptionFeeSuggestion()
 
-	// Check all matches and send swap, redeem or refund as necessary.
 	var sent, quoteSent, received, quoteReceived uint64
-	for _, match := range t.matches {
+	checkMatch := func(match *matchTracker) error {
 		side := match.Side
 		if (side == order.Maker && match.Status >= order.MakerRedeemed) ||
 			(side == order.Taker && match.Status >= order.MatchComplete) {
-			continue
+			return nil
 		}
 		if match.Address == "" {
-			continue // a cancel order match
+			return nil // a cancel order match
 		}
 		if !t.matchIsActive(match) {
-			continue // either refunded or revoked requiring no action on this side of the match
+			return nil // either refunded or revoked requiring no action on this side of the match
 		}
-		switch {
-		case t.isSwappable(c.ctx, match):
+
+		// The trackedTrade mutex is locked, so we must not hang forever. Give
+		// this a generous timeout because it may be necessary to retrieve full
+		// blocks, and catch timeout/shutdown after each check.
+		ctx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
+		defer cancel()
+
+		if t.isSwappable(ctx, match) {
 			c.log.Debugf("Swappable match %s for order %v (%v)", match, t.ID(), side)
 			swaps = append(swaps, match)
 			sent += match.Quantity
 			quoteSent += calc.BaseToQuote(match.Rate, match.Quantity)
+			return nil
+		}
+		if ctx.Err() != nil { // may be here because of timeout or shutdown
+			return ctx.Err()
+		}
 
-		case t.isRedeemable(c.ctx, match):
+		if t.isRedeemable(ctx, match) {
 			c.log.Debugf("Redeemable match %s for order %v (%v)", match, t.ID(), side)
 			redeems = append(redeems, match)
 			received += match.Quantity
 			quoteReceived += calc.BaseToQuote(match.Rate, match.Quantity)
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 
 		// Check refundability before checking if to start finding redemption.
 		// Ensures that redemption search is not started if locktime has expired.
 		// If we've already started redemption search for this match, the search
 		// will be aborted if/when auto-refund succeeds.
-		case t.isRefundable(match):
+		if t.isRefundable(ctx, match) {
 			c.log.Debugf("Refundable match %s for order %v (%v)", match, t.ID(), side)
 			refunds = append(refunds, match)
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 
-		case t.shouldBeginFindRedemption(c.ctx, match):
+		if t.shouldBeginFindRedemption(ctx, match) {
 			c.log.Debugf("Ready to find counter-party redemption for match %s, order %v (%v)", match, t.ID(), side)
-			t.findMakersRedemption(match)
+			t.findMakersRedemption(c.ctx, match) // async search, not on the timeout
+			return nil
+		}
+
+		return ctx.Err()
+	}
+
+	// Check all matches and send swap, redeem, or refund as necessary.
+	for _, match := range t.matches {
+		if err := checkMatch(match); err != nil {
+			return assets, err
 		}
 	}
 
@@ -1459,6 +1499,12 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	if len(swaps) > 0 || len(refunds) > 0 {
 		assets.count(fromID)
 	}
+	errs := newErrorSet(t.dc.acct.host + " tick: ")
+
+	// TODO: Wallet requests below may still hang if there are no internal
+	// timeouts. We should give each asset.Wallet method a context arg. However,
+	// if the requests in the checks above just succeeded, the wallet is likely
+	// to be responsive below.
 
 	if len(swaps) > 0 {
 		didUnlock, err := t.wallets.fromWallet.refreshUnlock()
@@ -2281,19 +2327,20 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 //
 // This method modifies trackedTrade fields and MUST be called with the
 // trackedTrade mutex lock held for writes.
-func (t *trackedTrade) findMakersRedemption(match *matchTracker) {
+func (t *trackedTrade) findMakersRedemption(ctx context.Context, match *matchTracker) {
 	if match.cancelRedemptionSearch != nil {
 		return
 	}
 
-	// TODO: Should copy Core's ctx to auto-cancel this ctx when Core is shut down.
-	ctx, cancel := context.WithCancel(context.TODO())
+	// NOTE: Use Core's ctx to auto-cancel this search when Core is shut down.
+	ctx, cancel := context.WithCancel(ctx)
 	match.cancelRedemptionSearch = cancel
 	swapCoinID := dex.Bytes(match.MetaData.Proof.TakerSwap)
 	swapContract := dex.Bytes(match.MetaData.Proof.ContractData)
 
 	// Run redemption finder in goroutine.
 	go func() {
+		defer cancel() // don't leak the context when we reset match.cancelRedemptionSearch
 		redemptionCoinID, secret, err := t.wallets.fromWallet.FindRedemption(ctx, swapCoinID, swapContract)
 
 		// Redemption search done, with or without error.
@@ -2415,7 +2462,7 @@ func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, 
 				// started FindRedemption for this contract.
 				c.log.Debugf("Failed to refund %s contract %s, already redeemed. Beginning find redemption.",
 					refundAsset.Symbol, swapCoinString)
-				t.findMakersRedemption(match)
+				t.findMakersRedemption(c.ctx, match)
 			} else {
 				t.delayTicks(match, time.Minute*5)
 				errs.add("error sending refund tx for match %s, swap coin %s: %v",
@@ -2424,7 +2471,7 @@ func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, 
 					// Check for a redeem even though Refund did not indicate it
 					// was spent via CoinNotFoundError, but do not set refundErr
 					// so that a refund can be tried again.
-					t.findMakersRedemption(match)
+					t.findMakersRedemption(c.ctx, match)
 				}
 			}
 			continue
