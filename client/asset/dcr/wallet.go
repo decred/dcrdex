@@ -43,7 +43,7 @@ func RegisterCustomWallet(constructor WalletConstructor, def *asset.WalletDefini
 	return nil
 }
 
-type TipChangeCallback func(*chainhash.Hash, int64, error)
+type TipChangeCallback func(context.Context, *chainhash.Hash, int64, error)
 
 // BlockHeader is a wire.BlockHeader with the addition of a MedianTime field.
 // Implementations must fill in the MedianTime field when returning a

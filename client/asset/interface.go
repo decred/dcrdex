@@ -309,7 +309,7 @@ type Wallet interface {
 	// contract can be refunded since assets have different rules to satisfy the
 	// lock. For example, in Bitcoin the median of the last 11 blocks must be
 	// past the expiry time, not the current time.
-	LocktimeExpired(contract dex.Bytes) (bool, time.Time, error)
+	LocktimeExpired(ctx context.Context, contract dex.Bytes) (bool, time.Time, error)
 	// FindRedemption watches for the input that spends the specified
 	// coin and contract, and returns the spending input and the
 	// secret key when it finds a spender.
