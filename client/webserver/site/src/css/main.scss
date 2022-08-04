@@ -427,13 +427,10 @@ hr.dashed {
   background-color: #7775;
 }
 
-div.form-closer,
-div.corner-bttn {
-  position: absolute;
-  right: -15px;
-  top: 0;
+div.form-closer {
   display: flex;
-  align-items: center;
+  width: 30px;
+  margin-left: auto;
   padding: 10px;
   font-size: 11px;
   cursor: pointer;
