@@ -125,18 +125,18 @@ other assets including: Bitcoin, Decred, Litecoin, ZCash, Dogecoin, Bitcoin
 Cash. The following release will include Ethereum support with a native light
 wallet.
 
-1. **Bitcoin.** The native wallet has no prerequisites. To use a Bitcoin Core
-   full node wallet (bitcoind or bitcoin-qt), the supported versions are
-   [v0.21, v22, or v23](https://bitcoincore.org/en/download/) .
-   Descriptor wallets are not supported in v0.21.
-   An [Electrum v4.2.x](https://electrum.org/) wallet is also supported.
+1. **Bitcoin.** The native wallet has no prerequisites. To use a
+   [Bitcoin Core](https://bitcoincore.org/en/download/) full node wallet
+   (bitcoind or bitcoin-qt), the supported versions are v0.21, v22, and v23.
+   Descriptor wallets are not supported in v0.21. An [Electrum
+   v4.2.x](https://electrum.org/) wallet is also supported.
 2. **Decred.** The native wallet has no prerequisites. Alternatively, Decrediton
    or the dcrwallet command line application may be used in either SPV or full
    node (RPC) mode. The latest Decrediton installer includes DEX. If using a
    standalone [dcrwallet](https://github.com/decred/dcrwallet), install from the
    [v1.7.x release binaries](https://github.com/decred/decred-release/releases),
    or build from the `release-v1.7` branches.
-3. **Litecoin.** Either [Litecoin Core v0.21.x](https://litecoin.org/), or
+3. **Litecoin.** Either [Litecoin Core v0.21.x](https://litecoin.org/) or
    [Electrum-LTC v4.2.x](https://electrum-ltc.org/) are supported.
 4. **Dogecoin.** [Dogecoin Core v1.14.5+](https://dogecoin.com/).
 5. **ZCash.** [zcashd v5.1](https://z.cash/download/).
@@ -188,7 +188,7 @@ wallet.
    deposit address for the wallet and the minimum amount you should deposit to
    be able to pay the fee. After sending to your address, the transaction **must
    confirm** (i.e. be mined in a block) before the form will update your
-   balance. This form will be skipped of the wallet is already funded and
+   balance. This form will be skipped if the wallet is already funded and
    synchronized.
 
    <img src="docs/images/sync-fund-btc.png" width="360">
