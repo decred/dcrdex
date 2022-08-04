@@ -108,9 +108,10 @@ and/or blockchain software, adapt as necessary.
 
 ### Prerequisites
 
-External wallet software is not required for most assets, just the DEX client!
-The native light wallets are the simplest and best option for most users. But if
-using external wallets, they should be running and synced before starting DEX.
+External wallet software is not required for all assets. The native light
+wallets are the simplest and best option for most users. But if using external
+wallets, they should be running and synced before starting DEX. See the next
+section for a list of supported wallets and assets.
 
 Unless you use Decrediton to start DEX, you will need a web browser to open the
 DEX client user interface as described in the next section.
@@ -124,13 +125,22 @@ other assets including: Bitcoin, Decred, Litecoin, ZCash, Dogecoin, Bitcoin
 Cash. The following release will include Ethereum support with a native light
 wallet.
 
-1. For Bitcoin, [Bitcoin Core v0.21 or v22 or v23](https://bitcoincore.org/en/download/) (bitcoind or bitcoin-qt) wallet. Descriptor wallets are not supported in v0.21. Alternatively, you can use the native light wallet.
-2. For Decred, [dcrd](https://github.com/decred/dcrd) and [dcrwallet](https://github.com/decred/dcrwallet), installed from the [v1.7.x release binaries](https://github.com/decred/decred-release/releases), or built from the `release-v1.7` branches. Alternatively, you may use Decrediton or the dcrwallet application in SPV mode, or the native light wallet.
-3. For Litecoin, [Litecoin Core v0.21.x](https://litecoin.org/). Alternatively,
-you may use an external Electrum-LTC wallet with the name "default_wallet".
-4. For Dogecoin, [Dogecoin Core v1.14.5+](https://dogecoin.com/).
-5. For ZCash, [zcashd v5.1](https://z.cash/download/).
-6. For Bitcoin Cash, [Bitcoin Cash Node v24+](https://bitcoincashnode.org/en/)
+1. **Bitcoin.** The native wallet has no prerequisites. To use a Bitcoin Core
+   full node wallet (bitcoind or bitcoin-qt), the supported versions are
+   [v0.21, v22, or v23](https://bitcoincore.org/en/download/) .
+   Descriptor wallets are not supported in v0.21.
+   An [Electrum v4.2.x](https://electrum.org/) wallet is also supported.
+2. **Decred.** The native wallet has no prerequisites. Alternatively, Decrediton
+   or the dcrwallet command line application may be used in either SPV or full
+   node (RPC) mode. The latest Decrediton installer includes DEX. If using a
+   standalone [dcrwallet](https://github.com/decred/dcrwallet), install from the
+   [v1.7.x release binaries](https://github.com/decred/decred-release/releases),
+   or build from the `release-v1.7` branches.
+3. **Litecoin.** Either [Litecoin Core v0.21.x](https://litecoin.org/), or
+   [Electrum-LTC v4.2.x](https://electrum-ltc.org/) are supported.
+4. **Dogecoin.** [Dogecoin Core v1.14.5+](https://dogecoin.com/).
+5. **ZCash.** [zcashd v5.1](https://z.cash/download/).
+6. **Bitcoin Cash.** [Bitcoin Cash Node v24+](https://bitcoincashnode.org/en/)
 
 ### Connect Wallets and Register
 
@@ -150,19 +160,19 @@ you may use an external Electrum-LTC wallet with the name "default_wallet".
    pre-defined hosts such as **dex.decred.org**, or enter the address of a known
    server that you would like to use.
 
-3. The DEX server will support paying the one time setup fee in one or more
-   assets. (This is a nominal amount just to discourage abuse and maintain a
-   good experience for all users. No further fees are collected on trades.) At
-   this point you should select the asset you wish to use, and then configure
-   the wallet. After the wallet is configured, the form will give you the first
-   deposit address for the wallet and the minimum amount you should deposit to
-   be able to pay the fee. NOTE: This is your own local wallet, and you can send
-   as much as you like to the wallet since *only* the amount required for the
-   fee will be spent when registering in the next step. The remaining balance
-   will be available for trading or may be withdrawn.
+3. The DEX server will offer a choice of assets with which to pay the one-time
+   setup fee. (This is a nominal amount just to discourage abuse and maintain a
+   good experience for all users. No further fees are collected on trades.)
+   Select the asset you wish to use, and then configure the wallet. After the
+   wallet is configured, the form will give you the first deposit address for
+   the wallet and the minimum amount you should deposit to be able to pay the
+   fee. NOTE: This is your own local wallet, and you can send as much as you
+   like to the wallet since *only* the amount required for the fee will be spent
+   when registering in the next step. The remaining balance will be available
+   for trading or may be withdrawn.
 
 4. Once the wallet is synchronized and has at least enough to pay the server's
-   defined fee, you just click the button to submit the registration request.
+   defined fee, click the button to submit the registration request.
 
 5. You will then be taken to the **markets view**, where you must wait for
    confirmations on your registration fee transaction, at which time your client
@@ -203,7 +213,7 @@ reach out
 DEX does not collect any fees on the trades, but since all swap transactions
 occur on-chain and are created directly by the users, they will pay network
 transaction fees. Transaction fees vary based on how orders are matched. Fee
-estimates are shown prior to order creation, and the realized fees are displayed
+estimates are shown during order creation, and the realized fees are displayed
 on the order details page.
 
 To ensure that on-chain transaction fees do not eat a significant portion of the
@@ -285,32 +295,6 @@ in the **decred/dcrdex** repository open-source, but the entire protocol is
 open-source. So anyone can, in principle, write their own client or server based
 on the specification. Such an endeavor would be ill-advised in these early
 stages, while the protocols are undergoing constant change.
-
-## Client Applications and the Core Package
-
-The initial DEX release also includes the client **Core** module, written in Go.
-**Core** offers an intuitive programmer interface, with methods for creating
-wallets, registering DEX accounts, viewing markets, and performing trades.
-
-**dcrdex** has two applications built with **Core**.
-
-The **browser-based GUI** (a.k.a. "the app") offers a familiar exchange
-experience in your browser. The app is really just a one-client web server that
-you run and connect to on the same machine. The market view allows you to see
-the market's order book in sorted lists or as a depth chart. You can place your
-order and monitor it's status in the same market view. The GUI application is
-managed by the **dexc** utility in *client/cmd/dexc*.
-
-If you modify any of the HTML templates in *client/webserver/site/src/html*, it
-is necessary to regenerate the localize templates in
-*client/webserver/site/src/localized_html*:
-
-```
-go generate ./...
-```
-
-The **dexcctl** utility enables trading via CLI. Commands are parsed and
-issued to **Core** for execution. **dexcctl** also requires **dexc**.
 
 ## Server Installation
 
