@@ -400,9 +400,9 @@ DEX server, but can be customized with the `--appdata` command-line argument.
 
 ### Run your asset daemons
 
-As of writing, only `dcrd`, `bitcoind`, and `litecoind` are supported. The
-`txindex` configuration option must be set. Be sure to specify the correct
-network if not using mainnet.
+Only the **full node** software listed in the [client configuration](#optional-external-software)
+section are supported for the server. The `txindex` configuration options must
+be set. Be sure to specify the correct network if not using mainnet.
 
 ### Create the assets and market configuration file
 
