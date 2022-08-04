@@ -238,7 +238,7 @@ for more details about how atomic swaps work.
 
 ### Dependencies
 
-1. [Go 1.17 or 1.18](https://golang.org/doc/install)
+1. [Go 1.18 or 1.19](https://golang.org/doc/install)
 2. [Node 16 or 18](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) is used to bundle resources for the browser interface. It's important to note that the DEX client has no external JavaScript dependencies. The client doesn't import any Node packages. We only use Node to lint and compile our own JavaScript and css resources.
 3. At least 2 GB of available system memory.
 
@@ -301,7 +301,7 @@ stages, while the protocols are undergoing constant change.
 ### Server Dependencies
 
 1. Linux or MacOS
-2. [Go >= 1.17](https://golang.org/doc/install)
+2. [Go >= 1.18](https://golang.org/doc/install)
 3. [PostgreSQL 11+](https://www.postgresql.org/download/), [tuned](https://pgtune.leopard.in.ua/) and running.
 4. Decred (dcrd) and Bitcoin (bitcoind) full nodes, and any other assets' full nodes, both with `txindex` enabled.
 
