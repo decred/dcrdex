@@ -126,11 +126,11 @@
 
     {{- /* DEPOSIT ADDRESS */ -}}
     <div class="text-center fs20 d-hide" id="deposit">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <div class="px-2 py-1 mb-2 text-center position-relative fs22 sans-light">
         [[[Deposit]]]
         <img id="depositLogo" class="micro-icon mx-1">
         <span id="depositName"></span>
-        <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       </div>
       <div class="d-inline">
         <img class="mb-3" id="qrcode" />
@@ -148,11 +148,11 @@
 
     {{- /* Send Form */ -}}
     <form class="pb-3 d-hide" id="sendForm" autocomplete="off">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       <div class="py-1 text-center position-relative fs22 sans-light">
         [[[Send]]]
         <img id="sendLogo" class="micro-icon mx-1">
         <span id="sendName"></span>
-        <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
       </div>
       <div class="mt-3">
         <label for="sendAddr" class="form-label ps-1 mb-1">[[[Address]]]</label>
@@ -193,12 +193,12 @@
     
     {{- /* RECONFIGURE WALLET */ -}}
     <form class="pb-3 d-hide mt-3" id="reconfigForm" autocomplete="off">
+      <div class="form-closer recfg-form hoverbg"><span class="ico-cross"></span></div>
       <div class="py-1 text-center position-relative fs22 sans-light">
         [[[Reconfigure]]]
         <img id="recfgAssetLogo" class="micro-icon mx-1">
         <span id="recfgAssetName"></span>
         [[[Wallet]]]
-        <div class="form-closer recfg-form hoverbg"><span class="ico-cross"></span></div>
       </div>
       <div class="py-1 mt-2" id="reconfigInputs">
         {{template "walletConfigTemplates"}}
