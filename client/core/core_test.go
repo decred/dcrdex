@@ -3163,7 +3163,7 @@ func TestRefundReserves(t *testing.T) {
 		matchID := addMatch(side, status, matchQty)
 		desc := fmt.Sprintf("match revoke - %s in %s", side, status)
 		test(desc, expReserves, func() {
-			tracker.revokeMatch(tCtx, matchID, true)
+			tracker.revokeMatch(matchID, true)
 		})
 	}
 
@@ -3211,7 +3211,7 @@ func TestRefundReserves(t *testing.T) {
 	tEthWallet.refundUnlocked = 0
 	for _, mid := range mids {
 		// Third match should catch the market buy order dust filter.
-		if err := tracker.revokeMatch(tCtx, mid, true); err != nil {
+		if err := tracker.revokeMatch(mid, true); err != nil {
 			t.Fatalf("revokeMatch error: %v", err)
 		}
 	}
@@ -3391,7 +3391,7 @@ func TestRedemptionReserves(t *testing.T) {
 		matchID := addMatch(side, status, matchQty)
 		desc := fmt.Sprintf("match revoke - %s in %s", side, status)
 		test(desc, expReserves, func() {
-			tracker.revokeMatch(tCtx, matchID, true)
+			tracker.revokeMatch(matchID, true)
 		})
 	}
 
@@ -3425,7 +3425,7 @@ func TestRedemptionReserves(t *testing.T) {
 	tEthWallet.redemptionUnlocked = 0
 	for _, mid := range mids {
 		// Third match should catch the market buy order dust filter.
-		if err := tracker.revokeMatch(tCtx, mid, true); err != nil {
+		if err := tracker.revokeMatch(mid, true); err != nil {
 			t.Fatalf("revokeMatch error: %v", err)
 		}
 	}
