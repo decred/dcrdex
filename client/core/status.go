@@ -71,7 +71,7 @@ func (c *Core) resolveMatchConflicts(dc *dexConnection, statusConflicts map[orde
 					statusResolutionID(dc, trade, match))
 				// revokeMatch only returns an error for a missing match ID, and
 				// we already checked in compareServerMatches.
-				_ = trade.revokeMatch(c.ctx, match.MatchID, false)
+				_ = trade.revokeMatch(match.MatchID, false)
 			}
 		}(conflict.trade, conflict.matches)
 	}

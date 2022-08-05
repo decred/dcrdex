@@ -70,8 +70,8 @@ const (
 	walletTypeSPV     = "SPV"
 
 	// confCheckTimeout is the amount of time allowed to check for
-	// confirmations.
-	confCheckTimeout = 2 * time.Second
+	// confirmations. If SPV, this might involve pulling a full block.
+	confCheckTimeout = 4 * time.Second
 
 	// acctInternalBranch is the child number used when performing BIP0044 style
 	// hierarchical deterministic key derivation for the internal branch of an
@@ -2539,7 +2539,8 @@ func (dcr *ExchangeWallet) FindRedemption(ctx context.Context, coinID, _ dex.Byt
 	if result != nil {
 		return result.RedemptionCoinID, result.Secret, result.Err
 	}
-	return nil, nil, fmt.Errorf("aborted search for redemption of contract %s", contractOutpoint.String())
+	return nil, nil, fmt.Errorf("aborted search for redemption of contract %s: %w",
+		contractOutpoint, ctx.Err())
 }
 
 // queueFindRedemptionRequest extracts the contract hash and tx block (if mined)

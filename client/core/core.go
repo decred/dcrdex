@@ -678,7 +678,9 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 				extra = append(extra, msgMatch)
 				continue
 			}
+			mt.exceptionMtx.Lock()
 			mt.checkServerRevoke = false
+			mt.exceptionMtx.Unlock()
 			if mt.Status != order.MatchStatus(msgMatch.Status) {
 				conflict := statusConflicts[oid]
 				if conflict == nil {
@@ -2423,24 +2425,24 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 
 	clearTickGovernors := func() {
 		for _, dc := range c.dexConnections() {
-			dc.tradeMtx.RLock()
-			for _, t := range dc.trades {
+			for _, t := range dc.trackedTrades() {
 				if t.Base() != assetID && t.Quote() != assetID {
 					continue
 				}
 				isFromAsset := t.wallets.fromAsset.ID == assetID
-				t.mtx.Lock()
-				for _, m := range t.matches {
+				t.mtx.RLock()
+				for _, m := range t.matches { // maybe range t.activeMatches()
+					m.exceptionMtx.Lock()
 					if m.tickGovernor != nil &&
 						((m.suspectSwap && isFromAsset) || (m.suspectRedeem && !isFromAsset)) {
 
 						m.tickGovernor.Stop()
 						m.tickGovernor = nil
 					}
+					m.exceptionMtx.Unlock()
 				}
-				t.mtx.Unlock()
+				t.mtx.RUnlock()
 			}
-			dc.tradeMtx.RUnlock()
 		}
 	}
 
@@ -6227,16 +6229,18 @@ func (c *Core) handleConnectEvent(dc *dexConnection, status comms.ConnectionStat
 		topic = TopicDEXConnected
 	} else {
 		for _, tracker := range dc.trackedTrades() {
-			tracker.mtx.Lock()
+			tracker.mtx.RLock()
 			for _, match := range tracker.matches {
 				// Make sure that a taker will not prematurely send an
 				// initialization until it is confirmed with the server
 				// that the match is not revoked.
 				if match.Side == order.Taker && match.Status == order.MakerSwapCast {
+					match.exceptionMtx.Lock()
 					match.checkServerRevoke = true
+					match.exceptionMtx.Unlock()
 				}
 			}
-			tracker.mtx.Unlock()
+			tracker.mtx.RUnlock()
 		}
 	}
 	atomic.StoreUint32(&dc.connectionStatus, uint32(status))
@@ -6340,7 +6344,7 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	copy(matchID[:], revocation.MatchID)
 
 	tracker.mtx.Lock()
-	err = tracker.revokeMatch(c.ctx, matchID, true)
+	err = tracker.revokeMatch(matchID, true)
 	tracker.mtx.Unlock()
 	if err != nil {
 		return fmt.Errorf("unable to revoke match %s for order %s: %w", matchID, tracker.ID(), err)
