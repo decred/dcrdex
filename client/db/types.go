@@ -304,14 +304,50 @@ func (m *MetaMatch) MatchOrderUniqueID() []byte {
 }
 
 // MatchIsActive returns false (i.e. the match is inactive) if any: (1) status
-// is complete AND (RedeemSig is set, signalling completed swap OR InitSig
-// unset, signaling a cancel order match, which is never active), (2) the match
-// is refunded, or (3) it is revoked and this side of the match requires no
-// further action like refund or auto-redeem.
-//
-// WARNING: Do not modify this function without preserving a version for
-// v6Upgrade or any other upgrade that relies on a particular behavior.
+// is MatchConfirmed OR InitSig unset, signaling a cancel order match, which is
+// never active), (2) the match is refunded, or (3) it is revoked and this side
+// of the match requires no further action like refund or auto-redeem.
 func MatchIsActive(match *order.UserMatch, proof *MatchProof) bool {
+	// MatchComplete only means inactive if: (a) cancel order match or (b) the
+	// redeem request was accepted for trade orders. A cancel order match starts
+	// complete and has no InitSig as their is no swap negotiation.
+	// Unfortunately, an empty Address is not sufficient since taker cancel
+	// matches included the makers Address.
+	if match.Status == order.MatchConfirmed {
+		return false
+	}
+
+	// Cancel match
+	if match.Status == order.MatchComplete && len(proof.Auth.InitSig) == 0 {
+		return false
+	}
+
+	// Refunded matches are inactive regardless of status.
+	if len(proof.RefundCoin) > 0 {
+		return false
+	}
+
+	// Revoked matches may need to be refunded or auto-redeemed first.
+	if proof.IsRevoked() {
+		// - NewlyMatched requires no further action from either side
+		// - MakerSwapCast requires no further action from the taker
+		// - (TakerSwapCast requires action on both sides)
+		// - MakerRedeemed requires no further action from the maker
+		// - MatchComplete requires no further action. This happens if taker
+		//   does not have server's ack of their redeem request (RedeemSig).
+		status, side := match.Status, match.Side
+		if status == order.NewlyMatched || status >= order.MatchComplete ||
+			(status == order.MakerSwapCast && side == order.Taker) ||
+			(status == order.MakerRedeemed && side == order.Maker) {
+			return false
+		}
+	}
+	return true
+}
+
+// MatchIsActiveV6Upgrade is the previous version of MatchIsActive that is
+// is required for the V6 upgrade of the DB.
+func MatchIsActiveV6Upgrade(match *order.UserMatch, proof *MatchProof) bool {
 	// MatchComplete only means inactive if: (a) cancel order match or (b) the
 	// redeem request was accepted for trade orders. A cancel order match starts
 	// complete and has no InitSig as their is no swap negotiation.

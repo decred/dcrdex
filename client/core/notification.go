@@ -281,11 +281,14 @@ type MatchNote struct {
 }
 
 const (
-	TopicAudit           Topic = "Audit"
-	TopicAuditTrouble    Topic = "AuditTrouble"
-	TopicNewMatch        Topic = "NewMatch"
-	TopicCounterConfirms Topic = "CounterConfirms"
-	TopicConfirms        Topic = "Confirms"
+	TopicAudit                 Topic = "Audit"
+	TopicAuditTrouble          Topic = "AuditTrouble"
+	TopicNewMatch              Topic = "NewMatch"
+	TopicCounterConfirms       Topic = "CounterConfirms"
+	TopicConfirms              Topic = "Confirms"
+	TopicRedemptionResubmitted Topic = "RedemptionResubmitted"
+	TopicSwapRefunded          Topic = "SwapRefunded"
+	TopicRedemptionConfirmed   Topic = "RedemptionConfirmed"
 )
 
 func newMatchNote(topic Topic, subject, details string, severity db.Severity, t *trackedTrade, match *matchTracker) *MatchNote {
@@ -299,7 +302,8 @@ func newMatchNote(topic Topic, subject, details string, severity db.Severity, t 
 		Notification: db.NewNotification(NoteTypeMatch, topic, subject, details, severity),
 		OrderID:      t.ID().Bytes(),
 		Match: matchFromMetaMatchWithConfs(t.Order, &match.MetaMatch, match.swapConfirms,
-			int64(t.wallets.fromAsset.SwapConf), counterConfs, int64(t.wallets.toAsset.SwapConf)),
+			int64(t.wallets.fromAsset.SwapConf), counterConfs, int64(t.wallets.toAsset.SwapConf),
+			int64(match.redemptionConfs), int64(match.redemptionConfsReq)),
 		Host:     t.dc.acct.host,
 		MarketID: marketName(t.Base(), t.Quote()),
 	}

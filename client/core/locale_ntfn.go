@@ -317,6 +317,18 @@ var enUS = map[Topic]*translation{
 		subject:  "Failed to create token wallet",
 		template: "After creating %s wallet, failed to create the %s wallet",
 	},
+	TopicRedemptionResubmitted: {
+		subject:  "Redemption Resubmitted",
+		template: "Your redemption for match %s in order %s was resubmitted.",
+	},
+	TopicSwapRefunded: {
+		subject:  "Swap Refunded",
+		template: "Match %s in order %s was refunded by the counterparty.",
+	},
+	TopicRedemptionConfirmed: {
+		subject:  "Redemption Confirmed",
+		template: "Your redemption for match %s in order %s was confirmed",
+	},
 }
 
 var ptBR = map[Topic]*translation{

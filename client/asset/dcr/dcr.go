@@ -2536,6 +2536,11 @@ func (dcr *ExchangeWallet) LocktimeExpired(ctx context.Context, contract dex.Byt
 	return time.Unix(hdr.MedianTime, 0).After(contractExpiry), contractExpiry, nil
 }
 
+// ConfirmRedemption is not implemented.
+func (dcr *ExchangeWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Redemption) (*asset.ConfirmRedemptionStatus, error) {
+	return &asset.ConfirmRedemptionStatus{}, nil
+}
+
 // FindRedemption watches for the input that spends the specified contract
 // coin, and returns the spending input and the contract's secret key when it
 // finds a spender.

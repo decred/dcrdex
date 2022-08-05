@@ -92,6 +92,9 @@ const (
 	// their redemption transaction. The DEX has validated the redemption and
 	// sent the details to the maker.
 	MatchComplete // 4
+	// MatchConfirmed is a status used only by the client that represents
+	// that the user's redemption transaction has been confirmed.
+	MatchConfirmed // 5
 )
 
 // String satisfies fmt.Stringer.
@@ -107,6 +110,8 @@ func (status MatchStatus) String() string {
 		return "MakerRedeemed"
 	case MatchComplete:
 		return "MatchComplete"
+	case MatchConfirmed:
+		return "MatchConfirmed"
 	}
 	return "MatchStatusUnknown"
 }

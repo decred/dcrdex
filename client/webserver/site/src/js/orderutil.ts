@@ -32,6 +32,7 @@ export const MakerSwapCast = 1
 export const TakerSwapCast = 2
 export const MakerRedeemed = 3
 export const MatchComplete = 4
+export const MatchConfirmed = 5
 
 /* The match sides are a mirror of dex/order.MatchSide. */
 export const Maker = 0
@@ -135,11 +136,13 @@ export function matchStatusString (m: Match) {
       return '(2 / 4) Second Swap Sent'
     case MakerRedeemed:
       if (m.side === Maker) {
-        return 'Match Complete'
+        return 'Redemption Sent'
       }
       return '(3 / 4) Maker Redeemed'
     case MatchComplete:
-      return 'Match Complete'
+      return 'Redemption Sent'
+    case MatchConfirmed:
+      return 'Redemption Confirmed'
   }
   return 'Unknown Match Status'
 }

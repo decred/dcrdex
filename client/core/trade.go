@@ -89,6 +89,13 @@ type matchTracker struct {
 	// taker successfully executes a refund.
 	cancelRedemptionSearch context.CancelFunc
 
+	// confirmRedemptionNumTries is just used for logging.
+	confirmRedemptionNumTries int
+	// redemptionConfs and redemptionConfsReq are set while the redemption
+	// confirmation process is running.
+	redemptionConfs    uint64
+	redemptionConfsReq uint64
+
 	// The fields below need to be modified without the parent trackedTrade's
 	// mutex being write locked, so they have dedicated mutexes.
 
@@ -163,6 +170,11 @@ func (m *matchTracker) setSwapConfirms(mine int64) {
 
 func (m *matchTracker) setCounterConfirms(theirs int64) (was int64) {
 	return atomic.SwapInt64(&m.counterConfirms, theirs)
+}
+
+// token returns a shortened representation of the match ID.
+func (m *matchTracker) token() string {
+	return hex.EncodeToString(m.MatchID[:4])
 }
 
 // trackedCancel is information necessary to track a cancel order. A
@@ -553,7 +565,8 @@ func (t *trackedTrade) coreOrderInternal() *Order {
 		swapConfs, counterConfs := mt.confirms()
 		corder.Matches = append(corder.Matches, matchFromMetaMatchWithConfs(t, &mt.MetaMatch,
 			swapConfs, int64(t.wallets.fromAsset.SwapConf),
-			counterConfs, int64(t.wallets.toAsset.SwapConf)))
+			counterConfs, int64(t.wallets.toAsset.SwapConf),
+			int64(mt.redemptionConfs), int64(mt.redemptionConfsReq)))
 	}
 	return corder
 }
@@ -1083,7 +1096,7 @@ func (t *trackedTrade) isActive() bool {
 		// 	"Order: %v, Refund coin: %v, ContractData: %x, Revoked: %v", match,
 		// 	match.Side, match.Status, t.ID(),
 		// 	proof.RefundCoin, proof.ContractData, proof.IsRevoked())
-		if t.matchIsActive(match) {
+		if t.matchIsActive(match, true) {
 			return true
 		}
 	}
@@ -1100,22 +1113,32 @@ func (t *trackedTrade) matchIsRevoked(match *matchTracker) bool {
 // Matches are inactive if: (1) status is complete, (2) it is refunded, or (3)
 // it is revoked and this side of the match requires no further action like
 // refund or auto-redeem. This should not be applied to cancel order matches.
-func (t *trackedTrade) matchIsActive(match *matchTracker) bool {
+// If redeemMustConfirm is true, a match that has completed but the redemption
+// has not yet been confirmed will still be considered active.
+func (t *trackedTrade) matchIsActive(match *matchTracker, redeemMustConfirm bool) bool {
 	proof := &match.MetaData.Proof
 	isActive := db.MatchIsActive(match.UserMatch, proof)
 	if proof.IsRevoked() && !isActive {
 		t.dc.log.Tracef("Revoked match %s (%v) in status %v considered inactive.",
 			match, match.Side, match.Status)
 	}
-	return isActive
+
+	if !isActive {
+		return false
+	}
+
+	status, side := match.Status, match.Side
+	return redeemMustConfirm ||
+		(side == order.Maker && status < order.MakerRedeemed) ||
+		(side == order.Taker && status < order.MatchComplete)
 }
 
-func (t *trackedTrade) activeMatches() []*matchTracker {
+func (t *trackedTrade) activeMatches(redeemMustConfirm bool) []*matchTracker {
 	var actives []*matchTracker
 	t.mtx.RLock()
 	defer t.mtx.RUnlock()
 	for _, match := range t.matches {
-		if t.matchIsActive(match) {
+		if t.matchIsActive(match, redeemMustConfirm) {
 			actives = append(actives, match)
 		}
 	}
@@ -1469,6 +1492,28 @@ func (t *trackedTrade) shouldBeginFindRedemption(ctx context.Context, match *mat
 	return spent || confs >= t.wallets.fromAsset.SwapConf
 }
 
+// shouldConfirmRedemption will return true if a redemption transaction
+// has been broadcast, but it has not yet been confirmed.
+//
+// This method accesses match fields and MUST be called with the trackedTrade
+// mutex lock held for reads.
+func shouldConfirmRedemption(match *matchTracker) bool {
+	if match.Status == order.MatchConfirmed {
+		return false
+	}
+
+	if (match.Side == order.Maker && match.Status < order.MakerRedeemed) ||
+		(match.Side == order.Taker && match.Status < order.MatchComplete) {
+		return false
+	}
+
+	proof := &match.MetaData.Proof
+	if match.Side == order.Maker {
+		return len(proof.MakerRedeem) > 0
+	}
+	return len(proof.TakerRedeem) > 0
+}
+
 // tick will check for and perform any match actions necessary.
 func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	assets := make(assetMap) // callers expect non-nil map even on error :(
@@ -1494,19 +1539,18 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	// Make sure we have a redemption fee suggestion cached.
 	t.cacheRedemptionFeeSuggestion()
 
-	var swaps, redeems, refunds, revokes, searches []*matchTracker
+	var swaps, redeems, refunds, revokes, searches, redemptionConfirms []*matchTracker
 	var sent, quoteSent, received, quoteReceived uint64
 
 	checkMatch := func(match *matchTracker) error { // only errors on context.DeadlineExceeded or context.Canceled
 		side := match.Side
-		if (side == order.Maker && match.Status >= order.MakerRedeemed) ||
-			(side == order.Taker && match.Status >= order.MatchComplete) {
+		if match.Status == order.MatchConfirmed {
 			return nil
 		}
 		if match.Address == "" {
 			return nil // a cancel order match
 		}
-		if !t.matchIsActive(match) {
+		if !t.matchIsActive(match, true) {
 			return nil // either refunded or revoked requiring no action on this side of the match
 		}
 
@@ -1573,6 +1617,11 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 			return nil
 		}
 
+		if shouldConfirmRedemption(match) {
+			redemptionConfirms = append(redemptionConfirms, match)
+			return nil
+		}
+
 		return ctx.Err()
 	}
 
@@ -1613,7 +1662,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	}
 
 	if len(swaps) == 0 && len(refunds) == 0 && len(redeems) == 0 &&
-		len(revokes) == 0 && len(searches) == 0 {
+		len(revokes) == 0 && len(searches) == 0 && len(redemptionConfirms) == 0 {
 		return assets, nil // nothing to do, don't acquire the write-lock
 	}
 
@@ -1717,6 +1766,12 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		}
 	}
 
+	if len(redemptionConfirms) > 0 {
+		for _, match := range redemptionConfirms {
+			t.confirmRedemption(match)
+		}
+	}
+
 	return assets, errs.ifAny()
 }
 
@@ -1743,7 +1798,7 @@ func (c *Core) resendPendingRequests(t *trackedTrade) {
 			swapCoinID = proof.TakerSwap
 		case side == order.Maker && status == order.MakerRedeemed:
 			redeemCoinID = proof.MakerRedeem
-		case side == order.Taker && status == order.MatchComplete:
+		case side == order.Taker && status >= order.MatchComplete:
 			redeemCoinID = proof.TakerRedeem
 		}
 		if len(swapCoinID) != 0 && len(auth.InitSig) == 0 { // resend pending `init` request
@@ -2356,7 +2411,6 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 			errs.add("error storing swap details in database for match %s, coin %s: %v",
 				match, coinIDString(t.wallets.fromAsset.ID, coinID), err)
 		}
-
 		c.sendRedeemAsync(t, match, coinIDs[i], proof.Secret)
 	}
 	if refundNum != 0 {
@@ -2437,7 +2491,7 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 		auth := &match.MetaData.Proof.Auth
 		auth.RedeemSig = ack.Sig
 		auth.RedeemStamp = uint64(time.Now().UnixMilli())
-		if match.Side == order.Maker {
+		if match.Side == order.Maker && match.Status < order.MatchComplete {
 			// As maker, this is the end. However, this diverges from server,
 			// which still needs taker's redeem.
 			match.Status = order.MatchComplete
@@ -2448,6 +2502,90 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 		}
 		t.mtx.Unlock()
 	}()
+}
+
+// confirmRedemption checks if the user's redemption has been confirmed,
+// and if so, updates the match's status to MatchConfirmed.
+//
+// This method accesses match fields and MUST be called with the trackedTrade
+// mutex lock held for writes.
+func (t *trackedTrade) confirmRedemption(match *matchTracker) {
+	var redeemCoinID order.CoinID
+	if match.Side == order.Maker {
+		redeemCoinID = match.MetaData.Proof.MakerRedeem
+	} else {
+		redeemCoinID = match.MetaData.Proof.TakerRedeem
+	}
+
+	match.confirmRedemptionNumTries++
+
+	redemptionStatus, err := t.wallets.toWallet.ConfirmRedemption(dex.Bytes(redeemCoinID), &asset.Redemption{
+		Spends: match.counterSwap,
+		Secret: match.MetaData.Proof.Secret,
+	})
+	if err == asset.ErrSwapRefunded {
+		subject, details := t.formatDetails(TopicSwapRefunded, match.token(), t.token())
+		note := newMatchNote(TopicSwapRefunded, subject, details, db.ErrorLevel, t, match)
+		t.notify(note)
+		match.Status = order.MatchConfirmed
+		err := t.db.UpdateMatch(&match.MetaMatch)
+		if err != nil {
+			t.dc.log.Errorf("Failed to update match in db %v", err)
+		}
+		return
+	} else if err != nil {
+		t.dc.log.Errorf("Error confirming redemption for coin %v. Already tried %d times, will retry later: %v.",
+			redeemCoinID, match.confirmRedemptionNumTries, err)
+		match.delayTicks(time.Minute * 15)
+		return
+	}
+
+	var redemptionResubmitted, redemptionConfirmed bool
+	if !bytes.Equal(redeemCoinID, redemptionStatus.CoinID) {
+		redemptionResubmitted = true
+		if match.Side == order.Maker {
+			match.MetaData.Proof.MakerRedeem = order.CoinID(redemptionStatus.CoinID)
+		} else {
+			match.MetaData.Proof.TakerRedeem = order.CoinID(redemptionStatus.CoinID)
+		}
+	}
+
+	if redemptionStatus == nil || redemptionStatus.Req <= redemptionStatus.Confs {
+		redemptionConfirmed = true
+		match.Status = order.MatchConfirmed
+		match.redemptionConfs = 0
+		match.redemptionConfsReq = 0
+	} else {
+		match.redemptionConfs = redemptionStatus.Confs
+		match.redemptionConfsReq = redemptionStatus.Req
+	}
+
+	if redemptionResubmitted || redemptionConfirmed {
+		err := t.db.UpdateMatch(&match.MetaMatch)
+		if err != nil {
+			t.dc.log.Errorf("failed to update match in db: %v", err)
+		}
+	}
+
+	if redemptionResubmitted {
+		if match.Side == order.Maker {
+			match.MetaData.Proof.MakerRedeem = order.CoinID(redemptionStatus.CoinID)
+		} else {
+			match.MetaData.Proof.TakerRedeem = order.CoinID(redemptionStatus.CoinID)
+		}
+		subject, details := t.formatDetails(TopicRedemptionResubmitted, match.token(), t.token())
+		note := newMatchNote(TopicRedemptionResubmitted, subject, details, db.WarningLevel, t, match)
+		t.notify(note)
+	}
+
+	if redemptionConfirmed {
+		subject, details := t.formatDetails(TopicRedemptionConfirmed, match.token(), t.token())
+		note := newMatchNote(TopicRedemptionConfirmed, subject, details, db.Success, t, match)
+		t.notify(note)
+	} else {
+		note := newMatchNote(TopicConfirms, "", "", db.Data, t, match)
+		t.notify(note)
+	}
 }
 
 // findMakersRedemption starts a goroutine to search for the redemption of

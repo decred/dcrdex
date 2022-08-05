@@ -218,12 +218,12 @@ func (c *Coin) SetConfirmations(confs, confReq int64) {
 // This function is intended for use with inactive matches. For active matches,
 // use matchFromMetaMatchWithConfs.
 func matchFromMetaMatch(ord order.Order, metaMatch *db.MetaMatch) *Match {
-	return matchFromMetaMatchWithConfs(ord, metaMatch, 0, 0, 0, 0)
+	return matchFromMetaMatchWithConfs(ord, metaMatch, 0, 0, 0, 0, 0, 0)
 }
 
 // matchFromMetaMatchWithConfs constructs a *Match from a *MetaMatch,
 // and sets the confirmations for swaps-in-waiting.
-func matchFromMetaMatchWithConfs(ord order.Order, metaMatch *db.MetaMatch, swapConfs, swapReq, counterSwapConfs, counterReq int64) *Match {
+func matchFromMetaMatchWithConfs(ord order.Order, metaMatch *db.MetaMatch, swapConfs, swapReq, counterSwapConfs, counterReq, redeemConfs, redeemReq int64) *Match {
 	if _, isCancel := ord.(*order.CancelOrder); isCancel {
 		fmt.Println("matchFromMetaMatchWithConfs got a cancel order for match", metaMatch)
 		return &Match{}
@@ -270,6 +270,9 @@ func matchFromMetaMatchWithConfs(ord order.Order, metaMatch *db.MetaMatch, swapC
 	}
 	if len(redeemCoin) > 0 {
 		redeem = NewCoin(toID, redeemCoin)
+		if status < order.MatchConfirmed {
+			redeem.SetConfirmations(redeemConfs, redeemReq)
+		}
 	}
 	if len(counterRedeemCoin) > 0 {
 		counterRedeem = NewCoin(fromID, counterRedeemCoin)

@@ -91,7 +91,30 @@ func (be *AssetBackend) newSwapCoin(coinID []byte, contractData []byte) (*swapCo
 // asset.Backend.Redemption.
 func (be *AssetBackend) newRedeemCoin(coinID []byte, contractData []byte) (*redeemCoin, error) {
 	bc, err := be.baseCoin(coinID, contractData)
-	if err != nil {
+	if err == asset.CoinNotFoundError {
+		// If the coin is not found, check to see if the swap has been
+		// redeemed by another transaction.
+		contractVer, secretHash, err := dexeth.DecodeContractData(contractData)
+		if err != nil {
+			return nil, err
+		}
+		swapState, err := be.node.swap(be.ctx, be.assetID, secretHash)
+		if err != nil {
+			return nil, err
+		}
+		if swapState.State != dexeth.SSRedeemed {
+			return nil, asset.CoinNotFoundError
+		}
+		bc = &baseCoin{
+			backend:     be,
+			secretHash:  secretHash,
+			contractVer: contractVer,
+		}
+		return &redeemCoin{
+			baseCoin: bc,
+			secret:   swapState.Secret,
+		}, nil
+	} else if err != nil {
 		return nil, err
 	}
 

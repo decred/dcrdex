@@ -40,6 +40,7 @@ func TestNewRedeemCoin(t *testing.T) {
 		contract      []byte
 		tx            *types.Transaction
 		swpErr, txErr error
+		swap          *dexeth.SwapState
 		wantErr       bool
 	}{{
 		name:     "ok redeem",
@@ -60,11 +61,30 @@ func TestNewRedeemCoin(t *testing.T) {
 		tx:       tTx(gasPrice, gasTipCap, value, contractAddr, redeemCalldata),
 		contract: encode.RandomBytes(32),
 		wantErr:  true,
+	}, {
+		name:     "tx not found, redeemed",
+		txErr:    ethereum.NotFound,
+		swap:     tSwap(97, initLocktime, 1000, secret, dexeth.SSRedeemed, &initParticipantAddr),
+		contract: contract,
+	}, {
+		name:     "tx not found, not redeemed",
+		txErr:    ethereum.NotFound,
+		swap:     tSwap(97, initLocktime, 1000, secret, dexeth.SSInitiated, &initParticipantAddr),
+		contract: contract,
+		wantErr:  true,
+	}, {
+		name:     "tx not found, swap err",
+		txErr:    ethereum.NotFound,
+		swpErr:   errors.New("swap not found"),
+		contract: contract,
+		wantErr:  true,
 	}}
 	for _, test := range tests {
 		node := &testNode{
-			tx:    test.tx,
-			txErr: test.txErr,
+			tx:     test.tx,
+			txErr:  test.txErr,
+			swp:    test.swap,
+			swpErr: test.swpErr,
 		}
 		eth := &AssetBackend{
 			baseBackend: &baseBackend{
@@ -85,11 +105,12 @@ func TestNewRedeemCoin(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for test %q: %v", test.name, err)
 		}
-		if rc.secretHash != secretHash ||
+
+		if test.txErr == nil && (rc.secretHash != secretHash ||
 			rc.secret != secret ||
 			rc.value.Uint64() != 0 ||
 			rc.gasFeeCap != wantGas ||
-			rc.gasTipCap != wantGasTipCap {
+			rc.gasTipCap != wantGasTipCap) {
 			t.Fatalf("returns do not match expected for test %q / %v", test.name, rc)
 		}
 	}

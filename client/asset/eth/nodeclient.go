@@ -214,26 +214,30 @@ func (n *nodeClient) addPeer(peerURL string) error {
 	return nil
 }
 
-// sendTransaction sends a tx.
+// getConfirmedNonce returns the nonce of the account in the state of a
+// certain block.
+func (n *nodeClient) getConfirmedNonce(ctx context.Context, blockNumber int64) (uint64, error) {
+	state, _, err := n.leth.ApiBackend.StateAndHeaderByNumber(ctx, rpc.BlockNumber(blockNumber))
+	if err != nil {
+		return 0, err
+	}
+	return state.GetNonce(n.address()), nil
+}
+
+// sendTransaction sends a tx. The nonce should be set in txOpts.
 func (n *nodeClient) sendTransaction(ctx context.Context, txOpts *bind.TransactOpts,
 	to common.Address, data []byte) (*types.Transaction, error) {
-
-	nonce, err := n.leth.ApiBackend.GetPoolNonce(ctx, n.creds.addr)
-	if err != nil {
-		return nil, fmt.Errorf("error getting nonce: %v", err)
-	}
 
 	tx, err := n.creds.ks.SignTx(*n.creds.acct, types.NewTx(&types.DynamicFeeTx{
 		To:        &to,
 		ChainID:   n.chainID,
-		Nonce:     nonce,
+		Nonce:     txOpts.Nonce.Uint64(),
 		Gas:       txOpts.GasLimit,
 		GasFeeCap: txOpts.GasFeeCap,
 		GasTipCap: txOpts.GasTipCap,
 		Value:     txOpts.Value,
 		Data:      data,
 	}), n.chainID)
-
 	if err != nil {
 		return nil, fmt.Errorf("signing error: %v", err)
 	}
@@ -270,11 +274,10 @@ func (n *nodeClient) signData(data []byte) (sig, pubKey []byte, err error) {
 	return
 }
 
-func (n *nodeClient) addSignerToOpts(txOpts *bind.TransactOpts) error {
+func (n *nodeClient) addSignerToOpts(txOpts *bind.TransactOpts) {
 	txOpts.Signer = func(addr common.Address, tx *types.Transaction) (*types.Transaction, error) {
 		return n.creds.wallet.SignTx(*n.creds.acct, tx, n.chainID)
 	}
-	return nil
 }
 
 // currentFees gets the baseFee and tipCap for the next block.
@@ -318,7 +321,7 @@ func (n *nodeClient) getCodeAt(ctx context.Context, contractAddr common.Address)
 // added automatically.
 //
 // NOTE: The nonce included in the txOpts must be sent before txOpts is used
-// again. The caller should ensure that txOpts -> send sequence is sychronized.
+// again. The caller should ensure that txOpts -> send sequence is synchronized.
 func (n *nodeClient) txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate *big.Int) (*bind.TransactOpts, error) {
 	baseFee, gasTipCap, err := n.currentFees(ctx)
 	if err != nil {
@@ -329,20 +332,13 @@ func (n *nodeClient) txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate 
 		maxFeeRate = new(big.Int).Mul(baseFee, big.NewInt(2))
 	}
 
-	txOpts := newTxOpts(ctx, n.creds.addr, val, maxGas, maxFeeRate, gasTipCap)
-	if err := n.addSignerToOpts(txOpts); err != nil {
-		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
-	}
-
 	nonce, err := n.leth.ApiBackend.GetPoolNonce(ctx, n.creds.addr)
 	if err != nil {
 		return nil, fmt.Errorf("error getting nonce: %v", err)
 	}
+	txOpts := newTxOpts(ctx, n.creds.addr, val, maxGas, maxFeeRate, gasTipCap)
 	txOpts.Nonce = new(big.Int).SetUint64(nonce)
-
-	if err := n.addSignerToOpts(txOpts); err != nil {
-		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
-	}
+	n.addSignerToOpts(txOpts)
 
 	return txOpts, nil
 }
@@ -351,31 +347,44 @@ func (n *nodeClient) contractBackend() bind.ContractBackend {
 	return n.ec
 }
 
-// transactionConfirmations gets the number of confirmations for the specified
-// transaction.
-func (n *nodeClient) transactionConfirmations(ctx context.Context, txHash common.Hash) (uint32, error) {
+// getTransaction looks up a transaction and returns the transaction and the
+// height of the block it was included in. -1 is returned for the height of
+// unmined transactions.
+func (n *nodeClient) getTransaction(ctx context.Context, txHash common.Hash) (*types.Transaction, int64, error) {
 	// We'll check the local tx pool first, since from what I can tell, a light
 	// client always requests tx data from the network for anything else.
 	if tx := n.leth.ApiBackend.GetPoolTransaction(txHash); tx != nil {
-		return 0, nil
-	}
-	hdr, err := n.bestHeader(ctx)
-	if err != nil {
-		return 0, err
+		return tx, -1, nil
 	}
 	tx, _, blockHeight, _, err := n.leth.ApiBackend.GetTransaction(ctx, txHash)
 	if err != nil {
-		return 0, err
+		return nil, 0, err
 	}
 	if tx != nil {
-		return uint32(hdr.Number.Uint64() - blockHeight + 1), nil
+		return tx, int64(blockHeight), nil
 	}
 	// TODO: There may be a race between when the tx is removed from our local
 	// tx pool, and when our peers are ready to supply the info. I saw a
 	// CoinNotFoundError in TestAccount/testSendTransaction, but haven't
 	// reproduced.
-	n.log.Warnf("transactionConfirmations: cannot find %v", txHash)
-	return 0, asset.CoinNotFoundError
+	n.log.Warnf("getTransaction: cannot find %v", txHash)
+	return nil, 0, asset.CoinNotFoundError
+}
+
+// transactionConfirmations gets the number of confirmations for the specified
+// transaction.
+func (n *nodeClient) transactionConfirmations(ctx context.Context, txHash common.Hash) (uint32, error) {
+	_, blockHeight, err := n.getTransaction(ctx, txHash)
+	if err != nil || blockHeight < 0 {
+		return 0, err
+	}
+
+	hdr, err := n.bestHeader(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	return uint32(hdr.Number.Int64() - blockHeight + 1), nil
 }
 
 // sendSignedTransaction injects a signed transaction into the pending pool for execution.

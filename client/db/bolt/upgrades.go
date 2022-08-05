@@ -342,7 +342,7 @@ func v6Upgrade(dbtx *bbolt.Tx) error {
 			return fmt.Errorf("error decoding proof: %w", err)
 		}
 		// If match is active, move to activeMatchesBucket.
-		if !dexdb.MatchIsActive(match, proof) {
+		if !dexdb.MatchIsActiveV6Upgrade(match, proof) {
 			nArchived++
 			return nil
 		}

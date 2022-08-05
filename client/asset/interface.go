@@ -126,6 +126,9 @@ const (
 	ErrConnectionDown   = dex.ErrorKind("wallet not connected")
 	ErrNotImplemented   = dex.ErrorKind("not implemented")
 	ErrUnsupported      = dex.ErrorKind("unsupported")
+	// ErrSwapRefunded is returned from ConfirmRedemption when the swap has
+	// been refunded before the user could redeem.
+	ErrSwapRefunded = dex.ErrorKind("swap refunded")
 
 	// InternalNodeLoggerName is the name for a logger that is used to fine
 	// tune log levels for only loggers using this name.
@@ -241,6 +244,15 @@ type WalletConfig struct {
 	DataDir string
 }
 
+// ConfirmRedemptionStatus contains the coinID which redeemed a swap, the
+// number of confirmations the transaction has, and the number of confirmations
+// required for it to be considered confirmed.
+type ConfirmRedemptionStatus struct {
+	Confs  uint64
+	Req    uint64
+	CoinID dex.Bytes
+}
+
 // Wallet is a common interface to be implemented by cryptocurrency wallet
 // software.
 type Wallet interface {
@@ -327,6 +339,14 @@ type Wallet interface {
 	// performed long after the swap is broadcast; might be better executed from
 	// a goroutine.
 	FindRedemption(ctx context.Context, coinID, contract dex.Bytes) (redemptionCoin, secret dex.Bytes, err error)
+	// ConfirmRedemption checks the status of a redemption. It returned the number
+	// of confirmations the redemption has, the number of confirmations that are
+	// required for it to be considered fully confirmed, and the CoinID used to
+	// do the redemption. If it is determined that a transaction will not be mined,
+	// this function will submit a new transaction to replace the old one. The
+	// caller is notified of this by having a different CoinID in the returned
+	// asset.ConfirmRedemptionStatus as was used to call the function.
+	ConfirmRedemption(coinID dex.Bytes, redemption *Redemption) (*ConfirmRedemptionStatus, error)
 	// Refund refunds a contract. This can only be used after the time lock has
 	// expired AND if the contract has not been redeemed/refunded. This method
 	// MUST return an asset.CoinNotFoundError error if the swap is already
