@@ -1173,28 +1173,50 @@ func testFundingCoins(t *testing.T, segwit bool, walletType string) {
 	wallet, node, shutdown := tNewWallet(segwit, walletType)
 	defer shutdown()
 
-	const vout = 1
+	const vout0 = 1
 	const txBlockHeight = 3
-	tx := makeRawTx([]dex.Bytes{{0x01}, tP2PKH}, []*wire.TxIn{dummyInput()})
-	txHash := tx.TxHash()
-	_, _ = node.addRawTx(txBlockHeight, tx)
-	coinID := toCoinID(&txHash, vout)
+	tx0 := makeRawTx([]dex.Bytes{{0x01}, tP2PKH}, []*wire.TxIn{dummyInput()})
+	txHash0 := tx0.TxHash()
+	_, _ = node.addRawTx(txBlockHeight, tx0)
+	coinID0 := toCoinID(&txHash0, vout0)
 	// Make spendable (confs > 0)
 	node.addRawTx(txBlockHeight+1, dummyTx())
 
-	p2pkhUnspent := &ListUnspentResult{
-		TxID:         txHash.String(),
-		Vout:         vout,
+	p2pkhUnspent0 := &ListUnspentResult{
+		TxID:         txHash0.String(),
+		Vout:         vout0,
 		ScriptPubKey: tP2PKH,
 		Spendable:    true,
 		Solvable:     true,
 		SafePtr:      boolPtr(true),
 		Amount:       1,
 	}
-	unspents := []*ListUnspentResult{p2pkhUnspent}
+	unspents := []*ListUnspentResult{p2pkhUnspent0}
+
+	// Add a second funding coin to make sure more than one iteration of the
+	// utxo loops is required.
+	const vout1 = 0
+	tx1 := makeRawTx([]dex.Bytes{tP2PKH, {0x02}}, []*wire.TxIn{dummyInput()})
+	txHash1 := tx1.TxHash()
+	_, _ = node.addRawTx(txBlockHeight, tx1)
+	coinID1 := toCoinID(&txHash1, vout1)
+	// Make spendable (confs > 0)
+	node.addRawTx(txBlockHeight+1, dummyTx())
+
+	p2pkhUnspent1 := &ListUnspentResult{
+		TxID:         txHash1.String(),
+		Vout:         vout1,
+		ScriptPubKey: tP2PKH,
+		Spendable:    true,
+		Solvable:     true,
+		SafePtr:      boolPtr(true),
+		Amount:       1,
+	}
+	unspents = append(unspents, p2pkhUnspent1)
+
 	node.listLockUnspent = []*RPCOutpoint{}
 	node.listUnspent = unspents
-	coinIDs := []dex.Bytes{coinID}
+	coinIDs := []dex.Bytes{coinID0, coinID1}
 
 	ensureGood := func() {
 		t.Helper()
@@ -1202,8 +1224,8 @@ func testFundingCoins(t *testing.T, segwit bool, walletType string) {
 		if err != nil {
 			t.Fatalf("FundingCoins error: %v", err)
 		}
-		if len(coins) != 1 {
-			t.Fatalf("expected 1 coin, got %d", len(coins))
+		if len(coins) != 2 {
+			t.Fatalf("expected 2 coins, got %d", len(coins))
 		}
 	}
 	ensureGood()
@@ -1235,17 +1257,27 @@ func testFundingCoins(t *testing.T, segwit bool, walletType string) {
 	coinIDs = ogIDs
 
 	// Coins locked but not in wallet.fundingCoins.
+	irrelevantTx := dummyTx()
+	node.addRawTx(txBlockHeight+1, irrelevantTx)
 	node.listLockUnspent = []*RPCOutpoint{
-		{TxID: p2pkhUnspent.TxID, Vout: p2pkhUnspent.Vout},
+		{TxID: p2pkhUnspent0.TxID, Vout: p2pkhUnspent0.Vout},
+		{TxID: p2pkhUnspent1.TxID, Vout: p2pkhUnspent1.Vout},
 	}
 	node.listUnspent = []*ListUnspentResult{}
-	txRaw, _ := serializeMsgTx(tx)
-	getTxRes := &GetTransactionResult{
-		Hex: txRaw,
+
+	txRaw0, _ := serializeMsgTx(tx0)
+	getTxRes0 := &GetTransactionResult{
+		Hex: txRaw0,
+	}
+	txRaw1, _ := serializeMsgTx(tx1)
+	getTxRes1 := &GetTransactionResult{
+		Hex: txRaw1,
 	}
 
 	node.getTransactionMap = map[string]*GetTransactionResult{
-		"any": getTxRes}
+		txHash0.String(): getTxRes0,
+		txHash1.String(): getTxRes1,
+	}
 
 	ensureGood()
 }
