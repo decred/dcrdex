@@ -190,6 +190,8 @@ func Assets() map[uint32]*RegisteredAsset {
 	return assets
 }
 
+// Asset gets the RegisteredAsset for the specified asset ID. Asset is for
+// base chain assets, not tokens.
 func Asset(assetID uint32) *RegisteredAsset {
 	driversMtx.RLock()
 	defer driversMtx.RUnlock()

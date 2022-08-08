@@ -1549,12 +1549,12 @@ func (c *Core) connectAndUpdateWallet(w *xcWallet) error {
 	if token != nil {
 		parentWallet, found := c.wallet(token.ParentID)
 		if !found {
-			return fmt.Errorf("token %s wallet has no %s parent?", unbip(w.AssetID), unbip(token.ParentID))
+			return fmt.Errorf("token %s wallet has no %s parent?", unbip(assetID), unbip(token.ParentID))
 		}
 		if !parentWallet.connected() {
 			if err := c.connectAndUpdateWallet(parentWallet); err != nil {
 				return fmt.Errorf("failed to connect %s parent wallet for %s token",
-					unbip(token.ParentID), unbip(w.AssetID))
+					unbip(token.ParentID), unbip(assetID))
 			}
 		}
 	}
@@ -1863,6 +1863,12 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		return err
 	}
 
+	// Prevent two different tokens from trying to create the parent simulataneously.
+	if err = c.setWalletCreationPending(token.ParentID); err != nil {
+		return err
+	}
+	defer c.setWalletCreationComplete(token.ParentID)
+
 	// If the parent already exists, easy route.
 	_, found := c.wallet(token.ParentID)
 	if found {
@@ -1885,16 +1891,14 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 			form.ParentForm.AssetID, token.ParentID)
 	}
 
-	if err = c.setWalletCreationPending(assetID); err != nil {
-		// Creation already pending?
-		return err
-	}
-
 	// Create the parent synchronously.
 	parentWallet, err := c.createWalletOrToken(crypter, walletPW, form.ParentForm)
 	if err != nil {
-		c.setWalletCreationComplete(assetID)
 		return fmt.Errorf("error creating parent wallet: %v", err)
+	}
+
+	if err = c.setWalletCreationPending(assetID); err != nil {
+		return err
 	}
 
 	// Start a goroutine to wait until the parent wallet is synced, and then

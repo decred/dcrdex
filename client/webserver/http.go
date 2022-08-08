@@ -469,11 +469,11 @@ func (s *WebServer) orderReader(ord *core.Order) *core.OrderReader {
 			return unitInfo
 		}
 		xc := s.core.Exchanges()[ord.Host]
-		asset, found := xc.Assets[assetID]
-		if !found || asset.UnitInfo.Conventional.ConversionFactor == 0 {
+		a, found := xc.Assets[assetID]
+		if !found || a.UnitInfo.Conventional.ConversionFactor == 0 {
 			return defaultUnitInfo(symbol)
 		}
-		return asset.UnitInfo
+		return a.UnitInfo
 	}
 
 	return &core.OrderReader{

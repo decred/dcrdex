@@ -160,7 +160,7 @@ func tSwap(bn, locktime int64, value uint64, secret [32]byte, state dexeth.SwapS
 		LockTime:    time.Unix(locktime, 0),
 		Participant: *participantAddr,
 		State:       state,
-		Value:       value,
+		Value:       dexeth.GweiToWei(value),
 	}
 }
 
@@ -175,6 +175,7 @@ func tNewBackend(assetID uint32) (*AssetBackend, *testNode) {
 		log:        tLogger.SubLogger(strings.ToUpper(dex.BipIDSymbol(assetID))),
 		assetID:    assetID,
 		blockChans: make(map[chan *asset.BlockUpdate]struct{}),
+		atomize:    dexeth.WeiToGwei,
 	}, node
 }
 

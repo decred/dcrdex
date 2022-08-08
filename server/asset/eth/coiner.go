@@ -26,7 +26,7 @@ type baseCoin struct {
 	gasFeeCap    uint64
 	gasTipCap    uint64
 	txHash       common.Hash
-	value        uint64
+	value        *big.Int
 	txData       []byte
 	serializedTx []byte
 	contractVer  uint32
@@ -34,7 +34,9 @@ type baseCoin struct {
 
 type swapCoin struct {
 	*baseCoin
-	init *dexeth.Initiation
+	dexAtoms uint64
+	evmVal   *big.Int
+	init     *dexeth.Initiation
 }
 
 type redeemCoin struct {
@@ -66,12 +68,13 @@ func (be *AssetBackend) newSwapCoin(coinID []byte, contractData []byte) (*swapCo
 		return nil, fmt.Errorf("tx %v does not contain initiation with secret hash %x", bc.txHash, bc.secretHash)
 	}
 
+	evmVal := new(big.Int)
 	if be.assetID == BipID {
-		var sum uint64
+		sum := new(big.Int)
 		for _, in := range inits {
-			sum += in.Value
+			sum.Add(sum, in.Value)
 		}
-		if bc.value < sum {
+		if bc.value.Cmp(sum) < 0 {
 			return nil, fmt.Errorf("tx %s value < sum of inits. %d < %d", bc.txHash, bc.value, sum)
 		}
 	}
@@ -79,6 +82,8 @@ func (be *AssetBackend) newSwapCoin(coinID []byte, contractData []byte) (*swapCo
 	return &swapCoin{
 		baseCoin: bc,
 		init:     init,
+		evmVal:   evmVal,
+		dexAtoms: be.atomize(init.Value),
 	}, nil
 }
 
@@ -93,7 +98,7 @@ func (be *AssetBackend) newRedeemCoin(coinID []byte, contractData []byte) (*rede
 		return nil, err
 	}
 
-	if bc.value != 0 {
+	if bc.value.Cmp(new(big.Int)) != 0 {
 		return nil, fmt.Errorf("expected tx value of zero for redeem but got: %d", bc.value)
 	}
 
@@ -172,19 +177,13 @@ func (be *AssetBackend) baseCoin(coinID []byte, contractData []byte) (*baseCoin,
 		return nil, fmt.Errorf("unable to convert gas tip cap: %v", err)
 	}
 
-	// Value is stored in the swap with the initialization transaction.
-	value, err := dexeth.WeiToGweiUint64(tx.Value())
-	if err != nil {
-		return nil, fmt.Errorf("unable to convert value: %v", err)
-	}
-
 	return &baseCoin{
 		backend:      be,
 		secretHash:   secretHash,
 		gasFeeCap:    gasFeeCapGwei,
 		gasTipCap:    gasTipCapGwei,
 		txHash:       txHash,
-		value:        value,
+		value:        tx.Value(),
 		txData:       tx.Data(),
 		serializedTx: serializedTx,
 		contractVer:  contractVer,
@@ -221,8 +220,8 @@ func (c *swapCoin) Confirmations(ctx context.Context) (int64, error) {
 	// confirmations, and we are sure the secret hash belongs to
 	// this swap. Assert that the value, receiver, and locktime are
 	// as expected.
-	if swap.Value != c.init.Value {
-		return -1, fmt.Errorf("tx data swap val (%dgwei) does not match contract value (%dgwei)",
+	if swap.Value.Cmp(c.init.Value) != 0 {
+		return -1, fmt.Errorf("tx data swap val (%d) does not match contract value (%d)",
 			c.init.Value, swap.Value)
 	}
 	if swap.Participant != c.init.Participant {
@@ -275,6 +274,8 @@ func (c *redeemCoin) Confirmations(ctx context.Context) (int64, error) {
 	return -1, fmt.Errorf("redemption in failed state with swap at %s state", swap.State)
 }
 
+func (c *redeemCoin) Value() uint64 { return 0 }
+
 // ID is the swap's coin ID.
 func (c *baseCoin) ID() []byte {
 	return c.txHash.Bytes() // c.txHash[:]
@@ -290,12 +291,6 @@ func (c *baseCoin) String() string {
 	return c.txHash.String()
 }
 
-// Value is the amount paid to the swap, set in initialization. Always zero for
-// redemptions.
-func (c *baseCoin) Value() uint64 {
-	return c.value
-}
-
 // FeeRate returns the gas rate, in gwei/gas. It is set in initialization of
 // the swapCoin.
 func (c *baseCoin) FeeRate() uint64 {
@@ -304,5 +299,5 @@ func (c *baseCoin) FeeRate() uint64 {
 
 // Value returns the value of one swap in order to validate during processing.
 func (c *swapCoin) Value() uint64 {
-	return c.init.Value
+	return c.dexAtoms
 }

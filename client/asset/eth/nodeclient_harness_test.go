@@ -92,11 +92,11 @@ var (
 	alphaNodeDir                = filepath.Join(homeDir, "dextest", "eth", "alpha", "node")
 	ctx                         context.Context
 	tLogger                     = dex.StdOutLogger("ETHTEST", dex.LevelCritical)
-	simnetWalletSeed            = "5c52e2ef5f5298ec41107e4e9573df4488577fb3504959cbc26c88437205dd2c0812f5244004217452059e2fd11603a511b5d0870ead753df76c966ce3c71531"
+	simnetWalletSeed            = "0812f5244004217452059e2fd11603a511b5d0870ead753df76c966ce3c71531"
 	simnetAddr                  common.Address
 	simnetAcct                  *accounts.Account
 	ethClient                   *nodeClient
-	participantWalletSeed       = "b99fb787fc5886eb539830d103c0017eff5241ace28ee137d40f135fd02212b1a897afbdcba037c8c735cc63080558a30d72851eb5a3d05684400ec4123a2d00"
+	participantWalletSeed       = "a897afbdcba037c8c735cc63080558a30d72851eb5a3d05684400ec4123a2d00"
 	participantAddr             common.Address
 	participantAcct             *accounts.Account
 	participantEthClient        *nodeClient
@@ -305,6 +305,38 @@ func runSimnet(m *testing.M) (int, error) {
 	}
 	if err := participantEthClient.unlock(pw); err != nil {
 		return 1, fmt.Errorf("error unlocking initiator client: %w", err)
+	}
+
+	// Fund the wallets. Can use the simharness package once #1738 is merged.
+	homeDir, _ := os.UserHomeDir()
+	harnessCtlDir := filepath.Join(homeDir, "dextest", "eth", "harness-ctl")
+	send := func(exe, addr, amt string) error {
+		cmd := exec.CommandContext(ctx, exe, addr, amt)
+		cmd.Dir = harnessCtlDir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("error running %q: %v", cmd, err)
+		}
+		fmt.Printf("result from %q: %s\n", cmd, out)
+		return nil
+	}
+	for _, s := range []*struct {
+		exe, addr, amt string
+	}{
+		{"./sendtoaddress", simnetAddr.String(), "10"},
+		{"./sendtoaddress", participantAddr.String(), "10"},
+		{"./sendTokens", simnetAddr.String(), "10"},
+		{"./sendTokens", participantAddr.String(), "10"},
+	} {
+		if err := send(s.exe, s.addr, s.amt); err != nil {
+			return 1, err
+		}
+	}
+
+	cmd := exec.CommandContext(ctx, "./mine-alpha", "1")
+	cmd.Dir = harnessCtlDir
+	if err := cmd.Run(); err != nil {
+		return 1, fmt.Errorf("error mining block after funding wallets")
 	}
 
 	code := m.Run()

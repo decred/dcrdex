@@ -87,7 +87,7 @@ func TestNewRedeemCoin(t *testing.T) {
 		}
 		if rc.secretHash != secretHash ||
 			rc.secret != secret ||
-			rc.value != 0 ||
+			rc.value.Uint64() != 0 ||
 			rc.gasFeeCap != wantGas ||
 			rc.gasTipCap != wantGasTipCap {
 			t.Fatalf("returns do not match expected for test %q / %v", test.name, rc)
@@ -198,6 +198,7 @@ func TestNewSwapCoin(t *testing.T) {
 			},
 			contractAddr: *contractAddr,
 			initTxSize:   uint32(dexeth.InitGas(1, 0)),
+			atomize:      dexeth.WeiToGwei,
 		}
 		sc, err := eth.newSwapCoin(test.coinID, test.contract)
 		if test.wantErr {
@@ -212,7 +213,7 @@ func TestNewSwapCoin(t *testing.T) {
 
 		if sc.init.Participant != initParticipantAddr ||
 			sc.secretHash != secretHash ||
-			sc.value != wantVal ||
+			dexeth.WeiToGwei(sc.value) != wantVal ||
 			sc.gasFeeCap != wantGas ||
 			sc.gasTipCap != wantGasTipCap ||
 			sc.init.LockTime.Unix() != initLocktime {
@@ -321,6 +322,7 @@ func TestConfirmations(t *testing.T) {
 			},
 			contractAddr: *contractAddr,
 			initTxSize:   uint32(dexeth.InitGas(1, 0)),
+			atomize:      dexeth.WeiToGwei,
 		}
 
 		swapData := dexeth.EncodeContractData(0, secretHash)

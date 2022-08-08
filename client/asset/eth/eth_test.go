@@ -1767,7 +1767,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			LockTime:    time.Now(),
 			Initiator:   testAddressB,
 			Participant: testAddressA,
-			Value:       value,
+			Value:       dexeth.GweiToWei(value),
 			State:       step,
 		}
 		contractorV1.swapMap[secretHash] = &swap
@@ -2236,7 +2236,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			// secretHash should equal redemption.Spends.SecretHash, but it's
 			// not part of the Redeem code, just the test input consistency.
 			swap := contractorV1.swapMap[secretHash]
-			totalSwapValue += swap.Value
+			totalSwapValue += dexeth.WeiToGwei(swap.Value)
 		}
 		if out.Value() != totalSwapValue {
 			t.Fatalf("expected coin value to be %d but got %d",
@@ -2451,7 +2451,7 @@ func overMaxWei() *big.Int {
 func packInitiateDataV0(initiations []*dexeth.Initiation) ([]byte, error) {
 	abiInitiations := make([]swapv0.ETHSwapInitiation, 0, len(initiations))
 	for _, init := range initiations {
-		bigVal := new(big.Int).SetUint64(init.Value)
+		bigVal := new(big.Int).Set(init.Value)
 		abiInitiations = append(abiInitiations, swapv0.ETHSwapInitiation{
 			RefundTimestamp: big.NewInt(init.LockTime.Unix()),
 			SecretHash:      init.SecretHash,
@@ -2501,13 +2501,13 @@ func testAuditContract(t *testing.T, assetID uint32) {
 					LockTime:    now,
 					SecretHash:  secretHashes[0],
 					Participant: testAddressA,
-					Value:       1,
+					Value:       dexeth.GweiToWei(1),
 				},
 				{
 					LockTime:    laterThanNow,
 					SecretHash:  secretHashes[1],
 					Participant: testAddressB,
-					Value:       1,
+					Value:       dexeth.GweiToWei(1),
 				},
 			},
 			wantRecipient:  testAddressB.Hex(),
@@ -2521,7 +2521,7 @@ func testAuditContract(t *testing.T, assetID uint32) {
 					LockTime:    now,
 					SecretHash:  secretHashes[0],
 					Participant: testAddressA,
-					Value:       1,
+					Value:       dexeth.GweiToWei(1),
 				},
 			},
 			differentHash: true,
@@ -2540,13 +2540,13 @@ func testAuditContract(t *testing.T, assetID uint32) {
 					LockTime:    now,
 					SecretHash:  secretHashes[0],
 					Participant: testAddressA,
-					Value:       1,
+					Value:       dexeth.GweiToWei(1),
 				},
 				{
 					LockTime:    laterThanNow,
 					SecretHash:  secretHashes[1],
 					Participant: testAddressB,
-					Value:       1,
+					Value:       dexeth.GweiToWei(1),
 				},
 			},
 			wantErr: true,
@@ -2565,13 +2565,13 @@ func testAuditContract(t *testing.T, assetID uint32) {
 					LockTime:    now,
 					SecretHash:  secretHashes[0],
 					Participant: testAddressA,
-					Value:       1,
+					Value:       dexeth.GweiToWei(1),
 				},
 				{
 					LockTime:    laterThanNow,
 					SecretHash:  secretHashes[1],
 					Participant: testAddressB,
-					Value:       1,
+					Value:       dexeth.GweiToWei(1),
 				},
 			},
 			badTxBinary: true,

@@ -187,7 +187,7 @@ func (c *contractorV0) swap(ctx context.Context, secretHash [32]byte) (*dexeth.S
 		Secret:      state.Secret,
 		Initiator:   state.Initiator,
 		Participant: state.Participant,
-		Value:       c.atomize(state.Value),
+		Value:       state.Value,
 		State:       dexeth.SwapStep(state.State),
 	}, nil
 }
@@ -293,7 +293,7 @@ func (c *contractorV0) incomingValue(ctx context.Context, tx *types.Transaction)
 			if err != nil {
 				return 0, fmt.Errorf("redeem swap error: %w", err)
 			}
-			redeemed += swap.Value
+			redeemed += c.atomize(swap.Value)
 		}
 		return redeemed, nil
 	}
@@ -305,14 +305,14 @@ func (c *contractorV0) incomingValue(ctx context.Context, tx *types.Transaction)
 	if err != nil {
 		return 0, fmt.Errorf("refund swap error: %w", err)
 	}
-	return swap.Value, nil
+	return c.atomize(swap.Value), nil
 }
 
 // outgoingValue calculates the value sent in swaps in the tx.
 func (c *contractorV0) outgoingValue(tx *types.Transaction) (swapped uint64) {
 	if inits, err := dexeth.ParseInitiateData(tx.Data(), 0); err == nil {
 		for _, init := range inits {
-			swapped += init.Value
+			swapped += c.atomize(init.Value)
 		}
 	}
 	return

@@ -206,7 +206,7 @@ type SwapState struct {
 	Secret      [32]byte
 	Initiator   common.Address
 	Participant common.Address
-	Value       uint64
+	Value       *big.Int
 	State       SwapStep
 }
 
@@ -219,7 +219,7 @@ func SwapStateFromV0(state *v0.ETHSwapSwap) *SwapState {
 		Secret:      state.Secret,
 		Initiator:   state.Initiator,
 		Participant: state.Participant,
-		Value:       WeiToGwei(state.Value),
+		Value:       state.Value,
 		State:       SwapStep(state.State),
 	}
 }
@@ -229,7 +229,7 @@ type Initiation struct {
 	LockTime    time.Time
 	SecretHash  [32]byte
 	Participant common.Address
-	Value       uint64 // gwei
+	Value       *big.Int
 }
 
 // Redemption is the data used to redeem a swap.

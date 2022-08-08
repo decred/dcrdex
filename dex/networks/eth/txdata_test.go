@@ -16,12 +16,11 @@ import (
 func packInitiateDataV0(initiations []*Initiation) ([]byte, error) {
 	abiInitiations := make([]swapv0.ETHSwapInitiation, 0, len(initiations))
 	for _, init := range initiations {
-		bigVal := new(big.Int).SetUint64(init.Value)
 		abiInitiations = append(abiInitiations, swapv0.ETHSwapInitiation{
 			RefundTimestamp: big.NewInt(init.LockTime.Unix()),
 			SecretHash:      init.SecretHash,
 			Participant:     init.Participant,
-			Value:           new(big.Int).Mul(bigVal, big.NewInt(GweiFactor)),
+			Value:           init.Value,
 		})
 	}
 	return (*ABIs[0]).Pack("initiate", abiInitiations)
@@ -54,7 +53,7 @@ func initiationsAreEqual(a, b *Initiation) bool {
 	return a.LockTime == b.LockTime &&
 		a.SecretHash == b.SecretHash &&
 		a.Participant == b.Participant &&
-		a.Value == b.Value
+		a.Value.Cmp(b.Value) == 0
 }
 
 func TestParseInitiateDataV0(t *testing.T) {
@@ -71,13 +70,13 @@ func TestParseInitiateDataV0(t *testing.T) {
 			LockTime:    time.Unix(locktime, 0),
 			SecretHash:  secretHashA,
 			Participant: participantAddr,
-			Value:       1,
+			Value:       GweiToWei(1),
 		},
 		{
 			LockTime:    time.Unix(locktime, 0),
 			SecretHash:  secretHashB,
 			Participant: participantAddr,
-			Value:       1,
+			Value:       GweiToWei(1),
 		},
 	}
 	calldata, err := packInitiateDataV0(initiations)

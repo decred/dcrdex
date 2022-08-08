@@ -2073,8 +2073,8 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 	for i, receipt := range receipts {
 		match := matches[i]
 		coin := receipt.Coin()
-		c.log.Infof("Contract coin %v (%s), value = %d, refundable at %v (script = %v), match = %v",
-			coin, t.wallets.fromAsset.Symbol, coin.Value(), receipt.Expiration(), receipt.Contract(), match)
+		c.log.Infof("Contract coin %v (%s), value = %d, refundable at %v (receipt = %v), match = %v",
+			coin, t.wallets.fromAsset.Symbol, coin.Value(), receipt.Expiration(), receipt.String(), match)
 		if secret := match.MetaData.Proof.Secret; len(secret) > 0 {
 			c.log.Tracef("Contract coin %v secret = %x", coin, secret)
 		}

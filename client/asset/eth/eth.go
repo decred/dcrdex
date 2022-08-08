@@ -270,9 +270,10 @@ type baseWallet struct {
 // assetWallet satisfies the dex.Wallet interface.
 type assetWallet struct {
 	*baseWallet
-	assetID   uint32
-	tipChange func(error)
-	log       dex.Logger
+	assetID    uint32
+	tipChange  func(error)
+	log        dex.Logger
+	atomicUnit string
 
 	lockedFunds struct {
 		mtx                sync.RWMutex
@@ -332,8 +333,8 @@ func (w *TokenWallet) Info() *asset.WalletInfo {
 // generating a BIP-39 mnemonic. Then it returns the wallet seed generated
 // from the mnemonic which can be used to derive a private key.
 func genWalletSeed(entropy []byte) ([]byte, error) {
-	if len(entropy) != 32 {
-		return nil, fmt.Errorf("wallet entropy must be 32 bytes long")
+	if len(entropy) < 32 || len(entropy) > 64 {
+		return nil, fmt.Errorf("wallet entropy must be 32 to 64 bytes long")
 	}
 	mnemonic, err := bip39.NewMnemonic(entropy)
 	if err != nil {
@@ -419,6 +420,7 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		contractors:        make(map[uint32]contractor),
 		evmify:             dexeth.GweiToWei,
 		atomize:            dexeth.WeiToGwei,
+		atomicUnit:         dexeth.UnitInfo.AtomicUnit,
 	}
 
 	w.wallets = map[uint32]*assetWallet{
@@ -573,6 +575,7 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 		contractors:        make(map[uint32]contractor),
 		evmify:             token.AtomicToEVM,
 		atomize:            token.EVMToAtomic,
+		atomicUnit:         token.UnitInfo.AtomicUnit,
 	}
 
 	w.baseWallet.walletsMtx.Lock()
@@ -646,8 +649,9 @@ func (w *assetWallet) lockFunds(amt uint64, t fundReserveType) error {
 	}
 
 	if balance.Available < amt {
-		return fmt.Errorf("attempting to lock more %s for %s than is currently available. %d > %d gwei",
-			dex.BipIDSymbol(w.assetID), t, amt, balance.Available)
+
+		return fmt.Errorf("attempting to lock more %s for %s than is currently available. %d > %d %s",
+			dex.BipIDSymbol(w.assetID), t, amt, balance.Available, w.atomicUnit)
 	}
 
 	w.lockedFunds.mtx.Lock()
@@ -1473,7 +1477,7 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet) ([]
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error finding swap state: %w", err)
 		}
-		redeemedValue += swapData.Value
+		redeemedValue += w.atomize(swapData.Value)
 	}
 
 	g := w.gases(contractVer)
@@ -1802,7 +1806,7 @@ func (eth *baseWallet) SignMessage(_ asset.Coin, msg dex.Bytes) (pubkeys, sigs [
 // during a swap. coinID is expected to be the transaction id, and must
 // be the same as the hash of serializedTx. contract is expected to be
 // (contractVersion|secretHash) where the secretHash uniquely keys the swap.
-func (eth *baseWallet) AuditContract(coinID, contract, serializedTx dex.Bytes, rebroadcast bool) (*asset.AuditInfo, error) {
+func (w *assetWallet) AuditContract(coinID, contract, serializedTx dex.Bytes, rebroadcast bool) (*asset.AuditInfo, error) {
 	tx := new(types.Transaction)
 	err := tx.UnmarshalBinary(serializedTx)
 	if err != nil {
@@ -1831,7 +1835,7 @@ func (eth *baseWallet) AuditContract(coinID, contract, serializedTx dex.Bytes, r
 
 	coin := &coin{
 		id:    txHash,
-		value: initiation.Value,
+		value: w.atomize(initiation.Value),
 	}
 
 	// The counter-party should have broadcasted the contract tx but rebroadcast
@@ -1839,8 +1843,8 @@ func (eth *baseWallet) AuditContract(coinID, contract, serializedTx dex.Bytes, r
 	// because this is not required and does not affect the audit result.
 	if rebroadcast {
 		go func() {
-			if err := eth.node.sendSignedTransaction(eth.ctx, tx); err != nil {
-				eth.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
+			if err := w.node.sendSignedTransaction(w.ctx, tx); err != nil {
+				w.log.Debugf("Rebroadcasting counterparty contract %v (THIS MAY BE NORMAL): %v", txHash, err)
 			}
 		}()
 	}
@@ -2209,7 +2213,7 @@ func (w *TokenWallet) Send(addr string, value, _ uint64) (asset.Coin, error) {
 	}
 	avail := bal.Available
 	if avail < value {
-		return nil, fmt.Errorf("not enough tokens: have %d gwei need %d gwei", avail, value)
+		return nil, fmt.Errorf("not enough tokens: have %[1]d %[3]s need %[2]d %[3]s", avail, value, w.atomicUnit)
 	}
 
 	ethBal, err := w.parent.Balance()
@@ -2802,7 +2806,7 @@ func GetGasEstimates(ctx context.Context, cl *nodeClient, c contractor, maxSwaps
 			if err != nil {
 				return fmt.Errorf("error constructing signed tx opts for transfer: %v", err)
 			}
-			transferTx, err = tokenContractor.transfer(txOpts, cl.address(), dexeth.GweiToWei(1))
+			transferTx, err = tokenContractor.transfer(txOpts, cl.address(), big.NewInt(1))
 			if err != nil {
 				return fmt.Errorf("error estimating transfer gas: %v", err)
 			}

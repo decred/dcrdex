@@ -202,6 +202,7 @@ type AssetBackend struct {
 	*baseBackend
 	assetID uint32
 	log     dex.Logger
+	atomize func(*big.Int) uint64
 
 	// The backend provides block notification channels through the BlockChannel
 	// method.
@@ -256,6 +257,7 @@ func unconnectedETH(logger dex.Logger, net dex.Network) (*ETHBackend, error) {
 		initTxSize:   uint32(dexeth.InitGas(1, ethContractVersion)),
 		redeemSize:   dexeth.RedeemGas(1, ethContractVersion),
 		assetID:      BipID,
+		atomize:      dexeth.WeiToGwei,
 	}}, nil
 }
 
@@ -340,7 +342,7 @@ func (eth *ETHBackend) TokenBackend(assetID uint32, configPath string) (asset.Ba
 		return nil, fmt.Errorf("asset %d backend already loaded", assetID)
 	}
 
-	_, _, swapContract, err := networkToken(assetID, eth.net)
+	token, _, swapContract, err := networkToken(assetID, eth.net)
 	if err != nil {
 		return nil, err
 	}
@@ -370,6 +372,7 @@ func (eth *ETHBackend) TokenBackend(assetID uint32, configPath string) (asset.Ba
 		initTxSize:   uint32(gases.Swap),
 		redeemSize:   gases.Redeem,
 		contractAddr: swapContract.Address,
+		atomize:      token.EVMToAtomic,
 	}}
 	eth.baseBackend.tokens[assetID] = be
 	return be, nil
