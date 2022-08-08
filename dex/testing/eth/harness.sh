@@ -122,8 +122,7 @@ cat > "${NODES_ROOT}/harness-ctl/send.js" <<EOF
 function send(from, to, value) {
   from = from.startsWith('0x') ? from : '0x' + from
   to = to.startsWith('0x') ? to : '0x' + to
-  personal.sendTransaction({ from, to, value, gasPrice: 82000000000 }, "${PASSWORD}")
-  return true;
+  return personal.sendTransaction({ from, to, value, gasPrice: 82000000000 }, "${PASSWORD}")
 }
 EOF
 
@@ -356,7 +355,7 @@ cat > "${NODES_ROOT}/harness-ctl/loadTestToken.js" <<EOF
 
     function transfer (addr, val) {
       addr = addr.startsWith('0x') ? addr : '0x'+addr
-      testToken.transfer(addr, val*1e18)
+      return testToken.transfer(addr, val*1e18)
     }
 EOF
 
