@@ -35,7 +35,6 @@ type baseCoin struct {
 type swapCoin struct {
 	*baseCoin
 	dexAtoms uint64
-	evmVal   *big.Int
 	init     *dexeth.Initiation
 }
 
@@ -68,7 +67,6 @@ func (be *AssetBackend) newSwapCoin(coinID []byte, contractData []byte) (*swapCo
 		return nil, fmt.Errorf("tx %v does not contain initiation with secret hash %x", bc.txHash, bc.secretHash)
 	}
 
-	evmVal := new(big.Int)
 	if be.assetID == BipID {
 		sum := new(big.Int)
 		for _, in := range inits {
@@ -82,7 +80,6 @@ func (be *AssetBackend) newSwapCoin(coinID []byte, contractData []byte) (*swapCo
 	return &swapCoin{
 		baseCoin: bc,
 		init:     init,
-		evmVal:   evmVal,
 		dexAtoms: be.atomize(init.Value),
 	}, nil
 }
