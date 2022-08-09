@@ -316,7 +316,7 @@ const CoinExplorers: Record<number, Record<number, (cid: string) => string>> = {
   },
   2: { // ltc
     [Mainnet]: (cid: string) => `https://ltc.bitaps.com/${cid.split(':')[0]}`,
-    [Testnet]: (cid: string) => `https://tltc.bitaps.com/${cid.split(':')[0]}`
+    [Testnet]: (cid: string) => `https://sochain.com/tx/LTCTEST/${cid.split(':')[0]}`
   },
   60: { // eth
     [Mainnet]: (cid: string) => {
