@@ -4632,38 +4632,40 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 		return nil, newError(suspendedAcctErr, "may not trade while account is suspended")
 	}
 
-	corder, fromID, err := c.prepareTrackedTrade(dc, form, crypter)
+	corder, updatedAssets, err := c.prepareTrackedTrade(dc, form, crypter)
 	if err != nil {
 		return nil, err
 	}
 
-	c.updateAssetBalance(fromID)
+	for assetID := range updatedAssets {
+		c.updateAssetBalance(assetID)
+	}
 
 	return corder, nil
 }
 
 // Send an order, process result, prepare and store the trackedTrade.
-func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter encrypt.Crypter) (*Order, uint32, error) {
+func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter encrypt.Crypter) (*Order, assetMap, error) {
 	mktID := marketName(form.Base, form.Quote)
 	mktConf := dc.marketConfig(mktID)
 	if mktConf == nil {
-		return nil, 0, newError(marketErr, "order placed for unknown market %q", mktID)
+		return nil, nil, newError(marketErr, "order placed for unknown market %q", mktID)
 	}
 
 	// Proceed with the order if there is no trade suspension
 	// scheduled for the market.
 	if !dc.running(mktID) {
-		return nil, 0, newError(marketErr, "%s market trading is suspended", mktID)
+		return nil, nil, newError(marketErr, "%s market trading is suspended", mktID)
 	}
 
 	rate, qty := form.Rate, form.Qty
 	if form.IsLimit && rate == 0 {
-		return nil, 0, newError(orderParamsErr, "zero-rate order not allowed")
+		return nil, nil, newError(orderParamsErr, "zero-rate order not allowed")
 	}
 
 	wallets, err := c.walletSet(dc, form.Base, form.Quote, form.Sell)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, err
 	}
 	fromWallet, toWallet := wallets.fromWallet, wallets.toWallet
 
@@ -4694,18 +4696,18 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 
 	err = prepareWallet(fromWallet)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, err
 	}
 
 	err = prepareWallet(toWallet)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, err
 	}
 
 	// Get an address for the swap contract.
 	redeemAddr, err := toWallet.RedemptionAddress()
 	if err != nil {
-		return nil, 0, codedError(walletErr, fmt.Errorf("%s RedemptionAddress error: %w", wallets.toAsset.Symbol, err))
+		return nil, nil, codedError(walletErr, fmt.Errorf("%s RedemptionAddress error: %w", wallets.toAsset.Symbol, err))
 	}
 
 	// Fund the order and prepare the coins.
@@ -4745,16 +4747,16 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 							"qty = %d %s, mid-gap = %d, base-qty = %d %s, lot size = %d",
 						qty, wallets.quoteAsset.Symbol, midGap, baseQty,
 						wallets.baseAsset.Symbol, lotSize)
-					return nil, 0, err
+					return nil, nil, err
 				}
 			} else if isAccountRedemption {
-				return nil, 0, newError(orderParamsErr, "cannot estimate redemption count")
+				return nil, nil, newError(orderParamsErr, "cannot estimate redemption count")
 			}
 		}
 	}
 
 	if lots == 0 {
-		return nil, 0, newError(orderParamsErr, "order quantity < 1 lot. qty = %d %s, rate = %d, lot size = %d",
+		return nil, nil, newError(orderParamsErr, "order quantity < 1 lot. qty = %d %s, rate = %d, lot size = %d",
 			qty, wallets.baseAsset.Symbol, rate, lotSize)
 	}
 
@@ -4768,7 +4770,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		Options:       form.Options,
 	})
 	if err != nil {
-		return nil, 0, codedError(walletErr, fmt.Errorf("FundOrder error for %s, funding quantity %d (%d lots): %w",
+		return nil, nil, codedError(walletErr, fmt.Errorf("FundOrder error for %s, funding quantity %d (%d lots): %w",
 			wallets.fromAsset.Symbol, fundQty, lots, err))
 	}
 
@@ -4843,12 +4845,12 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	}
 	err = order.ValidateOrder(ord, order.OrderStatusEpoch, lotSize)
 	if err != nil {
-		return nil, 0, fmt.Errorf("ValidateOrder error: %w", err)
+		return nil, nil, fmt.Errorf("ValidateOrder error: %w", err)
 	}
 
 	msgCoins, err := messageCoins(wallets.fromWallet, coins, redeemScripts)
 	if err != nil {
-		return nil, 0, fmt.Errorf("wallet %v failed to sign coins: %w", wallets.fromAsset.ID, err)
+		return nil, nil, fmt.Errorf("wallet %v failed to sign coins: %w", wallets.fromAsset.ID, err)
 	}
 
 	// Everything is ready. Send the order.
@@ -4860,14 +4862,14 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	if isAccountRedemption {
 		pubKeys, sigs, err := toWallet.SignMessage(nil, msgOrder.Serialize())
 		if err != nil {
-			return nil, 0, codedError(signatureErr, fmt.Errorf("SignMessage error: %w", err))
+			return nil, nil, codedError(signatureErr, fmt.Errorf("SignMessage error: %w", err))
 		}
 		if len(pubKeys) == 0 || len(sigs) == 0 {
-			return nil, 0, newError(signatureErr, "wrong number of pubkeys or signatures, %d & %d", len(pubKeys), len(sigs))
+			return nil, nil, newError(signatureErr, "wrong number of pubkeys or signatures, %d & %d", len(pubKeys), len(sigs))
 		}
 		redemptionReserves, err = accountRedeemer.ReserveNRedemptions(redemptionRefundLots, wallets.toAsset)
 		if err != nil {
-			return nil, 0, codedError(walletErr, fmt.Errorf("ReserveNRedemptions error: %w", err))
+			return nil, nil, codedError(walletErr, fmt.Errorf("ReserveNRedemptions error: %w", err))
 		}
 		msgTrade.RedeemSig = &msgjson.RedeemSig{
 			PubKey: pubKeys[0],
@@ -4885,7 +4887,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	if isAccountRefund {
 		refundReserves, err = accountRefunder.ReserveNRefunds(redemptionRefundLots, wallets.fromAsset)
 		if err != nil {
-			return nil, 0, codedError(walletErr, fmt.Errorf("ReserveNRefunds error: %w", err))
+			return nil, nil, codedError(walletErr, fmt.Errorf("ReserveNRefunds error: %w", err))
 		}
 		defer func() {
 			if !success {
@@ -4899,7 +4901,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	// be signed with that address's private key.
 	if changeID != nil {
 		if _, msgTrade.Coins[0].Sigs, err = fromWallet.SignMessage(nil, msgOrder.Serialize()); err != nil {
-			return nil, 0, fmt.Errorf("wallet %v failed to sign for redeem: %w", wallets.fromAsset.ID, err)
+			return nil, nil, fmt.Errorf("wallet %v failed to sign for redeem: %w", wallets.fromAsset.ID, err)
 		}
 	}
 
@@ -4917,7 +4919,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		// and created the trade order, but we lost the connection before
 		// receiving the response with the trade's order ID. Any preimage
 		// request will be unrecognized. This order is ABANDONED.
-		return nil, 0, fmt.Errorf("new order request with DEX server %v market %v failed: %w", dc.acct.host, mktID, err)
+		return nil, nil, fmt.Errorf("new order request with DEX server %v market %v failed: %w", dc.acct.host, mktID, err)
 	}
 
 	// If we encounter an error, perform some basic logging.
@@ -4929,7 +4931,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	err = validateOrderResponse(dc, result, ord, msgOrder) // stamps the order, giving it a valid ID
 	if err != nil {
 		logAbandon(fmt.Sprintf("order response validation failure: %v", err))
-		return nil, 0, fmt.Errorf("validateOrderResponse error: %w", err)
+		return nil, nil, fmt.Errorf("validateOrderResponse error: %w", err)
 	}
 
 	// Store the order.
@@ -4954,7 +4956,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	err = c.db.UpdateOrder(dbOrder)
 	if err != nil {
 		logAbandon(fmt.Sprintf("failed to store order in database: %v", err))
-		return nil, 0, fmt.Errorf("Order abandoned due to database error: %w", err)
+		return nil, nil, fmt.Errorf("Order abandoned due to database error: %w", err)
 	}
 
 	// Prepare and store the tracker and get the core.Order to return.
@@ -4995,9 +4997,17 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		c.notify(newOrderNote(TopicOrderPlaced, subject, details, db.Poke, corder))
 	}
 
+	updated := assetMap{fromWallet.AssetID: struct{}{}}
+	if isAccountRefund && fromWallet.parent != nil {
+		updated[fromWallet.parent.AssetID] = struct{}{}
+	}
+	if isAccountRedemption && toWallet.parent != nil {
+		updated[toWallet.parent.AssetID] = struct{}{}
+	}
+
 	success = true
 
-	return corder, wallets.fromWallet.AssetID, nil
+	return corder, updated, nil
 }
 
 // walletSet is a pair of wallets with asset configurations identified in useful
