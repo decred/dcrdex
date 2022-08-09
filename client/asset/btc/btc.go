@@ -1132,7 +1132,7 @@ func (btc *baseWallet) connect(ctx context.Context) (*sync.WaitGroup, error) {
 	}
 	bestBlockHash, err := chainhash.NewHashFromStr(bestBlockHdr.Hash)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get best block hash from %s node", btc.symbol)
+		return nil, fmt.Errorf("invalid best block hash from %s node: %v", btc.symbol, err)
 	}
 	// Check for method unknown error for feeRate method.
 	_, err = btc.estimateFee(btc.node, 1)
@@ -2144,7 +2144,7 @@ func (btc *baseWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 		}
 		pt := newOutPoint(txHash, rpcOP.Vout)
 		if !notFound[pt] {
-			continue
+			continue // unrelated to the order
 		}
 
 		txRaw, _, err := btc.rawWalletTx(txHash)
@@ -2192,8 +2192,6 @@ func (btc *baseWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 		if len(notFound) == 0 {
 			return coins, nil
 		}
-
-		return nil, fmt.Errorf("funding coin %s:%v not found", txHash, rpcOP.Vout)
 	}
 
 	// Some funding coins still not found after checking locked outputs.
@@ -3897,12 +3895,12 @@ func (btc *intermediaryWallet) watchBlocks(ctx context.Context) {
 		case <-ticker.C:
 			newTipHdr, err := btc.node.getBestBlockHeader()
 			if err != nil {
-				go btc.tipChange(fmt.Errorf("failed to get best block header from %s node", btc.symbol))
+				go btc.tipChange(fmt.Errorf("failed to get best block header from %s node: %v", btc.symbol, err))
 				continue
 			}
 			newTipHash, err := chainhash.NewHashFromStr(newTipHdr.Hash)
 			if err != nil {
-				go btc.tipChange(fmt.Errorf("failed to get best block hash from %s node", btc.symbol))
+				go btc.tipChange(fmt.Errorf("invalid best block hash from %s node: %v", btc.symbol, err))
 				continue
 			}
 
