@@ -11,7 +11,7 @@ require (
 
 require (
 	decred.org/cspp/v2 v2.0.0 // indirect
-	decred.org/dcrwallet/v2 v2.0.1 // indirect
+	decred.org/dcrwallet/v2 v2.0.8 // indirect
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
 	github.com/VictoriaMetrics/fastcache v1.6.0 // indirect
 	github.com/aead/siphash v1.0.1 // indirect
@@ -41,7 +41,7 @@ require (
 	github.com/decred/dcrd/addrmgr/v2 v2.0.0 // indirect
 	github.com/decred/dcrd/blockchain/stake/v4 v4.0.0 // indirect
 	github.com/decred/dcrd/blockchain/standalone/v2 v2.1.0 // indirect
-	github.com/decred/dcrd/blockchain/v4 v4.0.0 // indirect
+	github.com/decred/dcrd/blockchain/v4 v4.0.2 // indirect
 	github.com/decred/dcrd/certgen v1.1.1 // indirect
 	github.com/decred/dcrd/chaincfg/chainhash v1.0.3 // indirect
 	github.com/decred/dcrd/chaincfg/v3 v3.1.1 // indirect
