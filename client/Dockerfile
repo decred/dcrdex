@@ -10,7 +10,7 @@
 #
 
 # frontend build
-FROM node:16 AS nodebuilder
+FROM node:18 AS nodebuilder
 WORKDIR /root/dex
 COPY . .
 WORKDIR /root/dex/client/webserver/site/
@@ -18,7 +18,7 @@ RUN npm clean-install
 RUN npm run build
 
 # dexc binary build
-FROM golang:1.18 AS gobuilder
+FROM golang:1.19 AS gobuilder
 COPY --from=nodebuilder /root/dex/ /root/dex/
 WORKDIR /root/dex/client/cmd/dexc/
 RUN CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build
@@ -26,7 +26,7 @@ WORKDIR /root/dex/client/cmd/dexcctl/
 RUN CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build
 
 # Final image
-FROM alpine:3.14
+FROM alpine:3.16
 WORKDIR /root
 COPY --from=gobuilder /root/dex/client/cmd/dexc/dexc ./
 COPY --from=gobuilder /root/dex/client/cmd/dexcctl/dexcctl ./
