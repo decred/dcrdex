@@ -29,6 +29,9 @@ import (
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	btcwallet "github.com/btcsuite/btcwallet/wallet"
 	"github.com/btcsuite/btcwallet/wtxmgr"
+	neutrino "github.com/dcrlabs/neutrino-bch"
+	labschain "github.com/dcrlabs/neutrino-bch/chain"
+	"github.com/decred/slog"
 	"github.com/gcash/bchd/bchec"
 	bchchaincfg "github.com/gcash/bchd/chaincfg"
 	bchchainhash "github.com/gcash/bchd/chaincfg/chainhash"
@@ -43,7 +46,6 @@ import (
 	"github.com/gcash/bchwallet/walletdb"
 	_ "github.com/gcash/bchwallet/walletdb/bdb"
 	bchwtxmgr "github.com/gcash/bchwallet/wtxmgr"
-	"github.com/gcash/neutrino"
 	"github.com/jrick/logrotate/rotator"
 	btcneutrino "github.com/lightninglabs/neutrino"
 	"github.com/lightninglabs/neutrino/headerfs"
@@ -77,7 +79,7 @@ type bchSPVWallet struct {
 
 	// This section is populated in Start.
 	*wallet.Wallet
-	chainClient *chain.NeutrinoClient
+	chainClient *labschain.NeutrinoClient
 	cl          *neutrino.ChainService
 	loader      *wallet.Loader
 	neutrinoDB  walletdb.DB
@@ -220,7 +222,7 @@ func (w *bchSPVWallet) Start() (btc.SPVService, error) {
 	}
 	errCloser.Add(w.cl.Stop)
 
-	w.chainClient = chain.NewNeutrinoClient(w.chainParams, w.cl)
+	w.chainClient = labschain.NewNeutrinoClient(w.chainParams, w.cl, &logAdapter{w.log})
 
 	oldBday := w.Manager.Birthday()
 
@@ -1036,4 +1038,18 @@ func (f *fileLoggerPlus) Critical(v ...interface{}) {
 	f.log.Critical(v...)
 	f.Logger.Critical(v...)
 
+}
+
+type logAdapter struct {
+	dex.Logger
+}
+
+var _ bchlog.Logger = (*logAdapter)(nil)
+
+func (a *logAdapter) Level() bchlog.Level {
+	return bchlog.Level(a.Logger.Level())
+}
+
+func (a *logAdapter) SetLevel(lvl bchlog.Level) {
+	a.Logger.SetLevel(slog.Level(lvl))
 }

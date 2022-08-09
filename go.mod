@@ -2,10 +2,6 @@ module decred.org/dcrdex
 
 go 1.18
 
-// This patch branch includes https://github.com/gcash/neutrino/pull/34, 35, 36,
-// 37, and 38.
-replace github.com/gcash/neutrino => github.com/buck54321/neutrino-bch v0.0.0-20220616193517-b8fcce55a27c
-
 require (
 	decred.org/dcrwallet/v2 v2.0.8
 	github.com/btcsuite/btcd v0.23.1
@@ -20,6 +16,7 @@ require (
 	github.com/btcsuite/btcwallet/wtxmgr v1.5.0
 	github.com/davecgh/go-spew v1.1.1
 	github.com/dchest/blake2b v1.0.0
+	github.com/dcrlabs/neutrino-bch v0.0.0-20220809174944-921b271ba678
 	github.com/decred/base58 v1.0.4
 	github.com/decred/dcrd/addrmgr/v2 v2.0.0
 	github.com/decred/dcrd/blockchain/stake/v4 v4.0.0
@@ -49,7 +46,6 @@ require (
 	github.com/gcash/bchutil v0.0.0-20210113190856-6ea28dff4000
 	github.com/gcash/bchwallet v0.10.0
 	github.com/gcash/bchwallet/walletdb v0.0.0-20210524114850-4837f9798568
-	github.com/gcash/neutrino v0.0.0-20210524114821-3b1878290cf9
 	github.com/go-chi/chi/v5 v5.0.1
 	github.com/gorilla/websocket v1.5.0
 	github.com/jessevdk/go-flags v1.5.0
@@ -95,6 +91,7 @@ require (
 	github.com/edsrzf/mmap-go v1.0.0 // indirect
 	github.com/fjl/memsize v0.0.0-20190710130421-bcb5799ab5e5 // indirect
 	github.com/gballet/go-libpcsclite v0.0.0-20190607065134-2772fd86a8ff // indirect
+	github.com/gcash/neutrino v0.0.0-20210524114821-3b1878290cf9 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-stack/stack v1.8.0 // indirect
 	github.com/golang-jwt/jwt/v4 v4.3.0 // indirect
