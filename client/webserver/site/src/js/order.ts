@@ -256,7 +256,7 @@ export default class OrderPage extends BasePage {
       Doc.hide(swapSpan, cSwapSpan)
     }
 
-    Doc.tmplElement(card, 'status').textContent = OrderUtil.matchStatusString(m.status, m.side)
+    Doc.tmplElement(card, 'status').textContent = OrderUtil.matchStatusString(m)
   }
 }
 
