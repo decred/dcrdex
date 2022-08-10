@@ -192,12 +192,11 @@ export default class OrderPage extends BasePage {
   handleOrderNote (note: OrderNote) {
     const page = this.page
     const order = note.order
+    if (order.id !== this.orderID) return
     this.order = order
     const bttn = page.cancelBttn
-    if (bttn && order.id === this.orderID) {
-      if (bttn && order.status > OrderUtil.StatusBooked) Doc.hide(bttn)
-      page.status.textContent = OrderUtil.statusString(order)
-    }
+    if (bttn && order.status > OrderUtil.StatusBooked) Doc.hide(bttn)
+    page.status.textContent = OrderUtil.statusString(order)
     for (const m of order.matches || []) this.processMatch(m)
     this.showAccelerationButton()
   }
@@ -256,7 +255,7 @@ export default class OrderPage extends BasePage {
       Doc.hide(swapSpan, cSwapSpan)
     }
 
-    Doc.tmplElement(card, 'status').textContent = OrderUtil.matchStatusString(m.status, m.side)
+    Doc.tmplElement(card, 'status').textContent = OrderUtil.matchStatusString(m)
   }
 }
 

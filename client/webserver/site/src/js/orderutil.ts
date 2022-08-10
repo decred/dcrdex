@@ -110,8 +110,23 @@ export function settled (order: Order) {
  * matchStatusString is a string used to create a displayable string describing
  * describing the match status.
  */
-export function matchStatusString (status: number, side: number) {
-  switch (status) {
+export function matchStatusString (m: Match) {
+  if (m.revoked) {
+    // When revoked, match status is less important than pending action if still
+    // active, or the outcome if inactive.
+    if (m.active) {
+      return 'Revoked - Refund PENDING' // auto-redeem also possible, but action is pending
+    }
+    if (m.refund) {
+      return 'Revoked - Refunded'
+    }
+    if (m.redeem) {
+      return 'Revoked - Redeemed'
+    }
+    return 'Revoked - Complete'
+  }
+
+  switch (m.status) {
     case NewlyMatched:
       return '(0 / 4) Newly Matched'
     case MakerSwapCast:
@@ -119,14 +134,14 @@ export function matchStatusString (status: number, side: number) {
     case TakerSwapCast:
       return '(2 / 4) Second Swap Sent'
     case MakerRedeemed:
-      if (side === Maker) {
+      if (m.side === Maker) {
         return 'Match Complete'
       }
       return '(3 / 4) Maker Redeemed'
     case MatchComplete:
       return 'Match Complete'
   }
-  return 'Unknown Order Status'
+  return 'Unknown Match Status'
 }
 
 // Having the caller set these vars on load using an exported function makes
