@@ -712,6 +712,8 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 			put(maxFeeRateKey, uint64Bytes(md.MaxFeeRate)).
 			put(redeemMaxFeeRateKey, uint64Bytes(md.RedeemMaxFeeRate)).
 			put(redemptionFeesKey, uint64Bytes(md.RedemptionFeesPaid)).
+			put(fromVersionKey, uint32Bytes(md.FromVersion)).
+			put(toVersionKey, uint32Bytes(md.ToVersion)).
 			put(optionsKey, config.Data(md.Options)).
 			put(accelerationsKey, accelerationsB).
 			err()
