@@ -48,7 +48,7 @@ export default class OrderPage extends BasePage {
     page.forms.querySelectorAll('.form-closer').forEach(el => {
       Doc.bind(el, 'click', () => {
         if (this.refreshOnPopupClose) {
-          location.replace(location.href)
+          window.location.replace(window.location.href)
           return
         }
         Doc.hide(page.forms)
@@ -78,7 +78,7 @@ export default class OrderPage extends BasePage {
     Doc.bind(page.forms, 'mousedown', (e: MouseEvent) => {
       if (!Doc.mouseInElement(e, this.currentForm)) {
         if (this.refreshOnPopupClose) {
-          location.reload()
+          window.location.reload()
           return
         }
         Doc.hide(page.forms)
