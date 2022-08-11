@@ -192,13 +192,14 @@ func (b *bookie) logEpochReport(note *msgjson.EpochReportNote) error {
 	}
 
 	marketID := marketName(b.base, b.quote)
-	b.SetMatchesSummary(note.MatchesSummary, note.EndStamp)
-	fmt.Printf("matches summary: %+v\n\n", b.GetMatchesSummary())
-	b.send(&BookUpdate{
-		Action:   EpochMatchSummary,
-		MarketID: marketID,
-		Payload:  b.GetMatchesSummary(),
-	})
+	if note.MatchesSummary != nil {
+		b.SetMatchesSummary(note.MatchesSummary, note.EndStamp)
+		b.send(&BookUpdate{
+			Action:   EpochMatchSummary,
+			MarketID: marketID,
+			Payload:  b.GetMatchesSummary(),
+		})
+	}
 	for durStr, cache := range b.candleCaches {
 		c := cache.addCandle(&note.Candle)
 		if c == nil {
