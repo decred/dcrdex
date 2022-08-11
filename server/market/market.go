@@ -2589,16 +2589,23 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 		log.Errorf("Error updating API data collector: %v", err)
 	}
 
+	basicMatches := make(map[uint64]uint64)
+	for _, matchSet := range matches {
+		for _, match := range matchSet.Matches() {
+			basicMatches[match.Rate] += match.Quantity
+		}
+	}
 	// Send "epoch_report" notifications.
 	notifyChan <- &updateSignal{
 		action: epochReportAction,
 		data: sigDataEpochReport{
-			epochIdx:     epoch.Epoch,
-			epochDur:     epoch.Duration,
-			spot:         spot,
-			stats:        stats,
-			baseFeeRate:  feeRateBase,
-			quoteFeeRate: feeRateQuote,
+			epochIdx:       epoch.Epoch,
+			epochDur:       epoch.Duration,
+			spot:           spot,
+			stats:          stats,
+			baseFeeRate:    feeRateBase,
+			quoteFeeRate:   feeRateQuote,
+			matchesSummary: basicMatches,
 		},
 	}
 
