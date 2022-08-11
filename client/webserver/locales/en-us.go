@@ -87,6 +87,7 @@ var EnUS = map[string]string{
 	"immature":                       "immature",
 	"Sell Orders":                    "Sell Orders",
 	"Your Orders":                    "Your Orders",
+	"Recent Matches":                 "Recent Matches",
 	"Type":                           "Type",
 	"Side":                           "Side",
 	"Age":                            "Age",

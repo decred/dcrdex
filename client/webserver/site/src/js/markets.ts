@@ -50,7 +50,8 @@ import {
   ConnEventNote,
   Spot,
   OrderOption,
-  ConnectionStatus
+  ConnectionStatus,
+  RecentMatch
 } from './registry'
 
 const bind = Doc.bind
@@ -63,6 +64,7 @@ const epochOrderRoute = 'epoch_order'
 const candlesRoute = 'candles'
 const candleUpdateRoute = 'candle_update'
 const unmarketRoute = 'unmarket'
+const epochMatchSummaryRoute = 'epoch_match_summary'
 
 const lastMarketKey = 'selectedMarket'
 const chartRatioKey = 'chartRatio'
@@ -184,6 +186,9 @@ export default class MarketsPage extends BasePage {
   secondTicker: number
   candlesLoading: LoadTracker | null
   accelerateOrderForm: AccelerateOrderForm
+  recentMatches: RecentMatch[]
+  recentMatchesSortKey: string
+  recentMatchesSortDirection: 1 | -1
 
   constructor (main: HTMLElement, data: any) {
     super()
@@ -195,6 +200,7 @@ export default class MarketsPage extends BasePage {
     // that the screen is updated with the most recent one.
     this.maxOrderUpdateCounter = 0
     this.metaOrders = {}
+    this.recentMatches = []
     this.preorderCache = {}
     this.depthLines = {
       hover: [],
@@ -203,8 +209,12 @@ export default class MarketsPage extends BasePage {
     this.hovers = []
     // 'Your Orders' list sort key and direction.
     this.ordersSortKey = 'submitTime'
+    // 'Recent Matches' list sort key and direction.
+    this.recentMatchesSortKey = 'stamp'
     // 1 if sorting ascendingly, -1 if sorting descendingly.
     this.ordersSortDirection = 1
+    // same as this.ordersSortDirection.
+    this.recentMatchesSortDirection = 1
     // store original title so we can re-append it when updating market value.
     this.ogTitle = document.title
 
@@ -340,6 +350,8 @@ export default class MarketsPage extends BasePage {
     // Handle the candles update on the 'candles' route.
     ws.registerRoute(candleUpdateRoute, (data: BookUpdate) => { this.handleCandleUpdateRoute(data) })
 
+    // Handle the recent matches update on the 'epoch_report' route.
+    ws.registerRoute(epochMatchSummaryRoute, (data: BookUpdate) => { this.handleEpochMatchSummary(data) })
     // Bind the wallet unlock form.
     this.unlockForm = new UnlockWalletForm(page.unlockWalletForm, async () => { this.openFunc() })
     // Create a wallet
@@ -358,6 +370,24 @@ export default class MarketsPage extends BasePage {
     // Bind active orders list's header sort events.
     page.liveTable.querySelectorAll('[data-ordercol]')
       .forEach((th: HTMLElement) => bind(th, 'click', () => setOrdersSortCol(th.dataset.ordercol || '')))
+    // Bind active orders list's header sort events.
+    page.recentMatchesTable.querySelectorAll('[data-ordercol]')
+      .forEach((th: HTMLElement) => bind(
+        th, 'click', () => setRecentMatchesSortCol(th.dataset.ordercol || '')
+      ))
+
+    const setRecentMatchesSortCol = (key: string) => {
+      // First unset header's current sorted col classes.
+      unsetRecentMatchesSortColClasses()
+      if (this.recentMatchesSortKey === key) {
+        this.recentMatchesSortDirection *= -1
+      } else {
+        this.recentMatchesSortKey = key
+        this.recentMatchesSortDirection = 1
+      }
+      this.refreshRecentMatchesTable()
+      setRecentMatchesSortColClasses()
+    }
 
     const setOrdersSortCol = (key: string) => {
       // First unset header's current sorted col classes.
@@ -375,8 +405,9 @@ export default class MarketsPage extends BasePage {
       setOrdersSortColClasses()
     }
 
-    const sortClassByDirection = () => {
-      if (this.ordersSortDirection === 1) return 'sorted-asc'
+    // sortClassByDirection receives a sort direction and return a class based on it.
+    const sortClassByDirection = (element: 1 | -1) => {
+      if (element === 1) return 'sorted-asc'
       return 'sorted-dsc'
     }
 
@@ -385,14 +416,26 @@ export default class MarketsPage extends BasePage {
         .forEach(th => th.classList.remove('sorted-asc', 'sorted-dsc'))
     }
 
+    const unsetRecentMatchesSortColClasses = () => {
+      page.recentMatchesTable.querySelectorAll('[data-ordercol]')
+        .forEach(th => th.classList.remove('sorted-asc', 'sorted-dsc'))
+    }
+
     const setOrdersSortColClasses = () => {
       const key = this.ordersSortKey
-      const sortCls = sortClassByDirection()
+      const sortCls = sortClassByDirection(this.ordersSortDirection)
       Doc.safeSelector(page.liveTable, `[data-ordercol=${key}]`).classList.add(sortCls)
+    }
+
+    const setRecentMatchesSortColClasses = () => {
+      const key = this.recentMatchesSortKey
+      const sortCls = sortClassByDirection(this.recentMatchesSortDirection)
+      Doc.safeSelector(page.recentMatchesTable, `[data-ordercol=${key}]`).classList.add(sortCls)
     }
 
     // Set default's sorted col header classes.
     setOrdersSortColClasses()
+    setRecentMatchesSortColClasses()
 
     const closePopups = () => {
       Doc.hide(page.forms)
@@ -708,6 +751,7 @@ export default class MarketsPage extends BasePage {
       this.maxEstimateTimer = null
     }
     const mktId = marketID(baseCfg.symbol, quoteCfg.symbol)
+    this.bindToRecentMatches(dex.markets[mktId].recentmatches)
     this.market = {
       dex: dex,
       sid: mktId, // A string market identifier used by the DEX.
@@ -736,6 +780,7 @@ export default class MarketsPage extends BasePage {
       if (dex.candleDurs.indexOf(this.candleDur) === -1) this.candleDur = dex.candleDurs[0]
       this.loadCandles()
     }
+    this.refreshRecentMatchesTable()
     this.setLoaderMsgVisibility()
     this.setRegistrationStatusVisibility()
     this.resolveOrderFormVisibility()
@@ -1338,6 +1383,11 @@ export default class MarketsPage extends BasePage {
     this.candleChart.setCandles(data.payload, this.market.cfg, this.market.baseUnitInfo, this.market.quoteUnitInfo)
   }
 
+  handleEpochMatchSummary (data: BookUpdate) {
+    this.bindToRecentMatches(data.payload)
+    this.refreshRecentMatchesTable()
+  }
+
   /* handleCandleUpdateRoute is the handler for 'candle_update' notifications. */
   handleCandleUpdateRoute (data: BookUpdate) {
     if (data.host !== this.market.dex.host) return
@@ -1829,6 +1879,58 @@ export default class MarketsPage extends BasePage {
           break
       }
     }
+  }
+
+  /*
+   * ordersSortCompare returns sort compare function according to the active
+   * sort key and direction.
+   */
+  recentMatchesSortCompare () {
+    switch (this.recentMatchesSortKey) {
+      case 'rate':
+        return (a: RecentMatch, b: RecentMatch) => this.recentMatchesSortDirection * (a.Rate - b.Rate)
+      case 'qty':
+        return (a: RecentMatch, b: RecentMatch) => this.recentMatchesSortDirection * (a.Qty - b.Qty)
+      case 'age':
+        return (a: RecentMatch, b:RecentMatch) => this.recentMatchesSortDirection * (a.Age.getTime() - b.Age.getTime())
+    }
+  }
+
+  refreshRecentMatchesTable () {
+    const page = this.page
+    const recentMatches = this.recentMatches
+    Doc.empty(page.recentMatchesLiveList)
+    if (!recentMatches) return
+    const compare = this.recentMatchesSortCompare()
+    recentMatches.sort(compare)
+    for (const match of recentMatches) {
+      const row = page.recentMatchesTemplate.cloneNode(true) as HTMLElement
+
+      this.updateRecentMatchRow(row, match)
+
+      page.recentMatchesLiveList.append(row)
+    }
+  }
+
+  updateRecentMatchRow (tr: HTMLElement, match: RecentMatch) {
+    app().bindTooltips(tr)
+    updateDataCol(tr, 'rate', Doc.formatCoinValue(match.Rate / this.market.rateConversionFactor))
+    // change rate color based if is sell or not.
+    updateDataCol(tr, 'qty', Doc.formatCoinValue(match.Qty, this.market.baseUnitInfo))
+    updateDataCol(tr, 'age', match.Age.toLocaleDateString())
+    updateToolTipCol(tr, 'age', match.Age.toLocaleTimeString())
+  }
+
+  bindToRecentMatches (matches: RecentMatch[]) {
+    // if does not have new matches, just skip.
+    if (!matches) {
+      this.recentMatches = []
+      return
+    }
+    for (let i = 0; i < matches.length; i++) {
+      matches[i].Age = new Date(matches[i].Age)
+    }
+    this.recentMatches = matches
   }
 
   setBalanceVisibility () {
@@ -2703,6 +2805,10 @@ function swapBttns (before: HTMLElement, now: HTMLElement) {
  */
 function updateDataCol (tr: HTMLElement, col: string, s: string) {
   Doc.tmplElement(tr, col).textContent = s
+}
+
+function updateToolTipCol (tr: HTMLElement, col: string, s: string) {
+  Doc.tmplElement(tr, col).dataset.tooltip = s
 }
 
 /*

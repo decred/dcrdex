@@ -54,6 +54,12 @@ type rateSell struct {
 	sell bool
 }
 
+type MatchSummary struct {
+	Rate uint64
+	Qty  uint64
+	Age  uint64
+}
+
 // OrderBook represents a client tracked order book.
 type OrderBook struct {
 	log      dex.Logger
@@ -78,6 +84,9 @@ type OrderBook struct {
 	currentEpoch uint64
 	proofedEpoch uint64
 	epochQueues  map[uint64]*EpochQueue
+
+	matchSummaryMtx sync.Mutex
+	matchesSummary  []*MatchSummary
 
 	// feeRates is a separate struct to account for atomic field alignment in
 	// 32-bit systems. See also https://golang.org/pkg/sync/atomic/#pkg-note-BUG
@@ -603,4 +612,31 @@ func (ob *OrderBook) BestFill(sell bool, qty uint64) ([]*Fill, bool) {
 // The qty given will be in units of quote asset.
 func (ob *OrderBook) BestFillMarketBuy(qty, lotSize uint64) ([]*Fill, bool) {
 	return ob.sells.bestFill(qty, true, lotSize)
+}
+
+func (ob *OrderBook) SetMatchesSummary(matches map[uint64]uint64, ts uint64) {
+	ob.matchSummaryMtx.Lock()
+	defer ob.matchSummaryMtx.Unlock()
+	newMatchesSummary := make([]*MatchSummary, len(matches))
+	i := 0
+	for rate, qty := range matches {
+		newMatchesSummary[i] = &MatchSummary{
+			Rate: rate,
+			Qty:  qty,
+			Age:  ts,
+		}
+		i++
+	}
+	if ob.matchesSummary == nil {
+		ob.matchesSummary = newMatchesSummary
+		return
+	}
+	ob.matchesSummary = append(newMatchesSummary, ob.matchesSummary...)
+}
+
+func (ob *OrderBook) GetMatchesSummary() []*MatchSummary {
+	if ob.matchesSummary == nil {
+		ob.matchesSummary = make([]*MatchSummary, 0)
+	}
+	return ob.matchesSummary
 }

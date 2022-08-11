@@ -191,6 +191,14 @@ func (b *bookie) logEpochReport(note *msgjson.EpochReportNote) error {
 		return fmt.Errorf("epoch report has zero-valued candle end stamp")
 	}
 
+	marketID := marketName(b.base, b.quote)
+	b.SetMatchesSummary(note.MatchesSummary, note.EndStamp)
+	fmt.Printf("matches summary: %+v\n\n", b.GetMatchesSummary())
+	b.send(&BookUpdate{
+		Action:   EpochMatchSummary,
+		MarketID: marketID,
+		Payload:  b.GetMatchesSummary(),
+	})
 	for durStr, cache := range b.candleCaches {
 		c := cache.addCandle(&note.Candle)
 		if c == nil {
@@ -200,7 +208,7 @@ func (b *bookie) logEpochReport(note *msgjson.EpochReportNote) error {
 		b.send(&BookUpdate{
 			Action:   CandleUpdateAction,
 			Host:     b.dc.acct.host,
-			MarketID: marketName(b.base, b.quote),
+			MarketID: marketID,
 			Payload: CandleUpdate{
 				Dur:          durStr,
 				DurMilliSecs: uint64(dur.Milliseconds()),
@@ -1053,7 +1061,7 @@ func handleEpochReportMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) erro
 
 // handleEpochOrderMsg is called when an epoch_order notification is
 // received.
-func handleEpochOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+func handleEpochOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error {
 	note := new(msgjson.EpochOrderNote)
 	err := msg.Unmarshal(note)
 	if err != nil {

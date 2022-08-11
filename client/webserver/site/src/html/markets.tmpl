@@ -420,6 +420,34 @@
       </div>
     </div>
 
+    {{- /* Recently Matched orders */ -}}
+    <div class="bg0 p-0 col-24 col-xxl-100 d-flex flex-column align-items-stretch">
+    {{/* <div class="bg0 p-0 col-24 col-xxl-10 d-flex flex-column align-items-stretch"> */}}
+        <div class="market-header text-center fs14 py-1 brdrleft">
+          [[[Recent Matches]]]
+        </div>
+        <div class=" brdrleft flex-grow-1 bg1 position-relative">
+          <div class="stylish-overflow">
+            <table id="recentMatchesTable" class="ordertable">
+              <thead>
+                <tr>
+                  <th data-ordercol="stamp">[[[Age]]] <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="rate">[[[Rate]]] <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="qty">[[[Quantity]]] <span class="ico-arrowdown"></span></th>
+                  <th class="last"></th>
+                </tr>
+              </thead>
+              <tbody id="recentMatchesLiveList">
+                <tr id="recentMatchesTemplate">
+                  <td data-tmpl="age" data-tooltip=" "></td>
+                  <td data-tmpl="rate"></td>
+                  <td data-tmpl="qty"></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
   </div>
 
   {{- /* POP-UP FORMS */ -}}

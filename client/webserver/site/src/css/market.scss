@@ -703,6 +703,41 @@ div.numorders {
   }
 }
 
+#recentMatchesTable {
+  th {
+    align-items: center;
+
+    &:hover {
+      opacity: 0.7;
+    }
+
+    .ico-arrowdown {
+      display: inline-block;
+      visibility: hidden;
+      vertical-align: middle;
+      font-size: 10px;
+      margin-left: 5px;
+    }
+
+    &.sorted-dsc {
+      .ico-arrowdown {
+        visibility: visible;
+      }
+    }
+
+    &.sorted-asc {
+      .ico-arrowdown {
+        visibility: visible;
+        transform: rotate(180deg);
+      }
+    }
+  }
+
+  tr {
+    cursor: pointer;
+  }
+}
+
 #vDetailPane {
   max-width: 425px;
 

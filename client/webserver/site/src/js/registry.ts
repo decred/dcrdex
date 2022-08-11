@@ -56,6 +56,7 @@ export interface Market {
   buybuffer: number
   orders: Order[]
   spot: Spot
+  recentmatches: RecentMatch[]
 }
 
 export interface Order {
@@ -315,6 +316,12 @@ export interface OrderNote extends CoreNote {
   order: Order
 }
 
+export interface RecentMatch {
+  Rate: number
+  Qty: number
+  Age: Date
+}
+
 export interface EpochNote extends CoreNote {
   host: string
   marketID: string
@@ -442,6 +449,7 @@ export interface BookUpdate {
   action: string
   host: string
   marketID: string
+  matchessummary: RecentMatch[]
   payload: any
 }
 
