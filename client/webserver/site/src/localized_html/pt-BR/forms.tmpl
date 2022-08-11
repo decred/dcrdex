@@ -74,6 +74,18 @@
 
   <div class="fs15 pt-3 text-center d-hide errcolor text-break" data-tmpl="newWalletErr"></div>
 </div>
+<div class="d-hide flex-center flex-column fs16" data-tmpl="parentSyncing">
+  <div class="p-3">
+    Synchronizing <img data-tmpl="parentLogo" class="micro-icon"> <span data-tmpl="parentName"></span>.
+  </div>
+
+  <div class="fs20">
+    <span data-tmpl="parentSyncPct"></span> %
+  </div>
+  <div class="p-3">
+    <img data-tmpl="childLogo" class="micro-icon"> <span data-tmpl="childName"></span> wallet will be created after sync.
+  </div>
+</div>
 {{end}}
 
 {{define "unlockWalletForm"}}
@@ -155,7 +167,7 @@
       <img class="reg-asset-logo" data-tmpl="logo">
     </div>
     <div class="reg-asset-details d-flex flex-column justify-content-center">
-      <div class="fs18" data-tmpl="fee"></div>
+      <div class="fs18"><span data-tmpl="feeAmt"></span> <span data-tmpl="feeSymbol"></span></div>
       <div class="fs14"><span data-tmpl="confs"></span> confirmações</div>
       <div class="fs14 readygreen" data-tmpl="ready"></div>
     </div>
@@ -172,11 +184,12 @@
             <td class="pe-3">
               <div class="d-flex align-items-center">
                 <img class="reg-market-logo" data-tmpl="logo">
-                <span data-tmpl="name"></span>
+                <span data-tmpl="baseName"></span>-<span data-tmpl="quoteName"></span>
               </div>
             </td>
             <td>
               <span data-tmpl="lotSize"></span>
+              <span data-tmpl="lotSizeSymbol"></span>
               <span data-tmpl="quoteLotSize" class="d-hide"></span>
             </td>
           </tr>
@@ -465,18 +478,29 @@
     </div>
     <div class="flex-center mt-1">
       <span class="fs16 me-1">Balanço:</span>
-      <span class="fs20 mx-1" data-tmpl="balance"></span>
+      <span class="fs20 me-1" data-tmpl="balance"></span>
       <span class="fs16 grey unit">XYZ</span>
     </div>
-    <div class="mb-2 flex-center flex-row">
+    <div class="mb-1 flex-center flex-row">
       <span class="fs16 me-1">Taxa de registro:</span>
-      <span class="fs20 mx-1" data-tmpl="fee"></span>
+      <span class="fs20 me-1" data-tmpl="fee"></span>
       <span class="fs16 grey unit">XYZ</span>
     </div>
-    <div class="fs14">Seu Endereço de Depósito</div>
+    <div class="mb-1 flex-center flex-row" data-tmpl="txFeeBox">
+      <span class="fs16 me-1">Transaction Fees:</span>
+      <span class="fs20 me-1" data-tmpl="txFee"></span>
+      <span class="fs16 grey unit" data-tmpl="txFeeUnit">XYZ</span>
+    </div>
+    <div class="mb-1 flex-center flex-row d-hide" data-tmpl="txFeeBalanceBox">
+      <span class="fs16 me-1">Tx Fee Balance:</span>
+      <span class="fs20 me-1" data-tmpl="parentBal">0</span>
+      <span class="fs16 grey unit" data-tmpl="parentBalUnit">XYZ</span>
+    </div>
+    <div class="fs14 mt-1">Seu Endereço de Depósito</div>
     <div class="fs14 mono bg0 p-1 select-all" data-tmpl="depoAddr"></div>
     <span data-tmpl="sendEnough">Make sure you send enough to also cover network fees. You may deposit as much as you like to your wallet, since only the fee amount will be used in the next step. The deposit must confirm to proceed.</span>
     <span data-tmpl="sendEnoughWithEst">Deposit at least <span data-tmpl="totalFees"></span> <span class="unit">XYZ</span> to also cover network fees. You may deposit as much as you like to your wallet, since only the required amount will be used in the next step. The deposit must confirm to proceed.</span>
+    <span data-tmpl="sendEnoughForToken">Deposit at least <span data-tmpl="tokenFees"></span> <span class="unit">XYZ</span> and <span data-tmpl="parentFees"></span> <span data-tmpl="parentUnit">XYZ</span> to also cover fees. You may deposit as much as you like to your wallet, since only the required amount will be used in the next step. The deposit must confirm to proceed.</span>
   </div>
 </div>
 

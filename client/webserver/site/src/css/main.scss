@@ -467,3 +467,9 @@ div.border1 {
 .preline {
   white-space: pre-line;
 }
+
+span.token-aware-symbol sup {
+  font-size: 0.6em;
+  position: relative;
+  top: -0.6em;
+}

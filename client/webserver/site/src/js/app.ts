@@ -579,7 +579,7 @@ export default class Application {
         this.walletMap[wallet.assetID] = wallet
         const bal = wallet.balance.available
         const balances = this.main.querySelectorAll(`[data-balance-target="${wallet.assetID}"]`)
-        balances.forEach(el => { el.textContent = Doc.formatFullPrecision(bal, asset.info.unitinfo) })
+        balances.forEach(el => { el.textContent = Doc.formatFullPrecision(bal, asset.unitInfo) })
         break
       }
       case 'match': {
@@ -830,7 +830,7 @@ export default class Application {
    */
   unitInfo (assetID: number, xc?: Exchange): UnitInfo {
     const supportedAsset = this.assets[assetID]
-    if (supportedAsset) return supportedAsset.info.unitinfo
+    if (supportedAsset) return supportedAsset.unitInfo
     if (!xc) {
       throw Error(`no supported asset info for id = ${assetID}, and no exchange info provided`)
     }
@@ -845,12 +845,18 @@ export default class Application {
   }
 
   walletDefinition (assetID: number, walletType: string): WalletDefinition {
-    const assetInfo = this.assets[assetID].info
-    if (walletType === '') return assetInfo.availablewallets[assetInfo.emptyidx]
-    return assetInfo.availablewallets.filter(def => def.type === walletType)[0]
+    const asset = this.assets[assetID]
+    if (asset.token) return asset.token.definition
+    if (!asset.info) throw Error('where\'s the wallet info?')
+    if (walletType === '') return asset.info.availablewallets[asset.info.emptyidx]
+    return asset.info.availablewallets.filter(def => def.type === walletType)[0]
   }
 
   currentWalletDefinition (assetID: number): WalletDefinition {
+    const asset = this.assets[assetID]
+    if (asset.token) {
+      return asset.token.definition
+    }
     return this.walletDefinition(assetID, this.assets[assetID].wallet.type)
   }
 

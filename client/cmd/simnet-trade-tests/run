@@ -48,6 +48,10 @@ case $1 in
     ./simnet-trade-tests --base zec --quote btc --regasset btc ${@:2}
     ;;
 
+  dcrdextt)
+    ./simnet-trade-tests --base1node trading1 --base2node trading2 --quote dextt.eth ${@:2}
+    ;;
+
   help|--help|-h)
     ./simnet-trade-tests --help
     cat <<EOF
@@ -66,6 +70,7 @@ ltcelectrumdcr - Litecoin Electrum wallet and Decred RPC wallet on LTC-DCR marke
 dcrdoge - RPC wallets on DCR-DOGE market
 dcreth - Decred RPC wallet and Ethereum native wallet on DCR-ETH market
 zecbtc - RPC wallets on ZEC-BTC market
+dcrdextt - Decred RPC wallet and Ethereum wallet with dextt.eth test token on market DCR-DEXTT.ETH
 
 ---------------------
 

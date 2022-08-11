@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -22,6 +23,7 @@ const stackerSpread = 0.05
 // side before submitting taker orders for the other. There is some built-in
 // randomness to the rates and quantities of the sideStacker's orders.
 type sideStacker struct {
+	log     dex.Logger
 	node    string
 	seller  bool
 	metered bool
@@ -36,8 +38,9 @@ type sideStacker struct {
 
 var _ Trader = (*sideStacker)(nil)
 
-func newSideStacker(seller bool, numStanding, ordsPerEpoch int, node string, metered bool) *sideStacker {
+func newSideStacker(seller bool, numStanding, ordsPerEpoch int, node string, metered bool, log dex.Logger) *sideStacker {
 	return &sideStacker{
+		log:          log,
 		node:         node,
 		seller:       seller,
 		metered:      metered,
@@ -56,11 +59,11 @@ func runSideStacker(numStanding, ordsPerEpoch int) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		runTrader(newSideStacker(true, numStanding, ordsPerEpoch, alpha, false), "STACKER:0")
+		runTrader(newSideStacker(true, numStanding, ordsPerEpoch, alpha, false, log.SubLogger("STACKER:0")), "STACKER:0")
 	}()
 	go func() {
 		defer wg.Done()
-		runTrader(newSideStacker(false, numStanding, ordsPerEpoch, alpha, false), "STACKER:1")
+		runTrader(newSideStacker(false, numStanding, ordsPerEpoch, alpha, false, log.SubLogger("STACKER:1")), "STACKER:1")
 	}()
 	wg.Wait()
 
@@ -78,7 +81,7 @@ func (s *sideStacker) SetupWallets(m *Mantle) {
 	baseCoins, quoteCoins, minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := walletConfig(maxOrderLots, maxActiveOrders, s.seller)
 	m.createWallet(baseSymbol, s.node, minBaseQty, maxBaseQty, baseCoins)
 	m.createWallet(quoteSymbol, s.node, minQuoteQty, maxQuoteQty, quoteCoins)
-	m.log.Infof("Side Stacker has been initialized with %d target standing orders, %d orders "+
+	s.log.Infof("Side Stacker has been initialized with %d target standing orders, %d orders "+
 		"per epoch, %s to %s %s balance, and %s to %s %s balance, %d initial %s coins, %d initial %s coins",
 		s.numStanding, s.ordsPerEpoch, valString(minBaseQty, baseSymbol), valString(maxBaseQty, baseSymbol), baseSymbol,
 		valString(minQuoteQty, quoteSymbol), valString(maxQuoteQty, quoteSymbol), quoteSymbol, baseCoins, baseSymbol, quoteCoins, quoteSymbol)
@@ -90,7 +93,7 @@ func (s *sideStacker) SetupWallets(m *Mantle) {
 func (s *sideStacker) HandleNotification(m *Mantle, note core.Notification) {
 	switch n := note.(type) {
 	case *core.EpochNotification:
-		m.log.Debugf("Epoch note received: %s", mustJSON(note))
+		s.log.Debugf("Epoch note received: %s", mustJSON(note))
 		if n.MarketID == market {
 			// delay the orders, since the epoch note comes before the order
 			// book updates associated with the last epoch. Ideally, we want a
@@ -107,7 +110,7 @@ func (s *sideStacker) HandleNotification(m *Mantle, note core.Notification) {
 			m.replenishBalances()
 		}
 	case *core.BalanceNote:
-		// log.Infof("balance for %s = %d available, %d locked", unbip(n.AssetID), n.Balance.Available, n.Balance.Locked)
+		s.log.Infof("Balance: %s = %d available, %d locked", unbip(n.AssetID), n.Balance.Available, n.Balance.Locked)
 	}
 }
 
@@ -157,7 +160,7 @@ func (s *sideStacker) stack(m *Mantle) {
 	}
 	numNewStanding = clamp(numNewStanding, 0, s.ordsPerEpoch)
 	numMatchers := s.ordsPerEpoch - numNewStanding
-	m.log.Infof("Side Stacker (seller = %t) placing %d standers and %d matchers. Currently %d active orders",
+	s.log.Infof("Seller = %t placing %d standers and %d matchers. Currently %d active orders",
 		s.seller, numNewStanding, numMatchers, activeOrders)
 
 	qty := func() uint64 {

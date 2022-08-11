@@ -119,13 +119,15 @@ cat > "${NODES_ROOT}/genesis.json" <<EOF
 EOF
 
 cat > "${NODES_ROOT}/harness-ctl/send.js" <<EOF
-function send(from, to, amt) {
-  personal.sendTransaction({from:"0x"+from,to:"0x"+to,value:amt,gasPrice:82000000000}, "${PASSWORD}")
-  return true;
+function send(from, to, value) {
+  from = from.startsWith('0x') ? from : '0x' + from
+  to = to.startsWith('0x') ? to : '0x' + to
+  return personal.sendTransaction({ from, to, value, gasPrice: 82000000000 }, "${PASSWORD}")
 }
 EOF
 
 cat > "${NODES_ROOT}/harness-ctl/sendtoaddress" <<EOF
+#!/usr/bin/env bash
 "${NODES_ROOT}/harness-ctl/alpha" "attach --preload ${NODES_ROOT}/harness-ctl/send.js --exec send(\"${ALPHA_ADDRESS}\",\"\$1\",\$2*1e18)"
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/sendtoaddress"
@@ -350,6 +352,11 @@ cat > "${NODES_ROOT}/harness-ctl/loadTestToken.js" <<EOF
     var testToken = contract.at('${TEST_TOKEN_CONTRACT_ADDR}')
     web3.eth.defaultAccount = web3.eth.accounts[1]
     personal.unlockAccount(web3.eth.defaultAccount, '${PASSWORD}')
+
+    function transfer (addr, val) {
+      addr = addr.startsWith('0x') ? addr : '0x'+addr
+      return testToken.transfer(addr, val*1e18)
+    }
 EOF
 
 cat > "${NODES_ROOT}/harness-ctl/alphaWithToken.sh" <<EOF
@@ -357,6 +364,12 @@ cat > "${NODES_ROOT}/harness-ctl/alphaWithToken.sh" <<EOF
   ./alpha attach --preload loadTestToken.js
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/alphaWithToken.sh"
+
+cat > "${NODES_ROOT}/harness-ctl/sendTokens" <<EOF
+#!/usr/bin/env bash
+./alpha attach --preload loadTestToken.js --exec "transfer(\"\$1\",\$2)"
+EOF
+chmod +x "${NODES_ROOT}/harness-ctl/sendTokens"
 
 # ERC20Swap contract depends on the address of the test token contract, so this
 # is deployed last.

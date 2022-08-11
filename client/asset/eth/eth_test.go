@@ -16,6 +16,7 @@ import (
 	"math/rand"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -504,6 +505,8 @@ func newTestNode(assetID uint32) *testNode {
 
 	ttc := &tTokenContractor{
 		tContractor: tc,
+		allow:       new(big.Int),
+		approveTx:   types.NewTransaction(4, common.Address{0x34}, big.NewInt(1e9), defaultGasFeeLimit, big.NewInt(2e9), nil),
 	}
 	if assetID != BipID {
 		c = ttc
@@ -999,12 +1002,18 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 	}
 	checkFundOrderResult := func(coins asset.Coins, redeemScripts []dex.Bytes, err error, test fundOrderTest) {
 		t.Helper()
+		if tw, is := w.(*TokenWallet); is {
+			tw.approval = atomic.Value{}
+		}
 		if test.wantErr && err == nil {
 			t.Fatalf("%v: expected error but didn't get", test.testName)
 		}
 		if test.wantErr {
 			return
 		}
+		// if !node.tokenContractor.approved {
+		// 	t.Fatalf("token not approved")
+		// }
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", test.testName, err)
 		}
@@ -1436,6 +1445,7 @@ func testSwap(t *testing.T, assetID uint32) {
 
 	receivingAddress := "0x2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27"
 	node.tContractor.initTx = types.NewTx(&types.DynamicFeeTx{})
+	node.tokenContractor.allow = unlimitedAllowance
 
 	coinIDsForAmounts := func(coinAmounts []uint64, n uint64) []dex.Bytes {
 		coinIDs := make([]dex.Bytes, 0, len(coinAmounts))
@@ -1719,21 +1729,6 @@ func TestPreRedeem(t *testing.T) {
 	if preRedeem.Estimate.RealisticBestCase >= preRedeem.Estimate.RealisticWorstCase {
 		t.Fatalf("token best case > worst case")
 	}
-
-	// Make sure a lower allowance results in higher fee estimate.
-	oldEst := preRedeem.Estimate.RealisticWorstCase
-	node.tokenContractor.allow = new(big.Int).Sub(unlimitedAllowanceReplenishThreshold, big.NewInt(1))
-	preRedeem, err = w.PreRedeem(form)
-	if err != nil {
-		t.Fatalf("unexpected token PreRedeem with approval error: %v", err)
-	}
-
-	approvalCost := preRedeem.Estimate.RealisticWorstCase - oldEst
-	expApprovalCost := tokenGases.Approve * form.FeeSuggestion
-	if approvalCost != expApprovalCost {
-		t.Fatalf("unexpected approval cost: wanted %d, got %d", expApprovalCost, approvalCost)
-	}
-
 }
 
 func TestRedeem(t *testing.T) {
@@ -1772,7 +1767,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			LockTime:    time.Now(),
 			Initiator:   testAddressB,
 			Participant: testAddressA,
-			Value:       value,
+			Value:       dexeth.GweiToWei(value),
 			State:       step,
 		}
 		contractorV1.swapMap[secretHash] = &swap
@@ -2241,7 +2236,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			// secretHash should equal redemption.Spends.SecretHash, but it's
 			// not part of the Redeem code, just the test input consistency.
 			swap := contractorV1.swapMap[secretHash]
-			totalSwapValue += swap.Value
+			totalSwapValue += dexeth.WeiToGwei(swap.Value)
 		}
 		if out.Value() != totalSwapValue {
 			t.Fatalf("expected coin value to be %d but got %d",
@@ -2456,7 +2451,7 @@ func overMaxWei() *big.Int {
 func packInitiateDataV0(initiations []*dexeth.Initiation) ([]byte, error) {
 	abiInitiations := make([]swapv0.ETHSwapInitiation, 0, len(initiations))
 	for _, init := range initiations {
-		bigVal := new(big.Int).SetUint64(init.Value)
+		bigVal := new(big.Int).Set(init.Value)
 		abiInitiations = append(abiInitiations, swapv0.ETHSwapInitiation{
 			RefundTimestamp: big.NewInt(init.LockTime.Unix()),
 			SecretHash:      init.SecretHash,
@@ -2506,13 +2501,13 @@ func testAuditContract(t *testing.T, assetID uint32) {
 					LockTime:    now,
 					SecretHash:  secretHashes[0],
 					Participant: testAddressA,
-					Value:       1,
+					Value:       dexeth.GweiToWei(1),
 				},
 				{
 					LockTime:    laterThanNow,
 					SecretHash:  secretHashes[1],
 					Participant: testAddressB,
-					Value:       1,
+					Value:       dexeth.GweiToWei(1),
 				},
 			},
 			wantRecipient:  testAddressB.Hex(),
@@ -2526,7 +2521,7 @@ func testAuditContract(t *testing.T, assetID uint32) {
 					LockTime:    now,
 					SecretHash:  secretHashes[0],
 					Participant: testAddressA,
-					Value:       1,
+					Value:       dexeth.GweiToWei(1),
 				},
 			},
 			differentHash: true,
@@ -2545,13 +2540,13 @@ func testAuditContract(t *testing.T, assetID uint32) {
 					LockTime:    now,
 					SecretHash:  secretHashes[0],
 					Participant: testAddressA,
-					Value:       1,
+					Value:       dexeth.GweiToWei(1),
 				},
 				{
 					LockTime:    laterThanNow,
 					SecretHash:  secretHashes[1],
 					Participant: testAddressB,
-					Value:       1,
+					Value:       dexeth.GweiToWei(1),
 				},
 			},
 			wantErr: true,
@@ -2570,13 +2565,13 @@ func testAuditContract(t *testing.T, assetID uint32) {
 					LockTime:    now,
 					SecretHash:  secretHashes[0],
 					Participant: testAddressA,
-					Value:       1,
+					Value:       dexeth.GweiToWei(1),
 				},
 				{
 					LockTime:    laterThanNow,
 					SecretHash:  secretHashes[1],
 					Participant: testAddressB,
-					Value:       1,
+					Value:       dexeth.GweiToWei(1),
 				},
 			},
 			badTxBinary: true,
@@ -3375,10 +3370,6 @@ func testRedemptionReserves(t *testing.T, assetID uint32) {
 	if err != nil {
 		t.Fatalf("error reserving with token approval: %v", err)
 	}
-	if !node.tokenContractor.approved {
-		t.Fatalf("token not approved")
-	}
-
 }
 
 func ethToGwei(v uint64) uint64 {

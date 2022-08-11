@@ -9,5 +9,10 @@
 package main
 
 import (
+	dexeth "decred.org/dcrdex/dex/networks/eth"
 	_ "decred.org/dcrdex/server/asset/eth" // register eth asset
 )
+
+func init() {
+	dexeth.MaybeReadSimnetAddrs()
+}

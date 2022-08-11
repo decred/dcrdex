@@ -10,6 +10,7 @@ import (
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
+	dexeth "decred.org/dcrdex/dex/networks/eth"
 )
 
 func parseWalletType(t string) (core.SimWalletType, error) {
@@ -147,4 +148,8 @@ func (f *flagArray) String() string {
 func (f *flagArray) Set(value string) error {
 	*f = append(*f, value)
 	return nil
+}
+
+func init() {
+	dexeth.MaybeReadSimnetAddrs()
 }

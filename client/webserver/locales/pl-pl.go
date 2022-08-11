@@ -163,7 +163,7 @@ var PlPL = map[string]string{
 	"Restore from seed":           "Przywróć z ziarna",
 	"Import Account":              "Importuj konto",
 	"no_wallet":                   "brak portfela",
-	"create_a_x_wallet":           "Utwórz portfel {{.Info.Name}}", // .Info.Name will be an asset symbol like DCR
+	"create_a_x_wallet":           "Utwórz portfel {{.Name}}", // .Name will be an asset symbol like DCR
 	"dont_share":                  "Nie udostępniaj nikomu. Nie zgub go.",
 	"Show Me":                     "Pokaż",
 	"Wallet Settings":             "Ustawienia portfela",

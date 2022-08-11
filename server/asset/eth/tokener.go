@@ -96,11 +96,11 @@ func (t *tokener) swapped(txData []byte) *big.Int {
 	if err != nil {
 		return nil
 	}
-	var v uint64
+	v := new(big.Int)
 	for _, init := range inits {
-		v += init.Value
+		v.Add(v, init.Value)
 	}
-	return dexeth.GweiToWei(v)
+	return v
 }
 
 // balanceOf checks the account's token balance.

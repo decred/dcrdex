@@ -30,20 +30,26 @@ export default class OrderPage extends BasePage {
   secondTicker: number
   refreshOnPopupClose: boolean
   accelerateOrderForm: AccelerateOrderForm
+  stampers: PageElement[]
 
   constructor (main: HTMLElement) {
     super()
-    const stampers = Doc.applySelector(main, '[data-stamp]')
+    const page = this.page = Doc.idDescendants(main)
+    this.stampers = Doc.applySelector(main, '[data-stamp]')
     net = parseInt(main.dataset.net || '')
     // Find the order
     this.orderID = main.dataset.oid || ''
-    const ord = app().order(this.orderID)
-    // app().order can only access active orders. If the order is not active,
-    // we'll need to get the data from the database.
-    if (ord) this.order = ord
-    else this.fetchOrder()
 
-    const page = this.page = Doc.idDescendants(main)
+    main.querySelectorAll('[data-explorer-id]').forEach((link: PageElement) => {
+      setCoinHref(link)
+    })
+
+    const setStamp = () => {
+      for (const span of this.stampers) {
+        span.textContent = Doc.timeSince(parseInt(span.dataset.stamp || ''))
+      }
+    }
+    setStamp()
 
     page.forms.querySelectorAll('.form-closer').forEach(el => {
       Doc.bind(el, 'click', () => {
@@ -89,17 +95,6 @@ export default class OrderPage extends BasePage {
     // Cancel order form
     bindForm(page.cancelForm, page.cancelSubmit, async () => { this.submitCancel() })
 
-    main.querySelectorAll('[data-explorer-id]').forEach((link: PageElement) => {
-      setCoinHref(link)
-    })
-
-    const setStamp = () => {
-      for (const span of stampers) {
-        span.textContent = Doc.timeSince(parseInt(span.dataset.stamp || ''))
-      }
-    }
-    setStamp()
-
     this.secondTicker = window.setInterval(() => {
       setStamp()
     }, 10000) // update every 10 seconds
@@ -108,6 +103,22 @@ export default class OrderPage extends BasePage {
       order: (note: OrderNote) => { this.handleOrderNote(note) },
       match: (note: MatchNote) => { this.handleMatchNote(note) }
     })
+
+    this.start()
+  }
+
+  async start () {
+    let ord = app().order(this.orderID)
+    // app().order can only access active orders. If the order is not active,
+    // we'll need to get the data from the database.
+    if (ord) this.order = ord
+    else {
+      ord = await this.fetchOrder()
+    }
+
+    // Swap out the dot-notation symbols with token-aware symbols.
+    this.page.mktBaseSymbol.replaceWith(Doc.symbolize(ord.baseSymbol))
+    this.page.mktQuoteSymbol.replaceWith(Doc.symbolize(ord.quoteSymbol))
   }
 
   unload () {
@@ -115,10 +126,11 @@ export default class OrderPage extends BasePage {
   }
 
   /* fetchOrder fetches the order from the client. */
-  async fetchOrder () {
+  async fetchOrder (): Promise<Order> {
     const res = await postJSON('/api/order', this.orderID)
-    if (!app().checkResponse(res)) return
+    if (!app().checkResponse(res)) throw res.msg
     this.order = res.order
+    return this.order
   }
 
   /* showCancel shows a form to confirm submission of a cancel order. */
@@ -127,8 +139,8 @@ export default class OrderPage extends BasePage {
     const page = this.page
     const remaining = order.qty - order.filled
     const asset = OrderUtil.isMarketBuy(order) ? app().assets[order.quoteID] : app().assets[order.baseID]
-    page.cancelRemain.textContent = Doc.formatCoinValue(remaining, asset.info.unitinfo)
-    page.cancelUnit.textContent = asset.info.unitinfo.conventional.unit.toUpperCase()
+    page.cancelRemain.textContent = Doc.formatCoinValue(remaining, asset.unitInfo)
+    page.cancelUnit.textContent = asset.unitInfo.conventional.unit.toUpperCase()
     this.showForm(page.cancelForm)
   }
 

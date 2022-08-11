@@ -10,7 +10,7 @@ const parser = new window.DOMParser()
 
 const FPS = 30
 
-const BipIDs = {
+const BipIDs: Record<number, string> = {
   0: 'btc',
   42: 'dcr',
   2: 'ltc',
@@ -19,7 +19,8 @@ const BipIDs = {
   3: 'doge',
   145: 'bch',
   60: 'eth',
-  133: 'zec'
+  133: 'zec',
+  60000: 'dextt.eth'
 }
 
 const BipSymbols = Object.values(BipIDs)
@@ -255,6 +256,37 @@ export default class Doc {
   static logoPath (symbol: string): string {
     if (BipSymbols.indexOf(symbol) === -1) symbol = symbol.substring(0, 1)
     return `/img/coins/${symbol}.png`
+  }
+
+  static logoPathFromID (assetID: number): string {
+    return Doc.logoPath(BipIDs[assetID])
+  }
+
+  /*
+   * symbolize creates a token-aware symbol element for the asset's symbol. For
+   * non-token assets, this is simply a <span>SYMBOL</span>. For tokens, it'll
+   * be <span><span>SYMBOL</span><sup>PARENT</sup></span>.
+   */
+  static symbolize (symbol: string): PageElement {
+    const parts = symbol.split('.')
+    const assetSymbol = document.createElement('span')
+    assetSymbol.textContent = parts[0].toUpperCase()
+    if (parts.length === 1) return assetSymbol
+    const span = document.createElement('span')
+    span.classList.add('token-aware-symbol')
+    span.appendChild(assetSymbol)
+    const parent = document.createElement('sup')
+    parent.textContent = parts[1].toUpperCase()
+    span.appendChild(parent)
+    return span
+  }
+
+  /*
+   * shortSymbol removes the short format of a symbol, with any parent chain
+   * identifier removed
+   */
+  static shortSymbol (symbol: string): string {
+    return symbol.split('.')[0].toUpperCase()
   }
 
   /*

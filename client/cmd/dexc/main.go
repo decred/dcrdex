@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
 	_ "decred.org/dcrdex/client/asset/bch"  // register bch asset
 	_ "decred.org/dcrdex/client/asset/btc"  // register btc asset
 	_ "decred.org/dcrdex/client/asset/dcr"  // register dcr asset
@@ -50,6 +51,8 @@ func mainCore() error {
 	if err != nil {
 		return fmt.Errorf("configration error: %w", err)
 	}
+
+	asset.SetNetwork(cfg.Net)
 
 	// If explicitly running without web server then you must run the rpc
 	// server.

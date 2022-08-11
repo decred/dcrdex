@@ -277,7 +277,7 @@
                         <th>
                           <div class="d-flex align-items-center pb-1" id="baseWalletIcons">
                             <img id="baseImg" class="micro-icon me-1">
-                            <span data-unit="base"></span>
+                            <span id="balBaseSymbol"></span>
                             <div class="flex-grow-1"></div>
                             <div id="baseWalletState" class="fs12">{{template "walletIcons"}}</div>
                             <span class="ico-expired fs16 ps-1" id="baseExpired" data-tooltip="账户可能已过期。请连接到钱包进行更新。"></span>
@@ -286,7 +286,7 @@
                         <th>
                           <div class="d-flex align-items-center pb-1" id="quoteWalletIcons">
                             <img id="quoteImg" class="micro-icon me-1">
-                            <span data-unit="quote"></span>
+                            <span id="balQuoteSymbol"></span>
                             <div class="flex-grow-1"></div>
                             <div id="quoteWalletState" class="fs12">{{template "walletIcons"}}</div>
                             <span class="ico-expired fs16 ps-1" id="quoteExpired" data-tooltip="账户可能已过期。请连接到钱包进行更新。"></span>
@@ -309,6 +309,9 @@
                         <td id="baseNewWalletRow" rowspan="3">
                           <button id="baseNewButton" type="button" class="newwallet bg1 text-center">添加一个<br><span data-unit="base"></span><br>钱包</button>
                         </td>
+                        <td id="baseWalletPendingRow" rowspan="3">
+                          <div class="ico-spinner spinner fs20"></div>
+                        </td>
                         <td id="baseAvail" class="fs16"></td>
                         <td id="quoteUnsupported" rowspan="3">
                           <div class="ico-cross"></div>
@@ -322,6 +325,9 @@
                         <td id="quoteNewWalletRow" rowspan="3" class="brdr-left">
                           <button id="quoteNewButton" type="button" class="newwallet bg1 text-center">添加一个<br><span data-unit="quote"></span><br>钱包</button>
                         </td>
+                        <td id="quoteWalletPendingRow" rowspan="3">
+                          <div class="ico-spinner spinner fs20"></div>
+                        </td>
                         <td id="quoteAvail" class="brdr-left fs16"></td>
                       </tr>
                       <tr>
@@ -333,6 +339,11 @@
                         <td>不成熟</td>
                         <td id="baseImmature"></td>
                         <td id="quoteImmature" class="brdr-left"></td>
+                      </tr>
+                      <tr class="d-hide" id="parentBalance">
+                        <td>fee balance</td>
+                        <td><span id="baseParent"></span> <img id="baseParentLogo" class="micro-icon"></td>
+                        <td><span id="quoteParent"></span> <img id="quoteParentLogo" class="micro-icon"></td>
                       </tr>
                     </tbody>
                   </table>

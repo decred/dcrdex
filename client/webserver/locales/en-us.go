@@ -166,7 +166,7 @@ var EnUS = map[string]string{
 	"Restore from seed":           "Restore from seed",
 	"Import Account":              "Import Account",
 	"no_wallet":                   "no wallet",
-	"create_a_x_wallet":           "Create a {{.Info.Name}} Wallet", // .Info.Name will be an asset symbol like DCR
+	"create_a_x_wallet":           "Create a {{.Name}} Wallet", // .Name will be an asset symbol like DCR
 	"dont_share":                  "Don't share it. Don't lose it.",
 	"Show Me":                     "Show Me",
 	"Wallet Settings":             "Wallet Settings",
@@ -190,6 +190,7 @@ var EnUS = map[string]string{
 	"Your Deposit Address":        "Your Wallet's Deposit Address",
 	"Send enough for reg fee":     `Make sure you send enough to also cover network fees. You may deposit as much as you like to your wallet, since only the fee amount will be used in the next step. The deposit must confirm to proceed.`,
 	"Send enough with estimate":   `Deposit at least <span data-tmpl="totalFees"></span> <span class="unit">XYZ</span> to also cover network fees. You may deposit as much as you like to your wallet, since only the required amount will be used in the next step. The deposit must confirm to proceed.`,
+	"Send funds for token":        `Deposit at least <span data-tmpl="tokenFees"></span> <span class="unit">XYZ</span> and <span data-tmpl="parentFees"></span> <span data-tmpl="parentUnit">XYZ</span> to also cover fees. You may deposit as much as you like to your wallet, since only the required amount will be used in the next step. The deposit must confirm to proceed.`,
 	"add a different server":      "add a different server",
 	"Add a custom server":         "Add a custom server",
 	"plus tx fees":                "+ tx fees",
@@ -244,4 +245,6 @@ var EnUS = map[string]string{
 	"export_wallet_msg":           "Below are the seeds needed to restore your wallet in some popular external wallets. DO NOT make transactions with your external wallet while you have active trades running on the DEX.",
 	"clipboard_warning":           "Copy/Pasting a wallet seed is a potential security risk. Do this at your own risk.",
 	"fiat_exchange_rate_sources":  "Fiat Exchange Rate Sources",
+	"Synchronizing":               "Synchronizing",
+	"wallet_wait_synced":          "wallet will be created after sync",
 }

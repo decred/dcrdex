@@ -12,9 +12,9 @@ import {
   WalletDefinition,
   BalanceNote,
   WalletStateNote,
-  Market,
   RateNote,
-  WalletState
+  WalletState,
+  WalletCreationNote
 } from './registry'
 
 const bind = Doc.bind
@@ -36,6 +36,7 @@ interface Actions {
   rescan: HTMLElement
   lock: HTMLElement
   settings: HTMLElement
+  createPending: HTMLElement
 }
 
 interface RowInfo {
@@ -85,7 +86,6 @@ export default class WalletsPage extends BasePage {
   displayed: HTMLElement
   animation: Promise<void>
   openAsset: number
-  walletAsset: number
   reconfigAsset: number
   forms: PageElement[]
   forceReq: RescanRecoveryRequest
@@ -112,37 +112,41 @@ export default class WalletsPage extends BasePage {
     const getAction = (row: HTMLElement, name: string) => row.querySelector(`[data-action=${name}]`) as HTMLElement
     const rowInfos: Record<string, RowInfo> = this.rowInfos = {}
     const rows = Doc.applySelector(page.walletTable, 'tr')
+
     let firstRow
     for (const tr of rows) {
       const assetID = parseInt(tr.dataset.assetID || '')
+      const actions = {
+        connect: getAction(tr, 'connect'),
+        unlock: getAction(tr, 'unlock'),
+        send: getAction(tr, 'send'),
+        deposit: getAction(tr, 'deposit'),
+        create: getAction(tr, 'create'),
+        rescan: getAction(tr, 'rescan'),
+        lock: getAction(tr, 'lock'),
+        settings: getAction(tr, 'settings'),
+        createPending: getAction(tr, 'createPending')
+      }
       rowInfos[assetID] = {
         assetID: assetID,
         tr: tr,
         symbol: tr.dataset.symbol || '',
         name: tr.dataset.name || '',
         stateIcons: new WalletIcons(tr),
-        actions: {
-          connect: getAction(tr, 'connect'),
-          unlock: getAction(tr, 'unlock'),
-          send: getAction(tr, 'send'),
-          deposit: getAction(tr, 'deposit'),
-          create: getAction(tr, 'create'),
-          rescan: getAction(tr, 'rescan'),
-          lock: getAction(tr, 'lock'),
-          settings: getAction(tr, 'settings')
-        }
+        actions: actions
       }
+      if (!assetIsConfigurable(assetID)) Doc.hide(actions.settings)
+      // Replace the Go template symbol with a token-aware symbol.
+      const symbolEl = Doc.tmplElement(tr, 'symbol')
+      symbolEl.replaceWith(Doc.symbolize(tr.dataset.symbol || ''))
       if (!firstRow) firstRow = rowInfos[assetID]
     }
 
     // Prepare templates
-    page.marketCard.removeAttribute('id')
-    page.marketCard.remove()
-    page.oneMarket.removeAttribute('id')
-    page.oneMarket.remove()
+    Doc.cleanTemplates(page.marketCard, page.oneMarket)
 
     // Bind the new wallet form.
-    this.newWalletForm = new NewWalletForm(page.newWalletForm, () => { this.createWalletSuccess() })
+    this.newWalletForm = new NewWalletForm(page.newWalletForm, (assetID: number) => { this.createWalletSuccess(assetID) })
 
     // Bind the wallet reconfig form.
     this.reconfigForm = new WalletConfigForm(page.reconfigInputs, false)
@@ -217,7 +221,7 @@ export default class WalletsPage extends BasePage {
     bind(page.sendAvail, 'click', () => {
       const asset = this.sendAsset
       const bal = asset.wallet.balance.available
-      page.sendAmt.value = String(bal / asset.info.unitinfo.conventional.conversionFactor)
+      page.sendAmt.value = String(bal / asset.unitInfo.conventional.conversionFactor)
       this.showFiatValue(asset.id, bal, page.sendValue)
       // Ensure we don't check subtract checkbox for assets that don't have a
       // withdraw method.
@@ -237,7 +241,7 @@ export default class WalletsPage extends BasePage {
       const asset = this.sendAsset
       if (!asset) return
       const amt = parseFloat(page.sendAmt.value || '0')
-      const conversionFactor = asset.info.unitinfo.conventional.conversionFactor
+      const conversionFactor = asset.unitInfo.conventional.conversionFactor
       this.showFiatValue(asset.id, amt * conversionFactor, page.sendValue)
     })
 
@@ -266,6 +270,7 @@ export default class WalletsPage extends BasePage {
       fiatrateupdate: (note: RateNote) => { this.handleRatesNote(note) },
       balance: (note: BalanceNote) => { this.handleBalanceNote(note) },
       walletstate: (note: WalletStateNote) => { this.handleWalletStateNote(note) },
+      createwallet: (note: WalletCreationNote) => { this.handleCreateWalletNote(note) },
       walletconfig: (note: WalletStateNote) => { this.handleWalletStateNote(note) }
     })
   }
@@ -370,10 +375,12 @@ export default class WalletsPage extends BasePage {
         // Only show markets where this is the base or quote asset.
         if (market.baseid !== assetID && market.quoteid !== assetID) continue
         const mBox = page.oneMarket.cloneNode(true) as HTMLElement
-        Doc.safeSelector(mBox, 'span').textContent = prettyMarketName(market)
+        const mktTmpl = Doc.parseTemplate(mBox)
+        mktTmpl.baseSymbol.appendChild(Doc.symbolize(market.basesymbol))
+        mktTmpl.quoteSymbol.appendChild(Doc.symbolize(market.quotesymbol))
         let counterSymbol = market.basesymbol
         if (market.baseid === assetID) counterSymbol = market.quotesymbol
-        Doc.safeSelector(mBox, 'img').src = Doc.logoPath(counterSymbol)
+        mktTmpl.logo.src = Doc.logoPath(counterSymbol)
         // Bind the click to a load of the markets page.
         const pageData = { host: host, base: market.baseid, quote: market.quoteid }
         bind(mBox, 'click', () => { app().loadPage('markets', pageData) })
@@ -388,10 +395,9 @@ export default class WalletsPage extends BasePage {
     const page = this.page
     const box = page.newWalletForm
     await this.hideBox()
-    this.walletAsset = this.lastFormAsset = assetID
-    this.newWalletForm.setAsset(assetID)
+    this.lastFormAsset = assetID
     this.animation = this.showBox(box)
-    await this.newWalletForm.loadDefaults()
+    await this.newWalletForm.setAsset(assetID)
   }
 
   async rescanWallet (assetID: number) {
@@ -461,12 +467,13 @@ export default class WalletsPage extends BasePage {
     const asset = app().assets[assetID]
 
     const currentDef = app().currentWalletDefinition(assetID)
+    const walletDefs = asset.token ? [asset.token.definition] : asset.info ? asset.info.availablewallets : []
 
-    if (asset.info.availablewallets.length > 1) {
+    if (walletDefs.length > 1) {
       Doc.empty(page.changeWalletTypeSelect)
       Doc.show(page.showChangeType, page.changeTypeShowIcon)
       page.changeTypeMsg.textContent = intl.prep(intl.ID_CHANGE_WALLET_TYPE)
-      for (const wDef of asset.info.availablewallets) {
+      for (const wDef of walletDefs) {
         const option = document.createElement('option') as HTMLOptionElement
         if (wDef.type === currentDef.type) option.selected = true
         option.value = option.textContent = wDef.type
@@ -485,7 +492,7 @@ export default class WalletsPage extends BasePage {
     else Doc.hide(page.exportWallet)
 
     page.recfgAssetLogo.src = Doc.logoPath(asset.symbol)
-    page.recfgAssetName.textContent = asset.info.name
+    page.recfgAssetName.textContent = asset.name
     await this.hideBox()
     this.animation = this.showBox(page.reconfigForm)
     const loaded = app().loading(page.reconfigForm)
@@ -498,8 +505,8 @@ export default class WalletsPage extends BasePage {
       Doc.show(page.reconfigErr)
       return
     }
-    const walletIsActive = app().walletIsActive(assetID)
-    this.reconfigForm.update(currentDef.configopts || [], walletIsActive)
+    const assetHasActiveOrders = app().haveAssetOrders(assetID)
+    this.reconfigForm.update(currentDef.configopts || [], { assetHasActiveOrders })
     this.reconfigForm.setConfig(res.map)
     this.updateDisplayedReconfigFields(currentDef)
   }
@@ -508,12 +515,12 @@ export default class WalletsPage extends BasePage {
     const page = this.page
     const walletType = page.changeWalletTypeSelect.value || ''
     const walletDef = app().walletDefinition(this.reconfigAsset, walletType)
-    this.reconfigForm.update(walletDef.configopts || [])
+    this.reconfigForm.update(walletDef.configopts || [], {})
     this.updateDisplayedReconfigFields(walletDef)
   }
 
   updateDisplayedReconfigFields (walletDef: WalletDefinition) {
-    if (walletDef.seeded) {
+    if (walletDef.seeded || walletDef.type === 'token') {
       Doc.hide(this.page.showChangePW)
       this.changeWalletPW = false
       this.setPWSettingViz(false)
@@ -530,11 +537,11 @@ export default class WalletsPage extends BasePage {
     const wallet = app().walletMap[assetID]
     this.depositAsset = this.lastFormAsset = assetID
     if (!wallet) {
-      app().notify(ntfn.make('Cannot retrieve deposit address.', `No wallet found for ${asset.info.name}`, ntfn.ERROR)) // TODO: translate
+      app().notify(ntfn.make('Cannot retrieve deposit address.', `No wallet found for ${asset.name}`, ntfn.ERROR)) // TODO: translate
       return
     }
     await this.hideBox()
-    page.depositName.textContent = asset.info.name
+    page.depositName.textContent = asset.name
     page.depositAddress.textContent = wallet.address
     page.qrcode.src = `/generateqrcode?address=${wallet.address}`
     if ((wallet.traits & traitNewAddresser) !== 0) Doc.show(page.newDepAddrBttn)
@@ -568,7 +575,7 @@ export default class WalletsPage extends BasePage {
     this.lastFormAsset = assetID
     const wallet = app().walletMap[assetID]
     if (!wallet) {
-      app().notify(ntfn.make('Cannot send/withdraw.', `No wallet found for ${asset.info.name}`, ntfn.ERROR))
+      app().notify(ntfn.make('Cannot send/withdraw.', `No wallet found for ${asset.name}`, ntfn.ERROR))
     }
     await this.hideBox()
 
@@ -590,9 +597,9 @@ export default class WalletsPage extends BasePage {
     page.sendErr.textContent = ''
 
     this.showFiatValue(asset.id, 0, page.sendValue)
-    page.sendAvail.textContent = Doc.formatFullPrecision(wallet.balance.available, asset.info.unitinfo)
+    page.sendAvail.textContent = Doc.formatFullPrecision(wallet.balance.available, asset.unitInfo)
     page.sendLogo.src = Doc.logoPath(asset.symbol)
-    page.sendName.textContent = asset.info.name
+    page.sendName.textContent = asset.name
     // page.sendFee.textContent = wallet.feerate
     // page.sendUnit.textContent = wallet.units
     box.dataset.assetID = String(assetID)
@@ -612,9 +619,13 @@ export default class WalletsPage extends BasePage {
   }
 
   /* createWalletSuccess is the success callback for wallet creation. */
-  async createWalletSuccess () {
-    const rowInfo = this.rowInfos[this.walletAsset]
+  async createWalletSuccess (assetID: number) {
+    const rowInfo = this.rowInfos[assetID]
     this.showMarkets(rowInfo.assetID)
+    const a = rowInfo.actions
+    Doc.hide(a.create, a.createPending)
+    Doc.show(a.send, a.deposit)
+    if (assetIsConfigurable(assetID)) Doc.show(a.settings)
     await app().fetchUser()
     await app().loadPage('wallets')
   }
@@ -674,7 +685,7 @@ export default class WalletsPage extends BasePage {
     const loaded = app().loading(page.reconfigForm)
     const req: ReconfigRequest = {
       assetID: this.reconfigAsset,
-      config: this.reconfigForm.map(),
+      config: this.reconfigForm.map(this.reconfigAsset),
       appPW: page.appPW.value || '',
       walletType: walletType
     }
@@ -848,6 +859,30 @@ export default class WalletsPage extends BasePage {
   }
 
   /*
+   * handleWalletStateNote is a handler for 'createwallet' notifications.
+   */
+  handleCreateWalletNote (note: WalletCreationNote) {
+    const actions = this.rowInfos[note.assetID].actions
+    switch (note.topic) {
+      case 'QueuedCreationFailed':
+        Doc.hide(actions.createPending)
+        Doc.show(actions.create)
+        break
+      case 'QueuedCreationSuccess':
+        this.createWalletSuccess(note.assetID)
+        break
+      case 'CreationQueued': {
+        const token = app().assets[note.assetID].token
+        if (!token) throw Error('CreationQueued notification for a non-token?')
+        this.createWalletSuccess(token.parentID)
+        Doc.hide(actions.create)
+        Doc.show(actions.createPending)
+        break
+      }
+    }
+  }
+
+  /*
    * unload is called by the Application when the user navigates away from
    * the /wallets page.
    */
@@ -857,10 +892,17 @@ export default class WalletsPage extends BasePage {
 }
 
 /*
- * Given a market object as created with makeMarket, prettyMarketName will
- * create a string ABC-XYZ, where ABC and XYZ are the upper-case ticker symbols
- * for the base and quote assets respectively.
+ * assetIsConfigurable indicates whether there are any user-configurable wallet
+ * settings for the asset.
  */
-function prettyMarketName (market: Market) {
-  return `${market.basesymbol.toUpperCase()}-${market.quotesymbol.toUpperCase()}`
+function assetIsConfigurable (assetID: number) {
+  const asset = app().assets[assetID]
+  if (asset.token) {
+    const opts = asset.token.definition.configopts
+    return opts && opts.length > 0
+  }
+  if (!asset.info) throw Error('this asset isn\'t an asset, I guess')
+  const defs = asset.info.availablewallets
+  const zerothOpts = defs[0].configopts
+  return defs.length > 1 || (zerothOpts && zerothOpts.length > 0)
 }

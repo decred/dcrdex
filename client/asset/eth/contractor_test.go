@@ -234,7 +234,7 @@ func TestSwapV0(t *testing.T) {
 	if swap.Secret != secret {
 		t.Fatalf("wrong secret")
 	}
-	if swap.Value != valGwei {
+	if dexeth.WeiToGwei(swap.Value) != valGwei {
 		t.Fatalf("wrong value")
 	}
 	if swap.BlockHeight != blockNum {

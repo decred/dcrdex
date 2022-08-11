@@ -160,7 +160,7 @@ func tSwap(bn, locktime int64, value uint64, secret [32]byte, state dexeth.SwapS
 		LockTime:    time.Unix(locktime, 0),
 		Participant: *participantAddr,
 		State:       state,
-		Value:       value,
+		Value:       dexeth.GweiToWei(value),
 	}
 }
 
@@ -175,6 +175,7 @@ func tNewBackend(assetID uint32) (*AssetBackend, *testNode) {
 		log:        tLogger.SubLogger(strings.ToUpper(dex.BipIDSymbol(assetID))),
 		assetID:    assetID,
 		blockChans: make(map[chan *asset.BlockUpdate]struct{}),
+		atomize:    dexeth.WeiToGwei,
 	}, node
 }
 
@@ -185,7 +186,6 @@ func TestMain(m *testing.M) {
 	doIt := func() int {
 		defer shutdown()
 		dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts[0].Address = common.BytesToAddress(encode.RandomBytes(20))
-		registerToken(testTokenID, 0)
 		return m.Run()
 	}
 	os.Exit(doIt())

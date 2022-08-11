@@ -24,6 +24,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/client/asset/dcr"
+	"decred.org/dcrdex/client/asset/eth"
 	"decred.org/dcrdex/client/asset/ltc"
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/core"
@@ -35,7 +36,6 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	dexbch "decred.org/dcrdex/dex/networks/bch"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
-	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
 )
@@ -47,9 +47,10 @@ const (
 
 var (
 	tCtx                  context.Context
-	maxDelay              = time.Second * 2
-	epochDuration         = time.Second * 30 // milliseconds
-	feedPeriod            = time.Second * 10
+	maxDelay                     = time.Second * 2
+	epochDuration                = time.Second * 30 // milliseconds
+	feedPeriod                   = time.Second * 10
+	creationPendingAsset  uint32 = 0xFFFFFFFF
 	forceDisconnectWallet bool
 	wipeWalletBalance     bool
 	gapWidthFactor        = 1.0 // Should be 0 < gapWidthFactor <= 1.0
@@ -57,6 +58,8 @@ var (
 	randomNotes           = false
 	numUserOrders         = 10
 	conversionFactor      = dexbtc.UnitInfo.Conventional.ConversionFactor
+	delayBalance          = false
+	doubleCreateAsyncErr  = false
 )
 
 func dummySettings() map[string]string {
@@ -185,26 +188,41 @@ func mkMrkt(base, quote string) *core.Market {
 
 func mkSupportedAsset(symbol string, state *tWalletState, bal *core.WalletBalance) *core.SupportedAsset {
 	assetID, _ := dex.BipSymbolID(symbol)
-	winfo := winfos[assetID]
 	var wallet *core.WalletState
 	if state != nil {
+		syncPct := atomic.LoadUint32(&state.syncProgress)
 		wallet = &core.WalletState{
-			Symbol:    unbip(assetID),
-			AssetID:   assetID,
-			Open:      state.open,
-			Running:   state.running,
-			Address:   ordertest.RandomAddress(),
-			Balance:   bal,
-			Units:     winfo.UnitInfo.AtomicUnit,
-			Encrypted: true,
-			Synced:    false,
+			Symbol:       unbip(assetID),
+			AssetID:      assetID,
+			Open:         state.open,
+			Running:      state.running,
+			Address:      ordertest.RandomAddress(),
+			Balance:      bal,
+			Units:        unitInfo(assetID).Conventional.Unit,
+			Encrypted:    true,
+			Synced:       syncPct == 100,
+			SyncProgress: float32(syncPct) / 100,
 		}
 	}
+	winfo := winfos[assetID]
+	var name string
+	var unitInfo dex.UnitInfo
+	if winfo == nil {
+		name = tinfos[assetID].Name
+		unitInfo = tinfos[assetID].UnitInfo
+	} else {
+		name = winfo.Name
+		unitInfo = winfo.UnitInfo
+	}
 	return &core.SupportedAsset{
-		ID:     assetID,
-		Symbol: symbol,
-		Wallet: wallet,
-		Info:   winfo,
+		ID:                    assetID,
+		Symbol:                symbol,
+		Wallet:                wallet,
+		Info:                  winfo,
+		Token:                 tinfos[assetID],
+		Name:                  name,
+		UnitInfo:              unitInfo,
+		WalletCreationPending: assetID == atomic.LoadUint32(&creationPendingAsset),
 	}
 }
 
@@ -278,15 +296,16 @@ func miniOrderFromCoreOrder(ord *core.Order) *core.MiniOrder {
 }
 
 var dexAssets = map[uint32]*dex.Asset{
-	0:   mkDexAsset("btc"),
-	2:   mkDexAsset("ltc"),
-	42:  mkDexAsset("dcr"),
-	22:  mkDexAsset("mona"),
-	28:  mkDexAsset("vtc"),
-	141: mkDexAsset("kmd"),
-	3:   mkDexAsset("doge"),
-	145: mkDexAsset("bch"),
-	60:  mkDexAsset("eth"),
+	0:     mkDexAsset("btc"),
+	2:     mkDexAsset("ltc"),
+	42:    mkDexAsset("dcr"),
+	22:    mkDexAsset("mona"),
+	28:    mkDexAsset("vtc"),
+	141:   mkDexAsset("kmd"),
+	3:     mkDexAsset("doge"),
+	145:   mkDexAsset("bch"),
+	60:    mkDexAsset("eth"),
+	60000: mkDexAsset("dextt.eth"),
 }
 
 var tExchanges = map[string]*core.Exchange{
@@ -295,14 +314,15 @@ var tExchanges = map[string]*core.Exchange{
 		Assets: dexAssets,
 		AcctID: "abcdef0123456789",
 		Markets: map[string]*core.Market{
-			mkid(42, 0):   mkMrkt("dcr", "btc"),
-			mkid(145, 42): mkMrkt("bch", "dcr"),
-			mkid(60, 42):  mkMrkt("eth", "dcr"),
-			mkid(2, 42):   mkMrkt("ltc", "dcr"),
-			mkid(3, 0):    mkMrkt("doge", "btc"),
-			mkid(3, 42):   mkMrkt("doge", "dcr"),
-			mkid(22, 42):  mkMrkt("mona", "dcr"),
-			mkid(28, 0):   mkMrkt("vtc", "btc"),
+			mkid(42, 0):     mkMrkt("dcr", "btc"),
+			mkid(145, 42):   mkMrkt("bch", "dcr"),
+			mkid(60, 42):    mkMrkt("eth", "dcr"),
+			mkid(2, 42):     mkMrkt("ltc", "dcr"),
+			mkid(3, 0):      mkMrkt("doge", "btc"),
+			mkid(3, 42):     mkMrkt("doge", "dcr"),
+			mkid(22, 42):    mkMrkt("mona", "dcr"),
+			mkid(28, 0):     mkMrkt("vtc", "btc"),
+			mkid(60000, 42): mkMrkt("dextt.eth", "dcr"),
 		},
 		ConnectionStatus: comms.Connected,
 		RegFees: map[string]*core.FeeAsset{
@@ -336,7 +356,12 @@ var tExchanges = map[string]*core.Exchange{
 				Confs: 10,
 				Amt:   1e12,
 			},
-			"kmd": { // Not-supported
+			"dextt.eth": {
+				ID:    60000,
+				Confs: 10,
+				Amt:   1e11,
+			},
+			"kmd": { // Not-supported by client
 				ID:    141,
 				Confs: 10,
 				Amt:   1e12,
@@ -393,9 +418,10 @@ func (c *tCoin) Confirmations(context.Context) (uint32, error) {
 }
 
 type tWalletState struct {
-	open     bool
-	running  bool
-	settings map[string]string
+	open         bool
+	running      bool
+	settings     map[string]string
+	syncProgress uint32
 }
 
 type tBookFeed struct {
@@ -472,14 +498,15 @@ func newTCore() *TCore {
 	return &TCore{
 		wallets: make(map[uint32]*tWalletState),
 		balances: map[uint32]*core.WalletBalance{
-			0:   randomBalance(0),
-			2:   randomBalance(2),
-			42:  randomBalance(42),
-			22:  randomBalance(22),
-			3:   randomBalance(3),
-			28:  randomBalance(28),
-			60:  randomBalance(60),
-			145: randomBalance(145),
+			0:     randomBalance(0),
+			2:     randomBalance(2),
+			42:    randomBalance(42),
+			22:    randomBalance(22),
+			3:     randomBalance(3),
+			28:    randomBalance(28),
+			60:    randomBalance(60),
+			145:   randomBalance(145),
+			60000: randomBalance(60000),
 		},
 		noteFeed: make(chan core.Notification, 1),
 		fiatSources: map[string]bool{
@@ -539,13 +566,25 @@ func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) {
 	return nil, nil
 }
 func (c *TCore) EstimateRegistrationTxFee(host string, certI interface{}, assetID uint32) (uint64, error) {
-	return 0, nil
+	xc := tExchanges[host]
+	if xc == nil {
+		xc = tExchanges[firstDEX]
+	}
+	assetFeeID := assetID
+	if tkn := asset.TokenInfo(assetID); tkn != nil {
+		assetFeeID = tkn.ParentID
+	}
+	var txFee uint64 = 1e6
+	if regFee := xc.RegFees[unbip(assetFeeID)]; regFee != nil {
+		txFee = regFee.Amt / 100
+	}
+	return txFee, nil
 }
 func (c *TCore) Login([]byte) (*core.LoginResult, error) { return &core.LoginResult{}, nil }
 func (c *TCore) IsInitialized() bool                     { return true }
 func (c *TCore) Logout() error                           { return nil }
 
-var orderAssets = []string{"dcr", "btc", "ltc", "doge", "mona", "vtc"}
+var orderAssets = []string{"dcr", "btc", "ltc", "doge", "mona", "vtc", "dextt.eth"}
 
 func (c *TCore) Orders(filter *core.OrderFilter) ([]*core.Order, error) {
 	var spacing uint64 = 60 * 60 * 1000 / 2 // half an hour
@@ -707,23 +746,20 @@ func makeCoreOrder() *core.Order {
 	if rand.Float32() > 0.5 {
 		host = secondDEX
 	}
-	baseIdx := rand.Intn(len(orderAssets))
-	baseSymbol := orderAssets[baseIdx]
-	quoteSymbol := orderAssets[(baseIdx+1)%len(orderAssets)]
-	baseID, _ := dex.BipSymbolID(baseSymbol)
-	quoteID, _ := dex.BipSymbolID(quoteSymbol)
-	mktID, _ := dex.MarketName(baseID, quoteID)
-	lotSize := tExchanges[host].Markets[mktID].LotSize
-	rateStep := tExchanges[host].Markets[mktID].RateStep
-	rate := uint64(rand.Intn(1e3)) * rateStep
-	baseQty := uint64(rand.Intn(1e3)) * lotSize
+	mkts := make([]*core.Market, 0, len(tExchanges[host].Markets))
+	for _, mkt := range tExchanges[host].Markets {
+		mkts = append(mkts, mkt)
+	}
+	mkt := mkts[rand.Intn(len(mkts))]
+	rate := uint64(rand.Intn(1e3)) * mkt.RateStep
+	baseQty := uint64(rand.Intn(1e3)) * mkt.LotSize
 	isMarket := rand.Float32() > 0.5
 	sell := rand.Float32() > 0.5
 	numMatches := rand.Intn(13)
 	orderQty := baseQty
 	orderRate := rate
 	matchQ := baseQty / 13
-	matchQ -= matchQ % lotSize
+	matchQ -= matchQ % mkt.LotSize
 	tif := order.TimeInForce(rand.Intn(int(order.StandingTiF)))
 
 	if isMarket {
@@ -750,11 +786,11 @@ func makeCoreOrder() *core.Order {
 
 	cord := &core.Order{
 		Host:        host,
-		BaseID:      baseID,
-		BaseSymbol:  baseSymbol,
-		QuoteID:     quoteID,
-		QuoteSymbol: quoteSymbol,
-		MarketID:    baseSymbol + "_" + quoteSymbol,
+		BaseID:      mkt.BaseID,
+		BaseSymbol:  mkt.BaseSymbol,
+		QuoteID:     mkt.QuoteID,
+		QuoteSymbol: mkt.QuoteSymbol,
+		MarketID:    mkt.BaseSymbol + "_" + mkt.QuoteSymbol,
 		Type:        order.OrderType(rand.Intn(int(order.MarketOrderType))) + 1,
 		Stamp:       stamp(),
 		ID:          ordertest.RandomOrderID().Bytes(),
@@ -767,7 +803,7 @@ func makeCoreOrder() *core.Order {
 		TimeInForce: tif,
 		FeesPaid: &core.FeeBreakdown{
 			Swap:       orderQty / 100,
-			Redemption: rateStep * 100,
+			Redemption: mkt.RateStep * 100,
 		},
 		FundingCoins: fundingCoins,
 	}
@@ -1202,13 +1238,7 @@ var winfos = map[uint32]*asset.WalletInfo{
 			ConfigOpts: configOpts,
 		}},
 	},
-	60: {
-		Name:     "Ethereum",
-		UnitInfo: dexeth.UnitInfo,
-		AvailableWallets: []*asset.WalletDefinition{{
-			ConfigOpts: configOpts,
-		}},
-	},
+	60: eth.WalletInfo,
 	145: {
 		Name:     "Bitcoin Cash",
 		UnitInfo: dexbch.UnitInfo,
@@ -1216,6 +1246,15 @@ var winfos = map[uint32]*asset.WalletInfo{
 			ConfigOpts: configOpts,
 		}},
 	},
+}
+
+var tinfos map[uint32]*asset.Token
+
+func unitInfo(assetID uint32) dex.UnitInfo {
+	if tinfo, found := tinfos[assetID]; found {
+		return tinfo.UnitInfo
+	}
+	return winfos[assetID].UnitInfo
 }
 
 func (c *TCore) WalletState(assetID uint32) *core.WalletState {
@@ -1230,16 +1269,18 @@ func (c *TCore) walletState(assetID uint32) *core.WalletState {
 	if w == nil {
 		return nil
 	}
+	syncPct := atomic.LoadUint32(&w.syncProgress)
 	return &core.WalletState{
-		Symbol:    unbip(assetID),
-		AssetID:   assetID,
-		Open:      w.open,
-		Running:   w.running,
-		Address:   ordertest.RandomAddress(),
-		Balance:   c.balances[assetID],
-		Units:     winfos[assetID].UnitInfo.AtomicUnit,
-		Encrypted: true,
-		Synced:    true,
+		Symbol:       unbip(assetID),
+		AssetID:      assetID,
+		Open:         w.open,
+		Running:      w.running,
+		Address:      ordertest.RandomAddress(),
+		Balance:      c.balances[assetID],
+		Units:        unitInfo(assetID).AtomicUnit,
+		Encrypted:    true,
+		Synced:       syncPct == 100,
+		SyncProgress: float32(syncPct) / 100,
 	}
 }
 
@@ -1248,28 +1289,50 @@ func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) erro
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 
-	c.wallets[form.AssetID] = &tWalletState{
+	// If this is a token, simulate parent syncing.
+	token := asset.TokenInfo(form.AssetID)
+	if token == nil || form.ParentForm == nil {
+		c.createWallet(form, false)
+		return nil
+	}
+
+	atomic.StoreUint32(&creationPendingAsset, form.AssetID)
+
+	synced := c.createWallet(form.ParentForm, false)
+
+	c.noteFeed <- &core.WalletCreationNote{
+		Notification: db.NewNotification(core.NoteTypeCreateWallet, core.TopicCreationQueued, "", "", db.Data),
+		AssetID:      form.AssetID,
+	}
+
+	go func() {
+		<-synced
+		defer atomic.StoreUint32(&creationPendingAsset, 0xFFFFFFFF)
+		if doubleCreateAsyncErr {
+			c.noteFeed <- &core.WalletCreationNote{
+				Notification: db.NewNotification(core.NoteTypeCreateWallet, core.TopicQueuedCreationFailed,
+					"Test Error", "This failed because doubleCreateAsyncErr is true in live_test.go", db.Data),
+				AssetID: form.AssetID,
+			}
+			return
+		}
+		c.createWallet(form, true)
+	}()
+	return nil
+}
+
+func (c *TCore) createWallet(form *core.WalletForm, synced bool) (done chan struct{}) {
+	done = make(chan struct{})
+
+	tWallet := &tWalletState{
 		running:  true,
 		open:     true,
 		settings: form.Config,
 	}
+	c.wallets[form.AssetID] = tWallet
 
 	w := c.walletState(form.AssetID)
-	w.Synced = false
-	w.SyncProgress = 0.0
-	regFee := tExchanges[firstDEX].RegFees[w.Symbol]
-	w.Balance.Available = regFee.Amt * 2
-
-	tStart := time.Now()
-	syncDuration := float64(time.Second * 17)
-
-	syncProgress := func() float32 {
-		progress := float64(time.Since(tStart)) / syncDuration
-		if progress > 1 {
-			progress = 1
-		}
-		return float32(progress)
-	}
+	regFee := tExchanges[firstDEX].RegFees[w.Symbol].Amt * 2
 
 	sendWalletState := func() {
 		wCopy := *w
@@ -1279,8 +1342,61 @@ func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) erro
 		}
 	}
 
+	defer func() {
+		sendWalletState()
+		if asset.TokenInfo(form.AssetID) != nil {
+			c.noteFeed <- &core.WalletCreationNote{
+				Notification: db.NewNotification(core.NoteTypeCreateWallet, core.TopicQueuedCreationSuccess, "", "", db.Data),
+				AssetID:      form.AssetID,
+			}
+		}
+		if delayBalance {
+			time.AfterFunc(time.Second*10, func() {
+				w.Balance.Available = regFee
+				c.noteFeed <- &core.BalanceNote{
+					Notification: db.NewNotification(core.NoteTypeBalance, core.TopicBalanceUpdated, "", "", db.Data),
+					AssetID:      form.AssetID,
+					Balance: &core.WalletBalance{
+						Balance: &db.Balance{
+							Balance: asset.Balance{
+								Available: regFee,
+							},
+							Stamp: time.Now(),
+						},
+					},
+				}
+			})
+		}
+	}()
+
+	if !delayBalance {
+		w.Balance.Available = regFee
+	}
+
+	w.Synced = synced
+	if synced {
+		atomic.StoreUint32(&tWallet.syncProgress, 100)
+		w.SyncProgress = 1
+		close(done)
+		return
+	}
+
+	w.SyncProgress = 0.0
+
+	tStart := time.Now()
+	syncDuration := float64(time.Second * 6)
+
+	syncProgress := func() float32 {
+		progress := float64(time.Since(tStart)) / syncDuration
+		if progress > 1 {
+			progress = 1
+		}
+		return float32(progress)
+	}
+
 	setProgress := func() bool {
 		progress := syncProgress()
+		atomic.StoreUint32(&tWallet.syncProgress, uint32(math.Round(float64(progress)*100)))
 		c.mtx.Lock()
 		defer c.mtx.Unlock()
 		w.SyncProgress = progress
@@ -1291,6 +1407,7 @@ func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) erro
 	}
 
 	go func() {
+		defer close(done)
 		for {
 			select {
 			case <-time.After(time.Millisecond * 1013):
@@ -1303,9 +1420,7 @@ func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) erro
 		}
 	}()
 
-	sendWalletState()
-
-	return nil
+	return
 }
 
 func (c *TCore) RescanWallet(assetID uint32, force bool) error {
@@ -1363,7 +1478,7 @@ func (c *TCore) Wallets() []*core.WalletState {
 			Running:   wallet.running,
 			Address:   ordertest.RandomAddress(),
 			Balance:   c.balances[assetID],
-			Units:     winfos[assetID].UnitInfo.AtomicUnit,
+			Units:     unitInfo(assetID).AtomicUnit,
 			Encrypted: true,
 		})
 	}
@@ -1432,14 +1547,15 @@ func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
 	return map[uint32]*core.SupportedAsset{
-		0:   mkSupportedAsset("btc", c.wallets[0], c.balances[0]),
-		42:  mkSupportedAsset("dcr", c.wallets[42], c.balances[42]),
-		2:   mkSupportedAsset("ltc", c.wallets[2], c.balances[2]),
-		22:  mkSupportedAsset("mona", c.wallets[22], c.balances[22]),
-		3:   mkSupportedAsset("doge", c.wallets[3], c.balances[3]),
-		28:  mkSupportedAsset("vtc", c.wallets[28], c.balances[28]),
-		60:  mkSupportedAsset("eth", c.wallets[60], c.balances[60]),
-		145: mkSupportedAsset("bch", c.wallets[145], c.balances[145]),
+		0:     mkSupportedAsset("btc", c.wallets[0], c.balances[0]),
+		42:    mkSupportedAsset("dcr", c.wallets[42], c.balances[42]),
+		2:     mkSupportedAsset("ltc", c.wallets[2], c.balances[2]),
+		22:    mkSupportedAsset("mona", c.wallets[22], c.balances[22]),
+		3:     mkSupportedAsset("doge", c.wallets[3], c.balances[3]),
+		28:    mkSupportedAsset("vtc", c.wallets[28], c.balances[28]),
+		60:    mkSupportedAsset("eth", c.wallets[60], c.balances[60]),
+		145:   mkSupportedAsset("bch", c.wallets[145], c.balances[145]),
+		60000: mkSupportedAsset("dextt.eth", c.wallets[60000], c.balances[60000]),
 	}
 }
 
@@ -1647,6 +1763,10 @@ func TestServer(t *testing.T) {
 	asset.Register(141, &TDriver{}) // kmd
 	asset.Register(3, &TDriver{})   // doge
 
+	tinfos = map[uint32]*asset.Token{
+		60000: asset.TokenInfo(60000),
+	}
+
 	numBuys = 10
 	numSells = 10
 	feedPeriod = 5000 * time.Millisecond
@@ -1657,6 +1777,8 @@ func TestServer(t *testing.T) {
 	randomPokes = false
 	randomNotes = false
 	numUserOrders = 40
+	delayBalance = true
+	doubleCreateAsyncErr = false
 
 	var shutdown context.CancelFunc
 	tCtx, shutdown = context.WithCancel(context.Background())

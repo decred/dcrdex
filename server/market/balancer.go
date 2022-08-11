@@ -150,7 +150,7 @@ func (b *DEXBalancer) CheckBalance(acctAddr string, assetID, redeemAssetID uint3
 		log.Error("(*DEXBalancer).CheckBalance: error getting account balance for %q: %v", acctAddr, err)
 		return false
 	}
-	if bal == 0 {
+	if qty > 0 && bal == 0 { // shortcut if they are requesting funds and have none.
 		log.Tracef("(*DEXBalancer).CheckBalance(%q, %d, %d, %d, %d) false for zero balance",
 			acctAddr, assetID, qty, lots, redeems)
 		return false
@@ -252,8 +252,8 @@ func (b *DEXBalancer) CheckBalance(acctAddr string, assetID, redeemAssetID uint3
 	}
 
 	log.Tracef("(*DEXBalancer).CheckBalance: balance check for %s - %s: total qty = %d, "+
-		"total lots = %d, total redeems = %d, redeemCosts = %d, required = %d, bal = %d",
-		backedAsset.assetInfo.Symbol, acctAddr, qty, lots, redeems, redeemFees, reqFunds, bal)
+		"total lots = %d, total redeems = %d, redeemCosts = %d, required = %d, bal = %d, fee bal = %d",
+		backedAsset.assetInfo.Symbol, acctAddr, qty, lots, redeems, redeemFees, reqFunds, bal, feeBal)
 
 	return bal >= reqFunds
 }

@@ -78,6 +78,14 @@ type WalletForm struct {
 	AssetID uint32
 	Config  map[string]string
 	Type    string
+	// ParentForm is the configuration settings for a parent asset. If this is a
+	// token whose parent asset needs configuration, a non-nil ParentForm can be
+	// supplied. This will cause CreateWallet to run in a special mode which
+	// will create the parent asset's wallet synchronously, but schedule the
+	// creation of the token wallet to occur asynchronously after the parent
+	// wallet is fully synced, sending NoteTypeCreateWallet notifications to
+	// update with progress.
+	ParentForm *WalletForm
 }
 
 // WalletBalance is an exchange wallet's balance which includes contractlocked
@@ -123,10 +131,19 @@ type User struct {
 // SupportedAsset is data about an asset and possibly the wallet associated
 // with it.
 type SupportedAsset struct {
-	ID     uint32            `json:"id"`
-	Symbol string            `json:"symbol"`
-	Wallet *WalletState      `json:"wallet"`
-	Info   *asset.WalletInfo `json:"info"`
+	ID     uint32       `json:"id"`
+	Symbol string       `json:"symbol"`
+	Name   string       `json:"name"`
+	Wallet *WalletState `json:"wallet"`
+	// Info is only populated for base chain assets. One of either Info or
+	// Token will be populated.
+	Info *asset.WalletInfo `json:"info"`
+	// Token is only populated for token assets.
+	Token    *asset.Token `json:"token"`
+	UnitInfo dex.UnitInfo `json:"unitInfo"`
+	// WalletCreationPending will be true if this wallet's parent wallet is
+	// being synced before this wallet is created.
+	WalletCreationPending bool `json:"walletCreationPending"`
 }
 
 // RegisterForm is information necessary to register an account on a DEX.

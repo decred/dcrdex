@@ -51,15 +51,20 @@ type registrationTxFeeForm struct {
 	AssetID *uint32 `json:"asset,omitempty"`
 }
 
-// newWalletForm is information necessary to create a new wallet.
-type newWalletForm struct {
+type walletConfig struct {
 	AssetID    uint32 `json:"assetID"`
 	WalletType string `json:"walletType"`
 	// These are only used if the Decred wallet does not already exist. In that
 	// case, these parameters will be used to create the wallet.
 	Config map[string]string `json:"config"`
-	Pass   encode.PassBytes  `json:"pass"`
-	AppPW  encode.PassBytes  `json:"appPass"`
+}
+
+// newWalletForm is information necessary to create a new wallet.
+type newWalletForm struct {
+	walletConfig
+	Pass       encode.PassBytes `json:"pass"`
+	AppPW      encode.PassBytes `json:"appPass"`
+	ParentForm *walletConfig    `json:"parentForm"`
 }
 
 // openWalletForm is information necessary to open a wallet.

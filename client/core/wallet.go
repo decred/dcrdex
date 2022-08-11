@@ -44,6 +44,7 @@ type xcWallet struct {
 	dbID       []byte
 	walletType string
 	traits     asset.WalletTrait
+	parent     *xcWallet
 
 	mtx          sync.RWMutex
 	encPass      []byte // empty means wallet not password protected
@@ -82,6 +83,9 @@ func (w *xcWallet) setEncPW(encPW []byte) {
 // Unlock unlocks the wallet backend and caches the decrypted wallet password so
 // the wallet may be unlocked without user interaction using refreshUnlock.
 func (w *xcWallet) Unlock(crypter encrypt.Crypter) error {
+	if w.parent != nil {
+		return w.parent.Unlock(crypter)
+	}
 	if len(w.encPW()) == 0 {
 		if w.Locked() {
 			return fmt.Errorf("wallet reporting as locked, but no password has been set")
@@ -90,7 +94,7 @@ func (w *xcWallet) Unlock(crypter encrypt.Crypter) error {
 	}
 	pw, err := crypter.Decrypt(w.encPW())
 	if err != nil {
-		return fmt.Errorf("unlockWallet decryption error: %w", err)
+		return fmt.Errorf("%s unlockWallet decryption error: %w", unbip(w.AssetID), err)
 	}
 	err = w.Wallet.Unlock(pw) // can be slow - no timeout and NOT in the critical section!
 	if err != nil {
@@ -113,6 +117,9 @@ func (w *xcWallet) Unlock(crypter encrypt.Crypter) error {
 // non-nil error will be returned if the cached password fails to unlock the
 // wallet, in which case unlockAttempted will also be true.
 func (w *xcWallet) refreshUnlock() (unlockAttempted bool, err error) {
+	if w.parent != nil {
+		return w.parent.refreshUnlock()
+	}
 	// Check if the wallet backend is already unlocked.
 	if !w.Locked() {
 		return false, nil // unlocked
@@ -138,6 +145,9 @@ func (w *xcWallet) refreshUnlock() (unlockAttempted bool, err error) {
 // Lock the wallet. For encrypted wallets (encPW set), this clears the cached
 // decrypted password and attempts to lock the wallet backend.
 func (w *xcWallet) Lock(timeout time.Duration) error {
+	if w.parent != nil {
+		return w.parent.Lock(timeout)
+	}
 	w.mtx.Lock()
 	if len(w.encPass) == 0 {
 		w.mtx.Unlock()
@@ -155,6 +165,9 @@ func (w *xcWallet) Lock(timeout time.Duration) error {
 // directly, likely involving an RPC call. Use locallyUnlocked to determine if
 // the wallet is automatically unlockable rather than actually unlocked.
 func (w *xcWallet) unlocked() bool {
+	if w.parent != nil {
+		return w.parent.unlocked()
+	}
 	return w.locallyUnlocked() && !w.Locked()
 }
 
@@ -163,6 +176,9 @@ func (w *xcWallet) unlocked() bool {
 // this is true only if the decrypted password is cached. Use this to determine
 // if the wallet may be unlocked without user interaction (via refreshUnlock).
 func (w *xcWallet) locallyUnlocked() bool {
+	if w.parent != nil {
+		return w.parent.locallyUnlocked()
+	}
 	w.mtx.RLock()
 	defer w.mtx.RUnlock()
 	if len(w.encPass) == 0 {
@@ -177,14 +193,20 @@ func (w *xcWallet) state() *WalletState {
 	if w.peerCount > 0 { // -1 initially
 		peerCount = uint32(w.peerCount)
 	}
+
+	winfo := w.Info()
+	lockable := w
+	if w.parent != nil {
+		lockable = w.parent
+	}
+
 	w.mtx.RLock()
 	defer w.mtx.RUnlock()
-	winfo := w.Info()
 	return &WalletState{
 		Symbol:       unbip(w.AssetID),
 		AssetID:      w.AssetID,
 		Version:      winfo.Version,
-		Open:         len(w.encPass) == 0 || len(w.pw) > 0,
+		Open:         len(lockable.encPass) == 0 || len(lockable.pw) > 0,
 		Running:      w.connector.On(),
 		Balance:      w.balance,
 		Address:      w.address,

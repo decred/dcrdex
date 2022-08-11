@@ -33,6 +33,7 @@
     <button data-action="lock"{{if or (not $ready) (not $w.Encrypted)}} class="d-hide"{{end}}>锁定</button>
     <button data-action="rescan"{{if not $w.Traits.IsRescanner}} class="d-hide"{{end}}>Rescan</button>
     <button data-action="create" class="d-hide">创建{{.Info.Name}}钱包</button>
+    <div data-action="createPending" class="d-inline-block fs16 ico-spinner spinner d-hide"></div>
     <span data-action="settings" class="ico-settings fs20 pointer"></span>
   {{else}}
     <button data-action="connect" class="d-hide">连接</button>
@@ -41,7 +42,8 @@
     <button data-action="deposit" class="d-hide">存款</button>
     <button data-action="lock" class="d-hide">锁定</button>
     <button data-action="rescan" class="d-hide">Rescan</button>
-    <button data-action="create">创建{{.Info.Name}}钱包</button>
+    <button data-action="create"{{if .WalletCreationPending}} class="d-hide"{{end}}>创建{{.Info.Name}}钱包</button>
+    <div data-action="createPending" class="d-inline-block fs16 ico-spinner spinner{{if not .WalletCreationPending}} d-hide{{end}}"></div>
     <span data-action="settings" class="ico-settings fs20 pointer d-hide"></span>
   {{end}}
 {{end}}
@@ -63,18 +65,19 @@
           <th>操作</th>
         </tr>
       </thead>
+      {{/* TODO: Move the wallet table element generation to Javascript */}}
       <tbody id="walletTable">
         {{range .Assets}}
-        <tr data-asset-i-d="{{.ID}}" data-symbol="{{.Symbol}}" data-name="{{.Info.Name}}">
+        <tr data-asset-i-d="{{.ID}}" data-symbol="{{.Symbol}}" data-name="{{.Name}}">
           <td>
             <img src="{{logoPath .Symbol}}" class="mini-icon">
-            <span class="fs20">{{.Info.Name}}</span>
-            <span class="fs15">({{toUpper .Symbol}})</span>
+            <span class="fs20">{{.Name}} </span>
+            <span class="fs15"> (<span data-tmpl=symbol>{{toUpper .Symbol}}</span>)</span>
           </td>
          <td>
             {{if .Wallet}}
             <div data-balance-target="{{.ID}}">
-              {{.Info.UnitInfo.ConventionalString .Wallet.Balance.Available}}
+              {{.UnitInfo.ConventionalString .Wallet.Balance.Available}}
             </div>
             <div class="d-hide d-flex"><span data-conversion-target={{.ID}}></span>USD</span>
             </div>
@@ -105,9 +108,8 @@
           <div class="px-2 text-center fs18" data-tmpl="dexTitle"></div>
           <div class="d-flex justify-content-center align-items-start flex-wrap" data-tmpl="markets">
             <div class="asset-market hoverbg pointer m-2 px-2 py-1 d-flex flex-column align-items-center" id="oneMarket">
-              {{/* TODO: Get rid of this call to logoPath. We don't need to set this value. It's overwritten anyway. Do we even need the template function? */}}
-              <img src="{{logoPath "dcr"}}" class="logo">
-              <span class="mt-1 fs14 demi">DCR-BTC</span>
+              <img class="logo" data-tmpl=logo>
+              <span class="mt-1 fs14 demi"><span data-tmpl=baseSymbol></span>-<span data-tmpl=quoteSymbol></span></span>
             </div>
           </div>
         </div>

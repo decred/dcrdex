@@ -66,6 +66,8 @@ func (p *pingPonger) HandleNotification(m *Mantle, note core.Notification) {
 				p.buy(m)
 			}
 		}
+	case *core.BalanceNote:
+		log.Infof("pingponger balance: %s = %d available, %d locked", unbip(n.AssetID), n.Balance.Available, n.Balance.Locked)
 	}
 }
 
