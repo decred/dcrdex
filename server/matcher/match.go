@@ -152,10 +152,24 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 
 	updates = new(OrdersUpdated)
 	stats = new(MatchCycleStats)
-	startRate := midGap(book)
-	stats.StartRate = startRate
-	stats.LowRate = startRate
-	stats.HighRate = startRate
+
+	defer func() {
+		for _, matchSet := range matches {
+			if matchSet.Total > 0 { // cancel filter
+				stats.StartRate = matchSet.Makers[0].Rate
+				break
+			}
+		}
+		if stats.StartRate > 0 { // If we didn't find anything going forward, no need to check going backwards.
+			for i := len(matches) - 1; i >= 0; i-- {
+				matchSet := matches[i]
+				if matchSet.Total > 0 { // cancel filter
+					stats.EndRate = matchSet.Makers[len(matchSet.Makers)-1].Rate
+					break
+				}
+			}
+		}
+	}()
 
 	appendTradeSet := func(matchSet *order.MatchSet) {
 		matches = append(matches, matchSet)
@@ -315,9 +329,7 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 		nomatched = append(nomatched, q)
 	}
 
-	midGap := midGap(book)
-	stats.EndRate = midGap
-	bookVolumes(book, midGap, stats)
+	bookVolumes(book, stats)
 
 	return
 }
@@ -658,7 +670,8 @@ func sideVolume(ords []*order.LimitOrder) (q uint64) {
 	return
 }
 
-func bookVolumes(book Booker, midGap uint64, stats *MatchCycleStats) {
+func bookVolumes(book Booker, stats *MatchCycleStats) {
+	midGap := midGap(book)
 	cutoff5 := midGap - midGap/20 // 5%
 	cutoff25 := midGap - midGap/4 // 25%
 	for _, ord := range book.BuyOrders() {

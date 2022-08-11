@@ -18,6 +18,11 @@ const (
 	InsertEpoch = `INSERT INTO %s (epoch_idx, epoch_dur, match_time, csum, seed, revealed, missed)
 		VALUES ($1, $2, $3, $4, $5, $6, $7);`
 
+	SelectLastEpochRate = `SELECT end_rate
+		FROM %s
+		ORDER BY epoch_end DESC
+		LIMIT 1;`
+
 	// CreateEpochReportTable creates an epoch_reports table that holds
 	// epoch-end reports that can be used to construct market history data sets.
 	CreateEpochReportTable = `CREATE TABLE IF NOT EXISTS %s (

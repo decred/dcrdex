@@ -78,6 +78,11 @@ type DEXArchivist interface {
 	// InsertEpoch stores the results of a newly-processed epoch.
 	InsertEpoch(ed *EpochResults) error
 
+	// LastEpochRate gets the EndRate of the last EpochResults inserted for the
+	// market. If the database is empty, no error and a rate of zero are
+	// returned.
+	LastEpochRate(b, q uint32) (uint64, error)
+
 	// LoadEpochStats reads all market epoch history from the database.
 	LoadEpochStats(uint32, uint32, []*candles.Cache) error
 
