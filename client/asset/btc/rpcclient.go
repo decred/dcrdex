@@ -176,7 +176,7 @@ func (wc *rpcClient) connect(ctx context.Context, _ *sync.WaitGroup) error {
 
 // reconfigure attempts to reconfigure the rpcClient for the new settings. Live
 // reconfiguration is only attempted if the new wallet type is walletTypeRPC. If
-// the special:activelyUsed flag is set, reconfigure will fail if we can't
+// the specialactivelyUsed flag is set, reconfigure will fail if we can't
 // validate ownership of the current deposit address.
 func (wc *rpcClient) reconfigure(cfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error) {
 	// rpcClient only handles walletTypeRPC.

@@ -2448,6 +2448,9 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 
 	// See if the wallet offers a quick path.
 	if configurer, is := oldWallet.Wallet.(asset.LiveReconfigurer); is {
+		form.Config[asset.SpecialSettingActivelyUsed] = strconv.FormatBool(c.assetHasActiveOrders(dbWallet.AssetID))
+		defer delete(form.Config, asset.SpecialSettingActivelyUsed)
+
 		if restart, err := configurer.Reconfigure(c.ctx, &asset.WalletConfig{
 			Type:     form.Type,
 			Settings: form.Config,

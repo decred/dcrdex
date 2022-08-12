@@ -184,7 +184,7 @@ func runTest(t *testing.T, splitTx bool) {
 		}
 		tLogger.Debugf("%s %f available, %f unconfirmed, %f locked",
 			name, float64(bal.Available)/1e8, float64(bal.Immature)/1e8, float64(bal.Locked)/1e8)
-		wallet.useSplitTx = splitTx
+		wallet.config().useSplitTx = splitTx
 	}
 
 	// Unlock the wallet for use.

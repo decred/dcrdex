@@ -4,6 +4,7 @@
 package dcr
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -190,6 +191,72 @@ func newRPCWallet(settings map[string]string, logger dex.Logger, net dex.Network
 	return rpcw, nil
 }
 
+// Reconfigure updates the wallet to user a new configuration.
+func (w *rpcWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, net dex.Network, currentAddress, depositAccount string) (restart bool, err error) {
+	if !(cfg.Type == walletTypeDcrwRPC || cfg.Type == walletTypeLegacy) {
+		return true, nil
+	}
+
+	rpcCfg, chainParams, err := loadRPCConfig(cfg.Settings, net)
+	if err != nil {
+		return false, fmt.Errorf("error parsing config: %w", err)
+	}
+
+	walletCfg := new(walletConfig)
+	_, err = loadConfig(cfg.Settings, net, walletCfg)
+	if err != nil {
+		return false, err
+	}
+
+	if chainParams.Net != w.chainParams.Net {
+		return false, errors.New("cannot reconfigure to use different netowrk")
+	}
+	certs, err := os.ReadFile(rpcCfg.RPCCert)
+	if err != nil {
+		return false, fmt.Errorf("TLS certificate read error: %w", err)
+	}
+	if rpcCfg.RPCUser == w.rpcCfg.User &&
+		rpcCfg.RPCPass == w.rpcCfg.Pass &&
+		bytes.Equal(certs, w.rpcCfg.Certificates) &&
+		rpcCfg.RPCListen == w.rpcCfg.Host {
+		return false, nil
+	}
+
+	newWallet, err := newRPCWallet(cfg.Settings, w.log, net)
+	if err != nil {
+		return false, err
+	}
+
+	err = newWallet.Connect(ctx)
+	if err != nil {
+		return false, fmt.Errorf("error connecting new wallet")
+	}
+
+	if walletCfg.ActivelyUsed {
+		a, err := stdaddr.DecodeAddress(currentAddress, w.chainParams)
+		if err != nil {
+			return false, err
+		}
+		owns, err := newWallet.AccountOwnsAddress(ctx, a, depositAccount)
+		if err != nil {
+			return false, err
+		}
+		if !owns {
+			return false, errors.New("cannot reconfigure to different wallet while there are active deals")
+		}
+	}
+
+	w.rpcMtx.Lock()
+	defer w.rpcMtx.Unlock()
+	w.chainParams = newWallet.chainParams
+	w.rpcCfg = newWallet.rpcCfg
+	w.spvMode = newWallet.spvMode
+	w.rpcConnector = newWallet.rpcConnector
+	w.rpcClient = newWallet.rpcClient
+
+	return false, nil
+}
+
 func (w *rpcWallet) handleRPCClientReconnection(ctx context.Context) {
 	connectCount := atomic.AddUint32(&w.connectCount, 1)
 	if connectCount == 1 {
@@ -201,30 +268,31 @@ func (w *rpcWallet) handleRPCClientReconnection(ctx context.Context) {
 	w.log.Debugf("dcrwallet reconnected (%d)", connectCount-1)
 	w.rpcMtx.RLock()
 	defer w.rpcMtx.RUnlock()
-	err := w.checkRPCConnection(ctx)
+	spv, err := checkRPCConnection(ctx, w.rpcConnector, w.rpcClient, w.log)
 	if err != nil {
 		w.log.Errorf("dcrwallet reconnect handler error: %v", err)
 	}
+	w.spvMode = spv
 }
 
 // checkRPCConnection verifies the dcrwallet connection with the walletinfo RPC
 // and sets the spvMode flag accordingly. The spvMode flag is only set after a
 // successful check. This method is not safe for concurrent access, and the
 // rpcMtx must be at least read locked.
-func (w *rpcWallet) checkRPCConnection(ctx context.Context) error {
+func checkRPCConnection(ctx context.Context, connector rpcConnector, client rpcClient, log dex.Logger) (bool, error) {
 	// Check the required API versions.
-	versions, err := w.rpcConnector.Version(ctx)
+	versions, err := connector.Version(ctx)
 	if err != nil {
-		return fmt.Errorf("dcrwallet version fetch error: %w", err)
+		return false, fmt.Errorf("dcrwallet version fetch error: %w", err)
 	}
 
 	ver, exists := versions["dcrwalletjsonrpcapi"]
 	if !exists {
-		return fmt.Errorf("dcrwallet.Version response missing 'dcrwalletjsonrpcapi'")
+		return false, fmt.Errorf("dcrwallet.Version response missing 'dcrwalletjsonrpcapi'")
 	}
 	walletSemver := dex.NewSemver(ver.Major, ver.Minor, ver.Patch)
 	if !dex.SemverCompatible(requiredWalletVersion, walletSemver) {
-		return fmt.Errorf("dcrwallet has an incompatible JSON-RPC version: got %s, expected %s",
+		return false, fmt.Errorf("dcrwallet has an incompatible JSON-RPC version: got %s, expected %s",
 			walletSemver, requiredWalletVersion)
 	}
 
@@ -232,26 +300,24 @@ func (w *rpcWallet) checkRPCConnection(ctx context.Context) error {
 	if exists {
 		nodeSemver := dex.NewSemver(ver.Major, ver.Minor, ver.Patch)
 		if !dex.SemverCompatible(requiredNodeVersion, nodeSemver) {
-			return fmt.Errorf("dcrd has an incompatible JSON-RPC version: got %s, expected %s",
+			return false, fmt.Errorf("dcrd has an incompatible JSON-RPC version: got %s, expected %s",
 				nodeSemver, requiredNodeVersion)
 		}
-		w.spvMode = false
-		w.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) proxying dcrd (JSON-RPC API v%s) on %v",
-			walletSemver, nodeSemver, w.chainParams.Name)
-	} else {
-		// SPV maybe?
-		walletInfo, err := w.rpcClient.WalletInfo(ctx)
-		if err != nil {
-			return fmt.Errorf("walletinfo rpc error: %w", translateRPCCancelErr(err))
-		}
-		if !walletInfo.SPV {
-			return fmt.Errorf("dcrwallet.Version response missing 'dcrdjsonrpcapi' for non-spv wallet")
-		}
-		w.spvMode = true
-		w.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) in SPV mode", walletSemver)
+		log.Infof("Connected to dcrwallet (JSON-RPC API v%s) proxying dcrd (JSON-RPC API v%s)",
+			walletSemver, nodeSemver)
+		return false, nil
 	}
 
-	return nil
+	// SPV maybe?
+	walletInfo, err := client.WalletInfo(ctx)
+	if err != nil {
+		return false, fmt.Errorf("walletinfo rpc error: %w", translateRPCCancelErr(err))
+	}
+	if !walletInfo.SPV {
+		return false, fmt.Errorf("dcrwallet.Version response missing 'dcrdjsonrpcapi' for non-spv wallet")
+	}
+	log.Infof("Connected to dcrwallet (JSON-RPC API v%s) in SPV mode", walletSemver)
+	return true, nil
 }
 
 // Connect establishes a connection to the previously created rpc client. The
@@ -297,7 +363,7 @@ func (w *rpcWallet) Connect(ctx context.Context) error {
 	// fails and we return with a non-nil error, we must shutdown the
 	// rpc client otherwise subsequent reconnect attempts will be met
 	// with "websocket client has already connected".
-	err = w.checkRPCConnection(ctx)
+	spv, err := checkRPCConnection(ctx, w.rpcConnector, w.rpcClient, w.log)
 	if err != nil {
 		// The client should still be connected, but if not, do not try to
 		// shutdown and wait as it could hang.
@@ -308,6 +374,8 @@ func (w *rpcWallet) Connect(ctx context.Context) error {
 		}
 		return err
 	}
+
+	w.spvMode = spv
 
 	return nil
 }

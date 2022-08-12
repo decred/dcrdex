@@ -367,7 +367,7 @@ func (w *spvWallet) birthday() time.Time {
 
 // reconfigure attempts to reconfigure the rpcClient for the new settings. Live
 // reconfiguration is only attempted if the new wallet type is walletTypeSPV. An
-// error is generated if the birthday is reduced and the special:activelyUsed
+// error is generated if the birthday is reduced and the specialactivelyUsed
 // flag is set.
 func (w *spvWallet) reconfigure(cfg *asset.WalletConfig, _ /* currentAddress */ string) (restartRequired bool, err error) {
 	if cfg.Type != walletTypeSPV {
