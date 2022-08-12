@@ -1,16 +1,16 @@
 module decred.org/dcrdex
 
-go 1.17
+go 1.18
 
 require (
 	decred.org/dcrwallet/v2 v2.0.8
-	github.com/btcsuite/btcd v0.22.0-beta.0.20220413172512-bf64c8bdbbbf
-	github.com/btcsuite/btcd/btcec/v2 v2.2.0
-	github.com/btcsuite/btcd/btcutil v1.1.1
-	github.com/btcsuite/btcd/btcutil/psbt v1.1.3
+	github.com/btcsuite/btcd v0.23.1
+	github.com/btcsuite/btcd/btcec/v2 v2.2.1
+	github.com/btcsuite/btcd/btcutil v1.1.2
+	github.com/btcsuite/btcd/btcutil/psbt v1.1.5
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.0.1
 	github.com/btcsuite/btclog v0.0.0-20170628155309-84c8d2346e9f
-	github.com/btcsuite/btcwallet v0.14.1-0.20220322205928-94c51d7bdbf9
+	github.com/btcsuite/btcwallet v0.15.1
 	github.com/btcsuite/btcwallet/wallet/txauthor v1.2.3
 	github.com/btcsuite/btcwallet/walletdb v1.4.0
 	github.com/btcsuite/btcwallet/wtxmgr v1.5.0
@@ -46,7 +46,7 @@ require (
 	github.com/jessevdk/go-flags v1.4.1-0.20200711081900-c17162fe8fd7
 	github.com/jrick/logrotate v1.0.0
 	github.com/lib/pq v1.10.4
-	github.com/lightninglabs/neutrino v0.14.1
+	github.com/lightninglabs/neutrino v0.14.2
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/tyler-smith/go-bip39 v1.0.1-0.20181017060643-dbb3b84ba2ef
 	go.etcd.io/bbolt v1.3.7-0.20220130032806-d5db64bdbfde
