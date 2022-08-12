@@ -48,7 +48,7 @@ require (
 	github.com/lib/pq v1.10.4
 	github.com/lightninglabs/neutrino v0.14.2
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
-	github.com/tyler-smith/go-bip39 v1.0.1-0.20181017060643-dbb3b84ba2ef
+	github.com/tyler-smith/go-bip39 v1.1.0
 	go.etcd.io/bbolt v1.3.7-0.20220130032806-d5db64bdbfde
 	golang.org/x/crypto v0.0.0-20220507011949-2cf3adece122
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
