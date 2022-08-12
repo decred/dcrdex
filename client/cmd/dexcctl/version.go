@@ -19,8 +19,8 @@ var (
 	// - Create a release branch of the form 'release-vMAJOR.MINOR'
 	// - Modify the Version variable below on that branch to:
 	//   - Remove the pre-release portion
-	//   - Set the build metadata to 'release'
-	//   - Example: 'Version = "0.5.0+release"'
+	//   - Set the build metadata to 'release.local'
+	//   - Example: 'Version = "0.5.0+release.local"'
 	// - Update the Version variable below on the master branch to the next
 	//   expected version while retaining a pre-release of 'pre'
 	//
@@ -41,7 +41,7 @@ var (
 	// and build metadata portions MUST only contain characters from
 	// semanticAlphabet.
 	// NOTE: The Version string is overridden on init.
-	Version = "0.5.0-pre"
+	Version = "0.6.0-pre"
 )
 
 func init() {

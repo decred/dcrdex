@@ -1,8 +1,10 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 set -e
 
-VER="0.5.0"
+# For release, remove pre-release info, and set metadata to "release".
+VER="0.6.0-pre" # pre, beta, rc1, etc.
+META= # "release"
 
 rm -rf bin
 mkdir -p bin/dexc-windows-amd64-v${VER}
@@ -13,6 +15,9 @@ mkdir -p bin/dexc-darwin-arm64-v${VER}
 
 export CGO_ENABLED=0
 
+# if META set, append "+${META}", otherwise nothing.
+LDFLAGS="-s -w -X main.Version=${VER}${META:++${META}}"
+
 # Generate the localized_html and build the webpack bundle prior to building the
 # webserver package, which embeds the files.
 pushd client/webserver/site
@@ -21,7 +26,7 @@ npm ci
 npm run build
 popd
 
-LDFLAGS="-s -w -X main.Version=${VER}+release"
+LDFLAGS="-s -w -X main.Version=${VER}${META:++${META}}"
 
 pushd client/cmd/dexc
 GOOS=linux GOARCH=amd64 go build -trimpath -o ../../../bin/dexc-linux-amd64-v${VER} -ldflags "$LDFLAGS"
@@ -31,7 +36,7 @@ GOOS=darwin GOARCH=amd64 go build -trimpath -o ../../../bin/dexc-darwin-amd64-v$
 GOOS=darwin GOARCH=arm64 go build -trimpath -o ../../../bin/dexc-darwin-arm64-v${VER} -ldflags "$LDFLAGS"
 popd
 
-LDFLAGS="-s -w -X main.Version=${VER}+release"
+LDFLAGS="-s -w -X main.Version=${VER}${META:++${META}}"
 
 pushd client/cmd/dexcctl
 GOOS=linux GOARCH=amd64 go build -trimpath -o ../../../bin/dexc-linux-amd64-v${VER} -ldflags "$LDFLAGS"
