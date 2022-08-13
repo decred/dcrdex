@@ -1197,8 +1197,16 @@ func TestEpochReport(t *testing.T) {
 		t.Fatalf("cleanTables: %v", err)
 	}
 
+	lastRate, err := archie.LastEpochRate(42, 0)
+	if err != nil {
+		t.Fatalf("error getting last epoch rate from empty table (should be err = nil, rate = 0): %v", err)
+	}
+	if lastRate != 0 {
+		t.Fatalf("wrong initial last rate. expected 0, got %d", lastRate)
+	}
+
 	var epochIdx, epochDur int64 = 13245678, 6000
-	err := archie.InsertEpoch(&db.EpochResults{
+	err = archie.InsertEpoch(&db.EpochResults{
 		MktBase:     42,
 		MktQuote:    0,
 		Idx:         epochIdx,
@@ -1213,6 +1221,14 @@ func TestEpochReport(t *testing.T) {
 
 	if err != nil {
 		t.Fatalf("error inserting first epoch: %v", err)
+	}
+
+	lastRate, err = archie.LastEpochRate(42, 0)
+	if err != nil {
+		t.Fatalf("error getting last epoch rate from after first epoch: %v", err)
+	}
+	if lastRate != 5 {
+		t.Fatalf("wrong first epoch last rate. expected 5, got %d", lastRate)
 	}
 
 	// Trying for the same epoch should violate a primary key constraint.
@@ -1240,6 +1256,14 @@ func TestEpochReport(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("error inserting second epoch: %v", err)
+	}
+
+	lastRate, err = archie.LastEpochRate(42, 0)
+	if err != nil {
+		t.Fatalf("error getting last epoch rate from after second-to-last epoch: %v", err)
+	}
+	if lastRate != 15 {
+		t.Fatalf("wrong second-to-last epoch last rate. expected 15, got %d", lastRate)
 	}
 
 	archie.InsertEpoch(&db.EpochResults{

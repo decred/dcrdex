@@ -18,6 +18,11 @@ const (
 	InsertEpoch = `INSERT INTO %s (epoch_idx, epoch_dur, match_time, csum, seed, revealed, missed)
 		VALUES ($1, $2, $3, $4, $5, $6, $7);`
 
+	SelectLastEpochRate = `SELECT end_rate
+		FROM %s
+		ORDER BY epoch_end DESC
+		LIMIT 1;`
+
 	// CreateEpochReportTable creates an epoch_reports table that holds
 	// epoch-end reports that can be used to construct market history data sets.
 	CreateEpochReportTable = `CREATE TABLE IF NOT EXISTS %s (
@@ -33,8 +38,8 @@ const (
 		book_sells_25 INT8,         -- booked sell volume within 25 pct of market
 		high_rate INT8,             -- the highest rate matched
 		low_rate INT8,              -- the lowest rate matched
-		start_rate INT8,            -- the mid-gap rate at the beginning of the match cycle
-		end_rate INT8               -- the mid-gap rate at the end of the match cycle
+		start_rate INT8,            -- the rate of the first match in the epoch
+		end_rate INT8               -- the rate of the last match in the epoch
 	);`
 
 	// InsertEpochReport inserts a row into the epoch_reports table.

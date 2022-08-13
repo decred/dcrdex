@@ -167,6 +167,7 @@ type Market struct {
 
 	// Data API
 	dataCollector DataCollector
+	lastRate      uint64
 }
 
 // Storage is the DB interface required by Market.
@@ -176,6 +177,7 @@ type Storage interface {
 	Fatal() <-chan struct{}
 	Close() error
 	InsertEpoch(ed *db.EpochResults) error
+	LastEpochRate(base, quote uint32) (uint64, error)
 	MarketMatches(base, quote uint32) ([]*db.MatchDataWithCoins, error)
 	InsertMatch(match *order.Match) error
 }
@@ -475,6 +477,11 @@ ordersLoop:
 	}
 	log.Infof("Tracking %d orders with %d active matches.", len(settling), len(activeMatches))
 
+	lastEpochEndRate, err := storage.LastEpochRate(base, quote)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load last epoch end rate: %w", err)
+	}
+
 	return &Market{
 		running:          make(chan struct{}), // closed on market start
 		marketInfo:       mktInfo,
@@ -492,6 +499,7 @@ ordersLoop:
 		baseFeeFetcher:   cfg.FeeFetcherBase,
 		quoteFeeFetcher:  cfg.FeeFetcherQuote,
 		dataCollector:    cfg.DataCollector,
+		lastRate:         lastEpochEndRate,
 	}, nil
 }
 
@@ -2373,6 +2381,17 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 	oidsMissed := make([]order.OrderID, 0, len(misses))
 	for _, om := range misses {
 		oidsMissed = append(oidsMissed, om.ID())
+	}
+
+	// If there were no matches, we need to persist that last rate from the last
+	// match recorded.
+	if stats.EndRate == 0 {
+		stats.EndRate = m.lastRate
+		stats.StartRate = m.lastRate
+		stats.HighRate = m.lastRate
+		stats.LowRate = m.lastRate
+	} else {
+		m.lastRate = stats.EndRate
 	}
 
 	err := m.storage.InsertEpoch(&db.EpochResults{

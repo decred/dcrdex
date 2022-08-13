@@ -135,6 +135,9 @@ func (ta *TArchivist) InsertEpoch(ed *db.EpochResults) error {
 	}
 	return nil
 }
+func (ta *TArchivist) LastEpochRate(base, quote uint32) (rate uint64, err error) {
+	return 1, nil
+}
 func (ta *TArchivist) BookOrder(lo *order.LimitOrder) error {
 	ta.mtx.Lock()
 	defer ta.mtx.Unlock()

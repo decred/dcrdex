@@ -597,14 +597,16 @@ func TestMatchWithBook_limitsOnly_multipleQueued(t *testing.T) {
 	_, matches, passed, failed, doneOK, partial, booked, nomatched, unbooked, _, stats := me.Match(b, epochQueue)
 	//t.Log(matches, passed, failed, doneOK, partial, booked, unbooked)
 
+	lastMatch := matches[len(matches)-1]
+
 	compareMatchStats(t, &matcher.MatchCycleStats{
 		BookBuys:    (bookBuyLots - 4) * LotSize,
 		BookSells:   (bookSellLots + 39) * LotSize,
 		MatchVolume: 6 * LotSize,
 		HighRate:    4550000,
 		LowRate:     4300000,
-		StartRate:   (4550000 + 4500000) / 2,
-		EndRate:     (4600000 + 4300000) / 2,
+		StartRate:   matches[0].Makers[0].Rate,
+		EndRate:     lastMatch.Makers[len(lastMatch.Makers)-1].Rate,
 	}, stats)
 
 	// PASSED orders
@@ -928,10 +930,10 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 				BookBuys:    (bookBuyLots - 1) * LotSize,
 				BookSells:   bookSellLots * LotSize,
 				MatchVolume: LotSize,
-				HighRate:    initialMidGap,
-				LowRate:     4500000,
-				StartRate:   initialMidGap,
-				EndRate:     (4300000 + 4550000) / 2,
+				HighRate:    bookBuyOrders[nBuy-1].Rate,
+				LowRate:     bookBuyOrders[nBuy-1].Rate,
+				StartRate:   bookBuyOrders[nBuy-1].Rate,
+				EndRate:     bookBuyOrders[nBuy-1].Rate,
 			},
 		},
 		{
@@ -955,10 +957,10 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 				BookBuys:    (bookBuyLots - 3) * LotSize,
 				BookSells:   bookSellLots * LotSize,
 				MatchVolume: 3 * LotSize,
-				HighRate:    initialMidGap,
-				LowRate:     4300000,
-				StartRate:   initialMidGap,
-				EndRate:     (4550000 + 4300000) / 2,
+				HighRate:    bookBuyOrders[nBuy-1].Rate,
+				LowRate:     bookBuyOrders[nBuy-2].Rate,
+				StartRate:   bookBuyOrders[nBuy-1].Rate,
+				EndRate:     bookBuyOrders[nBuy-2].Rate,
 			},
 			// newLimitOrder(false, 4300000, 2, order.StandingTiF, 0), // older
 			// newLimitOrder(false, 4500000, 1, order.StandingTiF, 0),
@@ -987,10 +989,10 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 				BookSells:   bookSellLots * LotSize,
 				MatchVolume: 5 * LotSize,
 
-				HighRate:  initialMidGap,
-				LowRate:   4300000,
-				StartRate: initialMidGap,
-				EndRate:   (4550000 + 4300000) / 2,
+				HighRate:  bookBuyOrders[nBuy-1].Rate,
+				LowRate:   bookBuyOrders[nBuy-3].Rate,
+				StartRate: bookBuyOrders[nBuy-1].Rate,
+				EndRate:   bookBuyOrders[nBuy-3].Rate,
 			},
 		},
 		{

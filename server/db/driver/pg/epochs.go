@@ -5,7 +5,9 @@ package pg
 
 import (
 	"context"
+	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"time"
 
@@ -80,6 +82,22 @@ func (a *Archiver) InsertEpoch(ed *db.EpochResults) error {
 	}
 
 	return err
+}
+
+// LastEpochRate gets the EndRate of the last EpochResults inserted for the
+// market. If the database is empty, no error and a rate of zero are returned.
+func (a *Archiver) LastEpochRate(base, quote uint32) (rate uint64, err error) {
+	marketSchema, err := a.marketSchema(base, quote)
+	if err != nil {
+		return 0, err
+	}
+
+	epochReportsTableName := fullEpochReportsTableName(a.dbName, marketSchema)
+	stmt := fmt.Sprintf(internal.SelectLastEpochRate, epochReportsTableName)
+	if err = a.db.QueryRowContext(a.ctx, stmt).Scan(&rate); err != nil && !errors.Is(sql.ErrNoRows, err) {
+		return 0, err
+	}
+	return rate, nil
 }
 
 // LoadEpochStats reads all market epoch history from the database, updating the
