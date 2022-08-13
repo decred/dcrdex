@@ -38,8 +38,8 @@ const (
 		book_sells_25 INT8,         -- booked sell volume within 25 pct of market
 		high_rate INT8,             -- the highest rate matched
 		low_rate INT8,              -- the lowest rate matched
-		start_rate INT8,            -- the mid-gap rate at the beginning of the match cycle
-		end_rate INT8               -- the mid-gap rate at the end of the match cycle
+		start_rate INT8,            -- the rate of the first match in the epoch
+		end_rate INT8               -- the rate of the last match in the epoch
 	);`
 
 	// InsertEpochReport inserts a row into the epoch_reports table.

@@ -153,24 +153,6 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 	updates = new(OrdersUpdated)
 	stats = new(MatchCycleStats)
 
-	defer func() {
-		for _, matchSet := range matches {
-			if matchSet.Total > 0 { // cancel filter
-				stats.StartRate = matchSet.Makers[0].Rate
-				break
-			}
-		}
-		if stats.StartRate > 0 { // If we didn't find anything going forward, no need to check going backwards.
-			for i := len(matches) - 1; i >= 0; i-- {
-				matchSet := matches[i]
-				if matchSet.Total > 0 { // cancel filter
-					stats.EndRate = matchSet.Makers[len(matchSet.Makers)-1].Rate
-					break
-				}
-			}
-		}
-	}()
-
 	appendTradeSet := func(matchSet *order.MatchSet) {
 		matches = append(matches, matchSet)
 
@@ -327,6 +309,22 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 
 	for _, q := range nomatchStanding {
 		nomatched = append(nomatched, q)
+	}
+
+	for _, matchSet := range matches {
+		if matchSet.Total > 0 { // cancel filter
+			stats.StartRate = matchSet.Makers[0].Rate
+			break
+		}
+	}
+	if stats.StartRate > 0 { // If we didn't find anything going forward, no need to check going backwards.
+		for i := len(matches) - 1; i >= 0; i-- {
+			matchSet := matches[i]
+			if matchSet.Total > 0 { // cancel filter
+				stats.EndRate = matchSet.Makers[len(matchSet.Makers)-1].Rate
+				break
+			}
+		}
 	}
 
 	bookVolumes(book, stats)
