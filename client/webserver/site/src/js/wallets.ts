@@ -20,11 +20,13 @@ import {
 } from './registry'
 
 const animationLength = 300
+const traitRescanner = 1
 const traitNewAddresser = 1 << 1
 const traitLogFiler = 1 << 2
 const traitRecoverer = 1 << 5
 const traitWithdrawer = 1 << 6
 const traitRestorer = 1 << 8
+const traitsExtraOpts = traitLogFiler & traitRecoverer & traitRestorer & traitRescanner
 
 const activeOrdersErrCode = 35
 
@@ -274,7 +276,9 @@ export default class WalletsPage extends BasePage {
       page.checkmark.style.fontSize = `${prog * 80}px`
       page.checkmark.style.color = `rgb(${startR + prog * diffR}, ${startG + prog * diffG}, ${startB + prog * diffB})`
     }, 'easeOutElastic', () => {
-      this.animation = new Animation(1500, () => { /* pass */ }, '', () => { this.closePopups() })
+      this.animation = new Animation(1500, () => { /* pass */ }, '', () => {
+        if (this.currentForm === page.checkmarkForm) this.closePopups()
+      })
     })
   }
 
@@ -509,9 +513,13 @@ export default class WalletsPage extends BasePage {
   }
 
   async rescanWallet (assetID: number) {
-    const loaded = app().loading(this.body)
+    const page = this.page
+    Doc.hide(page.reconfigErr)
+
     const url = '/api/rescanwallet'
     const req = { assetID: assetID }
+
+    const loaded = app().loading(this.body)
     const res = await postJSON(url, req)
     loaded()
     if (res.code === activeOrdersErrCode) {
@@ -520,7 +528,12 @@ export default class WalletsPage extends BasePage {
       this.showConfirmForce()
       return
     }
-    app().checkResponse(res)
+    if (!app().checkResponse(res)) {
+      page.reconfigErr.textContent = res.msg
+      Doc.show(page.reconfigErr)
+      return
+    }
+    this.assetUpdated(assetID, page.reconfigForm, intl.prep(intl.ID_RESCAN_STARTED))
   }
 
   showConfirmForce () {
@@ -589,12 +602,11 @@ export default class WalletsPage extends BasePage {
     }
 
     const wallet = app().walletMap[assetID]
-    if ((wallet.traits & traitLogFiler) !== 0) Doc.show(page.downloadLogs)
-    else Doc.hide(page.downloadLogs)
-    if ((wallet.traits & traitRecoverer) !== 0) Doc.show(page.recoverWallet)
-    else Doc.hide(page.recoverWallet)
-    if ((wallet.traits & traitRestorer)) Doc.show(page.exportWallet)
-    else Doc.hide(page.exportWallet)
+    Doc.setVis(wallet.traits & traitLogFiler, page.downloadLogs)
+    Doc.setVis(wallet.traits & traitRecoverer, page.recoverWallet)
+    Doc.setVis(wallet.traits & traitRestorer, page.exportWallet)
+    Doc.setVis(wallet.traits & traitRescanner, page.rescanWallet)
+    Doc.setVis(wallet.traits & traitsExtraOpts, page.otherActionsLabel)
 
     page.recfgAssetLogo.src = Doc.logoPath(asset.symbol)
     page.recfgAssetName.textContent = asset.name

@@ -259,4 +259,5 @@ var EnUS = map[string]string{
 	"Volume":                      "Volume",
 	"No Recent Activity":          "No Recent Activity",
 	"Recent asset_name Activity":  "Recent <span data-asset-name=1></span> Activity",
+	"Other Actions":               "Other Actions",
 }

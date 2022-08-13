@@ -156,6 +156,15 @@ export default class Doc {
     for (const el of els) el.classList.remove('d-hide')
   }
 
+  /*
+   * show or hide the specified elements, based on value of the truthiness of
+   * vis.
+   */
+  static setVis (vis: any, ...els: Element[]) {
+    if (vis) Doc.show(...els)
+    else Doc.hide(...els)
+  }
+
   /* isHidden returns true if the specified element is hidden */
   static isHidden (el: Element): boolean {
     return el.classList.contains('d-hide')

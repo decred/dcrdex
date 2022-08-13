@@ -204,6 +204,7 @@ func mkSupportedAsset(symbol string, state *tWalletState, bal *core.WalletBalanc
 			Encrypted:    true,
 			Synced:       syncPct == 100,
 			SyncProgress: float32(syncPct) / 100,
+			Traits:       asset.WalletTrait(rand.Uint32()),
 		}
 	}
 	winfo := winfos[assetID]
@@ -1293,6 +1294,7 @@ func (c *TCore) walletState(assetID uint32) *core.WalletState {
 		Encrypted:    true,
 		Synced:       syncPct == 100,
 		SyncProgress: float32(syncPct) / 100,
+		Traits:       asset.WalletTrait(rand.Uint32()),
 	}
 }
 
@@ -1492,6 +1494,7 @@ func (c *TCore) Wallets() []*core.WalletState {
 			Balance:   c.balances[assetID],
 			Units:     unitInfo(assetID).AtomicUnit,
 			Encrypted: true,
+			Traits:    asset.WalletTrait(rand.Uint32()),
 		})
 	}
 	return states
