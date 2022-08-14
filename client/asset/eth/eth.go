@@ -95,7 +95,7 @@ var (
 		AvailableWallets: []*asset.WalletDefinition{
 			{
 				Type:        walletTypeGeth,
-				Tab:         "Internal",
+				Tab:         "Native",
 				Description: "Use the built-in DEX wallet (geth light node)",
 				ConfigOpts:  configOpts,
 				Seeded:      true,

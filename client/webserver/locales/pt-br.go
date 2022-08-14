@@ -164,7 +164,7 @@ var PtBr = map[string]string{
 	"Restore from seed":           "Restaurar da Semente",
 	"Import Account":              "Importar Conta",
 	"no_wallet":                   "sem carteira",
-	"create_a_x_wallet":           "Criar uma Carteira {{.Name}}",
+	"create_a_x_wallet":           "Criar uma Carteira <span data-asset-name=1></span>",
 	"dont_share":                  "Não compartilhe e não perca sua seed.",
 	"Show Me":                     "Mostre me",
 	"Wallet Settings":             "Configurações da Carteira",

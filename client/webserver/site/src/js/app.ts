@@ -117,6 +117,7 @@ export default class Application {
     this.seedGenTime = 0
     this.commitHash = process.env.COMMITHASH || ''
     this.noteReceivers = []
+    this.fiatRatesMap = {}
     this.showPopups = State.getCookie('popups') === '1'
     console.log('Decred DEX Client App, Build', this.commitHash.substring(0, 7))
 
@@ -577,9 +578,6 @@ export default class Application {
         const asset = this.assets[wallet.assetID]
         asset.wallet = wallet
         this.walletMap[wallet.assetID] = wallet
-        const bal = wallet.balance.available
-        const balances = this.main.querySelectorAll(`[data-balance-target="${wallet.assetID}"]`)
-        balances.forEach(el => { el.textContent = Doc.formatFullPrecision(bal, asset.unitInfo) })
         break
       }
       case 'match': {
@@ -615,6 +613,8 @@ export default class Application {
         f(note)
       } catch (error) {
         console.error('note feeder error:', error.message ? error.message : error)
+        console.log(note)
+        console.log(error.stack)
       }
     }
     // Discard data notifications.

@@ -76,14 +76,23 @@ header.maintop {
   border-bottom: 1px solid #777;
 }
 
-a.logo {
+a.logo,
+a.logo-icon {
   display: block;
-  width: 145px;
   height: 30px;
   margin: 0 20px;
   background-size: cover;
-  background-image: url("/img/logo_wide_v1.svg");
   cursor: pointer;
+}
+
+a.logo {
+  width: 145px;
+  background-image: url("/img/logo_wide_v1.svg");
+}
+
+a.logo-icon {
+  width: 30px;
+  background-image: url("/img/logo_icon_v1.svg");
 }
 
 div.main {
@@ -147,7 +156,7 @@ button:focus {
 
 div.mainlinks > div,
 div.mainlinks > a {
-  padding-right: 1.7em;
+  padding-right: 1em;
   color: #4a4949;
   cursor: pointer;
 }
@@ -201,7 +210,7 @@ input[type=number] {
   align-items: center;
 }
 
-.fill-abs {
+@mixin fill-abs {
   position: absolute;
   left: 0;
   top: 0;
@@ -209,7 +218,11 @@ input[type=number] {
   right: 0;
 }
 
-.stylish-overflow {
+.fill-abs {
+  @include fill-abs;
+}
+
+@mixin stylish-overflow {
   overflow: auto;
   scrollbar-width: thin;
   scrollbar-color: #7774 #7771;
@@ -227,6 +240,10 @@ input[type=number] {
     background-color: #7774;
     border-radius: 4px;
   }
+}
+
+.stylish-overflow {
+  @include stylish-overflow;
 }
 
 .max-h-100 {
@@ -364,6 +381,10 @@ div.popup-notes {
   100% { transform: rotate(360deg); }
 }
 
+.mw-425 {
+  max-width: 425px;
+}
+
 .d-hide {
   display: none !important;
 }
@@ -472,4 +493,11 @@ span.token-aware-symbol sup {
   font-size: 0.6em;
   position: relative;
   top: -0.6em;
+}
+
+@include media-breakpoint-up(md) {
+  div.mainlinks > div,
+  div.mainlinks > a {
+    padding-right: 1.7em;
+  }
 }

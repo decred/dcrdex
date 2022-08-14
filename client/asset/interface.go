@@ -568,6 +568,8 @@ type Balance struct {
 	// Locked is the total amount locked in the wallet which includes but
 	// is not limited to funds locked for swap but not actually swapped yet.
 	Locked uint64 `json:"locked"`
+	// Other is a place to list custom balance categories.
+	Other map[string]uint64 `json:"other"`
 }
 
 // Coin is some amount of spendable asset. Coin provides the information needed

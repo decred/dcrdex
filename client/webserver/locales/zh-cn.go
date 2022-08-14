@@ -163,8 +163,7 @@ var ZhCN = map[string]string{
 	"Restoration Seed":          "恢复种子",
 	"Restore from seed":         "从种子恢复",
 	"Import Account":            "导入帐户",
-	"no_wallet":                 "未连接钱包", // alt. 没有钱包
-	"create_a_x_wallet":         "创建{{.Info.Name}}钱包",
+	"create_a_x_wallet":         "创建<span data-asset-name=1></span>钱包",
 	"dont_share":                "请好好保存切勿分享它。",
 	"Show Me":                   "展示",
 	"Wallet Settings":           "钱包设置",

@@ -50,6 +50,11 @@ export const ID_KEEP_WALLET_TYPE = 'ID_KEEP_WALLET_TYPE'
 export const WALLET_READY = 'WALLET_READY'
 export const WALLET_PENDING = 'WALLET_PENDING'
 export const SETUP_NEEDED = 'SETUP_NEEDED'
+export const ID_SEND_SUCCESS = 'SEND_SUCCESS'
+export const ID_RECONFIG_SUCCESS = 'RECONFIG_SUCCESS'
+export const ID_RESCAN_STARTED = 'RESCAN_STARTED'
+export const ID_NEW_WALLET_SUCCESS = 'NEW_WALLET_SUCCESS'
+export const ID_WALLET_UNLOCKED = 'WALLET_UNLOCKED'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -101,7 +106,12 @@ export const enUS: Locale = {
   [ID_KEEP_WALLET_TYPE]: 'don\'t change the wallet type',
   [WALLET_READY]: 'Wallet Ready',
   [SETUP_NEEDED]: 'Setup Needed',
-  [WALLET_PENDING]: 'Creating Wallet'
+  [WALLET_PENDING]: 'Creating Wallet',
+  [ID_SEND_SUCCESS]: '{{ assetName }} Sent!',
+  [ID_RECONFIG_SUCCESS]: 'Wallet Reconfigured!',
+  [ID_RESCAN_STARTED]: 'Wallet Rescan Running',
+  [ID_NEW_WALLET_SUCCESS]: '{{ assetName }} Wallet Created!',
+  [ID_WALLET_UNLOCKED]: 'Wallet Unlocked'
 }
 
 export const ptBR: Locale = {

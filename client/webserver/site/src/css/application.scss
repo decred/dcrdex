@@ -65,10 +65,10 @@ $grid-breakpoints: (
 @import "~bootstrap/scss/utilities/api";
 
 // Application
-@import "./main.scss";
-@import "./main_dark.scss";
 @import "./typography.scss";
 @import "./icons.scss";
+@import "./main.scss";
+@import "./main_dark.scss";
 @import "./market.scss";
 @import "./market_dark.scss";
 @import "./wallets.scss";

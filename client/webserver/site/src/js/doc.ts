@@ -156,6 +156,15 @@ export default class Doc {
     for (const el of els) el.classList.remove('d-hide')
   }
 
+  /*
+   * show or hide the specified elements, based on value of the truthiness of
+   * vis.
+   */
+  static setVis (vis: any, ...els: Element[]) {
+    if (vis) Doc.show(...els)
+    else Doc.hide(...els)
+  }
+
   /* isHidden returns true if the specified element is hidden */
   static isHidden (el: Element): boolean {
     return el.classList.contains('d-hide')
@@ -175,18 +184,7 @@ export default class Doc {
    * default easing algorithm is linear.
    */
   static async animate (duration: number, f: (progress: number) => void, easingAlgo?: string) {
-    const easer = easingAlgo ? Easing[easingAlgo] : Easing.linear
-    const start = new Date().getTime()
-    const end = start + duration
-    const range = end - start
-    const frameDuration = 1000 / FPS
-    let now = start
-    while (now < end) {
-      f(easer((now - start) / range))
-      await sleep(frameDuration)
-      now = new Date().getTime()
-    }
-    f(1)
+    await new Animation(duration, f, easingAlgo).wait()
   }
 
   static applySelector (ancestor: HTMLElement, k: string): PageElement[] {
@@ -304,7 +302,7 @@ export default class Doc {
   * tmplElement is a helper function for grabbing sub-elements of the market list
   * template.
   */
-  static tmplElement (ancestor: Document | Element, s: string): PageElement {
+  static tmplElement (ancestor: Document | HTMLElement, s: string): PageElement {
     return ancestor.querySelector(`[data-tmpl="${s}"]`) || document.createElement('div')
   }
 
@@ -368,13 +366,83 @@ export default class Doc {
   }
 }
 
+/*
+ * Animation is a handler for starting and stopping animations.
+ */
+export class Animation {
+  done: (() => void) | undefined
+  endAnimation: boolean
+  thread: Promise<void>
+  Forever: number
+
+  constructor (duration: number, f: (progress: number) => void, easingAlgo?: string, done?: () => void) {
+    this.done = done
+    this.thread = this.run(duration, f, easingAlgo)
+  }
+
+  /*
+   * run runs the animation function, increasing progress from 0 to 1 in a
+   * manner dictated by easingAlgo.
+   */
+  async run (duration: number, f: (progress: number) => void, easingAlgo?: string) {
+    duration = duration >= 0 ? duration : 1000 * 86400 * 365 * 10 // 10 years, in ms
+    const easer = easingAlgo ? Easing[easingAlgo] : Easing.linear
+    const start = new Date().getTime()
+    const end = start + duration
+    const range = end - start
+    const frameDuration = 1000 / FPS
+    let now = start
+    this.endAnimation = false
+    while (now < end) {
+      if (this.endAnimation) return this.runCompletionFunction()
+      f(easer((now - start) / range))
+      await sleep(frameDuration)
+      now = new Date().getTime()
+    }
+    f(1)
+    this.runCompletionFunction()
+  }
+
+  /* wait returns a promise that will resolve when the animation completes. */
+  async wait () {
+    await this.thread
+  }
+
+  /* stop schedules the animation to exit at its next frame. */
+  stop () {
+    this.endAnimation = true
+  }
+
+  /*
+   * stopAndWait stops the animations and returns a promise that will resolve
+   * when the animation exits.
+   */
+  async stopAndWait () {
+    this.stop()
+    await this.wait()
+  }
+
+  /* runCompletionFunction runs any registered callback function */
+  runCompletionFunction () {
+    if (this.done) this.done()
+  }
+}
+
 /* Easing algorithms for animations. */
-const Easing: Record<string, (t: number) => number> = {
+export const Easing: Record<string, (t: number) => number> = {
   linear: t => t,
   easeIn: t => t * t,
   easeOut: t => t * (2 - t),
   easeInHard: t => t * t * t,
-  easeOutHard: t => (--t) * t * t + 1
+  easeOutHard: t => (--t) * t * t + 1,
+  easeOutElastic: t => {
+    const c4 = (2 * Math.PI) / 3
+    return t === 0
+      ? 0
+      : t === 1
+        ? 1
+        : Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * c4) + 1
+  }
 }
 
 /* WalletIcons are used for controlling wallets in various places. */
