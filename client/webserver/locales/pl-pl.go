@@ -168,6 +168,8 @@ var PlPL = map[string]string{
 	"Show Me":                     "Pokaż",
 	"Wallet Settings":             "Ustawienia portfela",
 	"add_a_x_wallet":              `Dodaj portfel <img data-tmpl="assetLogo" class="asset-logo mx-1"> <span data-tmpl="assetName"></span>`,
+	"ready":                       "gotowy",
+	"off":                         "wyłączony",
 	"Export Trades":               "Eksportuj zlecenia wymiany",
 	"change the wallet type":      "zmień typ portfela",
 	"confirmations":               "potwierdzenia",

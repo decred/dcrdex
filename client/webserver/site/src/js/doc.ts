@@ -366,6 +366,9 @@ export default class Doc {
   }
 }
 
+/*
+ * Animation is a handler for starting and stopping animations.
+ */
 export class Animation {
   done: (() => void) | undefined
   endAnimation: boolean
@@ -377,6 +380,10 @@ export class Animation {
     this.thread = this.run(duration, f, easingAlgo)
   }
 
+  /*
+   * run runs the animation function, increasing progress from 0 to 1 in a
+   * manner dictated by easingAlgo.
+   */
   async run (duration: number, f: (progress: number) => void, easingAlgo?: string) {
     duration = duration >= 0 ? duration : 1000 * 86400 * 365 * 10 // 10 years, in ms
     const easer = easingAlgo ? Easing[easingAlgo] : Easing.linear
@@ -396,24 +403,30 @@ export class Animation {
     this.runCompletionFunction()
   }
 
+  /* wait returns a promise that will resolve when the animation completes. */
   async wait () {
     await this.thread
   }
 
+  /* stop schedules the animation to exit at its next frame. */
   stop () {
     this.endAnimation = true
   }
 
+  /*
+   * stopAndWait stops the animations and returns a promise that will resolve
+   * when the animation exits.
+   */
   async stopAndWait () {
     this.stop()
     await this.wait()
   }
 
+  /* runCompletionFunction runs any registered callback function */
   runCompletionFunction () {
     if (this.done) this.done()
   }
 }
-// Animation.Forever = -1
 
 /* Easing algorithms for animations. */
 export const Easing: Record<string, (t: number) => number> = {

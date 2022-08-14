@@ -171,6 +171,8 @@ var EnUS = map[string]string{
 	"Show Me":                     "Show Me",
 	"Wallet Settings":             "Wallet Settings",
 	"add_a_x_wallet":              `Add a <img data-tmpl="assetLogo" class="asset-logo mx-1"> <span data-tmpl="assetName"></span> Wallet`,
+	"ready":                       "ready",
+	"off":                         "off",
 	"Export Trades":               "Export Trades",
 	"change the wallet type":      "change the wallet type",
 	"confirmations":               "confirmations",

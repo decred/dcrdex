@@ -458,7 +458,7 @@ export default class WalletsPage extends BasePage {
 
   async showRecentActivity (assetID: number) {
     const page = this.page
-    // const loaded = app().loading(this.main)
+    const loaded = app().loading(page.orderActivityBox)
     const filter: OrderFilter = {
       n: 20,
       assets: [assetID],
@@ -466,7 +466,7 @@ export default class WalletsPage extends BasePage {
       statuses: []
     }
     const res = await postJSON('/api/orders', filter)
-    // loaded()
+    loaded()
     Doc.hide(page.noActivity, page.orderActivity)
     if (!res.orders || res.orders.length === 0) {
       Doc.show(page.noActivity)
@@ -503,8 +503,7 @@ export default class WalletsPage extends BasePage {
       tmpl.toLogo.src = Doc.logoPath(to)
       tmpl.toSymbol.appendChild(Doc.symbolize(to))
       tmpl.status.textContent = OrderUtil.statusString(ord)
-      tmpl.filled.textContent = `${(ord.filled / ord.qty * 100).toFixed(1)}%`
-      // tmpl.settled.textContent = `${(OrderUtil.settled(ord) / ord.qty * 100).toFixed(1)}%`
+      tmpl.filled.textContent = `${(OrderUtil.filled(ord) / ord.qty * 100).toFixed(1)}%`
       tmpl.age.textContent = Doc.timeSince(ord.submitTime)
       tmpl.link.href = `order/${ord.id}`
       app().bindInternalNavigation(row)
