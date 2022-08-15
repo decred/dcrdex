@@ -76,6 +76,7 @@ type DexConf struct {
 	Network           dex.Network
 	DBConf            *DBConf
 	BroadcastTimeout  time.Duration
+	TxWaitExpiration  time.Duration
 	CancelThreshold   float64
 	Anarchy           bool
 	FreeCancels       bool
@@ -146,6 +147,7 @@ func newConfigResponse(cfg *DexConf, regAssets map[string]*msgjson.FeeAsset, cfg
 
 	configMsg := &msgjson.ConfigResult{
 		BroadcastTimeout: uint64(cfg.BroadcastTimeout.Milliseconds()),
+		TxWaitExpiration: uint64(cfg.TxWaitExpiration.Milliseconds()),
 		RegFeeConfirms:   uint16(dcrAsset.Confs), // DEPRECATED - DCR only
 		CancelMax:        cfg.CancelThreshold,
 		Assets:           cfgAssets,
@@ -619,6 +621,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		Storage:          storage,
 		AuthManager:      authMgr,
 		BroadcastTimeout: cfg.BroadcastTimeout,
+		TxWaitExpiration: cfg.TxWaitExpiration,
 		LockTimeTaker:    dex.LockTimeTaker(cfg.Network),
 		LockTimeMaker:    dex.LockTimeMaker(cfg.Network),
 		SwapDone:         swapDone,

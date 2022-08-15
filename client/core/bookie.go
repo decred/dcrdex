@@ -835,7 +835,7 @@ func (dc *dexConnection) refreshServerConfig() error {
 
 	bTimeout := time.Millisecond * time.Duration(cfg.BroadcastTimeout)
 	tickInterval := bTimeout / tickCheckDivisions
-	dc.log.Debugf("Server %v broadcast timeout %v. Tick interval %v", dc.acct.host, bTimeout, tickInterval)
+	dc.log.Debugf("Server %v broadcast timeout %v. Tick interval %v. Tx wait expiration %v", dc.acct.host, bTimeout, tickInterval, time.Millisecond*time.Duration(cfg.TxWaitExpiration))
 	if dc.ticker.Dur() != tickInterval {
 		dc.ticker.Reset(tickInterval)
 	}

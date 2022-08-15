@@ -33,9 +33,6 @@ var (
 	// fastRecheckInterval, but will eventually taper to taperedRecheckInterval.
 	fastRecheckInterval    = time.Second * 3
 	taperedRecheckInterval = time.Second * 30
-	// txWaitExpiration is the longest the Swapper will wait for a coin waiter.
-	// This could be thought of as the maximum allowable backend latency.
-	txWaitExpiration = 2 * time.Minute
 	// minBlockPeriod is the minimum delay between block-triggered
 	// confirmation/inaction checks. This helps with limiting notification
 	// bursts when blocks are generated closely together (e.g. in Ethereum
@@ -241,6 +238,8 @@ type Swapper struct {
 
 	// The broadcast timeout.
 	bTimeout time.Duration
+	// txWaitExpiration is the longest the Swapper will wait for a coin waiter.
+	txWaitExpiration time.Duration
 	// Expected locktimes for maker and taker swaps.
 	lockTimeTaker time.Duration
 	lockTimeMaker time.Duration
@@ -270,6 +269,9 @@ type Config struct {
 	// BroadcastTimeout is how long the Swapper will wait for expected swap
 	// transactions following new blocks.
 	BroadcastTimeout time.Duration
+	// TxWaitExpiration is the longest the Swapper will wait for a coin waiter.
+	// This could be thought of as the maximum allowable backend latency.
+	TxWaitExpiration time.Duration
 	// LockTimeTaker is the locktime Swapper will use for auditing taker swaps.
 	LockTimeTaker time.Duration
 	// LockTimeMaker is the locktime Swapper will use for auditing maker swaps.
@@ -302,22 +304,23 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 
 	authMgr := cfg.AuthManager
 	swapper := &Swapper{
-		coins:         cfg.Assets,
-		storage:       cfg.Storage,
-		authMgr:       authMgr,
-		swapDone:      cfg.SwapDone,
-		latencyQ:      wait.NewTaperingTickerQueue(fastRecheckInterval, taperedRecheckInterval),
-		matches:       make(map[order.MatchID]*matchTracker),
-		userMatches:   make(map[account.AccountID]map[order.MatchID]*matchTracker),
-		acctMatches:   acctMatches,
-		bTimeout:      cfg.BroadcastTimeout,
-		lockTimeTaker: cfg.LockTimeTaker,
-		lockTimeMaker: cfg.LockTimeMaker,
+		coins:            cfg.Assets,
+		storage:          cfg.Storage,
+		authMgr:          authMgr,
+		swapDone:         cfg.SwapDone,
+		latencyQ:         wait.NewTaperingTickerQueue(fastRecheckInterval, taperedRecheckInterval),
+		matches:          make(map[order.MatchID]*matchTracker),
+		userMatches:      make(map[account.AccountID]map[order.MatchID]*matchTracker),
+		acctMatches:      acctMatches,
+		bTimeout:         cfg.BroadcastTimeout,
+		txWaitExpiration: cfg.TxWaitExpiration,
+		lockTimeTaker:    cfg.LockTimeTaker,
+		lockTimeMaker:    cfg.LockTimeMaker,
 	}
 
 	// Ensure txWaitExpiration is not greater than broadcast timeout setting.
-	if sensible := swapper.bTimeout; txWaitExpiration > sensible {
-		txWaitExpiration = sensible
+	if swapper.txWaitExpiration > swapper.bTimeout {
+		swapper.txWaitExpiration = swapper.bTimeout
 	}
 
 	if !cfg.NoResume {
@@ -824,6 +827,7 @@ func (s *Swapper) Run(ctx context.Context) {
 	}()
 
 	log.Debugf("Swapper started with %v broadcast timeout.", s.bTimeout)
+	log.Debugf("Swapper started with %v tx wait expiration.", s.txWaitExpiration)
 
 	// Block-based inaction checks are started with Timers, and run in the main
 	// loop to avoid locks and WaitGroups.
@@ -1944,7 +1948,7 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 
 	// Search for the transaction for the full txWaitExpiration, even if it goes
 	// past the inaction deadline. processInit recognizes when it is revoked.
-	expireTime := time.Now().Add(txWaitExpiration).UTC()
+	expireTime := time.Now().Add(s.txWaitExpiration).UTC()
 	log.Debugf("Allowing until %v (%v) to locate contract from %v (%v), match %v, tx %s (%s)",
 		expireTime, time.Until(expireTime), makerTaker(stepInfo.actor.isMaker),
 		stepInfo.step, matchID, coinStr, stepInfo.asset.Symbol)
@@ -2051,7 +2055,7 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 
 	// Search for the transaction for the full txWaitExpiration, even if it goes
 	// past the inaction deadline. processRedeem recognizes when it is revoked.
-	expireTime := time.Now().Add(txWaitExpiration).UTC()
+	expireTime := time.Now().Add(s.txWaitExpiration).UTC()
 	log.Debugf("Allowing until %v (%v) to locate redeem from %v (%v), match %v, tx %s (%s)",
 		expireTime, time.Until(expireTime), makerTaker(stepInfo.actor.isMaker),
 		stepInfo.step, matchID, coinStr, stepInfo.asset.Symbol)

@@ -54,6 +54,7 @@ const (
 
 	defaultCancelThresh     = 0.95             // 19 cancels : 1 success
 	defaultBroadcastTimeout = 12 * time.Minute // accommodate certain known long block download timeouts
+	defaultTxWaitExpiration = 2 * time.Minute
 )
 
 var (
@@ -92,6 +93,7 @@ type dexConf struct {
 	RPCListen         []string
 	HiddenService     string
 	BroadcastTimeout  time.Duration
+	TxWaitExpiration  time.Duration
 	AltDNSNames       []string
 	LogMaker          *dex.LoggerMaker
 	SigningKeyPW      []byte
@@ -124,6 +126,7 @@ type flagsData struct {
 
 	MarketsConfPath  string        `long:"marketsconfpath" description:"Path to the markets configuration JSON file."`
 	BroadcastTimeout time.Duration `long:"bcasttimeout" description:"The broadcast timeout specifies how long clients have to broadcast an expected transaction when it is their turn to act. Matches without the expected action by this time are revoked and the actor is penalized."`
+	TxWaitExpiration time.Duration `long:"txWaitExpiration" description:"This specifies how long the server will keep searching for a transaction."`
 	DEXPrivKeyPath   string        `long:"dexprivkeypath" description:"The path to a file containing the DEX private key for message signing."`
 
 	// Deprecated fields that specify the Decred-specific registration fee
@@ -263,6 +266,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		MarketsConfPath:  defaultMarketsConfFilename,
 		DEXPrivKeyPath:   defaultDEXPrivKeyFilename,
 		BroadcastTimeout: defaultBroadcastTimeout,
+		TxWaitExpiration: defaultTxWaitExpiration,
 		CancelThreshold:  defaultCancelThresh,
 		MaxUserCancels:   defaultMaxUserCancels,
 		BanScore:         defaultBanScore,
@@ -556,6 +560,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		RPCListen:         RPCListen,
 		HiddenService:     HiddenService,
 		BroadcastTimeout:  cfg.BroadcastTimeout,
+		TxWaitExpiration:  cfg.TxWaitExpiration,
 		AltDNSNames:       cfg.AltDNSNames,
 		LogMaker:          logMaker,
 		SigningKeyPW:      []byte(cfg.SigningKeyPassword),

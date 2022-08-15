@@ -1079,6 +1079,7 @@ type FeeAsset struct {
 type ConfigResult struct {
 	CancelMax        float64   `json:"cancelmax"`
 	BroadcastTimeout uint64    `json:"btimeout"`
+	TxWaitExpiration uint64    `json:"txWaitExpiration"`
 	RegFeeConfirms   uint16    `json:"regfeeconfirms"` // DEPRECATED
 	Assets           []*Asset  `json:"assets"`
 	Markets          []*Market `json:"markets"`
