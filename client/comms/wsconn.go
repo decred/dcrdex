@@ -340,8 +340,7 @@ func (conn *wsConn) read(ctx context.Context) {
 		if msg.Type == msgjson.Response {
 			handler := conn.respHandler(msg.ID)
 			if handler == nil {
-				b, _ := json.Marshal(msg)
-				conn.log.Errorf("No handler found for response: %v", string(b))
+				conn.log.Errorf("unhandled response with error msg: %v", handleUknownResponse(msg))
 				continue
 			}
 			// Run handlers in a goroutine so that other messages can be
@@ -597,4 +596,14 @@ func (conn *wsConn) respHandler(id uint64) *responseHandler {
 // shutdown, the channel will be closed.
 func (conn *wsConn) MessageSource() <-chan *msgjson.Message {
 	return conn.readCh
+}
+
+// handleUknownResponse extracts the error message sent for a response without a
+// handler.
+func handleUknownResponse(msg *msgjson.Message) error {
+	resp, err := msg.Response()
+	if err != nil {
+		return err
+	}
+	return resp.Error
 }
