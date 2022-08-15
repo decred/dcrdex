@@ -630,7 +630,7 @@ func basisPrice(host string, mkt *Market, oracleBias, oracleWeighting float64, m
 
 	// If we're still unable to resolve a mid-gap price, infer it from the
 	// fiat rates.
-	log.Infof("no basis price available from order book data or known exchanges. using fiat-based fallback.")
+	log.Infof("Inferring exchange rate from fiat data.")
 	fiatRates := bp.fiatConversions()
 	baseRate, found := fiatRates[mkt.BaseID]
 	if !found || baseRate == 0 {
@@ -677,8 +677,8 @@ func oracleAverage(mkts []*OracleReport, log dex.Logger) (float64, error) {
 	var n int
 	for _, mkt := range mkts {
 		n++
-		weightedSum += mkt.DayVol * (mkt.BestBuy + mkt.BestSell) / 2
-		totalWeight += mkt.DayVol
+		weightedSum += mkt.USDVol * (mkt.BestBuy + mkt.BestSell) / 2
+		totalWeight += mkt.USDVol
 		usdVolume += mkt.USDVol
 	}
 	if totalWeight == 0 {
@@ -708,13 +708,12 @@ func oracleMarketReport(ctx context.Context, b, q *SupportedAsset, log dex.Logge
 	}
 
 	type coinpapMarket struct {
-		BaseCurrencyID         string                   `json:"base_currency_id"`
-		QuoteCurrencyID        string                   `json:"quote_currency_id"`
-		MarketURL              string                   `json:"market_url"`
-		AdjustedVolume24hShare float64                  `json:"adjusted_volume_24h_share"`
-		LastUpdated            time.Time                `json:"last_updated"`
-		TrustScore             string                   `json:"trust_score"`
-		Quotes                 map[string]*coinpapQuote `json:"quotes"`
+		BaseCurrencyID  string                   `json:"base_currency_id"`
+		QuoteCurrencyID string                   `json:"quote_currency_id"`
+		MarketURL       string                   `json:"market_url"`
+		LastUpdated     time.Time                `json:"last_updated"`
+		TrustScore      string                   `json:"trust_score"`
+		Quotes          map[string]*coinpapQuote `json:"quotes"`
 	}
 
 	// We use a cache for the market data in case there is more than one bot
@@ -752,7 +751,6 @@ func oracleMarketReport(ctx context.Context, b, q *SupportedAsset, log dex.Logge
 		}
 		oracle := &OracleReport{
 			Host:     host,
-			DayVol:   mkt.AdjustedVolume24hShare,
 			BestBuy:  buy,
 			BestSell: sell,
 		}
@@ -1563,6 +1561,11 @@ func (c *Core) MarketReport(host string, baseID, quoteID uint32) (*MarketReport,
 	r.BasisPrice = mkt.MsgRateToConventional(basisPrice(host, mkt, zeroOracleBias, zeroOracleWeight, midGap, c, c.log))
 
 	setBreakEven := func() error {
+		// If the basis price is still zero, use the oracle price. This mirrors
+		// the handling in basisPrice for oracle weight > 0.
+		if r.BasisPrice == 0 {
+			r.BasisPrice = r.Price
+		}
 		breakEven, err := c.breakEvenHalfSpread(host, mkt, mkt.ConventionalRateToMsg(r.BasisPrice))
 		if err != nil {
 			return fmt.Errorf("error calculating break-even spread: %v", err)
@@ -1594,6 +1597,7 @@ func (c *Core) MarketReport(host string, baseID, quoteID uint32) (*MarketReport,
 	if err != nil {
 		return nil, err
 	}
+	c.log.Debugf("oracle rate fetched for market %s: %f", marketName(baseID, quoteID), price)
 	r.Oracles = oracles
 	r.Price = price
 	r.BasisPrice = price

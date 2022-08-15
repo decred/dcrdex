@@ -1750,6 +1750,9 @@ func (c *Core) connectAndUnlock(crypter encrypt.Crypter, wallet *xcWallet) error
 	// Unlock if either the backend itself is locked or if we lack a cached
 	// unencrypted password for encrypted wallets.
 	if !wallet.unlocked() {
+		if crypter == nil {
+			return newError(noAuthError, "wallet locked and no password provided")
+		}
 		// Note that in cases where we already had the cached decrypted password
 		// but it was just the backend reporting as locked, only unlocking the
 		// backend is needed but this redecrypts the password using the provided
@@ -4936,7 +4939,9 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 
 // Trade is used to place a market or limit order.
 func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
-	// Check the user password.
+	// Check the user password. A Trade can be attempted with an empty password,
+	// which should work if both wallets are unlocked. We use this feature for
+	// bots.
 	var crypter encrypt.Crypter
 	if len(pw) > 0 {
 		var err error
@@ -4994,45 +4999,36 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	accountRedeemer, isAccountRedemption := toWallet.Wallet.(asset.AccountLocker)
 	accountRefunder, isAccountRefund := fromWallet.Wallet.(asset.AccountLocker)
 
-	if crypter != nil {
-		prepareWallet := func(w *xcWallet) error {
-			// NOTE: If the wallet is already internally unlocked (the decrypted
-			// password cached in xcWallet.pw), this could be done without the
-			// crypter via refreshUnlock.
-			err := c.connectAndUnlock(crypter, w)
-			if err != nil {
-				return fmt.Errorf("%s connectAndUnlock error: %w",
-					wallets.fromAsset.Symbol, err)
-			}
-			w.mtx.RLock()
-			defer w.mtx.RUnlock()
-			if w.peerCount < 1 {
-				return fmt.Errorf("%s wallet has no network peers (check your network or firewall)",
-					unbip(w.AssetID))
-			}
-			if !w.synced {
-				return fmt.Errorf("%s still syncing. progress = %.2f%%", unbip(w.AssetID),
-					w.syncProgress*100)
-			}
-			return nil
-		}
-
-		err = prepareWallet(fromWallet)
+	prepareWallet := func(w *xcWallet) error {
+		// NOTE: If the wallet is already internally unlocked (the decrypted
+		// password cached in xcWallet.pw), this could be done without the
+		// crypter via refreshUnlock.
+		err := c.connectAndUnlock(crypter, w)
 		if err != nil {
-			return nil, nil, err
+			return fmt.Errorf("%s connectAndUnlock error: %w",
+				wallets.fromAsset.Symbol, err)
 		}
-
-		err = prepareWallet(toWallet)
-		if err != nil {
-			return nil, nil, err
+		w.mtx.RLock()
+		defer w.mtx.RUnlock()
+		if w.peerCount < 1 {
+			return fmt.Errorf("%s wallet has no network peers (check your network or firewall)",
+				unbip(w.AssetID))
 		}
+		if !w.synced {
+			return fmt.Errorf("%s still syncing. progress = %.2f%%", unbip(w.AssetID),
+				w.syncProgress*100)
+		}
+		return nil
 	}
 
-	if !toWallet.unlocked() {
-		return nil, nil, fmt.Errorf("%s wallet not unlocked", wallets.toAsset.Symbol)
+	err = prepareWallet(fromWallet)
+	if err != nil {
+		return nil, nil, err
 	}
-	if !fromWallet.unlocked() {
-		return nil, nil, fmt.Errorf("%s wallet not unlocked", wallets.fromAsset.Symbol)
+
+	err = prepareWallet(toWallet)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	// Get an address for the swap contract.

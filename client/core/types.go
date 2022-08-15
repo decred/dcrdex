@@ -981,7 +981,9 @@ type BotReport struct {
 // MarketReport is a report about the current state of a market pair, including
 // oracle data.
 type MarketReport struct {
-	Price           float64         `json:"price"`
+	Price float64 `json:"price"`
+	// BasisPrice is the the target price before oracle weighting and bias is
+	// applied.
 	BasisPrice      float64         `json:"basisPrice"`
 	Oracles         []*OracleReport `json:"oracles"`
 	BreakEvenSpread float64         `json:"breakEvenSpread"`
@@ -990,7 +992,6 @@ type MarketReport struct {
 // OracleReport is a summary of an oracle's market data.
 type OracleReport struct {
 	Host     string  `json:"host"`
-	DayVol   float64 `json:"vol24"`
 	USDVol   float64 `json:"usdVol"`
 	BestBuy  float64 `json:"bestBuy"`
 	BestSell float64 `json:"bestSell"`

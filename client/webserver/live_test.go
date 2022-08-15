@@ -1902,14 +1902,12 @@ func (c *TCore) MarketReport(host string, baseID, quoteID uint32) (*core.MarketR
 		Oracles: []*core.OracleReport{
 			{
 				Host:     "binance.com",
-				DayVol:   123456,
 				USDVol:   56789,
 				BestBuy:  0.11158,
 				BestSell: 0.11195,
 			},
 			{
 				Host:     "coinbase.com",
-				DayVol:   654321,
 				USDVol:   98765,
 				BestBuy:  0.11157,
 				BestSell: 0.11199,

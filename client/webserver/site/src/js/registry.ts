@@ -532,7 +532,6 @@ export interface MarketReport {
 
 export interface OracleReport {
   host: string
-  vol24: number
   usdVol: number
   bestBuy: number
   bestSell: number

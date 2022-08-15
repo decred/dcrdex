@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,17 +29,27 @@ var (
 	defaultConfigFileName = "mm.json"
 	defaultCoreDir        = filepath.Join(userDir, ".dexc")
 	defaultConfigFilePath = filepath.Join(defaultCoreDir, defaultConfigFileName)
-	c                     *core.Core
-	pgmID                 uint64
-	log                   dex.Logger
-
-	// flags
-	configFile, coreDir, lang, logLevel string
-	testnet, simnet                     bool
-	manualRate                          float64
 )
 
 func main() {
+	if err := mainErr(); err != nil {
+		fmt.Fprint(os.Stderr, err, "\n")
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+func mainErr() error {
+	var (
+		c     *core.Core
+		pgmID uint64
+
+		// flags
+		configFile, coreDir, lang, logLevel string
+		testnet, simnet                     bool
+		manualRate                          float64
+	)
+
 	flag.StringVar(&configFile, "config", defaultConfigFilePath, "the bot program to run")
 	flag.StringVar(&coreDir, "coredir", defaultCoreDir, "the core configuration directory")
 	flag.StringVar(&lang, "lang", "en-US", "language")
@@ -48,12 +59,14 @@ func main() {
 	flag.Float64Var(&manualRate, "emptyrate", 0, "(optional) a rate to use if the book is empty an there are no oracles available")
 	flag.Parse()
 
-	if coreDir != defaultCoreDir && configFile == defaultConfigFilePath {
-		configFile = filepath.Join(coreDir, defaultConfigFileName)
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	loggerMaker, err := dex.NewLoggerMaker(os.Stdout, logLevel)
+	if err != nil {
+		return err
+	}
+	log := loggerMaker.NewLogger("MAIN")
 
 	killChan := make(chan os.Signal, 1)
 	signal.Notify(killChan, os.Interrupt)
@@ -70,16 +83,9 @@ func main() {
 		}
 	}()
 
-	if err := mainErr(ctx); err != nil {
-		fmt.Fprint(os.Stderr, err, "\n")
-		os.Exit(1)
+	if coreDir != defaultCoreDir && configFile == defaultConfigFilePath {
+		configFile = filepath.Join(coreDir, defaultConfigFileName)
 	}
-	os.Exit(0)
-}
-
-func mainErr(ctx context.Context) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 
 	cfgB, err := os.ReadFile(configFile)
 	if err != nil {
@@ -102,13 +108,6 @@ func mainErr(ctx context.Context) error {
 	case testnet:
 		net = dex.Testnet
 	}
-
-	loggerMaker, err := dex.NewLoggerMaker(os.Stdout, logLevel)
-	if err != nil {
-		return err
-	}
-
-	log = loggerMaker.NewLogger("MAIN")
 
 	c, err = core.New(&core.Config{
 		DBPath:   filepath.Join(coreDir, net.String(), "dexc.db"),
@@ -172,8 +171,8 @@ func mainErr(ctx context.Context) error {
 	}
 
 	printStartMessage := func() {
-		fmt.Println(":::::: Base Wallet Address: ", b.Wallet.Address)
-		fmt.Println(":::::: Quote Wallet Address:", q.Wallet.Address)
+		fmt.Printf(":::::: %s Wallet Address: %s \n", strings.ToUpper(b.Symbol), b.Wallet.Address)
+		fmt.Printf(":::::: %s Wallet Address: %s \n", strings.ToUpper(b.Symbol), q.Wallet.Address)
 		fmt.Println(":::::: Press Enter to begin")
 	}
 

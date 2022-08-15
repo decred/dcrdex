@@ -106,11 +106,16 @@
         {{- /* CURRENT ORACLE DATA */ -}}
         <div id="oraclesBox" class="d-hide edit-hide">
           <table class="oracles-table my-1 w-100">
+            <thead>
+              <tr>
+                <td>Oracles</td>
+                <td colspan="2">avg: <span id="avgPrice"></span></td>
+              </tr>
+            </thead>
             <tbody id="oracles">
               <tr id="oracleTmpl">
-                <td><img data-tmpl="logo"></td>
-                <td data-tmpl="host"></td>
-                <td><span data-tmpl="volume"></span><span data-tmpl="volumeUnit" class="fs12 demi ms-1"></span></td>
+                <td class="text-left"><span class="d-flex align-items-center"><img data-tmpl="logo" class="me-1"><span data-tmpl="host"></span></span></td>
+                <td><span class="fs12 demi me-1">USD</span><span data-tmpl="volume"></span></td>
                 <td data-tmpl="price"></td>
               </tr>
             </tbody>

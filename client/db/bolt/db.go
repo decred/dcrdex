@@ -694,6 +694,10 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 			put(dexKey, []byte(md.Host)).
 			put(typeKey, []byte{byte(ord.Type())}).
 			put(orderKey, order.EncodeOrder(ord)).
+			put(fromVersionKey, uint32Bytes(md.FromVersion)).
+			put(toVersionKey, uint32Bytes(md.ToVersion)).
+			put(redeemMaxFeeRateKey, uint64Bytes(md.RedeemMaxFeeRate)).
+			put(maxFeeRateKey, uint64Bytes(md.MaxFeeRate)).
 			err()
 
 		if err != nil {
@@ -1129,15 +1133,11 @@ func updateOrderMetaData(bkt *bbolt.Bucket, md *dexdb.OrderMetaData) error {
 		put(changeKey, md.ChangeCoin).
 		put(linkedKey, linkedB).
 		put(swapFeesKey, uint64Bytes(md.SwapFeesPaid)).
-		put(maxFeeRateKey, uint64Bytes(md.MaxFeeRate)).
 		put(redemptionFeesKey, uint64Bytes(md.RedemptionFeesPaid)).
-		put(fromVersionKey, uint32Bytes(md.FromVersion)).
-		put(toVersionKey, uint32Bytes(md.ToVersion)).
 		put(optionsKey, config.Data(md.Options)).
 		put(redemptionReservesKey, uint64Bytes(md.RedemptionReserves)).
 		put(refundReservesKey, uint64Bytes(md.RefundReserves)).
 		put(accelerationsKey, accelerationsB).
-		put(redeemMaxFeeRateKey, uint64Bytes(md.RedeemMaxFeeRate)).
 		put(programKey, uint64Bytes(md.ProgramID)).
 		err()
 }

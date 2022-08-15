@@ -10,7 +10,8 @@ import {
   MaxSell,
   MaxBuy,
   MarketReport,
-  SupportedAsset
+  SupportedAsset,
+  OracleReport
 } from './registry'
 import Doc from './doc'
 import BasePage from './basepage'
@@ -680,17 +681,24 @@ export default class MarketMakerPage extends BasePage {
     Doc.hide(page.manualPriceBttn)
     this.setCurrentReport(r)
 
+    if (!r.oracles || r.oracles.length === 0) return
+
     Doc.empty(page.oracles)
-    for (const o of r.oracles ?? []) {
+    let weight = 0
+    let weightedSum = 0
+    for (const o of (r.oracles as OracleReport[]) ?? []) {
       const tr = page.oracleTmpl.cloneNode(true) as PageElement
       page.oracles.appendChild(tr)
       const tmpl = Doc.parseTemplate(tr)
       tmpl.logo.src = 'img/' + o.host + '.png'
       tmpl.host.textContent = ExchangeNames[o.host]
-      tmpl.volume.textContent = Doc.formatThreeSigFigs(o.vol24)
-      Doc.setContent(tmpl.volumeUnit, Doc.symbolize(mkt.basesymbol))
+      tmpl.volume.textContent = Doc.formatThreeSigFigs(o.usdVol)
+      const price = (o.bestBuy + o.bestSell) / 2
+      weightedSum += o.usdVol * price
+      weight += o.usdVol
       tmpl.price.textContent = Doc.formatThreeSigFigs((o.bestBuy + o.bestSell) / 2)
     }
+    page.avgPrice.textContent = Doc.formatFiveSigFigs(weightedSum / weight)
   }
 
   async fetchMaxBuy (rate: number): Promise<void> {
