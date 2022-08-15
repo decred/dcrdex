@@ -1270,7 +1270,7 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) (r
 		return false, false
 	}
 	if ticksGoverned, _ := match.exceptions(); ticksGoverned {
-		t.dc.log.Tracef("Match %s not redeemable: ticks metered", match, match.swapErr)
+		t.dc.log.Tracef("Match %s not redeemable: ticks metered", match)
 		return false, false
 	}
 	// NOTE: Taker must be able to redeem when revoked!  As maker, only block
