@@ -360,9 +360,9 @@ export default class MarketMakerPage extends BasePage {
       if (pw === '') return
       const handler = this.pwHandler
       if (handler === null) return
-      await handler(pw)
       this.pwHandler = null
-      this.closePopups()
+      await handler(pw)
+      if (this.currentForm === page.pwForm) this.closePopups()
     }
 
     bindForm(page.pwForm, page.pwSubmit, () => submitPasswordForm())
