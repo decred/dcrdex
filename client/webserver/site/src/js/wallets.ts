@@ -65,7 +65,6 @@ export default class WalletsPage extends BasePage {
   unlockForm: UnlockWalletForm
   keyup: (e: KeyboardEvent) => void
   changeWalletPW: boolean
-  depositAsset: number
   displayed: HTMLElement
   animation: Animation
   forms: PageElement[]
@@ -662,7 +661,7 @@ export default class WalletsPage extends BasePage {
     Doc.hide(page.depositErr)
     const loaded = app().loading(page.deposit)
     const res = await postJSON('/api/depositaddress', {
-      assetID: this.depositAsset
+      assetID: this.selectedAssetID
     })
     loaded()
     if (!app().checkResponse(res, true)) {
