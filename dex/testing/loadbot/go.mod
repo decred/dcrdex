@@ -83,6 +83,7 @@ require (
 	github.com/holiman/uint256 v1.2.0 // indirect
 	github.com/huin/goupnp v1.0.3 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
+	github.com/jessevdk/go-flags v1.4.1-0.20200711081900-c17162fe8fd7 // indirect
 	github.com/jrick/bitset v1.0.0 // indirect
 	github.com/jrick/logrotate v1.0.0 // indirect
 	github.com/jrick/wsrpc/v2 v2.3.4 // indirect
