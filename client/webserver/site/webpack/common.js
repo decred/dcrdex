@@ -59,7 +59,7 @@ module.exports = {
     publicPath: '/dist/'
   },
   resolve: {
-    extensions: ['.ts'],
+    extensions: ['.ts', ".js"],
   },
   // Fixes weird issue with watch script. See
   // https://github.com/webpack/webpack/issues/2297#issuecomment-289291324
