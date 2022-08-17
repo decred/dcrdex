@@ -31,12 +31,33 @@ privileges and forfeiture of registration fee.
 
 ## Contents
 
+- [Getting Started](#getting-started)
 - [Important Stuff to Know](#important-stuff-to-know)
 - [Fees](#fees)
 - [DEX Specification](#dex-specification)
-- [Client Applications and the Core Package](#client-applications-and-the-core-package)
-- [Server Installation](#server-installation)
 - [Contribute](#contribute)
+- [Source](#source)
+
+## Getting Started
+
+To begin using the DEX to trade, you need the client application. There are
+few simple options for obtaining the software:
+
+1. Download the the standalone DEX client for your operating system for the
+   [latest release on GitHub](https://github.com/decred/dcrdex/releases).
+2. [Use Decrediton](https://docs.decred.org/wallets/decrediton/decrediton-setup/),
+   the official graphical Decred wallet, which integrates the DEX client, and go
+   to the DEX tab.
+3. Use the Decred command line application installer, [**dcrinstall**](https://docs.decred.org/wallets/cli/cli-installation/),
+   with the `--dcrdex` switch.
+4. Build the standalone client [from source](https://github.com/decred/dcrdex/wiki/Client-Installation-and-Configuration#advanced-client-installation).
+
+See the [Client Installation and Configuration](https://github.com/decred/dcrdex/wiki/Client-Installation-and-Configuration)
+page on the wiki for more information and a detailed walk-through of the initial setup.
+
+Almost everyone will just want the client to trade on existing markets, but if
+you want to set up a new DEX server and host markets of your choice, see
+[Server Installation](https://github.com/decred/dcrdex/wiki/Server-Installation).
 
 ## Important Stuff to Know
 
@@ -96,83 +117,6 @@ in the **decred/dcrdex** repository open-source, but the entire protocol is
 open-source. So anyone can, in principle, write their own client or server based
 on the specification. Such an endeavor would be ill-advised in these early
 stages, while the protocols are undergoing constant change.
-
-## Server Installation
-
-### Server Dependencies
-
-1. Linux or MacOS
-2. [Go >= 1.18](https://golang.org/doc/install)
-3. [PostgreSQL 11+](https://www.postgresql.org/download/), [tuned](https://pgtune.leopard.in.ua/) and running.
-4. Decred (dcrd) and Bitcoin (bitcoind) full nodes, and any other assets' full nodes, both with `txindex` enabled.
-
-### Set up the database
-
-In a PostgreSQL `psql` terminal, run
-
-```sql
-CREATE USER dcrdex WITH PASSWORD 'dexpass';
-CREATE DATABASE dcrdex_testnet OWNER dcrdex;
-```
-
-### Generate a dcrwallet account public key
-
-The master public key is used for collecting registration fees.
-Using [dcrctl](https://docs.decred.org/wallets/cli/dcrctl-basics/)
-and [dcrwallet](https://github.com/decred/dcrwallet),
-create a new account.
-
-`dcrctl --wallet --testnet createnewaccount fees`
-
-Get the master public key for the account.
-
-`dcrctl --wallet --testnet getmasterpubkey fees`
-
-Master public keys are network-specific, so make sure to specify the network
-to both `dcrwallet` and `dcrctl`, if not using mainnet.
-
-Place the pubkey string into a new DEX configuration file.
-
-**~/.dcrdex/dcrdex.conf**
-
-```ini
-# Testnet extended pubkey
-regfeexpub=tpubVWHTkHRefqHptAnBdNcDJ...
-
-# PostgreSQL Credentials
-pgpass=dexpass
-```
-
-*~/.dcrdex/* is the default **app data directory** location used by the
-DEX server, but can be customized with the `--appdata` command-line argument.
-
-### Run your asset daemons
-
-Only the **full node** software listed in the [client configuration](#optional-external-software)
-section are supported for the server. The `txindex` configuration options must
-be set. Be sure to specify the correct network if not using mainnet.
-
-### Create the assets and market configuration file
-
-A sample is given at
-[*sample-markets.json*](server/cmd/dcrdex/sample-markets.json). See the
-[**market json**](https://github.com/decred/dcrdex/wiki/Server-Admin#markets-json) section of the wiki for
-more information on individual options.
-
-### Build and run dcrdex
-
-From a command prompt, navigate to **server/cmd/dcrdex**. Build the executable
-by running `go build`. The generated executable will be named **dcrdex**. Run
-`./dcrdex --help` to see configuration options that can be set either as a
-command line argument or in the *dcrdex.conf* file. The
-[**Exchange Variables**](spec/admin.mediawiki) section of the specification has
-additional information on a few key options.
-
-**Run the server.**
-
-`./dcrdex --testnet`
-
-from **server/cmd/dcrdex**.
 
 ## Contribute
 
