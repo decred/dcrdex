@@ -1,18 +1,15 @@
 ## Client Quick Start Installation
 
-The DEX client can be installed in one of three ways:
+The DEX client can be installed in one of the following ways:
 
-1. [Install Decrediton](https://docs.decred.org/wallets/decrediton/decrediton-setup/) and go to the DEX tab.
-2. Install the standalone DEX client using `dcrinstall` as described below.
-3. Build the standalone client [from source](#advanced-client-installation).
-
-If available for the latest release, the
-[**dcrinstall**](https://docs.decred.org/wallets/cli/cli-installation/) tool
-will install everything you need, and help set up your Decred wallet. Just run
-dcrinstall from the command line with `--dcrdex` appended to the command shown
-on the linked page for your operating system. Otherwise, see the latest DCRDEX
-releases [on Github](https://github.com/decred/dcrdex/releases) for source code
-or pre-compiled standalone packages.
+1. Download the the standalone DEX client for your operating system for the
+   [latest release on GitHub](https://github.com/decred/dcrdex/releases).
+2. [Use Decrediton](https://docs.decred.org/wallets/decrediton/decrediton-setup/),
+   the official graphical Decred wallet, which integrates the DEX client, and go
+   to the DEX tab.
+3. Use the Decred command line application installer, [**dcrinstall**](https://docs.decred.org/wallets/cli/cli-installation/),
+   with the `--dcrdex` switch.
+4. Build the standalone client [from source](https://github.com/decred/dcrdex/wiki/Client-Installation-and-Configuration#advanced-client-installation).
 
 **WARNING**: If you decide to build from source, use the `release-v0.5` branch,
 not `master`.
