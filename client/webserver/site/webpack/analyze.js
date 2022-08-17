@@ -4,11 +4,15 @@ const BundleAnalyzerPlugin = require('webpack-bundle-analyzer').BundleAnalyzerPl
 
 module.exports = merge(common, {
   mode: 'production',
+  module: {
+    rules: [{
+      test: /\.ts$/,
+      use: 'ts-loader',
+      exclude: /node_modules/,
+    }]
+  },
   optimization: {
-    usedExports: true,
-    splitChunks: {
-      chunks: 'all'
-    }
+    usedExports: true
   },
   plugins: [
     new BundleAnalyzerPlugin()
