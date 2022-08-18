@@ -169,7 +169,6 @@ class Chart {
     this.ctx = ctx
     this.ctx.textAlign = 'center'
     this.ctx.textBaseline = 'middle'
-    this.setZoomBttns()
     // Mouse handling
     this.mousePos = null
     bind(this.canvas, 'mousemove', (e: MouseEvent) => {
@@ -204,12 +203,6 @@ class Chart {
   /* draw calls the child class's render method. */
   draw () {
     this.render()
-  }
-
-  // setZoomBttns is run before drawing and should be used for setup of zoom
-  // buttons.
-  setZoomBttns () {
-    // should be implemented by inheriting class.
   }
 
   /* click is the handler for a click event on the canvas. */
@@ -410,6 +403,7 @@ export class DepthChart extends Chart {
       buys: [],
       sells: []
     }
+    this.setZoomBttns() // can't wait for requestAnimationFrame -> resized
     this.resize(parent.clientHeight)
   }
 
@@ -1207,6 +1201,7 @@ function makeLabels (
   valFmt = valFmt || formatLabelValue
   const n = screenW / spacingGuess
   const diff = max - min
+  if (n < 1 || diff <= 0) return { lbls: [] }
   const tickGuess = diff / n
   // make the tick spacing a multiple of the step
   const tick = tickGuess + step - (tickGuess % step)
