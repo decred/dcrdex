@@ -73,19 +73,32 @@ func TestDecrypt(t *testing.T) {
 }
 
 func FuzzDecrypt(f *testing.F) {
-	seeds := [][]byte{
-		[]byte("4kliaOCha2"),
-		[]byte("123456"),
-		[]byte("23Fgfge34"),
-		[]byte("asdfgth#4"),
-	}
+	seeds := []struct {
+		b []byte
+		n int
+	}{{
+		n: 200,
+		b: []byte("4kliaOCha2longerbyte"),
+	}, {
+		n: 20,
+		b: []byte("short123456"),
+	}, {
+		n: 50,
+		b: []byte("23Fgfge34"),
+	}, {
+		n: 1000000000,
+		b: []byte("asdf$#@*(gth#4"),
+	}}
 
 	for _, seed := range seeds {
-		f.Add(rand.Intn(100), seed)
+		f.Add(seed.n, seed.b)
 	}
 
-	f.Fuzz(func(t *testing.T, n int, a []byte) {
-		crypter := NewCrypter(a)
+	f.Fuzz(func(t *testing.T, n int, b []byte) {
+		if n < 1 || n > encode.MaxDataLen || len(b) > encode.MaxDataLen {
+			t.Skip()
+		}
+		crypter := NewCrypter(b)
 		thing := randB(n)
 		encThing, err := crypter.Encrypt(thing)
 		if err != nil {
