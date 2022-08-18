@@ -48,3 +48,13 @@ jobs:
     - name: npm run build
       working-directory: ./client/webserver/site
       run: npm run build
+  lint-docs:
+    name: Lint Markdown
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - uses: DavidAnson/markdownlint-cli2-action@v7
+      continue-on-error: true
+      with:
+        globs: '**/*.md'
+      
