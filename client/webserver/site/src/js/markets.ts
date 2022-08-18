@@ -626,15 +626,16 @@ export default class MarketsPage extends BasePage {
    * on the dex data.
    */
   setRegistrationStatusVisibility () {
-    const { page, market: { dex } } = this
+    const { page, market } = this
+    if (!market || !market.dex) return
 
     // If dex is not connected to server, is not possible to know fee
     // registration status.
-    if (dex.connectionStatus !== ConnectionStatus.Connected) return
+    if (market.dex.connectionStatus !== ConnectionStatus.Connected) return
 
     this.updateRegistrationStatusView()
 
-    if (dex.pendingFee) {
+    if (market.dex.pendingFee) {
       Doc.show(page.registrationStatus)
     } else {
       const toggle = () => {
@@ -681,10 +682,7 @@ export default class MarketsPage extends BasePage {
     // If we have not yet connected, there is no dex.assets or any other
     // exchange data, so just put up a message and wait for the connection to be
     // established, at which time handleConnNote will refresh and reload.
-    if (dex.connectionStatus !== ConnectionStatus.Connected) {
-      // TODO: Figure out why this was like this.
-      // this.market = { dex: dex }
-
+    if (!dex || !dex.markets || dex.connectionStatus !== ConnectionStatus.Connected) {
       page.chartErrMsg.textContent = intl.prep(intl.ID_CONNECTION_FAILED)
       Doc.show(page.chartErrMsg)
       if (this.loaded) this.loaded()
@@ -1717,7 +1715,7 @@ export default class MarketsPage extends BasePage {
    */
   handlePriceUpdate (note: SpotPriceNote) {
     const xcSection = this.marketList.xcSection(note.host)
-    if (!xcSection) return
+    if (!xcSection || !xcSection.marketRows) return
     for (const spot of Object.values(note.spots)) {
       const marketRow = xcSection.marketRow(spot.baseID, spot.quoteID)
       if (marketRow) marketRow.setSpot(spot)
@@ -1792,11 +1790,10 @@ export default class MarketsPage extends BasePage {
   }
 
   setBalanceVisibility () {
-    if (this.market.dex.connectionStatus === ConnectionStatus.Connected) {
-      Doc.show(this.page.balanceTable)
-    } else {
-      Doc.hide(this.page.balanceTable)
-    }
+    const mkt = this.market
+    if (!mkt || !mkt.dex) return
+    if (mkt.dex.connectionStatus === ConnectionStatus.Connected) Doc.show(this.page.balanceTable)
+    else Doc.hide(this.page.balanceTable)
   }
 
   /* handleBalanceNote handles notifications updating a wallet's balance. */
@@ -1804,9 +1801,9 @@ export default class MarketsPage extends BasePage {
     this.setBalanceVisibility()
     // if connection to dex server fails, it is not possible to retrieve
     // markets.
-    if (this.market.dex.connectionStatus !== ConnectionStatus.Connected) return
-    // If there's a balance update, refresh the max order section.
     const mkt = this.market
+    if (!mkt || !mkt.dex || mkt.dex.connectionStatus !== ConnectionStatus.Connected) return
+    // If there's a balance update, refresh the max order section.
     const avail = note.balance.available
     switch (note.assetID) {
       case mkt.baseCfg.id:
