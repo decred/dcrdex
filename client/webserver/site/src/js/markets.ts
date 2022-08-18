@@ -330,10 +330,11 @@ export default class MarketsPage extends BasePage {
     ws.registerRoute(updateRemainingRoute, (data: BookUpdate) => { this.handleUpdateRemainingRoute(data) })
     // Handle the new order for the order book on the 'epoch_order' route.
     ws.registerRoute(epochOrderRoute, (data: BookUpdate) => { this.handleEpochOrderRoute(data) })
-    // Handle the intial candlestick data on the 'candles' route.
-    ws.registerRoute(candleUpdateRoute, (data: BookUpdate) => { this.handleCandleUpdateRoute(data) })
-    // Handle the candles update on the 'candles' route.
+    // Handle the initial candlestick data on the 'candles' route.
     ws.registerRoute(candlesRoute, (data: BookUpdate) => { this.handleCandlesRoute(data) })
+    // Handle the candles update on the 'candles' route.
+    ws.registerRoute(candleUpdateRoute, (data: BookUpdate) => { this.handleCandleUpdateRoute(data) })
+
     // Bind the wallet unlock form.
     this.unlockForm = new UnlockWalletForm(page.unlockWalletForm, async () => { this.openFunc() })
     // Create a wallet
@@ -2221,9 +2222,10 @@ export default class MarketsPage extends BasePage {
   unload () {
     ws.request(unmarketRoute, {})
     ws.deregisterRoute(bookRoute)
-    ws.deregisterRoute(epochOrderRoute)
     ws.deregisterRoute(bookOrderRoute)
     ws.deregisterRoute(unbookOrderRoute)
+    ws.deregisterRoute(updateRemainingRoute)
+    ws.deregisterRoute(epochOrderRoute)
     ws.deregisterRoute(candlesRoute)
     ws.deregisterRoute(candleUpdateRoute)
     this.depthChart.unattach()
