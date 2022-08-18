@@ -40,7 +40,7 @@ privileges and forfeiture of registration fee.
 
 ## Getting Started
 
-To begin using the DEX to trade, you need the client application. There are
+To begin using the DEX to trade, you need the client application. There are a
 few simple options for obtaining the software:
 
 1. Download the the standalone DEX client for your operating system for the

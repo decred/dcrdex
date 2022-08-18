@@ -4,6 +4,10 @@ The dcrdex wiki provides documentation for dcrdex users and developers.
 
 Also have a look at the [README](https://github.com/decred/dcrdex/blob/master/README.md) and the [spec](https://github.com/decred/dcrdex/blob/master/spec/README.mediawiki).
 
+## Usage
+
+To get started using DCRDEX, see the [Client Installation and Configuration](https://github.com/decred/dcrdex/wiki/Client-Installation-and-Configuration) page.
+
 ## Contribute changes to the wiki
 
 The following instructions assume that you have already forked **dcrdex**.
