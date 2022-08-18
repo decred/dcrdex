@@ -14,6 +14,7 @@ ADDRESS_JSON=$8
 ADDRESS_JSON_FILE_NAME=$9
 NODE_KEY=${10}
 SYNC_MODE=${11}
+AUTHRPC_PORT=${12}
 
 GROUP_DIR="${NODES_ROOT}/${NAME}"
 MINE_JS="${GROUP_DIR}/mine.js"
@@ -73,6 +74,7 @@ DatasetDir = "${NODE_DIR}/.ethash"
 
 [Node]
 DataDir = "${NODE_DIR}"
+AuthPort = ${AUTHRPC_PORT}
 
 [Node.P2P]
 NoDiscovery = true

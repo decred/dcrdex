@@ -6,7 +6,7 @@ sandboxed environment for testing dex swap transactions.
 ## Dependencies
 
 The harness depends on [geth](https://github.com/ethereum/go-ethereum/tree/master/cmd/geth)
-to run.
+to run. geth v1.10.21+ is recommended.
 
 It also requires tmux and bc.
 

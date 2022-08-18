@@ -223,6 +223,8 @@ func runSimnet(m *testing.M) (int, error) {
 	fmt.Printf("Token swap contract addr is %v\n", token.SwapContracts[0].Address)
 	fmt.Printf("Test token contract addr is %v\n", token.Address)
 
+	ethSwapContractAddr = dexeth.ContractAddresses[0][dex.Simnet]
+
 	err = setupWallet(simnetWalletDir, simnetWalletSeed, "localhost:30355", dex.Simnet)
 	if err != nil {
 		return 1, err
@@ -969,13 +971,13 @@ func testInitiate(t *testing.T, assetID uint32) {
 
 	isETH := assetID == BipID
 
-	c := simnetContractor
+	sc := simnetContractor
 	balance := func() (*big.Int, error) {
 		return ethClient.addressBalance(ctx, simnetAddr)
 	}
 	gases := ethGases
 	if !isETH {
-		c = simnetTokenContractor
+		sc = simnetTokenContractor
 		balance = func() (*big.Int, error) {
 			return simnetTokenContractor.balance(ctx)
 		}
@@ -988,7 +990,7 @@ func testInitiate(t *testing.T, assetID uint32) {
 	secretHashes := make([][32]byte, numSecretHashes)
 	for i := 0; i < numSecretHashes; i++ {
 		copy(secretHashes[i][:], encode.RandomBytes(32))
-		swap, err := c.swap(ctx, secretHashes[i])
+		swap, err := sc.swap(ctx, secretHashes[i])
 		if err != nil {
 			t.Fatal("unable to get swap state")
 		}
@@ -1076,7 +1078,7 @@ func testInitiate(t *testing.T, assetID uint32) {
 		var totalVal uint64
 		originalStates := make(map[string]dexeth.SwapStep)
 		for _, tSwap := range test.swaps {
-			swap, err := c.swap(ctx, bytesToArray(tSwap.SecretHash))
+			swap, err := sc.swap(ctx, bytesToArray(tSwap.SecretHash))
 			if err != nil {
 				t.Fatalf("%s: swap error: %v", test.name, err)
 			}
@@ -1101,9 +1103,14 @@ func testInitiate(t *testing.T, assetID uint32) {
 		txOpts, _ := ethClient.txOpts(ctx, optsVal, expGas, dexeth.GweiToWei(maxFeeRate))
 		var tx *types.Transaction
 		if test.overflow {
-			tx, err = initiateOverflow(c.(*contractorV0), txOpts, test.swaps)
+			switch c := sc.(type) {
+			case *contractorV0:
+				tx, err = initiateOverflow(c, txOpts, test.swaps)
+			case *tokenContractorV0:
+				tx, err = initiateOverflow(c.contractorV0, txOpts, test.swaps)
+			}
 		} else {
-			tx, err = c.initiate(txOpts, test.swaps)
+			tx, err = sc.initiate(txOpts, test.swaps)
 		}
 		if err != nil {
 			if test.swapErr {
@@ -1168,7 +1175,7 @@ func testInitiate(t *testing.T, assetID uint32) {
 		}
 
 		for _, tSwap := range test.swaps {
-			swap, err := c.swap(ctx, bytesToArray(tSwap.SecretHash))
+			swap, err := sc.swap(ctx, bytesToArray(tSwap.SecretHash))
 			if err != nil {
 				t.Fatalf("%s: swap error post-init: %v", test.name, err)
 			}
