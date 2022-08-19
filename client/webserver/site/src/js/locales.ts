@@ -57,6 +57,8 @@ export const ID_NEW_WALLET_SUCCESS = 'NEW_WALLET_SUCCESS'
 export const ID_WALLET_UNLOCKED = 'WALLET_UNLOCKED'
 export const ID_SELLING = 'ID_SELLING'
 export const ID_BUYING = 'ID_BUYING'
+export const ID_WALET_DISABLED = 'WALLET_DISABLED'
+export const ID_WALET_ENABLED = 'WALLET_ENABLED'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -115,7 +117,9 @@ export const enUS: Locale = {
   [ID_NEW_WALLET_SUCCESS]: '{{ assetName }} Wallet Created!',
   [ID_WALLET_UNLOCKED]: 'Wallet Unlocked',
   [ID_SELLING]: 'Selling',
-  [ID_BUYING]: 'Buying'
+  [ID_BUYING]: 'Buying',
+  [ID_WALET_ENABLED]: '{{ assetName }} Wallet Enabled',
+  [ID_WALET_DISABLED]: '{{ assetName }} Wallet Disabled'
 }
 
 export const ptBR: Locale = {

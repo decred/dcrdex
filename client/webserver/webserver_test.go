@@ -74,6 +74,8 @@ type TCore struct {
 	estFee           uint64
 	estFeeErr        error
 	validAddr        bool
+	walletDisabled   bool
+	walletStatusErr  error
 }
 
 func (c *TCore) Network() dex.Network                         { return dex.Mainnet }
@@ -128,6 +130,13 @@ func (c *TCore) Wallets() []*core.WalletState                     { return nil }
 func (c *TCore) WalletSettings(uint32) (map[string]string, error) { return nil, nil }
 func (c *TCore) ReconfigureWallet(aPW, nPW []byte, form *core.WalletForm) error {
 	return nil
+}
+func (c *TCore) ToggleWalletStatus(pw []byte, assetID uint32, disable bool) error {
+	if c.walletStatusErr != nil {
+		return c.walletStatusErr
+	}
+	c.walletDisabled = disable
+	return c.walletStatusErr
 }
 func (c *TCore) ChangeAppPass(appPW, newAppPW []byte) error                         { return nil }
 func (c *TCore) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) error { return nil }
@@ -842,4 +851,38 @@ func TestAPIEstimateSendTxFee(t *testing.T) {
 	want = fmt.Sprintf(`{"ok":false,"msg":"%s"}`, tErr)
 	tCore.estFeeErr = tErr
 	ensureResponse(t, s.apiEstimateSendTxFee, want, reader, writer, body, nil)
+}
+
+func TestAPI_ToggleWalletStatus(t *testing.T) {
+	s, tCore, shutdown:= newTServer(t, false)
+	defer shutdown()
+	writer := new(TWriter)
+	reader := new(TReader)
+
+	var body *walletStatusForm
+	ensure := func(want string) {
+		ensureResponse(t, s.apiToggleWalletStatus, want, reader, writer, body, nil)
+	}
+
+	body = &walletStatusForm{
+		Pass:    encode.PassBytes("dummyAppPass"),
+		Disable: true,
+		AssetID: 12,
+	}
+
+	ensure(`{"ok":true}`)
+	if !tCore.walletDisabled {
+		t.Fatal("Expected wallet to be disabled")
+	}
+
+	tCore.walletStatusErr = errors.New("wallet not found")
+	ensure(`{"ok":false,"msg":"wallet not found"}`)
+
+	tCore.walletDisabled = false
+	body.Disable = false
+	tCore.walletStatusErr = nil
+	ensure(`{"ok":true}`)
+	if tCore.walletDisabled {
+		t.Fatal("Expected wallet to be enabled")
+	}
 }

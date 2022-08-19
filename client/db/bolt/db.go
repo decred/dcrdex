@@ -104,6 +104,7 @@ var (
 	byteTrue               = encode.ByteTrue
 	backupDir              = "backup"
 	disabledRateSourceKey  = []byte("disabledRateSources")
+	walletDisabledKey      = []byte("walletDisabled")
 )
 
 // BoltDB is a bbolt-based database backend for a DEX client. BoltDB satisfies
@@ -1496,6 +1497,20 @@ func (db *BoltDB) UpdateBalance(wid []byte, bal *dexdb.Balance) error {
 	})
 }
 
+// UpdateWalletStatus updates a wallet's status.
+func (db *BoltDB) UpdateWalletStatus(wid []byte, disable bool) error {
+	return db.walletsUpdate(func(master *bbolt.Bucket) error {
+		wBkt := master.Bucket(wid)
+		if wBkt == nil {
+			return fmt.Errorf("wallet %x bucket is not a bucket", wid)
+		}
+		if disable {
+			return wBkt.Put(walletDisabledKey, encode.ByteTrue)
+		}
+		return wBkt.Put(walletDisabledKey, encode.ByteFalse)
+	})
+}
+
 // Wallets loads all wallets from the database.
 func (db *BoltDB) Wallets() ([]*dexdb.Wallet, error) {
 	var wallets []*dexdb.Wallet
@@ -1513,7 +1528,7 @@ func (db *BoltDB) Wallets() ([]*dexdb.Wallet, error) {
 	})
 }
 
-// Wallet loads all wallet from the database.
+// Wallet loads a single wallet from the database.
 func (db *BoltDB) Wallet(wid []byte) (wallet *dexdb.Wallet, err error) {
 	return wallet, db.walletsView(func(master *bbolt.Bucket) error {
 		wallet, err = makeWallet(master.Bucket(wid))
@@ -1542,6 +1557,11 @@ func makeWallet(wBkt *bbolt.Bucket) (*dexdb.Wallet, error) {
 			return nil, fmt.Errorf("DecodeBalance error: %w", err)
 		}
 		w.Balance = bal
+	}
+
+	statusB := getCopy(wBkt, walletDisabledKey)
+	if statusB != nil {
+		w.Disabled = bytes.Equal(statusB, encode.ByteTrue)
 	}
 	return w, nil
 }

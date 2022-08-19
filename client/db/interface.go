@@ -105,6 +105,8 @@ type DB interface {
 	Wallets() ([]*Wallet, error)
 	// Wallet fetches the wallet for the specified asset by wallet ID.
 	Wallet(wid []byte) (*Wallet, error)
+	// UpdateWalletStatus updates a wallet's status.
+	UpdateWalletStatus(wid []byte, disable bool) error
 	// Backup makes a copy of the database to the default "backups" folder.
 	Backup() error
 	// BackupTo makes a backup of the database at the specified location,

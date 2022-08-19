@@ -147,6 +147,9 @@ export default class WalletsPage extends BasePage {
     bindForm(page.exportWalletAuth, page.exportWalletAuthSubmit, async () => { this.exportWalletAuthSubmit() })
     bindForm(page.recoverWalletConfirm, page.recoverWalletSubmit, () => { this.recoverWallet() })
     bindForm(page.confirmForce, page.confirmForceSubmit, async () => { this.confirmForceSubmit() })
+    Doc.bind(page.disableWallet, 'click', async () => { this.showToggleWalletStatus(true) })
+    Doc.bind(page.enableWallet, 'click', async () => { this.showToggleWalletStatus(false) })
+    bindForm(page.toggleWalletStatusConfirm, page.toggleWalletStatusSubmit, async () => { this.toggleWalletStatus() })
 
     // New deposit address button.
     Doc.bind(page.newDepAddrBttn, 'click', async () => { this.newDepositAddress() })
@@ -316,6 +319,49 @@ export default class WalletsPage extends BasePage {
   }
 
   /*
+   * showToggleWalletStatus displays the toggleWalletStatusConfirm form with
+   * relevant help message.
+   */
+  showToggleWalletStatus (disable: boolean) {
+    const page = this.page
+    Doc.hide(page.toggleWalletStatusErr, page.toggleDisableWallet, page.toggleEnableWallet)
+    if (disable) Doc.show(page.toggleDisableWallet)
+    else Doc.show(page.toggleEnableWallet)
+    page.toggleWalletStatus.checked = disable
+    this.showForm(page.toggleWalletStatusConfirm)
+  }
+
+  /*
+   * toggleWalletStatus toggles a wallets status to either disabled or enabled.
+   */
+  async toggleWalletStatus () {
+    const page = this.page
+    Doc.hide(page.toggleWalletStatusErr)
+
+    const url = '/api/togglewalletstatus'
+    const disable = page.toggleWalletStatus.checked
+    const req = {
+      pass: page.toggleWalletStatusPW.value,
+      assetID: this.selectedAssetID,
+      disable: disable
+    }
+
+    const loaded = app().loading(page.toggleWalletStatusConfirm)
+    const res = await postJSON(url, req)
+    loaded()
+    if (!app().checkResponse(res)) {
+      page.toggleWalletStatusErr.textContent = res.msg
+      Doc.show(page.toggleWalletStatusErr)
+      return
+    }
+
+    const fmtParams = { assetName: app().assets[this.selectedAssetID].name }
+    let successMsg = intl.prep(intl.ID_WALET_DISABLED, fmtParams)
+    if (!disable) successMsg = intl.prep(intl.ID_WALET_ENABLED, fmtParams)
+    this.assetUpdated(this.selectedAssetID, page.toggleWalletStatusConfirm, successMsg)
+  }
+
+  /*
    * showBox shows the box with a fade-in animation.
    */
   async showBox (box: HTMLElement, focuser?: PageElement) {
@@ -448,7 +494,7 @@ export default class WalletsPage extends BasePage {
       const configurable = assetIsConfigurable(assetID)
       if (configurable) Doc.show(page.reconfigureBox)
 
-      if (wallet.running) {
+      if (wallet.running && !wallet.disabled) {
         Doc.show(page.sendReceive, page.peerCountBox, page.syncProgressBox)
         page.peerCount.textContent = String(wallet.peerCount)
         page.syncProgress.textContent = `${(wallet.syncProgress * 100).toFixed(1)}%`
@@ -664,6 +710,7 @@ export default class WalletsPage extends BasePage {
     const page = this.page
     Doc.hide(page.changeWalletType, page.changeTypeHideIcon, page.reconfigErr, page.showChangeType, page.changeTypeHideIcon)
     Doc.hide(page.reconfigErr)
+    Doc.hide(page.enableWallet, page.disableWallet)
     // Hide update password section by default
     this.changeWalletPW = false
     this.setPWSettingViz(this.changeWalletPW)
@@ -692,6 +739,9 @@ export default class WalletsPage extends BasePage {
     Doc.setVis(wallet.traits & traitRestorer, page.exportWallet)
     Doc.setVis(wallet.traits & traitRescanner, page.rescanWallet)
     Doc.setVis(wallet.traits & traitsExtraOpts, page.otherActionsLabel)
+
+    if (wallet.disabled) Doc.show(page.enableWallet)
+    else Doc.show(page.disableWallet)
 
     page.recfgAssetLogo.src = Doc.logoPath(asset.symbol)
     page.recfgAssetName.textContent = asset.name

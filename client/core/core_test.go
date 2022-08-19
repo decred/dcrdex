@@ -482,6 +482,10 @@ func (tdb *TDB) UpdateBalance(wid []byte, balance *db.Balance) error {
 	return nil
 }
 
+func (tdb *TDB) UpdateWalletStatus(wid []byte, disable bool) error {
+	return nil
+}
+
 func (tdb *TDB) Wallets() ([]*db.Wallet, error) {
 	return nil, nil
 }
@@ -2768,6 +2772,14 @@ func TestTrade(t *testing.T) {
 	}
 	if tCore.CloseWallet(tUTXOAssetB.ID) == nil {
 		t.Fatalf("no error for closing BTC wallet with active orders")
+	}
+
+	// Should not be able to disable wallet, since there are active orders.
+	if tCore.ToggleWalletStatus(tPW, tUTXOAssetA.ID, true) == nil {
+		t.Fatalf("no error for disabling DCR wallet with active orders")
+	}
+	if tCore.ToggleWalletStatus(tPW, tUTXOAssetB.ID, true) == nil {
+		t.Fatalf("no error for disabling BTC wallet with active orders")
 	}
 
 	// We want to set peerCount to 0 (from 1), but we'll do this the hard way to

@@ -1,7 +1,7 @@
 //go:build live && lgpl
 
 // Run a test server with
-// go test -v -tags live -run Server -timeout 60m
+// go test -v -tags live,lgpl -run Server -timeout 60m
 // test server will run for 1 hour and serve randomness.
 
 package webserver
@@ -198,6 +198,7 @@ func mkSupportedAsset(symbol string, state *tWalletState, bal *core.WalletBalanc
 			AssetID:      assetID,
 			Open:         state.open,
 			Running:      state.running,
+			Disabled:     state.disabled,
 			Address:      ordertest.RandomAddress(),
 			Balance:      bal,
 			Units:        unitInfo(assetID).Conventional.Unit,
@@ -423,6 +424,7 @@ func (c *tCoin) Confirmations(context.Context) (uint32, error) {
 type tWalletState struct {
 	open         bool
 	running      bool
+	disabled     bool
 	settings     map[string]string
 	syncProgress uint32
 }
@@ -1455,6 +1457,9 @@ func (c *TCore) OpenWallet(assetID uint32, pw []byte) error {
 	if wallet == nil {
 		return fmt.Errorf("attempting to open non-existent test wallet for asset ID %d", assetID)
 	}
+	if wallet.disabled {
+		return fmt.Errorf("wallet is disabled")
+	}
 	wallet.running = true
 	wallet.open = true
 	return nil
@@ -1466,6 +1471,9 @@ func (c *TCore) ConnectWallet(assetID uint32) error {
 	wallet := c.wallets[assetID]
 	if wallet == nil {
 		return fmt.Errorf("attempting to connect to non-existent test wallet for asset ID %d", assetID)
+	}
+	if wallet.disabled {
+		return fmt.Errorf("wallet is disabled")
 	}
 	wallet.running = true
 	return nil
@@ -1497,6 +1505,7 @@ func (c *TCore) Wallets() []*core.WalletState {
 			AssetID:   assetID,
 			Open:      wallet.open,
 			Running:   wallet.running,
+			Disabled:  wallet.disabled,
 			Address:   ordertest.RandomAddress(),
 			Balance:   c.balances[assetID],
 			Units:     unitInfo(assetID).AtomicUnit,
@@ -1521,6 +1530,31 @@ func (c *TCore) WalletSettings(assetID uint32) (map[string]string, error) {
 
 func (c *TCore) ReconfigureWallet(aPW, nPW []byte, form *core.WalletForm) error {
 	c.wallets[form.AssetID].settings = form.Config
+	return nil
+}
+
+func (c *TCore) ToggleWalletStatus(pw []byte, assetID uint32, disable bool) error {
+	w, ok := c.wallets[assetID]
+	if !ok {
+		return fmt.Errorf("wallet with id %d not found", assetID)
+	}
+
+	var err error
+	if disable {
+		err = c.CloseWallet(assetID)
+		c.mtx.Lock()
+		w.disabled = disable
+		c.mtx.Unlock()
+	} else {
+		c.mtx.Lock()
+		w.disabled = disable
+		c.mtx.Unlock()
+		err = c.OpenWallet(assetID, []byte(""))
+	}
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 

@@ -56,6 +56,7 @@ type xcWallet struct {
 	hookedUp     bool
 	synced       bool
 	syncProgress float32
+	disabled     bool
 
 	// When wallets are being reconfigured and especially when the wallet type
 	// or host is being changed, we want to suppress "walletstate" notes to
@@ -83,6 +84,9 @@ func (w *xcWallet) setEncPW(encPW []byte) {
 // Unlock unlocks the wallet backend and caches the decrypted wallet password so
 // the wallet may be unlocked without user interaction using refreshUnlock.
 func (w *xcWallet) Unlock(crypter encrypt.Crypter) error {
+	if w.isDisabled() { // cannot unlock disabled wallet.
+		return errWalletDisabled
+	}
 	if w.parent != nil {
 		return w.parent.Unlock(crypter)
 	}
@@ -117,6 +121,9 @@ func (w *xcWallet) Unlock(crypter encrypt.Crypter) error {
 // non-nil error will be returned if the cached password fails to unlock the
 // wallet, in which case unlockAttempted will also be true.
 func (w *xcWallet) refreshUnlock() (unlockAttempted bool, err error) {
+	if w.isDisabled() { // disabled wallet cannot be unlocked.
+		return false, errWalletDisabled
+	}
 	if w.parent != nil {
 		return w.parent.refreshUnlock()
 	}
@@ -145,6 +152,9 @@ func (w *xcWallet) refreshUnlock() (unlockAttempted bool, err error) {
 // Lock the wallet. For encrypted wallets (encPW set), this clears the cached
 // decrypted password and attempts to lock the wallet backend.
 func (w *xcWallet) Lock(timeout time.Duration) error {
+	if w.isDisabled() { // wallet is disabled and is locked.
+		return nil
+	}
 	if w.parent != nil {
 		return w.parent.Lock(timeout)
 	}
@@ -165,6 +175,9 @@ func (w *xcWallet) Lock(timeout time.Duration) error {
 // directly, likely involving an RPC call. Use locallyUnlocked to determine if
 // the wallet is automatically unlockable rather than actually unlocked.
 func (w *xcWallet) unlocked() bool {
+	if w.isDisabled() {
+		return false
+	}
 	if w.parent != nil {
 		return w.parent.unlocked()
 	}
@@ -176,6 +189,9 @@ func (w *xcWallet) unlocked() bool {
 // this is true only if the decrypted password is cached. Use this to determine
 // if the wallet may be unlocked without user interaction (via refreshUnlock).
 func (w *xcWallet) locallyUnlocked() bool {
+	if w.isDisabled() {
+		return false
+	}
 	if w.parent != nil {
 		return w.parent.locallyUnlocked()
 	}
@@ -217,6 +233,7 @@ func (w *xcWallet) state() *WalletState {
 		SyncProgress: w.syncProgress,
 		WalletType:   w.walletType,
 		Traits:       w.traits,
+		Disabled:     w.disabled,
 	}
 }
 
@@ -225,6 +242,19 @@ func (w *xcWallet) setBalance(bal *WalletBalance) {
 	w.mtx.Lock()
 	w.balance = bal
 	w.mtx.Unlock()
+}
+
+// setDisabled sets the wallet disabled field.
+func (w *xcWallet) setDisabled(status bool) {
+	w.mtx.Lock()
+	w.disabled = status
+	w.mtx.Unlock()
+}
+
+func (w *xcWallet) isDisabled() bool {
+	w.mtx.RLock()
+	defer w.mtx.RUnlock()
+	return w.disabled
 }
 
 func (w *xcWallet) currentDepositAddress() string {
@@ -267,6 +297,11 @@ func (w *xcWallet) connected() bool {
 // flag to true, and validates the deposit address. Use Disconnect to cleanly
 // shutdown the wallet.
 func (w *xcWallet) Connect() error {
+	// Disabled wallet cannot be connected to unless it is enabled.
+	if w.isDisabled() {
+		return errWalletDisabled
+	}
+
 	// No parent context; use Disconnect instead. Also note that there's no
 	// reconnect loop for wallet like with the server Connectors, so we use
 	// ConnectOnce so that the ConnectionMaster's On method will report false.
@@ -310,6 +345,10 @@ func (w *xcWallet) Connect() error {
 // Disconnect calls the dex.Connector's Disconnect method and sets the
 // xcWallet.hookedUp flag to false.
 func (w *xcWallet) Disconnect() {
+	// Disabled wallet is already disconnected.
+	if w.isDisabled() {
+		return
+	}
 	w.connector.Disconnect()
 	w.mtx.Lock()
 	w.hookedUp = false
@@ -339,6 +378,9 @@ func (w *xcWallet) logFilePath() (string, error) {
 // accelerateOrder uses the Child-Pays-For-Parent technique to accelerate an
 // order if the wallet is an Accelerator.
 func (w *xcWallet) accelerateOrder(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, newFeeRate uint64) (asset.Coin, string, error) {
+	if w.isDisabled() { // cannot perform order acceleration with disabled wallet.
+		return nil, "", errWalletDisabled
+	}
 	accelerator, ok := w.Wallet.(asset.Accelerator)
 	if !ok {
 		return nil, "", errors.New("wallet does not support acceleration")
@@ -349,6 +391,9 @@ func (w *xcWallet) accelerateOrder(swapCoins, accelerationCoins []dex.Bytes, cha
 // accelerationEstimate estimates the cost to accelerate an order if the wallet
 // is an Accelerator.
 func (w *xcWallet) accelerationEstimate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (uint64, error) {
+	if w.isDisabled() { // cannot perform acceleration estimate with disabled wallet.
+		return 0, errWalletDisabled
+	}
 	accelerator, ok := w.Wallet.(asset.Accelerator)
 	if !ok {
 		return 0, errors.New("wallet does not support acceleration")
@@ -360,6 +405,9 @@ func (w *xcWallet) accelerationEstimate(swapCoins, accelerationCoins []dex.Bytes
 // preAccelerate gives the user information about accelerating an order if the
 // wallet is an Accelerator.
 func (w *xcWallet) preAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (uint64, *asset.XYRange, *asset.EarlyAcceleration, error) {
+	if w.isDisabled() { // cannot perform operation with disabled wallet.
+		return 0, &asset.XYRange{}, nil, errWalletDisabled
+	}
 	accelerator, ok := w.Wallet.(asset.Accelerator)
 	if !ok {
 		return 0, &asset.XYRange{}, nil, errors.New("wallet does not support acceleration")
@@ -373,6 +421,9 @@ func (w *xcWallet) preAccelerate(swapCoins, accelerationCoins []dex.Bytes, chang
 // returned. If the coin is located, but recognized as spent, no error is
 // returned.
 func (w *xcWallet) swapConfirmations(ctx context.Context, coinID []byte, contract []byte, matchTime uint64) (uint32, bool, error) {
+	if w.isDisabled() { // cannot check swap confirmation with disabled wallet.
+		return 0, false, errWalletDisabled
+	}
 	return w.Wallet.SwapConfirmations(ctx, coinID, contract, time.UnixMilli(int64(matchTime)))
 }
 
