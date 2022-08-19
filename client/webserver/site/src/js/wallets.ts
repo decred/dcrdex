@@ -411,6 +411,7 @@ export default class WalletsPage extends BasePage {
     const page = this.page
     const markets: [string, Market][] = []
     for (const xc of Object.values(app().user.exchanges)) {
+      if (!xc.markets) continue
       for (const mkt of Object.values(xc.markets)) {
         if (mkt.baseid === assetID || mkt.quoteid === assetID) markets.push([xc.host, mkt])
       }
