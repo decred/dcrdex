@@ -1,12 +1,14 @@
+# Server Settings
+
 ## Exchange Settings
 
 ### Admin HTTP JSON API
 
-See https://github.com/decred/dcrdex/blob/6693bc57283d4cf5b451778091aa1c1b20cb9187/server/admin/server.go#L145
+See <https://github.com/decred/dcrdex/blob/6693bc57283d4cf5b451778091aa1c1b20cb9187/server/admin/server.go#L145>
 
 ### Markets JSON Settings File
 
-```
+```text
 {
     "markets" (array): Array of market objects.
     [

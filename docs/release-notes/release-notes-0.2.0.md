@@ -329,7 +329,7 @@ most notable fixes are:
 
 166 commits, 287 files changed, 40,296 insertions(+), 18,072 deletions(-)
 
-https://github.com/decred/dcrdex/compare/4517832...release-v0.2
+<https://github.com/decred/dcrdex/compare/4517832...release-v0.2>
 
 9 contributors
 

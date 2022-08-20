@@ -264,7 +264,7 @@ reality of unreliable consumer networks and other such technical issues.
 In this release, there are two primary inaction violations that adjust a users
 score: (1) failure to respond with a preimage for an order when the epoch for
 that order is closed (preimage miss), and (2) swap negotiation resulting in
-match revocation as described in the [previous section](#revoked_matches).
+match revocation as described in the [previous section](#revoked-matches).
 
 The score threshold at which an account becomes suspended (ban score) is an
 operator set variable, but the default is 20.

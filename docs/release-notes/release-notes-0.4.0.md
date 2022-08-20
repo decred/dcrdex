@@ -258,7 +258,7 @@ and server/cmd/dcrdex/sample-dcrdex.conf
 - When connecting to a Bitcoin Core wallet, check the wallet type to prevent use
   of "descriptor" wallets, which do not support the full set of RPCs required by
   the DEX client. See
-  https://bitcoincore.org/en/releases/0.21.0/#experimental-descriptor-wallets
+  <https://bitcoincore.org/en/releases/0.21.0/#experimental-descriptor-wallets>
   for more information on descriptor wallets.
   ([256cd69](https://github.com/decred/dcrdex/commit/256cd69a73ccaa2af0a31757a5d62e4aab57eddd))
 - If a user has active trades, they must be settled by a wallet that can
@@ -603,7 +603,7 @@ The most notable fixes are:
 
 186 commits, 330 files changed, 50,332 insertions(+), 23,221 deletions(-)
 
-https://github.com/decred/dcrdex/compare/ba59397...release-v0.4
+<https://github.com/decred/dcrdex/compare/ba59397...release-v0.4>
 
 12 contributors
 
