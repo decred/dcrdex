@@ -836,10 +836,13 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 	// Send notifications.
 	corder := t.coreOrderInternal()
 	if cancelMatch != nil {
-		subject, details := t.formatDetails(TopicOrderCanceled,
-			strings.Title(sellString(trade.Sell)), unbip(t.Base()), unbip(t.Quote()), t.dc.acct.host, t.token())
+		topic := TopicBuyOrderCanceled
+		if trade.Sell {
+			topic = TopicSellOrderCanceled
+		}
+		subject, details := t.formatDetails(topic, unbip(t.Base()), unbip(t.Quote()), t.dc.acct.host, t.token())
 
-		t.notify(newOrderNote(TopicOrderCanceled, subject, details, db.Poke, corder))
+		t.notify(newOrderNote(topic, subject, details, db.Poke, corder))
 		// Also send out a data notification with the cancel order information.
 		t.notify(newOrderNote(TopicCancel, "", "", db.Data, corder))
 	}
@@ -854,9 +857,12 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		}
 
 		// A single order notification.
-		subject, details := t.formatDetails(TopicMatchesMade,
-			strings.Title(sellString(trade.Sell)), unbip(t.Base()), unbip(t.Quote()), fillPct, t.token())
-		t.notify(newOrderNote(TopicMatchesMade, subject, details, db.Poke, corder))
+		topic := TopicBuyMatchesMade
+		if trade.Sell {
+			topic = TopicSellMatchesMade
+		}
+		subject, details := t.formatDetails(topic, unbip(t.Base()), unbip(t.Quote()), fillPct, t.token())
+		t.notify(newOrderNote(topic, subject, details, db.Poke, corder))
 	}
 
 	err := t.db.UpdateOrder(t.metaOrder())

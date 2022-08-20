@@ -45,7 +45,12 @@ export const Taker = 1
  */
 export const RateEncodingFactor = 1e8
 
-export function sellString (ord: Order) { return ord.sell ? 'sell' : 'buy' }
+export function sellString (ord: Order) {
+  const key = ord.sell ? intl.ID_SELL : intl.ID_BUY
+  const lang = document.documentElement.lang.toLowerCase()
+  return intl.prep(key).toLocaleLowerCase(lang)
+}
+
 export function typeString (ord: Order) { return ord.type === Limit ? (ord.tif === ImmediateTiF ? 'limit (i)' : 'limit') : 'market' }
 
 /* isMarketBuy will return true if the order is a market buy order. */

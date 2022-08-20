@@ -723,7 +723,8 @@ func testOrderStatusReconciliation(s *simulationTest) error {
 		s.client2.log.Infof("Waiting %v for order %s to be partially matched", maxMatchDuration, tracker.token())
 		matched := notes.find(ctx, maxMatchDuration, func(n Notification) bool {
 			orderNote, isOrderNote := n.(*OrderNote)
-			return isOrderNote && n.Topic() == TopicMatchesMade && orderNote.Order.ID.String() == orderID
+			isMatchedTopic := n.Topic() == TopicBuyMatchesMade || n.Topic() == TopicSellMatchesMade
+			return isOrderNote && isMatchedTopic && orderNote.Order.ID.String() == orderID
 		})
 		if !matched {
 			return fmt.Errorf("order %s not matched after %s", tracker.token(), maxMatchDuration)
@@ -1118,7 +1119,8 @@ func (s *simulationTest) monitorOrderMatchingAndTradeNeg(ctx context.Context, cl
 	client.log.Infof("Waiting up to %v for matches on order %s", maxMatchDuration, tracker.token())
 	matched := client.notes.find(ctx, maxMatchDuration, func(n Notification) bool {
 		orderNote, isOrderNote := n.(*OrderNote)
-		return isOrderNote && n.Topic() == TopicMatchesMade && orderNote.Order.ID.String() == orderID
+		isMatchedTopic := n.Topic() == TopicBuyMatchesMade || n.Topic() == TopicSellMatchesMade
+		return isOrderNote && isMatchedTopic && orderNote.Order.ID.String() == orderID
 	})
 	if ctx.Err() != nil { // context canceled
 		return nil

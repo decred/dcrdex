@@ -55,6 +55,8 @@ export const ID_RECONFIG_SUCCESS = 'RECONFIG_SUCCESS'
 export const ID_RESCAN_STARTED = 'RESCAN_STARTED'
 export const ID_NEW_WALLET_SUCCESS = 'NEW_WALLET_SUCCESS'
 export const ID_WALLET_UNLOCKED = 'WALLET_UNLOCKED'
+export const ID_SELLING = 'ID_SELLING'
+export const ID_BUYING = 'ID_BUYING'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -111,7 +113,9 @@ export const enUS: Locale = {
   [ID_RECONFIG_SUCCESS]: 'Wallet Reconfigured!',
   [ID_RESCAN_STARTED]: 'Wallet Rescan Running',
   [ID_NEW_WALLET_SUCCESS]: '{{ assetName }} Wallet Created!',
-  [ID_WALLET_UNLOCKED]: 'Wallet Unlocked'
+  [ID_WALLET_UNLOCKED]: 'Wallet Unlocked',
+  [ID_SELLING]: 'Selling',
+  [ID_BUYING]: 'Buying'
 }
 
 export const ptBR: Locale = {
@@ -210,7 +214,7 @@ export const zhCN: Locale = {
   [ID_API_ERROR]: '接口错误',
   [ID_ADD]: '加',
   [ID_CREATE]: '创建',
-  [ID_WALLET_READY]: 'Choose Wallet', // xxx translate
+  [ID_WALLET_READY]: 'Ready', // xxx translate
   [ID_SETUP_WALLET]: 'Setup' // xxx translate
 }
 
