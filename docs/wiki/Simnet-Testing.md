@@ -1,3 +1,5 @@
+# Simnet Testing
+
 - [Simnet Harnesses](#simnet-harnesses)
   - [Start the DCR and BTC simnet harnesses](#start-the-dcr-and-btc-simnet-harnesses)
   - [Automatic mining](#automatic-mining)
@@ -15,7 +17,7 @@
 
 ### Start the DCR and BTC simnet harnesses
 
-The harness are used by both server (dcrdex) and client (dexc).
+The harnesses are used by both server (dcrdex) and client (dexc).
 
 From the source repository root, run each command in a separate terminal:
 
@@ -51,19 +53,19 @@ Decred is similar, but under the `dcr` folder:
 ~  dextest  dcr  harness-ctl  $  watch -n 30 ./mine-alpha 1
 ```
 
-**WARNING**: Decred's harness can't mine indefinitely so stop the watch when you have completed your current test.  The harness config has a ticket buyer, but not enough tickets are purchased on a long enough time line because automatic buying is not allowed before price change.  This needs tweaking.
+**WARNING**: Decred's harness can't mine indefinitely so stop the watch when you have completed your current test.  The harness config has a ticket buyer, but not enough tickets are purchased on a long enough timeline because automatic buying is not allowed before a price change.  This needs tweaking.
 
 ## Server (`dcrdex`) Setup
 
 ### Harness option
 
-There is a dcrdex harness that will setup everything for you, although with a very short contract lock time set of 1 min maker and 30 sec taker.
+There is a dcrdex harness that will set up everything for you, although with a very short contract lock time set of 1 min maker and 30 sec taker.
 
 ```sh
 ~  [repo root]  dex  testing  dcrdex  $  ./harness.sh
 ```
 
-To instead setup the dcrdex server manually, and with the regular contract lock times follow the steps in the following subsections.
+To setup the dcrdex server manually, and with the regular contract lock times, follow the steps in the following subsections.
 
 ### Configure dcrdex markets for simnet
 
@@ -176,12 +178,12 @@ enabled. This should redirect to <http://127.0.0.3:5758/register.>
 4. Pay fee (type in app pass to authorize payment from DCR wallet).
 5. If auto-mining is not setup, mine a few blocks on Decred simnet. How many depends on the `regfeeconfirms` setting used with `dcrdex.
 
-   ```none
-   ~  dextest  dcr  harness-ctl  $  ./mine-alpha 1 # mine one block
-   ```
+    ```none
+    ~  dextest  dcr  harness-ctl  $  ./mine-alpha 1 # mine one block
+    ```
 
-5. Place a couple orders that match.
-6. Mine a few blocks on each chain, alternating chains. How many depends on the `"swapConf"` values in markets.json.
+6. Place a couple orders that match.
+7. Mine a few blocks on each chain, alternating chains. How many depends on the `"swapConf"` values in markets.json.
 
 ### Setup the client via dexcctl
 

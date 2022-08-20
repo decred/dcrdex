@@ -124,7 +124,7 @@ A failure may occur while fuzzing for several reasons:
 ## Other Highlighted Fuzz Flags
 
 - **-fuzztime**:
-    The total time or number of iterations that the fuzz target will be executed before exiting, specified as a time.Duration (for example, `-fuzztime 1h30s`) or using aspecial syntax Nx to run the fuzz target N times (for example, `-fuzztime 1000x`). The default is to run forever.
+    The total time or number of iterations that the fuzz target will be executed before exiting, specified as a time.Duration (for example, `-fuzztime 1h30s`) or using a special syntax Nx to run the fuzz target N times (for example, `-fuzztime 1000x`). The default is to run forever.
 - **-fuzzminimizetime**: the time or number of iterations that the fuzz target will be executed during each minimization attempt, default 60sec. You can completely disable minimization by setting -fuzzminimizetime 0 when fuzzing.
 - **-parallel**: the number of fuzzing processes running at once, default $GOMAXPROCS. Currently, setting -cpu during fuzzing has no effect.
 - **-keepfuzzing**: Keep running the fuzz test if a crasher is found. (default false)

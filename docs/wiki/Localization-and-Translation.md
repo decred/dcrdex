@@ -1,3 +1,5 @@
+# Localization and Translation
+
 The DEX client supports translations for the browser frontend and the notification messages from the backend.
 
 To add a new locale, the translations must be defined in the following locations:
@@ -6,13 +8,13 @@ To add a new locale, the translations must be defined in the following locations
 2. Notification strings (client/core/locale_ntfn.go)
 3. JavaScript strings (client/webserver/site/src/js/locales.js)
 
-If you decide to do the following for a different language, please see https://github.com/decred/dcrdex/wiki/Contribution-Guide for help with the github workflow.
+If you decide to do the following for a different language, please see <https://github.com/decred/dcrdex/wiki/Contribution-Guide> for help with the github workflow.
 
 ## Step 1 - HTML
 
-The HTML strings involved creating [client/webserver/locales/zh-cn.go](https://github.com/decred/dcrdex/blob/master/client/webserver/locales/zh-cn.go), which contains a `var ZhCN map[string]string` that provides a translation for a string identified by a certain key. The translation is not of the key itself, but of the corresponding English string in the `EnUS` map in https://github.com/decred/dcrdex/blob/master/client/webserver/locales/en-us.go. The name of this file should be a [BCP 47 language tag](https://www.w3.org/International/articles/bcp47/), preferably the "language-region" form.
+The HTML strings involved creating [client/webserver/locales/zh-cn.go](https://github.com/decred/dcrdex/blob/master/client/webserver/locales/zh-cn.go), which contains a `var ZhCN map[string]string` that provides a translation for a string identified by a certain key. The translation is not of the key itself, but of the corresponding English string in the `EnUS` map in <https://github.com/decred/dcrdex/blob/master/client/webserver/locales/en-us.go>. The name of this file should be a [BCP 47 language tag](https://www.w3.org/International/articles/bcp47/), preferably the "language-region" form.
 
-The new HTML strings map must then be listed in https://github.com/decred/dcrdex/blob/master/client/webserver/locales/locales.go with an appropriate language tag.
+The new HTML strings map must then be listed in <https://github.com/decred/dcrdex/blob/master/client/webserver/locales/locales.go> with an appropriate language tag.
 
 Once the new file is created in **client/webserver/locales** and the new map registered in **client/webserver/locales/locales.go**, it is then necessary to run `go generate` in the **client/webserver/site** folder.  This creates the localized HTML template files in the **localized_html** folder.
 

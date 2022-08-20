@@ -1,8 +1,10 @@
+# Client Installation and Configuration
+
 ## Client Quick Start Installation
 
 The DEX client can be installed in one of the following ways:
 
-1. Download the the standalone DEX client for your operating system for the
+1. Download the standalone DEX client for your operating system for the
    [latest release on GitHub](https://github.com/decred/dcrdex/releases).
 2. [Use Decrediton](https://docs.decred.org/wallets/decrediton/decrediton-setup/),
    the official graphical Decred wallet, which integrates the DEX client, and go
@@ -102,7 +104,7 @@ wallet.
    standalone client, open a command prompt in the folder containing the
    pre-compiled dexc client files and run `./dexc` (`dexc.exe` on Windows).
 
-2. In your web browser, navigate to http://localhost:5758. Skip this step if
+2. In your web browser, navigate to <http://localhost:5758>. Skip this step if
    using Decrediton.
 
    <img src="images/omnibar-client.png" width="320">
@@ -151,7 +153,7 @@ wallet.
    like to the wallet since *only* the amount required for the fee will be spent
    in the next step. The remaining balance will be available for trading or may
    be withdrawn later. In the case of the screenshot above, the form indicates
-   that for the client to make a fee payment transaction for the amount 0.001
+   that for the client to make a fee payment transaction for the amount of 0.001
    BTC, the wallet should be funded with "at least 0.00100823 BTC to also cover
    network fees".  For example, you can send yourself 5 BTC and only the
    required amount will be spent on the registration fee, with the remainder in
@@ -205,14 +207,13 @@ wallet.
 
 Bundle the CSS and JavaScript with Webpack:
 
-```
-npm clean-install
-npm run build
+```sh
+npm clean-install && npm run build
 ```
 
 **Build and run the client** from *client/cmd/dexc*.
 
-```
+```sh
 go build
 ./dexc
 ```
@@ -221,25 +222,25 @@ Connect to the client from your browser at `localhost:5758`.
 
 While `dexc` may be run from within the git workspace as described above, the
 `dexc` binary executable generated with `go build` and the entire `site` folder
-may be copied into a different folder as long as `site` is in the same directory
+can be copied into a different folder as long as `site` is in the same directory
 as `dexc` (e.g. `/opt/dcrdex/dexc` and `/opt/dcrdex/site`).
 
 ### Docker
 
-**Build the docker image**
+#### Build the docker image
 
-```
+```sh
 docker build -t user/dcrdex -f client/Dockerfile .
 ```
 
-**Create docker volume**
+#### Create docker volume
 
-```
+```sh
 docker volume create --name=dcrdex_data
 ```
 
-**Run image**
+#### Run image
 
-```
+```sh
 docker run -d --rm -p 127.0.0.1:5758:5758 -v dcrdex_data:/root/.dexc user/dcrdex
 ```
