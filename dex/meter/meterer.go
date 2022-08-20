@@ -39,7 +39,7 @@ func DelayedRelay(ctx context.Context, minDelay time.Duration, n int) (out <-cha
 
 				if time.Since(last) > minDelay {
 					outC <- nil
-					last = time.Now().UTC()
+					last = time.Now()
 					continue
 				}
 
@@ -51,7 +51,7 @@ func DelayedRelay(ctx context.Context, minDelay time.Duration, n int) (out <-cha
 			case <-now:
 				outC <- nil
 				scheduled = nil
-				last = time.Now().UTC()
+				last = time.Now()
 
 			case <-ctx.Done():
 				if scheduled != nil && !scheduled.Stop() {
