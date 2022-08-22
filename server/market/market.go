@@ -758,7 +758,7 @@ func (m *Market) processCancelOrderWhileSuspended(rec *orderRecord, errChan chan
 		return
 	}
 
-	if cancelable, err := m.CancelableBy(co.TargetOrderID, co.AccountID); !cancelable {
+	if cancelable, _, err := m.CancelableBy(co.TargetOrderID, co.AccountID); !cancelable {
 		errChan <- err
 		return
 	}
@@ -1002,13 +1002,13 @@ func (m *Market) Cancelable(oid order.OrderID) bool {
 // means: (1) an order in the book or epoch queue, (2) type limit with
 // time-in-force standing (implied for book orders), and (3) AccountID field
 // matching the provided account ID.
-func (m *Market) CancelableBy(oid order.OrderID, aid account.AccountID) (bool, error) {
+func (m *Market) CancelableBy(oid order.OrderID, aid account.AccountID) (bool, time.Time, error) {
 	// All book orders are standing limit orders.
 	if lo := m.book.Order(oid); lo != nil {
 		if lo.AccountID == aid {
-			return true, nil
+			return true, lo.ServerTime, nil
 		}
-		return false, ErrCancelNotPermitted
+		return false, time.Time{}, ErrCancelNotPermitted
 	}
 
 	// Check the active epochs (includes current and next).
@@ -1017,20 +1017,20 @@ func (m *Market) CancelableBy(oid order.OrderID, aid account.AccountID) (bool, e
 	m.epochMtx.RUnlock()
 
 	if ord == nil {
-		return false, ErrTargetNotActive
+		return false, time.Time{}, ErrTargetNotActive
 	}
 
 	lo, ok := ord.(*order.LimitOrder)
 	if !ok {
-		return false, ErrTargetNotCancelable
+		return false, time.Time{}, ErrTargetNotCancelable
 	}
 	if lo.Force != order.StandingTiF {
-		return false, ErrTargetNotCancelable
+		return false, time.Time{}, ErrTargetNotCancelable
 	}
 	if lo.AccountID != aid {
-		return false, ErrCancelNotPermitted
+		return false, time.Time{}, ErrCancelNotPermitted
 	}
-	return true, nil
+	return true, lo.ServerTime, nil
 }
 
 func (m *Market) checkUnfilledOrders(assetID uint32, unfilled []*order.LimitOrder) (unbooked []*order.LimitOrder) {
@@ -1772,6 +1772,7 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 	// Verify that another cancel order targeting the same order is not already
 	// in the epoch queue. Market and limit orders using the same coin IDs as
 	// other orders is prevented by the coinlocker.
+	epochGap := db.EpochGapNA
 	if co, ok := ord.(*order.CancelOrder); ok {
 		if eco := epoch.CancelTargets[co.TargetOrderID]; eco != nil {
 			log.Debugf("Received cancel order %v targeting %v, but already have %v.",
@@ -1790,13 +1791,16 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 		// Verify that the target order is on the books or in the epoch queue,
 		// and that the account of the CancelOrder is the same as the account of
 		// the target order.
-		cancelable, err := m.CancelableBy(co.TargetOrderID, co.AccountID)
+		cancelable, loTime, err := m.CancelableBy(co.TargetOrderID, co.AccountID)
 		if !cancelable {
 			log.Debugf("Cancel order %v (account=%v) target order %v: %v",
 				co, co.AccountID, co.TargetOrderID, err)
 			errChan <- err
 			return nil
 		}
+
+		epochGap = int32(epoch.Epoch - loTime.UnixMilli()/epoch.Duration)
+
 	} else if likelyTaker(ord) { // Likely-taker trade order. Check the quantity against user's limit.
 		// NOTE: We can entirely change this so that the taker limit is not
 		// based on just this market. Also so that it's based on lots rather
@@ -1879,7 +1883,7 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 
 	// Store the new epoch order BEFORE inserting it into the epoch queue,
 	// initiating the swap, and notifying book subscribers.
-	if err := m.storage.NewEpochOrder(ord, epoch.Epoch, epoch.Duration); err != nil {
+	if err := m.storage.NewEpochOrder(ord, epoch.Epoch, epoch.Duration, epochGap); err != nil {
 		errChan <- ErrInternalServer
 		return fmt.Errorf("processOrder: Failed to store new epoch order %v: %w",
 			ord, err)
@@ -2145,7 +2149,7 @@ func (m *Market) prepEpoch(orders []order.Order, epochEnd time.Time) (cSum []byt
 		// Change the order status from orderStatusEpoch to orderStatusRevoked.
 		coid, revTime, err := m.storage.RevokeOrder(ord)
 		if err == nil {
-			m.auth.RecordCancel(ord.User(), coid, ord.ID(), revTime)
+			m.auth.RecordCancel(ord.User(), coid, ord.ID(), db.EpochGapNA, revTime)
 		} else {
 			log.Errorf("Failed to revoke order %v with a new cancel order: %v",
 				ord.UID(), err)
@@ -2236,7 +2240,7 @@ func (m *Market) unbookedOrder(lo *order.LimitOrder) {
 	oid, user := lo.ID(), lo.User()
 	coid, revTime, err := m.storage.RevokeOrder(lo)
 	if err == nil {
-		m.auth.RecordCancel(user, coid, oid, revTime)
+		m.auth.RecordCancel(user, coid, oid, db.EpochGapNA, revTime)
 	} else {
 		log.Errorf("Failed to revoke order %v with a new cancel order: %v",
 			lo.UID(), err)
@@ -2336,6 +2340,7 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 	matchTime := time.Now() // considered as the time at which matched cancel orders are executed
 	seed, matches, _, failed, doneOK, partial, booked, nomatched, unbooked, updates, stats := m.matcher.Match(m.book, ordersRevealed)
 	m.bookEpochIdx = epoch.Epoch + 1
+	epochDur := int64(m.EpochDuration())
 	var canceled []order.OrderID
 	for _, ms := range matches {
 		// Set the epoch ID.
@@ -2347,7 +2352,8 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 		// Update order settling amounts.
 		for _, match := range ms.Matches() {
 			if co, ok := match.Taker.(*order.CancelOrder); ok {
-				m.auth.RecordCancel(co.User(), co.ID(), co.TargetOrderID, matchTime)
+				epochGap := int32((co.ServerTime.UnixMilli() / epochDur) - (match.Maker.ServerTime.UnixMilli() / epochDur))
+				m.auth.RecordCancel(co.User(), co.ID(), co.TargetOrderID, epochGap, matchTime)
 				canceled = append(canceled, co.TargetOrderID)
 				continue
 			}

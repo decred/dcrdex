@@ -249,7 +249,7 @@ func (a *TAuth) UserSettlingLimit(user account.AccountID, mkt *dex.MarketInfo) i
 }
 
 func (a *TAuth) RecordCompletedOrder(account.AccountID, order.OrderID, time.Time) {}
-func (a *TAuth) RecordCancel(aid account.AccountID, coid, oid order.OrderID, t time.Time) {
+func (a *TAuth) RecordCancel(aid account.AccountID, coid, oid order.OrderID, epochGap int32, t time.Time) {
 	a.cancelOrder = coid
 	a.canceledOrder = oid
 }

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/server/db"
 )
 
 func randomOrderID() (oid order.OrderID) {
@@ -46,19 +47,19 @@ func Test_latestOrders(t *testing.T) {
 	// add one cancel
 	ts := int64(1234)
 	coid := randomOrderID()
-	ordList.add(&oidStamped{order.OrderID{0x1}, ts, &coid})
+	ordList.add(&oidStamped{order.OrderID{0x1}, ts, &coid, 1})
 	checkSort()
 	total, cancels = ordList.counts()
 	if total != 1 {
 		t.Errorf("expected 1 orders, got %d", total)
 	}
 	if cancels != 1 {
-		t.Errorf("expected 1 cancels, got %d", total)
+		t.Errorf("expected 1 cancels, got %d", cancels)
 	}
 
 	// add one non-cancel
 	ts++
-	ordList.add(&oidStamped{order.OrderID{0x2}, ts, nil})
+	ordList.add(&oidStamped{order.OrderID{0x2}, ts, nil, db.EpochGapNA})
 	checkSort()
 	total, cancels = ordList.counts()
 	if total != 2 {
@@ -69,7 +70,7 @@ func Test_latestOrders(t *testing.T) {
 	}
 
 	// add one that is the smallest
-	ordList.add(&oidStamped{order.OrderID{0x3}, ts - 10, nil})
+	ordList.add(&oidStamped{order.OrderID{0x3}, ts - 10, nil, db.EpochGapNA})
 	checkSort()
 	total, cancels = ordList.counts()
 	if total != 3 {
@@ -84,9 +85,10 @@ func Test_latestOrders(t *testing.T) {
 	for i := total; i < int(cap); i++ {
 		ts++
 		ordList.add(&oidStamped{
-			OrderID: randomOrderID(),
-			time:    ts,
-			target:  maybeCancel(),
+			OrderID:  randomOrderID(),
+			time:     ts,
+			target:   maybeCancel(),
+			epochGap: db.EpochGapNA,
 		})
 		checkSort()
 	}
@@ -185,34 +187,34 @@ func Test_ordsByTimeThenID_Sort(t *testing.T) {
 		{
 			name: "unique, no swap",
 			ords: []*oidStamped{
-				{order.OrderID{0x1}, 1234, nil},
-				{order.OrderID{0x2}, 1235, nil},
+				{order.OrderID{0x1}, 1234, nil, db.EpochGapNA},
+				{order.OrderID{0x2}, 1235, nil, db.EpochGapNA},
 			},
 			wantOrds: []*oidStamped{
-				{order.OrderID{0x1}, 1234, nil},
-				{order.OrderID{0x2}, 1235, nil},
+				{order.OrderID{0x1}, 1234, nil, db.EpochGapNA},
+				{order.OrderID{0x2}, 1235, nil, db.EpochGapNA},
 			},
 		},
 		{
 			name: "unique, one swap",
 			ords: []*oidStamped{
-				{order.OrderID{0x2}, 1235, nil},
-				{order.OrderID{0x1}, 1234, nil},
+				{order.OrderID{0x2}, 1235, nil, db.EpochGapNA},
+				{order.OrderID{0x1}, 1234, nil, db.EpochGapNA},
 			},
 			wantOrds: []*oidStamped{
-				{order.OrderID{0x1}, 1234, nil},
-				{order.OrderID{0x2}, 1235, nil},
+				{order.OrderID{0x1}, 1234, nil, db.EpochGapNA},
+				{order.OrderID{0x2}, 1235, nil, db.EpochGapNA},
 			},
 		},
 		{
 			name: "time tie, swap by order ID",
 			ords: []*oidStamped{
-				{order.OrderID{0x2}, 1234, nil},
-				{order.OrderID{0x1}, 1234, nil},
+				{order.OrderID{0x2}, 1234, nil, db.EpochGapNA},
+				{order.OrderID{0x1}, 1234, nil, db.EpochGapNA},
 			},
 			wantOrds: []*oidStamped{
-				{order.OrderID{0x1}, 1234, nil},
-				{order.OrderID{0x2}, 1234, nil},
+				{order.OrderID{0x1}, 1234, nil, db.EpochGapNA},
+				{order.OrderID{0x2}, 1234, nil, db.EpochGapNA},
 			},
 		},
 	}

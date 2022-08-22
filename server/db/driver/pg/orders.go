@@ -183,8 +183,8 @@ func (status pgOrderStatus) active() bool {
 
 // NewEpochOrder stores the given order with epoch status. This is equivalent to
 // StoreOrder with OrderStatusEpoch.
-func (a *Archiver) NewEpochOrder(ord order.Order, epochIdx, epochDur int64) error {
-	return a.storeOrder(ord, epochIdx, epochDur, orderStatusEpoch)
+func (a *Archiver) NewEpochOrder(ord order.Order, epochIdx, epochDur int64, epochGap int32) error {
+	return a.storeOrder(ord, epochIdx, epochDur, epochGap, orderStatusEpoch)
 }
 
 // NewArchivedCancel stores a cancel order directly in the executed state. This
@@ -197,7 +197,7 @@ func (a *Archiver) NewArchivedCancel(ord *order.CancelOrder, epochID, epochDur i
 	}
 	status := orderStatusExecuted
 	tableName := fullCancelOrderTableName(a.dbName, marketSchema, status.active())
-	N, err := storeCancelOrder(a.db, tableName, ord, status, epochID, epochDur)
+	N, err := storeCancelOrder(a.db, tableName, ord, status, epochID, epochDur, db.EpochGapNA)
 	if err != nil {
 		a.fatalBackendErr(err)
 		return fmt.Errorf("storeCancelOrder failed: %w", err)
@@ -298,7 +298,7 @@ func (a *Archiver) FlushBook(base, quote uint32) (sellsRemoved, buysRemoved []or
 		//  - Set epoch idx to exemptEpochIdx (-1) and dur to dummyEpochDur (1),
 		//    consistent with revokeOrder(..., exempt=true).
 		_, err = dbTx.Exec(stmt, co.ID(), co.AccountID, co.ClientTime,
-			co.ServerTime, nil, co.TargetOrderID, orderStatusRevoked, exemptEpochIdx, dummyEpochDur)
+			co.ServerTime, nil, co.TargetOrderID, orderStatusRevoked, exemptEpochIdx, dummyEpochDur, db.EpochGapNA)
 		if err != nil {
 			fail()
 			err = fmt.Errorf("failed to store pseudo-cancel order: %w", err)
@@ -511,7 +511,7 @@ func (a *Archiver) revokeOrder(ord order.Order, exempt bool) (cancelID order.Ord
 	if exempt {
 		epochIdx = exemptEpochIdx
 	}
-	err = a.storeOrder(co, epochIdx, dummyEpochDur, orderStatusRevoked)
+	err = a.storeOrder(co, epochIdx, dummyEpochDur, db.EpochGapNA, orderStatusRevoked)
 	return
 }
 
@@ -535,10 +535,10 @@ func validateOrder(ord order.Order, status pgOrderStatus, mkt *dex.MarketInfo) b
 // storage. Updating orders should be done via one of the update functions such
 // as UpdateOrderStatus.
 func (a *Archiver) StoreOrder(ord order.Order, epochIdx, epochDur int64, status order.OrderStatus) error {
-	return a.storeOrder(ord, epochIdx, epochDur, marketToPgStatus(status))
+	return a.storeOrder(ord, epochIdx, epochDur, db.EpochGapNA, marketToPgStatus(status))
 }
 
-func (a *Archiver) storeOrder(ord order.Order, epochIdx, epochDur int64, status pgOrderStatus) error {
+func (a *Archiver) storeOrder(ord order.Order, epochIdx, epochDur int64, epochGap int32, status pgOrderStatus) error {
 	marketSchema, err := a.marketSchema(ord.Base(), ord.Quote())
 	if err != nil {
 		return err
@@ -601,7 +601,7 @@ func (a *Archiver) storeOrder(ord order.Order, epochIdx, epochDur int64, status 
 	switch ot := ord.(type) {
 	case *order.CancelOrder:
 		tableName := fullCancelOrderTableName(a.dbName, marketSchema, status.active())
-		N, err = storeCancelOrder(a.db, tableName, ot, status, epochIdx, epochDur)
+		N, err = storeCancelOrder(a.db, tableName, ot, status, epochIdx, epochDur, epochGap)
 		if err != nil {
 			a.fatalBackendErr(err)
 			return fmt.Errorf("storeCancelOrder failed: %w", err)
@@ -1228,16 +1228,10 @@ func (a *Archiver) OrderWithCommit(ctx context.Context, commit order.Commitment)
 	return // false, zero, nil
 }
 
-type cancelExecStamped struct {
-	oid, target order.OrderID
-	t           int64
-}
-
 // ExecutedCancelsForUser retrieves up to N executed cancel orders for a given
 // user. These may be user-initiated cancels, or cancels created by the server
 // (revokes). Executed cancel orders from all markets are returned.
-func (a *Archiver) ExecutedCancelsForUser(aid account.AccountID, N int) (oids, targets []order.OrderID, execTimes []int64, err error) {
-	var ords []cancelExecStamped
+func (a *Archiver) ExecutedCancelsForUser(aid account.AccountID, N int) (ords []*db.CancelRecord, err error) {
 
 	// Check all markets.
 	for marketSchema := range a.markets {
@@ -1246,42 +1240,34 @@ func (a *Archiver) ExecutedCancelsForUser(aid account.AccountID, N int) (oids, t
 		epochsTableName := fullEpochsTableName(a.dbName, marketSchema)
 		stmt := fmt.Sprintf(internal.RetrieveCancelTimesForUserByStatus, cancelTableName, epochsTableName)
 		ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
-		mktOids, err := a.executedCancelsForUser(ctx, a.db, stmt, aid, N)
+		mktOrds, err := a.executedCancelsForUser(ctx, a.db, stmt, aid, N)
 		cancel()
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, err
 		}
-		ords = append(ords, mktOids...)
+		ords = append(ords, mktOrds...)
 
 		// Query for revoked orders (server-initiated cancels).
 		stmt = fmt.Sprintf(internal.SelectRevokeCancels, cancelTableName)
 		ctx, cancel = context.WithTimeout(a.ctx, a.queryTimeout)
-		mktOids, err = a.revokeGeneratedCancelsForUser(ctx, a.db, stmt, aid, N)
+		mktOrds, err = a.revokeGeneratedCancelsForUser(ctx, a.db, stmt, aid, N)
 		cancel()
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, err
 		}
-		ords = append(ords, mktOids...)
+		ords = append(ords, mktOrds...)
 	}
 
 	sort.Slice(ords, func(i, j int) bool {
-		return ords[i].t > ords[j].t // descending, latest completed order first
+		return ords[i].MatchTime > ords[j].MatchTime // descending, latest completed order first
 	})
-
-	if N > len(ords) {
-		N = len(ords)
-	}
-
-	for i := range ords[:N] {
-		oids = append(oids, ords[i].oid)
-		targets = append(targets, ords[i].target)
-		execTimes = append(execTimes, ords[i].t)
-	}
 
 	return
 }
 
-func (a *Archiver) executedCancelsForUser(ctx context.Context, dbe *sql.DB, stmt string, aid account.AccountID, N int) (ords []cancelExecStamped, err error) {
+func (a *Archiver) executedCancelsForUser(ctx context.Context, dbe *sql.DB, stmt string,
+	aid account.AccountID, N int) (ords []*db.CancelRecord, err error) {
+
 	var rows *sql.Rows
 	rows, err = dbe.QueryContext(ctx, stmt, aid, orderStatusExecuted, N) // excludes orderStatusFailed
 	if err != nil {
@@ -1292,12 +1278,18 @@ func (a *Archiver) executedCancelsForUser(ctx context.Context, dbe *sql.DB, stmt
 	for rows.Next() {
 		var oid, target order.OrderID
 		var execTime int64
-		err = rows.Scan(&oid, &target, &execTime)
+		var epochGap int32
+		err = rows.Scan(&oid, &target, &epochGap, &execTime)
 		if err != nil {
 			return
 		}
 
-		ords = append(ords, cancelExecStamped{oid, target, execTime})
+		ords = append(ords, &db.CancelRecord{
+			ID:        oid,
+			TargetID:  target,
+			MatchTime: execTime,
+			EpochGap:  epochGap,
+		})
 	}
 
 	if err = rows.Err(); err != nil {
@@ -1308,7 +1300,9 @@ func (a *Archiver) executedCancelsForUser(ctx context.Context, dbe *sql.DB, stmt
 
 // revokeGeneratedCancelsForUser excludes exempt/uncounted cancels created with
 // RevokeOrderUncounted or revokeOrder(..., exempt=true).
-func (a *Archiver) revokeGeneratedCancelsForUser(ctx context.Context, dbe *sql.DB, stmt string, aid account.AccountID, N int) (ords []cancelExecStamped, err error) {
+func (a *Archiver) revokeGeneratedCancelsForUser(ctx context.Context, dbe *sql.DB, stmt string,
+	aid account.AccountID, N int) (ords []*db.CancelRecord, err error) {
+
 	var rows *sql.Rows
 	rows, err = dbe.QueryContext(ctx, stmt, aid, orderStatusRevoked, N)
 	if err != nil {
@@ -1330,7 +1324,12 @@ func (a *Archiver) revokeGeneratedCancelsForUser(ctx context.Context, dbe *sql.D
 			continue
 		}
 
-		ords = append(ords, cancelExecStamped{oid, target, revokeTime.UnixMilli()})
+		ords = append(ords, &db.CancelRecord{
+			ID:        oid,
+			TargetID:  target,
+			MatchTime: revokeTime.UnixMilli(),
+			EpochGap:  db.EpochGapNA,
+		})
 	}
 
 	if err = rows.Err(); err != nil {
@@ -1712,10 +1711,10 @@ func moveOrder(dbe sqlExecutor, oldTableName, newTableName string, oid order.Ord
 
 // BEGIN cancel order functions
 
-func storeCancelOrder(dbe sqlExecutor, tableName string, co *order.CancelOrder, status pgOrderStatus, epochIdx, epochDur int64) (int64, error) {
+func storeCancelOrder(dbe sqlExecutor, tableName string, co *order.CancelOrder, status pgOrderStatus, epochIdx, epochDur int64, epochGap int32) (int64, error) {
 	stmt := fmt.Sprintf(internal.InsertCancelOrder, tableName)
 	return sqlExec(dbe, stmt, co.ID(), co.AccountID, co.ClientTime,
-		co.ServerTime, co.Commit, co.TargetOrderID, status, epochIdx, epochDur)
+		co.ServerTime, co.Commit, co.TargetOrderID, status, epochIdx, epochDur, epochGap)
 }
 
 // loadCancelOrderFromTable does NOT set BaseAsset and QuoteAsset!

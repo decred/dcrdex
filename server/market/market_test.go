@@ -109,13 +109,13 @@ func (ta *TArchivist) failOnCommitWithOrder(ord order.Order) {
 func (ta *TArchivist) CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error) {
 	return nil, nil, nil
 }
-func (ta *TArchivist) ExecutedCancelsForUser(aid account.AccountID, N int) (oids, targets []order.OrderID, execTimes []int64, err error) {
-	return nil, nil, nil, nil
+func (ta *TArchivist) ExecutedCancelsForUser(aid account.AccountID, N int) ([]*db.CancelRecord, error) {
+	return nil, nil
 }
 func (ta *TArchivist) OrderStatus(order.Order) (order.OrderStatus, order.OrderType, int64, error) {
 	return order.OrderStatusUnknown, order.UnknownOrderType, -1, errors.New("boom")
 }
-func (ta *TArchivist) NewEpochOrder(ord order.Order, epochIdx, epochDur int64) error {
+func (ta *TArchivist) NewEpochOrder(ord order.Order, epochIdx, epochDur int64, epochGap int32) error {
 	ta.mtx.Lock()
 	defer ta.mtx.Unlock()
 	if ta.poisonEpochOrder != nil && ord.ID() == ta.poisonEpochOrder.ID() {

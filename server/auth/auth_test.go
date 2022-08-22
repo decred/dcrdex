@@ -44,6 +44,7 @@ type ratioData struct {
 	oidsCancels    []order.OrderID
 	oidsCanceled   []order.OrderID
 	timesCanceled  []int64
+	epochGaps      []int32
 }
 
 // TStorage satisfies the Storage interface
@@ -122,8 +123,16 @@ func (s *TStorage) setRatioData(dat *ratioData) {
 func (s *TStorage) CompletedUserOrders(aid account.AccountID, _ int) (oids []order.OrderID, compTimes []int64, err error) {
 	return s.ratio.oidsCompleted, s.ratio.timesCompleted, nil
 }
-func (s *TStorage) ExecutedCancelsForUser(aid account.AccountID, _ int) (oids, targets []order.OrderID, execTimes []int64, err error) {
-	return s.ratio.oidsCancels, s.ratio.oidsCanceled, s.ratio.timesCanceled, nil
+func (s *TStorage) ExecutedCancelsForUser(aid account.AccountID, _ int) (cancels []*db.CancelRecord, err error) {
+	for i := range s.ratio.oidsCanceled {
+		cancels = append(cancels, &db.CancelRecord{
+			ID:        s.ratio.oidsCancels[i],
+			TargetID:  s.ratio.oidsCanceled[i],
+			MatchTime: s.ratio.timesCanceled[i],
+			EpochGap:  s.ratio.epochGaps[i],
+		})
+	}
+	return cancels, nil
 }
 
 // TSigner satisfies the Signer interface
@@ -700,12 +709,15 @@ func TestConnect(t *testing.T) {
 	rig.storage.matches = []*db.MatchData{matchData}
 	defer func() { rig.storage.matches = nil }()
 
+	epochGaps := []int32{1} // penalized
+
 	rig.storage.setRatioData(&ratioData{
 		oidsCompleted:  []order.OrderID{{0x1}},
 		timesCompleted: []int64{1234},
 		oidsCancels:    []order.OrderID{{0x2}},
 		oidsCanceled:   []order.OrderID{{0x1}},
 		timesCanceled:  []int64{1235},
+		epochGaps:      epochGaps,
 	}) // 1:1 = 50%
 	defer rig.storage.setRatioData(&ratioData{}) // clean slate
 
@@ -715,6 +727,15 @@ func TestConnect(t *testing.T) {
 	if rig.storage.closedID != user.acctID {
 		t.Fatalf("Expected account %v to be closed on connect, got %v", user.acctID, rig.storage.closedID)
 	}
+
+	// Make it a free cancel.
+	rig.storage.closedID = account.AccountID{} // unclose the account in db
+	epochGaps[0] = 2
+	connectUser(t, user)
+	if rig.storage.closedID == user.acctID {
+		t.Fatalf("Expected account %v to NOT be closed with free cancels, but it was.", user)
+	}
+	epochGaps[0] = 1
 
 	// Try again just meeting cancel ratio.
 	rig.storage.closedID = account.AccountID{} // unclose the account in db
@@ -731,11 +752,21 @@ func TestConnect(t *testing.T) {
 	rig.storage.ratio.oidsCanceled = append(rig.storage.ratio.oidsCanceled, order.OrderID{0x3})
 	rig.storage.ratio.oidsCancels = append(rig.storage.ratio.oidsCancels, order.OrderID{0x4})
 	rig.storage.ratio.timesCanceled = append(rig.storage.ratio.timesCanceled, 12341234)
+	rig.storage.ratio.epochGaps = append(rig.storage.ratio.epochGaps, 1)
 
 	tryConnectUser(t, user, false)
 	if rig.storage.closedID != user.acctID {
 		t.Fatalf("Expected account %v to be closed on connect, got %v", user.acctID, rig.storage.closedID)
 	}
+
+	// Make one a free cancel.
+	rig.storage.closedID = account.AccountID{} // unclose the account in db
+	rig.storage.ratio.epochGaps[1] = 2
+	connectUser(t, user)
+	if rig.storage.closedID == user.acctID {
+		t.Fatalf("Expected account %v to NOT be closed with free cancels, but it was.", user)
+	}
+	rig.storage.ratio.epochGaps[1] = 0
 
 	// Try again just meeting cancel ratio.
 	rig.storage.closedID = account.AccountID{} // unclose the account in db
@@ -761,6 +792,7 @@ func TestConnect(t *testing.T) {
 	rig.storage.ratio.oidsCanceled = append(rig.storage.ratio.oidsCanceled, order.OrderID{0x4})
 	rig.storage.ratio.oidsCancels = append(rig.storage.ratio.oidsCancels, order.OrderID{0x5})
 	rig.storage.ratio.timesCanceled = append(rig.storage.ratio.timesCanceled, 12341239)
+	rig.storage.ratio.epochGaps = append(rig.storage.ratio.epochGaps, 1)
 
 	tryConnectUser(t, user, false)
 	if rig.storage.closedID == user.acctID {
@@ -1630,7 +1662,7 @@ func TestAuthManager_RecordCancel_RecordCompletedOrder(t *testing.T) {
 	// now a cancel
 	coid := newOrderID()
 	tCompleted = tCompleted.Add(time.Millisecond) // newer
-	rig.mgr.RecordCancel(user.acctID, coid, oid, tCompleted)
+	rig.mgr.RecordCancel(user.acctID, coid, oid, 1, tCompleted)
 
 	client.mtx.Lock()
 	total, cancels = client.recentOrders.counts()

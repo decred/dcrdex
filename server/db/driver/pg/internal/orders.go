@@ -180,6 +180,7 @@ const (
 		target_order BYTEA,    -- cancel orders ref another order
 		status INT2,
 		epoch_idx INT8, epoch_dur INT4, -- 0 for rule-based revocations, -1 for exempt (e.g. book purge)
+		epoch_gap INT4 DEFAULT -1, -- epochs between order and cancel order. -1 for revocations
 		preimage BYTEA UNIQUE  -- null before preimage collection, and all server-generated cancels (revocations)
 	);`
 
@@ -221,7 +222,7 @@ const (
 	// the match_time directly instead of the epoch_idx and epoch_dur. The
 	// cancels table, with full market schema, is %[1]s, while the epochs table
 	// is %[2]s.
-	RetrieveCancelTimesForUserByStatus = `SELECT oid, target_order, match_time
+	RetrieveCancelTimesForUserByStatus = `SELECT oid, target_order, epoch_gap, match_time
 		FROM %[1]s -- a cancels table
 		JOIN %[2]s ON %[2]s.epoch_idx = %[1]s.epoch_idx AND %[2]s.epoch_dur = %[1]s.epoch_dur -- join on epochs table PK
 		WHERE account_id = $1 AND status = $2
@@ -229,8 +230,9 @@ const (
 		LIMIT $3;`  // NOTE: find revoked orders via SelectRevokeCancels
 
 	// InsertCancelOrder inserts a cancel order row into the specified table.
-	InsertCancelOrder = `INSERT INTO %s (oid, account_id, client_time, server_time, commit, target_order, status, epoch_idx, epoch_dur)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);`
+	InsertCancelOrder = `INSERT INTO %s (oid, account_id, client_time, server_time,
+			commit, target_order, status, epoch_idx, epoch_dur, epoch_gap)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);`
 
 	// CancelOrderStatus retrieves an order's status
 	CancelOrderStatus = `SELECT status FROM %s WHERE oid = $1;`
@@ -240,7 +242,7 @@ const (
 	MoveCancelOrder = `WITH moved AS (
 		DELETE FROM %s
 		WHERE oid = $1
-		RETURNING oid, account_id, client_time, server_time, commit, target_order, %d, epoch_idx, epoch_dur, preimage
+		RETURNING oid, account_id, client_time, server_time, commit, target_order, %d, epoch_idx, epoch_dur, epoch_gap, preimage
 	)
 	INSERT INTO %s
 	SELECT * FROM moved;`

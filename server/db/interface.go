@@ -141,7 +141,7 @@ type OrderArchiver interface {
 	// given user. These may be user-initiated cancels, or cancels created by
 	// the server (revokes). Executed cancel orders from all markets are
 	// returned.
-	ExecutedCancelsForUser(aid account.AccountID, N int) (oids, targets []order.OrderID, execTimes []int64, err error)
+	ExecutedCancelsForUser(aid account.AccountID, N int) ([]*CancelRecord, error)
 
 	// OrderWithCommit searches all markets' trade and cancel orders, both
 	// active and archived, for an order with the given Commitment.
@@ -152,8 +152,10 @@ type OrderArchiver interface {
 
 	// NewEpochOrder stores a new order with epoch status. Such orders are
 	// pending execution or insertion on a book (standing limit orders with a
-	// remaining unfilled amount).
-	NewEpochOrder(ord order.Order, epochIdx, epochDur int64) error
+	// remaining unfilled amount). For trade orders, the epoch gap should be
+	// db.EpochGapNA, while for cancel orders it is the number of epochs since
+	// the targeted order was placed, as described in the docs for CancelRecord.
+	NewEpochOrder(ord order.Order, epochIdx, epochDur int64, epochGap int32) error
 
 	// StorePreimage stores the preimage associated with an existing order.
 	StorePreimage(ord order.Order, pi order.Preimage) error
@@ -465,4 +467,21 @@ func ValidateOrder(ord order.Order, status order.OrderStatus, mkt *dex.MarketInf
 	}
 
 	return order.ValidateOrder(ord, status, mkt.LotSize) == nil
+}
+
+// EpochGapNA is a specifier for an epoch gap (epochs between limit order and
+// cancel order) when such a designation doesn't apply in-context. For instance,
+// revocations are treated in many places like cancel orders, but there is no
+// reason to consider the epoch gap.
+const EpochGapNA int32 = -1
+
+// CancelRecord is info about a cancel order and when it matched.
+type CancelRecord struct {
+	ID        order.OrderID
+	TargetID  order.OrderID
+	MatchTime int64
+	// EpochGap is the number of epochs passed since the targeted trade order
+	// was placed, where 0 means canceled in the same epoch, 1 means canceled in
+	// the next epoch, etc.
+	EpochGap int32
 }

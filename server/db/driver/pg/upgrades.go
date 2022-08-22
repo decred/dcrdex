@@ -17,7 +17,7 @@ import (
 	"decred.org/dcrdex/server/db/driver/pg/internal"
 )
 
-const dbVersion = 4
+const dbVersion = 5
 
 // The number of upgrades defined MUST be equal to dbVersion.
 var upgrades = []func(db *sql.Tx) error{
@@ -39,6 +39,10 @@ var upgrades = []func(db *sql.Tx) error{
 	// v4 upgrade updates the markets tables to use a integer type that can
 	// accommodate a 32-bit unsigned integer.
 	v4Upgrade,
+
+	// v5 upgrade adds an epoch_gap column to the cancel order tables to
+	// facilitate free cancels.
+	v5Upgrade,
 }
 
 // v1Upgrade adds the schema_version column and removes the state_hash column
@@ -289,6 +293,30 @@ func v4Upgrade(tx *sql.Tx) (err error) {
 	}
 	_, err = tx.Exec("ALTER TABLE markets ALTER COLUMN quote TYPE INT8;")
 	return err
+}
+
+func v5Upgrade(tx *sql.Tx) (err error) {
+	mkts, err := loadMarkets(tx, marketsTableName)
+	if err != nil {
+		return fmt.Errorf("failed to read markets table: %w", err)
+	}
+
+	doTable := func(tableName string) error {
+		_, err = tx.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN epoch_gap INT4 DEFAULT -1;", tableName))
+		return err
+	}
+
+	log.Infof("Adding epoch_gap column to cancel tables for %d markets", len(mkts))
+
+	for _, mkt := range mkts {
+		if err := doTable(mkt.Name + "." + cancelsArchivedTableName); err != nil {
+			return err
+		}
+		if err := doTable(mkt.Name + "." + cancelsActiveTableName); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // DBVersion retrieves the database version from the meta table.

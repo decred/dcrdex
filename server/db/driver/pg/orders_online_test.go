@@ -437,17 +437,14 @@ func TestFlushBook(t *testing.T) {
 		t.Fatalf("got %d user orders, expected %d", len(ordersOut), wantNumOrders)
 	}
 
-	coids, targets, _, err := archie.ExecutedCancelsForUser(lo.User(), cancelThreshWindow)
+	cancels, err := archie.ExecutedCancelsForUser(lo.User(), cancelThreshWindow)
 	if err != nil {
 		t.Errorf("ExecutedCancelsForUser failed: %v", err)
 	}
 	// ExecutedCancelsForUser should not find the (exempt) cancels created by
 	// FlushBook.
-	if len(coids) != 0 {
-		t.Fatalf("got %d cancels, expected 0", len(coids))
-	}
-	if len(targets) != 0 {
-		t.Fatalf("got %d cancel targets, expected 0", len(targets))
+	if len(cancels) != 0 {
+		t.Fatalf("got %d cancels, expected 0", len(cancels))
 	}
 
 	// Query for the revoke associated cancels without the exemption filter.
@@ -458,7 +455,7 @@ func TestFlushBook(t *testing.T) {
 		t.Fatalf("QueryContext failed: %v", err)
 	}
 
-	var ords []cancelExecStamped
+	var ords []*db.CancelRecord
 	for rows.Next() {
 		var oid, target order.OrderID
 		var revokeTime time.Time
@@ -473,7 +470,11 @@ func TestFlushBook(t *testing.T) {
 			t.Errorf("got epoch index %d, expected %d", epochIdx, exemptEpochIdx)
 		}
 
-		ords = append(ords, cancelExecStamped{oid, target, revokeTime.UnixMilli()})
+		ords = append(ords, &db.CancelRecord{
+			ID:        oid,
+			TargetID:  target,
+			MatchTime: revokeTime.UnixMilli(),
+		})
 	}
 
 	if err = rows.Err(); err != nil {
@@ -484,8 +485,8 @@ func TestFlushBook(t *testing.T) {
 		t.Fatalf("found %d cancels, wanted 1", len(ords))
 	}
 
-	if ords[0].target != lo.ID() {
-		t.Fatalf("cancel order is targeting %v, expected %v", ords[0].target, lo.ID())
+	if ords[0].TargetID != lo.ID() {
+		t.Fatalf("cancel order is targeting %v, expected %v", ords[0].TargetID, lo.ID())
 	}
 
 	// Ensure market order is still there.
@@ -1759,7 +1760,7 @@ func TestExecutedCancelsForUser(t *testing.T) {
 	// Mark the cancel order executed.
 	err = archie.ExecuteOrder(co)
 	if err != nil {
-		t.Fatalf("StoreOrder failed: %v", err)
+		t.Fatalf("ExecuteOrder failed: %v", err)
 	}
 	_, status, err := loadCancelOrder(archie.db, archie.dbName, mktInfo.Name, co.ID())
 	if err != nil {
@@ -1832,38 +1833,38 @@ func TestExecutedCancelsForUser(t *testing.T) {
 	}
 
 	user := co.User()
-	oids, targets, compTimes, err := archie.ExecutedCancelsForUser(user, cancelThreshWindow)
+	cancels, err := archie.ExecutedCancelsForUser(user, cancelThreshWindow)
 	if err != nil {
 		t.Errorf("ExecutedCancelsForUser failed: %v", err)
 	}
-	if len(oids) != 2 {
-		t.Fatalf("found %d orders, expected 1", len(oids))
+	if len(cancels) != 2 {
+		t.Fatalf("found %d orders, expected 1", len(cancels))
 	}
-	if oids[0] != co.ID() {
-		t.Errorf("incorrect executed cancel %v, expected %v", oids[0], co.ID())
+	if cancels[0].ID != co.ID() {
+		t.Errorf("incorrect executed cancel %v, expected %v", cancels[0].ID, co.ID())
 	}
-	if targets[0] != targetOrderID {
-		t.Errorf("incorrect target for executed cancel %v, expected %v", targets[0], targetOrderID)
+	if cancels[0].TargetID != targetOrderID {
+		t.Errorf("incorrect target for executed cancel %v, expected %v", cancels[0].TargetID, targetOrderID)
 	}
-	if compTimes[0] != matchTime {
-		t.Errorf("incorrect exec time for executed cancel %v, expected %v", compTimes[0], matchTime)
+	if cancels[0].MatchTime != matchTime {
+		t.Errorf("incorrect exec time for executed cancel %v, expected %v", cancels[0].MatchTime, matchTime)
 	}
-	if oids[1] != coID {
-		t.Errorf("incorrect executed cancel %v, expected %v", oids[1], coID)
+	if cancels[1].ID != coID {
+		t.Errorf("incorrect executed cancel %v, expected %v", cancels[1].ID, coID)
 	}
-	if targets[1] != lo.ID() {
-		t.Errorf("incorrect target for executed cancel %v, expected %v", targets[1], lo.ID())
+	if cancels[1].TargetID != lo.ID() {
+		t.Errorf("incorrect target for executed cancel %v, expected %v", cancels[1].TargetID, lo.ID())
 	}
-	if coTimeMs := coTime.UnixMilli(); compTimes[1] != coTimeMs {
-		t.Errorf("incorrect exec time for executed cancel %v, expected %v", compTimes[1], coTimeMs)
+	if coTimeMs := coTime.UnixMilli(); cancels[1].MatchTime != coTimeMs {
+		t.Errorf("incorrect exec time for executed cancel %v, expected %v", cancels[1].MatchTime, coTimeMs)
 	}
 
 	// test the limit
-	oids, targets, compTimes, err = archie.ExecutedCancelsForUser(user, 0)
+	cancels, err = archie.ExecutedCancelsForUser(user, 0)
 	if err != nil {
 		t.Errorf("ExecutedCancelsForUser failed: %v", err)
 	}
-	if len(oids) > 0 || len(targets) > 0 || len(compTimes) > 0 {
+	if len(cancels) > 0 {
 		t.Errorf("found executed orders for user")
 	}
 
@@ -1881,11 +1882,11 @@ func TestExecutedCancelsForUser(t *testing.T) {
 	}
 
 	user2 := co2.User()
-	oids, targets, compTimes, err = archie.ExecutedCancelsForUser(user2, cancelThreshWindow)
+	cancels, err = archie.ExecutedCancelsForUser(user2, cancelThreshWindow)
 	if err != nil {
 		t.Errorf("ExecutedCancelsForUser failed: %v", err)
 	}
-	if len(oids) > 0 || len(targets) > 0 || len(compTimes) > 0 {
+	if len(cancels) > 0 {
 		t.Errorf("found executed orders for user")
 	}
 
@@ -1917,11 +1918,11 @@ func TestExecutedCancelsForUser(t *testing.T) {
 	}
 
 	user3 := co3.User()
-	oids, targets, compTimes, err = archie.ExecutedCancelsForUser(user3, cancelThreshWindow)
+	cancels, err = archie.ExecutedCancelsForUser(user3, cancelThreshWindow)
 	if err != nil {
 		t.Errorf("ExecutedCancelsForUser failed: %v", err)
 	}
-	if len(oids) > 0 || len(targets) > 0 || len(compTimes) > 0 {
+	if len(cancels) > 0 {
 		t.Errorf("found executed orders for user")
 	}
 
@@ -1939,11 +1940,11 @@ func TestExecutedCancelsForUser(t *testing.T) {
 	}
 
 	user4 := co4.User()
-	oids, targets, compTimes, err = archie.ExecutedCancelsForUser(user4, cancelThreshWindow)
+	cancels, err = archie.ExecutedCancelsForUser(user4, cancelThreshWindow)
 	if err != nil {
 		t.Errorf("ExecutedCancelsForUser failed: %v", err)
 	}
-	if len(oids) > 0 || len(targets) > 0 || len(compTimes) > 0 {
+	if len(cancels) > 0 {
 		t.Errorf("found executed orders for user")
 	}
 }

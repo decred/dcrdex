@@ -54,7 +54,7 @@ type Storage interface {
 	UserOrderStatuses(aid account.AccountID, base, quote uint32, oids []order.OrderID) ([]*db.OrderStatus, error)
 	ActiveUserOrderStatuses(aid account.AccountID) ([]*db.OrderStatus, error)
 	CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error)
-	ExecutedCancelsForUser(aid account.AccountID, N int) (oids, targets []order.OrderID, execTimes []int64, err error)
+	ExecutedCancelsForUser(aid account.AccountID, N int) ([]*db.CancelRecord, error)
 	CompletedAndAtFaultMatchStats(aid account.AccountID, lastN int) ([]*db.MatchOutcome, error)
 	PreimageStats(user account.AccountID, lastN int) ([]*db.PreimageResult, error)
 	AllActiveUserMatches(aid account.AccountID) ([]*db.MatchData, error)
@@ -433,15 +433,15 @@ func (auth *AuthManager) ExpectUsers(users map[account.AccountID]struct{}, withi
 
 // RecordCancel records a user's executed cancel order, including the canceled
 // order ID, and the time when the cancel was executed.
-func (auth *AuthManager) RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time) {
-	auth.recordOrderDone(user, oid, &target, t.UnixMilli())
+func (auth *AuthManager) RecordCancel(user account.AccountID, oid, target order.OrderID, epochGap int32, t time.Time) {
+	auth.recordOrderDone(user, oid, &target, epochGap, t.UnixMilli())
 }
 
 // RecordCompletedOrder records a user's completed order, where completed means
 // a swap involving the order was successfully completed and the order is no
 // longer on the books if it ever was.
 func (auth *AuthManager) RecordCompletedOrder(user account.AccountID, oid order.OrderID, t time.Time) {
-	auth.recordOrderDone(user, oid, nil, t.UnixMilli())
+	auth.recordOrderDone(user, oid, nil, db.EpochGapNA, t.UnixMilli())
 }
 
 // recordOrderDone an order that has finished processing. This can be a cancel
@@ -449,7 +449,7 @@ func (auth *AuthManager) RecordCompletedOrder(user account.AccountID, oid order.
 // completed the swap negotiation. Note that in the case of a cancel, oid refers
 // to the ID of the cancel order itself, while target is non-nil for cancel
 // orders.
-func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.OrderID, target *order.OrderID, tMS int64) {
+func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.OrderID, target *order.OrderID, epochGap int32, tMS int64) {
 	client := auth.user(user)
 	if client == nil {
 		// It is likely that the user is gone if this is a revoked order.
@@ -460,9 +460,10 @@ func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.Order
 	// Update recent orders and check/set suspended status atomically.
 	client.mtx.Lock()
 	client.recentOrders.add(&oidStamped{
-		OrderID: oid,
-		time:    tMS,
-		target:  target,
+		OrderID:  oid,
+		time:     tMS,
+		target:   target,
+		epochGap: epochGap,
 	})
 
 	log.Debugf("Recorded order %v that has finished processing: user=%v, time=%v, target=%v",
@@ -1342,7 +1343,7 @@ func (auth *AuthManager) loadRecentFinishedOrders(aid account.AccountID, N int) 
 	}
 
 	// Load the N latest executed cancel orders for the user.
-	cancelOids, targetOids, cancelTimes, err := auth.storage.ExecutedCancelsForUser(aid, N)
+	cancels, err := auth.storage.ExecutedCancelsForUser(aid, N)
 	if err != nil {
 		return nil, err
 	}
@@ -1359,11 +1360,13 @@ func (auth *AuthManager) loadRecentFinishedOrders(aid account.AccountID, N int) 
 	}
 	// Insert the executed cancels, popping off older orders that do not fit in
 	// the list.
-	for i := range cancelOids {
+	for _, c := range cancels {
+		tid := c.TargetID
 		latestFinished.add(&oidStamped{
-			OrderID: cancelOids[i],
-			time:    cancelTimes[i],
-			target:  &targetOids[i],
+			OrderID:  c.ID,
+			time:     c.MatchTime,
+			target:   &tid,
+			epochGap: c.EpochGap,
 		})
 	}
 

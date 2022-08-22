@@ -12,12 +12,21 @@ import (
 	"decred.org/dcrdex/dex/order"
 )
 
+// freeCancelThreshold is the minimum number of epochs a user should wait before
+// placing a cancel order, if they want to avoid penalization. It is set to 2,
+// which means if a user places a cancel order in the same epoch as its limit
+// order, or the next epoch, the user will be penalized. This value is chosen
+// because it is the minimum value such that the order remains booked for at
+// least one full epoch and one full match cycle.
+const freeCancelThreshold = 2
+
 // oidStamped is a time-stamped order ID, with a field for target order ID if
 // the order is a cancel order.
 type oidStamped struct {
 	order.OrderID
-	time   int64
-	target *order.OrderID
+	time     int64
+	target   *order.OrderID
+	epochGap int32
 }
 
 // ordsByTimeThenID is used to sort an ord slice in ascending order by time and
@@ -116,7 +125,7 @@ func (lo *latestOrders) counts() (total, cancels int) {
 
 	total = len(lo.orders)
 	for _, o := range lo.orders {
-		if o.target != nil {
+		if o.target != nil && o.epochGap >= 0 && o.epochGap < freeCancelThreshold {
 			cancels++
 		}
 	}
