@@ -2561,13 +2561,13 @@ func testEstimateSendTxFee(t *testing.T, segwit bool, walletType string) {
 	// Invalid address
 	_, valid, _ := wallet.EstimateSendTxFee("invalidsendAddr", unspentSats, optimalFeeRate, true)
 	if valid {
-		t.Fatal("Expected an error for invalid send address")
+		t.Fatal("Expected false for invalid send address")
 	}
 
 	// Successful estimation without an address
 	_, _, err = wallet.EstimateSendTxFee("", unspentSats, optimalFeeRate, true)
 	if err != nil {
-		t.Fatal("Unexpected error for estimation without an address")
+		t.Fatalf("Error for estimation without an address: %v", err)
 	}
 
 	// Zero send amount

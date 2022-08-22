@@ -269,5 +269,6 @@ var EnUS = map[string]string{
 	"max_estimated_send_fee":      "Max Estimated Send Fee",
 	"sending":                     "Sending",
 	"transfer":                    "Transfer",
-	"invalid_address":             "Note: You have to provide a valid address before proceeding.",
+	"invalid_address":             "Note: Provide a valid address.",
+	"max_estimated_send_tooltip":  "This is the estimated amount that will be received if you withdraw your current balance with 'Subtract fees from amount sent' checked. If there is no subtract fee checkbox, this is the maximum estimated amount you can send.",
 }

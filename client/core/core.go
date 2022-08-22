@@ -4533,15 +4533,15 @@ func (c *Core) Send(pw []byte, assetID uint32, value uint64, address string, sub
 }
 
 // ValidateAddress checks that the provided address is valid.
-func (c *Core) ValidateAddress(address string, assetID uint32) bool {
+func (c *Core) ValidateAddress(address string, assetID uint32) (bool, error) {
 	if address == "" {
-		return false
+		return false, nil
 	}
 	wallet, found := c.wallet(assetID)
 	if !found {
-		return false
+		return false, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
 	}
-	return wallet.Wallet.ValidateAddress(address)
+	return wallet.Wallet.ValidateAddress(address), nil
 }
 
 // EstimateSendTxFee returns an estimate of the tx fee needed to send or
@@ -4554,15 +4554,17 @@ func (c *Core) EstimateSendTxFee(address string, assetID uint32, amount uint64, 
 	if !found {
 		return 0, false, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
 	}
+
+	if !wallet.traits.IsTxFeeEstimator() {
+		return 0, false, fmt.Errorf("wallet does not support fee estimation")
+	}
 	if subtract {
-		if _, isWithdrawer := wallet.Wallet.(asset.Withdrawer); !isWithdrawer {
+		if !wallet.traits.IsWithdrawer() {
 			return 0, false, fmt.Errorf("wallet does not support checking network fee for withdrawal")
 		}
 	}
-	if txfeeEstimator, ok := wallet.Wallet.(asset.TxFeeEstimator); ok {
-		return txfeeEstimator.EstimateSendTxFee(address, amount, c.feeSuggestionAny(assetID), subtract)
-	}
-	return 0, wallet.Wallet.ValidateAddress(address), nil
+
+	return wallet.Wallet.(asset.TxFeeEstimator).EstimateSendTxFee(address, amount, c.feeSuggestionAny(assetID), subtract)
 }
 
 func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {

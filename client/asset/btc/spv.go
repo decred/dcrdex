@@ -975,8 +975,10 @@ func (w *spvWallet) sendWithSubtract(pkScript []byte, value, feeRate uint64) (*c
 // estimateSendTxFee callers should provide at least one output value.
 func (w *spvWallet) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract bool) (fee uint64, err error) {
 	minTxSize := uint64(tx.SerializeSize())
-	txOut := tx.TxOut[0]
-	sendAmount := uint64(txOut.Value)
+	var sendAmount uint64
+	for _, txOut := range tx.TxOut {
+		sendAmount += uint64(txOut.Value)
+	}
 
 	// If subtract is true, select enough inputs for sendAmount. Fees will be taken
 	// from the sendAmount. If not, select enough inputs to cover minimum fees.
@@ -1008,27 +1010,30 @@ func (w *spvWallet) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract b
 	remaining := sum - sendAmount
 
 	// Check if there will be a change output if there is enough remaining.
-	changeFee := uint64(dexbtc.P2WPKHOutputSize) * feeRate
-	changeValue := remaining - estFee - changeFee
+	estFeeWithChange := (txSize + dexbtc.P2WPKHOutputSize) * feeRate
+	var changeValue uint64
+	if remaining > estFeeWithChange {
+		changeValue = remaining - estFeeWithChange
+	}
+
 	if subtract {
 		// fees are already included in sendAmount, anything else is change.
 		changeValue = remaining
 	}
 
 	var finalFee uint64
-
 	if dexbtc.IsDustVal(dexbtc.P2WPKHOutputSize, changeValue, feeRate, true) {
 		// remaining cannot cover a non-dust change and the fee for the change.
 		finalFee = estFee + remaining
 	} else {
 		// additional fee will be paid for non-dust change
-		finalFee = estFee + changeFee
+		finalFee = estFeeWithChange
 	}
 
 	if subtract {
-		txOut.Value -= int64(finalFee)
+		sendAmount -= finalFee
 	}
-	if dexbtc.IsDustVal(minTxSize, uint64(txOut.Value), feeRate, true) {
+	if dexbtc.IsDustVal(minTxSize, sendAmount, feeRate, true) {
 		return 0, errors.New("output value is dust")
 	}
 

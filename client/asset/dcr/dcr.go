@@ -1163,7 +1163,7 @@ func (dcr *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, utx
 	}
 
 	val := lots * lotSize
-	sum, inputsSize, _, _, _, err := dcr.tryFund(utxos, orderEnough(val, lots, bumpedMaxRate, nfo))
+	sum, inputsSize, _, _, _, err := tryFund(utxos, orderEnough(val, lots, bumpedMaxRate, nfo))
 	if err != nil {
 		return nil, false, 0, err
 	}
@@ -1565,7 +1565,7 @@ func (dcr *ExchangeWallet) fund(enough func(sum uint64, size uint32, unspent *co
 		return nil, nil, 0, 0, err
 	}
 
-	sum, sz, coins, spents, redeemScripts, err := dcr.tryFund(utxos, enough)
+	sum, sz, coins, spents, redeemScripts, err := tryFund(utxos, enough)
 	if err != nil {
 		return nil, nil, 0, 0, err
 	}
@@ -1615,7 +1615,7 @@ func (dcr *ExchangeWallet) spendableUTXOs() ([]*compositeUTXO, error) {
 // function with the fewest number of inputs. The selected utxos are not locked.
 // If the requirement can be satisfied without 0-conf utxos, that set will be
 // selected regardless of whether the 0-conf inclusive case would be cheaper.
-func (dcr *ExchangeWallet) tryFund(utxos []*compositeUTXO, enough func(sum uint64, size uint32, unspent *compositeUTXO) bool) (
+func tryFund(utxos []*compositeUTXO, enough func(sum uint64, size uint32, unspent *compositeUTXO) bool) (
 	sum uint64, size uint32, coins asset.Coins, spents []*fundingCoin, redeemScripts []dex.Bytes, err error) {
 
 	addUTXO := func(unspent *compositeUTXO) error {
@@ -3657,27 +3657,27 @@ func (dcr *ExchangeWallet) EstimateSendTxFee(address string, sendAmount, feeRate
 		return sum+toAtoms(unspent.rpc.Amount) >= sendAmount+minFee
 	}
 
-	// Keep a consistent view of spendable and locked coins in the wallet and
-	// the fundingCoins map to make this safe for concurrent use.
-	dcr.fundingMtx.Lock()
 	utxos, err := dcr.spendableUTXOs()
-	dcr.fundingMtx.Unlock()
 	if err != nil {
-		return 0, isValidAddress, err
+		return 0, false, err
 	}
 
-	sum, inputsSize, _, _, _, err := dcr.tryFund(utxos, enough)
+	sum, inputsSize, _, _, _, err := tryFund(utxos, enough)
 	if err != nil {
-		return 0, isValidAddress, err
+		return 0, false, err
 	}
 
-	txSize := minTxSize + inputsSize
-	estFee := uint64(txSize) * feeRate
+	txSize := uint64(minTxSize + inputsSize)
+	estFee := txSize * feeRate
 	remaining := sum - sendAmount
 
 	// Check if there will be a change output if there is enough remaining.
-	changeFee := dexdcr.P2PKHOutputSize * feeRate
-	changeValue := remaining - estFee - changeFee
+	estFeeWithChange := (txSize + dexdcr.P2PKHOutputSize) * feeRate
+	var changeValue uint64
+	if remaining > estFeeWithChange {
+		changeValue = remaining - estFeeWithChange
+	}
+
 	if subtract {
 		// fees are already included in sendAmount, anything else is change.
 		changeValue = remaining
@@ -3689,7 +3689,7 @@ func (dcr *ExchangeWallet) EstimateSendTxFee(address string, sendAmount, feeRate
 		finalFee = estFee + remaining
 	} else {
 		// additional fee will be paid for non-dust change
-		finalFee = estFee + changeFee
+		finalFee = estFeeWithChange
 	}
 	return finalFee, isValidAddress, nil
 }

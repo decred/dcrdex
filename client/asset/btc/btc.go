@@ -780,8 +780,8 @@ func (w *baseWallet) apiFeeFallback() bool {
 
 type intermediaryWallet struct {
 	*baseWallet
-	txFeeEstimator
-	tipRedeemer tipRedemptionWallet
+	txFeeEstimator txFeeEstimator
+	tipRedeemer    tipRedemptionWallet
 }
 
 // ExchangeWalletSPV embeds a ExchangeWallet, but also provides the Rescan
@@ -1250,14 +1250,6 @@ func (btc *baseWallet) IsDust(txOut *wire.TxOut, minRelayTxFee uint64) bool {
 		return txOut.Value < int64(btc.dustLimit)
 	}
 	return dexbtc.IsDust(txOut, minRelayTxFee)
-}
-
-// IsDustVal is like IsDust but only needs the tx size, value and if segwit.
-func (btc *baseWallet) IsDustVal(txSize, value, minRelayTxFee uint64, segwit bool) bool {
-	if btc.dustLimit > 0 {
-		return value < btc.dustLimit
-	}
-	return dexbtc.IsDustVal(txSize, value, minRelayTxFee, segwit)
 }
 
 // getBlockchainInfoResult models the data returned from the getblockchaininfo
@@ -4471,7 +4463,7 @@ func (btc *intermediaryWallet) EstimateSendTxFee(address string, sendAmount, fee
 	if addr, err := btc.decodeAddr(address, btc.chainParams); err == nil {
 		pkScript, err = txscript.PayToAddrScript(addr)
 		if err != nil {
-			return 0, isValidAddress, fmt.Errorf("error generating pubkey script: %w", err)
+			return 0, false, fmt.Errorf("error generating pubkey script: %w", err)
 		}
 		isValidAddress = true
 	} else {
@@ -4481,16 +4473,16 @@ func (btc *intermediaryWallet) EstimateSendTxFee(address string, sendAmount, fee
 
 	wireOP := wire.NewTxOut(int64(sendAmount), pkScript)
 	if dexbtc.IsDust(wireOP, feeRate) {
-		return 0, isValidAddress, errors.New("output value is dust")
+		return 0, false, errors.New("output value is dust")
 	}
 
 	tx := wire.NewMsgTx(wire.TxVersion)
 	tx.AddTxOut(wireOP)
-	fee, err = btc.estimateSendTxFee(tx, btc.feeRateWithFallback(feeRate), subtract)
+	fee, err = btc.txFeeEstimator.estimateSendTxFee(tx, btc.feeRateWithFallback(feeRate), subtract)
 	if err != nil {
-		return 0, isValidAddress, err
+		return 0, false, err
 	}
-	return
+	return fee, isValidAddress, nil
 }
 
 type utxo struct {

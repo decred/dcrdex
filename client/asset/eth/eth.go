@@ -328,6 +328,8 @@ var _ asset.TokenMaster = (*ETHWallet)(nil)
 var _ asset.WalletRestorer = (*assetWallet)(nil)
 var _ asset.LiveReconfigurer = (*ETHWallet)(nil)
 var _ asset.LiveReconfigurer = (*TokenWallet)(nil)
+var _ asset.TxFeeEstimator = (*ETHWallet)(nil)
+var _ asset.TxFeeEstimator = (*TokenWallet)(nil)
 
 type baseWallet struct {
 	ctx  context.Context // the asset subsystem starts with Connect(ctx)
@@ -389,8 +391,6 @@ type ETHWallet struct {
 
 	tipMtx     sync.RWMutex
 	currentTip *types.Header
-
-	asset.TxFeeEstimator
 }
 
 // TokenWallet implements some token-specific methods.
@@ -401,8 +401,6 @@ type TokenWallet struct {
 	parent   *assetWallet
 	approval atomic.Value
 	token    *dexeth.Token
-
-	asset.TxFeeEstimator
 }
 
 // Info returns basic information about the wallet and asset.
@@ -2280,46 +2278,50 @@ func isValidSend(addr string, value uint64, subtract bool) error {
 	if value == 0 {
 		return fmt.Errorf("cannot send zero amount")
 	}
-	if !common.IsHexAddress(addr) {
-		return fmt.Errorf("invalid hex address %q", addr)
-	}
 	if subtract {
 		return fmt.Errorf("wallet does not support subtracting network fee from send amount")
+	}
+	if !common.IsHexAddress(addr) {
+		return fmt.Errorf("invalid hex address %q", addr)
 	}
 	return nil
 }
 
 // EstimateSendTxFee returns a tx fee estimate for a send tx. The provided fee
 // rate is ignored since all sends will use an internally derived fee rate.
-// Also, the value provided is ignored becasue this implementation does not need
+// Also, the value provided is ignored because this implementation does not need
 // it for the fee estimation.
 func (w *ETHWallet) EstimateSendTxFee(addr string, value, _ uint64, subtract bool) (uint64, bool, error) {
-	isValidAddress := w.ValidateAddress(addr)
+	if err := isValidSend(addr, value, subtract); err != nil && addr != "" { // fee estimate for a send tx.
+		return 0, false, err
+	}
 
 	maxFeeRate, err := w.recommendedMaxFeeRate(w.ctx)
 	if err != nil {
-		return 0, isValidAddress, fmt.Errorf("error getting max fee rate: %w", err)
+		return 0, false, fmt.Errorf("error getting max fee rate: %w", err)
 	}
-	return defaultSendGasLimit * dexeth.WeiToGwei(maxFeeRate), isValidAddress, nil
+	return defaultSendGasLimit * dexeth.WeiToGwei(maxFeeRate), w.ValidateAddress(addr), nil
 }
 
 // EstimateSendTxFee returns a tx fee estimate for a send tx. The provided fee
 // rate is ignored since all sends will use an internally derived fee rate.
-// Also, the value provided is ignored becasue this implementation does not need
+// Also, the value provided is ignored because this implementation does not need
 // it for the fee estimation.
 func (w *TokenWallet) EstimateSendTxFee(addr string, value, _ uint64, subtract bool) (fee uint64, isValidAddress bool, err error) {
-	isValidAddress = w.ValidateAddress(addr)
+	if err := isValidSend(addr, value, subtract); err != nil && addr != "" { // fee estimate for a send tx.
+		return 0, false, err
+	}
 
 	g := w.gases(contractVersionNewest)
 	if g == nil {
-		return 0, isValidAddress, fmt.Errorf("gas table not found")
+		return 0, false, fmt.Errorf("gas table not found")
 	}
 
 	maxFeeRate, err := w.recommendedMaxFeeRate(w.ctx)
 	if err != nil {
-		return 0, isValidAddress, fmt.Errorf("error getting max fee rate: %w", err)
+		return 0, false, fmt.Errorf("error getting max fee rate: %w", err)
 	}
-	return g.Transfer * dexeth.WeiToGwei(maxFeeRate), isValidAddress, nil
+	return g.Transfer * dexeth.WeiToGwei(maxFeeRate), w.ValidateAddress(addr), nil
 
 }
 

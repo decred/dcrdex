@@ -152,10 +152,7 @@ export default class WalletsPage extends BasePage {
 
     // Clicking on the available amount on the Send form populates the
     // amount field.
-    Doc.bind(page.walletBal, 'click', () => {
-      const asset = app().assets[this.selectedAssetID]
-      this.populateMaxSend(asset.wallet.balance.available, asset)
-    })
+    Doc.bind(page.walletBal, 'click', () => { this.populateMaxSend() })
 
     // Display fiat value for current send amount.
     Doc.bind(page.sendAmt, 'input', () => {
@@ -166,13 +163,7 @@ export default class WalletsPage extends BasePage {
     })
 
     // Clicking on maxSend on the send form should populate the amount field.
-    Doc.bind(page.maxSend, 'click', () => {
-      const asset = app().assets[this.selectedAssetID]
-      if (!asset) return
-      const maxSend = parseFloat(page.maxSend.textContent || '0')
-      if ((asset.wallet.traits & traitWithdrawer) === 0) this.populateMaxSend(maxSend * asset.unitInfo.conventional.conversionFactor, asset)
-      else this.populateMaxSend(asset.wallet.balance.available, asset)
-    })
+    Doc.bind(page.maxSend, 'click', () => { this.populateMaxSend() })
 
     // Validate send address on input.
     Doc.bind(page.sendAddr, 'input', async () => {
@@ -859,18 +850,28 @@ export default class WalletsPage extends BasePage {
     }
   }
 
-  /* populateMaxSend populates the amount field with the amount specified. The
-     amount provided can be the maximum amount based on our pre-estimation or the
-     user's wallet balance.
+  /* populateMaxSend populates the amount field with the max amount the wallet
+     can send. The max send amount can be the maximum amount based on our
+     pre-estimation or the asset's wallet balance.
   */
-  async populateMaxSend (amt :number, asset :SupportedAsset) {
+  async populateMaxSend () {
     const page = this.page
-    page.sendAmt.value = String(amt / asset.unitInfo.conventional.conversionFactor)
-    this.showFiatValue(asset.id, amt, page.sendValue)
-    // Ensure we don't check subtract checkbox for assets that don't have a
-    // withdraw method.
-    if ((asset.wallet.traits & traitWithdrawer) === 0) page.subtractCheckBox.checked = false
-    else page.subtractCheckBox.checked = true
+    const asset = app().assets[this.selectedAssetID]
+    if (!asset) return
+    // Populate send amount with max send value and ensure we don't check
+    // subtract checkbox for assets that don't have a withdraw method.
+    if ((asset.wallet.traits & traitWithdrawer) === 0) {
+      const maxSend = parseFloat(page.maxSend.textContent || '0')
+      const maxSendAmt = maxSend * asset.unitInfo.conventional.conversionFactor
+      page.sendAmt.value = String(maxSend)
+      this.showFiatValue(asset.id, maxSendAmt, page.sendValue)
+      page.subtractCheckBox.checked = false
+    } else {
+      const amt = asset.wallet.balance.available
+      page.sendAmt.value = String(amt / asset.unitInfo.conventional.conversionFactor)
+      this.showFiatValue(asset.id, amt, page.sendValue)
+      page.subtractCheckBox.checked = true
+    }
   }
 
   /* send submits the send form to the API. */

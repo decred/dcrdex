@@ -25,6 +25,7 @@ const (
 	WalletTraitSweeper                                     // The Wallet can sweep all the funds, leaving no change.
 	WalletTraitRestorer                                    // The wallet is an asset.WalletRestorer
 	WalletTraitRedemptionConfirmer                         // The wallet has a process to confirm a redemption.
+	WalletTraitTxFeeEstimator                              // The wallet can estimate transaction fees.
 )
 
 // IsRescanner tests if the WalletTrait has the WalletTraitRescanner bit set.
@@ -81,6 +82,12 @@ func (wt WalletTrait) IsRestorer() bool {
 	return wt&WalletTraitRestorer != 0
 }
 
+// IsTxFeeEstimator test if the WalletTrait has the WalletTraitTxFeeEstimator
+// bit set, which indicates the wallet implements the TxFeeEstimator interface.
+func (wt WalletTrait) IsTxFeeEstimator() bool {
+	return wt&WalletTraitTxFeeEstimator != 0
+}
+
 // DetermineWalletTraits returns the WalletTrait bitset for the provided Wallet.
 func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(Rescanner); is {
@@ -112,6 +119,9 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	}
 	if _, is := w.(RedemptionConfirmer); is {
 		t |= WalletTraitRedemptionConfirmer
+	}
+	if _, is := w.(TxFeeEstimator); is {
+		t |= WalletTraitTxFeeEstimator
 	}
 	return t
 }

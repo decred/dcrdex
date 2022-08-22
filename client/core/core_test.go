@@ -9799,20 +9799,38 @@ func TestValidateAddress(t *testing.T) {
 	tCore.wallets[tUTXOAssetA.ID] = wallet
 
 	tests := []struct {
-		name string
-		addr string
+		name              string
+		addr              string
+		wantValidAddr     bool
+		wantMissingWallet bool
+		wantErr           bool
 	}{{
-		name: "valid address",
-		addr: "randomvalidaddress",
+		name:          "valid address",
+		addr:          "randomvalidaddress",
+		wantValidAddr: true,
 	}, {
 		name: "invalid address",
 		addr: "",
+	}, {
+		name:              "wallet not found",
+		addr:              "randomaddr",
+		wantMissingWallet: true,
+		wantErr:           true,
 	}}
 	for _, test := range tests {
-		tWallet.validAddr = test.addr != ""
-		valid := tCore.ValidateAddress(test.addr, tUTXOAssetA.ID)
-		if test.addr != "" != valid {
-			t.Fatalf("Got wrong response for address validation, got %v expected %v", valid, test.addr != "")
+		tWallet.validAddr = test.wantValidAddr
+		if test.wantMissingWallet {
+			tCore.wallets = make(map[uint32]*xcWallet)
+		}
+		valid, err := tCore.ValidateAddress(test.addr, tUTXOAssetA.ID)
+		if test.wantErr {
+			if err != nil {
+				continue
+			}
+			t.Fatalf("%s: expected error", test.name)
+		}
+		if test.wantValidAddr != valid {
+			t.Fatalf("Got wrong response for address validation, got %v expected %v", valid, test.wantValidAddr)
 		}
 	}
 }
@@ -9822,32 +9840,54 @@ func TestEstimateSendTxFee(t *testing.T) {
 	defer rig.shutdown()
 	tCore := rig.core
 
-	wallet, tWallet := newTWallet(tUTXOAssetA.ID)
-	tCore.wallets[tUTXOAssetA.ID] = wallet
-
 	tests := []struct {
-		name    string
-		estFee  uint64
-		wantErr bool
+		name              string
+		asset             uint32
+		estFee            uint64
+		value             uint64
+		subtract          bool
+		wantMissingWallet bool
+		wantErr           bool
 	}{{
-		name:    "want error",
-		estFee:  1e8,
-		wantErr: true,
+		name:     "ok",
+		asset:    tUTXOAssetA.ID,
+		subtract: true,
+		estFee:   1e8,
+		value:    1e8,
 	}, {
-		name: "want zero fee value",
+		name:     "zero amount",
+		asset:    tACCTAsset.ID,
+		subtract: true,
+		wantErr:  true,
 	}, {
-		name:   "ok",
-		estFee: 1e8,
+		name:     "subtract true and not withdrawer",
+		asset:    tACCTAsset.ID,
+		subtract: true,
+		wantErr:  true,
+		value:    1e8,
+	}, {
+		name:              "wallet not found",
+		asset:             tUTXOAssetA.ID,
+		wantErr:           true,
+		wantMissingWallet: true,
+		value:             1e8,
 	}}
 
 	for _, test := range tests {
+		wallet, tWallet := newTWallet(test.asset)
+		tCore.wallets[test.asset] = wallet
+		if test.wantMissingWallet {
+			delete(tCore.wallets, test.asset)
+		}
+
 		tWallet.estFee = test.estFee
+
 		tWallet.estFeeErr = nil
 		if test.wantErr {
 			tWallet.estFeeErr = tErr
 		}
-		estimate, _, err := tCore.EstimateSendTxFee("addr", tUTXOAssetA.ID, 1e8, false)
-		if test.wantErr {
+		estimate, _, err := tCore.EstimateSendTxFee("addr", test.asset, test.value, test.subtract)
+		if test.wantErr && err == nil {
 			if err != nil {
 				continue
 			}
@@ -9856,8 +9896,8 @@ func TestEstimateSendTxFee(t *testing.T) {
 		if estimate != test.estFee {
 			t.Fatalf("%s: expected fee %v, got %v", test.name, test.estFee, estimate)
 		}
-		if err != nil {
-			t.Fatalf("%s: expected error", test.name)
+		if !test.wantErr && err != nil {
+			t.Fatalf("%s: unexpected error", test.name)
 		}
 	}
 }

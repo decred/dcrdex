@@ -584,8 +584,8 @@ func (c *TCore) EstimateRegistrationTxFee(host string, certI interface{}, assetI
 	}
 	return txFee, nil
 }
-func (c *TCore) ValidateAddress(address string, assetID uint32) bool {
-	return c.validAddr
+func (c *TCore) ValidateAddress(address string, assetID uint32) (bool, error) {
+	return c.validAddr, nil
 }
 func (c *TCore) EstimateSendTxFee(addr string, assetID uint32, value uint64, subtract bool) (fee uint64, isValidAddress bool, err error) {
 	return 0, true, nil
