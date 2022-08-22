@@ -147,7 +147,6 @@ func newConfigResponse(cfg *DexConf, regAssets map[string]*msgjson.FeeAsset, cfg
 
 	configMsg := &msgjson.ConfigResult{
 		BroadcastTimeout: uint64(cfg.BroadcastTimeout.Milliseconds()),
-		TxWaitExpiration: uint64(cfg.TxWaitExpiration.Milliseconds()),
 		RegFeeConfirms:   uint16(dcrAsset.Confs), // DEPRECATED - DCR only
 		CancelMax:        cfg.CancelThreshold,
 		Assets:           cfgAssets,

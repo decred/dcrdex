@@ -826,8 +826,7 @@ func (s *Swapper) Run(ctx context.Context) {
 		wgHelpers.Done()
 	}()
 
-	log.Debugf("Swapper started with %v broadcast timeout.", s.bTimeout)
-	log.Debugf("Swapper started with %v tx wait expiration.", s.txWaitExpiration)
+	log.Debugf("Swapper started with %v broadcast timeout and %v tx wait expiration.", s.bTimeout, s.txWaitExpiration)
 
 	// Block-based inaction checks are started with Timers, and run in the main
 	// loop to avoid locks and WaitGroups.

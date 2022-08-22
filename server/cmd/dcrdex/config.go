@@ -125,8 +125,8 @@ type flagsData struct {
 	HiddenService string   `long:"hiddenservice" description:"A host:port on which the RPC server should listen for incoming hidden service connections. No TLS is used for these connections."`
 
 	MarketsConfPath  string        `long:"marketsconfpath" description:"Path to the markets configuration JSON file."`
-	BroadcastTimeout time.Duration `long:"bcasttimeout" description:"The broadcast timeout specifies how long clients have to broadcast an expected transaction when it is their turn to act. Matches without the expected action by this time are revoked and the actor is penalized."`
-	TxWaitExpiration time.Duration `long:"txWaitExpiration" description:"This specifies how long the server will keep searching for a transaction."`
+	BroadcastTimeout time.Duration `long:"bcasttimeout" description:"The broadcast timeout specifies how long clients have to broadcast an expected transaction when it is their turn to act. Matches without the expected action by this time are revoked and the actor is penalized (default: 12 minutes)."`
+	TxWaitExpiration time.Duration `long:"txwaitexpiration" description:"How long the server will search for a client-reported transaction before responding to the client with an error indicating that it was not found. This should ideally be less than half of swaps BroadcastTimeout to allow for more than one retry of the client's request (default: 2 minutes)."`
 	DEXPrivKeyPath   string        `long:"dexprivkeypath" description:"The path to a file containing the DEX private key for message signing."`
 
 	// Deprecated fields that specify the Decred-specific registration fee

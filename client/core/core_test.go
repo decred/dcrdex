@@ -225,7 +225,6 @@ func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, 
 		cfg: &msgjson.ConfigResult{
 			CancelMax:        0.8,
 			BroadcastTimeout: 1000, // 1000 ms for faster expiration, but ticker fires fast
-			TxWaitExpiration: 500,
 			Assets: []*msgjson.Asset{
 				uncovertAssetInfo(tUTXOAssetA),
 				uncovertAssetInfo(tUTXOAssetB),
