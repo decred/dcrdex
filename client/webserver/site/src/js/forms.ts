@@ -344,7 +344,10 @@ export class WalletConfigForm {
       label.htmlFor = elID // 'for' attribute, but 'for' is a keyword
       label.prepend(opt.displayname)
       box.appendChild(el)
-      if (opt.noecho) input.type = 'password'
+      if (opt.noecho) {
+        input.type = 'password'
+        input.autocomplete = 'off'
+      }
       if (opt.description) label.dataset.tooltip = opt.description
       if (opt.isboolean) input.checked = opt.default
       else if (opt.isdate) {
