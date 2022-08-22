@@ -121,7 +121,7 @@ export default class DexSettingsPage extends BasePage {
     const loaded = app().loading(this.body)
     const res = await postJSON('/api/disableaccount', req)
     loaded()
-    if (!app().checkResponse(res, true)) {
+    if (!app().checkResponse(res)) {
       page.disableAccountErr.textContent = res.msg
       Doc.show(page.disableAccountErr)
       return
@@ -165,7 +165,7 @@ export default class DexSettingsPage extends BasePage {
     const loaded = app().loading(this.body)
     const res = await postJSON('/api/updatecert', req)
     loaded()
-    if (!app().checkResponse(res, true)) {
+    if (!app().checkResponse(res)) {
       page.errMsg.textContent = res.msg
       Doc.show(page.errMsg)
     } else {

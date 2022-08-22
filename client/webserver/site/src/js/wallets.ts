@@ -613,7 +613,7 @@ export default class WalletsPage extends BasePage {
     const loaded = app().loading(page.reconfigForm)
     const res = await postJSON('/api/walletsettings', { assetID })
     loaded()
-    if (!app().checkResponse(res, true)) {
+    if (!app().checkResponse(res)) {
       page.reconfigErr.textContent = res.msg
       Doc.show(page.reconfigErr)
       return
@@ -665,7 +665,7 @@ export default class WalletsPage extends BasePage {
       assetID: this.selectedAssetID
     })
     loaded()
-    if (!app().checkResponse(res, true)) {
+    if (!app().checkResponse(res)) {
       page.depositErr.textContent = res.msg
       Doc.show(page.depositErr)
       return
@@ -745,7 +745,7 @@ export default class WalletsPage extends BasePage {
     const loaded = app().loading(page.sendForm)
     const res = await postJSON('/api/send', open)
     loaded()
-    if (!app().checkResponse(res, true)) {
+    if (!app().checkResponse(res)) {
       page.sendErr.textContent = res.msg
       Doc.show(page.sendErr)
       return
@@ -782,7 +782,7 @@ export default class WalletsPage extends BasePage {
     page.appPW.value = ''
     page.newPW.value = ''
     loaded()
-    if (!app().checkResponse(res, true)) {
+    if (!app().checkResponse(res)) {
       page.reconfigErr.textContent = res.msg
       Doc.show(page.reconfigErr)
       return

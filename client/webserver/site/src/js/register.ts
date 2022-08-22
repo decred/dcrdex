@@ -149,7 +149,7 @@ export default class RegistrationPage extends BasePage {
       asset: assetID
     })
     loaded()
-    if (!app().checkResponse(res, true)) {
+    if (!app().checkResponse(res)) {
       return 0
     }
     return res.txfee

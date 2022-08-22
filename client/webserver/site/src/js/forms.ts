@@ -1455,7 +1455,7 @@ export class DEXAddressForm {
     const loaded = app().loading(this.form)
     const res = await postJSON(endpoint, req)
     loaded()
-    if (!app().checkResponse(res, true)) {
+    if (!app().checkResponse(res)) {
       if (res.msg === 'certificate required') {
         Doc.show(page.needCert)
       } else {
