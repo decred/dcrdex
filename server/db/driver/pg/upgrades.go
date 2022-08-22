@@ -40,8 +40,8 @@ var upgrades = []func(db *sql.Tx) error{
 	// accommodate a 32-bit unsigned integer.
 	v4Upgrade,
 
-	// v5 upgrade adds an epoch_gap column to the cancel order tables in order
-	// to facilitate free cancels.
+	// v5 upgrade adds an epoch_gap column to the cancel order tables to
+	// facilitate free cancels.
 	v5Upgrade,
 }
 
@@ -306,7 +306,7 @@ func v5Upgrade(tx *sql.Tx) (err error) {
 		return err
 	}
 
-	log.Info("Adding epoch_gap column to %d market tables", len(mkts)*2)
+	log.Infof("Adding epoch_gap column to cancel tables for %d markets", len(mkts))
 
 	for _, mkt := range mkts {
 		if err := doTable(mkt.Name + "." + cancelsArchivedTableName); err != nil {

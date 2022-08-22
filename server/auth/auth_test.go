@@ -44,7 +44,7 @@ type ratioData struct {
 	oidsCancels    []order.OrderID
 	oidsCanceled   []order.OrderID
 	timesCanceled  []int64
-	epochGaps      []int
+	epochGaps      []int32
 }
 
 // TStorage satisfies the Storage interface
@@ -709,7 +709,7 @@ func TestConnect(t *testing.T) {
 	rig.storage.matches = []*db.MatchData{matchData}
 	defer func() { rig.storage.matches = nil }()
 
-	epochGaps := []int{1} // penalized
+	epochGaps := []int32{1} // penalized
 
 	rig.storage.setRatioData(&ratioData{
 		oidsCompleted:  []order.OrderID{{0x1}},

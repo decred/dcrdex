@@ -230,9 +230,6 @@ func (m *TAuthManager) penalize(id account.AccountID, rule account.Rule) {
 	}
 }
 
-func (m *TAuthManager) RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time) {}
-func (m *TAuthManager) RecordCompletedOrder(account.AccountID, order.OrderID, time.Time)            {}
-
 func (m *TAuthManager) flushPenalty(user account.AccountID) (found bool, rule account.Rule) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()

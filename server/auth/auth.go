@@ -433,7 +433,7 @@ func (auth *AuthManager) ExpectUsers(users map[account.AccountID]struct{}, withi
 
 // RecordCancel records a user's executed cancel order, including the canceled
 // order ID, and the time when the cancel was executed.
-func (auth *AuthManager) RecordCancel(user account.AccountID, oid, target order.OrderID, epochGap int, t time.Time) {
+func (auth *AuthManager) RecordCancel(user account.AccountID, oid, target order.OrderID, epochGap int32, t time.Time) {
 	auth.recordOrderDone(user, oid, &target, epochGap, t.UnixMilli())
 }
 
@@ -449,7 +449,7 @@ func (auth *AuthManager) RecordCompletedOrder(user account.AccountID, oid order.
 // completed the swap negotiation. Note that in the case of a cancel, oid refers
 // to the ID of the cancel order itself, while target is non-nil for cancel
 // orders.
-func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.OrderID, target *order.OrderID, epochGap int, tMS int64) {
+func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.OrderID, target *order.OrderID, epochGap int32, tMS int64) {
 	client := auth.user(user)
 	if client == nil {
 		// It is likely that the user is gone if this is a revoked order.
@@ -1361,10 +1361,11 @@ func (auth *AuthManager) loadRecentFinishedOrders(aid account.AccountID, N int) 
 	// Insert the executed cancels, popping off older orders that do not fit in
 	// the list.
 	for _, c := range cancels {
+		tid := c.TargetID
 		latestFinished.add(&oidStamped{
 			OrderID:  c.ID,
 			time:     c.MatchTime,
-			target:   &c.TargetID,
+			target:   &tid,
 			epochGap: c.EpochGap,
 		})
 	}

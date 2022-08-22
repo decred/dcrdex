@@ -1799,7 +1799,7 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 			return nil
 		}
 
-		epochGap = int(epoch.Epoch - loTime.UnixMilli()/epoch.Duration)
+		epochGap = int32(epoch.Epoch - loTime.UnixMilli()/epoch.Duration)
 
 	} else if likelyTaker(ord) { // Likely-taker trade order. Check the quantity against user's limit.
 		// NOTE: We can entirely change this so that the taker limit is not
@@ -2352,7 +2352,7 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 		// Update order settling amounts.
 		for _, match := range ms.Matches() {
 			if co, ok := match.Taker.(*order.CancelOrder); ok {
-				epochGap := int((co.ServerTime.UnixMilli() / epochDur) - (match.Maker.ServerTime.UnixMilli() / epochDur))
+				epochGap := int32((co.ServerTime.UnixMilli() / epochDur) - (match.Maker.ServerTime.UnixMilli() / epochDur))
 				m.auth.RecordCancel(co.User(), co.ID(), co.TargetOrderID, epochGap, matchTime)
 				canceled = append(canceled, co.TargetOrderID)
 				continue

@@ -183,7 +183,7 @@ func (status pgOrderStatus) active() bool {
 
 // NewEpochOrder stores the given order with epoch status. This is equivalent to
 // StoreOrder with OrderStatusEpoch.
-func (a *Archiver) NewEpochOrder(ord order.Order, epochIdx, epochDur int64, epochGap int) error {
+func (a *Archiver) NewEpochOrder(ord order.Order, epochIdx, epochDur int64, epochGap int32) error {
 	return a.storeOrder(ord, epochIdx, epochDur, epochGap, orderStatusEpoch)
 }
 
@@ -538,7 +538,7 @@ func (a *Archiver) StoreOrder(ord order.Order, epochIdx, epochDur int64, status 
 	return a.storeOrder(ord, epochIdx, epochDur, db.EpochGapNA, marketToPgStatus(status))
 }
 
-func (a *Archiver) storeOrder(ord order.Order, epochIdx, epochDur int64, epochGap int, status pgOrderStatus) error {
+func (a *Archiver) storeOrder(ord order.Order, epochIdx, epochDur int64, epochGap int32, status pgOrderStatus) error {
 	marketSchema, err := a.marketSchema(ord.Base(), ord.Quote())
 	if err != nil {
 		return err
@@ -1278,7 +1278,7 @@ func (a *Archiver) executedCancelsForUser(ctx context.Context, dbe *sql.DB, stmt
 	for rows.Next() {
 		var oid, target order.OrderID
 		var execTime int64
-		var epochGap int
+		var epochGap int32
 		err = rows.Scan(&oid, &target, &epochGap, &execTime)
 		if err != nil {
 			return
@@ -1711,7 +1711,7 @@ func moveOrder(dbe sqlExecutor, oldTableName, newTableName string, oid order.Ord
 
 // BEGIN cancel order functions
 
-func storeCancelOrder(dbe sqlExecutor, tableName string, co *order.CancelOrder, status pgOrderStatus, epochIdx, epochDur int64, epochGap int) (int64, error) {
+func storeCancelOrder(dbe sqlExecutor, tableName string, co *order.CancelOrder, status pgOrderStatus, epochIdx, epochDur int64, epochGap int32) (int64, error) {
 	stmt := fmt.Sprintf(internal.InsertCancelOrder, tableName)
 	return sqlExec(dbe, stmt, co.ID(), co.AccountID, co.ClientTime,
 		co.ServerTime, co.Commit, co.TargetOrderID, status, epochIdx, epochDur, epochGap)

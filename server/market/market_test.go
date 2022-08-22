@@ -115,7 +115,7 @@ func (ta *TArchivist) ExecutedCancelsForUser(aid account.AccountID, N int) ([]*d
 func (ta *TArchivist) OrderStatus(order.Order) (order.OrderStatus, order.OrderType, int64, error) {
 	return order.OrderStatusUnknown, order.UnknownOrderType, -1, errors.New("boom")
 }
-func (ta *TArchivist) NewEpochOrder(ord order.Order, epochIdx, epochDur int64, epochGap int) error {
+func (ta *TArchivist) NewEpochOrder(ord order.Order, epochIdx, epochDur int64, epochGap int32) error {
 	ta.mtx.Lock()
 	defer ta.mtx.Unlock()
 	if ta.poisonEpochOrder != nil && ord.ID() == ta.poisonEpochOrder.ID() {
