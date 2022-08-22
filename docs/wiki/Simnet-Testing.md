@@ -153,10 +153,10 @@ Decred:
 
 ### Start `dexc`
 
-Clear any existing client DB files from previous setups:
+Clear any existing client simnet files from previous setups:
 
 ```sh
-rm ~/.dexc/simnet/dexc.db ~/.dexc/simnet/backup/dexc.db && rm -r ~/.dexc/simnet/assetdb/btc/regtest
+rm -fr ~/.dexc/simnet/
 ```
 
 Start `dexc` with the web UI and RPC server in simnet mode and trace level logging. IMPORTANT: On the `release-0.1` branch you should also specify different HTTP and RPC listen addresses (e.g. To change the RPC port to 6757, and the HTTP IP address to 127.0.0.3: `--rpcaddr=localhost:6757 --webaddr=127.0.0.3:5758`). The following command does not change these, so modify it as necessary:
@@ -291,3 +291,14 @@ During this process, `dexc` should log messages similar to the following:
 ```
 
 For rapid setup, there is a script at `[repo root]/client/cmd/dexcctl/simnet-setup.sh` that has a reasonable default. You may also use this script as a template.
+
+### Acquire DCR and BTC Simnet Funds
+
+You can generate a deposit address for your wallet through the wallets view in the
+client app.
+
+Take the generated address to it's respective harness terminal and send funds to it using:
+
+`./alpha sendtoaddress {address} {amount}`
+
+Note: If you're using an `SPV` wallet, run `./mine-alpha 1` after sending or the SPV wallets won't see it.
