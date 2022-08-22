@@ -530,7 +530,10 @@ export class WalletConfigForm {
         opt.regAsset = formOpts.assetID // Signal for map filtering
       }
       box.appendChild(el)
-      if (opt.noecho) input.type = 'password'
+      if (opt.noecho) {
+        input.type = 'password'
+        input.autocomplete = 'off'
+      }
       if (opt.description) label.dataset.tooltip = opt.description
       if (opt.isboolean) input.checked = opt.default
       else if (opt.isdate) {
