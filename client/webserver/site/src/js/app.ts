@@ -72,10 +72,6 @@ const constructors: Record<string, PageClass> = {
   dexsettings: DexSettingsPage
 }
 
-// unathedPages are pages that don't require authorization to load.
-// These are endpoints outside of the requireLogin block in webserver.New.
-const unauthedPages = ['register', 'login', 'settings']
-
 // Application is the main javascript web application for the Decred DEX client.
 export default class Application {
   notes: CoreNotePlus[]
@@ -219,9 +215,7 @@ export default class Application {
    */
   async fetchUser (): Promise<User | void> {
     const resp: APIResponse = await getJSON('/api/user')
-    // If it's not a page that requires auth, skip the error notification.
-    const skipNote = unauthedPages.indexOf(this.main.dataset.handler || '') > -1
-    if (!this.checkResponse(resp, skipNote)) return
+    if (!this.checkResponse(resp)) return
     const user = (resp as any) as User
     this.seedGenTime = user.seedgentime
     this.user = user
@@ -876,16 +870,11 @@ export default class Application {
 
   /*
    * checkResponse checks the response object as returned from the functions in
-   * the http module. If the response indicates that the request failed, a
-   * message will be displayed in the drop-down notifications and false will be
-   * returned.
+   * the http module. If the response indicates that the request failed, it
+   * returns false, otherwise, true.
    */
-  checkResponse (resp: APIResponse, skipNote?: boolean): boolean {
-    if (!resp.requestSuccessful || !resp.ok) {
-      if (this.user.inited && !skipNote) this.notify(ntfn.make(intl.prep(intl.ID_API_ERROR), resp.msg, ntfn.ERROR))
-      return false
-    }
-    return true
+  checkResponse (resp: APIResponse): boolean {
+    return (resp.requestSuccessful && resp.ok)
   }
 
   /**

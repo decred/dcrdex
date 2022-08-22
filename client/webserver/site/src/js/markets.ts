@@ -958,7 +958,7 @@ export default class MarketsPage extends BasePage {
         ...args
       })
       if (counter !== this.maxOrderUpdateCounter) return
-      if (!app().checkResponse(res, true)) {
+      if (!app().checkResponse(res)) {
         console.warn('max order estimate not available:', res)
         page.maxFromLots.textContent = intl.prep(intl.ID_ESTIMATE_UNAVAILABLE)
         if (this.maxLoaded) {
@@ -1520,7 +1520,7 @@ export default class MarketsPage extends BasePage {
     for (const assetID of assetIDs) {
       req.assetID = assetID
       const res = await postJSON('/api/openwallet', req)
-      if (!app().checkResponse(res, true)) {
+      if (!app().checkResponse(res)) {
         return res.msg
       }
     }
@@ -1537,7 +1537,7 @@ export default class MarketsPage extends BasePage {
     const loaded = app().loading(page.verifyForm)
     const res = await postJSON('/api/preorder', wireOrder(order))
     loaded()
-    if (!app().checkResponse(res, true)) return { err: res.msg }
+    if (!app().checkResponse(res)) return { err: res.msg }
     this.preorderCache[cacheKey] = res.estimate
     return res.estimate
   }
@@ -1555,7 +1555,6 @@ export default class MarketsPage extends BasePage {
 
   /* preOrder loads the options and fetches pre-order estimates */
   async preOrder (order: TradeForm) {
-    // if (!this.validateOrder(order)) return
     const page = this.page
 
     // Add swap options.
@@ -1640,7 +1639,7 @@ export default class MarketsPage extends BasePage {
     const res = await postJSON('/api/cancel', req)
     loaded()
     // Display error on confirmation modal.
-    if (!app().checkResponse(res, true)) {
+    if (!app().checkResponse(res)) {
       page.cancelErr.textContent = res.msg
       Doc.show(page.cancelErr)
       return
@@ -1842,7 +1841,7 @@ export default class MarketsPage extends BasePage {
     page.vSubmit.classList.remove('d-hide')
     page.vLoader.classList.add('d-hide')
     // If errors display error on confirmation modal.
-    if (!app().checkResponse(res, true)) {
+    if (!app().checkResponse(res)) {
       page.vErr.textContent = res.msg
       Doc.show(page.vErr)
       return

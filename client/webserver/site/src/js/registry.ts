@@ -523,7 +523,7 @@ export interface Application {
   walletDefinition (assetID: number, walletType: string): WalletDefinition
   currentWalletDefinition (assetID: number): WalletDefinition
   fetchBalance (assetID: number): Promise<WalletBalance>
-  checkResponse (resp: APIResponse, skipNote?: boolean): boolean
+  checkResponse (resp: APIResponse): boolean
   signOut (): Promise<void>
   registerNoteFeeder (receivers: Record<string, (n: CoreNote) => void>): void
 }
