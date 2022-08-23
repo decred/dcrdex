@@ -2697,8 +2697,6 @@ func TestReconfigure(t *testing.T) {
 		DataDir:  "abcd",
 	}
 
-	reconfigurer.restart = false
-
 	restart, err := wallet.Reconfigure(ctx, walletCfg, "123456")
 	if err != nil {
 		t.Fatalf("did not expect an error")

@@ -486,8 +486,8 @@ type WalletConfig struct {
 	FallbackFeeRate  float64 `ini:"fallbackfee"`
 	FeeRateLimit     float64 `ini:"feeratelimit"`
 	RedeemConfTarget uint64  `ini:"redeemconftarget"`
-	ActivelyUsed     bool    `ini:"specialactivelyUsed"` // injected by core
-	Birthday         uint64  `ini:"walletbirthday"`      // SPV
+	ActivelyUsed     bool    `ini:"special_activelyUsed"` // injected by core
+	Birthday         uint64  `ini:"walletbirthday"`       // SPV
 }
 
 // adjustedBirthday converts WalletConfig.Birthday to a time.Time, and adjusts

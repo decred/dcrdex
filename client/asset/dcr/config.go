@@ -38,7 +38,7 @@ type walletConfig struct {
 	FallbackFeeRate  float64 `ini:"fallbackfee"`
 	FeeRateLimit     float64 `ini:"feeratelimit"`
 	RedeemConfTarget uint64  `ini:"redeemconftarget"`
-	ActivelyUsed     bool    `ini:"specialactivelyUsed"` //injected by core
+	ActivelyUsed     bool    `ini:"special_activelyUsed"` //injected by core
 	ApiFeeFallback   bool    `ini:"apifeefallback"`
 }
 

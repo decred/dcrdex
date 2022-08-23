@@ -602,12 +602,6 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, err
 	}
 
-	// dcrwallet doesn't accept an empty string as an account name. Use the
-	// default value.
-	if walletCfg.PrimaryAccount == "" {
-		walletCfg.PrimaryAccount = defaultAcctName
-	}
-
 	dcr, err := unconnectedWallet(cfg, walletCfg, chainParams, logger, network)
 	if err != nil {
 		return nil, err
@@ -665,6 +659,12 @@ func getExchangeWalletCfg(dcrCfg *walletConfig, logger dex.Logger) (*exchangeWal
 	}
 	logger.Tracef("Redeem conf target set to %d blocks", redeemConfTarget)
 
+	primaryAcct := dcrCfg.PrimaryAccount
+	if primaryAcct == "" {
+		primaryAcct = defaultAcctName
+	}
+	logger.Tracef("Primary account set to %s", primaryAcct)
+
 	// Both UnmixedAccount and TradingAccount must be provided if primary
 	// account is a mixed account. Providing one but not the other is bad
 	// configuration. If set, the account names will be validated on Connect.
@@ -686,7 +686,7 @@ func getExchangeWalletCfg(dcrCfg *walletConfig, logger dex.Logger) (*exchangeWal
 	}
 
 	return &exchangeWalletConfig{
-		primaryAcct:      dcrCfg.PrimaryAccount,
+		primaryAcct:      primaryAcct,
 		unmixedAccount:   dcrCfg.UnmixedAccount,
 		tradingAccount:   dcrCfg.TradingAccount,
 		fallbackFeeRate:  fallbackFeesPerByte,
@@ -2198,8 +2198,7 @@ func (dcr *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 		return nil, nil, 0, fmt.Errorf("error parsing selected swap options: %w", err)
 	}
 
-	cfg := dcr.config()
-	rawFeeRate := dcr.targetFeeRateWithFallback(cfg.redeemConfTarget, form.FeeSuggestion)
+	rawFeeRate := dcr.targetFeeRateWithFallback(dcr.config().redeemConfTarget, form.FeeSuggestion)
 	feeRate, err := calcBumpedRate(rawFeeRate, customCfg.FeeBump)
 	if err != nil {
 		dcr.log.Errorf("calcBumpRate error: %v", err)

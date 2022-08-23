@@ -209,7 +209,7 @@ func (w *rpcWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, ne
 	}
 
 	if chainParams.Net != w.chainParams.Net {
-		return false, errors.New("cannot reconfigure to use different netowrk")
+		return false, errors.New("cannot reconfigure to use different network")
 	}
 	certs, err := os.ReadFile(rpcCfg.RPCCert)
 	if err != nil {

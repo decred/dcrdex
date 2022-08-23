@@ -514,7 +514,13 @@ func (w *ETHWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, cu
 		return false, err
 	}
 
-	atomic.StoreUint64(&w.baseWallet.gasFeeLimitV, walletCfg.GasFeeLimit)
+	gasFeeLimit := walletCfg.GasFeeLimit
+	if walletCfg.GasFeeLimit == 0 {
+		gasFeeLimit = defaultGasFeeLimit
+	}
+
+	atomic.StoreUint64(&w.baseWallet.gasFeeLimitV, gasFeeLimit)
+
 	return false, nil
 }
 
