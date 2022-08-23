@@ -254,11 +254,64 @@ export const plPL: Locale = {
   [SETUP_NEEDED]: 'Potrzebna konfiguracja'
 }
 
+export const deDE: Locale = {
+  [ID_NO_PASS_ERROR_MSG]: 'Passwort darf nicht leer sein',
+  [ID_NO_APP_PASS_ERROR_MSG]: 'App-Passwort darf nicht leer sein',
+  [ID_PASSWORD_NOT_MATCH]: 'Passwörter stimmen nicht überein',
+  [ID_SET_BUTTON_BUY]: 'Platziere Auftrag zum Kauf von  {{ asset }}',
+  [ID_SET_BUTTON_SELL]: 'Platziere Auftrag zum Verkauf von {{ asset }}',
+  [ID_OFF]: 'aus',
+  [ID_READY]: 'bereit',
+  [ID_LOCKED]: 'gesperrt',
+  [ID_NOWALLET]: 'kein Wallet',
+  [ID_WALLET_SYNC_PROGRESS]: 'Wallet ist zu {{ syncProgress }}% synchronisiert',
+  [ID_HIDE_ADDITIONAL_SETTINGS]: 'zusätzliche Einstellungen ausblenden',
+  [ID_SHOW_ADDITIONAL_SETTINGS]: 'zusätzliche Einstellungen anzeigen',
+  [ID_BUY]: 'Kaufen',
+  [ID_SELL]: 'Verkaufen',
+  [ID_NOT_SUPPORTED]: '{{ asset }} wird nicht unterstützt',
+  [ID_CONNECTION_FAILED]: 'Die Verbindung zum Dex-Server fehlgeschlagen. Du kannst dexc schließen und es später erneut versuchen oder warten bis die Verbindung wiederhergestellt ist.',
+  [ID_ORDER_PREVIEW]: 'Insgesamt: {{ total }} {{ asset }}',
+  [ID_CALCULATING]: 'kalkuliere...',
+  [ID_ESTIMATE_UNAVAILABLE]: 'Schätzung nicht verfügbar',
+  [ID_NO_ZERO_RATE]: 'Null-Satz nicht erlaubt',
+  [ID_NO_ZERO_QUANTITY]: 'Null-Menge nicht erlaubt',
+  [ID_TRADE]: 'Handel',
+  [ID_NO_ASSET_WALLET]: 'Kein {{ asset }} Wallet',
+  [ID_EXECUTED]: 'ausgeführt',
+  [ID_BOOKED]: 'gebucht',
+  [ID_CANCELING]: 'Abbruch',
+  [ID_ACCT_UNDEFINED]: 'Account undefiniert.',
+  [ID_KEEP_WALLET_PASS]: 'aktuelles Passwort für das Wallet behalten',
+  [ID_NEW_WALLET_PASS]: 'ein neues Passwort für das Wallet festlegen',
+  [ID_LOT]: 'Lot',
+  [ID_LOTS]: 'Lots',
+  [ID_UNKNOWN]: 'unbekannt',
+  [ID_EPOCH]: 'Epoche',
+  [ID_SETTLING]: 'Abwicklung',
+  [ID_NO_MATCH]: 'kein Match',
+  [ID_CANCELED]: 'abgebrochen',
+  [ID_REVOKED]: 'widerrufen',
+  [ID_WAITING_FOR_CONFS]: 'Warten auf Bestätigungen...',
+  [ID_NONE_SELECTED]: 'keine ausgewählt',
+  [ID_REGISTRATION_FEE_SUCCESS]: 'Zahlung der Registrierungsgebühr erfolgreich!',
+  [ID_API_ERROR]: 'API Fehler',
+  [ID_ADD]: 'Hinzufügen',
+  [ID_CREATE]: 'Erstellen',
+  [ID_WALLET_READY]: 'Bereit',
+  [ID_SETUP_WALLET]: 'Einrichten',
+  [ID_CHANGE_WALLET_TYPE]: 'den Wallet-Typ ändern',
+  [ID_KEEP_WALLET_TYPE]: 'den Wallet-Typ nicht ändern',
+  [WALLET_READY]: 'Wallet bereit',
+  [SETUP_NEEDED]: 'Einrichtung erforderlich'
+}
+
 const localesMap: Record<string, Locale> = {
   'en-us': enUS,
   'pt-br': ptBR,
   'zh-cn': zhCN,
-  'pl-pl': plPL
+  'pl-pl': plPL,
+  'de-de': deDE
 }
 
 /* locale will hold the locale loaded via setLocale. */
