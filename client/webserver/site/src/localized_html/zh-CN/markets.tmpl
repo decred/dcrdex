@@ -67,14 +67,14 @@
       <div class="chart-legend" id="chartLegend">
         <button class="chart-selector" id="candlestickBttn"></button>
         <button class="chart-selector d-hide" id="depthBttn"></button>
-        <div class="d-flex align-items-center" id="epochLine"><div class="epoch-line"></div> [[[epoch]]]</div>
+        <div class="d-flex align-items-center" id="epochLine"><div class="epoch-line"></div> 时间</div>
         <div class="flex-grow-1">
           <div id="hoverData" class="d-flex align-items-center d-hide">
             <span class="category-spacer text-center text-nowrap"></span>
             <span class="ico-target fs11 me-1"></span>
             <span id="depthHoverData">
-              [[[price]]]: <span id="hoverPrice"></span>,
-              [[[volume]]]: <span id="hoverVolume"></span>
+              价格: <span id="hoverPrice"></span>,
+              量: <span id="hoverVolume"></span>
             </span>
             <span class="d-hide" id="candleHoverData">
               S: <span id="candleStart"></span>,
@@ -86,9 +86,9 @@
           </div>
         </div>
         <div id="depthSummary" class="d-flex align-items-center">
-          <span>[[[sells]]]: <span id="sellBookedBase"></span> <span data-unit="base"></span>, <span id="sellBookedQuote"></span> <span data-unit="quote"></span></span>
+          <span>卖: <span id="sellBookedBase"></span> <span data-unit="base"></span>, <span id="sellBookedQuote"></span> <span data-unit="quote"></span></span>
           <span class="category-spacer"></span>
-          <span class="me-2">[[[buys]]]: <span id="buyBookedBase"></span> <span data-unit="base"></span>, <span id="buyBookedQuote"></span> <span data-unit="quote"></span></span>
+          <span class="me-2">买: <span id="buyBookedBase"></span> <span data-unit="base"></span>, <span id="buyBookedQuote"></span> <span data-unit="quote"></span></span>
         </div>
         <div class="d-flex flex-nowrap me-2 d-hide" id="durBttnBox"><button class="candle-dur-bttn" id="durBttnTemplate"></button></div>
       </div>
@@ -103,16 +103,16 @@
 
           {{- /* BUY ORDER LIST */ -}}
           <div class="marketorders order-lg-1 order-2 col-lg-7 p-0 bg1 d-flex flex-column">
-            <div class="market-header text-center fs14 py-1">[[[Buy Orders]]]</div>
+            <div class="market-header text-center fs14 py-1">买单</div>
             <div class="brdrleft flex-grow-1 bg1 position-relative">
               <div class="market-orders-table-container stylish-overflow">
                 <table class="ordertable">
                   {{block "thead" .}}
                   <thead>
                     <tr>
-                      <th class="text-start ps-2">[[[Quantity]]]</th>
-                      <th class="text-end pe-2">[[[Rate]]]</th>
-                      <th class="text-end pe-2">[[[Epoch]]]</th>
+                      <th class="text-start ps-2">数量</th>
+                      <th class="text-end pe-2">比率</th>
+                      <th class="text-end pe-2">时间</th>
                     </tr>
                   </thead>
                   {{end}}
@@ -137,8 +137,8 @@
           {{- /* ORDER PANEL */ -}}
           <div class="col-lg-10 order-1 order-lg-2 order-panel p-0 brdrleft brdrright d-flex flex-column">
             <div class="market-header fs14 d-flex justify-content-start ps-4 align-items-stretch">
-              <button id="limitBttn" type="button" class="flex-center px-3 py-0 markettab brdrleft selected">[[[Limit Order]]]</button>
-              <button id="marketBttn" type="button" class="flex-center px-3 py-0 markettab brdrleft brdrright">[[[Market Order]]]</button>
+              <button id="limitBttn" type="button" class="flex-center px-3 py-0 markettab brdrleft selected">限价单</button>
+              <button id="marketBttn" type="button" class="flex-center px-3 py-0 markettab brdrleft brdrright">市价单</button>
             </div>
 
             <div class="flex-grow-1 position-relative">
@@ -151,7 +151,7 @@
                   <div class="p-0 w-100">
                     <div class="d-flex flex-column justify-content-center align-items-center">
                       <span id="regStatusTitle" class="title"></span>
-                      <p id="regStatusMessage">[[[reg_status_msg]]]
+                      <p id="regStatusMessage">为了切换到 <span id="regStatusDex" class="text-break"></span>，必须支付注册费 <span id="confReq"></span> 确认书。
                       </p>
                       <span id="regStatusConfsDisplay"></span>
                     </div>
@@ -165,11 +165,11 @@
                     {{- /* BUY - SELL SELECTOR */ -}}
                     <div class="d-flex justify-content-start pt-4 pb-2 fs14">
                       <button id="buyBttn" type="button" class="bg2 buygreen selected">
-                        [[[Buy]]]
+                        买
                         <span data-unit="base"></span>
                       </button>
                       <button id="sellBttn" type="button" class="bg2 sellred ms-2">
-                        [[[Sell]]]
+                        卖
                         <span data-unit="base"></span>
                       </button>
                       <span></span>
@@ -178,12 +178,12 @@
                     {{- /* MARKET CONFIG */ -}}
                     <div class="d-flex justify-content-between my-2 fs14">
                       <div>
-                        [[[Lot Size]]]:
+                        批量:
                         <span id="lotSize"></span>
                         <span data-unit="base"></span>
                       </div>
                       <div>
-                        [[[Rate Step]]]:
+                        兑换:
                         <span id="rateStep"></span>
                         <span data-unit="quote"></span>
                       </div>
@@ -191,9 +191,9 @@
                     <div class="my-2 fs14 h21" id="maxBox">
                       <div id="maxOrd" class="d-hide position-relative pointer">
                         <span id="maxLotBox" class="d-hide">
-                          <span class="underline">[[[Max]]] <span id="maxLbl">[[[Buy]]]</span></span>:
+                          <span class="underline">最多 <span id="maxLbl">买</span></span>:
                           <span id="maxFromLots"></span>
-                          <span id="maxFromLotsLbl">[[[lot]]]</span>
+                          <span id="maxFromLotsLbl">批处理</span>
                         </span>
                         <span id="maxAboveZero" class="d-hide">
                           ,
@@ -208,17 +208,17 @@
 
                     {{- /* RATE AND QUANTITY INPUTS */ -}}
                     <div class="d-flex mt-3" id="priceBox">
-                      <label for="rateField" class="form-label col-6 d-flex align-items-center p-0">[[[Price]]]</label>
+                      <label for="rateField" class="form-label col-6 d-flex align-items-center p-0">价格</label>
                       <div class="col-18 p-0 position-relative">
                         <input type="number" class="form-control select bg1" id="rateField">
                         <span class="unitbox"><span class="unit" data-unit="quote"></span>/<span class="unit" data-unit="base"></span></span>
                       </div>
                     </div>
                     <div class="d-flex mt-4" id="qtyBox">
-                      <label for="qtyField" class="form-label col-6 d-flex align-items-center p-0">[[[Quantity]]]</label>
+                      <label for="qtyField" class="form-label col-6 d-flex align-items-center p-0">数量</label>
                       <div class="col-6 p-0 position-relative">
                         <input type="number" class="form-control select bg1" id="lotField">
-                        <span class="unit unitbox">[[[Lots]]]</span>
+                        <span class="unit unitbox">批</span>
                       </div>
                       <div class="col-1 p-0"></div> {{/* spacer */}}
                       <div class="col-11 p-0 position-relative">
@@ -230,7 +230,7 @@
                     {{- /* MARKET BUY ORDER QUANTITY INPUT */ -}}
                     <div id="mktBuyBox" class="d-hide">
                       <div class="text-center mt-2 fs15">
-                        [[[min trade is about]]] <span id="minMktBuy"></span> <span data-unit="quote"></span>
+                        最小交换结束了 <span id="minMktBuy"></span> <span data-unit="quote"></span>
                       </div>
                       <div class="d-flex justify-content-center mt-2">
                         <!-- <label for="mktBuyField" class="flex-center col-12 p-0">Trading</label> -->
@@ -242,7 +242,7 @@
                       <div class="p-0 fs14 flex-center mt-1">
                         <span>
                           ~ <span id="mktBuyScore">0</span> <span data-unit="base"></span>
-                          @ <span id="mktBuyLots">0</span> <span >[[[Lots]]]</span><br>
+                          @ <span id="mktBuyLots">0</span> <span >批</span><br>
 
                         </span>
                       </div>
@@ -255,8 +255,8 @@
                     <div class="my-1 text-start form-check" id="tifBox">
                       <input id="tifNow" class="form-check-input" type="checkbox" value="">
                       <label class="form-check-label" for="tifNow">
-                        [[[Immediate or cancel]]]
-                        <span class="ico-info fs12" data-tooltip="[[[immediate_explanation]]]"></span>
+                        立即或取消
+                        <span class="ico-info fs12" data-tooltip="如果订单在下一个周期中没有完成，任何剩余的金额将不会在下一个周期中保留或重新组合。"></span>
                       </label>
                     </div>
 
@@ -270,7 +270,7 @@
 
                 {{- /* BALANCES */ -}}
                 <div id="marketBalance" class="market-bal pt-2 pb-1 my-3 position-relative">
-                  <span class="market-bal-lbl">[[[Balances]]]</span>
+                  <span class="market-bal-lbl">余额</span>
                   <table class="balance-table" id="balanceTable">
                     <thead>
                       <tr>
@@ -281,7 +281,7 @@
                             <span id="balBaseSymbol"></span>
                             <div class="flex-grow-1"></div>
                             <div id="baseWalletState" class="fs12">{{template "walletIcons"}}</div>
-                            <span class="ico-expired fs16 ps-1" id="baseExpired" data-tooltip="[[[outdated_tooltip]]]"></span>
+                            <span class="ico-expired fs16 ps-1" id="baseExpired" data-tooltip="账户可能已过期。请连接到钱包进行更新。"></span>
                           </div>
                         </th>
                         <th>
@@ -290,25 +290,25 @@
                             <span id="balQuoteSymbol"></span>
                             <div class="flex-grow-1"></div>
                             <div id="quoteWalletState" class="fs12">{{template "walletIcons"}}</div>
-                            <span class="ico-expired fs16 ps-1" id="quoteExpired" data-tooltip="[[[outdated_tooltip]]]"></span>
+                            <span class="ico-expired fs16 ps-1" id="quoteExpired" data-tooltip="账户可能已过期。请连接到钱包进行更新。"></span>
                           </div>
                         </th>
                       </tr>
                     </thead>
                     <tbody>
                       <tr>
-                        <td class="fs16">[[[available]]]</td>
+                        <td class="fs16">可用</td>
                         <td id="baseUnsupported" rowspan="3">
                           <div class="ico-cross"></div>
                         </td>
-                        <td id="baseConnect" rowspan="3" class="pointer" data-tooltip="[[[connect_refresh_tooltip]]]">
+                        <td id="baseConnect" rowspan="3" class="pointer" data-tooltip="点击连接并刷新">
                           <div class="ico-sleeping"></div>
                         </td>
                         <td id="baseSpinner" rowspan="3">
                           <div class="ico-spinner spinner"></div>
                         </td>
                         <td id="baseNewWalletRow" rowspan="3">
-                          <button id="baseNewButton" type="button" class="newwallet bg1 text-center">[[[add_a_base_wallet]]]</button>
+                          <button id="baseNewButton" type="button" class="newwallet bg1 text-center">添加一个<br><span data-unit="base"></span><br>钱包</button>
                         </td>
                         <td id="baseWalletPendingRow" rowspan="3">
                           <div class="ico-spinner spinner fs20"></div>
@@ -317,14 +317,14 @@
                         <td id="quoteUnsupported" rowspan="3">
                           <div class="ico-cross"></div>
                         </td>
-                        <td id="quoteConnect" rowspan="3" class="pointer" data-tooltip="[[[connect_refresh_tooltip]]]">
+                        <td id="quoteConnect" rowspan="3" class="pointer" data-tooltip="点击连接并刷新">
                           <div class="ico-sleeping"></div>
                         </td>
                         <td id="quoteSpinner" rowspan="3">
                           <div class="ico-spinner spinner"></div>
                         </td>
                         <td id="quoteNewWalletRow" rowspan="3" class="brdr-left">
-                          <button id="quoteNewButton" type="button" class="newwallet bg1 text-center">[[[add_a_quote_wallet]]]</button>
+                          <button id="quoteNewButton" type="button" class="newwallet bg1 text-center">添加一个<br><span data-unit="quote"></span><br>钱包</button>
                         </td>
                         <td id="quoteWalletPendingRow" rowspan="3">
                           <div class="ico-spinner spinner fs20"></div>
@@ -332,12 +332,12 @@
                         <td id="quoteAvail" class="brdr-left fs16"></td>
                       </tr>
                       <tr>
-                        <td>[[[locked]]]</td>
+                        <td>锁定</td>
                         <td id="baseLocked"></td>
                         <td id="quoteLocked" class="brdr-left"></td>
                       </tr>
                       <tr>
-                        <td>[[[immature]]]</td>
+                        <td>不成熟</td>
                         <td id="baseImmature"></td>
                         <td id="quoteImmature" class="brdr-left"></td>
                       </tr>
@@ -355,7 +355,7 @@
 
           {{- /* SELL ORDER LIST */ -}}
           <div class="marketorders col-lg-7 order-3 p-0 bg1 d-flex flex-column">
-            <div class="market-header text-center fs14 py-1">[[[Sell Orders]]]</div>
+            <div class="market-header text-center fs14 py-1">卖单</div>
             <div class="brdrleft flex-grow-1 bg1 position-relative">
               <div class="market-orders-table-container stylish-overflow">
                 <table class="ordertable">
@@ -371,7 +371,7 @@
       {{- /* USER ORDERS */ -}}
       <div class="bg0 p-0 col-24 col-xxl-10 d-flex flex-column align-items-stretch">
         <div class="market-header text-center fs14 py-1 brdrleft">
-          [[[Your Orders]]]
+          你的订单
         </div>
         <div class="brdrleft flex-grow-1 bg1 position-relative">
 
@@ -379,14 +379,14 @@
             <table id="liveTable" class="ordertable">
               <thead>
                 <tr>
-                  <th data-ordercol="type">[[[Type]]] <span class="ico-arrowdown"></span></th>
-                  <th data-ordercol="sell">[[[Side]]] <span class="ico-arrowdown"></span></th>
-                  <th data-ordercol="submitTime">[[[Age]]] <span class="ico-arrowdown"></span></th>
-                  <th data-ordercol="rate">[[[Rate]]] <span class="ico-arrowdown"></span></th>
-                  <th data-ordercol="qty">[[[Quantity]]] <span class="ico-arrowdown"></span></th>
-                  <th data-ordercol="filled">[[[Filled]]] <span class="ico-arrowdown"></span></th>
-                  <th data-ordercol="settled">[[[Settled]]] <span class="ico-arrowdown"></span></th>
-                  <th data-ordercol="status">[[[Status]]] <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="type">类型 <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="sell">侧面 <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="submitTime">年龄 <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="rate">比率 <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="qty">数量 <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="filled">已满 <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="settled">稳定的 <span class="ico-arrowdown"></span></th>
+                  <th data-ordercol="status">状态 <span class="ico-arrowdown"></span></th>
                   <th class="last"></th>
                 </tr>
               </thead>
@@ -402,15 +402,15 @@
                   <td data-tmpl="status"></td>
                   <td class="last text-end">
                     <span data-tmpl="accelerateBttn" class="ico-rocket d-hide" data-tooltip="accelerate order"></span>
-                    <span data-tmpl="cancelBttn" class="ico-cross d-hide" data-tooltip="[[[cancel order]]]"></span>
-                    <a data-tmpl="link" class="ico-open fs13 pointer ms-2 plainlink" data-tooltip="[[[order details]]]"></a>
+                    <span data-tmpl="cancelBttn" class="ico-cross d-hide" data-tooltip="取消订单"></span>
+                    <a data-tmpl="link" class="ico-open fs13 pointer ms-2 plainlink" data-tooltip="订单详情"></a>
                   </td>
                 </tr>
               </tbody>
               <tbody>
                 <tr>
                   <td colspan="9" class="text-center">
-                    <a href="/orders" class="d-block fs14 px-2 plainlink">[[[view order history]]]</a>
+                    <a href="/orders" class="d-block fs14 px-2 plainlink">查看历史订单</a>
                   </td>
                 </tr>
               </tbody>
@@ -456,19 +456,19 @@
         {{- /* Price, Quantity, Total Section */ -}}
         <div id="verifyLimit">
           <div class="d-flex align-items-center justify-content-between">
-            <span class="grey fs17 flex-grow-1 text-start">[[[Price]]]</span>
+            <span class="grey fs17 flex-grow-1 text-start">价格</span>
             <span id="vRate" class="fs18 demi"></span>
             <span class="grey fs14 ms-2">
               <sup data-unit="quote"></sup>/<sub data-unit="base"></sub>
             </span>
           </div>
           <div class="d-flex align-items-center mt-1">
-            <span class="grey fs17 flex-grow-1 text-start">[[[Quantity]]]</span>
+            <span class="grey fs17 flex-grow-1 text-start">数量</span>
             <span id="vQty" class="fs18 demi"></span>
             <span data-unit="base" class="grey fs14 ms-2"></span>
           </div>
           <div class="d-flex align-items-center mt-1">
-            <span class="grey fs17 flex-grow-1 text-start">[[[Total]]]</span>
+            <span class="grey fs17 flex-grow-1 text-start">Total</span>
             <span id="vTotal" class="fs18 demi"></span>
             <span data-unit="quote" class="grey fs14 ms-2"></span>
           </div>
@@ -478,7 +478,7 @@
         </div>
         <div id="verifyMarket">
           <div class="d-flex align-items-center justify-content-between">
-            <span class="grey fs17 flex-grow-1 text-start">[[[Trading]]]</span>
+            <span class="grey fs17 flex-grow-1 text-start">Trading</span>
             <span id="vmFromTotal" class="fs18 demi"></span>
             <span id="vmFromAsset" class="grey fs14 ms-2"></span>
           </div>
@@ -487,8 +487,8 @@
           </span>
           <div id="vMarketEstimate" class="d-flex align-items-center justify-content-between">
             <span class="grey fs17 flex-grow-1 text-start">
-              [[[Receiving Approximately]]]
-              <span class="ico-info fs12" data-tooltip="[[[verify_market]]]"></span>
+              Receiving Approximately
+              <span class="ico-info fs12" data-tooltip="这是一个市价单，将匹配订单簿中的最佳订单。根据当前的平均市场价，您将收到"></span>
             </span>
             <span id="vmToTotal" class="fs18 demi"></span>
             <span id="vmToAsset" class="grey fs14 ms-2"></span>
@@ -502,10 +502,10 @@
 
         {{- /* Auth Section */ -}}
         {{$passwordIsCached := .UserInfo.PasswordIsCached}}
-        <div class="fs16 text-center {{if $passwordIsCached}}d-hide{{end}}">[[[auth_order_app_pw]]]</div>
+        <div class="fs16 text-center {{if $passwordIsCached}}d-hide{{end}}">使用应用密码授权此订单。</div>
         <div class="d-flex mt-3 {{if $passwordIsCached}}justify-content-end{{end}}" >
           <div class="col-12 p-0 text-start {{if $passwordIsCached}}d-hide{{end}}">
-            <label for="vPass" class="form-label ps-1 mb-1">[[[Password]]]</label>
+            <label for="vPass" class="form-label ps-1 mb-1">密码</label>
             <input type="password" class="form-control select" id="vPass">
           </div>
           <div class="col-12 p-0 d-flex justify-content-end">
@@ -525,23 +525,23 @@
 
           <div class="d-flex justify-content-between align-items-center">
             <span class="grey fs18">
-              [[[Fee Projection]]]
-              <span class="ico-info fs12" data-tooltip="[[[fee_projection_tooltip]]]"></span>
+              Fee Projection
+              <span class="ico-info fs12" data-tooltip="If network conditions don't change before your order matches, total realized fees (as a percentage of trade) should fall within this range."></span>
             </span>
-            <span class="grey fs14 underline pointer hoverbright" id="vFeeDetails">[[[details]]]</span>
+            <span class="grey fs14 underline pointer hoverbright" id="vFeeDetails">details</span>
           </div>
 
           <div class="py-1 d-flex align-items-center justify-content-center fs18" id="vFeeSummary">
             <span id="vFeeSummaryLow"></span>
             <span class="fs15">%</span>
-            <span class="fs15 px-2">[[[to]]]</span>
+            <span class="fs15 px-2">to</span>
             <span id="vFeeSummaryHigh"></span>
             <span class="fs15">%</span>
           </div>
 
           <hr class="dashed mb-2 mt-3">
 
-          <div class="grey fs18 text-start">[[[Options]]]</div>
+          <div class="grey fs18 text-start">Options</div>
 
           <div id="vOrderOpts">
             {{template "orderOptionTemplates"}}
@@ -552,51 +552,53 @@
           <hr class="dashed mb-2 mt-3">
           <div class="flex-center flex-column my-2 p-3">
             <span class="ico-locked my-2"></span>
-            <span>[[[unlock_for_details]]]</span>
+            <span>Unlock your wallets to retrieve order details and additional options.</span>
             <div class="d-flex align-items-stretch w-100">
               <div class="col-12 p-0 text-start">
-                <label for="vUnlockPass" class="form-label ps-1 mb-1">[[[Password]]]</label>
+                <label for="vUnlockPass" class="form-label ps-1 mb-1">密码</label>
                 <input type="password" class="form-control select w-100" id="vUnlockPass">
               </div>
               <div class="col-12 p-0 d-flex align-items-end justify-content-end">
-                <button type="button" id="vUnlockSubmit" class="selected buygreen">[[[Unlock]]]</button>
+                <button type="button" id="vUnlockSubmit" class="selected buygreen">解锁</button>
               </div>
             </div>
           </div>
         </div>
 
         <div id="vPreorderErr" class="mt-2">
-          [[[estimate_unavailable]]]
+          Order estimates and options unavailable
           <span class="ico-info red fs12" id="vPreorderErrTip" data-tooltip=" "></span>
         </div>
 
         <hr class="dashed my-2">
         <div class="disclaimer fs14">
-          [[[order_disclaimer]]]
+          <span class="red">交易需要</span>一定时间才能完成，禁止关闭 DEX 客户端软件以及
+		<span data-unit="quote"></span>或<span data-unit="base"></span>钱包软件。
+		交易可能在几分钟内完成，也可能长至几个小时。
         </div>
       </form>
 
       {{- /* FEE DETAIL BREAKDOWN */ -}}
       <form id="vDetailPane" class="d-hide fs16 pb-2">
         <div class="d-flex justify-content-between align-items-center py-1 px-3">
-          <span>[[[Fee Details]]]</span>
+          <span>Fee Details</span>
           <span class="ico-cross fs12 pointer" id="closeDetailPane"></span>
         </div>
         <div class="px-3">
           <div class="m-1">
-            [[[estimate_market_conditions]]]
+            Best- and worst-case estimates are based on current network conditions, and might change by the time the order matches.
           </div>
 
-          <div class="fs18 mt-2 demi">[[[Best Case Fees]]]</div>
+          <div class="fs18 mt-2 demi">Best Case Fees</div>
           <div class="px-3 indent">
             <div>
-              [[[best_case_conditions]]]
+              The best case fees occur when the entire order is consumed in a single match.
             </div>
             <div class="d-flex">
               <table class="fee-breakout">
                 <tr>
-                  <td><img class="micro-icon" data-icon="from"> [[[Swap]]]</td>
-                  <td><img class="micro-icon" data-icon="to"> [[[Redeem]]]</td>
+                  <td><img class="micro-icon" data-icon="from"> </td>
+                  <td><img class="micro-icon" data-icon="to"> Redeem</td>
                 </tr>
                 <tr>
                   <td><span id="vSwapFeesLow"></span> (<span id="vSwapFeesLowPct"></span>)</td>
@@ -606,16 +608,16 @@
             </div>
           </div>
 
-          <div class="fs18 mt-2 demi">[[[Worst Case Fees]]]</div>
+          <div class="fs18 mt-2 demi">Worst Case Fees</div>
           <div class="px-3 indent">
             <div>
-              [[[worst_case_conditions]]]
+              The worst case can occur if the order matches one lot at a time over the course of many epochs.
             </div>
             <div class="d-flex">
               <table class="fee-breakout">
                 <tr>
-                  <td><img class="micro-icon" data-icon="from"> [[[Swap]]]</td>
-                  <td><img class="micro-icon" data-icon="to"> [[[Redeem]]]</td>
+                  <td><img class="micro-icon" data-icon="from"> </td>
+                  <td><img class="micro-icon" data-icon="to"> Redeem</td>
                 </tr>
                 <tr>
                   <td><span id="vSwapFeesHigh"></span> (<span id="vSwapFeesHighPct"></span>)</td>
@@ -625,10 +627,10 @@
             </div>
           </div>
 
-          <div class="fs18 mt-2 demi">[[[Maximum Possible Swap Fees]]]</div>
+          <div class="fs18 mt-2 demi">Maximum Possible Swap Fees</div>
           <div class="px-3 indent">
             <div>
-              [[[max_fee_conditions]]]
+              This is the most you would ever pay in fees on your swap. Fees are normally assessed at a fraction of this rate. The maximum is not subject to changes once your order is placed.
             </div>
             <div>
               <img class="micro-icon me-1" data-icon="from">

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -85,7 +86,7 @@ func (w *xcWallet) setEncPW(encPW []byte) {
 // the wallet may be unlocked without user interaction using refreshUnlock.
 func (w *xcWallet) Unlock(crypter encrypt.Crypter) error {
 	if w.isDisabled() { // cannot unlock disabled wallet.
-		return errWalletDisabled
+		return fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(w.AssetID)))
 	}
 	if w.parent != nil {
 		return w.parent.Unlock(crypter)
@@ -122,7 +123,7 @@ func (w *xcWallet) Unlock(crypter encrypt.Crypter) error {
 // wallet, in which case unlockAttempted will also be true.
 func (w *xcWallet) refreshUnlock() (unlockAttempted bool, err error) {
 	if w.isDisabled() { // disabled wallet cannot be unlocked.
-		return false, errWalletDisabled
+		return false, fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(w.AssetID)))
 	}
 	if w.parent != nil {
 		return w.parent.refreshUnlock()
@@ -299,7 +300,7 @@ func (w *xcWallet) connected() bool {
 func (w *xcWallet) Connect() error {
 	// Disabled wallet cannot be connected to unless it is enabled.
 	if w.isDisabled() {
-		return errWalletDisabled
+		return fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(w.AssetID)))
 	}
 
 	// No parent context; use Disconnect instead. Also note that there's no
@@ -379,7 +380,7 @@ func (w *xcWallet) logFilePath() (string, error) {
 // order if the wallet is an Accelerator.
 func (w *xcWallet) accelerateOrder(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, newFeeRate uint64) (asset.Coin, string, error) {
 	if w.isDisabled() { // cannot perform order acceleration with disabled wallet.
-		return nil, "", errWalletDisabled
+		return nil, "", fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(w.AssetID)))
 	}
 	accelerator, ok := w.Wallet.(asset.Accelerator)
 	if !ok {
@@ -392,7 +393,7 @@ func (w *xcWallet) accelerateOrder(swapCoins, accelerationCoins []dex.Bytes, cha
 // is an Accelerator.
 func (w *xcWallet) accelerationEstimate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (uint64, error) {
 	if w.isDisabled() { // cannot perform acceleration estimate with disabled wallet.
-		return 0, errWalletDisabled
+		return 0, fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(w.AssetID)))
 	}
 	accelerator, ok := w.Wallet.(asset.Accelerator)
 	if !ok {
@@ -406,7 +407,7 @@ func (w *xcWallet) accelerationEstimate(swapCoins, accelerationCoins []dex.Bytes
 // wallet is an Accelerator.
 func (w *xcWallet) preAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (uint64, *asset.XYRange, *asset.EarlyAcceleration, error) {
 	if w.isDisabled() { // cannot perform operation with disabled wallet.
-		return 0, &asset.XYRange{}, nil, errWalletDisabled
+		return 0, &asset.XYRange{}, nil, fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(w.AssetID)))
 	}
 	accelerator, ok := w.Wallet.(asset.Accelerator)
 	if !ok {
@@ -422,7 +423,7 @@ func (w *xcWallet) preAccelerate(swapCoins, accelerationCoins []dex.Bytes, chang
 // returned.
 func (w *xcWallet) swapConfirmations(ctx context.Context, coinID []byte, contract []byte, matchTime uint64) (uint32, bool, error) {
 	if w.isDisabled() { // cannot check swap confirmation with disabled wallet.
-		return 0, false, errWalletDisabled
+		return 0, false, fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(w.AssetID)))
 	}
 	return w.Wallet.SwapConfirmations(ctx, coinID, contract, time.UnixMilli(int64(matchTime)))
 }

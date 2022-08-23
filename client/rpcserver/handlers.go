@@ -876,9 +876,9 @@ var helpMsgs = map[string]helpMsg{
 		pwArgsLong: `Password Args:
     appPass (string): The DEX client password.`,
 		argsLong: `Args:
-    assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
-      See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
-	disable (bool): The wallet's status. e.g To disable a wallet set to "true", to enable set to "false"`,
+   assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
+                  See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
+   disable (bool): The wallet's status. e.g To disable a wallet set to "true", to enable set to "false"`,
 		returns: `Returns:
     string: The message "` + fmt.Sprintf(walletStatusStr, "[coin symbol]", "[wallet status]") + `"`,
 	},

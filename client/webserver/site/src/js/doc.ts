@@ -466,13 +466,14 @@ export class WalletIcons {
     this.icons.nowallet = stateElement('nowallet')
     this.icons.syncing = stateElement('syncing')
     this.icons.nopeers = stateElement('nopeers')
+    this.icons.disabled = stateElement('disabled')
     this.status = stateElement('status')
   }
 
   /* sleeping sets the icons to indicate that the wallet is not connected. */
   sleeping () {
     const i = this.icons
-    Doc.hide(i.locked, i.unlocked, i.nowallet, i.syncing)
+    Doc.hide(i.locked, i.unlocked, i.nowallet, i.syncing, i.disabled)
     Doc.show(i.sleeping)
     if (this.status) this.status.textContent = intl.prep(intl.ID_OFF)
   }
@@ -482,7 +483,7 @@ export class WalletIcons {
    */
   locked () {
     const i = this.icons
-    Doc.hide(i.unlocked, i.nowallet, i.sleeping)
+    Doc.hide(i.unlocked, i.nowallet, i.sleeping, i.disabled)
     Doc.show(i.locked)
     if (this.status) this.status.textContent = intl.prep(intl.ID_LOCKED)
   }
@@ -493,22 +494,30 @@ export class WalletIcons {
    */
   unlocked () {
     const i = this.icons
-    Doc.hide(i.locked, i.nowallet, i.sleeping)
+    Doc.hide(i.locked, i.nowallet, i.sleeping, i.disabled)
     Doc.show(i.unlocked)
     if (this.status) this.status.textContent = intl.prep(intl.ID_READY)
   }
 
-  /* sleeping sets the icons to indicate that no wallet exists. */
+  /* nowallet sets the icons to indicate that no wallet exists. */
   nowallet () {
     const i = this.icons
-    Doc.hide(i.locked, i.unlocked, i.sleeping, i.syncing)
+    Doc.hide(i.locked, i.unlocked, i.sleeping, i.syncing, i.disabled)
     Doc.show(i.nowallet)
     if (this.status) this.status.textContent = intl.prep(intl.ID_NOWALLET)
   }
 
+  /* set the icons to indicate that the wallet is disabled */
+  disabled () {
+    const i = this.icons
+    Doc.hide(i.locked, i.unlocked, i.sleeping, i.syncing, i.nowallet, i.nopeers)
+    Doc.show(i.disabled)
+    i.disabled.dataset.tooltip = intl.prep(intl.ID_DISABLED)
+  }
+
   setSyncing (wallet: WalletState | null) {
     const syncIcon = this.icons.syncing
-    if (!wallet || !wallet.running) {
+    if (!wallet || !wallet.running || wallet.disabled) {
       Doc.hide(syncIcon)
       return
     }
@@ -533,6 +542,9 @@ export class WalletIcons {
     this.setSyncing(wallet)
     if (!wallet) return this.nowallet()
     switch (true) {
+      case (wallet.disabled):
+        this.disabled()
+        break
       case (!wallet.running):
         this.sleeping()
         break

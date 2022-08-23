@@ -8,6 +8,7 @@ export const ID_OFF = 'ID_OFF'
 export const ID_READY = 'ID_READY'
 export const ID_LOCKED = 'ID_LOCKED'
 export const ID_NOWALLET = 'ID_NOWALLET'
+export const ID_DISABLED = 'ID_DISABLED'
 export const ID_WALLET_SYNC_PROGRESS = 'ID_WALLET_SYNC_PROGRESS'
 export const ID_HIDE_ADDITIONAL_SETTINGS = 'ID_HIDE_ADDITIONAL_SETTINGS'
 export const ID_SHOW_ADDITIONAL_SETTINGS = 'ID_SHOW_ADDITIONAL_SETTINGS'
@@ -119,7 +120,8 @@ export const enUS: Locale = {
   [ID_SELLING]: 'Selling',
   [ID_BUYING]: 'Buying',
   [ID_WALET_ENABLED]: '{{ assetName }} Wallet Enabled',
-  [ID_WALET_DISABLED]: '{{ assetName }} Wallet Disabled'
+  [ID_WALET_DISABLED]: '{{ assetName }} Wallet Disabled',
+  [ID_DISABLED]: 'wallet is disabled'
 }
 
 export const ptBR: Locale = {

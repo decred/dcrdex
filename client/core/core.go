@@ -77,9 +77,9 @@ var (
 	// ActiveOrdersLogoutErr is returned from logout when there are active
 	// orders.
 	ActiveOrdersLogoutErr = errors.New("cannot log out with active orders")
-	// errWalletDisabled is the error message returned when trying to use a
+	// walletDisabledErrStr is the error message returned when trying to use a
 	// disabled wallet.
-	errWalletDisabled = errors.New("wallet is disabled")
+	walletDisabledErrStr = "%s wallet is disabled"
 
 	errTimeout = errors.New("timeout")
 )
@@ -1776,10 +1776,15 @@ func (c *Core) ToggleWalletStatus(pw []byte, assetID uint32, disable bool) error
 			strings.ToUpper(unbip(assetID)), assetID)
 	}
 
+	// Return early if this wallet is already disabled or already enabled.
+	walletDisabled := wallet.isDisabled()
+	if disable && walletDisabled || !disable && !walletDisabled {
+		return nil
+	}
+
 	if disable {
-		// Return early if this wallet is already disabled.
-		if wallet.isDisabled() {
-			return nil
+		if !wallet.connected() {
+			return fmt.Errorf("%s wallet is not connected", unbip(assetID))
 		}
 
 		if c.assetHasActiveOrders(assetID) {
@@ -1799,7 +1804,7 @@ func (c *Core) ToggleWalletStatus(pw []byte, assetID uint32, disable bool) error
 	// wallets cannot be connected to.
 	wallet.setDisabled(disable)
 
-	if !disable && !wallet.connected() {
+	if !disable {
 		// Attempt to connect wallet.
 		err := c.connectAndUpdateWallet(wallet)
 		if err != nil {
@@ -2470,7 +2475,7 @@ func (c *Core) RecoverWallet(assetID uint32, appPW []byte, force bool) error {
 
 	// Disabled wallets cannot initiate a recovery.
 	if oldWallet.isDisabled() {
-		return errWalletDisabled
+		return fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(assetID)))
 	}
 
 	recoverer, isRecoverer := oldWallet.Wallet.(asset.Recoverer)
@@ -2700,7 +2705,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 	}
 
 	if oldWallet.isDisabled() { // disabled wallet cannot perform operation.
-		return errWalletDisabled
+		return fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(assetID)))
 	}
 
 	oldDef, err := walletDefinition(assetID, oldWallet.walletType)
@@ -7750,7 +7755,7 @@ func (c *Core) WalletLogFilePath(assetID uint32) (string, error) {
 			strings.ToUpper(unbip(assetID)), assetID)
 	}
 	if wallet.isDisabled() {
-		return "", errWalletDisabled
+		return "", fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(assetID)))
 	}
 
 	return wallet.logFilePath()

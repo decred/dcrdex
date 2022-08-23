@@ -243,9 +243,14 @@ export default class MarketsPage extends BasePage {
       bind(quoteIcons.sleeping, 'click', () => { this.showOpen(this.market.quote, this.walletUnlocked) })
       bind(baseIcons.locked, 'click', () => { this.showOpen(this.market.base, this.walletUnlocked) })
       bind(quoteIcons.locked, 'click', () => { this.showOpen(this.market.quote, this.walletUnlocked) })
+      bind(baseIcons.disabled, 'click', () => { this.showToggleWalletStatus(this.market.base) })
+      bind(quoteIcons.disabled, 'click', () => { this.showToggleWalletStatus(this.market.quote) })
       bind(wgt.base.newWalletBttn, 'click', () => { this.showCreate(this.market.base) })
       bind(wgt.quote.newWalletBttn, 'click', () => { this.showCreate(this.market.quote) })
     }
+
+    // Bind toggle wallet status form.
+    bindForm(page.toggleWalletStatusConfirm, page.toggleWalletStatusSubmit, async () => { this.toggleWalletStatus() })
 
     // Prepare templates for the buy and sell tables and the user's order table.
     OrderUtil.setOptionTemplates(page)
@@ -1373,6 +1378,45 @@ export default class MarketsPage extends BasePage {
     this.unlockForm.refresh(app().assets[asset.id])
     this.showForm(page.unlockWalletForm)
     page.uwAppPass.focus()
+  }
+
+  /*
+   * showToggleWalletStatus displays the toggleWalletStatusConfirm form to
+   * enable a wallet.
+   */
+  showToggleWalletStatus (asset: SupportedAsset) {
+    const page = this.page
+    this.openAsset = asset
+    Doc.hide(page.toggleWalletStatusErr, page.toggleDisableWallet, page.toggleEnableWallet)
+    Doc.show(page.toggleEnableWallet)
+    this.showForm(page.toggleWalletStatusConfirm)
+  }
+
+  /*
+   * toggleWalletStatus toggle wallets status to enabled.
+   */
+  async toggleWalletStatus () {
+    const page = this.page
+    Doc.hide(page.toggleWalletStatusErr)
+
+    const url = '/api/togglewalletstatus'
+    const req = {
+      pass: page.toggleWalletStatusPW.value,
+      assetID: this.openAsset.id,
+      disable: false
+    }
+
+    const loaded = app().loading(page.toggleWalletStatusConfirm)
+    const res = await postJSON(url, req)
+    loaded()
+    if (!app().checkResponse(res)) {
+      page.toggleWalletStatusErr.textContent = res.msg
+      Doc.show(page.toggleWalletStatusErr)
+      return
+    }
+
+    Doc.hide(this.page.forms)
+    this.balanceWgt.updateAsset(this.openAsset.id)
   }
 
   /* showVerify shows the form to accept the currently parsed order information
@@ -2586,7 +2630,7 @@ class BalanceWidget {
     }
     const bal = wallet.balance
     // Handle not connected and no balance known for the DEX.
-    if (!bal && !wallet.running) {
+    if (!bal && !wallet.running && !wallet.disabled) {
       Doc.show(side.connect)
       return
     }
@@ -2605,7 +2649,7 @@ class BalanceWidget {
     // If the current balance update time is older than an hour, show the
     // expiration icon. Request a balance update, if possible.
     const expired = new Date().getTime() - new Date(bal.stamp).getTime() > anHour
-    if (expired) {
+    if (expired && !wallet.disabled) {
       Doc.show(side.expired)
       if (wallet.running) app().fetchBalance(side.id)
     } else Doc.hide(side.expired)
