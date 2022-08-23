@@ -176,6 +176,8 @@ func mainCore(ctx context.Context) error {
 		return err
 	}
 
+	go dexMan.LoadHistoricalAPIData()
+
 	var wg sync.WaitGroup
 	if cfg.AdminSrvOn {
 		srvCFG := &admin.SrvConfig{

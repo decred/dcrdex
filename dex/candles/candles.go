@@ -44,6 +44,7 @@ type Cache struct {
 // NewCache is a constructor for a Cache.
 func NewCache(cap int, binSize uint64) *Cache {
 	return &Cache{
+		Candles: make([]msgjson.Candle, 0, cap),
 		cap:     cap,
 		BinSize: binSize,
 	}

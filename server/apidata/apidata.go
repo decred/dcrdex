@@ -82,18 +82,28 @@ func (s *DataAPI) AddMarketSource(mkt MarketSource) error {
 	}
 	epochDur := mkt.EpochDuration()
 	s.epochDurations[mktName] = epochDur
+
 	binCaches := make(map[uint64]*candles.Cache, len(binSizes)+1)
-	s.marketCaches[mktName] = binCaches
 	cacheList := make([]*candles.Cache, 0, len(binSizes)+1)
 	for _, binSize := range append([]uint64{epochDur}, binSizes...) {
 		cache := candles.NewCache(candles.CacheSize, binSize)
 		cacheList = append(cacheList, cache)
 		binCaches[binSize] = cache
 	}
-	err = s.db.LoadEpochStats(mkt.Base(), mkt.Quote(), cacheList)
-	if err != nil {
+	if err = s.db.LoadEpochStats(mkt.Base(), mkt.Quote(), cacheList); err != nil {
 		return err
 	}
+
+	// Merge any new candles added by ReportEpoch to the older candles.
+	s.cacheMtx.Lock()
+	for binSize, cache := range s.marketCaches[mktName] {
+		for i := range cache.Candles {
+			binCaches[binSize].Add(&cache.Candles[i]) // added candles must be and are newer
+		}
+	}
+	s.marketCaches[mktName] = binCaches
+	s.cacheMtx.Unlock()
+
 	return nil
 }
 
@@ -116,7 +126,8 @@ func (s *DataAPI) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matche
 		defer s.cacheMtx.Unlock()
 		mktCaches := s.marketCaches[mktName]
 		if mktCaches == nil {
-			return 0, 0, 0, 0, fmt.Errorf("unknown market %q", mktName)
+			mktCaches = make(map[uint64]*candles.Cache, len(binSizes)+1)
+			s.marketCaches[mktName] = mktCaches
 		}
 		epochDur := s.epochDurations[mktName]
 		startStamp := epochIdx * epochDur
@@ -238,6 +249,6 @@ func init() {
 		if err != nil {
 			panic("error parsing bin size '" + s + "': " + err.Error())
 		}
-		binSizes = append(binSizes, uint64(dur/time.Millisecond))
+		binSizes = append(binSizes, uint64(dur.Milliseconds()))
 	}
 }

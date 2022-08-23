@@ -128,6 +128,7 @@ type DEX struct {
 	bookRouter  *market.BookRouter
 	subsystems  []subsystem
 	server      *comms.Server
+	dataAPI     *apidata.DataAPI
 
 	configRespMtx sync.RWMutex
 	configResp    *configResponse
@@ -746,11 +747,6 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		markets[mktInf.Name] = mkt
 		marketTunnels[mktInf.Name] = mkt
 		pendingAccounters[mktInf.Name] = mkt
-		log.Infof("Preparing historical market data API for market %v...", mktInf.Name)
-		err = dataAPI.AddMarketSource(mkt)
-		if err != nil {
-			return nil, fmt.Errorf("DataSource.AddMarket: %w", err)
-		}
 
 		// Having loaded the book, get the accounts owning the orders.
 		_, buys, sells := mkt.Book()
@@ -844,6 +840,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		subsystems:  subsystems,
 		server:      server,
 		configResp:  cfgResp,
+		dataAPI:     dataAPI,
 	}
 
 	comms.RegisterHTTP(msgjson.ConfigRoute, dexMgr.handleDEXConfig)
@@ -853,6 +850,16 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	ready = true // don't shut down on return
 
 	return dexMgr, nil
+}
+
+func (dm *DEX) LoadHistoricalAPIData() {
+	for mktName, mkt := range dm.markets {
+		log.Infof("Preparing historical market data API for market %v...", mktName)
+		err := dm.dataAPI.AddMarketSource(mkt)
+		if err != nil {
+			log.Errorf("DataSource.AddMarket: %w", err)
+		}
+	}
 }
 
 // Asset retrieves an asset backend by its ID.
