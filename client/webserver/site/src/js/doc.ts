@@ -110,9 +110,7 @@ export default class Doc {
    * the bounds of the specified element.
    */
   static mouseInElement (e: MouseEvent, el: HTMLElement): boolean {
-    const rect = el.getBoundingClientRect()
-    return e.pageX >= rect.left && e.pageX <= rect.right &&
-      e.pageY >= rect.top && e.pageY <= rect.bottom
+    return el.contains(e.target as Node)
   }
 
   /*
