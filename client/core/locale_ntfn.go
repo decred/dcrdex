@@ -1178,11 +1178,314 @@ var plPL = map[Topic]*translation{
 	},
 }
 
+// deDE is the German translations.
+var deDE = map[Topic]*translation{
+	// [host]
+	TopicAccountRegistered: {
+		subject:  "Account registeriert",
+		template: "Du kannst nun auf %s handeln",
+	},
+	// [confs, host]
+	TopicFeePaymentInProgress: {
+		subject:  "Abwicklung der Registrationsgebühr",
+		template: "Warten auf %d Bestätigungen bevor mit dem Handel bei %s begonnen werden kann",
+	},
+	// [confs, required confs]
+	TopicRegUpdate: {
+		subject:  "Aktualisierung der Registration",
+		template: "%v/%v Bestätigungen der Registrationsgebühr",
+	},
+	// [host, error]
+	TopicFeePaymentError: {
+		subject:  "Fehler bei der Zahlung der Registrationsgebühr",
+		template: "Bei der Zahlung der Registrationsgebühr für %s trat ein Fehler auf: %v",
+	},
+	// [host, error]
+	TopicAccountUnlockError: {
+		subject:  "Fehler beim Entsperren des Accounts",
+		template: "Fehler beim Entsperren des Accounts für %s: %v",
+	},
+	// [host]
+	TopicFeeCoinError: {
+		subject:  "Coin Fehler bei Registrationsgebühr",
+		template: "Fehlende Coin Angabe für Registrationsgebühr bei %s.",
+	},
+	// [host]
+	TopicWalletConnectionWarning: {
+		subject:  "Warnung bei Wallet Verbindung",
+		template: "Unvollständige Registration für %s erkannt, konnte keine Verbindung zum Decred Wallet herstellen",
+	},
+	// [host, error]
+	TopicWalletUnlockError: {
+		subject:  "Fehler beim Entsperren des Wallet",
+		template: "Verbunden zum Wallet um die Registration bei %s abzuschließen, ein Fehler beim entsperren des Wallet ist aufgetreten: %v",
+	},
+	// [asset name, error message]
+	TopicWalletCommsWarning: {
+		subject:  "Probleme mit der Verbindung zum Wallet",
+		template: "Kommunikation mit dem %v Wallet nicht möglich! Grund: %q",
+	},
+	// [asset name]
+	TopicWalletPeersWarning: {
+		subject:  "Problem mit dem Wallet-Netzwerk",
+		template: "%v Wallet hat keine Netzwerk-Peers!",
+	},
+	// [asset name]
+	TopicWalletPeersRestored: {
+		subject:  "Wallet-Konnektivität wiederhergestellt",
+		template: "Die Verbindung mit dem %v Wallet wurde wiederhergestellt.",
+	},
+	// [ticker, error]
+	TopicSendError: {
+		subject:  "Sendefehler",
+		template: "Fehler beim senden von %s aufgetreten: %v",
+	},
+	// [ticker, coin ID]
+	TopicSendSuccess: {
+		subject:  "Erfolgreich gesendet",
+		template: "Das Senden von %s wurde erfolgreich abgeschlossen. Coin ID = %s",
+	},
+	// [error]
+	TopicOrderLoadFailure: {
+		subject:  "Fehler beim Laden der Aufträge",
+		template: "Einige Aufträge konnten nicht aus der Datenbank geladen werden: %v",
+	},
+	// [qty, ticker, token]
+	TopicYoloPlaced: {
+		subject:  "Marktauftrag platziert",
+		template: "Verkaufe %s %s zum Marktpreis (%s)",
+	},
+	// [sell string, qty, ticker, rate string, token]
+	TopicOrderPlaced: {
+		subject:  "Auftrag platziert",
+		template: "%s %s %s, Kurs = %s (%s)",
+	},
+	// [missing count, token, host]
+	TopicMissingMatches: {
+		subject:  "Fehlende Matches",
+		template: "%d Matches für den Auftrag %s wurden nicht von %q gemeldet und gelten daher als widerrufen",
+	},
+	// [token, error]
+	TopicWalletMissing: {
+		subject:  "Wallet fehlt",
+		template: "Fehler bei der Wallet-Abfrage für den aktiven Auftrag %s: %v",
+	},
+	// [side, token, match status]
+	TopicMatchErrorCoin: {
+		subject:  "Fehler beim Coin Match",
+		template: "Match %s für den Auftrag %s hat den Status %s, hat aber keine Coins für den Swap vom Maker gefunden.",
+	},
+	// [side, token, match status]
+	TopicMatchErrorContract: {
+		subject:  "Fehler beim Match Kontrakt",
+		template: "Match %s für Auftrag %s hat den Status %s, hat aber keinen passenden Maker Swap Kontrakt.",
+	},
+	// [ticker, contract, token, error]
+	TopicMatchRecoveryError: {
+		subject:  "Fehler bei Match Wiederherstellung",
+		template: "Fehler bei der Prüfung des Swap-Kontrakts der Gegenpartei (%s %v) während der Wiederherstellung des Auftrags %s: %v",
+	},
+	// [token]
+	TopicOrderCoinError: {
+		subject:  "Fehler bei den Coins für einen Auftrag",
+		template: "Keine Coins zur Finanzierung des aktiven Auftrags %s gefunden",
+	},
+	// [token, ticker, error]
+	TopicOrderCoinFetchError: {
+		subject:  "Fehler beim Abruf der Coins für den Auftrag",
+		template: "Beim Abruf der Coins als Quelle für den Auftrag %s (%s) ist ein Fehler aufgetreten: %v",
+	},
+	// [token]
+	TopicMissedCancel: {
+		subject:  "Abbruch verpasst",
+		template: "Der Abbruch passt nicht zum Auftrag %s. Dies kann passieren wenn der Abbruch in der gleichen Epoche wie der Abschluss übermittelt wird oder wenn der Zielauftrag vollständig ausgeführt wird bevor er mit dem Abbruch gematcht werden konnte.",
+	},
+	// [capitalized sell string, base ticker, quote ticker, host, token]
+	TopicOrderCanceled: {
+		subject:  "Auftrag abgebrochen",
+		template: "%s Auftrag für %s-%s bei %s wurde abgebrochen (%s)",
+	},
+	// [capitalized sell string, base ticker, quote ticker, fill percent, token]
+	TopicMatchesMade: {
+		subject:  "Matches durchgeführt",
+		template: "%s Auftrag für %s-%s %.1f%% erfüllt (%s)",
+	},
+	// [qty, ticker, token]
+	TopicSwapSendError: {
+		subject:  "Fehler beim Senden des Swaps",
+		template: "Beim Senden des Swap Output(s) im Wert von %s %s für den Auftrag %s",
+	},
+	// [match, error]
+	TopicInitError: {
+		subject:  "Fehler beim Swap Reporting",
+		template: "Fehler bei der Benachrichtigung des Swaps an den DEX für den Match %s: %v",
+	},
+	// [match, error]
+	TopicReportRedeemError: {
+		subject:  "Fehler beim Redeem Reporting",
+		template: "Fehler bei der Benachrichtigung des DEX für die Redemption des Match %s: %v",
+	},
+	// [qty, ticker, token]
+	TopicSwapsInitiated: {
+		subject:  "Swaps initiiert",
+		template: "Swaps im Wert von %s %s für den Auftrag %s gesendet",
+	},
+	// [qty, ticker, token]
+	TopicRedemptionError: {
+		subject:  "Fehler bei der Redemption",
+		template: "Fehler beim Senden von Redemptions im Wert von %s %s für Auftrag %s",
+	},
+	// [qty, ticker, token]
+	TopicMatchComplete: {
+		subject:  "Match abgeschlossen",
+		template: "Redeemed %s %s für Auftrag %s",
+	},
+	// [qty, ticker, token]
+	TopicRefundFailure: {
+		subject:  "Fehler bei der Erstattung",
+		template: "%s %s für Auftrag %s erstattet, mit einigen Fehlern",
+	},
+	// [qty, ticker, token]
+	TopicMatchesRefunded: {
+		subject:  "Matches Erstattet",
+		template: "%s %s für Auftrag %s erstattet",
+	},
+	// [match ID token]
+	TopicMatchRevoked: {
+		subject:  "Match widerrufen",
+		template: "Match %s wurde widerrufen",
+	},
+	// [token, market name, host]
+	TopicOrderRevoked: {
+		subject:  "Auftrag widerrufen",
+		template: "Der Auftrag %s für den %s Markt bei %s wurde vom Server widerrufen",
+	},
+	// [token, market name, host]
+	TopicOrderAutoRevoked: {
+		subject:  "Auftrag automatisch widerrufen",
+		template: "Der Auftrag %s für den %s Markt bei %s wurde wegen Aussetzung des Marktes widerrufen",
+	},
+	// [ticker, coin ID, match]
+	TopicMatchRecovered: {
+		subject:  "Match wiederhergestellt",
+		template: "Die Redemption (%s: %v) des Anbieters wurde gefunden und das Geheimnis für Match %s verifiziert",
+	},
+	// [token]
+	TopicCancellingOrder: {
+		subject:  "Auftrag abgebrochen",
+		template: "Der Auftrag %s wurde abgebrochen",
+	},
+	// [token, old status, new status]
+	TopicOrderStatusUpdate: {
+		subject:  "Aktualisierung des Auftragsstatus",
+		template: "Status des Auftrags %v geändert von %v auf %v",
+	},
+	// [count, host, token]
+	TopicMatchResolutionError: {
+		subject:  "Fehler bei der Auflösung für Match",
+		template: "%d Matches durch %s gemeldet wurden für %s nicht gefunden.",
+	},
+	// [token]
+	TopicFailedCancel: {
+		subject:  "Abbruch fehlgeschlagen",
+		template: "Der Auftrag für den Abbruch des Auftrags %s blieb 2 Epochen lang im Epoche-Status hängen und wird nun gelöscht.",
+	},
+	// [coin ID, ticker, match]
+	TopicAuditTrouble: {
+		subject:  "Audit-Probleme",
+		template: "Immernoch auf der Suche den Coins %v (%s) der Gegenseite für Match %s. Überprüfe deine Internetverbindung und die Verbindungen zum Wallet.",
+	},
+	// [host, error]
+	TopicDexAuthError: {
+		subject:  "DEX-Authentifizierungsfehler",
+		template: "%s: %v",
+	},
+	// [count, host]
+	TopicUnknownOrders: {
+		subject:  "DEX meldet unbekannte Aufträge",
+		template: "%d aktive Aufträge von DEX %s gemeldet aber konnten nicht gefunden werden.",
+	},
+	// [count]
+	TopicOrdersReconciled: {
+		subject:  "Aufträge mit DEX abgestimmt",
+		template: "Der Status für %d Aufträge wurde aktualisiert.",
+	},
+	// [ticker, address]
+	TopicWalletConfigurationUpdated: {
+		subject:  "Aktualisierung der Wallet Konfiguration",
+		template: "Konfiguration für Wallet %s wurde aktualisiert. Einzahlungsadresse = %s",
+	},
+	//  [ticker]
+	TopicWalletPasswordUpdated: {
+		subject:  "Wallet-Passwort aktualisiert",
+		template: "Passwort für das %s Wallet wurde aktualisiert.",
+	},
+	// [market name, host, time]
+	TopicMarketSuspendScheduled: {
+		subject:  "Aussetzung des Marktes geplant",
+		template: "%s Markt bei %s ist nun für ab %v zur Aussetzung geplant.",
+	},
+	// [market name, host]
+	TopicMarketSuspended: {
+		subject:  "Markt ausgesetzt",
+		template: "Der Handel für den %s Markt bei %s ist nun ausgesetzt.",
+	},
+	// [market name, host]
+	TopicMarketSuspendedWithPurge: {
+		subject:  "Markt ausgesetzt, Aufträge gelöscht",
+		template: "Der Handel für den %s Markt bei %s ist nun ausgesetzt. Alle gebuchten Aufträge werden jetzt ENTFERNT.",
+	},
+	// [market name, host, time]
+	TopicMarketResumeScheduled: {
+		subject:  "Wiederaufnahme des Marktes geplant",
+		template: "Der %s Markt bei %s wird nun zur Wiederaufnahme ab %v geplant",
+	},
+	// [market name, host, epoch]
+	TopicMarketResumed: {
+		subject:  "Markt wiederaufgenommen",
+		template: "Der %s Markt bei %s hat den Handel mit der Epoche %d wieder aufgenommen",
+	},
+	// [host]
+	TopicUpgradeNeeded: {
+		subject:  "Upgrade notwendig",
+		template: "Du musst deinen Klient aktualisieren um bei %s zu Handeln.",
+	},
+	// [host]
+	TopicDEXConnected: {
+		subject:  "Server verbunden",
+		template: "Erfolgreich verbunden mit %s",
+	},
+	// [host]
+	TopicDEXDisconnected: {
+		subject:  "Verbindung zum Server getrennt",
+		template: "Verbindung zu %s unterbrochen",
+	},
+	// [host, rule, time, details]
+	TopicPenalized: {
+		subject:  "Bestrafung durch einen Server erhalten",
+		template: "Bestrafung von DEX %s\nletzte gebrochene Regel: %s\nZeitpunkt: %v\nDetails:\n\"%s\"\n",
+	},
+	TopicSeedNeedsSaving: {
+		subject:  "Vergiss nicht deinen App-Seed zu sichern",
+		template: "Es wurde ein neuer App-Seed erstellt. Erstelle jetzt eine Sicherungskopie in den Einstellungen.",
+	},
+	TopicUpgradedToSeed: {
+		subject:  "Sichere deinen neuen App-Seed",
+		template: "Dein Klient wurde aktualisiert und nutzt nun einen App-Seed. Erstelle jetzt eine Sicherungskopie in den Einstellungen.",
+	},
+	// [host, msg]
+	TopicDEXNotification: {
+		subject:  "Nachricht von DEX",
+		template: "%s: %s",
+	},
+}
+
 var locales = map[string]map[Topic]*translation{
 	language.AmericanEnglish.String():     enUS,
 	language.BrazilianPortuguese.String(): ptBR,
 	"zh-CN":                               zhCN, // language.SimplifiedChinese is zh-Hans
 	"pl-PL":                               plPL, // language.Polish is pl
+	"de-DE":                               deDE, // language.German is de
 }
 
 func init() {
