@@ -15,15 +15,17 @@ import (
 type WalletTrait uint64
 
 const (
-	WalletTraitRescanner    WalletTrait = 1 << iota // The Wallet is an asset.Rescanner.
-	WalletTraitNewAddresser                         // The Wallet can generate new addresses on demand with NewAddress.
-	WalletTraitLogFiler                             // The Wallet allows for downloading of a log file.
-	WalletTraitFeeRater                             // Wallet can provide a fee rate for non-critical transactions
-	WalletTraitAccelerator                          // This wallet can accelerate transactions using the CPFP technique
-	WalletTraitRecoverer                            // The wallet is an asset.Recoverer.
-	WalletTraitWithdrawer                           // The Wallet can withdraw a specific amount from an exchange wallet.
-	WalletTraitSweeper                              // The Wallet can sweep all the funds, leaving no change.
-	WalletTraitRestorer                             // The wallet is an asset.WalletRestorer
+	WalletTraitRescanner           WalletTrait = 1 << iota // The Wallet is an asset.Rescanner.
+	WalletTraitNewAddresser                                // The Wallet can generate new addresses on demand with NewAddress.
+	WalletTraitLogFiler                                    // The Wallet allows for downloading of a log file.
+	WalletTraitFeeRater                                    // Wallet can provide a fee rate for non-critical transactions
+	WalletTraitAccelerator                                 // This wallet can accelerate transactions using the CPFP technique
+	WalletTraitRecoverer                                   // The wallet is an asset.Recoverer.
+	WalletTraitWithdrawer                                  // The Wallet can withdraw a specific amount from an exchange wallet.
+	WalletTraitSweeper                                     // The Wallet can sweep all the funds, leaving no change.
+	WalletTraitRestorer                                    // The wallet is an asset.WalletRestorer
+	WalletTraitRedemptionConfirmer                         // The wallet has a process to confirm a redemption.
+	WalletTraitDataClearer                                 // The wallet stores data that should be cleared when there are no active deals.
 )
 
 // IsRescanner tests if the WalletTrait has the WalletTraitRescanner bit set.
@@ -80,6 +82,12 @@ func (wt WalletTrait) IsRestorer() bool {
 	return wt&WalletTraitRestorer != 0
 }
 
+// IsDataClearer test if the WalletTrait has the WalletTraitDataClearer bit set,
+// which indicates the wallet implements the DataClearer interface.
+func (wt WalletTrait) IsDataClearer() bool {
+	return wt&WalletTraitDataClearer != 0
+}
+
 // DetermineWalletTraits returns the WalletTrait bitset for the provided Wallet.
 func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(Rescanner); is {
@@ -108,6 +116,12 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	}
 	if _, is := w.(WalletRestorer); is {
 		t |= WalletTraitRestorer
+	}
+	if _, is := w.(RedemptionConfirmer); is {
+		t |= WalletTraitRedemptionConfirmer
+	}
+	if _, is := w.(DataClearer); is {
+		t |= WalletTraitDataClearer
 	}
 	return t
 }
@@ -339,14 +353,6 @@ type Wallet interface {
 	// performed long after the swap is broadcast; might be better executed from
 	// a goroutine.
 	FindRedemption(ctx context.Context, coinID, contract dex.Bytes) (redemptionCoin, secret dex.Bytes, err error)
-	// ConfirmRedemption checks the status of a redemption. It returned the number
-	// of confirmations the redemption has, the number of confirmations that are
-	// required for it to be considered fully confirmed, and the CoinID used to
-	// do the redemption. If it is determined that a transaction will not be mined,
-	// this function will submit a new transaction to replace the old one. The
-	// caller is notified of this by having a different CoinID in the returned
-	// asset.ConfirmRedemptionStatus as was used to call the function.
-	ConfirmRedemption(coinID dex.Bytes, redemption *Redemption) (*ConfirmRedemptionStatus, error)
 	// Refund refunds a contract. This can only be used after the time lock has
 	// expired AND if the contract has not been redeemed/refunded. This method
 	// MUST return an asset.CoinNotFoundError error if the swap is already
@@ -576,6 +582,28 @@ type LiveReconfigurer interface {
 	// requires a restart, the Wallet should still validate as much
 	// configuration as possible.
 	Reconfigure(ctx context.Context, cfg *WalletConfig, currentAddress string) (restartRequired bool, err error)
+}
+
+// RedemptionConfirmer is a wallet that has a process to confirm and
+// potentially resubmit a redemption.
+type RedemptionConfirmer interface {
+	// ConfirmRedemption checks the status of a redemption. It returned the
+	// number of confirmations the redemption has, the number of confirmations
+	// that are required for it to be considered fully confirmed, and the
+	// CoinID used to do the redemption. If it is determined that a transaction
+	// will not be mined, this function will submit a new transaction to
+	// replace the old one. The caller is notified of this by having a
+	// different CoinID in the returned asset.ConfirmRedemptionStatus as was
+	// used to call the function.
+	ConfirmRedemption(coinID dex.Bytes, redemption *Redemption) (*ConfirmRedemptionStatus, error)
+}
+
+// DataClearer is a wallet that stores temporary data that should be cleared
+// when the asset has no active trades.
+type DataClearer interface {
+	// ClearData lets the wallet know that it can clear any data required for
+	// active orders.
+	ClearData()
 }
 
 // Balance is categorized information about a wallet's balance.

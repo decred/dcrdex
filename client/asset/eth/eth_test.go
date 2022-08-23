@@ -3594,8 +3594,10 @@ func TestConfirmRedemption(t *testing.T) {
 }
 
 func testConfirmRedemption(t *testing.T, assetID uint32) {
-	w, eth, node, shutdown := tassetWallet(assetID)
+	wi, eth, node, shutdown := tassetWallet(assetID)
 	defer shutdown()
+
+	w := wi.(asset.RedemptionConfirmer)
 
 	txHashes := make([]common.Hash, 5)
 	secrets := make([]common.Hash, 5)

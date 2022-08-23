@@ -3332,11 +3332,6 @@ func (btc *baseWallet) LocktimeExpired(_ context.Context, contract dex.Bytes) (b
 	return medianTime.After(contractExpiry), contractExpiry, nil
 }
 
-// ConfirmRedemption is not implemented.
-func (btc *baseWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Redemption) (*asset.ConfirmRedemptionStatus, error) {
-	return &asset.ConfirmRedemptionStatus{}, nil
-}
-
 // FindRedemption watches for the input that spends the specified contract
 // coin, and returns the spending input and the contract's secret key when it
 // finds a spender.

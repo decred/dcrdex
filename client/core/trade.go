@@ -2510,6 +2510,16 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 // This method accesses match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
 func (t *trackedTrade) confirmRedemption(match *matchTracker) {
+	confirmer, isConfirmer := t.wallets.toWallet.Wallet.(asset.RedemptionConfirmer)
+	if !isConfirmer {
+		match.Status = order.MatchConfirmed
+		err := t.db.UpdateMatch(&match.MetaMatch)
+		if err != nil {
+			t.dc.log.Errorf("Failed to update match in db %v", err)
+		}
+		return
+	}
+
 	var redeemCoinID order.CoinID
 	if match.Side == order.Maker {
 		redeemCoinID = match.MetaData.Proof.MakerRedeem
@@ -2519,7 +2529,7 @@ func (t *trackedTrade) confirmRedemption(match *matchTracker) {
 
 	match.confirmRedemptionNumTries++
 
-	redemptionStatus, err := t.wallets.toWallet.ConfirmRedemption(dex.Bytes(redeemCoinID), &asset.Redemption{
+	redemptionStatus, err := confirmer.ConfirmRedemption(dex.Bytes(redeemCoinID), &asset.Redemption{
 		Spends: match.counterSwap,
 		Secret: match.MetaData.Proof.Secret,
 	})
@@ -2550,7 +2560,7 @@ func (t *trackedTrade) confirmRedemption(match *matchTracker) {
 		}
 	}
 
-	if redemptionStatus == nil || redemptionStatus.Req <= redemptionStatus.Confs {
+	if redemptionStatus.Req <= redemptionStatus.Confs {
 		redemptionConfirmed = true
 		match.Status = order.MatchConfirmed
 		match.redemptionConfs = 0

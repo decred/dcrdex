@@ -2281,6 +2281,21 @@ func (w *assetWallet) RestorationInfo(seed []byte) ([]*asset.WalletRestoration, 
 	}, nil
 }
 
+// ClearData is called when there are no active trades for ETH or any tokens.
+// It will clear the monitoredTxs map and the underlying key value db.
+func (w *assetWallet) ClearData() {
+	w.monitoredTxsMtx.Lock()
+	defer w.monitoredTxsMtx.Unlock()
+
+	w.monitoredTxs = make(map[common.Hash]*monitoredTx)
+
+	if err := w.monitoredTxDB.ForEach(func(k, v []byte) error {
+		return w.monitoredTxDB.Delete(k)
+	}); err != nil {
+		w.log.Errorf("failed to delete monitored txs from db: %v", err)
+	}
+}
+
 // SwapConfirmations gets the number of confirmations and the spend status
 // for the specified swap.
 func (w *assetWallet) SwapConfirmations(ctx context.Context, coinID dex.Bytes, contract dex.Bytes, _ time.Time) (confs uint32, spent bool, err error) {
@@ -2810,6 +2825,8 @@ func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Rede
 			w.log.Debugf("tx %s was replaced by %s since the last attempt to confirm redemption", txHash, monitoredTxHash)
 			txHash = monitoredTxHash
 		}
+	} else {
+		w.log.Warnf("tx %s is missing from monitored txs", txHash)
 	}
 	w.monitoredTxsMtx.Unlock()
 
