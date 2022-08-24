@@ -118,7 +118,7 @@ func (d *Driver) Info() *asset.WalletInfo {
 // only used for wallets with WalletDefinition.Seeded = true.
 func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
 	if walletType != walletTypeSPV {
-		return false, fmt.Errorf("no Bitcoin wallet of type %q available", walletType)
+		return false, fmt.Errorf("no Bitcoin Cash wallet of type %q available", walletType)
 	}
 
 	chainParams, err := parseChainParams(net)

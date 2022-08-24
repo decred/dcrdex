@@ -1305,9 +1305,9 @@ func (w *walletExtender) Start() (SPVService, error) {
 		AddPeers:      addPeers,
 		ConnectPeers:  connectPeers,
 		// WARNING: PublishTransaction currently uses the entire duration
-		// because if an external bug, but even if the resolved, a typical
-		// inv/getdata round trip is ~4 seconds, so we set this so neutrino does
-		// not cancel queries too readily.
+		// because if an external bug, but even if the bug is resolved, a
+		// typical inv/getdata round trip is ~4 seconds, so we set this so
+		// neutrino does not cancel queries too readily.
 		BroadcastTimeout: 6 * time.Second,
 	})
 	if err != nil {

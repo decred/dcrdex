@@ -192,11 +192,16 @@ func (w *bchSPVWallet) Start() (btc.SPVService, error) {
 	// Depending on the network, we add some addpeers or a connect peer. On
 	// regtest, if the peers haven't been explicitly set, add the simnet harness
 	// alpha node as an additional peer so we don't have to type it in. On
-	// mainet and testnet3, add a known reliable persistent peer to be used in
+	// mainet and testnet4, add a known reliable persistent peer to be used in
 	// addition to normal DNS seed-based peer discovery.
-	// var addPeers []string
+	var addPeers []string
 	var connectPeers []string
 	switch w.chainParams.Net {
+	// case bchwire.MainNet:
+	// 	addPeers = []string{"cfilters.ssgen.io"}
+	case bchwire.TestNet4:
+		// Add the address for a local bchd testnet4 node.
+		addPeers = []string{"localhost:28333"}
 	case bchwire.TestNet, bchwire.SimNet: // plain "wire.TestNet" is regnet!
 		connectPeers = []string{"localhost:21577"}
 	}
@@ -208,13 +213,12 @@ func (w *bchSPVWallet) Start() (btc.SPVService, error) {
 		ChainParams: *w.chainParams,
 		// https://github.com/gcash/neutrino/pull/36
 		PersistToDisk: true, // keep cfilter headers on disk for efficient rescanning
-		// AddPeers:     addPeers,
-		ConnectPeers: connectPeers,
-		// // WARNING: PublishTransaction currently uses the entire duration
-		// // because if an external bug, but even if the resolved, a typical
-		// // inv/getdata round trip is ~4 seconds, so we set this so neutrino does
-		// // not cancel queries too readily.
-		// https://github.com/gcash/neutrino/pull/35
+		AddPeers:      addPeers,
+		ConnectPeers:  connectPeers,
+		// WARNING: PublishTransaction currently uses the entire duration
+		// because if an external bug, but even if the bug is resolved, a
+		// typical inv/getdata round trip is ~4 seconds, so we set this so
+		// neutrino does not cancel queries too readily.
 		BroadcastTimeout: 6 * time.Second,
 	})
 	if err != nil {
