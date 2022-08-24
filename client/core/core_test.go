@@ -207,6 +207,9 @@ func tNewAccount(crypter *tCrypter) *dexAccount {
 		privKey:   privKey,
 		id:        account.NewID(privKey.PubKey().SerializeCompressed()),
 		feeCoin:   []byte("somecoin"),
+		// feeAssetID is 0 (btc)
+		// tier, bonds, etc. set on auth
+		tier: 1, // not suspended by default
 	}
 }
 
@@ -228,6 +231,8 @@ func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, 
 		},
 		books: make(map[string]*bookie),
 		cfg: &msgjson.ConfigResult{
+			APIVersion:       serverdex.PreAPIVersion,
+			DEXPubKey:        acct.dexPubKey.SerializeCompressed(),
 			CancelMax:        0.8,
 			BroadcastTimeout: 1000, // 1000 ms for faster expiration, but ticker fires fast
 			Assets: []*msgjson.Asset{
@@ -264,9 +269,12 @@ func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, 
 					},
 				},
 			},
+			BondExpiry: 86400, // >0 make client treat as API v1
+			BondAssets: map[string]*msgjson.BondAsset{
+				"dcr": {ID: 42, Amt: tFee, Confs: 1},
+			},
 			Fee:            tFee,
-			RegFeeConfirms: 0,
-			DEXPubKey:      acct.dexPubKey.SerializeCompressed(),
+			RegFeeConfirms: 0, // 1 or remove?
 			BinSizes:       []string{"1h", "24h"},
 		},
 		notify:            func(Notification) {},
@@ -1211,11 +1219,6 @@ func newTestRig() *testRig {
 		legacyKeyErr: tErr,
 	}
 
-	ai := &db.AccountInfo{
-		Host: "somedex.com",
-	}
-	tdb.acct = ai
-
 	// Set the global waiter expiration, and start the waiter.
 	queue := wait.NewTickerQueue(time.Millisecond * 5)
 	ctx, cancel := context.WithCancel(tCtx)
@@ -1228,6 +1231,18 @@ func newTestRig() *testRig {
 
 	crypter := &tCrypter{}
 	dc, conn, acct := testDexConnection(ctx, crypter) // crypter makes acct.encKey consistent with privKey
+
+	ai := &db.AccountInfo{
+		Host:      "somedex.com",
+		Cert:      acct.cert,
+		DEXPubKey: acct.dexPubKey,
+		EncKeyV2:  acct.encKey,
+		// Bonds: nil,
+		// LegacyFeeCoin:    acct.feeCoin,
+		// LegacyFeeAssetID: acct.feeAssetID,
+		// LegacyFeePaid: true,
+	}
+	tdb.acct = ai
 
 	shutdown := func() {
 		cancel()
@@ -1350,6 +1365,10 @@ func (rig *testRig) queueConnect(rpcErr *msgjson.Error, matches []*msgjson.Match
 		result := &msgjson.ConnectResult{Sig: connect.Sig, ActiveMatches: matches, ActiveOrderStatuses: orders}
 		if len(suspended) > 0 {
 			result.Suspended = &suspended[0]
+			if suspended[0] {
+				tier := int64(-1) // even <0 so keys cycle even with v1 api
+				result.Tier = &tier
+			}
 		}
 		var resp *msgjson.Message
 		if rpcErr != nil {
@@ -5683,7 +5702,7 @@ func TestResolveActiveTrades(t *testing.T) {
 	defer rig.shutdown()
 	tCore := rig.core
 
-	rig.acct.auth(false) // Short path through initializeDEXConnections
+	rig.acct.auth(1, false) // Short path through initializeDEXConnections
 
 	utxoAsset /* base */, acctAsset /* quote */ := tUTXOAssetB, tACCTAsset
 
@@ -5848,7 +5867,7 @@ func TestReReserveFunding(t *testing.T) {
 	defer rig.shutdown()
 	tCore := rig.core
 
-	rig.acct.auth(false) // Short path through initializeDEXConnections
+	rig.acct.auth(1, false) // Short path through initializeDEXConnections
 
 	utxoAsset /* base */, acctAsset /* quote */ := tUTXOAssetB, tACCTAsset
 
@@ -9556,9 +9575,9 @@ func TestRefreshServerConfig(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
 
-	// Add an API version to serverAPIVers to use in tests.
-	newAPIVer := ^uint16(0) - 1
-	serverAPIVers = append(serverAPIVers, int(newAPIVer))
+	// Add an API version to supportedAPIVers to use in tests.
+	const newAPIVer = ^uint16(0) - 1
+	supportedAPIVers = append(supportedAPIVers, int32(newAPIVer))
 
 	queueConfig := func(err *msgjson.Error, apiVer uint16) {
 		rig.ws.queueResponse(msgjson.ConfigRoute, func(msg *msgjson.Message, f msgFunc) error {
@@ -9598,7 +9617,7 @@ func TestRefreshServerConfig(t *testing.T) {
 	for _, test := range tests {
 		rig.dc.cfg.Markets[0].Base = test.marketBase
 		queueConfig(test.configErr, test.gotAPIVer)
-		err := rig.dc.refreshServerConfig()
+		_, err := rig.dc.refreshServerConfig()
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %q", test.name)
