@@ -29,6 +29,9 @@ import (
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	btcwallet "github.com/btcsuite/btcwallet/wallet"
 	"github.com/btcsuite/btcwallet/wtxmgr"
+	neutrino "github.com/dcrlabs/neutrino-ltc"
+	labschain "github.com/dcrlabs/neutrino-ltc/chain"
+	"github.com/decred/slog"
 	"github.com/jrick/logrotate/rotator"
 	btcneutrino "github.com/lightninglabs/neutrino"
 	"github.com/lightninglabs/neutrino/headerfs"
@@ -44,7 +47,6 @@ import (
 	"github.com/ltcsuite/ltcwallet/walletdb"
 	_ "github.com/ltcsuite/ltcwallet/walletdb/bdb"
 	ltcwtxmgr "github.com/ltcsuite/ltcwallet/wtxmgr"
-	"github.com/ltcsuite/neutrino"
 )
 
 const (
@@ -75,7 +77,7 @@ type ltcSPVWallet struct {
 
 	// This section is populated in Start.
 	*wallet.Wallet
-	chainClient *chain.NeutrinoClient
+	chainClient *labschain.NeutrinoClient
 	cl          *neutrino.ChainService
 	loader      *wallet.Loader
 	neutrinoDB  walletdb.DB
@@ -151,6 +153,19 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string,
 	return nil
 }
 
+// walletParams works around a bug in dcrwallet that doesn't recognize
+// wire.TestNet4 in (*ScopedKeyManager).cloneKeyWithVersion which is called from
+// AccountProperties. Only do this for the *wallet.Wallet, not the
+// *neutrino.ChainService.
+func (w *ltcSPVWallet) walletParams() *ltcchaincfg.Params {
+	if w.chainParams.Name != ltcchaincfg.TestNet4Params.Name {
+		return w.chainParams
+	}
+	spoofParams := *w.chainParams
+	spoofParams.Net = ltcwire.TestNet3
+	return &spoofParams
+}
+
 // Start initializes the *ltcwallet.Wallet and its supporting players and starts
 // syncing.
 func (w *ltcSPVWallet) Start() (btc.SPVService, error) {
@@ -158,7 +173,7 @@ func (w *ltcSPVWallet) Start() (btc.SPVService, error) {
 		return nil, fmt.Errorf("error initializing btcwallet+neutrino logging: %v", err)
 	}
 	// recoverWindow arguments borrowed from ltcwallet directly.
-	w.loader = wallet.NewLoader(w.chainParams, w.dir, true, 60*time.Second, 250)
+	w.loader = wallet.NewLoader(w.walletParams(), w.dir, true, 60*time.Second, 250)
 
 	exists, err := w.loader.WalletExists()
 	if err != nil {
@@ -190,9 +205,11 @@ func (w *ltcSPVWallet) Start() (btc.SPVService, error) {
 	// alpha node as an additional peer so we don't have to type it in. On
 	// mainet and testnet3, add a known reliable persistent peer to be used in
 	// addition to normal DNS seed-based peer discovery.
-	// var addPeers []string
+	var addPeers []string
 	var connectPeers []string
 	switch w.chainParams.Net {
+	case ltcwire.TestNet4:
+		addPeers = []string{"127.0.0.1:19335"}
 	case ltcwire.TestNet, ltcwire.SimNet: // plain "wire.TestNet" is regnet!
 		connectPeers = []string{"localhost:20585"}
 	}
@@ -203,12 +220,12 @@ func (w *ltcSPVWallet) Start() (btc.SPVService, error) {
 		Database:      w.neutrinoDB,
 		ChainParams:   *w.chainParams,
 		PersistToDisk: true, // keep cfilter headers on disk for efficient rescanning
-		// AddPeers:     addPeers,
-		ConnectPeers: connectPeers,
-		// // WARNING: PublishTransaction currently uses the entire duration
-		// // because if an external bug, but even if the resolved, a typical
-		// // inv/getdata round trip is ~4 seconds, so we set this so neutrino does
-		// // not cancel queries too readily.
+		AddPeers:      addPeers,
+		ConnectPeers:  connectPeers,
+		// WARNING: PublishTransaction currently uses the entire duration
+		// because if an external bug, but even if the resolved, a typical
+		// inv/getdata round trip is ~4 seconds, so we set this so neutrino does
+		// not cancel queries too readily.
 		BroadcastTimeout: 6 * time.Second,
 	})
 	if err != nil {
@@ -216,7 +233,7 @@ func (w *ltcSPVWallet) Start() (btc.SPVService, error) {
 	}
 	errCloser.Add(w.cl.Stop)
 
-	w.chainClient = chain.NewNeutrinoClient(w.chainParams, w.cl)
+	w.chainClient = labschain.NewNeutrinoClient(w.chainParams, w.cl, &logAdapter{w.log})
 
 	oldBday := w.Manager.Birthday()
 	wdb := w.Database()
@@ -1046,4 +1063,18 @@ func (f *fileLoggerPlus) Critical(v ...interface{}) {
 	f.log.Critical(v...)
 	f.Logger.Critical(v...)
 
+}
+
+type logAdapter struct {
+	dex.Logger
+}
+
+var _ btclog.Logger = (*logAdapter)(nil)
+
+func (a *logAdapter) Level() btclog.Level {
+	return btclog.Level(a.Logger.Level())
+}
+
+func (a *logAdapter) SetLevel(lvl btclog.Level) {
+	a.Logger.SetLevel(slog.Level(lvl))
 }

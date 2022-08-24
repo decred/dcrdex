@@ -40,6 +40,7 @@ require (
 	github.com/dchest/blake2b v1.0.0 // indirect
 	github.com/dchest/siphash v1.2.3 // indirect
 	github.com/dcrlabs/neutrino-bch v0.0.0-20220809174944-921b271ba678 // indirect
+	github.com/dcrlabs/neutrino-ltc v0.0.0-20220819181220-04c154bb8ed8 // indirect
 	github.com/deckarep/golang-set v1.8.0 // indirect
 	github.com/decred/base58 v1.0.4 // indirect
 	github.com/decred/dcrd/addrmgr/v2 v2.0.0 // indirect

@@ -18,6 +18,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1
 	github.com/dchest/blake2b v1.0.0
 	github.com/dcrlabs/neutrino-bch v0.0.0-20220809174944-921b271ba678
+	github.com/dcrlabs/neutrino-ltc v0.0.0-20220819181220-04c154bb8ed8
 	github.com/decred/base58 v1.0.4
 	github.com/decred/dcrd/addrmgr/v2 v2.0.0
 	github.com/decred/dcrd/blockchain/stake/v4 v4.0.0
@@ -59,7 +60,6 @@ require (
 	github.com/ltcsuite/ltcwallet/wallet/txauthor v1.1.0
 	github.com/ltcsuite/ltcwallet/walletdb v1.3.5
 	github.com/ltcsuite/ltcwallet/wtxmgr v1.5.0
-	github.com/ltcsuite/neutrino v0.13.2
 	github.com/pkg/browser v0.0.0-20210911075715-681adbf594b8
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/tyler-smith/go-bip39 v1.1.0
@@ -130,6 +130,7 @@ require (
 	github.com/ltcsuite/ltcd/ltcutil/psbt v1.1.0-1 // indirect
 	github.com/ltcsuite/ltcwallet/wallet/txrules v1.2.0 // indirect
 	github.com/ltcsuite/ltcwallet/wallet/txsizes v1.1.0 // indirect
+	github.com/ltcsuite/neutrino v0.13.2 // indirect
 	github.com/mattn/go-colorable v0.1.12 // indirect
 	github.com/mattn/go-isatty v0.0.14 // indirect
 	github.com/mattn/go-runewidth v0.0.12 // indirect
