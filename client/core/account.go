@@ -14,17 +14,19 @@ import (
 func (c *Core) disconnectDEX(dc *dexConnection) {
 	// Stop dexConnection books.
 	dc.cfgMtx.RLock()
-	for _, m := range dc.cfg.Markets {
-		// Empty bookie's feeds map, close feeds' channels & stop close timers.
-		dc.booksMtx.Lock()
-		if b, found := dc.books[m.Name]; found {
-			b.closeFeeds()
-			if b.closeTimer != nil {
-				b.closeTimer.Stop()
+	if dc.cfg != nil {
+		for _, m := range dc.cfg.Markets {
+			// Empty bookie's feeds map, close feeds' channels & stop close timers.
+			dc.booksMtx.Lock()
+			if b, found := dc.books[m.Name]; found {
+				b.closeFeeds()
+				if b.closeTimer != nil {
+					b.closeTimer.Stop()
+				}
 			}
+			dc.booksMtx.Unlock()
+			dc.stopBook(m.Base, m.Quote)
 		}
-		dc.booksMtx.Unlock()
-		dc.stopBook(m.Base, m.Quote)
 	}
 	dc.cfgMtx.RUnlock()
 	// Disconnect and delete connection from map.
