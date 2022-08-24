@@ -540,16 +540,21 @@ func (m *Market) ConventionalRateToMsg(p float64) uint64 {
 	return uint64(math.Round(p / m.AtomToConv * calc.RateEncodingFactor))
 }
 
-// FeeAsset has an analogous msgjson type for server providing supported
-// registration fee assets.
-type FeeAsset struct {
-	ID    uint32 `json:"id"`
-	Confs uint32 `json:"confs"`
-	Amt   uint64 `json:"amount"`
+// BondAsset describes the bond asset in terms of it's BIP-44 coin type,
+// required confirmations, and minimum bond amount. There is an analogous
+// msgjson type for server providing supported bond assets.
+type BondAsset struct {
+	Version uint16 `json:"ver"`
+	ID      uint32 `json:"id"`
+	Confs   uint32 `json:"confs"`
+	Amt     uint64 `json:"amount"`
 }
 
+// FeeAsset is deprecated (V0PURGE), but the same as BondAsset.
+type FeeAsset BondAsset
+
 // PendingFeeState conveys a pending registration fee's asset and current
-// confirmation count.
+// confirmation count.  Deprecated (V0PURGE).
 type PendingFeeState struct {
 	Symbol  string `json:"symbol"`
 	AssetID uint32 `json:"assetID"`
@@ -562,11 +567,18 @@ type Exchange struct {
 	AcctID           string                 `json:"acctID"`
 	Markets          map[string]*Market     `json:"markets"`
 	Assets           map[uint32]*dex.Asset  `json:"assets"`
+	BondExpiry       uint64                 `json:"bondExpiry"`
+	BondAssets       map[string]*BondAsset  `json:"bondAssets"`
 	ConnectionStatus comms.ConnectionStatus `json:"connectionStatus"`
-	Fee              *FeeAsset              `json:"feeAsset"` // DEPRECATED. DCR.
-	RegFees          map[string]*FeeAsset   `json:"regFees"`
-	PendingFee       *PendingFeeState       `json:"pendingFee,omitempty"`
 	CandleDurs       []string               `json:"candleDurs"`
+	Tier             int64                  `json:"tier"`
+	BondsPending     bool                   `json:"bondsPending"`
+	// TODO: a Bonds slice
+
+	// OLD fields for the legacy registration fee (V0PURGE):
+	Fee        *FeeAsset            `json:"feeAsset"` // DCR. DEPRECATED by RegFees.
+	RegFees    map[string]*FeeAsset `json:"regFees"`
+	PendingFee *PendingFeeState     `json:"pendingFee,omitempty"`
 }
 
 // newDisplayIDFromSymbols creates a display-friendly market ID for a base/quote
@@ -656,26 +668,33 @@ type dexAccount struct {
 	privKey *secp256k1.PrivateKey
 	id      account.AccountID
 
+	authMtx  sync.RWMutex
+	isAuthed bool
+	// pendingBonds  []*db.Bond // not yet confirmed
+	// bonds         []*db.Bond // confirmed, and not yet expired
+	// expiredBonds  []*db.Bond // expired and needing refund
+	tier          int64 // check instead of isSuspended
+	legacyFeePaid bool  // server reports a legacy fee paid
+
+	// Legacy reg fee (V0PURGE)
 	feeAssetID uint32
 	feeCoin    []byte
-
-	authMtx     sync.RWMutex
-	isPaid      bool // feeCoin fully confirmed, ready to trade
-	isAuthed    bool
-	isSuspended bool
+	isPaid     bool // feeCoin fully confirmed
+	// Instead of isSuspended, set tier=0 if legacy fee paid and server
+	// indicates the account is suspended.
 }
 
 // newDEXAccount is a constructor for a new *dexAccount.
 func newDEXAccount(acctInfo *db.AccountInfo) *dexAccount {
 	return &dexAccount{
 		host:       acctInfo.Host,
-		encKey:     acctInfo.EncKey(),
+		cert:       acctInfo.Cert,
 		dexPubKey:  acctInfo.DEXPubKey,
-		isPaid:     acctInfo.Paid,
+		encKey:     acctInfo.EncKey(), // privKey and id on decrypt
 		feeAssetID: acctInfo.FeeAssetID,
 		feeCoin:    acctInfo.FeeCoin,
-		cert:       acctInfo.Cert,
-		// isSuspended is determined on connect, not stored
+		isPaid:     acctInfo.Paid,
+		// bonds are set separately when categorized in authDEX
 	}
 }
 
@@ -795,12 +814,12 @@ func (a *dexAccount) authed() bool {
 	return a.isAuthed
 }
 
-// auth sets the account as authenticated, but possibly suspended (may not place
-// new orders, but may still be negotiating swaps).
-func (a *dexAccount) auth(suspended bool) {
+// auth sets the account as authenticated at the provided tier.
+func (a *dexAccount) auth(tier int64, legacyFeePaid bool) {
 	a.authMtx.Lock()
 	a.isAuthed = true
-	a.isSuspended = suspended
+	a.tier = tier
+	a.legacyFeePaid = legacyFeePaid
 	a.authMtx.Unlock()
 }
 
@@ -815,7 +834,13 @@ func (a *dexAccount) unauth() {
 func (a *dexAccount) suspended() bool {
 	a.authMtx.RLock()
 	defer a.authMtx.RUnlock()
-	return a.isSuspended
+	return a.tier < 1
+}
+
+func (a *dexAccount) hasLegacyFee() bool {
+	a.authMtx.RLock()
+	defer a.authMtx.RUnlock()
+	return len(a.feeCoin) > 0
 }
 
 // feePending checks whether the fee transaction has been broadcast, but the
@@ -854,6 +879,12 @@ func (a *dexAccount) sign(msg []byte) ([]byte, error) {
 
 // checkSig checks the signature against the message and the DEX pubkey.
 func (a *dexAccount) checkSig(msg []byte, sig []byte) error {
+	if msg == nil {
+		return fmt.Errorf("no message to verify")
+	}
+	if sig == nil {
+		return fmt.Errorf("no signature to verify")
+	}
 	return checkSigS256(msg, a.dexPubKey.SerializeCompressed(), sig)
 }
 

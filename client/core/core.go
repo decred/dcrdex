@@ -74,13 +74,13 @@ var (
 	// When waiting for a wallet to sync, a SyncStatus check will be performed
 	// every syncTickerPeriod. var instead of const for testing purposes.
 	syncTickerPeriod = 3 * time.Second
-	// serverAPIVers are the DEX server API versions this client is capable
+	// supportedAPIVers are the DEX server API versions this client is capable
 	// of communicating with.
 	//
 	// NOTE: API version may change at any time. Keep this in mind when
 	// updating the API. Long-running operations may start and end with
 	// differing versions.
-	serverAPIVers = []int{serverdex.PreAPIVersion}
+	supportedAPIVers = []int32{serverdex.PreAPIVersion, serverdex.BondAPIVersion}
 	// ActiveOrdersLogoutErr is returned from logout when there are active
 	// orders.
 	ActiveOrdersLogoutErr = errors.New("cannot log out with active orders")
@@ -151,6 +151,8 @@ type dexConnection struct {
 	// connectionStatus is a best guess on the ws connection status.
 	connectionStatus uint32
 
+	// pendingFee is deprecated, and will be removed when v0 API support is
+	// dropped in favor of v1 with bonds. (V0PURGE)
 	pendingFeeMtx sync.RWMutex
 	pendingFee    *pendingFeeState
 
@@ -395,8 +397,14 @@ func (dc *dexConnection) exchangeInfo() *Exchange {
 			Host:             dc.acct.host,
 			AcctID:           acctID,
 			ConnectionStatus: dc.status(),
-			PendingFee:       dc.getPendingFee(),
+			PendingFee:       dc.getPendingFee(), // V0PURGE - deprecated with bonds in v1
 		}
+	}
+
+	bondAssets := make(map[string]*BondAsset, len(cfg.BondAssets))
+	for symb, bondAsset := range cfg.BondAssets {
+		coreBondAsset := BondAsset(*bondAsset) // convert msgjson.BondAsset to core.BondAsset
+		bondAssets[symb] = &coreBondAsset
 	}
 
 	dc.assetsMtx.RLock()
@@ -416,6 +424,7 @@ func (dc *dexConnection) exchangeInfo() *Exchange {
 	}
 	dcrAsset := feeAssets["dcr"]
 	if dcrAsset == nil { // should have happened in refreshServerConfig
+		// V0PURGE
 		dcrAsset = &FeeAsset{
 			ID:    42,
 			Amt:   cfg.Fee,
@@ -424,16 +433,29 @@ func (dc *dexConnection) exchangeInfo() *Exchange {
 		feeAssets["dcr"] = dcrAsset
 	}
 
+	dc.acct.authMtx.RLock()
+	// TODO: List bonds in core.Exchange. For now, just tier.
+	// bondsPending := len(dc.acct.pendingBonds) > 0
+	tier := dc.acct.tier
+	dc.acct.authMtx.RUnlock()
+
 	return &Exchange{
 		Host:             dc.acct.host,
 		AcctID:           acctID,
 		Markets:          dc.marketMap(),
 		Assets:           assets,
+		BondExpiry:       cfg.BondExpiry,
+		BondAssets:       bondAssets,
 		ConnectionStatus: dc.status(),
-		Fee:              dcrAsset,
-		RegFees:          feeAssets,
-		PendingFee:       dc.getPendingFee(),
 		CandleDurs:       cfg.BinSizes,
+		Tier:             tier,
+		BondsPending:     false,
+		// TODO: Bonds
+
+		// Legacy reg fee (V0PURGE)
+		Fee:        dcrAsset,
+		RegFees:    feeAssets,
+		PendingFee: dc.getPendingFee(),
 	}
 }
 
@@ -3439,20 +3461,24 @@ func (c *Core) discoverAccount(dc *dexConnection, crypter encrypt.Crypter) (bool
 			}
 			return false, newError(authErr, "unexpected authDEX error: %w", err)
 		}
-		if dc.acct.isSuspended {
-			c.log.Infof("HD account key for %s was reported as suspended. Deriving another account key.", dc.acct.host)
+		// do not skip key if tier is 0 and bonds will be used
+		if dc.acct.tier < 0 || (dc.acct.tier < 1 && dc.apiVersion() < serverdex.BondAPIVersion) {
+			c.log.Infof("HD account key for %s has tier %d (not able to trade). Deriving another account key.",
+				dc.acct.host, dc.acct.tier)
 			keyIndex++
 			time.Sleep(200 * time.Millisecond) // don't hammer
 			continue
 		}
 
-		break // great, the account at this key index is paid and ready
+		break // great, the account at this key index exists
 	}
 
-	// Actual fee asset ID and coin are unknown, but paid.
-	dc.acct.isPaid = true
-	dc.acct.feeCoin = []byte("DUMMY COIN")
-	dc.acct.feeAssetID = 42
+	if dc.acct.legacyFeePaid {
+		// Actual fee asset ID and coin are unknown, but paid.
+		dc.acct.isPaid = true
+		dc.acct.feeCoin = []byte("DUMMY COIN")
+		dc.acct.feeAssetID = 42
+	}
 
 	err := c.db.CreateAccount(&db.AccountInfo{
 		Host:         dc.acct.host,
@@ -3522,6 +3548,10 @@ func (c *Core) upgradeConnection(dc *dexConnection) {
 // to register on a DEX, and Register may be called directly, although it requires
 // the expected fee amount as an additional input and it will pay the fee if the
 // account is not discovered and paid.
+//
+// The Tier and BondsPending fields may be consulted to determine if it is still
+// necessary to PostBond (i.e. Tier == 0 && !BondsPending) before trading. The
+// Connected field should be consulted first.
 func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI interface{}) (*Exchange, bool, error) {
 	if !c.IsInitialized() {
 		return nil, false, fmt.Errorf("cannot register DEX because app has not been initialized")
@@ -3538,8 +3568,16 @@ func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI interface{}) 
 	}
 	defer crypter.Close()
 
+	c.connMtx.RLock()
+	dc, found := c.conns[host]
+	c.connMtx.RUnlock()
+	if found {
+		// Already registered, but connection may be down and/or PostBond needed.
+		return dc.exchangeInfo(), true, nil // *Exchange has Tier and BondsPending
+	}
+
 	var ready bool
-	dc, err := c.tempDexConnection(host, certI)
+	dc, err = c.tempDexConnection(host, certI)
 	if dc != nil { // (re)connect loop may be running even if err != nil
 		defer func() {
 			// Either disconnect or promote this connection.
@@ -3695,10 +3733,8 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 
 	// Ensure this DEX supports this asset for registration fees, and get the
 	// required confirmations and fee amount.
-	dc.cfgMtx.RLock()
-	feeAsset, supported := dc.cfg.RegFees[regFeeAssetSymbol]
-	dc.cfgMtx.RUnlock()
-	if !supported || feeAsset == nil {
+	feeAsset := dc.feeAsset(regFeeAssetID) // dc.cfg.RegFees[regFeeAssetSymbol]
+	if feeAsset == nil {
 		return nil, newError(assetSupportErr, "dex server does not accept registration fees in asset %q", regFeeAssetSymbol)
 	}
 	if feeAsset.ID != regFeeAssetID {
@@ -5691,15 +5727,29 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		return newError(signatureErr, "DEX signature validation error: %w", err)
 	}
 
-	var suspended bool
-	if result.Suspended != nil {
-		suspended = *result.Suspended
+	var tier int64
+	var legacyFeePaid bool
+	if result.Tier == nil { // legacy server (V0PURGE)
+		// A legacy server does not set ConnectResult.LegacyFeePaid, but unpaid
+		// legacy ('register') users get an UnpaidAccountError from Connect, so
+		// we know the account is paid and not suspended.
+		legacyFeePaid = true
+		if result.Suspended == nil || !*result.Suspended {
+			tier = 1
+		}
+	} else {
+		tier = *result.Tier
+		if result.LegacyFeePaid != nil {
+			legacyFeePaid = *result.LegacyFeePaid
+		}
 	}
 
 	// Set the account as authenticated.
-	c.log.Debugf("Authenticated connection to %s, acct %v, %d active orders, %d active matches, score %d (suspended = %v)",
-		dc.acct.host, acctID, len(result.ActiveOrderStatuses), len(result.ActiveMatches), result.Score, suspended)
-	dc.acct.auth(suspended)
+	c.log.Infof("Authenticated connection to %s, acct %v, %d active bonds, %d active orders, %d active matches, score %d, tier %d",
+		dc.acct.host, acctID, len(result.ActiveBonds), len(result.ActiveOrderStatuses), len(result.ActiveMatches), result.Score, tier)
+	// Flag as authenticated before bondConfirmed / monitorBondConfs, which may
+	// call authDEX if not flagged as such.
+	dc.acct.auth(tier, legacyFeePaid)
 
 	// Associate the matches with known trades.
 	matches, _, err := dc.parseMatches(result.ActiveMatches, false)
@@ -6968,7 +7018,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 	}
 
 	// Request the market configuration.
-	err = dc.refreshServerConfig() // handleReconnect must too
+	_, err = dc.refreshServerConfig() // handleReconnect must too
 	if err != nil {
 		if errors.Is(err, outdatedClientErr) {
 			sendOutdatedClientNotification(c, dc)
@@ -7000,7 +7050,7 @@ func (c *Core) handleReconnect(host string) {
 
 	// The server's configuration may have changed, so retrieve the current
 	// server configuration.
-	err := dc.refreshServerConfig()
+	cfg, err := dc.refreshServerConfig()
 	if err != nil {
 		if errors.Is(err, outdatedClientErr) {
 			sendOutdatedClientNotification(c, dc)
@@ -7014,16 +7064,14 @@ func (c *Core) handleReconnect(host string) {
 		base  uint32
 		quote uint32
 	}
-	dc.cfgMtx.RLock()
 	mkts := make(map[string]*market, len(dc.cfg.Markets))
-	for _, m := range dc.cfg.Markets {
+	for _, m := range cfg.Markets {
 		mkts[m.Name] = &market{
 			name:  m.Name,
 			base:  m.Base,
 			quote: m.Quote,
 		}
 	}
-	dc.cfgMtx.RUnlock()
 
 	// Update the orders' selfGoverned flag according to the configured markets.
 	for _, trade := range dc.trackedTrades() {
