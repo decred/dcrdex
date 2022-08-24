@@ -317,6 +317,7 @@ func newTestMarket(opts ...interface{}) (*Market, *TArchivist, *TAuth, func(), e
 		Storage:          storage,
 		AuthManager:      authMgr,
 		BroadcastTimeout: 10 * time.Second,
+		TxWaitExpiration: 5 * time.Second,
 		LockTimeTaker:    dex.LockTimeTaker(dex.Testnet),
 		LockTimeMaker:    dex.LockTimeMaker(dex.Testnet),
 		SwapDone: func(ord order.Order, match *order.Match, fail bool) {

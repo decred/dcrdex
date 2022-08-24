@@ -76,6 +76,7 @@ type DexConf struct {
 	Network           dex.Network
 	DBConf            *DBConf
 	BroadcastTimeout  time.Duration
+	TxWaitExpiration  time.Duration
 	CancelThreshold   float64
 	Anarchy           bool
 	FreeCancels       bool
@@ -619,6 +620,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		Storage:          storage,
 		AuthManager:      authMgr,
 		BroadcastTimeout: cfg.BroadcastTimeout,
+		TxWaitExpiration: cfg.TxWaitExpiration,
 		LockTimeTaker:    dex.LockTimeTaker(cfg.Network),
 		LockTimeMaker:    dex.LockTimeMaker(cfg.Network),
 		SwapDone:         swapDone,

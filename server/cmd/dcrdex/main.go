@@ -154,6 +154,7 @@ func mainCore(ctx context.Context) error {
 			ShowPGConfig: cfg.ShowPGConfig,
 		},
 		BroadcastTimeout:  cfg.BroadcastTimeout,
+		TxWaitExpiration:  cfg.TxWaitExpiration,
 		CancelThreshold:   cfg.CancelThreshold,
 		Anarchy:           cfg.Anarchy,
 		FreeCancels:       cfg.FreeCancels,
