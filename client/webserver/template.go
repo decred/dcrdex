@@ -175,6 +175,9 @@ func (t *templates) exec(name string, data interface{}) (string, error) {
 
 		t.addTemplate(name, tmpl.preloads...)
 		log.Debugf("reloaded HTML template %q", name)
+
+		// Grab the new pageTemplate
+		tmpl = t.templates[name]
 	}
 
 	var page strings.Builder
