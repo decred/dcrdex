@@ -97,7 +97,10 @@ var (
 	// check for new blocks.
 	blockPollInterval = time.Second
 
-	requiredNodeVersion = dex.Semver{Major: 7, Minor: 0, Patch: 0}
+	compatibleNodeRPCVersions = []dex.Semver{
+		{Major: 8, Minor: 0, Patch: 0}, // 1.8-pre, just dropped unused ticket RPCs
+		{Major: 7, Minor: 0, Patch: 0}, // 1.7 release, new gettxout args
+	}
 
 	conventionalConversionFactor = float64(dexdcr.UnitInfo.Conventional.ConversionFactor)
 )
@@ -234,10 +237,10 @@ func (dcr *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		return nil, fmt.Errorf("dcrd.Version response missing 'dcrdjsonrpcapi'")
 	}
 	nodeSemver := dex.NewSemver(ver.Major, ver.Minor, ver.Patch)
-	if !dex.SemverCompatible(requiredNodeVersion, nodeSemver) {
+	if !dex.SemverCompatibleAny(compatibleNodeRPCVersions, nodeSemver) {
 		dcr.shutdown()
-		return nil, fmt.Errorf("dcrd has an incompatible JSON-RPC version: got %s, expected %s",
-			nodeSemver, requiredNodeVersion)
+		return nil, fmt.Errorf("dcrd has an incompatible JSON-RPC version %s, require one of %s",
+			nodeSemver, compatibleNodeRPCVersions)
 	}
 
 	// Verify dcrd has tx index enabled (required for getrawtransaction).

@@ -34,8 +34,14 @@ import (
 )
 
 var (
-	requiredWalletVersion = dex.Semver{Major: 8, Minor: 8, Patch: 0}
-	requiredNodeVersion   = dex.Semver{Major: 7, Minor: 0, Patch: 0}
+	compatibleWalletRPCVersions = []dex.Semver{
+		{Major: 9, Minor: 0, Patch: 0}, // 1.8-pre
+		{Major: 8, Minor: 8, Patch: 0}, // 1.7 release, min for getcurrentnet
+	}
+	compatibleNodeRPCVersions = []dex.Semver{
+		{Major: 8, Minor: 0, Patch: 0}, // 1.8-pre, just dropped unused ticket RPCs
+		{Major: 7, Minor: 0, Patch: 0}, // 1.7 release, new gettxout args
+	}
 )
 
 // RawRequest RPC methods
@@ -291,17 +297,17 @@ func checkRPCConnection(ctx context.Context, connector rpcConnector, client rpcC
 		return false, fmt.Errorf("dcrwallet.Version response missing 'dcrwalletjsonrpcapi'")
 	}
 	walletSemver := dex.NewSemver(ver.Major, ver.Minor, ver.Patch)
-	if !dex.SemverCompatible(requiredWalletVersion, walletSemver) {
-		return false, fmt.Errorf("dcrwallet has an incompatible JSON-RPC version: got %s, expected %s",
-			walletSemver, requiredWalletVersion)
+	if !dex.SemverCompatibleAny(compatibleWalletRPCVersions, walletSemver) {
+		return false, fmt.Errorf("advertised dcrwallet JSON-RPC version %v incompatible with %v",
+			walletSemver, compatibleWalletRPCVersions)
 	}
 
 	ver, exists = versions["dcrdjsonrpcapi"]
 	if exists {
 		nodeSemver := dex.NewSemver(ver.Major, ver.Minor, ver.Patch)
-		if !dex.SemverCompatible(requiredNodeVersion, nodeSemver) {
-			return false, fmt.Errorf("dcrd has an incompatible JSON-RPC version: got %s, expected %s",
-				nodeSemver, requiredNodeVersion)
+		if !dex.SemverCompatibleAny(compatibleNodeRPCVersions, nodeSemver) {
+			return false, fmt.Errorf("advertised dcrd JSON-RPC version %v incompatible with %v",
+				nodeSemver, compatibleNodeRPCVersions)
 		}
 		log.Infof("Connected to dcrwallet (JSON-RPC API v%s) proxying dcrd (JSON-RPC API v%s)",
 			walletSemver, nodeSemver)
