@@ -31,6 +31,17 @@ func SemverCompatible(required, actual Semver) bool {
 	}
 }
 
+// SemverCompatibleAny checks if the version is compatible with any versions in
+// a slice of versions.
+func SemverCompatibleAny(compatible []Semver, actual Semver) bool {
+	for _, v := range compatible {
+		if SemverCompatible(v, actual) {
+			return true
+		}
+	}
+	return false
+}
+
 // Semver formats the Semver as major.minor.patch (e.g. 1.2.3).
 func (s Semver) String() string {
 	return fmt.Sprintf("%d.%d.%d", s.Major, s.Minor, s.Patch)
