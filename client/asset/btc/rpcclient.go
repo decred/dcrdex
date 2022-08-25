@@ -125,6 +125,7 @@ type rpcCore struct {
 	legacyValidateAddressRPC bool
 	manualMedianTime         bool
 	omitRPCOptionsArg        bool
+	legacySendToAddr         bool
 }
 
 func (c *rpcCore) requester() RawRequesterWithContext {
@@ -770,8 +771,26 @@ func (wc *rpcClient) walletLock() error {
 }
 
 // sendToAddress sends the amount to the address. feeRate is in units of
-// sats/byte.
+// sats/byte. If there is not a fee rate positional param, it is used
+// legacySendToAddress instead.
 func (wc *rpcClient) sendToAddress(address string, value, feeRate uint64, subtract bool) (*chainhash.Hash, error) {
+	// 1e-5 = 1e-8 for satoshis * 1000 for kB.
+	if wc.rpcCore.legacySendToAddr {
+		return wc.legacySendToAddress(address, value, feeRate, subtract)
+	}
+	var txid string
+	coinValue := btcutil.Amount(value).ToBTC()
+	params := anylist{address, coinValue, "dcrdex", "", subtract, nil, nil, nil, nil, feeRate}
+	err := wc.call(methodSendToAddress, params, &txid)
+	if err != nil {
+		return nil, err
+	}
+	return chainhash.NewHashFromStr(txid)
+}
+
+// legacySendToAddress sends the amount to the address. Sets fee rate calling
+// methodSetTxFee.
+func (wc *rpcClient) legacySendToAddress(address string, value, feeRate uint64, subtract bool) (*chainhash.Hash, error) {
 	var success bool
 	// 1e-5 = 1e-8 for satoshis * 1000 for kB.
 	err := wc.call(methodSetTxFee, anylist{float64(feeRate) / 1e5}, &success)
