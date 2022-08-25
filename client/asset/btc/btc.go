@@ -352,6 +352,9 @@ type BTCCloneCFG struct {
 	ManualMedianTime bool
 	// OmitRPCOptionsArg is for clones that don't take an options argument.
 	OmitRPCOptionsArg bool
+	// LegacySendToAddr sents legacy raw tx which does not have positional fee
+	// rate param.
+	LegacySendToAddr bool
 }
 
 // outPoint is the hash and output index of a transaction output.
@@ -1015,6 +1018,7 @@ func newRPCWallet(requester RawRequesterWithContext, cfg *BTCCloneCFG, parsedCfg
 		chainParams:              cfg.ChainParams,
 		omitAddressType:          cfg.OmitAddressType,
 		legacySignTx:             cfg.LegacySignTxRPC,
+		legacySendToAddr:         cfg.LegacySendToAddr,
 		booleanGetBlock:          cfg.BooleanGetBlockRPC,
 		unlockSpends:             cfg.UnlockSpends,
 		deserializeTx:            btc.deserializeTx,
