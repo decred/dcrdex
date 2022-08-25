@@ -173,7 +173,7 @@ func TestDelta(t *testing.T) {
 	check24 := func(expDelta float64, expVol uint64) {
 		t.Helper()
 		high, low := (expDelta + 0.01), (expDelta - 0.01)
-		delta24, vol24 := c.Delta(testTime.Add(-time.Hour * 24))
+		delta24, vol24, _, _ := c.Delta(testTime.Add(-time.Hour * 24))
 		if delta24 < low || delta24 > high {
 			t.Fatalf("wrong delta24. expected %.3f, got, %.3f", expDelta, delta24)
 		}
@@ -231,7 +231,7 @@ func TestDeltaPartialDays(t *testing.T) {
 		StartRate:   50,
 		EndRate:     150,
 	})
-	delta6, vol6 := c.Delta(tNow.Add(-time.Hour * 6))
+	delta6, vol6, _, _ := c.Delta(tNow.Add(-time.Hour * 6))
 	// In the last 6 hours, the rate would be interpreted as going from 125 to
 	// 150, change = 25/125 = 0.20
 	// Note that the cache would never be used with duration < binSize this way

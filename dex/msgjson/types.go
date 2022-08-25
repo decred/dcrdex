@@ -1101,6 +1101,8 @@ type Spot struct {
 	BookVolume uint64  `json:"bookVolume"`
 	Change24   float64 `json:"change24"`
 	Vol24      uint64  `json:"vol24"`
+	High24     uint64  `json:"high24"`
+	Low24      uint64  `json:"low24"`
 }
 
 // CandlesRequest is a data API request for market history.

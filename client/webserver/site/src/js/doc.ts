@@ -384,7 +384,7 @@ export class Animation {
   done: (() => void) | undefined
   endAnimation: boolean
   thread: Promise<void>
-  Forever: number
+  static Forever: number
 
   constructor (duration: number, f: (progress: number) => void, easingAlgo?: string, done?: () => void) {
     this.done = done
@@ -399,7 +399,7 @@ export class Animation {
     duration = duration >= 0 ? duration : 1000 * 86400 * 365 * 10 // 10 years, in ms
     const easer = easingAlgo ? Easing[easingAlgo] : Easing.linear
     const start = new Date().getTime()
-    const end = start + duration
+    const end = (duration === Animation.Forever) ? Number.MAX_SAFE_INTEGER : start + duration
     const range = end - start
     const frameDuration = 1000 / FPS
     let now = start
@@ -438,6 +438,7 @@ export class Animation {
     if (this.done) this.done()
   }
 }
+Animation.Forever = -1
 
 /* Easing algorithms for animations. */
 export const Easing: Record<string, (t: number) => number> = {

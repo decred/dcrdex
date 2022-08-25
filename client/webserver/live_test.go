@@ -48,7 +48,7 @@ const (
 
 var (
 	tCtx                  context.Context
-	maxDelay                     = time.Second * 2
+	maxDelay                     = time.Second * 4
 	epochDuration                = time.Second * 30 // milliseconds
 	feedPeriod                   = time.Second * 10
 	creationPendingAsset  uint32 = 0xFFFFFFFF
@@ -183,7 +183,7 @@ func mkMrkt(base, quote string) *core.Market {
 			Rate:    rate,
 			// BookVolume: ,
 			Change24: change24,
-			// Vol24: ,
+			Vol24:    lotSize * uint64(50000*rand.Float32()),
 		},
 	}
 }

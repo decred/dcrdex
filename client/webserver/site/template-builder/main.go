@@ -81,7 +81,7 @@ func main() {
 				if !found {
 					replacement, found = enDict[key]
 					if !found {
-						return fmt.Errorf("no translation and no default replacement for %s", key)
+						return fmt.Errorf("no %s translation in %q and no default replacement for %s", lang, baseName, key)
 					}
 					fmt.Printf("Warning: no %s replacement text for key %q, using 'en' value %s \n", lang, key, replacement)
 				}

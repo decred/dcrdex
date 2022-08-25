@@ -60,39 +60,44 @@ input:invalid {
   overflow-y: auto;
 }
 
-.overflow-x-hidden {
+.overflow-y-hidden {
+  overflow-y: hidden;
+}
+
+.overflow-x-hidden,
+.stylish-overflow.overflow-x-hidden {
   overflow-x: hidden;
 }
 
 header.maintop {
   width: 100%;
-  height: 60px;
-  min-height: 60px;
+  height: 70px;
+  min-height: 70px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   z-index: 100;
-  background-color: white;
-  border-bottom: 1px solid #777;
+  border-bottom: 1px solid $light_border_color;
 }
 
 a.logo,
 a.logo-icon {
   display: block;
-  height: 30px;
-  margin: 0 20px;
+  margin: 0 10px;
   background-size: cover;
   cursor: pointer;
 }
 
 a.logo {
+  height: 30px;
   width: 145px;
   background-image: url("/img/logo_wide_v1.svg");
 }
 
 a.logo-icon {
-  width: 30px;
-  background-image: url("/img/logo_icon_v1.svg");
+  height: 40px;
+  width: 40px;
+  background-image: url("/img/softened-icon.png");
 }
 
 div.main {
@@ -116,31 +121,6 @@ button:focus {
   outline: none;
 }
 
-.card {
-  width: 400px;
-  border-radius: 3px;
-  position: relative;
-
-  button {
-    padding: 6px 0;
-  }
-
-  input,
-  select {
-    background-color: $light_bg_2;
-  }
-
-  input:focus,
-  select:focus {
-    background-color: $light_bg_2;
-  }
-
-  form label {
-    font-size: 15px;
-    font-family: $demi-sans;
-  }
-}
-
 .dynamicopts {
   display: flex;
   align-items: stretch;
@@ -154,11 +134,17 @@ button:focus {
   }
 }
 
-div.mainlinks > div,
-div.mainlinks > a {
-  padding-right: 1em;
-  color: #4a4949;
-  cursor: pointer;
+div.mainlinks {
+  white-space: nowrap;
+
+  & > div,
+  & > a {
+    color: #4a4949;
+    cursor: pointer;
+    padding-top: 5px;
+    padding-bottom: 5px;
+    padding-left: 10px;
+  }
 }
 
 .plainlink {
@@ -187,12 +173,8 @@ header.maintop a:hover,
   cursor: pointer;
 }
 
-div.mainlinks .hoverbright:hover {
-  color: $dark_bg_3;
-}
-
-form.card button:hover {
-  color: black;
+div.mainlinks .hoverbg:hover {
+  color: #222;
 }
 
 div.spinner {
@@ -244,6 +226,19 @@ input[type=number] {
 
 .stylish-overflow {
   @include stylish-overflow;
+}
+
+.stylish-overflow.hoveronly:not(:hover) {
+  scrollbar-color: transparent transparent;
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background-color: transparent;
+    border-radius: 4px;
+  }
 }
 
 .max-h-100 {
@@ -327,7 +322,7 @@ div.popup-notes {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  background-color: white;
+  background-color: $light_body_bg;
   border: 1px solid #7777;
   z-index: 100;
   font-family: $sans;
@@ -389,22 +384,6 @@ div.popup-notes {
   display: none !important;
 }
 
-.bg0 {
-  background-color: white;
-}
-
-.bg1 {
-  background-color: $light_bg_1;
-}
-
-.border1 {
-  border: 1px solid #aaa;
-}
-
-.bg2 {
-  background-color: $light_bg_2;
-}
-
 .buycolor {
   color: $buycolor_light;
 }
@@ -415,6 +394,26 @@ div.popup-notes {
 
 .errcolor {
   color: #e61c00;
+}
+
+.grey {
+  color: #999;
+}
+
+.brdrleft {
+  border-left: 1px solid $light_border_color;
+}
+
+.brdrright {
+  border-right: 1px solid $light_border_color;
+}
+
+.brdrtop {
+  border-top: 1px solid $light_border_color;
+}
+
+.brdrbottom {
+  border-bottom: 1px solid $light_border_color;
 }
 
 hr.dashed {
@@ -477,10 +476,6 @@ div.form-closer {
   font-size: 15px;
 }
 
-div.border1 {
-  border: 1px solid #aaa;
-}
-
 #loader {
   background-color: #e0e0e077;
 }
@@ -498,6 +493,11 @@ span.token-aware-symbol sup {
 @include media-breakpoint-up(md) {
   div.mainlinks > div,
   div.mainlinks > a {
-    padding-right: 1.7em;
+    padding-left: 18px;
+    padding-right: 18px;
+
+    &:last-child {
+      padding-right: 0;
+    }
   }
 }

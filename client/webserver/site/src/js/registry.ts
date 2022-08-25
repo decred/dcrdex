@@ -495,6 +495,7 @@ export interface Application {
   seedGenTime: number
   user: User
   header: HTMLElement
+  headerSpace: HTMLElement
   walletMap: Record<number, WalletState>
   exchanges: Record<string, Exchange>
   fiatRatesMap: Record<number, number>
@@ -529,7 +530,7 @@ export interface Application {
   order (oid: string): Order | null
   canAccelerateOrder(order: Order): boolean
   unitInfo (assetID: number, xc?: Exchange): UnitInfo
-  conventionalRate (baseID: number, quoteID: number, encRate: number): number
+  conventionalRate (baseID: number, quoteID: number, encRate: number, xc?: Exchange): number
   walletDefinition (assetID: number, walletType: string): WalletDefinition
   currentWalletDefinition (assetID: number): WalletDefinition
   fetchBalance (assetID: number): Promise<WalletBalance>

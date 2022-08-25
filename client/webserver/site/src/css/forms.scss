@@ -1,10 +1,6 @@
 #regAssetForm {
   position: relative;
 
-  .grey {
-    color: #999;
-  }
-
   div.reg-asset-allmkts {
     min-width: 210px;
     max-width: 320px;
@@ -117,10 +113,6 @@
 #confirmRegForm {
   width: 425px;
 
-  .grey {
-    color: grey;
-  }
-
   button.submit {
     width: auto;
     padding: 12px 30px;
@@ -154,10 +146,6 @@
 
 #newWalletForm {
   width: 425px;
-
-  .grey {
-    color: #999;
-  }
 
   .wallet-tabs {
     width: 100%;
@@ -255,7 +243,7 @@ button.form-button {
   bottom: 0;
   right: 0;
   padding: 25px 0;
-  background-color: #e0e0e0f3;
+  background-color: $light_body_bg;
   z-index: 100;
 
   & > form {
@@ -273,10 +261,6 @@ button.form-button {
 
 #walletWait {
   max-width: 425px;
-
-  .grey {
-    color: #999;
-  }
 
   .icons {
     width: 25px;
@@ -344,4 +328,11 @@ button.form-button {
 #reconfigForm,
 #authorizeSeedDisplay {
   width: 425px;
+}
+
+#deposit {
+  #copyAlert {
+    margin-left: 12px;
+    position: absolute;
+  }
 }
