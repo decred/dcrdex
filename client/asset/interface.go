@@ -25,7 +25,6 @@ const (
 	WalletTraitSweeper                                     // The Wallet can sweep all the funds, leaving no change.
 	WalletTraitRestorer                                    // The wallet is an asset.WalletRestorer
 	WalletTraitRedemptionConfirmer                         // The wallet has a process to confirm a redemption.
-	WalletTraitDataClearer                                 // The wallet stores data that should be cleared when there are no active deals.
 )
 
 // IsRescanner tests if the WalletTrait has the WalletTraitRescanner bit set.
@@ -82,12 +81,6 @@ func (wt WalletTrait) IsRestorer() bool {
 	return wt&WalletTraitRestorer != 0
 }
 
-// IsDataClearer test if the WalletTrait has the WalletTraitDataClearer bit set,
-// which indicates the wallet implements the DataClearer interface.
-func (wt WalletTrait) IsDataClearer() bool {
-	return wt&WalletTraitDataClearer != 0
-}
-
 // DetermineWalletTraits returns the WalletTrait bitset for the provided Wallet.
 func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(Rescanner); is {
@@ -119,9 +112,6 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	}
 	if _, is := w.(RedemptionConfirmer); is {
 		t |= WalletTraitRedemptionConfirmer
-	}
-	if _, is := w.(DataClearer); is {
-		t |= WalletTraitDataClearer
 	}
 	return t
 }
@@ -587,7 +577,7 @@ type LiveReconfigurer interface {
 // RedemptionConfirmer is a wallet that has a process to confirm and
 // potentially resubmit a redemption.
 type RedemptionConfirmer interface {
-	// ConfirmRedemption checks the status of a redemption. It returned the
+	// ConfirmRedemption checks the status of a redemption. It returns the
 	// number of confirmations the redemption has, the number of confirmations
 	// that are required for it to be considered fully confirmed, and the
 	// CoinID used to do the redemption. If it is determined that a transaction
@@ -596,14 +586,6 @@ type RedemptionConfirmer interface {
 	// different CoinID in the returned asset.ConfirmRedemptionStatus as was
 	// used to call the function.
 	ConfirmRedemption(coinID dex.Bytes, redemption *Redemption) (*ConfirmRedemptionStatus, error)
-}
-
-// DataClearer is a wallet that stores temporary data that should be cleared
-// when the asset has no active trades.
-type DataClearer interface {
-	// ClearData lets the wallet know that it can clear any data required for
-	// active orders.
-	ClearData()
 }
 
 // Balance is categorized information about a wallet's balance.

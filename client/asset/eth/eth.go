@@ -250,14 +250,19 @@ type ethFetcher interface {
 // yet been confirmed. If a transaction has to be replaced due to the fee
 // being too low or another transaction being mined with the same nonce,
 // the replacement transaction's ID is recorded in the replacementTx field.
+// replacedTx is used to maintain a doubly linked list, which allows deletion
+// of transactions that were replaced after a transaction is confirmed.
 type monitoredTx struct {
 	mtx sync.Mutex
 
 	tx             *types.Transaction
-	blockSubmitted int64
+	blockSubmitted uint64
 	replacementTx  *common.Hash
+	replacedTx     *common.Hash
 }
 
+// MarsalBinary marshals a monitoredTx into a byte array.
+// It satisfies the encoding.BinaryMarshaler interface for monitoredTx.
 func (m *monitoredTx) MarshalBinary() (data []byte, err error) {
 	b := encode.BuildyBytes{0}
 	txB, err := m.tx.MarshalBinary()
@@ -267,7 +272,7 @@ func (m *monitoredTx) MarshalBinary() (data []byte, err error) {
 	b = b.AddData(txB)
 
 	blockB := make([]byte, 8)
-	binary.BigEndian.PutUint64(blockB, uint64(m.blockSubmitted))
+	binary.BigEndian.PutUint64(blockB, m.blockSubmitted)
 	b = b.AddData(blockB)
 
 	if m.replacementTx != nil {
@@ -278,6 +283,8 @@ func (m *monitoredTx) MarshalBinary() (data []byte, err error) {
 	return b, nil
 }
 
+// UnmarshalBinary loads a data from a marshalled byte arary into a
+// monitoredTx.
 func (m *monitoredTx) UnmarshalBinary(data []byte) error {
 	ver, pushes, err := encode.DecodeBlob(data)
 	if err != nil {
@@ -294,7 +301,7 @@ func (m *monitoredTx) UnmarshalBinary(data []byte) error {
 		return fmt.Errorf("error reading tx: %w", err)
 	}
 
-	m.blockSubmitted = int64(binary.BigEndian.Uint64(pushes[1]))
+	m.blockSubmitted = binary.BigEndian.Uint64(pushes[1])
 
 	if len(pushes) == 3 {
 		var replacementTxHash common.Hash
@@ -1566,8 +1573,7 @@ func (w *TokenWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, u
 // Redeem sends the redemption transaction, which may contain more than one
 // redemption. The nonceOverride paramater is used to specify a specific nonce
 // to be used for the redemption transaction. It is needed when resubmitting
-// a redemption that a fee lower than the current base fee, preventing it from
-// being mined.
+// a redemption with a fee too low to be mined.
 func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, nonceOverride *uint64) ([]dex.Bytes, asset.Coin, uint64, error) {
 	fail := func(err error) ([]dex.Bytes, asset.Coin, uint64, error) {
 		return nil, nil, 0, err
@@ -1693,7 +1699,7 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 		txs[i] = txHash[:]
 	}
 
-	w.monitorTx(tx, hdr.Number.Int64())
+	w.monitorTx(tx, hdr.Number.Uint64())
 
 	outputCoin := &coin{
 		id:    txHash,
@@ -2281,21 +2287,6 @@ func (w *assetWallet) RestorationInfo(seed []byte) ([]*asset.WalletRestoration, 
 	}, nil
 }
 
-// ClearData is called when there are no active trades for ETH or any tokens.
-// It will clear the monitoredTxs map and the underlying key value db.
-func (w *assetWallet) ClearData() {
-	w.monitoredTxsMtx.Lock()
-	defer w.monitoredTxsMtx.Unlock()
-
-	w.monitoredTxs = make(map[common.Hash]*monitoredTx)
-
-	if err := w.monitoredTxDB.ForEach(func(k, v []byte) error {
-		return w.monitoredTxDB.Delete(k)
-	}); err != nil {
-		w.log.Errorf("failed to delete monitored txs from db: %v", err)
-	}
-}
-
 // SwapConfirmations gets the number of confirmations and the spend status
 // for the specified swap.
 func (w *assetWallet) SwapConfirmations(ctx context.Context, coinID dex.Bytes, contract dex.Bytes, _ time.Time) (confs uint32, spent bool, err error) {
@@ -2583,45 +2574,114 @@ func (eth *ETHWallet) checkForNewBlocks(reportErr func(error)) {
 // transaction has been replaced, the latest in the chain of transactions
 // is returned.
 //
-// w.monitoredTxsMtx MUST be held when calling this function.
+// !!WARNING!!: The latest transaction is returned with its mutex locked.
+// It must be unlocked by the caller. This is done in order to prevent
+// another transaction starting the redemption process before a
+// a potential replacement.
 func (w *assetWallet) getLatestMonitoredTx(txHash common.Hash) (*monitoredTx, error) {
-	tx, found := w.monitoredTxs[txHash]
+	w.monitoredTxsMtx.RLock()
+	defer w.monitoredTxsMtx.RUnlock()
 	maxLoops := 100 // avoid an infinite loop in case of a cycle
 	for i := 0; i < maxLoops; i++ {
+		tx, found := w.monitoredTxs[txHash]
 		if !found {
 			return nil, fmt.Errorf("%s not found among monitored transactions", txHash)
 		}
+		tx.mtx.Lock()
 		if tx.replacementTx == nil {
 			return tx, nil
 		}
-		tx, found = w.monitoredTxs[*tx.replacementTx]
+		txHash = *tx.replacementTx
+		tx.mtx.Unlock()
 	}
-
 	return nil, fmt.Errorf("there is a cycle in the monitored transactions")
 }
 
 // recordReplacementTx updates a monitoredTx with a replacement transaction.
 // This change is also stored in the db.
 //
-// The monitoredTx's mtx must be held when calling this funcion.
-func (w *assetWallet) recordReplacementTx(txHash, replacementHash common.Hash) error {
-	tx, found := w.monitoredTxs[txHash]
-	if !found {
-		return fmt.Errorf("%s not found among monitored transactions", txHash)
+// originalTx's mtx must be held when calling this funcion.
+func (w *assetWallet) recordReplacementTx(originalTx *monitoredTx, replacementHash common.Hash) error {
+	originalTx.replacementTx = &replacementHash
+	originalHash := originalTx.tx.Hash()
+	if err := w.monitoredTxDB.Store(originalHash[:], originalTx); err != nil {
+		return fmt.Errorf("error recoring replacement tx: %v", err)
 	}
 
-	tx.replacementTx = &replacementHash
+	w.monitoredTxsMtx.Lock()
+	defer w.monitoredTxsMtx.Unlock()
 
-	if err := w.monitoredTxDB.Store(txHash[:], tx); err != nil {
-		return fmt.Errorf("error recoring replacement tx: %v", err)
+	replacementTx, found := w.monitoredTxs[replacementHash]
+	if !found {
+		w.log.Errorf("could not find replacement monitored tx %s", replacementHash)
+	}
+	replacementTx.mtx.Lock()
+	defer replacementTx.mtx.Unlock()
+	replacementTx.replacedTx = &originalHash
+	if err := w.monitoredTxDB.Store(replacementHash[:], replacementTx); err != nil {
+		return fmt.Errorf("error recoring replaced tx: %v", err)
 	}
 
 	return nil
 }
 
+// txsToDelete retraces the doubly linked list to find the  b
+func (w *assetWallet) txsToDelete(tx *monitoredTx) []common.Hash {
+	txsToDelete := []common.Hash{tx.tx.Hash()}
+
+	maxLoops := 100 // avoid an infinite loop in case of a cycle
+	for i := 0; i < maxLoops; i++ {
+		if tx.replacedTx == nil {
+			return txsToDelete
+		}
+		txsToDelete = append(txsToDelete, *tx.replacedTx)
+		var found bool
+		tx, found = w.monitoredTxs[*tx.replacedTx]
+		if !found {
+			w.log.Errorf("failed to find replaced tx: %v", *tx.replacedTx)
+			return txsToDelete
+		}
+	}
+
+	w.log.Errorf("found cycle while clearing monitored txs")
+	return txsToDelete
+}
+
+// clearMonitoredTx removes a monitored tx and all of its ancestors from the
+// monitoredTxs map and the underlying database.
+func (w *assetWallet) clearMonitoredTx(tx *monitoredTx) {
+	if tx == nil {
+		return
+	}
+
+	w.monitoredTxsMtx.Lock()
+	defer w.monitoredTxsMtx.Unlock()
+
+	txsToDelete := w.txsToDelete(tx)
+	for _, hash := range txsToDelete {
+		if err := w.monitoredTxDB.Delete(hash[:]); err != nil {
+			w.log.Errorf("failed to delete monitored tx: %v", err)
+		}
+	}
+
+	// Delete from the database immediately, but keep in the memory map a bit
+	// longer to allow time for other matches that used the same transaction
+	// to complete. If they are cleared too early there will just be an error
+	// message stating that the monitored tx is missing, but no other issue.
+	go func() {
+		timer := time.NewTimer(3 * time.Minute)
+		<-timer.C
+		w.monitoredTxsMtx.Lock()
+		defer w.monitoredTxsMtx.Unlock()
+		for _, hash := range txsToDelete {
+			delete(w.monitoredTxs, hash)
+		}
+	}()
+}
+
 // monitorTx adds a transaction to the map of monitored transactions and also
 // stores it in the db.
-func (w *assetWallet) monitorTx(tx *types.Transaction, blockSubmitted int64) {
+func (w *assetWallet) monitorTx(tx *types.Transaction, blockSubmitted uint64) {
 	w.monitoredTxsMtx.Lock()
 	defer w.monitoredTxsMtx.Unlock()
 
@@ -2641,7 +2701,7 @@ func (w *assetWallet) monitorTx(tx *types.Transaction, blockSubmitted int64) {
 // in the batch that are still redeemable are included in the new transaction.
 // nonceOverride is set to a non-nil value when a specific nonce is required
 // (when a transaction has not been mined due to a low fee).
-func (w *assetWallet) resubmitRedemption(tx *types.Transaction, contractVersion uint32, nonceOverride *uint64, feeWallet *assetWallet) (*common.Hash, error) {
+func (w *assetWallet) resubmitRedemption(tx *types.Transaction, contractVersion uint32, nonceOverride *uint64, feeWallet *assetWallet, monitoredTx *monitoredTx) (*common.Hash, error) {
 	parsedRedemptions, err := dexeth.ParseRedeemData(tx.Data(), contractVersion)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse redeem data: %w", err)
@@ -2688,9 +2748,11 @@ func (w *assetWallet) resubmitRedemption(tx *types.Transaction, contractVersion 
 	var replacementHash common.Hash
 	copy(replacementHash[:], txs[0])
 
-	err = w.recordReplacementTx(tx.Hash(), replacementHash)
-	if err != nil {
-		w.log.Errorf("failed to record %s as a replacement for %s", replacementHash, tx.Hash())
+	if monitoredTx != nil {
+		err = w.recordReplacementTx(monitoredTx, replacementHash)
+		if err != nil {
+			w.log.Errorf("failed to record %s as a replacement for %s", replacementHash, tx.Hash())
+		}
 	}
 
 	return &replacementHash, nil
@@ -2732,48 +2794,85 @@ func (w *TokenWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Rede
 	return w.confirmRedemption(coinID, redemption, w.parent)
 }
 
-// confirmRedemption checks the status of a redemption and submits a replacement
-// transaction if necessary.
-//
-// The logic is as follows:
-//
-// -- If Geth knows about Tx
-//
-//	-- If num confirmations == 0
-//	 -- If <10 blocks have passed -> [no action]
-//	 -- If >=10 blocks have passed
-//	   -- If status is redeemed -> [confirmation complete]
-//	   -- If status is refunded -> [return asset.ErrSwapRefunded]
-//	   -- If tx was nonce replaced -> [resubmit redemption, generate new with current account nonce]
-//	   -- If gas price < base fee -> [resubmit redemption, same nonce, higher fee]
-//	   -- else -> [resubmit the original tx with the same nonce]
-//	 -- 0 < Num confirmations < 10 -> [no action]
-//	 -- Num confirmations >= 10
-//	   -- If receipt status = success -> [confirmation complete]
-//	   -- If receipt status = failed -> [resubmit redemption, generate new tx with current account nonce]
-//
-// -- If Geth does not know about TX
-//
-//	   -- If <10 blocks have passed -> [no action]
-//	   -- If >=10 blocks have passed
-//	     -- Swap status == Initiated
-//		    -- If monitoredTxs contains the tx -> [resubmit redemption, generate new tx with current account nonce]
-//	        -- If monitoredTxs does not contain the tx -> [create a new redemption tx for this secret hash]
-//	     -- Swap status == Redeemed -> [confirmation complete]
-//	     -- Swap status == Refunded -> [return asset.ErrSwapRefunded]
-func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Redemption, feeWallet *assetWallet) (*asset.ConfirmRedemptionStatus, error) {
-	const (
-		txConfsNeededToConfirm               = 10
-		blocksToWaitBeforeCoinNotFound       = 10
-		blocksToWaitBeforeCheckingIfReplaced = 10
-	)
+const (
+	txConfsNeededToConfirm               = 10
+	blocksToWaitBeforeCoinNotFound       = 10
+	blocksToWaitBeforeCheckingIfReplaced = 10
+)
 
-	if len(coinID) != common.HashLength {
-		return nil, fmt.Errorf("expected coin ID to be a transaction hash, but it has a length of %d",
-			len(coinID))
+func confStatus(confs uint64, txHash common.Hash) *asset.ConfirmRedemptionStatus {
+	return &asset.ConfirmRedemptionStatus{
+		Confs:  confs,
+		Req:    txConfsNeededToConfirm,
+		CoinID: txHash[:],
 	}
-	var txHash common.Hash
-	copy(txHash[:], coinID)
+}
+
+// checkUnconfirmedRedemption is called when a transaction has not yet been
+// confirmed. It does the following:
+// -- checks if the swap has already been redeemed by another tx
+// -- resubmits the tx with a new nonce if it has been nonce replaced
+// -- resubmits the tx with the same nonce but higher fee if the fee is too low
+// -- otherwise, resubmits the same tx to ensure propagation
+func (w *assetWallet) checkUnconfirmedRedemption(secretHash common.Hash, contractVer uint32, txHash common.Hash, tx *types.Transaction, currentTip uint64, feeWallet *assetWallet, monitoredTx *monitoredTx) (*asset.ConfirmRedemptionStatus, error) {
+	// Check if the swap has been redeemed by another transaction we are unaware of.
+	swapIsRedeemed, err := w.swapIsRedeemed(secretHash, contractVer)
+	if err != nil {
+		return nil, err
+	}
+	if swapIsRedeemed {
+		w.clearMonitoredTx(monitoredTx)
+		return confStatus(txConfsNeededToConfirm, txHash), nil
+	}
+
+	// Resubmit the transaction if another transaction with the same nonce has
+	// already been confirmed.
+	confirmedNonce, err := w.node.getConfirmedNonce(w.ctx, int64(currentTip))
+	if err != nil {
+		return nil, err
+	}
+	if confirmedNonce > tx.Nonce() {
+		replacementTxHash, err := w.resubmitRedemption(tx, contractVer, nil, feeWallet, monitoredTx)
+		if err != nil {
+			return nil, err
+		}
+		return confStatus(0, *replacementTxHash), nil
+	}
+
+	// Resubmit the transaction if the current base fee is higher than the gas
+	// fee cap in the transaction.
+	baseFee, _, err := w.node.currentFees(w.ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error getting net fee state: %w", err)
+	}
+	if baseFee.Cmp(tx.GasFeeCap()) > 0 {
+		w.log.Errorf("redemption tx %s has a gas fee cap %v lower than the current base fee %v",
+			txHash, tx.GasFeeCap(), baseFee)
+		nonce := tx.Nonce()
+		replacementTxHash, err := w.resubmitRedemption(tx, contractVer, &nonce, feeWallet, monitoredTx)
+		if err != nil {
+			return nil, err
+		}
+		return confStatus(0, *replacementTxHash), nil
+	}
+
+	// Resend the transaction in case it has not been mined because it was not
+	// successfully propagated.
+	err = w.node.sendSignedTransaction(w.ctx, tx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resubmit transaction %w", err)
+	}
+
+	return confStatus(0, txHash), nil
+}
+
+// confirmRedemptionWithoutMonitoredTx checks the confirmation status of a
+// redemption transaction. It is called when a monitored tx cannot be
+// found. The main difference between the regular path and this one is that
+// when geth can also not find the transaction, instead of resubmitting an
+// entire redemption batch, a new transaction containing onl the swap we are
+// searching for will be created.
+func (w *assetWallet) confirmRedemptionWithoutMonitoredTx(txHash common.Hash, redemption *asset.Redemption, feeWallet *assetWallet) (*asset.ConfirmRedemptionStatus, error) {
 	contractVer, secretHash, err := dexeth.DecodeContractData(redemption.Spends.Contract)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode contract data: %w", err)
@@ -2782,59 +2881,113 @@ func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Rede
 	if err != nil {
 		return nil, fmt.Errorf("failed to get best header: %w", err)
 	}
-	currentTip := hdr.Number.Int64()
+	currentTip := hdr.Number.Uint64()
 
-	confStatus := func(confs uint64, txHash common.Hash) *asset.ConfirmRedemptionStatus {
-		return &asset.ConfirmRedemptionStatus{
-			Confs:  confs,
-			Req:    txConfsNeededToConfirm,
-			CoinID: txHash[:],
-		}
-	}
-
-	resubmitTx := func(tx *types.Transaction, nonceOverride *uint64) (*asset.ConfirmRedemptionStatus, error) {
-		replacementTxHash, err := w.resubmitRedemption(tx, contractVer, nonceOverride, feeWallet)
+	tx, txBlock, err := w.node.getTransaction(w.ctx, txHash)
+	if errors.Is(err, asset.CoinNotFoundError) {
+		w.log.Errorf("ConfirmRedemption: geth could not find tx: %s", txHash)
+		swapIsRedeemed, err := w.swapIsRedeemed(secretHash, contractVer)
 		if err != nil {
 			return nil, err
 		}
+		if swapIsRedeemed {
+			return confStatus(txConfsNeededToConfirm, txHash), nil
+		}
 
+		// If geth cannot find the transaction, and it also wasn't among the
+		// monitored txs, we will resubmit the swap individually.
+		txs, _, _, err := w.Redeem(&asset.RedeemForm{
+			Redemptions:   []*asset.Redemption{redemption},
+			FeeSuggestion: w.FeeRate(),
+		}, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		if len(txs) == 0 {
+			return nil, errors.New("no txs returned while resubmitting redemption")
+		}
+		var resubmittedTxHash common.Hash
+		copy(resubmittedTxHash[:], txs[0])
+		return confStatus(0, resubmittedTxHash), nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var confirmations uint64
+	if txBlock > 0 {
+		if currentTip >= uint64(txBlock) {
+			confirmations = currentTip - uint64(txBlock) + 1
+		}
+	}
+	if confirmations >= txConfsNeededToConfirm {
+		receipt, err := w.node.transactionReceipt(w.ctx, txHash)
+		if err != nil {
+			return nil, err
+		}
+		if receipt.Status == types.ReceiptStatusSuccessful {
+			return confStatus(txConfsNeededToConfirm, txHash), nil
+		}
+		replacementTxHash, err := w.resubmitRedemption(tx, contractVer, nil, feeWallet, nil)
+		if err != nil {
+			return nil, err
+		}
 		return confStatus(0, *replacementTxHash), nil
 	}
+	if confirmations > 0 {
+		return confStatus(confirmations, txHash), nil
+	}
 
-	// Generally we rely on the transaction retrieved from geth, but we
-	// use our stored monitored tx for two reasons:
-	// - If the transaction was resubmitted, calls to ConfirmRedemption using
-	//   the old tx id will use the monitoredTxs map to determine the new one.
-	// - When geth cannot find the transaction, we can resubmit the redemption
-	//   using the tx stored in the monitoredTxs map.
-	w.monitoredTxsMtx.Lock()
+	return w.checkUnconfirmedRedemption(secretHash, contractVer, txHash, tx, currentTip, feeWallet, nil)
+}
+
+// confirmRedemption checks the confirmation status of a redemption transaction.
+// It will resubmit transactions if it has been determined that the transaction
+// cannot be mined.
+func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Redemption, feeWallet *assetWallet) (*asset.ConfirmRedemptionStatus, error) {
+	if len(coinID) != common.HashLength {
+		return nil, fmt.Errorf("expected coin ID to be a transaction hash, but it has a length of %d",
+			len(coinID))
+	}
+	var txHash common.Hash
+	copy(txHash[:], coinID)
+
 	monitoredTx, err := w.getLatestMonitoredTx(txHash)
 	if err != nil {
-		// We were unable to find the monitored tx, but we will attempt to continue
 		w.log.Error(err)
+		return w.confirmRedemptionWithoutMonitoredTx(txHash, redemption, feeWallet)
 	}
-	var blocksSinceSubmission int64
-	if monitoredTx != nil {
-		monitoredTx.mtx.Lock()
-		defer monitoredTx.mtx.Unlock()
-		if currentTip > monitoredTx.blockSubmitted {
-			blocksSinceSubmission = currentTip - monitoredTx.blockSubmitted
-		}
-		monitoredTxHash := monitoredTx.tx.Hash()
-		if monitoredTxHash != txHash {
-			w.log.Debugf("tx %s was replaced by %s since the last attempt to confirm redemption", txHash, monitoredTxHash)
-			txHash = monitoredTxHash
-		}
-	} else {
-		w.log.Warnf("tx %s is missing from monitored txs", txHash)
+	// This mutex is locked inside of getLatestMonitoredTx.
+	defer monitoredTx.mtx.Unlock()
+	monitoredTxHash := monitoredTx.tx.Hash()
+	if monitoredTxHash != txHash {
+		w.log.Debugf("tx %s was replaced by %s since the last attempt to confirm redemption",
+			txHash, monitoredTxHash)
+		txHash = monitoredTxHash
 	}
-	w.monitoredTxsMtx.Unlock()
 
-	gethTx, txBlock, err := w.node.getTransaction(w.ctx, txHash)
+	contractVer, secretHash, err := dexeth.DecodeContractData(redemption.Spends.Contract)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode contract data: %w", err)
+	}
+	hdr, err := w.node.bestHeader(w.ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get best header: %w", err)
+	}
+	currentTip := hdr.Number.Uint64()
+
+	var blocksSinceSubmission uint64
+	if currentTip > monitoredTx.blockSubmitted {
+		blocksSinceSubmission = currentTip - monitoredTx.blockSubmitted
+	}
+
+	tx, txBlock, err := w.node.getTransaction(w.ctx, txHash)
 	if errors.Is(err, asset.CoinNotFoundError) {
-		w.log.Errorf("ConfirmRedemption: geth could not find tx: %s", txHash)
+		if blocksSinceSubmission > 2 {
+			w.log.Errorf("ConfirmRedemption: geth could not find tx: %s", txHash)
+		}
 
-		if monitoredTx != nil && blocksSinceSubmission < blocksToWaitBeforeCoinNotFound {
+		if blocksSinceSubmission < blocksToWaitBeforeCoinNotFound {
 			return confStatus(0, txHash), nil
 		}
 
@@ -2846,96 +2999,48 @@ func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Rede
 			return confStatus(txConfsNeededToConfirm, txHash), nil
 		}
 
-		if monitoredTx != nil {
-			return resubmitTx(monitoredTx.tx, nil)
-		} else {
-			// If the tx is missing from both geth and the monitorTx, it is
-			// resubmitted individually.
-			txs, _, _, err := w.Redeem(&asset.RedeemForm{
-				Redemptions:   []*asset.Redemption{redemption},
-				FeeSuggestion: w.FeeRate(),
-			}, nil, nil)
-			if err != nil {
-				return nil, err
-			}
-			if len(txs) == 0 {
-				return nil, errors.New("no txs returned while resubmitting redemption")
-			}
-			var resubmittedTxHash common.Hash
-			copy(resubmittedTxHash[:], txs[0])
-			return confStatus(0, resubmittedTxHash), nil
+		replacementTxHash, err := w.resubmitRedemption(monitoredTx.tx, contractVer, nil, feeWallet, monitoredTx)
+		if err != nil {
+			return nil, err
 		}
-	} else if err != nil {
+		return confStatus(0, *replacementTxHash), nil
+	}
+	if err != nil {
 		return nil, err
 	}
 
-	var confirmations int64
+	var confirmations uint64
 	if txBlock > 0 {
-		if currentTip >= txBlock {
-			confirmations = currentTip - txBlock + 1
+		if currentTip >= uint64(txBlock) {
+			confirmations = currentTip - uint64(txBlock) + 1
 		}
 	}
-
 	if confirmations >= txConfsNeededToConfirm {
 		receipt, err := w.node.transactionReceipt(w.ctx, txHash)
 		if err != nil {
 			return nil, err
 		}
 		if receipt.Status == types.ReceiptStatusSuccessful {
+			w.clearMonitoredTx(monitoredTx)
 			return confStatus(txConfsNeededToConfirm, txHash), nil
-		} else {
-			return resubmitTx(monitoredTx.tx, nil)
 		}
-	} else if confirmations > 0 {
-		return confStatus(uint64(confirmations), txHash), nil
+		replacementTxHash, err := w.resubmitRedemption(tx, contractVer, nil, feeWallet, monitoredTx)
+		if err != nil {
+			return nil, err
+		}
+		return confStatus(0, *replacementTxHash), nil
+	}
+	if confirmations > 0 {
+		return confStatus(confirmations, txHash), nil
 	}
 
 	// If the transaction is unconfirmed, check to see if it should be
 	// resubmitted once every blocksToWaitBeforeCheckingIfReplaced blocks.
-	if monitoredTx != nil && (blocksSinceSubmission%blocksToWaitBeforeCheckingIfReplaced != 0 || blocksSinceSubmission == 0) {
+	if blocksSinceSubmission%blocksToWaitBeforeCheckingIfReplaced != 0 || blocksSinceSubmission == 0 {
 		return confStatus(0, txHash), nil
 	}
 
-	// Check if the swap has been redeemed by another transaction we are unaware of.
-	swapIsRedeemed, err := w.swapIsRedeemed(secretHash, contractVer)
-	if err != nil {
-		return nil, err
-	}
-	if swapIsRedeemed {
-		return confStatus(txConfsNeededToConfirm, txHash), nil
-	}
-
-	// Resubmit the transaction if another transaction with the same nonce has
-	// already been confirmed.
-	confirmedNonce, err := w.node.getConfirmedNonce(w.ctx, currentTip)
-	if err != nil {
-		return nil, err
-	}
-	if confirmedNonce > gethTx.Nonce() {
-		return resubmitTx(monitoredTx.tx, nil)
-	}
-
-	// Resubmit the transaction if the current base fee is higher than the gas
-	// fee cap in the transaction.
-	baseFee, _, err := w.node.currentFees(w.ctx)
-	if err != nil {
-		return nil, fmt.Errorf("error getting net fee state: %w", err)
-	}
-	if baseFee.Cmp(gethTx.GasFeeCap()) > 0 {
-		w.log.Errorf("redemption tx %s has a gas fee cap %v lower than the current base fee %v",
-			txHash, baseFee, gethTx.GasFeeCap())
-		nonce := gethTx.Nonce()
-		return resubmitTx(monitoredTx.tx, &nonce)
-	}
-
-	// Resend the transaction in case it has not been mined because it was not
-	// successfully propagated.
-	err = w.node.sendSignedTransaction(w.ctx, gethTx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resubmit transaction %w", err)
-	}
-
-	return confStatus(0, txHash), nil
+	return w.checkUnconfirmedRedemption(secretHash, contractVer, txHash, tx, currentTip, feeWallet, monitoredTx)
 }
 
 // checkFindRedemptions checks queued findRedemptionRequests.
@@ -3191,7 +3296,6 @@ func (w *assetWallet) estimateTransferGas(val uint64) (gas uint64, err error) {
 func (w *assetWallet) redeem(ctx context.Context, assetID uint32, redemptions []*asset.Redemption, maxFeeRate, gasLimit uint64, contractVer uint32, nonceOverride *uint64) (tx *types.Transaction, err error) {
 	w.nonceSendMtx.Lock()
 	defer w.nonceSendMtx.Unlock()
-
 	txOpts, err := w.node.txOpts(ctx, 0, gasLimit, dexeth.GweiToWei(maxFeeRate))
 	if err != nil {
 		return nil, err

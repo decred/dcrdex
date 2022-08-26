@@ -2533,7 +2533,7 @@ func (t *trackedTrade) confirmRedemption(match *matchTracker) {
 		Spends: match.counterSwap,
 		Secret: match.MetaData.Proof.Secret,
 	})
-	if err == asset.ErrSwapRefunded {
+	if errors.Is(asset.ErrSwapRefunded, err) {
 		subject, details := t.formatDetails(TopicSwapRefunded, match.token(), t.token())
 		note := newMatchNote(TopicSwapRefunded, subject, details, db.ErrorLevel, t, match)
 		t.notify(note)
@@ -2578,11 +2578,6 @@ func (t *trackedTrade) confirmRedemption(match *matchTracker) {
 	}
 
 	if redemptionResubmitted {
-		if match.Side == order.Maker {
-			match.MetaData.Proof.MakerRedeem = order.CoinID(redemptionStatus.CoinID)
-		} else {
-			match.MetaData.Proof.TakerRedeem = order.CoinID(redemptionStatus.CoinID)
-		}
 		subject, details := t.formatDetails(TopicRedemptionResubmitted, match.token(), t.token())
 		note := newMatchNote(TopicRedemptionResubmitted, subject, details, db.WarningLevel, t, match)
 		t.notify(note)

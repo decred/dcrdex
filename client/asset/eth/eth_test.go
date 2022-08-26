@@ -2333,7 +2333,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		if !stored {
 			t.Fatalf("%s: tx was not stored in monitored transactions", test.name)
 		}
-		if monitoredTx.blockSubmitted != bestBlock {
+		if monitoredTx.blockSubmitted != uint64(bestBlock) {
 			t.Fatalf("%s: expected block submitted to be %d, but got %d", test.name, bestBlock, monitoredTx.blockSubmitted)
 		}
 		eth.monitoredTxsMtx.RUnlock()
@@ -3761,13 +3761,8 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 					blockSubmitted: 9,
 				},
 			},
-			expectedMonitoredTxs: map[common.Hash]*monitoredTx{
-				(*toEthTxHash(3, 200, redeem0Data)): {
-					tx:             toEthTx(3, 200, redeem0Data),
-					blockSubmitted: 9,
-				},
-			},
-			bestBlock: 19,
+			expectedMonitoredTxs: map[common.Hash]*monitoredTx{},
+			bestBlock:            19,
 			expectedResult: &asset.ConfirmRedemptionStatus{
 				Confs:  10,
 				Req:    10,
@@ -3902,6 +3897,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 					nonce:         3,
 					gasFeeCapGwei: 200,
 					height:        10,
+					data:          redeem0Data,
 				},
 			},
 			swapMap: map[[32]byte]*dexeth.SwapState{
@@ -4021,6 +4017,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 					nonce:         5,
 					gasFeeCapGwei: 200,
 					height:        21,
+					data:          redeem0Data,
 				},
 			},
 			swapMap: map[[32]byte]*dexeth.SwapState{
@@ -4067,6 +4064,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 					nonce:         3,
 					gasFeeCapGwei: 200,
 					height:        -1,
+					data:          redeem0Data,
 				},
 			},
 			swapMap: map[[32]byte]*dexeth.SwapState{
@@ -4091,6 +4089,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 					nonce:         3,
 					gasFeeCapGwei: 200,
 					height:        -1,
+					data:          redeem0Data,
 				},
 			},
 			swapMap: map[[32]byte]*dexeth.SwapState{
@@ -4140,6 +4139,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 					nonce:         3,
 					gasFeeCapGwei: 200,
 					height:        -1,
+					data:          redeem0Data,
 				},
 			},
 			swapMap: map[[32]byte]*dexeth.SwapState{
@@ -4361,6 +4361,12 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 		if err != nil {
 			t.Fatalf("%s: failed to load stored txs", test.name)
 		}
+
+		// We do not check the length of the in memory map because that will be cleared later
+		if len(storedTxs) != len(test.expectedMonitoredTxs) {
+			t.Fatalf("expected %d monitored txs to be stored but got %d", len(test.expectedMonitoredTxs), len(storedTxs))
+		}
+
 		for hash, expected := range test.expectedMonitoredTxs {
 			actual, found := eth.monitoredTxs[hash]
 			if !found {

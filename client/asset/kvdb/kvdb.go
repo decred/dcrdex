@@ -1,3 +1,6 @@
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org/license/1.0.0.
+
 package kvdb
 
 import (
@@ -100,6 +103,8 @@ func (d *kvDB) Store(k []byte, thing encoding.BinaryMarshaler) error {
 type badgerLoggerWrapper struct {
 	dex.Logger
 }
+
+var _ badger.Logger = (*badgerLoggerWrapper)(nil)
 
 // Warningf -> dex.Logger.Warnf
 func (log *badgerLoggerWrapper) Warningf(s string, a ...interface{}) {

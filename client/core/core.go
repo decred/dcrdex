@@ -396,19 +396,6 @@ func (dc *dexConnection) hasActiveOrders() bool {
 	return false
 }
 
-// maybeClearWalletData will call the ClearData method if the wallet implements
-// DataClearer and does not currently have any active orders.
-func (c *Core) maybeClearWalletData(wallet *xcWallet) {
-	clearer, isClearer := wallet.Wallet.(asset.DataClearer)
-	if !isClearer {
-		return
-	}
-
-	if !c.assetHasActiveOrders(wallet.AssetID) {
-		clearer.ClearData()
-	}
-}
-
 // findOrder returns the tracker and preimage for an order ID, and a boolean
 // indicating whether this is a cancel order.
 func (dc *dexConnection) findOrder(oid order.OrderID) (tracker *trackedTrade, preImg order.Preimage, isCancel bool) {
