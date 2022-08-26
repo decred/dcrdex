@@ -486,7 +486,7 @@ type WalletConfig struct {
 	FallbackFeeRate  float64 `ini:"fallbackfee"`
 	FeeRateLimit     float64 `ini:"feeratelimit"`
 	RedeemConfTarget uint64  `ini:"redeemconftarget"`
-	ActivelyUsed     bool    `ini:"special:activelyUsed"` // injected by core
+	ActivelyUsed     bool    `ini:"special_activelyUsed"` // injected by core
 	Birthday         uint64  `ini:"walletbirthday"`       // SPV
 }
 

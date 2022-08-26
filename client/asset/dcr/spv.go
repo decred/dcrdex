@@ -18,8 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrwallet/v2/chain"
 	walleterrors "decred.org/dcrwallet/v2/errors"
 	"decred.org/dcrwallet/v2/p2p"
@@ -224,6 +224,10 @@ func createSPVWallet(pw, seed []byte, dataDir string, extIdx, intIdx uint32, cha
 	}
 
 	return nil
+}
+
+func (w *spvWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, net dex.Network, currentAddress, depositAccount string) (restart bool, err error) {
+	return cfg.Type != walletTypeSPV, nil
 }
 
 func (w *spvWallet) startWallet(ctx context.Context) error {

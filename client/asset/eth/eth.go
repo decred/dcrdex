@@ -248,14 +248,17 @@ var _ asset.AccountLocker = (*ETHWallet)(nil)
 var _ asset.AccountLocker = (*TokenWallet)(nil)
 var _ asset.TokenMaster = (*ETHWallet)(nil)
 var _ asset.WalletRestorer = (*assetWallet)(nil)
+var _ asset.LiveReconfigurer = (*ETHWallet)(nil)
+var _ asset.LiveReconfigurer = (*TokenWallet)(nil)
 
 type baseWallet struct {
-	ctx         context.Context // the asset subsystem starts with Connect(ctx)
-	net         dex.Network
-	node        ethFetcher
-	addr        common.Address
-	log         dex.Logger
-	gasFeeLimit uint64
+	ctx  context.Context // the asset subsystem starts with Connect(ctx)
+	net  dex.Network
+	node ethFetcher
+	addr common.Address
+	log  dex.Logger
+
+	gasFeeLimitV uint64 // atomic
 
 	walletsMtx sync.RWMutex
 	wallets    map[uint32]*assetWallet
@@ -402,12 +405,12 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 	}
 
 	eth := &baseWallet{
-		log:         logger,
-		net:         net,
-		node:        cl,
-		addr:        cl.address(),
-		gasFeeLimit: gasFeeLimit,
-		wallets:     make(map[uint32]*assetWallet),
+		log:          logger,
+		net:          net,
+		node:         cl,
+		addr:         cl.address(),
+		gasFeeLimitV: gasFeeLimit,
+		wallets:      make(map[uint32]*assetWallet),
 	}
 
 	w := &assetWallet{
@@ -510,6 +513,29 @@ func (w *TokenWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	return &wg, nil
 }
 
+// Reconfigure attempts to reconfigure the wallet.
+func (w *ETHWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, currentAddress string) (restart bool, err error) {
+	walletCfg, err := parseWalletConfig(cfg.Settings)
+	if err != nil {
+		return false, err
+	}
+
+	gasFeeLimit := walletCfg.GasFeeLimit
+	if walletCfg.GasFeeLimit == 0 {
+		gasFeeLimit = defaultGasFeeLimit
+	}
+
+	atomic.StoreUint64(&w.baseWallet.gasFeeLimitV, gasFeeLimit)
+
+	return false, nil
+}
+
+// Reconfigure attempts to reconfigure the wallet. The token wallet has
+// no configurations.
+func (w *TokenWallet) Reconfigure(context.Context, *asset.WalletConfig, string) (bool, error) {
+	return false, nil
+}
+
 func (eth *baseWallet) walletList() []*assetWallet {
 	eth.walletsMtx.RLock()
 	defer eth.walletsMtx.RUnlock()
@@ -524,6 +550,10 @@ func (eth *baseWallet) wallet(assetID uint32) *assetWallet {
 	eth.walletsMtx.RLock()
 	defer eth.walletsMtx.RUnlock()
 	return eth.wallets[assetID]
+}
+
+func (eth *baseWallet) gasFeeLimit() uint64 {
+	return atomic.LoadUint64(&eth.gasFeeLimitV)
 }
 
 // tokenWalletConfig is the configuration options for token wallets.
@@ -905,12 +935,12 @@ func (eth *TokenWallet) createTokenFundingCoin(amount, fees uint64) *tokenFundin
 func (w *ETHWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error) {
 	cfg := ord.DEXConfig
 
-	if w.gasFeeLimit < cfg.MaxFeeRate {
+	if w.gasFeeLimit() < cfg.MaxFeeRate {
 		return nil, nil, fmt.Errorf(
 			"%v: server's max fee rate %v higher than configured fee rate limit %v",
 			ord.DEXConfig.Symbol,
 			ord.DEXConfig.MaxFeeRate,
-			w.gasFeeLimit)
+			w.gasFeeLimit())
 	}
 
 	g, err := w.initGasEstimate(int(ord.MaxSwapCount), cfg, ord.RedeemConfig)
@@ -939,12 +969,12 @@ func (w *ETHWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error
 func (w *TokenWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error) {
 	cfg := ord.DEXConfig
 
-	if w.gasFeeLimit < cfg.MaxFeeRate {
+	if w.gasFeeLimit() < cfg.MaxFeeRate {
 		return nil, nil, fmt.Errorf(
 			"%v: server's max fee rate %v higher than configured fee rate limit %v",
 			ord.DEXConfig.Symbol,
 			ord.DEXConfig.MaxFeeRate,
-			w.gasFeeLimit)
+			w.gasFeeLimit())
 	}
 
 	g, err := w.initGasEstimate(int(ord.MaxSwapCount), cfg, ord.RedeemConfig)

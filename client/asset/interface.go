@@ -211,7 +211,7 @@ const (
 	// core that lets the wallet know that it is being actively used. A use
 	// case is by the bitcoin SPV wallet to decide whether or not it is safe
 	// to do a full rescan.
-	SpecialSettingActivelyUsed = "special:activelyUsed"
+	SpecialSettingActivelyUsed = "special_activelyUsed"
 )
 
 // WalletConfig is the configuration settings for the wallet. WalletConfig
