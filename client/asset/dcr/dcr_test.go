@@ -2697,6 +2697,7 @@ func TestReconfigure(t *testing.T) {
 		DataDir:  "abcd",
 	}
 
+	// restart = false
 	restart, err := wallet.Reconfigure(ctx, walletCfg, "123456")
 	if err != nil {
 		t.Fatalf("did not expect an error")
@@ -2706,13 +2707,23 @@ func TestReconfigure(t *testing.T) {
 	}
 	checkConfig(cfg1)
 
+	// restart = 2
+	reconfigurer.restart = true
+	restart, err = wallet.Reconfigure(ctx, walletCfg, "123456")
+	if err != nil {
+		t.Fatalf("did not expect an error")
+	}
+	if !restart {
+		t.Fatalf("expected true restart but got false")
+	}
+	checkConfig(cfg1)
+
+	// try to set new configs, but get error. config should not change.
 	reconfigurer.err = errors.New("reconfigure error")
 	walletCfg.Settings = settings2
 	_, err = wallet.Reconfigure(ctx, walletCfg, "123456")
 	if err == nil {
 		t.Fatalf("expected an error")
 	}
-
-	// make sure configuration was not updated
 	checkConfig(cfg1)
 }

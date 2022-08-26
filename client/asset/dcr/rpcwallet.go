@@ -242,7 +242,7 @@ func (w *rpcWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, ne
 			return false, err
 		}
 		if !owns {
-			return false, errors.New("cannot reconfigure to different wallet while there are active deals")
+			return false, errors.New("cannot reconfigure to different wallet while there are active trades")
 		}
 	}
 
