@@ -21,6 +21,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
@@ -532,12 +533,12 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *testNode, contex
 
 	aw := &assetWallet{
 		baseWallet: &baseWallet{
-			addr:        node.addr,
-			net:         dex.Simnet,
-			node:        node,
-			ctx:         ctx,
-			log:         tLogger,
-			gasFeeLimit: defaultGasFeeLimit,
+			addr:         node.addr,
+			net:          dex.Simnet,
+			node:         node,
+			ctx:          ctx,
+			log:          tLogger,
+			gasFeeLimitV: defaultGasFeeLimit,
 		},
 		log:                tLogger.SubLogger(strings.ToUpper(dex.BipIDSymbol(assetID))),
 		assetID:            assetID,
@@ -1121,13 +1122,13 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 	node.balErr = nil
 
 	// Test eth wallet gas fee limit > server MaxFeeRate causes error
-	tmpGasFeeLimit := eth.gasFeeLimit
-	eth.gasFeeLimit = order.DEXConfig.MaxFeeRate - 1
+	tmpGasFeeLimit := eth.gasFeeLimit()
+	eth.gasFeeLimitV = order.DEXConfig.MaxFeeRate - 1
 	_, _, err = w.FundOrder(&order)
 	if err == nil {
 		t.Fatalf("eth wallet gas fee limit > server MaxFeeRate should cause error")
 	}
-	eth.gasFeeLimit = tmpGasFeeLimit
+	eth.gasFeeLimitV = tmpGasFeeLimit
 
 	w2, eth2, _, shutdown2 := tassetWallet(assetID)
 	defer shutdown2()
@@ -2866,8 +2867,8 @@ func TestDriverOpen(t *testing.T) {
 	if !ok {
 		t.Fatalf("failed to cast wallet as assetWallet")
 	}
-	if eth.gasFeeLimit != defaultGasFeeLimit {
-		t.Fatalf("expected gasFeeLimit to be default, but got %v", eth.gasFeeLimit)
+	if eth.gasFeeLimit() != defaultGasFeeLimit {
+		t.Fatalf("expected gasFeeLimit to be default, but got %v", eth.gasFeeLimit())
 	}
 	eth.shutdown()
 
@@ -2881,8 +2882,8 @@ func TestDriverOpen(t *testing.T) {
 	if !ok {
 		t.Fatalf("failed to cast wallet as assetWallet")
 	}
-	if eth.gasFeeLimit != 150 {
-		t.Fatalf("expected gasFeeLimit to be 150, but got %v", eth.gasFeeLimit)
+	if eth.gasFeeLimit() != 150 {
+		t.Fatalf("expected gasFeeLimit to be 150, but got %v", eth.gasFeeLimit())
 	}
 }
 
@@ -3388,6 +3389,42 @@ func ethToGwei(v uint64) uint64 {
 func ethToWei(v uint64) *big.Int {
 	bigV := new(big.Int).SetUint64(ethToGwei(v))
 	return new(big.Int).Mul(bigV, big.NewInt(dexeth.GweiFactor))
+}
+
+func TestReconfigure(t *testing.T) {
+	w, eth, _, shutdown := tassetWallet(BipID)
+	defer shutdown()
+
+	reconfigurer, is := w.(asset.LiveReconfigurer)
+	if !is {
+		t.Fatal("wallet is not a reconfigurer")
+	}
+
+	ethCfg := &WalletConfig{
+		GasFeeLimit: 123,
+	}
+
+	settings, err := config.Mapify(ethCfg)
+	if err != nil {
+		t.Fatal("failed to mapify")
+	}
+
+	walletCfg := &asset.WalletConfig{
+		Type:     walletTypeGeth,
+		Settings: settings,
+	}
+
+	restart, err := reconfigurer.Reconfigure(context.Background(), walletCfg, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if restart {
+		t.Fatalf("unexpected restart")
+	}
+
+	if eth.baseWallet.gasFeeLimit() != ethCfg.GasFeeLimit {
+		t.Fatal("gas fee limit was not updated properly")
+	}
 }
 
 func TestSend(t *testing.T) {
