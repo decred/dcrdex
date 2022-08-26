@@ -143,6 +143,8 @@ type Wallet interface {
 	PeerCount(ctx context.Context) (uint32, error)
 	// AddressPrivKey fetches the privkey for the specified address.
 	AddressPrivKey(ctx context.Context, address stdaddr.Address) (*secp256k1.PrivateKey, error)
+
+	Reconfigure(ctx context.Context, cfg *asset.WalletConfig, net dex.Network, currentAddress, depositAccount string) (restart bool, err error)
 }
 
 // WalletTransaction is a pared down version of walletjson.GetTransactionResult.

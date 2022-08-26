@@ -506,29 +506,36 @@ type feeStamped struct {
 	stamp time.Time
 }
 
-// ExchangeWallet is a wallet backend for Decred. The backend is how the DEX
-// client app communicates with the Decred blockchain and wallet. ExchangeWallet
-// satisfies the dex.Wallet interface.
-type ExchangeWallet struct {
-	ctx            context.Context // the asset subsystem starts with Connect(ctx)
-	wallet         Wallet
-	chainParams    *chaincfg.Params
-	log            dex.Logger
-	network        dex.Network
+// exchangeWalletConfig is the validated, unit-converted, user-configurable
+// wallet settings.
+type exchangeWalletConfig struct {
 	primaryAcct    string
 	unmixedAccount string // mixing-enabled wallets only
 	// tradingAccount (mixing-enabled wallets only) stores utxos reserved for
 	// executing order matches, the external branch stores split tx outputs,
 	// internal branch stores chained (non-final) swap change.
 	tradingAccount   string
-	tipChange        func(error)
-	lastPeerCount    uint32
-	peersChange      func(uint32, error)
+	useSplitTx       bool
 	fallbackFeeRate  uint64
 	feeRateLimit     uint64
 	redeemConfTarget uint64
-	useSplitTx       bool
 	apiFeeFallback   bool
+}
+
+// ExchangeWallet is a wallet backend for Decred. The backend is how the DEX
+// client app communicates with the Decred blockchain and wallet. ExchangeWallet
+// satisfies the dex.Wallet interface.
+type ExchangeWallet struct {
+	cfgV atomic.Value // *exchangeWalletConfig
+
+	ctx           context.Context // the asset subsystem starts with Connect(ctx)
+	wallet        Wallet
+	chainParams   *chaincfg.Params
+	log           dex.Logger
+	network       dex.Network
+	tipChange     func(error)
+	lastPeerCount uint32
+	peersChange   func(uint32, error)
 
 	oracleFeesMtx sync.Mutex
 	oracleFees    map[uint64]feeStamped // conf target => fee rate
@@ -548,10 +555,15 @@ type ExchangeWallet struct {
 	externalTxCache map[chainhash.Hash]*externalTx
 }
 
+func (dcr *ExchangeWallet) config() *exchangeWalletConfig {
+	return dcr.cfgV.Load().(*exchangeWalletConfig)
+}
+
 // Check that ExchangeWallet satisfies the Wallet interface.
 var _ asset.Wallet = (*ExchangeWallet)(nil)
 var _ asset.FeeRater = (*ExchangeWallet)(nil)
 var _ asset.Withdrawer = (*ExchangeWallet)(nil)
+var _ asset.LiveReconfigurer = (*ExchangeWallet)(nil)
 
 type block struct {
 	height int64
@@ -590,12 +602,6 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, err
 	}
 
-	// dcrwallet doesn't accept an empty string as an account name. Use the
-	// default value.
-	if walletCfg.PrimaryAccount == "" {
-		walletCfg.PrimaryAccount = defaultAcctName
-	}
-
 	dcr, err := unconnectedWallet(cfg, walletCfg, chainParams, logger, network)
 	if err != nil {
 		return nil, err
@@ -608,7 +614,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 			return nil, err
 		}
 	case walletTypeSPV:
-		dcr.wallet, err = openSPVWallet(cfg.Settings, cfg.DataDir, chainParams, logger)
+		dcr.wallet, err = openSPVWallet(cfg.DataDir, chainParams, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -626,9 +632,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	return dcr, nil
 }
 
-// unconnectedWallet returns an ExchangeWallet without a base wallet. The wallet
-// should be set before use.
-func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParams *chaincfg.Params, logger dex.Logger, network dex.Network) (*ExchangeWallet, error) {
+func getExchangeWalletCfg(dcrCfg *walletConfig, logger dex.Logger) (*exchangeWalletConfig, error) {
 	// If set in the user config, the fallback fee will be in units of DCR/kB.
 	// Convert to atoms/B.
 	fallbackFeesPerByte := toAtoms(dcrCfg.FallbackFeeRate / 1000)
@@ -655,6 +659,12 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParam
 	}
 	logger.Tracef("Redeem conf target set to %d blocks", redeemConfTarget)
 
+	primaryAcct := dcrCfg.PrimaryAccount
+	if primaryAcct == "" {
+		primaryAcct = defaultAcctName
+	}
+	logger.Tracef("Primary account set to %s", primaryAcct)
+
 	// Both UnmixedAccount and TradingAccount must be provided if primary
 	// account is a mixed account. Providing one but not the other is bad
 	// configuration. If set, the account names will be validated on Connect.
@@ -675,43 +685,51 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParam
 		}
 	}
 
-	return &ExchangeWallet{
+	return &exchangeWalletConfig{
+		primaryAcct:      primaryAcct,
+		unmixedAccount:   dcrCfg.UnmixedAccount,
+		tradingAccount:   dcrCfg.TradingAccount,
+		fallbackFeeRate:  fallbackFeesPerByte,
+		feeRateLimit:     feesLimitPerByte,
+		redeemConfTarget: redeemConfTarget,
+		useSplitTx:       dcrCfg.UseSplitTx,
+		apiFeeFallback:   dcrCfg.ApiFeeFallback,
+	}, nil
+}
+
+// unconnectedWallet returns an ExchangeWallet without a base wallet. The wallet
+// should be set before use.
+func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParams *chaincfg.Params, logger dex.Logger, network dex.Network) (*ExchangeWallet, error) {
+	walletCfg, err := getExchangeWalletCfg(dcrCfg, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	w := &ExchangeWallet{
 		log:                 logger,
 		chainParams:         chainParams,
 		network:             network,
-		primaryAcct:         dcrCfg.PrimaryAccount,
-		unmixedAccount:      dcrCfg.UnmixedAccount,
-		tradingAccount:      dcrCfg.TradingAccount,
 		tipChange:           cfg.TipChange,
 		peersChange:         cfg.PeersChange,
 		fundingCoins:        make(map[outPoint]*fundingCoin),
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
 		externalTxCache:     make(map[chainhash.Hash]*externalTx),
-		fallbackFeeRate:     fallbackFeesPerByte,
-		feeRateLimit:        feesLimitPerByte,
-		redeemConfTarget:    redeemConfTarget,
-		useSplitTx:          dcrCfg.UseSplitTx,
-		apiFeeFallback:      dcrCfg.ApiFeeFallback,
 		oracleFees:          make(map[uint64]feeStamped),
-	}, nil
+	}
+
+	w.cfgV.Store(walletCfg)
+
+	return w, nil
 }
 
 // openSPVWallet opens the previously created native SPV wallet.
-func openSPVWallet(settings map[string]string, dataDir string, chainParams *chaincfg.Params, log dex.Logger) (*spvWallet, error) {
-	walletCfg := new(walletConfig)
-	err := config.Unmapify(settings, walletCfg)
-	if err != nil {
-		return nil, err
-	}
-
+func openSPVWallet(dataDir string, chainParams *chaincfg.Params, log dex.Logger) (*spvWallet, error) {
 	dir := filepath.Join(dataDir, chainParams.Name, "spv")
 	if exists, err := walletExists(dir); err != nil {
 		return nil, err
 	} else if !exists {
 		return nil, fmt.Errorf("wallet at %q doesn't exists", dir)
 	}
-
-	// allowAutomaticRescan := !walletCfg.ActivelyUsed
 
 	return &spvWallet{
 		acctNum:     defaultAcct,
@@ -764,8 +782,10 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		}
 	}()
 
+	cfg := dcr.config()
+
 	// Validate accounts early on to prevent errors later.
-	for _, acct := range []string{dcr.primaryAcct, dcr.unmixedAccount, dcr.tradingAccount} {
+	for _, acct := range []string{cfg.primaryAcct, cfg.unmixedAccount, cfg.tradingAccount} {
 		if acct == "" {
 			continue
 		}
@@ -808,23 +828,57 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	return &wg, nil
 }
 
+// Reconfigure attempts to reconfigure the wallet.
+func (dcr *ExchangeWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, currentAddress string) (restart bool, err error) {
+	dcrCfg := new(walletConfig)
+	_, err = loadConfig(cfg.Settings, dcr.network, dcrCfg)
+	if err != nil {
+		return false, err
+	}
+
+	var depositAccount string
+	if dcrCfg.UnmixedAccount != "" {
+		depositAccount = dcrCfg.UnmixedAccount
+	} else {
+		depositAccount = dcrCfg.PrimaryAccount
+	}
+
+	restart, err = dcr.wallet.Reconfigure(dcr.ctx, cfg, dcr.network, currentAddress, depositAccount)
+	if err != nil || restart {
+		return restart, err
+	}
+
+	exchangeWalletCfg, err := getExchangeWalletCfg(dcrCfg, dcr.log)
+	if err != nil {
+		return false, err
+	}
+
+	dcr.cfgV.Store(exchangeWalletCfg)
+
+	return false, nil
+}
+
 // depositAccount returns the account that may be used to receive funds into
 // the wallet, either by a direct deposit action or via redemption or refund.
 func (dcr *ExchangeWallet) depositAccount() string {
-	if dcr.unmixedAccount != "" {
-		return dcr.unmixedAccount
+	cfg := dcr.config()
+
+	if cfg.unmixedAccount != "" {
+		return cfg.unmixedAccount
 	}
-	return dcr.primaryAcct
+	return cfg.primaryAcct
 }
 
 // fundingAccounts returns the primary account along with any configured trading
 // account which may contain spendable outputs (split tx outputs or chained swap
 // change).
 func (dcr *ExchangeWallet) fundingAccounts() []string {
-	if dcr.unmixedAccount == "" {
-		return []string{dcr.primaryAcct}
+	cfg := dcr.config()
+
+	if cfg.unmixedAccount == "" {
+		return []string{cfg.primaryAcct}
 	}
-	return []string{dcr.primaryAcct, dcr.tradingAccount}
+	return []string{cfg.primaryAcct, cfg.tradingAccount}
 }
 
 // OwnsDepositAddress indicates if the provided address can be used to deposit
@@ -843,11 +897,13 @@ func (dcr *ExchangeWallet) OwnsDepositAddress(address string) (bool, error) {
 // includes potentially untrusted 0-conf utxos, consider prioritizing confirmed
 // utxos when funding an order.
 func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
-	locked, err := dcr.lockedAtoms(dcr.primaryAcct)
+	cfg := dcr.config()
+
+	locked, err := dcr.lockedAtoms(cfg.primaryAcct)
 	if err != nil {
 		return nil, err
 	}
-	ab, err := dcr.wallet.AccountBalance(dcr.ctx, 0, dcr.primaryAcct)
+	ab, err := dcr.wallet.AccountBalance(dcr.ctx, 0, cfg.primaryAcct)
 	if err != nil {
 		return nil, err
 	}
@@ -858,7 +914,7 @@ func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
 		Locked: locked + toAtoms(ab.LockedByTickets),
 	}
 
-	if dcr.unmixedAccount == "" {
+	if cfg.unmixedAccount == "" {
 		return bal, nil
 	}
 
@@ -866,15 +922,15 @@ func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
 	// 1) trading account spendable (-locked) as available,
 	// 2) all unmixed funds as immature, and
 	// 3) all locked utxos in the trading account as locked (for swapping).
-	tradingAcctBal, err := dcr.wallet.AccountBalance(dcr.ctx, 0, dcr.tradingAccount)
+	tradingAcctBal, err := dcr.wallet.AccountBalance(dcr.ctx, 0, cfg.tradingAccount)
 	if err != nil {
 		return nil, err
 	}
-	tradingAcctLocked, err := dcr.lockedAtoms(dcr.tradingAccount)
+	tradingAcctLocked, err := dcr.lockedAtoms(cfg.tradingAccount)
 	if err != nil {
 		return nil, err
 	}
-	unmixedAcctBal, err := dcr.wallet.AccountBalance(dcr.ctx, 0, dcr.unmixedAccount)
+	unmixedAcctBal, err := dcr.wallet.AccountBalance(dcr.ctx, 0, cfg.unmixedAccount)
 	if err != nil {
 		return nil, err
 	}
@@ -909,8 +965,10 @@ func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
 		}
 	}
 
+	cfg := dcr.config()
+
 	// Either SPV wallet or EstimateSmartFeeRate failed.
-	if !dcr.apiFeeFallback {
+	if !cfg.apiFeeFallback {
 		return 0, fmt.Errorf("fee rate estimation unavailable and external API is disabled")
 	}
 
@@ -947,9 +1005,9 @@ func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if atomsPerByte > dcr.feeRateLimit {
+	if atomsPerByte > cfg.feeRateLimit {
 		return 0, fmt.Errorf("fee rate from external API greater than fee rate limit: %v > %v",
-			atomsPerByte, dcr.feeRateLimit)
+			atomsPerByte, cfg.feeRateLimit)
 	}
 	dcr.oracleFees[confTarget] = feeStamped{atomsPerByte, now}
 	return atomsPerByte, nil
@@ -1022,12 +1080,14 @@ func (dcr *ExchangeWallet) targetFeeRateWithFallback(confTarget, feeSuggestion u
 // limits. If not, the configured fallbackFeeRate is returned and a warning
 // logged.
 func (dcr *ExchangeWallet) feeRateWithFallback(feeSuggestion uint64) uint64 {
-	if feeSuggestion > 0 && feeSuggestion < dcr.feeRateLimit {
+	cfg := dcr.config()
+
+	if feeSuggestion > 0 && feeSuggestion < cfg.feeRateLimit {
 		dcr.log.Tracef("Using caller's suggestion for fee rate, %d", feeSuggestion)
 		return feeSuggestion
 	}
-	dcr.log.Warnf("No usable fee rate suggestion. Using fallback of %d", dcr.fallbackFeeRate)
-	return dcr.fallbackFeeRate
+	dcr.log.Warnf("No usable fee rate suggestion. Using fallback of %d", cfg.fallbackFeeRate)
+	return cfg.fallbackFeeRate
 }
 
 type amount uint64
@@ -1067,8 +1127,9 @@ func (dcr *ExchangeWallet) maxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asse
 	// Start by attempting max lots with a basic fee.
 	basicFee := nfo.SwapSize * nfo.MaxFeeRate
 	lots := avail / (lotSize + basicFee)
+	cfg := dcr.config()
 	for lots > 0 {
-		est, _, _, err := dcr.estimateSwap(lots, lotSize, feeSuggestion, utxos, nfo, dcr.useSplitTx, 1.0)
+		est, _, _, err := dcr.estimateSwap(lots, lotSize, feeSuggestion, utxos, nfo, cfg.useSplitTx, 1.0)
 		// The only failure mode of estimateSwap -> dcr.fund is when there is
 		// not enough funds, so if an error is encountered, count down the lots
 		// and repeat until we have enough.
@@ -1168,7 +1229,8 @@ func (dcr *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 	}
 
 	// Parse the configured split transaction.
-	split := dcr.useSplitTx
+	cfg := dcr.config()
+	split := cfg.useSplitTx
 	if customCfg.Split != nil {
 		split = *customCfg.Split
 	}
@@ -1294,12 +1356,13 @@ func (dcr *ExchangeWallet) splitOption(req *asset.PreSwapForm, utxos []*composit
 	desc := fmt.Sprintf("Using a split transaction to prevent temporary overlock of %s DCR, but for additional fees of %s DCR",
 		amount(overlock), amount(xtraFees))
 
+	cfg := dcr.config()
 	return &asset.OrderOption{
 		ConfigOption: asset.ConfigOption{
 			Key:          splitKey,
 			DisplayName:  "Pre-size Funds",
 			Description:  desc,
-			DefaultValue: dcr.useSplitTx,
+			DefaultValue: cfg.useSplitTx,
 			IsBoolean:    true,
 		},
 		Boolean: &asset.BooleanConfig{
@@ -1311,9 +1374,11 @@ func (dcr *ExchangeWallet) splitOption(req *asset.PreSwapForm, utxos []*composit
 // PreRedeem generates an estimate of the range of redemption fees that could
 // be assessed.
 func (dcr *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, error) {
+	cfg := dcr.config()
+
 	feeRate := req.FeeSuggestion
 	if feeRate == 0 { // or just document that the caller must set it?
-		feeRate = dcr.targetFeeRateWithFallback(dcr.redeemConfTarget, req.FeeSuggestion)
+		feeRate = dcr.targetFeeRateWithFallback(cfg.redeemConfTarget, req.FeeSuggestion)
 	}
 	// Best is one transaction with req.Lots inputs and 1 output.
 	var best uint64 = dexdcr.MsgTxOverhead
@@ -1391,6 +1456,8 @@ func orderEnough(val, lots, feeRate uint64, nfo *dex.Asset) func(sum uint64, siz
 // dex.Bytes should be appended to the redeem scripts collection for coins with
 // no redeem script.
 func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error) {
+	cfg := dcr.config()
+
 	// Consumer checks dex asset version, so maybe this is not our job:
 	// if ord.DEXConfig.Version != dcr.Info().Version {
 	// 	return nil, nil, fmt.Errorf("asset version mismatch: server = %d, client = %d",
@@ -1405,16 +1472,16 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	if ord.FeeSuggestion > ord.DEXConfig.MaxFeeRate {
 		return nil, nil, fmt.Errorf("fee suggestion %d > max fee rate %d", ord.FeeSuggestion, ord.DEXConfig.MaxFeeRate)
 	}
-	if ord.FeeSuggestion > dcr.feeRateLimit {
-		return nil, nil, fmt.Errorf("suggested fee > configured limit. %d > %d", ord.FeeSuggestion, dcr.feeRateLimit)
+	if ord.FeeSuggestion > cfg.feeRateLimit {
+		return nil, nil, fmt.Errorf("suggested fee > configured limit. %d > %d", ord.FeeSuggestion, cfg.feeRateLimit)
 	}
 	// Check wallet's fee rate limit against server's max fee rate
-	if dcr.feeRateLimit < ord.DEXConfig.MaxFeeRate {
+	if cfg.feeRateLimit < ord.DEXConfig.MaxFeeRate {
 		return nil, nil, fmt.Errorf(
 			"%v: server's max fee rate %v higher than configured fee rate limit %v",
 			ord.DEXConfig.Symbol,
 			ord.DEXConfig.MaxFeeRate,
-			dcr.feeRateLimit)
+			cfg.feeRateLimit)
 	}
 
 	customCfg := new(swapOptions)
@@ -1435,7 +1502,7 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 			amount(ord.Value), err)
 	}
 
-	useSplit := dcr.useSplitTx
+	useSplit := cfg.useSplitTx
 	if customCfg.Split != nil {
 		useSplit = *customCfg.Split
 	}
@@ -1450,7 +1517,7 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 			// TODO
 			// 1.0: Error when no suggestion.
 			// return nil, false, fmt.Errorf("cannot do a split transaction without a fee rate suggestion from the server")
-			rawFeeRate = dcr.targetFeeRateWithFallback(dcr.redeemConfTarget, 0)
+			rawFeeRate = dcr.targetFeeRateWithFallback(cfg.redeemConfTarget, 0)
 			// We PreOrder checked this as <= MaxFeeRate, so use that as an
 			// upper limit.
 			if rawFeeRate > ord.DEXConfig.MaxFeeRate {
@@ -1511,23 +1578,24 @@ func (dcr *ExchangeWallet) fund(enough func(sum uint64, size uint32, unspent *co
 
 // spendableUTXOs generates a slice of spendable *compositeUTXO.
 func (dcr *ExchangeWallet) spendableUTXOs() ([]*compositeUTXO, error) {
-	unspents, err := dcr.wallet.Unspents(dcr.ctx, dcr.primaryAcct)
+	cfg := dcr.config()
+	unspents, err := dcr.wallet.Unspents(dcr.ctx, cfg.primaryAcct)
 	if err != nil {
 		return nil, err
 	}
-	if dcr.tradingAccount != "" {
+	if cfg.tradingAccount != "" {
 		// Trading account may contain spendable utxos such as unspent split tx
 		// outputs that are unlocked/returned. TODO: Care should probably be
 		// taken to ensure only unspent split tx outputs are selected and other
 		// unmixed outputs in the trading account are ignored.
-		tradingAcctSpendables, err := dcr.wallet.Unspents(dcr.ctx, dcr.tradingAccount)
+		tradingAcctSpendables, err := dcr.wallet.Unspents(dcr.ctx, cfg.tradingAccount)
 		if err != nil {
 			return nil, err
 		}
 		unspents = append(unspents, tradingAcctSpendables...)
 	}
 	if len(unspents) == 0 {
-		return nil, fmt.Errorf("insufficient funds. 0 DCR available to spend in account %q", dcr.primaryAcct)
+		return nil, fmt.Errorf("insufficient funds. 0 DCR available to spend in account %q", cfg.primaryAcct)
 	}
 
 	// Parse utxos to include script size for spending input. Returned utxos
@@ -1685,11 +1753,12 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 	// spent, it won't be transferred to the unmixed account for re-mixing.
 	// Instead, it'll simply be unlocked in the trading account and can thus be
 	// used to fund future orders.
+	cfg := dcr.config()
 	addr, err := func() (stdaddr.Address, error) {
-		if dcr.tradingAccount != "" {
-			return dcr.wallet.ExternalAddress(dcr.ctx, dcr.tradingAccount)
+		if cfg.tradingAccount != "" {
+			return dcr.wallet.ExternalAddress(dcr.ctx, cfg.tradingAccount)
 		}
-		return dcr.wallet.InternalAddress(dcr.ctx, dcr.primaryAcct)
+		return dcr.wallet.InternalAddress(dcr.ctx, cfg.primaryAcct)
 	}()
 	if err != nil {
 		return nil, false, fmt.Errorf("error creating split transaction address: %w", err)
@@ -1759,7 +1828,8 @@ func (dcr *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 	dcr.fundingMtx.Lock()
 	returnedCoins, err := dcr.returnCoins(unspents)
 	dcr.fundingMtx.Unlock()
-	if err != nil || dcr.unmixedAccount == "" {
+	cfg := dcr.config()
+	if err != nil || cfg.unmixedAccount == "" {
 		return err
 	}
 
@@ -1790,13 +1860,13 @@ func (dcr *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 		// Move this coin to the unmixed account if it was sent to the internal
 		// branch of the trading account. This excludes unspent split tx outputs
 		// which are sent to the external branch of the trading account.
-		if addrInfo.Branch == acctInternalBranch && addrInfo.Account == dcr.tradingAccount {
+		if addrInfo.Branch == acctInternalBranch && addrInfo.Account == cfg.tradingAccount {
 			coinsToTransfer = append(coinsToTransfer, coin.op)
 		}
 	}
 
 	if len(coinsToTransfer) > 0 {
-		tx, totalSent, err := dcr.sendAll(coinsToTransfer, dcr.unmixedAccount)
+		tx, totalSent, err := dcr.sendAll(coinsToTransfer, cfg.unmixedAccount)
 		if err != nil {
 			dcr.log.Errorf("unable to transfer unlocked swapped change from temp trading "+
 				"account to unmixed account: %v", err)
@@ -2018,10 +2088,11 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	// Sign the tx but don't send the transaction yet until
 	// the individual swap refund txs are prepared and signed.
 	changeAcct := dcr.depositAccount()
-	if swaps.LockChange && dcr.tradingAccount != "" {
+	cfg := dcr.config()
+	if swaps.LockChange && cfg.tradingAccount != "" {
 		// Change will likely be used to fund more swaps, send to trading
 		// account.
-		changeAcct = dcr.tradingAccount
+		changeAcct = cfg.tradingAccount
 	}
 	msgTx, change, changeAddr, fees, err := dcr.signTxAndAddChange(baseTx, feeRate, -1, changeAcct)
 	if err != nil {
@@ -2127,7 +2198,7 @@ func (dcr *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 		return nil, nil, 0, fmt.Errorf("error parsing selected swap options: %w", err)
 	}
 
-	rawFeeRate := dcr.targetFeeRateWithFallback(dcr.redeemConfTarget, form.FeeSuggestion)
+	rawFeeRate := dcr.targetFeeRateWithFallback(dcr.config().redeemConfTarget, form.FeeSuggestion)
 	feeRate, err := calcBumpedRate(rawFeeRate, customCfg.FeeBump)
 	if err != nil {
 		dcr.log.Errorf("calcBumpRate error: %v", err)
@@ -2973,10 +3044,11 @@ func (dcr *ExchangeWallet) Unlock(pw []byte) error {
 
 // Lock locks the exchange wallet.
 func (dcr *ExchangeWallet) Lock() error {
-	if dcr.unmixedAccount != "" {
+	cfg := dcr.config()
+	if cfg.unmixedAccount != "" {
 		return nil // don't lock if mixing is enabled
 	}
-	return dcr.wallet.LockAccount(dcr.ctx, dcr.primaryAcct)
+	return dcr.wallet.LockAccount(dcr.ctx, cfg.primaryAcct)
 }
 
 // Locked will be true if the wallet is currently locked.
@@ -2998,9 +3070,10 @@ func (dcr *ExchangeWallet) Locked() bool {
 // EstimateRegistrationTxFee returns an estimate for the tx fee needed to
 // pay the registration fee using the provided feeRate.
 func (dcr *ExchangeWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
+	cfg := dcr.config()
 	const inputCount = 5 // buffer so this estimate is higher than actual reg tx fee.
-	if feeRate == 0 || feeRate > dcr.feeRateLimit {
-		feeRate = dcr.fallbackFeeRate
+	if feeRate == 0 || feeRate > cfg.feeRateLimit {
+		feeRate = cfg.fallbackFeeRate
 	}
 	return (dexdcr.MsgTxOverhead + dexdcr.P2PKHOutputSize*2 + inputCount*dexdcr.P2PKHInputSize) * feeRate
 }

@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -19,6 +20,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/config"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"decred.org/dcrwallet/v2/rpc/client/dcrwallet"
 	walletjson "decred.org/dcrwallet/v2/rpc/jsonrpc/types"
@@ -134,7 +136,9 @@ func dummyTx() *wire.MsgTx {
 	return makeRawTx([]*wire.TxIn{dummyInput()}, []dex.Bytes{})
 }
 
-func tNewWallet() (*ExchangeWallet, *tRPCClient, func(), error) {
+// sometimes we want to not start monitor blocks to avoid a race condition in
+// case we replace the wallet.
+func tNewWalletMonitorBlocks(monitorBlocks bool) (*ExchangeWallet, *tRPCClient, func(), error) {
 	client := newTRPCClient()
 	walletCfg := &asset.WalletConfig{
 		TipChange:   func(error) {},
@@ -158,9 +162,16 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func(), error) {
 	wallet.currentTip, _ = wallet.getBestBlock(walletCtx)
 	wallet.tipMtx.Unlock()
 
-	go wallet.monitorBlocks(walletCtx)
+	if monitorBlocks {
+		go wallet.monitorBlocks(walletCtx)
+	}
 
 	return wallet, client, shutdown, nil
+
+}
+
+func tNewWallet() (*ExchangeWallet, *tRPCClient, func(), error) {
+	return tNewWalletMonitorBlocks(true)
 }
 
 func signFunc(msgTx *wire.MsgTx, scriptSize int) (*wire.MsgTx, bool, error) {
@@ -865,7 +876,7 @@ func TestAvailableFund(t *testing.T) {
 	// Prepare for a split transaction.
 	baggageFees := tDCR.MaxFeeRate * splitTxBaggage
 	node.changeAddr = tPKHAddr
-	wallet.useSplitTx = true
+	wallet.config().useSplitTx = true
 	// No split performed due to economics is not an error.
 	setOrderValue(extraLottaOrder)
 	coins, _, err := wallet.FundOrder(ord)
@@ -1191,7 +1202,7 @@ func TestFundEdges(t *testing.T) {
 
 	// For a split transaction, we would need to cover the splitTxBaggage as
 	// well.
-	wallet.useSplitTx = true
+	wallet.config().useSplitTx = true
 	node.changeAddr = tPKHAddr
 	node.signFunc = func(msgTx *wire.MsgTx) (*wire.MsgTx, bool, error) {
 		return signFunc(msgTx, dexdcr.P2PKHSigScriptSize)
@@ -1243,7 +1254,7 @@ func TestFundEdges(t *testing.T) {
 
 	// TODO: test version mismatch
 
-	wallet.useSplitTx = false
+	wallet.config().useSplitTx = false
 
 	// TODO: fix the p2sh test so that the redeem script is a p2pk pkScript or a
 	// multisig pkScript, not a p2pkh pkScript.
@@ -2529,8 +2540,8 @@ func TestEstimateRegistrationTxFee(t *testing.T) {
 
 	const inputCount = 5
 	const txSize = dexdcr.MsgTxOverhead + dexdcr.P2PKHOutputSize*2 + inputCount*dexdcr.P2PKHInputSize
-	wallet.feeRateLimit = 100
-	wallet.fallbackFeeRate = 30
+	wallet.config().feeRateLimit = 100
+	wallet.config().fallbackFeeRate = 30
 
 	estimate := wallet.EstimateRegistrationTxFee(50)
 	if estimate != 50*txSize {
@@ -2538,13 +2549,13 @@ func TestEstimateRegistrationTxFee(t *testing.T) {
 	}
 
 	estimate = wallet.EstimateRegistrationTxFee(0)
-	if estimate != wallet.fallbackFeeRate*txSize {
-		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate*txSize, estimate)
+	if estimate != wallet.config().fallbackFeeRate*txSize {
+		t.Fatalf("expected tx fee to be %d but got %d", wallet.config().fallbackFeeRate*txSize, estimate)
 	}
 
-	estimate = wallet.EstimateRegistrationTxFee(wallet.feeRateLimit + 1)
-	if estimate != wallet.fallbackFeeRate*txSize {
-		t.Fatalf("expected tx fee to be %d but got %d", wallet.fallbackFeeRate*txSize, estimate)
+	estimate = wallet.EstimateRegistrationTxFee(wallet.config().feeRateLimit + 1)
+	if estimate != wallet.config().fallbackFeeRate*txSize {
+		t.Fatalf("expected tx fee to be %d but got %d", wallet.config().fallbackFeeRate*txSize, estimate)
 	}
 }
 
@@ -2610,4 +2621,109 @@ func Test_dcrPerKBToAtomsPerByte(t *testing.T) {
 			}
 		})
 	}
+}
+
+type tReconfigurer struct {
+	*rpcWallet
+	restart bool
+	err     error
+}
+
+func (r *tReconfigurer) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, net dex.Network, currentAddress, depositAccount string) (restartRequired bool, err error) {
+	return r.restart, r.err
+}
+
+func TestReconfigure(t *testing.T) {
+	wallet, _, shutdown, _ := tNewWalletMonitorBlocks(false)
+	defer shutdown()
+
+	reconfigurer := tReconfigurer{
+		rpcWallet: wallet.wallet.(*rpcWallet),
+	}
+
+	wallet.wallet = &reconfigurer
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cfg1 := &walletConfig{
+		PrimaryAccount:   "primary",
+		UnmixedAccount:   "unmixed",
+		TradingAccount:   "trading",
+		UseSplitTx:       true,
+		FallbackFeeRate:  55,
+		FeeRateLimit:     98,
+		RedeemConfTarget: 7,
+		ApiFeeFallback:   true,
+	}
+
+	cfg2 := &walletConfig{
+		PrimaryAccount:   "primary2",
+		UnmixedAccount:   "unmixed2",
+		TradingAccount:   "trading2",
+		UseSplitTx:       false,
+		FallbackFeeRate:  66,
+		FeeRateLimit:     97,
+		RedeemConfTarget: 5,
+		ApiFeeFallback:   false,
+	}
+
+	checkConfig := func(cfg *walletConfig) {
+		if cfg.PrimaryAccount != wallet.config().primaryAcct ||
+			cfg.UnmixedAccount != wallet.config().unmixedAccount ||
+			cfg.TradingAccount != wallet.config().tradingAccount ||
+			cfg.UseSplitTx != wallet.config().useSplitTx ||
+			toAtoms(cfg.FallbackFeeRate/1000) != wallet.config().fallbackFeeRate ||
+			toAtoms(cfg.FeeRateLimit/1000) != wallet.config().feeRateLimit ||
+			cfg.RedeemConfTarget != wallet.config().redeemConfTarget ||
+			cfg.ApiFeeFallback != wallet.config().apiFeeFallback {
+			t.Fatalf("wallet not configured with the correct values")
+		}
+	}
+
+	settings1, err := config.Mapify(cfg1)
+	if err != nil {
+		t.Fatalf("failed to mapify: %v", err)
+	}
+
+	settings2, err := config.Mapify(cfg2)
+	if err != nil {
+		t.Fatalf("failed to mapify: %v", err)
+	}
+
+	walletCfg := &asset.WalletConfig{
+		Type:     walletTypeDcrwRPC,
+		Settings: settings1,
+		DataDir:  "abcd",
+	}
+
+	// restart = false
+	restart, err := wallet.Reconfigure(ctx, walletCfg, "123456")
+	if err != nil {
+		t.Fatalf("did not expect an error")
+	}
+	if restart {
+		t.Fatalf("expected false restart but got true")
+	}
+	checkConfig(cfg1)
+
+	// restart = 2
+	reconfigurer.restart = true
+	restart, err = wallet.Reconfigure(ctx, walletCfg, "123456")
+	if err != nil {
+		t.Fatalf("did not expect an error")
+	}
+	if !restart {
+		t.Fatalf("expected true restart but got false")
+	}
+	checkConfig(cfg1)
+
+	// try to set new configs, but get error. config should not change.
+	reconfigurer.err = errors.New("reconfigure error")
+	walletCfg.Settings = settings2
+	_, err = wallet.Reconfigure(ctx, walletCfg, "123456")
+	if err == nil {
+		t.Fatalf("expected an error")
+	}
+	checkConfig(cfg1)
 }
