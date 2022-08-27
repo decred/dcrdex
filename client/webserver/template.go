@@ -7,8 +7,8 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"decred.org/dcrdex/client/webserver/locales"
@@ -23,94 +23,64 @@ type pageTemplate struct {
 
 // templates is a template processor.
 type templates struct {
-	templates map[string]pageTemplate
-	folder    string
-	locale    map[string]string
-	embedded  bool // used in exec and addTemplate
-	addErr    error
+	templates    map[string]pageTemplate
+	fs           fs.FS // must contain tmpl files at root
+	reloadOnExec bool
+	dict         map[string]string
+
+	addErr error
 }
 
 // newTemplates constructs a new templates.
-func newTemplates(folder, lang string, embedded bool) *templates {
+func newTemplates(folder, lang string) *templates {
+	embedded := folder == ""
 	t := &templates{
-		templates: make(map[string]pageTemplate),
-		folder:    folder,
-		embedded:  embedded,
+		templates:    make(map[string]pageTemplate),
+		reloadOnExec: !embedded,
 	}
-	// t.locale is only used in retranslate, which currently only applies when
-	// not using the embedded site resources, but check the lang anyway. TODO:
-	// We should aim to embed only the untranslated template, and translate
-	// those in-memory on template creation.
+
 	var found bool
-	if t.locale, found = locales.Locales[lang]; !found {
+	if t.dict, found = locales.Locales[lang]; !found {
 		t.addErr = fmt.Errorf("no translation dictionary found for lang %q", lang)
 		return t
 	}
-	if embedded { // slashes even on Windows, see embed pkg docs
-		t.folder = filepath.ToSlash(t.folder)
+
+	if embedded {
+		t.fs = htmlTmplSub
 		return t
 	}
 
-	// Make sure we have the expected directory structure.
-	if !folderExists(t.srcDir()) {
-		t.addErr = fmt.Errorf("no-embed-site set but source directory not found at %s", t.srcDir())
+	if !folderExists(folder) {
+		t.addErr = fmt.Errorf("not using embedded site, but source directory not found at %s", folder)
 	}
+	t.fs = os.DirFS(folder)
 
 	return t
 }
 
-// filepath constructs the template path from the template ID.
-func (t *templates) filepath(name string) string {
-	if t.embedded { // slashes even on Windows, see embed pkg docs
-		return t.folder + "/" + name + ".tmpl"
+// translate a template file.
+func (t *templates) translate(name string) (string, error) {
+	rawTmpl, err := fs.ReadFile(t.fs, name+".tmpl")
+	if err != nil {
+		return "", fmt.Errorf("ReadFile error: %w", err)
 	}
-	return filepath.Join(t.folder, name+".tmpl")
-}
 
-// srcDir is the expected directory of the translation source templates. Only
-// used in development when the --no-embed-site flag is used.
-// <root>/localized_html/[lang] -> <root>/html
-func (t *templates) srcDir() string {
-	return filepath.Join(filepath.Dir(filepath.Dir(t.folder)), "html")
-}
-
-// srcPath is the path translation source. Only used in
-// development when the --no-embed-site flag is used.
-func (t *templates) srcPath(name string) string {
-	return filepath.Join(t.srcDir(), name+".tmpl")
-}
-
-// retranslate rebuilds the localized html template. Only used in development
-// when the --no-embed-site flag is used.
-func (t *templates) retranslate(name string, preloads ...string) error {
-	for _, iName := range append(preloads, name) {
-		srcPath := t.srcPath(iName)
-		rawTmpl, err := os.ReadFile(srcPath)
-		if err != nil {
-			return fmt.Errorf("ReadFile error: %w", err)
+	for _, matchGroup := range locales.Tokens(rawTmpl) {
+		if len(matchGroup) != 2 {
+			return "", fmt.Errorf("can't parse match group: %v", matchGroup)
 		}
-		destTmpl := make([]byte, len(rawTmpl))
-		copy(destTmpl, rawTmpl)
-		for _, matchGroup := range locales.Tokens(rawTmpl) {
-			if len(matchGroup) != 2 {
-				return fmt.Errorf("can't parse match group: %v", matchGroup)
-			}
-			token, key := matchGroup[0], string(matchGroup[1])
-			replacement, found := t.locale[key]
+		token, key := matchGroup[0], string(matchGroup[1])
+		replacement, found := t.dict[key]
+		if !found {
+			replacement, found = locales.EnUS[key]
 			if !found {
-				replacement, found = locales.EnUS[key]
-				if !found {
-					return fmt.Errorf("warning: no translation text for key %q", key)
-				}
+				return "", fmt.Errorf("warning: no translation text for key %q", key)
 			}
-			destTmpl = bytes.Replace(destTmpl, token, []byte(replacement), -1)
 		}
-
-		if err := os.WriteFile(t.filepath(iName), destTmpl, 0644); err != nil {
-			return fmt.Errorf("error writing localized template %s: %v", t.filepath(iName), err)
-		}
+		rawTmpl = bytes.ReplaceAll(rawTmpl, token, []byte(replacement))
 	}
-	return nil
+
+	return string(rawTmpl), nil
 }
 
 // addTemplate adds a new template. It can be embed from the binary or not, to
@@ -123,23 +93,24 @@ func (t *templates) addTemplate(name string, preloads ...string) *templates {
 	if t.addErr != nil {
 		return t
 	}
-	files := make([]string, 0, len(preloads)+1)
-	for i := range preloads {
-		files = append(files, t.filepath(preloads[i]))
-	}
-	files = append(files, t.filepath(name))
 
 	tmpl := template.New(name).Funcs(templateFuncs)
-	var err error
-	if t.embedded {
-		tmpl, err = tmpl.ParseFS(siteRes, files...)
-	} else {
-		tmpl, err = tmpl.ParseFiles(files...)
+
+	// Translate and parse each template for this page.
+	for _, subName := range append(preloads, name) {
+		localized, err := t.translate(subName)
+		if err != nil {
+			t.addErr = fmt.Errorf("error translating templates: %w", err)
+			return t
+		}
+
+		tmpl, err = tmpl.Parse(localized)
+		if err != nil {
+			t.addErr = fmt.Errorf("error adding template %s: %w", name, err)
+			return t
+		}
 	}
-	if err != nil {
-		t.addErr = fmt.Errorf("error adding template %s: %w", name, err)
-		return t
-	}
+
 	t.templates[name] = pageTemplate{
 		preloads: preloads,
 		template: tmpl,
@@ -171,12 +142,8 @@ func (t *templates) exec(name string, data interface{}) (string, error) {
 		return "", fmt.Errorf("template %q not found", name)
 	}
 
-	if !t.embedded {
-		err := t.retranslate(name, tmpl.preloads...)
-		if err != nil {
-			return "", err
-		}
-
+	if t.reloadOnExec {
+		// Retranslate and re-parse the template.
 		t.addTemplate(name, tmpl.preloads...)
 		log.Debugf("reloaded HTML template %q", name)
 

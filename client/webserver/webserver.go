@@ -26,6 +26,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/webserver/locales"
 	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
@@ -76,9 +77,9 @@ var (
 	log   dex.Logger
 	unbip = dex.BipIDSymbol
 
-	//go:embed site/src/localized_html/*/*.tmpl
-	siteRes      embed.FS
-	embedHTMLDir = "site/src/localized_html" // slashes even on Windows
+	//go:embed site/src/html/*.tmpl
+	htmlTmplRes    embed.FS
+	htmlTmplSub, _ = fs.Sub(htmlTmplRes, "site/src/html") // unrooted slash separated path as per io/fs.ValidPath
 
 	//go:embed site/dist site/src/img site/src/font
 	staticSiteRes embed.FS
@@ -399,84 +400,42 @@ func New(cfg *Config) (*WebServer, error) {
 
 // buildTemplates prepares the HTML templates, which are executed and served in
 // sendTemplate. An empty siteDir indicates that the embedded templates in the
-// siteRes FS should be used. If siteDir is set, the templates will be loaded
-// from disk.
+// htmlTmplSub FS should be used. If siteDir is set, the templates will be
+// loaded from disk.
 func (s *WebServer) buildTemplates(lang, siteDir string) error {
-	embedded := siteDir == ""
-
-	// Find the subfolder with a matching language tag. First, list the contents
-	// of the localized_html folder, which contains sub-folders with language
-	// tags as their names.
-	var htmlDir string
-	var fileInfos []fs.DirEntry
-	var err error
-	if embedded {
-		htmlDir = embedHTMLDir
-		fileInfos, err = siteRes.ReadDir(htmlDir)
-	} else {
-		htmlDir = filepath.Join(siteDir, "src", "localized_html")
-		fileInfos, err = os.ReadDir(htmlDir)
-	}
+	// Try to identify language.
+	acceptLang, err := language.Parse(lang)
 	if err != nil {
-		return fmt.Errorf("ReadDir error: %w", err)
+		return fmt.Errorf("unable to parse requested language: %v", err)
 	}
 
-	// Try to match lang with the folder names.
-	var match string
-	langs := make([]language.Tag, 0, 1)
-	dirs := make([]string, 0, 1)
-	for _, fi := range fileInfos {
-		if !fi.IsDir() {
-			continue
-		}
-		if fi.Name() == lang { // exact match
-			match = fi.Name()
-			break
-		}
-
-		// Get a BCP 47 tag for the folder name for subsequent fuzzing matching.
-		tag, err := language.Parse(fi.Name())
-		if err != nil {
-			log.Warnf("error parsing language tag %q: %v", fi.Name(), err)
-			continue
-		}
-		langs = append(langs, tag)
-		dirs = append(dirs, fi.Name())
+	// Find acceptable match with available locales.
+	langTags := make([]language.Tag, 0, len(locales.Locales))
+	localeNames := make([]string, 0, len(locales.Locales))
+	for localeName := range locales.Locales {
+		lang, _ := language.Parse(localeName) // checked in init()
+		langTags = append(langTags, lang)
+		localeNames = append(localeNames, localeName)
+	}
+	_, idx, conf := language.NewMatcher(langTags).Match(acceptLang)
+	localeName := localeNames[idx] // use index because tag may end up as something hyper specific like zh-Hans-u-rg-cnzzzz
+	switch conf {
+	case language.Exact, language.High, language.Low:
+		log.Infof("Using language %v", localeName)
+	case language.No:
+		return fmt.Errorf("no match for %q in recognized languages %v", lang, localeNames)
 	}
 
-	// If no exact match, attempt a fuzzy match with language.Matcher.
-	if match == "" {
-		// Try to identify candidate languages.
-		acceptLang, err := language.Parse(lang)
-		if err != nil {
-			return fmt.Errorf("unable to parse requested language: %v", err)
-		}
-		// Match against template languages.
-		matcher := language.NewMatcher(langs)
-		_, idx, conf := matcher.Match(acceptLang) // use index because tag may end up as something hyper specific like zh-Hans-u-rg-cnzzzz
-		tag := langs[idx]
-		switch conf {
-		case language.Exact:
-		case language.High, language.Low:
-			log.Infof("Using language %v", tag)
-		case language.No:
-			return fmt.Errorf("no match for %q in recognized languages %v", lang, langs)
-		}
-		match = dirs[idx]
+	var htmlDir string
+	if siteDir == "" {
+		log.Infof("Using embedded HTML templates")
+	} else {
+		htmlDir = filepath.Join(siteDir, "src", "html")
+		log.Infof("Using HTML templates in %s", htmlDir)
 	}
-
-	tmplDir := filepath.Join(htmlDir, match)
-
-	// Report the selected folder.
-	printDir := tmplDir
-	if embedded { // pseudo-prefix embedded path, without filepath.Clean
-		tmplDir = htmlDir + "/" + match
-		printDir = "<embedded>/" + tmplDir
-	}
-	log.Infof("Using localized HTML templates in %s", printDir)
 
 	bb := "bodybuilder"
-	s.html = newTemplates(tmplDir, match, embedded).
+	s.html = newTemplates(htmlDir, localeName).
 		addTemplate("login", bb, "forms").
 		addTemplate("register", bb, "forms").
 		addTemplate("markets", bb, "forms").

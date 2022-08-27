@@ -18,10 +18,10 @@ export CGO_ENABLED=0
 # if META set, append "+${META}", otherwise nothing.
 LDFLAGS="-s -w -X main.Version=${VER}${META:++${META}}"
 
-# Generate the localized_html and build the webpack bundle prior to building the
-# webserver package, which embeds the files.
+# Build the webpack bundle prior to building the webserver package, which embeds
+# the files.
 pushd client/webserver/site
-go generate # should be a no-op
+go generate # just check, no write
 npm ci
 npm run build
 popd
@@ -48,8 +48,7 @@ popd
 
 echo "Files embedded in the Go webserver package:"
 go list -f '{{ .EmbedFiles }}' decred.org/dcrdex/client/webserver
-# NOTE: before embedding, we needed to grab: dist, src/font, src/html,
-# src/localized_html, src/img.
+# NOTE: before embedding, we needed to grab: dist, src/font, src/html, src/img.
 
 pushd bin
 zip -9 -r -q dexc-windows-amd64-v${VER}.zip dexc-windows-amd64-v${VER}
