@@ -107,10 +107,20 @@ export default class Doc {
 
   /*
    * mouseInElement returns true if the position of mouse event, e, is within
-   * the bounds of the specified element.
+   * the bounds of the specified element or any of its descendents.
    */
   static mouseInElement (e: MouseEvent, el: HTMLElement): boolean {
     return el.contains(e.target as Node)
+  }
+
+  /*
+   * mouseInElementBounds returns true if the position of mouse event, e, is
+   * within the bounds of the specified element.
+   */
+  static mouseInElementBounds (e: MouseEvent, el: HTMLElement): boolean {
+    const rect = el.getBoundingClientRect()
+    return e.pageX >= rect.left && e.pageX <= rect.right &&
+      e.pageY >= rect.top && e.pageY <= rect.bottom
   }
 
   /*
