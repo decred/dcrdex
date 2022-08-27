@@ -16,11 +16,6 @@ The HTML strings involved creating [client/webserver/locales/zh-cn.go](https://g
 
 The new HTML strings map must then be listed in <https://github.com/decred/dcrdex/blob/master/client/webserver/locales/locales.go> with an appropriate language tag.
 
-Once the new file is created in **client/webserver/locales** and the new map registered in **client/webserver/locales/locales.go**, it is then necessary to run `go generate` in the **client/webserver/site** folder.  This creates the localized HTML template files in the **localized_html** folder.
-
-If you modify any of the HTML templates in *client/webserver/site/src/html*, it
-is also necessary to regenerate the localize templates with `go generate`.
-
 ## Step 2 - Notifications
 
 The notification strings involved editing [client/core/locale_ntfn.go](https://github.com/decred/dcrdex/blob/master/client/core/locale_ntfn.go) with a new `var zhCN map[Topic]*translation`. These translations correspond to the English strings in the `enUS` map in the same file.
