@@ -380,7 +380,7 @@ export default class Application {
     dialog.style.top = `${ico.top - 9}px`
 
     const hide = (e: MouseEvent) => {
-      if (!Doc.mouseInElement(e, dialog)) {
+      if (!Doc.mouseInElementBounds(e, dialog)) {
         Doc.hide(dialog)
         unbind(document, 'click', hide)
         if (dialog === this.page.noteBox && Doc.isDisplayed(this.page.noteList)) {
