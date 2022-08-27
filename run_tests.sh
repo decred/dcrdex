@@ -8,14 +8,8 @@ modules=". ./dex/testing/loadbot"
 GV=$(go version | sed "s/^.*go\([0-9.]*\).*/\1/")
 echo "Go version: $GV"
 
-# Regenerate localized html templates and check for changes.
-TMPL_STATUS=$(git status --porcelain 'client/webserver/site/src/localized_html/*.tmpl')
-go generate -x ./client/webserver/site
-TMPL_STATUS2=$(git status --porcelain 'client/webserver/site/src/localized_html/*.tmpl')
-if [ "$TMPL_STATUS" != "$TMPL_STATUS2" ]; then
-	printf "Localized HTML templates in client/webserver/site/src/localized_html need updating:\n${TMPL_STATUS2}\n"
-	exit 1
-fi
+# Ensure html templates pass localization.
+go generate -x ./client/webserver/site # no -write
 
 # For each module, run go mod tidy, build and run test.
 for m in $modules
@@ -24,7 +18,7 @@ do
 
 	# Run `go mod tidy` and fail if the git status of go.mod and/or
 	# go.sum changes. Only do this for the latest Go version.
-	if [[ "$GV" =~ ^1.18 ]]; then
+	if [[ "$GV" =~ ^1.19 ]]; then
 		MOD_STATUS=$(git status --porcelain go.mod go.sum)
 		go mod tidy
 		UPDATED_MOD_STATUS=$(git status --porcelain go.mod go.sum)
