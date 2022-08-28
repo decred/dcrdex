@@ -46,7 +46,8 @@ func newTemplates(folder, lang string, embedded bool) *templates {
 		t.addErr = fmt.Errorf("no translation dictionary found for lang %q", lang)
 		return t
 	}
-	if embedded {
+	if embedded { // slashes even on Windows, see embed pkg docs
+		t.folder = filepath.ToSlash(t.folder)
 		return t
 	}
 
@@ -60,6 +61,9 @@ func newTemplates(folder, lang string, embedded bool) *templates {
 
 // filepath constructs the template path from the template ID.
 func (t *templates) filepath(name string) string {
+	if t.embedded { // slashes even on Windows, see embed pkg docs
+		return t.folder + "/" + name + ".tmpl"
+	}
 	return filepath.Join(t.folder, name+".tmpl")
 }
 
