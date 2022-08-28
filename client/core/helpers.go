@@ -18,8 +18,10 @@ import (
 // Whenever possible, add an OrderReader methods rather than a template func.
 type OrderReader struct {
 	*Order
-	BaseUnitInfo  dex.UnitInfo
-	QuoteUnitInfo dex.UnitInfo
+	BaseUnitInfo     dex.UnitInfo
+	BaseFeeUnitInfo  dex.UnitInfo
+	QuoteUnitInfo    dex.UnitInfo
+	QuoteFeeUnitInfo dex.UnitInfo
 }
 
 // FromSymbol is the symbol of the asset which will be sent.
@@ -36,6 +38,34 @@ func (ord *OrderReader) ToSymbol() string {
 		return ord.QuoteSymbol
 	}
 	return ord.BaseSymbol
+}
+
+// FromFeeSymbol is the symbol of the asset used to pay swap fees.
+func (ord *OrderReader) FromFeeSymbol() string {
+	if ord.Sell {
+		return ord.BaseFeeUnitInfo.Conventional.Unit
+	}
+	return ord.QuoteFeeUnitInfo.Conventional.Unit
+}
+
+// ToFeeSymbol is the symbol of the asset used to pay redeem fees.
+func (ord *OrderReader) ToFeeSymbol() string {
+	if ord.Sell {
+		return ord.QuoteFeeUnitInfo.Conventional.Unit
+	}
+	return ord.BaseFeeUnitInfo.Conventional.Unit
+}
+
+// BaseFeeSymbol is the symbol of the asset used to pay the base asset's
+// network fees.
+func (ord *OrderReader) BaseFeeSymbol() string {
+	return ord.BaseFeeUnitInfo.Conventional.Unit
+}
+
+// QuoteFeeSymbol is the symbol of the asset used to pay the quote asset's
+// network fees.
+func (ord *OrderReader) QuoteFeeSymbol() string {
+	return ord.QuoteFeeUnitInfo.Conventional.Unit
 }
 
 // FromID is the asset ID of the asset which will be sent.
@@ -303,17 +333,17 @@ func (ord *OrderReader) AverageRateString() string {
 // SwapFeesString is a formatted string of the paid swap fees.
 func (ord *OrderReader) SwapFeesString() string {
 	if ord.Sell {
-		return formatQty(ord.FeesPaid.Swap, ord.BaseUnitInfo)
+		return formatQty(ord.FeesPaid.Swap, ord.BaseFeeUnitInfo)
 	}
-	return formatQty(ord.FeesPaid.Swap, ord.QuoteUnitInfo)
+	return formatQty(ord.FeesPaid.Swap, ord.QuoteFeeUnitInfo)
 }
 
 // RedemptionFeesString is a formatted string of the paid redemption fees.
 func (ord *OrderReader) RedemptionFeesString() string {
 	if ord.Sell {
-		return formatQty(ord.FeesPaid.Swap, ord.QuoteUnitInfo)
+		return formatQty(ord.FeesPaid.Redemption, ord.QuoteFeeUnitInfo)
 	}
-	return formatQty(ord.FeesPaid.Swap, ord.BaseUnitInfo)
+	return formatQty(ord.FeesPaid.Redemption, ord.BaseFeeUnitInfo)
 }
 
 // BaseAssetFees is a formatted string of the fees paid in the base asset.
