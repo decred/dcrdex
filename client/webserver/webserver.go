@@ -19,6 +19,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -76,7 +77,8 @@ var (
 	unbip = dex.BipIDSymbol
 
 	//go:embed site/src/localized_html/*/*.tmpl
-	siteRes embed.FS
+	siteRes      embed.FS
+	embedHTMLDir = "site/src/localized_html" // slashes even on Windows
 
 	//go:embed site/dist site/src/img site/src/font
 	staticSiteRes embed.FS
@@ -409,7 +411,7 @@ func (s *WebServer) buildTemplates(lang, siteDir string) error {
 	var fileInfos []fs.DirEntry
 	var err error
 	if embedded {
-		htmlDir = filepath.Join(site, "src", "localized_html")
+		htmlDir = embedHTMLDir
 		fileInfos, err = siteRes.ReadDir(htmlDir)
 	} else {
 		htmlDir = filepath.Join(siteDir, "src", "localized_html")
@@ -468,7 +470,8 @@ func (s *WebServer) buildTemplates(lang, siteDir string) error {
 	// Report the selected folder.
 	printDir := tmplDir
 	if embedded { // pseudo-prefix embedded path, without filepath.Clean
-		printDir = "<embedded>" + string(filepath.Separator) + tmplDir
+		tmplDir = htmlDir + "/" + match
+		printDir = "<embedded>/" + tmplDir
 	}
 	log.Infof("Using localized HTML templates in %s", printDir)
 
@@ -834,7 +837,15 @@ func fileServer(r chi.Router, pathPrefix, siteDir, subDir, forceContentType stri
 			} // else don't set it (plain)
 		}
 
-		_, err = io.Copy(w, f)
+		sendSize := stat.Size()
+		w.Header().Set("Content-Length", strconv.FormatInt(sendSize, 10))
+
+		// TODO: Set Last-Modified for the embedded files.
+		// if modTime != nil {
+		// 	w.Header().Set("Last-Modified", modTime.Format(http.TimeFormat))
+		// }
+
+		_, err = io.CopyN(w, f, sendSize)
 		if err != nil {
 			log.Errorf("Writing response for path %q failed: %v", r.URL.Path, err)
 			// Too late to write to header with error code.
