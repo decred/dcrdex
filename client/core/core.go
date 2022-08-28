@@ -7702,7 +7702,9 @@ func (c *Core) deleteOrderFn(ordersFileStr string) (perOrderFn func(*db.MetaOrde
 		"Order Rate",
 		"Actual Rate",
 		"Base Fees",
+		"Base Fees Asset",
 		"Quote Fees",
+		"Quote Fees Asset",
 		"Type",
 		"Side",
 		"Time in Force",
@@ -7729,14 +7731,36 @@ func (c *Core) deleteOrderFn(ordersFileStr string) (perOrderFn func(*db.MetaOrde
 		if err != nil {
 			return fmt.Errorf("unable to get base unit info for %v: %v", cord.BaseSymbol, err)
 		}
+
+		baseFeeUnitInfo := baseUnitInfo
+		baseIsToken, baseParent := asset.IsToken(cord.BaseID)
+		if baseIsToken {
+			baseFeeUnitInfo, err = asset.UnitInfo(baseParent)
+			if err != nil {
+				return fmt.Errorf("unable to get base fee unit info for %v: %v", baseParent, err)
+			}
+		}
+
 		quoteUnitInfo, err := asset.UnitInfo(cord.QuoteID)
 		if err != nil {
 			return fmt.Errorf("unable to get quote unit info for %v: %v", cord.QuoteSymbol, err)
 		}
+
+		quoteFeeUnitInfo := quoteUnitInfo
+		quoteIsToken, quoteParent := asset.IsToken(cord.QuoteID)
+		if quoteIsToken {
+			quoteFeeUnitInfo, err = asset.UnitInfo(quoteParent)
+			if err != nil {
+				return fmt.Errorf("unable to get quote fee unit info for %v: %v", quoteParent, err)
+			}
+		}
+
 		ordReader := &OrderReader{
-			Order:         cord,
-			BaseUnitInfo:  baseUnitInfo,
-			QuoteUnitInfo: quoteUnitInfo,
+			Order:            cord,
+			BaseUnitInfo:     baseUnitInfo,
+			BaseFeeUnitInfo:  baseFeeUnitInfo,
+			QuoteUnitInfo:    quoteUnitInfo,
+			QuoteFeeUnitInfo: quoteFeeUnitInfo,
 		}
 
 		timestamp := time.UnixMilli(int64(cord.Stamp)).Local().Format(time.RFC3339Nano)
@@ -7749,7 +7773,9 @@ func (c *Core) deleteOrderFn(ordersFileStr string) (perOrderFn func(*db.MetaOrde
 			ordReader.SimpleRateString(),  // Order Rate
 			ordReader.AverageRateString(), // Actual Rate
 			ordReader.BaseAssetFees(),     // Base Fees
+			ordReader.BaseFeeSymbol(),     // Base Fees Asset
 			ordReader.QuoteAssetFees(),    // Quote Fees
+			ordReader.QuoteFeeSymbol(),    // Quote Fees Asset
 			ordReader.Type.String(),       // Type
 			ordReader.SideString(),        // Side
 			cord.TimeInForce.String(),     // Time in Force

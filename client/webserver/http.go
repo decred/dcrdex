@@ -370,7 +370,9 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 		"Order Rate",
 		"Actual Rate",
 		"Base Fees",
+		"Base Fees Asset",
 		"Quote Fees",
+		"Quote Fees Asset",
 		"Type",
 		"Side",
 		"Time in Force",
@@ -402,7 +404,9 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 			ordReader.SimpleRateString(),  // Order Rate
 			ordReader.AverageRateString(), // Actual Rate
 			ordReader.BaseAssetFees(),     // Base Fees
+			ordReader.BaseFeeSymbol(),     // Base Fees Asset
 			ordReader.QuoteAssetFees(),    // Quote Fees
+			ordReader.QuoteFeeSymbol(),    // Quote Fees Asset
 			ordReader.Type.String(),       // Type
 			ordReader.SideString(),        // Side
 			ord.TimeInForce.String(),      // Time in Force
@@ -476,9 +480,20 @@ func (s *WebServer) orderReader(ord *core.Order) *core.OrderReader {
 		return a.UnitInfo
 	}
 
+	feeUnitInfo := func(assetID uint32, symbol string) dex.UnitInfo {
+		isToken, parent := asset.IsToken(assetID)
+		if !isToken {
+			return unitInfo(assetID, symbol)
+		}
+		parentAsset := asset.Asset(parent)
+		return parentAsset.Info.UnitInfo
+	}
+
 	return &core.OrderReader{
-		Order:         ord,
-		BaseUnitInfo:  unitInfo(ord.BaseID, ord.BaseSymbol),
-		QuoteUnitInfo: unitInfo(ord.QuoteID, ord.QuoteSymbol),
+		Order:            ord,
+		BaseUnitInfo:     unitInfo(ord.BaseID, ord.BaseSymbol),
+		BaseFeeUnitInfo:  feeUnitInfo(ord.BaseID, ord.BaseSymbol),
+		QuoteUnitInfo:    unitInfo(ord.QuoteID, ord.QuoteSymbol),
+		QuoteFeeUnitInfo: feeUnitInfo(ord.QuoteID, ord.QuoteSymbol),
 	}
 }
