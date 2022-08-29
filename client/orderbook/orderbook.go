@@ -614,9 +614,9 @@ func (ob *OrderBook) BestFillMarketBuy(qty, lotSize uint64) ([]*Fill, bool) {
 	return ob.sells.bestFill(qty, true, lotSize)
 }
 
+// SetMatchesSummary set matches summary. If the matches summary length grows
+// bigger than 100, it will slice out the ones first added.
 func (ob *OrderBook) SetMatchesSummary(matches map[uint64]uint64, ts uint64) {
-	ob.matchSummaryMtx.Lock()
-	defer ob.matchSummaryMtx.Unlock()
 	newMatchesSummary := make([]*MatchSummary, len(matches))
 	i := 0
 	for rate, qty := range matches {
@@ -627,16 +627,26 @@ func (ob *OrderBook) SetMatchesSummary(matches map[uint64]uint64, ts uint64) {
 		}
 		i++
 	}
+
+	ob.matchSummaryMtx.Lock()
+	defer ob.matchSummaryMtx.Unlock()
 	if ob.matchesSummary == nil {
 		ob.matchesSummary = newMatchesSummary
 		return
 	}
 	ob.matchesSummary = append(newMatchesSummary, ob.matchesSummary...)
+	maxLength := 1000
+	// if maxLength is greater than 100, slice it and left the first 100.
+	if len(ob.matchesSummary) > maxLength+100 {
+		ob.matchesSummary = ob.matchesSummary[maxLength:]
+	}
 }
 
 func (ob *OrderBook) GetMatchesSummary() []*MatchSummary {
+	ob.matchSummaryMtx.Lock()
 	if ob.matchesSummary == nil {
 		ob.matchesSummary = make([]*MatchSummary, 0)
 	}
+	ob.matchSummaryMtx.Unlock()
 	return ob.matchesSummary
 }
