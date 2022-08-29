@@ -6,7 +6,7 @@ replace decred.org/dcrdex => ../../..
 
 require (
 	decred.org/dcrdex v0.5.0
-	fyne.io/systray v1.10.0
+	fyne.io/systray v1.10.1-0.20220621085403-9a2652634e93
 	github.com/decred/dcrd/dcrutil/v4 v4.0.0
 	github.com/decred/slog v1.2.0
 	github.com/jessevdk/go-flags v1.4.1-0.20200711081900-c17162fe8fd7
@@ -76,7 +76,7 @@ require (
 	github.com/go-chi/chi/v5 v5.0.1 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-stack/stack v1.8.0 // indirect
-	github.com/godbus/dbus/v5 v5.0.4 // indirect
+	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/golang-jwt/jwt/v4 v4.3.0 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/uuid v1.3.0 // indirect

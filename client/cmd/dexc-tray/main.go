@@ -69,7 +69,7 @@ func onReady() {
 	mStarting.Hide()
 
 	mOpen := systray.AddMenuItem("Launch browser", "Open the interface in a browser window.")
-	mOpen.SetIcon(FavIcon)
+	mOpen.SetIcon(SymbolBWIcon)
 	go func() {
 		for range mOpen.ClickedCh {
 			err := browser.OpenURL("http://" + addr)
@@ -91,9 +91,19 @@ func onReady() {
 		}
 	}()
 
-	mConfigFile := systray.AddMenuItem("Open config file", "Open the config file.")
+	mConfigFile := systray.AddMenuItem("Edit config file", "Open the config file in a text editor.")
 	go func() {
 		for range mConfigFile.ClickedCh {
+			if _, err := os.Stat(cfgPath); err != nil {
+				if os.IsNotExist(err) {
+					fid, err := os.Create(cfgPath)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "failed to create new config file: %v", err)
+						continue
+					}
+					fid.Close()
+				}
+			}
 			err := browser.OpenFile(cfgPath)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
