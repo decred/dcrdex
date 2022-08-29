@@ -271,4 +271,9 @@ var EnUS = map[string]string{
 	"transfer":                    "Transfer",
 	"invalid_address":             "Note: Provide a valid address.",
 	"max_estimated_send_tooltip":  "This is the estimated amount that will be received if you withdraw your current balance with 'Subtract fees from amount sent' checked. If there is no subtract fee checkbox, this is the maximum estimated amount you can send.",
+	"Maker Swap":                  "Maker Swap",
+	"Taker Swap":                  "Taker Swap",
+	"Maker Redemption":            "Maker Redemption",
+	"Taker Redemption":            "Taker Redemption",
+	"Pending":                     "Pending",
 }

@@ -432,6 +432,105 @@ func (ord *OrderReader) MatchReaders() []*matchReader {
 	return readers
 }
 
+// IsMaker returns if the user is the maker in this match.
+func (m *matchReader) IsMaker() bool {
+	return m.Side == order.Maker
+}
+
+// MakerSwapID reutrns the ID of the asset used in the maker's swap.
+func (m *matchReader) MakerSwapID() uint32 {
+	if m.Side == order.Maker {
+		return m.ord.FromID()
+	}
+	return m.ord.ToID()
+}
+
+// TakerSwapID reutrns the ID of the asset used in the taker's swap.
+func (m *matchReader) TakerSwapID() uint32 {
+	if m.Side == order.Maker {
+		return m.ord.ToID()
+	}
+	return m.ord.FromID()
+}
+
+// MakerSwapSymbol reutrns the symbol of the asset used in the maker's swap.
+func (m *matchReader) MakerSwapSymbol() string {
+	if m.Side == order.Maker {
+		return m.ord.FromSymbol()
+	}
+	return m.ord.ToSymbol()
+}
+
+// TakerSwapSymbol reutrns the symbol of the asset used in the taker's swap.
+func (m *matchReader) TakerSwapSymbol() string {
+	if m.Side == order.Maker {
+		return m.ord.ToSymbol()
+	}
+	return m.ord.FromSymbol()
+}
+
+// MakerSwap returns the coin created by the maker's swap transaction.
+func (m *matchReader) MakerSwap() *Coin {
+	if m.Side == order.Maker {
+		return m.Swap
+	}
+	return m.CounterSwap
+}
+
+// TakerSwap returns the coin created by the taker's swap transaction.
+func (m *matchReader) TakerSwap() *Coin {
+	if m.Side == order.Maker {
+		return m.CounterSwap
+	}
+	return m.Swap
+}
+
+// MakerRedeem returns the coin created by the maker's redeem transaction.
+func (m *matchReader) MakerRedeem() *Coin {
+	if m.Side == order.Maker {
+		return m.Redeem
+	}
+	return m.CounterRedeem
+}
+
+// TakerRedeem returns the coin created by the taker's redeem transaction.
+func (m *matchReader) TakerRedeem() *Coin {
+	if m.Side == order.Maker {
+		return m.CounterRedeem
+	}
+	return m.Redeem
+}
+
+// ShowMakerSwap returns whether or not to display the maker swap section
+// on the match card.
+func (m *matchReader) ShowMakerSwap() bool {
+	return m.MakerSwap() != nil || !m.Revoked
+}
+
+// ShowTakerSwap returns whether or not to display the taker swap section
+// on the match card.
+func (m *matchReader) ShowTakerSwap() bool {
+	return m.TakerSwap() != nil || !m.Revoked
+}
+
+// ShowMakerRedeem returns whether or not to display the maker redeem section
+// on the match card.
+func (m *matchReader) ShowMakerRedeem() bool {
+	return m.MakerRedeem() != nil || !m.Revoked
+}
+
+// ShowTakerRedeem returns whether or not to display the taker redeem section
+// on the match card.
+func (m *matchReader) ShowTakerRedeem() bool {
+	return !m.IsMaker() && (m.TakerRedeem() != nil || !m.Revoked)
+}
+
+// ShowRefund returns whether or not to display the refund section on the match
+// card.
+func (m *matchReader) ShowRefund() bool {
+	return m.Refund != nil || (m.Revoked && m.Active)
+}
+
 // StatusString is a formatted string of the match status.
 func (m *matchReader) StatusString() string {
 	if m.Revoked {
@@ -451,16 +550,16 @@ func (m *matchReader) StatusString() string {
 
 	switch m.Status {
 	case order.NewlyMatched:
-		return "(0 / 4) Newly Matched"
+		return "Newly Matched"
 	case order.MakerSwapCast:
-		return "(1 / 4) First Swap Sent"
+		return "Maker Swap Sent"
 	case order.TakerSwapCast:
-		return "(2 / 4) Second Swap Sent"
+		return "Taker Swap Sent"
 	case order.MakerRedeemed:
 		if m.Side == order.Maker {
 			return "Redemption Sent"
 		}
-		return "(3 / 4) Maker Redeemed"
+		return "Maker Redeemed"
 	case order.MatchComplete:
 		return "Redemption Sent"
 	case order.MatchConfirmed:
@@ -507,51 +606,34 @@ func (m *matchReader) TimeString() string {
 	return t.Format("Jan 2 2006, 15:04:05 MST")
 }
 
-// InSwapCast will be true if the last match step was us broadcasting our swap
-// transaction.
-func (m *matchReader) InSwapCast() bool {
-	if m.Revoked || m.Refund != nil {
-		return false
-	}
-	return (m.Match.Status == order.TakerSwapCast && m.Match.Side == order.Taker) ||
-		(m.Match.Status == order.MakerSwapCast && m.Match.Side == order.Maker)
-}
-
-// SwapConfirmString returns a string indicating the current confirmation
-// progress of the our swap contract, if and only if the counter-party has not
-// yet redeemed the swap, otherwise an empty string is returned.
-func (m *matchReader) SwapConfirmString() string {
-	if !m.InSwapCast() || m.Swap == nil {
-		return ""
-	}
-	confs := m.Swap.Confs
-	if confs == nil || confs.Required == 0 {
-		return ""
-	}
-	if confs.Count < 0 {
-		return "confirmations unknown"
-	}
-	return fmt.Sprintf("%d / %d confirmations", confs.Count, confs.Required)
-}
-
-// InCounterSwapCast will be true if the last match step was the counter-party
+// InMakerSwapCast will be true if the last match step was the maker
 // broadcasting their swap transaction.
-func (m *matchReader) InCounterSwapCast() bool {
+func (m *matchReader) InMakerSwapCast() bool {
 	if m.Revoked || m.Refund != nil {
 		return false
 	}
-	return (m.Match.Status == order.MakerSwapCast && m.Match.Side == order.Taker) ||
-		(m.Match.Status == order.TakerSwapCast && m.Match.Side == order.Maker)
+
+	return m.Match.Status == order.MakerSwapCast
 }
 
-// CounterSwapConfirmString returns a string indicating the current confirmation
-// progress of the other party's swap contract, if and only if we have not yet
-// redeemed the swap, otherwise an empty string is returned.
-func (m *matchReader) CounterSwapConfirmString() string {
-	if !m.InCounterSwapCast() || m.CounterSwap == nil {
+// InTakerSwapCast will be true if the last match step was the taker
+// broadcasting their swap transaction.
+func (m *matchReader) InTakerSwapCast() bool {
+	if m.Revoked || m.Refund != nil {
+		return false
+	}
+
+	return m.Match.Status == order.TakerSwapCast
+}
+
+// MakerSwapConfirmString returns a string indicating the current confirmation
+// progress of the maker's swap contract.
+func (m *matchReader) MakerSwapConfirmString() string {
+	makerSwap := m.MakerSwap()
+	if !m.InMakerSwapCast() || makerSwap == nil {
 		return ""
 	}
-	confs := m.CounterSwap.Confs
+	confs := makerSwap.Confs
 	if confs == nil || confs.Required == 0 {
 		return ""
 	}
@@ -559,18 +641,51 @@ func (m *matchReader) CounterSwapConfirmString() string {
 		return "confirmations unknown"
 	}
 	return fmt.Sprintf("%d / %d confirmations", confs.Count, confs.Required)
+}
+
+// TakerSwapConfirmString returns a string indicating the current confirmation
+// progress of the taker's swap contract.
+func (m *matchReader) TakerSwapConfirmString() string {
+	takerSwap := m.TakerSwap()
+	if !m.InTakerSwapCast() || takerSwap == nil {
+		return ""
+	}
+	confs := takerSwap.Confs
+	if confs == nil || confs.Required == 0 {
+		return ""
+	}
+	if confs.Count < 0 {
+		return "confirmations unknown"
+	}
+	return fmt.Sprintf("%d / %d confirmations", confs.Count, confs.Required)
+}
+
+// ConfirmingMakerRedeem returns true if the user is the maker and the maker's
+// redemption is being confirmed.
+func (m *matchReader) ConfirmingMakerRedeem() bool {
+	if m.Revoked || m.Refund != nil {
+		return false
+	}
+
+	return m.Match.Side == order.Maker &&
+		m.Match.Status < order.MatchConfirmed && m.Match.Status >= order.MakerRedeemed
+}
+
+// ConfirmingMakerRedeem returns true if the user is the taker and the taker's
+// redemption is being confirmed.
+func (m *matchReader) ConfirmingTakerRedeem() bool {
+	if m.Revoked || m.Refund != nil {
+		return false
+	}
+
+	return m.Match.Side == order.Taker &&
+		m.Match.Status < order.MatchConfirmed && m.Match.Status >= order.MatchComplete
 }
 
 // InConfirmingRedeem returns true if the match has completed but the user's
 // redemption has not yet been confirmed.
 func (m *matchReader) InConfirmingRedeem() bool {
-	if m.Revoked || m.Refund != nil {
-		return false
-	}
-
-	return m.Match.Status < order.MatchConfirmed &&
-		((m.Match.Status >= order.MatchComplete && m.Match.Side == order.Taker) ||
-			(m.Match.Status >= order.MakerRedeemed && m.Match.Side == order.Maker))
+	return m.ConfirmingMakerRedeem() || m.ConfirmingTakerRedeem()
 }
 
 // ConfirmRedeemString returns a string indicating the current confirmation
