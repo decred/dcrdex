@@ -8,10 +8,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math"
+	"net/http"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -74,6 +76,11 @@ const (
 	swapFeeBumpKey   = "swapfeebump"
 	splitKey         = "swapsplit"
 	redeemFeeBumpFee = "redeemfeebump"
+	// externalApiUrl is the URL of the external API in case of fallback.
+	externalApiUrl = "https://mempool.space/api/"
+	// testnetExternalApiUrl is the URL of the testnet external API in case of
+	// fallback.
+	testnetExternalApiUrl = "https://mempool.space/testnet/api/"
 )
 
 const (
@@ -206,6 +213,14 @@ var (
 			IsBoolean:    true,
 			DefaultValue: false,
 		},
+		{
+			Key:         "apifeefallback",
+			DisplayName: "External fee rate estimates",
+			Description: "Allow fee rate estimation from a block explorer API. " +
+				"This is useful as a fallback for SPV wallets and RPC wallets " +
+				"that have recently been started.",
+			IsBoolean: true,
+		},
 	}
 	rpcWalletDefinition = &asset.WalletDefinition{
 		Type:              walletTypeRPC,
@@ -241,6 +256,8 @@ var (
 		},
 		LegacyWalletIndex: 1,
 	}
+
+	client http.Client
 )
 
 // TxInSigner is a transaction input signer. In addition to the standard Bitcoin
@@ -488,6 +505,7 @@ type WalletConfig struct {
 	RedeemConfTarget uint64  `ini:"redeemconftarget"`
 	ActivelyUsed     bool    `ini:"special_activelyUsed"` // injected by core
 	Birthday         uint64  `ini:"walletbirthday"`       // SPV
+	ApiFeeFallback   bool    `ini:"apifeefallback"`
 }
 
 // adjustedBirthday converts WalletConfig.Birthday to a time.Time, and adjusts
@@ -534,6 +552,7 @@ func readBaseWalletConfig(walletCfg *WalletConfig) (*baseWalletConfig, error) {
 
 	cfg.redeemConfTarget = walletCfg.RedeemConfTarget
 	cfg.useSplitTx = walletCfg.UseSplitTx
+	cfg.apiFeeFallback = walletCfg.ApiFeeFallback
 
 	return cfg, nil
 }
@@ -687,6 +706,7 @@ type baseWalletConfig struct {
 	feeRateLimit     uint64 // atoms/byte
 	redeemConfTarget uint64
 	useSplitTx       bool
+	apiFeeFallback   bool
 }
 
 // baseWallet is a wallet backend for Bitcoin. The backend is how the DEX
@@ -721,6 +741,8 @@ type baseWallet struct {
 	hashTx            func(*wire.MsgTx) *chainhash.Hash
 	stringAddr        dexbtc.AddressStringer
 	txVersion         func() int32
+	Network           dex.Network
+	ctx               context.Context // the asset subsystem starts with Connect(ctx)
 
 	// TODO: remove currentTip and the mutex, and make it local to the
 	// watchBlocks->reportNewTip call stack. The tests are reliant on current
@@ -750,6 +772,10 @@ func (w *baseWallet) redeemConfTarget() uint64 {
 
 func (w *baseWallet) useSplitTx() bool {
 	return w.cfgV.Load().(*baseWalletConfig).useSplitTx
+}
+
+func (w *baseWallet) apiFeeFallback() bool {
+	return w.cfgV.Load().(*baseWalletConfig).apiFeeFallback
 }
 
 type intermediaryWallet struct {
@@ -1075,6 +1101,7 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		hashTx:              txHasher,
 		calcTxSize:          txSizeCalculator,
 		txVersion:           txVersion,
+		Network:             cfg.Network,
 	}
 	w.cfgV.Store(baseCfg)
 
@@ -1125,6 +1152,7 @@ func (btc *baseWallet) connect(ctx context.Context) (*sync.WaitGroup, error) {
 	if err := btc.node.connect(ctx, &wg); err != nil {
 		return nil, err
 	}
+	btc.ctx = ctx
 	// Initialize the best block.
 	bestBlockHdr, err := btc.node.getBestBlockHeader()
 	if err != nil {
@@ -1344,7 +1372,23 @@ func (btc *baseWallet) legacyBalance() (*asset.Balance, error) {
 func (btc *baseWallet) feeRate(_ RawRequester, confTarget uint64) (uint64, error) {
 	feeResult, err := btc.node.estimateSmartFee(int64(confTarget), &btcjson.EstimateModeConservative)
 	if err != nil {
-		return 0, err
+		btc.log.Errorf("Failed to get fee rate with estimate smart fee rate: %v", err)
+		fmt.Printf("btc.apiFeeFallback: %+v\n\n", btc.apiFeeFallback())
+
+		if !btc.apiFeeFallback() {
+			return 0, err
+		}
+		btc.log.Debug("Retrieving fee rate from external API: ", externalApiUrl)
+		estimatedFee, err := externalFeeEstimator(btc.ctx, btc.Network)
+		fmt.Printf("estimated fee: %+v\n\n", estimatedFee)
+		if err != nil {
+			btc.log.Errorf("Failed to get fee rate from external API: %v", err)
+			return 0, err
+		}
+		if estimatedFee <= 0 {
+			return 0, fmt.Errorf("invalid fee rate %v", estimatedFee)
+		}
+		return estimatedFee, nil
 	}
 	if len(feeResult.Errors) > 0 {
 		return 0, fmt.Errorf(strings.Join(feeResult.Errors, "; "))
@@ -1360,6 +1404,42 @@ func (btc *baseWallet) feeRate(_ RawRequester, confTarget uint64) (uint64, error
 		return 0, fmt.Errorf("invalid fee rate %v", satPerKB)
 	}
 	return uint64(dex.IntDivUp(int64(satPerKB), 1000)), nil
+}
+
+// externalFeeEstimator gets the fee rate from the external API and returns it
+// in sats/vByte.
+func externalFeeEstimator(ctx context.Context, net dex.Network) (uint64, error) {
+	var url string
+	if net == dex.Testnet {
+		url = testnetExternalApiUrl
+	} else {
+		url = externalApiUrl
+	}
+	url = url + "v1/fees/recommended"
+	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, err
+	}
+	httpResponse, err := client.Do(r)
+	if err != nil {
+		return 0, err
+	}
+	var resp map[string]uint64
+	reader := io.LimitReader(httpResponse.Body, 1<<20)
+	err = json.NewDecoder(reader).Decode(&resp)
+	if err != nil {
+		return 0, err
+	}
+	httpResponse.Body.Close()
+
+	// we use fastestFee, docs to mempool api https://mempool.space/docs/api
+	feeInSat, ok := resp["fastestFee"]
+	if !ok {
+		return 0, errors.New("no fee rate found")
+	}
+	return feeInSat, nil
 }
 
 type amount uint64
