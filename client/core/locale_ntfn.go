@@ -312,7 +312,7 @@ var enUS = map[Topic]*translation{
 		subject:  "Message from DEX",
 		template: "%s: %s",
 	},
-	// [parentSymbol, tokenSymbol, errorMsg]
+	// [parentSymbol, tokenSymbol]
 	TopicQueuedCreationFailed: {
 		subject:  "Failed to create token wallet",
 		template: "After creating %s wallet, failed to create the %s wallet",
@@ -1477,6 +1477,12 @@ var deDE = map[Topic]*translation{
 	TopicDEXNotification: {
 		subject:  "Nachricht von DEX",
 		template: "%s: %s",
+	},
+	// karamble:
+	// [parentSymbol, tokenSymbol]
+	TopicQueuedCreationFailed: {
+		subject:  "Failed to create token wallet",
+		template: "After creating %s wallet, failed to create the %s wallet",
 	},
 }
 
