@@ -278,8 +278,7 @@ var EnUS = map[string]string{
 	"Pending":                     "Pending",
 	"disable_wallet":              "Disable Wallet",
 	"enable_wallet":               "Enable Wallet",
-	"change_wallet_status":        "Change Wallet Status",
-	"disable_wallet_warning":      "Note: This wallet will not be connected to when you start the DEX client software and cannot be used until it is enabled. Ensure you do not have active trades.",
+	"disable_wallet_warning":      "Note: This wallet will not be connected to when you start the DEX client software and cannot be used until it is enabled.",
 	"enable_wallet_message":       "This wallet will resume operation and might take some time to sync.",
 	"Disabled":                    "Disabled",
 }

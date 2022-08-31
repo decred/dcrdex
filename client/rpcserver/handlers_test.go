@@ -410,9 +410,6 @@ func TestHandleCloseWallet(t *testing.T) {
 }
 
 func TestHandleToggleWalletStatus(t *testing.T) {
-	pw := encode.PassBytes("password123")
-	pWArgs := []encode.PassBytes{pw}
-
 	tests := []struct {
 		name            string
 		params          *RawParams
@@ -420,20 +417,20 @@ func TestHandleToggleWalletStatus(t *testing.T) {
 		wantErrCode     int
 	}{{
 		name:        "ok: disable",
-		params:      &RawParams{PWArgs: pWArgs, Args: []string{"42", "true"}},
+		params:      &RawParams{Args: []string{"42", "true", "false"}},
 		wantErrCode: -1,
 	}, {
 		name:        "ok: enable",
-		params:      &RawParams{PWArgs: pWArgs, Args: []string{"42", "false"}},
+		params:      &RawParams{Args: []string{"42", "false", "false"}},
 		wantErrCode: -1,
 	}, {
 		name:            "core.toggleWalletStatus error",
-		params:          &RawParams{PWArgs: pWArgs, Args: []string{"42", "true"}},
+		params:          &RawParams{Args: []string{"42", "true", "false"}},
 		walletStatusErr: errors.New("error"),
 		wantErrCode:     msgjson.RPCToggleWalletStatusError,
 	}, {
 		name:        "bad params",
-		params:      &RawParams{PWArgs: pWArgs, Args: []string{"42"}},
+		params:      &RawParams{Args: []string{"42"}},
 		wantErrCode: msgjson.RPCArgumentsError,
 	}}
 	for _, test := range tests {

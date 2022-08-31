@@ -1387,8 +1387,8 @@ export default class MarketsPage extends BasePage {
   showToggleWalletStatus (asset: SupportedAsset) {
     const page = this.page
     this.openAsset = asset
-    Doc.hide(page.toggleWalletStatusErr, page.toggleDisableWallet, page.toggleEnableWallet)
-    Doc.show(page.toggleEnableWallet)
+    Doc.hide(page.toggleWalletStatusErr, page.walletStatusDisable, page.disableWalletMsg)
+    Doc.show(page.walletStatusEnable, page.enableWalletMsg)
     this.showForm(page.toggleWalletStatusConfirm)
   }
 
@@ -1401,7 +1401,6 @@ export default class MarketsPage extends BasePage {
 
     const url = '/api/togglewalletstatus'
     const req = {
-      pass: page.toggleWalletStatusPW.value,
       assetID: this.openAsset.id,
       disable: false
     }

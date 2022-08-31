@@ -105,7 +105,7 @@ type clientCore interface {
 	WalletState(assetID uint32) *core.WalletState
 	WalletSettings(uint32) (map[string]string, error)
 	ReconfigureWallet([]byte, []byte, *core.WalletForm) error
-	ToggleWalletStatus(pw []byte, assetID uint32, disable bool) error
+	ToggleWalletStatus(assetID uint32, disable bool, force bool) error
 	ChangeAppPass([]byte, []byte) error
 	NewDepositAddress(assetID uint32) (string, error)
 	AutoWalletConfig(assetID uint32, walletType string) (map[string]string, error)

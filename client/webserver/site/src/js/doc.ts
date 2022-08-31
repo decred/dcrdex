@@ -512,7 +512,7 @@ export class WalletIcons {
     const i = this.icons
     Doc.hide(i.locked, i.unlocked, i.sleeping, i.syncing, i.nowallet, i.nopeers)
     Doc.show(i.disabled)
-    i.disabled.dataset.tooltip = intl.prep(intl.ID_DISABLED)
+    i.disabled.dataset.tooltip = intl.prep(intl.ID_DISABLED_MSG)
   }
 
   setSyncing (wallet: WalletState | null) {

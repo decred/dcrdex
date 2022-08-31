@@ -2775,10 +2775,10 @@ func TestTrade(t *testing.T) {
 	}
 
 	// Should not be able to disable wallet, since there are active orders.
-	if tCore.ToggleWalletStatus(tPW, tUTXOAssetA.ID, true) == nil {
+	if tCore.ToggleWalletStatus(tUTXOAssetA.ID, true, false) == nil {
 		t.Fatalf("no error for disabling DCR wallet with active orders")
 	}
-	if tCore.ToggleWalletStatus(tPW, tUTXOAssetB.ID, true) == nil {
+	if tCore.ToggleWalletStatus(tUTXOAssetB.ID, true, false) == nil {
 		t.Fatalf("no error for disabling BTC wallet with active orders")
 	}
 

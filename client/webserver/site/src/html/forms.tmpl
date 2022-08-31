@@ -548,16 +548,12 @@
 {{define "toggleWalletStatusConfirm"}}
 <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 <div class="px-2 py-1 text-center position-relative fs22 sans-light">
-   [[[change_wallet_status]]]
+   <span id="walletStatusDisable" class="d-hide">[[[disable_wallet]]]</span>
+    <span id="walletStatusEnable" class="d-hide">[[[enable_wallet]]]</span>
 </div>
 <div class="fs15 text-left mt-2">
- <span id="toggleDisableWallet" class="hide">[[[disable_wallet_warning]]]</span>
- <span id="toggleEnableWallet" class="hide">[[[enable_wallet_message]]]</span>
-</div>
-<input id="toggleWalletStatus" class="form-check-input d-hide" type="checkbox">
-<div class="text-left mt-2">
- <label for="toggleWalletStatusPW" class="form-label pl-1 mb-1">Password</label>
- <input type="password" class="form-control select" id="toggleWalletStatusPW" autocomplete="current-password">
+ <span id="disableWalletMsg" class="hide">[[[disable_wallet_warning]]]</span>
+ <span id="enableWalletMsg" class="hide">[[[enable_wallet_message]]]</span>
 </div>
 <div class="d-flex justify-content-end mt-4">
   <button id="toggleWalletStatusSubmit" type="button" class="justify-content-center fs15 bg2 selected">[[[Submit]]]</button>

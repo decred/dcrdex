@@ -1559,7 +1559,7 @@ func makeWallet(wBkt *bbolt.Bucket) (*dexdb.Wallet, error) {
 		w.Balance = bal
 	}
 
-	statusB := getCopy(wBkt, walletDisabledKey)
+	statusB := wBkt.Get(walletDisabledKey)
 	if statusB != nil {
 		w.Disabled = bytes.Equal(statusB, encode.ByteTrue)
 	}

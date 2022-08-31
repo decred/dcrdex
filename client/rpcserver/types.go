@@ -113,11 +113,11 @@ type openWalletForm struct {
 	appPass encode.PassBytes
 }
 
-// walletStatusForm is information neccessary to change a wallet's status.
+// walletStatusForm is information necessary to change a wallet's status.
 type walletStatusForm struct {
-	appPass encode.PassBytes
 	assetID uint32
 	disable bool
+	force   bool
 }
 
 // newWalletForm is information necessary to create a new wallet.
@@ -348,7 +348,7 @@ func parseCloseWalletArgs(params *RawParams) (uint32, error) {
 }
 
 func parseToggleWalletStatusArgs(params *RawParams) (*walletStatusForm, error) {
-	if err := checkNArgs(params, []int{1}, []int{2}); err != nil {
+	if err := checkNArgs(params, []int{0}, []int{3}); err != nil {
 		return nil, err
 	}
 	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
@@ -359,7 +359,11 @@ func parseToggleWalletStatusArgs(params *RawParams) (*walletStatusForm, error) {
 	if err != nil {
 		return nil, err
 	}
-	req := &walletStatusForm{assetID: uint32(assetID), appPass: params.PWArgs[0], disable: disable}
+	force, err := checkBoolArg(params.Args[1], "force")
+	if err != nil {
+		return nil, err
+	}
+	req := &walletStatusForm{assetID: uint32(assetID), disable: disable, force: force}
 	return req, nil
 }
 

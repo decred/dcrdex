@@ -131,7 +131,7 @@ func (c *TCore) WalletSettings(uint32) (map[string]string, error) { return nil, 
 func (c *TCore) ReconfigureWallet(aPW, nPW []byte, form *core.WalletForm) error {
 	return nil
 }
-func (c *TCore) ToggleWalletStatus(pw []byte, assetID uint32, disable bool) error {
+func (c *TCore) ToggleWalletStatus(assetID uint32, disable bool, force bool) error {
 	if c.walletStatusErr != nil {
 		return c.walletStatusErr
 	}
@@ -854,7 +854,7 @@ func TestAPIEstimateSendTxFee(t *testing.T) {
 }
 
 func TestAPI_ToggleWalletStatus(t *testing.T) {
-	s, tCore, shutdown:= newTServer(t, false)
+	s, tCore, shutdown := newTServer(t, false)
 	defer shutdown()
 	writer := new(TWriter)
 	reader := new(TReader)
@@ -865,7 +865,6 @@ func TestAPI_ToggleWalletStatus(t *testing.T) {
 	}
 
 	body = &walletStatusForm{
-		Pass:    encode.PassBytes("dummyAppPass"),
 		Disable: true,
 		AssetID: 12,
 	}

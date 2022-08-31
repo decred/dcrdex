@@ -8,7 +8,7 @@ export const ID_OFF = 'ID_OFF'
 export const ID_READY = 'ID_READY'
 export const ID_LOCKED = 'ID_LOCKED'
 export const ID_NOWALLET = 'ID_NOWALLET'
-export const ID_DISABLED = 'ID_DISABLED'
+export const ID_DISABLED_MSG = 'ID_DISABLED_MSG'
 export const ID_WALLET_SYNC_PROGRESS = 'ID_WALLET_SYNC_PROGRESS'
 export const ID_HIDE_ADDITIONAL_SETTINGS = 'ID_HIDE_ADDITIONAL_SETTINGS'
 export const ID_SHOW_ADDITIONAL_SETTINGS = 'ID_SHOW_ADDITIONAL_SETTINGS'
@@ -58,8 +58,8 @@ export const ID_NEW_WALLET_SUCCESS = 'NEW_WALLET_SUCCESS'
 export const ID_WALLET_UNLOCKED = 'WALLET_UNLOCKED'
 export const ID_SELLING = 'ID_SELLING'
 export const ID_BUYING = 'ID_BUYING'
-export const ID_WALET_DISABLED = 'WALLET_DISABLED'
-export const ID_WALET_ENABLED = 'WALLET_ENABLED'
+export const ID_WALET_DISABLED_MSG = 'WALLET_DISABLED'
+export const ID_WALET_ENABLED_MSG = 'WALLET_ENABLED'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -119,9 +119,9 @@ export const enUS: Locale = {
   [ID_WALLET_UNLOCKED]: 'Wallet Unlocked',
   [ID_SELLING]: 'Selling',
   [ID_BUYING]: 'Buying',
-  [ID_WALET_ENABLED]: '{{ assetName }} Wallet Enabled',
-  [ID_WALET_DISABLED]: '{{ assetName }} Wallet Disabled',
-  [ID_DISABLED]: 'wallet is disabled'
+  [ID_WALET_ENABLED_MSG]: '{{ assetName }} Wallet Enabled',
+  [ID_WALET_DISABLED_MSG]: '{{ assetName }} Wallet Disabled',
+  [ID_DISABLED_MSG]: 'wallet is disabled'
 }
 
 export const ptBR: Locale = {

@@ -739,7 +739,7 @@ func (s *WebServer) apiToggleWalletStatus(w http.ResponseWriter, r *http.Request
 	if !readPost(w, r, form) {
 		return
 	}
-	err := s.core.ToggleWalletStatus(form.Pass, form.AssetID, form.Disable)
+	err := s.core.ToggleWalletStatus(form.AssetID, form.Disable, form.Force)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error setting wallet settings: %w", err))
 		return

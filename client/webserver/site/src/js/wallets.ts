@@ -324,10 +324,9 @@ export default class WalletsPage extends BasePage {
    */
   showToggleWalletStatus (disable: boolean) {
     const page = this.page
-    Doc.hide(page.toggleWalletStatusErr, page.toggleDisableWallet, page.toggleEnableWallet)
-    if (disable) Doc.show(page.toggleDisableWallet)
-    else Doc.show(page.toggleEnableWallet)
-    page.toggleWalletStatus.checked = disable
+    Doc.hide(page.toggleWalletStatusErr, page.walletStatusDisable, page.disableWalletMsg, page.walletStatusEnable, page.enableWalletMsg)
+    if (disable) Doc.show(page.walletStatusDisable, page.disableWalletMsg)
+    else Doc.show(page.walletStatusEnable, page.enableWalletMsg)
     this.showForm(page.toggleWalletStatusConfirm)
   }
 
@@ -338,10 +337,10 @@ export default class WalletsPage extends BasePage {
     const page = this.page
     Doc.hide(page.toggleWalletStatusErr)
 
+    const asset = app().assets[this.selectedAssetID]
+    const disable = !asset.wallet.disabled
     const url = '/api/togglewalletstatus'
-    const disable = page.toggleWalletStatus.checked
     const req = {
-      pass: page.toggleWalletStatusPW.value,
       assetID: this.selectedAssetID,
       disable: disable
     }
@@ -349,15 +348,21 @@ export default class WalletsPage extends BasePage {
     const loaded = app().loading(page.toggleWalletStatusConfirm)
     const res = await postJSON(url, req)
     loaded()
+    if (res.code === activeOrdersErrCode) {
+      this.forceUrl = url
+      this.forceReq = req
+      this.showConfirmForce()
+      return
+    }
     if (!app().checkResponse(res)) {
       page.toggleWalletStatusErr.textContent = res.msg
       Doc.show(page.toggleWalletStatusErr)
       return
     }
 
-    const fmtParams = { assetName: app().assets[this.selectedAssetID].name }
-    let successMsg = intl.prep(intl.ID_WALET_DISABLED, fmtParams)
-    if (!disable) successMsg = intl.prep(intl.ID_WALET_ENABLED, fmtParams)
+    const fmtParams = { assetName: asset.name }
+    let successMsg = intl.prep(intl.ID_WALET_DISABLED_MSG, fmtParams)
+    if (!disable) successMsg = intl.prep(intl.ID_WALET_ENABLED_MSG, fmtParams)
     this.assetUpdated(this.selectedAssetID, page.toggleWalletStatusConfirm, successMsg)
   }
 
@@ -1065,9 +1070,9 @@ export default class WalletsPage extends BasePage {
   }
 
   /*
-   * confirmForceSubmit resubmits either the recover or rescan requests with
-   * force set to true. These two requests require force to be set to true if
-   * they are called while the wallet is managing active orders.
+   * confirmForceSubmit resubmits either the recover, rescan or disable requests
+   * with force set to true. These two requests require force to be set to true
+   * if they are called while the wallet is managing active orders.
    */
   async confirmForceSubmit (): Promise<void> {
     const page = this.page
