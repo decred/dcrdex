@@ -8,8 +8,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"runtime/pprof"
@@ -40,6 +42,18 @@ var (
 	webserverReady = make(chan string, 1)
 	mainDone       = make(chan struct{})
 )
+
+func filePathToURL(name string) (string, error) {
+	path, err := filepath.Abs(name)
+	if err != nil { // can't pwd if name was relative, probably impossible
+		return "", err
+	}
+	fileURL, err := url.Parse("file://" + path)
+	if err != nil {
+		return "", err
+	}
+	return fileURL.String(), nil
+}
 
 func onReady() {
 	go func() {
@@ -81,35 +95,43 @@ func onReady() {
 
 	systray.AddSeparator()
 
-	mLogs := systray.AddMenuItem("Open logs folder", "Open the folder with your DEX logs.")
-	go func() {
-		for range mLogs.ClickedCh {
-			err := browser.OpenFile(logDirectory)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-			}
-		}
-	}()
-
-	mConfigFile := systray.AddMenuItem("Edit config file", "Open the config file in a text editor.")
-	go func() {
-		for range mConfigFile.ClickedCh {
-			if _, err := os.Stat(cfgPath); err != nil {
-				if os.IsNotExist(err) {
-					fid, err := os.Create(cfgPath)
-					if err != nil {
-						fmt.Fprintf(os.Stderr, "failed to create new config file: %v", err)
-						continue
-					}
-					fid.Close()
+	if logDirURL, err := filePathToURL(logDirectory); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+	} else {
+		mLogs := systray.AddMenuItem("Open logs folder", "Open the folder with your DEX logs.")
+		go func() {
+			for range mLogs.ClickedCh {
+				err := browser.OpenURL(logDirURL)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
 				}
 			}
-			err := browser.OpenFile(cfgPath)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
+		}()
+	}
+
+	if cfgPathURL, err := filePathToURL(cfgPath); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+	} else {
+		mConfigFile := systray.AddMenuItem("Edit config file", "Open the config file in a text editor.")
+		go func() {
+			for range mConfigFile.ClickedCh {
+				if _, err := os.Stat(cfgPath); err != nil {
+					if os.IsNotExist(err) {
+						fid, err := os.Create(cfgPath)
+						if err != nil {
+							fmt.Fprintf(os.Stderr, "failed to create new config file: %v", err)
+							continue
+						}
+						fid.Close()
+					}
+				}
+				err := browser.OpenURL(cfgPathURL)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+				}
 			}
-		}
-	}()
+		}()
+	}
 
 	systray.AddSeparator()
 
