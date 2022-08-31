@@ -316,13 +316,12 @@ export const deDE: Locale = {
   [ID_KEEP_WALLET_TYPE]: 'den Wallet-Typ nicht ändern',
   [WALLET_READY]: 'Wallet bereit',
   [SETUP_NEEDED]: 'Einrichtung erforderlich',
-  // karamble:
-  [WALLET_PENDING]: 'Creating Wallet',
-  [ID_SEND_SUCCESS]: '{{ assetName }} Sent!',
-  [ID_RECONFIG_SUCCESS]: 'Wallet Reconfigured!',
-  [ID_RESCAN_STARTED]: 'Wallet Rescan Running',
-  [ID_NEW_WALLET_SUCCESS]: '{{ assetName }} Wallet Created!',
-  [ID_WALLET_UNLOCKED]: 'Wallet Unlocked'
+  [WALLET_PENDING]: 'Erstelle Wallet',
+  [ID_SEND_SUCCESS]: '{{ assetName }} gesendet!',
+  [ID_RECONFIG_SUCCESS]: 'Wallet neu konfiguriert!',
+  [ID_RESCAN_STARTED]: 'Wallet Rescan läuft',
+  [ID_NEW_WALLET_SUCCESS]: '{{ assetName }} Wallet erstellt!',
+  [ID_WALLET_UNLOCKED]: 'Brieftasche entsperrt'
 }
 
 const localesMap: Record<string, Locale> = {

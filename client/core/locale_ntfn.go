@@ -1481,8 +1481,8 @@ var deDE = map[Topic]*translation{
 	// karamble:
 	// [parentSymbol, tokenSymbol]
 	TopicQueuedCreationFailed: {
-		subject:  "Failed to create token wallet",
-		template: "After creating %s wallet, failed to create the %s wallet",
+		subject:  "Token-Wallet konnte nicht erstellt werden",
+		template: "Nach dem Erstellen des %s-Wallet kam es zu einen Fehler, konnte das %s-Wallet nicht erstellen",
 	},
 }
 
