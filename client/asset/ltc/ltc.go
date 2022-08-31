@@ -48,61 +48,6 @@ var (
 			Description: "The wallet name",
 		},
 	}
-	commonOpts = []*asset.ConfigOption{
-		{
-			Key:         "rpcuser",
-			DisplayName: "JSON-RPC Username",
-			Description: "Litecoin's 'rpcuser' setting",
-		},
-		{
-			Key:         "rpcpassword",
-			DisplayName: "JSON-RPC Password",
-			Description: "Litecoin's 'rpcpassword' setting",
-			NoEcho:      true,
-		},
-		{
-			Key:          "rpcbind",
-			DisplayName:  "JSON-RPC Address",
-			Description:  "<addr> or <addr>:<port> (default 'localhost')",
-			DefaultValue: "127.0.0.1",
-		},
-		{
-			Key:          "rpcport",
-			DisplayName:  "JSON-RPC Port",
-			Description:  "Port for RPC connections (if not set in rpcbind)",
-			DefaultValue: "9332",
-		},
-		{
-			Key:          "fallbackfee",
-			DisplayName:  "Fallback fee rate",
-			Description:  "Litecoin's 'fallbackfee' rate. Units: LTC/kB",
-			DefaultValue: defaultFee * 1000 / 1e8,
-		},
-		{
-			Key:         "feeratelimit",
-			DisplayName: "Highest acceptable fee rate",
-			Description: "This is the highest network fee rate you are willing to " +
-				"pay on swap transactions. If feeratelimit is lower than a market's " +
-				"maxfeerate, you will not be able to trade on that market with this " +
-				"wallet.  Units: LTC/kB",
-			DefaultValue: defaultFeeRateLimit * 1000 / 1e8,
-		},
-		{
-			Key:          "redeemconftarget",
-			DisplayName:  "Redeem transaction confirmation target",
-			Description:  "The target number of blocks for the redeem transaction to get a confirmation. Used to set the transaction's fee rate. (default: 2 blocks)",
-			DefaultValue: 2,
-		},
-		{
-			Key:         "txsplit",
-			DisplayName: "Pre-size funding inputs",
-			Description: "When placing an order, create a \"split\" transaction to fund the order without locking more of the wallet balance than " +
-				"necessary. Otherwise, excess funds may be reserved to fund the order until the first swap contract is broadcast " +
-				"during match settlement, or the order is canceled. This an extra transaction for which network mining fees are paid. " +
-				"Used only for standing-type orders, e.g. limit orders without immediate time-in-force.",
-			IsBoolean: true,
-		},
-	}
 	rpcWalletDefinition = &asset.WalletDefinition{
 		Type:              walletTypeRPC,
 		Tab:               "Litecoin Core (external)",
@@ -115,7 +60,7 @@ var (
 		Tab:         "Electrum-LTC (external)",
 		Description: "Use an external Electrum-LTC Wallet",
 		// json: DefaultConfigPath: filepath.Join(btcutil.AppDataDir("electrum-ltc", false), "config"), // e.g. ~/.electrum-ltc/config		ConfigOpts:        append(rpcOpts, commonOpts...),
-		ConfigOpts: btc.CommonConfigOpts("LTC", false),
+		ConfigOpts: append(btc.ElectrumConfigOpts, btc.CommonConfigOpts("LTC", false)...),
 	}
 	spvWalletDefinition = &asset.WalletDefinition{
 		Type:        walletTypeSPV,
@@ -216,17 +161,13 @@ func (d *Driver) Create(params *asset.CreateWalletParams) error {
 // exchange wallet.
 func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
 	var cloneParams *chaincfg.Params
-	var ltcParams *ltcchaincfg.Params
 	switch network {
 	case dex.Mainnet:
 		cloneParams = dexltc.MainNetParams
-		ltcParams = &ltcchaincfg.MainNetParams
 	case dex.Testnet:
 		cloneParams = dexltc.TestNet4Params
-		ltcParams = &ltcchaincfg.TestNet4Params
 	case dex.Regtest:
 		cloneParams = dexltc.RegressionNetParams
-		ltcParams = &ltcchaincfg.RegressionNetParams
 	default:
 		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
@@ -254,13 +195,23 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	case walletTypeRPC, walletTypeLegacy:
 		return btc.BTCCloneWallet(cloneCFG)
 	case walletTypeSPV:
-		return btc.OpenSPVWallet(cloneCFG, func(dir string, cfg *btc.WalletConfig, btcParams *chaincfg.Params, log dex.Logger) btc.BTCWallet {
-			return openSPVWallet(dir, cfg, btcParams, ltcParams, log)
-		})
+		return btc.OpenSPVWallet(cloneCFG, openSPVWallet)
 	case walletTypeElectrum:
 		cloneCFG.Ports = dexbtc.NetPorts{} // no default ports
 		return btc.ElectrumWallet(cloneCFG)
 	default:
 		return nil, fmt.Errorf("unknown wallet type %q", cfg.Type)
 	}
+}
+
+func parseChainParams(net dex.Network) (*ltcchaincfg.Params, error) {
+	switch net {
+	case dex.Mainnet:
+		return &ltcchaincfg.MainNetParams, nil
+	case dex.Testnet:
+		return &ltcchaincfg.TestNet4Params, nil
+	case dex.Regtest:
+		return &ltcchaincfg.RegressionNetParams, nil
+	}
+	return nil, fmt.Errorf("unknown network ID %v", net)
 }

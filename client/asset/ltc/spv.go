@@ -17,6 +17,7 @@ import (
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
+	dexltc "decred.org/dcrdex/dex/networks/ltc"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/btcutil"
@@ -67,7 +68,7 @@ var (
 // exceptions, and have some critical code that needed to be duplicated (in
 // order to avoid interface hell).
 type ltcSPVWallet struct {
-	// This section is populated in newSPVWallet.
+	// This section is populated in openSPVWallet.
 	dir                  string
 	chainParams          *ltcchaincfg.Params
 	btcParams            *chaincfg.Params
@@ -86,9 +87,16 @@ type ltcSPVWallet struct {
 var _ btc.BTCWallet = (*ltcSPVWallet)(nil)
 
 // openSPVWallet creates a ltcSPVWallet, but does not Start.
-func openSPVWallet(dir string, cfg *btc.WalletConfig, btcParams *chaincfg.Params,
-	ltcParams *ltcchaincfg.Params, log dex.Logger) btc.BTCWallet {
-
+func openSPVWallet(dir string, cfg *btc.WalletConfig, btcParams *chaincfg.Params, log dex.Logger) btc.BTCWallet {
+	var ltcParams *ltcchaincfg.Params
+	switch btcParams.Name {
+	case dexltc.MainNetParams.Name:
+		ltcParams = &ltcchaincfg.MainNetParams
+	case dexltc.TestNet4Params.Name:
+		ltcParams = &ltcchaincfg.TestNet4Params
+	case dexltc.RegressionNetParams.Name:
+		ltcParams = &ltcchaincfg.RegressionNetParams
+	}
 	w := &ltcSPVWallet{
 		dir:                  dir,
 		chainParams:          ltcParams,
@@ -105,7 +113,7 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string,
 	netDir := filepath.Join(dbDir, net.Name, "spv")
 
 	if err := logNeutrino(netDir, log); err != nil {
-		return fmt.Errorf("error initializing btcwallet+neutrino logging: %w", err)
+		return fmt.Errorf("error initializing dcrwallet+neutrino logging: %w", err)
 	}
 
 	logDir := filepath.Join(netDir, logDirName)
@@ -124,8 +132,8 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string,
 		return fmt.Errorf("CreateNewWallet error: %w", err)
 	}
 
-	errCloser := dex.NewErrorCloser(log)
-	defer errCloser.Done()
+	errCloser := dex.NewErrorCloser()
+	defer errCloser.Done(log)
 	errCloser.Add(loader.UnloadWallet)
 
 	if extIdx > 0 || intIdx > 0 {
@@ -170,7 +178,7 @@ func (w *ltcSPVWallet) walletParams() *ltcchaincfg.Params {
 // syncing.
 func (w *ltcSPVWallet) Start() (btc.SPVService, error) {
 	if err := logNeutrino(w.dir, w.log); err != nil {
-		return nil, fmt.Errorf("error initializing btcwallet+neutrino logging: %v", err)
+		return nil, fmt.Errorf("error initializing dcrwallet+neutrino logging: %v", err)
 	}
 	// recoverWindow arguments borrowed from ltcwallet directly.
 	w.loader = wallet.NewLoader(w.walletParams(), w.dir, true, 60*time.Second, 250)
@@ -189,8 +197,8 @@ func (w *ltcSPVWallet) Start() (btc.SPVService, error) {
 		return nil, fmt.Errorf("couldn't load wallet: %w", err)
 	}
 
-	errCloser := dex.NewErrorCloser(w.log)
-	defer errCloser.Done()
+	errCloser := dex.NewErrorCloser()
+	defer errCloser.Done(w.log)
 	errCloser.Add(w.loader.UnloadWallet)
 
 	neutrinoDBPath := filepath.Join(w.dir, neutrinoDBName)
@@ -380,7 +388,7 @@ func (w *ltcSPVWallet) ListUnspent(minconf, maxconf int32, acctName string) ([]*
 // need the TxOut, and to show ownership.
 func (w *ltcSPVWallet) FetchInputInfo(prevOut *wire.OutPoint) (*wire.MsgTx, *wire.TxOut, *psbt.Bip32Derivation, int64, error) {
 
-	td, err := w.txDetails(convertHashToLTC(prevOut.Hash))
+	td, err := w.txDetails((*ltcchainhash.Hash)(&prevOut.Hash))
 	if err != nil {
 		return nil, nil, nil, 0, err
 	}
@@ -415,14 +423,14 @@ func (w *ltcSPVWallet) FetchInputInfo(prevOut *wire.OutPoint) (*wire.MsgTx, *wir
 
 func (w *ltcSPVWallet) LockOutpoint(op wire.OutPoint) {
 	w.Wallet.LockOutpoint(ltcwire.OutPoint{
-		Hash:  *convertHashToLTC(op.Hash),
+		Hash:  ltcchainhash.Hash(op.Hash),
 		Index: op.Index,
 	})
 }
 
 func (w *ltcSPVWallet) UnlockOutpoint(op wire.OutPoint) {
 	w.Wallet.UnlockOutpoint(ltcwire.OutPoint{
-		Hash:  *convertHashToLTC(op.Hash),
+		Hash:  ltcchainhash.Hash(op.Hash),
 		Index: op.Index,
 	})
 }
@@ -634,7 +642,7 @@ func (w *ltcSPVWallet) dropTransactionHistory() error {
 }
 
 func (w *ltcSPVWallet) WalletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetails, error) {
-	txDetails, err := w.txDetails(convertHashToLTC(*txHash))
+	txDetails, err := w.txDetails((*ltcchainhash.Hash)(txHash))
 	if err != nil {
 		return nil, err
 	}
@@ -665,13 +673,13 @@ func (w *ltcSPVWallet) WalletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDeta
 	return &wtxmgr.TxDetails{
 		TxRecord: wtxmgr.TxRecord{
 			MsgTx:        *btcTx,
-			Hash:         *convertHashToBTC(txDetails.TxRecord.Hash),
+			Hash:         chainhash.Hash(txDetails.TxRecord.Hash),
 			Received:     txDetails.TxRecord.Received,
 			SerializedTx: txDetails.TxRecord.SerializedTx,
 		},
 		Block: wtxmgr.BlockMeta{
 			Block: wtxmgr.Block{
-				Hash:   *convertHashToBTC(txDetails.Block.Hash),
+				Hash:   chainhash.Hash(txDetails.Block.Hash),
 				Height: txDetails.Block.Height,
 			},
 			Time: txDetails.Block.Time,
@@ -685,7 +693,7 @@ func (w *ltcSPVWallet) SyncedTo() waddrmgr.BlockStamp {
 	bs := w.Manager.SyncedTo()
 	return waddrmgr.BlockStamp{
 		Height:    bs.Height,
-		Hash:      *convertHashToBTC(bs.Hash),
+		Hash:      chainhash.Hash(bs.Hash),
 		Timestamp: bs.Timestamp,
 	}
 
@@ -742,7 +750,7 @@ func (w *ltcSPVWallet) BlockNotifications(ctx context.Context) <-chan *btc.Block
 					lastBlock := note.AttachedBlocks[len(note.AttachedBlocks)-1]
 					select {
 					case ch <- &btc.BlockNotification{
-						Hash:   *convertHashToBTC(*lastBlock.Hash),
+						Hash:   chainhash.Hash(*lastBlock.Hash),
 						Height: lastBlock.Height,
 					}:
 					default:
@@ -820,7 +828,7 @@ func (s *spvService) GetBlockHash(height int64) (*chainhash.Hash, error) {
 	if err != nil {
 		return nil, err
 	}
-	return convertHashToBTC(*ltcHash), nil
+	return (*chainhash.Hash)(ltcHash), nil
 }
 
 func (s *spvService) BestBlock() (*headerfs.BlockStamp, error) {
@@ -830,7 +838,7 @@ func (s *spvService) BestBlock() (*headerfs.BlockStamp, error) {
 	}
 	return &headerfs.BlockStamp{
 		Height:    bs.Height,
-		Hash:      *convertHashToBTC(bs.Hash),
+		Hash:      chainhash.Hash(bs.Hash),
 		Timestamp: bs.Timestamp,
 	}, nil
 }
@@ -845,18 +853,18 @@ func (s *spvService) Peers() []btc.SPVPeer {
 }
 
 func (s *spvService) GetBlockHeight(h *chainhash.Hash) (int32, error) {
-	return s.ChainService.GetBlockHeight(convertHashToLTC(*h))
+	return s.ChainService.GetBlockHeight((*ltcchainhash.Hash)(h))
 }
 
 func (s *spvService) GetBlockHeader(h *chainhash.Hash) (*wire.BlockHeader, error) {
-	hdr, err := s.ChainService.GetBlockHeader(convertHashToLTC(*h))
+	hdr, err := s.ChainService.GetBlockHeader((*ltcchainhash.Hash)(h))
 	if err != nil {
 		return nil, err
 	}
 	return &wire.BlockHeader{
 		Version:    hdr.Version,
-		PrevBlock:  *convertHashToBTC(hdr.PrevBlock),
-		MerkleRoot: *convertHashToBTC(hdr.MerkleRoot),
+		PrevBlock:  chainhash.Hash(hdr.PrevBlock),
+		MerkleRoot: chainhash.Hash(hdr.MerkleRoot),
 		Timestamp:  hdr.Timestamp,
 		Bits:       hdr.Bits,
 		Nonce:      hdr.Nonce,
@@ -864,7 +872,7 @@ func (s *spvService) GetBlockHeader(h *chainhash.Hash) (*wire.BlockHeader, error
 }
 
 func (s *spvService) GetCFilter(blockHash chainhash.Hash, filterType wire.FilterType, _ ...btcneutrino.QueryOption) (*gcs.Filter, error) {
-	f, err := s.ChainService.GetCFilter(*convertHashToLTC(blockHash), ltcwire.GCSFilterRegular)
+	f, err := s.ChainService.GetCFilter(ltcchainhash.Hash(blockHash), ltcwire.GCSFilterRegular)
 	if err != nil {
 		return nil, err
 	}
@@ -878,7 +886,7 @@ func (s *spvService) GetCFilter(blockHash chainhash.Hash, filterType wire.Filter
 }
 
 func (s *spvService) GetBlock(blockHash chainhash.Hash, _ ...btcneutrino.QueryOption) (*btcutil.Block, error) {
-	blk, err := s.ChainService.GetBlock(*convertHashToLTC(blockHash))
+	blk, err := s.ChainService.GetBlock(ltcchainhash.Hash(blockHash))
 	if err != nil {
 		return nil, err
 	}
@@ -889,18 +897,6 @@ func (s *spvService) GetBlock(blockHash chainhash.Hash, _ ...btcneutrino.QueryOp
 	}
 
 	return btcutil.NewBlockFromBytes(b)
-}
-
-func convertHashToBTC(src ltcchainhash.Hash) *chainhash.Hash {
-	var tgt chainhash.Hash
-	copy(tgt[:], src[:])
-	return &tgt
-}
-
-func convertHashToLTC(src chainhash.Hash) *ltcchainhash.Hash {
-	var tgt ltcchainhash.Hash
-	copy(tgt[:], src[:])
-	return &tgt
 }
 
 func convertMsgTxToBTC(tx *ltcwire.MsgTx) (*wire.MsgTx, error) {
@@ -926,21 +922,7 @@ func convertMsgTxToLTC(tx *wire.MsgTx) (*ltcwire.MsgTx, error) {
 		return nil, err
 	}
 
-	// 153280a7351c702ce4e8d87a878cc3d1eab41650ce0b895a3598b62c3778ad5f from peer=2 was not accepted: non-mandatory-script-verify-flag (Witness program hash mismatch)
-
 	return ltcTx, nil
-}
-
-func parseChainParams(net dex.Network) (*ltcchaincfg.Params, error) {
-	switch net {
-	case dex.Mainnet:
-		return &ltcchaincfg.MainNetParams, nil
-	case dex.Testnet:
-		return &ltcchaincfg.TestNet4Params, nil
-	case dex.Regtest:
-		return &ltcchaincfg.RegressionNetParams, nil
-	}
-	return nil, fmt.Errorf("unknown network ID %v", net)
 }
 
 func extendAddresses(extIdx, intIdx uint32, ltcw *wallet.Wallet) error {
@@ -965,16 +947,6 @@ var (
 	loggingInited uint32
 	logFileName   = "neutrino.log"
 )
-
-// logWriter implements an io.Writer that outputs to a rotating log file.
-type logWriter struct {
-	*rotator.Rotator
-}
-
-// Write writes the data in p to the log file.
-func (w logWriter) Write(p []byte) (n int, err error) {
-	return w.Rotator.Write(p)
-}
 
 // logRotator initializes a rotating file logger.
 func logRotator(netDir string) (*rotator.Rotator, error) {
@@ -1006,7 +978,7 @@ func logNeutrino(netDir string, errorLogger dex.Logger) error {
 		return fmt.Errorf("error initializing log rotator: %w", err)
 	}
 
-	backendLog := btclog.NewBackend(logWriter{logSpinner})
+	backendLog := btclog.NewBackend(logSpinner)
 
 	logger := func(name string, lvl btclog.Level) btclog.Logger {
 		l := backendLog.Logger(name)
@@ -1032,37 +1004,31 @@ type fileLoggerPlus struct {
 func (f *fileLoggerPlus) Warnf(format string, params ...interface{}) {
 	f.log.Warnf(format, params...)
 	f.Logger.Warnf(format, params...)
-
 }
 
 func (f *fileLoggerPlus) Errorf(format string, params ...interface{}) {
 	f.log.Errorf(format, params...)
 	f.Logger.Errorf(format, params...)
-
 }
 
 func (f *fileLoggerPlus) Criticalf(format string, params ...interface{}) {
 	f.log.Criticalf(format, params...)
 	f.Logger.Criticalf(format, params...)
-
 }
 
 func (f *fileLoggerPlus) Warn(v ...interface{}) {
 	f.log.Warn(v...)
 	f.Logger.Warn(v...)
-
 }
 
 func (f *fileLoggerPlus) Error(v ...interface{}) {
 	f.log.Error(v...)
 	f.Logger.Error(v...)
-
 }
 
 func (f *fileLoggerPlus) Critical(v ...interface{}) {
 	f.log.Critical(v...)
 	f.Logger.Critical(v...)
-
 }
 
 type logAdapter struct {

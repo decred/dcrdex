@@ -99,7 +99,7 @@ var (
 	walletBlockAllowance         = time.Second * 10
 	conventionalConversionFactor = float64(dexbtc.UnitInfo.Conventional.ConversionFactor)
 
-	electrumOpts = []*asset.ConfigOption{
+	ElectrumConfigOpts = []*asset.ConfigOption{
 		{
 			Key:         "rpcuser",
 			DisplayName: "JSON-RPC Username",
@@ -112,16 +112,14 @@ var (
 			NoEcho:      true,
 		},
 		{
-			Key:          "rpcbind", // match RPCConfig struct field tags
-			DisplayName:  "JSON-RPC Address",
-			Description:  "Electrum's 'rpchost' <addr> or <addr>:<port>",
-			DefaultValue: "127.0.0.1",
+			Key:         "rpcbind", // match RPCConfig struct field tags
+			DisplayName: "JSON-RPC Address",
+			Description: "Electrum's 'rpchost' <addr> or <addr>:<port>",
 		},
 		{
-			Key:          "rpcport",
-			DisplayName:  "JSON-RPC Port",
-			Description:  "Electrum's 'rpcport' (if not set with address)",
-			DefaultValue: "6789",
+			Key:         "rpcport",
+			DisplayName: "JSON-RPC Port",
+			Description: "Electrum's 'rpcport' (if not set with rpcbind)",
 		},
 	}
 
@@ -149,7 +147,7 @@ var (
 		Tab:         "Electrum (external)",
 		Description: "Use an external Electrum Wallet",
 		// json: DefaultConfigPath: filepath.Join(btcutil.AppDataDir("electrum", false), "config"), // e.g. ~/.electrum/config
-		ConfigOpts: append(electrumOpts, CommonConfigOpts("BTC", true)...),
+		ConfigOpts: append(append(ElectrumConfigOpts, apiFallbackOpt(false)), CommonConfigOpts("BTC", false)...),
 	}
 
 	// WalletInfo defines some general information about a Bitcoin wallet.
@@ -165,6 +163,17 @@ var (
 		LegacyWalletIndex: 1,
 	}
 )
+
+func apiFallbackOpt(defaultV bool) *asset.ConfigOption {
+	return &asset.ConfigOption{
+		Key:         "apifeefallback",
+		DisplayName: "External fee rate estimates",
+		Description: "Allow fee rate estimation from a block explorer API. " +
+			"This is useful as a fallback for SPV wallets and RPC wallets " +
+			"that have recently been started.",
+		IsBoolean: defaultV,
+	}
+}
 
 // CommonConfigOpts are the common options that the Wallets recognize.
 func CommonConfigOpts(symbol string /* upper-case */, withApiFallback bool) []*asset.ConfigOption {
@@ -209,14 +218,7 @@ func CommonConfigOpts(symbol string /* upper-case */, withApiFallback bool) []*a
 	}
 
 	if withApiFallback {
-		opts = append(opts, &asset.ConfigOption{
-			Key:         "apifeefallback",
-			DisplayName: "External fee rate estimates",
-			Description: "Allow fee rate estimation from a block explorer API. " +
-				"This is useful as a fallback for SPV wallets and RPC wallets " +
-				"that have recently been started.",
-			IsBoolean: true,
-		})
+		opts = append(opts, apiFallbackOpt(true))
 	}
 	return opts
 }
@@ -974,7 +976,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 
 	switch cfg.Type {
 	case walletTypeSPV:
-		return OpenSPVWallet(cloneCFG, newExtendedWallet)
+		return OpenSPVWallet(cloneCFG, openSPVWallet)
 	case walletTypeRPC, walletTypeLegacy:
 		rpcWallet, err := BTCCloneWallet(cloneCFG)
 		if err != nil {

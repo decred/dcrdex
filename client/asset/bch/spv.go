@@ -134,8 +134,8 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string,
 		return fmt.Errorf("CreateNewWallet error: %w", err)
 	}
 
-	errCloser := dex.NewErrorCloser(log)
-	defer errCloser.Done()
+	errCloser := dex.NewErrorCloser()
+	defer errCloser.Done(log)
 	errCloser.Add(loader.UnloadWallet)
 
 	if extIdx > 0 || intIdx > 0 {
@@ -186,8 +186,8 @@ func (w *bchSPVWallet) Start() (btc.SPVService, error) {
 		return nil, fmt.Errorf("couldn't load wallet: %w", err)
 	}
 
-	errCloser := dex.NewErrorCloser(w.log)
-	defer errCloser.Done()
+	errCloser := dex.NewErrorCloser()
+	defer errCloser.Done(w.log)
 	errCloser.Add(w.loader.UnloadWallet)
 
 	neutrinoDBPath := filepath.Join(w.dir, neutrinoDBName)

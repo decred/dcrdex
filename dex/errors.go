@@ -43,15 +43,12 @@ func NewError(err error, detail string) Error {
 // scheduled with Add. If Success is not signaled before Done, the shutdown
 // routines will be run in the reverse order that they are added.
 type ErrorCloser struct {
-	log     Logger
 	closers []func() error
-	success bool
 }
 
 // NewErrorCloser creates a new ErrorCloser.
-func NewErrorCloser(log Logger) *ErrorCloser {
+func NewErrorCloser() *ErrorCloser {
 	return &ErrorCloser{
-		log:     log,
 		closers: make([]func() error, 0, 3),
 	}
 }
@@ -64,19 +61,15 @@ func (e *ErrorCloser) Add(closer func() error) {
 
 // Success cancels the running of any Add'ed functions.
 func (e *ErrorCloser) Success() {
-	e.success = true
+	e.closers = nil
 }
 
 // Done signals that the ErrorClose can run its registered functions if success
 // has not yet been flagged.
-func (e *ErrorCloser) Done() {
-	if e.success {
-		return
-	}
-
+func (e *ErrorCloser) Done(log Logger) {
 	for i := len(e.closers) - 1; i >= 0; i-- {
 		if err := e.closers[i](); err != nil {
-			e.log.Errorf("error running shutdown function %d: %v", i, err)
+			log.Errorf("error running shutdown function %d: %v", i, err)
 		}
 	}
 }
