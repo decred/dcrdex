@@ -1194,7 +1194,7 @@ func newTestRig() *testRig {
 			newCrypter: func([]byte) encrypt.Crypter { return crypter },
 			reCrypter:  func([]byte, []byte) (encrypt.Crypter, error) { return crypter, crypter.recryptErr },
 
-			locale:        enUS,
+			locale:        originLocale,
 			localePrinter: message.NewPrinter(language.AmericanEnglish),
 
 			fiatRateSources: make(map[string]*commonRateSource),

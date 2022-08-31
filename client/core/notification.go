@@ -104,8 +104,12 @@ func (c *Core) AckNotes(ids []dex.Bytes) {
 func (c *Core) formatDetails(topic Topic, args ...interface{}) (translatedSubject, details string) {
 	trans, found := c.locale[topic]
 	if !found {
-		c.log.Errorf("no translation found for topic %q", topic)
-		return string(topic), "translation error"
+		c.log.Errorf("No translation found for topic %q", topic)
+		originTrans := originLocale[topic]
+		if originTrans == nil {
+			return string(topic), "translation error"
+		}
+		return originTrans.subject, fmt.Sprintf(originTrans.template, args...)
 	}
 	return trans.subject, c.localePrinter.Sprintf(string(topic), args...)
 }

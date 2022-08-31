@@ -35,6 +35,9 @@ done
 
 cd "$dir"
 
+# Print missing Core notification translations.
+go run ./client/core/localetest/main.go
+
 # -race in go tests above requires cgo, but disable it for the compile tests below
 export CGO_ENABLED=0
 go build ./...

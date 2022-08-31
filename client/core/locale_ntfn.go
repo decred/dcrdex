@@ -10,10 +10,18 @@ import (
 type translation struct {
 	subject  string
 	template string
+
+	// stale is used to indicate that a translation has changed, is only
+	// partially translated, or just needs review, and should be updated. This
+	// is useful when it's better than falling back to english, but it allows
+	// these translations to be identified programmatically.
+	stale bool
 }
 
-// enUS is the American English translations.
-var enUS = map[Topic]*translation{
+const originLang = "en-US"
+
+// originLocale is the American English translations.
+var originLocale = map[Topic]*translation{
 	// [host]
 	TopicAccountRegistered: {
 		subject:  "Account registered",
@@ -74,7 +82,7 @@ var enUS = map[Topic]*translation{
 		subject:  "Send error",
 		template: "Error encountered while sending %s: %v",
 	},
-	// [ticker, coin ID]
+	// [value string, ticker, destination address, coin ID]
 	TopicSendSuccess: {
 		subject:  "Send Successful",
 		template: "Sending %s %s to %s has completed successfully. Coin ID = %s",
@@ -372,15 +380,17 @@ var ptBR = map[Topic]*translation{
 		subject:  "Erro ao Destravar Carteira",
 		template: "Conectado com carteira para completar o registro em %s, mas falha ao destrancar: %v",
 	},
-	// [ticker, error], RETRANSLATE.
+	// [ticker, error]
 	TopicSendError: {
 		subject:  "Erro Retirada",
 		template: "Erro encontrado durante retirada de %s: %v",
+		stale:    true,
 	},
-	// [ticker, coin ID], RETRANSLATE.
+	// [value string, ticker, destination address, coin ID]
 	TopicSendSuccess: {
 		template: "Retirada de %s %s (%s) foi completada com sucesso. ID da moeda = %s",
 		subject:  "Retirada Enviada",
+		stale:    true,
 	},
 	// [error]
 	TopicOrderLoadFailure: {
@@ -659,15 +669,17 @@ var zhCN = map[Topic]*translation{
 		subject:  "解锁钱包时出错",
 		template: "与 decred 钱包连接以在 %s 上完成注册，但无法解锁： %v", // alt. 已连接到 Decred 钱包以在 %s 完成注册，但无法解锁：%v
 	},
-	// [ticker, error], RETRANSLATE.
+	// [ticker, error]
 	TopicSendError: {
 		subject:  "提款错误",
 		template: "在 %s 提取过程中遇到错误: %v", // alt. 删除 %s 时遇到错误： %v
+		stale:    true,
 	},
-	// [ticker, coin ID], RETRANSLATE.
+	// [value string, ticker, destination address, coin ID]
 	TopicSendSuccess: {
 		subject:  "提款已发送",
 		template: "%s %s (%s) 的提款已成功完成。硬币 ID = %s",
+		stale:    true,
 	},
 	// [error]
 	TopicOrderLoadFailure: {
@@ -945,15 +957,17 @@ var plPL = map[Topic]*translation{
 		subject:  "Błąd odblokowywania portfela",
 		template: "Połączono z portfelem Decred, aby dokończyć rejestrację na %s, lecz próba odblokowania portfela nie powiodła się: %v",
 	},
-	// [ticker, error], RETRANSLATE.
+	// [ticker, error]
 	TopicSendError: {
 		subject:  "Błąd wypłaty środków",
 		template: "Wystąpił błąd przy wypłacaniu %s: %v",
+		stale:    true,
 	},
-	// [ticker, coin ID], RETRANSLATE.
+	// [value string, ticker, destination address, coin ID]
 	TopicSendSuccess: {
 		subject:  "Wypłata zrealizowana",
 		template: "Wypłata %s %s (%s) została zrealizowana pomyślnie. ID monety = %s",
+		stale:    true,
 	},
 	// [error]
 	TopicOrderLoadFailure: {
@@ -1191,10 +1205,10 @@ var plPL = map[Topic]*translation{
 }
 
 var locales = map[string]map[Topic]*translation{
-	language.AmericanEnglish.String():     enUS,
-	language.BrazilianPortuguese.String(): ptBR,
-	"zh-CN":                               zhCN, // language.SimplifiedChinese is zh-Hans
-	"pl-PL":                               plPL, // language.Polish is pl
+	originLang: originLocale,
+	"pt-BR":    ptBR,
+	"zh-CN":    zhCN,
+	"pl-PL":    plPL,
 }
 
 func init() {
@@ -1206,4 +1220,33 @@ func init() {
 			}
 		}
 	}
+}
+
+// CheckTopicLangs is used to report missing notification translations.
+func CheckTopicLangs() (missing, stale map[string][]Topic) {
+	missing = make(map[string][]Topic, len(locales)-1)
+	stale = make(map[string][]Topic, len(locales)-1)
+
+	for lang, translations := range locales {
+		if lang == originLang {
+			continue
+		}
+		var missingTopics, staleTopics []Topic
+		for topic := range originLocale {
+			t, found := translations[topic]
+			if !found {
+				missingTopics = append(missingTopics, topic)
+			} else if t.stale {
+				staleTopics = append(staleTopics, topic)
+			}
+		}
+		if len(missingTopics) > 0 {
+			missing[lang] = missingTopics
+		}
+		if len(staleTopics) > 0 {
+			stale[lang] = staleTopics
+		}
+	}
+
+	return
 }
