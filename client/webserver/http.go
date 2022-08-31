@@ -480,20 +480,25 @@ func (s *WebServer) orderReader(ord *core.Order) *core.OrderReader {
 		return a.UnitInfo
 	}
 
-	feeUnitInfo := func(assetID uint32, symbol string) dex.UnitInfo {
+	feeAssetInfo := func(assetID uint32, symbol string) (string, dex.UnitInfo) {
 		isToken, parent := asset.IsToken(assetID)
 		if !isToken {
-			return unitInfo(assetID, symbol)
+			return unbip(assetID), unitInfo(assetID, symbol)
 		}
 		parentAsset := asset.Asset(parent)
-		return parentAsset.Info.UnitInfo
+		return unbip(parent), parentAsset.Info.UnitInfo
 	}
 
+	baseFeeAssetSymbol, baseFeeUintInfo := feeAssetInfo(ord.BaseID, ord.BaseSymbol)
+	quoteFeeAssetSymbol, quoteFeeUnitInfo := feeAssetInfo(ord.QuoteID, ord.QuoteSymbol)
+
 	return &core.OrderReader{
-		Order:            ord,
-		BaseUnitInfo:     unitInfo(ord.BaseID, ord.BaseSymbol),
-		BaseFeeUnitInfo:  feeUnitInfo(ord.BaseID, ord.BaseSymbol),
-		QuoteUnitInfo:    unitInfo(ord.QuoteID, ord.QuoteSymbol),
-		QuoteFeeUnitInfo: feeUnitInfo(ord.QuoteID, ord.QuoteSymbol),
+		Order:               ord,
+		BaseUnitInfo:        unitInfo(ord.BaseID, ord.BaseSymbol),
+		BaseFeeUnitInfo:     baseFeeUintInfo,
+		BaseFeeAssetSymbol:  baseFeeAssetSymbol,
+		QuoteUnitInfo:       unitInfo(ord.QuoteID, ord.QuoteSymbol),
+		QuoteFeeUnitInfo:    quoteFeeUnitInfo,
+		QuoteFeeAssetSymbol: quoteFeeAssetSymbol,
 	}
 }
