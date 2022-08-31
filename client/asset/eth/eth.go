@@ -2579,11 +2579,11 @@ func (eth *ETHWallet) checkForNewBlocks(reportErr func(error)) {
 // another transaction starting the redemption process before a
 // a potential replacement.
 func (w *assetWallet) getLatestMonitoredTx(txHash common.Hash) (*monitoredTx, error) {
-	w.monitoredTxsMtx.RLock()
-	defer w.monitoredTxsMtx.RUnlock()
 	maxLoops := 100 // avoid an infinite loop in case of a cycle
 	for i := 0; i < maxLoops; i++ {
+		w.monitoredTxsMtx.RLock()
 		tx, found := w.monitoredTxs[txHash]
+		w.monitoredTxsMtx.RUnlock()
 		if !found {
 			return nil, fmt.Errorf("%s not found among monitored transactions", txHash)
 		}
@@ -2605,7 +2605,7 @@ func (w *assetWallet) recordReplacementTx(originalTx *monitoredTx, replacementHa
 	originalTx.replacementTx = &replacementHash
 	originalHash := originalTx.tx.Hash()
 	if err := w.monitoredTxDB.Store(originalHash[:], originalTx); err != nil {
-		return fmt.Errorf("error recoring replacement tx: %v", err)
+		return fmt.Errorf("error recording replacement tx: %v", err)
 	}
 
 	w.monitoredTxsMtx.Lock()
@@ -2736,7 +2736,7 @@ func (w *assetWallet) resubmitRedemption(tx *types.Transaction, contractVersion 
 
 	txs, _, _, err := w.Redeem(&asset.RedeemForm{
 		Redemptions:   redemptions,
-		FeeSuggestion: w.gasFeeLimit,
+		FeeSuggestion: w.gasFeeLimit(),
 	}, feeWallet, nonceOverride)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resubmit redemption: %v", err)
@@ -2870,7 +2870,7 @@ func (w *assetWallet) checkUnconfirmedRedemption(secretHash common.Hash, contrac
 // redemption transaction. It is called when a monitored tx cannot be
 // found. The main difference between the regular path and this one is that
 // when geth can also not find the transaction, instead of resubmitting an
-// entire redemption batch, a new transaction containing onl the swap we are
+// entire redemption batch, a new transaction containing only the swap we are
 // searching for will be created.
 func (w *assetWallet) confirmRedemptionWithoutMonitoredTx(txHash common.Hash, redemption *asset.Redemption, feeWallet *assetWallet) (*asset.ConfirmRedemptionStatus, error) {
 	contractVer, secretHash, err := dexeth.DecodeContractData(redemption.Spends.Contract)
