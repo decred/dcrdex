@@ -10,8 +10,7 @@ import {
   MaxSell,
   MaxBuy,
   MarketReport,
-  SupportedAsset,
-  OracleReport
+  SupportedAsset
 } from './registry'
 import Doc from './doc'
 import BasePage from './basepage'
@@ -175,8 +174,8 @@ const animationLength = 300
 export default class MarketMakerPage extends BasePage {
   page: Record<string, PageElement>
   data: any
-  createOpts: Record<string, any>
-  gapRanges: Record<string, any>
+  createOpts: Record<string, number>
+  gapRanges: Record<string, number>
   currentMarket: HostedMarket
   currentForm: PageElement
   keyup: (e: KeyboardEvent) => void
@@ -685,7 +684,7 @@ export default class MarketMakerPage extends BasePage {
     Doc.empty(page.oracles)
     let weight = 0
     let weightedSum = 0
-    for (const o of (r.oracles as OracleReport[]) ?? []) {
+    for (const o of r.oracles ?? []) {
       const tr = page.oracleTmpl.cloneNode(true) as PageElement
       page.oracles.appendChild(tr)
       const tmpl = Doc.parseTemplate(tr)
@@ -906,10 +905,10 @@ export default class MarketMakerPage extends BasePage {
       host: currentMarket.host,
       baseID: currentMarket.baseid,
       quoteID: currentMarket.quoteid
-    }, this.createOpts, { lots })
+    }, this.createOpts, { lots, gapStrategy: '' })
 
     const strategy = page.gapStrategySelect.value
-    makerProgram.gapStrategy = strategy
+    makerProgram.gapStrategy = strategy ?? ''
 
     const req = {
       botType: 'MakerV0',
