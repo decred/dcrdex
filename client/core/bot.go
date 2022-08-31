@@ -35,6 +35,14 @@ const (
 
 	ErrNoMarkets           = dex.ErrorKind("no markets")
 	defaultOracleWeighting = 0.2
+
+	// Our mid-gap rate derived from the local DEX order book is converted to an
+	// effective mid-gap that can only vary by up to 3% from the oracle rate.
+	// This is to prevent someone from taking advantage of a sparse market to
+	// force a bot into giving a favorable price. In reality a market maker on
+	// an empty market should use a high oracle bias anyway, but this should
+	// prevent catastrophe.
+	maxOracleMismatch = 0.03
 )
 
 // GapStrategy is a specifier for an algorithm to choose the maker bot's target
@@ -596,32 +604,41 @@ func basisPrice(host string, mkt *Market, oracleBias, oracleWeighting float64, m
 
 	log.Tracef("basisPrice: mid-gap price = %d", midGap)
 
-	if w := oracleWeighting; w > 0 {
-		// Our sync loop should be running. Only check the cache.
-		p := bp.cachedOraclePrice(mkt.Name)
+	// Our sync loop should be running. Only check the cache.
+	p := bp.cachedOraclePrice(mkt.Name)
 
-		if p != nil && p.price != 0 {
-			log.Tracef("basisPrice: raw oracle price = %.8f", p.price)
+	if p != nil && p.price != 0 {
+		log.Tracef("basisPrice: raw oracle price = %.8f", p.price)
 
-			msgOracleRate := float64(mkt.ConventionalRateToMsg(p.price))
+		msgOracleRate := float64(mkt.ConventionalRateToMsg(p.price))
 
-			if oracleBias != 0 {
-				msgOracleRate *= 1 + oracleBias
-
-				log.Tracef("basisPrice: biased oracle price = %.0f", msgOracleRate)
+		// Apply the oracle mismatch filter.
+		if basisPrice > 0 {
+			low, high := msgOracleRate*(1-maxOracleMismatch), msgOracleRate*(1+maxOracleMismatch)
+			if basisPrice < low {
+				log.Debug("local mid-gap is below safe range. Using effective mid-gap of %d%% below the oracle rate.", maxOracleMismatch*100)
+				basisPrice = low
+			} else if basisPrice > high {
+				log.Debug("local mid-gap is above safe range. Using effective mid-gap of %d%% above the oracle rate.", maxOracleMismatch*100)
+				basisPrice = high
 			}
-
-			if basisPrice == 0 { // no mid-gap available. Just use the oracle value straight.
-				basisPrice = msgOracleRate
-				log.Tracef("basisPrice: using basis price %.0f from oracle because no mid-gap was found in order book", basisPrice)
-			} else {
-				basisPrice = msgOracleRate*w + basisPrice*(1-w)
-				log.Tracef("basisPrice: oracle-weighted basis price = %f", basisPrice)
-			}
-		} else {
-			log.Warnf("no oracle price available for %s bot", mkt.Name)
 		}
 
+		if oracleBias != 0 {
+			msgOracleRate *= 1 + oracleBias
+
+			log.Tracef("basisPrice: biased oracle price = %.0f", msgOracleRate)
+		}
+
+		if basisPrice == 0 { // no mid-gap available. Just use the oracle value straight.
+			basisPrice = msgOracleRate
+			log.Tracef("basisPrice: using basis price %.0f from oracle because no mid-gap was found in order book", basisPrice)
+		} else if oracleWeighting > 0 {
+			basisPrice = msgOracleRate*oracleWeighting + basisPrice*(1-oracleWeighting)
+			log.Tracef("basisPrice: oracle-weighted basis price = %f", basisPrice)
+		}
+	} else {
+		log.Warnf("no oracle price available for %s bot", mkt.Name)
 	}
 
 	if basisPrice > 0 {

@@ -312,10 +312,17 @@ func TestBasisPrice(t *testing.T) {
 		},
 		{
 			name:         "mid-gap + oracle weight",
-			midGap:       1000,
+			midGap:       1950,
 			oraclePrice:  2000,
 			oracleWeight: 0.5,
-			exp:          1500,
+			exp:          1975,
+		},
+		{
+			name:         "adjusted mid-gap + oracle weight",
+			midGap:       1000, // adjusted to 1940
+			oraclePrice:  2000,
+			oracleWeight: 0.5,
+			exp:          1970,
 		},
 		{
 			name:         "no mid-gap effectively sets oracle weight to 100%",
@@ -326,11 +333,11 @@ func TestBasisPrice(t *testing.T) {
 		},
 		{
 			name:         "mid-gap + oracle weight + oracle bias",
-			midGap:       1000,
+			midGap:       1950,
 			oraclePrice:  2000,
 			oracleBias:   -0.01, // minus 20
 			oracleWeight: 0.75,
-			exp:          1735, // (1000 + 0.75 * 2000) - (0.75 * 20) = 1735
+			exp:          1972, // 0.25 * 1950 + 0.75 * (2000 - 20) = 1972
 		},
 		{
 			name:         "no mid-gap and no oracle weight falls back to fiat ratio",

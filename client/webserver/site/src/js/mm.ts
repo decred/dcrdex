@@ -218,7 +218,8 @@ export default class MarketMakerPage extends BasePage {
     Doc.cleanTemplates(page.assetRowTmpl, page.booleanOptTmpl, page.rangeOptTmpl,
       page.orderOptTmpl, page.runningProgramTmpl, page.oracleTmpl)
 
-    const selectClicked = (isBase: boolean): void => {
+    const selectClicked = (e: MouseEvent, isBase: boolean): void => {
+      e.stopPropagation()
       const select = isBase ? page.baseSelect : page.quoteSelect
       const m = Doc.descendentMetrics(main, select)
       page.assetDropdown.style.left = `${m.bodyLeft}px`
@@ -263,9 +264,7 @@ export default class MarketMakerPage extends BasePage {
       }
       addOptions(options, true)
       addOptions(nonOptions, false)
-
       Doc.show(page.assetDropdown)
-
       const clicker = (e: MouseEvent): void => {
         if (Doc.mouseInElement(e, page.assetDropdown)) return
         this.hideAssetDropdown()
@@ -274,8 +273,8 @@ export default class MarketMakerPage extends BasePage {
       Doc.bind(document, 'click', clicker)
     }
 
-    Doc.bind(page.baseSelect, 'click', () => selectClicked(true))
-    Doc.bind(page.quoteSelect, 'click', () => selectClicked(false))
+    Doc.bind(page.baseSelect, 'click', (e: MouseEvent) => selectClicked(e, true))
+    Doc.bind(page.quoteSelect, 'click', (e: MouseEvent) => selectClicked(e, false))
 
     Doc.bind(page.marketSelect, 'change', () => {
       const [host, name] = page.marketSelect.value?.split(' ') as string[]
