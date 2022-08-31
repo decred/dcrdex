@@ -18,7 +18,7 @@ The new HTML strings map must then be listed in <https://github.com/decred/dcrde
 
 ## Step 2 - Notifications
 
-The notification strings involved editing [client/core/locale_ntfn.go](https://github.com/decred/dcrdex/blob/master/client/core/locale_ntfn.go) with a new `var zhCN map[Topic]*translation`. These translations correspond to the English strings in the `enUS` map in the same file.
+The notification strings involved editing [client/core/locale_ntfn.go](https://github.com/decred/dcrdex/blob/master/client/core/locale_ntfn.go) with a new `var zhCN map[Topic]*translation`. These translations correspond to the English strings in the `originLocale` map in the same file.
 
 Note how in **client/core/locale_ntfn.go** there are "printf" specifiers like `%s` and `%d`.  These define the formatting for various runtime data, such as integer numbers, identifier strings, etc.  Because sentence structure varies between languages the order of those specifiers can be explicitly defined like `%[3]s` (the third argument given to printf in the code) instead of relying on the position of those specifiers in the formatting string.  This is necessary because the code that executes the printing always provides the values in a particular order, which may not be the same order in a translated string.
 
