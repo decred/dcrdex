@@ -7732,9 +7732,11 @@ func (c *Core) deleteOrderFn(ordersFileStr string) (perOrderFn func(*db.MetaOrde
 			return fmt.Errorf("unable to get base unit info for %v: %v", cord.BaseSymbol, err)
 		}
 
+		baseFeeAssetSymbol := unbip(cord.BaseID)
 		baseFeeUnitInfo := baseUnitInfo
 		baseIsToken, baseParent := asset.IsToken(cord.BaseID)
 		if baseIsToken {
+			baseFeeAssetSymbol = unbip(baseParent)
 			baseFeeUnitInfo, err = asset.UnitInfo(baseParent)
 			if err != nil {
 				return fmt.Errorf("unable to get base fee unit info for %v: %v", baseParent, err)
@@ -7746,9 +7748,11 @@ func (c *Core) deleteOrderFn(ordersFileStr string) (perOrderFn func(*db.MetaOrde
 			return fmt.Errorf("unable to get quote unit info for %v: %v", cord.QuoteSymbol, err)
 		}
 
+		quoteFeeAssetSymbol := unbip(cord.QuoteID)
 		quoteFeeUnitInfo := quoteUnitInfo
 		quoteIsToken, quoteParent := asset.IsToken(cord.QuoteID)
 		if quoteIsToken {
+			quoteFeeAssetSymbol = unbip(quoteParent)
 			quoteFeeUnitInfo, err = asset.UnitInfo(quoteParent)
 			if err != nil {
 				return fmt.Errorf("unable to get quote fee unit info for %v: %v", quoteParent, err)
@@ -7756,11 +7760,13 @@ func (c *Core) deleteOrderFn(ordersFileStr string) (perOrderFn func(*db.MetaOrde
 		}
 
 		ordReader := &OrderReader{
-			Order:            cord,
-			BaseUnitInfo:     baseUnitInfo,
-			BaseFeeUnitInfo:  baseFeeUnitInfo,
-			QuoteUnitInfo:    quoteUnitInfo,
-			QuoteFeeUnitInfo: quoteFeeUnitInfo,
+			Order:               cord,
+			BaseUnitInfo:        baseUnitInfo,
+			BaseFeeUnitInfo:     baseFeeUnitInfo,
+			BaseFeeAssetSymbol:  baseFeeAssetSymbol,
+			QuoteUnitInfo:       quoteUnitInfo,
+			QuoteFeeUnitInfo:    quoteFeeUnitInfo,
+			QuoteFeeAssetSymbol: quoteFeeAssetSymbol,
 		}
 
 		timestamp := time.UnixMilli(int64(cord.Stamp)).Local().Format(time.RFC3339Nano)

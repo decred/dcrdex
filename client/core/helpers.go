@@ -18,10 +18,12 @@ import (
 // Whenever possible, add an OrderReader methods rather than a template func.
 type OrderReader struct {
 	*Order
-	BaseUnitInfo     dex.UnitInfo
-	BaseFeeUnitInfo  dex.UnitInfo
-	QuoteUnitInfo    dex.UnitInfo
-	QuoteFeeUnitInfo dex.UnitInfo
+	BaseUnitInfo        dex.UnitInfo
+	BaseFeeUnitInfo     dex.UnitInfo
+	BaseFeeAssetSymbol  string
+	QuoteUnitInfo       dex.UnitInfo
+	QuoteFeeUnitInfo    dex.UnitInfo
+	QuoteFeeAssetSymbol string
 }
 
 // FromSymbol is the symbol of the asset which will be sent.
@@ -43,29 +45,29 @@ func (ord *OrderReader) ToSymbol() string {
 // FromFeeSymbol is the symbol of the asset used to pay swap fees.
 func (ord *OrderReader) FromFeeSymbol() string {
 	if ord.Sell {
-		return ord.BaseFeeUnitInfo.Conventional.Unit
+		return ord.BaseFeeAssetSymbol
 	}
-	return ord.QuoteFeeUnitInfo.Conventional.Unit
+	return ord.QuoteFeeAssetSymbol
 }
 
 // ToFeeSymbol is the symbol of the asset used to pay redeem fees.
 func (ord *OrderReader) ToFeeSymbol() string {
 	if ord.Sell {
-		return ord.QuoteFeeUnitInfo.Conventional.Unit
+		return ord.QuoteFeeAssetSymbol
 	}
-	return ord.BaseFeeUnitInfo.Conventional.Unit
+	return ord.BaseFeeAssetSymbol
 }
 
 // BaseFeeSymbol is the symbol of the asset used to pay the base asset's
 // network fees.
 func (ord *OrderReader) BaseFeeSymbol() string {
-	return ord.BaseFeeUnitInfo.Conventional.Unit
+	return ord.BaseFeeAssetSymbol
 }
 
 // QuoteFeeSymbol is the symbol of the asset used to pay the quote asset's
 // network fees.
 func (ord *OrderReader) QuoteFeeSymbol() string {
-	return ord.QuoteFeeUnitInfo.Conventional.Unit
+	return ord.QuoteFeeAssetSymbol
 }
 
 // FromID is the asset ID of the asset which will be sent.
