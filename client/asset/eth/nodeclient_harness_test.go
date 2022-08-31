@@ -235,14 +235,15 @@ func prepareRPCClient(name, dataDir, endpoint string, net dex.Network) (*multiRP
 	return c, c.creds.acct, nil
 }
 
-func prepareTestRPCClients(initiatorDir, participantDir string, net dex.Network) (err error) {
-	initiatorEndpoint, participantEndpoint := alphaIPCFile, betaIPCFile
+func rpcEndpoints(net dex.Network) (string, string) {
 	if net == dex.Testnet {
-		if rpcNode == "" {
-			return fmt.Errorf("rpcNode must be specified for testnet")
-		}
-		initiatorEndpoint, participantEndpoint = rpcNode, rpcNode
+		return rpcNode, rpcNode
 	}
+	return alphaIPCFile, betaIPCFile
+}
+
+func prepareTestRPCClients(initiatorDir, participantDir string, net dex.Network) (err error) {
+	initiatorEndpoint, participantEndpoint := rpcEndpoints(net)
 
 	ethClient, simnetAcct, err = prepareRPCClient("initiator", initiatorDir, initiatorEndpoint, net)
 	if err != nil {
@@ -326,12 +327,14 @@ func runSimnet(m *testing.M) (int, error) {
 
 	ethSwapContractAddr = dexeth.ContractAddresses[0][dex.Simnet]
 
-	err = setupWallet(simnetWalletDir, simnetWalletSeed, "localhost:30355", dex.Simnet)
+	initiatorRPC, participantRPC := rpcEndpoints(dex.Simnet)
+
+	err = setupWallet(simnetWalletDir, simnetWalletSeed, "localhost:30355", initiatorRPC, dex.Simnet)
 	if err != nil {
 		return 1, err
 	}
 
-	err = setupWallet(participantWalletDir, participantWalletSeed, "localhost:30356", dex.Simnet)
+	err = setupWallet(participantWalletDir, participantWalletSeed, "localhost:30356", participantRPC, dex.Simnet)
 	if err != nil {
 		return 1, err
 	}
@@ -449,11 +452,14 @@ func runTestnet(m *testing.M) (int, error) {
 	secPerBlock = testnetSecPerBlock
 	ethSwapContractAddr = dexeth.ContractAddresses[0][dex.Testnet]
 	fmt.Printf("ETH swap contract address is %v\n", ethSwapContractAddr)
-	err = setupWallet(testnetWalletDir, testnetWalletSeed, "localhost:30355", dex.Testnet)
+
+	initiatorRPC, participantRPC := rpcEndpoints(dex.Simnet)
+
+	err = setupWallet(testnetWalletDir, testnetWalletSeed, "localhost:30355", initiatorRPC, dex.Testnet)
 	if err != nil {
 		return 1, err
 	}
-	err = setupWallet(testnetParticipantWalletDir, testnetParticipantWalletSeed, "localhost:30356", dex.Testnet)
+	err = setupWallet(testnetParticipantWalletDir, testnetParticipantWalletSeed, "localhost:30356", participantRPC, dex.Testnet)
 	if err != nil {
 		return 1, err
 	}
@@ -566,21 +572,25 @@ func TestMain(m *testing.M) {
 	os.Exit(exitCode)
 }
 
-func setupWallet(walletDir, seed, listenAddress string, net dex.Network) error {
+func setupWallet(walletDir, seed, listenAddress, rpcAddr string, net dex.Network) error {
 	walletType := walletTypeGeth
+	settings := map[string]string{
+		"nodelistenaddr": listenAddress,
+	}
 	if useRPC {
 		walletType = walletTypeRPC
+		settings = map[string]string{
+			providersKey: rpcAddr,
+		}
 	}
 	seedB, _ := hex.DecodeString(seed)
 	createWalletParams := asset.CreateWalletParams{
-		Type: walletType,
-		Seed: seedB,
-		Pass: []byte(pw),
-		Settings: map[string]string{
-			"nodelistenaddr": listenAddress,
-		},
-		DataDir: walletDir,
-		Net:     net,
+		Type:     walletType,
+		Seed:     seedB,
+		Pass:     []byte(pw),
+		Settings: settings,
+		DataDir:  walletDir,
+		Net:      net,
 	}
 	return CreateWallet(&createWalletParams)
 }

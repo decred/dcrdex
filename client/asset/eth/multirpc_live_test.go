@@ -176,6 +176,33 @@ func TestMultiRPCClient(t *testing.T) {
 	}
 }
 
+//
+// Create a providers.json file in your .dexc directory.
+//   1. Seed can be anything. Just generate randomness.
+//   2. Can connect to a host's websocket and http endpoints simultaneously.
+//      Actually nothing preventing you from connecting to a single provider
+//      100 times, but that may be a guardrail added in the future.
+//
+// Example ~/.dexc/providers.json
+/*
+{
+    "testnet": {
+        "seed": "9e0084387c3ba7ac4b5bb409c220c08d4ee74f7b8c73b03fff18c727c5ce9f48",
+        "providers": [
+            "https://goerli.infura.io/v3/<API KEY>",
+            "https://rpc.ankr.com/eth_goerli"
+        ]
+    },
+    "mainnet": {
+        "seed": "9e0084387c3ba7ac4b5bb409c220c08d4ee74f7b8c73b03fff18c727c5ce9f48",
+        "providers": [
+            "wss://mainnet.infura.io/ws/v3/<API KEY>",
+            "https://rpc.ankr.com/eth"
+        ]
+    }
+}
+*/
+
 func TestMonitorTestnet(t *testing.T) {
 	testMonitorNet(t, dex.Testnet)
 }

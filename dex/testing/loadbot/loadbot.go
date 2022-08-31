@@ -79,9 +79,11 @@ var (
 	log         dex.Logger
 	unbip       = dex.BipIDSymbol
 
-	usr, _     = user.Current()
-	dextestDir = filepath.Join(usr.HomeDir, "dextest")
-	botDir     = filepath.Join(dextestDir, "loadbot")
+	usr, _       = user.Current()
+	dextestDir   = filepath.Join(usr.HomeDir, "dextest")
+	botDir       = filepath.Join(dextestDir, "loadbot")
+	alphaIPCFile = filepath.Join(dextestDir, "eth", "alpha", "node", "geth.ipc")
+	betaIPCFile  = filepath.Join(dextestDir, "eth", "beta", "node", "geth.ipc")
 
 	ctx, quit = context.WithCancel(context.Background())
 

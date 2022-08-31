@@ -58,8 +58,9 @@ import (
 var (
 	dexHost = "127.0.0.1:17273"
 
-	homeDir    = os.Getenv("HOME")
-	dextestDir = filepath.Join(homeDir, "dextest")
+	homeDir      = os.Getenv("HOME")
+	dextestDir   = filepath.Join(homeDir, "dextest")
+	alphaIPCFile = filepath.Join(dextestDir, "eth", "alpha", "node", "geth.ipc")
 
 	tLockTimeTaker = 30 * time.Second
 	tLockTimeMaker = 1 * time.Minute
@@ -1597,7 +1598,8 @@ func bchWallet(wt SimWalletType, node string) (*tWallet, error) {
 func ethWallet() (*tWallet, error) {
 	return &tWallet{
 		fund:       true,
-		walletType: "geth",
+		walletType: "rpc",
+		config:     map[string]string{"providers": alphaIPCFile},
 	}, nil
 }
 
@@ -1606,8 +1608,9 @@ func dexttWallet() (*tWallet, error) {
 		fund:       true,
 		walletType: "token",
 		parent: &WalletForm{
-			Type:    "geth",
+			Type:    "rpc",
 			AssetID: eth.BipID,
+			Config:  map[string]string{"providers": alphaIPCFile},
 		},
 	}, nil
 }

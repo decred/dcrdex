@@ -524,7 +524,11 @@ func createWallet(createWalletParams *asset.CreateWalletParams, skipConnect bool
 	case walletTypeRPC:
 
 		// Check that we can connect to all endpoints.
-		endpoints := strings.Split(createWalletParams.Settings[providersKey], " ")
+		providerDef := createWalletParams.Settings[providersKey]
+		if len(providerDef) == 0 {
+			return errors.New("no providers specified")
+		}
+		endpoints := strings.Split(providerDef, " ")
 		n := len(endpoints)
 
 		// TODO: This procedure may actually work for walletTypeGeth too.

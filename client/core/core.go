@@ -2218,7 +2218,7 @@ func (c *Core) createSeededWallet(assetID uint32, crypter encrypt.Crypter, form 
 	}
 	defer encode.ClearBytes(seed)
 
-	c.log.Infof("Initializing a built-in %s wallet", unbip(assetID))
+	c.log.Infof("Initializing a %s wallet", unbip(assetID))
 	if err = asset.CreateWallet(assetID, &asset.CreateWalletParams{
 		Type:     form.Type,
 		Seed:     seed,
