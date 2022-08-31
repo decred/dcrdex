@@ -437,7 +437,7 @@ func (m *matchReader) IsMaker() bool {
 	return m.Side == order.Maker
 }
 
-// MakerSwapID reutrns the ID of the asset used in the maker's swap.
+// MakerSwapID returns the ID of the asset used in the maker's swap.
 func (m *matchReader) MakerSwapID() uint32 {
 	if m.Side == order.Maker {
 		return m.ord.FromID()
@@ -445,7 +445,7 @@ func (m *matchReader) MakerSwapID() uint32 {
 	return m.ord.ToID()
 }
 
-// TakerSwapID reutrns the ID of the asset used in the taker's swap.
+// TakerSwapID returns the ID of the asset used in the taker's swap.
 func (m *matchReader) TakerSwapID() uint32 {
 	if m.Side == order.Maker {
 		return m.ord.ToID()
@@ -453,7 +453,7 @@ func (m *matchReader) TakerSwapID() uint32 {
 	return m.ord.FromID()
 }
 
-// MakerSwapSymbol reutrns the symbol of the asset used in the maker's swap.
+// MakerSwapSymbol returns the symbol of the asset used in the maker's swap.
 func (m *matchReader) MakerSwapSymbol() string {
 	if m.Side == order.Maker {
 		return m.ord.FromSymbol()
@@ -461,7 +461,7 @@ func (m *matchReader) MakerSwapSymbol() string {
 	return m.ord.ToSymbol()
 }
 
-// TakerSwapSymbol reutrns the symbol of the asset used in the taker's swap.
+// TakerSwapSymbol returns the symbol of the asset used in the taker's swap.
 func (m *matchReader) TakerSwapSymbol() string {
 	if m.Side == order.Maker {
 		return m.ord.ToSymbol()
@@ -504,25 +504,25 @@ func (m *matchReader) TakerRedeem() *Coin {
 // ShowMakerSwap returns whether or not to display the maker swap section
 // on the match card.
 func (m *matchReader) ShowMakerSwap() bool {
-	return m.MakerSwap() != nil || !m.Revoked
+	return (m.MakerSwap() != nil || !m.Revoked) && !m.IsCancel
 }
 
 // ShowTakerSwap returns whether or not to display the taker swap section
 // on the match card.
 func (m *matchReader) ShowTakerSwap() bool {
-	return m.TakerSwap() != nil || !m.Revoked
+	return (m.TakerSwap() != nil || !m.Revoked) && !m.IsCancel
 }
 
 // ShowMakerRedeem returns whether or not to display the maker redeem section
 // on the match card.
 func (m *matchReader) ShowMakerRedeem() bool {
-	return m.MakerRedeem() != nil || !m.Revoked
+	return (m.MakerRedeem() != nil || !m.Revoked) && !m.IsCancel
 }
 
 // ShowTakerRedeem returns whether or not to display the taker redeem section
 // on the match card.
 func (m *matchReader) ShowTakerRedeem() bool {
-	return !m.IsMaker() && (m.TakerRedeem() != nil || !m.Revoked)
+	return !m.IsMaker() && (m.TakerRedeem() != nil || !m.Revoked) && !m.IsCancel
 }
 
 // ShowRefund returns whether or not to display the refund section on the match
