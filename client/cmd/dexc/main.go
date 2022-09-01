@@ -32,24 +32,18 @@ import (
 	"decred.org/dcrdex/dex/version"
 )
 
-func main() {
-	// Wrap the actual main so defers run in it.
-	err := mainCore()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	os.Exit(0)
-}
+var (
+	appCtx, cancel = context.WithCancel(context.Background())
+	webserverReady = make(chan string, 1)
+)
 
-func mainCore() error {
-	appCtx, cancel := context.WithCancel(context.Background())
-	defer cancel() // don't leak on the earliest returns
+func runCore() error {
+	defer cancel() // for the earliest returns
 
 	// Parse configuration.
 	cfg, err := configure()
 	if err != nil {
-		return fmt.Errorf("configration error: %w", err)
+		return fmt.Errorf("configuration error: %w", err)
 	}
 
 	asset.SetNetwork(cfg.Net)
@@ -217,8 +211,11 @@ func mainCore() error {
 				cancel()
 				return
 			}
+			webserverReady <- webSrv.Addr()
 			cm.Wait()
 		}()
+	} else {
+		close(webserverReady)
 	}
 
 	// Wait for everything to stop.

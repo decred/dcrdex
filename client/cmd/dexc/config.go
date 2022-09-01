@@ -33,6 +33,7 @@ const (
 var (
 	defaultApplicationDirectory = dcrutil.AppDataDir("dexc", false)
 	defaultConfigPath           = filepath.Join(defaultApplicationDirectory, configFilename)
+	cfgPath                     string // used config file path
 	logFilename, netDirectory   string
 	logDirectory                string
 	cfg                         *Config
@@ -151,7 +152,7 @@ func configure() (*Config, error) {
 		}
 	}
 
-	cfgPath := dex.CleanAndExpandPath(preCfg.Config)
+	cfgPath = dex.CleanAndExpandPath(preCfg.Config)
 
 	// Load additional config from file.
 	parser := flags.NewParser(&iniCfg, flags.Default)

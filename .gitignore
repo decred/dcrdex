@@ -20,7 +20,6 @@ markets.json
 dist/
 node_modules/
 client/cmd/dexc/dexc
-client/cmd/dexc-tray/dexc-tray
 client/cmd/dexcctl/dexcctl
 client/cmd/assetseed/assetseed
 client/cmd/simnet-trade-tests/simnet-trade-tests
