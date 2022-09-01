@@ -154,16 +154,6 @@ func DecodeCoinID(assetID uint32, coinID []byte) (cid string, err error) {
 		tkn.ParentID, dex.BipIDSymbol(tkn.ParentID), assetID, dex.BipIDSymbol(assetID))
 }
 
-// IsToken checks if the asset ID is for a token and returns the token's parent
-// ID.
-func IsToken(assetID uint32) (is bool, parentID uint32) {
-	token, is := tokens[assetID]
-	if !is {
-		return
-	}
-	return true, token.ParentID
-}
-
 // A registered asset is information about a supported asset.
 type RegisteredAsset struct {
 	ID     uint32

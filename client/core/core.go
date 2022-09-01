@@ -7734,12 +7734,11 @@ func (c *Core) deleteOrderFn(ordersFileStr string) (perOrderFn func(*db.MetaOrde
 
 		baseFeeAssetSymbol := unbip(cord.BaseID)
 		baseFeeUnitInfo := baseUnitInfo
-		baseIsToken, baseParent := asset.IsToken(cord.BaseID)
-		if baseIsToken {
-			baseFeeAssetSymbol = unbip(baseParent)
-			baseFeeUnitInfo, err = asset.UnitInfo(baseParent)
+		if baseToken := asset.TokenInfo(cord.BaseID); baseToken != nil {
+			baseFeeAssetSymbol = unbip(baseToken.ParentID)
+			baseFeeUnitInfo, err = asset.UnitInfo(baseToken.ParentID)
 			if err != nil {
-				return fmt.Errorf("unable to get base fee unit info for %v: %v", baseParent, err)
+				return fmt.Errorf("unable to get base fee unit info for %v: %v", baseToken.ParentID, err)
 			}
 		}
 
@@ -7750,12 +7749,11 @@ func (c *Core) deleteOrderFn(ordersFileStr string) (perOrderFn func(*db.MetaOrde
 
 		quoteFeeAssetSymbol := unbip(cord.QuoteID)
 		quoteFeeUnitInfo := quoteUnitInfo
-		quoteIsToken, quoteParent := asset.IsToken(cord.QuoteID)
-		if quoteIsToken {
-			quoteFeeAssetSymbol = unbip(quoteParent)
-			quoteFeeUnitInfo, err = asset.UnitInfo(quoteParent)
+		if quoteToken := asset.TokenInfo(cord.QuoteID); quoteToken != nil {
+			quoteFeeAssetSymbol = unbip(quoteToken.ParentID)
+			quoteFeeUnitInfo, err = asset.UnitInfo(quoteToken.ParentID)
 			if err != nil {
-				return fmt.Errorf("unable to get quote fee unit info for %v: %v", quoteParent, err)
+				return fmt.Errorf("unable to get quote fee unit info for %v: %v", quoteToken.ParentID, err)
 			}
 		}
 
