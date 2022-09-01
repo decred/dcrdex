@@ -69,7 +69,7 @@ var (
 // and have some critical code that needed to be duplicated (in order to avoid
 // interface hell).
 type bchSPVWallet struct {
-	// This section is populated in newSPVWallet.
+	// This section is populated in openSPVWallet.
 	dir                  string
 	chainParams          *bchchaincfg.Params
 	btcParams            *chaincfg.Params
@@ -89,8 +89,16 @@ var _ btc.BTCWallet = (*bchSPVWallet)(nil)
 
 // openSPVWallet creates a bchSPVWallet, but does not Start.
 // Satisfies btc.BTCWalletConstructor.
-func openSPVWallet(dir string, cfg *btc.WalletConfig, btcParams *chaincfg.Params,
-	bchParams *bchchaincfg.Params, log dex.Logger) btc.BTCWallet {
+func openSPVWallet(dir string, cfg *btc.WalletConfig, btcParams *chaincfg.Params, log dex.Logger) btc.BTCWallet {
+	var bchParams *bchchaincfg.Params
+	switch btcParams.Name {
+	case dexbch.MainNetParams.Name:
+		bchParams = &bchchaincfg.MainNetParams
+	case dexbch.TestNet4Params.Name:
+		bchParams = &bchchaincfg.TestNet4Params
+	case dexbch.RegressionNetParams.Name:
+		bchParams = &bchchaincfg.RegressionNetParams
+	}
 
 	w := &bchSPVWallet{
 		dir:                  dir,
@@ -327,7 +335,7 @@ func (w *bchSPVWallet) ListUnspent(minconf, maxconf int32, acctName string) ([]*
 // need the TxOut, and to show ownership.
 func (w *bchSPVWallet) FetchInputInfo(prevOut *wire.OutPoint) (*wire.MsgTx, *wire.TxOut, *psbt.Bip32Derivation, int64, error) {
 
-	td, err := w.txDetails(convertHashToBCH(prevOut.Hash))
+	td, err := w.txDetails((*bchchainhash.Hash)(&prevOut.Hash))
 	if err != nil {
 		return nil, nil, nil, 0, err
 	}
@@ -362,14 +370,14 @@ func (w *bchSPVWallet) FetchInputInfo(prevOut *wire.OutPoint) (*wire.MsgTx, *wir
 
 func (w *bchSPVWallet) LockOutpoint(op wire.OutPoint) {
 	w.Wallet.LockOutpoint(bchwire.OutPoint{
-		Hash:  *convertHashToBCH(op.Hash),
+		Hash:  bchchainhash.Hash(op.Hash),
 		Index: op.Index,
 	})
 }
 
 func (w *bchSPVWallet) UnlockOutpoint(op wire.OutPoint) {
 	w.Wallet.UnlockOutpoint(bchwire.OutPoint{
-		Hash:  *convertHashToBCH(op.Hash),
+		Hash:  bchchainhash.Hash(op.Hash),
 		Index: op.Index,
 	})
 }
@@ -576,7 +584,7 @@ func (w *bchSPVWallet) dropTransactionHistory() error {
 }
 
 func (w *bchSPVWallet) WalletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetails, error) {
-	txDetails, err := w.txDetails(convertHashToBCH(*txHash))
+	txDetails, err := w.txDetails((*bchchainhash.Hash)(txHash))
 	if err != nil {
 		return nil, err
 	}
@@ -607,13 +615,13 @@ func (w *bchSPVWallet) WalletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDeta
 	return &wtxmgr.TxDetails{
 		TxRecord: wtxmgr.TxRecord{
 			MsgTx:        *btcTx,
-			Hash:         *convertHashToBTC(txDetails.TxRecord.Hash),
+			Hash:         chainhash.Hash(txDetails.TxRecord.Hash),
 			Received:     txDetails.TxRecord.Received,
 			SerializedTx: txDetails.TxRecord.SerializedTx,
 		},
 		Block: wtxmgr.BlockMeta{
 			Block: wtxmgr.Block{
-				Hash:   *convertHashToBTC(txDetails.Block.Hash),
+				Hash:   chainhash.Hash(txDetails.Block.Hash),
 				Height: txDetails.Block.Height,
 			},
 			Time: txDetails.Block.Time,
@@ -627,7 +635,7 @@ func (w *bchSPVWallet) SyncedTo() waddrmgr.BlockStamp {
 	bs := w.Manager.SyncedTo()
 	return waddrmgr.BlockStamp{
 		Height:    bs.Height,
-		Hash:      *convertHashToBTC(bs.Hash),
+		Hash:      chainhash.Hash(bs.Hash),
 		Timestamp: bs.Timestamp,
 	}
 
@@ -682,7 +690,7 @@ func (w *bchSPVWallet) BlockNotifications(ctx context.Context) <-chan *btc.Block
 					lastBlock := note.AttachedBlocks[len(note.AttachedBlocks)-1]
 					select {
 					case ch <- &btc.BlockNotification{
-						Hash:   *convertHashToBTC(*lastBlock.Hash),
+						Hash:   chainhash.Hash(*lastBlock.Hash),
 						Height: lastBlock.Height,
 					}:
 					default:
@@ -802,7 +810,7 @@ func (s *spvService) GetBlockHash(height int64) (*chainhash.Hash, error) {
 	if err != nil {
 		return nil, err
 	}
-	return convertHashToBTC(*bchHash), nil
+	return (*chainhash.Hash)(bchHash), nil
 }
 
 func (s *spvService) BestBlock() (*headerfs.BlockStamp, error) {
@@ -812,7 +820,7 @@ func (s *spvService) BestBlock() (*headerfs.BlockStamp, error) {
 	}
 	return &headerfs.BlockStamp{
 		Height:    bs.Height,
-		Hash:      *convertHashToBTC(bs.Hash),
+		Hash:      chainhash.Hash(bs.Hash),
 		Timestamp: bs.Timestamp,
 	}, nil
 }
@@ -827,18 +835,18 @@ func (s *spvService) Peers() []btc.SPVPeer {
 }
 
 func (s *spvService) GetBlockHeight(h *chainhash.Hash) (int32, error) {
-	return s.ChainService.GetBlockHeight(convertHashToBCH(*h))
+	return s.ChainService.GetBlockHeight((*bchchainhash.Hash)(h))
 }
 
 func (s *spvService) GetBlockHeader(h *chainhash.Hash) (*wire.BlockHeader, error) {
-	hdr, err := s.ChainService.GetBlockHeader(convertHashToBCH(*h))
+	hdr, err := s.ChainService.GetBlockHeader((*bchchainhash.Hash)(h))
 	if err != nil {
 		return nil, err
 	}
 	return &wire.BlockHeader{
 		Version:    hdr.Version,
-		PrevBlock:  *convertHashToBTC(hdr.PrevBlock),
-		MerkleRoot: *convertHashToBTC(hdr.MerkleRoot),
+		PrevBlock:  chainhash.Hash(hdr.PrevBlock),
+		MerkleRoot: chainhash.Hash(hdr.MerkleRoot),
 		Timestamp:  hdr.Timestamp,
 		Bits:       hdr.Bits,
 		Nonce:      hdr.Nonce,
@@ -846,7 +854,7 @@ func (s *spvService) GetBlockHeader(h *chainhash.Hash) (*wire.BlockHeader, error
 }
 
 func (s *spvService) GetCFilter(blockHash chainhash.Hash, filterType wire.FilterType, _ ...btcneutrino.QueryOption) (*gcs.Filter, error) {
-	f, err := s.ChainService.GetCFilter(*convertHashToBCH(blockHash), bchwire.GCSFilterRegular)
+	f, err := s.ChainService.GetCFilter(bchchainhash.Hash(blockHash), bchwire.GCSFilterRegular)
 	if err != nil {
 		return nil, err
 	}
@@ -860,7 +868,7 @@ func (s *spvService) GetCFilter(blockHash chainhash.Hash, filterType wire.Filter
 }
 
 func (s *spvService) GetBlock(blockHash chainhash.Hash, _ ...btcneutrino.QueryOption) (*btcutil.Block, error) {
-	blk, err := s.ChainService.GetBlock(*convertHashToBCH(blockHash))
+	blk, err := s.ChainService.GetBlock(bchchainhash.Hash(blockHash))
 	if err != nil {
 		return nil, err
 	}
@@ -871,18 +879,6 @@ func (s *spvService) GetBlock(blockHash chainhash.Hash, _ ...btcneutrino.QueryOp
 	}
 
 	return btcutil.NewBlockFromBytes(b)
-}
-
-func convertHashToBTC(src bchchainhash.Hash) *chainhash.Hash {
-	var tgt chainhash.Hash
-	copy(tgt[:], src[:])
-	return &tgt
-}
-
-func convertHashToBCH(src chainhash.Hash) *bchchainhash.Hash {
-	var tgt bchchainhash.Hash
-	copy(tgt[:], src[:])
-	return &tgt
 }
 
 func convertMsgTxToBTC(tx *bchwire.MsgTx) (*wire.MsgTx, error) {
@@ -908,18 +904,6 @@ func convertMsgTxToBCH(tx *wire.MsgTx) (*bchwire.MsgTx, error) {
 		return nil, err
 	}
 	return bchTx, nil
-}
-
-func parseChainParams(net dex.Network) (*bchchaincfg.Params, error) {
-	switch net {
-	case dex.Mainnet:
-		return &bchchaincfg.MainNetParams, nil
-	case dex.Testnet:
-		return &bchchaincfg.TestNet4Params, nil
-	case dex.Regtest:
-		return &bchchaincfg.RegressionNetParams, nil
-	}
-	return nil, fmt.Errorf("unknown network ID %v", net)
 }
 
 func extendAddresses(extIdx, intIdx uint32, bchw *wallet.Wallet) error {
@@ -1011,37 +995,31 @@ type fileLoggerPlus struct {
 func (f *fileLoggerPlus) Warnf(format string, params ...interface{}) {
 	f.log.Warnf(format, params...)
 	f.Logger.Warnf(format, params...)
-
 }
 
 func (f *fileLoggerPlus) Errorf(format string, params ...interface{}) {
 	f.log.Errorf(format, params...)
 	f.Logger.Errorf(format, params...)
-
 }
 
 func (f *fileLoggerPlus) Criticalf(format string, params ...interface{}) {
 	f.log.Criticalf(format, params...)
 	f.Logger.Criticalf(format, params...)
-
 }
 
 func (f *fileLoggerPlus) Warn(v ...interface{}) {
 	f.log.Warn(v...)
 	f.Logger.Warn(v...)
-
 }
 
 func (f *fileLoggerPlus) Error(v ...interface{}) {
 	f.log.Error(v...)
 	f.Logger.Error(v...)
-
 }
 
 func (f *fileLoggerPlus) Critical(v ...interface{}) {
 	f.log.Critical(v...)
 	f.Logger.Critical(v...)
-
 }
 
 type logAdapter struct {

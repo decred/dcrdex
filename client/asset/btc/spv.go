@@ -175,12 +175,11 @@ func extendAddresses(extIdx, intIdx uint32, btcw *wallet.Wallet) error {
 	return walletdb.Update(btcw.Database(), func(dbtx walletdb.ReadWriteTx) error {
 		ns := dbtx.ReadWriteBucket(wAddrMgrBkt)
 		if extIdx > 0 {
-			scopedKeyManager.ExtendExternalAddresses(ns, defaultAcctNum, extIdx)
+			if err := scopedKeyManager.ExtendExternalAddresses(ns, defaultAcctNum, extIdx); err != nil {
+				return err
+			}
 		}
-		if intIdx > 0 {
-			scopedKeyManager.ExtendInternalAddresses(ns, defaultAcctNum, intIdx)
-		}
-		return nil
+		return scopedKeyManager.ExtendInternalAddresses(ns, defaultAcctNum, intIdx)
 	})
 }
 
@@ -190,7 +189,7 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dataDir strin
 	dir := filepath.Join(dataDir, net.Name, "spv")
 
 	if err := logNeutrino(dir); err != nil {
-		return fmt.Errorf("error initializing btcwallet+neutrino logging: %w", err)
+		return fmt.Errorf("error initializing ltcwallet+neutrino logging: %w", err)
 	}
 
 	logDir := filepath.Join(dir, logDirName)
@@ -276,7 +275,7 @@ func logNeutrino(dir string) error {
 		return fmt.Errorf("error initializing log rotator: %w", err)
 	}
 
-	backendLog := btclog.NewBackend(logWriter{logSpinner})
+	backendLog := btclog.NewBackend(logSpinner)
 
 	logger := func(name string, lvl btclog.Level) btclog.Logger {
 		l := backendLog.Logger(name)
@@ -328,16 +327,6 @@ type hashEntry struct {
 type scanCheckpoint struct {
 	res        *filterScanResult
 	lastAccess time.Time
-}
-
-// logWriter implements an io.Writer that outputs to a rotating log file.
-type logWriter struct {
-	*rotator.Rotator
-}
-
-// Write writes the data in p to the log file.
-func (w logWriter) Write(p []byte) (n int, err error) {
-	return w.Rotator.Write(p)
 }
 
 // spvWallet is an in-process btcwallet.Wallet + neutrino light-filter-based
@@ -1247,11 +1236,11 @@ func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) (err error)
 	return nil
 }
 
-// startWallet initializes the *btcwallet.Wallet and its supporting players and
-// starts syncing.
+// Start initializes the *btcwallet.Wallet and its supporting players and starts
+// syncing.
 func (w *walletExtender) Start() (SPVService, error) {
 	if err := logNeutrino(w.dir); err != nil {
-		return nil, fmt.Errorf("error initializing btcwallet+neutrino logging: %v", err)
+		return nil, fmt.Errorf("error initializing ltcwallet+neutrino logging: %v", err)
 	}
 	// timeout and recoverWindow arguments borrowed from btcwallet directly.
 	w.loader = wallet.NewLoader(w.chainParams, w.dir, true, 60*time.Second, 250)

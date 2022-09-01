@@ -167,17 +167,13 @@ func (d *Driver) Create(params *asset.CreateWalletParams) error {
 // exchange wallet.
 func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
 	var cloneParams *chaincfg.Params
-	var bchParams *bchchaincfg.Params
 	switch network {
 	case dex.Mainnet:
 		cloneParams = dexbch.MainNetParams
-		bchParams = &bchchaincfg.MainNetParams
 	case dex.Testnet:
 		cloneParams = dexbch.TestNet4Params
-		bchParams = &bchchaincfg.TestNet4Params
 	case dex.Regtest:
 		cloneParams = dexbch.RegressionNetParams
-		bchParams = &bchchaincfg.RegressionNetParams
 	default:
 		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
@@ -228,9 +224,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	// 	cloneCFG.Ports = dexbtc.NetPorts{} // no default ports for Electrum wallet
 	// 	return btc.ElectrumWallet(cloneCFG)
 	case walletTypeSPV:
-		return btc.OpenSPVWallet(cloneCFG, func(dir string, cfg *btc.WalletConfig, btcParams *chaincfg.Params, log dex.Logger) btc.BTCWallet {
-			return openSPVWallet(dir, cfg, btcParams, bchParams, log)
-		})
+		return btc.OpenSPVWallet(cloneCFG, openSPVWallet)
 	}
 	return nil, fmt.Errorf("wallet type %q not known", cfg.Type)
 }
@@ -292,4 +286,16 @@ func translateTx(btcTx *wire.MsgTx) (*bchwire.MsgTx, error) {
 	}
 
 	return bchTx, nil
+}
+
+func parseChainParams(net dex.Network) (*bchchaincfg.Params, error) {
+	switch net {
+	case dex.Mainnet:
+		return &bchchaincfg.MainNetParams, nil
+	case dex.Testnet:
+		return &bchchaincfg.TestNet4Params, nil
+	case dex.Regtest:
+		return &bchchaincfg.RegressionNetParams, nil
+	}
+	return nil, fmt.Errorf("unknown network ID %v", net)
 }
