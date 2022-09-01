@@ -481,12 +481,11 @@ func (s *WebServer) orderReader(ord *core.Order) *core.OrderReader {
 	}
 
 	feeAssetInfo := func(assetID uint32, symbol string) (string, dex.UnitInfo) {
-		isToken, parent := asset.IsToken(assetID)
-		if !isToken {
-			return unbip(assetID), unitInfo(assetID, symbol)
+		if token := asset.TokenInfo(assetID); token != nil {
+			parentAsset := asset.Asset(token.ParentID)
+			return unbip(parentAsset.ID), parentAsset.Info.UnitInfo
 		}
-		parentAsset := asset.Asset(parent)
-		return unbip(parent), parentAsset.Info.UnitInfo
+		return unbip(assetID), unitInfo(assetID, symbol)
 	}
 
 	baseFeeAssetSymbol, baseFeeUintInfo := feeAssetInfo(ord.BaseID, ord.BaseSymbol)
