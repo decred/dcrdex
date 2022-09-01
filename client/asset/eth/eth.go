@@ -253,15 +253,22 @@ type ethFetcher interface {
 // replacedTx is used to maintain a doubly linked list, which allows deletion
 // of transactions that were replaced after a transaction is confirmed.
 type monitoredTx struct {
-	mtx sync.Mutex
-
 	tx             *types.Transaction
 	blockSubmitted uint64
-	replacementTx  *common.Hash
-	replacedTx     *common.Hash
+
+	// This mutex must be held during the entire process of confirming
+	// a transaction. This is to avoid confirmations of the same
+	// transactions happening concurrently resulting in more than one
+	// replacement for the same transaction.
+	mtx           sync.Mutex
+	replacementTx *common.Hash
+	// replacedTx could be set when the tx is created, be immutable, and not
+	// need the mutex, but since Redeem doesn't know if the transaction is a
+	// replacement or a new one, this variable is set in recordReplacementTx.
+	replacedTx *common.Hash
 }
 
-// MarsalBinary marshals a monitoredTx into a byte array.
+// MarshalBinary marshals a monitoredTx into a byte array.
 // It satisfies the encoding.BinaryMarshaler interface for monitoredTx.
 func (m *monitoredTx) MarshalBinary() (data []byte, err error) {
 	b := encode.BuildyBytes{0}
@@ -283,7 +290,7 @@ func (m *monitoredTx) MarshalBinary() (data []byte, err error) {
 	return b, nil
 }
 
-// UnmarshalBinary loads a data from a marshalled byte arary into a
+// UnmarshalBinary loads a data from a marshalled byte array into a
 // monitoredTx.
 func (m *monitoredTx) UnmarshalBinary(data []byte) error {
 	ver, pushes, err := encode.DecodeBlob(data)
@@ -2600,7 +2607,7 @@ func (w *assetWallet) getLatestMonitoredTx(txHash common.Hash) (*monitoredTx, er
 // recordReplacementTx updates a monitoredTx with a replacement transaction.
 // This change is also stored in the db.
 //
-// originalTx's mtx must be held when calling this funcion.
+// originalTx's mtx must be held when calling this function.
 func (w *assetWallet) recordReplacementTx(originalTx *monitoredTx, replacementHash common.Hash) error {
 	originalTx.replacementTx = &replacementHash
 	originalHash := originalTx.tx.Hash()
@@ -2619,13 +2626,14 @@ func (w *assetWallet) recordReplacementTx(originalTx *monitoredTx, replacementHa
 	defer replacementTx.mtx.Unlock()
 	replacementTx.replacedTx = &originalHash
 	if err := w.monitoredTxDB.Store(replacementHash[:], replacementTx); err != nil {
-		return fmt.Errorf("error recoring replaced tx: %v", err)
+		return fmt.Errorf("error recording replaced tx: %v", err)
 	}
 
 	return nil
 }
 
-// txsToDelete retraces the doubly linked list to find the  b
+// txsToDelete retraces the doubly linked list to find the all the
+// ancestors of a monitoredTx.
 func (w *assetWallet) txsToDelete(tx *monitoredTx) []common.Hash {
 	txsToDelete := []common.Hash{tx.tx.Hash()}
 
