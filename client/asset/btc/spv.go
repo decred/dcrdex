@@ -189,7 +189,7 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dataDir strin
 	dir := filepath.Join(dataDir, net.Name, "spv")
 
 	if err := logNeutrino(dir); err != nil {
-		return fmt.Errorf("error initializing ltcwallet+neutrino logging: %w", err)
+		return fmt.Errorf("error initializing btcwallet+neutrino logging: %w", err)
 	}
 
 	logDir := filepath.Join(dir, logDirName)
@@ -1240,7 +1240,7 @@ func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) (err error)
 // syncing.
 func (w *walletExtender) Start() (SPVService, error) {
 	if err := logNeutrino(w.dir); err != nil {
-		return nil, fmt.Errorf("error initializing ltcwallet+neutrino logging: %v", err)
+		return nil, fmt.Errorf("error initializing btcwallet+neutrino logging: %v", err)
 	}
 	// timeout and recoverWindow arguments borrowed from btcwallet directly.
 	w.loader = wallet.NewLoader(w.chainParams, w.dir, true, 60*time.Second, 250)
