@@ -543,17 +543,31 @@ func createWallet(createWalletParams *asset.CreateWalletParams, skipConnect bool
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 			defer cancel()
 
-			providers, err := connectProviders(ctx, endpoints, crypto.PubkeyToAddress(priv.PublicKey), createWalletParams.Logger)
+			for _, endpoint := range endpoints {
+				known, compliant := providerIsCompliant(endpoint)
+				if known && !compliant {
+					return fmt.Errorf("provider %q is known to have an insufficient API for DEX", endpoint)
+				}
+			}
+
+			providers, err := connectProviders(ctx, endpoints, createWalletParams.Logger, big.NewInt(chainIDs[createWalletParams.Net]))
 			if err != nil {
 				return err
 			}
+
 			defer func() {
 				for _, p := range providers {
-					p.cl().Close()
+					p.ec.Close()
 				}
 			}()
 			if len(providers) != n {
 				return fmt.Errorf("Could not connect to all providers")
+			}
+
+			if createWalletParams.Net == dex.Mainnet {
+				if err := checkProvidersCompliance(ctx, walletDir, providers, createWalletParams.Logger); err != nil {
+					return err
+				}
 			}
 		}
 		return importKeyToKeyStore(ks, priv, createWalletParams.Pass)

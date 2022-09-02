@@ -44,22 +44,22 @@ go build ./...
 go build -tags lgpl ./...
 go build -tags harness,lgpl -o /dev/null ./client/cmd/simnet-trade-tests 
 
-dumptags=(-c -o /dev/null -tags)
-go test "${dumptags[@]}" live,lgpl ./client/webserver
-go test "${dumptags[@]}" harness ./client/asset/dcr
-go test "${dumptags[@]}" electrumlive ./client/asset/btc
-go test "${dumptags[@]}" harness ./client/asset/btc/livetest
-go test "${dumptags[@]}" harness ./client/asset/ltc
-go test "${dumptags[@]}" harness ./client/asset/bch
-go test "${dumptags[@]}" harness,lgpl ./client/asset/eth
-go test "${dumptags[@]}" dcrlive ./server/asset/dcr
-go test "${dumptags[@]}" btclive ./server/asset/btc
-go test "${dumptags[@]}" ltclive ./server/asset/ltc
-go test "${dumptags[@]}" bchlive ./server/asset/bch
-go test "${dumptags[@]}" dogelive ./server/asset/doge
-go test "${dumptags[@]}" zeclive ./server/asset/zec
-go test "${dumptags[@]}" harness,lgpl ./server/asset/eth
-go test "${dumptags[@]}" pgonline ./server/db/driver/pg
+go test -c -o /dev/null -tags live,lgpl ./client/webserver
+go test -c -o /dev/null -tags harness ./client/asset/dcr
+go test -c -o /dev/null -tags electrumlive ./client/asset/btc
+go test -c -o /dev/null -tags harness ./client/asset/btc/livetest
+go test -c -o /dev/null -tags harness ./client/asset/ltc
+go test -c -o /dev/null -tags harness ./client/asset/bch
+go test -c -o /dev/null -tags harness,lgpl ./client/asset/eth
+go test -c -o /dev/null -tags rpclive,lgpl ./client/asset/eth
+go test -c -o /dev/null -tags dcrlive ./server/asset/dcr
+go test -c -o /dev/null -tags btclive ./server/asset/btc
+go test -c -o /dev/null -tags ltclive ./server/asset/ltc
+go test -c -o /dev/null -tags bchlive ./server/asset/bch
+go test -c -o /dev/null -tags dogelive ./server/asset/doge
+go test -c -o /dev/null -tags zeclive ./server/asset/zec
+go test -c -o /dev/null -tags harness,lgpl ./server/asset/eth
+go test -c -o /dev/null -tags pgonline ./server/db/driver/pg
 
 # Return to initial directory.
 cd "$dir"

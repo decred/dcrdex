@@ -90,7 +90,7 @@ var (
 	betaNodeDir                 = filepath.Join(homeDir, "dextest", "eth", "beta", "node")
 	betaIPCFile                 = filepath.Join(betaNodeDir, "geth.ipc")
 	ctx                         context.Context
-	tLogger                     = dex.StdOutLogger("ETHTEST", dex.LevelCritical)
+	tLogger                     = dex.StdOutLogger("ETHTEST", dex.LevelWarn)
 	simnetWalletSeed            = "0812f5244004217452059e2fd11603a511b5d0870ead753df76c966ce3c71531"
 	simnetAddr                  common.Address
 	simnetAcct                  *accounts.Account
@@ -591,6 +591,7 @@ func setupWallet(walletDir, seed, listenAddress, rpcAddr string, net dex.Network
 		Settings: settings,
 		DataDir:  walletDir,
 		Net:      net,
+		Logger:   tLogger,
 	}
 	return CreateWallet(&createWalletParams)
 }
@@ -1110,7 +1111,7 @@ func testInitiate(t *testing.T, assetID uint32) {
 
 	sc := simnetContractor
 	balance := func() (*big.Int, error) {
-		return ethClient.addressBalance(ctx, simnetAddr)
+		return ethClient.addressBalance(ctx, ethClient.address())
 	}
 	gases := ethGases
 	if !isETH {
@@ -1226,7 +1227,7 @@ func testInitiate(t *testing.T, assetID uint32) {
 		optsVal := totalVal
 		if !isETH {
 			optsVal = 0
-			originalParentBal, err = ethClient.addressBalance(ctx, simnetAddr)
+			originalParentBal, err = ethClient.addressBalance(ctx, ethClient.address())
 			if err != nil {
 				t.Fatalf("balance error for eth, test %s: %v", test.name, err)
 			}
@@ -1293,7 +1294,7 @@ func testInitiate(t *testing.T, assetID uint32) {
 		if isETH {
 			wantBal = new(big.Int).Sub(wantBal, txFee)
 		} else {
-			parentBal, err := ethClient.addressBalance(ctx, simnetAddr)
+			parentBal, err := ethClient.addressBalance(ctx, ethClient.address())
 			if err != nil {
 				t.Fatalf("%s: eth balance error: %v", test.name, err)
 			}
@@ -1569,7 +1570,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		}
 
 		balance := func() (*big.Int, error) {
-			return test.redeemerClient.addressBalance(ctx, test.redeemer.Address)
+			return test.redeemerClient.addressBalance(ctx, test.redeemerClient.address())
 		}
 		if !isETH {
 			balance = func() (*big.Int, error) {
@@ -1622,7 +1623,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 
 		var originalParentBal *big.Int
 		if !isETH {
-			originalParentBal, err = test.redeemerClient.addressBalance(ctx, test.redeemer.Address)
+			originalParentBal, err = test.redeemerClient.addressBalance(ctx, test.redeemerClient.address())
 			if err != nil {
 				t.Fatalf("%s: eth balance error: %v", test.name, err)
 			}
@@ -1695,7 +1696,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		if isETH {
 			wantBal.Sub(wantBal, txFee)
 		} else {
-			parentBal, err := test.redeemerClient.addressBalance(ctx, test.redeemer.Address)
+			parentBal, err := test.redeemerClient.addressBalance(ctx, test.redeemerClient.address())
 			if err != nil {
 				t.Fatalf("%s: post-redeem eth balance error: %v", test.name, err)
 			}
@@ -1897,7 +1898,7 @@ func testRefund(t *testing.T, assetID uint32) {
 
 		var originalParentBal *big.Int
 		if !isETH {
-			originalParentBal, err = test.refunderClient.addressBalance(ctx, test.refunder.Address)
+			originalParentBal, err = test.refunderClient.addressBalance(ctx, test.refunderClient.address())
 			if err != nil {
 				t.Fatalf("%s: eth balance error: %v", test.name, err)
 			}
@@ -1967,7 +1968,7 @@ func testRefund(t *testing.T, assetID uint32) {
 		if isETH {
 			wantBal.Sub(wantBal, txFee)
 		} else {
-			parentBal, err := test.refunderClient.addressBalance(ctx, test.refunder.Address)
+			parentBal, err := test.refunderClient.addressBalance(ctx, test.refunderClient.address())
 			if err != nil {
 				t.Fatalf("%s: post-redeem eth balance error: %v", test.name, err)
 			}

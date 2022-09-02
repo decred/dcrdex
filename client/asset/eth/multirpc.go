@@ -16,6 +16,7 @@ import (
 	"math/big"
 	"math/rand"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -23,12 +24,14 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/networks/erc20"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"decred.org/dcrdex/server/asset"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/misc"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/params"
@@ -36,14 +39,34 @@ import (
 )
 
 const (
-	failQuarantine         = time.Minute
-	receiptCacheExpiration = time.Hour
+	// failQuarantine is how long we will wait after a failed request before
+	// trying a provider again.
+	failQuarantine = time.Minute
+	// receiptCacheExpiration is how long we will track a receipt after the
+	// last request. There is no persistent storage, so all receipts are cached
+	// in-memory.
+	receiptCacheExpiration     = time.Hour
+	tipCapSuggestionExpiration = time.Hour
+	ipcHost                    = "IPC"
 )
 
+// nonceProviderStickiness is the minimum amount of time that must pass between
+// requests to DIFFERENT nonce providers. If we use a provider for a
+// nonce-sensitive (NS) operation, and later have another NS operation, we will
+// use the same provider if < nonceProviderStickiness has passed.
 var nonceProviderStickiness = time.Minute
 
-// TODO: Handle rate limiting. From the docs:
+// TODO: Handle rate limiting? From the docs:
 // When you are rate limited, your JSON-RPC responses have HTTP Status code 429.
+// I don't think we have access to these codes through ethclient.Client, but
+// I haven't verified that.
+
+// The suggested tip cap is expected to be very-slowly changing. We'll only
+// update once per tipCapSuggestionExpiration.
+type cachedTipCap struct {
+	cap   *big.Int
+	stamp time.Time
+}
 
 type combinedRPCClient struct {
 	*ethclient.Client
@@ -52,10 +75,11 @@ type combinedRPCClient struct {
 
 type provider struct {
 	host    string
-	isLocal bool
-	ec      atomic.Value // *combinedRPCClient
+	ec      *combinedRPCClient
 	ws      bool
+	tipCapV atomic.Value // *cachedTipCap
 
+	// tip tracks the best known header as well as any error encount
 	tip struct {
 		sync.RWMutex
 		header      *types.Header
@@ -63,10 +87,6 @@ type provider struct {
 		failStamp   time.Time
 		failCount   int
 	}
-}
-
-func (p *provider) cl() *combinedRPCClient {
-	return p.ec.Load().(*combinedRPCClient)
 }
 
 func (p *provider) setTip(header *types.Header) {
@@ -78,6 +98,7 @@ func (p *provider) setTip(header *types.Header) {
 	p.tip.Unlock()
 }
 
+// cachedTip retrieves the last known best header.
 func (p *provider) cachedTip() *types.Header {
 	stale := time.Second * 10
 	if p.ws {
@@ -92,6 +113,8 @@ func (p *provider) cachedTip() *types.Header {
 	return p.tip.header
 }
 
+// setFailed should be called after a failed request, the provider is considered
+// failed for failQuarantine.
 func (p *provider) setFailed() {
 	p.tip.Lock()
 	p.tip.failStamp = time.Now()
@@ -99,12 +122,15 @@ func (p *provider) setFailed() {
 	p.tip.Unlock()
 }
 
+// failed will be true if setFailed has been called in the last failQuarantine.
 func (p *provider) failed() bool {
 	p.tip.Lock()
 	defer p.tip.Unlock()
 	return time.Since(p.tip.failStamp) < failQuarantine || p.tip.failCount > 100
 }
 
+// bestHeader get the best known header from the provider, cached if available,
+// otherwise a new RPC call is made.
 func (p *provider) bestHeader(ctx context.Context, log dex.Logger) (*types.Header, error) {
 	// Check if we have a cached header.
 	if tip := p.cachedTip(); tip != nil {
@@ -113,7 +139,7 @@ func (p *provider) bestHeader(ctx context.Context, log dex.Logger) (*types.Heade
 	}
 
 	log.Tracef("fetching fresh header from %q", p.host)
-	hdr, err := p.cl().HeaderByNumber(ctx, nil /* latest */)
+	hdr, err := p.ec.HeaderByNumber(ctx, nil /* latest */)
 	if err != nil {
 		p.setFailed()
 		return nil, fmt.Errorf("HeaderByNumber error: %w", err)
@@ -132,16 +158,117 @@ func (p *provider) headerByHash(ctx context.Context, h common.Hash) (*types.Head
 	return hdr, nil
 }
 
+// suggestTipCap returns a tip cap suggestion, cached if available, otherwise a
+// new RPC call is made.
+func (p *provider) suggestTipCap(ctx context.Context, log dex.Logger) *big.Int {
+	if cachedV := p.tipCapV.Load(); cachedV != nil {
+		rec := cachedV.(*cachedTipCap)
+		if time.Since(rec.stamp) < tipCapSuggestionExpiration {
+			return rec.cap
+		}
+	}
+	tipCap, err := p.ec.SuggestGasTipCap(ctx)
+	if err != nil {
+		log.Errorf("error getting tip cap suggestion from %q: %v", p.host, err)
+		return dexeth.GweiToWei(dexeth.MinGasTipCap)
+	} else {
+		p.tipCapV.Store(&cachedTipCap{
+			cap:   tipCap,
+			stamp: time.Now(),
+		})
+	}
+
+	minGasTipCapWei := dexeth.GweiToWei(dexeth.MinGasTipCap)
+	if tipCap.Cmp(minGasTipCapWei) < 0 {
+		return new(big.Int).Set(minGasTipCapWei)
+	}
+	return tipCap
+}
+
+// subscribeHeaders starts a listening loop for header updates for a provider.
+func (p *provider) subscribeHeaders(ctx context.Context, sub ethereum.Subscription, h chan *types.Header, log dex.Logger) {
+	defer sub.Unsubscribe()
+	var lastWarning time.Time
+	newSub := func() (ethereum.Subscription, error) {
+		for {
+			var err error
+			sub, err = p.ec.SubscribeNewHead(ctx, h)
+			if err == nil {
+				return sub, nil
+			}
+			if time.Since(lastWarning) > 5*time.Minute {
+				log.Warnf("can't resubscribe to %q headers: %v", err)
+			}
+			select {
+			case <-time.After(time.Second * 30):
+			case <-ctx.Done():
+				return nil, context.Canceled
+			}
+		}
+	}
+
+	// I thought the filter logs might catch some transactions we coudld cache
+	// to avoid rpc calls, but in testing, I get nothing in the channel. May
+	// revisit later.
+	// logs := make(chan types.Log, 128)
+	// newAcctSub := func(retryTimeout time.Duration) ethereum.Subscription {
+	// 	config := ethereum.FilterQuery{
+	// 		Addresses: []common.Address{addr},
+	// 	}
+
+	// 	acctSub, err := p.ec.SubscribeFilterLogs(ctx, config, logs)
+	// 	if err != nil {
+	// 		log.Errorf("failed to subscribe to filter logs: %v", err)
+	// 		return newRetrySubscription(ctx, retryTimeout)
+	// 	}
+	// 	return acctSub
+	// }
+
+	// // If we fail the first time, don't try again.
+	// acctSub := newAcctSub(time.Hour * 24 * 365)
+	// defer acctSub.Unsubscribe()
+
+	// Start the background filtering
+	log.Tracef("handling websocket subscriptions for %q", p.host)
+
+	for {
+		select {
+		case hdr := <-h:
+			log.Tracef("%q reported new tip at height %s (%s)", p.host, hdr.Number, hdr.Hash())
+			p.setTip(hdr)
+		case err, ok := <-sub.Err():
+			if !ok {
+				// Subscription cancelled
+				return
+			}
+			log.Errorf("%q header subscription error: %v", err)
+			sub, err = newSub()
+			if err != nil { // context cancelled
+				return
+			}
+		// case l := <-logs:
+		// 	log.Tracef("%q log reported: %+v", p.host, l)
+		// case err, ok := <-acctSub.Err():
+		// 	if err != nil && !errors.Is(err, retryError) {
+		// 		log.Errorf("%q log subscription error: %v", p.host, err)
+		// 	}
+		// 	if ok {
+		// 		acctSub = newAcctSub(time.Minute * 5)
+		// 	}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// receiptRecord is a cached receipt and its last-access time. Receipts are
+// stored in-memory for up to receiptCacheExpiration.
 type receiptRecord struct {
 	r          *types.Receipt
 	lastAccess time.Time
 }
 
-// multiRPCClient is an ethFetcher backed by one or more public infrastructure
-// providers.
-// MATIC providers at
-//
-//	https://docs.polygon.technology/docs/develop/network-details/network/
+// multiRPCClient is an ethFetcher backed by one or more public RPC providers.
 type multiRPCClient struct {
 	cfg     *params.ChainConfig
 	creds   *accountCredentials
@@ -189,16 +316,23 @@ func newMultiRPCClient(dir string, endpoints []string, log dex.Logger, cfg *para
 	return m, nil
 }
 
-func connectProviders(ctx context.Context, endpoints []string, addr common.Address, log dex.Logger) ([]*provider, error) {
+// connectProviders attempts to connnect to the list of endpoints, returning a
+// list of providers that were succesfully connected. It is not an error for
+// a connection to fail. The caller can infer failed connections from the
+// length and contents of the returned provider list.
+func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, chainID *big.Int) ([]*provider, error) {
 	providers := make([]*provider, 0, len(endpoints))
 	var success bool
 	for _, endpoint := range endpoints {
-		// First try to get a websocket connection.
+		// First try to get a websocket connection. Websockets have a header
+		// feed, so are much preferred to http connections. So much so, that
+		// we'll do some path inspection here and make an attempt to find a
+		// websocket server, even if the user requested http.
 		var ec *ethclient.Client
 		var rpcClient *rpc.Client
 		var sub ethereum.Subscription
 		var h chan *types.Header
-		host := "IPC"
+		host := ipcHost
 		if !strings.HasSuffix(endpoint, ".ipc") {
 			wsURL, err := url.Parse(endpoint)
 			if err != nil {
@@ -209,16 +343,21 @@ func connectProviders(ctx context.Context, endpoints []string, addr common.Addre
 			switch ogScheme {
 			case "https":
 				wsURL.Scheme = "wss"
-				wsURL.Path = "/ws" + wsURL.Path
 			case "http":
 				wsURL.Scheme = "ws"
-				wsURL.Path = "/ws" + wsURL.Path
 			case "ws", "wss":
 			default:
 				return nil, fmt.Errorf("unknown scheme for endpoint %q: %q", endpoint, wsURL.Scheme)
 			}
-			if strings.HasPrefix(wsURL.Path, "/v3") {
+
+			// Handle known paths.
+			switch {
+			case strings.Contains(wsURL.String(), "infura.io/v3"):
 				wsURL.Path = "/ws" + wsURL.Path
+			case strings.Contains(wsURL.Host, "rpc.rivet.cloud"):
+				wsURL.Host = strings.Replace(wsURL.Host, ".rpc.", ".ws.", 1)
+				host = "rivet.cloud" // subdomain contains api key
+				// Alchemy is just a protocol change
 			}
 
 			replaced := ogScheme != wsURL.Scheme
@@ -244,6 +383,7 @@ func connectProviders(ctx context.Context, endpoints []string, addr common.Addre
 				}
 			}
 		}
+		// Weren't able to get a websocket connection. Try HTTP now.
 		if ec == nil {
 			var err error
 			rpcClient, err = rpc.Dial(endpoint)
@@ -259,45 +399,57 @@ func connectProviders(ctx context.Context, endpoints []string, addr common.Addre
 			}
 		}()
 
-		// Get best header
-		hdr, err := ec.HeaderByNumber(ctx, nil /* latest */)
+		// Get chain ID.
+		reportedChainID, err := ec.ChainID(ctx)
 		if err != nil {
+			// If we can't get a header, don't use this provider.
 			ec.Close()
-			log.Errorf("Failed to get best header from %q", endpoint)
+			log.Errorf("Failed to get chain ID from %q: %v", endpoint, err)
+			continue
+		}
+		if chainID.Cmp(reportedChainID) != 0 {
+			ec.Close()
+			log.Errorf("%q reported wrong chain ID. expected %d, got %d", endpoint, chainID, reportedChainID)
+			continue
 		}
 
-		lower := strings.ToLower(endpoint)
-		p := &provider{
-			host:    host,
-			ws:      sub != nil,
-			isLocal: strings.HasSuffix(lower, ".ipc") || strings.HasPrefix(lower, "http") || strings.HasPrefix(lower, "ws"),
+		hdr, err := ec.HeaderByNumber(ctx, nil /* latest */)
+		if err != nil {
+			// If we can't get a header, don't use this provider.
+			ec.Close()
+			log.Errorf("Failed to get header from %q: %v", endpoint, err)
+			continue
 		}
-		p.ec.Store(&combinedRPCClient{
-			Client: ec,
-			rpc:    rpcClient,
-		})
+
+		p := &provider{
+			host: host,
+			ws:   sub != nil,
+			ec: &combinedRPCClient{
+				Client: ec,
+				rpc:    rpcClient,
+			},
+		}
 		p.setTip(hdr)
 		providers = append(providers, p)
 
 		// Start websocket listen loop.
 		if sub != nil {
-			go subHeaders(ctx, p, sub, h, addr, log)
+			go p.subscribeHeaders(ctx, sub, h, log)
 		}
 	}
 
-	if len(providers) != len(endpoints) {
-		if len(providers) == 0 {
-			return nil, fmt.Errorf("failed to connect")
-		}
-		log.Warnf("Only connected with %d of %d RPC servers", len(providers), len(endpoints))
+	if len(providers) == 0 {
+		return nil, fmt.Errorf("failed to connect")
 	}
+
+	log.Debugf("Connected with %d of %d RPC servers", len(providers), len(endpoints))
 
 	success = true
 	return providers, nil
 }
 
 func (m *multiRPCClient) connect(ctx context.Context) (err error) {
-	providers, err := connectProviders(ctx, m.endpoints, m.creds.addr, m.log)
+	providers, err := connectProviders(ctx, m.endpoints, m.log, m.chainID)
 	if err != nil {
 		return err
 	}
@@ -322,7 +474,7 @@ func (m *multiRPCClient) connect(ctx context.Context) (err error) {
 	go func() {
 		<-ctx.Done()
 		for _, p := range m.providerList() {
-			p.cl().Close()
+			p.ec.Close()
 		}
 	}()
 
@@ -335,7 +487,7 @@ func (m *multiRPCClient) reconfigure(ctx context.Context, settings map[string]st
 		return errors.New("no providers specified")
 	}
 	endpoints := strings.Split(providerDef, " ")
-	providers, err := connectProviders(ctx, endpoints, m.creds.addr, m.log)
+	providers, err := connectProviders(ctx, endpoints, m.log, m.chainID)
 	if err != nil {
 		return err
 	}
@@ -345,84 +497,9 @@ func (m *multiRPCClient) reconfigure(ctx context.Context, settings map[string]st
 	m.endpoints = endpoints
 	m.providerMtx.Unlock()
 	for _, p := range oldProviders {
-		p.cl().Close()
+		p.ec.Close()
 	}
 	return nil
-}
-
-func subHeaders(ctx context.Context, p *provider, sub ethereum.Subscription, h chan *types.Header, addr common.Address, log dex.Logger) {
-	defer sub.Unsubscribe()
-	var lastWarning time.Time
-	newSub := func() (ethereum.Subscription, error) {
-		for {
-			var err error
-			sub, err = p.cl().SubscribeNewHead(ctx, h)
-			if err == nil {
-				return sub, nil
-			}
-			if time.Since(lastWarning) > 5*time.Minute {
-				log.Warnf("can't resubscribe to %q headers: %v", err)
-			}
-			select {
-			case <-time.After(time.Second * 30):
-			case <-ctx.Done():
-				return nil, context.Canceled
-			}
-		}
-	}
-
-	// I thought the filter logs might catch some transactions we coudld cache
-	// to avoid rpc calls, but in testing, I get nothing in the channel. May
-	// revisit later.
-	// logs := make(chan types.Log, 128)
-	// newAcctSub := func(retryTimeout time.Duration) ethereum.Subscription {
-	// 	config := ethereum.FilterQuery{
-	// 		Addresses: []common.Address{addr},
-	// 	}
-
-	// 	acctSub, err := p.cl().SubscribeFilterLogs(ctx, config, logs)
-	// 	if err != nil {
-	// 		log.Errorf("failed to subscribe to filter logs: %v", err)
-	// 		return newRetrySubscription(ctx, retryTimeout)
-	// 	}
-	// 	return acctSub
-	// }
-
-	// // If we fail the first time, don't try again.
-	// acctSub := newAcctSub(time.Hour * 24 * 365)
-	// defer acctSub.Unsubscribe()
-
-	// Start the background filtering
-	log.Tracef("handling websocket subscriptions")
-
-	for {
-		select {
-		case hdr := <-h:
-			log.Tracef("%q reported new tip at height %s (%s)", p.host, hdr.Number, hdr.Hash())
-			p.setTip(hdr)
-		case err, ok := <-sub.Err():
-			if !ok {
-				// Subscription cancelled
-				return
-			}
-			log.Errorf("%q header subscription error: %v", err)
-			sub, err = newSub()
-			if err != nil { // context cancelled
-				return
-			}
-		// case l := <-logs:
-		// 	log.Tracef("%q log reported: %+v", p.host, l)
-		// case err, ok := <-acctSub.Err():
-		// 	if err != nil && !errors.Is(err, retryError) {
-		// 		log.Errorf("%q log subscription error: %v", p.host, err)
-		// 	}
-		// 	if ok {
-		// 		acctSub = newAcctSub(time.Minute * 5)
-		// 	}
-		case <-ctx.Done():
-			return
-		}
-	}
 }
 
 // cleanReceipts cleans up the receipt cache, deleting any receipts that haven't
@@ -439,7 +516,7 @@ func (m *multiRPCClient) cleanReceipts() {
 
 func (m *multiRPCClient) transactionReceipt(ctx context.Context, txHash common.Hash) (r *types.Receipt, tx *types.Transaction, err error) {
 	// TODO
-	// TODO: Plug into the monitoredTx system from #1638.
+	// TODO: Plug in to the monitoredTx system from #1638.
 	// TODO
 	if tx, _, err = m.getTransaction(ctx, txHash); err != nil {
 		return nil, nil, err
@@ -461,7 +538,7 @@ func (m *multiRPCClient) transactionReceipt(ctx context.Context, txHash common.H
 	}
 
 	if err = m.withPreferred(func(p *provider) error {
-		r, err = p.cl().TransactionReceipt(ctx, txHash)
+		r, err = p.ec.TransactionReceipt(ctx, txHash)
 		return err
 	}); err != nil {
 		return nil, nil, err
@@ -498,22 +575,28 @@ func (tx *rpcTransaction) UnmarshalJSON(b []byte) error {
 	return json.Unmarshal(b, tx)
 }
 
-func (m *multiRPCClient) getTransaction(ctx context.Context, txHash common.Hash) (tx *types.Transaction, h int64, err error) {
+func getRPCTransaction(ctx context.Context, p *provider, txHash common.Hash) (*rpcTransaction, error) {
 	var resp *rpcTransaction
+	err := p.ec.rpc.CallContext(ctx, &resp, "eth_getTransactionByHash", txHash)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, asset.CoinNotFoundError
+	}
+	// Just copying geth with this one.
+	if _, r, _ := resp.tx.RawSignatureValues(); r == nil {
+		return nil, fmt.Errorf("server returned transaction without signature")
+	}
+	return resp, nil
+}
 
+func (m *multiRPCClient) getTransaction(ctx context.Context, txHash common.Hash) (tx *types.Transaction, h int64, err error) {
 	return tx, h, m.withPreferred(func(p *provider) error {
-		err = p.cl().rpc.CallContext(ctx, &resp, "eth_getTransactionByHash", txHash)
+		resp, err := getRPCTransaction(ctx, p, txHash)
 		if err != nil {
 			return err
 		}
-		if resp == nil {
-			return asset.CoinNotFoundError
-		}
-		// Just copying geth with this one.
-		if _, r, _ := resp.tx.RawSignatureValues(); r == nil {
-			return fmt.Errorf("server returned transaction without signature")
-		}
-
 		tx = resp.tx
 		if resp.BlockNumber != nil {
 			b, _ := hex.DecodeString(*resp.BlockNumber)
@@ -525,7 +608,7 @@ func (m *multiRPCClient) getTransaction(ctx context.Context, txHash common.Hash)
 
 func (m *multiRPCClient) getConfirmedNonce(ctx context.Context, blockNumber int64) (n uint64, err error) {
 	return n, m.withPreferred(func(p *provider) error {
-		n, err = p.cl().PendingNonceAt(ctx, m.address())
+		n, err = p.ec.PendingNonceAt(ctx, m.address())
 		return err
 	})
 }
@@ -539,13 +622,18 @@ func (m *multiRPCClient) providerList() []*provider {
 	return providers
 }
 
+// withOne runs the provider function against the providers in order until one
+// succeeds or all have failed.
 func (m *multiRPCClient) withOne(providers []*provider, f func(*provider) error) error {
 	for _, p := range providers {
 		if p.failed() {
 			continue
 		}
 		if err := f(p); err != nil {
-			m.log.Error(err)
+			m.log.Errorf("error from provider %q: %v", p.host, err)
+			// Is this too aggressive? Is there any case where we might expect
+			// an error here.
+			p.setFailed()
 			continue
 		}
 		return nil
@@ -553,22 +641,22 @@ func (m *multiRPCClient) withOne(providers []*provider, f func(*provider) error)
 	return fmt.Errorf("all providers errored")
 }
 
-func shuffleProviders(p []*provider) {
-	rand.Shuffle(len(p), func(i, j int) {
-		p[i], p[j] = p[j], p[i]
-	})
-}
-
+// withAny runs the provider function against known providers in random order
+// until one succeeds or all have failed.
 func (m *multiRPCClient) withAny(f func(*provider) error) error {
 	providers := m.providerList()
 	shuffleProviders(providers)
 	return m.withOne(providers, f)
 }
 
+// withPreferred is like withAny, but will prioritize recently used nonce
+// providers.
 func (m *multiRPCClient) withPreferred(f func(*provider) error) error {
 	return m.withOne(m.nonceProviderList(), f)
 }
 
+// nonceProviderList returns the randomized provider list, but with any recent
+// nonce provider inserted in the first position.
 func (m *multiRPCClient) nonceProviderList() []*provider {
 	m.providerMtx.Lock()
 	defer m.providerMtx.Unlock()
@@ -596,9 +684,10 @@ func (m *multiRPCClient) nonceProviderList() []*provider {
 	return providers
 }
 
+// nextNonce returns the next nonce number for the account.
 func (m *multiRPCClient) nextNonce(ctx context.Context) (nonce uint64, err error) {
 	return nonce, m.withPreferred(func(p *provider) error {
-		nonce, err = p.cl().PendingNonceAt(ctx, m.creds.addr)
+		nonce, err = p.ec.PendingNonceAt(ctx, m.creds.addr)
 		return err
 	})
 }
@@ -609,12 +698,13 @@ func (m *multiRPCClient) address() common.Address {
 
 func (m *multiRPCClient) addressBalance(ctx context.Context, addr common.Address) (bal *big.Int, err error) {
 	return bal, m.withAny(func(p *provider) error {
-		bal, err = p.cl().BalanceAt(ctx, addr, nil /* latest */)
+		bal, err = p.ec.BalanceAt(ctx, addr, nil /* latest */)
 		return err
 	})
 }
 
 func (m *multiRPCClient) bestHeader(ctx context.Context) (hdr *types.Header, err error) {
+	// Check for an unexpired cached header first.
 	var bestHeader *types.Header
 	for _, p := range m.providerList() {
 		h := p.cachedTip()
@@ -682,7 +772,7 @@ func (m *multiRPCClient) pendingTransactions() ([]*types.Transaction, error) {
 
 func (m *multiRPCClient) shutdown() {
 	for _, p := range m.providerList() {
-		p.cl().Close()
+		p.ec.Close()
 	}
 
 }
@@ -692,7 +782,11 @@ func (m *multiRPCClient) sendSignedTransaction(ctx context.Context, tx *types.Tr
 	if err := m.withPreferred(func(p *provider) error {
 		lastProvider = p
 		m.log.Tracef("Sending signed tx via %q", p.host)
-		return p.cl().SendTransaction(ctx, tx)
+		err := p.ec.SendTransaction(ctx, tx)
+		if err != nil && strings.Contains(err.Error(), core.ErrAlreadyKnown.Error()) {
+			return nil
+		}
+		return err
 	}); err != nil {
 		return err
 	}
@@ -728,7 +822,7 @@ func (m *multiRPCClient) signData(data []byte) (sig, pubKey []byte, err error) {
 
 func (m *multiRPCClient) syncProgress(ctx context.Context) (prog *ethereum.SyncProgress, err error) {
 	return prog, m.withAny(func(p *provider) error {
-		s, err := p.cl().SyncProgress(ctx)
+		s, err := p.ec.SyncProgress(ctx)
 		if err != nil {
 			return fmt.Errorf("error getting sync progress from %s: %v", p.host, err)
 		}
@@ -740,7 +834,7 @@ func (m *multiRPCClient) syncProgress(ctx context.Context) (prog *ethereum.SyncP
 		// SyncProgress will return nil both before syncing has begun and after
 		// it has finished. In order to discern when syncing has begun, check
 		// that the best header came in under MaxBlockInterval.
-		bh, err := p.cl().HeaderByNumber(ctx, nil /* latest */)
+		bh, err := p.ec.HeaderByNumber(ctx, nil /* latest */)
 		if err != nil {
 			return fmt.Errorf("error getting header for nil SyncProgress resolution: %v", err)
 		}
@@ -767,7 +861,7 @@ func (m *multiRPCClient) transactionConfirmations(ctx context.Context, txHash co
 	var tip *types.Header
 	var notFound bool
 	if err := m.withPreferred(func(p *provider) error {
-		r, err = p.cl().TransactionReceipt(ctx, txHash)
+		r, err = p.ec.TransactionReceipt(ctx, txHash)
 		if err != nil {
 			if strings.Contains(err.Error(), "not found") {
 				notFound = true
@@ -831,19 +925,7 @@ func (m *multiRPCClient) currentFees(ctx context.Context) (baseFees, tipCap *big
 			baseFees.Set(minGasPrice)
 		}
 
-		if p.isLocal {
-			tipCap, err = p.cl().SuggestGasTipCap(ctx)
-			if err != nil {
-				return err
-			}
-		} else {
-			tipCap = dexeth.GweiToWei(2)
-		}
-
-		minGasTipCapWei := dexeth.GweiToWei(dexeth.MinGasTipCap)
-		if tipCap.Cmp(minGasTipCapWei) < 0 {
-			tipCap = new(big.Int).Set(minGasTipCapWei)
-		}
+		tipCap = p.suggestTipCap(ctx, m.log)
 
 		return nil
 	})
@@ -859,64 +941,56 @@ var _ bind.ContractBackend = (*multiRPCClient)(nil)
 
 func (m *multiRPCClient) CodeAt(ctx context.Context, contract common.Address, blockNumber *big.Int) (code []byte, err error) {
 	return code, m.withAny(func(p *provider) error {
-		code, err = p.cl().CodeAt(ctx, contract, blockNumber)
+		code, err = p.ec.CodeAt(ctx, contract, blockNumber)
 		return err
 	})
 }
 
 func (m *multiRPCClient) CallContract(ctx context.Context, call ethereum.CallMsg, blockNumber *big.Int) (res []byte, err error) {
 	return res, m.withPreferred(func(p *provider) error {
-		res, err = p.cl().CallContract(ctx, call, blockNumber)
+		res, err = p.ec.CallContract(ctx, call, blockNumber)
 		return err
 	})
 }
 
 func (m *multiRPCClient) HeaderByNumber(ctx context.Context, number *big.Int) (hdr *types.Header, err error) {
 	return hdr, m.withAny(func(p *provider) error {
-		hdr, err = p.cl().HeaderByNumber(ctx, number)
+		hdr, err = p.ec.HeaderByNumber(ctx, number)
 		return err
 	})
 }
 
 func (m *multiRPCClient) PendingCodeAt(ctx context.Context, account common.Address) (code []byte, err error) {
 	return code, m.withAny(func(p *provider) error {
-		code, err = p.cl().PendingCodeAt(ctx, account)
+		code, err = p.ec.PendingCodeAt(ctx, account)
 		return err
 	})
 }
 
 func (m *multiRPCClient) PendingNonceAt(ctx context.Context, account common.Address) (nonce uint64, err error) {
 	return nonce, m.withPreferred(func(p *provider) error {
-		nonce, err = p.cl().PendingNonceAt(ctx, account)
+		nonce, err = p.ec.PendingNonceAt(ctx, account)
 		return err
 	})
 }
 
 func (m *multiRPCClient) SuggestGasPrice(ctx context.Context) (price *big.Int, err error) {
 	return price, m.withAny(func(p *provider) error {
-		price, err = p.cl().SuggestGasPrice(ctx)
+		price, err = p.ec.SuggestGasPrice(ctx)
 		return err
 	})
 }
 
 func (m *multiRPCClient) SuggestGasTipCap(ctx context.Context) (tipCap *big.Int, err error) {
 	return tipCap, m.withAny(func(p *provider) error {
-		if p.isLocal {
-			tipCap, err = p.cl().SuggestGasTipCap(ctx)
-			if err != nil {
-				return err
-			}
-		} else {
-			// Probably don't have eth_maxPriorityFeePerGas.
-			tipCap = dexeth.GweiToWei(2)
-		}
-		return err
+		tipCap = p.suggestTipCap(ctx, m.log)
+		return nil
 	})
 }
 
 func (m *multiRPCClient) EstimateGas(ctx context.Context, call ethereum.CallMsg) (gas uint64, err error) {
 	return gas, m.withAny(func(p *provider) error {
-		gas, err = p.cl().EstimateGas(ctx, call)
+		gas, err = p.ec.EstimateGas(ctx, call)
 		return err
 	})
 }
@@ -927,14 +1001,250 @@ func (m *multiRPCClient) SendTransaction(ctx context.Context, tx *types.Transact
 
 func (m *multiRPCClient) FilterLogs(ctx context.Context, query ethereum.FilterQuery) (logs []types.Log, err error) {
 	return logs, m.withAny(func(p *provider) error {
-		logs, err = p.cl().FilterLogs(ctx, query)
+		logs, err = p.ec.FilterLogs(ctx, query)
 		return err
 	})
 }
 
 func (m *multiRPCClient) SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (sub ethereum.Subscription, err error) {
 	return sub, m.withAny(func(p *provider) error {
-		sub, err = p.cl().SubscribeFilterLogs(ctx, query, ch)
+		sub, err = p.ec.SubscribeFilterLogs(ctx, query, ch)
 		return err
+	})
+}
+
+var compliantProviders = []string{
+	"linkpool.io",
+	"mewapi.io",
+	"flashbots.net",
+	"mycryptoapi.com",
+	"runonflux.io",
+	"infura.io",
+	"rivet.cloud",
+	"alchemy.com",
+}
+
+var nonCompliantProviders = []string{
+	"cloudflare-eth.com", // "SuggestGasTipCap" error: Method not found
+	"ankr.com",           // "SyncProgress" error: the method eth_syncing does not exist/is not available
+}
+
+func providerIsCompliant(addr string) (known, compliant bool) {
+	addr = domain(addr)
+	for _, host := range compliantProviders {
+		if addr == host {
+			return true, true
+		}
+	}
+	for _, host := range nonCompliantProviders {
+		if addr == host {
+			return true, false
+		}
+	}
+	return false, false
+}
+
+type rpcTest struct {
+	name string
+	f    func(*provider) error
+}
+
+// newCompatibilityTests returns a list of RPC tests to run to determine API
+// compatibility.
+func newCompatibilityTests(ctx context.Context, cb bind.ContractBackend, log dex.Logger) []*rpcTest {
+	var (
+		// Vitalik's address from https://twitter.com/VitalikButerin/status/1050126908589887488
+		mainnetAddr   = common.HexToAddress("0xab5801a7d398351b8be11c439e05c5b3259aec9b")
+		mainnetUSDC   = common.HexToAddress("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48")
+		mainnetTxHash = common.HexToHash("0xea1a717af9fad5702f189d6f760bb9a5d6861b4ee915976fe7732c0c95cd8a0e")
+	)
+	return []*rpcTest{
+		{
+			name: "HeaderByNumber",
+			f: func(p *provider) error {
+				_, err := p.ec.HeaderByNumber(ctx, nil /* latest */)
+				return err
+			},
+		},
+		{
+			name: "TransactionReceipt",
+			f: func(p *provider) error {
+				_, err := p.ec.TransactionReceipt(ctx, mainnetTxHash)
+				return err
+			},
+		},
+		{
+			name: "PendingNonceAt",
+			f: func(p *provider) error {
+				_, err := p.ec.PendingNonceAt(ctx, mainnetAddr)
+				return err
+			},
+		},
+		{
+			name: "SuggestGasTipCap",
+			f: func(p *provider) error {
+				tipCap, err := p.ec.SuggestGasTipCap(ctx)
+				if err != nil {
+					return err
+				}
+				if log != nil {
+					log.Info("#### Retreived tip cap:", tipCap)
+				}
+				return nil
+			},
+		},
+		{
+			name: "BalanceAt",
+			f: func(p *provider) error {
+				bal, err := p.ec.BalanceAt(ctx, mainnetAddr, nil)
+				if err != nil {
+					return err
+				}
+				if log != nil {
+					log.Info("#### Vitalik's balance retrieved:", dexeth.WeiToGwei(bal)/1e9)
+				}
+				return nil
+			},
+		},
+		{
+			name: "SyncProgress",
+			f: func(p *provider) error {
+				s, err := p.ec.SyncProgress(ctx)
+				if err != nil {
+					return err
+				}
+				if log != nil {
+					log.Infof("#### Sync progress: %+v", s)
+				}
+				return nil
+			},
+		},
+		{
+			name: "CodeAt",
+			f: func(p *provider) error {
+				code, err := p.ec.CodeAt(ctx, mainnetUSDC, nil)
+				if err != nil {
+					return err
+				}
+				if log != nil {
+					log.Infof("#### %d bytes of USDC contract retrieved", len(code))
+				}
+				return nil
+			},
+		},
+		{
+			name: "CallContract(balanceOf)",
+			f: func(p *provider) error {
+				caller, err := erc20.NewIERC20(mainnetUSDC, cb)
+				if err != nil {
+					return err
+				}
+				bal, err := caller.BalanceOf(&bind.CallOpts{
+					From:    mainnetAddr,
+					Context: ctx,
+				}, mainnetAddr)
+				if err != nil {
+					return err
+				}
+				// I guess we would need to unpack the results. I don't really
+				// know how to interpret these, but I'm really just looking for
+				// a request error.
+				if log != nil {
+					log.Info("#### USDC balanceOf result:", bal, "wei")
+				}
+				return nil
+			},
+		},
+		{
+			name: "ChainID",
+			f: func(p *provider) error {
+				chainID, err := p.ec.ChainID(ctx)
+				if err != nil {
+					return err
+				}
+				if log != nil {
+					log.Infof("#### Chain ID: %d", chainID)
+				}
+				return nil
+			},
+		},
+		{
+			name: "PendingNonceAt",
+			f: func(p *provider) error {
+				n, err := p.ec.PendingNonceAt(ctx, mainnetAddr)
+				if err != nil {
+					return err
+				}
+				if log != nil {
+					log.Infof("#### Pending nonce: %d", n)
+				}
+				return nil
+			},
+		},
+		{
+			name: "getRPCTransaction",
+			f: func(p *provider) error {
+				_, err := getRPCTransaction(ctx, p, mainnetTxHash)
+				return err
+			},
+		},
+	}
+}
+
+func domain(host string) string {
+	parts := strings.Split(host, ".")
+	n := len(parts)
+	if n <= 2 {
+		return host
+	}
+	return parts[n-2] + "." + parts[n-1]
+}
+
+func checkProvidersCompliance(ctx context.Context, walletDir string, providers []*provider, log dex.Logger) error {
+	var compliantProviders map[string]bool
+	path := filepath.Join(walletDir, "compliant-providers.json")
+	b, err := os.ReadFile(path)
+	if err == nil {
+		if err := json.Unmarshal(b, &compliantProviders); err != nil {
+			log.Warn("Couldn't parse compliant providers file")
+		}
+	}
+	if compliantProviders == nil {
+		compliantProviders = make(map[string]bool)
+	}
+
+	n := len(compliantProviders)
+
+	for _, p := range providers {
+		if p.host == ipcHost || compliantProviders[domain(p.host)] {
+			continue
+		}
+
+		if known, _ := providerIsCompliant(p.host); !known {
+			// Need to run API tests on this endpoint.
+			for _, t := range newCompatibilityTests(ctx, p.ec, nil /* logger is for testing only */) {
+				if err := t.f(p); err != nil {
+					log.Errorf("RPC Provider @ %q has a non-compliant API: %v", err)
+					return fmt.Errorf("RPC Provider @ %q has a non-compliant API", p.host)
+				}
+			}
+			compliantProviders[domain(p.host)] = true
+		}
+	}
+
+	if len(compliantProviders) != n {
+		b, _ /* c'mon */ := json.Marshal(compliantProviders)
+		if err := os.WriteFile(path, b, 0644); err != nil {
+			log.Errorf("Failed to write compliant providers file: %v", err)
+		}
+	}
+
+	return nil
+}
+
+// shuffleProviders shuffles the provider slice in-place.
+func shuffleProviders(p []*provider) {
+	rand.Shuffle(len(p), func(i, j int) {
+		p[i], p[j] = p[j], p[i]
 	})
 }

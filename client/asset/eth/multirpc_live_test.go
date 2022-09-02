@@ -187,21 +187,46 @@ func TestMultiRPCClient(t *testing.T) {
 /*
 {
     "testnet": {
-        "seed": "9e0084387c3ba7ac4b5bb409c220c08d4ee74f7b8c73b03fff18c727c5ce9f48",
+        "seed": "9e0084387c3ba7ac4b5bb409c220c08d4ee74f7b8c73b03fff18c727c5ce9f47",
         "providers": [
             "https://goerli.infura.io/v3/<API KEY>",
-            "https://rpc.ankr.com/eth_goerli"
+            "https://<API KEY>.eth.rpc.rivet.cloud",
+            "https://eth-goerli.g.alchemy.com/v2/<API KEY>-"
         ]
     },
     "mainnet": {
-        "seed": "9e0084387c3ba7ac4b5bb409c220c08d4ee74f7b8c73b03fff18c727c5ce9f48",
+        "seed": "9e0084387c3ba7ac4b5bb409c220c08d4ee74f7b8c73b03fff18c727c5ce9f47",
         "providers": [
             "wss://mainnet.infura.io/ws/v3/<API KEY>",
-            "https://rpc.ankr.com/eth"
+            "https://<API KEY>.eth.rpc.rivet.cloud",
+            "https://eth-mainnet.g.alchemy.com/v2/<API KEY>"
         ]
     }
 }
 */
+
+type tProvider struct {
+	Seed      dex.Bytes `json:"seed"`
+	Providers []string  `json:"providers"`
+}
+
+func readProviderFile(t *testing.T, net dex.Network) *tProvider {
+	t.Helper()
+	providersFile := filepath.Join(dextestDir, "providers.json")
+	b, err := os.ReadFile(providersFile)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error: %v", providersFile, err)
+	}
+	var accounts map[string]*tProvider
+	if err := json.Unmarshal(b, &accounts); err != nil {
+		t.Fatal(err)
+	}
+	accts := accounts[net.String()]
+	if accts == nil {
+		t.Fatalf("no")
+	}
+	return accts
+}
 
 func TestMonitorTestnet(t *testing.T) {
 	testMonitorNet(t, dex.Testnet)
@@ -212,28 +237,10 @@ func TestMonitorMainnet(t *testing.T) {
 }
 
 func testMonitorNet(t *testing.T, net dex.Network) {
-	providersFile := filepath.Join(dextestDir, "providers.json")
-	b, err := os.ReadFile(providersFile)
-	if err != nil {
-		t.Fatalf("ReadFile(%q) error: %v", providersFile, err)
-	}
-
-	var accounts map[string]*struct {
-		Seed      dex.Bytes `json:"seed"`
-		Providers []string  `json:"providers"`
-	}
-	if err := json.Unmarshal(b, &accounts); err != nil {
-		t.Fatal(err)
-	}
-
-	acct := accounts[net.String()]
-	if acct == nil {
-		t.Fatalf("no %s account in providers file", net)
-	}
-
+	providerFile := readProviderFile(t, net)
 	dir, _ := os.MkdirTemp("", "")
 
-	cl, err := tRPCClient(dir, acct.Seed, acct.Providers, net, true)
+	cl, err := tRPCClient(dir, providerFile.Seed, providerFile.Providers, net, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,6 +252,93 @@ func testMonitorNet(t *testing.T, net dex.Network) {
 		t.Fatalf("Connection error: %v", err)
 	}
 	<-ctx.Done()
+}
+
+func TestRPC(t *testing.T) {
+	endpoint := os.Getenv("PROVIDER")
+	if endpoint == "" {
+		t.Fatalf("specify a provider in the PROVIDER environmental variable")
+	}
+	dir, _ := os.MkdirTemp("", "")
+	defer os.RemoveAll(dir)
+	cl, err := tRPCClient(dir, encode.RandomBytes(32), []string{endpoint}, dex.Mainnet, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := cl.connect(ctx); err != nil {
+		t.Fatalf("connect error: %v", err)
+	}
+
+	for _, tt := range newCompatibilityTests(ctx, cl, cl.log) {
+		tStart := time.Now()
+		if err := cl.withAny(tt.f); err != nil {
+			t.Fatalf("%q: %v", tt.name, err)
+		}
+		fmt.Printf("### %q: %s \n", tt.name, time.Since(tStart))
+	}
+}
+
+var freeServers = []string{
+	"https://cloudflare-eth.com/", // cloudflare-eth.com "SuggestGasTipCap" error: Method not found
+	"https://main-rpc.linkpool.io/",
+	"https://nodes.mewapi.io/rpc/eth",
+	"https://rpc.flashbots.net/",
+	"https://rpc.ankr.com/eth", // rpc.ankr.com "SyncProgress" error: the method eth_syncing does not exist/is not available
+	"https://api.mycryptoapi.com/eth",
+	"https://ethereumnodelight.app.runonflux.io",
+}
+
+func TestFreeServers(t *testing.T) {
+	runTest := func(endpoint string) error {
+		dir, _ := os.MkdirTemp("", "")
+		defer os.RemoveAll(dir)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		cl, err := tRPCClient(dir, encode.RandomBytes(32), []string{endpoint}, dex.Mainnet, true)
+		if err != nil {
+			return fmt.Errorf("tRPCClient error: %v", err)
+		}
+		if err := cl.connect(ctx); err != nil {
+			return fmt.Errorf("connect error: %v", err)
+		}
+		return cl.withAny(func(p *provider) error {
+			for _, tt := range newCompatibilityTests(ctx, cl, cl.log) {
+				if err := tt.f(p); err != nil {
+					return fmt.Errorf("%q error: %v", tt.name, err)
+				}
+				fmt.Printf("#### %q passed %q \n", endpoint, tt.name)
+			}
+			return nil
+		})
+	}
+
+	for _, endpoint := range freeServers {
+		if err := runTest(endpoint); err != nil {
+			fmt.Printf("XXXX %q FAILED : %v \n", endpoint, err)
+		} else {
+			fmt.Printf("!!!! %q PASSED \n", endpoint)
+		}
+	}
+}
+
+func TestMainnetCompliance(t *testing.T) {
+	providerFile := readProviderFile(t, dex.Mainnet)
+	dir, _ := os.MkdirTemp("", "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	log := dex.StdOutLogger("T", dex.LevelTrace)
+	providers, err := connectProviders(ctx, providerFile.Providers, log, big.NewInt(chainIDs[dex.Mainnet]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = checkProvidersCompliance(ctx, dir, providers, log)
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func tRPCClient(dir string, seed []byte, endpoints []string, net dex.Network, skipConnect bool) (*multiRPCClient, error) {
