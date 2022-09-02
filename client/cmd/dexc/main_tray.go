@@ -7,27 +7,13 @@ package main
 
 import (
 	"fmt"
-	"net/url"
 	"os"
-	"path/filepath"
 
 	"fyne.io/systray"
 	"github.com/pkg/browser"
 )
 
 var mainDone = make(chan struct{})
-
-func filePathToURL(name string) (string, error) {
-	path, err := filepath.Abs(name)
-	if err != nil { // can't pwd if name was relative, probably impossible
-		return "", err
-	}
-	fileURL, err := url.Parse("file://" + path)
-	if err != nil {
-		return "", err
-	}
-	return fileURL.String(), nil
-}
 
 func onReady() {
 	go func() {
