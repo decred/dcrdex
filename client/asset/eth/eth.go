@@ -2287,41 +2287,100 @@ func isValidSend(addr string, value uint64, subtract bool) error {
 	return nil
 }
 
-// EstimateSendTxFee returns a tx fee estimate for a send tx. The provided fee
-// rate is ignored since all sends will use an internally derived fee rate.
-// Also, the value provided is ignored because this implementation does not need
-// it for the fee estimation.
-func (w *ETHWallet) EstimateSendTxFee(addr string, value, _ uint64, subtract bool) (uint64, bool, error) {
-	if err := isValidSend(addr, value, subtract); err != nil && addr != "" { // fee estimate for a send tx.
-		return 0, false, err
-	}
-
+// canSend ensures that the wallet has enough to cover send value and returns
+// the fee rate and max fee required for the send tx. If isPreEstimate is false,
+// wallet balance must be enough to cover total spend.
+func (w *ETHWallet) canSend(value uint64, isPreEstimate bool) (uint64, *big.Int, error) {
 	maxFeeRate, err := w.recommendedMaxFeeRate(w.ctx)
 	if err != nil {
-		return 0, false, fmt.Errorf("error getting max fee rate: %w", err)
+		return 0, nil, fmt.Errorf("error getting max fee rate: %w", err)
 	}
-	return defaultSendGasLimit * dexeth.WeiToGwei(maxFeeRate), w.ValidateAddress(addr), nil
+
+	maxFee := defaultSendGasLimit * dexeth.WeiToGwei(maxFeeRate)
+
+	if !isPreEstimate {
+		bal, err := w.Balance()
+		if err != nil {
+			return 0, nil, err
+		}
+		avail := bal.Available
+		if avail < value {
+			return 0, nil, fmt.Errorf("not enough funds to send: have %d gwei need %d gwei", avail, value)
+		}
+
+		if avail < value+maxFee {
+			return 0, nil, fmt.Errorf("available funds %d gwei cannot cover value being sent: need %d gwei + %d gwei max fee", avail, value, maxFee)
+		}
+	}
+	return maxFee, maxFeeRate, nil
 }
 
-// EstimateSendTxFee returns a tx fee estimate for a send tx. The provided fee
-// rate is ignored since all sends will use an internally derived fee rate.
-// Also, the value provided is ignored because this implementation does not need
-// it for the fee estimation.
-func (w *TokenWallet) EstimateSendTxFee(addr string, value, _ uint64, subtract bool) (fee uint64, isValidAddress bool, err error) {
-	if err := isValidSend(addr, value, subtract); err != nil && addr != "" { // fee estimate for a send tx.
-		return 0, false, err
+// canSend ensures that the wallet has enough to cover send value and returns
+// the fee rate and max fee required for the send tx.
+func (w *TokenWallet) canSend(value uint64, isPreEstimate bool) (uint64, *big.Int, error) {
+	maxFeeRate, err := w.recommendedMaxFeeRate(w.ctx)
+	if err != nil {
+		return 0, nil, fmt.Errorf("error getting max fee rate: %w", err)
 	}
 
 	g := w.gases(contractVersionNewest)
 	if g == nil {
-		return 0, false, fmt.Errorf("gas table not found")
+		return 0, nil, fmt.Errorf("gas table not found")
 	}
 
-	maxFeeRate, err := w.recommendedMaxFeeRate(w.ctx)
-	if err != nil {
-		return 0, false, fmt.Errorf("error getting max fee rate: %w", err)
+	maxFee := dexeth.WeiToGwei(maxFeeRate) * g.Transfer
+
+	if !isPreEstimate {
+		bal, err := w.Balance()
+		if err != nil {
+			return 0, nil, err
+		}
+		avail := bal.Available
+		if avail < value {
+			return 0, nil, fmt.Errorf("not enough tokens: have %[1]d %[3]s need %[2]d %[3]s", avail, value, w.atomicUnit)
+		}
+
+		ethBal, err := w.parent.Balance()
+		if err != nil {
+			return 0, nil, fmt.Errorf("error getting base chain balance: %w", err)
+		}
+
+		if ethBal.Available < maxFee {
+			return 0, nil, fmt.Errorf("insufficient balance to cover token transfer fees. %d < %d",
+				ethBal.Available, maxFee)
+		}
 	}
-	return g.Transfer * dexeth.WeiToGwei(maxFeeRate), w.ValidateAddress(addr), nil
+	return maxFee, maxFeeRate, nil
+}
+
+// EstimateSendTxFee returns a tx fee estimate for a send tx. The provided fee
+// rate is ignored since all sends will use an internally derived fee rate. If
+// an address is provided, it will ensure wallet has enough to cover total
+// spend.
+func (w *ETHWallet) EstimateSendTxFee(addr string, value, _ uint64, subtract bool) (uint64, bool, error) {
+	if err := isValidSend(addr, value, subtract); err != nil && addr != "" { // fee estimate for a send tx.
+		return 0, false, err
+	}
+	maxFee, _, err := w.canSend(value, addr == "")
+	if err != nil {
+		return 0, false, err
+	}
+	return maxFee, w.ValidateAddress(addr), nil
+}
+
+// EstimateSendTxFee returns a tx fee estimate for a send tx. The provided fee
+// rate is ignored since all sends will use an internally derived fee rate. If
+// an address is provided, it will ensure wallet has enough to cover total
+// spend.
+func (w *TokenWallet) EstimateSendTxFee(addr string, value, _ uint64, subtract bool) (fee uint64, isValidAddress bool, err error) {
+	if err := isValidSend(addr, value, subtract); err != nil && addr != "" { // fee estimate for a send tx.
+		return 0, false, err
+	}
+	maxFee, _, err := w.canSend(value, addr == "")
+	if err != nil {
+		return 0, false, err
+	}
+	return maxFee, w.ValidateAddress(addr), nil
 
 }
 
@@ -2398,22 +2457,9 @@ func (w *ETHWallet) Send(addr string, value, _ uint64) (asset.Coin, error) {
 		return nil, err
 	}
 
-	bal, err := w.Balance()
+	_, maxFeeRate, err := w.canSend(value, false)
 	if err != nil {
 		return nil, err
-	}
-	avail := bal.Available
-	if avail < value {
-		return nil, fmt.Errorf("not enough funds to send: have %d gwei need %d gwei", avail, value)
-	}
-	maxFeeRate, err := w.recommendedMaxFeeRate(w.ctx)
-	if err != nil {
-		return nil, fmt.Errorf("error getting max fee rate: %w", err)
-	}
-
-	maxFee := defaultSendGasLimit * dexeth.WeiToGwei(maxFeeRate)
-	if avail < value+maxFee {
-		return nil, fmt.Errorf("available funds %d gwei cannot cover value being sent: need %d gwei + %d gwei max fee", avail, value, maxFee)
 	}
 	// TODO: Subtract option.
 	// if avail < value+maxFee {
@@ -2436,34 +2482,9 @@ func (w *TokenWallet) Send(addr string, value, _ uint64) (asset.Coin, error) {
 		return nil, err
 	}
 
-	bal, err := w.Balance()
+	_, maxFeeRate, err := w.canSend(value, false)
 	if err != nil {
 		return nil, err
-	}
-	avail := bal.Available
-	if avail < value {
-		return nil, fmt.Errorf("not enough tokens: have %[1]d %[3]s need %[2]d %[3]s", avail, value, w.atomicUnit)
-	}
-
-	ethBal, err := w.parent.Balance()
-	if err != nil {
-		return nil, fmt.Errorf("error getting base chain balance: %w", err)
-	}
-
-	g := w.gases(contractVersionNewest)
-	if g == nil {
-		return nil, fmt.Errorf("gas table not found")
-	}
-
-	maxFeeRate, err := w.recommendedMaxFeeRate(w.ctx)
-	if err != nil {
-		return nil, fmt.Errorf("error getting max fee rate: %w", err)
-	}
-
-	maxFee := dexeth.WeiToGwei(maxFeeRate) * g.Transfer
-	if ethBal.Available < maxFee {
-		return nil, fmt.Errorf("insufficient balance to cover token transfer fees. %d < %d",
-			ethBal.Available, maxFee)
 	}
 
 	tx, err := w.sendToAddr(common.HexToAddress(addr), value, maxFeeRate)

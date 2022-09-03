@@ -124,6 +124,7 @@ type rpcCore struct {
 	numericGetRawTxRPC       bool
 	legacyValidateAddressRPC bool
 	manualMedianTime         bool
+	omitRPCOptionsArg        bool
 }
 
 func (c *rpcCore) requester() RawRequesterWithContext {
@@ -790,33 +791,49 @@ func (wc *rpcClient) sendToAddress(address string, value, feeRate uint64, subtra
 	return chainhash.NewHashFromStr(txid)
 }
 
+// sendTxFeeEstimator returns the fee required to send tx using the provided
+// feeRate.
 func (wc *rpcClient) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract bool) (txfee uint64, err error) {
 	txBytes, err := wc.serializeTx(tx)
 	if err != nil {
 		return 0, fmt.Errorf("tx serialization error: %w", err)
 	}
+	args := anylist{hex.EncodeToString(txBytes)}
 
 	// 1e-5 = 1e-8 for satoshis * 1000 for kB.
 	feeRateOption := float64(feeRate) / 1e5
-	options := &btcjson.FundRawTransactionOpts{
-		FeeRate:    &feeRateOption,
-		ChangeType: &btcjson.ChangeTypeBech32,
-	}
-	if subtract {
-		options.SubtractFeeFromOutputs = []int{0}
-	}
-	if !wc.segwit {
-		options.ChangeType = &btcjson.ChangeTypeLegacy
+	if wc.omitRPCOptionsArg {
+		var success bool
+		err := wc.call(methodSetTxFee, anylist{feeRateOption}, &success)
+		if err != nil {
+			return 0, fmt.Errorf("error setting transaction fee: %w", err)
+		}
+		if !success {
+			return 0, fmt.Errorf("failed to set transaction fee")
+		}
+	} else {
+		options := &btcjson.FundRawTransactionOpts{
+			FeeRate: &feeRateOption,
+		}
+		if !wc.omitAddressType {
+			if wc.segwit {
+				options.ChangeType = &btcjson.ChangeTypeBech32
+			} else {
+				options.ChangeType = &btcjson.ChangeTypeLegacy
+			}
+		}
+		if subtract {
+			options.SubtractFeeFromOutputs = []int{0}
+		}
+		args = append(args, options)
 	}
 
 	res := &btcjson.FundRawTransactionResult{}
-	err = wc.call(methodFundRawTransaction, anylist{hex.EncodeToString(txBytes), options, false}, &res)
+	err = wc.call(methodFundRawTransaction, args, &res)
 	if err != nil {
 		return 0, fmt.Errorf("error calculating transaction fee: %w", err)
 	}
-
-	txfee = toSatoshi(res.Fee.ToBTC())
-	return
+	return toSatoshi(res.Fee.ToBTC()), nil
 }
 
 // GetWalletInfo gets the getwalletinfo RPC result.

@@ -4450,7 +4450,7 @@ func TestEstimateSendTxFee(t *testing.T) {
 }
 
 func testEstimateSendTxFee(t *testing.T, assetID uint32) {
-	w, eth, _, shutdown := tassetWallet(assetID)
+	w, eth, node, shutdown := tassetWallet(assetID)
 	defer shutdown()
 
 	maxFeeRate, _ := eth.recommendedMaxFeeRate(eth.ctx)
@@ -4461,22 +4461,50 @@ func testEstimateSendTxFee(t *testing.T, assetID uint32) {
 
 	const val = 10e9
 	tests := []struct {
-		name, addr string
-		val        uint64
-		wantErr    bool
+		name, addr      string
+		sendAdj, feeAdj uint64
+		balErr          error
+		withdraw        bool
+		wantErr         bool
 	}{{
 		name: "ok",
 		addr: testAddr,
-		val:  val,
 	}, {
 		name: "ok: empty address",
 		addr: "",
-		val:  val,
+	}, {
+		name:    "not enough",
+		sendAdj: 1,
+		wantErr: true,
+		addr:    testAddr,
+	}, {
+		name:    "low fees",
+		feeAdj:  1,
+		wantErr: true,
+		addr:    testAddr,
+	}, {
+		name:     "subtract",
+		feeAdj:   1,
+		withdraw: true,
+		wantErr:  true,
+		addr:     testAddr,
+	}, {
+		name:    "balance error",
+		balErr:  errors.New(""),
+		wantErr: true,
+		addr:    testAddr,
 	}}
 
 	for _, test := range tests {
+		node.balErr = test.balErr
+		if assetID == BipID {
+			node.bal = dexeth.GweiToWei(val + ethFees - test.sendAdj - test.feeAdj)
+		} else {
+			node.tokenContractor.bal = dexeth.GweiToWei(val - test.sendAdj)
+			node.bal = dexeth.GweiToWei(tokenFees - test.feeAdj)
+		}
 		txFeeEstimator := w.(asset.TxFeeEstimator)
-		estimate, _, err := txFeeEstimator.EstimateSendTxFee(test.addr, test.val, 0, false)
+		estimate, _, err := txFeeEstimator.EstimateSendTxFee(test.addr, val, 0, false)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %v", test.name)
@@ -4485,15 +4513,15 @@ func testEstimateSendTxFee(t *testing.T, assetID uint32) {
 		}
 		if assetID == BipID {
 			if estimate != ethFees {
-				t.Fatalf("expected fees to be %v, got %v", ethFees, estimate)
+				t.Fatalf("%s: expected fees to be %v, got %v", test.name, ethFees, estimate)
 			}
 		} else {
 			if estimate != tokenFees {
-				t.Fatalf("expected fees to be %v, got %v", ethFees, estimate)
+				t.Fatalf("%s: expected fees to be %v, got %v", test.name, ethFees, estimate)
 			}
 		}
 		if err != nil {
-			t.Fatalf("unexpected error for test %v: %v", test.name, err)
+			t.Fatalf("%s: unexpected error: %v", test.name, err)
 		}
 	}
 }

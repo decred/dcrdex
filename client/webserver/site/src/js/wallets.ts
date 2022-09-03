@@ -73,6 +73,7 @@ export default class WalletsPage extends BasePage {
   currentForm: PageElement
   restoreInfoCard: HTMLElement
   selectedAssetID: number
+  maxSend: number
 
   constructor (body: HTMLElement) {
     super()
@@ -232,12 +233,7 @@ export default class WalletsPage extends BasePage {
   // send form.
   async stepSend () {
     const page = this.page
-    page.vSendFee.textContent = '0.00000000'
-    page.vSendDestinationAmt.textContent = '0.00000000'
-    page.vTotalSend.textContent = '0.00000000'
-    page.vSendErr.textContent = ''
-    page.vSendAddr.textContent = ''
-    Doc.hide(page.vSendAddrMsg)
+    Doc.hide(page.vSendAddrMsg, page.vSendErr, page.sendErr)
     const assetID = parseInt(page.sendForm.dataset.assetID || '')
     const subtract = page.subtractCheckBox.checked || false
     const conversionFactor = app().unitInfo(assetID).conventional.conversionFactor
@@ -251,25 +247,20 @@ export default class WalletsPage extends BasePage {
       value: value
     }
 
-    page.vSendSymbol.textContent = wallet.symbol.toUpperCase()
-    page.vSendLogo.src = Doc.logoPath(wallet.symbol)
-
     const loaded = app().loading(page.sendForm)
     const res = await postJSON('/api/txfee', open)
     loaded()
     if (!app().checkResponse(res)) {
-      page.sendErr.textContent = res.msg
-      return
-    } else if (res.txfee === 0) {
-      page.vSendErr.textContent = 'Fee estimation currently unavailable.'
-      Doc.hide(page.sendForm)
-      await this.showBox(page.vSendForm)
+      Doc.showFormError(page.sendErr, res.msg)
       return
     }
 
     if (!res.validaddress) {
       Doc.show(page.vSendAddrMsg)
     }
+
+    page.vSendSymbol.textContent = wallet.symbol.toUpperCase()
+    page.vSendLogo.src = Doc.logoPath(wallet.symbol)
 
     page.vSendFee.textContent = Doc.formatFullPrecision(res.txfee, app().unitInfo(assetID))
     this.showFiatValue(assetID, res.txfee, page.vSendFeeFiat)
@@ -304,9 +295,9 @@ export default class WalletsPage extends BasePage {
 
   // cancelSend displays the send form if user wants to make modification.
   async cancelSend () {
-    this.page.sendErr.textContent = ''
-    Doc.hide(this.page.vSendForm)
-    await this.showForm(this.page.sendForm)
+    const page = this.page
+    Doc.hide(page.vSendForm, page.sendErr)
+    await this.showForm(page.sendForm)
   }
 
   /*
@@ -624,8 +615,7 @@ export default class WalletsPage extends BasePage {
       return
     }
     if (!app().checkResponse(res)) {
-      page.reconfigErr.textContent = res.msg
-      Doc.show(page.reconfigErr)
+      Doc.showFormError(page.reconfigErr, res.msg)
       return
     }
     this.assetUpdated(assetID, page.reconfigForm, intl.prep(intl.ID_RESCAN_STARTED))
@@ -710,8 +700,7 @@ export default class WalletsPage extends BasePage {
     const res = await postJSON('/api/walletsettings', { assetID })
     loaded()
     if (!app().checkResponse(res)) {
-      page.reconfigErr.textContent = res.msg
-      Doc.show(page.reconfigErr)
+      Doc.showFormError(page.reconfigErr, res.msg)
       return
     }
     const assetHasActiveOrders = app().haveAssetOrders(assetID)
@@ -762,8 +751,7 @@ export default class WalletsPage extends BasePage {
     })
     loaded()
     if (!app().checkResponse(res)) {
-      page.depositErr.textContent = res.msg
-      Doc.show(page.depositErr)
+      Doc.showFormError(page.depositErr, res.msg)
       return
     }
     page.depositAddress.textContent = res.address
@@ -783,19 +771,16 @@ export default class WalletsPage extends BasePage {
       Doc.show(page.toggleSubtract)
     }
 
+    Doc.hide(page.validAddr, page.sendErr, page.maxSendDisplay)
     page.sendAddr.classList.remove('invalid')
-    Doc.hide(page.validAddr)
     page.sendAddr.value = ''
     page.sendAmt.value = ''
-    page.sendErr.textContent = ''
     this.showFiatValue(assetID, 0, page.sendValue)
     page.walletBal.textContent = Doc.formatFullPrecision(wallet.balance.available, ui)
     page.sendLogo.src = Doc.logoPath(symbol)
     page.sendName.textContent = name
     // page.sendFee.textContent = wallet.feerate
     // page.sendUnit.textContent = wallet.units
-
-    Doc.hide(page.maxSendDisplay)
 
     if (wallet.balance.available > 0) {
       const feeReq = {
@@ -804,13 +789,14 @@ export default class WalletsPage extends BasePage {
         value: wallet.balance.available
       }
 
-      const loaded = app().loading(page.sendForm)
+      const loaded = app().loading(this.body)
       const res = await postJSON('/api/txfee', feeReq)
       loaded()
       if (!app().checkResponse(res)) {
-        page.sendErr.textContent = res.msg
-      } else if (res.txfee !== 0) {
+        Doc.showFormError(page.sendErr, res.msg)
+      } else {
         const canSend = wallet.balance.available - res.txfee
+        this.maxSend = canSend
         page.maxSend.textContent = Doc.formatFullPrecision(canSend, ui)
         this.showFiatValue(assetID, canSend, page.maxSendFiat)
         page.maxSendFee.textContent = Doc.formatFullPrecision(res.txfee, ui)
@@ -861,10 +847,8 @@ export default class WalletsPage extends BasePage {
     // Populate send amount with max send value and ensure we don't check
     // subtract checkbox for assets that don't have a withdraw method.
     if ((asset.wallet.traits & traitWithdrawer) === 0) {
-      const maxSend = parseFloat(page.maxSend.textContent || '0')
-      const maxSendAmt = maxSend * asset.unitInfo.conventional.conversionFactor
-      page.sendAmt.value = String(maxSend)
-      this.showFiatValue(asset.id, maxSendAmt, page.sendValue)
+      page.sendAmt.value = String(this.maxSend / asset.unitInfo.conventional.conversionFactor)
+      this.showFiatValue(asset.id, this.maxSend, page.sendValue)
       page.subtractCheckBox.checked = false
     } else {
       const amt = asset.wallet.balance.available
@@ -883,7 +867,7 @@ export default class WalletsPage extends BasePage {
     const pw = page.vSendPw.value || ''
     page.vSendPw.value = ''
     if (pw === '') {
-      page.vSendErr.textContent = intl.prep(intl.ID_NO_PASS_ERROR_MSG)
+      Doc.showFormError(page.vSendErr, intl.prep(intl.ID_NO_PASS_ERROR_MSG))
       return
     }
     const open = {
@@ -897,7 +881,7 @@ export default class WalletsPage extends BasePage {
     const res = await postJSON('/api/send', open)
     loaded()
     if (!app().checkResponse(res)) {
-      page.vSendErr.textContent = res.msg
+      Doc.showFormError(page.vSendErr, res.msg)
       return
     }
     const name = app().assets[assetID].name
@@ -910,8 +894,7 @@ export default class WalletsPage extends BasePage {
     const assetID = this.selectedAssetID
     Doc.hide(page.reconfigErr)
     if (!page.appPW.value && !State.passwordIsCached()) {
-      page.reconfigErr.textContent = intl.prep(intl.ID_NO_APP_PASS_ERROR_MSG)
-      Doc.show(page.reconfigErr)
+      Doc.showFormError(page.reconfigErr, intl.prep(intl.ID_NO_APP_PASS_ERROR_MSG))
       return
     }
 
@@ -933,8 +916,7 @@ export default class WalletsPage extends BasePage {
     page.newPW.value = ''
     loaded()
     if (!app().checkResponse(res)) {
-      page.reconfigErr.textContent = res.msg
-      Doc.show(page.reconfigErr)
+      Doc.showFormError(page.reconfigErr, res.msg)
       return
     }
     this.assetUpdated(assetID, page.reconfigForm, intl.prep(intl.ID_RECONFIG_SUCCESS))
@@ -985,8 +967,7 @@ export default class WalletsPage extends BasePage {
       page.exportWalletPW.value = ''
       this.displayRestoreWalletInfo(res.restorationinfo)
     } else {
-      page.exportWalletErr.textContent = res.msg
-      Doc.show(page.exportWalletErr)
+      Doc.showFormError(page.exportWalletErr, res.msg)
     }
   }
 
@@ -1026,8 +1007,7 @@ export default class WalletsPage extends BasePage {
     } else if (app().checkResponse(res)) {
       this.closePopups()
     } else {
-      page.recoverWalletErr.textContent = res.msg
-      Doc.show(page.recoverWalletErr)
+      Doc.showFormError(page.recoverWalletErr, res.msg)
     }
   }
 
@@ -1044,8 +1024,7 @@ export default class WalletsPage extends BasePage {
     loaded()
     if (app().checkResponse(res)) this.closePopups()
     else {
-      page.confirmForceErr.textContent = res.msg
-      Doc.show(page.confirmForceErr)
+      Doc.showFormError(page.confirmForceErr, res.msg)
     }
   }
 

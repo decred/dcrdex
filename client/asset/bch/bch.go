@@ -184,6 +184,8 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		// https://gist.github.com/markblundeberg/a3aba3c9d610e59c3c49199f697bc38b#making-unmalleable-smart-contracts
 		// https://github.com/bitcoin/bips/blob/master/bip-0062.mediawiki
 		NonSegwitSigner: rawTxInSigner,
+		// Bitcoin Cash don't take a change_type argument in their options
+		// unlike Bitcoin Core.
 		OmitAddressType: true,
 		// Bitcoin Cash uses estimatefee instead of estimatesmartfee, and even
 		// then, they modified it from the old Bitcoin Core estimatefee by

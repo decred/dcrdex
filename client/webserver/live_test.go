@@ -585,10 +585,10 @@ func (c *TCore) EstimateRegistrationTxFee(host string, certI interface{}, assetI
 	return txFee, nil
 }
 func (c *TCore) ValidateAddress(address string, assetID uint32) (bool, error) {
-	return c.validAddr, nil
+	return len(address) > 10, nil
 }
 func (c *TCore) EstimateSendTxFee(addr string, assetID uint32, value uint64, subtract bool) (fee uint64, isValidAddress bool, err error) {
-	return 0, true, nil
+	return uint64(float64(value) * 0.01), len(addr) > 10, nil
 }
 func (c *TCore) Login([]byte) (*core.LoginResult, error) { return &core.LoginResult{}, nil }
 func (c *TCore) IsInitialized() bool                     { return true }

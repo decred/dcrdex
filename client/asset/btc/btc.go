@@ -350,6 +350,8 @@ type BTCCloneCFG struct {
 	TxVersion func() int32
 	// ManualMedianTime causes the median time to be calculated manually.
 	ManualMedianTime bool
+	// OmitRPCOptionsArg is for clones that don't take an options argument.
+	OmitRPCOptionsArg bool
 }
 
 // outPoint is the hash and output index of a transaction output.
@@ -1021,6 +1023,7 @@ func newRPCWallet(requester RawRequesterWithContext, cfg *BTCCloneCFG, parsedCfg
 		numericGetRawTxRPC:       cfg.NumericGetRawRPC,
 		legacyValidateAddressRPC: cfg.LegacyValidateAddressRPC,
 		manualMedianTime:         cfg.ManualMedianTime,
+		omitRPCOptionsArg:        cfg.OmitRPCOptionsArg,
 	}
 	core.requesterV.Store(requester)
 	node := newRPCClient(core)

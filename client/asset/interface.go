@@ -413,7 +413,8 @@ type Wallet interface {
 type TxFeeEstimator interface {
 	// EstimateSendTxFee returns a tx fee estimate for sending or withdrawing
 	// the provided amount using the provided feeRate. This uses actual utxos to
-	// calculate the tx fee where possible.
+	// calculate the tx fee where possible and ensures the wallet has enough to
+	// cover send value and minimum fees.
 	EstimateSendTxFee(address string, value, feeRate uint64, subtract bool) (fee uint64, isValidAddress bool, err error)
 }
 

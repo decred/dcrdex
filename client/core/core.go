@@ -4550,6 +4550,7 @@ func (c *Core) EstimateSendTxFee(address string, assetID uint32, amount uint64, 
 	if amount == 0 {
 		return 0, false, fmt.Errorf("cannot check fee for zero %s", unbip(assetID))
 	}
+
 	wallet, found := c.wallet(assetID)
 	if !found {
 		return 0, false, newError(missingWalletErr, "no wallet found for %s", unbip(assetID))
@@ -4558,13 +4559,16 @@ func (c *Core) EstimateSendTxFee(address string, assetID uint32, amount uint64, 
 	if !wallet.traits.IsTxFeeEstimator() {
 		return 0, false, fmt.Errorf("wallet does not support fee estimation")
 	}
-	if subtract {
-		if !wallet.traits.IsWithdrawer() {
-			return 0, false, fmt.Errorf("wallet does not support checking network fee for withdrawal")
-		}
+
+	if subtract && !wallet.traits.IsWithdrawer() {
+		return 0, false, fmt.Errorf("wallet does not support checking network fee for withdrawal")
+	}
+	estimator, is := wallet.Wallet.(asset.TxFeeEstimator)
+	if !is {
+		return 0, false, fmt.Errorf("wallet does not support fee estimation")
 	}
 
-	return wallet.Wallet.(asset.TxFeeEstimator).EstimateSendTxFee(address, amount, c.feeSuggestionAny(assetID), subtract)
+	return estimator.EstimateSendTxFee(address, amount, c.feeSuggestionAny(assetID), subtract)
 }
 
 func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
