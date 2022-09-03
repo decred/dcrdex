@@ -351,7 +351,7 @@ func Run(t *testing.T, cfg *Config) {
 	confContract := receipts[0].Contract()
 	checkConfs := func(n uint32, expSpent bool) {
 		t.Helper()
-		confs, spent, err := rig.secondWallet.SwapConfirmations(context.Background(), confCoin.ID(), confContract, tStart)
+		confs, spent, err := rig.secondWallet.SwapConfirmations(context.Background(), confCoin.ID(), confContract, tStart, nil)
 		if err != nil {
 			if n > 0 || !errors.Is(err, asset.CoinNotFoundError) {
 				t.Fatalf("error getting %d confs: %v", n, err)
@@ -406,7 +406,7 @@ func Run(t *testing.T, cfg *Config) {
 		if auditCoin.Value() != swapVal {
 			t.Fatalf("wrong contract value. wanted %d, got %d", swapVal, auditCoin.Value())
 		}
-		confs, spent, err := rig.firstWallet.SwapConfirmations(tCtx, receipt.Coin().ID(), receipt.Contract(), tStart)
+		confs, spent, err := rig.firstWallet.SwapConfirmations(tCtx, receipt.Coin().ID(), receipt.Contract(), tStart, nil)
 		if err != nil {
 			t.Fatalf("error getting confirmations: %v", err)
 		}
@@ -460,7 +460,7 @@ func Run(t *testing.T, cfg *Config) {
 		TryFunc: func() wait.TryDirective {
 			ctx, cancel := context.WithTimeout(tCtx, time.Second)
 			defer cancel()
-			_, _, err = rig.secondWallet.FindRedemption(ctx, swapReceipt.Coin().ID(), nil)
+			_, _, err = rig.secondWallet.FindRedemption(ctx, swapReceipt.Coin().ID(), nil, nil)
 			if err != nil {
 				return wait.TryAgain
 			}
@@ -478,7 +478,7 @@ func Run(t *testing.T, cfg *Config) {
 	}
 	// Check that there is 1 confirmation on the swap
 	checkConfs(expConfs, true)
-	_, checkKey, err := rig.secondWallet.FindRedemption(ctx, swapReceipt.Coin().ID(), nil)
+	_, checkKey, err := rig.secondWallet.FindRedemption(ctx, swapReceipt.Coin().ID(), nil, nil)
 	if err != nil {
 		t.Fatalf("error finding confirmed redemption: %v", err)
 	}
@@ -525,7 +525,7 @@ func Run(t *testing.T, cfg *Config) {
 		mine()
 	}
 
-	coinID, err := rig.secondWallet.Refund(swapReceipt.Coin().ID(), swapReceipt.Contract(), 100)
+	coinID, err := rig.secondWallet.Refund(swapReceipt.Coin().ID(), swapReceipt.Contract(), nil, 100)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}

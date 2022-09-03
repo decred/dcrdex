@@ -15,6 +15,7 @@ import (
 	"os"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	v0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"github.com/ethereum/go-ethereum/common"
@@ -228,8 +229,19 @@ func SwapStateFromV0(state *v0.ETHSwapSwap) *SwapState {
 type Initiation struct {
 	LockTime    time.Time
 	SecretHash  [32]byte
+	Initiator   common.Address // v0 only
 	Participant common.Address
 	Value       *big.Int
+	ValueGwei   uint64
+}
+
+func (i *Initiation) Contract() *asset.Contract {
+	return &asset.Contract{
+		Address:    i.Participant.String(),
+		Value:      i.ValueGwei,
+		SecretHash: i.SecretHash[:],
+		LockTime:   uint64(i.LockTime.Unix()),
+	}
 }
 
 // Redemption is the data used to redeem a swap.

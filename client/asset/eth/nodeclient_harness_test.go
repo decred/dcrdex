@@ -88,6 +88,7 @@ const (
 
 var (
 	homeDir                     = os.Getenv("HOME")
+	harnessCtlDir               = filepath.Join(homeDir, "dextest", "eth", "harness-ctl")
 	simnetWalletDir             = filepath.Join(homeDir, "dextest", "eth", "client_rpc_tests", "simnet")
 	participantWalletDir        = filepath.Join(homeDir, "dextest", "eth", "client_rpc_tests", "participant")
 	testnetWalletDir            = filepath.Join(homeDir, "ethtest", "testnet_contract_tests", "walletA")
@@ -117,8 +118,7 @@ var (
 	// secPerBlock is one for simnet, because it takes one second to mine a
 	// block currently. Is set in code to testnetSecPerBlock if runing on
 	// testnet.
-	secPerBlock        = time.Second
-	maxFeeRate  uint64 = 1000 // gwei per gas
+	secPerBlock = time.Second
 )
 
 func newContract(stamp uint64, secretHash [32]byte, val uint64) *asset.Contract {
@@ -314,8 +314,6 @@ func runSimnet(m *testing.M) (int, error) {
 	}
 
 	// Fund the wallets. Can use the simharness package once #1738 is merged.
-	homeDir, _ := os.UserHomeDir()
-	harnessCtlDir := filepath.Join(homeDir, "dextest", "eth", "harness-ctl")
 	send := func(exe, addr, amt string) error {
 		cmd := exec.CommandContext(ctx, exe, addr, amt)
 		cmd.Dir = harnessCtlDir
@@ -634,7 +632,6 @@ func TestContract(t *testing.T) {
 	if !t.Run("testAddressesHaveFunds", testAddressesHaveFundsFn(100_000_000 /* gwei */)) {
 		t.Fatal("not enough funds")
 	}
-	t.Run("testSwap", func(t *testing.T) { testSwap(t, BipID) })
 	t.Run("testInitiate", func(t *testing.T) { testInitiate(t, BipID) })
 	t.Run("testRedeem", func(t *testing.T) { testRedeem(t, BipID) })
 	t.Run("testRefund", func(t *testing.T) { testRefund(t, BipID) })
@@ -647,7 +644,6 @@ func TestGas(t *testing.T) {
 }
 
 func TestTokenContract(t *testing.T) {
-	t.Run("testTokenSwap", func(t *testing.T) { testSwap(t, testTokenID) })
 	t.Run("testInitiateToken", func(t *testing.T) { testInitiate(t, testTokenID) })
 	t.Run("testRedeemToken", func(t *testing.T) { testRedeem(t, testTokenID) })
 	t.Run("testRefundToken", func(t *testing.T) { testRefund(t, testTokenID) })
@@ -858,17 +854,6 @@ func testPendingTransactions(t *testing.T) {
 	spew.Dump(txs)
 }
 
-func testSwap(t *testing.T, assetID uint32) {
-	var secretHash [32]byte
-	copy(secretHash[:], encode.RandomBytes(32))
-	swap, err := simnetContractor.swap(ctx, secretHash)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Should be empty.
-	spew.Dump(swap)
-}
-
 func testSyncProgress(t *testing.T) {
 	spew.Dump(ethClient.syncProgress())
 }
@@ -929,28 +914,28 @@ func feesAtBlk(ctx context.Context, n *nodeClient, blkNum int64) (fees *big.Int,
 
 // initiateOverflow is just like *contractorV0.initiate but sets the first swap
 // value to a max uint256 minus one emv unit.
-func initiateOverflow(c *contractorV0, txOpts *bind.TransactOpts, contracts []*asset.Contract) (*types.Transaction, error) {
-	inits := make([]swapv0.ETHSwapInitiation, 0, len(contracts))
-	secrets := make(map[[32]byte]bool, len(contracts))
+func initiateOverflow(c *contractorV0, txOpts *bind.TransactOpts, details []*dex.SwapContractDetails) (*types.Transaction, error) {
+	inits := make([]swapv0.ETHSwapInitiation, 0, len(details))
+	secrets := make(map[[32]byte]bool, len(details))
 
-	for i, contract := range contracts {
-		if len(contract.SecretHash) != dexeth.SecretHashSize {
-			return nil, fmt.Errorf("wrong secret hash length. wanted %d, got %d", dexeth.SecretHashSize, len(contract.SecretHash))
+	for i, deets := range details {
+		if len(deets.SecretHash) != dexeth.SecretHashSize {
+			return nil, fmt.Errorf("wrong secret hash length. wanted %d, got %d", dexeth.SecretHashSize, len(deets.SecretHash))
 		}
 
 		var secretHash [32]byte
-		copy(secretHash[:], contract.SecretHash)
+		copy(secretHash[:], deets.SecretHash)
 
 		if secrets[secretHash] {
-			return nil, fmt.Errorf("secret hash %s is a duplicate", contract.SecretHash)
+			return nil, fmt.Errorf("secret hash %s is a duplicate", deets.SecretHash)
 		}
 		secrets[secretHash] = true
 
-		if !common.IsHexAddress(contract.Address) {
-			return nil, fmt.Errorf("%q is not an address", contract.Address)
+		if !common.IsHexAddress(deets.To) {
+			return nil, fmt.Errorf("%q is not an address", deets.To)
 		}
 
-		val := c.evmify(contract.Value)
+		val := c.evmify(deets.Value)
 		if i == 0 {
 			val = big.NewInt(2)
 			val.Exp(val, big.NewInt(256), nil)
@@ -958,9 +943,9 @@ func initiateOverflow(c *contractorV0, txOpts *bind.TransactOpts, contracts []*a
 			fmt.Println(val)
 		}
 		inits = append(inits, swapv0.ETHSwapInitiation{
-			RefundTimestamp: big.NewInt(int64(contract.LockTime)),
+			RefundTimestamp: big.NewInt(int64(deets.LockTime)),
 			SecretHash:      secretHash,
-			Participant:     common.HexToAddress(contract.Address),
+			Participant:     common.HexToAddress(deets.To),
 			Value:           val,
 		})
 	}
@@ -977,7 +962,7 @@ func testInitiate(t *testing.T, assetID uint32) {
 
 	sc := simnetContractor
 	balance := func() (*big.Int, error) {
-		return ethClient.addressBalance(ctx, simnetAddr)
+		return ethClient.addressBalance(ctx, ethClient.address())
 	}
 	gases := ethGases
 	if !isETH {
@@ -988,66 +973,68 @@ func testInitiate(t *testing.T, assetID uint32) {
 		gases = tokenGases
 	}
 
+	now := uint64(time.Now().Unix())
+
 	// Create a slice of random secret hashes that can be used in the tests and
 	// make sure none of them have been used yet.
 	numSecretHashes := 10
 	secretHashes := make([][32]byte, numSecretHashes)
 	for i := 0; i < numSecretHashes; i++ {
-		copy(secretHashes[i][:], encode.RandomBytes(32))
-		swap, err := sc.swap(ctx, secretHashes[i])
-		if err != nil {
-			t.Fatal("unable to get swap state")
-		}
-		state := dexeth.SwapStep(swap.State)
-		if state != dexeth.SSNone {
-			t.Fatalf("unexpected swap state: want %s got %s", dexeth.SSNone, state)
+		secretHashes[i] = bytesToArray(encode.RandomBytes(32))
+	}
+
+	newDetails := func(idx int, v uint64) *dex.SwapContractDetails {
+		return &dex.SwapContractDetails{
+			From:       ethClient.address().String(),
+			To:         participantEthClient.address().String(),
+			LockTime:   now,
+			SecretHash: secretHashes[idx][:],
+			Value:      v,
 		}
 	}
 
-	now := uint64(time.Now().Unix())
-
 	tests := []struct {
 		name              string
-		swaps             []*asset.Contract
+		swaps             []*dex.SwapContractDetails
 		success, overflow bool
 		swapErr           bool
 	}{
 		{
 			name:    "1 swap ok",
 			success: true,
-			swaps: []*asset.Contract{
-				newContract(now, secretHashes[0], 2),
+			swaps: []*dex.SwapContractDetails{
+				newDetails(0, 2),
 			},
 		},
 		{
 			name:    "1 swap with existing hash",
 			success: false,
-			swaps: []*asset.Contract{
-				newContract(now, secretHashes[0], 1),
+			swaps: []*dex.SwapContractDetails{
+				newDetails(0, 1),
 			},
 		},
 		{
 			name:    "2 swaps ok",
 			success: true,
-			swaps: []*asset.Contract{
-				newContract(now, secretHashes[1], 1),
-				newContract(now, secretHashes[2], 1),
+			swaps: []*dex.SwapContractDetails{
+				newDetails(1, 1),
+				newDetails(2, 1),
 			},
 		},
 		{
 			name:    "2 swaps repeated hash",
 			success: false,
-			swaps: []*asset.Contract{
-				newContract(now, secretHashes[3], 1),
-				newContract(now, secretHashes[3], 1),
+			swaps: []*dex.SwapContractDetails{
+				newDetails(3, 1),
+				newDetails(3, 1),
 			},
 			swapErr: true,
 		},
 		{
 			name:    "1 swap nil refundtimestamp",
 			success: false,
-			swaps: []*asset.Contract{
-				newContract(0, secretHashes[4], 1),
+			swaps: []*dex.SwapContractDetails{
+				newDetails(4, 1),
 			},
 		},
 		{
@@ -1056,17 +1043,17 @@ func testInitiate(t *testing.T, assetID uint32) {
 			name:     "value addition overflows",
 			success:  false,
 			overflow: true,
-			swaps: []*asset.Contract{
-				newContract(now, secretHashes[5], 0), // Will be set to max uint256 - 1 evm unit
-				newContract(now, secretHashes[6], 3),
+			swaps: []*dex.SwapContractDetails{
+				newDetails(5, 0), // Will be set to max uint256 - 1 evm unit
+				newDetails(6, 3),
 			},
 		},
 		{
 			name:    "swap with 0 value",
 			success: false,
-			swaps: []*asset.Contract{
-				newContract(now, secretHashes[7], 0),
-				newContract(now, secretHashes[8], 1),
+			swaps: []*dex.SwapContractDetails{
+				newDetails(7, 0),
+				newDetails(8, 1),
 			},
 		},
 	}
@@ -1082,11 +1069,11 @@ func testInitiate(t *testing.T, assetID uint32) {
 		var totalVal uint64
 		originalStates := make(map[string]dexeth.SwapStep)
 		for _, tSwap := range test.swaps {
-			swap, err := sc.swap(ctx, bytesToArray(tSwap.SecretHash))
+			step, _, _, err := sc.status(ctx, tSwap)
 			if err != nil {
 				t.Fatalf("%s: swap error: %v", test.name, err)
 			}
-			originalStates[tSwap.SecretHash.String()] = dexeth.SwapStep(swap.State)
+			originalStates[tSwap.SecretHash.String()] = step
 			totalVal += tSwap.Value
 		}
 
@@ -1105,6 +1092,9 @@ func testInitiate(t *testing.T, assetID uint32) {
 
 		expGas := gases.SwapN(len(test.swaps))
 		txOpts, _ := ethClient.txOpts(ctx, optsVal, expGas, dexeth.GweiToWei(maxFeeRate))
+
+		spew.Dump(txOpts)
+
 		var tx *types.Transaction
 		if test.overflow {
 			switch c := sc.(type) {
@@ -1114,7 +1104,12 @@ func testInitiate(t *testing.T, assetID uint32) {
 				tx, err = initiateOverflow(c.contractorV0, txOpts, test.swaps)
 			}
 		} else {
+			b, _ := balance()
+			fmt.Println("--beforeinit", fmtBig(b))
+
 			tx, err = sc.initiate(txOpts, test.swaps)
+
+			spew.Dump(tx)
 		}
 		if err != nil {
 			if test.swapErr {
@@ -1152,6 +1147,7 @@ func testInitiate(t *testing.T, assetID uint32) {
 		if test.success {
 			wantBal.Sub(wantBal, dexeth.GweiToWei(totalVal))
 		}
+
 		bal, err := balance()
 		if err != nil {
 			t.Fatalf("%s: balance error: %v", test.name, err)
@@ -1174,24 +1170,38 @@ func testInitiate(t *testing.T, assetID uint32) {
 
 		diff := new(big.Int).Sub(wantBal, bal)
 		if diff.CmpAbs(new(big.Int)) != 0 {
+
+			fmt.Println("Original balance:", fmtBig(originalBal), ", New balance:", fmtBig(bal),
+				", Balance change:", fmtBig(new(big.Int).Sub(bal, originalBal)),
+				", Tx fees:", fmtBig(txFee), ", Swap val:", fmtBig(dexeth.GweiToWei(totalVal)))
+
+			cmd := exec.CommandContext(ctx, "./mine-alpha", "5")
+			cmd.Dir = harnessCtlDir
+			if err := cmd.Run(); err != nil {
+				t.Fatalf("error mining block after funding wallets")
+			}
+
+			bal, _ := balance()
+
+			fmt.Println("Original balance:", fmtBig(originalBal), ", New balance:", fmtBig(bal),
+				", Balance change:", fmtBig(new(big.Int).Sub(bal, originalBal)))
 			t.Fatalf("%s: unexpected balance change: want %d got %d gwei, diff = %.9f gwei",
 				test.name, dexeth.WeiToGwei(wantBal), dexeth.WeiToGwei(bal), float64(diff.Int64())/dexeth.GweiFactor)
 		}
 
 		for _, tSwap := range test.swaps {
-			swap, err := sc.swap(ctx, bytesToArray(tSwap.SecretHash))
+			step, _, _, err := sc.status(ctx, tSwap)
 			if err != nil {
 				t.Fatalf("%s: swap error post-init: %v", test.name, err)
 			}
 
-			state := dexeth.SwapStep(swap.State)
-			if test.success && state != dexeth.SSInitiated {
-				t.Fatalf("%s: wrong success swap state: want %s got %s", test.name, dexeth.SSInitiated, state)
+			if test.success && step != dexeth.SSInitiated {
+				t.Fatalf("%s: wrong success swap state: want %s got %s", test.name, dexeth.SSInitiated, step)
 			}
 
 			originalState := originalStates[hex.EncodeToString(tSwap.SecretHash[:])]
-			if !test.success && state != originalState {
-				t.Fatalf("%s: wrong error swap state: want %s got %s", test.name, originalState, state)
+			if !test.success && step != originalState {
+				t.Fatalf("%s: wrong error swap state: want %s got %s", test.name, originalState, step)
 			}
 		}
 	}
@@ -1217,9 +1227,19 @@ func testRedeemGas(t *testing.T, assetID uint32) {
 	// Initiate swaps
 	now := uint64(time.Now().Unix())
 
-	swaps := make([]*asset.Contract, 0, numSwaps)
+	newDetails := func(idx int, v uint64) *dex.SwapContractDetails {
+		return &dex.SwapContractDetails{
+			From:       ethClient.address().String(),
+			To:         participantEthClient.address().String(),
+			LockTime:   now,
+			SecretHash: secretHashes[idx][:],
+			Value:      v,
+		}
+	}
+
+	details := make([]*dex.SwapContractDetails, 0, numSwaps)
 	for i := 0; i < numSwaps; i++ {
-		swaps = append(swaps, newContract(now, secretHashes[i], 1))
+		details = append(details, newDetails(i, 1))
 	}
 
 	gases := ethGases
@@ -1233,8 +1253,8 @@ func testRedeemGas(t *testing.T, assetID uint32) {
 		pc = participantTokenContractor
 	}
 
-	txOpts, _ := ethClient.txOpts(ctx, optsVal, gases.SwapN(len(swaps)), dexeth.GweiToWei(maxFeeRate))
-	tx, err := c.initiate(txOpts, swaps)
+	txOpts, _ := ethClient.txOpts(ctx, optsVal, gases.SwapN(len(details)), dexeth.GweiToWei(maxFeeRate))
+	tx, err := c.initiate(txOpts, details)
 	if err != nil {
 		t.Fatalf("Unable to initiate swap: %v ", err)
 	}
@@ -1253,20 +1273,20 @@ func testRedeemGas(t *testing.T, assetID uint32) {
 	}
 
 	// Make sure swaps were properly initiated
-	for i := range swaps {
-		swap, err := c.swap(ctx, bytesToArray(swaps[i].SecretHash))
+	for _, deets := range details {
+		step, _, _, err := c.status(ctx, deets)
 		if err != nil {
 			t.Fatal("unable to get swap state")
 		}
-		if swap.State != dexeth.SSInitiated {
-			t.Fatalf("unexpected swap state: want %s got %s", dexeth.SSInitiated, swap.State)
+		if step != dexeth.SSInitiated {
+			t.Fatalf("unexpected swap state: want %s got %s", dexeth.SSInitiated, step)
 		}
 	}
 
 	// Test gas usage of redeem function
 	var previous uint64
 	for i := 0; i < numSwaps; i++ {
-		gas, err := pc.estimateRedeemGas(ctx, secrets[:i+1])
+		gas, err := pc.estimateRedeemGas(ctx, secrets[:i+1], details[:i+1])
 		if err != nil {
 			t.Fatalf("Error estimating gas for redeem function: %v", err)
 		}
@@ -1314,13 +1334,23 @@ func testRedeem(t *testing.T, assetID uint32) {
 		c, pc = simnetTokenContractor, participantTokenContractor
 	}
 
+	newDetails := func(idx int, v uint64) *dex.SwapContractDetails {
+		return &dex.SwapContractDetails{
+			From:       ethClient.address().String(),
+			To:         participantEthClient.address().String(),
+			LockTime:   lockTime,
+			SecretHash: secretHashes[idx][:],
+			Value:      v,
+		}
+	}
+
 	tests := []struct {
 		name               string
 		sleepNBlocks       int
 		redeemerClient     *nodeClient
 		redeemer           *accounts.Account
 		redeemerContractor contractor
-		swaps              []*asset.Contract
+		swaps              []*dex.SwapContractDetails
 		redemptions        []*asset.Redemption
 		isRedeemable       []bool
 		finalStates        []dexeth.SwapStep
@@ -1333,7 +1363,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			redeemerClient:     participantEthClient,
 			redeemer:           participantAcct,
 			redeemerContractor: pc,
-			swaps:              []*asset.Contract{newContract(lockTime, secretHashes[0], 1)},
+			swaps:              []*dex.SwapContractDetails{newDetails(0, 1)},
 			redemptions:        []*asset.Redemption{newRedeem(secrets[0], secretHashes[0])},
 			isRedeemable:       []bool{true},
 			finalStates:        []dexeth.SwapStep{dexeth.SSRedeemed},
@@ -1345,9 +1375,9 @@ func testRedeem(t *testing.T, assetID uint32) {
 			redeemerClient:     participantEthClient,
 			redeemer:           participantAcct,
 			redeemerContractor: pc,
-			swaps: []*asset.Contract{
-				newContract(lockTime, secretHashes[1], 1),
-				newContract(lockTime, secretHashes[2], 1),
+			swaps: []*dex.SwapContractDetails{
+				newDetails(1, 1),
+				newDetails(2, 1),
 			},
 			redemptions: []*asset.Redemption{
 				newRedeem(secrets[1], secretHashes[1]),
@@ -1365,7 +1395,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			redeemerClient:     participantEthClient,
 			redeemer:           participantAcct,
 			redeemerContractor: pc,
-			swaps:              []*asset.Contract{newContract(lockTime, secretHashes[3], 1)},
+			swaps:              []*dex.SwapContractDetails{newDetails(3, 1)},
 			redemptions:        []*asset.Redemption{newRedeem(secrets[3], secretHashes[3])},
 			isRedeemable:       []bool{true},
 			finalStates:        []dexeth.SwapStep{dexeth.SSRedeemed},
@@ -1377,7 +1407,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			redeemerClient:     ethClient,
 			redeemer:           simnetAcct,
 			redeemerContractor: c,
-			swaps:              []*asset.Contract{newContract(lockTime, secretHashes[4], 1)},
+			swaps:              []*dex.SwapContractDetails{newDetails(4, 1)},
 			redemptions:        []*asset.Redemption{newRedeem(secrets[4], secretHashes[4])},
 			isRedeemable:       []bool{false},
 			finalStates:        []dexeth.SwapStep{dexeth.SSInitiated},
@@ -1389,7 +1419,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			redeemerClient:     participantEthClient,
 			redeemer:           participantAcct,
 			redeemerContractor: pc,
-			swaps:              []*asset.Contract{newContract(lockTime, secretHashes[5], 1)},
+			swaps:              []*dex.SwapContractDetails{newDetails(5, 1)},
 			redemptions:        []*asset.Redemption{newRedeem(secrets[6], secretHashes[5])},
 			isRedeemable:       []bool{false},
 			finalStates:        []dexeth.SwapStep{dexeth.SSInitiated},
@@ -1402,9 +1432,9 @@ func testRedeem(t *testing.T, assetID uint32) {
 			redeemerClient:     participantEthClient,
 			redeemer:           participantAcct,
 			redeemerContractor: pc,
-			swaps: []*asset.Contract{
-				newContract(lockTime, secretHashes[7], 1),
-				newContract(lockTime, secretHashes[8], 1),
+			swaps: []*dex.SwapContractDetails{
+				newDetails(7, 1),
+				newDetails(8, 1),
 			},
 			redemptions: []*asset.Redemption{
 				newRedeem(secrets[7], secretHashes[7]),
@@ -1421,14 +1451,13 @@ func testRedeem(t *testing.T, assetID uint32) {
 
 	for _, test := range tests {
 		var optsVal uint64
-		for i, contract := range test.swaps {
-			swap, err := c.swap(ctx, bytesToArray(test.swaps[i].SecretHash))
+		for _, contract := range test.swaps {
+			step, _, _, err := c.status(ctx, contract)
 			if err != nil {
 				t.Fatal("unable to get swap state")
 			}
-			state := dexeth.SwapStep(swap.State)
-			if state != dexeth.SSNone {
-				t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, dexeth.SSNone, state)
+			if step != dexeth.SSNone {
+				t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, dexeth.SSNone, step)
 			}
 			if isETH {
 				optsVal += contract.Value
@@ -1467,23 +1496,23 @@ func testRedeem(t *testing.T, assetID uint32) {
 		}
 		fmt.Printf("Gas used for %d inits: %d \n", len(test.swaps), receipt.GasUsed)
 
-		for i := range test.swaps {
-			swap, err := test.redeemerContractor.swap(ctx, bytesToArray(test.swaps[i].SecretHash))
+		for i, contract := range test.swaps {
+			step, _, _, err := test.redeemerContractor.status(ctx, contract)
 			if err != nil {
 				t.Fatal("unable to get swap state")
 			}
-			if swap.State != dexeth.SSInitiated {
-				t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, dexeth.SSInitiated, swap.State)
+			if step != dexeth.SSInitiated {
+				t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, dexeth.SSInitiated, step)
 			}
 
 			expected := test.isRedeemable[i]
 			redemption := test.redemptions[i]
 
-			isRedeemable, err := test.redeemerContractor.isRedeemable(bytesToArray(redemption.Spends.SecretHash), bytesToArray(redemption.Secret))
+			isRedeemable, err := test.redeemerContractor.isRedeemable(bytesToArray(redemption.Spends.SecretHash), contract)
 			if err != nil {
 				t.Fatalf(`test "%v": error calling isRedeemable: %v`, test.name, err)
 			} else if isRedeemable != expected {
-				t.Fatalf(`test "%v": expected isRedeemable to be %v, but got %v. swap = %+v`, test.name, expected, isRedeemable, swap)
+				t.Fatalf(`test "%v": expected isRedeemable to be %v, but got %v. step = %s`, test.name, expected, isRedeemable, step)
 			}
 		}
 
@@ -1580,15 +1609,14 @@ func testRedeem(t *testing.T, assetID uint32) {
 				test.name, dexeth.WeiToGwei(wantBal), dexeth.WeiToGwei(bal), float64(diff.Int64())/dexeth.GweiFactor)
 		}
 
-		for i, redemption := range test.redemptions {
-			swap, err := c.swap(ctx, bytesToArray(redemption.Spends.SecretHash))
+		for i := range test.redemptions {
+			step, _, _, err := c.status(ctx, test.swaps[i])
 			if err != nil {
 				t.Fatalf("unexpected error for test %v: %v", test.name, err)
 			}
-			state := dexeth.SwapStep(swap.State)
-			if state != test.finalStates[i] {
+			if step != test.finalStates[i] {
 				t.Fatalf("unexpected swap state for test %v [%d]: want %s got %s",
-					test.name, i, test.finalStates[i], state)
+					test.name, i, test.finalStates[i], step)
 			}
 		}
 	}
@@ -1617,7 +1645,14 @@ func testRefundGas(t *testing.T, assetID uint32) {
 	lockTime := uint64(time.Now().Unix())
 
 	txOpts, _ := ethClient.txOpts(ctx, optsVal, gases.SwapN(1), nil)
-	_, err := c.initiate(txOpts, []*asset.Contract{newContract(lockTime, secretHash, 1)})
+	deets := &dex.SwapContractDetails{
+		From:       ethClient.address().String(),
+		To:         participantEthClient.address().String(),
+		LockTime:   lockTime,
+		SecretHash: secretHash[:],
+		Value:      1,
+	}
+	_, err := c.initiate(txOpts, []*dex.SwapContractDetails{deets})
 	if err != nil {
 		t.Fatalf("Unable to initiate swap: %v ", err)
 	}
@@ -1625,16 +1660,15 @@ func testRefundGas(t *testing.T, assetID uint32) {
 		t.Fatalf("unexpected error while waiting to mine: %v", err)
 	}
 
-	swap, err := c.swap(ctx, secretHash)
+	step, _, _, err := c.status(ctx, deets)
 	if err != nil {
 		t.Fatal("unable to get swap state")
 	}
-	state := dexeth.SwapStep(swap.State)
-	if state != dexeth.SSInitiated {
-		t.Fatalf("unexpected swap state: want %s got %s", dexeth.SSInitiated, state)
+	if step != dexeth.SSInitiated {
+		t.Fatalf("unexpected swap state: want %s got %s", dexeth.SSInitiated, step)
 	}
 
-	gas, err := c.estimateRefundGas(ctx, secretHash)
+	gas, err := c.estimateRefundGas(ctx, deets)
 	if err != nil {
 		t.Fatalf("Error estimating gas for refund function: %v", err)
 	}
@@ -1727,19 +1761,25 @@ func testRefund(t *testing.T, assetID uint32) {
 		var secret [32]byte
 		copy(secret[:], encode.RandomBytes(32))
 		secretHash := sha256.Sum256(secret[:])
+		inLocktime := uint64(time.Now().Add(test.addTime).Unix())
+		deets := &dex.SwapContractDetails{
+			From:       ethClient.address().String(),
+			To:         participantEthClient.address().String(),
+			LockTime:   inLocktime,
+			SecretHash: secretHash[:],
+			Value:      amt,
+		}
 
-		swap, err := test.refunderContractor.swap(ctx, secretHash)
+		step, _, _, err := test.refunderContractor.status(ctx, deets)
 		if err != nil {
 			t.Fatalf("%s: unable to get swap state pre-init", test.name)
 		}
-		if swap.State != dexeth.SSNone {
-			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, dexeth.SSNone, swap.State)
+		if step != dexeth.SSNone {
+			t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, dexeth.SSNone, step)
 		}
 
-		inLocktime := uint64(time.Now().Add(test.addTime).Unix())
-
 		txOpts, _ := ethClient.txOpts(ctx, optsVal, gases.SwapN(1), nil)
-		_, err = c.initiate(txOpts, []*asset.Contract{newContract(inLocktime, secretHash, amt)})
+		_, err = c.initiate(txOpts, []*dex.SwapContractDetails{deets})
 		if err != nil {
 			t.Fatalf("%s: initiate error: %v ", test.name, err)
 		}
@@ -1774,7 +1814,7 @@ func testRefund(t *testing.T, assetID uint32) {
 			t.Fatalf("%s: balance error: %v", test.name, err)
 		}
 
-		isRefundable, err := test.refunderContractor.isRefundable(secretHash)
+		isRefundable, err := test.refunderContractor.isRefundable(deets)
 		if err != nil {
 			t.Fatalf("%s: isRefundable error %v", test.name, err)
 		}
@@ -1784,7 +1824,7 @@ func testRefund(t *testing.T, assetID uint32) {
 		}
 
 		txOpts, _ = test.refunderClient.txOpts(ctx, 0, gases.Refund, nil)
-		tx, err := test.refunderContractor.refund(txOpts, secretHash)
+		tx, err := test.refunderContractor.refund(txOpts, deets)
 		if err != nil {
 			t.Fatalf("%s: refund error: %v", test.name, err)
 		}
@@ -1855,12 +1895,12 @@ func testRefund(t *testing.T, assetID uint32) {
 				test.name, dexeth.WeiToGwei(wantBal), dexeth.WeiToGwei(bal), dexeth.WeiToGwei(diff))
 		}
 
-		swap, err = test.refunderContractor.swap(ctx, secretHash)
+		step, _, _, err = test.refunderContractor.status(ctx, deets)
 		if err != nil {
 			t.Fatalf("%s: post-refund swap error: %v", test.name, err)
 		}
-		if swap.State != test.finalState {
-			t.Fatalf("%s: wrong swap state: want %s got %s", test.name, test.finalState, swap.State)
+		if step != test.finalState {
+			t.Fatalf("%s: wrong swap state: want %s got %s", test.name, test.finalState, step)
 		}
 	}
 }
@@ -1933,6 +1973,7 @@ func TestReplayAttack(t *testing.T) {
 	}
 
 	var secretHash [32]byte
+	var inLocktime uint64
 	// Make four swaps that should be locked and refundable and one that is
 	// soon refundable.
 	for i := 0; i < 5; i++ {
@@ -1941,10 +1982,17 @@ func TestReplayAttack(t *testing.T) {
 		secretHash = sha256.Sum256(secret[:])
 
 		if i != 4 {
-			inLocktime := uint64(time.Now().Add(time.Hour).Unix())
+			inLocktime = uint64(time.Now().Add(time.Hour).Unix())
+			details := []*dex.SwapContractDetails{{
+				From:       ethClient.address().String(),
+				To:         participantEthClient.address().String(),
+				LockTime:   inLocktime,
+				SecretHash: secretHash[:],
+				Value:      1,
+			}}
 
 			txOpts, _ := ethClient.txOpts(ctx, 1, ethGases.SwapN(1), nil)
-			_, err = simnetContractor.initiate(txOpts, []*asset.Contract{newContract(inLocktime, secretHash, 1)})
+			_, err = simnetContractor.initiate(txOpts, details)
 			if err != nil {
 				t.Fatalf("unable to initiate swap: %v ", err)
 			}
@@ -1958,12 +2006,12 @@ func TestReplayAttack(t *testing.T) {
 		intermediateContractVal, _ := ethClient.addressBalance(ctx, ethSwapContractAddr)
 		t.Logf("intermediate contract value %d", dexeth.WeiToGwei(intermediateContractVal))
 
-		inLocktime := time.Now().Add(-1 * time.Second).Unix()
+		inLocktime = uint64(time.Now().Add(-1 * time.Second).Unix())
 		// Set some variables in the contract used for the exploit. This
 		// will fail (silently) due to require(msg.origin == msg.sender)
 		// in the real contract.
 		txOpts, _ := ethClient.txOpts(ctx, 1, defaultSendGasLimit*5, nil)
-		_, err := reentryContract.SetUsUpTheBomb(txOpts, ethSwapContractAddr, secretHash, big.NewInt(inLocktime), participantAddr)
+		_, err := reentryContract.SetUsUpTheBomb(txOpts, ethSwapContractAddr, secretHash, big.NewInt(int64(inLocktime)), participantAddr)
 		if err != nil {
 			t.Fatalf("unable to set up the bomb: %v", err)
 		}
@@ -2042,13 +2090,18 @@ func TestReplayAttack(t *testing.T) {
 
 	// The exploit failed and status should be SSNone because initiation also
 	// failed.
-	swap, err := simnetContractor.swap(ctx, secretHash)
+	step, _, _, err := simnetContractor.status(ctx, &dex.SwapContractDetails{
+		From:       ethClient.address().String(),
+		To:         participantEthClient.address().String(),
+		LockTime:   inLocktime,
+		SecretHash: secretHash[:],
+		Value:      1,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := dexeth.SwapStep(swap.State)
-	if state != dexeth.SSNone {
-		t.Fatalf("unexpected swap state: want %s got %s", dexeth.SSNone, state)
+	if step != dexeth.SSNone {
+		t.Fatalf("unexpected swap state: want %s got %s", dexeth.SSNone, step)
 	}
 
 	// The contract should hold four more ether because initiation of one
@@ -2221,4 +2274,8 @@ func exportAccountsFromNode(node *node.Node) ([]accounts.Account, error) {
 		return nil, err
 	}
 	return ks.Accounts(), nil
+}
+
+func fmtBig(v *big.Int) string {
+	return fmt.Sprintf("%.9f gwei", float64(new(big.Int).Div(v, big.NewInt(dexeth.GweiFactor)).Int64()))
 }

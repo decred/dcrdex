@@ -2520,12 +2520,8 @@ func (dcr *ExchangeWallet) lookupTxOutput(ctx context.Context, txHash *chainhash
 
 // LocktimeExpired returns true if the specified contract's locktime has
 // expired, making it possible to issue a Refund.
-func (dcr *ExchangeWallet) LocktimeExpired(ctx context.Context, contract dex.Bytes) (bool, time.Time, error) {
-	_, _, locktime, _, err := dexdcr.ExtractSwapDetails(contract, dcr.chainParams)
-	if err != nil {
-		return false, time.Time{}, fmt.Errorf("error extracting contract locktime: %w", err)
-	}
-	contractExpiry := time.Unix(int64(locktime), 0).UTC()
+func (dcr *ExchangeWallet) LocktimeExpired(ctx context.Context, deets *dex.SwapContractDetails) (bool, time.Time, error) {
+	contractExpiry := time.Unix(int64(deets.LockTime), 0).UTC()
 	dcr.tipMtx.RLock()
 	blockHash := dcr.currentTip.hash
 	dcr.tipMtx.RUnlock()
@@ -2542,7 +2538,7 @@ func (dcr *ExchangeWallet) LocktimeExpired(ctx context.Context, contract dex.Byt
 //
 // This method blocks until the redemption is found, an error occurs or the
 // provided context is canceled.
-func (dcr *ExchangeWallet) FindRedemption(ctx context.Context, coinID, _ dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {
+func (dcr *ExchangeWallet) FindRedemption(ctx context.Context, coinID, _ dex.Bytes, _ *dex.SwapContractDetails) (redemptionCoin, secret dex.Bytes, err error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("cannot decode contract coin id: %w", err)
@@ -2906,7 +2902,7 @@ func (dcr *ExchangeWallet) fatalFindRedemptionsError(err error, contractOutpoint
 // wallet does not store it, even though it was known when the init transaction
 // was created. The client should store this information for persistence across
 // sessions.
-func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
+func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes, _ *dex.SwapContractDetails, feeRate uint64) (dex.Bytes, error) {
 	// Caller should provide a non-zero fee rate, so we could just do
 	// dcr.feeRateWithFallback(feeRate), but be permissive for now.
 	if feeRate == 0 {
@@ -3124,7 +3120,7 @@ func (dcr *ExchangeWallet) ValidateSecret(secret, secretHash []byte) bool {
 // cannot see non-wallet transactions until they are mined.
 //
 // If the coin is located, but recognized as spent, no error is returned.
-func (dcr *ExchangeWallet) SwapConfirmations(ctx context.Context, coinID, contract dex.Bytes, matchTime time.Time) (confs uint32, spent bool, err error) {
+func (dcr *ExchangeWallet) SwapConfirmations(ctx context.Context, coinID, contract dex.Bytes, matchTime time.Time, _ *dex.SwapContractDetails) (confs uint32, spent bool, err error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return 0, false, err

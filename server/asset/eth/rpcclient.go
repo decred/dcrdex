@@ -13,6 +13,7 @@ import (
 	"decred.org/dcrdex/dex"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
+	"decred.org/dcrdex/server/asset"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -65,13 +66,13 @@ func (c *rpcclient) connect(ctx context.Context) error {
 	}
 	c.ec = ethclient.NewClient(client)
 
-	netAddrs, found := dexeth.ContractAddresses[ethContractVersion]
+	netAddrs, found := dexeth.ContractAddresses[0]
 	if !found {
-		return fmt.Errorf("no contract address for eth version %d", ethContractVersion)
+		return fmt.Errorf("no contract address for eth version %d", 0)
 	}
 	contractAddr, found := netAddrs[c.net]
 	if !found {
-		return fmt.Errorf("no contract address for eth version %d on %s", ethContractVersion, c.net)
+		return fmt.Errorf("no contract address for eth version %d on %s", 0, c.net)
 	}
 
 	es, err := swapv0.NewETHSwap(contractAddr, c.ec)
@@ -139,13 +140,23 @@ func (c *rpcclient) blockNumber(ctx context.Context) (uint64, error) {
 }
 
 // swap gets a swap keyed by secretHash in the contract.
-func (c *rpcclient) swap(ctx context.Context, assetID uint32, secretHash [32]byte) (state *dexeth.SwapState, err error) {
+func (c *rpcclient) status(ctx context.Context, assetID uint32, contract *asset.Contract) (step dexeth.SwapStep, secret [32]byte, blockNumber uint32, err error) {
+	var secretHash [32]byte
+	copy(secretHash[:], contract.SecretHash)
 	if assetID == BipID {
-		return c.swapContract.Swap(ctx, secretHash)
+		swap, err := c.swapContract.Swap(ctx, secretHash)
+		if err != nil {
+			return 0, secret, 0, err
+		}
+		return swap.State, swap.Secret, uint32(swap.BlockHeight), nil
 	}
-	return state, c.withTokener(assetID, func(tkn *tokener) error {
-		state, err = tkn.Swap(ctx, secretHash)
-		return err
+	return step, secret, blockNumber, c.withTokener(assetID, func(tkn *tokener) error {
+		swap, err := tkn.Swap(ctx, secretHash)
+		if err != nil {
+			return err
+		}
+		step, secret, blockNumber = swap.State, swap.Secret, uint32(swap.BlockHeight)
+		return nil
 	})
 }
 
@@ -153,6 +164,10 @@ func (c *rpcclient) swap(ctx context.Context, assetID uint32, secretHash [32]byt
 // mempool. Errors if tx does not exist.
 func (c *rpcclient) transaction(ctx context.Context, hash common.Hash) (tx *types.Transaction, isMempool bool, err error) {
 	return c.ec.TransactionByHash(ctx, hash)
+}
+
+func (c *rpcclient) receipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
+	return c.ec.TransactionReceipt(ctx, txHash)
 }
 
 // accountBalance gets the account balance, including the effects of known

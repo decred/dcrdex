@@ -3399,12 +3399,8 @@ func (btc *baseWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroad
 
 // LocktimeExpired returns true if the specified contract's locktime has
 // expired, making it possible to issue a Refund.
-func (btc *baseWallet) LocktimeExpired(_ context.Context, contract dex.Bytes) (bool, time.Time, error) {
-	_, _, locktime, _, err := dexbtc.ExtractSwapDetails(contract, btc.segwit, btc.chainParams)
-	if err != nil {
-		return false, time.Time{}, fmt.Errorf("error extracting contract locktime: %w", err)
-	}
-	contractExpiry := time.Unix(int64(locktime), 0).UTC()
+func (btc *baseWallet) LocktimeExpired(_ context.Context, deets *dex.SwapContractDetails) (bool, time.Time, error) {
+	contractExpiry := time.Unix(int64(deets.LockTime), 0).UTC()
 	medianTime, err := btc.node.medianTime() // TODO: pass ctx
 	if err != nil {
 		return false, time.Time{}, fmt.Errorf("error getting median time: %w", err)
@@ -3418,7 +3414,7 @@ func (btc *baseWallet) LocktimeExpired(_ context.Context, contract dex.Bytes) (b
 //
 // This method blocks until the redemption is found, an error occurs or the
 // provided context is canceled.
-func (btc *intermediaryWallet) FindRedemption(ctx context.Context, coinID, _ dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {
+func (btc *intermediaryWallet) FindRedemption(ctx context.Context, coinID, _ dex.Bytes, _ *dex.SwapContractDetails) (redemptionCoin, secret dex.Bytes, err error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("cannot decode contract coin id: %w", err)
@@ -3656,7 +3652,7 @@ func (btc *intermediaryWallet) tryRedemptionRequests(ctx context.Context, startB
 // wallet does not store it, even though it was known when the init transaction
 // was created. The client should store this information for persistence across
 // sessions.
-func (btc *baseWallet) Refund(coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error) {
+func (btc *baseWallet) Refund(coinID, contract dex.Bytes, _ *dex.SwapContractDetails, feeRate uint64) (dex.Bytes, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
@@ -3890,7 +3886,7 @@ func (btc *baseWallet) send(address string, val uint64, feeRate uint64, subtract
 // SwapConfirmations gets the number of confirmations for the specified swap
 // by first checking for a unspent output, and if not found, searching indexed
 // wallet transactions.
-func (btc *baseWallet) SwapConfirmations(_ context.Context, id dex.Bytes, contract dex.Bytes, startTime time.Time) (uint32, bool, error) {
+func (btc *baseWallet) SwapConfirmations(_ context.Context, id dex.Bytes, contract dex.Bytes, startTime time.Time, _ *dex.SwapContractDetails) (uint32, bool, error) {
 	txHash, vout, err := decodeCoinID(id)
 	if err != nil {
 		return 0, false, err

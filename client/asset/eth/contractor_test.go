@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
@@ -60,17 +61,18 @@ func TestInitV0(t *testing.T) {
 	const gweiVal = 123456
 	const lockTime = 100_000_000
 
-	contract := &asset.Contract{
+	deets := &dex.SwapContractDetails{
 		SecretHash: secretHashB,
-		Address:    addrStr,
+		To:         addrStr,
+		From:       addrStr,
 		Value:      gweiVal,
 		LockTime:   lockTime,
 	}
 
-	contracts := []*asset.Contract{contract}
+	details := []*dex.SwapContractDetails{deets}
 
 	checkResult := func(tag string, wantErr bool) {
-		_, err := c.initiate(nil, contracts)
+		_, err := c.initiate(nil, details)
 		if (err != nil) != wantErr {
 			t.Fatal(tag)
 		}
@@ -96,29 +98,29 @@ func TestInitV0(t *testing.T) {
 	}
 
 	// wrong secret hash size
-	contract.SecretHash = encode.RandomBytes(20)
+	deets.SecretHash = encode.RandomBytes(20)
 	checkResult("bad hash", true)
-	contract.SecretHash = encode.RandomBytes(32)
+	deets.SecretHash = encode.RandomBytes(32)
 
 	// dupe hash
-	contracts = []*asset.Contract{contract, contract}
+	details = []*dex.SwapContractDetails{deets, deets}
 	checkResult("dupe hash", true)
 
 	// ok with two
-	contract2 := *contract
-	contract2.SecretHash = encode.RandomBytes(32)
-	contracts = []*asset.Contract{contract, &contract2}
+	deets2 := *deets
+	deets2.SecretHash = encode.RandomBytes(32)
+	details = []*dex.SwapContractDetails{deets, &deets2}
 	checkResult("ok two", false)
-	contracts = []*asset.Contract{contract}
+	details = []*dex.SwapContractDetails{deets}
 
 	if len(abiContract.lastInits) != 2 {
 		t.Fatalf("two contracts weren't passed")
 	}
 
 	// bad address
-	contract.Address = "badaddress"
+	deets.To = "badaddress"
 	checkResult("bad address", true)
-	contract.Address = addrStr
+	deets.To = addrStr
 
 	// Initiate error
 	abiContract.initErr = fmt.Errorf("test error")
@@ -220,36 +222,36 @@ func TestSwapV0(t *testing.T) {
 
 	// error path
 	abiContract.swapErr = fmt.Errorf("test error")
-	_, err := c.swap(nil, [32]byte{})
+	_, _, _, err := c.status(nil, &dex.SwapContractDetails{})
 	if err == nil {
 		t.Fatalf("swap error not transmitted")
 	}
 	abiContract.swapErr = nil
 
-	swap, err := c.swap(nil, [32]byte{})
+	step, secret, blockNumber, err := c.status(nil, &dex.SwapContractDetails{})
 	if err != nil {
 		t.Fatalf("swap error: %v", err)
 	}
 
-	if swap.Secret != secret {
+	if secret != secret {
 		t.Fatalf("wrong secret")
 	}
-	if dexeth.WeiToGwei(swap.Value) != valGwei {
-		t.Fatalf("wrong value")
-	}
-	if swap.BlockHeight != blockNum {
+	// if dexeth.WeiToGwei(swap.Value) != valGwei {
+	// 	t.Fatalf("wrong value")
+	// }
+	if blockNumber != blockNum {
 		t.Fatalf("wrong block height")
 	}
-	if swap.LockTime.Unix() != stamp {
-		t.Fatalf("wrong lock time")
-	}
-	if swap.Initiator != initiator {
-		t.Fatalf("initiator not transmitted")
-	}
-	if swap.Participant != participant {
-		t.Fatalf("participant not transmitted")
-	}
-	if swap.State != state {
+	// if swap.LockTime.Unix() != stamp {
+	// 	t.Fatalf("wrong lock time")
+	// }
+	// if swap.Initiator != initiator {
+	// 	t.Fatalf("initiator not transmitted")
+	// }
+	// if swap.Participant != participant {
+	// 	t.Fatalf("participant not transmitted")
+	// }
+	if step != state {
 		t.Fatalf("state not transmitted")
 	}
 }

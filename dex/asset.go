@@ -174,3 +174,17 @@ func IntDivUp(val, div int64) int64 {
 	return q
 	// return (val + div - 1) / div
 }
+
+// SwapContractDetails is critical information for one side of a trade.
+type SwapContractDetails struct {
+	// From is the sending address.
+	From string
+	// To is the receiving address.
+	To string
+	// Value is the amount being traded.
+	Value uint64
+	// SecretHash is the hash of the secret key.
+	SecretHash Bytes
+	// LockTime is the contract lock time in UNIX seconds.
+	LockTime uint64
+}

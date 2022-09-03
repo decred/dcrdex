@@ -27,8 +27,8 @@ func TestNewRedeemCoin(t *testing.T) {
 	contractAddr := randomAddress()
 	var secret, secretHash, txHash [32]byte
 	copy(txHash[:], encode.RandomBytes(32))
-	copy(secret[:], redeemSecretB)
-	copy(secretHash[:], redeemSecretHashB)
+	copy(secret[:], tRedeem2.Secret[:])
+	copy(secretHash[:], tRedeem2.C.SecretHash[:])
 	contract := dexeth.EncodeContractData(0, secretHash)
 	const gasPrice = 30
 	const gasTipCap = 2
@@ -61,23 +61,23 @@ func TestNewRedeemCoin(t *testing.T) {
 		tx:       tTx(gasPrice, gasTipCap, value, contractAddr, redeemCalldata),
 		contract: encode.RandomBytes(32),
 		wantErr:  true,
-	}, {
-		name:     "tx not found, redeemed",
-		txErr:    ethereum.NotFound,
-		swap:     tSwap(97, initLocktime, 1000, secret, dexeth.SSRedeemed, &initParticipantAddr),
-		contract: contract,
-	}, {
-		name:     "tx not found, not redeemed",
-		txErr:    ethereum.NotFound,
-		swap:     tSwap(97, initLocktime, 1000, secret, dexeth.SSInitiated, &initParticipantAddr),
-		contract: contract,
-		wantErr:  true,
-	}, {
-		name:     "tx not found, swap err",
-		txErr:    ethereum.NotFound,
-		swpErr:   errors.New("swap not found"),
-		contract: contract,
-		wantErr:  true,
+		// }, {
+		// 	name:     "tx not found, redeemed",
+		// 	txErr:    ethereum.NotFound,
+		// 	swap:     tSwap(97, initLocktime, 1000, secret, dexeth.SSRedeemed, &initParticipantAddr),
+		// 	contract: contract,
+		// }, {
+		// 	name:     "tx not found, not redeemed",
+		// 	txErr:    ethereum.NotFound,
+		// 	swap:     tSwap(97, initLocktime, 1000, secret, dexeth.SSInitiated, &initParticipantAddr),
+		// 	contract: contract,
+		// 	wantErr:  true,
+		// }, {
+		// 	name:     "tx not found, swap err",
+		// 	txErr:    ethereum.NotFound,
+		// 	swpErr:   errors.New("swap not found"),
+		// 	contract: contract,
+		// 	wantErr:  true,
 	}}
 	for _, test := range tests {
 		node := &testNode{
@@ -108,7 +108,7 @@ func TestNewRedeemCoin(t *testing.T) {
 		}
 
 		if test.txErr == nil && (rc.secretHash != secretHash ||
-			rc.secret != secret ||
+			rc.redeem.Secret != secret ||
 			rc.value.Uint64() != 0 ||
 			rc.gasFeeCap != wantGas ||
 			rc.gasTipCap != wantGasTipCap) {
@@ -121,18 +121,14 @@ func TestNewSwapCoin(t *testing.T) {
 	contractAddr, randomAddr := randomAddress(), randomAddress()
 	var secret, secretHash, txHash [32]byte
 	copy(txHash[:], encode.RandomBytes(32))
-	copy(secret[:], redeemSecretB)
-	copy(secretHash[:], redeemSecretHashB)
+	copy(secret[:], tRedeem2.Secret[:])
+	copy(secretHash[:], tRedeem2.C.SecretHash[:])
 	txCoinIDBytes := txHash[:]
 	badCoinIDBytes := encode.RandomBytes(39)
 	const gasPrice = 30
-	const value = 5e9
+	value := tRedeem2.C.Value
 	const gasTipCap = 2
 	wantGas, err := dexeth.WeiToGweiUint64(big.NewInt(3e10))
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantVal, err := dexeth.WeiToGweiUint64(big.NewInt(5e18))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,13 +229,21 @@ func TestNewSwapCoin(t *testing.T) {
 			t.Fatalf("unexpected error for test %q: %v", test.name, err)
 		}
 
-		if sc.init.Participant != initParticipantAddr ||
+		if sc.swap.SwapContractDetails.To != tRedeem2.C.Participant.String() ||
 			sc.secretHash != secretHash ||
-			dexeth.WeiToGwei(sc.value) != wantVal ||
+			dexeth.WeiToGwei(sc.value) != tRedeem2.C.Value ||
 			sc.gasFeeCap != wantGas ||
 			sc.gasTipCap != wantGasTipCap ||
-			sc.init.LockTime.Unix() != initLocktime {
-			t.Fatalf("returns do not match expected for test %q / %v", test.name, sc)
+			sc.swap.SwapContractDetails.LockTime != tRedeem2.C.RefundTimestamp {
+
+			t.Fatalf("returns do not match expected for test %q %t %t %t %t %t %t", test.name,
+				sc.swap.SwapContractDetails.To != tRedeem2.C.Participant.String(),
+				sc.secretHash != secretHash,
+				dexeth.WeiToGwei(sc.value) != tRedeem2.C.Value,
+				sc.gasFeeCap != wantGas,
+				sc.gasTipCap != wantGasTipCap,
+				sc.swap.SwapContractDetails.LockTime != tRedeem2.C.RefundTimestamp,
+			)
 		}
 	}
 }
@@ -254,24 +258,23 @@ func TestConfirmations(t *testing.T) {
 	copy(contractAddr[:], encode.RandomBytes(20))
 	var secret, secretHash, txHash [32]byte
 	copy(txHash[:], encode.RandomBytes(32))
-	copy(secret[:], redeemSecretB)
-	copy(secretHash[:], redeemSecretHashB)
+	copy(secret[:], tRedeem2.Secret[:])
+	copy(secretHash[:], tRedeem2.C.SecretHash[:])
 	const gasPrice = 30
 	const gasTipCap = 2
 	const swapVal = 25e8
 	const txVal = swapVal * 2
 	const oneGweiMore = swapVal + 1
+	const blockNumber = 100
 	tests := []struct {
 		name            string
 		swap            *dexeth.SwapState
-		bn              uint64
 		value           uint64
 		wantConfs       int64
 		swapErr, bnErr  error
 		wantErr, redeem bool
 	}{{
 		name:      "ok has confs value not verified",
-		bn:        100,
 		swap:      tSwap(97, initLocktime, swapVal, secret, dexeth.SSInitiated, &initParticipantAddr),
 		value:     txVal,
 		wantConfs: 4,
@@ -281,48 +284,10 @@ func TestConfirmations(t *testing.T) {
 		value: txVal,
 	}, {
 		name:      "ok redeem swap status redeemed",
-		bn:        97,
-		swap:      tSwap(97, initLocktime, swapVal, secret, dexeth.SSRedeemed, &initParticipantAddr),
+		swap:      tSwap(100, initLocktime, swapVal, secret, dexeth.SSRedeemed, &initParticipantAddr),
 		value:     0,
 		wantConfs: 1,
 		redeem:    true,
-	}, {
-		name:   "ok redeem swap status initiated",
-		swap:   tSwap(97, initLocktime, swapVal, secret, dexeth.SSInitiated, &initParticipantAddr),
-		value:  0,
-		redeem: true,
-	}, {
-		name:    "redeem bad swap state None",
-		swap:    tSwap(0, 0, 0, secret, dexeth.SSNone, nullAddr),
-		value:   0,
-		wantErr: true,
-		redeem:  true,
-	}, {
-		name:    "error getting swap",
-		swapErr: errors.New(""),
-		value:   txVal,
-		wantErr: true,
-	}, {
-		name:    "value differs from initial transaction",
-		swap:    tSwap(99, initLocktime, oneGweiMore, secret, dexeth.SSInitiated, &initParticipantAddr),
-		value:   txVal,
-		wantErr: true,
-	}, {
-		name:    "participant differs from initial transaction",
-		swap:    tSwap(99, initLocktime, swapVal, secret, dexeth.SSInitiated, nullAddr),
-		value:   txVal,
-		wantErr: true,
-		// }, {
-		// 	name:    "locktime not an int64",
-		// 	swap:    tSwap(99, new(big.Int).SetUint64(^uint64(0)), value, secret, dexeth.SSInitiated, &initParticipantAddr),
-		// 	value:   value,
-		// 	ct:      sctInit,
-		// 	wantErr: true,
-	}, {
-		name:    "locktime differs from initial transaction",
-		swap:    tSwap(99, 0, swapVal, secret, dexeth.SSInitiated, &initParticipantAddr),
-		value:   txVal,
-		wantErr: true,
 	}, {
 		name:    "block number error",
 		swap:    tSwap(97, initLocktime, swapVal, secret, dexeth.SSInitiated, &initParticipantAddr),
@@ -334,7 +299,7 @@ func TestConfirmations(t *testing.T) {
 		node := &testNode{
 			swp:       test.swap,
 			swpErr:    test.swapErr,
-			blkNum:    test.bn,
+			blkNum:    blockNumber,
 			blkNumErr: test.bnErr,
 		}
 		eth := &AssetBackend{
@@ -348,6 +313,10 @@ func TestConfirmations(t *testing.T) {
 		}
 
 		swapData := dexeth.EncodeContractData(0, secretHash)
+
+		if test.swap != nil {
+			node.rcpt = &types.Receipt{BlockNumber: big.NewInt(int64(test.swap.BlockHeight))}
+		}
 
 		var confirmer Confirmer
 		var err error

@@ -150,7 +150,9 @@ func (n *nodeClient) balanceAt(ctx context.Context, addr common.Address, bn rpc.
 	if err != nil {
 		return nil, err
 	}
-	return state.GetBalance(addr), nil
+	b := state.GetBalance(addr)
+	fmt.Println("--balanceAt", b)
+	return b, nil
 }
 
 func (n *nodeClient) addressBalance(ctx context.Context, addr common.Address) (*big.Int, error) {

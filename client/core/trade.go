@@ -177,6 +177,52 @@ func (m *matchTracker) token() string {
 	return hex.EncodeToString(m.MatchID[:4])
 }
 
+func (t *trackedTrade) theirContract(m *matchTracker) *dex.SwapContractDetails {
+	value := m.Quantity
+	if m.trade.Sell {
+		value = calc.BaseToQuote(m.Rate, m.Quantity)
+	}
+
+	matchTime := m.matchTime()
+	lockTime := matchTime.Add(t.lockTimeMaker).UTC().Unix()
+	if m.Side == order.Maker {
+		lockTime = matchTime.Add(t.lockTimeTaker).UTC().Unix()
+	}
+
+	from, to := m.Address, t.Trade().Address
+
+	return &dex.SwapContractDetails{
+		From:       from,
+		To:         to,
+		Value:      value,
+		SecretHash: m.MetaData.Proof.SecretHash,
+		LockTime:   uint64(lockTime),
+	}
+}
+
+func (t *trackedTrade) ourContract(m *matchTracker) *dex.SwapContractDetails {
+	value := m.Quantity
+	if !m.trade.Sell {
+		value = calc.BaseToQuote(m.Rate, m.Quantity)
+	}
+
+	matchTime := m.matchTime()
+	lockTime := matchTime.Add(t.lockTimeTaker).UTC().Unix()
+	if m.Side == order.Maker {
+		lockTime = matchTime.Add(t.lockTimeMaker).UTC().Unix()
+	}
+
+	from, to := t.Trade().Address, m.Address
+
+	return &dex.SwapContractDetails{
+		From:       from,
+		To:         to,
+		Value:      value,
+		SecretHash: m.MetaData.Proof.SecretHash,
+		LockTime:   uint64(lockTime),
+	}
+}
+
 // trackedCancel is information necessary to track a cancel order. A
 // trackedCancel is always associated with a trackedTrade.
 type trackedCancel struct {
@@ -985,7 +1031,7 @@ func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTra
 	wallet := t.wallets.toWallet
 	coin := match.counterSwap.Coin
 
-	_, lockTime, err := wallet.LocktimeExpired(ctx, match.MetaData.Proof.CounterContract)
+	_, lockTime, err := wallet.LocktimeExpired(ctx, t.theirContract(match))
 	if err != nil {
 		return fail(fmt.Errorf("error checking if locktime has expired on taker's contract on order %s, "+
 			"match %s: %w", t.ID(), match, err))
@@ -993,7 +1039,7 @@ func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTra
 	expired = time.Until(lockTime) < 0 // not necessarily refundable, but can be at any moment
 
 	have, spent, err = wallet.swapConfirmations(ctx, coin.ID(),
-		match.MetaData.Proof.CounterContract, match.MetaData.Stamp)
+		match.MetaData.Proof.CounterContract, match.MetaData.Stamp, t.theirContract(match))
 	if err != nil {
 		return fail(fmt.Errorf("failed to get confirmations of the counter-party's swap %s (%s) "+
 			"for match %s, order %v: %w",
@@ -1251,7 +1297,7 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) (re
 
 		// If we're the maker, check the confirmations anyway so we can notify.
 		confs, spent, err := wallet.swapConfirmations(ctx, match.MetaData.Proof.MakerSwap,
-			match.MetaData.Proof.ContractData, match.MetaData.Stamp)
+			match.MetaData.Proof.ContractData, match.MetaData.Stamp, t.ourContract(match))
 		if err != nil && !errors.Is(err, asset.ErrSwapNotInitiated) {
 			// No need to log an error if swap not initiated as this
 			// is expected for newly made swaps involving contracts.
@@ -1352,7 +1398,7 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) (r
 
 		// If we're the taker, check the confirmations anyway so we can notify.
 		confs, spent, err := t.wallets.fromWallet.swapConfirmations(ctx, match.MetaData.Proof.TakerSwap,
-			match.MetaData.Proof.ContractData, match.MetaData.Stamp)
+			match.MetaData.Proof.ContractData, match.MetaData.Stamp, t.ourContract(match))
 		if err != nil && !errors.Is(err, asset.ErrSwapNotInitiated) {
 			// No need to log an error if swap not initiated as this
 			// is expected for newly made swaps involving contracts.
@@ -1409,7 +1455,7 @@ func (t *trackedTrade) isRefundable(ctx context.Context, match *matchTracker) bo
 	}
 
 	// Issue a refund if our swap's locktime has expired.
-	swapLocktimeExpired, contractExpiry, err := wallet.LocktimeExpired(ctx, match.MetaData.Proof.ContractData)
+	swapLocktimeExpired, contractExpiry, err := wallet.LocktimeExpired(ctx, t.ourContract(match))
 	if err != nil {
 		if !errors.Is(err, asset.ErrSwapNotInitiated) {
 			// No need to log an error as this is expected for newly
@@ -1476,7 +1522,7 @@ func (t *trackedTrade) shouldBeginFindRedemption(ctx context.Context, match *mat
 		return false
 	}
 
-	confs, spent, err := t.wallets.fromWallet.swapConfirmations(ctx, swapCoinID, proof.ContractData, match.MetaData.Stamp)
+	confs, spent, err := t.wallets.fromWallet.swapConfirmations(ctx, swapCoinID, proof.ContractData, match.MetaData.Stamp, t.ourContract(match))
 	if err != nil {
 		if !errors.Is(err, asset.ErrSwapNotInitiated) {
 			// No need to log an error if swap not initiated as this
@@ -1945,7 +1991,6 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 			match.MetaData.Proof.Secret = encode.RandomBytes(32)
 			secretHash := sha256.Sum256(match.MetaData.Proof.Secret)
 			match.MetaData.Proof.SecretHash = secretHash[:]
-			lockTime = matchTime.Add(t.lockTimeMaker).UTC().Unix()
 		}
 
 		contracts[i] = &asset.Contract{
@@ -2530,8 +2575,9 @@ func (t *trackedTrade) confirmRedemption(match *matchTracker) {
 	match.confirmRedemptionNumTries++
 
 	redemptionStatus, err := confirmer.ConfirmRedemption(dex.Bytes(redeemCoinID), &asset.Redemption{
-		Spends: match.counterSwap,
-		Secret: match.MetaData.Proof.Secret,
+		Spends:      match.counterSwap,
+		SwapDetails: t.theirContract(match),
+		Secret:      match.MetaData.Proof.Secret,
 	})
 	if errors.Is(asset.ErrSwapRefunded, err) {
 		subject, details := t.formatDetails(TopicSwapRefunded, match.token(), t.token())
@@ -2612,7 +2658,7 @@ func (t *trackedTrade) findMakersRedemption(ctx context.Context, match *matchTra
 	// Run redemption finder in goroutine.
 	go func() {
 		defer cancel() // don't leak the context when we reset match.cancelRedemptionSearch
-		redemptionCoinID, secret, err := t.wallets.fromWallet.FindRedemption(ctx, swapCoinID, swapContract)
+		redemptionCoinID, secret, err := t.wallets.fromWallet.FindRedemption(ctx, swapCoinID, swapContract, t.theirContract(match))
 
 		// Redemption search done, with or without error.
 		// Keep the mutex locked for the remainder of this goroutine execution to
@@ -2721,7 +2767,7 @@ func (c *Core) refundMatches(t *trackedTrade, matches []*matchTracker) (uint64, 
 			feeRate = c.feeSuggestionAny(refundAsset.ID) // includes wallet itself
 		}
 
-		refundCoin, err := refundWallet.Refund(swapCoinID, contractToRefund, feeRate)
+		refundCoin, err := refundWallet.Refund(swapCoinID, contractToRefund, t.ourContract(match), feeRate)
 		if err != nil {
 			// CRITICAL - Refund must indicate if the swap is spent (i.e.
 			// redeemed already) so that as taker we will start the

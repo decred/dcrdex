@@ -77,3 +77,16 @@ if [ "$VERSION" -eq "0" ]; then
   # Reorder the imports since we rewrote go-ethereum/event to a dcrdex package.
   gofmt -s -w "$CONTRACT_FILE"
 fi
+
+if [ "$VERSION" -eq "1" ]; then
+  perl -0pi -e 's/go-ethereum\/event"/go-ethereum\/event"\n\tethv1 "decred.org\/dcrdex\/dex\/networks\/eth\/contracts\/v1"/' $CONTRACT_FILE
+
+  perl -0pi -e 's/\/\/ ERC20SwapContract[^}]*}\n\n//' $CONTRACT_FILE
+  perl -0pi -e 's/ERC20SwapContract/ethv1.ETHSwapContract/g' $CONTRACT_FILE
+
+  perl -0pi -e 's/\/\/ ERC20SwapRedemption[^}]*}\n\n//' $CONTRACT_FILE
+  perl -0pi -e 's/ERC20SwapRedemption/ethv1.ETHSwapRedemption/g' $CONTRACT_FILE
+
+  perl -0pi -e 's/\/\/ ERC20SwapRecord[^}]*}\n\n//' $CONTRACT_FILE
+  perl -0pi -e 's/ERC20SwapRecord/ethv1.ETHSwapRecord/g' $CONTRACT_FILE
+fi

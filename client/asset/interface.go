@@ -325,7 +325,7 @@ type Wallet interface {
 	// contract can be refunded since assets have different rules to satisfy the
 	// lock. For example, in Bitcoin the median of the last 11 blocks must be
 	// past the expiry time, not the current time.
-	LocktimeExpired(ctx context.Context, contract dex.Bytes) (bool, time.Time, error)
+	LocktimeExpired(ctx context.Context, deets *dex.SwapContractDetails) (bool, time.Time, error)
 	// FindRedemption watches for the input that spends the specified
 	// coin and contract, and returns the spending input and the
 	// secret key when it finds a spender.
@@ -342,7 +342,7 @@ type Wallet interface {
 	// NOTE: This could potentially be a long and expensive operation if
 	// performed long after the swap is broadcast; might be better executed from
 	// a goroutine.
-	FindRedemption(ctx context.Context, coinID, contract dex.Bytes) (redemptionCoin, secret dex.Bytes, err error)
+	FindRedemption(ctx context.Context, coinID, contractData dex.Bytes, deets *dex.SwapContractDetails) (redemptionCoin, secret dex.Bytes, err error)
 	// Refund refunds a contract. This can only be used after the time lock has
 	// expired AND if the contract has not been redeemed/refunded. This method
 	// MUST return an asset.CoinNotFoundError error if the swap is already
@@ -351,7 +351,7 @@ type Wallet interface {
 	// the unspent coin info as the wallet does not store it, even though it was
 	// known when the init transaction was created. The client should store this
 	// information for persistence across sessions.
-	Refund(coinID, contract dex.Bytes, feeRate uint64) (dex.Bytes, error)
+	Refund(coinID, contractData dex.Bytes, deets *dex.SwapContractDetails, feeRate uint64) (dex.Bytes, error)
 	// DepositAddress returns an address for depositing funds into the exchange
 	// wallet.
 	DepositAddress() (string, error)
@@ -378,7 +378,7 @@ type Wallet interface {
 	// be accurate.
 	// The contract and matchTime are provided so that wallets may search for
 	// the coin using light filters.
-	SwapConfirmations(ctx context.Context, coinID dex.Bytes, contract dex.Bytes, matchTime time.Time) (confs uint32, spent bool, err error)
+	SwapConfirmations(ctx context.Context, coinID dex.Bytes, contract dex.Bytes, matchTime time.Time, deets *dex.SwapContractDetails) (confs uint32, spent bool, err error)
 	// ValidateSecret checks that the secret hashes to the secret hash.
 	ValidateSecret(secret, secretHash []byte) bool
 	// SyncStatus is information about the blockchain sync status. It should
@@ -686,7 +686,7 @@ type Swaps struct {
 
 // Contract is a swap contract.
 type Contract struct {
-	// Address is the receiving address.
+	// From is the receiving address.
 	Address string
 	// Value is the amount being traded.
 	Value uint64
@@ -701,6 +701,8 @@ type Contract struct {
 type Redemption struct {
 	// Spends is the AuditInfo for the swap output being spent.
 	Spends *AuditInfo
+	// SwapDetails is the swap details.
+	SwapDetails *dex.SwapContractDetails
 	// Secret is the secret key needed to satisfy the swap contract.
 	Secret dex.Bytes
 }

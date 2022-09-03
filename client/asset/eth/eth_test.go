@@ -114,7 +114,9 @@ type testNode struct {
 	receipt        *types.Receipt
 	receiptErr     error
 
-	lastSignedTx    *types.Transaction
+	lastSignedTx *types.Transaction
+	getTx        *types.Transaction
+
 	sendTxTx        *types.Transaction
 	sendTxErr       error
 	simBackend      bind.ContractBackend
@@ -276,24 +278,26 @@ type tContractor struct {
 	lastRedeems       []*asset.Redemption
 	lastRefund        struct {
 		// tx          *types.Transaction
-		secretHash [32]byte
+		secretHash []byte
 		maxFeeRate *big.Int
 		// contractVer uint32
 	}
 }
 
-func (c *tContractor) swap(ctx context.Context, secretHash [32]byte) (*dexeth.SwapState, error) {
+func (c *tContractor) status(ctx context.Context, contract *dex.SwapContractDetails) (step dexeth.SwapStep, secret [32]byte, blockNumber uint32, err error) {
 	if c.swapErr != nil {
-		return nil, c.swapErr
+		return 0, secret, 0, c.swapErr
 	}
+	var secretHash [32]byte
+	copy(secretHash[:], contract.SecretHash)
 	swap, ok := c.swapMap[secretHash]
 	if !ok {
-		return nil, errors.New("swap not in map")
+		return 0, secret, 0, errors.New("swap not in map")
 	}
-	return swap, nil
+	return swap.State, swap.Secret, uint32(swap.BlockHeight), nil
 }
 
-func (c *tContractor) initiate(*bind.TransactOpts, []*asset.Contract) (*types.Transaction, error) {
+func (c *tContractor) initiate(*bind.TransactOpts, []*dex.SwapContractDetails) (*types.Transaction, error) {
 	return c.initTx, c.initErr
 }
 
@@ -303,8 +307,8 @@ func (c *tContractor) redeem(txOpts *bind.TransactOpts, redeems []*asset.Redempt
 	return c.redeemTx, c.redeemErr
 }
 
-func (c *tContractor) refund(opts *bind.TransactOpts, secretHash [32]byte) (*types.Transaction, error) {
-	c.lastRefund.secretHash = secretHash
+func (c *tContractor) refund(opts *bind.TransactOpts, contract *dex.SwapContractDetails) (*types.Transaction, error) {
+	c.lastRefund.secretHash = contract.SecretHash
 	c.lastRefund.maxFeeRate = opts.GasFeeCap
 	return c.refundTx, c.refundErr
 }
@@ -313,21 +317,24 @@ func (c *tContractor) estimateInitGas(ctx context.Context, n int) (uint64, error
 	return c.gasEstimates.SwapN(n), c.initGasErr
 }
 
-func (c *tContractor) estimateRedeemGas(ctx context.Context, secrets [][32]byte) (uint64, error) {
+func (c *tContractor) estimateRedeemGas(ctx context.Context, secrets [][32]byte, _ []*dex.SwapContractDetails) (uint64, error) {
 	if c.redeemGasOverride != nil {
 		return *c.redeemGasOverride, nil
 	}
 	return c.gasEstimates.RedeemN(len(secrets)), c.redeemGasErr
 }
 
-func (c *tContractor) estimateRefundGas(ctx context.Context, secretHash [32]byte) (uint64, error) {
+func (c *tContractor) estimateRefundGas(ctx context.Context, contract *dex.SwapContractDetails) (uint64, error) {
 	return c.gasEstimates.Refund, c.refundGasErr
 }
 
-func (c *tContractor) isRedeemable(secretHash, secret [32]byte) (bool, error) {
+func (c *tContractor) isRedeemable(secret [32]byte, deets *dex.SwapContractDetails) (bool, error) {
 	if c.redeemableErr != nil {
 		return false, c.redeemableErr
 	}
+
+	var secretHash [32]byte
+	copy(secretHash[:], deets.SecretHash)
 
 	if c.redeemableMap != nil {
 		return c.redeemableMap[secretHash], nil
@@ -340,7 +347,7 @@ func (c *tContractor) value(_ context.Context, tx *types.Transaction) (incoming,
 	return c.valueIn[tx.Hash()], c.valueOut[tx.Hash()], c.valueErr
 }
 
-func (c *tContractor) isRefundable(secretHash [32]byte) (bool, error) {
+func (c *tContractor) isRefundable(*dex.SwapContractDetails) (bool, error) {
 	return c.refundable, c.refundableErr
 }
 
@@ -965,7 +972,7 @@ func testRefund(t *testing.T, assetID uint32) {
 			c.refundTx = tx
 		}
 
-		refundID, err := eth.Refund(nil, contract, feeSuggestion)
+		refundID, err := eth.Refund(nil, contract, &dex.SwapContractDetails{SecretHash: secretHash[:]}, feeSuggestion)
 
 		if test.wantErr {
 			if err == nil {
@@ -988,7 +995,7 @@ func testRefund(t *testing.T, assetID uint32) {
 				t.Fatalf(`%v: expected refund tx hash: %x = returned id: %s`, test.name, txHash, refundID)
 			}
 
-			if secretHash != c.lastRefund.secretHash {
+			if !bytes.Equal(secretHash[:], c.lastRefund.secretHash) {
 				t.Fatalf(`%v: secret hash in contract %x != used to call refund %x`,
 					test.name, secretHash, c.lastRefund.secretHash)
 			}
@@ -1904,7 +1911,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
 							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
 							Coin: &coin{
-								id: randomHash(),
+								id:    randomHash(),
+								value: 1e9,
 							},
 						},
 						Secret: secrets[0][:],
@@ -1914,7 +1922,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
 							SecretHash: secretHashes[1][:],
 							Coin: &coin{
-								id: randomHash(),
+								id:    randomHash(),
+								value: 1e9,
 							},
 						},
 						Secret: secrets[1][:],
@@ -1938,7 +1947,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
 							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
 							Coin: &coin{
-								id: randomHash(),
+								id:    randomHash(),
+								value: 1e9,
 							},
 						},
 						Secret: secrets[0][:],
@@ -1948,7 +1958,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
 							SecretHash: secretHashes[1][:],
 							Coin: &coin{
-								id: randomHash(),
+								id:    randomHash(),
+								value: 1e9,
 							},
 						},
 						Secret: secrets[1][:],
@@ -1972,7 +1983,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
 							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
 							Coin: &coin{
-								id: randomHash(),
+								id:    randomHash(),
+								value: 1e9,
 							},
 						},
 						Secret: secrets[0][:],
@@ -1982,7 +1994,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
 							SecretHash: secretHashes[1][:],
 							Coin: &coin{
-								id: randomHash(),
+								id:    randomHash(),
+								value: 1e9,
 							},
 						},
 						Secret: secrets[1][:],
@@ -2005,7 +2018,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
 							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
 							Coin: &coin{
-								id: randomHash(),
+								id:    randomHash(),
+								value: 1e9,
 							},
 						},
 						Secret: secrets[0][:],
@@ -2015,7 +2029,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
 							SecretHash: secretHashes[1][:],
 							Coin: &coin{
-								id: randomHash(),
+								id:    randomHash(),
+								value: 1e9,
 							},
 						},
 						Secret: secrets[1][:],
@@ -2038,7 +2053,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
 							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
 							Coin: &coin{
-								id: randomHash(),
+								id:    randomHash(),
+								value: 1e9,
 							},
 						},
 						Secret: secrets[0][:],
@@ -2048,7 +2064,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
 							SecretHash: secretHashes[1][:],
 							Coin: &coin{
-								id: randomHash(),
+								id:    randomHash(),
+								value: 1e9,
 							},
 						},
 						Secret: secrets[1][:],
@@ -2072,7 +2089,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
 							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
 							Coin: &coin{
-								id: randomHash(),
+								id:    randomHash(),
+								value: 1e9,
 							},
 						},
 						Secret: secrets[0][:],
@@ -2082,7 +2100,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
 							SecretHash: secretHashes[1][:],
 							Coin: &coin{
-								id: randomHash(),
+								id:    randomHash(),
+								value: 1e9,
 							},
 						},
 						Secret: secrets[1][:],
@@ -2106,7 +2125,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
 							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
 							Coin: &coin{
-								id: randomHash(),
+								id:    randomHash(),
+								value: 1e9,
 							},
 						},
 						Secret: secrets[0][:],
@@ -2116,7 +2136,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
 							SecretHash: secretHashes[1][:],
 							Coin: &coin{
-								id: randomHash(),
+								id:    randomHash(),
+								value: 1e9,
 							},
 						},
 						Secret: secrets[1][:],
@@ -2139,7 +2160,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
 							SecretHash: secretHashes[0][:],
 							Coin: &coin{
-								id: randomHash(),
+								id:    randomHash(),
+								value: 1e9,
 							},
 						},
 						Secret: secrets[0][:],
@@ -2149,7 +2171,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
 							SecretHash: secretHashes[1][:],
 							Coin: &coin{
-								id: randomHash(),
+								id:    randomHash(),
+								value: 1e9,
 							},
 						},
 						Secret: secrets[1][:],
@@ -2172,7 +2195,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
 							SecretHash: secretHashes[0][:],
 							Coin: &coin{
-								id: randomHash(),
+								id:    randomHash(),
+								value: 1e9,
 							},
 						},
 						Secret: secrets[0][:],
@@ -2182,7 +2206,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
 							SecretHash: secretHashes[1][:],
 							Coin: &coin{
-								id: randomHash(),
+								id:    randomHash(),
+								value: 1e9,
 							},
 						},
 						Secret: secrets[1][:],
@@ -2205,7 +2230,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
 							SecretHash: secretHashes[0][:],
 							Coin: &coin{
-								id: randomHash(),
+								id:    randomHash(),
+								value: 1e9,
 							},
 						},
 						Secret: secrets[0][:],
@@ -2227,7 +2253,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[2]),
 							SecretHash: secretHashes[2][:],
 							Coin: &coin{
-								id: randomHash(),
+								id:    randomHash(),
+								value: 1e9,
 							},
 						},
 						Secret: secrets[2][:],
@@ -2288,7 +2315,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			t.Fatalf("%v: expected fees %d, but got %d", test.name, expectedFees, fees)
 		}
 
-		// Check that value of output coin is as axpected
+		// Check that value of output coin is as expected
 		var totalSwapValue uint64
 		for _, redemption := range test.form.Redemptions {
 			_, secretHash, err := dexeth.DecodeContractData(redemption.Spends.Contract)
@@ -2301,8 +2328,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 			totalSwapValue += dexeth.WeiToGwei(swap.Value)
 		}
 		if out.Value() != totalSwapValue {
-			t.Fatalf("expected coin value to be %d but got %d",
-				totalSwapValue, out.Value())
+			t.Fatalf("%q expected coin value to be %d but got %d",
+				test.name, totalSwapValue, out.Value())
 		}
 
 		// Check that gas limit in the transaction is as expected
@@ -2890,7 +2917,9 @@ func TestSwapConfirmation(t *testing.T) {
 	defer cancel()
 
 	checkResult := func(expErr bool, expConfs uint32, expSpent bool) {
-		confs, spent, err := eth.SwapConfirmations(ctx, nil, dexeth.EncodeContractData(ver, secretHash), time.Time{})
+		t.Helper()
+		confs, spent, err := eth.SwapConfirmations(ctx, nil, dexeth.EncodeContractData(ver, secretHash),
+			time.Time{}, &dex.SwapContractDetails{SecretHash: secretHash[:]})
 		if err != nil {
 			if expErr {
 				return
@@ -2924,15 +2953,11 @@ func TestSwapConfirmation(t *testing.T) {
 
 	// ErrSwapNotInitiated
 	state.State = dexeth.SSNone
-	_, _, err := eth.SwapConfirmations(ctx, nil, dexeth.EncodeContractData(0, secretHash), time.Time{})
+	_, _, err := eth.SwapConfirmations(ctx, nil, dexeth.EncodeContractData(0, secretHash),
+		time.Time{}, &dex.SwapContractDetails{SecretHash: secretHash[:]})
 	if !errors.Is(err, asset.ErrSwapNotInitiated) {
 		t.Fatalf("expected ErrSwapNotInitiated, got %v", err)
 	}
-
-	// 1 conf, spent
-	state.BlockHeight = 6
-	state.State = dexeth.SSRedeemed
-	checkResult(false, 1, true)
 }
 
 func TestDriverOpen(t *testing.T) {
@@ -3091,13 +3116,15 @@ func TestLocktimeExpired(t *testing.T) {
 	var secretHash [32]byte
 	copy(secretHash[:], encode.RandomBytes(32))
 
+	lockTime := time.Now()
+
 	state := &dexeth.SwapState{
-		LockTime: time.Now(),
+		LockTime: lockTime,
 		State:    dexeth.SSInitiated,
 	}
 
 	header := &types.Header{
-		Time: uint64(time.Now().Add(time.Second).Unix()),
+		Time: uint64(lockTime.Add(time.Second).Unix()),
 	}
 
 	node.tContractor.swapMap[secretHash] = state
@@ -3108,7 +3135,7 @@ func TestLocktimeExpired(t *testing.T) {
 
 	ensureResult := func(tag string, expErr, expExpired bool) {
 		t.Helper()
-		expired, _, err := eth.LocktimeExpired(context.Background(), contract)
+		expired, _, err := eth.LocktimeExpired(context.Background(), &dex.SwapContractDetails{LockTime: uint64(lockTime.Unix())})
 		switch {
 		case err != nil:
 			if !expErr {
@@ -3117,7 +3144,7 @@ func TestLocktimeExpired(t *testing.T) {
 		case expErr:
 			t.Fatalf("%s: expected error, got none", tag)
 		case expExpired != expired:
-			t.Fatalf("%s: expired wrong. %t != %t", tag, expired, expExpired)
+			t.Fatalf("%s: expired wrong. expected %t, got %t", tag, expExpired, expired)
 		}
 	}
 
@@ -3129,29 +3156,9 @@ func TestLocktimeExpired(t *testing.T) {
 	ensureResult("header error", true, false)
 	node.bestHdrErr = nil
 
-	// swap not initiated
-	saveState := state.State
-	state.State = dexeth.SSNone
-	ensureResult("swap not initiated", true, false)
-	state.State = saveState
-
-	// missing swap
-	delete(node.tContractor.swapMap, secretHash)
-	ensureResult("missing swap", true, false)
-	node.tContractor.swapMap[secretHash] = state
-
 	// lock time not expired
-	state.LockTime = time.Now().Add(time.Minute)
+	lockTime = time.Now().Add(time.Minute)
 	ensureResult("lock time not expired", false, false)
-
-	// wrong contract version
-	contract[3] = 1
-	ensureResult("wrong contract version", true, false)
-	contract[3] = 0
-
-	// bad contract
-	contract = append(contract, 0)
-	ensureResult("bad contract", true, false)
 }
 
 func TestFindRedemption(t *testing.T) {
@@ -3190,7 +3197,7 @@ func testFindRedemption(t *testing.T, assetID uint32) {
 		var err error
 		ctx, cancel := context.WithTimeout(baseCtx, time.Second)
 		defer cancel()
-		_, secretB, err := eth.FindRedemption(ctx, nil, contract)
+		_, secretB, err := eth.FindRedemption(ctx, nil, contract, &dex.SwapContractDetails{SecretHash: secretHash[:]})
 		if err != nil {
 			if wantErr {
 				return
@@ -3282,7 +3289,7 @@ func testFindRedemption(t *testing.T, assetID uint32) {
 	eth.findRedemptionMtx.Unlock()
 	res := make(chan error, 1)
 	go func() {
-		_, _, err := eth.FindRedemption(baseCtx, nil, contract)
+		_, _, err := eth.FindRedemption(baseCtx, nil, contract, &dex.SwapContractDetails{SecretHash: secretHash[:]})
 		res <- err
 	}()
 
@@ -3683,6 +3690,9 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 		return &asset.Redemption{
 			Spends: &asset.AuditInfo{
 				Contract: dexeth.EncodeContractData(0, secretHash),
+			},
+			SwapDetails: &dex.SwapContractDetails{
+				SecretHash: secretHash[:],
 			},
 			Secret: secret[:],
 		}

@@ -2139,7 +2139,7 @@ func testFindRedemption(t *testing.T, segwit bool, walletType string) {
 	})
 
 	// Check find redemption result.
-	_, checkSecret, err := wallet.FindRedemption(tCtx, coinID, nil)
+	_, checkSecret, err := wallet.FindRedemption(tCtx, coinID, nil, nil)
 	if err != nil {
 		t.Fatalf("error finding redemption: %v", err)
 	}
@@ -2149,7 +2149,7 @@ func testFindRedemption(t *testing.T, segwit bool, walletType string) {
 
 	// gettransaction error
 	node.getTransactionErr = tErr
-	_, _, err = wallet.FindRedemption(tCtx, coinID, nil)
+	_, _, err = wallet.FindRedemption(tCtx, coinID, nil, nil)
 	if err == nil {
 		t.Fatalf("no error for gettransaction rpc error")
 	}
@@ -2160,7 +2160,7 @@ func testFindRedemption(t *testing.T, segwit bool, walletType string) {
 	delete(node.getCFilterScripts, *redeemBlockHash)
 	timedCtx, cancel := context.WithTimeout(tCtx, 500*time.Millisecond) // 0.5 seconds is long enough
 	defer cancel()
-	_, k, err := wallet.FindRedemption(timedCtx, coinID, nil)
+	_, k, err := wallet.FindRedemption(timedCtx, coinID, nil, nil)
 	if timedCtx.Err() == nil || k != nil {
 		// Expected ctx to cancel after timeout and no secret should be found.
 		t.Fatalf("unexpected result for missing redemption: secret: %v, err: %v", k, err)
@@ -2174,7 +2174,7 @@ func testFindRedemption(t *testing.T, segwit bool, walletType string) {
 	// Canceled context
 	deadCtx, cancelCtx := context.WithCancel(tCtx)
 	cancelCtx()
-	_, _, err = wallet.FindRedemption(deadCtx, coinID, nil)
+	_, _, err = wallet.FindRedemption(deadCtx, coinID, nil, nil)
 	if err == nil {
 		t.Fatalf("no error for canceled context")
 	}
@@ -2185,7 +2185,7 @@ func testFindRedemption(t *testing.T, segwit bool, walletType string) {
 	redeemVin.SignatureScript = randBytes(100)
 
 	node.blockchainMtx.Unlock()
-	_, _, err = wallet.FindRedemption(tCtx, coinID, nil)
+	_, _, err = wallet.FindRedemption(tCtx, coinID, nil, nil)
 	if err == nil {
 		t.Fatalf("no error for wrong redemption")
 	}
@@ -2195,7 +2195,7 @@ func testFindRedemption(t *testing.T, segwit bool, walletType string) {
 	node.blockchainMtx.Unlock()
 
 	// Sanity check to make sure it passes again.
-	_, _, err = wallet.FindRedemption(tCtx, coinID, nil)
+	_, _, err = wallet.FindRedemption(tCtx, coinID, nil, nil)
 	if err != nil {
 		t.Fatalf("error after clearing errors: %v", err)
 	}
@@ -2234,7 +2234,7 @@ func testRefund(t *testing.T, segwit bool, walletType string) {
 	node.getTransactionErr = WalletTransactionNotFound
 
 	contractOutput := newOutput(&txHash, 0, 1e8)
-	_, err = wallet.Refund(contractOutput.ID(), contract, feeSuggestion)
+	_, err = wallet.Refund(contractOutput.ID(), contract, nil, feeSuggestion)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}
@@ -2243,14 +2243,14 @@ func testRefund(t *testing.T, segwit bool, walletType string) {
 	badReceipt := &tReceipt{
 		coin: &tCoin{id: make([]byte, 15)},
 	}
-	_, err = wallet.Refund(badReceipt.coin.id, badReceipt.Contract(), feeSuggestion)
+	_, err = wallet.Refund(badReceipt.coin.id, badReceipt.Contract(), nil, feeSuggestion)
 	if err == nil {
 		t.Fatalf("no error for bad receipt")
 	}
 
 	ensureErr := func(tag string) {
 		delete(node.checkpoints, outPt)
-		_, err = wallet.Refund(contractOutput.ID(), contract, feeSuggestion)
+		_, err = wallet.Refund(contractOutput.ID(), contract, nil, feeSuggestion)
 		if err == nil {
 			t.Fatalf("no error for %q", tag)
 		}
@@ -2266,7 +2266,7 @@ func testRefund(t *testing.T, segwit bool, walletType string) {
 	// bad contract
 	badContractOutput := newOutput(tTxHash, 0, 1e8)
 	badContract := randBytes(50)
-	_, err = wallet.Refund(badContractOutput.ID(), badContract, feeSuggestion)
+	_, err = wallet.Refund(badContractOutput.ID(), badContract, nil, feeSuggestion)
 	if err == nil {
 		t.Fatalf("no error for bad contract")
 	}
@@ -2301,7 +2301,7 @@ func testRefund(t *testing.T, segwit bool, walletType string) {
 	node.badSendHash = nil
 
 	// Sanity check that we can succeed again.
-	_, err = wallet.Refund(contractOutput.ID(), contract, feeSuggestion)
+	_, err = wallet.Refund(contractOutput.ID(), contract, nil, feeSuggestion)
 	if err != nil {
 		t.Fatalf("re-refund error: %v", err)
 	}
@@ -2507,7 +2507,7 @@ func testConfirmations(t *testing.T, segwit bool, walletType string) {
 	matchTime := swapBlock.Header.Timestamp
 
 	// Bad coin id
-	_, _, err := wallet.SwapConfirmations(context.Background(), randBytes(35), contract, matchTime)
+	_, _, err := wallet.SwapConfirmations(context.Background(), randBytes(35), contract, matchTime, nil)
 	if err == nil {
 		t.Fatalf("no error for bad coin ID")
 	}
@@ -2519,7 +2519,7 @@ func testConfirmations(t *testing.T, segwit bool, walletType string) {
 	}
 	node.txOutRes = txOutRes
 	node.getCFilterScripts[*blockHash] = [][]byte{pkScript}
-	confs, _, err := wallet.SwapConfirmations(context.Background(), coinID, contract, matchTime)
+	confs, _, err := wallet.SwapConfirmations(context.Background(), coinID, contract, matchTime, nil)
 	if err != nil {
 		t.Fatalf("error for gettransaction path: %v", err)
 	}
@@ -2531,7 +2531,7 @@ func testConfirmations(t *testing.T, segwit bool, walletType string) {
 	node.txOutRes = nil
 	node.getCFilterScripts[*blockHash] = nil
 	node.getTransactionErr = tErr
-	_, _, err = wallet.SwapConfirmations(context.Background(), coinID, contract, matchTime)
+	_, _, err = wallet.SwapConfirmations(context.Background(), coinID, contract, matchTime, nil)
 	if err == nil {
 		t.Fatalf("no error for gettransaction error")
 	}
@@ -2547,7 +2547,7 @@ func testConfirmations(t *testing.T, segwit bool, walletType string) {
 
 	node.getCFilterScripts[*spendingBlockHash] = [][]byte{pkScript}
 	node.walletTxSpent = true
-	_, spent, err := wallet.SwapConfirmations(context.Background(), coinID, contract, matchTime)
+	_, spent, err := wallet.SwapConfirmations(context.Background(), coinID, contract, matchTime, nil)
 	if err != nil {
 		t.Fatalf("error for spent swap: %v", err)
 	}

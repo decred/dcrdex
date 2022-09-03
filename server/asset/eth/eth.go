@@ -85,7 +85,7 @@ func init() {
 
 const (
 	BipID              = 60
-	ethContractVersion = 0
+	ethContractVersion = 1
 	version            = 0
 	// The blockPollInterval is the delay between calls to bestBlockHash to
 	// check for new blocks.
@@ -164,9 +164,10 @@ type ethFetcher interface {
 	suggestGasTipCap(ctx context.Context) (*big.Int, error)
 	syncProgress(ctx context.Context) (*ethereum.SyncProgress, error)
 	transaction(ctx context.Context, hash common.Hash) (tx *types.Transaction, isMempool bool, err error)
+	receipt(context.Context, common.Hash) (*types.Receipt, error)
 	// token- and asset-specific methods
 	loadToken(ctx context.Context, assetID uint32) error
-	swap(ctx context.Context, assetID uint32, secretHash [32]byte) (*dexeth.SwapState, error)
+	status(ctx context.Context, assetID uint32, contract *asset.Contract) (step dexeth.SwapStep, secret [32]byte, blockNumber uint32, err error)
 	accountBalance(ctx context.Context, assetID uint32, addr common.Address) (*big.Int, error)
 }
 
@@ -254,8 +255,8 @@ func unconnectedETH(logger dex.Logger, net dex.Network) (*ETHBackend, error) {
 		log:          logger.SubLogger("ETH"),
 		contractAddr: contractAddr,
 		blockChans:   make(map[chan *asset.BlockUpdate]struct{}),
-		initTxSize:   uint32(dexeth.InitGas(1, ethContractVersion)),
-		redeemSize:   dexeth.RedeemGas(1, ethContractVersion),
+		initTxSize:   uint32(dexeth.InitGas(1, 0)),
+		redeemSize:   dexeth.RedeemGas(1, 0),
 		assetID:      BipID,
 		atomize:      dexeth.WeiToGwei,
 	}}, nil
@@ -540,11 +541,11 @@ func (be *AssetBackend) Contract(coinID, contractData []byte) (*asset.Contract, 
 	}
 	return &asset.Contract{
 		Coin:         sc,
-		SwapAddress:  sc.init.Participant.String(),
+		SwapAddress:  sc.swap.SwapContractDetails.To,
 		ContractData: contractData,
 		SecretHash:   sc.secretHash[:],
 		TxData:       sc.serializedTx,
-		LockTime:     sc.init.LockTime,
+		LockTime:     time.Unix(int64(sc.swap.SwapContractDetails.LockTime), 0),
 	}, nil
 }
 
@@ -754,4 +755,20 @@ func (eth *ETHBackend) run(ctx context.Context) {
 			return
 		}
 	}
+}
+
+func (eth *baseBackend) txConfirmations(ctx context.Context, txHash common.Hash) (int64, error) {
+	r, err := eth.node.receipt(ctx, txHash)
+	if err != nil {
+		return 0, err
+	}
+	if r.BlockNumber == nil || r.BlockNumber.Int64() <= 0 {
+		return 0, nil
+	}
+
+	bn, err := eth.node.blockNumber(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("unable to fetch block number: %v", err)
+	}
+	return int64(bn) - r.BlockNumber.Int64() + 1, nil
 }

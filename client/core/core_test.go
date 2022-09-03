@@ -810,15 +810,15 @@ func (w *TXCWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroadcas
 	return w.auditInfo, w.auditErr
 }
 
-func (w *TXCWallet) LocktimeExpired(_ context.Context, contract dex.Bytes) (bool, time.Time, error) {
+func (w *TXCWallet) LocktimeExpired(_ context.Context, deets *dex.SwapContractDetails) (bool, time.Time, error) {
 	return w.contractExpired, w.contractLockTime, nil
 }
 
-func (w *TXCWallet) FindRedemption(ctx context.Context, coinID, _ dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {
+func (w *TXCWallet) FindRedemption(ctx context.Context, coinID, _ dex.Bytes, _ *dex.SwapContractDetails) (redemptionCoin, secret dex.Bytes, err error) {
 	return nil, nil, fmt.Errorf("not mocked")
 }
 
-func (w *TXCWallet) Refund(refundCoin dex.Bytes, refundContract dex.Bytes, feeSuggestion uint64) (dex.Bytes, error) {
+func (w *TXCWallet) Refund(refundCoin, contractData dex.Bytes, deets *dex.SwapContractDetails, feeSuggestion uint64) (dex.Bytes, error) {
 	w.refundFeeSuggestion = feeSuggestion
 	return w.refundCoin, w.refundErr
 }
@@ -888,7 +888,7 @@ func (w *TXCWallet) tConfirmations(ctx context.Context, coinID dex.Bytes) (uint3
 	return w.confs[id], w.confsErr[id]
 }
 
-func (w *TXCWallet) SwapConfirmations(ctx context.Context, coinID dex.Bytes, contract dex.Bytes, matchTime time.Time) (uint32, bool, error) {
+func (w *TXCWallet) SwapConfirmations(ctx context.Context, coinID dex.Bytes, contractData dex.Bytes, matchTime time.Time, deets *dex.SwapContractDetails) (uint32, bool, error) {
 	confs, err := w.tConfirmations(ctx, coinID)
 	return confs, false, err
 }
@@ -8409,6 +8409,7 @@ func TestConfirmRedemption(t *testing.T) {
 					Address: addr,
 				},
 			},
+			trade: lo.Trade(),
 		}
 		tracker.matches = map[order.MatchID]*matchTracker{matchID: match}
 

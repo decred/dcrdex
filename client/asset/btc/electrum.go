@@ -235,7 +235,7 @@ func (btc *ExchangeWalletElectrum) tryRedemptionRequests(ctx context.Context) {
 
 // FindRedemption locates a swap contract output's redemption transaction input
 // and the secret key used to spend the output.
-func (btc *ExchangeWalletElectrum) FindRedemption(ctx context.Context, coinID, contract dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {
+func (btc *ExchangeWalletElectrum) FindRedemption(ctx context.Context, coinID, contract dex.Bytes, _ *dex.SwapContractDetails) (redemptionCoin, secret dex.Bytes, err error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, nil, err

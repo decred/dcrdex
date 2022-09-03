@@ -372,8 +372,8 @@ func (w *xcWallet) preAccelerate(swapCoins, accelerationCoins []dex.Bytes, chang
 // Context. If the coin cannot be located, an asset.CoinNotFoundError is
 // returned. If the coin is located, but recognized as spent, no error is
 // returned.
-func (w *xcWallet) swapConfirmations(ctx context.Context, coinID []byte, contract []byte, matchTime uint64) (uint32, bool, error) {
-	return w.Wallet.SwapConfirmations(ctx, coinID, contract, time.UnixMilli(int64(matchTime)))
+func (w *xcWallet) swapConfirmations(ctx context.Context, coinID []byte, contractData []byte, matchTime uint64, deets *dex.SwapContractDetails) (uint32, bool, error) {
+	return w.Wallet.SwapConfirmations(ctx, coinID, contractData, time.UnixMilli(int64(matchTime)), deets)
 }
 
 // feeRater is identical to calling w.Wallet.(asset.FeeRater).
