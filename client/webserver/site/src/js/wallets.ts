@@ -420,7 +420,9 @@ export default class WalletsPage extends BasePage {
     const spotVolume = (assetID: number, mkt: Market): number => {
       const spot = mkt.spot
       if (!spot) return 0
-      return assetID === mkt.baseid ? spot.vol24 : spot.vol24 * spot.rate / OrderUtil.RateEncodingFactor
+      const conversionFactor = app().unitInfo(assetID).conventional.conversionFactor
+      const volume = assetID === mkt.baseid ? spot.vol24 : spot.vol24 * spot.rate / OrderUtil.RateEncodingFactor
+      return volume / conversionFactor
     }
 
     markets.sort((a: [string, Market], b: [string, Market]): number => {
