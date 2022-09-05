@@ -255,6 +255,7 @@ var (
 			electrumWalletDefinition,
 		},
 		LegacyWalletIndex: 1,
+		ProtocolVersions:  []uint32{0},
 	}
 
 	client http.Client

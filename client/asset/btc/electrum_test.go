@@ -128,7 +128,7 @@ func TestElectrumExchangeWallet(t *testing.T) {
 	}
 
 	// FindRedemption
-	redeemCoin, secretBytes, err := eew.FindRedemption(ctx, toCoinID(swapTxHash, swapVout), contract)
+	redeemCoin, secretBytes, err := eew.FindRedemption(ctx, toCoinID(swapTxHash, swapVout), contract, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

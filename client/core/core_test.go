@@ -696,7 +696,7 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 
 func (w *TXCWallet) Info() *asset.WalletInfo {
 	return &asset.WalletInfo{
-		Version: 0, // match tUTXOAssetA/tUTXOAssetB
+		ProtocolVersions: []uint32{0}, // match tUTXOAssetA/tUTXOAssetB
 	}
 }
 
@@ -8890,7 +8890,7 @@ func TestSuspectTrades(t *testing.T) {
 	setRedeems()
 	tBtcWallet.redeemErr = tErr
 	_, err = tCore.tick(tracker)
-	if err == nil || !strings.Contains(err.Error(), "error sending redeem transaction") {
+	if err == nil || !strings.Contains(err.Error(), "error redeeming") {
 		t.Fatalf("redeem error not propagated. err = %v", err)
 	}
 	if tBtcWallet.redeemCounter != 1 {

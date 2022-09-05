@@ -139,8 +139,8 @@ func TestRedeemV0(t *testing.T) {
 	secretHashB := encode.RandomBytes(32)
 
 	redemption := &asset.Redemption{
-		Secret: secretB,
-		Spends: &asset.AuditInfo{SecretHash: secretHashB},
+		Secret:      secretB,
+		SwapDetails: &dex.SwapContractDetails{SecretHash: secretHashB},
 	}
 
 	redemptions := []*asset.Redemption{redemption}
@@ -166,9 +166,9 @@ func TestRedeemV0(t *testing.T) {
 	}
 
 	// bad secret hash length
-	redemption.Spends.SecretHash = encode.RandomBytes(20)
+	redemption.SwapDetails.SecretHash = encode.RandomBytes(20)
 	checkResult("bad secret hash length", true)
-	redemption.Spends.SecretHash = encode.RandomBytes(32)
+	redemption.SwapDetails.SecretHash = encode.RandomBytes(32)
 
 	// bad secret length
 	redemption.Secret = encode.RandomBytes(20)
@@ -186,8 +186,8 @@ func TestRedeemV0(t *testing.T) {
 
 	// two OK
 	redemption2 := &asset.Redemption{
-		Secret: encode.RandomBytes(32),
-		Spends: &asset.AuditInfo{SecretHash: encode.RandomBytes(32)},
+		Secret:      encode.RandomBytes(32),
+		SwapDetails: &dex.SwapContractDetails{SecretHash: encode.RandomBytes(32)},
 	}
 	redemptions = []*asset.Redemption{redemption, redemption2}
 	checkResult("two ok", false)
@@ -236,21 +236,9 @@ func TestSwapV0(t *testing.T) {
 	if secret != secret {
 		t.Fatalf("wrong secret")
 	}
-	// if dexeth.WeiToGwei(swap.Value) != valGwei {
-	// 	t.Fatalf("wrong value")
-	// }
 	if blockNumber != blockNum {
 		t.Fatalf("wrong block height")
 	}
-	// if swap.LockTime.Unix() != stamp {
-	// 	t.Fatalf("wrong lock time")
-	// }
-	// if swap.Initiator != initiator {
-	// 	t.Fatalf("initiator not transmitted")
-	// }
-	// if swap.Participant != participant {
-	// 	t.Fatalf("participant not transmitted")
-	// }
 	if step != state {
 		t.Fatalf("state not transmitted")
 	}

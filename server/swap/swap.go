@@ -1505,7 +1505,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 			stepInfo.match.ID(), actor, params.CoinID, params.Contract, err)
 		actor.status.mtx.RUnlock()
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
-			"redemption error")
+			"init error")
 		return wait.DontTryAgain
 	}
 
@@ -1541,6 +1541,12 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 				contract.SwapAddress, counterParty.order.Trade().SwapAddress()))
 		return wait.DontTryAgain
 	}
+	if contract.FromAccount != "" && contract.FromAccount != actor.order.Trade().FromAccount() {
+		s.respondError(msg.ID, actor.user, msgjson.ContractError,
+			fmt.Sprintf("incorrect initiator. expected %s. got %s",
+				actor.order.Trade().SwapAddress(), contract.SwapAddress))
+		return wait.DontTryAgain
+	}
 	if contract.Value() != stepInfo.checkVal {
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
 			fmt.Sprintf("contract error. expected contract value to be %d, got %d", stepInfo.checkVal, contract.Value()))
@@ -1559,7 +1565,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	}
 	if contract.LockTime.Before(reqLockTime) {
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
-			fmt.Sprintf("contract error. expected lock time >= %s, got %s", reqLockTime, contract.LockTime))
+			fmt.Sprintf("contract error. expected lock time >= %s, got %s", reqLockTime.UTC(), contract.LockTime.UTC()))
 		return wait.DontTryAgain
 	} else if remain := time.Until(contract.LockTime); remain < 0 {
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,

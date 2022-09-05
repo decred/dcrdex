@@ -162,6 +162,9 @@ type Contract struct {
 	Coin
 	// SwapAddress is the receiving address of the swap contract.
 	SwapAddress string
+	// FromAccount is only populated for assets that require verification of
+	// expected sender account.
+	FromAccount string
 	// ContractData is essential data about this swap. For example, the redeem
 	// script for UTXO contracts, or a secret hash that keys swaps for account-
 	// based contracts.

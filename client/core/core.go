@@ -5077,6 +5077,16 @@ func (w *walletSet) trimmedConventionalRateString(r uint64) string {
 	return strings.TrimRight(strings.TrimRight(s, "0"), ".")
 }
 
+func checkWalletDEXCompatibility(a *dex.Asset, w *xcWallet) error {
+	for _, ver := range w.Info().ProtocolVersions {
+		if a.Version == ver {
+			return nil
+		}
+	}
+	return newError(walletErr, "%s wallet version %d is not one of the wallet's supported versions %+v",
+		unbip(w.AssetID), a.Version, w.Info().ProtocolVersions)
+}
+
 // walletSet constructs a walletSet.
 func (c *Core) walletSet(dc *dexConnection, baseID, quoteID uint32, sell bool) (*walletSet, error) {
 	dc.assetsMtx.RLock()
@@ -5100,14 +5110,11 @@ func (c *Core) walletSet(dc *dexConnection, baseID, quoteID uint32, sell bool) (
 		return nil, newError(missingWalletErr, "no wallet found for %s", unbip(quoteID))
 	}
 
-	if ver := baseWallet.Info().Version; baseAsset.Version != ver {
-		return nil, newError(walletErr, "wallet asset %d version %d does not match server asset version %d",
-			baseID, ver, baseAsset.Version)
+	if err := checkWalletDEXCompatibility(baseAsset, baseWallet); err != nil {
+		return nil, err
 	}
-
-	if ver := quoteWallet.Info().Version; quoteAsset.Version != ver {
-		return nil, newError(walletErr, "wallet asset %d version %d does not match server asset version %d",
-			quoteID, ver, quoteAsset.Version)
+	if err := checkWalletDEXCompatibility(quoteAsset, quoteWallet); err != nil {
+		return nil, err
 	}
 
 	// We actually care less about base/quote, and more about from/to, which

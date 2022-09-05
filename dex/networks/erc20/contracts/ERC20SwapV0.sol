@@ -6,7 +6,7 @@ pragma solidity = 0.8.15;
 // order to save on gas fees, a separate ERC20Swap contract is deployed
 // for each ERC20 token. After deployed, it keeps a map of swaps that
 // facilitates atomic swapping of ERC20 tokens with other crypto currencies
-// that support time locks. 
+// that support time locks.
 //
 // It accomplishes this by holding tokens acquired during a swap initiation
 // until conditions are met. Prior to initiating a swap, the initiator must
@@ -27,7 +27,7 @@ pragma solidity = 0.8.15;
 contract ERC20Swap {
     bytes4 private constant TRANSFER_FROM_SELECTOR = bytes4(keccak256("transferFrom(address,address,uint256)"));
     bytes4 private constant TRANSFER_SELECTOR = bytes4(keccak256("transfer(address,uint256)"));
-    
+
     address public immutable token_address;
 
     // State is a type that hold's a contract's state. Empty is the uninitiated

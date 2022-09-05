@@ -233,6 +233,7 @@ var (
 				ConfigOpts:        append(rpcOpts, walletOpts...),
 			},
 		},
+		ProtocolVersions: []uint32{0},
 	}
 	swapFeeBumpKey   = "swapfeebump"
 	splitKey         = "swapsplit"

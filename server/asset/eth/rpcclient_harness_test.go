@@ -105,10 +105,14 @@ func TestSuggestGasTipCap(t *testing.T) {
 	}
 }
 
-func TestSwap(t *testing.T) {
-	var secretHash [32]byte
-	copy(secretHash[:], encode.RandomBytes(32))
-	_, err := ethClient.swap(ctx, BipID, secretHash)
+func TestStatus(t *testing.T) {
+	_, _, _, err := ethClient.status(ctx, BipID, &dex.SwapContractDetails{
+		To:         common.Address{}.String(),
+		From:       common.Address{}.String(),
+		Value:      1,
+		SecretHash: encode.RandomBytes(32),
+		LockTime:   1,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

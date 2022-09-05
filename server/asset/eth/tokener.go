@@ -12,16 +12,16 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/networks/erc20"
-	erc20v0 "decred.org/dcrdex/dex/networks/erc20/contracts/v0"
+	erc20v1 "decred.org/dcrdex/dex/networks/erc20/contracts/v1"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
-	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
+	swapv1 "decred.org/dcrdex/dex/networks/eth/contracts/v1"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 )
 
 // swapContract is a generic source of swap contract data.
 type swapContract interface {
-	Swap(context.Context, [32]byte) (*dexeth.SwapState, error)
+	Status(context.Context, *dex.SwapContractDetails) (step dexeth.SwapStep, secret [32]byte, blockNum uint32, err error)
 }
 
 // erc2Contract exposes methods of a token's ERC20 contract.
@@ -44,11 +44,11 @@ func newTokener(ctx context.Context, assetID uint32, net dex.Network, be bind.Co
 		return nil, err
 	}
 
-	if token.ver != 0 {
+	if token.ver != 1 {
 		return nil, fmt.Errorf("only version 0 contracts supported")
 	}
 
-	es, err := erc20v0.NewERC20Swap(swapContract.Address, be)
+	es, err := erc20v1.NewERC20Swap(swapContract.Address, be)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +71,7 @@ func newTokener(ctx context.Context, assetID uint32, net dex.Network, be bind.Co
 
 	tkn := &tokener{
 		registeredToken: token,
-		swapContract:    &swapSourceV0{es},
+		swapContract:    &swapSourceV1{es},
 		erc20Contract:   erc20,
 		contractAddr:    swapContract.Address,
 		tokenAddr:       netToken.Address,
@@ -122,25 +122,25 @@ func (t *tokener) balanceOf(ctx context.Context, addr common.Address) (*big.Int,
 	return t.BalanceOf(readOnlyCallOpts(ctx, false), addr)
 }
 
-// swapContractV0 represents a version 0 swap contract for ETH or a token.
-type swapContractV0 interface {
-	Swap(opts *bind.CallOpts, secretHash [32]byte) (swapv0.ETHSwapSwap, error)
+// swapContractV1 represents a version 0 swap contract for ETH or a token.
+type swapContractV1 interface {
+	State(*bind.CallOpts, swapv1.ETHSwapContract) (swapv1.ETHSwapRecord, error)
 }
 
-// swapSourceV0 wraps a swapContractV0 and translates the swap data to satisfy
+// swapSourceV1 wraps a swapContractV1 and translates the swap data to satisfy
 // swapSource.
-type swapSourceV0 struct {
-	contract swapContractV0 // *swapv0.ETHSwap or *erc20v0.ERCSwap
+type swapSourceV1 struct {
+	contract swapContractV1 // *swapv1.ETHSwap or *erc20v1.ERCSwap
 }
 
-// Swap translates the version 0 swap data to the more general SwapState to
+// Status translates the version 0 swap data to the more general SwapState to
 // satisfy the swapSource interface.
-func (s *swapSourceV0) Swap(ctx context.Context, secretHash [32]byte) (*dexeth.SwapState, error) {
-	state, err := s.contract.Swap(readOnlyCallOpts(ctx, true), secretHash)
+func (s *swapSourceV1) Status(ctx context.Context, deets *dex.SwapContractDetails) (step dexeth.SwapStep, secret [32]byte, blockNum uint32, err error) {
+	rec, err := s.contract.State(readOnlyCallOpts(ctx, true), dexeth.SwapToV1(deets))
 	if err != nil {
-		return nil, fmt.Errorf("Swap error: %w", err)
+		return
 	}
-	return dexeth.SwapStateFromV0(&state), nil
+	return dexeth.SwapStep(rec.State), rec.Secret, uint32(rec.BlockNumber.Uint64()), nil
 }
 
 // readOnlyCallOpts is the CallOpts used for read-only contract method calls.

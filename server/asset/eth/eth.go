@@ -52,15 +52,15 @@ func networkToken(assetID uint32, net dex.Network) (token *registeredToken, netT
 	return
 }
 
-func registerToken(assetID uint32, ver uint32) {
+func registerToken(assetID uint32, contractVer uint32) {
 	token, exists := dexeth.Tokens[assetID]
 	if !exists {
 		panic(fmt.Sprintf("no token constructor for asset ID %d", assetID))
 	}
 	drv := &TokenDriver{
 		driverBase: driverBase{
-			version:  ver,
-			unitInfo: token.UnitInfo,
+			serverVersion: version,
+			unitInfo:      token.UnitInfo,
 		},
 		token: token.Token,
 	}
@@ -68,25 +68,26 @@ func registerToken(assetID uint32, ver uint32) {
 	registeredTokens[assetID] = &registeredToken{
 		Token: token,
 		drv:   drv,
-		ver:   ver,
+		ver:   contractVer,
 	}
 }
 
 func init() {
 	asset.Register(BipID, &Driver{
 		driverBase: driverBase{
-			version:  version,
-			unitInfo: dexeth.UnitInfo,
+			serverVersion: version,
+			unitInfo:      dexeth.UnitInfo,
 		},
 	})
 
-	registerToken(testTokenID, 0)
+	registerToken(testTokenID, tokenContractVersion)
 }
 
 const (
-	BipID              = 60
-	ethContractVersion = 1
-	version            = 0
+	BipID                = 60
+	ethContractVersion   = 1
+	tokenContractVersion = 1
+	version              = 1
 	// The blockPollInterval is the delay between calls to bestBlockHash to
 	// check for new blocks.
 	blockPollInterval = time.Second
@@ -104,13 +105,13 @@ var (
 )
 
 type driverBase struct {
-	unitInfo dex.UnitInfo
-	version  uint32
+	unitInfo      dex.UnitInfo
+	serverVersion uint32
 }
 
 // Version returns the Backend implementation's version number.
 func (d *driverBase) Version() uint32 {
-	return d.version
+	return d.serverVersion
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for
@@ -167,7 +168,7 @@ type ethFetcher interface {
 	receipt(context.Context, common.Hash) (*types.Receipt, error)
 	// token- and asset-specific methods
 	loadToken(ctx context.Context, assetID uint32) error
-	status(ctx context.Context, assetID uint32, contract *asset.Contract) (step dexeth.SwapStep, secret [32]byte, blockNumber uint32, err error)
+	// status(ctx context.Context, assetID uint32, contract *dex.SwapContractDetails) (step dexeth.SwapStep, secret [32]byte, blockNumber uint32, err error)
 	accountBalance(ctx context.Context, assetID uint32, addr common.Address) (*big.Int, error)
 }
 
@@ -242,9 +243,9 @@ func unconnectedETH(logger dex.Logger, net dex.Network) (*ETHBackend, error) {
 	// least for transitory periods when updating the contract, and
 	// possibly a random contract setup, and so this section will need to
 	// change to support multiple contracts.
-	contractAddr, exists := dexeth.ContractAddresses[0][net]
+	contractAddr, exists := dexeth.ContractAddresses[ethContractVersion][net]
 	if !exists || contractAddr == (common.Address{}) {
-		return nil, fmt.Errorf("no eth contract for version 0, net %s", net)
+		return nil, fmt.Errorf("no eth contract for version %d, net %s", ethContractVersion, net)
 	}
 	return &ETHBackend{&AssetBackend{
 		baseBackend: &baseBackend{
@@ -529,7 +530,7 @@ func (be *AssetBackend) Contract(coinID, contractData []byte) (*asset.Contract, 
 	// counterparty address, and locktime. The supported version is enforced.
 	sc, err := be.newSwapCoin(coinID, contractData)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create coiner: %w", err)
+		return nil, err
 	}
 
 	// Confirmations performs some extra swap status checks if the the tx is
@@ -541,11 +542,12 @@ func (be *AssetBackend) Contract(coinID, contractData []byte) (*asset.Contract, 
 	}
 	return &asset.Contract{
 		Coin:         sc,
-		SwapAddress:  sc.swap.SwapContractDetails.To,
+		SwapAddress:  sc.swap.To,
+		FromAccount:  sc.swap.From,
 		ContractData: contractData,
 		SecretHash:   sc.secretHash[:],
 		TxData:       sc.serializedTx,
-		LockTime:     time.Unix(int64(sc.swap.SwapContractDetails.LockTime), 0),
+		LockTime:     time.Unix(int64(sc.swap.LockTime), 0),
 	}, nil
 }
 
@@ -760,6 +762,15 @@ func (eth *ETHBackend) run(ctx context.Context) {
 func (eth *baseBackend) txConfirmations(ctx context.Context, txHash common.Hash) (int64, error) {
 	r, err := eth.node.receipt(ctx, txHash)
 	if err != nil {
+		// Could be mempool.
+		if _, isMempool, err2 := eth.node.transaction(ctx, txHash); err2 != nil {
+			if errors.Is(err2, ethereum.NotFound) {
+				return 0, asset.CoinNotFoundError
+			}
+			return 0, fmt.Errorf("errors encountered searching for transaction: %v, %v", err, err2)
+		} else if isMempool {
+			return 0, nil
+		}
 		return 0, err
 	}
 	if r.BlockNumber == nil || r.BlockNumber.Int64() <= 0 {

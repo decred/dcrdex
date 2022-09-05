@@ -88,6 +88,7 @@ var (
 			DefaultConfigPath: dexbtc.SystemConfigPath("dogecoin"),
 			ConfigOpts:        configOpts,
 		}},
+		ProtocolVersions: []uint32{0},
 	}
 )
 

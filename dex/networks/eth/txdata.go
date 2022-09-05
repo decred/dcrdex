@@ -171,17 +171,12 @@ func ParseRefundDataV0(calldata []byte) ([32]byte, error) {
 	return secretHash, nil
 }
 
-type ContractV1 struct {
-	*dex.SwapContractDetails
-	Initiator string
-}
-
 type RedemptionV1 struct {
 	Secret   [32]byte
-	Contract *ContractV1
+	Contract *dex.SwapContractDetails
 }
 
-func ParseInitiateDataV1(calldata []byte) (map[[SecretHashSize]byte]*ContractV1, error) {
+func ParseInitiateDataV1(calldata []byte) (map[[SecretHashSize]byte]*dex.SwapContractDetails, error) {
 	decoded, err := ParseCallData(calldata, ABIs[1])
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse call data: %v", err)
@@ -215,17 +210,14 @@ func ParseInitiateDataV1(calldata []byte) (map[[SecretHashSize]byte]*ContractV1,
 		_ = swapv1.ETHSwapContract(initiations[0])
 	}
 
-	toReturn := make(map[[SecretHashSize]byte]*ContractV1, len(initiations))
+	toReturn := make(map[[SecretHashSize]byte]*dex.SwapContractDetails, len(initiations))
 	for _, init := range initiations {
-		toReturn[init.SecretHash] = &ContractV1{
-			SwapContractDetails: &dex.SwapContractDetails{
-				From:       init.Initiator.String(),
-				To:         init.Participant.String(),
-				Value:      init.Value,
-				SecretHash: init.SecretHash[:],
-				LockTime:   init.RefundTimestamp,
-			},
-			Initiator: init.Initiator.String(),
+		toReturn[init.SecretHash] = &dex.SwapContractDetails{
+			From:       init.Initiator.String(),
+			To:         init.Participant.String(),
+			Value:      init.Value,
+			SecretHash: init.SecretHash[:],
+			LockTime:   init.RefundTimestamp,
 		}
 	}
 
@@ -274,15 +266,12 @@ func ParseRedeemDataV1(calldata []byte) (map[[SecretHashSize]byte]*RedemptionV1,
 	toReturn := make(map[[SecretHashSize]byte]*RedemptionV1, len(redemptions))
 	for _, r := range redemptions {
 		toReturn[r.C.SecretHash] = &RedemptionV1{
-			Contract: &ContractV1{
-				SwapContractDetails: &dex.SwapContractDetails{
-					From:       r.C.Initiator.String(),
-					To:         r.C.Participant.String(),
-					Value:      r.C.Value,
-					SecretHash: r.C.SecretHash[:],
-					LockTime:   r.C.RefundTimestamp,
-				},
-				Initiator: r.C.Initiator.String(),
+			Contract: &dex.SwapContractDetails{
+				From:       r.C.Initiator.String(),
+				To:         r.C.Participant.String(),
+				Value:      r.C.Value,
+				SecretHash: r.C.SecretHash[:],
+				LockTime:   r.C.RefundTimestamp,
 			},
 			Secret: r.Secret,
 		}
@@ -291,7 +280,7 @@ func ParseRedeemDataV1(calldata []byte) (map[[SecretHashSize]byte]*RedemptionV1,
 	return toReturn, nil
 }
 
-func ParseRefundDataV1(calldata []byte) (*ContractV1, error) {
+func ParseRefundDataV1(calldata []byte) (*dex.SwapContractDetails, error) {
 	decoded, err := ParseCallData(calldata, ABIs[1])
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse call data: %v", err)
@@ -319,14 +308,11 @@ func ParseRefundDataV1(calldata []byte) (*ContractV1, error) {
 		return nil, fmt.Errorf("expected first arg of type [32]byte but got %T", args[0].value)
 	}
 
-	return &ContractV1{
-		SwapContractDetails: &dex.SwapContractDetails{
-			From:       contract.Initiator.String(),
-			To:         contract.Participant.String(),
-			Value:      contract.Value,
-			LockTime:   contract.RefundTimestamp,
-			SecretHash: contract.SecretHash[:],
-		},
-		Initiator: contract.Initiator.String(),
+	return &dex.SwapContractDetails{
+		From:       contract.Initiator.String(),
+		To:         contract.Participant.String(),
+		Value:      contract.Value,
+		LockTime:   contract.RefundTimestamp,
+		SecretHash: contract.SecretHash[:],
 	}, nil
 }

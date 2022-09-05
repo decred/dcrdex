@@ -38,6 +38,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	ethmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/tyler-smith/go-bip39"
 )
@@ -65,6 +66,7 @@ const (
 	defaultGasFee       = 82  // gwei
 	defaultGasFeeLimit  = 200 // gwei
 	defaultSendGasLimit = 21_000
+	approveGas          = 4e5
 
 	walletTypeGeth = "geth"
 
@@ -72,6 +74,9 @@ const (
 	// confirmations. Testing on testnet has shown spikes up to 2.5
 	// seconds. This value may need to be adjusted in the future.
 	confCheckTimeout = 4 * time.Second
+
+	contractVersionNewest  = ^uint32(0)
+	contractVersionUnknown = contractVersionNewest - 1
 )
 
 var (
@@ -103,6 +108,8 @@ var (
 				Seeded:      true,
 			},
 		},
+		Version:          0,
+		ProtocolVersions: []uint32{0, 1},
 	}
 
 	chainIDs = map[dex.Network]int64{
@@ -129,6 +136,11 @@ var (
 		0,                                // branch 0
 		0,                                // index 0
 	}
+
+	// https://github.com/ethereum/go-ethereum/blob/16341e05636fd088aa04a27fca6dc5cda5dbab8f/eth/backend.go#L110-L113
+	// ultimately results in a minimum fee rate by the filter applied at
+	// https://github.com/ethereum/go-ethereum/blob/4ebeca19d739a243dc0549bcaf014946cde95c4f/core/tx_pool.go#L626
+	minGasPrice = ethconfig.Defaults.Miner.GasPrice
 )
 
 // WalletConfig are wallet-level configuration settings.
@@ -409,8 +421,10 @@ func (*ETHWallet) Info() *asset.WalletInfo {
 // Info returns basic information about the wallet and asset.
 func (w *TokenWallet) Info() *asset.WalletInfo {
 	return &asset.WalletInfo{
-		Name:     w.token.Name,
-		UnitInfo: w.token.UnitInfo,
+		Name:             w.token.Name,
+		UnitInfo:         w.token.UnitInfo,
+		Version:          0,
+		ProtocolVersions: []uint32{0, 1},
 	}
 }
 
@@ -426,6 +440,21 @@ func genWalletSeed(entropy []byte) ([]byte, error) {
 		return nil, fmt.Errorf("error deriving mnemonic: %w", err)
 	}
 	return bip39.NewSeed(mnemonic, ""), nil
+}
+
+// contractVersion converts a server version to a contract version. It applies
+// to both tokens and eth right now, but that may not always be the case.
+func contractVersion(serverVer uint32) uint32 {
+	switch serverVer {
+	case 0:
+		return 0
+	case 1:
+		return 1
+	case contractVersionNewest:
+		return contractVersionNewest
+	default:
+		return contractVersionUnknown
+	}
 }
 
 // CreateWallet creates a new internal ETH wallet and stores the private key
@@ -995,8 +1024,8 @@ func (w *assetWallet) allowanceGasRequired(dexRedeemCfg *dex.Asset) (uint64, err
 }
 
 // gases gets the gas table for the specified contract version.
-func (w *assetWallet) gases(contractVer uint32) *dexeth.Gases {
-	return gases(w.assetID, contractVer, w.net)
+func (w *assetWallet) gases(serverVer uint32) *dexeth.Gases {
+	return gases(w.assetID, contractVersion(serverVer), w.net)
 }
 
 // PreRedeem generates an estimate of the range of redemption fees that could
@@ -1372,7 +1401,7 @@ type swapReceipt struct {
 	// lookup, but we cache these values to avoid this.
 	expiration   time.Time
 	value        uint64
-	ver          uint32
+	serverVer    uint32
 	contractAddr string // specified by ver, here for naive consumers
 }
 
@@ -1393,7 +1422,7 @@ func (r *swapReceipt) Coin() asset.Coin {
 // Contract returns the swap's identifying data, which the concatenation of the
 // contract version and the secret hash.
 func (r *swapReceipt) Contract() dex.Bytes {
-	return dexeth.EncodeContractData(r.ver, r.secretHash)
+	return dexeth.EncodeContractData(r.serverVer, r.secretHash)
 }
 
 // String returns a string representation of the swapReceipt. The secret hash
@@ -1467,7 +1496,7 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 			value:        swap.Value,
 			txHash:       txHash,
 			secretHash:   secretHash,
-			ver:          cfg.Version,
+			serverVer:    cfg.Version,
 			contractAddr: dexeth.ContractAddresses[cfg.Version][w.net].String(),
 		})
 	}
@@ -1557,7 +1586,7 @@ func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uin
 			value:        swap.Value,
 			txHash:       txHash,
 			secretHash:   secretHash,
-			ver:          cfg.Version,
+			serverVer:    cfg.Version,
 			contractAddr: erc20.ContractAddresses[cfg.Version][w.net].String(),
 		})
 	}
@@ -1606,10 +1635,10 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 		return fail(errors.New("Redeem: must be called with at least 1 redemption"))
 	}
 
-	var contractVer uint32 // require a consistent version since this is a single transaction
+	var serverVer uint32 // require a consistent version since this is a single transaction
 	secrets := make([][32]byte, 0, n)
 	var redeemedValue uint64
-	contracts := make([]*dex.SwapContractDetails, len(form.Redemptions))
+	details := make([]*dex.SwapContractDetails, len(form.Redemptions))
 	for i, redemption := range form.Redemptions {
 		// NOTE: redemption.Spends.SecretHash is a dup of the hash extracted
 		// from redemption.Spends.Contract. Even for scriptable UTXO assets, the
@@ -1620,10 +1649,10 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 			return fail(fmt.Errorf("Redeem: invalid versioned swap contract data: %w", err))
 		}
 		if i == 0 {
-			contractVer = ver
-		} else if contractVer != ver {
-			return fail(fmt.Errorf("Redeem: inconsistent contract versions in RedeemForm.Redemptions: "+
-				"%d != %d", contractVer, ver))
+			serverVer = ver
+		} else if serverVer != ver {
+			return fail(fmt.Errorf("Redeem: inconsistent server versions in RedeemForm.Redemptions: "+
+				"%d != %d", serverVer, ver))
 		}
 
 		// Use the contract's free public view function to validate the secret
@@ -1633,14 +1662,8 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 		var secret [32]byte
 		copy(secret[:], redemption.Secret)
 		secrets = append(secrets, secret)
-		val := redemption.SwapDetails.Value
-		deets := &dex.SwapContractDetails{
-			From:       w.addr.String(),
-			To:         redemption.Spends.Recipient,
-			Value:      val,
-			SecretHash: redemption.Spends.SecretHash,
-			LockTime:   uint64(redemption.Spends.Expiration.Unix()),
-		}
+		deets := redemption.SwapDetails
+		details[i] = deets
 		redeemable, err := w.isRedeemable(secret, deets, ver)
 		if err != nil {
 			return fail(fmt.Errorf("Redeem: failed to check if swap is redeemable: %w", err))
@@ -1650,7 +1673,7 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 				secretHash, secret))
 		}
 
-		step, _, _, err := w.status(w.ctx, deets, contractVer)
+		step, _, _, err := w.status(w.ctx, deets, serverVer)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error finding swap state: %w", err)
 		}
@@ -1659,12 +1682,10 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 			return nil, nil, 0, fmt.Errorf("cannot redeem swap in state %s", step)
 		}
 
-		redeemedValue += val
-
-		contracts[i] = deets
+		redeemedValue += deets.Value
 	}
 
-	g := w.gases(contractVer)
+	g := w.gases(serverVer)
 	if g == nil {
 		return fail(fmt.Errorf("no gas table"))
 	}
@@ -1680,7 +1701,7 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 	gasLimit, gasFeeCap := g.Redeem*n, form.FeeSuggestion
 	originalFundsReserved := gasLimit * gasFeeCap
 
-	gasEst, err := w.estimateRedeemGas(w.ctx, secrets, contracts, contractVer)
+	gasEst, err := w.estimateRedeemGas(w.ctx, secrets, details, serverVer)
 	if err != nil {
 		return fail(fmt.Errorf("error getting redemption estimate: %w", err))
 	}
@@ -1726,7 +1747,7 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 		return fail(fmt.Errorf("error fetching best header: %w", err))
 	}
 
-	tx, err := w.redeem(w.ctx, w.assetID, form.Redemptions, gasFeeCap, gasLimit, contractVer, nonceOverride)
+	tx, err := w.redeem(w.ctx, w.assetID, form.Redemptions, gasFeeCap, gasLimit, serverVer, nonceOverride)
 	if err != nil {
 		return fail(fmt.Errorf("Redeem: redeem error: %w", err))
 	}
@@ -1838,7 +1859,7 @@ func (w *assetWallet) tokenAllowance() (allowance *big.Int, err error) {
 
 // approveToken approves the token swap contract to spend tokens on behalf of
 // account handled by the wallet.
-func (w *assetWallet) approveToken(amount *big.Int, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
+func (w *assetWallet) approveToken(amount *big.Int, maxFeeRate uint64, serverVer uint32) (tx *types.Transaction, err error) {
 	w.nonceSendMtx.Lock()
 	defer w.nonceSendMtx.Unlock()
 	txOpts, err := w.node.txOpts(w.ctx, 0, approveGas, dexeth.GweiToWei(maxFeeRate))
@@ -1846,7 +1867,7 @@ func (w *assetWallet) approveToken(amount *big.Int, maxFeeRate uint64, contractV
 		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
 	}
 
-	return tx, w.withTokenContractor(w.assetID, contractVer, func(c tokenContractor) error {
+	return tx, w.withTokenContractor(w.assetID, serverVer, func(c tokenContractor) error {
 		tx, err = c.approve(txOpts, amount)
 		if err == nil {
 			w.log.Infof("Approval sent for %s at token address %s, nonce = %s",
@@ -2017,6 +2038,7 @@ func (w *assetWallet) AuditContract(coinID, contract, serializedTx dex.Bytes, re
 
 	var val uint64
 	var participant string
+	var initiator string
 	var lockTime time.Time
 	switch version {
 	case 0:
@@ -2032,6 +2054,20 @@ func (w *assetWallet) AuditContract(coinID, contract, serializedTx dex.Bytes, re
 		val = w.atomize(initiation.Value)
 		participant = initiation.Participant.String()
 		lockTime = initiation.LockTime
+	case 1:
+		details, err := dexeth.ParseInitiateDataV1(tx.Data())
+		if err != nil {
+			return nil, fmt.Errorf("AuditContract: failed to parse initiate data: %w", err)
+		}
+
+		deets, ok := details[secretHash]
+		if !ok {
+			return nil, errors.New("AuditContract: tx does not initiate secret hash")
+		}
+		val = deets.Value
+		participant = deets.To
+		initiator = deets.From
+		lockTime = time.Unix(int64(deets.LockTime), 0)
 	default:
 		return nil, fmt.Errorf("unknown contract version %d", version)
 	}
@@ -2054,6 +2090,7 @@ func (w *assetWallet) AuditContract(coinID, contract, serializedTx dex.Bytes, re
 
 	return &asset.AuditInfo{
 		Recipient:  participant,
+		Initiator:  initiator,
 		Expiration: lockTime,
 		Coin:       coin,
 		Contract:   contract,
@@ -2080,9 +2117,9 @@ type findRedemptionResult struct {
 
 // findRedemptionRequest is a request that is waiting on a redemption result.
 type findRedemptionRequest struct {
-	contractVer uint32
-	deets       *dex.SwapContractDetails
-	res         chan *findRedemptionResult
+	serverVer uint32
+	deets     *dex.SwapContractDetails
+	res       chan *findRedemptionResult
 }
 
 // sendFindRedemptionResult sends the result or logs a message if it cannot be
@@ -2110,13 +2147,13 @@ func (w *assetWallet) findRedemptionRequests() map[[32]byte]*findRedemptionReque
 // but un-redeemed and un-refunded, FindRedemption will block until a redemption
 // is seen.
 func (w *assetWallet) FindRedemption(ctx context.Context, _, contractData dex.Bytes, deets *dex.SwapContractDetails) (redemptionCoin, secret dex.Bytes, err error) {
-	contractVer, secretHash, err := dexeth.DecodeContractData(contractData)
+	serverVer, secretHash, err := dexeth.DecodeContractData(contractData)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// See if it's ready right away.
-	secret, err = w.findSecret(deets, contractVer)
+	secret, err = w.findSecret(deets, serverVer)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -2127,9 +2164,9 @@ func (w *assetWallet) FindRedemption(ctx context.Context, _, contractData dex.By
 
 	// Not ready. Queue the request.
 	req := &findRedemptionRequest{
-		contractVer: contractVer,
-		deets:       deets,
-		res:         make(chan *findRedemptionResult, 1),
+		serverVer: serverVer,
+		deets:     deets,
+		res:       make(chan *findRedemptionResult, 1),
 	}
 
 	w.findRedemptionMtx.Lock()
@@ -2164,10 +2201,10 @@ func (w *assetWallet) FindRedemption(ctx context.Context, _, contractData dex.By
 	return findRedemptionCoinID, res.secret[:], nil
 }
 
-func (w *assetWallet) findSecret(deets *dex.SwapContractDetails, contractVer uint32) ([]byte, error) {
+func (w *assetWallet) findSecret(deets *dex.SwapContractDetails, serverVer uint32) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(w.ctx, 10*time.Second)
 	defer cancel()
-	step, secret, _, err := w.status(ctx, deets, contractVer)
+	step, secret, _, err := w.status(ctx, deets, serverVer)
 	if err != nil {
 		return nil, err
 	}
@@ -2742,6 +2779,20 @@ func (w *assetWallet) monitorTx(tx *types.Transaction, blockSubmitted uint64) {
 func (w *assetWallet) resubmitRedemption(tx *types.Transaction, redeem *asset.Redemption, serverVer uint32, nonceOverride *uint64,
 	feeWallet *assetWallet, monitoredTx *monitoredTx) (*common.Hash, error) {
 
+	makeRedemption := func(deets *dex.SwapContractDetails, secret [32]byte) *asset.Redemption {
+		var secretHash [dexeth.SecretHashSize]byte
+		copy(secretHash[:], deets.SecretHash)
+		contractData := dexeth.EncodeContractData(serverVer, secretHash)
+		return &asset.Redemption{
+			Spends: &asset.AuditInfo{
+				Contract:   contractData,
+				SecretHash: deets.SecretHash[:],
+			},
+			SwapDetails: deets,
+			Secret:      secret[:],
+		}
+	}
+
 	var redemptions []*asset.Redemption
 	switch serverVer {
 	case 0:
@@ -2750,31 +2801,54 @@ func (w *assetWallet) resubmitRedemption(tx *types.Transaction, redeem *asset.Re
 			return nil, fmt.Errorf("failed to parse redeem data: %w", err)
 		}
 		redemptions = make([]*asset.Redemption, 0, len(parsedRedemptions))
-		// Whether or not a a swap can be redeemed is checked in Redeem, but here
-		// we filter out unredeemable swaps in case one of the swaps in the tx
-		// was refunded/redeemed but the others were not.
-		for _, r := range parsedRedemptions {
-			redeemable, err := w.isRedeemable(r.Secret, redeem.SwapDetails, serverVer)
+		if err := w.withContractor(serverVer, func(ci contractor) error {
+			c := ci.(interface {
+				swap(context.Context, [32]byte) (*dexeth.SwapState, error)
+			})
+			// Whether or not a a swap can be redeemed is checked in Redeem, but here
+			// we filter out unredeemable swaps in case one of the swaps in the tx
+			// was refunded/redeemed but the others were not.
+			for _, r := range parsedRedemptions {
+				swap, err := c.swap(context.TODO(), r.SecretHash)
+				if err != nil {
+					return err
+				} else if swap.State != dexeth.SSInitiated {
+					w.log.Warnf("swap %x is not redeemable. not resubmitting", r.SecretHash)
+					continue
+				}
+
+				redemptions = append(redemptions, makeRedemption(&dex.SwapContractDetails{
+					From:       swap.Initiator.String(),
+					To:         swap.Participant.String(),
+					LockTime:   uint64(swap.LockTime.Unix()),
+					SecretHash: r.SecretHash[:],
+					Value:      dexeth.WeiToGwei(swap.Value),
+				}, r.Secret))
+			}
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+
+	case 1:
+		redeems, err := dexeth.ParseRedeemDataV1(tx.Data())
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range redeems {
+			is, err := w.isRedeemable(r.Secret, r.Contract, serverVer)
 			if err != nil {
 				return nil, err
-			} else if !redeemable {
-				w.log.Warnf("swap %x is not redeemable. not resubmitting", r.SecretHash)
+			} else if !is {
+				w.log.Warnf("swap %x is not redeemable. not resubmitting", r.Contract.SecretHash)
 				continue
 			}
+			redemptions = append(redemptions, makeRedemption(r.Contract, r.Secret))
+		}
+	}
 
-			contractData := dexeth.EncodeContractData(serverVer, r.SecretHash)
-			redemptions = append(redemptions, &asset.Redemption{
-				Spends: &asset.AuditInfo{
-					Contract:   contractData,
-					SecretHash: r.SecretHash[:],
-				},
-				Secret: r.Secret[:],
-			})
-		}
-		if len(redemptions) == 0 {
-			return nil, fmt.Errorf("the swaps in tx %s are no longer redeemable. not resubmitting.", tx.Hash())
-		}
-	case 1:
+	if len(redemptions) == 0 {
+		return nil, fmt.Errorf("the swaps in tx %s are no longer redeemable. not resubmitting.", tx.Hash())
 	}
 
 	txs, _, _, err := w.Redeem(&asset.RedeemForm{
@@ -3067,6 +3141,7 @@ func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redeem *asset.Redempti
 			w.clearMonitoredTx(monitoredTx)
 			return confStatus(txConfsNeededToConfirm, txHash), nil
 		}
+
 		replacementTxHash, err := w.resubmitRedemption(tx, redeem, contractVer, nil, feeWallet, monitoredTx)
 		if err != nil {
 			return nil, err
@@ -3089,7 +3164,7 @@ func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redeem *asset.Redempti
 // checkFindRedemptions checks queued findRedemptionRequests.
 func (w *assetWallet) checkFindRedemptions() {
 	for secretHash, req := range w.findRedemptionRequests() {
-		secret, err := w.findSecret(req.deets, req.contractVer)
+		secret, err := w.findSecret(req.deets, req.serverVer)
 		if err != nil {
 			w.sendFindRedemptionResult(req, secretHash, nil, err)
 		} else if len(secret) > 0 {
@@ -3202,7 +3277,10 @@ func (w *TokenWallet) sendToAddr(addr common.Address, amt uint64, maxFeeRate *bi
 	})
 }
 
-// swap gets a swap keyed by secretHash in the contract.
+// status returns the current status of the swap. For v1 swaps, whether secret
+// or blockNumber or neither is set depends on the current step. For
+// SSNone and SSRefunded, neither is set. For SSInitiated, the blockNumber is
+// set. For SSRedeemed, the secret is set.
 func (w *assetWallet) status(ctx context.Context, deets *dex.SwapContractDetails, serverVer uint32) (step dexeth.SwapStep, secret [32]byte, blockNumber uint32, err error) {
 	return step, secret, blockNumber, w.withContractor(serverVer, func(c contractor) error {
 		step, secret, blockNumber, err = c.status(ctx, deets)
@@ -3215,7 +3293,7 @@ func (w *assetWallet) status(ctx context.Context, deets *dex.SwapContractDetails
 
 // initiate initiates multiple swaps in the same transaction.
 func (w *assetWallet) initiate(ctx context.Context, assetID uint32, details []*dex.SwapContractDetails,
-	maxFeeRate, gasLimit uint64, contractVer uint32) (tx *types.Transaction, err error) {
+	maxFeeRate, gasLimit uint64, serverVer uint32) (tx *types.Transaction, err error) {
 
 	var val uint64
 	if assetID == BipID {
@@ -3226,7 +3304,7 @@ func (w *assetWallet) initiate(ctx context.Context, assetID uint32, details []*d
 	w.nonceSendMtx.Lock()
 	defer w.nonceSendMtx.Unlock()
 	txOpts, _ := w.node.txOpts(ctx, val, gasLimit, dexeth.GweiToWei(maxFeeRate))
-	return tx, w.withContractor(contractVer, func(c contractor) error {
+	return tx, w.withContractor(serverVer, func(c contractor) error {
 		tx, err = c.initiate(txOpts, details)
 		return err
 	})
@@ -3242,8 +3320,8 @@ func (w *assetWallet) estimateInitGas(ctx context.Context, numSwaps int, contrac
 }
 
 // estimateRedeemGas checks the amount of gas that is used for the redemption.
-func (w *assetWallet) estimateRedeemGas(ctx context.Context, secrets [][32]byte, details []*dex.SwapContractDetails, contractVer uint32) (gas uint64, err error) {
-	return gas, w.withContractor(contractVer, func(c contractor) error {
+func (w *assetWallet) estimateRedeemGas(ctx context.Context, secrets [][32]byte, details []*dex.SwapContractDetails, serverVer uint32) (gas uint64, err error) {
+	return gas, w.withContractor(serverVer, func(c contractor) error {
 		gas, err = c.estimateRedeemGas(ctx, secrets, details)
 		return err
 	})
@@ -3289,7 +3367,8 @@ func (w *assetWallet) loadContractors() error {
 }
 
 // withContractor runs the provided function with the versioned contractor.
-func (w *assetWallet) withContractor(contractVer uint32, f func(contractor) error) error {
+func (w *assetWallet) withContractor(serverVer uint32, f func(contractor) error) error {
+	contractVer := contractVersion(serverVer)
 	if contractVer == contractVersionNewest {
 		var bestVer uint32
 		var bestContractor contractor
@@ -3309,8 +3388,8 @@ func (w *assetWallet) withContractor(contractVer uint32, f func(contractor) erro
 }
 
 // withTokenContractor runs the provided function with the tokenContractor.
-func (w *assetWallet) withTokenContractor(assetID, ver uint32, f func(tokenContractor) error) error {
-	return w.withContractor(ver, func(c contractor) error {
+func (w *assetWallet) withTokenContractor(assetID, serverVer uint32, f func(tokenContractor) error) error {
+	return w.withContractor(serverVer, func(c contractor) error {
 		tc, is := c.(tokenContractor)
 		if !is {
 			return fmt.Errorf("contractor for %d %T is not a tokenContractor", assetID, c)
@@ -3340,7 +3419,7 @@ func (w *assetWallet) estimateTransferGas(val uint64) (gas uint64, err error) {
 // redeem redeems a swap contract. Any on-chain failure, such as this secret not
 // matching the hash, will not cause this to error.
 func (w *assetWallet) redeem(ctx context.Context, assetID uint32, redemptions []*asset.Redemption,
-	maxFeeRate, gasLimit uint64, contractVer uint32, nonceOverride *uint64) (tx *types.Transaction, err error) {
+	maxFeeRate, gasLimit uint64, serverVer uint32, nonceOverride *uint64) (tx *types.Transaction, err error) {
 
 	w.nonceSendMtx.Lock()
 	defer w.nonceSendMtx.Unlock()
@@ -3353,7 +3432,7 @@ func (w *assetWallet) redeem(ctx context.Context, assetID uint32, redemptions []
 		txOpts.Nonce = new(big.Int).SetUint64(*nonceOverride)
 	}
 
-	return tx, w.withContractor(contractVer, func(c contractor) error {
+	return tx, w.withContractor(serverVer, func(c contractor) error {
 		tx, err = c.redeem(txOpts, redemptions)
 		return err
 	})
@@ -3362,10 +3441,10 @@ func (w *assetWallet) redeem(ctx context.Context, assetID uint32, redemptions []
 // refund refunds a swap contract using the account controlled by the wallet.
 // Any on-chain failure, such as the locktime not being past, will not cause
 // this to error.
-func (w *assetWallet) refund(deets *dex.SwapContractDetails, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
-	gas := w.gases(contractVer)
+func (w *assetWallet) refund(deets *dex.SwapContractDetails, maxFeeRate uint64, serverVer uint32) (tx *types.Transaction, err error) {
+	gas := w.gases(serverVer)
 	if gas == nil {
-		return nil, fmt.Errorf("no gas table for asset %d, version %d", w.assetID, contractVer)
+		return nil, fmt.Errorf("no gas table for server %d, version %d", w.assetID, serverVer)
 	}
 	w.nonceSendMtx.Lock()
 	defer w.nonceSendMtx.Unlock()
@@ -3374,22 +3453,22 @@ func (w *assetWallet) refund(deets *dex.SwapContractDetails, maxFeeRate uint64, 
 		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
 	}
 
-	return tx, w.withContractor(contractVer, func(c contractor) error {
+	return tx, w.withContractor(serverVer, func(c contractor) error {
 		tx, err = c.refund(txOpts, deets)
 		return err
 	})
 }
 
 // isRedeemable checks if the swap identified by secretHash is redeemable using secret.
-func (w *assetWallet) isRedeemable(secret [32]byte, deets *dex.SwapContractDetails, contractVer uint32) (redeemable bool, err error) {
-	return redeemable, w.withContractor(contractVer, func(c contractor) error {
+func (w *assetWallet) isRedeemable(secret [32]byte, deets *dex.SwapContractDetails, serverVer uint32) (redeemable bool, err error) {
+	return redeemable, w.withContractor(serverVer, func(c contractor) error {
 		redeemable, err = c.isRedeemable(secret, deets)
 		return err
 	})
 }
 
-func (w *assetWallet) isRefundable(deets *dex.SwapContractDetails, contractVer uint32) (refundable bool, err error) {
-	return refundable, w.withContractor(contractVer, func(c contractor) error {
+func (w *assetWallet) isRefundable(deets *dex.SwapContractDetails, serverVer uint32) (refundable bool, err error) {
+	return refundable, w.withContractor(serverVer, func(c contractor) error {
 		refundable, err = c.isRefundable(deets)
 		return err
 	})
@@ -3471,42 +3550,64 @@ func GetGasEstimates(ctx context.Context, cl *nodeClient, c contractor, maxSwaps
 		fmt.Printf("    %+v \n", stats.transfers)
 	}()
 
-	var approveTx, transferTx *types.Transaction
-	if isToken {
-		txOpts, err := cl.txOpts(ctx, 0, g.Approve*2, nil)
-		if err != nil {
-			return fmt.Errorf("error constructing signed tx opts for approve: %v", err)
-		}
-		approveTx, err = tokenContractor.approve(txOpts, new(big.Int).SetBytes(encode.RandomBytes(8)))
-		if err != nil {
-			return fmt.Errorf("error estimating approve gas: %v", err)
-		}
-		txOpts, err = cl.txOpts(ctx, 0, g.Transfer*2, nil)
-		if err != nil {
-			return fmt.Errorf("error constructing signed tx opts for transfer: %v", err)
-		}
-		transferTx, err = tokenContractor.transfer(txOpts, cl.address(), big.NewInt(1))
-		if err != nil {
-			return fmt.Errorf("error estimating transfer gas: %v", err)
-		}
-	}
-
 	for n := 1; n <= maxSwaps; n++ {
+		if isToken {
+			txOpts, err := cl.txOpts(ctx, 0, g.Approve*2, nil)
+			if err != nil {
+				return fmt.Errorf("error constructing signed tx opts for approve: %v", err)
+			}
+			approveTx, err := tokenContractor.approve(txOpts, new(big.Int).SetBytes(encode.RandomBytes(8)))
+			if err != nil {
+				return fmt.Errorf("error estimating approve gas: %v", err)
+			}
+			txOpts, err = cl.txOpts(ctx, 0, g.Transfer*2, nil)
+			if err != nil {
+				return fmt.Errorf("error constructing signed tx opts for transfer: %v", err)
+			}
+			transferTx, err := tokenContractor.transfer(txOpts, cl.address(), big.NewInt(1))
+			if err != nil {
+				return fmt.Errorf("error estimating transfer gas: %v", err)
+			}
+			waitForMined()
+			receipt, err := cl.transactionReceipt(ctx, approveTx.Hash())
+			if err != nil {
+				return err
+			}
+			if err := checkTxStatus(receipt, txOpts.GasLimit); err != nil {
+				return err
+			}
+			stats.approves = append(stats.approves, receipt.GasUsed)
+			receipt, err = cl.transactionReceipt(ctx, transferTx.Hash())
+			if err != nil {
+				return err
+			}
+			if err := checkTxStatus(receipt, txOpts.GasLimit); err != nil {
+				return err
+			}
+			stats.transfers = append(stats.transfers, receipt.GasUsed)
+		}
+
 		details := make([]*dex.SwapContractDetails, 0, n)
 		secrets := make([][32]byte, 0, n)
+		redemptions := make([]*asset.Redemption, 0, n)
 		for i := 0; i < n; i++ {
 			secretB := encode.RandomBytes(32)
 			var secret [32]byte
 			copy(secret[:], secretB)
 			secretHash := sha256.Sum256(secretB)
-			details = append(details, &dex.SwapContractDetails{
+			deets := &dex.SwapContractDetails{
 				To:         cl.address().String(),
 				From:       cl.address().String(),
 				Value:      1,
 				SecretHash: secretHash[:],
 				LockTime:   uint64(time.Now().Add(-time.Hour).Unix()),
-			})
+			}
+			details = append(details, deets)
 			secrets = append(secrets, secret)
+			redemptions = append(redemptions, &asset.Redemption{
+				SwapDetails: deets,
+				Secret:      secrets[i][:],
+			})
 		}
 
 		var optsVal uint64
@@ -3533,41 +3634,11 @@ func GetGasEstimates(ctx context.Context, cl *nodeClient, c contractor, maxSwaps
 		}
 		stats.swaps = append(stats.swaps, receipt.GasUsed)
 
-		if isToken {
-			receipt, err = cl.transactionReceipt(ctx, approveTx.Hash())
-			if err != nil {
-				return err
-			}
-			if err := checkTxStatus(receipt, txOpts.GasLimit); err != nil {
-				return err
-			}
-			stats.approves = append(stats.approves, receipt.GasUsed)
-			receipt, err = cl.transactionReceipt(ctx, transferTx.Hash())
-			if err != nil {
-				return err
-			}
-			if err := checkTxStatus(receipt, txOpts.GasLimit); err != nil {
-				return err
-			}
-			stats.transfers = append(stats.transfers, receipt.GasUsed)
-		}
-
-		// Estimate a refund
 		refundGas, err := c.estimateRefundGas(ctx, details[0])
 		if err != nil {
-			return fmt.Errorf("error estimate refund gas: %w", err)
+			return fmt.Errorf("error estimating refund gas: %w", err)
 		}
 		stats.refunds = append(stats.refunds, refundGas)
-
-		redemptions := make([]*asset.Redemption, 0, n)
-		for i, deets := range details {
-			redemptions = append(redemptions, &asset.Redemption{
-				Spends: &asset.AuditInfo{
-					SecretHash: deets.SecretHash,
-				},
-				Secret: secrets[i][:],
-			})
-		}
 
 		txOpts, _ = cl.txOpts(ctx, 0, g.RedeemN(n)*2, nil)
 		tx, err = c.redeem(txOpts, redemptions)

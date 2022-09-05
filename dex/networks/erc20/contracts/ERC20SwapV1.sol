@@ -6,7 +6,7 @@ pragma solidity = 0.8.15;
 // order to save on gas fees, a separate ERC20Swap contract is deployed
 // for each ERC20 token. After deployed, it keeps a map of swaps that
 // facilitates atomic swapping of ERC20 tokens with other crypto currencies
-// that support time locks. 
+// that support time locks.
 //
 // It accomplishes this by holding tokens acquired during a swap initiation
 // until conditions are met. Prior to initiating a swap, the initiator must
@@ -27,7 +27,7 @@ pragma solidity = 0.8.15;
 contract ERC20Swap {
     bytes4 private constant TRANSFER_FROM_SELECTOR = bytes4(keccak256("transferFrom(address,address,uint256)"));
     bytes4 private constant TRANSFER_SELECTOR = bytes4(keccak256("transfer(address,uint256)"));
-    
+
     address public immutable token_address;
 
     // State is a type that hold's a contract's state. Empty is the uninitiated
@@ -122,7 +122,7 @@ contract ERC20Swap {
         return r;
     }
 
-     // initiate initiates an array of Contracts.
+    // initiate initiates an array of Contracts.
     function initiate(Contract[] calldata contracts)
         public
         payable
@@ -141,7 +141,7 @@ contract ERC20Swap {
 
             record = bytes32(block.number);
             require(!secretValidates(record, c.secretHash), "hash collision");
-            
+
             swaps[k] = record;
 
             initVal += c.value * 1 gwei;
@@ -161,7 +161,7 @@ contract ERC20Swap {
         returns (bool)
     {
         (, bytes32 record, uint256 blockNum) = retrieveRecord(c);
-        return blockNum != 0 && blockNum <= block.number && !secretValidates(record, c.secretHash);
+        return blockNum != 0 && !secretValidates(record, c.secretHash);
     }
 
     // redeem redeems a Contract. It checks that the sender is not a contract,
@@ -223,7 +223,7 @@ contract ERC20Swap {
         (bytes32 k, bytes32 record, uint256 blockNum) = retrieveRecord(c);
 
         // Is this swap initialized?
-        require(blockNum > 0 && blockNum < block.number, "swap not active");
+        require(blockNum > 0 && blockNum <= block.number, "swap not active");
 
         // Is it already redeemed?
         require(!secretValidates(record, c.secretHash), "swap already redeemed");

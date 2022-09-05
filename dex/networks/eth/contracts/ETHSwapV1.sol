@@ -151,7 +151,7 @@ contract ETHSwap {
         returns (bool)
     {
         (, bytes32 record, uint256 blockNum) = retrieveRecord(c);
-        return blockNum != 0 && blockNum <= block.number && !secretValidates(record, c.secretHash);
+        return blockNum != 0 && !secretValidates(record, c.secretHash);
     }
 
     // redeem redeems a Contract. It checks that the sender is not a contract,
@@ -210,7 +210,7 @@ contract ETHSwap {
         (bytes32 k, bytes32 record, uint256 blockNum) = retrieveRecord(c);
 
         // Is this swap initialized?
-        require(blockNum > 0 && blockNum < block.number, "swap not active");
+        require(blockNum > 0 && blockNum <= block.number, "swap not active");
 
         // Is it already redeemed?
         require(!secretValidates(record, c.secretHash), "swap already redeemed");

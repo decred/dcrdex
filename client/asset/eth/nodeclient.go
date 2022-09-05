@@ -20,7 +20,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/les"
 	"github.com/ethereum/go-ethereum/node"
@@ -32,17 +31,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus/misc"
 )
 
-const (
-	contractVersionNewest = ^uint32(0)
-	approveGas            = 4e5
-)
-
 var (
-	// https://github.com/ethereum/go-ethereum/blob/16341e05636fd088aa04a27fca6dc5cda5dbab8f/eth/backend.go#L110-L113
-	// ultimately results in a minimum fee rate by the filter applied at
-	// https://github.com/ethereum/go-ethereum/blob/4ebeca19d739a243dc0549bcaf014946cde95c4f/core/tx_pool.go#L626
-	minGasPrice = ethconfig.Defaults.Miner.GasPrice
-
 	// Check that nodeClient satisfies the ethFetcher interface.
 	_ ethFetcher = (*nodeClient)(nil)
 )
@@ -150,9 +139,7 @@ func (n *nodeClient) balanceAt(ctx context.Context, addr common.Address, bn rpc.
 	if err != nil {
 		return nil, err
 	}
-	b := state.GetBalance(addr)
-	fmt.Println("--balanceAt", b)
-	return b, nil
+	return state.GetBalance(addr), nil
 }
 
 func (n *nodeClient) addressBalance(ctx context.Context, addr common.Address) (*big.Int, error) {

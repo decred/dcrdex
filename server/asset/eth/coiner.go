@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"decred.org/dcrdex/dex"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"decred.org/dcrdex/server/asset"
 	"github.com/ethereum/go-ethereum"
@@ -34,7 +35,7 @@ type baseCoin struct {
 
 type swapCoin struct {
 	*baseCoin
-	swap *dexeth.ContractV1
+	swap *dex.SwapContractDetails
 }
 
 type redeemCoin struct {
@@ -223,5 +224,5 @@ func (c *baseCoin) FeeRate() uint64 {
 
 // Value returns the value of one swap in order to validate during processing.
 func (c *swapCoin) Value() uint64 {
-	return c.swap.SwapContractDetails.Value
+	return c.swap.Value
 }

@@ -284,6 +284,17 @@ type tContractor struct {
 	}
 }
 
+func (c *tContractor) swap(ctx context.Context, secretHash [32]byte) (*dexeth.SwapState, error) {
+	if c.swapErr != nil {
+		return nil, c.swapErr
+	}
+	swap, ok := c.swapMap[secretHash]
+	if !ok {
+		return nil, errors.New("swap not in map")
+	}
+	return swap, nil
+}
+
 func (c *tContractor) status(ctx context.Context, contract *dex.SwapContractDetails) (step dexeth.SwapStep, secret [32]byte, blockNumber uint32, err error) {
 	if c.swapErr != nil {
 		return 0, secret, 0, c.swapErr
@@ -1885,6 +1896,19 @@ func testRedeem(t *testing.T, assetID uint32) {
 		Number: big.NewInt(bestBlock),
 	}
 
+	newRedeem := func(idx int) *asset.Redemption {
+		return &asset.Redemption{
+			Spends: &asset.AuditInfo{
+				Contract: dexeth.EncodeContractData(contractVer, secretHashes[idx]),
+			},
+			SwapDetails: &dex.SwapContractDetails{
+				SecretHash: secretHashes[idx][:],
+				Value:      1e9,
+			},
+			Secret: secrets[idx][:],
+		}
+	}
+
 	tests := []struct {
 		name              string
 		form              asset.RedeemForm
@@ -1905,30 +1929,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			baseFee:           dexeth.GweiToWei(100),
 			expectedGasFeeCap: dexeth.GweiToWei(100),
 			form: asset.RedeemForm{
-				Redemptions: []*asset.Redemption{
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
-							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
-							Coin: &coin{
-								id:    randomHash(),
-								value: 1e9,
-							},
-						},
-						Secret: secrets[0][:],
-					},
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
-							SecretHash: secretHashes[1][:],
-							Coin: &coin{
-								id:    randomHash(),
-								value: 1e9,
-							},
-						},
-						Secret: secrets[1][:],
-					},
-				},
+				Redemptions:   []*asset.Redemption{newRedeem(0), newRedeem(1)},
 				FeeSuggestion: 100,
 			},
 		},
@@ -1941,30 +1942,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			expectedGasFeeCap: dexeth.GweiToWei(100),
 			redeemGasOverride: &higherGasEstimate,
 			form: asset.RedeemForm{
-				Redemptions: []*asset.Redemption{
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
-							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
-							Coin: &coin{
-								id:    randomHash(),
-								value: 1e9,
-							},
-						},
-						Secret: secrets[0][:],
-					},
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
-							SecretHash: secretHashes[1][:],
-							Coin: &coin{
-								id:    randomHash(),
-								value: 1e9,
-							},
-						},
-						Secret: secrets[1][:],
-					},
-				},
+				Redemptions:   []*asset.Redemption{newRedeem(0), newRedeem(1)},
 				FeeSuggestion: 100,
 			},
 		},
@@ -1977,30 +1955,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			expectedGasFeeCap: dexeth.GweiToWei(100),
 			redeemGasOverride: &doubleGasEstimate,
 			form: asset.RedeemForm{
-				Redemptions: []*asset.Redemption{
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
-							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
-							Coin: &coin{
-								id:    randomHash(),
-								value: 1e9,
-							},
-						},
-						Secret: secrets[0][:],
-					},
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
-							SecretHash: secretHashes[1][:],
-							Coin: &coin{
-								id:    randomHash(),
-								value: 1e9,
-							},
-						},
-						Secret: secrets[1][:],
-					},
-				},
+				Redemptions:   []*asset.Redemption{newRedeem(0), newRedeem(1)},
 				FeeSuggestion: 100,
 			},
 		},
@@ -2012,30 +1967,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			baseFee:           dexeth.GweiToWei(100),
 			redeemGasOverride: &moreThanDoubleGasEstimate,
 			form: asset.RedeemForm{
-				Redemptions: []*asset.Redemption{
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
-							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
-							Coin: &coin{
-								id:    randomHash(),
-								value: 1e9,
-							},
-						},
-						Secret: secrets[0][:],
-					},
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
-							SecretHash: secretHashes[1][:],
-							Coin: &coin{
-								id:    randomHash(),
-								value: 1e9,
-							},
-						},
-						Secret: secrets[1][:],
-					},
-				},
+				Redemptions:   []*asset.Redemption{newRedeem(0), newRedeem(1)},
 				FeeSuggestion: 100,
 			},
 		},
@@ -2047,30 +1979,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			baseFee:           dexeth.GweiToWei(100),
 			redeemGasOverride: &higherGasEstimate,
 			form: asset.RedeemForm{
-				Redemptions: []*asset.Redemption{
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
-							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
-							Coin: &coin{
-								id:    randomHash(),
-								value: 1e9,
-							},
-						},
-						Secret: secrets[0][:],
-					},
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
-							SecretHash: secretHashes[1][:],
-							Coin: &coin{
-								id:    randomHash(),
-								value: 1e9,
-							},
-						},
-						Secret: secrets[1][:],
-					},
-				},
+				Redemptions:   []*asset.Redemption{newRedeem(0), newRedeem(1)},
 				FeeSuggestion: 100,
 			},
 		},
@@ -2083,30 +1992,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			expectedGasFeeCap: dexeth.GweiToWei(300),
 			redeemGasOverride: &higherGasEstimate,
 			form: asset.RedeemForm{
-				Redemptions: []*asset.Redemption{
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
-							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
-							Coin: &coin{
-								id:    randomHash(),
-								value: 1e9,
-							},
-						},
-						Secret: secrets[0][:],
-					},
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
-							SecretHash: secretHashes[1][:],
-							Coin: &coin{
-								id:    randomHash(),
-								value: 1e9,
-							},
-						},
-						Secret: secrets[1][:],
-					},
-				},
+				Redemptions:   []*asset.Redemption{newRedeem(0), newRedeem(1)},
 				FeeSuggestion: 100,
 			},
 		},
@@ -2119,30 +2005,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			expectedGasFeeCap: dexeth.GweiToWei(298),
 			redeemGasOverride: &higherGasEstimate,
 			form: asset.RedeemForm{
-				Redemptions: []*asset.Redemption{
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
-							SecretHash: secretHashes[0][:], // redundant for all current assets, unused with eth
-							Coin: &coin{
-								id:    randomHash(),
-								value: 1e9,
-							},
-						},
-						Secret: secrets[0][:],
-					},
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
-							SecretHash: secretHashes[1][:],
-							Coin: &coin{
-								id:    randomHash(),
-								value: 1e9,
-							},
-						},
-						Secret: secrets[1][:],
-					},
-				},
+				Redemptions:   []*asset.Redemption{newRedeem(0), newRedeem(1)},
 				FeeSuggestion: 100,
 			},
 		},
@@ -2154,30 +2017,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			baseFee:      dexeth.GweiToWei(100),
 
 			form: asset.RedeemForm{
-				Redemptions: []*asset.Redemption{
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
-							SecretHash: secretHashes[0][:],
-							Coin: &coin{
-								id:    randomHash(),
-								value: 1e9,
-							},
-						},
-						Secret: secrets[0][:],
-					},
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
-							SecretHash: secretHashes[1][:],
-							Coin: &coin{
-								id:    randomHash(),
-								value: 1e9,
-							},
-						},
-						Secret: secrets[1][:],
-					},
-				},
+				Redemptions:   []*asset.Redemption{newRedeem(0), newRedeem(1)},
 				FeeSuggestion: 100,
 			},
 		},
@@ -2189,30 +2029,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			baseFee:         dexeth.GweiToWei(100),
 			isRedeemableErr: errors.New(""),
 			form: asset.RedeemForm{
-				Redemptions: []*asset.Redemption{
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
-							SecretHash: secretHashes[0][:],
-							Coin: &coin{
-								id:    randomHash(),
-								value: 1e9,
-							},
-						},
-						Secret: secrets[0][:],
-					},
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[1]),
-							SecretHash: secretHashes[1][:],
-							Coin: &coin{
-								id:    randomHash(),
-								value: 1e9,
-							},
-						},
-						Secret: secrets[1][:],
-					},
-				},
+				Redemptions:   []*asset.Redemption{newRedeem(0), newRedeem(1)},
 				FeeSuggestion: 100,
 			},
 		},
@@ -2224,19 +2041,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			ethBal:       dexeth.GweiToWei(10e9),
 			baseFee:      dexeth.GweiToWei(100),
 			form: asset.RedeemForm{
-				Redemptions: []*asset.Redemption{
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[0]),
-							SecretHash: secretHashes[0][:],
-							Coin: &coin{
-								id:    randomHash(),
-								value: 1e9,
-							},
-						},
-						Secret: secrets[0][:],
-					},
-				},
+				Redemptions:   []*asset.Redemption{newRedeem(0)},
 				FeeSuggestion: 200,
 			},
 		},
@@ -2247,19 +2052,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			ethBal:       dexeth.GweiToWei(10e9),
 			baseFee:      dexeth.GweiToWei(100),
 			form: asset.RedeemForm{
-				Redemptions: []*asset.Redemption{
-					{
-						Spends: &asset.AuditInfo{
-							Contract:   dexeth.EncodeContractData(contractVer, secretHashes[2]),
-							SecretHash: secretHashes[2][:],
-							Coin: &coin{
-								id:    randomHash(),
-								value: 1e9,
-							},
-						},
-						Secret: secrets[2][:],
-					},
-				},
+				Redemptions:   []*asset.Redemption{newRedeem(2)},
 				FeeSuggestion: 100,
 			},
 		},
@@ -3817,7 +3610,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 			},
 			swapMap: map[[32]byte]*dexeth.SwapState{
 				secretHashes[0]: {
-					State: dexeth.SSRedeemed,
+					State: dexeth.SSInitiated,
 				},
 			},
 			monitoredTxs: map[common.Hash]*monitoredTx{
@@ -4319,7 +4112,6 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 				t.Fatalf("%s: error storing monitored tx: %v", test.name, err)
 			}
 		}
-
 		result, err := w.ConfirmRedemption(test.coinID, test.redemption)
 		if test.expectErr {
 			if err == nil {
@@ -4331,7 +4123,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 			continue
 		}
 		if err != nil {
-			t.Fatalf("%s: unexpected error %v", test.name, err)
+			t.Fatalf("%s: unexpected error: %v", test.name, err)
 		}
 
 		// Check that the correct swaps were resubmitted

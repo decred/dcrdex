@@ -184,16 +184,21 @@ func (t *trackedTrade) theirContract(m *matchTracker) *dex.SwapContractDetails {
 	}
 
 	matchTime := m.matchTime()
-	lockTime := matchTime.Add(t.lockTimeMaker).UTC().Unix()
+	lockTime := matchTime.Add(t.lockTimeMaker).Unix()
 	if m.Side == order.Maker {
-		lockTime = matchTime.Add(t.lockTimeTaker).UTC().Unix()
+		lockTime = matchTime.Add(t.lockTimeTaker).Unix()
 	}
 
-	from, to := m.Address, t.Trade().Address
+	var initiator string
+	// In practice, counterSwap should never be nil in the places we need it.
+	// Do a sanity check anyway.
+	if m.counterSwap != nil {
+		initiator = m.counterSwap.Initiator
+	}
 
 	return &dex.SwapContractDetails{
-		From:       from,
-		To:         to,
+		From:       initiator,
+		To:         t.Trade().Address,
 		Value:      value,
 		SecretHash: m.MetaData.Proof.SecretHash,
 		LockTime:   uint64(lockTime),
@@ -207,16 +212,14 @@ func (t *trackedTrade) ourContract(m *matchTracker) *dex.SwapContractDetails {
 	}
 
 	matchTime := m.matchTime()
-	lockTime := matchTime.Add(t.lockTimeTaker).UTC().Unix()
+	lockTime := matchTime.Add(t.lockTimeTaker).Unix()
 	if m.Side == order.Maker {
-		lockTime = matchTime.Add(t.lockTimeMaker).UTC().Unix()
+		lockTime = matchTime.Add(t.lockTimeMaker).Unix()
 	}
 
-	from, to := t.Trade().Address, m.Address
-
 	return &dex.SwapContractDetails{
-		From:       from,
-		To:         to,
+		From:       t.Trade().FromAccount(),
+		To:         m.Address,
 		Value:      value,
 		SecretHash: m.MetaData.Proof.SecretHash,
 		LockTime:   uint64(lockTime),
@@ -1988,6 +1991,7 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 		matchTime := match.matchTime()
 		lockTime := matchTime.Add(t.lockTimeTaker).UTC().Unix()
 		if match.Side == order.Maker {
+			lockTime = matchTime.Add(t.lockTimeMaker).UTC().Unix()
 			match.MetaData.Proof.Secret = encode.RandomBytes(32)
 			secretHash := sha256.Sum256(match.MetaData.Proof.Secret)
 			match.MetaData.Proof.SecretHash = secretHash[:]
@@ -2335,8 +2339,9 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 	redemptions := make([]*asset.Redemption, 0, len(matches))
 	for _, match := range matches {
 		redemptions = append(redemptions, &asset.Redemption{
-			Spends: match.counterSwap,
-			Secret: match.MetaData.Proof.Secret,
+			Spends:      match.counterSwap,
+			SwapDetails: t.theirContract(match),
+			Secret:      match.MetaData.Proof.Secret,
 		})
 	}
 
@@ -2400,7 +2405,7 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 			}
 			match.delayTicks(waitTime)
 		}
-		errs.add("error sending redeem transaction: %v", err)
+		errs.add("error redeeming: %v", err)
 		return
 	}
 

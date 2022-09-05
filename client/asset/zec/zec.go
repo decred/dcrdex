@@ -101,6 +101,7 @@ var (
 			ConfigOpts:        configOpts,
 			NoAuth:            true,
 		}},
+		ProtocolVersions: []uint32{0},
 	}
 )
 

@@ -178,6 +178,10 @@ type Token struct {
 type WalletInfo struct {
 	// Name is the display name for the currency, e.g. "Decred"
 	Name string `json:"name"`
+	// ProtocolVersions is the Wallet's accepted server version numbers.
+	// TODO: Handle unsupported protocols at the UI (instruct user to update
+	// dexc).
+	ProtocolVersions []uint32 `json:"protocolVersions"`
 	// Version is the Wallet's version number, which is used to signal when
 	// major changes are made to internal details such as coin ID encoding and
 	// contract structure that must be common to a server's.
@@ -646,6 +650,7 @@ type Receipt interface {
 type AuditInfo struct {
 	// Recipient is the string-encoded recipient address.
 	Recipient string
+	Initiator string
 	// Expiration is the unix timestamp of the contract time lock expiration.
 	Expiration time.Time
 	// Coin is the coin that contains the contract.

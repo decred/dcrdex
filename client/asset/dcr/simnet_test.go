@@ -274,7 +274,7 @@ func runTest(t *testing.T, splitTx bool) {
 	confContract := receipts[0].Contract()
 	checkConfs := func(n uint32, expSpent bool) {
 		t.Helper()
-		confs, spent, err := rig.beta().SwapConfirmations(tCtx, confCoin.ID(), confContract, tStart)
+		confs, spent, err := rig.beta().SwapConfirmations(tCtx, confCoin.ID(), confContract, tStart, nil)
 		if err != nil {
 			t.Fatalf("error getting %d confs: %v", n, err)
 		}
@@ -324,7 +324,7 @@ func runTest(t *testing.T, splitTx bool) {
 		if swapOutput.Value() != swapVal {
 			t.Fatalf("wrong contract value. wanted %d, got %d", swapVal, swapOutput.Value())
 		}
-		confs, spent, err := rig.alpha().SwapConfirmations(context.TODO(), swapOutput.ID(), receipt.Contract(), tStart)
+		confs, spent, err := rig.alpha().SwapConfirmations(context.TODO(), swapOutput.ID(), receipt.Contract(), tStart, nil)
 		if err != nil {
 			t.Fatalf("error getting confirmations: %v", err)
 		}
@@ -364,7 +364,7 @@ func runTest(t *testing.T, splitTx bool) {
 		waitNetwork()
 		ctx, cancel := context.WithDeadline(tCtx, time.Now().Add(time.Second*5))
 		defer cancel()
-		_, checkKey, err := rig.beta().FindRedemption(ctx, swapReceipt.Coin().ID(), nil)
+		_, checkKey, err := rig.beta().FindRedemption(ctx, swapReceipt.Coin().ID(), nil, nil)
 		if err != nil {
 			t.Fatalf("error finding unconfirmed redemption: %v", err)
 		}
@@ -384,7 +384,7 @@ func runTest(t *testing.T, splitTx bool) {
 	}
 	ctx, cancel2 := context.WithDeadline(tCtx, time.Now().Add(time.Second*5))
 	defer cancel2()
-	_, _, err = rig.beta().FindRedemption(ctx, swapReceipt.Coin().ID(), nil)
+	_, _, err = rig.beta().FindRedemption(ctx, swapReceipt.Coin().ID(), nil, nil)
 	if err != nil {
 		t.Fatalf("error finding confirmed redemption: %v", err)
 	}
@@ -420,7 +420,7 @@ func runTest(t *testing.T, splitTx bool) {
 	swapReceipt = receipts[0]
 
 	waitNetwork()
-	_, err = rig.beta().Refund(swapReceipt.Coin().ID(), swapReceipt.Contract(), tDCR.MaxFeeRate/4)
+	_, err = rig.beta().Refund(swapReceipt.Coin().ID(), swapReceipt.Contract(), nil, tDCR.MaxFeeRate/4)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}

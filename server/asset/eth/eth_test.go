@@ -104,9 +104,6 @@ var (
 			Secret: 87eac09638c0c38b4e735b79f053cb869167ee770640ac5df5c4ab030813122a
 		}]
 	*/
-	// redeemSecretHashA = mustParseHex("99d971975c09331eb00f5e0dc1eaeca9bf4ee2d086d3fe1de489f920007d6546")
-	// redeemSecretHashB = mustParseHex("ebdc4c31b88d0c8f4d644591a8e00e92b607f920ad8050deb7c7469767d9c561")
-	// redeemSecretB     = mustParseHex("87eac09638c0c38b4e735b79f053cb869167ee770640ac5df5c4ab030813122a")
 )
 
 func mustParseHex(s string) []byte {
@@ -170,7 +167,7 @@ func (n *testNode) suggestGasTipCap(ctx context.Context) (*big.Int, error) {
 	return n.suggGasTipCap, n.suggGasTipCapErr
 }
 
-func (n *testNode) status(ctx context.Context, assetID uint32, contract *asset.Contract) (dexeth.SwapStep, [32]byte, uint32, error) {
+func (n *testNode) status(ctx context.Context, assetID uint32, contract *dex.SwapContractDetails) (dexeth.SwapStep, [32]byte, uint32, error) {
 	return n.swp.State, n.swp.Secret, uint32(n.swp.BlockHeight), n.swpErr
 }
 
@@ -218,7 +215,10 @@ func TestMain(m *testing.M) {
 	tCtx, shutdown = context.WithCancel(context.Background())
 	doIt := func() int {
 		defer shutdown()
+		dexeth.ContractAddresses[0][dex.Simnet] = common.BytesToAddress(encode.RandomBytes(20))
+		dexeth.ContractAddresses[1][dex.Simnet] = common.BytesToAddress(encode.RandomBytes(20))
 		dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts[0].Address = common.BytesToAddress(encode.RandomBytes(20))
+		dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts[1].Address = common.BytesToAddress(encode.RandomBytes(20))
 		return m.Run()
 	}
 	os.Exit(doIt())
@@ -603,13 +603,13 @@ func TestRedemption(t *testing.T) {
 	}{{
 		name:       "ok",
 		tx:         tTx(gasPrice, gasTipCap, 0, contractAddr, redeemCalldata),
-		contractID: dexeth.EncodeContractData(0, secretHash),
+		contractID: dexeth.EncodeContractData(version, secretHash),
 		coinID:     txHash[:],
 		swp:        tSwap(0, 0, 0, secret, dexeth.SSRedeemed, receiverAddr),
 	}, {
 		name:       "new coiner error, wrong tx type",
 		tx:         tTx(gasPrice, gasTipCap, 0, contractAddr, redeemCalldata),
-		contractID: dexeth.EncodeContractData(0, secretHash),
+		contractID: dexeth.EncodeContractData(version, secretHash),
 		coinID:     txHash[1:],
 		wantErr:    true,
 	}, {
@@ -706,14 +706,16 @@ func testValidateContract(t *testing.T, assetID uint32) {
 		wantErr    bool
 	}{{
 		name:       "ok",
+		ver:        1,
 		secretHash: make([]byte, dexeth.SecretHashSize),
 	}, {
 		name:       "wrong size",
+		ver:        1,
 		secretHash: make([]byte, dexeth.SecretHashSize-1),
 		wantErr:    true,
 	}, {
 		name:       "wrong version",
-		ver:        1,
+		ver:        0,
 		secretHash: make([]byte, dexeth.SecretHashSize),
 		wantErr:    true,
 	}}

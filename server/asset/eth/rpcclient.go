@@ -12,8 +12,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
-	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
-	"decred.org/dcrdex/server/asset"
+	swapv1 "decred.org/dcrdex/dex/networks/eth/contracts/v1"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -75,11 +74,11 @@ func (c *rpcclient) connect(ctx context.Context) error {
 		return fmt.Errorf("no contract address for eth version %d on %s", 0, c.net)
 	}
 
-	es, err := swapv0.NewETHSwap(contractAddr, c.ec)
+	es, err := swapv1.NewETHSwap(contractAddr, c.ec)
 	if err != nil {
 		return fmt.Errorf("unable to find swap contract: %v", err)
 	}
-	c.swapContract = &swapSourceV0{es}
+	c.swapContract = &swapSourceV1{es}
 	c.caller = client
 	return nil
 }
@@ -140,23 +139,15 @@ func (c *rpcclient) blockNumber(ctx context.Context) (uint64, error) {
 }
 
 // swap gets a swap keyed by secretHash in the contract.
-func (c *rpcclient) status(ctx context.Context, assetID uint32, contract *asset.Contract) (step dexeth.SwapStep, secret [32]byte, blockNumber uint32, err error) {
+func (c *rpcclient) status(ctx context.Context, assetID uint32, deets *dex.SwapContractDetails) (step dexeth.SwapStep, secret [32]byte, blockNumber uint32, err error) {
 	var secretHash [32]byte
-	copy(secretHash[:], contract.SecretHash)
+	copy(secretHash[:], deets.SecretHash)
 	if assetID == BipID {
-		swap, err := c.swapContract.Swap(ctx, secretHash)
-		if err != nil {
-			return 0, secret, 0, err
-		}
-		return swap.State, swap.Secret, uint32(swap.BlockHeight), nil
+		return c.swapContract.Status(ctx, deets)
 	}
 	return step, secret, blockNumber, c.withTokener(assetID, func(tkn *tokener) error {
-		swap, err := tkn.Swap(ctx, secretHash)
-		if err != nil {
-			return err
-		}
-		step, secret, blockNumber = swap.State, swap.Secret, uint32(swap.BlockHeight)
-		return nil
+		step, secret, blockNumber, err = tkn.Status(ctx, deets)
+		return err
 	})
 }
 

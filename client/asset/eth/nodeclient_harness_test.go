@@ -28,10 +28,12 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"math/rand"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -105,20 +107,20 @@ var (
 	participantAcct             *accounts.Account
 	participantEthClient        *nodeClient
 	ethSwapContractAddr         common.Address
-	tokenSwapContractAddr       common.Address
-	testTokenContractAddr       common.Address
 	simnetID                    int64 = 42
 	simnetContractor            contractor
 	participantContractor       contractor
 	simnetTokenContractor       tokenContractor
 	participantTokenContractor  tokenContractor
-	ethGases                    = dexeth.VersionedGases[0]
-	tokenGases                  = &dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts[0].Gas
+	ethGases                    *dexeth.Gases
+	tokenGases                  *dexeth.Gases
 	testnetSecPerBlock          = 15 * time.Second
 	// secPerBlock is one for simnet, because it takes one second to mine a
 	// block currently. Is set in code to testnetSecPerBlock if runing on
 	// testnet.
 	secPerBlock = time.Second
+	v1          bool
+	ver         uint32
 )
 
 func newContract(stamp uint64, secretHash [32]byte, val uint64) *asset.Contract {
@@ -130,10 +132,14 @@ func newContract(stamp uint64, secretHash [32]byte, val uint64) *asset.Contract 
 	}
 }
 
-func newRedeem(secret, secretHash [32]byte) *asset.Redemption {
+func newRedeem(secret, secretHash [32]byte, valg, lockTime uint64) *asset.Redemption {
 	return &asset.Redemption{
-		Spends: &asset.AuditInfo{
+		SwapDetails: &dex.SwapContractDetails{
+			From:       ethClient.address().String(),
+			To:         participantEthClient.address().String(),
+			LockTime:   lockTime,
 			SecretHash: secretHash[:],
+			Value:      valg,
 		},
 		Secret: secret[:],
 	}
@@ -223,11 +229,11 @@ func runSimnet(m *testing.M) (int, error) {
 
 	// ETH swap contract.
 	token := dexeth.Tokens[testTokenID].NetTokens[dex.Simnet]
-	fmt.Printf("ETH swap contract address is %v\n", dexeth.ContractAddresses[0][dex.Simnet])
-	fmt.Printf("Token swap contract addr is %v\n", token.SwapContracts[0].Address)
+	fmt.Printf("ETH swap contract address is %v\n", dexeth.ContractAddresses[ver][dex.Simnet])
+	fmt.Printf("Token swap contract addr is %v\n", token.SwapContracts[ver].Address)
 	fmt.Printf("Test token contract addr is %v\n", token.Address)
 
-	ethSwapContractAddr = dexeth.ContractAddresses[0][dex.Simnet]
+	ethSwapContractAddr = dexeth.ContractAddresses[ver][dex.Simnet]
 
 	err = setupWallet(simnetWalletDir, simnetWalletSeed, "localhost:30355", dex.Simnet)
 	if err != nil {
@@ -286,24 +292,10 @@ func runSimnet(m *testing.M) (int, error) {
 	participantAcct = &accts[0]
 	participantAddr = participantAcct.Address
 
-	if simnetContractor, err = newV0Contractor(dex.Simnet, simnetAddr, ethClient.contractBackend()); err != nil {
-		return 1, fmt.Errorf("newV0Contractor error: %w", err)
-	}
-	if participantContractor, err = newV0Contractor(dex.Simnet, participantAddr, participantEthClient.contractBackend()); err != nil {
-		return 1, fmt.Errorf("participant newV0Contractor error: %w", err)
-	}
-
-	if simnetTokenContractor, err = newV0TokenContractor(dex.Simnet, testTokenID, simnetAddr, ethClient.contractBackend()); err != nil {
-		return 1, fmt.Errorf("newV0TokenContractor error: %w", err)
-	}
-
-	// I don't know why this is needed for the participant client but not
-	// the initiator. Without this, we'll get a bind.ErrNoCode from
-	// (*BoundContract).Call while calling (*ERC20Swap).TokenAddress.
-	time.Sleep(time.Second)
-
-	if participantTokenContractor, err = newV0TokenContractor(dex.Simnet, testTokenID, participantAddr, participantEthClient.contractBackend()); err != nil {
-		return 1, fmt.Errorf("participant newV0TokenContractor error: %w", err)
+	if v1 {
+		prepareV1Contractors()
+	} else {
+		prepareV0Contractors()
 	}
 
 	if err := ethClient.unlock(pw); err != nil {
@@ -374,7 +366,7 @@ func runTestnet(m *testing.M) (int, error) {
 		return 1, fmt.Errorf("error creating testnet participant wallet dir: %v", err)
 	}
 	secPerBlock = testnetSecPerBlock
-	ethSwapContractAddr = dexeth.ContractAddresses[0][dex.Testnet]
+	ethSwapContractAddr = dexeth.ContractAddresses[ver][dex.Testnet]
 	fmt.Printf("ETH swap contract address is %v\n", ethSwapContractAddr)
 	err = setupWallet(testnetWalletDir, testnetWalletSeed, "localhost:30355", dex.Testnet)
 	if err != nil {
@@ -455,10 +447,15 @@ func runTestnet(m *testing.M) (int, error) {
 	participantAcct = &accts[0]
 	participantAddr = participantAcct.Address
 
-	if simnetContractor, err = newV0Contractor(dex.Testnet, simnetAddr, ethClient.contractBackend()); err != nil {
+	c := newV0Contractor
+	if ver == 1 {
+		c = newV1Contractor
+	}
+
+	if simnetContractor, err = c(dex.Testnet, simnetAddr, ethClient.contractBackend()); err != nil {
 		return 1, fmt.Errorf("newV0Contractor error: %w", err)
 	}
-	if participantContractor, err = newV0Contractor(dex.Testnet, participantAddr, participantEthClient.contractBackend()); err != nil {
+	if participantContractor, err = c(dex.Testnet, participantAddr, participantEthClient.contractBackend()); err != nil {
 		return 1, fmt.Errorf("participant newV0Contractor error: %w", err)
 	}
 
@@ -485,8 +482,62 @@ func runTestnet(m *testing.M) (int, error) {
 	return code, nil
 }
 
+func prepareV0Contractors() (err error) {
+	return prepareContractors(newV0Contractor, newV0TokenContractor)
+}
+
+func prepareV1Contractors() (err error) {
+	return prepareContractors(newV1Contractor, newV1TokenContractor)
+}
+
+func prepareContractors(c contractorConstructor, tc tokenContractorConstructor) (err error) {
+	if simnetContractor, err = c(dex.Simnet, simnetAddr, ethClient.contractBackend()); err != nil {
+		return fmt.Errorf("new contractor error: %w", err)
+	}
+	if participantContractor, err = c(dex.Simnet, participantAddr, participantEthClient.contractBackend()); err != nil {
+		return fmt.Errorf("participant new contractor error: %w", err)
+	}
+
+	if simnetTokenContractor, err = tc(dex.Simnet, testTokenID, simnetAddr, ethClient.contractBackend()); err != nil {
+		return fmt.Errorf("new token contractor error: %w", err)
+	}
+
+	// I don't know why this is needed for the participant client but not
+	// the initiator. Without this, we'll get a bind.ErrNoCode from
+	// (*BoundContract).Call while calling (*ERC20Swap).TokenAddress.
+	time.Sleep(time.Second)
+
+	if participantTokenContractor, err = tc(dex.Simnet, testTokenID, participantAddr, participantEthClient.contractBackend()); err != nil {
+		return fmt.Errorf("participant new token contractor error: %w", err)
+	}
+	return
+}
+
 func TestMain(m *testing.M) {
+	rand.Seed(time.Now().UnixNano())
 	dexeth.MaybeReadSimnetAddrs()
+	targs := make(map[string]string)
+	for _, param := range strings.Split(os.Getenv("TARGS"), " ") {
+		if param == "" {
+			continue
+		}
+		var arg string
+		a := strings.Split(param, "=")
+		if len(a) > 1 {
+			param = a[0]
+			arg = strings.Join(a[1:], "=")
+		}
+		targs[strings.TrimLeft(param, "-")] = arg
+	}
+
+	if _, exists := targs["v1"]; exists {
+		v1 = true
+		ver = 1
+	}
+
+	ethGases = dexeth.VersionedGases[ver]
+	tokenGases = &dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts[ver].Gas
+
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithCancel(context.Background())
 	c := make(chan os.Signal, 1)
@@ -1007,10 +1058,10 @@ func testInitiate(t *testing.T, assetID uint32) {
 			},
 		},
 		{
-			name:    "1 swap with existing hash",
+			name:    "1 swap with pre-used details",
 			success: false,
 			swaps: []*dex.SwapContractDetails{
-				newDetails(0, 1),
+				newDetails(0, 2),
 			},
 		},
 		{
@@ -1029,13 +1080,6 @@ func testInitiate(t *testing.T, assetID uint32) {
 				newDetails(3, 1),
 			},
 			swapErr: true,
-		},
-		{
-			name:    "1 swap nil refundtimestamp",
-			success: false,
-			swaps: []*dex.SwapContractDetails{
-				newDetails(4, 1),
-			},
 		},
 		{
 			// Preventing this used to need explicit checks before solidity 0.8, but now the
@@ -1059,11 +1103,17 @@ func testInitiate(t *testing.T, assetID uint32) {
 	}
 
 	for _, test := range tests {
-		var originalParentBal *big.Int
-
 		originalBal, err := balance()
 		if err != nil {
 			t.Fatalf("balance error for asset %d, test %s: %v", assetID, test.name, err)
+		}
+
+		var originalParentBal *big.Int
+		if !isETH {
+			originalParentBal, err = ethClient.addressBalance(ctx, ethClient.address())
+			if err != nil {
+				t.Fatalf("balance error for eth, test %s: %v", test.name, err)
+			}
 		}
 
 		var totalVal uint64
@@ -1071,23 +1121,17 @@ func testInitiate(t *testing.T, assetID uint32) {
 		for _, tSwap := range test.swaps {
 			step, _, _, err := sc.status(ctx, tSwap)
 			if err != nil {
-				t.Fatalf("%s: swap error: %v", test.name, err)
+				t.Fatalf("%s: status error: %v", test.name, err)
 			}
 			originalStates[tSwap.SecretHash.String()] = step
 			totalVal += tSwap.Value
 		}
 
 		optsVal := totalVal
-		if !isETH {
-			optsVal = 0
-			originalParentBal, err = ethClient.addressBalance(ctx, simnetAddr)
-			if err != nil {
-				t.Fatalf("balance error for eth, test %s: %v", test.name, err)
-			}
-		}
-
 		if test.overflow {
 			optsVal = 2
+		} else if !isETH {
+			optsVal = 0
 		}
 
 		expGas := gases.SwapN(len(test.swaps))
@@ -1096,7 +1140,7 @@ func testInitiate(t *testing.T, assetID uint32) {
 		spew.Dump(txOpts)
 
 		var tx *types.Transaction
-		if test.overflow {
+		if test.overflow && !v1 {
 			switch c := sc.(type) {
 			case *contractorV0:
 				tx, err = initiateOverflow(c, txOpts, test.swaps)
@@ -1104,11 +1148,7 @@ func testInitiate(t *testing.T, assetID uint32) {
 				tx, err = initiateOverflow(c.contractorV0, txOpts, test.swaps)
 			}
 		} else {
-			b, _ := balance()
-			fmt.Println("--beforeinit", fmtBig(b))
-
 			tx, err = sc.initiate(txOpts, test.swaps)
-
 			spew.Dump(tx)
 		}
 		if err != nil {
@@ -1364,7 +1404,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			redeemer:           participantAcct,
 			redeemerContractor: pc,
 			swaps:              []*dex.SwapContractDetails{newDetails(0, 1)},
-			redemptions:        []*asset.Redemption{newRedeem(secrets[0], secretHashes[0])},
+			redemptions:        []*asset.Redemption{newRedeem(secrets[0], secretHashes[0], 1, lockTime)},
 			isRedeemable:       []bool{true},
 			finalStates:        []dexeth.SwapStep{dexeth.SSRedeemed},
 			addAmt:             true,
@@ -1380,8 +1420,8 @@ func testRedeem(t *testing.T, assetID uint32) {
 				newDetails(2, 1),
 			},
 			redemptions: []*asset.Redemption{
-				newRedeem(secrets[1], secretHashes[1]),
-				newRedeem(secrets[2], secretHashes[2]),
+				newRedeem(secrets[1], secretHashes[1], 1, lockTime),
+				newRedeem(secrets[2], secretHashes[2], 1, lockTime),
 			},
 			isRedeemable: []bool{true, true},
 			finalStates: []dexeth.SwapStep{
@@ -1396,23 +1436,23 @@ func testRedeem(t *testing.T, assetID uint32) {
 			redeemer:           participantAcct,
 			redeemerContractor: pc,
 			swaps:              []*dex.SwapContractDetails{newDetails(3, 1)},
-			redemptions:        []*asset.Redemption{newRedeem(secrets[3], secretHashes[3])},
+			redemptions:        []*asset.Redemption{newRedeem(secrets[3], secretHashes[3], 1, lockTime)},
 			isRedeemable:       []bool{true},
 			finalStates:        []dexeth.SwapStep{dexeth.SSRedeemed},
 			addAmt:             true,
 		},
-		{
-			name:               "bad redeemer",
-			sleepNBlocks:       8,
-			redeemerClient:     ethClient,
-			redeemer:           simnetAcct,
-			redeemerContractor: c,
-			swaps:              []*dex.SwapContractDetails{newDetails(4, 1)},
-			redemptions:        []*asset.Redemption{newRedeem(secrets[4], secretHashes[4])},
-			isRedeemable:       []bool{false},
-			finalStates:        []dexeth.SwapStep{dexeth.SSInitiated},
-			addAmt:             false,
-		},
+		// {
+		// 	name:               "bad redeemer",
+		// 	sleepNBlocks:       8,
+		// 	redeemerClient:     ethClient,
+		// 	redeemer:           simnetAcct,
+		// 	redeemerContractor: c,
+		// 	swaps:              []*dex.SwapContractDetails{newDetails(4, 1)},
+		// 	redemptions:        []*asset.Redemption{newRedeem(secrets[4], secretHashes[4], 1, lockTime)},
+		// 	isRedeemable:       []bool{false},
+		// 	finalStates:        []dexeth.SwapStep{dexeth.SSInitiated},
+		// 	addAmt:             false,
+		// },
 		{
 			name:               "bad secret",
 			sleepNBlocks:       8,
@@ -1420,10 +1460,11 @@ func testRedeem(t *testing.T, assetID uint32) {
 			redeemer:           participantAcct,
 			redeemerContractor: pc,
 			swaps:              []*dex.SwapContractDetails{newDetails(5, 1)},
-			redemptions:        []*asset.Redemption{newRedeem(secrets[6], secretHashes[5])},
+			redemptions:        []*asset.Redemption{newRedeem(secrets[6], secretHashes[5], 1, lockTime)},
 			isRedeemable:       []bool{false},
 			finalStates:        []dexeth.SwapStep{dexeth.SSInitiated},
 			addAmt:             false,
+			expectRedeemErr:    v1, // Why doesn't v0 error on this?
 		},
 		{
 			name:               "duplicate secret hashes",
@@ -1437,10 +1478,10 @@ func testRedeem(t *testing.T, assetID uint32) {
 				newDetails(8, 1),
 			},
 			redemptions: []*asset.Redemption{
-				newRedeem(secrets[7], secretHashes[7]),
-				newRedeem(secrets[7], secretHashes[7]),
+				newRedeem(secrets[7], secretHashes[7], 1, lockTime),
+				newRedeem(secrets[7], secretHashes[7], 1, lockTime),
 			},
-			isRedeemable: []bool{true, true},
+			isRedeemable: []bool{true, false /* doesn't match SwapContractDetails */},
 			finalStates: []dexeth.SwapStep{
 				dexeth.SSInitiated,
 				dexeth.SSInitiated,
@@ -1508,7 +1549,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 			expected := test.isRedeemable[i]
 			redemption := test.redemptions[i]
 
-			isRedeemable, err := test.redeemerContractor.isRedeemable(bytesToArray(redemption.Spends.SecretHash), contract)
+			isRedeemable, err := test.redeemerContractor.isRedeemable(bytesToArray(redemption.Secret), contract)
 			if err != nil {
 				t.Fatalf(`test "%v": error calling isRedeemable: %v`, test.name, err)
 			} else if isRedeemable != expected {
@@ -1530,6 +1571,11 @@ func testRedeem(t *testing.T, assetID uint32) {
 		}
 
 		expGas := gases.RedeemN(len(test.redemptions))
+		// Ethereum is weird. For v1, if I use 42,000 here, it will often fail,
+		// using all of the gas, so presumably it fails because of insufficient
+		// gas. But if I set a higher limit, the it will succeed, and oddly will
+		// never use 42,000 gas. Why does it use more gas when I use a lower
+		// limit?
 		txOpts, _ = test.redeemerClient.txOpts(ctx, 0, expGas, dexeth.GweiToWei(maxFeeRate))
 		tx, err = test.redeemerContractor.redeem(txOpts, test.redemptions)
 		if test.expectRedeemErr {
@@ -1552,12 +1598,15 @@ func testRedeem(t *testing.T, assetID uint32) {
 			t.Fatalf("%s: failed to get redeem receipt: %v", test.name, err)
 		}
 		spew.Dump(receipt)
-
 		expSuccess := !test.expectRedeemErr && test.addAmt
 		err = checkTxStatus(receipt, txOpts.GasLimit)
 		if err != nil && expSuccess {
 			t.Fatalf("%s: failed redeem transaction status: %v", test.name, err)
 		}
+		if expSuccess && receipt.GasUsed > expGas {
+			t.Fatalf("%s: gas used, %d, exceeds expected max %d", test.name, receipt.GasUsed, expGas)
+		}
+
 		fmt.Printf("Gas used for %d redeems, success = %t: %d \n", len(test.swaps), expSuccess, receipt.GasUsed)
 
 		bal, err := balance()
@@ -1784,21 +1833,33 @@ func testRefund(t *testing.T, assetID uint32) {
 			t.Fatalf("%s: initiate error: %v ", test.name, err)
 		}
 
-		if test.redeem {
-			if err := waitForMined(t, sleepForNBlocks, false); err != nil {
-				t.Fatalf("%s: pre-redeem mining error: %v", test.name, err)
-			}
+		if err := waitForMined(t, sleepForNBlocks, false); err != nil {
+			t.Fatalf("%s: pre-redeem mining error: %v", test.name, err)
+		}
 
-			txOpts, _ = participantEthClient.txOpts(ctx, 0, gases.RedeemN(1), nil)
-			_, err := pc.redeem(txOpts, []*asset.Redemption{newRedeem(secret, secretHash)})
+		if test.redeem {
+			expGas := gases.RedeemN(1)
+			txOpts, _ = participantEthClient.txOpts(ctx, 0, expGas, nil)
+			tx, err := pc.redeem(txOpts, []*asset.Redemption{newRedeem(secret, secretHash, amt, deets.LockTime)})
 			if err != nil {
 				t.Fatalf("%s: redeem error: %v", test.name, err)
 			}
-		}
 
-		// This waitForMined will always take test.sleep to complete.
-		if err := waitForMined(t, sleepForNBlocks, true); err != nil {
-			t.Fatalf("unexpected post-init mining error for test %v: %v", test.name, err)
+			// This waitForMined will always take test.sleep to complete.
+			if err := waitForMined(t, sleepForNBlocks, true); err != nil {
+				t.Fatalf("unexpected post-init mining error for test %v: %v", test.name, err)
+			}
+
+			r, err := ethClient.transactionReceipt(ctx, tx.Hash())
+			if err != nil {
+				t.Fatalf("error getting redemption receipt: %v", err)
+			}
+			if err = checkTxStatus(r, txOpts.GasLimit); err != nil {
+				t.Fatalf("redemption error: %v", err)
+			}
+			if r.GasUsed > expGas {
+				t.Fatalf("gas used, %d, is more than expected max, %d", r.GasUsed, expGas)
+			}
 		}
 
 		var originalParentBal *big.Int
@@ -1891,6 +1952,11 @@ func testRefund(t *testing.T, assetID uint32) {
 
 		diff := new(big.Int).Sub(wantBal, bal)
 		if diff.CmpAbs(dexeth.GweiToWei(1)) >= 0 {
+
+			fmt.Println("Original balance:", fmtBig(originalBal), ", New balance:", fmtBig(bal),
+				", Balance change:", fmtBig(new(big.Int).Sub(bal, originalBal)),
+				", Tx fees:", fmtBig(txFee), ", Swap val:", fmtBig(dexeth.GweiToWei(amt)))
+
 			t.Fatalf("%s: unexpected balance change: want %d got %d, diff = %d",
 				test.name, dexeth.WeiToGwei(wantBal), dexeth.WeiToGwei(bal), dexeth.WeiToGwei(diff))
 		}

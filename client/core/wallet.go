@@ -217,6 +217,9 @@ func (w *xcWallet) state() *WalletState {
 		SyncProgress: w.syncProgress,
 		WalletType:   w.walletType,
 		Traits:       w.traits,
+		// ProtocolVersions were added around 0.6, and signal the supported
+		// server asset backend versions.
+		ProtocolVersions: winfo.ProtocolVersions,
 	}
 }
 

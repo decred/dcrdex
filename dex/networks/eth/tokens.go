@@ -118,7 +118,28 @@ var Tokens = map[uint32]*Token{
 							// first approvals on the same contract, so it's not
 							// just the global first.
 							Approve:  46_000, //  [44465 27365 27365 27365 27365]
-							Transfer: 27_000, // [24964 24964 24964 24964 24964]
+							Transfer: 28_000, // [24964 24964 24964 24964 24964]
+						},
+					},
+					1: {
+						// Swap contract address. The simnet harness writes this
+						// address to file. Live tests must populate this field.
+						Address: common.Address{},
+						Gas: Gases{
+							Swap:      95_000, // [86009 112920 139831 166742 193651]
+							SwapAdd:   30_000, // avg SwapAdd 26910
+							Redeem:    50_000, // [42569 53614 64646 75703 86734]
+							RedeemAdd: 14_000, // avg RedeemAdd 11038
+							Refund:    50_000, // [45306 45306 45306 45306 45294] avg: 45303
+							// Approve is the gas used to call the approve
+							// method of the contract. For Approve transactions,
+							// the very first approval for an account-spender
+							// pair takes more than subsequent approvals. The
+							// results are repeated for a different account's
+							// first approvals on the same contract, so it's not
+							// just the global first.
+							Approve:  46_000,
+							Transfer: 28_000,
 						},
 					},
 				},
@@ -165,14 +186,18 @@ func MaybeReadSimnetAddrs() {
 		return
 	}
 
-	ethSwapContractAddrFile := filepath.Join(ethPath, "eth_swap_contract_address.txt")
-	tokenSwapContractAddrFile := filepath.Join(ethPath, "erc20_swap_contract_address.txt")
+	ethSwapContractAddrFileV0 := filepath.Join(ethPath, "eth_swap_contract_address.txt")
+	tokenSwapContractAddrFileV0 := filepath.Join(ethPath, "erc20_swap_contract_address.txt")
+	ethSwapContractAddrFileV1 := filepath.Join(ethPath, "eth_swap_contract_address_v1.txt")
+	tokenSwapContractAddrFileV1 := filepath.Join(ethPath, "erc20_swap_contract_address_v1.txt")
 	testTokenContractAddrFile := filepath.Join(ethPath, "test_token_contract_address.txt")
 
-	ContractAddresses[0][dex.Simnet] = getContractAddrFromFile(ethSwapContractAddrFile)
+	ContractAddresses[0][dex.Simnet] = getContractAddrFromFile(ethSwapContractAddrFileV0)
+	ContractAddresses[1][dex.Simnet] = getContractAddrFromFile(ethSwapContractAddrFileV1)
 
 	token := Tokens[testTokenID].NetTokens[dex.Simnet]
-	token.SwapContracts[0].Address = getContractAddrFromFile(tokenSwapContractAddrFile)
+	token.SwapContracts[0].Address = getContractAddrFromFile(tokenSwapContractAddrFileV0)
+	token.SwapContracts[1].Address = getContractAddrFromFile(tokenSwapContractAddrFileV1)
 	token.Address = getContractAddrFromFile(testTokenContractAddrFile)
 }
 

@@ -18,6 +18,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	v0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
+	swapv1 "decred.org/dcrdex/dex/networks/eth/contracts/v1"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 )
@@ -43,13 +44,19 @@ var (
 
 	VersionedGases = map[uint32]*Gases{
 		0: v0Gases,
+		1: v1Gases,
 	}
 
 	ContractAddresses = map[uint32]map[dex.Network]common.Address{
 		0: {
 			dex.Mainnet: common.Address{},
-			dex.Simnet:  common.HexToAddress("0x2f68e723b8989ba1c6a9f03e42f33cb7dc9d606f"),
 			dex.Testnet: common.HexToAddress("0xa483b6166dA8Da6748B29Af35f96C4F9388c456C"),
+			dex.Simnet:  common.Address{},
+		},
+		1: {
+			dex.Mainnet: common.Address{},
+			dex.Testnet: common.Address{},
+			dex.Simnet:  common.Address{},
 		},
 	}
 )
@@ -60,6 +67,14 @@ var v0Gases = &Gases{
 	Redeem:    63_000,
 	RedeemAdd: 32_000,
 	Refund:    43_000,
+}
+
+var v1Gases = &Gases{
+	Swap:      52_000, // [48072 74276 100477 126682 152874]
+	SwapAdd:   30_000,
+	Redeem:    50_000, // [39832 50894 61956 73016 84067]
+	RedeemAdd: 14_000,
+	Refund:    45_000, // [37961 37937 37961 37961]
 }
 
 // LoadGenesisFile loads a Genesis config from a json file.
@@ -78,7 +93,7 @@ func LoadGenesisFile(genesisFile string) (*core.Genesis, error) {
 	return &genesis, nil
 }
 
-// EncodeContractData packs the contract version and the secret hash into a byte
+// EncodeContractData packs the server version and the secret hash into a byte
 // slice for communicating a swap's identity.
 func EncodeContractData(contractVersion uint32, swapKey [SecretHashSize]byte) []byte {
 	b := make([]byte, SecretHashSize+4)
@@ -87,7 +102,7 @@ func EncodeContractData(contractVersion uint32, swapKey [SecretHashSize]byte) []
 	return b
 }
 
-// DecodeContractData unpacks the contract version and secret hash.
+// DecodeContractData unpacks the server version and secret hash.
 func DecodeContractData(data []byte) (contractVersion uint32, swapKey [SecretHashSize]byte, err error) {
 	if len(data) != SecretHashSize+4 {
 		err = errors.New("invalid swap data")
@@ -290,4 +305,16 @@ func (g *Gases) RedeemN(n int) uint64 {
 		return 0
 	}
 	return g.Redeem + g.RedeemAdd*(uint64(n)-1)
+}
+
+func SwapToV1(c *dex.SwapContractDetails) swapv1.ETHSwapContract {
+	var secretHash [32]byte
+	copy(secretHash[:], c.SecretHash)
+	return swapv1.ETHSwapContract{
+		SecretHash:      secretHash,
+		Initiator:       common.HexToAddress(c.From),
+		RefundTimestamp: c.LockTime,
+		Participant:     common.HexToAddress(c.To),
+		Value:           c.Value,
+	}
 }

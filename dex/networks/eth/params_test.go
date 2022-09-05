@@ -71,7 +71,7 @@ func TestVersionedGases(t *testing.T) {
 			expRefundGas: v0Gases.Refund,
 		},
 		{
-			ver:            1,
+			ver:            2,
 			expInitGases:   []uint64{0, math.MaxUint64},
 			expRedeemGases: []uint64{0, math.MaxUint64},
 			expRefundGas:   math.MaxUint64,

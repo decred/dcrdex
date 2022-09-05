@@ -29,7 +29,7 @@ func TestNewRedeemCoin(t *testing.T) {
 	copy(txHash[:], encode.RandomBytes(32))
 	copy(secret[:], tRedeem2.Secret[:])
 	copy(secretHash[:], tRedeem2.C.SecretHash[:])
-	contract := dexeth.EncodeContractData(0, secretHash)
+	contract := dexeth.EncodeContractData(version, secretHash)
 	const gasPrice = 30
 	const gasTipCap = 2
 	const value = 5e9
@@ -92,7 +92,7 @@ func TestNewRedeemCoin(t *testing.T) {
 				baseLogger: tLogger,
 			},
 			contractAddr: *contractAddr,
-			initTxSize:   uint32(dexeth.InitGas(1, 0)),
+			initTxSize:   uint32(dexeth.InitGas(1, version)),
 			assetID:      BipID,
 			log:          tLogger,
 		}
@@ -229,20 +229,20 @@ func TestNewSwapCoin(t *testing.T) {
 			t.Fatalf("unexpected error for test %q: %v", test.name, err)
 		}
 
-		if sc.swap.SwapContractDetails.To != tRedeem2.C.Participant.String() ||
+		if sc.swap.To != tRedeem2.C.Participant.String() ||
 			sc.secretHash != secretHash ||
 			dexeth.WeiToGwei(sc.value) != tRedeem2.C.Value ||
 			sc.gasFeeCap != wantGas ||
 			sc.gasTipCap != wantGasTipCap ||
-			sc.swap.SwapContractDetails.LockTime != tRedeem2.C.RefundTimestamp {
+			sc.swap.LockTime != tRedeem2.C.RefundTimestamp {
 
 			t.Fatalf("returns do not match expected for test %q %t %t %t %t %t %t", test.name,
-				sc.swap.SwapContractDetails.To != tRedeem2.C.Participant.String(),
+				sc.swap.To != tRedeem2.C.Participant.String(),
 				sc.secretHash != secretHash,
 				dexeth.WeiToGwei(sc.value) != tRedeem2.C.Value,
 				sc.gasFeeCap != wantGas,
 				sc.gasTipCap != wantGasTipCap,
-				sc.swap.SwapContractDetails.LockTime != tRedeem2.C.RefundTimestamp,
+				sc.swap.LockTime != tRedeem2.C.RefundTimestamp,
 			)
 		}
 	}
@@ -308,11 +308,11 @@ func TestConfirmations(t *testing.T) {
 				baseLogger: tLogger,
 			},
 			contractAddr: *contractAddr,
-			initTxSize:   uint32(dexeth.InitGas(1, 0)),
+			initTxSize:   uint32(dexeth.InitGas(1, version)),
 			atomize:      dexeth.WeiToGwei,
 		}
 
-		swapData := dexeth.EncodeContractData(0, secretHash)
+		swapData := dexeth.EncodeContractData(version, secretHash)
 
 		if test.swap != nil {
 			node.rcpt = &types.Receipt{BlockNumber: big.NewInt(int64(test.swap.BlockHeight))}

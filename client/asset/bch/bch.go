@@ -113,6 +113,7 @@ var (
 			rpcWalletDefinition,
 			// electrumWalletDefinition, // getinfo RPC needs backport: https://github.com/Electron-Cash/Electron-Cash/pull/2399
 		},
+		ProtocolVersions: []uint32{0},
 	}
 )
 

@@ -117,6 +117,8 @@ type WalletState struct {
 	PeerCount    uint32            `json:"peerCount"`
 	Synced       bool              `json:"synced"`
 	SyncProgress float32           `json:"syncProgress"`
+	// ProtocolVersions is the supported server protocol versions. Added ~0.6.
+	ProtocolVersions []uint32 `json:"protocolVersions"`
 }
 
 // User is information about the user's wallets and DEX accounts.
