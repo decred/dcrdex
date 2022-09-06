@@ -228,7 +228,7 @@ echo "Writing node config files"
 cat > "${NODES_ROOT}/alpha/dcrd.conf" <<EOF
 rpcuser=${RPC_USER}
 rpcpass=${RPC_PASS}
-rpccert=${NODES_ROOT}/alpha/rpc.cert
+rpccert="${NODES_ROOT}/alpha/rpc.cert"
 rpclisten=127.0.0.1:${ALPHA_NODE_RPC_PORT}
 EOF
 
