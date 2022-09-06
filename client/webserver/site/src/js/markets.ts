@@ -751,7 +751,7 @@ export default class MarketsPage extends BasePage {
       this.maxEstimateTimer = null
     }
     const mktId = marketID(baseCfg.symbol, quoteCfg.symbol)
-    this.bindToRecentMatches(dex.markets[mktId].recentmatches)
+    this.setToRecentMatches(dex.markets[mktId].recentmatches)
     this.market = {
       dex: dex,
       sid: mktId, // A string market identifier used by the DEX.
@@ -1384,7 +1384,7 @@ export default class MarketsPage extends BasePage {
   }
 
   handleEpochMatchSummary (data: BookUpdate) {
-    this.bindToRecentMatches(data.payload)
+    this.setToRecentMatches(data.payload)
     this.refreshRecentMatchesTable()
   }
 
@@ -1888,11 +1888,11 @@ export default class MarketsPage extends BasePage {
   recentMatchesSortCompare () {
     switch (this.recentMatchesSortKey) {
       case 'rate':
-        return (a: RecentMatch, b: RecentMatch) => this.recentMatchesSortDirection * (a.Rate - b.Rate)
+        return (a: RecentMatch, b: RecentMatch) => this.recentMatchesSortDirection * (a.rate - b.rate)
       case 'qty':
-        return (a: RecentMatch, b: RecentMatch) => this.recentMatchesSortDirection * (a.Qty - b.Qty)
+        return (a: RecentMatch, b: RecentMatch) => this.recentMatchesSortDirection * (a.qty - b.qty)
       case 'age':
-        return (a: RecentMatch, b:RecentMatch) => this.recentMatchesSortDirection * (a.Age.getTime() - b.Age.getTime())
+        return (a: RecentMatch, b:RecentMatch) => this.recentMatchesSortDirection * (a.age.getTime() - b.age.getTime())
     }
   }
 
@@ -1906,29 +1906,23 @@ export default class MarketsPage extends BasePage {
     for (const match of recentMatches) {
       const row = page.recentMatchesTemplate.cloneNode(true) as HTMLElement
 
-      this.updateRecentMatchRow(row, match)
+      app().bindTooltips(row)
+      updateDataCol(row, 'rate', Doc.formatCoinValue(match.rate / this.market.rateConversionFactor))
+      // change rate color based if is sell or not.
+      updateDataCol(row, 'qty', Doc.formatCoinValue(match.qty, this.market.baseUnitInfo))
+      updateDataCol(row, 'age', match.age.toLocaleDateString())
+      updateToolTipCol(row, 'age', match.age.toLocaleTimeString())
+      row.classList.add(match.sell ? 'sellcolor' : 'buycolor')
 
       page.recentMatchesLiveList.append(row)
     }
   }
 
-  updateRecentMatchRow (tr: HTMLElement, match: RecentMatch) {
-    app().bindTooltips(tr)
-    updateDataCol(tr, 'rate', Doc.formatCoinValue(match.Rate / this.market.rateConversionFactor))
-    // change rate color based if is sell or not.
-    updateDataCol(tr, 'qty', Doc.formatCoinValue(match.Qty, this.market.baseUnitInfo))
-    updateDataCol(tr, 'age', match.Age.toLocaleDateString())
-    updateToolTipCol(tr, 'age', match.Age.toLocaleTimeString())
-  }
-
-  bindToRecentMatches (matches: RecentMatch[]) {
+  setToRecentMatches (matches: RecentMatch[]) {
     // if does not have new matches, just skip.
-    if (!matches) {
-      this.recentMatches = []
-      return
-    }
+    if (!matches) return
     for (let i = 0; i < matches.length; i++) {
-      matches[i].Age = new Date(matches[i].Age)
+      matches[i].age = new Date(matches[i].age)
     }
     this.recentMatches = matches
   }

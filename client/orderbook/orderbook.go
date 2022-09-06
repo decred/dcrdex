@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
@@ -55,9 +56,10 @@ type rateSell struct {
 }
 
 type MatchSummary struct {
-	Rate uint64
-	Qty  uint64
-	Age  uint64
+	Rate uint64    `json:"rate"`
+	Qty  uint64    `json:"qty"`
+	Age  time.Time `json:"age"`
+	Sell bool      `json:"sell"`
 }
 
 // OrderBook represents a client tracked order book.
@@ -616,14 +618,18 @@ func (ob *OrderBook) BestFillMarketBuy(qty, lotSize uint64) ([]*Fill, bool) {
 
 // SetMatchesSummary set matches summary. If the matches summary length grows
 // bigger than 100, it will slice out the ones first added.
-func (ob *OrderBook) SetMatchesSummary(matches map[uint64]uint64, ts uint64) {
+func (ob *OrderBook) SetMatchesSummary(matches map[uint64]uint64, ts uint64, sell bool) {
+	if matches == nil {
+		return
+	}
 	newMatchesSummary := make([]*MatchSummary, len(matches))
 	i := 0
 	for rate, qty := range matches {
 		newMatchesSummary[i] = &MatchSummary{
 			Rate: rate,
 			Qty:  qty,
-			Age:  ts,
+			Age:  time.UnixMilli(int64(ts)),
+			Sell: sell,
 		}
 		i++
 	}
@@ -643,10 +649,5 @@ func (ob *OrderBook) SetMatchesSummary(matches map[uint64]uint64, ts uint64) {
 }
 
 func (ob *OrderBook) GetMatchesSummary() []*MatchSummary {
-	ob.matchSummaryMtx.Lock()
-	if ob.matchesSummary == nil {
-		ob.matchesSummary = make([]*MatchSummary, 0)
-	}
-	ob.matchSummaryMtx.Unlock()
 	return ob.matchesSummary
 }

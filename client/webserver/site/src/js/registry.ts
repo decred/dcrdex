@@ -317,9 +317,10 @@ export interface OrderNote extends CoreNote {
 }
 
 export interface RecentMatch {
-  Rate: number
-  Qty: number
-  Age: Date
+  rate: number
+  qty: number
+  age: Date
+  sell: boolean
 }
 
 export interface EpochNote extends CoreNote {
@@ -449,7 +450,7 @@ export interface BookUpdate {
   action: string
   host: string
   marketID: string
-  matchessummary: RecentMatch[]
+  matchesSummary: RecentMatch[]
   payload: any
 }
 

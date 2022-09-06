@@ -104,13 +104,14 @@ type sigDataEpochOrder sigDataOrder
 type sigDataUpdateRemaining sigDataOrder
 
 type sigDataEpochReport struct {
-	epochIdx       int64
-	epochDur       int64
-	stats          *matcher.MatchCycleStats
-	spot           *msgjson.Spot
-	baseFeeRate    uint64
-	quoteFeeRate   uint64
-	matchesSummary map[uint64]uint64
+	epochIdx           int64
+	epochDur           int64
+	stats              *matcher.MatchCycleStats
+	spot               *msgjson.Spot
+	baseFeeRate        uint64
+	quoteFeeRate       uint64
+	matchesSummaryBuy  map[uint64]uint64
+	matchesSummarySell map[uint64]uint64
 }
 
 type sigDataNewEpoch struct {
@@ -429,7 +430,8 @@ out:
 						StartRate:   stats.StartRate,
 						EndRate:     stats.EndRate,
 					},
-					MatchesSummary: sigData.matchesSummary,
+					MatchesSummaryBuy:  sigData.matchesSummaryBuy,
+					MatchesSummarySell: sigData.matchesSummarySell,
 				}
 
 			case sigDataEpochOrder:
