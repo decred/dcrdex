@@ -831,6 +831,22 @@ func (wc *rpcClient) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract 
 	res := &btcjson.FundRawTransactionResult{}
 	err = wc.call(methodFundRawTransaction, args, &res)
 	if err != nil {
+		// This is a work around for ZEC wallet, which does not support options
+		// argument for fundrawtransaction.
+		if wc.omitRPCOptionsArg {
+			var sendAmount uint64
+			for _, txOut := range tx.TxOut {
+				sendAmount += uint64(txOut.Value)
+			}
+			var bal uint64
+			// args: "(dummy)" minconf includeWatchonly inZat
+			if err := wc.call(methodGetBalance, anylist{"", 0, false, true}, &bal); err != nil {
+				return 0, err
+			}
+			if subtract && sendAmount <= bal {
+				return 0, errors.New("wallet does not support options")
+			}
+		}
 		return 0, fmt.Errorf("error calculating transaction fee: %w", err)
 	}
 	return toSatoshi(res.Fee.ToBTC()), nil

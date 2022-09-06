@@ -250,12 +250,12 @@ export default class WalletsPage extends BasePage {
     const loaded = app().loading(page.sendForm)
     const res = await postJSON('/api/txfee', open)
     loaded()
-    if (!app().checkResponse(res)) {
+    if (!app().checkResponse(res) && res.msg !== 'wallet does not support options') { // This is a work around for wallets like ZEC, which does not support subtract for fee estimations.
       Doc.showFormError(page.sendErr, res.msg)
       return
     }
 
-    if (!res.validaddress) {
+    if (!res.validaddress && res.ok) {
       Doc.show(page.vSendAddrMsg)
     }
 
@@ -793,7 +793,9 @@ export default class WalletsPage extends BasePage {
       const res = await postJSON('/api/txfee', feeReq)
       loaded()
       if (!app().checkResponse(res)) {
-        Doc.showFormError(page.sendErr, res.msg)
+        // This is a work around for wallets like ZEC, which does not support
+        // subtract for fee estimations.
+        if (res.msg !== 'wallet does not support options') Doc.showFormError(page.sendErr, res.msg)
       } else {
         const canSend = wallet.balance.available - res.txfee
         this.maxSend = canSend
