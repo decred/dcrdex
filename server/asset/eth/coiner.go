@@ -98,6 +98,7 @@ func (be *AssetBackend) newRedeemCoin(coinID []byte, contractData []byte) (*rede
 		if err != nil {
 			return nil, err
 		}
+		be.log.Warnf("redeem coin with ID %x for secret hash %x was not found", coinID, secretHash)
 		swapState, err := be.node.swap(be.ctx, be.assetID, secretHash)
 		if err != nil {
 			return nil, err

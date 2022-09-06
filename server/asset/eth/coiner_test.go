@@ -94,6 +94,7 @@ func TestNewRedeemCoin(t *testing.T) {
 			contractAddr: *contractAddr,
 			initTxSize:   uint32(dexeth.InitGas(1, 0)),
 			assetID:      BipID,
+			log:          tLogger,
 		}
 		rc, err := eth.newRedeemCoin(txHash[:], test.contract)
 		if test.wantErr {
