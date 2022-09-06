@@ -254,17 +254,22 @@ export default class OrderPage extends BasePage {
 
     const swapSpan = Doc.tmplElement(card, 'swapMsg')
     const cSwapSpan = Doc.tmplElement(card, 'counterSwapMsg')
+    const redeemSpan = Doc.tmplElement(card, 'redeemMsg')
 
     if (inCounterSwapCast(m)) {
       cSwapSpan.textContent = confirmationString(m.counterSwap)
-      Doc.hide(Doc.tmplElement(card, 'swapMsg'))
+      Doc.hide(swapSpan, redeemSpan)
       Doc.show(cSwapSpan)
     } else if (inSwapCast(m)) {
       swapSpan.textContent = confirmationString(m.swap)
-      Doc.hide(Doc.tmplElement(card, 'counterSwapMsg'))
+      Doc.hide(cSwapSpan, redeemSpan)
       Doc.show(swapSpan)
-    } else {
+    } else if (inConfirmingRedeem(m)) {
+      redeemSpan.textContent = confirmationString(m.redeem)
       Doc.hide(swapSpan, cSwapSpan)
+      Doc.show(redeemSpan)
+    } else {
+      Doc.hide(swapSpan, cSwapSpan, redeemSpan)
     }
 
     Doc.tmplElement(card, 'status').textContent = OrderUtil.matchStatusString(m)
@@ -276,7 +281,7 @@ export default class OrderPage extends BasePage {
  * coin
  * */
 function confirmationString (coin: Coin) {
-  if (!coin.confs) return ''
+  if (!coin.confs || coin.confs.required === 0) return ''
   return `${coin.confs.count} / ${coin.confs.required} confirmations`
 }
 
@@ -294,6 +299,14 @@ function inCounterSwapCast (m: Match) {
  */
 function inSwapCast (m: Match) {
   return (m.side === OrderUtil.Maker && m.status === OrderUtil.MakerSwapCast) || (m.side === OrderUtil.Taker && m.status === OrderUtil.TakerSwapCast)
+}
+
+/*
+* inConfirmingRedeem will be true if we are waiting on confirmations for our own
+* redeem.
+*/
+function inConfirmingRedeem (m: Match) {
+  return m.status < OrderUtil.MatchConfirmed && ((m.side === OrderUtil.Maker && m.status >= OrderUtil.MakerRedeemed) || (m.side === OrderUtil.Taker && m.status >= OrderUtil.MatchComplete))
 }
 
 /*

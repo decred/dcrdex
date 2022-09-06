@@ -100,6 +100,7 @@ var conflictResolvers = []struct {
 	{order.MakerRedeemed, order.TakerSwapCast, resolveServerMissedMakerRedeem},
 	{order.MakerRedeemed, order.MatchComplete, resolveMatchComplete},
 	{order.MatchComplete, order.MakerRedeemed, resolveServerMissedTakerRedeem},
+	{order.MatchConfirmed, order.MakerRedeemed, resolveServerMissedTakerRedeem},
 }
 
 // conflictResolver is a getter for a matchConflictResolver for the specified
@@ -120,7 +121,7 @@ func conflictResolver(ours, servers order.MatchStatus) matchConflictResolver {
 // self-revoked.
 func (c *Core) resolveConflictWithServerData(dc *dexConnection, trade *trackedTrade, match *matchTracker, srvData *msgjson.MatchStatusResult) {
 	srvStatus := order.MatchStatus(srvData.Status)
-	if srvStatus != order.MatchComplete && !srvData.Active {
+	if srvStatus < order.MatchComplete && !srvData.Active {
 		// Server has revoked the match. We'll still go through
 		// resolveConflictWithServerData to collect any extra data the
 		// server has, but setting ServerRevoked will prevent us from

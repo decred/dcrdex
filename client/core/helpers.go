@@ -364,8 +364,8 @@ func settledFilter(match *Match) bool {
 	if match.IsCancel {
 		return false
 	}
-	return (match.Side == order.Taker && match.Status == order.MatchComplete) ||
-		(match.Side == order.Maker && (match.Status == order.MakerRedeemed || match.Status == order.MatchComplete))
+	return (match.Side == order.Taker && match.Status >= order.MatchComplete) ||
+		(match.Side == order.Maker && (match.Status >= order.MakerRedeemed))
 }
 
 func settlingFilter(match *Match) bool {
@@ -426,11 +426,13 @@ func (m *matchReader) StatusString() string {
 		return "(2 / 4) Second Swap Sent"
 	case order.MakerRedeemed:
 		if m.Side == order.Maker {
-			return "Match Complete"
+			return "Redemption Sent"
 		}
 		return "(3 / 4) Maker Redeemed"
 	case order.MatchComplete:
-		return "Match Complete"
+		return "Redemption Sent"
+	case order.MatchConfirmed:
+		return "Redemption Confirmed"
 	}
 	return "Unknown Match Status"
 }
@@ -524,5 +526,33 @@ func (m *matchReader) CounterSwapConfirmString() string {
 	if confs.Count < 0 {
 		return "confirmations unknown"
 	}
+	return fmt.Sprintf("%d / %d confirmations", confs.Count, confs.Required)
+}
+
+// InConfirmingRedeem returns true if the match has completed but the user's
+// redemption has not yet been confirmed.
+func (m *matchReader) InConfirmingRedeem() bool {
+	if m.Revoked || m.Refund != nil {
+		return false
+	}
+
+	return m.Match.Status < order.MatchConfirmed &&
+		((m.Match.Status >= order.MatchComplete && m.Match.Side == order.Taker) ||
+			(m.Match.Status >= order.MakerRedeemed && m.Match.Side == order.Maker))
+}
+
+// ConfirmRedeemString returns a string indicating the current confirmation
+// progress of the user's redemption. An empty string is returned if the
+// user has not yet submit their redemption, or if it is already confirmed.
+func (m *matchReader) ConfirmRedeemString() string {
+	if !m.InConfirmingRedeem() || m.Redeem == nil {
+		return ""
+	}
+
+	confs := m.Redeem.Confs
+	if confs == nil || confs.Required == 0 {
+		return ""
+	}
+
 	return fmt.Sprintf("%d / %d confirmations", confs.Count, confs.Required)
 }

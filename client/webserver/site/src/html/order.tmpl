@@ -177,7 +177,12 @@
           </div>
           {{$coin = $match.Redeem}}
           <div class="px-3 pb-3{{if not $coin}} d-hide{{end}}" data-tmpl="redeem">
-            <span class="match-data-label">[[[Redemption]]] ({{$ord.ToSymbol}}, [[[you]]])</span><br>
+            <div class="d-flex align-items-center justify-content-between">
+              <span class="match-data-label">[[[Redemption]]] ({{$ord.ToSymbol}}, [[[you]]])</span>
+              <span class="match-data-label{{if not $match.InConfirmingRedeem}} d-hide{{end}}" data-tmpl="redeemMsg">
+                {{$match.ConfirmRedeemString}}
+              </span>
+            </div>
             <a target="_blank" class="mono plainlink" data-explorer-id="{{$ord.ToID}}"
               data-explorer-coin="{{if $coin}}{{$coin.StringID}}{{end}}" data-tmpl="redeemCoin">{{if $coin}}{{$coin.StringID}}{{end}}</a>
           </div>

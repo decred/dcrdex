@@ -936,7 +936,7 @@ func TestMatches(t *testing.T) {
 		if i < numActive {
 			m.Status = order.MatchStatus(rand.Intn(4))
 		} else {
-			m.Status = order.MatchComplete              // inactive
+			m.Status = order.MatchConfirmed             // inactive
 			m.MetaData.Proof.Auth.RedeemSig = []byte{0} // redeemSig required for MatchComplete to be considered inactive
 		}
 		matchIndex[m.MatchID] = m
@@ -1315,7 +1315,7 @@ func TestDeleteInactiveMatches(t *testing.T) {
 			} else {
 				m.OrderID = anInactiveOrder
 			}
-			m.Status = order.MatchComplete              // inactive
+			m.Status = order.MatchConfirmed             // inactive
 			m.MetaData.Proof.Auth.RedeemSig = []byte{0} // redeemSig required for MatchComplete to be considered inactive
 		}
 		matchIndex[m.MatchID] = m

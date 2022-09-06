@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/client/asset/kvdb"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
@@ -82,6 +83,11 @@ var (
 	// }, 1e9)
 )
 
+type tGetTxRes struct {
+	tx     *types.Transaction
+	height int64
+}
+
 type testNode struct {
 	acct           *accounts.Account
 	addr           common.Address
@@ -99,7 +105,16 @@ type testNode struct {
 	baseFee        *big.Int
 	tip            *big.Int
 	netFeeStateErr error
+	confNonce      uint64
+	confNonceErr   error
+	getTxRes       *types.Transaction
+	getTxResMap    map[common.Hash]*tGetTxRes
+	getTxHeight    int64
+	getTxErr       error
+	receipt        *types.Receipt
+	receiptErr     error
 
+	lastSignedTx    *types.Transaction
 	sendTxTx        *types.Transaction
 	sendTxErr       error
 	simBackend      bind.ContractBackend
@@ -137,6 +152,26 @@ func (n *testNode) chainConfig() *params.ChainConfig {
 
 func (n *testNode) pendingTransactions() ([]*types.Transaction, error) {
 	return n.pendingTxs, nil
+}
+
+func (n *testNode) getConfirmedNonce(context.Context, int64) (uint64, error) {
+	return n.confNonce, n.confNonceErr
+}
+
+func (n *testNode) getTransaction(ctx context.Context, hash common.Hash) (*types.Transaction, int64, error) {
+	if n.getTxErr != nil {
+		return nil, 0, n.getTxErr
+	}
+
+	if n.getTxResMap != nil {
+		if tx, ok := n.getTxResMap[hash]; ok {
+			return tx.tx, tx.height, nil
+		} else {
+			return nil, 0, asset.CoinNotFoundError
+		}
+	}
+
+	return n.getTxRes, n.getTxHeight, n.getTxErr
 }
 
 func (n *testNode) txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate *big.Int) (*bind.TransactOpts, error) {
@@ -194,6 +229,7 @@ func (n *testNode) sendTransaction(ctx context.Context, txOpts *bind.TransactOpt
 	return n.sendTxTx, n.sendTxErr
 }
 func (n *testNode) sendSignedTransaction(ctx context.Context, tx *types.Transaction) error {
+	n.lastSignedTx = tx
 	return nil
 }
 
@@ -209,6 +245,10 @@ func tTx(gasFeeCap, gasTipCap, value uint64, to *common.Address, data []byte) *t
 
 func (n *testNode) transactionConfirmations(context.Context, common.Hash) (uint32, error) {
 	return 0, nil
+}
+
+func (n *testNode) transactionReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, error) {
+	return n.receipt, n.receiptErr
 }
 
 type tContractor struct {
@@ -227,12 +267,14 @@ type tContractor struct {
 	redeemGasOverride *uint64
 	redeemable        bool
 	redeemableErr     error
+	redeemableMap     map[common.Hash]bool
 	valueIn           map[common.Hash]uint64
 	valueOut          map[common.Hash]uint64
 	valueErr          error
 	refundable        bool
 	refundableErr     error
 	lastRedeemOpts    *bind.TransactOpts
+	lastRedeems       []*asset.Redemption
 	lastRefund        struct {
 		// tx          *types.Transaction
 		secretHash [32]byte
@@ -258,6 +300,7 @@ func (c *tContractor) initiate(*bind.TransactOpts, []*asset.Contract) (*types.Tr
 
 func (c *tContractor) redeem(txOpts *bind.TransactOpts, redeems []*asset.Redemption) (*types.Transaction, error) {
 	c.lastRedeemOpts = txOpts
+	c.lastRedeems = redeems
 	return c.redeemTx, c.redeemErr
 }
 
@@ -283,6 +326,14 @@ func (c *tContractor) estimateRefundGas(ctx context.Context, secretHash [32]byte
 }
 
 func (c *tContractor) isRedeemable(secretHash, secret [32]byte) (bool, error) {
+	if c.redeemableErr != nil {
+		return false, c.redeemableErr
+	}
+
+	if c.redeemableMap != nil {
+		return c.redeemableMap[secretHash], nil
+	}
+
 	return c.redeemable, c.redeemableErr
 }
 
@@ -536,12 +587,14 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *testNode, contex
 
 	aw := &assetWallet{
 		baseWallet: &baseWallet{
-			addr:         node.addr,
-			net:          dex.Simnet,
-			node:         node,
-			ctx:          ctx,
-			log:          tLogger,
-			gasFeeLimitV: defaultGasFeeLimit,
+			addr:          node.addr,
+			net:           dex.Simnet,
+			node:          node,
+			ctx:           ctx,
+			log:           tLogger,
+			gasFeeLimitV:  defaultGasFeeLimit,
+			monitoredTxs:  make(map[common.Hash]*monitoredTx),
+			monitoredTxDB: kvdb.NewMemoryDB(),
 		},
 		log:                tLogger.SubLogger(strings.ToUpper(dex.BipIDSymbol(assetID))),
 		assetID:            assetID,
@@ -1752,7 +1805,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 	contractorV1 := &tContractor{
 		swapMap:      make(map[[32]byte]*dexeth.SwapState, 1),
 		gasEstimates: ethGases,
-		redeemTx:     types.NewTx(&types.DynamicFeeTx{}),
+		redeemTx:     types.NewTx(&types.DynamicFeeTx{Data: []byte{1, 2, 3}}),
 	}
 	var c contractor = contractorV1
 	if assetID != BipID {
@@ -1819,6 +1872,11 @@ func testRedeem(t *testing.T, assetID uint32) {
 		amountRequired := gasFeeCap * gasLimit
 
 		return amountRequired - originalReserves
+	}
+
+	var bestBlock int64 = 123
+	node.bestHdr = &types.Header{
+		Number: big.NewInt(bestBlock),
 	}
 
 	tests := []struct {
@@ -2198,6 +2256,10 @@ func testRedeem(t *testing.T, assetID uint32) {
 		contractorV1.redeemableErr = test.isRedeemableErr
 		contractorV1.redeemGasOverride = test.redeemGasOverride
 
+		eth.monitoredTxsMtx.Lock()
+		eth.monitoredTxs = make(map[common.Hash]*monitoredTx)
+		eth.monitoredTxsMtx.Unlock()
+
 		node.bal = test.ethBal
 		node.baseFee = test.baseFee
 
@@ -2263,6 +2325,18 @@ func testRedeem(t *testing.T, assetID uint32) {
 		if contractorV1.lastRedeemOpts.GasFeeCap.Cmp(test.expectedGasFeeCap) != 0 {
 			t.Fatalf("%s: expected gas fee cap %v, but got %v", test.name, test.expectedGasFeeCap, contractorV1.lastRedeemOpts.GasFeeCap)
 		}
+
+		// Check that tx was stored in the monitored transactions
+		txHash := contractorV1.redeemTx.Hash()
+		eth.monitoredTxsMtx.RLock()
+		monitoredTx, stored := eth.monitoredTxs[txHash]
+		if !stored {
+			t.Fatalf("%s: tx was not stored in monitored transactions", test.name)
+		}
+		if monitoredTx.blockSubmitted != uint64(bestBlock) {
+			t.Fatalf("%s: expected block submitted to be %d, but got %d", test.name, bestBlock, monitoredTx.blockSubmitted)
+		}
+		eth.monitoredTxsMtx.RUnlock()
 	}
 }
 
@@ -2461,6 +2535,17 @@ func packInitiateDataV0(initiations []*dexeth.Initiation) ([]byte, error) {
 		})
 	}
 	return (*dexeth.ABIs[0]).Pack("initiate", abiInitiations)
+}
+
+func packRedeemDataV0(redemptions []*dexeth.Redemption) ([]byte, error) {
+	abiRedemptions := make([]swapv0.ETHSwapRedemption, 0, len(redemptions))
+	for _, redeem := range redemptions {
+		abiRedemptions = append(abiRedemptions, swapv0.ETHSwapRedemption{
+			Secret:     redeem.Secret,
+			SecretHash: redeem.SecretHash,
+		})
+	}
+	return (*dexeth.ABIs[0]).Pack("redeem", abiRedemptions)
 }
 
 func TestAuditContract(t *testing.T) {
@@ -3500,6 +3585,862 @@ func testSend(t *testing.T, assetID uint32) {
 		if !bytes.Equal(txHash[:], coin.ID()) {
 			t.Fatal("coin is not the tx hash")
 		}
+	}
+}
+
+func TestConfirmRedemption(t *testing.T) {
+	t.Run("eth", func(t *testing.T) { testConfirmRedemption(t, BipID) })
+	t.Run("token", func(t *testing.T) { testConfirmRedemption(t, testTokenID) })
+}
+
+func testConfirmRedemption(t *testing.T, assetID uint32) {
+	wi, eth, node, shutdown := tassetWallet(assetID)
+	defer shutdown()
+
+	w := wi.(asset.RedemptionConfirmer)
+
+	txHashes := make([]common.Hash, 5)
+	secrets := make([]common.Hash, 5)
+	secretHashes := make([][32]byte, 5)
+	for i := 0; i < 5; i++ {
+		copy(txHashes[i][:], encode.RandomBytes(32))
+		copy(secrets[i][:], encode.RandomBytes(32))
+		secretHashes[i] = sha256.Sum256(secrets[i][:])
+	}
+
+	type txData struct {
+		nonce         uint64
+		gasFeeCapGwei uint64
+		height        int64
+		data          dex.Bytes
+	}
+
+	toEthTx := func(nonce, gasFeeCapGwei uint64, data dex.Bytes) *types.Transaction {
+		return types.NewTx(&types.DynamicFeeTx{
+			Nonce:     nonce,
+			GasFeeCap: dexeth.GweiToWei(gasFeeCapGwei),
+			Data:      data,
+		})
+	}
+
+	toEthTxHash := func(nonce, gasFeeCapGwei uint64, data dex.Bytes) *common.Hash {
+		txHash := toEthTx(nonce, gasFeeCapGwei, data).Hash()
+		return &txHash
+	}
+
+	toEthTxCoinID := func(nonce, gasFeeCapGwei uint64, data dex.Bytes) dex.Bytes {
+		txHash := toEthTx(nonce, gasFeeCapGwei, data).Hash()
+		return txHash[:]
+	}
+
+	redeem0 := []*dexeth.Redemption{
+		{
+			Secret:     secrets[0],
+			SecretHash: secretHashes[0],
+		},
+	}
+	redeem0Data, err := packRedeemDataV0(redeem0)
+	if err != nil {
+		panic("failed to pack redeem data")
+	}
+
+	redeem0and1 := []*dexeth.Redemption{
+		{
+			Secret:     secrets[0],
+			SecretHash: secretHashes[0],
+		},
+		{
+			Secret:     secrets[1],
+			SecretHash: secretHashes[1],
+		},
+	}
+	redeem0and1Data, err := packRedeemDataV0(redeem0and1)
+	if err != nil {
+		panic("failed to pack redeem data")
+	}
+
+	assetRedemption := func(secretHash, secret common.Hash) *asset.Redemption {
+		return &asset.Redemption{
+			Spends: &asset.AuditInfo{
+				Contract: dexeth.EncodeContractData(0, secretHash),
+			},
+			Secret: secret[:],
+		}
+	}
+
+	tests := []struct {
+		name string
+
+		redemption *asset.Redemption
+		coinID     dex.Bytes
+
+		expectedResult                 *asset.ConfirmRedemptionStatus
+		expectErr                      bool
+		expectSwapRefundedErr          bool
+		expectedResubmittedRedemptions []*asset.Redemption
+		expectSentSignedTransaction    *types.Transaction
+		expectedMonitoredTxs           map[common.Hash]*monitoredTx
+
+		getTxResMap   map[common.Hash]*txData
+		swapMap       map[[32]byte]*dexeth.SwapState
+		monitoredTxs  map[common.Hash]*monitoredTx
+		redeemableMap map[common.Hash]bool
+
+		redeemTx  *types.Transaction
+		redeemErr error
+
+		confNonce    uint64
+		confNonceErr error
+
+		baseFee   *big.Int
+		getFeeErr error
+
+		bestBlock  int64
+		bestHdrErr error
+
+		receipt    *types.Receipt
+		receiptErr error
+	}{
+		{
+			name:       "in monitored txs, found by geth, not yet confirmed",
+			coinID:     toEthTxCoinID(3, 200, redeem0Data),
+			redemption: assetRedemption(secretHashes[0], secrets[0]),
+			getTxResMap: map[common.Hash]*txData{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					nonce:         3,
+					gasFeeCapGwei: 200,
+					height:        10,
+					data:          redeem0Data,
+				},
+			},
+			swapMap: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSInitiated,
+				},
+			},
+			monitoredTxs: map[common.Hash]*monitoredTx{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					tx:             toEthTx(3, 200, redeem0Data),
+					blockSubmitted: 9,
+				},
+			},
+			expectedMonitoredTxs: map[common.Hash]*monitoredTx{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					tx:             toEthTx(3, 200, redeem0Data),
+					blockSubmitted: 9,
+				},
+			},
+			bestBlock: 13,
+			expectedResult: &asset.ConfirmRedemptionStatus{
+				Confs:  4,
+				Req:    10,
+				CoinID: toEthTxCoinID(3, 200, redeem0Data),
+			},
+			baseFee: dexeth.GweiToWei(100),
+		},
+		{
+			name:       "in monitored txs, found by geth, confirmed",
+			coinID:     toEthTxCoinID(3, 200, redeem0Data),
+			redemption: assetRedemption(secretHashes[0], secrets[0]),
+			getTxResMap: map[common.Hash]*txData{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					nonce:         3,
+					gasFeeCapGwei: 200,
+					height:        10,
+					data:          redeem0Data,
+				},
+			},
+			swapMap: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSRedeemed,
+				},
+			},
+			monitoredTxs: map[common.Hash]*monitoredTx{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					tx:             toEthTx(3, 200, redeem0Data),
+					blockSubmitted: 9,
+				},
+			},
+			expectedMonitoredTxs: map[common.Hash]*monitoredTx{},
+			bestBlock:            19,
+			expectedResult: &asset.ConfirmRedemptionStatus{
+				Confs:  10,
+				Req:    10,
+				CoinID: toEthTxCoinID(3, 200, redeem0Data),
+			},
+			receipt: &types.Receipt{
+				Status: types.ReceiptStatusSuccessful,
+			},
+			baseFee: dexeth.GweiToWei(100),
+		},
+		{
+			name:       "in monitored txs, found by geth, receipt failed",
+			coinID:     toEthTxCoinID(3, 200, redeem0Data),
+			redemption: assetRedemption(secretHashes[0], secrets[0]),
+			getTxResMap: map[common.Hash]*txData{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					nonce:         3,
+					gasFeeCapGwei: 200,
+					height:        10,
+					data:          redeem0Data,
+				},
+			},
+			swapMap: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSRedeemed,
+				},
+			},
+			monitoredTxs: map[common.Hash]*monitoredTx{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					tx:             toEthTx(3, 200, redeem0Data),
+					blockSubmitted: 9,
+				},
+			},
+			expectedMonitoredTxs: map[common.Hash]*monitoredTx{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					tx:             toEthTx(3, 200, redeem0Data),
+					blockSubmitted: 9,
+					replacementTx:  toEthTxHash(4, 123, redeem0Data),
+				},
+				(*toEthTxHash(4, 123, redeem0Data)): {
+					tx:             toEthTx(4, 123, redeem0Data),
+					blockSubmitted: 19,
+				},
+			},
+			redeemableMap: map[common.Hash]bool{
+				secretHashes[0]: true,
+			},
+			bestBlock: 19,
+			expectedResult: &asset.ConfirmRedemptionStatus{
+				Confs:  0,
+				Req:    10,
+				CoinID: toEthTxCoinID(4, 123, redeem0Data),
+			},
+			redeemTx: toEthTx(4, 123, redeem0Data),
+			receipt: &types.Receipt{
+				Status: types.ReceiptStatusFailed,
+			},
+			baseFee: dexeth.GweiToWei(100),
+		},
+		{
+			name:       "in monitored txs, found by geth, refunded",
+			coinID:     toEthTxCoinID(3, 200, redeem0Data),
+			redemption: assetRedemption(secretHashes[0], secrets[0]),
+			getTxResMap: map[common.Hash]*txData{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					nonce:         3,
+					gasFeeCapGwei: 200,
+					height:        -1,
+					data:          redeem0Data,
+				},
+			},
+			swapMap: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSRefunded,
+				},
+			},
+			monitoredTxs: map[common.Hash]*monitoredTx{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					tx:             toEthTx(3, 200, redeem0Data),
+					blockSubmitted: 9,
+				},
+			},
+			expectedMonitoredTxs: map[common.Hash]*monitoredTx{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					tx:             toEthTx(3, 200, redeem0Data),
+					blockSubmitted: 9,
+				},
+			},
+			bestBlock:             19,
+			expectErr:             true,
+			expectSwapRefundedErr: true,
+			receipt: &types.Receipt{
+				Status: types.ReceiptStatusSuccessful,
+			},
+			baseFee: dexeth.GweiToWei(100),
+		},
+		{
+			name:        "not in monitored txs, not found by geth",
+			coinID:      toEthTxCoinID(3, 200, redeem0Data),
+			redemption:  assetRedemption(secretHashes[0], secrets[0]),
+			getTxResMap: map[common.Hash]*txData{},
+			swapMap: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSInitiated,
+				},
+			},
+			redeemableMap: map[common.Hash]bool{
+				secretHashes[0]: true,
+			},
+			monitoredTxs: map[common.Hash]*monitoredTx{},
+			expectedMonitoredTxs: map[common.Hash]*monitoredTx{
+				(*toEthTxHash(4, 123, redeem0Data)): {
+					tx:             toEthTx(4, 123, redeem0Data),
+					blockSubmitted: 13,
+				},
+			},
+			bestBlock: 13,
+			expectedResult: &asset.ConfirmRedemptionStatus{
+				Confs:  0,
+				Req:    10,
+				CoinID: toEthTxCoinID(4, 123, redeem0Data),
+			},
+			redeemTx: toEthTx(4, 123, redeem0Data),
+			baseFee:  dexeth.GweiToWei(100),
+		},
+		{
+			name:       "not in monitored txs, found by geth, < 10 confirmations",
+			coinID:     toEthTxCoinID(3, 200, redeem0Data),
+			redemption: assetRedemption(secretHashes[0], secrets[0]),
+			getTxResMap: map[common.Hash]*txData{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					nonce:         3,
+					gasFeeCapGwei: 200,
+					height:        10,
+					data:          redeem0Data,
+				},
+			},
+			swapMap: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSInitiated,
+				},
+			},
+			monitoredTxs: map[common.Hash]*monitoredTx{},
+			bestBlock:    13,
+
+			expectedResult: &asset.ConfirmRedemptionStatus{
+				Confs:  4,
+				Req:    10,
+				CoinID: toEthTxCoinID(3, 200, redeem0Data),
+			},
+			baseFee: dexeth.GweiToWei(100),
+		},
+		{
+			name:        "in monitored txs, not found by geth, 10 blocks since submitted",
+			coinID:      toEthTxCoinID(3, 200, redeem0and1Data),
+			redemption:  assetRedemption(secretHashes[0], secrets[0]),
+			getTxResMap: map[common.Hash]*txData{},
+			swapMap: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSInitiated,
+				},
+				secretHashes[1]: {
+					State: dexeth.SSInitiated,
+				},
+			},
+			monitoredTxs: map[common.Hash]*monitoredTx{
+				(*toEthTxHash(3, 200, redeem0and1Data)): {
+					tx:             toEthTx(3, 200, redeem0and1Data),
+					blockSubmitted: 3,
+				},
+			},
+			expectedMonitoredTxs: map[common.Hash]*monitoredTx{
+				(*toEthTxHash(3, 200, redeem0and1Data)): {
+					tx:             toEthTx(3, 200, redeem0and1Data),
+					blockSubmitted: 3,
+					replacementTx:  toEthTxHash(4, 123, redeem0and1Data),
+				},
+				(*toEthTxHash(4, 123, redeem0and1Data)): {
+					tx:             toEthTx(4, 123, redeem0and1Data),
+					blockSubmitted: 13,
+				},
+			},
+			redeemableMap: map[common.Hash]bool{
+				secretHashes[0]: true,
+				secretHashes[1]: true,
+			},
+			bestBlock: 13,
+			expectedResult: &asset.ConfirmRedemptionStatus{
+				Confs:  0,
+				Req:    10,
+				CoinID: toEthTxCoinID(4, 123, redeem0and1Data),
+			},
+			expectedResubmittedRedemptions: []*asset.Redemption{
+				assetRedemption(secretHashes[0], secrets[0]),
+				assetRedemption(secretHashes[1], secrets[1]),
+			},
+			redeemTx: toEthTx(4, 123, redeem0and1Data),
+			baseFee:  big.NewInt(100),
+		},
+		{
+			name:        "in monitored txs, not found by geth, other swap in tx already complete",
+			coinID:      toEthTxCoinID(3, 200, redeem0and1Data),
+			redemption:  assetRedemption(secretHashes[0], secrets[0]),
+			getTxResMap: map[common.Hash]*txData{},
+			swapMap: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSInitiated,
+				},
+				secretHashes[1]: {
+					State: dexeth.SSRedeemed,
+				},
+			},
+			monitoredTxs: map[common.Hash]*monitoredTx{
+				(*toEthTxHash(3, 200, redeem0and1Data)): {
+					tx:             toEthTx(3, 200, redeem0and1Data),
+					blockSubmitted: 3,
+				},
+			},
+			expectedMonitoredTxs: map[common.Hash]*monitoredTx{
+				(*toEthTxHash(3, 200, redeem0and1Data)): {
+					tx:             toEthTx(3, 200, redeem0and1Data),
+					blockSubmitted: 3,
+					replacementTx:  toEthTxHash(4, 123, redeem0Data),
+				},
+				(*toEthTxHash(4, 123, redeem0Data)): {
+					tx:             toEthTx(4, 123, redeem0Data),
+					blockSubmitted: 13,
+				},
+			},
+			redeemableMap: map[common.Hash]bool{
+				secretHashes[0]: true,
+				secretHashes[1]: false,
+			},
+			bestBlock: 13,
+			expectedResult: &asset.ConfirmRedemptionStatus{
+				Confs:  0,
+				Req:    10,
+				CoinID: toEthTxCoinID(4, 123, redeem0Data),
+			},
+			expectedResubmittedRedemptions: []*asset.Redemption{
+				assetRedemption(secretHashes[0], secrets[0]),
+			},
+			redeemTx: toEthTx(4, 123, redeem0Data),
+			baseFee:  big.NewInt(100),
+		},
+		{
+			name:       "replaced, but call with old coin ID",
+			coinID:     toEthTxCoinID(3, 200, redeem0Data),
+			redemption: assetRedemption(secretHashes[0], secrets[0]),
+			getTxResMap: map[common.Hash]*txData{
+				(*toEthTxHash(5, 200, redeem0Data)): {
+					nonce:         5,
+					gasFeeCapGwei: 200,
+					height:        21,
+					data:          redeem0Data,
+				},
+			},
+			swapMap: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSInitiated,
+				},
+			},
+			monitoredTxs: map[common.Hash]*monitoredTx{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					tx:             toEthTx(3, 200, redeem0Data),
+					blockSubmitted: 9,
+					replacementTx:  toEthTxHash(5, 200, redeem0Data),
+				},
+				(*toEthTxHash(5, 200, redeem0Data)): {
+					tx:             toEthTx(5, 200, redeem0Data),
+					blockSubmitted: 19,
+				},
+			},
+			expectedMonitoredTxs: map[common.Hash]*monitoredTx{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					tx:             toEthTx(3, 200, redeem0Data),
+					blockSubmitted: 9,
+					replacementTx:  toEthTxHash(5, 200, redeem0Data),
+				},
+				(*toEthTxHash(5, 200, redeem0Data)): {
+					tx:             toEthTx(5, 200, redeem0Data),
+					blockSubmitted: 19,
+				},
+			},
+			bestBlock: 22,
+			expectedResult: &asset.ConfirmRedemptionStatus{
+				Confs:  2,
+				Req:    10,
+				CoinID: toEthTxCoinID(5, 200, redeem0Data),
+			},
+			baseFee: dexeth.GweiToWei(100),
+		},
+		{
+			name:       "found by geth, redeemed by another unknown transaction",
+			coinID:     toEthTxCoinID(3, 200, redeem0Data),
+			redemption: assetRedemption(secretHashes[0], secrets[0]),
+			getTxResMap: map[common.Hash]*txData{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					nonce:         3,
+					gasFeeCapGwei: 200,
+					height:        -1,
+					data:          redeem0Data,
+				},
+			},
+			swapMap: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSRedeemed,
+				},
+			},
+			bestBlock: 13,
+			expectedResult: &asset.ConfirmRedemptionStatus{
+				Confs:  10,
+				Req:    10,
+				CoinID: toEthTxCoinID(3, 200, redeem0Data),
+			},
+			baseFee: dexeth.GweiToWei(100),
+		},
+		{
+			name:       "found by geth, nonce replaced",
+			coinID:     toEthTxCoinID(3, 200, redeem0Data),
+			redemption: assetRedemption(secretHashes[0], secrets[0]),
+			getTxResMap: map[common.Hash]*txData{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					nonce:         3,
+					gasFeeCapGwei: 200,
+					height:        -1,
+					data:          redeem0Data,
+				},
+			},
+			swapMap: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSInitiated,
+				},
+			},
+			monitoredTxs: map[common.Hash]*monitoredTx{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					tx:             toEthTx(3, 200, redeem0Data),
+					blockSubmitted: 3,
+				},
+			},
+			expectedMonitoredTxs: map[common.Hash]*monitoredTx{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					tx:             toEthTx(3, 200, redeem0Data),
+					blockSubmitted: 3,
+					replacementTx:  toEthTxHash(4, 123, redeem0Data),
+				},
+				(*toEthTxHash(4, 123, redeem0Data)): {
+					tx:             toEthTx(4, 123, redeem0Data),
+					blockSubmitted: 13,
+				},
+			},
+			redeemableMap: map[common.Hash]bool{
+				secretHashes[0]: true,
+			},
+			bestBlock: 13,
+			expectedResult: &asset.ConfirmRedemptionStatus{
+				Confs:  0,
+				Req:    10,
+				CoinID: toEthTxCoinID(4, 123, redeem0Data),
+			},
+			expectedResubmittedRedemptions: []*asset.Redemption{
+				assetRedemption(secretHashes[0], secrets[0]),
+			},
+			confNonce: 4,
+			redeemTx:  toEthTx(4, 123, redeem0Data),
+			baseFee:   dexeth.GweiToWei(100),
+		},
+		{
+			name:       "found by geth, fee too low",
+			coinID:     toEthTxCoinID(3, 200, redeem0Data),
+			redemption: assetRedemption(secretHashes[0], secrets[0]),
+			getTxResMap: map[common.Hash]*txData{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					nonce:         3,
+					gasFeeCapGwei: 200,
+					height:        -1,
+					data:          redeem0Data,
+				},
+			},
+			swapMap: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSInitiated,
+				},
+			},
+			monitoredTxs: map[common.Hash]*monitoredTx{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					tx:             toEthTx(3, 200, redeem0Data),
+					blockSubmitted: 3,
+				},
+			},
+			expectedMonitoredTxs: map[common.Hash]*monitoredTx{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					tx:             toEthTx(3, 200, redeem0Data),
+					blockSubmitted: 3,
+					replacementTx:  toEthTxHash(4, 123, redeem0Data),
+				},
+				(*toEthTxHash(4, 123, redeem0Data)): {
+					tx:             toEthTx(4, 123, redeem0Data),
+					blockSubmitted: 13,
+				},
+			},
+			redeemableMap: map[common.Hash]bool{
+				secretHashes[0]: true,
+			},
+			bestBlock: 13,
+			expectedResult: &asset.ConfirmRedemptionStatus{
+				Confs:  0,
+				Req:    10,
+				CoinID: toEthTxCoinID(4, 123, redeem0Data),
+			},
+			expectedResubmittedRedemptions: []*asset.Redemption{
+				assetRedemption(secretHashes[0], secrets[0]),
+			},
+			confNonce: 3,
+			redeemTx:  toEthTx(4, 123, redeem0Data),
+			baseFee:   dexeth.GweiToWei(300),
+		},
+		{
+			name:       "found by geth, expect resubmission",
+			coinID:     toEthTxCoinID(3, 200, redeem0Data),
+			redemption: assetRedemption(secretHashes[0], secrets[0]),
+			getTxResMap: map[common.Hash]*txData{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					nonce:         3,
+					gasFeeCapGwei: 200,
+					height:        -1,
+					data:          redeem0Data,
+				},
+			},
+			swapMap: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSInitiated,
+				},
+			},
+			monitoredTxs: map[common.Hash]*monitoredTx{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					tx:             toEthTx(3, 200, redeem0Data),
+					blockSubmitted: 3,
+				},
+			},
+			expectedMonitoredTxs: map[common.Hash]*monitoredTx{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					tx:             toEthTx(3, 200, redeem0Data),
+					blockSubmitted: 3,
+				},
+			},
+			redeemableMap: map[common.Hash]bool{
+				secretHashes[0]: true,
+			},
+			bestBlock: 13,
+			expectedResult: &asset.ConfirmRedemptionStatus{
+				Confs:  0,
+				Req:    10,
+				CoinID: toEthTxCoinID(3, 200, redeem0Data),
+			},
+			expectSentSignedTransaction: toEthTx(3, 200, redeem0Data),
+			confNonce:                   3,
+			baseFee:                     dexeth.GweiToWei(100),
+		},
+		{
+			name:       "best hdr error",
+			coinID:     toEthTxCoinID(3, 200, redeem0Data),
+			redemption: assetRedemption(secretHashes[0], secrets[0]),
+			getTxResMap: map[common.Hash]*txData{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					nonce:         3,
+					gasFeeCapGwei: 200,
+					height:        10,
+					data:          redeem0Data,
+				},
+			},
+			swapMap: map[[32]byte]*dexeth.SwapState{
+				secretHashes[0]: {
+					State: dexeth.SSInitiated,
+				},
+			},
+			monitoredTxs: map[common.Hash]*monitoredTx{
+				(*toEthTxHash(3, 200, redeem0Data)): {
+					tx:             toEthTx(3, 200, redeem0Data),
+					blockSubmitted: 9,
+				},
+			},
+			bestBlock:  13,
+			bestHdrErr: errors.New(""),
+			expectErr:  true,
+			baseFee:    dexeth.GweiToWei(100),
+		},
+	}
+
+	for _, test := range tests {
+		node.getTxResMap = make(map[common.Hash]*tGetTxRes)
+		for hash, txData := range test.getTxResMap {
+			node.getTxResMap[hash] = &tGetTxRes{
+				tx:     toEthTx(txData.nonce, txData.gasFeeCapGwei, txData.data),
+				height: txData.height,
+			}
+		}
+		for _, s := range test.swapMap {
+			s.Value = big.NewInt(1)
+		}
+
+		node.tContractor.swapMap = test.swapMap
+		node.tContractor.redeemableMap = test.redeemableMap
+		node.tContractor.redeemTx = test.redeemTx
+		node.tContractor.lastRedeems = nil
+		node.tokenContractor.bal = big.NewInt(1e9)
+		node.bal = big.NewInt(1e9)
+
+		node.lastSignedTx = nil
+
+		node.baseFee = test.baseFee
+		node.netFeeStateErr = test.getFeeErr
+		node.confNonce = test.confNonce
+		node.confNonceErr = test.confNonceErr
+		node.bestHdr = &types.Header{Number: big.NewInt(test.bestBlock)}
+		node.bestHdrErr = test.bestHdrErr
+		node.receipt = test.receipt
+		node.receiptErr = test.receiptErr
+
+		eth.monitoredTxDB = kvdb.NewMemoryDB()
+		eth.monitoredTxs = test.monitoredTxs
+		for h, tx := range test.monitoredTxs {
+			if err := eth.monitoredTxDB.Store(h[:], tx); err != nil {
+				t.Fatalf("%s: error storing monitored tx: %v", test.name, err)
+			}
+		}
+
+		result, err := w.ConfirmRedemption(test.coinID, test.redemption)
+		if test.expectErr {
+			if err == nil {
+				t.Fatalf("%s: expected but did not get", test.name)
+			}
+			if test.expectSwapRefundedErr && !errors.Is(asset.ErrSwapRefunded, err) {
+				t.Fatalf("%s: expected swap refunded error but got %v", test.name, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%s: unexpected error %v", test.name, err)
+		}
+
+		// Check that the correct swaps were resubmitted
+		if test.expectedResubmittedRedemptions != nil {
+			if len(test.expectedResubmittedRedemptions) != len(node.tContractor.lastRedeems) {
+				t.Fatalf("%s expected %d redeems but got %d",
+					test.name,
+					len(test.expectedResubmittedRedemptions),
+					len(node.tContractor.lastRedeems))
+			}
+
+			// The redemptions might be out of order, so we create this map.
+			lastRedeems := make(map[string]*asset.Redemption)
+			for _, redeem := range node.tContractor.lastRedeems {
+				lastRedeems[fmt.Sprintf("%x", redeem.Spends.Contract)] = redeem
+			}
+			for i := range test.expectedResubmittedRedemptions {
+				expected := test.expectedResubmittedRedemptions[i]
+				actual, found := lastRedeems[fmt.Sprintf("%x", expected.Spends.Contract)]
+				if !found {
+					t.Fatalf("%s: expected contract not found among redemptions", test.name)
+				}
+				if !bytes.Equal(expected.Spends.Contract, actual.Spends.Contract) {
+					t.Fatalf("%s: redeemed contract not as expected", test.name)
+				}
+				if !bytes.Equal(expected.Secret, actual.Secret) {
+					t.Fatalf("%s: redeemed secret not as expected", test.name)
+				}
+			}
+		}
+
+		// If the transaction should be resubmitted unmodified, check that this
+		// happened properly
+		if test.expectSentSignedTransaction != nil {
+			if test.expectSentSignedTransaction.Hash() != node.lastSignedTx.Hash() {
+				t.Fatalf("%s expected sent signed tx %s != actual %s",
+					test.name, test.expectSentSignedTransaction.Hash(), node.lastSignedTx.Hash())
+			}
+		}
+
+		// Check that the monitoredTxs were updated properly
+		monitoredTxsMatch := func(a, b *monitoredTx) bool {
+			if a.blockSubmitted != b.blockSubmitted {
+				return false
+			} else if a.tx.Hash() != b.tx.Hash() {
+				return false
+			} else if a.tx.Hash() != b.tx.Hash() {
+				return false
+			} else if (a.replacementTx == nil) != (b.replacementTx == nil) {
+				return false
+			} else if a.replacementTx != nil && *a.replacementTx != *b.replacementTx {
+				return false
+			}
+			return true
+		}
+		storedTxs, err := loadMonitoredTxs(eth.monitoredTxDB)
+		if err != nil {
+			t.Fatalf("%s: failed to load stored txs", test.name)
+		}
+
+		// We do not check the length of the in memory map because that will be cleared later
+		if len(storedTxs) != len(test.expectedMonitoredTxs) {
+			t.Fatalf("expected %d monitored txs to be stored but got %d", len(test.expectedMonitoredTxs), len(storedTxs))
+		}
+
+		for hash, expected := range test.expectedMonitoredTxs {
+			actual, found := eth.monitoredTxs[hash]
+			if !found {
+				t.Fatalf("%s: expected monitored tx not found among monitored txs", test.name)
+			}
+			if !monitoredTxsMatch(expected, actual) {
+				t.Fatalf("%s: expected monitored tx %+v != actual %+v", test.name, expected, actual)
+			}
+
+			stored, found := storedTxs[hash]
+			if !found {
+				t.Fatalf("%s: expected monitored tx not found among stored txs", test.name)
+			}
+			if !monitoredTxsMatch(expected, stored) {
+				t.Fatalf("%s: expected monitored tx %+v != stored %+v", test.name, expected, stored)
+			}
+		}
+
+		// Check that the resulting status is as expected
+		if !bytes.Equal(test.expectedResult.CoinID, result.CoinID) ||
+			test.expectedResult.Confs != result.Confs ||
+			test.expectedResult.Req != result.Req {
+			t.Fatalf("%s: expected result %+v != result %+v", test.name, test.expectedResult, result)
+		}
+	}
+}
+
+func TestMarshalMonitoredTx(t *testing.T) {
+	var replacementTxHash common.Hash
+	copy(replacementTxHash[:], encode.RandomBytes(32))
+
+	original := &monitoredTx{
+		tx:             tTx(100, 200, 300, &testAddressA, []byte{}),
+		blockSubmitted: 123,
+		replacementTx:  &replacementTxHash,
+	}
+
+	originalB, err := original.MarshalBinary()
+	if err != nil {
+		t.Fatalf("error marshaling monitored tx: %v", err)
+	}
+
+	var unmarshaledMonitoredTx monitoredTx
+	err = unmarshaledMonitoredTx.UnmarshalBinary(originalB)
+	if err != nil {
+		t.Fatalf("error unmarshalling monitored tx: %v", err)
+	}
+
+	if original.tx.Hash() != unmarshaledMonitoredTx.tx.Hash() ||
+		original.blockSubmitted != unmarshaledMonitoredTx.blockSubmitted ||
+		*original.replacementTx != *unmarshaledMonitoredTx.replacementTx {
+		t.Fatalf("incorrectly unmarshalled")
+	}
+
+	originalNoReplacement := &monitoredTx{
+		tx:             tTx(100, 200, 300, &testAddressA, []byte{}),
+		blockSubmitted: 123,
+	}
+
+	noReplacementB, err := originalNoReplacement.MarshalBinary()
+	if err != nil {
+		t.Fatalf("error marshaling monitored tx: %v", err)
+	}
+
+	var unmarshalledNoReplacement monitoredTx
+	err = unmarshalledNoReplacement.UnmarshalBinary(noReplacementB)
+	if err != nil {
+		t.Fatalf("error unmarshalling monitored tx: %v", err)
+	}
+
+	if originalNoReplacement.tx.Hash() != unmarshalledNoReplacement.tx.Hash() ||
+		originalNoReplacement.blockSubmitted != unmarshalledNoReplacement.blockSubmitted ||
+		originalNoReplacement.replacementTx != unmarshalledNoReplacement.replacementTx {
+		t.Fatalf("incorrectly unmarshalled")
 	}
 }
 

@@ -745,7 +745,7 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 	dc.tradeMtx.RLock()
 	defer dc.tradeMtx.RUnlock()
 	for oid, trade := range dc.trades {
-		activeMatches := trade.activeMatches()
+		activeMatches := trade.activeMatches(false)
 		if len(activeMatches) == 0 {
 			continue
 		}
@@ -5882,7 +5882,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				if match.Status < order.MakerSwapCast {
 					matchesNeedingCoins = append(matchesNeedingCoins, match)
 				}
-				if match.Status == order.TakerSwapCast {
+				if match.Status >= order.TakerSwapCast && match.Status < order.MatchConfirmed {
 					needsAuditInfo = true // maker needs AuditInfo for takers contract
 					counterSwap = match.MetaData.Proof.TakerSwap
 				}
@@ -5894,7 +5894,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				if match.Status < order.TakerSwapCast {
 					matchesNeedingCoins = append(matchesNeedingCoins, match)
 				}
-				if match.Status < order.MatchComplete && match.Status >= order.MakerSwapCast {
+				if match.Status < order.MatchConfirmed && match.Status >= order.MakerSwapCast {
 					needsAuditInfo = true // taker needs AuditInfo for maker's contract
 					counterSwap = match.MetaData.Proof.MakerSwap
 				}
@@ -7198,7 +7198,7 @@ func (c *Core) schedTradeTick(tracker *trackedTrade) {
 		}
 	}
 
-	numMatches := len(tracker.activeMatches())
+	numMatches := len(tracker.activeMatches(true))
 	if numMatches == 1 {
 		go tick()
 		return

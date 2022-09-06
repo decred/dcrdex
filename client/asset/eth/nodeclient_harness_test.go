@@ -51,6 +51,9 @@ import (
 	"github.com/ethereum/go-ethereum/crypto/secp256k1"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/rpc"
+	//	"encoding/binary"
+	//	"github.com/decred/dcrd/dcrutil/v4"
+	// 	"github.com/decred/dcrd/crypto/blake256"
 )
 
 const (
@@ -1912,10 +1915,7 @@ func TestReplayAttack(t *testing.T) {
 		t.Fatalf("txOpts error: %v", err)
 	}
 
-	err = ethClient.addSignerToOpts(txOpts)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ethClient.addSignerToOpts(txOpts)
 
 	// Deploy the reentry attack contract.
 	_, _, reentryContract, err := reentryattack.DeployReentryAttack(txOpts, ethClient.ec)
@@ -2069,6 +2069,77 @@ func TestReplayAttack(t *testing.T) {
 	}
 }
 
+// This test can be used to test that the resubmission of ETH redemptions after
+// they have been overridden by another transaction works properly. Just replace
+// the app seed and nonce. Also uncomment the lines in the function which will
+// either create a replacement transaction that redeems the swap, or one that
+// just sends ETH to another address. If the swap is redeemed by another tx,
+// the DEX should not attempt to resubmit the redemption.
+/*func TestReplaceWithRandomTransaction(t *testing.T) {
+	appSeed := "36e6976207c4ae35d2942fc644fc845cba28c2d3832f93c94fd23e9857e19ad65c2752a041afbf3f1897f693d4abe3903d6374d53cb78b90002ecc6999d4b317"
+	var gasFeeCap int64 = 300000000000
+	var gasTipCap int64 = 300000000000
+	var nonce int64 = 6
+
+	// uncomment these lines to override the tx with another one that redeems the swap
+	// addressToCall := common.HexToAddress("0x2f68e723b8989ba1c6a9f03e42f33cb7dc9d606f")
+	// data, _ := hex.DecodeString("f4fd17f9000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000011ad8ca2d3762cc2d1b8e6216944d90bb5d2b0885106dcadc7ad8f24af49b295d4914b04a3523fb24740bf72f58ca69549343e3f0428fd557f4a81bb6695f467e")
+	// value := 0
+
+	// uncomment these lines to override the tx with another one that does not redeem the swap
+	// addressToCall := simnetAddr
+	// data := []byte{}
+	// value := uint64(1)
+
+	walletDir := filepath.Join(dcrutil.AppDataDir("dexc", false), "simnet", "assetdb", dex.BipIDSymbol(60))
+	client, err := newNodeClient(getWalletDir(walletDir, dex.Simnet), dex.Simnet, tLogger.SubLogger("initiator"))
+	if err != nil {
+		t.Fatalf("unable to create node client %v", err)
+	}
+	if err := client.connect(ctx); err != nil {
+		t.Fatalf("failed to connect to node: %v", err)
+	}
+	defer client.shutdown()
+
+	appSeedB, err := hex.DecodeString(appSeed)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	appSeedAndPass := func(assetID uint32, appSeed []byte) ([]byte, []byte) {
+		b := make([]byte, len(appSeed)+4)
+		copy(b, appSeed)
+		binary.BigEndian.PutUint32(b[len(appSeed):], assetID)
+
+		s := blake256.Sum256(b)
+		p := blake256.Sum256(s[:])
+		return s[:], p[:]
+	}
+
+	_, pw := appSeedAndPass(60, appSeedB)
+	err = client.unlock(string(pw))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	txOpts := &bind.TransactOpts{
+		Context:   ctx,
+		From:      client.address(),
+		Value:     dexeth.GweiToWei(value),
+		GasFeeCap: big.NewInt(gasFeeCap),
+		GasTipCap: big.NewInt(gasTipCap),
+		GasLimit:  63000,
+		Nonce:     big.NewInt(nonce),
+	}
+
+	tx, err := client.sendTransaction(ctx, txOpts, addressToCall, data)
+	if err != nil {
+		t.Fatalf("failed to send transaction: %v", err)
+	}
+
+	fmt.Printf("replacement tx hash: %s\n", tx.Hash())
+}*/
+
 func testGetCodeAt(t *testing.T) {
 	byteCode, err := ethClient.getCodeAt(ctx, ethSwapContractAddr)
 	if err != nil {
@@ -2111,6 +2182,13 @@ func TestTokenGasEstimates(t *testing.T) {
 		}
 	}); err != nil {
 		t.Fatalf("getGasEstimates error: %v", err)
+	}
+}
+
+func TestConfirmedNonce(t *testing.T) {
+	_, err := ethClient.getConfirmedNonce(ctx, -1)
+	if err != nil {
+		t.Fatalf("getConfirmedNonce error: %v", err)
 	}
 }
 
