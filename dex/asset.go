@@ -175,7 +175,7 @@ func IntDivUp(val, div int64) int64 {
 	// return (val + div - 1) / div
 }
 
-// SwapContractDetails is critical information for one side of a trade.
+// SwapContractDetails is critical swap data for one side of a trade.
 type SwapContractDetails struct {
 	// From is the sending address.
 	From string

@@ -293,9 +293,9 @@ func runSimnet(m *testing.M) (int, error) {
 	participantAddr = participantAcct.Address
 
 	if v1 {
-		prepareV1Contractors()
+		prepareV1SimnetContractors()
 	} else {
-		prepareV0Contractors()
+		prepareV0SimnetContractors()
 	}
 
 	if err := ethClient.unlock(pw); err != nil {
@@ -482,15 +482,15 @@ func runTestnet(m *testing.M) (int, error) {
 	return code, nil
 }
 
-func prepareV0Contractors() (err error) {
-	return prepareContractors(newV0Contractor, newV0TokenContractor)
+func prepareV0SimnetContractors() (err error) {
+	return prepareSimnetContractors(newV0Contractor, newV0TokenContractor)
 }
 
-func prepareV1Contractors() (err error) {
-	return prepareContractors(newV1Contractor, newV1TokenContractor)
+func prepareV1SimnetContractors() (err error) {
+	return prepareSimnetContractors(newV1Contractor, newV1TokenContractor)
 }
 
-func prepareContractors(c contractorConstructor, tc tokenContractorConstructor) (err error) {
+func prepareSimnetContractors(c contractorConstructor, tc tokenContractorConstructor) (err error) {
 	if simnetContractor, err = c(dex.Simnet, simnetAddr, ethClient.contractBackend()); err != nil {
 		return fmt.Errorf("new contractor error: %w", err)
 	}
@@ -1210,21 +1210,9 @@ func testInitiate(t *testing.T, assetID uint32) {
 
 		diff := new(big.Int).Sub(wantBal, bal)
 		if diff.CmpAbs(new(big.Int)) != 0 {
-
-			fmt.Println("Original balance:", fmtBig(originalBal), ", New balance:", fmtBig(bal),
-				", Balance change:", fmtBig(new(big.Int).Sub(bal, originalBal)),
-				", Tx fees:", fmtBig(txFee), ", Swap val:", fmtBig(dexeth.GweiToWei(totalVal)))
-
-			cmd := exec.CommandContext(ctx, "./mine-alpha", "5")
-			cmd.Dir = harnessCtlDir
-			if err := cmd.Run(); err != nil {
-				t.Fatalf("error mining block after funding wallets")
-			}
-
-			bal, _ := balance()
-
-			fmt.Println("Original balance:", fmtBig(originalBal), ", New balance:", fmtBig(bal),
-				", Balance change:", fmtBig(new(big.Int).Sub(bal, originalBal)))
+			fmt.Println("Original balance:", fmtWei(originalBal), ", New balance:", fmtWei(bal),
+				", Balance change:", fmtWei(new(big.Int).Sub(bal, originalBal)),
+				", Tx fees:", fmtWei(txFee), ", Swap val:", fmtWei(dexeth.GweiToWei(totalVal)))
 			t.Fatalf("%s: unexpected balance change: want %d got %d gwei, diff = %.9f gwei",
 				test.name, dexeth.WeiToGwei(wantBal), dexeth.WeiToGwei(bal), float64(diff.Int64())/dexeth.GweiFactor)
 		}
@@ -1441,18 +1429,18 @@ func testRedeem(t *testing.T, assetID uint32) {
 			finalStates:        []dexeth.SwapStep{dexeth.SSRedeemed},
 			addAmt:             true,
 		},
-		// {
-		// 	name:               "bad redeemer",
-		// 	sleepNBlocks:       8,
-		// 	redeemerClient:     ethClient,
-		// 	redeemer:           simnetAcct,
-		// 	redeemerContractor: c,
-		// 	swaps:              []*dex.SwapContractDetails{newDetails(4, 1)},
-		// 	redemptions:        []*asset.Redemption{newRedeem(secrets[4], secretHashes[4], 1, lockTime)},
-		// 	isRedeemable:       []bool{false},
-		// 	finalStates:        []dexeth.SwapStep{dexeth.SSInitiated},
-		// 	addAmt:             false,
-		// },
+		{
+			name:               "bad redeemer",
+			sleepNBlocks:       8,
+			redeemerClient:     ethClient,
+			redeemer:           simnetAcct,
+			redeemerContractor: c,
+			swaps:              []*dex.SwapContractDetails{newDetails(4, 1)},
+			redemptions:        []*asset.Redemption{newRedeem(secrets[4], secretHashes[4], 1, lockTime)},
+			isRedeemable:       []bool{false},
+			finalStates:        []dexeth.SwapStep{dexeth.SSInitiated},
+			addAmt:             false,
+		},
 		{
 			name:               "bad secret",
 			sleepNBlocks:       8,
@@ -1573,9 +1561,9 @@ func testRedeem(t *testing.T, assetID uint32) {
 		expGas := gases.RedeemN(len(test.redemptions))
 		// Ethereum is weird. For v1, if I use 42,000 here, it will often fail,
 		// using all of the gas, so presumably it fails because of insufficient
-		// gas. But if I set a higher limit, the it will succeed, and oddly will
-		// never use 42,000 gas. Why does it use more gas when I use a lower
-		// limit?
+		// gas. But if I set a higher limit, then it will succeed, and oddly
+		// will never use 42,000 gas. Why does it use more gas when I use a
+		// lower limit?
 		txOpts, _ = test.redeemerClient.txOpts(ctx, 0, expGas, dexeth.GweiToWei(maxFeeRate))
 		tx, err = test.redeemerContractor.redeem(txOpts, test.redemptions)
 		if test.expectRedeemErr {
@@ -1602,9 +1590,6 @@ func testRedeem(t *testing.T, assetID uint32) {
 		err = checkTxStatus(receipt, txOpts.GasLimit)
 		if err != nil && expSuccess {
 			t.Fatalf("%s: failed redeem transaction status: %v", test.name, err)
-		}
-		if expSuccess && receipt.GasUsed > expGas {
-			t.Fatalf("%s: gas used, %d, exceeds expected max %d", test.name, receipt.GasUsed, expGas)
 		}
 
 		fmt.Printf("Gas used for %d redeems, success = %t: %d \n", len(test.swaps), expSuccess, receipt.GasUsed)
@@ -1952,11 +1937,9 @@ func testRefund(t *testing.T, assetID uint32) {
 
 		diff := new(big.Int).Sub(wantBal, bal)
 		if diff.CmpAbs(dexeth.GweiToWei(1)) >= 0 {
-
-			fmt.Println("Original balance:", fmtBig(originalBal), ", New balance:", fmtBig(bal),
-				", Balance change:", fmtBig(new(big.Int).Sub(bal, originalBal)),
-				", Tx fees:", fmtBig(txFee), ", Swap val:", fmtBig(dexeth.GweiToWei(amt)))
-
+			fmt.Println("Original balance:", fmtWei(originalBal), ", New balance:", fmtWei(bal),
+				", Balance change:", fmtWei(new(big.Int).Sub(bal, originalBal)),
+				", Tx fees:", fmtWei(txFee), ", Swap val:", fmtWei(dexeth.GweiToWei(amt)))
 			t.Fatalf("%s: unexpected balance change: want %d got %d, diff = %d",
 				test.name, dexeth.WeiToGwei(wantBal), dexeth.WeiToGwei(bal), dexeth.WeiToGwei(diff))
 		}
@@ -2342,6 +2325,6 @@ func exportAccountsFromNode(node *node.Node) ([]accounts.Account, error) {
 	return ks.Accounts(), nil
 }
 
-func fmtBig(v *big.Int) string {
+func fmtWei(v *big.Int) string {
 	return fmt.Sprintf("%.9f gwei", float64(new(big.Int).Div(v, big.NewInt(dexeth.GweiFactor)).Int64()))
 }

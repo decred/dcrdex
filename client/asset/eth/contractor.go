@@ -195,7 +195,6 @@ func (c *contractorV0) swap(ctx context.Context, secretHash [32]byte) (*dexeth.S
 	if err != nil {
 		return nil, err
 	}
-
 	return &dexeth.SwapState{
 		BlockHeight: state.InitBlockNumber.Uint64(),
 		LockTime:    time.Unix(state.RefundBlockTimestamp.Int64(), 0),
@@ -207,7 +206,6 @@ func (c *contractorV0) swap(ctx context.Context, secretHash [32]byte) (*dexeth.S
 	}, nil
 }
 
-// swap retrieves the swap info from the read-only swap method.
 func (c *contractorV0) status(ctx context.Context, contract *dex.SwapContractDetails) (step dexeth.SwapStep, secret [32]byte, blockNumber uint32, err error) {
 	var secretHash [32]byte
 	copy(secretHash[:], contract.SecretHash)
@@ -218,32 +216,41 @@ func (c *contractorV0) status(ctx context.Context, contract *dex.SwapContractDet
 	return swap.State, swap.Secret, uint32(swap.BlockHeight), nil
 }
 
+func (c *contractorV0) refundImpl(txOpts *bind.TransactOpts, secretHash [32]byte) (*types.Transaction, error) {
+	return c.contractV0.Refund(txOpts, secretHash)
+}
+
 // refund issues the refund command to the swap contract. Use isRefundable first
 // to ensure the refund will be accepted.
 func (c *contractorV0) refund(txOpts *bind.TransactOpts, contract *dex.SwapContractDetails) (*types.Transaction, error) {
 	var secretHash [32]byte
 	copy(secretHash[:], contract.SecretHash)
-	return c.contractV0.Refund(txOpts, secretHash)
+	return c.refundImpl(txOpts, secretHash)
+}
+
+func (c *contractorV0) isRedeemableImpl(secretHash, secret [32]byte) (bool, error) {
+	return c.contractV0.IsRedeemable(&bind.CallOpts{From: c.acctAddr}, secretHash, secret)
 }
 
 // isRedeemable exposes the isRedeemable method of the swap contract.
 func (c *contractorV0) isRedeemable(secret [32]byte, contract *dex.SwapContractDetails) (bool, error) {
 	var secretHash [32]byte
 	copy(secretHash[:], contract.SecretHash)
-	return c.contractV0.IsRedeemable(&bind.CallOpts{From: c.acctAddr}, secretHash, secret)
+	return c.isRedeemableImpl(secretHash, secret)
+}
+
+func (c *contractorV0) isRefundableImpl(secretHash [32]byte) (bool, error) {
+	return c.contractV0.IsRefundable(&bind.CallOpts{From: c.acctAddr}, secretHash)
 }
 
 // isRefundable exposes the isRefundable method of the swap contract.
 func (c *contractorV0) isRefundable(contract *dex.SwapContractDetails) (bool, error) {
 	var secretHash [32]byte
 	copy(secretHash[:], contract.SecretHash)
-	return c.contractV0.IsRefundable(&bind.CallOpts{From: c.acctAddr}, secretHash)
+	return c.isRefundableImpl(secretHash)
 }
 
-// estimateRedeemGas estimates the gas used to redeem. The secret hashes
-// supplied must reference existing swaps, so this method can't be used until
-// the swap is initiated.
-func (c *contractorV0) estimateRedeemGas(ctx context.Context, secrets [][32]byte, _ []*dex.SwapContractDetails) (uint64, error) {
+func (c *contractorV0) estimateRedeemGasImpl(ctx context.Context, secrets [][32]byte) (uint64, error) {
 	redemps := make([]swapv0.ETHSwapRedemption, 0, len(secrets))
 	for _, secret := range secrets {
 		redemps = append(redemps, swapv0.ETHSwapRedemption{
@@ -254,13 +261,24 @@ func (c *contractorV0) estimateRedeemGas(ctx context.Context, secrets [][32]byte
 	return c.estimateGas(ctx, nil, "redeem", redemps)
 }
 
+// estimateRedeemGas estimates the gas used to redeem. The secret hashes
+// supplied must reference existing swaps, so this method can't be used until
+// the swap is initiated.
+func (c *contractorV0) estimateRedeemGas(ctx context.Context, secrets [][32]byte, _ []*dex.SwapContractDetails) (uint64, error) {
+	return c.estimateRedeemGasImpl(ctx, secrets)
+}
+
+func (c *contractorV0) estimateRefundGasImpl(ctx context.Context, secretHash [32]byte) (uint64, error) {
+	return c.estimateGas(ctx, nil, "refund", secretHash)
+}
+
 // estimateRefundGas estimates the gas used to refund. The secret hashes
 // supplied must reference existing swaps that are refundable, so this method
 // can't be used until the swap is initiated and the lock time has expired.
 func (c *contractorV0) estimateRefundGas(ctx context.Context, deets *dex.SwapContractDetails) (uint64, error) {
 	var secretHash [32]byte
 	copy(secretHash[:], deets.SecretHash)
-	return c.estimateGas(ctx, nil, "refund", secretHash)
+	return c.estimateRefundGasImpl(ctx, secretHash)
 }
 
 // estimateInitGas estimates the gas used to initiate n generic swaps. The

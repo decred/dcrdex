@@ -168,7 +168,6 @@ type ethFetcher interface {
 	receipt(context.Context, common.Hash) (*types.Receipt, error)
 	// token- and asset-specific methods
 	loadToken(ctx context.Context, assetID uint32) error
-	// status(ctx context.Context, assetID uint32, contract *dex.SwapContractDetails) (step dexeth.SwapStep, secret [32]byte, blockNumber uint32, err error)
 	accountBalance(ctx context.Context, assetID uint32, addr common.Address) (*big.Int, error)
 }
 

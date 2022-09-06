@@ -92,29 +92,15 @@ func (t *tokener) transferred(txData []byte) *big.Int {
 
 // swapped calculates the value sent to the swap contracts initiate method.
 func (t *tokener) swapped(txData []byte) *big.Int {
-	switch t.ver {
-	case 0:
-		inits, err := dexeth.ParseInitiateDataV0(txData)
-		if err != nil {
-			return nil
-		}
-		v := new(big.Int)
-		for _, init := range inits {
-			v.Add(v, init.Value)
-		}
-		return v
-	case 1:
-		contracts, err := dexeth.ParseInitiateDataV1(txData)
-		if err != nil {
-			return nil
-		}
-		v := new(big.Int)
-		for _, c := range contracts {
-			v.Add(v, dexeth.GweiToWei(c.Value))
-		}
-		return v
+	contracts, err := dexeth.ParseInitiateDataV1(txData)
+	if err != nil {
+		return nil
 	}
-	return nil
+	v := new(big.Int)
+	for _, c := range contracts {
+		v.Add(v, dexeth.GweiToWei(c.Value))
+	}
+	return v
 }
 
 // balanceOf checks the account's token balance.

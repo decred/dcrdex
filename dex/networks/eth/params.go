@@ -15,7 +15,6 @@ import (
 	"os"
 	"time"
 
-	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	v0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	swapv1 "decred.org/dcrdex/dex/networks/eth/contracts/v1"
@@ -248,15 +247,6 @@ type Initiation struct {
 	Participant common.Address
 	Value       *big.Int
 	ValueGwei   uint64
-}
-
-func (i *Initiation) Contract() *asset.Contract {
-	return &asset.Contract{
-		Address:    i.Participant.String(),
-		Value:      i.ValueGwei,
-		SecretHash: i.SecretHash[:],
-		LockTime:   uint64(i.LockTime.Unix()),
-	}
 }
 
 // Redemption is the data used to redeem a swap.

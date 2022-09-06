@@ -182,9 +182,8 @@ type WalletInfo struct {
 	// TODO: Handle unsupported protocols at the UI (instruct user to update
 	// dexc).
 	ProtocolVersions []uint32 `json:"protocolVersions"`
-	// Version is the Wallet's version number, which is used to signal when
-	// major changes are made to internal details such as coin ID encoding and
-	// contract structure that must be common to a server's.
+	// Version is the highest server backend version supported by the client.
+	// Deprecated: Use ProtocolVersions.
 	Version uint32 `json:"version"`
 	// AvailableWallets is an ordered list of available WalletDefinition. The
 	// first WalletDefinition is considered the default, and might, for instance

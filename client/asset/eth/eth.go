@@ -1482,7 +1482,7 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 		return fail("unfunded swap: %d < %d", reservedVal, swapVal+fees)
 	}
 
-	tx, err := w.initiate(w.ctx, w.assetID, w.contractsToDetails(swaps.Contracts), swaps.FeeRate, gasLimit, cfg.Version)
+	tx, err := w.initiate(w.ctx, w.assetID, w.contractsToInitDetails(swaps.Contracts), swaps.FeeRate, gasLimit, cfg.Version)
 	if err != nil {
 		return fail("Swap: initiate error: %w", err)
 	}
@@ -1512,7 +1512,7 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 	return receipts, change, fees, nil
 }
 
-func (w *baseWallet) contractsToDetails(contracts []*asset.Contract) []*dex.SwapContractDetails {
+func (w *baseWallet) contractsToInitDetails(contracts []*asset.Contract) []*dex.SwapContractDetails {
 	details := make([]*dex.SwapContractDetails, len(contracts))
 	for i, c := range contracts {
 		details[i] = &dex.SwapContractDetails{
@@ -1572,7 +1572,7 @@ func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uin
 		return fail("unfunded token swap fees: %d < %d", reservedParent, fees)
 	}
 
-	tx, err := w.initiate(w.ctx, w.assetID, w.contractsToDetails(swaps.Contracts), swaps.FeeRate, gasLimit, cfg.Version)
+	tx, err := w.initiate(w.ctx, w.assetID, w.contractsToInitDetails(swaps.Contracts), swaps.FeeRate, gasLimit, cfg.Version)
 	if err != nil {
 		return fail("Swap: initiate error: %w", err)
 	}
@@ -2037,8 +2037,7 @@ func (w *assetWallet) AuditContract(coinID, contract, serializedTx dex.Bytes, re
 	}
 
 	var val uint64
-	var participant string
-	var initiator string
+	var participant, initiator string
 	var lockTime time.Time
 	switch version {
 	case 0:

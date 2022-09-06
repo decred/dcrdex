@@ -119,7 +119,7 @@ var (
 			rpcWalletDefinition,
 			electrumWalletDefinition,
 		},
-		ProtocolVersions: []uint32{0},
+		ProtocolVersions: []uint32{1},
 	}
 )
 

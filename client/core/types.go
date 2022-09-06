@@ -104,7 +104,7 @@ type WalletBalance struct {
 // WalletState is the current status of an exchange wallet.
 type WalletState struct {
 	Symbol       string            `json:"symbol"`
-	AssetID      uint32            `json:"assetID"`
+	AssetID      uint32            `json:"assetID"` // Deprecated: use ProtocolVersions
 	Version      uint32            `json:"version"`
 	WalletType   string            `json:"type"`
 	Traits       asset.WalletTrait `json:"traits"`
@@ -117,7 +117,7 @@ type WalletState struct {
 	PeerCount    uint32            `json:"peerCount"`
 	Synced       bool              `json:"synced"`
 	SyncProgress float32           `json:"syncProgress"`
-	// ProtocolVersions is the supported server protocol versions. Added ~0.6.
+	// ProtocolVersions is the supported server protocol versions.
 	ProtocolVersions []uint32 `json:"protocolVersions"`
 }
 

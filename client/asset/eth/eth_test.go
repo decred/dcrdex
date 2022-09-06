@@ -2485,27 +2485,6 @@ func testAuditContract(t *testing.T, assetID uint32) {
 	}
 
 	for _, test := range tests {
-		// txData, err := packInitiateDataV0(test.initiations)
-		// if err != nil {
-		// 	t.Fatalf("unexpected error: %v", err)
-		// }
-		// if test.badTxData {
-		// 	txData = []byte{0}
-		// }
-
-		// tx := tTx(2, 300, uint64(len(test.initiations)), &node.addr, txData)
-		// chainParams := node.chainConfig()
-		// signer := types.LatestSignerForChainID(chainParams.ChainID)
-		// tx, _ = types.SignTx(tx, signer, privKey)
-
-		// txBinary, err := tx.MarshalBinary()
-		// if err != nil {
-		// 	t.Fatalf(`"%v": failed to marshal binary: %v`, test.name, err)
-		// }
-		// if test.badTxBinary {
-		// 	txBinary = []byte{0}
-		// }
-
 		txData, err := packInitiateDataV0(test.initiations)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)

@@ -34,16 +34,21 @@ var (
 	_       ethFetcher = (*testNode)(nil)
 	tLogger            = dex.StdOutLogger("ETHTEST", dex.LevelTrace)
 	tCtx    context.Context
-	// initCalldata = mustParseHex("a8793f94000000000000000000000000000" +
-	// 	"0000000000000000000000000000000000020000000000000000000000000000000000" +
-	// 	"0000000000000000000000000000002000000000000000000000000000000000000000" +
-	// 	"00000000000000000614811148b3e4acc53b664f9cf6fcac0adcd328e95d62ba1f4379" +
-	// 	"650ae3e1460a0f9d1a1000000000000000000000000345853e21b1d475582e71cc2691" +
-	// 	"24ed5e2dd342200000000000000000000000000000000000000000000000022b1c8c12" +
-	// 	"27a0000000000000000000000000000000000000000000000000000000000006148111" +
-	// 	"4ebdc4c31b88d0c8f4d644591a8e00e92b607f920ad8050deb7c7469767d9c56100000" +
-	// 	"0000000000000000000345853e21b1d475582e71cc269124ed5e2dd342200000000000" +
-	// 	"000000000000000000000000000000000000022b1c8c1227a0000")
+	tSwap1  = &swapv1.ETHSwapContract{
+		SecretHash:      bytesToArray([]byte("1")),
+		Initiator:       common.BytesToAddress([]byte("initiator1")),
+		RefundTimestamp: 1,
+		Participant:     common.BytesToAddress([]byte("participant1")),
+		Value:           1,
+	}
+	tSwap2 = &swapv1.ETHSwapContract{
+		SecretHash:      bytesToArray([]byte("2")),
+		Initiator:       common.BytesToAddress([]byte("initiator2")),
+		RefundTimestamp: 2,
+		Participant:     common.BytesToAddress([]byte("participant2")),
+		Value:           2,
+	}
+	// redeemCalldata encodes [tSwap1, tSwap2]
 	initCalldata = mustParseHex("64a97bff00000000000000000000000000000000000000" +
 		"00000000000000000000000020000000000000000000000000000000000000000000000000" +
 		"00000000000000023100000000000000000000000000000000000000000000000000000000" +
@@ -55,30 +60,18 @@ var (
 		"696e69746961746f7232000000000000000000000000000000000000000000000000000000" +
 		"000000000200000000000000000000000000000000000000007061727469636970616e7432" +
 		"0000000000000000000000000000000000000000000000000000000000000002")
-	/* initCallData parses to:
-	[ETHSwapInitiation {
-			RefundTimestamp: 1632112916
-			SecretHash: 8b3e4acc53b664f9cf6fcac0adcd328e95d62ba1f4379650ae3e1460a0f9d1a1
-			Value: 5e9 gwei
-			Participant: 0x345853e21b1d475582e71cc269124ed5e2dd3422
-		},
-	ETHSwapInitiation {
-			RefundTimestamp: 1632112916
-			SecretHash: ebdc4c31b88d0c8f4d644591a8e00e92b607f920ad8050deb7c7469767d9c561
-			Value: 5e9 gwei
-			Participant: 0x345853e21b1d475582e71cc269124ed5e2dd3422
-		}]
-	*/
 	initSecretHashA     = mustParseHex("8b3e4acc53b664f9cf6fcac0adcd328e95d62ba1f4379650ae3e1460a0f9d1a1")
 	initSecretHashB     = mustParseHex("ebdc4c31b88d0c8f4d644591a8e00e92b607f920ad8050deb7c7469767d9c561")
 	initParticipantAddr = common.HexToAddress("345853e21b1d475582E71cC269124eD5e2dD3422")
-	// redeemCalldata      = mustParseHex("f4fd17f90000000000000000000000000000000000000" +
-	// 	"000000000000000000000000020000000000000000000000000000000000000000000000000" +
-	// 	"00000000000000022c0a304c9321402dc11cbb5898b9f2af3029ce1c76ec6702c4cd5bb965f" +
-	// 	"d3e7399d971975c09331eb00f5e0dc1eaeca9bf4ee2d086d3fe1de489f920007d654687eac0" +
-	// 	"9638c0c38b4e735b79f053cb869167ee770640ac5df5c4ab030813122aebdc4c31b88d0c8f4" +
-	// 	"d644591a8e00e92b607f920ad8050deb7c7469767d9c561")
-
+	tRedeem1            = &swapv1.ETHSwapRedemption{
+		C:      *tSwap1,
+		Secret: bytesToArray([]byte("1")),
+	}
+	tRedeem2 = &swapv1.ETHSwapRedemption{
+		C:      *tSwap2,
+		Secret: bytesToArray([]byte("2")),
+	}
+	// redeemCalldata encodes [tRedeem1, tRedeem2]
 	redeemCalldata = mustParseHex("428b16e100000000000000000000000000000000000" +
 		"0000000000000000000000000002000000000000000000000000000000000000000000" +
 		"0000000000000000000000231000000000000000000000000000000000000000000000" +
@@ -93,17 +86,6 @@ var (
 		"0000000007061727469636970616e74320000000000000000000000000000000000000" +
 		"0000000000000000000000000023200000000000000000000000000000000000000000" +
 		"000000000000000000000")
-	/*
-		redeemCallData parses to:
-		[ETHSwapRedemption {
-			SecretHash: 99d971975c09331eb00f5e0dc1eaeca9bf4ee2d086d3fe1de489f920007d6546
-			Secret: 2c0a304c9321402dc11cbb5898b9f2af3029ce1c76ec6702c4cd5bb965fd3e73
-		}
-		ETHSwapRedemption {
-			SecretHash: ebdc4c31b88d0c8f4d644591a8e00e92b607f920ad8050deb7c7469767d9c561
-			Secret: 87eac09638c0c38b4e735b79f053cb869167ee770640ac5df5c4ab030813122a
-		}]
-	*/
 )
 
 func mustParseHex(s string) []byte {
@@ -952,32 +934,6 @@ func bytesToArray(b []byte) (a [32]byte) {
 	copy(a[:], b)
 	return
 }
-
-var (
-	tSwap1 = &swapv1.ETHSwapContract{
-		SecretHash:      bytesToArray([]byte("1")),
-		Initiator:       common.BytesToAddress([]byte("initiator1")),
-		RefundTimestamp: 1,
-		Participant:     common.BytesToAddress([]byte("participant1")),
-		Value:           1,
-	}
-	tSwap2 = &swapv1.ETHSwapContract{
-		SecretHash:      bytesToArray([]byte("2")),
-		Initiator:       common.BytesToAddress([]byte("initiator2")),
-		RefundTimestamp: 2,
-		Participant:     common.BytesToAddress([]byte("participant2")),
-		Value:           2,
-	}
-
-	tRedeem1 = &swapv1.ETHSwapRedemption{
-		C:      *tSwap1,
-		Secret: bytesToArray([]byte("1")),
-	}
-	tRedeem2 = &swapv1.ETHSwapRedemption{
-		C:      *tSwap2,
-		Secret: bytesToArray([]byte("2")),
-	}
-)
 
 // func TestGenerateV1RedeemData(t *testing.T) {
 // 	redeemData, err := dexeth.ABIs[1].Pack("redeem", []swapv1.ETHSwapRedemption{*tRedeem1, *tRedeem2})
