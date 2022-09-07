@@ -73,6 +73,7 @@ export default class WalletsPage extends BasePage {
   currentForm: PageElement
   restoreInfoCard: HTMLElement
   selectedAssetID: number
+  maxSend: number
 
   constructor (body: HTMLElement) {
     super()
@@ -116,9 +117,12 @@ export default class WalletsPage extends BasePage {
     // Bind the wallet unlock form.
     this.unlockForm = new UnlockWalletForm(page.unlockWalletForm, (assetID: number) => this.openWalletSuccess(assetID, page.unlockWalletForm))
 
-    // Bind the Send form.
-    bindForm(page.sendForm, page.submitSendForm, () => { this.send() })
-
+    // Bind the send form.
+    bindForm(page.sendForm, page.submitSendForm, async () => { this.stepSend() })
+    // Send confirmation form.
+    bindForm(page.vSendForm, page.vSend, async () => { this.send() })
+    // Cancel send confirmation form.
+    Doc.bind(page.vCancelSend, 'click', async () => { this.cancelSend() })
     // Bind the wallet reconfiguration submission.
     bindForm(page.reconfigForm, page.submitReconfig, () => this.reconfig())
 
@@ -149,22 +153,32 @@ export default class WalletsPage extends BasePage {
 
     // Clicking on the available amount on the Send form populates the
     // amount field.
-    Doc.bind(page.sendAvail, 'click', () => {
-      const { wallet: { balance: { available: avail }, traits }, unitInfo: ui } = app().assets[this.selectedAssetID]
-      page.sendAmt.value = String(avail / ui.conventional.conversionFactor)
-      this.showFiatValue(this.selectedAssetID, avail, page.sendValue)
-      // Ensure we don't check subtract checkbox for assets that don't have a
-      // withdraw method.
-      if ((traits & traitWithdrawer) === 0) page.subtractCheckBox.checked = false
-      else page.subtractCheckBox.checked = true
-    })
+    Doc.bind(page.walletBal, 'click', () => { this.populateMaxSend() })
 
     // Display fiat value for current send amount.
     Doc.bind(page.sendAmt, 'input', () => {
       const { unitInfo: ui } = app().assets[this.selectedAssetID]
-      const amt = parseFloat(page.sendAmt.value ?? '0')
+      const amt = parseFloat(page.sendAmt.value || '0')
       const conversionFactor = ui.conventional.conversionFactor
       this.showFiatValue(this.selectedAssetID, amt * conversionFactor, page.sendValue)
+    })
+
+    // Clicking on maxSend on the send form should populate the amount field.
+    Doc.bind(page.maxSend, 'click', () => { this.populateMaxSend() })
+
+    // Validate send address on input.
+    Doc.bind(page.sendAddr, 'input', async () => {
+      const asset = app().assets[this.selectedAssetID]
+      Doc.hide(page.validAddr)
+      page.sendAddr.classList.remove('invalid')
+      if (!asset || page.sendAddr.value === '') return
+      const addrCheck = {
+        addr: page.sendAddr.value,
+        assetID: asset.id
+      }
+      const res = await postJSON('/api/validateaddress', addrCheck)
+      if (app().checkResponse(res)) Doc.show(page.validAddr)
+      else page.sendAddr.classList.add('invalid')
     })
 
     // A link on the wallet reconfiguration form to show/hide the password field.
@@ -213,6 +227,77 @@ export default class WalletsPage extends BasePage {
       .catch((reason) => {
         console.error('Unable to copy: ', reason)
       })
+  }
+
+  // stepSend makes a request to get an estimated fee and displays the confirm
+  // send form.
+  async stepSend () {
+    const page = this.page
+    Doc.hide(page.vSendAddrMsg, page.vSendErr, page.sendErr)
+    const assetID = parseInt(page.sendForm.dataset.assetID || '')
+    const subtract = page.subtractCheckBox.checked || false
+    const conversionFactor = app().unitInfo(assetID).conventional.conversionFactor
+    const value = Math.round(parseFloat(page.sendAmt.value || '') * conversionFactor)
+    const wallet = app().walletMap[assetID]
+
+    const open = {
+      addr: page.sendAddr.value,
+      assetID: assetID,
+      subtract: subtract,
+      value: value
+    }
+
+    const loaded = app().loading(page.sendForm)
+    const res = await postJSON('/api/txfee', open)
+    loaded()
+    if (!app().checkResponse(res) && res.msg !== 'wallet does not support options') { // This is a work around for wallets like ZEC, which does not support subtract for fee estimations.
+      Doc.showFormError(page.sendErr, res.msg)
+      return
+    }
+
+    if (!res.validaddress && res.ok) {
+      Doc.show(page.vSendAddrMsg)
+    }
+
+    page.vSendSymbol.textContent = wallet.symbol.toUpperCase()
+    page.vSendLogo.src = Doc.logoPath(wallet.symbol)
+
+    page.vSendFee.textContent = Doc.formatFullPrecision(res.txfee, app().unitInfo(assetID))
+    this.showFiatValue(assetID, res.txfee, page.vSendFeeFiat)
+    page.vSendDestinationAmt.textContent = Doc.formatFullPrecision(value - res.txfee, app().unitInfo(assetID))
+    page.vTotalSend.textContent = Doc.formatFullPrecision(value, app().unitInfo(assetID))
+    this.showFiatValue(assetID, value, page.vTotalSendFiat)
+    page.vSendAddr.textContent = page.sendAddr.value || ''
+    const bal = wallet.balance.available - value
+    page.balanceAfterSend.textContent = Doc.formatFullPrecision(bal, app().unitInfo(assetID))
+    this.showFiatValue(assetID, bal, page.balanceAfterSendFiat)
+    Doc.show(page.approxSign)
+    if (!subtract) {
+      Doc.hide(page.approxSign)
+      page.vSendDestinationAmt.textContent = Doc.formatFullPrecision(value, app().unitInfo(assetID))
+      const totalSend = value + res.txfee
+      page.vTotalSend.textContent = Doc.formatFullPrecision(totalSend, app().unitInfo(assetID))
+      this.showFiatValue(assetID, value, page.vTotalSendFiat)
+      const bal = wallet.balance.available - totalSend
+      // handle edge cases where bal is not enough to cover totalSend.
+      // we don't want a minus display of user bal.
+      if (bal <= 0) {
+        page.balanceAfterSend.textContent = Doc.formatFullPrecision(0, app().unitInfo(assetID))
+        this.showFiatValue(assetID, 0, page.balanceAfterSendFiat)
+      } else {
+        page.balanceAfterSend.textContent = Doc.formatFullPrecision(bal, app().unitInfo(assetID))
+        this.showFiatValue(assetID, bal, page.balanceAfterSendFiat)
+      }
+    }
+    Doc.hide(page.sendForm)
+    await this.showForm(page.vSendForm)
+  }
+
+  // cancelSend displays the send form if user wants to make modification.
+  async cancelSend () {
+    const page = this.page
+    Doc.hide(page.vSendForm, page.sendErr)
+    await this.showForm(page.sendForm)
   }
 
   /*
@@ -530,8 +615,7 @@ export default class WalletsPage extends BasePage {
       return
     }
     if (!app().checkResponse(res)) {
-      page.reconfigErr.textContent = res.msg
-      Doc.show(page.reconfigErr)
+      Doc.showFormError(page.reconfigErr, res.msg)
       return
     }
     this.assetUpdated(assetID, page.reconfigForm, intl.prep(intl.ID_RESCAN_STARTED))
@@ -616,8 +700,7 @@ export default class WalletsPage extends BasePage {
     const res = await postJSON('/api/walletsettings', { assetID })
     loaded()
     if (!app().checkResponse(res)) {
-      page.reconfigErr.textContent = res.msg
-      Doc.show(page.reconfigErr)
+      Doc.showFormError(page.reconfigErr, res.msg)
       return
     }
     const assetHasActiveOrders = app().haveAssetOrders(assetID)
@@ -668,8 +751,7 @@ export default class WalletsPage extends BasePage {
     })
     loaded()
     if (!app().checkResponse(res)) {
-      page.depositErr.textContent = res.msg
-      Doc.show(page.depositErr)
+      Doc.showFormError(page.depositErr, res.msg)
       return
     }
     page.depositAddress.textContent = res.address
@@ -681,28 +763,54 @@ export default class WalletsPage extends BasePage {
     const page = this.page
     const box = page.sendForm
     const { wallet, name, unitInfo: ui, symbol } = app().assets[assetID]
-    Doc.hide(page.senderOnlyHelpText)
     Doc.hide(page.toggleSubtract)
     page.subtractCheckBox.checked = false
 
     const isWithdrawer = (wallet.traits & traitWithdrawer) !== 0
-    if (!isWithdrawer) {
-      Doc.show(page.senderOnlyHelpText)
-      page.subtractCheckBox.checked = false
-    } else {
+    if (isWithdrawer) {
       Doc.show(page.toggleSubtract)
     }
 
+    Doc.hide(page.validAddr, page.sendErr, page.maxSendDisplay)
+    page.sendAddr.classList.remove('invalid')
     page.sendAddr.value = ''
     page.sendAmt.value = ''
-    page.sendPW.value = ''
-    page.sendErr.textContent = ''
     this.showFiatValue(assetID, 0, page.sendValue)
-    page.sendAvail.textContent = Doc.formatFullPrecision(wallet.balance.available, ui)
+    page.walletBal.textContent = Doc.formatFullPrecision(wallet.balance.available, ui)
     page.sendLogo.src = Doc.logoPath(symbol)
     page.sendName.textContent = name
     // page.sendFee.textContent = wallet.feerate
     // page.sendUnit.textContent = wallet.units
+
+    if (wallet.balance.available > 0) {
+      const feeReq = {
+        assetID: assetID,
+        subtract: isWithdrawer,
+        value: wallet.balance.available
+      }
+
+      const loaded = app().loading(this.body)
+      const res = await postJSON('/api/txfee', feeReq)
+      loaded()
+      if (!app().checkResponse(res)) {
+        // This is a work around for wallets like ZEC, which does not support
+        // subtract for fee estimations.
+        if (res.msg !== 'wallet does not support options') Doc.showFormError(page.sendErr, res.msg)
+      } else {
+        const canSend = wallet.balance.available - res.txfee
+        this.maxSend = canSend
+        page.maxSend.textContent = Doc.formatFullPrecision(canSend, ui)
+        this.showFiatValue(assetID, canSend, page.maxSendFiat)
+        page.maxSendFee.textContent = Doc.formatFullPrecision(res.txfee, ui)
+        this.showFiatValue(assetID, res.txfee, page.maxSendFeeFiat)
+        Doc.show(page.maxSendDisplay)
+      }
+    }
+
+    this.showFiatValue(assetID, 0, page.sendValue)
+    page.walletBal.textContent = Doc.formatFullPrecision(wallet.balance.available, ui)
+    page.sendLogo.src = Doc.logoPath(wallet.symbol)
+    page.sendName.textContent = name
     box.dataset.assetID = String(assetID)
     this.showForm(box)
   }
@@ -730,30 +838,56 @@ export default class WalletsPage extends BasePage {
     }
   }
 
+  /* populateMaxSend populates the amount field with the max amount the wallet
+     can send. The max send amount can be the maximum amount based on our
+     pre-estimation or the asset's wallet balance.
+  */
+  async populateMaxSend () {
+    const page = this.page
+    const asset = app().assets[this.selectedAssetID]
+    if (!asset) return
+    // Populate send amount with max send value and ensure we don't check
+    // subtract checkbox for assets that don't have a withdraw method.
+    if ((asset.wallet.traits & traitWithdrawer) === 0) {
+      page.sendAmt.value = String(this.maxSend / asset.unitInfo.conventional.conversionFactor)
+      this.showFiatValue(asset.id, this.maxSend, page.sendValue)
+      page.subtractCheckBox.checked = false
+    } else {
+      const amt = asset.wallet.balance.available
+      page.sendAmt.value = String(amt / asset.unitInfo.conventional.conversionFactor)
+      this.showFiatValue(asset.id, amt, page.sendValue)
+      page.subtractCheckBox.checked = true
+    }
+  }
+
   /* send submits the send form to the API. */
   async send (): Promise<void> {
     const page = this.page
-    Doc.hide(page.sendErr)
     const assetID = parseInt(page.sendForm.dataset.assetID ?? '')
     const subtract = page.subtractCheckBox.checked ?? false
     const conversionFactor = app().unitInfo(assetID).conventional.conversionFactor
+    const pw = page.vSendPw.value || ''
+    page.vSendPw.value = ''
+    if (pw === '') {
+      Doc.showFormError(page.vSendErr, intl.prep(intl.ID_NO_PASS_ERROR_MSG))
+      return
+    }
     const open = {
       assetID: assetID,
       address: page.sendAddr.value,
       subtract: subtract,
       value: Math.round(parseFloat(page.sendAmt.value ?? '') * conversionFactor),
-      pw: page.sendPW.value
+      pw: pw
     }
-    const loaded = app().loading(page.sendForm)
+    const loaded = app().loading(page.vSendForm)
     const res = await postJSON('/api/send', open)
     loaded()
     if (!app().checkResponse(res)) {
-      page.sendErr.textContent = res.msg
-      Doc.show(page.sendErr)
+      Doc.showFormError(page.vSendErr, res.msg)
       return
     }
     const name = app().assets[assetID].name
-    this.assetUpdated(assetID, page.sendForm, intl.prep(intl.ID_SEND_SUCCESS, { assetName: name }))
+    this.assetUpdated(assetID, page.vSendForm, intl.prep(intl.ID_SEND_SUCCESS, { assetName: name }))
   }
 
   /* update wallet configuration */
@@ -762,8 +896,7 @@ export default class WalletsPage extends BasePage {
     const assetID = this.selectedAssetID
     Doc.hide(page.reconfigErr)
     if (!page.appPW.value && !State.passwordIsCached()) {
-      page.reconfigErr.textContent = intl.prep(intl.ID_NO_APP_PASS_ERROR_MSG)
-      Doc.show(page.reconfigErr)
+      Doc.showFormError(page.reconfigErr, intl.prep(intl.ID_NO_APP_PASS_ERROR_MSG))
       return
     }
 
@@ -785,8 +918,7 @@ export default class WalletsPage extends BasePage {
     page.newPW.value = ''
     loaded()
     if (!app().checkResponse(res)) {
-      page.reconfigErr.textContent = res.msg
-      Doc.show(page.reconfigErr)
+      Doc.showFormError(page.reconfigErr, res.msg)
       return
     }
     this.assetUpdated(assetID, page.reconfigForm, intl.prep(intl.ID_RECONFIG_SUCCESS))
@@ -837,8 +969,7 @@ export default class WalletsPage extends BasePage {
       page.exportWalletPW.value = ''
       this.displayRestoreWalletInfo(res.restorationinfo)
     } else {
-      page.exportWalletErr.textContent = res.msg
-      Doc.show(page.exportWalletErr)
+      Doc.showFormError(page.exportWalletErr, res.msg)
     }
   }
 
@@ -878,8 +1009,7 @@ export default class WalletsPage extends BasePage {
     } else if (app().checkResponse(res)) {
       this.closePopups()
     } else {
-      page.recoverWalletErr.textContent = res.msg
-      Doc.show(page.recoverWalletErr)
+      Doc.showFormError(page.recoverWalletErr, res.msg)
     }
   }
 
@@ -896,8 +1026,7 @@ export default class WalletsPage extends BasePage {
     loaded()
     if (app().checkResponse(res)) this.closePopups()
     else {
-      page.confirmForceErr.textContent = res.msg
-      Doc.show(page.confirmForceErr)
+      Doc.showFormError(page.confirmForceErr, res.msg)
     }
   }
 

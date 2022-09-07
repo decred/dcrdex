@@ -4444,6 +4444,88 @@ func TestMarshalMonitoredTx(t *testing.T) {
 	}
 }
 
+func TestEstimateSendTxFee(t *testing.T) {
+	t.Run("eth", func(t *testing.T) { testEstimateSendTxFee(t, BipID) })
+	t.Run("token", func(t *testing.T) { testEstimateSendTxFee(t, testTokenID) })
+}
+
+func testEstimateSendTxFee(t *testing.T, assetID uint32) {
+	w, eth, node, shutdown := tassetWallet(assetID)
+	defer shutdown()
+
+	maxFeeRate, _ := eth.recommendedMaxFeeRate(eth.ctx)
+	ethFees := dexeth.WeiToGwei(maxFeeRate) * defaultSendGasLimit
+	tokenFees := dexeth.WeiToGwei(maxFeeRate) * tokenGases.Transfer
+
+	const testAddr = "dd93b447f7eBCA361805eBe056259853F3912E04"
+
+	const val = 10e9
+	tests := []struct {
+		name, addr      string
+		sendAdj, feeAdj uint64
+		balErr          error
+		withdraw        bool
+		wantErr         bool
+	}{{
+		name: "ok",
+		addr: testAddr,
+	}, {
+		name: "ok: empty address",
+		addr: "",
+	}, {
+		name:    "not enough",
+		sendAdj: 1,
+		wantErr: true,
+		addr:    testAddr,
+	}, {
+		name:    "low fees",
+		feeAdj:  1,
+		wantErr: true,
+		addr:    testAddr,
+	}, {
+		name:     "subtract",
+		feeAdj:   1,
+		withdraw: true,
+		wantErr:  true,
+		addr:     testAddr,
+	}, {
+		name:    "balance error",
+		balErr:  errors.New(""),
+		wantErr: true,
+		addr:    testAddr,
+	}}
+
+	for _, test := range tests {
+		node.balErr = test.balErr
+		if assetID == BipID {
+			node.bal = dexeth.GweiToWei(val + ethFees - test.sendAdj - test.feeAdj)
+		} else {
+			node.tokenContractor.bal = dexeth.GweiToWei(val - test.sendAdj)
+			node.bal = dexeth.GweiToWei(tokenFees - test.feeAdj)
+		}
+		txFeeEstimator := w.(asset.TxFeeEstimator)
+		estimate, _, err := txFeeEstimator.EstimateSendTxFee(test.addr, val, 0, false)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %v", test.name)
+			}
+			continue
+		}
+		if assetID == BipID {
+			if estimate != ethFees {
+				t.Fatalf("%s: expected fees to be %v, got %v", test.name, ethFees, estimate)
+			}
+		} else {
+			if estimate != tokenFees {
+				t.Fatalf("%s: expected fees to be %v, got %v", test.name, ethFees, estimate)
+			}
+		}
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", test.name, err)
+		}
+	}
+}
+
 func parseRecoveryID(c asset.Coin) []byte {
 	return c.(asset.RecoveryCoin).RecoveryID()
 }

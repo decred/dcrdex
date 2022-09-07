@@ -25,6 +25,7 @@ const (
 	WalletTraitSweeper                                     // The Wallet can sweep all the funds, leaving no change.
 	WalletTraitRestorer                                    // The wallet is an asset.WalletRestorer
 	WalletTraitRedemptionConfirmer                         // The wallet has a process to confirm a redemption.
+	WalletTraitTxFeeEstimator                              // The wallet can estimate transaction fees.
 )
 
 // IsRescanner tests if the WalletTrait has the WalletTraitRescanner bit set.
@@ -81,6 +82,12 @@ func (wt WalletTrait) IsRestorer() bool {
 	return wt&WalletTraitRestorer != 0
 }
 
+// IsTxFeeEstimator test if the WalletTrait has the WalletTraitTxFeeEstimator
+// bit set, which indicates the wallet implements the TxFeeEstimator interface.
+func (wt WalletTrait) IsTxFeeEstimator() bool {
+	return wt&WalletTraitTxFeeEstimator != 0
+}
+
 // DetermineWalletTraits returns the WalletTrait bitset for the provided Wallet.
 func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(Rescanner); is {
@@ -112,6 +119,9 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	}
 	if _, is := w.(RedemptionConfirmer); is {
 		t |= WalletTraitRedemptionConfirmer
+	}
+	if _, is := w.(TxFeeEstimator); is {
+		t |= WalletTraitTxFeeEstimator
 	}
 	return t
 }
@@ -395,6 +405,17 @@ type Wallet interface {
 	// EstimateRegistrationTxFee returns an estimate for the tx fee needed to
 	// pay the registration fee using the provided feeRate.
 	EstimateRegistrationTxFee(feeRate uint64) uint64
+	// ValidateAddress checks that the provided address is valid.
+	ValidateAddress(address string) bool
+}
+
+// TxFeeEstimator is a wallet implementation with fee estimation functionality.
+type TxFeeEstimator interface {
+	// EstimateSendTxFee returns a tx fee estimate for sending or withdrawing
+	// the provided amount using the provided feeRate. This uses actual utxos to
+	// calculate the tx fee where possible and ensures the wallet has enough to
+	// cover send value and minimum fees.
+	EstimateSendTxFee(address string, value, feeRate uint64, subtract bool) (fee uint64, isValidAddress bool, err error)
 }
 
 // Rescanner is a wallet implementation with rescan functionality.

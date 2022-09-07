@@ -59,6 +59,7 @@ const (
 	methodGetBlockHeader     = "getblockheader"
 	methodGetNetworkInfo     = "getnetworkinfo"
 	methodGetBlockchainInfo  = "getblockchaininfo"
+	methodFundRawTransaction = "fundrawtransaction"
 )
 
 // isTxNotFoundErr will return true if the error indicates that the requested
@@ -123,6 +124,7 @@ type rpcCore struct {
 	numericGetRawTxRPC       bool
 	legacyValidateAddressRPC bool
 	manualMedianTime         bool
+	omitRPCOptionsArg        bool
 }
 
 func (c *rpcCore) requester() RawRequesterWithContext {
@@ -787,6 +789,67 @@ func (wc *rpcClient) sendToAddress(address string, value, feeRate uint64, subtra
 		return nil, err
 	}
 	return chainhash.NewHashFromStr(txid)
+}
+
+// sendTxFeeEstimator returns the fee required to send tx using the provided
+// feeRate.
+func (wc *rpcClient) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract bool) (txfee uint64, err error) {
+	txBytes, err := wc.serializeTx(tx)
+	if err != nil {
+		return 0, fmt.Errorf("tx serialization error: %w", err)
+	}
+	args := anylist{hex.EncodeToString(txBytes)}
+
+	// 1e-5 = 1e-8 for satoshis * 1000 for kB.
+	feeRateOption := float64(feeRate) / 1e5
+	if wc.omitRPCOptionsArg {
+		var success bool
+		err := wc.call(methodSetTxFee, anylist{feeRateOption}, &success)
+		if err != nil {
+			return 0, fmt.Errorf("error setting transaction fee: %w", err)
+		}
+		if !success {
+			return 0, fmt.Errorf("failed to set transaction fee")
+		}
+	} else {
+		options := &btcjson.FundRawTransactionOpts{
+			FeeRate: &feeRateOption,
+		}
+		if !wc.omitAddressType {
+			if wc.segwit {
+				options.ChangeType = &btcjson.ChangeTypeBech32
+			} else {
+				options.ChangeType = &btcjson.ChangeTypeLegacy
+			}
+		}
+		if subtract {
+			options.SubtractFeeFromOutputs = []int{0}
+		}
+		args = append(args, options)
+	}
+
+	res := &btcjson.FundRawTransactionResult{}
+	err = wc.call(methodFundRawTransaction, args, &res)
+	if err != nil {
+		// This is a work around for ZEC wallet, which does not support options
+		// argument for fundrawtransaction.
+		if wc.omitRPCOptionsArg {
+			var sendAmount uint64
+			for _, txOut := range tx.TxOut {
+				sendAmount += uint64(txOut.Value)
+			}
+			var bal uint64
+			// args: "(dummy)" minconf includeWatchonly inZat
+			if err := wc.call(methodGetBalance, anylist{"", 0, false, true}, &bal); err != nil {
+				return 0, err
+			}
+			if subtract && sendAmount <= bal {
+				return 0, errors.New("wallet does not support options")
+			}
+		}
+		return 0, fmt.Errorf("error calculating transaction fee: %w", err)
+	}
+	return toSatoshi(res.Fee.ToBTC()), nil
 }
 
 // GetWalletInfo gets the getwalletinfo RPC result.

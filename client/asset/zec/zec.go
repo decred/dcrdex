@@ -40,8 +40,10 @@ const (
 )
 
 var (
-	fallbackFeeKey = "fallbackfee"
-	configOpts     = []*asset.ConfigOption{
+	conventionalConversionFactor = float64(dexzec.UnitInfo.Conventional.ConversionFactor)
+	fallbackFeeKey               = "fallbackfee"
+
+	configOpts = []*asset.ConfigOption{
 		{
 			Key:         "rpcuser",
 			DisplayName: "JSON-RPC Username",
@@ -210,7 +212,8 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 			return dexzec.VersionNU5
 		},
 		// https://github.com/zcash/zcash/pull/6005
-		ManualMedianTime: true,
+		ManualMedianTime:  true,
+		OmitRPCOptionsArg: true,
 	}
 
 	var err error

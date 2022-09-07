@@ -262,4 +262,13 @@ var EnUS = map[string]string{
 	"No Recent Activity":          "No Recent Activity",
 	"Recent asset_name Activity":  "Recent <span data-asset-name=1></span> Activity",
 	"Other Actions":               "Other Actions",
+	"estimated_fee":               "Estimated Fee",
+	"estimated_total_spend":       "Estimated Total Spend",
+	"estimated_balance":           "Estimated Balance After",
+	"max_estimated_send":          "Max Estimated Send",
+	"max_estimated_send_fee":      "Max Estimated Send Fee",
+	"sending":                     "Sending",
+	"transfer":                    "Transfer",
+	"invalid_address":             "Note: Provide a valid address.",
+	"max_estimated_send_tooltip":  "This is the estimated amount that will be received if you withdraw your current balance with 'Subtract fees from amount sent' checked. If there is no subtract fee checkbox, this is the maximum estimated amount you can send.",
 }

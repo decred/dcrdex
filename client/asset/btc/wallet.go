@@ -60,6 +60,10 @@ type tipRedemptionWallet interface {
 	findRedemptionsInMempool(ctx context.Context, reqs map[outPoint]*findRedemptionReq) (discovered map[outPoint]*findRedemptionResult)
 }
 
+type txFeeEstimator interface {
+	estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract bool) (fee uint64, err error)
+}
+
 // walletTxChecker provide a fast wallet tx query when block info not needed.
 // This should be treated as an optimization method, where getWalletTransaction
 // may always be used in its place if it does not exists.

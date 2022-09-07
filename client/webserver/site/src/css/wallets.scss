@@ -257,3 +257,8 @@
   color: #d11414;
   font-size: bold;
 }
+
+#sendAddr.invalid {
+  border-color: #ee1a1a;
+  box-shadow: 0 0 2px 2px #ee1a1a;
+}

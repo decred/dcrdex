@@ -564,6 +564,7 @@ var _ asset.Wallet = (*ExchangeWallet)(nil)
 var _ asset.FeeRater = (*ExchangeWallet)(nil)
 var _ asset.Withdrawer = (*ExchangeWallet)(nil)
 var _ asset.LiveReconfigurer = (*ExchangeWallet)(nil)
+var _ asset.TxFeeEstimator = (*ExchangeWallet)(nil)
 
 type block struct {
 	height int64
@@ -1162,7 +1163,7 @@ func (dcr *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, utx
 	}
 
 	val := lots * lotSize
-	sum, inputsSize, _, _, _, err := dcr.tryFund(utxos, orderEnough(val, lots, bumpedMaxRate, nfo))
+	sum, inputsSize, _, _, _, err := tryFund(utxos, orderEnough(val, lots, bumpedMaxRate, nfo))
 	if err != nil {
 		return nil, false, 0, err
 	}
@@ -1564,7 +1565,7 @@ func (dcr *ExchangeWallet) fund(enough func(sum uint64, size uint32, unspent *co
 		return nil, nil, 0, 0, err
 	}
 
-	sum, sz, coins, spents, redeemScripts, err := dcr.tryFund(utxos, enough)
+	sum, sz, coins, spents, redeemScripts, err := tryFund(utxos, enough)
 	if err != nil {
 		return nil, nil, 0, 0, err
 	}
@@ -1614,7 +1615,7 @@ func (dcr *ExchangeWallet) spendableUTXOs() ([]*compositeUTXO, error) {
 // function with the fewest number of inputs. The selected utxos are not locked.
 // If the requirement can be satisfied without 0-conf utxos, that set will be
 // selected regardless of whether the 0-conf inclusive case would be cheaper.
-func (dcr *ExchangeWallet) tryFund(utxos []*compositeUTXO, enough func(sum uint64, size uint32, unspent *compositeUTXO) bool) (
+func tryFund(utxos []*compositeUTXO, enough func(sum uint64, size uint32, unspent *compositeUTXO) bool) (
 	sum uint64, size uint32, coins asset.Coins, spents []*fundingCoin, redeemScripts []dex.Bytes, err error) {
 
 	addUTXO := func(unspent *compositeUTXO) error {
@@ -3607,6 +3608,90 @@ func (dcr *ExchangeWallet) signTxAndAddChange(baseTx *wire.MsgTx, feeRate uint64
 	}
 
 	return msgTx, change, changeAddr, lastFee, nil
+}
+
+// ValidateAddress checks that the provided address is valid.
+func (dcr *ExchangeWallet) ValidateAddress(address string) bool {
+	_, err := stdaddr.DecodeAddress(address, dcr.chainParams)
+	return err == nil
+}
+
+// dummyP2PKHScript only has to be a valid 25-byte pay-to-pubkey-hash pkScript
+// for EstimateSendTxFee when an empty or invalid address is provided.
+var dummyP2PKHScript = []byte{0x76, 0xa9, 0x14, 0xe4, 0x28, 0x61, 0xa,
+	0xfc, 0xd0, 0x4e, 0x21, 0x94, 0xf7, 0xe2, 0xcc, 0xf8,
+	0x58, 0x7a, 0xc9, 0xe7, 0x2c, 0x79, 0x7b, 0x88, 0xac,
+}
+
+// EstimateSendTxFee returns a tx fee estimate for sending or withdrawing the
+// provided amount using the provided feeRate.
+func (dcr *ExchangeWallet) EstimateSendTxFee(address string, sendAmount, feeRate uint64, subtract bool) (fee uint64, isValidAddress bool, err error) {
+	if sendAmount == 0 {
+		return 0, false, fmt.Errorf("cannot check fee: send amount = 0")
+	}
+
+	feeRate = dcr.feeRateWithFallback(feeRate)
+
+	var pkScript []byte
+	var payScriptVer uint16
+	if addr, err := stdaddr.DecodeAddress(address, dcr.chainParams); err == nil {
+		payScriptVer, pkScript = addr.PaymentScript()
+		isValidAddress = true
+	} else {
+		// use a dummy 25-byte p2pkh script
+		pkScript = dummyP2PKHScript
+	}
+
+	tx := wire.NewMsgTx()
+
+	tx.AddTxOut(newTxOut(int64(sendAmount), payScriptVer, pkScript)) // payScriptVer is default zero
+	minTxSize := uint32(tx.SerializeSize())
+
+	// If subtract, select enough inputs for amount because the fees will be
+	// taken from the amount, else select enough inputs to cover minimum fees.
+	enough := func(sum uint64, inputSize uint32, unspent *compositeUTXO) bool {
+		if subtract {
+			return sum+toAtoms(unspent.rpc.Amount) >= sendAmount
+		}
+		minFee := uint64(minTxSize+inputSize+unspent.input.Size()) * feeRate
+		return sum+toAtoms(unspent.rpc.Amount) >= sendAmount+minFee
+	}
+
+	utxos, err := dcr.spendableUTXOs()
+	if err != nil {
+		return 0, false, err
+	}
+
+	sum, inputsSize, _, _, _, err := tryFund(utxos, enough)
+	if err != nil {
+		return 0, false, err
+	}
+
+	txSize := uint64(minTxSize + inputsSize)
+	estFee := txSize * feeRate
+	remaining := sum - sendAmount
+
+	// Check if there will be a change output if there is enough remaining.
+	estFeeWithChange := (txSize + dexdcr.P2PKHOutputSize) * feeRate
+	var changeValue uint64
+	if remaining > estFeeWithChange {
+		changeValue = remaining - estFeeWithChange
+	}
+
+	if subtract {
+		// fees are already included in sendAmount, anything else is change.
+		changeValue = remaining
+	}
+
+	var finalFee uint64
+	if dexdcr.IsDustVal(dexdcr.P2PKHOutputSize, changeValue, feeRate) {
+		// remaining cannot cover a non-dust change and the fee for the change.
+		finalFee = estFee + remaining
+	} else {
+		// additional fee will be paid for non-dust change
+		finalFee = estFeeWithChange
+	}
+	return finalFee, isValidAddress, nil
 }
 
 func (dcr *ExchangeWallet) broadcastTx(signedTx *wire.MsgTx) error {

@@ -365,6 +365,12 @@ export default class Doc {
       })
     }
   }
+
+  // showFormError can be used to set and display error message on forms.
+  static showFormError (el: PageElement, msg: any) {
+    el.textContent = msg
+    Doc.show(el)
+  }
 }
 
 /*

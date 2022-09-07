@@ -57,6 +57,10 @@ func (s *WebServer) apiEstimateRegistrationTxFee(w http.ResponseWriter, r *http.
 	if !readPost(w, r, form) {
 		return
 	}
+	if form.AssetID == nil {
+		s.writeAPIError(w, errors.New("missing asset ID"))
+		return
+	}
 	cert := []byte(form.Cert)
 	txFee, err := s.core.EstimateRegistrationTxFee(form.Addr, cert, *form.AssetID)
 	if err != nil {
@@ -69,6 +73,59 @@ func (s *WebServer) apiEstimateRegistrationTxFee(w http.ResponseWriter, r *http.
 	}{
 		OK:    true,
 		TxFee: txFee,
+	}
+	writeJSON(w, resp, s.indent)
+}
+
+// apiValidateAddress is the handlers for the '/validateaddress' API request.
+func (s *WebServer) apiValidateAddress(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		Addr    string  `json:"addr"`
+		AssetID *uint32 `json:"assetID"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+	if form.AssetID == nil {
+		s.writeAPIError(w, errors.New("missing asset ID"))
+		return
+	}
+	valid, err := s.core.ValidateAddress(form.Addr, *form.AssetID)
+	if err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+	resp := struct {
+		OK bool `json:"ok"`
+	}{
+		OK: valid,
+	}
+	writeJSON(w, resp, s.indent)
+}
+
+// apiEstimateSendTxFee is the handler for the '/txfee' API request.
+func (s *WebServer) apiEstimateSendTxFee(w http.ResponseWriter, r *http.Request) {
+	form := new(sendTxFeeForm)
+	if !readPost(w, r, form) {
+		return
+	}
+	if form.AssetID == nil {
+		s.writeAPIError(w, errors.New("missing asset ID"))
+		return
+	}
+	txFee, validAddress, err := s.core.EstimateSendTxFee(form.Addr, *form.AssetID, form.Value, form.Subtract)
+	if err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+	resp := struct {
+		OK           bool   `json:"ok"`
+		TxFee        uint64 `json:"txfee"`
+		ValidAddress bool   `json:"validaddress"`
+	}{
+		OK:           true,
+		TxFee:        txFee,
+		ValidAddress: validAddress,
 	}
 	writeJSON(w, resp, s.indent)
 }

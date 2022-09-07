@@ -383,15 +383,20 @@ func IsDust(txOut *wire.TxOut, minRelayTxFee uint64) bool {
 	if txscript.IsUnspendable(txOut.PkScript) {
 		return true
 	}
-	totalSize := txOut.SerializeSize() + 41
-	if txscript.IsWitnessProgram(txOut.PkScript) {
+	return IsDustVal(uint64(txOut.SerializeSize()), uint64(txOut.Value), minRelayTxFee, txscript.IsWitnessProgram(txOut.PkScript))
+}
+
+// IsDustVal is like IsDust but only takes the txSize, amount and if segwit.
+func IsDustVal(txSize, value, minRelayTxFee uint64, segwit bool) bool {
+	totalSize := txSize + 41
+	if segwit {
 		// This function is taken from btcd, but noting here that we are not
 		// rounding up and probably should be.
 		totalSize += (107 / witnessWeight)
 	} else {
 		totalSize += 107
 	}
-	return txOut.Value/(3*int64(totalSize)) < int64(minRelayTxFee)
+	return int64(value)/(3*int64(totalSize)) < int64(minRelayTxFee)
 }
 
 // ExtractScriptData extracts script type, addresses, and required signature

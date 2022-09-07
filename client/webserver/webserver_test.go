@@ -71,6 +71,9 @@ type TCore struct {
 	notRunning       bool
 	notOpen          bool
 	rateSourceErr    error
+	estFee           uint64
+	estFeeErr        error
+	validAddr        bool
 }
 
 func (c *TCore) Network() dex.Network                         { return dex.Mainnet }
@@ -138,6 +141,12 @@ func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 }
 func (c *TCore) Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (asset.Coin, error) {
 	return &tCoin{id: []byte{0xde, 0xc7, 0xed}}, c.sendErr
+}
+func (w *TCore) ValidateAddress(address string, assetID uint32) (bool, error) {
+	return w.validAddr, nil
+}
+func (c *TCore) EstimateSendTxFee(addr string, assetID uint32, value uint64, subtract bool) (fee uint64, isValidAddress bool, err error) {
+	return c.estFee, true, c.estFeeErr
 }
 func (c *TCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error) {
 	oType := order.LimitOrderType
@@ -247,7 +256,7 @@ func (r *TReader) Read(p []byte) (n int, err error) {
 
 func (r *TReader) Close() error { return nil }
 
-func newTServer(t *testing.T, start bool) (*WebServer, *TCore, func(), error) {
+func newTServer(t *testing.T, start bool) (*WebServer, *TCore, func()) {
 	t.Helper()
 	c := &TCore{}
 	var shutdown func()
@@ -274,7 +283,7 @@ func newTServer(t *testing.T, start bool) (*WebServer, *TCore, func(), error) {
 	} else {
 		shutdown = killCtx
 	}
-	return s, c, shutdown, err
+	return s, c, shutdown
 }
 
 func ensureResponse(t *testing.T, f func(w http.ResponseWriter, r *http.Request), want string, reader *TReader, writer *TWriter, body interface{}, cookies map[string]string) {
@@ -346,16 +355,12 @@ func TestNew_siteError(t *testing.T) {
 }
 
 func TestConnectStart(t *testing.T) {
-	_, _, shutdown, err := newTServer(t, true)
+	_, _, shutdown := newTServer(t, true)
 	defer shutdown()
-
-	if err != nil {
-		t.Fatalf("error starting web server: %s", err)
-	}
 }
 
 func TestConnectBindError(t *testing.T) {
-	s0, _, shutdown, _ := newTServer(t, true)
+	s0, _, shutdown := newTServer(t, true)
 	defer shutdown()
 
 	tAddr := s0.addr
@@ -381,7 +386,7 @@ func TestAPIRegister(t *testing.T) {
 	writer := new(TWriter)
 	var body interface{}
 	reader := new(TReader)
-	s, tCore, shutdown, _ := newTServer(t, false)
+	s, tCore, shutdown := newTServer(t, false)
 	defer shutdown()
 
 	ensure := func(want string) {
@@ -416,7 +421,7 @@ func TestAPILogin(t *testing.T) {
 	writer := new(TWriter)
 	var body interface{}
 	reader := new(TReader)
-	s, tCore, shutdown, _ := newTServer(t, false)
+	s, tCore, shutdown := newTServer(t, false)
 	defer shutdown()
 
 	ensure := func(want string) {
@@ -444,7 +449,7 @@ func testAPISendAndAPIWithdraw(t *testing.T, withdraw bool) {
 	writer := new(TWriter)
 	var body interface{}
 	reader := new(TReader)
-	s, tCore, shutdown, _ := newTServer(t, false)
+	s, tCore, shutdown := newTServer(t, false)
 	defer shutdown()
 
 	isOK := func() bool {
@@ -502,7 +507,7 @@ func TestAPIInit(t *testing.T) {
 	writer := new(TWriter)
 	var body interface{}
 	reader := new(TReader)
-	s, tCore, shutdown, _ := newTServer(t, false)
+	s, tCore, shutdown := newTServer(t, false)
 	defer shutdown()
 
 	ensure := func(f func(http.ResponseWriter, *http.Request), want string) {
@@ -537,7 +542,7 @@ func TestAPINewWallet(t *testing.T) {
 	writer := new(TWriter)
 	var body interface{}
 	reader := new(TReader)
-	s, tCore, shutdown, _ := newTServer(t, false)
+	s, tCore, shutdown := newTServer(t, false)
 	defer shutdown()
 
 	ensure := func(want string) {
@@ -565,7 +570,7 @@ func TestAPINewWallet(t *testing.T) {
 func TestAPILogout(t *testing.T) {
 	writer := new(TWriter)
 	reader := new(TReader)
-	s, tCore, shutdown, _ := newTServer(t, false)
+	s, tCore, shutdown := newTServer(t, false)
 	defer shutdown()
 
 	ensure := func(want string) {
@@ -582,7 +587,7 @@ func TestAPILogout(t *testing.T) {
 func TestApiGetBalance(t *testing.T) {
 	writer := new(TWriter)
 	reader := new(TReader)
-	s, tCore, shutdown, _ := newTServer(t, false)
+	s, tCore, shutdown := newTServer(t, false)
 	defer shutdown()
 
 	ensure := func(want string) {
@@ -665,10 +670,7 @@ func TestGetOrderIDCtx(t *testing.T) {
 }
 
 func TestPasswordCache(t *testing.T) {
-	s, tCore, shutdown, err := newTServer(t, false)
-	if err != nil {
-		t.Fatalf("error starting server: %v", err)
-	}
+	s, tCore, shutdown := newTServer(t, false)
 	defer shutdown()
 
 	password := encode.PassBytes("def")
@@ -725,11 +727,9 @@ func TestPasswordCache(t *testing.T) {
 }
 
 func TestAPI_ToggleRatesource(t *testing.T) {
-	s, tCore, shutdown, err := newTServer(t, false)
-	if err != nil {
-		t.Fatalf("error starting server: %v", err)
-	}
+	s, tCore, shutdown := newTServer(t, false)
 	defer shutdown()
+
 	writer := new(TWriter)
 	reader := new(TReader)
 
@@ -793,4 +793,53 @@ func TestAPI_ToggleRatesource(t *testing.T) {
 		tCore.rateSourceErr = test.wantErr
 		ensureResponse(t, s.apiToggleRateSource, test.want, reader, writer, body, nil)
 	}
+}
+
+func TestAPIValidateAddress(t *testing.T) {
+	s, tCore, shutdown := newTServer(t, false)
+	defer shutdown()
+
+	writer := new(TWriter)
+	reader := new(TReader)
+	testID := uint32(42)
+
+	body := &struct {
+		Addr    string  `json:"addr"`
+		AssetID *uint32 `json:"assetID"`
+	}{
+		Addr:    "addr",
+		AssetID: &testID,
+	}
+
+	want := `{"ok":true}`
+	tCore.validAddr = true
+	ensureResponse(t, s.apiValidateAddress, want, reader, writer, body, nil)
+
+	want = `{"ok":false}`
+	tCore.validAddr = false
+	ensureResponse(t, s.apiValidateAddress, want, reader, writer, body, nil)
+}
+
+func TestAPIEstimateSendTxFee(t *testing.T) {
+	s, tCore, shutdown := newTServer(t, false)
+	defer shutdown()
+
+	writer := new(TWriter)
+	reader := new(TReader)
+	testID := uint32(42)
+
+	body := &sendTxFeeForm{
+		Addr:     "addr",
+		Value:    1e8,
+		Subtract: false,
+		AssetID:  &testID,
+	}
+
+	want := `{"ok":true,"txfee":10000,"validaddress":true}`
+	tCore.estFee = 10000
+	ensureResponse(t, s.apiEstimateSendTxFee, want, reader, writer, body, nil)
+
+	want = fmt.Sprintf(`{"ok":false,"msg":"%s"}`, tErr)
+	tCore.estFeeErr = tErr
+	ensureResponse(t, s.apiEstimateSendTxFee, want, reader, writer, body, nil)
 }
