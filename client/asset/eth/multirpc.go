@@ -27,6 +27,7 @@ import (
 	"decred.org/dcrdex/dex/networks/erc20"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"decred.org/dcrdex/server/asset"
+	"github.com/decred/slog"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -149,7 +150,7 @@ func (p *provider) bestHeader(ctx context.Context, log dex.Logger) (*types.Heade
 }
 
 func (p *provider) headerByHash(ctx context.Context, h common.Hash) (*types.Header, error) {
-	hdr, err := p.cl().HeaderByHash(ctx, h)
+	hdr, err := p.ec.HeaderByHash(ctx, h)
 	if err != nil {
 		p.setFailed()
 		return nil, fmt.Errorf("HeaderByHash error: %w", err)
@@ -171,17 +172,18 @@ func (p *provider) suggestTipCap(ctx context.Context, log dex.Logger) *big.Int {
 	if err != nil {
 		log.Errorf("error getting tip cap suggestion from %q: %v", p.host, err)
 		return dexeth.GweiToWei(dexeth.MinGasTipCap)
-	} else {
-		p.tipCapV.Store(&cachedTipCap{
-			cap:   tipCap,
-			stamp: time.Now(),
-		})
 	}
 
 	minGasTipCapWei := dexeth.GweiToWei(dexeth.MinGasTipCap)
 	if tipCap.Cmp(minGasTipCapWei) < 0 {
-		return new(big.Int).Set(minGasTipCapWei)
+		return tipCap.Set(minGasTipCapWei)
 	}
+
+	p.tipCapV.Store(&cachedTipCap{
+		cap:   tipCap,
+		stamp: time.Now(),
+	})
+
 	return tipCap
 }
 
@@ -562,7 +564,11 @@ func (m *multiRPCClient) transactionReceipt(ctx context.Context, txHash common.H
 }
 
 type rpcTransaction struct {
-	tx          *types.Transaction
+	tx *types.Transaction
+	txExtraDetail
+}
+
+type txExtraDetail struct {
 	BlockNumber *string         `json:"blockNumber,omitempty"`
 	BlockHash   *common.Hash    `json:"blockHash,omitempty"`
 	From        *common.Address `json:"from,omitempty"`
@@ -572,7 +578,7 @@ func (tx *rpcTransaction) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, &tx.tx); err != nil {
 		return err
 	}
-	return json.Unmarshal(b, tx)
+	return json.Unmarshal(b, &tx.txExtraDetail)
 }
 
 func getRPCTransaction(ctx context.Context, p *provider, txHash common.Hash) (*rpcTransaction, error) {
@@ -622,37 +628,100 @@ func (m *multiRPCClient) providerList() []*provider {
 	return providers
 }
 
+// acceptabilityFilter: When running a pick-a-provider function (withOne,
+// withAny, withPreferred), sometimes errors will need special handling
+// depending on what they are. Zero or more acceptabilityFilters can be added
+// to provide extra control.
+//
+//	 discard: If a filter indicates discard = true, the error will be discarded,
+//	   provider iteration will end immediately and a nil error will be returned.
+//	propagate: If a filter indicates propagate = true, provider iteration will
+//	  be ended and the error will be returned immediately.
+//	fail: If a filter indicates fail = true, the provider will be quarantined
+//	  and provider iteration will continue
+//
+// If false is returned for all three for all filters, the error is logged and
+// provider iteration will continue.
+type acceptabilityFilter func(error) (discard, propagate, fail bool)
+
+func allRPCErrorsAreFails(err error) (discard, propagate, fail bool) {
+	return false, false, true
+}
+
+func errorFilter(err error, matches ...interface{}) bool {
+	errStr := err.Error()
+	for _, mi := range matches {
+		var s string
+		switch m := mi.(type) {
+		case string:
+			s = m
+		case error:
+			if errors.Is(err, m) {
+				return true
+			}
+			s = m.Error()
+		}
+		if strings.Contains(errStr, s) {
+			return true
+		}
+	}
+	return false
+}
+
 // withOne runs the provider function against the providers in order until one
 // succeeds or all have failed.
-func (m *multiRPCClient) withOne(providers []*provider, f func(*provider) error) error {
+func (m *multiRPCClient) withOne(providers []*provider, f func(*provider) error, acceptabilityFilters ...acceptabilityFilter) (superError error) {
+	readyProviders := make([]*provider, 0, len(providers))
 	for _, p := range providers {
-		if p.failed() {
-			continue
+		if !p.failed() {
+			readyProviders = append(readyProviders, p)
 		}
-		if err := f(p); err != nil {
-			m.log.Errorf("error from provider %q: %v", p.host, err)
-			// Is this too aggressive? Is there any case where we might expect
-			// an error here.
-			p.setFailed()
-			continue
-		}
-		return nil
 	}
-	return fmt.Errorf("all providers errored")
+	if len(readyProviders) == 0 {
+		// Just try them all.
+		m.log.Tracef("all providers in a failed state, so acting like none are")
+		readyProviders = providers
+	}
+	for _, p := range readyProviders {
+
+		err := f(p)
+		if err == nil {
+			break
+		}
+		if superError == nil {
+			superError = err
+		} else {
+			superError = fmt.Errorf("%v: %w", superError, err)
+		}
+		for _, f := range acceptabilityFilters {
+			discard, propagate, fail := f(err)
+			if discard {
+				return nil
+			}
+			if propagate {
+				return err
+			}
+			if fail {
+				p.setFailed()
+			}
+		}
+		m.log.Errorf("error from provider %q: %v", p.host, err)
+	}
+	return
 }
 
 // withAny runs the provider function against known providers in random order
 // until one succeeds or all have failed.
-func (m *multiRPCClient) withAny(f func(*provider) error) error {
+func (m *multiRPCClient) withAny(f func(*provider) error, acceptabilityFilters ...acceptabilityFilter) error {
 	providers := m.providerList()
 	shuffleProviders(providers)
-	return m.withOne(providers, f)
+	return m.withOne(providers, f, acceptabilityFilters...)
 }
 
 // withPreferred is like withAny, but will prioritize recently used nonce
 // providers.
-func (m *multiRPCClient) withPreferred(f func(*provider) error) error {
-	return m.withOne(m.nonceProviderList(), f)
+func (m *multiRPCClient) withPreferred(f func(*provider) error, acceptabilityFilters ...acceptabilityFilter) error {
+	return m.withOne(m.nonceProviderList(), f, acceptabilityFilters...)
 }
 
 // nonceProviderList returns the randomized provider list, but with any recent
@@ -728,7 +797,7 @@ func (m *multiRPCClient) bestHeader(ctx context.Context) (hdr *types.Header, err
 	return hdr, m.withAny(func(p *provider) error {
 		hdr, err = p.bestHeader(ctx, m.log)
 		return err
-	})
+	}, allRPCErrorsAreFails)
 }
 
 func (m *multiRPCClient) headerByHash(ctx context.Context, h common.Hash) (hdr *types.Header, err error) {
@@ -782,11 +851,9 @@ func (m *multiRPCClient) sendSignedTransaction(ctx context.Context, tx *types.Tr
 	if err := m.withPreferred(func(p *provider) error {
 		lastProvider = p
 		m.log.Tracef("Sending signed tx via %q", p.host)
-		err := p.ec.SendTransaction(ctx, tx)
-		if err != nil && strings.Contains(err.Error(), core.ErrAlreadyKnown.Error()) {
-			return nil
-		}
-		return err
+		return p.ec.SendTransaction(ctx, tx)
+	}, func(err error) (discard, propagate, fail bool) {
+		return errorFilter(err, core.ErrAlreadyKnown, "known transaction"), false, false
 	}); err != nil {
 		return err
 	}
@@ -834,7 +901,7 @@ func (m *multiRPCClient) syncProgress(ctx context.Context) (prog *ethereum.SyncP
 		// SyncProgress will return nil both before syncing has begun and after
 		// it has finished. In order to discern when syncing has begun, check
 		// that the best header came in under MaxBlockInterval.
-		bh, err := p.ec.HeaderByNumber(ctx, nil /* latest */)
+		bh, err := p.bestHeader(ctx, m.log)
 		if err != nil {
 			return fmt.Errorf("error getting header for nil SyncProgress resolution: %v", err)
 		}
@@ -853,7 +920,7 @@ func (m *multiRPCClient) syncProgress(ctx context.Context) (prog *ethereum.SyncP
 		// Not synced.
 		prog = &ethereum.SyncProgress{}
 		return nil
-	})
+	}, allRPCErrorsAreFails)
 }
 
 func (m *multiRPCClient) transactionConfirmations(ctx context.Context, txHash common.Hash) (confs uint32, err error) {
@@ -992,6 +1059,9 @@ func (m *multiRPCClient) EstimateGas(ctx context.Context, call ethereum.CallMsg)
 	return gas, m.withAny(func(p *provider) error {
 		gas, err = p.ec.EstimateGas(ctx, call)
 		return err
+	}, func(err error) (discard, propagate, fail bool) {
+		// Assume this one will be the same all around.
+		return false, errorFilter(err, "gas required exceeds allowance"), false
 	})
 }
 
@@ -1051,13 +1121,16 @@ type rpcTest struct {
 
 // newCompatibilityTests returns a list of RPC tests to run to determine API
 // compatibility.
-func newCompatibilityTests(ctx context.Context, cb bind.ContractBackend, log dex.Logger) []*rpcTest {
+func newCompatibilityTests(ctx context.Context, cb bind.ContractBackend, log slog.Logger) []*rpcTest {
 	var (
 		// Vitalik's address from https://twitter.com/VitalikButerin/status/1050126908589887488
 		mainnetAddr   = common.HexToAddress("0xab5801a7d398351b8be11c439e05c5b3259aec9b")
 		mainnetUSDC   = common.HexToAddress("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48")
 		mainnetTxHash = common.HexToHash("0xea1a717af9fad5702f189d6f760bb9a5d6861b4ee915976fe7732c0c95cd8a0e")
 	)
+	if log == nil { // Logging detail is for testing.
+		log = slog.Disabled
+	}
 	return []*rpcTest{
 		{
 			name: "HeaderByNumber",
@@ -1087,9 +1160,7 @@ func newCompatibilityTests(ctx context.Context, cb bind.ContractBackend, log dex
 				if err != nil {
 					return err
 				}
-				if log != nil {
-					log.Info("#### Retreived tip cap:", tipCap)
-				}
+				log.Info("#### Retreived tip cap:", tipCap)
 				return nil
 			},
 		},
@@ -1100,9 +1171,7 @@ func newCompatibilityTests(ctx context.Context, cb bind.ContractBackend, log dex
 				if err != nil {
 					return err
 				}
-				if log != nil {
-					log.Info("#### Vitalik's balance retrieved:", dexeth.WeiToGwei(bal)/1e9)
-				}
+				log.Infof("#### Vitalik's balance retrieved: %.9f", float64(dexeth.WeiToGwei(bal))/1e9)
 				return nil
 			},
 		},
@@ -1113,9 +1182,7 @@ func newCompatibilityTests(ctx context.Context, cb bind.ContractBackend, log dex
 				if err != nil {
 					return err
 				}
-				if log != nil {
-					log.Infof("#### Sync progress: %+v", s)
-				}
+				log.Infof("#### Sync progress: %+v", s)
 				return nil
 			},
 		},
@@ -1126,9 +1193,7 @@ func newCompatibilityTests(ctx context.Context, cb bind.ContractBackend, log dex
 				if err != nil {
 					return err
 				}
-				if log != nil {
-					log.Infof("#### %d bytes of USDC contract retrieved", len(code))
-				}
+				log.Infof("#### %d bytes of USDC contract retrieved", len(code))
 				return nil
 			},
 		},
@@ -1149,9 +1214,7 @@ func newCompatibilityTests(ctx context.Context, cb bind.ContractBackend, log dex
 				// I guess we would need to unpack the results. I don't really
 				// know how to interpret these, but I'm really just looking for
 				// a request error.
-				if log != nil {
-					log.Info("#### USDC balanceOf result:", bal, "wei")
-				}
+				log.Info("#### USDC balanceOf result:", bal, "wei")
 				return nil
 			},
 		},
@@ -1162,9 +1225,7 @@ func newCompatibilityTests(ctx context.Context, cb bind.ContractBackend, log dex
 				if err != nil {
 					return err
 				}
-				if log != nil {
-					log.Infof("#### Chain ID: %d", chainID)
-				}
+				log.Infof("#### Chain ID: %d", chainID)
 				return nil
 			},
 		},
@@ -1175,17 +1236,23 @@ func newCompatibilityTests(ctx context.Context, cb bind.ContractBackend, log dex
 				if err != nil {
 					return err
 				}
-				if log != nil {
-					log.Infof("#### Pending nonce: %d", n)
-				}
+				log.Infof("#### Pending nonce: %d", n)
 				return nil
 			},
 		},
 		{
 			name: "getRPCTransaction",
 			f: func(p *provider) error {
-				_, err := getRPCTransaction(ctx, p, mainnetTxHash)
-				return err
+				rpcTx, err := getRPCTransaction(ctx, p, mainnetTxHash)
+				if err != nil {
+					return err
+				}
+				var h string
+				if rpcTx.BlockNumber != nil {
+					h = *rpcTx.BlockNumber
+				}
+				log.Infof("#### RPC Tx is nil? %t, block number: %q", rpcTx.tx == nil, h)
+				return nil
 			},
 		},
 	}
