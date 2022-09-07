@@ -268,6 +268,7 @@ func (p *provider) subscribeHeaders(ctx context.Context, sub ethereum.Subscripti
 type receiptRecord struct {
 	r          *types.Receipt
 	lastAccess time.Time
+	confirmed  bool
 }
 
 // multiRPCClient is an ethFetcher backed by one or more public RPC providers.
@@ -516,6 +517,7 @@ func (m *multiRPCClient) cleanReceipts() {
 	m.receipts.Unlock()
 }
 
+<<<<<<< HEAD
 func (m *multiRPCClient) transactionReceipt(ctx context.Context, txHash common.Hash) (r *types.Receipt, tx *types.Transaction, err error) {
 	// TODO
 	// TODO: Plug in to the monitoredTx system from #1638.
@@ -524,10 +526,15 @@ func (m *multiRPCClient) transactionReceipt(ctx context.Context, txHash common.H
 		return nil, nil, err
 	}
 
+=======
+func (m *multiRPCClient) transactionReceipt(ctx context.Context, txHash common.Hash) (r *types.Receipt, err error) {
+>>>>>>> martonp early review followup
 	// Check the cache.
+	const cacheExpiration = time.Minute
+
 	m.receipts.RLock()
 	cached := m.receipts.cache[txHash]
-	if cached != nil {
+	if cached != nil && cached.confirmed {
 		cached.lastAccess = time.Now()
 	}
 	if time.Since(m.receipts.lastClean) > time.Minute*20 {
@@ -535,10 +542,18 @@ func (m *multiRPCClient) transactionReceipt(ctx context.Context, txHash common.H
 		go m.cleanReceipts()
 	}
 	m.receipts.RUnlock()
+<<<<<<< HEAD
 	if cached != nil {
 		return cached.r, tx, nil
+=======
+
+	// If confirmed or if it was just fetched, return it as is.
+	if cached != nil && (cached.confirmed || time.Since(cached.lastAccess) < cacheExpiration) {
+		return cached.r, nil
+>>>>>>> martonp early review followup
 	}
 
+	// Fetch a fresh one.
 	if err = m.withPreferred(func(p *provider) error {
 		r, err = p.ec.TransactionReceipt(ctx, txHash)
 		return err
@@ -546,10 +561,20 @@ func (m *multiRPCClient) transactionReceipt(ctx context.Context, txHash common.H
 		return nil, nil, err
 	}
 
+	var confs int64
+	if r.BlockNumber != nil {
+		tip, err := m.bestHeader(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("bestHeader error: %v", err)
+		}
+		confs = new(big.Int).Sub(tip.Number, r.BlockNumber).Int64() + 1
+	}
+
 	m.receipts.Lock()
 	m.receipts.cache[txHash] = &receiptRecord{
 		r:          r,
 		lastAccess: time.Now(),
+		confirmed:  confs > txConfsNeededToConfirm,
 	}
 	m.receipts.Unlock()
 
@@ -683,7 +708,6 @@ func (m *multiRPCClient) withOne(providers []*provider, f func(*provider) error,
 		readyProviders = providers
 	}
 	for _, p := range readyProviders {
-
 		err := f(p)
 		if err == nil {
 			break
@@ -887,38 +911,19 @@ func (m *multiRPCClient) signData(data []byte) (sig, pubKey []byte, err error) {
 	return signData(m.creds, data)
 }
 
+// syncProgress: We're going to lie and just always say we're synced if we
+// can get a header.
 func (m *multiRPCClient) syncProgress(ctx context.Context) (prog *ethereum.SyncProgress, err error) {
 	return prog, m.withAny(func(p *provider) error {
-		s, err := p.ec.SyncProgress(ctx)
+		tip, err := p.bestHeader(ctx, m.log)
 		if err != nil {
-			return fmt.Errorf("error getting sync progress from %s: %v", p.host, err)
-		}
-		if s != nil {
-			prog = s
-			return nil
+			return err
 		}
 
-		// SyncProgress will return nil both before syncing has begun and after
-		// it has finished. In order to discern when syncing has begun, check
-		// that the best header came in under MaxBlockInterval.
-		bh, err := p.bestHeader(ctx, m.log)
-		if err != nil {
-			return fmt.Errorf("error getting header for nil SyncProgress resolution: %v", err)
+		prog = &ethereum.SyncProgress{
+			CurrentBlock: tip.Number.Uint64(),
+			HighestBlock: tip.Number.Uint64(),
 		}
-		// Time in the header is in seconds.
-		nowInSecs := time.Now().Unix() / 1000
-		timeDiff := nowInSecs - int64(bh.Time)
-
-		if timeDiff < dexeth.MaxBlockInterval {
-			// Consider this synced.
-			prog = &ethereum.SyncProgress{
-				CurrentBlock: bh.Number.Uint64(),
-				HighestBlock: bh.Number.Uint64(),
-			}
-			return nil
-		}
-		// Not synced.
-		prog = &ethereum.SyncProgress{}
 		return nil
 	}, allRPCErrorsAreFails)
 }
@@ -1172,17 +1177,6 @@ func newCompatibilityTests(ctx context.Context, cb bind.ContractBackend, log slo
 					return err
 				}
 				log.Infof("#### Vitalik's balance retrieved: %.9f", float64(dexeth.WeiToGwei(bal))/1e9)
-				return nil
-			},
-		},
-		{
-			name: "SyncProgress",
-			f: func(p *provider) error {
-				s, err := p.ec.SyncProgress(ctx)
-				if err != nil {
-					return err
-				}
-				log.Infof("#### Sync progress: %+v", s)
 				return nil
 			},
 		},

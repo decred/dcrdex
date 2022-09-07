@@ -286,7 +286,7 @@ var freeServers = []string{
 	"https://main-rpc.linkpool.io/",
 	"https://nodes.mewapi.io/rpc/eth",
 	"https://rpc.flashbots.net/",
-	"https://rpc.ankr.com/eth", // rpc.ankr.com "SyncProgress" error: the method eth_syncing does not exist/is not available
+	"https://rpc.ankr.com/eth", // Passes, but doesn't support SyncProgress, which don't use and just lie about right now.
 	"https://api.mycryptoapi.com/eth",
 	"https://ethereumnodelight.app.runonflux.io",
 }
