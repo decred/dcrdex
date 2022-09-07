@@ -2593,7 +2593,7 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 	basicMatchesBuy := make(map[uint64]uint64)
 	for _, matchSet := range matches {
 		for _, match := range matchSet.Matches() {
-			if match.Maker.Sell {
+			if match.Taker.Trade() != nil && match.Taker.Trade().Sell {
 				basicMatchesSell[match.Rate] += match.Quantity
 			} else {
 				basicMatchesBuy[match.Rate] += match.Quantity

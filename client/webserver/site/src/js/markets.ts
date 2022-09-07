@@ -1910,8 +1910,7 @@ export default class MarketsPage extends BasePage {
       updateDataCol(row, 'rate', Doc.formatCoinValue(match.rate / this.market.rateConversionFactor))
       // change rate color based if is sell or not.
       updateDataCol(row, 'qty', Doc.formatCoinValue(match.qty, this.market.baseUnitInfo))
-      updateDataCol(row, 'age', match.age.toLocaleDateString())
-      updateToolTipCol(row, 'age', match.age.toLocaleTimeString())
+      updateDataCol(row, 'age', match.age.toLocaleTimeString())
       row.classList.add(match.sell ? 'sellcolor' : 'buycolor')
 
       page.recentMatchesLiveList.append(row)
@@ -2799,10 +2798,6 @@ function swapBttns (before: HTMLElement, now: HTMLElement) {
  */
 function updateDataCol (tr: HTMLElement, col: string, s: string) {
   Doc.tmplElement(tr, col).textContent = s
-}
-
-function updateToolTipCol (tr: HTMLElement, col: string, s: string) {
-  Doc.tmplElement(tr, col).dataset.tooltip = s
 }
 
 /*
