@@ -227,7 +227,7 @@ export default class WalletsPage extends BasePage {
   // send form.
   async stepSend () {
     const page = this.page
-    Doc.hide(page.vSendAddrMsg, page.vSendErr, page.sendErr)
+    Doc.hide(page.vSendErr, page.sendErr)
     const assetID = parseInt(page.sendForm.dataset.assetID || '')
     const subtract = page.subtractCheckBox.checked || false
     const conversionFactor = app().unitInfo(assetID).conventional.conversionFactor
@@ -244,21 +244,35 @@ export default class WalletsPage extends BasePage {
     const loaded = app().loading(page.sendForm)
     const res = await postJSON('/api/txfee', open)
     loaded()
-    if (!app().checkResponse(res) && res.msg !== 'wallet does not support options') { // This is a work around for wallets like ZEC, which does not support subtract for fee estimations.
-      Doc.showFormError(page.sendErr, res.msg)
-      return
-    }
-
-    if (!res.validaddress && res.ok) {
-      Doc.show(page.vSendAddrMsg)
+    let txfee = 0
+    if (!app().checkResponse(res)) {
+      if (res.msg !== 'wallet does not support options') {
+        Doc.showFormError(page.sendErr, res.msg)
+        return
+      } else {
+        // This is a work around for wallets like ZEC, which does not support
+        // subtract for fee estimations. We still want to ensure user address is
+        // valid before proceeding to send confirm form.
+        const resp = await postJSON('/api/validateaddress', { addr: page.sendAddr.value, assetID: assetID })
+        if (!app().checkResponse(resp)) {
+          Doc.showFormError(page.sendErr, intl.prep(intl.ID_INVALID_ADDRESS_MSG, { address: page.sendAddr.value || '' }))
+          return
+        }
+      }
+    } else {
+      if (!res.validaddress && res.ok) {
+        Doc.showFormError(page.sendErr, intl.prep(intl.ID_INVALID_ADDRESS_MSG, { address: page.sendAddr.value || '' }))
+        return
+      }
+      txfee = res.txfee
     }
 
     page.vSendSymbol.textContent = wallet.symbol.toUpperCase()
     page.vSendLogo.src = Doc.logoPath(wallet.symbol)
 
-    page.vSendFee.textContent = Doc.formatFullPrecision(res.txfee, app().unitInfo(assetID))
-    this.showFiatValue(assetID, res.txfee, page.vSendFeeFiat)
-    page.vSendDestinationAmt.textContent = Doc.formatFullPrecision(value - res.txfee, app().unitInfo(assetID))
+    page.vSendFee.textContent = Doc.formatFullPrecision(txfee, app().unitInfo(assetID))
+    this.showFiatValue(assetID, txfee, page.vSendFeeFiat)
+    page.vSendDestinationAmt.textContent = Doc.formatFullPrecision(value - txfee, app().unitInfo(assetID))
     page.vTotalSend.textContent = Doc.formatFullPrecision(value, app().unitInfo(assetID))
     this.showFiatValue(assetID, value, page.vTotalSendFiat)
     page.vSendAddr.textContent = page.sendAddr.value || ''
@@ -269,7 +283,7 @@ export default class WalletsPage extends BasePage {
     if (!subtract) {
       Doc.hide(page.approxSign)
       page.vSendDestinationAmt.textContent = Doc.formatFullPrecision(value, app().unitInfo(assetID))
-      const totalSend = value + res.txfee
+      const totalSend = value + txfee
       page.vTotalSend.textContent = Doc.formatFullPrecision(totalSend, app().unitInfo(assetID))
       this.showFiatValue(assetID, value, page.vTotalSendFiat)
       const bal = wallet.balance.available - totalSend
