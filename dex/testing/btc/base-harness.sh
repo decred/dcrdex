@@ -375,9 +375,9 @@ if [ ! -z "$GODAEMON" ]; then
   DAEMON_INSTALLED=$?
 
   if [ $DAEMON_INSTALLED -eq 0 ]; then
-    echo "${GODAEMON} installed"
+    echo "Go node found. Starting"
 
-    tmux new-window -t $SESSION:3 -n "${GODAEMON}" $SHELL
+    tmux new-window -t $SESSION:3 -n "go-node" $SHELL
     tmux send-keys -t $SESSION:3 "set +o history" C-m
 
     $GOCLIENT --version &> /dev/null
@@ -385,11 +385,11 @@ if [ ! -z "$GODAEMON" ]; then
     if [ $DAEMON_INSTALLED -eq 0 ]; then
       echo "${GOCLIENT} installed"
 
-      OMEGA_DIR="${NODES_ROOT}/${GODAEMON}"
+      OMEGA_DIR="${NODES_ROOT}/gonode"
       mkdir -p "${OMEGA_DIR}"
 
-      NODE_CONF="${OMEGA_DIR}/${GODAEMON}.conf"
-      CLIENT_CONF="${OMEGA_DIR}/${GOCLIENT}.conf"
+      NODE_CONF="${OMEGA_DIR}/gonode.conf"
+      CLIENT_CONF="${OMEGA_DIR}/goctl.conf"
       OMEGA_RPC_PORT=21558
 
 cat > "${NODE_CONF}" <<EOF
@@ -422,10 +422,10 @@ chmod +x "${HARNESS_DIR}/omega"
       --configfile ${NODE_CONF}" C-m
 
     else
-      echo "${GOCLIENT} not detected"
+      echo "Go CLI client not found"
     fi
   else
-    echo "${GODAEMON} not detected"
+    echo "Go node not found"
   fi
 fi
 
