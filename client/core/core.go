@@ -5075,9 +5075,12 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 			rateString = wallets.trimmedConventionalRateString(corder.Rate)
 		}
 		ui := wallets.baseWallet.Info().UnitInfo
-		subject, details := c.formatDetails(TopicOrderPlaced,
-			sellString(corder.Sell), ui.ConventionalString(corder.Qty), ui.Conventional.Unit, rateString, tracker.token())
-		c.notify(newOrderNote(TopicOrderPlaced, subject, details, db.Poke, corder))
+		topic := TopicBuyOrderPlaced
+		if corder.Sell {
+			topic = TopicSellOrderPlaced
+		}
+		subject, details := c.formatDetails(topic, ui.ConventionalString(corder.Qty), ui.Conventional.Unit, rateString, tracker.token())
+		c.notify(newOrderNote(topic, subject, details, db.Poke, corder))
 	}
 
 	updated := assetMap{fromWallet.AssetID: struct{}{}}

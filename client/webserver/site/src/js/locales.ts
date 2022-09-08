@@ -55,6 +55,8 @@ export const ID_RECONFIG_SUCCESS = 'RECONFIG_SUCCESS'
 export const ID_RESCAN_STARTED = 'RESCAN_STARTED'
 export const ID_NEW_WALLET_SUCCESS = 'NEW_WALLET_SUCCESS'
 export const ID_WALLET_UNLOCKED = 'WALLET_UNLOCKED'
+export const ID_SELLING = 'ID_SELLING'
+export const ID_BUYING = 'ID_BUYING'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -111,7 +113,9 @@ export const enUS: Locale = {
   [ID_RECONFIG_SUCCESS]: 'Wallet Reconfigured!',
   [ID_RESCAN_STARTED]: 'Wallet Rescan Running',
   [ID_NEW_WALLET_SUCCESS]: '{{ assetName }} Wallet Created!',
-  [ID_WALLET_UNLOCKED]: 'Wallet Unlocked'
+  [ID_WALLET_UNLOCKED]: 'Wallet Unlocked',
+  [ID_SELLING]: 'Selling',
+  [ID_BUYING]: 'Buying'
 }
 
 export const ptBR: Locale = {
@@ -198,20 +202,10 @@ export const zhCN: Locale = {
   [ID_NEW_WALLET_PASS]: '设置新的钱包密码',
   [ID_LOT]: '批处理',
   [ID_LOTS]: '批', // alt. 很多
-  [ID_UNKNOWN]: 'unknown', // TODO
   [ID_EPOCH]: '时间',
-  [ID_SETTLING]: 'settling', // TODO - "settling" shows in the Your Orders table when the order is doing an atomic swap with another trade
-  [ID_NO_MATCH]: 'no match', // TODO - "no match" shows in the Your Orders table when the order did not match with another trade and is done
-  [ID_CANCELED]: 'canceled', // TODO - "canceled" shows in the Your Orders table when the order has been canceled
-  [ID_REVOKED]: 'revoked', // TODO - "revoked" shows in the Your Orders table when the order has failed during swap
-  [ID_WAITING_FOR_CONFS]: 'Waiting for confirmations...', // TODO - shows when the registration fee transaction is waiting to be mined (needs confirmations)
-  [ID_NONE_SELECTED]: 'none selected', // TODO - looks unused, but this indicates nothing is selected in some list
-  [ID_REGISTRATION_FEE_SUCCESS]: 'Registration fee payment successful!', // TODO - When the registration fee transaction reaches the required number of confirmations, this is shown
   [ID_API_ERROR]: '接口错误',
   [ID_ADD]: '加',
-  [ID_CREATE]: '创建',
-  [ID_WALLET_READY]: 'Choose Wallet', // xxx translate
-  [ID_SETUP_WALLET]: 'Setup' // xxx translate
+  [ID_CREATE]: '创建'
 }
 
 export const plPL: Locale = {

@@ -57,7 +57,7 @@ var enUS = map[Topic]*translation{
 	// [asset name, error message]
 	TopicWalletCommsWarning: {
 		subject:  "Wallet connection issue",
-		template: "Unable to communicate with %v wallet! Reason: %q",
+		template: "Unable to communicate with %v wallet! Reason: %v",
 	},
 	// [asset name]
 	TopicWalletPeersWarning: {
@@ -89,10 +89,15 @@ var enUS = map[Topic]*translation{
 		subject:  "Market order placed",
 		template: "selling %s %s at market rate (%s)",
 	},
-	// [sell string, qty, ticker, rate string, token]
-	TopicOrderPlaced: {
+	// [qty, ticker, rate string, token]
+	TopicBuyOrderPlaced: {
 		subject:  "Order placed",
-		template: "%sing %s %s, rate = %s (%s)",
+		template: "Buying %s %s, rate = %s (%s)",
+	},
+	// [qty, ticker, rate string, token]
+	TopicSellOrderPlaced: {
+		subject:  "Order placed",
+		template: "Selling %s %s, rate = %s (%s)",
 	},
 	// [missing count, token, host]
 	TopicMissingMatches: {
@@ -134,15 +139,24 @@ var enUS = map[Topic]*translation{
 		subject:  "Missed cancel",
 		template: "Cancel order did not match for order %s. This can happen if the cancel order is submitted in the same epoch as the trade or if the target order is fully executed before matching with the cancel order.",
 	},
-	// [capitalized sell string, base ticker, quote ticker, host, token]
-	TopicOrderCanceled: {
+	// [base ticker, quote ticker, host, token]
+	TopicBuyOrderCanceled: {
 		subject:  "Order canceled",
-		template: "%s order on %s-%s at %s has been canceled (%s)",
+		template: "Buy order on %s-%s at %s has been canceled (%s)",
 	},
-	// [capitalized sell string, base ticker, quote ticker, fill percent, token]
-	TopicMatchesMade: {
+	TopicSellOrderCanceled: {
+		subject:  "Order canceled",
+		template: "Sell order on %s-%s at %s has been canceled (%s)",
+	},
+	// [base ticker, quote ticker, fill percent, token]
+	TopicBuyMatchesMade: {
 		subject:  "Matches made",
-		template: "%s order on %s-%s %.1f%% filled (%s)",
+		template: "Buy order on %s-%s %.1f%% filled (%s)",
+	},
+	// [base ticker, quote ticker, fill percent, token]
+	TopicSellMatchesMade: {
+		subject:  "Matches made",
+		template: "Sell order on %s-%s %.1f%% filled (%s)",
 	},
 	// [qty, ticker, token]
 	TopicSwapSendError: {
@@ -392,10 +406,15 @@ var ptBR = map[Topic]*translation{
 		template: "vendendo %s %s a taxa de mercado (%s)",
 		subject:  "Ordem de Mercado Colocada",
 	},
-	// [sell string, qty, ticker, rate string, token]
-	TopicOrderPlaced: {
+	// [qty, ticker, rate string, token], RETRANSLATE.
+	TopicBuyOrderPlaced: {
 		subject:  "Ordem Colocada",
-		template: "%sing %s %s, valor = %s (%s)",
+		template: "Buying %s %s, valor = %s (%s)",
+	},
+	// [qty, ticker, rate string, token], RETRANSLATE.
+	TopicSellOrderPlaced: {
+		subject:  "Ordem Colocada",
+		template: "Selling %s %s, valor = %s (%s)",
 	},
 	// [missing count, token, host]
 	TopicMissingMatches: {
@@ -437,14 +456,24 @@ var ptBR = map[Topic]*translation{
 		template: "Pedido de cancelamento não combinou para pedido %s. Isto pode acontecer se o pedido de cancelamento foi enviado no mesmo epoque do que a troca ou se o pedido foi completamente executado antes da ordem de cancelamento ser executada.",
 		subject:  "Cancelamento Perdido",
 	},
-	// [capitalized sell string, base ticker, quote ticker, host, token]
-	TopicOrderCanceled: {
-		template: "%s pedido sobre %s-%s em %s foi cancelado (%s)",
+	// [base ticker, quote ticker, host, token], RETRANSLATE.
+	TopicSellOrderCanceled: {
+		template: "Sell pedido sobre %s-%s em %s foi cancelado (%s)",
 		subject:  "Cancelamento de Pedido",
 	},
-	// [capitalized sell string, base ticker, quote ticker, fill percent, token]
-	TopicMatchesMade: {
-		template: "%s pedido sobre %s-%s %.1f%% preenchido (%s)",
+	// [base ticker, quote ticker, host, token], RETRANSLATE.
+	TopicBuyOrderCanceled: {
+		template: "Buy pedido sobre %s-%s em %s foi cancelado (%s)",
+		subject:  "Cancelamento de Pedido",
+	},
+	// [base ticker, quote ticker, fill percent, token], RETRANSLATE.
+	TopicSellMatchesMade: {
+		template: "Sell pedido sobre %s-%s %.1f%% preenchido (%s)",
+		subject:  "Combinações Feitas",
+	},
+	// [base ticker, quote ticker, fill percent, token], RETRANSLATE.
+	TopicBuyMatchesMade: {
+		template: "Buy pedido sobre %s-%s %.1f%% preenchido (%s)",
 		subject:  "Combinações Feitas",
 	},
 	// [qty, ticker, token]
@@ -679,10 +708,15 @@ var zhCN = map[Topic]*translation{
 		subject:  "下达市价单",
 		template: "以市场价格 (%[3]s) 出售 %[1]s %[2]s",
 	},
-	// [sell string, qty, ticker, rate string, token]
-	TopicOrderPlaced: {
+	// [qty, ticker, rate string, token], RETRANSLATE.
+	TopicBuyOrderPlaced: {
 		subject:  "已下订单",
-		template: "%sing %s %s，值 = %s (%s)", // figure out the "ing" issue (TODO)
+		template: "Buying %s %s，值 = %s (%s)",
+	},
+	// [qty, ticker, rate string, token], RETRANSLATE.
+	TopicSellOrderPlaced: {
+		subject:  "已下订单",
+		template: "Selling %s %s，值 = %s (%s)",
 	},
 	// [missing count, token, host]
 	TopicMissingMatches: {
@@ -724,15 +758,25 @@ var zhCN = map[Topic]*translation{
 		subject:  "丢失取消",
 		template: "取消订单与订单 %s 不匹配。如果取消订单与交易所同时发送，或者订单在取消订单执行之前已完全执行，则可能发生这种情况。",
 	},
-	// [capitalized sell string, base ticker, quote ticker, host, token]
-	TopicOrderCanceled: {
+	// [base ticker, quote ticker, host, token], RETRANSLATE.
+	TopicBuyOrderCanceled: {
 		subject:  "订单取消",
-		template: "%s 的 %s-%s 的 %s 订单已被取消 (%s)", // alt. %s 上 %s-%s 上的 %s 请求已被取消 (%s)
+		template: "Buy 的 %s-%s 的 %s 订单已被取消 (%s)", // alt. %s 上 %s-%s 上的 %s 请求已被取消 (%s)
 	},
-	// [capitalized sell string, base ticker, quote ticker, fill percent, token]
-	TopicMatchesMade: {
+	// [base ticker, quote ticker, host, token], RETRANSLATE.
+	TopicSellOrderCanceled: {
+		subject:  "订单取消",
+		template: "Sell 的 %s-%s 的 %s 订单已被取消 (%s)", // alt. %s 上 %s-%s 上的 %s 请求已被取消 (%s)
+	},
+	// [base ticker, quote ticker, fill percent, token], RETRANSLATE.
+	TopicBuyMatchesMade: {
 		subject:  "匹配完成",
-		template: "%s 订单 %s-%s %.1f%% 已完成 (%s)", // alt. %s 请求超过 %s-%s %.1f%% 已填充（%s）
+		template: "Buy 订单 %s-%s %.1f%% 已完成 (%s)", // alt. %s 请求超过 %s-%s %.1f%% 已填充（%s）
+	},
+	// [base ticker, quote ticker, fill percent, token], RETRANSLATE.
+	TopicSellMatchesMade: {
+		subject:  "匹配完成",
+		template: "Sell 订单 %s-%s %.1f%% 已完成 (%s)", // alt. %s 请求超过 %s-%s %.1f%% 已填充（%s）
 	},
 	// [qty, ticker, token]
 	TopicSwapSendError: {
@@ -965,10 +1009,15 @@ var plPL = map[Topic]*translation{
 		subject:  "Złożono zlecenie rynkowe",
 		template: "sprzedaż %s %s po kursie rynkowym (%s)",
 	},
-	// [sell string, qty, ticker, rate string, token]
-	TopicOrderPlaced: {
+	// [qty, ticker, rate string, token], RETRANSLATE.
+	TopicBuyOrderPlaced: {
 		subject:  "Złożono zlecenie",
-		template: "%sing %s %s, kurs = %s (%s)",
+		template: "Buying %s %s, kurs = %s (%s)",
+	},
+	// [qty, ticker, rate string, token], RETRANSLATE.
+	TopicSellOrderPlaced: {
+		subject:  "Złożono zlecenie",
+		template: "Selling %s %s, kurs = %s (%s)",
 	},
 	// [missing count, token, host]
 	TopicMissingMatches: {
@@ -1010,15 +1059,25 @@ var plPL = map[Topic]*translation{
 		subject:  "Spóźniona anulacja",
 		template: "Zlecenie anulacji nie zostało spasowane dla zlecenia %s. Może to mieć miejsce, gdy zlecenie anulacji wysłane jest w tej samej epoce, co zlecenie handlu, lub gdy zlecenie handlu zostaje w pełni wykonane przed spasowaniem ze zleceniem anulacji.",
 	},
-	// [capitalized sell string, base ticker, quote ticker, host, token]
-	TopicOrderCanceled: {
+	// [base ticker, quote ticker, host, token], RETRANSLATE.
+	TopicBuyOrderCanceled: {
 		subject:  "Zlecenie anulowane",
-		template: "Zlecenie %s dla %s-%s na %s zostało anulowane (%s)",
+		template: "Zlecenie buy dla %s-%s na %s zostało anulowane (%s)",
 	},
-	// [capitalized sell string, base ticker, quote ticker, fill percent, token]
-	TopicMatchesMade: {
+	// [base ticker, quote ticker, host, token], RETRANSLATE.
+	TopicSellOrderCanceled: {
+		subject:  "Zlecenie anulowane",
+		template: "Zlecenie sell dla %s-%s na %s zostało anulowane (%s)",
+	},
+	// [base ticker, quote ticker, fill percent, token], RETRANSLATE.
+	TopicSellMatchesMade: {
 		subject:  "Dokonano spasowania",
-		template: "Zlecenie %s na %s-%s zrealizowane w %.1f%% (%s)",
+		template: "Zlecenie sell na %s-%s zrealizowane w %.1f%% (%s)",
+	},
+	// [base ticker, quote ticker, fill percent, token], RETRANSLATE.
+	TopicBuyMatchesMade: {
+		subject:  "Dokonano spasowania",
+		template: "Zlecenie buy na %s-%s zrealizowane w %.1f%% (%s)",
 	},
 	// [qty, ticker, token]
 	TopicSwapSendError: {

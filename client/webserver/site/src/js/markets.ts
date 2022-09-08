@@ -1402,7 +1402,7 @@ export default class MarketsPage extends BasePage {
     Doc.hide(page.vUnlockPreorder, page.vPreorderErr)
     Doc.show(page.vPreorder)
 
-    page.vBuySell.textContent = isSell ? 'Selling' : 'Buying'
+    page.vBuySell.textContent = isSell ? intl.prep(intl.ID_SELLING) : intl.prep(intl.ID_BUYING)
     const buySellStr = isSell ? intl.prep(intl.ID_SELL) : intl.prep(intl.ID_BUY)
     page.vSideSubmit.textContent = buySellStr
     page.vOrderHost.textContent = order.host

@@ -227,7 +227,8 @@ type OrderNote struct {
 
 const (
 	TopicOrderLoadFailure     Topic = "OrderLoadFailure"
-	TopicOrderPlaced          Topic = "OrderPlaced"
+	TopicBuyOrderPlaced       Topic = "BuyOrderPlaced"
+	TopicSellOrderPlaced      Topic = "SellOrderPlaced"
 	TopicYoloPlaced           Topic = "YoloPlaced"
 	TopicMissingMatches       Topic = "MissingMatches"
 	TopicWalletMissing        Topic = "WalletMissing"
@@ -241,9 +242,11 @@ const (
 	TopicMissedCancel         Topic = "MissedCancel"
 	TopicOrderBooked          Topic = "OrderBooked"
 	TopicNoMatch              Topic = "NoMatch"
-	TopicOrderCanceled        Topic = "OrderCanceled"
+	TopicBuyOrderCanceled     Topic = "BuyOrderCanceled"
+	TopicSellOrderCanceled    Topic = "SellOrderCanceled"
 	TopicCancel               Topic = "Cancel"
-	TopicMatchesMade          Topic = "MatchesMade"
+	TopicBuyMatchesMade       Topic = "BuyMatchesMade"
+	TopicSellMatchesMade      Topic = "SellMatchesMade"
 	TopicSwapSendError        Topic = "SwapSendError"
 	TopicInitError            Topic = "InitError"
 	TopicReportRedeemError    Topic = "ReportRedeemError"
