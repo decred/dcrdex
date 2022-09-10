@@ -9,7 +9,6 @@ package eth
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -629,9 +628,14 @@ func (m *multiRPCClient) getTransaction(ctx context.Context, txHash common.Hash)
 			return err
 		}
 		tx = resp.tx
-		if resp.BlockNumber != nil {
-			b, _ := hex.DecodeString(*resp.BlockNumber)
-			h = new(big.Int).SetBytes(b).Int64()
+		if resp.BlockNumber == nil {
+			h = -1
+		} else {
+			bigH, ok := new(big.Int).SetString(*resp.BlockNumber, 0 /* must start with 0x */)
+			if !ok {
+				return fmt.Errorf("couldn't parse hex number %q", *resp.BlockNumber)
+			}
+			h = bigH.Int64()
 		}
 		return nil
 	})
