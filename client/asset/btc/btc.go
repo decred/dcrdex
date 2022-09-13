@@ -1384,14 +1384,12 @@ func (btc *baseWallet) feeRate(_ RawRequester, confTarget uint64) (uint64, error
 	feeResult, err := btc.node.estimateSmartFee(int64(confTarget), &btcjson.EstimateModeConservative)
 	if err != nil {
 		btc.log.Errorf("Failed to get fee rate with estimate smart fee rate: %v", err)
-		fmt.Printf("btc.apiFeeFallback: %+v\n\n", btc.apiFeeFallback())
 
 		if !btc.apiFeeFallback() {
 			return 0, err
 		}
 		btc.log.Debug("Retrieving fee rate from external API: ", externalApiUrl)
 		estimatedFee, err := externalFeeEstimator(btc.ctx, btc.Network)
-		fmt.Printf("estimated fee: %+v\n\n", estimatedFee)
 		if err != nil {
 			btc.log.Errorf("Failed to get fee rate from external API: %v", err)
 			return 0, err
