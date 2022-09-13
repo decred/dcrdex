@@ -44,6 +44,18 @@ regfeexpub=tpubVWHTkHRefqHptAnBdNcDJ...
 pgpass=dexpass
 ```
 
+Or supply the dcrdex executable with the pubkey using:
+
+```sh
+./dcrdex --{network} --regfeexpub={network specific value}
+```
+
+**Note**: You can specify configurations for different networks in a separate config file e.g `~/.dcrdex/dcrdex-{network}.conf` and provide it to the dcrdex executable using the `-C` flag:
+
+```sh
+./dcrdex -C ~/.dcrdex/dcrdex-{network}.conf
+```
+
 *~/.dcrdex/* is the default **app data directory** location used by the
 DEX server, but can be customized with the `--appdata` command-line argument.
 
