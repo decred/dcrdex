@@ -9,6 +9,12 @@ import (
 	"strings"
 )
 
+const (
+	// defaultEpochDuration is the spec defined default markets epoch duration
+	// in milliseconds.
+	defaultEpochDuration uint64 = 60000
+)
+
 // MarketInfo specifies a market that the Archiver must support.
 type MarketInfo struct {
 	Name                   string
@@ -53,6 +59,12 @@ func NewMarketInfo(base, quote uint32, lotSize, rateStep, epochDuration uint64, 
 	if err != nil {
 		return nil, err
 	}
+
+	// Check for sensible epoch duration.
+	if epochDuration <= 0 {
+		epochDuration = defaultEpochDuration
+	}
+
 	return &MarketInfo{
 		Name:                   name,
 		Base:                   base,
@@ -80,6 +92,11 @@ func NewMarketInfoFromSymbols(base, quote string, lotSize, rateStep, epochDurati
 	quoteID, found := BipSymbolID(quote)
 	if !found {
 		return nil, fmt.Errorf(`quote asset symbol "%s" unrecognized`, quote)
+	}
+
+	// Check for sensible epoch duration.
+	if epochDuration <= 0 {
+		epochDuration = defaultEpochDuration
 	}
 
 	return &MarketInfo{
