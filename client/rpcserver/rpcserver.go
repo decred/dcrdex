@@ -66,7 +66,7 @@ type clientCore interface {
 	Login(appPass []byte) (*core.LoginResult, error)
 	Logout() error
 	OpenWallet(assetID uint32, appPass []byte) error
-	ToggleWalletStatus(assetID uint32, disable bool, force bool) error
+	ToggleWalletStatus(assetID uint32, disable bool) error
 	GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange, error)
 	Register(form *core.RegisterForm) (*core.RegisterResult, error)
 	Trade(appPass []byte, form *core.TradeForm) (order *core.Order, err error)

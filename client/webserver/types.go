@@ -84,7 +84,6 @@ type openWalletForm struct {
 type walletStatusForm struct {
 	AssetID uint32 `json:"assetID"`
 	Disable bool   `json:"disable"`
-	Force   bool   `json:"force"`
 }
 
 type tradeForm struct {

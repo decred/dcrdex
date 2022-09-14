@@ -345,22 +345,17 @@ export default class WalletsPage extends BasePage {
       disable: disable
     }
 
+    const fmtParams = { assetName: asset.name }
     const loaded = app().loading(page.toggleWalletStatusConfirm)
     const res = await postJSON(url, req)
     loaded()
-    if (res.code === activeOrdersErrCode) {
-      this.forceUrl = url
-      this.forceReq = req
-      this.showConfirmForce()
-      return
-    }
     if (!app().checkResponse(res)) {
-      page.toggleWalletStatusErr.textContent = res.msg
+      if (res.code === activeOrdersErrCode) page.toggleWalletStatusErr.textContent = intl.prep(intl.ID_ACTIVE_ORDERS_ERR_MSG, fmtParams)
+      else page.toggleWalletStatusErr.textContent = res.msg
       Doc.show(page.toggleWalletStatusErr)
       return
     }
 
-    const fmtParams = { assetName: asset.name }
     let successMsg = intl.prep(intl.ID_WALET_DISABLED_MSG, fmtParams)
     if (!disable) successMsg = intl.prep(intl.ID_WALET_ENABLED_MSG, fmtParams)
     this.assetUpdated(this.selectedAssetID, page.toggleWalletStatusConfirm, successMsg)
@@ -1070,9 +1065,9 @@ export default class WalletsPage extends BasePage {
   }
 
   /*
-   * confirmForceSubmit resubmits either the recover, rescan or disable requests
-   * with force set to true. These two requests require force to be set to true
-   * if they are called while the wallet is managing active orders.
+   * confirmForceSubmit resubmits either the recover or rescan requests with
+   * force set to true. These two requests require force to be set to true if
+   * they are called while the wallet is managing active orders.
    */
   async confirmForceSubmit (): Promise<void> {
     const page = this.page

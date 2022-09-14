@@ -131,7 +131,7 @@ func (c *TCore) WalletSettings(uint32) (map[string]string, error) { return nil, 
 func (c *TCore) ReconfigureWallet(aPW, nPW []byte, form *core.WalletForm) error {
 	return nil
 }
-func (c *TCore) ToggleWalletStatus(assetID uint32, disable bool, force bool) error {
+func (c *TCore) ToggleWalletStatus(assetID uint32, disable bool) error {
 	if c.walletStatusErr != nil {
 		return c.walletStatusErr
 	}

@@ -1533,7 +1533,7 @@ func (c *TCore) ReconfigureWallet(aPW, nPW []byte, form *core.WalletForm) error 
 	return nil
 }
 
-func (c *TCore) ToggleWalletStatus(assetID uint32, disable bool, force bool) error {
+func (c *TCore) ToggleWalletStatus(assetID uint32, disable bool) error {
 	w, ok := c.wallets[assetID]
 	if !ok {
 		return fmt.Errorf("wallet with id %d not found", assetID)

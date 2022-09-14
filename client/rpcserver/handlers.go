@@ -253,7 +253,7 @@ func handleToggleWalletStatus(s *RPCServer, params *RawParams) *msgjson.Response
 	if err != nil {
 		return usage(toggleWalletStatusRoute, err)
 	}
-	if err := s.core.ToggleWalletStatus(form.assetID, form.disable, form.force); err != nil {
+	if err := s.core.ToggleWalletStatus(form.assetID, form.disable); err != nil {
 		errMsg := fmt.Sprintf("unable to change %s wallet status: %v",
 			dex.BipIDSymbol(form.assetID), err)
 		resErr := msgjson.NewError(msgjson.RPCToggleWalletStatusError, errMsg)
@@ -870,16 +870,14 @@ var helpMsgs = map[string]helpMsg{
 	},
 	toggleWalletStatusRoute: {
 		pwArgsShort: "appPass",
-		argsShort:   `assetID disable (force)`,
+		argsShort:   `assetID disable`,
 		cmdSummary:  `Disable or enable an existing wallet.`,
 		pwArgsLong: `Password Args:
     appPass (string): The DEX client password.`,
 		argsLong: `Args:
    assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
                   See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
-  disable (bool): The wallet's status. e.g To disable a wallet set to "true", to enable set to "false".
-    force (bool): Disable wallet even if their are active orders. The
-      			  default is false.`,
+  disable (bool): The wallet's status. e.g To disable a wallet set to "true", to enable set to "false".`,
 		returns: `Returns:
     string: The message "` + fmt.Sprintf(walletStatusStr, "[coin symbol]", "[wallet status]") + `".`,
 	},

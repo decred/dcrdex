@@ -104,7 +104,7 @@ func (c *TCore) Logout() error {
 func (c *TCore) OpenWallet(assetID uint32, pw []byte) error {
 	return c.openWalletErr
 }
-func (c *TCore) ToggleWalletStatus(assetID uint32, disable bool, force bool) error {
+func (c *TCore) ToggleWalletStatus(assetID uint32, disable bool) error {
 	if c.walletStatusErr != nil {
 		return c.walletStatusErr
 	}

@@ -417,15 +417,15 @@ func TestHandleToggleWalletStatus(t *testing.T) {
 		wantErrCode     int
 	}{{
 		name:        "ok: disable",
-		params:      &RawParams{Args: []string{"42", "true", "false"}},
+		params:      &RawParams{Args: []string{"42", "true"}},
 		wantErrCode: -1,
 	}, {
 		name:        "ok: enable",
-		params:      &RawParams{Args: []string{"42", "false", "false"}},
+		params:      &RawParams{Args: []string{"42", "false"}},
 		wantErrCode: -1,
 	}, {
 		name:            "core.toggleWalletStatus error",
-		params:          &RawParams{Args: []string{"42", "true", "false"}},
+		params:          &RawParams{Args: []string{"42", "true"}},
 		walletStatusErr: errors.New("error"),
 		wantErrCode:     msgjson.RPCToggleWalletStatusError,
 	}, {

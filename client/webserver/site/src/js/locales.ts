@@ -60,6 +60,7 @@ export const ID_SELLING = 'ID_SELLING'
 export const ID_BUYING = 'ID_BUYING'
 export const ID_WALET_DISABLED_MSG = 'WALLET_DISABLED'
 export const ID_WALET_ENABLED_MSG = 'WALLET_ENABLED'
+export const ID_ACTIVE_ORDERS_ERR_MSG = 'ACTIVE_ORDERS_ERR_MSG'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -121,7 +122,8 @@ export const enUS: Locale = {
   [ID_BUYING]: 'Buying',
   [ID_WALET_ENABLED_MSG]: '{{ assetName }} Wallet Enabled',
   [ID_WALET_DISABLED_MSG]: '{{ assetName }} Wallet Disabled',
-  [ID_DISABLED_MSG]: 'wallet is disabled'
+  [ID_DISABLED_MSG]: 'wallet is disabled',
+  [ID_ACTIVE_ORDERS_ERR_MSG]: '{{ assetName }} wallet is actively managing orders'
 }
 
 export const ptBR: Locale = {

@@ -1763,7 +1763,7 @@ func (c *Core) Wallets() []*WalletState {
 }
 
 // ToggleWalletStatus changes a wallet's status to either disabled or enabled.
-func (c *Core) ToggleWalletStatus(assetID uint32, disable bool, force bool) error {
+func (c *Core) ToggleWalletStatus(assetID uint32, disable bool) error {
 	wallet, exists := c.wallet(assetID)
 	if !exists {
 		return newError(missingWalletErr, "no configured wallet found for %s (%d)",
@@ -1789,7 +1789,7 @@ func (c *Core) ToggleWalletStatus(assetID uint32, disable bool, force bool) erro
 			return fmt.Errorf("%s wallet is not connected", unbip(assetID))
 		}
 
-		if !force && c.assetHasActiveOrders(assetID) {
+		if c.assetHasActiveOrders(assetID) {
 			return newError(activeOrdersErr, "active orders for %v", unbip(assetID))
 		}
 
