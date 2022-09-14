@@ -263,8 +263,6 @@ export default class OrderPage extends BasePage {
     const makerRedeemSpan = Doc.tmplElement(card, 'makerRedeemMsg')
     const takerRedeemSpan = Doc.tmplElement(card, 'takerRedeemMsg')
 
-    console.log(JSON.stringify(m.redeem))
-
     if (m.status === OrderUtil.MakerSwapCast && !m.revoked && !m.refund) {
       const c = makerSwapCoin(m)
       makerSwapSpan.textContent = confirmationString(c)

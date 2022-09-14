@@ -682,17 +682,11 @@ func (m *matchReader) ConfirmingTakerRedeem() bool {
 		m.Match.Status < order.MatchConfirmed && m.Match.Status >= order.MatchComplete
 }
 
-// InConfirmingRedeem returns true if the match has completed but the user's
-// redemption has not yet been confirmed.
-func (m *matchReader) InConfirmingRedeem() bool {
-	return m.ConfirmingMakerRedeem() || m.ConfirmingTakerRedeem()
-}
-
 // ConfirmRedeemString returns a string indicating the current confirmation
 // progress of the user's redemption. An empty string is returned if the
 // user has not yet submit their redemption, or if it is already confirmed.
 func (m *matchReader) ConfirmRedeemString() string {
-	if !m.InConfirmingRedeem() || m.Redeem == nil {
+	if !(m.ConfirmingMakerRedeem() || m.ConfirmingTakerRedeem()) || m.Redeem == nil {
 		return ""
 	}
 
