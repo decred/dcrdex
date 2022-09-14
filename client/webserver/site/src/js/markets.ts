@@ -1360,7 +1360,7 @@ export default class MarketsPage extends BasePage {
     this.currentForm = form
     const page = this.page
     Doc.hide(page.unlockWalletForm, page.verifyForm, page.newWalletForm,
-      page.cancelForm, page.vDetailPane, page.accelerateForm)
+      page.cancelForm, page.vDetailPane, page.accelerateForm, page.toggleWalletStatusConfirm)
     form.style.right = '10000px'
     Doc.show(page.forms, form)
     const shift = (page.forms.offsetWidth + form.offsetWidth) / 2
