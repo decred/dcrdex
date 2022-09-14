@@ -719,10 +719,10 @@ export default class WalletsPage extends BasePage {
 
   updateDisplayedReconfigFields (walletDef: WalletDefinition) {
     if (walletDef.seeded || walletDef.type === 'token') {
-      Doc.hide(this.page.showChangePW)
+      Doc.hide(this.page.showChangePW, this.reconfigForm.fileSelector)
       this.changeWalletPW = false
       this.setPWSettingViz(false)
-    } else Doc.show(this.page.showChangePW)
+    } else Doc.show(this.page.showChangePW, this.reconfigForm.fileSelector)
   }
 
   /* Display a deposit address. */
