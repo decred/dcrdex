@@ -236,41 +236,77 @@ export default class OrderPage extends BasePage {
       return
     }
 
-    const setCoin = (divName: string, linkName: string, coin: Coin) => {
+    const setCoin = (pendingName: string, linkName: string, coin: Coin) => {
       if (!card) return // Ugh
-      if (!coin) return
-      Doc.show(Doc.tmplElement(card, divName))
       const coinLink = Doc.tmplElement(card, linkName)
+      const pendingSpan = Doc.tmplElement(card, pendingName)
+      if (!coin) {
+        Doc.show(pendingSpan)
+        Doc.hide(coinLink)
+        return
+      }
       coinLink.textContent = coin.stringID
       coinLink.dataset.explorerCoin = coin.stringID
       setCoinHref(coinLink)
+      Doc.hide(pendingSpan)
+      Doc.show(coinLink)
     }
 
-    setCoin('swap', 'swapCoin', m.swap)
-    setCoin('counterSwap', 'counterSwapCoin', m.counterSwap)
-    setCoin('redeem', 'redeemCoin', m.redeem)
-    setCoin('counterRedeem', 'counterRedeemCoin', m.counterRedeem)
-    setCoin('refund', 'refundCoin', m.refund)
+    setCoin('makerSwapPending', 'makerSwapCoin', makerSwapCoin(m))
+    setCoin('takerSwapPending', 'takerSwapCoin', takerSwapCoin(m))
+    setCoin('makerRedeemPending', 'makerRedeemCoin', makerRedeemCoin(m))
+    setCoin('takerRedeemPending', 'takerRedeemCoin', takerRedeemCoin(m))
+    setCoin('refundPending', 'refundCoin', m.refund)
 
-    const swapSpan = Doc.tmplElement(card, 'swapMsg')
-    const cSwapSpan = Doc.tmplElement(card, 'counterSwapMsg')
-    const redeemSpan = Doc.tmplElement(card, 'redeemMsg')
+    const makerSwapSpan = Doc.tmplElement(card, 'makerSwapMsg')
+    const takerSwapSpan = Doc.tmplElement(card, 'takerSwapMsg')
+    const makerRedeemSpan = Doc.tmplElement(card, 'makerRedeemMsg')
+    const takerRedeemSpan = Doc.tmplElement(card, 'takerRedeemMsg')
 
-    if (inCounterSwapCast(m)) {
-      cSwapSpan.textContent = confirmationString(m.counterSwap)
-      Doc.hide(swapSpan, redeemSpan)
-      Doc.show(cSwapSpan)
-    } else if (inSwapCast(m)) {
-      swapSpan.textContent = confirmationString(m.swap)
-      Doc.hide(cSwapSpan, redeemSpan)
-      Doc.show(swapSpan)
-    } else if (inConfirmingRedeem(m)) {
-      redeemSpan.textContent = confirmationString(m.redeem)
-      Doc.hide(swapSpan, cSwapSpan)
-      Doc.show(redeemSpan)
+    if (m.status === OrderUtil.MakerSwapCast && !m.revoked && !m.refund) {
+      const c = makerSwapCoin(m)
+      makerSwapSpan.textContent = confirmationString(c)
+      Doc.hide(takerSwapSpan, makerRedeemSpan, takerRedeemSpan)
+      Doc.show(makerSwapSpan)
+    } else if (m.status === OrderUtil.TakerSwapCast && !m.revoked && !m.refund) {
+      const c = takerSwapCoin(m)
+      takerSwapSpan.textContent = confirmationString(c)
+      Doc.hide(makerSwapSpan, makerRedeemSpan, takerRedeemSpan)
+      Doc.show(takerSwapSpan)
+    } else if (inConfirmingMakerRedeem(m) && !m.revoked && !m.refund) {
+      makerRedeemSpan.textContent = confirmationString(m.redeem)
+      Doc.hide(makerSwapSpan, takerSwapSpan, takerRedeemSpan)
+      Doc.show(makerRedeemSpan)
+    } else if (inConfirmingTakerRedeem(m) && !m.revoked && !m.refund) {
+      takerRedeemSpan.textContent = confirmationString(m.redeem)
+      Doc.hide(makerSwapSpan, takerSwapSpan, makerRedeemSpan)
+      Doc.show(takerRedeemSpan)
     } else {
-      Doc.hide(swapSpan, cSwapSpan, redeemSpan)
+      Doc.hide(makerSwapSpan, takerSwapSpan, makerRedeemSpan, takerRedeemSpan)
     }
+
+    const makerSwapDiv = Doc.tmplElement(card, 'makerSwap')
+    const takerSwapDiv = Doc.tmplElement(card, 'takerSwap')
+    const makerRedeemDiv = Doc.tmplElement(card, 'makerRedeem')
+    const takerRedeemDiv = Doc.tmplElement(card, 'takerRedeem')
+    const refundDiv = Doc.tmplElement(card, 'refund')
+
+    const showMakerSwap = !m.isCancel && (makerSwapCoin(m) || !m.revoked)
+    const showTakerSwap = !m.isCancel && (takerSwapCoin(m) || !m.revoked)
+    const showMakerRedeem = !m.isCancel && (makerRedeemCoin(m) || !m.revoked)
+    const showTakerRedeem = !m.isCancel && (m.side !== OrderUtil.Maker) && (takerRedeemCoin(m) || !m.revoked)
+    const showRefund = !m.isCancel && (m.refund || (m.revoked && m.active))
+
+    if (showMakerSwap) Doc.show(makerSwapDiv)
+    else Doc.hide(makerSwapDiv)
+    if (showTakerSwap) Doc.show(takerSwapDiv)
+    else Doc.hide(takerSwapDiv)
+    if (showMakerRedeem) Doc.show(makerRedeemDiv)
+    else Doc.hide(makerRedeemDiv)
+    if (showTakerRedeem) Doc.show(takerRedeemDiv)
+    else Doc.hide(takerRedeemDiv)
+    if (showRefund) Doc.show(refundDiv)
+    else Doc.hide(refundDiv)
 
     Doc.tmplElement(card, 'status').textContent = OrderUtil.matchStatusString(m)
   }
@@ -285,28 +321,40 @@ function confirmationString (coin: Coin) {
   return `${coin.confs.count} / ${coin.confs.required} confirmations`
 }
 
-/*
- * inCounterSwapCast will be true if we are waiting on confirmations for the
- * counterparty's swap.
- */
-function inCounterSwapCast (m: Match) {
-  return (m.side === OrderUtil.Taker && m.status === OrderUtil.MakerSwapCast) || (m.side === OrderUtil.Maker && m.status === OrderUtil.TakerSwapCast)
+// makerSwapCoin return's the maker's swap coin.
+function makerSwapCoin (m: Match) : Coin {
+  return (m.side === OrderUtil.Maker) ? m.swap : m.counterSwap
+}
+
+// takerSwapCoin return's the taker's swap coin.
+function takerSwapCoin (m: Match) {
+  return (m.side === OrderUtil.Maker) ? m.counterSwap : m.swap
+}
+
+// makerRedeemCoin return's the maker's redeem coin.
+function makerRedeemCoin (m: Match) {
+  return (m.side === OrderUtil.Maker) ? m.redeem : m.counterRedeem
+}
+
+// takerRedeemCoin return's the taker's redeem coin.
+function takerRedeemCoin (m: Match) {
+  return (m.side === OrderUtil.Maker) ? m.counterRedeem : m.redeem
 }
 
 /*
- * inCounterSwapCast will be true if we are waiting on confirmations for our own
- * swap.
- */
-function inSwapCast (m: Match) {
-  return (m.side === OrderUtil.Maker && m.status === OrderUtil.MakerSwapCast) || (m.side === OrderUtil.Taker && m.status === OrderUtil.TakerSwapCast)
-}
-
-/*
-* inConfirmingRedeem will be true if we are waiting on confirmations for our own
-* redeem.
+* inConfirmingMakerRedeem will be true if we are the maker, and we are waiting
+* on confirmations for our own redeem.
 */
-function inConfirmingRedeem (m: Match) {
-  return m.status < OrderUtil.MatchConfirmed && ((m.side === OrderUtil.Maker && m.status >= OrderUtil.MakerRedeemed) || (m.side === OrderUtil.Taker && m.status >= OrderUtil.MatchComplete))
+function inConfirmingMakerRedeem (m: Match) {
+  return m.status < OrderUtil.MatchConfirmed && m.side === OrderUtil.Maker && m.status >= OrderUtil.MakerRedeemed
+}
+
+/*
+* inConfirmingTakerRedeem will be true if we are the taker, and we are waiting
+* on confirmations for our own redeem.
+*/
+function inConfirmingTakerRedeem (m: Match) {
+  return m.status < OrderUtil.MatchConfirmed && m.side === OrderUtil.Taker && m.status >= OrderUtil.MatchComplete
 }
 
 /*

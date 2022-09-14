@@ -134,16 +134,16 @@ export function matchStatusString (m: Match) {
 
   switch (m.status) {
     case NewlyMatched:
-      return '(0 / 4) Newly Matched'
+      return 'Newly Matched'
     case MakerSwapCast:
-      return '(1 / 4) First Swap Sent'
+      return 'Maker Swap Sent'
     case TakerSwapCast:
-      return '(2 / 4) Second Swap Sent'
+      return 'Taker Swap Sent'
     case MakerRedeemed:
       if (m.side === Maker) {
         return 'Redemption Sent'
       }
-      return '(3 / 4) Maker Redeemed'
+      return 'Maker Redeemed'
     case MatchComplete:
       return 'Redemption Sent'
     case MatchConfirmed:
