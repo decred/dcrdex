@@ -77,6 +77,9 @@ var (
 	// ActiveOrdersLogoutErr is returned from logout when there are active
 	// orders.
 	ActiveOrdersLogoutErr = errors.New("cannot log out with active orders")
+	// walletDisabledErrStr is the error message returned when trying to use a
+	// disabled wallet.
+	walletDisabledErrStr = "%s wallet is disabled"
 
 	errTimeout = errors.New("timeout")
 )
@@ -1759,6 +1762,88 @@ func (c *Core) Wallets() []*WalletState {
 	return state
 }
 
+// ToggleWalletStatus changes a wallet's status to either disabled or enabled.
+func (c *Core) ToggleWalletStatus(assetID uint32, disable bool) error {
+	wallet, exists := c.wallet(assetID)
+	if !exists {
+		return newError(missingWalletErr, "no configured wallet found for %s (%d)",
+			strings.ToUpper(unbip(assetID)), assetID)
+	}
+
+	// Return early if this wallet is already disabled or already enabled.
+	if disable == wallet.isDisabled() {
+		return nil
+	}
+
+	if disable {
+		// Ensure wallet is not a parent of an enabled token wallet.
+		if assetInfo := asset.Asset(assetID); assetInfo != nil {
+			for id := range assetInfo.Tokens {
+				if wallet, exists := c.wallet(id); exists && !wallet.isDisabled() {
+					return fmt.Errorf("%s wallet has an enabled %s token wallet", unbip(assetID), unbip(id))
+				}
+			}
+		}
+
+		if !wallet.connected() {
+			return fmt.Errorf("%s wallet is not connected", unbip(assetID))
+		}
+
+		if c.assetHasActiveOrders(assetID) {
+			return newError(activeOrdersErr, "active orders for %v", unbip(assetID))
+		}
+
+		if !wallet.Locked() {
+			err := wallet.Lock(5 * time.Second)
+			if err != nil {
+				c.log.Errorf("Failed to lock %v wallet: %v", unbip(assetID), err)
+			}
+		}
+		wallet.Disconnect()
+		wallet.setDisabled(true)
+	} else {
+		// Ensure wallet does not have a disabled parent wallet.
+		if wallet.parent != nil && wallet.parent.isDisabled() {
+			return fmt.Errorf("token parent wallet is disabled")
+		}
+
+		dbWallet, err := c.db.Wallet(wallet.dbID)
+		if err != nil {
+			return fmt.Errorf("error retrieving DB wallet: %w", err)
+		}
+
+		wallet, err = c.loadWallet(dbWallet)
+		if err != nil {
+			return newError(walletErr, "error loading wallet for %d -> %s: %w",
+				assetID, unbip(assetID), err)
+		}
+
+		// Update wallet status before attempting to connect wallet because disabled
+		// wallets cannot be connected to.
+		wallet.setDisabled(false)
+
+		// Attempt to connect wallet.
+		err = c.connectAndUpdateWallet(wallet)
+		if err != nil {
+			c.log.Errorf("Error connecting to %s wallet: %v", unbip(assetID), err)
+		}
+
+		// The wallet has been successfully enabled.
+		c.walletMtx.Lock()
+		c.wallets[assetID] = wallet
+		c.walletMtx.Unlock()
+	}
+
+	// Update db with wallet status.
+	err := c.db.UpdateWalletStatus(wallet.dbID, disable)
+	if err != nil {
+		return fmt.Errorf("db.UpdateWalletStatus error: %w", err)
+	}
+
+	c.notify(newWalletStateNote(wallet.state()))
+	return nil
+}
+
 // SupportedAssets returns a map of asset information for supported assets.
 func (c *Core) SupportedAssets() map[uint32]*SupportedAsset {
 	return c.assetMap()
@@ -2178,6 +2263,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		dbID:         dbWallet.ID(),
 		walletType:   dbWallet.Type,
 		broadcasting: new(uint32),
+		disabled:     dbWallet.Disabled,
 	}
 
 	token := asset.TokenInfo(assetID)
@@ -2409,6 +2495,11 @@ func (c *Core) RecoverWallet(assetID uint32, appPW []byte, force bool) error {
 			assetID, unbip(assetID), err)
 	}
 
+	// Disabled wallets cannot initiate a recovery.
+	if oldWallet.isDisabled() {
+		return fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(assetID)))
+	}
+
 	recoverer, isRecoverer := oldWallet.Wallet.(asset.Recoverer)
 	if !isRecoverer {
 		return errors.New("wallet is not a recoverer")
@@ -2633,6 +2724,10 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 	if !found {
 		return newError(missingWalletErr, "%d -> %s wallet not found",
 			assetID, unbip(assetID))
+	}
+
+	if oldWallet.isDisabled() { // disabled wallet cannot perform operation.
+		return fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(assetID)))
 	}
 
 	oldDef, err := walletDefinition(assetID, oldWallet.walletType)
@@ -3876,6 +3971,10 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	var connectCount uint32
 	connectWallet := func(wallet *xcWallet) {
 		defer wg.Done()
+		// Return early if wallet is disabled.
+		if wallet.isDisabled() {
+			return
+		}
 		if !wallet.connected() {
 			err := c.connectAndUpdateWallet(wallet)
 			if err != nil {

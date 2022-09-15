@@ -42,6 +42,7 @@ type TCore struct {
 	rescanWalletErr          error
 	walletState              *core.WalletState
 	closeWalletErr           error
+	walletStatusErr          error
 	wallets                  []*core.WalletState
 	initializeClientErr      error
 	registerResult           *core.RegisterResult
@@ -102,6 +103,15 @@ func (c *TCore) Logout() error {
 }
 func (c *TCore) OpenWallet(assetID uint32, pw []byte) error {
 	return c.openWalletErr
+}
+func (c *TCore) ToggleWalletStatus(assetID uint32, disable bool) error {
+	if c.walletStatusErr != nil {
+		return c.walletStatusErr
+	}
+	if c.walletState != nil {
+		c.walletState.Disabled = disable
+	}
+	return c.walletStatusErr
 }
 func (c *TCore) RescanWallet(assetID uint32, force bool) error {
 	return c.rescanWalletErr

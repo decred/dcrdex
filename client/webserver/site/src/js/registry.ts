@@ -170,6 +170,7 @@ export interface WalletState {
   traits: number
   open: boolean
   running: boolean
+  disabled: boolean
   balance: WalletBalance
   address: string
   units: string

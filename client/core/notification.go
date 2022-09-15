@@ -461,8 +461,8 @@ func newWalletConfigNote(topic Topic, subject, details string, severity db.Sever
 }
 
 // WalletStateNote is a notification regarding a change in wallet state,
-// including: creation, locking, unlocking, and connect. This is intended to be
-// a Data Severity notification.
+// including: creation, locking, unlocking, connect, disabling and enabling. This
+// is intended to be a Data Severity notification.
 type WalletStateNote WalletConfigNote
 
 const TopicWalletState Topic = "WalletState"

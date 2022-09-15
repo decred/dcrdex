@@ -117,6 +117,7 @@ type WalletState struct {
 	PeerCount    uint32            `json:"peerCount"`
 	Synced       bool              `json:"synced"`
 	SyncProgress float32           `json:"syncProgress"`
+	Disabled     bool              `json:"disabled"`
 }
 
 // User is information about the user's wallets and DEX accounts.

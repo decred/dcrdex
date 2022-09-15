@@ -30,7 +30,7 @@ var (
 	// requiredRPCServerVersion is the least version of the dexc RPC server that
 	// this dexcctl package can work with. It should be updated whenever a
 	// dexcctl change requires an updated RPC server.
-	requiredRPCServerVersion = dex.Semver{Major: 0, Minor: 2, Patch: 0}
+	requiredRPCServerVersion = dex.Semver{Major: 0, Minor: 3, Patch: 0}
 )
 
 func main() {
@@ -47,17 +47,18 @@ func main() {
 // promptPasswords is a map of routes to password prompts. Passwords are
 // prompted in the order given.
 var promptPasswords = map[string][]string{
-	"cancel":       {"App password:"},
-	"discoveracct": {"App password:"},
-	"init":         {"Set new app password:"},
-	"login":        {"App password:"},
-	"newwallet":    {"App password:", "Wallet password:"},
-	"openwallet":   {"App password:"},
-	"register":     {"App password:"},
-	"trade":        {"App password:"},
-	"withdraw":     {"App password:"},
-	"send":         {"App password:"},
-	"appseed":      {"App password:"},
+	"cancel":             {"App password:"},
+	"discoveracct":       {"App password:"},
+	"init":               {"Set new app password:"},
+	"login":              {"App password:"},
+	"newwallet":          {"App password:", "Wallet password:"},
+	"openwallet":         {"App password:"},
+	"register":           {"App password:"},
+	"trade":              {"App password:"},
+	"withdraw":           {"App password:"},
+	"send":               {"App password:"},
+	"appseed":            {"App password:"},
+	"togglewalletstatus": {"App password:"},
 }
 
 // optionalTextFiles is a map of routes to arg index for routes that should read

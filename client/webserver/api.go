@@ -733,6 +733,25 @@ func (s *WebServer) apiWalletSettings(w http.ResponseWriter, r *http.Request) {
 	}, s.indent)
 }
 
+// apiToggleWalletStatus updates the wallet's status.
+func (s *WebServer) apiToggleWalletStatus(w http.ResponseWriter, r *http.Request) {
+	form := new(walletStatusForm)
+	if !readPost(w, r, form) {
+		return
+	}
+	err := s.core.ToggleWalletStatus(form.AssetID, form.Disable)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error setting wallet settings: %w", err))
+		return
+	}
+	response := struct {
+		OK bool `json:"ok"`
+	}{
+		OK: true,
+	}
+	writeJSON(w, response, s.indent)
+}
+
 // apiDefaultWalletCfg attempts to load configuration settings from the
 // asset's default path on the server.
 func (s *WebServer) apiDefaultWalletCfg(w http.ResponseWriter, r *http.Request) {

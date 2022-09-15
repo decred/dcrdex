@@ -30,6 +30,7 @@ const (
 	myOrdersRoute              = "myorders"
 	newWalletRoute             = "newwallet"
 	openWalletRoute            = "openwallet"
+	toggleWalletStatusRoute    = "togglewalletstatus"
 	orderBookRoute             = "orderbook"
 	getDEXConfRoute            = "getdexconfig" // consider a getfees route
 	registerRoute              = "register"
@@ -50,6 +51,7 @@ const (
 	walletUnlockedStr = "%s wallet unlocked"
 	canceledOrderStr  = "canceled order %s"
 	logoutStr         = "goodbye"
+	walletStatusStr   = "%s wallet has been %s"
 )
 
 // createResponse creates a msgjson response payload.
@@ -83,6 +85,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	myOrdersRoute:              handleMyOrders,
 	newWalletRoute:             handleNewWallet,
 	openWalletRoute:            handleOpenWallet,
+	toggleWalletStatusRoute:    handleToggleWalletStatus,
 	orderBookRoute:             handleOrderBook,
 	getDEXConfRoute:            handleGetDEXConfig,
 	registerRoute:              handleRegister,
@@ -240,6 +243,30 @@ func handleCloseWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload
 
 	res := fmt.Sprintf(walletLockedStr, dex.BipIDSymbol(assetID))
 	return createResponse(closeWalletRoute, &res, nil)
+}
+
+// handleToggleWalletStatus handles requests for toggleWalletStatus.
+// *msgjson.ResponsePayload.Error is empty if successful. Disables or enables a
+// wallet.
+func handleToggleWalletStatus(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	form, err := parseToggleWalletStatusArgs(params)
+	if err != nil {
+		return usage(toggleWalletStatusRoute, err)
+	}
+	if err := s.core.ToggleWalletStatus(form.assetID, form.disable); err != nil {
+		errMsg := fmt.Sprintf("unable to change %s wallet status: %v",
+			dex.BipIDSymbol(form.assetID), err)
+		resErr := msgjson.NewError(msgjson.RPCToggleWalletStatusError, errMsg)
+		return createResponse(toggleWalletStatusRoute, nil, resErr)
+	}
+
+	status := "enabled"
+	if form.disable {
+		status = "disabled"
+	}
+
+	res := fmt.Sprintf(walletStatusStr, dex.BipIDSymbol(form.assetID), status)
+	return createResponse(toggleWalletStatusRoute, &res, nil)
 }
 
 // handleWallets handles requests for wallets. Returns a list of wallet details.
@@ -460,7 +487,7 @@ func send(s *RPCServer, params *RawParams, route string) *msgjson.ResponsePayloa
 func handleRescanWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	assetID, force, err := parseRescanWalletArgs(params)
 	if err != nil {
-		return usage(withdrawRoute, err)
+		return usage(rescanWalletRoute, err)
 	}
 	err = s.core.RescanWallet(assetID, force)
 	if err != nil {
@@ -841,6 +868,19 @@ var helpMsgs = map[string]helpMsg{
 		returns: `Returns:
     string: The message "` + fmt.Sprintf(walletLockedStr, "[coin symbol]") + `"`,
 	},
+	toggleWalletStatusRoute: {
+		pwArgsShort: "appPass",
+		argsShort:   `assetID disable`,
+		cmdSummary:  `Disable or enable an existing wallet.`,
+		pwArgsLong: `Password Args:
+    appPass (string): The DEX client password.`,
+		argsLong: `Args:
+   assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
+                  See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
+  disable (bool): The wallet's status. e.g To disable a wallet set to "true", to enable set to "false".`,
+		returns: `Returns:
+    string: The message "` + fmt.Sprintf(walletStatusStr, "[coin symbol]", "[wallet status]") + `".`,
+	},
 	walletsRoute: {
 		cmdSummary: `List all wallets.`,
 		returns: `Returns:
@@ -852,6 +892,7 @@ var helpMsgs = map[string]helpMsg{
           See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
         "open" (bool): Whether the wallet is unlocked.
         "running" (bool): Whether the wallet is running.
+		"disabled" (bool): Whether the wallet is disabled.
         "updated" (int): Unix time of last balance update. Seconds since 00:00:00 Jan 1 1970.
         "balance" (obj): {
           "available" (int): The balance available for funding orders case.

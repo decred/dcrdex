@@ -80,6 +80,12 @@ type openWalletForm struct {
 	Pass    encode.PassBytes `json:"pass"` // Application password.
 }
 
+// walletStatusForm is information neccessary to change a wallet's status.
+type walletStatusForm struct {
+	AssetID uint32 `json:"assetID"`
+	Disable bool   `json:"disable"`
+}
+
 type tradeForm struct {
 	Pass  encode.PassBytes `json:"pw"`
 	Order *core.TradeForm  `json:"order"`

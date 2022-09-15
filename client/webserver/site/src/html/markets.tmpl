@@ -5,6 +5,7 @@
 <span data-state="syncing" class="ico-sync fs12 d-hide" data-tooltip="placeholder text"></span>
 <span data-state="nopeers" class="ico-disconnected fs12 d-hide" data-tooltip="no peers!"></span>
 <span data-state="nowallet"></span> {{/* not showing ico-cross */}}
+<span data-state="disabled" class="ico-cross errcolor d-hide" data-tooltip="placeholder text"></span>
 {{end}}
 
 {{define "markets"}}
@@ -432,6 +433,11 @@
     {{- /* NEW WALLET */ -}}
     <form class="m-auto d-hide" id="newWalletForm" autocomplete="off">
       {{template "newWalletForm"}}
+    </form>
+
+    {{- /* TOGGLE WALLET STATUS AUTHORIZATION */ -}}
+    <form class="d-hide" id="toggleWalletStatusConfirm">
+      {{template "toggleWalletStatusConfirm"}}
     </form>
 
     {{- /* VERIFY FORM */ -}}

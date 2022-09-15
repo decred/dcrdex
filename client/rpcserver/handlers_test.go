@@ -409,6 +409,41 @@ func TestHandleCloseWallet(t *testing.T) {
 	}
 }
 
+func TestHandleToggleWalletStatus(t *testing.T) {
+	tests := []struct {
+		name            string
+		params          *RawParams
+		walletStatusErr error
+		wantErrCode     int
+	}{{
+		name:        "ok: disable",
+		params:      &RawParams{Args: []string{"42", "true"}},
+		wantErrCode: -1,
+	}, {
+		name:        "ok: enable",
+		params:      &RawParams{Args: []string{"42", "false"}},
+		wantErrCode: -1,
+	}, {
+		name:            "core.toggleWalletStatus error",
+		params:          &RawParams{Args: []string{"42", "true"}},
+		walletStatusErr: errors.New("error"),
+		wantErrCode:     msgjson.RPCToggleWalletStatusError,
+	}, {
+		name:        "bad params",
+		params:      &RawParams{Args: []string{"42"}},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{walletStatusErr: test.walletStatusErr, walletState: &core.WalletState{}}
+		r := &RPCServer{core: tc, wsServer: wsServer}
+		payload := handleToggleWalletStatus(r, test.params)
+		res := ""
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatalf("%s failed: %v", test.name, err)
+		}
+	}
+}
+
 func TestHandleWallets(t *testing.T) {
 	tc := new(TCore)
 	r := &RPCServer{core: tc}

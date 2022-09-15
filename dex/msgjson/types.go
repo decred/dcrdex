@@ -80,6 +80,7 @@ const (
 	RPCWalletRescanError                 // 62
 	RPCDeleteArchivedRecordsError        // 63
 	DuplicateRequestError                // 64
+	RPCToggleWalletStatusError           // 65
 )
 
 // Routes are destinations for a "payload" of data. The type of data being

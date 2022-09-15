@@ -75,6 +75,10 @@
                       <td class="grey">[[[Status]]]</td>
                       <td><span class="ico-sleeping fs14 me-2"></span>[[[Off]]]</td>
                     </tr>
+                    <tr id="statusDisabled">
+                      <td class="grey">[[[Status]]]</td>
+                      <td><span class="ico-cross errcolor fs14 me-2"></span>[[[Disabled]]]</td>
+                    </tr>
                     <tr id="unlockBttnBox">
                       <td colspan="2" class="pb-2">
                         <button id="unlockBttn" class="fs14 p-1 hoverbg">[[[Unlock]]]</button>
@@ -404,10 +408,17 @@
       <div class="sans-light fs17" id="otherActionsLabel">[[[Other Actions]]]</div>
       <div class="d-flex flex-row fs15 pt-1">
         <button id="downloadLogs" type="button" class="p-1 me-2 hoverbg">[[[wallet_logs]]]</button>
-        <button id="exportWallet" type="button" class="w-25 mx-1 mt-1 justify-content-center fs15 bg2">[[[export_wallet]]]</button>
+        <button id="exportWallet" type="button" class="me-2 p-1 fs15 bg2">[[[export_wallet]]]</button>
         <button id="recoverWallet" type="button" class="danger p-1 me-2 hoverbg">[[[recover]]]</button>
         <button id="rescanWallet" type="button" class="danger p-1 me-2 hoverbg">[[[Rescan]]]</button>
+        <button id="disableWallet" type="button" class="danger p-1 me-2 hoverbg">[[[disable_wallet]]]</button>
+        <button id="enableWallet" type="button" class="green p-1 me-2 hoverbg">[[[enable_wallet]]]</button>
       </div>
+    </form>
+
+    {{- /* TOGGLE WALLET STATUS AUTHORIZATION */ -}}
+    <form class="d-hide" id="toggleWalletStatusConfirm">
+      {{template "toggleWalletStatusConfirm"}}
     </form>
 
     {{- /* CONFIRM FORCE FORM */ -}}

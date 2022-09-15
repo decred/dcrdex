@@ -659,6 +659,7 @@ type Wallet struct {
 	Balance     *Balance
 	EncryptedPW []byte
 	Address     string
+	Disabled    bool
 }
 
 // Encode encodes the Wallet to a versioned blob.
