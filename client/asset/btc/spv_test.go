@@ -6,12 +6,14 @@
 package btc
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
@@ -189,6 +191,10 @@ func (c *tBtcWallet) HaveAddress(a btcutil.Address) (bool, error) {
 
 func (c *tBtcWallet) Stop() {}
 
+func (c *tBtcWallet) Start() (SPVService, error) {
+	return nil, nil
+}
+
 func (c *tBtcWallet) WaitForShutdown() {}
 
 func (c *tBtcWallet) ChainSynced() bool {
@@ -202,7 +208,7 @@ func (c *tBtcWallet) ChainSynced() bool {
 
 func (c *tBtcWallet) SynchronizeRPC(chainClient chain.Interface) {}
 
-func (c *tBtcWallet) walletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetails, error) {
+func (c *tBtcWallet) WalletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetails, error) {
 	if c.getTransactionErr != nil {
 		return nil, c.getTransactionErr
 	}
@@ -283,7 +289,7 @@ func (c *tBtcWallet) getTransaction(txHash *chainhash.Hash) (*GetTransactionResu
 	return txData, nil
 }
 
-func (c *tBtcWallet) syncedTo() waddrmgr.BlockStamp {
+func (c *tBtcWallet) SyncedTo() waddrmgr.BlockStamp {
 	bestHash, bestHeight := c.bestBlock() // NOTE: in reality this may be lower than the chain service's best block
 	blk := c.getBlock(bestHash.String())
 	return waddrmgr.BlockStamp{
@@ -293,7 +299,7 @@ func (c *tBtcWallet) syncedTo() waddrmgr.BlockStamp {
 	}
 }
 
-func (c *tBtcWallet) signTransaction(tx *wire.MsgTx) error {
+func (c *tBtcWallet) SignTx(tx *wire.MsgTx) error {
 	if c.signTxErr != nil {
 		return c.signTxErr
 	}
@@ -304,8 +310,24 @@ func (c *tBtcWallet) signTransaction(tx *wire.MsgTx) error {
 	return nil
 }
 
-func (c *tBtcWallet) txNotifications() wallet.TransactionNotificationsClient {
-	return wallet.TransactionNotificationsClient{}
+func (c *tBtcWallet) AccountProperties(scope waddrmgr.KeyScope, acct uint32) (*waddrmgr.AccountProperties, error) {
+	return nil, nil
+}
+
+func (c *tBtcWallet) BlockNotifications(ctx context.Context) <-chan *BlockNotification {
+	return nil
+}
+
+func (c *tBtcWallet) ForceRescan() {}
+
+func (c *tBtcWallet) RescanAsync() error { return nil }
+
+func (c *tBtcWallet) Birthday() time.Time {
+	return time.Time{}
+}
+
+func (c *tBtcWallet) Reconfigure(*asset.WalletConfig, string) (bool, error) {
+	return false, nil
 }
 
 type tNeutrinoClient struct {
@@ -341,14 +363,14 @@ func (c *tNeutrinoClient) BestBlock() (*headerfs.BlockStamp, error) {
 	}, nil
 }
 
-func (c *tNeutrinoClient) Peers() []*neutrino.ServerPeer {
+func (c *tNeutrinoClient) Peers() []SPVPeer {
 	c.blockchainMtx.RLock()
 	defer c.blockchainMtx.RUnlock()
 	peer := &neutrino.ServerPeer{Peer: &peer.Peer{}}
 	if c.getBlockchainInfo != nil {
 		peer.UpdateLastBlockHeight(int32(c.getBlockchainInfo.Headers))
 	}
-	return []*neutrino.ServerPeer{peer}
+	return []SPVPeer{peer}
 }
 
 func (c *tNeutrinoClient) GetBlockHeight(hash *chainhash.Hash) (int32, error) {

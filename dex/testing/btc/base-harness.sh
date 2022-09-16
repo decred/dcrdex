@@ -200,6 +200,7 @@ cat > "${HARNESS_DIR}/quit" <<EOF
 #!/usr/bin/env bash
 tmux send-keys -t $SESSION:0 C-c
 tmux send-keys -t $SESSION:1 C-c
+tmux send-keys -t $SESSION:3 C-c
 tmux wait-for alpha${SYMBOL}
 tmux wait-for beta${SYMBOL}
 # seppuku
@@ -366,6 +367,67 @@ if [ ! "$CHAIN_LOADED" ]; then
   echo "**********************************************************************"
 fi
 
-# Reenable history and attach to the control session.
+# Reenable history
 tmux send-keys -t $SESSION:2 "set -o history" C-m
+
+if [ ! -z "$GODAEMON" ]; then
+  $GODAEMON --version &> /dev/null
+  DAEMON_INSTALLED=$?
+
+  if [ $DAEMON_INSTALLED -eq 0 ]; then
+    echo "Go node found. Starting"
+
+    tmux new-window -t $SESSION:3 -n "go-node" $SHELL
+    tmux send-keys -t $SESSION:3 "set +o history" C-m
+
+    $GOCLIENT --version &> /dev/null
+    CLIENT_INSTALLED=$?
+    if [ $DAEMON_INSTALLED -eq 0 ]; then
+      echo "${GOCLIENT} installed"
+
+      OMEGA_DIR="${NODES_ROOT}/gonode"
+      mkdir -p "${OMEGA_DIR}"
+
+      NODE_CONF="${OMEGA_DIR}/gonode.conf"
+      CLIENT_CONF="${OMEGA_DIR}/goctl.conf"
+      OMEGA_RPC_PORT=21558
+
+cat > "${NODE_CONF}" <<EOF
+addpeer=127.0.0.1:${ALPHA_LISTEN_PORT}
+listen=:21577
+rpcuser=user
+rpcpass=pass
+rpclisten=0.0.0.0:${OMEGA_RPC_PORT}
+regtest=1
+rpccert=${OMEGA_DIR}/rpc.cert
+rpckey=${OMEGA_DIR}/rpc.key
+debuglevel=trace
+EOF
+
+cat > "${CLIENT_CONF}" <<EOF
+rpcuser=user
+rpcpass=pass
+simnet=1
+rpccert=${OMEGA_DIR}/rpc.cert
+rpcserver=127.0.0.1:${OMEGA_RPC_PORT}
+EOF
+
+cat > "${HARNESS_DIR}/omega" <<EOF
+#!/usr/bin/env bash
+${GOCLIENT} --configfile=${CLIENT_CONF} "\$@"
+EOF
+chmod +x "${HARNESS_DIR}/omega"
+
+      tmux send-keys -t $SESSION:3 "${GODAEMON} --datadir ${OMEGA_DIR} \
+      --configfile ${NODE_CONF}" C-m
+
+    else
+      echo "Go CLI client not found"
+    fi
+  else
+    echo "Go node not found"
+  fi
+fi
+
+tmux select-window -t $SESSION:2
 tmux attach-session -t $SESSION

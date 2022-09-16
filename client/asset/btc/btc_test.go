@@ -656,17 +656,16 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWalletFullNode, *testD
 			neutrinoClient := &tNeutrinoClient{data}
 			spvw := &spvWallet{
 				chainParams: &chaincfg.MainNetParams,
+				cfg:         &WalletConfig{},
 				wallet:      &tBtcWallet{data},
 				cl:          neutrinoClient,
 				tipChan:     make(chan *block, 1),
-				chainClient: nil,
 				acctNum:     0,
 				txBlocks:    data.dbBlockForTx,
 				checkpoints: data.checkpoints,
 				log:         cfg.Logger.SubLogger("SPV"),
-				loader:      nil,
+				decodeAddr:  btcutil.DecodeAddress,
 			}
-			spvw.birthdayV.Store(time.Time{})
 			w.node = spvw
 			wallet = &ExchangeWalletFullNode{
 				intermediaryWallet: &intermediaryWallet{
