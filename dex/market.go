@@ -12,7 +12,7 @@ import (
 const (
 	// defaultEpochDuration is the spec defined default markets epoch duration
 	// in milliseconds.
-	defaultEpochDuration uint64 = 60000
+	defaultEpochDuration uint64 = 20000
 )
 
 // MarketInfo specifies a market that the Archiver must support.
@@ -61,7 +61,7 @@ func NewMarketInfo(base, quote uint32, lotSize, rateStep, epochDuration uint64, 
 	}
 
 	// Check for sensible epoch duration.
-	if epochDuration <= 0 {
+	if epochDuration == 0 {
 		epochDuration = defaultEpochDuration
 	}
 
@@ -95,7 +95,7 @@ func NewMarketInfoFromSymbols(base, quote string, lotSize, rateStep, epochDurati
 	}
 
 	// Check for sensible epoch duration.
-	if epochDuration <= 0 {
+	if epochDuration == 0 {
 		epochDuration = defaultEpochDuration
 	}
 
