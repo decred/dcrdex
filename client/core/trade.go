@@ -218,7 +218,7 @@ type trackedTrade struct {
 	wallets            *walletSet
 	preImg             order.Preimage
 	csum               dex.Bytes // the commitment checksum provided in the preimage request
-	mktID              string
+	mktID              string    // convenience for marketName(t.Base(), t.Quote())
 	coins              map[string]asset.Coin
 	coinsLocked        bool
 	lockTimeTaker      time.Duration
@@ -273,6 +273,12 @@ func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnec
 		refundReserves:     refundReserves,
 	}
 	return t
+}
+
+func (t *trackedTrade) status() order.OrderStatus {
+	t.mtx.RLock()
+	defer t.mtx.RUnlock()
+	return t.metaData.Status
 }
 
 // cacheRedemptionFeeSuggestion sets the redeemFeeSuggestion for the
@@ -1022,6 +1028,17 @@ func (t *trackedTrade) deleteCancelOrder() {
 	t.metaData.LinkedOrder = order.OrderID{} // NOTE: caller may wish to update the trades's DB entry
 }
 
+func (t *trackedTrade) hasStaleCancelOrder() bool {
+	if t.cancel == nil || t.metaData.Status != order.OrderStatusBooked {
+		return false
+	}
+
+	epoch := order.EpochID{Idx: t.cancelEpochIdx(), Dur: t.epochLen}
+	epochEnd := epoch.End()
+
+	return time.Since(epochEnd) >= preimageReqTimeout
+}
+
 // deleteStaleCancelOrder checks if this trade has an associated cancel order,
 // and deletes the cancel order if the cancel order stays at Epoch status for
 // more than 2 epochs. Deleting the stale cancel order from this trade makes
@@ -1037,19 +1054,12 @@ func (t *trackedTrade) deleteCancelOrder() {
 //
 // This method MUST be called with the trackedTrade mutex lock held for writes.
 func (t *trackedTrade) deleteStaleCancelOrder() {
-	if t.cancel == nil || t.metaData.Status != order.OrderStatusBooked {
+	if !t.hasStaleCancelOrder() {
 		return
 	}
 
-	stamp := t.cancel.ServerTime
-	epoch := order.EpochID{Idx: uint64(stamp.UnixMilli()) / t.epochLen, Dur: t.epochLen}
-	epochEnd := epoch.End()
-	if time.Since(epochEnd).Milliseconds() < int64(2*t.epochLen) {
-		return // not stuck, yet
-	}
-
-	t.dc.log.Infof("Cancel order %v in epoch status with server time stamp %v, epoch end %v (%v ago) considered executed and unmatched.",
-		t.cancel.ID(), t.cancel.ServerTime, epochEnd, time.Since(epochEnd))
+	t.dc.log.Infof("Cancel order %v in epoch status with server time stamp %v (%v old) considered executed and unmatched.",
+		t.cancel.ID(), t.cancel.ServerTime, time.Since(t.cancel.ServerTime))
 
 	// Clear the trackedCancel, allowing this order to be canceled again, and
 	// set the cancel order's status as revoked.
@@ -1588,6 +1598,9 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 			break
 		}
 	}
+
+	rmCancel := t.hasStaleCancelOrder()
+
 	// End checks under read-only lock.
 	t.mtx.RUnlock()
 
@@ -1612,7 +1625,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		assets.count(t.fromAssetID) // update ContractLocked balance
 	}
 
-	if len(swaps) == 0 && len(refunds) == 0 && len(redeems) == 0 &&
+	if !rmCancel && len(swaps) == 0 && len(refunds) == 0 && len(redeems) == 0 &&
 		len(revokes) == 0 && len(searches) == 0 {
 		return assets, nil // nothing to do, don't acquire the write-lock
 	}
@@ -1626,6 +1639,10 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	errs := newErrorSet(t.dc.acct.host + " tick: ")
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
+
+	if rmCancel {
+		t.deleteStaleCancelOrder()
+	}
 
 	for _, match := range revokes {
 		match.MetaData.Proof.SelfRevoked = true

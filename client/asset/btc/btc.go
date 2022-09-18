@@ -2013,7 +2013,7 @@ func fund(utxos []*compositeUTXO, enough func(uint64, uint64) bool) (
 	if !tryUTXOs(1) {
 		if !tryUTXOs(0) {
 			return 0, 0, nil, nil, nil, nil, fmt.Errorf("not enough to cover requested funds. "+
-				"%s BTC available in %d UTXOs", amount(sum), len(coins))
+				"%s available in %d UTXOs", amount(sum), len(coins))
 		}
 	}
 
