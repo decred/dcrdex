@@ -1475,7 +1475,7 @@ export default class MarketsPage extends BasePage {
         const received = order.sell ? order.qty * gap : order.qty / gap
         page.vmToTotal.textContent = Doc.formatCoinValue(received, toAsset.unitInfo)
         page.vmToAsset.textContent = toAsset.symbol.toUpperCase()
-        // Format recieved value to fiat equivalent.
+        // Format received value to fiat equivalent.
         this.showFiatValue(toAsset.id, received, page.vmTotalFiat)
       } else {
         Doc.hide(page.vMarketEstimate)

@@ -1240,7 +1240,7 @@ export class AccelerateOrderForm {
     Doc.show(page.earlyAccelerationDiv)
   }
 
-  // sendAccelerateRequest makes an accelerateorder request to the client
+  // sendAccelerateRequest makes an accelerate order request to the client
   // backend.
   async sendAccelerateRequest () {
     const order = this.order
@@ -1306,8 +1306,8 @@ export class AccelerateOrderForm {
     this.updateAccelerationEstimate()
   }
 
-  // updateAccelerationEstimate makes an accelerateestimate request to the
-  // client backend using the curretly selected rate on the slider, and
+  // updateAccelerationEstimate makes an accelerate estimate request to the
+  // client backend using the currently selected rate on the slider, and
   // displays the results.
   async updateAccelerationEstimate () {
     const page = this.page
@@ -1601,7 +1601,7 @@ function isTruthyString (s: string) {
   return s === '1' || s.toLowerCase() === 'true'
 }
 
-// toUnixDate converts a javscript date object to a unix date, which is
+// toUnixDate converts a javascript date object to a unix date, which is
 // the number of *seconds* since the start of the epoch.
 function toUnixDate (date: Date) {
   return Math.floor(date.getTime() / 1000)

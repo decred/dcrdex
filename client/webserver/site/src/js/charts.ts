@@ -218,7 +218,7 @@ class Chart {
 
   /*
    * resize updates the chart size. The parentHeight is an argument to support
-   * updating the height programatically after the caller sets a style.height
+   * updating the height programmatically after the caller sets a style.height
    * but before the clientHeight has been updated.
    */
   resize (parentHeight: number) {

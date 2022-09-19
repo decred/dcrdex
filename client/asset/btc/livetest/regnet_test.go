@@ -99,7 +99,7 @@ func TestWallet(t *testing.T) {
 		}
 
 		// TODO: Randomize the address scope passed to
-		// btcwallet.Wallet.{NewAddres, NewChangeAddress} between
+		// btcwallet.Wallet.{NewAddress, NewChangeAddress} between
 		// waddrmgr.KeyScopeBIP0084 and waddrmgr.KeyScopeBIP0044 so that we
 		// know we can handle non-segwit previous outpoints too.
 		if err := loadAddress(addr); err != nil {

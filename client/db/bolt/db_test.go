@@ -1371,7 +1371,7 @@ func TestDeleteInactiveMatches(t *testing.T) {
 	}
 	numLeft := numNewer + numActiveOrdWithMtch
 	if numArchivedMatches != numLeft {
-		t.Fatalf("expected %d acrchived matches left after deletion but got %d", numLeft, numArchivedMatches)
+		t.Fatalf("expected %d archived matches left after deletion but got %d", numLeft, numArchivedMatches)
 	}
 }
 
@@ -1519,7 +1519,7 @@ func TestDeleteInactiveOrders(t *testing.T) {
 		t.Fatalf("error getting active orders: %v", err)
 	}
 	if len(activeOrders) != numActive {
-		t.Fatalf("expected %d active orcers, got %d", numActive, len(activeOrders))
+		t.Fatalf("expected %d active orders, got %d", numActive, len(activeOrders))
 	}
 
 	// Matches occurring after stamp or part of an active match should be
@@ -1537,7 +1537,7 @@ func TestDeleteInactiveOrders(t *testing.T) {
 	}
 	numUntouched := numNewer + numActiveMtchWithOrd
 	if numArchivedOrders != numUntouched {
-		t.Fatalf("expected %d acrchived orders left after deletion but got %d", numUntouched, numArchivedOrders)
+		t.Fatalf("expected %d archived orders left after deletion but got %d", numUntouched, numArchivedOrders)
 	}
 }
 

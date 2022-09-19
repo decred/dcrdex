@@ -120,7 +120,7 @@ type Notification interface {
 	// Type is a string ID unique to the concrete type.
 	Type() string
 	// Topic is a string ID unique to the message subject. Since subjects must
-	// be translated, we cannot rely on the subject to programatically identify
+	// be translated, we cannot rely on the subject to programmatically identify
 	// the message.
 	Topic() Topic
 	// Subject is a short description of the notification contents. When displayed

@@ -1999,7 +1999,7 @@ func orderSide(tx *bbolt.Tx, oid order.OrderID) (sell bool, err error) {
 }
 
 // DeleteInactiveMatches deletes matches that are no longer needed for normal
-// operations. Optionally accepts a time to delete matchess with a later time
+// operations. Optionally accepts a time to delete matches with a later time
 // stamp. Accepts an optional function to perform on deleted matches.
 func (db *BoltDB) DeleteInactiveMatches(ctx context.Context, olderThan *time.Time,
 	perMatchFn func(mtch *dexdb.MetaMatch, isSell bool) error) error {

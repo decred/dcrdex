@@ -535,11 +535,6 @@ type Exchange struct {
 	CandleDurs       []string               `json:"candleDurs"`
 }
 
-// newDisplayID creates a display-friendly market ID for a base/quote ID pair.
-func newDisplayID(base, quote uint32) string {
-	return newDisplayIDFromSymbols(unbip(base), unbip(quote))
-}
-
 // newDisplayIDFromSymbols creates a display-friendly market ID for a base/quote
 // symbol pair.
 func newDisplayIDFromSymbols(base, quote string) string {
@@ -794,7 +789,7 @@ func (a *dexAccount) feePending() bool {
 	return !a.isPaid && len(a.feeCoin) > 0
 }
 
-// feePaid returns true if the account regisration fee has been accepted by the
+// feePaid returns true if the account registration fee has been accepted by the
 // DEX.
 func (a *dexAccount) feePaid() bool {
 	a.authMtx.RLock()
