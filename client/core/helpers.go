@@ -311,9 +311,9 @@ func (ord *OrderReader) SwapFeesString() string {
 // RedemptionFeesString is a formatted string of the paid redemption fees.
 func (ord *OrderReader) RedemptionFeesString() string {
 	if ord.Sell {
-		return formatQty(ord.FeesPaid.Swap, ord.QuoteUnitInfo)
+		return formatQty(ord.FeesPaid.Redemption, ord.QuoteUnitInfo)
 	}
-	return formatQty(ord.FeesPaid.Swap, ord.BaseUnitInfo)
+	return formatQty(ord.FeesPaid.Redemption, ord.BaseUnitInfo)
 }
 
 // BaseAssetFees is a formatted string of the fees paid in the base asset.
