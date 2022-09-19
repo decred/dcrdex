@@ -618,6 +618,7 @@ export default class MarketsPage extends BasePage {
    * on the dex data.
    */
   setRegistrationStatusVisibility () {
+    if (!this.market || !this.market.dex) return
     const { page, market: { dex } } = this
 
     // If dex is not connected to server, is not possible to know fee
@@ -1701,7 +1702,7 @@ export default class MarketsPage extends BasePage {
 
   handlePriceUpdate (note: SpotPriceNote) {
     const xcSection = this.marketList.xcSection(note.host)
-    if (!xcSection) return
+    if (!xcSection || !xcSection.marketRows) return
     for (const spot of Object.values(note.spots)) {
       const marketRow = xcSection.marketRow(spot.baseID, spot.quoteID)
       if (marketRow) marketRow.setSpot(spot)
@@ -1776,6 +1777,7 @@ export default class MarketsPage extends BasePage {
   }
 
   setBalanceVisibility () {
+    if (!this.market || !this.market.dex) return
     if (this.market.dex.connectionStatus === ConnectionStatus.Connected) {
       Doc.show(this.page.balanceTable)
     } else {
@@ -1786,6 +1788,7 @@ export default class MarketsPage extends BasePage {
   /* handleBalanceNote handles notifications updating a wallet's balance. */
   handleBalanceNote (note: BalanceNote) {
     this.setBalanceVisibility()
+    if (!this.market || !this.market.dex) return
     // if connection to dex server fails, it is not possible to retrieve
     // markets.
     if (this.market.dex.connectionStatus !== ConnectionStatus.Connected) return
