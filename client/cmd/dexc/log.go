@@ -28,7 +28,7 @@ func (w logWriter) Write(p []byte) (n int, err error) {
 	return logRotator.Write(p)
 }
 
-// initLogging initializes the logging rotater to write logs to logFile and
+// initLogging initializes the logging rotator to write logs to logFile and
 // create roll files in the same directory. initLogging must be called before
 // the package-global log rotator variables are used.
 func initLogging(lvl string, utc bool) *dex.LoggerMaker {

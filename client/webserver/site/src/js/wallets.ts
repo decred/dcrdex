@@ -356,8 +356,8 @@ export default class WalletsPage extends BasePage {
       return
     }
 
-    let successMsg = intl.prep(intl.ID_WALET_DISABLED_MSG, fmtParams)
-    if (!disable) successMsg = intl.prep(intl.ID_WALET_ENABLED_MSG, fmtParams)
+    let successMsg = intl.prep(intl.ID_WALLET_DISABLED_MSG, fmtParams)
+    if (!disable) successMsg = intl.prep(intl.ID_WALLET_ENABLED_MSG, fmtParams)
     this.assetUpdated(this.selectedAssetID, page.toggleWalletStatusConfirm, successMsg)
   }
 

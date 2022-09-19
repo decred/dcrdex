@@ -58,8 +58,8 @@ export const ID_NEW_WALLET_SUCCESS = 'NEW_WALLET_SUCCESS'
 export const ID_WALLET_UNLOCKED = 'WALLET_UNLOCKED'
 export const ID_SELLING = 'ID_SELLING'
 export const ID_BUYING = 'ID_BUYING'
-export const ID_WALET_DISABLED_MSG = 'WALLET_DISABLED'
-export const ID_WALET_ENABLED_MSG = 'WALLET_ENABLED'
+export const ID_WALLET_DISABLED_MSG = 'WALLET_DISABLED'
+export const ID_WALLET_ENABLED_MSG = 'WALLET_ENABLED'
 export const ID_ACTIVE_ORDERS_ERR_MSG = 'ACTIVE_ORDERS_ERR_MSG'
 
 export const enUS: Locale = {
@@ -120,8 +120,8 @@ export const enUS: Locale = {
   [ID_WALLET_UNLOCKED]: 'Wallet Unlocked',
   [ID_SELLING]: 'Selling',
   [ID_BUYING]: 'Buying',
-  [ID_WALET_ENABLED_MSG]: '{{ assetName }} Wallet Enabled',
-  [ID_WALET_DISABLED_MSG]: '{{ assetName }} Wallet Disabled',
+  [ID_WALLET_ENABLED_MSG]: '{{ assetName }} Wallet Enabled',
+  [ID_WALLET_DISABLED_MSG]: '{{ assetName }} Wallet Disabled',
   [ID_DISABLED_MSG]: 'wallet is disabled',
   [ID_ACTIVE_ORDERS_ERR_MSG]: '{{ assetName }} wallet is actively managing orders'
 }

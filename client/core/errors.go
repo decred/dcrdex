@@ -8,8 +8,7 @@ import (
 	"fmt"
 )
 
-// errors used on client/webserver/site/js/constants.js
-// need to be careful for not going out of sync.
+// Error codes here are used on the frontend.
 const (
 	walletErr = iota
 	walletAuthErr

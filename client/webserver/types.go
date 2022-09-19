@@ -80,7 +80,7 @@ type openWalletForm struct {
 	Pass    encode.PassBytes `json:"pass"` // Application password.
 }
 
-// walletStatusForm is information neccessary to change a wallet's status.
+// walletStatusForm is information necessary to change a wallet's status.
 type walletStatusForm struct {
 	AssetID uint32 `json:"assetID"`
 	Disable bool   `json:"disable"`

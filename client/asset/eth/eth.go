@@ -530,10 +530,10 @@ func getWalletDir(dataDir string, network dex.Network) string {
 	return filepath.Join(dataDir, network.String())
 }
 
-func (eth *ETHWallet) shutdown() {
-	eth.node.shutdown()
-	if err := eth.monitoredTxDB.Close(); err != nil {
-		eth.log.Errorf("error closing tx db: %v", err)
+func (w *ETHWallet) shutdown() {
+	w.node.shutdown()
+	if err := w.monitoredTxDB.Close(); err != nil {
+		w.log.Errorf("error closing tx db: %v", err)
 	}
 }
 

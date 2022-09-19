@@ -20,7 +20,7 @@ import (
 // runWithTimeout runs the provided function, returning either the error from
 // the function or errTimeout if the function fails to return within the
 // timeout. This function is for wallet methods that may not have a context or
-// timeout of their own, or we simply cannot rely on thirdparty packages to
+// timeout of their own, or we simply cannot rely on third party packages to
 // respect context cancellation or deadlines.
 func runWithTimeout(f func() error, timeout time.Duration) error {
 	errChan := make(chan error, 1)
