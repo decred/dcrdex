@@ -198,6 +198,12 @@ func (dc *dexConnection) marketConfig(mktID string) *msgjson.Market {
 	return dc.findMarketConfig(mktID)
 }
 
+func (dc *dexConnection) assetConfig(assetID uint32) *dex.Asset {
+	dc.assetsMtx.RLock()
+	defer dc.assetsMtx.RUnlock()
+	return dc.assets[assetID]
+}
+
 // marketMap creates a map of this DEX's *Market keyed by name/ID,
 // [base]_[quote].
 func (dc *dexConnection) marketMap() map[string]*Market {
@@ -477,6 +483,11 @@ func (c *Core) tryCancelTrade(dc *dexConnection, tracker *trackedTrade) error {
 		return fmt.Errorf("cannot cancel %s order %s that is not a standing limit order", tracker.Type(), oid)
 	}
 
+	mktConf := dc.marketConfig(tracker.mktID)
+	if mktConf == nil {
+		return newError(marketErr, "unknown market %q", tracker.mktID)
+	}
+
 	tracker.mtx.Lock()
 	defer tracker.mtx.Unlock()
 
@@ -538,7 +549,7 @@ func (c *Core) tryCancelTrade(dc *dexConnection, tracker *trackedTrade) error {
 	}
 
 	// Store the cancel order with the tracker.
-	err = tracker.cancelTrade(co, preImg)
+	err = tracker.cancelTrade(co, preImg, mktConf.EpochLen)
 	if err != nil {
 		return fmt.Errorf("error storing cancel order info %s: %w", co.ID(), err)
 	}
@@ -555,6 +566,7 @@ func (c *Core) tryCancelTrade(dc *dexConnection, tracker *trackedTrade) error {
 				DEXSig:   result.Sig,
 				Preimage: preImg[:],
 			},
+			EpochDur:    mktConf.EpochLen, // epochIndex := result.ServerTime / mktConf.EpochLen
 			LinkedOrder: oid,
 		},
 		Order: co,
@@ -1118,7 +1130,6 @@ func (dc *dexConnection) setEpoch(mktID string, epochIdx uint64) bool {
 func (dc *dexConnection) marketEpochDuration(mktID string) uint64 {
 	mkt := dc.marketConfig(mktID)
 	if mkt == nil {
-		dc.log.Errorf("marketEpoch called for unknown market %s", mktID)
 		return 0
 	}
 	return mkt.EpochLen
@@ -4157,10 +4168,14 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 		c.log.Infof("Connected to %d of %d wallets.", connectCount, walletCount)
 	}
 
-	loaded := c.resolveActiveTrades(crypter)
-	if loaded > 0 {
-		c.log.Infof("loaded %d incomplete orders", loaded)
-	}
+	// Load trades from the DB, unlock required wallets for active orders, and
+	// populate the dc.trades map. NOTE: repeated login may involve redundant DB
+	// load of trades already in the dc.trades map, but new required wallets
+	// may be accessible this time.
+	c.resolveActiveTrades(crypter)
+	// Unlock account keys and attempt to authorize with each dexConnection.
+	// Even if connect fails, this prepares the account private keys so authDEX
+	// triggered by the reconnect handler can succeed.
 
 	if err := c.loadBotPrograms(); err != nil {
 		c.log.Errorf("Error loading bot programs: %v", err)
@@ -4547,6 +4562,16 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 			continue
 		}
 
+		// If the connection is down, authDEX will fail on Send.
+		if dc.IsDown() {
+			c.log.Warnf("Connection to %v not available for authorization. "+
+				"It will automatically authorize when it connects.", dc.acct.host)
+			subject, details := c.formatDetails(TopicDEXDisconnected, dc.acct.host)
+			c.notify(newConnEventNote(TopicDEXDisconnected, subject, dc.acct.host, comms.Disconnected, details, db.ErrorLevel))
+			result.AuthErr = details
+			continue
+		}
+
 		wg.Add(1)
 		go func(dc *dexConnection) {
 			defer wg.Done()
@@ -4568,7 +4593,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 // orders and orders with active matches are loaded. Also, only active matches
 // are loaded, even if there are inactive matches for the same order, but it may
 // be desirable to load all matches, so this behavior may change.
-func (c *Core) resolveActiveTrades(crypter encrypt.Crypter) (loaded int) {
+func (c *Core) resolveActiveTrades(crypter encrypt.Crypter) {
 	failed := make(map[uint32]struct{})
 	relocks := make(assetMap)
 	for _, dc := range c.dexConnections() {
@@ -4583,10 +4608,9 @@ func (c *Core) resolveActiveTrades(crypter encrypt.Crypter) (loaded int) {
 			locks := c.resumeTrades(dc, ready) // fills out dc.trades
 			relocks.merge(locks)
 		}
-		loaded += len(ready)
+		c.log.Infof("Loaded %d incomplete orders with DEX %v", len(ready), dc.acct.host)
 	}
 	c.updateBalances(relocks)
-	return loaded
 }
 
 func (c *Core) wait(coinID []byte, assetID uint32, trigger func() (bool, error), action func(error)) {
@@ -4678,6 +4702,9 @@ func (c *Core) feeSuggestionAny(assetID uint32, preferredConns ...*dexConnection
 		dc.cfgMtx.RLock()
 		cfg := dc.cfg
 		dc.cfgMtx.RUnlock()
+		if cfg == nil {
+			return false
+		}
 		for _, mkt := range cfg.Markets {
 			if mkt.Base == assetID || mkt.Quote == assetID && mkt.Running() {
 				return true
@@ -4822,9 +4849,12 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 		return nil, newError(marketErr, "unknown market %q", mktID)
 	}
 
-	wallets, err := c.walletSet(dc, form.Base, form.Quote, form.Sell)
+	wallets, haveAssetConfigs, err := c.walletSet(dc, form.Base, form.Quote, form.Sell)
 	if err != nil {
 		return nil, err
+	}
+	if !haveAssetConfigs { // this is unexpected given we have mktConf, but check
+		return nil, fmt.Errorf("missing asset configurations for %v", form.Host)
 	}
 
 	// So here's the thing. Our assets thus far don't require the wallet to be
@@ -4991,9 +5021,12 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		return nil, nil, newError(orderParamsErr, "zero-rate order not allowed")
 	}
 
-	wallets, err := c.walletSet(dc, form.Base, form.Quote, form.Sell)
+	wallets, haveAssetConfigs, err := c.walletSet(dc, form.Base, form.Quote, form.Sell)
 	if err != nil {
 		return nil, nil, err
+	}
+	if !haveAssetConfigs { // this is unexpected given we have mktConf, but check
+		return nil, nil, fmt.Errorf("missing asset configurations for %v", dc.acct.host)
 	}
 	fromWallet, toWallet := wallets.fromWallet, wallets.toWallet
 
@@ -5262,21 +5295,28 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		return nil, nil, fmt.Errorf("validateOrderResponse error: %w", err)
 	}
 
+	// TODO: Need xcWallet fields for acceptable SwapConf values: a min
+	// acceptable for security, and even a max confs override to act sooner.
+
 	// Store the order.
 	dbOrder := &db.MetaOrder{
 		MetaData: &db.OrderMetaData{
-			Status:           order.OrderStatusEpoch,
-			Host:             dc.acct.host,
-			MaxFeeRate:       wallets.fromAsset.MaxFeeRate,
-			RedeemMaxFeeRate: wallets.toAsset.MaxFeeRate,
+			Status: order.OrderStatusEpoch,
+			Host:   dc.acct.host,
 			Proof: db.OrderProof{
 				DEXSig:   result.Sig,
 				Preimage: preImg[:],
 			},
+			EpochDur:           mktConf.EpochLen, // epochIndex := result.ServerTime / mktConf.EpochLen
+			FromSwapConf:       wallets.fromAsset.SwapConf,
+			ToSwapConf:         wallets.toAsset.SwapConf,
+			MaxFeeRate:         wallets.fromAsset.MaxFeeRate,
+			RedeemMaxFeeRate:   wallets.toAsset.MaxFeeRate,
 			FromVersion:        wallets.fromAsset.Version,
 			ToVersion:          wallets.toAsset.Version,
 			Options:            form.Options,
 			RedemptionReserves: redemptionReserves,
+			RefundReserves:     refundReserves,
 			ChangeCoin:         changeID,
 			ProgramID:          form.Program,
 		},
@@ -5289,8 +5329,8 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	}
 
 	// Prepare and store the tracker and get the core.Order to return.
-	tracker := newTrackedTrade(dbOrder, preImg, dc, dc.marketEpochDuration(mktID), c.lockTimeTaker, c.lockTimeMaker,
-		c.db, c.latencyQ, wallets, coins, c.notify, c.formatDetails, form.Options, redemptionReserves, refundReserves)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, c.lockTimeTaker, c.lockTimeMaker,
+		c.db, c.latencyQ, wallets, coins, c.notify, c.formatDetails)
 
 	tracker.redemptionLocked = tracker.redemptionReserves
 	tracker.refundLocked = tracker.refundReserves
@@ -5367,35 +5407,46 @@ func (w *walletSet) trimmedConventionalRateString(r uint64) string {
 }
 
 // walletSet constructs a walletSet.
-func (c *Core) walletSet(dc *dexConnection, baseID, quoteID uint32, sell bool) (*walletSet, error) {
-	dc.assetsMtx.RLock()
-	baseAsset, baseFound := dc.assets[baseID]
-	quoteAsset, quoteFound := dc.assets[quoteID]
-	dc.assetsMtx.RUnlock()
-	if !baseFound {
-		return nil, fmt.Errorf("unknown base asset %d -> %s for %s", baseID, unbip(baseID), dc.acct.host)
-	}
-	if !quoteFound {
-		return nil, fmt.Errorf("unknown quote asset %d -> %s for %s", quoteID, unbip(quoteID), dc.acct.host)
-	}
-
+func (c *Core) walletSet(dc *dexConnection, baseID, quoteID uint32, sell bool) (*walletSet, bool, error) {
 	// Connect and open the wallets if needed.
 	baseWallet, found := c.wallet(baseID)
 	if !found {
-		return nil, newError(missingWalletErr, "no wallet found for %s", unbip(baseID))
+		return nil, false, newError(missingWalletErr, "no wallet found for %s", unbip(baseID))
 	}
 	quoteWallet, found := c.wallet(quoteID)
 	if !found {
-		return nil, newError(missingWalletErr, "no wallet found for %s", unbip(quoteID))
+		return nil, false, newError(missingWalletErr, "no wallet found for %s", unbip(quoteID))
 	}
 
-	if ver := baseWallet.Info().Version; baseAsset.Version != ver {
-		return nil, newError(walletErr, "wallet asset %d version %d does not match server asset version %d",
+	dc.assetsMtx.RLock()
+	baseAsset := dc.assets[baseID]
+	quoteAsset := dc.assets[quoteID]
+	dc.assetsMtx.RUnlock()
+	haveAssetConfigs := baseAsset != nil && quoteAsset != nil
+	if baseAsset == nil {
+		baseAsset = &dex.Asset{
+			ID:       baseWallet.AssetID,
+			Symbol:   unbip(baseWallet.AssetID),
+			Version:  baseWallet.Info().Version,
+			UnitInfo: baseWallet.Info().UnitInfo,
+		}
+		c.log.Warnf("Base asset server configuration not available for %s (asset %s).",
+			dc.acct.host, unbip(baseID))
+	} else if ver := baseWallet.Info().Version; baseAsset.Version != ver {
+		return nil, false, newError(walletErr, "wallet asset %d version %d does not match server asset version %d",
 			baseID, ver, baseAsset.Version)
 	}
-
-	if ver := quoteWallet.Info().Version; quoteAsset.Version != ver {
-		return nil, newError(walletErr, "wallet asset %d version %d does not match server asset version %d",
+	if quoteAsset == nil {
+		quoteAsset = &dex.Asset{
+			ID:       quoteWallet.AssetID,
+			Symbol:   unbip(quoteWallet.AssetID),
+			Version:  quoteWallet.Info().Version,
+			UnitInfo: quoteWallet.Info().UnitInfo,
+		}
+		c.log.Warnf("Quote asset server configuration not available for %s (asset %s).",
+			dc.acct.host, unbip(quoteID))
+	} else if ver := quoteWallet.Info().Version; quoteAsset.Version != ver {
+		return nil, false, newError(walletErr, "wallet asset %d version %d does not match server asset version %d",
 			quoteID, ver, quoteAsset.Version)
 	}
 
@@ -5417,7 +5468,7 @@ func (c *Core) walletSet(dc *dexConnection, baseID, quoteID uint32, sell bool) (
 		toAsset:     toAsset,
 		baseWallet:  baseWallet,
 		quoteWallet: quoteWallet,
-	}, nil
+	}, haveAssetConfigs, nil
 }
 
 func (c *Core) Cancel(pw []byte, oidB dex.Bytes) error {
@@ -5644,6 +5695,13 @@ func (c *Core) AssetBalance(assetID uint32) (*WalletBalance, error) {
 	return c.updateWalletBalance(wallet)
 }
 
+func pluralize(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
 // initialize pulls the known DEXes from the database and attempts to connect
 // and retrieve the DEX configuration.
 func (c *Core) initialize() {
@@ -5665,6 +5723,7 @@ func (c *Core) initialize() {
 		}(acct)
 	}
 
+	// Load wallet configurations. Actual connections are established on Login.
 	dbWallets, err := c.db.Wallets()
 	if err != nil {
 		c.log.Errorf("error loading wallets from database: %v", err)
@@ -5681,30 +5740,21 @@ func (c *Core) initialize() {
 		c.log.Infof("Loaded %s wallet configuration.", unbip(assetID))
 		c.updateWallet(assetID, wallet)
 	}
-	c.walletMtx.RLock()
-	numWallets := len(c.wallets)
-	c.walletMtx.RUnlock()
-
-	if len(dbWallets) > 0 {
-		c.log.Infof("successfully loaded %d of %d wallets", numWallets, len(dbWallets))
-	}
 
 	// Wait for DEXes to be connected to ensure DEXes are ready for
 	// authentication when Login is triggered. NOTE/TODO: Login could just as
 	// easily make the connection, but arguably configured DEXs should be
 	// available for unauthenticated operations such as watching market feeds.
 	wg.Wait()
-	c.log.Infof("Successfully connected to %d out of %d DEX servers", liveConns, len(accts))
-	pluralize := func(n int) string {
-		if n == 1 {
-			return ""
-		}
-		return "s"
-	}
-	for _, dc := range c.dexConnections() {
-		activeOrders, _ := c.dbOrders(dc) // non-nil error will load 0 orders, and any subsequent db error will cause a shutdown on dex auth or sooner
+	c.log.Infof("Connected to %d of %d DEX servers", liveConns, len(accts))
+
+	// Check DB for active orders on any DEX.
+	for _, acct := range accts {
+		host, _ := addrHost(acct.Host)
+		activeOrders, _ := c.dbOrders(host) // non-nil error will load 0 orders, and any subsequent db error will cause a shutdown on dex auth or sooner
 		if n := len(activeOrders); n > 0 {
-			c.log.Warnf("\n\n\t ****  IMPORTANT: You have %d active order%s on %s. LOGIN immediately!  **** \n", n, pluralize(n), dc.acct.host)
+			c.log.Warnf("\n\n\t ****  IMPORTANT: You have %d active order%s on %s. LOGIN immediately!  **** \n",
+				n, pluralize(n), host)
 		}
 	}
 }
@@ -5747,9 +5797,10 @@ func (c *Core) connectAccount(acct *db.AccountInfo) (dc *dexConnection, connecte
 
 	dc, err = c.connectDEX(acct)
 	if dc == nil {
-		c.log.Errorf("Cannot connect to DEX %s: %v", host, err)
+		c.log.Errorf("Unable to prepare DEX %s: %v", host, err)
 		return
 	}
+	// Connected or not, the dexConnection goes in the conns map now.
 	if err != nil {
 		c.log.Errorf("Trouble establishing connection to %s (will retry). Error: %v", host, err)
 	} else {
@@ -5859,11 +5910,11 @@ func (c *Core) reFee(wallet *xcWallet, dc *dexConnection) {
 	c.verifyRegistrationFee(wallet.AssetID, dc, acctInfo.FeeCoin, confs, reqConfs)
 }
 
-func (c *Core) dbOrders(dc *dexConnection) ([]*db.MetaOrder, error) {
+func (c *Core) dbOrders(host string) ([]*db.MetaOrder, error) {
 	// Prepare active orders, according to the DB.
-	dbOrders, err := c.db.ActiveDEXOrders(dc.acct.host)
+	dbOrders, err := c.db.ActiveDEXOrders(host)
 	if err != nil {
-		return nil, fmt.Errorf("database error when fetching orders for %s: %w", dc.acct.host, err)
+		return nil, fmt.Errorf("database error when fetching orders for %s: %w", host, err)
 	}
 	c.log.Infof("Loaded %d active orders.", len(dbOrders))
 
@@ -5878,9 +5929,9 @@ func (c *Core) dbOrders(dc *dexConnection) ([]*db.MetaOrder, error) {
 		return false
 	}
 
-	activeMatchOrders, err := c.db.DEXOrdersWithActiveMatches(dc.acct.host)
+	activeMatchOrders, err := c.db.DEXOrdersWithActiveMatches(host)
 	if err != nil {
-		return nil, fmt.Errorf("database error fetching active match orders for %s: %w", dc.acct.host, err)
+		return nil, fmt.Errorf("database error fetching active match orders for %s: %w", host, err)
 	}
 	c.log.Infof("Loaded %d active match orders", len(activeMatchOrders))
 	for _, oid := range activeMatchOrders {
@@ -5889,7 +5940,7 @@ func (c *Core) dbOrders(dc *dexConnection) ([]*db.MetaOrder, error) {
 		}
 		dbOrder, err := c.db.Order(oid)
 		if err != nil {
-			return nil, fmt.Errorf("database error fetching order %s for %s: %w", oid, dc.acct.host, err)
+			return nil, fmt.Errorf("database error fetching order %s for %s: %w", oid, host, err)
 		}
 		dbOrders = append(dbOrders, dbOrder)
 	}
@@ -5903,7 +5954,7 @@ func (c *Core) dbOrders(dc *dexConnection) ([]*db.MetaOrder, error) {
 // trackers. Use resumeTrades with the app Crypter to prepare wallets and coins.
 func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, error) {
 	// Prepare active orders, according to the DB.
-	dbOrders, err := c.dbOrders(dc)
+	dbOrders, err := c.dbOrders(dc.acct.host)
 	if err != nil {
 		return nil, err
 	}
@@ -5915,6 +5966,15 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		if dbOrder.Order.Type() == order.CancelOrderType {
 			unknownCancels[dbOrder.Order.ID()] = struct{}{}
 		}
+	}
+
+	// For older orders, we'll attempt to get the SwapConf from the server's
+	// asset config. Newer orders will have it stored in the DB.
+	assetSwapConf := func(assetID uint32) uint32 {
+		if asset := dc.assetConfig(assetID); asset != nil {
+			return asset.SwapConf
+		}
+		return 0 // server may be gone
 	}
 
 	trackers := make(map[order.OrderID]*trackedTrade, len(dbOrders))
@@ -5929,16 +5989,33 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		}
 
 		mktID := marketName(ord.Base(), ord.Quote())
-		if dc.marketConfig(mktID) == nil {
-			c.log.Errorf("Active %s order retrieved for unknown market %s", oid, mktID)
-			continue
+		if mktConf := dc.marketConfig(mktID); mktConf == nil {
+			c.log.Warnf("Active %s order retrieved for unknown market %s at %v (server status: %v). Loading it anyway.",
+				oid, mktID, dc.acct.host, dc.status())
+		} else {
+			if dbOrder.MetaData.EpochDur == 0 { // do our best for old orders + down dex
+				dbOrder.MetaData.EpochDur = mktConf.EpochLen
+			}
+		}
+		if dbOrder.MetaData.ToSwapConf == 0 { // upgraded with active order :/
+			if dbOrder.Order.Trade().Sell {
+				dbOrder.MetaData.ToSwapConf = assetSwapConf(ord.Quote())
+			} else {
+				dbOrder.MetaData.ToSwapConf = assetSwapConf(ord.Base())
+			}
+		}
+		if dbOrder.MetaData.FromSwapConf == 0 {
+			if dbOrder.Order.Trade().Sell {
+				dbOrder.MetaData.FromSwapConf = assetSwapConf(ord.Base())
+			} else {
+				dbOrder.MetaData.FromSwapConf = assetSwapConf(ord.Quote())
+			}
 		}
 
 		var preImg order.Preimage
 		copy(preImg[:], dbOrder.MetaData.Proof.Preimage)
-		tracker := newTrackedTrade(dbOrder, preImg, dc, dc.marketEpochDuration(mktID), c.lockTimeTaker,
-			c.lockTimeMaker, c.db, c.latencyQ, nil, nil, c.notify, c.formatDetails,
-			dbOrder.MetaData.Options, dbOrder.MetaData.RedemptionReserves, dbOrder.MetaData.RefundReserves)
+		tracker := newTrackedTrade(dbOrder, preImg, dc, c.lockTimeTaker, c.lockTimeMaker,
+			c.db, c.latencyQ, nil, nil, c.notify, c.formatDetails)
 		trackers[dbOrder.Order.ID()] = tracker
 
 		// Get matches.
@@ -5990,12 +6067,17 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 			c.log.Errorf("linked order %s is not a cancel order", cancelID)
 			continue
 		}
+		epochDur := metaCancel.MetaData.EpochDur
+		if epochDur == 0 {
+			epochDur = dbOrder.MetaData.EpochDur // could still be zero this is an old order and server down
+		}
 		var pimg order.Preimage
 		copy(pimg[:], metaCancel.MetaData.Proof.Preimage)
-		err = tracker.cancelTrade(co, pimg) // set tracker.cancel and link
-		tracker.cancel.matches.maker = makerCancel
+		err = tracker.cancelTrade(co, pimg, epochDur) // set tracker.cancel and link
 		if err != nil {
 			c.log.Errorf("Error setting cancel order info %s: %v", co.ID(), err)
+		} else {
+			tracker.cancel.matches.maker = makerCancel
 		}
 		delete(unknownCancels, cancelID) // this one is known
 		c.log.Debugf("Loaded cancel order %v for trade %v", cancelID, oid)
@@ -6092,8 +6174,7 @@ func (c *Core) loadDBTrades(dc *dexConnection, crypter encrypt.Crypter, failed m
 // loading audit info needed to finish swaps and funding coins needed to create
 // new matches on an order.
 func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMap {
-	var tracker *trackedTrade
-	notifyErr := func(topic Topic, args ...interface{}) {
+	notifyErr := func(tracker *trackedTrade, topic Topic, args ...interface{}) {
 		subject, detail := c.formatDetails(topic, args...)
 		c.notify(newOrderNote(topic, subject, detail, db.ErrorLevel, tracker.coreOrder()))
 	}
@@ -6119,25 +6200,10 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 	}
 
 	relocks := make(assetMap)
-	dc.tradeMtx.Lock()
-	defer dc.tradeMtx.Unlock()
-	for _, tracker = range trackers {
-		// Never overwrite existing trackedTrades.
-		if _, found := dc.trades[tracker.ID()]; found {
-			c.log.Tracef("Trade %v already running.", tracker.ID())
-			continue
-		}
 
-		// See if the order is 100% filled.
+	lockStuff := func(tracker *trackedTrade) {
 		trade := tracker.Trade()
-		// Make sure we have the necessary wallets.
-		wallets, err := c.walletSet(dc, tracker.Base(), tracker.Quote(), trade.Sell)
-		if err != nil {
-			notifyErr(TopicWalletMissing, tracker.token(), err)
-			continue
-		}
-
-		tracker.wallets = wallets
+		wallets := tracker.wallets
 
 		// Find the least common multiplier to use as the denom for adding
 		// reserve fractions.
@@ -6162,7 +6228,6 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 
 		// If matches haven't redeemed, but the counter-swap has been received,
 		// reload the audit info.
-		isActive := tracker.metaData.Status == order.OrderStatusBooked || tracker.metaData.Status == order.OrderStatusEpoch
 		var matchesNeedingCoins []*matchTracker
 		for _, match := range tracker.matches {
 			var needsAuditInfo bool
@@ -6200,13 +6265,13 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				// Check for unresolvable states.
 				if len(counterSwap) == 0 {
 					match.swapErr = fmt.Errorf("missing counter-swap, order %s, match %s", tracker.ID(), match)
-					notifyErr(TopicMatchErrorCoin, match.Side, tracker.token(), match.Status)
+					notifyErr(tracker, TopicMatchErrorCoin, match.Side, tracker.token(), match.Status)
 					continue
 				}
 				counterContract := match.MetaData.Proof.CounterContract
 				if len(counterContract) == 0 {
 					match.swapErr = fmt.Errorf("missing counter-contract, order %s, match %s", tracker.ID(), match)
-					notifyErr(TopicMatchErrorContract, match.Side, tracker.token(), match.Status)
+					notifyErr(tracker, TopicMatchErrorContract, match.Side, tracker.token(), match.Status)
 					continue
 				}
 				counterTxData := match.MetaData.Proof.CounterTxData
@@ -6219,9 +6284,9 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 					// This case is unlikely to happen since the original audit
 					// message handling would have passed the audit based on the
 					// tx data, but it depends on the asset backend.
-					contractStr := coinIDString(wallets.toAsset.ID, counterSwap)
-					c.log.Warnf("Auditing for counterparty contract %v (%s): %v",
-						contractStr, unbip(wallets.toAsset.ID), err)
+					toAssetID := wallets.toWallet.AssetID
+					contractStr := coinIDString(toAssetID, counterSwap)
+					c.log.Warnf("Starting search for counterparty contract %v (%s)", contractStr, unbip(toAssetID))
 					// Start the audit retry waiter. Set swapErr to block tick
 					// actions like counterSwap.Confirmations checks while it is
 					// searching since matchTracker.counterSwap is not yet set.
@@ -6243,7 +6308,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 								match, match.Status, len(match.MetaData.Proof.RefundCoin) > 0,
 								match.MetaData.Proof.IsRevoked(), err)
 							subject, detail := c.formatDetails(TopicMatchRecoveryError,
-								unbip(wallets.toAsset.ID), contractStr, tracker.token(), err)
+								unbip(toAssetID), contractStr, tracker.token(), err)
 							c.notify(newOrderNote(TopicMatchRecoveryError, subject, detail,
 								db.ErrorLevel, tracker.coreOrderInternal())) // tracker.mtx already locked
 							// The match may be revoked by server. Only refund possible now.
@@ -6252,7 +6317,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 						match.counterSwap = auditInfo
 						match.swapErr = nil // unblock tick actions
 						c.log.Infof("Successfully re-validated counterparty contract %v (%s)",
-							contractStr, unbip(wallets.toAsset.ID))
+							contractStr, unbip(toAssetID))
 					}(tracker, match)
 
 					continue // leave auditInfo nil
@@ -6272,6 +6337,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 		// Active orders and orders with matches with unsent swaps need funding
 		// coin(s). If they are not found, block new matches and swap attempts.
 		needsCoins := len(matchesNeedingCoins) > 0
+		isActive := tracker.metaData.Status == order.OrderStatusBooked || tracker.metaData.Status == order.OrderStatusEpoch
 		if isActive || needsCoins {
 			coinIDs := trade.Coins
 			if len(tracker.metaData.ChangeCoin) != 0 {
@@ -6279,7 +6345,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 			}
 			tracker.coins = map[string]asset.Coin{} // should already be
 			if len(coinIDs) == 0 {
-				notifyErr(TopicOrderCoinError, tracker.token())
+				notifyErr(tracker, TopicOrderCoinError, tracker.token())
 				markUnfunded(tracker, matchesNeedingCoins) // bug - no user resolution
 			} else {
 				byteIDs := make([]dex.Bytes, 0, len(coinIDs))
@@ -6288,7 +6354,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				}
 				coins, err := wallets.fromWallet.FundingCoins(byteIDs)
 				if err != nil || len(coins) == 0 {
-					notifyErr(TopicOrderCoinFetchError, tracker.token(), unbip(wallets.fromAsset.ID), err)
+					notifyErr(tracker, TopicOrderCoinFetchError, tracker.token(), unbip(wallets.fromWallet.AssetID), err)
 					// Block matches needing funding coins.
 					markUnfunded(tracker, matchesNeedingCoins)
 					// Note: tracker is still added to trades map for (1) status
@@ -6297,7 +6363,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 					// authDEX if the order is booked.
 					c.log.Warnf("Check the status of your %s wallet and the coins logged above! "+
 						"Resolve the wallet issue if possible and restart the DEX client.",
-						strings.ToUpper(unbip(wallets.fromAsset.ID)))
+						strings.ToUpper(unbip(wallets.fromWallet.AssetID)))
 					c.log.Warnf("Unfunded order %v will be canceled on connect, but %d active matches need funding coins!",
 						tracker.ID(), len(matchesNeedingCoins))
 					// If the funding coins are spent or inaccessible, the user
@@ -6323,10 +6389,55 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 		if isActive || needsCoins || tracker.unspentContractAmounts() > 0 {
 			relocks.count(wallets.fromAsset.ID)
 		}
-
-		dc.trades[tracker.ID()] = tracker
-		c.notify(newOrderNote(TopicOrderLoaded, "", "", db.Data, tracker.coreOrder()))
 	}
+
+	dc.tradeMtx.Lock()
+	defer dc.tradeMtx.Unlock()
+	for _, tracker := range trackers {
+		// Never overwrite existing trackedTrades.
+		oid := tracker.ID()
+		if _, found := dc.trades[oid]; found {
+			c.log.Tracef("Trade %v already running.", oid)
+			continue
+		}
+		trade := tracker.Trade()
+
+		// Make sure we have the necessary wallets.
+		walletSet, haveAssetConfigs, err := c.walletSet(dc, tracker.Base(), tracker.Quote(), trade.Sell)
+		if err != nil {
+			notifyErr(tracker, TopicWalletMissing, "Wallet retrieval error for active order %s: %v", tracker.token(), err)
+			continue
+		}
+		tracker.wallets = walletSet
+		lockStuff(tracker)
+		dc.trades[oid] = tracker
+
+		mktConf := dc.marketConfig(tracker.mktID)
+
+		if tracker.metaData.EpochDur == 0 { // upgraded with live orders... smart :/
+			if mktConf != nil { // may remain zero if market also vanished
+				tracker.metaData.EpochDur = mktConf.EpochLen
+			}
+		}
+		if tracker.metaData.FromSwapConf == 0 {
+			tracker.metaData.FromSwapConf = walletSet.fromAsset.SwapConf // possibly still zero if !haveAssetConfigs
+		}
+		if tracker.metaData.ToSwapConf == 0 {
+			tracker.metaData.ToSwapConf = walletSet.toAsset.SwapConf
+		}
+
+		c.notify(newOrderNote(TopicOrderLoaded, "", "", db.Data, tracker.coreOrder()))
+
+		if mktConf == nil || !haveAssetConfigs { // the presence of a market config should imply asset configs...
+			tracker.setSelfGoverned(true) // redeem and refund only
+			c.log.Warnf("No server market or asset configuration for trade %v, market %v, host %v!",
+				oid, tracker.mktID, dc.acct.host)
+			// c.notify(newOrderNote(TopicOrderSelfGoverned, subject, details, db.WarnLevel, nil)) ?
+		} else {
+			tracker.setSelfGoverned(false)
+		}
+	}
+
 	return relocks
 }
 
@@ -6674,7 +6785,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 		go c.handleReconnect(host)
 	}
 
-	// Create a websocket connection to the server.
+	// Create a websocket "connection" to the server. (Don't actually connect.)
 	conn, err := c.wsConstructor(&wsCfg)
 	if err != nil {
 		return nil, err
@@ -6750,6 +6861,38 @@ func (c *Core) handleReconnect(host string) {
 		return
 	}
 
+	type market struct { // for book re-subscribe
+		name  string
+		base  uint32
+		quote uint32
+	}
+	dc.cfgMtx.RLock()
+	mkts := make(map[string]*market, len(dc.cfg.Markets))
+	for _, m := range dc.cfg.Markets {
+		mkts[m.Name] = &market{
+			name:  m.Name,
+			base:  m.Base,
+			quote: m.Quote,
+		}
+	}
+	dc.cfgMtx.RUnlock()
+
+	// Update the orders' selfGoverned flag according to the configured markets.
+	for _, trade := range dc.trackedTrades() {
+		// If the server's market is gone, we're on our own, otherwise we are
+		// now free to swap for this order.
+		gone := mkts[trade.mktID] == nil
+		if trade.setSelfGoverned(gone) {
+			if gone {
+				c.log.Warnf("DEX %v is MISSING market %v for trade %v!", host, trade.mktID, trade.ID())
+			} else {
+				c.log.Infof("DEX %v with market %v restored for trade %v", host, trade.mktID, trade.ID())
+			}
+		}
+		// We could refresh the asset configs in the walletSet, but we'll stick
+		// to what we have recorded in OrderMetaData at time of order placement.
+	}
+
 	go dc.subPriceFeed()
 
 	if !dc.acct.locked() && dc.acct.feePaid() {
@@ -6793,12 +6936,6 @@ func (c *Core) handleReconnect(host string) {
 		)
 	}
 
-	type market struct {
-		name  string
-		base  uint32
-		quote uint32
-	}
-
 	resubMkt := func(mkt *market) {
 		// Locate any bookie for this market.
 		booky := dc.bookie(mkt.name)
@@ -6834,18 +6971,6 @@ func (c *Core) handleReconnect(host string) {
 		})
 	}
 
-	// Create a list of books to check.
-	dc.cfgMtx.RLock()
-	mkts := make([]*market, 0, len(dc.cfg.Markets))
-	for _, m := range dc.cfg.Markets {
-		mkts = append(mkts, &market{
-			name:  m.Name,
-			base:  m.Base,
-			quote: m.Quote,
-		})
-	}
-	dc.cfgMtx.RUnlock()
-
 	// For each market, resubscribe to any market books.
 	for _, mkt := range mkts {
 		resubMkt(mkt)
@@ -6861,11 +6986,15 @@ func (dc *dexConnection) broadcastingConnect() bool {
 //
 // NOTE: Disconnect event notifications may lag behind actual disconnections.
 func (c *Core) handleConnectEvent(dc *dexConnection, status comms.ConnectionStatus) {
+	atomic.StoreUint32(&dc.connectionStatus, uint32(status))
+
 	topic := TopicDEXDisconnected
 	if status == comms.Connected {
 		topic = TopicDEXConnected
 	} else {
 		for _, tracker := range dc.trackedTrades() {
+			tracker.setSelfGoverned(true) // reconnect handles unflagging based on fresh market config
+
 			tracker.mtx.RLock()
 			for _, match := range tracker.matches {
 				// Make sure that a taker will not prematurely send an
@@ -6880,7 +7009,7 @@ func (c *Core) handleConnectEvent(dc *dexConnection, status comms.ConnectionStat
 			tracker.mtx.RUnlock()
 		}
 	}
-	atomic.StoreUint32(&dc.connectionStatus, uint32(status))
+
 	if dc.broadcastingConnect() {
 		subject, details := c.formatDetails(topic, dc.acct.host)
 		dc.notify(newConnEventNote(topic, subject, dc.acct.host, status, details, db.Poke))

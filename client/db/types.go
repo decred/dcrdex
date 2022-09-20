@@ -257,6 +257,24 @@ type OrderMetaData struct {
 	// RedemptionFeesPaid is the sum of the actual fees paid for all
 	// redemptions.
 	RedemptionFeesPaid uint64
+
+	// EpochDur is the epoch duration for the market at the time the order was
+	// submitted. When considered with the order's ServerTime, we also know the
+	// epoch index, which is helpful for determining if an epoch order should
+	// have been matched. WARNING: may load from DB as zero for older orders, in
+	// which case the current asset config should be used.
+	EpochDur uint64
+
+	// We store any variable information of each dex.Asset (the server's asset
+	// config at time of order). This includes: the max fee rates for swap and
+	// redeem, and the asset versions, and the required swap confirmations
+	// counts.
+
+	// FromSwapConf and ToSwapConf are the dex.Asset.SwapConf values at the time
+	// the order is submitted. WARNING: may load from DB as zero for older
+	// orders, in which case the current asset config should be used.
+	FromSwapConf uint32
+	ToSwapConf   uint32
 	// MaxFeeRate is the dex.Asset.MaxFeeRate at the time of ordering. The rates
 	// assigned to matches will be validated against this value.
 	MaxFeeRate uint64
@@ -269,6 +287,7 @@ type OrderMetaData struct {
 	FromVersion uint32
 	// ToVersion is the version of the to asset.
 	ToVersion uint32
+
 	// Options are the options offered by the wallet and selected by the user.
 	Options map[string]string
 	// RedemptionReserves is the amount of funds reserved by the wallet to pay
@@ -349,7 +368,7 @@ func MatchIsActive(match *order.UserMatch, proof *MatchProof) bool {
 }
 
 // MatchIsActiveV6Upgrade is the previous version of MatchIsActive that is
-// is required for the V6 upgrade of the DB.
+// required for the V6 upgrade of the DB.
 func MatchIsActiveV6Upgrade(match *order.UserMatch, proof *MatchProof) bool {
 	// MatchComplete only means inactive if: (a) cancel order match or (b) the
 	// redeem request was accepted for trade orders. A cancel order match starts

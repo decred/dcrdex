@@ -665,7 +665,7 @@ func testOrderStatusReconciliation(s *simulationTest) error {
 		}
 		oid := tracker.ID()
 		// Wait a max of 2 epochs for preimage to be sent for this order.
-		twoEpochs := 2 * time.Duration(tracker.epochLen) * time.Millisecond
+		twoEpochs := 2 * time.Duration(tracker.epochLen()) * time.Millisecond
 		s.client2.log.Infof("Waiting %v for preimage reveal, order %s", twoEpochs, tracker.token())
 		preimageRevealed := notes.find(ctx, twoEpochs, func(n Notification) bool {
 			orderNote, isOrderNote := n.(*OrderNote)
@@ -700,7 +700,7 @@ func testOrderStatusReconciliation(s *simulationTest) error {
 			return fmt.Errorf("client 2 place order error: %v", err)
 		}
 		// Wait a max of 2 epochs for preimage to be sent for this order.
-		twoEpochs := 2 * time.Duration(tracker.epochLen) * time.Millisecond
+		twoEpochs := 2 * time.Duration(tracker.epochLen()) * time.Millisecond
 		s.client2.log.Infof("Waiting %v for preimage reveal, order %s", twoEpochs, tracker.token())
 		preimageRevealed := notes.find(ctx, twoEpochs, func(n Notification) bool {
 			orderNote, isOrderNote := n.(*OrderNote)
@@ -1091,7 +1091,7 @@ func (s *simulationTest) monitorOrderMatchingAndTradeNeg(ctx context.Context, cl
 	}
 
 	// Wait up to 2 times the epoch duration for this order to get matched.
-	maxMatchDuration := 2 * time.Duration(tracker.epochLen) * time.Millisecond
+	maxMatchDuration := 2 * time.Duration(tracker.epochLen()) * time.Millisecond
 	client.log.Infof("Waiting up to %v for matches on order %s", maxMatchDuration, tracker.token())
 	matched := client.notes.find(ctx, maxMatchDuration, func(n Notification) bool {
 		orderNote, isOrderNote := n.(*OrderNote)

@@ -97,8 +97,11 @@ var (
 	innerKeyParamsKey      = []byte("innerKeyParams")
 	outerKeyParamsKey      = []byte("outerKeyParams")
 	legacyKeyParamsKey     = []byte("keyParams")
+	epochDurKey            = []byte("epochDur")
 	fromVersionKey         = []byte("fromVersion")
 	toVersionKey           = []byte("toVersion")
+	fromSwapConfKey        = []byte("fromSwapConf")
+	toSwapConfKey          = []byte("toSwapConf")
 	optionsKey             = []byte("options")
 	redemptionReservesKey  = []byte("redemptionReservesKey")
 	refundReservesKey      = []byte("refundReservesKey")
@@ -694,8 +697,11 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 			put(dexKey, []byte(md.Host)).
 			put(typeKey, []byte{byte(ord.Type())}).
 			put(orderKey, order.EncodeOrder(ord)).
+			put(epochDurKey, uint64Bytes(md.EpochDur)).
 			put(fromVersionKey, uint32Bytes(md.FromVersion)).
 			put(toVersionKey, uint32Bytes(md.ToVersion)).
+			put(fromSwapConfKey, uint32Bytes(md.FromSwapConf)).
+			put(toSwapConfKey, uint32Bytes(md.ToSwapConf)).
 			put(redeemMaxFeeRateKey, uint64Bytes(md.RedeemMaxFeeRate)).
 			put(maxFeeRateKey, uint64Bytes(md.MaxFeeRate)).
 			err()
@@ -718,7 +724,7 @@ func (db *BoltDB) ActiveOrders() ([]*dexdb.MetaOrder, error) {
 
 // AccountOrders retrieves all orders associated with the specified DEX. n = 0
 // applies no limit on number of orders returned. since = 0 is equivalent to
-// disabling the time filter, since no orders were created before before 1970.
+// disabling the time filter, since no orders were created before 1970.
 func (db *BoltDB) AccountOrders(dex string, n int, since uint64) ([]*dexdb.MetaOrder, error) {
 	dexB := []byte(dex)
 	if n == 0 && since == 0 {
@@ -735,7 +741,7 @@ func (db *BoltDB) AccountOrders(dex string, n int, since uint64) ([]*dexdb.MetaO
 
 // MarketOrders retrieves all orders for the specified DEX and market. n = 0
 // applies no limit on number of orders returned. since = 0 is equivalent to
-// disabling the time filter, since no orders were created before before 1970.
+// disabling the time filter, since no orders were created before 1970.
 func (db *BoltDB) MarketOrders(dex string, base, quote uint32, n int, since uint64) ([]*dexdb.MetaOrder, error) {
 	dexB := []byte(dex)
 	baseB := uint32Bytes(base)
@@ -1010,6 +1016,20 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 		toVersion = intCoder.Uint32(toVersionB)
 	}
 
+	var fromSwapConf, toSwapConf uint32
+	fromSwapConfB, toSwapConfB := oBkt.Get(fromSwapConfKey), oBkt.Get(toSwapConfKey)
+	if len(fromSwapConfB) == 4 {
+		fromSwapConf = intCoder.Uint32(fromSwapConfB)
+	}
+	if len(toSwapConfB) == 4 {
+		toSwapConf = intCoder.Uint32(toSwapConfB)
+	}
+
+	var epochDur uint64
+	if epochDurB := oBkt.Get(epochDurKey); len(epochDurB) == 8 {
+		epochDur = intCoder.Uint64(epochDurB)
+	}
+
 	optionsB := oBkt.Get(optionsKey)
 	options, err := config.Parse(optionsB)
 	if err != nil {
@@ -1041,9 +1061,12 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 			ChangeCoin:         getCopy(oBkt, changeKey),
 			LinkedOrder:        linkedID,
 			SwapFeesPaid:       intCoder.Uint64(oBkt.Get(swapFeesKey)),
+			EpochDur:           epochDur,
 			MaxFeeRate:         maxFeeRate,
 			RedeemMaxFeeRate:   redeemMaxFeeRate,
 			RedemptionFeesPaid: intCoder.Uint64(oBkt.Get(redemptionFeesKey)),
+			FromSwapConf:       fromSwapConf,
+			ToSwapConf:         toSwapConf,
 			FromVersion:        fromVersion,
 			ToVersion:          toVersion,
 			Options:            options,
