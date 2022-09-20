@@ -802,6 +802,7 @@ export default class Application {
   walletIsActive (assetID: number): boolean {
     if (this.haveAssetOrders(assetID)) return true
     for (const xc of Object.values(this.user.exchanges)) {
+      if (!xc) continue
       if (xc.pendingFee && xc.pendingFee.assetID === assetID) {
         return true
       }
@@ -812,6 +813,7 @@ export default class Application {
   /* order attempts to locate an order by order ID. */
   order (oid: string): Order | null {
     for (const xc of Object.values(this.user.exchanges)) {
+      if (!xc || !xc.markets) continue
       for (const market of Object.values(xc.markets)) {
         if (!market.orders) continue
         for (const ord of market.orders) {
@@ -853,7 +855,7 @@ export default class Application {
   unitInfo (assetID: number, xc?: Exchange): UnitInfo {
     const supportedAsset = this.assets[assetID]
     if (supportedAsset) return supportedAsset.unitInfo
-    if (!xc) {
+    if (!xc || !xc.assets) {
       throw Error(`no supported asset info for id = ${assetID}, and no exchange info provided`)
     }
     return xc.assets[assetID].unitInfo

@@ -1438,9 +1438,8 @@ func (btc *baseWallet) legacyBalance() (*asset.Balance, error) {
 func (btc *baseWallet) feeRate(_ RawRequester, confTarget uint64) (uint64, error) {
 	feeResult, err := btc.node.estimateSmartFee(int64(confTarget), &btcjson.EstimateModeConservative)
 	if err != nil {
-		btc.log.Errorf("Failed to get fee rate with estimate smart fee rate: %v", err)
-
 		if !btc.apiFeeFallback() {
+			btc.log.Warnf("Failed to get local fee rate estimate: %v", err)
 			return 0, err
 		}
 		btc.log.Debug("Retrieving fee rate from external API: ", externalApiUrl)

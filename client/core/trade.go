@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
@@ -181,9 +182,10 @@ func (m *matchTracker) token() string {
 // trackedCancel is always associated with a trackedTrade.
 type trackedCancel struct {
 	order.CancelOrder
-	preImg  order.Preimage
-	csum    dex.Bytes // the commitment checksum provided in the preimage request
-	matches struct {
+	preImg   order.Preimage
+	csum     dex.Bytes // the commitment checksum provided in the preimage request
+	epochLen uint64
+	matches  struct {
 		maker *msgjson.Match
 		taker *msgjson.Match
 	}
@@ -217,44 +219,46 @@ type trackedTrade struct {
 	// repopulated if the client is restarted.
 	redeemFeeSuggestion feeStamped
 
+	selfGoverned uint32 // (atomic) server either lacks this market or is down
+
 	tickLock sync.Mutex // prevent multiple concurrent ticks, but allow them to queue
 
 	order.Order
-	// mtx protects all read-write fields of the trackedTrade and the
-	// matchTrackers in the matches map.
-	mtx                sync.RWMutex
-	metaData           *db.OrderMetaData
-	dc                 *dexConnection
+
 	db                 db.DB
+	dc                 *dexConnection
 	latencyQ           *wait.TickerQueue
-	wallets            *walletSet
-	preImg             order.Preimage
-	csum               dex.Bytes // the commitment checksum provided in the preimage request
-	mktID              string    // convenience for marketName(t.Base(), t.Quote())
-	coins              map[string]asset.Coin
-	coinsLocked        bool
+	mktID              string // convenience for marketName(t.Base(), t.Quote())
 	lockTimeTaker      time.Duration
 	lockTimeMaker      time.Duration
-	change             asset.Coin
-	changeLocked       bool
-	cancel             *trackedCancel
-	matches            map[order.MatchID]*matchTracker
 	notify             func(Notification)
 	formatDetails      func(Topic, ...interface{}) (string, string)
-	epochLen           uint64
-	fromAssetID        uint32
-	options            map[string]string
-	redemptionReserves uint64
-	redemptionLocked   uint64
-	refundReserves     uint64
-	refundLocked       uint64
+	fromAssetID        uint32            // wallets.fromWallet.AssetID
+	options            map[string]string // metaData.Options (immutable) for Redeem and Swap
+	redemptionReserves uint64            // metaData.RedemptionReserves (immutable)
+	refundReserves     uint64            // metaData.RefundReserves (immutable)
+
+	// mtx protects all read-write fields of the trackedTrade and the
+	// matchTrackers in the matches map.
+	mtx              sync.RWMutex
+	metaData         *db.OrderMetaData
+	wallets          *walletSet
+	preImg           order.Preimage
+	csum             dex.Bytes // the commitment checksum provided in the preimage request
+	coins            map[string]asset.Coin
+	coinsLocked      bool
+	change           asset.Coin
+	changeLocked     bool
+	cancel           *trackedCancel
+	matches          map[order.MatchID]*matchTracker
+	redemptionLocked uint64 // remaining locked of redemptionReserves
+	refundLocked     uint64 // remaining locked of refundReserves
 }
 
 // newTrackedTrade is a constructor for a trackedTrade.
-func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnection, epochLen uint64,
+func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnection,
 	lockTimeTaker, lockTimeMaker time.Duration, db db.DB, latencyQ *wait.TickerQueue, wallets *walletSet,
-	coins asset.Coins, notify func(Notification), formatDetails func(Topic, ...interface{}) (string, string),
-	options map[string]string, redemptionReserves, refundReserves uint64) *trackedTrade {
+	coins asset.Coins, notify func(Notification), formatDetails func(Topic, ...interface{}) (string, string)) *trackedTrade {
 
 	fromID := dbOrder.Order.Quote()
 	if dbOrder.Order.Trade().Sell {
@@ -277,14 +281,24 @@ func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnec
 		lockTimeMaker:      lockTimeMaker,
 		matches:            make(map[order.MatchID]*matchTracker),
 		notify:             notify,
-		epochLen:           epochLen,
 		fromAssetID:        fromID,
 		formatDetails:      formatDetails,
-		options:            options,
-		redemptionReserves: redemptionReserves,
-		refundReserves:     refundReserves,
+		options:            dbOrder.MetaData.Options,
+		redemptionReserves: dbOrder.MetaData.RedemptionReserves,
+		refundReserves:     dbOrder.MetaData.RefundReserves,
 	}
 	return t
+}
+
+func (t *trackedTrade) isSelfGoverned() bool {
+	return atomic.LoadUint32(&t.selfGoverned) == 1
+}
+
+func (t *trackedTrade) setSelfGoverned(is bool) (changed bool) {
+	if is {
+		return atomic.CompareAndSwapUint32(&t.selfGoverned, 0, 1)
+	}
+	return atomic.CompareAndSwapUint32(&t.selfGoverned, 1, 0)
 }
 
 func (t *trackedTrade) status() order.OrderStatus {
@@ -492,8 +506,17 @@ func (t *trackedTrade) isMarketBuy() bool {
 	return t.Type() == order.MarketOrderType && !trade.Sell
 }
 
+func (t *trackedTrade) epochLen() uint64 {
+	return t.metaData.EpochDur
+}
+
 func (t *trackedTrade) epochIdx() uint64 {
-	return uint64(t.Prefix().ServerTime.UnixMilli()) / t.epochLen
+	// Guard against bizarre circumstances with both an old order without epoch
+	// duration stored, AND a server that is either down or missing the market.
+	if t.epochLen() == 0 {
+		return 0
+	}
+	return uint64(t.Prefix().ServerTime.UnixMilli()) / t.epochLen()
 }
 
 // cancelEpochIdx gives the epoch index of any cancel associated cancel order.
@@ -502,7 +525,16 @@ func (t *trackedTrade) cancelEpochIdx() uint64 {
 	if t.cancel == nil {
 		return 0
 	}
-	return uint64(t.cancel.Prefix().ServerTime.UnixMilli()) / t.epochLen
+	epochLen := t.cancel.epochLen
+	if epochLen == 0 {
+		epochLen = t.epochLen()
+	}
+	if epochLen == 0 {
+		// In these strange circumstances, the cancel should be declared stale
+		// anyway (see hasStaleCancelOrder).
+		return 0
+	}
+	return uint64(t.cancel.Prefix().ServerTime.UnixMilli()) / epochLen
 }
 
 func (t *trackedTrade) verifyCSum(csum []byte, epochIdx uint64) error {
@@ -570,8 +602,8 @@ func (t *trackedTrade) coreOrderInternal() *Order {
 	for _, mt := range t.matches {
 		swapConfs, counterConfs := mt.confirms()
 		corder.Matches = append(corder.Matches, matchFromMetaMatchWithConfs(t, &mt.MetaMatch,
-			swapConfs, int64(t.wallets.fromAsset.SwapConf),
-			counterConfs, int64(t.wallets.toAsset.SwapConf),
+			swapConfs, int64(t.metaData.FromSwapConf),
+			counterConfs, int64(t.metaData.ToSwapConf),
 			int64(mt.redemptionConfs), int64(mt.redemptionConfsReq)))
 	}
 	return corder
@@ -612,10 +644,11 @@ func (t *trackedTrade) token() string {
 
 // cancelTrade sets the cancellation data with the order and its preimage.
 // cancelTrade must be called with the mtx write-locked.
-func (t *trackedTrade) cancelTrade(co *order.CancelOrder, preImg order.Preimage) error {
+func (t *trackedTrade) cancelTrade(co *order.CancelOrder, preImg order.Preimage, epochLen uint64) error {
 	t.cancel = &trackedCancel{
 		CancelOrder: *co,
 		preImg:      preImg,
+		epochLen:    epochLen,
 	}
 	err := t.db.LinkOrder(t.ID(), co.ID())
 	if err != nil {
@@ -991,12 +1024,12 @@ func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTra
 	}
 
 	// Counter-party's swap is the "to" asset.
-	needed = t.wallets.toAsset.SwapConf
+	needed = t.metaData.ToSwapConf
 
 	// Check the confirmations on the counter-party's swap. If counterSwap is
 	// not set, we shouldn't be here, but catch this just in case.
 	if match.counterSwap == nil {
-		return fail(errors.New("counterPartyConfirms: No AuditInfo available to check!"))
+		return fail(errors.New("no AuditInfo available to check"))
 	}
 
 	wallet := t.wallets.toWallet
@@ -1057,7 +1090,7 @@ func (t *trackedTrade) hasStaleCancelOrder() bool {
 		return false
 	}
 
-	epoch := order.EpochID{Idx: t.cancelEpochIdx(), Dur: t.epochLen}
+	epoch := order.EpochID{Idx: t.cancelEpochIdx(), Dur: t.epochLen()}
 	epochEnd := epoch.End()
 
 	return time.Since(epochEnd) >= preimageReqTimeout
@@ -1231,6 +1264,13 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) (re
 		return false, false
 	}
 
+	defer func() {
+		// We should never try to init when the server is known to be down or
+		// lacks this market, but allow all the checks to run first for the sake
+		// of confirmation notifications and conditional self-revocation.
+		ready = ready && !t.isSelfGoverned() && t.dc.status() == comms.Connected // NOTE: swapMatchGroup rechecks dc conn anyway
+	}()
+
 	switch match.Status {
 	case order.NewlyMatched:
 		return match.Side == order.Maker, false
@@ -1262,7 +1302,7 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) (re
 				t.dc.log.Errorf("Our contract would expire in the past (%v). REVOKING!", lockTime)
 				return false, true // REVOKE!
 			}
-			ready := confs >= req
+			ready = confs >= req
 			if changed && !ready {
 				t.dc.log.Infof("Match %s not yet swappable: current confs = %d, required confs = %d",
 					match, confs, req)
@@ -1491,7 +1531,11 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) (r
 				t.dc.log.Warnf("Order %s, match %s counter-party's swap expired before we could redeem", t.ID(), match)
 				return false, true // REVOKE!
 			}
-			ready := confs >= req
+			// NOTE: We'll redeem even if the market has vanished - taker will
+			// find it. We'll keep trying to send the redeem request. If the
+			// server/market never reappears, we should self-revoke and retire
+			// after taker lock time has expired and server would have revoked.
+			ready = confs >= req
 			if changed && !ready {
 				t.dc.log.Infof("Match %s not yet redeemable: current confs = %d, required confs = %d",
 					match, confs, req)
@@ -1638,7 +1682,7 @@ func (t *trackedTrade) shouldBeginFindRedemption(ctx context.Context, match *mat
 	if spent { // NOTE: spent may not be accurate for SPV wallet, so this should not be a requirement.
 		t.dc.log.Infof("Swap contract for revoked match %s, order %s is spent. Will begin search for redemption", match, t.ID())
 	}
-	return spent || confs >= t.wallets.fromAsset.SwapConf
+	return spent || confs >= t.metaData.FromSwapConf
 }
 
 // shouldConfirmRedemption will return true if a redemption transaction
@@ -1778,6 +1822,18 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		if shouldConfirmRedemption(match) {
 			redemptionConfirms = append(redemptionConfirms, match)
 			return nil
+		}
+
+		// For certain "self-governed" trades where the market or server has
+		// vanished, we should revoke the match to allow it to retire without
+		// having sent any pending redeem requests. Note that self-governed is
+		// not necessarily a permanent state, so we delay this action.
+		if !revoked && t.isSelfGoverned() && time.Since(match.matchTime()) > t.lockTimeTaker {
+			c.log.Warnf("Revoking old self-governed match %v for market %v, host %v.",
+				match, t.mktID, t.dc.acct.host)
+			revokes = append(revokes, match)
+			// NOTE: If the trade is in booked status, the order still won't
+			// retire. We need a way to force-cancel such orders.
 		}
 
 		return ctx.Err()
@@ -1955,6 +2011,9 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 // This method modifies match fields and MUST be called with the trackedTrade
 // mutex lock held for reads.
 func (c *Core) resendPendingRequests(t *trackedTrade) {
+	if t.isSelfGoverned() {
+		return
+	}
 	for _, match := range t.matches {
 		proof, auth := &match.MetaData.Proof, &match.MetaData.Proof.Auth
 		// Do not resend pending requests for revoked matches.

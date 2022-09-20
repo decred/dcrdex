@@ -50,6 +50,20 @@ const (
 	InvalidCert
 )
 
+// String gives a human readable string for each connection status.
+func (cs ConnectionStatus) String() string {
+	switch cs {
+	case Disconnected:
+		return "disconnected"
+	case Connected:
+		return "connected"
+	case InvalidCert:
+		return "invalid certificate"
+	default:
+		return "unknown status"
+	}
+}
+
 // ErrInvalidCert is the error returned when attempting to use an invalid cert
 // to set up a ws connection.
 var ErrInvalidCert = fmt.Errorf("invalid certificate")
