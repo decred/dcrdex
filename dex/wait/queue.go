@@ -185,8 +185,6 @@ func (q *TaperingTickerQueue) Wait(waiter *Waiter) {
 
 // Run runs the primary wait loop until the context is canceled.
 func (q *TaperingTickerQueue) Run(ctx context.Context) {
-	waiters := make([]*taperingWaiter, 0, 100)
-
 	var wg sync.WaitGroup
 	defer wg.Wait()
 
@@ -209,19 +207,15 @@ func (q *TaperingTickerQueue) Run(ctx context.Context) {
 
 		q.queueWaiter <- w // send it back to the queue
 	}
-	maybeStop := func(timer *time.Timer) {
-		if timer != nil {
-			timer.Stop()
-		}
-	}
 
-	var (
-		tick  <-chan time.Time
-		timer *time.Timer
-	)
+	waiters := make([]*taperingWaiter, 0, 100) // only used in the loop
+	var timer *time.Timer
 	for {
+		var tick <-chan time.Time
 		if len(waiters) > 0 {
-			maybeStop(timer)
+			if timer != nil {
+				timer.Stop()
+			}
 			timer = time.NewTimer(time.Until(waiters[0].nextTick))
 			tick = timer.C
 		}
@@ -250,7 +244,9 @@ func (q *TaperingTickerQueue) Run(ctx context.Context) {
 			})
 
 		case <-ctx.Done():
-			maybeStop(timer)
+			if timer != nil {
+				timer.Stop()
+			}
 			for _, w := range waiters {
 				w.ExpireFunc() // early, but still ending prior to DontTryAgain
 			}
@@ -259,17 +255,14 @@ func (q *TaperingTickerQueue) Run(ctx context.Context) {
 	}
 }
 
-func nextTick(
-	nextTick int,
-	slowestInterval, fastestInterval time.Duration,
-	now, expiration time.Time,
-) time.Time {
+func nextTick(ticksPassed int, slowestInterval, fastestInterval time.Duration,
+	now, expiration time.Time) time.Time {
 	var nextTickTime time.Time
 	switch {
-	case nextTick < fullSpeedTicks:
+	case ticksPassed < fullSpeedTicks:
 		nextTickTime = now.Add(fastestInterval)
-	case nextTick < fullyTapered: // ramp up the interval
-		prog := float64(nextTick+1-fullSpeedTicks) / (fullyTapered - fullSpeedTicks)
+	case ticksPassed < fullyTapered: // ramp up the interval
+		prog := float64(ticksPassed+1-fullSpeedTicks) / (fullyTapered - fullSpeedTicks)
 		taper := float64(slowestInterval - fastestInterval)
 		interval := fastestInterval + time.Duration(math.Round(prog*taper))
 		nextTickTime = now.Add(interval)

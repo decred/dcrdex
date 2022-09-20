@@ -207,25 +207,16 @@ func expTickSchedule(startTime time.Time, fastestInterval, slowestInterval time.
 	expectedTicks[1] = expectedTicks[0].Add(fastestInterval)
 	expectedTicks[2] = expectedTicks[1].Add(fastestInterval)
 
-	const linearCnt = float64(fullyTapered - fullSpeedTicks)
-	expectedTicks[3] = expectedTicks[2].Add(fastestInterval + time.Duration(math.Round((float64(1)/linearCnt)*float64(slowestInterval-fastestInterval))))
-	expectedTicks[4] = expectedTicks[3].Add(fastestInterval + time.Duration(math.Round((float64(2)/linearCnt)*float64(slowestInterval-fastestInterval))))
-	expectedTicks[5] = expectedTicks[4].Add(fastestInterval + time.Duration(math.Round((float64(3)/linearCnt)*float64(slowestInterval-fastestInterval))))
-	expectedTicks[6] = expectedTicks[5].Add(fastestInterval + time.Duration(math.Round((float64(4)/linearCnt)*float64(slowestInterval-fastestInterval))))
-	expectedTicks[7] = expectedTicks[6].Add(fastestInterval + time.Duration(math.Round((float64(5)/linearCnt)*float64(slowestInterval-fastestInterval))))
-	expectedTicks[8] = expectedTicks[7].Add(fastestInterval + time.Duration(math.Round((float64(6)/linearCnt)*float64(slowestInterval-fastestInterval))))
-	expectedTicks[9] = expectedTicks[8].Add(fastestInterval + time.Duration(math.Round((float64(7)/linearCnt)*float64(slowestInterval-fastestInterval))))
-	expectedTicks[10] = expectedTicks[9].Add(fastestInterval + time.Duration(math.Round((float64(8)/linearCnt)*float64(slowestInterval-fastestInterval))))
-	expectedTicks[11] = expectedTicks[10].Add(fastestInterval + time.Duration(math.Round((float64(9)/linearCnt)*float64(slowestInterval-fastestInterval))))
-	expectedTicks[12] = expectedTicks[11].Add(fastestInterval + time.Duration(math.Round((float64(10)/linearCnt)*float64(slowestInterval-fastestInterval))))
-	expectedTicks[13] = expectedTicks[12].Add(fastestInterval + time.Duration(math.Round((float64(11)/linearCnt)*float64(slowestInterval-fastestInterval))))
-
-	expectedTicks[14] = expectedTicks[13].Add(slowestInterval)
-	expectedTicks[15] = expectedTicks[14].Add(slowestInterval)
-	expectedTicks[16] = expectedTicks[15].Add(slowestInterval)
-	expectedTicks[17] = expectedTicks[16].Add(slowestInterval)
-	expectedTicks[18] = expectedTicks[17].Add(slowestInterval)
-	expectedTicks[19] = expectedTicks[18].Add(slowestInterval)
-	expectedTicks[20] = expectedTicks[19].Add(slowestInterval)
+	taper := func(i int) time.Duration {
+		const linearCnt = fullyTapered - fullSpeedTicks
+		ramp := float64(slowestInterval - fastestInterval)
+		return time.Duration(math.Round(float64(i) / linearCnt * ramp))
+	}
+	for i := fullSpeedTicks; i < fullyTapered-1; i++ {
+		expectedTicks[i] = expectedTicks[i-1].Add(fastestInterval + taper(i-2))
+	}
+	for i := fullyTapered - 1; i < len(expectedTicks); i++ {
+		expectedTicks[i] = expectedTicks[i-1].Add(slowestInterval)
+	}
 	return expectedTicks[:]
 }
