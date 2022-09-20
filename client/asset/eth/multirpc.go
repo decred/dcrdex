@@ -796,12 +796,14 @@ func (m *multiRPCClient) bestHeader(ctx context.Context) (hdr *types.Header, err
 		if h == nil {
 			continue
 		}
-		// This block choosing algo is probably too rudimentary. Really need
-		// shnuld traverse parents to a common block and sum up gas (including
-		// uncles?), I think.
-		if bestHeader == nil || // first one
-			h.Number.Cmp(bestHeader.Number) > 0 || // newer
-			(h.Number.Cmp(bestHeader.Number) == 0 && h.GasUsed > bestHeader.GasUsed) { // same height, but more gas used
+		if bestHeader == nil ||
+			// In fact, we should be comparing the total terminal difficulty of
+			// the blocks. We don't have the TTD, even though it is sent by RPC,
+			// because ethclient strips it from header data and the header
+			// subscriptions may or may not send the ttd (Infura docs do not
+			// show it in message), but it doesn't come through the geth client
+			// subscription machinery regardless.
+			h.Number.Cmp(bestHeader.Number) > 0 {
 
 			bestHeader = h
 		}
