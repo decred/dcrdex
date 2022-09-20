@@ -351,6 +351,10 @@ var originLocale = map[Topic]*translation{
 		subject:  "Redemption Confirmed",
 		template: "Your redemption for match %s in order %s was confirmed",
 	},
+	TopicWalletTypeDeprecated: {
+		subject:  "Wallet Disabled",
+		template: "Your %s wallet type is no longer supported. Create a new wallet.",
+	},
 }
 
 var ptBR = map[Topic]*translation{

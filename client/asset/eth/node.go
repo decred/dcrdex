@@ -271,12 +271,12 @@ func importKeyToKeyStore(ks *keystore.KeyStore, priv *ecdsa.PrivateKey, pw []byt
 	} else if len(accounts) == 1 {
 		address := crypto.PubkeyToAddress(priv.PublicKey)
 		if !bytes.Equal(accounts[0].Address.Bytes(), address.Bytes()) {
-			errMsg := "importKeyToNode: attemping to import account to eth wallet: %v, " +
+			errMsg := "importKeyToKeyStore: attemping to import account to eth wallet: %v, " +
 				"but node already contains imported account: %v"
 			return fmt.Errorf(errMsg, address, accounts[0].Address)
 		}
 	} else {
-		return fmt.Errorf("importKeyToNode: eth wallet keystore contains %v accounts", accounts)
+		return fmt.Errorf("importKeyToKeyStore: eth wallet keystore contains %v accounts", accounts)
 	}
 	return nil
 }

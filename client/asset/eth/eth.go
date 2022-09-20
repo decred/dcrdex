@@ -105,7 +105,7 @@ var (
 			Description: "Specify one or more providers. For infrastructure " +
 				"providers, use an https address. Only url-based authentication " +
 				"is supported. For a local node, use the filepath to an IPC file.",
-			Repeatable: " ",
+			Repeatable: providerDelimiter,
 			Required:   true,
 		},
 	}
@@ -486,7 +486,9 @@ func CreateWallet(cfg *asset.CreateWalletParams) error {
 
 func createWallet(createWalletParams *asset.CreateWalletParams, skipConnect bool) error {
 	switch createWalletParams.Type {
-	case walletTypeGeth, walletTypeRPC:
+	case walletTypeGeth:
+		return asset.ErrWalletTypeDisabled
+	case walletTypeRPC:
 	default:
 		return fmt.Errorf("wallet type %q unrecognized", createWalletParams.Type)
 	}
@@ -511,16 +513,16 @@ func createWallet(createWalletParams *asset.CreateWalletParams, skipConnect bool
 	}
 
 	switch createWalletParams.Type {
-	case walletTypeGeth:
-		node, err := prepareNode(&nodeConfig{
-			net:    createWalletParams.Net,
-			appDir: walletDir,
-		})
-		if err != nil {
-			return err
-		}
-		defer node.Close()
-		return importKeyToNode(node, privateKey, createWalletParams.Pass)
+	// case walletTypeGeth:
+	// 	node, err := prepareNode(&nodeConfig{
+	// 		net:    createWalletParams.Net,
+	// 		appDir: walletDir,
+	// 	})
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	defer node.Close()
+	// 	return importKeyToNode(node, privateKey, createWalletParams.Pass)
 	case walletTypeRPC:
 
 		// Check that we can connect to all endpoints.
@@ -528,7 +530,7 @@ func createWallet(createWalletParams *asset.CreateWalletParams, skipConnect bool
 		if len(providerDef) == 0 {
 			return errors.New("no providers specified")
 		}
-		endpoints := strings.Split(providerDef, " ")
+		endpoints := strings.Split(providerDef, providerDelimiter)
 		n := len(endpoints)
 
 		// TODO: This procedure may actually work for walletTypeGeth too.
@@ -582,10 +584,11 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 	// var cl ethFetcher
 	switch assetCFG.Type {
 	case walletTypeGeth:
-	// 	cl, err = newNodeClient(getWalletDir(assetCFG.DataDir, net), net, logger.SubLogger("NODE"))
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
+		// 	cl, err = newNodeClient(getWalletDir(assetCFG.DataDir, net), net, logger.SubLogger("NODE"))
+		// 	if err != nil {
+		// 		return nil, err
+		// 	}
+		return nil, asset.ErrWalletTypeDisabled
 	case walletTypeRPC:
 		if _, found := assetCFG.Settings[providersKey]; !found {
 			return nil, errors.New("no providers specified")
@@ -706,10 +709,11 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	var cl ethFetcher
 	switch w.walletType {
 	case walletTypeGeth:
-		cl, err = newNodeClient(getWalletDir(w.dir, w.net), w.net, w.log.SubLogger("NODE"))
-		if err != nil {
-			return nil, err
-		}
+		// cl, err = newNodeClient(getWalletDir(w.dir, w.net), w.net, w.log.SubLogger("NODE"))
+		// if err != nil {
+		// 	return nil, err
+		// }
+		return nil, asset.ErrWalletTypeDisabled
 	case walletTypeRPC:
 		endpoints := strings.Split(w.settings[providersKey], " ")
 		ethCfg, err := ethChainConfig(w.net)

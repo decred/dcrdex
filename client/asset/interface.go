@@ -147,6 +147,9 @@ const (
 	// ErrNotEnoughConfirms is returned when a transaction is confirmed,
 	// but does not have enough confirmations to be trusted.
 	ErrNotEnoughConfirms = dex.ErrorKind("transaction does not have enough confirmations")
+	// ErrWalletTypeDisabled inidicates that a wallet type is no longer
+	// available.
+	ErrWalletTypeDisabled = dex.ErrorKind("wallet type has been disabled")
 
 	// InternalNodeLoggerName is the name for a logger that is used to fine
 	// tune log levels for only loggers using this name.

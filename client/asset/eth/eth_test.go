@@ -2932,23 +2932,24 @@ func TestDriverOpen(t *testing.T) {
 	logger := dex.StdOutLogger("ETHTEST", dex.LevelOff)
 	tmpDir := t.TempDir()
 
-	err := CreateWallet(&asset.CreateWalletParams{
-		Type:     walletTypeGeth,
+	settings := map[string]string{providersKey: "a.ipc"}
+	err := createWallet(&asset.CreateWalletParams{
+		Type:     walletTypeRPC,
 		Seed:     encode.RandomBytes(32),
 		Pass:     encode.RandomBytes(32),
-		Settings: make(map[string]string),
+		Settings: settings,
 		DataDir:  tmpDir,
 		Net:      dex.Testnet,
 		Logger:   logger,
-	})
+	}, true)
 	if err != nil {
 		t.Fatalf("CreateWallet error: %v", err)
 	}
 
 	// Make sure default gas fee limit is used when nothing is set
 	cfg := &asset.WalletConfig{
-		Type:     walletTypeGeth,
-		Settings: make(map[string]string),
+		Type:     walletTypeRPC,
+		Settings: settings,
 		DataDir:  tmpDir,
 	}
 	wallet, err := drv.Open(cfg, logger, dex.Testnet)
@@ -2982,7 +2983,7 @@ func TestDriverExists(t *testing.T) {
 	drv := &Driver{}
 	tmpDir := t.TempDir()
 
-	settings := map[string]string{}
+	settings := map[string]string{providersKey: "a.ipc"}
 
 	// no wallet
 	exists, err := drv.Exists(walletTypeGeth, tmpDir, settings, dex.Simnet)
@@ -2994,21 +2995,21 @@ func TestDriverExists(t *testing.T) {
 	}
 
 	// Create the wallet.
-	err = CreateWallet(&asset.CreateWalletParams{
-		Type:     walletTypeGeth,
+	err = createWallet(&asset.CreateWalletParams{
+		Type:     walletTypeRPC,
 		Seed:     encode.RandomBytes(32),
 		Pass:     encode.RandomBytes(32),
 		Settings: settings,
 		DataDir:  tmpDir,
 		Net:      dex.Simnet,
 		Logger:   tLogger,
-	})
+	}, true)
 	if err != nil {
 		t.Fatalf("CreateWallet error: %v", err)
 	}
 
 	// exists
-	exists, err = drv.Exists(walletTypeGeth, tmpDir, settings, dex.Simnet)
+	exists, err = drv.Exists(walletTypeRPC, tmpDir, settings, dex.Simnet)
 	if err != nil {
 		t.Fatalf("Exists error for existent geth wallet: %v", err)
 	}

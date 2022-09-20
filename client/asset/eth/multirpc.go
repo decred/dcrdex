@@ -9,6 +9,7 @@ package eth
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,6 +49,7 @@ const (
 	receiptCacheExpiration     = time.Hour
 	tipCapSuggestionExpiration = time.Hour
 	ipcHost                    = "IPC"
+	providerDelimiter          = " "
 )
 
 // nonceProviderStickiness is the minimum amount of time that must pass between
@@ -516,7 +518,6 @@ func (m *multiRPCClient) cleanReceipts() {
 	m.receipts.Unlock()
 }
 
-<<<<<<< HEAD
 func (m *multiRPCClient) transactionReceipt(ctx context.Context, txHash common.Hash) (r *types.Receipt, tx *types.Transaction, err error) {
 	// TODO
 	// TODO: Plug in to the monitoredTx system from #1638.
@@ -525,9 +526,6 @@ func (m *multiRPCClient) transactionReceipt(ctx context.Context, txHash common.H
 		return nil, nil, err
 	}
 
-=======
-func (m *multiRPCClient) transactionReceipt(ctx context.Context, txHash common.Hash) (r *types.Receipt, err error) {
->>>>>>> martonp early review followup
 	// Check the cache.
 	const cacheExpiration = time.Minute
 
@@ -541,15 +539,10 @@ func (m *multiRPCClient) transactionReceipt(ctx context.Context, txHash common.H
 		go m.cleanReceipts()
 	}
 	m.receipts.RUnlock()
-<<<<<<< HEAD
-	if cached != nil {
-		return cached.r, tx, nil
-=======
 
 	// If confirmed or if it was just fetched, return it as is.
 	if cached != nil && (cached.confirmed || time.Since(cached.lastAccess) < cacheExpiration) {
-		return cached.r, nil
->>>>>>> martonp early review followup
+		return cached.r, tx, nil
 	}
 
 	// Fetch a fresh one.
@@ -564,7 +557,7 @@ func (m *multiRPCClient) transactionReceipt(ctx context.Context, txHash common.H
 	if r.BlockNumber != nil {
 		tip, err := m.bestHeader(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("bestHeader error: %v", err)
+			return nil, nil, fmt.Errorf("bestHeader error: %v", err)
 		}
 		confs = new(big.Int).Sub(tip.Number, r.BlockNumber).Int64() + 1
 	}
@@ -628,14 +621,9 @@ func (m *multiRPCClient) getTransaction(ctx context.Context, txHash common.Hash)
 			return err
 		}
 		tx = resp.tx
-		if resp.BlockNumber == nil {
-			h = -1
-		} else {
-			bigH, ok := new(big.Int).SetString(*resp.BlockNumber, 0 /* must start with 0x */)
-			if !ok {
-				return fmt.Errorf("couldn't parse hex number %q", *resp.BlockNumber)
-			}
-			h = bigH.Int64()
+		if resp.BlockNumber != nil {
+			b, _ := hex.DecodeString(*resp.BlockNumber)
+			h = new(big.Int).SetBytes(b).Int64()
 		}
 		return nil
 	})
