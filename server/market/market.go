@@ -2120,6 +2120,25 @@ func (m *Market) enqueueEpoch(eq *epochPump, epoch *EpochQueue) bool {
 	return true
 }
 
+func (m *Market) sendRevokeOrderNote(oid order.OrderID, user account.AccountID) {
+	// Send revoke_order notification to order owner.
+	route := msgjson.RevokeOrderRoute
+	log.Infof("Sending a '%s' notification to %v for order %v", route, user, oid)
+	revMsg := &msgjson.RevokeOrder{
+		OrderID: oid.Bytes(),
+	}
+	m.auth.Sign(revMsg)
+	revNtfn, err := msgjson.NewNotification(route, revMsg)
+	if err != nil {
+		log.Errorf("Failed to create %s notification for order %v: %v", route, oid, err)
+	} else {
+		err = m.auth.Send(user, revNtfn)
+		if err != nil {
+			log.Debugf("Failed to send %s notification to user %v: %v", route, user, err)
+		}
+	}
+}
+
 // prepEpoch collects order preimages, and penalizes users who fail to respond.
 func (m *Market) prepEpoch(orders []order.Order, epochEnd time.Time) (cSum []byte, ordersRevealed []*matcher.OrderRevealed, misses []order.Order) {
 	// Solicit the preimages for each order.
@@ -2130,20 +2149,25 @@ func (m *Market) prepEpoch(orders []order.Order, epochEnd time.Time) (cSum []byt
 	}
 
 	for _, ord := range misses {
+		oid, user := ord.ID(), ord.User()
 		log.Infof("No preimage received for order %v from user %v. Recording violation and revoking order.",
-			ord.ID(), ord.User())
+			oid, user)
 		// Unlock the order's coins locked in processOrder.
 		m.unlockOrderCoins(ord) // could also be done in processReadyEpoch
 		// Change the order status from orderStatusEpoch to orderStatusRevoked.
 		coid, revTime, err := m.storage.RevokeOrder(ord)
 		if err == nil {
-			m.auth.RecordCancel(ord.User(), coid, ord.ID(), revTime)
+			m.auth.RecordCancel(user, coid, oid, revTime)
 		} else {
 			log.Errorf("Failed to revoke order %v with a new cancel order: %v",
 				ord.UID(), err)
 		}
 		// Register the preimage miss violation, adjusting the user's score.
-		m.auth.MissedPreimage(ord.User(), epochEnd, ord.ID())
+		m.auth.MissedPreimage(user, epochEnd, oid)
+		// The user is most likely offline, but it is possible they have
+		// reconnected too late for the preimage request but after
+		// storage.RevokeOrder updated the order status. Try to notify.
+		go m.sendRevokeOrderNote(oid, user)
 	}
 
 	// Register the preimage collection successes, potentially evicting preimage
@@ -2235,21 +2259,7 @@ func (m *Market) unbookedOrder(lo *order.LimitOrder) {
 	}
 
 	// Send revoke_order notification to order owner.
-	route := msgjson.RevokeOrderRoute
-	log.Infof("Sending a '%s' notification to %v for order %v", route, user, oid)
-	revMsg := &msgjson.RevokeOrder{
-		OrderID: oid.Bytes(),
-	}
-	m.auth.Sign(revMsg)
-	revNtfn, err := msgjson.NewNotification(route, revMsg)
-	if err != nil {
-		log.Errorf("Failed to create %s notification for order %v: %v", route, oid, err)
-	} else {
-		err = m.auth.Send(user, revNtfn)
-		if err != nil {
-			log.Debugf("Failed to send %s notification to user %v: %v", route, user, err)
-		}
-	}
+	m.sendRevokeOrderNote(oid, user)
 
 	// Send "unbook" notification to order book subscribers.
 	m.sendToFeeds(&updateSignal{
