@@ -2589,16 +2589,33 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 		log.Errorf("Error updating API data collector: %v", err)
 	}
 
+	basicMatchesSell := make(map[uint64]uint64)
+	basicMatchesBuy := make(map[uint64]uint64)
+	for _, matchSet := range matches {
+		for _, match := range matchSet.Matches() {
+			// skip cancel order types
+			if _, ok := match.Taker.(*order.CancelOrder); ok {
+				continue
+			}
+			if match.Taker.Trade() != nil && match.Taker.Trade().Sell {
+				basicMatchesSell[match.Rate] += match.Quantity
+			} else {
+				basicMatchesBuy[match.Rate] += match.Quantity
+			}
+		}
+	}
 	// Send "epoch_report" notifications.
 	notifyChan <- &updateSignal{
 		action: epochReportAction,
 		data: sigDataEpochReport{
-			epochIdx:     epoch.Epoch,
-			epochDur:     epoch.Duration,
-			spot:         spot,
-			stats:        stats,
-			baseFeeRate:  feeRateBase,
-			quoteFeeRate: feeRateQuote,
+			epochIdx:           epoch.Epoch,
+			epochDur:           epoch.Duration,
+			spot:               spot,
+			stats:              stats,
+			baseFeeRate:        feeRateBase,
+			quoteFeeRate:       feeRateQuote,
+			matchesSummaryBuy:  basicMatchesBuy,
+			matchesSummarySell: basicMatchesSell,
 		},
 	}
 

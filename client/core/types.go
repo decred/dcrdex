@@ -596,6 +596,7 @@ const (
 	UnbookOrderAction     = "unbook_order"
 	UpdateRemainingAction = "update_remaining"
 	CandleUpdateAction    = "candle_update"
+	EpochMatchSummary     = "epoch_match_summary"
 )
 
 // BookUpdate is an order book update.

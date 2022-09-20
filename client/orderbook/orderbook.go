@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
@@ -54,6 +55,13 @@ type rateSell struct {
 	sell bool
 }
 
+type MatchSummary struct {
+	Rate uint64    `json:"rate"`
+	Qty  uint64    `json:"qty"`
+	Age  time.Time `json:"age"`
+	Sell bool      `json:"sell"`
+}
+
 // OrderBook represents a client tracked order book.
 type OrderBook struct {
 	log      dex.Logger
@@ -78,6 +86,9 @@ type OrderBook struct {
 	currentEpoch uint64
 	proofedEpoch uint64
 	epochQueues  map[uint64]*EpochQueue
+
+	matchSummaryMtx sync.Mutex
+	matchesSummary  []*MatchSummary
 
 	// feeRates is a separate struct to account for atomic field alignment in
 	// 32-bit systems. See also https://golang.org/pkg/sync/atomic/#pkg-note-BUG
@@ -603,4 +614,59 @@ func (ob *OrderBook) BestFill(sell bool, qty uint64) ([]*Fill, bool) {
 // The qty given will be in units of quote asset.
 func (ob *OrderBook) BestFillMarketBuy(qty, lotSize uint64) ([]*Fill, bool) {
 	return ob.sells.bestFill(qty, true, lotSize)
+}
+
+// SetMatchesSummary set matches summary. If the matches summary length grows
+// bigger than 100, it will slice out the ones first added.
+func (ob *OrderBook) SetMatchesSummary(matches map[uint64]uint64, ts uint64, sell bool) {
+	if matches == nil {
+		return
+	}
+	newMatchesSummary := make([]*MatchSummary, len(matches))
+	i := 0
+	for rate, qty := range matches {
+		newMatchesSummary[i] = &MatchSummary{
+			Rate: rate,
+			Qty:  qty,
+			Age:  time.UnixMilli(int64(ts)),
+			Sell: sell,
+		}
+		i++
+	}
+
+	ob.matchSummaryMtx.Lock()
+	defer ob.matchSummaryMtx.Unlock()
+	if ob.matchesSummary == nil {
+		ob.matchesSummary = newMatchesSummary
+		return
+	}
+	ob.matchesSummary = append(newMatchesSummary, ob.matchesSummary...)
+	maxLength := 100
+	// if ob.matchesSummary length is greater than max length, we slice the array
+	// to maxLength, removing values first added.
+	if len(ob.matchesSummary) > maxLength {
+		ob.matchesSummary = ob.matchesSummary[:maxLength]
+	}
+}
+
+// GetMatchesSummary returns a deep copy of MatchesSummary
+func (ob *OrderBook) GetMatchesSummary() []MatchSummary {
+	ob.matchSummaryMtx.Lock()
+	defer ob.matchSummaryMtx.Unlock()
+	matchesSummary := make([]MatchSummary, len(ob.matchesSummary))
+	for i := 0; i < len(ob.matchesSummary); i++ {
+		matchesSummary[i] = ob.matchesSummary[i].copy()
+	}
+	return matchesSummary
+}
+
+// makes a copy of a MatchSummary
+func (ob *MatchSummary) copy() MatchSummary {
+	matchSummary := MatchSummary{
+		Rate: ob.Rate,
+		Qty:  ob.Qty,
+		Age:  ob.Age,
+		Sell: ob.Sell,
+	}
+	return matchSummary
 }

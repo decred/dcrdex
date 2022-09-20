@@ -1177,6 +1177,9 @@ type EpochReportNote struct {
 	Epoch        uint64 `json:"epoch"`
 	BaseFeeRate  uint64 `json:"baseFeeRate"`
 	QuoteFeeRate uint64 `json:"quoteFeeRate"`
+	// quantity of matches by rate: [rate]qty
+	MatchesSummaryBuy  map[uint64]uint64 `json:"matchesSummaryBuy"`
+	MatchesSummarySell map[uint64]uint64 `json:"matchesSummarySell"`
 	Candle
 }
 
