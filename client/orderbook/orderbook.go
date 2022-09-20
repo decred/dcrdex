@@ -641,13 +641,32 @@ func (ob *OrderBook) SetMatchesSummary(matches map[uint64]uint64, ts uint64, sel
 		return
 	}
 	ob.matchesSummary = append(newMatchesSummary, ob.matchesSummary...)
-	maxLength := 1000
-	// if maxLength is greater than 100, slice it and left the first 100.
-	if len(ob.matchesSummary) > maxLength+100 {
-		ob.matchesSummary = ob.matchesSummary[maxLength:]
+	maxLength := 100
+	// if ob.matchesSummary length is greater than max length, we slice the array
+	// to maxLength, removing values first added.
+	if len(ob.matchesSummary) > maxLength {
+		ob.matchesSummary = ob.matchesSummary[:maxLength]
 	}
 }
 
-func (ob *OrderBook) GetMatchesSummary() []*MatchSummary {
-	return ob.matchesSummary
+// GetMatchesSummary returns a deep copy of MatchesSummary
+func (ob *OrderBook) GetMatchesSummary() []MatchSummary {
+	ob.matchSummaryMtx.Lock()
+	defer ob.matchSummaryMtx.Unlock()
+	matchesSummary := make([]MatchSummary, len(ob.matchesSummary))
+	for i := 0; i < len(ob.matchesSummary); i++ {
+		matchesSummary[i] = ob.matchesSummary[i].copy()
+	}
+	return matchesSummary
+}
+
+// makes a copy of a MatchSummary
+func (ob *MatchSummary) copy() MatchSummary {
+	matchSummary := MatchSummary{
+		Rate: ob.Rate,
+		Qty:  ob.Qty,
+		Age:  ob.Age,
+		Sell: ob.Sell,
+	}
+	return matchSummary
 }
