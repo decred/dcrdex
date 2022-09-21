@@ -74,7 +74,7 @@ var ZhCN = map[string]string{
 	"lot":                            "很多",
 	"Price":                          "价格",
 	"Lots":                           "很多",
-	"min trade is about":             "min trade is about",
+	"min trade is about":             "最小交易额",
 	"immediate_explanation":          "如果订单在下一个匹配周期内不能完全匹配，不匹配的数量将不会被再次匹配。需要重新设置订单。",
 	"Immediate or cancel":            "立即或取消",
 	"Balances":                       "余额",
@@ -105,7 +105,7 @@ var ZhCN = map[string]string{
 	"auth_order_app_pw":              "输入您的应用程序密码授权此订单。",
 	"lots":                           "手数",
 	"order_disclaimer": `<span class="red">请注意</span>：交易需要时间结算，您不能关闭 DEX 客户端软件，
-		 以及<span data-unit="报价"></span> 或 <span data-unit="基础"></span> 钱包软件，直到
+		 以及<span data-unit="quote"></span> 或 <span data-unit="base"></span> 钱包软件，直到
 		结算完成。结算可能在几分钟内完成，也可能需要几个小时完成。`,
 	"Order":                     "订单",
 	"see all orders":            "查看所有订单",
