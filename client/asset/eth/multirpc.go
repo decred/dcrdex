@@ -46,10 +46,19 @@ const (
 	// receiptCacheExpiration is how long we will track a receipt after the
 	// last request. There is no persistent storage, so all receipts are cached
 	// in-memory.
+<<<<<<< HEAD
 	receiptCacheExpiration     = time.Hour
 	tipCapSuggestionExpiration = time.Hour
 	ipcHost                    = "IPC"
 	providerDelimiter          = " "
+=======
+	receiptCacheExpiration       = time.Hour
+	unconfirmedReceiptExpiration = time.Minute
+	tipCapSuggestionExpiration   = time.Hour
+	ipcHost                      = "IPC"
+	brickedFailCount             = 100
+	providerDelimiter            = " "
+>>>>>>> add receipt cache test
 )
 
 // nonceProviderStickiness is the minimum amount of time that must pass between
@@ -507,8 +516,6 @@ func (m *multiRPCClient) reconfigure(ctx context.Context, settings map[string]st
 }
 
 func (m *multiRPCClient) cachedReceipt(txHash common.Hash) *types.Receipt {
-	const cacheExpiration = time.Minute
-
 	m.receipts.Lock()
 	defer m.receipts.Unlock()
 
@@ -537,7 +544,7 @@ func (m *multiRPCClient) cachedReceipt(txHash common.Hash) *types.Receipt {
 		if cached.confirmed {
 			cached.lastAccess = time.Now()
 		}
-		if time.Since(cached.lastAccess) < cacheExpiration {
+		if time.Since(cached.lastAccess) < unconfirmedReceiptExpiration {
 			return cached.r
 		}
 	}

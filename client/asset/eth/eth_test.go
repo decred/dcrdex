@@ -4601,6 +4601,7 @@ func testMaxSwapRedeemLots(t *testing.T, assetID uint32) {
 	}
 }
 
+<<<<<<< HEAD
 func TestSwapOrRedemptionFeesPaid(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -4788,6 +4789,52 @@ func TestSwapOrRedemptionFeesPaid(t *testing.T) {
 			}
 		}
 	}
+=======
+func TestReceiptCache(t *testing.T) {
+	m := &multiRPCClient{}
+	c := make(map[common.Hash]*receiptRecord)
+	m.receipts.cache = c
+
+	r := &receiptRecord{
+		r: &types.Receipt{
+			Type: 50,
+		},
+		lastAccess: time.Now(),
+	}
+
+	var txHash common.Hash
+	copy(txHash[:], encode.RandomBytes(32))
+	c[txHash] = r
+
+	if r := m.cachedReceipt(txHash); r == nil {
+		t.Fatalf("cached receipt not returned")
+	}
+
+	r.lastAccess = time.Now().Add(-(unconfirmedReceiptExpiration + 1))
+	if r := m.cachedReceipt(txHash); r != nil {
+		t.Fatalf("expired receipt returned")
+	}
+
+	// The receipt still hasn't been pruned.
+	if len(c) != 1 {
+		t.Fatalf("receipt was pruned?")
+	}
+
+	// An if it was confirmed, it would be returned.
+	r.confirmed = true
+	if r := m.cachedReceipt(txHash); r == nil {
+		t.Fatalf("confirmed receipt not returned")
+	}
+
+	r.lastAccess = time.Now().Add(-(receiptCacheExpiration + 1))
+	m.receipts.lastClean = time.Time{}
+	m.cachedReceipt(common.Hash{})
+	// The receipt still hasn't been pruned.
+	if len(c) != 0 {
+		t.Fatalf("receipt wasn't pruned")
+	}
+
+>>>>>>> add receipt cache test
 }
 
 func parseRecoveryID(c asset.Coin) []byte {
