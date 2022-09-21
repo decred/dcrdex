@@ -751,7 +751,6 @@ export default class MarketsPage extends BasePage {
       this.maxEstimateTimer = null
     }
     const mktId = marketID(baseCfg.symbol, quoteCfg.symbol)
-    this.setToRecentMatches(dex.markets[mktId].recentmatches)
     this.market = {
       dex: dex,
       sid: mktId, // A string market identifier used by the DEX.
@@ -780,7 +779,6 @@ export default class MarketsPage extends BasePage {
       if (dex.candleDurs.indexOf(this.candleDur) === -1) this.candleDur = dex.candleDurs[0]
       this.loadCandles()
     }
-    this.refreshRecentMatchesTable()
     this.setLoaderMsgVisibility()
     this.setRegistrationStatusVisibility()
     this.resolveOrderFormVisibility()
@@ -1087,6 +1085,8 @@ export default class MarketsPage extends BasePage {
       return
     }
     this.depthChart.set(this.book, cfg.lotsize, cfg.ratestep, baseUnitInfo, quoteUnitInfo)
+    this.recentMatches = data.book.recentMatches ?? []
+    this.refreshRecentMatchesTable()
   }
 
   /*
@@ -1384,7 +1384,7 @@ export default class MarketsPage extends BasePage {
   }
 
   handleEpochMatchSummary (data: BookUpdate) {
-    this.setToRecentMatches(data.payload)
+    this.addRecentMatches(data.payload)
     this.refreshRecentMatchesTable()
   }
 
@@ -1892,7 +1892,7 @@ export default class MarketsPage extends BasePage {
       case 'qty':
         return (a: RecentMatch, b: RecentMatch) => this.recentMatchesSortDirection * (a.qty - b.qty)
       case 'age':
-        return (a: RecentMatch, b:RecentMatch) => this.recentMatchesSortDirection * (a.age.getTime() - b.age.getTime())
+        return (a: RecentMatch, b:RecentMatch) => this.recentMatchesSortDirection * (a.stamp - b.stamp)
     }
   }
 
@@ -1910,20 +1910,15 @@ export default class MarketsPage extends BasePage {
       updateDataCol(row, 'rate', Doc.formatCoinValue(match.rate / this.market.rateConversionFactor))
       // change rate color based if is sell or not.
       updateDataCol(row, 'qty', Doc.formatCoinValue(match.qty, this.market.baseUnitInfo))
-      updateDataCol(row, 'age', match.age.toLocaleTimeString())
+      updateDataCol(row, 'age', new Date(match.stamp).toLocaleTimeString())
       row.classList.add(match.sell ? 'sellcolor' : 'buycolor')
 
       page.recentMatchesLiveList.append(row)
     }
   }
 
-  setToRecentMatches (matches: RecentMatch[]) {
-    // if does not have new matches, just skip.
-    if (!matches) return
-    for (let i = 0; i < matches.length; i++) {
-      matches[i].age = new Date(matches[i].age)
-    }
-    this.recentMatches = matches
+  addRecentMatches (matches: RecentMatch[]) {
+    this.recentMatches = [...matches, ...this.recentMatches].slice(0, 100)
   }
 
   setBalanceVisibility () {

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
@@ -56,10 +55,10 @@ type rateSell struct {
 }
 
 type MatchSummary struct {
-	Rate uint64    `json:"rate"`
-	Qty  uint64    `json:"qty"`
-	Age  time.Time `json:"age"`
-	Sell bool      `json:"sell"`
+	Rate  uint64 `json:"rate"`
+	Qty   uint64 `json:"qty"`
+	Stamp uint64 `json:"stamp"`
+	Sell  bool   `json:"sell"`
 }
 
 // OrderBook represents a client tracked order book.
@@ -616,57 +615,49 @@ func (ob *OrderBook) BestFillMarketBuy(qty, lotSize uint64) ([]*Fill, bool) {
 	return ob.sells.bestFill(qty, true, lotSize)
 }
 
-// SetMatchesSummary set matches summary. If the matches summary length grows
-// bigger than 100, it will slice out the ones first added.
-func (ob *OrderBook) SetMatchesSummary(matches map[uint64]uint64, ts uint64, sell bool) {
+// AddRecentMatches adds the recent matches. If the recent matches cache length
+// grows bigger than 100, it will slice out the ones first added.
+func (ob *OrderBook) AddRecentMatches(matches [][2]int64, ts uint64) []*MatchSummary {
 	if matches == nil {
-		return
+		return nil
 	}
-	newMatchesSummary := make([]*MatchSummary, len(matches))
-	i := 0
-	for rate, qty := range matches {
-		newMatchesSummary[i] = &MatchSummary{
-			Rate: rate,
-			Qty:  qty,
-			Age:  time.UnixMilli(int64(ts)),
-			Sell: sell,
+	newMatches := make([]*MatchSummary, len(matches))
+	for i, m := range matches {
+		rate, qty := m[0], m[1]
+		// negative qty means maker is a sell
+		sell := true
+		if qty < 0 {
+			qty *= -1
+			sell = false
 		}
-		i++
+		newMatches[i] = &MatchSummary{
+			Rate:  uint64(rate),
+			Qty:   uint64(qty),
+			Stamp: ts,
+			Sell:  sell,
+		}
+	}
+
+	// Put the newest first.
+	for i, j := 0, len(newMatches)-1; i < j; i, j = i+1, j-1 {
+		newMatches[i], newMatches[j] = newMatches[j], newMatches[i]
 	}
 
 	ob.matchSummaryMtx.Lock()
 	defer ob.matchSummaryMtx.Unlock()
-	if ob.matchesSummary == nil {
-		ob.matchesSummary = newMatchesSummary
-		return
-	}
-	ob.matchesSummary = append(newMatchesSummary, ob.matchesSummary...)
-	maxLength := 100
+	ob.matchesSummary = append(newMatches, ob.matchesSummary...)
+	const maxLength = 100
 	// if ob.matchesSummary length is greater than max length, we slice the array
 	// to maxLength, removing values first added.
 	if len(ob.matchesSummary) > maxLength {
 		ob.matchesSummary = ob.matchesSummary[:maxLength]
 	}
+	return newMatches
 }
 
-// GetMatchesSummary returns a deep copy of MatchesSummary
-func (ob *OrderBook) GetMatchesSummary() []MatchSummary {
+// RecentMatches returns a deep copy of MatchesSummary
+func (ob *OrderBook) RecentMatches() []*MatchSummary {
 	ob.matchSummaryMtx.Lock()
 	defer ob.matchSummaryMtx.Unlock()
-	matchesSummary := make([]MatchSummary, len(ob.matchesSummary))
-	for i := 0; i < len(ob.matchesSummary); i++ {
-		matchesSummary[i] = ob.matchesSummary[i].copy()
-	}
-	return matchesSummary
-}
-
-// makes a copy of a MatchSummary
-func (ob *MatchSummary) copy() MatchSummary {
-	matchSummary := MatchSummary{
-		Rate: ob.Rate,
-		Qty:  ob.Qty,
-		Age:  ob.Age,
-		Sell: ob.Sell,
-	}
-	return matchSummary
+	return ob.matchesSummary
 }

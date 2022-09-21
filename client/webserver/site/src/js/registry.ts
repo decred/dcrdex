@@ -56,7 +56,6 @@ export interface Market {
   buybuffer: number
   orders: Order[]
   spot: Spot
-  recentmatches: RecentMatch[]
 }
 
 export interface Order {
@@ -319,7 +318,7 @@ export interface OrderNote extends CoreNote {
 export interface RecentMatch {
   rate: number
   qty: number
-  age: Date
+  stamp: number
   sell: boolean
 }
 
@@ -468,6 +467,7 @@ export interface CoreOrderBook {
   sells: MiniOrder[]
   buys: MiniOrder[]
   epoch: MiniOrder[]
+  recentMatches: RecentMatch[]
 }
 
 export interface MarketOrderBook {
