@@ -340,6 +340,7 @@ export class NewWalletForm {
     // A seeded or token wallet is internal to the dex client and as such does
     // not have an external config file to select.
     if (walletDef.seeded || Boolean(this.current.asset.token)) Doc.hide(this.subform.fileSelector)
+    else Doc.show(this.subform.fileSelector)
 
     this.refresh()
     await this.loadDefaults()
