@@ -506,6 +506,44 @@ func (m *multiRPCClient) reconfigure(ctx context.Context, settings map[string]st
 	return nil
 }
 
+func (m *multiRPCClient) cachedReceipt(txHash common.Hash) *types.Receipt {
+	const cacheExpiration = time.Minute
+
+	m.receipts.Lock()
+	defer m.receipts.Unlock()
+
+	cached := m.receipts.cache[txHash]
+
+	// Periodically clean up the receipts.
+	if time.Since(m.receipts.lastClean) > time.Minute*20 {
+		m.receipts.lastClean = time.Now()
+		defer func() {
+			for txHash, rec := range m.receipts.cache {
+				if time.Since(rec.lastAccess) > receiptCacheExpiration {
+					delete(m.receipts.cache, txHash)
+				}
+			}
+		}()
+	}
+
+	// If confirmed or if it was just fetched, return it as is.
+	if cached != nil {
+		// If the cached receipt has the requisite confirmations, it's always
+		// considered good and we'll just update the lastAccess stamp so we don't
+		// delete it from the map.
+		// If it's not confirmed, we never update the lastAccess stamp, which just
+		// serves to age out the receipt so a new one can be requested and
+		// confirmations checked again.
+		if cached.confirmed {
+			cached.lastAccess = time.Now()
+		}
+		if time.Since(cached.lastAccess) < cacheExpiration {
+			return cached.r
+		}
+	}
+	return nil
+}
+
 // cleanReceipts cleans up the receipt cache, deleting any receipts that haven't
 // been access for > receiptCacheExpiration.
 func (m *multiRPCClient) cleanReceipts() {
@@ -526,23 +564,8 @@ func (m *multiRPCClient) transactionReceipt(ctx context.Context, txHash common.H
 		return nil, nil, err
 	}
 
-	// Check the cache.
-	const cacheExpiration = time.Minute
-
-	m.receipts.RLock()
-	cached := m.receipts.cache[txHash]
-	if cached != nil && cached.confirmed {
-		cached.lastAccess = time.Now()
-	}
-	if time.Since(m.receipts.lastClean) > time.Minute*20 {
-		m.receipts.lastClean = time.Now()
-		go m.cleanReceipts()
-	}
-	m.receipts.RUnlock()
-
-	// If confirmed or if it was just fetched, return it as is.
-	if cached != nil && (cached.confirmed || time.Since(cached.lastAccess) < cacheExpiration) {
-		return cached.r, tx, nil
+	if r = m.cachedReceipt(txHash); r != nil {
+		return r, tx, nil
 	}
 
 	// Fetch a fresh one.
