@@ -206,7 +206,9 @@ func prepareMarkets(db *sql.DB, mktConfig []*dex.MarketInfo) ([]string, error) {
 				if err != nil {
 					return nil, fmt.Errorf("unable to update lot size for %s: %w", mkt.Name, err)
 				}
-				purgeMarkets = append(purgeMarkets, mkt.Name)
+				// archiver.markets use market schema name.
+				schema := marketSchema(mkt.Name)
+				purgeMarkets = append(purgeMarkets, schema)
 			}
 		}
 
