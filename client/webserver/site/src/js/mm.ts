@@ -99,7 +99,7 @@ const oracleBiasOption: OrderOption = createXYRange(oracleBiasBaseOption, oracle
 const driftToleranceBaseOption: BaseOption = {
   key: 'driftTolerance',
   displayname: 'Drift Tolerance',
-  description: 'How far from the ideal price will we allow orders to drift? Typically a fraction of a percent.',
+  description: 'How far from the ideal price will we allow orders to drift. Typically a fraction of a percent.',
   default: 0.001,
   max: 0.01,
   min: 0
@@ -735,6 +735,7 @@ export default class MarketMakerPage extends BasePage {
     this.driftToleranceOpt.setValue(pgm.driftTolerance)
     page.gapStrategySelect.value = pgm.gapStrategy
     this.updateGapStrategyInputVisibility()
+    this.createOptsUpdated()
 
     switch (pgm.gapStrategy) {
       case GapStrategyPercent:

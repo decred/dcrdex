@@ -1702,7 +1702,8 @@ func (btc *baseWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
 }
 
 // SingleLotSwapFees is a fallback for PreSwap that uses estimation when funds
-// aren't available. The returned fees are the RealisticWorstCase.
+// aren't available. The returned fees are the RealisticWorstCase.  The Lots
+// field of the PreSwapForm is ignored and assumed to be a single lot.
 func (btc *baseWallet) SingleLotSwapFees(form *asset.PreSwapForm) (fees uint64, err error) {
 	// Load the user's selected order-time options.
 	customCfg := new(swapOptions)
@@ -1733,18 +1734,18 @@ func (btc *baseWallet) SingleLotSwapFees(form *asset.PreSwapForm) (fees uint64, 
 		} else {
 			fees += (dexbtc.MinimumTxOverhead + dexbtc.RedeemP2PKHInputSize + dexbtc.P2PKHOutputSize) * bumpedNetRate
 		}
-
 	}
 
 	var inputSize uint64
 	if btc.segwit {
-		inputSize = dexbtc.TxInOverhead + 1 + dexbtc.RedeemP2PKHSigScriptSize
-	} else {
 		inputSize = dexbtc.RedeemP2WPKHInputSize
+	} else {
+		inputSize = dexbtc.RedeemP2PKHInputSize
 	}
 
 	nfo := form.AssetConfig
-	swapFunds := calc.RequiredOrderFundsAlt(form.LotSize, inputSize, 1, nfo.SwapSizeBase, nfo.SwapSize, bumpedNetRate)
+	const maxSwaps = 1 // Assumed single lot order
+	swapFunds := calc.RequiredOrderFundsAlt(form.LotSize, inputSize, maxSwaps, nfo.SwapSizeBase, nfo.SwapSize, bumpedNetRate)
 	fees += swapFunds - form.LotSize
 
 	return fees, nil
@@ -1943,7 +1944,8 @@ func (btc *baseWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, er
 }
 
 // SingleLotRedeemFees is a fallback for PreRedeem that uses estimation when
-// funds aren't available. The returned fees are the RealisticWorstCase.
+// funds aren't available. The returned fees are the RealisticWorstCase.  The
+// Lots field of the PreSwapForm is ignored and assumed to be a single lot.
 func (btc *baseWallet) SingleLotRedeemFees(req *asset.PreRedeemForm) (uint64, error) {
 	// For BTC, there are no funds required to redeem, so we'll never actually
 	// end up here unless there are some bad order options, since this method

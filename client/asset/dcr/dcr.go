@@ -1335,9 +1335,9 @@ func (dcr *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 	}, nil
 }
 
-// SingleLotSwapFees is a fallback for PreSwap that uses estimation
-// when funds aren't available. The returned fees are the
-// RealisticWorstCase.
+// SingleLotSwapFees is a fallback for PreSwap that uses estimation when funds
+// aren't available. The returned fees are the RealisticWorstCase. The Lots
+// field of the PreSwapForm is ignored and assumed to be a single lot.
 func (dcr *ExchangeWallet) SingleLotSwapFees(form *asset.PreSwapForm) (fees uint64, err error) {
 	// Load the user's selected order-time options.
 	customCfg := new(swapOptions)
@@ -1367,7 +1367,8 @@ func (dcr *ExchangeWallet) SingleLotSwapFees(form *asset.PreSwapForm) (fees uint
 	}
 
 	nfo := form.AssetConfig
-	swapFunds := calc.RequiredOrderFundsAlt(form.LotSize, dexdcr.P2PKHInputSize, 1, nfo.SwapSizeBase, nfo.SwapSize, bumpedNetRate)
+	const maxSwaps = 1 // Assumed single lot order
+	swapFunds := calc.RequiredOrderFundsAlt(form.LotSize, dexdcr.P2PKHInputSize, maxSwaps, nfo.SwapSizeBase, nfo.SwapSize, bumpedNetRate)
 	fees += swapFunds - form.LotSize
 
 	return fees, nil

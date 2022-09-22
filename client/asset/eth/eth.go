@@ -1131,7 +1131,8 @@ func (w *assetWallet) preSwap(req *asset.PreSwapForm, feeWallet *assetWallet) (*
 }
 
 // SingleLotSwapFees is a fallback for PreSwap that uses estimation when funds
-// aren't available. The returned fees are the RealisticWorstCase.
+// aren't available. The returned fees are the RealisticWorstCase. The Lots
+// field of the PreSwapForm is ignored and assumed to be a single lot.
 func (w *assetWallet) SingleLotSwapFees(form *asset.PreSwapForm) (fees uint64, err error) {
 	return form.AssetConfig.SwapSize * form.FeeSuggestion, nil
 }
@@ -1211,7 +1212,8 @@ func (w *assetWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, err
 }
 
 // SingleLotRedeemFees is a fallback for PreRedeem that uses estimation when
-// funds aren't available. The returned fees are the RealisticWorstCase.
+// funds aren't available. The returned fees are the RealisticWorstCase.  The
+// Lots field of the PreSwapForm is ignored and assumed to be a single lot.
 func (w *assetWallet) SingleLotRedeemFees(form *asset.PreSwapForm) (fees uint64, err error) {
 	redeemSize := form.AssetConfig.RedeemSize
 	if redeemSize == 0 {

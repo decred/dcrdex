@@ -234,18 +234,16 @@ func (dc *dexConnection) coreMarket(mktName string) *Market {
 	if cfg == nil {
 		return nil
 	}
-	var msgMkt *msgjson.Market
+	var mkt *Market
 	for _, m := range cfg.Markets {
 		if m.Name == mktName {
-			msgMkt = m
+			mkt = coreMarketFromMsgMarket(dc, m)
 			break
 		}
 	}
-	if msgMkt == nil {
+	if mkt == nil {
 		return nil
 	}
-
-	mkt := coreMarketFromMsgMarket(dc, msgMkt)
 
 	// Populate spots.
 	dc.spotsMtx.RLock()

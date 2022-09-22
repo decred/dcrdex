@@ -41,30 +41,19 @@ func TestFetchEXMOSpread(t *testing.T) {
 	testSpreader(t, fetchEXMOSpread, "dcr", "btc")
 }
 
-func TestMarketAveragedPrice(t *testing.T) {
+func TestOracleMarketReport(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	m := &makerBot{
-		Core: &Core{},
-		base: &makerAsset{
-			Asset: &dex.Asset{Symbol: "dcr"},
-			Name:  "Decred",
-		},
-		quote: &makerAsset{
-			Asset: &dex.Asset{Symbol: "btc"},
-			Name:  "Bitcoin",
-		},
-		log: dex.StdOutLogger("T", dex.LevelTrace),
-		market: &Market{
-			Name: "dcr_btc",
-		},
-	}
+	b := &SupportedAsset{Symbol: "dcr", Name: "Decred"}
+	q := &SupportedAsset{Symbol: "btc", Name: "Bitcoin"}
 
-	p, err := m.marketAveragedPrice(ctx)
+	oracles, err := oracleMarketReport(ctx, b, q, dex.StdOutLogger("T", dex.LevelTrace))
 	if err != nil {
 		t.Fatal(err)
-	} else {
-		fmt.Printf("Success: price = %f \n", p)
 	}
+	for _, o := range oracles {
+		fmt.Printf("Success: %s price = %f \n", o.Host, (o.BestBuy+o.BestSell)/2)
+	}
+
 }

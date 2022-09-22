@@ -702,10 +702,12 @@ type Bond struct {
 type BotWallet interface {
 	// SingleLotSwapFees is a fallback for PreSwap that uses estimation
 	// when funds aren't available. The returned fees are the
-	// RealisticWorstCase.
+	// RealisticWorstCase. The Lots field of the PreSwapForm is ignored and
+	// assumed to be a single lot.
 	SingleLotSwapFees(*PreSwapForm) (uint64, error)
 	// SingleLotRedeemFees is a fallback for PreRedeem that uses estimation when
-	// funds aren't available. The returned fees are the RealisticWorstCase.
+	// funds aren't available. The returned fees are the RealisticWorstCase. The
+	// Lots field of the PreSwapForm is ignored and assumed to be a single lot.
 	SingleLotRedeemFees(*PreRedeemForm) (uint64, error)
 }
 

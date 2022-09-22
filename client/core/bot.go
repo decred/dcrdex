@@ -84,7 +84,8 @@ type MakerProgram struct {
 	GapFactor float64 `json:"gapFactor"`
 
 	// DriftTolerance is how far away from an ideal price an order can drift
-	// before it will replaced (units: ratio of price). Default 0.1%
+	// before it will replaced (units: ratio of price). Default: 0.1%.
+	// 0 <= x <= 0.01.
 	DriftTolerance float64 `json:"driftTolerance"`
 
 	// OracleWeighting affects how the target price is derived based on external
@@ -96,7 +97,7 @@ type MakerProgram struct {
 	OracleWeighting *float64 `json:"oracleWeighting"`
 
 	// OracleBias applies a bias in the positive (higher price) or negative
-	// (lower price) direction.
+	// (lower price) direction. -0.05 <= x <= 0.05.
 	OracleBias float64 `json:"oracleBias"`
 
 	// EmptyMarketRate can be set if there is no market data available, and is
@@ -334,7 +335,7 @@ func (m *makerBot) program() *MakerProgram {
 }
 
 // liverOrderIDs returns a list of order IDs of all orders created and
-// currrently monitored by the makerBot.
+// currently monitored by the makerBot.
 func (m *makerBot) liveOrderIDs() []order.OrderID {
 	m.ordMtx.RLock()
 	oids := make([]order.OrderID, 0, len(m.ords))
@@ -353,9 +354,9 @@ func (m *makerBot) retire() {
 	m.stop()
 	if err := m.db.RetireBotProgram(m.pgmID); err != nil {
 		m.log.Errorf("error retiring bot program")
-	} else {
-		m.notify(newBotNote(TopicBotRetired, "", "", db.Data, m.report()))
+		return
 	}
+	m.notify(newBotNote(TopicBotRetired, "", "", db.Data, m.report()))
 }
 
 // stop stops the bot and cancels all live orders. Note that stop is not called
@@ -421,7 +422,6 @@ func (m *makerBot) run(ctx context.Context) {
 	go func() {
 		defer m.wg.Done()
 		defer func() { m.notify(newBotNote(TopicBotStopped, "", "", db.Data, m.report())) }()
-		defer atomic.StoreUint32(&m.running, 0)
 		defer m.returnFeed(cid)
 		for {
 			select {
@@ -507,8 +507,8 @@ func (m *makerBot) updateProgram(pgm *MakerProgram) error {
 	return nil
 }
 
-// syncOraclePrice retreives price data for the makerBot's market and
-// and returns the volume-weighted average price.
+// syncOraclePrice retreives price data for the makerBot's market and returns
+// the volume-weighted average price.
 func (m *makerBot) syncOraclePrice(ctx context.Context) (float64, error) {
 	_, price, err := m.Core.marketReport(ctx, m.base.SupportedAsset, m.quote.SupportedAsset)
 	return price, err
@@ -690,20 +690,19 @@ func (c *Core) marketReport(ctx context.Context, b, q *SupportedAsset) ([]*Oracl
 // oracleAverage averages the oracle market data into a volume-weighted average
 // price.
 func oracleAverage(mkts []*OracleReport, log dex.Logger) (float64, error) {
-	var weightedSum, totalWeight, usdVolume float64
+	var weightedSum, usdVolume float64
 	var n int
 	for _, mkt := range mkts {
 		n++
 		weightedSum += mkt.USDVol * (mkt.BestBuy + mkt.BestSell) / 2
-		totalWeight += mkt.USDVol
 		usdVolume += mkt.USDVol
 	}
-	if totalWeight == 0 {
+	if usdVolume == 0 {
 		log.Tracef("marketAveragedPrice: no markets")
 		return 0, ErrNoMarkets
 	}
 
-	rate := weightedSum / totalWeight
+	rate := weightedSum / usdVolume
 	// TODO: Require a minimum USD volume?
 	log.Tracef("marketAveragedPrice: price calculated from %d markets: rate = %f, USD volume = %f", n, rate, usdVolume)
 	return rate, nil
@@ -1263,9 +1262,6 @@ func (c *Core) feeEstimates(form *TradeForm) (swapFees, redeemFees uint64, err e
 	return
 }
 
-// breakEvenHalfSpread is the minimum spread that should be maintained to
-// theoretically break even on a single-lot round-trip order pair. The returned
-// spread half-width will be rounded up to an integer multiple of the rate step.
 func (m *makerBot) halfSpread(basisPrice uint64) (uint64, error) {
 	pgm := m.program()
 	return breakEvenHalfSpread(pgm.Host, m.market, basisPrice, m.Core, m.log)
@@ -1391,7 +1387,7 @@ func (c *Core) prepareBotWallets(crypter encrypt.Crypter, baseID, quoteID uint32
 	return nil
 }
 
-// CreateBot creates a market-maker bot.
+// CreateBot creates and starts a market-maker bot.
 func (c *Core) CreateBot(pw []byte, botType string, pgm *MakerProgram) (uint64, error) {
 	if botType != MakerBotV0 {
 		return 0, fmt.Errorf("unknown bot type %q", botType)
@@ -1401,6 +1397,7 @@ func (c *Core) CreateBot(pw []byte, botType string, pgm *MakerProgram) (uint64, 
 	if err != nil {
 		return 0, codedError(passwordErr, err)
 	}
+	defer crypter.Close()
 
 	if err := c.prepareBotWallets(crypter, pgm.BaseID, pgm.QuoteID); err != nil {
 		return 0, err
@@ -1428,6 +1425,7 @@ func (c *Core) StartBot(pw []byte, pgmID uint64) error {
 	if err != nil {
 		return codedError(passwordErr, err)
 	}
+	defer crypter.Close()
 
 	c.mm.RLock()
 	bot := c.mm.bots[pgmID]
@@ -1437,7 +1435,7 @@ func (c *Core) StartBot(pw []byte, pgmID uint64) error {
 	}
 
 	if atomic.LoadUint32(&bot.running) == 1 {
-		c.log.Warnf("Ignoring attempt to start an alread-running bot for %s", bot.market.Name)
+		c.log.Warnf("Ignoring attempt to start an already-running bot for %s", bot.market.Name)
 		return nil
 	}
 
@@ -1479,8 +1477,8 @@ func (c *Core) UpdateBotProgram(pgmID uint64, pgm *MakerProgram) error {
 
 // RetireBot stops a bot and deletes its program from the database.
 func (c *Core) RetireBot(pgmID uint64) error {
-	c.mm.RLock()
-	defer c.mm.RUnlock()
+	c.mm.Lock()
+	defer c.mm.Unlock()
 	bot := c.mm.bots[pgmID]
 	if bot == nil {
 		return fmt.Errorf("no bot with program ID %d", pgmID)
@@ -1562,6 +1560,23 @@ func (c *Core) MarketReport(host string, baseID, quoteID uint32) (*MarketReport,
 
 	r := &MarketReport{}
 
+	// The break-even spread depends on the basis price. So we need to
+	// exhaust all possible options to get a basis price before performing
+	// this last step.
+	setBreakEven := func() error {
+		// If the basis price is still zero, use the oracle price. This mirrors
+		// the handling in basisPrice for oracle weight > 0.
+		if r.BasisPrice == 0 {
+			r.BasisPrice = r.Price
+		}
+		breakEven, err := c.breakEvenHalfSpread(host, mkt, mkt.ConventionalRateToMsg(r.BasisPrice))
+		if err != nil {
+			return fmt.Errorf("error calculating break-even spread: %v", err)
+		}
+		r.BreakEvenSpread = mkt.MsgRateToConventional(breakEven) * 2
+		return nil
+	}
+
 	dc.booksMtx.Lock()
 	book := dc.books[mkt.Name]
 	dc.booksMtx.Unlock()
@@ -1576,20 +1591,6 @@ func (c *Core) MarketReport(host string, baseID, quoteID uint32) (*MarketReport,
 	// fiat rate ratio backup.
 	var zeroOracleBias, zeroOracleWeight float64
 	r.BasisPrice = mkt.MsgRateToConventional(basisPrice(host, mkt, zeroOracleBias, zeroOracleWeight, midGap, c, c.log))
-
-	setBreakEven := func() error {
-		// If the basis price is still zero, use the oracle price. This mirrors
-		// the handling in basisPrice for oracle weight > 0.
-		if r.BasisPrice == 0 {
-			r.BasisPrice = r.Price
-		}
-		breakEven, err := c.breakEvenHalfSpread(host, mkt, mkt.ConventionalRateToMsg(r.BasisPrice))
-		if err != nil {
-			return fmt.Errorf("error calculating break-even spread: %v", err)
-		}
-		r.BreakEvenSpread = mkt.MsgRateToConventional(breakEven) * 2
-		return nil
-	}
 
 	// See if we have a valid cached report.
 	p := c.cachedOraclePrice(marketName(baseID, quoteID))
@@ -1617,7 +1618,7 @@ func (c *Core) MarketReport(host string, baseID, quoteID uint32) (*MarketReport,
 	c.log.Debugf("oracle rate fetched for market %s: %f", marketName(baseID, quoteID), price)
 	r.Oracles = oracles
 	r.Price = price
-	r.BasisPrice = price
+	r.BasisPrice = mkt.MsgRateToConventional(basisPrice(host, mkt, zeroOracleBias, zeroOracleWeight, midGap, c, c.log))
 	return r, setBreakEven()
 }
 

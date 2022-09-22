@@ -1,3 +1,6 @@
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org/license/1.0.0.
+
 package main
 
 /*
@@ -71,16 +74,14 @@ func mainErr() error {
 	killChan := make(chan os.Signal, 1)
 	signal.Notify(killChan, os.Interrupt)
 	go func() {
-		for range killChan {
-			if c != nil && pgmID > 0 {
-				if err := c.RetireBot(pgmID); err != nil {
-					fmt.Fprintf(os.Stderr, "error retiring bot: %v \n", err)
-				}
-
+		<-killChan
+		if c != nil && pgmID > 0 {
+			if err := c.RetireBot(pgmID); err != nil {
+				fmt.Fprintf(os.Stderr, "error retiring bot: %v \n", err)
 			}
-			log.Infof("Shutdown signal received")
-			cancel()
 		}
+		log.Infof("Shutdown signal received")
+		cancel()
 	}()
 
 	if coreDir != defaultCoreDir && configFile == defaultConfigFilePath {
@@ -172,7 +173,7 @@ func mainErr() error {
 
 	printStartMessage := func() {
 		fmt.Printf(":::::: %s Wallet Address: %s \n", strings.ToUpper(b.Symbol), b.Wallet.Address)
-		fmt.Printf(":::::: %s Wallet Address: %s \n", strings.ToUpper(b.Symbol), q.Wallet.Address)
+		fmt.Printf(":::::: %s Wallet Address: %s \n", strings.ToUpper(q.Symbol), q.Wallet.Address)
 		fmt.Println(":::::: Press Enter to begin")
 	}
 
