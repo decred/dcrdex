@@ -710,23 +710,6 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 		return nil
 	}
 
-	// Clear the book and unbook/revoke own orders.
-	book := dc.bookie(sp.MarketID)
-	if book == nil {
-		return fmt.Errorf("no order book found with market id '%s'", sp.MarketID)
-	}
-
-	err = book.Reset(&msgjson.OrderBook{
-		MarketID: sp.MarketID,
-		Seq:      sp.Seq,        // forces seq reset, but should be in seq with previous
-		Epoch:    sp.FinalEpoch, // unused?
-		// Orders is nil
-		// BaseFeeRate = QuoteFeeRate = 0 effectively disables the book's fee
-		// cache until an update is received, since bestBookFeeSuggestion
-		// ignores zeros.
-	})
-	// Return any non-nil error, but still revoke purged orders.
-
 	// Revoke all active orders of the suspended market for the dex.
 	c.log.Warnf("Revoking all active orders for market %s at %s.", sp.MarketID, dc.acct.host)
 	updatedAssets := make(assetMap)
@@ -742,6 +725,24 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 		}
 	}
 	dc.tradeMtx.RUnlock()
+
+	// Clear the book and unbook/revoke own orders.
+	book := dc.bookie(sp.MarketID)
+	if book == nil {
+		c.updateBalances(updatedAssets)
+		return fmt.Errorf("no order book found with market id '%s'", sp.MarketID)
+	}
+
+	err = book.Reset(&msgjson.OrderBook{
+		MarketID: sp.MarketID,
+		Seq:      sp.Seq,        // forces seq reset, but should be in seq with previous
+		Epoch:    sp.FinalEpoch, // unused?
+		// Orders is nil
+		// BaseFeeRate = QuoteFeeRate = 0 effectively disables the book's fee
+		// cache until an update is received, since bestBookFeeSuggestion
+		// ignores zeros.
+	})
+	// Return any non-nil error, but still revoke purged orders.
 
 	// Clear the book.
 	book.send(&BookUpdate{
