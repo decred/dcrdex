@@ -112,6 +112,21 @@ export function settled (order: Order) {
   }, 0)
 }
 
+/* baseToQuote returns the quantity of the quote asset. */
+export function baseToQuote (rate: number, base: number) : number {
+  return rate * base / RateEncodingFactor
+}
+
+/* orderPortion returns a string stating the percentage of the order a match
+   makes up. */
+export function orderPortion (order: Order, match: Match) : string {
+  let matchQty = match.qty
+  if (isMarketBuy(order)) {
+    matchQty = baseToQuote(match.rate, match.qty)
+  }
+  return ((matchQty / order.qty) * 100).toFixed(1) + ' %'
+}
+
 /*
  * matchStatusString is a string used to create a displayable string describing
  * describing the match status.

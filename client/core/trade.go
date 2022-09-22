@@ -845,6 +845,11 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		t.notify(newOrderNote(topic, subject, details, db.Poke, corder))
 		// Also send out a data notification with the cancel order information.
 		t.notify(newOrderNote(TopicCancel, "", "", db.Data, corder))
+		t.notify(newMatchNote(TopicNewMatch, "", "", db.Data, t, &matchTracker{
+			prefix:    t.Prefix(),
+			trade:     trade,
+			MetaMatch: *t.makeMetaMatch(cancelMatch),
+		}))
 	}
 	if len(newTrackers) > 0 {
 		fillPct := 100 * float64(filled) / float64(trade.Quantity)
