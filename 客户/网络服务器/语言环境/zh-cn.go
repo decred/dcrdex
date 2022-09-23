@@ -155,7 +155,7 @@ var ZhCN = map[string]string{
 	"pw_change_instructions":      "修改下面的密码不会改变你钱包软件的密码。直接用钱包软件修改密码后，使用此表单更新DEX客户端。",
 	"New Wallet Password":         "新的钱包密码",
 	"pw_change_warn":              "注意：在进行活跃交易时更改为不同的钱包可能会导致资金丢失。",
-	"Show more options":           "显示更多选项"",
+	"Show more options":           "显示更多选项",
 	"seed_implore_msg":            "您应该仔细记下您的应用程序种子并保存一份副本。如果您无法访问本机或关键应用程序文件，该种子可用于恢复您的 DEX 账户和原生钱包。一些旧账户不能从种子中恢复，无论是旧的还是新的，最好将帐户密钥与种子分开备份。",
 	"View Application Seed":       "查看应用程序种子",
 	"Remember my password":        "记住密码",
