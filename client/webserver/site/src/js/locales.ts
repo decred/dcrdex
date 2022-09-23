@@ -186,13 +186,13 @@ export const zhCN: Locale = {
   [ID_SET_BUTTON_SELL]: '来自{{ asset }}的卖出订单',
   [ID_OFF]: '关闭',
   [ID_READY]: '准备就绪', //  alt. 准备好
-  [ID_LOCKED]: '锁定',
+  [ID_LOCKED]: '锁',
   [ID_NOWALLET]: '未连接钱包', // alt. 没有钱包
   [ID_WALLET_SYNC_PROGRESS]: '钱包同步进度{{ syncProgress }}%',
   [ID_HIDE_ADDITIONAL_SETTINGS]: '隐藏其它设置',
   [ID_SHOW_ADDITIONAL_SETTINGS]: '显示其它设置',
-  [ID_BUY]: '买',
-  [ID_SELL]: '卖',
+  [ID_BUY]: '买入',
+  [ID_SELL]: '卖出',
   [ID_NOT_SUPPORTED]: '{{ asset }}不受支持',
   [ID_CONNECTION_FAILED]: '连接到服务器 dex 失败。您可以关闭 dexc 并稍后重试或等待尝试重新连接。',
   [ID_ORDER_PREVIEW]: '总计： {{ total }} {{ asset }}',
@@ -212,7 +212,7 @@ export const zhCN: Locale = {
   [ID_LOTS]: '批', // alt. 很多
   [ID_EPOCH]: '时间',
   [ID_API_ERROR]: '接口错误',
-  [ID_ADD]: '加',
+  [ID_ADD]: '添加',
   [ID_CREATE]: '创建'
 }
 
