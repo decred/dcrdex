@@ -329,7 +329,7 @@ export const deDE: Locale = {
 const localesMap: Record<string, Locale> = {
   'en-us': enUS,
   'pt-br': ptBR,
-  'zh-cn': 简体中文 ,
+  'zh-cn': zhCN,
   'pl-pl': plPL,
   'de-de': deDE
 }
