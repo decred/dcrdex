@@ -180,7 +180,7 @@ export const ptBR: Locale = {
 
 export const zhCN: Locale = {
   [ID_NO_PASS_ERROR_MSG]: '密码不能为空',
-  [ID_NO_APP_PASS_ERROR_MSG]: '应用密码不能为空',
+  [ID_NO_APP_PASS_ERROR_MSG]: '应用程序密码不能为空',
   [ID_PASSWORD_NOT_MATCH]: '密码不相同',
   [ID_SET_BUTTON_BUY]: '来自{{ asset }}的买入订单',
   [ID_SET_BUTTON_SELL]: '来自{{ asset }}的卖出订单',
@@ -212,7 +212,7 @@ export const zhCN: Locale = {
   [ID_LOTS]: '批', // alt. 很多
   [ID_EPOCH]: '时间',
   [ID_API_ERROR]: '接口错误',
-  [ID_ADD]: '加',
+  [ID_ADD]: '添加',
   [ID_CREATE]: '创建'
 }
 
@@ -329,7 +329,7 @@ export const deDE: Locale = {
 const localesMap: Record<string, Locale> = {
   'en-us': enUS,
   'pt-br': ptBR,
-  'zh-cn': zhCN,
+  'zh-cn': 简体中文,
   'pl-pl': plPL,
   'de-de': deDE
 }
