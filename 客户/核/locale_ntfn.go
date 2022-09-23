@@ -723,12 +723,12 @@ var zhCN = map[Topic]*translation{
 	// [qty, ticker, rate string, token], RETRANSLATE.
 	TopicBuyOrderPlaced: {
 		subject:  "已下订单",
-		template: "Buying %s %s，值 = %s (%s)",
+		template: "买入 %s %s，值 = %s (%s)",
 	},
 	// [qty, ticker, rate string, token], RETRANSLATE.
 	TopicSellOrderPlaced: {
 		subject:  "已下订单",
-		template: "Selling %s %s，值 = %s (%s)",
+		template: "卖出 %s %s，值 = %s (%s)",
 	},
 	// [missing count, token, host]
 	TopicMissingMatches: {
@@ -773,22 +773,22 @@ var zhCN = map[Topic]*translation{
 	// [base ticker, quote ticker, host, token], RETRANSLATE.
 	TopicBuyOrderCanceled: {
 		subject:  "订单取消",
-		template: "Buy 的 %s-%s 的 %s 订单已被取消 (%s)", // alt. %s 上 %s-%s 上的 %s 请求已被取消 (%s)
+		template: "买入 %s-%s 的 %s 订单已被取消 (%s)", // alt. %s 上 %s-%s 上的 %s 请求已被取消 (%s)
 	},
 	// [base ticker, quote ticker, host, token], RETRANSLATE.
 	TopicSellOrderCanceled: {
 		subject:  "订单取消",
-		template: "Sell 的 %s-%s 的 %s 订单已被取消 (%s)", // alt. %s 上 %s-%s 上的 %s 请求已被取消 (%s)
+		template: "卖出 %s-%s 的 %s 订单已被取消 (%s)", // alt. %s 上 %s-%s 上的 %s 请求已被取消 (%s)
 	},
 	// [base ticker, quote ticker, fill percent, token], RETRANSLATE.
 	TopicBuyMatchesMade: {
 		subject:  "匹配完成",
-		template: "Buy 订单 %s-%s %.1f%% 已完成 (%s)", // alt. %s 请求超过 %s-%s %.1f%% 已填充（%s）
+		template: "买入 %s-%s %.1f%% 的订单已完成 (%s)", // alt. %s 请求超过 %s-%s %.1f%% 已填充（%s）
 	},
 	// [base ticker, quote ticker, fill percent, token], RETRANSLATE.
 	TopicSellMatchesMade: {
 		subject:  "匹配完成",
-		template: "Sell 订单 %s-%s %.1f%% 已完成 (%s)", // alt. %s 请求超过 %s-%s %.1f%% 已填充（%s）
+		template: "卖出 %s-%s %.1f%% 的订单已完成 (%s)", // alt. %s 请求超过 %s-%s %.1f%% 已填充（%s）
 	},
 	// [qty, ticker, token]
 	TopicSwapSendError: {
@@ -807,7 +807,7 @@ var zhCN = map[Topic]*translation{
 	},
 	// [qty, ticker, token]
 	TopicSwapsInitiated: {
-		subject:  "发起交流",
+		subject:  "发起交易",
 		template: "在订单 %[3]s 上发送价值 %[1]s %[2]s 的交易", // should mention "contract" (TODO) ? 已发送价值 %.8f %s 的交易，订单 %s
 	},
 	// [qty, ticker, token]
@@ -892,7 +892,7 @@ var zhCN = map[Topic]*translation{
 	},
 	// [ticker, address]
 	TopicWalletConfigurationUpdated: {
-		subject:  "更新的钱包设置a",
+		subject:  "更新的钱包设置",
 		template: "钱包 %[1]s 的配置已更新。存款地址 = %[2]s", // alt. %s 钱包的配置已更新。存款地址 = %s
 	},
 	//  [ticker]
@@ -922,7 +922,7 @@ var zhCN = map[Topic]*translation{
 	},
 	// [market name, host, epoch]
 	TopicMarketResumed: {
-		subject:  "总结市场",
+		subject:  "总览市场",
 		template: "%[2]s 上的市场 %[1]s 已汇总用于时代 %[3]d 中的交易", // alt. M%s 的市场 %s 已在epoch %d 恢复交易
 	},
 	// [host]
