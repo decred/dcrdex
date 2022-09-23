@@ -1593,7 +1593,7 @@ var deDE = map[Topic]*translation{
 var locales = map[string]map[Topic]*translation{
 	originLang: originLocale,
 	"pt-BR":    ptBR,
-	"zh-CN":    简体中文,
+	"zh-CN":    zhCN,
 	"pl-PL":    plPL,
 	"de-DE":    deDE, // language.German is de
 }
