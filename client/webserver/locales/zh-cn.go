@@ -1,7 +1,7 @@
 package locales
 
 var ZhCN = map[string]string{
-        "Language":                       "简体中文",
+        "Language":                       "ZhCN",
 	"Markets":                        "市场",
 	"Wallets":                        "钱包",
 	"Notifications":                  "通知",
