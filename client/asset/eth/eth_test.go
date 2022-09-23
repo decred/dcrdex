@@ -4601,7 +4601,6 @@ func testMaxSwapRedeemLots(t *testing.T, assetID uint32) {
 	}
 }
 
-<<<<<<< HEAD
 func TestSwapOrRedemptionFeesPaid(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -4789,7 +4788,8 @@ func TestSwapOrRedemptionFeesPaid(t *testing.T) {
 			}
 		}
 	}
-=======
+}
+
 func TestReceiptCache(t *testing.T) {
 	m := &multiRPCClient{}
 	c := make(map[common.Hash]*receiptRecord)
@@ -4834,7 +4834,6 @@ func TestReceiptCache(t *testing.T) {
 		t.Fatalf("receipt wasn't pruned")
 	}
 
->>>>>>> add receipt cache test
 }
 
 func parseRecoveryID(c asset.Coin) []byte {

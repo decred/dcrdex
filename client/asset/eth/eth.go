@@ -545,28 +545,30 @@ func createWallet(createWalletParams *asset.CreateWalletParams, skipConnect bool
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 			defer cancel()
 
+			var unknownEndpoints []string
+
 			for _, endpoint := range endpoints {
 				known, compliant := providerIsCompliant(endpoint)
 				if known && !compliant {
 					return fmt.Errorf("provider %q is known to have an insufficient API for DEX", endpoint)
+				} else if !known {
+					unknownEndpoints = append(unknownEndpoints, endpoint)
 				}
 			}
 
-			providers, err := connectProviders(ctx, endpoints, createWalletParams.Logger, big.NewInt(chainIDs[createWalletParams.Net]))
-			if err != nil {
-				return err
-			}
-
-			defer func() {
-				for _, p := range providers {
-					p.ec.Close()
+			if len(unknownEndpoints) > 0 && createWalletParams.Net == dex.Mainnet {
+				providers, err := connectProviders(ctx, unknownEndpoints, createWalletParams.Logger, big.NewInt(chainIDs[createWalletParams.Net]))
+				if err != nil {
+					return err
 				}
-			}()
-			if len(providers) != n {
-				return fmt.Errorf("Could not connect to all providers")
-			}
-
-			if createWalletParams.Net == dex.Mainnet {
+				defer func() {
+					for _, p := range providers {
+						p.ec.Close()
+					}
+				}()
+				if len(providers) != n {
+					return fmt.Errorf("Could not connect to all providers")
+				}
 				if err := checkProvidersCompliance(ctx, walletDir, providers, createWalletParams.Logger); err != nil {
 					return err
 				}

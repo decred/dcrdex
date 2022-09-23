@@ -46,19 +46,12 @@ const (
 	// receiptCacheExpiration is how long we will track a receipt after the
 	// last request. There is no persistent storage, so all receipts are cached
 	// in-memory.
-<<<<<<< HEAD
-	receiptCacheExpiration     = time.Hour
-	tipCapSuggestionExpiration = time.Hour
-	ipcHost                    = "IPC"
-	providerDelimiter          = " "
-=======
 	receiptCacheExpiration       = time.Hour
 	unconfirmedReceiptExpiration = time.Minute
 	tipCapSuggestionExpiration   = time.Hour
 	ipcHost                      = "IPC"
 	brickedFailCount             = 100
 	providerDelimiter            = " "
->>>>>>> add receipt cache test
 )
 
 // nonceProviderStickiness is the minimum amount of time that must pass between
@@ -253,7 +246,11 @@ func (p *provider) subscribeHeaders(ctx context.Context, sub ethereum.Subscripti
 				// Subscription cancelled
 				return
 			}
-			log.Errorf("%q header subscription error: %v", err)
+			if ctx.Err() != nil || err == nil { // Both conditions indicate normal close
+				return
+			}
+			log.Errorf("%q header subscription error: %v", p.host, err)
+			log.Info("Attempting to resubscribe to %q block headers", p.host)
 			sub, err = newSub()
 			if err != nil { // context cancelled
 				return

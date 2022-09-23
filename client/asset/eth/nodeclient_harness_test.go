@@ -25,6 +25,7 @@ import (
 	"crypto/elliptic"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -63,15 +64,6 @@ const (
 	alphaAddr         = "18d65fb8d60c1199bb1ad381be47aa692b482605"
 	pw                = "bee75192465cef9f8ab1198093dfed594e93ae810ccbbf2b3b12e1771cc6cb19"
 	maxFeeRate uint64 = 200 // gwei per gas
-
-	// The following constants are related to testnet testing.
-
-	// testnetWalletSeed and testnetParticipantWalletSeed are required for
-	// use on testnet and can be any 256 bit hex. If the wallets created by
-	// these seeds do not have enough funds to test, addresses that need
-	// funds will be printed.
-	testnetWalletSeed            = ""
-	testnetParticipantWalletSeed = ""
 
 	// addPeer is optional and will be added if set. It should looks
 	// something like enode://1565e5bc2...2c3300e9@127.0.0.1:30303
@@ -112,7 +104,8 @@ var (
 	// block currently. Is set in code to testnetSecPerBlock if runing on
 	// testnet.
 	secPerBlock = time.Second
-	// If you are testing on testnet, you must specify the rpcNode.
+	// If you are testing on testnet, you must specify the rpcNode. You can also
+	// specify it in the testnet-credentials.json file.
 	rpcNode string
 	// useRPC can be set to true to test the RPC clients.
 	useRPC = false
@@ -127,6 +120,21 @@ var (
 	//
 	// TODO: Make this also work for token tests.
 	isTestnet = false
+
+	// For testnet credentials, use a JSON file formatted like...
+	// {
+	// 	"key0": "deadbeef",
+	// 	"key1": "beefdead",
+	// 	"provider": "https://myprovider.com/MYAPIKEY"
+	// }
+	testnetCredentialsPath = filepath.Join(homeDir, "ethtest", "testnet-credentials.json")
+
+	// testnetWalletSeed and testnetParticipantWalletSeed are required for
+	// use on testnet and can be any 256 bit hex. If the wallets created by
+	// these seeds do not have enough funds to test, addresses that need
+	// funds will be printed.
+	testnetWalletSeed            string
+	testnetParticipantWalletSeed string
 )
 
 func newContract(stamp uint64, secretHash [32]byte, val uint64) *asset.Contract {
@@ -176,10 +184,41 @@ func waitForReceipt(t *testing.T, nc ethFetcher, tx *types.Transaction) (*types.
 	}
 }
 
+func waitForMinedRPC() error {
+	hdr, err := ethClient.bestHeader(ctx)
+	if err != nil {
+		return err
+	}
+	const targetConfs = 1
+	currentHeight := hdr.Number
+	barrierHeight := new(big.Int).Add(currentHeight, big.NewInt(targetConfs))
+	fmt.Println("Waiting for RPC blocks")
+	for {
+		select {
+		case <-time.After(time.Second):
+			hdr, err = ethClient.bestHeader(ctx)
+			if err != nil {
+				return err
+			}
+			if hdr.Number.Cmp(barrierHeight) > 0 {
+				return nil
+			}
+			if hdr.Number.Cmp(currentHeight) > 0 {
+				currentHeight = hdr.Number
+				fmt.Println("Block mined!!!", new(big.Int).Sub(barrierHeight, currentHeight).Uint64()+1, "to go")
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
 // waitForMined will multiply the time limit by testnetSecPerBlock for
 // testnet and mine blocks when on simnet.
-func waitForMined(t *testing.T, cl ethFetcher, nBlock int, waitTimeLimit bool) error {
-	t.Helper()
+func waitForMined(cl ethFetcher, nBlock int, waitTimeLimit bool) error {
+	if useRPC {
+		waitForMinedRPC()
+	}
 	if !isTestnet {
 		err := exec.Command("geth", "--datadir="+alphaNodeDir, "attach", "--exec", "miner.start()").Run()
 		if err != nil {
@@ -266,6 +305,7 @@ func prepareNodeClient(name, dataDir string, net dex.Network) (*nodeClient, *acc
 	if err != nil {
 		return nil, nil, fmt.Errorf("(%s) newNodeClient error: %v", name, err)
 	}
+
 	if err := c.connect(ctx); err != nil {
 		return nil, nil, fmt.Errorf("(%s) connect error: %v", name, err)
 	}
@@ -453,7 +493,7 @@ func runTestnet(m *testing.M) (int, error) {
 	ethSwapContractAddr = dexeth.ContractAddresses[0][dex.Testnet]
 	fmt.Printf("ETH swap contract address is %v\n", ethSwapContractAddr)
 
-	initiatorRPC, participantRPC := rpcEndpoints(dex.Simnet)
+	initiatorRPC, participantRPC := rpcEndpoints(dex.Testnet)
 
 	err = setupWallet(testnetWalletDir, testnetWalletSeed, "localhost:30355", initiatorRPC, dex.Testnet)
 	if err != nil {
@@ -463,7 +503,12 @@ func runTestnet(m *testing.M) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	if err = prepareTestNodeClients(testnetWalletDir, testnetParticipantWalletDir, dex.Testnet); err != nil {
+	if useRPC {
+		err = prepareTestRPCClients(testnetWalletDir, testnetParticipantWalletDir, dex.Testnet)
+	} else {
+		err = prepareTestNodeClients(testnetWalletDir, testnetParticipantWalletDir, dex.Testnet)
+	}
+	if err != nil {
 		return 1, err
 	}
 	defer ethClient.shutdown()
@@ -473,6 +518,7 @@ func runTestnet(m *testing.M) (int, error) {
 	wg := sync.WaitGroup{}
 	wg.Add(2)
 	var initerErr, participantErr error
+
 	go func() {
 		initerErr = syncClient(ethClient)
 		wg.Done()
@@ -524,6 +570,32 @@ func runTestnet(m *testing.M) (int, error) {
 	return code, nil
 }
 
+func useTestnet() error {
+	isTestnet = true
+	b, err := os.ReadFile(testnetCredentialsPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("error reading credentials file: %v", err)
+		}
+	} else {
+		var creds struct {
+			Key0     string `json:"key0"`
+			Key1     string `json:"key1"`
+			Provider string `json:"provider"`
+		}
+		if err := json.Unmarshal(b, &creds); err != nil {
+			return fmt.Errorf("error parsing credentials file: %v", err)
+		}
+		if creds.Key0 == "" || creds.Key1 == "" {
+			return fmt.Errorf("must provide both keys in testnet credentials file")
+		}
+		testnetWalletSeed = creds.Key0
+		testnetParticipantWalletSeed = creds.Key1
+		rpcNode = creds.Provider
+	}
+	return nil
+}
+
 func TestMain(m *testing.M) {
 	dexeth.MaybeReadSimnetAddrs()
 	targs := make(map[string]string)
@@ -544,7 +616,10 @@ func TestMain(m *testing.M) {
 		useRPC = true
 	}
 	if _, exists := targs["testnet"]; exists {
-		isTestnet = true
+		if err := useTestnet(); err != nil {
+			fmt.Fprintf(os.Stderr, "error loading testnet: %v", err)
+			os.Exit(1)
+		}
 	}
 
 	var cancel context.CancelFunc
@@ -593,7 +668,7 @@ func setupWallet(walletDir, seed, listenAddress, rpcAddr string, net dex.Network
 		Net:      net,
 		Logger:   tLogger,
 	}
-	return CreateWallet(&createWalletParams)
+	return createWallet(&createWalletParams, true)
 }
 
 func prepareTokenClients(t *testing.T) {
@@ -617,7 +692,7 @@ func prepareTokenClients(t *testing.T) {
 	}
 
 	time.Sleep(1) // Give txs time to propagate.
-	if err := waitForMined(t, participantEthClient, 8, true); err != nil {
+	if err := waitForMined(participantEthClient, 8, true); err != nil {
 		t.Fatalf("unexpected error while waiting to mine approval block: %v", err)
 	}
 
@@ -760,12 +835,17 @@ func testBestHeader(t *testing.T) {
 func testAddressBalance(t *testing.T) {
 	bal, err := ethClient.addressBalance(ctx, simnetAddr)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("error getting initiator balance: %v", err)
 	}
 	if bal == nil {
 		t.Fatalf("empty balance")
 	}
-	spew.Dump(bal)
+	fmt.Printf("Initiator balance: %.9f ETH \n", float64(dexeth.WeiToGwei(bal))/dexeth.GweiFactor)
+	bal, err = participantEthClient.addressBalance(ctx, participantAddr)
+	if err != nil {
+		t.Fatalf("error getting participant balance: %v", err)
+	}
+	fmt.Printf("Participant balance: %.9f ETH \n", float64(dexeth.WeiToGwei(bal))/dexeth.GweiFactor)
 }
 
 func testTokenBalance(t *testing.T) {
@@ -844,7 +924,7 @@ func testSendTransaction(t *testing.T) {
 	}
 
 	spew.Dump(tx)
-	if err := waitForMined(t, ethClient, 10, false); err != nil {
+	if err := waitForMined(ethClient, 10, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -944,7 +1024,7 @@ func testSendSignedTransaction(t *testing.T) {
 	}
 
 	spew.Dump(tx)
-	if err := waitForMined(t, ethClient, 10, false); err != nil {
+	if err := waitForMined(ethClient, 10, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -958,12 +1038,12 @@ func testSendSignedTransaction(t *testing.T) {
 }
 
 func testTransactionReceipt(t *testing.T) {
-	txOpts, _ := ethClient.txOpts(ctx, 1, dexeth.InitGas(1, 0), nil)
+	txOpts, _ := ethClient.txOpts(ctx, 1, defaultSendGasLimit, nil)
 	tx, err := ethClient.sendTransaction(ctx, txOpts, simnetAddr, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := waitForMined(t, ethClient, 10, false); err != nil {
+	if err := waitForMined(ethClient, 10, false); err != nil {
 		t.Fatal(err)
 	}
 	receipt, err := waitForReceipt(t, ethClient, tx)
@@ -1257,7 +1337,7 @@ func testInitiate(t *testing.T, assetID uint32) {
 			t.Fatalf("%s: initiate error: %v", test.name, err)
 		}
 
-		if err := waitForMined(t, ethClient, 10, false); err != nil {
+		if err := waitForMined(ethClient, 10, false); err != nil {
 			t.Fatalf("%s: post-initiate mining error: %v", test.name, err)
 		}
 
@@ -1372,7 +1452,7 @@ func testRedeemGas(t *testing.T, assetID uint32) {
 	if err != nil {
 		t.Fatalf("Unable to initiate swap: %v ", err)
 	}
-	if err := waitForMined(t, ethClient, 8, true); err != nil {
+	if err := waitForMined(ethClient, 8, true); err != nil {
 		t.Fatalf("unexpected error while waiting to mine: %v", err)
 	}
 	receipt, err := waitForReceipt(t, ethClient, tx)
@@ -1585,7 +1665,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		}
 
 		// This waitForMined will always take test.sleepNBlocks to complete.
-		if err := waitForMined(t, test.redeemerClient, test.sleepNBlocks, true); err != nil {
+		if err := waitForMined(test.redeemerClient, test.sleepNBlocks, true); err != nil {
 			t.Fatalf("%s: post-init mining error: %v", test.name, err)
 		}
 
@@ -1648,7 +1728,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		}
 		spew.Dump(tx)
 
-		if err := waitForMined(t, test.redeemerClient, 10, false); err != nil {
+		if err := waitForMined(test.redeemerClient, 10, false); err != nil {
 			t.Fatalf("%s: post-redeem mining error: %v", test.name, err)
 		}
 
@@ -1755,7 +1835,7 @@ func testRefundGas(t *testing.T, assetID uint32) {
 	if err != nil {
 		t.Fatalf("Unable to initiate swap: %v ", err)
 	}
-	if err := waitForMined(t, ethClient, 8, true); err != nil {
+	if err := waitForMined(ethClient, 8, true); err != nil {
 		t.Fatalf("unexpected error while waiting to mine: %v", err)
 	}
 
@@ -1880,7 +1960,7 @@ func testRefund(t *testing.T, assetID uint32) {
 		}
 
 		if test.redeem {
-			if err := waitForMined(t, ethClient, sleepForNBlocks, false); err != nil {
+			if err := waitForMined(ethClient, sleepForNBlocks, false); err != nil {
 				t.Fatalf("%s: pre-redeem mining error: %v", test.name, err)
 			}
 
@@ -1892,7 +1972,7 @@ func testRefund(t *testing.T, assetID uint32) {
 		}
 
 		// This waitForMined will always take test.sleep to complete.
-		if err := waitForMined(t, participantEthClient, sleepForNBlocks, true); err != nil {
+		if err := waitForMined(participantEthClient, sleepForNBlocks, true); err != nil {
 			t.Fatalf("unexpected post-init mining error for test %v: %v", test.name, err)
 		}
 
@@ -1931,7 +2011,7 @@ func testRefund(t *testing.T, assetID uint32) {
 			t.Fatalf("%s: unexpected pending in balance %d", test.name, in)
 		}
 
-		if err := waitForMined(t, test.refunderClient, 10, false); err != nil {
+		if err := waitForMined(test.refunderClient, 10, false); err != nil {
 			t.Fatalf("%s: post-refund mining error: %v", test.name, err)
 		}
 
@@ -2007,7 +2087,7 @@ func testApproveAllowance(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := waitForMined(t, ethClient, 10, false); err != nil {
+	if err := waitForMined(ethClient, 10, false); err != nil {
 		t.Fatalf("post approve mining error: %v", err)
 	}
 
@@ -2063,7 +2143,7 @@ func TestReplayAttack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := waitForMined(t, cl, 10, false); err != nil {
+	if err := waitForMined(cl, 10, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2089,7 +2169,7 @@ func TestReplayAttack(t *testing.T) {
 				t.Fatalf("unable to initiate swap: %v ", err)
 			}
 
-			if err := waitForMined(t, cl, 10, false); err != nil {
+			if err := waitForMined(cl, 10, false); err != nil {
 				t.Fatal(err)
 			}
 			continue
@@ -2107,7 +2187,7 @@ func TestReplayAttack(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unable to set up the bomb: %v", err)
 		}
-		if err = waitForMined(t, cl, 10, false); err != nil {
+		if err = waitForMined(cl, 10, false); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -2120,13 +2200,13 @@ func TestReplayAttack(t *testing.T) {
 		t.Fatalf("unable to get all your base: %v", err)
 	}
 	spew.Dump(tx)
-	if err = waitForMined(t, ethClient, 10, false); err != nil {
+	if err = waitForMined(ethClient, 10, false); err != nil {
 		t.Fatal(err)
 	}
 	receipt, err := waitForReceipt(t, ethClient, tx)
 	spew.Dump(receipt)
 
-	if err = waitForMined(t, cl, 10, false); err != nil {
+	if err = waitForMined(cl, 10, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2141,7 +2221,7 @@ func TestReplayAttack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to are belong to us: %v", err)
 	}
-	if err = waitForMined(t, ethClient, 10, false); err != nil {
+	if err = waitForMined(ethClient, 10, false); err != nil {
 		t.Fatal(err)
 	}
 	receipt, err = waitForReceipt(t, ethClient, tx)
@@ -2319,7 +2399,7 @@ func testSignMessage(t *testing.T) {
 func TestTokenGasEstimates(t *testing.T) {
 	prepareTokenClients(t)
 	if err := GetGasEstimates(ctx, ethClient, simnetTokenContractor, 5, tokenGases, func() {
-		if err := waitForMined(t, ethClient, 10, false); err != nil {
+		if err := waitForMined(ethClient, 10, false); err != nil {
 			t.Fatalf("mining error: %v", err)
 		}
 	}); err != nil {
@@ -2337,7 +2417,7 @@ func TestConfirmedNonce(t *testing.T) {
 func TestTokenGasEstimatesParticipant(t *testing.T) {
 	prepareTokenClients(t)
 	if err := GetGasEstimates(ctx, participantEthClient, participantTokenContractor, 5, tokenGases, func() {
-		if err := waitForMined(t, participantEthClient, 10, false); err != nil {
+		if err := waitForMined(participantEthClient, 10, false); err != nil {
 			t.Fatalf("mining error: %v", err)
 		}
 	}); err != nil {
