@@ -134,13 +134,13 @@ var (
 		Tab:               "External",
 		Description:       "Connect to bitcoind",
 		DefaultConfigPath: dexbtc.SystemConfigPath("bitcoin"),
-		ConfigOpts:        append(RPCConfigOpts("Bitcoin", "8332"), CommonConfigOpts("BTC")...),
+		ConfigOpts:        append(RPCConfigOpts("Bitcoin", "8332"), CommonConfigOpts("BTC", true)...),
 	}
 	spvWalletDefinition = &asset.WalletDefinition{
 		Type:        walletTypeSPV,
 		Tab:         "Native",
 		Description: "Use the built-in SPV wallet",
-		ConfigOpts:  append(SPVConfigOpts("BTC"), CommonConfigOpts("BTC")...),
+		ConfigOpts:  append(SPVConfigOpts("BTC"), CommonConfigOpts("BTC", true)...),
 		Seeded:      true,
 	}
 
@@ -149,7 +149,7 @@ var (
 		Tab:         "Electrum (external)",
 		Description: "Use an external Electrum Wallet",
 		// json: DefaultConfigPath: filepath.Join(btcutil.AppDataDir("electrum", false), "config"), // e.g. ~/.electrum/config
-		ConfigOpts: append(electrumOpts, CommonConfigOpts("BTC")...),
+		ConfigOpts: append(electrumOpts, CommonConfigOpts("BTC", true)...),
 	}
 
 	// WalletInfo defines some general information about a Bitcoin wallet.
@@ -167,8 +167,8 @@ var (
 )
 
 // CommonConfigOpts are the common options that the Wallets recognize.
-func CommonConfigOpts(symbol string /* upper-case */) []*asset.ConfigOption {
-	return []*asset.ConfigOption{
+func CommonConfigOpts(symbol string /* upper-case */, withApiFallback bool) []*asset.ConfigOption {
+	opts := []*asset.ConfigOption{
 		{
 			Key:         "fallbackfee",
 			DisplayName: "Fallback fee rate",
@@ -206,15 +206,19 @@ func CommonConfigOpts(symbol string /* upper-case */) []*asset.ConfigOption {
 			IsBoolean:    true,
 			DefaultValue: false,
 		},
-		{
+	}
+
+	if withApiFallback {
+		opts = append(opts, &asset.ConfigOption{
 			Key:         "apifeefallback",
 			DisplayName: "External fee rate estimates",
 			Description: "Allow fee rate estimation from a block explorer API. " +
 				"This is useful as a fallback for SPV wallets and RPC wallets " +
 				"that have recently been started.",
 			IsBoolean: true,
-		},
+		})
 	}
+	return opts
 }
 
 // SPVConfigOpts are the options common to built-in SPV wallets.
