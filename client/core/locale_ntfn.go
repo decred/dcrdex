@@ -773,22 +773,22 @@ var zhCN = map[Topic]*translation{
 	// [base ticker, quote ticker, host, token], RETRANSLATE.
 	TopicBuyOrderCanceled: {
 		subject:  "订单取消",
-		template: "Buy 的 %s-%s 的 %s 订单已被取消 (%s)", // alt. %s 上 %s-%s 上的 %s 请求已被取消 (%s)
+		template: "买入 %s-%s 的 %s 订单已被取消 (%s)", // alt. %s 上 %s-%s 上的 %s 请求已被取消 (%s)
 	},
 	// [base ticker, quote ticker, host, token], RETRANSLATE.
 	TopicSellOrderCanceled: {
 		subject:  "订单取消",
-		template: "Sell 的 %s-%s 的 %s 订单已被取消 (%s)", // alt. %s 上 %s-%s 上的 %s 请求已被取消 (%s)
+		template: "卖出 %s-%s 的 %s 订单已被取消 (%s)", // alt. %s 上 %s-%s 上的 %s 请求已被取消 (%s)
 	},
 	// [base ticker, quote ticker, fill percent, token], RETRANSLATE.
 	TopicBuyMatchesMade: {
 		subject:  "匹配完成",
-		template: "Buy 订单 %s-%s %.1f%% 已完成 (%s)", // alt. %s 请求超过 %s-%s %.1f%% 已填充（%s）
+		template: "买入 %s-%s %.1f%% 的订单已完成 (%s)", // alt. %s 请求超过 %s-%s %.1f%% 已填充（%s）
 	},
 	// [base ticker, quote ticker, fill percent, token], RETRANSLATE.
 	TopicSellMatchesMade: {
 		subject:  "匹配完成",
-		template: "Sell 订单 %s-%s %.1f%% 已完成 (%s)", // alt. %s 请求超过 %s-%s %.1f%% 已填充（%s）
+		template: "卖出 %s-%s %.1f%% 的订单已完成 (%s)", // alt. %s 请求超过 %s-%s %.1f%% 已填充（%s）
 	},
 	// [qty, ticker, token]
 	TopicSwapSendError: {
@@ -797,7 +797,7 @@ var zhCN = map[Topic]*translation{
 	},
 	// [match, error]
 	TopicInitError: {
-		subject:  "交换错误",
+		subject:  "交易错误",
 		template: "通知 DEX 匹配 %s 的交换时出错： %v", // alt. 错误通知 DEX %s 交换组合：%v
 	},
 	// [match, error]
@@ -807,7 +807,7 @@ var zhCN = map[Topic]*translation{
 	},
 	// [qty, ticker, token]
 	TopicSwapsInitiated: {
-		subject:  "发起交流",
+		subject:  "发起交易",
 		template: "在订单 %[3]s 上发送价值 %[1]s %[2]s 的交易", // should mention "contract" (TODO) ? 已发送价值 %.8f %s 的交易，订单 %s
 	},
 	// [qty, ticker, token]
