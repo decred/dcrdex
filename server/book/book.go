@@ -43,13 +43,15 @@ func New(lotSize uint64, acctTracking AccountTracking) *Book {
 }
 
 // Clear reset the order book with configured capacity.
-func (b *Book) Clear() {
+func (b *Book) Clear() (removedBuys, removedSells []*order.LimitOrder) {
 	b.mtx.Lock()
+	removedBuys, removedSells = b.buys.Orders(), b.sells.Orders()
 	b.buys, b.sells = nil, nil
 	b.buys = NewMaxOrderPQ(initBookHalfCapacity)
 	b.sells = NewMinOrderPQ(initBookHalfCapacity)
 	b.acctTracker = newAccountTracker(b.acctTracking)
 	b.mtx.Unlock()
+	return
 }
 
 // LotSize returns the Book's configured lot size in atoms of the base asset.

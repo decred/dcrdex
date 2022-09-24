@@ -6847,6 +6847,12 @@ func handleRevokeOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 		return fmt.Errorf("no order found with id %s", oid.String())
 	}
 
+	if tracker.status() == order.OrderStatusRevoked {
+		// Already revoked is expected if entire book was purged in a suspend
+		// ntfn, which emits a gentler and more informative notification.
+		// However, we may not be subscribed to orderbook notifications.
+		return nil
+	}
 	tracker.revoke()
 
 	subject, details := c.formatDetails(TopicOrderRevoked, tracker.token(), tracker.mktID, dc.acct.host)

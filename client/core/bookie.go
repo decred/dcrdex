@@ -733,11 +733,11 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	dc.tradeMtx.RLock()
 	for _, tracker := range dc.trades {
 		if tracker.Order.Base() == mkt.Base && tracker.Order.Quote() == mkt.Quote &&
-			tracker.metaData.Host == dc.acct.host && tracker.metaData.Status == order.OrderStatusBooked {
+			tracker.metaData.Host == dc.acct.host && tracker.status() == order.OrderStatusBooked {
 			// Locally revoke the purged book order.
 			tracker.revoke()
 			subject, details := c.formatDetails(TopicOrderAutoRevoked, tracker.token(), sp.MarketID, dc.acct.host)
-			c.notify(newOrderNote(TopicOrderAutoRevoked, subject, details, db.WarningLevel, tracker.coreOrderInternal()))
+			c.notify(newOrderNote(TopicOrderAutoRevoked, subject, details, db.WarningLevel, tracker.coreOrder()))
 			updatedAssets.count(tracker.fromAssetID)
 		}
 	}

@@ -252,7 +252,13 @@ func TestBook(t *testing.T) {
 		t.Errorf("buy side was empty")
 	}
 
-	b.Clear()
+	buysRemoved, sellsRemoved := b.Clear()
+	if len(buysRemoved) != len(bookBuyOrders)-2 {
+		t.Errorf("removed %d buys, expected, %d", len(buysRemoved), len(bookBuyOrders)-2)
+	}
+	if len(sellsRemoved) != len(bookSellOrders)-2 {
+		t.Errorf("removed %d sells, expected, %d", len(sellsRemoved), len(bookSellOrders)-2)
+	}
 
 	if b.SellCount() != 0 {
 		t.Errorf("sell side was not empty after Clear")
