@@ -112,15 +112,21 @@ var (
 			NoEcho:      true,
 		},
 		{
+			Key:         "rpcport",
+			DisplayName: "JSON-RPC Port",
+			Description: "Electrum's 'rpcport' (if not set with rpcbind)",
+		},
+		{
 			Key:          "rpcbind", // match RPCConfig struct field tags
 			DisplayName:  "JSON-RPC Address",
 			Description:  "Electrum's 'rpchost' <addr> or <addr>:<port>",
 			DefaultValue: "127.0.0.1",
 		},
 		{
-			Key:         "rpcport",
-			DisplayName: "JSON-RPC Port",
-			Description: "Electrum's 'rpcport' (if not set with rpcbind)",
+			Key:          "walletname", // match RPCConfig struct field tags
+			DisplayName:  "Wallet File",
+			Description:  "Full path to the wallet file (empty is default_wallet)",
+			DefaultValue: "", // empty string, not a nil interface
 		},
 	}
 
@@ -148,7 +154,7 @@ var (
 		Tab:         "Electrum (external)",
 		Description: "Use an external Electrum Wallet",
 		// json: DefaultConfigPath: filepath.Join(btcutil.AppDataDir("electrum", false), "config"), // e.g. ~/.electrum/config
-		ConfigOpts: append(append(ElectrumConfigOpts, apiFallbackOpt(false)), CommonConfigOpts("BTC", false)...),
+		ConfigOpts: append(append(ElectrumConfigOpts, CommonConfigOpts("BTC", false)...), apiFallbackOpt(false)),
 	}
 
 	// WalletInfo defines some general information about a Bitcoin wallet.

@@ -31,8 +31,9 @@ func run() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	// .electrum-ltc/testnet/config: rpcuser, rpcpass, rpcport
-	const walletPass = "walletpass" // set me
-	ec := electrum.NewWalletClient("user", "pass", "http://127.0.0.1:5678")
+	const walletPass = "walletpass"                                     // set me
+	const walletName = "~/.electrum-ltc/testnet/wallets/default_wallet" // passed directly to Electrum, not resolved
+	ec := electrum.NewWalletClient("user", "pass", "http://127.0.0.1:5678", walletName)
 
 	commands, err := ec.Commands(ctx)
 	if err != nil {

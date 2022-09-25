@@ -13,28 +13,31 @@ import (
 )
 
 const (
+	// Wallet-agnostic commands
 	methodCommands          = "commands" // list of supported methods
 	methodGetInfo           = "getinfo"
 	methodGetServers        = "getservers"
 	methodGetFeeRate        = "getfeerate"
-	methodCreateNewAddress  = "createnewaddress" // beyond gap limit, makes recovery difficult
-	methodGetUnusedAddress  = "getunusedaddress"
 	methodGetAddressHistory = "getaddresshistory"
 	methodGetAddressUnspent = "getaddressunspent"
-	methodGetTransaction    = "gettransaction"
-	methodListUnspent       = "listunspent"
-	methodGetPrivateKeys    = "getprivatekeys"
-	methodPayTo             = "payto"
 	methodBroadcast         = "broadcast"
-	methodAddLocalTx        = "addtransaction"
-	methodRemoveLocalTx     = "removelocaltx"
-	methodGetTxStatus       = "get_tx_status" // only wallet txns
-	methodGetBalance        = "getbalance"
-	methodIsMine            = "ismine"
 	methodValidateAddress   = "validateaddress"
-	methodSignTransaction   = "signtransaction"
-	methodFreezeUTXO        = "freeze_utxo"
-	methodUnfreezeUTXO      = "unfreeze_utxo"
+
+	// Wallet-specific commands
+	methodCreateNewAddress = "createnewaddress" // beyond gap limit, makes recovery difficult
+	methodGetUnusedAddress = "getunusedaddress"
+	methodGetTransaction   = "gettransaction"
+	methodListUnspent      = "listunspent"
+	methodGetPrivateKeys   = "getprivatekeys"
+	methodPayTo            = "payto"
+	methodAddLocalTx       = "addtransaction"
+	methodRemoveLocalTx    = "removelocaltx"
+	methodGetTxStatus      = "get_tx_status" // only wallet txns
+	methodGetBalance       = "getbalance"
+	methodIsMine           = "ismine"
+	methodSignTransaction  = "signtransaction"
+	methodFreezeUTXO       = "freeze_utxo"
+	methodUnfreezeUTXO     = "unfreeze_utxo"
 )
 
 // Commands gets a list of the supported wallet RPCs.
@@ -132,11 +135,15 @@ func (wc *WalletClient) FeeRate(ctx context.Context, confTarget int64) (int64, e
 	return satPerKB, nil
 }
 
+type walletReq struct {
+	Wallet string `json:"wallet,omitempty"`
+}
+
 // CreateNewAddress generates a new address, ignoring the gap limit. NOTE: There
 // is no method to retrieve a change address (makes recovery difficult).
 func (wc *WalletClient) CreateNewAddress(ctx context.Context) (string, error) {
 	var res string
-	err := wc.Call(ctx, methodCreateNewAddress, nil, &res)
+	err := wc.Call(ctx, methodCreateNewAddress, &walletReq{wc.walletFile}, &res)
 	if err != nil {
 		return "", err
 	}
@@ -147,20 +154,25 @@ func (wc *WalletClient) CreateNewAddress(ctx context.Context) (string, error) {
 // already been requested.
 func (wc *WalletClient) GetUnusedAddress(ctx context.Context) (string, error) {
 	var res string
-	err := wc.Call(ctx, methodGetUnusedAddress, nil, &res)
+	err := wc.Call(ctx, methodGetUnusedAddress, &walletReq{wc.walletFile}, &res)
 	if err != nil {
 		return "", err
 	}
 	return res, nil
 }
 
+type addrReq struct {
+	Addr   string `json:"address"`
+	Wallet string `json:"wallet,omitempty"`
+}
+
 // CheckAddress validates the address and reports if it belongs to the wallet.
 func (wc *WalletClient) CheckAddress(ctx context.Context, addr string) (valid, mine bool, err error) {
-	err = wc.Call(ctx, methodIsMine, positional{addr}, &mine)
+	err = wc.Call(ctx, methodIsMine, addrReq{Addr: addr, Wallet: wc.walletFile}, &mine)
 	if err != nil {
 		return
 	}
-	err = wc.Call(ctx, methodValidateAddress, positional{addr}, &valid)
+	err = wc.Call(ctx, methodValidateAddress, positional{addr}, &valid) // no wallet arg for validateaddress
 	if err != nil {
 		return
 	}
@@ -172,7 +184,7 @@ func (wc *WalletClient) CheckAddress(ctx context.Context, addr string) (valid, m
 // value of zero for Height.
 func (wc *WalletClient) GetAddressHistory(ctx context.Context, addr string) ([]*GetAddressHistoryResult, error) {
 	var res []*GetAddressHistoryResult
-	err := wc.Call(ctx, methodGetAddressHistory, positional{addr}, &res)
+	err := wc.Call(ctx, methodGetAddressHistory, positional{addr}, &res) // no wallet arg for getaddresshistory
 	if err != nil {
 		return nil, err
 	}
@@ -183,11 +195,16 @@ func (wc *WalletClient) GetAddressHistory(ctx context.Context, addr string) ([]*
 // outputs will have a value of zero for Height.
 func (wc *WalletClient) GetAddressUnspent(ctx context.Context, addr string) ([]*GetAddressUnspentResult, error) {
 	var res []*GetAddressUnspentResult
-	err := wc.Call(ctx, methodGetAddressUnspent, positional{addr}, &res)
+	err := wc.Call(ctx, methodGetAddressUnspent, positional{addr}, &res) // no wallet arg for getaddressunspent
 	if err != nil {
 		return nil, err
 	}
 	return res, nil
+}
+
+type utxoReq struct {
+	UTXO   string `json:"coin"`
+	Wallet string `json:"wallet,omitempty"`
 }
 
 // FreezeUTXO freezes/locks a single UTXO. It will still be reported by
@@ -195,7 +212,7 @@ func (wc *WalletClient) GetAddressUnspent(ctx context.Context, addr string) ([]*
 func (wc *WalletClient) FreezeUTXO(ctx context.Context, txid string, out uint32) error {
 	utxo := txid + ":" + strconv.FormatUint(uint64(out), 10)
 	var res bool
-	err := wc.Call(ctx, methodFreezeUTXO, positional{utxo}, &res)
+	err := wc.Call(ctx, methodFreezeUTXO, &utxoReq{UTXO: utxo, Wallet: wc.walletFile}, &res)
 	if err != nil {
 		return err
 	}
@@ -209,7 +226,7 @@ func (wc *WalletClient) FreezeUTXO(ctx context.Context, txid string, out uint32)
 func (wc *WalletClient) UnfreezeUTXO(ctx context.Context, txid string, out uint32) error {
 	utxo := txid + ":" + strconv.FormatUint(uint64(out), 10)
 	var res bool
-	err := wc.Call(ctx, methodUnfreezeUTXO, positional{utxo}, &res)
+	err := wc.Call(ctx, methodUnfreezeUTXO, &utxoReq{UTXO: utxo, Wallet: wc.walletFile}, &res)
 	if err != nil {
 		return err
 	}
@@ -219,10 +236,15 @@ func (wc *WalletClient) UnfreezeUTXO(ctx context.Context, txid string, out uint3
 	return nil
 }
 
+type txidReq struct {
+	TxID   string `json:"txid"`
+	Wallet string `json:"wallet,omitempty"`
+}
+
 // GetRawTransaction retrieves the serialized transaction identified by txid.
 func (wc *WalletClient) GetRawTransaction(ctx context.Context, txid string) ([]byte, error) {
 	var res string
-	err := wc.Call(ctx, methodGetTransaction, positional{txid}, &res)
+	err := wc.Call(ctx, methodGetTransaction, &txidReq{TxID: txid, Wallet: wc.walletFile}, &res)
 	if err != nil {
 		return nil, err
 	}
@@ -240,7 +262,7 @@ func (wc *WalletClient) GetWalletTxConfs(ctx context.Context, txid string) (int,
 	var res struct {
 		Confs int `json:"confirmations"`
 	}
-	err := wc.Call(ctx, methodGetTxStatus, positional{txid}, &res)
+	err := wc.Call(ctx, methodGetTxStatus, &txidReq{TxID: txid, Wallet: wc.walletFile}, &res)
 	if err != nil {
 		return 0, err
 	}
@@ -252,7 +274,7 @@ func (wc *WalletClient) GetWalletTxConfs(ctx context.Context, txid string) (int,
 // GetRawTransaction for PrevOutHash if the output is of interest.
 func (wc *WalletClient) ListUnspent(ctx context.Context) ([]*ListUnspentResult, error) {
 	var res []*ListUnspentResult
-	err := wc.Call(ctx, methodListUnspent, nil, &res)
+	err := wc.Call(ctx, methodListUnspent, &walletReq{wc.walletFile}, &res)
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +288,7 @@ func (wc *WalletClient) GetBalance(ctx context.Context) (*Balance, error) {
 		Unconfirmed floatString `json:"unconfirmed"`
 		Immature    floatString `json:"unmatured"` // yes, unmatured!
 	}
-	err := wc.Call(ctx, methodGetBalance, nil, &res)
+	err := wc.Call(ctx, methodGetBalance, &walletReq{wc.walletFile}, &res)
 	if err != nil {
 		return nil, err
 	}
@@ -293,6 +315,7 @@ type paytoReq struct {
 	Password       string `json:"password"`
 	LockTime       *int64 `json:"locktime,omitempty"`
 	AddTransaction bool   `json:"addtransaction"`
+	Wallet         string `json:"wallet,omitempty"`
 }
 
 // PayTo sends the specified amount in BTC (or the conventional unit for the
@@ -314,6 +337,7 @@ func (wc *WalletClient) PayTo(ctx context.Context, walletPass string, addr strin
 		// before broadcasting. If we don't, rapid back-to-back sends can result
 		// in a mempool conflict from spending the same prevouts.
 		AddTransaction: true,
+		Wallet:         wc.walletFile,
 	}, &res)
 	if err != nil {
 		return nil, err
@@ -344,6 +368,7 @@ func (wc *WalletClient) PayToFromCoinsAbsFee(ctx context.Context, walletPass str
 		Password:       walletPass,
 		FromUTXOs:      strings.Join(fromCoins, ","),
 		AddTransaction: true,
+		Wallet:         wc.walletFile,
 	}, &res)
 	if err != nil {
 		return nil, err
@@ -370,6 +395,7 @@ func (wc *WalletClient) Sweep(ctx context.Context, walletPass string, addr strin
 		FeeRate:        &feeRate,
 		Password:       walletPass,
 		AddTransaction: true,
+		Wallet:         wc.walletFile,
 	}, &res)
 	if err != nil {
 		return nil, err
@@ -388,13 +414,18 @@ type signTransactionArgs struct {
 	// signtransaction_with_privkey request. (this RPC should not use positional
 	// arguments)
 	// Privkey string `json:"privkey,omitempty"` // sign with wallet if empty
+	Wallet string `json:"wallet,omitempty"`
 }
 
 // SignTx signs the base-64 encoded PSBT with the wallet's keys, returning the
 // signed transaction.
 func (wc *WalletClient) SignTx(ctx context.Context, walletPass string, psbtB64 string) ([]byte, error) {
 	var res string
-	err := wc.Call(ctx, methodSignTransaction, &signTransactionArgs{psbtB64, walletPass}, &res)
+	err := wc.Call(ctx, methodSignTransaction, &signTransactionArgs{
+		Tx:     psbtB64,
+		Pass:   walletPass,
+		Wallet: wc.walletFile},
+		&res)
 	if err != nil {
 		return nil, err
 	}
@@ -409,11 +440,16 @@ func (wc *WalletClient) SignTx(ctx context.Context, walletPass string, psbtB64 s
 func (wc *WalletClient) Broadcast(ctx context.Context, tx []byte) (string, error) {
 	txStr := hex.EncodeToString(tx)
 	var res string
-	err := wc.Call(ctx, methodBroadcast, positional{txStr}, &res)
+	err := wc.Call(ctx, methodBroadcast, positional{txStr}, &res) // no wallet arg
 	if err != nil {
 		return "", err
 	}
 	return res, nil
+}
+
+type rawTxReq struct {
+	RawTx  string `json:"tx"`
+	Wallet string `json:"wallet,omitempty"`
 }
 
 // AddLocalTx is used to add a "local" transaction to the Electrum wallet DB.
@@ -421,7 +457,7 @@ func (wc *WalletClient) Broadcast(ctx context.Context, tx []byte) (string, error
 func (wc *WalletClient) AddLocalTx(ctx context.Context, tx []byte) (string, error) {
 	txStr := hex.EncodeToString(tx)
 	var txid string
-	err := wc.Call(ctx, methodAddLocalTx, positional{txStr}, &txid)
+	err := wc.Call(ctx, methodAddLocalTx, &rawTxReq{RawTx: txStr, Wallet: wc.walletFile}, &txid)
 	if err != nil {
 		return "", err
 	}
@@ -435,19 +471,24 @@ func (wc *WalletClient) AddLocalTx(ctx context.Context, tx []byte) (string, erro
 // send it after inspecting the raw transaction. Calling RemoveLocalTx with an
 // already broadcast or non-existent txid will not generate an error.
 func (wc *WalletClient) RemoveLocalTx(ctx context.Context, txid string) error {
-	return wc.Call(ctx, methodRemoveLocalTx, positional{txid}, nil)
+	return wc.Call(ctx, methodRemoveLocalTx, &txidReq{TxID: txid, Wallet: wc.walletFile}, nil)
 }
 
 type getPrivKeyArgs struct {
-	Addr string `json:"address"`
-	Pass string `json:"password"`
+	Addr   string `json:"address"`
+	Pass   string `json:"password"`
+	Wallet string `json:"wallet,omitempty"`
 }
 
 // GetPrivateKeys uses the getprivatekeys RPC to retrieve the keys for a given
 // address. The returned string is WIF-encoded.
 func (wc *WalletClient) GetPrivateKeys(ctx context.Context, walletPass, addr string) (string, error) {
 	var res string
-	err := wc.Call(ctx, methodGetPrivateKeys, &getPrivKeyArgs{addr, walletPass}, &res)
+	err := wc.Call(ctx, methodGetPrivateKeys, &getPrivKeyArgs{
+		Addr:   addr,
+		Pass:   walletPass,
+		Wallet: wc.walletFile},
+		&res)
 	if err != nil {
 		return "", err
 	}
