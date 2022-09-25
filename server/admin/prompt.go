@@ -21,6 +21,19 @@ type passwordReadResponse struct {
 // PasswordPrompt prompts the user to enter a password. Password must not be an
 // empty string.
 func PasswordPrompt(ctx context.Context, prompt string) ([]byte, error) {
+	var password []byte
+	var err error
+	for len(password) == 0 {
+		password, err = passwordPrompt(ctx, prompt)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return password, nil
+}
+
+// passwordPrompt prompts the user to enter a password.
+func passwordPrompt(ctx context.Context, prompt string) ([]byte, error) {
 	// Get the initial state of the terminal.
 	initialTermState, err := term.GetState(int(os.Stdin.Fd()))
 	if err != nil {
