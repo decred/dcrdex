@@ -1263,7 +1263,7 @@ var العربية = map[Topic]*translation{
 	},
 	// [confs, required confs]
 	TopicRegUpdate: {
-		subject:  "تراجُع التحديث",
+		subject:  "تحديث التسجيل",
 		template: "تأكيدات دفع الرسوم %v/%v",
 	},
 	// [host, error]
@@ -1344,12 +1344,12 @@ var العربية = map[Topic]*translation{
 	// [side, token, match status]
 	TopicMatchErrorCoin: {
 		subject:  "خطأ في مطابقة العملة",
-		template: "مطابقة %s للطلب %s في الحالة %s، لكن لا يوجد بها عملة مقايضة للواضع.",
+		template: "مطابقة %s للطلب %s في الحالة %s، لكن لا توجد عملة مقايضة من الصانع.",
 	},
 	// [side, token, match status]
 	TopicMatchErrorContract: {
 		subject:  "خطأ في عقد المطابقة",
-		template: "تطابق %s للطلب %s في الحالة %s، لكن لا يوجد عقد مقايضة مع الواضع.",
+		template: "تطابق %s للطلب %s في الحالة %s، لكن لا يوجد عقد مقايضة من الصانع.",
 	},
 	// [ticker, contract, token, error]
 	TopicMatchRecoveryError: {
@@ -1398,7 +1398,7 @@ var العربية = map[Topic]*translation{
 	},
 	// [qty, ticker, token]
 	TopicSwapsInitiated: {
-		subject:  "تنفيذ المقايضات",
+		subject:  "بدأت المقايضات",
 		template: "تم إرسال مقايضات بقيمة %s %s عند الطلب %s",
 	},
 	// [qty, ticker, token]
@@ -1439,7 +1439,7 @@ var العربية = map[Topic]*translation{
 	// [ticker, coin ID, match]
 	TopicMatchRecovered: {
 		subject:  "تم استرداد المطابقة",
-		template: "تم إيجاد تسديد (%s: %v) الواضع كما تم التحقق من السر للمطابقة %s",
+		template: "تم إيجاد استرداد (%s: %v) صانع القيمة وسر المطابقة الذي تم التحقق منه %s",
 	},
 	// [token]
 	TopicCancellingOrder: {
@@ -1503,7 +1503,7 @@ var العربية = map[Topic]*translation{
 	},
 	// [market name, host]
 	TopicMarketSuspendedWithPurge: {
-		subject:  "Market suspended, orders purged",
+		subject:  "تم تعليق السوق، وألغيت الطلبات",
 		template: "تم تعليق التداول في السوق %s عند %s. كما تمت إزالة جميع الطلبات المحجوزة.",
 	},
 	// [market name, host, time]
