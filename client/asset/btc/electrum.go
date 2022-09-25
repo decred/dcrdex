@@ -45,7 +45,8 @@ func ElectrumWallet(cfg *BTCCloneCFG) (*ExchangeWalletElectrum, error) {
 	}
 
 	rpcCfg := &clientCfg.RPCConfig
-	ewc := electrum.NewWalletClient(rpcCfg.RPCUser, rpcCfg.RPCPass, "http://"+rpcCfg.RPCBind)
+	ewc := electrum.NewWalletClient(rpcCfg.RPCUser, rpcCfg.RPCPass,
+		"http://"+rpcCfg.RPCBind, rpcCfg.WalletName)
 	ew := newElectrumWallet(ewc, &electrumWalletConfig{
 		params:         cfg.ChainParams,
 		log:            cfg.Logger.SubLogger("ELECTRUM"),

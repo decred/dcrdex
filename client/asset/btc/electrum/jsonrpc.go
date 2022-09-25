@@ -48,6 +48,15 @@ func prepareRequest(id uint64, method string, args interface{}) ([]byte, error) 
 	if args == nil {
 		args = []json.RawMessage{}
 	}
+	// else {
+	// 	switch reflect.TypeOf(args).Kind() {
+	// 	case reflect.Interface, reflect.Pointer, reflect.Slice, reflect.Map:
+	// 		if reflect.ValueOf(args).IsNil() {
+	// 			args = []json.RawMessage{}
+	// 		}
+	// 	default:
+	// 	}
+	// }
 
 	switch rt := reflect.TypeOf(args); rt.Kind() {
 	case reflect.Struct, reflect.Slice:

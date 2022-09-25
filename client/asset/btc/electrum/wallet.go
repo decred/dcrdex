@@ -19,9 +19,10 @@ const defaultWalletTimeout = 10 * time.Second
 
 // WalletClient is an Electrum wallet HTTP JSON-RPC client.
 type WalletClient struct {
-	reqID uint64
-	url   string
-	auth  string
+	reqID      uint64
+	url        string
+	auth       string
+	walletFile string
 
 	// HTTPClient may be set by the user to a custom http.Client. The
 	// constructor sets a vanilla client.
@@ -34,14 +35,17 @@ type WalletClient struct {
 // NewWalletClient constructs a new Electrum wallet RPC client with the given
 // authorization information and endpoint. The endpoint should include the
 // protocol, e.g. http://127.0.0.1:4567. To specify a custom http.Client or
-// request timeout, the fields may be set after construction.
-func NewWalletClient(user, pass, endpoint string) *WalletClient {
+// request timeout, the fields may be set after construction. The full path to
+// the wallet file, if provided, will be passed directly to Electrum in RPCs
+// that have an optional "wallet" field.
+func NewWalletClient(user, pass, endpoint, walletFile string) *WalletClient {
 	// Prepare the HTTP Basic Authorization request header. This avoids
 	// re-encoding it for every request with (*http.Request).SetBasicAuth.
 	auth := "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+pass))
 	return &WalletClient{
 		url:        endpoint,
 		auth:       auth,
+		walletFile: walletFile,
 		HTTPClient: &http.Client{},
 		Timeout:    defaultWalletTimeout,
 	}

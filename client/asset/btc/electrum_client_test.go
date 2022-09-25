@@ -30,7 +30,7 @@ func Test_electrumWallet(t *testing.T) {
 	// (and the bitcoin network) and there are historical transactions that can
 	// be inspected in public block explorers.
 	const walletPass = "walletpass" // set me
-	ewc := electrum.NewWalletClient("user", "pass", "http://127.0.0.1:6789")
+	ewc := electrum.NewWalletClient("user", "pass", "http://127.0.0.1:5678", "~/.electrum/testnet/wallets/default_wallet")
 	ew := newElectrumWallet(ewc, &electrumWalletConfig{
 		params: &chaincfg.TestNet3Params,
 		log:    dex.StdOutLogger("ELECTRUM-TEST", dex.LevelTrace),
