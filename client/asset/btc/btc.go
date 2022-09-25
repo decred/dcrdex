@@ -142,16 +142,15 @@ var (
 			NoEcho:      true,
 		},
 		{
+			Key:         "rpcport",
+			DisplayName: "JSON-RPC Port",
+			Description: "Electrum's 'rpcport' (if not set with address)",
+		},
+		{
 			Key:          "rpcbind", // match RPCConfig struct field tags
 			DisplayName:  "JSON-RPC Address",
 			Description:  "Electrum's 'rpchost' <addr> or <addr>:<port>",
 			DefaultValue: "127.0.0.1",
-		},
-		{
-			Key:          "rpcport",
-			DisplayName:  "JSON-RPC Port",
-			Description:  "Electrum's 'rpcport' (if not set with address)",
-			DefaultValue: "6789",
 		},
 	}
 
