@@ -40,8 +40,7 @@ export default class OrderPage extends BasePage {
     // Find the order
     this.orderID = main.dataset.oid || ''
 
-    page.matchCardTmpl.removeAttribute('id')
-    page.matchCardTmpl.remove()
+    Doc.cleanTemplates(page.matchCardTmpl)
 
     main.querySelectorAll('[data-explorer-id]').forEach((link: PageElement) => {
       setCoinHref(link)
@@ -107,11 +106,7 @@ export default class OrderPage extends BasePage {
       match: (note: MatchNote) => { this.handleMatchNote(note) }
     })
 
-    this.start().then(
-      () => {
-        this.showMatchCards()
-      }
-    )
+    this.start()
   }
 
   async start () {
@@ -126,6 +121,8 @@ export default class OrderPage extends BasePage {
     // Swap out the dot-notation symbols with token-aware symbols.
     this.page.mktBaseSymbol.replaceWith(Doc.symbolize(ord.baseSymbol))
     this.page.mktQuoteSymbol.replaceWith(Doc.symbolize(ord.quoteSymbol))
+
+    this.showMatchCards()
   }
 
   unload () {
@@ -145,22 +142,21 @@ export default class OrderPage extends BasePage {
    * changed.
    */
   setImmutableMatchCardElements (matchCard: HTMLElement, match: Match) {
-    Doc.tmplElement(matchCard, 'matchID').textContent = match.matchID
+    const tmpl = Doc.parseTemplate(matchCard)
+
+    tmpl.matchID.textContent = match.matchID
 
     const time = new Date(match.stamp)
-    Doc.tmplElement(matchCard, 'matchTime').textContent = time.toLocaleTimeString('en-GB', {
+    tmpl.matchTime.textContent = time.toLocaleTimeString('en-GB', {
       year: 'numeric',
       month: 'short',
       day: 'numeric'
     })
 
-    const timeAgoSpan = Doc.tmplElement(matchCard, 'matchTimeAgo')
-    timeAgoSpan.dataset.stamp = match.stamp.toString()
-    timeAgoSpan.textContent = Doc.timeSince(match.stamp)
-    this.stampers.push(timeAgoSpan)
+    tmpl.matchTimeAgo.dataset.stamp = match.stamp.toString()
+    tmpl.matchTimeAgo.textContent = Doc.timeSince(match.stamp)
+    this.stampers.push(tmpl.matchTimeAgo)
 
-    const cancelDiv = Doc.tmplElement(matchCard, 'cancelInfoDiv')
-    const infoDiv = Doc.tmplElement(matchCard, 'infoDiv')
     const orderPortion = OrderUtil.orderPortion(this.order, match)
     const baseSymbol = Doc.bipSymbol(this.order.baseID)
     const quoteSymbol = Doc.bipSymbol(this.order.quoteID)
@@ -169,85 +165,85 @@ export default class OrderPage extends BasePage {
     const quoteAmount = OrderUtil.baseToQuote(match.rate, match.qty)
 
     if (match.isCancel) {
-      Doc.show(cancelDiv)
-      Doc.hide(infoDiv, Doc.tmplElement(matchCard, 'status'), Doc.tmplElement(matchCard, 'statusHdr'))
+      Doc.show(tmpl.cancelInfoDiv)
+      Doc.hide(tmpl.infoDiv, tmpl.status, tmpl.statusHdr)
 
       if (this.order.sell) {
-        Doc.tmplElement(matchCard, 'cancelAmount').textContent = Doc.formatCoinValue(match.qty, baseUnitInfo)
-        Doc.tmplElement(matchCard, 'cancelIcon').src = Doc.logoPathFromID(this.order.baseID)
+        tmpl.cancelAmount.textContent = Doc.formatCoinValue(match.qty, baseUnitInfo)
+        tmpl.cancelIcon.src = Doc.logoPathFromID(this.order.baseID)
       } else {
-        Doc.tmplElement(matchCard, 'cancelAmount').textContent = Doc.formatCoinValue(quoteAmount, quoteUnitInfo)
-        Doc.tmplElement(matchCard, 'cancelIcon').src = Doc.logoPathFromID(this.order.quoteID)
+        tmpl.cancelAmount.textContent = Doc.formatCoinValue(quoteAmount, quoteUnitInfo)
+        tmpl.cancelIcon.src = Doc.logoPathFromID(this.order.quoteID)
       }
 
-      Doc.tmplElement(matchCard, 'cancelOrderPortion').textContent = orderPortion
+      tmpl.cancelOrderPortion.textContent = orderPortion
 
       return
     }
 
-    Doc.show(infoDiv)
-    Doc.hide(cancelDiv)
+    Doc.show(tmpl.infoDiv)
+    Doc.hide(tmpl.cancelInfoDiv)
 
-    Doc.tmplElement(matchCard, 'orderPortion').textContent = orderPortion
+    tmpl.orderPortion.textContent = orderPortion
 
     if (match.side === OrderUtil.Maker) {
-      Doc.tmplElement(matchCard, 'side').textContent = 'Maker'
+      tmpl.side.textContent = 'Maker'
       Doc.show(
-        Doc.tmplElement(matchCard, 'makerSwapYou'),
-        Doc.tmplElement(matchCard, 'makerRedeemYou'),
-        Doc.tmplElement(matchCard, 'takerSwapThem'),
-        Doc.tmplElement(matchCard, 'takerRedeemThem')
+        tmpl.makerSwapYou,
+        tmpl.makerRedeemYou,
+        tmpl.takerSwapThem,
+        tmpl.takerRedeemThem
       )
       Doc.hide(
-        Doc.tmplElement(matchCard, 'takerSwapYou'),
-        Doc.tmplElement(matchCard, 'takerRedeemYou'),
-        Doc.tmplElement(matchCard, 'makerSwapThem'),
-        Doc.tmplElement(matchCard, 'makerRedeemThem')
+        tmpl.takerSwapYou,
+        tmpl.takerRedeemYou,
+        tmpl.makerSwapThem,
+        tmpl.makerRedeemThem
       )
     } else {
-      Doc.tmplElement(matchCard, 'side').textContent = 'Taker'
+      tmpl.side.textContent = 'Taker'
       Doc.hide(
-        Doc.tmplElement(matchCard, 'makerSwapYou'),
-        Doc.tmplElement(matchCard, 'makerRedeemYou'),
-        Doc.tmplElement(matchCard, 'takerSwapThem'),
-        Doc.tmplElement(matchCard, 'takerRedeemThem')
+        tmpl.makerSwapYou,
+        tmpl.makerRedeemYou,
+        tmpl.takerSwapThem,
+        tmpl.takerRedeemThem
       )
       Doc.show(
-        Doc.tmplElement(matchCard, 'takerSwapYou'),
-        Doc.tmplElement(matchCard, 'takerRedeemYou'),
-        Doc.tmplElement(matchCard, 'makerSwapThem'),
-        Doc.tmplElement(matchCard, 'makerRedeemThem')
+        tmpl.takerSwapYou,
+        tmpl.takerRedeemYou,
+        tmpl.makerSwapThem,
+        tmpl.makerRedeemThem
       )
     }
 
     if ((match.side === OrderUtil.Maker && this.order.sell) ||
           (match.side === OrderUtil.Taker && !this.order.sell)) {
-      Doc.tmplElement(matchCard, 'makerSwapAsset').textContent = baseSymbol
-      Doc.tmplElement(matchCard, 'takerSwapAsset').textContent = quoteSymbol
-      Doc.tmplElement(matchCard, 'makerRedeemAsset').textContent = quoteSymbol
-      Doc.tmplElement(matchCard, 'takerRedeemAsset').textContent = baseSymbol
+      tmpl.makerSwapAsset.textContent = baseSymbol
+      tmpl.takerSwapAsset.textContent = quoteSymbol
+      tmpl.makerRedeemAsset.textContent = quoteSymbol
+      tmpl.takerRedeemAsset.textContent = baseSymbol
     } else {
-      Doc.tmplElement(matchCard, 'makerSwapAsset').textContent = quoteSymbol
-      Doc.tmplElement(matchCard, 'takerSwapAsset').textContent = baseSymbol
-      Doc.tmplElement(matchCard, 'makerRedeemAsset').textContent = baseSymbol
-      Doc.tmplElement(matchCard, 'takerRedeemAsset').textContent = quoteSymbol
+      tmpl.makerSwapAsset.textContent = quoteSymbol
+      tmpl.takerSwapAsset.textContent = baseSymbol
+      tmpl.makerRedeemAsset.textContent = baseSymbol
+      tmpl.takerRedeemAsset.textContent = quoteSymbol
     }
 
     const rate = app().conventionalRate(this.order.baseID, this.order.quoteID, match.rate)
-    Doc.tmplElement(matchCard, 'rate').textContent = `${rate} ${baseSymbol}/${quoteSymbol}`
+    tmpl.rate.textContent = `${rate} ${baseSymbol}/${quoteSymbol}`
 
     if (this.order.sell) {
-      Doc.tmplElement(matchCard, 'refundAsset').textContent = baseSymbol
-      Doc.tmplElement(matchCard, 'fromAmount').textContent = Doc.formatCoinValue(match.qty, baseUnitInfo)
-      Doc.tmplElement(matchCard, 'toAmount').textContent = Doc.formatCoinValue(quoteAmount, quoteUnitInfo)
-      Doc.tmplElement(matchCard, 'fromIcon').src = Doc.logoPathFromID(this.order.baseID)
-      Doc.tmplElement(matchCard, 'toIcon').src = Doc.logoPathFromID(this.order.quoteID)
+      tmpl.refundAsset.textContent = baseSymbol
+      tmpl.fromAmount.textContent = Doc.formatCoinValue(match.qty, baseUnitInfo)
+      tmpl.toAmount.textContent = Doc.formatCoinValue(quoteAmount, quoteUnitInfo)
+      tmpl.fromIcon.src = Doc.logoPathFromID(this.order.baseID)
+      tmpl.toIcon.src = Doc.logoPathFromID(this.order.quoteID)
     } else {
-      Doc.tmplElement(matchCard, 'refundAsset').textContent = quoteSymbol
-      Doc.tmplElement(matchCard, 'fromAmount').textContent = Doc.formatCoinValue(quoteAmount, quoteUnitInfo)
-      Doc.tmplElement(matchCard, 'toAmount').textContent = Doc.formatCoinValue(match.qty, baseUnitInfo)
-      Doc.tmplElement(matchCard, 'fromIcon').src = Doc.logoPathFromID(this.order.quoteID)
-      Doc.tmplElement(matchCard, 'toIcon').src = Doc.logoPathFromID(this.order.baseID)
+      tmpl.refundAsset.textContent = quoteSymbol
+      tmpl.fromAmount.textContent = Doc.formatCoinValue(quoteAmount, quoteUnitInfo)
+      tmpl.toAmount.textContent = Doc.formatCoinValue(match.qty, baseUnitInfo)
+      tmpl.fromIcon.src = Doc.logoPathFromID(this.order.quoteID)
+      tmpl.toIcon.src = Doc.logoPathFromID(this.order.baseID)
     }
   }
 
@@ -255,19 +251,20 @@ export default class OrderPage extends BasePage {
    * setMutableMatchCardElements sets the match card elements which may get
    * updated on each update to the match.
    */
-  setMutableMatchCardElements (card: HTMLElement, m: Match) {
-    Doc.tmplElement(card, 'status').textContent = OrderUtil.matchStatusString(m)
-
+  setMutableMatchCardElements (matchCard: HTMLElement, m: Match) {
     if (m.isCancel) {
       return
     }
 
+    const tmpl = Doc.parseTemplate(matchCard)
+    tmpl.status.textContent = OrderUtil.matchStatusString(m)
+
     const setCoin = (pendingName: string, linkName: string, coin: Coin) => {
-      const coinLink = Doc.tmplElement(card, linkName)
-      const pendingSpan = Doc.tmplElement(card, pendingName)
+      const coinLink = tmpl[linkName]
+      const pendingSpan = tmpl[pendingName]
       if (!coin) {
-        Doc.show(pendingSpan)
-        Doc.hide(coinLink)
+        Doc.show(tmpl[pendingName])
+        Doc.hide(tmpl[linkName])
         return
       }
       coinLink.textContent = coin.stringID
@@ -283,38 +280,27 @@ export default class OrderPage extends BasePage {
     setCoin('takerRedeemPending', 'takerRedeemCoin', takerRedeemCoin(m))
     setCoin('refundPending', 'refundCoin', m.refund)
 
-    const makerSwapSpan = Doc.tmplElement(card, 'makerSwapMsg')
-    const takerSwapSpan = Doc.tmplElement(card, 'takerSwapMsg')
-    const makerRedeemSpan = Doc.tmplElement(card, 'makerRedeemMsg')
-    const takerRedeemSpan = Doc.tmplElement(card, 'takerRedeemMsg')
-
     if (m.status === OrderUtil.MakerSwapCast && !m.revoked && !m.refund) {
       const c = makerSwapCoin(m)
-      makerSwapSpan.textContent = confirmationString(c)
-      Doc.hide(takerSwapSpan, makerRedeemSpan, takerRedeemSpan)
-      Doc.show(makerSwapSpan)
+      tmpl.makerSwapMsg.textContent = confirmationString(c)
+      Doc.hide(tmpl.takerSwapMsg, tmpl.makerRedeemMsg, tmpl.takerRedeemMsg)
+      Doc.show(tmpl.makerSwapMsg)
     } else if (m.status === OrderUtil.TakerSwapCast && !m.revoked && !m.refund) {
       const c = takerSwapCoin(m)
-      takerSwapSpan.textContent = confirmationString(c)
-      Doc.hide(makerSwapSpan, makerRedeemSpan, takerRedeemSpan)
-      Doc.show(takerSwapSpan)
+      tmpl.takerSwapMsg.textContent = confirmationString(c)
+      Doc.hide(tmpl.makerSwapMsg, tmpl.makerRedeemMsg, tmpl.takerRedeemMsg)
+      Doc.show(tmpl.takerSwapMsg)
     } else if (inConfirmingMakerRedeem(m) && !m.revoked && !m.refund) {
-      makerRedeemSpan.textContent = confirmationString(m.redeem)
-      Doc.hide(makerSwapSpan, takerSwapSpan, takerRedeemSpan)
-      Doc.show(makerRedeemSpan)
+      tmpl.makerRedeemMsg.textContent = confirmationString(m.redeem)
+      Doc.hide(tmpl.makerSwapMsg, tmpl.takerSwapMsg, tmpl.takerRedeemMsg)
+      Doc.show(tmpl.makerRedeemMsg)
     } else if (inConfirmingTakerRedeem(m) && !m.revoked && !m.refund) {
-      takerRedeemSpan.textContent = confirmationString(m.redeem)
-      Doc.hide(makerSwapSpan, takerSwapSpan, makerRedeemSpan)
-      Doc.show(takerRedeemSpan)
+      tmpl.takerRedeemMsg.textContent = confirmationString(m.redeem)
+      Doc.hide(tmpl.makerSwapMsg, tmpl.takerSwapMsg, tmpl.makerRedeemMsg)
+      Doc.show(tmpl.takerRedeemMsg)
     } else {
-      Doc.hide(makerSwapSpan, takerSwapSpan, makerRedeemSpan, takerRedeemSpan)
+      Doc.hide(tmpl.makerSwapMsg, tmpl.takerSwapMsg, tmpl.makerRedeemMsg, tmpl.takerRedeemMsg)
     }
-
-    const makerSwapDiv = Doc.tmplElement(card, 'makerSwap')
-    const takerSwapDiv = Doc.tmplElement(card, 'takerSwap')
-    const makerRedeemDiv = Doc.tmplElement(card, 'makerRedeem')
-    const takerRedeemDiv = Doc.tmplElement(card, 'takerRedeem')
-    const refundDiv = Doc.tmplElement(card, 'refund')
 
     const showMakerSwap = !m.isCancel && (makerSwapCoin(m) || !m.revoked)
     const showTakerSwap = !m.isCancel && (takerSwapCoin(m) || !m.revoked)
@@ -322,16 +308,16 @@ export default class OrderPage extends BasePage {
     const showTakerRedeem = !m.isCancel && (m.side !== OrderUtil.Maker) && (takerRedeemCoin(m) || !m.revoked)
     const showRefund = !m.isCancel && (m.refund || (m.revoked && m.active))
 
-    if (showMakerSwap) Doc.show(makerSwapDiv)
-    else Doc.hide(makerSwapDiv)
-    if (showTakerSwap) Doc.show(takerSwapDiv)
-    else Doc.hide(takerSwapDiv)
-    if (showMakerRedeem) Doc.show(makerRedeemDiv)
-    else Doc.hide(makerRedeemDiv)
-    if (showTakerRedeem) Doc.show(takerRedeemDiv)
-    else Doc.hide(takerRedeemDiv)
-    if (showRefund) Doc.show(refundDiv)
-    else Doc.hide(refundDiv)
+    if (showMakerSwap) Doc.show(tmpl.makerSwap)
+    else Doc.hide(tmpl.makerSwap)
+    if (showTakerSwap) Doc.show(tmpl.takerSwap)
+    else Doc.hide(tmpl.takerSwap)
+    if (showMakerRedeem) Doc.show(tmpl.makerRedeem)
+    else Doc.hide(tmpl.makerRedeem)
+    if (showTakerRedeem) Doc.show(tmpl.takerRedeem)
+    else Doc.hide(tmpl.takerRedeem)
+    if (showRefund) Doc.show(tmpl.refund)
+    else Doc.hide(tmpl.refund)
   }
 
   /*
