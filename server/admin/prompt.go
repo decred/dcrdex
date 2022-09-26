@@ -18,22 +18,9 @@ type passwordReadResponse struct {
 	err      error
 }
 
-// PasswordPrompt prompts the user to enter a password. Password must not be an
-// empty string.
+// PasswordPrompt prompts the user to enter a password. Password must not be
+// empty.
 func PasswordPrompt(ctx context.Context, prompt string) ([]byte, error) {
-	var password []byte
-	var err error
-	for len(password) == 0 {
-		password, err = passwordPrompt(ctx, prompt)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return password, nil
-}
-
-// passwordPrompt prompts the user to enter a password.
-func passwordPrompt(ctx context.Context, prompt string) ([]byte, error) {
 	// Get the initial state of the terminal.
 	initialTermState, err := term.GetState(int(os.Stdin.Fd()))
 	if err != nil {
@@ -41,15 +28,28 @@ func passwordPrompt(ctx context.Context, prompt string) ([]byte, error) {
 	}
 
 	passwordReadChan := make(chan passwordReadResponse, 1)
-
-	go func() {
-		fmt.Print(prompt)
-		pass, err := term.ReadPassword(int(os.Stdin.Fd()))
-		fmt.Println()
+	passwordResult := func(pass []byte, err error) {
 		passwordReadChan <- passwordReadResponse{
 			password: pass,
 			err:      err,
 		}
+	}
+
+	go func() {
+		// Use a retry loop to ensure user password returned from the terminal
+		// is not a zero-length byte because it is not an error if len(password)
+		// == 0, user did not enter a password.
+		var pass []byte
+		for len(pass) == 0 {
+			fmt.Print(prompt)
+			pass, err = term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Println()
+			if err != nil {
+				passwordResult(pass, err)
+				return
+			}
+		}
+		passwordResult(pass, nil)
 	}()
 
 	select {
