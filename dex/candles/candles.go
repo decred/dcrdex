@@ -130,8 +130,8 @@ func (c *Cache) Delta(since time.Time) (changePct float64, vol uint64) {
 		if candle.StartStamp <= cutoff && candle.StartRate != 0 {
 			// Interpret the point linearly between the start and end stamps
 			cut := float64(cutoff-candle.StartStamp) / float64(candle.EndStamp-candle.StartStamp)
-			rateDelta := candle.EndRate - candle.StartRate
-			r := candle.StartRate + uint64(cut*float64(rateDelta))
+			rateDelta := float64(candle.EndRate) - float64(candle.StartRate)
+			r := candle.StartRate + uint64(cut*rateDelta)
 			if r > 0 {
 				startRate = r
 			}
