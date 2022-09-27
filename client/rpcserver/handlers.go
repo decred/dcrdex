@@ -346,7 +346,7 @@ func handleRegister(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	return createResponse(registerRoute, res, nil)
 }
 
-// handleExchanges handles requests for exchangess. It takes no arguments and
+// handleExchanges handles requests for exchanges. It takes no arguments and
 // returns a map of exchanges.
 func handleExchanges(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 	// Convert something to a map[string]interface{}.
@@ -363,7 +363,7 @@ func handleExchanges(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 	}
 	res := s.core.Exchanges()
 	exchanges := convM(res)
-	// Interate through exchanges converting structs into maps in order to
+	// Iterate through exchanges converting structs into maps in order to
 	// remove some fields. Keys are DEX addresses.
 	for k, exchange := range exchanges {
 		exchangeDetails := convM(exchange)
@@ -614,7 +614,7 @@ func parseCoreOrder(co *core.Order, b, q uint32) *myOrder {
 		TimeInForce: co.TimeInForce.String(),
 	}
 
-	// Parese matches & calculate settled value
+	// Parse matches & calculate settled value
 	o.Matches, o.Settled = parseMatches(co.Matches)
 
 	return o

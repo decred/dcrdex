@@ -582,7 +582,7 @@ type AccountLocker interface {
 	ReReserveRefund(uint64) error
 	// UnlockRefundReserves is used to return funds reserved for refunds
 	// when an order was cancelled or revoked before a swap was initiated,
-	// completed successully, or after a refund was done.
+	// completed successfully, or after a refund was done.
 	UnlockRefundReserves(uint64)
 }
 

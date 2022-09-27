@@ -53,29 +53,29 @@ func (c *tCoin) Confirmations(context.Context) (uint32, error) {
 }
 
 type TCore struct {
-	balanceErr       error
-	syncFeed         core.BookFeed
-	syncErr          error
-	regErr           error
-	loginErr         error
-	logoutErr        error
-	initErr          error
-	isInited         bool
-	getDEXConfigErr  error
-	createWalletErr  error
-	openWalletErr    error
-	closeWalletErr   error
-	rescannWalletErr error
-	sendErr          error
-	notHas           bool
-	notRunning       bool
-	notOpen          bool
-	rateSourceErr    error
-	estFee           uint64
-	estFeeErr        error
-	validAddr        bool
-	walletDisabled   bool
-	walletStatusErr  error
+	balanceErr      error
+	syncFeed        core.BookFeed
+	syncErr         error
+	regErr          error
+	loginErr        error
+	logoutErr       error
+	initErr         error
+	isInited        bool
+	getDEXConfigErr error
+	createWalletErr error
+	openWalletErr   error
+	closeWalletErr  error
+	rescanWalletErr error
+	sendErr         error
+	notHas          bool
+	notRunning      bool
+	notOpen         bool
+	rateSourceErr   error
+	estFee          uint64
+	estFeeErr       error
+	validAddr       bool
+	walletDisabled  bool
+	walletStatusErr error
 }
 
 func (c *TCore) Network() dex.Network                         { return dex.Mainnet }
@@ -122,7 +122,7 @@ func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error {
 	return c.createWalletErr
 }
-func (c *TCore) RescanWallet(assetID uint32, force bool) error    { return c.rescannWalletErr }
+func (c *TCore) RescanWallet(assetID uint32, force bool) error    { return c.rescanWalletErr }
 func (c *TCore) OpenWallet(assetID uint32, pw []byte) error       { return c.openWalletErr }
 func (c *TCore) CloseWallet(assetID uint32) error                 { return c.closeWalletErr }
 func (c *TCore) ConnectWallet(assetID uint32) error               { return nil }
@@ -754,8 +754,8 @@ func TestAPI_ToggleRatesource(t *testing.T) {
 	}{{
 		name:    "Invalid rate source",
 		source:  "binance",
-		wantErr: errors.New("cannot enable unkown fiat rate source"),
-		want:    `{"ok":false,"msg":"cannot enable unkown fiat rate source"}`,
+		wantErr: errors.New("cannot enable unknown fiat rate source"),
+		want:    `{"ok":false,"msg":"cannot enable unknown fiat rate source"}`,
 	}, {
 		name:   "ok valid source",
 		source: "dcrdata",
@@ -782,8 +782,8 @@ func TestAPI_ToggleRatesource(t *testing.T) {
 	}{{
 		name:    "Invalid rate source",
 		source:  "binance",
-		wantErr: errors.New("cannot disable unkown fiat rate source"),
-		want:    `{"ok":false,"msg":"cannot disable unkown fiat rate source"}`,
+		wantErr: errors.New("cannot disable unknown fiat rate source"),
+		want:    `{"ok":false,"msg":"cannot disable unknown fiat rate source"}`,
 	}, {
 		name:   "ok valid source",
 		source: "Messari",

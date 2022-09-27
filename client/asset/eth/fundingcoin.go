@@ -120,8 +120,8 @@ func decodeTokenFundingCoin(coinID []byte) (*tokenFundingCoin, error) {
 	}, nil
 }
 
-// createTokenFundingCoin constructs a new fundingtokenFundingCoinCoin for the provided account
-// address, value, and fees in gwei.
+// createTokenFundingCoin constructs a new tokenFundingCoin for the provided
+// account address, value, and fees in gwei.
 func createTokenFundingCoin(address common.Address, tokenValue, fees uint64) *tokenFundingCoin {
 	return &tokenFundingCoin{
 		addr: address,

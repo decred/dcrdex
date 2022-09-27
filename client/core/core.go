@@ -58,6 +58,13 @@ const (
 	defaultTickInterval = 30 * time.Second
 
 	marketBuyRedemptionSlippageBuffer = 2
+
+	// preimageReqTimeout the server's preimage request timeout period. When
+	// considered with a market's epoch duration, this is used to detect when an
+	// order should have gone through matching for a certain epoch. TODO:
+	// consider sharing const for the preimage timeout with the server packages,
+	// or a config response field if it should be considered variable.
+	preimageReqTimeout = 20 * time.Second
 )
 
 var (
@@ -774,6 +781,124 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 	return
 }
 
+// updateOrderStatus updates the order's status, cleaning up any associated
+// cancel orders, unlocking funding coins and refund/redemption reserves, and
+// updating the order in the DB. The trackedTrade's mutex must be write locked.
+func (dc *dexConnection) updateOrderStatus(trade *trackedTrade, newStatus order.OrderStatus) {
+	oid := trade.ID()
+	previousStatus := trade.metaData.Status
+	if previousStatus == newStatus { // may be expected if no srvOrderStatuses provided
+		return
+	}
+	trade.metaData.Status = newStatus
+	// If there is an associated cancel order, and we are revising the
+	// status of the targeted order to anything other than canceled, we can
+	// infer the cancel order is done. Update the status of the cancel order
+	// and unlink it from the trade. If the targeted order is reported as
+	// canceled, that indicates we submitted a cancel order preimage but
+	// missed the match notification, so the cancel order is executed.
+	if newStatus != order.OrderStatusCanceled {
+		trade.deleteCancelOrder()
+	} else if trade.cancel != nil {
+		cid := trade.cancel.ID()
+		err := trade.db.UpdateOrderStatus(cid, order.OrderStatusExecuted)
+		if err != nil {
+			dc.log.Errorf("Failed to update status of executed cancel order %v: %v", cid, err)
+		}
+	}
+	// If we're updating an order from an active state to executed,
+	// canceled, or revoked, and there are no active matches, return the
+	// locked funding coins and any refund/redeem reserves.
+	trade.maybeReturnCoins()
+	if newStatus >= order.OrderStatusExecuted && trade.Trade().Remaining() > 0 &&
+		(!trade.isMarketBuy() || len(trade.matches) == 0) {
+		if trade.isMarketBuy() {
+			trade.unlockRedemptionFraction(1, 1)
+			trade.unlockRefundFraction(1, 1)
+		} else {
+			trade.unlockRedemptionFraction(trade.Trade().Remaining(), trade.Trade().Quantity)
+			trade.unlockRefundFraction(trade.Trade().Remaining(), trade.Trade().Quantity)
+		}
+	}
+	// Now update the trade.
+	if err := trade.db.UpdateOrder(trade.metaOrder()); err != nil {
+		dc.log.Errorf("Error updating status in db for order %v from %v to %v", oid, previousStatus, newStatus)
+	} else {
+		dc.log.Warnf("Order %v updated from recorded status %q to new status %q reported by DEX %s",
+			oid, previousStatus, newStatus, dc.acct.host)
+	}
+
+	subject, details := trade.formatDetails(TopicOrderStatusUpdate, trade.token(), previousStatus, newStatus)
+	dc.notify(newOrderNote(TopicOrderStatusUpdate, subject, details, db.WarningLevel, trade.coreOrderInternal()))
+}
+
+// syncOrderStatuses requests and updates the status for each of the trades.
+func (dc *dexConnection) syncOrderStatuses(orders []*trackedTrade) (reconciledOrdersCount int) {
+	orderStatusRequests := make([]*msgjson.OrderStatusRequest, len(orders))
+	tradeMap := make(map[order.OrderID]*trackedTrade, len(orders))
+	for i, trade := range orders {
+		oid := trade.ID()
+		tradeMap[oid] = trade
+		orderStatusRequests[i] = &msgjson.OrderStatusRequest{
+			Base:    trade.Base(),
+			Quote:   trade.Quote(),
+			OrderID: oid.Bytes(),
+		}
+	}
+
+	dc.log.Debugf("Requesting statuses for %d orders from DEX %s", len(orderStatusRequests), dc.acct.host)
+
+	// Send the 'order_status' request.
+	var orderStatusResults []*msgjson.OrderStatus
+	err := sendRequest(dc.WsConn, msgjson.OrderStatusRoute, orderStatusRequests,
+		&orderStatusResults, DefaultResponseTimeout)
+	if err != nil {
+		dc.log.Errorf("Error retrieving order statuses from DEX %s: %v", dc.acct.host, err)
+		return
+	}
+
+	if len(orderStatusResults) != len(orderStatusRequests) {
+		dc.log.Errorf("Retrieved statuses for %d out of %d orders from order_status route",
+			len(orderStatusResults), len(orderStatusRequests))
+	}
+
+	// Update the orders with the statuses received.
+	for _, srvOrderStatus := range orderStatusResults {
+		var oid order.OrderID
+		copy(oid[:], srvOrderStatus.ID)
+		trade := tradeMap[oid] // no need to lock dc.tradeMtx
+		if trade == nil {
+			dc.log.Warnf("Server reported status for order %v that we did not request.", oid)
+			continue
+		}
+		reconciledOrdersCount++
+		trade.mtx.Lock()
+		dc.updateOrderStatus(trade, order.OrderStatus(srvOrderStatus.Status))
+		trade.mtx.Unlock()
+	}
+
+	// Treat orders with no status reported as revoked.
+reqsLoop:
+	for _, req := range orderStatusRequests {
+		for _, res := range orderStatusResults {
+			if req.OrderID.Equal(res.ID) {
+				continue reqsLoop
+			}
+		}
+		// No result for this order.
+		dc.log.Warnf("Server did not report status for order %v", req.OrderID)
+		var oid order.OrderID
+		copy(oid[:], req.OrderID)
+		trade := tradeMap[oid]
+		reconciledOrdersCount++
+		trade.mtx.Lock()
+		dc.updateOrderStatus(trade, order.OrderStatusRevoked)
+		trade.mtx.Unlock()
+	}
+
+	return
+}
+
 // reconcileTrades compares the statuses of orders in the dc.trades map to the
 // statuses returned by the server on `connect`, updating the statuses of the
 // tracked trades where applicable e.g.
@@ -809,78 +934,28 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 	}
 	knownActiveTrades := make(map[order.OrderID]*trackedTrade)
 	for oid, trade := range dc.trades {
-		trade.mtx.RLock()
-		if trade.metaData.Status == order.OrderStatusEpoch || trade.metaData.Status == order.OrderStatusBooked {
+		status := trade.status()
+		if status == order.OrderStatusEpoch || status == order.OrderStatusBooked {
 			knownActiveTrades[oid] = trade
 		} else if srvOrderStatus := srvActiveOrderStatuses[oid]; srvOrderStatus != nil {
 			// Lock redemption funds?
 			dc.log.Warnf("Inactive order %v, status %q reported by DEX %s as active, status %q",
-				oid, trade.metaData.Status, dc.acct.host, order.OrderStatus(srvOrderStatus.Status))
+				oid, status, dc.acct.host, order.OrderStatus(srvOrderStatus.Status))
 		}
-		trade.mtx.RUnlock()
 	}
 	dc.tradeMtx.RUnlock()
 
-	updateOrder := func(trade *trackedTrade, srvOrderStatus *msgjson.OrderStatus) {
-		reconciledOrdersCount++
-		oid := trade.ID()
-		previousStatus := trade.metaData.Status
-		newStatus := order.OrderStatus(srvOrderStatus.Status)
-		trade.metaData.Status = newStatus
-		// If there is an associated cancel order, and we are revising the
-		// status of the targeted order to anything other than canceled, we can
-		// infer the cancel order is done. Update the status of the cancel order
-		// and unlink it from the trade. If the targeted order is reported as
-		// canceled, that indicates we submitted a cancel order preimage but
-		// missed the match notification, so the cancel order is executed.
-		if newStatus != order.OrderStatusCanceled {
-			trade.deleteCancelOrder()
-		} else if trade.cancel != nil {
-			cid := trade.cancel.ID()
-			err := trade.db.UpdateOrderStatus(cid, order.OrderStatusExecuted)
-			if err != nil {
-				dc.log.Errorf("Failed to update status of executed cancel order %v: %v", cid, err)
-			}
-		}
-		// If we're updating an order from an active state to executed,
-		// canceled, or revoked, return the remaining quantity.
-		if newStatus >= order.OrderStatusExecuted && trade.Trade().Remaining() > 0 &&
-			(!trade.isMarketBuy() || len(trade.matches) == 0) {
-			if trade.isMarketBuy() {
-				trade.unlockRedemptionFraction(1, 1)
-				trade.unlockRefundFraction(1, 1)
-			} else {
-				trade.unlockRedemptionFraction(trade.Trade().Remaining(), trade.Trade().Quantity)
-				trade.unlockRefundFraction(trade.Trade().Remaining(), trade.Trade().Quantity)
-			}
-		}
-		// Now update the trade.
-		if err := trade.db.UpdateOrder(trade.metaOrder()); err != nil {
-			dc.log.Errorf("Error updating status in db for order %v from %v to %v", oid, previousStatus, newStatus)
-		} else {
-			dc.log.Warnf("Order %v updated from recorded status %q to new status %q reported by DEX %s",
-				oid, previousStatus, newStatus, dc.acct.host)
-		}
-
-		subject, details := trade.formatDetails(TopicOrderStatusUpdate, trade.token(), previousStatus, newStatus)
-		dc.notify(newOrderNote(TopicOrderStatusUpdate, subject, details, db.WarningLevel, trade.coreOrderInternal()))
-	}
-
-	// Compare the status reported by the server for each known active trade. Orders
-	// for which the server did not return a status are no longer active (now Executed,
-	// Canceled or Revoked). Use the order_status route to determine the correct status
-	// for such orders and update accordingly.
-	var orderStatusRequests []*msgjson.OrderStatusRequest
+	// Compare the status reported by the server for each known active trade.
+	// Orders for which the server did not return a status are no longer active
+	// (now Executed, Canceled or Revoked). Use the order_status route to
+	// determine the correct status for such orders and update accordingly.
+	var mysteryOrders []*trackedTrade
 	for oid, trade := range knownActiveTrades {
 		srvOrderStatus := srvActiveOrderStatuses[oid]
 		if srvOrderStatus == nil {
 			// Order status not returned by server. Must be inactive now.
 			// Request current status from the DEX.
-			orderStatusRequests = append(orderStatusRequests, &msgjson.OrderStatusRequest{
-				Base:    trade.Base(),
-				Quote:   trade.Quote(),
-				OrderID: trade.ID().Bytes(),
-			})
+			mysteryOrders = append(mysteryOrders, trade)
 			continue
 		}
 
@@ -888,54 +963,33 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 
 		// Server reports this order as active. Delete any associated cancel
 		// order if the cancel order's epoch has passed.
-		trade.deleteStaleCancelOrder()
+		trade.deleteStaleCancelOrder() // could be too soon, so we'll have to check in tick too
 
+		ourStatus := trade.metaData.Status
 		serverStatus := order.OrderStatus(srvOrderStatus.Status)
-		if trade.metaData.Status == serverStatus {
+		if ourStatus == serverStatus {
 			dc.log.Tracef("Status reconciliation not required for order %v, status %q, server-reported status %q",
-				oid, trade.metaData.Status, serverStatus)
-		} else if trade.metaData.Status == order.OrderStatusEpoch && serverStatus == order.OrderStatusBooked {
+				oid, ourStatus, serverStatus)
+		} else if ourStatus == order.OrderStatusEpoch && serverStatus == order.OrderStatusBooked {
 			// Only standing orders can move from Epoch to Booked. This must have
 			// happened in the client's absence (maybe a missed nomatch message).
 			if lo, ok := trade.Order.(*order.LimitOrder); ok && lo.Force == order.StandingTiF {
-				updateOrder(trade, srvOrderStatus)
+				reconciledOrdersCount++
+				dc.updateOrderStatus(trade, serverStatus)
 			} else {
 				dc.log.Warnf("Incorrect status %q reported for non-standing order %v by DEX %s, client status = %q",
-					serverStatus, oid, dc.acct.host, trade.metaData.Status)
+					serverStatus, oid, dc.acct.host, ourStatus)
 			}
 		} else {
 			dc.log.Warnf("Inconsistent status %q reported for order %v by DEX %s, client status = %q",
-				serverStatus, oid, dc.acct.host, trade.metaData.Status)
+				serverStatus, oid, dc.acct.host, ourStatus)
 		}
 
 		trade.mtx.Unlock()
 	}
 
-	if len(orderStatusRequests) > 0 {
-		dc.log.Debugf("Requesting statuses for %d orders from DEX %s", len(orderStatusRequests), dc.acct.host)
-
-		// Send the 'order_status' request.
-		var orderStatusResults []*msgjson.OrderStatus
-		err := sendRequest(dc.WsConn, msgjson.OrderStatusRoute, orderStatusRequests, &orderStatusResults, DefaultResponseTimeout)
-		if err != nil {
-			dc.log.Errorf("Error retrieving order statuses from DEX %s: %v", dc.acct.host, err)
-			return
-		}
-
-		if len(orderStatusResults) != len(orderStatusRequests) {
-			dc.log.Errorf("Retrieved statuses for %d out of %d orders from order_status route",
-				len(orderStatusResults), len(orderStatusRequests))
-		}
-
-		// Update the orders with the statuses received.
-		for _, srvOrderStatus := range orderStatusResults {
-			var oid order.OrderID
-			copy(oid[:], srvOrderStatus.ID)
-			trade := knownActiveTrades[oid] // no need to lock dc.tradeMtx
-			trade.mtx.Lock()
-			updateOrder(trade, srvOrderStatus)
-			trade.mtx.Unlock()
-		}
+	if len(mysteryOrders) > 0 {
+		reconciledOrdersCount += dc.syncOrderStatuses(mysteryOrders)
 	}
 
 	return
@@ -6616,6 +6670,36 @@ func (c *Core) handleReconnect(host string) {
 		// Continue to resubscribe to market fees.
 	}
 
+	// Now that reconcileTrades has been run in authDEX, make a list of epoch
+	// status orders that should be re-checked in the next epoch because we may
+	// have missed the preimage request while disconnected.
+	epochOrders := make(map[string][]*trackedTrade)
+	for _, trade := range dc.trackedTrades() {
+		if trade.status() == order.OrderStatusEpoch {
+			epochOrders[trade.mktID] = append(epochOrders[trade.mktID], trade)
+		}
+	}
+	for mkt := range epochOrders {
+		trades := epochOrders[mkt] // don't capture loop var below
+		time.AfterFunc(
+			preimageReqTimeout+time.Duration(dc.marketEpochDuration(mkt))*time.Millisecond,
+			func() {
+				if c.ctx.Err() != nil {
+					return // core shut down
+				}
+				var stillEpochOrders []*trackedTrade
+				for _, trade := range trades {
+					if trade.status() == order.OrderStatusEpoch {
+						stillEpochOrders = append(stillEpochOrders, trade)
+					}
+				}
+				if len(stillEpochOrders) > 0 {
+					dc.syncOrderStatuses(stillEpochOrders)
+				}
+			},
+		)
+	}
+
 	type market struct {
 		name  string
 		base  uint32
@@ -7543,10 +7627,7 @@ func checkSigS256(msg, pkBytes, sigBytes []byte) error {
 	}
 	hash := sha256.Sum256(msg)
 	if !signature.Verify(hash[:], pubKey) {
-		// Might be an older buggy server. (V0PURGE)
-		if !signature.Verify(msg, pubKey) {
-			return fmt.Errorf("secp256k1 signature verification failed")
-		}
+		return fmt.Errorf("secp256k1 signature verification failed")
 	}
 	return nil
 }

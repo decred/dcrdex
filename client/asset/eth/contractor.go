@@ -408,7 +408,7 @@ func (c *tokenContractorV0) estimateApproveGas(ctx context.Context, amount *big.
 	return c.estimateGas(ctx, "approve", c.contractAddr, amount)
 }
 
-// estimateTransferGas esimates the gas needed for a transfer tx. The account
+// estimateTransferGas estimates the gas needed for a transfer tx. The account
 // needs to have > amount tokens to use this method.
 func (c *tokenContractorV0) estimateTransferGas(ctx context.Context, amount *big.Int) (uint64, error) {
 	return c.estimateGas(ctx, "transfer", c.acctAddr, amount)
