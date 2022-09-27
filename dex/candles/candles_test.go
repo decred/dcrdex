@@ -154,10 +154,10 @@ func TestDelta(t *testing.T) {
 	})
 	c.Add(&Candle{
 		MatchVolume: 150,
-		StartStamp:  now - 2*fiveMins,
-		EndStamp:    now - fiveMins,
+		StartStamp:  aDayAgo,
+		EndStamp:    aDayAgo + fiveMins,
 		StartRate:   100,
-		EndRate:     125,
+		EndRate:     150,
 	})
 	c.Add(&Candle{
 		MatchVolume: 50,
@@ -167,41 +167,63 @@ func TestDelta(t *testing.T) {
 		EndRate:     175,
 	})
 
+	startCandle := &c.Candles[1]
+
+	testTime := tNow
 	check24 := func(expDelta float64, expVol uint64) {
+		t.Helper()
 		high, low := (expDelta + 0.01), (expDelta - 0.01)
-		delta24, vol24 := c.Delta(tNow.Add(-time.Hour * 24))
+		delta24, vol24 := c.Delta(testTime.Add(-time.Hour * 24))
 		if delta24 < low || delta24 > high {
-			t.Fatalf("wrong delta24. expected 0.75, got, %.3f", delta24)
+			t.Fatalf("wrong delta24. expected %.3f, got, %.3f", expDelta, delta24)
 		}
 		if vol24 != expVol {
-			t.Fatalf("wrong 24-hour volume. wanted 200, got %d", vol24)
+			t.Fatalf("wrong 24-hour volume. wanted %d, got %d", expVol, vol24)
 		}
 	}
 
 	// Basic function test.
 	check24(0.75, 200)
 
+	// Test halfway through the candle time. 125 -> 175 = +0.4, vol = 75 + 50
+	testTime = tNow.Add(time.Minute * 5 / 2)
+	check24(0.4, 125)
+
+	// Larger start rate tests undeflow handling.
+	startCandle.StartRate, startCandle.EndRate = startCandle.EndRate, startCandle.StartRate
+	check24(0.4, 125)
+	startCandle.StartRate, startCandle.EndRate = startCandle.EndRate, startCandle.StartRate
+
+	testTime = tNow
+
 	// Zero-handling tests.
 
 	// A zero start rate on the first (used) candle should result in the EndRate
 	// being used as the base point instead. 125 -> 175 = 40% increase
-	c.Candles[1].StartRate = 0
+	startCandle.StartRate = 0
+	startCandle.EndRate = 125
 	check24(0.40, 200)
 
 	// A zero on the end rate too should result in that stick being skipped, but
 	// same result since start rate of next candle is same as end rate of this
 	// candle.
-	c.Candles[1].EndRate = 0
+	startCandle.EndRate = 0
 	check24(0.40, 200)
 
 	// Set that EndRate again, but delete the last candles EndRate, forcing use
 	// of the start rate instead. 100 -> 125 = 25% increase
-	c.Candles[1].EndRate = 100
+	startCandle.EndRate = 100
 	c.Candles[2].EndRate = 0
 	check24(0.25, 200)
 
-	// Get a delta that uses a partial stick.
-	c = NewCache(5, fiveMins)
+}
+
+func TestDeltaPartialDays(t *testing.T) {
+	tNow := time.Now().Truncate(time.Millisecond)
+	now := uint64(tNow.UnixMilli())
+	aDayAgo := now - 86400*1000
+
+	c := NewCache(5, fiveMins)
 	c.Add(&Candle{
 		MatchVolume: 444,
 		StartStamp:  aDayAgo,
