@@ -453,6 +453,12 @@ func (s *WebServer) buildTemplates(lang, siteDir string) error {
 	return s.html.buildErr()
 }
 
+// Addr gives the address on which WebServer is listening. Use only after
+// Connect.
+func (s *WebServer) Addr() string {
+	return s.addr
+}
+
 // Connect starts the web server. Satisfies the dex.Connector interface.
 func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	// Start serving.
