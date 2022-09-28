@@ -1,13 +1,14 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
-package bch
+package ltc
 
 import (
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -17,7 +18,7 @@ import (
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
-	dexbch "decred.org/dcrdex/dex/networks/bch"
+	dexltc "decred.org/dcrdex/dex/networks/ltc"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/btcutil"
@@ -26,52 +27,59 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btclog"
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	btcwallet "github.com/btcsuite/btcwallet/wallet"
 	"github.com/btcsuite/btcwallet/wtxmgr"
-	neutrino "github.com/dcrlabs/neutrino-bch"
-	labschain "github.com/dcrlabs/neutrino-bch/chain"
+	neutrino "github.com/dcrlabs/neutrino-ltc"
+	labschain "github.com/dcrlabs/neutrino-ltc/chain"
 	"github.com/decred/slog"
-	"github.com/gcash/bchd/bchec"
-	bchchaincfg "github.com/gcash/bchd/chaincfg"
-	bchchainhash "github.com/gcash/bchd/chaincfg/chainhash"
-	bchtxscript "github.com/gcash/bchd/txscript"
-	bchwire "github.com/gcash/bchd/wire"
-	"github.com/gcash/bchlog"
-	"github.com/gcash/bchutil"
-	"github.com/gcash/bchwallet/chain"
-	bchwaddrmgr "github.com/gcash/bchwallet/waddrmgr"
-	"github.com/gcash/bchwallet/wallet"
-	"github.com/gcash/bchwallet/wallet/txauthor"
-	"github.com/gcash/bchwallet/walletdb"
-	_ "github.com/gcash/bchwallet/walletdb/bdb"
-	bchwtxmgr "github.com/gcash/bchwallet/wtxmgr"
 	"github.com/jrick/logrotate/rotator"
 	btcneutrino "github.com/lightninglabs/neutrino"
 	"github.com/lightninglabs/neutrino/headerfs"
+	ltcchaincfg "github.com/ltcsuite/ltcd/chaincfg"
+	ltcchainhash "github.com/ltcsuite/ltcd/chaincfg/chainhash"
+	"github.com/ltcsuite/ltcd/ltcutil"
+	ltctxscript "github.com/ltcsuite/ltcd/txscript"
+	ltcwire "github.com/ltcsuite/ltcd/wire"
+	"github.com/ltcsuite/ltcwallet/chain"
+	ltcwaddrmgr "github.com/ltcsuite/ltcwallet/waddrmgr"
+	"github.com/ltcsuite/ltcwallet/wallet"
+	"github.com/ltcsuite/ltcwallet/wallet/txauthor"
+	"github.com/ltcsuite/ltcwallet/walletdb"
+	_ "github.com/ltcsuite/ltcwallet/walletdb/bdb"
+	ltcwtxmgr "github.com/ltcsuite/ltcwallet/wtxmgr"
 )
 
 const (
-	DefaultM       uint64 = 784931 // From bchutil. Used for gcs filters.
+	DefaultM       uint64 = 784931 // From ltcutil. Used for gcs filters.
 	logDirName            = "logs"
 	neutrinoDBName        = "neutrino.db"
 	defaultAcctNum        = 0
+	dbTimeout             = 20 * time.Second
 )
 
 var (
 	waddrmgrNamespace = []byte("waddrmgr")
 	wtxmgrNamespace   = []byte("wtxmgr")
+
+	testnet4Seeds = [][]byte{
+		{0x12, 0xc0, 0x38, 0x95, 0x87, 0x4b},
+		{0x3, 0x47, 0x1e, 0x2e, 0x87, 0x4b},
+		{0x22, 0x59, 0x4e, 0x2d, 0x87, 0x4b},
+		{0x22, 0x8c, 0xc5, 0x98, 0x87, 0x4b},
+	}
 )
 
-// bchSPVWallet is an implementation of btc.BTCWallet that runs a native Bitcoin
-// Cash SPV Wallet. bchSPVWallet mostly just translates types from the btcsuite
-// types to gcash and vice-versa. Startup and shutdown are notable exceptions,
-// and have some critical code that needed to be duplicated (in order to avoid
-// interface hell).
-type bchSPVWallet struct {
+// ltcSPVWallet is an implementation of btc.BTCWallet that runs a native
+// Litecoin SPV Wallet. ltcSPVWallet mostly just translates types from the
+// btcsuite types to ltcsuite and vice-versa. Startup and shutdown are notable
+// exceptions, and have some critical code that needed to be duplicated (in
+// order to avoid interface hell).
+type ltcSPVWallet struct {
 	// This section is populated in openSPVWallet.
 	dir                  string
-	chainParams          *bchchaincfg.Params
+	chainParams          *ltcchaincfg.Params
 	btcParams            *chaincfg.Params
 	log                  dex.Logger
 	birthdayV            atomic.Value // time.Time
@@ -85,24 +93,22 @@ type bchSPVWallet struct {
 	neutrinoDB  walletdb.DB
 }
 
-var _ btc.BTCWallet = (*bchSPVWallet)(nil)
+var _ btc.BTCWallet = (*ltcSPVWallet)(nil)
 
-// openSPVWallet creates a bchSPVWallet, but does not Start.
-// Satisfies btc.BTCWalletConstructor.
+// openSPVWallet creates a ltcSPVWallet, but does not Start.
 func openSPVWallet(dir string, cfg *btc.WalletConfig, btcParams *chaincfg.Params, log dex.Logger) btc.BTCWallet {
-	var bchParams *bchchaincfg.Params
+	var ltcParams *ltcchaincfg.Params
 	switch btcParams.Name {
-	case dexbch.MainNetParams.Name:
-		bchParams = &bchchaincfg.MainNetParams
-	case dexbch.TestNet4Params.Name:
-		bchParams = &bchchaincfg.TestNet4Params
-	case dexbch.RegressionNetParams.Name:
-		bchParams = &bchchaincfg.RegressionNetParams
+	case dexltc.MainNetParams.Name:
+		ltcParams = &ltcchaincfg.MainNetParams
+	case dexltc.TestNet4Params.Name:
+		ltcParams = &ltcchaincfg.TestNet4Params
+	case dexltc.RegressionNetParams.Name:
+		ltcParams = &ltcchaincfg.RegressionNetParams
 	}
-
-	w := &bchSPVWallet{
+	w := &ltcSPVWallet{
 		dir:                  dir,
-		chainParams:          bchParams,
+		chainParams:          ltcParams,
 		btcParams:            btcParams,
 		log:                  log,
 		allowAutomaticRescan: !cfg.ActivelyUsed,
@@ -112,11 +118,11 @@ func openSPVWallet(dir string, cfg *btc.WalletConfig, btcParams *chaincfg.Params
 }
 
 // createSPVWallet creates a new SPV wallet.
-func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string, log dex.Logger, extIdx, intIdx uint32, net *bchchaincfg.Params) error {
+func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string, log dex.Logger, extIdx, intIdx uint32, net *ltcchaincfg.Params) error {
 	netDir := filepath.Join(dbDir, net.Name, "spv")
 
 	if err := logNeutrino(netDir, log); err != nil {
-		return fmt.Errorf("error initializing bchwallet+neutrino logging: %w", err)
+		return fmt.Errorf("error initializing dcrwallet+neutrino logging: %w", err)
 	}
 
 	logDir := filepath.Join(netDir, logDirName)
@@ -125,7 +131,8 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string,
 		return fmt.Errorf("error creating wallet directories: %w", err)
 	}
 
-	loader := wallet.NewLoader(net, netDir, true, 250)
+	// timeout and recoverWindow arguments borrowed from btcwallet directly.
+	loader := wallet.NewLoader(net, netDir, true, dbTimeout, 250)
 
 	pubPass := []byte(wallet.InsecurePubPassphrase)
 
@@ -147,7 +154,7 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string,
 
 	// The chain service DB
 	neutrinoDBPath := filepath.Join(netDir, neutrinoDBName)
-	db, err := walletdb.Create("bdb", neutrinoDBPath, true)
+	db, err := walletdb.Create("bdb", neutrinoDBPath, true, dbTimeout)
 	if err != nil {
 		return fmt.Errorf("unable to create neutrino db at %q: %w", neutrinoDBPath, err)
 	}
@@ -163,14 +170,28 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string,
 	return nil
 }
 
-// Start initializes the *bchwallet.Wallet and its supporting players and starts
-// syncing.
-func (w *bchSPVWallet) Start() (btc.SPVService, error) {
-	if err := logNeutrino(w.dir, w.log); err != nil {
-		return nil, fmt.Errorf("error initializing bchwallet+neutrino logging: %v", err)
+// walletParams works around a bug in ltcwallet that doesn't recognize
+// wire.TestNet4 in (*ScopedKeyManager).cloneKeyWithVersion which is called from
+// AccountProperties. Only do this for the *wallet.Wallet, not the
+// *neutrino.ChainService.
+func (w *ltcSPVWallet) walletParams() *ltcchaincfg.Params {
+	if w.chainParams.Name != ltcchaincfg.TestNet4Params.Name {
+		return w.chainParams
 	}
-	// recoverWindow arguments borrowed from bchwallet directly.
-	w.loader = wallet.NewLoader(w.chainParams, w.dir, true, 250)
+	spoofParams := *w.chainParams
+	spoofParams.Net = ltcwire.TestNet3
+	return &spoofParams
+}
+
+// Start initializes the *ltcwallet.Wallet and its supporting players and starts
+// syncing.
+func (w *ltcSPVWallet) Start() (btc.SPVService, error) {
+	if err := logNeutrino(w.dir, w.log); err != nil {
+		return nil, fmt.Errorf("error initializing dcrwallet+neutrino logging: %v", err)
+	}
+	// recoverWindow arguments borrowed from ltcwallet directly.
+
+	w.loader = wallet.NewLoader(w.walletParams(), w.dir, true, dbTimeout, 250)
 
 	exists, err := w.loader.WalletExists()
 	if err != nil {
@@ -180,7 +201,7 @@ func (w *bchSPVWallet) Start() (btc.SPVService, error) {
 		return nil, errors.New("wallet not found")
 	}
 
-	w.log.Debug("Starting native BCH wallet...")
+	w.log.Debug("Starting native LTC wallet...")
 	w.Wallet, err = w.loader.OpenExistingWallet([]byte(wallet.InsecurePubPassphrase), false)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't load wallet: %w", err)
@@ -191,7 +212,7 @@ func (w *bchSPVWallet) Start() (btc.SPVService, error) {
 	errCloser.Add(w.loader.UnloadWallet)
 
 	neutrinoDBPath := filepath.Join(w.dir, neutrinoDBName)
-	w.neutrinoDB, err = walletdb.Create("bdb", neutrinoDBPath, true)
+	w.neutrinoDB, err = walletdb.Create("bdb", neutrinoDBPath, true, dbTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create wallet db at %q: %v", neutrinoDBPath, err)
 	}
@@ -200,33 +221,34 @@ func (w *bchSPVWallet) Start() (btc.SPVService, error) {
 	// Depending on the network, we add some addpeers or a connect peer. On
 	// regtest, if the peers haven't been explicitly set, add the simnet harness
 	// alpha node as an additional peer so we don't have to type it in. On
-	// mainet and testnet4, add a known reliable persistent peer to be used in
-	// addition to normal DNS seed-based peer discovery.
+	// testnet4, add a known reliable persistent peer to be used in addition to
+	// normal DNS seed-based peer discovery.
 	var addPeers []string
 	var connectPeers []string
 	switch w.chainParams.Net {
-	// case bchwire.MainNet:
-	// 	addPeers = []string{"cfilters.ssgen.io"}
-	case bchwire.TestNet4:
-		// Add the address for a local bchd testnet4 node.
-		addPeers = []string{"localhost:28333"}
-	case bchwire.TestNet, bchwire.SimNet: // plain "wire.TestNet" is regnet!
-		connectPeers = []string{"localhost:21577"}
+	case ltcwire.TestNet4:
+		addPeers = []string{"127.0.0.1:19335"}
+		for _, host := range testnet4Seeds {
+			var addr netip.AddrPort
+			addr.UnmarshalBinary(host)
+			addPeers = append(addPeers, addr.String())
+		}
+	case ltcwire.TestNet, ltcwire.SimNet: // plain "wire.TestNet" is regnet!
+		connectPeers = []string{"localhost:20585"}
 	}
 
 	w.log.Debug("Starting neutrino chain service...")
 	w.cl, err = neutrino.NewChainService(neutrino.Config{
-		DataDir:     w.dir,
-		Database:    w.neutrinoDB,
-		ChainParams: *w.chainParams,
-		// https://github.com/gcash/neutrino/pull/36
+		DataDir:       w.dir,
+		Database:      w.neutrinoDB,
+		ChainParams:   *w.chainParams,
 		PersistToDisk: true, // keep cfilter headers on disk for efficient rescanning
 		AddPeers:      addPeers,
 		ConnectPeers:  connectPeers,
 		// WARNING: PublishTransaction currently uses the entire duration
-		// because if an external bug, but even if the bug is resolved, a
-		// typical inv/getdata round trip is ~4 seconds, so we set this so
-		// neutrino does not cancel queries too readily.
+		// because if an external bug, but even if the resolved, a typical
+		// inv/getdata round trip is ~4 seconds, so we set this so neutrino does
+		// not cancel queries too readily.
 		BroadcastTimeout: 6 * time.Second,
 	})
 	if err != nil {
@@ -237,6 +259,7 @@ func (w *bchSPVWallet) Start() (btc.SPVService, error) {
 	w.chainClient = labschain.NewNeutrinoClient(w.chainParams, w.cl, &logAdapter{w.log})
 
 	oldBday := w.Manager.Birthday()
+	wdb := w.Database()
 
 	performRescan := w.Birthday().Before(oldBday)
 	if performRescan && !w.allowAutomaticRescan {
@@ -244,7 +267,11 @@ func (w *bchSPVWallet) Start() (btc.SPVService, error) {
 	}
 
 	if !oldBday.Equal(w.Birthday()) {
-		if err := w.updateDBBirthday(w.Birthday()); err != nil {
+		err = walletdb.Update(wdb, func(dbtx walletdb.ReadWriteTx) error {
+			ns := dbtx.ReadWriteBucket(waddrmgrNamespace)
+			return w.Manager.SetBirthday(ns, w.Birthday())
+		})
+		if err != nil {
 			w.log.Errorf("Failed to reset wallet manager birthday: %v", err)
 			performRescan = false
 		}
@@ -266,7 +293,49 @@ func (w *bchSPVWallet) Start() (btc.SPVService, error) {
 	return &spvService{w.cl}, nil
 }
 
-func (w *bchSPVWallet) txDetails(txHash *bchchainhash.Hash) (*bchwtxmgr.TxDetails, error) {
+func (w *ltcSPVWallet) Birthday() time.Time {
+	return w.birthdayV.Load().(time.Time)
+}
+
+func (w *ltcSPVWallet) Reconfigure(cfg *asset.WalletConfig, _ /* oldAddress */ string) (restart bool, err error) {
+	parsedCfg := new(btc.WalletConfig)
+	if err = config.Unmapify(cfg.Settings, parsedCfg); err != nil {
+		return
+	}
+
+	newBday := parsedCfg.AdjustedBirthday()
+	if newBday.Equal(w.Birthday()) {
+		// It's the only setting we care about.
+		return
+	}
+	rescanRequired := newBday.Before(w.Birthday())
+	if rescanRequired && parsedCfg.ActivelyUsed {
+		return false, errors.New("cannot decrease the birthday with active orders")
+	}
+	if err := w.updateDBBirthday(newBday); err != nil {
+		return false, fmt.Errorf("error storing new birthday: %w", err)
+	}
+	w.birthdayV.Store(newBday)
+	if rescanRequired {
+		if err = w.RescanAsync(); err != nil {
+			return false, fmt.Errorf("error initiating rescan after birthday adjustment: %w", err)
+		}
+	}
+	return
+}
+
+func (w *ltcSPVWallet) updateDBBirthday(bday time.Time) error {
+	btcw, isLoaded := w.loader.LoadedWallet()
+	if !isLoaded {
+		return fmt.Errorf("wallet not loaded")
+	}
+	return walletdb.Update(btcw.Database(), func(dbtx walletdb.ReadWriteTx) error {
+		ns := dbtx.ReadWriteBucket(waddrmgrNamespace)
+		return btcw.Manager.SetBirthday(ns, bday)
+	})
+}
+
+func (w *ltcSPVWallet) txDetails(txHash *ltcchainhash.Hash) (*ltcwtxmgr.TxDetails, error) {
 	details, err := wallet.UnstableAPI(w.Wallet).TxDetails(txHash)
 	if err != nil {
 		return nil, err
@@ -278,17 +347,24 @@ func (w *bchSPVWallet) txDetails(txHash *bchchainhash.Hash) (*bchwtxmgr.TxDetail
 	return details, nil
 }
 
-var _ btc.BTCWallet = (*bchSPVWallet)(nil)
+func (w *ltcSPVWallet) addrLTC2BTC(addr ltcutil.Address) (btcutil.Address, error) {
+	return btcutil.DecodeAddress(addr.String(), w.btcParams)
+}
 
-func (w *bchSPVWallet) PublishTransaction(btcTx *wire.MsgTx, label string) error {
-	bchTx, err := convertMsgTxToBCH(btcTx)
+func (w *ltcSPVWallet) addrBTC2LTC(addr btcutil.Address) (ltcutil.Address, error) {
+	return ltcutil.DecodeAddress(addr.String(), w.chainParams)
+}
+
+func (w *ltcSPVWallet) PublishTransaction(btcTx *wire.MsgTx, label string) error {
+	ltcTx, err := convertMsgTxToLTC(btcTx)
 	if err != nil {
 		return err
 	}
-	return w.Wallet.PublishTransaction(bchTx)
+
+	return w.Wallet.PublishTransaction(ltcTx, label)
 }
 
-func (w *bchSPVWallet) CalculateAccountBalances(account uint32, confirms int32) (btcwallet.Balances, error) {
+func (w *ltcSPVWallet) CalculateAccountBalances(account uint32, confirms int32) (btcwallet.Balances, error) {
 	bals, err := w.Wallet.CalculateAccountBalances(account, confirms)
 	if err != nil {
 		return btcwallet.Balances{}, err
@@ -300,11 +376,11 @@ func (w *bchSPVWallet) CalculateAccountBalances(account uint32, confirms int32) 
 	}, nil
 }
 
-func (w *bchSPVWallet) ListUnspent(minconf, maxconf int32, acctName string) ([]*btcjson.ListUnspentResult, error) {
-	// bchwallet's ListUnspent takes either a list of addresses, or else returns
+func (w *ltcSPVWallet) ListUnspent(minconf, maxconf int32, acctName string) ([]*btcjson.ListUnspentResult, error) {
+	// ltcwallet's ListUnspent takes either a list of addresses, or else returns
 	// all non-locked unspent outputs for all accounts. We need to iterate the
 	// results anyway to convert type.
-	uns, err := w.Wallet.ListUnspent(minconf, maxconf, nil)
+	uns, err := w.Wallet.ListUnspent(minconf, maxconf, acctName)
 	if err != nil {
 		return nil, err
 	}
@@ -330,12 +406,12 @@ func (w *bchSPVWallet) ListUnspent(minconf, maxconf int32, acctName string) ([]*
 	return outs, nil
 }
 
-// FetchInputInfo is not actually implemented in bchwallet. This is based on the
+// FetchInputInfo is not actually implemented in ltcwallet. This is based on the
 // btcwallet implementation. As this is used by btc.spvWallet, we really only
 // need the TxOut, and to show ownership.
-func (w *bchSPVWallet) FetchInputInfo(prevOut *wire.OutPoint) (*wire.MsgTx, *wire.TxOut, *psbt.Bip32Derivation, int64, error) {
+func (w *ltcSPVWallet) FetchInputInfo(prevOut *wire.OutPoint) (*wire.MsgTx, *wire.TxOut, *psbt.Bip32Derivation, int64, error) {
 
-	td, err := w.txDetails((*bchchainhash.Hash)(&prevOut.Hash))
+	td, err := w.txDetails((*ltcchainhash.Hash)(&prevOut.Hash))
 	if err != nil {
 		return nil, nil, nil, 0, err
 	}
@@ -344,10 +420,10 @@ func (w *bchSPVWallet) FetchInputInfo(prevOut *wire.OutPoint) (*wire.MsgTx, *wir
 		return nil, nil, nil, 0, fmt.Errorf("not enough outputs")
 	}
 
-	bchTxOut := td.TxRecord.MsgTx.TxOut[prevOut.Index]
+	ltcTxOut := td.TxRecord.MsgTx.TxOut[prevOut.Index]
 
 	// Verify we own at least one parsed address.
-	_, addrs, _, err := bchtxscript.ExtractPkScriptAddrs(bchTxOut.PkScript, w.chainParams)
+	_, addrs, _, err := ltctxscript.ExtractPkScriptAddrs(ltcTxOut.PkScript, w.chainParams)
 	if err != nil {
 		return nil, nil, nil, 0, err
 	}
@@ -361,28 +437,28 @@ func (w *bchSPVWallet) FetchInputInfo(prevOut *wire.OutPoint) (*wire.MsgTx, *wir
 	}
 
 	btcTxOut := &wire.TxOut{
-		Value:    bchTxOut.Value,
-		PkScript: bchTxOut.PkScript,
+		Value:    ltcTxOut.Value,
+		PkScript: ltcTxOut.PkScript,
 	}
 
 	return nil, btcTxOut, nil, 0, nil
 }
 
-func (w *bchSPVWallet) LockOutpoint(op wire.OutPoint) {
-	w.Wallet.LockOutpoint(bchwire.OutPoint{
-		Hash:  bchchainhash.Hash(op.Hash),
+func (w *ltcSPVWallet) LockOutpoint(op wire.OutPoint) {
+	w.Wallet.LockOutpoint(ltcwire.OutPoint{
+		Hash:  ltcchainhash.Hash(op.Hash),
 		Index: op.Index,
 	})
 }
 
-func (w *bchSPVWallet) UnlockOutpoint(op wire.OutPoint) {
-	w.Wallet.UnlockOutpoint(bchwire.OutPoint{
-		Hash:  bchchainhash.Hash(op.Hash),
+func (w *ltcSPVWallet) UnlockOutpoint(op wire.OutPoint) {
+	w.Wallet.UnlockOutpoint(ltcwire.OutPoint{
+		Hash:  ltcchainhash.Hash(op.Hash),
 		Index: op.Index,
 	})
 }
 
-func (w *bchSPVWallet) LockedOutpoints() []btcjson.TransactionInput {
+func (w *ltcSPVWallet) LockedOutpoints() []btcjson.TransactionInput {
 	locks := w.Wallet.LockedOutpoints()
 	locked := make([]btcjson.TransactionInput, len(locks))
 	for i, lock := range locks {
@@ -394,53 +470,55 @@ func (w *bchSPVWallet) LockedOutpoints() []btcjson.TransactionInput {
 	return locked
 }
 
-func (w *bchSPVWallet) NewChangeAddress(account uint32, _ waddrmgr.KeyScope) (btcutil.Address, error) {
-	bchAddr, err := w.Wallet.NewChangeAddress(account, bchwaddrmgr.KeyScopeBIP0044)
+func (w *ltcSPVWallet) NewChangeAddress(account uint32, _ waddrmgr.KeyScope) (btcutil.Address, error) {
+	ltcAddr, err := w.Wallet.NewChangeAddress(account, ltcwaddrmgr.KeyScopeBIP0084)
 	if err != nil {
 		return nil, err
 	}
-	return dexbch.DecodeCashAddress(bchAddr.String(), w.btcParams)
+	return w.addrLTC2BTC(ltcAddr)
 }
 
-func (w *bchSPVWallet) NewAddress(account uint32, _ waddrmgr.KeyScope) (btcutil.Address, error) {
-	bchAddr, err := w.Wallet.NewAddress(account, bchwaddrmgr.KeyScopeBIP0044)
+func (w *ltcSPVWallet) NewAddress(account uint32, _ waddrmgr.KeyScope) (btcutil.Address, error) {
+	ltcAddr, err := w.Wallet.NewAddress(account, ltcwaddrmgr.KeyScopeBIP0084)
 	if err != nil {
 		return nil, err
 	}
-	return dexbch.DecodeCashAddress(bchAddr.String(), w.btcParams)
+	return w.addrLTC2BTC(ltcAddr)
 }
 
-func (w *bchSPVWallet) PrivKeyForAddress(a btcutil.Address) (*btcec.PrivateKey, error) {
-	bchAddr, err := dexbch.BTCAddrToBCHAddr(a, w.btcParams)
-	if err != nil {
-		return nil, err
-	}
-	bchKey, err := w.Wallet.PrivKeyForAddress(bchAddr)
+func (w *ltcSPVWallet) PrivKeyForAddress(a btcutil.Address) (*btcec.PrivateKey, error) {
+	ltcAddr, err := w.addrBTC2LTC(a)
 	if err != nil {
 		return nil, err
 	}
 
-	priv, _ /* pub */ := btcec.PrivKeyFromBytes(bchKey.Serialize())
+	ltcKey, err := w.Wallet.PrivKeyForAddress(ltcAddr)
+	if err != nil {
+		return nil, err
+	}
+
+	priv, _ /* pub */ := btcec.PrivKeyFromBytes(ltcKey.Serialize())
 	return priv, nil
 }
 
-func (w *bchSPVWallet) SendOutputs(outputs []*wire.TxOut, _ *waddrmgr.KeyScope, account uint32, minconf int32,
-	satPerKb btcutil.Amount, _ btcwallet.CoinSelectionStrategy, label string) (*wire.MsgTx, error) {
+func (w *ltcSPVWallet) SendOutputs(outputs []*wire.TxOut, _ *waddrmgr.KeyScope, account uint32, minconf int32,
+	satPerKb btcutil.Amount, css btcwallet.CoinSelectionStrategy, label string) (*wire.MsgTx, error) {
 
-	bchOuts := make([]*bchwire.TxOut, len(outputs))
+	ltcOuts := make([]*ltcwire.TxOut, len(outputs))
 	for i, op := range outputs {
-		bchOuts[i] = &bchwire.TxOut{
+		ltcOuts[i] = &ltcwire.TxOut{
 			Value:    op.Value,
 			PkScript: op.PkScript,
 		}
 	}
 
-	bchTx, err := w.Wallet.SendOutputs(bchOuts, account, minconf, bchutil.Amount(satPerKb))
+	ltcTx, err := w.Wallet.SendOutputs(ltcOuts, &ltcwaddrmgr.KeyScopeBIP0084, account,
+		minconf, ltcutil.Amount(satPerKb), wallet.CoinSelectionStrategy(css), label)
 	if err != nil {
 		return nil, err
 	}
 
-	btcTx, err := convertMsgTxToBTC(bchTx)
+	btcTx, err := convertMsgTxToBTC(ltcTx)
 	if err != nil {
 		return nil, err
 	}
@@ -448,16 +526,16 @@ func (w *bchSPVWallet) SendOutputs(outputs []*wire.TxOut, _ *waddrmgr.KeyScope, 
 	return btcTx, nil
 }
 
-func (w *bchSPVWallet) HaveAddress(a btcutil.Address) (bool, error) {
-	bchAddr, err := dexbch.BTCAddrToBCHAddr(a, w.btcParams)
+func (w *ltcSPVWallet) HaveAddress(a btcutil.Address) (bool, error) {
+	ltcAddr, err := w.addrBTC2LTC(a)
 	if err != nil {
 		return false, err
 	}
 
-	return w.Wallet.HaveAddress(bchAddr)
+	return w.Wallet.HaveAddress(ltcAddr)
 }
 
-func (w *bchSPVWallet) Stop() {
+func (w *ltcSPVWallet) Stop() {
 	w.log.Info("Unloading wallet")
 	if err := w.loader.UnloadWallet(); err != nil {
 		w.log.Errorf("UnloadWallet error: %v", err)
@@ -479,24 +557,27 @@ func (w *bchSPVWallet) Stop() {
 	w.log.Info("SPV wallet closed")
 }
 
-func (w *bchSPVWallet) AccountProperties(_ waddrmgr.KeyScope, acct uint32) (*waddrmgr.AccountProperties, error) {
-	props, err := w.Wallet.AccountProperties(bchwaddrmgr.KeyScopeBIP0044, acct)
+func (w *ltcSPVWallet) AccountProperties(_ waddrmgr.KeyScope, acct uint32) (*waddrmgr.AccountProperties, error) {
+	props, err := w.Wallet.AccountProperties(ltcwaddrmgr.KeyScopeBIP0084, acct)
 	if err != nil {
 		return nil, err
 	}
 	return &waddrmgr.AccountProperties{
-		// bch only has a subset of the btc AccountProperties. We'll give
-		// everything we have. The only two that are actually used are these
-		// first to fields.
-		ExternalKeyCount: props.ExternalKeyCount,
-		InternalKeyCount: props.InternalKeyCount,
-		AccountNumber:    props.AccountNumber,
-		AccountName:      props.AccountName,
-		ImportedKeyCount: props.ImportedKeyCount,
+		AccountNumber:        props.AccountNumber,
+		AccountName:          props.AccountName,
+		ExternalKeyCount:     props.ExternalKeyCount,
+		InternalKeyCount:     props.InternalKeyCount,
+		ImportedKeyCount:     props.ImportedKeyCount,
+		MasterKeyFingerprint: props.MasterKeyFingerprint,
+		KeyScope:             waddrmgr.KeyScopeBIP0084,
+		IsWatchOnly:          props.IsWatchOnly,
+		// The last two would need conversion but aren't currently used.
+		// AccountPubKey:        props.AccountPubKey,
+		// AddrSchema:           props.AddrSchema,
 	}, nil
 }
 
-func (w *bchSPVWallet) RescanAsync() error {
+func (w *ltcSPVWallet) RescanAsync() error {
 	w.log.Info("Stopping wallet and chain client...")
 	w.Wallet.Stop() // stops Wallet and chainClient (not chainService)
 	w.Wallet.WaitForShutdown()
@@ -520,7 +601,7 @@ func (w *bchSPVWallet) RescanAsync() error {
 // restart by dropping the complete transaction history and setting the
 // "synced to" field to nil. See the btcwallet/cmd/dropwtxmgr app for more
 // information.
-func (w *bchSPVWallet) ForceRescan() {
+func (w *ltcSPVWallet) ForceRescan() {
 	w.log.Info("Dropping transaction history to perform full rescan...")
 	err := w.dropTransactionHistory()
 	if err != nil {
@@ -538,8 +619,8 @@ func (w *bchSPVWallet) ForceRescan() {
 }
 
 // dropTransactionHistory drops the transaction history. It is based off of the
-// dropwtxmgr utility in the bchwallet repo.
-func (w *bchSPVWallet) dropTransactionHistory() error {
+// dropwtxmgr utility in the ltcwallet repo.
+func (w *ltcSPVWallet) dropTransactionHistory() error {
 	w.log.Info("Dropping wallet transaction history")
 
 	return walletdb.Update(w.Database(), func(tx walletdb.ReadWriteTx) error {
@@ -551,40 +632,40 @@ func (w *bchSPVWallet) dropTransactionHistory() error {
 		if err != nil {
 			return err
 		}
-		err = bchwtxmgr.Create(ns)
+		err = ltcwtxmgr.Create(ns)
 		if err != nil {
 			return err
 		}
 
 		ns = tx.ReadWriteBucket(waddrmgrNamespace)
-		birthdayBlock, err := bchwaddrmgr.FetchBirthdayBlock(ns)
+		birthdayBlock, err := ltcwaddrmgr.FetchBirthdayBlock(ns)
 		if err != nil {
 			fmt.Println("Wallet does not have a birthday block " +
 				"set, falling back to rescan from genesis")
 
-			startBlock, err := bchwaddrmgr.FetchStartBlock(ns)
+			startBlock, err := ltcwaddrmgr.FetchStartBlock(ns)
 			if err != nil {
 				return err
 			}
-			return bchwaddrmgr.PutSyncedTo(ns, startBlock)
+			return ltcwaddrmgr.PutSyncedTo(ns, startBlock)
 		}
 
 		// We'll need to remove our birthday block first because it
 		// serves as a barrier when updating our state to detect reorgs
 		// due to the wallet not storing all block hashes of the chain.
-		if err := bchwaddrmgr.DeleteBirthdayBlock(ns); err != nil {
+		if err := ltcwaddrmgr.DeleteBirthdayBlock(ns); err != nil {
 			return err
 		}
 
-		if err := bchwaddrmgr.PutSyncedTo(ns, &birthdayBlock); err != nil {
+		if err := ltcwaddrmgr.PutSyncedTo(ns, &birthdayBlock); err != nil {
 			return err
 		}
-		return bchwaddrmgr.PutBirthdayBlock(ns, birthdayBlock)
+		return ltcwaddrmgr.PutBirthdayBlock(ns, birthdayBlock)
 	})
 }
 
-func (w *bchSPVWallet) WalletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetails, error) {
-	txDetails, err := w.txDetails((*bchchainhash.Hash)(txHash))
+func (w *ltcSPVWallet) WalletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetails, error) {
+	txDetails, err := w.txDetails((*ltcchainhash.Hash)(txHash))
 	if err != nil {
 		return nil, err
 	}
@@ -631,7 +712,7 @@ func (w *bchSPVWallet) WalletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDeta
 	}, nil
 }
 
-func (w *bchSPVWallet) SyncedTo() waddrmgr.BlockStamp {
+func (w *ltcSPVWallet) SyncedTo() waddrmgr.BlockStamp {
 	bs := w.Manager.SyncedTo()
 	return waddrmgr.BlockStamp{
 		Height:    bs.Height,
@@ -641,20 +722,20 @@ func (w *bchSPVWallet) SyncedTo() waddrmgr.BlockStamp {
 
 }
 
-func (w *bchSPVWallet) SignTx(btcTx *wire.MsgTx) error {
-	bchTx, err := convertMsgTxToBCH(btcTx)
+func (w *ltcSPVWallet) SignTx(btcTx *wire.MsgTx) error {
+	ltcTx, err := convertMsgTxToLTC(btcTx)
 	if err != nil {
 		return err
 	}
 
 	var prevPkScripts [][]byte
-	var inputValues []bchutil.Amount
+	var inputValues []ltcutil.Amount
 	for _, txIn := range btcTx.TxIn {
 		_, txOut, _, _, err := w.FetchInputInfo(&txIn.PreviousOutPoint)
 		if err != nil {
 			return err
 		}
-		inputValues = append(inputValues, bchutil.Amount(txOut.Value))
+		inputValues = append(inputValues, ltcutil.Amount(txOut.Value))
 		prevPkScripts = append(prevPkScripts, txOut.PkScript)
 		// Zero the previous witness and signature script or else
 		// AddAllInputScripts does some weird stuff.
@@ -662,23 +743,25 @@ func (w *bchSPVWallet) SignTx(btcTx *wire.MsgTx) error {
 		txIn.Witness = nil
 	}
 
-	err = txauthor.AddAllInputScripts(bchTx, prevPkScripts, inputValues, &secretSource{w.Wallet, w.chainParams})
+	err = txauthor.AddAllInputScripts(ltcTx, prevPkScripts, inputValues, &secretSource{w.Wallet, w.chainParams})
 	if err != nil {
 		return err
 	}
-
-	if len(bchTx.TxIn) != len(btcTx.TxIn) {
+	if len(ltcTx.TxIn) != len(btcTx.TxIn) {
 		return fmt.Errorf("txin count mismatch")
 	}
 	for i, txIn := range btcTx.TxIn {
-		txIn.SignatureScript = bchTx.TxIn[i].SignatureScript
+		ltcIn := ltcTx.TxIn[i]
+		txIn.SignatureScript = ltcIn.SignatureScript
+		txIn.Witness = make(wire.TxWitness, len(ltcIn.Witness))
+		copy(txIn.Witness, ltcIn.Witness)
 	}
 	return nil
 }
 
 // BlockNotifications returns a channel on which to receive notifications of
 // newly processed blocks. The caller should only call BlockNotificaitons once.
-func (w *bchSPVWallet) BlockNotifications(ctx context.Context) <-chan *btc.BlockNotification {
+func (w *ltcSPVWallet) BlockNotifications(ctx context.Context) <-chan *btc.BlockNotification {
 	cl := w.NtfnServer.TransactionNotifications()
 	ch := make(chan *btc.BlockNotification, 1)
 	go func() {
@@ -704,68 +787,26 @@ func (w *bchSPVWallet) BlockNotifications(ctx context.Context) <-chan *btc.Block
 	return ch
 }
 
-func (w *bchSPVWallet) Birthday() time.Time {
-	return w.birthdayV.Load().(time.Time)
-}
-
-func (w *bchSPVWallet) Reconfigure(cfg *asset.WalletConfig, _ /* oldAddress */ string) (restart bool, err error) {
-	parsedCfg := new(btc.WalletConfig)
-	if err = config.Unmapify(cfg.Settings, parsedCfg); err != nil {
-		return
-	}
-
-	newBday := parsedCfg.AdjustedBirthday()
-	if newBday.Equal(w.Birthday()) {
-		// It's the only setting we care about.
-		return
-	}
-	rescanRequired := newBday.Before(w.Birthday())
-	if rescanRequired && parsedCfg.ActivelyUsed {
-		return false, errors.New("cannot decrease the birthday with active orders")
-	}
-	if err := w.updateDBBirthday(newBday); err != nil {
-		return false, fmt.Errorf("error storing new birthday: %w", err)
-	}
-	w.birthdayV.Store(newBday)
-	if rescanRequired {
-		if err = w.RescanAsync(); err != nil {
-			return false, fmt.Errorf("error initiating rescan after birthday adjustment: %w", err)
-		}
-	}
-	return
-}
-
-func (w *bchSPVWallet) updateDBBirthday(bday time.Time) error {
-	btcw, isLoaded := w.loader.LoadedWallet()
-	if !isLoaded {
-		return fmt.Errorf("wallet not loaded")
-	}
-	return walletdb.Update(btcw.Database(), func(dbtx walletdb.ReadWriteTx) error {
-		ns := dbtx.ReadWriteBucket(waddrmgrNamespace)
-		return btcw.Manager.SetBirthday(ns, bday)
-	})
-}
-
 // secretSource is used to locate keys and redemption scripts while signing a
 // transaction. secretSource satisfies the txauthor.SecretsSource interface.
 type secretSource struct {
 	w           *wallet.Wallet
-	chainParams *bchchaincfg.Params
+	chainParams *ltcchaincfg.Params
 }
 
 // ChainParams returns the chain parameters.
-func (s *secretSource) ChainParams() *bchchaincfg.Params {
+func (s *secretSource) ChainParams() *ltcchaincfg.Params {
 	return s.chainParams
 }
 
 // GetKey fetches a private key for the specified address.
-func (s *secretSource) GetKey(addr bchutil.Address) (*bchec.PrivateKey, bool, error) {
+func (s *secretSource) GetKey(addr ltcutil.Address) (*btcec.PrivateKey, bool, error) {
 	ma, err := s.w.AddressInfo(addr)
 	if err != nil {
 		return nil, false, err
 	}
 
-	mpka, ok := ma.(bchwaddrmgr.ManagedPubKeyAddress)
+	mpka, ok := ma.(ltcwaddrmgr.ManagedPubKeyAddress)
 	if !ok {
 		e := fmt.Errorf("managed address type for %v is `%T` but "+
 			"want waddrmgr.ManagedPubKeyAddress", addr, ma)
@@ -777,19 +818,19 @@ func (s *secretSource) GetKey(addr bchutil.Address) (*bchec.PrivateKey, bool, er
 		return nil, false, err
 	}
 
-	k, _ /* pub */ := bchec.PrivKeyFromBytes(bchec.S256(), privKey.Serialize())
+	k, _ /* pub */ := btcec.PrivKeyFromBytes(privKey.Serialize())
 
 	return k, ma.Compressed(), nil
 }
 
 // GetScript fetches the redemption script for the specified p2sh/p2wsh address.
-func (s *secretSource) GetScript(addr bchutil.Address) ([]byte, error) {
+func (s *secretSource) GetScript(addr ltcutil.Address) ([]byte, error) {
 	ma, err := s.w.AddressInfo(addr)
 	if err != nil {
 		return nil, err
 	}
 
-	msa, ok := ma.(bchwaddrmgr.ManagedScriptAddress)
+	msa, ok := ma.(ltcwaddrmgr.ManagedScriptAddress)
 	if !ok {
 		e := fmt.Errorf("managed address type for %v is `%T` but "+
 			"want waddrmgr.ManagedScriptAddress", addr, ma)
@@ -798,7 +839,7 @@ func (s *secretSource) GetScript(addr bchutil.Address) ([]byte, error) {
 	return msa.Script()
 }
 
-// spvService embeds gcash neutrino.ChainService and translates types.
+// spvService embeds ltcsuite neutrino.ChainService and translates types.
 type spvService struct {
 	*neutrino.ChainService
 }
@@ -806,11 +847,11 @@ type spvService struct {
 var _ btc.SPVService = (*spvService)(nil)
 
 func (s *spvService) GetBlockHash(height int64) (*chainhash.Hash, error) {
-	bchHash, err := s.ChainService.GetBlockHash(height)
+	ltcHash, err := s.ChainService.GetBlockHash(height)
 	if err != nil {
 		return nil, err
 	}
-	return (*chainhash.Hash)(bchHash), nil
+	return (*chainhash.Hash)(ltcHash), nil
 }
 
 func (s *spvService) BestBlock() (*headerfs.BlockStamp, error) {
@@ -835,11 +876,11 @@ func (s *spvService) Peers() []btc.SPVPeer {
 }
 
 func (s *spvService) GetBlockHeight(h *chainhash.Hash) (int32, error) {
-	return s.ChainService.GetBlockHeight((*bchchainhash.Hash)(h))
+	return s.ChainService.GetBlockHeight((*ltcchainhash.Hash)(h))
 }
 
 func (s *spvService) GetBlockHeader(h *chainhash.Hash) (*wire.BlockHeader, error) {
-	hdr, err := s.ChainService.GetBlockHeader((*bchchainhash.Hash)(h))
+	hdr, err := s.ChainService.GetBlockHeader((*ltcchainhash.Hash)(h))
 	if err != nil {
 		return nil, err
 	}
@@ -854,7 +895,7 @@ func (s *spvService) GetBlockHeader(h *chainhash.Hash) (*wire.BlockHeader, error
 }
 
 func (s *spvService) GetCFilter(blockHash chainhash.Hash, filterType wire.FilterType, _ ...btcneutrino.QueryOption) (*gcs.Filter, error) {
-	f, err := s.ChainService.GetCFilter(bchchainhash.Hash(blockHash), bchwire.GCSFilterRegular)
+	f, err := s.ChainService.GetCFilter(ltcchainhash.Hash(blockHash), ltcwire.GCSFilterRegular)
 	if err != nil {
 		return nil, err
 	}
@@ -868,7 +909,7 @@ func (s *spvService) GetCFilter(blockHash chainhash.Hash, filterType wire.Filter
 }
 
 func (s *spvService) GetBlock(blockHash chainhash.Hash, _ ...btcneutrino.QueryOption) (*btcutil.Block, error) {
-	blk, err := s.ChainService.GetBlock(bchchainhash.Hash(blockHash))
+	blk, err := s.ChainService.GetBlock(ltcchainhash.Hash(blockHash))
 	if err != nil {
 		return nil, err
 	}
@@ -881,7 +922,7 @@ func (s *spvService) GetBlock(blockHash chainhash.Hash, _ ...btcneutrino.QueryOp
 	return btcutil.NewBlockFromBytes(b)
 }
 
-func convertMsgTxToBTC(tx *bchwire.MsgTx) (*wire.MsgTx, error) {
+func convertMsgTxToBTC(tx *ltcwire.MsgTx) (*wire.MsgTx, error) {
 	buf := new(bytes.Buffer)
 	if err := tx.Serialize(buf); err != nil {
 		return nil, err
@@ -894,25 +935,26 @@ func convertMsgTxToBTC(tx *bchwire.MsgTx) (*wire.MsgTx, error) {
 	return btcTx, nil
 }
 
-func convertMsgTxToBCH(tx *wire.MsgTx) (*bchwire.MsgTx, error) {
+func convertMsgTxToLTC(tx *wire.MsgTx) (*ltcwire.MsgTx, error) {
 	buf := new(bytes.Buffer)
 	if err := tx.Serialize(buf); err != nil {
 		return nil, err
 	}
-	bchTx := new(bchwire.MsgTx)
-	if err := bchTx.Deserialize(buf); err != nil {
+	ltcTx := new(ltcwire.MsgTx)
+	if err := ltcTx.Deserialize(buf); err != nil {
 		return nil, err
 	}
-	return bchTx, nil
+
+	return ltcTx, nil
 }
 
-func extendAddresses(extIdx, intIdx uint32, bchw *wallet.Wallet) error {
-	scopedKeyManager, err := bchw.Manager.FetchScopedKeyManager(bchwaddrmgr.KeyScopeBIP0044)
+func extendAddresses(extIdx, intIdx uint32, ltcw *wallet.Wallet) error {
+	scopedKeyManager, err := ltcw.Manager.FetchScopedKeyManager(ltcwaddrmgr.KeyScopeBIP0084)
 	if err != nil {
 		return err
 	}
 
-	return walletdb.Update(bchw.Database(), func(dbtx walletdb.ReadWriteTx) error {
+	return walletdb.Update(ltcw.Database(), func(dbtx walletdb.ReadWriteTx) error {
 		ns := dbtx.ReadWriteBucket(waddrmgrNamespace)
 		if extIdx > 0 {
 			scopedKeyManager.ExtendExternalAddresses(ns, defaultAcctNum, extIdx)
@@ -928,16 +970,6 @@ var (
 	loggingInited uint32
 	logFileName   = "neutrino.log"
 )
-
-// logWriter implements an io.Writer that outputs to a rotating log file.
-type logWriter struct {
-	*rotator.Rotator
-}
-
-// Write writes the data in p to the log file.
-func (w logWriter) Write(p []byte) (n int, err error) {
-	return w.Rotator.Write(p)
-}
 
 // logRotator initializes a rotating file logger.
 func logRotator(netDir string) (*rotator.Rotator, error) {
@@ -969,18 +1001,18 @@ func logNeutrino(netDir string, errorLogger dex.Logger) error {
 		return fmt.Errorf("error initializing log rotator: %w", err)
 	}
 
-	backendLog := bchlog.NewBackend(logWriter{logSpinner})
+	backendLog := btclog.NewBackend(logSpinner)
 
-	logger := func(name string, lvl bchlog.Level) bchlog.Logger {
+	logger := func(name string, lvl btclog.Level) btclog.Logger {
 		l := backendLog.Logger(name)
 		l.SetLevel(lvl)
 		return &fileLoggerPlus{Logger: l, log: errorLogger.SubLogger(name)}
 	}
 
-	neutrino.UseLogger(logger("NTRNO", bchlog.LevelDebug))
-	wallet.UseLogger(logger("BTCW", bchlog.LevelInfo))
-	bchwtxmgr.UseLogger(logger("TXMGR", bchlog.LevelInfo))
-	chain.UseLogger(logger("CHAIN", bchlog.LevelInfo))
+	neutrino.UseLogger(logger("NTRNO", btclog.LevelDebug))
+	wallet.UseLogger(logger("LTCW", btclog.LevelInfo))
+	ltcwtxmgr.UseLogger(logger("TXMGR", btclog.LevelInfo))
+	chain.UseLogger(logger("CHAIN", btclog.LevelInfo))
 
 	return nil
 }
@@ -988,7 +1020,7 @@ func logNeutrino(netDir string, errorLogger dex.Logger) error {
 // fileLoggerPlus logs everything to a file, and everything with level >= warn
 // to both file and a specified dex.Logger.
 type fileLoggerPlus struct {
-	bchlog.Logger
+	btclog.Logger
 	log dex.Logger
 }
 
@@ -1026,12 +1058,12 @@ type logAdapter struct {
 	dex.Logger
 }
 
-var _ bchlog.Logger = (*logAdapter)(nil)
+var _ btclog.Logger = (*logAdapter)(nil)
 
-func (a *logAdapter) Level() bchlog.Level {
-	return bchlog.Level(a.Logger.Level())
+func (a *logAdapter) Level() btclog.Level {
+	return btclog.Level(a.Logger.Level())
 }
 
-func (a *logAdapter) SetLevel(lvl bchlog.Level) {
+func (a *logAdapter) SetLevel(lvl btclog.Level) {
 	a.Logger.SetLevel(slog.Level(lvl))
 }

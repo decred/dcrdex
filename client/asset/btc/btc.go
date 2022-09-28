@@ -99,7 +99,7 @@ var (
 	walletBlockAllowance         = time.Second * 10
 	conventionalConversionFactor = float64(dexbtc.UnitInfo.Conventional.ConversionFactor)
 
-	electrumOpts = []*asset.ConfigOption{
+	ElectrumConfigOpts = []*asset.ConfigOption{
 		{
 			Key:         "rpcuser",
 			DisplayName: "JSON-RPC Username",
@@ -118,10 +118,9 @@ var (
 			DefaultValue: "127.0.0.1",
 		},
 		{
-			Key:          "rpcport",
-			DisplayName:  "JSON-RPC Port",
-			Description:  "Electrum's 'rpcport' (if not set with address)",
-			DefaultValue: "6789",
+			Key:         "rpcport",
+			DisplayName: "JSON-RPC Port",
+			Description: "Electrum's 'rpcport' (if not set with rpcbind)",
 		},
 	}
 
@@ -149,7 +148,7 @@ var (
 		Tab:         "Electrum (external)",
 		Description: "Use an external Electrum Wallet",
 		// json: DefaultConfigPath: filepath.Join(btcutil.AppDataDir("electrum", false), "config"), // e.g. ~/.electrum/config
-		ConfigOpts: append(electrumOpts, CommonConfigOpts("BTC", true)...),
+		ConfigOpts: append(append(ElectrumConfigOpts, apiFallbackOpt(false)), CommonConfigOpts("BTC", false)...),
 	}
 
 	// WalletInfo defines some general information about a Bitcoin wallet.
@@ -165,6 +164,18 @@ var (
 		LegacyWalletIndex: 1,
 	}
 )
+
+func apiFallbackOpt(defaultV bool) *asset.ConfigOption {
+	return &asset.ConfigOption{
+		Key:         "apifeefallback",
+		DisplayName: "External fee rate estimates",
+		Description: "Allow fee rate estimation from a block explorer API. " +
+			"This is useful as a fallback for SPV wallets and RPC wallets " +
+			"that have recently been started.",
+		IsBoolean:    true,
+		DefaultValue: defaultV,
+	}
+}
 
 // CommonConfigOpts are the common options that the Wallets recognize.
 func CommonConfigOpts(symbol string /* upper-case */, withApiFallback bool) []*asset.ConfigOption {
@@ -209,14 +220,7 @@ func CommonConfigOpts(symbol string /* upper-case */, withApiFallback bool) []*a
 	}
 
 	if withApiFallback {
-		opts = append(opts, &asset.ConfigOption{
-			Key:         "apifeefallback",
-			DisplayName: "External fee rate estimates",
-			Description: "Allow fee rate estimation from a block explorer API. " +
-				"This is useful as a fallback for SPV wallets and RPC wallets " +
-				"that have recently been started.",
-			IsBoolean: true,
-		})
+		opts = append(opts, apiFallbackOpt(true))
 	}
 	return opts
 }
@@ -641,7 +645,7 @@ func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, 
 	}
 	dir := filepath.Join(dataDir, chainParams.Name, "spv")
 	// timeout and recoverWindow arguments borrowed from btcwallet directly.
-	loader := wallet.NewLoader(chainParams, dir, true, 60*time.Second, 250)
+	loader := wallet.NewLoader(chainParams, dir, true, dbTimeout, 250)
 	return loader.WalletExists()
 }
 
@@ -974,7 +978,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 
 	switch cfg.Type {
 	case walletTypeSPV:
-		return OpenSPVWallet(cloneCFG, newExtendedWallet)
+		return OpenSPVWallet(cloneCFG, openSPVWallet)
 	case walletTypeRPC, walletTypeLegacy:
 		rpcWallet, err := BTCCloneWallet(cloneCFG)
 		if err != nil {
@@ -1151,18 +1155,19 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 	}
 
 	spvw := &spvWallet{
-		chainParams:  cfg.ChainParams,
-		cfg:          walletCfg,
-		acctNum:      defaultAcctNum,
-		acctName:     defaultAcctName,
-		dir:          filepath.Join(cfg.WalletCFG.DataDir, cfg.ChainParams.Name, "spv"),
-		txBlocks:     make(map[chainhash.Hash]*hashEntry),
-		checkpoints:  make(map[outPoint]*scanCheckpoint),
-		log:          cfg.Logger.SubLogger("SPV"),
-		tipChan:      make(chan *block, 8),
-		newBTCWallet: walletConstructor,
-		decodeAddr:   btc.decodeAddr,
+		chainParams: cfg.ChainParams,
+		cfg:         walletCfg,
+		acctNum:     defaultAcctNum,
+		acctName:    defaultAcctName,
+		dir:         filepath.Join(cfg.WalletCFG.DataDir, cfg.ChainParams.Name, "spv"),
+		txBlocks:    make(map[chainhash.Hash]*hashEntry),
+		checkpoints: make(map[outPoint]*scanCheckpoint),
+		log:         cfg.Logger.SubLogger("SPV"),
+		tipChan:     make(chan *block, 8),
+		decodeAddr:  btc.decodeAddr,
 	}
+
+	spvw.wallet = walletConstructor(spvw.dir, spvw.cfg, spvw.chainParams, spvw.log)
 
 	btc.node = spvw
 

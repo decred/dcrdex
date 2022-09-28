@@ -4,14 +4,19 @@
 package ltc
 
 import (
+	"errors"
 	"fmt"
+	"path/filepath"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/config"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	dexltc "decred.org/dcrdex/dex/networks/ltc"
 	"github.com/btcsuite/btcd/chaincfg"
+	ltcchaincfg "github.com/ltcsuite/ltcd/chaincfg"
+	"github.com/ltcsuite/ltcwallet/wallet"
 )
 
 const (
@@ -24,6 +29,7 @@ const (
 	defaultFeeRateLimit = 100
 	minNetworkVersion   = 210201
 	walletTypeRPC       = "litecoindRPC"
+	walletTypeSPV       = "SPV"
 	walletTypeLegacy    = ""
 	walletTypeElectrum  = "electrumRPC"
 )
@@ -41,74 +47,26 @@ var (
 			Description: "The wallet name",
 		},
 	}
-	commonOpts = []*asset.ConfigOption{
-		{
-			Key:         "rpcuser",
-			DisplayName: "JSON-RPC Username",
-			Description: "Litecoin's 'rpcuser' setting",
-		},
-		{
-			Key:         "rpcpassword",
-			DisplayName: "JSON-RPC Password",
-			Description: "Litecoin's 'rpcpassword' setting",
-			NoEcho:      true,
-		},
-		{
-			Key:          "rpcbind",
-			DisplayName:  "JSON-RPC Address",
-			Description:  "<addr> or <addr>:<port> (default 'localhost')",
-			DefaultValue: "127.0.0.1",
-		},
-		{
-			Key:          "rpcport",
-			DisplayName:  "JSON-RPC Port",
-			Description:  "Port for RPC connections (if not set in rpcbind)",
-			DefaultValue: "9332",
-		},
-		{
-			Key:          "fallbackfee",
-			DisplayName:  "Fallback fee rate",
-			Description:  "Litecoin's 'fallbackfee' rate. Units: LTC/kB",
-			DefaultValue: defaultFee * 1000 / 1e8,
-		},
-		{
-			Key:         "feeratelimit",
-			DisplayName: "Highest acceptable fee rate",
-			Description: "This is the highest network fee rate you are willing to " +
-				"pay on swap transactions. If feeratelimit is lower than a market's " +
-				"maxfeerate, you will not be able to trade on that market with this " +
-				"wallet.  Units: LTC/kB",
-			DefaultValue: defaultFeeRateLimit * 1000 / 1e8,
-		},
-		{
-			Key:          "redeemconftarget",
-			DisplayName:  "Redeem transaction confirmation target",
-			Description:  "The target number of blocks for the redeem transaction to get a confirmation. Used to set the transaction's fee rate. (default: 2 blocks)",
-			DefaultValue: 2,
-		},
-		{
-			Key:         "txsplit",
-			DisplayName: "Pre-size funding inputs",
-			Description: "When placing an order, create a \"split\" transaction to fund the order without locking more of the wallet balance than " +
-				"necessary. Otherwise, excess funds may be reserved to fund the order until the first swap contract is broadcast " +
-				"during match settlement, or the order is canceled. This an extra transaction for which network mining fees are paid. " +
-				"Used only for standing-type orders, e.g. limit orders without immediate time-in-force.",
-			IsBoolean: true,
-		},
-	}
 	rpcWalletDefinition = &asset.WalletDefinition{
 		Type:              walletTypeRPC,
 		Tab:               "Litecoin Core (external)",
 		Description:       "Connect to litecoind",
 		DefaultConfigPath: dexbtc.SystemConfigPath("litecoin"),
-		ConfigOpts:        append(walletNameOpt, commonOpts...),
+		ConfigOpts:        append(btc.RPCConfigOpts("Litecoin", "9332"), btc.CommonConfigOpts("LTC", false)...),
 	}
 	electrumWalletDefinition = &asset.WalletDefinition{
 		Type:        walletTypeElectrum,
 		Tab:         "Electrum-LTC (external)",
 		Description: "Use an external Electrum-LTC Wallet",
 		// json: DefaultConfigPath: filepath.Join(btcutil.AppDataDir("electrum-ltc", false), "config"), // e.g. ~/.electrum-ltc/config		ConfigOpts:        append(rpcOpts, commonOpts...),
-		ConfigOpts: commonOpts,
+		ConfigOpts: append(btc.ElectrumConfigOpts, btc.CommonConfigOpts("LTC", false)...),
+	}
+	spvWalletDefinition = &asset.WalletDefinition{
+		Type:        walletTypeSPV,
+		Tab:         "Native",
+		Description: "Use the built-in SPV wallet",
+		ConfigOpts:  append(btc.SPVConfigOpts("LTC"), btc.CommonConfigOpts("LTC", false)...),
+		Seeded:      true,
 	}
 	// WalletInfo defines some general information about a Litecoin wallet.
 	WalletInfo = &asset.WalletInfo{
@@ -116,6 +74,7 @@ var (
 		Version:  version,
 		UnitInfo: dexltc.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{
+			spvWalletDefinition,
 			rpcWalletDefinition,
 			electrumWalletDefinition,
 		},
@@ -149,17 +108,65 @@ func (d *Driver) Info() *asset.WalletInfo {
 	return WalletInfo
 }
 
+// Exists checks the existence of the wallet. Part of the Creator interface, so
+// only used for wallets with WalletDefinition.Seeded = true.
+func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
+	if walletType != walletTypeSPV {
+		return false, fmt.Errorf("no Bitcoin wallet of type %q available", walletType)
+	}
+
+	chainParams, err := parseChainParams(net)
+	if err != nil {
+		return false, err
+	}
+	netDir := filepath.Join(dataDir, chainParams.Name, "spv")
+	loader := wallet.NewLoader(chainParams, netDir, true, dbTimeout, 250)
+	return loader.WalletExists()
+}
+
+// Create creates a new SPV wallet.
+func (d *Driver) Create(params *asset.CreateWalletParams) error {
+	if params.Type != walletTypeSPV {
+		return fmt.Errorf("SPV is the only seeded wallet type. required = %q, requested = %q", walletTypeSPV, params.Type)
+	}
+	if len(params.Seed) == 0 {
+		return errors.New("wallet seed cannot be empty")
+	}
+	if len(params.DataDir) == 0 {
+		return errors.New("must specify wallet data directory")
+	}
+	chainParams, err := parseChainParams(params.Net)
+	if err != nil {
+		return fmt.Errorf("error parsing chain: %w", err)
+	}
+
+	walletCfg := new(btc.WalletConfig)
+	err = config.Unmapify(params.Settings, walletCfg)
+	if err != nil {
+		return err
+	}
+
+	recoveryCfg := new(btc.RecoveryCfg)
+	err = config.Unmapify(params.Settings, recoveryCfg)
+	if err != nil {
+		return err
+	}
+
+	return createSPVWallet(params.Pass, params.Seed, walletCfg.AdjustedBirthday(), params.DataDir,
+		params.Logger, recoveryCfg.NumExternalAddresses, recoveryCfg.NumInternalAddresses, chainParams)
+}
+
 // NewWallet is the exported constructor by which the DEX will import the
 // exchange wallet.
 func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
-	var params *chaincfg.Params
+	var cloneParams *chaincfg.Params
 	switch network {
 	case dex.Mainnet:
-		params = dexltc.MainNetParams
+		cloneParams = dexltc.MainNetParams
 	case dex.Testnet:
-		params = dexltc.TestNet4Params
+		cloneParams = dexltc.TestNet4Params
 	case dex.Regtest:
-		params = dexltc.RegressionNetParams
+		cloneParams = dexltc.RegressionNetParams
 	default:
 		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
@@ -173,7 +180,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		Symbol:              "ltc",
 		Logger:              logger,
 		Network:             network,
-		ChainParams:         params,
+		ChainParams:         cloneParams,
 		Ports:               NetPorts,
 		DefaultFallbackFee:  defaultFee,
 		DefaultFeeRateLimit: defaultFeeRateLimit,
@@ -186,10 +193,24 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	switch cfg.Type {
 	case walletTypeRPC, walletTypeLegacy:
 		return btc.BTCCloneWallet(cloneCFG)
+	case walletTypeSPV:
+		return btc.OpenSPVWallet(cloneCFG, openSPVWallet)
 	case walletTypeElectrum:
 		cloneCFG.Ports = dexbtc.NetPorts{} // no default ports
 		return btc.ElectrumWallet(cloneCFG)
 	default:
 		return nil, fmt.Errorf("unknown wallet type %q", cfg.Type)
 	}
+}
+
+func parseChainParams(net dex.Network) (*ltcchaincfg.Params, error) {
+	switch net {
+	case dex.Mainnet:
+		return &ltcchaincfg.MainNetParams, nil
+	case dex.Testnet:
+		return &ltcchaincfg.TestNet4Params, nil
+	case dex.Regtest:
+		return &ltcchaincfg.RegressionNetParams, nil
+	}
+	return nil, fmt.Errorf("unknown network ID %v", net)
 }
