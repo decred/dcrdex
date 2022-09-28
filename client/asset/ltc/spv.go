@@ -55,6 +55,7 @@ const (
 	logDirName            = "logs"
 	neutrinoDBName        = "neutrino.db"
 	defaultAcctNum        = 0
+	dbTimeout             = 20 * time.Second
 )
 
 var (
@@ -123,7 +124,7 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string,
 	}
 
 	// timeout and recoverWindow arguments borrowed from btcwallet directly.
-	loader := wallet.NewLoader(net, netDir, true, 60*time.Second, 250)
+	loader := wallet.NewLoader(net, netDir, true, dbTimeout, 250)
 
 	pubPass := []byte(wallet.InsecurePubPassphrase)
 
@@ -145,7 +146,7 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string,
 
 	// The chain service DB
 	neutrinoDBPath := filepath.Join(netDir, neutrinoDBName)
-	db, err := walletdb.Create("bdb", neutrinoDBPath, true, 5*time.Second)
+	db, err := walletdb.Create("bdb", neutrinoDBPath, true, dbTimeout)
 	if err != nil {
 		return fmt.Errorf("unable to create neutrino db at %q: %w", neutrinoDBPath, err)
 	}
@@ -161,7 +162,7 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string,
 	return nil
 }
 
-// walletParams works around a bug in dcrwallet that doesn't recognize
+// walletParams works around a bug in ltcwallet that doesn't recognize
 // wire.TestNet4 in (*ScopedKeyManager).cloneKeyWithVersion which is called from
 // AccountProperties. Only do this for the *wallet.Wallet, not the
 // *neutrino.ChainService.
@@ -181,7 +182,8 @@ func (w *ltcSPVWallet) Start() (btc.SPVService, error) {
 		return nil, fmt.Errorf("error initializing dcrwallet+neutrino logging: %v", err)
 	}
 	// recoverWindow arguments borrowed from ltcwallet directly.
-	w.loader = wallet.NewLoader(w.walletParams(), w.dir, true, 60*time.Second, 250)
+
+	w.loader = wallet.NewLoader(w.walletParams(), w.dir, true, dbTimeout, 250)
 
 	exists, err := w.loader.WalletExists()
 	if err != nil {
@@ -202,7 +204,7 @@ func (w *ltcSPVWallet) Start() (btc.SPVService, error) {
 	errCloser.Add(w.loader.UnloadWallet)
 
 	neutrinoDBPath := filepath.Join(w.dir, neutrinoDBName)
-	w.neutrinoDB, err = walletdb.Create("bdb", neutrinoDBPath, true, wallet.DefaultDBTimeout)
+	w.neutrinoDB, err = walletdb.Create("bdb", neutrinoDBPath, true, dbTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create wallet db at %q: %v", neutrinoDBPath, err)
 	}
@@ -211,8 +213,8 @@ func (w *ltcSPVWallet) Start() (btc.SPVService, error) {
 	// Depending on the network, we add some addpeers or a connect peer. On
 	// regtest, if the peers haven't been explicitly set, add the simnet harness
 	// alpha node as an additional peer so we don't have to type it in. On
-	// mainet and testnet3, add a known reliable persistent peer to be used in
-	// addition to normal DNS seed-based peer discovery.
+	// testnet4, add a known reliable persistent peer to be used in addition to
+	// normal DNS seed-based peer discovery.
 	var addPeers []string
 	var connectPeers []string
 	switch w.chainParams.Net {
@@ -330,6 +332,14 @@ func (w *ltcSPVWallet) txDetails(txHash *ltcchainhash.Hash) (*ltcwtxmgr.TxDetail
 	}
 
 	return details, nil
+}
+
+func (w *ltcSPVWallet) addrLTC2BTC(addr ltcutil.Address) (btcutil.Address, error) {
+	return btcutil.DecodeAddress(addr.String(), w.btcParams)
+}
+
+func (w *ltcSPVWallet) addrBTC2LTC(addr btcutil.Address) (ltcutil.Address, error) {
+	return ltcutil.DecodeAddress(addr.String(), w.chainParams)
 }
 
 func (w *ltcSPVWallet) PublishTransaction(btcTx *wire.MsgTx, label string) error {
@@ -452,7 +462,7 @@ func (w *ltcSPVWallet) NewChangeAddress(account uint32, _ waddrmgr.KeyScope) (bt
 	if err != nil {
 		return nil, err
 	}
-	return btcutil.DecodeAddress(ltcAddr.String(), w.btcParams)
+	return w.addrLTC2BTC(ltcAddr)
 }
 
 func (w *ltcSPVWallet) NewAddress(account uint32, _ waddrmgr.KeyScope) (btcutil.Address, error) {
@@ -460,11 +470,11 @@ func (w *ltcSPVWallet) NewAddress(account uint32, _ waddrmgr.KeyScope) (btcutil.
 	if err != nil {
 		return nil, err
 	}
-	return btcutil.DecodeAddress(ltcAddr.String(), w.btcParams)
+	return w.addrLTC2BTC(ltcAddr)
 }
 
 func (w *ltcSPVWallet) PrivKeyForAddress(a btcutil.Address) (*btcec.PrivateKey, error) {
-	ltcAddr, err := ltcutil.DecodeAddress(a.String(), w.chainParams)
+	ltcAddr, err := w.addrBTC2LTC(a)
 	if err != nil {
 		return nil, err
 	}
@@ -504,7 +514,7 @@ func (w *ltcSPVWallet) SendOutputs(outputs []*wire.TxOut, _ *waddrmgr.KeyScope, 
 }
 
 func (w *ltcSPVWallet) HaveAddress(a btcutil.Address) (bool, error) {
-	ltcAddr, err := ltcutil.DecodeAddress(a.String(), w.chainParams)
+	ltcAddr, err := w.addrBTC2LTC(a)
 	if err != nil {
 		return false, err
 	}
@@ -546,7 +556,7 @@ func (w *ltcSPVWallet) AccountProperties(_ waddrmgr.KeyScope, acct uint32) (*wad
 		InternalKeyCount:     props.InternalKeyCount,
 		ImportedKeyCount:     props.ImportedKeyCount,
 		MasterKeyFingerprint: props.MasterKeyFingerprint,
-		KeyScope:             waddrmgr.KeyScopeBIP0044,
+		KeyScope:             waddrmgr.KeyScopeBIP0084,
 		IsWatchOnly:          props.IsWatchOnly,
 		// The last two would need conversion but aren't currently used.
 		// AccountPubKey:        props.AccountPubKey,

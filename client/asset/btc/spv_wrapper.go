@@ -252,15 +252,14 @@ func (w logWriter) Write(p []byte) (n int, err error) {
 // Bitcoin wallet. spvWallet controls an instance of btcwallet.Wallet directly
 // and does not run or connect to the RPC server.
 type spvWallet struct {
-	chainParams  *chaincfg.Params
-	cfg          *WalletConfig
-	wallet       BTCWallet
-	cl           SPVService
-	acctNum      uint32
-	acctName     string
-	dir          string
-	newBTCWallet BTCWalletConstructor
-	decodeAddr   dexbtc.AddressDecoder
+	chainParams *chaincfg.Params
+	cfg         *WalletConfig
+	wallet      BTCWallet
+	cl          SPVService
+	acctNum     uint32
+	acctName    string
+	dir         string
+	decodeAddr  dexbtc.AddressDecoder
 
 	txBlocksMtx sync.Mutex
 	txBlocks    map[chainhash.Hash]*hashEntry
@@ -861,6 +860,74 @@ func (w *spvWallet) sendWithSubtract(pkScript []byte, value, feeRate uint64) (*c
 	return w.sendRawTransaction(tx)
 }
 
+// estimateSendTxFee callers should provide at least one output value.
+func (w *spvWallet) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract bool) (fee uint64, err error) {
+	minTxSize := uint64(tx.SerializeSize())
+	var sendAmount uint64
+	for _, txOut := range tx.TxOut {
+		sendAmount += uint64(txOut.Value)
+	}
+
+	// If subtract is true, select enough inputs for sendAmount. Fees will be taken
+	// from the sendAmount. If not, select enough inputs to cover minimum fees.
+	enough := func(inputsSize, sum uint64) bool {
+		if subtract {
+			return sum >= sendAmount
+		}
+		minFee := (minTxSize + inputsSize) * feeRate
+		return sum >= sendAmount+minFee
+	}
+
+	unspents, err := w.listUnspent()
+	if err != nil {
+		return 0, fmt.Errorf("error listing unspent outputs: %w", err)
+	}
+
+	utxos, _, _, err := convertUnspent(0, unspents, w.chainParams)
+	if err != nil {
+		return 0, fmt.Errorf("error converting unspent outputs: %w", err)
+	}
+
+	sum, inputsSize, _, _, _, _, err := fund(utxos, enough)
+	if err != nil {
+		return 0, err
+	}
+
+	txSize := minTxSize + uint64(inputsSize)
+	estFee := feeRate * txSize
+	remaining := sum - sendAmount
+
+	// Check if there will be a change output if there is enough remaining.
+	estFeeWithChange := (txSize + dexbtc.P2WPKHOutputSize) * feeRate
+	var changeValue uint64
+	if remaining > estFeeWithChange {
+		changeValue = remaining - estFeeWithChange
+	}
+
+	if subtract {
+		// fees are already included in sendAmount, anything else is change.
+		changeValue = remaining
+	}
+
+	var finalFee uint64
+	if dexbtc.IsDustVal(dexbtc.P2WPKHOutputSize, changeValue, feeRate, true) {
+		// remaining cannot cover a non-dust change and the fee for the change.
+		finalFee = estFee + remaining
+	} else {
+		// additional fee will be paid for non-dust change
+		finalFee = estFeeWithChange
+	}
+
+	if subtract {
+		sendAmount -= finalFee
+	}
+	if dexbtc.IsDustVal(minTxSize, sendAmount, feeRate, true) {
+		return 0, errors.New("output value is dust")
+	}
+
+	return finalFee, nil
+}
+
 // swapConfirmations attempts to get the number of confirmations and the spend
 // status for the specified tx output. For swap outputs that were not generated
 // by this wallet, startTime must be supplied to limit the search. Use the match
@@ -999,7 +1066,6 @@ func (w *spvWallet) logFilePath() string {
 
 // connect will start the wallet and begin syncing.
 func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) (err error) {
-	w.wallet = w.newBTCWallet(w.dir, w.cfg, w.chainParams, w.log)
 	w.cl, err = w.wallet.Start()
 	if err != nil {
 		return err
@@ -1057,74 +1123,6 @@ func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) (err error)
 	}()
 
 	return nil
-}
-
-// estimateSendTxFee callers should provide at least one output value.
-func (w *spvWallet) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract bool) (fee uint64, err error) {
-	minTxSize := uint64(tx.SerializeSize())
-	var sendAmount uint64
-	for _, txOut := range tx.TxOut {
-		sendAmount += uint64(txOut.Value)
-	}
-
-	// If subtract is true, select enough inputs for sendAmount. Fees will be taken
-	// from the sendAmount. If not, select enough inputs to cover minimum fees.
-	enough := func(inputsSize, sum uint64) bool {
-		if subtract {
-			return sum >= sendAmount
-		}
-		minFee := (minTxSize + inputsSize) * feeRate
-		return sum >= sendAmount+minFee
-	}
-
-	unspents, err := w.listUnspent()
-	if err != nil {
-		return 0, fmt.Errorf("error listing unspent outputs: %w", err)
-	}
-
-	utxos, _, _, err := convertUnspent(0, unspents, w.chainParams)
-	if err != nil {
-		return 0, fmt.Errorf("error converting unspent outputs: %w", err)
-	}
-
-	sum, inputsSize, _, _, _, _, err := fund(utxos, enough)
-	if err != nil {
-		return 0, err
-	}
-
-	txSize := minTxSize + uint64(inputsSize)
-	estFee := feeRate * txSize
-	remaining := sum - sendAmount
-
-	// Check if there will be a change output if there is enough remaining.
-	estFeeWithChange := (txSize + dexbtc.P2WPKHOutputSize) * feeRate
-	var changeValue uint64
-	if remaining > estFeeWithChange {
-		changeValue = remaining - estFeeWithChange
-	}
-
-	if subtract {
-		// fees are already included in sendAmount, anything else is change.
-		changeValue = remaining
-	}
-
-	var finalFee uint64
-	if dexbtc.IsDustVal(dexbtc.P2WPKHOutputSize, changeValue, feeRate, true) {
-		// remaining cannot cover a non-dust change and the fee for the change.
-		finalFee = estFee + remaining
-	} else {
-		// additional fee will be paid for non-dust change
-		finalFee = estFeeWithChange
-	}
-
-	if subtract {
-		sendAmount -= finalFee
-	}
-	if dexbtc.IsDustVal(minTxSize, sendAmount, feeRate, true) {
-		return 0, errors.New("output value is dust")
-	}
-
-	return finalFee, nil
 }
 
 // moveWalletData will move all wallet files to a backup directory.

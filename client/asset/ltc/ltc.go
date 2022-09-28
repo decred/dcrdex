@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
@@ -121,7 +120,7 @@ func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, 
 		return false, err
 	}
 	netDir := filepath.Join(dataDir, chainParams.Name, "spv")
-	loader := wallet.NewLoader(chainParams, netDir, true, 60*time.Second, 250)
+	loader := wallet.NewLoader(chainParams, netDir, true, dbTimeout, 250)
 	return loader.WalletExists()
 }
 

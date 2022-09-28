@@ -27,6 +27,10 @@ import (
 	"github.com/lightninglabs/neutrino"
 )
 
+const (
+	dbTimeout = 20 * time.Second
+)
+
 // btcSPVWallet implements BTCWallet for Bitcoin.
 type btcSPVWallet struct {
 	*wallet.Wallet
@@ -65,7 +69,7 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dataDir strin
 		return fmt.Errorf("error creating wallet directories: %w", err)
 	}
 
-	loader := wallet.NewLoader(net, dir, true, 60*time.Second, 250)
+	loader := wallet.NewLoader(net, dir, true, dbTimeout, 250)
 
 	pubPass := []byte(wallet.InsecurePubPassphrase)
 
@@ -90,7 +94,7 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dataDir strin
 
 	// The chain service DB
 	neutrinoDBPath := filepath.Join(dir, neutrinoDBName)
-	db, err := walletdb.Create("bdb", neutrinoDBPath, true, 5*time.Second)
+	db, err := walletdb.Create("bdb", neutrinoDBPath, true, dbTimeout)
 	if err != nil {
 		bailOnWallet()
 		return fmt.Errorf("unable to create neutrino db at %q: %w", neutrinoDBPath, err)
@@ -143,7 +147,7 @@ func (w *btcSPVWallet) Start() (SPVService, error) {
 		return nil, fmt.Errorf("error initializing btcwallet+neutrino logging: %v", err)
 	}
 	// timeout and recoverWindow arguments borrowed from btcwallet directly.
-	w.loader = wallet.NewLoader(w.chainParams, w.dir, true, 60*time.Second, 250)
+	w.loader = wallet.NewLoader(w.chainParams, w.dir, true, dbTimeout, 250)
 
 	exists, err := w.loader.WalletExists()
 	if err != nil {
@@ -164,7 +168,7 @@ func (w *btcSPVWallet) Start() (SPVService, error) {
 	errCloser.Add(w.loader.UnloadWallet)
 
 	neutrinoDBPath := filepath.Join(w.dir, neutrinoDBName)
-	w.neutrinoDB, err = walletdb.Create("bdb", neutrinoDBPath, true, wallet.DefaultDBTimeout)
+	w.neutrinoDB, err = walletdb.Create("bdb", neutrinoDBPath, true, dbTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create wallet db at %q: %v", neutrinoDBPath, err)
 	}

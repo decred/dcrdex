@@ -112,9 +112,10 @@ var (
 			NoEcho:      true,
 		},
 		{
-			Key:         "rpcbind", // match RPCConfig struct field tags
-			DisplayName: "JSON-RPC Address",
-			Description: "Electrum's 'rpchost' <addr> or <addr>:<port>",
+			Key:          "rpcbind", // match RPCConfig struct field tags
+			DisplayName:  "JSON-RPC Address",
+			Description:  "Electrum's 'rpchost' <addr> or <addr>:<port>",
+			DefaultValue: "127.0.0.1",
 		},
 		{
 			Key:         "rpcport",
@@ -171,7 +172,8 @@ func apiFallbackOpt(defaultV bool) *asset.ConfigOption {
 		Description: "Allow fee rate estimation from a block explorer API. " +
 			"This is useful as a fallback for SPV wallets and RPC wallets " +
 			"that have recently been started.",
-		IsBoolean: defaultV,
+		IsBoolean:    true,
+		DefaultValue: defaultV,
 	}
 }
 
@@ -643,7 +645,7 @@ func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, 
 	}
 	dir := filepath.Join(dataDir, chainParams.Name, "spv")
 	// timeout and recoverWindow arguments borrowed from btcwallet directly.
-	loader := wallet.NewLoader(chainParams, dir, true, 60*time.Second, 250)
+	loader := wallet.NewLoader(chainParams, dir, true, dbTimeout, 250)
 	return loader.WalletExists()
 }
 
@@ -1153,18 +1155,19 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 	}
 
 	spvw := &spvWallet{
-		chainParams:  cfg.ChainParams,
-		cfg:          walletCfg,
-		acctNum:      defaultAcctNum,
-		acctName:     defaultAcctName,
-		dir:          filepath.Join(cfg.WalletCFG.DataDir, cfg.ChainParams.Name, "spv"),
-		txBlocks:     make(map[chainhash.Hash]*hashEntry),
-		checkpoints:  make(map[outPoint]*scanCheckpoint),
-		log:          cfg.Logger.SubLogger("SPV"),
-		tipChan:      make(chan *block, 8),
-		newBTCWallet: walletConstructor,
-		decodeAddr:   btc.decodeAddr,
+		chainParams: cfg.ChainParams,
+		cfg:         walletCfg,
+		acctNum:     defaultAcctNum,
+		acctName:    defaultAcctName,
+		dir:         filepath.Join(cfg.WalletCFG.DataDir, cfg.ChainParams.Name, "spv"),
+		txBlocks:    make(map[chainhash.Hash]*hashEntry),
+		checkpoints: make(map[outPoint]*scanCheckpoint),
+		log:         cfg.Logger.SubLogger("SPV"),
+		tipChan:     make(chan *block, 8),
+		decodeAddr:  btc.decodeAddr,
 	}
+
+	spvw.wallet = walletConstructor(spvw.dir, spvw.cfg, spvw.chainParams, spvw.log)
 
 	btc.node = spvw
 
