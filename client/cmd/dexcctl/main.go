@@ -47,18 +47,17 @@ func main() {
 // promptPasswords is a map of routes to password prompts. Passwords are
 // prompted in the order given.
 var promptPasswords = map[string][]string{
-	"cancel":             {"App password:"},
-	"discoveracct":       {"App password:"},
-	"init":               {"Set new app password:"},
-	"login":              {"App password:"},
-	"newwallet":          {"App password:", "Wallet password:"},
-	"openwallet":         {"App password:"},
-	"register":           {"App password:"},
-	"trade":              {"App password:"},
-	"withdraw":           {"App password:"},
-	"send":               {"App password:"},
-	"appseed":            {"App password:"},
-	"togglewalletstatus": {"App password:"},
+	"cancel":       {"App password:"},
+	"discoveracct": {"App password:"},
+	"init":         {"Set new app password:"},
+	"login":        {"App password:"},
+	"newwallet":    {"App password:", "Wallet password:"},
+	"openwallet":   {"App password:"},
+	"register":     {"App password:"},
+	"trade":        {"App password:"},
+	"withdraw":     {"App password:"},
+	"send":         {"App password:"},
+	"appseed":      {"App password:"},
 }
 
 // optionalTextFiles is a map of routes to arg index for routes that should read
