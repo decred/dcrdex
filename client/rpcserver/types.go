@@ -180,11 +180,11 @@ func checkNArgs(params *RawParams, nPWArgs, nArgs []int) error {
 	check := func(have int, want []int) error {
 		if len(want) == 1 {
 			if want[0] != have {
-				return fmt.Errorf("%w: wanted %d but got %d", errArgs, want[0], have)
+				return fmt.Errorf("%w: wanted %d argument but got %d argument", errArgs, want[0], have)
 			}
 		} else {
 			if have < want[0] || have > want[1] {
-				return fmt.Errorf("%w: wanted between %d and %d but got %d", errArgs, want[0], want[1], have)
+				return fmt.Errorf("%w: wanted between %d and %d argument but got %d argument", errArgs, want[0], want[1], have)
 			}
 		}
 		return nil
