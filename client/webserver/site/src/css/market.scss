@@ -671,6 +671,12 @@ div[data-handler=markets] {
   border-bottom: 1px solid $light_border_color;
 }
 
+#recentMatchesBox {
+  @extend .stylish-overflow;
+
+  max-height: 350px;
+}
+
 #recentMatchesTable {
   th {
     align-items: center;
@@ -813,5 +819,10 @@ div[data-handler=markets] {
 
   table.ordertable {
     width: auto;
+  }
+
+  #recentMatchesBox {
+    overflow: visible;
+    max-height: none;
   }
 }

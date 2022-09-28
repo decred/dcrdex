@@ -160,8 +160,6 @@ export default class MarketsPage extends BasePage {
   depthLines: Record<string, DepthLine[]>
   activeMarkerRate: number | null
   hovers: HTMLElement[]
-  ordersSortKey: string
-  ordersSortDirection: 1 | -1
   ogTitle: string
   depthChart: DepthChart
   candleChart: CandleChart
@@ -199,13 +197,8 @@ export default class MarketsPage extends BasePage {
       input: []
     }
     this.hovers = []
-    // 'Your Orders' list sort key and direction.
-    this.ordersSortKey = 'submitTime'
     // 'Recent Matches' list sort key and direction.
     this.recentMatchesSortKey = 'stamp'
-    // 1 if sorting ascendingly, -1 if sorting descendingly.
-    this.ordersSortDirection = 1
-    // same as this.ordersSortDirection.
     this.recentMatchesSortDirection = 1
     // store original title so we can re-append it when updating market value.
     this.ogTitle = document.title
@@ -348,9 +341,6 @@ export default class MarketsPage extends BasePage {
     Doc.bind(page.vFeeDetails, 'click', () => this.showForm(page.vDetailPane))
     Doc.bind(page.closeDetailPane, 'click', () => this.showVerifyForm())
     // // Bind active orders list's header sort events.
-    // page.liveTable.querySelectorAll('[data-ordercol]')
-    //   .forEach((th: HTMLElement) => bind(th, 'click', () => setOrdersSortCol(th.dataset.ordercol || '')))
-    // // Bind active orders list's header sort events.
     page.recentMatchesTable.querySelectorAll('[data-ordercol]')
       .forEach((th: HTMLElement) => bind(
         th, 'click', () => setRecentMatchesSortCol(th.dataset.ordercol || '')
@@ -369,43 +359,16 @@ export default class MarketsPage extends BasePage {
       setRecentMatchesSortColClasses()
     }
 
-    // const setOrdersSortCol = (key: string) => {
-    //   // First unset header's current sorted col classes.
-    //   unsetOrdersSortColClasses()
-    //   // If already sorting by key change sort direction.
-    //   if (this.ordersSortKey === key) {
-    //     this.ordersSortDirection *= -1
-    //   } else {
-    //     // Otherwise update sort key and set default direction to ascending.
-    //     this.ordersSortKey = key
-    //     this.ordersSortDirection = 1
-    //   }
-    //   this.refreshActiveOrders()
-    //   // Set header's new sorted col classes.
-    //   setOrdersSortColClasses()
-    // }
-
     // sortClassByDirection receives a sort direction and return a class based on it.
     const sortClassByDirection = (element: 1 | -1) => {
       if (element === 1) return 'sorted-asc'
       return 'sorted-dsc'
     }
 
-    // const unsetOrdersSortColClasses = () => {
-    //   page.liveTable.querySelectorAll('[data-ordercol]')
-    //     .forEach(th => th.classList.remove('sorted-asc', 'sorted-dsc'))
-    // }
-
     const unsetRecentMatchesSortColClasses = () => {
       page.recentMatchesTable.querySelectorAll('[data-ordercol]')
         .forEach(th => th.classList.remove('sorted-asc', 'sorted-dsc'))
     }
-
-    // const setOrdersSortColClasses = () => {
-    //   const key = this.ordersSortKey
-    //   const sortCls = sortClassByDirection(this.ordersSortDirection)
-    //   Doc.safeSelector(page.liveTable, `[data-ordercol=${key}]`).classList.add(sortCls)
-    // }
 
     const setRecentMatchesSortColClasses = () => {
       const key = this.recentMatchesSortKey
@@ -414,7 +377,6 @@ export default class MarketsPage extends BasePage {
     }
 
     // Set default's sorted col header classes.
-    // setOrdersSortColClasses()
     setRecentMatchesSortColClasses()
 
     const closePopups = () => {
@@ -510,6 +472,9 @@ export default class MarketsPage extends BasePage {
     this.secondTicker = window.setInterval(() => {
       for (const mord of Object.values(this.metaOrders)) {
         mord.details.age.textContent = Doc.timeSince(mord.ord.submitTime)
+      }
+      for (const td of Doc.applySelector(page.recentMatchesLiveList, '[data-tmpl=age]')) {
+        td.textContent = Doc.timeSince(parseFloat(td.dataset.sinceStamp ?? '0'))
       }
     }, 1000)
 
@@ -1182,36 +1147,6 @@ export default class MarketsPage extends BasePage {
     }
   }
 
-  /*
-   * ordersSortCompare returns sort compare function according to the active
-   * sort key and direction.
-   */
-  ordersSortCompare () {
-    switch (this.ordersSortKey) {
-      case 'submitTime':
-        return (a: Order, b: Order) => this.ordersSortDirection * (b.submitTime - a.submitTime)
-      case 'rate':
-        return (a: Order, b: Order) => this.ordersSortDirection * (a.rate - b.rate)
-      case 'qty':
-        return (a: Order, b: Order) => this.ordersSortDirection * (a.qty - b.qty)
-      case 'type':
-        return (a: Order, b: Order) => this.ordersSortDirection *
-        OrderUtil.typeString(a).localeCompare(OrderUtil.typeString(b))
-      case 'sell':
-        return (a: Order, b: Order) => this.ordersSortDirection *
-          (OrderUtil.sellString(a)).localeCompare(OrderUtil.sellString(b))
-      case 'status':
-        return (a: Order, b: Order) => this.ordersSortDirection *
-          (OrderUtil.statusString(a)).localeCompare(OrderUtil.statusString(b))
-      case 'settled':
-        return (a: Order, b: Order) => this.ordersSortDirection *
-          ((OrderUtil.settled(a) * 100 / a.qty) - (OrderUtil.settled(b) * 100 / b.qty))
-      case 'filled':
-        return (a: Order, b: Order) => this.ordersSortDirection *
-          ((OrderUtil.filled(a) * 100 / a.qty) - (OrderUtil.filled(b) * 100 / b.qty))
-    }
-  }
-
   /* refreshActiveOrders refreshes the user's active order list. */
   refreshActiveOrders () {
     const page = this.page
@@ -1220,8 +1155,7 @@ export default class MarketsPage extends BasePage {
     for (const oid in metaOrders) delete metaOrders[oid]
     const orders = app().orders(market.dex.host, marketID(market.baseCfg.symbol, market.quoteCfg.symbol))
     // Sort orders by sort key.
-    const compare = this.ordersSortCompare()
-    orders.sort(compare)
+    orders.sort((a: Order, b: Order) => b.submitTime - a.submitTime)
 
     Doc.empty(page.userOrders)
     Doc.setVis(orders?.length, page.userOrders)
@@ -1942,7 +1876,7 @@ export default class MarketsPage extends BasePage {
   }
 
   /*
-   * ordersSortCompare returns sort compare function according to the active
+   * recentMatchesSortCompare returns sort compare function according to the active
    * sort key and direction.
    */
   recentMatchesSortCompare () {
@@ -1969,7 +1903,8 @@ export default class MarketsPage extends BasePage {
       app().bindTooltips(row)
       tmpl.rate.textContent = Doc.formatCoinValue(match.rate / this.market.rateConversionFactor)
       tmpl.qty.textContent = Doc.formatCoinValue(match.qty, this.market.baseUnitInfo)
-      tmpl.age.textContent = new Date(match.stamp).toLocaleTimeString()
+      tmpl.age.textContent = Doc.timeSince(match.stamp)
+      tmpl.age.dataset.sinceStamp = String(match.stamp)
       row.classList.add(match.sell ? 'sellcolor' : 'buycolor')
       page.recentMatchesLiveList.append(row)
     }

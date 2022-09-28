@@ -29,6 +29,7 @@ import (
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/candles"
@@ -1141,12 +1142,24 @@ func (c *TCore) book(dexAddr, mktID string) *core.OrderBook {
 		buys = append(buys, ord)
 		c.buys[ord.Token] = ord
 	}
+	recentMatches := make([]*orderbook.MatchSummary, 0, 25)
+	tNow := time.Now()
+	for i := 0; i < 25; i++ {
+		ord := randomOrder(rand.Float32() > 0.5, maxQty, midGap, gapWidthFactor*midGap, false)
+		recentMatches = append(recentMatches, &orderbook.MatchSummary{
+			Rate:  ord.MsgRate,
+			Qty:   ord.QtyAtomic,
+			Stamp: uint64(tNow.Add(-time.Duration(i) * time.Minute).UnixMilli()),
+			Sell:  ord.Sell,
+		})
+	}
 	c.orderMtx.Unlock()
 	sort.Slice(buys, func(i, j int) bool { return buys[i].Rate > buys[j].Rate })
 	sort.Slice(sells, func(i, j int) bool { return sells[i].Rate < sells[j].Rate })
 	return &core.OrderBook{
-		Buys:  buys,
-		Sells: sells,
+		Buys:          buys,
+		Sells:         sells,
+		RecentMatches: recentMatches,
 	}
 }
 

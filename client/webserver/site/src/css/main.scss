@@ -80,21 +80,11 @@ header.maintop {
   border-bottom: 1px solid $light_border_color;
 }
 
-a.logo,
 a.logo-icon {
   display: block;
   margin: 0 10px;
   background-size: cover;
   cursor: pointer;
-}
-
-a.logo {
-  height: 30px;
-  width: 145px;
-  background-image: url("/img/logo_wide_v1.svg");
-}
-
-a.logo-icon {
   height: 40px;
   width: 40px;
   background-image: url("/img/softened-icon.png");
