@@ -302,22 +302,11 @@ export default class OrderPage extends BasePage {
       Doc.hide(tmpl.makerSwapMsg, tmpl.takerSwapMsg, tmpl.makerRedeemMsg, tmpl.takerRedeemMsg)
     }
 
-    const showMakerSwap = !m.isCancel && (makerSwapCoin(m) || !m.revoked)
-    const showTakerSwap = !m.isCancel && (takerSwapCoin(m) || !m.revoked)
-    const showMakerRedeem = !m.isCancel && (makerRedeemCoin(m) || !m.revoked)
-    const showTakerRedeem = !m.isCancel && (m.side !== OrderUtil.Maker) && (takerRedeemCoin(m) || !m.revoked)
-    const showRefund = !m.isCancel && (m.refund || (m.revoked && m.active))
-
-    if (showMakerSwap) Doc.show(tmpl.makerSwap)
-    else Doc.hide(tmpl.makerSwap)
-    if (showTakerSwap) Doc.show(tmpl.takerSwap)
-    else Doc.hide(tmpl.takerSwap)
-    if (showMakerRedeem) Doc.show(tmpl.makerRedeem)
-    else Doc.hide(tmpl.makerRedeem)
-    if (showTakerRedeem) Doc.show(tmpl.takerRedeem)
-    else Doc.hide(tmpl.takerRedeem)
-    if (showRefund) Doc.show(tmpl.refund)
-    else Doc.hide(tmpl.refund)
+    Doc.setVis(!m.isCancel && (makerSwapCoin(m) || !m.revoked), tmpl.makerSwap)
+    Doc.setVis(!m.isCancel && (takerSwapCoin(m) || !m.revoked), tmpl.takerSwap)
+    Doc.setVis(!m.isCancel && (makerRedeemCoin(m) || !m.revoked), tmpl.makerRedeem)
+    Doc.setVis(!m.isCancel && (m.side !== OrderUtil.Maker) && (takerRedeemCoin(m) || !m.revoked), tmpl.takerRedeem)
+    Doc.setVis(!m.isCancel && (m.refund || (m.revoked && m.active)), tmpl.refund)
   }
 
   /*

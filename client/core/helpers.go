@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
@@ -407,75 +406,4 @@ func settlingFilter(match *Match) bool {
 
 func filledNonCancelFilter(match *Match) bool {
 	return !match.IsCancel
-}
-
-// matchReader wraps a Match and provides methods for info display.
-// Whenever possible, add an matchReader methods rather than a template func.
-type matchReader struct {
-	*Match
-	ord *OrderReader
-}
-
-func newMatchReader(match *Match, ord *OrderReader) *matchReader {
-	return &matchReader{
-		Match: match,
-		ord:   ord,
-	}
-}
-
-// MatchReaders creates a slice of *matchReader for the order's matches.
-func (ord *OrderReader) MatchReaders() []*matchReader {
-	readers := make([]*matchReader, 0, len(ord.Matches))
-	for _, match := range ord.Matches {
-		readers = append(readers, newMatchReader(match, ord))
-	}
-	return readers
-}
-
-// StatusString is a formatted string of the match status.
-func (m *matchReader) StatusString() string {
-	if m.Revoked {
-		// When revoked, match status is less important than pending action if
-		// still active, or the outcome if inactive.
-		switch {
-		case m.Active:
-			return "Revoked - Refund PENDING" // could auto-redeem too, but we are waiting
-		case m.Refund != nil:
-			return "Revoked - Refunded"
-			// TODO: show refund txid on /order page
-		case m.Redeem != nil:
-			return "Revoked - Redeemed"
-		} // otherwise no txns needed to retire
-		return "Revoked - Complete"
-	}
-
-	switch m.Status {
-	case order.NewlyMatched:
-		return "Newly Matched"
-	case order.MakerSwapCast:
-		return "Maker Swap Sent"
-	case order.TakerSwapCast:
-		return "Taker Swap Sent"
-	case order.MakerRedeemed:
-		if m.Side == order.Maker {
-			return "Redemption Sent"
-		}
-		return "Maker Redeemed"
-	case order.MatchComplete:
-		return "Redemption Sent"
-	case order.MatchConfirmed:
-		return "Redemption Confirmed"
-	}
-	return "Unknown Match Status"
-}
-
-// RateString is the formatted match rate, with units.
-func (m *matchReader) RateString() string {
-	return fmt.Sprintf("%s %s/%s", m.ord.formatRate(m.Rate), m.ord.QuoteSymbol, m.ord.BaseSymbol)
-}
-
-// TimeString is a formatted string of the match's timestamp.
-func (m *matchReader) TimeString() string {
-	t := time.UnixMilli(int64(m.Stamp)).Local()
-	return t.Format("Jan 2 2006, 15:04:05 MST")
 }
