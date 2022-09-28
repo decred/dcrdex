@@ -13,6 +13,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/candles"
@@ -567,6 +568,8 @@ type OrderBook struct {
 	Sells []*MiniOrder `json:"sells"`
 	Buys  []*MiniOrder `json:"buys"`
 	Epoch []*MiniOrder `json:"epoch"`
+	// RecentMatches is a cache of up to 100 recent matches for a market.
+	RecentMatches []*orderbook.MatchSummary `json:"recentMatches"`
 }
 
 // MarketOrderBook is used as the BookUpdate's Payload with the FreshBookAction.

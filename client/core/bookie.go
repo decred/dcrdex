@@ -192,13 +192,12 @@ func (b *bookie) logEpochReport(note *msgjson.EpochReportNote) error {
 	}
 
 	marketID := marketName(b.base, b.quote)
-	b.SetMatchesSummary(note.MatchesSummarySell, note.EndStamp, true)
-	b.SetMatchesSummary(note.MatchesSummaryBuy, note.EndStamp, false)
-	if note.MatchesSummaryBuy != nil || note.MatchesSummarySell != nil {
+	matchSummaries := b.AddRecentMatches(note.MatchSummary, note.EndStamp)
+	if len(note.MatchSummary) > 0 {
 		b.send(&BookUpdate{
 			Action:   EpochMatchSummary,
 			MarketID: marketID,
-			Payload:  b.GetMatchesSummary(),
+			Payload:  matchSummaries,
 		})
 	}
 	for durStr, cache := range b.candleCaches {
@@ -365,9 +364,10 @@ func (b *bookie) send(u *BookUpdate) {
 func (b *bookie) book() *OrderBook {
 	buys, sells, epoch := b.Orders()
 	return &OrderBook{
-		Buys:  b.translateBookSide(buys),
-		Sells: b.translateBookSide(sells),
-		Epoch: b.translateBookSide(epoch),
+		Buys:          b.translateBookSide(buys),
+		Sells:         b.translateBookSide(sells),
+		Epoch:         b.translateBookSide(epoch),
+		RecentMatches: b.RecentMatches(),
 	}
 }
 
@@ -911,7 +911,7 @@ func (dc *dexConnection) refreshServerConfig() error {
 
 	assets, epochs, err := generateDEXMaps(dc.acct.host, cfg)
 	if err != nil {
-		return fmt.Errorf("Inconsistent 'config' response: %w", err)
+		return fmt.Errorf("inconsistent 'config' response: %w", err)
 	}
 
 	// Update dc.{marketMap,epoch,assets}

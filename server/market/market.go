@@ -2599,18 +2599,23 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 		log.Errorf("Error updating API data collector: %v", err)
 	}
 
-	basicMatchesSell := make(map[uint64]uint64)
-	basicMatchesBuy := make(map[uint64]uint64)
+	matchReport := make([][2]int64, 0, len(matches))
+	var lastRate uint64
+	var lastSide bool
 	for _, matchSet := range matches {
 		for _, match := range matchSet.Matches() {
-			// skip cancel order types
-			if _, ok := match.Taker.(*order.CancelOrder); ok {
+			t := match.Taker.Trade()
+			if t == nil {
 				continue
 			}
-			if match.Taker.Trade() != nil && match.Taker.Trade().Sell {
-				basicMatchesSell[match.Rate] += match.Quantity
+			if match.Rate != lastRate || t.Sell != lastSide {
+				matchReport = append(matchReport, [2]int64{int64(match.Rate), 0})
+				lastRate, lastSide = match.Rate, t.Sell
+			}
+			if t.Sell {
+				matchReport[len(matchReport)-1][1] += int64(match.Quantity)
 			} else {
-				basicMatchesBuy[match.Rate] += match.Quantity
+				matchReport[len(matchReport)-1][1] -= int64(match.Quantity)
 			}
 		}
 	}
@@ -2618,14 +2623,13 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 	notifyChan <- &updateSignal{
 		action: epochReportAction,
 		data: sigDataEpochReport{
-			epochIdx:           epoch.Epoch,
-			epochDur:           epoch.Duration,
-			spot:               spot,
-			stats:              stats,
-			baseFeeRate:        feeRateBase,
-			quoteFeeRate:       feeRateQuote,
-			matchesSummaryBuy:  basicMatchesBuy,
-			matchesSummarySell: basicMatchesSell,
+			epochIdx:     epoch.Epoch,
+			epochDur:     epoch.Duration,
+			spot:         spot,
+			stats:        stats,
+			baseFeeRate:  feeRateBase,
+			quoteFeeRate: feeRateQuote,
+			matches:      matchReport,
 		},
 	}
 
