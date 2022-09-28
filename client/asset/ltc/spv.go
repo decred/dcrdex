@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -61,6 +62,13 @@ const (
 var (
 	waddrmgrNamespace = []byte("waddrmgr")
 	wtxmgrNamespace   = []byte("wtxmgr")
+
+	testnet4Seeds = [][]byte{
+		{0x12, 0xc0, 0x38, 0x95, 0x87, 0x4b},
+		{0x3, 0x47, 0x1e, 0x2e, 0x87, 0x4b},
+		{0x22, 0x59, 0x4e, 0x2d, 0x87, 0x4b},
+		{0x22, 0x8c, 0xc5, 0x98, 0x87, 0x4b},
+	}
 )
 
 // ltcSPVWallet is an implementation of btc.BTCWallet that runs a native
@@ -220,6 +228,11 @@ func (w *ltcSPVWallet) Start() (btc.SPVService, error) {
 	switch w.chainParams.Net {
 	case ltcwire.TestNet4:
 		addPeers = []string{"127.0.0.1:19335"}
+		for _, host := range testnet4Seeds {
+			var addr netip.AddrPort
+			addr.UnmarshalBinary(host)
+			addPeers = append(addPeers, addr.String())
+		}
 	case ltcwire.TestNet, ltcwire.SimNet: // plain "wire.TestNet" is regnet!
 		connectPeers = []string{"localhost:20585"}
 	}
