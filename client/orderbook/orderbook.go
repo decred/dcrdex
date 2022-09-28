@@ -54,6 +54,9 @@ type rateSell struct {
 	sell bool
 }
 
+// MatchSummary summarizes one or more consecutive matches at a given rate and
+// buy/sell direction. Consecutive matches of the same rate and direction are
+// binned by the server.
 type MatchSummary struct {
 	Rate  uint64 `json:"rate"`
 	Qty   uint64 `json:"qty"`
@@ -655,7 +658,7 @@ func (ob *OrderBook) AddRecentMatches(matches [][2]int64, ts uint64) []*MatchSum
 	return newMatches
 }
 
-// RecentMatches returns a deep copy of MatchesSummary
+// RecentMatches returns up to 100 recent matches, newest first.
 func (ob *OrderBook) RecentMatches() []*MatchSummary {
 	ob.matchSummaryMtx.Lock()
 	defer ob.matchSummaryMtx.Unlock()

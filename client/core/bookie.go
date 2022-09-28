@@ -193,7 +193,7 @@ func (b *bookie) logEpochReport(note *msgjson.EpochReportNote) error {
 
 	marketID := marketName(b.base, b.quote)
 	matchSummaries := b.AddRecentMatches(note.MatchSummary, note.EndStamp)
-	if note.MatchSummary != nil && len(note.MatchSummary) > 0 {
+	if len(note.MatchSummary) > 0 {
 		b.send(&BookUpdate{
 			Action:   EpochMatchSummary,
 			MarketID: marketID,

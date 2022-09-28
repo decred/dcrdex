@@ -2589,7 +2589,7 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 		log.Errorf("Error updating API data collector: %v", err)
 	}
 
-	matchReport := make([][2]int64, 0, len(matches)) // allocation almost certainly too low, but a good starting point.
+	matchReport := make([][2]int64, 0, len(matches))
 	var lastRate uint64
 	var lastSide bool
 	for _, matchSet := range matches {
