@@ -87,8 +87,6 @@ export class NewWalletForm {
     // WalletConfigForm will set the global app variable.
     this.subform = new WalletConfigForm(page.walletSettings, true)
 
-    Doc.bind(this.subform.showOther, 'click', () => Doc.show(page.walletSettingsHeader))
-
     bind(form, page.submitAdd, () => this.submit())
     bind(form, page.oneBttn, () => this.submit())
 
@@ -316,6 +314,8 @@ export class NewWalletForm {
     const noWalletPWNeeded = walletDef.seeded || Boolean(this.current.asset.token)
     if (appPwCached && noWalletPWNeeded) {
       Doc.show(page.oneBttnBox)
+      // no required configuration for wallet.
+      Doc.hide(page.walletSettingsHeader)
     } else if (noWalletPWNeeded) {
       Doc.show(page.auth)
       page.newWalletPass.value = ''
@@ -335,7 +335,7 @@ export class NewWalletForm {
       })
     } else this.subform.update(configOpts, {})
 
-    if (this.subform.dynamicOpts.children.length) Doc.show(page.walletSettingsHeader)
+    if (this.subform.dynamicOpts.attributes.length) Doc.show(page.walletSettingsHeader)
     else Doc.hide(page.walletSettingsHeader)
     // A seeded or token wallet is internal to the dex client and as such does
     // not have an external config file to select.
