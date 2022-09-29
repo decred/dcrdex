@@ -78,6 +78,9 @@ type combinedRPCClient struct {
 }
 
 type provider struct {
+	// host is the domain and tld of the provider, and is used as a identifier
+	// in logs and as a unique, path- and subdomaion-independent ID for e.g. map
+	// keys.
 	host    string
 	ec      *combinedRPCClient
 	ws      bool
@@ -326,13 +329,22 @@ func newMultiRPCClient(dir string, endpoints []string, log dex.Logger, cfg *para
 	return m, nil
 }
 
-// connectProviders attempts to connnect to the list of endpoints, returning a
-// list of providers that were succesfully connected. It is not an error for
-// a connection to fail. The caller can infer failed connections from the
-// length and contents of the returned provider list.
+// connectProviders attempts to connect to the list of endpoints, returning a
+// list of providers that were successfully connected. It is not an error for a
+// connection to fail. The caller can infer failed connections from the length
+// and contents of the returned provider list.
 func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, chainID *big.Int) ([]*provider, error) {
 	providers := make([]*provider, 0, len(endpoints))
 	var success bool
+
+	defer func() {
+		if !success {
+			for _, p := range providers {
+				p.ec.Close()
+			}
+		}
+	}()
+
 	for _, endpoint := range endpoints {
 		// First try to get a websocket connection. Websockets have a header
 		// feed, so are much preferred to http connections. So much so, that
@@ -359,18 +371,20 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 			default:
 				return nil, fmt.Errorf("unknown scheme for endpoint %q: %q", endpoint, wsURL.Scheme)
 			}
+			replaced := ogScheme != wsURL.Scheme
 
 			// Handle known paths.
 			switch {
 			case strings.Contains(wsURL.String(), "infura.io/v3"):
-				wsURL.Path = "/ws" + wsURL.Path
+				if replaced {
+					wsURL.Path = "/ws" + wsURL.Path
+				}
 			case strings.Contains(wsURL.Host, "rpc.rivet.cloud"):
+				// subdomain contains API key, so can't simply replace.
 				wsURL.Host = strings.Replace(wsURL.Host, ".rpc.", ".ws.", 1)
-				host = "rivet.cloud" // subdomain contains api key
-				// Alchemy is just a protocol change
+				host = "rivet.cloud"
 			}
 
-			replaced := ogScheme != wsURL.Scheme
 			rpcClient, err = rpc.DialWebsocket(ctx, wsURL.String(), "")
 			if err == nil {
 				ec = ethclient.NewClient(rpcClient)
@@ -393,7 +407,8 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 				}
 			}
 		}
-		// Weren't able to get a websocket connection. Try HTTP now.
+		// Weren't able to get a websocket connection. Try HTTP now. Dial does
+		// path discrimination, so I won't even try to validate the protocol.
 		if ec == nil {
 			var err error
 			rpcClient, err = rpc.Dial(endpoint)
@@ -402,12 +417,6 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 			}
 			ec = ethclient.NewClient(rpcClient)
 		}
-
-		defer func() {
-			if !success {
-				ec.Close()
-			}
-		}()
 
 		// Get chain ID.
 		reportedChainID, err := ec.ChainID(ctx)
@@ -1109,35 +1118,46 @@ func (m *multiRPCClient) SubscribeFilterLogs(ctx context.Context, query ethereum
 	})
 }
 
-var compliantProviders = []string{
-	"linkpool.io",
-	"mewapi.io",
-	"flashbots.net",
-	"mycryptoapi.com",
-	"runonflux.io",
-	"infura.io",
-	"rivet.cloud",
-	"alchemy.com",
+const (
+	// Compliant providers
+	providerIPC         = "IPC"
+	providerLinkPool    = "linkpool.io"
+	providerMewAPI      = "mewapi.io"
+	providerFlashBots   = "flashbots.net"
+	providerMyCryptoAPI = "mycryptoapi.com"
+	providerRunOnFlux   = "runonflux.io"
+	providerInfura      = "infura.io"
+	providerRivetCloud  = "rivet.cloud"
+	providerAlchemy     = "alchemy.com"
+
+	// Non-compliant providers
+	providerCloudflareETH = "cloudflare-eth.com" // "SuggestGasTipCap" error: Method not found
+	providerAnkr          = "ankr.com"           // "SyncProgress" error: the method eth_syncing does not exist/is not available
+)
+
+var compliantProviders = map[string]bool{
+	providerLinkPool:    true,
+	providerMewAPI:      true,
+	providerFlashBots:   true,
+	providerMyCryptoAPI: true,
+	providerRunOnFlux:   true,
+	providerInfura:      true,
+	providerRivetCloud:  true,
+	providerAlchemy:     true,
 }
 
-var nonCompliantProviders = []string{
-	"cloudflare-eth.com", // "SuggestGasTipCap" error: Method not found
-	"ankr.com",           // "SyncProgress" error: the method eth_syncing does not exist/is not available
+var nonCompliantProviders = map[string]bool{
+	providerCloudflareETH: true,
+	providerAnkr:          true,
 }
 
 func providerIsCompliant(addr string) (known, compliant bool) {
 	addr = domain(addr)
-	for _, host := range compliantProviders {
-		if addr == host {
-			return true, true
-		}
+	if _, known = compliantProviders[addr]; known {
+		return true, true
 	}
-	for _, host := range nonCompliantProviders {
-		if addr == host {
-			return true, false
-		}
-	}
-	return false, false
+	_, known = compliantProviders[addr]
+	return known, false
 }
 
 type rpcTest struct {
@@ -1150,9 +1170,10 @@ type rpcTest struct {
 func newCompatibilityTests(ctx context.Context, cb bind.ContractBackend, log slog.Logger) []*rpcTest {
 	var (
 		// Vitalik's address from https://twitter.com/VitalikButerin/status/1050126908589887488
-		mainnetAddr   = common.HexToAddress("0xab5801a7d398351b8be11c439e05c5b3259aec9b")
-		mainnetUSDC   = common.HexToAddress("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48")
-		mainnetTxHash = common.HexToHash("0xea1a717af9fad5702f189d6f760bb9a5d6861b4ee915976fe7732c0c95cd8a0e")
+		mainnetAddr      = common.HexToAddress("0xab5801a7d398351b8be11c439e05c5b3259aec9b")
+		mainnetUSDC      = common.HexToAddress("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48")
+		mainnetTxHash    = common.HexToHash("0xea1a717af9fad5702f189d6f760bb9a5d6861b4ee915976fe7732c0c95cd8a0e")
+		mainnetBlockHash = common.HexToHash("0x44ebd6f66b4fd546bccdd700869f6a433ef9a47e296a594fa474228f86eeb353")
 	)
 	if log == nil { // Logging detail is for testing.
 		log = slog.Disabled
@@ -1162,6 +1183,13 @@ func newCompatibilityTests(ctx context.Context, cb bind.ContractBackend, log slo
 			name: "HeaderByNumber",
 			f: func(p *provider) error {
 				_, err := p.ec.HeaderByNumber(ctx, nil /* latest */)
+				return err
+			},
+		},
+		{
+			name: "HeaderByHash",
+			f: func(p *provider) error {
+				_, err := p.ec.HeaderByHash(ctx, mainnetBlockHash)
 				return err
 			},
 		},
@@ -1282,6 +1310,10 @@ func domain(host string) string {
 	return parts[n-2] + "." + parts[n-1]
 }
 
+// checkProvidersCompliance verifies that a provider supports the API that DEX
+// requires by sending a series of requests and verfiying the responses. If a
+// provider is found to be compliant, their domain name is added to a list and
+// stored in a file on disk, so that future checks can be short-circuited.
 func checkProvidersCompliance(ctx context.Context, walletDir string, providers []*provider, log dex.Logger) error {
 	var compliantProviders map[string]bool
 	path := filepath.Join(walletDir, "compliant-providers.json")

@@ -129,7 +129,7 @@ func TestWSTxLogs(t *testing.T) {
 	}
 }
 
-func TestMultiRPCClient(t *testing.T) {
+func TestSimnetMultiRPCClient(t *testing.T) {
 	endpoints := []string{
 		"ws://localhost:" + deltaWSPort,
 		"http://localhost:" + deltaHTTPPort,
@@ -315,12 +315,20 @@ func TestFreeServers(t *testing.T) {
 		})
 	}
 
+	fails, passes := make([]string, 0), make([]string, 0)
 	for _, endpoint := range freeServers {
 		if err := runTest(endpoint); err != nil {
+			fails = append(fails, endpoint)
 			fmt.Printf("XXXX %q FAILED : %v \n", endpoint, err)
 		} else {
-			fmt.Printf("!!!! %q PASSED \n", endpoint)
+			passes = append(passes, endpoint)
 		}
+	}
+	for _, pass := range passes {
+		fmt.Printf("!!!! %q PASSED \n", pass)
+	}
+	for _, fail := range fails {
+		fmt.Printf("XXXX %q FAILED \n", fail)
 	}
 }
 
