@@ -73,7 +73,6 @@ export default class OrderPage extends BasePage {
       this.showAccelerateForm()
     })
 
-    this.showAccelerationButton()
     const success = () => {
       this.refreshOnPopupClose = true
     }
@@ -122,6 +121,7 @@ export default class OrderPage extends BasePage {
     this.page.mktBaseSymbol.replaceWith(Doc.symbolize(ord.baseSymbol))
     this.page.mktQuoteSymbol.replaceWith(Doc.symbolize(ord.quoteSymbol))
 
+    this.setAccelerationButtonVis()
     this.showMatchCards()
   }
 
@@ -377,15 +377,14 @@ export default class OrderPage extends BasePage {
   }
 
   /*
-   * showAccelerationButton shows the acceleration button if the order can
+   * setAccelerationButtonVis shows the acceleration button if the order can
    * be accelerated.
    */
-  showAccelerationButton () {
+  setAccelerationButtonVis () {
     const order = this.order
     if (!order) return
     const page = this.page
-    if (app().canAccelerateOrder(order)) Doc.show(page.accelerateBttn, page.actionsLabel)
-    else Doc.hide(page.accelerateBttn, page.actionsLabel)
+    Doc.setVis(app().canAccelerateOrder(order), page.accelerateBttn, page.actionsLabel)
   }
 
   /* showAccelerateForm shows a form to accelerate an order */
@@ -409,13 +408,14 @@ export default class OrderPage extends BasePage {
     if (bttn && order.status > OrderUtil.StatusBooked) Doc.hide(bttn)
     page.status.textContent = OrderUtil.statusString(order)
     for (const m of order.matches || []) this.processMatch(m)
-    this.showAccelerationButton()
+    this.setAccelerationButtonVis()
   }
 
   /* handleMatchNote handles a 'match' notification. */
   handleMatchNote (note: MatchNote) {
     if (note.orderID !== this.orderID) return
     this.processMatch(note.match)
+    this.setAccelerationButtonVis()
   }
 
   /*
