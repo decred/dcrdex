@@ -244,6 +244,6 @@ const (
 		WHERE oid = $1
 		RETURNING oid, account_id, client_time, server_time, commit, target_order, %d, epoch_idx, epoch_dur, epoch_gap, preimage
 	)
-	INSERT INTO %s
+	INSERT INTO %s (oid, account_id, client_time, server_time, commit, target_order, status, epoch_idx, epoch_dur, epoch_gap, preimage)
 	SELECT * FROM moved;`
 )
