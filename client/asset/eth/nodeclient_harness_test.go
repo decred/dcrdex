@@ -27,13 +27,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"math/big"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -108,7 +108,7 @@ var (
 	// specify it in the testnet-credentials.json file.
 	rpcNode string
 	// useRPC can be set to true to test the RPC clients.
-	useRPC = false
+	useRPC bool
 
 	// isTestnet can be set to true to perform tests on the goerli testnet.
 	// May need some setup including sending testnet coins to the addresses
@@ -119,7 +119,7 @@ var (
 	// Only for non-token tests, so run with --run=TestGroupName.
 	//
 	// TODO: Make this also work for token tests.
-	isTestnet = false
+	isTestnet bool
 
 	// For testnet credentials, use a JSON file formatted like...
 	// {
@@ -216,7 +216,7 @@ func waitForMinedRPC() error {
 // waitForMined will multiply the time limit by testnetSecPerBlock for
 // testnet and mine blocks when on simnet.
 func waitForMined(cl ethFetcher, nBlock int, waitTimeLimit bool) error {
-	if useRPC {
+	if isTestnet && useRPC {
 		waitForMinedRPC()
 	}
 	if !isTestnet {
@@ -598,24 +598,12 @@ func useTestnet() error {
 
 func TestMain(m *testing.M) {
 	dexeth.MaybeReadSimnetAddrs()
-	targs := make(map[string]string)
-	for _, param := range strings.Split(os.Getenv("TARGS"), " ") {
-		if param == "" {
-			continue
-		}
-		var arg string
-		a := strings.Split(param, "=")
-		if len(a) > 1 {
-			param = a[0]
-			arg = strings.Join(a[1:], "=")
-		}
-		targs[strings.TrimLeft(param, "-")] = arg
-	}
 
-	if _, exists := targs["rpc"]; exists {
-		useRPC = true
-	}
-	if _, exists := targs["testnet"]; exists {
+	flag.BoolVar(&isTestnet, "testnet", false, "use testnet")
+	flag.BoolVar(&useRPC, "rpc", false, "use RPC")
+	flag.Parse()
+
+	if isTestnet {
 		if err := useTestnet(); err != nil {
 			fmt.Fprintf(os.Stderr, "error loading testnet: %v", err)
 			os.Exit(1)

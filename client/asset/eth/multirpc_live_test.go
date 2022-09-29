@@ -315,11 +315,10 @@ func TestFreeServers(t *testing.T) {
 		})
 	}
 
-	fails, passes := make([]string, 0), make([]string, 0)
+	passes, fails := make([]string, 0), make(map[string]error, 0)
 	for _, endpoint := range freeServers {
 		if err := runTest(endpoint); err != nil {
-			fails = append(fails, endpoint)
-			fmt.Printf("XXXX %q FAILED : %v \n", endpoint, err)
+			fails[endpoint] = err
 		} else {
 			passes = append(passes, endpoint)
 		}
@@ -327,8 +326,8 @@ func TestFreeServers(t *testing.T) {
 	for _, pass := range passes {
 		fmt.Printf("!!!! %q PASSED \n", pass)
 	}
-	for _, fail := range fails {
-		fmt.Printf("XXXX %q FAILED \n", fail)
+	for endpoint, err := range fails {
+		fmt.Printf("XXXX %q FAILED : %v \n", endpoint, err)
 	}
 }
 
