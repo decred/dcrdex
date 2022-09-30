@@ -28,14 +28,14 @@ const (
 	methodGetUnusedAddress = "getunusedaddress"
 	methodGetTransaction   = "gettransaction"
 	methodListUnspent      = "listunspent"
-	methodGetPrivateKeys   = "getprivatekeys"
-	methodPayTo            = "payto"
+	methodGetPrivateKeys   = "getprivatekeys" // requires password for protected wallets
+	methodPayTo            = "payto"          // requires password for protected wallets
 	methodAddLocalTx       = "addtransaction"
 	methodRemoveLocalTx    = "removelocaltx"
 	methodGetTxStatus      = "get_tx_status" // only wallet txns
 	methodGetBalance       = "getbalance"
 	methodIsMine           = "ismine"
-	methodSignTransaction  = "signtransaction"
+	methodSignTransaction  = "signtransaction" // requires password for protected wallets
 	methodFreezeUTXO       = "freeze_utxo"
 	methodUnfreezeUTXO     = "unfreeze_utxo"
 )
@@ -312,7 +312,7 @@ type paytoReq struct {
 	NoCheck        bool   `json:"nocheck"`
 	Unsigned       bool   `json:"unsigned"` // unsigned returns a base64 psbt thing
 	RBF            bool   `json:"rbf"`      // default to false
-	Password       string `json:"password"`
+	Password       string `json:"password,omitempty"`
 	LockTime       *int64 `json:"locktime,omitempty"`
 	AddTransaction bool   `json:"addtransaction"`
 	Wallet         string `json:"wallet,omitempty"`
@@ -409,7 +409,7 @@ func (wc *WalletClient) Sweep(ctx context.Context, walletPass string, addr strin
 
 type signTransactionArgs struct {
 	Tx   string `json:"tx"`
-	Pass string `json:"password"`
+	Pass string `json:"password,omitempty"`
 	// 4.0.9 has privkey in this request, but 4.2 does not since it has a
 	// signtransaction_with_privkey request. (this RPC should not use positional
 	// arguments)
@@ -476,7 +476,7 @@ func (wc *WalletClient) RemoveLocalTx(ctx context.Context, txid string) error {
 
 type getPrivKeyArgs struct {
 	Addr   string `json:"address"`
-	Pass   string `json:"password"`
+	Pass   string `json:"password,omitempty"`
 	Wallet string `json:"wallet,omitempty"`
 }
 
