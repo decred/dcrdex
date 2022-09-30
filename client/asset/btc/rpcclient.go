@@ -322,21 +322,6 @@ func (wc *rpcClient) getTxOutput(txHash *chainhash.Hash, index uint32) (*btcjson
 		&res)
 }
 
-// locked returns the wallet's lock state.
-func (wc *rpcClient) locked() bool {
-	walletInfo, err := wc.GetWalletInfo()
-	if err != nil {
-		wc.log.Errorf("GetWalletInfo error: %w", err)
-		return false
-	}
-	if walletInfo.UnlockedUntil == nil {
-		// This wallet is not encrypted.
-		return false
-	}
-
-	return time.Unix(*walletInfo.UnlockedUntil, 0).Before(time.Now())
-}
-
 func (wc *rpcClient) callHashGetter(method string, args anylist) (*chainhash.Hash, error) {
 	var txid string
 	err := wc.call(method, args, &txid)
@@ -768,6 +753,21 @@ func (wc *rpcClient) walletUnlock(pw []byte) error {
 // walletLock locks the wallet.
 func (wc *rpcClient) walletLock() error {
 	return wc.call(methodLock, nil, nil)
+}
+
+// locked returns the wallet's lock state.
+func (wc *rpcClient) locked() bool {
+	walletInfo, err := wc.GetWalletInfo()
+	if err != nil {
+		wc.log.Errorf("GetWalletInfo error: %w", err)
+		return false
+	}
+	if walletInfo.UnlockedUntil == nil {
+		// This wallet is not encrypted.
+		return false
+	}
+
+	return time.Unix(*walletInfo.UnlockedUntil, 0).Before(time.Now())
 }
 
 // sendToAddress sends the amount to the address. feeRate is in units of

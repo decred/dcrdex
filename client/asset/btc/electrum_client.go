@@ -274,6 +274,10 @@ func (ew *electrumWallet) connect(ctx context.Context, wg *sync.WaitGroup) error
 	ew.resetChain(chain)
 	ew.ctx = ctx // for requests via methods that lack a context arg
 
+	// This wallet may not be "protected", in which case we omit the password
+	// from the requests. Detect this now and flag the wallet as unlocked.
+	_ = ew.walletUnlock([]byte{})
+
 	// Start a goroutine to keep the chain client alive and on the same
 	// ElectrumX server as the external Electrum wallet if possible.
 	wg.Add(1)
@@ -895,10 +899,39 @@ func (ew *electrumWallet) pass() (pw string, unlocked bool) {
 	return ew.pw, ew.unlocked
 }
 
+func (ew *electrumWallet) testPass(pw []byte) error {
+	addr, err := ew.wallet.GetUnusedAddress(ew.ctx)
+	if err != nil {
+		return err
+	}
+	wifStr, err := ew.wallet.GetPrivateKeys(ew.ctx, string(pw), addr)
+	if err != nil {
+		// When providing a password to an unprotected wallet, and other cases,
+		// a cryptic error containing "incorrect padding" is returned.
+		if strings.Contains(strings.ToLower(err.Error()), "incorrect padding") {
+			return errors.New("incorrect password (no password required?)")
+		}
+		return fmt.Errorf("GetPrivateKeys: %v", err)
+	}
+	// That should be enough, but validate the returned keys in case they are
+	// empty or invalid.
+	if _, err = btcutil.DecodeWIF(wifStr); err != nil {
+		return fmt.Errorf("DecodeWIF: %v", err)
+	}
+	return nil
+}
+
 // walletLock locks the wallet. Part of the btc.Wallet interface.
 func (ew *electrumWallet) walletLock() error {
 	ew.pwMtx.Lock()
 	defer ew.pwMtx.Unlock()
+	if ew.pw == "" && ew.unlocked {
+		// This is an unprotected wallet (can't actually lock it). But confirm
+		// the password is still empty in case it changed externally.
+		if err := ew.testPass([]byte{}); err == nil {
+			return nil
+		} // must have changed! "lock" it!
+	}
 	ew.pw, ew.unlocked = "", false
 	return nil
 }
@@ -922,20 +955,11 @@ func (ew *electrumWallet) walletPass() string {
 // success, the password is stored and may be accessed via pass or walletPass.
 // Part of the btc.Wallet interface.
 func (ew *electrumWallet) walletUnlock(pw []byte) error {
-	addr, err := ew.wallet.GetUnusedAddress(ew.ctx)
-	if err != nil {
-		return err
-	}
-	pass := string(pw)
-	wifStr, err := ew.wallet.GetPrivateKeys(ew.ctx, pass, addr)
-	if err != nil {
-		return err
-	} // that should be enough, but validate the returned keys in case they are empty or something
-	if _, err = btcutil.DecodeWIF(wifStr); err != nil {
+	if err := ew.testPass(pw); err != nil {
 		return err
 	}
 	ew.pwMtx.Lock()
-	ew.pw, ew.unlocked = pass, true
+	ew.pw, ew.unlocked = string(pw), true
 	ew.pwMtx.Unlock()
 	return nil
 }
