@@ -31,6 +31,7 @@ const traitLogFiler = 1 << 2
 const traitRecoverer = 1 << 5
 const traitWithdrawer = 1 << 6
 const traitRestorer = 1 << 8
+const traitTxFeeEstimator = 1 << 10
 const traitsExtraOpts = traitLogFiler & traitRecoverer & traitRestorer & traitRescanner
 
 const activeOrdersErrCode = 35
@@ -179,13 +180,10 @@ export default class WalletsPage extends BasePage {
       const asset = app().assets[this.selectedAssetID]
       Doc.hide(page.validAddr)
       page.sendAddr.classList.remove('invalid')
-      if (!asset || page.sendAddr.value === '') return
-      const addrCheck = {
-        addr: page.sendAddr.value,
-        assetID: asset.id
-      }
-      const res = await postJSON('/api/validateaddress', addrCheck)
-      if (app().checkResponse(res)) Doc.show(page.validAddr)
+      const addr = page.sendAddr.value || ''
+      if (!asset || addr === '') return
+      const valid = await this.validateSendAddress(addr, asset.id)
+      if (valid) Doc.show(page.validAddr)
       else page.sendAddr.classList.add('invalid')
     })
 
@@ -227,73 +225,74 @@ export default class WalletsPage extends BasePage {
   // send form.
   async stepSend () {
     const page = this.page
-    Doc.hide(page.vSendErr, page.sendErr)
+    Doc.hide(page.vSendErr, page.sendErr, page.vSendEstimates, page.txFeeNotAvailable)
     const assetID = parseInt(page.sendForm.dataset.assetID || '')
     const subtract = page.subtractCheckBox.checked || false
     const conversionFactor = app().unitInfo(assetID).conventional.conversionFactor
     const value = Math.round(parseFloat(page.sendAmt.value || '') * conversionFactor)
-    const wallet = app().walletMap[assetID]
+    const addr = page.sendAddr.value || ''
+    if (addr === '') return Doc.showFormError(page.sendErr, intl.prep(intl.ID_INVALID_ADDRESS_MSG, { address: addr }))
+    const { wallet, unitInfo: ui, symbol } = app().assets[assetID]
 
-    const open = {
-      addr: page.sendAddr.value,
-      assetID: assetID,
-      subtract: subtract,
-      value: value
-    }
-
-    const loaded = app().loading(page.sendForm)
-    const res = await postJSON('/api/txfee', open)
-    loaded()
+    // txfee will not be available if wallet is not a fee estimator or the
+    // request failed.
     let txfee = 0
-    if (!app().checkResponse(res)) {
-      if (res.msg !== 'wallet does not support options') {
-        Doc.showFormError(page.sendErr, res.msg)
-        return
-      } else {
-        // This is a work around for wallets like ZEC, which does not support
-        // subtract for fee estimations. We still want to ensure user address is
-        // valid before proceeding to send confirm form.
-        const resp = await postJSON('/api/validateaddress', { addr: page.sendAddr.value, assetID: assetID })
-        if (!app().checkResponse(resp)) {
-          Doc.showFormError(page.sendErr, intl.prep(intl.ID_INVALID_ADDRESS_MSG, { address: page.sendAddr.value || '' }))
-          return
-        }
+    if ((wallet.traits & traitTxFeeEstimator) !== 0) {
+      const open = {
+        addr: page.sendAddr.value,
+        assetID: assetID,
+        subtract: subtract,
+        value: value
+      }
+
+      const loaded = app().loading(page.sendForm)
+      const res = await postJSON('/api/txfee', open)
+      loaded()
+      if (!app().checkResponse(res)) {
+        page.txFeeNotAvailable.dataset.tooltip = intl.prep(intl.ID_TXFEE_ERR_MSG, { err: res.msg })
+        Doc.show(page.txFeeNotAvailable)
+        // We still want to ensure user address is valid before proceeding to send
+        // confirm form if there's an error while calculating the transaction fee.
+        const valid = await this.validateSendAddress(addr, assetID)
+        if (!valid) return Doc.showFormError(page.sendErr, intl.prep(intl.ID_INVALID_ADDRESS_MSG, { address: addr || '' }))
+      } else if (res.ok) {
+        if (!res.validaddress) return Doc.showFormError(page.sendErr, intl.prep(intl.ID_INVALID_ADDRESS_MSG, { address: page.sendAddr.value || '' }))
+        txfee = res.txfee
+        Doc.show(page.vSendEstimates)
       }
     } else {
-      if (!res.validaddress && res.ok) {
-        Doc.showFormError(page.sendErr, intl.prep(intl.ID_INVALID_ADDRESS_MSG, { address: page.sendAddr.value || '' }))
-        return
-      }
-      txfee = res.txfee
+      // Validate only the send address for assets that are not fee estimators.
+      const valid = await this.validateSendAddress(addr, assetID)
+      if (!valid) return Doc.showFormError(page.sendErr, intl.prep(intl.ID_INVALID_ADDRESS_MSG, { address: addr || '' }))
     }
 
-    page.vSendSymbol.textContent = wallet.symbol.toUpperCase()
-    page.vSendLogo.src = Doc.logoPath(wallet.symbol)
+    page.vSendSymbol.textContent = symbol.toUpperCase()
+    page.vSendLogo.src = Doc.logoPath(symbol)
 
-    page.vSendFee.textContent = Doc.formatFullPrecision(txfee, app().unitInfo(assetID))
+    page.vSendFee.textContent = Doc.formatFullPrecision(txfee, ui)
     this.showFiatValue(assetID, txfee, page.vSendFeeFiat)
-    page.vSendDestinationAmt.textContent = Doc.formatFullPrecision(value - txfee, app().unitInfo(assetID))
-    page.vTotalSend.textContent = Doc.formatFullPrecision(value, app().unitInfo(assetID))
+    page.vSendDestinationAmt.textContent = Doc.formatFullPrecision(value - txfee, ui)
+    page.vTotalSend.textContent = Doc.formatFullPrecision(value, ui)
     this.showFiatValue(assetID, value, page.vTotalSendFiat)
     page.vSendAddr.textContent = page.sendAddr.value || ''
     const bal = wallet.balance.available - value
-    page.balanceAfterSend.textContent = Doc.formatFullPrecision(bal, app().unitInfo(assetID))
+    page.balanceAfterSend.textContent = Doc.formatFullPrecision(bal, ui)
     this.showFiatValue(assetID, bal, page.balanceAfterSendFiat)
     Doc.show(page.approxSign)
     if (!subtract) {
       Doc.hide(page.approxSign)
-      page.vSendDestinationAmt.textContent = Doc.formatFullPrecision(value, app().unitInfo(assetID))
+      page.vSendDestinationAmt.textContent = Doc.formatFullPrecision(value, ui)
       const totalSend = value + txfee
-      page.vTotalSend.textContent = Doc.formatFullPrecision(totalSend, app().unitInfo(assetID))
+      page.vTotalSend.textContent = Doc.formatFullPrecision(totalSend, ui)
       this.showFiatValue(assetID, value, page.vTotalSendFiat)
       const bal = wallet.balance.available - totalSend
       // handle edge cases where bal is not enough to cover totalSend.
       // we don't want a minus display of user bal.
       if (bal <= 0) {
-        page.balanceAfterSend.textContent = Doc.formatFullPrecision(0, app().unitInfo(assetID))
+        page.balanceAfterSend.textContent = Doc.formatFullPrecision(0, ui)
         this.showFiatValue(assetID, 0, page.balanceAfterSendFiat)
       } else {
-        page.balanceAfterSend.textContent = Doc.formatFullPrecision(bal, app().unitInfo(assetID))
+        page.balanceAfterSend.textContent = Doc.formatFullPrecision(bal, ui)
         this.showFiatValue(assetID, bal, page.balanceAfterSendFiat)
       }
     }
@@ -306,6 +305,14 @@ export default class WalletsPage extends BasePage {
     const page = this.page
     Doc.hide(page.vSendForm, page.sendErr)
     await this.showForm(page.sendForm)
+  }
+
+  /*
+   * validateSendAddress validates the provided address for an asset.
+   */
+  async validateSendAddress (addr: string, assetID: number): Promise<boolean> {
+    const resp = await postJSON('/api/validateaddress', { addr: addr, assetID: assetID })
+    return app().checkResponse(resp)
   }
 
   /*
@@ -811,7 +818,7 @@ export default class WalletsPage extends BasePage {
     // page.sendFee.textContent = wallet.feerate
     // page.sendUnit.textContent = wallet.units
 
-    if (wallet.balance.available > 0) {
+    if (wallet.balance.available > 0 && (wallet.traits & traitTxFeeEstimator) !== 0) {
       const feeReq = {
         assetID: assetID,
         subtract: isWithdrawer,
@@ -821,11 +828,7 @@ export default class WalletsPage extends BasePage {
       const loaded = app().loading(this.body)
       const res = await postJSON('/api/txfee', feeReq)
       loaded()
-      if (!app().checkResponse(res)) {
-        // This is a work around for wallets like ZEC, which does not support
-        // subtract for fee estimations.
-        if (res.msg !== 'wallet does not support options') Doc.showFormError(page.sendErr, res.msg)
-      } else {
+      if (app().checkResponse(res)) {
         const canSend = wallet.balance.available - res.txfee
         this.maxSend = canSend
         page.maxSend.textContent = Doc.formatFullPrecision(canSend, ui)

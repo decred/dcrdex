@@ -67,6 +67,8 @@ export const ID_FEE_BALANCE = 'FEE_BALANCE'
 export const ID_CANDLES_LOADING = 'CANDLES_LOADING'
 export const ID_DEPTH_LOADING = 'DEPTH_LOADING'
 export const ID_INVALID_ADDRESS_MSG = 'INVALID_ADDRESS_MSG'
+export const ID_TXFEE_UNSUPPORTED = 'TXFEE_UNSUPPORTED'
+export const ID_TXFEE_ERR_MSG = 'TXFEE_ERR_MSG'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -135,7 +137,9 @@ export const enUS: Locale = {
   [ID_FEE_BALANCE]: 'fee balance',
   [ID_CANDLES_LOADING]: 'waiting for candlesticks',
   [ID_DEPTH_LOADING]: 'retrieving depth data',
-  [ID_INVALID_ADDRESS_MSG]: 'Invalid address: {{ address }}'
+  [ID_INVALID_ADDRESS_MSG]: 'invalid address: {{ address }}',
+  [ID_TXFEE_UNSUPPORTED]: 'fee estimation is not supported for this wallet type',
+  [ID_TXFEE_ERR_MSG]: 'fee estimation failed: {{ err }}'
 }
 
 export const ptBR: Locale = {

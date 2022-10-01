@@ -231,7 +231,7 @@
       <div class="mt-3">
         <label for="sendAddr" class="form-label ps-1 mb-1">[[[Address]]]</label>
         <div class="d-flex">
-         <input type="text" class="form-control col-1 select" id="sendAddr">
+         <input type="text" class="form-control col-1 select" id="sendAddr" spellcheck="false">
          <span id="validAddr" class="ico-check mx-2 pt-2 d-hide"></span>
         </div>
       </div>
@@ -292,25 +292,30 @@
       <div class="text-center">[[[to]]]</div>
       <div id="vSendAddr" class="text-center font-weight-bold"></div>
       <hr class="dashed mt-2">
-      <div class="d-flex align-items-center justify-content-between">[[[estimated_fee]]]: 
-       <span id="vSendFee"></span>
+      <div id="vSendEstimates" class="d-hide">
+        <div class="d-flex align-items-center justify-content-between">[[[estimated_fee]]]: 
+         <span id="vSendFee"></span>
+        </div>
+        <span class="d-flex d-hide justify-content-end grey fs14">
+         ~<span id="vSendFeeFiat" class="mx-1"></span>USD
+        </span>
+        <hr class="dashed mt-2">
+        <div class="d-flex align-items-center justify-content-between">[[[estimated_total_spend]]]: 
+         <span id="vTotalSend"></span>
+        </div>
+        <span class="d-flex d-hide justify-content-end grey fs14">
+         ~<span id="vTotalSendFiat" class="mx-1"></span>USD
+        </span>
+        <div class="d-flex align-items-center justify-content-between">[[[estimated_balance]]]: 
+         <span id="balanceAfterSend"></span>
+        </div>
+        <span class="d-flex d-hide justify-content-end grey fs14">
+         ~<span id="balanceAfterSendFiat" class="mx-1"></span>USD
+        </span>
       </div>
-      <span class="d-flex d-hide justify-content-end grey fs14">
-       ~<span id="vSendFeeFiat" class="mx-1"></span>USD
-      </span>
-      <hr class="dashed mt-2">
-      <div class="d-flex align-items-center justify-content-between">[[[estimated_total_spend]]]: 
-       <span id="vTotalSend"></span>
+      <div id="txFeeNotAvailable" class="d-hide" data-tooltip="Fee unavailable">[[[txfee_not_available]]]
+        <span class="ico-info errcolor"></span>
       </div>
-      <span class="d-flex d-hide justify-content-end grey fs14">
-       ~<span id="vTotalSendFiat" class="mx-1"></span>USD
-      </span>
-      <div class="d-flex align-items-center justify-content-between">[[[estimated_balance]]]: 
-       <span id="balanceAfterSend"></span>
-      </div>
-      <span class="d-flex d-hide justify-content-end grey fs14">
-       ~<span id="balanceAfterSendFiat" class="mx-1"></span>USD
-      </span>
       <hr class="dashed my-4">
        <div class="fs16 px-4 text-center">[[[Authorize the transfer with your app password.]]]</div>
         <div class="input-group mt-2">
