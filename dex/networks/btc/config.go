@@ -27,10 +27,6 @@ var RPCPorts = NetPorts{
 	Simnet:  "18443",
 }
 
-const (
-	defaultHost = "localhost"
-)
-
 // RPCConfig holds the parameters needed to initialize an RPC connection to a btc
 // wallet or backend. Default values are used for RPCBind and/or RPCPort if not
 // set.
@@ -50,7 +46,6 @@ func CheckRPCConfig(cfg *RPCConfig, name string, network dex.Network, ports NetP
 		return fmt.Errorf("no rpcpassword set in %q config file", name)
 	}
 
-	host := defaultHost
 	var port string
 	switch network {
 	case dex.Mainnet:
@@ -63,29 +58,33 @@ func CheckRPCConfig(cfg *RPCConfig, name string, network dex.Network, ports NetP
 		return fmt.Errorf("unknown network ID %v", network)
 	}
 
-	// RPCPort overrides network default
-	if cfg.RPCPort != 0 {
-		port = strconv.Itoa(cfg.RPCPort)
+	StandardizeRPCConf(cfg, port)
+
+	return nil
+}
+
+// StandardizeRPCConf standardizes the RPCBind and RPCPort fields, and returns
+// the updated RPCBind field. defaultPort must be either an empty string or a
+// valid representation of a positive 16-bit integer.
+func StandardizeRPCConf(cfg *RPCConfig, defaultPort string) {
+	host := "127.0.0.1" // default if not in RPCBind or RPCConnect
+	port := strconv.Itoa(cfg.RPCPort)
+	if cfg.RPCPort <= 0 {
+		port = defaultPort
 	}
 
-	// If RPCBind includes a port, it takes precedence over RPCPort.
 	if cfg.RPCBind != "" {
 		h, p, err := net.SplitHostPort(cfg.RPCBind)
 		if err != nil {
 			// Will error for i.e. "localhost", but not for "localhost:" or ":1234"
-			host = cfg.RPCBind
+			host = cfg.RPCBind // use port from RPCPort
 		} else {
 			if h != "" {
 				host = h
 			}
+			// If RPCBind includes a port, it takes precedence over RPCPort.
 			if p != "" {
 				port = p
-				// Patch cfg.RPCPort for consistency with RPCBind.
-				if rpcPort, err := strconv.Atoi(port); err != nil {
-					// port was already parsed as an int by SplitHostPort, but
-					// be cautious.
-					cfg.RPCPort = rpcPort
-				}
 			}
 		}
 	}
@@ -97,10 +96,12 @@ func CheckRPCConfig(cfg *RPCConfig, name string, network dex.Network, ports NetP
 		// RPCConnect does not include port, so use what we got above.
 	}
 
-	// overwrite rpcbind to use for rpcclient connection
-	cfg.RPCBind = net.JoinHostPort(host, port)
-
-	return nil
+	if port != "" {
+		cfg.RPCBind = net.JoinHostPort(host, port)
+		cfg.RPCPort, _ = strconv.Atoi(port)
+	} else {
+		cfg.RPCBind = host
+	}
 }
 
 // SystemConfigPath will return the default config file path for bitcoin-like

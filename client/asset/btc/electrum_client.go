@@ -372,6 +372,7 @@ func (ew *electrumWallet) reconfigure(cfg *asset.WalletConfig, currentAddress st
 	if err != nil {
 		return false, fmt.Errorf("error parsing rpc wallet config: %w", err)
 	}
+	dexbtc.StandardizeRPCConf(&parsedCfg.RPCConfig.RPCConfig, "")
 
 	// Changing RPC settings is not supported without restart.
 	return parsedCfg.RPCConfig != *ew.rpcCfg, nil
