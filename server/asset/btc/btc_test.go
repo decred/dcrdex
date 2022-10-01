@@ -40,7 +40,7 @@ var (
 	testParams     = &chaincfg.MainNetParams
 	mainnetPort    = 8332
 	blockPollDelay time.Duration
-	defaultHost    = "localhost"
+	defaultHost    = "127.0.0.1"
 )
 
 func TestMain(m *testing.M) {

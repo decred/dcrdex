@@ -15,6 +15,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc/electrum"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/config"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
@@ -34,9 +35,10 @@ var _ asset.Sweeper = (*ExchangeWalletElectrum)(nil)
 // configuration, which must contain the necessary details for accessing the
 // Electrum wallet's RPC server in the WalletCFG.Settings map.
 func ElectrumWallet(cfg *BTCCloneCFG) (*ExchangeWalletElectrum, error) {
-	clientCfg, err := readRPCWalletConfig(cfg.WalletCFG.Settings, cfg.Symbol, cfg.Network, cfg.Ports)
+	clientCfg := new(RPCWalletConfig)
+	err := config.Unmapify(cfg.WalletCFG.Settings, clientCfg)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error parsing rpc wallet config: %w", err)
 	}
 
 	btc, err := newUnconnectedWallet(cfg, &clientCfg.WalletConfig)
@@ -45,6 +47,7 @@ func ElectrumWallet(cfg *BTCCloneCFG) (*ExchangeWalletElectrum, error) {
 	}
 
 	rpcCfg := &clientCfg.RPCConfig
+	dexbtc.StandardizeRPCConf(&rpcCfg.RPCConfig, "")
 	ewc := electrum.NewWalletClient(rpcCfg.RPCUser, rpcCfg.RPCPass,
 		"http://"+rpcCfg.RPCBind, rpcCfg.WalletName)
 	ew := newElectrumWallet(ewc, &electrumWalletConfig{
