@@ -335,7 +335,9 @@ export class NewWalletForm {
       })
     } else this.subform.update(configOpts, {})
 
-    if (this.subform.dynamicOpts.attributes.length) Doc.show(page.walletSettingsHeader)
+    if (this.subform.dynamicOpts.children.length || this.subform.defaultSettings.children.length) {
+        Doc.show(page.walletSettingsHeader)
+    }
     else Doc.hide(page.walletSettingsHeader)
     // A seeded or token wallet is internal to the dex client and as such does
     // not have an external config file to select.
