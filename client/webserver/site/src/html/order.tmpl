@@ -95,127 +95,107 @@
     {{- /* MATCHES */ -}}
     <div class="fs18 demi pt-4 pb-2{{if eq (len $ord.Matches) 0}} d-hide{{end}}" id="matchesLabel">[[[Matches]]]</div>
     <div class="d-flex align-items-stretch justify-content-start flex-wrap" id="matchBox">
-    {{range $match := $ord.MatchReaders}}
-      <div class="match-card" data-match-i-d="{{$match.MatchID}}">
+
+      <div class="match-card" id="matchCardTmpl">
         <div class="match-header">
           <div class="d-flex justify-content-between align-items-center">
             <span class="match-data-label ms-3">[[[Match ID]]]</span>
           </div>
-          <div class="mono mx-3 fs15">{{$match.MatchID}}</div>
+          <div class="mono mx-3 fs15" data-tmpl="matchID"></div>
         </div>
 
         <div class="row py-2">
           <div class="col-10 text-center">
-            <span class="match-data-label">[[[Status]]]</span><br>
-            <span class="fs15" data-tmpl="status">
-              {{$match.StatusString}}
-            </span>
+            <span class="match-data-label" data-tmpl="statusHdr">[[[Status]]]</span><br>
+            <span class="fs15" data-tmpl="status"></span>
           </div>
           <div class="col-14 text-center">
             <span class="match-data-label">[[[Time]]]</span><br>
-            <span class="fs15">{{$match.TimeString}}</span>
-            <span class="fs14">(<span class="fs15" data-stamp="{{$match.Stamp}}"></span> [[[ago]]])</span>
+            <span class="fs15" data-tmpl="matchTime"></span>
+            <span class="fs14">(<span class="fs15" data-tmpl="matchTimeAgo"></span> [[[ago]]])</span>
           </div>
         </div>
 
-        {{if $match.IsCancel}}
+        <div data-tmpl="cancelInfoDiv">
           <div class="text-center fs20 red">[[[Cancellation]]]</div>
-          <div class="text-center fs16">{{$match.FromQuantityString}} {{template "microIcon" $ord.FromSymbol}} ({{$match.OrderPortion}}%)</div>
-        {{else}}
-          <div class="text-center demi fs20 py-2">
-            {{$match.FromQuantityString}} {{template "microIcon" $ord.FromSymbol}}
+          <div class="text-center fs16" data-tmpl="cancelInfo">
+            <span data-tmpl="cancelAmount"></span> <img src="" class="micro-icon" data-tmpl="cancelIcon"> (<span data-tmpl="cancelOrderPortion"></span>)
+          </div>
+        </div>
+
+        <div data-tmpl="infoDiv">
+          <div class="text-center demi fs20 py-2" data-tmpl="fromToDiv">
+            <span data-tmpl="fromAmount"></span> <img src="" class="micro-icon" data-tmpl="fromIcon">
             &rarr;
-            {{$match.ToQuantityString}} {{template "microIcon" $ord.ToSymbol}}
+            <span data-tmpl="toAmount"></span> <img src="" class="micro-icon" data-tmpl="toIcon">
           </div>
 
           <div class="row py-2">
             <div class="col-10 text-center">
               <span class="match-data-label">[[[Rate]]]</span><br>
-              <span class="fs15">
-                {{$match.RateString}}
-              </span>
+              <span class="fs15" data-tmpl="rate"></span>
             </div>
             <div class="col-7 text-center">
               <span class="match-data-label">[[[Side]]]</span><br>
-              <span class="fs15">{{$match.Side}}</span>
+              <span class="fs15" data-tmpl="side"></span>
             </div>
             <div class="col-7 text-center">
               <span class="match-data-label">[[[Order Portion]]]</span><br>
-              <span class="fs15">
-                {{$match.OrderPortion}}%
+              <span class="fs15" data-tmpl="orderPortion">
+                <span data-tmpl="orderPortion"></span>
               </span>
             </div>
           </div>
-        {{end}}
 
-        <div class="pt-3">
-          {{$coin := $match.MakerSwap}}
-          <div class="px-3 pb-3 {{if not $match.ShowMakerSwap}}d-hide{{end}}" data-tmpl="makerSwap">
-            <div class="d-inline-block">
-              <div class="d-flex align-items-center justify-content-between">
-                <span class="match-data-label">1. [[[Maker Swap]]] ({{$match.MakerSwapSymbol}}, {{if $match.IsMaker}}[[[you]]]{{else}}[[[them]]]{{end}})</span>
-                <span class="match-data-label {{if not $match.InMakerSwapCast}}d-hide{{end}}" data-tmpl="makerSwapMsg">
-                  {{$match.MakerSwapConfirmString}}
-                </span>
+          <div class="pt-3">
+            <div class="px-3 pb-3" data-tmpl="makerSwap">
+              <div class="d-inline-block">
+                <div class="d-flex align-items-center justify-content-between">
+                  <span class="match-data-label">1. [[[Maker Swap]]] (<span data-tmpl="makerSwapAsset"></span>, <span data-tmpl="makerSwapYou">[[[you]]]</span><span data-tmpl="makerSwapThem">[[[them]]]</span>)</span>
+                  <span class="match-data-label" data-tmpl="makerSwapMsg"></span>
+                </div>
+                <span data-tmpl="makerSwapPending">&lt;[[[Pending]]]&gt;</span>
+                <a target="_blank" class="mono plainlink" data-tmpl="makerSwapCoin"></a>
               </div>
-              <span {{if $coin}}class="d-hide"{{end}} data-tmpl="makerSwapPending">&lt;[[[Pending]]]&gt;</span>
-              <a target="_blank" class="mono plainlink {{if not $coin}}d-hide{{end}}" data-explorer-id="{{$match.MakerSwapID}}"
-                data-explorer-coin="{{if $coin}}{{$coin.StringID}}{{end}}" data-tmpl="makerSwapCoin">{{if $coin}}{{$coin.StringID}}{{end}}</a>
             </div>
-          </div>
-          {{$coin = $match.TakerSwap}}
-          <div class="px-3 pb-3 {{if not $match.ShowTakerSwap}}d-hide{{end}}" data-tmpl="takerSwap">
-            <div class="d-inline-block">
-              <div class="d-flex align-items-center justify-content-between">
-                <span class="match-data-label">2. [[[Taker Swap]]] ({{$match.TakerSwapSymbol}}, {{if $match.IsMaker}}[[[them]]]{{else}}[[[you]]]{{end}})</span>
-                <span class="match-data-label {{if not $match.InTakerSwapCast}}d-hide{{end}}" data-tmpl="takerSwapMsg">
-                  {{$match.TakerSwapConfirmString}}
-                </span>
+            <div class="px-3 pb-3" data-tmpl="takerSwap">
+              <div class="d-inline-block">
+                <div class="d-flex align-items-center justify-content-between">
+                  <span class="match-data-label">2. [[[Taker Swap]]] (<span data-tmpl="takerSwapAsset"></span>, <span data-tmpl="takerSwapYou">[[[you]]]</span><span data-tmpl="takerSwapThem">[[[them]]]</span>)</span>
+                  <span class="match-data-label" data-tmpl="takerSwapMsg"></span>
+                </div>
+                <span data-tmpl="takerSwapPending">&lt;[[[Pending]]]&gt;</span>
+                <a target="_blank" class="mono plainlink" data-tmpl="takerSwapCoin"></a>
               </div>
-              <span {{if $coin}}class="d-hide"{{end}} data-tmpl="takerSwapPending">&lt;[[[Pending]]]&gt;</span>
-              <a target="_blank" class="mono plainlink {{if not $coin}}d-hide{{end}}" data-explorer-id="{{$match.TakerSwapID}}"
-                data-explorer-coin="{{if $coin}}{{$coin.StringID}}{{end}}" data-tmpl="takerSwapCoin">{{if $coin}}{{$coin.StringID}}{{end}}</a>
             </div>
-          </div>
-          {{$coin = $match.MakerRedeem}}
-          <div class="px-3 pb-3 {{if not $match.ShowMakerRedeem}}d-hide{{end}}" data-tmpl="makerRedeem">
-            <div class="d-inline-block">
-              <div class="d-flex align-items-center justify-content-between">
-                <span class="match-data-label">3. [[[Maker Redemption]]] ({{$match.TakerSwapSymbol}}, {{if $match.IsMaker}}[[[you]]]{{else}}[[[them]]]{{end}})</span><br>
-                <span class="match-data-label {{if not $match.ConfirmingMakerRedeem}}d-hide{{end}}" data-tmpl="makerRedeemMsg">
-                  {{$match.ConfirmRedeemString}}
-                </span>
+            <div class="px-3 pb-3" data-tmpl="makerRedeem">
+              <div class="d-inline-block">
+                <div class="d-flex align-items-center justify-content-between">
+                  <span class="match-data-label">3. [[[Maker Redemption]]] (<span data-tmpl="makerRedeemAsset"></span>, <span data-tmpl="makerRedeemYou">[[[you]]]</span><span data-tmpl="makerRedeemThem">[[[them]]]</span>)</span>
+                  <span class="match-data-label" data-tmpl="makerRedeemMsg"></span>
+                </div>
+                <span data-tmpl="makerRedeemPending">&lt;[[[Pending]]]&gt;</span>
+                <a target="_blank" class="mono plainlink" data-tmpl="makerRedeemCoin"></a>
               </div>
-              <span {{if $coin}}class="d-hide"{{end}} data-tmpl="makerRedeemPending">&lt;[[[Pending]]]&gt;</span>
-              <a target="_blank" class="mono plainlink {{if not $coin}}d-hide{{end}}" data-explorer-id="{{$match.TakerSwapID}}"
-                data-explorer-coin="{{if $coin}}{{$coin.StringID}}{{end}}" data-tmpl="makerRedeemCoin">{{if $coin}}{{$coin.StringID}}{{end}}</a>
             </div>
-          </div>
-          {{$coin = $match.TakerRedeem}}
-          <div class="px-3 pb-3 {{if not $match.ShowTakerRedeem}}d-hide{{end}}" data-tmpl="takerRedeem">
-            <div class="d-inline-block">
-              <div class="d-flex align-items-center justify-content-between">
-                <span class="match-data-label">4. [[[Taker Redemption]]] ({{$match.MakerSwapSymbol}}, {{if $match.IsMaker}}[[[them]]]{{else}}[[[you]]]{{end}})</span><br>
-                <span class="match-data-label {{if not $match.ConfirmingTakerRedeem}}d-hide{{end}}" data-tmpl="takerRedeemMsg">
-                  {{$match.ConfirmRedeemString}}
-                </span>
+            <div class="px-3 pb-3" data-tmpl="takerRedeem">
+              <div class="d-inline-block">
+                <div class="d-flex align-items-center justify-content-between">
+                  <span class="match-data-label">4. [[[Taker Redemption]]] (<span data-tmpl="takerRedeemAsset"></span>, <span data-tmpl="takerRedeemYou">[[[you]]]</span><span data-tmpl="takerRedeemThem">[[[them]]]</span>)</span>
+                  <span class="match-data-label" data-tmpl="takerRedeemMsg"></span>
+                </div>
+                <span data-tmpl="takerRedeemPending">&lt;[[[Pending]]]&gt;</span>
+                <a target="_blank" class="mono plainlink" data-tmpl="takerRedeemCoin"></a>
               </div>
-              <span {{if $coin}}class="d-hide"{{end}} data-tmpl="takerRedeemPending">&lt;[[[Pending]]]&gt;</span>
-              <a target="_blank" class="mono plainlink {{if not $coin}}d-hide{{end}}" data-explorer-id="{{$match.MakerSwapID}}"
-                data-explorer-coin="{{if $coin}}{{$coin.StringID}}{{end}}" data-tmpl="takerRedeemCoin">{{if $coin}}{{$coin.StringID}}{{end}}</a>
             </div>
-          </div>
-          {{$coin = $match.Refund}}
-          <div class="px-3 pb-3 {{if not $match.ShowRefund}}d-hide{{end}}" data-tmpl="refund">
-            <span class="match-data-label red">[[[Refund]]] ({{$ord.FromSymbol}}, [[[you]]])</span><br>
-            <span {{if $coin}}class="d-hide"{{end}} data-tmpl="refundPending">&lt;[[[Pending]]]&gt;</span>
-            <a target="_blank" class="mono plainlink red {{if not $coin}}d-hide{{end}}" data-explorer-id="{{$ord.FromID}}"
-              data-explorer-coin="{{if $coin}}{{$coin.StringID}}{{end}}" data-tmpl="refundCoin">{{if $coin}}{{$coin.StringID}}{{end}}</a>
+            <div class="px-3 pb-3" data-tmpl="refund">
+              <span class="match-data-label red">[[[Refund]]] (<span data-tmpl="refundAsset"></span>, [[[you]]])</span><br>
+              <span data-tmpl="refundPending">&lt;[[[Pending]]]&gt;</span>
+                <a target="_blank" class="mono plainlink" data-tmpl="refundCoin"></a>
+            </div>
           </div>
         </div>
-
-      </div>
-    {{end}}
+      </div>    
     </div>
 
     {{- /* FUNDING COINS */ -}}

@@ -257,6 +257,10 @@ export default class Doc {
     return `/img/coins/${symbol}.png`
   }
 
+  static bipSymbol (assetID: number): string {
+    return BipIDs[assetID]
+  }
+
   static logoPathFromID (assetID: number): string {
     return Doc.logoPath(BipIDs[assetID])
   }

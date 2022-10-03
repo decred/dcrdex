@@ -40,6 +40,8 @@ export default class OrderPage extends BasePage {
     // Find the order
     this.orderID = main.dataset.oid || ''
 
+    Doc.cleanTemplates(page.matchCardTmpl)
+
     main.querySelectorAll('[data-explorer-id]').forEach((link: PageElement) => {
       setCoinHref(link)
     })
@@ -71,7 +73,6 @@ export default class OrderPage extends BasePage {
       this.showAccelerateForm()
     })
 
-    this.showAccelerationButton()
     const success = () => {
       this.refreshOnPopupClose = true
     }
@@ -119,6 +120,9 @@ export default class OrderPage extends BasePage {
     // Swap out the dot-notation symbols with token-aware symbols.
     this.page.mktBaseSymbol.replaceWith(Doc.symbolize(ord.baseSymbol))
     this.page.mktQuoteSymbol.replaceWith(Doc.symbolize(ord.quoteSymbol))
+
+    this.setAccelerationButtonVis()
+    this.showMatchCards()
   }
 
   unload () {
@@ -131,6 +135,201 @@ export default class OrderPage extends BasePage {
     if (!app().checkResponse(res)) throw res.msg
     this.order = res.order
     return this.order
+  }
+
+  /*
+   * setImmutableMatchCardElements sets the match card elements that are never
+   * changed.
+   */
+  setImmutableMatchCardElements (matchCard: HTMLElement, match: Match) {
+    const tmpl = Doc.parseTemplate(matchCard)
+
+    tmpl.matchID.textContent = match.matchID
+
+    const time = new Date(match.stamp)
+    tmpl.matchTime.textContent = time.toLocaleTimeString('en-GB', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    })
+
+    tmpl.matchTimeAgo.dataset.stamp = match.stamp.toString()
+    tmpl.matchTimeAgo.textContent = Doc.timeSince(match.stamp)
+    this.stampers.push(tmpl.matchTimeAgo)
+
+    const orderPortion = OrderUtil.orderPortion(this.order, match)
+    const baseSymbol = Doc.bipSymbol(this.order.baseID)
+    const quoteSymbol = Doc.bipSymbol(this.order.quoteID)
+    const baseUnitInfo = app().unitInfo(this.order.baseID)
+    const quoteUnitInfo = app().unitInfo(this.order.quoteID)
+    const quoteAmount = OrderUtil.baseToQuote(match.rate, match.qty)
+
+    if (match.isCancel) {
+      Doc.show(tmpl.cancelInfoDiv)
+      Doc.hide(tmpl.infoDiv, tmpl.status, tmpl.statusHdr)
+
+      if (this.order.sell) {
+        tmpl.cancelAmount.textContent = Doc.formatCoinValue(match.qty, baseUnitInfo)
+        tmpl.cancelIcon.src = Doc.logoPathFromID(this.order.baseID)
+      } else {
+        tmpl.cancelAmount.textContent = Doc.formatCoinValue(quoteAmount, quoteUnitInfo)
+        tmpl.cancelIcon.src = Doc.logoPathFromID(this.order.quoteID)
+      }
+
+      tmpl.cancelOrderPortion.textContent = orderPortion
+
+      return
+    }
+
+    Doc.show(tmpl.infoDiv)
+    Doc.hide(tmpl.cancelInfoDiv)
+
+    tmpl.orderPortion.textContent = orderPortion
+
+    if (match.side === OrderUtil.Maker) {
+      tmpl.side.textContent = 'Maker'
+      Doc.show(
+        tmpl.makerSwapYou,
+        tmpl.makerRedeemYou,
+        tmpl.takerSwapThem,
+        tmpl.takerRedeemThem
+      )
+      Doc.hide(
+        tmpl.takerSwapYou,
+        tmpl.takerRedeemYou,
+        tmpl.makerSwapThem,
+        tmpl.makerRedeemThem
+      )
+    } else {
+      tmpl.side.textContent = 'Taker'
+      Doc.hide(
+        tmpl.makerSwapYou,
+        tmpl.makerRedeemYou,
+        tmpl.takerSwapThem,
+        tmpl.takerRedeemThem
+      )
+      Doc.show(
+        tmpl.takerSwapYou,
+        tmpl.takerRedeemYou,
+        tmpl.makerSwapThem,
+        tmpl.makerRedeemThem
+      )
+    }
+
+    if ((match.side === OrderUtil.Maker && this.order.sell) ||
+          (match.side === OrderUtil.Taker && !this.order.sell)) {
+      tmpl.makerSwapAsset.textContent = baseSymbol
+      tmpl.takerSwapAsset.textContent = quoteSymbol
+      tmpl.makerRedeemAsset.textContent = quoteSymbol
+      tmpl.takerRedeemAsset.textContent = baseSymbol
+    } else {
+      tmpl.makerSwapAsset.textContent = quoteSymbol
+      tmpl.takerSwapAsset.textContent = baseSymbol
+      tmpl.makerRedeemAsset.textContent = baseSymbol
+      tmpl.takerRedeemAsset.textContent = quoteSymbol
+    }
+
+    const rate = app().conventionalRate(this.order.baseID, this.order.quoteID, match.rate)
+    tmpl.rate.textContent = `${rate} ${baseSymbol}/${quoteSymbol}`
+
+    if (this.order.sell) {
+      tmpl.refundAsset.textContent = baseSymbol
+      tmpl.fromAmount.textContent = Doc.formatCoinValue(match.qty, baseUnitInfo)
+      tmpl.toAmount.textContent = Doc.formatCoinValue(quoteAmount, quoteUnitInfo)
+      tmpl.fromIcon.src = Doc.logoPathFromID(this.order.baseID)
+      tmpl.toIcon.src = Doc.logoPathFromID(this.order.quoteID)
+    } else {
+      tmpl.refundAsset.textContent = quoteSymbol
+      tmpl.fromAmount.textContent = Doc.formatCoinValue(quoteAmount, quoteUnitInfo)
+      tmpl.toAmount.textContent = Doc.formatCoinValue(match.qty, baseUnitInfo)
+      tmpl.fromIcon.src = Doc.logoPathFromID(this.order.quoteID)
+      tmpl.toIcon.src = Doc.logoPathFromID(this.order.baseID)
+    }
+  }
+
+  /*
+   * setMutableMatchCardElements sets the match card elements which may get
+   * updated on each update to the match.
+   */
+  setMutableMatchCardElements (matchCard: HTMLElement, m: Match) {
+    if (m.isCancel) {
+      return
+    }
+
+    const tmpl = Doc.parseTemplate(matchCard)
+    tmpl.status.textContent = OrderUtil.matchStatusString(m)
+
+    const setCoin = (pendingName: string, linkName: string, coin: Coin) => {
+      const coinLink = tmpl[linkName]
+      const pendingSpan = tmpl[pendingName]
+      if (!coin) {
+        Doc.show(tmpl[pendingName])
+        Doc.hide(tmpl[linkName])
+        return
+      }
+      coinLink.textContent = coin.stringID
+      coinLink.dataset.explorerCoin = coin.stringID
+      setCoinHref(coinLink)
+      Doc.hide(pendingSpan)
+      Doc.show(coinLink)
+    }
+
+    setCoin('makerSwapPending', 'makerSwapCoin', makerSwapCoin(m))
+    setCoin('takerSwapPending', 'takerSwapCoin', takerSwapCoin(m))
+    setCoin('makerRedeemPending', 'makerRedeemCoin', makerRedeemCoin(m))
+    setCoin('takerRedeemPending', 'takerRedeemCoin', takerRedeemCoin(m))
+    setCoin('refundPending', 'refundCoin', m.refund)
+
+    if (m.status === OrderUtil.MakerSwapCast && !m.revoked && !m.refund) {
+      const c = makerSwapCoin(m)
+      tmpl.makerSwapMsg.textContent = confirmationString(c)
+      Doc.hide(tmpl.takerSwapMsg, tmpl.makerRedeemMsg, tmpl.takerRedeemMsg)
+      Doc.show(tmpl.makerSwapMsg)
+    } else if (m.status === OrderUtil.TakerSwapCast && !m.revoked && !m.refund) {
+      const c = takerSwapCoin(m)
+      tmpl.takerSwapMsg.textContent = confirmationString(c)
+      Doc.hide(tmpl.makerSwapMsg, tmpl.makerRedeemMsg, tmpl.takerRedeemMsg)
+      Doc.show(tmpl.takerSwapMsg)
+    } else if (inConfirmingMakerRedeem(m) && !m.revoked && !m.refund) {
+      tmpl.makerRedeemMsg.textContent = confirmationString(m.redeem)
+      Doc.hide(tmpl.makerSwapMsg, tmpl.takerSwapMsg, tmpl.takerRedeemMsg)
+      Doc.show(tmpl.makerRedeemMsg)
+    } else if (inConfirmingTakerRedeem(m) && !m.revoked && !m.refund) {
+      tmpl.takerRedeemMsg.textContent = confirmationString(m.redeem)
+      Doc.hide(tmpl.makerSwapMsg, tmpl.takerSwapMsg, tmpl.makerRedeemMsg)
+      Doc.show(tmpl.takerRedeemMsg)
+    } else {
+      Doc.hide(tmpl.makerSwapMsg, tmpl.takerSwapMsg, tmpl.makerRedeemMsg, tmpl.takerRedeemMsg)
+    }
+
+    Doc.setVis(!m.isCancel && (makerSwapCoin(m) || !m.revoked), tmpl.makerSwap)
+    Doc.setVis(!m.isCancel && (takerSwapCoin(m) || !m.revoked), tmpl.takerSwap)
+    Doc.setVis(!m.isCancel && (makerRedeemCoin(m) || !m.revoked), tmpl.makerRedeem)
+    Doc.setVis(!m.isCancel && (m.side !== OrderUtil.Maker) && (takerRedeemCoin(m) || !m.revoked), tmpl.takerRedeem)
+    Doc.setVis(!m.isCancel && (m.refund || (m.revoked && m.active)), tmpl.refund)
+  }
+
+  /*
+   * addNewMatchCard adds a new card to the list of match cards.
+   */
+  addNewMatchCard (match: Match) {
+    const page = this.page
+    const matchCard = page.matchCardTmpl.cloneNode(true) as HTMLElement
+    matchCard.dataset.matchID = match.matchID
+    this.setImmutableMatchCardElements(matchCard, match)
+    this.setMutableMatchCardElements(matchCard, match)
+    page.matchBox.appendChild(matchCard)
+  }
+
+  /*
+   * showMatchCards creates cards for each match in the order.
+   */
+  showMatchCards () {
+    const order = this.order
+    if (!order) return
+    if (!order.matches) return
+    order.matches.sort((a, b) => a.stamp - b.stamp)
+    order.matches.forEach((match) => this.addNewMatchCard(match))
   }
 
   /* showCancel shows a form to confirm submission of a cancel order. */
@@ -178,15 +377,14 @@ export default class OrderPage extends BasePage {
   }
 
   /*
-   * showAccelerationButton shows the acceleration button if the order can
+   * setAccelerationButtonVis shows the acceleration button if the order can
    * be accelerated.
    */
-  showAccelerationButton () {
+  setAccelerationButtonVis () {
     const order = this.order
     if (!order) return
     const page = this.page
-    if (app().canAccelerateOrder(order)) Doc.show(page.accelerateBttn, page.actionsLabel)
-    else Doc.hide(page.accelerateBttn, page.actionsLabel)
+    Doc.setVis(app().canAccelerateOrder(order), page.accelerateBttn, page.actionsLabel)
   }
 
   /* showAccelerateForm shows a form to accelerate an order */
@@ -210,13 +408,14 @@ export default class OrderPage extends BasePage {
     if (bttn && order.status > OrderUtil.StatusBooked) Doc.hide(bttn)
     page.status.textContent = OrderUtil.statusString(order)
     for (const m of order.matches || []) this.processMatch(m)
-    this.showAccelerationButton()
+    this.setAccelerationButtonVis()
   }
 
   /* handleMatchNote handles a 'match' notification. */
   handleMatchNote (note: MatchNote) {
     if (note.orderID !== this.orderID) return
     this.processMatch(note.match)
+    this.setAccelerationButtonVis()
   }
 
   /*
@@ -231,84 +430,11 @@ export default class OrderPage extends BasePage {
         break
       }
     }
-    if (!card) {
-      // TO DO: Create a new card from template.
-      return
-    }
-
-    const setCoin = (pendingName: string, linkName: string, coin: Coin) => {
-      if (!card) return // Ugh
-      const coinLink = Doc.tmplElement(card, linkName)
-      const pendingSpan = Doc.tmplElement(card, pendingName)
-      if (!coin) {
-        Doc.show(pendingSpan)
-        Doc.hide(coinLink)
-        return
-      }
-      coinLink.textContent = coin.stringID
-      coinLink.dataset.explorerCoin = coin.stringID
-      setCoinHref(coinLink)
-      Doc.hide(pendingSpan)
-      Doc.show(coinLink)
-    }
-
-    setCoin('makerSwapPending', 'makerSwapCoin', makerSwapCoin(m))
-    setCoin('takerSwapPending', 'takerSwapCoin', takerSwapCoin(m))
-    setCoin('makerRedeemPending', 'makerRedeemCoin', makerRedeemCoin(m))
-    setCoin('takerRedeemPending', 'takerRedeemCoin', takerRedeemCoin(m))
-    setCoin('refundPending', 'refundCoin', m.refund)
-
-    const makerSwapSpan = Doc.tmplElement(card, 'makerSwapMsg')
-    const takerSwapSpan = Doc.tmplElement(card, 'takerSwapMsg')
-    const makerRedeemSpan = Doc.tmplElement(card, 'makerRedeemMsg')
-    const takerRedeemSpan = Doc.tmplElement(card, 'takerRedeemMsg')
-
-    if (m.status === OrderUtil.MakerSwapCast && !m.revoked && !m.refund) {
-      const c = makerSwapCoin(m)
-      makerSwapSpan.textContent = confirmationString(c)
-      Doc.hide(takerSwapSpan, makerRedeemSpan, takerRedeemSpan)
-      Doc.show(makerSwapSpan)
-    } else if (m.status === OrderUtil.TakerSwapCast && !m.revoked && !m.refund) {
-      const c = takerSwapCoin(m)
-      takerSwapSpan.textContent = confirmationString(c)
-      Doc.hide(makerSwapSpan, makerRedeemSpan, takerRedeemSpan)
-      Doc.show(takerSwapSpan)
-    } else if (inConfirmingMakerRedeem(m) && !m.revoked && !m.refund) {
-      makerRedeemSpan.textContent = confirmationString(m.redeem)
-      Doc.hide(makerSwapSpan, takerSwapSpan, takerRedeemSpan)
-      Doc.show(makerRedeemSpan)
-    } else if (inConfirmingTakerRedeem(m) && !m.revoked && !m.refund) {
-      takerRedeemSpan.textContent = confirmationString(m.redeem)
-      Doc.hide(makerSwapSpan, takerSwapSpan, makerRedeemSpan)
-      Doc.show(takerRedeemSpan)
+    if (card) {
+      this.setMutableMatchCardElements(card, m)
     } else {
-      Doc.hide(makerSwapSpan, takerSwapSpan, makerRedeemSpan, takerRedeemSpan)
+      this.addNewMatchCard(m)
     }
-
-    const makerSwapDiv = Doc.tmplElement(card, 'makerSwap')
-    const takerSwapDiv = Doc.tmplElement(card, 'takerSwap')
-    const makerRedeemDiv = Doc.tmplElement(card, 'makerRedeem')
-    const takerRedeemDiv = Doc.tmplElement(card, 'takerRedeem')
-    const refundDiv = Doc.tmplElement(card, 'refund')
-
-    const showMakerSwap = !m.isCancel && (makerSwapCoin(m) || !m.revoked)
-    const showTakerSwap = !m.isCancel && (takerSwapCoin(m) || !m.revoked)
-    const showMakerRedeem = !m.isCancel && (makerRedeemCoin(m) || !m.revoked)
-    const showTakerRedeem = !m.isCancel && (m.side !== OrderUtil.Maker) && (takerRedeemCoin(m) || !m.revoked)
-    const showRefund = !m.isCancel && (m.refund || (m.revoked && m.active))
-
-    if (showMakerSwap) Doc.show(makerSwapDiv)
-    else Doc.hide(makerSwapDiv)
-    if (showTakerSwap) Doc.show(takerSwapDiv)
-    else Doc.hide(takerSwapDiv)
-    if (showMakerRedeem) Doc.show(makerRedeemDiv)
-    else Doc.hide(makerRedeemDiv)
-    if (showTakerRedeem) Doc.show(takerRedeemDiv)
-    else Doc.hide(takerRedeemDiv)
-    if (showRefund) Doc.show(refundDiv)
-    else Doc.hide(refundDiv)
-
-    Doc.tmplElement(card, 'status').textContent = OrderUtil.matchStatusString(m)
   }
 }
 
