@@ -329,7 +329,7 @@ const localesMap: Record<string, Locale> = {
   'pt-br': ptBR,
   'zh-cn': zhCN,
   'pl-pl': plPL
-  'Ar': Ar
+  'العربية': Ar
 }
 
 /* locale will hold the locale loaded via setLocale. */
