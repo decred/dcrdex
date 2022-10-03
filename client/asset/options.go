@@ -40,4 +40,6 @@ type OrderOption struct {
 	// Range indicates a numeric input where the user can adjust the value
 	// between a pre-defined low and high.
 	XYRange *XYRange `json:"xyRange,omitempty"`
+
+	ShowByDefault bool `json:"showByDefault,omitempty"`
 }

@@ -339,9 +339,12 @@ export default class MarketsPage extends BasePage {
     Doc.bind(page.vUnlockSubmit, 'click', async () => { this.submitEstimateUnlock() })
     // Cancel order form.
     bindForm(page.cancelForm, page.cancelSubmit, async () => { this.submitCancel() })
-    // Order detail view
+    // Order detail view.
     Doc.bind(page.vFeeDetails, 'click', () => this.showForm(page.vDetailPane))
     Doc.bind(page.closeDetailPane, 'click', () => this.showVerifyForm())
+    // bind show or hide advanced pre order options.
+    Doc.bind(page.showAdvancedOptions, 'click', () => { this.showPreOrderAdvancedOptions() })
+    Doc.bind(page.hideAdvancedOptions, 'click', () => { this.hidePreOrderAdvancedOptions() })
     // // Bind active orders list's header sort events.
     page.recentMatchesTable.querySelectorAll('[data-ordercol]')
       .forEach((th: HTMLElement) => bind(
@@ -882,6 +885,20 @@ export default class MarketsPage extends BasePage {
     page.candleHigh.textContent = Doc.formatCoinValue(candle.highRate / this.market.rateConversionFactor)
     page.candleLow.textContent = Doc.formatCoinValue(candle.lowRate / this.market.rateConversionFactor)
     page.candleVol.textContent = Doc.formatCoinValue(candle.matchVolume, this.market.baseUnitInfo)
+  }
+
+  showPreOrderAdvancedOptions () {
+    this.preOrder(this.parseOrder(), true)
+    const page = this.page
+    Doc.hide(page.showAdvancedOptions)
+    Doc.show(page.hideAdvancedOptions)
+  }
+
+  hidePreOrderAdvancedOptions () {
+    this.preOrder(this.parseOrder(), false)
+    const page = this.page
+    Doc.hide(page.hideAdvancedOptions)
+    Doc.show(page.showAdvancedOptions)
   }
 
   /*
@@ -1570,7 +1587,7 @@ export default class MarketsPage extends BasePage {
     this.showVerifyForm()
     page.vPass.focus()
 
-    if (baseAsset.wallet.open && quoteAsset.wallet.open) this.preOrder(order)
+    if (baseAsset.wallet.open && quoteAsset.wallet.open) this.preOrder(order, false)
     else {
       Doc.hide(page.vPreorder)
       if (State.passwordIsCached()) this.unlockWalletsForEstimates('')
@@ -1616,7 +1633,7 @@ export default class MarketsPage extends BasePage {
     if (err) return this.setPreorderErr(err)
     Doc.show(page.vPreorder)
     Doc.hide(page.vUnlockPreorder)
-    this.preOrder(this.parseOrder())
+    this.preOrder(this.parseOrder(), false)
   }
 
   /*
@@ -1669,7 +1686,7 @@ export default class MarketsPage extends BasePage {
   }
 
   /* preOrder loads the options and fetches pre-order estimates */
-  async preOrder (order: TradeForm) {
+  async preOrder (order: TradeForm, showAll: boolean) {
     const page = this.page
 
     // Add swap options.
@@ -1691,7 +1708,11 @@ export default class MarketsPage extends BasePage {
           page.vFeeSummary.style.backgroundColor = `rgba(128, 128, 128, ${0.5 - 0.5 * progress})`
         })
       }
-      const addOption = (opt: OrderOption, isSwap: boolean) => page.vOrderOpts.appendChild(OrderUtil.optionElement(opt, order, changed, isSwap))
+      const addOption = (opt: OrderOption, isSwap: boolean) => {
+        if (opt.showByDefault || showAll) {
+          page.vOrderOpts.appendChild(OrderUtil.optionElement(opt, order, changed, isSwap))
+        }
+      }
       for (const opt of swap.options || []) addOption(opt, true)
       for (const opt of redeem.options || []) addOption(opt, false)
       app().bindTooltips(page.vOrderOpts)

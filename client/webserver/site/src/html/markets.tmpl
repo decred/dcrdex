@@ -572,7 +572,15 @@
 
           <hr class="dashed mb-2 mt-3">
 
-          <div class="grey fs18 text-start">[[[Options]]]</div>
+          <div class="grey fs18 d-flex justify-content-between align-items-center">
+            [[[Options]]]
+            <span class="grey fs14 underline pointer hoverbg" id="showAdvancedOptions">
+              [[[show advanced options]]]
+            </span>
+            <span class="grey fs14 underline pointer hoverbg d-hide" id="hideAdvancedOptions">
+              [[[hide advanced options]]]
+            </span>
+          </div>
 
           <div id="vOrderOpts">
             {{template "orderOptionTemplates"}}

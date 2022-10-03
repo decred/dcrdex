@@ -1325,6 +1325,7 @@ func (dcr *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 				Description:  desc,
 				DefaultValue: 1.0,
 			},
+			ShowByDefault: false,
 			XYRange: &asset.XYRange{
 				Start: asset.XYRangePoint{
 					Label: "1X",
@@ -1431,6 +1432,7 @@ func (dcr *ExchangeWallet) splitOption(req *asset.PreSwapForm, utxos []*composit
 			DefaultValue: cfg.useSplitTx,
 			IsBoolean:    true,
 		},
+		ShowByDefault: true,
 		Boolean: &asset.BooleanConfig{
 			Reason: reason,
 		},
@@ -1479,6 +1481,7 @@ func (dcr *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem
 			Description:  "Bump the redemption transaction fees up to 2x for faster confirmations on your redemption transaction.",
 			DefaultValue: 1.0,
 		},
+		ShowByDefault: false,
 		XYRange: &asset.XYRange{
 			Start: asset.XYRangePoint{
 				Label: "1X",
