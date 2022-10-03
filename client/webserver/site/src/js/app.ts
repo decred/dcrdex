@@ -84,6 +84,7 @@ export default class Application {
   recorders: Record<string, LogMessage[]>
   main: HTMLElement
   header: HTMLElement
+  headerSpace: HTMLElement
   assets: Record<number, SupportedAsset>
   exchanges: Record<string, Exchange>
   walletMap: Record<number, WalletState>
@@ -258,6 +259,7 @@ export default class Application {
     this.main.replaceWith(main)
     this.main = main
     this.noteReceivers = []
+    Doc.empty(this.headerSpace)
     this.attach(data)
     return true
   }
@@ -303,6 +305,7 @@ export default class Application {
    */
   attachHeader () {
     this.header = idel(document.body, 'header')
+    this.headerSpace = Doc.idel(this.header, 'headerSpace')
     this.popupNotes = idel(document.body, 'popupNotes')
     this.popupTmpl = Doc.tmplElement(this.popupNotes, 'note')
     if (this.popupTmpl) this.popupTmpl.remove()
@@ -316,13 +319,13 @@ export default class Application {
     page.loader.remove()
     Doc.show(page.loader)
 
-    bind(page.noteMenuEntry, 'click', async () => {
+    bind(page.noteBell, 'click', async () => {
       Doc.hide(page.pokeList)
       Doc.show(page.noteList)
       this.ackNotes()
       page.noteCat.classList.add('active')
       page.pokeCat.classList.remove('active')
-      this.showDropdown(page.noteMenuEntry, page.noteBox)
+      this.showDropdown(page.noteBell, page.noteBox)
       Doc.hide(page.noteIndicator)
       for (const note of this.notes) {
         if (note.acked) {
@@ -334,8 +337,8 @@ export default class Application {
       this.storeNotes()
     })
 
-    bind(page.profileMenuEntry, 'click', () => {
-      this.showDropdown(page.profileMenuEntry, page.profileBox)
+    bind(page.profileIcon, 'click', () => {
+      this.showDropdown(page.profileIcon, page.profileBox)
     })
 
     bind(page.innerNoteIcon, 'click', () => { Doc.hide(page.noteBox) })
@@ -370,8 +373,8 @@ export default class Application {
     const ico = icon.getBoundingClientRect()
     Doc.hide(this.page.noteBox, this.page.profileBox)
     Doc.show(dialog)
-    dialog.style.right = `${window.innerWidth - ico.left - ico.width + 11}px`
-    dialog.style.top = `${ico.top - 9}px`
+    dialog.style.right = `${window.innerWidth - ico.left - ico.width + 5}px`
+    dialog.style.top = `${ico.top - 4}px`
 
     const hide = (e: MouseEvent) => {
       if (!Doc.mouseInElement(e, dialog)) {
@@ -459,10 +462,10 @@ export default class Application {
       return
     }
     if (!this.user.authed) {
-      Doc.hide(page.noteMenuEntry, page.walletsMenuEntry, page.marketsMenuEntry, page.profileMenuEntry)
+      Doc.hide(page.noteBell, page.walletsMenuEntry, page.marketsMenuEntry, page.profileIcon)
       return
     }
-    Doc.show(page.noteMenuEntry, page.walletsMenuEntry, page.profileMenuEntry)
+    Doc.show(page.noteBell, page.walletsMenuEntry, page.profileIcon)
     if (Object.keys(this.user.exchanges).length > 0) {
       Doc.show(page.marketsMenuEntry)
     } else {
@@ -833,8 +836,9 @@ export default class Application {
   }
 
   /* conventionalRate converts the encoded atomic rate to a conventional rate */
-  conventionalRate (baseID: number, quoteID: number, encRate: number): number {
-    const [b, q] = [this.unitInfo(baseID), this.unitInfo(quoteID)]
+  conventionalRate (baseID: number, quoteID: number, encRate: number, xc?: Exchange): number {
+    const [b, q] = [this.unitInfo(baseID, xc), this.unitInfo(quoteID, xc)]
+
     const r = b.conventional.conversionFactor / q.conventional.conversionFactor
     return encRate / RateEncodingFactor * r
   }

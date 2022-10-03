@@ -9,10 +9,17 @@ import {
   CandleReporters,
   MouseReport,
   VolumeReport,
-  DepthMarker
+  DepthMarker,
+  Wave
 } from './charts'
 import { postJSON } from './http'
-import { NewWalletForm, UnlockWalletForm, AccelerateOrderForm, bind as bindForm } from './forms'
+import {
+  NewWalletForm,
+  UnlockWalletForm,
+  AccelerateOrderForm,
+  DepositAddress,
+  bind as bindForm
+} from './forms'
 import * as OrderUtil from './orderutil'
 import ws from './ws'
 import * as intl from './locales'
@@ -48,7 +55,6 @@ import {
   MiniOrder,
   RemainderUpdate,
   ConnEventNote,
-  Spot,
   OrderOption,
   ConnectionStatus,
   RecentMatch
@@ -67,18 +73,19 @@ const unmarketRoute = 'unmarket'
 const epochMatchSummaryRoute = 'epoch_match_summary'
 
 const lastMarketKey = 'selectedMarket'
-const chartRatioKey = 'chartRatio'
 const depthZoomKey = 'depthZoom'
 
 const animationLength = 500
 
 const anHour = 60 * 60 * 1000 // milliseconds
 
-const depthChart = 'depth_chart'
-const candleChart = 'candle_chart'
-
 const check = document.createElement('span')
 check.classList.add('ico-check')
+
+const buyBtnClass = 'buygreen-bg'
+const sellBtnClass = 'sellred-bg'
+
+const fiveMinBinKey = '5m'
 
 const percentFormatter = new Intl.NumberFormat(document.documentElement.lang, {
   minimumFractionDigits: 1,
@@ -88,8 +95,10 @@ const percentFormatter = new Intl.NumberFormat(document.documentElement.lang, {
 const parentIDNone = 0xFFFFFFFF
 
 interface MetaOrder {
-  row: HTMLElement
-  order: Order
+  div: HTMLElement
+  header: Record<string, PageElement>
+  details: Record<string, PageElement>
+  ord: Order
   cancelling?: boolean
   status?: number
 }
@@ -118,28 +127,6 @@ interface CurrentMarket {
   rateConversionFactor: number
 }
 
-interface BalanceWidgetElement {
-  id: number
-  parentID: number
-  cfg: Asset | null
-  logo: PageElement
-  symbol: PageElement
-  avail: PageElement
-  newWalletRow: PageElement
-  newWalletBttn: PageElement
-  walletPendingRow: PageElement
-  locked: PageElement
-  immature: PageElement
-  parentBal: PageElement
-  parentIcon: PageElement
-  unsupported: PageElement
-  expired: PageElement
-  connect: PageElement
-  spinner: PageElement
-  iconBox: PageElement
-  stateIcons: WalletIcons
-}
-
 interface LoadTracker {
   loaded: () => void
   timer: number
@@ -149,10 +136,14 @@ interface OrderRow extends HTMLElement {
   manager: OrderTableRowManager
 }
 
+interface StatsDisplay {
+  row: PageElement
+  tmpl: Record<string, PageElement>
+}
+
 export default class MarketsPage extends BasePage {
   page: Record<string, PageElement>
   main: HTMLElement
-  loaded: (() => void) | null
   maxLoaded: (() => void) | null
   maxOrderUpdateCounter: number
   market: CurrentMarket
@@ -169,12 +160,9 @@ export default class MarketsPage extends BasePage {
   depthLines: Record<string, DepthLine[]>
   activeMarkerRate: number | null
   hovers: HTMLElement[]
-  ordersSortKey: string
-  ordersSortDirection: 1 | -1
   ogTitle: string
   depthChart: DepthChart
   candleChart: CandleChart
-  currentChart: string
   candleDur: string
   balanceWgt: BalanceWidget
   marketList: MarketList
@@ -182,6 +170,7 @@ export default class MarketsPage extends BasePage {
   baseUnits: NodeListOf<HTMLElement>
   unlockForm: UnlockWalletForm
   newWalletForm: NewWalletForm
+  depositAddrForm: DepositAddress
   keyup: (e: KeyboardEvent) => void
   secondTicker: number
   candlesLoading: LoadTracker | null
@@ -189,13 +178,14 @@ export default class MarketsPage extends BasePage {
   recentMatches: RecentMatch[]
   recentMatchesSortKey: string
   recentMatchesSortDirection: 1 | -1
+  stats: [StatsDisplay, StatsDisplay]
+  loadingAnimations: { candles?: Wave, depth?: Wave }
 
   constructor (main: HTMLElement, data: any) {
     super()
     const page = this.page = Doc.idDescendants(main)
     this.main = main
     if (!this.main.parentElement) return // Not gonna happen, but TypeScript cares.
-    this.loaded = app().loading(this.main.parentElement)
     // There may be multiple pending updates to the max order. This makes sure
     // that the screen is updated with the most recent one.
     this.maxOrderUpdateCounter = 0
@@ -207,13 +197,8 @@ export default class MarketsPage extends BasePage {
       input: []
     }
     this.hovers = []
-    // 'Your Orders' list sort key and direction.
-    this.ordersSortKey = 'submitTime'
     // 'Recent Matches' list sort key and direction.
     this.recentMatchesSortKey = 'stamp'
-    // 1 if sorting ascendingly, -1 if sorting descendingly.
-    this.ordersSortDirection = 1
-    // same as this.ordersSortDirection.
     this.recentMatchesSortDirection = 1
     // store original title so we can re-append it when updating market value.
     this.ogTitle = document.title
@@ -224,39 +209,44 @@ export default class MarketsPage extends BasePage {
       mouse: (r: MouseReport) => { this.reportDepthMouse(r) },
       zoom: (z: number) => { this.reportDepthZoom(z) }
     }
-    this.depthChart = new DepthChart(page.marketChart, depthReporters, State.fetch(depthZoomKey))
+    this.depthChart = new DepthChart(page.depthChart, depthReporters, State.fetch(depthZoomKey))
 
     const candleReporters: CandleReporters = {
       mouse: c => { this.reportMouseCandle(c) }
     }
-    this.candleChart = new CandleChart(page.marketChart, candleReporters)
+    this.candleChart = new CandleChart(page.candlesChart, candleReporters)
 
     const success = () => { /* do nothing */ }
     // Do not call cleanTemplates before creating the AccelerateOrderForm
     this.accelerateOrderForm = new AccelerateOrderForm(page.accelerateForm, success)
 
     // TODO: Store user's state and reload last known configuration.
-    this.candleChart.hide()
-    this.currentChart = depthChart
-    this.candleDur = ''
+    this.candleDur = fiveMinBinKey
 
     // Set up the BalanceWidget.
     {
-      const wgt = this.balanceWgt = new BalanceWidget(page.balanceTable)
+      page.walletInfoTmpl.removeAttribute('id')
+      const bWidget = page.walletInfoTmpl
+      const qWidget = page.walletInfoTmpl.cloneNode(true) as PageElement
+      bWidget.after(qWidget)
+      const wgt = this.balanceWgt = new BalanceWidget(bWidget, qWidget)
       const baseIcons = wgt.base.stateIcons.icons
       const quoteIcons = wgt.quote.stateIcons.icons
-      bind(wgt.base.connect, 'click', () => { this.showOpen(this.market.base, this.walletUnlocked) })
-      bind(wgt.quote.connect, 'click', () => { this.showOpen(this.market.quote, this.walletUnlocked) })
-      bind(wgt.base.expired, 'click', () => { this.showOpen(this.market.base, this.walletUnlocked) })
-      bind(wgt.quote.expired, 'click', () => { this.showOpen(this.market.quote, this.walletUnlocked) })
+      bind(wgt.base.tmpl.connect, 'click', () => { this.showOpen(this.market.base, this.walletUnlocked) })
+      bind(wgt.quote.tmpl.connect, 'click', () => { this.showOpen(this.market.quote, this.walletUnlocked) })
+      bind(wgt.base.tmpl.expired, 'click', () => { this.showOpen(this.market.base, this.walletUnlocked) })
+      bind(wgt.quote.tmpl.expired, 'click', () => { this.showOpen(this.market.quote, this.walletUnlocked) })
       bind(baseIcons.sleeping, 'click', () => { this.showOpen(this.market.base, this.walletUnlocked) })
       bind(quoteIcons.sleeping, 'click', () => { this.showOpen(this.market.quote, this.walletUnlocked) })
       bind(baseIcons.locked, 'click', () => { this.showOpen(this.market.base, this.walletUnlocked) })
       bind(quoteIcons.locked, 'click', () => { this.showOpen(this.market.quote, this.walletUnlocked) })
       bind(baseIcons.disabled, 'click', () => { this.showToggleWalletStatus(this.market.base) })
       bind(quoteIcons.disabled, 'click', () => { this.showToggleWalletStatus(this.market.quote) })
-      bind(wgt.base.newWalletBttn, 'click', () => { this.showCreate(this.market.base) })
-      bind(wgt.quote.newWalletBttn, 'click', () => { this.showCreate(this.market.quote) })
+      bind(wgt.base.tmpl.newWalletBttn, 'click', () => { this.showCreate(this.market.base) })
+      bind(wgt.quote.tmpl.newWalletBttn, 'click', () => { this.showCreate(this.market.quote) })
+      Doc.bind(wgt.base.tmpl.walletAddr, 'click', () => { this.showDeposit(this.market.base.id) })
+      Doc.bind(wgt.quote.tmpl.walletAddr, 'click', () => { this.showDeposit(this.market.quote.id) })
+      this.depositAddrForm = new DepositAddress(page.deposit)
     }
 
     // Bind toggle wallet status form.
@@ -264,18 +254,7 @@ export default class MarketsPage extends BasePage {
 
     // Prepare templates for the buy and sell tables and the user's order table.
     OrderUtil.setOptionTemplates(page)
-    Doc.cleanTemplates(page.rowTemplate, page.liveTemplate, page.durBttnTemplate, page.booleanOptTmpl, page.rangeOptTmpl, page.orderOptTmpl)
-
-    // Prepare the list of markets.
-    this.marketList = new MarketList(page.marketList)
-    for (const xc of this.marketList.xcSections) {
-      if (!xc.marketRows) continue
-      for (const row of xc.marketRows) {
-        bind(row.node, 'click', () => {
-          this.setMarket(xc.host, row.mkt.baseid, row.mkt.quoteid)
-        })
-      }
-    }
+    Doc.cleanTemplates(page.rowTemplate, page.durBttnTemplate, page.booleanOptTmpl, page.rangeOptTmpl, page.orderOptTmpl, page.userOrderTmpl)
 
     // Store the elements that need their ticker changed when the market
     // changes.
@@ -285,8 +264,8 @@ export default class MarketsPage extends BasePage {
     // Buttons to set order type and side.
     bind(page.buyBttn, 'click', () => {
       swapBttns(page.sellBttn, page.buyBttn)
-      page.submitBttn.classList.remove('sellred')
-      page.submitBttn.classList.add('buygreen')
+      page.submitBttn.classList.remove(sellBtnClass)
+      page.submitBttn.classList.add(buyBtnClass)
       page.maxLbl.textContent = intl.prep(intl.ID_BUY)
       this.setOrderBttnText()
       this.setOrderVisibility()
@@ -294,8 +273,8 @@ export default class MarketsPage extends BasePage {
     })
     bind(page.sellBttn, 'click', () => {
       swapBttns(page.buyBttn, page.sellBttn)
-      page.submitBttn.classList.add('sellred')
-      page.submitBttn.classList.remove('buygreen')
+      page.submitBttn.classList.add(sellBtnClass)
+      page.submitBttn.classList.remove(buyBtnClass)
       page.maxLbl.textContent = intl.prep(intl.ID_SELL)
       this.setOrderBttnText()
       this.setOrderVisibility()
@@ -325,12 +304,6 @@ export default class MarketsPage extends BasePage {
         page.lotField.value = String(maxSell.swap.lots)
       } else page.lotField.value = String(this.market.maxBuys[this.adjustedRate()].swap.lots)
       this.lotChanged()
-    })
-    bind(page.depthBttn, 'click', () => {
-      this.depthChartSelected()
-    })
-    bind(page.candlestickBttn, 'click', () => {
-      this.candleChartSelected()
     })
 
     Doc.disableMouseWheel(page.rateField, page.lotField, page.qtyField, page.mktBuyField)
@@ -367,10 +340,7 @@ export default class MarketsPage extends BasePage {
     // Order detail view
     Doc.bind(page.vFeeDetails, 'click', () => this.showForm(page.vDetailPane))
     Doc.bind(page.closeDetailPane, 'click', () => this.showVerifyForm())
-    // Bind active orders list's header sort events.
-    page.liveTable.querySelectorAll('[data-ordercol]')
-      .forEach((th: HTMLElement) => bind(th, 'click', () => setOrdersSortCol(th.dataset.ordercol || '')))
-    // Bind active orders list's header sort events.
+    // // Bind active orders list's header sort events.
     page.recentMatchesTable.querySelectorAll('[data-ordercol]')
       .forEach((th: HTMLElement) => bind(
         th, 'click', () => setRecentMatchesSortCol(th.dataset.ordercol || '')
@@ -389,42 +359,15 @@ export default class MarketsPage extends BasePage {
       setRecentMatchesSortColClasses()
     }
 
-    const setOrdersSortCol = (key: string) => {
-      // First unset header's current sorted col classes.
-      unsetOrdersSortColClasses()
-      // If already sorting by key change sort direction.
-      if (this.ordersSortKey === key) {
-        this.ordersSortDirection *= -1
-      } else {
-        // Otherwise update sort key and set default direction to ascending.
-        this.ordersSortKey = key
-        this.ordersSortDirection = 1
-      }
-      this.refreshActiveOrders()
-      // Set header's new sorted col classes.
-      setOrdersSortColClasses()
-    }
-
     // sortClassByDirection receives a sort direction and return a class based on it.
     const sortClassByDirection = (element: 1 | -1) => {
       if (element === 1) return 'sorted-asc'
       return 'sorted-dsc'
     }
 
-    const unsetOrdersSortColClasses = () => {
-      page.liveTable.querySelectorAll('[data-ordercol]')
-        .forEach(th => th.classList.remove('sorted-asc', 'sorted-dsc'))
-    }
-
     const unsetRecentMatchesSortColClasses = () => {
       page.recentMatchesTable.querySelectorAll('[data-ordercol]')
         .forEach(th => th.classList.remove('sorted-asc', 'sorted-dsc'))
-    }
-
-    const setOrdersSortColClasses = () => {
-      const key = this.ordersSortKey
-      const sortCls = sortClassByDirection(this.ordersSortDirection)
-      Doc.safeSelector(page.liveTable, `[data-ordercol=${key}]`).classList.add(sortCls)
     }
 
     const setRecentMatchesSortColClasses = () => {
@@ -434,7 +377,6 @@ export default class MarketsPage extends BasePage {
     }
 
     // Set default's sorted col header classes.
-    setOrdersSortColClasses()
     setRecentMatchesSortColClasses()
 
     const closePopups = () => {
@@ -473,8 +415,8 @@ export default class MarketsPage extends BasePage {
     bind(page.rateField, 'keyup', () => { this.previewQuoteAmt(true) })
 
     // Market search input bindings.
-    bind(page.marketSearch, 'change', () => { this.filterMarkets() })
-    bind(page.marketSearch, 'keyup', () => { this.filterMarkets() })
+    bind(page.marketSearchV1, 'change', () => { this.filterMarkets() })
+    bind(page.marketSearchV1, 'keyup', () => { this.filterMarkets() })
 
     const clearChartLines = () => {
       this.depthLines.hover = []
@@ -482,44 +424,36 @@ export default class MarketsPage extends BasePage {
     }
     bind(page.buyRows, 'mouseleave', clearChartLines)
     bind(page.sellRows, 'mouseleave', clearChartLines)
-    bind(page.liveList, 'mouseleave', () => {
+    bind(page.userOrders, 'mouseleave', () => {
       this.activeMarkerRate = null
       this.setDepthMarkers()
     })
 
-    // Load the user's layout preferences.
-    const setChartRatio = (r: number) => {
-      if (r > 0.7) r = 0.7
-      else if (r < 0.25) r = 0.25
-
-      const h = r * (this.main.clientHeight - app().header.offsetHeight)
-      page.marketChart.style.height = `${h}px`
-
-      this.depthChart.resize(h)
-      this.candleChart.resize(h)
-    }
-    const chartDivRatio = State.fetch(chartRatioKey)
-    if (chartDivRatio) {
-      setChartRatio(chartDivRatio)
-    }
-    // Bind chart resizing.
-    bind(page.chartResizer, 'mousedown', (e: MouseEvent) => {
-      if (e.button !== 0) return
-      e.preventDefault()
-      let chartRatio: number
-      const trackMouse = (ee: MouseEvent) => {
-        ee.preventDefault()
-        const box = page.rightSide.getBoundingClientRect()
-        const h = box.bottom - box.top
-        chartRatio = (ee.pageY - box.top) / h
-        setChartRatio(chartRatio)
-      }
-      bind(document, 'mousemove', trackMouse)
-      bind(document, 'mouseup', () => {
-        if (chartRatio) State.store(chartRatioKey, chartRatio)
-        Doc.unbind(document, 'mousemove', trackMouse)
-      })
+    Doc.bind(page.leftHider, 'click', () => {
+      page.leftColumnV1.classList.remove('default')
+      page.leftColumnV1.classList.add('stashed')
     })
+
+    const stats0 = page.marketStatsV1
+    const stats1 = stats0.cloneNode(true) as PageElement
+    Doc.hide(stats0, stats1)
+    stats1.removeAttribute('id')
+    app().headerSpace.appendChild(stats1)
+    this.stats = [{ row: stats0, tmpl: Doc.parseTemplate(stats0) }, { row: stats1, tmpl: Doc.parseTemplate(stats1) }]
+    for (const s of this.stats) {
+      Doc.bind(s.tmpl.marketSelect, 'click', () => {
+        page.leftColumnV1.classList.remove('stashed', 'default')
+      })
+    }
+
+    this.marketList = new MarketList(page.marketListV1)
+    // Prepare the list of markets.
+    for (const row of this.marketList.markets) {
+      bind(row.node, 'click', () => {
+        this.startLoadingAnimations()
+        this.setMarket(row.mkt.xc.host, row.mkt.baseid, row.mkt.quoteid)
+      })
+    }
 
     // Notification filters.
     app().registerNoteFeeder({
@@ -531,6 +465,23 @@ export default class MarketsPage extends BasePage {
       spots: (note: SpotPriceNote) => { this.handlePriceUpdate(note) }
     })
 
+    this.loadingAnimations = {}
+    this.startLoadingAnimations()
+
+    // Start a ticker to update time-since values.
+    this.secondTicker = window.setInterval(() => {
+      for (const mord of Object.values(this.metaOrders)) {
+        mord.details.age.textContent = Doc.timeSince(mord.ord.submitTime)
+      }
+      for (const td of Doc.applySelector(page.recentMatchesLiveList, '[data-tmpl=age]')) {
+        td.textContent = Doc.timeSince(parseFloat(td.dataset.sinceStamp ?? '0'))
+      }
+    }, 1000)
+
+    this.init(data)
+  }
+
+  async init (data: any) {
     // Fetch the first market in the list, or the users last selected market, if
     // it exists.
     let selected
@@ -540,21 +491,24 @@ export default class MarketsPage extends BasePage {
       selected = State.fetch(lastMarketKey)
     }
     if (!selected || !this.marketList.exists(selected.host, selected.base, selected.quote)) {
-      selected = this.marketList.first()
+      const first = this.marketList.first()
+      if (first) selected = { host: first.mkt.xc.host, base: first.mkt.baseid, quote: first.mkt.quoteid }
     }
-    this.setMarket(selected.host, selected.base, selected.quote)
-
-    // Start a ticker to update time-since values.
-    this.secondTicker = window.setInterval(() => {
-      for (const metaOrder of Object.values(this.metaOrders)) {
-        const td = Doc.tmplElement(metaOrder.row, 'age')
-        td.textContent = Doc.timeSince(metaOrder.order.submitTime)
-      }
-    }, 1000)
+    if (selected) this.setMarket(selected.host, selected.base, selected.quote)
 
     // set the initial state for the registration status
     this.setRegistrationStatusVisibility()
     this.setBalanceVisibility()
+  }
+
+  startLoadingAnimations () {
+    const { page, loadingAnimations: anis, depthChart, candleChart } = this
+    depthChart.canvas.classList.add('invisible')
+    candleChart.canvas.classList.add('invisible')
+    if (anis.candles) anis.candles.stop()
+    anis.candles = new Wave(page.candlesChart, { message: intl.prep(intl.ID_CANDLES_LOADING) })
+    if (anis.depth) anis.depth.stop()
+    anis.depth = new Wave(page.depthChart, { message: intl.prep(intl.ID_CANDLES_LOADING) })
   }
 
   /* isSell is true if the user has selected sell in the order options. */
@@ -570,6 +524,50 @@ export default class MarketsPage extends BasePage {
   /* hasFeePending is true if the fee payment is pending */
   hasFeePending () {
     return !!this.market.dex.pendingFee
+  }
+
+  /* setStats updates the currently displayed market and spot price. */
+  setStats (): void {
+    const selected = this.market
+    if (!selected) return
+    // Get an up-to-date Market.
+    const xc = app().exchanges[selected.dex.host]
+    const mkt = xc.markets[selected.cfg.name]
+    for (const s of this.stats) {
+      setMarketDetails(s.tmpl, mkt)
+      if (mkt.spot) {
+        const bconv = xc.assets[mkt.baseid].unitInfo.conventional.conversionFactor
+        s.tmpl.volume.textContent = fourSigFigs(mkt.spot.vol24 / bconv)
+        setPriceAndChange(s.tmpl, xc, mkt)
+      }
+    }
+  }
+
+  /* setHighLow calculates the high and low rates over the last 24 hours. */
+  setHighLow () {
+    const cache = this.market?.candleCaches[fiveMinBinKey]
+    if (!cache) {
+      for (const s of this.stats) {
+        s.tmpl.high.textContent = '-'
+        s.tmpl.low.textContent = '-'
+      }
+      return
+    }
+
+    // We'll eventually get this data in the spot, but for now, we must set it
+    // from candles.
+    let [high, low] = [0, 0]
+    for (let i = cache.candles.length - 1; i >= 0; i--) {
+      const c = cache.candles[i]
+      if (low === 0 || (c.lowRate > 0 && c.lowRate < low)) low = c.lowRate
+      if (c.highRate > high) high = c.highRate
+    }
+
+    const bconv = app().unitInfo(this.market.cfg.baseid, this.market.dex).conventional.conversionFactor
+    for (const s of this.stats) {
+      s.tmpl.high.textContent = high > 0 ? fourSigFigs(high / bconv) : '-'
+      s.tmpl.low.textContent = low > 0 ? fourSigFigs(low / bconv) : '-'
+    }
   }
 
   /* assetsAreSupported is true if all the assets of the current market are
@@ -611,14 +609,14 @@ export default class MarketsPage extends BasePage {
     const page = this.page
     // By default the order form should be hidden, and only if market is set
     // and ready for trading the form should show up.
-    Doc.hide(page.orderForm)
+    Doc.hide(page.orderForm, page.orderTypeBttns)
     const feePaid = !this.hasFeePending()
     const assetsAreSupported = this.assetsAreSupported()
     const { base, quote } = this.market
     const hasWallets = base && app().assets[base.id].wallet && quote && app().assets[quote.id].wallet
 
     if (feePaid && assetsAreSupported && hasWallets) {
-      Doc.show(page.orderForm)
+      Doc.show(page.orderForm, page.orderTypeBttns)
     }
   }
 
@@ -636,6 +634,7 @@ export default class MarketsPage extends BasePage {
     const symbol = market.base ? market.quoteCfg.symbol : market.baseCfg.symbol
     page.loaderMsg.textContent = intl.prep(intl.ID_NOT_SUPPORTED, { asset: symbol.toUpperCase() })
     Doc.show(page.loaderMsg)
+    Doc.hide(page.noWallet)
   }
 
   /* setRegistrationStatusView sets the text content and class for the
@@ -727,17 +726,18 @@ export default class MarketsPage extends BasePage {
     page.qtyField.value = ''
     page.rateField.value = ''
 
+    Doc.hide(page.noWallet)
+
     // If we have not yet connected, there is no dex.assets or any other
     // exchange data, so just put up a message and wait for the connection to be
     // established, at which time handleConnNote will refresh and reload.
     if (!dex || !dex.markets || dex.connectionStatus !== ConnectionStatus.Connected) {
       page.chartErrMsg.textContent = intl.prep(intl.ID_CONNECTION_FAILED)
       Doc.show(page.chartErrMsg)
-      if (this.loaded) this.loaded()
-      this.main.style.opacity = '1'
-      Doc.hide(page.marketLoader)
       return
     }
+
+    for (const s of this.stats) Doc.show(s.row)
 
     const baseCfg = dex.assets[base]
     const quoteCfg = dex.assets[quote]
@@ -772,13 +772,19 @@ export default class MarketsPage extends BasePage {
       buyBalance: 0
     }
 
-    Doc.show(page.marketLoader)
-    if (!dex.candleDurs || dex.candleDurs.length === 0) this.currentChart = depthChart
-    if (this.currentChart === depthChart) ws.request('loadmarket', makeMarket(host, base, quote))
-    else {
-      if (dex.candleDurs.indexOf(this.candleDur) === -1) this.candleDur = dex.candleDurs[0]
-      this.loadCandles()
-    }
+    Doc.setVis(!(this.market.base.wallet && this.market.quote.wallet), page.noWallet)
+    this.setStats()
+    this.refreshRecentMatchesTable()
+
+    // if (!dex.candleDurs || dex.candleDurs.length === 0) this.currentChart = depthChart
+
+    // depth chart
+    ws.request('loadmarket', makeMarket(host, base, quote))
+
+    // candlesticks
+    this.candleDur = fiveMinBinKey
+    this.loadCandles()
+
     this.setLoaderMsgVisibility()
     this.setRegistrationStatusVisibility()
     this.resolveOrderFormVisibility()
@@ -819,25 +825,24 @@ export default class MarketsPage extends BasePage {
     while (this.hovers.length) (this.hovers.shift() as HTMLElement).classList.remove('hover')
     const page = this.page
     if (!r) {
-      Doc.hide(page.hoverData)
+      Doc.hide(page.hoverData, page.depthHoverData)
       return
     }
+    Doc.show(page.hoverData, page.depthHoverData)
 
     // If the user is hovered to within a small percent (based on chart width)
     // of a user order, highlight that order's row.
-    for (const metaOrd of Object.values(this.metaOrders)) {
-      const [row, ord] = [metaOrd.row, metaOrd.order]
+    for (const { div, ord } of Object.values(this.metaOrders)) {
       if (ord.status !== OrderUtil.StatusBooked) continue
       if (r.hoverMarkers.indexOf(ord.rate) > -1) {
-        row.classList.add('hover')
-        this.hovers.push(row)
+        div.classList.add('hover')
+        this.hovers.push(div)
       }
     }
 
     page.hoverPrice.textContent = Doc.formatCoinValue(r.rate)
     page.hoverVolume.textContent = Doc.formatCoinValue(r.depth)
     page.hoverVolume.style.color = r.dotColor
-    Doc.show(page.hoverData)
   }
 
   /*
@@ -852,16 +857,15 @@ export default class MarketsPage extends BasePage {
   reportMouseCandle (candle: Candle | null) {
     const page = this.page
     if (!candle) {
-      Doc.hide(page.hoverData)
+      Doc.hide(page.hoverData, page.candleHoverData)
       return
     }
-
+    Doc.show(page.hoverData, page.candleHoverData)
     page.candleStart.textContent = Doc.formatCoinValue(candle.startRate / this.market.rateConversionFactor)
     page.candleEnd.textContent = Doc.formatCoinValue(candle.endRate / this.market.rateConversionFactor)
     page.candleHigh.textContent = Doc.formatCoinValue(candle.highRate / this.market.rateConversionFactor)
     page.candleLow.textContent = Doc.formatCoinValue(candle.lowRate / this.market.rateConversionFactor)
     page.candleVol.textContent = Doc.formatCoinValue(candle.matchVolume, this.market.baseUnitInfo)
-    Doc.show(page.hoverData)
   }
 
   /*
@@ -1034,20 +1038,23 @@ export default class MarketsPage extends BasePage {
 
     page.maxFromLots.textContent = lots.toString()
     // XXX add plural into format details, so we don't need this
-    page.maxFromLotsLbl.textContent = lots === 1 ? 'lot' : 'lots'
+    page.maxFromLotsLbl.textContent = intl.prep(lots === 1 ? intl.ID_LOT : intl.ID_LOTS)
     if (!maxOrder) {
       Doc.hide(page.maxAboveZero)
       return
     }
     // Could add the estimatedFees here, but that might also be
     // confusing.
-    const [fromAsset, toAsset] = sell ? [this.market.base, this.market.quote] : [this.market.quote, this.market.base]
+    const fromAsset = sell ? this.market.base : this.market.quote
+    // DRAFT NOTE: Maybe just use base qty from lots.
     page.maxFromAmt.textContent = Doc.formatCoinValue(maxOrder.value || 0, fromAsset.unitInfo)
     page.maxFromTicker.textContent = fromAsset.symbol.toUpperCase()
     // Could subtract the maxOrder.redemptionFees here.
-    const toConversion = sell ? this.adjustedRate() / OrderUtil.RateEncodingFactor : OrderUtil.RateEncodingFactor / this.adjustedRate()
-    page.maxToAmt.textContent = Doc.formatCoinValue((maxOrder.value || 0) * toConversion, toAsset.unitInfo)
-    page.maxToTicker.textContent = toAsset.symbol.toUpperCase()
+    // The qty conversion doesn't fit well with the new design.
+    // TODO: Make this work somehow?
+    // const toConversion = sell ? this.adjustedRate() / OrderUtil.RateEncodingFactor : OrderUtil.RateEncodingFactor / this.adjustedRate()
+    // page.maxToAmt.textContent = Doc.formatCoinValue((maxOrder.value || 0) * toConversion, toAsset.unitInfo)
+    // page.maxToTicker.textContent = toAsset.symbol.toUpperCase()
   }
 
   /*
@@ -1084,6 +1091,9 @@ export default class MarketsPage extends BasePage {
       Doc.empty(this.page.sellRows)
       return
     }
+    Doc.show(this.page.epochLine)
+    if (this.loadingAnimations.depth) this.loadingAnimations.depth.stop()
+    this.depthChart.canvas.classList.remove('invisible')
     this.depthChart.set(this.book, cfg.lotsize, cfg.ratestep, baseUnitInfo, quoteUnitInfo)
     this.recentMatches = data.book.recentMatches ?? []
     this.refreshRecentMatchesTable()
@@ -1137,36 +1147,6 @@ export default class MarketsPage extends BasePage {
     }
   }
 
-  /*
-   * ordersSortCompare returns sort compare function according to the active
-   * sort key and direction.
-   */
-  ordersSortCompare () {
-    switch (this.ordersSortKey) {
-      case 'submitTime':
-        return (a: Order, b: Order) => this.ordersSortDirection * (b.submitTime - a.submitTime)
-      case 'rate':
-        return (a: Order, b: Order) => this.ordersSortDirection * (a.rate - b.rate)
-      case 'qty':
-        return (a: Order, b: Order) => this.ordersSortDirection * (a.qty - b.qty)
-      case 'type':
-        return (a: Order, b: Order) => this.ordersSortDirection *
-        OrderUtil.typeString(a).localeCompare(OrderUtil.typeString(b))
-      case 'sell':
-        return (a: Order, b: Order) => this.ordersSortDirection *
-          (OrderUtil.sellString(a)).localeCompare(OrderUtil.sellString(b))
-      case 'status':
-        return (a: Order, b: Order) => this.ordersSortDirection *
-          (OrderUtil.statusString(a)).localeCompare(OrderUtil.statusString(b))
-      case 'settled':
-        return (a: Order, b: Order) => this.ordersSortDirection *
-          ((OrderUtil.settled(a) * 100 / a.qty) - (OrderUtil.settled(b) * 100 / b.qty))
-      case 'filled':
-        return (a: Order, b: Order) => this.ordersSortDirection *
-          ((OrderUtil.filled(a) * 100 / a.qty) - (OrderUtil.filled(b) * 100 / b.qty))
-    }
-  }
-
   /* refreshActiveOrders refreshes the user's active order list. */
   refreshActiveOrders () {
     const page = this.page
@@ -1175,62 +1155,88 @@ export default class MarketsPage extends BasePage {
     for (const oid in metaOrders) delete metaOrders[oid]
     const orders = app().orders(market.dex.host, marketID(market.baseCfg.symbol, market.quoteCfg.symbol))
     // Sort orders by sort key.
-    const compare = this.ordersSortCompare()
-    orders.sort(compare)
+    orders.sort((a: Order, b: Order) => b.submitTime - a.submitTime)
 
-    Doc.empty(page.liveList)
+    Doc.empty(page.userOrders)
+    Doc.setVis(orders?.length, page.userOrders)
+    Doc.setVis(!orders?.length, page.userNoOrders)
+
     for (const ord of orders) {
-      const row = page.liveTemplate.cloneNode(true) as HTMLElement
-      metaOrders[ord.id] = {
-        row: row,
-        order: ord
+      const div = page.userOrderTmpl.cloneNode(true) as HTMLElement
+      page.userOrders.appendChild(div)
+
+      const header = Doc.parseTemplate(Doc.tmplElement(div, 'header'))
+      const detailsDiv = Doc.tmplElement(div, 'details')
+      const details = Doc.parseTemplate(detailsDiv)
+
+      const mord: MetaOrder = {
+        div: div,
+        header: header,
+        details: details,
+        ord: ord
       }
-      Doc.bind(row, 'mouseenter', () => {
+      metaOrders[ord.id] = mord
+
+      header.sideLight.classList.add(ord.sell ? 'sell' : 'buy')
+      details.side.textContent = header.side.textContent = OrderUtil.sellString(ord)
+      details.side.classList.add(ord.sell ? 'sellcolor' : 'buycolor')
+      header.side.classList.add(ord.sell ? 'sellcolor' : 'buycolor')
+      details.qty.textContent = header.qty.textContent = fourSigFigs(ord.qty / this.market.baseUnitInfo.conventional.conversionFactor)
+      details.rate.textContent = fourSigFigs(ord.rate / this.market.rateConversionFactor)
+      header.baseSymbol.textContent = ord.baseSymbol.toUpperCase()
+      details.type.textContent = OrderUtil.typeString(ord)
+      this.updateMetaOrder(mord)
+
+      Doc.bind(div, 'mouseenter', () => {
         this.activeMarkerRate = ord.rate
         this.setDepthMarkers()
       })
-      this.updateUserOrderRow(row, ord)
+
       if (ord.type === OrderUtil.Limit && (ord.tif === OrderUtil.StandingTiF && ord.status < OrderUtil.StatusExecuted)) {
-        const icon = Doc.tmplElement(row, 'cancelBttn')
-        Doc.show(icon)
-        bind(icon, 'click', e => {
+        Doc.show(details.cancelBttn)
+        bind(details.cancelBttn, 'click', e => {
           e.stopPropagation()
-          this.showCancel(row, ord.id)
+          this.showCancel(div, ord.id)
         })
       }
 
-      const accelerateBttn = Doc.tmplElement(row, 'accelerateBttn')
-      bind(accelerateBttn, 'click', e => {
+      bind(details.accelerateBttn, 'click', e => {
         e.stopPropagation()
         this.showAccelerate(ord)
       })
       if (app().canAccelerateOrder(ord)) {
-        Doc.show(accelerateBttn)
+        Doc.show(details.accelerateBttn)
       }
 
-      const side = Doc.tmplElement(row, 'side')
-      side.classList.add(ord.sell ? 'sellcolor' : 'buycolor')
-      const link = Doc.tmplElement(row, 'link')
-      link.href = `order/${ord.id}`
-      app().bindInternalNavigation(row)
-      page.liveList.appendChild(row)
-      app().bindTooltips(row)
+      Doc.bind(header.expander, 'click', () => {
+        if (Doc.isDisplayed(detailsDiv)) {
+          Doc.hide(detailsDiv)
+          header.expander.classList.add('ico-arrowdown')
+          header.expander.classList.remove('ico-arrowup')
+          return
+        }
+        Doc.show(detailsDiv)
+        header.expander.classList.remove('ico-arrowdown')
+        header.expander.classList.add('ico-arrowup')
+      })
+      details.link.href = `order/${ord.id}`
+      app().bindInternalNavigation(div)
+      app().bindTooltips(div)
     }
     this.setDepthMarkers()
   }
 
   /*
-  * updateUserOrderRow sets the td contents of the user's order table row.
+  * updateMetaOrder sets the td contents of the user's order table row.
   */
-  updateUserOrderRow (tr: HTMLElement, ord: Order) {
-    updateDataCol(tr, 'type', OrderUtil.typeString(ord))
-    updateDataCol(tr, 'side', OrderUtil.sellString(ord))
-    updateDataCol(tr, 'age', Doc.timeSince(ord.submitTime))
-    updateDataCol(tr, 'rate', Doc.formatCoinValue(ord.rate / this.market.rateConversionFactor))
-    updateDataCol(tr, 'qty', Doc.formatCoinValue(ord.qty, this.market.baseUnitInfo))
-    updateDataCol(tr, 'filled', `${(OrderUtil.filled(ord) / ord.qty * 100).toFixed(1)}%`)
-    updateDataCol(tr, 'settled', `${(OrderUtil.settled(ord) / ord.qty * 100).toFixed(1)}%`)
-    updateDataCol(tr, 'status', OrderUtil.statusString(ord))
+  updateMetaOrder (mord: MetaOrder) {
+    const { header, details, ord } = mord
+    if (ord.status <= OrderUtil.StatusBooked) header.activeLight.classList.add('active')
+    else header.activeLight.classList.remove('active')
+    details.status.textContent = header.status.textContent = OrderUtil.statusString(ord)
+    details.age.textContent = Doc.timeSince(ord.submitTime)
+    details.filled.textContent = `${(OrderUtil.filled(ord) / ord.qty * 100).toFixed(1)}%`
+    details.settled.textContent = `${(OrderUtil.settled(ord) / ord.qty * 100).toFixed(1)}%`
   }
 
   /* setMarkers sets the depth chart markers for booked orders. */
@@ -1240,8 +1246,7 @@ export default class MarketsPage extends BasePage {
       sells: []
     }
     const rateFactor = this.market.rateConversionFactor
-    for (const mo of Object.values(this.metaOrders)) {
-      const ord = mo.order
+    for (const { ord } of Object.values(this.metaOrders)) {
       if (ord.rate && ord.status === OrderUtil.StatusBooked) {
         if (ord.sell) {
           markers.sells.push({
@@ -1291,7 +1296,6 @@ export default class MarketsPage extends BasePage {
     this.refreshActiveOrders()
     this.handleBook(mktBook)
     this.updateTitle()
-    Doc.hide(page.marketLoader)
     this.marketList.select(host, b.id, q.id)
 
     State.store(lastMarketKey, {
@@ -1313,13 +1317,6 @@ export default class MarketsPage extends BasePage {
     this.balanceWgt.setWallets(host, b.id, q.id)
     this.setMarketBuyOrderEstimate()
     this.refreshActiveOrders()
-    if (this.loaded) {
-      this.loaded()
-      this.loaded = null
-      Doc.animate(250, progress => {
-        this.main.style.opacity = String(progress)
-      })
-    }
   }
 
   /* handleBookOrderRoute is the handler for 'book_order' notifications. */
@@ -1374,12 +1371,13 @@ export default class MarketsPage extends BasePage {
       this.candlesLoading.loaded()
       this.candlesLoading = null
     }
-    this.depthChart.hide()
-    this.candleChart.show()
-    if (data.host !== this.market.dex.host) return
+    if (data.host !== this.market.dex.host || data.marketID !== this.market.cfg.name) return
     const dur = data.payload.dur
     this.market.candleCaches[dur] = data.payload
-    if (this.currentChart !== candleChart || this.candleDur !== dur) return
+    this.setHighLow()
+    if (this.candleDur !== dur) return
+    if (this.loadingAnimations.candles) this.loadingAnimations.candles.stop()
+    this.candleChart.canvas.classList.remove('invisible')
     this.candleChart.setCandles(data.payload, this.market.cfg, this.market.baseUnitInfo, this.market.quoteUnitInfo)
   }
 
@@ -1401,7 +1399,7 @@ export default class MarketsPage extends BasePage {
       if (last.startStamp === candle.startStamp) candles[candles.length - 1] = candle
       else candles.push(candle)
     }
-    if (this.currentChart !== candleChart || this.candleDur !== dur) return
+    if (this.candleDur !== dur) return
     this.candleChart.draw()
   }
 
@@ -1409,8 +1407,7 @@ export default class MarketsPage extends BasePage {
   async showForm (form: HTMLElement) {
     this.currentForm = form
     const page = this.page
-    Doc.hide(page.unlockWalletForm, page.verifyForm, page.newWalletForm,
-      page.cancelForm, page.vDetailPane, page.accelerateForm, page.toggleWalletStatusConfirm)
+    Doc.hide(...Array.from(page.forms.children))
     form.style.right = '10000px'
     Doc.show(page.forms, form)
     const shift = (page.forms.offsetWidth + form.offsetWidth) / 2
@@ -1532,8 +1529,6 @@ export default class MarketsPage extends BasePage {
       }
     }
     // Visually differentiate between buy/sell orders.
-    const buyBtnClass = 'buygreen'
-    const sellBtnClass = 'sellred'
     if (isSell) {
       page.vHeader.classList.add(sellBtnClass)
       page.vHeader.classList.remove(buyBtnClass)
@@ -1744,10 +1739,10 @@ export default class MarketsPage extends BasePage {
 
   /* showCancel shows a form to confirm submission of a cancel order. */
   showCancel (row: HTMLElement, orderID: string) {
-    const order = this.metaOrders[orderID].order
+    const ord = this.metaOrders[orderID].ord
     const page = this.page
-    const remaining = order.qty - order.filled
-    const asset = OrderUtil.isMarketBuy(order) ? this.market.quote : this.market.base
+    const remaining = ord.qty - ord.filled
+    const asset = OrderUtil.isMarketBuy(ord) ? this.market.quote : this.market.base
     page.cancelRemain.textContent = Doc.formatCoinValue(remaining, asset.unitInfo)
     page.cancelUnit.textContent = asset.symbol.toUpperCase()
     Doc.hide(page.cancelErr)
@@ -1755,7 +1750,7 @@ export default class MarketsPage extends BasePage {
     page.cancelPass.focus()
     this.cancelData = {
       bttn: Doc.tmplElement(row, 'cancelBttn'),
-      order: order
+      order: ord
     }
   }
 
@@ -1802,16 +1797,17 @@ export default class MarketsPage extends BasePage {
     this.showVerify()
   }
 
+  /* Display a deposit address. */
+  async showDeposit (assetID: number) {
+    this.depositAddrForm.setAsset(assetID)
+    this.showForm(this.page.deposit)
+  }
+
   /*
    * handlePriceUpdate is the handler for the 'spots' notification.
    */
   handlePriceUpdate (note: SpotPriceNote) {
-    const xcSection = this.marketList.xcSection(note.host)
-    if (!xcSection || !xcSection.marketRows) return
-    for (const spot of Object.values(note.spots)) {
-      const marketRow = xcSection.marketRow(spot.baseID, spot.quoteID)
-      if (marketRow) marketRow.setSpot(spot)
-    }
+    this.marketList.updateSpots(note)
   }
 
   /*
@@ -1832,20 +1828,18 @@ export default class MarketsPage extends BasePage {
    */
   handleOrderNote (note: OrderNote) {
     const order = note.order
-    const metaOrder = this.metaOrders[order.id]
+    const mord = this.metaOrders[order.id]
     // If metaOrder doesn't exist for the given order it means it was
     // created via dexcctl and the GUI isn't aware of it.
     // Call refreshActiveOrders to grab the order.
-    if (!metaOrder) return this.refreshActiveOrders()
-    const oldStatus = metaOrder.status
-    metaOrder.order = order
-    const cancelBttn = Doc.tmplElement(metaOrder.row, 'cancelBttn')
-    if (note.topic === 'MissedCancel') Doc.show(cancelBttn)
-    if (order.filled === order.qty) Doc.hide(cancelBttn)
-    const accelerateBttn = Doc.tmplElement(metaOrder.row, 'accelerateBttn')
-    if (app().canAccelerateOrder(order)) Doc.show(accelerateBttn)
-    else Doc.hide(accelerateBttn)
-    this.updateUserOrderRow(metaOrder.row, order)
+    if (!mord) return this.refreshActiveOrders()
+    const oldStatus = mord.status
+    mord.ord = order
+    if (note.topic === 'MissedCancel') Doc.show(mord.details.cancelBttn)
+    if (order.filled === order.qty) Doc.hide(mord.details.cancelBttn)
+    if (app().canAccelerateOrder(order)) Doc.show(mord.details.accelerateBttn)
+    else Doc.hide(mord.details.accelerateBttn)
+    this.updateMetaOrder(mord)
     // Only reset markers if there is a change, since the chart is redrawn.
     if ((oldStatus === OrderUtil.StatusEpoch && order.status === OrderUtil.StatusBooked) ||
       (oldStatus === OrderUtil.StatusBooked && order.status > OrderUtil.StatusBooked)) this.setDepthMarkers()
@@ -1863,26 +1857,26 @@ export default class MarketsPage extends BasePage {
     }
 
     this.clearOrderTableEpochs()
-    for (const metaOrder of Object.values(this.metaOrders)) {
-      const order = metaOrder.order
-      const alreadyMatched = note.epoch > order.epoch
-      const statusTD = Doc.tmplElement(metaOrder.row, 'status')
+    for (const { ord, details, header } of Object.values(this.metaOrders)) {
+      const alreadyMatched = note.epoch > ord.epoch
       switch (true) {
-        case order.type === OrderUtil.Limit && order.status === OrderUtil.StatusEpoch && alreadyMatched:
-          statusTD.textContent = order.tif === OrderUtil.ImmediateTiF ? intl.prep(intl.ID_EXECUTED) : intl.prep(intl.ID_BOOKED)
-          order.status = order.tif === OrderUtil.ImmediateTiF ? OrderUtil.StatusExecuted : OrderUtil.StatusBooked
+        case ord.type === OrderUtil.Limit && ord.status === OrderUtil.StatusEpoch && alreadyMatched: {
+          const status = ord.tif === OrderUtil.ImmediateTiF ? intl.prep(intl.ID_EXECUTED) : intl.prep(intl.ID_BOOKED)
+          details.status.textContent = header.status.textContent = status
+          ord.status = ord.tif === OrderUtil.ImmediateTiF ? OrderUtil.StatusExecuted : OrderUtil.StatusBooked
           break
-        case order.type === OrderUtil.Market && order.status === OrderUtil.StatusEpoch:
+        }
+        case ord.type === OrderUtil.Market && ord.status === OrderUtil.StatusEpoch:
           // Technically don't know if this should be 'executed' or 'settling'.
-          statusTD.textContent = intl.prep(intl.ID_EXECUTED)
-          order.status = OrderUtil.StatusExecuted
+          details.status.textContent = header.status.textContent = intl.prep(intl.ID_EXECUTED)
+          ord.status = OrderUtil.StatusExecuted
           break
       }
     }
   }
 
   /*
-   * ordersSortCompare returns sort compare function according to the active
+   * recentMatchesSortCompare returns sort compare function according to the active
    * sort key and direction.
    */
   recentMatchesSortCompare () {
@@ -1905,14 +1899,13 @@ export default class MarketsPage extends BasePage {
     recentMatches.sort(compare)
     for (const match of recentMatches) {
       const row = page.recentMatchesTemplate.cloneNode(true) as HTMLElement
-
+      const tmpl = Doc.parseTemplate(row)
       app().bindTooltips(row)
-      updateDataCol(row, 'rate', Doc.formatCoinValue(match.rate / this.market.rateConversionFactor))
-      // change rate color based if is sell or not.
-      updateDataCol(row, 'qty', Doc.formatCoinValue(match.qty, this.market.baseUnitInfo))
-      updateDataCol(row, 'age', new Date(match.stamp).toLocaleTimeString())
+      tmpl.rate.textContent = Doc.formatCoinValue(match.rate / this.market.rateConversionFactor)
+      tmpl.qty.textContent = Doc.formatCoinValue(match.qty, this.market.baseUnitInfo)
+      tmpl.age.textContent = Doc.timeSince(match.stamp)
+      tmpl.age.dataset.sinceStamp = String(match.stamp)
       row.classList.add(match.sell ? 'sellcolor' : 'buycolor')
-
       page.recentMatchesLiveList.append(row)
     }
   }
@@ -1924,8 +1917,7 @@ export default class MarketsPage extends BasePage {
   setBalanceVisibility () {
     const mkt = this.market
     if (!mkt || !mkt.dex) return
-    if (mkt.dex.connectionStatus === ConnectionStatus.Connected) Doc.show(this.page.balanceTable)
-    else Doc.hide(this.page.balanceTable)
+    this.balanceWgt.setBalanceVisibility(mkt.dex.connectionStatus === ConnectionStatus.Connected)
   }
 
   /* handleBalanceNote handles notifications updating a wallet's balance. */
@@ -1996,6 +1988,7 @@ export default class MarketsPage extends BasePage {
     const asset = user.assets[this.currentCreate.id]
     Doc.hide(this.page.forms)
     this.balanceWgt.updateAsset(asset.id)
+    Doc.setVis(!(this.market.base.wallet && this.market.quote.wallet), this.page.noWallet)
     this.resolveOrderFormVisibility()
   }
 
@@ -2255,7 +2248,7 @@ export default class MarketsPage extends BasePage {
       // or this may be the first opportunity to get the server's config, so
       // fetch it all before reloading the markets page.
       await app().fetchUser()
-      await app().loadPage('markets')
+      if (!this.market) this.init({})
     }
   }
 
@@ -2264,7 +2257,7 @@ export default class MarketsPage extends BasePage {
    * value of the search input.
    */
   filterMarkets () {
-    const filterTxt = this.page.marketSearch.value
+    const filterTxt = this.page.marketSearchV1.value
     const filter = filterTxt ? (mkt: MarketRow) => mkt.name.includes(filterTxt) : () => true
     this.marketList.setFilter(filter)
   }
@@ -2273,33 +2266,6 @@ export default class MarketsPage extends BasePage {
   drawChartLines () {
     this.depthChart.setLines([...this.depthLines.hover, ...this.depthLines.input])
     this.depthChart.draw()
-  }
-
-  /*
-   * depthChartSelected is called when the user clicks a button to show the
-   * depth chart.
-  */
-  depthChartSelected () {
-    const page = this.page
-    Doc.hide(page.depthBttn, page.durBttnBox, page.candleHoverData)
-    Doc.show(page.candlestickBttn, page.epochLine, page.depthHoverData, page.depthSummary)
-    this.currentChart = depthChart
-    this.depthChart.show()
-    this.candleChart.hide()
-  }
-
-  /*
-   * candleChartSelected is called when the user clicks a button to show the
-   * historical market data (candlestick) chart.
-  */
-  candleChartSelected () {
-    const page = this.page
-    const dex = this.market.dex
-    this.currentChart = candleChart
-    Doc.hide(page.candlestickBttn, page.epochLine, page.depthHoverData, page.depthSummary)
-    Doc.show(page.depthBttn, page.durBttnBox, page.candleHoverData)
-    if (dex.candleDurs.indexOf(this.candleDur) === -1) this.candleDur = dex.candleDurs[0]
-    this.loadCandles()
   }
 
   /* candleDurationSelected sets the candleDur and loads the candles. */
@@ -2320,8 +2286,8 @@ export default class MarketsPage extends BasePage {
     const { candleCaches, cfg, baseUnitInfo, quoteUnitInfo } = this.market
     const cache = candleCaches[this.candleDur]
     if (cache) {
-      this.depthChart.hide()
-      this.candleChart.show()
+      // this.depthChart.hide()
+      // this.candleChart.show()
       this.candleChart.setCandles(cache, cfg, baseUnitInfo, quoteUnitInfo)
       return
     }
@@ -2331,11 +2297,10 @@ export default class MarketsPage extends BasePage {
   /* requestCandles sends the loadcandles request. */
   requestCandles () {
     this.candlesLoading = {
-      loaded: () => { Doc.hide(this.page.marketLoader) },
+      loaded: () => { /* pass */ },
       timer: window.setTimeout(() => {
         if (this.candlesLoading) {
           this.candlesLoading = null
-          Doc.hide(this.page.marketLoader)
           console.error('candles not received')
         }
       }, 10000)
@@ -2370,69 +2335,68 @@ export default class MarketsPage extends BasePage {
  * and sort order of markets.
  */
 class MarketList {
-  xcSections: ExchangeSection[]
+  // xcSections: ExchangeSection[]
+  div: PageElement
+  rowTmpl: PageElement
+  markets: MarketRow[]
   selected: MarketRow
 
   constructor (div: HTMLElement) {
-    const xcTmpl = Doc.tmplElement(div, 'xc')
-    Doc.cleanTemplates(xcTmpl)
-    this.xcSections = []
-    for (const dex of Object.values(app().user.exchanges)) {
-      this.xcSections.push(new ExchangeSection(xcTmpl, dex))
-    }
-    // Initial sort is alphabetical.
-    for (const xc of this.sortedSections()) {
-      div.appendChild(xc.node)
+    this.div = div
+    this.rowTmpl = Doc.idel(div, 'marketTmplV1')
+    Doc.cleanTemplates(this.rowTmpl)
+    this.reloadMarketsPane()
+  }
+
+  updateSpots (note: SpotPriceNote) {
+    for (const row of this.markets) {
+      if (row.mkt.xc.host !== note.host) continue
+      const spot = note.spots[row.mkt.name]
+      if (!spot) return
+      const xc = app().exchanges[row.mkt.xc.host]
+      const mkt = xc.markets[row.mkt.name]
+      setPriceAndChange(row.tmpl, xc, mkt)
     }
   }
 
-  /*
-   * sortedSections returns a list of ExchangeSection sorted alphabetically by
-   * host.
-   */
-  sortedSections () {
-    return [...this.xcSections].sort((a, b) => a.host < b.host ? -1 : 1)
+  reloadMarketsPane (): void {
+    Doc.empty(this.div)
+    this.markets = []
+
+    const addMarket = (mkt: ExchangeMarket) => {
+      const bui = app().unitInfo(mkt.baseid, mkt.xc)
+      const qui = app().unitInfo(mkt.quoteid, mkt.xc)
+      const rateConversionFactor = OrderUtil.RateEncodingFactor / bui.conventional.conversionFactor * qui.conventional.conversionFactor
+      const row = new MarketRow(this.rowTmpl, mkt, rateConversionFactor)
+      this.div.appendChild(row.node)
+      return row
+    }
+
+    for (const mkt of sortedMarkets()) this.markets.push(addMarket(mkt))
   }
 
-  /*
-   * xcSection is a getter for the ExchangeSection for a specified host.
-   */
-  xcSection (host: string) {
-    for (const xc of this.xcSections) {
-      if (xc.host === host) return xc
+  find (host: string, baseID: number, quoteID: number): MarketRow | null {
+    for (const row of this.markets) {
+      if (row.mkt.xc.host === host && row.mkt.baseid === baseID && row.mkt.quoteid === quoteID) return row
     }
     return null
   }
 
   /* exists will be true if the specified market exists. */
-  exists (host: string, baseID: number, quoteID: number) {
-    const xc = this.xcSection(host)
-    // If connecting to an offline server the client is not able to get xc.marketRows.
-    // Therefore we must check for it.
-    if (!xc || !xc.marketRows) return false
-    for (const mkt of xc.marketRows) {
-      if (mkt.baseID === baseID && mkt.quoteID === quoteID) return true
-    }
-    return false
+  exists (host: string, baseID: number, quoteID: number): boolean {
+    return this.find(host, baseID, quoteID) !== null
   }
 
   /* first gets the first market from the first exchange, alphabetically. */
-  first () {
-    const firstXC = this.sortedSections()[0]
-    const firstMkt = firstXC.first()
-    // Cannot find markets if server connection failed.
-    if (!firstMkt) return makeMarket(firstXC.host)
-    return makeMarket(firstXC.host, firstMkt.baseID, firstMkt.quoteID)
+  first (): MarketRow {
+    return this.markets[0]
   }
 
   /* select sets the specified market as selected. */
   select (host: string, baseID: number, quoteID: number) {
-    if (this.selected) this.selected.node.classList.remove('selected')
-    const xcSection = this.xcSection(host)
-    if (!xcSection) return console.error(`select: no exchange section for ${host}`)
-    const marketRow = xcSection.marketRow(baseID, quoteID)
-    if (!marketRow) return console.error(`select: no market row for ${host}, ${baseID}-${quoteID}`)
-    this.selected = marketRow
+    const row = this.find(host, baseID, quoteID)
+    if (!row) return console.error(`select: no market row for ${host}, ${baseID}-${quoteID}`)
+    this.selected = row
     this.selected.node.classList.add('selected')
   }
 
@@ -2440,99 +2404,20 @@ class MarketList {
    * on the core.ConnEventNote.
    */
   setConnectionStatus (note: ConnEventNote) {
-    const xcSection = this.xcSection(note.host)
-    if (!xcSection) return console.error(`setConnectionStatus: no exchange section for ${note.host}`)
-    xcSection.setConnected(note.connectionStatus === ConnectionStatus.Connected)
+    for (const row of this.markets) {
+      if (row.mkt.xc.host !== note.host) continue
+      if (note.connectionStatus === ConnectionStatus.Connected) Doc.hide(row.tmpl.disconnectedIco)
+      else Doc.show(row.tmpl.disconnectedIco)
+    }
   }
 
   /*
    * setFilter sets the visibility of market rows based on the provided filter.
    */
   setFilter (filter: (mkt: MarketRow) => boolean) {
-    for (const xc of this.xcSections) {
-      xc.setFilter(filter)
-    }
-  }
-}
-
-/*
- * ExchangeSection is a top level section of the MarketList.
- */
-class ExchangeSection {
-  marketRows: MarketRow[]
-  host: string
-  dex: Exchange
-  node: HTMLElement
-  disconnectedIco: PageElement
-
-  constructor (template: HTMLElement, dex: Exchange) {
-    this.dex = dex
-    this.host = dex.host
-    this.node = template.cloneNode(true) as HTMLElement
-    const tmpl = Doc.parseTemplate(this.node)
-    tmpl.header.textContent = dex.host
-
-    this.disconnectedIco = tmpl.disconnected
-    if (dex.connectionStatus === ConnectionStatus.Connected) Doc.hide(tmpl.disconnected)
-
-    tmpl.mkts.removeChild(tmpl.mktrow)
-    // If disconnected is not possible to get the markets from the server.
-    if (!dex.markets) return
-
-    this.marketRows = Object.values(dex.markets).map(mkt => {
-      const bui = app().unitInfo(mkt.baseid, dex)
-      const qui = app().unitInfo(mkt.quoteid, dex)
-      const rateConversionFactor = OrderUtil.RateEncodingFactor / bui.conventional.conversionFactor * qui.conventional.conversionFactor
-      return new MarketRow(tmpl.mktrow, mkt, rateConversionFactor)
-    })
-
-    // for (const mkt of Object.values(dex.markets)) {
-    //   this.marketRows.push(new MarketRow(tmpl.mktrow, mkt))
-    // }
-    for (const market of this.sortedMarkets()) {
-      tmpl.mkts.appendChild(market.node)
-    }
-  }
-
-  /*
-   * sortedMarkets is the list of MarketRow sorted alphabetically by the base
-   * symbol first, quote symbol second.
-   */
-  sortedMarkets () {
-    if (!this.marketRows) return []
-    return [...this.marketRows].sort((a, b) => a.name < b.name ? -1 : 1)
-  }
-
-  /*
-   * first returns the first market in the alphabetically-sorted list of
-   * markets.
-   */
-  first () {
-    return this.sortedMarkets()[0]
-  }
-
-  /*
-   * marketRow gets the MarketRow for the specified market.
-   */
-  marketRow (baseID: number, quoteID: number) {
-    for (const mkt of this.marketRows) {
-      if (mkt.baseID === baseID && mkt.quoteID === quoteID) return mkt
-    }
-  }
-
-  /* setConnected sets the visiblity of the disconnected icon. */
-  setConnected (isConnected: boolean) {
-    if (isConnected) Doc.hide(this.disconnectedIco)
-    else Doc.show(this.disconnectedIco)
-  }
-
-  /*
-   * setFilter sets the visibility of market rows based on the provided filter.
-   */
-  setFilter (filter: (mkt: MarketRow) => boolean) {
-    for (const mkt of this.marketRows) {
-      if (filter(mkt)) Doc.show(mkt.node)
-      else Doc.hide(mkt.node)
+    for (const row of this.markets) {
+      if (filter(row)) Doc.show(row.node)
+      else Doc.hide(row.node)
     }
   }
 }
@@ -2543,7 +2428,7 @@ class ExchangeSection {
  */
 class MarketRow {
   node: HTMLElement
-  mkt: Market
+  mkt: ExchangeMarket
   name: string
   baseID: number
   quoteID: number
@@ -2552,7 +2437,7 @@ class MarketRow {
   tmpl: Record<string, PageElement>
   rateConversionFactor: number
 
-  constructor (template: HTMLElement, mkt: Market, rateConversionFactor: number) {
+  constructor (template: HTMLElement, mkt: ExchangeMarket, rateConversionFactor: number) {
     this.mkt = mkt
     this.name = mkt.name
     this.baseID = mkt.baseid
@@ -2566,27 +2451,19 @@ class MarketRow {
     tmpl.quoteIcon.src = Doc.logoPath(mkt.quotesymbol)
     tmpl.baseSymbol.appendChild(Doc.symbolize(mkt.basesymbol))
     tmpl.quoteSymbol.appendChild(Doc.symbolize(mkt.quotesymbol))
-    this.setSpot(mkt.spot)
+    tmpl.baseName.textContent = mkt.baseName
+    setPriceAndChange(tmpl, mkt.xc, mkt)
   }
+}
 
-  setSpot (spot: Spot) {
-    if (!spot) return
-    const { tmpl, mkt } = this
-
-    Doc.show(tmpl.pctChange)
-    const pct = spot.change24 * 100
-    const num = percentFormatter.format(pct)
-    const sign = pct > 0 ? '+' : ''
-    tmpl.pctChange.textContent = `${sign}${num}%`
-    tmpl.pctChange.classList.remove('upgreen', 'downred', 'grey')
-    tmpl.pctChange.classList.add(pct === 0 ? 'grey' : pct > 0 ? 'upgreen' : 'downred')
-    const baseAsset = app().assets[mkt.baseid]
-    if (baseAsset) {
-      Doc.show(tmpl.bottomRow)
-      tmpl.assetName.textContent = baseAsset.name
-      tmpl.price.textContent = Doc.formatCoinValue(spot.rate / this.rateConversionFactor)
-    }
-  }
+interface BalanceWidgetElement {
+  id: number
+  parentID: number
+  cfg: Asset | null
+  node: PageElement
+  tmpl: Record<string, PageElement>
+  iconBox: PageElement
+  stateIcons: WalletIcons
 }
 
 /*
@@ -2599,60 +2476,46 @@ class MarketRow {
 class BalanceWidget {
   base: BalanceWidgetElement
   quote: BalanceWidgetElement
-  parentRow: PageElement
+  // parentRow: PageElement
   dex: Exchange
 
-  constructor (table: HTMLElement) {
-    const els = Doc.idDescendants(table)
+  constructor (base: HTMLElement, quote: HTMLElement) {
+    Doc.hide(base, quote)
+    const btmpl = Doc.parseTemplate(base)
     this.base = {
       id: 0,
       parentID: parentIDNone,
       cfg: null,
-      logo: els.baseImg,
-      symbol: els.balBaseSymbol,
-      avail: els.baseAvail,
-      newWalletRow: els.baseNewWalletRow,
-      newWalletBttn: els.baseNewButton,
-      walletPendingRow: els.baseWalletPendingRow,
-      locked: els.baseLocked,
-      immature: els.baseImmature,
-      parentBal: els.baseParent,
-      parentIcon: els.baseParentLogo,
-      unsupported: els.baseUnsupported,
-      expired: els.baseExpired,
-      connect: els.baseConnect,
-      spinner: els.baseSpinner,
-      iconBox: els.baseWalletState,
-      stateIcons: new WalletIcons(els.baseWalletState)
+      node: base,
+      tmpl: btmpl,
+      iconBox: btmpl.walletState,
+      stateIcons: new WalletIcons(btmpl.walletState)
     }
+    btmpl.balanceRowTmpl.remove()
+
+    const qtmpl = Doc.parseTemplate(quote)
     this.quote = {
       id: 0,
       parentID: parentIDNone,
       cfg: null,
-      logo: els.quoteImg,
-      symbol: els.balQuoteSymbol,
-      avail: els.quoteAvail,
-      newWalletRow: els.quoteNewWalletRow,
-      newWalletBttn: els.quoteNewButton,
-      walletPendingRow: els.quoteWalletPendingRow,
-      locked: els.quoteLocked,
-      immature: els.quoteImmature,
-      parentBal: els.quoteParent,
-      parentIcon: els.quoteParentLogo,
-      unsupported: els.quoteUnsupported,
-      expired: els.quoteExpired,
-      connect: els.quoteConnect,
-      spinner: els.quoteSpinner,
-      iconBox: els.quoteWalletState,
-      stateIcons: new WalletIcons(els.quoteWalletState)
+      node: quote,
+      tmpl: qtmpl,
+      iconBox: qtmpl.walletState,
+      stateIcons: new WalletIcons(qtmpl.walletState)
     }
-    this.parentRow = els.parentBalance
+    qtmpl.balanceRowTmpl.remove()
+    // this.parentRow = els.parentBalance
 
     app().registerNoteFeeder({
       balance: (note: BalanceNote) => { this.updateAsset(note.assetID) },
       walletstate: (note: WalletStateNote) => { this.updateAsset(note.wallet.assetID) },
       createwallet: (note: WalletCreationNote) => { this.updateAsset(note.assetID) }
     })
+  }
+
+  setBalanceVisibility (connected: boolean) {
+    if (connected) Doc.show(this.base.node, this.quote.node)
+    else Doc.hide(this.base.node, this.quote.node)
   }
 
   /*
@@ -2671,7 +2534,6 @@ class BalanceWidget {
     this.quote.id = quoteID
     this.quote.parentID = parentID(quoteID)
     this.quote.cfg = this.dex.assets[quoteID]
-    Doc.hide(this.parentRow)
     this.updateWallet(this.base)
     this.updateWallet(this.quote)
   }
@@ -2681,74 +2543,88 @@ class BalanceWidget {
    * core.Wallet state.
    */
   updateWallet (side: BalanceWidgetElement) {
-    if (!side.cfg) return // no wallet set yet
-    const asset = app().assets[side.id]
+    const { cfg, tmpl, iconBox, stateIcons, id: assetID } = side
+    if (!cfg) return // no wallet set yet
+    const asset = app().assets[assetID]
     // Just hide everything to start.
     Doc.hide(
-      side.newWalletRow, side.avail, side.immature, side.locked,
-      side.expired, side.unsupported, side.connect, side.spinner, side.iconBox,
-      side.walletPendingRow, side.parentIcon
+      tmpl.newWalletRow, tmpl.expired, tmpl.unsupported, tmpl.connect, tmpl.spinner,
+      tmpl.walletState, tmpl.balanceRows, tmpl.walletAddr
     )
-    side.logo.src = Doc.logoPath(side.cfg.symbol)
-    Doc.empty(side.symbol)
-    side.symbol.appendChild(Doc.symbolize(side.cfg.symbol))
+    tmpl.logo.src = Doc.logoPath(cfg.symbol)
+    tmpl.addWalletSymbol.textContent = cfg.symbol.toUpperCase()
+    Doc.empty(tmpl.symbol)
+    tmpl.symbol.appendChild(Doc.symbolize(cfg.symbol))
     // Handle an unsupported asset.
     if (!asset) {
-      Doc.show(side.unsupported)
+      Doc.show(tmpl.unsupported)
       return
     }
-    Doc.show(side.iconBox)
+    Doc.show(iconBox)
     const wallet = asset.wallet
-    side.stateIcons.readWallet(wallet)
+    stateIcons.readWallet(wallet)
     // Handle no wallet configured.
     if (!wallet) {
       if (asset.walletCreationPending) {
-        Doc.show(side.walletPendingRow)
+        Doc.show(tmpl.spinner)
         return
       }
-      Doc.show(side.newWalletRow)
+      Doc.show(tmpl.newWalletRow)
       return
     }
+    Doc.show(tmpl.walletAddr)
     // Parent asset
-    side.parentBal.textContent = '—'
-    if (asset.token) {
-      Doc.show(this.parentRow, side.parentIcon)
-      const { wallet: { balance }, unitInfo, symbol } = app().assets[asset.token.parentID]
-      side.parentBal.textContent = Doc.formatCoinValue(balance.available, unitInfo)
-      side.parentIcon.src = Doc.logoPath(symbol)
-    }
     const bal = wallet.balance
     // Handle not connected and no balance known for the DEX.
     if (!bal && !wallet.running && !wallet.disabled) {
-      Doc.show(side.connect)
+      Doc.show(tmpl.connect)
       return
     }
     // If there is no balance, but the wallet is connected, show the loading
     // icon while we fetch an update.
     if (!bal) {
-      app().fetchBalance(side.id)
-      Doc.show(side.spinner)
+      app().fetchBalance(assetID)
+      Doc.show(tmpl.spinner)
       return
     }
+
     // We have a wallet and a DEX-specific balance. Set all of the fields.
-    Doc.show(side.avail, side.immature, side.locked)
-    side.avail.textContent = Doc.formatCoinValue(bal.available, asset.unitInfo)
-    side.locked.textContent = Doc.formatCoinValue((bal.locked + bal.contractlocked), asset.unitInfo)
-    side.immature.textContent = Doc.formatCoinValue(bal.immature, asset.unitInfo)
+    Doc.show(tmpl.balanceRows)
+    Doc.empty(tmpl.balanceRows)
+    const addRow = (title: string, bal: number, ui: UnitInfo, icon?: PageElement) => {
+      const row = tmpl.balanceRowTmpl.cloneNode(true) as PageElement
+      tmpl.balanceRows.appendChild(row)
+      const balTmpl = Doc.parseTemplate(row)
+      balTmpl.title.textContent = title
+      balTmpl.bal.textContent = Doc.formatCoinValue(bal, ui)
+      if (icon) balTmpl.bal.append(icon)
+    }
+
+    addRow(intl.prep(intl.ID_AVAILABLE), bal.available, asset.unitInfo)
+    addRow(intl.prep(intl.ID_LOCKED), bal.locked + bal.contractlocked, asset.unitInfo)
+    addRow(intl.prep(intl.ID_IMMATURE), bal.immature, asset.unitInfo)
+    if (asset.token) {
+      const { wallet: { balance }, unitInfo, symbol } = app().assets[asset.token.parentID]
+      const icon = document.createElement('img')
+      icon.src = Doc.logoPath(symbol)
+      icon.classList.add('micro-icon')
+      addRow(intl.prep(intl.ID_FEE_BALANCE), balance.available, unitInfo, icon)
+    }
+
     // If the current balance update time is older than an hour, show the
     // expiration icon. Request a balance update, if possible.
     const expired = new Date().getTime() - new Date(bal.stamp).getTime() > anHour
     if (expired && !wallet.disabled) {
-      Doc.show(side.expired)
-      if (wallet.running) app().fetchBalance(side.id)
-    } else Doc.hide(side.expired)
+      Doc.show(tmpl.expired)
+      if (wallet.running) app().fetchBalance(assetID)
+    } else Doc.hide(tmpl.expired)
   }
 
   /* updateParent updates the side's parent asset balance. */
   updateParent (side: BalanceWidgetElement) {
     const { wallet: { balance }, unitInfo, symbol } = app().assets[side.parentID]
-    side.parentBal.textContent = Doc.formatCoinValue(balance.available, unitInfo)
-    side.parentIcon.src = Doc.logoPath(symbol)
+    side.tmpl.parentBal.textContent = Doc.formatCoinValue(balance.available, unitInfo)
+    side.tmpl.parentLogo.src = Doc.logoPath(symbol)
   }
 
   /*
@@ -2786,13 +2662,6 @@ function convertToAtoms (s: string, conversionFactor: number) {
 function swapBttns (before: HTMLElement, now: HTMLElement) {
   before.classList.remove('selected')
   now.classList.add('selected')
-}
-
-/*
- * updateDataCol sets the textContent of descendent template element.
- */
-function updateDataCol (tr: HTMLElement, col: string, s: string) {
-  Doc.tmplElement(tr, col).textContent = s
 }
 
 /*
@@ -2942,4 +2811,62 @@ class OrderTableRowManager {
       return this.isEpoch() ? 1 : -1
     }
   }
+}
+
+interface ExchangeMarket extends Market {
+  xc: Exchange
+  baseName: string
+  bui: UnitInfo
+}
+
+function sortedMarkets (): ExchangeMarket[] {
+  const mkts: ExchangeMarket[] = []
+  const assets = app().assets
+  const convertMarkets = (xc: Exchange, mkts: Market[]) => {
+    return mkts.map((mkt: Market) => {
+      const a = assets[mkt.baseid]
+      const baseName = a ? a.name : mkt.basesymbol
+      const bui = app().unitInfo(mkt.baseid, xc)
+      return Object.assign({ xc, baseName, bui }, mkt)
+    })
+  }
+  for (const xc of Object.values(app().exchanges)) mkts.push(...convertMarkets(xc, Object.values(xc.markets || {})))
+  mkts.sort((a: ExchangeMarket, b: ExchangeMarket): number => {
+    if (!a.spot) {
+      if (b.spot) return 1 // put b first, since we have the spot
+      // no spots. compare market name then host name
+      if (a.name === b.name) return a.xc.host.localeCompare(b.xc.host)
+      return a.name.localeCompare(b.name)
+    } else if (!b.spot) return -1 // put a first, since we have the spot
+    const [aLots, bLots] = [a.spot.vol24 / a.lotsize, b.spot.vol24 / b.lotsize]
+    return bLots - aLots // whoever has more volume by lot count
+  })
+  return mkts
+}
+
+const FourSigFigs = new Intl.NumberFormat((navigator.languages as string[]), {
+  minimumSignificantDigits: 4,
+  maximumSignificantDigits: 4
+})
+
+const intFormatter = new Intl.NumberFormat((navigator.languages as string[]))
+
+function fourSigFigs (v: number): string {
+  if (v < 100) return FourSigFigs.format(v)
+  return intFormatter.format(Math.round(v))
+}
+
+function setMarketDetails (tmpl: Record<string, PageElement>, mkt: Market) {
+  tmpl.baseIcon.src = Doc.logoPath(mkt.basesymbol)
+  tmpl.quoteIcon.src = Doc.logoPath(mkt.quotesymbol)
+  tmpl.baseSymbol.textContent = mkt.basesymbol.toUpperCase()
+  tmpl.quoteSymbol.textContent = mkt.quotesymbol.toUpperCase()
+}
+
+function setPriceAndChange (tmpl: Record<string, PageElement>, xc: Exchange, mkt: Market) {
+  if (!mkt.spot) return
+  tmpl.price.textContent = fourSigFigs(app().conventionalRate(mkt.baseid, mkt.quoteid, mkt.spot.rate, xc))
+  const sign = mkt.spot.change24 > 0 ? '+' : ''
+  tmpl.change.classList.add(mkt.spot.change24 >= 0 ? 'buycolor' : 'sellcolor')
+  tmpl.change.textContent = `${sign}${(mkt.spot.change24 * 100).toFixed(1)}%`
 }

@@ -1,8 +1,4 @@
 .walletspage {
-  .grey {
-    color: #999;
-  }
-
   .ico-unlocked {
     color: #1e7d11;
   }
@@ -21,15 +17,6 @@
 
   .mw-90p {
     min-width: 90%;
-  }
-
-  .bg1 {
-    background-color: #0e0c1b;
-  }
-
-  .border-top-lt-xxl,
-  .border-top-lt-lg {
-    border-top: 1px solid #7777;
   }
 
   #depositAddress {
@@ -52,12 +39,9 @@
     margin-right: 5px;
   }
 
-  #copyAlert {
-    margin-left: 12px;
-    position: absolute;
-  }
-
   #assetSelect {
+    border-right: 1px solid $dark-border-color;
+
     .icon-select {
       padding: 15px;
       cursor: pointer;
@@ -185,6 +169,15 @@
     width: 100px;
     height: 100px;
   }
+
+  #marketsOverviewBox {
+    border-left: 1px solid $light_border_color;
+    border-bottom: 1px solid $light_border_color;
+  }
+
+  #walletDetailsBox {
+    border-bottom: $light_border_color;
+  }
 }
 
 @include media-breakpoint-up(xxl) {
@@ -193,12 +186,12 @@
   }
 
   .walletspage {
-    .border-top-lt-xxl {
-      border-top: none;
-    }
-
     .flex-nowrap-xxl {
       flex-wrap: nowrap;
+    }
+
+    div#orderActivityBox {
+      border-top: none;
     }
   }
 }
@@ -213,12 +206,17 @@
   }
 
   .walletspage {
-    .bg1-lg {
-      background-color: #0e0c1b;
+    #orderActivityBox {
+      border-top: 1px solid $dark-border-color;
     }
 
-    .border-top-lt-lg {
-      border-top: none;
+    #marketsOverviewBox {
+      border-right: 1px solid $dark-border-color;
+      border-bottom: none;
+    }
+
+    #walletDetailsBox {
+      border-bottom: none;
     }
   }
 

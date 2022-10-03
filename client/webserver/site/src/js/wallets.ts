@@ -1,7 +1,13 @@
 import Doc, { Animation } from './doc'
 import BasePage from './basepage'
 import { postJSON } from './http'
-import { NewWalletForm, WalletConfigForm, UnlockWalletForm, bind as bindForm } from './forms'
+import {
+  NewWalletForm,
+  WalletConfigForm,
+  UnlockWalletForm,
+  DepositAddress,
+  bind as bindForm
+} from './forms'
 import State from './state'
 import * as intl from './locales'
 import * as OrderUtil from './orderutil'
@@ -21,7 +27,6 @@ import {
 
 const animationLength = 300
 const traitRescanner = 1
-const traitNewAddresser = 1 << 1
 const traitLogFiler = 1 << 2
 const traitRecoverer = 1 << 5
 const traitWithdrawer = 1 << 6
@@ -63,6 +68,7 @@ export default class WalletsPage extends BasePage {
   newWalletForm: NewWalletForm
   reconfigForm: WalletConfigForm
   unlockForm: UnlockWalletForm
+  depositAddrForm: DepositAddress
   keyup: (e: KeyboardEvent) => void
   changeWalletPW: boolean
   displayed: HTMLElement
@@ -88,7 +94,6 @@ export default class WalletsPage extends BasePage {
       Doc.bind(el, 'click', () => { this.closePopups() })
     })
     Doc.bind(page.cancelForce, 'click', () => { this.closePopups() })
-    Doc.bind(page.copyAddressBtn, 'click', () => { this.copyAddress() })
 
     this.selectedAssetID = -1
     Doc.cleanTemplates(
@@ -152,7 +157,7 @@ export default class WalletsPage extends BasePage {
     bindForm(page.toggleWalletStatusConfirm, page.toggleWalletStatusSubmit, async () => { this.toggleWalletStatus() })
 
     // New deposit address button.
-    Doc.bind(page.newDepAddrBttn, 'click', async () => { this.newDepositAddress() })
+    this.depositAddrForm = new DepositAddress(page.deposit)
 
     // Clicking on the available amount on the Send form populates the
     // amount field.
@@ -216,20 +221,6 @@ export default class WalletsPage extends BasePage {
   closePopups () {
     Doc.hide(this.page.forms)
     if (this.animation) this.animation.stop()
-  }
-
-  async copyAddress () {
-    const page = this.page
-    navigator.clipboard.writeText(page.depositAddress.textContent || '')
-      .then(() => {
-        Doc.show(page.copyAlert)
-        setTimeout(() => {
-          Doc.hide(page.copyAlert)
-        }, 800)
-      })
-      .catch((reason) => {
-        console.error('Unable to copy: ', reason)
-      })
   }
 
   // stepSend makes a request to get an estimated fee and displays the confirm
@@ -778,35 +769,8 @@ export default class WalletsPage extends BasePage {
 
   /* Display a deposit address. */
   async showDeposit (assetID: number) {
-    const page = this.page
-    Doc.hide(page.depositErr)
-    const box = page.deposit
-    const asset = app().assets[assetID]
-    page.depositLogo.src = Doc.logoPath(asset.symbol)
-    const wallet = app().walletMap[assetID]
-    page.depositName.textContent = asset.name
-    page.depositAddress.textContent = wallet.address
-    page.qrcode.src = `/generateqrcode?address=${wallet.address}`
-    if ((wallet.traits & traitNewAddresser) !== 0) Doc.show(page.newDepAddrBttn)
-    else Doc.hide(page.newDepAddrBttn)
-    this.showForm(box)
-  }
-
-  /* Fetch a new address from the wallet. */
-  async newDepositAddress () {
-    const page = this.page
-    Doc.hide(page.depositErr)
-    const loaded = app().loading(page.deposit)
-    const res = await postJSON('/api/depositaddress', {
-      assetID: this.selectedAssetID
-    })
-    loaded()
-    if (!app().checkResponse(res)) {
-      Doc.showFormError(page.depositErr, res.msg)
-      return
-    }
-    page.depositAddress.textContent = res.address
-    page.qrcode.src = `/generateqrcode?address=${res.address}`
+    this.depositAddrForm.setAsset(assetID)
+    this.showForm(this.page.deposit)
   }
 
   /* Show the form to either send or withdraw funds. */

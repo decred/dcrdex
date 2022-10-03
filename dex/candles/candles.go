@@ -107,11 +107,11 @@ func (c *Cache) WireCandles(count int) *msgjson.WireCandles {
 // from that candle is linearly interpreted between the endpoints. The caller is
 // responsible for making sure that dur >> binSize, otherwise the results will
 // be of little value.
-func (c *Cache) Delta(since time.Time) (changePct float64, vol uint64) {
+func (c *Cache) Delta(since time.Time) (changePct float64, vol, high, low uint64) {
 	cutoff := uint64(since.UnixMilli())
 	sz := len(c.Candles)
 	if sz == 0 {
-		return 0, 0
+		return 0, 0, 0, 0
 	}
 	var startRate, endRate uint64
 	for i := 0; i < sz; i++ {
@@ -125,6 +125,13 @@ func (c *Cache) Delta(since time.Time) (changePct float64, vol uint64) {
 			if endRate == 0 {
 				endRate = candle.StartRate
 			}
+		}
+
+		if low == 0 || (candle.LowRate > 0 && candle.LowRate < low) {
+			low = candle.LowRate
+		}
+		if candle.HighRate > high {
+			high = candle.HighRate
 		}
 
 		if candle.StartStamp <= cutoff && candle.StartRate != 0 {
@@ -147,9 +154,9 @@ func (c *Cache) Delta(since time.Time) (changePct float64, vol uint64) {
 		vol += candle.MatchVolume
 	}
 	if startRate == 0 {
-		return 0, vol
+		return 0, vol, high, low
 	}
-	return (float64(endRate) - float64(startRate)) / float64(startRate), vol
+	return (float64(endRate) - float64(startRate)) / float64(startRate), vol, high, low
 }
 
 // last gets the most recent candle in the cache.

@@ -1,11 +1,10 @@
-import Doc from './doc'
+import Doc, { Animation } from './doc'
 import { RateEncodingFactor } from './orderutil'
 import OrderBook from './orderbook'
 import State from './state'
 import { UnitInfo, Market, Candle, CandlesPayload } from './registry'
 
 const bind = Doc.bind
-const unbind = Doc.unbind
 const PIPI = 2 * Math.PI
 const plusChar = String.fromCharCode(59914)
 const minusChar = String.fromCharCode(59915)
@@ -105,8 +104,8 @@ interface Theme {
 
 const darkTheme: Theme = {
   axisLabel: '#b1b1b1',
-  gridBorder: '#3a3a3a',
-  gridLines: '#2a2a2a',
+  gridBorder: '#383f4b',
+  gridLines: '#383f4b',
   gapLine: '#6b6b6b',
   value: '#9a9a9a',
   zoom: '#5b5b5b',
@@ -122,8 +121,8 @@ const darkTheme: Theme = {
 
 const lightTheme: Theme = {
   axisLabel: '#1b1b1b',
-  gridBorder: '#3a3a3a',
-  gridLines: '#dadada',
+  gridBorder: '#ddd',
+  gridLines: '#ddd',
   gapLine: '#595959',
   value: '#4d4d4d',
   zoom: '#777',
@@ -138,12 +137,13 @@ const lightTheme: Theme = {
 }
 
 // Chart is the base class for charts.
-class Chart {
+export class Chart {
   parent: HTMLElement
   report: ChartReporters
   theme: Theme
   canvas: HTMLCanvasElement
   visible: boolean
+  renderScheduled: boolean
   ctx: CanvasRenderingContext2D
   mousePos: Point | null
   rect: DOMRect
@@ -153,6 +153,7 @@ class Chart {
   xRegion: Region
   yRegion: Region
   dataExtents: Extents
+  unattachers: (() => void)[]
 
   constructor (parent: HTMLElement, reporters: ChartReporters) {
     this.parent = parent
@@ -173,6 +174,7 @@ class Chart {
     this.mousePos = null
     bind(this.canvas, 'mousemove', (e: MouseEvent) => {
       // this.rect will be set in resize().
+      if (!this.rect) return
       this.mousePos = {
         x: e.clientX - this.rect.left,
         y: e.clientY - this.rect.y
@@ -183,12 +185,24 @@ class Chart {
       this.mousePos = null
       this.draw()
     })
+
+    // Bind resize.
+    const resizeObserver = new ResizeObserver(() => this.resize())
+    resizeObserver.observe(this.parent)
+
     // Scrolling by wheel is smoother when the rate is slightly limited.
     this.wheelLimiter = null
     bind(this.canvas, 'wheel', (e: WheelEvent) => { this.wheel(e) })
-    this.boundResizer = () => { this.resize(parent.clientHeight) }
-    bind(window, 'resize', this.boundResizer)
     bind(this.canvas, 'click', (e: MouseEvent) => { this.click(e) })
+    const setVis = () => {
+      this.visible = document.visibilityState !== 'hidden'
+      if (this.visible && this.renderScheduled) {
+        this.renderScheduled = false
+        this.draw()
+      }
+    }
+    bind(document, 'visibilitychange', setVis)
+    this.unattachers = [() => { Doc.unbind(document, 'visibilitychange', setVis) }]
   }
 
   wheeled () {
@@ -221,9 +235,9 @@ class Chart {
    * updating the height programmatically after the caller sets a style.height
    * but before the clientHeight has been updated.
    */
-  resize (parentHeight: number) {
+  resize () {
     this.canvas.width = this.parent.clientWidth
-    this.canvas.height = parentHeight - 20 // magic number derived from a soup of css values.
+    this.canvas.height = this.parent.clientHeight
     const xLblHeight = 30
     const yGuess = 40 // y label width guess. Will be adjusted when drawn.
     const plotExtents = new Extents(yGuess, this.canvas.width, 10, this.canvas.height - xLblHeight)
@@ -246,22 +260,10 @@ class Chart {
     this.report.zoom(bigger)
   }
 
-  /* hide hides the canvas */
-  hide () {
-    this.visible = false
-    Doc.hide(this.canvas)
-  }
-
-  /* show shows the canvas */
-  show () {
-    this.visible = true
-    Doc.show(this.canvas)
-    this.resize(this.parent.clientHeight)
-  }
-
   /* The market handler will call unattach when the markets page is unloaded. */
   unattach () {
-    unbind(window, 'resize', this.boundResizer)
+    for (const u of this.unattachers) u()
+    this.unattachers = []
   }
 
   /* render must be implemented by the child class. */
@@ -270,10 +272,10 @@ class Chart {
   }
 
   /* applyLabelStyle applies the style used for axis tick labels. */
-  applyLabelStyle () {
+  applyLabelStyle (fontSize?: number) {
     this.ctx.textAlign = 'center'
     this.ctx.textBaseline = 'middle'
-    this.ctx.font = '12px \'sans\', sans-serif'
+    this.ctx.font = `${fontSize ?? '14'}px 'sans', sans-serif`
     this.ctx.fillStyle = this.theme.axisLabel
   }
 
@@ -343,11 +345,12 @@ class Chart {
    * provided plot region.
    */
   doYLabels (region: Region, step: number, unit: string, valFmt?: (v: number) => string) {
+    this.applyLabelStyle()
     const yLabels = makeLabels(this.ctx, region.height(), this.dataExtents.y.min,
       this.dataExtents.y.max, 50, step, unit, valFmt)
 
     // Reassign the width of the y-label column to accommodate the widest text.
-    const yAxisWidth = (yLabels.widest || 0) * 1.5
+    const yAxisWidth = (yLabels.widest || 0) + 20 /* x padding */
     this.yRegion.extents.x.max = yAxisWidth
     this.yRegion.extents.y.max = region.extents.y.max
 
@@ -404,7 +407,7 @@ export class DepthChart extends Chart {
       sells: []
     }
     this.setZoomBttns() // can't wait for requestAnimationFrame -> resized
-    this.resize(parent.clientHeight)
+    this.resize()
   }
 
   // setZoomBttns creates new regions for zoom in and zoom out buttons. It is
@@ -481,11 +484,13 @@ export class DepthChart extends Chart {
    */
   render () {
     // if connection fails it is not possible to get book.
-    if (!this.book || !this.visible) return
+    if (!this.book || !this.visible || this.canvas.width === 0) {
+      this.renderScheduled = true
+      return
+    }
 
     this.clear()
     // if (!this.book || this.book.empty()) return
-
     const ctx = this.ctx
     const mousePos = this.mousePos
     const buys = this.book.buys
@@ -841,7 +846,7 @@ export class CandleChart extends Chart {
     this.reporters = reporters
     this.zoomLevel = 1
     this.numToShow = 100
-    this.resize(parent.clientHeight)
+    this.resize()
   }
 
   /* resized is called when the window or parent element are resized. */
@@ -877,7 +882,10 @@ export class CandleChart extends Chart {
   /* render draws the chart */
   render () {
     const data = this.data
-    if (!data || !this.visible) return
+    if (!data || !this.visible || this.canvas.width === 0) {
+      this.renderScheduled = true
+      return
+    }
     const candleWidth = data.ms
     const mousePos = this.mousePos
     const allCandles = data.candles || []
@@ -1020,6 +1028,125 @@ export class CandleChart extends Chart {
     }
     this.numToShow = 100
     this.draw()
+  }
+}
+
+interface WaveOpts {
+  message?: string
+  backgroundColor?: string | boolean // true for <body> background color
+}
+
+/* Wave is a loading animation that displays a colorful line that oscillates */
+export class Wave extends Chart {
+  ani: Animation
+  size: [number, number]
+  region: Region
+  colorShift: number
+  opts: WaveOpts
+  msgRegion: Region
+  fontSize: number
+
+  constructor (parent: HTMLElement, opts?: WaveOpts) {
+    super(parent, {
+      resize: () => this.resized(),
+      click: (/* e: MouseEvent */) => { /* pass */ },
+      zoom: (/* bigger: boolean */) => { /* pass */ }
+    })
+    this.canvas.classList.add('fill-abs')
+    this.canvas.style.zIndex = '5'
+
+    this.opts = opts ?? {}
+
+    const period = 1500 // ms
+    const start = Math.random() * period
+    this.colorShift = Math.random() * 360
+
+    // y = A*cos(k*x + theta*t + c)
+    // combine three waves with different periods and speeds and phases.
+    const amplitudes = [1, 0.65, 0.75]
+    const ks = [3, 3, 2]
+    const speeds = [Math.PI, Math.PI * 10 / 9, Math.PI / 2.5]
+    const phases = [0, 0, Math.PI * 1.5]
+    const n = 75
+    const single = (n: number, angularX: number, angularTime: number): number => {
+      return amplitudes[n] * Math.cos(ks[n] * angularX + speeds[n] * angularTime + phases[n])
+    }
+    const value = (x: number, angularTime: number): number => {
+      const angularX = x * Math.PI * 2
+      return (single(0, angularX, angularTime) + single(1, angularX, angularTime) + single(2, angularX, angularTime)) / 3
+    }
+    this.resize()
+    this.ani = new Animation(Animation.Forever, () => {
+      const angularTime = (new Date().getTime() - start) / period * Math.PI * 2
+      const values = []
+      for (let i = 0; i < n; i++) {
+        values.push(value(i / (n - 1), angularTime))
+      }
+      this.drawValues(values)
+    })
+  }
+
+  resized () {
+    const opts = this.opts
+    const [maxW, maxH] = [150, 100]
+    const [cw, ch] = [this.canvas.width, this.canvas.height]
+    let [w, h] = [cw * 0.8, ch * 0.8]
+    if (w > maxW) w = maxW
+    if (h > maxH) h = maxH
+    let [l, t] = [(cw - w) / 2, (ch - h) / 2]
+    if (opts.message) {
+      this.fontSize = clamp(h * 0.15, 10, 14)
+      this.applyLabelStyle(this.fontSize)
+      const ypad = this.fontSize * 0.5
+      const halfH = (this.fontSize / 2) + ypad
+      t -= halfH
+      this.msgRegion = new Region(this.ctx, new Extents(0, cw, t + h, t + h + 2 * halfH))
+    }
+    this.region = new Region(this.ctx, new Extents(l, l + w, t, t + h))
+  }
+
+  drawValues (values: number[]) {
+    if (!this.region) return
+    this.clear()
+    const hsl = (h: number) => `hsl(${h}, 35%, 50%)`
+
+    const { region, msgRegion, canvas: { width: w, height: h }, opts: { backgroundColor: bg, message: msg }, colorShift, ctx } = this
+
+    if (bg) {
+      if (bg === true) ctx.fillStyle = window.getComputedStyle(document.body, null).getPropertyValue('background-color')
+      else ctx.fillStyle = bg
+      ctx.fillRect(0, 0, w, h)
+    }
+
+    region.plot(new Extents(0, 1, -1, 1), (ctx: CanvasRenderingContext2D, t: Translator) => {
+      ctx.lineWidth = 4
+      ctx.lineCap = 'round'
+
+      const shift = colorShift + (new Date().getTime() % 2000) / 2000 * 360 // colors move with frequency 1 / 2s
+      const grad = ctx.createLinearGradient(t.x(0), 0, t.x(1), 0)
+      grad.addColorStop(0, hsl(shift))
+      ctx.strokeStyle = grad
+
+      ctx.beginPath()
+      ctx.moveTo(t.x(0), t.y(values[0]))
+      for (let i = 1; i < values.length; i++) {
+        const prog = i / (values.length - 1)
+        grad.addColorStop(prog, hsl(prog * 300 + shift))
+        ctx.lineTo(t.x(prog), t.y(values[i]))
+      }
+      ctx.stroke()
+    })
+    if (!msg) return
+    msgRegion.plot(new Extents(0, 1, 0, 1), (ctx: CanvasRenderingContext2D, t: Translator) => {
+      ctx.fillText(msg, t.x(0.5), t.y(0.5), this.msgRegion.width())
+    })
+  }
+
+  render () { /* pass */ }
+
+  stop () {
+    this.ani.stop()
+    this.canvas.remove()
   }
 }
 

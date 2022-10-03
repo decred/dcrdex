@@ -6,7 +6,6 @@ export const ID_SET_BUTTON_BUY = 'ID_SET_BUTTON_BUY'
 export const ID_SET_BUTTON_SELL = 'ID_SET_BUTTON_SELL'
 export const ID_OFF = 'ID_OFF'
 export const ID_READY = 'ID_READY'
-export const ID_LOCKED = 'ID_LOCKED'
 export const ID_NOWALLET = 'ID_NOWALLET'
 export const ID_DISABLED_MSG = 'ID_DISABLED_MSG'
 export const ID_WALLET_SYNC_PROGRESS = 'ID_WALLET_SYNC_PROGRESS'
@@ -61,6 +60,12 @@ export const ID_BUYING = 'ID_BUYING'
 export const ID_WALLET_DISABLED_MSG = 'WALLET_DISABLED'
 export const ID_WALLET_ENABLED_MSG = 'WALLET_ENABLED'
 export const ID_ACTIVE_ORDERS_ERR_MSG = 'ACTIVE_ORDERS_ERR_MSG'
+export const ID_AVAILABLE = 'AVAILABLE'
+export const ID_LOCKED = 'LOCKED'
+export const ID_IMMATURE = 'IMMATURE'
+export const ID_FEE_BALANCE = 'FEE_BALANCE'
+export const ID_CANDLES_LOADING = 'CANDLES_LOADING'
+export const ID_DEPTH_LOADING = 'DEPTH_LOADING'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -123,7 +128,12 @@ export const enUS: Locale = {
   [ID_WALLET_ENABLED_MSG]: '{{ assetName }} Wallet Enabled',
   [ID_WALLET_DISABLED_MSG]: '{{ assetName }} Wallet Disabled',
   [ID_DISABLED_MSG]: 'wallet is disabled',
-  [ID_ACTIVE_ORDERS_ERR_MSG]: '{{ assetName }} wallet is actively managing orders'
+  [ID_ACTIVE_ORDERS_ERR_MSG]: '{{ assetName }} wallet is actively managing orders',
+  [ID_AVAILABLE]: 'available',
+  [ID_IMMATURE]: 'immature',
+  [ID_FEE_BALANCE]: 'fee balance',
+  [ID_CANDLES_LOADING]: 'waiting for candlesticks',
+  [ID_DEPTH_LOADING]: 'retrieving depth data'
 }
 
 export const ptBR: Locale = {
@@ -175,7 +185,9 @@ export const ptBR: Locale = {
   [ID_CHANGE_WALLET_TYPE]: 'trocar o tipo de carteira',
   [ID_KEEP_WALLET_TYPE]: 'Não trocara tipo de carteira',
   [WALLET_READY]: 'Carteira Pronta',
-  [SETUP_NEEDED]: 'Configuração Necessária'
+  [SETUP_NEEDED]: 'Configuração Necessária',
+  [ID_AVAILABLE]: 'disponível',
+  [ID_IMMATURE]: 'imaturo'
 }
 
 export const zhCN: Locale = {
@@ -213,7 +225,9 @@ export const zhCN: Locale = {
   [ID_EPOCH]: '时间',
   [ID_API_ERROR]: '接口错误',
   [ID_ADD]: '加',
-  [ID_CREATE]: '创建'
+  [ID_CREATE]: '创建',
+  [ID_AVAILABLE]: '可用',
+  [ID_IMMATURE]: '不成熟'
 }
 
 export const plPL: Locale = {
@@ -265,7 +279,9 @@ export const plPL: Locale = {
   [ID_CHANGE_WALLET_TYPE]: 'zmień typ portfela',
   [ID_KEEP_WALLET_TYPE]: 'nie zmieniaj typu portfela',
   [WALLET_READY]: 'Portfel jest gotowy',
-  [SETUP_NEEDED]: 'Potrzebna konfiguracja'
+  [SETUP_NEEDED]: 'Potrzebna konfiguracja',
+  [ID_AVAILABLE]: 'dostępne',
+  [ID_IMMATURE]: 'niedojrzałe'
 }
 
 export const deDE: Locale = {

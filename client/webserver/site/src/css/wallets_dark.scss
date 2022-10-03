@@ -1,16 +1,12 @@
-body.dark .walletspage {
-  table.wallets {
-    tbody tr {
-      background-color: $dark_bg_2;
+body.dark {
+  .walletspage {
+    #marketsOverviewBox {
+      border-left: 1px solid $dark_border_color;
+      border-bottom: 1px solid $dark_border_color;
     }
 
-    button {
-      background-color: black;
-      color: $font-color-dark;
-    }
-
-    td {
-      border-color: #333;
+    #walletDetailsBox {
+      border-bottom: $dark_border_color;
     }
   }
 }

@@ -111,12 +111,12 @@ func (s *DataAPI) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matche
 	}
 
 	// Add the candlestick.
-	addCandle := func() (change24 float64, vol24 uint64, err error) {
+	addCandle := func() (change24 float64, vol24, high24, low24 uint64, err error) {
 		s.cacheMtx.Lock()
 		defer s.cacheMtx.Unlock()
 		mktCaches := s.marketCaches[mktName]
 		if mktCaches == nil {
-			return 0, 0, fmt.Errorf("unknown market %q", mktName)
+			return 0, 0, 0, 0, fmt.Errorf("unknown market %q", mktName)
 		}
 		epochDur := s.epochDurations[mktName]
 		startStamp := epochIdx * epochDur
@@ -140,13 +140,13 @@ func (s *DataAPI) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matche
 			cache.Add(candle)
 		}
 		if cache5min == nil {
-			return 0, 0, fmt.Errorf("no 5 minute cache")
+			return 0, 0, 0, 0, fmt.Errorf("no 5 minute cache")
 		}
-		change24, vol24 = cache5min.Delta(time.Now().Add(-time.Hour * 24))
+		change24, vol24, high24, low24 = cache5min.Delta(time.Now().Add(-time.Hour * 24))
 		return
 	}
 
-	change24, vol24, err := addCandle()
+	change24, vol24, high24, low24, err := addCandle()
 	if err != nil {
 		return nil, err
 	}
@@ -159,6 +159,8 @@ func (s *DataAPI) ReportEpoch(base, quote uint32, epochIdx uint64, stats *matche
 		Rate:     stats.EndRate,
 		Change24: change24,
 		Vol24:    vol24,
+		High24:   high24,
+		Low24:    low24,
 	}
 	s.spotsMtx.Lock()
 	s.spots[mktName], err = json.Marshal(spot)

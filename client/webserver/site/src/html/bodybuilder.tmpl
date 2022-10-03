@@ -8,7 +8,7 @@
   <link rel="icon" href="/img/favicon.png?v=AK4XS4">
   <meta name="description" content="Decred DEX Client Web Portal">
   <title>{{.Title}}</title>
-  <link href="/css/style.css?v=RQIW8193" rel="stylesheet">
+  <link href="/css/style.css?v=GHTDFVH710" rel="stylesheet">
 </head>
 <body {{if .UserInfo.DarkMode}} class="dark"{{end}}>
   <div class="popup-notes" id="popupNotes">
@@ -25,24 +25,25 @@
 <header id=header class="maintop">
   {{$authed := .UserInfo.Authed}}
   {{$marketsReady := and $authed (gt (len .UserInfo.Exchanges) 0)}}
-  <a href="/" class="logo d-none d-md-block"></a>
+  <a href="/" class="logo-icon d-none d-md-block"></a>
   <a href="/" class="logo-icon d-block d-md-none"></a>
-  <div class="mainlinks fs18 offwhite">
+  <div id="headerSpace"></div>
+  <div class="mainlinks fs18 offwhite pe-3">
 
-    <a href="/markets" class="demi hoverbright{{if not $marketsReady}} d-hide{{end}}" id="marketsMenuEntry">[[[Markets]]]</a>
+    <a href="/markets" class="demi hoverbg{{if not $marketsReady}} d-hide{{end}}" id="marketsMenuEntry">[[[Markets]]]</a>
 
-    <a href="/wallets" class="demi hoverbright{{if not $authed}} d-hide{{end}}" id="walletsMenuEntry">[[[Wallets]]]</a>
+    <a href="/wallets" class="demi hoverbg{{if not $authed}} d-hide{{end}}" id="walletsMenuEntry">[[[Wallets]]]</a>
 
-    <div class="d-inline-block position-relative{{if not $authed}} d-hide{{end}}" id="noteMenuEntry">
-      <span class="ico-bell fs20 hoverbright" id="noteBell"></span>
+    <div class="d-inline-block position-relative hoverbg{{if not $authed}} d-hide{{end}}" id="noteBell">
+      <span class="ico-bell fs20  p-2"></span>
       <div id="noteIndicator" class="d-hide"></div>
     </div>
 
-    <div class="d-inline-block position-relative{{if not $authed}} d-hide{{end}}" id="profileMenuEntry">
-      <span class="ico-profile fs20 hoverbright" id="profileIcon"></span>
+    <div class="d-inline-block position-relative hoverbg{{if not $authed}} d-hide{{end}}" id="profileIcon">
+      <span class="ico-profile p-2 fs20"></span>
     </div>
 
-    <a href="/settings" class="ico-settings hoverbright fs24"></a>
+    <a href="/settings" class="ico-settings hoverbg fs24"></a>
 
   </div>
   <div id="loader" class="fill-abs flex-center d-hide">
@@ -51,7 +52,7 @@
 
   <div id="noteBox" class="d-hide">
     <div class="icon fs20 ico-bell p-1" id="innerNoteIcon"></div>
-    <div class="header d-flex align-items-center justify-content-start fs17 demi hoverbright px-3 py-2">
+    <div class="header d-flex align-items-center justify-content-start fs17 demi hoverbg px-3 py-2">
       <div id="noteCat" class="active">[[[Notifications]]]</div>
       <div id="pokeCat">[[[Recent Activity]]]</div>
     </div>
@@ -78,15 +79,15 @@
 
   <div id="profileBox" class="d-hide">
     <div class="icon fs20 ico-profile p-1" id="innerProfileIcon"></div>
-    <span class="demi hoverbright pointer" id="profileSignout">[[[Sign Out]]]</span>
-    <a href="/orders" class="demi hoverbright plainlink pt-2">[[[Order History]]]</a>
+    <span class="demi hoverbg pointer" id="profileSignout">[[[Sign Out]]]</span>
+    <a href="/orders" class="demi hoverbg plainlink pt-2">[[[Order History]]]</a>
   </div>
 
 </header>
 {{end}}
 
 {{define "bottom"}}
-<script src="/js/entry.js?v=RQIW8193"></script>
+<script src="/js/entry.js?v=GHTDFVH710"></script>
 </body>
 </html>
 {{end}}

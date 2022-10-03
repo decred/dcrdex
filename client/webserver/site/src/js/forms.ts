@@ -3,6 +3,7 @@ import { postJSON } from './http'
 import State from './state'
 import * as intl from './locales'
 import * as OrderUtil from './orderutil'
+import { Wave } from './charts'
 import {
   app,
   PasswordCache,
@@ -130,10 +131,10 @@ export class NewWalletForm {
       walletType: walletType,
       parentForm: parentForm
     }
-    const loaded = app().loading(this.page.mainForm)
 
+    const ani = new Wave(this.page.mainForm, { backgroundColor: true })
     const res = await postJSON('/api/newwallet', createForm)
-    loaded()
+    ani.stop()
     return res
   }
 
@@ -1559,6 +1560,72 @@ export class LoginForm {
       form.style.transform = `scale(${0.9 + 0.1 * prog})`
       form.style.opacity = String(Math.pow(prog, 4))
     }, 'easeOut')
+  }
+}
+
+const traitNewAddresser = 1 << 1
+
+/*
+ * DepositAddress displays a deposit address, a QR code, and a button to
+ * generate a new address (if supported).
+ */
+export class DepositAddress {
+  form: PageElement
+  page: Record<string, PageElement>
+  assetID: number
+
+  constructor (form: PageElement) {
+    this.form = form
+    const page = this.page = Doc.idDescendants(form)
+    Doc.bind(page.newDepAddrBttn, 'click', async () => { this.newDepositAddress() })
+    Doc.bind(page.copyAddressBtn, 'click', () => { this.copyAddress() })
+  }
+
+  /* Display a deposit address. */
+  async setAsset (assetID: number) {
+    this.assetID = assetID
+    const page = this.page
+    Doc.hide(page.depositErr)
+    const asset = app().assets[assetID]
+    page.depositLogo.src = Doc.logoPath(asset.symbol)
+    const wallet = app().walletMap[assetID]
+    page.depositName.textContent = asset.name
+    page.depositAddress.textContent = wallet.address
+    page.qrcode.src = `/generateqrcode?address=${wallet.address}`
+    if ((wallet.traits & traitNewAddresser) !== 0) Doc.show(page.newDepAddrBttn)
+    else Doc.hide(page.newDepAddrBttn)
+  }
+
+  /* Fetch a new address from the wallet. */
+  async newDepositAddress () {
+    const page = this.page
+    Doc.hide(page.depositErr)
+    const loaded = app().loading(this.form)
+    const res = await postJSON('/api/depositaddress', {
+      assetID: this.assetID
+    })
+    loaded()
+    if (!app().checkResponse(res)) {
+      page.depositErr.textContent = res.msg
+      Doc.show(page.depositErr)
+      return
+    }
+    page.depositAddress.textContent = res.address
+    page.qrcode.src = `/generateqrcode?address=${res.address}`
+  }
+
+  async copyAddress () {
+    const page = this.page
+    navigator.clipboard.writeText(page.depositAddress.textContent || '')
+      .then(() => {
+        Doc.show(page.copyAlert)
+        setTimeout(() => {
+          Doc.hide(page.copyAlert)
+        }, 800)
+      })
+      .catch((reason) => {
+        console.error('Unable to copy: ', reason)
+      })
   }
 }
 

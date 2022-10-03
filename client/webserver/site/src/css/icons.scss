@@ -110,6 +110,12 @@
   transform: rotate(180deg);
 }
 
+.ico-arrowup::before {
+  content: "\e90c";
+  display: inline-block;
+  transform: rotate(-90deg);
+}
+
 .ico-checkbox::before {
   content: "\e90d";
 }
