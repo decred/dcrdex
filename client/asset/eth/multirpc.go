@@ -23,10 +23,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/networks/erc20"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
-	"decred.org/dcrdex/server/asset"
 	"github.com/decred/slog"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -49,7 +49,6 @@ const (
 	receiptCacheExpiration       = time.Hour
 	unconfirmedReceiptExpiration = time.Minute
 	tipCapSuggestionExpiration   = time.Hour
-	ipcHost                      = "IPC"
 	brickedFailCount             = 100
 	providerDelimiter            = " "
 )
@@ -161,7 +160,6 @@ func (p *provider) headerByHash(ctx context.Context, h common.Hash) (*types.Head
 		p.setFailed()
 		return nil, fmt.Errorf("HeaderByHash error: %w", err)
 	}
-	p.setTip(hdr)
 	return hdr, nil
 }
 
@@ -354,7 +352,7 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 		var rpcClient *rpc.Client
 		var sub ethereum.Subscription
 		var h chan *types.Header
-		host := ipcHost
+		host := providerIPC
 		if !strings.HasSuffix(endpoint, ".ipc") {
 			wsURL, err := url.Parse(endpoint)
 			if err != nil {
@@ -382,7 +380,7 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 			case strings.Contains(wsURL.Host, "rpc.rivet.cloud"):
 				// subdomain contains API key, so can't simply replace.
 				wsURL.Host = strings.Replace(wsURL.Host, ".rpc.", ".ws.", 1)
-				host = "rivet.cloud"
+				host = providerRivetCloud
 			}
 
 			rpcClient, err = rpc.DialWebsocket(ctx, wsURL.String(), "")
@@ -586,6 +584,9 @@ func (m *multiRPCClient) transactionReceipt(ctx context.Context, txHash common.H
 		r, err = p.ec.TransactionReceipt(ctx, txHash)
 		return err
 	}); err != nil {
+		if isNotFoundError(err) {
+			return nil, nil, asset.ErrNotEnoughConfirms
+		}
 		return nil, nil, err
 	}
 
@@ -605,13 +606,6 @@ func (m *multiRPCClient) transactionReceipt(ctx context.Context, txHash common.H
 		confirmed:  confs > txConfsNeededToConfirm,
 	}
 	m.receipts.Unlock()
-
-	// TODO
-	// TODO: Plug into the monitoredTx system from #1638.
-	// TODO
-	if tx, _, err = m.getTransaction(ctx, txHash); err != nil {
-		return nil, nil, err
-	}
 
 	return r, tx, nil
 }
@@ -654,6 +648,9 @@ func (m *multiRPCClient) getTransaction(ctx context.Context, txHash common.Hash)
 	return tx, h, m.withPreferred(func(p *provider) error {
 		resp, err := getRPCTransaction(ctx, p, txHash)
 		if err != nil {
+			if isNotFoundError(err) {
+				return asset.CoinNotFoundError
+			}
 			return err
 		}
 		tx = resp.tx
@@ -742,7 +739,7 @@ func (m *multiRPCClient) withOne(providers []*provider, f func(*provider) error,
 		}
 		if superError == nil {
 			superError = err
-		} else {
+		} else if err.Error() != superError.Error() {
 			superError = fmt.Errorf("%v: %w", superError, err)
 		}
 		for _, f := range acceptabilityFilters {
@@ -757,7 +754,6 @@ func (m *multiRPCClient) withOne(providers []*provider, f func(*provider) error,
 				p.setFailed()
 			}
 		}
-		m.log.Errorf("error from provider %q: %v", p.host, err)
 	}
 	return
 }
@@ -965,7 +961,7 @@ func (m *multiRPCClient) transactionConfirmations(ctx context.Context, txHash co
 	if err := m.withPreferred(func(p *provider) error {
 		r, err = p.ec.TransactionReceipt(ctx, txHash)
 		if err != nil {
-			if strings.Contains(err.Error(), "not found") {
+			if isNotFoundError(err) {
 				notFound = true
 			}
 			return err
@@ -1330,7 +1326,7 @@ func checkProvidersCompliance(ctx context.Context, walletDir string, providers [
 	n := len(compliantProviders)
 
 	for _, p := range providers {
-		if p.host == ipcHost || compliantProviders[domain(p.host)] {
+		if compliantProviders[domain(p.host)] {
 			continue
 		}
 
@@ -1361,4 +1357,8 @@ func shuffleProviders(p []*provider) {
 	rand.Shuffle(len(p), func(i, j int) {
 		p[i], p[j] = p[j], p[i]
 	})
+}
+
+func isNotFoundError(err error) bool {
+	return strings.Contains(err.Error(), "not found")
 }

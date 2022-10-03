@@ -2808,6 +2808,7 @@ func (eth *baseWallet) swapOrRedemptionFeesPaid(ctx context.Context, coinID, con
 	if err != nil {
 		return 0, nil, err
 	}
+
 	var txHash common.Hash
 	copy(txHash[:], coinID)
 	receipt, tx, err := eth.node.transactionReceipt(ctx, txHash)
@@ -3379,7 +3380,7 @@ func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Rede
 
 	monitoredTx, err := w.getLatestMonitoredTx(txHash)
 	if err != nil {
-		w.log.Error(err)
+		w.log.Error("getLatestMonitoredTx error: %v", err)
 		return w.confirmRedemptionWithoutMonitoredTx(txHash, redemption, feeWallet)
 	}
 	// This mutex is locked inside of getLatestMonitoredTx.
