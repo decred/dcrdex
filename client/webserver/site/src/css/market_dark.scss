@@ -200,6 +200,10 @@ body.dark {
       &:last-child {
         border-top: 1px solid $dark_border_color;
       }
+
+      tbody#sellRows {
+        border-top: none;
+      }
     }
   }
 }

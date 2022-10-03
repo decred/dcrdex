@@ -763,6 +763,10 @@ div[data-handler=markets] {
       height: calc(50% - 15px);
       display: flex;
 
+      &.reversible {
+        flex-direction: column-reverse;
+      }
+
       &:first-child {
         border-bottom: 1px solid $light_border_color;
       }
