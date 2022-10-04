@@ -139,6 +139,9 @@ type dexConnection struct {
 	// trades tracks outstanding orders issued by this client.
 	trades map[order.OrderID]*trackedTrade
 
+	blindCancelsMtx sync.Mutex
+	blindCancels    map[order.OrderID]order.Preimage
+
 	epochMtx sync.RWMutex
 	epoch    map[string]uint64
 
@@ -399,6 +402,55 @@ func (dc *dexConnection) findOrder(oid order.OrderID) (tracker *trackedTrade, pr
 	return
 }
 
+func (c *Core) sendCancelOrder(dc *dexConnection, oid order.OrderID, base, quote uint32) (order.Preimage, *order.CancelOrder, []byte, chan struct{}, error) {
+	preImg := newPreimage()
+	co := &order.CancelOrder{
+		P: order.Prefix{
+			AccountID:  dc.acct.ID(),
+			BaseAsset:  base,
+			QuoteAsset: quote,
+			OrderType:  order.CancelOrderType,
+			ClientTime: time.Now(),
+			Commit:     preImg.Commit(),
+		},
+		TargetOrderID: oid,
+	}
+	err := order.ValidateOrder(co, order.OrderStatusEpoch, 0)
+	if err != nil {
+		return preImg, nil, nil, nil, err
+	}
+
+	commitSig := make(chan struct{})
+	c.sentCommitsMtx.Lock()
+	c.sentCommits[co.Commit] = commitSig
+	c.sentCommitsMtx.Unlock()
+
+	// Create and send the order message. Check the response before using it.
+	route, msgOrder, _ := messageOrder(co, nil)
+	var result = new(msgjson.OrderResult)
+	err = dc.signAndRequest(msgOrder, route, result, DefaultResponseTimeout)
+	if err != nil {
+		// At this point there is a possibility that the server got the request
+		// and created the cancel order, but we lost the connection before
+		// receiving the response with the cancel's order ID. Any preimage
+		// request will be unrecognized. This order is ABANDONED.
+		c.sentCommitsMtx.Lock()
+		delete(c.sentCommits, co.Commit)
+		c.sentCommitsMtx.Unlock()
+		return preImg, nil, nil, nil, fmt.Errorf("failed to submit cancel order targeting trade %v: %w", oid, err)
+	}
+	err = validateOrderResponse(dc, result, co, msgOrder)
+	if err != nil {
+		c.sentCommitsMtx.Lock()
+		delete(c.sentCommits, co.Commit)
+		c.sentCommitsMtx.Unlock()
+		return preImg, nil, nil, nil, fmt.Errorf("Abandoning order. preimage: %x, server time: %d: %w",
+			preImg[:], result.ServerTime, err)
+	}
+
+	return preImg, co, result.Sig, commitSig, nil
+}
+
 // tryCancel will look for an order with the specified order ID, and attempt to
 // cancel the order. It is not an error if the order is not found.
 func (c *Core) tryCancel(dc *dexConnection, oid order.OrderID) (found bool, err error) {
@@ -434,47 +486,12 @@ func (c *Core) tryCancelTrade(dc *dexConnection, tracker *trackedTrade) error {
 		}
 	}
 
-	// Construct the order.
-	prefix := tracker.Prefix()
-	preImg := newPreimage()
-	co := &order.CancelOrder{
-		P: order.Prefix{
-			AccountID:  prefix.AccountID,
-			BaseAsset:  prefix.BaseAsset,
-			QuoteAsset: prefix.QuoteAsset,
-			OrderType:  order.CancelOrderType,
-			ClientTime: time.Now(),
-			Commit:     preImg.Commit(),
-		},
-		TargetOrderID: oid,
-	}
-	err := order.ValidateOrder(co, order.OrderStatusEpoch, 0)
+	// Construct and send the order.
+	preImg, co, sig, commitSig, err := c.sendCancelOrder(dc, oid, tracker.Base(), tracker.Quote())
 	if err != nil {
 		return err
 	}
-
-	commitSig := make(chan struct{})
-	defer close(commitSig) // signals on both success and failure, unlike syncOrderPlaced/piSyncers
-	c.sentCommitsMtx.Lock()
-	c.sentCommits[co.Commit] = commitSig
-	c.sentCommitsMtx.Unlock()
-
-	// Create and send the order message. Check the response before using it.
-	route, msgOrder, _ := messageOrder(co, nil)
-	var result = new(msgjson.OrderResult)
-	err = dc.signAndRequest(msgOrder, route, result, DefaultResponseTimeout)
-	if err != nil {
-		// At this point there is a possibility that the server got the request
-		// and created the cancel order, but we lost the connection before
-		// receiving the response with the cancel's order ID. Any preimage
-		// request will be unrecognized. This order is ABANDONED.
-		return fmt.Errorf("failed to submit cancel order targeting trade %v: %w", oid, err)
-	}
-	err = validateOrderResponse(dc, result, co, msgOrder)
-	if err != nil {
-		return fmt.Errorf("Abandoning order. preimage: %x, server time: %d: %w",
-			preImg[:], result.ServerTime, err)
-	}
+	defer close(commitSig)
 
 	// Store the cancel order with the tracker.
 	err = tracker.cancelTrade(co, preImg)
@@ -491,7 +508,7 @@ func (c *Core) tryCancelTrade(dc *dexConnection, tracker *trackedTrade) error {
 			Status: order.OrderStatusEpoch,
 			Host:   dc.acct.host,
 			Proof: db.OrderProof{
-				DEXSig:   result.Sig,
+				DEXSig:   sig,
 				Preimage: preImg[:],
 			},
 			LinkedOrder: oid,
@@ -513,6 +530,7 @@ func (c *Core) tryCancelTrade(dc *dexConnection, tracker *trackedTrade) error {
 
 // Synchronize with the preimage request, in case that request came before
 // we had an order ID and added this order to the trades map or cancel field.
+// (V0PURGE)
 func (c *Core) syncOrderPlaced(oid order.OrderID) {
 	c.piSyncMtx.Lock()
 	syncChan, found := c.piSyncers[oid]
@@ -581,6 +599,14 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 		copy(oid[:], msgMatch.OrderID)
 		tracker, _, isCancel := dc.findOrder(oid)
 		if tracker == nil {
+			dc.blindCancelsMtx.Lock()
+			_, found := dc.blindCancels[oid]
+			delete(dc.blindCancels, oid)
+			dc.blindCancelsMtx.Unlock()
+			if found { // We're done. The targeted order isn't tracked, and we don't need to ack.
+				dc.log.Infof("Blind cancel order %v matched.", oid)
+				continue
+			}
 			errs = append(errs, "order "+oid.String()+" not found")
 			continue
 		}
@@ -891,7 +917,7 @@ reqsLoop:
 // Also purges "stale" cancel orders if the targeted order is returned in the
 // server's `connect` response. See *trackedTrade.deleteStaleCancelOrder for
 // the definition of a stale cancel order.
-func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus) (unknownOrdersCount, reconciledOrdersCount int) {
+func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus) (unknownOrders []order.OrderID, reconciledOrdersCount int) {
 	dc.tradeMtx.RLock()
 	// Check for unknown orders reported as active by the server. If such
 	// exists, could be that they were known to the client but were thought
@@ -904,7 +930,7 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 			srvActiveOrderStatuses[oid] = srvOrderStatus
 		} else {
 			dc.log.Warnf("Unknown order %v reported by DEX %s as active", oid, dc.acct.host)
-			unknownOrdersCount++
+			unknownOrders = append(unknownOrders, oid)
 		}
 	}
 	knownActiveTrades := make(map[order.OrderID]*trackedTrade)
@@ -1191,7 +1217,7 @@ type Core struct {
 	noteChans []chan Notification
 
 	piSyncMtx sync.Mutex
-	piSyncers map[order.OrderID]chan struct{}
+	piSyncers map[order.OrderID]chan struct{} // V0PURGE
 
 	sentCommitsMtx sync.Mutex
 	sentCommits    map[order.Commitment]chan struct{}
@@ -5076,9 +5102,9 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	// the trade statuses where necessary. This is done after processing the
 	// connect resp matches so that where possible, available match data can be
 	// used to properly set order statuses and filled amount.
-	unknownOrdersCount, reconciledOrdersCount := dc.reconcileTrades(result.ActiveOrderStatuses)
-	if unknownOrdersCount > 0 {
-		subject, details := c.formatDetails(TopicUnknownOrders, unknownOrdersCount, dc.acct.host)
+	unknownOrders, reconciledOrdersCount := dc.reconcileTrades(result.ActiveOrderStatuses)
+	if len(unknownOrders) > 0 {
+		subject, details := c.formatDetails(TopicUnknownOrders, len(unknownOrders), dc.acct.host)
 		c.notify(newDEXAuthNote(TopicUnknownOrders, subject, dc.acct.host, false, details, db.Poke))
 	}
 	if reconciledOrdersCount > 0 {
@@ -5122,6 +5148,34 @@ func (c *Core) authDEX(dc *dexConnection) error {
 
 	if len(updatedAssets) > 0 {
 		c.updateBalances(updatedAssets)
+	}
+
+	// Try to cancel unknown orders.
+	for _, oid := range unknownOrders {
+		// Even if we have a record of this order, it is inactive from our
+		// perspective, so we don't try to track it as a trackedTrade.
+		var base, quote uint32
+		if metaUnknown, _ := c.db.Order(oid); metaUnknown != nil {
+			if metaUnknown.Order.Type() != order.LimitOrderType {
+				continue // can't cancel a cancel or market order, it should just go away from server
+			}
+			base, quote = metaUnknown.Order.Base(), metaUnknown.Order.Quote()
+		} else {
+			c.log.Warnf("Order %v not found in DB, so cancelling may fail.", oid)
+			// Otherwise try with (42,0) and hope server will dig for it based
+			// on just the targeted order ID if that market is incorrect.
+			base, quote = 42, 0
+		}
+		preImg, co, _, commitSig, err := c.sendCancelOrder(dc, oid, base, quote)
+		if err != nil {
+			c.log.Errorf("Failed to send cancel for unknown order %v: %v", oid, err)
+			continue
+		}
+		c.log.Warnf("Sent request to cancel unknown order %v, cancel order ID %v", oid, co.ID())
+		dc.blindCancelsMtx.Lock()
+		dc.blindCancels[co.ID()] = preImg
+		dc.blindCancelsMtx.Unlock()
+		close(commitSig) // ready to handle the preimage request
 	}
 
 	return nil
@@ -6124,6 +6178,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 		ticker:            newDexTicker(defaultTickInterval), // updated when server config obtained
 		books:             make(map[string]*bookie),
 		trades:            make(map[order.OrderID]*trackedTrade),
+		blindCancels:      make(map[order.OrderID]order.Preimage),
 		apiVer:            -1,
 		reportingConnects: reporting,
 		spots:             make(map[string]*msgjson.Spot),
@@ -6836,28 +6891,34 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.OrderID, commitChecksum dex.Bytes) error {
 	tracker, preImg, isCancel := dc.findOrder(oid)
 	if tracker == nil {
-		return fmt.Errorf("no active order found for preimage request for %s", oid)
-	}
-
-	// Record the csum if this preimage request is novel, and deny it if this is
-	// a duplicate request with an altered csum.
-	if !acceptCsum(tracker, isCancel, commitChecksum) {
-		csumErr := errors.New("invalid csum in duplicate preimage request")
-		resp, err := msgjson.NewResponse(reqID, nil,
-			msgjson.NewError(msgjson.InvalidRequestError, csumErr.Error()))
-		if err != nil {
-			c.log.Errorf("Failed to encode response to denied preimage request: %v", err)
+		var found bool
+		dc.blindCancelsMtx.Lock()
+		preImg, found = dc.blindCancels[oid]
+		dc.blindCancelsMtx.Unlock()
+		if !found {
+			return fmt.Errorf("no active order found for preimage request for %s", oid)
+		} // delete the entry in match/nomatch
+	} else {
+		// Record the csum if this preimage request is novel, and deny it if this is
+		// a duplicate request with an altered csum.
+		if !acceptCsum(tracker, isCancel, commitChecksum) {
+			csumErr := errors.New("invalid csum in duplicate preimage request")
+			resp, err := msgjson.NewResponse(reqID, nil,
+				msgjson.NewError(msgjson.InvalidRequestError, csumErr.Error()))
+			if err != nil {
+				c.log.Errorf("Failed to encode response to denied preimage request: %v", err)
+				return csumErr
+			}
+			err = dc.Send(resp)
+			if err != nil {
+				c.log.Errorf("Failed to send response to denied preimage request: %v", err)
+			}
 			return csumErr
 		}
-		err = dc.Send(resp)
-		if err != nil {
-			c.log.Errorf("Failed to send response to denied preimage request: %v", err)
-		}
-		return csumErr
 	}
 
 	// Clean up the sentCommits now that we loaded the commitment. This can be
-	// removed when the old piSyncers method is removed.
+	// removed when the old piSyncers method is removed. (V0PURGE)
 	defer func() {
 		// Note the commitment is not tracker.Commitment() for cancel orders.
 		c.sentCommitsMtx.Lock()
@@ -6874,11 +6935,13 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 	if err != nil {
 		return fmt.Errorf("preimage send error: %w", err)
 	}
-	topic := TopicPreimageSent
-	if isCancel {
-		topic = TopicCancelPreimageSent
+	if tracker != nil {
+		topic := TopicPreimageSent
+		if isCancel {
+			topic = TopicCancelPreimageSent
+		}
+		c.notify(newOrderNote(topic, "", "", db.Data, tracker.coreOrder()))
 	}
-	c.notify(newOrderNote(topic, "", "", db.Data, tracker.coreOrder()))
 	return nil
 }
 
@@ -6980,6 +7043,14 @@ func handleNoMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error 
 
 	tracker, _, _ := dc.findOrder(oid)
 	if tracker == nil {
+		dc.blindCancelsMtx.Lock()
+		_, found := dc.blindCancels[oid]
+		delete(dc.blindCancels, oid)
+		dc.blindCancelsMtx.Unlock()
+		if found { // if it didn't match, the targeted order isn't booked and we're done
+			c.log.Infof("Blind cancel order %v did not match. Its targeted order is assumed to be unbooked.", oid)
+			return nil
+		}
 		return newError(unknownOrderErr, "nomatch request received for unknown order %v from %s", oid, dc.acct.host)
 	}
 	updatedAssets, err := tracker.nomatch(oid)
