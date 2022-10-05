@@ -641,9 +641,6 @@ func (c *Core) tryCancelTrade(dc *dexConnection, tracker *trackedTrade) error {
 		return fmt.Errorf("error storing cancel order info %s: %w", co.ID(), err)
 	}
 
-	// Now that the trackedTrade is updated, sync with the preimage request.
-	c.syncOrderPlaced(co.ID())
-
 	// Store the cancel order.
 	err = c.db.UpdateOrder(&db.MetaOrder{
 		MetaData: &db.OrderMetaData{
@@ -669,26 +666,6 @@ func (c *Core) tryCancelTrade(dc *dexConnection, tracker *trackedTrade) error {
 	c.notify(newOrderNote(TopicCancellingOrder, subject, details, db.Poke, tracker.coreOrderInternal()))
 
 	return nil
-}
-
-// Synchronize with the preimage request, in case that request came before
-// we had an order ID and added this order to the trades map or cancel field.
-// (V0PURGE)
-func (c *Core) syncOrderPlaced(oid order.OrderID) {
-	c.piSyncMtx.Lock()
-	syncChan, found := c.piSyncers[oid]
-	if found {
-		// If we found the channel, the preimage request is already waiting.
-		// Close the channel to allow that request to proceed.
-		close(syncChan)
-		delete(c.piSyncers, oid)
-	} else {
-		// If there is no channel, the preimage request hasn't come yet. Add a
-		// channel to signal readiness. Could insert nil unless syncOrderPlaced
-		// is erroneously called twice for the same order ID.
-		c.piSyncers[oid] = make(chan struct{})
-	}
-	c.piSyncMtx.Unlock()
 }
 
 // signAndRequest signs and sends the request, unmarshaling the response into
@@ -1366,9 +1343,6 @@ type Core struct {
 	noteMtx   sync.RWMutex
 	noteChans map[uint64]chan Notification
 
-	piSyncMtx sync.Mutex
-	piSyncers map[order.OrderID]chan struct{} // V0PURGE
-
 	sentCommitsMtx sync.Mutex
 	sentCommits    map[order.Commitment]chan struct{}
 
@@ -1470,7 +1444,6 @@ func New(cfg *Config) (*Core, error) {
 		lockTimeTaker: dex.LockTimeTaker(cfg.Net),
 		lockTimeMaker: dex.LockTimeMaker(cfg.Net),
 		blockWaiters:  make(map[string]*blockWaiter),
-		piSyncers:     make(map[order.OrderID]chan struct{}),
 		sentCommits:   make(map[order.Commitment]chan struct{}),
 		tickSched:     make(map[order.OrderID]*time.Timer),
 		// Allowing to change the constructor makes testing a lot easier.
@@ -5556,9 +5529,6 @@ func (c *Core) sendTradeRequest(tr *tradeRequest) (*Order, error) {
 	dc.trades[tracker.ID()] = tracker
 	dc.tradeMtx.Unlock()
 
-	// Now that the trades map is updated, sync with the preimage request.
-	c.syncOrderPlaced(ord.ID())
-
 	// Send a low-priority notification.
 	corder := tracker.coreOrder()
 	if !form.IsLimit && !form.Sell {
@@ -7654,85 +7624,35 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 		return err
 	}
 
-	// NEW protocol with commitment specified.
-	if len(req.Commitment) == order.CommitmentSize {
-		// See if we recognize that commitment, and if we do, just wait for the
-		// order ID, and process the request.
-		var commit order.Commitment
-		copy(commit[:], req.Commitment)
-
-		c.sentCommitsMtx.Lock()
-		defer c.sentCommitsMtx.Unlock()
-		commitSig, found := c.sentCommits[commit]
-		if !found { // this is the main benefit of a commitment index
-			return fmt.Errorf("received preimage request for unknown commitment %v, order %v",
-				req.Commitment, oid)
-		}
-		delete(c.sentCommits, commit)
-
-		dc.log.Debugf("Received preimage request for order %v with known commitment %v", oid, commit)
-
-		// Go async while waiting.
-		go func() {
-			// Order request success OR fail closes the channel.
-			<-commitSig
-			if err := processPreimageRequest(c, dc, msg.ID, oid, req.CommitChecksum); err != nil {
-				c.log.Errorf("async processPreimageRequest for %v failed: %v", oid, err)
-			} else {
-				c.log.Debugf("async processPreimageRequest for %v succeeded", oid)
-			}
-
-			// There or not, delete this oid entry from the deprecated map.
-			c.piSyncMtx.Lock()
-			delete(c.piSyncers, oid)
-			c.piSyncMtx.Unlock()
-		}()
-
-		return nil
-	} // else no or invalid commitment, eventually error (v0 DEPRECATION)
-
-	// OLD protocol below without the commitment is DEPRECATED. Remove when
-	// protocol version reaches 1.
-
-	// Sync with order placement, the response from which provides the order ID.
-	c.piSyncMtx.Lock()
-	if _, found := c.piSyncers[oid]; found {
-		// If we found a map entry, the tracker is already in the trades map,
-		// and we can go ahead.
-		delete(c.piSyncers, oid)
-		c.piSyncMtx.Unlock()
-		dc.log.Debugf("Received preimage request for known order %v", oid)
-		return processPreimageRequest(c, dc, msg.ID, oid, req.CommitChecksum)
+	if len(req.Commitment) != order.CommitmentSize {
+		return fmt.Errorf("received preimage request for %v with no corresponding order submission response.", oid)
 	}
 
-	// If we didn't find an entry, Trade or Cancel is still running. Add a chan
-	// and wait for Trade to close it.
-	syncChan := make(chan struct{})
-	c.piSyncers[oid] = syncChan
-	c.piSyncMtx.Unlock()
+	// See if we recognize that commitment, and if we do, just wait for the
+	// order ID, and process the request.
+	var commit order.Commitment
+	copy(commit[:], req.Commitment)
 
-	// The order submission could be timing out waiting for a response, or this
-	// could be a bogus preimage request, so we do not want to block the caller,
-	// (*Core).listen if this hangs. Preimage requests are ok to handle
-	// asynchronously since there can be no matches until we respond to this.
-	c.log.Warnf("Received preimage request for %v with no corresponding order submission response! Waiting...", oid)
+	c.sentCommitsMtx.Lock()
+	defer c.sentCommitsMtx.Unlock()
+	commitSig, found := c.sentCommits[commit]
+	if !found { // this is the main benefit of a commitment index
+		return fmt.Errorf("received preimage request for unknown commitment %v, order %v",
+			req.Commitment, oid)
+	}
+	delete(c.sentCommits, commit)
+
+	dc.log.Debugf("Received preimage request for order %v with known commitment %v", oid, commit)
+
+	// Go async while waiting.
 	go func() {
-		select {
-		case <-syncChan:
-			if err := processPreimageRequest(c, dc, msg.ID, oid, req.CommitChecksum); err != nil {
-				c.log.Errorf("async processPreimageRequest for %v failed: %v", oid, err)
-			} else {
-				c.log.Debugf("async processPreimageRequest for %v succeeded", oid)
-			}
-			// The channel is deleted from the piSyncers map by syncOrderPlaced.
-			return
-		case <-time.After(DefaultResponseTimeout):
-			c.log.Errorf("Timed out syncing preimage request from %s, order %s", dc.acct.host, oid)
-		case <-c.ctx.Done():
+		// Order request success OR fail closes the channel.
+		<-commitSig
+		if err := processPreimageRequest(c, dc, msg.ID, oid, req.CommitChecksum); err != nil {
+			c.log.Errorf("async processPreimageRequest for %v failed: %v", oid, err)
+		} else {
+			c.log.Debugf("async processPreimageRequest for %v succeeded", oid)
 		}
-		c.piSyncMtx.Lock()
-		delete(c.piSyncers, oid)
-		c.piSyncMtx.Unlock()
 	}()
 
 	return nil
@@ -7749,8 +7669,8 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 			return fmt.Errorf("no active order found for preimage request for %s", oid)
 		} // delete the entry in match/nomatch
 	} else {
-		// Record the csum if this preimage request is novel, and deny it if this is
-		// a duplicate request with an altered csum.
+		// Record the csum if this preimage request is novel, and deny it if
+		// this is a duplicate request with an altered csum.
 		if !acceptCsum(tracker, isCancel, commitChecksum) {
 			csumErr := errors.New("invalid csum in duplicate preimage request")
 			resp, err := msgjson.NewResponse(reqID, nil,
@@ -7767,14 +7687,6 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 		}
 	}
 
-	// Clean up the sentCommits now that we loaded the commitment. This can be
-	// removed when the old piSyncers method is removed. (V0PURGE)
-	defer func() {
-		// Note the commitment is not tracker.Commitment() for cancel orders.
-		c.sentCommitsMtx.Lock()
-		delete(c.sentCommits, preImg.Commit()) // redundant if the commitment was in request
-		c.sentCommitsMtx.Unlock()
-	}()
 	resp, err := msgjson.NewResponse(reqID, &msgjson.PreimageResponse{
 		Preimage: preImg[:],
 	}, nil)
@@ -7785,6 +7697,7 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 	if err != nil {
 		return fmt.Errorf("preimage send error: %w", err)
 	}
+
 	if tracker != nil {
 		topic := TopicPreimageSent
 		if isCancel {
@@ -7792,6 +7705,7 @@ func processPreimageRequest(c *Core, dc *dexConnection, reqID uint64, oid order.
 		}
 		c.notify(newOrderNote(topic, "", "", db.Data, tracker.coreOrder()))
 	}
+
 	return nil
 }
 

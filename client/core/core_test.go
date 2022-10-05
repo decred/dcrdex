@@ -1266,7 +1266,6 @@ func newTestRig() *testRig {
 			lockTimeMaker: dex.LockTimeMaker(dex.Testnet),
 			wallets:       make(map[uint32]*xcWallet),
 			blockWaiters:  make(map[string]*blockWaiter),
-			piSyncers:     make(map[order.OrderID]chan struct{}),
 			sentCommits:   make(map[order.Commitment]chan struct{}),
 			tickSched:     make(map[order.OrderID]*time.Timer),
 			wsConstructor: func(*comms.WsCfg) (comms.WsConn, error) {
@@ -3729,6 +3728,8 @@ func TestHandlePreimageRequest(t *testing.T) {
 		ord := &order.LimitOrder{P: order.Prefix{ServerTime: time.Now()}}
 		oid := ord.ID()
 		preImg := newPreimage()
+
+		// It is no longer OK for server to omit the commitment.
 		payload := &msgjson.PreimageRequest{
 			OrderID: oid[:],
 			// No commitment in this request.
@@ -3745,13 +3746,6 @@ func TestHandlePreimageRequest(t *testing.T) {
 			metaData: &db.OrderMetaData{},
 		}
 
-		// Simulate an order submission request having completed.
-		loadSyncer := func() {
-			rig.core.piSyncMtx.Lock()
-			rig.core.piSyncers[oid] = nil // set nil to ensure it's just a map entry
-			rig.core.piSyncMtx.Unlock()
-		}
-
 		// resetCsum resets csum for further preimage request since multiple
 		// testing scenarios use the same tracker object.
 		resetCsum := func(tracker *trackedTrade) {
@@ -3761,10 +3755,9 @@ func TestHandlePreimageRequest(t *testing.T) {
 		}
 
 		rig.dc.trades[oid] = tracker
-		loadSyncer()
 		err := handlePreimageRequest(rig.core, rig.dc, reqNoCommit)
-		if err != nil {
-			t.Fatalf("handlePreimageRequest error: %v", err)
+		if err == nil {
+			t.Fatalf("handlePreimageRequest succeeded with no commitment in the request")
 		}
 		resetCsum(tracker)
 
@@ -3810,7 +3803,6 @@ func TestHandlePreimageRequest(t *testing.T) {
 		// negative paths
 		ensureErr := func(tag string, req *msgjson.Message, errPrefix string) {
 			t.Helper()
-			loadSyncer()
 			commitSig := readyCommitment(commit)
 			close(commitSig) // ready before preimage request
 			err := handlePreimageRequest(rig.core, rig.dc, req)
@@ -3830,18 +3822,6 @@ func TestHandlePreimageRequest(t *testing.T) {
 		}
 		reqCommitBad, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payloadBad)
 		ensureErr("unknown commitment", reqCommitBad, "received preimage request for unknown commitment")
-		// all other errors for
-
-		// Trade-not-found error only returned on synchronous non-commitment request
-		// handling, so use reqNoCommit to test that part of processPreimageRequest.
-		delete(rig.dc.trades, oid)
-		ensureErr("no tracker", reqNoCommit, "no active order found for preimage request")
-		rig.dc.trades[oid] = tracker // reset
-
-		// Response send error also only returned on synchronous request handling.
-		rig.ws.sendErr = tErr
-		ensureErr("send error", reqNoCommit, "preimage send error")
-		rig.ws.sendErr = nil // reset
 	})
 	t.Run("csum for order", func(t *testing.T) {
 		rig := newTestRig()
@@ -7546,6 +7526,7 @@ func TestPreimageSync(t *testing.T) {
 	tBtcWallet.fundRedeemScripts = []dex.Bytes{nil}
 
 	limitRouteProcessing := make(chan order.OrderID)
+	var commit order.Commitment
 
 	rig.ws.queueResponse(msgjson.LimitRoute, func(msg *msgjson.Message, f msgFunc) error {
 		t.Helper()
@@ -7558,8 +7539,8 @@ func TestPreimageSync(t *testing.T) {
 		lo := convertMsgLimitOrder(msgOrder)
 		resp := orderResponse(msg.ID, msgOrder, lo, false, false, false)
 		limitRouteProcessing <- lo.ID()
-		<-time.NewTimer(time.Millisecond * 100).C
-		f(resp)
+		commit = lo.Commit // accessed below only after errChan receive indicating Trade done
+		f(resp)            // e.g. the UnmarshalJSON in sendRequest
 		return nil
 	})
 
@@ -7575,24 +7556,26 @@ func TestPreimageSync(t *testing.T) {
 	var oid order.OrderID
 	select {
 	case oid = <-limitRouteProcessing:
-	case <-time.NewTimer(time.Second).C:
+	case <-time.After(time.Second):
 		t.Fatalf("limit route never hit")
+	}
+
+	err := <-errChan
+	if err != nil {
+		t.Fatalf("trade error: %v", err)
 	}
 
 	// So ideally, we're calling handlePreimageRequest about 100 ms before we
 	// even have an order id back from the server. This shouldn't result in an
 	// error.
 	payload := &msgjson.PreimageRequest{
-		OrderID: oid[:],
+		OrderID:    oid[:],
+		Commitment: commit[:],
 	}
 	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payload)
-	err := handlePreimageRequest(rig.core, rig.dc, req)
+	err = handlePreimageRequest(rig.core, rig.dc, req)
 	if err != nil {
 		t.Fatalf("early preimage request error: %v", err)
-	}
-	err = <-errChan
-	if err != nil {
-		t.Fatalf("trade error: %v", err)
 	}
 }
 
