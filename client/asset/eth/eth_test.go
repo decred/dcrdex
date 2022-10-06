@@ -2957,7 +2957,6 @@ func TestDriverOpen(t *testing.T) {
 	if eth.gasFeeLimit() != defaultGasFeeLimit {
 		t.Fatalf("expected gasFeeLimit to be default, but got %v", eth.gasFeeLimit())
 	}
-	eth.shutdown()
 
 	// Make sure gas fee limit is properly parsed from settings
 	cfg.Settings["gasfeelimit"] = "150"
