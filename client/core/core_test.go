@@ -114,6 +114,8 @@ var (
 	tLogger                    = dex.StdOutLogger("TCORE", dex.LevelDebug)
 	tMaxFeeRate         uint64 = 10
 	tWalletInfo                = &asset.WalletInfo{
+		Version:           0,
+		SupportedVersions: []uint32{0},
 		UnitInfo: dex.UnitInfo{
 			Conventional: dex.Denomination{
 				ConversionFactor: 1e8,
@@ -621,6 +623,7 @@ func (r *tReceipt) SignedRefund() dex.Bytes {
 }
 
 type TXCWallet struct {
+	swapSize            uint64
 	sendFeeSuggestion   uint64
 	sendCoin            *tCoin
 	sendErr             error
@@ -713,23 +716,26 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 		lastSwaps:        make([]*asset.Swaps, 0),
 		lastRedeems:      make([]*asset.RedeemForm, 0),
 		info: &asset.WalletInfo{
-			Version: 0, // match tUTXOAssetA/tUTXOAssetB
+			Version:           0, // match tUTXOAssetA/tUTXOAssetB
+			SupportedVersions: []uint32{0},
 		},
 	}
 	var broadcasting uint32 = 1
 	xcWallet := &xcWallet{
-		Wallet:       w,
-		connector:    dex.NewConnectionMaster(w),
-		AssetID:      assetID,
-		hookedUp:     true,
-		dbID:         encode.Uint32Bytes(assetID),
-		encPass:      []byte{0x01},
-		peerCount:    1,
-		synced:       true,
-		syncProgress: 1,
-		pw:           tPW,
-		traits:       asset.DetermineWalletTraits(w),
-		broadcasting: &broadcasting,
+		version:           w.info.Version,
+		supportedVersions: w.info.SupportedVersions,
+		Wallet:            w,
+		connector:         dex.NewConnectionMaster(w),
+		AssetID:           assetID,
+		hookedUp:          true,
+		dbID:              encode.Uint32Bytes(assetID),
+		encPass:           []byte{0x01},
+		peerCount:         1,
+		synced:            true,
+		syncProgress:      1,
+		pw:                tPW,
+		traits:            asset.DetermineWalletTraits(w),
+		broadcasting:      &broadcasting,
 	}
 
 	return xcWallet, w
@@ -958,6 +964,9 @@ func (w *TXCWallet) RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (
 	return w.tConfirmations(ctx, coinID)
 }
 
+func (w *TXCWallet) FeesForRemainingSwaps(n, feeRate uint64) uint64 {
+	return n * feeRate * w.swapSize
+}
 func (w *TXCWallet) AccelerateOrder(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, newFeeRate uint64) (asset.Coin, string, error) {
 	if w.accelerateOrderErr != nil {
 		return nil, "", w.accelerateOrderErr
@@ -1054,7 +1063,7 @@ func newTAccountLocker(assetID uint32) (*xcWallet, *TAccountLocker) {
 	return xcWallet, accountLocker
 }
 
-func (w *TAccountLocker) ReserveNRedemptions(n uint64, dexSwapCfg *dex.Asset) (uint64, error) {
+func (w *TAccountLocker) ReserveNRedemptions(n uint64, ver uint32, maxFeeRate uint64) (uint64, error) {
 	return w.reserveNRedemptions, w.reserveNRedemptionsErr
 }
 
@@ -1067,7 +1076,7 @@ func (w *TAccountLocker) UnlockRedemptionReserves(v uint64) {
 	w.redemptionUnlocked += v
 }
 
-func (w *TAccountLocker) ReserveNRefunds(n uint64, dexRedeemCfg *dex.Asset) (uint64, error) {
+func (w *TAccountLocker) ReserveNRefunds(n uint64, ver uint32, maxFeeRate uint64) (uint64, error) {
 	return w.reserveNRefunds, w.reserveNRefundsErr
 }
 
@@ -2299,7 +2308,7 @@ func TestLogin(t *testing.T) {
 	tCore.wallets[tUTXOAssetA.ID] = dcrWallet
 	btcWallet, tBtcWallet := newTWallet(tUTXOAssetB.ID)
 	tCore.wallets[tUTXOAssetB.ID] = btcWallet
-	walletSet, _, _ := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
+	walletSet, _, _, _ := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
 	tracker := newTrackedTrade(dbOrder, preImg, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails) // nil means no funding coins
 	matchID := ordertest.RandomMatchID()
@@ -3090,7 +3099,7 @@ func TestRefundReserves(t *testing.T) {
 	lo.Force = order.StandingTiF
 	loid := lo.ID()
 
-	walletSet, _, err := tCore.walletSet(dc, tACCTAsset.ID, tUTXOAssetA.ID, true)
+	walletSet, _, _, err := tCore.walletSet(dc, tACCTAsset.ID, tUTXOAssetA.ID, true)
 	if err != nil {
 		t.Fatalf("walletSet error: %v", err)
 	}
@@ -3278,7 +3287,7 @@ func TestRefundReserves(t *testing.T) {
 	// Market buy order
 	mo.BaseAsset, mo.QuoteAsset = mo.QuoteAsset, mo.BaseAsset
 	mo.Sell = false
-	tracker.wallets, _, _ = tCore.walletSet(dc, tUTXOAssetA.ID, tACCTAsset.ID, false)
+	tracker.wallets, _, _, _ = tCore.walletSet(dc, tUTXOAssetA.ID, tACCTAsset.ID, false)
 
 	test("redemption received, market buy", reserves, func() {
 		mid := addMatch(order.Taker, order.TakerSwapCast, lotSize)
@@ -3343,7 +3352,7 @@ func TestRedemptionReserves(t *testing.T) {
 	lo.Force = order.StandingTiF
 	loid := lo.ID()
 
-	walletSet, _, err := tCore.walletSet(dc, tUTXOAssetB.ID, tACCTAsset.ID, true)
+	walletSet, _, _, err := tCore.walletSet(dc, tUTXOAssetB.ID, tACCTAsset.ID, true)
 	if err != nil {
 		t.Fatalf("walletSet error: %v", err)
 	}
@@ -3505,7 +3514,7 @@ func TestRedemptionReserves(t *testing.T) {
 	// Market buy order with dust handling.
 	mo.BaseAsset, mo.QuoteAsset = mo.QuoteAsset, mo.BaseAsset
 	mo.Sell = false
-	tracker.wallets, _, _ = tCore.walletSet(dc, tACCTAsset.ID, tUTXOAssetB.ID, false)
+	tracker.wallets, _, _, _ = tCore.walletSet(dc, tACCTAsset.ID, tUTXOAssetB.ID, false)
 
 	resetMatches()
 	mids := []order.MatchID{
@@ -4202,7 +4211,7 @@ func TestHandleRevokeOrderMsg(t *testing.T) {
 
 	tDcrWallet.fundingCoins = asset.Coins{fundCoinDcr}
 
-	walletSet, _, err := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
+	walletSet, _, _, err := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
 	if err != nil {
 		t.Fatalf("walletSet error: %v", err)
 	}
@@ -4276,7 +4285,7 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 	tDcrWallet.fundingCoins = asset.Coins{fundCoinDcr}
 
 	mid := ordertest.RandomMatchID()
-	walletSet, _, err := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
+	walletSet, _, _, err := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
 	if err != nil {
 		t.Fatalf("walletSet error: %v", err)
 	}
@@ -4347,7 +4356,7 @@ func TestTradeTracking(t *testing.T) {
 	//tDcrWallet.fundingCoins = asset.Coins{fundCoinDcr}
 
 	mid := ordertest.RandomMatchID()
-	walletSet, _, err := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
+	walletSet, _, _, err := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
 	if err != nil {
 		t.Fatalf("walletSet error: %v", err)
 	}
@@ -4915,7 +4924,7 @@ func TestReconcileTrades(t *testing.T) {
 	mkt := dc.marketConfig(tDcrBtcMktName)
 	rig.core.wallets[mkt.Base], _ = newTWallet(mkt.Base)
 	rig.core.wallets[mkt.Quote], _ = newTWallet(mkt.Quote)
-	walletSet, _, err := rig.core.walletSet(dc, mkt.Base, mkt.Quote, true)
+	walletSet, _, _, err := rig.core.walletSet(dc, mkt.Base, mkt.Quote, true)
 	if err != nil {
 		t.Fatalf("walletSet error: %v", err)
 	}
@@ -4928,12 +4937,12 @@ func TestReconcileTrades(t *testing.T) {
 	}
 	makeOrderSet := func(force order.TimeInForce) *orderSet {
 		orders := &orderSet{
-			epoch:    makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusEpoch),
-			executed: makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusExecuted),
+			epoch:    makeTradeTracker(rig, walletSet, force, order.OrderStatusEpoch),
+			executed: makeTradeTracker(rig, walletSet, force, order.OrderStatusExecuted),
 		}
 		if force == order.StandingTiF {
-			orders.booked = makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusBooked)
-			orders.bookedPendingCancel = makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusBooked)
+			orders.booked = makeTradeTracker(rig, walletSet, force, order.OrderStatusBooked)
+			orders.bookedPendingCancel = makeTradeTracker(rig, walletSet, force, order.OrderStatusBooked)
 			orders.bookedPendingCancel.cancel = &trackedCancel{
 				CancelOrder: order.CancelOrder{
 					P: order.Prefix{
@@ -5112,14 +5121,11 @@ func TestReconcileTrades(t *testing.T) {
 	}
 }
 
-func makeTradeTracker(rig *testRig, mkt *msgjson.Market, walletSet *walletSet, force order.TimeInForce, status order.OrderStatus) *trackedTrade {
+func makeTradeTracker(rig *testRig, walletSet *walletSet, force order.TimeInForce, status order.OrderStatus) *trackedTrade {
 	qty := 4 * dcrBtcLotSize
 	lo, dbOrder, preImg, _ := makeLimitOrder(rig.dc, true, qty, dcrBtcRateStep)
 	lo.Force = force
 	dbOrder.MetaData.Status = status
-	dbOrder.MetaData.EpochDur = mkt.EpochLen
-	dbOrder.MetaData.FromSwapConf = walletSet.fromAsset.SwapConf
-	dbOrder.MetaData.ToSwapConf = walletSet.toAsset.SwapConf
 
 	return newTrackedTrade(dbOrder, preImg, rig.dc,
 		rig.core.lockTimeTaker, rig.core.lockTimeMaker,
@@ -5203,7 +5209,7 @@ func TestRefunds(t *testing.T) {
 	lo, dbOrder, preImgL, addr := makeLimitOrder(dc, false, qty, dcrBtcRateStep)
 	loid := lo.ID()
 	mid := ordertest.RandomMatchID()
-	walletSet, _, err := tCore.walletSet(dc, tUTXOAssetB.ID, tACCTAsset.ID, false)
+	walletSet, _, _, err := tCore.walletSet(dc, tUTXOAssetB.ID, tACCTAsset.ID, false)
 	if err != nil {
 		t.Fatalf("walletSet error: %v", err)
 	}
@@ -5832,7 +5838,7 @@ func TestReReserveFunding(t *testing.T) {
 	for _, tt := range reservationTests {
 
 		lo.T.Sell = tt.sell
-		tracker.wallets, _, _ = tCore.walletSet(rig.dc, utxoAsset.ID, acctAsset.ID, tt.sell)
+		tracker.wallets, _, _, _ = tCore.walletSet(rig.dc, utxoAsset.ID, acctAsset.ID, tt.sell)
 		if tt.sell {
 			dbOrder.MetaData.RefundReserves = 0
 			dbOrder.MetaData.RedemptionReserves = redemptionReserves
@@ -6534,7 +6540,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	tCore.wallets[tUTXOAssetB.ID] = btcWallet
 	btcWallet.Unlock(rig.crypter)
 
-	walletSet, _, _ := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
+	walletSet, _, _, _ := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
 
 	rig.dc.books[tDcrBtcMktName] = newBookie(rig.dc, tUTXOAssetA.ID, tUTXOAssetB.ID, nil, tLogger)
 
@@ -6825,7 +6831,7 @@ func TestHandleNomatch(t *testing.T) {
 	btcWallet, _ := newTWallet(tUTXOAssetB.ID)
 	tCore.wallets[tUTXOAssetB.ID] = btcWallet
 
-	walletSet, _, err := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
+	walletSet, _, _, err := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
 	if err != nil {
 		t.Fatalf("walletSet error: %v", err)
 	}
@@ -7123,10 +7129,10 @@ func TestReconfigureWallet(t *testing.T) {
 			},
 		},
 		wallets: &walletSet{
-			fromAsset:  &dex.Asset{ID: assetID},
+			// fromAsset:  &dex.Asset{ID: assetID},
 			fromWallet: &xcWallet{AssetID: assetID},
-			toAsset:    &dex.Asset{},
-			toWallet:   &xcWallet{},
+			// toAsset:    &dex.Asset{},
+			toWallet: &xcWallet{},
 		},
 		matches: map[order.MatchID]*matchTracker{
 			{}: match,
@@ -7473,13 +7479,15 @@ func TestAccelerateOrder(t *testing.T) {
 	tCore := rig.core
 	dc := rig.dc
 
-	dcrWallet, _ := newTWallet(tUTXOAssetA.ID)
+	dcrWallet, tDcrWallet := newTWallet(tUTXOAssetA.ID)
+	tDcrWallet.swapSize = tUTXOAssetA.SwapSize
 	tCore.wallets[tUTXOAssetA.ID] = dcrWallet
 	btcWallet, tBtcWallet := newTWallet(tUTXOAssetB.ID)
+	tBtcWallet.swapSize = tUTXOAssetB.SwapSize
 	tCore.wallets[tUTXOAssetB.ID] = btcWallet
 
-	buyWalletSet, _, _ := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, false)
-	sellWalletSet, _, _ := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, false)
+	buyWalletSet, _, _, _ := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, false)
+	sellWalletSet, _, _, _ := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, false)
 
 	var newBaseFeeRate uint64 = 55
 	var newQuoteFeeRate uint64 = 65
@@ -7978,7 +7986,7 @@ func TestMatchStatusResolution(t *testing.T) {
 	tCore.wallets[tUTXOAssetA.ID] = dcrWallet
 	btcWallet, tBtcWallet := newTWallet(tUTXOAssetB.ID)
 	tCore.wallets[tUTXOAssetB.ID] = btcWallet
-	walletSet, _, _ := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
+	walletSet, _, _, _ := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
 
 	qty := 3 * dcrBtcLotSize
 	secret := encode.RandomBytes(32)
@@ -8471,7 +8479,7 @@ func TestConfirmRedemption(t *testing.T) {
 	tCore.wallets[tUTXOAssetA.ID] = dcrWallet
 	btcWallet, tBtcWallet := newTWallet(tUTXOAssetB.ID)
 	tCore.wallets[tUTXOAssetB.ID] = btcWallet
-	walletSet, _, _ := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
+	walletSet, _, _, _ := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
 
 	lo, dbOrder, preImg, addr := makeLimitOrder(dc, true, 0, 0)
 	oid := lo.ID()
@@ -8835,7 +8843,7 @@ func TestMaxSwapsRedeemsInTx(t *testing.T) {
 	tCore.wallets[tUTXOAssetA.ID] = dcrWallet
 	btcWallet, tBtcWallet := newTWallet(tUTXOAssetB.ID)
 	tCore.wallets[tUTXOAssetB.ID] = btcWallet
-	walletSet, _, _ := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
+	walletSet, _, _, _ := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
 
 	tDcrWallet.info.MaxSwapsInTx = 4
 	tBtcWallet.info.MaxRedeemsInTx = 4
@@ -8963,7 +8971,7 @@ func TestSuspectTrades(t *testing.T) {
 	tCore.wallets[tUTXOAssetA.ID] = dcrWallet
 	btcWallet, tBtcWallet := newTWallet(tUTXOAssetB.ID)
 	tCore.wallets[tUTXOAssetB.ID] = btcWallet
-	walletSet, _, _ := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
+	walletSet, _, _, _ := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
 
 	lo, dbOrder, preImg, addr := makeLimitOrder(dc, true, 0, 0)
 	oid := lo.ID()

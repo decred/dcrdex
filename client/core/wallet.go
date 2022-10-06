@@ -40,12 +40,15 @@ func runWithTimeout(f func() error, timeout time.Duration) error {
 // xcWallet is a wallet. Use (*Core).loadWallet to construct a xcWallet.
 type xcWallet struct {
 	asset.Wallet
-	connector  *dex.ConnectionMaster
-	AssetID    uint32
-	dbID       []byte
-	walletType string
-	traits     asset.WalletTrait
-	parent     *xcWallet
+	connector         *dex.ConnectionMaster
+	AssetID           uint32
+	Symbol            string
+	version           uint32
+	supportedVersions []uint32
+	dbID              []byte
+	walletType        string
+	traits            asset.WalletTrait
+	parent            *xcWallet
 
 	mtx          sync.RWMutex
 	encPass      []byte // empty means wallet not password protected
@@ -80,6 +83,15 @@ func (w *xcWallet) setEncPW(encPW []byte) {
 	w.mtx.Lock()
 	w.encPass = encPW
 	w.mtx.Unlock()
+}
+
+func (w *xcWallet) supportsVer(ver uint32) bool {
+	for _, v := range w.supportedVersions {
+		if v == ver {
+			return true
+		}
+	}
+	return false
 }
 
 // Unlock unlocks the wallet backend and caches the decrypted wallet password so
@@ -202,6 +214,10 @@ func (w *xcWallet) locallyUnlocked() bool {
 		return true // unencrypted wallet
 	}
 	return len(w.pw) > 0 // cached password for encrypted wallet
+}
+
+func (w *xcWallet) unitInfo() dex.UnitInfo {
+	return w.Info().UnitInfo
 }
 
 // state returns the current WalletState.

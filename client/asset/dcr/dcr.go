@@ -216,9 +216,10 @@ var (
 
 	// WalletInfo defines some general information about a Decred wallet.
 	WalletInfo = &asset.WalletInfo{
-		Name:     "Decred",
-		Version:  version,
-		UnitInfo: dexdcr.UnitInfo,
+		Name:              "Decred",
+		Version:           version,
+		SupportedVersions: []uint32{version},
+		UnitInfo:          dexdcr.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{
 			{
 				Type:        walletTypeSPV,
@@ -1121,14 +1122,14 @@ func (a amount) String() string {
 // calculate lotSize based on a rate conversion from the base asset's lot size.
 // lotSize must not be zero and will cause a panic if so.
 func (dcr *ExchangeWallet) MaxOrder(ord *asset.MaxOrderForm) (*asset.SwapEstimate, error) {
-	_, est, err := dcr.maxOrder(ord.LotSize, ord.FeeSuggestion, ord.AssetConfig)
+	_, est, err := dcr.maxOrder(ord.LotSize, ord.FeeSuggestion, ord.MaxFeeRate)
 	return est, err
 }
 
 // maxOrder gets the estimate for MaxOrder, and also returns the
 // []*compositeUTXO and network fee rate to be used for further order estimation
 // without additional calls to listunspent.
-func (dcr *ExchangeWallet) maxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asset) (utxos []*compositeUTXO, est *asset.SwapEstimate, err error) {
+func (dcr *ExchangeWallet) maxOrder(lotSize, feeSuggestion, maxFeeRate uint64) (utxos []*compositeUTXO, est *asset.SwapEstimate, err error) {
 	if lotSize == 0 {
 		return nil, nil, errors.New("cannot divide by lotSize zero")
 	}
@@ -1143,11 +1144,11 @@ func (dcr *ExchangeWallet) maxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asse
 	}
 
 	// Start by attempting max lots with a basic fee.
-	basicFee := nfo.SwapSize * nfo.MaxFeeRate
+	basicFee := dexdcr.InitTxSize * maxFeeRate
 	lots := avail / (lotSize + basicFee)
 	cfg := dcr.config()
 	for lots > 0 {
-		est, _, _, err := dcr.estimateSwap(lots, lotSize, feeSuggestion, utxos, nfo, cfg.useSplitTx, 1.0)
+		est, _, _, err := dcr.estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate, utxos, cfg.useSplitTx, 1.0)
 		// The only failure mode of estimateSwap -> dcr.fund is when there is
 		// not enough funds, so if an error is encountered, count down the lots
 		// and repeat until we have enough.
@@ -1162,8 +1163,8 @@ func (dcr *ExchangeWallet) maxOrder(lotSize, feeSuggestion uint64, nfo *dex.Asse
 }
 
 // estimateSwap prepares an *asset.SwapEstimate.
-func (dcr *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, utxos []*compositeUTXO,
-	nfo *dex.Asset, trySplit bool, feeBump float64) (*asset.SwapEstimate, bool /*split used*/, uint64 /* locked */, error) {
+func (dcr *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate uint64, utxos []*compositeUTXO,
+	trySplit bool, feeBump float64) (*asset.SwapEstimate, bool /*split used*/, uint64 /* locked */, error) {
 
 	var avail uint64
 	for _, utxo := range utxos {
@@ -1172,7 +1173,7 @@ func (dcr *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, utx
 
 	// If there is a fee bump, the networkFeeRate can be higher than the
 	// MaxFeeRate
-	bumpedMaxRate := nfo.MaxFeeRate
+	bumpedMaxRate := maxFeeRate
 	bumpedNetRate := feeSuggestion
 	if feeBump > 1 {
 		bumpedMaxRate = uint64(math.Round(float64(bumpedMaxRate) * feeBump))
@@ -1180,18 +1181,21 @@ func (dcr *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, utx
 	}
 
 	val := lots * lotSize
-	sum, inputsSize, _, _, _, err := tryFund(utxos, orderEnough(val, lots, bumpedMaxRate, nfo))
+	sum, inputsSize, _, _, _, err := tryFund(utxos, orderEnough(val, lots, bumpedMaxRate))
 	if err != nil {
 		return nil, false, 0, err
 	}
 
-	reqFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots, nfo.SwapSizeBase, nfo.SwapSize, bumpedMaxRate)
+	reqFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots,
+		dexdcr.InitTxSizeBase, dexdcr.InitTxSize, bumpedMaxRate)
 	maxFees := reqFunds - val
 
-	estHighFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots, nfo.SwapSizeBase, nfo.SwapSize, bumpedNetRate)
+	estHighFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots,
+		dexdcr.InitTxSizeBase, dexdcr.InitTxSize, bumpedNetRate)
 	estHighFees := estHighFunds - val
 
-	estLowFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), 1, nfo.SwapSizeBase, nfo.SwapSize, bumpedNetRate)
+	estLowFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), 1,
+		dexdcr.InitTxSizeBase, dexdcr.InitTxSize, bumpedNetRate)
 	estLowFunds += dexdcr.P2SHOutputSize * (lots - 1) * bumpedNetRate
 	estLowFees := estLowFunds - val
 
@@ -1231,7 +1235,7 @@ func (dcr *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 	// The utxo set is only used once right now, but when order-time options are
 	// implemented, the utxos will be used to calculate option availability and
 	// fees.
-	utxos, maxEst, err := dcr.maxOrder(req.LotSize, req.FeeSuggestion, req.AssetConfig)
+	utxos, maxEst, err := dcr.maxOrder(req.LotSize, req.FeeSuggestion, req.MaxFeeRate)
 	if err != nil {
 		return nil, err
 	}
@@ -1260,7 +1264,8 @@ func (dcr *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 	}
 
 	// Get the estimate for the requested number of lots.
-	est, splitUsed, _, err := dcr.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion, utxos, req.AssetConfig, split, bump)
+	est, splitUsed, _, err := dcr.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion,
+		req.MaxFeeRate, utxos, split, bump)
 	if err != nil {
 		return nil, fmt.Errorf("estimation failed: %v", err)
 	}
@@ -1280,7 +1285,8 @@ func (dcr *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 	var maxBump float64
 	var maxBumpEst *asset.SwapEstimate
 	for maxBump = 2.0; maxBump > 1.01; maxBump -= 0.1 {
-		tryEst, splitUsed, _, err := dcr.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion, utxos, req.AssetConfig, split, maxBump)
+		tryEst, splitUsed, _, err := dcr.estimateSwap(req.Lots, req.LotSize,
+			req.FeeSuggestion, req.MaxFeeRate, utxos, split, maxBump)
 		// If the split used wasn't the configured value, this option is not
 		// available.
 		if err == nil && split == splitUsed {
@@ -1290,7 +1296,8 @@ func (dcr *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 	}
 
 	if maxBumpEst != nil {
-		noBumpEst, _, _, err := dcr.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion, utxos, req.AssetConfig, split, 1.0)
+		noBumpEst, _, _, err := dcr.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion,
+			req.MaxFeeRate, utxos, split, 1.0)
 		if err != nil {
 			// shouldn't be possible, since we already succeeded with a higher bump.
 			return nil, fmt.Errorf("error getting no-bump estimate: %w", err)
@@ -1377,12 +1384,14 @@ func (dcr *ExchangeWallet) SingleLotSwapFees(form *asset.PreSwapForm) (fees uint
 // splitOption constructs an *asset.OrderOption with customized text based on the
 // difference in fees between the configured and test split condition.
 func (dcr *ExchangeWallet) splitOption(req *asset.PreSwapForm, utxos []*compositeUTXO, bump float64) *asset.OrderOption {
-	noSplitEst, _, noSplitLocked, err := dcr.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion, utxos, req.AssetConfig, false, bump)
+	noSplitEst, _, noSplitLocked, err := dcr.estimateSwap(req.Lots, req.LotSize,
+		req.FeeSuggestion, req.MaxFeeRate, utxos, false, bump)
 	if err != nil {
 		dcr.log.Errorf("estimateSwap (no split) error: %v", err)
 		return nil
 	}
-	splitEst, splitUsed, splitLocked, err := dcr.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion, utxos, req.AssetConfig, true, bump)
+	splitEst, splitUsed, splitLocked, err := dcr.estimateSwap(req.Lots, req.LotSize,
+		req.FeeSuggestion, req.MaxFeeRate, utxos, true, bump)
 	if err != nil {
 		dcr.log.Errorf("estimateSwap (with split) error: %v", err)
 		return nil
@@ -1507,9 +1516,10 @@ func (dcr *ExchangeWallet) SingleLotRedeemFees(req *asset.PreRedeemForm) (uint64
 
 // orderEnough generates a function that can be used as the enough argument to
 // the fund method.
-func orderEnough(val, lots, feeRate uint64, nfo *dex.Asset) func(sum uint64, size uint32, unspent *compositeUTXO) bool {
+func orderEnough(val, lots, feeRate uint64) func(sum uint64, size uint32, unspent *compositeUTXO) bool {
 	return func(sum uint64, size uint32, unspent *compositeUTXO) bool {
-		reqFunds := calc.RequiredOrderFundsAlt(val, uint64(size+unspent.input.Size()), lots, nfo.SwapSizeBase, nfo.SwapSize, feeRate)
+		reqFunds := calc.RequiredOrderFundsAlt(val, uint64(size+unspent.input.Size()), lots,
+			dexdcr.InitTxSizeBase, dexdcr.InitTxSize, feeRate)
 		// needed fees are reqFunds - value
 		return sum+toAtoms(unspent.rpc.Amount) >= reqFunds
 	}
@@ -1536,19 +1546,17 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	if ord.MaxSwapCount == 0 {
 		return nil, nil, fmt.Errorf("cannot fund a zero-lot order")
 	}
-	if ord.FeeSuggestion > ord.DEXConfig.MaxFeeRate {
-		return nil, nil, fmt.Errorf("fee suggestion %d > max fee rate %d", ord.FeeSuggestion, ord.DEXConfig.MaxFeeRate)
+	if ord.FeeSuggestion > ord.MaxFeeRate {
+		return nil, nil, fmt.Errorf("fee suggestion %d > max fee rate %d", ord.FeeSuggestion, ord.MaxFeeRate)
 	}
 	if ord.FeeSuggestion > cfg.feeRateLimit {
 		return nil, nil, fmt.Errorf("suggested fee > configured limit. %d > %d", ord.FeeSuggestion, cfg.feeRateLimit)
 	}
 	// Check wallet's fee rate limit against server's max fee rate
-	if cfg.feeRateLimit < ord.DEXConfig.MaxFeeRate {
+	if cfg.feeRateLimit < ord.MaxFeeRate {
 		return nil, nil, fmt.Errorf(
 			"%v: server's max fee rate %v higher than configured fee rate limit %v",
-			ord.DEXConfig.Symbol,
-			ord.DEXConfig.MaxFeeRate,
-			cfg.feeRateLimit)
+			dex.BipIDSymbol(BipID), ord.MaxFeeRate, cfg.feeRateLimit)
 	}
 
 	customCfg := new(swapOptions)
@@ -1558,12 +1566,12 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	}
 
 	// Check ord.Options for a FeeBump here
-	bumpedMaxRate, err := calcBumpedRate(ord.DEXConfig.MaxFeeRate, customCfg.FeeBump)
+	bumpedMaxRate, err := calcBumpedRate(ord.MaxFeeRate, customCfg.FeeBump)
 	if err != nil {
 		dcr.log.Errorf("calcBumpRate error: %v", err)
 	}
 
-	coins, redeemScripts, sum, inputsSize, err := dcr.fund(orderEnough(ord.Value, ord.MaxSwapCount, bumpedMaxRate, ord.DEXConfig))
+	coins, redeemScripts, sum, inputsSize, err := dcr.fund(orderEnough(ord.Value, ord.MaxSwapCount, bumpedMaxRate))
 	if err != nil {
 		return nil, nil, fmt.Errorf("error funding order value of %s DCR: %w",
 			amount(ord.Value), err)
@@ -1587,8 +1595,8 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 			rawFeeRate = dcr.targetFeeRateWithFallback(cfg.redeemConfTarget, 0)
 			// We PreOrder checked this as <= MaxFeeRate, so use that as an
 			// upper limit.
-			if rawFeeRate > ord.DEXConfig.MaxFeeRate {
-				rawFeeRate = ord.DEXConfig.MaxFeeRate
+			if rawFeeRate > ord.MaxFeeRate {
+				rawFeeRate = ord.MaxFeeRate
 			}
 		}
 		splitFeeRate, err := calcBumpedRate(rawFeeRate, customCfg.FeeBump)
@@ -1597,7 +1605,7 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 		}
 
 		splitCoins, split, err := dcr.split(ord.Value, ord.MaxSwapCount, coins,
-			inputsSize, splitFeeRate, bumpedMaxRate, ord.DEXConfig)
+			inputsSize, splitFeeRate, bumpedMaxRate)
 		if err != nil {
 			if _, errRet := dcr.returnCoins(coins); errRet != nil {
 				dcr.log.Warnf("Failed to unlock funding coins %v: %v", coins, errRet)
@@ -1792,7 +1800,7 @@ func tryFund(utxos []*compositeUTXO, enough func(sum uint64, size uint32, unspen
 // would already have an output of just the right size, and that would be
 // recognized here.
 func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, inputsSize uint64,
-	splitFeeRate, bumpedMaxRate uint64, nfo *dex.Asset) (asset.Coins, bool, error) {
+	splitFeeRate, bumpedMaxRate uint64) (asset.Coins, bool, error) {
 
 	// Calculate the extra fees associated with the additional inputs, outputs,
 	// and transaction overhead, and compare to the excess that would be locked.
@@ -1805,7 +1813,8 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 
 	valStr := amount(value).String()
 
-	excess := coinSum - calc.RequiredOrderFundsAlt(value, inputsSize, lots, nfo.SwapSizeBase, nfo.SwapSize, bumpedMaxRate)
+	excess := coinSum - calc.RequiredOrderFundsAlt(value, inputsSize, lots,
+		dexdcr.InitTxSizeBase, dexdcr.InitTxSize, bumpedMaxRate)
 
 	if baggageFees > excess {
 		dcr.log.Debugf("Skipping split transaction because cost is greater than potential over-lock. %s > %s.",
@@ -1831,7 +1840,8 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 		return nil, false, fmt.Errorf("error creating split transaction address: %w", err)
 	}
 
-	reqFunds := calc.RequiredOrderFundsAlt(value, dexdcr.P2PKHInputSize, lots, nfo.SwapSizeBase, nfo.SwapSize, bumpedMaxRate)
+	reqFunds := calc.RequiredOrderFundsAlt(value, dexdcr.P2PKHInputSize, lots,
+		dexdcr.InitTxSizeBase, dexdcr.InitTxSize, bumpedMaxRate)
 
 	dcr.fundingMtx.Lock()         // before generating the new output in sendCoins
 	defer dcr.fundingMtx.Unlock() // after locking it (wallet and map)

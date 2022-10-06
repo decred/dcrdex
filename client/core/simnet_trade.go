@@ -1066,7 +1066,7 @@ func (s *simulationTest) placeTestOrders(qty, rate uint64) (string, string, erro
 		return "", "", err
 	}
 	// Wait the epoch duration for this order to get booked.
-	epochDur := time.Duration(tracker.epochLen) * time.Millisecond
+	epochDur := time.Duration(tracker.epochLen()) * time.Millisecond
 	time.Sleep(epochDur)
 
 	if s.client1IsMaker {
@@ -1209,7 +1209,7 @@ func (s *simulationTest) monitorTrackedTrade(client *simulationClient, tracker *
 					waitForOtherSideTakerInit = true
 				}
 				// Progress from asset.
-				nBlocks := tracker.wallets.fromAsset.SwapConf
+				nBlocks := tracker.metaData.FromSwapConf
 				if accountBIPs[tracker.wallets.fromWallet.AssetID] {
 					nBlocks = 8
 				}
@@ -1229,7 +1229,7 @@ func (s *simulationTest) monitorTrackedTrade(client *simulationClient, tracker *
 					waitForOtherSideTakerInit = true
 				}
 				// Progress to asset.
-				nBlocks := tracker.wallets.toAsset.SwapConf
+				nBlocks := tracker.metaData.ToSwapConf
 				if accountBIPs[tracker.wallets.toWallet.AssetID] {
 					nBlocks = 8
 				}
@@ -1350,7 +1350,7 @@ func (s *simulationTest) checkAndWaitForRefunds(ctx context.Context, client *sim
 		if !client.isSeller {
 			swapAmt = calc.BaseToQuote(match.Rate, match.Quantity)
 		}
-		refundAmts[tracker.wallets.fromAsset.ID] += int64(swapAmt)
+		refundAmts[tracker.wallets.fromWallet.AssetID] += int64(swapAmt)
 
 		matchTime := match.matchTime()
 		swapLockTime := matchTime.Add(tracker.lockTimeTaker)

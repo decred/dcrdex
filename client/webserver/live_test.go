@@ -500,6 +500,8 @@ func (*TDriver) DecodeCoinID(coinID []byte) (string, error) {
 
 func (*TDriver) Info() *asset.WalletInfo {
 	return &asset.WalletInfo{
+		Version:           0,
+		SupportedVersions: []uint32{0},
 		UnitInfo: dex.UnitInfo{
 			Conventional: dex.Denomination{
 				ConversionFactor: 1e8,
@@ -1234,6 +1236,8 @@ var winfos = map[uint32]*asset.WalletInfo{
 	2:  ltc.WalletInfo,
 	42: dcr.WalletInfo,
 	22: {
+		Version:           0,
+		SupportedVersions: []uint32{0},
 		UnitInfo: dex.UnitInfo{
 			AtomicUnit: "atoms",
 			Conventional: dex.Denomination{
@@ -1256,6 +1260,8 @@ var winfos = map[uint32]*asset.WalletInfo{
 		},
 	},
 	3: {
+		Version:           0,
+		SupportedVersions: []uint32{0},
 		UnitInfo: dex.UnitInfo{
 			AtomicUnit: "atoms",
 			Conventional: dex.Denomination{
@@ -1269,6 +1275,8 @@ var winfos = map[uint32]*asset.WalletInfo{
 		}},
 	},
 	28: {
+		Version:           0,
+		SupportedVersions: []uint32{0},
 		UnitInfo: dex.UnitInfo{
 			AtomicUnit: "Sats",
 			Conventional: dex.Denomination{
@@ -1283,8 +1291,10 @@ var winfos = map[uint32]*asset.WalletInfo{
 	},
 	60: eth.WalletInfo,
 	145: {
-		Name:     "Bitcoin Cash",
-		UnitInfo: dexbch.UnitInfo,
+		Version:           0,
+		SupportedVersions: []uint32{0},
+		Name:              "Bitcoin Cash",
+		UnitInfo:          dexbch.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{{
 			ConfigOpts: configOpts,
 		}},

@@ -3,8 +3,6 @@
 
 package asset
 
-import "decred.org/dcrdex/dex"
-
 // SwapEstimate is an estimate of the fees and locked amounts associated with
 // an order.
 type SwapEstimate struct {
@@ -37,17 +35,15 @@ type RedeemEstimate struct {
 
 // PreSwapForm can be used to get a swap fees estimate.
 type PreSwapForm struct {
+	// Version is the asset version. Most backends only support one version.
+	Version uint32
 	// LotSize is the lot size for the calculation. For quote assets, LotSize
 	// should be based on either the user's limit order rate, or some measure
 	// of the current market rate.
 	LotSize uint64
 	// Lots is the number of lots in the order.
-	Lots uint64
-	// AssetConfig is the dex's asset configuration info.
-	AssetConfig *dex.Asset
-	// RedeemConfig is the dex's asset configuration info for the redemption
-	// asset.
-	RedeemConfig *dex.Asset
+	Lots       uint64
+	MaxFeeRate uint64
 	// Immediate should be set to true if this is for an order that is not a
 	// standing order, likely a market order or a limit order with immediate
 	// time-in-force.
@@ -61,6 +57,17 @@ type PreSwapForm struct {
 	// selects an option, a new PreOrder can be generated to updated the
 	// options available and recalculate the effects.
 	SelectedOptions map[string]string
+
+	// The following fields are only used for some assets where the redeemed/to
+	// asset may require funds in this "from" asset. For example, buying ERC20
+	// tokens with ETH. The funds may be used for withdraw approval for the
+	// redeemed token contract, or just the redeem tx gas.
+
+	// RedeemVersion is the asset version of the "to" asset with the redeem
+	// transaction. Most backends only support one version.
+	RedeemVersion uint32
+	// RedeemAssetID is the asset ID of the "to" asset.
+	RedeemAssetID uint32
 }
 
 // PreSwap is a SwapEstimate returned from Wallet.PreSwap. The struct will be
@@ -72,14 +79,14 @@ type PreSwap struct {
 
 // PreRedeemForm can be used to get a redemption estimate.
 type PreRedeemForm struct {
+	// Version is the asset version. Most backends only support one version.
+	Version uint32
 	// Lots is the number of lots in the order.
 	Lots uint64
 	// FeeSuggestion is a suggested fee from the server.
 	FeeSuggestion uint64
 	// SelectedOptions is any options that the user has selected.
 	SelectedOptions map[string]string
-	// AssetConfig is the dex's asset configuration info.
-	AssetConfig *dex.Asset
 }
 
 // PreRedeem is an estimate of the fees for redemption. The struct will be
@@ -93,6 +100,13 @@ type PreRedeem struct {
 type MaxOrderForm struct {
 	LotSize       uint64
 	FeeSuggestion uint64
-	AssetConfig   *dex.Asset
-	RedeemConfig  *dex.Asset
+	AssetVersion  uint32 // the init/from asset version
+	MaxFeeRate    uint64 // max fee rate of init/from asset
+
+	// The following Redeem asset fields are only required for certain assets
+	// where redeeming the other asset may require funds of the "from" asset
+	// (this wallet's asset) to be reserved. e.g. ERC20 tokens bought with ETH.
+
+	RedeemVersion uint32 // the redeem/to asset version
+	RedeemAssetID uint32 // the redeem/to asset ID
 }

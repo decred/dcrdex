@@ -70,9 +70,10 @@ var (
 	}
 	// WalletInfo defines some general information about a Litecoin wallet.
 	WalletInfo = &asset.WalletInfo{
-		Name:     "Litecoin",
-		Version:  version,
-		UnitInfo: dexltc.UnitInfo,
+		Name:              "Litecoin",
+		Version:           version,
+		SupportedVersions: []uint32{version},
+		UnitInfo:          dexltc.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{
 			spvWalletDefinition,
 			rpcWalletDefinition,
@@ -187,6 +188,8 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		LegacyBalance:       false,
 		LegacyRawFeeLimit:   false,
 		Segwit:              true,
+		InitTxSize:          dexbtc.InitTxSizeSegwit,
+		InitTxSizeBase:      dexbtc.InitTxSizeBaseSegwit,
 		BlockDeserializer:   dexltc.DeserializeBlockBytes,
 	}
 

@@ -1056,17 +1056,21 @@ func (m *Market) Running() bool {
 // Asset describes an asset and its variables, and is returned as part of a
 // ConfigResult.
 type Asset struct {
-	Symbol       string       `json:"symbol"`
-	ID           uint32       `json:"id"`
-	Version      uint32       `json:"version"`
-	LotSize      uint64       `json:"lotsize,omitempty"`
-	RateStep     uint64       `json:"ratestep,omitempty"`
-	MaxFeeRate   uint64       `json:"maxfeerate"`
-	SwapSize     uint64       `json:"swapsize"`
-	SwapSizeBase uint64       `json:"swapsizebase"`
-	RedeemSize   uint64       `json:"redeemsize"`
-	SwapConf     uint16       `json:"swapconf"`
-	UnitInfo     dex.UnitInfo `json:"unitinfo"`
+	Symbol     string       `json:"symbol"`
+	ID         uint32       `json:"id"`
+	Version    uint32       `json:"version"`
+	LotSize    uint64       `json:"lotsize,omitempty"`
+	RateStep   uint64       `json:"ratestep,omitempty"`
+	MaxFeeRate uint64       `json:"maxfeerate"`
+	SwapConf   uint16       `json:"swapconf"`
+	UnitInfo   dex.UnitInfo `json:"unitinfo"`
+
+	// The swap/redeem size fields are DEPRECATED. They are implied by version.
+	// The values provided by the server in these fields should not be used by
+	// client wallets, which know the structure of their own transactions.
+	SwapSize     uint64 `json:"swapsize"`
+	SwapSizeBase uint64 `json:"swapsizebase"`
+	RedeemSize   uint64 `json:"redeemsize"`
 }
 
 // FeeAsset describes an asset for which registration fees are supported.

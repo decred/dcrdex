@@ -315,7 +315,7 @@ func resolveMissedMakerRedemption(dc *dexConnection, trade *trackedTrade, match 
 	// If we're the maker, this state is nonsense. Just revoke the match for
 	// good measure.
 	if match.Side == order.Maker {
-		coinStr, _ := asset.DecodeCoinID(trade.wallets.toAsset.ID, srvData.MakerRedeem)
+		coinStr, _ := asset.DecodeCoinID(trade.wallets.toWallet.AssetID, srvData.MakerRedeem)
 		err = fmt.Errorf("server reported match status MakerRedeemed, but we're the maker and we don't have redemption data."+
 			" self-revoking. %s, reported coin = %s", logID, coinStr)
 		return
@@ -347,7 +347,7 @@ func resolveMatchComplete(dc *dexConnection, trade *trackedTrade, match *matchTr
 	// good measure.
 	if match.Side == order.Taker {
 		match.MetaData.Proof.SelfRevoked = true
-		coinStr, _ := asset.DecodeCoinID(trade.wallets.toAsset.ID, srvData.TakerRedeem)
+		coinStr, _ := asset.DecodeCoinID(trade.wallets.toWallet.AssetID, srvData.TakerRedeem)
 		dc.log.Error("server reported match status MatchComplete, but we're the taker and we don't have redemption data."+
 			" self-revoking. %s, reported coin = %s", logID, coinStr)
 		return

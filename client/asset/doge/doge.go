@@ -78,9 +78,10 @@ var (
 	}
 	// WalletInfo defines some general information about a Dogecoin wallet.
 	WalletInfo = &asset.WalletInfo{
-		Name:     "Dogecoin",
-		Version:  version,
-		UnitInfo: dexdoge.UnitInfo,
+		Name:              "Dogecoin",
+		Version:           version,
+		SupportedVersions: []uint32{version},
+		UnitInfo:          dexdoge.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{{
 			Type:              walletTypeRPC,
 			Tab:               "External",
@@ -152,6 +153,8 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		DefaultFeeRateLimit:      dexdoge.DefaultFeeRateLimit,
 		LegacyBalance:            true,
 		Segwit:                   false,
+		InitTxSize:               dexbtc.InitTxSize,
+		InitTxSizeBase:           dexbtc.InitTxSizeBase,
 		OmitAddressType:          true,
 		LegacySignTxRPC:          true,
 		LegacySendToAddr:         true,

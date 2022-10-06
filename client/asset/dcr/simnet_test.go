@@ -302,9 +302,10 @@ func runTest(t *testing.T, splitTx bool) {
 	}
 
 	ord := &asset.Order{
+		Version:      tDCR.Version,
 		Value:        contractValue * 3,
 		MaxSwapCount: lots * 3,
-		DEXConfig:    tDCR,
+		MaxFeeRate:   tDCR.MaxFeeRate,
 	}
 	setOrderValue := func(v uint64) {
 		ord.Value = v

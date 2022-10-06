@@ -92,9 +92,10 @@ var (
 	}
 	// WalletInfo defines some general information about a ZCash wallet.
 	WalletInfo = &asset.WalletInfo{
-		Name:     "ZCash",
-		Version:  version,
-		UnitInfo: dexzec.UnitInfo,
+		Name:              "ZCash",
+		Version:           version,
+		SupportedVersions: []uint32{version},
+		UnitInfo:          dexzec.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{{
 			Type:              walletTypeRPC,
 			Tab:               "External",
@@ -173,6 +174,8 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 		LegacyRawFeeLimit:        true,
 		ZECStyleBalance:          true,
 		Segwit:                   false,
+		InitTxSize:               dexzec.InitTxSize,
+		InitTxSizeBase:           dexzec.InitTxSizeBase,
 		OmitAddressType:          true,
 		LegacySignTxRPC:          true,
 		LegacySendToAddr:         true,

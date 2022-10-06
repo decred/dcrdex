@@ -325,7 +325,7 @@ func newMatchNote(topic Topic, subject, details string, severity db.Severity, t 
 		Notification: db.NewNotification(NoteTypeMatch, topic, subject, details, severity),
 		OrderID:      t.ID().Bytes(),
 		Match: matchFromMetaMatchWithConfs(t.Order, &match.MetaMatch, match.swapConfirms,
-			int64(t.wallets.fromAsset.SwapConf), counterConfs, int64(t.wallets.toAsset.SwapConf),
+			int64(t.metaData.FromSwapConf), counterConfs, int64(t.metaData.ToSwapConf),
 			int64(match.redemptionConfs), int64(match.redemptionConfsReq)),
 		Host:     t.dc.acct.host,
 		MarketID: marketName(t.Base(), t.Quote()),
