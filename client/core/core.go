@@ -2116,9 +2116,7 @@ func (c *Core) createWalletOrToken(crypter encrypt.Crypter, walletPW []byte, for
 		dbWallet.Address)
 
 	// The wallet has been successfully created. Store it.
-	c.walletMtx.Lock()
-	c.wallets[assetID] = wallet
-	c.walletMtx.Unlock()
+	c.updateWallet(assetID, wallet)
 
 	c.notify(newWalletStateNote(wallet.state()))
 
@@ -2499,6 +2497,13 @@ func (c *Core) removeWallet(assetID uint32) {
 	delete(c.wallets, assetID)
 }
 
+// updateWallet stores or updates an asset's wallet.
+func (c *Core) updateWallet(assetID uint32, wallet *xcWallet) {
+	c.walletMtx.Lock()
+	defer c.walletMtx.Unlock()
+	c.wallets[assetID] = wallet
+}
+
 // RecoverWallet will retrieve some recovery information from the wallet,
 // which may not be possible if the wallet is too corrupted, disconnect and
 // destroy the old wallet, create a new one, and if the recovery information
@@ -2530,11 +2535,6 @@ func (c *Core) RecoverWallet(assetID uint32, appPW []byte, force bool) error {
 			assetID, unbip(assetID), err)
 	}
 
-	// Disabled wallets cannot initiate a recovery.
-	if oldWallet.isDisabled() {
-		return fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(assetID)))
-	}
-
 	recoverer, isRecoverer := oldWallet.Wallet.(asset.Recoverer)
 	if !isRecoverer {
 		return errors.New("wallet is not a recoverer")
@@ -2561,19 +2561,20 @@ func (c *Core) RecoverWallet(assetID uint32, appPW []byte, force bool) error {
 	defer encode.ClearBytes(seed)
 	defer encode.ClearBytes(pw)
 
-	if recoveryCfg, err := recoverer.GetRecoveryCfg(); err != nil {
-		c.log.Errorf("RecoverWallet: unable to get recovery config: %v", err)
-	} else {
-		// merge recoveryCfg with dbWallet.Settings
-		for key, val := range recoveryCfg {
-			dbWallet.Settings[key] = val
+	if oldWallet.connected() {
+		if recoveryCfg, err := recoverer.GetRecoveryCfg(); err != nil {
+			c.log.Errorf("RecoverWallet: unable to get recovery config: %v", err)
+		} else {
+			// merge recoveryCfg with dbWallet.Settings
+			for key, val := range recoveryCfg {
+				dbWallet.Settings[key] = val
+			}
 		}
+		oldWallet.Disconnect() // wallet now shut down and w.hookedUp == false -> connected() returns false
 	}
-
 	// Before we pull the plug, remove the wallet from wallets map. Otherwise,
 	// connectedWallet would try to connect it.
 	c.removeWallet(assetID)
-	oldWallet.Disconnect() // wallet now shut down and w.hookedUp == false -> connected() returns false
 
 	if err = recoverer.Move(c.assetDataBackupDirectory(assetID)); err != nil {
 		return fmt.Errorf("failed to move wallet data to backup folder: %w", err)
@@ -2597,16 +2598,21 @@ func (c *Core) RecoverWallet(assetID uint32, appPW []byte, force bool) error {
 			assetID, unbip(assetID), err)
 	}
 
-	_, err = c.connectWallet(newWallet)
-	if err != nil {
-		return err
-	}
+	// Ensure we are not trying to connect to a disabled wallet.
+	if newWallet.isDisabled() {
+		c.updateWallet(assetID, newWallet)
+	} else {
+		_, err = c.connectWallet(newWallet)
+		if err != nil {
+			return err
+		}
 
-	c.updateAssetWalletRefs(newWallet)
+		c.updateAssetWalletRefs(newWallet)
 
-	err = newWallet.Unlock(crypter)
-	if err != nil {
-		return err
+		err = newWallet.Unlock(crypter)
+		if err != nil {
+			return err
+		}
 	}
 
 	state := newWallet.state()
@@ -3020,9 +3026,7 @@ func (c *Core) updateAssetWalletRefs(newWallet *xcWallet) {
 		dc.tradeMtx.RUnlock()
 	}
 
-	c.walletMtx.Lock()
-	c.wallets[assetID] = newWallet
-	c.walletMtx.Unlock()
+	c.updateWallet(assetID, newWallet)
 }
 
 // SetWalletPassword updates the (encrypted) password for the wallet. Returns
@@ -5565,9 +5569,7 @@ func (c *Core) initialize() {
 		}
 		// Wallet is loaded from the DB, but not yet connected.
 		c.log.Infof("Loaded %s wallet configuration.", unbip(assetID))
-		c.walletMtx.Lock()
-		c.wallets[assetID] = wallet
-		c.walletMtx.Unlock()
+		c.updateWallet(assetID, wallet)
 	}
 	c.walletMtx.RLock()
 	numWallets := len(c.wallets)
