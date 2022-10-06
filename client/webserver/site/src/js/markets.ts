@@ -198,7 +198,7 @@ export default class MarketsPage extends BasePage {
     }
     this.hovers = []
     // 'Recent Matches' list sort key and direction.
-    this.recentMatchesSortKey = 'stamp'
+    this.recentMatchesSortKey = 'age'
     this.recentMatchesSortDirection = 1
     // store original title so we can re-append it when updating market value.
     this.ogTitle = document.title
@@ -434,6 +434,10 @@ export default class MarketsPage extends BasePage {
       page.leftColumnV1.classList.add('stashed')
     })
 
+    Doc.bind(page.marketReopener, 'click', () => {
+      page.leftColumnV1.classList.remove('stashed', 'default')
+    })
+
     const stats0 = page.marketStatsV1
     const stats1 = stats0.cloneNode(true) as PageElement
     Doc.hide(stats0, stats1)
@@ -508,7 +512,7 @@ export default class MarketsPage extends BasePage {
     if (anis.candles) anis.candles.stop()
     anis.candles = new Wave(page.candlesChart, { message: intl.prep(intl.ID_CANDLES_LOADING) })
     if (anis.depth) anis.depth.stop()
-    anis.depth = new Wave(page.depthChart, { message: intl.prep(intl.ID_CANDLES_LOADING) })
+    anis.depth = new Wave(page.depthChart, { message: intl.prep(intl.ID_DEPTH_LOADING) })
   }
 
   /* isSell is true if the user has selected sell in the order options. */
@@ -2248,7 +2252,7 @@ export default class MarketsPage extends BasePage {
       // or this may be the first opportunity to get the server's config, so
       // fetch it all before reloading the markets page.
       await app().fetchUser()
-      if (!this.market) this.init({})
+      await app().loadPage('markets')
     }
   }
 
@@ -2257,7 +2261,7 @@ export default class MarketsPage extends BasePage {
    * value of the search input.
    */
   filterMarkets () {
-    const filterTxt = this.page.marketSearchV1.value
+    const filterTxt = this.page.marketSearchV1.value?.toLowerCase()
     const filter = filterTxt ? (mkt: MarketRow) => mkt.name.includes(filterTxt) : () => true
     this.marketList.setFilter(filter)
   }
@@ -2453,6 +2457,7 @@ class MarketRow {
     tmpl.quoteSymbol.appendChild(Doc.symbolize(mkt.quotesymbol))
     tmpl.baseName.textContent = mkt.baseName
     setPriceAndChange(tmpl, mkt.xc, mkt)
+    if (this.mkt.xc.connectionStatus !== ConnectionStatus.Connected) Doc.show(tmpl.disconnectedIco)
   }
 }
 
