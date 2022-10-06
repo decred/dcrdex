@@ -2385,6 +2385,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	contractLockedAmt, orderLockedAmt := c.lockedAmounts(assetID)
 	wallet := &xcWallet{ // captured by the PeersChange closure
 		AssetID: assetID,
+		Symbol:  unbip(assetID),
 		balance: &WalletBalance{
 			Balance:        dbWallet.Balance,
 			OrderLocked:    orderLockedAmt,
@@ -2459,6 +2460,8 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 
 	wallet.Wallet = w
 	wallet.parent = parent
+	wallet.version = w.Info().Version
+	wallet.supportedVersions = w.Info().SupportedVersions
 	wallet.connector = dex.NewConnectionMaster(w)
 	wallet.traits = asset.DetermineWalletTraits(w)
 	atomic.StoreUint32(wallet.broadcasting, 1)
@@ -2918,7 +2921,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 				if t.Base() != assetID && t.Quote() != assetID {
 					continue
 				}
-				isFromAsset := t.wallets.fromAsset.ID == assetID
+				isFromAsset := t.wallets.fromWallet.AssetID == assetID
 				t.mtx.RLock()
 				for _, m := range t.matches { // maybe range t.activeMatches()
 					m.exceptionMtx.Lock()
@@ -4411,17 +4414,19 @@ func (c *Core) MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEs
 	maxBuy, err := quoteWallet.MaxOrder(&asset.MaxOrderForm{
 		LotSize:       quoteLotEst,
 		FeeSuggestion: swapFeeSuggestion,
-		AssetConfig:   quoteAsset,
-		RedeemConfig:  baseAsset,
+		AssetVersion:  quoteAsset.Version, // using the server's asset version, when our wallets support multiple vers
+		MaxFeeRate:    quoteAsset.MaxFeeRate,
+		RedeemVersion: baseAsset.Version,
+		RedeemAssetID: baseWallet.AssetID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%s wallet MaxOrder error: %v", unbip(quote), err)
 	}
 
 	preRedeem, err := baseWallet.PreRedeem(&asset.PreRedeemForm{
+		Version:       baseAsset.Version,
 		Lots:          maxBuy.Lots,
 		FeeSuggestion: redeemFeeSuggestion,
-		AssetConfig:   baseAsset,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%s PreRedeem error: %v", unbip(base), err)
@@ -4468,17 +4473,19 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, erro
 	maxSell, err := baseWallet.MaxOrder(&asset.MaxOrderForm{
 		LotSize:       lotSize,
 		FeeSuggestion: swapFeeSuggestion,
-		AssetConfig:   baseAsset,
-		RedeemConfig:  quoteAsset,
+		AssetVersion:  baseAsset.Version, // using the server's asset version, when our wallets support multiple vers
+		MaxFeeRate:    baseAsset.MaxFeeRate,
+		RedeemVersion: quoteAsset.Version,
+		RedeemAssetID: quoteWallet.AssetID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%s wallet MaxOrder error: %v", unbip(base), err)
 	}
 
 	preRedeem, err := quoteWallet.PreRedeem(&asset.PreRedeemForm{
+		Version:       quoteAsset.Version,
 		Lots:          maxSell.Lots,
 		FeeSuggestion: redeemFeeSuggestion,
-		AssetConfig:   quoteAsset,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%s PreRedeem error: %v", unbip(quote), err)
@@ -4849,12 +4856,12 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 		return nil, newError(marketErr, "unknown market %q", mktID)
 	}
 
-	wallets, haveAssetConfigs, err := c.walletSet(dc, form.Base, form.Quote, form.Sell)
+	wallets, assetConfigs, versCompat, err := c.walletSet(dc, form.Base, form.Quote, form.Sell)
 	if err != nil {
 		return nil, err
 	}
-	if !haveAssetConfigs { // this is unexpected given we have mktConf, but check
-		return nil, fmt.Errorf("missing asset configurations for %v", form.Host)
+	if !versCompat { // covers missing asset config, but that's unlikely since there is a market config
+		return nil, fmt.Errorf("client and server asset versions are incompatible for %v", form.Host)
 	}
 
 	// So here's the thing. Our assets thus far don't require the wallet to be
@@ -4866,16 +4873,16 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 	if !wallets.fromWallet.connected() {
 		err := c.connectAndUpdateWallet(wallets.fromWallet)
 		if err != nil {
-			c.log.Errorf("Error connecting to %s wallet: %v", wallets.fromAsset.Symbol, err)
-			return nil, fmt.Errorf("Error connecting to %s wallet", wallets.fromAsset.Symbol)
+			c.log.Errorf("Error connecting to %s wallet: %v", wallets.fromWallet.Symbol, err)
+			return nil, fmt.Errorf("Error connecting to %s wallet", wallets.fromWallet.Symbol)
 		}
 	}
 
 	if !wallets.toWallet.connected() {
 		err := c.connectAndUpdateWallet(wallets.toWallet)
 		if err != nil {
-			c.log.Errorf("Error connecting to %s wallet: %v", wallets.toAsset.Symbol, err)
-			return nil, fmt.Errorf("Error connecting to %s wallet", wallets.toAsset.Symbol)
+			c.log.Errorf("Error connecting to %s wallet: %v", wallets.toWallet.Symbol, err)
+			return nil, fmt.Errorf("Error connecting to %s wallet", wallets.toWallet.Symbol)
 		}
 	}
 
@@ -4924,14 +4931,14 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 		}
 	}
 
-	swapFeeSuggestion := c.feeSuggestion(dc, wallets.fromAsset.ID) // server rates only for the swap init
+	swapFeeSuggestion := c.feeSuggestion(dc, wallets.fromWallet.AssetID) // server rates only for the swap init
 	if swapFeeSuggestion == 0 {
-		return nil, fmt.Errorf("failed to get swap fee suggestion for %s at %s", unbip(wallets.fromAsset.ID), form.Host)
+		return nil, fmt.Errorf("failed to get swap fee suggestion for %s at %s", wallets.fromWallet.Symbol, form.Host)
 	}
 
-	redeemFeeSuggestion := c.feeSuggestionAny(wallets.toAsset.ID) // wallet rate or server rate
+	redeemFeeSuggestion := c.feeSuggestionAny(wallets.toWallet.AssetID) // wallet rate or server rate
 	if redeemFeeSuggestion == 0 {
-		return nil, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", unbip(wallets.toAsset.ID), form.Host)
+		return nil, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", wallets.toWallet.Symbol, form.Host)
 	}
 
 	swapLotSize := lotSize
@@ -4940,23 +4947,25 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 	}
 
 	swapEstimate, err := wallets.fromWallet.PreSwap(&asset.PreSwapForm{
+		Version:         assetConfigs.fromAsset.Version,
 		LotSize:         swapLotSize,
 		Lots:            lots,
-		AssetConfig:     wallets.fromAsset,
-		RedeemConfig:    wallets.toAsset,
+		MaxFeeRate:      assetConfigs.fromAsset.MaxFeeRate,
 		Immediate:       form.IsLimit && form.TifNow,
 		FeeSuggestion:   swapFeeSuggestion,
 		SelectedOptions: form.Options,
+		RedeemVersion:   assetConfigs.toAsset.Version,
+		RedeemAssetID:   assetConfigs.toAsset.ID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error getting swap estimate: %w", err)
 	}
 
 	redeemEstimate, err := wallets.toWallet.PreRedeem(&asset.PreRedeemForm{
+		Version:         assetConfigs.toAsset.Version,
 		Lots:            lots,
 		FeeSuggestion:   redeemFeeSuggestion,
 		SelectedOptions: form.Options,
-		AssetConfig:     wallets.toAsset,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error getting redemption estimate: %v", err)
@@ -5021,13 +5030,14 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		return nil, nil, newError(orderParamsErr, "zero-rate order not allowed")
 	}
 
-	wallets, haveAssetConfigs, err := c.walletSet(dc, form.Base, form.Quote, form.Sell)
+	wallets, assetConfigs, versCompat, err := c.walletSet(dc, form.Base, form.Quote, form.Sell)
 	if err != nil {
 		return nil, nil, err
 	}
-	if !haveAssetConfigs { // this is unexpected given we have mktConf, but check
-		return nil, nil, fmt.Errorf("missing asset configurations for %v", dc.acct.host)
+	if !versCompat { // also covers missing asset config, but that's unlikely since there is a market config
+		return nil, nil, fmt.Errorf("client and server asset versions are incompatible for %v", dc.acct.host)
 	}
+
 	fromWallet, toWallet := wallets.fromWallet, wallets.toWallet
 
 	accountRedeemer, isAccountRedemption := toWallet.Wallet.(asset.AccountLocker)
@@ -5040,7 +5050,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		err := c.connectAndUnlock(crypter, w)
 		if err != nil {
 			return fmt.Errorf("%s connectAndUnlock error: %w",
-				wallets.fromAsset.Symbol, err)
+				assetConfigs.fromAsset.Symbol, err)
 		}
 		w.mtx.RLock()
 		defer w.mtx.RUnlock()
@@ -5068,7 +5078,8 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	// Get an address for the swap contract.
 	redeemAddr, err := toWallet.RedemptionAddress()
 	if err != nil {
-		return nil, nil, codedError(walletErr, fmt.Errorf("%s RedemptionAddress error: %w", wallets.toAsset.Symbol, err))
+		return nil, nil, codedError(walletErr, fmt.Errorf("%s RedemptionAddress error: %w",
+			assetConfigs.toAsset.Symbol, err))
 	}
 
 	// Fund the order and prepare the coins.
@@ -5106,8 +5117,8 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 					err = newError(orderParamsErr,
 						"order quantity is too low for current market rates. "+
 							"qty = %d %s, mid-gap = %d, base-qty = %d %s, lot size = %d",
-						qty, wallets.quoteAsset.Symbol, midGap, baseQty,
-						wallets.baseAsset.Symbol, lotSize)
+						qty, assetConfigs.quoteAsset.Symbol, midGap, baseQty,
+						assetConfigs.baseAsset.Symbol, lotSize)
 					return nil, nil, err
 				}
 			} else if isAccountRedemption {
@@ -5118,21 +5129,23 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 
 	if lots == 0 {
 		return nil, nil, newError(orderParamsErr, "order quantity < 1 lot. qty = %d %s, rate = %d, lot size = %d",
-			qty, wallets.baseAsset.Symbol, rate, lotSize)
+			qty, assetConfigs.baseAsset.Symbol, rate, lotSize)
 	}
 
 	coins, redeemScripts, err := fromWallet.FundOrder(&asset.Order{
+		Version:       assetConfigs.fromAsset.Version,
 		Value:         fundQty,
 		MaxSwapCount:  lots,
-		DEXConfig:     wallets.fromAsset,
-		RedeemConfig:  wallets.toAsset,
+		MaxFeeRate:    assetConfigs.fromAsset.MaxFeeRate,
 		Immediate:     isImmediate,
-		FeeSuggestion: c.feeSuggestion(dc, wallets.fromAsset.ID),
+		FeeSuggestion: c.feeSuggestion(dc, assetConfigs.fromAsset.ID),
 		Options:       form.Options,
+		RedeemVersion: assetConfigs.toAsset.Version,
+		RedeemAssetID: assetConfigs.toAsset.ID,
 	})
 	if err != nil {
 		return nil, nil, codedError(walletErr, fmt.Errorf("FundOrder error for %s, funding quantity %d (%d lots): %w",
-			wallets.fromAsset.Symbol, fundQty, lots, err))
+			assetConfigs.fromAsset.Symbol, fundQty, lots, err))
 	}
 
 	coinIDs := make([]order.CoinID, 0, len(coins))
@@ -5211,7 +5224,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 
 	msgCoins, err := messageCoins(wallets.fromWallet, coins, redeemScripts)
 	if err != nil {
-		return nil, nil, fmt.Errorf("wallet %v failed to sign coins: %w", wallets.fromAsset.ID, err)
+		return nil, nil, fmt.Errorf("%v wallet failed to sign coins: %w", assetConfigs.fromAsset.Symbol, err)
 	}
 
 	// Everything is ready. Send the order.
@@ -5228,7 +5241,8 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		if len(pubKeys) == 0 || len(sigs) == 0 {
 			return nil, nil, newError(signatureErr, "wrong number of pubkeys or signatures, %d & %d", len(pubKeys), len(sigs))
 		}
-		redemptionReserves, err = accountRedeemer.ReserveNRedemptions(redemptionRefundLots, wallets.toAsset)
+		redemptionReserves, err = accountRedeemer.ReserveNRedemptions(redemptionRefundLots,
+			assetConfigs.toAsset.Version, assetConfigs.toAsset.MaxFeeRate)
 		if err != nil {
 			return nil, nil, codedError(walletErr, fmt.Errorf("ReserveNRedemptions error: %w", err))
 		}
@@ -5246,7 +5260,8 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	// If the from asset is an AccountLocker, we need to lock up refund funds.
 	var refundReserves uint64
 	if isAccountRefund {
-		refundReserves, err = accountRefunder.ReserveNRefunds(redemptionRefundLots, wallets.fromAsset)
+		refundReserves, err = accountRefunder.ReserveNRefunds(redemptionRefundLots,
+			assetConfigs.fromAsset.Version, assetConfigs.fromAsset.MaxFeeRate)
 		if err != nil {
 			return nil, nil, codedError(walletErr, fmt.Errorf("ReserveNRefunds error: %w", err))
 		}
@@ -5262,7 +5277,8 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	// be signed with that address's private key.
 	if changeID != nil {
 		if _, msgTrade.Coins[0].Sigs, err = fromWallet.SignMessage(nil, msgOrder.Serialize()); err != nil {
-			return nil, nil, fmt.Errorf("wallet %v failed to sign for redeem: %w", wallets.fromAsset.ID, err)
+			return nil, nil, fmt.Errorf("%v wallet failed to sign for redeem: %w",
+				assetConfigs.fromAsset.Symbol, err)
 		}
 	}
 
@@ -5308,12 +5324,12 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 				Preimage: preImg[:],
 			},
 			EpochDur:           mktConf.EpochLen, // epochIndex := result.ServerTime / mktConf.EpochLen
-			FromSwapConf:       wallets.fromAsset.SwapConf,
-			ToSwapConf:         wallets.toAsset.SwapConf,
-			MaxFeeRate:         wallets.fromAsset.MaxFeeRate,
-			RedeemMaxFeeRate:   wallets.toAsset.MaxFeeRate,
-			FromVersion:        wallets.fromAsset.Version,
-			ToVersion:          wallets.toAsset.Version,
+			FromSwapConf:       assetConfigs.fromAsset.SwapConf,
+			ToSwapConf:         assetConfigs.toAsset.SwapConf,
+			MaxFeeRate:         assetConfigs.fromAsset.MaxFeeRate,
+			RedeemMaxFeeRate:   assetConfigs.toAsset.MaxFeeRate,
+			FromVersion:        assetConfigs.fromAsset.Version,
+			ToVersion:          assetConfigs.toAsset.Version, // and we're done with the server's asset configs.
 			Options:            form.Options,
 			RedemptionReserves: redemptionReserves,
 			RefundReserves:     refundReserves,
@@ -5385,14 +5401,18 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 // walletSet is a pair of wallets with asset configurations identified in useful
 // ways.
 type walletSet struct {
-	baseAsset   *dex.Asset
-	quoteAsset  *dex.Asset
 	fromWallet  *xcWallet
-	fromAsset   *dex.Asset
 	toWallet    *xcWallet
-	toAsset     *dex.Asset
 	baseWallet  *xcWallet
 	quoteWallet *xcWallet
+}
+
+// assetSet bundles a server's asset "config" for a pair of assets.
+type assetSet struct {
+	baseAsset  *dex.Asset
+	quoteAsset *dex.Asset
+	fromAsset  *dex.Asset
+	toAsset    *dex.Asset
 }
 
 // conventionalRate converts the message-rate encoded rate to a rate in
@@ -5406,48 +5426,40 @@ func (w *walletSet) trimmedConventionalRateString(r uint64) string {
 	return strings.TrimRight(strings.TrimRight(s, "0"), ".")
 }
 
-// walletSet constructs a walletSet.
-func (c *Core) walletSet(dc *dexConnection, baseID, quoteID uint32, sell bool) (*walletSet, bool, error) {
+// walletSet constructs a walletSet and an assetSet for a certain DEX server and
+// asset pair, with the trade direction (sell) used to assign to/from aliases in
+// the returned structs. It is not an error if one or both asset configurations
+// are missing on the DEX, so the caller must nil check the fields. This also
+// returns if our wallet versions and the server's asset versions are
+// compatible.
+func (c *Core) walletSet(dc *dexConnection, baseID, quoteID uint32, sell bool) (*walletSet, *assetSet, bool, error) {
 	// Connect and open the wallets if needed.
 	baseWallet, found := c.wallet(baseID)
 	if !found {
-		return nil, false, newError(missingWalletErr, "no wallet found for %s", unbip(baseID))
+		return nil, nil, false, newError(missingWalletErr, "no wallet found for %s", unbip(baseID))
 	}
 	quoteWallet, found := c.wallet(quoteID)
 	if !found {
-		return nil, false, newError(missingWalletErr, "no wallet found for %s", unbip(quoteID))
+		return nil, nil, false, newError(missingWalletErr, "no wallet found for %s", unbip(quoteID))
 	}
 
 	dc.assetsMtx.RLock()
 	baseAsset := dc.assets[baseID]
 	quoteAsset := dc.assets[quoteID]
 	dc.assetsMtx.RUnlock()
-	haveAssetConfigs := baseAsset != nil && quoteAsset != nil
+
+	var versCompat bool
 	if baseAsset == nil {
-		baseAsset = &dex.Asset{
-			ID:       baseWallet.AssetID,
-			Symbol:   unbip(baseWallet.AssetID),
-			Version:  baseWallet.Info().Version,
-			UnitInfo: baseWallet.Info().UnitInfo,
-		}
 		c.log.Warnf("Base asset server configuration not available for %s (asset %s).",
 			dc.acct.host, unbip(baseID))
-	} else if ver := baseWallet.Info().Version; baseAsset.Version != ver {
-		return nil, false, newError(walletErr, "wallet asset %d version %d does not match server asset version %d",
-			baseID, ver, baseAsset.Version)
+	} else {
+		versCompat = baseWallet.supportsVer(baseAsset.Version)
 	}
 	if quoteAsset == nil {
-		quoteAsset = &dex.Asset{
-			ID:       quoteWallet.AssetID,
-			Symbol:   unbip(quoteWallet.AssetID),
-			Version:  quoteWallet.Info().Version,
-			UnitInfo: quoteWallet.Info().UnitInfo,
-		}
 		c.log.Warnf("Quote asset server configuration not available for %s (asset %s).",
 			dc.acct.host, unbip(quoteID))
-	} else if ver := quoteWallet.Info().Version; quoteAsset.Version != ver {
-		return nil, false, newError(walletErr, "wallet asset %d version %d does not match server asset version %d",
-			quoteID, ver, quoteAsset.Version)
+	} else {
+		versCompat = versCompat && quoteWallet.supportsVer(quoteAsset.Version)
 	}
 
 	// We actually care less about base/quote, and more about from/to, which
@@ -5460,15 +5472,16 @@ func (c *Core) walletSet(dc *dexConnection, baseID, quoteID uint32, sell bool) (
 	}
 
 	return &walletSet{
-		baseAsset:   baseAsset,
-		quoteAsset:  quoteAsset,
-		fromWallet:  fromWallet,
-		fromAsset:   fromAsset,
-		toWallet:    toWallet,
-		toAsset:     toAsset,
-		baseWallet:  baseWallet,
-		quoteWallet: quoteWallet,
-	}, haveAssetConfigs, nil
+			fromWallet:  fromWallet,
+			toWallet:    toWallet,
+			baseWallet:  baseWallet,
+			quoteWallet: quoteWallet,
+		}, &assetSet{
+			baseAsset:  baseAsset,
+			quoteAsset: quoteAsset,
+			fromAsset:  fromAsset,
+			toAsset:    toAsset,
+		}, versCompat, nil
 }
 
 func (c *Core) Cancel(pw []byte, oidB dex.Bytes) error {
@@ -5585,7 +5598,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		// required sending swaps, and unlock coins if so.
 		if len(missing) > 0 {
 			if trade.maybeReturnCoins() {
-				updatedAssets.count(trade.wallets.fromAsset.ID)
+				updatedAssets.count(trade.wallets.fromWallet.AssetID)
 			}
 
 			subject, details := c.formatDetails(TopicMissingMatches,
@@ -6387,7 +6400,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 		// Balances should be updated for any orders with locked wallet coins,
 		// or orders with funds locked in contracts.
 		if isActive || needsCoins || tracker.unspentContractAmounts() > 0 {
-			relocks.count(wallets.fromAsset.ID)
+			relocks.count(wallets.fromWallet.AssetID)
 		}
 	}
 
@@ -6403,7 +6416,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 		trade := tracker.Trade()
 
 		// Make sure we have the necessary wallets.
-		walletSet, haveAssetConfigs, err := c.walletSet(dc, tracker.Base(), tracker.Quote(), trade.Sell)
+		walletSet, assetConfigs, versCompat, err := c.walletSet(dc, tracker.Base(), tracker.Quote(), trade.Sell)
 		if err != nil {
 			notifyErr(tracker, TopicWalletMissing, "Wallet retrieval error for active order %s: %v", tracker.token(), err)
 			continue
@@ -6419,18 +6432,18 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				tracker.metaData.EpochDur = mktConf.EpochLen
 			}
 		}
-		if tracker.metaData.FromSwapConf == 0 {
-			tracker.metaData.FromSwapConf = walletSet.fromAsset.SwapConf // possibly still zero if !haveAssetConfigs
+		if tracker.metaData.FromSwapConf == 0 && assetConfigs.fromAsset != nil {
+			tracker.metaData.FromSwapConf = assetConfigs.fromAsset.SwapConf
 		}
-		if tracker.metaData.ToSwapConf == 0 {
-			tracker.metaData.ToSwapConf = walletSet.toAsset.SwapConf
+		if tracker.metaData.ToSwapConf == 0 && assetConfigs.toAsset != nil {
+			tracker.metaData.ToSwapConf = assetConfigs.toAsset.SwapConf
 		}
 
 		c.notify(newOrderNote(TopicOrderLoaded, "", "", db.Data, tracker.coreOrder()))
 
-		if mktConf == nil || !haveAssetConfigs { // the presence of a market config should imply asset configs...
+		if mktConf == nil || !versCompat {
 			tracker.setSelfGoverned(true) // redeem and refund only
-			c.log.Warnf("No server market or asset configuration for trade %v, market %v, host %v!",
+			c.log.Warnf("No server market or incompatible/missing asset configurations for trade %v, market %v, host %v!",
 				oid, tracker.mktID, dc.acct.host)
 			// c.notify(newOrderNote(TopicOrderSelfGoverned, subject, details, db.WarnLevel, nil)) ?
 		} else {
@@ -6881,10 +6894,19 @@ func (c *Core) handleReconnect(host string) {
 	for _, trade := range dc.trackedTrades() {
 		// If the server's market is gone, we're on our own, otherwise we are
 		// now free to swap for this order.
-		gone := mkts[trade.mktID] == nil
-		if trade.setSelfGoverned(gone) {
-			if gone {
-				c.log.Warnf("DEX %v is MISSING market %v for trade %v!", host, trade.mktID, trade.ID())
+		auto := mkts[trade.mktID] == nil
+		if !auto { // market exists, now check asset config and version
+			baseCfg := dc.assetConfig(trade.Base())
+			auto = baseCfg == nil || !trade.wallets.baseWallet.supportsVer(baseCfg.Version)
+		}
+		if !auto {
+			quoteCfg := dc.assetConfig(trade.Base())
+			auto = quoteCfg == nil || !trade.wallets.quoteWallet.supportsVer(quoteCfg.Version)
+		}
+
+		if trade.setSelfGoverned(auto) {
+			if auto {
+				c.log.Warnf("DEX %v is MISSING/INCOMPATIBLE market %v for trade %v!", host, trade.mktID, trade.ID())
 			} else {
 				c.log.Infof("DEX %v with market %v restored for trade %v", host, trade.mktID, trade.ID())
 			}
@@ -7289,7 +7311,7 @@ func (c *Core) listen(dc *dexConnection) {
 			c.log.Infof("Retiring inactive order %v in status %v", trade.ID(), trade.metaData.Status)
 			trade.returnCoins()
 			trade.mtx.Unlock()
-			updatedAssets.count(trade.wallets.fromAsset.ID)
+			updatedAssets.count(trade.wallets.fromWallet.AssetID)
 		}
 
 		for _, trade := range activeTrades {
@@ -8487,8 +8509,7 @@ func (c *Core) AccelerateOrder(pw []byte, oidB dex.Bytes, newFeeRate uint64) (st
 	}
 
 	if !tracker.wallets.fromWallet.traits.IsAccelerator() {
-		return "", fmt.Errorf("the %s wallet is not an accelerator",
-			tracker.wallets.fromAsset.Symbol)
+		return "", fmt.Errorf("the %s wallet is not an accelerator", tracker.wallets.fromWallet.Symbol)
 	}
 
 	tracker.mtx.Lock()
@@ -8526,6 +8547,11 @@ func (c *Core) AccelerationEstimate(oidB dex.Bytes, newFeeRate uint64) (uint64, 
 	if err != nil {
 		return 0, err
 	}
+
+	if !tracker.wallets.fromWallet.traits.IsAccelerator() {
+		return 0, fmt.Errorf("the %s wallet is not an accelerator", tracker.wallets.fromWallet.Symbol)
+	}
+
 	tracker.mtx.RLock()
 	defer tracker.mtx.RUnlock()
 
@@ -8553,6 +8579,10 @@ func (c *Core) PreAccelerateOrder(oidB dex.Bytes) (*PreAccelerate, error) {
 	tracker, err := c.findActiveOrder(oid)
 	if err != nil {
 		return nil, err
+	}
+
+	if !tracker.wallets.fromWallet.traits.IsAccelerator() {
+		return nil, fmt.Errorf("the %s wallet is not an accelerator", tracker.wallets.fromWallet.Symbol)
 	}
 
 	feeSuggestion := c.feeSuggestionAny(tracker.fromAssetID)

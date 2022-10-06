@@ -98,7 +98,7 @@ type testRig struct {
 }
 
 func (rig *testRig) close() {
-	close := func(cm *dex.ConnectionMaster) {
+	closeConn := func(cm *dex.ConnectionMaster) {
 		closed := make(chan struct{})
 		go func() {
 			cm.Disconnect()
@@ -110,8 +110,8 @@ func (rig *testRig) close() {
 			rig.t.Fatalf("failed to disconnect")
 		}
 	}
-	close(rig.firstWallet.cxn)
-	close(rig.secondWallet.cxn)
+	closeConn(rig.firstWallet.cxn)
+	closeConn(rig.secondWallet.cxn)
 }
 
 func (rig *testRig) mineAlpha() error {
@@ -242,9 +242,11 @@ func Run(t *testing.T, cfg *Config) {
 	checkAmt("second", rig.secondWallet)
 
 	ord := &asset.Order{
+		Version:      0,
 		Value:        contractValue * 3,
 		MaxSwapCount: lots * 3,
-		DEXConfig:    cfg.Asset,
+		MaxFeeRate:   cfg.Asset.MaxFeeRate,
+		// Redeem vars omitted.
 	}
 	setOrderValue := func(v uint64) {
 		ord.Value = v
@@ -525,6 +527,7 @@ func Run(t *testing.T, cfg *Config) {
 		mine()
 	}
 
+	const defaultFee = 100
 	coinID, err := rig.secondWallet.Refund(swapReceipt.Coin().ID(), swapReceipt.Contract(), 100)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
@@ -533,9 +536,8 @@ func Run(t *testing.T, cfg *Config) {
 	tLogger.Infof("Refunded with %s", c)
 
 	// Test Send.
-	const defaultFee = 100
 	tLogger.Info("Testing Send")
-	coin, err := rig.secondWallet.Send(address, cfg.LotSize, 100)
+	coin, err := rig.secondWallet.Send(address, cfg.LotSize, defaultFee)
 	if err != nil {
 		t.Fatalf("error sending: %v", err)
 	}
@@ -547,7 +549,7 @@ func Run(t *testing.T, cfg *Config) {
 	// Test Withdraw.
 	withdrawer, _ := rig.secondWallet.Wallet.(asset.Withdrawer)
 	tLogger.Info("Testing Withdraw")
-	coin, err = withdrawer.Withdraw(address, cfg.LotSize, 100)
+	coin, err = withdrawer.Withdraw(address, cfg.LotSize, defaultFee)
 	if err != nil {
 		t.Fatalf("error withdrawing: %v", err)
 	}

@@ -1212,27 +1212,28 @@ func (c *Core) feeEstimates(form *TradeForm) (swapFees, redeemFees uint64, err e
 		return 0, 0, fmt.Errorf("failed to get market %q at %q", marketName(form.Base, form.Quote), form.Host)
 	}
 
-	lotSize := mkt.LotSize
-	lots := form.Qty / lotSize
-	rate := form.Rate
-
-	swapLotSize := mkt.LotSize
-	if !form.Sell {
-		swapLotSize = calc.BaseToQuote(rate, mkt.LotSize)
+	// Get the MaxFeeRate for the "from" asset.
+	fromAsset := dc.exchangeInfo().Assets[fromWallet.AssetID]
+	if fromAsset == nil { // unlikely given it has a mkt with this asset, but be defensive
+		return 0, 0, fmt.Errorf("asset %d not supported by host %v", fromWallet.AssetID, form.Host)
 	}
 
-	xcInfo := dc.exchangeInfo()
-	fromAsset := xcInfo.Assets[fromWallet.AssetID]
-	toAsset := xcInfo.Assets[toWallet.AssetID]
+	lots := form.Qty / mkt.LotSize
+	swapLotSize := mkt.LotSize
+	if !form.Sell {
+		swapLotSize = calc.BaseToQuote(form.Rate, mkt.LotSize)
+	}
 
 	preSwapForm := &asset.PreSwapForm{
+		Version:         fromWallet.version,
 		LotSize:         swapLotSize,
 		Lots:            lots,
-		AssetConfig:     fromAsset,
-		RedeemConfig:    toAsset,
+		MaxFeeRate:      fromAsset.MaxFeeRate,
 		Immediate:       (form.IsLimit && form.TifNow),
 		FeeSuggestion:   swapFeeSuggestion,
 		SelectedOptions: form.Options,
+		RedeemVersion:   toWallet.version,
+		RedeemAssetID:   toWallet.AssetID,
 	}
 
 	swapEstimate, err := fromWallet.PreSwap(preSwapForm)
@@ -1252,10 +1253,10 @@ func (c *Core) feeEstimates(form *TradeForm) (swapFees, redeemFees uint64, err e
 	}
 
 	preRedeemForm := &asset.PreRedeemForm{
+		Version:         toWallet.version,
 		Lots:            lots,
 		FeeSuggestion:   redeemFeeSuggestion,
 		SelectedOptions: form.Options,
-		AssetConfig:     toAsset,
 	}
 	redeemEstimate, err := toWallet.PreRedeem(preRedeemForm)
 	if err == nil {

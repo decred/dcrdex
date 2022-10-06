@@ -863,9 +863,10 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	}
 
 	ord := &asset.Order{
+		Version:       version,
 		Value:         0,
 		MaxSwapCount:  1,
-		DEXConfig:     tBTC,
+		MaxFeeRate:    tBTC.MaxFeeRate,
 		FeeSuggestion: feeSuggestion,
 	}
 
@@ -1298,7 +1299,8 @@ func checkMaxOrder(t *testing.T, wallet asset.Wallet, lots, swapVal, maxFees, es
 	maxOrder, err := wallet.MaxOrder(&asset.MaxOrderForm{
 		LotSize:       tLotSize,
 		FeeSuggestion: feeSuggestion,
-		AssetConfig:   tBTC,
+		AssetVersion:  version,
+		MaxFeeRate:    tBTC.MaxFeeRate,
 	})
 	if err != nil {
 		t.Fatalf("MaxOrder error: %v", err)
@@ -1379,9 +1381,10 @@ func TestFundEdges(t *testing.T) {
 	unspents := []*ListUnspentResult{p2pkhUnspent}
 	node.listUnspent = unspents
 	ord := &asset.Order{
+		Version:       version,
 		Value:         swapVal,
 		MaxSwapCount:  lots,
-		DEXConfig:     tBTC,
+		MaxFeeRate:    tBTC.MaxFeeRate,
 		FeeSuggestion: feeSuggestion,
 	}
 
@@ -1602,9 +1605,10 @@ func TestFundEdgesSegwit(t *testing.T) {
 	unspents := []*ListUnspentResult{p2wpkhUnspent}
 	node.listUnspent = unspents
 	ord := &asset.Order{
+		Version:       version,
 		Value:         swapVal,
 		MaxSwapCount:  lots,
-		DEXConfig:     tBTC,
+		MaxFeeRate:    tBTC.MaxFeeRate,
 		FeeSuggestion: feeSuggestion,
 	}
 
@@ -2869,11 +2873,13 @@ func testPreSwap(t *testing.T, segwit bool, walletType string) {
 	}
 
 	form := &asset.PreSwapForm{
+		Version:       version,
 		LotSize:       tLotSize,
 		Lots:          lots,
-		AssetConfig:   tBTC,
+		MaxFeeRate:    tBTC.MaxFeeRate,
 		Immediate:     false,
 		FeeSuggestion: feeSuggestion,
+		// Redeem fields unneeded
 	}
 
 	setFunds(minReq)
@@ -2913,8 +2919,8 @@ func testPreRedeem(t *testing.T, segwit bool, walletType string) {
 	defer shutdown()
 
 	preRedeem, err := wallet.PreRedeem(&asset.PreRedeemForm{
-		Lots:        5,
-		AssetConfig: tBTC,
+		Version: version,
+		Lots:    5,
 	})
 	// Shouldn't actually be any path to error.
 	if err != nil {

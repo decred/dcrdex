@@ -75,8 +75,9 @@ var (
 
 	// WalletInfo defines some general information about a Bitcoin Cash wallet.
 	WalletInfo = &asset.WalletInfo{
-		Name:    "Bitcoin Cash",
-		Version: version,
+		Name:              "Bitcoin Cash",
+		Version:           version,
+		SupportedVersions: []uint32{version},
 		// Same as bitcoin. That's dumb.
 		UnitInfo: dexbch.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{
@@ -192,6 +193,8 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		Ports:              netPorts,
 		DefaultFallbackFee: defaultFee,
 		Segwit:             false,
+		InitTxSizeBase:     dexbtc.InitTxSizeBase,
+		InitTxSize:         dexbtc.InitTxSize,
 		LegacyBalance:      cfg.Type != walletTypeSPV,
 		LegacySendToAddr:   true,
 		// Bitcoin Cash uses the Cash Address encoding, which is Bech32, but not

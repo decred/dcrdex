@@ -195,10 +195,15 @@ type Token struct {
 type WalletInfo struct {
 	// Name is the display name for the currency, e.g. "Decred"
 	Name string `json:"name"`
-	// Version is the Wallet's version number, which is used to signal when
-	// major changes are made to internal details such as coin ID encoding and
-	// contract structure that must be common to a server's.
-	Version uint32 `json:"version"`
+	// Version is the Wallet's primary asset version number, which is used to
+	// signal when major changes are made to internal details such as coin ID
+	// encoding and contract structure that must be common to a server's.
+	Version uint32 `json:"version"` // Deprecated? Does frontend need .version?
+	// SupportedVersions lists all supported asset versions. Several wallet
+	// methods accept a version argument to indicate which contract to use,
+	// however, the consumer (e.g. Core) is responsible for ensuring the
+	// server's asset version is supported before using the Wallet.
+	SupportedVersions []uint32 `json:"versions"`
 	// AvailableWallets is an ordered list of available WalletDefinition. The
 	// first WalletDefinition is considered the default, and might, for instance
 	// be the initial form offered to the user for configuration, with others
@@ -569,6 +574,14 @@ type EarlyAcceleration struct {
 // Accelerator is implemented by wallets which support acceleration of the
 // mining of swap transactions.
 type Accelerator interface {
+	// FeesForRemainingSwaps returns the fees for a certain number of
+	// chained/grouped swaps at a given feeRate. This should be used with an
+	// Accelerator wallet to help compute the required amount for remaining
+	// swaps for a given trade with a mix of future and active matches, which is
+	// only known to the consumer. This is only accurate if each swap has a
+	// single input or chained swaps all pay the same fees. Accurate estimates
+	// for new orders without existing funding should use PreSwap or FundOrder.
+	FeesForRemainingSwaps(n, feeRate uint64) uint64
 	// AccelerateOrder uses the Child-Pays-For-Parent technique to accelerate a
 	// chain of swap transactions and previous accelerations. It broadcasts a new
 	// transaction with a fee high enough so that the average fee of all the
@@ -581,12 +594,14 @@ type Accelerator interface {
 	// this amount.
 	//
 	// The returned change coin may be nil, and should be checked before use.
-	AccelerateOrder(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, newFeeRate uint64) (Coin, string, error)
+	AccelerateOrder(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes,
+		requiredForRemainingSwaps, newFeeRate uint64) (Coin, string, error)
 	// AccelerationEstimate takes the same parameters as AccelerateOrder, but
 	// instead of broadcasting the acceleration transaction, it just returns
 	// the amount of funds that will need to be spent in order to increase the
 	// average fee rate to the desired amount.
-	AccelerationEstimate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, newFeeRate uint64) (uint64, error)
+	AccelerationEstimate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes,
+		requiredForRemainingSwaps, newFeeRate uint64) (uint64, error)
 	// PreAccelerate returns the current average fee rate of the unmined swap
 	// initiation and acceleration transactions, and also returns a suggested
 	// range that the fee rate should be increased to in order to expedite mining.
@@ -595,7 +610,8 @@ type Accelerator interface {
 	// the user a good amount of flexibility in determining the post acceleration
 	// effective fee rate, but still not allowing them to pick something
 	// outrageously high.
-	PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (uint64, *XYRange, *EarlyAcceleration, error)
+	PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes,
+		requiredForRemainingSwaps, feeSuggestion uint64) (uint64, *XYRange, *EarlyAcceleration, error)
 }
 
 // TokenConfig is required to OpenTokenWallet.
@@ -624,10 +640,10 @@ type TokenMaster interface {
 type AccountLocker interface {
 	// ReserveNRedemption is used when preparing funding for an order that
 	// redeems to an account-based asset. The wallet will set aside the
-	// appropriate amount of funds so that we can redeem N swaps using the fee
-	// and version configuration specified in the dex.Asset. It is an error to
-	// request funds > spendable balance.
-	ReserveNRedemptions(n uint64, dexRedeemCfg *dex.Asset) (uint64, error)
+	// appropriate amount of funds so that we can redeem N swaps using the
+	// specified fee and asset version. It is an error to request funds >
+	// spendable balance.
+	ReserveNRedemptions(n uint64, ver uint32, maxFeeRate uint64) (uint64, error)
 	// ReReserveRedemption is used when reconstructing existing orders on
 	// startup. It is an error to request funds > spendable balance.
 	ReReserveRedemption(amt uint64) error
@@ -636,10 +652,9 @@ type AccountLocker interface {
 	UnlockRedemptionReserves(uint64)
 	// ReserveNRefunds is used when preparing funding for an order that refunds
 	// to an account-based asset. The wallet will set aside the appropriate
-	// amount of funds so that we can refund N swaps using the fee and version
-	// configuration specified in the dex.Asset. It is an error to request funds
-	// > spendable balance.
-	ReserveNRefunds(n uint64, dexSwapCfg *dex.Asset) (uint64, error)
+	// amount of funds so that we can refund N swaps using the specified fee and
+	// asset version. It is an error to request funds > spendable balance.
+	ReserveNRefunds(n uint64, ver uint32, maxFeeRate uint64) (uint64, error)
 	// ReReserveRefund is used when reconstructing existing orders on
 	// startup. It is an error to request funds > spendable balance.
 	ReReserveRefund(uint64) error
@@ -789,6 +804,8 @@ type AuditInfo struct {
 
 // Swaps is the details needed to broadcast a swap contract(s).
 type Swaps struct {
+	// Version is the asset version. Most backends only support one version.
+	Version uint32
 	// Inputs are the Coins being spent.
 	Inputs Coins
 	// Contract is the contract data.
@@ -798,11 +815,6 @@ type Swaps struct {
 	// LockChange can be set to true if the change should be locked for
 	// subsequent matches.
 	LockChange bool
-	// AssetConfig contains the asset version and fee configuration for the DEX.
-	// NOTE: Only one Config field is supported, so only orders from the same
-	// host can be batched. We could consider moving this field to the Contract
-	// and Wallets could batch compatible swaps internally.
-	AssetConfig *dex.Asset
 	// Options are OrderOptions set or selected by the user at order time.
 	Options map[string]string
 }
@@ -844,6 +856,9 @@ type RedeemForm struct {
 
 // Order is order details needed for FundOrder.
 type Order struct {
+	// Version is the asset version of the "from" asset with the init
+	// transaction (this wallet). Most backends only support one version.
+	Version uint32
 	// Value is the amount required to satisfy the order. The Value does not
 	// include fees. Fees will be calculated internally based on the number of
 	// possible swaps (MaxSwapCount) and the exchange's configuration
@@ -856,11 +871,10 @@ type Order struct {
 	// Value / DEXConfig.LotSize, because an order is quantified in the base
 	// asset, so lots is always (order quantity) / (base asset lot size).
 	MaxSwapCount uint64 // uint64 for compatibility with quantity and lot size.
-	// DEXConfig holds values specific to and provided by a particular server.
-	// Info about fee rates and swap transaction sizes is used internally to
-	// calculate the funding required to cover fees.
-	DEXConfig    *dex.Asset
-	RedeemConfig *dex.Asset
+	// MaxFeeRate is the largest possible fee rate for the init transaction (of
+	// this "from" asset) specific to and provided by a particular server, and
+	// is used to calculate the funding required to cover fees.
+	MaxFeeRate uint64
 	// Immediate should be set to true if this is for an order that is not a
 	// standing order, likely a market order or a limit order with immediate
 	// time-in-force.
@@ -872,4 +886,14 @@ type Order struct {
 	// Options are options that corresponds to PreSwap.Options, as well as
 	// their values.
 	Options map[string]string
+
+	// The following fields are only used for some assets where the redeemed/to
+	// asset may require funds in this "from" asset. For example, buying ERC20
+	// tokens with ETH.
+
+	// RedeemVersion is the asset version of the "to" asset with the redeem
+	// transaction. Most backends only support one version.
+	RedeemVersion uint32
+	// RedeemAssetID is the asset ID of the "to" asset.
+	RedeemAssetID uint32
 }

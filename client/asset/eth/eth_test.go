@@ -49,6 +49,7 @@ var (
 	tokenGases = dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts[0].Gas
 
 	tETH = &dex.Asset{
+		// Version meaning?
 		ID:           60,
 		Symbol:       "ETH",
 		MaxFeeRate:   100,
@@ -1108,15 +1109,18 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 	}
 
 	order := asset.Order{
-		Value:        walletBalanceGwei / 2,
-		MaxSwapCount: 2,
-		DEXConfig:    fromAsset,
-		RedeemConfig: tBTC,
+		Version:       fromAsset.Version,
+		Value:         walletBalanceGwei / 2,
+		MaxSwapCount:  2,
+		MaxFeeRate:    fromAsset.MaxFeeRate,
+		RedeemVersion: tBTC.Version, // not important if not a token
+		RedeemAssetID: tBTC.ID,
 	}
 
 	// Test fund order with less than available funds
 	coins1, redeemScripts1, err := w.FundOrder(&order)
-	expectedOrderFees := order.DEXConfig.SwapSize * order.DEXConfig.MaxFeeRate * order.MaxSwapCount
+	// NOTE: the following should NOT use dex.Asset.SwapSize, instead w.gases(ver) and the swap count and fee rate
+	expectedOrderFees := fromAsset.SwapSize * order.MaxFeeRate * order.MaxSwapCount
 	expectedFees := expectedOrderFees
 	expectedCoinValue := order.Value
 	if assetID == BipID {
@@ -1197,7 +1201,7 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 
 	// Test eth wallet gas fee limit > server MaxFeeRate causes error
 	tmpGasFeeLimit := eth.gasFeeLimit()
-	eth.gasFeeLimitV = order.DEXConfig.MaxFeeRate - 1
+	eth.gasFeeLimitV = order.MaxFeeRate - 1
 	_, _, err = w.FundOrder(&order)
 	if err == nil {
 		t.Fatalf("eth wallet gas fee limit > server MaxFeeRate should cause error")
@@ -1463,11 +1467,13 @@ func TestPreSwap(t *testing.T) {
 		node.balErr = test.balErr
 
 		preSwap, err := w.PreSwap(&asset.PreSwapForm{
+			Version:       assetCfg.Version,
 			LotSize:       lotSize,
 			Lots:          test.lots,
-			AssetConfig:   assetCfg,
-			RedeemConfig:  tBTC,
+			MaxFeeRate:    assetCfg.MaxFeeRate,
 			FeeSuggestion: feeSuggestion,
+			RedeemVersion: tBTC.Version,
+			RedeemAssetID: tBTC.ID,
 		})
 
 		if test.wantErr {
@@ -1593,7 +1599,7 @@ func testSwap(t *testing.T, assetID uint32) {
 			if err != nil {
 				t.Fatalf("failed to decode contract data: %v", err)
 			}
-			if swaps.AssetConfig.Version != ver {
+			if swaps.Version != ver {
 				t.Fatal("wrong contract version")
 			}
 			if !bytes.Equal(contract.SecretHash, secretHash[:]) {
@@ -1673,11 +1679,11 @@ func testSwap(t *testing.T, assetID uint32) {
 		assetCfg = tToken
 	}
 	swaps := asset.Swaps{
-		Inputs:      inputs,
-		Contracts:   contracts,
-		FeeRate:     assetCfg.MaxFeeRate,
-		LockChange:  false,
-		AssetConfig: assetCfg,
+		Version:    assetCfg.Version,
+		Inputs:     inputs,
+		Contracts:  contracts,
+		FeeRate:    assetCfg.MaxFeeRate,
+		LockChange: false,
 	}
 	testSwap("error initialize but no send", swaps, true)
 	node.tContractor.initErr = nil
@@ -1694,22 +1700,22 @@ func testSwap(t *testing.T, assetID uint32) {
 
 	inputs = refreshWalletAndFundCoins(5, []uint64{ethToGwei(2)}, 1)
 	swaps = asset.Swaps{
-		Inputs:      inputs,
-		Contracts:   contracts,
-		FeeRate:     assetCfg.MaxFeeRate,
-		LockChange:  false,
-		AssetConfig: assetCfg,
+		Version:    assetCfg.Version,
+		Inputs:     inputs,
+		Contracts:  contracts,
+		FeeRate:    assetCfg.MaxFeeRate,
+		LockChange: false,
 	}
 	testSwap("one contract, don't lock change", swaps, false)
 
 	// Test one contract with locking change
 	inputs = refreshWalletAndFundCoins(5, []uint64{ethToGwei(2)}, 1)
 	swaps = asset.Swaps{
-		Inputs:      inputs,
-		Contracts:   contracts,
-		FeeRate:     assetCfg.MaxFeeRate,
-		LockChange:  true,
-		AssetConfig: assetCfg,
+		Version:    assetCfg.Version,
+		Inputs:     inputs,
+		Contracts:  contracts,
+		FeeRate:    assetCfg.MaxFeeRate,
+		LockChange: true,
 	}
 	testSwap("one contract, lock change", swaps, false)
 
@@ -1730,33 +1736,33 @@ func testSwap(t *testing.T, assetID uint32) {
 	}
 	inputs = refreshWalletAndFundCoins(5, []uint64{ethToGwei(3)}, 2)
 	swaps = asset.Swaps{
-		Inputs:      inputs,
-		Contracts:   contracts,
-		FeeRate:     assetCfg.MaxFeeRate,
-		LockChange:  false,
-		AssetConfig: assetCfg,
+		Version:    assetCfg.Version,
+		Inputs:     inputs,
+		Contracts:  contracts,
+		FeeRate:    assetCfg.MaxFeeRate,
+		LockChange: false,
 	}
 	testSwap("two contracts", swaps, false)
 
 	// Test error when funding coins are not enough to cover swaps
 	inputs = refreshWalletAndFundCoins(5, []uint64{ethToGwei(1)}, 2)
 	swaps = asset.Swaps{
-		Inputs:      inputs,
-		Contracts:   contracts,
-		FeeRate:     assetCfg.MaxFeeRate,
-		LockChange:  false,
-		AssetConfig: assetCfg,
+		Version:    assetCfg.Version,
+		Inputs:     inputs,
+		Contracts:  contracts,
+		FeeRate:    assetCfg.MaxFeeRate,
+		LockChange: false,
 	}
 	testSwap("funding coins not enough balance", swaps, true)
 
 	// Ensure when funds are exactly the same as required works properly
 	inputs = refreshWalletAndFundCoins(5, []uint64{ethToGwei(2) + (2 * 200 * dexeth.InitGas(1, 0))}, 2)
 	swaps = asset.Swaps{
-		Inputs:      inputs,
-		Contracts:   contracts,
-		FeeRate:     assetCfg.MaxFeeRate,
-		LockChange:  false,
-		AssetConfig: assetCfg,
+		Inputs:     inputs,
+		Version:    assetCfg.Version,
+		Contracts:  contracts,
+		FeeRate:    assetCfg.MaxFeeRate,
+		LockChange: false,
 	}
 	testSwap("exact change", swaps, false)
 }
@@ -1766,9 +1772,9 @@ func TestPreRedeem(t *testing.T) {
 	defer shutdown()
 
 	form := &asset.PreRedeemForm{
+		Version:       tETH.Version,
 		Lots:          5,
 		FeeSuggestion: 100,
-		AssetConfig:   tETH,
 	}
 
 	preRedeem, err := w.PreRedeem(form)
@@ -1784,7 +1790,7 @@ func TestPreRedeem(t *testing.T) {
 	w, _, node, shutdown2 := tassetWallet(testTokenID)
 	defer shutdown2()
 
-	form.AssetConfig = tToken
+	form.Version = tToken.Version
 	node.tokenContractor.allow = unlimitedAllowanceReplenishThreshold
 
 	preRedeem, err = w.PreRedeem(form)
@@ -2495,8 +2501,10 @@ func TestMaxOrder(t *testing.T) {
 		maxOrder, err := w.MaxOrder(&asset.MaxOrderForm{
 			LotSize:       ethToGwei(test.lotSize),
 			FeeSuggestion: test.feeSuggestion,
-			AssetConfig:   dexAsset,
-			RedeemConfig:  redeemerAsset,
+			AssetVersion:  dexAsset.Version,
+			MaxFeeRate:    dexAsset.MaxFeeRate,
+			RedeemVersion: redeemerAsset.Version,
+			RedeemAssetID: redeemerAsset.ID,
 		})
 		if test.wantErr {
 			if err == nil {
@@ -3332,7 +3340,7 @@ func testRefundReserves(t *testing.T, assetID uint32) {
 	assetV1.MaxFeeRate = 50
 
 	// Lock for 3 refunds with contract version 0
-	v0Val, err := w.ReserveNRefunds(3, &assetV0)
+	v0Val, err := w.ReserveNRefunds(3, assetV0.Version, assetV0.MaxFeeRate)
 	if err != nil {
 		t.Fatalf("ReserveNRefunds error: %v", err)
 	}
@@ -3347,7 +3355,7 @@ func testRefundReserves(t *testing.T, assetID uint32) {
 	}
 
 	// Lock for 2 refunds with contract version 1
-	v1Val, err := w.ReserveNRefunds(2, &assetV1)
+	v1Val, err := w.ReserveNRefunds(2, assetV1.Version, assetV1.MaxFeeRate)
 	if err != nil {
 		t.Fatalf("ReserveNRefunds error: %v", err)
 	}
@@ -3425,7 +3433,7 @@ func testRedemptionReserves(t *testing.T, assetID uint32) {
 	assetV1.Version = 1
 	assetV1.MaxFeeRate = 50
 
-	v0Val, err := w.ReserveNRedemptions(3, &assetV0)
+	v0Val, err := w.ReserveNRedemptions(3, assetV0.Version, assetV0.MaxFeeRate)
 	if err != nil {
 		t.Fatalf("reservation error: %v", err)
 	}
@@ -3441,7 +3449,7 @@ func testRedemptionReserves(t *testing.T, assetID uint32) {
 		t.Fatalf("expected value %d, got %d", lockPerV0, v0Val)
 	}
 
-	v1Val, err := w.ReserveNRedemptions(2, &assetV1)
+	v1Val, err := w.ReserveNRedemptions(2, assetV1.Version, assetV1.MaxFeeRate)
 	if err != nil {
 		t.Fatalf("reservation error: %v", err)
 	}
@@ -3464,7 +3472,7 @@ func testRedemptionReserves(t *testing.T, assetID uint32) {
 
 	node.tokenContractor.allow = new(big.Int).Sub(unlimitedAllowanceReplenishThreshold, big.NewInt(1))
 	node.tokenContractor.approveTx = tTx(0, 0, 0, &testAddressA, nil)
-	_, err = w.ReserveNRedemptions(1, &assetV0)
+	_, err = w.ReserveNRedemptions(1, assetV0.Version, assetV0.MaxFeeRate)
 	if err != nil {
 		t.Fatalf("error reserving with token approval: %v", err)
 	}

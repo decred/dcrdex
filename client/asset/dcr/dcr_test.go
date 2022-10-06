@@ -785,9 +785,10 @@ func TestAvailableFund(t *testing.T) {
 	}
 
 	ord := &asset.Order{
+		Version:       version,
 		Value:         0,
 		MaxSwapCount:  1,
-		DEXConfig:     tDCR,
+		MaxFeeRate:    tDCR.MaxFeeRate,
 		FeeSuggestion: feeSuggestion,
 	}
 
@@ -1092,7 +1093,7 @@ func TestFundingCoins(t *testing.T) {
 
 func checkMaxOrder(t *testing.T, wallet *ExchangeWallet, lots, swapVal, maxFees, estWorstCase, estBestCase, locked uint64) {
 	t.Helper()
-	_, maxOrder, err := wallet.maxOrder(tLotSize, feeSuggestion, tDCR)
+	_, maxOrder, err := wallet.maxOrder(tLotSize, feeSuggestion, tDCR.MaxFeeRate)
 	if err != nil {
 		t.Fatalf("MaxOrder error: %v", err)
 	}
@@ -1163,9 +1164,10 @@ func TestFundEdges(t *testing.T) {
 
 	node.unspent = []walletjson.ListUnspentResult{p2pkhUnspent}
 	ord := &asset.Order{
+		Version:       version,
 		Value:         swapVal,
 		MaxSwapCount:  lots,
-		DEXConfig:     tDCR,
+		MaxFeeRate:    tDCR.MaxFeeRate,
 		FeeSuggestion: feeSuggestion,
 	}
 
@@ -2419,7 +2421,6 @@ func TestPreSwap(t *testing.T) {
 	swapVal := uint64(1e8)
 	lots := swapVal / tLotSize // 10 lots
 
-	const swapSize = 251
 	const totalBytes = 2510
 	const bestCaseBytes = 557
 
@@ -2441,11 +2442,13 @@ func TestPreSwap(t *testing.T) {
 	node.unspent = []walletjson.ListUnspentResult{p2pkhUnspent}
 
 	form := &asset.PreSwapForm{
+		Version:       version,
 		LotSize:       tLotSize,
 		Lots:          lots,
-		AssetConfig:   tDCR,
+		MaxFeeRate:    tDCR.MaxFeeRate,
 		Immediate:     false,
 		FeeSuggestion: feeSuggestion,
+		// Redeem fields unneeded
 	}
 
 	node.unspent[0].Amount = float64(minReq) / 1e8
@@ -2481,8 +2484,8 @@ func TestPreRedeem(t *testing.T) {
 	defer shutdown()
 
 	preRedeem, err := wallet.PreRedeem(&asset.PreRedeemForm{
-		Lots:        5,
-		AssetConfig: tDCR,
+		Version: version,
+		Lots:    5,
 	})
 	// Shouldn't actually be any path to error.
 	if err != nil {
