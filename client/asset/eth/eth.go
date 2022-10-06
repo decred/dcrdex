@@ -11,10 +11,13 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"math/big"
+	"net/http"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -74,6 +77,12 @@ const (
 	// seconds. This value may need to be adjusted in the future.
 	confCheckTimeout                 = 4 * time.Second
 	dynamicSwapOrRedemptionFeesConfs = 2
+
+	// externalApiUrl is the URL of the external API in case of fallback.
+	externalApiUrl = "https://api-eth.bitcore.io/api/ETH/mainnet/"
+	// testnetExternalApiUrl is the URL of the testnet external API in case of
+	// fallback.
+	testnetExternalApiUrl = "https://api-eth.bitcore.io/api/ETH/testnet/"
 )
 
 var (
@@ -90,6 +99,15 @@ var (
 				"maxfeerate, you will not be able to trade on that market with this " +
 				"wallet.  Units: gwei / gas",
 			DefaultValue: defaultGasFeeLimit,
+		},
+		{
+			Key:         "apifeefallback",
+			DisplayName: "External fee rate estimates",
+			Description: "Allow fee rate estimation from a block explorer API. " +
+				"This is useful as a fallback for SPV wallets and RPC wallets " +
+				"that have recently been started.",
+			IsBoolean:    true,
+			DefaultValue: true,
 		},
 	}
 	// WalletInfo defines some general information about a Ethereum wallet.
@@ -135,7 +153,8 @@ var (
 
 // WalletConfig are wallet-level configuration settings.
 type WalletConfig struct {
-	GasFeeLimit uint64 `ini:"gasfeelimit"`
+	GasFeeLimit    uint64 `ini:"gasfeelimit"`
+	ApiFeeFallback bool   `ini:"apifeefallback"`
 }
 
 // parseWalletConfig parses the settings map into a *WalletConfig.
@@ -343,7 +362,8 @@ type baseWallet struct {
 	addr common.Address
 	log  dex.Logger
 
-	gasFeeLimitV uint64 // atomic
+	gasFeeLimitV   uint64 // atomic
+	apiFeeFallback bool
 
 	walletsMtx sync.RWMutex
 	wallets    map[uint32]*assetWallet
@@ -499,14 +519,15 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 	}
 
 	eth := &baseWallet{
-		log:           logger,
-		net:           net,
-		node:          cl,
-		addr:          cl.address(),
-		gasFeeLimitV:  gasFeeLimit,
-		wallets:       make(map[uint32]*assetWallet),
-		monitoredTxs:  make(map[common.Hash]*monitoredTx),
-		monitoredTxDB: db,
+		log:            logger,
+		net:            net,
+		node:           cl,
+		addr:           cl.address(),
+		gasFeeLimitV:   gasFeeLimit,
+		wallets:        make(map[uint32]*assetWallet),
+		monitoredTxs:   make(map[common.Hash]*monitoredTx),
+		monitoredTxDB:  db,
+		apiFeeFallback: cfg.ApiFeeFallback,
 	}
 
 	w := &assetWallet{
@@ -1161,6 +1182,17 @@ func (w *assetWallet) initGasEstimate(n int, dexSwapCfg, dexRedeemCfg *dex.Asset
 
 	est.Swap, est.nSwap, _, err = w.swapGas(n, dexSwapCfg)
 	if err != nil {
+		if w.apiFeeFallback {
+			var estimatedGas uint64
+			estimatedGas, err = externalFeeEstimator(w.ctx, w.net, n)
+			if err != nil {
+				return nil, fmt.Errorf("error getting external gas estimation: %w", err)
+			}
+			est.nSwap = uint64(n) * estimatedGas
+			est.Swap = estimatedGas
+
+			return
+		}
 		return nil, fmt.Errorf("error calculating swap gas: %w", err)
 	}
 
@@ -1175,6 +1207,42 @@ func (w *assetWallet) initGasEstimate(n int, dexSwapCfg, dexRedeemCfg *dex.Asset
 	}
 
 	return
+}
+
+// externalFeeEstimator gets the fee rate from the external API and returns it
+// in sats/vByte.
+func externalFeeEstimator(ctx context.Context, net dex.Network, n int) (uint64, error) {
+	var url string
+	if net == dex.Testnet {
+		url = testnetExternalApiUrl
+	} else {
+		url = externalApiUrl
+	}
+	url = url + "fee/" + strconv.Itoa(n)
+	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, err
+	}
+	httpResponse, err := http.DefaultClient.Do(r)
+	if err != nil {
+		return 0, err
+	}
+	var resp map[string]uint64
+	reader := io.LimitReader(httpResponse.Body, 1<<20)
+	err = json.NewDecoder(reader).Decode(&resp)
+	if err != nil {
+		return 0, err
+	}
+	httpResponse.Body.Close()
+
+	// we use feerate, docs to mempool api https://mempool.space/docs/api
+	feeInWei, ok := resp["feerate"]
+	if !ok {
+		return 0, errors.New("no fee rate found")
+	}
+	return dexeth.WeiToGwei(big.NewInt(int64(feeInWei))), nil
 }
 
 // swapGas estimates gas for a number of initiations. swapGas will error if we
