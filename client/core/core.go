@@ -1861,31 +1861,15 @@ func (c *Core) ToggleWalletStatus(assetID uint32, disable bool) error {
 			return fmt.Errorf("token parent wallet is disabled")
 		}
 
-		dbWallet, err := c.db.Wallet(wallet.dbID)
-		if err != nil {
-			return fmt.Errorf("error retrieving DB wallet: %w", err)
-		}
-
-		wallet, err = c.loadWallet(dbWallet)
-		if err != nil {
-			return newError(walletErr, "error loading wallet for %d -> %s: %w",
-				assetID, unbip(assetID), err)
-		}
-
 		// Update wallet status before attempting to connect wallet because disabled
 		// wallets cannot be connected to.
 		wallet.setDisabled(false)
 
 		// Attempt to connect wallet.
-		err = c.connectAndUpdateWallet(wallet)
+		err := c.connectAndUpdateWallet(wallet)
 		if err != nil {
 			c.log.Errorf("Error connecting to %s wallet: %v", unbip(assetID), err)
 		}
-
-		// The wallet has been successfully enabled.
-		c.walletMtx.Lock()
-		c.wallets[assetID] = wallet
-		c.walletMtx.Unlock()
 	}
 
 	// Update db with wallet status.
