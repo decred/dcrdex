@@ -1665,6 +1665,10 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 // syncing, this also starts a goroutine to monitor sync status, emitting
 // WalletStateNotes on each progress update.
 func (c *Core) connectWallet(w *xcWallet) (depositAddr string, err error) {
+	if w.isDisabled() {
+		return "", fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(w.AssetID)))
+	}
+
 	err = w.Connect() // ensures valid deposit address
 	if err != nil {
 		return "", codedError(connectWalletErr, err)
@@ -1839,21 +1843,14 @@ func (c *Core) ToggleWalletStatus(assetID uint32, disable bool) error {
 			}
 		}
 
-		if !wallet.connected() {
-			return fmt.Errorf("%s wallet is not connected", unbip(assetID))
-		}
-
 		if c.assetHasActiveOrders(assetID) {
 			return newError(activeOrdersErr, "active orders for %v", unbip(assetID))
 		}
 
-		if !wallet.Locked() {
-			err := wallet.Lock(5 * time.Second)
-			if err != nil {
-				c.log.Errorf("Failed to lock %v wallet: %v", unbip(assetID), err)
-			}
+		if wallet.connected() {
+			wallet.Disconnect()
 		}
-		wallet.Disconnect()
+
 		wallet.setDisabled(true)
 	} else {
 		// Ensure wallet does not have a disabled parent wallet.

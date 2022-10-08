@@ -479,11 +479,6 @@ func CreateWallet(createWalletParams *asset.CreateWalletParams) error {
 // NewWallet is the exported constructor by which the DEX will import the
 // exchange wallet.
 func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network) (*ETHWallet, error) {
-	cl, err := newNodeClient(getWalletDir(assetCFG.DataDir, net), net, logger.SubLogger("NODE"))
-	if err != nil {
-		return nil, err
-	}
-
 	cfg, err := parseWalletConfig(assetCFG.Settings)
 	if err != nil {
 		return nil, err
@@ -497,8 +492,6 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 	eth := &baseWallet{
 		log:          logger,
 		net:          net,
-		node:         cl,
-		addr:         cl.address(),
 		dir:          assetCFG.DataDir,
 		gasFeeLimitV: gasFeeLimit,
 		wallets:      make(map[uint32]*assetWallet),
@@ -563,8 +556,15 @@ func loadMonitoredTxs(db kvdb.KeyValueDB) (map[common.Hash]*monitoredTx, error) 
 
 // Connect connects to the node RPC server. Satisfies dex.Connector.
 func (w *ETHWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
+	cl, err := newNodeClient(getWalletDir(w.dir, w.net), w.net, w.log.SubLogger("NODE"))
+	if err != nil {
+		return nil, err
+	}
+
+	w.node = cl
+	w.addr = cl.address()
 	w.ctx = ctx
-	err := w.node.connect(ctx)
+	err = w.node.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
