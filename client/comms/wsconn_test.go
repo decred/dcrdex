@@ -452,9 +452,30 @@ func TestWsConn(t *testing.T) {
 		t.Fatalf("didn't expire") // conn will be dead by this time without pings
 	}
 
-	// Clean up.
+	// New request to abort on conn shutdown.
+	sent = makeRequest(wsc.NextID(), msgjson.InitRoute, init)
+	expiring = make(chan struct{}, 1)
+	expTime = 20 * time.Second                  // we're going to cancel first
+	beforeExpire := time.After(2 * time.Second) // enough time for shutdown to call expire func
+	err = wsc.RequestWithTimeout(sent, func(*msgjson.Message) {}, expTime, func() {
+		expiring <- struct{}{}
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	<-writePumpCh
+
+	pingCh <- struct{}{}
+
+	// Shutdown/Disconnect before expire.
 	time.Sleep(50 * time.Millisecond) // let pings and pongs flush, but it's not a problem if they bomb
 	waiter.Disconnect()
+
+	select {
+	case <-beforeExpire: // much shorter than req timeout
+		t.Error("expire func not called on conn shutdown")
+	case <-expiring: // means aborted if triggered before timeout
+	}
 
 	select {
 	case _, ok := <-readSource:

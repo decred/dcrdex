@@ -30,10 +30,10 @@ const (
 	// The maximum time in seconds to write to a connection.
 	writeWait = time.Second * 3
 
-	// reconnetInterval is the initial and increment between reconnect tries.
+	// reconnectInterval is the initial and increment between reconnect tries.
 	reconnectInterval = 5 * time.Second
 
-	// maxReconnetInterval is the maximum allowed reconnect interval.
+	// maxReconnectInterval is the maximum allowed reconnect interval.
 	maxReconnectInterval = time.Minute
 
 	// DefaultResponseTimeout is the default timeout for responses after a
@@ -74,6 +74,7 @@ type WsConn interface {
 type responseHandler struct {
 	expiration *time.Timer
 	f          func(*msgjson.Message)
+	abort      func() // only to be run at most once, and not if f ran
 }
 
 // WsCfg is the configuration struct for initializing a WsConn.
@@ -340,7 +341,7 @@ func (conn *wsConn) read(ctx context.Context) {
 		if msg.Type == msgjson.Response {
 			handler := conn.respHandler(msg.ID)
 			if handler == nil {
-				conn.log.Errorf("unhandled response with error msg: %v", handleUknownResponse(msg))
+				conn.log.Errorf("unhandled response with error msg: %v", handleUnknownResponse(msg))
 				continue
 			}
 			// Run handlers in a goroutine so that other messages can be
@@ -445,6 +446,17 @@ func (conn *wsConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 			conn.close()
 		}
 		conn.wsMtx.Unlock()
+
+		// Run the expire funcs so request callers don't hang.
+		conn.reqMtx.Lock()
+		defer conn.reqMtx.Unlock()
+		for id, h := range conn.respHandlers {
+			delete(conn.respHandlers, id)
+			// Since we are holding reqMtx and deleting the handler, no need to
+			// check if expiration fired (see logReq), but good to stop it.
+			h.expiration.Stop()
+			h.abort()
+		}
 
 		close(conn.readCh) // signal to MessageSource receivers that the wsConn is dead
 	}()
@@ -573,6 +585,7 @@ func (conn *wsConn) logReq(id uint64, respHandler func(*msgjson.Message), expire
 	conn.respHandlers[id] = &responseHandler{
 		expiration: time.AfterFunc(expireTime, doExpire),
 		f:          respHandler,
+		abort:      expire,
 	}
 }
 
@@ -598,9 +611,9 @@ func (conn *wsConn) MessageSource() <-chan *msgjson.Message {
 	return conn.readCh
 }
 
-// handleUknownResponse extracts the error message sent for a response without a
-// handler.
-func handleUknownResponse(msg *msgjson.Message) error {
+// handleUnknownResponse extracts the error message sent for a response without
+// a handler.
+func handleUnknownResponse(msg *msgjson.Message) error {
 	resp, err := msg.Response()
 	if err != nil {
 		return err
