@@ -605,7 +605,8 @@ type TXCWallet struct {
 	sendErr             error
 	addrErr             error
 	signCoinErr         error
-	lastSwaps           *asset.Swaps
+	lastSwaps           []*asset.Swaps
+	lastRedeems         []*asset.RedeemForm
 	swapReceipts        []asset.Receipt
 	swapCounter         int
 	swapErr             error
@@ -662,6 +663,7 @@ type TXCWallet struct {
 	preAccelerateSuggestedRange asset.XYRange
 	accelerationEstimate        uint64
 	accelerateOrderErr          error
+	info                        *asset.WalletInfo
 
 	confirmRedemptionResult *asset.ConfirmRedemptionStatus
 	confirmRedemptionErr    error
@@ -682,6 +684,11 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 		confsErr:         make(map[string]error),
 		ownsAddress:      true,
 		contractLockTime: time.Now().Add(time.Minute),
+		lastSwaps:        make([]*asset.Swaps, 0),
+		lastRedeems:      make([]*asset.RedeemForm, 0),
+		info: &asset.WalletInfo{
+			Version: 0, // match tUTXOAssetA/tUTXOAssetB
+		},
 	}
 	var broadcasting uint32 = 1
 	xcWallet := &xcWallet{
@@ -703,9 +710,7 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 }
 
 func (w *TXCWallet) Info() *asset.WalletInfo {
-	return &asset.WalletInfo{
-		Version: 0, // match tUTXOAssetA/tUTXOAssetB
-	}
+	return w.info
 }
 
 func (w *TXCWallet) OwnsDepositAddress(address string) (bool, error) {
@@ -784,7 +789,7 @@ func (w *TXCWallet) FundingCoins([]dex.Bytes) (asset.Coins, error) {
 
 func (w *TXCWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
 	w.swapCounter++
-	w.lastSwaps = swaps
+	w.lastSwaps = append(w.lastSwaps, swaps)
 	if w.swapErr != nil {
 		return nil, nil, 0, w.swapErr
 	}
@@ -798,6 +803,7 @@ func (w *TXCWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, uin
 			w.redeemErrChan <- w.redeemErr
 		}
 	}()
+	w.lastRedeems = append(w.lastRedeems, form)
 	w.redeemCounter++
 	if w.redeemErr != nil {
 		return nil, nil, 0, w.redeemErr
@@ -4846,7 +4852,8 @@ func TestTradeTracking(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handleMatchRoute error (immediate partial fill): %v", err)
 	}
-	if tDcrWallet.lastSwaps.LockChange != false {
+	lastSwaps := tDcrWallet.lastSwaps[len(tDcrWallet.lastSwaps)-1]
+	if lastSwaps.LockChange != false {
 		t.Fatalf("change locked for executed non-standing order (immediate partial fill)")
 	}
 }
@@ -8765,6 +8772,135 @@ func TestConfirmRedemption(t *testing.T) {
 		}
 		tracker.mtx.RUnlock()
 	}
+}
+
+func TestMaxSwapsRedeemsInTx(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	dc := rig.dc
+	tCore := rig.core
+
+	dcrWallet, tDcrWallet := newTWallet(tUTXOAssetA.ID)
+	tCore.wallets[tUTXOAssetA.ID] = dcrWallet
+	btcWallet, tBtcWallet := newTWallet(tUTXOAssetB.ID)
+	tCore.wallets[tUTXOAssetB.ID] = btcWallet
+	walletSet, _ := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
+
+	tDcrWallet.info.MaxSwapsInTx = 4
+	tBtcWallet.info.MaxRedeemsInTx = 4
+
+	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)
+	oid := lo.ID()
+	mkt := dc.marketConfig(tDcrBtcMktName)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails, nil, 0, 0)
+	dc.trades[oid] = tracker
+
+	newMatch := func(side order.MatchSide, status order.MatchStatus) *matchTracker {
+		return &matchTracker{
+			prefix: lo.Prefix(),
+			trade:  lo.Trade(),
+			MetaMatch: db.MetaMatch{
+				MetaData: &db.MatchMetaData{
+					Proof: db.MatchProof{
+						Auth: db.MatchAuth{
+							MatchStamp: uint64(time.Now().UnixMilli()),
+							AuditStamp: uint64(time.Now().UnixMilli()),
+						},
+					},
+				},
+				UserMatch: &order.UserMatch{
+					MatchID: ordertest.RandomMatchID(),
+					Side:    side,
+					Address: ordertest.RandomAddress(),
+					Status:  status,
+				},
+			},
+		}
+	}
+
+	swapabbleMatches := func(num int) map[order.MatchID]*matchTracker {
+		matches := make(map[order.MatchID]*matchTracker, num)
+		for i := 0; i < num; i++ {
+			m := newMatch(order.Maker, order.NewlyMatched)
+			matches[m.MatchID] = m
+		}
+		return matches
+	}
+
+	redeemableMatches := func(num int) map[order.MatchID]*matchTracker {
+		matches := make(map[order.MatchID]*matchTracker, num)
+		for i := 0; i < num; i++ {
+			m := newMatch(order.Taker, order.MakerRedeemed)
+			matches[m.MatchID] = m
+			rig.ws.queueResponse(msgjson.RedeemRoute, redeemAcker)
+		}
+		return matches
+	}
+
+	checkNumSwaps := func(expected []int, wallet *TXCWallet) {
+		t.Helper()
+		for i := range expected {
+			if expected[i] != len(wallet.lastSwaps[i].Contracts) {
+				t.Fatalf("expected %d swaps but got %d", expected[i], len(wallet.lastSwaps[i].Contracts))
+			}
+		}
+	}
+
+	checkNumRedeems := func(expected []int, wallet *TXCWallet) {
+		t.Helper()
+		for i := range expected {
+			if expected[i] != len(wallet.lastRedeems[i].Redemptions) {
+				t.Fatalf("expected %d swaps but got %d", expected[i], len(wallet.lastRedeems[i].Redemptions))
+			}
+		}
+	}
+
+	populateRedeemCoins := func(num int, wallet *TXCWallet) {
+		wallet.redeemCoins = make([]dex.Bytes, num)
+		for i := 0; i < num; i++ {
+			wallet.redeemCoins = append(wallet.redeemCoins, encode.RandomBytes(32))
+		}
+	}
+
+	// Test Swaps
+	expected := []int{4, 4, 4, 4, 4, 2}
+	tracker.matches = swapabbleMatches(22)
+	tCore.tick(tracker)
+	checkNumSwaps(expected, tDcrWallet)
+
+	tDcrWallet.lastSwaps = make([]*asset.Swaps, 0)
+	expected = []int{3}
+	tracker.matches = swapabbleMatches(3)
+	tCore.tick(tracker)
+	checkNumSwaps(expected, tDcrWallet)
+
+	tDcrWallet.lastSwaps = make([]*asset.Swaps, 0)
+	expected = []int{4}
+	tracker.matches = swapabbleMatches(4)
+	tCore.tick(tracker)
+	checkNumSwaps(expected, tDcrWallet)
+
+	// Test Redeems
+	expected = []int{4, 4, 4, 4, 4, 2}
+	tracker.matches = redeemableMatches(22)
+	populateRedeemCoins(22, tBtcWallet)
+	tCore.tick(tracker)
+	checkNumRedeems(expected, tBtcWallet)
+
+	tBtcWallet.lastRedeems = make([]*asset.RedeemForm, 0)
+	expected = []int{3}
+	tracker.matches = redeemableMatches(3)
+	populateRedeemCoins(3, tBtcWallet)
+	tCore.tick(tracker)
+	checkNumRedeems(expected, tBtcWallet)
+
+	tBtcWallet.lastRedeems = make([]*asset.RedeemForm, 0)
+	expected = []int{4}
+	tracker.matches = redeemableMatches(4)
+	populateRedeemCoins(4, tBtcWallet)
+	tCore.tick(tracker)
+	checkNumRedeems(expected, tBtcWallet)
 }
 
 func TestSuspectTrades(t *testing.T) {

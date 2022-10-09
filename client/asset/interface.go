@@ -207,6 +207,12 @@ type WalletInfo struct {
 	// UnitInfo is the information about unit names and conversion factors for
 	// the asset.
 	UnitInfo dex.UnitInfo `json:"unitinfo"`
+	// MaxSwapsInTx is the max amount of swaps that this wallet can do in a
+	// single transaction.
+	MaxSwapsInTx uint64
+	// MaxRedeemsInTx is the max amount of redemptions that this wallet can do
+	// in a single transaction.
+	MaxRedeemsInTx uint64
 }
 
 // ConfigOption is a wallet configuration option.
