@@ -7675,9 +7675,13 @@ func (c *Core) schedTradeTick(tracker *trackedTrade) {
 	}
 
 	numMatches := len(tracker.activeMatches(true))
-	if numMatches == 1 {
+	switch numMatches {
+	case 0:
+		return
+	case 1:
 		go tick()
 		return
+	default:
 	}
 
 	// Schedule a tick for this trade.
@@ -7720,19 +7724,142 @@ func handleRedemptionRoute(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	if err != nil {
 		return fmt.Errorf("redemption request parsing error: %w", err)
 	}
+
+	sigMsg := redemption.Serialize()
+	err = dc.acct.checkSig(sigMsg, redemption.Sig)
+	if err != nil {
+		c.log.Warnf("Server redemption signature error: %v", err) // just warn
+	}
+
 	var oid order.OrderID
 	copy(oid[:], redemption.OrderID)
 
-	tracker, _, _ := dc.findOrder(oid)
-	if tracker == nil {
-		return fmt.Errorf("redemption request received for unknown order: %s", string(msg.Payload))
+	tracker, _, isCancel := dc.findOrder(oid)
+	if tracker != nil {
+		if isCancel {
+			return fmt.Errorf("redemption request received for cancel order %v, match %v (you ok server?)",
+				oid, redemption.MatchID)
+		}
+		err = tracker.processRedemption(msg.ID, redemption)
+		if err != nil {
+			return err
+		}
+		c.schedTradeTick(tracker)
+		return nil
 	}
-	err = tracker.processRedemption(msg.ID, redemption)
+
+	// This might be an order we completed on our own as taker without waiting
+	// for redeem information to be provided to us, or as maker we retired the
+	// order after redeeming but before receiving the taker's redeem info that
+	// we don't need except for establishing a complete record of all
+	// transactions in the atomic swap. Check the DB for the order, and if we
+	// were taker with our redeem recorded, send it to the server.
+	matches, err := c.db.MatchesForOrder(oid, true)
 	if err != nil {
 		return err
 	}
-	c.schedTradeTick(tracker)
-	return nil
+
+	for _, match := range matches {
+		if !bytes.Equal(match.MatchID[:], redemption.MatchID) {
+			continue
+		}
+
+		// Respond to the DEX's redemption request with an ack.
+		err = dc.ack(msg.ID, match.MatchID, redemption)
+		if err != nil {
+			c.log.Warnf("Failed to send redeem ack: %v", err) // just warn
+		}
+
+		// Store the counterparty's redeem coin if we don't already have it
+		// recorded, and if we are the taker, also send our redeem request.
+
+		proof := &match.MetaData.Proof
+
+		ourRedeem := proof.TakerRedeem
+		if match.Side == order.Maker {
+			ourRedeem = proof.MakerRedeem
+		}
+
+		c.log.Debugf("Handling redemption request for inactive order %v, match %v in status %v, side %v "+
+			"(revoked = %v, refunded = %v, redeemed = %v)",
+			oid, match, match.Status, match.Side, proof.IsRevoked(),
+			len(proof.RefundCoin) > 0, len(ourRedeem) > 0)
+
+		// If we are maker, we are being informed of the taker's redeem, so we
+		// just record it TakerRedeem and be done. Presently server does not do
+		// this anymore, but if it does again, we would record this.
+		if match.Side == order.Maker {
+			proof.TakerRedeem = order.CoinID(redemption.CoinID)
+			return c.db.UpdateMatch(match)
+		}
+		// If we are taker, we are being informed of the maker's redeem, but
+		// since we did not have this order actively tracked, that should mean
+		// we found it on our own first and already redeemed. Load up the
+		// details of our redeem and send our redeem request as required even
+		// though it's mostly pointless as the last step.
+
+		// Do some sanity checks considering that this order is NOT active. We
+		// won't actually try to resolve any discrepancy since we have retired
+		// this order by own usual match negotiation process, and server could
+		// just be spamming nonsense, but make some noise in the logs.
+		if len(proof.RefundCoin) > 0 {
+			c.log.Warnf("We have supposedly refunded inactive match %v as taker, "+
+				"but server is telling us the counterparty just redeemed it!", match)
+			// That should imply we have no redeem coin to send, but check.
+		}
+		if len(ourRedeem) == 0 {
+			c.log.Warnf("We have not redeemed inactive match %v as taker (refunded = %v), "+
+				"but server is telling us the counterparty just redeemed ours!",
+				match, len(proof.RefundCoin) > 0) // nothing to send, return
+			return fmt.Errorf("we have no record of our own redeem as taker on match %v", match.MatchID)
+		}
+
+		makerRedeem := order.CoinID(redemption.CoinID)
+		if len(proof.MakerRedeem) == 0 { // findMakersRedemption or processMakersRedemption would have recorded this!
+			c.log.Warnf("We (taker) have no previous record of the maker's redeem for inactive match %v.", match)
+			// proof.MakerRedeem = makerRedeem; _ = c.db.UpdateMatch(match) // maybe, but this is unexpected
+		} else if !bytes.Equal(proof.MakerRedeem, makerRedeem) {
+			c.log.Warnf("We (taker) have a different maker redeem coin already recorded: "+
+				"recorded (%v) != notified (%v)", proof.MakerRedeem, makerRedeem)
+		}
+
+		msgRedeem := &msgjson.Redeem{
+			OrderID: redemption.OrderID,
+			MatchID: redemption.MatchID,
+			CoinID:  dex.Bytes(ourRedeem),
+			Secret:  proof.Secret, // silly for taker, but send it back as required
+		}
+
+		c.wg.Add(1)
+		go func() {
+			defer c.wg.Done()
+			ack := new(msgjson.Acknowledgement)
+			err := dc.signAndRequest(msgRedeem, msgjson.RedeemRoute, ack, 30*time.Second)
+			if err != nil {
+				c.log.Errorf("error sending 'redeem' message: %v", err)
+				return
+			}
+
+			err = dc.acct.checkSig(msgRedeem.Serialize(), ack.Sig)
+			if err != nil {
+				c.log.Errorf("'redeem' ack signature error: %v", err)
+				return
+			}
+
+			c.log.Debugf("Received valid ack for 'redeem' request for match %s", match)
+			auth := &proof.Auth
+			auth.RedeemSig = ack.Sig
+			auth.RedeemStamp = uint64(time.Now().UnixMilli())
+			err = c.db.UpdateMatch(match)
+			if err != nil {
+				c.log.Errorf("error storing redeem ack sig in database: %v", err)
+			}
+		}()
+
+		return nil
+	}
+
+	return fmt.Errorf("redemption request received for unknown order: %s", string(msg.Payload))
 }
 
 // existsWaiter returns true if the waiter already exists in the map.
