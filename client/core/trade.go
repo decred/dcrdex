@@ -100,6 +100,9 @@ type matchTracker struct {
 	// The fields below need to be modified without the parent trackedTrade's
 	// mutex being write locked, so they have dedicated mutexes.
 
+	swapSpentTimeMtx sync.Mutex
+	swapSpentTime    time.Time
+
 	// lastExpireDur is the most recently logged time until expiry of the
 	// party's own contract. This may be negative if expiry has passed, but it
 	// is not yet refundable due to other consensus rules. This is used only by
@@ -127,6 +130,24 @@ type matchTracker struct {
 // matchTime returns the match's match time as a time.Time.
 func (m *matchTracker) matchTime() time.Time {
 	return time.UnixMilli(int64(m.MetaData.Proof.Auth.MatchStamp)).UTC()
+}
+
+func (m *matchTracker) swapSpentAgo() time.Duration {
+	m.swapSpentTimeMtx.Lock()
+	defer m.swapSpentTimeMtx.Unlock()
+	if m.swapSpentTime.IsZero() {
+		return 0
+	}
+	return time.Since(m.swapSpentTime)
+}
+
+func (m *matchTracker) swapSpent() {
+	m.swapSpentTimeMtx.Lock()
+	defer m.swapSpentTimeMtx.Unlock()
+	if !m.swapSpentTime.IsZero() {
+		return // already noted
+	}
+	m.swapSpentTime = time.Now()
 }
 
 // setExpireDur records the last known duration until expiry if the difference
@@ -203,10 +224,21 @@ func (fs *feeStamped) get() uint64 {
 	return fs.rate
 }
 
-// freshRedeemFeeAge is the expiry age for cached redeem fee rates, past which
-// fetchFeeFromOracle should be used to refresh the rate. See
-// cacheRedemptionFeeSuggestion.
-const freshRedeemFeeAge = time.Minute
+const (
+	// freshRedeemFeeAge is the expiry age for cached redeem fee rates, past
+	// which fetchFeeFromOracle should be used to refresh the rate. See
+	// cacheRedemptionFeeSuggestion.
+	freshRedeemFeeAge = time.Minute
+
+	// spentAgoThreshNormal is how long to wait after we as taker observer our
+	// swap spent by the maker without receiving a redemption request from the
+	// server before initiating a redemption search and auto-redeem.
+	spentAgoThreshNormal = 10 * time.Minute
+	// spentAgoThreshSelfGoverned is like spentAgoThreshNormal, but for a
+	// self-governed trade. We are less patient if the server is down or
+	// lacking the market or asset configs involved.
+	spentAgoThreshSelfGoverned = time.Minute
+)
 
 // trackedTrade is an order (issued by this client), its matches, and its cancel
 // order, if applicable. The trackedTrade has methods for handling requests
@@ -292,6 +324,13 @@ func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnec
 
 func (t *trackedTrade) isSelfGoverned() bool {
 	return atomic.LoadUint32(&t.selfGoverned) == 1
+}
+
+func (t *trackedTrade) spentAgoThresh() time.Duration {
+	if t.isSelfGoverned() {
+		return spentAgoThreshSelfGoverned
+	}
+	return spentAgoThreshNormal // longer
 }
 
 func (t *trackedTrade) setSelfGoverned(is bool) (changed bool) {
@@ -1552,9 +1591,12 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) (r
 			t.dc.log.Errorf("isRedeemable: error getting confirmation for our own swap transaction: %v", err)
 		}
 		if spent {
-			t.dc.log.Debugf("our (taker) swap for match %s is being reported as spent, "+
+			t.dc.log.Debugf("Our (taker) swap for match %s is being reported as spent, "+
 				"but we have not seen the counter-party's redemption yet. This could just"+
 				" be network latency.", match)
+			// Record this time if this is the first time we have observed that
+			// it's spent.
+			match.swapSpent()
 		}
 		match.setSwapConfirms(int64(confs))
 		t.notify(newMatchNote(TopicConfirms, "", "", db.Data, t, match))
@@ -1648,16 +1690,16 @@ func (t *trackedTrade) isRefundable(ctx context.Context, match *matchTracker) bo
 }
 
 // shouldBeginFindRedemption will be true if we are the Taker on this match,
-// we've broadcasted a swap, our swap has gotten the required confs, the match
-// was revoked without receiving a valid notification of Maker's redeem and
-// we've not refunded our swap. Only revoked matches should begin a redemption
-// search, so the caller may skip this check (and not begin the search) if the
-// match is revoked or will be revoked.
+// we've broadcasted a swap, our swap has gotten the required confs, we've not
+// refunded our swap, and either the match was revoked (without receiving a
+// valid notification of Maker's redeem) or the match is self-governed and it
+// has been a while since our swap was spent. The revoked status is provided as
+// in input since it may not be flagged as revoked in the MatchProof yet.
 //
 // This method accesses match fields and MUST be called with the trackedTrade
 // mutex lock held for reads.
-func (t *trackedTrade) shouldBeginFindRedemption(ctx context.Context, match *matchTracker) bool {
-	proof := &match.MetaData.Proof // revoked flags may not be updated yet, so don't enforce it
+func (t *trackedTrade) shouldBeginFindRedemption(ctx context.Context, match *matchTracker, revoked bool) bool {
+	proof := &match.MetaData.Proof // revoked flags may not be updated yet, so we use an input arg
 	swapCoinID := proof.TakerSwap
 	if match.Side != order.Taker || len(swapCoinID) == 0 || len(proof.MakerRedeem) > 0 || len(proof.RefundCoin) > 0 {
 		// t.dc.log.Tracef(
@@ -1665,6 +1707,9 @@ func (t *trackedTrade) shouldBeginFindRedemption(ctx context.Context, match *mat
 		// 	match, match.Side, match.swapErr, proof.TakerSwap, proof.RefundCoin)
 		return false
 	}
+	// We are taker and have published our contract, there is no known maker
+	// redeem, and we have not refunded. We may want to search for a maker
+	// redeem if this match is revoked or our swap has been spent some time ago.
 	if match.cancelRedemptionSearch != nil { // already finding redemption
 		return false
 	}
@@ -1679,10 +1724,18 @@ func (t *trackedTrade) shouldBeginFindRedemption(ctx context.Context, match *mat
 		}
 		return false
 	}
-	if spent { // NOTE: spent may not be accurate for SPV wallet, so this should not be a requirement.
-		t.dc.log.Infof("Swap contract for revoked match %s, order %s is spent. Will begin search for redemption", match, t.ID())
+	if spent {
+		match.swapSpent() // noted.
+		// NOTE: spent may not be accurate for SPV wallet (false negative), so
+		// this should not be a requirement. (specifically... 0-conf?)
+		t.dc.log.Infof("Swap contract for match %s, order %s is spent. "+
+			"Search for counterparty redemption may begin soon.", match, t.ID())
 	}
-	return spent || confs >= t.metaData.FromSwapConf
+	if revoked { // no delays if it's revoked
+		return spent || confs >= t.metaData.FromSwapConf
+	}
+	// Even if not revoked, go find that redeem if it was spent a while ago.
+	return spent && match.swapSpentAgo() > t.spentAgoThresh()
 }
 
 // shouldConfirmRedemption will return true if a redemption transaction
@@ -1811,9 +1864,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 			return ctx.Err()
 		}
 
-		// A redemption search should only be done for a revoked match, but
-		// MatchProof may not be updated, so we enforce that here.
-		if revoked && t.shouldBeginFindRedemption(ctx, match) {
+		if t.shouldBeginFindRedemption(ctx, match, revoked /* consider new pending self-revoke */) {
 			c.log.Debugf("Ready to find counter-party redemption for match %s, order %v (%v)", match, t.ID(), side)
 			searches = append(searches, match)
 			return nil
@@ -3284,16 +3335,16 @@ func (t *trackedTrade) processRedemption(msgID uint64, redemption *msgjson.Redem
 		default:
 			return fmt.Errorf("maker redemption received at incorrect step %d", match.Status)
 		}
+	} else {
+		if match.Status < order.MakerRedeemed { // only makes sense if we've redeemed
+			return fmt.Errorf("redemption request received as maker for match %v in status %v",
+				mid, match.Status)
+		}
+		t.dc.log.Tracef("Received a courtesy redemption request for match %v as maker", mid)
 	}
 
-	sigMsg := redemption.Serialize()
-	err := t.dc.acct.checkSig(sigMsg, redemption.Sig)
-	if err != nil {
-		// Log, but don't quit.
-		errs.add("server redemption signature error: %v", err)
-	}
 	// Respond to the DEX.
-	err = t.dc.ack(msgID, match.MatchID, redemption)
+	err := t.dc.ack(msgID, match.MatchID, redemption)
 	if err != nil {
 		return errs.add("Audit - %v", err)
 	}
@@ -3303,15 +3354,20 @@ func (t *trackedTrade) processRedemption(msgID uint64, redemption *msgjson.Redem
 	match.MetaData.Proof.Auth.RedemptionStamp = redemption.Time
 
 	if match.Side == order.Taker {
+		// As taker, this step is important because we validate that the
+		// provided secret corresponds to the secret hash in our contract.
 		err = t.processMakersRedemption(match, redemption.CoinID, redemption.Secret)
 		if err != nil {
 			errs.addErr(err)
 		}
+	} else {
+		// Historically, the server does not send a redemption request to the
+		// maker for the taker's redeem since match negotiation is complete
+		// client-side at time of redeem. Just store the redeem CoinID as
+		// TakerRedeem. Our own match negotiation has or will advance the status
+		// and handle coin unlocking as needed.
+		match.MetaData.Proof.TakerRedeem = order.CoinID(redemption.CoinID)
 	}
-	// The server does not send a redemption request to the maker for the
-	// taker's redeem since match negotiation is complete server-side when the
-	// taker redeems, and it is complete client-side when we redeem. If we are
-	// both sides, there is another trackedTrade and matchTracker for that side.
 
 	err = t.db.UpdateMatch(&match.MetaMatch)
 	if err != nil {
