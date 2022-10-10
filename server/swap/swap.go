@@ -768,7 +768,7 @@ func (s *Swapper) Run(ctx context.Context) {
 		// Now that handlers AND the coin waiter queue are stopped, the
 		// liveWaiters can be accessed without locking.
 
-		// Stop the main loop if if there was no internal error.
+		// Stop the main loop if there was no internal error.
 		close(mainLoop)
 		wgMain.Wait()
 	}()
@@ -1151,6 +1151,14 @@ func (s *Swapper) checkInactionEventBased() {
 			if tooOld(match.makerStatus.redeemSeenTime()) { // rlocks swapStatus.mtx
 				deleteMatch(true)
 			}
+		case order.MatchComplete:
+			// If we got an ack from the redemption request sent to maker
+			// (detailing the taker's redeem), or it has been a while since
+			// taker redeemed, delete the match. Former should have deleted it.
+			if len(match.Sigs.MakerRedeem) > 0 || tooOld(match.takerStatus.redeemSeenTime()) {
+				log.Debugf("Deleting completed match %v", match.ID())
+				s.deleteMatch(match) // no fail or revoke, just remove from map
+			}
 		}
 	}
 
@@ -1474,8 +1482,15 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	// potentially record the order as complete with the auth manager and in
 	// persistent storage.
 
-	// Record the taker's redeem ack sig. There isn't one for maker.
-	if !acker.isMaker {
+	// Record the taker's redeem ack sig. One from the maker isn't required.
+	if acker.isMaker { // maker acknowledging the redeem req we sent regarding the taker redeem
+		acker.match.Sigs.MakerRedeem = ack.Sig
+		// We don't save that pointless sig anymore; use it as a flag.
+		log.Debugf("Deleting completed match %v", mktMatch)
+		s.matchMtx.Lock()
+		s.deleteMatch(acker.match)
+		s.matchMtx.Unlock()
+	} else { // taker acknowledging the redeem req we sent regarding the maker redeem
 		acker.match.Sigs.TakerRedeem = ack.Sig
 		if err = s.storage.SaveRedeemAckSigB(mktMatch, ack.Sig); err != nil {
 			s.respondError(msg.ID, acker.user, msgjson.RPCInternalError,
@@ -1758,14 +1773,8 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	log.Debugf("processRedeem: valid redemption %v (%s) spending contract %s received at %v from %v (%s) for match %v, "+
 		"swapStatus %v => %v", redemption, stepInfo.asset.Symbol, cpSwapStr, redeemTime, actor.user,
 		makerTaker(actor.isMaker), matchID, stepInfo.step, newStatus)
-
-	if newStatus == order.MatchComplete { // actor is taker
-		log.Debugf("Deleting completed match %v", matchID)
-		s.matchMtx.Lock()
-		s.deleteMatch(match)
-		s.matchMtx.Unlock()
-		// SaveRedeemB flags the match as inactive in the DB.
-	}
+	// If MatchComplete, we'll delete the match in processAck if the maker
+	// responds to the courtesy redemption request, or checkInactionEventBased.
 
 	// Store the swap contract and the coinID (e.g. txid:vout) containing the
 	// contract script hash. Maker is party A, the initiator, who first reveals
@@ -1806,11 +1815,8 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 
 	s.swapDone(ord, match.Match, false)
 
-	// For taker's redeem, that's the end.
-	if !actor.isMaker {
-		return wait.DontTryAgain
-	}
-	// For maker's redeem, inform the taker.
+	// Inform the counterparty, even though the maker doesn't really care about
+	// the taker's redeem details.
 	rParams := &msgjson.Redemption{
 		Redeem: msgjson.Redeem{
 			OrderID: idToBytes(counterParty.order.ID()),
@@ -1827,7 +1833,11 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		return wait.DontTryAgain
 	}
 
-	// Set up the acknowledgement callback.
+	// Send the redemption request.
+	log.Debugf("processRedeem: sending 'redemption' request to counterparty %v (%s) "+
+		"for match %v", counterParty.user, makerTaker(counterParty.isMaker), matchID)
+
+	// Set up the redemption acknowledgement callback.
 	ack := &messageAcker{
 		user:    counterParty.user,
 		match:   match,
@@ -1835,10 +1845,6 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		isMaker: counterParty.isMaker,
 		// isAudit: false,
 	}
-	log.Debugf("processRedeem: sending 'redemption' request to counterparty %v (%s) "+
-		"for match %v", ack.user, makerTaker(ack.isMaker), matchID)
-
-	// Send the ack request.
 
 	// The counterparty does not need to actually locate the redemption txn,
 	// so use the default request timeout.

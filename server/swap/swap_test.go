@@ -999,12 +999,12 @@ func (rig *testRig) redeem_taker(expectSuccess bool) error {
 	}
 	matchInfo.db.takerRedeem = redeem
 	if expectSuccess {
-		if err := rig.waitChans("server received our redeem", rig.auth.redeemReceived); err != nil {
+		if err := rig.waitChans("server received our redeem and we got a redemption note", rig.auth.redeemReceived, rig.auth.redemptionReq); err != nil {
 			return err
 		}
 		tracker := rig.getTracker()
-		if tracker != nil {
-			return fmt.Errorf("expected match to be removed, found it, in status %v", tracker.Status)
+		if tracker.Status != order.MatchComplete {
+			return fmt.Errorf("unexpected swap status %d after taker redeem notification", tracker.Status)
 		}
 		err = rig.checkServerResponseSuccess(matchInfo.taker)
 		if err != nil {
@@ -1049,13 +1049,29 @@ func (rig *testRig) ackRedemption_taker(checkSig bool) error {
 	return nil
 }
 
+// Maker: Acknowledge the DEX 'redemption' request.
+func (rig *testRig) ackRedemption_maker(checkSig bool) error {
+	matchInfo := rig.matchInfo
+	err := rig.ackRedemption(matchInfo.maker, matchInfo.makerOID, matchInfo.db.takerRedeem)
+	if err != nil {
+		return err
+	}
+	if checkSig {
+		tracker := rig.getTracker()
+		if tracker != nil {
+			return fmt.Errorf("expected match to be removed, found it, in status %v", tracker.Status)
+		}
+	}
+	return nil
+}
+
 func (rig *testRig) ackRedemption(user *tUser, oid order.OrderID, redeem *tRedeem) error {
 	if redeem == nil {
 		return fmt.Errorf("nil redeem info")
 	}
 	req := rig.auth.popReq(user.acct)
 	if req == nil {
-		return fmt.Errorf("failed to find audit request for %s after counterparty's init", user.lbl)
+		return fmt.Errorf("failed to find redemption request for %s", user.lbl)
 	}
 	err := rig.checkRedeem(req.req, oid, redeem.coin.ID(), user.lbl)
 	if err != nil {
@@ -1484,6 +1500,7 @@ func testSwap(t *testing.T, rig *testRig) {
 		ensureNilErr(rig.redeem_maker(true))
 		ensureNilErr(rig.ackRedemption_taker(true))
 		ensureNilErr(rig.redeem_taker(true))
+		ensureNilErr(rig.ackRedemption_maker(true))
 	}
 }
 
@@ -1492,8 +1509,8 @@ func TestSwaps(t *testing.T) {
 	defer cleanup()
 
 	rig.auth.auditReq = make(chan struct{}, 1)
-	rig.auth.redeemReceived = make(chan struct{}, 1)
-	rig.auth.redemptionReq = make(chan struct{}, 1)
+	rig.auth.redeemReceived = make(chan struct{}, 2)
+	rig.auth.redemptionReq = make(chan struct{}, 2)
 
 	for _, makerSell := range []bool{true, false} {
 		sellStr := " buy"
@@ -1739,6 +1756,9 @@ func TestTxWaiters(t *testing.T) {
 	}
 	rig.abcNode.setRedemptionErr(nil)
 	ensureNilErr(rig.redeem_taker(true))
+	tickMempool()
+	tickMempool()
+	ensureNilErr(rig.ackRedemption_maker(true))
 	// Set the number of confirmations on the redemptions.
 	matchInfo.db.makerRedeem.coin.setConfs(int64(rig.xyz.SwapConf))
 	matchInfo.db.takerRedeem.coin.setConfs(int64(rig.abc.SwapConf))
@@ -1960,6 +1980,7 @@ func TestSigErrors(t *testing.T) {
 	testAction(rig.redeem_maker, maker, rig.auth.redeemReceived)
 	testAction(rig.ackRedemption_taker, taker)
 	testAction(rig.redeem_taker, taker, rig.auth.redeemReceived)
+	testAction(rig.ackRedemption_maker, maker)
 }
 
 func TestMalformedSwap(t *testing.T) {
@@ -2125,19 +2146,38 @@ func TestRetriesDuringSwap(t *testing.T) {
 	})
 
 	ensureNilErr(rig.redeem_taker(true))
-	// We can't easily "rewind time" (like we are doing above) after taker
-	// successfully redeemed (because server gets rid of this match), so
-	// just check that any subsequent redeem request retry will just return
-	// "unknown match" error.
+	// Check that any subsequent redeem request retry will just return a
+	// settlement sequence error, and after the redemption ack, an "unknown
+	// match" error.
 	err := rig.redeem_taker(false)
 	if err == nil {
 		t.Fatalf("expected 2nd redeem request to fail after 1st one succeeded")
 	}
 	ensureNilErr(rig.waitChans("server received our redeem", rig.auth.redeemReceived))
 	tracker = rig.getTracker()
+	if tracker == nil {
+		t.Fatal("missing match tracker after taker redeem")
+	}
+	if tracker.Status != order.MatchComplete {
+		t.Fatalf("unexpected swap status %d after taker redeem notification", tracker.Status)
+	}
+	ensureNilErr(rig.checkServerResponseFail(rig.matchInfo.taker, msgjson.SettlementSequenceError))
+
+	tickMempool()
+	tickMempool()
+	ensureNilErr(rig.ackRedemption_maker(true)) // will cause match to be deleted
+
+	tracker = rig.getTracker()
 	if tracker != nil {
 		t.Fatalf("expected match to be removed, found it, in status %v", tracker.Status)
 	}
+
+	// Now it will fail with "unknown match".
+	err = rig.redeem_taker(false)
+	if err == nil {
+		t.Fatalf("expected 2nd redeem request to fail after 1st one succeeded")
+	}
+
 	ensureNilErr(rig.checkServerResponseFail(rig.matchInfo.taker, msgjson.RPCUnknownMatch))
 }
 
