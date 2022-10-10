@@ -2,7 +2,7 @@
 
 set -e
 
-VER="0.5.3"
+VER="0.5.4"
 
 rm -rf bin
 mkdir -p bin/dexc-windows-amd64-v${VER}
@@ -15,11 +15,11 @@ export CGO_ENABLED=0
 
 # Generate the localized_html and build the webpack bundle prior to building the
 # webserver package, which embeds the files.
-pushd client/webserver/site
-go generate # should be a no-op
-npm ci
-npm run build
-popd
+#pushd client/webserver/site
+#go generate # should be a no-op
+#npm ci
+#npm run build
+#popd
 
 LDFLAGS="-s -w -X main.Version=${VER}+release"
 
