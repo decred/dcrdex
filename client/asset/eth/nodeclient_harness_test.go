@@ -929,12 +929,9 @@ func testHeaderByHash(t *testing.T) {
 	// Checking a random hash should result in no header.
 	var txHash common.Hash
 	copy(txHash[:], encode.RandomBytes(32))
-	hdr, err := ethClient.headerByHash(ctx, txHash)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if hdr != nil {
-		t.Fatal("expected nil header for nonexistant hash")
+	_, err := ethClient.headerByHash(ctx, txHash)
+	if err == nil {
+		t.Fatal("expected header not found error")
 	}
 
 	bestHdr, err := ethClient.bestHeader(ctx)
@@ -944,7 +941,7 @@ func testHeaderByHash(t *testing.T) {
 
 	txHash = bestHdr.Hash()
 
-	hdr, err = ethClient.headerByHash(ctx, txHash)
+	hdr, err := ethClient.headerByHash(ctx, txHash)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -174,6 +174,7 @@ func (p *provider) suggestTipCap(ctx context.Context, log dex.Logger) *big.Int {
 	}
 	tipCap, err := p.ec.SuggestGasTipCap(ctx)
 	if err != nil {
+		p.setFailed()
 		log.Errorf("error getting tip cap suggestion from %q: %v", p.host, err)
 		return dexeth.GweiToWei(dexeth.MinGasTipCap)
 	}
@@ -192,6 +193,9 @@ func (p *provider) suggestTipCap(ctx context.Context, log dex.Logger) *big.Int {
 }
 
 // subscribeHeaders starts a listening loop for header updates for a provider.
+// The Subscription and header chan are passed in, because error-free
+// instantiation of these variable is necessary to accepting that a websocket
+// connection is valid, so they are generated early in connectProviders.
 func (p *provider) subscribeHeaders(ctx context.Context, sub ethereum.Subscription, h chan *types.Header, log dex.Logger) {
 	defer sub.Unsubscribe()
 	var lastWarning time.Time
@@ -213,7 +217,7 @@ func (p *provider) subscribeHeaders(ctx context.Context, sub ethereum.Subscripti
 		}
 	}
 
-	// I thought the filter logs might catch some transactions we coudld cache
+	// I thought the filter logs might catch some transactions we could cache
 	// to avoid rpc calls, but in testing, I get nothing in the channel. May
 	// revisit later.
 	// logs := make(chan types.Log, 128)
@@ -1131,20 +1135,20 @@ const (
 	providerAnkr          = "ankr.com"           // "SyncProgress" error: the method eth_syncing does not exist/is not available
 )
 
-var compliantProviders = map[string]bool{
-	providerLinkPool:    true,
-	providerMewAPI:      true,
-	providerFlashBots:   true,
-	providerMyCryptoAPI: true,
-	providerRunOnFlux:   true,
-	providerInfura:      true,
-	providerRivetCloud:  true,
-	providerAlchemy:     true,
+var compliantProviders = map[string]struct{}{
+	providerLinkPool:    {},
+	providerMewAPI:      {},
+	providerFlashBots:   {},
+	providerMyCryptoAPI: {},
+	providerRunOnFlux:   {},
+	providerInfura:      {},
+	providerRivetCloud:  {},
+	providerAlchemy:     {},
 }
 
-var nonCompliantProviders = map[string]bool{
-	providerCloudflareETH: true,
-	providerAnkr:          true,
+var nonCompliantProviders = map[string]struct{}{
+	providerCloudflareETH: {},
+	providerAnkr:          {},
 }
 
 func providerIsCompliant(addr string) (known, compliant bool) {
@@ -1152,7 +1156,7 @@ func providerIsCompliant(addr string) (known, compliant bool) {
 	if _, known = compliantProviders[addr]; known {
 		return true, true
 	}
-	_, known = compliantProviders[addr]
+	_, known = nonCompliantProviders[addr]
 	return known, false
 }
 

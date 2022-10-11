@@ -891,8 +891,10 @@ export default class MarketsPage extends BasePage {
     const limit = this.isLimit()
     const sell = this.isSell()
     const market = this.market
+    let qtyConv = market.baseUnitInfo.conventional.conversionFactor
     if (!limit && !sell) {
       qtyField = page.mktBuyField
+      qtyConv = market.quoteUnitInfo.conventional.conversionFactor
     }
     return {
       host: market.dex.host,
@@ -900,7 +902,7 @@ export default class MarketsPage extends BasePage {
       sell: sell,
       base: market.base.id,
       quote: market.quote.id,
-      qty: convertToAtoms(qtyField.value || '', market.baseUnitInfo.conventional.conversionFactor),
+      qty: convertToAtoms(qtyField.value || '', qtyConv),
       rate: convertToAtoms(page.rateField.value || '', market.rateConversionFactor), // message-rate
       tifnow: page.tifNow.checked || false,
       options: {}
