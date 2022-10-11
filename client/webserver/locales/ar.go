@@ -223,7 +223,7 @@ var Ar = map[string]string{
 	"accelerate_success":          `تم إرسال المعاملة بنجاح: <span id="accelerateTxID"></span>`,
 	"accelerate":                  "التسريع",
 	"acceleration_transactions":   "معاملات التسريع",
-	"acceleration_cost_msg":       `زيادة معدل الرسوم الفعلية إلى <span id="feeRateEstimate"></span> سيكلف <span id=“feeEstimate"></span>`,
+	"acceleration_cost_msg":       `زيادة معدل الرسوم الفعلية إلى <span id="feeRateEstimate"></span> سيكلف <span id="feeEstimate"></span>`,
 	"recent_acceleration_msg":     `آخر تسارع لك كان قبل <span id="recentAccelerationTime"></span> دقائق فقط! هل أنت متأكد أنك تريد التسريع؟`,
 	"recent_swap_msg":             `تم تقديم أقدم معاملة مقايضة غير مؤكدة قبل <span id="recentSwapTime"></span> دقائق فقط! هل أنت متأكد من أنك تريد التسريع؟`,
 	"early_acceleration_help_msg": `لن يتسبب ذلك في أي ضرر لطلبك، لكنك قد تهدر المال. لا يكون التسريع مفيدًا إلا إذا أصبح معدل الرسوم على معاملة حالية غير مؤكدة منخفضًا جدًا بحيث لا يمكن تعدينها في الكتلة التالية، ولكن ليس إذا تم تعدين الكتل ببطء. يمكنك تأكيد ذلك في مستكشف الكتل عن طريق إغلاق هذه النافذة المنبثقة والنقر على معاملاتك السابقة.`,
