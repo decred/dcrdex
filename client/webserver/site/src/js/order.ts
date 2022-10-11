@@ -42,10 +42,6 @@ export default class OrderPage extends BasePage {
 
     Doc.cleanTemplates(page.matchCardTmpl)
 
-    main.querySelectorAll('[data-explorer-id]').forEach((link: PageElement) => {
-      setCoinHref(link)
-    })
-
     const setStamp = () => {
       for (const span of this.stampers) {
         span.textContent = Doc.timeSince(parseInt(span.dataset.stamp || ''))
@@ -269,7 +265,7 @@ export default class OrderPage extends BasePage {
       }
       coinLink.textContent = coin.stringID
       coinLink.dataset.explorerCoin = coin.stringID
-      setCoinHref(coinLink)
+      setCoinHref(coin.assetID, coinLink)
       Doc.hide(pendingSpan)
       Doc.show(coinLink)
     }
@@ -487,8 +483,8 @@ function inConfirmingTakerRedeem (m: Match) {
  * setCoinHref sets the hyperlink element's href attribute based on its
  * data-explorer-id and data-explorer-coin values.
  */
-function setCoinHref (link: PageElement) {
-  const assetExplorer = CoinExplorers[parseInt(link.dataset.explorerId || '')]
+function setCoinHref (assetID: number, link: PageElement) {
+  const assetExplorer = CoinExplorers[assetID]
   if (!assetExplorer) return
   const formatter = assetExplorer[net]
   if (!formatter) return
