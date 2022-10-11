@@ -112,8 +112,7 @@ export default class RegistrationPage extends BasePage {
     }
     Doc.show(currentForm)
 
-    // Attempt to load the dcrwallet configuration from the default location.
-    if (app().user.authed) this.auth()
+    if (app().authed()) this.auth()
   }
 
   unload () {

@@ -222,6 +222,10 @@ export default class Application {
     return user
   }
 
+  authed () {
+    return this.user && this.user.authed
+  }
+
   /* Load the page from the server. Insert and bind the DOM. */
   async loadPage (page: string, data?: any, skipPush?: boolean): Promise<boolean> {
     // Close some menus and tooltips.

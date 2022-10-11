@@ -313,6 +313,7 @@ div[data-handler=markets] {
         opacity: 0.5;
       }
 
+      &:not(:placeholder-shown) + .ico-search,
       &:focus + .ico-search {
         display: none;
       }
@@ -320,7 +321,7 @@ div[data-handler=markets] {
 
     #marketListV1 {
       height: 100%;
-      min-width: 225px;
+      min-width: 275px;
 
       .market-tmpl-v1 {
         line-height: 1;
