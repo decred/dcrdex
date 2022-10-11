@@ -2377,6 +2377,7 @@ class MarketList {
     }
 
     for (const mkt of sortedMarkets()) this.markets.push(addMarket(mkt))
+    app().bindTooltips(this.div)
   }
 
   find (host: string, baseID: number, quoteID: number): MarketRow | null {
@@ -2400,6 +2401,7 @@ class MarketList {
   select (host: string, baseID: number, quoteID: number) {
     const row = this.find(host, baseID, quoteID)
     if (!row) return console.error(`select: no market row for ${host}, ${baseID}-${quoteID}`)
+    for (const mkt of this.markets) mkt.node.classList.remove('selected')
     this.selected = row
     this.selected.node.classList.add('selected')
   }
@@ -2456,6 +2458,9 @@ class MarketRow {
     tmpl.baseSymbol.appendChild(Doc.symbolize(mkt.basesymbol))
     tmpl.quoteSymbol.appendChild(Doc.symbolize(mkt.quotesymbol))
     tmpl.baseName.textContent = mkt.baseName
+    tmpl.host.textContent = mkt.xc.host
+    tmpl.host.style.color = hostColor(mkt.xc.host)
+    tmpl.host.dataset.tooltip = mkt.xc.host
     setPriceAndChange(tmpl, mkt.xc, mkt)
     if (this.mkt.xc.connectionStatus !== ConnectionStatus.Connected) Doc.show(tmpl.disconnectedIco)
   }
@@ -2874,4 +2879,17 @@ function setPriceAndChange (tmpl: Record<string, PageElement>, xc: Exchange, mkt
   const sign = mkt.spot.change24 > 0 ? '+' : ''
   tmpl.change.classList.add(mkt.spot.change24 >= 0 ? 'buycolor' : 'sellcolor')
   tmpl.change.textContent = `${sign}${(mkt.spot.change24 * 100).toFixed(1)}%`
+}
+
+const hues = [1 / 2, 1 / 4, 3 / 4, 1 / 8, 5 / 8, 3 / 8, 7 / 8]
+
+function generateHue (idx: number): string {
+  const h = hues[idx % hues.length]
+  return `hsl(${h * 360}, 35%, 50%)`
+}
+
+function hostColor (host: string): string {
+  const hosts = Object.keys(app().exchanges)
+  hosts.sort()
+  return generateHue(hosts.indexOf(host))
 }

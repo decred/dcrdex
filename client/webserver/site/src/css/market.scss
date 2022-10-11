@@ -340,6 +340,17 @@ div[data-handler=markets] {
           //   top: -5px;
           // }
         }
+
+        .dexname {
+          padding-left: 8px;
+          max-width: 60px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        &.selected {
+          background-color: #7773;
+        }
       }
     }
   }
