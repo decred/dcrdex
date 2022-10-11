@@ -429,24 +429,33 @@ export default class MarketsPage extends BasePage {
       this.setDepthMarkers()
     })
 
-    Doc.bind(page.leftHider, 'click', () => {
-      page.leftColumnV1.classList.remove('default')
-      page.leftColumnV1.classList.add('stashed')
-    })
-
-    Doc.bind(page.marketReopener, 'click', () => {
-      page.leftColumnV1.classList.remove('stashed', 'default')
-    })
-
     const stats0 = page.marketStatsV1
     const stats1 = stats0.cloneNode(true) as PageElement
+    stats1.classList.add('listopen')
     Doc.hide(stats0, stats1)
     stats1.removeAttribute('id')
     app().headerSpace.appendChild(stats1)
     this.stats = [{ row: stats0, tmpl: Doc.parseTemplate(stats0) }, { row: stats1, tmpl: Doc.parseTemplate(stats1) }]
+
+    const closeMarketsList = () => {
+      page.leftColumnV1.classList.remove('default')
+      page.leftColumnV1.classList.add('stashed')
+      for (const s of this.stats) s.row.classList.remove('listopen')
+    }
+
+    const openMarketsList = () => {
+      page.leftColumnV1.classList.remove('default', 'stashed')
+      for (const s of this.stats) s.row.classList.add('listopen')
+    }
+
+    Doc.bind(page.leftHider, 'click', () => closeMarketsList())
+
+    Doc.bind(page.marketReopener, 'click', () => openMarketsList())
+
     for (const s of this.stats) {
       Doc.bind(s.tmpl.marketSelect, 'click', () => {
-        page.leftColumnV1.classList.remove('stashed', 'default')
+        if (page.leftColumnV1.clientWidth === 0) openMarketsList()
+        else closeMarketsList()
       })
     }
 

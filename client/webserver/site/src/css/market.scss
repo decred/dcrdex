@@ -690,6 +690,14 @@ div[data-handler=markets] {
     //   left: 5px;
     // }
   }
+
+  &.listopen .ico-arrowdown {
+    display: none;
+  }
+
+  &:not(.listopen) .ico-arrowup {
+    display: none;
+  }
 }
 
 #headerSpace .market-stats-v1 {
