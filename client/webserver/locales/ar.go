@@ -1,7 +1,7 @@
 package locales
 
 var Ar = map[string]string{
-	"Language":                       "العربية",
+	"Language":                       "ar",
 	"Markets":                        "الأسواق",
 	"Wallets":                        "المحافظ",
 	"Notifications":                  "الإشعارات",

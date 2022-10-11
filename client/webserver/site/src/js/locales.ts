@@ -406,8 +406,8 @@ export const ar: Locale = {
   [ID_WALLET_UNLOCKED]: 'المحفظة غير مقفلة',
   [ID_SELLING]: 'البيع',
   [ID_BUYING]: 'Bالشراء',
-  [ID_WALET_ENABLED_MSG]: '{{ assetName }} المحفظة ممكنة',
-  [ID_WALET_DISABLED_MSG]: '{{ assetName }} المحفظة معطلة',
+  [ID_WALLET_ENABLED_MSG]: '{{ assetName }} المحفظة ممكنة',
+  [ID_WALLET_DISABLED_MSG]: '{{ assetName }} المحفظة معطلة',
   [ID_DISABLED_MSG]: 'تم تعطيل المحفظة',
   [ID_ACTIVE_ORDERS_ERR_MSG]: '{{ assetName }} تدير المحفظة  الطلبات بفعالية'
 }
@@ -418,7 +418,7 @@ const localesMap: Record<string, Locale> = {
   'zh-cn': zhCN,
   'pl-pl': plPL,
   'de-de': deDE,
-  'ar':    ar
+  'ar': ar
 }
 
 /* locale will hold the locale loaded via setLocale. */

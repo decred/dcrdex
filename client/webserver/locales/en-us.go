@@ -1,7 +1,7 @@
 package locales
 
 var EnUS = map[string]string{
-	"Language":                       "en-US",
+	"Language":                       "en-US", // the bcp47 lang tag
 	"Markets":                        "Markets",
 	"Wallets":                        "Wallets",
 	"Notifications":                  "Notifications",

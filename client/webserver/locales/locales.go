@@ -17,6 +17,7 @@ func init() {
 		"zh-CN": ZhCN,
 		"pl-PL": PlPL,
 		"de-DE": DeDE,
+		"ar":    Ar,
 	}
 
 	for localeName := range Locales {
