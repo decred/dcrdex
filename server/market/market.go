@@ -1273,17 +1273,17 @@ func (m *Market) Book() (epoch int64, buys, sells []*order.LimitOrder) {
 // to status revoked.
 func (m *Market) PurgeBook() {
 	// Clear booked orders from the DB and the in-memory book.
-	buysRemoved, sellsRemoved := m.purgeBook()
+	removed := m.purgeBook()
 
 	// Send individual revoke order notifications. These are not part of the
 	// orderbook subscription, so the users will receive them whether or not
 	// they are subscribed for book updates.
-	for _, lo := range append(sellsRemoved, buysRemoved...) {
-		m.sendRevokeOrderNote(lo.ID(), lo.AccountID)
+	for oid, aid := range removed {
+		m.sendRevokeOrderNote(oid, aid)
 	}
 }
 
-func (m *Market) purgeBook() (buysRemoved, sellsRemoved []*order.LimitOrder) {
+func (m *Market) purgeBook() (removed map[order.OrderID]account.AccountID) {
 	m.bookMtx.Lock()
 	defer m.bookMtx.Unlock()
 
@@ -1295,7 +1295,7 @@ func (m *Market) purgeBook() (buysRemoved, sellsRemoved []*order.LimitOrder) {
 	}
 
 	// Clear the in-memory order book to match the DB.
-	buysRemoved, sellsRemoved = m.book.Clear()
+	buysRemoved, sellsRemoved := m.book.Clear()
 
 	log.Infof("Flushed %d sell orders and %d buy orders from market %q book",
 		len(sellsRemoved), len(buysRemoved), m.marketInfo.Name)
@@ -1328,6 +1328,11 @@ func (m *Market) purgeBook() (buysRemoved, sellsRemoved []*order.LimitOrder) {
 		for i := range buysRemoved {
 			m.coinLockerQuote.UnlockOrderCoins(buysRemoved[i].ID())
 		}
+	}
+
+	removed = make(map[order.OrderID]account.AccountID, len(buysRemoved)+len(sellsRemoved))
+	for _, lo := range append(sellsRemoved, buysRemoved...) {
+		removed[lo.ID()] = lo.AccountID
 	}
 
 	return
