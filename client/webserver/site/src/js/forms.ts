@@ -314,8 +314,6 @@ export class NewWalletForm {
     const noWalletPWNeeded = walletDef.seeded || Boolean(this.current.asset.token)
     if (appPwCached && noWalletPWNeeded) {
       Doc.show(page.oneBttnBox)
-      // no required configuration for wallet.
-      Doc.hide(page.walletSettingsHeader)
     } else if (noWalletPWNeeded) {
       Doc.show(page.auth)
       page.newWalletPass.value = ''
