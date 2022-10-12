@@ -99,18 +99,6 @@ export default class Application {
   constructor () {
     this.notes = []
     this.pokes = []
-    // The "user" is a large data structure that contains nearly all state
-    // information, including exchanges, markets, wallets, orders and exchange
-    // rates for assets.
-    this.user = {
-      exchanges: {},
-      inited: false,
-      seedgentime: 0,
-      assets: {},
-      fiatRates: {},
-      authed: false,
-      ok: true
-    }
     this.seedGenTime = 0
     this.commitHash = process.env.COMMITHASH || ''
     this.noteReceivers = []
@@ -232,6 +220,10 @@ export default class Application {
 
     this.updateMenuItemsDisplay()
     return user
+  }
+
+  authed () {
+    return this.user && this.user.authed
   }
 
   /* Load the page from the server. Insert and bind the DOM. */
@@ -455,18 +447,18 @@ export default class Application {
    * and when the user registers a DEX.
    */
   updateMenuItemsDisplay () {
-    const page = this.page
+    const { page, user } = this
     if (!page) {
       // initial page load, header elements not yet attached but menu items
       // would already be hidden/displayed as appropriate.
       return
     }
-    if (!this.user.authed) {
+    if (!user || !user.authed) {
       Doc.hide(page.noteBell, page.walletsMenuEntry, page.marketsMenuEntry, page.profileIcon)
       return
     }
     Doc.show(page.noteBell, page.walletsMenuEntry, page.profileIcon)
-    if (Object.keys(this.user.exchanges).length > 0) {
+    if (Object.keys(user.exchanges).length > 0) {
       Doc.show(page.marketsMenuEntry)
     } else {
       Doc.hide(page.marketsMenuEntry)
@@ -525,17 +517,18 @@ export default class Application {
     this.storeNotes()
   }
 
-  /*
-   * notify is the top-level handler for notifications received from the client.
-   * Notifications are propagated to the loadedPage.
-   */
-  notify (note: CoreNote) {
-    // Handle type-specific updates.
-    this.log('notes', 'notify', note)
+  updateUser (note: CoreNote) {
+    const { user, assets, walletMap } = this
+    if (note.type === 'fiatrateupdate') {
+      this.fiatRatesMap = (note as RateNote).fiatRates
+      return
+    }
+    // Some notes can be received before we get a User during login.
+    if (!user) return
     switch (note.type) {
       case 'order': {
         const order = (note as OrderNote).order
-        const mkt = this.user.exchanges[order.host].markets[order.market]
+        const mkt = user.exchanges[order.host].markets[order.market]
         // Updates given order in market's orders list if it finds it.
         // Returns a bool which indicates if order was found.
         const updateOrder = (mkt: Market, ord: Order) => {
@@ -557,7 +550,7 @@ export default class Application {
       }
       case 'balance': {
         const n: BalanceNote = note as BalanceNote
-        const asset = this.user.assets[n.assetID]
+        const asset = user.assets[n.assetID]
         // Balance updates can come before the user is fetched after login.
         if (!asset) break
         const w = asset.wallet
@@ -570,11 +563,11 @@ export default class Application {
       case 'walletstate':
       case 'walletconfig': {
         // assets can be null if failed to connect to dex server.
-        if (!this.assets) return
+        if (!assets) return
         const wallet = (note as WalletConfigNote).wallet
-        const asset = this.assets[wallet.assetID]
+        const asset = assets[wallet.assetID]
         asset.wallet = wallet
-        this.walletMap[wallet.assetID] = wallet
+        walletMap[wallet.assetID] = wallet
         break
       }
       case 'match': {
@@ -585,24 +578,29 @@ export default class Application {
       }
       case 'conn': {
         const n = note as ConnEventNote
-        const xc = this.user.exchanges[n.host]
+        const xc = user.exchanges[n.host]
         if (xc) xc.connectionStatus = n.connectionStatus
         break
       }
       case 'spots': {
         const n = note as SpotPriceNote
-        const xc = this.user.exchanges[n.host]
+        const xc = user.exchanges[n.host]
         // Spots can come before the user is fetched after login and before/while the
         // markets page reload when it recieves a dex conn note.
         if (!xc || !xc.markets) break
         for (const [mktName, spot] of Object.entries(n.spots)) xc.markets[mktName].spot = spot
-        break
-      }
-      case 'fiatrateupdate': {
-        this.fiatRatesMap = (note as RateNote).fiatRates
       }
     }
+  }
 
+  /*
+   * notify is the top-level handler for notifications received from the client.
+   * Notifications are propagated to the loadedPage.
+   */
+  notify (note: CoreNote) {
+    // Handle type-specific updates.
+    this.log('notes', 'notify', note)
+    this.updateUser(note)
     // Inform the page.
     for (const feeder of this.noteReceivers) {
       const f = feeder[note.type]
@@ -618,17 +616,17 @@ export default class Application {
     // Discard data notifications.
     if (note.severity < ntfn.POKE) return
     // Poke notifications have their own display.
-    if (this.showPopups) {
-      const span = this.popupTmpl.cloneNode(true) as HTMLElement
+    const { popupTmpl, popupNotes, showPopups } = this
+    if (showPopups) {
+      const span = popupTmpl.cloneNode(true) as HTMLElement
       Doc.tmplElement(span, 'text').textContent = `${note.subject}: ${note.details}`
       const indicator = Doc.tmplElement(span, 'indicator')
       if (note.severity === ntfn.POKE) {
         Doc.hide(indicator)
       } else setSeverityClass(indicator, note.severity)
-      const pn = this.popupNotes
-      pn.appendChild(span)
+      popupNotes.appendChild(span)
       // These take up screen space. Only show max 5 at a time.
-      while (pn.children.length > 5) pn.removeChild(pn.firstChild as Node)
+      while (popupNotes.children.length > 5) popupNotes.removeChild(popupNotes.firstChild as Node)
       setTimeout(async () => {
         await Doc.animate(500, (progress: number) => {
           span.style.opacity = String(1 - progress)
@@ -889,6 +887,8 @@ export default class Application {
   async signOut () {
     const res = await postJSON('/api/logout')
     if (!this.checkResponse(res)) {
+      // TODO: Esp. for active orders error, let the user know what's going on.
+      // Maybe give them an option to force.
       Doc.hide(this.page.profileBox)
       return
     }

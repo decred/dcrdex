@@ -17,21 +17,24 @@
 
       <div class="d-flex align-items-stretch" id="searchBoxV1">
         <div class="flex-grow-1 p-1 position-relative">
-          <input type="text" id="marketSearchV1" spellcheck="false">
+          <input type="text" id="marketSearchV1"  placeholder=" " spellcheck="false" class="my-1">
           <div class="ico-search fs22"></div>
         </div>
         <div id="leftHider" class="flex-center pointer hoverbg">
-          <span class="ico-arrowback fs24">
+          <span class="ico-arrowback d-inline-block fs24">
         </div>
       </div>
 
       <div class="flex-grow-1 overflow-y-hidden">
         <div id="marketListV1" class="stylish-overflow hoveronly overflow-x-hidden">
           <div id="marketTmplV1" class="market-tmpl-v1 d-flex align-items-stretch p-2 my-1 pointer hoverbg">
-            <div class="flex-center">
-              <img data-tmpl="baseIcon">
-              <img data-tmpl="quoteIcon" class="ms-1">
-              <span class="disconnected ico-disconnected d-hide" id="disconnectedIcon"></span>
+            <div class="flex-center flex-column me-1">
+              <div class="d-flex align-items-start justify-content-start flex-grow-1">
+                <img data-tmpl="baseIcon">
+                <img data-tmpl="quoteIcon" class="ms-1">
+                <span class="errcolor ico-disconnected d-hide ps-1" data-tmpl="disconnectedIco"></span>
+              </div>
+              <div class="fs10 demi text-start text-nowrap dexname" data-tmpl="host"></div>
             </div>
             <div class="d-flex flex-column pe-4 ps-2 flex-grow-1">
               <span class="fs17 demi">
@@ -49,6 +52,10 @@
     </div>
   </div>
 
+  <div id="marketReopener" class="flex-center pointer hoverbg">
+    <span class="ico-arrowright d-inline-block fs24">
+  </div>
+
   {{- /* MAIN CONTENT */ -}}
   <div class="flex-grow-1 position-relative v1">
     <div class="stylish-overflow h-100 w-100 overflow-x-hidden d-flex flex-column align-items-stretch">
@@ -63,6 +70,7 @@
             <span data-tmpl="baseSymbol"></span>-<span data-tmpl="quoteSymbol"></span>
           </div>
           <span class="ico-arrowdown fs8 grey ms-1"></span>
+          <span class="ico-arrowup fs8 grey ms-1"></span>
         </div>
   
         <div class="data-point">
@@ -351,7 +359,7 @@
               </div>
 
               {{- /* USER ORDERS */ -}}
-              <div id="userOrdersHeader" class="text-center fs20 sans-light my-1">[[[Your Orders]]]</div>
+              <div class="text-center fs20 sans-light my-1">[[[Your Orders]]]</div>
               <div id="userNoOrders" class="p-3 flex-center fs16 grey">no active orders</div>
               <div id="userOrders" class="mb-3">
                 <div id="userOrderTmpl" class="user-order">
@@ -410,15 +418,17 @@
                 </div>
               </div>{{- /* END USER ORDERS */ -}}
 
+              <a href="/orders" class="flex-center my-2 plainlink">[[[view order history]]]</a>
+
               {{- /* RECENT MATCHES */ -}}
-              <div id=recentMatchesBox  class="d-flex flex-column align-items-stretch px-3 pb-4">
-                <div id="userOrdersHeader" class="text-center fs20 sans-light my-1">[[[Recent Matches]]]</div>
+              <div id=recentMatchesBox  class="d-flex flex-column align-items-stretch px-3 pb-4 mt-2 brdrtop">
+                <div class="text-center fs20 sans-light my-3">[[[Recent Matches]]]</div>
                 <table id="recentMatchesTable" class="ordertable">
                   <thead>
                     <tr>
-                      <th data-ordercol="age">[[[Age]]] <span class="ico-arrowdown"></span></th>
-                      <th data-ordercol="rate" class="text-end pe-2"><span class="ico-arrowdown"></span> [[[Rate]]]</th>
-                      <th data-ordercol="qty" class="text-end"><span class="ico-arrowdown"></span> [[[Quantity]]]</th>
+                      <th data-ordercol="age" class="text-nowrap">[[[Age]]] <span class="ico-arrowdown"></span></th>
+                      <th data-ordercol="rate" class="text-end pe-2 text-nowrap"><span class="ico-arrowdown"></span> [[[Rate]]]</th>
+                      <th data-ordercol="qty" class="text-end text-nowrap"><span class="ico-arrowdown"></span> [[[Quantity]]]</th>
                     </tr>
                   </thead>
                   <tbody id="recentMatchesLiveList">

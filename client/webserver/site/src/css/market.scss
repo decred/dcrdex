@@ -291,6 +291,7 @@ div[data-handler=markets] {
     #marketSearchV1 {
       @extend .fill-abs;
 
+      width: 100%; // firefox needs, for some reason
       z-index: 2;
       background-color: transparent;
       font-size: 25px;
@@ -312,30 +313,15 @@ div[data-handler=markets] {
         opacity: 0.5;
       }
 
+      &:not(:placeholder-shown) + .ico-search,
       &:focus + .ico-search {
         display: none;
       }
     }
 
-    #leftHider {
-      padding: 0 5px;
-      border-left-style: solid;
-      border-color: $light_border_color;
-      border-width: 1px;
-
-      .ico-arrowback {
-        transform: scaleX(0.5);
-        opacity: 0.5;
-      }
-
-      &:hover .ico-arrowback {
-        opacity: 1;
-      }
-    }
-
     #marketListV1 {
       height: 100%;
-      min-width: 225px;
+      min-width: 275px;
 
       .market-tmpl-v1 {
         line-height: 1;
@@ -354,6 +340,17 @@ div[data-handler=markets] {
           // &:nth-child(1) {
           //   top: -5px;
           // }
+        }
+
+        .dexname {
+          padding-left: 8px;
+          max-width: 60px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        &.selected {
+          background-color: #7773;
         }
       }
     }
@@ -595,6 +592,39 @@ div[data-handler=markets] {
       }
     }
   }
+
+  #leftHider {
+    border-left-style: solid;
+    padding: 0 5px;
+  }
+
+  #marketReopener {
+    display: none;
+    border-style: none solid solid none;
+    padding: 10px 0;
+    position: absolute;
+    top: 0;
+    left: 0;
+    background-color: $light_body_bg;
+    z-index: 10;
+  }
+
+  #leftHider,
+  #marketReopener {
+    border-color: $light_border_color;
+    border-width: 1px;
+
+    .ico-arrowback,
+    .ico-arrowright {
+      transform: scaleX(0.5);
+      opacity: 0.5;
+    }
+
+    &:hover .ico-arrowback,
+    &:hover .ico-arrowright {
+      opacity: 1;
+    }
+  }
 }
 
 .market-stats-v1 {
@@ -660,6 +690,14 @@ div[data-handler=markets] {
     //   position: relative;
     //   left: 5px;
     // }
+  }
+
+  &.listopen .ico-arrowdown {
+    display: none;
+  }
+
+  &:not(.listopen) .ico-arrowup {
+    display: none;
   }
 }
 
@@ -818,6 +856,10 @@ div[data-handler=markets] {
         overflow-x: hidden;
         border-style: none none none solid;
       }
+    }
+
+    #leftColumnV1.stashed + #marketReopener {
+      display: block;
     }
   }
 

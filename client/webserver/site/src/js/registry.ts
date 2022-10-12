@@ -501,6 +501,7 @@ export interface Application {
   fiatRatesMap: Record<number, number>
   showPopups: boolean
   commitHash: string
+  authed(): boolean
   start (): Promise<void>
   reconnected (): void
   fetchUser (): Promise<User | void>

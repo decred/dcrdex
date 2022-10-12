@@ -183,6 +183,11 @@ body.dark {
       background-color: $dark_body_bg;
     }
   }
+
+  #marketReopener {
+    border-color: $dark_border_color;
+    background-color: $dark_body_bg;
+  }
 }
 
 @include media-breakpoint-up(lg) {
