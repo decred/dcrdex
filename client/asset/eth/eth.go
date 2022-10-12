@@ -342,6 +342,7 @@ type baseWallet struct {
 	node ethFetcher
 	addr common.Address
 	log  dex.Logger
+	dir  string
 
 	gasFeeLimitV uint64 // atomic
 
@@ -476,13 +477,8 @@ func CreateWallet(createWalletParams *asset.CreateWalletParams) error {
 }
 
 // NewWallet is the exported constructor by which the DEX will import the
-// exchange wallet. It starts an internal light node.
+// exchange wallet.
 func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network) (*ETHWallet, error) {
-	cl, err := newNodeClient(getWalletDir(assetCFG.DataDir, net), net, logger.SubLogger("NODE"))
-	if err != nil {
-		return nil, err
-	}
-
 	cfg, err := parseWalletConfig(assetCFG.Settings)
 	if err != nil {
 		return nil, err
@@ -493,20 +489,13 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		gasFeeLimit = defaultGasFeeLimit
 	}
 
-	db, err := kvdb.NewFileDB(filepath.Join(assetCFG.DataDir, "tx.db"), logger.SubLogger("TXDB"))
-	if err != nil {
-		return nil, err
-	}
-
 	eth := &baseWallet{
-		log:           logger,
-		net:           net,
-		node:          cl,
-		addr:          cl.address(),
-		gasFeeLimitV:  gasFeeLimit,
-		wallets:       make(map[uint32]*assetWallet),
-		monitoredTxs:  make(map[common.Hash]*monitoredTx),
-		monitoredTxDB: db,
+		log:          logger,
+		net:          net,
+		dir:          assetCFG.DataDir,
+		gasFeeLimitV: gasFeeLimit,
+		wallets:      make(map[uint32]*assetWallet),
+		monitoredTxs: make(map[common.Hash]*monitoredTx),
 	}
 
 	w := &assetWallet{
@@ -567,8 +556,15 @@ func loadMonitoredTxs(db kvdb.KeyValueDB) (map[common.Hash]*monitoredTx, error) 
 
 // Connect connects to the node RPC server. Satisfies dex.Connector.
 func (w *ETHWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
+	cl, err := newNodeClient(getWalletDir(w.dir, w.net), w.net, w.log.SubLogger("NODE"))
+	if err != nil {
+		return nil, err
+	}
+
+	w.node = cl
+	w.addr = cl.address()
 	w.ctx = ctx
-	err := w.node.connect(ctx)
+	err = w.node.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -581,6 +577,12 @@ func (w *ETHWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		w.contractors[ver] = c
 	}
 
+	db, err := kvdb.NewFileDB(filepath.Join(w.dir, "tx.db"), w.log.SubLogger("TXDB"))
+	if err != nil {
+		return nil, err
+	}
+
+	w.monitoredTxDB = db
 	w.monitoredTxs, err = loadMonitoredTxs(w.monitoredTxDB)
 	if err != nil {
 		return nil, err
