@@ -1272,39 +1272,70 @@ func (m *Market) Book() (epoch int64, buys, sells []*order.LimitOrder) {
 // storage. In terms of storage, this means changing orders with status booked
 // to status revoked.
 func (m *Market) PurgeBook() {
+	// Clear booked orders from the DB and the in-memory book.
+	removed := m.purgeBook()
+
+	// Send individual revoke order notifications. These are not part of the
+	// orderbook subscription, so the users will receive them whether or not
+	// they are subscribed for book updates.
+	for oid, aid := range removed {
+		m.sendRevokeOrderNote(oid, aid)
+	}
+}
+
+func (m *Market) purgeBook() (removed map[order.OrderID]account.AccountID) {
 	m.bookMtx.Lock()
 	defer m.bookMtx.Unlock()
 
 	// Revoke all booked orders in the DB.
-	sellsRemoved, buysRemoved, err := m.storage.FlushBook(m.marketInfo.Base, m.marketInfo.Quote)
+	sellsCleared, buysCleared, err := m.storage.FlushBook(m.marketInfo.Base, m.marketInfo.Quote)
 	if err != nil {
 		log.Errorf("Failed to flush book for market %s: %v", m.marketInfo.Name, err)
-	} else {
-		log.Infof("Flushed %d sell orders and %d buy orders from market %q book",
-			len(sellsRemoved), len(buysRemoved), m.marketInfo.Name)
-		// Clear the in-memory order book to match the DB.
-		m.book.Clear()
-		// Unlock coins for removed orders.
+		return
+	}
 
-		// TODO: only unlock previously booked order coins, do not include coins
-		// that might belong to orders still in epoch status. This won't matter
-		// if the market is suspended, but it does if PurgeBook is used while
-		// the market is still accepting new orders and processing epochs.
+	// Clear the in-memory order book to match the DB.
+	buysRemoved, sellsRemoved := m.book.Clear()
 
-		// Unlock base asset coins locked by sell orders.
-		if m.coinLockerBase != nil {
-			for i := range sellsRemoved {
-				m.coinLockerBase.UnlockOrderCoins(sellsRemoved[i])
-			}
-		}
+	log.Infof("Flushed %d sell orders and %d buy orders from market %q book",
+		len(sellsRemoved), len(buysRemoved), m.marketInfo.Name)
+	// Maybe the DB cleaned up orphaned orders. Log any discrepancies.
+	if len(sellsRemoved) != len(sellsCleared) {
+		log.Warnf("Removed %d sell orders from the book, but %d were updated in the DB.",
+			len(sellsRemoved), len(sellsCleared))
+	}
+	if len(buysRemoved) != len(buysCleared) {
+		log.Warnf("Removed %d buy orders from the book, but %d were updated in the DB.",
+			len(buysRemoved), len(buysCleared))
+	}
 
-		// Unlock quote asset coins locked by buy orders.
-		if m.coinLockerQuote != nil {
-			for i := range buysRemoved {
-				m.coinLockerQuote.UnlockOrderCoins(buysRemoved[i])
-			}
+	// Unlock coins for removed orders.
+
+	// TODO: only unlock previously booked order coins, do not include coins
+	// that might belong to orders still in epoch status. This won't matter if
+	// the market is suspended, but it does if PurgeBook is used while the
+	// market is still accepting new orders and processing epochs.
+
+	// Unlock base asset coins locked by sell orders.
+	if m.coinLockerBase != nil {
+		for i := range sellsRemoved {
+			m.coinLockerBase.UnlockOrderCoins(sellsRemoved[i].ID())
 		}
 	}
+
+	// Unlock quote asset coins locked by buy orders.
+	if m.coinLockerQuote != nil {
+		for i := range buysRemoved {
+			m.coinLockerQuote.UnlockOrderCoins(buysRemoved[i].ID())
+		}
+	}
+
+	removed = make(map[order.OrderID]account.AccountID, len(buysRemoved)+len(sellsRemoved))
+	for _, lo := range append(sellsRemoved, buysRemoved...) {
+		removed[lo.ID()] = lo.AccountID
+	}
+
+	return
 }
 
 func (m *Market) lazy(do func()) {
@@ -1368,9 +1399,7 @@ func (m *Market) Run(ctx context.Context) {
 
 		// persistBook is set under epochMtx lock.
 		m.epochMtx.Lock()
-		if !m.persistBook {
-			m.PurgeBook()
-		}
+
 		// Signal to the book router of the suspend now that the closed epoch
 		// processing pipeline is finished (wgEpochs).
 		notifyChan <- &updateSignal{
@@ -1380,6 +1409,11 @@ func (m *Market) Run(ctx context.Context) {
 				persistBook: m.persistBook,
 			},
 		}
+
+		if !m.persistBook {
+			m.PurgeBook()
+		}
+
 		m.persistBook = true // future resume default
 		m.activeEpochIdx = 0
 
