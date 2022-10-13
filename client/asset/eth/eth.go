@@ -412,6 +412,9 @@ type TokenWallet struct {
 	token    *dexeth.Token
 }
 
+// maxProportionOfBlockGasLimitToUse sets the maximum proportion of a block's
+// gas limit that a swap and redeem transaction will use. Since it is set to
+// 4, the max that will be used is 25% (1/4) of the block's gas limit.
 const maxProportionOfBlockGasLimitToUse = 4
 
 // Info returns basic information about the wallet and asset.
