@@ -134,15 +134,21 @@ export function matchStatusString (m: Match) {
     // When revoked, match status is less important than pending action if still
     // active, or the outcome if inactive.
     if (m.active) {
-      return 'Revoked - Refund PENDING' // auto-redeem also possible, but action is pending
+      if (m.redeem) return 'Revoked - Redemption Sent' // must require confirmation if active
+      // If maker and we have not redeemed, waiting to refund, assuming it's not
+      // revoked while waiting for confs on an unspent/unexpired taker swap.
+      if (m.side === Maker) return 'Revoked - Refund PENDING'
+      // As taker, resolution depends on maker's actions while waiting to refund.
+      if (m.counterRedeem) return 'Revoked - Redeem PENDING' // this should be very brief if we see the maker's redeem
+      return 'Revoked - Refund PENDING' // may switch to redeem if maker redeems on the sly
     }
     if (m.refund) {
       return 'Revoked - Refunded'
     }
     if (m.redeem) {
-      return 'Revoked - Redeemed'
+      return 'Revoked - Redemption Confirmed'
     }
-    return 'Revoked - Complete'
+    return 'Revoked - Complete' // i.e. we sent no swap
   }
 
   switch (m.status) {

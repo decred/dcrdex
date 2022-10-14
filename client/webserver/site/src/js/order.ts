@@ -302,8 +302,11 @@ export default class OrderPage extends BasePage {
     Doc.setVis(!m.isCancel && (makerSwapCoin(m) || !m.revoked), tmpl.makerSwap)
     Doc.setVis(!m.isCancel && (takerSwapCoin(m) || !m.revoked), tmpl.takerSwap)
     Doc.setVis(!m.isCancel && (makerRedeemCoin(m) || !m.revoked), tmpl.makerRedeem)
-    Doc.setVis(!m.isCancel && (m.side !== OrderUtil.Maker) && (takerRedeemCoin(m) || !m.revoked), tmpl.takerRedeem)
-    Doc.setVis(!m.isCancel && (m.refund || (m.revoked && m.active)), tmpl.refund)
+    // When revoked, there is uncertainty about the taker redeem coin. The taker
+    // redeem may be needed if maker redeems while taker is waiting to refund.
+    Doc.setVis(!m.isCancel && (takerRedeemCoin(m) || (!m.revoked && m.active) || ((m.side === OrderUtil.Taker) && m.active && (m.counterRedeem || !m.refund))), tmpl.takerRedeem)
+    // The refund placeholder should not be shown if there is a counter redeem.
+    Doc.setVis(!m.isCancel && (m.refund || (m.revoked && m.active && !m.counterRedeem)), tmpl.refund)
   }
 
   /*
