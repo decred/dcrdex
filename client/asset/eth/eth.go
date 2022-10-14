@@ -39,6 +39,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	ethmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/tyler-smith/go-bip39"
 )
@@ -385,6 +386,9 @@ type assetWallet struct {
 
 	evmify  func(uint64) *big.Int
 	atomize func(*big.Int) uint64
+
+	maxSwapsInTx   uint64
+	maxRedeemsInTx uint64
 }
 
 // ETHWallet implements some Ethereum-specific methods.
@@ -409,16 +413,25 @@ type TokenWallet struct {
 	token    *dexeth.Token
 }
 
+// maxProportionOfBlockGasLimitToUse sets the maximum proportion of a block's
+// gas limit that a swap and redeem transaction will use. Since it is set to
+// 4, the max that will be used is 25% (1/4) of the block's gas limit.
+const maxProportionOfBlockGasLimitToUse = 4
+
 // Info returns basic information about the wallet and asset.
-func (*ETHWallet) Info() *asset.WalletInfo {
+func (w *ETHWallet) Info() *asset.WalletInfo {
+	WalletInfo.MaxSwapsInTx = w.maxSwapsInTx
+	WalletInfo.MaxRedeemsInTx = w.maxRedeemsInTx
 	return WalletInfo
 }
 
 // Info returns basic information about the wallet and asset.
 func (w *TokenWallet) Info() *asset.WalletInfo {
 	return &asset.WalletInfo{
-		Name:     w.token.Name,
-		UnitInfo: w.token.UnitInfo,
+		Name:           w.token.Name,
+		UnitInfo:       w.token.UnitInfo,
+		MaxSwapsInTx:   w.maxSwapsInTx,
+		MaxRedeemsInTx: w.maxRedeemsInTx,
 	}
 }
 
@@ -498,6 +511,17 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		monitoredTxs: make(map[common.Hash]*monitoredTx),
 	}
 
+	gasCeil := ethconfig.Defaults.Miner.GasCeil
+	var maxSwapGas, maxRedeemGas uint64
+	for _, gases := range dexeth.VersionedGases {
+		if gases.Swap > maxSwapGas {
+			maxSwapGas = gases.Swap
+		}
+		if gases.Redeem > maxRedeemGas {
+			maxRedeemGas = gases.Redeem
+		}
+	}
+
 	w := &assetWallet{
 		baseWallet:         eth,
 		log:                logger.SubLogger("ETH"),
@@ -509,6 +533,8 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		evmify:             dexeth.GweiToWei,
 		atomize:            dexeth.WeiToGwei,
 		atomicUnit:         dexeth.UnitInfo.AtomicUnit,
+		maxSwapsInTx:       gasCeil / maxProportionOfBlockGasLimitToUse / maxSwapGas,
+		maxRedeemsInTx:     gasCeil / maxProportionOfBlockGasLimitToUse / maxRedeemGas,
 	}
 
 	w.wallets = map[uint32]*assetWallet{
@@ -724,6 +750,22 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 		return nil, err
 	}
 
+	netToken := token.NetTokens[w.net]
+	if netToken == nil || len(netToken.SwapContracts) == 0 {
+		return nil, fmt.Errorf("could not find token with ID %d on network %s", w.assetID, w.net)
+	}
+
+	gasCeil := ethconfig.Defaults.Miner.GasCeil
+	var maxSwapGas, maxRedeemGas uint64
+	for _, contract := range netToken.SwapContracts {
+		if contract.Gas.Swap > maxSwapGas {
+			maxSwapGas = contract.Gas.Swap
+		}
+		if contract.Gas.Redeem > maxRedeemGas {
+			maxRedeemGas = contract.Gas.Redeem
+		}
+	}
+
 	aw := &assetWallet{
 		baseWallet:         w.baseWallet,
 		log:                w.baseWallet.log.SubLogger(strings.ToUpper(dex.BipIDSymbol(tokenCfg.AssetID))),
@@ -735,6 +777,8 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 		evmify:             token.AtomicToEVM,
 		atomize:            token.EVMToAtomic,
 		atomicUnit:         token.UnitInfo.AtomicUnit,
+		maxSwapsInTx:       gasCeil / maxProportionOfBlockGasLimitToUse / maxSwapGas,
+		maxRedeemsInTx:     gasCeil / maxProportionOfBlockGasLimitToUse / maxRedeemGas,
 	}
 
 	w.baseWallet.walletsMtx.Lock()

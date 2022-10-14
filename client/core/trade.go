@@ -2090,7 +2090,18 @@ func (c *Core) swapMatches(t *trackedTrade, matches []*matchTracker) error {
 		}
 	}
 	if len(groupables) > 0 {
-		c.swapMatchGroup(t, groupables, errs)
+		maxSwapsInTx := int(t.wallets.fromWallet.Info().MaxSwapsInTx)
+		if maxSwapsInTx <= 0 || len(groupables) < maxSwapsInTx {
+			c.swapMatchGroup(t, groupables, errs)
+		} else {
+			for i := 0; i < len(groupables); i += maxSwapsInTx {
+				if i+maxSwapsInTx < len(groupables) {
+					c.swapMatchGroup(t, groupables[i:i+maxSwapsInTx], errs)
+				} else {
+					c.swapMatchGroup(t, groupables[i:], errs)
+				}
+			}
+		}
 	}
 	for _, m := range suspects {
 		c.swapMatchGroup(t, []*matchTracker{m}, errs)
@@ -2431,7 +2442,18 @@ func (c *Core) redeemMatches(t *trackedTrade, matches []*matchTracker) error {
 		}
 	}
 	if len(groupables) > 0 {
-		c.redeemMatchGroup(t, groupables, errs)
+		maxRedeemsInTx := int(t.wallets.toWallet.Info().MaxRedeemsInTx)
+		if maxRedeemsInTx <= 0 || len(groupables) < maxRedeemsInTx {
+			c.redeemMatchGroup(t, groupables, errs)
+		} else {
+			for i := 0; i < len(groupables); i += maxRedeemsInTx {
+				if i+maxRedeemsInTx < len(groupables) {
+					c.redeemMatchGroup(t, groupables[i:i+maxRedeemsInTx], errs)
+				} else {
+					c.redeemMatchGroup(t, groupables[i:], errs)
+				}
+			}
+		}
 	}
 	for _, m := range suspects {
 		c.redeemMatchGroup(t, []*matchTracker{m}, errs)

@@ -628,10 +628,15 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *testNode, contex
 			assetID:     BipID,
 			atomize:     dexeth.WeiToGwei,
 		}
+		testTokenID, found := dex.BipSymbolID("dextt.eth")
+		if !found {
+			panic("could not find test token ID")
+		}
 		w = &TokenWallet{
 			assetWallet: aw,
 			cfg:         &tokenWalletConfig{},
 			parent:      node.tokenParent,
+			token:       dexeth.Tokens[testTokenID],
 		}
 		aw.wallets = map[uint32]*assetWallet{
 			testTokenID: aw,
@@ -4528,6 +4533,69 @@ func testEstimateSendTxFee(t *testing.T, assetID uint32) {
 		}
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", test.name, err)
+		}
+	}
+}
+
+// This test will fail if new versions of the eth or the test token
+// contract (that require more gas) are added.
+func TestMaxSwapRedeemLots(t *testing.T) {
+	t.Run("eth", func(t *testing.T) { testMaxSwapRedeemLots(t, BipID) })
+	t.Run("token", func(t *testing.T) { testMaxSwapRedeemLots(t, testTokenID) })
+}
+
+func testMaxSwapRedeemLots(t *testing.T, assetID uint32) {
+	drv := &Driver{}
+	logger := dex.StdOutLogger("ETHTEST", dex.LevelOff)
+	tmpDir := t.TempDir()
+
+	err := CreateWallet(&asset.CreateWalletParams{
+		Type:     walletTypeGeth,
+		Seed:     encode.RandomBytes(32),
+		Pass:     encode.RandomBytes(32),
+		Settings: make(map[string]string),
+		DataDir:  tmpDir,
+		Net:      dex.Testnet,
+		Logger:   logger,
+	})
+	if err != nil {
+		t.Fatalf("CreateWallet error: %v", err)
+	}
+
+	wallet, err := drv.Open(&asset.WalletConfig{
+		Type:     walletTypeGeth,
+		Settings: make(map[string]string),
+		DataDir:  tmpDir,
+	}, logger, dex.Testnet)
+	if err != nil {
+		t.Fatalf("driver open error: %v", err)
+	}
+
+	if assetID != BipID {
+		eth, _ := wallet.(*ETHWallet)
+		eth.net = dex.Simnet
+		wallet, err = eth.OpenTokenWallet(&asset.TokenConfig{
+			AssetID: assetID,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	info := wallet.Info()
+	if assetID == BipID {
+		if info.MaxSwapsInTx != 55 {
+			t.Fatalf("expected 55 for max swaps but got %d", info.MaxSwapsInTx)
+		}
+		if info.MaxRedeemsInTx != 119 {
+			t.Fatalf("expected 119 for max redemptions but got %d", info.MaxRedeemsInTx)
+		}
+	} else {
+		if info.MaxSwapsInTx != 43 {
+			t.Fatalf("expected 43 for max swaps but got %d", info.MaxSwapsInTx)
+		}
+		if info.MaxRedeemsInTx != 107 {
+			t.Fatalf("expected 107 for max redemptions but got %d", info.MaxRedeemsInTx)
 		}
 	}
 }
