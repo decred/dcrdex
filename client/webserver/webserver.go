@@ -26,6 +26,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/webserver/locales"
 	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
@@ -92,7 +93,7 @@ type clientCore interface {
 	Exchanges() map[string]*core.Exchange
 	Exchange(host string) (*core.Exchange, error)
 	Register(*core.RegisterForm) (*core.RegisterResult, error)
-	Login(pw []byte) (*core.LoginResult, error)
+	Login(pw []byte) error
 	InitializeClient(pw, seed []byte) error
 	AssetBalance(assetID uint32) (*core.WalletBalance, error)
 	CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error
@@ -151,6 +152,7 @@ type clientCore interface {
 	WalletPeers(assetID uint32) ([]*asset.WalletPeer, error)
 	AddWalletPeer(assetID uint32, addr string) error
 	RemoveWalletPeer(assetID uint32, addr string) error
+	Notifications(n int) ([]*db.Notification, error)
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -414,7 +416,6 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/getwalletpeers", s.apiGetWalletPeers)
 			apiAuth.Post("/addwalletpeer", s.apiAddWalletPeer)
 			apiAuth.Post("/removewalletpeer", s.apiRemoveWalletPeer)
-
 			if s.experimental {
 				apiAuth.Post("/createbot", s.apiCreateBot)
 				apiAuth.Post("/startbot", s.apiStartBot)

@@ -19,6 +19,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
@@ -80,6 +81,8 @@ type TCore struct {
 	deletedRecords   int
 	deleteRecordsErr error
 	tradeErr         error
+	notes            []*db.Notification
+	notesErr         error
 }
 
 func (c *TCore) Network() dex.Network                         { return dex.Mainnet }
@@ -102,9 +105,9 @@ func (c *TCore) FiatRateSources() map[string]bool {
 	return nil
 }
 
-func (c *TCore) InitializeClient(pw, seed []byte) error     { return c.initErr }
-func (c *TCore) Login(pw []byte) (*core.LoginResult, error) { return &core.LoginResult{}, c.loginErr }
-func (c *TCore) IsInitialized() bool                        { return c.isInited }
+func (c *TCore) InitializeClient(pw, seed []byte) error { return c.initErr }
+func (c *TCore) Login(pw []byte) error                  { return c.loginErr }
+func (c *TCore) IsInitialized() bool                    { return c.isInited }
 func (c *TCore) SyncBook(dex string, base, quote uint32) (core.BookFeed, error) {
 	return c.syncFeed, c.syncErr
 }
@@ -254,6 +257,9 @@ func (c *TCore) AddWalletPeer(assetID uint32, address string) error {
 }
 func (c *TCore) RemoveWalletPeer(assetID uint32, address string) error {
 	return nil
+}
+func (c *TCore) Notifications(n int) ([]*db.Notification, error) {
+	return c.notes, c.notesErr
 }
 
 func (c *TCore) CreateBot(pw []byte, botType string, pgm *core.MakerProgram) (uint64, error) {
@@ -497,6 +503,15 @@ func TestAPILogin(t *testing.T) {
 	body = goodBody
 	ensure(`{"ok":true,"notes":null}`)
 
+	tCore.notes = []*db.Notification{{
+		TopicID: core.TopicAccountUnlockError,
+	}}
+	ensure(`{"ok":true,"notes":[{"type":"","topic":"AccountUnlockError","subject":"","details":"","severity":0,"stamp":0,"acked":false,"id":""}]}`)
+
+	tCore.notes = nil
+	tCore.notesErr = errors.New("")
+	ensure(`{"ok":true,"notes":null}`)
+
 	// Login error
 	tCore.loginErr = tErr
 	ensure(fmt.Sprintf(`{"ok":false,"msg":"%s"}`, tErr))
@@ -591,7 +606,7 @@ func TestAPIInit(t *testing.T) {
 		Pass: encode.PassBytes("def"),
 	}
 	body = goodBody
-	ensure(s.apiInit, `{"ok":true,"notes":null}`)
+	ensure(s.apiInit, `{"ok":true}`)
 
 	// Initialization error
 	tCore.initErr = tErr

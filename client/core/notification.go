@@ -248,6 +248,7 @@ type OrderNote struct {
 
 const (
 	TopicOrderLoadFailure     Topic = "OrderLoadFailure"
+	TopicOrderResumeFailure   Topic = "OrderResumeFailure"
 	TopicBuyOrderPlaced       Topic = "BuyOrderPlaced"
 	TopicSellOrderPlaced      Topic = "SellOrderPlaced"
 	TopicYoloPlaced           Topic = "YoloPlaced"

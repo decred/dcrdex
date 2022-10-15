@@ -1600,8 +1600,8 @@ export class LoginForm {
     }
     if (res.notes) {
       res.notes.reverse()
+      app().setNotes(res.notes)
     }
-    app().setNotes(res.notes || [])
     if (this.pwCache) this.pwCache.pw = pw
     this.success()
   }

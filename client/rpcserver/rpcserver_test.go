@@ -19,6 +19,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 )
@@ -49,7 +50,6 @@ type TCore struct {
 	registerErr              error
 	exchanges                map[string]*core.Exchange
 	loginErr                 error
-	loginResult              *core.LoginResult
 	order                    *core.Order
 	tradeErr                 error
 	cancelErr                error
@@ -96,8 +96,8 @@ func (c *TCore) Exchange(host string) (*core.Exchange, error) {
 func (c *TCore) InitializeClient(pw, seed []byte) error {
 	return c.initializeClientErr
 }
-func (c *TCore) Login(appPass []byte) (*core.LoginResult, error) {
-	return c.loginResult, c.loginErr
+func (c *TCore) Login(appPass []byte) error {
+	return c.loginErr
 }
 func (c *TCore) Logout() error {
 	return c.logoutErr
@@ -158,6 +158,9 @@ func (c *TCore) AddWalletPeer(assetID uint32, address string) error {
 }
 func (c *TCore) RemoveWalletPeer(assetID uint32, address string) error {
 	return nil
+}
+func (c *TCore) Notifications(n int) ([]*db.Notification, error) {
+	return nil, nil
 }
 
 type tBookFeed struct{}

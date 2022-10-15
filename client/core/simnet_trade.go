@@ -814,7 +814,7 @@ func testOrderStatusReconciliation(s *simulationTest) error {
 	// to trigger dex authentication.
 	// TODO: cannot do this anymore with built-in wallets
 	s.client2.core.initialize()
-	_, err = s.client2.core.Login(s.client2.appPass)
+	err = s.client2.core.Login(s.client2.appPass)
 	if err != nil {
 		return fmt.Errorf("client 2 login error: %w", err)
 	}

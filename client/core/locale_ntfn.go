@@ -362,6 +362,10 @@ var originLocale = map[Topic]*translation{
 		subject:  "Wallet Disabled",
 		template: "Your %s wallet type is no longer supported. Create a new wallet.",
 	},
+	TopicOrderResumeFailure: {
+		subject:  "Resume order failure",
+		template: "Failed to resume processing of trade: %v",
+	},
 }
 
 var ptBR = map[Topic]*translation{

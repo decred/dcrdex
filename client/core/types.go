@@ -333,6 +333,7 @@ type Order struct {
 	Rate              uint64            `json:"rate"`          // limit only
 	TimeInForce       order.TimeInForce `json:"tif"`           // limit only
 	TargetOrderID     dex.Bytes         `json:"targetOrderID"` // cancel only
+	ReadyToTick       bool              `json:"readyToTick"`
 }
 
 // InFlightOrder is an Order that is not stamped yet, but has a temporary ID
@@ -927,21 +928,6 @@ func coinIDString(assetID uint32, coinID []byte) string {
 		return "<invalid coin>:" + hex.EncodeToString(coinID)
 	}
 	return coinStr
-}
-
-// DEXBrief holds data returned from initializeDEXConnections.
-type DEXBrief struct {
-	Host     string   `json:"host"`
-	AcctID   string   `json:"acctID"`
-	Authed   bool     `json:"authed"`
-	AuthErr  string   `json:"autherr,omitempty"`
-	TradeIDs []string `json:"tradeIDs"`
-}
-
-// LoginResult holds data returned from Login.
-type LoginResult struct {
-	Notifications []*db.Notification `json:"notifications"`
-	DEXes         []*DEXBrief        `json:"dexes"`
 }
 
 // RegisterResult holds data returned from Register.

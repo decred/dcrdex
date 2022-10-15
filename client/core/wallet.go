@@ -17,6 +17,8 @@ import (
 	"decred.org/dcrdex/dex/encrypt"
 )
 
+var errWalletNotConnected = errors.New("wallet not connected")
+
 // runWithTimeout runs the provided function, returning either the error from
 // the function or errTimeout if the function fails to return within the
 // timeout. This function is for wallet methods that may not have a context or
@@ -103,6 +105,9 @@ func (w *xcWallet) Unlock(crypter encrypt.Crypter) error {
 	if w.parent != nil {
 		return w.parent.Unlock(crypter)
 	}
+	if !w.connected() {
+		return errWalletNotConnected
+	}
 	if len(w.encPW()) == 0 {
 		if w.Locked() {
 			return fmt.Errorf("wallet reporting as locked, but no password has been set")
@@ -140,6 +145,9 @@ func (w *xcWallet) refreshUnlock() (unlockAttempted bool, err error) {
 	if w.parent != nil {
 		return w.parent.refreshUnlock()
 	}
+	if !w.connected() {
+		return false, errWalletNotConnected
+	}
 	// Check if the wallet backend is already unlocked.
 	if !w.Locked() {
 		return false, nil // unlocked
@@ -172,6 +180,10 @@ func (w *xcWallet) Lock(timeout time.Duration) error {
 		return w.parent.Lock(timeout)
 	}
 	w.mtx.Lock()
+	if !w.hookedUp {
+		w.mtx.Unlock()
+		return errWalletNotConnected
+	}
 	if len(w.encPass) == 0 {
 		w.mtx.Unlock()
 		return nil
@@ -193,6 +205,9 @@ func (w *xcWallet) unlocked() bool {
 	}
 	if w.parent != nil {
 		return w.parent.unlocked()
+	}
+	if !w.connected() {
+		return false
 	}
 	return w.locallyUnlocked() && !w.Locked()
 }
@@ -375,6 +390,9 @@ func (w *xcWallet) Disconnect() {
 // rescan will initiate a rescan of the wallet if the asset.Wallet
 // implementation is a Rescanner.
 func (w *xcWallet) rescan(ctx context.Context) error {
+	if !w.connected() {
+		return errWalletNotConnected
+	}
 	rescanner, ok := w.Wallet.(asset.Rescanner)
 	if !ok {
 		return errors.New("wallet does not support rescanning")
@@ -398,6 +416,9 @@ func (w *xcWallet) accelerateOrder(swapCoins, accelerationCoins []dex.Bytes, cha
 	if w.isDisabled() { // cannot perform order acceleration with disabled wallet.
 		return nil, "", fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(w.AssetID)))
 	}
+	if !w.connected() {
+		return nil, "", errWalletNotConnected
+	}
 	accelerator, ok := w.Wallet.(asset.Accelerator)
 	if !ok {
 		return nil, "", errors.New("wallet does not support acceleration")
@@ -410,6 +431,9 @@ func (w *xcWallet) accelerateOrder(swapCoins, accelerationCoins []dex.Bytes, cha
 func (w *xcWallet) accelerationEstimate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (uint64, error) {
 	if w.isDisabled() { // cannot perform acceleration estimate with disabled wallet.
 		return 0, fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(w.AssetID)))
+	}
+	if !w.connected() {
+		return 0, errWalletNotConnected
 	}
 	accelerator, ok := w.Wallet.(asset.Accelerator)
 	if !ok {
@@ -424,6 +448,9 @@ func (w *xcWallet) accelerationEstimate(swapCoins, accelerationCoins []dex.Bytes
 func (w *xcWallet) preAccelerate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, feeSuggestion uint64) (uint64, *asset.XYRange, *asset.EarlyAcceleration, error) {
 	if w.isDisabled() { // cannot perform operation with disabled wallet.
 		return 0, &asset.XYRange{}, nil, fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(w.AssetID)))
+	}
+	if !w.connected() {
+		return 0, &asset.XYRange{}, nil, errWalletNotConnected
 	}
 	accelerator, ok := w.Wallet.(asset.Accelerator)
 	if !ok {
@@ -440,6 +467,9 @@ func (w *xcWallet) preAccelerate(swapCoins, accelerationCoins []dex.Bytes, chang
 func (w *xcWallet) swapConfirmations(ctx context.Context, coinID []byte, contract []byte, matchTime uint64) (uint32, bool, error) {
 	if w.isDisabled() { // cannot check swap confirmation with disabled wallet.
 		return 0, false, fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(w.AssetID)))
+	}
+	if !w.connected() {
+		return 0, false, errWalletNotConnected
 	}
 	return w.Wallet.SwapConfirmations(ctx, coinID, contract, time.UnixMilli(int64(matchTime)))
 }

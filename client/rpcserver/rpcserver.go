@@ -22,6 +22,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
@@ -63,7 +64,7 @@ type clientCore interface {
 	DiscoverAccount(dexAddr string, pass []byte, certI interface{}) (*core.Exchange, bool, error)
 	Exchanges() (exchanges map[string]*core.Exchange)
 	InitializeClient(appPass, seed []byte) error
-	Login(appPass []byte) (*core.LoginResult, error)
+	Login(appPass []byte) error
 	Logout() error
 	OpenWallet(assetID uint32, appPass []byte) error
 	ToggleWalletStatus(assetID uint32, disable bool) error
@@ -79,6 +80,7 @@ type clientCore interface {
 	WalletPeers(assetID uint32) ([]*asset.WalletPeer, error)
 	AddWalletPeer(assetID uint32, host string) error
 	RemoveWalletPeer(assetID uint32, host string) error
+	Notifications(int) ([]*db.Notification, error)
 }
 
 // RPCServer is a single-client http and websocket server enabling a JSON

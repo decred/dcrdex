@@ -1253,12 +1253,11 @@ func newTestRig() *testRig {
 	rig := &testRig{
 		shutdown: shutdown,
 		core: &Core{
-			ctx:       ctx,
-			cfg:       &Config{},
-			db:        tdb,
-			log:       tLogger,
-			loginSlot: make(chan struct{}, 1),
-			latencyQ:  queue,
+			ctx:      ctx,
+			cfg:      &Config{},
+			db:       tdb,
+			log:      tLogger,
+			latencyQ: queue,
 			conns: map[string]*dexConnection{
 				tDexHost: dc,
 			},
@@ -2252,7 +2251,7 @@ func TestCredentialsUpgrade(t *testing.T) {
 	clearUpgrade()
 
 	// initial success
-	_, err := tCore.Login(tPW)
+	err := tCore.Login(tPW)
 	if err != nil {
 		t.Fatalf("initial Login error: %v", err)
 	}
@@ -2261,14 +2260,14 @@ func TestCredentialsUpgrade(t *testing.T) {
 
 	// Recrypt error
 	rig.db.recryptErr = tErr
-	_, err = tCore.Login(tPW)
+	err = tCore.Login(tPW)
 	if err == nil {
 		t.Fatalf("no error for recryptErr")
 	}
 	rig.db.recryptErr = nil
 
 	// final success
-	_, err = tCore.Login(tPW)
+	err = tCore.Login(tPW)
 	if err != nil {
 		t.Fatalf("final Login error: %v", err)
 	}
@@ -2281,7 +2280,7 @@ func TestLogin(t *testing.T) {
 	rig.acct.markFeePaid()
 
 	rig.queueConnect(nil, nil, nil)
-	_, err := tCore.Login(tPW)
+	err := tCore.Login(tPW)
 	if err != nil || !rig.acct.authed() {
 		t.Fatalf("initial Login error: %v", err)
 	}
@@ -2290,7 +2289,7 @@ func TestLogin(t *testing.T) {
 	rig.acct.unauth()
 	creds := tCore.credentials
 	tCore.credentials = nil
-	_, err = tCore.Login(tPW)
+	err = tCore.Login(tPW)
 	if err == nil || rig.acct.authed() {
 		t.Fatalf("no error for missing app key")
 	}
@@ -2299,7 +2298,7 @@ func TestLogin(t *testing.T) {
 	// Account not Paid. No error, and account should be unlocked.
 	rig.acct.isPaid = false
 	rig.queueConnect(nil, nil, nil)
-	_, err = tCore.Login(tPW)
+	err = tCore.Login(tPW)
 	if err != nil || rig.acct.authed() {
 		t.Fatalf("error for unpaid account: %v", err)
 	}
@@ -2318,7 +2317,7 @@ func TestLogin(t *testing.T) {
 		f(resp)
 		return nil
 	})
-	_, err = tCore.Login(tPW)
+	err = tCore.Login(tPW)
 	// Should be no error, but also not authed. Error is sent and logged
 	// as a notification.
 	if err != nil || rig.acct.authed() {
@@ -2406,7 +2405,7 @@ func TestLogin(t *testing.T) {
 	// 	-> update match after spawning auditContract
 	// 	-> update match in auditContract (second because of lock) ** the ASYNC one we have to wait for **
 	rig.db.updateMatchChan = make(chan order.MatchStatus, 4)
-	_, err = tCore.Login(tPW) // authDEX -> async contract audit for the extra match
+	err = tCore.Login(tPW) // authDEX -> async contract audit for the extra match
 	if err != nil || !rig.acct.authed() {
 		t.Fatalf("final Login error: %v", err)
 	}
@@ -2445,7 +2444,7 @@ func TestLogin(t *testing.T) {
 	}
 }
 
-func TestLoginAccountNotFoundError(t *testing.T) {
+func TestAccountNotFoundError(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
 	tCore := rig.core
@@ -2454,18 +2453,32 @@ func TestLoginAccountNotFoundError(t *testing.T) {
 	expectedErrorMessage := "test account not found error"
 	accountNotFoundError := msgjson.NewError(msgjson.AccountNotFoundError, expectedErrorMessage)
 	rig.queueConnect(accountNotFoundError, nil, nil)
+	rig.queueConnect(accountNotFoundError, nil, nil)
 
 	wallet, _ := newTWallet(tUTXOAssetA.ID)
 	tCore.wallets[tUTXOAssetA.ID] = wallet
 	rig.queueConnect(nil, nil, nil)
 
-	result, err := tCore.Login(tPW)
-	if err != nil {
-		t.Fatalf("unexpected Login error: %v", err)
+	feed := tCore.NotificationFeed()
+
+	tCore.initializeDEXConnections(rig.crypter)
+
+	// Make sure that the connections did not get authenticated
+	for _, dc := range tCore.dexConnections() {
+		if dc.acct.authed() {
+			t.Fatalf("dex connection should not have been authenticated")
+		}
 	}
-	for _, dexStat := range result.DEXes {
-		if dexStat.Authed || dexStat.AuthErr == "" || !strings.Contains(dexStat.AuthErr, expectedErrorMessage) {
-			t.Fatalf("expected account not found error")
+
+	// Make sure that an error notification was sent
+	for {
+		select {
+		case note := <-feed:
+			if note.Topic() == TopicDexAuthError && strings.Contains(note.Details(), expectedErrorMessage) {
+				return
+			}
+		case <-time.After(1 * time.Second):
+			t.Fatalf("error notification could not be found")
 		}
 	}
 }
@@ -2477,14 +2490,11 @@ func TestInitializeDEXConnectionsSuccess(t *testing.T) {
 	rig.acct.markFeePaid()
 	rig.queueConnect(nil, nil, nil)
 
-	dexStats := tCore.initializeDEXConnections(rig.crypter)
-
-	if dexStats == nil {
-		t.Fatal("initializeDEXConnections failure")
-	}
-	for _, dexStat := range dexStats {
-		if dexStat.AuthErr != "" {
-			t.Fatalf("initializeDEXConnections authorization error %v", dexStat.AuthErr)
+	// Make sure that the connections got authenticated
+	tCore.initializeDEXConnections(rig.crypter)
+	for _, dc := range tCore.dexConnections() {
+		if !dc.acct.authed() {
+			t.Fatalf("dex connection was not authenticated")
 		}
 	}
 }
@@ -5734,30 +5744,39 @@ func TestResolveActiveTrades(t *testing.T) {
 		ethWallet.Lock(time.Second)
 		tEthWallet.reservedRedemption = 0
 		tEthWallet.reservedRefund = 0
+
 		rig.dc.trades = make(map[order.OrderID]*trackedTrade)
 	}
 
 	// Ensure the order is good, and reset the state.
-	ensureGood := func(tag string, expCoinsLoaded int) {
+	runTest := func(tag string, expAddedToTradesMap, expReadyToTick, expBTCUnlocked, expETHUnlocked bool, expCoinsLoaded int) {
 		t.Helper()
+		defer reset()
+
 		description := fmt.Sprintf("%s: side = %s, order status = %s, match status = %s",
 			tag, match.Side, dbOrder.MetaData.Status, match.Status)
-		_, err := tCore.Login(tPW)
+		tCore.loginMtx.Lock()
+		tCore.loggedIn = false
+		tCore.loginMtx.Unlock()
+		err := tCore.Login(tPW)
 		if err != nil {
 			t.Fatalf("%s: login error: %v", description, err)
 		}
 
-		if !btcWallet.unlocked() {
-			t.Fatalf("%s: btc wallet not unlocked", description)
-		}
-
-		if !ethWallet.unlocked() {
-			t.Fatalf("%s: eth wallet not unlocked", description)
-		}
-
 		trade, found := rig.dc.trades[lo.ID()]
-		if !found {
-			t.Fatalf("%s: trade with expected order id not found. len(trades) = %d", description, len(rig.dc.trades))
+		if expAddedToTradesMap != found {
+			t.Fatalf("%s: expected added to trades map = %v, but got %v. len(trades) = %d", description, expAddedToTradesMap, found, len(rig.dc.trades))
+		}
+		if !expAddedToTradesMap {
+			return
+		}
+
+		if expBTCUnlocked != btcWallet.unlocked() {
+			t.Fatalf("%s: btc wallet unlocked = %v but got %v", description, expBTCUnlocked, btcWallet.unlocked())
+		}
+
+		if expETHUnlocked != ethWallet.unlocked() {
+			t.Fatalf("%s: eth wallet unlocked = %v but got %v", description, expETHUnlocked, ethWallet.unlocked())
 		}
 
 		_, found = trade.matches[match.MatchID]
@@ -5767,6 +5786,13 @@ func TestResolveActiveTrades(t *testing.T) {
 
 		if len(trade.coins) != expCoinsLoaded {
 			t.Fatalf("%s: expected %d coin loaded, got %d", description, expCoinsLoaded, len(trade.coins))
+		}
+
+		if found && expReadyToTick != trade.readyToTick {
+			t.Fatalf("%s: expected ready to tick = %v, but got %v", description, expReadyToTick, trade.readyToTick)
+		}
+		if !expReadyToTick {
+			return
 		}
 
 		if lo.T.Sell && ((match.Side == order.Taker && match.Status < order.MatchComplete) ||
@@ -5792,61 +5818,46 @@ func TestResolveActiveTrades(t *testing.T) {
 			}
 		}
 
-		reset()
 	}
 
-	ensureGood("initial", 1)
+	runTest("initial", true, true, true, true, 1)
 
-	// Ensure a failure AND reset. err != nil just helps to make sure that we're
-	// hitting errors in resolveActiveTrades, which sends errors as
-	// notifications, vs somewhere else.
-	ensureFail := func(tag string) {
-		t.Helper()
-		_, err := tCore.Login(tPW)
-		if err != nil || len(rig.dc.trades) != 0 {
-			t.Fatalf("%s: no error. err = %v, len(trades) = %d", tag, err, len(rig.dc.trades))
-		}
-		reset()
-	}
-
-	// NEGATIVE PATHS
-
-	// No base wallet
+	// No base wallet. Trade will not be in the map.
 	delete(tCore.wallets, utxoAsset.ID)
-	ensureFail("missing base")
+	runTest("no base wallet", false, false, false, false, 0)
 	tCore.wallets[utxoAsset.ID] = btcWallet
 
-	// Base wallet unlock errors
+	// Base wallet unlock errors. Trade will be in map, but it will not be
+	// ready to tick.
 	tBtcWallet.unlockErr = tErr
 	tBtcWallet.locked = true
-	ensureFail("base unlock")
+	runTest("base unlock", true, false, false, false, 0)
 	tBtcWallet.unlockErr = nil
 	tBtcWallet.locked = false
 
-	// No quote wallet
+	// No quote wallet. Trade will not be in the map.
 	delete(tCore.wallets, acctAsset.ID)
-	ensureFail("missing quote")
+	runTest("missing quote", false, false, false, false, 0)
 	tCore.wallets[acctAsset.ID] = ethWallet
 
-	// Quote wallet unlock errors
+	// Quote wallet unlock errors. Trade will be in map, but it will not be
+	// ready to tick.
 	tEthWallet.unlockErr = tErr
 	tEthWallet.locked = true
-	ensureFail("quote unlock")
+	runTest("quote unlock", true, false, true, false, 0)
 	tEthWallet.unlockErr = nil
 	tEthWallet.locked = false
 
-	// Funding coin error still puts it in the trades map, just with no coins
-	// locked.
+	// Funding coin error still puts it in the trades map, and sets ready to tick,
+	// just with no coins locked.
 	tBtcWallet.fundingCoinErr = tErr
-	ensureGood("funding coin", 0)
+	runTest("funding coin", true, true, true, true, 0)
 	tBtcWallet.fundingCoinErr = nil
 
 	// No matches
 	rig.db.activeMatchOIDSErr = tErr
-	ensureFail("matches error")
+	runTest("matches error", false, false, false, false, 0)
 	rig.db.activeMatchOIDSErr = nil
-
-	// POSITIVE PATHS
 
 	for _, tt := range reservationTests {
 		lo.T.Sell = tt.sell
@@ -5863,7 +5874,7 @@ func TestResolveActiveTrades(t *testing.T) {
 				dbOrder.MetaData.Status = orderStatus
 				for _, matchStatus := range tt.matchStatuses {
 					match.Status = matchStatus
-					ensureGood(tt.name, tt.expectedCoins)
+					runTest(tt.name, true, true, true, true, tt.expectedCoins)
 				}
 			}
 		}
@@ -6429,6 +6440,11 @@ func TestLogout(t *testing.T) {
 
 	ensureErr := func(tag string) {
 		t.Helper()
+
+		tCore.loginMtx.Lock()
+		tCore.loggedIn = true
+		tCore.loginMtx.Unlock()
+
 		err := tCore.Logout()
 		if err == nil {
 			t.Fatalf("%s: no error", tag)
@@ -7251,6 +7267,7 @@ func TestReconfigureWallet(t *testing.T) {
 			},
 		},
 	}
+	tCore.conns[tDexHost].tradeMtx.Lock()
 	tCore.conns[tDexHost].trades[order.OrderID{}] = &trackedTrade{
 		Order: &order.LimitOrder{
 			P: order.Prefix{
@@ -7270,6 +7287,7 @@ func TestReconfigureWallet(t *testing.T) {
 		metaData: &db.OrderMetaData{},
 		dc:       rig.dc,
 	}
+	tCore.conns[tDexHost].tradeMtx.Unlock()
 
 	// Error checking if wallet owns address.
 	tXyzWallet.ownsAddressErr = tErr
@@ -9670,7 +9688,7 @@ func TestCredentialHandling(t *testing.T) {
 
 	tCore.Logout()
 
-	_, err = tCore.Login(tPW)
+	err = tCore.Login(tPW)
 	if err != nil {
 		t.Fatalf("Login error: %v", err)
 	}
