@@ -167,7 +167,7 @@ func mainErr() error {
 		return fmt.Errorf("no market %q", mktName)
 	}
 
-	if _, err := c.Login(appPW); err != nil {
+	if err := c.Login(appPW); err != nil {
 		return fmt.Errorf("login error: %w", err)
 	}
 

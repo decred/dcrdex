@@ -285,6 +285,7 @@ type trackedTrade struct {
 	matches          map[order.MatchID]*matchTracker
 	redemptionLocked uint64 // remaining locked of redemptionReserves
 	refundLocked     uint64 // remaining locked of refundReserves
+	readyToTick      bool   // this will be false if either of the wallets cannot be connected and unlocked
 }
 
 // newTrackedTrade is a constructor for a trackedTrade.
@@ -318,6 +319,7 @@ func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnec
 		options:            dbOrder.MetaData.Options,
 		redemptionReserves: dbOrder.MetaData.RedemptionReserves,
 		refundReserves:     dbOrder.MetaData.RefundReserves,
+		readyToTick:        true,
 	}
 	return t
 }
@@ -370,7 +372,8 @@ func (t *trackedTrade) cacheRedemptionFeeSuggestion() {
 	// Use the wallet's rate first. Note that this could make a costly request
 	// to an external fee oracle if an internal estimate is not available and
 	// the wallet settings permit external API requests.
-	if rater, is := t.wallets.toWallet.feeRater(); is {
+	toWallet := t.wallets.toWallet
+	if rater, is := toWallet.feeRater(); is && t.readyToTick && toWallet.connected() {
 		if feeRate := rater.FeeRate(); feeRate != 0 {
 			set(feeRate)
 			return
@@ -379,7 +382,7 @@ func (t *trackedTrade) cacheRedemptionFeeSuggestion() {
 
 	// Check any book that might have the fee recorded from an epoch_report note
 	// (requires a book subscription).
-	redeemAsset := t.wallets.toWallet.AssetID
+	redeemAsset := toWallet.AssetID
 	feeSuggestion := t.dc.bestBookFeeSuggestion(redeemAsset)
 	if feeSuggestion > 0 {
 		set(feeSuggestion)
@@ -637,6 +640,7 @@ func (t *trackedTrade) coreOrderInternal() *Order {
 
 	corder.Epoch = t.dc.marketEpoch(t.mktID, t.Prefix().ServerTime)
 	corder.LockedAmt = t.lockedAmount()
+	corder.ReadyToTick = t.readyToTick
 
 	for _, mt := range t.matches {
 		swapConfs, counterConfs := mt.confirms()
@@ -1073,6 +1077,10 @@ func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTra
 
 	wallet := t.wallets.toWallet
 	coin := match.counterSwap.Coin
+
+	if !wallet.connected() {
+		return fail(errWalletNotConnected)
+	}
 
 	_, lockTime, err := wallet.ContractLockTimeExpired(ctx, match.MetaData.Proof.CounterContract)
 	if err != nil {
@@ -1883,6 +1891,12 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 
 	// Begin checks under read-only lock.
 	t.mtx.RLock()
+
+	if !t.readyToTick {
+		t.mtx.RUnlock()
+		return assets, nil
+	}
+
 	// Check all matches for and resend pending requests as necessary.
 	c.resendPendingRequests(t)
 
@@ -2543,6 +2557,9 @@ func (c *Core) redeemMatches(t *trackedTrade, matches []*matchTracker) error {
 		}
 	}
 	if len(groupables) > 0 {
+		if !t.wallets.toWallet.connected() {
+			return errWalletNotConnected // don't ungroup, just return
+		}
 		maxRedeemsInTx := int(t.wallets.toWallet.Info().MaxRedeemsInTx)
 		if maxRedeemsInTx <= 0 || len(groupables) < maxRedeemsInTx {
 			c.redeemMatchGroup(t, groupables, errs)
@@ -2610,6 +2627,10 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 
 	// Send the transaction.
 	redeemWallet := t.wallets.toWallet // this is our redeem
+	if !redeemWallet.connected() {
+		errs.add("%v", errWalletNotConnected)
+		return
+	}
 	coinIDs, outCoin, fees, err := redeemWallet.Redeem(&asset.RedeemForm{
 		Redemptions:   redemptions,
 		FeeSuggestion: feeSuggestion, // fallback - wallet will try to get a rate internally for configured redeem conf target
@@ -2820,6 +2841,9 @@ func (t *trackedTrade) confirmRedemption(match *matchTracker) {
 		}
 		return
 	}
+	if !t.wallets.toWallet.connected() {
+		return
+	}
 
 	var redeemCoinID order.CoinID
 	if match.Side == order.Maker {
@@ -2910,10 +2934,16 @@ func (t *trackedTrade) findMakersRedemption(ctx context.Context, match *matchTra
 	swapCoinID := dex.Bytes(match.MetaData.Proof.TakerSwap)
 	swapContract := dex.Bytes(match.MetaData.Proof.ContractData)
 
+	wallet := t.wallets.fromWallet
+	if !wallet.connected() {
+		t.dc.log.Errorf("Cannot find redemption with wallet not connected")
+		return
+	}
+
 	// Run redemption finder in goroutine.
 	go func() {
 		defer cancel() // don't leak the context when we reset match.cancelRedemptionSearch
-		redemptionCoinID, secret, err := t.wallets.fromWallet.FindRedemption(ctx, swapCoinID, swapContract)
+		redemptionCoinID, secret, err := wallet.FindRedemption(ctx, swapCoinID, swapContract)
 
 		// Redemption search done, with or without error.
 		// Keep the mutex locked for the remainder of this goroutine execution to
@@ -2922,7 +2952,7 @@ func (t *trackedTrade) findMakersRedemption(ctx context.Context, match *matchTra
 		defer t.mtx.Unlock()
 
 		match.cancelRedemptionSearch = nil
-		symbol, assetID := t.wallets.fromWallet.Symbol, t.wallets.fromWallet.AssetID
+		symbol, assetID := wallet.Symbol, wallet.AssetID
 
 		if err != nil {
 			// Ignore the error if we've refunded, the error would likely be context
@@ -3160,6 +3190,9 @@ func (t *trackedTrade) searchAuditInfo(match *matchTracker, coinID []byte, contr
 	var auditInfo *asset.AuditInfo
 	var tries int
 	toWallet := t.wallets.toWallet
+	if !toWallet.connected() {
+		return nil, errWalletNotConnected
+	}
 	contractID, contractSymb := coinIDString(toWallet.AssetID, coinID), toWallet.Symbol
 	tLastWarning := time.Now()
 	t.latencyQ.Wait(&wait.Waiter{
@@ -3447,6 +3480,10 @@ func (t *trackedTrade) maybeReturnCoins() bool {
 // This method modifies match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
 func (t *trackedTrade) returnCoins() {
+	if !t.wallets.fromWallet.connected() {
+		t.dc.log.Warnf("Unable to return %s funding coins: %v", t.wallets.fromWallet.Symbol, errWalletNotConnected)
+		return
+	}
 	if t.change == nil && t.coinsLocked {
 		fundingCoins := make([]asset.Coin, 0, len(t.coins))
 		for _, coin := range t.coins {

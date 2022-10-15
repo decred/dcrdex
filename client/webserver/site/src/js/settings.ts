@@ -257,12 +257,6 @@ export default class SettingsPage extends BasePage {
       Doc.show(page.importAccountErr)
       return
     }
-    const loginResponse = await postJSON('/api/login', { pass: pw })
-    if (!app().checkResponse(loginResponse)) {
-      page.importAccountErr.textContent = loginResponse.msg
-      Doc.show(page.importAccountErr)
-      return
-    }
     await app().fetchUser()
     Doc.hide(page.forms)
     // Initial method of displaying imported account.

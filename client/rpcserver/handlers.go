@@ -45,6 +45,7 @@ const (
 	walletPeersRoute           = "walletpeers"
 	addWalletPeerRoute         = "addwalletpeer"
 	removeWalletPeerRoute      = "removewalletpeer"
+	notificationsRoute         = "notifications"
 )
 
 const (
@@ -103,6 +104,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	walletPeersRoute:           handleWalletPeers,
 	addWalletPeerRoute:         handleAddWalletPeer,
 	removeWalletPeerRoute:      handleRemoveWalletPeer,
+	notificationsRoute:         handleNotificationsRoute,
 }
 
 // handleHelp handles requests for help. Returns general help for all commands
@@ -399,19 +401,20 @@ func handleExchanges(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 	return createResponse(exchangesRoute, &exchanges, nil)
 }
 
-// handleLogin sets up the dex connection and returns core.LoginResult.
+// handleLogin sets up the dex connections.
 func handleLogin(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	appPass, err := parseLoginArgs(params)
 	if err != nil {
 		return usage(loginRoute, err)
 	}
 	defer appPass.Clear()
-	res, err := s.core.Login(appPass)
+	err = s.core.Login(appPass)
 	if err != nil {
 		errMsg := fmt.Sprintf("unable to login: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCLoginError, errMsg)
 		return createResponse(loginRoute, nil, resErr)
 	}
+	res := "successfully logged in"
 	return createResponse(loginRoute, &res, nil)
 }
 
@@ -742,6 +745,22 @@ func handleRemoveWalletPeer(s *RPCServer, params *RawParams) *msgjson.ResponsePa
 	}
 
 	return createResponse(removeWalletPeerRoute, "successfully removed peer", nil)
+}
+
+func handleNotificationsRoute(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	numNotes, err := parseNotificationsArgs(params)
+	if err != nil {
+		return usage(notificationsRoute, err)
+	}
+
+	notes, err := s.core.Notifications(numNotes)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to remove wallet peer: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCNotificationsError, errMsg)
+		return createResponse(notificationsRoute, nil, resErr)
+	}
+
+	return createResponse(notificationsRoute, notes, nil)
 }
 
 // format concatenates thing and tail. If thing is empty, returns an empty
@@ -1286,5 +1305,11 @@ needed to complete a swap.`,
 		assetID (int): The asset's BIP-44 registered coin index. Used to identify
 		which wallet to add a peer.
 		addr (string): The peer's address (host:port).`,
+	},
+	notificationsRoute: {
+		cmdSummary: `See recent notifications.`,
+		argsShort:  `(num)`,
+		argsLong: `Args:
+		num (int): The number of notifications to load.`,
 	},
 }

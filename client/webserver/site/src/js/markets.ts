@@ -1181,11 +1181,13 @@ export default class MarketsPage extends BasePage {
     Doc.setVis(orders?.length, page.userOrders)
     Doc.setVis(!orders?.length, page.userNoOrders)
 
+    let unreadyOrders = false
     for (const ord of orders) {
       const div = page.userOrderTmpl.cloneNode(true) as HTMLElement
       page.userOrders.appendChild(div)
 
-      const header = Doc.parseTemplate(Doc.tmplElement(div, 'header'))
+      const headerEl = Doc.tmplElement(div, 'header')
+      const header = Doc.parseTemplate(headerEl)
       const detailsDiv = Doc.tmplElement(div, 'details')
       const details = Doc.parseTemplate(detailsDiv)
 
@@ -1200,6 +1202,10 @@ export default class MarketsPage extends BasePage {
       // display.
       if (ord.id) metaOrders[ord.id] = mord
 
+      if (!ord.readyToTick) {
+        headerEl.classList.add('unready-user-order')
+        unreadyOrders = true
+      }
       header.sideLight.classList.add(ord.sell ? 'sell' : 'buy')
       details.side.textContent = header.side.textContent = OrderUtil.sellString(ord)
       details.side.classList.add(ord.sell ? 'sellcolor' : 'buycolor')
@@ -1252,6 +1258,7 @@ export default class MarketsPage extends BasePage {
       })
       app().bindTooltips(div)
     }
+    Doc.setVis(unreadyOrders, page.unreadyOrdersMsg)
     this.setDepthMarkers()
   }
 
@@ -1890,10 +1897,16 @@ export default class MarketsPage extends BasePage {
   handleOrderNote (note: OrderNote) {
     const order = note.order
     const mord = this.metaOrders[order.id]
-    // If metaOrder doesn't exist for the given order it means it was created
-    // via dexcctl and the GUI isn't aware of it or it was an inflight order.
-    // Call refreshActiveOrders to grab the order.
-    if (!mord || note.topic === 'AsyncOrderFailure') return this.refreshActiveOrders()
+    // - If metaOrder doesn't exist for the given order it means it was created
+    //  via dexcctl and the GUI isn't aware of it or it was an inflight order.
+    //  refreshActiveOrders must be called to grab this order.
+    // - If an OrderLoaded notification is recieved, it means an order that was
+    //   previously not "ready to tick" (due to its wallets not being connected
+    //   and unlocked) has now become ready to tick. The active orders section
+    //   needs to be refreshed.
+    if (!mord || note.topic === 'AsyncOrderFailure' || (note.topic === 'OrderLoaded' && order.readyToTick)) {
+      return this.refreshActiveOrders()
+    }
     const oldStatus = mord.status
     mord.ord = order
     if (note.topic === 'MissedCancel') Doc.show(mord.details.cancelBttn)

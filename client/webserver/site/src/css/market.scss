@@ -122,6 +122,14 @@ div[data-handler=markets] {
     }
   }
 
+  #unreadyOrdersMsg {
+    color: red;
+  }
+
+  .unready-user-order {
+    background-color: #6e0909;
+  }
+
   .user-order {
     margin: 0 20px;
     border: 1px solid $light_border_color;

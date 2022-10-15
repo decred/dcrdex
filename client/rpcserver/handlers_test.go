@@ -676,13 +676,12 @@ func TestHandleLogin(t *testing.T) {
 	}}
 	for _, test := range tests {
 		tc := &TCore{
-			loginResult: &core.LoginResult{},
-			loginErr:    test.loginErr,
+			loginErr: test.loginErr,
 		}
 		r := &RPCServer{core: tc}
 		payload := handleLogin(r, test.params)
-		var res *core.LoginResult
-		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+		successString := "successfully logged in"
+		if err := verifyResponse(payload, &successString, test.wantErrCode); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -197,6 +197,7 @@ func (c *Core) AccountImport(pw []byte, acct Account) error {
 		}
 	}
 
+	c.initializeDEXConnections(crypter)
 	return nil
 }
 

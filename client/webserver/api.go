@@ -704,7 +704,13 @@ func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, fmt.Errorf("initialization error: %w", err))
 		return
 	}
-	s.actuallyLogin(w, r, &loginForm{Pass: init.Pass, RememberPass: init.RememberPass})
+	err = s.actuallyLogin(w, r, &loginForm{Pass: init.Pass, RememberPass: init.RememberPass})
+	if err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+
+	writeJSON(w, simpleAck(), s.indent)
 }
 
 // apiIsInitialized is the handler for the '/isinitialized' request.
@@ -725,7 +731,25 @@ func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 	if !readPost(w, r, login) {
 		return
 	}
-	s.actuallyLogin(w, r, login)
+
+	err := s.actuallyLogin(w, r, login)
+	if err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+
+	notes, err := s.core.Notifications(100)
+	if err != nil {
+		log.Errorf("failed to get notifications: %v", err)
+	}
+
+	writeJSON(w, &struct {
+		OK    bool               `json:"ok"`
+		Notes []*db.Notification `json:"notes"`
+	}{
+		OK:    true,
+		Notes: notes,
+	}, s.indent)
 }
 
 // apiLogout handles the 'logout' API request.
@@ -1184,17 +1208,15 @@ func (s *WebServer) apiPreOrder(w http.ResponseWriter, r *http.Request) {
 
 // apiActuallyLogin logs the user in. login form private data is expected to be
 // cleared by the caller.
-func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login *loginForm) {
+func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login *loginForm) error {
 	pass, err := s.resolvePass(login.Pass, r)
 	defer zero(pass)
 	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
-		return
+		return fmt.Errorf("password error: %w", err)
 	}
-	loginResult, err := s.core.Login(pass)
+	err = s.core.Login(pass)
 	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("login error: %w", err))
-		return
+		return fmt.Errorf("login error: %w", err)
 	}
 
 	user := extractUserInfo(r)
@@ -1204,8 +1226,8 @@ func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login 
 		if login.RememberPass {
 			key, err := s.cacheAppPassword(pass, authToken)
 			if err != nil {
-				s.writeAPIError(w, fmt.Errorf("login error: %w", err))
-				return
+				return fmt.Errorf("login error: %w", err)
+
 			}
 			setCookie(pwKeyCK, hex.EncodeToString(key), w)
 			zero(key)
@@ -1216,13 +1238,7 @@ func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login 
 		}
 	}
 
-	writeJSON(w, struct {
-		OK    bool               `json:"ok"`
-		Notes []*db.Notification `json:"notes"`
-	}{
-		OK:    true,
-		Notes: loginResult.Notifications,
-	}, s.indent)
+	return nil
 }
 
 // apiUser handles the 'user' API request.

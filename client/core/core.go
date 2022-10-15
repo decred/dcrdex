@@ -1307,13 +1307,15 @@ type Core struct {
 	ctx           context.Context
 	wg            sync.WaitGroup
 	ready         chan struct{}
-	loginSlot     chan struct{}
 	cfg           *Config
 	log           dex.Logger
 	db            db.DB
 	net           dex.Network
 	lockTimeTaker time.Duration
 	lockTimeMaker time.Duration
+
+	loginMtx sync.Mutex
+	loggedIn bool
 
 	locale        map[Topic]*translation
 	localePrinter *message.Printer
@@ -1436,7 +1438,6 @@ func New(cfg *Config) (*Core, error) {
 		credentials:   creds,
 		ready:         make(chan struct{}),
 		log:           cfg.Logger,
-		loginSlot:     make(chan struct{}, 1),
 		db:            boltDB,
 		conns:         make(map[string]*dexConnection),
 		wallets:       make(map[uint32]*xcWallet),
@@ -1737,7 +1738,10 @@ func (c *Core) storeDepositAddress(wdbID []byte, addr string) error {
 	return c.db.UpdateWallet(dbWallet)
 }
 
-func (c *Core) connectAndUpdateWallet(w *xcWallet) error {
+// connectAndUpdateWalletResumeTrades creates a connection to a wallet and
+// updates the balance. If resumeTrades is set to true, an attempt to resume
+// any trades that were unable to be resumed at startup will be made.
+func (c *Core) connectAndUpdateWalletResumeTrades(w *xcWallet, resumeTrades bool) error {
 	assetID := w.AssetID
 
 	token := asset.TokenInfo(assetID)
@@ -1747,7 +1751,7 @@ func (c *Core) connectAndUpdateWallet(w *xcWallet) error {
 			return fmt.Errorf("token %s wallet has no %s parent?", unbip(assetID), unbip(token.ParentID))
 		}
 		if !parentWallet.connected() {
-			if err := c.connectAndUpdateWallet(parentWallet); err != nil {
+			if err := c.connectAndUpdateWalletResumeTrades(parentWallet, resumeTrades); err != nil {
 				return fmt.Errorf("failed to connect %s parent wallet for %s token",
 					unbip(token.ParentID), unbip(assetID))
 			}
@@ -1756,7 +1760,7 @@ func (c *Core) connectAndUpdateWallet(w *xcWallet) error {
 
 	c.log.Infof("Connecting wallet for %s", unbip(assetID))
 	addr := w.currentDepositAddress()
-	newAddr, err := c.connectWallet(w)
+	newAddr, err := c.connectWalletResumeTrades(w, resumeTrades)
 	if err != nil {
 		return fmt.Errorf("connectWallet: %w", err) // core.Error with code connectWalletErr
 	}
@@ -1778,6 +1782,12 @@ func (c *Core) connectAndUpdateWallet(w *xcWallet) error {
 	return nil
 }
 
+// connectAndUpdateWallet creates a connection to a wallet and updates the
+// balance.
+func (c *Core) connectAndUpdateWallet(w *xcWallet) error {
+	return c.connectAndUpdateWalletResumeTrades(w, true)
+}
+
 // connectedWallet fetches a wallet and will connect the wallet if it is not
 // already connected. If the wallet gets connected, this also emits WalletState
 // and WalletBalance notification.
@@ -1796,11 +1806,13 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 	return wallet, nil
 }
 
-// connectWallet connects to the wallet and returns the deposit address
-// validated by the xcWallet after connecting. If the wallet backend is still
-// syncing, this also starts a goroutine to monitor sync status, emitting
-// WalletStateNotes on each progress update.
-func (c *Core) connectWallet(w *xcWallet) (depositAddr string, err error) {
+// connectWalletResumeTrades connects to the wallet and returns the deposit
+// address validated by the xcWallet after connecting. If the wallet backend
+// is still syncing, this also starts a goroutine to monitor sync status,
+// emitting WalletStateNotes on each progress update. If resumeTrades is set to
+// true, an attempt to resume any trades that were unable to be resumed at
+// startup will be made.
+func (c *Core) connectWalletResumeTrades(w *xcWallet, resumeTrades bool) (depositAddr string, err error) {
 	if w.isDisabled() {
 		return "", fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(w.AssetID)))
 	}
@@ -1808,6 +1820,12 @@ func (c *Core) connectWallet(w *xcWallet) (depositAddr string, err error) {
 	err = w.Connect() // ensures valid deposit address
 	if err != nil {
 		return "", codedError(connectWalletErr, err)
+	}
+
+	// This may be a wallet that does not require a password, so we can attempt
+	// to resume any active trades.
+	if resumeTrades {
+		go c.resumeTrades(nil)
 	}
 
 	w.mtx.RLock()
@@ -1823,16 +1841,18 @@ func (c *Core) connectWallet(w *xcWallet) (depositAddr string, err error) {
 	return
 }
 
-// Connect to the wallet if not already connected. Unlock the wallet if not
-// already unlocked.
-func (c *Core) connectAndUnlock(crypter encrypt.Crypter, wallet *xcWallet) error {
-	if !wallet.connected() {
-		c.log.Infof("Connecting wallet for %s", unbip(wallet.AssetID))
-		err := c.connectAndUpdateWallet(wallet)
-		if err != nil {
-			return err
-		}
-	}
+// connectWallet connects to the wallet and returns the deposit address
+// validated by the xcWallet after connecting. If the wallet backend is still
+// syncing, this also starts a goroutine to monitor sync status, emitting
+// WalletStateNotes on each progress update.
+func (c *Core) connectWallet(w *xcWallet) (depositAddr string, err error) {
+	return c.connectWalletResumeTrades(w, true)
+}
+
+// unlockWalletResumeTrades will unlock a wallet if it is not yet unlocked. If
+// resumeTrades is set to true, an attempt to resume any trades that were
+// unable to be resumed at startup will be made.
+func (c *Core) unlockWalletResumeTrades(crypter encrypt.Crypter, wallet *xcWallet, resumeTrades bool) error {
 	// Unlock if either the backend itself is locked or if we lack a cached
 	// unencrypted password for encrypted wallets.
 	if !wallet.unlocked() {
@@ -1850,8 +1870,44 @@ func (c *Core) connectAndUnlock(crypter encrypt.Crypter, wallet *xcWallet) error
 		}
 		// Notify new wallet state.
 		c.notify(newWalletStateNote(wallet.state()))
+
+		if resumeTrades {
+			go c.resumeTrades(crypter)
+		}
 	}
+
 	return nil
+}
+
+// unlockWallet will unlock a wallet if it is not yet unlocked.
+func (c *Core) unlockWallet(crypter encrypt.Crypter, wallet *xcWallet) error {
+	return c.unlockWalletResumeTrades(crypter, wallet, true)
+}
+
+// connectAndUnlockResumeTrades will connect to the wallet if not already
+// connected, and unlock the wallet if not already unlocked. If the wallet
+// backend is still syncing, this also starts a goroutine to monitor sync
+// status, emitting WalletStateNotes on each progress update. If resumeTrades
+// is set to true, an attempt to resume any trades that were unable to be
+// resumed at startup will be made.
+func (c *Core) connectAndUnlockResumeTrades(crypter encrypt.Crypter, wallet *xcWallet, resumeTrades bool) error {
+	if !wallet.connected() {
+		c.log.Infof("Connecting wallet for %s", unbip(wallet.AssetID))
+		err := c.connectAndUpdateWalletResumeTrades(wallet, resumeTrades)
+		if err != nil {
+			return err
+		}
+	}
+
+	return c.unlockWalletResumeTrades(crypter, wallet, resumeTrades)
+}
+
+// connectAndUnlock will connect to the wallet if not already connected,
+// and unlock the wallet if not already unlocked. If the wallet backend
+// is still syncing, this also starts a goroutine to monitor sync status,
+// emitting WalletStateNotes on each progress update.
+func (c *Core) connectAndUnlock(crypter encrypt.Crypter, wallet *xcWallet) error {
+	return c.connectAndUnlockResumeTrades(crypter, wallet, true)
 }
 
 // walletBalance gets the xcWallet's current WalletBalance, which includes the
@@ -2267,7 +2323,7 @@ func (c *Core) createWalletOrToken(crypter encrypt.Crypter, walletPW []byte, for
 		return nil, fmt.Errorf(s, a...)
 	}
 
-	err = wallet.Unlock(crypter) // no-op if !wallet.Wallet.Locked() && len(encPW) == 0
+	err = c.unlockWallet(crypter, wallet) // no-op if !wallet.Wallet.Locked() && len(encPW) == 0
 	if err != nil {
 		wallet.Disconnect()
 		return nil, fmt.Errorf("%s wallet authentication error: %w", symbol, err)
@@ -2794,7 +2850,7 @@ func (c *Core) RecoverWallet(assetID uint32, appPW []byte, force bool) error {
 
 		c.updateAssetWalletRefs(newWallet)
 
-		err = newWallet.Unlock(crypter)
+		err = c.unlockWallet(crypter, newWallet)
 		if err != nil {
 			return err
 		}
@@ -2816,7 +2872,7 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 	if err != nil {
 		return fmt.Errorf("OpenWallet: wallet not found for %d -> %s: %w", assetID, unbip(assetID), err)
 	}
-	err = wallet.Unlock(crypter)
+	err = c.unlockWallet(crypter, wallet)
 	if err != nil {
 		return newError(walletAuthErr, "failed to unlock %s wallet: %w", unbip(assetID), err)
 	}
@@ -3118,7 +3174,7 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 	// setWalletPassword since it would use connectAndUpdateWallet, which
 	// performs additional deposit address validation and balance updates that
 	// are redundant with the rest of this function.
-	dbWallet.Address, err = c.connectWallet(wallet)
+	dbWallet.Address, err = c.connectWalletResumeTrades(wallet, false)
 	if err != nil {
 		return fmt.Errorf("connectWallet: %w", err)
 	}
@@ -3189,6 +3245,8 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 	go c.reReserveFunding(wallet)
 
 	clearTickGovernors()
+
+	c.resumeTrades(crypter)
 
 	return nil
 }
@@ -3287,7 +3345,7 @@ func (c *Core) setWalletPassword(wallet *xcWallet, newPW []byte, crypter encrypt
 		_ = backend.Unlock([]byte{})
 		if backend.Locked() {
 			if wasUnlocked { // try to re-unlock the wallet with previous encPW
-				_ = wallet.Unlock(crypter)
+				_ = c.unlockWallet(crypter, wallet)
 			}
 			return newError(authErr, "wallet appears to require a password")
 		}
@@ -3699,7 +3757,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	}
 
 	if !wallet.unlocked() {
-		err = wallet.Unlock(crypter)
+		err = c.unlockWallet(crypter, wallet)
 		if err != nil {
 			return nil, newError(walletAuthErr, "failed to unlock %s wallet: %w", unbip(wallet.AssetID), err)
 		}
@@ -4130,8 +4188,11 @@ func (c *Core) generateCredentials(pw, seed []byte) (encrypt.Crypter, *db.Primar
 	return innerCrypter, creds, nil
 }
 
-// Login logs the user in, decrypting the account keys for all known DEXes.
-func (c *Core) Login(pw []byte) (*LoginResult, error) {
+// Login logs the user in. On the first login after startup or after a logout,
+// this function will connect wallets, resolve active trades, and decrypt
+// account keys for all known DEXes. Otherwise, it will only check whether or
+// not the app pass is correct.
+func (c *Core) Login(pw []byte) error {
 	// Make sure the app has been initialized. This condition would error when
 	// attempting to retrieve the encryption key below as well, but the
 	// messaging may be confusing.
@@ -4140,7 +4201,7 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	c.credMtx.RUnlock()
 
 	if creds == nil {
-		return nil, fmt.Errorf("cannot log in because app has not been initialized")
+		return fmt.Errorf("cannot log in because app has not been initialized")
 	}
 
 	if len(creds.EncInnerKey) == 0 {
@@ -4149,71 +4210,41 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 			// It's tempting to panic here, since Core and the db are probably
 			// out of sync and the client shouldn't be doing anything else.
 			c.log.Criticalf("v1 upgrade failed: %v", err)
-			return nil, err
+			return err
 		}
 	}
 
 	crypter, err := c.encryptionKey(pw)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer crypter.Close()
 
-	loginResult := func() *LoginResult {
-		// NOTE: initializeDEXConnections will do authDEX and a 'connect'
-		// request only if NOT already dc.acct.authed().
-		dexStats := c.initializeDEXConnections(crypter)
-		notes, err := c.db.NotificationsN(100)
-		if err != nil {
-			c.log.Errorf("Login -> NotificationsN error: %v", err)
+	c.loginMtx.Lock()
+	defer c.loginMtx.Unlock()
+
+	if !c.loggedIn {
+		// It is not an error if we can't connect, unless we need the wallet
+		// for active trades, but that condition is checked later in
+		// resolveActiveTrades. We won't try to unlock here, but if the wallet
+		// is needed for active trades, it will be unlocked in resolveActiveTrades
+		// and the balance updated there.
+		c.connectWallets()
+		c.resolveActiveTrades(crypter)
+		c.initializeDEXConnections(crypter)
+		if err = c.loadBotPrograms(); err != nil {
+			c.log.Errorf("Error loading bot programs: %v", err)
 		}
 
-		return &LoginResult{
-			Notifications: notes,
-			DEXes:         dexStats,
-		}
+		c.loggedIn = true
 	}
 
-	// Connecting and loading wallets might take time, but we don't want
-	// concurrent wallet connect attempts running, especially for native wallets
-	// that use the same file system resources. NOTE: The following channel
-	// mechanism similar to the following, and it does suggest some design
-	// issues, described below.
-	//
-	// !c.loginMtx.TryLock() {
-	//  c.loginMtx.Lock()
-	//  defer c.loginMtx.Lock()
-	//  return loginResult(), err
-	// }
-	defer func() { <-c.loginSlot }() // remove the peg from the slot when done
-	select {
-	case c.loginSlot <- struct{}{}: // full login
-	default:
-		c.log.Warnf("Login already running! Waiting for it to complete.")
-		// Just wait and take the short path.
-		c.loginSlot <- struct{}{}
-		return loginResult(), err
-	}
-	// The design issue that requires this is that we require multiple Login
-	// calls to succeed without a Logout between them. To properly solve this,
-	// Login would actually error if already logged in. However:
-	//  1. Login gives "restart" capabilities for loading and resuming trades.
-	//  2. We lack a mechanism for repeated callers (e.g. impatient HTTP
-	//     requests or sessions from other browsers) to get the result from the
-	//     already-running Login.
-	//
-	// Fundamentally, we need to separate the following notions:
-	//  1. login to Core (credentials check, get cookies)
-	//  2. Core initialization (prep internal state, e.g. loading data from DB)
-	//  3. login to the server (initializeDEXConnections > authDEX).
+	return nil
+}
 
-	// Attempt to connect to and retrieve balance from all known wallets. It is
-	// not an error if we can't connect, unless we need the wallet for active
-	// trades, but that condition is checked later in resolveActiveTrades.
-	// Ignore updateWalletBalance errors here too, to accommodate wallets that
-	// must be unlocked to get the balance. We won't try to unlock here, but if
-	// the wallet is needed for active trades, it will be unlocked in
-	// resolveActiveTrades and the balance updated there.
+// connectWallets attempts to connect to and retrieve balance from all known
+// wallets.
+func (c *Core) connectWallets() {
 	var wg sync.WaitGroup
 	var connectCount uint32
 	connectWallet := func(wallet *xcWallet) {
@@ -4261,21 +4292,15 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	if walletCount > 0 {
 		c.log.Infof("Connected to %d of %d wallets.", connectCount, walletCount)
 	}
+}
 
-	// Load trades from the DB, unlock required wallets for active orders, and
-	// populate the dc.trades map. NOTE: repeated login may involve redundant DB
-	// load of trades already in the dc.trades map, but new required wallets
-	// may be accessible this time.
-	c.resolveActiveTrades(crypter)
-	// Unlock account keys and attempt to authorize with each dexConnection.
-	// Even if connect fails, this prepares the account private keys so authDEX
-	// triggered by the reconnect handler can succeed.
-
-	if err := c.loadBotPrograms(); err != nil {
-		c.log.Errorf("Error loading bot programs: %v", err)
+// Notifications loads the latest notifications from the db.
+func (c *Core) Notifications(n int) ([]*db.Notification, error) {
+	notes, err := c.db.NotificationsN(n)
+	if err != nil {
+		return nil, fmt.Errorf("error getting notifications: %w", err)
 	}
-
-	return loginResult(), nil
+	return notes, nil
 }
 
 // initializePrimaryCredentials sets the PrimaryCredential fields after the DB
@@ -4327,6 +4352,12 @@ func (c *Core) initializePrimaryCredentials(pw []byte, oldKeyParams []byte) erro
 
 // Logout logs the user out
 func (c *Core) Logout() error {
+	c.loginMtx.Lock()
+	defer c.loginMtx.Unlock()
+
+	if !c.loggedIn {
+		return nil
+	}
 
 	// Check active orders
 	conns := c.dexConnections()
@@ -4352,6 +4383,8 @@ func (c *Core) Logout() error {
 	for _, dc := range conns {
 		dc.acct.lock()
 	}
+
+	c.loggedIn = false
 
 	return nil
 }
@@ -4590,25 +4623,10 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, erro
 // If an account is not found on the dex server upon dex authentication the
 // account is disabled and the corresponding entry in c.conns is removed
 // which will result in the user being prompted to register again.
-func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
+func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) {
 	var wg sync.WaitGroup
 	conns := c.dexConnections()
-	results := make([]*DEXBrief, 0, len(conns))
 	for _, dc := range conns {
-		dc.tradeMtx.RLock()
-		tradeIDs := make([]string, 0, len(dc.trades))
-		for tradeID := range dc.trades {
-			tradeIDs = append(tradeIDs, tradeID.String())
-		}
-		dc.tradeMtx.RUnlock()
-		result := &DEXBrief{
-			Host:     dc.acct.host,
-			TradeIDs: tradeIDs,
-			// AcctID might be set to a zeroed string here, but will be reset
-			// below if we have to auth.
-			AcctID: dc.acct.ID().String(),
-		}
-		results = append(results, result)
 		// Unlock before checking auth and continuing, because if the user
 		// logged out and didn't shut down, the account is still authed, but
 		// locked, and needs unlocked.
@@ -4616,21 +4634,16 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 		if err != nil {
 			subject, details := c.formatDetails(TopicAccountUnlockError, dc.acct.host, err)
 			c.notify(newFeePaymentNote(TopicAccountUnlockError, subject, details, db.ErrorLevel, dc.acct.host))
-			result.AuthErr = details
 			continue
 		}
 		if dc.acct.authed() {
-			result.Authed = true
-			result.AcctID = dc.acct.ID().String()
 			continue // authDEX already done
 		}
-		result.AcctID = dc.acct.ID().String()
 
 		if !dc.acct.feePaid() {
 			if len(dc.acct.feeCoin) == 0 {
 				subject, details := c.formatDetails(TopicFeeCoinError, dc.acct.host)
 				c.notify(newFeePaymentNote(TopicFeeCoinError, subject, details, db.ErrorLevel, dc.acct.host))
-				result.AuthErr = details
 				continue
 			}
 			// Try to unlock the fee wallet, which should run the reFee cycle, and
@@ -4640,15 +4653,13 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 				c.log.Debugf("Failed to connect for reFee at %s with error: %v", dc.acct.host, err)
 				subject, details := c.formatDetails(TopicWalletConnectionWarning, dc.acct.host)
 				c.notify(newFeePaymentNote(TopicWalletConnectionWarning, subject, details, db.WarningLevel, dc.acct.host))
-				result.AuthErr = details
 				continue
 			}
 			if !feeWallet.unlocked() {
-				err = feeWallet.Unlock(crypter)
+				err = c.unlockWallet(crypter, feeWallet)
 				if err != nil {
 					subject, details := c.formatDetails(TopicWalletUnlockError, dc.acct.host, err)
 					c.notify(newFeePaymentNote(TopicWalletUnlockError, subject, details, db.ErrorLevel, dc.acct.host))
-					result.AuthErr = details
 					continue
 				}
 			}
@@ -4662,7 +4673,6 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 				"It will automatically authorize when it connects.", dc.acct.host)
 			subject, details := c.formatDetails(TopicDEXDisconnected, dc.acct.host)
 			c.notify(newConnEventNote(TopicDEXDisconnected, subject, dc.acct.host, comms.Disconnected, details, db.ErrorLevel))
-			result.AuthErr = details
 			continue
 		}
 
@@ -4673,14 +4683,11 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 			if err != nil {
 				subject, details := c.formatDetails(TopicDexAuthError, dc.acct.host, err)
 				c.notify(newDEXAuthNote(TopicDexAuthError, subject, dc.acct.host, false, details, db.ErrorLevel))
-				result.AuthErr = details
 				return
 			}
-			result.Authed = true
 		}(dc)
 	}
 	wg.Wait()
-	return results
 }
 
 // resolveActiveTrades loads order and match data from the database. Only active
@@ -4688,23 +4695,16 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 // are loaded, even if there are inactive matches for the same order, but it may
 // be desirable to load all matches, so this behavior may change.
 func (c *Core) resolveActiveTrades(crypter encrypt.Crypter) {
-	failed := make(map[uint32]struct{})
-	relocks := make(assetMap)
 	for _, dc := range c.dexConnections() {
-		// loadDBTrades can add to the failed map.
-		ready, err := c.loadDBTrades(dc, crypter, failed)
+		err := c.loadDBTrades(dc)
 		if err != nil {
-			subject, details := c.formatDetails(TopicOrderLoadFailure, err)
-			c.notify(newOrderNote(TopicOrderLoadFailure, subject, details, db.ErrorLevel, nil))
-			// Keep going since some trades may still have loaded.
+			c.log.Errorf("failed to load trades from db for dex at %s: %v", dc.acct.host, err)
 		}
-		if len(ready) > 0 {
-			locks := c.resumeTrades(dc, ready) // fills out dc.trades
-			relocks.merge(locks)
-		}
-		c.log.Infof("Loaded %d incomplete orders with DEX %v", len(ready), dc.acct.host)
 	}
-	c.updateBalances(relocks)
+
+	// resumeTrades will be a no-op if there are no trades in any
+	// dexConnection's trades map that is not ready to tick.
+	c.resumeTrades(crypter)
 }
 
 func (c *Core) wait(coinID []byte, assetID uint32, trigger func() (bool, error), action func(error)) {
@@ -5090,6 +5090,7 @@ func (c *Core) TradeAsync(pw []byte, form *TradeForm) (*InFlightOrder, error) {
 
 	// Prepare and store the inflight order.
 	corder := coreOrderFromTrade(req.dbOrder.Order, req.dbOrder.MetaData)
+	corder.ReadyToTick = true
 	tempID := req.dc.storeInFlightOrder(corder)
 	req.tempID = tempID
 
@@ -6170,9 +6171,9 @@ func (c *Core) dbOrders(host string) ([]*db.MetaOrder, error) {
 }
 
 // dbTrackers prepares trackedTrades based on active orders and matches in the
-// database. Since dbTrackers may run before sign in when wallets are not
-// connected or unlocked, wallets and coins are not added to the returned
-// trackers. Use resumeTrades with the app Crypter to prepare wallets and coins.
+// database. Since dbTrackers is during the login process when wallets are not yet
+// connected or unlocked, wallets and coins are not added to the returned trackers.
+// Use resumeTrades with the app Crypter to prepare wallets and coins.
 func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, error) {
 	// Prepare active orders, according to the DB.
 	dbOrders, err := c.dbOrders(dc.acct.host)
@@ -6237,6 +6238,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		copy(preImg[:], dbOrder.MetaData.Proof.Preimage)
 		tracker := newTrackedTrade(dbOrder, preImg, dc, c.lockTimeTaker, c.lockTimeMaker,
 			c.db, c.latencyQ, nil, nil, c.notify, c.formatDetails)
+		tracker.readyToTick = false
 		trackers[dbOrder.Order.ID()] = tracker
 
 		// Get matches.
@@ -6324,80 +6326,85 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 	return trackers, nil
 }
 
-// loadDBTrades loads orders and matches from the database for the specified
-// dexConnection. If there are active trades, the necessary wallets will be
-// unlocked. To prevent spamming wallet connections, the 'failed' map will be
-// populated with asset IDs for which the attempt to connect or unlock has
-// failed. The failed map should be passed on subsequent calls for other dexes.
-func (c *Core) loadDBTrades(dc *dexConnection, crypter encrypt.Crypter, failed map[uint32]struct{}) ([]*trackedTrade, error) {
-	// Parse the active trades and see if any wallets need unlocking.
-	trades, err := c.dbTrackers(dc)
+// loadDBTrades load's the active trades from the db, populates the trade's
+// wallets field and some other metadata, and adds the trade to the
+// dexConnection's trades map. Every trade added to the trades map will
+// have wallets set. readyToTick will still be set to false, so resumeTrades
+// must be run before the trades will be processed.
+func (c *Core) loadDBTrades(dc *dexConnection) error {
+	trackers, err := c.dbTrackers(dc)
 	if err != nil {
-		return nil, fmt.Errorf("error retrieving active matches: %w", err)
+		return fmt.Errorf("error retrieving active matches: %w", err)
 	}
 
-	errs := newErrorSet(dc.acct.host + ": ")
-	ready := make([]*trackedTrade, 0, len(trades))
-	for _, trade := range trades {
-		if !trade.isActive() {
+	var tradesLoaded uint32
+	for _, tracker := range trackers {
+		if !tracker.isActive() {
 			// In this event, there is a discrepancy between the active criteria
 			// between dbTrackers and isActive that should be resolved.
-			c.log.Warnf("Loaded inactive trade %v from the DB.", trade.ID())
+			c.log.Warnf("Loaded inactive trade %v from the DB.", tracker.ID())
 			continue
 		}
-		base, quote := trade.Base(), trade.Quote()
-		_, baseFailed := failed[base]
-		_, quoteFailed := failed[quote]
-		if !baseFailed {
-			baseWallet, err := c.connectedWallet(base)
-			if err != nil {
-				baseFailed = true
-				failed[base] = struct{}{}
-				c.log.Errorf("Connecting to wallet %s failed: %v", unbip(base), err)
-			} else if !baseWallet.unlocked() {
-				err = baseWallet.Unlock(crypter)
-				if err != nil {
-					baseFailed = true
-					failed[base] = struct{}{}
-					c.log.Errorf("Unlock wallet %s failed: %v", unbip(base), err)
-				}
+
+		trade := tracker.Trade()
+
+		walletSet, assetConfigs, versCompat, err := c.walletSet(dc, tracker.Base(), tracker.Quote(), trade.Sell)
+		if err != nil {
+			err = fmt.Errorf("failed to load wallets for trade ID %s: %w", tracker.ID(), err)
+			subject, details := c.formatDetails(TopicOrderLoadFailure, err)
+			c.notify(newOrderNote(TopicOrderLoadFailure, subject, details, db.ErrorLevel, nil))
+			continue
+		}
+
+		// Every trade in the trades map must have wallets set.
+		tracker.wallets = walletSet
+		dc.tradeMtx.Lock()
+		if _, found := dc.trades[tracker.ID()]; found {
+			dc.tradeMtx.Unlock()
+			continue
+		}
+		dc.trades[tracker.ID()] = tracker
+		dc.tradeMtx.Unlock()
+
+		mktConf := dc.marketConfig(tracker.mktID)
+		if tracker.metaData.EpochDur == 0 { // upgraded with live orders... smart :/
+			if mktConf != nil { // may remain zero if market also vanished
+				tracker.metaData.EpochDur = mktConf.EpochLen
 			}
 		}
-		if !baseFailed && !quoteFailed {
-			quoteWallet, err := c.connectedWallet(quote)
-			if err != nil {
-				quoteFailed = true
-				failed[quote] = struct{}{}
-				c.log.Errorf("Connecting to wallet %s failed: %v", unbip(quote), err)
-			} else if !quoteWallet.unlocked() {
-				err = quoteWallet.Unlock(crypter)
-				if err != nil {
-					quoteFailed = true
-					failed[quote] = struct{}{}
-					c.log.Errorf("Unlock wallet %s failed: %v", unbip(quote), err)
-				}
-			}
+		if tracker.metaData.FromSwapConf == 0 && assetConfigs.fromAsset != nil {
+			tracker.metaData.FromSwapConf = assetConfigs.fromAsset.SwapConf
 		}
-		if baseFailed {
-			errs.add("could not complete order %s because the wallet for %s cannot be used", trade.token(), unbip(base))
-			continue
+		if tracker.metaData.ToSwapConf == 0 && assetConfigs.toAsset != nil {
+			tracker.metaData.ToSwapConf = assetConfigs.toAsset.SwapConf
 		}
-		if quoteFailed {
-			errs.add("could not complete order %s because the wallet for %s cannot be used", trade.token(), unbip(quote))
-			continue
+
+		c.notify(newOrderNote(TopicOrderLoaded, "", "", db.Data, tracker.coreOrder()))
+
+		if mktConf == nil || !versCompat {
+			tracker.setSelfGoverned(true) // redeem and refund only
+			c.log.Warnf("No server market or incompatible/missing asset configurations for trade %v, market %v, host %v!",
+				tracker.Order.ID(), tracker.mktID, dc.acct.host)
+		} else {
+			tracker.setSelfGoverned(false)
 		}
-		ready = append(ready, trade)
+
+		tradesLoaded++
 	}
-	return ready, errs.ifAny()
+
+	c.log.Infof("Loaded %d incomplete orders with DEX %v", tradesLoaded, dc.acct.host)
+	return nil
 }
 
-// resumeTrades recovers the states of active trades and matches, including
-// loading audit info needed to finish swaps and funding coins needed to create
-// new matches on an order.
-func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMap {
+// resumeTrade recovers the state of active matches including loading audit info
+// needed to finish swaps and funding coins needed to create new matches on an order.
+// If both of the wallets needed for this trade are able to be connected and unlocked,
+// readyToTick will be set to true, even if the funding coins for the order could
+// not be found or the audit info could not be loaded.
+func (c *Core) resumeTrade(tracker *trackedTrade, crypter encrypt.Crypter, failed map[uint32]bool, relocks assetMap) bool {
 	notifyErr := func(tracker *trackedTrade, topic Topic, args ...interface{}) {
 		subject, detail := c.formatDetails(topic, args...)
-		c.notify(newOrderNote(topic, subject, detail, db.ErrorLevel, tracker.coreOrder()))
+		c.notify(newOrderNote(topic, subject, detail, db.ErrorLevel, tracker.coreOrderInternal()))
 	}
 
 	// markUnfunded is used to allow an unfunded order to enter the trades map
@@ -6420,9 +6427,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 		// after timeout. However, the order should be unconditionally canceled.
 	}
 
-	relocks := make(assetMap)
-
-	lockStuff := func(tracker *trackedTrade) {
+	lockStuff := func() {
 		trade := tracker.Trade()
 		wallets := tracker.wallets
 
@@ -6608,58 +6613,78 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 		// Balances should be updated for any orders with locked wallet coins,
 		// or orders with funds locked in contracts.
 		if isActive || needsCoins || tracker.unspentContractAmounts() > 0 {
-			relocks.count(wallets.fromWallet.AssetID)
-		}
-	}
-
-	dc.tradeMtx.Lock()
-	defer dc.tradeMtx.Unlock()
-	for _, tracker := range trackers {
-		// Never overwrite existing trackedTrades.
-		oid := tracker.ID()
-		if _, found := dc.trades[oid]; found {
-			c.log.Tracef("Trade %v already running.", oid)
-			continue
-		}
-		trade := tracker.Trade()
-
-		// Make sure we have the necessary wallets.
-		walletSet, assetConfigs, versCompat, err := c.walletSet(dc, tracker.Base(), tracker.Quote(), trade.Sell)
-		if err != nil {
-			notifyErr(tracker, TopicWalletMissing, "Wallet retrieval error for active order %s: %v", tracker.token(), err)
-			continue
-		}
-		tracker.wallets = walletSet
-		lockStuff(tracker)
-		dc.trades[oid] = tracker
-
-		mktConf := dc.marketConfig(tracker.mktID)
-
-		if tracker.metaData.EpochDur == 0 { // upgraded with live orders... smart :/
-			if mktConf != nil { // may remain zero if market also vanished
-				tracker.metaData.EpochDur = mktConf.EpochLen
+			relocks.count(tracker.wallets.fromWallet.AssetID)
+			if _, is := tracker.accountRedeemer(); is {
+				relocks.count(tracker.wallets.toWallet.AssetID)
 			}
 		}
-		if tracker.metaData.FromSwapConf == 0 && assetConfigs.fromAsset != nil {
-			tracker.metaData.FromSwapConf = assetConfigs.fromAsset.SwapConf
-		}
-		if tracker.metaData.ToSwapConf == 0 && assetConfigs.toAsset != nil {
-			tracker.metaData.ToSwapConf = assetConfigs.toAsset.SwapConf
-		}
+	}
 
-		c.notify(newOrderNote(TopicOrderLoaded, "", "", db.Data, tracker.coreOrder()))
+	tracker.mtx.Lock()
+	defer tracker.mtx.Unlock()
 
-		if mktConf == nil || !versCompat {
-			tracker.setSelfGoverned(true) // redeem and refund only
-			c.log.Warnf("No server market or incompatible/missing asset configurations for trade %v, market %v, host %v!",
-				oid, tracker.mktID, dc.acct.host)
-			// c.notify(newOrderNote(TopicOrderSelfGoverned, subject, details, db.WarnLevel, nil)) ?
-		} else {
-			tracker.setSelfGoverned(false)
+	if tracker.readyToTick {
+		return true
+	}
+
+	if failed[tracker.Base()] || failed[tracker.Quote()] {
+		return false
+	}
+
+	// This should never happen as every wallet added to the trades map has a
+	// walletSet, but this is a good sanity check and also allows tests which
+	// don't have the wallets set to not panic.
+	if tracker.wallets == nil || tracker.wallets.baseWallet == nil || tracker.wallets.quoteWallet == nil {
+		return false
+	}
+
+	err := c.connectAndUnlockResumeTrades(crypter, tracker.wallets.baseWallet, false)
+	if err != nil {
+		failed[tracker.Base()] = true
+		return false
+	}
+
+	err = c.connectAndUnlockResumeTrades(crypter, tracker.wallets.quoteWallet, false)
+	if err != nil {
+		failed[tracker.Quote()] = true
+		return false
+	}
+
+	lockStuff()
+	tracker.readyToTick = true
+	return true
+}
+
+// resumeTrades recovers the states of active trades and matches for all
+// trades in all dexConnection's that are not yet readyToTick. If there are no
+// trades that are not readyToTick, this will be a no-op.
+func (c *Core) resumeTrades(crypter encrypt.Crypter) {
+
+	failed := make(map[uint32]bool)
+	relocks := make(assetMap)
+
+	for _, dc := range c.dexConnections() {
+		for _, tracker := range dc.trackedTrades() {
+			tracker.mtx.RLock()
+			if tracker.readyToTick {
+				tracker.mtx.RUnlock()
+				continue
+			}
+			tracker.mtx.RUnlock()
+
+			if c.resumeTrade(tracker, crypter, failed, relocks) {
+				c.notify(newOrderNote(TopicOrderLoaded, "", "", db.Data, tracker.coreOrder()))
+			} else {
+				tracker.mtx.RLock()
+				err := fmt.Errorf("failed to connect and unlock wallets for trade ID %s", tracker.ID())
+				tracker.mtx.RUnlock()
+				subject, details := c.formatDetails(TopicOrderResumeFailure, err)
+				c.notify(newOrderNote(TopicOrderResumeFailure, subject, details, db.ErrorLevel, nil))
+			}
 		}
 	}
 
-	return relocks
+	c.updateBalances(relocks)
 }
 
 // reReserveFunding reserves funding coins for a newly instantiated wallet.

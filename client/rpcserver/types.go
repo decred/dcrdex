@@ -630,3 +630,14 @@ func parseAddRemoveWalletPeerArgs(params *RawParams) (form *addRemovePeerForm, e
 	form.address = params.Args[1]
 	return form, nil
 }
+
+func parseNotificationsArgs(params *RawParams) (int, error) {
+	if err := checkNArgs(params, []int{0}, []int{1}); err != nil {
+		return 0, err
+	}
+	num, err := checkUIntArg(params.Args[0], "num", 32)
+	if err != nil {
+		return 0, fmt.Errorf("invalid num: %v", err)
+	}
+	return int(num), nil
+}

@@ -622,9 +622,12 @@ func (c *TCore) ValidateAddress(address string, assetID uint32) (bool, error) {
 func (c *TCore) EstimateSendTxFee(addr string, assetID uint32, value uint64, subtract bool) (fee uint64, isValidAddress bool, err error) {
 	return uint64(float64(value) * 0.01), len(addr) > 10, nil
 }
-func (c *TCore) Login([]byte) (*core.LoginResult, error) { return &core.LoginResult{}, nil }
-func (c *TCore) IsInitialized() bool                     { return true }
-func (c *TCore) Logout() error                           { return nil }
+func (c *TCore) Login([]byte) error  { return nil }
+func (c *TCore) IsInitialized() bool { return true }
+func (c *TCore) Logout() error       { return nil }
+func (c *TCore) Notifications(n int) ([]*db.Notification, error) {
+	return nil, nil
+}
 
 var orderAssets = []string{"dcr", "btc", "ltc", "doge", "mona", "vtc", "dextt.eth"}
 

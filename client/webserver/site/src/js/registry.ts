@@ -91,6 +91,7 @@ export interface Order {
   rate: number // limit only
   tif: number // limit only
   targetOrderID: string // cancel only
+  readyToTick: boolean
 }
 
 export interface Match {
