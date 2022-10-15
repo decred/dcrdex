@@ -20,10 +20,7 @@
     <span>Fiat Currency: </span><span id="fiatCurrency">{{.FiatCurrency}}</span>
     </div>
     <div id="fiatRateSources" {{if not .UserInfo.Authed}} class="d-hide"{{end}}>
-    <span class="mb-2" data-tooltip="Sources may provide fiat exchange rates for different subsets of assets.
-     You should select all sources that are acceptable to get fiat exchange rates for the most assets. 
-     Assets with fiat rates from multiple sources will use the average from all of those sources.
-     Note: dcrdate provides fiat exchange rates for only BTC and DCR.">
+    <span class="mb-2" data-tooltip="[[[fiat_exchange_rate_msg]]]">
      [[[fiat_exchange_rate_sources]]]:
     <span class="ico-info"></span>
     </span>
