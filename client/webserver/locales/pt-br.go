@@ -92,7 +92,7 @@ var PtBr = map[string]string{
 	"Settled":                        "Assentado",
 	"Status":                         "Status",
 	"view order history":             "ver histórico de pedidos",
-	"cancel order":                   "cancelar pedido",
+	"cancel_order":                   "cancelar pedido",
 	"order details":                  "detalhes do pedido",
 	"verify_order":                   `Verificar<span id="vSideHeader"></span> Pedido`,
 	"You are submitting an order to": "Você está enviando um pedido para",

@@ -92,7 +92,7 @@ var PlPL = map[string]string{
 	"Settled":                        "Rozliczone",
 	"Status":                         "Status",
 	"view order history":             "wyświetl historię zleceń",
-	"cancel order":                   "anuluj zlecenie",
+	"cancel_order":                   "anuluj zlecenie",
 	"order details":                  "szczegóły zlecenia",
 	"verify_order":                   `Zweryfikuj zlecenie <span id="vSideHeader"></span>`,
 	"You are submitting an order to": "Wysyłasz zlecenie",
