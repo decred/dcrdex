@@ -15,7 +15,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 )
 
-// Dummy keyIndexer since there is no DB or need to coordinate withother
+// Dummy keyIndexer since there is no DB or need to coordinate with other
 // goroutines.
 type keyIndexer struct {
 	idx map[string]uint32

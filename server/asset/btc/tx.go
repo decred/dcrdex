@@ -107,7 +107,7 @@ type VerboseTxExtended struct {
 }
 
 // Currently disabled because the verbose getrawtransaction results for ZCash
-// do not includee the valueBalanceOrchard yet.
+// do not include the valueBalanceOrchard yet.
 // https://github.com/zcash/zcash/pull/5969
 // // ShieldedIO sums the ZCash shielded pool inputs and outputs. Will return
 // // zeros for non-ZCash-protocol transactions.

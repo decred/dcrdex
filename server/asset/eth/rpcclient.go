@@ -57,7 +57,7 @@ func newRPCClient(net dex.Network, ipc string) *rpcclient {
 }
 
 // connect connects to an ipc socket. It then wraps ethclient's client and
-// bundles commands in a form we can easil use.
+// bundles commands in a form we can easily use.
 func (c *rpcclient) connect(ctx context.Context) error {
 	client, err := rpc.DialIPC(ctx, c.ipc)
 	if err != nil {

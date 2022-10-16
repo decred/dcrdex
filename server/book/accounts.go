@@ -7,7 +7,7 @@ import (
 	"decred.org/dcrdex/dex/order"
 )
 
-// AccountTracking is a bitfield representing the assets which need account
+// AccountTracking is a bit field representing the assets which need account
 // tracking.
 type AccountTracking uint8
 

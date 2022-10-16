@@ -136,7 +136,7 @@ func activeSwaps(ctx context.Context, dbe *sql.DB, tableName string) (matches []
 // successfully completed by the specified user, or (2) failed with the user
 // being the at-fault party. Note that the MakerRedeemed match status may be
 // either a success or failure depending on if the user was the maker or taker
-// in the swap, respectively, and the MatchOutcome.Fail flag disambiguates this.
+// in the swap, respectively, and the MatchOutcome.Fail flag disambiguate's this.
 func (a *Archiver) CompletedAndAtFaultMatchStats(aid account.AccountID, lastN int) ([]*db.MatchOutcome, error) {
 	var outcomes []*db.MatchOutcome
 

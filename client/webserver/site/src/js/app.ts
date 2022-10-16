@@ -586,7 +586,7 @@ export default class Application {
         const n = note as SpotPriceNote
         const xc = user.exchanges[n.host]
         // Spots can come before the user is fetched after login and before/while the
-        // markets page reload when it recieves a dex conn note.
+        // markets page reload when it receives a dex conn note.
         if (!xc || !xc.markets) break
         for (const [mktName, spot] of Object.entries(n.spots)) xc.markets[mktName].spot = spot
       }
@@ -756,8 +756,8 @@ export default class Application {
   }
 
   /*
-   * haveActiveOrders returns whether or not the there are active orders
-   * involving a certain asset.
+   * haveActiveOrders returns whether or not there are active orders involving a
+   * certain asset.
    */
   haveAssetOrders (assetID: number): boolean {
     for (const xc of Object.values(this.user.exchanges)) {

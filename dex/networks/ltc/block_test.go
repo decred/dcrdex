@@ -16,29 +16,29 @@ import (
 var (
 	// Testnet4 block 1821752 is pre-MWEB activation, 3 txns.
 	// But version 20000000.
-	//go:embed testnet4Block1821752.dat
+	//go:embed test-data/testnet4Block1821752.dat
 	block1821752 []byte
 
 	// Block 2215584 is the first with MW txns, a peg-in with witness version 9
 	// script, an integ tx with witness version 8 script, block version 20000000
 	// (with a MWEB), and 5 txns.
 	// 7e35fabe7b3c694ebeb0368a1a1c31e83962f3c5b4cc8dcede3ae94ed3deb306
-	//go:embed testnet4Block2215584.dat
+	//go:embed test-data/testnet4Block2215584.dat
 	block2215584 []byte
 
 	// Block 2321749 is version 20000000 with a MWEB, 4 txns, the last one being
 	// an integration / hogex txn that fails to decode.
 	// 57929846db4a92d937eb596354d10949e33c815ee45df0c9b3bbdfb283e15bcd
-	//go:embed testnet4Block2321749.dat
+	//go:embed test-data/testnet4Block2321749.dat
 	block2321749 []byte
 
 	// Block 2319633 is version 20000000 with a MWEB, 2 txns, one coinbase and
 	// one integration.
 	// e9fe2c6496aedefa8bf6529bdc5c1f9fd4af565ca4c98cab73e3a1f616fb3502
-	//go:embed testnet4Block2319633.dat
+	//go:embed test-data/testnet4Block2319633.dat
 	block2319633 []byte
 
-	//go:embed block2215586testnet4.dat
+	//go:embed test-data/testnet4Block2215586.dat
 	block2215586 []byte
 )
 

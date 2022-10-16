@@ -216,7 +216,7 @@ func (pq *OrderPQ) Count() int {
 	return len(pq.orders)
 }
 
-// Satisfy heap.Inferface (Len, Less, Swap, Push, Pop). These functions are only
+// Satisfy heap.Interface (Len, Less, Swap, Push, Pop). These functions are only
 // to be used by the container/heap functions via other thread-safe OrderPQ
 // methods. These are not safe for concurrent use.
 
@@ -265,7 +265,7 @@ func (pq *OrderPQ) Push(ord interface{}) {
 // Extract*, or Remove*, not this method. Pop is required for heap.Interface. It
 // is not thread-safe.
 func (pq *OrderPQ) Pop() interface{} {
-	// heap.Pop put the best value at the end and reheaped without it. Now
+	// heap.Pop put the best value at the end and re-heaped without it. Now
 	// actually pop it off the heap's slice.
 	n := pq.Len()
 	oe := pq.oh[n-1]
@@ -302,7 +302,7 @@ func (pq *OrderPQ) Pop() interface{} {
 	return lo
 }
 
-// End heap.Inferface.
+// End heap.Interface.
 
 // SetLessFn sets the function called by Less. The input lessFn must accept two
 // *orderEntry and return a bool, unlike Less, which accepts heap indexes i, j.
@@ -384,7 +384,7 @@ func (pq *OrderPQ) PeekBest() *order.LimitOrder {
 
 // Reset creates a fresh queue given the input LimitOrder slice. For every
 // element in the queue, this resets the heap index. The heap is then heapified.
-// The input slice is not modifed.
+// The input slice is not modified.
 func (pq *OrderPQ) Reset(orders []*order.LimitOrder) {
 	pq.mtx.Lock()
 	defer pq.mtx.Unlock()

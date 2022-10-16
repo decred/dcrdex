@@ -183,9 +183,9 @@ const (
 	// added to every segwit transaction.
 	SegwitMarkerAndFlagWeight = 2
 
-	// RedeemP2WSHInputWitnessWeight depends on the number of redeem scrpit and
+	// RedeemP2WSHInputWitnessWeight depends on the number of redeem script and
 	// number of signatures.
-	//  version + signatures + length of redeem script + redeemscript
+	//  version + signatures + length of redeem script + redeem script
 	// RedeemP2WSHInputWitnessWeight = 1 + N*DERSigLength + 1 + (redeem script bytes)
 
 	// P2WPKHPkScriptSize is the size of a transaction output script that

@@ -14,7 +14,7 @@ import (
 // PendingAccounter can view order-reserved funds for an account-based asset's
 // address. PendingAccounter is satisfied by *Market.
 type PendingAccounter interface {
-	// AccountPending retreives the total pending order-reserved quantity for
+	// AccountPending retrieves the total pending order-reserved quantity for
 	// the asset, as well as the number of possible pending redemptions
 	// (a.k.a. ordered lots).
 	AccountPending(acctAddr string, assetID uint32) (qty, lots uint64, redeems int)
@@ -29,7 +29,7 @@ type PendingAccounter interface {
 type MatchNegotiator interface {
 	// AccountStats collects stats about pending matches for account's address
 	// on an account-based asset. qty is the total pending outgoing quantity,
-	// swaps is the number matches with oustanding swaps funded by the account,
+	// swaps is the number matches with outstanding swaps funded by the account,
 	// and redeem is the number of matches with outstanding redemptions that pay
 	// to the account.
 	AccountStats(acctAddr string, assetID uint32) (qty, swaps uint64, redeems int)

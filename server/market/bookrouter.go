@@ -33,8 +33,9 @@ const (
 	// unbookAction means an order is being removed from the order book and will
 	// result in a msgjson.UnbookOrderNote being sent to subscribers.
 	unbookAction
-	// updateRemainingAction means a standling limit order has partially filled
-	// and will result in a msgjson.UpdateRemainingNote being sent to subscribers.
+	// updateRemainingAction means a standing limit order has partially filled
+	// and will result in a msgjson.UpdateRemainingNote being sent to
+	// subscribers.
 	updateRemainingAction
 	// newEpochAction is an internal signal to the routers main loop that
 	// indicates when a new epoch has opened.
