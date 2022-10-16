@@ -647,6 +647,11 @@ type TXCWallet struct {
 	ownsAddressErr      error
 	pubKeys             []dex.Bytes
 	sigs                []dex.Bytes
+	feeTxMade           []byte
+	feeCoin             []byte
+	makeRegFeeTxErr     error
+	feeCoinSent         []byte
+	sendTxnErr          error
 	contractExpired     bool
 	contractLockTime    time.Time
 	accelerationParams  *struct {
@@ -824,7 +829,11 @@ func (w *TXCWallet) AuditContract(coinID, contract, txData dex.Bytes, rebroadcas
 	return w.auditInfo, w.auditErr
 }
 
-func (w *TXCWallet) LocktimeExpired(_ context.Context, contract dex.Bytes) (bool, time.Time, error) {
+func (w *TXCWallet) LockTimeExpired(_ context.Context, lockTime time.Time) (bool, error) {
+	return w.contractExpired, nil
+}
+
+func (w *TXCWallet) ContractLockTimeExpired(_ context.Context, contract dex.Bytes) (bool, time.Time, error) {
 	return w.contractExpired, w.contractLockTime, nil
 }
 
@@ -869,6 +878,14 @@ func (w *TXCWallet) Send(address string, value, feeSuggestion uint64) (asset.Coi
 	w.sendFeeSuggestion = feeSuggestion
 	w.sendCoin.val = value
 	return w.sendCoin, w.sendErr
+}
+
+func (w *TXCWallet) MakeBondTx(ver uint64, address string, regFee uint64, acctID []byte) (*asset.Bond, error) {
+	return nil, errors.New("not used")
+}
+
+func (w *TXCWallet) SendTransaction(rawTx []byte) ([]byte, error) {
+	return w.feeCoinSent, w.sendTxnErr
 }
 
 func (w *TXCWallet) Withdraw(address string, value, feeSuggestion uint64) (asset.Coin, error) {

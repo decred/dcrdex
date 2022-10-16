@@ -28,6 +28,8 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/decred/dcrd/dcrutil/v4"
 )
 
 const (
@@ -147,6 +149,112 @@ func TestMain(m *testing.M) {
 		return m.Run()
 	}
 	os.Exit(doIt())
+}
+
+func TestMakeBondTx(t *testing.T) {
+	rig := newTestRig(t, func(name string, err error) {
+		tLogger.Infof("%s has reported a new block, error = %v", name, err)
+	})
+	defer rig.close(t)
+
+	// Get a private key for the bond script. This would come from the client's
+	// HD key chain.
+	priv, err := secp256k1.GeneratePrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pubkey := priv.PubKey()
+
+	acctID := randBytes(32)
+	fee := uint64(10_2030_4050) //  ~10.2 DCR
+	const bondVer = 0
+
+	wallet := rig.beta()
+
+	// Unlock the wallet to sign the tx and get keys.
+	err = wallet.Unlock(walletPassword)
+	if err != nil {
+		t.Fatalf("error unlocking beta wallet: %v", err)
+	}
+
+	lockTime := time.Now().Add(5 * time.Minute)
+	bond, err := wallet.MakeBondTx(bondVer, fee, lockTime, priv, acctID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coinhash, _, err := decodeCoinID(bond.CoinID)
+	if err != nil {
+		t.Fatalf("decodeCoinID: %v", err)
+	}
+	t.Logf("bond txid %v\n", coinhash)
+	t.Logf("signed tx: %x\n", bond.SignedTx)
+	t.Logf("unsigned tx: %x\n", bond.UnsignedTx)
+	t.Logf("bond script: %x\n", bond.BondData)
+	t.Logf("redeem tx: %x\n", bond.RedeemTx)
+	bondMsgTx, err := msgTxFromBytes(bond.SignedTx)
+	if err != nil {
+		t.Fatalf("invalid bond tx: %v", err)
+	}
+	bondOutVersion := bondMsgTx.TxOut[0].Version
+
+	pkh := dcrutil.Hash160(pubkey.SerializeCompressed())
+
+	lockTimeUint, pkhPush, err := dexdcr.ExtractBondDetailsV0(bondOutVersion, bond.BondData)
+	if err != nil {
+		t.Fatalf("ExtractBondDetailsV0: %v", err)
+	}
+	if !bytes.Equal(pkh, pkhPush) {
+		t.Fatalf("mismatching pubkeyhash in bond script and signature (%x != %x)", pkh, pkhPush)
+	}
+
+	if lockTime.Unix() != int64(lockTimeUint) {
+		t.Fatalf("mismatching locktimes (%d != %d)", lockTime.Unix(), lockTimeUint)
+	}
+	lockTimePush := time.Unix(int64(lockTimeUint), 0)
+	t.Logf("lock time in bond script: %v", lockTimePush)
+
+	privOut := secp256k1.PrivKeyFromBytes(bond.BondPrivKey)
+	pk := privOut.PubKey()
+	if !pk.IsEqual(pubkey) {
+		t.Fatalf("privkey does not match pubkey from bond script and bond signature")
+	}
+
+	if !privOut.Key.Equals(&priv.Key) {
+		t.Fatalf("serialized private key from asset.Bond does not match private key provided private key")
+	}
+
+	sendBondTx, err := wallet.SendTransaction(bond.SignedTx)
+	if err != nil {
+		t.Fatalf("RefundBond: %v", err)
+	}
+	sendBondTxid, _, err := decodeCoinID(sendBondTx)
+	if err != nil {
+		t.Fatalf("decodeCoinID: %v", err)
+	}
+	t.Logf("sendBondTxid: %v\n", sendBondTxid)
+
+	waitNetwork() // wait for alpha to see the txn
+	mineAlpha()
+	waitNetwork() // wait for beta to see the new block (bond must be mined for RefundBond)
+
+	refundTxNew, err := wallet.RefundBond(context.Background(), bondVer, bond.CoinID,
+		bond.BondData, bond.Amount, priv)
+	if err != nil {
+		t.Fatalf("RefundBond: %v", err)
+	}
+	t.Logf("refundTxNew: %x\n", refundTxNew)
+
+	// Send it, but note that since lock time is not passed this is still
+	// non-standard and won't yet propagate on mainnet.
+	refundCoin, err := wallet.SendTransaction(refundTxNew)
+	if err != nil {
+		t.Fatalf("SendTransaction: %v", err)
+	}
+	refundCoinTxid, _, err := decodeCoinID(refundCoin)
+	if err != nil {
+		t.Fatalf("decodeCoinID: %v", err)
+	}
+	t.Log(refundCoinTxid)
 }
 
 func TestWallet(t *testing.T) {

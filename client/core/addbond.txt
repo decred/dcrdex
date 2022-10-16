@@ -1,0 +1,171 @@
+// AddBond posts a new bond for an existing DEX account.
+func (c *Core) AddBond(form *PostBondForm) (*PostBondResult, error) {
+	// Make sure the app has been initialized.
+	if !c.IsInitialized() {
+		return nil, fmt.Errorf("app not initialized")
+	}
+
+	// Check the app password.
+	crypter, err := c.encryptionKey(form.AppPass)
+	if err != nil {
+		return nil, codedError(passwordErr, err)
+	}
+	if form.Addr == "" {
+		return nil, newError(emptyHostErr, "no dex address specified")
+	}
+	host, err := addrHost(form.Addr)
+	if err != nil {
+		return nil, newError(addressParseErr, "error parsing address: %v", err)
+	}
+	if !c.isRegistered(host) {
+		return nil, newError(unknownDEXErr, "not registered at %s", form.Addr)
+	}
+
+	dc, err := c.connectedDEX(host)
+	if err != nil {
+		return nil, err
+	}
+	if dc.acct.locked() { // require authDEX first to reconcile any existing bond statuses
+		return nil, newError(acctKeyErr, "acct locked %s (login first)", form.Addr)
+	}
+
+	// Get the wallet to author the transaction.
+	bondAssetID := uint32(42)
+	if form.Asset != nil {
+		bondAssetID = *form.Asset
+	}
+	bondAssetSymbol := dex.BipIDSymbol(bondAssetID)
+	wallet, err := c.connectedWallet(bondAssetID)
+	if err != nil {
+		return nil, fmt.Errorf("cannot connect to %s wallet to pay fee: %w", bondAssetSymbol, err)
+	}
+
+	// Ensure this DEX supports this asset for bond, and get the required
+	// confirmations and bond amount.
+	bondAsset, bondExpiry := dc.bondAsset(bondAssetID)
+	if bondAsset == nil {
+		return nil, newError(assetSupportErr, "dex server does not support fidelity bonds in asset %q", bondAssetSymbol)
+	}
+	bondValidity := time.Duration(bondExpiry) * time.Second // bond lifetime
+
+	lockTime := time.Now().Add(2 * bondValidity).Truncate(time.Second) // default lockTime is double
+	if form.LockTime > 0 {
+		lockTime = time.Unix(int64(form.LockTime), 0)
+	}
+	expireTime := time.Now().Add(bondValidity) // when the server would expire the bond
+	if lockTime.Before(expireTime) {
+		return nil, newError(bondTimeErr, "lock time of %d has already passed the server's expiry time of %d (bond expiry %d)",
+			form.LockTime, expireTime, bondExpiry)
+	}
+	if lockTime.Add(-time.Minute).Before(expireTime) {
+		return nil, newError(bondTimeErr, "lock time of %d is less than a minute from the server's expiry time of %d (bond expiry %d)",
+			form.LockTime, expireTime, bondExpiry)
+	}
+	if lockDur := time.Until(lockTime); lockDur > lockTimeLimit {
+		return nil, newError(bondTimeErr, "excessive lock time (%v>%v)", lockDur, lockTimeLimit)
+	}
+
+	if bondAssetID != bondAsset.ID { // internal consistency of config.bondassets array
+		return nil, newError(signatureErr, "config response lists asset %d, but expected %d: %v",
+			bondAsset.ID, bondAssetID, err)
+	}
+
+	// Check that the bond amount is non-zero.
+	if form.Bond == 0 {
+		return nil, newError(bondAmtErr, "zero registration fees not allowed")
+	}
+	// Check that the bond amount matches the caller's expectations.
+	if form.Bond < bondAsset.Amt {
+		return nil, newError(bondAmtErr, "specified bond amount is less than the DEX-provided amount. %d < %d",
+			form.Bond, bondAsset.Amt)
+	}
+	if rem := form.Bond % bondAsset.Amt; rem != 0 {
+		return nil, newError(bondAmtErr, "specified bond amount is not a multiple of the DEX-provided amount. %d %% %d = %d",
+			form.Bond, bondAsset.Amt, rem)
+	}
+	strength := form.Bond / bondAsset.Amt
+
+	// Get ready to generate the bond txn.
+	if !wallet.unlocked() {
+		err = wallet.Unlock(crypter)
+		if err != nil {
+			return nil, newError(walletAuthErr, "failed to unlock %s wallet: %v", unbip(wallet.AssetID), err)
+		}
+	}
+
+	// Make a bond transaction for the account ID generated from our public key.
+	privKey := dc.acct.privKey
+	pkBytes := privKey.PubKey().SerializeCompressed()
+	acctID := account.NewID(pkBytes) // dc.acct.id
+	bond, err := wallet.MakeBondTx(form.Bond, lockTime, acctID[:])
+	if err != nil {
+		return nil, codedError(registerErr, err)
+	}
+
+	// Do postbond with the *unsigned* txn.
+	pbr, err := c.postBond(dc, bond)
+	if err != nil {
+		return nil, err
+	}
+
+	reqConfs := bondAsset.Confs
+	bondCoinStr := coinIDString(bond.AssetID, bond.CoinID)
+	c.log.Infof("DEX %v has validated our bond %v (%s) with strength %d. %d confirmations required to trade.",
+		host, bondCoinStr, unbip(bond.AssetID), strength, reqConfs)
+
+	// Store the account and bond info.
+	dbBond := &db.Bond{
+		AssetID:     bond.AssetID,
+		CoinID:      bond.CoinID,
+		UnsignedTx:  bond.UnsignedTx,
+		SignedTx:    bond.SignedTx,
+		Script:      bond.BondScript,
+		Amount:      form.Bond,
+		LockTime:    uint64(lockTime.Unix()),
+		BondPrivKey: bond.BondPrivKey,
+		RefundTx:    bond.RedeemTx,
+		// Confirmed and Refunded are false (new bond tx)
+	}
+	err = c.db.AddBond(host, dbBond)
+	if err != nil {
+		return nil, fmt.Errorf("failed to store bond %v (%s) for dex %v: %v",
+			bondCoinStr, bond.AssetID, host, err)
+	}
+
+	dc.acct.authMtx.Lock()
+	dc.acct.pendingBonds = append(dc.acct.pendingBonds, dbBond)
+	dc.acct.authMtx.Unlock()
+
+	// Broadcast the bond and start waiting for confs.
+	c.log.Infof("Broadcasting bond %v (%s) with lock time %v, script = %x.\n\n"+
+		"BACKUP refund tx paying to current wallet: %x\n\n",
+		bondCoinStr, unbip(bond.AssetID), lockTime, bond.BondScript, bond.RedeemTx)
+	if bondCoinCast, err := wallet.SendTransaction(bond.SignedTx); err != nil {
+		c.log.Warnf("Failed to broadcast bond txn: %v")
+	} else if !bytes.Equal(bond.CoinID, bondCoinCast) {
+		c.log.Warnf("Broadcasted bond %v; was expecting %v!",
+			coinIDString(bond.AssetID, bondCoinCast), bondCoinStr)
+	}
+
+	c.updateAssetBalance(bond.AssetID)
+
+	if pbr.Confs < int64(reqConfs) { // pbr.Confs should be -1!
+		// Start waiting for reqConfs.
+		details := fmt.Sprintf("Waiting for %d confirmations to post bond %v (%s) to %s",
+			reqConfs, bondCoinStr, unbip(bond.AssetID), dc.acct.host)
+		c.notify(newBondPostNoteWithConfirmations(TopicBondConfirming, string(TopicBondConfirming),
+			details, db.Success, bond.AssetID, 0, dc.acct.host))
+		// Set up the coin waiter, which watches confirmations so the user knows
+		// when to expect their account to be marked paid by the server.
+		c.monitorBondConfs(dc, bond, reqConfs)
+	} else {
+		c.log.Warnf("DEX %v claims that out bond txn %v is already confirmed, but we just made it!",
+			host, bondCoinStr)
+		err = c.bondConfirmed(dc, bond.AssetID, bond.CoinID, pbr.Tier)
+		if err != nil {
+			c.log.Errorf("Unable to confirm bond: %v", err)
+		}
+	}
+
+	return &PostBondResult{BondID: bondCoinStr, ReqConfirms: uint16(reqConfs)}, err
+}

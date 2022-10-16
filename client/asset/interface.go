@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
 // WalletTrait is a bitset indicating various optional wallet features, such as
@@ -338,13 +339,13 @@ type Wallet interface {
 	// the tx exists on the blockchain, use SwapConfirmations to ensure
 	// the tx is mined.
 	AuditContract(coinID, contract, txData dex.Bytes, rebroadcast bool) (*AuditInfo, error)
-	// LocktimeExpired returns true if the specified contract's locktime has
-	// expired, making it possible to issue a Refund. The contract expiry time
-	// is also returned, but reaching this time does not necessarily mean the
-	// contract can be refunded since assets have different rules to satisfy the
-	// lock. For example, in Bitcoin the median of the last 11 blocks must be
-	// past the expiry time, not the current time.
-	LocktimeExpired(ctx context.Context, contract dex.Bytes) (bool, time.Time, error)
+	// ContractLockTimeExpired returns true if the specified contract's locktime
+	// has expired, making it possible to issue a Refund. The contract expiry
+	// time is also returned, but reaching this time does not necessarily mean
+	// the contract can be refunded since assets have different rules to satisfy
+	// the lock. For example, in Bitcoin the median of the last 11 blocks must
+	// be past the expiry time, not the current time.
+	ContractLockTimeExpired(ctx context.Context, contract dex.Bytes) (bool, time.Time, error)
 	// FindRedemption watches for the input that spends the specified
 	// coin and contract, and returns the spending input and the
 	// secret key when it finds a spender.
@@ -389,6 +390,9 @@ type Wallet interface {
 	Lock() error
 	// Locked will be true if the wallet is currently locked.
 	Locked() bool
+	// LockTimeExpired returns true if the specified locktime has expired,
+	// making it possible to redeem the locked coins.
+	LockTimeExpired(ctx context.Context, lockTime time.Time) (bool, error)
 	// SwapConfirmations gets the number of confirmations and the spend status
 	// for the specified swap. If the swap was not funded by this wallet, and
 	// it is already spent, you may see CoinNotFoundError.
@@ -425,6 +429,29 @@ type TxFeeEstimator interface {
 	// calculate the tx fee where possible and ensures the wallet has enough to
 	// cover send value and minimum fees.
 	EstimateSendTxFee(address string, value, feeRate uint64, subtract bool) (fee uint64, isValidAddress bool, err error)
+}
+
+// Bonder is a wallet capable of creating and redeeming time-locked fidelity
+// bond transaction outputs.
+type Bonder interface {
+	// MakeBondTx authors a DEX time-locked fidelity bond transaction for the
+	// provided amount, lock time, and dex account ID. An explicit private key
+	// type is used to guarantee it's not bytes from something else like a
+	// public key.
+	MakeBondTx(ver uint16, amt uint64, lockTime time.Time, privKey *secp256k1.PrivateKey, acctID []byte) (*Bond, error)
+	// RefundBond will refund the bond given the full bond output details and
+	// private key to spend it.
+	RefundBond(ctx context.Context, ver uint16, coinID, script []byte, amt uint64, privKey *secp256k1.PrivateKey) ([]byte, error)
+	// SendTransaction broadcasts a raw transaction, returning its coin ID.
+	SendTransaction(rawTx []byte) ([]byte, error)
+
+	// A RefundBondByCoinID may be created in the future to attempt to refund a
+	// bond by locating it on chain, i.e. without providing the amount or
+	// script, while also verifying the bond output is unspent. However, it's
+	// far more straightforward to generate the refund transaction using the
+	// known values. Further, methods for (1) locking coins for future bonds,
+	// and (2) renewing bonds by spending a bond directly into a new one, may be
+	// required for efficient client bond management.
 }
 
 // Rescanner is a wallet implementation with rescan functionality.
@@ -634,6 +661,32 @@ type RedemptionConfirmer interface {
 	// different CoinID in the returned asset.ConfirmRedemptionStatus as was
 	// used to call the function.
 	ConfirmRedemption(coinID dex.Bytes, redemption *Redemption) (*ConfirmRedemptionStatus, error)
+}
+
+// Bond is the fidelity bond info generated for a certain account ID, amount,
+// and lock time. These data are intended for the "post bond" request, in which
+// the server pre-validates the unsigned transaction, the client then publishes
+// the corresponding signed transaction, and a final request is made once the
+// bond is fully confirmed. The bond key is kept in this struct to keep it
+// coupled with the bond identity, and a redeem transaction is provided as a
+// backup.
+type Bond struct {
+	Version     uint16
+	AssetID     uint32
+	Amount      uint64
+	CoinID      []byte
+	BondData    []byte // additional data to interpret the bond e.g. redeem script, bond contract, etc.
+	BondPrivKey []byte // caller provided, but kept with the output
+	// SignedTx and UnsignedTx are the opaque (raw bytes) signed and unsigned
+	// bond creation transactions, in whatever encoding and funding scheme for
+	// this asset and wallet. The unsigned one is used to pre-validate this bond
+	// with the server prior to publishing it, thus locking funds for a long
+	// period of time. Once the bond is pre-validated, the signed tx may then be
+	// published by the wallet.
+	SignedTx, UnsignedTx []byte
+	// RedeemTx is a backup transaction that spends the bond output. Normally
+	// the BondPrivKey will be used when the bond expires.
+	RedeemTx []byte
 }
 
 // Balance is categorized information about a wallet's balance.
