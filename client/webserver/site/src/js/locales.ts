@@ -69,6 +69,7 @@ export const ID_DEPTH_LOADING = 'DEPTH_LOADING'
 export const ID_INVALID_ADDRESS_MSG = 'INVALID_ADDRESS_MSG'
 export const ID_TXFEE_UNSUPPORTED = 'TXFEE_UNSUPPORTED'
 export const ID_TXFEE_ERR_MSG = 'TXFEE_ERR_MSG'
+export const ID_ACTIVE_ORDERS_LOGOUT_ERR_MSG = 'ACTIVE_ORDERS_LOGOUT_ERR_MSG'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -139,7 +140,8 @@ export const enUS: Locale = {
   [ID_DEPTH_LOADING]: 'retrieving depth data',
   [ID_INVALID_ADDRESS_MSG]: 'invalid address: {{ address }}',
   [ID_TXFEE_UNSUPPORTED]: 'fee estimation is not supported for this wallet type',
-  [ID_TXFEE_ERR_MSG]: 'fee estimation failed: {{ err }}'
+  [ID_TXFEE_ERR_MSG]: 'fee estimation failed: {{ err }}',
+  [ID_ACTIVE_ORDERS_LOGOUT_ERR_MSG]: 'cannot logout with active orders'
 }
 
 export const ptBR: Locale = {

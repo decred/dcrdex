@@ -330,6 +330,7 @@ export default class Application {
     })
 
     bind(page.profileIcon, 'click', () => {
+      Doc.hide(page.logoutErr)
       this.showDropdown(page.profileIcon, page.profileBox)
     })
 
@@ -887,9 +888,13 @@ export default class Application {
   async signOut () {
     const res = await postJSON('/api/logout')
     if (!this.checkResponse(res)) {
-      // TODO: Esp. for active orders error, let the user know what's going on.
-      // Maybe give them an option to force.
-      Doc.hide(this.page.profileBox)
+      const activeOrdersErrCode = 35
+      if (res.code === activeOrdersErrCode) {
+        this.page.logoutErr.textContent = intl.prep(intl.ID_ACTIVE_ORDERS_LOGOUT_ERR_MSG)
+      } else {
+        this.page.logoutErr.textContent = res.msg
+      }
+      Doc.show(this.page.logoutErr)
       return
     }
     State.clearAllStore()
