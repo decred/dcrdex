@@ -5,7 +5,9 @@
 package dcr
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -19,6 +21,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
+	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec"
@@ -198,6 +201,11 @@ func (*testNode) GetTxOut(_ context.Context, txHash *chainhash.Hash, index uint3
 	out := testChain.txOuts[outID]
 	// Unfound is not an error for GetTxOut.
 	return out, nil
+}
+
+func (*testNode) SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error) {
+	hash := tx.TxHash()
+	return &hash, nil
 }
 
 // Part of the dcrNode interface.
@@ -1460,7 +1468,7 @@ func TestAuxiliary(t *testing.T) {
 		t.Fatal("FeeCoin accepted a stake output")
 	}
 
-	// make a p2sh
+	// make a p2sh that FeeCoin should also accept
 	msgP2SH := testMsgTxP2SHMofN(1, 2)
 	scriptClass, _ = dexdcr.ExtractScriptAddrs(msgP2SH.tx.TxOut[0].Version, msgP2SH.tx.TxOut[0].PkScript, chainParams)
 	if scriptClass == dexdcr.ScriptUnsupported {
@@ -1471,8 +1479,27 @@ func TestAuxiliary(t *testing.T) {
 	confs = int64(3)
 	testAddTxVerbose(msgP2SH.tx, txHash, blockHash, int64(txHeight), confs)
 	_, _, _, err = dcr.FeeCoin(toCoinID(txHash, 0))
-	if err == nil {
-		t.Fatal("FeeCoin accepted a p2sh output")
+	if err != nil {
+		t.Fatal("FeeCoin rejected a p2sh output")
+	}
+
+	// make a p2pk that FeeCoin should reject
+	priv, err := secp256k1.GeneratePrivateKey()
+	if err != nil {
+		t.Fatalf("GeneratePrivateKey error: %v", err)
+	}
+	pkAddr, err := stdaddr.NewAddressPubKeyEcdsaSecp256k1V0(priv.PubKey(), chainParams)
+	if err != nil {
+		t.Fatalf("NewAddressPubKeyEcdsaSecp256k1V0 error: %v", err)
+	}
+	msgTxPK := wire.NewMsgTx()
+	_, pkScript := pkAddr.PaymentScript()
+	msgTxPK.AddTxOut(wire.NewTxOut(1, pkScript))
+	chainHash := msgTxPK.TxHash()
+	testAddTxVerbose(msgTxPK, &chainHash, blockHash, int64(txHeight), confs)
+	_, _, _, err = dcr.FeeCoin(toCoinID(txHash, 0))
+	if err != nil {
+		t.Fatal("FeeCoin rejected a p2sh output")
 	}
 }
 
@@ -1511,23 +1538,21 @@ func TestValidateXPub(t *testing.T) {
 		t.Fatalf("failed to generate master extended key: %v", err)
 	}
 
-	be := &Backend{}
-
 	// fail for private key
 	xprivStr := master.String()
-	if err = be.ValidateXPub(xprivStr); err == nil {
+	if err = ValidateXPub(xprivStr); err == nil {
 		t.Errorf("no error for extended private key")
 	}
 
 	// succeed for public key
 	xpub := master.Neuter()
 	xpubStr := xpub.String()
-	if err = be.ValidateXPub(xpubStr); err != nil {
+	if err = ValidateXPub(xpubStr); err != nil {
 		t.Error(err)
 	}
 
 	// fail for invalid key of wrong length
-	if err = be.ValidateXPub(xpubStr[2:]); err == nil {
+	if err = ValidateXPub(xpubStr[2:]); err == nil {
 		t.Errorf("no error for invalid key")
 	}
 
@@ -1537,7 +1562,7 @@ func TestValidateXPub(t *testing.T) {
 		t.Fatalf("failed to generate master extended key: %v", err)
 	}
 	xpubTestnet := masterTestnet.Neuter()
-	if err = be.ValidateXPub(xpubTestnet.String()); err == nil {
+	if err = ValidateXPub(xpubTestnet.String()); err == nil {
 		t.Errorf("no error for invalid wrong network")
 	}
 }
@@ -1638,4 +1663,98 @@ func TestSynced(t *testing.T) {
 		t.Fatalf("getblockchaininfo error not propagated")
 	}
 	tNode.blockchainInfoErr = nil
+}
+
+func TestParseBondTx(t *testing.T) {
+	const bondVer = 0
+	var bondAmt int64 = 1e8
+	txOK := wire.NewMsgTx()
+	txIn := wire.NewTxIn(&wire.OutPoint{}, 1, []byte{2, 2, 3}) // junk input
+	txOK.AddTxIn(txIn)
+
+	bondPriv, err := secp256k1.GeneratePrivateKey()
+	if err != nil {
+		t.Fatalf("GeneratePrivateKey error: %v\n", err)
+	}
+	bondPubKey := bondPriv.PubKey()
+	pkh := stdaddr.Hash160(bondPubKey.SerializeCompressed())
+	lockTime := time.Now().Add(time.Hour)
+	bondRedeemScript, err := dexdcr.MakeBondScript(bondVer, uint32(lockTime.Unix()), pkh)
+	if err != nil {
+		t.Fatalf("failed to build bond output redeem script: %v", err)
+	}
+
+	bondAddr, err := stdaddr.NewAddressScriptHashV0(bondRedeemScript, chainParams)
+	if err != nil {
+		t.Fatalf("NewAddressScriptHashV0 error: %v\n", err)
+	}
+	_, bondPkScript := bondAddr.PaymentScript()
+
+	feeOut := wire.NewTxOut(bondAmt, bondPkScript)
+	txOK.AddTxOut(feeOut)
+
+	priv, err := secp256k1.GeneratePrivateKey()
+	if err != nil {
+		t.Fatalf("GeneratePrivateKey error: %v\n", err)
+	}
+	pubkey := priv.PubKey().SerializeCompressed()
+	acct, err := account.NewAccountFromPubKey(pubkey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pushData := make([]byte, 2+len(acct.ID)+4+20)
+	var offset int
+	binary.BigEndian.PutUint16(pushData[offset:], bondVer)
+	offset += 2
+	copy(pushData[offset:], acct.ID[:])
+	offset += len(acct.ID)
+	binary.BigEndian.PutUint32(pushData[offset:], uint32(lockTime.Unix()))
+	offset += 4
+	copy(pushData[offset:], pkh)
+	commitPkScript, err := txscript.NewScriptBuilder().
+		AddOp(txscript.OP_RETURN).
+		AddData(pushData).
+		Script()
+	if err != nil {
+		t.Fatalf("script building error in testMsgTxSwapInit: %v", err)
+	}
+	acctOut := wire.NewTxOut(0, commitPkScript)
+	txOK.AddTxOut(acctOut)
+
+	txRaw, err := txOK.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gotCoinID, gotAmt, gotAddr, gotPubKeyHash, gotLockTime, gotAcct, err := ParseBondTx(bondVer, txRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantBondAddr := bondAddr.String()
+	if wantBondAddr != gotAddr {
+		t.Errorf("wrong fee address, wanted %v, got %v", wantBondAddr, gotAmt)
+	}
+
+	if gotAcct != acct.ID {
+		t.Errorf("wrong account, wanted %v, got %v", acct.ID, gotAcct)
+	}
+
+	txHash, vout, err := decodeCoinID(gotCoinID)
+	if err != nil {
+		t.Fatalf("decodeCoinID: %v", err)
+	}
+	if txOK.TxHash() != *txHash {
+		t.Fatalf("got txid %v, expected %v", txOK.TxHash(), txHash)
+	}
+	if vout != 0 {
+		t.Fatalf("wanted vout 0, got %d", vout)
+	}
+	if !bytes.Equal(gotPubKeyHash, pkh) {
+		t.Fatal("pubkey mismatch")
+	}
+	if lockTime.Unix() != gotLockTime {
+		t.Fatalf("got lock time %d, wanted %d", gotLockTime, lockTime.Unix())
+	}
 }
