@@ -81,6 +81,22 @@ func testAddresses() *tAddrs {
 	}
 }
 
+func TestExtractBondDetailsV0(t *testing.T) {
+	bondScript, _ := hex.DecodeString("041d013663b17576a91465b064a4c6bbb1b57362b5b390c00dbd33bdb2b888ac")
+	lockTime, pkh, err := ExtractBondDetailsV0(0, bondScript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantLock := uint32(1664483613)
+	if lockTime != wantLock {
+		t.Errorf("wanted locktime %d, got %d", wantLock, lockTime)
+	}
+	wantPkh, _ := hex.DecodeString("65b064a4c6bbb1b57362b5b390c00dbd33bdb2b8")
+	if !bytes.Equal(pkh, wantPkh) {
+		t.Errorf("wanted pkh %x, got %x", wantPkh, pkh)
+	}
+}
+
 // Test ScriptType methods and pkScript identification via ParseScriptType.
 // TestInputInfo verifies combined P2SH pkScript + redeemscript identification.
 // This test also verifies ExtractScriptHashV0.
