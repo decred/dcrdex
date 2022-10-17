@@ -216,7 +216,7 @@ var DeDE = map[string]string{
 	"Maximum Possible Swap Fees":  "Höchstmögliche Swap-Gebühren",
 	"max_fee_conditions":          "Dies ist der höchste Betrag der für deinen Swap fällig werden könnte. Normalerweise betragen die Gebühren nur einen Bruchteil dieses Satzes. Der Höchstbetrag kann nicht mehr geändert werden sobald der Auftrag erteilt ist.",
 	"wallet_logs":                 "Wallet Logs",
-	":title:accelerate_order":     "Auftrag beschleunigen",
+	"accelerate_order":            "Auftrag beschleunigen",
 	"acceleration_text":           "Wenn deine Swap-Transaktionen stocken kannst du versuchen sie mit einer zusätzlichen Transaktion zu beschleunigen. Dies ist hilfreich wenn der Gebührensatz für eine bestehende unbestätigte Transaktion zu niedrig für das Mining im nächsten Block gewählt wurde, aber nicht wenn die Blöcke nur langsam gemined werden. Wenn du dieses Formular abschickst wird eine Transaktion erstellt die die Änderung aus deiner eigenen Swap-Initiierungstransaktion an dich selbst mit einer höheren Gebühr sendet. Der effektive Gebührensatz deiner Swap-Transaktionen wird zu dem Satz den du unten auswählst durchgeführt. Wähle einen Satz der ausreicht um in den nächsten Block aufgenommen zu werden. Ziehe einen Block-Explorer zu Rate um sicherzugehen.",
 	"effective_swap_tx_rate":      "Effektive Swap tx Gebühr",
 	"current_fee":                 "Derzeitig empfohlene Gebühr",

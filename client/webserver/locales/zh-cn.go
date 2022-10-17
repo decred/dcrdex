@@ -216,7 +216,7 @@ var ZhCN = map[string]string{
 	"Maximum Possible Swap Fees":  "可能出现的最大交换费用",
 	"max_fee_conditions":          "这是您交易而支付的最高费用。费用通常按此费率的一小部分评估。一旦您下订单，最高金额不会更改。",
 	"wallet_logs":                 "钱包日志",
-	":title:accelerate_order":     "加速订单",
+	"accelerate_order":            "加速订单",
 	"acceleration_text":           "如果你的交易卡住了，你可以尝试通过额外的交易来加速它们。当现有未确认交易的费率变得太低而无法在下一个区块中开采时，这很有帮助。当您提交此表单时，将创建一个交易，提高网络的费用。选择一个足以包含在下一个区块中的费率。请查看区块浏览器用以确认。",
 	"effective_swap_tx_rate":      "有效交易费率",
 	"current_fee":                 "当前建议费率",
