@@ -27,6 +27,15 @@ func parseWalletType(t string) (core.SimWalletType, error) {
 }
 
 func main() {
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("SUCCESS!")
+	os.Exit(0)
+}
+
+func run() error {
 	var baseSymbol, quoteSymbol, base1Node, quote1Node, base2Node, quote2Node, regAsset string
 	var base1SPV, quote1SPV, base2SPV, quote2SPV, debug, trace, list, all, runOnce bool
 	var base1Type, quote1Type, base2Type, quote2Type string
@@ -59,24 +68,20 @@ func main() {
 		for _, s := range core.SimTests() {
 			fmt.Println(s)
 		}
-		return
+		return nil
 	}
 
 	if base1SPV {
-		fmt.Fprintln(os.Stderr, "base1spv is removed - use base1type=spv instead")
-		os.Exit(1)
+		return errors.New("base1spv is removed - use base1type=spv instead")
 	}
 	if quote1SPV {
-		fmt.Fprintln(os.Stderr, "quote1spv is removed - use quote1type=spv instead")
-		os.Exit(1)
+		return errors.New("quote1spv is removed - use quote1type=spv instead")
 	}
 	if base2SPV {
-		fmt.Fprintln(os.Stderr, "base2spv is removed - use base2type=spv instead")
-		os.Exit(1)
+		return errors.New("base2spv is removed - use base2type=spv instead")
 	}
 	if quote2SPV {
-		fmt.Fprintln(os.Stderr, "quote2spv is removed - use quote2type=spv instead")
-		os.Exit(1)
+		return errors.New("quote2spv is removed - use quote2type=spv instead")
 	}
 
 	logLevel := dex.LevelInfo
@@ -87,8 +92,31 @@ func main() {
 		logLevel = dex.LevelDebug
 	}
 
+	// Assume any trailing arguments are test names.
+	tests = append(tests, flag.Args()...)
+
+	// Check that all test names are valid.
+	allTests := core.SimTests()
+	var containsAll bool
 	if len(tests) == 0 {
 		tests = []string{"success"}
+	} else {
+		for _, t := range tests {
+			if t == "all" {
+				containsAll = true
+				break
+			}
+			var found bool
+			for _, at := range allTests {
+				if at == t {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("test %s is unknown. Possible tests are %s", t, allTests)
+			}
+		}
 	}
 
 	if regAsset == "" {
@@ -97,27 +125,23 @@ func main() {
 
 	b1wt, err := parseWalletType(base1Type)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "invalid base1 wallet type %q", base1Type)
-		os.Exit(1)
+		return fmt.Errorf("invalid base1 wallet type %q", base1Type)
 	}
 	q1wt, err := parseWalletType(quote1Type)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "invalid quote1 wallet type %q", quote1Type)
-		os.Exit(1)
+		return fmt.Errorf("invalid quote1 wallet type %q", quote1Type)
 	}
 	b2wt, err := parseWalletType(base2Type)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "invalid base2 wallet type %q", base2Type)
-		os.Exit(1)
+		return fmt.Errorf("invalid base2 wallet type %q", base2Type)
 	}
 	q2wt, err := parseWalletType(quote2Type)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "invalid quote2 wallet type %q", quote2Type)
-		os.Exit(1)
+		return fmt.Errorf("invalid quote2 wallet type %q", quote2Type)
 	}
 
-	if all {
-		tests = core.SimTests()
+	if all || containsAll {
+		tests = allTests
 		if len(except) > 0 {
 			for i := len(tests) - 1; i >= 0; i-- {
 				for _, ex := range except {
@@ -130,7 +154,7 @@ func main() {
 		}
 	}
 
-	err = core.RunSimulationTest(&core.SimulationConfig{
+	return core.RunSimulationTest(&core.SimulationConfig{
 		BaseSymbol:        baseSymbol,
 		QuoteSymbol:       quoteSymbol,
 		RegistrationAsset: regAsset,
@@ -150,11 +174,6 @@ func main() {
 		Logger:  dex.StdOutLogger("T", logLevel),
 		RunOnce: runOnce,
 	})
-	if err != nil {
-		fmt.Println("ERROR:", err)
-	} else {
-		fmt.Println("SUCCESS!")
-	}
 }
 
 type flagArray []string
