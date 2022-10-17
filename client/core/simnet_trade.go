@@ -25,7 +25,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,14 +43,17 @@ import (
 	"decred.org/dcrdex/client/asset/ltc"
 	"decred.org/dcrdex/client/asset/zec"
 	"decred.org/dcrdex/client/comms"
-	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
-	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/msgjson"
+	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	dexdoge "decred.org/dcrdex/dex/networks/doge"
+	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"decred.org/dcrdex/dex/order"
 	dexsrv "decred.org/dcrdex/server/dex"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/wire"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -124,21 +126,23 @@ type SimulationConfig struct {
 	Client2           *SimClient
 	Tests             []string
 	Logger            dex.Logger
+	RunOnce           bool
 }
 
 type simulationTest struct {
-	ctx        context.Context
-	cancel     context.CancelFunc
-	log        dex.Logger
-	base       *assetConfig
-	quote      *assetConfig
-	regAsset   uint32
-	marketName string
-	lotSize    uint64
-	rateStep   uint64
-	client1    *simulationClient
-	client2    *simulationClient
-	clients    []*simulationClient
+	ctx            context.Context
+	cancel         context.CancelFunc
+	log            dex.Logger
+	base           *assetConfig
+	quote          *assetConfig
+	regAsset       uint32
+	marketName     string
+	lotSize        uint64
+	rateStep       uint64
+	client1        *simulationClient
+	client2        *simulationClient
+	clients        []*simulationClient
+	client1IsMaker bool
 }
 
 func (s *simulationTest) waitALittleBit() {
@@ -147,20 +151,7 @@ func (s *simulationTest) waitALittleBit() {
 		s.client2.BaseWalletType == WTElectrum || s.client2.QuoteWalletType == WTElectrum {
 		sleep = 7 * time.Second
 	}
-	sleep *= sleepFactor
-	feeSleep := time.Millisecond * time.Duration(s.client1.dc().cfg.BroadcastTimeout/2)
-	if sleep < feeSleep {
-		// eth based assets need to wait for txn to be mined for fees
-		// to be populated here.
-		for bipID := range s.client1.wallets {
-			if accountBIPs[bipID] {
-				sleep = feeSleep
-				s.client1.log.Infof("Waiting for paid order fees to be populated (%s).", sleep)
-				break
-			}
-		}
-	}
-	time.Sleep(sleep)
+	time.Sleep(sleep * sleepFactor)
 }
 
 // RunSimulationTest runs one or more simulations tests, based on the provided
@@ -248,13 +239,21 @@ func RunSimulationTest(cfg *SimulationConfig) error {
 	}
 
 	for _, testName := range cfg.Tests {
-		s.log.Infof("Running %q", testName)
+		s.log.Infof("Running %q with cliet 1 as maker", testName)
 		f, ok := testLookup[testName]
 		if !ok {
 			return fmt.Errorf("no test named %q", testName)
 		}
+		s.client1IsMaker = true
 		if err := f(s); err != nil {
-			return fmt.Errorf("test %q failed: %w", testName, err)
+			return fmt.Errorf("test %q failed with client 1 as maker: %w", testName, err)
+		}
+		s.client1IsMaker = false
+		if !cfg.RunOnce && testName != "orderstatus" {
+			s.log.Infof("Running %q with client 2 as maker", testName)
+			if err := f(s); err != nil {
+				return fmt.Errorf("test %q failed with client 2 as maker: %w", testName, err)
+			}
 		}
 	}
 
@@ -404,6 +403,8 @@ func (s *simulationTest) setup(cl1, cl2 *SimClient) (err error) {
 	if err != nil {
 		return fmt.Errorf("error starting clients: %w", err)
 	}
+	s.client1.replaceConns()
+	s.client2.replaceConns()
 	return nil
 }
 
@@ -414,7 +415,7 @@ var sleepFactor time.Duration = 1
 func testTradeSuccess(s *simulationTest) error {
 	var qty, rate uint64 = 2 * s.lotSize, 150 * s.rateStep
 	s.client1.isSeller, s.client2.isSeller = true, false
-	return s.simpleTradeTest(qty, rate, order.MatchComplete)
+	return s.simpleTradeTest(qty, rate, order.MatchConfirmed)
 }
 
 // TestNoMakerSwap runs a simple trade test and ensures that the resulting
@@ -445,6 +446,38 @@ func testNoTakerSwap(s *simulationTest) error {
 func testNoMakerRedeem(s *simulationTest) error {
 	var qty, rate uint64 = 1 * s.lotSize, 250 * s.rateStep
 	s.client1.isSeller, s.client2.isSeller = true, false
+
+	var bits uint8
+	go func() {
+		<-time.After(tLockTimeTaker)
+		s.client1.filteredConn.requestFilter.Store(func(string) error { return nil })
+		s.client2.filteredConn.requestFilter.Store(func(string) error { return nil })
+		if bits == 0b1 {
+			s.client1.enableWallets()
+		} else {
+			s.client2.enableWallets()
+		}
+	}()
+	preFilter1 := func(route string) error {
+		// Fail every first try of init and redeem. Second try will be
+		// passed on to the real comms.
+		if route == msgjson.InitRoute && bits == 0 {
+			bits = 0b1
+			s.client1.disableWallets()
+		}
+		return nil
+	}
+	preFilter2 := func(route string) error {
+		if route == msgjson.InitRoute && bits == 0 {
+			bits = 0b10
+			s.client2.disableWallets()
+		}
+		return nil
+	}
+
+	s.client1.filteredConn.requestFilter.Store(preFilter1)
+	s.client2.filteredConn.requestFilter.Store(preFilter2)
+
 	return s.simpleTradeTest(qty, rate, order.TakerSwapCast)
 }
 
@@ -461,93 +494,42 @@ func testMakerGhostingAfterTakerRedeem(s *simulationTest) error {
 	var qty, rate uint64 = 1 * s.lotSize, 250 * s.rateStep
 	s.client1.isSeller, s.client2.isSeller = true, false
 
-	c1OrderID, c2OrderID, err := s.placeTestOrders(qty, rate)
-	if err != nil {
-		return err
-	}
-
-	// Monitor trades and stop at order.TakerSwapCast
-	monitorTrades, ctx := errgroup.WithContext(context.Background())
-	monitorTrades.Go(func() error {
-		return s.monitorOrderMatchingAndTradeNeg(ctx, s.client1, c1OrderID, order.TakerSwapCast)
-	})
-	monitorTrades.Go(func() error {
-		return s.monitorOrderMatchingAndTradeNeg(ctx, s.client2, c2OrderID, order.TakerSwapCast)
-	})
-	if err = monitorTrades.Wait(); err != nil {
-		return err
-	}
-
-	// Resume trades but disable Maker's ability to notify the server
-	// after redeeming Taker's swap.
-	resumeTrade := func(ctx context.Context, client *simulationClient, orderID string) error {
-		tracker, err := client.findOrder(orderID)
-		if err != nil {
-			return err
-		}
-		finalStatus := order.MatchComplete
-		var disconnectClient bool
-		tracker.mtx.Lock()
-		for _, match := range tracker.matches {
-			side, status := match.Side, match.Status
-			client.log.Infof("trade %s paused at %s", token(match.MatchID[:]), status)
-			if side == order.Maker {
-				// Disconnecting the client will lock the
-				// tracker mutex, and so cannot be done with it already locked.
-				disconnectClient = true
-			} else {
-				client.log.Infof("%s: resuming trade negotiations to audit Maker's redeem", side)
-				client.noRedeemWait = true
+	var bits uint8
+	anErr := errors.New("intentional error from test")
+	// Prevent the first redeemer, who must be maker, from sending
+	// redeem info to the server.
+	preFilter1 := func(route string) error {
+		if route == msgjson.RedeemRoute {
+			if bits == 0 {
+				bits = 0b1
 			}
-			// Resume maker to redeem even though the redeem request to server
-			// will fail (disconnected) after the redeem bcast.
-			match.swapErr = nil
+			if bits&0b1 != 0 {
+				return anErr
+			}
 		}
-		tracker.mtx.Unlock()
-		if disconnectClient {
-			client.log.Infof("Maker: disconnecting DEX before redeeming Taker's swap")
-			client.dc().connMaster.Disconnect()
-			finalStatus = order.MakerRedeemed // maker shouldn't get past this state
-		}
-		// force next action since trade.tick() will not be called for disconnected dcs.
-		if _, err = client.core.tick(tracker); err != nil {
-			client.log.Infof("tick failure: %v", err)
-		}
-
-		// Propagation to miners can take some time after the send RPC
-		// completes, especially with SPV wallets, so wait a bit before mining
-		// blocks in monitorTrackedTrade.
-		time.Sleep(sleepFactor * time.Second)
-
-		return s.monitorTrackedTrade(client, tracker, finalStatus)
+		return nil
 	}
-	resumeTrades, ctx := errgroup.WithContext(context.Background())
-	resumeTrades.Go(func() error {
-		return resumeTrade(ctx, s.client1, c1OrderID)
-	})
-	resumeTrades.Go(func() error {
-		return resumeTrade(ctx, s.client2, c2OrderID)
-	})
-	if err = resumeTrades.Wait(); err != nil {
-		return err
+	preFilter2 := func(route string) error {
+		if route == msgjson.RedeemRoute {
+			if bits == 0 {
+				bits = 0b10
+			}
+			if bits&0b10 != 0 {
+				return anErr
+			}
+		}
+		return nil
 	}
 
-	// Allow some time for balance changes to be properly reported.
-	// There is usually a split-second window where a locked output
-	// has been spent but the spending tx is still in mempool. This
-	// will cause the txout to be included in the wallets locked
-	// balance, causing a higher than actual balance report.
-	s.waitALittleBit()
+	s.client1.filteredConn.requestFilter.Store(preFilter1)
+	s.client2.filteredConn.requestFilter.Store(preFilter2)
+	defer s.client1.filteredConn.requestFilter.Store(func(string) error { return nil })
+	defer s.client2.filteredConn.requestFilter.Store(func(string) error { return nil })
 
-	for _, client := range s.clients {
-		if err = s.assertBalanceChanges(client); err != nil {
-			return err
-		}
-	}
-
-	s.log.Infof("Trades completed. Maker went dark at %s, Taker continued till %s.",
-		order.MakerRedeemed, order.MatchComplete)
-	return nil
+	// TODO: Currently taker redeemer will not have its redeem confirmed
+	// when match is server revoked. That should be changed and this
+	// changed to order.MatchConfirmed.
+	return s.simpleTradeTest(qty, rate, order.MatchComplete)
 }
 
 // TestOrderStatusReconciliation simulates a few conditions that could cause a
@@ -824,6 +806,7 @@ func testOrderStatusReconciliation(s *simulationTest) error {
 		return fmt.Errorf("client 2 dex not disconnected after %v", disconnectTimeout)
 	}
 
+	s.client2.enableWallets()
 	// Disconnect the wallets, they'll be reconnected when Login is called below.
 	// Login->connectWallets will error for btc spv wallets if the wallet is not
 	// first disconnected.
@@ -877,6 +860,19 @@ func testOrderStatusReconciliation(s *simulationTest) error {
 		return fmt.Errorf("client 2 locked funds not returned: locked before trading %v, locked after trading %v, "+
 			"locked after reconnect %v", preTradeLockedBalance, preDisconnectLockedBalance, c2Balance.Locked)
 	}
+	s.client2.enableWallets()
+
+	for _, c := range s.clients {
+		if err := c.mineMedian(context.TODO(), s.quote.id); err != nil {
+			return err
+		}
+		if err := c.mineMedian(context.TODO(), s.base.id); err != nil {
+			return err
+		}
+	}
+
+	s.waitALittleBit()
+
 	return nil
 }
 
@@ -887,144 +883,48 @@ func testResendPendingRequests(s *simulationTest) error {
 	var qty, rate uint64 = 1 * s.lotSize, 250 * s.rateStep
 	s.client1.isSeller, s.client2.isSeller = true, false
 
-	c1OrderID, c2OrderID, err := s.placeTestOrders(qty, rate)
-	if err != nil {
-		return err
-	}
-
-	// Monitor trades and stop at order.MakerSwapCast.
-	monitorTrades, ctx := errgroup.WithContext(context.Background())
-	monitorTrades.Go(func() error {
-		return s.monitorOrderMatchingAndTradeNeg(ctx, s.client1, c1OrderID, order.MakerSwapCast)
-	})
-	monitorTrades.Go(func() error {
-		return s.monitorOrderMatchingAndTradeNeg(ctx, s.client2, c2OrderID, order.MakerSwapCast)
-	})
-	if err = monitorTrades.Wait(); err != nil {
-		return err
-	}
-
-	// TODO: Rethink how we trigger resendPendingRequests, because causing an
-	// error with a request, esp. by hacking it's match ID to be incorrect, is
-	// very indirect and can cause a data race by modifying a field that is
-	// supposed to be immutable. Can we just call resendPendingRequests?
-
-	// invalidateMatchesAndResumeNegotiations sets an invalid match ID for all
-	// matches of the specified side. This ensures that subsequent attempts by
-	// the client to send a match-related request to the server will fail. The
-	// swapErr is also unset to resume match negotiations.
-	// Returns the original match IDs for the invalidated matches.
-	// Taker matches are invalidated at MakerSwapCast before taker bcasts their swap.
-	// Maker matches are invalidated at TakerSwapCast before maker bcasts their redeem.
-	invalidateMatchesAndResumeNegotiations := func(tracker *trackedTrade, side order.MatchSide) map[*matchTracker]order.MatchID {
-		var invalidMid order.MatchID
-		copy(invalidMid[:], encode.RandomBytes(32))
-
-		tracker.mtx.Lock()
-		invalidatedMatchIDs := make(map[*matchTracker]order.MatchID, len(tracker.matches))
-		for _, match := range tracker.matches {
-			if match.Side == side {
-				invalidatedMatchIDs[match] = match.MatchID
-				match.MatchID = invalidMid
-			}
-			match.swapErr = nil
-		}
-		tracker.mtx.Unlock()
-
-		return invalidatedMatchIDs
-	}
-
-	// restoreMatchesAfterRequestErrors waits for init/redeem request errors
-	// and restores match IDs to stop further errors.
-	restoreMatchesAfterRequestErrors := func(client *simulationClient, tracker *trackedTrade, invalidatedMatchIDs map[*matchTracker]order.MatchID) error {
-		// create new notification feed to catch swap-related errors from send{Init,Redeem}Async
-		notes := client.core.NotificationFeed()
-
-		wait := 5 * sleepFactor * time.Second
-		timer := time.NewTimer(wait)
-		defer timer.Stop()
-		var foundSwapErrorNote bool
-		for !foundSwapErrorNote {
-			select {
-			case note := <-notes:
-				foundSwapErrorNote = note.Severity() == db.ErrorLevel && (note.Topic() == TopicSwapSendError ||
-					note.Topic() == TopicInitError || note.Topic() == TopicReportRedeemError)
-			case <-timer.C:
-				return fmt.Errorf("client %s: no init/redeem error note after %v", client.name, wait)
+	anErr := errors.New("intentional error from test")
+	var bits uint8
+	// Fail every first try of init and redeem. Second try will be
+	// passed on to the real comms.
+	preFilter1 := func(route string) error {
+		if route == msgjson.InitRoute {
+			if bits&0b1 == 0 {
+				bits |= 0b1
+				return anErr
 			}
 		}
-
-		tracker.mtx.Lock()
-		for match, mid := range invalidatedMatchIDs {
-			match.MatchID = mid
+		if route == msgjson.RedeemRoute {
+			if bits&0b10 == 0 {
+				bits |= 0b10
+				return anErr
+			}
 		}
-		tracker.mtx.Unlock()
 		return nil
 	}
 
-	// Resume and monitor trades but set up both taker's init and maker's redeem
-	// requests to fail.
-	resumeTrade := func(ctx context.Context, client *simulationClient, orderID string) error {
-		tracker, err := client.findOrder(orderID)
-		if err != nil {
-			return err
-		}
-
-		// if this is Taker, invalidate the matches to cause init request failure
-		invalidatedMatchIDs := invalidateMatchesAndResumeNegotiations(tracker, order.Taker)
-		client.log.Infof("resumed trade negotiations from %s", order.MakerSwapCast)
-
-		if len(invalidatedMatchIDs) > 0 { // client is taker
-			client.log.Infof("invalidated taker matches, waiting for init request error")
-			if err = restoreMatchesAfterRequestErrors(client, tracker, invalidatedMatchIDs); err != nil {
-				return err
+	preFilter2 := func(route string) error {
+		if route == msgjson.InitRoute {
+			if bits&0b100 == 0 {
+				bits |= 0b100
+				return anErr
 			}
-			client.log.Infof("taker matches restored, now monitoring trade to completion")
-			return s.monitorTrackedTrade(client, tracker, order.MatchComplete)
 		}
-
-		// client is maker, pause trade neg after auditing taker's init swap, but before sending redeem
-		if err = s.monitorTrackedTrade(client, tracker, order.TakerSwapCast); err != nil {
-			return err
+		if route == msgjson.RedeemRoute {
+			if bits&0b1000 == 0 {
+				bits |= 0b1000
+				return anErr
+			}
 		}
-		client.log.Infof("trade paused for maker at %s", order.TakerSwapCast)
-
-		// invalidate maker matches to cause redeem to fail
-		invalidatedMatchIDs = invalidateMatchesAndResumeNegotiations(tracker, order.Maker)
-		client.log.Infof("trade resumed for maker, matches invalidated, waiting for redeem request error")
-		if err = restoreMatchesAfterRequestErrors(client, tracker, invalidatedMatchIDs); err != nil {
-			return err
-		}
-		client.log.Infof("maker matches restored, now monitoring trade to completion")
-		return s.monitorTrackedTrade(client, tracker, order.MatchComplete)
+		return nil
 	}
 
-	resumeTrades, ctx := errgroup.WithContext(context.Background())
-	resumeTrades.Go(func() error {
-		return resumeTrade(ctx, s.client1, c1OrderID)
-	})
-	resumeTrades.Go(func() error {
-		return resumeTrade(ctx, s.client2, c2OrderID)
-	})
-	if err = resumeTrades.Wait(); err != nil {
-		return err
-	}
+	s.client1.filteredConn.requestFilter.Store(preFilter1)
+	s.client2.filteredConn.requestFilter.Store(preFilter2)
+	defer s.client1.filteredConn.requestFilter.Store(func(string) error { return nil })
+	defer s.client2.filteredConn.requestFilter.Store(func(string) error { return nil })
 
-	// Allow some time for balance changes to be properly reported.
-	// There is usually a split-second window where a locked output
-	// has been spent but the spending tx is still in mempool. This
-	// will cause the txout to be included in the wallet's locked
-	// balance, causing a higher than actual balance report.
-	s.waitALittleBit()
-
-	for _, client := range s.clients {
-		if err = s.assertBalanceChanges(client); err != nil {
-			return err
-		}
-	}
-
-	s.log.Infof("Trades completed. Init and redeem requests failed and were resent for taker and maker respectively.")
-	return nil
+	return s.simpleTradeTest(qty, rate, order.MatchConfirmed)
 }
 
 // simpleTradeTest uses client1 and client2 to place similar orders but on
@@ -1037,9 +937,6 @@ func (s *simulationTest) simpleTradeTest(qty, rate uint64, finalStatus order.Mat
 		return fmt.Errorf("Both client 1 and 2 cannot be sellers")
 	}
 
-	stopMiners := s.runMiners()
-	defer stopMiners()
-
 	c1OrderID, c2OrderID, err := s.placeTestOrders(qty, rate)
 	if err != nil {
 		return err
@@ -1050,11 +947,24 @@ func (s *simulationTest) simpleTradeTest(qty, rate uint64, finalStatus order.Mat
 		// orders are matched.
 		for _, client := range s.clients {
 			client.disableWallets()
+			defer client.enableWallets()
 		}
 	}
 
-	// WARNING: maker/taker roles are randomly assigned to client1/client2
-	// because they are in the same epoch.
+	if finalStatus == order.MakerSwapCast {
+		// Kill the wallets to prevent Taker from sending swap as soon
+		// as the orders are matched.
+		if s.client1IsMaker {
+			s.client2.disableWallets()
+			defer s.client2.enableWallets()
+		} else {
+			s.client1.disableWallets()
+			defer s.client1.enableWallets()
+		}
+	}
+
+	// NOTE: Client 1 is always maker the first time this test is run and
+	// taker the second when running the same test twice.
 	monitorTrades, ctx := errgroup.WithContext(context.Background())
 	monitorTrades.Go(func() error {
 		return s.monitorOrderMatchingAndTradeNeg(ctx, s.client1, c1OrderID, finalStatus)
@@ -1074,14 +984,14 @@ func (s *simulationTest) simpleTradeTest(qty, rate uint64, finalStatus order.Mat
 	s.waitALittleBit()
 
 	for _, client := range s.clients {
-		if err = s.assertBalanceChanges(client); err != nil {
+		if err = s.assertBalanceChanges(client, false); err != nil {
 			return err
 		}
 	}
 
 	// Check if any refunds are necessary and wait to ensure the refunds
 	// are completed.
-	if finalStatus != order.MatchComplete {
+	if finalStatus < order.MatchConfirmed {
 		refundsWaiter, ctx := errgroup.WithContext(context.Background())
 		refundsWaiter.Go(func() error {
 			return s.checkAndWaitForRefunds(ctx, s.client1, c1OrderID)
@@ -1109,14 +1019,66 @@ func (s *simulationTest) placeTestOrders(qty, rate uint64) (string, string, erro
 		client.expectBalanceDiffs = map[uint32]int64{s.base.id: 0, s.quote.id: 0}
 	}
 
-	c1OrderID, err := s.placeOrder(s.client1, qty, rate, false)
-	if err != nil {
-		return "", "", fmt.Errorf("client1 place %s order error: %v", sellString(s.client1.isSeller), err)
+	var (
+		c1OrderID, c2OrderID string
+		err                  error
+	)
+	placeOrderC1 := func() error {
+		c1OrderID, err = s.placeOrder(s.client1, qty, rate, false)
+		if err != nil {
+			return fmt.Errorf("client1 place %s order error: %v", sellString(s.client1.isSeller), err)
+		}
+		return nil
 	}
-	c2OrderID, err := s.placeOrder(s.client2, qty, rate, false)
-	if err != nil {
-		return "", "", fmt.Errorf("client2 place %s order error: %v", sellString(s.client2.isSeller), err)
+
+	placeOrderC2 := func() error {
+		c2OrderID, err = s.placeOrder(s.client2, qty, rate, false)
+		if err != nil {
+			return fmt.Errorf("client2 place %s order error: %v", sellString(s.client2.isSeller), err)
+		}
+		return nil
 	}
+
+	// The client to have their order booked first becomes the maker of a
+	// trade. Here the second time a trade is run for the same
+	// simulationTest make and taker will be swapped allowing testing for
+	// both sides at different stages of failure to act and their resolution.
+	var (
+		client  *simulationClient
+		orderID string
+	)
+	if s.client1IsMaker {
+		if err = placeOrderC1(); err != nil {
+			return "", "", err
+		}
+		orderID = c1OrderID
+		client = s.client1
+	} else {
+		if err = placeOrderC2(); err != nil {
+			return "", "", err
+		}
+		orderID = c2OrderID
+		client = s.client2
+	}
+
+	tracker, err := client.findOrder(orderID)
+	if err != nil {
+		return "", "", err
+	}
+	// Wait the epoch duration for this order to get booked.
+	epochDur := time.Duration(tracker.epochLen) * time.Millisecond
+	time.Sleep(epochDur)
+
+	if s.client1IsMaker {
+		if err = placeOrderC2(); err != nil {
+			return "", "", err
+		}
+	} else {
+		if err = placeOrderC1(); err != nil {
+			return "", "", err
+		}
+	}
+
 	return c1OrderID, c2OrderID, nil
 }
 
@@ -1143,43 +1105,6 @@ func (s *simulationTest) monitorOrderMatchingAndTradeNeg(ctx context.Context, cl
 		return errs.add("order %s not matched after %s", tracker.token(), maxMatchDuration)
 	}
 
-	tracker.mtx.RLock()
-	client.log.Infof("%d match(es) received for order %s", len(tracker.matches), tracker.token())
-	for _, match := range tracker.matches {
-		client.log.Infof("%s on match %s, amount %s %s", match.Side.String(), token(match.MatchID.Bytes()),
-			s.base.valFmt(match.Quantity), s.base.symbol)
-	}
-	tracker.mtx.RUnlock()
-
-	return s.monitorTrackedTrade(client, tracker, finalStatus)
-}
-
-func (s *simulationTest) runMiners() context.CancelFunc {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	runMiner := func(a *assetConfig, swapConfs uint32) {
-		ctrl := newHarnessCtrl(a.id)
-		go func() {
-			for {
-				ctrl.mineBlocks(s.ctx, swapConfs)
-				// wait between 1 and 5 seconds.
-				delay := time.Duration(rand.Float64()*float64(time.Second)*4) + time.Second
-				select {
-				case <-time.After(delay):
-				case <-ctx.Done():
-					return
-				}
-			}
-		}()
-	}
-
-	runMiner(s.base, 1)
-	runMiner(s.quote, 1)
-
-	return cancel
-}
-
-func (s *simulationTest) monitorTrackedTrade(client *simulationClient, tracker *trackedTrade, finalStatus order.MatchStatus) error {
 	recordBalanceChanges := func(isSwap bool, qty, rate uint64) {
 		amt := int64(qty)
 		a := s.base
@@ -1195,90 +1120,164 @@ func (s *simulationTest) monitorTrackedTrade(client *simulationClient, tracker *
 		client.expectBalanceDiffs[a.id] += amt
 	}
 
+	tracker.mtx.RLock()
+	client.log.Infof("%d match(es) received for order %s", len(tracker.matches), tracker.token())
+	for _, match := range tracker.matches {
+		client.log.Infof("%s on match %s, amount %s %s", match.Side.String(), token(match.MatchID.Bytes()),
+			s.base.valFmt(match.Quantity), s.base.symbol)
+		if match.Side == order.Taker {
+			if finalStatus >= order.TakerSwapCast {
+				recordBalanceChanges(true, match.Quantity, match.Rate)
+			}
+			if finalStatus >= order.MatchComplete {
+				recordBalanceChanges(false, match.Quantity, match.Rate)
+			}
+		} else { // maker
+			if finalStatus >= order.MakerSwapCast {
+				recordBalanceChanges(true, match.Quantity, match.Rate)
+			}
+			if finalStatus >= order.MakerRedeemed {
+				recordBalanceChanges(false, match.Quantity, match.Rate)
+			}
+		}
+	}
+	tracker.mtx.RUnlock()
+
+	return s.monitorTrackedTrade(client, tracker, finalStatus)
+}
+
+func (s *simulationTest) monitorTrackedTrade(client *simulationClient, tracker *trackedTrade, finalStatus order.MatchStatus) error {
 	// run a repeated check for match status changes to mine blocks as necessary.
-	maxTradeDuration := 2 * time.Minute
+	maxTradeDuration := 4 * time.Minute
+	var waitedForOtherSideMakerInit, waitedForOtherSideTakerInit bool
+
+	// TODO: Remove this when the makerghost todo is fixed.
+	if finalStatus == order.MatchComplete {
+		finalStatus = order.MakerRedeemed
+	}
 
 	tryUntil(s.ctx, maxTradeDuration, func() bool {
 		var completedTrades int
+		mineAssets := make(map[uint32]uint32)
+		var waitForOtherSideMakerInit, waitForOtherSideTakerInit bool
+		var thisSide uint32
+		// Don't spam.
+		time.Sleep(time.Second * 2 * sleepFactor)
 		tracker.mtx.Lock()
-		defer tracker.mtx.Unlock()
 		for _, match := range tracker.matches {
 			side, status := match.Side, match.Status
-			if status >= finalStatus {
-				// With async redeem request, wait for redeem sig before
-				// declaring the match complete. Sometimes it is almost
-				// instantaneos and other times the server's node takes a while.
-				// to see the txns (TODO: diagnose this).
-				// Tests that don't expect a redeem can set noRedeemWait to true.
-				if finalStatus == order.MatchComplete &&
-					len(match.MetaData.Proof.Auth.RedeemSig) == 0 &&
-					!client.noRedeemWait {
-					client.log.Infof("Completed match waiting for async redeem response...")
-					continue // check again later
-				}
-				// Prevent further action by blocking the match with a swapErr.
+			client.psMTX.Lock()
+			lastStatus := client.processedStatus[match.MatchID]
+			client.psMTX.Unlock()
+			if status >= finalStatus && lastStatus >= finalStatus {
 				match.swapErr = fmt.Errorf("take no further action")
 				completedTrades++
-			}
-
-			client.psMTX.Lock()
-			if status == client.processedStatus[match.MatchID] || status > finalStatus {
-				client.psMTX.Unlock()
 				continue
 			}
-			lastStatus := client.processedStatus[match.MatchID]
-			client.processedStatus[match.MatchID] = status
-			client.psMTX.Unlock()
-			client.log.Infof("NOW =====> %s", status)
-
-			var assetToMine *dex.Asset
-			var swapOrRedeem string
-
-			switch {
-			case side == order.Maker && status == order.MakerSwapCast,
-				side == order.Taker && status == order.TakerSwapCast:
-				// Record expected balance changes if we've just sent a swap.
-				// Do NOT mine blocks until counter-party captures status change.
-				recordBalanceChanges(true, match.Quantity, match.Rate)
-
-			case side == order.Maker && status == order.TakerSwapCast,
-				side == order.Taker && status == order.MakerSwapCast:
-				// Mine block for counter-party's swap. This enables us to
-				// proceed with the required follow-up action.
-				// Our toAsset == counter-party's fromAsset.
-				assetToMine, swapOrRedeem = tracker.wallets.toAsset, "swap"
-
-			case side == order.Maker && status == order.MakerRedeemed,
-				status == order.MatchComplete && (side == order.Taker || lastStatus != order.MakerRedeemed): // allow MatchComplete for Maker if lastStatus != order.MakerRedeemed
-				recordBalanceChanges(false, match.Quantity, match.Rate)
-				// Mine blocks for redemption since counter-party does not wait
-				// for redeem tx confirmations before performing follow-up action.
-				assetToMine, swapOrRedeem = tracker.wallets.toAsset, "redeem"
+			if status != lastStatus {
+				client.log.Infof("NOW =====> %s", status)
+				client.psMTX.Lock()
+				client.processedStatus[match.MatchID] = status
+				client.psMTX.Unlock()
 			}
 
-			if assetToMine != nil {
-				assetID, nBlocks := assetToMine.ID, assetToMine.SwapConf
-				sleep := 2 * sleepFactor * time.Second
-				client.log.Infof("sleeping for %s to catch up", sleep)
-				time.Sleep(sleep)
-				err := newHarnessCtrl(assetID).mineBlocks(s.ctx, nBlocks)
-				if err == nil {
-					var actor order.MatchSide
-					if swapOrRedeem == "redeem" {
-						actor = side // this client
-					} else if side == order.Maker {
-						actor = order.Taker // counter-party
-					} else {
-						actor = order.Maker
-					}
-					client.log.Infof("Mined %d %s blocks for %s's %s, match %s", nBlocks, unbip(assetID),
-						actor, swapOrRedeem, token(match.MatchID.Bytes()))
+			logIt := func(swapOrRedeem string, assetID, nBlocks uint32) {
+				var actor order.MatchSide
+				if swapOrRedeem == "redeem" {
+					actor = side // this client
+				} else if side == order.Maker {
+					actor = order.Taker // counter-party
 				} else {
-					client.log.Infof("%s mine error %v", unbip(assetID), err) // return err???
+					actor = order.Maker
 				}
+				client.log.Infof("Mining %d %s blocks for %s's %s, match %s", nBlocks, unbip(assetID),
+					actor, swapOrRedeem, token(match.MatchID.Bytes()))
+			}
+
+			if (side == order.Maker && status <= order.MakerSwapCast && finalStatus >= order.MakerSwapCast) ||
+				(side == order.Taker && status <= order.TakerSwapCast && finalStatus >= order.TakerSwapCast) {
+				// If the other side is geth, we need to give it
+				// time to confirm the swap in order to populate
+				// swap fees.
+				if !waitedForOtherSideMakerInit && accountBIPs[tracker.wallets.toWallet.AssetID] {
+					thisSide = tracker.wallets.fromWallet.AssetID
+					waitForOtherSideMakerInit = true
+				}
+				if !waitedForOtherSideTakerInit && status > order.MakerSwapCast &&
+					accountBIPs[tracker.wallets.toWallet.AssetID] {
+					thisSide = tracker.wallets.fromWallet.AssetID
+					waitForOtherSideTakerInit = true
+				}
+				// Progress from asset.
+				nBlocks := tracker.wallets.fromAsset.SwapConf
+				if accountBIPs[tracker.wallets.fromWallet.AssetID] {
+					nBlocks = 8
+				}
+				assetID := tracker.wallets.fromWallet.AssetID
+				mineAssets[assetID] = nBlocks
+				logIt("swap", assetID, nBlocks)
+			}
+			if (side == order.Maker && status > order.TakerSwapCast && finalStatus > order.TakerSwapCast) ||
+				(side == order.Taker && status > order.MakerRedeemed && finalStatus > order.MakerRedeemed) {
+				if !waitedForOtherSideMakerInit && accountBIPs[tracker.wallets.fromWallet.AssetID] {
+					thisSide = tracker.wallets.toWallet.AssetID
+					waitForOtherSideMakerInit = true
+				}
+				if !waitedForOtherSideTakerInit && status > order.MakerSwapCast &&
+					accountBIPs[tracker.wallets.fromWallet.AssetID] {
+					thisSide = tracker.wallets.toWallet.AssetID
+					waitForOtherSideTakerInit = true
+				}
+				// Progress to asset.
+				nBlocks := tracker.wallets.toAsset.SwapConf
+				if accountBIPs[tracker.wallets.toWallet.AssetID] {
+					nBlocks = 8
+				}
+				assetID := tracker.wallets.toWallet.AssetID
+				mineAssets[assetID] = nBlocks
+				logIt("redeem", assetID, nBlocks)
+			}
+			// TODO: Remove this when the makerghost todo is fixed.
+			if accountBIPs[tracker.wallets.toWallet.AssetID] && finalStatus == order.MakerRedeemed &&
+				side == order.Taker && status >= order.MakerRedeemed {
+				assetID := tracker.wallets.toWallet.AssetID
+				nBlocks := uint32(14)
+				mineAssets[assetID] = nBlocks
+				logIt("redeem", assetID, nBlocks)
 			}
 		}
-		return completedTrades == len(tracker.matches)
+		finish := completedTrades == len(tracker.matches)
+		// Do not hold the lock while mining as this hinders trades.
+		tracker.mtx.Unlock()
+
+		// Geth light client takes time for the best block to be updated
+		// after mining. Sleeping to get confs registered for the init
+		// before the match can be confirmed if the utxo side completes
+		// too fast.
+		if waitForOtherSideMakerInit || waitForOtherSideTakerInit {
+			client.log.Infof("Not mining asset %d so geth can find init confirms", thisSide)
+			delete(mineAssets, thisSide)
+		}
+		mine := func(assetID, nBlocks uint32) {
+			err := newHarnessCtrl(assetID).mineBlocks(s.ctx, nBlocks)
+			if err != nil {
+				client.log.Infof("%s mine error %v", unbip(assetID), err) // return err???
+			}
+		}
+		for assetID, swapConf := range mineAssets {
+			mine(assetID, swapConf)
+		}
+		if waitForOtherSideMakerInit || waitForOtherSideTakerInit {
+			client.log.Info("Sleeping 8 seconds for geth to update other side's init best block.")
+			time.Sleep(time.Second * 8)
+			if waitForOtherSideMakerInit {
+				waitedForOtherSideMakerInit = true
+			}
+			if waitForOtherSideTakerInit {
+				waitedForOtherSideTakerInit = true
+			}
+		}
+		return finish
 	})
 	if s.ctx.Err() != nil { // context canceled
 		return nil
@@ -1305,9 +1304,25 @@ func (s *simulationTest) monitorTrackedTrade(client *simulationClient, tracker *
 	return nil
 }
 
+// swaps cannot be refunded until the MedianTimePast is greater than
+// the swap locktime. The MedianTimePast is calculated by taking the
+// timestamps of the last 11 blocks and finding the median. Mining 6
+// blocks on the chain a second from now will ensure that the
+// MedianTimePast will be greater than the furthest swap locktime,
+// thereby lifting the time lock on all these swaps.
+func (client *simulationClient) mineMedian(ctx context.Context, assetID uint32) error {
+	time.Sleep(sleepFactor * time.Second)
+	if err := newHarnessCtrl(assetID).mineBlocks(ctx, 6); err != nil {
+		return fmt.Errorf("client %s: error mining 6 %s blocks for swap refunds: %v",
+			client.name, unbip(assetID), err)
+	}
+	client.log.Infof("Mined 6 blocks for assetID %d to expire swap locktimes", assetID)
+	return nil
+}
+
 func (s *simulationTest) checkAndWaitForRefunds(ctx context.Context, client *simulationClient, orderID string) error {
 	// check if client has pending refunds
-	client.log.Infof("checking if refunds are necessary")
+	client.log.Info("checking if refunds are necessary")
 	refundAmts := map[uint32]int64{s.base.id: 0, s.quote.id: 0}
 	var furthestLockTime time.Time
 
@@ -1322,6 +1337,9 @@ func (s *simulationTest) checkAndWaitForRefunds(ctx context.Context, client *sim
 		return err
 	}
 
+	if tracker == nil {
+		return nil
+	}
 	tracker.mtx.RLock()
 	for _, match := range tracker.matches {
 		if !hasRefundableSwap(match) {
@@ -1368,28 +1386,13 @@ func (s *simulationTest) checkAndWaitForRefunds(ctx context.Context, client *sim
 		}
 	}
 
-	// swaps cannot be refunded until the MedianTimePast is greater than
-	// the swap locktime. The MedianTimePast is calculated by taking the
-	// timestamps of the last 11 blocks and finding the median. Mining 6
-	// blocks on the chain a second from now will ensure that the
-	// MedianTimePast will be greater than the furthest swap locktime,
-	// thereby lifting the time lock on all these swaps.
-	mineMedian := func(assetID uint32) error {
-		time.Sleep(sleepFactor * time.Second)
-		if err := newHarnessCtrl(assetID).mineBlocks(ctx, 6); err != nil {
-			return fmt.Errorf("client %s: error mining 6 %s blocks for swap refunds: %v",
-				client.name, unbip(assetID), err)
-		}
-		client.log.Infof("Mined 6 blocks for assetID %d to expire swap locktimes", assetID)
-		return nil
-	}
 	if refundAmts[s.quote.id] > 0 {
-		if err := mineMedian(s.quote.id); err != nil {
+		if err := client.mineMedian(ctx, s.quote.id); err != nil {
 			return err
 		}
 	}
 	if refundAmts[s.base.id] > 0 {
-		if err := mineMedian(s.base.id); err != nil {
+		if err := client.mineMedian(ctx, s.base.id); err != nil {
 			return err
 		}
 	}
@@ -1428,10 +1431,10 @@ func (s *simulationTest) checkAndWaitForRefunds(ctx context.Context, client *sim
 	s.waitALittleBit()
 
 	client.expectBalanceDiffs = refundAmts
-	err = s.assertBalanceChanges(client)
+	err = s.assertBalanceChanges(client, true)
 	if err == nil {
 		client.log.Infof("successfully refunded swaps worth %s %s and %s %s", s.base.valFmt(refundAmts[s.base.id]),
-			s.base.symbol, s.quote.valFmt(refundAmts[s.quote.id]))
+			s.base.symbol, s.quote.valFmt(refundAmts[s.quote.id]), s.quote.symbol)
 	}
 	return err
 }
@@ -1477,7 +1480,6 @@ type marketConfig struct {
 
 type harnessCtrl struct {
 	dir, fundCmd, fundStr string
-	blockMultiplier       uint32
 }
 
 func (hc *harnessCtrl) run(ctx context.Context, cmd string, args ...string) error {
@@ -1492,7 +1494,6 @@ func (hc *harnessCtrl) run(ctx context.Context, cmd string, args ...string) erro
 }
 
 func (hc *harnessCtrl) mineBlocks(ctx context.Context, n uint32) error {
-	n *= hc.blockMultiplier
 	return hc.run(ctx, "./mine-alpha", fmt.Sprintf("%d", n))
 }
 
@@ -1513,25 +1514,22 @@ func newHarnessCtrl(assetID uint32) *harnessCtrl {
 	switch assetID {
 	case dcr.BipID, btc.BipID, ltc.BipID, bch.BipID, doge.BipID, zec.BipID:
 		return &harnessCtrl{
-			dir:             filepath.Join(dextestDir, dex.BipIDSymbol(assetID), "harness-ctl"),
-			fundCmd:         "./alpha",
-			fundStr:         "sendtoaddress_%s_%d",
-			blockMultiplier: 1,
+			dir:     filepath.Join(dextestDir, dex.BipIDSymbol(assetID), "harness-ctl"),
+			fundCmd: "./alpha",
+			fundStr: "sendtoaddress_%s_%d",
 		}
 	case eth.BipID:
 		// Sending with values of .1 eth.
 		return &harnessCtrl{
-			dir:             filepath.Join(dextestDir, dex.BipIDSymbol(assetID), "harness-ctl"),
-			fundCmd:         "./sendtoaddress",
-			fundStr:         "%s_%d",
-			blockMultiplier: 4,
+			dir:     filepath.Join(dextestDir, dex.BipIDSymbol(assetID), "harness-ctl"),
+			fundCmd: "./sendtoaddress",
+			fundStr: "%s_%d",
 		}
 	case testTokenID:
 		return &harnessCtrl{
-			dir:             filepath.Join(dextestDir, dex.BipIDSymbol(eth.BipID), "harness-ctl"),
-			fundCmd:         "./sendTokens",
-			fundStr:         "%s_%d",
-			blockMultiplier: 4,
+			dir:     filepath.Join(dextestDir, dex.BipIDSymbol(eth.BipID), "harness-ctl"),
+			fundCmd: "./sendTokens",
+			fundStr: "%s_%d",
 		}
 	}
 	panic(fmt.Sprintf("unknown asset %d for harness control", assetID))
@@ -1557,6 +1555,7 @@ var cloneTypes = map[uint32]string{
 // accountBIPs is a map of account based assets. Used in fee estimation.
 var accountBIPs = map[uint32]bool{
 	eth.BipID: true,
+	60000:     true, // dextt test token
 }
 
 func dcrWallet(wt SimWalletType, node string) (*tWallet, error) {
@@ -1743,12 +1742,11 @@ func (s *simulationTest) newClient(name string, cl *SimClient) (*simulationClien
 
 type simulationClient struct {
 	*SimClient
-	name         string
-	log          dex.Logger
-	wg           sync.WaitGroup
-	core         *Core
-	notes        *notificationReader
-	noRedeemWait bool
+	name  string
+	log   dex.Logger
+	wg    sync.WaitGroup
+	core  *Core
+	notes *notificationReader
 
 	psMTX           sync.Mutex
 	processedStatus map[order.MatchID]order.MatchStatus
@@ -1761,6 +1759,7 @@ type simulationClient struct {
 	// change validation. Set to nil to NOT perform balance checks.
 	expectBalanceDiffs map[uint32]int64
 	lastOrder          []byte
+	filteredConn       *tConn
 }
 
 var clientCounter uint32
@@ -1782,6 +1781,17 @@ func (client *simulationClient) init(ctx context.Context) error {
 	client.core.lockTimeMaker = tLockTimeMaker
 	client.notes = client.startNotificationReader(ctx)
 	return nil
+}
+
+func (client *simulationClient) replaceConns() {
+	// Put the real comms in a fake comms we can induce request failures
+	// with.
+	client.core.connMtx.Lock()
+	client.filteredConn = &tConn{
+		WsConn: client.core.conns[dexHost].WsConn,
+	}
+	client.core.conns[dexHost].WsConn = client.filteredConn
+	client.core.connMtx.Unlock()
 }
 
 func (s *simulationTest) registerDEX(client *simulationClient) error {
@@ -1977,7 +1987,7 @@ func (s *simulationTest) updateBalances(client *simulationClient) error {
 	return setBalance(s.quote)
 }
 
-func (s *simulationTest) assertBalanceChanges(client *simulationClient) error {
+func (s *simulationTest) assertBalanceChanges(client *simulationClient, isRefund bool) error {
 	if client.expectBalanceDiffs == nil {
 		return errors.New("balance diff is nil")
 	}
@@ -1988,13 +1998,41 @@ func (s *simulationTest) assertBalanceChanges(client *simulationClient) error {
 	}
 
 	var baseFees, quoteFees int64
-	if fees := ord.FeesPaid; fees != nil {
+	if fees := ord.FeesPaid; fees != nil && !isRefund {
 		if ord.Sell {
 			baseFees = int64(fees.Swap)
 			quoteFees = int64(fees.Redemption)
 		} else {
 			quoteFees = int64(fees.Swap)
 			baseFees = int64(fees.Redemption)
+		}
+	}
+
+	// Account assets require a refund fee in addition to the swap amount.
+	if isRefund {
+		// NOTE: Gas price may be higher if the eth harness has
+		// had a lot of use. The minimum is the gas tip cap.
+		ethRefundFees := int64(dexeth.RefundGas(0 /*version*/)) * dexeth.MinGasTipCap
+
+		msgTx := wire.NewMsgTx(0)
+		prevOut := wire.NewOutPoint(&chainhash.Hash{}, 0)
+		txIn := wire.NewTxIn(prevOut, []byte{}, nil)
+		msgTx.AddTxIn(txIn)
+		size := dexbtc.MsgTxVBytes(msgTx)
+		// tx fee is 1sat/vByte on simnet. utxoRefundFees is 293 sats.
+		utxoRefundFees := int64(size + dexbtc.RefundSigScriptSize + dexbtc.P2PKHOutputSize)
+		if ord.Sell {
+			if accountBIPs[s.base.id] {
+				baseFees = ethRefundFees
+			} else {
+				baseFees = utxoRefundFees
+			}
+		} else {
+			if accountBIPs[s.quote.id] {
+				quoteFees = ethRefundFees
+			} else {
+				quoteFees = utxoRefundFees
+			}
 		}
 	}
 
@@ -2026,8 +2064,6 @@ func (s *simulationTest) assertBalanceChanges(client *simulationClient) error {
 
 		balanceDiff := int64(client.balances[a.id]) - int64(prevBalances[a.id])
 		if balanceDiff < minExpectedDiff || balanceDiff > maxExpectedDiff {
-			// precisionStr := fmt.Sprintf(,
-			// 	math.Log10(float64(conversionFactor)))
 			return fmt.Errorf("%s balance change not in expected range %s - %s, got %s", a.symbol,
 				a.valFmt(minExpectedDiff), a.valFmt(maxExpectedDiff), a.valFmt(balanceDiff))
 		}
@@ -2057,18 +2093,20 @@ func (client *simulationClient) findOrder(orderID string) (*trackedTrade, error)
 	return tracker, nil
 }
 
-// Torpedo the client's wallets by forcing (*Core).locallyUnlocked to return
-// false, even for an unencrypted wallet.
 func (client *simulationClient) disableWallets() {
-	client.log.Infof("Torpedoing wallets")
+	client.log.Infof("Disabling wallets for client %s.", client.name)
 	client.core.walletMtx.Lock()
-	// NOTE: this is not reversible, but could be made so with the undo data:
-	// walletPasses[cid] = make(map[uint32]passes, len(client.core.wallets))
 	for _, wallet := range client.core.wallets {
-		wallet.mtx.Lock()
-		wallet.encPass = []byte{0}
-		wallet.pw = nil
-		wallet.mtx.Unlock()
+		wallet.setDisabled(true)
+	}
+	client.core.walletMtx.Unlock()
+}
+
+func (client *simulationClient) enableWallets() {
+	client.log.Infof("Enabling wallets for client %s.", client.name)
+	client.core.walletMtx.Lock()
+	for _, wallet := range client.core.wallets {
+		wallet.setDisabled(false)
 	}
 	client.core.walletMtx.Unlock()
 }
@@ -2080,6 +2118,26 @@ func (client *simulationClient) disconnectWallets() {
 		wallet.Disconnect()
 	}
 	client.core.walletMtx.Unlock()
+}
+
+var _ comms.WsConn = (*tConn)(nil)
+
+type tConn struct {
+	comms.WsConn
+	requestFilter atomic.Value // func(route string) error
+}
+
+func (tc *tConn) Request(msg *msgjson.Message, respHandler func(*msgjson.Message)) error {
+	return tc.RequestWithTimeout(msg, respHandler, time.Minute, func() {})
+}
+
+func (tc *tConn) RequestWithTimeout(msg *msgjson.Message, respHandler func(*msgjson.Message), expireTime time.Duration, expire func()) error {
+	if fi := tc.requestFilter.Load(); fi != nil {
+		if err := fi.(func(string) error)(msg.Route); err != nil {
+			return err
+		}
+	}
+	return tc.WsConn.RequestWithTimeout(msg, respHandler, expireTime, expire)
 }
 
 func init() {

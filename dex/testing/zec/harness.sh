@@ -33,10 +33,10 @@ mkdir -p "${HARNESS_DIR}"
 
 WALLET_PASSWORD="abc"
 
-ALPHA_CLI_CFG="-rpcport=${ALPHA_RPC_PORT} -regtest=1 -rpcuser=user -rpcpassword=pass"
-BETA_CLI_CFG="-rpcport=${BETA_RPC_PORT} -regtest=1 -rpcuser=user -rpcpassword=pass"
-DELTA_CLI_CFG="-rpcport=${DELTA_RPC_PORT} -regtest=1 -rpcuser=user -rpcpassword=pass"
-GAMMA_CLI_CFG="-rpcport=${GAMMA_RPC_PORT} -regtest=1 -rpcuser=user -rpcpassword=pass"
+ALPHA_CLI_CFG="-rpcport=${ALPHA_RPC_PORT} -regtest=1 -rpcuser=user -rpcpassword=pass -conf=${ALPHA_DIR}/alpha.conf"
+BETA_CLI_CFG="-rpcport=${BETA_RPC_PORT} -regtest=1 -rpcuser=user -rpcpassword=pass -conf=${BETA_DIR}/beta.conf"
+DELTA_CLI_CFG="-rpcport=${DELTA_RPC_PORT} -regtest=1 -rpcuser=user -rpcpassword=pass -conf=${DELTA_DIR}/delta.conf"
+GAMMA_CLI_CFG="-rpcport=${GAMMA_RPC_PORT} -regtest=1 -rpcuser=user -rpcpassword=pass -conf=${GAMMA_DIR}/gamma.conf"
 
 # DONE can be used in a send-keys call along with a `wait-for btc` command to
 # wait for process termination.

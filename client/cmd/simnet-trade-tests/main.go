@@ -28,9 +28,9 @@ func parseWalletType(t string) (core.SimWalletType, error) {
 
 func main() {
 	var baseSymbol, quoteSymbol, base1Node, quote1Node, base2Node, quote2Node, regAsset string
-	var base1SPV, quote1SPV, base2SPV, quote2SPV, debug, trace, list bool
+	var base1SPV, quote1SPV, base2SPV, quote2SPV, debug, trace, list, all, runOnce bool
 	var base1Type, quote1Type, base2Type, quote2Type string
-	var tests flagArray
+	var tests, except flagArray
 	flag.Var(&tests, "t", "the test(s) to run. multiple --t flags OK")
 	flag.StringVar(&baseSymbol, "base", "dcr", "the bot program to run")
 	flag.StringVar(&quoteSymbol, "quote", "btc", "the bot program to run")
@@ -50,6 +50,9 @@ func main() {
 	flag.BoolVar(&list, "list", false, "list available tests")
 	flag.BoolVar(&debug, "debug", false, "log at logging level debug")
 	flag.BoolVar(&trace, "trace", false, "log at logging level trace")
+	flag.BoolVar(&all, "all", false, "run all tests for the asset")
+	flag.Var(&except, "except", "can only be used with the \"all\" flag and removes unwanted tests. multiple --except flags OK")
+	flag.BoolVar(&runOnce, "runonce", false, "some tests will run twice to swap maker/taker. Set to only run once. default is false")
 	flag.Parse()
 
 	if list {
@@ -113,6 +116,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	if all {
+		tests = core.SimTests()
+		if len(except) > 0 {
+			for i := len(tests) - 1; i >= 0; i-- {
+				for _, ex := range except {
+					if tests[i] == ex {
+						tests = append(tests[:i], tests[i+1:]...)
+						break
+					}
+				}
+			}
+		}
+	}
+
 	err = core.RunSimulationTest(&core.SimulationConfig{
 		BaseSymbol:        baseSymbol,
 		QuoteSymbol:       quoteSymbol,
@@ -129,8 +146,9 @@ func main() {
 			BaseNode:        base2Node,
 			QuoteNode:       quote2Node,
 		},
-		Tests:  tests,
-		Logger: dex.StdOutLogger("T", logLevel),
+		Tests:   tests,
+		Logger:  dex.StdOutLogger("T", logLevel),
+		RunOnce: runOnce,
 	})
 	if err != nil {
 		fmt.Println("ERROR:", err)

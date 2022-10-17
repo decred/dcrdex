@@ -434,7 +434,7 @@ func matchMarketBuyOrder(book Booker, ord *order.MarketOrder) (matchSet *order.M
 
 	lotSize := book.LotSize()
 
-	// Amount remaining for market buy is in *quoute* asset, not base asset.
+	// Amount remaining for market buy is in *quote* asset, not base asset.
 	amtRemaining := ord.Remaining() // i.e. ord.Quantity - ord.FillAmt
 	if amtRemaining == 0 {
 		return

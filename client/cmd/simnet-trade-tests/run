@@ -86,7 +86,7 @@ dcrdextt - Decred RPC wallet and Ethereum wallet with dextt.eth test token on ma
 
 ---------------------
 
-One or more of the following tests can be run by specifying one or more -t flags. Default is ['success'].
+One or more of the following tests can be run by specifying one or more -t flags. Default is ['success']. All tests for an asset pair can be run with --all. When using --all, tests can be excluded with --except=test_name.
 
 EOF
 
