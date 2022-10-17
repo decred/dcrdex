@@ -3451,7 +3451,7 @@ func (btc *baseWallet) LockTimeExpired(_ context.Context, lockTime time.Time) (b
 	if err != nil {
 		return false, fmt.Errorf("error getting median time: %w", err)
 	}
-	return medianTime.After(medianTime), nil
+	return medianTime.After(lockTime), nil
 }
 
 // ContractLockTimeExpired returns true if the specified contract's locktime has
