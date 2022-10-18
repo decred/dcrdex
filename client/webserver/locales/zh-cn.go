@@ -49,7 +49,6 @@ var ZhCN = map[string]string{
 	"Current Password":               "当前密码",
 	"New Password":                   "新密码",
 	"Confirm New Password":           "确认新密码",
-	"Cancel Order":                   "取消订单",
 	"cancel_pw":                      "输入您的密码以取消订单",
 	"cancel_no_pw":                   "取消剩余订单",
 	"cancel_remain":                  "在取消订单之前，剩余金额可能会发生变化。",

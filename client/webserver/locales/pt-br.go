@@ -48,7 +48,6 @@ var PtBr = map[string]string{
 	"Current Password":               "Senha Atual",
 	"New Password":                   "Nova Senha",
 	"Confirm New Password":           "Confirmar Nova Senha",
-	"Cancel Order":                   "Cancelar pedido",
 	"cancel_pw":                      "Informe sua senha para cancelar os pedidos que restam",
 	"cancel_no_pw":                   "Enviar ordem de cancelamento para o restante.",
 	"cancel_remain":                  "A quantidade restante pode ser alterada antes do pedido de cancelamento ser coincididos.",

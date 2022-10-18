@@ -48,7 +48,6 @@ var PlPL = map[string]string{
 	"Current Password":               "Obecne hasło",
 	"New Password":                   "Nowe hasło",
 	"Confirm New Password":           "Potwierdź nowe hasło",
-	"Cancel Order":                   "Anuluj zlecenie",
 	"cancel_pw":                      "Podaj hasło, aby wysłać zlecenie anulowania pozostałej sumy",
 	"cancel_no_pw":                   "Wyślij zlecenie anulowania pozostałej sumy",
 	"cancel_remain":                  "Pozostałą suma może ulec zmianie, zanim zlecenie anulowania zostanie wykonane.",

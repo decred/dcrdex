@@ -424,7 +424,7 @@ func TestInputInfo(t *testing.T) {
 	if err == nil {
 		t.Fatalf("no error for missing redeem script")
 	}
-	// Redeem script must be parsable.
+	// Redeem script must be parseable.
 	spendInfo, err = InputInfo(script, invalidScript, tParams)
 	if err != nil {
 		t.Fatalf("failed to parse non-standard script")
