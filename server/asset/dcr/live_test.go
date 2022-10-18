@@ -356,7 +356,7 @@ func TestCacheAdvantage(t *testing.T) {
 	for i := 0; i < numBlocks; i++ {
 		block, err := client.GetBlockVerbose(ctx, nextHash, false)
 		if err != nil {
-			t.Fatalf("error retreving %d-th block from the tip: %v", i, err)
+			t.Fatalf("error retrieving %d-th block from the tip: %v", i, err)
 		}
 		blocks = append(blocks, block)
 		nextHash, err = chainhash.NewHashFromStr(block.PreviousHash)

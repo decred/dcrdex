@@ -149,7 +149,7 @@ func TestUnmarshalJSONEncodedStrings(t *testing.T) {
 	// Test with pre-defined inputs and expectations. Inputs will be converted
 	// to bytes (not json-marshalled), so we'd expect inputs that are not valid
 	// json-encoded strings to fail.
-	expectionsTests := []struct {
+	expectationTests := []struct {
 		name      string
 		jsonPass  jsonString
 		expectErr bool
@@ -214,7 +214,7 @@ func TestUnmarshalJSONEncodedStrings(t *testing.T) {
 		},
 	}
 
-	for _, test := range expectionsTests {
+	for _, test := range expectationTests {
 		var unmarshalledPassBytes PassBytes
 		err := json.Unmarshal(test.jsonPass.bytes(), &unmarshalledPassBytes)
 		if test.expectErr && err != nil {

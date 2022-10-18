@@ -6,12 +6,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"decred.org/dcrdex/client/webserver/locales"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 var (
 	workingDirectory, _ = os.Getwd()
+	titler              cases.Caser
 )
 
 func main() {
@@ -76,7 +80,13 @@ func main() {
 			}
 			token, key := matchGroup[0], string(matchGroup[1])
 			for lang, tmpl := range localizedTemplates {
+				titler = cases.Title(language.MustParse(lang))
 				dict := locales.Locales[lang]
+				var toTitle bool
+				if titleKey := strings.TrimPrefix(key, ":title:"); titleKey != key {
+					toTitle = true
+					key = titleKey
+				}
 				replacement, found := dict[key]
 				if !found {
 					replacement, found = enDict[key]
@@ -85,6 +95,11 @@ func main() {
 					}
 					fmt.Printf("Warning: no %s replacement text for key %q, using 'en' value %s \n", lang, key, replacement)
 				}
+
+				if toTitle {
+					replacement = titler.String(replacement)
+				}
+
 				localizedTemplates[lang] = bytes.Replace(tmpl, token, []byte(replacement), -1) // Could just do 1
 			}
 		}

@@ -49,7 +49,7 @@ func (b *Bytes) UnmarshalJSON(encHex []byte) (err error) {
 	if encHex[0] != '"' || encHex[len(encHex)-1] != '"' {
 		return fmt.Errorf("marshalled Bytes, %q, not quoted", string(encHex))
 	}
-	// DecodeString overallocates by at least double, and it makes a copy.
+	// DecodeString over-allocates by at least double, and it makes a copy.
 	src := encHex[1 : len(encHex)-1]
 	dst := make([]byte, len(src)/2)
 	_, err = hex.Decode(dst, src)

@@ -222,7 +222,7 @@ func (s *DataAPI) handleCandles(thing interface{}) (interface{}, error) {
 func (s *DataAPI) handleOrderBook(thing interface{}) (interface{}, error) {
 	req, ok := thing.(*msgjson.OrderBookSubscription)
 	if !ok {
-		return nil, fmt.Errorf("orderbook request unparseable")
+		return nil, fmt.Errorf("unparseable orderbook request")
 	}
 
 	mkt, err := dex.MarketName(req.Base, req.Quote)

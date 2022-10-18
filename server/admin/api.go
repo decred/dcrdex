@@ -219,7 +219,7 @@ func (s *Server) apiMarketOrderBook(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, res)
 }
 
-// hander for route '/market/{marketName}/epochorders' API request.
+// handler for route '/market/{marketName}/epochorders' API request.
 func (s *Server) apiMarketEpochOrders(w http.ResponseWriter, r *http.Request) {
 	mkt := strings.ToLower(chi.URLParam(r, marketNameKey))
 	status := s.core.MarketStatus(mkt)
@@ -254,7 +254,7 @@ func (s *Server) apiMarketEpochOrders(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, res)
 }
 
-// hander for route '/market/{marketName}/matches?includeinactive=BOOL&n=INT' API
+// handler for route '/market/{marketName}/matches?includeinactive=BOOL&n=INT' API
 // request. The n value is only used when includeinactive is true.
 func (s *Server) apiMarketMatches(w http.ResponseWriter, r *http.Request) {
 	var includeInactive bool
@@ -323,7 +323,7 @@ func (s *Server) apiMarketMatches(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// hander for route '/market/{marketName}/resume?t=UNIXMS'
+// handler for route '/market/{marketName}/resume?t=UNIXMS'
 func (s *Server) apiResume(w http.ResponseWriter, r *http.Request) {
 	// Ensure the market exists and is not running.
 	mkt := strings.ToLower(chi.URLParam(r, marketNameKey))
@@ -371,7 +371,7 @@ func (s *Server) apiResume(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// hander for route '/market/{marketName}/suspend?t=UNIXMS&persist=BOOL'
+// handler for route '/market/{marketName}/suspend?t=UNIXMS&persist=BOOL'
 func (s *Server) apiSuspend(w http.ResponseWriter, r *http.Request) {
 	// Ensure the market exists and is running.
 	mkt := strings.ToLower(chi.URLParam(r, marketNameKey))
@@ -462,7 +462,7 @@ func (s *Server) apiAccountInfo(w http.ResponseWriter, r *http.Request) {
 	acctIDStr := chi.URLParam(r, accountIDKey)
 	acctIDSlice, err := hex.DecodeString(acctIDStr)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("could not decode accout id: %v", err), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("could not decode account id: %v", err), http.StatusBadRequest)
 		return
 	}
 	if len(acctIDSlice) != account.HashSize {
@@ -487,7 +487,7 @@ func decodeAcctID(acctIDStr string) (account.AccountID, error) {
 		return acctID, errors.New("account id has incorrect length")
 	}
 	if _, err := hex.Decode(acctID[:], []byte(acctIDStr)); err != nil {
-		return acctID, fmt.Errorf("could not decode accout id: %w", err)
+		return acctID, fmt.Errorf("could not decode account id: %w", err)
 	}
 	return acctID, nil
 }

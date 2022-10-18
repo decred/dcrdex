@@ -12,19 +12,19 @@ import (
 
 var (
 	// Block 299983 is version 2 with no AuxPOW section, and two txns.
-	//go:embed block299983.dat
+	//go:embed test-data/block299983.dat
 	block299983 []byte
 
 	// Block 371027 is version 6422530 with and AuxPOW section, and five txns.
-	//go:embed block371027.dat
+	//go:embed test-data/block371027.dat
 	block371027 []byte
 
 	// Block 371469 is version 6422786 with and AuxPOW section, and three txns.
-	//go:embed block371469.dat
+	//go:embed test-data/block371469.dat
 	block371469 []byte
 
 	// Block 4193723 is version 6422788 with an AuxPOW section, and two txns.
-	//go:embed block4193723.dat
+	//go:embed test-data/block4193723.dat
 	block4193723 []byte
 )
 

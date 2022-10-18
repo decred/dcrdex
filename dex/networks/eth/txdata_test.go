@@ -81,7 +81,7 @@ func TestParseInitiateDataV0(t *testing.T) {
 	}
 	calldata, err := packInitiateDataV0(initiations)
 	if err != nil {
-		t.Fatalf("unale to pack abi: %v", err)
+		t.Fatalf("failed to pack abi: %v", err)
 	}
 	initiateCalldata := mustParseHex("a8793f940000000000000000000000" +
 		"00000000000000000000000000000000000000002000000000000000000" +
@@ -174,7 +174,7 @@ func TestParseRedeemDataV0(t *testing.T) {
 	}
 	calldata, err := packRedeemDataV0(redemptions)
 	if err != nil {
-		t.Fatalf("unable to pack abi: %v", err)
+		t.Fatalf("failed to pack abi: %v", err)
 	}
 	redeemCallData := mustParseHex("f4fd17f9000000000000000000000000000000000" +
 		"000000000000000000000000000002000000000000000000000000000000000000" +
@@ -249,7 +249,7 @@ func TestParseRefundDataV0(t *testing.T) {
 
 	calldata, err := packRefundDataV0(secretHash)
 	if err != nil {
-		t.Fatalf("unale to pack abi: %v", err)
+		t.Fatalf("failed to pack abi: %v", err)
 	}
 
 	refundCallData := mustParseHex("7249fbb6ebdc4c31b88d0c8f4d644591a8e00e92b607f920ad8050deb7c7469767d9c561")

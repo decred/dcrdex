@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"decred.org/dcrdex/client/webserver/locales"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // pageTemplate holds the information necessary to process a template. Also
@@ -27,6 +29,7 @@ type templates struct {
 	fs           fs.FS // must contain tmpl files at root
 	reloadOnExec bool
 	dict         map[string]string
+	titler       cases.Caser
 
 	addErr error
 }
@@ -44,6 +47,7 @@ func newTemplates(folder, lang string) *templates {
 		t.addErr = fmt.Errorf("no translation dictionary found for lang %q", lang)
 		return t
 	}
+	t.titler = cases.Title(language.MustParse(lang))
 
 	if embedded {
 		t.fs = htmlTmplSub
@@ -70,6 +74,13 @@ func (t *templates) translate(name string) (string, error) {
 			return "", fmt.Errorf("can't parse match group: %v", matchGroup)
 		}
 		token, key := matchGroup[0], string(matchGroup[1])
+
+		var toTitle bool
+		if titleKey := strings.TrimPrefix(key, ":title:"); titleKey != key {
+			toTitle = true
+			key = titleKey
+		}
+
 		replacement, found := t.dict[key]
 		if !found {
 			replacement, found = locales.EnUS[key]
@@ -77,6 +88,11 @@ func (t *templates) translate(name string) (string, error) {
 				return "", fmt.Errorf("warning: no translation text for key %q", key)
 			}
 		}
+
+		if toTitle {
+			replacement = t.titler.String(replacement)
+		}
+
 		rawTmpl = bytes.ReplaceAll(rawTmpl, token, []byte(replacement))
 	}
 

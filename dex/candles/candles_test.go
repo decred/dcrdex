@@ -189,7 +189,7 @@ func TestDelta(t *testing.T) {
 	testTime = tNow.Add(time.Minute * 5 / 2)
 	check24(0.4, 125)
 
-	// Larger start rate tests undeflow handling.
+	// Larger start rate tests underflow handling.
 	startCandle.StartRate, startCandle.EndRate = startCandle.EndRate, startCandle.StartRate
 	check24(0.4, 125)
 	startCandle.StartRate, startCandle.EndRate = startCandle.EndRate, startCandle.StartRate

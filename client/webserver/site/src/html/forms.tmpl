@@ -386,7 +386,7 @@
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 <div class="text-center fs22 sans-light position-relative">
-  [[[Cancel Order]]]
+  [[[:title:cancel_order]]]
 </div>
 <div class="mt-2 sans-light">
   {{if $passwordIsCached}}[[[cancel_no_pw]]]{{else}}[[[cancel_pw]]]{{end}}
@@ -411,7 +411,7 @@
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 <div class="text-center fs22 sans-light position-relative">
-  [[[accelerate_order]]]
+  [[[:title:accelerate_order]]]
 </div>
 <div id=accelerateMainDiv>
   <div id="configureAccelerationDiv">
@@ -535,7 +535,7 @@
   <div class="flex-grow-1" data-tmpl="controls">
     <div class="d-flex align-items-center">
       <span data-tmpl="optName" class="flex-grow-1 text-start fs16 ps-2"></span>
-      <span data-tmpl="tooltip" class="ico-info me-2" data-tooltip="Prevent temporary overlocking of funds"></span>
+      <span data-tmpl="tooltip" class="ico-info me-2" data-tooltip="[[[prevent_temporary_overlocking]]]"></span>
       <img data-tmpl="chainIcon" class="micro-icon me-1">
     </div>
   </div>

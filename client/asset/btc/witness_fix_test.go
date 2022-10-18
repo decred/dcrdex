@@ -10,10 +10,10 @@ import (
 	"github.com/btcsuite/btcd/wire"
 )
 
-//go:embed bitcoin-block-757922.dat
+//go:embed test-data/bitcoin-block-757922.dat
 var block757922 []byte
 
-//go:embed bitcoin-tx-7393096d97bfee8660f4100ffd61874d62f9a65de9fb6acf740c4c386990ef73.dat
+//go:embed test-data/bitcoin-tx-7393096d97bfee8660f4100ffd61874d62f9a65de9fb6acf740c4c386990ef73.dat
 var tx7393096d9 []byte
 
 func TestBigWitness(t *testing.T) {
