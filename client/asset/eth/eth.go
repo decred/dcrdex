@@ -586,32 +586,11 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 	// var cl ethFetcher
 	switch assetCFG.Type {
 	case walletTypeGeth:
-		// 	cl, err = newNodeClient(getWalletDir(assetCFG.DataDir, net), net, logger.SubLogger("NODE"))
-		// 	if err != nil {
-		// 		return nil, err
-		// 	}
 		return nil, asset.ErrWalletTypeDisabled
 	case walletTypeRPC:
 		if _, found := assetCFG.Settings[providersKey]; !found {
 			return nil, errors.New("no providers specified")
 		}
-		// endpoints := strings.Split(assetCFG.Settings[providersKey], " ")
-		// ethCfg, err := ethChainConfig(net)
-		// if err != nil {
-		// 	return nil, err
-		// }
-	// 	chainConfig := ethCfg.Genesis.Config
-
-	// 	// Point to a harness node on simnet, if not specified.
-	// 	if net == dex.Simnet && len(endpoints) == 0 {
-	// 		u, _ := user.Current()
-	// 		endpoints = append(endpoints, filepath.Join(u.HomeDir, "dextest", "eth", "beta", "node", "geth.ipc"))
-	// 	}
-
-	// 	cl, err = newMultiRPCClient(assetCFG.DataDir, endpoints, logger.SubLogger("RPC"), chainConfig, big.NewInt(chainIDs[net]), net)
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
 	default:
 		return nil, fmt.Errorf("unknown wallet type %q", assetCFG.Type)
 	}
@@ -737,11 +716,6 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	default:
 		return nil, fmt.Errorf("unknown wallet type %q", w.walletType)
 	}
-
-	// cl, err := newNodeClient(getWalletDir(w.dir, w.net), w.net, w.log.SubLogger("NODE"))
-	// if err != nil {
-	// 	return nil, err
-	// }
 
 	w.node = cl
 	w.addr = cl.address()

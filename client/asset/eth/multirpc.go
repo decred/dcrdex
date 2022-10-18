@@ -9,7 +9,6 @@ package eth
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -132,7 +131,7 @@ func (p *provider) setFailed() {
 func (p *provider) failed() bool {
 	p.tip.Lock()
 	defer p.tip.Unlock()
-	return time.Since(p.tip.failStamp) < failQuarantine || p.tip.failCount > 100
+	return p.tip.failCount > brickedFailCount || time.Since(p.tip.failStamp) < failQuarantine
 }
 
 // bestHeader get the best known header from the provider, cached if available,
@@ -559,18 +558,6 @@ func (m *multiRPCClient) cachedReceipt(txHash common.Hash) *types.Receipt {
 	return nil
 }
 
-// cleanReceipts cleans up the receipt cache, deleting any receipts that haven't
-// been access for > receiptCacheExpiration.
-func (m *multiRPCClient) cleanReceipts() {
-	m.receipts.Lock()
-	for txHash, rec := range m.receipts.cache {
-		if time.Since(rec.lastAccess) > receiptCacheExpiration {
-			delete(m.receipts.cache, txHash)
-		}
-	}
-	m.receipts.Unlock()
-}
-
 func (m *multiRPCClient) transactionReceipt(ctx context.Context, txHash common.Hash) (r *types.Receipt, tx *types.Transaction, err error) {
 	// TODO
 	// TODO: Plug in to the monitoredTx system from #1638.
@@ -658,9 +645,14 @@ func (m *multiRPCClient) getTransaction(ctx context.Context, txHash common.Hash)
 			return err
 		}
 		tx = resp.tx
-		if resp.BlockNumber != nil {
-			b, _ := hex.DecodeString(*resp.BlockNumber)
-			h = new(big.Int).SetBytes(b).Int64()
+		if resp.BlockNumber == nil {
+			h = -1
+		} else {
+			bigH, ok := new(big.Int).SetString(*resp.BlockNumber, 0 /* must start with 0x */)
+			if !ok {
+				return fmt.Errorf("couldn't parse hex number %q", *resp.BlockNumber)
+			}
+			h = bigH.Int64()
 		}
 		return nil
 	})
@@ -1311,7 +1303,7 @@ func domain(host string) string {
 }
 
 // checkProvidersCompliance verifies that a provider supports the API that DEX
-// requires by sending a series of requests and verfiying the responses. If a
+// requires by sending a series of requests and verifying the responses. If a
 // provider is found to be compliant, their domain name is added to a list and
 // stored in a file on disk, so that future checks can be short-circuited.
 func checkProvidersCompliance(ctx context.Context, walletDir string, providers []*provider, log dex.Logger) error {
