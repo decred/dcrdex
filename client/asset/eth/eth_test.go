@@ -2986,7 +2986,7 @@ func TestDriverExists(t *testing.T) {
 	settings := map[string]string{providersKey: "a.ipc"}
 
 	// no wallet
-	exists, err := drv.Exists(walletTypeGeth, tmpDir, settings, dex.Simnet)
+	exists, err := drv.Exists(walletTypeRPC, tmpDir, settings, dex.Simnet)
 	if err != nil {
 		t.Fatalf("Exists error for no geth wallet: %v", err)
 	}
@@ -3498,7 +3498,7 @@ func TestReconfigure(t *testing.T) {
 	}
 
 	walletCfg := &asset.WalletConfig{
-		Type:     walletTypeGeth,
+		Type:     walletTypeRPC,
 		Settings: settings,
 	}
 
@@ -4550,22 +4550,23 @@ func testMaxSwapRedeemLots(t *testing.T, assetID uint32) {
 	logger := dex.StdOutLogger("ETHTEST", dex.LevelOff)
 	tmpDir := t.TempDir()
 
-	err := CreateWallet(&asset.CreateWalletParams{
-		Type:     walletTypeGeth,
+	settings := map[string]string{providersKey: "a.ipc"}
+	err := createWallet(&asset.CreateWalletParams{
+		Type:     walletTypeRPC,
 		Seed:     encode.RandomBytes(32),
 		Pass:     encode.RandomBytes(32),
-		Settings: make(map[string]string),
+		Settings: settings,
 		DataDir:  tmpDir,
 		Net:      dex.Testnet,
 		Logger:   logger,
-	})
+	}, true)
 	if err != nil {
 		t.Fatalf("CreateWallet error: %v", err)
 	}
 
 	wallet, err := drv.Open(&asset.WalletConfig{
-		Type:     walletTypeGeth,
-		Settings: make(map[string]string),
+		Type:     walletTypeRPC,
+		Settings: settings,
 		DataDir:  tmpDir,
 	}, logger, dex.Testnet)
 	if err != nil {
