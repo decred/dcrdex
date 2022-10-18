@@ -4126,7 +4126,7 @@ func (c *Core) Logout() error {
 	conns := c.dexConnections()
 	for _, dc := range conns {
 		if dc.hasActiveOrders() {
-			return newError(activeOrdersErr, "%w", ActiveOrdersLogoutErr)
+			return codedError(activeOrdersErr, ActiveOrdersLogoutErr)
 		}
 	}
 

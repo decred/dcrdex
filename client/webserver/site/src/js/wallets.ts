@@ -1,6 +1,6 @@
 import Doc, { Animation } from './doc'
 import BasePage from './basepage'
-import { postJSON } from './http'
+import { postJSON, Errors } from './http'
 import {
   NewWalletForm,
   WalletConfigForm,
@@ -33,8 +33,6 @@ const traitWithdrawer = 1 << 6
 const traitRestorer = 1 << 8
 const traitTxFeeEstimator = 1 << 10
 const traitsExtraOpts = traitLogFiler & traitRecoverer & traitRestorer & traitRescanner
-
-const activeOrdersErrCode = 35
 
 interface ReconfigRequest {
   assetID: number
@@ -362,7 +360,7 @@ export default class WalletsPage extends BasePage {
     const res = await postJSON(url, req)
     loaded()
     if (!app().checkResponse(res)) {
-      if (res.code === activeOrdersErrCode) page.toggleWalletStatusErr.textContent = intl.prep(intl.ID_ACTIVE_ORDERS_ERR_MSG, fmtParams)
+      if (res.code === Errors.activeOrdersErr) page.toggleWalletStatusErr.textContent = intl.prep(intl.ID_ACTIVE_ORDERS_ERR_MSG, fmtParams)
       else page.toggleWalletStatusErr.textContent = res.msg
       Doc.show(page.toggleWalletStatusErr)
       return
@@ -667,7 +665,7 @@ export default class WalletsPage extends BasePage {
     const loaded = app().loading(this.body)
     const res = await postJSON(url, req)
     loaded()
-    if (res.code === activeOrdersErrCode) {
+    if (res.code === Errors.activeOrdersErr) {
       this.forceUrl = url
       this.forceReq = req
       this.showConfirmForce()
@@ -1034,7 +1032,7 @@ export default class WalletsPage extends BasePage {
     const loaded = app().loading(page.forms)
     const res = await postJSON(url, req)
     loaded()
-    if (res.code === activeOrdersErrCode) {
+    if (res.code === Errors.activeOrdersErr) {
       this.forceUrl = url
       this.forceReq = req
       this.showConfirmForce()

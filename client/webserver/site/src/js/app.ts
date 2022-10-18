@@ -9,7 +9,7 @@ import OrdersPage from './orders'
 import OrderPage from './order'
 import DexSettingsPage from './dexsettings'
 import { RateEncodingFactor, StatusExecuted, hasLiveMatches } from './orderutil'
-import { getJSON, postJSON } from './http'
+import { getJSON, postJSON, Errors } from './http'
 import * as ntfn from './notifications'
 import ws from './ws'
 import * as intl from './locales'
@@ -888,8 +888,7 @@ export default class Application {
   async signOut () {
     const res = await postJSON('/api/logout')
     if (!this.checkResponse(res)) {
-      const activeOrdersErrCode = 35
-      if (res.code === activeOrdersErrCode) {
+      if (res.code === Errors.activeOrdersErr) {
         this.page.logoutErr.textContent = intl.prep(intl.ID_ACTIVE_ORDERS_LOGOUT_ERR_MSG)
       } else {
         this.page.logoutErr.textContent = res.msg
