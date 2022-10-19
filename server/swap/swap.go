@@ -1423,7 +1423,7 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	ack := new(msgjson.Acknowledgement)
 	err := msg.UnmarshalResult(ack)
 	if err != nil {
-		s.respondError(msg.ID, acker.user, msgjson.RPCParseError, "error parsing acknowledgment")
+		s.respondError(msg.ID, acker.user, msgjson.RPCParseError, fmt.Sprintf("error parsing acknowledgment: %v", err))
 		return
 	}
 	// Note: ack.MatchID unused, but could be checked against acker.match.ID().
@@ -1478,7 +1478,8 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	if !acker.isMaker {
 		acker.match.Sigs.TakerRedeem = ack.Sig
 		if err = s.storage.SaveRedeemAckSigB(mktMatch, ack.Sig); err != nil {
-			s.respondError(msg.ID, acker.user, msgjson.UnknownMarketError, "internal server error")
+			s.respondError(msg.ID, acker.user, msgjson.RPCInternalError,
+				"internal server error")
 			log.Errorf("SaveRedeemAckSigB failed for match %v: %v", mktMatch.String(), err)
 			return
 		}
@@ -1486,7 +1487,7 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 }
 
 // processInit processes the `init` RPC request, which is used to inform the DEX
-// of a newly broadcast swap transaction. Once the transaction is seen and and
+// of a newly broadcast swap transaction. Once the transaction is seen and
 // audited by the Swapper, the counter-party is informed with an 'audit'
 // request. This method is run as a coin waiter, hence the return value
 // indicates if future attempts should be made to check coin status.
@@ -1505,7 +1506,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 			stepInfo.match.ID(), actor, params.CoinID, params.Contract, err)
 		actor.status.mtx.RUnlock()
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
-			"redemption error")
+			fmt.Sprintf("contract error encountered: %v", err))
 		return wait.DontTryAgain
 	}
 
@@ -1595,7 +1596,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	if err != nil {
 		log.Errorf("saving swap contract (match id=%v, maker=%v) failed: %v",
 			matchID, actor.isMaker, err)
-		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError,
+		s.respondError(msg.ID, actor.user, msgjson.RPCInternalError,
 			"internal server error")
 		// TODO: revoke the match without penalties instead of retrying forever?
 		return wait.TryAgain
@@ -1649,7 +1650,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	s.authMgr.Sign(auditParams)
 	notification, err := msgjson.NewRequest(comms.NextID(), msgjson.AuditRoute, auditParams)
 	if err != nil {
-		// This is likely an impossibly condition.
+		// This is likely an impossible condition.
 		log.Errorf("error creating audit request: %v", err)
 		return wait.DontTryAgain
 	}
@@ -1665,8 +1666,6 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	// Send the 'audit' request to the counter-party.
 	log.Debugf("processInit: sending contract 'audit' request to counterparty %v (%s) "+
 		"for match %v", ack.user, makerTaker(ack.isMaker), matchID)
-	// Send the request.
-
 	// The counterparty will audit the contract by retrieving it, which may
 	// involve them waiting for up to the broadcast timeout before responding,
 	// so the user gets at least s.bTimeout to the request.
@@ -1707,7 +1706,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	if !chain.ValidateSecret(params.Secret, cpContract) {
 		log.Infof("Secret validation failed (match id=%v, maker=%v, secret=%v)",
 			matchID, actor.isMaker, params.Secret)
-		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError, "secret validation failed")
+		s.respondError(msg.ID, actor.user, msgjson.InvalidRequestError, "secret validation failed")
 		return wait.DontTryAgain
 	}
 	redemption, err := chain.Redemption(params.CoinID, cpSwapCoin, cpContract)
@@ -1721,13 +1720,14 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		log.Warnf("Redemption error encountered for match %s, actor %s, using coin ID %v to satisfy contract at %x: %v",
 			stepInfo.match.ID(), actor, params.CoinID, cpSwapCoin, err)
 		actor.status.mtx.RUnlock()
-		s.respondError(msg.ID, actor.user, msgjson.RedemptionError, "redemption error")
+		s.respondError(msg.ID, actor.user, msgjson.RedemptionError,
+			fmt.Sprintf("redemption error encountered: %v", err))
 		return wait.DontTryAgain
 	}
 
 	newStatus := stepInfo.nextStep
 
-	// NOTE: redemption.FeeRate is not checked since the counter party is not
+	// NOTE: redemption.FeeRate is not checked since the counterparty is not
 	// inconvenienced by slow confirmation of the redemption.
 
 	// Modify the match's swapStatuses, but only if the match wasn't revoked
@@ -2120,12 +2120,12 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 	err := msg.UnmarshalResult(&acks)
 	if err != nil {
 		s.respondError(msg.ID, user, msgjson.RPCParseError,
-			"error parsing match request acknowledgment")
+			fmt.Sprintf("error parsing match request acknowledgment: %v", err))
 		return
 	}
 	if len(matches) != len(acks) {
 		s.respondError(msg.ID, user, msgjson.AckCountError,
-			fmt.Sprintf("expected %d acknowledgements, got %d", len(acks), len(matches)))
+			fmt.Sprintf("expected %d acknowledgements, got %d", len(matches), len(acks)))
 		return
 	}
 

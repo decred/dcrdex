@@ -884,14 +884,14 @@ func (m *Market) processMatchAcksForCancel(user account.AccountID, msg *msgjson.
 	err := msg.UnmarshalResult(&acks)
 	if err != nil {
 		m.respondError(msg.ID, user, msgjson.RPCParseError,
-			"error parsing match request acknowledgment")
+			fmt.Sprintf("error parsing match request acknowledgment: %v", err))
 		return
 	}
 	// The acknowledgment for both the taker and maker should come from the same user
 	expectedNumAcks := 2
 	if len(acks) != expectedNumAcks {
 		m.respondError(msg.ID, user, msgjson.AckCountError,
-			fmt.Sprintf("expected %d acknowledgements, got %d", len(acks), expectedNumAcks))
+			fmt.Sprintf("expected %d acknowledgements, got %d", expectedNumAcks, len(acks)))
 		return
 	}
 	log.Debugf("processMatchAcksForCancel: 'match' ack received from %v", user)
@@ -1995,7 +1995,7 @@ func (m *Market) handlePreimageResp(msg *msgjson.Message, reqData *piData) {
 	if err != nil {
 		sendPI(nil)
 		m.respondError(msg.ID, reqData.ord.User(), msgjson.RPCParseError,
-			"error parsing preimage notification response")
+			fmt.Sprintf("error parsing preimage notification response: %v", err))
 		return
 	}
 	if resp.Error != nil {
@@ -2007,7 +2007,7 @@ func (m *Market) handlePreimageResp(msg *msgjson.Message, reqData *piData) {
 	if err != nil {
 		sendPI(nil)
 		m.respondError(msg.ID, reqData.ord.User(), msgjson.RPCParseError,
-			"error parsing preimage response payload result")
+			fmt.Sprintf("error parsing preimage response payload result: %v", err))
 		return
 	}
 
@@ -2038,8 +2038,9 @@ func (m *Market) handlePreimageResp(msg *msgjson.Message, reqData *piData) {
 	if err != nil {
 		log.Errorf("StorePreimage: %v", err)
 		// Fatal backend error. New swaps will not begin, but pass the preimage
-		// along so it does not appear as a miss to collectPreimages.
-		m.respondError(msg.ID, reqData.ord.User(), msgjson.UnknownMarketError, "internal server error")
+		// along so that it does not appear as a miss to collectPreimages.
+		m.respondError(msg.ID, reqData.ord.User(), msgjson.RPCInternalError,
+			"internal server error")
 	}
 
 	sendPI(&pi)
