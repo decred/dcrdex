@@ -986,11 +986,12 @@ func (s *Swapper) processBlock(ctx context.Context, block *blockNotification) {
 			return
 		}
 
+		// Lock the matchTracker so the following checks and updates are atomic
+		// with respect to Status.
 		match.mtx.RLock()
-		status := match.Status
-		match.mtx.RUnlock()
+		defer match.mtx.RUnlock()
 
-		switch status {
+		switch match.Status {
 		case order.MakerSwapCast:
 			if match.makerStatus.swapAsset != block.assetID {
 				break
