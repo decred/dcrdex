@@ -82,18 +82,26 @@ func main() {
 			for lang, tmpl := range localizedTemplates {
 				titler = cases.Title(language.MustParse(lang))
 				dict := locales.Locales[lang]
+
 				var toTitle bool
+				var found bool
+				var replacement string
 				if titleKey := strings.TrimPrefix(key, ":title:"); titleKey != key {
-					toTitle = true
-					key = titleKey
-				}
-				replacement, found := dict[key]
-				if !found {
-					replacement, found = enDict[key]
-					if !found {
-						return fmt.Errorf("no %s translation in %q and no default replacement for %s", lang, baseName, key)
+					// Check if there's a value for :title:key. Especially for languages
+					// that do not work well with cases.Caser, e.g zh-cn.
+					if replacement, found = dict[key]; !found {
+						toTitle = true
+						key = titleKey
 					}
-					fmt.Printf("Warning: no %s replacement text for key %q, using 'en' value %s \n", lang, key, replacement)
+				}
+
+				if !found {
+					if replacement, found = dict[key]; !found {
+						if replacement, found = enDict[key]; !found {
+							return fmt.Errorf("no %s translation in %q and no default replacement for %s", lang, baseName, key)
+						}
+						fmt.Printf("Warning: no %s replacement text for key %q, using 'en' value %s \n", lang, key, replacement)
+					}
 				}
 
 				if toTitle {

@@ -242,6 +242,7 @@ var ZhCN = map[string]string{
 	"wallet_wait_synced":          "同步后会创建钱包",
 	"Create a Wallet":             "创建钱包",
 	"Receive":                     "接收",
+	":title:ready":                "准备就绪",
 	"ready":                       "已准备",
 	"Wallet Type":                 "钱包类型",
 	"Peer Count":                  "节点数",
