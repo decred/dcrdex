@@ -19,7 +19,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/les"
@@ -134,8 +133,8 @@ func (n *nodeClient) bestHeader(ctx context.Context) (*types.Header, error) {
 	return n.leth.ApiBackend.HeaderByNumber(ctx, rpc.LatestBlockNumber)
 }
 
-func (n *nodeClient) headerByHash(txHash common.Hash) *types.Header {
-	return n.leth.BlockChain().GetHeaderByHash(txHash)
+func (n *nodeClient) headerByHash(ctx context.Context, txHash common.Hash) (*types.Header, error) {
+	return n.leth.BlockChain().GetHeaderByHash(txHash), nil
 }
 
 func (n *nodeClient) stateAt(ctx context.Context, bn rpc.BlockNumber) (*state.StateDB, error) {
@@ -250,32 +249,15 @@ func (n *nodeClient) sendTransaction(ctx context.Context, txOpts *bind.TransactO
 }
 
 // syncProgress return the current sync progress. Returns no error and nil when not syncing.
-func (n *nodeClient) syncProgress() ethereum.SyncProgress {
-	return n.leth.ApiBackend.SyncProgress()
+func (n *nodeClient) syncProgress(_ context.Context) (*ethereum.SyncProgress, error) {
+	p := n.leth.ApiBackend.SyncProgress()
+	return &p, nil
 }
 
 // signData uses the private key of the address to sign a piece of data.
 // The wallet must be unlocked to use this function.
 func (n *nodeClient) signData(data []byte) (sig, pubKey []byte, err error) {
-	h := crypto.Keccak256(data)
-	sig, err = n.creds.ks.SignHash(*n.creds.acct, h)
-	if err != nil {
-		return nil, nil, err
-	}
-	if len(sig) != 65 {
-		return nil, nil, fmt.Errorf("unexpected signature length %d", len(sig))
-	}
-
-	pubKey, err = recoverPubkey(h, sig)
-	if err != nil {
-		return nil, nil, fmt.Errorf("SignMessage: error recovering pubkey %w", err)
-	}
-
-	// Lop off the "recovery id", since we already recovered the pub key and
-	// it's not used for validation.
-	sig = sig[:64]
-
-	return
+	return signData(n.creds, data)
 }
 
 func (n *nodeClient) addSignerToOpts(txOpts *bind.TransactOpts) {

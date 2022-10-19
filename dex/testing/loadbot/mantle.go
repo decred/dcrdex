@@ -679,14 +679,15 @@ func newBotWallet(symbol, node, name string, port string, pass []byte, minFunds,
 			},
 		}
 	case eth, dextt:
+		rpcProvider := alphaIPCFile
+		if node == beta {
+			rpcProvider = betaIPCFile
+		}
 		form = &core.WalletForm{
-			Type:    "geth",
+			Type:    "rpc",
 			AssetID: ethID,
 			Config: map[string]string{
-				"walletname":  name,
-				"rpcuser":     "user",
-				"rpcpassword": "pass",
-				"rpcport":     port,
+				"providers": rpcProvider,
 			},
 		}
 		if symbol == dextt {

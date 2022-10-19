@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"os/user"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -39,6 +40,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	ethmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/tyler-smith/go-bip39"
@@ -69,6 +71,9 @@ const (
 	defaultSendGasLimit = 21_000
 
 	walletTypeGeth = "geth"
+	walletTypeRPC  = "rpc"
+
+	providersKey = "providers"
 
 	// confCheckTimeout is the amount of time allowed to check for
 	// confirmations. Testing on testnet has shown spikes up to 2.5
@@ -82,7 +87,7 @@ var (
 	// blockTicker is the delay between calls to check for new blocks.
 	blockTicker     = time.Second
 	peerCountTicker = 5 * time.Second
-	configOpts      = []*asset.ConfigOption{
+	WalletOpts      = []*asset.ConfigOption{
 		{
 			Key:         "gasfeelimit",
 			DisplayName: "Gas Fee Limit",
@@ -93,17 +98,36 @@ var (
 			DefaultValue: defaultGasFeeLimit,
 		},
 	}
+	RPCOpts = []*asset.ConfigOption{
+		{
+			Key:         providersKey,
+			DisplayName: "Provider",
+			Description: "Specify one or more providers. For infrastructure " +
+				"providers, use an https address. Only url-based authentication " +
+				"is supported. For a local node, use the filepath to an IPC file.",
+			Repeatable: providerDelimiter,
+			Required:   true,
+		},
+	}
 	// WalletInfo defines some general information about a Ethereum wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:     "Ethereum",
 		UnitInfo: dexeth.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{
+			// {
+			// 	Type:        walletTypeGeth,
+			// 	Tab:         "Native",
+			// 	Description: "Use the built-in DEX wallet (geth light node)",
+			// 	ConfigOpts:  WalletOpts,
+			// 	Seeded:      true,
+			// },
 			{
-				Type:        walletTypeGeth,
-				Tab:         "Native",
-				Description: "Use the built-in DEX wallet (geth light node)",
-				ConfigOpts:  configOpts,
+				Type:        walletTypeRPC,
+				Tab:         "External",
+				Description: "Infrastructure providers (e.g. Infura) or local nodes",
+				ConfigOpts:  append(RPCOpts, WalletOpts...),
 				Seeded:      true,
+				NoAuth:      true,
 			},
 		},
 	}
@@ -204,9 +228,12 @@ func (d *Driver) Info() *asset.WalletInfo {
 
 // Exists checks the existence of the wallet.
 func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, net dex.Network) (bool, error) {
-	if walletType != walletTypeGeth {
+	switch walletType {
+	case walletTypeGeth, walletTypeRPC:
+	default:
 		return false, fmt.Errorf("wallet type %q unrecognized", walletType)
 	}
+
 	keyStoreDir := filepath.Join(getWalletDir(dataDir, net), "keystore")
 	ks := keystore.NewKeyStore(keyStoreDir, keystore.LightScryptN, keystore.LightScryptP)
 	return len(ks.Wallets()) > 0, nil
@@ -232,7 +259,7 @@ type ethFetcher interface {
 	connect(ctx context.Context) error
 	peerCount() uint32
 	contractBackend() bind.ContractBackend
-	headerByHash(txHash common.Hash) *types.Header
+	headerByHash(ctx context.Context, txHash common.Hash) (*types.Header, error)
 	lock() error
 	locked() bool
 	pendingTransactions() ([]*types.Transaction, error)
@@ -240,7 +267,7 @@ type ethFetcher interface {
 	sendSignedTransaction(ctx context.Context, tx *types.Transaction) error
 	sendTransaction(ctx context.Context, txOpts *bind.TransactOpts, to common.Address, data []byte) (*types.Transaction, error)
 	signData(data []byte) (sig, pubKey []byte, err error)
-	syncProgress() ethereum.SyncProgress
+	syncProgress(context.Context) (*ethereum.SyncProgress, error)
 	transactionConfirmations(context.Context, common.Hash) (uint32, error)
 	getTransaction(context.Context, common.Hash) (*types.Transaction, int64, error)
 	txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate *big.Int) (*bind.TransactOpts, error)
@@ -338,12 +365,14 @@ var _ asset.DynamicSwapOrRedemptionFeeChecker = (*ETHWallet)(nil)
 var _ asset.DynamicSwapOrRedemptionFeeChecker = (*TokenWallet)(nil)
 
 type baseWallet struct {
-	ctx  context.Context // the asset subsystem starts with Connect(ctx)
-	net  dex.Network
-	node ethFetcher
-	addr common.Address
-	log  dex.Logger
-	dir  string
+	ctx        context.Context // the asset subsystem starts with Connect(ctx)
+	net        dex.Network
+	node       ethFetcher
+	addr       common.Address
+	log        dex.Logger
+	dir        string
+	walletType string
+	settings   map[string]string
 
 	gasFeeLimitV uint64 // atomic
 
@@ -451,18 +480,20 @@ func genWalletSeed(entropy []byte) ([]byte, error) {
 
 // CreateWallet creates a new internal ETH wallet and stores the private key
 // derived from the wallet seed.
-func CreateWallet(createWalletParams *asset.CreateWalletParams) error {
-	if createWalletParams.Type != walletTypeGeth {
+func CreateWallet(cfg *asset.CreateWalletParams) error {
+	return createWallet(cfg, false)
+}
+
+func createWallet(createWalletParams *asset.CreateWalletParams, skipConnect bool) error {
+	switch createWalletParams.Type {
+	case walletTypeGeth:
+		return asset.ErrWalletTypeDisabled
+	case walletTypeRPC:
+	default:
 		return fmt.Errorf("wallet type %q unrecognized", createWalletParams.Type)
 	}
+
 	walletDir := getWalletDir(createWalletParams.DataDir, createWalletParams.Net)
-	node, err := prepareNode(&nodeConfig{
-		net:    createWalletParams.Net,
-		appDir: walletDir,
-	})
-	if err != nil {
-		return err
-	}
 
 	walletSeed, err := genWalletSeed(createWalletParams.Seed)
 	if err != nil {
@@ -481,17 +512,89 @@ func CreateWallet(createWalletParams *asset.CreateWalletParams) error {
 		return err
 	}
 
-	err = importKeyToNode(node, privateKey, createWalletParams.Pass)
-	if err != nil {
-		return err
+	switch createWalletParams.Type {
+	// case walletTypeGeth:
+	// 	node, err := prepareNode(&nodeConfig{
+	// 		net:    createWalletParams.Net,
+	// 		appDir: walletDir,
+	// 	})
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	defer node.Close()
+	// 	return importKeyToNode(node, privateKey, createWalletParams.Pass)
+	case walletTypeRPC:
+
+		// Check that we can connect to all endpoints.
+		providerDef := createWalletParams.Settings[providersKey]
+		if len(providerDef) == 0 {
+			return errors.New("no providers specified")
+		}
+		endpoints := strings.Split(providerDef, providerDelimiter)
+		n := len(endpoints)
+
+		// TODO: This procedure may actually work for walletTypeGeth too.
+		ks := keystore.NewKeyStore(filepath.Join(walletDir, "keystore"), keystore.LightScryptN, keystore.LightScryptP)
+
+		priv, err := crypto.ToECDSA(privateKey)
+		if err != nil {
+			return err
+		}
+
+		if !skipConnect {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+			defer cancel()
+
+			var unknownEndpoints []string
+
+			for _, endpoint := range endpoints {
+				known, compliant := providerIsCompliant(endpoint)
+				if known && !compliant {
+					return fmt.Errorf("provider %q is known to have an insufficient API for DEX", endpoint)
+				} else if !known {
+					unknownEndpoints = append(unknownEndpoints, endpoint)
+				}
+			}
+
+			if len(unknownEndpoints) > 0 && createWalletParams.Net == dex.Mainnet {
+				providers, err := connectProviders(ctx, unknownEndpoints, createWalletParams.Logger, big.NewInt(chainIDs[createWalletParams.Net]))
+				if err != nil {
+					return err
+				}
+				defer func() {
+					for _, p := range providers {
+						p.ec.Close()
+					}
+				}()
+				if len(providers) != n {
+					return fmt.Errorf("Could not connect to all providers")
+				}
+				if err := checkProvidersCompliance(ctx, walletDir, providers, createWalletParams.Logger); err != nil {
+					return err
+				}
+			}
+		}
+		return importKeyToKeyStore(ks, priv, createWalletParams.Pass)
 	}
 
-	return node.Close()
+	return fmt.Errorf("unknown wallet type %q", createWalletParams.Type)
 }
 
 // NewWallet is the exported constructor by which the DEX will import the
-// exchange wallet.
-func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network) (*ETHWallet, error) {
+// exchange wallet. It starts an internal light node.
+func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network) (w *ETHWallet, err error) {
+	// var cl ethFetcher
+	switch assetCFG.Type {
+	case walletTypeGeth:
+		return nil, asset.ErrWalletTypeDisabled
+	case walletTypeRPC:
+		if _, found := assetCFG.Settings[providersKey]; !found {
+			return nil, errors.New("no providers specified")
+		}
+	default:
+		return nil, fmt.Errorf("unknown wallet type %q", assetCFG.Type)
+	}
+
 	cfg, err := parseWalletConfig(assetCFG.Settings)
 	if err != nil {
 		return nil, err
@@ -506,6 +609,8 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		log:          logger,
 		net:          net,
 		dir:          assetCFG.DataDir,
+		walletType:   assetCFG.Type,
+		settings:     assetCFG.Settings,
 		gasFeeLimitV: gasFeeLimit,
 		wallets:      make(map[uint32]*assetWallet),
 		monitoredTxs: make(map[common.Hash]*monitoredTx),
@@ -522,7 +627,7 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		}
 	}
 
-	w := &assetWallet{
+	aw := &assetWallet{
 		baseWallet:         eth,
 		log:                logger.SubLogger("ETH"),
 		assetID:            BipID,
@@ -537,12 +642,12 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		maxRedeemsInTx:     gasCeil / maxProportionOfBlockGasLimitToUse / maxRedeemGas,
 	}
 
-	w.wallets = map[uint32]*assetWallet{
-		BipID: w,
+	aw.wallets = map[uint32]*assetWallet{
+		BipID: aw,
 	}
 
 	return &ETHWallet{
-		assetWallet: w,
+		assetWallet: aw,
 	}, nil
 }
 
@@ -581,10 +686,35 @@ func loadMonitoredTxs(db kvdb.KeyValueDB) (map[common.Hash]*monitoredTx, error) 
 }
 
 // Connect connects to the node RPC server. Satisfies dex.Connector.
-func (w *ETHWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
-	cl, err := newNodeClient(getWalletDir(w.dir, w.net), w.net, w.log.SubLogger("NODE"))
-	if err != nil {
-		return nil, err
+func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) {
+	var cl ethFetcher
+	switch w.walletType {
+	case walletTypeGeth:
+		// cl, err = newNodeClient(getWalletDir(w.dir, w.net), w.net, w.log.SubLogger("NODE"))
+		// if err != nil {
+		// 	return nil, err
+		// }
+		return nil, asset.ErrWalletTypeDisabled
+	case walletTypeRPC:
+		endpoints := strings.Split(w.settings[providersKey], " ")
+		ethCfg, err := ethChainConfig(w.net)
+		if err != nil {
+			return nil, err
+		}
+		chainConfig := ethCfg.Genesis.Config
+
+		// Point to a harness node on simnet, if not specified.
+		if w.net == dex.Simnet && len(endpoints) == 0 {
+			u, _ := user.Current()
+			endpoints = append(endpoints, filepath.Join(u.HomeDir, "dextest", "eth", "beta", "node", "geth.ipc"))
+		}
+
+		cl, err = newMultiRPCClient(w.dir, endpoints, w.log.SubLogger("RPC"), chainConfig, big.NewInt(chainIDs[w.net]), w.net)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unknown wallet type %q", w.walletType)
 	}
 
 	w.node = cl
@@ -678,6 +808,12 @@ func (w *ETHWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, cu
 	gasFeeLimit := walletCfg.GasFeeLimit
 	if walletCfg.GasFeeLimit == 0 {
 		gasFeeLimit = defaultGasFeeLimit
+	}
+
+	if rpc, is := w.node.(*multiRPCClient); is {
+		if err := rpc.reconfigure(ctx, cfg.Settings); err != nil {
+			return false, err
+		}
 	}
 
 	atomic.StoreUint64(&w.baseWallet.gasFeeLimitV, gasFeeLimit)
@@ -2577,7 +2713,10 @@ func (*baseWallet) ValidateSecret(secret, secretHash []byte) bool {
 
 // SyncStatus is information about the blockchain sync status.
 func (eth *baseWallet) SyncStatus() (bool, float32, error) {
-	prog := eth.node.syncProgress()
+	prog, err := eth.node.syncProgress(eth.ctx)
+	if err != nil {
+		return false, 0, err
+	}
 	if prog.HighestBlock != 0 {
 		// HighestBlock was set. This means syncing started and is
 		// finished if CurrentBlock is higher. CurrentBlock will
@@ -2643,6 +2782,7 @@ func (eth *baseWallet) swapOrRedemptionFeesPaid(ctx context.Context, coinID, con
 	if err != nil {
 		return 0, nil, err
 	}
+
 	var txHash common.Hash
 	copy(txHash[:], coinID)
 	receipt, tx, err := eth.node.transactionReceipt(ctx, txHash)
@@ -2650,7 +2790,10 @@ func (eth *baseWallet) swapOrRedemptionFeesPaid(ctx context.Context, coinID, con
 		return 0, nil, err
 	}
 
-	hdr := eth.node.headerByHash(receipt.BlockHash)
+	hdr, err := eth.node.headerByHash(ctx, receipt.BlockHash)
+	if err != nil {
+		return 0, nil, fmt.Errorf("error getting header %s: %w", receipt.BlockHash, err)
+	}
 	if hdr == nil {
 		return 0, nil, fmt.Errorf("header for hash %v not found", receipt.BlockHash)
 	}
@@ -3211,7 +3354,7 @@ func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Rede
 
 	monitoredTx, err := w.getLatestMonitoredTx(txHash)
 	if err != nil {
-		w.log.Error(err)
+		w.log.Error("getLatestMonitoredTx error: %v", err)
 		return w.confirmRedemptionWithoutMonitoredTx(txHash, redemption, feeWallet)
 	}
 	// This mutex is locked inside of getLatestMonitoredTx.
@@ -3623,7 +3766,7 @@ func checkTxStatus(receipt *types.Receipt, gasLimit uint64) error {
 // factor of 2. The account should already have a trading balance of at least
 // maxSwaps gwei (token or eth), and sufficient eth balance to cover the
 // requisite tx fees.
-func GetGasEstimates(ctx context.Context, cl *nodeClient, c contractor, maxSwaps int, g *dexeth.Gases, waitForMined func()) error {
+func GetGasEstimates(ctx context.Context, cl ethFetcher, c contractor, maxSwaps int, g *dexeth.Gases, waitForMined func()) error {
 	tokenContractor, isToken := c.(tokenContractor)
 
 	stats := struct {

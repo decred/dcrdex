@@ -1,4 +1,4 @@
-//go:build !harness && lgpl
+//go:build !harness && !rpclive && lgpl
 
 // These tests will not be run if the harness build tag is set.
 
@@ -205,8 +205,8 @@ func (n *testNode) lock() error {
 func (n *testNode) locked() bool {
 	return false
 }
-func (n *testNode) syncProgress() ethereum.SyncProgress {
-	return n.syncProg
+func (n *testNode) syncProgress(context.Context) (*ethereum.SyncProgress, error) {
+	return &n.syncProg, nil
 }
 func (n *testNode) peerCount() uint32 {
 	return 1
@@ -250,8 +250,8 @@ func (n *testNode) transactionConfirmations(context.Context, common.Hash) (uint3
 	return 0, nil
 }
 
-func (n *testNode) headerByHash(txHash common.Hash) *types.Header {
-	return n.hdrByHash
+func (n *testNode) headerByHash(_ context.Context, txHash common.Hash) (*types.Header, error) {
+	return n.hdrByHash, nil
 }
 
 func (n *testNode) transactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, *types.Transaction, error) {
@@ -2932,23 +2932,24 @@ func TestDriverOpen(t *testing.T) {
 	logger := dex.StdOutLogger("ETHTEST", dex.LevelOff)
 	tmpDir := t.TempDir()
 
-	err := CreateWallet(&asset.CreateWalletParams{
-		Type:     walletTypeGeth,
+	settings := map[string]string{providersKey: "a.ipc"}
+	err := createWallet(&asset.CreateWalletParams{
+		Type:     walletTypeRPC,
 		Seed:     encode.RandomBytes(32),
 		Pass:     encode.RandomBytes(32),
-		Settings: make(map[string]string),
+		Settings: settings,
 		DataDir:  tmpDir,
 		Net:      dex.Testnet,
 		Logger:   logger,
-	})
+	}, true)
 	if err != nil {
 		t.Fatalf("CreateWallet error: %v", err)
 	}
 
 	// Make sure default gas fee limit is used when nothing is set
 	cfg := &asset.WalletConfig{
-		Type:     walletTypeGeth,
-		Settings: make(map[string]string),
+		Type:     walletTypeRPC,
+		Settings: settings,
 		DataDir:  tmpDir,
 	}
 	wallet, err := drv.Open(cfg, logger, dex.Testnet)
@@ -2982,10 +2983,10 @@ func TestDriverExists(t *testing.T) {
 	drv := &Driver{}
 	tmpDir := t.TempDir()
 
-	settings := map[string]string{}
+	settings := map[string]string{providersKey: "a.ipc"}
 
 	// no wallet
-	exists, err := drv.Exists(walletTypeGeth, tmpDir, settings, dex.Simnet)
+	exists, err := drv.Exists(walletTypeRPC, tmpDir, settings, dex.Simnet)
 	if err != nil {
 		t.Fatalf("Exists error for no geth wallet: %v", err)
 	}
@@ -2994,21 +2995,21 @@ func TestDriverExists(t *testing.T) {
 	}
 
 	// Create the wallet.
-	err = CreateWallet(&asset.CreateWalletParams{
-		Type:     walletTypeGeth,
+	err = createWallet(&asset.CreateWalletParams{
+		Type:     walletTypeRPC,
 		Seed:     encode.RandomBytes(32),
 		Pass:     encode.RandomBytes(32),
 		Settings: settings,
 		DataDir:  tmpDir,
 		Net:      dex.Simnet,
 		Logger:   tLogger,
-	})
+	}, true)
 	if err != nil {
 		t.Fatalf("CreateWallet error: %v", err)
 	}
 
 	// exists
-	exists, err = drv.Exists(walletTypeGeth, tmpDir, settings, dex.Simnet)
+	exists, err = drv.Exists(walletTypeRPC, tmpDir, settings, dex.Simnet)
 	if err != nil {
 		t.Fatalf("Exists error for existent geth wallet: %v", err)
 	}
@@ -3497,7 +3498,7 @@ func TestReconfigure(t *testing.T) {
 	}
 
 	walletCfg := &asset.WalletConfig{
-		Type:     walletTypeGeth,
+		Type:     walletTypeRPC,
 		Settings: settings,
 	}
 
@@ -4549,22 +4550,23 @@ func testMaxSwapRedeemLots(t *testing.T, assetID uint32) {
 	logger := dex.StdOutLogger("ETHTEST", dex.LevelOff)
 	tmpDir := t.TempDir()
 
-	err := CreateWallet(&asset.CreateWalletParams{
-		Type:     walletTypeGeth,
+	settings := map[string]string{providersKey: "a.ipc"}
+	err := createWallet(&asset.CreateWalletParams{
+		Type:     walletTypeRPC,
 		Seed:     encode.RandomBytes(32),
 		Pass:     encode.RandomBytes(32),
-		Settings: make(map[string]string),
+		Settings: settings,
 		DataDir:  tmpDir,
 		Net:      dex.Testnet,
 		Logger:   logger,
-	})
+	}, true)
 	if err != nil {
 		t.Fatalf("CreateWallet error: %v", err)
 	}
 
 	wallet, err := drv.Open(&asset.WalletConfig{
-		Type:     walletTypeGeth,
-		Settings: make(map[string]string),
+		Type:     walletTypeRPC,
+		Settings: settings,
 		DataDir:  tmpDir,
 	}, logger, dex.Testnet)
 	if err != nil {
@@ -4787,6 +4789,52 @@ func TestSwapOrRedemptionFeesPaid(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestReceiptCache(t *testing.T) {
+	m := &multiRPCClient{}
+	c := make(map[common.Hash]*receiptRecord)
+	m.receipts.cache = c
+
+	r := &receiptRecord{
+		r: &types.Receipt{
+			Type: 50,
+		},
+		lastAccess: time.Now(),
+	}
+
+	var txHash common.Hash
+	copy(txHash[:], encode.RandomBytes(32))
+	c[txHash] = r
+
+	if r := m.cachedReceipt(txHash); r == nil {
+		t.Fatalf("cached receipt not returned")
+	}
+
+	r.lastAccess = time.Now().Add(-(unconfirmedReceiptExpiration + 1))
+	if r := m.cachedReceipt(txHash); r != nil {
+		t.Fatalf("expired receipt returned")
+	}
+
+	// The receipt still hasn't been pruned.
+	if len(c) != 1 {
+		t.Fatalf("receipt was pruned?")
+	}
+
+	// An if it was confirmed, it would be returned.
+	r.confirmed = true
+	if r := m.cachedReceipt(txHash); r == nil {
+		t.Fatalf("confirmed receipt not returned")
+	}
+
+	r.lastAccess = time.Now().Add(-(receiptCacheExpiration + 1))
+	m.receipts.lastClean = time.Time{}
+	m.cachedReceipt(common.Hash{})
+	// The receipt still hasn't been pruned.
+	if len(c) != 0 {
+		t.Fatalf("receipt wasn't pruned")
+	}
+
 }
 
 func parseRecoveryID(c asset.Coin) []byte {

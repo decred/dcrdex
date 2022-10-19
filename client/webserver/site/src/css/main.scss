@@ -120,6 +120,9 @@ button:focus {
   & > div {
     min-height: 55px;
     margin-top: 10px;
+  }
+
+  & > div:not(.repeatable) {
     width: 47%;
   }
 }

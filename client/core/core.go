@@ -2218,7 +2218,7 @@ func (c *Core) createSeededWallet(assetID uint32, crypter encrypt.Crypter, form 
 	}
 	defer encode.ClearBytes(seed)
 
-	c.log.Infof("Initializing a built-in %s wallet", unbip(assetID))
+	c.log.Infof("Initializing a %s wallet", unbip(assetID))
 	if err = asset.CreateWallet(assetID, &asset.CreateWalletParams{
 		Type:     form.Type,
 		Seed:     seed,
@@ -2350,6 +2350,10 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		})
 	}
 	if err != nil {
+		if errors.Is(err, asset.ErrWalletTypeDisabled) {
+			subject, details := c.formatDetails(TopicWalletTypeDeprecated, unbip(assetID))
+			c.notify(newWalletConfigNote(TopicWalletTypeDeprecated, subject, details, db.WarningLevel, nil))
+		}
 		return nil, fmt.Errorf("error opening wallet: %w", err)
 	}
 

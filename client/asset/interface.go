@@ -147,6 +147,9 @@ const (
 	// ErrNotEnoughConfirms is returned when a transaction is confirmed,
 	// but does not have enough confirmations to be trusted.
 	ErrNotEnoughConfirms = dex.ErrorKind("transaction does not have enough confirmations")
+	// ErrWalletTypeDisabled inidicates that a wallet type is no longer
+	// available.
+	ErrWalletTypeDisabled = dex.ErrorKind("wallet type has been disabled")
 
 	// InternalNodeLoggerName is the name for a logger that is used to fine
 	// tune log levels for only loggers using this name.
@@ -226,11 +229,17 @@ type ConfigOption struct {
 	// UI will display the current date.
 	MaxValue          interface{} `json:"max"`
 	MinValue          interface{} `json:"min"`
-	NoEcho            bool        `json:"noecho"`
-	IsBoolean         bool        `json:"isboolean"`
-	IsDate            bool        `json:"isdate"`
-	DisableWhenActive bool        `json:"disablewhenactive"`
-	IsBirthdayConfig  bool        `json:"isBirthdayConfig"`
+	Options           map[string]*ConfigOption
+	NoEcho            bool `json:"noecho"`
+	IsBoolean         bool `json:"isboolean"`
+	IsDate            bool `json:"isdate"`
+	DisableWhenActive bool `json:"disablewhenactive"`
+	IsBirthdayConfig  bool `json:"isBirthdayConfig"`
+	// Repeatable signals a text input that can be duplicated and submitted
+	// multiple times, with the specified delimiter used to encode the data
+	// in the settings map.
+	Repeatable string `json:"repeatable"`
+	Required   bool   `json:"required"`
 }
 
 const (
