@@ -198,18 +198,18 @@ type makerBot struct {
 	log    dex.Logger
 	book   *orderbook.OrderBook
 
-	running uint32
+	running uint32 // atomic
 	wg      sync.WaitGroup
 	die     context.CancelFunc
 
-	rebalanceRunning uint32
+	rebalanceRunning uint32 // atomic
 
 	programV atomic.Value // *MakerProgram
 
 	ordMtx sync.RWMutex
 	ords   map[order.OrderID]*Order
 
-	oracleRunning uint32
+	oracleRunning uint32 // atomic
 }
 
 func createMakerBot(ctx context.Context, c *Core, pgm *MakerProgram) (*makerBot, error) {
@@ -283,10 +283,14 @@ func createMakerBot(ctx context.Context, c *Core, pgm *MakerProgram) (*makerBot,
 	maxBuy, err := c.MaxBuy(pgm.Host, pgm.BaseID, pgm.QuoteID, rate)
 	if err == nil {
 		maxBuyLots = maxBuy.Swap.Lots
+	} else {
+		m.log.Errorf("Bot MaxBuy error: %v", err)
 	}
 	maxSell, err := c.MaxSell(pgm.Host, pgm.BaseID, pgm.QuoteID)
 	if err == nil {
 		maxSellLots = maxSell.Swap.Lots
+	} else {
+		m.log.Errorf("Bot MaxSell error: %v", err)
 	}
 
 	if maxBuyLots+maxSellLots < pgm.Lots*2 {
@@ -381,7 +385,10 @@ func (m *makerBot) run(ctx context.Context) {
 		m.log.Errorf("run called while makerBot already running")
 		return
 	}
-	defer atomic.StoreUint32(&m.running, 0)
+	defer func() {
+		atomic.StoreUint32(&m.running, 0)
+		m.notify(newBotNote(TopicBotStopped, "", "", db.Data, m.report()))
+	}()
 
 	ctx, m.die = context.WithCancel(ctx)
 	defer m.die()
@@ -421,7 +428,6 @@ func (m *makerBot) run(ctx context.Context) {
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
-		defer func() { m.notify(newBotNote(TopicBotStopped, "", "", db.Data, m.report())) }()
 		defer m.returnFeed(cid)
 		for {
 			select {
@@ -905,7 +911,7 @@ type rebalancer interface {
 func rebalance(ctx context.Context, m rebalancer, mkt *Market, pgm *MakerProgram, log dex.Logger, newEpoch uint64) (newBuyLots, newSellLots int, buyPrice, sellPrice uint64) {
 	basisPrice := m.basisPrice()
 	if basisPrice == 0 {
-		log.Errorf("No basis price available")
+		log.Errorf("No basis price available and no empty-market rate set")
 		return
 	}
 
@@ -927,7 +933,7 @@ func rebalance(ctx context.Context, m rebalancer, mkt *Market, pgm *MakerProgram
 	var halfSpread uint64
 	switch pgm.GapStrategy {
 	case GapStrategyMultiplier:
-		halfSpread = uint64(math.Round(float64(breakEven) * (1 + pgm.GapFactor)))
+		halfSpread = uint64(math.Round(float64(breakEven) * pgm.GapFactor))
 	case GapStrategyPercent, GapStrategyPercentPlus:
 		halfSpread = uint64(math.Round(pgm.GapFactor * float64(basisPrice)))
 	case GapStrategyAbsolute, GapStrategyAbsolutePlus:
@@ -984,6 +990,10 @@ func rebalance(ctx context.Context, m rebalancer, mkt *Market, pgm *MakerProgram
 	var canceledBuyLots, canceledSellLots uint64 // for stats reporting
 	cancels := make([]*sortedOrder, 0)
 	addCancel := func(ord *sortedOrder) {
+		if newEpoch-ord.Epoch < 2 {
+			log.Debugf("rebalance: skipping cancel not past free cancel threshold")
+		}
+
 		if ord.Sell {
 			canceledSellLots += ord.lots
 		} else {

@@ -347,6 +347,10 @@ div.popup-notes {
       }
     }
   }
+
+  .authed-only:not(.authed) {
+    display: none;
+  }
 }
 
 #noteBox {

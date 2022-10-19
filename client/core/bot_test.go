@@ -72,7 +72,7 @@ func TestRebalance(t *testing.T) {
 	const lotSize uint64 = 50e8
 	const breakEven uint64 = 8 * rateStep
 	const newEpoch = 123_456_789
-	const spreadMultiplier = 2
+	const spreadMultiplier = 3
 	const driftTolerance = 0.001
 
 	mkt := &Market{
@@ -146,8 +146,8 @@ func TestRebalance(t *testing.T) {
 		}
 	}
 
-	buyPrice := midGap - (breakEven * (1 + spreadMultiplier))
-	sellPrice := midGap + (breakEven * (1 + spreadMultiplier))
+	buyPrice := midGap - (breakEven * spreadMultiplier)
+	sellPrice := midGap + (breakEven * spreadMultiplier)
 
 	sellTolerance := uint64(math.Round(float64(sellPrice) * driftTolerance))
 
