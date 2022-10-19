@@ -70,7 +70,7 @@ contract ERC20Swap {
         return swaps[secretHash];
     }
 
-    // Initiation is used to specify the information needed to initiatite a swap.
+    // Initiation is used to specify the information needed to initiate a swap.
     struct Initiation {
         uint refundTimestamp;
         bytes32 secretHash;
@@ -134,7 +134,7 @@ contract ERC20Swap {
 
     // redeem redeems an array of swaps contract. It checks that the sender is
     // not a contract, and that the secret hash hashes to secretHash. The ERC20
-    // tokens are tranfered from the contract to the sender.
+    // tokens are transferred from the contract to the sender.
     function redeem(Redemption[] calldata redemptions)
         public
         senderIsOrigin()
@@ -173,7 +173,7 @@ contract ERC20Swap {
 
     // refund refunds a contract. It checks that the sender is not a contract,
     // and that the refund time has passed. An amount of ERC20 tokens equal to
-    // swap.value is tranfered from the contract to the sender.
+    // swap.value is transferred from the contract to the sender.
     function refund(bytes32 secretHash)
         public
         senderIsOrigin()
