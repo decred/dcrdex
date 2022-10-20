@@ -520,6 +520,7 @@ export class WalletConfigForm {
     } else el = this.textInputTmpl.cloneNode(true) as HTMLElement
     this.configElements.push([opt, el])
     const input = el.querySelector('input') as ConfigOptionInput
+    input.configOpt = opt
     input.id = elID
     const label = Doc.safeSelector(el, 'label')
     label.htmlFor = elID // 'for' attribute, but 'for' is a keyword
