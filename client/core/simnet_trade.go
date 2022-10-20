@@ -152,7 +152,7 @@ func (s *simulationTest) waitALittleBit() {
 	if sleep < feeSleep {
 		// eth based assets need to wait for txn to be mined for fees
 		// to be populated here.
-		for bipID, _ := range s.client1.wallets {
+		for bipID := range s.client1.wallets {
 			if accountBIPs[bipID] {
 				sleep = feeSleep
 				s.client1.log.Infof("Waiting for paid order fees to be populated (%s).", sleep)

@@ -37,7 +37,6 @@ import (
 	"decred.org/dcrdex/server/account"
 	serverdex "decred.org/dcrdex/server/dex"
 	"github.com/decred/dcrd/crypto/blake256"
-	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 )
@@ -9168,12 +9167,12 @@ out:
 			t.Fatalf("timed out waiting for synced wallet note. Received %d progress notes", progressNotes)
 		}
 	}
-	// Should get 9 notes, but just make sure we get at least half of them to
-	// avoid github vm false positives.
-	if progressNotes < 5 /* 9? */ {
-		t.Fatalf("expected 9 progress notes, got %d", progressNotes)
+	// We must get at least 1 progress note.
+	// By the time we've got 9th note it should signal that the wallet has been
+	// synced (due to how we've set up testDuration and syncTickerPeriod values).
+	if progressNotes < 1 || progressNotes > 9 {
+		t.Fatalf("expected at least 1 and at most 9 progress notes, got %d", progressNotes)
 	}
-	// t.Logf("got %d progress notes", progressNotes)
 }
 
 func TestParseCert(t *testing.T) {
