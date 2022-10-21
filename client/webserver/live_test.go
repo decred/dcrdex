@@ -1660,20 +1660,22 @@ func (c *TCore) Send(pw []byte, assetID uint32, value uint64, address string, su
 	return &tCoin{id: []byte{0xde, 0xc7, 0xed}}, nil
 }
 
-func (c *TCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error) {
+func (c *TCore) TradeAsync(pw []byte, form *core.TradeForm) (*core.InFlightOrder, error) {
 	c.OpenWallet(form.Quote, []byte(""))
 	c.OpenWallet(form.Base, []byte(""))
 	oType := order.LimitOrderType
 	if !form.IsLimit {
 		oType = order.MarketOrderType
 	}
-	return &core.Order{
-		ID:    ordertest.RandomOrderID().Bytes(),
-		Type:  oType,
-		Stamp: uint64(time.Now().UnixMilli()),
-		Rate:  form.Rate,
-		Qty:   form.Qty,
-		Sell:  form.Sell,
+	return &core.InFlightOrder{
+		Order: &core.Order{ID: ordertest.RandomOrderID().Bytes(),
+			Type:  oType,
+			Stamp: uint64(time.Now().UnixMilli()),
+			Rate:  form.Rate,
+			Qty:   form.Qty,
+			Sell:  form.Sell,
+		},
+		TemporaryID: uint64(rand.Int63()),
 	}, nil
 }
 

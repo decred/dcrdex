@@ -373,14 +373,14 @@ func (s *WebServer) apiTrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer zero(pass)
-	ord, err := s.core.Trade(pass, form.Order)
+	ord, err := s.core.TradeAsync(pass, form.Order)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error placing order: %w", err))
 		return
 	}
 	resp := &struct {
-		OK    bool        `json:"ok"`
-		Order *core.Order `json:"order"`
+		OK    bool                `json:"ok"`
+		Order *core.InFlightOrder `json:"order"`
 	}{
 		OK:    true,
 		Order: ord,

@@ -314,7 +314,7 @@ type Order struct {
 	QuoteSymbol       string            `json:"quoteSymbol"`
 	MarketID          string            `json:"market"`
 	Type              order.OrderType   `json:"type"`
-	ID                dex.Bytes         `json:"id"`
+	ID                dex.Bytes         `json:"id"`    // Can be zero if part of an InFlightOrder
 	Stamp             uint64            `json:"stamp"` // Server's time stamp
 	SubmitTime        uint64            `json:"submitTime"`
 	Sig               dex.Bytes         `json:"sig"`
@@ -333,6 +333,13 @@ type Order struct {
 	Rate              uint64            `json:"rate"`          // limit only
 	TimeInForce       order.TimeInForce `json:"tif"`           // limit only
 	TargetOrderID     dex.Bytes         `json:"targetOrderID"` // cancel only
+}
+
+// InFlightOrder is an Order that is not stamped yet, but has a temporary ID
+// to match once order submission is complete.
+type InFlightOrder struct {
+	*Order
+	TemporaryID uint64 `json:"tempID"`
 }
 
 // FeeBreakdown is categorized fee information.
@@ -396,6 +403,12 @@ func coreOrderFromTrade(ord order.Order, metaData *db.OrderMetaData) *Order {
 		accelerationCoins = append(accelerationCoins, NewCoin(fromID, coinID))
 	}
 
+	// For in-flight orders, we'll set the order ID as a zero-hash.
+	var oid order.OrderID
+	if ord.Time() > 0 {
+		oid = ord.ID()
+	}
+
 	corder := &Order{
 		Host:        metaData.Host,
 		BaseID:      baseID,
@@ -404,7 +417,7 @@ func coreOrderFromTrade(ord order.Order, metaData *db.OrderMetaData) *Order {
 		QuoteSymbol: unbip(quoteID),
 		MarketID:    marketName(baseID, quoteID),
 		Type:        prefix.OrderType,
-		ID:          ord.ID().Bytes(),
+		ID:          oid.Bytes(),
 		Stamp:       uint64(prefix.ServerTime.UnixMilli()),
 		SubmitTime:  uint64(prefix.ClientTime.UnixMilli()),
 		Sig:         metaData.Proof.DEXSig,
@@ -445,6 +458,10 @@ type Market struct {
 	// an atomic rate (e.g. gwei/sat) to a conventional rate (ETH/BTC). Divide
 	// by AtomToConv to convert a conventional rate to an atomic rate.
 	AtomToConv float64 `json:"atomToConv"`
+	// InFlightOrders are Orders with zeroed IDs for the embedded Order, but
+	// with a TemporaryID to match with a notification once asynchronous order
+	// submission is complete.
+	InFlightOrders []*InFlightOrder `json:"inflight"`
 }
 
 // BaseContractLocked is the amount of base asset locked in un-redeemed

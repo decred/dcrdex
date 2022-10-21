@@ -226,7 +226,8 @@ func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, 
 			tUTXOAssetB.ID: tUTXOAssetB,
 			tACCTAsset.ID:  tACCTAsset,
 		},
-		books: make(map[string]*bookie),
+		inFlightOrders: make(map[uint64]*InFlightOrder),
+		books:          make(map[string]*bookie),
 		cfg: &msgjson.ConfigResult{
 			CancelMax:        0.8,
 			BroadcastTimeout: 1000, // 1000 ms for faster expiration, but ticker fires fast
@@ -652,6 +653,7 @@ type TXCWallet struct {
 	unlockErr           error
 	balErr              error
 	bal                 *asset.Balance
+	fundingMtx          sync.RWMutex
 	fundingCoins        asset.Coins
 	fundRedeemScripts   []dex.Bytes
 	returnedCoins       asset.Coins
@@ -796,6 +798,8 @@ func (w *TXCWallet) PreRedeem(form *asset.PreRedeemForm) (*asset.PreRedeem, erro
 func (w *TXCWallet) RedemptionFees() (uint64, error) { return 0, nil }
 
 func (w *TXCWallet) ReturnCoins(coins asset.Coins) error {
+	w.fundingMtx.Lock()
+	defer w.fundingMtx.Unlock()
 	w.returnedCoins = coins
 	coinInSlice := func(coin asset.Coin) bool {
 		for _, c := range coins {
@@ -1068,11 +1072,15 @@ func (w *TAccountLocker) ReserveNRedemptions(n uint64, ver uint32, maxFeeRate ui
 }
 
 func (w *TAccountLocker) ReReserveRedemption(v uint64) error {
+	w.fundingMtx.Lock()
+	defer w.fundingMtx.Unlock()
 	w.reservedRedemption += v
 	return w.reReserveRedemptionErr
 }
 
 func (w *TAccountLocker) UnlockRedemptionReserves(v uint64) {
+	w.fundingMtx.Lock()
+	defer w.fundingMtx.Unlock()
 	w.redemptionUnlocked += v
 }
 
@@ -1081,10 +1089,14 @@ func (w *TAccountLocker) ReserveNRefunds(n uint64, ver uint32, maxFeeRate uint64
 }
 
 func (w *TAccountLocker) UnlockRefundReserves(v uint64) {
+	w.fundingMtx.Lock()
+	defer w.fundingMtx.Unlock()
 	w.refundUnlocked += v
 }
 
 func (w *TAccountLocker) ReReserveRefund(v uint64) error {
+	w.fundingMtx.Lock()
+	defer w.fundingMtx.Unlock()
 	w.reservedRefund += v
 	return w.reReserveRefundErr
 }
@@ -2689,7 +2701,8 @@ func TestSend(t *testing.T) {
 	}
 }
 
-func TestTrade(t *testing.T) {
+func trade(t *testing.T, async bool) {
+	t.Helper()
 	rig := newTestRig()
 	defer rig.shutdown()
 	tCore := rig.core
@@ -2795,20 +2808,89 @@ func TestTrade(t *testing.T) {
 		return nil
 	}
 
-	ensureErr := func(tag string) {
+	ch := tCore.NotificationFeed() // detect when sync goroutine completes
+	waitForOrderNotification := func() (*Order, uint64, error) {
+		var corder *Order
+		var tempID uint64
+	wait:
+		for {
+			select {
+			case note := <-ch:
+				if note.Type() == NoteTypeOrder {
+					n, ok := note.(*OrderNote)
+					if !ok {
+						t.Fatalf("Expected OrderNote type, got %T", note)
+					}
+					if note.Topic() == TopicAsyncOrderSubmitted {
+						tempID = n.TemporaryID
+					} else if tempID == n.TemporaryID && note.Topic() == TopicAsyncOrderFailure {
+						return nil, tempID, fmt.Errorf("%v", note.Details())
+					} else {
+						corder = n.Order
+						break wait
+					}
+				}
+			case <-time.After(1 * time.Second):
+				t.Fatal("Failed to receive queued order note")
+			}
+		}
+		return corder, tempID, nil
+	}
+
+	trade := func() (*Order, error) {
+		if !async {
+			return tCore.Trade(tPW, form)
+		}
+
+		inflight, err := tCore.TradeAsync(tPW, form)
+		if err != nil {
+			return nil, err
+		}
+
+		corder, tempID, err := waitForOrderNotification()
+		if err != nil {
+			return nil, err
+		}
+
+		if inflight.TemporaryID != tempID {
+			t.Fatalf("received wrong inflight order, expected %d got %d", inflight.TemporaryID, tempID)
+		}
+
+		return corder, nil
+	}
+
+	ensureOrderErr := func(tag string, waitForErr bool) {
 		t.Helper()
-		_, err = tCore.Trade(tPW, form)
-		if err == nil {
+		var err error
+		if async {
+			_, err = tCore.TradeAsync(tPW, form)
+		} else {
+			_, err = tCore.Trade(tPW, form)
+		}
+		if !waitForErr && err == nil {
 			t.Fatalf("%s: no error", tag)
 		}
+
+		if waitForErr {
+			_, _, err := waitForOrderNotification()
+			if err == nil {
+				t.Fatalf("%s: no error for queued order", tag)
+			}
+		}
+	}
+
+	ensureErr := func(tag string) {
+		t.Helper()
+		ensureOrderErr(tag, false)
 	}
 
 	// Initial success
 	rig.ws.queueResponse(msgjson.LimitRoute, handleLimit)
-	_, err = tCore.Trade(tPW, form)
+	corder, err := trade()
 	if err != nil {
 		t.Fatalf("limit order error: %v", err)
 	}
+	t.Logf("Order with ID(%s) has been placed successfully!", corder.ID.String())
 
 	// Check that the Fund request for a limit sell came through and that
 	// value was not adjusted internally with BaseToQuote.
@@ -2847,7 +2929,6 @@ func TestTrade(t *testing.T) {
 	if err == nil {
 		t.Fatalf("no error for no peers")
 	}
-	ch := tCore.NotificationFeed() // detect when sync goroutine completes
 	tCore.peerChange(dcrWallet, 1, nil)
 
 	// Wait for the balance update note when the sync status goroutine flags the
@@ -2888,6 +2969,12 @@ wait:
 		t.Fatalf("no error for disconnected dex")
 	}
 	atomic.StoreUint32(&rig.dc.connectionStatus, uint32(comms.Connected))
+
+	setWalletSyncStatus := func(w *xcWallet, status bool) {
+		w.mtx.Lock()
+		w.synced = status
+		w.mtx.Unlock()
+	}
 
 	// No base asset
 	form.Base = 12345
@@ -2936,17 +3023,17 @@ wait:
 	tDcrWallet.signCoinErr = nil
 
 	// Sync-in-progress error
-	dcrWallet.synced = false
+	setWalletSyncStatus(dcrWallet, false)
 	ensureErr("base not synced")
-	dcrWallet.synced = true
+	setWalletSyncStatus(dcrWallet, true)
 
-	btcWallet.synced = false
+	setWalletSyncStatus(btcWallet, false)
 	ensureErr("quote not synced")
-	btcWallet.synced = true
+	setWalletSyncStatus(btcWallet, true)
 
 	// LimitRoute error
 	rig.ws.reqErr = tErr
-	ensureErr("Request error")
+	ensureOrderErr("Request error", async)
 	rig.ws.reqErr = nil
 
 	// The rest need a queued handler
@@ -2954,34 +3041,35 @@ wait:
 	// Bad signature
 	rig.ws.queueResponse(msgjson.LimitRoute, handleLimit)
 	badSig = true
-	ensureErr("bad server sig")
+	ensureOrderErr("bad server sig", async)
 	badSig = false
 
 	// No order ID in response
 	rig.ws.queueResponse(msgjson.LimitRoute, handleLimit)
 	noID = true
-	ensureErr("no ID")
+	ensureOrderErr("no ID", async)
 	noID = false
 
 	// Wrong order ID in response
 	rig.ws.queueResponse(msgjson.LimitRoute, handleLimit)
 	badID = true
-	ensureErr("no ID")
+	ensureOrderErr("no ID", async)
 	badID = false
 
 	// Storage failure
 	rig.ws.queueResponse(msgjson.LimitRoute, handleLimit)
 	rig.db.updateOrderErr = tErr
-	ensureErr("db failure")
+	ensureOrderErr("db failure", async)
 	rig.db.updateOrderErr = nil
 
 	// Success when buying.
 	form.Sell = false
 	rig.ws.queueResponse(msgjson.LimitRoute, handleLimit)
-	_, err = tCore.Trade(tPW, form)
+	corder, err = trade()
 	if err != nil {
 		t.Fatalf("limit order error: %v", err)
 	}
+	t.Logf("Order with ID(%s) has been placed successfully!", corder.ID.String())
 
 	// Check that the Fund request for a limit buy came through to the BTC wallet
 	// and that the value was adjusted internally with BaseToQuote.
@@ -3000,10 +3088,11 @@ wait:
 	form.IsLimit = false
 	form.Qty = calc.BaseToQuote(rate, qty)
 	rig.ws.queueResponse(msgjson.MarketRoute, handleMarket)
-	_, err = tCore.Trade(tPW, form)
+	corder, err = trade()
 	if err != nil {
 		t.Fatalf("market order error: %v", err)
 	}
+	t.Logf("Order with ID(%s) has been placed successfully!", corder.ID.String())
 
 	// The funded qty for a market buy should not be adjusted.
 	if tBtcWallet.fundedVal != form.Qty {
@@ -3019,10 +3108,11 @@ wait:
 	form.Sell = true
 	form.Qty = qty
 	rig.ws.queueResponse(msgjson.MarketRoute, handleMarket)
-	_, err = tCore.Trade(tPW, form)
+	corder, err = trade()
 	if err != nil {
 		t.Fatalf("market order error: %v", err)
 	}
+	t.Logf("Order with ID(%s) has been placed successfully!", corder.ID.String())
 
 	// The funded qty for a market sell order should not be adjusted.
 	if tDcrWallet.fundedVal != qty {
@@ -3037,13 +3127,16 @@ wait:
 	form.Base = tUTXOAssetB.ID
 	form.Quote = tACCTAsset.ID
 	rig.ws.queueResponse(msgjson.MarketRoute, handleMarket)
+	tEthWallet.fundingMtx.Lock()
 	tEthWallet.reserveNRedemptions = reserveN
+	tEthWallet.fundingMtx.Unlock()
 	tEthWallet.sigs = []dex.Bytes{{}}
 	tEthWallet.pubKeys = []dex.Bytes{{}}
-	_, err = tCore.Trade(tPW, form)
+	corder, err = trade()
 	if err != nil {
 		t.Fatalf("account-redeemed order error: %v", err)
 	}
+	t.Logf("Order with ID(%s) has been placed successfully!", corder.ID.String())
 
 	// redeem sig error
 	tEthWallet.signCoinErr = tErr
@@ -3061,14 +3154,26 @@ wait:
 	tEthWallet.reserveNRedemptionsErr = nil
 
 	// Funds returned for later error.
+	tEthWallet.fundingMtx.Lock()
 	tEthWallet.redemptionUnlocked = 0
+	tEthWallet.fundingMtx.Unlock()
 	rig.db.updateOrderErr = tErr
 	rig.ws.queueResponse(msgjson.MarketRoute, handleMarket)
-	ensureErr("db error after redeem funds checked out")
+	ensureOrderErr("db error after redeem funds checked out", async)
 	rig.db.updateOrderErr = nil
+	tEthWallet.fundingMtx.Lock()
+	defer tEthWallet.fundingMtx.Unlock()
 	if tEthWallet.redemptionUnlocked != reserveN {
 		t.Fatalf("redeem funds not returned")
 	}
+}
+
+func TestTrade(t *testing.T) {
+	trade(t, false)
+}
+
+func TestTradeAsync(t *testing.T) {
+	trade(t, true)
 }
 
 func TestRefundReserves(t *testing.T) {
@@ -6264,7 +6369,7 @@ func Test_marketTrades(t *testing.T) {
 
 	dc.trades[inactiveTracker.ID()] = inactiveTracker
 
-	trades := dc.marketTrades(mktID)
+	trades, _ := dc.marketTrades(mktID)
 	if len(trades) != 1 {
 		t.Fatalf("Expected only one trade from marketTrades, found %v", len(trades))
 	}

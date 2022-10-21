@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"os"
 	"strings"
@@ -159,17 +160,20 @@ func (w *TCore) ValidateAddress(address string, assetID uint32) (bool, error) {
 func (c *TCore) EstimateSendTxFee(addr string, assetID uint32, value uint64, subtract bool) (fee uint64, isValidAddress bool, err error) {
 	return c.estFee, true, c.estFeeErr
 }
-func (c *TCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error) {
+func (c *TCore) TradeAsync(pw []byte, form *core.TradeForm) (*core.InFlightOrder, error) {
 	oType := order.LimitOrderType
 	if !form.IsLimit {
 		oType = order.MarketOrderType
 	}
-	return &core.Order{
-		Type:  oType,
-		Stamp: uint64(time.Now().UnixMilli()),
-		Rate:  form.Rate,
-		Qty:   form.Qty,
-		Sell:  form.Sell,
+	return &core.InFlightOrder{
+		Order: &core.Order{
+			Type:  oType,
+			Stamp: uint64(time.Now().UnixMilli()),
+			Rate:  form.Rate,
+			Qty:   form.Qty,
+			Sell:  form.Sell,
+		},
+		TemporaryID: uint64(rand.Int63()),
 	}, nil
 }
 

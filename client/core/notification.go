@@ -242,7 +242,8 @@ func newSendNote(topic Topic, subject, details string, severity db.Severity) *Se
 // OrderNote is a notification about an order or a match.
 type OrderNote struct {
 	db.Notification
-	Order *Order `json:"order"`
+	Order       *Order `json:"order"`
+	TemporaryID uint64 `json:"tempID,omitempty"`
 }
 
 const (
@@ -285,6 +286,8 @@ const (
 	TopicFailedCancel         Topic = "FailedCancel"
 	TopicOrderLoaded          Topic = "OrderLoaded"
 	TopicOrderRetired         Topic = "OrderRetired"
+	TopicAsyncOrderFailure    Topic = "AsyncOrderFailure"
+	TopicAsyncOrderSubmitted  Topic = "AsyncOrderSubmitted"
 )
 
 func newOrderNote(topic Topic, subject, details string, severity db.Severity, corder *Order) *OrderNote {
@@ -292,6 +295,12 @@ func newOrderNote(topic Topic, subject, details string, severity db.Severity, co
 		Notification: db.NewNotification(NoteTypeOrder, topic, subject, details, severity),
 		Order:        corder,
 	}
+}
+
+func newOrderNoteWithTempID(topic Topic, subject, details string, severity db.Severity, corder *Order, tempID uint64) *OrderNote {
+	note := newOrderNote(topic, subject, details, severity, corder)
+	note.TemporaryID = tempID
+	return note
 }
 
 // MatchNote is a notification about a match.

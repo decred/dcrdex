@@ -641,6 +641,9 @@ func handleMyOrders(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 			for _, order := range market.Orders {
 				myOrders = append(myOrders, parseCoreOrder(order, market.BaseID, market.QuoteID))
 			}
+			for _, inflight := range market.InFlightOrders {
+				myOrders = append(myOrders, parseCoreOrder(inflight.Order, market.BaseID, market.QuoteID))
+			}
 		}
 	}
 	return createResponse(myOrdersRoute, myOrders, nil)

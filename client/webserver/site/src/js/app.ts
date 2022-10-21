@@ -39,7 +39,8 @@ import {
   BalanceResponse,
   APIResponse,
   RateNote,
-  BotReport
+  BotReport,
+  InFlightOrder
 } from './registry'
 
 const idel = Doc.idel // = element by id
@@ -535,8 +536,29 @@ export default class Application {
     if (!user) return
     switch (note.type) {
       case 'order': {
-        const order = (note as OrderNote).order
+        const orderNote = note as OrderNote
+        const order = orderNote.order
         const mkt = user.exchanges[order.host].markets[order.market]
+        const tempID = orderNote.tempID
+
+        // Ensure market's inflight orders list is updated.
+        if (note.topic === 'AsyncOrderSubmitted') {
+          const inflight = order as InFlightOrder
+          inflight.tempID = tempID
+          if (!mkt.inflight) mkt.inflight = [inflight]
+          else mkt.inflight.push(inflight)
+          break
+        } else if (note.topic === 'AsyncOrderFailure') {
+          mkt.inflight = mkt.inflight.filter(ord => ord.tempID !== tempID)
+          break
+        } else {
+          for (const i in mkt.inflight || []) {
+            if (!(mkt.inflight[i].tempID === tempID)) continue
+            mkt.inflight = mkt.inflight.filter(ord => ord.tempID !== tempID)
+            break
+          }
+        }
+
         // Updates given order in market's orders list if it finds it.
         // Returns a bool which indicates if order was found.
         const updateOrder = (mkt: Market, ord: Order) => {
@@ -771,12 +793,21 @@ export default class Application {
     return () => { loader.remove() }
   }
 
-  /* orders retrieves a list of orders for the specified dex and market. */
+  /* orders retrieves a list of orders for the specified dex and market
+   * including inflight orders.
+   */
   orders (host: string, mktID: string): Order[] {
     let o = this.user.exchanges[host].markets[mktID].orders
     if (!o) {
       o = []
       this.user.exchanges[host].markets[mktID].orders = o
+    }
+
+    let inflight = this.user.exchanges[host].markets[mktID].inflight
+    if (inflight) o = o.concat(inflight)
+    else {
+      inflight = []
+      this.user.exchanges[host].markets[mktID].inflight = inflight
     }
     return o
   }

@@ -73,3 +73,10 @@ func (e *ErrorCloser) Done(log Logger) {
 		}
 	}
 }
+
+// Copy creates a shallow copy of the ErrorCloser.
+func (e *ErrorCloser) Copy() *ErrorCloser {
+	return &ErrorCloser{
+		closers: e.closers,
+	}
+}

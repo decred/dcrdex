@@ -33,6 +33,7 @@ export const ID_LOT = 'ID_LOT'
 export const ID_LOTS = 'ID_LOTS'
 export const ID_UNKNOWN = 'ID_UNKNOWN'
 export const ID_EPOCH = 'ID_EPOCH'
+export const ID_ORDER_PENDING = 'ID_ORDER_PENDING'
 export const ID_SETTLING = 'ID_SETTLING'
 export const ID_NO_MATCH = 'ID_NO_MATCH'
 export const ID_CANCELED = 'ID_CANCELED'
@@ -149,7 +150,8 @@ export const enUS: Locale = {
   [ID_INVALID_DATE_ERR_MSG]: 'error: invalid date or time',
   [ID_NO_ARCHIVED_RECORDS]: 'No archived records found',
   [ID_DELETE_ARCHIVED_RECORDS_RESULT]: 'Message: {{ nRecords }} archived records has been deleted',
-  [ID_ARCHIVED_RECORDS_PATH]: 'File Location: {{ path }}'
+  [ID_ARCHIVED_RECORDS_PATH]: 'File Location: {{ path }}',
+  [ID_ORDER_PENDING]: 'pending'
 }
 
 export const ptBR: Locale = {
