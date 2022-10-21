@@ -112,7 +112,7 @@ func readTextFile(cmd string, args []string) error {
 		return nil
 	}
 	path := dex.CleanAndExpandPath(args[fileArgIndx])
-	if !fileExists(path) {
+	if !dex.FileExists(path) {
 		return fmt.Errorf("no file found at %s", path)
 	}
 	fileContents, err := os.ReadFile(path)

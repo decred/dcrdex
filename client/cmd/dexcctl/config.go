@@ -6,7 +6,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"runtime"
 
@@ -50,16 +49,6 @@ type config struct {
 	Simnet       bool     `long:"simnet" description:"use simnet"`
 }
 
-// fileExists reports whether the named file or directory exists.
-func fileExists(name string) bool {
-	if _, err := os.Stat(name); err != nil {
-		if os.IsNotExist(err) {
-			return false
-		}
-	}
-	return true
-}
-
 // configure parses command line options and a config file if present. Returns
 // an instantiated *config, leftover command line arguments, and a bool that
 // is true if there is nothing further to do (i.e. version was printed and we
@@ -98,7 +87,7 @@ func configure() (*config, []string, bool, error) {
 
 	parser := flags.NewParser(cfg, flags.Default)
 
-	if fileExists(cfg.Config) {
+	if dex.FileExists(cfg.Config) {
 		// Load additional config from file.
 		err = flags.NewIniParser(parser).ParseFile(cfg.Config)
 		if err != nil {
@@ -115,7 +104,7 @@ func configure() (*config, []string, bool, error) {
 	if cfg.RPCCert == "" {
 		// Check in ~/.dexcctl first.
 		cfg.RPCCert = dex.CleanAndExpandPath(filepath.Join(appDir, defaultRPCCertFile))
-		if !fileExists(cfg.RPCCert) { // Then in ~/.dexc
+		if !dex.FileExists(cfg.RPCCert) { // Then in ~/.dexc
 			cfg.RPCCert = dex.CleanAndExpandPath(filepath.Join(dexcAppDir, defaultRPCCertFile))
 		}
 	} else {

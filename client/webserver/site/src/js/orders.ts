@@ -10,11 +10,13 @@ import {
 } from './registry'
 
 const orderBatchSize = 50
+const animationLength = 500
 
 export default class OrdersPage extends BasePage {
   main: HTMLElement
   offset: string
   loading: boolean
+  currentForm: PageElement
   orderTmpl: PageElement
   filterState: OrderFilter
   page: Record<string, PageElement>
@@ -87,11 +89,49 @@ export default class OrdersPage extends BasePage {
       }
     })
 
+    page.forms.querySelectorAll('.form-closer').forEach(el => {
+      Doc.bind(el, 'click', () => {
+        Doc.hide(page.forms)
+      })
+    })
+
+    // If the user clicks outside of a form, it should close the page overlay.
+    Doc.bind(page.forms, 'mousedown', (e: MouseEvent) => {
+      if (!Doc.mouseInElement(e, this.currentForm)) {
+        Doc.hide(page.forms)
+      }
+    })
+
     Doc.bind(page.exportOrders, 'click', () => {
       this.exportOrders()
     })
 
+    Doc.bind(page.deleteArchivedRecords, 'click', () => {
+      const page = this.page
+      page.saveMatchesToFile.checked = false
+      page.saveOrdersToFile.checked = false
+      page.deleteArchivedRecordsErr.textContent = ''
+      Doc.hide(page.deleteArchivedRecordsErr)
+      this.showForm(page.deleteArchivedRecordsForm)
+    })
+
+    Doc.bind(page.deleteArchivedRecordsSubmit, 'click', () => { this.deleteArchivedRecords() })
+
     this.submitFilter()
+  }
+
+  /* showForm shows a modal form with a little animation. */
+  async showForm (form: HTMLElement) {
+    this.currentForm = form
+    const page = this.page
+    Doc.hide(page.deleteArchivedRecordsForm)
+    form.style.right = '10000px'
+    Doc.show(page.forms, form)
+    const shift = (page.forms.offsetWidth + form.offsetWidth) / 2
+    await Doc.animate(animationLength, progress => {
+      form.style.right = `${(1 - progress) * shift}px`
+    }, 'easeOutHard')
+    form.style.right = '0px'
   }
 
   /* setOrders empties the order table and appends the specified orders. */
@@ -189,6 +229,26 @@ export default class OrdersPage extends BasePage {
     url.search = search.toString()
     url.pathname = '/orders/export'
     window.open(url.toString())
+  }
+
+  /* deleteArchivedRecords removes the user's archived orders and matches
+   * created before user specified date time. Deleted archived records are saved
+   * to a CSV file if the user specify so.
+   */
+  async deleteArchivedRecords () {
+    const page = this.page
+    const reqBody = {
+      olderThanMs: Date.parse(page.olderThan.value || ''),
+      saveMatchesToFile: page.saveMatchesToFile.checked || false,
+      saveOrdersToFile: page.saveOrdersToFile.checked || false
+    }
+    const loaded = app().loading(this.main)
+    const res = await postJSON('/api/deletearchivedrecords', reqBody)
+    loaded()
+    if (!app().checkResponse(res)) {
+      return Doc.showFormError(page.deleteArchivedRecordsErr, res.msg)
+    }
+    app().loadPage('orders')
   }
 
   /*

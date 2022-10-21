@@ -119,3 +119,9 @@ type accountDisableForm struct {
 	Pass encode.PassBytes `json:"pw"`
 	Host string           `json:"host"`
 }
+
+type deleteRecordsForm struct {
+	OlderThanMs       int64 `json:"olderThanMs"`
+	SaveOrdersToFile  bool  `json:"saveOrdersToFile"`
+	SaveMatchesToFile bool  `json:"saveMatchesToFile"`
+}

@@ -251,5 +251,5 @@ var DeDE = map[string]string{
 	"Host":                        "Host",
 	"No Recent Activity":          "Keine aktuelle Aktivität",
 	"Recent asset_name Activity":  "<span data-asset-name=1></span>Aktuelle Aktivitäten",
-	"Other Actions":               "Andere Aktionen",
+	"other_actions":               "Andere Aktionen",
 }

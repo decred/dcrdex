@@ -7899,9 +7899,18 @@ func (c *Core) WalletRestorationInfo(pw []byte, assetID uint32) ([]*asset.Wallet
 	return restorationInfo, nil
 }
 
+// createFile creates a new file and will create the file directory if it does
+// not exist.
 func createFile(fileName string) (*os.File, error) {
 	if fileName == "" {
 		return nil, errors.New("no file path specified for creating")
+	}
+	fileDir := filepath.Dir(fileName)
+	if !dex.FileExists(fileDir) {
+		err := os.MkdirAll(fileDir, 0755)
+		if err != nil {
+			return nil, fmt.Errorf("os.MkdirAll error: %w", err)
+		}
 	}
 	fileName = dex.CleanAndExpandPath(fileName)
 	// Errors if file exists.
@@ -8146,8 +8155,27 @@ func deleteMatchFn(matchesFileStr string) (perMatchFn func(*db.MetaMatch, bool) 
 	}, matchesFile.Close, nil
 }
 
+// archivedRecordsDataDirectory returns a data directory to save deleted archive
+// records.
+func (c *Core) archivedRecordsDataDirectory() string {
+	return filepath.Join(filepath.Dir(c.cfg.DBPath), "archived-records")
+}
+
+// DeleteArchivedRecordsWithBackup is like DeleteArchivedRecords but the required
+// filepaths are provided by Core.
+func (c *Core) DeleteArchivedRecordsWithBackup(olderThan *time.Time, saveMatchesToFile, saveOrdersToFile bool) error {
+	var matchesFile, ordersFile string
+	if saveMatchesToFile {
+		matchesFile = filepath.Join(c.archivedRecordsDataDirectory(), fmt.Sprintf("archived-matches-%d", time.Now().Unix()))
+	}
+	if saveOrdersToFile {
+		ordersFile = filepath.Join(c.archivedRecordsDataDirectory(), fmt.Sprintf("archived-orders-%d", time.Now().Unix()))
+	}
+	return c.DeleteArchivedRecords(olderThan, matchesFile, ordersFile)
+}
+
 // DeleteArchivedRecords deletes archived matches from the database. Optionally
-// set a time to delete records after and file paths to save deleted records as
+// set a time to delete older records and file paths to save deleted records as
 // comma separated values. If a nil *time.Time is provided, current time is used.
 func (c *Core) DeleteArchivedRecords(olderThan *time.Time, matchesFile, ordersFile string) error {
 	var (

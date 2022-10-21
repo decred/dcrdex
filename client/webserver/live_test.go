@@ -1824,6 +1824,9 @@ func (c *TCore) ToggleRateSourceStatus(src string, disable bool) error {
 func (c *TCore) FiatRateSources() map[string]bool {
 	return c.fiatSources
 }
+func (c *TCore) DeleteArchivedRecordsWithBackup(olderThan *time.Time, saveMatchesToFile, saveOrdersToFile bool) error {
+	return nil
+}
 
 func TestServer(t *testing.T) {
 	// Register dummy drivers for unimplemented assets.
