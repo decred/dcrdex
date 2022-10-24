@@ -9160,20 +9160,19 @@ out:
 			if !ok {
 				continue
 			}
+			progressNotes++
 			if walletNote.Wallet.Synced {
 				break out
 			}
-			progressNotes++
 		case <-timeout.C:
 			t.Fatalf("timed out waiting for synced wallet note. Received %d progress notes", progressNotes)
 		}
 	}
-	// Should get 9 notes, but just make sure we get at least half of them to
-	// avoid github vm false positives.
-	if progressNotes < 5 /* 9? */ {
-		t.Fatalf("expected 9 progress notes, got %d", progressNotes)
+	// By the time we've got 10th note it should signal that the wallet has been
+	// synced (due to how we've set up testDuration and syncTickerPeriod values).
+	if progressNotes > 10 {
+		t.Fatalf("expected 10 progress notes at most, got %d", progressNotes)
 	}
-	// t.Logf("got %d progress notes", progressNotes)
 }
 
 func TestParseCert(t *testing.T) {
