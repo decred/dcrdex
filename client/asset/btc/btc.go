@@ -1390,23 +1390,26 @@ func (btc *baseWallet) legacyBalance() (*asset.Balance, error) {
 		return nil, fmt.Errorf("legacyBalance unimplemented for spv clients")
 	}
 
+	locked, err := btc.lockedSats()
+	if err != nil {
+		return nil, fmt.Errorf("(legacy) lockedSats error: %w", err)
+	}
+
 	if btc.zecStyleBalance {
 		var bal uint64
 		// args: "(dummy)" minconf includeWatchonly inZat
 		if err := cl.call(methodGetBalance, anylist{"", 0, false, true}, &bal); err != nil {
 			return nil, err
 		}
-		return &asset.Balance{Available: bal}, nil
+		return &asset.Balance{
+			Available: bal - locked,
+			Locked:    locked,
+		}, nil
 	}
 
 	walletInfo, err := cl.GetWalletInfo()
 	if err != nil {
 		return nil, fmt.Errorf("(legacy) GetWalletInfo error: %w", err)
-	}
-
-	locked, err := btc.lockedSats()
-	if err != nil {
-		return nil, fmt.Errorf("(legacy) lockedSats error: %w", err)
 	}
 
 	return &asset.Balance{
