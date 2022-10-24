@@ -37,7 +37,6 @@ import (
 	"decred.org/dcrdex/server/account"
 	serverdex "decred.org/dcrdex/server/dex"
 	"github.com/decred/dcrd/crypto/blake256"
-	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 )
@@ -9160,19 +9159,18 @@ out:
 			if !ok {
 				continue
 			}
+			progressNotes++
 			if walletNote.Wallet.Synced {
 				break out
 			}
-			progressNotes++
 		case <-timeout.C:
 			t.Fatalf("timed out waiting for synced wallet note. Received %d progress notes", progressNotes)
 		}
 	}
-	// We must get at least 1 progress note.
-	// By the time we've got 9th note it should signal that the wallet has been
+	// By the time we've got 10th note it should signal that the wallet has been
 	// synced (due to how we've set up testDuration and syncTickerPeriod values).
-	if progressNotes < 1 || progressNotes > 9 {
-		t.Fatalf("expected at least 1 and at most 9 progress notes, got %d", progressNotes)
+	if progressNotes > 10 {
+		t.Fatalf("expected 10 progress notes at most, got %d", progressNotes)
 	}
 }
 
