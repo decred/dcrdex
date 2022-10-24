@@ -179,6 +179,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 		NumericGetRawRPC:         true,
 		LegacyValidateAddressRPC: true,
 		SingularWallet:           true,
+		UnlockSpends:             true,
 		FeeEstimator:             estimateFee,
 		AddressDecoder: func(addr string, net *chaincfg.Params) (btcutil.Address, error) {
 			return dexzec.DecodeAddress(addr, addrParams, btcParams)
