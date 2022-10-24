@@ -479,7 +479,43 @@ func (wc *rpcClient) lockUnspent(unlock bool, ops []*output) error {
 func (wc *rpcClient) listLockUnspent() ([]*RPCOutpoint, error) {
 	var unspents []*RPCOutpoint
 	err := wc.call(methodListLockUnspent, nil, &unspents)
-	return unspents, err
+	if err != nil {
+		return nil, err
+	}
+	if !wc.unlockSpends {
+		return unspents, nil
+	}
+	// This is quirky wallet software that does not unlock spent outputs, so
+	// we'll verify that each output is actually unspent.
+	var i int // for in-place filter
+	for _, utxo := range unspents {
+		var gtxo *btcjson.GetTxOutResult
+		err = wc.call(methodGetTxOut, anylist{utxo.TxID, utxo.Vout, true}, &gtxo)
+		if err != nil {
+			wc.log.Warnf("gettxout(%v:%d): %v", utxo.TxID, utxo.Vout, err)
+			continue
+		}
+		if gtxo != nil {
+			unspents[i] = utxo // unspent, keep it
+			i++
+			continue
+		}
+		// actually spent, unlock
+		var success bool
+		op := []*RPCOutpoint{{
+			TxID: utxo.TxID,
+			Vout: utxo.Vout,
+		}}
+		err = wc.call(methodLockUnspent, anylist{true, op}, &success)
+		if err != nil || !success {
+			wc.log.Warnf("lockunspent(unlocking %v:%d): success = %v, err = %v",
+				utxo.TxID, utxo.Vout, success, err)
+			continue
+		}
+		wc.log.Debugf("Unlocked spent outpoint %v:%d", utxo.TxID, utxo.Vout)
+	}
+	unspents = unspents[:i]
+	return unspents, nil
 }
 
 // changeAddress gets a new internal address from the wallet. The address will
