@@ -76,16 +76,22 @@ func (t *templates) translate(name string) (string, error) {
 		token, key := matchGroup[0], string(matchGroup[1])
 
 		var toTitle bool
+		var found bool
+		var replacement string
 		if titleKey := strings.TrimPrefix(key, ":title:"); titleKey != key {
-			toTitle = true
-			key = titleKey
+			// Check if there's a value for :title:key. Especially for languages
+			// that do not work well with cases.Caser, e.g zh-cn.
+			if replacement, found = t.dict[key]; !found {
+				toTitle = true
+				key = titleKey
+			}
 		}
 
-		replacement, found := t.dict[key]
 		if !found {
-			replacement, found = locales.EnUS[key]
-			if !found {
-				return "", fmt.Errorf("warning: no translation text for key %q", key)
+			if replacement, found = t.dict[key]; !found {
+				if replacement, found = locales.EnUS[key]; !found {
+					return "", fmt.Errorf("warning: no translation text for key %q", key)
+				}
 			}
 		}
 
