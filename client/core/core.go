@@ -2165,6 +2165,8 @@ func (c *Core) createWalletOrToken(crypter encrypt.Crypter, walletPW []byte, for
 	if err != nil {
 		return nil, fmt.Errorf("error loading wallet for %d -> %s: %w", assetID, symbol, err)
 	}
+	// Block PeersChange until we know this wallet is ready.
+	atomic.StoreUint32(wallet.broadcasting, 0)
 
 	dbWallet.Address, err = c.connectWallet(wallet)
 	if err != nil {
@@ -2204,7 +2206,8 @@ func (c *Core) createWalletOrToken(crypter encrypt.Crypter, walletPW []byte, for
 	// The wallet has been successfully created. Store it.
 	c.updateWallet(assetID, wallet)
 
-	c.notify(newWalletStateNote(wallet.state()))
+	atomic.StoreUint32(wallet.broadcasting, 1)
+	c.walletCheckAndNotify(wallet)
 
 	return wallet, nil
 }
@@ -2696,6 +2699,7 @@ func (c *Core) RecoverWallet(assetID uint32, appPW []byte, force bool) error {
 		if err != nil {
 			return err
 		}
+		c.updateWalletBalance(newWallet)
 
 		c.updateAssetWalletRefs(newWallet)
 
@@ -2705,8 +2709,7 @@ func (c *Core) RecoverWallet(assetID uint32, appPW []byte, force bool) error {
 		}
 	}
 
-	state := newWallet.state()
-	c.notify(newWalletStateNote(state))
+	c.notify(newWalletStateNote(newWallet.state()))
 
 	return nil
 }
