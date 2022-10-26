@@ -12,35 +12,18 @@ func TestTokens(t *testing.T) {
 {{template "top" .}}
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
 <div id="main" data-handler="settings" class="text-center py-5 overflow-y-auto">
-  <span class="settings-gear ico-settings"></span><br>
   <div class="settings">
-    <div class="form-check">
-      <input class="form-check-input" type="checkbox" value="" id="darkMode"{{if .UserInfo.DarkMode}} checked{{end}}>
-      <label class="form-check-label" for="darkMode">
-        [[[Dark Mode]]]
-      </label>
-    </div>
     <div class="form-check">
       <input class="form-check-input" type="checkbox" value="" id="showPokes"{{if .UserInfo.ShowPopups}} checked{{end}}>
       <label class="form-check-label" for="showPokes">
         [[[Show pop-up notifications]]]
       </label>
     </div>
-    <div {{if not .UserInfo.Authed}} class="d-hide"{{end}}>
-    <span>Fiat Currency: </span><span id="fiatCurrency">{{.FiatCurrency}}</span>
-    </div>
     <div id="fiatRateSources" {{if not .UserInfo.Authed}} class="d-hide"{{end}}>
     <span class="mb-2" data-tooltip="[[[fiat_exchange_rate_msg]]]">
      [[[fiat_exchange_rate_sources]]]:
     <span class="ico-info"></span>
     </span>
-    {{range $source, $enabled := .FiatRateSources}}
-    <div class="form-check">
-      <input class="form-check-input" type="checkbox" value="{{$source}}" id="{{$source}}" {{if $enabled}} checked {{end}}>
-      <label class="form-check-label" for="{{$source}}">{{$source}}</label>
-    </div>
-    {{end}}
-    </div>
     <div>
       <div id="exchanges" {{if eq (len .UserInfo.Exchanges) 0}} class="d-hide"{{end}}>
         <h5>[[[registered dexes]]]</h5>
@@ -57,88 +40,13 @@ func TestTokens(t *testing.T) {
         <button id="importAccount" class="bg2 selected ms-2">[[[Import Account]]]</button>
       </div>
     </div>
-    <div>
-        <button id="changeAppPW" class="bg2 selected">[[[Change App Password]]]</button>
-    </div>
-    <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
-      [[[seed_implore_msg]]]<br>
-      <button id="exportSeed" class="fs15 bg2 selected">[[[View Application Seed]]]</button>
-    </div>
-    <div>[[[Build ID]]]: <span id="commitHash" class="mono"></span></div>
-  </div>
-
-  {{- /* POP-UP FORMS */ -}}
-  <div id="forms" class="d-hide">
-    
-    {{- /* DEX ADDRESS */ -}}
-    <form class="position-relative text-start" id="dexAddrForm" autocomplete="off">
-      {{template "dexAddrForm" .}}
-    </form>
-
-    {{- /* REG ASSET SELECTOR */ -}}
-    <form class="d-hide" id="regAssetForm">
-      {{template "regAssetForm"}}
-    </form>
-    {{- /* CONFIRM REGISTRATION */ -}}
-    <form class="d-hide" id="confirmRegForm">
-      {{template "confirmRegistrationForm"}}
-    </form>
-
-    {{- /* AUTHORIZE IMPORT ACCOUNT */ -}}
-    <form class="d-hide" id="authorizeAccountImportForm">
-      {{template "authorizeAccountImportForm" .}}
-    </form>
-
-    {{- /* NEW WALLET */ -}}
-    <form class="d-hide" id="newWalletForm">
-      {{template "newWalletForm" }}
-    </form>
-
-    {{- /* CHANGE APP PASSWORD */ -}}
-    <form class="d-hide" id="changeAppPWForm">
-      {{template "changeAppPWForm"}}
-    </form>
-
-    {{- /* EXPORT SEED AUTHORIZATION */ -}}
-    <form class="d-hide" id="exportSeedAuth">
-      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
-      <div class="py-1 text-center position-relative fs22 sans-light">
-        [[[Export Seed]]]
-      </div>
-      <div class="fs15 text-start mt-2">
-        [[[pw_for_seed]]]
-      </div>
-      <div class="text-start mt-2">
-        <label for="exportSeedPW" class="ps-1 mb-1">[[[Password]]]</label>
-        <input type="password" class="form-control select" id="exportSeedPW" autocomplete="current-password">
-      </div>
-      <div class="d-flex justify-content-end mt-4">
-        <button id="exportSeedSubmit" type="button" class="justify-content-center fs15 bg2 selected">[[[Show Me]]]</button>
-      </div>
-      <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="exportSeedErr"></div>
-    </form>
-
-    {{- /* SEED DISPLAY */ -}}
-    <form class="d-hide" id="authorizeSeedDisplay">
-      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
-      <div class="fs18 sans-light text-center mb-2">[[[dont_share]]]</div>
-      <div id="seedDiv"></div>
-    </form>
-
-    {{- /* SYNC AND BALANCE FORM */ -}}
-    <form class="d-hide" id="walletWait">
-      {{template "waitingForWalletForm"}}
-    </form>
-
-  </div>
-
 </div>
 {{template "bottom"}}
 {{end}}
 [[[ and Lets tRy: a_different  _HARDER_  .pattern. ::.-_-. ]]]
+[[[this shouldn't be included because of this number here: 1]]]
 `)
 	wantTokens := []string{
-		"[[[Dark Mode]]]",
 		"[[[Show pop-up notifications]]]",
 		"[[[fiat_exchange_rate_msg]]]",
 		"[[[fiat_exchange_rate_sources]]]",
@@ -146,22 +54,12 @@ func TestTokens(t *testing.T) {
 		"[[[simultaneous_servers_msg]]]",
 		"[[[Add a DEX]]]",
 		"[[[Import Account]]]",
-		"[[[Change App Password]]]",
-		"[[[seed_implore_msg]]]",
-		"[[[View Application Seed]]]",
-		"[[[Build ID]]]",
-		"[[[Export Seed]]]",
-		"[[[pw_for_seed]]]",
-		"[[[Password]]]",
-		"[[[Show Me]]]",
-		"[[[dont_share]]]",
 		"[[[ and Lets tRy: a_different  _HARDER_  .pattern. ::.-_-. ]]]",
 	}
 	sort.Slice(wantTokens, func(i, j int) bool {
 		return wantTokens[i] < wantTokens[j]
 	})
 	wantKeys := []string{
-		"Dark Mode",
 		"Show pop-up notifications",
 		"fiat_exchange_rate_msg",
 		"fiat_exchange_rate_sources",
@@ -169,15 +67,6 @@ func TestTokens(t *testing.T) {
 		"simultaneous_servers_msg",
 		"Add a DEX",
 		"Import Account",
-		"Change App Password",
-		"seed_implore_msg",
-		"View Application Seed",
-		"Build ID",
-		"Export Seed",
-		"pw_for_seed",
-		"Password",
-		"Show Me",
-		"dont_share",
 		" and Lets tRy: a_different  _HARDER_  .pattern. ::.-_-. ",
 	}
 	sort.Slice(wantKeys, func(i, j int) bool {
