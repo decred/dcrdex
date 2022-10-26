@@ -79,6 +79,7 @@ func TestElectrumExchangeWallet(t *testing.T) {
 		DefaultFallbackFee:  defaultFee,
 		DefaultFeeRateLimit: defaultFeeRateLimit,
 		Segwit:              true,
+		// ElectrumWallet constructor overrides btc.localFeeRate = eew.walletFeeRate
 	}
 	eew, err := ElectrumWallet(cfg)
 	if err != nil {

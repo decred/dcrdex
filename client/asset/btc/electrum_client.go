@@ -27,7 +27,6 @@ import (
 	"decred.org/dcrdex/dex/config"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/btcutil/psbt"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -157,7 +156,7 @@ func newElectrumWallet(ew electrumWalletClient, cfg *electrumWalletConfig) *elec
 
 // BEGIN unimplemented asset.Wallet methods
 
-func (ew *electrumWallet) RawRequest(string, []json.RawMessage) (json.RawMessage, error) {
+func (ew *electrumWallet) RawRequest(context.Context, string, []json.RawMessage) (json.RawMessage, error) {
 	return nil, errors.New("not available") // and not used
 }
 
@@ -376,18 +375,6 @@ func (ew *electrumWallet) reconfigure(cfg *asset.WalletConfig, currentAddress st
 
 	// Changing RPC settings is not supported without restart.
 	return parsedCfg.RPCConfig != *ew.rpcCfg, nil
-}
-
-// part of btc.Wallet interface
-func (ew *electrumWallet) estimateSmartFee(confTarget int64, _ *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error) {
-	satPerKB, err := ew.wallet.FeeRate(ew.ctx, confTarget)
-	if err != nil {
-		return nil, err
-	}
-	feeRate := float64(satPerKB) / 1e8 // BTC/KvB
-	return &btcjson.EstimateSmartFeeResult{
-		FeeRate: &feeRate,
-	}, nil
 }
 
 // part of btc.Wallet interface

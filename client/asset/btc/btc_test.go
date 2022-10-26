@@ -643,6 +643,7 @@ func tNewWallet(segwit bool, walletType string) (*ExchangeWalletFullNode, *testD
 		DefaultFallbackFee:  defaultFee,
 		DefaultFeeRateLimit: defaultFeeRateLimit,
 		Segwit:              segwit,
+		FeeEstimator:        rpcFeeRate,
 	}
 
 	var wallet *ExchangeWalletFullNode

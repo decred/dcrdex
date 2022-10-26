@@ -378,13 +378,9 @@ func (w *spvWallet) checkpoint(txHash *chainhash.Hash, vout uint32) *filterScanR
 	return res
 }
 
-func (w *spvWallet) RawRequest(method string, params []json.RawMessage) (json.RawMessage, error) {
+func (w *spvWallet) RawRequest(ctx context.Context, method string, params []json.RawMessage) (json.RawMessage, error) {
 	// Not needed for spv wallet.
 	return nil, errors.New("RawRequest not available on spv")
-}
-
-func (w *spvWallet) estimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error) {
-	return nil, errors.New("EstimateSmartFee not available on spv")
 }
 
 func (w *spvWallet) ownsAddress(addr btcutil.Address) (bool, error) {

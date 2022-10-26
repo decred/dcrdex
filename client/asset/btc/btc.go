@@ -343,7 +343,10 @@ type BTCCloneCFG struct {
 	NonSegwitSigner TxInSigner
 	// FeeEstimator provides a way to get fees given an RawRequest-enabled
 	// client and a confirmation target.
-	FeeEstimator func(RawRequester, uint64) (uint64, error)
+	FeeEstimator func(context.Context, RawRequester, uint64) (uint64, error)
+	// ExternalFeeEstimator should be supplied if the clone provides the
+	// apifeefallback ConfigOpt. TODO: confTarget uint64
+	ExternalFeeEstimator func(context.Context, dex.Network) (uint64, error)
 	// OmitAddressType causes the address type (bech32, legacy) to be omitted
 	// from calls to getnewaddress.
 	OmitAddressType bool
@@ -787,7 +790,8 @@ type baseWallet struct {
 	zecStyleBalance   bool
 	segwit            bool
 	signNonSegwit     TxInSigner
-	estimateFee       func(RawRequester, uint64) (uint64, error) // TODO: resolve the awkwardness of an RPC-oriented func in a generic framework
+	localFeeRate      func(context.Context, RawRequester, uint64) (uint64, error)
+	externalFeeRate   func(context.Context, dex.Network) (uint64, error)
 	decodeAddr        dexbtc.AddressDecoder
 	deserializeTx     func([]byte) (*wire.MsgTx, error)
 	serializeTx       func(*wire.MsgTx) ([]byte, error)
@@ -935,7 +939,9 @@ func (btc *ExchangeWalletSPV) RemovePeer(addr string) error {
 
 // FeeRate satisfies asset.FeeRater.
 func (btc *ExchangeWalletFullNode) FeeRate() uint64 {
-	rate, err := btc.estimateFee(btc.node, 1)
+	// NOTE: With baseWallet having an optional external fee rate source, we may
+	// consider making baseWallet a FeeRater by allowing a nil local func.
+	rate, err := btc.feeRate(1)
 	if err != nil {
 		btc.log.Tracef("Failed to get fee rate: %v", err)
 		return 0
@@ -1017,6 +1023,9 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 		DefaultFallbackFee:  defaultFee,
 		DefaultFeeRateLimit: defaultFeeRateLimit,
 		Segwit:              true,
+		// FeeEstimator must default to rpcFeeRate if not set, but set a
+		// specific external estimator:
+		ExternalFeeEstimator: externalFeeEstimator,
 	}
 
 	switch cfg.Type {
@@ -1056,7 +1065,7 @@ func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWalletFullNode, error) {
 }
 
 // newRPCWallet creates the ExchangeWallet and starts the block monitor.
-func newRPCWallet(requester RawRequesterWithContext, cfg *BTCCloneCFG, parsedCfg *RPCWalletConfig) (*ExchangeWalletFullNode, error) {
+func newRPCWallet(requester RawRequester, cfg *BTCCloneCFG, parsedCfg *RPCWalletConfig) (*ExchangeWalletFullNode, error) {
 	btc, err := newUnconnectedWallet(cfg, &parsedCfg.WalletConfig)
 	if err != nil {
 		return nil, err
@@ -1184,7 +1193,8 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		initTxSize:          uint64(initTxSize),
 		initTxSizeBase:      uint64(initTxSizeBase),
 		signNonSegwit:       nonSegwitSigner,
-		estimateFee:         cfg.FeeEstimator,
+		localFeeRate:        cfg.FeeEstimator,
+		externalFeeRate:     cfg.ExternalFeeEstimator,
 		decodeAddr:          addrDecoder,
 		stringAddr:          addrStringer,
 		walletInfo:          cfg.WalletInfo,
@@ -1197,11 +1207,22 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 	}
 	w.cfgV.Store(baseCfg)
 
-	if w.estimateFee == nil {
-		w.estimateFee = w.feeRate
+	// Default to the BTC RPC estimator (see LTC). Consumers can use
+	// NoLocalFeeRate or a similar dummy function to power feeRate() requests
+	// with only an external fee rate source available. Otherwise, all method
+	// calls must provide a rate or accept the configured fallback.
+	if w.localFeeRate == nil {
+		w.localFeeRate = rpcFeeRate
 	}
 
 	return w, nil
+}
+
+// NoLocalFeeRate is a dummy function for BTCCloneCFG.FeeEstimator for a wallet
+// instance that cannot support a local fee rate estimate but has an external
+// fee rate source.
+func NoLocalFeeRate() (uint64, error) {
+	return 0, errors.New("no local fee rate estimate possible")
 }
 
 // OpenSPVWallet opens the previously created native SPV wallet.
@@ -1254,11 +1275,11 @@ func (btc *baseWallet) Info() *asset.WalletInfo {
 // perform monitoring differently, but still use this connect method to start up
 // the btc.Wallet (the btc.node field).
 func (btc *baseWallet) connect(ctx context.Context) (*sync.WaitGroup, error) {
+	btc.ctx = ctx
 	var wg sync.WaitGroup
 	if err := btc.node.connect(ctx, &wg); err != nil {
 		return nil, err
 	}
-	btc.ctx = ctx
 	// Initialize the best block.
 	bestBlockHdr, err := btc.node.getBestBlockHeader()
 	if err != nil {
@@ -1269,7 +1290,7 @@ func (btc *baseWallet) connect(ctx context.Context) (*sync.WaitGroup, error) {
 		return nil, fmt.Errorf("invalid best block hash from %s node: %v", btc.symbol, err)
 	}
 	// Check for method unknown error for feeRate method.
-	_, err = btc.estimateFee(btc.node, 1)
+	_, err = btc.feeRate(1)
 	if isMethodNotFoundErr(err) {
 		return nil, fmt.Errorf("fee estimation method not found. Are you configured for the correct RPC?")
 	}
@@ -1477,25 +1498,41 @@ func (btc *baseWallet) legacyBalance() (*asset.Balance, error) {
 }
 
 // feeRate returns the current optimal fee rate in sat / byte using the
-// estimatesmartfee RPC.
-func (btc *baseWallet) feeRate(_ RawRequester, confTarget uint64) (uint64, error) {
-	feeResult, err := btc.node.estimateSmartFee(int64(confTarget), &btcjson.EstimateModeConservative)
-	if err != nil {
-		if !btc.apiFeeFallback() {
-			btc.log.Warnf("Failed to get local fee rate estimate: %v", err)
-			return 0, err
-		}
-		btc.log.Debug("Retrieving fee rate from external API: ", externalApiUrl)
-		estimatedFee, err := externalFeeEstimator(btc.ctx, btc.Network)
-		if err != nil {
-			btc.log.Errorf("Failed to get fee rate from external API: %v", err)
-			return 0, err
-		}
-		if estimatedFee <= 0 {
-			return 0, fmt.Errorf("invalid fee rate %v", estimatedFee)
-		}
-		return estimatedFee, nil
+// estimatesmartfee RPC or an external API if configured and enabled.
+func (btc *baseWallet) feeRate(confTarget uint64) (uint64, error) {
+	// Local estimate first. TODO: Allow only external (nil local).
+	feeRate, err := btc.localFeeRate(btc.ctx, btc.node, confTarget) // e.g. rpcFeeRate
+	if err == nil {
+		return feeRate, nil
 	}
+
+	if !btc.apiFeeFallback() {
+		return 0, err
+	}
+	if btc.externalFeeRate == nil {
+		return 0, fmt.Errorf("external fee rate fetcher not configured")
+	}
+
+	// External estimate fallback. Error if it exceeds our limit, and the caller
+	// may use btc.fallbackFeeRate(), as in targetFeeRateWithFallback.
+	feeRate, err = btc.externalFeeRate(btc.ctx, btc.Network) // e.g. externalFeeEstimator
+	if err != nil {
+		btc.log.Errorf("Failed to get fee rate from external API: %v", err)
+		return 0, err
+	}
+	if feeRate <= 0 || feeRate > btc.feeRateLimit() { // but fetcher shouldn't return <= 0 without error
+		return 0, fmt.Errorf("external fee rate %v exceeds configured limit", feeRate)
+	}
+	btc.log.Debugf("Retrieved fee rate from external API: %v", feeRate)
+	return feeRate, nil
+}
+
+func rpcFeeRate(ctx context.Context, rr RawRequester, confTarget uint64) (uint64, error) {
+	feeResult, err := estimateSmartFee(ctx, rr, confTarget, &btcjson.EstimateModeConservative)
+	if err != nil {
+		return 0, err
+	}
+
 	if len(feeResult.Errors) > 0 {
 		return 0, fmt.Errorf(strings.Join(feeResult.Errors, "; "))
 	}
@@ -1507,7 +1544,7 @@ func (btc *baseWallet) feeRate(_ RawRequester, confTarget uint64) (uint64, error
 		return 0, err
 	}
 	if satPerKB <= 0 {
-		return 0, fmt.Errorf("invalid fee rate %v", satPerKB)
+		return 0, errors.New("zero or negative fee rate")
 	}
 	return uint64(dex.IntDivUp(int64(satPerKB), 1000)), nil
 }
@@ -1558,9 +1595,9 @@ func (a amount) String() string {
 // number of confirmations, but falls back to the suggestion or fallbackFeeRate
 // via feeRateWithFallback.
 func (btc *baseWallet) targetFeeRateWithFallback(confTarget, feeSuggestion uint64) uint64 {
-	feeRate, err := btc.estimateFee(btc.node, confTarget)
+	feeRate, err := btc.feeRate(confTarget)
 	if err == nil && feeRate > 0 {
-		btc.log.Tracef("Obtained local estimate for %d-conf fee rate, %d", confTarget, feeRate)
+		btc.log.Tracef("Obtained estimate for %d-conf fee rate, %d", confTarget, feeRate)
 		return feeRate
 	}
 	btc.log.Tracef("no %d-conf feeRate available: %v", confTarget, err)
