@@ -171,21 +171,23 @@ type Config struct {
 	// should be used by default since site files from older distributions may
 	// be present on the disk. When NoEmbed is true, this also implies reloading
 	// and execution of html templates on each request.
-	NoEmbed  bool
-	HttpProf bool
+	NoEmbed      bool
+	HttpProf     bool
+	Experimental bool
 }
 
 // WebServer is a single-client http and websocket server enabling a browser
 // interface to the DEX client.
 type WebServer struct {
-	wsServer *websocket.Server
-	mux      *chi.Mux
-	core     clientCore
-	addr     string
-	csp      string
-	srv      *http.Server
-	html     *templates
-	indent   bool
+	wsServer     *websocket.Server
+	mux          *chi.Mux
+	core         clientCore
+	addr         string
+	csp          string
+	srv          *http.Server
+	html         *templates
+	indent       bool
+	experimental bool
 
 	authMtx         sync.RWMutex
 	authTokens      map[string]bool
@@ -262,6 +264,7 @@ func New(cfg *Config) (*WebServer, error) {
 		wsServer:        websocket.New(cfg.Core, log.SubLogger("WS")),
 		authTokens:      make(map[string]bool),
 		cachedPasswords: make(map[string]*cachedPassword),
+		experimental:    cfg.Experimental,
 	}
 
 	lang := cfg.Language
@@ -338,7 +341,9 @@ func New(cfg *Config) (*WebServer, error) {
 					webAuth.Get(exportOrderRoute, s.handleExportOrders)
 					webAuth.Get(homeRoute, s.handleHome)
 					webAuth.Get(marketsRoute, s.handleMarkets)
-					webAuth.Get(marketMakerRoute, s.handleMarketMaker)
+					if s.experimental {
+						webAuth.Get(marketMakerRoute, s.handleMarketMaker)
+					}
 				})
 			})
 
@@ -401,12 +406,15 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/validateaddress", s.apiValidateAddress)
 			apiAuth.Post("/txfee", s.apiEstimateSendTxFee)
 			apiAuth.Post("/deletearchivedrecords", s.apiDeleteArchivedRecords)
-			apiAuth.Post("/createbot", s.apiCreateBot)
-			apiAuth.Post("/startbot", s.apiStartBot)
-			apiAuth.Post("/stopbot", s.apiStopBot)
-			apiAuth.Post("/updatebotprogram", s.apiUpdateBotProgram)
-			apiAuth.Post("/retirebot", s.apiRetireBot)
-			apiAuth.Post("/marketreport", s.apiMarketReport)
+			if s.experimental {
+				apiAuth.Post("/createbot", s.apiCreateBot)
+				apiAuth.Post("/startbot", s.apiStartBot)
+				apiAuth.Post("/stopbot", s.apiStopBot)
+				apiAuth.Post("/updatebotprogram", s.apiUpdateBotProgram)
+				apiAuth.Post("/retirebot", s.apiRetireBot)
+				apiAuth.Post("/marketreport", s.apiMarketReport)
+			}
+
 		})
 	})
 
@@ -460,12 +468,15 @@ func (s *WebServer) buildTemplates(lang, siteDir string) error {
 		addTemplate("login", bb, "forms").
 		addTemplate("register", bb, "forms").
 		addTemplate("markets", bb, "forms").
-		addTemplate("mm", bb, "forms").
 		addTemplate("wallets", bb, "forms").
 		addTemplate("settings", bb, "forms").
 		addTemplate("orders", bb).
 		addTemplate("order", bb, "forms").
 		addTemplate("dexsettings", bb, "forms")
+
+	if s.experimental {
+		s.html.addTemplate("mm", bb, "forms")
+	}
 	return s.html.buildErr()
 }
 

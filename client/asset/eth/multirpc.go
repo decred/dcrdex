@@ -415,6 +415,7 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 			rpcClient, err = rpc.Dial(endpoint)
 			if err != nil {
 				log.Errorf("error creating http client for %q: %v", endpoint, err)
+				continue
 			}
 			ec = ethclient.NewClient(rpcClient)
 		}

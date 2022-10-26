@@ -102,6 +102,7 @@ type Config struct {
 	Onion        string `long:"onion" description:"Proxy for .onion addresses, if torproxy not set (eg. 127.0.0.1:9050)."`
 	Net          dex.Network
 	CertHosts    []string
+	Experimental bool `long:"experimental" description:"Enable experimental features"`
 }
 
 var defaultConfig = Config{
