@@ -135,6 +135,7 @@ func TestTokens(t *testing.T) {
 </div>
 {{template "bottom"}}
 {{end}}
+[[[ and Lets tRy: a_different  _HARDER_  .pattern. ::.-_-. ]]]
 `)
 	wantTokens := []string{
 		"[[[Dark Mode]]]",
@@ -154,6 +155,7 @@ func TestTokens(t *testing.T) {
 		"[[[Password]]]",
 		"[[[Show Me]]]",
 		"[[[dont_share]]]",
+		"[[[ and Lets tRy: a_different  _HARDER_  .pattern. ::.-_-. ]]]",
 	}
 	sort.Slice(wantTokens, func(i, j int) bool {
 		return wantTokens[i] < wantTokens[j]
@@ -176,6 +178,7 @@ func TestTokens(t *testing.T) {
 		"Password",
 		"Show Me",
 		"dont_share",
+		" and Lets tRy: a_different  _HARDER_  .pattern. ::.-_-. ",
 	}
 	sort.Slice(wantKeys, func(i, j int) bool {
 		return wantKeys[i] < wantKeys[j]
