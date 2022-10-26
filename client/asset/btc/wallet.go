@@ -9,7 +9,6 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
@@ -18,9 +17,8 @@ import (
 // Wallet is the interface that BTC wallet backends must implement. TODO: plumb
 // all requests with a context.Context.
 type Wallet interface {
-	RawRequester // for estimateFee calls
+	RawRequester // for localFeeRate/rpcFeeRate calls
 	connect(ctx context.Context, wg *sync.WaitGroup) error
-	estimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error) // TODO: ditch these btcjson types when killing the RawRequester
 	sendRawTransaction(tx *wire.MsgTx) (*chainhash.Hash, error)
 	getTxOut(txHash *chainhash.Hash, index uint32, pkScript []byte, startTime time.Time) (*wire.TxOut, uint32, error)
 	getBlockHash(blockHeight int64) (*chainhash.Hash, error)

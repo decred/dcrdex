@@ -66,7 +66,13 @@ func ElectrumWallet(cfg *BTCCloneCFG) (*ExchangeWalletElectrum, error) {
 		baseWallet: btc,
 		ew:         ew,
 	}
-	btc.estimateFee = eew.feeRate // use ExchangeWalletElectrum override, not baseWallet's
+	// In (*baseWallet).feeRate, use ExchangeWalletElectrum's walletFeeRate
+	// override for localFeeRate. No externalFeeRate is required. Note that we
+	// could set cfg.FeeEstimator to wrap ewc.FeeRate, but we'll use the
+	// ExchangeWalletElectrum method instead.
+	btc.localFeeRate = func(ctx context.Context, _ RawRequester, confTarget uint64) (uint64, error) {
+		return eew.walletFeeRate(ctx, confTarget)
+	}
 
 	return eew, nil
 }
@@ -170,18 +176,18 @@ func (btc *ExchangeWalletElectrum) Sweep(address string, feeSuggestion uint64) (
 	return newOutput(&txHash, 0, 0 /* ! */), nil
 }
 
-// override feeRate to avoid unnecessary conversions and btcjson types.
-func (btc *ExchangeWalletElectrum) feeRate(_ RawRequester, confTarget uint64) (uint64, error) {
-	satPerKB, err := btc.ew.wallet.FeeRate(btc.ew.ctx, int64(confTarget))
+func (btc *ExchangeWalletElectrum) walletFeeRate(ctx context.Context, confTarget uint64) (uint64, error) {
+	satPerKB, err := btc.ew.wallet.FeeRate(ctx, int64(confTarget))
 	if err != nil {
 		return 0, err
 	}
 	return uint64(dex.IntDivUp(satPerKB, 1000)), nil
 }
 
-// FeeRate gets a fee rate estimate. Satisfies asset.FeeRater.
+// FeeRate gets a fee rate estimate. Satisfies asset.FeeRater. Electrum's fee
+// rate is already externally-sourced, so we simplify for FeeRate callers.
 func (btc *ExchangeWalletElectrum) FeeRate() uint64 {
-	feeRate, err := btc.feeRate(nil, 1)
+	feeRate, err := btc.walletFeeRate(btc.ew.ctx, 1)
 	if err != nil {
 		btc.log.Errorf("Failed to retrieve fee rate: %v", err)
 		return 0

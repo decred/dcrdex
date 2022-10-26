@@ -859,7 +859,7 @@ func (dcr *ExchangeWallet) Reconfigure(ctx context.Context, cfg *asset.WalletCon
 		depositAccount = dcrCfg.PrimaryAccount
 	}
 
-	restart, err = dcr.wallet.Reconfigure(dcr.ctx, cfg, dcr.network, currentAddress, depositAccount)
+	restart, err = dcr.wallet.Reconfigure(ctx, cfg, dcr.network, currentAddress, depositAccount)
 	if err != nil || restart {
 		return restart, err
 	}
@@ -978,6 +978,9 @@ func (dcr *ExchangeWallet) FeeRate() uint64 {
 
 // feeRate returns the current optimal fee rate in atoms / byte.
 func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
+	if dcr.ctx == nil {
+		return 0, errors.New("not connected")
+	}
 	if feeEstimator, is := dcr.wallet.(FeeRateEstimator); is && !dcr.wallet.SpvMode() {
 		dcrPerKB, err := feeEstimator.EstimateSmartFeeRate(dcr.ctx, int64(confTarget), chainjson.EstimateSmartFeeConservative)
 		if err == nil && dcrPerKB > 0 {
@@ -4115,8 +4118,8 @@ func (dcr *ExchangeWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, a
 	return sig, priv.PubKey().SerializeCompressed(), nil
 }
 
-func (dcr *ExchangeWallet) checkPeers() {
-	ctx, cancel := context.WithTimeout(dcr.ctx, 2*time.Second)
+func (dcr *ExchangeWallet) checkPeers(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	numPeers, err := dcr.wallet.PeerCount(ctx)
 	if err != nil { // e.g. dcrd passthrough fail in non-SPV mode
@@ -4137,7 +4140,7 @@ func (dcr *ExchangeWallet) monitorPeers(ctx context.Context) {
 	ticker := time.NewTicker(peerCountTicker)
 	defer ticker.Stop()
 	for {
-		dcr.checkPeers()
+		dcr.checkPeers(ctx)
 
 		select {
 		case <-ticker.C:

@@ -89,12 +89,6 @@ func isMethodNotFoundErr(err error) bool {
 // RawRequester defines decred's rpcclient RawRequest func where all RPC
 // requests sent through. For testing, it can be satisfied by a stub.
 type RawRequester interface {
-	RawRequest(string, []json.RawMessage) (json.RawMessage, error)
-}
-
-// RawRequesterWithContext defines decred's rpcclient RawRequest func where all
-// RPC requests sent through. For testing, it can be satisfied by a stub.
-type RawRequesterWithContext interface {
 	RawRequest(context.Context, string, []json.RawMessage) (json.RawMessage, error)
 }
 
@@ -105,7 +99,7 @@ type anylist []interface{}
 type rpcCore struct {
 	rpcConfig                *RPCConfig
 	cloneParams              *BTCCloneCFG
-	requesterV               atomic.Value // RawRequesterWithContext
+	requesterV               atomic.Value // RawRequester
 	segwit                   bool
 	decodeAddr               dexbtc.AddressDecoder
 	stringAddr               dexbtc.AddressStringer
@@ -128,8 +122,8 @@ type rpcCore struct {
 	legacySendToAddr         bool
 }
 
-func (c *rpcCore) requester() RawRequesterWithContext {
-	return c.requesterV.Load().(RawRequesterWithContext)
+func (c *rpcCore) requester() RawRequester {
+	return c.requesterV.Load().(RawRequester)
 }
 
 // rpcClient is a bitcoind JSON RPC client that uses rpcclient.Client's
@@ -234,15 +228,15 @@ func (wc *rpcClient) reconfigure(cfg *asset.WalletConfig, currentAddress string)
 }
 
 // RawRequest passes the request to the wallet's RawRequester.
-func (wc *rpcClient) RawRequest(method string, params []json.RawMessage) (json.RawMessage, error) {
-	return wc.requester().RawRequest(wc.ctx, method, params)
+func (wc *rpcClient) RawRequest(ctx context.Context, method string, params []json.RawMessage) (json.RawMessage, error) {
+	return wc.requester().RawRequest(ctx, method, params)
 }
 
 // estimateSmartFee requests the server to estimate a fee level based on the
 // given parameters.
-func (wc *rpcClient) estimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error) {
+func estimateSmartFee(ctx context.Context, rr RawRequester, confTarget uint64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error) {
 	res := new(btcjson.EstimateSmartFeeResult)
-	return res, wc.call(methodEstimateSmartFee, anylist{confTarget, mode}, res)
+	return res, call(ctx, rr, methodEstimateSmartFee, anylist{confTarget, mode}, res)
 }
 
 // SendRawTransactionLegacy broadcasts the transaction with an additional legacy
@@ -1122,7 +1116,7 @@ func (wc *rpcClient) call(method string, args anylist, thing interface{}) error 
 	return call(wc.ctx, wc.requester(), method, args, thing)
 }
 
-func call(ctx context.Context, r RawRequesterWithContext, method string, args anylist, thing interface{}) error {
+func call(ctx context.Context, r RawRequester, method string, args anylist, thing interface{}) error {
 	params := make([]json.RawMessage, 0, len(args))
 	for i := range args {
 		p, err := json.Marshal(args[i])

@@ -4,9 +4,14 @@
 package doge
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"math"
+	"net/http"
+	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
@@ -74,6 +79,15 @@ var (
 				"during match settlement, or the order is canceled. This an extra transaction for which network mining fees are paid. " +
 				"Used only for standing-type orders, e.g. limit orders without immediate time-in-force.",
 			IsBoolean: true,
+		},
+		{
+			Key:         "apifeefallback",
+			DisplayName: "External fee rate estimates",
+			Description: "Allow fee rate estimation from a block explorer API. " +
+				"This is useful as a fallback for SPV wallets and RPC wallets " +
+				"that have recently been started.",
+			IsBoolean:    true,
+			DefaultValue: true,
 		},
 	}
 	// WalletInfo defines some general information about a Dogecoin wallet.
@@ -163,32 +177,73 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		SingularWallet:           true,
 		UnlockSpends:             true,
 		ConstantDustLimit:        dustLimit,
-		FeeEstimator: func(cl btc.RawRequester, _ uint64) (uint64, error) {
-			confArg, err := json.Marshal(feeConfs)
-			if err != nil {
-				return 0, err
-			}
-			resp, err := cl.RawRequest("estimatefee", []json.RawMessage{confArg})
-			if err != nil {
-				return 0, err
-			}
-			var feeRate float64
-			err = json.Unmarshal(resp, &feeRate)
-			if err != nil {
-				return 0, err
-			}
-			if feeRate <= 0 {
-				return 0, nil
-			}
-			// estimatefee is f#$%ed
-			// https://github.com/decred/dcrdex/pull/1558#discussion_r850061882
-			if feeRate > dexdoge.DefaultFeeRateLimit/1e5 {
-				return dexdoge.DefaultFee, nil
-			}
-			return uint64(math.Round(feeRate * 1e5)), nil
-		},
-		BlockDeserializer: dexdoge.DeserializeBlock,
+		FeeEstimator:             estimateFee,
+		ExternalFeeEstimator:     fetchExternalFee,
+		BlockDeserializer:        dexdoge.DeserializeBlock,
 	}
 
 	return btc.BTCCloneWallet(cloneCFG)
+}
+
+// NOTE: btc.(*baseWallet).feeRate calls the local and external fee estimators
+// in sequence, applying the limits configured in baseWallet.
+
+func estimateFee(ctx context.Context, cl btc.RawRequester, _ uint64) (uint64, error) {
+	confArg, err := json.Marshal(feeConfs)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := cl.RawRequest(ctx, "estimatefee", []json.RawMessage{confArg})
+	if err != nil {
+		return 0, err
+	}
+	var feeRate float64
+	err = json.Unmarshal(resp, &feeRate)
+	if err != nil {
+		return 0, err
+	}
+	if feeRate <= 0 {
+		return 0, nil
+	}
+	// estimatefee is f#$%ed
+	// https://github.com/decred/dcrdex/pull/1558#discussion_r850061882
+	if feeRate > dexdoge.DefaultFeeRateLimit/1e5 {
+		return dexdoge.DefaultFee, nil
+	}
+	return uint64(math.Round(feeRate * 1e5)), nil
+}
+
+func fetchExternalFee(ctx context.Context, net dex.Network) (uint64, error) {
+	var url string
+	if net == dex.Testnet {
+		url = "https://api.bitcore.io/api/DOGE/testnet/fee/1"
+	} else {
+		url = "https://api.bitcore.io/api/DOGE/mainnet/fee/1"
+	}
+	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, err
+	}
+	httpResponse, err := http.DefaultClient.Do(r)
+	if err != nil {
+		return 0, err
+	}
+	var resp map[string]float64
+	reader := io.LimitReader(httpResponse.Body, 1<<20)
+	err = json.NewDecoder(reader).Decode(&resp)
+	if err != nil {
+		return 0, err
+	}
+	httpResponse.Body.Close()
+
+	dogePerKb, ok := resp["feerate"]
+	if !ok {
+		return 0, errors.New("no fee rate in response")
+	}
+	if dogePerKb <= 0 {
+		return 0, fmt.Errorf("zero or negative fee rate")
+	}
+	return uint64(math.Round(dogePerKb * 1e5)), nil // DOGE/kB => sat/B
 }
