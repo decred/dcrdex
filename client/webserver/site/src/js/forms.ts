@@ -520,7 +520,7 @@ export class WalletConfigForm {
     } else el = this.textInputTmpl.cloneNode(true) as HTMLElement
     this.configElements.push([opt, el])
     const input = el.querySelector('input') as ConfigOptionInput
-    input.configOpt = opt
+    input.dataset.configKey = opt.key
     input.id = elID
     const label = Doc.safeSelector(el, 'label')
     label.htmlFor = elID // 'for' attribute, but 'for' is a keyword
@@ -699,7 +699,8 @@ export class WalletConfigForm {
   reorder (box: HTMLElement) {
     const inputs: Record<string, HTMLElement[]> = {}
     box.querySelectorAll('input').forEach((input: ConfigOptionInput) => {
-      const k = input.configOpt.key
+      const k = input.dataset.configKey
+      if (!k) return // typescript
       const els = []
       for (const [opt, el] of this.configElements) if (opt.key === k) els.push(el)
       inputs[k] = els
