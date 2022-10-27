@@ -2,7 +2,7 @@ package locales
 
 import "regexp"
 
-var keyRegExp = regexp.MustCompile(`\[\[\[([a-zA-Z0-9 _.-:]+)\]\]\]`)
+var keyRegExp = regexp.MustCompile(`\[\[\[([a-zA-Z0-9 _.\-:]+)\]\]\]`)
 
 // Tokens returns a slice of tuples (token, key), where token is just key with
 // triple square brackets, and could also be constructed simply as
