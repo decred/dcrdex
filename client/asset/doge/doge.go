@@ -193,11 +193,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 				if !allowExternal {
 					return 0, err
 				}
-				feeRate, err := externalFeeEstimator(ctx, net)
-				if err != nil {
-					return 0, err
-				}
-				return feeRate, nil
+				return externalFeeEstimator(ctx, net)
 			}
 			var feeRate float64
 			err = json.Unmarshal(resp, &feeRate)
@@ -208,11 +204,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 				if !allowExternal {
 					return 0, nil
 				}
-				feeRate, err := externalFeeEstimator(ctx, net)
-				if err != nil {
-					return 0, err
-				}
-				return feeRate, nil
+				return externalFeeEstimator(ctx, net)
 			}
 			// estimatefee is f#$%ed
 			// https://github.com/decred/dcrdex/pull/1558#discussion_r850061882

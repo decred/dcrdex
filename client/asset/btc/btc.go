@@ -341,8 +341,9 @@ type BTCCloneCFG struct {
 	// NonSegwitSigner can be true if the transaction signature hash data is not
 	// the standard for non-segwit Bitcoin. If nil, txscript.
 	NonSegwitSigner TxInSigner
-	// FeeEstimator provides a way to get fees given an RawRequest-enabled
-	// client and a confirmation target.
+	// FeeEstimator provides a way to get fees given a context, a RawRequest-enabled
+	// client, a confirmation target, a bool checking if the client is allowed
+	// or not to make external requests and the network.
 	FeeEstimator func(context.Context, RawRequester, uint64, bool, dex.Network) (uint64, error)
 	// OmitAddressType causes the address type (bech32, legacy) to be omitted
 	// from calls to getnewaddress.
@@ -1256,7 +1257,7 @@ func (btc *baseWallet) connect(ctx context.Context) (*sync.WaitGroup, error) {
 		return nil, fmt.Errorf("invalid best block hash from %s node: %v", btc.symbol, err)
 	}
 	// Check for method unknown error for feeRate method.
-	_, err = btc.estimateFee(btc.ctx, btc.node, 1, btc.apiFeeFallback(), btc.Network)
+	_, err = btc.estimateFee(ctx, btc.node, 1, btc.apiFeeFallback(), btc.Network)
 	if isMethodNotFoundErr(err) {
 		return nil, fmt.Errorf("fee estimation method not found. Are you configured for the correct RPC?")
 	}
