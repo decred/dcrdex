@@ -1177,12 +1177,13 @@ func (s *WebServer) apiDeleteArchivedRecords(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	var olderThan time.Time
+	var olderThan *time.Time
 	if form.OlderThanMs > 0 {
-		olderThan = time.UnixMilli(form.OlderThanMs)
+		ot := time.UnixMilli(form.OlderThanMs)
+		olderThan = &ot
 	}
 
-	err := s.core.DeleteArchivedRecordsWithBackup(&olderThan, form.SaveMatchesToFile, form.SaveOrdersToFile)
+	err := s.core.DeleteArchivedRecordsWithBackup(olderThan, form.SaveMatchesToFile, form.SaveOrdersToFile)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error deleting archived records: %w", err))
 		return

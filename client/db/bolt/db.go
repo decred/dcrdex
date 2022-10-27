@@ -1867,7 +1867,7 @@ func (db *BoltDB) DeleteInactiveOrders(ctx context.Context, olderThan *time.Time
 		finished   bool
 		olderThanB []byte
 	)
-	if olderThan != nil {
+	if olderThan != nil && !olderThan.IsZero() {
 		olderThanB = uint64Bytes(uint64(olderThan.UnixMilli()))
 	} else {
 		olderThanB = uint64Bytes(timeNow())
@@ -2008,7 +2008,7 @@ func (db *BoltDB) DeleteInactiveMatches(ctx context.Context, olderThan *time.Tim
 		finished   bool
 		olderThanB []byte
 	)
-	if olderThan != nil {
+	if olderThan != nil && !olderThan.IsZero() {
 		olderThanB = uint64Bytes(uint64(olderThan.UnixMilli()))
 	} else {
 		olderThanB = uint64Bytes(timeNow())
