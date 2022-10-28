@@ -55,9 +55,6 @@ func newWSClient(addr string, conn ws.Connection, hndlr func(msg *msgjson.Messag
 }
 
 func (cl *wsClient) shutDownFeed() {
-	cl.feedMtx.Lock()
-	defer cl.feedMtx.Unlock()
-
 	if cl.feed != nil {
 		cl.feed.loop.Stop()
 		cl.feed.loop.WaitForShutdown()
@@ -162,7 +159,9 @@ func (s *Server) connect(ctx context.Context, conn ws.Connection, addr string) {
 	s.clientsMtx.Unlock()
 
 	defer func() {
+		cl.feedMtx.Lock()
 		cl.shutDownFeed()
+		cl.feedMtx.Unlock()
 
 		s.clientsMtx.Lock()
 		delete(s.clients, cl.cid)
@@ -309,9 +308,9 @@ func loadMarket(s *Server, cl *wsClient, req *marketLoad) (*bookFeed, *msgjson.E
 		return nil, msgjson.NewError(msgjson.RPCOrderBookError, errMsg)
 	}
 
-	cl.shutDownFeed()
-
 	cl.feedMtx.Lock()
+	defer cl.feedMtx.Unlock()
+	cl.shutDownFeed()
 	cl.feed = &bookFeed{
 		BookFeed: feed,
 		loop:     newMarketSyncer(cl, feed, s.log.SubLogger(name)),
@@ -319,8 +318,6 @@ func loadMarket(s *Server, cl *wsClient, req *marketLoad) (*bookFeed, *msgjson.E
 		base:     req.Base,
 		quote:    req.Quote,
 	}
-	cl.feedMtx.Unlock()
-
 	return cl.feed, nil
 }
 
@@ -359,7 +356,10 @@ func wsLoadCandles(s *Server, cl *wsClient, msg *msgjson.Message) *msgjson.Error
 // and potentially unsubscribes from orderbook with the server if there are no
 // other consumers
 func wsUnmarket(_ *Server, cl *wsClient, _ *msgjson.Message) *msgjson.Error {
+	cl.feedMtx.Lock()
 	cl.shutDownFeed()
+	cl.feedMtx.Unlock()
+
 	return nil
 }
 
