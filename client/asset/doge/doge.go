@@ -253,13 +253,10 @@ func externalFeeEstimator(ctx context.Context, net dex.Network) (uint64, error) 
 	}
 	// estimatefee is f#$%ed
 	// https://github.com/decred/dcrdex/pull/1558#discussion_r850061882
-	if dogePerKb > dexdoge.DefaultFeeRateLimit/1e5 {
+	if dogePerKb <= 0 || dogePerKb > dexdoge.DefaultFeeRateLimit/1e5 {
 		return dexdoge.DefaultFee, nil
 	}
 	feeRate := toSatoshi(dogePerKb)
-	if feeRate < 0 {
-		return dexdoge.DefaultFee, nil
-	}
 	return feeRate, nil
 }
 
