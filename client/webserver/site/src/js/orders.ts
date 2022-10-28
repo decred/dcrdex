@@ -1,6 +1,7 @@
 import Doc from './doc'
 import BasePage from './basepage'
 import * as OrderUtil from './orderutil'
+import * as intl from './locales'
 import { postJSON } from './http'
 import {
   app,
@@ -106,16 +107,33 @@ export default class OrdersPage extends BasePage {
       this.exportOrders()
     })
 
+    page.showArchivedDateField.addEventListener('change', () => {
+      if (page.showArchivedDateField.checked) Doc.show(page.archivedDateField)
+      else Doc.hide(page.archivedDateField, page.deleteArchivedRecordsErr)
+    })
+
     Doc.bind(page.deleteArchivedRecords, 'click', () => {
       const page = this.page
+      page.showArchivedDateField.checked = false
       page.saveMatchesToFile.checked = false
       page.saveOrdersToFile.checked = false
       page.deleteArchivedRecordsErr.textContent = ''
       Doc.hide(page.deleteArchivedRecordsErr)
+      Doc.hide(page.archivedDateField)
       this.showForm(page.deleteArchivedRecordsForm)
     })
 
-    Doc.bind(page.deleteArchivedRecordsSubmit, 'click', () => { this.deleteArchivedRecords() })
+    Doc.bind(page.deleteArchivedRecordsSubmit, 'click', () => {
+      let date = 0
+      if (page.showArchivedDateField.checked) {
+        date = Date.parse(page.olderThan.value || '')
+        if (isNaN(date) || date <= 0) {
+          Doc.showFormError(page.deleteArchivedRecordsErr, intl.prep(intl.ID_INVALID_DATE_ERR_MSG))
+          return
+        }
+      }
+      this.deleteArchivedRecords(date)
+    })
 
     this.submitFilter()
   }
@@ -232,13 +250,13 @@ export default class OrdersPage extends BasePage {
   }
 
   /* deleteArchivedRecords removes the user's archived orders and matches
-   * created before user specified date time. Deleted archived records are saved
-   * to a CSV file if the user specify so.
+   * created before user specified date time in millisecond. Deleted archived
+   * records are saved to a CSV file if the user specify so.
    */
-  async deleteArchivedRecords () {
+  async deleteArchivedRecords (olderThanMs?: number) {
     const page = this.page
     const reqBody = {
-      olderThanMs: Date.parse(page.olderThan.value || ''),
+      olderThanMs: olderThanMs,
       saveMatchesToFile: page.saveMatchesToFile.checked || false,
       saveOrdersToFile: page.saveOrdersToFile.checked || false
     }
