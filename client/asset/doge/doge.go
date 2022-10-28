@@ -247,12 +247,20 @@ func externalFeeEstimator(ctx context.Context, net dex.Network) (uint64, error) 
 	}
 	httpResponse.Body.Close()
 
-	feeBtcByte, ok := resp["feerate"]
-	feeInSat := toSatoshi(feeBtcByte / 1000)
+	dogePerKb, ok := resp["feerate"]
 	if !ok {
 		return 0, errors.New("no fee rate found")
 	}
-	return feeInSat, nil
+	// estimatefee is f#$%ed
+	// https://github.com/decred/dcrdex/pull/1558#discussion_r850061882
+	if dogePerKb > dexdoge.DefaultFeeRateLimit/1e5 {
+		return dexdoge.DefaultFee, nil
+	}
+	feeRate := toSatoshi(dogePerKb)
+	if feeRate < 0 {
+		return dexdoge.DefaultFee, nil
+	}
+	return feeRate, nil
 }
 
 // Convert the BTC value to satoshi.
