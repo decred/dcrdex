@@ -54,6 +54,17 @@ func newWSClient(addr string, conn ws.Connection, hndlr func(msg *msgjson.Messag
 	}
 }
 
+func (cl *wsClient) shutDownFeed() {
+	cl.feedMtx.Lock()
+	defer cl.feedMtx.Unlock()
+
+	if cl.feed != nil {
+		cl.feed.loop.Stop()
+		cl.feed.loop.WaitForShutdown()
+		cl.feed = nil
+	}
+}
+
 // Core specifies the needed methods for Server to operate. Satisfied by *core.Core.
 type Core interface {
 	SyncBook(dex string, base, quote uint32) (core.BookFeed, error)
@@ -125,7 +136,7 @@ func (s *Server) HandleConnect(ctx context.Context, w http.ResponseWriter, r *ht
 func (s *Server) connect(ctx context.Context, conn ws.Connection, addr string) {
 	s.log.Debugf("New websocket client %s", addr)
 	// Create a new websocket client to handle the new websocket connection
-	// and wait for it to shutdown.  Once it has shutdown (and hence
+	// and wait for it to shut down.  Once it has shutdown (and hence
 	// disconnected), remove it.
 	var cl *wsClient
 	cl = newWSClient(addr, conn, func(msg *msgjson.Message) *msgjson.Error {
@@ -151,12 +162,7 @@ func (s *Server) connect(ctx context.Context, conn ws.Connection, addr string) {
 	s.clientsMtx.Unlock()
 
 	defer func() {
-		cl.feedMtx.Lock()
-		if cl.feed != nil {
-			cl.feed.loop.Stop()
-			cl.feed.loop.WaitForShutdown()
-		}
-		cl.feedMtx.Unlock()
+		cl.shutDownFeed()
 
 		s.clientsMtx.Lock()
 		delete(s.clients, cl.cid)
@@ -303,12 +309,9 @@ func loadMarket(s *Server, cl *wsClient, req *marketLoad) (*bookFeed, *msgjson.E
 		return nil, msgjson.NewError(msgjson.RPCOrderBookError, errMsg)
 	}
 
+	cl.shutDownFeed()
+
 	cl.feedMtx.Lock()
-	defer cl.feedMtx.Unlock()
-	if cl.feed != nil {
-		cl.feed.loop.Stop()
-		cl.feed.loop.WaitForShutdown()
-	}
 	cl.feed = &bookFeed{
 		BookFeed: feed,
 		loop:     newMarketSyncer(cl, feed, s.log.SubLogger(name)),
@@ -316,6 +319,7 @@ func loadMarket(s *Server, cl *wsClient, req *marketLoad) (*bookFeed, *msgjson.E
 		base:     req.Base,
 		quote:    req.Quote,
 	}
+	cl.feedMtx.Unlock()
 
 	return cl.feed, nil
 }
@@ -331,7 +335,12 @@ func wsLoadCandles(s *Server, cl *wsClient, msg *msgjson.Message) *msgjson.Error
 	cl.feedMtx.RLock()
 	feed := cl.feed
 	cl.feedMtx.RUnlock()
-	if feed.host != req.Host || feed.base != req.Base || feed.quote != req.Quote {
+	// If market hasn't been initialized/chosen yet (client should do it in a separate
+	// 'loadmarket' request), or if client wants to change currently chosen market (requesting
+	// candles for market that's different from currently chosen implies that) - we can
+	// try to load it here.
+	if feed == nil ||
+		(feed.host != req.Host || feed.base != req.Base || feed.quote != req.Quote) {
 		var msgErr *msgjson.Error
 		feed, msgErr = loadMarket(s, cl, &req.marketLoad)
 		if msgErr != nil {
@@ -350,13 +359,7 @@ func wsLoadCandles(s *Server, cl *wsClient, msg *msgjson.Message) *msgjson.Error
 // and potentially unsubscribes from orderbook with the server if there are no
 // other consumers
 func wsUnmarket(_ *Server, cl *wsClient, _ *msgjson.Message) *msgjson.Error {
-	cl.feedMtx.Lock()
-	defer cl.feedMtx.Unlock()
-	if cl.feed != nil {
-		cl.feed.loop.Stop()
-		cl.feed.loop.WaitForShutdown()
-		cl.feed = nil
-	}
+	cl.shutDownFeed()
 	return nil
 }
 

@@ -166,8 +166,7 @@ func TestLoadMarket(t *testing.T) {
 	// so manually stop the marketSyncer started by wsLoadMarket and the WSLink
 	// before returning from this test.
 	defer func() {
-		link.cl.feed.loop.Stop()
-		link.cl.feed.loop.WaitForShutdown()
+		link.cl.shutDownFeed()
 		link.cl.Disconnect()
 		linkWg.Wait()
 	}()
