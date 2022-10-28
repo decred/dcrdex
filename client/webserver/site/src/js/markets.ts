@@ -57,7 +57,8 @@ import {
   ConnEventNote,
   OrderOption,
   ConnectionStatus,
-  RecentMatch
+  RecentMatch,
+  MatchNote
 } from './registry'
 
 const bind = Doc.bind
@@ -471,6 +472,7 @@ export default class MarketsPage extends BasePage {
     // Notification filters.
     app().registerNoteFeeder({
       order: (note: OrderNote) => { this.handleOrderNote(note) },
+      match: (note: MatchNote) => { this.handleMatchNote(note) },
       epoch: (note: EpochNote) => { this.handleEpochNote(note) },
       conn: (note: ConnEventNote) => { this.handleConnNote(note) },
       balance: (note: BalanceNote) => { this.handleBalanceNote(note) },
@@ -1835,6 +1837,13 @@ export default class MarketsPage extends BasePage {
     // update local dex
     this.market.dex = app().exchanges[dexAddr]
     this.setRegistrationStatusVisibility()
+  }
+
+  handleMatchNote (note: MatchNote) {
+    const mord = this.metaOrders[note.orderID]
+    if (!mord) return this.refreshActiveOrders()
+    if (app().canAccelerateOrder(mord.ord)) Doc.show(mord.details.accelerateBttn)
+    else Doc.hide(mord.details.accelerateBttn)
   }
 
   /*
