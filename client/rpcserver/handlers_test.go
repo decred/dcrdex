@@ -1228,11 +1228,15 @@ func TestDeleteRecords(t *testing.T) {
 		tc := &TCore{
 			deleteArchivedRecordsErr: test.deleteArchivedRecordsErr,
 		}
+		tc.archivedRecords = 10
 		r := &RPCServer{core: tc}
 		payload := handleDeleteArchivedRecords(r, test.params)
 		res := ""
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatal(err)
+		}
+		if test.wantErrCode < 0 && res == "" {
+			t.Fatal("expected a non empty response for success")
 		}
 	}
 }

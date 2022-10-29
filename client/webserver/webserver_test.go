@@ -76,6 +76,7 @@ type TCore struct {
 	validAddr        bool
 	walletDisabled   bool
 	walletStatusErr  error
+	deletedRecords   int
 	deleteRecordsErr error
 }
 
@@ -226,8 +227,8 @@ func (c *TCore) UpdateDEXHost(string, string, []byte, interface{}) (*core.Exchan
 func (c *TCore) WalletRestorationInfo(pw []byte, assetID uint32) ([]*asset.WalletRestoration, error) {
 	return nil, nil
 }
-func (c *TCore) DeleteArchivedRecordsWithBackup(endDateTime *time.Time, saveMatchesToFile, saveOrdersToFile bool) error {
-	return c.deleteRecordsErr
+func (c *TCore) DeleteArchivedRecordsWithBackup(endDateTime *time.Time, saveMatchesToFile, saveOrdersToFile bool) (string, int, error) {
+	return "/path/to/records", c.deletedRecords, c.deleteRecordsErr
 }
 
 type TWriter struct {
@@ -906,7 +907,8 @@ func TestAPIDeleteArchivedRecords(t *testing.T) {
 		OlderThanMs: time.Now().UnixMilli(),
 	}
 
-	ensure(`{"ok":true}`)
+	tCore.deletedRecords = 23
+	ensure(`{"ok":true,"archivedRecordsDeleted":23,"archivedRecordsPath":"/path/to/records"}`)
 
 	tCore.deleteRecordsErr = tErr
 	ensure(`{"ok":false,"msg":"expected dummy error"}`)

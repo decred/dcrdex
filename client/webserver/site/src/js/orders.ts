@@ -118,8 +118,10 @@ export default class OrdersPage extends BasePage {
       page.saveMatchesToFile.checked = false
       page.saveOrdersToFile.checked = false
       page.deleteArchivedRecordsErr.textContent = ''
-      Doc.hide(page.deleteArchivedRecordsErr)
-      Doc.hide(page.archivedDateField)
+      page.archivedRecordsLocation.textContent = ''
+      page.deleteArchivedRecordsMsg.textContent = ''
+      Doc.hide(page.deleteArchivedResult, page.deleteArchivedRecordsErr,
+        page.deleteArchivedRecordsMsg, page.archivedRecordsLocation, page.archivedDateField)
       this.showForm(page.deleteArchivedRecordsForm)
     })
 
@@ -255,10 +257,12 @@ export default class OrdersPage extends BasePage {
    */
   async deleteArchivedRecords (olderThanMs?: number) {
     const page = this.page
+    const saveMatchesToFIle = page.saveMatchesToFile.checked || false
+    const saveOrdersToFile = page.saveOrdersToFile.checked || false
     const reqBody = {
       olderThanMs: olderThanMs,
-      saveMatchesToFile: page.saveMatchesToFile.checked || false,
-      saveOrdersToFile: page.saveOrdersToFile.checked || false
+      saveMatchesToFile: saveMatchesToFIle,
+      saveOrdersToFile: saveOrdersToFile
     }
     const loaded = app().loading(this.main)
     const res = await postJSON('/api/deletearchivedrecords', reqBody)
@@ -266,7 +270,19 @@ export default class OrdersPage extends BasePage {
     if (!app().checkResponse(res)) {
       return Doc.showFormError(page.deleteArchivedRecordsErr, res.msg)
     }
-    app().loadPage('orders')
+
+    if (res.archivedRecordsDeleted > 0) {
+      page.deleteArchivedRecordsMsg.textContent = intl.prep(intl.ID_DELETE_ARCHIVED_RECORDS_RESULT, { nRecords: res.archivedRecordsDeleted })
+      if (saveMatchesToFIle || saveOrdersToFile) {
+        page.archivedRecordsLocation.textContent = intl.prep(intl.ID_ARCHIVED_RECORDS_PATH, { path: res.archivedRecordsPath })
+        Doc.show(page.archivedRecordsLocation)
+      }
+      // Update the order page.
+      this.submitFilter()
+    } else {
+      page.deleteArchivedRecordsMsg.textContent = intl.prep(intl.ID_NO_ARCHIVED_RECORDS)
+    }
+    Doc.show(page.deleteArchivedResult, page.deleteArchivedRecordsMsg)
   }
 
   /*

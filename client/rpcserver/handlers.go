@@ -674,12 +674,18 @@ func handleDeleteArchivedRecords(s *RPCServer, params *RawParams) *msgjson.Respo
 	if err != nil {
 		return usage(deleteArchivedRecordsRoute, err)
 	}
-	if err := s.core.DeleteArchivedRecords(form.olderThan, form.matchesFileStr, form.ordersFileStr); err != nil {
+	nRecordsDeleted, err := s.core.DeleteArchivedRecords(form.olderThan, form.matchesFileStr, form.ordersFileStr)
+	if err != nil {
 		errMsg := fmt.Sprintf("unable to delete records: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCDeleteArchivedRecordsError, errMsg)
 		return createResponse(deleteArchivedRecordsRoute, nil, resErr)
 	}
-	return createResponse(deleteArchivedRecordsRoute, nil, nil)
+
+	msg := fmt.Sprintf("%d archived records has been deleted successfully", nRecordsDeleted)
+	if nRecordsDeleted <= 0 {
+		msg = "No archived records found"
+	}
+	return createResponse(deleteArchivedRecordsRoute, msg, nil)
 }
 
 // format concatenates thing and tail. If thing is empty, returns an empty
@@ -806,8 +812,8 @@ var helpMsgs = map[string]helpMsg{
 	},
 	deleteArchivedRecordsRoute: {
 		argsShort: `("unix time milli") ("matches csv path") ("orders csv path")`,
-		cmdSummary: `Delete archived matches from the database. Optionally set a time to
-    delete records before and file paths to save deleted records as comma separated
+		cmdSummary: `Delete archived records from the database and returns total deleted. Optionally
+	set a time to delete records before and file paths to save deleted records as comma separated
     values. Note that file locations are from the perspective of dexc and not the caller.`,
 		argsLong: `Args:
     unix time milli (int): Optional. If set deletes records before the date in unix time

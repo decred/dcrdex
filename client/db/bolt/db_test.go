@@ -1342,9 +1342,12 @@ func TestDeleteInactiveMatches(t *testing.T) {
 			return nil
 		}
 	)
-	err = boltdb.DeleteInactiveMatches(ctx, &olderThan, perMatchFn)
+	nMatchesDeleted, err := boltdb.DeleteInactiveMatches(ctx, &olderThan, perMatchFn)
 	if err != nil {
 		t.Fatalf("unable to delete inactive matches: %v", err)
+	}
+	if nMatchesDeleted != matchN {
+		t.Fatalf("expected %d archived matches to be deleted got %d", matchN, nMatchesDeleted)
 	}
 
 	// Active matches should be untouched.
@@ -1508,9 +1511,12 @@ func TestDeleteInactiveOrders(t *testing.T) {
 			return nil
 		}
 	)
-	err = boltdb.DeleteInactiveOrders(ctx, &olderThan, perOrderFn)
+	nOrdersDeleted, err := boltdb.DeleteInactiveOrders(ctx, &olderThan, perOrderFn)
 	if err != nil {
 		t.Fatalf("unable to delete inactive matches: %v", err)
+	}
+	if nOrdersDeleted != orderN {
+		t.Fatalf("expected %d deleted archived orders, got %d", orderN, nOrdersDeleted)
 	}
 
 	// Active orders should be untouched.

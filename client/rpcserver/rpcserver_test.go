@@ -61,6 +61,7 @@ type TCore struct {
 	exportSeed               []byte
 	exportSeedErr            error
 	discoverAcctErr          error
+	archivedRecords          int
 	deleteArchivedRecordsErr error
 }
 
@@ -143,8 +144,8 @@ func (c *TCore) ExportSeed(pw []byte) ([]byte, error) {
 func (c *TCore) DiscoverAccount(dexAddr string, pass []byte, certI interface{}) (*core.Exchange, bool, error) {
 	return c.dexExchange, false, c.discoverAcctErr
 }
-func (c *TCore) DeleteArchivedRecords(olderThan *time.Time, matchesFileStr, ordersFileStr string) error {
-	return c.deleteArchivedRecordsErr
+func (c *TCore) DeleteArchivedRecords(olderThan *time.Time, matchesFileStr, ordersFileStr string) (int, error) {
+	return c.archivedRecords, c.deleteArchivedRecordsErr
 }
 func (c *TCore) AssetHasActiveOrders(uint32) bool {
 	return false

@@ -1861,7 +1861,7 @@ func (idx *timeIndexNewest) add(t uint64, k []byte, b *bbolt.Bucket) {
 // operations. Optionally accepts a time to delete orders with a later time
 // stamp. Accepts an optional function to perform on deleted orders.
 func (db *BoltDB) DeleteInactiveOrders(ctx context.Context, olderThan *time.Time,
-	perOrderFn func(ords *dexdb.MetaOrder) error) error {
+	perOrderFn func(ords *dexdb.MetaOrder) error) (int, error) {
 	const batchSize = 1000
 	var (
 		finished   bool
@@ -1893,13 +1893,13 @@ func (db *BoltDB) DeleteInactiveOrders(ctx context.Context, olderThan *time.Time
 		}
 		return nil
 	}); err != nil {
-		return err
+		return 0, err
 	}
 
 	nDeletedOrders := 0
 	for !finished {
 		if err := ctx.Err(); err != nil {
-			return err
+			return 0, err
 		}
 		start := time.Now()
 		nDeletedOrders = 0
@@ -1957,10 +1957,10 @@ func (db *BoltDB) DeleteInactiveOrders(ctx context.Context, olderThan *time.Time
 			if perOrderFn != nil && nDeletedOrders != 0 {
 				db.log.Warnf("%d orders reported as deleted have been rolled back due to error.", nDeletedOrders)
 			}
-			return fmt.Errorf("unable to delete orders: %v", err)
+			return 0, fmt.Errorf("unable to delete orders: %v", err)
 		}
 	}
-	return nil
+	return nDeletedOrders, nil
 }
 
 // orderSide Returns wether the order was for buying or selling the asset.
@@ -2002,7 +2002,7 @@ func orderSide(tx *bbolt.Tx, oid order.OrderID) (sell bool, err error) {
 // operations. Optionally accepts a time to delete matches with a later time
 // stamp. Accepts an optional function to perform on deleted matches.
 func (db *BoltDB) DeleteInactiveMatches(ctx context.Context, olderThan *time.Time,
-	perMatchFn func(mtch *dexdb.MetaMatch, isSell bool) error) error {
+	perMatchFn func(mtch *dexdb.MetaMatch, isSell bool) error) (int, error) {
 	const batchSize = 1000
 	var (
 		finished   bool
@@ -2030,13 +2030,13 @@ func (db *BoltDB) DeleteInactiveMatches(ctx context.Context, olderThan *time.Tim
 		}
 		return nil
 	}); err != nil {
-		return err
+		return 0, err
 	}
 
 	nDeletedMatches := 0
 	for !finished {
 		if err := ctx.Err(); err != nil {
-			return err
+			return 0, err
 		}
 		start := time.Now()
 		nDeletedMatches = 0
@@ -2092,10 +2092,10 @@ func (db *BoltDB) DeleteInactiveMatches(ctx context.Context, olderThan *time.Tim
 			if perMatchFn != nil && nDeletedMatches != 0 {
 				db.log.Warnf("%d matches reported as deleted have been rolled back due to error.", nDeletedMatches)
 			}
-			return fmt.Errorf("unable to delete matches: %v", err)
+			return 0, fmt.Errorf("unable to delete matches: %v", err)
 		}
 	}
-	return nil
+	return nDeletedMatches, nil
 }
 
 // SaveDisabledRateSources updates disabled fiat rate sources.

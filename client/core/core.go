@@ -8161,9 +8161,10 @@ func (c *Core) archivedRecordsDataDirectory() string {
 	return filepath.Join(filepath.Dir(c.cfg.DBPath), "archived-records")
 }
 
-// DeleteArchivedRecordsWithBackup is like DeleteArchivedRecords but the required
-// filepaths are provided by Core.
-func (c *Core) DeleteArchivedRecordsWithBackup(olderThan *time.Time, saveMatchesToFile, saveOrdersToFile bool) error {
+// DeleteArchivedRecordsWithBackup is like DeleteArchivedRecords but the
+// required filepaths are provided by Core and the path where archived records
+// are stored is returned.
+func (c *Core) DeleteArchivedRecordsWithBackup(olderThan *time.Time, saveMatchesToFile, saveOrdersToFile bool) (string, int, error) {
 	var matchesFile, ordersFile string
 	if saveMatchesToFile {
 		matchesFile = filepath.Join(c.archivedRecordsDataDirectory(), fmt.Sprintf("archived-matches-%d", time.Now().Unix()))
@@ -8171,16 +8172,22 @@ func (c *Core) DeleteArchivedRecordsWithBackup(olderThan *time.Time, saveMatches
 	if saveOrdersToFile {
 		ordersFile = filepath.Join(c.archivedRecordsDataDirectory(), fmt.Sprintf("archived-orders-%d", time.Now().Unix()))
 	}
-	return c.DeleteArchivedRecords(olderThan, matchesFile, ordersFile)
+	nRecordsDeleted, err := c.DeleteArchivedRecords(olderThan, matchesFile, ordersFile)
+	if nRecordsDeleted > 0 && (saveMatchesToFile || saveOrdersToFile) {
+		return c.archivedRecordsDataDirectory(), nRecordsDeleted, err
+	}
+	return "", nRecordsDeleted, err
 }
 
-// DeleteArchivedRecords deletes archived matches from the database. Optionally
-// set a time to delete older records and file paths to save deleted records as
-// comma separated values. If a nil *time.Time is provided, current time is used.
-func (c *Core) DeleteArchivedRecords(olderThan *time.Time, matchesFile, ordersFile string) error {
+// DeleteArchivedRecords deletes archived matches from the database and returns
+// the total number of records deleted. Optionally set a time to delete older
+// records and file paths to save deleted records as comma separated values. If
+// a nil *time.Time is provided, current time is used.
+func (c *Core) DeleteArchivedRecords(olderThan *time.Time, matchesFile, ordersFile string) (int, error) {
 	var (
-		err       error
-		perMtchFn func(*db.MetaMatch, bool) error
+		err             error
+		perMtchFn       func(*db.MetaMatch, bool) error
+		nMatchesDeleted int
 	)
 	// If provided a file to write the orders csv to, write the header and
 	// defer closing the file.
@@ -8188,37 +8195,53 @@ func (c *Core) DeleteArchivedRecords(olderThan *time.Time, matchesFile, ordersFi
 		var cleanup func() error
 		perMtchFn, cleanup, err = deleteMatchFn(matchesFile)
 		if err != nil {
-			return fmt.Errorf("unable to set up orders csv: %v", err)
+			return 0, fmt.Errorf("unable to set up orders csv: %v", err)
 		}
-		defer cleanup()
+		defer func() {
+			cleanup()
+			// If no match was deleted, remove the matches file.
+			if nMatchesDeleted == 0 {
+				os.Remove(matchesFile)
+			}
+		}()
 	}
 
 	// Delete matches while saving to csv if available until the database
 	// says that's all or context is canceled.
-	err = c.db.DeleteInactiveMatches(c.ctx, olderThan, perMtchFn)
+	nMatchesDeleted, err = c.db.DeleteInactiveMatches(c.ctx, olderThan, perMtchFn)
 	if err != nil {
-		return fmt.Errorf("unable to delete matches: %v", err)
+		return 0, fmt.Errorf("unable to delete matches: %v", err)
 	}
 
-	var perOrdFn func(*db.MetaOrder) error
+	var (
+		perOrdFn       func(*db.MetaOrder) error
+		nOrdersDeleted int
+	)
+
 	// If provided a file to write the orders csv to, write the header and
 	// defer closing the file.
 	if ordersFile != "" {
 		var cleanup func() error
 		perOrdFn, cleanup, err = c.deleteOrderFn(ordersFile)
 		if err != nil {
-			return fmt.Errorf("unable to set up orders csv: %v", err)
+			return 0, fmt.Errorf("unable to set up orders csv: %v", err)
 		}
-		defer cleanup()
+		defer func() {
+			cleanup()
+			// If no order was deleted, remove the orders file.
+			if nOrdersDeleted == 0 {
+				os.Remove(ordersFile)
+			}
+		}()
 	}
 
 	// Delete orders while saving to csv if available until the database
 	// says that's all or context is canceled.
-	err = c.db.DeleteInactiveOrders(c.ctx, olderThan, perOrdFn)
+	nOrdersDeleted, err = c.db.DeleteInactiveOrders(c.ctx, olderThan, perOrdFn)
 	if err != nil {
-		return fmt.Errorf("unable to delete orders: %v", err)
+		return 0, fmt.Errorf("unable to delete orders: %v", err)
 	}
-	return nil
+	return nOrdersDeleted + nMatchesDeleted, nil
 }
 
 // AccelerateOrder will use the Child-Pays-For-Parent technique to accelerate

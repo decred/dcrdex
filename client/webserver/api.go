@@ -1183,12 +1183,21 @@ func (s *WebServer) apiDeleteArchivedRecords(w http.ResponseWriter, r *http.Requ
 		olderThan = &ot
 	}
 
-	err := s.core.DeleteArchivedRecordsWithBackup(olderThan, form.SaveMatchesToFile, form.SaveOrdersToFile)
+	archivedRecordsPath, nRecordsDeleted, err := s.core.DeleteArchivedRecordsWithBackup(olderThan, form.SaveMatchesToFile, form.SaveOrdersToFile)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error deleting archived records: %w", err))
 		return
 	}
-	writeJSON(w, simpleAck(), s.indent)
+	resp := &struct {
+		Ok                     bool   `json:"ok"`
+		ArchivedRecordsDeleted int    `json:"archivedRecordsDeleted"`
+		ArchivedRecordsPath    string `json:"archivedRecordsPath"`
+	}{
+		Ok:                     true,
+		ArchivedRecordsDeleted: nRecordsDeleted,
+		ArchivedRecordsPath:    archivedRecordsPath,
+	}
+	writeJSON(w, resp, s.indent)
 }
 
 // writeAPIError logs the formatted error and sends a standardResponse with the
