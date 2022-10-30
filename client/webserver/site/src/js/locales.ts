@@ -75,6 +75,9 @@ export const ID_INVALID_DATE_ERR_MSG = 'INVALID_DATE_ERR_MSG'
 export const ID_NO_ARCHIVED_RECORDS = 'NO_ARCHIVED_RECORDS'
 export const ID_DELETE_ARCHIVED_RECORDS_RESULT = 'DELETE_ARCHIVED_RECORDS_RESULT'
 export const ID_ARCHIVED_RECORDS_PATH = 'ARCHIVED_RECORDS_PATH'
+export const ID_DEFAULT = 'DEFAULT'
+export const ID_ADDED = 'USER_ADDED'
+export const ID_DISCOVERED = 'DISCOVERED'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -151,7 +154,10 @@ export const enUS: Locale = {
   [ID_NO_ARCHIVED_RECORDS]: 'No archived records found',
   [ID_DELETE_ARCHIVED_RECORDS_RESULT]: 'Message: {{ nRecords }} archived records has been deleted',
   [ID_ARCHIVED_RECORDS_PATH]: 'File Location: {{ path }}',
-  [ID_ORDER_SUBMITTING]: 'submitting'
+  [ID_ORDER_SUBMITTING]: 'submitting',
+  [ID_DEFAULT]: 'Default',
+  [ID_ADDED]: 'Added',
+  [ID_DISCOVERED]: 'Discovered'
 }
 
 export const ptBR: Locale = {

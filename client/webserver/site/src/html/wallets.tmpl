@@ -2,6 +2,9 @@
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
 {{template "top" .}}
 <div id="main" data-handler="wallets" class="walletspage flex-grow-1 position-relative">
+  <span class="me-2 connection ico-connection d-hide" style="padding-left:30%" id="connectedIconTmpl"></span>
+  <span class="me-2 errcolor ico-disconnected d-hide" style="padding-left:30%" id="disconnectedIconTmpl"></span>
+  <span class="me-2 errcolor ico-cross d-hide pointer" style="padding-left:30%" id="removeIconTmpl"></span>
   <div class="fill-abs d-flex align-items-stretch">
     {{- /* ASSET SELECT */ -}}
     <div class="d-flex flex-column align-items-stretch stylish-overflow invisible" id="assetSelect">
@@ -396,6 +399,7 @@
       <hr class="dashed my-2">
       <div class="sans-light fs17" id="otherActionsLabel">[[[other_actions]]]</div>
       <div class="d-flex flex-row fs15 pt-1">
+        <button id="managePeers" type="button" class="p-1 me-2 hoverbg">[[[manage_peers]]]</button>
         <button id="downloadLogs" type="button" class="p-1 me-2 hoverbg">[[[wallet_logs]]]</button>
         <button id="exportWallet" type="button" class="me-2 p-1 fs15 bg2">[[[export_wallet]]]</button>
         <button id="recoverWallet" type="button" class="danger p-1 me-2 hoverbg">[[[recover]]]</button>
@@ -408,6 +412,40 @@
     {{- /* TOGGLE WALLET STATUS AUTHORIZATION */ -}}
     <form class="d-hide" id="toggleWalletStatusConfirm">
       {{template "toggleWalletStatusConfirm"}}
+    </form>
+
+    {{- /* MANAGE PEERS */ -}}
+    <form class="d-hide" id="managePeersForm">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="px-2 py-1 text-center position-relative fs22 sans-light">
+        [[[manage_peers]]]
+      </div>
+      <table id="peersTable" class="table table-striped table-dark w-50">
+        <thead>
+          <tr>
+            <th class="text-nowrap"><span>Host</span></th>
+            <th class="text-nowrap">Source</th>
+            <th class="text-nowrap">Connected</th>
+            <th class="text-nowrap"></th>
+          </tr>
+        </thead>
+        <tbody id="peersTableBody">
+          <tr id="peerTableRow">
+            <td data-tmpl="host"></td>
+            <td data-tmpl="source"></td>
+            <td data-tmpl="connected"></td>
+            <td data-tmpl="remove"></td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="d-flex justify-content-end mt-4">
+        <input class="form-control select" id="addPeerInput">
+        <button id="addPeerSubmit" type="button" class="justify-content-center fs15 bg2 selected mx-2">[[[add_peer]]]</button>
+      </div>
+      <div id="peerSpinner" class="flex-center position-relative py-2 d-hide">
+        <div class="ico-spinner spinner fs15"></div>
+      </div>
+      <div class="fs15 pt-3 text-center d-hide errcolor" id="managePeersErr"></div>
     </form>
 
     {{- /* CONFIRM FORCE FORM */ -}}

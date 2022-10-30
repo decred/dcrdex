@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -35,6 +36,7 @@ import (
 	"github.com/gcash/bchd/bchec"
 	bchchaincfg "github.com/gcash/bchd/chaincfg"
 	bchchainhash "github.com/gcash/bchd/chaincfg/chainhash"
+	"github.com/gcash/bchd/peer"
 	bchtxscript "github.com/gcash/bchd/txscript"
 	bchwire "github.com/gcash/bchd/wire"
 	"github.com/gcash/bchlog"
@@ -83,13 +85,15 @@ type bchSPVWallet struct {
 	cl          *neutrino.ChainService
 	loader      *wallet.Loader
 	neutrinoDB  walletdb.DB
+
+	peerManager *btc.SPVPeerManager
 }
 
 var _ btc.BTCWallet = (*bchSPVWallet)(nil)
 
 // openSPVWallet creates a bchSPVWallet, but does not Start.
 // Satisfies btc.BTCWalletConstructor.
-func openSPVWallet(dir string, cfg *btc.WalletConfig, btcParams *chaincfg.Params, log dex.Logger) btc.BTCWallet {
+func openSPVWallet(dir string, cfg *btc.WalletConfig, btcParams *chaincfg.Params, log dex.Logger) (btc.BTCWallet, error) {
 	var bchParams *bchchaincfg.Params
 	switch btcParams.Name {
 	case dexbch.MainNetParams.Name:
@@ -108,7 +112,7 @@ func openSPVWallet(dir string, cfg *btc.WalletConfig, btcParams *chaincfg.Params
 		allowAutomaticRescan: !cfg.ActivelyUsed,
 	}
 	w.birthdayV.Store(cfg.AdjustedBirthday())
-	return w
+	return w, nil
 }
 
 // createSPVWallet creates a new SPV wallet.
@@ -197,23 +201,6 @@ func (w *bchSPVWallet) Start() (btc.SPVService, error) {
 	}
 	errCloser.Add(w.neutrinoDB.Close)
 
-	// Depending on the network, we add some addpeers or a connect peer. On
-	// regtest, if the peers haven't been explicitly set, add the simnet harness
-	// alpha node as an additional peer so we don't have to type it in. On
-	// mainet and testnet4, add a known reliable persistent peer to be used in
-	// addition to normal DNS seed-based peer discovery.
-	var addPeers []string
-	var connectPeers []string
-	switch w.chainParams.Net {
-	// case bchwire.MainNet:
-	// 	addPeers = []string{"cfilters.ssgen.io"}
-	case bchwire.TestNet4:
-		// Add the address for a local bchd testnet4 node.
-		addPeers = []string{"localhost:28333"}
-	case bchwire.TestNet, bchwire.SimNet: // plain "wire.TestNet" is regnet!
-		connectPeers = []string{"localhost:21577"}
-	}
-
 	w.log.Debug("Starting neutrino chain service...")
 	w.cl, err = neutrino.NewChainService(neutrino.Config{
 		DataDir:     w.dir,
@@ -221,8 +208,6 @@ func (w *bchSPVWallet) Start() (btc.SPVService, error) {
 		ChainParams: *w.chainParams,
 		// https://github.com/gcash/neutrino/pull/36
 		PersistToDisk: true, // keep cfilter headers on disk for efficient rescanning
-		AddPeers:      addPeers,
-		ConnectPeers:  connectPeers,
 		// WARNING: PublishTransaction currently uses the entire duration
 		// because if an external bug, but even if the bug is resolved, a
 		// typical inv/getdata round trip is ~4 seconds, so we set this so
@@ -254,6 +239,22 @@ func (w *bchSPVWallet) Start() (btc.SPVService, error) {
 		w.ForceRescan()
 	}
 
+	var defaultPeers []string
+	switch w.chainParams.Net {
+	// case bchwire.MainNet:
+	// 	addPeers = []string{"cfilters.ssgen.io"}
+	case bchwire.TestNet4:
+		// Add the address for a local bchd testnet4 node.
+		defaultPeers = []string{"localhost:28333"}
+	case bchwire.TestNet, bchwire.SimNet: // plain "wire.TestNet" is regnet!
+		defaultPeers = []string{"localhost:21577"}
+	}
+	peerManager, err := btc.NewSPVPeerManager(&spvService{w.cl}, defaultPeers, w.dir, w.log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create peer manager: %w", err)
+	}
+	w.peerManager = peerManager
+
 	if err = w.chainClient.Start(); err != nil { // lazily starts connmgr
 		return nil, fmt.Errorf("couldn't start Neutrino client: %v", err)
 	}
@@ -262,6 +263,8 @@ func (w *bchSPVWallet) Start() (btc.SPVService, error) {
 	w.SynchronizeRPC(w.chainClient)
 
 	errCloser.Success()
+
+	w.peerManager.ConnectToInitialWalletPeers()
 
 	return &spvService{w.cl}, nil
 }
@@ -746,6 +749,18 @@ func (w *bchSPVWallet) updateDBBirthday(bday time.Time) error {
 	})
 }
 
+func (w *bchSPVWallet) Peers() ([]*asset.WalletPeer, error) {
+	return w.peerManager.Peers()
+}
+
+func (w *bchSPVWallet) AddPeer(addr string) error {
+	return w.peerManager.AddPeer(addr)
+}
+
+func (w *bchSPVWallet) RemovePeer(addr string) error {
+	return w.peerManager.RemovePeer(addr)
+}
+
 // secretSource is used to locate keys and redemption scripts while signing a
 // transaction. secretSource satisfies the txauthor.SecretsSource interface.
 type secretSource struct {
@@ -832,6 +847,21 @@ func (s *spvService) Peers() []btc.SPVPeer {
 		peers[i] = p
 	}
 	return peers
+}
+
+func (s *spvService) AddPeer(addr string) error {
+	serverPeer := neutrino.NewServerPeer(s.ChainService, true)
+	peer, err := peer.NewOutboundPeer(neutrino.NewPeerConfig(serverPeer), addr)
+	if err != nil {
+		return err
+	}
+	conn, err := net.Dial("tcp", peer.Addr())
+	if err != nil {
+		return err
+	}
+	peer.AssociateConnection(conn)
+	serverPeer.Peer = peer
+	return nil
 }
 
 func (s *spvService) GetBlockHeight(h *chainhash.Hash) (int32, error) {

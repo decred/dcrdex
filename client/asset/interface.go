@@ -27,6 +27,7 @@ const (
 	WalletTraitRestorer                                    // The wallet is an asset.WalletRestorer
 	WalletTraitRedemptionConfirmer                         // The wallet has a process to confirm a redemption.
 	WalletTraitTxFeeEstimator                              // The wallet can estimate transaction fees.
+	WalletTraitPeerManager                                 // The wallet can manage its peers.
 )
 
 // IsRescanner tests if the WalletTrait has the WalletTraitRescanner bit set.
@@ -89,6 +90,12 @@ func (wt WalletTrait) IsTxFeeEstimator() bool {
 	return wt&WalletTraitTxFeeEstimator != 0
 }
 
+// IsPeerManager test if the WalletTrait has the WalletTraitPeerManager bit
+// set, which indicates the wallet implements the PeerManager interface.
+func (wt WalletTrait) IsPeerManager() bool {
+	return wt&WalletTraitPeerManager != 0
+}
+
 // DetermineWalletTraits returns the WalletTrait bitset for the provided Wallet.
 func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(Rescanner); is {
@@ -123,6 +130,9 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	}
 	if _, is := w.(TxFeeEstimator); is {
 		t |= WalletTraitTxFeeEstimator
+	}
+	if _, is := w.(PeerManager); is {
+		t |= WalletTraitPeerManager
 	}
 	return t
 }
@@ -688,6 +698,31 @@ type RedemptionConfirmer interface {
 	// different CoinID in the returned asset.ConfirmRedemptionStatus as was
 	// used to call the function.
 	ConfirmRedemption(coinID dex.Bytes, redemption *Redemption) (*ConfirmRedemptionStatus, error)
+}
+
+type PeerSource uint16
+
+const (
+	WalletDefault PeerSource = iota
+	UserAdded
+	Discovered
+)
+
+type WalletPeer struct {
+	Host      string     `json:"host"`
+	Source    PeerSource `json:"source"`
+	Connected bool       `json:"connected"`
+}
+
+type PeerManager interface {
+	// Peers returns a list of peers that the wallet is connected to.
+	Peers() ([]*WalletPeer, error)
+	// AddPeer connects the wallet to a new peer. The peer's address will be
+	// persisted and connected to each time the wallet is started up.
+	AddPeer(host string) error
+	// RemovePeer will remove a peer that was added by AddPeer. This peer may
+	// still be connected to by the wallet if it discovers it on its own.
+	RemovePeer(host string) error
 }
 
 // Bond is the fidelity bond info generated for a certain account ID, amount,

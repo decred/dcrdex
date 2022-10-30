@@ -8087,6 +8087,8 @@ func (c *Core) peerChange(w *xcWallet, numPeers uint32, err error) {
 	}
 	w.mtx.Unlock()
 
+	c.notify(newWalletConfigNote(TopicWalletPeersUpdate, "", "", db.Data, w.state()))
+
 	// When we get peers after having none, start waiting for re-sync, otherwise
 	// leave synced alone. This excludes the unknown state (-1) prior to the
 	// initial peer count report.
@@ -8921,6 +8923,54 @@ func (c *Core) PreAccelerateOrder(oidB dex.Bytes) (*PreAccelerate, error) {
 		SuggestedRange:    *suggestedRange,
 		EarlyAcceleration: earlyAcceleration,
 	}, nil
+}
+
+// WalletPeers returns a list of peers that a wallet is connected to. It also
+// returns the user added peers that the wallet is not connected to.
+func (c *Core) WalletPeers(assetID uint32) ([]*asset.WalletPeer, error) {
+	w, err := c.connectedWallet(assetID)
+	if err != nil {
+		return nil, err
+	}
+
+	peerManager, is := w.Wallet.(asset.PeerManager)
+	if !is {
+		return nil, fmt.Errorf("%s wallet is not a peer manager", unbip(assetID))
+	}
+
+	return peerManager.Peers()
+}
+
+// AddWalletPeer connects the wallet to a new peer, and also persists this peer
+// to be connected to on future startups.
+func (c *Core) AddWalletPeer(assetID uint32, host string) error {
+	w, err := c.connectedWallet(assetID)
+	if err != nil {
+		return err
+	}
+
+	peerManager, is := w.Wallet.(asset.PeerManager)
+	if !is {
+		return fmt.Errorf("%s wallet is not a peer manager", unbip(assetID))
+	}
+
+	return peerManager.AddPeer(host)
+}
+
+// RemoveWalletPeer disconnects from a peer that the user previously added. It
+// will no longer be guaranteed to connect to this peer in the future.
+func (c *Core) RemoveWalletPeer(assetID uint32, host string) error {
+	w, err := c.connectedWallet(assetID)
+	if err != nil {
+		return err
+	}
+
+	peerManager, is := w.Wallet.(asset.PeerManager)
+	if !is {
+		return fmt.Errorf("%s wallet is not a peer manager", unbip(assetID))
+	}
+
+	return peerManager.RemovePeer(host)
 }
 
 // findActiveOrder will search the dex connections for an active order by order

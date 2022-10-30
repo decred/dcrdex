@@ -1892,6 +1892,15 @@ func (c *TCore) FiatRateSources() map[string]bool {
 func (c *TCore) DeleteArchivedRecordsWithBackup(olderThan *time.Time, saveMatchesToFile, saveOrdersToFile bool) (string, int, error) {
 	return "/path/to/records", 10, nil
 }
+func (c *TCore) WalletPeers(assetID uint32) ([]*asset.WalletPeer, error) {
+	return nil, nil
+}
+func (c *TCore) AddWalletPeer(assetID uint32, host string) error {
+	return nil
+}
+func (c *TCore) RemoveWalletPeer(assetID uint32, host string) error {
+	return nil
+}
 
 var botCounter uint64
 

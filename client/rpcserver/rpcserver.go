@@ -76,6 +76,9 @@ type clientCore interface {
 	Send(appPass []byte, assetID uint32, value uint64, addr string, subtract bool) (asset.Coin, error)
 	ExportSeed(pw []byte) ([]byte, error)
 	DeleteArchivedRecords(olderThan *time.Time, matchesFileStr, ordersFileStr string) (int, error)
+	WalletPeers(assetID uint32) ([]*asset.WalletPeer, error)
+	AddWalletPeer(assetID uint32, host string) error
+	RemoveWalletPeer(assetID uint32, host string) error
 }
 
 // RPCServer is a single-client http and websocket server enabling a JSON

@@ -5,6 +5,7 @@ package rpcserver
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -42,6 +43,9 @@ const (
 	sendRoute                  = "send"
 	appSeedRoute               = "appseed"
 	deleteArchivedRecordsRoute = "deletearchivedrecords"
+	walletPeersRoute           = "walletpeers"
+	addWalletPeerRoute         = "addwalletpeer"
+	removeWalletPeerRoute      = "removewalletpeer"
 )
 
 const (
@@ -97,6 +101,9 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	sendRoute:                  handleSend,
 	appSeedRoute:               handleAppSeed,
 	deleteArchivedRecordsRoute: handleDeleteArchivedRecords,
+	walletPeersRoute:           handleWalletPeers,
+	addWalletPeerRoute:         handleAddWalletPeer,
+	removeWalletPeerRoute:      handleRemoveWalletPeer,
 }
 
 // handleHelp handles requests for help. Returns general help for all commands
@@ -691,6 +698,66 @@ func handleDeleteArchivedRecords(s *RPCServer, params *RawParams) *msgjson.Respo
 	return createResponse(deleteArchivedRecordsRoute, msg, nil)
 }
 
+func handleWalletPeers(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if len(params.Args) != 1 {
+		return usage(walletPeersRoute, errors.New("expected 1 arg"))
+	}
+	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
+	if err != nil {
+		return usage(walletPeersRoute, err)
+	}
+
+	peers, err := s.core.WalletPeers(uint32(assetID))
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to get wallet peers: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCWalletPeersError, errMsg)
+		return createResponse(walletPeersRoute, nil, resErr)
+	}
+	return createResponse(walletPeersRoute, peers, nil)
+}
+
+func handleAddWalletPeer(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if len(params.Args) != 2 {
+		return usage(walletPeersRoute, errors.New("expected 2 args"))
+	}
+	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
+	if err != nil {
+		return usage(walletPeersRoute, err)
+	}
+
+	addr := params.Args[1]
+
+	err = s.core.AddWalletPeer(uint32(assetID), addr)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to get wallet peers: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCWalletPeersError, errMsg)
+		return createResponse(walletPeersRoute, nil, resErr)
+	}
+
+	return createResponse(walletPeersRoute, "successfully added peer", nil)
+}
+
+func handleRemoveWalletPeer(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if len(params.Args) != 2 {
+		return usage(walletPeersRoute, errors.New("expected 2 args"))
+	}
+	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
+	if err != nil {
+		return usage(walletPeersRoute, err)
+	}
+
+	addr := params.Args[1]
+
+	err = s.core.RemoveWalletPeer(uint32(assetID), addr)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to get wallet peers: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCWalletPeersError, errMsg)
+		return createResponse(walletPeersRoute, nil, resErr)
+	}
+
+	return createResponse(walletPeersRoute, "successfully removed peer", nil)
+}
+
 // format concatenates thing and tail. If thing is empty, returns an empty
 // string.
 func format(thing, tail string) string {
@@ -1208,5 +1275,30 @@ needed to complete a swap.`,
     appPass (string): The DEX client password.`,
 		returns: `Returns:
     string: The application's seed as hex.`,
+	},
+	walletPeersRoute: {
+		cmdSummary: `Show the peers a wallet is connected to.`,
+		argsShort:  `(assetID)`,
+		argsLong: `Args:
+		assetID (int): The asset's BIP-44 registered coin index. Used to identify
+		which wallet's peers to return.`,
+		returns: `Returns:
+		[]string: Addresses of wallet peers.`,
+	},
+	addWalletPeerRoute: {
+		cmdSummary: `Add a new wallet peer connection.`,
+		argsShort:  `(assetID) (addr)`,
+		argsLong: `Args:
+		assetID (int): The asset's BIP-44 registered coin index. Used to identify
+		which wallet to add a peer.
+		addr (string): The peer's address (host:port).`,
+	},
+	removeWalletPeerRoute: {
+		cmdSummary: `Remove an added wallet peer.`,
+		argsShort:  `(assetID) (addr)`,
+		argsLong: `Args:
+		assetID (int): The asset's BIP-44 registered coin index. Used to identify
+		which wallet to add a peer.
+		addr (string): The peer's address (host:port).`,
 	},
 }

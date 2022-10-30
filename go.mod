@@ -17,8 +17,8 @@ require (
 	github.com/btcsuite/btcwallet/wtxmgr v1.5.0
 	github.com/davecgh/go-spew v1.1.1
 	github.com/dchest/blake2b v1.0.0
-	github.com/dcrlabs/neutrino-bch v0.0.0-20220809174944-921b271ba678
-	github.com/dcrlabs/neutrino-ltc v0.0.0-20220819181220-04c154bb8ed8
+	github.com/dcrlabs/neutrino-bch v0.0.0-20221031001408-f296bfa9bd1c
+	github.com/dcrlabs/neutrino-ltc v0.0.0-20221031001456-55ef06cefead
 	github.com/decred/base58 v1.0.4
 	github.com/decred/dcrd/addrmgr/v2 v2.0.0
 	github.com/decred/dcrd/blockchain/stake/v4 v4.0.0
@@ -53,7 +53,7 @@ require (
 	github.com/jessevdk/go-flags v1.5.0
 	github.com/jrick/logrotate v1.0.0
 	github.com/lib/pq v1.10.4
-	github.com/lightninglabs/neutrino v0.14.2
+	github.com/lightninglabs/neutrino v0.14.3-0.20221024182812-792af8548c14
 	github.com/ltcsuite/ltcd v0.22.0-beta
 	github.com/ltcsuite/ltcd/ltcutil v1.1.0
 	github.com/ltcsuite/ltcwallet v0.13.1

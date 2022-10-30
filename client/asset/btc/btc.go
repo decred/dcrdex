@@ -864,6 +864,7 @@ var _ asset.Rescanner = (*ExchangeWalletSPV)(nil)
 var _ asset.FeeRater = (*ExchangeWalletFullNode)(nil)
 var _ asset.LogFiler = (*ExchangeWalletSPV)(nil)
 var _ asset.Recoverer = (*ExchangeWalletSPV)(nil)
+var _ asset.PeerManager = (*ExchangeWalletSPV)(nil)
 var _ asset.TxFeeEstimator = (*intermediaryWallet)(nil)
 
 // RecoveryCfg is the information that is transferred from the old wallet
@@ -917,6 +918,26 @@ func (btc *ExchangeWalletSPV) Rescan(_ context.Context) error {
 	atomic.StoreInt64(&btc.tipAtConnect, 0) // for progress
 	// Caller should start calling SyncStatus on a ticker.
 	return w.wallet.RescanAsync()
+}
+
+// Peers returns a list of peers that the wallet is connected to.
+func (btc *ExchangeWalletSPV) Peers() ([]*asset.WalletPeer, error) {
+	w := btc.node.(*spvWallet)
+	return w.peers()
+}
+
+// AddPeer connects the wallet to a new peer. The peer's address will be
+// persisted and connected to each time the wallet is started up.
+func (btc *ExchangeWalletSPV) AddPeer(addr string) error {
+	w := btc.node.(*spvWallet)
+	return w.addPeer(addr)
+}
+
+// RemovePeer will remove a peer that was added by AddPeer. This peer may
+// still be connected to by the wallet if it discovers it on it's own.
+func (btc *ExchangeWalletSPV) RemovePeer(addr string) error {
+	w := btc.node.(*spvWallet)
+	return w.removePeer(addr)
 }
 
 // FeeRate satisfies asset.FeeRater.
@@ -1217,7 +1238,10 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 		decodeAddr:  btc.decodeAddr,
 	}
 
-	spvw.wallet = walletConstructor(spvw.dir, spvw.cfg, spvw.chainParams, spvw.log)
+	spvw.wallet, err = walletConstructor(spvw.dir, spvw.cfg, spvw.chainParams, spvw.log)
+	if err != nil {
+		return nil, err
+	}
 
 	btc.node = spvw
 

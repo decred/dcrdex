@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -52,6 +53,8 @@ type btcSPVWallet struct {
 	// rescanStarting is set while reloading the wallet and dropping
 	// transactions from the wallet db.
 	rescanStarting uint32 // atomic
+
+	peerManager *SPVPeerManager
 }
 
 var _ BTCWallet = (*btcSPVWallet)(nil)
@@ -113,7 +116,7 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dataDir strin
 
 // openSPVWallet is the BTCWalletConstructor for Bitcoin.
 func openSPVWallet(dir string, cfg *WalletConfig,
-	chainParams *chaincfg.Params, log dex.Logger) BTCWallet {
+	chainParams *chaincfg.Params, log dex.Logger) (BTCWallet, error) {
 
 	w := &btcSPVWallet{
 		dir:                  dir,
@@ -122,7 +125,7 @@ func openSPVWallet(dir string, cfg *WalletConfig,
 		allowAutomaticRescan: !cfg.ActivelyUsed,
 	}
 	w.birthdayV.Store(cfg.AdjustedBirthday())
-	return w
+	return w, nil
 }
 
 func (w *btcSPVWallet) Birthday() time.Time {
@@ -174,39 +177,40 @@ func (w *btcSPVWallet) Start() (SPVService, error) {
 	}
 	errCloser.Add(w.neutrinoDB.Close)
 
-	// Depending on the network, we add some addpeers or a connect peer. On
-	// regtest, if the peers haven't been explicitly set, add the simnet harness
-	// alpha node as an additional peer so we don't have to type it in. On
-	// mainet and testnet3, add a known reliable persistent peer to be used in
-	// addition to normal DNS seed-based peer discovery.
-	var addPeers []string
-	var connectPeers []string
-	switch w.chainParams.Net {
-	case wire.MainNet:
-		addPeers = []string{"cfilters.ssgen.io"}
-	case wire.TestNet3:
-		addPeers = []string{"dex-test.ssgen.io"}
-	case wire.TestNet, wire.SimNet: // plain "wire.TestNet" is regnet!
-		connectPeers = []string{"localhost:20575"}
-	}
 	w.log.Debug("Starting neutrino chain service...")
 	w.cl, err = neutrino.NewChainService(neutrino.Config{
 		DataDir:       w.dir,
 		Database:      w.neutrinoDB,
 		ChainParams:   *w.chainParams,
 		PersistToDisk: true, // keep cfilter headers on disk for efficient rescanning
-		AddPeers:      addPeers,
-		ConnectPeers:  connectPeers,
+		// AddPeers:      addPeers,
+		// ConnectPeers:  connectPeers,
 		// WARNING: PublishTransaction currently uses the entire duration
 		// because if an external bug, but even if the resolved, a typical
 		// inv/getdata round trip is ~4 seconds, so we set this so neutrino does
 		// not cancel queries too readily.
 		BroadcastTimeout: 6 * time.Second,
+		NameResolver:     net.LookupIP,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("couldn't create Neutrino ChainService: %v", err)
+		return nil, fmt.Errorf("couldn't create Neutrino ChainService: %w", err)
 	}
 	errCloser.Add(w.cl.Stop)
+
+	var defaultPeers []string
+	switch w.chainParams.Net {
+	case wire.MainNet:
+		defaultPeers = []string{"cfilters.ssgen.io:8333"}
+	case wire.TestNet3:
+		defaultPeers = []string{"dex-test.ssgen.io:18333"}
+	case wire.TestNet, wire.SimNet: // plain "wire.TestNet" is regnet!
+		defaultPeers = []string{"localhost:20575"}
+	}
+	peerManager, err := NewSPVPeerManager(&btcChainService{w.cl}, defaultPeers, w.dir, w.log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create peer manager: %w", err)
+	}
+	w.peerManager = peerManager
 
 	w.chainClient = chain.NewNeutrinoClient(w.chainParams, w.cl)
 	w.Wallet = btcw
@@ -237,6 +241,8 @@ func (w *btcSPVWallet) Start() (SPVService, error) {
 	btcw.SynchronizeRPC(w.chainClient)
 
 	errCloser.Success()
+
+	w.peerManager.ConnectToInitialWalletPeers()
 
 	return &btcChainService{w.cl}, nil
 }
@@ -432,6 +438,18 @@ func (w *btcSPVWallet) BlockNotifications(ctx context.Context) <-chan *BlockNoti
 		}
 	}()
 	return ch
+}
+
+func (w *btcSPVWallet) AddPeer(addr string) error {
+	return w.peerManager.AddPeer(addr)
+}
+
+func (w *btcSPVWallet) RemovePeer(addr string) error {
+	return w.peerManager.RemovePeer(addr)
+}
+
+func (w *btcSPVWallet) Peers() ([]*asset.WalletPeer, error) {
+	return w.peerManager.Peers()
 }
 
 // secretSource is used to locate keys and redemption scripts while signing a

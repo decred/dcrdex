@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -42,6 +43,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil/psbt"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/peer"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/waddrmgr"
@@ -114,6 +116,9 @@ type BTCWallet interface {
 	Stop()
 	Reconfigure(*asset.WalletConfig, string) (bool, error)
 	Birthday() time.Time
+	Peers() ([]*asset.WalletPeer, error)
+	AddPeer(string) error
+	RemovePeer(string) error
 }
 
 // BlockNotification is block hash and height delivered by a BTCWallet when it
@@ -129,6 +134,7 @@ type SPVService interface {
 	GetBlockHash(int64) (*chainhash.Hash, error)
 	BestBlock() (*headerfs.BlockStamp, error)
 	Peers() []SPVPeer
+	AddPeer(addr string) error
 	GetBlockHeight(hash *chainhash.Hash) (int32, error)
 	GetBlockHeader(*chainhash.Hash) (*wire.BlockHeader, error)
 	GetCFilter(blockHash chainhash.Hash, filterType wire.FilterType, options ...neutrino.QueryOption) (*gcs.Filter, error)
@@ -141,6 +147,7 @@ type SPVService interface {
 type SPVPeer interface {
 	StartingHeight() int32
 	LastBlock() int32
+	Addr() string
 }
 
 // btcChainService wraps *neutrino.ChainService in order to translate the
@@ -158,10 +165,25 @@ func (s *btcChainService) Peers() []SPVPeer {
 	return peers
 }
 
+func (s *btcChainService) AddPeer(addr string) error {
+	serverPeer := neutrino.NewServerPeer(s.ChainService, true)
+	peer, err := peer.NewOutboundPeer(neutrino.NewPeerConfig(serverPeer), addr)
+	if err != nil {
+		return err
+	}
+	conn, err := net.Dial("tcp", peer.Addr())
+	if err != nil {
+		return err
+	}
+	peer.AssociateConnection(conn)
+	serverPeer.Peer = peer
+	return nil
+}
+
 var _ SPVService = (*btcChainService)(nil)
 
 // BTCWalletConstructor is a function to construct a BTCWallet.
-type BTCWalletConstructor func(dir string, cfg *WalletConfig, chainParams *chaincfg.Params, log dex.Logger) BTCWallet
+type BTCWalletConstructor func(dir string, cfg *WalletConfig, chainParams *chaincfg.Params, log dex.Logger) (BTCWallet, error)
 
 func extendAddresses(extIdx, intIdx uint32, btcw *wallet.Wallet) error {
 	scopedKeyManager, err := btcw.Manager.FetchScopedKeyManager(waddrmgr.KeyScopeBIP0084)
@@ -479,6 +501,18 @@ func (w *spvWallet) getChainHeight() (int32, error) {
 
 func (w *spvWallet) peerCount() (uint32, error) {
 	return uint32(len(w.cl.Peers())), nil
+}
+
+func (w *spvWallet) peers() ([]*asset.WalletPeer, error) {
+	return w.wallet.Peers()
+}
+
+func (w *spvWallet) addPeer(addr string) error {
+	return w.wallet.AddPeer(addr)
+}
+
+func (w *spvWallet) removePeer(addr string) error {
+	return w.wallet.RemovePeer(addr)
 }
 
 // syncHeight is the best known sync height among peers.

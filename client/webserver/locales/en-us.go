@@ -312,4 +312,6 @@ var EnUS = map[string]string{
 	"Lots":                   "Lots",
 	"show advanced options":  "show advanced options",
 	"hide advanced options":  "hide advanced options",
+	"manage_peers":           "Manage Peers",
+	"add_peer":               "Add Peer",
 }

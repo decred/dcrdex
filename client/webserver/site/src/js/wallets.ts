@@ -22,7 +22,9 @@ import {
   Order,
   OrderFilter,
   WalletCreationNote,
-  Market
+  Market,
+  PeerSource,
+  WalletPeer
 } from './registry'
 
 const animationLength = 300
@@ -32,7 +34,8 @@ const traitRecoverer = 1 << 5
 const traitWithdrawer = 1 << 6
 const traitRestorer = 1 << 8
 const traitTxFeeEstimator = 1 << 10
-const traitsExtraOpts = traitLogFiler & traitRecoverer & traitRestorer & traitRescanner
+const traitPeerManager = 1 << 11
+const traitsExtraOpts = traitLogFiler & traitRecoverer & traitRestorer & traitRescanner & traitPeerManager
 
 interface ReconfigRequest {
   assetID: number
@@ -85,8 +88,9 @@ export default class WalletsPage extends BasePage {
     this.body = body
     const page = this.page = Doc.idDescendants(body)
 
-    Doc.cleanTemplates(page.restoreInfoCard)
+    Doc.cleanTemplates(page.restoreInfoCard, page.connectedIconTmpl, page.disconnectedIconTmpl, page.removeIconTmpl)
     this.restoreInfoCard = page.restoreInfoCard.cloneNode(true) as HTMLElement
+    Doc.show(page.connectedIconTmpl, page.disconnectedIconTmpl, page.removeIconTmpl)
 
     this.forms = Doc.applySelector(page.forms, ':scope > form')
     page.forms.querySelectorAll('.form-closer').forEach(el => {
@@ -154,6 +158,8 @@ export default class WalletsPage extends BasePage {
     Doc.bind(page.disableWallet, 'click', async () => { this.showToggleWalletStatus(true) })
     Doc.bind(page.enableWallet, 'click', async () => { this.showToggleWalletStatus(false) })
     bindForm(page.toggleWalletStatusConfirm, page.toggleWalletStatusSubmit, async () => { this.toggleWalletStatus() })
+    Doc.bind(page.managePeers, 'click', async () => { this.showManagePeersForm() })
+    Doc.bind(page.addPeerSubmit, 'click', async () => { this.submitAddPeer() })
 
     // New deposit address button.
     this.depositAddrForm = new DepositAddress(page.deposit)
@@ -326,6 +332,124 @@ export default class WalletsPage extends BasePage {
     Doc.hide(this.page.hideIcon, this.page.changePW)
     Doc.show(this.page.showIcon)
     this.page.switchPWMsg.textContent = intl.prep(intl.ID_NEW_WALLET_PASS)
+  }
+
+  /*
+   * updateWalletPeers retrieves the wallet peers and displays them in the
+   * wallet peers table.
+   */
+  async updateWalletPeersTable () {
+    const page = this.page
+
+    Doc.hide(page.peerSpinner)
+
+    const res = await postJSON('/api/getwalletpeers', {
+      assetID: this.selectedAssetID
+    })
+    if (!app().checkResponse(res)) {
+      page.managePeersErr.textContent = res.msg
+      Doc.show(page.managePeersErr)
+      return
+    }
+
+    while (page.peersTableBody.firstChild) {
+      page.peersTableBody.removeChild(page.peersTableBody.firstChild)
+    }
+
+    const peers : WalletPeer[] = res.peers || []
+    peers.sort((a: WalletPeer, b: WalletPeer) : number => {
+      return a.source - b.source
+    })
+
+    const defaultText = intl.prep(intl.ID_DEFAULT)
+    const addedText = intl.prep(intl.ID_ADDED)
+    const discoveredText = intl.prep(intl.ID_DISCOVERED)
+
+    peers.forEach((peer: WalletPeer) => {
+      const row = page.peerTableRow.cloneNode(true) as PageElement
+      const tmpl = Doc.parseTemplate(row)
+
+      tmpl.host.textContent = peer.host
+
+      switch (peer.source) {
+        case PeerSource.WalletDefault:
+          tmpl.source.textContent = defaultText
+          break
+        case PeerSource.UserAdded:
+          tmpl.source.textContent = addedText
+          break
+        case PeerSource.Discovered:
+          tmpl.source.textContent = discoveredText
+          break
+      }
+
+      let connectionIcon
+      if (peer.connected) {
+        connectionIcon = this.page.connectedIconTmpl.cloneNode(true)
+      } else {
+        connectionIcon = this.page.disconnectedIconTmpl.cloneNode(true)
+      }
+      tmpl.connected.appendChild(connectionIcon)
+
+      if (peer.source === PeerSource.UserAdded) {
+        const removeIcon = this.page.removeIconTmpl.cloneNode(true)
+        Doc.bind(removeIcon, 'click', async () => {
+          const res = await postJSON('/api/removewalletpeer', {
+            assetID: this.selectedAssetID,
+            host: peer.host
+          })
+          if (!app().checkResponse(res)) {
+            page.managePeersErr.textContent = res.msg
+            Doc.show(page.managePeersErr)
+            return
+          }
+          this.spinUntilPeersUpdate()
+        })
+        tmpl.remove.appendChild(removeIcon)
+      }
+
+      page.peersTableBody.appendChild(row)
+    })
+  }
+
+  // showManagePeersForm displays the manage peers form.
+  async showManagePeersForm () {
+    const page = this.page
+    await this.updateWalletPeersTable()
+    Doc.hide(page.managePeersErr)
+    this.showForm(page.managePeersForm)
+  }
+
+  // submitAddPeers sends a request for the the wallet to connect to a new
+  // peer.
+  async submitAddPeer () {
+    const page = this.page
+    const res = await postJSON('/api/addwalletpeer', {
+      assetID: this.selectedAssetID,
+      host: page.addPeerInput.value
+    })
+    if (!app().checkResponse(res)) {
+      page.managePeersErr.textContent = res.msg
+      Doc.show(page.managePeersErr)
+      return
+    }
+    this.spinUntilPeersUpdate()
+    page.addPeerInput.value = ''
+  }
+
+  /*
+   * spinUntilPeersUpdate will show the spinner on the manage peers fork.
+   * If it is still showing after 10 seconds, the peers table will be updated
+   * instead of waiting for a notification.
+   */
+  async spinUntilPeersUpdate () {
+    const page = this.page
+    Doc.show(page.peerSpinner)
+    setTimeout(() => {
+      if (Doc.isDisplayed(page.peerSpinner)) {
+        this.updateWalletPeersTable()
+      }
+    }, 10000)
   }
 
   /*
@@ -750,6 +874,8 @@ export default class WalletsPage extends BasePage {
     Doc.setVis(wallet.traits & traitRecoverer, page.recoverWallet)
     Doc.setVis(wallet.traits & traitRestorer, page.exportWallet)
     Doc.setVis(wallet.traits & traitRescanner, page.rescanWallet)
+    Doc.setVis(wallet.traits & traitPeerManager, page.managePeers)
+
     Doc.setVis(wallet.traits & traitsExtraOpts, page.otherActionsLabel)
 
     if (wallet.disabled) Doc.show(page.enableWallet)
@@ -1094,6 +1220,11 @@ export default class WalletsPage extends BasePage {
   handleWalletStateNote (note: WalletStateNote): void {
     this.updateAssetButton(note.wallet.assetID)
     this.assetUpdated(note.wallet.assetID)
+    if (note.topic === 'WalletPeersUpdate' &&
+        note.wallet.assetID === this.selectedAssetID &&
+        Doc.isDisplayed(this.page.managePeersForm)) {
+      this.updateWalletPeersTable()
+    }
   }
 
   /*
