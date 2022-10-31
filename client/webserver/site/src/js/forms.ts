@@ -700,7 +700,7 @@ export class WalletConfigForm {
     const inputs: Record<string, HTMLElement[]> = {}
     box.querySelectorAll('input').forEach((input: ConfigOptionInput) => {
       const k = input.dataset.configKey
-      if (!k) return // typescript
+      if (!k) return // TS2538
       const els = []
       for (const [opt, el] of this.configElements) if (opt.key === k) els.push(el)
       inputs[k] = els
