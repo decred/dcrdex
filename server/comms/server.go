@@ -289,8 +289,8 @@ type Server struct {
 // clients, if necessary.
 func NewServer(cfg *RPCConfig) (*Server, error) {
 	// Find or create the key pair.
-	keyExists := fileExists(cfg.RPCKey)
-	certExists := fileExists(cfg.RPCCert)
+	keyExists := dex.FileExists(cfg.RPCKey)
+	certExists := dex.FileExists(cfg.RPCCert)
 	if certExists == !keyExists {
 		return nil, fmt.Errorf("missing cert pair file")
 	}
@@ -746,12 +746,6 @@ func (s *Server) ipConnCount(ip dex.IPKey) int64 {
 		return 0
 	}
 	return wsl.conns
-}
-
-// filesExists reports whether the named file or directory exists.
-func fileExists(name string) bool {
-	_, err := os.Stat(name)
-	return !os.IsNotExist(err)
 }
 
 // genCertPair generates a key/cert pair to the paths provided.

@@ -3,7 +3,7 @@ body.dark {
   color: $font-color-dark;
 
   header.maintop {
-    // background-color: black;
+    background-color: $dark_body_bg;
     border-bottom-style: solid;
     border-color: $dark_border_color;
     border-width: 1px;

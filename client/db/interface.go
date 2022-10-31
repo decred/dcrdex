@@ -118,16 +118,17 @@ type DB interface {
 	NotificationsN(int) ([]*Notification, error)
 	// AckNotification sets the acknowledgement for a notification.
 	AckNotification(id []byte) error
-	// DeleteInactiveOrders deletes inactive orders from the database that
-	// have been updated after the supplied time. If no time is supplied
-	// the current time is used. Accepts an optional function to perform on
-	// deleted orders.
-	DeleteInactiveOrders(ctx context.Context, olderThan *time.Time, perOrderFn func(ord *MetaOrder) error) error
-	// DeleteInactiveMatches deletes inactive matches from the database
-	// that have been created after the supplied time. If no time is
-	// supplied the current time is used. Accepts an optional function to
-	// perform on deleted matches that includes if it was a sell order.
-	DeleteInactiveMatches(ctx context.Context, olderThan *time.Time, perMatchFn func(mtch *MetaMatch, isSell bool) error) error
+	// DeleteInactiveOrders deletes inactive orders from the database that are
+	// older than the supplied time and returns the total number of orders
+	// deleted. If no time is supplied, the current time is used. Accepts an
+	// optional function to perform on deleted orders.
+	DeleteInactiveOrders(ctx context.Context, olderThan *time.Time, perOrderFn func(ord *MetaOrder) error) (int, error)
+	// DeleteInactiveMatches deletes inactive matches from the database that are
+	// older than the supplied time and return total number of matches deleted.
+	// If no time is supplied, the current time is used. Accepts an optional
+	// function to perform on deleted matches that includes if it was a sell
+	// order.
+	DeleteInactiveMatches(ctx context.Context, olderThan *time.Time, perMatchFn func(mtch *MetaMatch, isSell bool) error) (int, error)
 	// SetSeedGenerationTime stores the time when the app seed was generated.
 	SetSeedGenerationTime(time uint64) error
 	// SeedGenerationTime fetches the time when the app seed was generated.

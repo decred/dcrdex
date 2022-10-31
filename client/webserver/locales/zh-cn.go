@@ -252,7 +252,7 @@ var ZhCN = map[string]string{
 	"Host":                        "主机",
 	"No Recent Activity":          "最近没有活动",
 	"Recent asset_name Activity":  "最近的 <span data-asset-name=1></span> 活动",
-	"Other Actions":               "其它活动",
+	"other_actions":               "其它活动",
 	"estimated_fee":               "预估费用",
 	"estimated_total_spend":       "预估总支出",
 	"estimated_balance":           "完成之后的预估余额",

@@ -75,7 +75,7 @@ type clientCore interface {
 	RescanWallet(assetID uint32, force bool) error
 	Send(appPass []byte, assetID uint32, value uint64, addr string, subtract bool) (asset.Coin, error)
 	ExportSeed(pw []byte) ([]byte, error)
-	DeleteArchivedRecords(olderThan *time.Time, matchesFileStr, ordersFileStr string) error
+	DeleteArchivedRecords(olderThan *time.Time, matchesFileStr, ordersFileStr string) (int, error)
 }
 
 // RPCServer is a single-client http and websocket server enabling a JSON
@@ -189,8 +189,8 @@ func New(cfg *Config) (*RPCServer, error) {
 	}
 
 	// Find or create the key pair.
-	keyExists := fileExists(cfg.Key)
-	certExists := fileExists(cfg.Cert)
+	keyExists := dex.FileExists(cfg.Key)
+	certExists := dex.FileExists(cfg.Cert)
 	if certExists == !keyExists {
 		return nil, fmt.Errorf("missing cert pair file")
 	}
@@ -354,10 +354,4 @@ func (s *RPCServer) authMiddleware(next http.Handler) http.Handler {
 		log.Debugf("authenticated user with ip: %s", r.RemoteAddr)
 		next.ServeHTTP(w, r)
 	})
-}
-
-// filesExists reports whether the named file or directory exists.
-func fileExists(name string) bool {
-	_, err := os.Stat(name)
-	return !os.IsNotExist(err)
 }

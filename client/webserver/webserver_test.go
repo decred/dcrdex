@@ -53,29 +53,31 @@ func (c *tCoin) Confirmations(context.Context) (uint32, error) {
 }
 
 type TCore struct {
-	balanceErr      error
-	syncFeed        core.BookFeed
-	syncErr         error
-	regErr          error
-	loginErr        error
-	logoutErr       error
-	initErr         error
-	isInited        bool
-	getDEXConfigErr error
-	createWalletErr error
-	openWalletErr   error
-	closeWalletErr  error
-	rescanWalletErr error
-	sendErr         error
-	notHas          bool
-	notRunning      bool
-	notOpen         bool
-	rateSourceErr   error
-	estFee          uint64
-	estFeeErr       error
-	validAddr       bool
-	walletDisabled  bool
-	walletStatusErr error
+	balanceErr       error
+	syncFeed         core.BookFeed
+	syncErr          error
+	regErr           error
+	loginErr         error
+	logoutErr        error
+	initErr          error
+	isInited         bool
+	getDEXConfigErr  error
+	createWalletErr  error
+	openWalletErr    error
+	closeWalletErr   error
+	rescanWalletErr  error
+	sendErr          error
+	notHas           bool
+	notRunning       bool
+	notOpen          bool
+	rateSourceErr    error
+	estFee           uint64
+	estFeeErr        error
+	validAddr        bool
+	walletDisabled   bool
+	walletStatusErr  error
+	deletedRecords   int
+	deleteRecordsErr error
 }
 
 func (c *TCore) Network() dex.Network                         { return dex.Mainnet }
@@ -224,6 +226,9 @@ func (c *TCore) UpdateDEXHost(string, string, []byte, interface{}) (*core.Exchan
 }
 func (c *TCore) WalletRestorationInfo(pw []byte, assetID uint32) ([]*asset.WalletRestoration, error) {
 	return nil, nil
+}
+func (c *TCore) DeleteArchivedRecordsWithBackup(endDateTime *time.Time, saveMatchesToFile, saveOrdersToFile bool) (string, int, error) {
+	return "/path/to/records", c.deletedRecords, c.deleteRecordsErr
 }
 
 type TWriter struct {
@@ -853,7 +858,7 @@ func TestAPIEstimateSendTxFee(t *testing.T) {
 	ensureResponse(t, s.apiEstimateSendTxFee, want, reader, writer, body, nil)
 }
 
-func TestAPI_ToggleWalletStatus(t *testing.T) {
+func TestAPIToggleWalletStatus(t *testing.T) {
 	s, tCore, shutdown := newTServer(t, false)
 	defer shutdown()
 	writer := new(TWriter)
@@ -884,4 +889,27 @@ func TestAPI_ToggleWalletStatus(t *testing.T) {
 	if tCore.walletDisabled {
 		t.Fatal("Expected wallet to be enabled")
 	}
+}
+
+func TestAPIDeleteArchivedRecords(t *testing.T) {
+	s, tCore, shutdown := newTServer(t, false)
+	defer shutdown()
+	writer := new(TWriter)
+	reader := new(TReader)
+
+	var body *deleteRecordsForm
+	ensure := func(want string) {
+		ensureResponse(t, s.apiDeleteArchivedRecords, want, reader, writer, body, nil)
+
+	}
+
+	body = &deleteRecordsForm{
+		OlderThanMs: time.Now().UnixMilli(),
+	}
+
+	tCore.deletedRecords = 23
+	ensure(`{"ok":true,"archivedRecordsDeleted":23,"archivedRecordsPath":"/path/to/records"}`)
+
+	tCore.deleteRecordsErr = tErr
+	ensure(`{"ok":false,"msg":"expected dummy error"}`)
 }

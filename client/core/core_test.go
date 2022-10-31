@@ -368,7 +368,9 @@ type TDB struct {
 	legacyKeyErr             error
 	recryptErr               error
 	deleteInactiveOrdersErr  error
+	archivedOrders           int
 	deleteInactiveMatchesErr error
+	archivedMatches          int
 	updateAccountInfoErr     error
 }
 
@@ -516,12 +518,12 @@ func (tdb *TDB) SetPrimaryCredentials(creds *db.PrimaryCredentials) error {
 	return nil
 }
 
-func (tdb *TDB) DeleteInactiveOrders(ctx context.Context, olderThan *time.Time, perBatchFn func(ords *db.MetaOrder) error) error {
-	return tdb.deleteInactiveOrdersErr
+func (tdb *TDB) DeleteInactiveOrders(ctx context.Context, olderThan *time.Time, perBatchFn func(ords *db.MetaOrder) error) (int, error) {
+	return tdb.archivedOrders, tdb.deleteInactiveOrdersErr
 }
 
-func (tdb *TDB) DeleteInactiveMatches(ctx context.Context, olderThan *time.Time, perBatchFn func(mtchs *db.MetaMatch, isSell bool) error) error {
-	return tdb.deleteInactiveMatchesErr
+func (tdb *TDB) DeleteInactiveMatches(ctx context.Context, olderThan *time.Time, perBatchFn func(mtchs *db.MetaMatch, isSell bool) error) (int, error) {
+	return tdb.archivedMatches, tdb.deleteInactiveMatchesErr
 }
 
 func (tdb *TDB) PrimaryCredentials() (*db.PrimaryCredentials, error) {
@@ -9777,14 +9779,19 @@ func TestDeleteArchivedRecords(t *testing.T) {
 		name                                              string
 		olderThan                                         *time.Time
 		matchesFileStr, ordersFileStr                     string
+		archivedMatches, archivedOrders                   int
 		deleteInactiveOrdersErr, deleteInactiveMatchesErr error
 		wantErr                                           bool
 	}{{
-		name: "ok no order or file save",
+		name:            "ok no order or file save",
+		archivedMatches: 12,
+		archivedOrders:  24,
 	}, {
-		name:           "ok orders and file save",
-		ordersFileStr:  tempFile("abc"),
-		matchesFileStr: tempFile("123"),
+		name:            "ok orders and file save",
+		ordersFileStr:   tempFile("abc"),
+		matchesFileStr:  tempFile("123"),
+		archivedMatches: 34,
+		archivedOrders:  67,
 	}, {
 		name:                    "orders save error",
 		ordersFileStr:           tempFile("abc"),
@@ -9798,9 +9805,11 @@ func TestDeleteArchivedRecords(t *testing.T) {
 	}}
 
 	for _, test := range tests {
+		tdb.archivedMatches = test.archivedMatches
+		tdb.archivedOrders = test.archivedOrders
 		tdb.deleteInactiveOrdersErr = test.deleteInactiveOrdersErr
 		tdb.deleteInactiveMatchesErr = test.deleteInactiveMatchesErr
-		err := tCore.DeleteArchivedRecords(test.olderThan, test.matchesFileStr, test.ordersFileStr)
+		nRecordsDeleted, err := tCore.DeleteArchivedRecords(test.olderThan, test.matchesFileStr, test.ordersFileStr)
 		if test.wantErr {
 			if err != nil {
 				continue
@@ -9809,6 +9818,10 @@ func TestDeleteArchivedRecords(t *testing.T) {
 		}
 		if err != nil {
 			t.Fatalf("%q: unexpected failure: %v", test.name, err)
+		}
+		expectedRecords := test.archivedMatches + test.archivedOrders
+		if nRecordsDeleted != expectedRecords {
+			t.Fatalf("%s: Expected %d deleted records, got %d", test.name, expectedRecords, nRecordsDeleted)
 		}
 	}
 }

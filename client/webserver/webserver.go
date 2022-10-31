@@ -140,6 +140,7 @@ type clientCore interface {
 	FiatRateSources() map[string]bool
 	EstimateSendTxFee(address string, assetID uint32, value uint64, subtract bool) (fee uint64, isValidAddress bool, err error)
 	ValidateAddress(address string, assetID uint32) (bool, error)
+	DeleteArchivedRecordsWithBackup(olderThan *time.Time, saveMatchesToFile, saveOrdersToFile bool) (string, int, error)
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -392,6 +393,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/toggleratesource", s.apiToggleRateSource)
 			apiAuth.Post("/validateaddress", s.apiValidateAddress)
 			apiAuth.Post("/txfee", s.apiEstimateSendTxFee)
+			apiAuth.Post("/deletearchivedrecords", s.apiDeleteArchivedRecords)
 		})
 	})
 

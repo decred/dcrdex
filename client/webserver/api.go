@@ -1170,6 +1170,36 @@ func (s *WebServer) apiToggleRateSource(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, simpleAck(), s.indent)
 }
 
+// apiDeleteArchiveRecords handles the '/deletearchivedrecords' API request.
+func (s *WebServer) apiDeleteArchivedRecords(w http.ResponseWriter, r *http.Request) {
+	form := new(deleteRecordsForm)
+	if !readPost(w, r, form) {
+		return
+	}
+
+	var olderThan *time.Time
+	if form.OlderThanMs > 0 {
+		ot := time.UnixMilli(form.OlderThanMs)
+		olderThan = &ot
+	}
+
+	archivedRecordsPath, nRecordsDeleted, err := s.core.DeleteArchivedRecordsWithBackup(olderThan, form.SaveMatchesToFile, form.SaveOrdersToFile)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error deleting archived records: %w", err))
+		return
+	}
+	resp := &struct {
+		Ok                     bool   `json:"ok"`
+		ArchivedRecordsDeleted int    `json:"archivedRecordsDeleted"`
+		ArchivedRecordsPath    string `json:"archivedRecordsPath"`
+	}{
+		Ok:                     true,
+		ArchivedRecordsDeleted: nRecordsDeleted,
+		ArchivedRecordsPath:    archivedRecordsPath,
+	}
+	writeJSON(w, resp, s.indent)
+}
+
 // writeAPIError logs the formatted error and sends a standardResponse with the
 // error message.
 func (s *WebServer) writeAPIError(w http.ResponseWriter, err error) {

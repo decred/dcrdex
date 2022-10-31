@@ -70,6 +70,10 @@ export const ID_INVALID_ADDRESS_MSG = 'INVALID_ADDRESS_MSG'
 export const ID_TXFEE_UNSUPPORTED = 'TXFEE_UNSUPPORTED'
 export const ID_TXFEE_ERR_MSG = 'TXFEE_ERR_MSG'
 export const ID_ACTIVE_ORDERS_LOGOUT_ERR_MSG = 'ACTIVE_ORDERS_LOGOUT_ERR_MSG'
+export const ID_INVALID_DATE_ERR_MSG = 'INVALID_DATE_ERR_MSG'
+export const ID_NO_ARCHIVED_RECORDS = 'NO_ARCHIVED_RECORDS'
+export const ID_DELETE_ARCHIVED_RECORDS_RESULT = 'DELETE_ARCHIVED_RECORDS_RESULT'
+export const ID_ARCHIVED_RECORDS_PATH = 'ARCHIVED_RECORDS_PATH'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -141,7 +145,11 @@ export const enUS: Locale = {
   [ID_INVALID_ADDRESS_MSG]: 'invalid address: {{ address }}',
   [ID_TXFEE_UNSUPPORTED]: 'fee estimation is not supported for this wallet type',
   [ID_TXFEE_ERR_MSG]: 'fee estimation failed: {{ err }}',
-  [ID_ACTIVE_ORDERS_LOGOUT_ERR_MSG]: 'cannot logout with active orders'
+  [ID_ACTIVE_ORDERS_LOGOUT_ERR_MSG]: 'cannot logout with active orders',
+  [ID_INVALID_DATE_ERR_MSG]: 'error: invalid date or time',
+  [ID_NO_ARCHIVED_RECORDS]: 'No archived records found',
+  [ID_DELETE_ARCHIVED_RECORDS_RESULT]: 'Message: {{ nRecords }} archived records has been deleted',
+  [ID_ARCHIVED_RECORDS_PATH]: 'File Location: {{ path }}'
 }
 
 export const ptBR: Locale = {

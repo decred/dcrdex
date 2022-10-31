@@ -14,7 +14,7 @@
   position: relative;
   max-width: 250px;
   white-space: nowrap;
-  overflow: hidden;
+  overflow: auto;
   text-overflow: ellipsis;
 }
 
@@ -32,7 +32,7 @@
   }
 }
 
-.export-bttn {
+.export-archived-records-bttn {
   display: flex;
   justify-content: center;
   align-items: center;

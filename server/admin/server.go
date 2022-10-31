@@ -14,10 +14,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"sync"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
@@ -94,16 +94,10 @@ func UseLogger(logger slog.Logger) {
 	log = logger
 }
 
-// filesExists reports whether the named file or directory exists.
-func fileExists(name string) bool {
-	_, err := os.Stat(name)
-	return !os.IsNotExist(err)
-}
-
 // NewServer is the constructor for a new Server.
 func NewServer(cfg *SrvConfig) (*Server, error) {
 	// Find the key pair.
-	if !fileExists(cfg.Key) || !fileExists(cfg.Cert) {
+	if !dex.FileExists(cfg.Key) || !dex.FileExists(cfg.Cert) {
 		return nil, fmt.Errorf("missing certificates")
 	}
 
