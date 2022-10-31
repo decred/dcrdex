@@ -184,7 +184,7 @@ func (c *ConnectionMaster) On() bool {
 	}
 }
 
-// Wait waits for the the Connector to shut down. It returns immediately if
+// Wait waits for the Connector to shut down. It returns immediately if
 // Connect has not been called yet.
 func (c *ConnectionMaster) Wait() {
 	<-c.Done() // let the anon goroutine from Connect return
