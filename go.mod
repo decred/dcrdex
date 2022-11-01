@@ -4,7 +4,7 @@ go 1.17
 
 require (
 	decred.org/dcrwallet/v2 v2.0.8
-	github.com/btcsuite/btcd v0.23.2
+	github.com/btcsuite/btcd v0.23.3
 	github.com/btcsuite/btcd/btcec/v2 v2.2.1
 	github.com/btcsuite/btcd/btcutil v1.1.2
 	github.com/btcsuite/btcd/btcutil/psbt v1.1.5
