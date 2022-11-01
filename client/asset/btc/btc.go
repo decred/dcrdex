@@ -344,7 +344,8 @@ type BTCCloneCFG struct {
 	// FeeEstimator provides a way to get fees given a context, a RawRequest-enabled
 	// client, a confirmation target, a bool checking if the client is allowed
 	// or not to make external requests and the network.
-	FeeEstimator func(context.Context, RawRequester, uint64, bool, dex.Network) (uint64, error)
+	FeeEstimator func(ctx context.Context, rawRequester RawRequester, confTarget uint64,
+		externalAllowed bool, net dex.Network) (fee uint64, err error)
 	// OmitAddressType causes the address type (bech32, legacy) to be omitted
 	// from calls to getnewaddress.
 	OmitAddressType bool
