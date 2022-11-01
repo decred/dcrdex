@@ -9,7 +9,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -817,19 +816,22 @@ func TestTryBlocksWithNotifier(t *testing.T) {
 	// Start with no blocks so that we're not synced.
 	node.blockchainMtx.Lock()
 	node.getBlockchainInfo = &getBlockchainInfoResult{
-		Headers: 2,
+		Headers: 3,
 		Blocks:  0,
 	}
 	node.blockchainMtx.Unlock()
 
 	addBlock()
 
-	// Prime the sync target to avoid the syncStatus tip send here.
-	atomic.StoreInt32(&spv.syncTarget, 1)
+	if !getNote(blockTicker * 2) {
+		t.Fatalf("0th block didn't send tip change update")
+	}
 
-	// It should not come through on the block tick, since it will be cached.
+	addBlock()
+
+	// It should not come through on the block tick, since it will be queued.
 	if getNote(blockTicker * 2) {
-		t.Fatalf("got block that should've been cached")
+		t.Fatalf("got non-0th block that should've been queued")
 	}
 
 	// And it won't come through after a single block allowance, because we're
