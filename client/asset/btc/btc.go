@@ -1764,6 +1764,8 @@ func (btc *baseWallet) SingleLotSwapFees(form *asset.PreSwapForm) (fees uint64, 
 	}
 
 	if split {
+		// TODO: The following is not correct for all BTC clones. e.g. zcash has
+		// a different MinimumTxOverhead (29).
 		if btc.segwit {
 			fees += (dexbtc.MinimumTxOverhead + dexbtc.RedeemP2WPKHInputSize + dexbtc.P2WPKHOutputSize) * bumpedNetRate
 		} else {
@@ -1778,9 +1780,9 @@ func (btc *baseWallet) SingleLotSwapFees(form *asset.PreSwapForm) (fees uint64, 
 		inputSize = dexbtc.RedeemP2PKHInputSize
 	}
 
-	nfo := form.AssetConfig
 	const maxSwaps = 1 // Assumed single lot order
-	swapFunds := calc.RequiredOrderFundsAlt(form.LotSize, inputSize, maxSwaps, nfo.SwapSizeBase, nfo.SwapSize, bumpedNetRate)
+	swapFunds := calc.RequiredOrderFundsAlt(form.LotSize, inputSize, maxSwaps,
+		btc.initTxSizeBase, btc.initTxSize, bumpedNetRate)
 	fees += swapFunds - form.LotSize
 
 	return fees, nil

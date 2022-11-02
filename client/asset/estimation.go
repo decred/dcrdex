@@ -42,7 +42,9 @@ type PreSwapForm struct {
 	// of the current market rate.
 	LotSize uint64
 	// Lots is the number of lots in the order.
-	Lots       uint64
+	Lots uint64
+	// MaxFeeRate is the highest possible fee rate that may be required for the
+	// swap initialization transaction.
 	MaxFeeRate uint64
 	// Immediate should be set to true if this is for an order that is not a
 	// standing order, likely a market order or a limit order with immediate

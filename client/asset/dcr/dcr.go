@@ -1373,9 +1373,9 @@ func (dcr *ExchangeWallet) SingleLotSwapFees(form *asset.PreSwapForm) (fees uint
 		fees += (dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + dexdcr.P2PKHOutputSize) * bumpedNetRate
 	}
 
-	nfo := form.AssetConfig
 	const maxSwaps = 1 // Assumed single lot order
-	swapFunds := calc.RequiredOrderFundsAlt(form.LotSize, dexdcr.P2PKHInputSize, maxSwaps, nfo.SwapSizeBase, nfo.SwapSize, bumpedNetRate)
+	swapFunds := calc.RequiredOrderFundsAlt(form.LotSize, dexdcr.P2PKHInputSize,
+		maxSwaps, dexdcr.InitTxSizeBase, dexdcr.InitTxSize, bumpedNetRate)
 	fees += swapFunds - form.LotSize
 
 	return fees, nil

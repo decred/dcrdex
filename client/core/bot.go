@@ -1247,6 +1247,7 @@ func (c *Core) feeEstimates(form *TradeForm) (swapFees, redeemFees uint64, err e
 			if err2 != nil {
 				return 0, 0, fmt.Errorf("error getting swap estimate (%v) and single-lot estimate (%v)", err, err2)
 			}
+			err = nil
 		} else {
 			return 0, 0, fmt.Errorf("error getting swap estimate: %w", err)
 		}
@@ -1262,12 +1263,13 @@ func (c *Core) feeEstimates(form *TradeForm) (swapFees, redeemFees uint64, err e
 	if err == nil {
 		redeemFees = redeemEstimate.Estimate.RealisticWorstCase
 	} else {
-		if bw, is := fromWallet.Wallet.(asset.BotWallet); is {
+		if bw, is := toWallet.Wallet.(asset.BotWallet); is {
 			var err2 error
 			redeemFees, err2 = bw.SingleLotRedeemFees(preRedeemForm)
 			if err2 != nil {
 				return 0, 0, fmt.Errorf("error getting redemption estimate (%v) and single-lot estimate (%v)", err, err2)
 			}
+			err = nil
 		} else {
 			return 0, 0, fmt.Errorf("error getting redemption estimate: %v", err)
 		}
