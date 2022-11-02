@@ -306,7 +306,7 @@ func createMakerBot(ctx context.Context, c *Core, pgm *MakerProgram) (*makerBot,
 	return m, nil
 }
 
-// newMakerBot constructs a new makerBot with a new program ID. To ressurect an
+// newMakerBot constructs a new makerBot with a new program ID. To resurrect an
 // existing bot, use recreateMakerBot.
 func newMakerBot(ctx context.Context, c *Core, pgm *MakerProgram) (*makerBot, error) {
 	m, err := createMakerBot(ctx, c, pgm)
@@ -483,7 +483,7 @@ func makerProgramDBRecord(pgm *MakerProgram) (*db.BotProgram, error) {
 	}, nil
 }
 
-// savePorgram saves a new bot program, returning the program ID.
+// saveProgram saves a new bot program, returning the program ID.
 func (m *makerBot) saveProgram() (uint64, error) {
 	dbRecord, err := makerProgramDBRecord(m.program())
 	if err != nil {
@@ -513,7 +513,7 @@ func (m *makerBot) updateProgram(pgm *MakerProgram) error {
 	return nil
 }
 
-// syncOraclePrice retreives price data for the makerBot's market and returns
+// syncOraclePrice retrieves price data for the makerBot's market and returns
 // the volume-weighted average price.
 func (m *makerBot) syncOraclePrice(ctx context.Context) (float64, error) {
 	_, price, err := m.Core.marketReport(ctx, m.base.SupportedAsset, m.quote.SupportedAsset)
@@ -963,12 +963,14 @@ func rebalance(ctx context.Context, m rebalancer, mkt *Market, pgm *MakerProgram
 	// These values are used to cancel order placement if there is a chance
 	// of self-matching, especially against a scheduled cancel order.
 	highestBuy, lowestSell := buyPrice, sellPrice
-	for _, ord := range sells {
+	if len(sells) > 0 {
+		ord := sells[0]
 		if ord.rate < lowestSell {
 			lowestSell = ord.rate
 		}
 	}
-	for _, ord := range buys {
+	if len(buys) > 0 {
+		ord := buys[0]
 		if ord.rate > highestBuy {
 			highestBuy = ord.rate
 		}
