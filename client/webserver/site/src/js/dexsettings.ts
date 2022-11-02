@@ -68,6 +68,10 @@ export default class DexSettingsPage extends BasePage {
     this.setConnectionStatus()
   }
 
+  unload () {
+    Doc.unbind(document, 'keyup', this.keyup)
+  }
+
   /* showForm shows a modal form with a little animation. */
   async showForm (form: HTMLElement) {
     const page = this.page

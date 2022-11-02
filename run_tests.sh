@@ -42,7 +42,8 @@ go run ./client/core/localetest/main.go
 export CGO_ENABLED=0
 go build ./...
 go build -tags lgpl ./...
-go build -tags harness,lgpl -o /dev/null ./client/cmd/simnet-trade-tests 
+go build -tags harness,lgpl -o /dev/null ./client/cmd/simnet-trade-tests
+go build -tags harness,lgpl -o /dev/null ./client/cmd/mmbot
 
 go test -c -o /dev/null -tags live,lgpl ./client/webserver
 go test -c -o /dev/null -tags harness ./client/asset/dcr

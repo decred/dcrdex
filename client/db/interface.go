@@ -139,4 +139,13 @@ type DB interface {
 	// SaveDisabledRateSources saves disabled fiat rate sources in the database.
 	// A source name must not contain a comma.
 	SaveDisabledRateSources(disabledSources []string) error
+	// SaveBotProgram saves data associated with a bot program. A unique ID
+	// is returned that can be used to address this program in future queries.
+	SaveBotProgram(*BotProgram) (pgmID uint64, err error)
+	// UpdateBotProgram updates the data associated with a running bot program.
+	UpdateBotProgram(pgmID uint64, pgm *BotProgram) error
+	// RetireBotProgram deletes the bot program from the database.
+	RetireBotProgram(pgmID uint64) error
+	// ActiveBotPrograms loads a list of active bot program IDs.
+	ActiveBotPrograms() (map[uint64]*BotProgram, error)
 }

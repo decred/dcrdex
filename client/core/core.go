@@ -210,31 +210,9 @@ func (dc *dexConnection) marketMap() map[string]*Market {
 	mktConfigs := cfg.Markets
 
 	marketMap := make(map[string]*Market, len(mktConfigs))
-	for _, mkt := range mktConfigs {
-		// The presence of the asset for every market was already verified when the
-		// dexConnection was created in connectDEX.
-		dc.assetsMtx.RLock()
-		base, quote := dc.assets[mkt.Base], dc.assets[mkt.Quote]
-		dc.assetsMtx.RUnlock()
-		mkt := &Market{
-			Name:            mkt.Name,
-			BaseID:          base.ID,
-			BaseSymbol:      base.Symbol,
-			QuoteID:         quote.ID,
-			QuoteSymbol:     quote.Symbol,
-			LotSize:         mkt.LotSize,
-			RateStep:        mkt.RateStep,
-			EpochLen:        mkt.EpochLen,
-			StartEpoch:      mkt.StartEpoch,
-			MarketBuyBuffer: mkt.MarketBuyBuffer,
-		}
-		mktID := mkt.marketName()
-
-		for _, trade := range dc.marketTrades(mktID) {
-			mkt.Orders = append(mkt.Orders, trade.coreOrder())
-		}
-
-		marketMap[mktID] = mkt
+	for _, msgMkt := range mktConfigs {
+		mkt := coreMarketFromMsgMarket(dc, msgMkt)
+		marketMap[mkt.marketName()] = mkt
 	}
 
 	// Populate spots.
@@ -245,6 +223,64 @@ func (dc *dexConnection) marketMap() map[string]*Market {
 	dc.spotsMtx.RUnlock()
 
 	return marketMap
+}
+
+// marketMap creates a map of this DEX's *Market keyed by name/ID,
+// [base]_[quote].
+func (dc *dexConnection) coreMarket(mktName string) *Market {
+	dc.cfgMtx.RLock()
+	cfg := dc.cfg
+	dc.cfgMtx.RUnlock()
+	if cfg == nil {
+		return nil
+	}
+	var mkt *Market
+	for _, m := range cfg.Markets {
+		if m.Name == mktName {
+			mkt = coreMarketFromMsgMarket(dc, m)
+			break
+		}
+	}
+	if mkt == nil {
+		return nil
+	}
+
+	// Populate spots.
+	dc.spotsMtx.RLock()
+	mkt.SpotPrice = dc.spots[mktName]
+	dc.spotsMtx.RUnlock()
+
+	return mkt
+}
+
+func coreMarketFromMsgMarket(dc *dexConnection, msgMkt *msgjson.Market) *Market {
+	// The presence of the asset for every market was already verified when the
+	// dexConnection was created in connectDEX.
+	dc.assetsMtx.RLock()
+	base, quote := dc.assets[msgMkt.Base], dc.assets[msgMkt.Quote]
+	dc.assetsMtx.RUnlock()
+
+	bconv, qconv := base.UnitInfo.Conventional.ConversionFactor, quote.UnitInfo.Conventional.ConversionFactor
+
+	mkt := &Market{
+		Name:            msgMkt.Name,
+		BaseID:          base.ID,
+		BaseSymbol:      base.Symbol,
+		QuoteID:         quote.ID,
+		QuoteSymbol:     quote.Symbol,
+		LotSize:         msgMkt.LotSize,
+		RateStep:        msgMkt.RateStep,
+		EpochLen:        msgMkt.EpochLen,
+		StartEpoch:      msgMkt.StartEpoch,
+		MarketBuyBuffer: msgMkt.MarketBuyBuffer,
+		AtomToConv:      float64(qconv) / float64(bconv),
+	}
+
+	for _, trade := range dc.marketTrades(mkt.marketName()) {
+		mkt.Orders = append(mkt.Orders, trade.coreOrder())
+	}
+
+	return mkt
 }
 
 func (dc *dexConnection) trackedTrades() []*trackedTrade {
@@ -1054,7 +1090,7 @@ func (c *Core) connectedDEX(addr string) (*dexConnection, error) {
 	}
 
 	if dc.acct.locked() {
-		return nil, fmt.Errorf("cannot place order on a locked %s account. Are you logged in?", dc.acct.host)
+		return nil, fmt.Errorf("account for %s is locked. Are you logged in?", dc.acct.host)
 	}
 
 	if !connected {
@@ -1213,7 +1249,7 @@ type Core struct {
 	tickSched    map[order.OrderID]*time.Timer
 
 	noteMtx   sync.RWMutex
-	noteChans []chan Notification
+	noteChans map[uint64]chan Notification
 
 	piSyncMtx sync.Mutex
 	piSyncers map[order.OrderID]chan struct{}
@@ -1229,6 +1265,15 @@ type Core struct {
 
 	pendingWalletsMtx sync.RWMutex
 	pendingWallets    map[uint32]bool
+
+	mm struct {
+		sync.RWMutex
+		bots  map[uint64]*makerBot
+		cache struct {
+			sync.RWMutex
+			prices map[string]*stampedPrice
+		}
+	}
 }
 
 // New is the constructor for a new Core.
@@ -1297,7 +1342,7 @@ func New(cfg *Config) (*Core, error) {
 		return nil, err
 	}
 
-	core := &Core{
+	c := &Core{
 		cfg:           cfg,
 		credentials:   creds,
 		ready:         make(chan struct{}),
@@ -1318,6 +1363,7 @@ func New(cfg *Config) (*Core, error) {
 		newCrypter:    encrypt.NewCrypter,
 		reCrypter:     encrypt.Deserialize,
 		latencyQ:      wait.NewTickerQueue(recheckInterval),
+		noteChans:     make(map[uint64]chan Notification),
 
 		locale:             locale,
 		localePrinter:      message.NewPrinter(lang),
@@ -1326,11 +1372,13 @@ func New(cfg *Config) (*Core, error) {
 		fiatRateSources: make(map[string]*commonRateSource),
 		pendingWallets:  make(map[uint32]bool),
 	}
+	c.mm.bots = make(map[uint64]*makerBot)
+	c.mm.cache.prices = make(map[string]*stampedPrice)
 
 	// Populate the initial user data. User won't include any DEX info yet, as
 	// those are retrieved when Run is called and the core connects to the DEXes.
-	core.log.Debugf("new client core created")
-	return core, nil
+	c.log.Debugf("new client core created")
+	return c, nil
 }
 
 // Run runs the core. Satisfies the runner.Runner interface.
@@ -1700,6 +1748,9 @@ func (c *Core) connectAndUnlock(crypter encrypt.Crypter, wallet *xcWallet) error
 	// Unlock if either the backend itself is locked or if we lack a cached
 	// unencrypted password for encrypted wallets.
 	if !wallet.unlocked() {
+		if crypter == nil {
+			return newError(noAuthError, "wallet locked and no password provided")
+		}
 		// Note that in cases where we already had the cached decrypted password
 		// but it was just the backend reporting as locked, only unlocking the
 		// backend is needed but this redecrypts the password using the provided
@@ -1946,6 +1997,40 @@ func (c *Core) assetMap() map[uint32]*SupportedAsset {
 	return assets
 }
 
+func (c *Core) asset(assetID uint32) *SupportedAsset {
+	var wallet *WalletState
+	w, _ := c.wallet(assetID)
+	if w != nil {
+		wallet = w.state()
+	}
+	regAsset := asset.Asset(assetID)
+	if regAsset != nil {
+		return &SupportedAsset{
+			ID:       assetID,
+			Symbol:   regAsset.Symbol,
+			Wallet:   wallet,
+			Info:     regAsset.Info,
+			Name:     regAsset.Info.Name,
+			UnitInfo: regAsset.Info.UnitInfo,
+		}
+	}
+
+	token := asset.TokenInfo(assetID)
+	if token == nil {
+		return nil
+	}
+
+	return &SupportedAsset{
+		ID:                    assetID,
+		Symbol:                dex.BipIDSymbol(assetID),
+		Wallet:                wallet,
+		Token:                 token,
+		Name:                  token.Name,
+		UnitInfo:              token.UnitInfo,
+		WalletCreationPending: c.walletCreationPending(assetID),
+	}
+}
+
 // User is a thread-safe getter for the User.
 func (c *Core) User() *User {
 	return &User{
@@ -1954,6 +2039,7 @@ func (c *Core) User() *User {
 		Initialized:        c.IsInitialized(),
 		SeedGenerationTime: c.seedGenerationTime,
 		FiatRates:          c.fiatConversions(),
+		Bots:               c.bots(),
 	}
 }
 
@@ -4073,6 +4159,10 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 		c.log.Infof("loaded %d incomplete orders", loaded)
 	}
 
+	if err := c.loadBotPrograms(); err != nil {
+		c.log.Errorf("Error loading bot programs: %v", err)
+	}
+
 	return loginResult(), nil
 }
 
@@ -4345,12 +4435,6 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, erro
 	lotSize := mktConf.LotSize
 	if lotSize == 0 {
 		return nil, errors.New("cannot divide by lot size zero")
-	}
-
-	// Estimate a quote-converted lot size.
-	book := dc.bookie(mktID)
-	if book == nil {
-		return nil, fmt.Errorf("no book synced for %s at %s", mktID, host)
 	}
 
 	swapFeeSuggestion := c.feeSuggestion(dc, base)
@@ -4853,12 +4937,18 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 
 // Trade is used to place a market or limit order.
 func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
-	// Check the user password.
-	crypter, err := c.encryptionKey(pw)
-	if err != nil {
-		return nil, fmt.Errorf("Trade password error: %w", err)
+	// Check the user password. A Trade can be attempted with an empty password,
+	// which should work if both wallets are unlocked. We use this feature for
+	// bots.
+	var crypter encrypt.Crypter
+	if len(pw) > 0 {
+		var err error
+		crypter, err = c.encryptionKey(pw)
+		if err != nil {
+			return nil, fmt.Errorf("Trade password error: %w", err)
+		}
+		defer crypter.Close()
 	}
-	defer crypter.Close()
 	dc, err := c.connectedDEX(form.Host)
 	if err != nil {
 		return nil, err
@@ -5185,6 +5275,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 			Options:            form.Options,
 			RedemptionReserves: redemptionReserves,
 			ChangeCoin:         changeID,
+			ProgramID:          form.Program,
 		},
 		Order: ord,
 	}
@@ -5326,7 +5417,6 @@ func (c *Core) walletSet(dc *dexConnection, baseID, quoteID uint32, sell bool) (
 	}, nil
 }
 
-// Cancel is used to send a cancel order which cancels a limit order.
 func (c *Core) Cancel(pw []byte, oidB dex.Bytes) error {
 	// Check the user password.
 	_, err := c.encryptionKey(pw)
@@ -5338,7 +5428,10 @@ func (c *Core) Cancel(pw []byte, oidB dex.Bytes) error {
 	if err != nil {
 		return err
 	}
+	return c.cancelOrder(oid)
+}
 
+func (c *Core) cancelOrder(oid order.OrderID) error {
 	for _, dc := range c.dexConnections() {
 		found, err := c.tryCancel(dc, oid)
 		if err != nil {
@@ -5349,7 +5442,7 @@ func (c *Core) Cancel(pw []byte, oidB dex.Bytes) error {
 		}
 	}
 
-	return fmt.Errorf("Cancel: failed to find order %s", oidB)
+	return fmt.Errorf("Cancel: failed to find order %s", oid)
 }
 
 // authDEX authenticates the connection for a DEX.

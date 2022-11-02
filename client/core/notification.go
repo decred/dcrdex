@@ -5,6 +5,7 @@ package core
 
 import (
 	"fmt"
+	"sync/atomic"
 
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/db"
@@ -27,10 +28,13 @@ const (
 	NoteTypeServerNotify = "notify"
 	NoteTypeSecurity     = "security"
 	NoteTypeUpgrade      = "upgrade"
+	NoteTypeBot          = "bot"
 	NoteTypeDEXAuth      = "dex_auth"
 	NoteTypeFiatRates    = "fiatrateupdate"
 	NoteTypeCreateWallet = "createwallet"
 )
+
+var noteChanCounter uint64
 
 func (c *Core) logNote(n Notification) {
 	// Do not log certain spammy note types that have no value in logs.
@@ -84,11 +88,23 @@ func (c *Core) notify(n Notification) {
 // channel has capacity 1024, and should be monitored for the lifetime of the
 // Core. Blocking channels are silently ignored.
 func (c *Core) NotificationFeed() <-chan Notification {
-	ch := make(chan Notification, 1024)
-	c.noteMtx.Lock()
-	c.noteChans = append(c.noteChans, ch)
-	c.noteMtx.Unlock()
+	_, ch := c.notificationFeed()
 	return ch
+}
+
+func (c *Core) notificationFeed() (uint64, <-chan Notification) {
+	ch := make(chan Notification, 1024)
+	cid := atomic.AddUint64(&noteChanCounter, 1)
+	c.noteMtx.Lock()
+	c.noteChans[cid] = ch
+	c.noteMtx.Unlock()
+	return cid, ch
+}
+
+func (c *Core) returnFeed(channelID uint64) {
+	c.noteMtx.Lock()
+	delete(c.noteChans, channelID)
+	c.noteMtx.Unlock()
 }
 
 // AckNotes sets the acknowledgement field for the notifications.
@@ -527,5 +543,26 @@ func newWalletCreationNote(topic Topic, subject, details string, severity db.Sev
 	return &WalletCreationNote{
 		Notification: db.NewNotification(NoteTypeCreateWallet, topic, subject, details, severity),
 		AssetID:      assetID,
+	}
+}
+
+// BotNote is a note that describes the operation of a automated trading bot.
+type BotNote struct {
+	db.Notification
+	Report *BotReport `json:"report"`
+}
+
+const (
+	TopicBotCreated Topic = "BotCreated"
+	TopicBotStarted Topic = "BotStarted"
+	TopicBotStopped Topic = "BotStopped"
+	TopicBotUpdated Topic = "BotUpdated"
+	TopicBotRetired Topic = "BotRetired"
+)
+
+func newBotNote(topic Topic, subject, details string, severity db.Severity, report *BotReport) *BotNote {
+	return &BotNote{
+		Notification: db.NewNotification(NoteTypeBot, topic, subject, details, severity),
+		Report:       report,
 	}
 }

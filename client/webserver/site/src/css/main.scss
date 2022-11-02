@@ -167,8 +167,12 @@ header.maintop a:hover,
   cursor: pointer;
 }
 
-div.mainlinks .hoverbg:hover {
+#header .hoverbright:hover {
   color: #222;
+}
+
+form.card button:hover {
+  color: black;
 }
 
 div.spinner {
@@ -343,6 +347,10 @@ div.popup-notes {
       }
     }
   }
+
+  .authed-only:not(.authed) {
+    display: none;
+  }
 }
 
 #noteBox {
@@ -392,6 +400,10 @@ div.popup-notes {
 
 .grey {
   color: #999;
+}
+
+.rounded3 {
+  border-radius: 3px;
 }
 
 .brdrleft {

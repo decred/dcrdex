@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 
@@ -128,6 +129,7 @@ type User struct {
 	SeedGenerationTime uint64                     `json:"seedgentime"`
 	Assets             map[uint32]*SupportedAsset `json:"assets"`
 	FiatRates          map[uint32]float64         `json:"fiatRates"`
+	Bots               []*BotReport               `json:"bots"`
 }
 
 // SupportedAsset is data about an asset and possibly the wallet associated
@@ -439,6 +441,10 @@ type Market struct {
 	MarketBuyBuffer float64       `json:"buybuffer"`
 	Orders          []*Order      `json:"orders"`
 	SpotPrice       *msgjson.Spot `json:"spot"`
+	// AtomToConv is a rate conversion factor. Multiply by AtomToConv to convert
+	// an atomic rate (e.g. gwei/sat) to a conventional rate (ETH/BTC). Divide
+	// by AtomToConv to convert a conventional rate to an atomic rate.
+	AtomToConv float64 `json:"atomToConv"`
 }
 
 // BaseContractLocked is the amount of base asset locked in un-redeemed
@@ -505,6 +511,16 @@ func (m *Market) Display() string {
 // mktID is a string ID constructed from the asset IDs.
 func (m *Market) marketName() string {
 	return marketName(m.BaseID, m.QuoteID)
+}
+
+// MsgRateToConventional converts a message-rate to a conventional rate.
+func (m *Market) MsgRateToConventional(r uint64) float64 {
+	return float64(r) / calc.RateEncodingFactor * m.AtomToConv
+}
+
+// ConventionalRateToMsg converts a conventinal rate to a message-rate.
+func (m *Market) ConventionalRateToMsg(p float64) uint64 {
+	return uint64(math.Round(p / m.AtomToConv * calc.RateEncodingFactor))
 }
 
 // FeeAsset has an analogous msgjson type for server providing supported
@@ -835,6 +851,7 @@ type TradeForm struct {
 	Rate    uint64            `json:"rate"`
 	TifNow  bool              `json:"tifnow"`
 	Options map[string]string `json:"options"`
+	Program uint64            // Bot program ID
 }
 
 // marketName is a string ID constructed from the asset IDs.
@@ -943,4 +960,39 @@ type PreAccelerate struct {
 	SuggestedRate     uint64                   `json:"suggestedRate"`
 	SuggestedRange    asset.XYRange            `json:"suggestedRange"`
 	EarlyAcceleration *asset.EarlyAcceleration `json:"earlyAcceleration,omitempty"`
+}
+
+// BotOrder identifies an order controlled by an bot program.
+type BotOrder struct {
+	Host     string            `json:"host"`
+	MarketID string            `json:"marketID"`
+	OrderID  dex.Bytes         `json:"orderID"`
+	Status   order.OrderStatus `json:"status"`
+}
+
+// BotReport is a report for the status of a bot.
+type BotReport struct {
+	ProgramID uint64        `json:"programID"`
+	Program   *MakerProgram `json:"program"`
+	Running   bool          `json:"running"`
+	Orders    []*BotOrder   `json:"orders"`
+}
+
+// MarketReport is a report about the current state of a market pair, including
+// oracle data.
+type MarketReport struct {
+	Price float64 `json:"price"`
+	// BasisPrice is the the target price before oracle weighting and bias is
+	// applied.
+	BasisPrice      float64         `json:"basisPrice"`
+	Oracles         []*OracleReport `json:"oracles"`
+	BreakEvenSpread float64         `json:"breakEvenSpread"`
+}
+
+// OracleReport is a summary of an oracle's market data.
+type OracleReport struct {
+	Host     string  `json:"host"`
+	USDVol   float64 `json:"usdVol"`
+	BestBuy  float64 `json:"bestBuy"`
+	BestSell float64 `json:"bestSell"`
 }

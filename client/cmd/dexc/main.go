@@ -196,6 +196,7 @@ func runCore() error {
 			NoEmbed:       cfg.NoEmbedSite,
 			HttpProf:      cfg.HTTPProfile,
 			Language:      cfg.Language,
+			Experimental:  cfg.Experimental,
 		})
 		if err != nil {
 			return fmt.Errorf("failed creating web server: %w", err)

@@ -31,6 +31,7 @@ const (
 	settingsRoute    = "/settings"
 	ordersRoute      = "/orders"
 	exportOrderRoute = "/orders/export"
+	marketMakerRoute = "/mm"
 )
 
 // sendTemplate processes the template and sends the result.
@@ -49,15 +50,17 @@ func (s *WebServer) sendTemplate(w http.ResponseWriter, tmplID string, data inte
 // CommonArguments are common page arguments that must be supplied to every
 // page to populate the <title> and <header> elements.
 type CommonArguments struct {
-	UserInfo *userInfo
-	Title    string
+	UserInfo     *userInfo
+	Title        string
+	Experimental bool
 }
 
 // Create the CommonArguments for the request.
-func commonArgs(r *http.Request, title string) *CommonArguments {
+func (s *WebServer) commonArgs(r *http.Request, title string) *CommonArguments {
 	return &CommonArguments{
-		UserInfo: extractUserInfo(r),
-		Title:    title,
+		UserInfo:     extractUserInfo(r),
+		Title:        title,
+		Experimental: s.experimental,
 	}
 }
 
@@ -69,7 +72,7 @@ func (s *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
 
 // handleLogin is the handler for the '/login' page request.
 func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
-	cArgs := commonArgs(r, "Login | Decred DEX")
+	cArgs := s.commonArgs(r, "Login | Decred DEX")
 	if cArgs.UserInfo.Authed {
 		http.Redirect(w, r, marketsRoute, http.StatusSeeOther)
 		return
@@ -87,7 +90,7 @@ type registerTmplData struct {
 
 // handleRegister is the handler for the '/register' page request.
 func (s *WebServer) handleRegister(w http.ResponseWriter, r *http.Request) {
-	common := commonArgs(r, "Register | Decred DEX")
+	common := s.commonArgs(r, "Register | Decred DEX")
 	s.sendTemplate(w, "register", &registerTmplData{
 		CommonArguments: *common,
 		KnownExchanges:  s.knownUnregisteredExchanges(common.UserInfo.Exchanges),
@@ -115,8 +118,15 @@ type marketTmplData struct {
 
 // handleMarkets is the handler for the '/markets' page request.
 func (s *WebServer) handleMarkets(w http.ResponseWriter, r *http.Request) {
-	cArgs := commonArgs(r, "Markets | Decred DEX")
+	cArgs := s.commonArgs(r, "Markets | Decred DEX")
 	s.sendTemplate(w, "markets", &marketTmplData{
+		CommonArguments: *cArgs,
+	})
+}
+
+func (s *WebServer) handleMarketMaker(w http.ResponseWriter, r *http.Request) {
+	cArgs := s.commonArgs(r, "Market Maker | Decred DEX")
+	s.sendTemplate(w, "mm", &marketTmplData{
 		CommonArguments: *cArgs,
 	})
 }
@@ -148,7 +158,7 @@ func (s *WebServer) handleWallets(w http.ResponseWriter, r *http.Request) {
 		return nowallets[i].Name < nowallets[j].Name
 	})
 	data := &walletsTmplData{
-		CommonArguments: *commonArgs(r, "Wallets | Decred DEX"),
+		CommonArguments: *s.commonArgs(r, "Wallets | Decred DEX"),
 		Assets:          append(assets, nowallets...),
 	}
 	s.sendTemplate(w, "wallets", data)
@@ -239,7 +249,7 @@ func (s *WebServer) handleGenerateQRCode(w http.ResponseWriter, r *http.Request)
 
 // handleSettings is the handler for the '/settings' page request.
 func (s *WebServer) handleSettings(w http.ResponseWriter, r *http.Request) {
-	common := commonArgs(r, "Settings | Decred DEX")
+	common := s.commonArgs(r, "Settings | Decred DEX")
 	data := &struct {
 		CommonArguments
 		KnownExchanges  []string
@@ -270,7 +280,7 @@ func (s *WebServer) handleDexSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	common := *commonArgs(r, fmt.Sprintf("%v Settings | Decred DEX", host))
+	common := *s.commonArgs(r, fmt.Sprintf("%v Settings | Decred DEX", host))
 	data := &struct {
 		CommonArguments
 		Exchange       *core.Exchange
@@ -308,7 +318,7 @@ func (s *WebServer) handleOrders(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.sendTemplate(w, "orders", &ordersTmplData{
-		CommonArguments: *commonArgs(r, "Orders | Decred DEX"),
+		CommonArguments: *s.commonArgs(r, "Orders | Decred DEX"),
 		Assets:          user.Assets,
 		Hosts:           hosts,
 		Statuses:        allStatuses,
@@ -450,7 +460,7 @@ func (s *WebServer) handleOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.sendTemplate(w, "order", &orderTmplData{
-		CommonArguments: *commonArgs(r, "Order | Decred DEX"),
+		CommonArguments: *s.commonArgs(r, "Order | Decred DEX"),
 		Order:           s.orderReader(ord),
 		Net:             uint8(s.core.Network()),
 	})

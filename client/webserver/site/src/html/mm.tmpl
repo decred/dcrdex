@@ -1,0 +1,291 @@
+{{define "mm"}}
+{{template "top" .}}
+<div id="main" data-handler="mm" class="mm d-flex overflow-y-auto w-100 flex-grow-1 align-items-stretch position-relative flex-wrap">
+
+  {{- /* ADD A BOT */ -}}
+  <div class="col-24 col-lg-12 col-xxl-8 d-flex brdr-right invisible d-flex flex-column align-items-stretch justify-content-start" id="createBox">
+    <div class="flex-center flex-column">
+      <div class="sans-light fs28 p-2 edit-hide-flex my-2 bg10 flex-center">
+        <span class="ico-barchart me-2 fs24"></span>
+        [[[Make a Market]]]
+        <span class="ms-2 ico-info fs12" data-tooltip="
+          Provide liquidity to improve the health of a market and potentially earn profits.
+          Market making is not guaranteed to be profitable.
+          Use this experimental feature at your own risk.
+        "></span>
+      </div>
+      <div class="sans-light fs28 py-2 edit-show orange text-center" id="editTitle">[[[Editing Program]]]</div>
+      <span id="exitEditMode" class="my-2 underline fs15 edit-show orange pointer hoverbg text-center">[[[exit edit mode]]]</span>
+
+      {{- /* BOT FORM */ -}}
+      <div id="botCreator" class="d-flex align-items-stretch flex-column position-relative bg10 p-3">
+        <div class="flex-center">
+
+          {{- /* MARKET SELECT */ -}}
+          <div class="flex-center flex-grow-1">
+            <div id="baseSelect" class="asset-select">
+              <div id="assetRowTmpl" class="d-flex align-items-stretch lh1 asset-row hoverbg pointer p-2">
+                <div class="flex-center"><img data-tmpl="logo"></div>
+                <div class="flex-center"><span data-tmpl="symbol" class="fs28 demi ms-2"></span></div>
+                <div class="d-flex align-items-end"><span data-tmpl="arrow" class="ico-arrowdown fs11 mr-1"></span></div>
+              </div>
+            </div>
+          </div>
+          <span class="ico-exchange fs22 mx-1 grey"></span>
+          <div class="flex-center flex-grow-1">
+            <div id="quoteSelect" class="asset-select"></div>
+          </div>
+        </div>
+
+        {{- /* HOST SELECT */ -}}
+        <div class="flex-center">
+          <span class="fs14" id="marketOneChoice"></span>
+          <select id="marketSelect" class="fs14"></select>
+        </div>
+        <div class="d-flex align-items-center justify-content-between mt-4 pt-2 brdr-top" id="lotsBox">
+          <div class="flex-center flex-column me-4">
+            <label for="lotsInput" class="fs14"><span class="fs20">[[[Lots]]]</span> [[[per side]]]</label>
+            <input id="lotsInput" type="number" class="my-1 text-center">
+          </div>
+          <div class="flex-center mt-4 pt-1 ms-4">
+            <button id="runBttn" class="fs22 p-3 selected flex-center lh1">
+              <span class="ico-arrowright fs18 me-1 edit-hide"></span>
+              <span class="edit-hide">[[[Start_loudly]]]</span>
+              <span class="ico-settings fs18 me-1 edit-show"></span>
+              <span class="edit-show">[[[Update]]]</span>
+            </button>
+          </div>
+        </div>
+        <div id="createErr" class="errcolor fs14 flex-center d-hide"></div>
+
+        <div id="fetchingMarkets" class="my-2 p-1 border1 flex-center flex-column d-hide">
+          <span class="my-1 fs14">Loading market data</span>
+          <div class="fs14 mb-1 ico-spinner spinner"></div>
+        </div>
+
+        {{- /* NUMBER OF LOTS */ -}}
+        <div id="lotEstimateBox" class="d-flex flex-column border1 mt-3 p-2 d-hide edit-hide-flex">
+          <div class="demi fs14 mb-1" id="availHeader">Lots available</div>
+          <div class="d-flex fs16 align-items-stretch">
+            <div class="col-12 flex-center" id="lotEstBaseBox">
+              <span id="lotEstBaseSymbol"></span>:
+              <span id="lotEstBaseLots" class="ms-1"></span>
+            </div>
+            <div class="col-12 d-flex align-items-stretch justify-content-start fs14" id="lotEstBaseNoWallet">
+              <button id="createBaseWallet" class="me-1">[[[add_a_x_wallet]]]</button>
+            </div>
+            <div class="col-12 flex-center" id="lotEstQuoteBox">
+              <span id="lotEstQuoteSymbol"></span>:
+              <span id="lotEstQuoteLots" class="ms-1"></span>
+            </div>
+            <div class="col-12 d-flex align-items-stretch justify-content-start fs14" id="lotEstQuoteNoWallet">
+              <button id="createQuoteWallet" class="ms-1">[[[add_a_x_wallet]]]</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="noFiatBox" class="my-2 p-2 fs15 d-hide edit-hide">
+          <span class="ico-info fs12"></span>
+          Try enabling fiat sources in settings to get a price estimate for this market.
+        </div>
+
+        <div id="marketInfo" class="d-hide edit-hide">
+          <div class="flex-center fs16 m-2">
+            <div class="p-2 border1 rounded3">
+              <span>
+                <span class="ico-info fs12 me-1" data-tooltip="The current target price, before configuration adjustments are applied."></span>
+                basis price:
+              </span>
+              <span id="basisPrice" class="mx-2"></span>
+              <input type="number" id="manualPriceInput" class="ms-2 d-hide">
+              <span id="manualPriceBttn" class="ico-edit pointer hoverbg fs12"></span>
+            </div>
+          </div>
+        </div>
+
+        {{- /* CURRENT ORACLE DATA */ -}}
+        <div id="oraclesBox" class="d-hide edit-hide">
+          <table class="oracles-table my-1 w-100">
+            <thead>
+              <tr>
+                <td>Oracles</td>
+                <td colspan="2">avg: <span id="avgPrice"></span></td>
+              </tr>
+            </thead>
+            <tbody id="oracles">
+              <tr id="oracleTmpl">
+                <td class="text-left"><span class="d-flex align-items-center"><img data-tmpl="logo" class="me-1"><span data-tmpl="host"></span></span></td>
+                <td><span class="fs12 demi me-1">USD</span><span data-tmpl="volume"></span></td>
+                <td data-tmpl="price"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {{- /* BOT CONFIGURATION */ -}}
+        <div id="advancedBox" class="flex-center">
+          <span id="showAdvanced" class="fs14 mt-3 hoverbg pointer flex-center"><span class="ico-plus fs10 me-2"></span> [[[Show other settings]]]</span>
+          <span id="hideAdvanced" class="fs14 mt-3 d-hide hoverbg pointer flex-center"><span class="ico-minus fs10 me-2"></span> [[[Hide settings]]]</span>  
+        </div>
+        <div id="options" class="w-100 d-flex align-items-stretch flex-column mt-2 d-hide">
+          <span class="mt-2 fs16">
+            Gap Strategy
+            <span class="ico-info fs12 ms-2" data-tooltip="
+              multiplier: a multiple of the break-even spread,
+              absolute: set an absolute sell - buy rate difference,
+              absolute-plus: absolute + add the break-even spread,
+              percent: gap set to a percent of the spot price,
+              percent-plus: percent + add the break-even spread
+            "></span>
+            
+          </span>
+          <select id="gapStrategySelect" class="mt-1">
+            <option value="multiplier">multiplier</option>
+            <option value="absolute">absolute</option>
+            <option value="absolute-plus">absolute plus</option>
+            <option value="percent">percent</option>
+            <option value="percent-plus" selected>percent plus</option>
+          </select>
+          <div id="absInputBox" class="flex-center mt-2 fs16 d-hide">
+            <span>Spread:</span>
+            <input type="number" id="absInput" class="ms-2 text-center flex-grow-1">
+          </div>
+          <div class="d-flex justify-content-end fs14 mt-1" id="absMaxBox">
+            <span class="ms-3">max <span id="gapFactorMax"></span>1</span>
+          </div>
+          <div class="flex-center fs16 m-2" id="breakEvenGapBox">
+            <div class="p-2 border1 rounded3 text-nowrap">
+              <span>
+                <span class="ico-info fs12 me-1" data-tooltip="The gap width at which profits equal fees"></span>
+                break-even gap:
+              </span>
+              <span id="breakEvenGap" class="ms-2"></span>
+            </div>
+          </div>
+        </div>
+        <div class="fs14 mt-3 pt-3 text-left border1" id="lotBullets">
+          <ul>
+            <li>[[[lot_commit_bullet]]]</li>
+            <li>[[[funds_split_bullet]]]</li>
+            <li>[[[target_maint_bullet]]]</li>
+            <li>[[[no_limit_bullet]]]</li>
+          </ul>
+        </div>
+      </div> {{- /* END BOT FORM */ -}}
+    </div>
+  </div>
+
+  {{- /* RIGHT PANE */ -}}
+  <div class="col-24 col-lg-12 col-xxl-16 d-flex align-items-stretch flex-column invisible" id="programsBox">
+    <div id="programsHeader" class="flex-center sans-light fs28 p-2 mx-2 edit-hide-flex bg10">[[[Your Programs]]]</div>
+    <div id="noProgramsMessage" class="flex-center sans-light fs20 py-2 edit-hide-flex">[[[No programs to display]]]</div>
+    <div id="runningPrograms" class="flex-center flex-wrap">
+
+      {{- /* RUNNING BOT TEMPLATE */ -}}
+      <div id="runningProgramTmpl" class="running-program bg10 p-3 m-2 d-flex align-items-stretch flex-column">
+        <div class="flex-center">
+          <div data-tmpl="base"></div>
+          <span class="ico-exchange fs22 mx-1 grey"></span>
+          <div data-tmpl="quote"></div>
+        </div>
+        <div data-tmpl="market" class="flex-center fs14 mt-1">
+          <span data-tmpl="baseSymbol"></span>-<span data-tmpl="quoteSymbol"></span>
+          @
+          <span data-tmpl="host"></span>
+        </div>
+
+        <span data-tmpl="startErr" class="errcolor fs14 flex-center"></span>
+
+        <div data-tmpl="programRunning" class="d-flex mt-3">
+          <div class="flex-center col-12 fs16"><div class="dot green me-1"></div> [[[Running]]]</div>
+          <div class="flex-center col-12">
+            <button data-tmpl="pauseBttn" class="hoverbg pointer flex-center">
+              <span class="ico-pause fs14 me-1"></span> [[[Pause]]]
+            </button>
+          </div>
+        </div>
+
+        <div data-tmpl="programPaused" class="d-flex mt-3">
+          <div class="flex-center col-12 fs16"><div class="dot orange me-1"></div> [[[Paused]]]</div>
+          <div class="flex-center col-12">
+            <button data-tmpl="startBttn" class="hoverbg pointer flex-center">
+              <span class="ico-arrowright fs14 me-1"></span> [[[Start]]]
+            </button>
+          </div>
+        </div>
+
+        <div class="d-flex w-100 mt-3">
+          <div class="col-12 px-2 d-flex align-items-stretch flex-column brdr-right">
+            <table>
+              <tbody>
+                <tr>
+                  <td>[[[Lots]]]</td>
+                  <td data-tmpl="lots"></td>
+                </tr>
+                <tr>
+                  <td>[[[Drift tolerance]]]</td>
+                  <td data-tmpl="driftTolerance"></td>
+                </tr>
+                <tr>
+                  <td>[[[Oracle bias]]]</td>
+                  <td data-tmpl="oracleBias"></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="col-12 px-2 d-flex align-items-stretch flex-column">
+            <table>
+              <tbody>
+                <tr>
+                  <td>[[[Multiplier]]]</td>
+                  <td data-tmpl="boost"></td>
+                </tr>
+                <tr>
+                  <td>[[[Oracle weight]]]</td>
+                  <td data-tmpl="oracleWeight"></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="d-flex justify-content-around mt-3">
+          <button data-tmpl="configureBttn" class="flex-center hoverbg pointer">
+            <span class="ico-settings fs14 me-1"></span> <span class="fs16">[[[Configure]]]</span>
+          </button>
+          <button data-tmpl="retireBttn" class="flex-center hoverbg pointer">
+            <span class="ico-cross fs10 me-1"></span> <span class="fs16">[[[Retire]]]</span>
+          </button>
+        </div>
+      </div> {{- /* END RUNNING BOT TEMPLATE */ -}}
+    </div>
+  </div>
+
+  {{- /* FORMS */ -}}
+  <div id="forms" class="d-hide">
+    {{template "orderOptionTemplates"}}
+
+    {{- /* APP PASSWORD */ -}}
+    <form id="pwForm" class="d-flex flex-column align-items-stretch">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div>
+        <label for="pwInput" class="form-label pt-3 ps-1 mb-1">[[[App Password]]]</label>
+        <input type="password" class="form-control select" id="pwInput" autocomplete="off">
+      </div>
+      <div class="text-end  mt-3">
+        <button id="pwSubmit" class="selected fs16">[[[Submit]]]</button>
+      </div>
+    </form>
+
+    {{- /* NEW WALLET */ -}}
+    <form class="position-relative d-hide" id="newWalletForm" autocomplete="off">
+      {{template "newWalletForm"}}
+    </form>
+
+  </div>  {{- /* END FORMS */ -}}
+
+  {{- /* ABSOLUTELY-POSITIONED CUSTOM ASSET SELECT */ -}}
+  <div id="assetDropdown" class="position-absolute d-flex flex-column align-items-stretch d-hide"></div>
+</div>
+{{template "bottom"}}
+{{end}}

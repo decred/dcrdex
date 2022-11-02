@@ -427,7 +427,7 @@ func runSimnet(m *testing.M) (int, error) {
 		return 1, fmt.Errorf("error unlocking initiator client: %w", err)
 	}
 
-	// Fund the wallets. Can use the simharness package once #1738 is merged.
+	// Fund the wallets.
 	homeDir, _ := os.UserHomeDir()
 	harnessCtlDir := filepath.Join(homeDir, "dextest", "eth", "harness-ctl")
 	send := func(exe, addr, amt string) error {

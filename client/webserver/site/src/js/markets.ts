@@ -60,6 +60,7 @@ import {
   RecentMatch,
   MatchNote
 } from './registry'
+import { setOptionTemplates } from './opts'
 
 const bind = Doc.bind
 
@@ -254,7 +255,7 @@ export default class MarketsPage extends BasePage {
     bindForm(page.toggleWalletStatusConfirm, page.toggleWalletStatusSubmit, async () => { this.toggleWalletStatus() })
 
     // Prepare templates for the buy and sell tables and the user's order table.
-    OrderUtil.setOptionTemplates(page)
+    setOptionTemplates(page)
     Doc.cleanTemplates(page.rowTemplate, page.durBttnTemplate, page.booleanOptTmpl, page.rangeOptTmpl, page.orderOptTmpl, page.userOrderTmpl)
 
     // Store the elements that need their ticker changed when the market
