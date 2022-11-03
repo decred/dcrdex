@@ -99,6 +99,7 @@ func (dcr *ExchangeWallet) externalTxOutput(ctx context.Context, op outPoint, pk
 
 	// Scan block filters to find the tx block if it is yet unknown.
 	if txBlock == nil {
+		dcr.log.Infof("Contract output %s:%d NOT yet found; now searching with block filters.", op.txHash, op.vout)
 		txBlock, err = dcr.scanFiltersForTxBlock(ctx, tx, [][]byte{pkScript}, earliestTxTime)
 		if err != nil {
 			return nil, nil, fmt.Errorf("error checking if tx %s is mined: %w", tx.hash, err)
@@ -129,7 +130,7 @@ func (dcr *ExchangeWallet) txBlockFromCache(ctx context.Context, tx *externalTx)
 	}
 
 	if txBlockStillValid { // both mainchain and not disapproved
-		dcr.log.Debugf("Cached tx %s is mined in block %d (%s).", tx.hash, tx.block.height, tx.block.hash)
+		// dcr.log.Tracef("Cached tx %s is mined in block %d (%s).", tx.hash, tx.block.height, tx.block.hash)
 		return tx.block, nil
 	}
 
@@ -300,7 +301,7 @@ func (dcr *ExchangeWallet) isOutputSpent(ctx context.Context, output *outputSpen
 			return false, err
 		}
 		if spenderBlockStillValid { // both mainchain and not disapproved
-			dcr.log.Debugf("Found cached information for the spender of %s.", output.op)
+			// dcr.log.Debugf("Found cached information for the spender of %s.", output.op)
 			return true, nil
 		}
 		// Output was previously found to have been spent but the block

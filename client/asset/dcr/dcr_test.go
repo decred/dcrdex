@@ -2207,8 +2207,8 @@ func TestLookupTxOutput(t *testing.T) {
 	if err == nil {
 		t.Fatalf("no error for bad output coin")
 	}
-	if spent {
-		t.Fatalf("spent is true for bad output coin")
+	if spent != 0 {
+		t.Fatalf("spent is not 0 for bad output coin")
 	}
 	op.vout = 0
 
@@ -2221,8 +2221,8 @@ func TestLookupTxOutput(t *testing.T) {
 	if confs != 2 {
 		t.Fatalf("confs not retrieved from gettxout path. expected 2, got %d", confs)
 	}
-	if spent {
-		t.Fatalf("expected spent = false for gettxout path, got true")
+	if spent != 0 {
+		t.Fatalf("expected spent = 0 for gettxout path, got true")
 	}
 
 	// gettransaction error
@@ -2232,8 +2232,8 @@ func TestLookupTxOutput(t *testing.T) {
 	if err == nil {
 		t.Fatalf("no error for gettransaction error")
 	}
-	if spent {
-		t.Fatalf("spent is true with gettransaction error")
+	if spent != 0 {
+		t.Fatalf("spent is not 0 with gettransaction error")
 	}
 	node.walletTxErr = nil
 
@@ -2257,8 +2257,8 @@ func TestLookupTxOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error for gettransaction path (unconfirmed): %v", err)
 	}
-	if spent {
-		t.Fatalf("expected spent = false for gettransaction path (unconfirmed), got true")
+	if spent != 0 {
+		t.Fatalf("expected spent = 0 for gettransaction path (unconfirmed), got true")
 	}
 
 	// Confirmed wallet tx without gettxout response is spent.
@@ -2267,21 +2267,22 @@ func TestLookupTxOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error for gettransaction path (confirmed): %v", err)
 	}
-	if !spent {
-		t.Fatalf("expected spent = true for gettransaction path (confirmed), got false")
+	if spent != 1 {
+		t.Fatalf("expected spent = 1 for gettransaction path (confirmed), got false")
 	}
 
-	// In spv mode, output is assumed unspent if it doesn't pay to the wallet.
-	(wallet.wallet.(*rpcWallet)).spvMode = true
+	// In spv mode, spent status is unknown without a block filters scan.
+	wallet.wallet.(*rpcWallet).spvMode = true
 	_, _, spent, err = wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
 	if err != nil {
 		t.Fatalf("unexpected error for spv gettransaction path (non-wallet output): %v", err)
 	}
-	if spent {
-		t.Fatalf("expected spent = false for spv gettransaction path (non-wallet output), got true")
+	if spent != -1 {
+		t.Fatalf("expected spent = -1 for spv gettransaction path (non-wallet output), got true")
 	}
 
-	// In spv mode, output is spent if it pays to the wallet.
+	// In spv mode, output is spent if it pays to the wallet (but no txOutRes).
+	/* what is the use case for this since a contract never pays to wallet?
 	node.walletTx.Details = []walletjson.GetTransactionDetailsResult{{
 		Vout:     0,
 		Category: "receive", // output at index 0 pays to the wallet
@@ -2290,9 +2291,10 @@ func TestLookupTxOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error for spv gettransaction path (wallet output): %v", err)
 	}
-	if !spent {
-		t.Fatalf("expected spent = true for spv gettransaction path (wallet output), got false")
+	if spent != 1 {
+		t.Fatalf("expected spent = 1 for spv gettransaction path (wallet output), got false")
 	}
+	*/
 }
 
 func TestSendEdges(t *testing.T) {
