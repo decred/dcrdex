@@ -1535,7 +1535,7 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) (r
 	// Just a quick check here. We'll perform a more thorough check if there are
 	// actually redeemables.
 	if !wallet.locallyUnlocked() {
-		t.dc.log.Errorf("not checking if order %s, match %s is redeemable because %s wallet is not unlocked",
+		t.dc.log.Errorf("not checking if order %s, match %s is redeemable because %s wallet is locked or disabled",
 			t.ID(), match, unbip(wallet.AssetID))
 		return false, false
 	}
@@ -1630,7 +1630,7 @@ func (t *trackedTrade) isRefundable(ctx context.Context, match *matchTracker) bo
 	// Just a quick check here. We'll perform a more thorough check if there are
 	// actually refundables.
 	if !wallet.locallyUnlocked() {
-		t.dc.log.Errorf("not checking if order %s, match %s is refundable because %s wallet is not unlocked",
+		t.dc.log.Errorf("not checking if order %s, match %s is refundable because %s wallet is locked or disabled",
 			t.ID(), match, unbip(wallet.AssetID))
 		return false
 	}
