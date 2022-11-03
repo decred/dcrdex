@@ -2,9 +2,9 @@
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
 {{template "top" .}}
 <div id="main" data-handler="wallets" class="walletspage flex-grow-1 position-relative">
-  <span class="me-2 connection ico-connection d-hide" style="padding-left:30%" id="connectedIconTmpl"></span>
-  <span class="me-2 errcolor ico-disconnected d-hide" style="padding-left:30%" id="disconnectedIconTmpl"></span>
-  <span class="me-2 errcolor ico-cross d-hide pointer" style="padding-left:30%" id="removeIconTmpl"></span>
+  <span class="me-2 connection ico-connection d-hide peers-table-icon" id="connectedIconTmpl"></span>
+  <span class="me-2 errcolor ico-disconnected d-hide peers-table-icon" id="disconnectedIconTmpl"></span>
+  <span class="me-2 errcolor ico-cross d-hide pointer peers-table-icon" id="removeIconTmpl"></span>
   <div class="fill-abs d-flex align-items-stretch">
     {{- /* ASSET SELECT */ -}}
     <div class="d-flex flex-column align-items-stretch stylish-overflow invisible" id="assetSelect">
@@ -423,15 +423,15 @@
       <table id="peersTable" class="table table-striped table-dark w-50">
         <thead>
           <tr>
-            <th class="text-nowrap"><span>Host</span></th>
-            <th class="text-nowrap">Source</th>
-            <th class="text-nowrap">Connected</th>
-            <th class="text-nowrap"></th>
+            <th class="text-nowrap">[[[address]]]</th>
+            <th class="text-nowrap">[[[source]]]</th>
+            <th class="text-nowrap">[[[connected]]]</th>
+            <th class="text-nowrap">[[[Remove]]]</th>
           </tr>
         </thead>
         <tbody id="peersTableBody">
           <tr id="peerTableRow">
-            <td data-tmpl="host"></td>
+            <td data-tmpl="addr"></td>
             <td data-tmpl="source"></td>
             <td data-tmpl="connected"></td>
             <td data-tmpl="remove"></td>

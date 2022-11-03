@@ -4,14 +4,17 @@
 package btc
 
 import (
-	"encoding/binary"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 
 	"decred.org/dcrdex/client/asset"
-	"decred.org/dcrdex/client/asset/kvdb"
 	"decred.org/dcrdex/dex"
 )
 
@@ -32,16 +35,9 @@ func (s peerSource) toAssetPeerSource() asset.PeerSource {
 	return asset.Discovered
 }
 
-func (s peerSource) MarshalBinary() ([]byte, error) {
-	b := make([]byte, 16)
-	binary.BigEndian.PutUint16(b, uint16(s))
-	return b, nil
-}
-
 type walletPeer struct {
-	source peerSource
-	// resolvedNames is used to avoid adding duplicate peers
-	resolvedNames []string
+	source       peerSource
+	resolvedName string
 }
 
 // PeerManagerChainService are the functions needed for an SPVPeerManager
@@ -59,9 +55,12 @@ type SPVPeerManager struct {
 
 	peersMtx sync.RWMutex
 	peers    map[string]*walletPeer
-	peersDB  kvdb.KeyValueDB
+
+	savedPeersFilePath string
 
 	defaultPeers []string
+
+	defaultPort string
 
 	log dex.Logger
 }
@@ -74,86 +73,162 @@ func (w *SPVPeerManager) Peers() ([]*asset.WalletPeer, error) {
 	defer w.peersMtx.RUnlock()
 
 	peers := w.cs.Peers()
-	peersMap := make(map[string]*asset.WalletPeer, len(peers))
-
+	connectedPeers := make(map[string]interface{})
 	for _, peer := range peers {
-		walletPeer := &asset.WalletPeer{
-			Host:      peer.Addr(),
+		connectedPeers[peer.Addr()] = struct{}{}
+	}
+
+	walletPeers := make([]*asset.WalletPeer, 0, len(connectedPeers))
+
+	for originalAddr, peer := range w.peers {
+		_, connected := connectedPeers[peer.resolvedName]
+		delete(connectedPeers, peer.resolvedName)
+		walletPeers = append(walletPeers, &asset.WalletPeer{
+			Addr:      originalAddr,
+			Connected: connected,
+			Source:    peer.source.toAssetPeerSource(),
+		})
+	}
+
+	for peer := range connectedPeers {
+		walletPeers = append(walletPeers, &asset.WalletPeer{
+			Addr:      peer,
 			Connected: true,
 			Source:    asset.Discovered,
-		}
-
-		if peer, found := w.peers[peer.Addr()]; found {
-			walletPeer.Source = peer.source.toAssetPeerSource()
-		}
-
-		peersMap[walletPeer.Host] = walletPeer
-	}
-
-	// Also return the peers that the user has added but are not connected
-	for host, peer := range w.peers {
-		if _, found := peersMap[host]; !found {
-			walletPeer := &asset.WalletPeer{
-				Host:   host,
-				Source: peer.source.toAssetPeerSource(),
-			}
-			peersMap[host] = walletPeer
-		}
-	}
-
-	walletPeers := make([]*asset.WalletPeer, 0, len(peersMap))
-	for _, peer := range peersMap {
-		walletPeers = append(walletPeers, peer)
+		})
 	}
 
 	return walletPeers, nil
 }
 
-// peerWithResolvedNames checks if there is a peer which has a resolved name
-// which matches one of the resolvedNames passed into the function.
-func (w *SPVPeerManager) peerWithResolvedNames(resolvedNames []string) (string, bool) {
-	for name, peer := range w.peers {
-		for _, peerResolvedName := range peer.resolvedNames {
-			for _, newPeerResolvedName := range resolvedNames {
-				if peerResolvedName == newPeerResolvedName {
-					return name, true
-				}
-			}
+// resolveAddress resolves an address to ip:port. This is needed because neutrino
+// internally resolves the address, and when neutrino is called to return its list
+// of peers, it will return the resolved addresses. Therefore, we call neutrino
+// with the resolved address, then we keep track of the mapping of address to
+// resolved address in order to be able to display the address the user provided
+// back to the user.
+func (w *SPVPeerManager) resolveAddress(addr string) (string, error) {
+	host, strPort, err := net.SplitHostPort(addr)
+	if err != nil {
+		switch err.(type) {
+		case *net.AddrError:
+			host = addr
+			strPort = w.defaultPort
+		default:
+			return "", err
+		}
+	}
+
+	// Tor addresses cannot be resolved to an IP, so just return onionAddr
+	// instead.
+	if strings.HasSuffix(host, ".onion") {
+		return host, nil
+	}
+
+	// Attempt to look up an IP address associated with the parsed host.
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return "", err
+	}
+
+	if len(ips) == 0 {
+		return "", fmt.Errorf("no addresses found for %s", host)
+	}
+
+	port, err := strconv.Atoi(strPort)
+	if err != nil {
+		return "", err
+	}
+
+	return (&net.TCPAddr{
+		IP:   ips[0],
+		Port: port,
+	}).String(), nil
+
+}
+
+// peerWithResolvedAddress checks to see if there is a peer with a resolved
+// address in w.peers, and if so, returns the address that was user to add
+// the peer.
+func (w *SPVPeerManager) peerWithResolvedAddr(resolvedAddr string) (string, bool) {
+	for originalAddr, peer := range w.peers {
+		if peer.resolvedName == resolvedAddr {
+			return originalAddr, true
 		}
 	}
 	return "", false
 }
 
-// AddPeer connects to a new peer and stores it in the db.
-func (w *SPVPeerManager) AddPeer(addr string) error {
-	return w.addPeer(addr, added)
+// loadSavedPeersFromFile returns the contents of dexc-peers.json.
+func (w *SPVPeerManager) loadSavedPeersFromFile() (map[string]peerSource, error) {
+	content, err := os.ReadFile(w.savedPeersFilePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return make(map[string]peerSource), nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	peers := make(map[string]peerSource)
+	err = json.Unmarshal(content, &peers)
+	if err != nil {
+		return nil, err
+	}
+
+	return peers, nil
 }
 
-func (w *SPVPeerManager) addPeer(addr string, source peerSource) error {
+// loadSavedPeersFromFile replaces the contents of dexc-peers.json.
+func (w *SPVPeerManager) writeSavedPeersToFile(peers map[string]peerSource) error {
+	content, err := json.Marshal(peers)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(w.savedPeersFilePath, content, 0644)
+}
+
+func (w *SPVPeerManager) addPeer(addr string, source peerSource, initialLoad bool) error {
 	w.peersMtx.Lock()
 	defer w.peersMtx.Unlock()
 
-	walletPeer := &walletPeer{source: source}
-	resolvedNames, err := resolvePeerNames(addr)
+	resolvedAddr, err := w.resolveAddress(addr)
 	if err != nil {
-		w.log.Errorf("failed to resolve peer name: %v", err)
-	} else {
-		if duplicatePeer, found := w.peerWithResolvedNames(resolvedNames); found {
-			return fmt.Errorf("%s and %s resolve to the same node", duplicatePeer, addr)
+		if initialLoad {
+			// If this is the initial load, we still want to add peers that are
+			// not able to be connected to the peers map, in order to display them
+			// to the user. If a user previously added a peer that originally connected
+			// but now the address cannot be resolved to an IP, it should be displayed
+			// that the wallet was unable to connect to that peer.
+			w.peers[addr] = &walletPeer{source: source, resolvedName: resolvedAddr}
 		}
-		walletPeer.resolvedNames = resolvedNames
+		return fmt.Errorf("failed to resolve address: %v", err)
 	}
 
-	w.peers[addr] = walletPeer
+	if duplicatePeer, found := w.peerWithResolvedAddr(resolvedAddr); found {
+		return fmt.Errorf("%s and %s resolve to the same node", duplicatePeer, addr)
+	}
 
-	if source != defaultPeer {
-		err = w.peersDB.Store([]byte(addr), added)
+	w.peers[addr] = &walletPeer{source: source, resolvedName: resolvedAddr}
+
+	if !initialLoad {
+		savedPeers, err := w.loadSavedPeersFromFile()
 		if err != nil {
-			w.log.Errorf("failed to store peer in db: %w", err)
+			w.log.Errorf("failed to load saved peers from file")
+		} else {
+			savedPeers[addr] = source
+			err = w.writeSavedPeersToFile(savedPeers)
+			if err != nil {
+				w.log.Errorf("failed to add peer to saved peers file: %v")
+			}
 		}
 	}
 
-	return w.cs.AddPeer(addr)
+	return w.cs.AddPeer(resolvedAddr)
+}
+
+// AddPeer connects to a new peer and stores it in the db.
+func (w *SPVPeerManager) AddPeer(addr string) error {
+	return w.addPeer(addr, added, false)
 }
 
 // RemovePeer disconnects from a peer added by the user and removes it from
@@ -162,75 +237,55 @@ func (w *SPVPeerManager) RemovePeer(addr string) error {
 	w.peersMtx.Lock()
 	defer w.peersMtx.Unlock()
 
-	err := w.peersDB.Delete([]byte(addr))
+	peer, found := w.peers[addr]
+	if !found {
+		return fmt.Errorf("peer not found: %v", addr)
+	}
+
+	savedPeers, err := w.loadSavedPeersFromFile()
 	if err != nil {
-		w.log.Errorf("failed to delete host from peers DB: %v")
+		return err
+	}
+	delete(savedPeers, addr)
+	err = w.writeSavedPeersToFile(savedPeers)
+	if err != nil {
+		w.log.Errorf("failed to delete peer from saved peers file: %v")
 	} else {
 		delete(w.peers, addr)
 	}
 
-	return w.cs.RemoveNodeByAddr(addr)
-}
-
-// resolvePeerNames returns the IP addresses that the address resolves
-// to.
-func resolvePeerNames(addr string) ([]string, error) {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return nil, err
-	}
-
-	ips, err := net.LookupIP(host)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(ips) == 0 {
-		return nil, fmt.Errorf("failed to resolve host: %v", host)
-	}
-
-	names := make([]string, 0, len(ips))
-	for _, ip := range ips {
-		switch {
-		case ip.To4() != nil:
-			names = append(names, fmt.Sprintf("%s:%s", ip.To4(), port))
-		case ip.To16() != nil:
-			names = append(names, fmt.Sprintf("[%s]:%s", ip.To16(), port))
-		}
-	}
-
-	return names, nil
+	return w.cs.RemoveNodeByAddr(peer.resolvedName)
 }
 
 // ConnectToInitialWalletPeers connects to the default peers and the peers
 // that were added by the user and persisted in the db.
 func (w *SPVPeerManager) ConnectToInitialWalletPeers() {
 	for _, peer := range w.defaultPeers {
-		w.addPeer(peer, defaultPeer)
+		w.addPeer(peer, defaultPeer, true)
 	}
 
-	_ = w.peersDB.ForEach(func(k []byte, v []byte) error {
-		addr := string(k)
-		err := w.addPeer(addr, added)
+	savedPeers, err := w.loadSavedPeersFromFile()
+	if err != nil {
+		w.log.Errorf("failed to load saved peers from file: v", err)
+		return
+	}
+
+	for addr := range savedPeers {
+		err := w.addPeer(addr, added, true)
 		if err != nil {
 			w.log.Errorf("failed to add peer %s: %v", addr, err)
 		}
-		return nil
-	})
+	}
 }
 
 // NewSPVPeerManager creates a new SPVPeerManager.
-func NewSPVPeerManager(cs PeerManagerChainService, defaultPeers []string, dir string, log dex.Logger) (*SPVPeerManager, error) {
-	db, err := kvdb.NewFileDB(filepath.Join(dir, "peers.db"), log.SubLogger("PEERDB"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create peers db: %w", err)
-	}
-
+func NewSPVPeerManager(cs PeerManagerChainService, defaultPeers []string, dir string, log dex.Logger, defaultPort string) *SPVPeerManager {
 	return &SPVPeerManager{
-		cs:           cs,
-		defaultPeers: defaultPeers,
-		peers:        make(map[string]*walletPeer),
-		peersDB:      db,
-		log:          log,
-	}, nil
+		cs:                 cs,
+		defaultPeers:       defaultPeers,
+		peers:              make(map[string]*walletPeer),
+		savedPeersFilePath: filepath.Join(dir, "dexc-peers.json"), // peers.json is used by neutrino
+		log:                log,
+		defaultPort:        defaultPort,
+	}
 }

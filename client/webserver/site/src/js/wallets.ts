@@ -369,7 +369,7 @@ export default class WalletsPage extends BasePage {
       const row = page.peerTableRow.cloneNode(true) as PageElement
       const tmpl = Doc.parseTemplate(row)
 
-      tmpl.host.textContent = peer.host
+      tmpl.addr.textContent = peer.addr
 
       switch (peer.source) {
         case PeerSource.WalletDefault:
@@ -396,7 +396,7 @@ export default class WalletsPage extends BasePage {
         Doc.bind(removeIcon, 'click', async () => {
           const res = await postJSON('/api/removewalletpeer', {
             assetID: this.selectedAssetID,
-            host: peer.host
+            addr: peer.addr
           })
           if (!app().checkResponse(res)) {
             page.managePeersErr.textContent = res.msg
@@ -426,7 +426,7 @@ export default class WalletsPage extends BasePage {
     const page = this.page
     const res = await postJSON('/api/addwalletpeer', {
       assetID: this.selectedAssetID,
-      host: page.addPeerInput.value
+      addr: page.addPeerInput.value
     })
     if (!app().checkResponse(res)) {
       page.managePeersErr.textContent = res.msg

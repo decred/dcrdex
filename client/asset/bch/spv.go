@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -36,7 +35,6 @@ import (
 	"github.com/gcash/bchd/bchec"
 	bchchaincfg "github.com/gcash/bchd/chaincfg"
 	bchchainhash "github.com/gcash/bchd/chaincfg/chainhash"
-	"github.com/gcash/bchd/peer"
 	bchtxscript "github.com/gcash/bchd/txscript"
 	bchwire "github.com/gcash/bchd/wire"
 	"github.com/gcash/bchlog"
@@ -249,10 +247,7 @@ func (w *bchSPVWallet) Start() (btc.SPVService, error) {
 	case bchwire.TestNet, bchwire.SimNet: // plain "wire.TestNet" is regnet!
 		defaultPeers = []string{"localhost:21577"}
 	}
-	peerManager, err := btc.NewSPVPeerManager(&spvService{w.cl}, defaultPeers, w.dir, w.log)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create peer manager: %w", err)
-	}
+	peerManager := btc.NewSPVPeerManager(&spvService{w.cl}, defaultPeers, w.dir, w.log, w.chainParams.DefaultPort)
 	w.peerManager = peerManager
 
 	if err = w.chainClient.Start(); err != nil { // lazily starts connmgr
@@ -850,18 +845,7 @@ func (s *spvService) Peers() []btc.SPVPeer {
 }
 
 func (s *spvService) AddPeer(addr string) error {
-	serverPeer := neutrino.NewServerPeer(s.ChainService, true)
-	peer, err := peer.NewOutboundPeer(neutrino.NewPeerConfig(serverPeer), addr)
-	if err != nil {
-		return err
-	}
-	conn, err := net.Dial("tcp", peer.Addr())
-	if err != nil {
-		return err
-	}
-	peer.AssociateConnection(conn)
-	serverPeer.Peer = peer
-	return nil
+	return s.ChainService.ConnectNode(addr, true)
 }
 
 func (s *spvService) GetBlockHeight(h *chainhash.Hash) (int32, error) {

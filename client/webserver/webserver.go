@@ -149,8 +149,8 @@ type clientCore interface {
 	RetireBot(pgmID uint64) error
 	MarketReport(host string, baseID, quoteID uint32) (*core.MarketReport, error)
 	WalletPeers(assetID uint32) ([]*asset.WalletPeer, error)
-	AddWalletPeer(assetID uint32, host string) error
-	RemoveWalletPeer(assetID uint32, host string) error
+	AddWalletPeer(assetID uint32, addr string) error
+	RemoveWalletPeer(assetID uint32, addr string) error
 }
 
 var _ clientCore = (*core.Core)(nil)

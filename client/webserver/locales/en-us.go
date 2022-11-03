@@ -314,4 +314,8 @@ var EnUS = map[string]string{
 	"hide advanced options":  "hide advanced options",
 	"manage_peers":           "Manage Peers",
 	"add_peer":               "Add Peer",
+	"address":                "Address",
+	"source":                 "Source",
+	"connected":              "Connected",
+	"Remove":                 "Remove",
 }

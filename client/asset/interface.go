@@ -709,7 +709,7 @@ const (
 )
 
 type WalletPeer struct {
-	Host      string     `json:"host"`
+	Addr      string     `json:"addr"`
 	Source    PeerSource `json:"source"`
 	Connected bool       `json:"connected"`
 }
@@ -719,10 +719,10 @@ type PeerManager interface {
 	Peers() ([]*WalletPeer, error)
 	// AddPeer connects the wallet to a new peer. The peer's address will be
 	// persisted and connected to each time the wallet is started up.
-	AddPeer(host string) error
+	AddPeer(addr string) error
 	// RemovePeer will remove a peer that was added by AddPeer. This peer may
 	// still be connected to by the wallet if it discovers it on its own.
-	RemovePeer(host string) error
+	RemovePeer(addr string) error
 }
 
 // Bond is the fidelity bond info generated for a certain account ID, amount,

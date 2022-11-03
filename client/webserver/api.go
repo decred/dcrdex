@@ -157,12 +157,12 @@ func (s *WebServer) apiGetWalletPeers(w http.ResponseWriter, r *http.Request) {
 func (s *WebServer) apiAddWalletPeer(w http.ResponseWriter, r *http.Request) {
 	var form struct {
 		AssetID uint32 `json:"assetID"`
-		Host    string `json:"host"`
+		Address string `json:"addr"`
 	}
 	if !readPost(w, r, &form) {
 		return
 	}
-	err := s.core.AddWalletPeer(form.AssetID, form.Host)
+	err := s.core.AddWalletPeer(form.AssetID, form.Address)
 	if err != nil {
 		s.writeAPIError(w, err)
 		return
@@ -174,12 +174,12 @@ func (s *WebServer) apiAddWalletPeer(w http.ResponseWriter, r *http.Request) {
 func (s *WebServer) apiRemoveWalletPeer(w http.ResponseWriter, r *http.Request) {
 	var form struct {
 		AssetID uint32 `json:"assetID"`
-		Host    string `json:"host"`
+		Address string `json:"addr"`
 	}
 	if !readPost(w, r, &form) {
 		return
 	}
-	err := s.core.RemoveWalletPeer(form.AssetID, form.Host)
+	err := s.core.RemoveWalletPeer(form.AssetID, form.Address)
 	if err != nil {
 		s.writeAPIError(w, err)
 		return

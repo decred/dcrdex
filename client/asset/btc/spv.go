@@ -206,10 +206,7 @@ func (w *btcSPVWallet) Start() (SPVService, error) {
 	case wire.TestNet, wire.SimNet: // plain "wire.TestNet" is regnet!
 		defaultPeers = []string{"localhost:20575"}
 	}
-	peerManager, err := NewSPVPeerManager(&btcChainService{w.cl}, defaultPeers, w.dir, w.log)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create peer manager: %w", err)
-	}
+	peerManager := NewSPVPeerManager(&btcChainService{w.cl}, defaultPeers, w.dir, w.log, w.chainParams.DefaultPort)
 	w.peerManager = peerManager
 
 	w.chainClient = chain.NewNeutrinoClient(w.chainParams, w.cl)

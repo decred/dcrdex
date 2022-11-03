@@ -25,7 +25,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -43,7 +42,6 @@ import (
 	"github.com/btcsuite/btcd/btcutil/psbt"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/peer"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/waddrmgr"
@@ -166,18 +164,7 @@ func (s *btcChainService) Peers() []SPVPeer {
 }
 
 func (s *btcChainService) AddPeer(addr string) error {
-	serverPeer := neutrino.NewServerPeer(s.ChainService, true)
-	peer, err := peer.NewOutboundPeer(neutrino.NewPeerConfig(serverPeer), addr)
-	if err != nil {
-		return err
-	}
-	conn, err := net.Dial("tcp", peer.Addr())
-	if err != nil {
-		return err
-	}
-	peer.AssociateConnection(conn)
-	serverPeer.Peer = peer
-	return nil
+	return s.ChainService.ConnectNode(addr, true)
 }
 
 var _ SPVService = (*btcChainService)(nil)

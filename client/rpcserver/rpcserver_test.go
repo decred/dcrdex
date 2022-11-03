@@ -153,10 +153,10 @@ func (c *TCore) AssetHasActiveOrders(uint32) bool {
 func (c *TCore) WalletPeers(assetID uint32) ([]*asset.WalletPeer, error) {
 	return nil, nil
 }
-func (c *TCore) AddWalletPeer(assetID uint32, host string) error {
+func (c *TCore) AddWalletPeer(assetID uint32, address string) error {
 	return nil
 }
-func (c *TCore) RemoveWalletPeer(assetID uint32, host string) error {
+func (c *TCore) RemoveWalletPeer(assetID uint32, address string) error {
 	return nil
 }
 

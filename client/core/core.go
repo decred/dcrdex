@@ -8943,7 +8943,7 @@ func (c *Core) WalletPeers(assetID uint32) ([]*asset.WalletPeer, error) {
 
 // AddWalletPeer connects the wallet to a new peer, and also persists this peer
 // to be connected to on future startups.
-func (c *Core) AddWalletPeer(assetID uint32, host string) error {
+func (c *Core) AddWalletPeer(assetID uint32, address string) error {
 	w, err := c.connectedWallet(assetID)
 	if err != nil {
 		return err
@@ -8954,12 +8954,12 @@ func (c *Core) AddWalletPeer(assetID uint32, host string) error {
 		return fmt.Errorf("%s wallet is not a peer manager", unbip(assetID))
 	}
 
-	return peerManager.AddPeer(host)
+	return peerManager.AddPeer(address)
 }
 
 // RemoveWalletPeer disconnects from a peer that the user previously added. It
 // will no longer be guaranteed to connect to this peer in the future.
-func (c *Core) RemoveWalletPeer(assetID uint32, host string) error {
+func (c *Core) RemoveWalletPeer(assetID uint32, address string) error {
 	w, err := c.connectedWallet(assetID)
 	if err != nil {
 		return err
@@ -8970,7 +8970,7 @@ func (c *Core) RemoveWalletPeer(assetID uint32, host string) error {
 		return fmt.Errorf("%s wallet is not a peer manager", unbip(assetID))
 	}
 
-	return peerManager.RemovePeer(host)
+	return peerManager.RemovePeer(address)
 }
 
 // findActiveOrder will search the dex connections for an active order by order

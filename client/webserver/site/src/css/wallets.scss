@@ -178,6 +178,10 @@
   #walletDetailsBox {
     border-bottom: $light_border_color;
   }
+
+  .peers-table-icon {
+    padding-left: 30%;
+  }
 }
 
 @include media-breakpoint-up(xxl) {
