@@ -447,30 +447,23 @@ func testNoMakerRedeem(s *simulationTest) error {
 	var qty, rate uint64 = 1 * s.lotSize, 250 * s.rateStep
 	s.client1.isSeller, s.client2.isSeller = true, false
 
-	var bits uint8
-	go func() {
-		<-time.After(tLockTimeTaker)
+	enable := func(client *simulationClient) {
+		client.enableWallets()
 		s.client1.filteredConn.requestFilter.Store(func(string) error { return nil })
 		s.client2.filteredConn.requestFilter.Store(func(string) error { return nil })
-		if bits == 0b1 {
-			s.client1.enableWallets()
-		} else {
-			s.client2.enableWallets()
-		}
-	}()
+	}
+	var killed uint32
 	preFilter1 := func(route string) error {
-		// Fail every first try of init and redeem. Second try will be
-		// passed on to the real comms.
-		if route == msgjson.InitRoute && bits == 0 {
-			bits = 0b1
+		if route == msgjson.InitRoute && atomic.CompareAndSwapUint32(&killed, 0, 1) {
 			s.client1.disableWallets()
+			time.AfterFunc(tLockTimeTaker, func() { enable(s.client1) })
 		}
 		return nil
 	}
 	preFilter2 := func(route string) error {
-		if route == msgjson.InitRoute && bits == 0 {
-			bits = 0b10
+		if route == msgjson.InitRoute && atomic.CompareAndSwapUint32(&killed, 0, 1) {
 			s.client2.disableWallets()
+			time.AfterFunc(tLockTimeTaker, func() { enable(s.client2) })
 		}
 		return nil
 	}
