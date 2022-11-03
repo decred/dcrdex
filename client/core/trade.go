@@ -1357,10 +1357,8 @@ func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) (re
 			// is expected for newly made swaps involving contracts.
 			t.dc.log.Errorf("isSwappable: error getting confirmation for our own swap transaction: %v", err)
 		}
-		if spent {
-			t.dc.log.Debugf("Our (maker) swap for match %s is being reported as spent, "+
-				"but we have not seen the counter-party's redemption yet. This could just"+
-				" be network latency.", match)
+		if spent { // This should NEVER happen for maker in MakerSwapCast unless revoked and refunded!
+			t.dc.log.Errorf("Our (maker) swap for match %s is being reported as spent before taker's swap was broadcast!", match)
 		}
 		match.setSwapConfirms(int64(confs))
 		t.notify(newMatchNote(TopicConfirms, "", "", db.Data, t, match))
