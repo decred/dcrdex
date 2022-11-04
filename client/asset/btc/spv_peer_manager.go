@@ -65,6 +65,15 @@ type SPVPeerManager struct {
 	log dex.Logger
 }
 
+func (w *SPVPeerManager) connectedPeers() map[string]interface{} {
+	peers := w.cs.Peers()
+	connectedPeers := make(map[string]interface{})
+	for _, peer := range peers {
+		connectedPeers[peer.Addr()] = struct{}{}
+	}
+	return connectedPeers
+}
+
 // Peers returns the list of peers that the wallet is connected to. It also
 // returns the peers that the user added that the wallet may not currently
 // be connected to.
@@ -72,11 +81,7 @@ func (w *SPVPeerManager) Peers() ([]*asset.WalletPeer, error) {
 	w.peersMtx.RLock()
 	defer w.peersMtx.RUnlock()
 
-	peers := w.cs.Peers()
-	connectedPeers := make(map[string]interface{})
-	for _, peer := range peers {
-		connectedPeers[peer.Addr()] = struct{}{}
-	}
+	connectedPeers := w.connectedPeers()
 
 	walletPeers := make([]*asset.WalletPeer, 0, len(connectedPeers))
 
@@ -223,7 +228,13 @@ func (w *SPVPeerManager) addPeer(addr string, source peerSource, initialLoad boo
 		}
 	}
 
-	return w.cs.AddPeer(resolvedAddr)
+	connectedPeers := w.connectedPeers()
+	_, connected := connectedPeers[resolvedAddr]
+	if !connected {
+		return w.cs.AddPeer(resolvedAddr)
+	}
+
+	return nil
 }
 
 // AddPeer connects to a new peer and stores it in the db.
@@ -254,7 +265,13 @@ func (w *SPVPeerManager) RemovePeer(addr string) error {
 		delete(w.peers, addr)
 	}
 
-	return w.cs.RemoveNodeByAddr(peer.resolvedName)
+	connectedPeers := w.connectedPeers()
+	_, connected := connectedPeers[peer.resolvedName]
+	if connected {
+		return w.cs.RemoveNodeByAddr(peer.resolvedName)
+	}
+
+	return nil
 }
 
 // ConnectToInitialWalletPeers connects to the default peers and the peers

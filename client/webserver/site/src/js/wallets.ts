@@ -394,6 +394,7 @@ export default class WalletsPage extends BasePage {
       if (peer.source === PeerSource.UserAdded) {
         const removeIcon = this.page.removeIconTmpl.cloneNode(true)
         Doc.bind(removeIcon, 'click', async () => {
+          Doc.hide(page.managePeersErr)
           const res = await postJSON('/api/removewalletpeer', {
             assetID: this.selectedAssetID,
             addr: peer.addr
@@ -424,6 +425,7 @@ export default class WalletsPage extends BasePage {
   // peer.
   async submitAddPeer () {
     const page = this.page
+    Doc.hide(page.managePeersErr)
     const res = await postJSON('/api/addwalletpeer', {
       assetID: this.selectedAssetID,
       addr: page.addPeerInput.value
