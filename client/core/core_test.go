@@ -726,6 +726,9 @@ type TXCWallet struct {
 	estFee    uint64
 	estFeeErr error
 	validAddr bool
+
+	takerSwapConfOverride int64
+	makerSwapConfOverride int64
 }
 
 var _ asset.Accelerator = (*TXCWallet)(nil)
@@ -9173,6 +9176,175 @@ func TestMaxSwapsRedeemsInTx(t *testing.T) {
 	populateRedeemCoins(4, tBtcWallet)
 	tCore.tick(tracker)
 	checkNumRedeems(expected, tBtcWallet)
+}
+
+// TestSwapWithMakerConfOverride tests if swaps are swappables when
+// makerSwapConfOverride is set.
+func TestSwapWithMakerConfOverride(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	dc := rig.dc
+	tCore := rig.core
+
+	confOverrider := 3
+	dcrWallet, _ := newTWallet(tUTXOAssetA.ID)
+
+	tCore.wallets[tUTXOAssetA.ID] = dcrWallet
+
+	btcWallet, tBtcWallet := newTWallet(tUTXOAssetB.ID)
+	// override makerSwapConfOverride from taker
+	btcWallet.makerSwapConfOverride = int64(confOverrider)
+	tBtcWallet.makerSwapConfOverride = int64(confOverrider)
+	tCore.wallets[tUTXOAssetB.ID] = btcWallet
+	walletSet, _, _, _ := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
+
+	lo, dbOrder, preImg, addr := makeLimitOrder(dc, true, 0, 0)
+	oid := lo.ID()
+	tracker := newTrackedTrade(dbOrder, preImg, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails)
+	dc.trades[oid] = tracker
+	newMatch := func(side order.MatchSide, status order.MatchStatus) *matchTracker {
+		return &matchTracker{
+			prefix: lo.Prefix(),
+			trade:  lo.Trade(),
+			MetaMatch: db.MetaMatch{
+				MetaData: &db.MatchMetaData{
+					Proof: db.MatchProof{
+						Auth: db.MatchAuth{
+							MatchStamp: uint64(time.Now().UnixMilli()),
+							AuditStamp: uint64(time.Now().UnixMilli()),
+						},
+					},
+				},
+				UserMatch: &order.UserMatch{
+					MatchID: ordertest.RandomMatchID(),
+					Side:    side,
+					Address: ordertest.RandomAddress(),
+					Status:  status,
+				},
+			},
+		}
+	}
+
+	var swappableMatch *matchTracker
+	setSwap := func() {
+		swappableMatch = newMatch(order.Taker, order.MakerSwapCast)
+		tracker.matches = map[order.MatchID]*matchTracker{
+			swappableMatch.MatchID: swappableMatch,
+		}
+		// Set valid wallet auditInfo for swappableMatch, taker will repeat audit before swapping.
+		auditQty := calc.BaseToQuote(swappableMatch.Rate, swappableMatch.Quantity)
+		_, auditInfo := tMsgAudit(oid, swappableMatch.MatchID, addr, auditQty, encode.RandomBytes(32))
+		auditInfo.Expiration = encode.DropMilliseconds(swappableMatch.matchTime().Add(tracker.lockTimeMaker))
+
+		var numberOfConfs int
+		// set taker with less than necessary to be redeemable
+		numberOfConfs = 1
+		tBtcWallet.setConfs(auditInfo.Coin.ID(), uint32(numberOfConfs), nil)
+		tCore.tick(tracker)
+		isSwappable, _ := tracker.isSwappable(tCore.ctx, swappableMatch)
+		if isSwappable {
+			t.Fatalf("match should not be swappable. Num of confs: %d, expected to confirmation: %d",
+				numberOfConfs, tBtcWallet.makerSwapConfOverride)
+		}
+		// set taker with equal than necessary to be redeemable
+		tBtcWallet.auditInfo = auditInfo
+		swappableMatch.counterSwap = auditInfo
+		numberOfConfs = 3
+		tBtcWallet.setConfs(auditInfo.Coin.ID(), uint32(numberOfConfs), nil)
+		tCore.tick(tracker)
+		isSwappable, _ = tracker.isSwappable(tCore.ctx, swappableMatch)
+		if !isSwappable {
+			t.Fatalf("match should be swappable. Num of confs: %d, expected to confirmation: %d",
+				numberOfConfs, tBtcWallet.makerSwapConfOverride)
+		}
+	}
+	setSwap()
+}
+
+// TestSwapWithTakerConfOverride tests if swaps are redeemable when
+// takerSwapConfOverride is set.
+func TestSwapWithTakerConfOverride(t *testing.T) {
+	rig := newTestRig()
+	defer rig.shutdown()
+	dc := rig.dc
+	tCore := rig.core
+
+	// value to override the conf.
+	confOverrider := 3
+
+	dcrWallet, tDcrWallet := newTWallet(tUTXOAssetA.ID)
+	// override takerSwapConfOverride from maker
+	dcrWallet.takerSwapConfOverride = int64(confOverrider)
+	tDcrWallet.takerSwapConfOverride = int64(confOverrider)
+	tCore.wallets[tUTXOAssetA.ID] = dcrWallet
+
+	btcWallet, tBtcWallet := newTWallet(tUTXOAssetB.ID)
+	tCore.wallets[tUTXOAssetB.ID] = btcWallet
+	walletSet, _, _, _ := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
+
+	lo, dbOrder, preImg, addr := makeLimitOrder(dc, true, 0, 0)
+	oid := lo.ID()
+	tracker := newTrackedTrade(dbOrder, preImg, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails)
+	dc.trades[oid] = tracker
+	newMatch := func(side order.MatchSide, status order.MatchStatus) *matchTracker {
+		return &matchTracker{
+			prefix: lo.Prefix(),
+			trade:  lo.Trade(),
+			MetaMatch: db.MetaMatch{
+				MetaData: &db.MatchMetaData{
+					Proof: db.MatchProof{
+						Auth: db.MatchAuth{
+							MatchStamp: uint64(time.Now().UnixMilli()),
+							AuditStamp: uint64(time.Now().UnixMilli()),
+						},
+					},
+				},
+				UserMatch: &order.UserMatch{
+					MatchID: ordertest.RandomMatchID(),
+					Side:    side,
+					Address: ordertest.RandomAddress(),
+					Status:  status,
+				},
+			},
+		}
+	}
+
+	var redeemableMatch, _ *matchTracker
+	setRedeems := func() {
+		redeemableMatch = newMatch(order.Maker, order.TakerSwapCast)
+		auditQty := calc.BaseToQuote(redeemableMatch.Rate, redeemableMatch.Quantity)
+		_, auditInfo := tMsgAudit(oid, redeemableMatch.MatchID, addr, auditQty, encode.RandomBytes(32))
+		redeemableMatch.counterSwap = auditInfo
+		redeemableMatch.MetaData.Proof.SecretHash = auditInfo.SecretHash
+
+		tracker.matches = map[order.MatchID]*matchTracker{
+			redeemableMatch.MatchID: redeemableMatch,
+		}
+		var numberOfConfs int
+		// set taker with less than necessary to be redeemable
+		numberOfConfs = 1
+		tBtcWallet.setConfs(auditInfo.Coin.ID(), uint32(numberOfConfs), nil)
+		tCore.tick(tracker)
+		isRedeemable, _ := tracker.isRedeemable(tCore.ctx, redeemableMatch)
+		if isRedeemable {
+			t.Fatalf("match should not be redeemable. Num of confs: %d, expected to confirmation: %d",
+				numberOfConfs, tDcrWallet.takerSwapConfOverride)
+		}
+		// set taker with equal than necessary to be redeemable
+		tBtcWallet.auditInfo = auditInfo
+		redeemableMatch.counterSwap = auditInfo
+		numberOfConfs = 3
+		// set taker number of confs, now it should be redeemable.
+		tBtcWallet.setConfs(auditInfo.Coin.ID(), uint32(numberOfConfs), nil)
+		isRedeemable, _ = tracker.isRedeemable(tCore.ctx, redeemableMatch)
+		if !isRedeemable {
+			t.Fatalf("match should be redeemable. Num of confs: %d, expected to confirmation: %d",
+				numberOfConfs, tDcrWallet.takerSwapConfOverride)
+		}
+	}
+	setRedeems()
 }
 
 func TestSuspectTrades(t *testing.T) {

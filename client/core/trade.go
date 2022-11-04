@@ -1068,7 +1068,15 @@ func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTra
 	fail := func(err error) (uint32, uint32, bool, bool, bool, error) {
 		return 0, 0, false, false, false, err
 	}
-
+	// If makerSwapConfOverride is defined and it is the taker's wallet,
+	// override the swapconf with its value.
+	if t.wallets.quoteWallet.makerSwapConfOverride > 0 && match.Status == order.MakerSwapCast && match.Side == order.Taker {
+		t.metaData.ToSwapConf = uint32(t.wallets.quoteWallet.makerSwapConfOverride)
+	}
+	// as maker, override the swap conf with the takerSwapConfOverride if defined.
+	if t.wallets.baseWallet.takerSwapConfOverride > 0 && match.Status == order.TakerSwapCast && match.Side == order.Maker {
+		t.metaData.ToSwapConf = uint32(t.wallets.baseWallet.takerSwapConfOverride)
+	}
 	// Counter-party's swap is the "to" asset.
 	needed = t.metaData.ToSwapConf
 

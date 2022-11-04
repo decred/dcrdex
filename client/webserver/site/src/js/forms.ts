@@ -302,11 +302,12 @@ export class NewWalletForm {
     this.current.selectedDef = walletDef
     const appPwCached = State.passwordIsCached() || (this.pwCache && this.pwCache.pw)
     Doc.hide(page.auth, page.oneBttnBox, page.newWalletPassBox)
-    const configOpts = walletDef.configopts || []
+    const { asset, parentAsset, winfo } = this.current
+    const configOpts = [...walletDef.configopts, ...asset.tradingOpts] || []
     // If a config represents a wallet's birthday, we update the default
     // selection to the current date if this installation of the client
     // generated a seed.
-    configOpts.map((opt) => {
+    configOpts.forEach((opt) => {
       if (opt.isBirthdayConfig && app().seedGenTime > 0) {
         opt.default = toUnixDate(new Date())
       }
@@ -334,7 +335,6 @@ export class NewWalletForm {
       page.submitAdd.textContent = intl.prep(intl.ID_ADD)
     }
 
-    const { asset, parentAsset, winfo } = this.current
     if (parentAsset) {
       this.subform.update(configOpts, { assetID: parentAsset.id })
       this.subform.update((winfo as Token).definition.configopts, {
@@ -414,6 +414,7 @@ export class WalletConfigForm {
   sectionize: boolean
   allSettings: PageElement
   dynamicOpts: PageElement
+  tradingOpts: ConfigOption[]
   textInputTmpl: PageElement
   dateInputTmpl: PageElement
   checkboxTmpl: PageElement
@@ -438,6 +439,7 @@ export class WalletConfigForm {
     this.configElements = []
     // configOpts is the wallet options provided by core.
     this.configOpts = []
+    this.tradingOpts = []
     this.sectionize = sectionize
 
     // Get template elements

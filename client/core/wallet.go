@@ -40,6 +40,25 @@ func runWithTimeout(f func() error, timeout time.Duration) error {
 	}
 }
 
+var (
+	tradingConfigOpt = []*asset.ConfigOption{
+		{
+			Key:         "makerswapconfoverride",
+			DisplayName: "Maker Swap Conf",
+			Description: "The target number of blocks for the maker to swap " +
+				"the transaction. It will override the default value.",
+			DefaultValue: 0,
+		},
+		{
+			Key:         "takerswapconfoverride",
+			DisplayName: "Taker Swap Conf",
+			Description: "The target number of blocks after the taker swap " +
+				"to redeem the transaction. It will override the default value.",
+			DefaultValue: 0,
+		},
+	}
+)
+
 // xcWallet is a wallet. Use (*Core).loadWallet to construct a xcWallet.
 type xcWallet struct {
 	asset.Wallet
@@ -64,6 +83,9 @@ type xcWallet struct {
 	synced       bool
 	syncProgress float32
 	disabled     bool
+
+	makerSwapConfOverride int64 // as taker, swap after this many confs of maker swap
+	takerSwapConfOverride int64 // as maker, redeem after this many confs of taker swap
 
 	// When wallets are being reconfigured and especially when the wallet type
 	// or host is being changed, we want to suppress "walletstate" notes to
@@ -253,21 +275,23 @@ func (w *xcWallet) state() *WalletState {
 	}
 
 	return &WalletState{
-		Symbol:       unbip(w.AssetID),
-		AssetID:      w.AssetID,
-		Version:      winfo.Version,
-		Open:         len(lockable.encPass) == 0 || len(lockable.pw) > 0,
-		Running:      w.connector.On(),
-		Balance:      w.balance,
-		Address:      w.address,
-		Units:        winfo.UnitInfo.AtomicUnit,
-		Encrypted:    len(w.encPass) > 0,
-		PeerCount:    peerCount,
-		Synced:       w.synced,
-		SyncProgress: w.syncProgress,
-		WalletType:   w.walletType,
-		Traits:       w.traits,
-		Disabled:     w.disabled,
+		Symbol:                unbip(w.AssetID),
+		AssetID:               w.AssetID,
+		Version:               winfo.Version,
+		Open:                  len(lockable.encPass) == 0 || len(lockable.pw) > 0,
+		Running:               w.connector.On(),
+		Balance:               w.balance,
+		Address:               w.address,
+		Units:                 winfo.UnitInfo.AtomicUnit,
+		Encrypted:             len(w.encPass) > 0,
+		PeerCount:             peerCount,
+		Synced:                w.synced,
+		SyncProgress:          w.syncProgress,
+		WalletType:            w.walletType,
+		Traits:                w.traits,
+		Disabled:              w.disabled,
+		MakerSwapConfOverride: w.makerSwapConfOverride,
+		TakerSwapConfOverride: w.takerSwapConfOverride,
 	}
 }
 

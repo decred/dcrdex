@@ -160,6 +160,7 @@ export interface SupportedAsset {
   token?: Token
   unitInfo: UnitInfo
   walletCreationPending: boolean
+  tradingOpts: ConfigOption[]
 }
 
 export interface Token {

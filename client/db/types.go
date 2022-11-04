@@ -790,16 +790,21 @@ type Wallet struct {
 	EncryptedPW []byte
 	Address     string
 	Disabled    bool
+
+	MakerSwapConfOverride int64 // init ours when maker's reaches this
+	TakerSwapConfOverride int64 // redeem takers at this
 }
 
 // Encode encodes the Wallet to a versioned blob.
 func (w *Wallet) Encode() []byte {
-	return versionedBytes(1).
+	return versionedBytes(2).
 		AddData(uint32Bytes(w.AssetID)).
 		AddData(config.Data(w.Settings)).
 		AddData(w.EncryptedPW).
 		AddData([]byte(w.Address)).
-		AddData([]byte(w.Type))
+		AddData([]byte(w.Type)).
+		AddData(uint64Bytes(uint64(w.MakerSwapConfOverride))).
+		AddData(uint64Bytes(uint64(w.TakerSwapConfOverride)))
 }
 
 // DecodeWallet decodes the versioned blob to a *Wallet. The Balance is NOT set;
@@ -814,6 +819,8 @@ func DecodeWallet(b []byte) (*Wallet, error) {
 		return decodeWallet_v0(pushes)
 	case 1:
 		return decodeWallet_v1(pushes)
+	case 2:
+		return decodeWallet_v2(pushes)
 	}
 	return nil, fmt.Errorf("unknown DecodeWallet version %d", ver)
 }
@@ -825,21 +832,32 @@ func decodeWallet_v0(pushes [][]byte) (*Wallet, error) {
 }
 
 func decodeWallet_v1(pushes [][]byte) (*Wallet, error) {
-	if len(pushes) != 5 {
-		return nil, fmt.Errorf("decodeWallet_v1: expected 5 pushes, got %d", len(pushes))
+	// Add pushes for swap conf overrides.
+	const conf = ^uint64(0) // -1
+	pushes = append(pushes, uint64Bytes(conf))
+	pushes = append(pushes, uint64Bytes(conf))
+	return decodeWallet_v2(pushes)
+}
+
+func decodeWallet_v2(pushes [][]byte) (*Wallet, error) {
+	if len(pushes) != 7 {
+		return nil, fmt.Errorf("decodeWallet_v1: expected 7 pushes, got %d", len(pushes))
 	}
 	idB, settingsB, keyB := pushes[0], pushes[1], pushes[2]
 	addressB, typeB := pushes[3], pushes[4]
+	makerSwapConfB, takerSwapConfB := pushes[5], pushes[6]
 	settings, err := config.Parse(settingsB)
 	if err != nil {
 		return nil, fmt.Errorf("unable to decode wallet settings")
 	}
 	return &Wallet{
-		AssetID:     intCoder.Uint32(idB),
-		Type:        string(typeB),
-		Settings:    settings,
-		EncryptedPW: keyB,
-		Address:     string(addressB),
+		AssetID:               intCoder.Uint32(idB),
+		Type:                  string(typeB),
+		Settings:              settings,
+		EncryptedPW:           keyB,
+		Address:               string(addressB),
+		MakerSwapConfOverride: int64(intCoder.Uint64(makerSwapConfB)),
+		TakerSwapConfOverride: int64(intCoder.Uint64(takerSwapConfB)),
 	}, nil
 }
 
@@ -848,7 +866,7 @@ func (w *Wallet) ID() []byte {
 	return uint32Bytes(w.AssetID)
 }
 
-// SID is a string respresentation of the wallet's asset ID.
+// SID is a string representation of the wallet's asset ID.
 func (w *Wallet) SID() string {
 	return strconv.Itoa(int(w.AssetID))
 }

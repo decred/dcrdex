@@ -2152,12 +2152,13 @@ func (c *Core) assetMap() map[uint32]*SupportedAsset {
 			wallet = w.state()
 		}
 		assets[assetID] = &SupportedAsset{
-			ID:       assetID,
-			Symbol:   asset.Symbol,
-			Wallet:   wallet,
-			Info:     asset.Info,
-			Name:     asset.Info.Name,
-			UnitInfo: asset.Info.UnitInfo,
+			ID:          assetID,
+			Symbol:      asset.Symbol,
+			Wallet:      wallet,
+			Info:        asset.Info,
+			Name:        asset.Info.Name,
+			UnitInfo:    asset.Info.UnitInfo,
+			TradingOpts: tradingConfigOpt,
 		}
 		for tokenID, token := range asset.Tokens {
 			wallet = nil
@@ -2445,11 +2446,33 @@ func (c *Core) createWallet(crypter encrypt.Crypter, walletPW []byte, assetID ui
 		}
 	}
 
+	var makerswapconfoverride, takerswapconfoverride int64
+	if form.Config["makerswapconfoverride"] != "" {
+		makerswapconfoverride, err = strconv.ParseInt(form.Config["makerswapconfoverride"], 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		if makerswapconfoverride < 0 {
+			return nil, fmt.Errorf("maker swap conf override cant be less than 0. %d", makerswapconfoverride)
+		}
+	}
+	if form.Config["takerswapconfoverride"] != "" {
+		takerswapconfoverride, err = strconv.ParseInt(form.Config["takerswapconfoverride"], 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		if takerswapconfoverride < 0 {
+			return nil, fmt.Errorf("taker swap conf override cant be less than 0. %d", makerswapconfoverride)
+		}
+	}
+
 	return &db.Wallet{
-		Type:        walletDef.Type,
-		AssetID:     assetID,
-		Settings:    form.Config,
-		EncryptedPW: encPW,
+		Type:                  walletDef.Type,
+		AssetID:               assetID,
+		Settings:              form.Config,
+		EncryptedPW:           encPW,
+		MakerSwapConfOverride: makerswapconfoverride,
+		TakerSwapConfOverride: takerswapconfoverride,
 		// Balance and Address are set after connect.
 	}, nil
 }
@@ -2575,6 +2598,9 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		walletType:   dbWallet.Type,
 		broadcasting: new(uint32),
 		disabled:     dbWallet.Disabled,
+
+		makerSwapConfOverride: dbWallet.MakerSwapConfOverride,
+		takerSwapConfOverride: dbWallet.TakerSwapConfOverride,
 	}
 
 	token := asset.TokenInfo(assetID)
@@ -2984,6 +3010,13 @@ func (c *Core) WalletSettings(assetID uint32) (map[string]string, error) {
 	if err != nil {
 		return nil, codedError(dbErr, err)
 	}
+	if dbWallet.MakerSwapConfOverride > 0 {
+		dbWallet.Settings["makerswapconfoverride"] = fmt.Sprint(dbWallet.MakerSwapConfOverride)
+	}
+	if dbWallet.TakerSwapConfOverride > 0 {
+		dbWallet.Settings["takerswapconfoverride"] = fmt.Sprint(dbWallet.TakerSwapConfOverride)
+	}
+
 	return dbWallet.Settings, nil
 }
 
@@ -3041,6 +3074,26 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 
 	assetID := form.AssetID
 
+	var makerswapconfoverride, takerswapconfoverride int64
+	if form.Config["makerswapconfoverride"] != "" {
+		makerswapconfoverride, err = strconv.ParseInt(form.Config["makerswapconfoverride"], 10, 64)
+		if err != nil {
+			return err
+		}
+		if makerswapconfoverride < 0 {
+			return newError(assetSupportErr, "maker swap conf override cant be less than 0. %d", makerswapconfoverride)
+		}
+	}
+	if form.Config["takerswapconfoverride"] != "" {
+		takerswapconfoverride, err = strconv.ParseInt(form.Config["takerswapconfoverride"], 10, 64)
+		if err != nil {
+			return err
+		}
+		if takerswapconfoverride < 0 {
+			return newError(assetSupportErr, "taker swap conf override cant be less than 0. %d", makerswapconfoverride)
+		}
+	}
+
 	walletDef, err := asset.WalletDef(assetID, form.Type)
 	if err != nil {
 		return newError(assetSupportErr, "asset.WalletDef error: %w", err)
@@ -3066,12 +3119,14 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 	oldDepositAddr := oldWallet.currentDepositAddress()
 
 	dbWallet := &db.Wallet{
-		Type:        form.Type,
-		AssetID:     oldWallet.AssetID,
-		Settings:    form.Config,
-		Balance:     &db.Balance{}, // in case retrieving new balance after connect fails
-		EncryptedPW: oldWallet.encPW(),
-		Address:     oldDepositAddr,
+		Type:                  form.Type,
+		AssetID:               oldWallet.AssetID,
+		Settings:              form.Config,
+		Balance:               &db.Balance{}, // in case retrieving new balance after connect fails
+		EncryptedPW:           oldWallet.encPW(),
+		Address:               oldDepositAddr,
+		MakerSwapConfOverride: makerswapconfoverride,
+		TakerSwapConfOverride: takerswapconfoverride,
 	}
 
 	storeWithBalance := func(w *xcWallet) error {
