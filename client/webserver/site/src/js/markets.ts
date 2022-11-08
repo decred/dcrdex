@@ -206,7 +206,14 @@ export default class MarketsPage extends BasePage {
     this.ogTitle = document.title
 
     const depthReporters = {
-      click: (x: number) => { this.reportDepthClick(x) },
+      // When the user clicks on depth-chart area, this click func gets called with x
+      // being the value user chose (value along x-axis).
+      click: (x: number) => {
+        // Must adjust chosen value here since it might not be conforming to rate-step.
+        this.page.rateField.value = String(x)
+        const [,, adjRate] = this.parseRateInput()
+        this.reportDepthClick(adjRate)
+      },
       volume: (r: VolumeReport) => { this.reportDepthVolume(r) },
       mouse: (r: MouseReport) => { this.reportDepthMouse(r) },
       zoom: (z: number) => { this.reportDepthZoom(z) }
@@ -271,6 +278,7 @@ export default class MarketsPage extends BasePage {
       page.maxLbl.textContent = intl.prep(intl.ID_BUY)
       this.setOrderBttnText()
       this.setOrderVisibility()
+      this.previewMax()
       this.drawChartLines()
     })
     bind(page.sellBttn, 'click', () => {
@@ -280,17 +288,14 @@ export default class MarketsPage extends BasePage {
       page.maxLbl.textContent = intl.prep(intl.ID_SELL)
       this.setOrderBttnText()
       this.setOrderVisibility()
+      this.previewMax()
       this.drawChartLines()
     })
     bind(page.limitBttn, 'click', () => {
       swapBttns(page.marketBttn, page.limitBttn)
       this.setOrderVisibility()
       if (!page.rateField.value) return
-      this.depthLines.input = [{
-        rate: parseFloat(page.rateField.value || '0'),
-        color: this.isSell() ? this.depthChart.theme.sellLine : this.depthChart.theme.buyLine
-      }]
-      this.drawChartLines()
+      this.drawChartLineInputRate()
     })
     bind(page.marketBttn, 'click', () => {
       swapBttns(page.limitBttn, page.marketBttn)
@@ -300,12 +305,9 @@ export default class MarketsPage extends BasePage {
       this.drawChartLines()
     })
     bind(page.maxOrd, 'click', () => {
-      if (this.isSell()) {
-        const maxSell = this.market.maxSell
-        if (!maxSell) return
-        page.lotField.value = String(maxSell.swap.lots)
-      } else page.lotField.value = String(this.market.maxBuys[this.adjustedRate()].swap.lots)
-      this.lotChanged()
+      const maxOrderLots = this.calcMaxOrderLots()
+      page.lotField.value = String(maxOrderLots)
+      this.lotFieldChangeEvent()
     })
 
     Doc.disableMouseWheel(page.rateField, page.lotField, page.qtyField, page.mktBuyField)
@@ -407,14 +409,14 @@ export default class MarketsPage extends BasePage {
     })
 
     // Event listeners for interactions with the various input fields.
-    bind(page.lotField, 'change', () => { this.lotChanged() })
-    bind(page.lotField, 'keyup', () => { this.lotChanged() })
-    bind(page.qtyField, 'change', () => { this.quantityChanged(true) })
-    bind(page.qtyField, 'keyup', () => { this.quantityChanged(false) })
-    bind(page.mktBuyField, 'change', () => { this.marketBuyChanged() })
-    bind(page.mktBuyField, 'keyup', () => { this.marketBuyChanged() })
-    bind(page.rateField, 'change', () => { this.rateFieldChanged() })
-    bind(page.rateField, 'keyup', () => { this.previewQuoteAmt(true) })
+    bind(page.lotField, 'change', () => { this.lotFieldChangeEvent() })
+    bind(page.lotField, 'keyup', () => { this.lotFieldKeyUpEvent() })
+    bind(page.qtyField, 'change', () => { this.qtyFieldChangeEvent() })
+    bind(page.qtyField, 'keyup', () => { this.qtyFieldKeyUpEvent() })
+    bind(page.mktBuyField, 'change', () => { this.marketBuyChangedEvent() })
+    bind(page.mktBuyField, 'keyup', () => { this.marketBuyChangedEvent() })
+    bind(page.rateField, 'change', () => { this.rateFieldChangeEvent() })
+    bind(page.rateField, 'keyup', () => { this.rateFieldKeyUpEvent() })
 
     // Market search input bindings.
     bind(page.marketSearchV1, 'change', () => { this.filterMarkets() })
@@ -557,6 +559,37 @@ export default class MarketsPage extends BasePage {
         setPriceAndChange(s.tmpl, xc, mkt)
       }
     }
+    this.page.rateField.value = fourSigFigs(this.defaultRate())
+  }
+
+  // defaultRate return default exchange rate (aka price).
+  defaultRate (): number {
+    // Current exchange rate would be reasonable default Price value.
+    const { market: { cfg: { baseid, quoteid, spot }, dex } } = this
+    let rate = 0
+    if (spot) rate = spot.rate
+    return app().conventionalRate(baseid, quoteid, rate, dex)
+  }
+
+  /* calcMaxOrderLots calculates max lots amount user can make an order with. */
+  calcMaxOrderLots (): number {
+    const adjRateAtoms = this.adjustedRateAtoms(this.page.rateField.value)
+    let maxEstimate: MaxOrderEstimate | null = this.market.maxBuys[adjRateAtoms]
+    if (this.isSell()) {
+      maxEstimate = this.market.maxSell
+    }
+    if (!maxEstimate) {
+      return 0
+    }
+    return maxEstimate.swap.lots
+  }
+
+  // calcMaxOrderQtyAtoms calculates max quantity (in atoms) user can make an order
+  // with.
+  calcMaxOrderQtyAtoms (): number {
+    const lotSize = this.market.cfg.lotsize
+    const maxOrderLots = this.calcMaxOrderLots()
+    return maxOrderLots * lotSize
   }
 
   /* setHighLow calculates the high and low rates over the last 24 hours. */
@@ -601,19 +634,16 @@ export default class MarketsPage extends BasePage {
   setOrderVisibility () {
     const page = this.page
     if (this.isLimit()) {
-      Doc.show(page.priceBox, page.tifBox, page.qtyBox, page.maxBox)
+      Doc.show(page.priceBox, page.tifBox, page.qtyBox, page.maxBox, page.rateStepBox, page.orderTotalPreview)
       Doc.hide(page.mktBuyBox)
-      this.previewQuoteAmt(true)
     } else {
-      Doc.hide(page.tifBox, page.maxBox, page.priceBox)
+      Doc.hide(page.priceBox, page.tifBox, page.maxBox, page.rateStepBox, page.orderTotalPreview)
       if (this.isSell()) {
         Doc.hide(page.mktBuyBox)
         Doc.show(page.qtyBox)
-        this.previewQuoteAmt(true)
       } else {
         Doc.show(page.mktBuyBox)
         Doc.hide(page.qtyBox)
-        this.previewQuoteAmt(false)
       }
     }
   }
@@ -632,6 +662,20 @@ export default class MarketsPage extends BasePage {
     const hasWallets = base && app().assets[base.id].wallet && quote && app().assets[quote.id].wallet
 
     if (feePaid && assetsAreSupported && hasWallets) {
+      // Reset order form inputs to defaults.
+      const lot = '1'
+      page.lotField.setAttribute('min', lot)
+      page.lotField.setAttribute('step', lot)
+      page.lotField.value = ''
+      const lotSize = String(this.market.cfg.lotsize / this.market.baseUnitInfo.conventional.conversionFactor)
+      page.qtyField.setAttribute('min', lotSize)
+      page.qtyField.setAttribute('step', lotSize)
+      page.qtyField.value = ''
+      page.rateField.setAttribute('min', String(this.market.cfg.ratestep / this.market.rateConversionFactor))
+      page.rateField.setAttribute('step', String(this.market.cfg.ratestep / this.market.rateConversionFactor))
+      const [,, rate] = this.parseRateInput() // will return default adjusted rate.
+      page.rateField.value = String(rate)
+      this.previewMax()
       Doc.show(page.orderForm, page.orderTypeBttns)
     }
   }
@@ -737,11 +781,6 @@ export default class MarketsPage extends BasePage {
     const dex = app().user.exchanges[host]
     const page = this.page
 
-    // reset form inputs
-    page.lotField.value = ''
-    page.qtyField.value = ''
-    page.rateField.value = ''
-
     Doc.hide(page.noWallet)
 
     // If we have not yet connected, there is no dex.assets or any other
@@ -794,8 +833,6 @@ export default class MarketsPage extends BasePage {
     this.setStats()
     this.refreshRecentMatchesTable()
 
-    // if (!dex.candleDurs || dex.candleDurs.length === 0) this.currentChart = depthChart
-
     // depth chart
     ws.request('loadmarket', makeMarket(host, base, quote))
 
@@ -808,16 +845,18 @@ export default class MarketsPage extends BasePage {
     this.resolveOrderFormVisibility()
     this.setOrderBttnText()
     this.setCandleDurBttns()
-    this.previewQuoteAmt(false)
   }
 
   /*
-   * reportDepthClick is a callback used by the DepthChart when the user clicks
-   * on the chart area. The rate field is set to the x-value of the click.
+   * reportDepthClick will update things that depend on user-chosen rate, it expects
+   * rate that has been adjusted to rate-step.
    */
-  reportDepthClick (r: number) {
-    this.page.rateField.value = String(r)
-    this.rateFieldChanged()
+  reportDepthClick (adjRate: number) {
+    this.page.rateField.value = String(adjRate)
+
+    this.previewMax()
+    this.previewTotal()
+    this.drawChartLineInputRate()
   }
 
   /*
@@ -836,7 +875,7 @@ export default class MarketsPage extends BasePage {
   }
 
   /*
-   * reportDepthMouse accepts informations about the mouse position on the
+   * reportDepthMouse accepts information about the mouse position on the
    * chart area.
    */
   reportDepthMouse (r: MouseReport) {
@@ -864,7 +903,7 @@ export default class MarketsPage extends BasePage {
   }
 
   /*
-   * reportDepthZoom accepts informations about the current depth chart zoom level.
+   * reportDepthZoom accepts information about current depth chart zoom level.
    * This information is saved to disk so that the zoom level can be maintained
    * across reloads.
    */
@@ -915,44 +954,36 @@ export default class MarketsPage extends BasePage {
   }
 
   /**
-   * previewQuoteAmt shows quote amount when rate or quantity input are changed
+   * previewTotal calculates Total value (in quote asset) for the order.
    */
-  previewQuoteAmt (show: boolean) {
+  previewTotal () {
     const page = this.page
-    if (!this.market.base || !this.market.quote) return // Not a supported asset
-    const order = this.parseOrder()
-    const adjusted = this.adjustedRate()
-    page.orderErr.textContent = ''
-    if (adjusted) {
-      if (order.sell) this.preSell()
-      else this.preBuy()
-    }
-    this.depthLines.input = []
-    if (adjusted && this.isLimit()) {
-      this.depthLines.input = [{
-        rate: order.rate / this.market.rateConversionFactor,
-        color: order.sell ? this.depthChart.theme.sellLine : this.depthChart.theme.buyLine
-      }]
-    }
-    this.drawChartLines()
-    if (!show || !adjusted || !order.qty) {
-      page.orderPreview.textContent = ''
-      this.drawChartLines()
-      return
-    }
-    const quoteAsset = app().assets[order.quote]
-    const quoteQty = order.qty * order.rate / OrderUtil.RateEncodingFactor
-    const total = Doc.formatCoinValue(quoteQty, this.market.quoteUnitInfo)
+    const market = this.market
 
-    page.orderPreview.textContent = intl.prep(intl.ID_ORDER_PREVIEW, { total, asset: quoteAsset.symbol.toUpperCase() })
-    if (this.isSell()) this.preSell()
-    else this.preBuy()
+    const order = this.parseOrder()
+
+    const quoteAsset = app().assets[market.quote.id]
+    const quoteQty = order.qty * order.rate / OrderUtil.RateEncodingFactor
+    const total = Doc.formatCoinValue(quoteQty, market.quoteUnitInfo)
+
+    page.orderTotalPreview.textContent = intl.prep(intl.ID_ORDER_PREVIEW, { total, asset: quoteAsset.symbol.toUpperCase() })
   }
 
   /**
-   * preSell populates the max order message for the largest available sell.
+   * previewMax populates the max order message for the largest available buy or sell.
    */
-  preSell () {
+  previewMax () {
+    if (this.isSell()) {
+      this.previewMaxSell()
+      return
+    }
+    this.previewMaxBuy()
+  }
+
+  /**
+   * previewMaxSell populates the max order message for the largest available sell.
+   */
+  previewMaxSell () {
     const mkt = this.market
     const baseWallet = app().assets[mkt.base.id].wallet
     if (baseWallet.balance.available < mkt.cfg.lotsize) {
@@ -975,11 +1006,11 @@ export default class MarketsPage extends BasePage {
   }
 
   /**
-   * preBuy populates the max order message for the largest available buy.
+   * previewMaxBuy populates the max order message for the largest available buy.
    */
-  preBuy () {
+  previewMaxBuy () {
     const mkt = this.market
-    const rate = this.adjustedRate()
+    const rate = this.adjustedRateAtoms(this.page.rateField.value)
     const quoteWallet = app().assets[mkt.quote.id].wallet
     if (!quoteWallet) return
     const aLot = mkt.cfg.lotsize * (rate / OrderUtil.RateEncodingFactor)
@@ -1015,7 +1046,7 @@ export default class MarketsPage extends BasePage {
     if (this.maxEstimateTimer) window.clearTimeout(this.maxEstimateTimer)
 
     Doc.show(page.maxOrd, page.maxLotBox)
-    Doc.hide(page.maxAboveZero)
+    Doc.hide(page.maxQtyBox)
     page.maxFromLots.textContent = intl.prep(intl.ID_CALCULATING)
     page.maxFromLotsLbl.textContent = ''
     this.maxOrderUpdateCounter++
@@ -1050,7 +1081,7 @@ export default class MarketsPage extends BasePage {
       this.maxLoaded()
       this.maxLoaded = null
     }
-    Doc.show(page.maxOrd, page.maxLotBox, page.maxAboveZero)
+    Doc.show(page.maxOrd, page.maxLotBox, page.maxQtyBox)
     const sell = this.isSell()
 
     let lots = 0
@@ -1060,7 +1091,7 @@ export default class MarketsPage extends BasePage {
     // XXX add plural into format details, so we don't need this
     page.maxFromLotsLbl.textContent = intl.prep(lots === 1 ? intl.ID_LOT : intl.ID_LOTS)
     if (!maxOrder) {
-      Doc.hide(page.maxAboveZero)
+      Doc.hide(page.maxQtyBox)
       return
     }
     // Could add the estimatedFees here, but that might also be
@@ -1083,16 +1114,35 @@ export default class MarketsPage extends BasePage {
    */
   validateOrder (order: TradeForm) {
     const page = this.page
-    if (order.isLimit && !order.rate) {
+
+    const showError = function (err: string) {
+      page.orderErr.textContent = intl.prep(err)
       Doc.show(page.orderErr)
-      page.orderErr.textContent = intl.prep(intl.ID_NO_ZERO_RATE)
+      setTimeout(function () {
+        Doc.hide(page.orderErr)
+      }, 8000) // 8s should be enough for user to consume error message.
+    }
+
+    if (order.isLimit && !order.rate) {
+      // Hints to the user what inputs don't pass validation.
+      highlightOutlineRed(page.rateField)
+      showError(intl.ID_NO_ZERO_RATE)
       return false
     }
     if (!order.qty) {
-      Doc.show(page.orderErr)
-      page.orderErr.textContent = intl.prep(intl.ID_NO_ZERO_QUANTITY)
+      // Hints to the user what inputs don't pass validation.
+      highlightOutlineRed(page.qtyField)
+      showError(intl.ID_NO_ZERO_QUANTITY)
       return false
     }
+    if (order.qty > this.calcMaxOrderQtyAtoms()) {
+      // Hints to the user what inputs don't pass validation.
+      highlightBackgroundRed(page.maxOrd)
+      highlightBackgroundRed(page.orderTotalPreview)
+      showError(intl.ID_NO_QUANTITY_EXCEEDS_MAX)
+      return false
+    }
+
     return true
   }
 
@@ -1841,6 +1891,9 @@ export default class MarketsPage extends BasePage {
   stepSubmit () {
     const page = this.page
     const market = this.market
+
+    animateClick(page.submitBttn, page.submitBttnLoader)
+
     Doc.hide(page.orderErr)
     if (!this.validateOrder(this.parseOrder())) return
     const baseWallet = app().walletMap[market.base.id]
@@ -2008,12 +2061,12 @@ export default class MarketsPage extends BasePage {
         // If we're not showing the max order panel yet, don't do anything.
         if (!mkt.maxSell) break
         if (typeof mkt.sellBalance === 'number' && mkt.sellBalance !== avail) mkt.maxSell = null
-        if (this.isSell()) this.preSell()
+        if (this.isSell()) this.previewMaxSell()
         break
       case mkt.quoteCfg.id:
         if (!Object.keys(mkt.maxBuys).length) break
         if (typeof mkt.buyBalance === 'number' && mkt.buyBalance !== avail) mkt.maxBuys = {}
-        if (!this.isSell()) this.preBuy()
+        if (!this.isSell()) this.previewMaxBuy()
     }
   }
 
@@ -2031,14 +2084,11 @@ export default class MarketsPage extends BasePage {
       order: wireOrder(order),
       pw: pw
     }
-    if (!this.validateOrder(order)) return
-    // Show loader and hide submit button.
-    page.vSubmit.classList.add('d-hide')
-    page.vLoader.classList.remove('d-hide')
+    Doc.hide(page.vSubmit)
+    Doc.show(page.vLoader)
     const res = await postJSON('/api/tradeasync', req)
-    // Hide loader and show submit button.
-    page.vSubmit.classList.remove('d-hide')
-    page.vLoader.classList.add('d-hide')
+    Doc.hide(page.vLoader)
+    Doc.show(page.vSubmit)
     // If error, display error on confirmation modal.
     if (!app().checkResponse(res)) {
       page.vErr.textContent = res.msg
@@ -2075,51 +2125,175 @@ export default class MarketsPage extends BasePage {
     this.balanceWgt.updateAsset(this.openAsset.id)
   }
 
-  /* lotChanged is attached to the keyup and change events of the lots input. */
-  lotChanged () {
+  lotFieldKeyUpEvent () {
     const page = this.page
-    const lots = parseInt(page.lotField.value || '0')
-    if (lots <= 0) {
-      page.lotField.value = '0'
+
+    // We can't do anything with empty value here, and since it is a default
+    // we don't want to report is to be an issue either. Just make sure to
+    // reset both lots and quantity because both represent the same thing.
+    if (page.lotField.value === '') {
       page.qtyField.value = ''
-      this.previewQuoteAmt(false)
       return
     }
-    const lotSize = this.market.cfg.lotsize
-    page.lotField.value = String(lots)
-    // Conversion factor must be a multiple of 10.
-    page.qtyField.value = String(lots * lotSize / this.market.baseUnitInfo.conventional.conversionFactor)
-    this.previewQuoteAmt(true)
+
+    const [inputInvalid, adjusted,, adjQty] = this.parseLotInput()
+    if (inputInvalid || adjusted) {
+      // Let the user know that lot value he's entered was rounded down to the
+      // nearest integer number.
+      highlightOutlineRed(page.lotField)
+      highlightBackgroundRed(page.lostSizeBox)
+    }
+    if (inputInvalid) {
+      page.orderTotalPreview.textContent = ''
+      page.qtyField.value = ''
+      return
+    }
+    // Lots and quantity fields are tightly coupled to each other, when one is
+    // changed, we need to update the other one as well. Lot has already been
+    // updated by the user, update the other one here.
+    page.qtyField.value = String(adjQty)
+
+    this.previewTotal()
   }
 
-  /*
-   * quantityChanged is attached to the keyup and change events of the quantity
-   * input.
-   */
-  quantityChanged (finalize: boolean) {
+  lotFieldChangeEvent () {
     const page = this.page
-    const order = this.parseOrder()
-    if (order.qty < 0) {
-      page.lotField.value = '0'
+
+    // We can't do anything with empty value here, and since it is a default
+    // we don't want to report is to be an issue either. Just make sure to
+    // reset both lots and quantity because both represent the same thing.
+    if (page.lotField.value === '') {
       page.qtyField.value = ''
-      this.previewQuoteAmt(false)
       return
     }
-    const lotSize = this.market.cfg.lotsize
-    const lots = Math.floor(order.qty / lotSize)
-    const adjusted = lots * lotSize
-    page.lotField.value = String(lots)
-    if (!order.isLimit && !order.sell) return
-    // Conversion factor must be a multiple of 10.
-    if (finalize) page.qtyField.value = String(adjusted / this.market.baseUnitInfo.conventional.conversionFactor)
-    this.previewQuoteAmt(true)
+
+    const [inputInvalid, adjusted, adjLots, adjQty] = this.parseLotInput()
+    if (inputInvalid) {
+      // Disable submit button temporarily (that additionally draws his
+      // attention to order-form) to prevent user clicking on it while input
+      // auto-adjusting is in progress. Otherwise, he might not notice the rounding.
+      animateClick(page.submitBttn, page.submitBttnLoader)
+    }
+    if (inputInvalid || adjusted) {
+      // Let the user know that lot value he's entered was rounded down to the
+      // nearest integer number.
+      highlightOutlineRed(page.lotField)
+      highlightBackgroundRed(page.lostSizeBox)
+    }
+    page.lotField.value = String(adjLots)
+    page.qtyField.value = String(adjQty)
+
+    this.previewTotal()
+  }
+
+  // parseLotInput parses lot input and returns whether there are any
+  // parsing issues, whether rounding(adjustment) to it had happened, and
+  // returns adjusted lot value. If lot value couldn't be parsed (parsing
+  // issues), 0 values, not defaults, are returned for 2nd, 3rd, 4th value.
+  parseLotInput (): [boolean, boolean, number, number] {
+    const page = this.page
+    const market = this.market
+    const lotSize = market.cfg.lotsize
+
+    const lotsAdj = parseInt(page.lotField.value || '')
+    if (lotsAdj < 1) {
+      return [true, false, 0, 0]
+    }
+
+    const rounded = String(lotsAdj) !== page.lotField.value
+    const adjQty = lotsAdj * lotSize / market.baseUnitInfo.conventional.conversionFactor
+
+    return [false, rounded, lotsAdj, adjQty]
+  }
+
+  qtyFieldKeyUpEvent () {
+    const page = this.page
+
+    // We can't do anything with empty value here, and since it is a default
+    // we don't want to report is to be an issue either. Just make sure to
+    // reset both lots and quantity because both represent the same thing.
+    if (page.qtyField.value === '') {
+      page.lotField.value = ''
+      return
+    }
+
+    const [inputInvalid, adjusted, adjLots] = this.parseQtyInput()
+    if (inputInvalid || adjusted) {
+      // Let the user know that quantity he's entered was rounded down.
+      highlightOutlineRed(page.qtyField)
+      highlightBackgroundRed(page.lostSizeBox)
+    }
+    if (inputInvalid) {
+      page.orderTotalPreview.textContent = ''
+      page.lotField.value = ''
+      return
+    }
+    // Lots and quantity fields are tightly coupled to each other, when one is
+    // changed, we need to update the other one as well. Quantity has already been
+    // updated by the user, update the other one here.
+    page.lotField.value = String(adjLots)
+
+    this.previewTotal()
+  }
+
+  qtyFieldChangeEvent () {
+    const page = this.page
+
+    // We can't do anything with empty value here, and since it is a default
+    // we don't want to report is to be an issue either. Just make sure to
+    // reset both lots and quantity because both represent the same thing.
+    if (page.qtyField.value === '') {
+      page.lotField.value = ''
+      return
+    }
+
+    const [inputInvalid, adjusted, adjLots, adjQty] = this.parseQtyInput()
+    if (inputInvalid) {
+      // Disable submit button temporarily (that additionally draws his
+      // attention to order-form) to prevent user clicking on it while input
+      // auto-adjusting is in progress. Otherwise, he might not notice the rounding.
+      animateClick(page.submitBttn, page.submitBttnLoader)
+    }
+    if (inputInvalid || adjusted) {
+      // Let the user know that quantity he's entered was rounded down.
+      highlightOutlineRed(page.qtyField)
+      highlightBackgroundRed(page.lostSizeBox)
+    }
+    page.lotField.value = String(adjLots)
+    page.qtyField.value = String(adjQty)
+
+    this.previewTotal()
+  }
+
+  // parseQtyInput parses quantity input and returns whether there are any
+  // parsing issues, whether rounding(adjustment) to it had happened, and
+  // returns adjusted quantity value. If quantity value couldn't be parsed
+  // (parsing issues), 0 values, not defaults, are returned for 2nd, 3rd, 4th
+  // value.
+  parseQtyInput (): [boolean, boolean, number, number] {
+    const page = this.page
+    const market = this.market
+    const lotSize = market.cfg.lotsize
+
+    const qtyRawAtom = convertToAtoms(page.qtyField.value || '', market.baseUnitInfo.conventional.conversionFactor)
+    if (qtyRawAtom < 1) {
+      return [true, false, 0, 0]
+    }
+
+    const lotsRaw = qtyRawAtom / lotSize
+    const adjLots = Math.floor(lotsRaw)
+    const adjQtyAtom = adjLots * lotSize
+    const rounded = adjQtyAtom !== qtyRawAtom
+    const adjQty = adjQtyAtom / market.baseUnitInfo.conventional.conversionFactor
+
+    return [false, rounded, adjLots, adjQty]
   }
 
   /*
    * marketBuyChanged is attached to the keyup and change events of the quantity
    * input for the market-buy form.
    */
-  marketBuyChanged () {
+  marketBuyChangedEvent () {
     const page = this.page
     const qty = convertToAtoms(page.mktBuyField.value || '', this.market.quoteUnitInfo.conventional.conversionFactor)
     const gap = this.midGap()
@@ -2134,38 +2308,80 @@ export default class MarketsPage extends BasePage {
     page.mktBuyScore.textContent = Doc.formatCoinValue(received, this.market.baseUnitInfo)
   }
 
-  /*
-   * rateFieldChanged is attached to the keyup and change events of the rate
-   * input.
-   */
-  rateFieldChanged () {
-    // Truncate to rate step. If it is a market buy order, do not adjust.
-    const adjusted = this.adjustedRate()
-    if (adjusted <= 0) {
-      this.depthLines.input = []
-      this.drawChartLines()
-      this.page.rateField.value = '0'
+  rateFieldKeyUpEvent () {
+    const page = this.page
+
+    const [inputInvalid, adjusted] = this.parseRateInput()
+    if (inputInvalid || adjusted) {
+      // Let the user know that rate he's entered was rounded down.
+      highlightOutlineRed(page.rateField)
+      highlightBackgroundRed(page.rateStepBox)
+    }
+    if (inputInvalid) {
+      page.orderTotalPreview.textContent = ''
       return
     }
-    const order = this.parseOrder()
-    const r = adjusted / this.market.rateConversionFactor
-    this.page.rateField.value = String(r)
-    this.depthLines.input = [{
-      rate: r,
-      color: order.sell ? this.depthChart.theme.sellLine : this.depthChart.theme.buyLine
-    }]
-    this.drawChartLines()
-    this.previewQuoteAmt(true)
+    this.previewMax()
+    this.previewTotal()
+    this.drawChartLineInputRate()
+  }
+
+  rateFieldChangeEvent () {
+    const page = this.page
+
+    const [inputInvalid, adjusted, adjRate] = this.parseRateInput()
+    if (inputInvalid) {
+      // Disable submit button temporarily (that additionally draws his
+      // attention to order-form) to prevent user clicking on it while input
+      // auto-adjusting is in progress. Otherwise, he might not notice the rounding.
+      animateClick(page.submitBttn, page.submitBttnLoader)
+    }
+    if (inputInvalid || adjusted) {
+      // Let the user know that rate he's entered was rounded down.
+      highlightOutlineRed(page.rateField)
+      highlightBackgroundRed(page.rateStepBox)
+    }
+
+    page.rateField.value = String(adjRate)
+
+    this.previewMax()
+    this.previewTotal()
+    this.drawChartLineInputRate()
+  }
+
+  // parseRateInput parses rate(price) input and returns whether there are any
+  // parsing issues, whether rounding(adjustment) to rate-step had happened, and
+  // returns adjusted rate(price) value. If rate(price) couldn't be parsed (parsing
+  // issues), default rate value (current market price) is returned.
+  parseRateInput (): [boolean, boolean, number] {
+    const rawRateAtom = this.rateAtoms(this.page.rateField.value)
+    let adjRateAtom = this.adjustedRateAtoms(this.page.rateField.value)
+    const rateParsingIssue = isNaN(rawRateAtom) || rawRateAtom <= 0
+    if (rateParsingIssue) {
+      // Set rate to default value if we weren't able to parse user input.
+      // Note, this default value might need adjustment to rate-step.
+      adjRateAtom = this.adjustedRateAtoms(String(this.defaultRate()))
+    }
+    const rounded = adjRateAtom !== rawRateAtom
+    const adjRate = adjRateAtom / this.market.rateConversionFactor
+
+    return [rateParsingIssue, rounded, adjRate]
   }
 
   /*
-   * adjustedRate is the current rate field rate, rounded down to a
+   * rateAtoms is the current rate field value in atoms.
+   */
+  rateAtoms (rateStr: string | undefined): number {
+    if (!rateStr) return NaN
+    return convertToAtoms(rateStr, this.market.rateConversionFactor)
+  }
+
+  /*
+   * rateAtoms is the current rate field value in atoms, rounded down to a
    * multiple of rateStep.
    */
-  adjustedRate (): number {
-    const v = this.page.rateField.value
-    if (!v) return NaN
-    const rate = convertToAtoms(v, this.market.rateConversionFactor)
+  adjustedRateAtoms (rateStr: string | undefined): number {
+    const rate = this.rateAtoms(rateStr)
     const rateStep = this.market.cfg.ratestep
     return rate - (rate % rateStep)
   }
@@ -2294,19 +2510,19 @@ export default class MarketsPage extends BasePage {
   orderTableRow (orderBin: MiniOrder[]): OrderRow {
     const tr = this.page.rowTemplate.cloneNode(true) as OrderRow
     const { baseUnitInfo, rateConversionFactor } = this.market
-    const manager = new OrderTableRowManager(tr, orderBin, baseUnitInfo, rateConversionFactor)
-    tr.manager = manager
+
+    tr.manager = new OrderTableRowManager(tr, orderBin, baseUnitInfo, rateConversionFactor)
+
+    const rowRate = tr.manager.getRate() / rateConversionFactor
+
     bind(tr, 'click', () => {
-      this.reportDepthClick(tr.manager.getRate() / rateConversionFactor)
+      // rowRate must already be adjusted to rate-step, otherwise we have an order with
+      // invalid rate(price) in the orderbook.
+      this.reportDepthClick(rowRate)
     })
-    if (tr.manager.getRate() !== 0) {
+    if (rowRate !== 0) {
       Doc.bind(tr, 'mouseenter', () => {
-        const chart = this.depthChart
-        this.depthLines.hover = [{
-          rate: tr.manager.getRate() / rateConversionFactor,
-          color: tr.manager.isSell() ? chart.theme.sellLine : chart.theme.buyLine
-        }]
-        this.drawChartLines()
+        this.drawChartLineAtRate(rowRate)
       })
     }
     return tr
@@ -2339,6 +2555,21 @@ export default class MarketsPage extends BasePage {
   drawChartLines () {
     this.depthChart.setLines([...this.depthLines.hover, ...this.depthLines.input])
     this.depthChart.draw()
+  }
+
+  /* drawChartLineAtRate draws line on the chart that corresponds to provided rate . */
+  drawChartLineAtRate (rate: number) {
+    this.depthLines.input = [{
+      rate: rate,
+      color: this.isSell() ? this.depthChart.theme.sellLine : this.depthChart.theme.buyLine
+    }]
+    this.drawChartLines()
+  }
+
+  /* drawChartLineInputRate draws line on the chart that corresponds to user-input rate . */
+  drawChartLineInputRate () {
+    const inputRate = parseFloat(this.page.rateField.value || '0')
+    this.drawChartLineAtRate(inputRate)
   }
 
   /* candleDurationSelected sets the candleDur and loads the candles. */
@@ -2963,4 +3194,66 @@ function hostColor (host: string): string {
   const hosts = Object.keys(app().exchanges)
   hosts.sort()
   return generateHue(hosts.indexOf(host))
+}
+
+// highlightBackgroundRed will change element background color to red and back in
+// a smooth transition.
+function highlightBackgroundRed (element: PageElement) {
+  if (element.animating) {
+    // Don't want to interfere with already running animation.
+    return
+  }
+  element.animating = true
+
+  const red = 'rgba(128, 0, 0, 1)'
+
+  const prevColor = element.style.backgroundColor
+  element.style.backgroundColor = red
+
+  Doc.animate(animationLength, (progress: number) => {
+    element.style.backgroundColor = `rgba(128, 0, 0, ${0.5 - 0.5 * progress})`
+  }, 'easeIn')
+
+  setTimeout(function () {
+    element.style.backgroundColor = prevColor
+    element.animating = false
+  }, animationLength + 1)
+}
+
+// highlightOutlineRed will add red outline to the element and will smoothly remove
+// it afterwards.
+function highlightOutlineRed (element: PageElement) {
+  if (element.animating) {
+    // Don't want to interfere with already running animation.
+    return
+  }
+  element.animating = true
+
+  const red = 'rgba(128, 0, 0, 1)'
+
+  const prevOutline = element.style.outline
+  const prevOutlineColor = element.style.outlineColor
+  element.style.outline = '2px solid'
+  element.style.outlineColor = red
+
+  Doc.animate(animationLength, (progress: number) => {
+    element.style.outlineColor = `rgba(128, 0, 0, ${0.5 - 0.5 * progress})`
+  }, 'easeIn')
+
+  setTimeout(function () {
+    element.style.outline = prevOutline
+    element.style.outlineColor = prevOutlineColor
+    element.animating = false
+  }, animationLength + 1)
+}
+
+// animateClick will temporarily replace button with animation, and put it back
+// to give the user satisfying interaction.
+function animateClick (button: PageElement, animation: PageElement) {
+  Doc.hide(button)
+  Doc.show(animation)
+  setTimeout(function () {
+    Doc.hide(animation)
+    Doc.show(button)
+  }, 300) // 300ms seems fluent.
 }

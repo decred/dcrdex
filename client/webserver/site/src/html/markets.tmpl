@@ -233,12 +233,12 @@
 
                   {{- /* MARKET CONFIG */ -}}
                   <div class="d-flex justify-content-between my-2 fs14">
-                    <div>
+                    <div id="lostSizeBox">
                       [[[:title:lot_size]]]:
                       <span id="lotSize"></span>
                       <span data-unit="base"></span>
                     </div>
-                    <div>
+                    <div id="rateStepBox">
                       [[[Rate Step]]]:
                       <span id="rateStep"></span>
                       <span data-unit="quote"></span>
@@ -251,13 +251,15 @@
                         <span id="maxFromLots"></span>
                         <span id="maxFromLotsLbl">[[[lot]]]</span>
                       </span>
-                      <span id="maxAboveZero" class="d-hide">
-                        ,
-                        <span id="maxFromAmt"></span>
-                        <span id="maxFromTicker"></span>
-                        <!-- &rarr;
-                        <span id="maxToAmt"></span>
-                        <span id="maxToTicker"></span> -->
+                      <span id="maxQtyBox" class="d-hide">
+                        =
+                        <span id="maxAboveZero">
+                          <span id="maxFromAmt"></span>
+                          <span id="maxFromTicker"></span>
+                          <!-- &rarr;
+                          <span id="maxToAmt"></span>
+                          <span id="maxToTicker"></span> -->
+                        </span>
                       </span>
                     </div>
                   </div>
@@ -305,7 +307,7 @@
                   </div>
 
                   {{- /* ORDER PREVIEW */ -}}
-                  <div class="mt-2 fs14 text-end" id="orderPreview"></div>
+                  <div class="mt-2 fs14 text-end" id="orderTotalPreview"></div>
 
                   {{- /* TIME-IN-FORCE CHECK BOX */ -}}
                   <div class="my-1 text-start form-check" id="tifBox">
@@ -319,6 +321,9 @@
                   {{- /* SUBMIT ORDER BUTTON */ -}}
                   <div class="text-end">
                     <button id="submitBttn" type="button" class="my-1 fs14 submit text-center buygreen-bg"></button> {{/* textContent set by script */}}
+                    <div id="submitBttnLoader" class="loader flex-center d-hide">
+                      <div class="ico-spinner spinner"></div>
+                    </div>
                   </div>
                 </div>
                 <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="orderErr"></div>

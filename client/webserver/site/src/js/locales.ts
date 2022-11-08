@@ -20,6 +20,7 @@ export const ID_CALCULATING = 'ID_CALCULATING'
 export const ID_ESTIMATE_UNAVAILABLE = 'ID_ESTIMATE_UNAVAILABLE'
 export const ID_NO_ZERO_RATE = 'ID_NO_ZERO_RATE'
 export const ID_NO_ZERO_QUANTITY = 'ID_NO_ZERO_QUANTITY'
+export const ID_NO_QUANTITY_EXCEEDS_MAX = 'ID_NO_QUANTITY_EXCEEDS_MAX'
 export const ID_TRADE = 'ID_TRADE'
 export const ID_NO_ASSET_WALLET = 'ID_NO_ASSET_WALLET'
 export const ID_EXECUTED = 'ID_EXECUTED'
@@ -116,6 +117,7 @@ export const enUS: Locale = {
   [ID_ESTIMATE_UNAVAILABLE]: 'estimate unavailable',
   [ID_NO_ZERO_RATE]: 'zero rate not allowed',
   [ID_NO_ZERO_QUANTITY]: 'zero quantity not allowed',
+  [ID_NO_QUANTITY_EXCEEDS_MAX]: 'not enough funds',
   [ID_TRADE]: 'trade',
   [ID_NO_ASSET_WALLET]: 'No {{ asset }} wallet',
   [ID_EXECUTED]: 'executed',
