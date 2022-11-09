@@ -124,8 +124,6 @@ func NewDB(dbPath string, logger dex.Logger) (dexdb.DB, error) {
 	_, err := os.Stat(dbPath)
 	isNew := os.IsNotExist(err)
 
-	logger.Infof("opening database at: %s", dbPath)
-
 	db, err := bbolt.Open(dbPath, 0600, &bbolt.Options{Timeout: 3 * time.Second})
 	if err != nil {
 		return nil, err
@@ -161,18 +159,25 @@ func NewDB(dbPath string, logger dex.Logger) (dexdb.DB, error) {
 				return err
 			}
 
-			bdb.log.Infof("creating new version %d database", DBVersion)
-
 			return nil
 		})
 		if err != nil {
 			return nil, err
 		}
 
+		bdb.log.Infof("Created and started database (version = %d, file = %s)", DBVersion, dbPath)
+
 		return bdb, nil
 	}
 
-	return bdb, bdb.upgradeDB()
+	err = bdb.upgradeDB()
+	if err != nil {
+		return nil, err
+	}
+
+	bdb.log.Infof("Started database (version = %d, file = %s)", DBVersion, dbPath)
+
+	return bdb, nil
 }
 
 func (db *BoltDB) fileSize(path string) int64 {
