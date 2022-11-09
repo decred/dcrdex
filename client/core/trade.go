@@ -1189,7 +1189,7 @@ func (t *trackedTrade) isActive() bool {
 		// 	"Order: %v, Refund coin: %v, ContractData: %x, Revoked: %v", match,
 		// 	match.Side, match.Status, t.ID(),
 		// 	proof.RefundCoin, proof.ContractData, proof.IsRevoked())
-		if t.matchIsActive(match, true) {
+		if t.matchIsActive(match) {
 			return true
 		}
 	}
@@ -1203,35 +1203,25 @@ func (t *trackedTrade) matchIsRevoked(match *matchTracker) bool {
 	return match.MetaData.Proof.IsRevoked()
 }
 
-// Matches are inactive if: (1) status is complete, (2) it is refunded, or (3)
-// it is revoked and this side of the match requires no further action like
-// refund or auto-redeem. This should not be applied to cancel order matches.
-// If redeemMustConfirm is true, a match that has completed but the redemption
-// has not yet been confirmed will still be considered active.
-func (t *trackedTrade) matchIsActive(match *matchTracker, redeemMustConfirm bool) bool {
+// Matches are inactive if: (1) status is confirmed, (2) it is refunded, or (3)
+// it is revoked and this side of the match requires no further action.
+func (t *trackedTrade) matchIsActive(match *matchTracker) bool {
 	proof := &match.MetaData.Proof
 	isActive := db.MatchIsActive(match.UserMatch, proof)
 	if proof.IsRevoked() && !isActive {
 		t.dc.log.Tracef("Revoked match %s (%v) in status %v considered inactive.",
 			match, match.Side, match.Status)
 	}
-
-	if !isActive {
-		return false
-	}
-
-	status, side := match.Status, match.Side
-	return redeemMustConfirm ||
-		(side == order.Maker && status < order.MakerRedeemed) ||
-		(side == order.Taker && status < order.MatchComplete)
+	return isActive
 }
 
-func (t *trackedTrade) activeMatches(redeemMustConfirm bool) []*matchTracker {
+// activeMatches returns active matches.
+func (t *trackedTrade) activeMatches() []*matchTracker {
 	var actives []*matchTracker
 	t.mtx.RLock()
 	defer t.mtx.RUnlock()
 	for _, match := range t.matches {
-		if t.matchIsActive(match, redeemMustConfirm) {
+		if t.matchIsActive(match) {
 			actives = append(actives, match)
 		}
 	}
@@ -1795,7 +1785,7 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 		if match.Address == "" {
 			return nil // a cancel order match
 		}
-		if !t.matchIsActive(match, true) {
+		if !t.matchIsActive(match) {
 			return nil // either refunded or revoked requiring no action on this side of the match
 		}
 
