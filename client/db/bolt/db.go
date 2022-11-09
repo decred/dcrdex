@@ -124,6 +124,8 @@ func NewDB(dbPath string, logger dex.Logger) (dexdb.DB, error) {
 	_, err := os.Stat(dbPath)
 	isNew := os.IsNotExist(err)
 
+	logger.Infof("opening database at: %s", dbPath)
+
 	db, err := bbolt.Open(dbPath, 0600, &bbolt.Options{Timeout: 3 * time.Second})
 	if err != nil {
 		return nil, err
