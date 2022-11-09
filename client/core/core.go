@@ -1408,6 +1408,9 @@ type Core struct {
 	localePrinter *message.Printer
 
 	// construction or init sets credentials
+	loginMtx sync.Mutex
+	loggedIn bool
+
 	credMtx     sync.RWMutex
 	credentials *db.PrimaryCredentials
 
@@ -1489,14 +1492,7 @@ func New(cfg *Config) (*Core, error) {
 		if err != nil {
 			return nil, fmt.Errorf("unable to parse requested language: %w", err)
 		}
-		var langs []language.Tag
-		for locale := range locales {
-			tag, err := language.Parse(locale)
-			if err != nil {
-				return nil, fmt.Errorf("bad %v: %w", locale, err)
-			}
-			langs = append(langs, tag)
-		}
+		langs := translator.Langs()
 		matcher := language.NewMatcher(langs)
 		_, idx, conf := matcher.Match(acceptLang) // use index because tag may end up as something hyper specific like zh-Hans-u-rg-cnzzzz
 		tag := langs[idx]
@@ -1508,13 +1504,9 @@ func New(cfg *Config) (*Core, error) {
 			return nil, fmt.Errorf("no match for %q in recognized languages %v", cfg.Language, langs)
 		}
 		lang = tag
+		translator.SetLanguage(lang)
 	}
 	cfg.Logger.Debugf("Using locale printer for %q", lang)
-
-	locale, found := locales[lang.String()]
-	if !found {
-		return nil, fmt.Errorf("No translations for language %s", lang)
-	}
 
 	// Try to get the primary credentials, but ignore no-credentials error here
 	// because the client may not be initialized.
@@ -1549,8 +1541,6 @@ func New(cfg *Config) (*Core, error) {
 		latencyQ:      wait.NewTickerQueue(recheckInterval),
 		noteChans:     make(map[uint64]chan Notification),
 
-		locale:             locale,
-		localePrinter:      message.NewPrinter(lang),
 		seedGenerationTime: seedGenerationTime,
 
 		fiatRateSources: make(map[string]*commonRateSource),

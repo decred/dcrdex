@@ -38,8 +38,6 @@ import (
 	serverdex "decred.org/dcrdex/server/dex"
 	"github.com/decred/dcrd/crypto/blake256"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
-	"golang.org/x/text/language"
-	"golang.org/x/text/message"
 )
 
 func init() {
@@ -1289,9 +1287,6 @@ func newTestRig() *testRig {
 			newCrypter: func([]byte) encrypt.Crypter { return crypter },
 			reCrypter:  func([]byte, []byte) (encrypt.Crypter, error) { return crypter, crypter.recryptErr },
 			noteChans:  make(map[uint64]chan Notification),
-
-			locale:        originLocale,
-			localePrinter: message.NewPrinter(language.AmericanEnglish),
 
 			fiatRateSources: make(map[string]*commonRateSource),
 		},
