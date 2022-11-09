@@ -551,8 +551,9 @@ export default class WalletsPage extends BasePage {
 
   showAvailableMarkets (assetID: number) {
     const page = this.page
+    const exchanges = app().user.exchanges
     const markets: [string, Market][] = []
-    for (const xc of Object.values(app().user.exchanges)) {
+    for (const xc of Object.values(exchanges)) {
       if (!xc.markets) continue
       for (const mkt of Object.values(xc.markets)) {
         if (mkt.baseid === assetID || mkt.quoteid === assetID) markets.push([xc.host, mkt])
@@ -588,7 +589,7 @@ export default class WalletsPage extends BasePage {
       tmpl.quoteSymbol.appendChild(Doc.symbolize(quotesymbol))
 
       if (spot) {
-        const convRate = app().conventionalRate(baseid, quoteid, spot.rate)
+        const convRate = app().conventionalRate(baseid, quoteid, spot.rate, exchanges[host])
         tmpl.price.textContent = fourSigFigs(convRate)
         tmpl.priceQuoteUnit.textContent = quotesymbol.toUpperCase()
         tmpl.priceBaseUnit.textContent = basesymbol.toUpperCase()

@@ -767,14 +767,16 @@ export default class MarketsPage extends BasePage {
       this.maxEstimateTimer = null
     }
     const mktId = marketID(baseCfg.symbol, quoteCfg.symbol)
+    const baseAsset = app().assets[base]
+    const quoteAsset = app().assets[quote]
     this.market = {
       dex: dex,
       sid: mktId, // A string market identifier used by the DEX.
       cfg: dex.markets[mktId],
       // app().assets is a map of core.SupportedAsset type, which can be found at
       // client/core/types.go.
-      base: app().assets[base],
-      quote: app().assets[quote],
+      base: baseAsset,
+      quote: quoteAsset,
       baseUnitInfo: bui,
       quoteUnitInfo: qui,
       maxSell: null,
@@ -788,7 +790,7 @@ export default class MarketsPage extends BasePage {
       buyBalance: 0
     }
 
-    Doc.setVis(!(this.market.base.wallet && this.market.quote.wallet), page.noWallet)
+    Doc.setVis(!(baseAsset && quoteAsset) || !(baseAsset.wallet && quoteAsset.wallet), page.noWallet)
     this.setStats()
     this.refreshRecentMatchesTable()
 

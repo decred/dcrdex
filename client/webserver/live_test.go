@@ -166,7 +166,7 @@ func mkMrkt(base, quote string) *core.Market {
 	rate := uint64(rand.Intn(1e3)) * rateStep
 	change24 := rand.Float64()*0.3 - .15
 
-	return &core.Market{
+	mkt := &core.Market{
 		Name:            fmt.Sprintf("%s_%s", base, quote),
 		BaseID:          baseID,
 		BaseSymbol:      base,
@@ -176,7 +176,6 @@ func mkMrkt(base, quote string) *core.Market {
 		RateStep:        rateStep,
 		MarketBuyBuffer: rand.Float64() + 1,
 		EpochLen:        uint64(epochDuration.Milliseconds()),
-		Orders:          userOrders(mktID),
 		SpotPrice: &msgjson.Spot{
 			Stamp:   uint64(time.Now().UnixMilli()),
 			BaseID:  baseID,
@@ -187,28 +186,16 @@ func mkMrkt(base, quote string) *core.Market {
 			Vol24:    lotSize * uint64(50000*rand.Float32()),
 		},
 	}
+
+	if (baseID != unsupportedAssetID) && (quoteID != unsupportedAssetID) {
+		mkt.Orders = userOrders(mktID)
+	}
+
+	return mkt
 }
 
-func mkSupportedAsset(symbol string, state *tWalletState, bal *core.WalletBalance) *core.SupportedAsset {
+func mkSupportedAsset(symbol string, state *core.WalletState) *core.SupportedAsset {
 	assetID, _ := dex.BipSymbolID(symbol)
-	var wallet *core.WalletState
-	if state != nil {
-		syncPct := atomic.LoadUint32(&state.syncProgress)
-		wallet = &core.WalletState{
-			Symbol:       unbip(assetID),
-			AssetID:      assetID,
-			Open:         state.open,
-			Running:      state.running,
-			Disabled:     state.disabled,
-			Address:      ordertest.RandomAddress(),
-			Balance:      bal,
-			Units:        unitInfo(assetID).Conventional.Unit,
-			Encrypted:    true,
-			Synced:       syncPct == 100,
-			SyncProgress: float32(syncPct) / 100,
-			Traits:       asset.WalletTrait(rand.Uint32()),
-		}
-	}
 	winfo := winfos[assetID]
 	var name string
 	var unitInfo dex.UnitInfo
@@ -219,11 +206,12 @@ func mkSupportedAsset(symbol string, state *tWalletState, bal *core.WalletBalanc
 		name = winfo.Name
 		unitInfo = winfo.UnitInfo
 	}
+
 	return &core.SupportedAsset{
 		ID:                    assetID,
 		Symbol:                symbol,
-		Wallet:                wallet,
 		Info:                  winfo,
+		Wallet:                state,
 		Token:                 tinfos[assetID],
 		Name:                  name,
 		UnitInfo:              unitInfo,
@@ -366,6 +354,16 @@ var tExchanges = map[string]*core.Exchange{
 				Confs: 10,
 				Amt:   1e11,
 			},
+			"mona": {
+				ID:    22,
+				Confs: 5,
+				Amt:   1e10,
+			},
+			"vtc": {
+				ID:    28,
+				Confs: 5,
+				Amt:   1e11,
+			},
 			"kmd": { // Not-supported
 				ID:    unsupportedAssetID,
 				Confs: 10,
@@ -395,6 +393,26 @@ var tExchanges = map[string]*core.Exchange{
 				Confs: 2,
 				Amt:   1e6,
 			},
+			"vtc": {
+				ID:    28,
+				Confs: 5,
+				Amt:   1e11,
+			},
+			"mona": {
+				ID:    22,
+				Confs: 5,
+				Amt:   1e10,
+			},
+			"kmd": { // Not-supported
+				ID:    unsupportedAssetID,
+				Confs: 10,
+				Amt:   1e12,
+			},
+			"ltc": {
+				ID:    2,
+				Confs: 5,
+				Amt:   1e10,
+			},
 		},
 		CandleDurs: []string{"5m", "1h", "24h"},
 	},
@@ -423,6 +441,7 @@ func (c *tCoin) Confirmations(context.Context) (uint32, error) {
 }
 
 type tWalletState struct {
+	walletType   string
 	open         bool
 	running      bool
 	disabled     bool
@@ -1265,6 +1284,8 @@ var winfos = map[uint32]*asset.WalletInfo{
 		},
 		Name: "Dogecoin",
 		AvailableWallets: []*asset.WalletDefinition{{
+			Type:       "2",
+			Tab:        "External",
 			ConfigOpts: configOpts,
 		}},
 	},
@@ -1278,6 +1299,8 @@ var winfos = map[uint32]*asset.WalletInfo{
 		},
 		Name: "Vertcoin",
 		AvailableWallets: []*asset.WalletDefinition{{
+			Type:       "2",
+			Tab:        "External",
 			ConfigOpts: configOpts,
 		}},
 	},
@@ -1286,6 +1309,8 @@ var winfos = map[uint32]*asset.WalletInfo{
 		Name:     "Bitcoin Cash",
 		UnitInfo: dexbch.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{{
+			Type:       "2",
+			Tab:        "External",
 			ConfigOpts: configOpts,
 		}},
 	},
@@ -1312,16 +1337,19 @@ func (c *TCore) walletState(assetID uint32) *core.WalletState {
 	if w == nil {
 		return nil
 	}
+
 	syncPct := atomic.LoadUint32(&w.syncProgress)
 	return &core.WalletState{
 		Symbol:       unbip(assetID),
 		AssetID:      assetID,
+		WalletType:   w.walletType,
 		Open:         w.open,
 		Running:      w.running,
 		Address:      ordertest.RandomAddress(),
 		Balance:      c.balances[assetID],
 		Units:        unitInfo(assetID).AtomicUnit,
 		Encrypted:    true,
+		PeerCount:    10,
 		Synced:       syncPct == 100,
 		SyncProgress: float32(syncPct) / 100,
 		Traits:       asset.WalletTrait(rand.Uint32()),
@@ -1369,9 +1397,10 @@ func (c *TCore) createWallet(form *core.WalletForm, synced bool) (done chan stru
 	done = make(chan struct{})
 
 	tWallet := &tWalletState{
-		running:  true,
-		open:     true,
-		settings: form.Config,
+		walletType: form.Type,
+		running:    true,
+		open:       true,
+		settings:   form.Config,
 	}
 	c.wallets[form.AssetID] = tWallet
 
@@ -1634,15 +1663,15 @@ func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
 	return map[uint32]*core.SupportedAsset{
-		0:     mkSupportedAsset("btc", c.wallets[0], c.balances[0]),
-		42:    mkSupportedAsset("dcr", c.wallets[42], c.balances[42]),
-		2:     mkSupportedAsset("ltc", c.wallets[2], c.balances[2]),
-		22:    mkSupportedAsset("mona", c.wallets[22], c.balances[22]),
-		3:     mkSupportedAsset("doge", c.wallets[3], c.balances[3]),
-		28:    mkSupportedAsset("vtc", c.wallets[28], c.balances[28]),
-		60:    mkSupportedAsset("eth", c.wallets[60], c.balances[60]),
-		145:   mkSupportedAsset("bch", c.wallets[145], c.balances[145]),
-		60000: mkSupportedAsset("dextt.eth", c.wallets[60000], c.balances[60000]),
+		0:     mkSupportedAsset("btc", c.walletState(0)),
+		42:    mkSupportedAsset("dcr", c.walletState(42)),
+		2:     mkSupportedAsset("ltc", c.walletState(2)),
+		22:    mkSupportedAsset("mona", c.walletState(22)),
+		3:     mkSupportedAsset("doge", c.walletState(3)),
+		28:    mkSupportedAsset("vtc", c.walletState(28)),
+		60:    mkSupportedAsset("eth", c.walletState(60)),
+		145:   mkSupportedAsset("bch", c.walletState(145)),
+		60000: mkSupportedAsset("dextt.eth", c.walletState(60000)),
 	}
 }
 
