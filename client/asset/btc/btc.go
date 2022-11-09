@@ -341,11 +341,12 @@ type BTCCloneCFG struct {
 	// NonSegwitSigner can be true if the transaction signature hash data is not
 	// the standard for non-segwit Bitcoin. If nil, txscript.
 	NonSegwitSigner TxInSigner
-	// FeeEstimator provides a way to get fees given a context, a RawRequest-enabled
-	// client, a confirmation target, a bool checking if the client is allowed
-	// or not to make external requests and the network.
-	FeeEstimator func(ctx context.Context, rawRequester RawRequester, confTarget uint64,
-		externalAllowed bool, net dex.Network) (fee uint64, err error)
+	// FeeEstimator provides a way to get fees given an RawRequest-enabled
+	// client and a confirmation target.
+	FeeEstimator func(RawRequester, uint64) (uint64, error)
+	// ExternalFeeEstimator should be supplied if the clone provides the
+	// apifeefallback ConfigOpt.
+	ExternalFeeEstimator func(context.Context, dex.Network) (uint64, error)
 	// OmitAddressType causes the address type (bech32, legacy) to be omitted
 	// from calls to getnewaddress.
 	OmitAddressType bool
@@ -789,7 +790,8 @@ type baseWallet struct {
 	zecStyleBalance   bool
 	segwit            bool
 	signNonSegwit     TxInSigner
-	estimateFee       func(context.Context, RawRequester, uint64, bool, dex.Network) (uint64, error) // TODO: resolve the awkwardness of an RPC-oriented func in a generic framework
+	estimateFee       func(RawRequester, uint64) (uint64, error) // TODO: resolve the awkwardness of an RPC-oriented func in a generic framework
+	fetchExternalFee  func(context.Context, dex.Network) (uint64, error)
 	decodeAddr        dexbtc.AddressDecoder
 	deserializeTx     func([]byte) (*wire.MsgTx, error)
 	serializeTx       func(*wire.MsgTx) ([]byte, error)
@@ -1006,6 +1008,8 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 		DefaultFallbackFee:  defaultFee,
 		DefaultFeeRateLimit: defaultFeeRateLimit,
 		Segwit:              true,
+		// Add our fee rate fetcher.
+		ExternalFeeEstimator: externalFeeEstimator,
 	}
 
 	switch cfg.Type {
@@ -1174,6 +1178,7 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		initTxSizeBase:      uint64(initTxSizeBase),
 		signNonSegwit:       nonSegwitSigner,
 		estimateFee:         cfg.FeeEstimator,
+		fetchExternalFee:    cfg.ExternalFeeEstimator,
 		decodeAddr:          addrDecoder,
 		stringAddr:          addrStringer,
 		walletInfo:          cfg.WalletInfo,
@@ -1474,8 +1479,12 @@ func (btc *baseWallet) feeRate(ctx context.Context, _ RawRequester, confTarget u
 			btc.log.Warnf("Failed to get local fee rate estimate: %v", err)
 			return 0, err
 		}
+		if btc.fetchExternalFee == nil {
+			btc.log.Debug("API fallback allowed but no fetcher provided for %s", btc.symbol)
+			return 0, err
+		}
 		btc.log.Debug("Retrieving fee rate from external API: ", externalApiUrl)
-		estimatedFee, err := externalFeeEstimator(ctx, net)
+		estimatedFee, err := btc.fetchExternalFee(btc.ctx, btc.Network)
 		if err != nil {
 			btc.log.Errorf("Failed to get fee rate from external API: %v", err)
 			return 0, err
