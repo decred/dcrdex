@@ -1668,31 +1668,30 @@ export default class MarketsPage extends BasePage {
     page.vPreorderErrTip.dataset.tooltip = msg
   }
 
-  showPreOrderAdvancedOptions (order: TradeForm, swap: PreSwap, redeem: PreRedeem, changed: ()=>void) {
+  showPreOrderAdvancedOptions () {
     const page = this.page
     Doc.hide(page.showAdvancedOptions)
-    Doc.show(page.hideAdvancedOptions)
-    this.reloadOrderOpts(order, swap, redeem, true, changed)
+    Doc.show(page.hideAdvancedOptions, page.vOtherOrderOpts)
   }
 
-  hidePreOrderAdvancedOptions (order: TradeForm, swap: PreSwap, redeem: PreRedeem, changed: ()=>void) {
+  hidePreOrderAdvancedOptions () {
     const page = this.page
-    Doc.hide(page.hideAdvancedOptions)
+    Doc.hide(page.hideAdvancedOptions, page.vOtherOrderOpts)
     Doc.show(page.showAdvancedOptions)
-    this.reloadOrderOpts(order, swap, redeem, false, changed)
   }
 
-  reloadOrderOpts (order: TradeForm, swap: PreSwap, redeem: PreRedeem, showAll: boolean, changed: ()=>void) {
+  reloadOrderOpts (order: TradeForm, swap: PreSwap, redeem: PreRedeem, changed: ()=>void) {
     const page = this.page
-    Doc.empty(page.vOrderOpts)
+    Doc.empty(page.vDefaultOrderOpts, page.vOtherOrderOpts)
     const addOption = (opt: OrderOption, isSwap: boolean) => {
-      if (opt.showByDefault || showAll) {
-        page.vOrderOpts.appendChild(OrderUtil.optionElement(opt, order, changed, isSwap))
-      }
+      const el = OrderUtil.optionElement(opt, order, changed, isSwap)
+      if (opt.showByDefault) page.vDefaultOrderOpts.appendChild(el)
+      else page.vOtherOrderOpts.appendChild(el)
     }
     for (const opt of swap.options || []) addOption(opt, true)
     for (const opt of redeem.options || []) addOption(opt, false)
-    app().bindTooltips(page.vOrderOpts)
+    app().bindTooltips(page.vDefaultOrderOpts)
+    app().bindTooltips(page.vOtherOrderOpts)
   }
 
   /* preOrder loads the options and fetches pre-order estimates */
@@ -1718,9 +1717,9 @@ export default class MarketsPage extends BasePage {
         })
       }
       // bind show or hide advanced pre order options.
-      Doc.bind(page.showAdvancedOptions, 'click', () => { this.showPreOrderAdvancedOptions(order, swap, redeem, changed) })
-      Doc.bind(page.hideAdvancedOptions, 'click', () => { this.hidePreOrderAdvancedOptions(order, swap, redeem, changed) })
-      this.reloadOrderOpts(order, swap, redeem, false, changed)
+      Doc.bind(page.showAdvancedOptions, 'click', () => { this.showPreOrderAdvancedOptions() })
+      Doc.bind(page.hideAdvancedOptions, 'click', () => { this.hidePreOrderAdvancedOptions() })
+      this.reloadOrderOpts(order, swap, redeem, changed)
     }
 
     refreshPreorder()
