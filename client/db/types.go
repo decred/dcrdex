@@ -354,13 +354,12 @@ func MatchIsActive(match *order.UserMatch, proof *MatchProof) bool {
 		// - NewlyMatched requires no further action from either side
 		// - MakerSwapCast requires no further action from the taker
 		// - (TakerSwapCast requires action on both sides)
-		// - MakerRedeemed requires no further action from the maker
-		// - MatchComplete requires no further action. This happens if taker
-		//   does not have server's ack of their redeem request (RedeemSig).
+		// Matches that make it to MakerRedeemed or MatchComplete must
+		// stay active until the redeem is confirmed. When the redeem
+		// is confirmed is up to the asset and differs between assets.
 		status, side := match.Status, match.Side
-		if status == order.NewlyMatched || status >= order.MatchComplete ||
-			(status == order.MakerSwapCast && side == order.Taker) ||
-			(status == order.MakerRedeemed && side == order.Maker) {
+		if status == order.NewlyMatched ||
+			(status == order.MakerSwapCast && side == order.Taker) {
 			return false
 		}
 	}

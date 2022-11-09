@@ -519,10 +519,7 @@ func testMakerGhostingAfterTakerRedeem(s *simulationTest) error {
 	defer s.client1.filteredConn.requestFilter.Store(func(string) error { return nil })
 	defer s.client2.filteredConn.requestFilter.Store(func(string) error { return nil })
 
-	// TODO: Currently taker redeemer will not have its redeem confirmed
-	// when match is server revoked. That should be changed and this
-	// changed to order.MatchConfirmed.
-	return s.simpleTradeTest(qty, rate, order.MatchComplete)
+	return s.simpleTradeTest(qty, rate, order.MatchConfirmed)
 }
 
 // TestOrderStatusReconciliation simulates a few conditions that could cause a
@@ -1144,11 +1141,6 @@ func (s *simulationTest) monitorTrackedTrade(client *simulationClient, tracker *
 	maxTradeDuration := 4 * time.Minute
 	var waitedForOtherSideMakerInit, waitedForOtherSideTakerInit bool
 
-	// TODO: Remove this when the makerghost todo is fixed.
-	if finalStatus == order.MatchComplete {
-		finalStatus = order.MakerRedeemed
-	}
-
 	tryUntil(s.ctx, maxTradeDuration, func() bool {
 		var completedTrades int
 		mineAssets := make(map[uint32]uint32)
@@ -1227,14 +1219,6 @@ func (s *simulationTest) monitorTrackedTrade(client *simulationClient, tracker *
 					nBlocks = 8
 				}
 				assetID := tracker.wallets.toWallet.AssetID
-				mineAssets[assetID] = nBlocks
-				logIt("redeem", assetID, nBlocks)
-			}
-			// TODO: Remove this when the makerghost todo is fixed.
-			if accountBIPs[tracker.wallets.toWallet.AssetID] && finalStatus == order.MakerRedeemed &&
-				side == order.Taker && status >= order.MakerRedeemed {
-				assetID := tracker.wallets.toWallet.AssetID
-				nBlocks := uint32(14)
 				mineAssets[assetID] = nBlocks
 				logIt("redeem", assetID, nBlocks)
 			}

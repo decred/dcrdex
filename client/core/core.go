@@ -803,7 +803,15 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 	dc.tradeMtx.RLock()
 	defer dc.tradeMtx.RUnlock()
 	for oid, trade := range dc.trades {
-		activeMatches := trade.activeMatches(false)
+		var activeMatches []*matchTracker
+		for _, m := range trade.activeMatches() {
+			// Server is not expected to report matches that have been fully
+			// redeemed or are revoked. Only client cares about redeem confs.
+			if m.Status >= order.MatchComplete || m.MetaData.Proof.IsRevoked() {
+				continue
+			}
+			activeMatches = append(activeMatches, m)
+		}
 		if len(activeMatches) == 0 {
 			continue
 		}
@@ -7674,7 +7682,7 @@ func (c *Core) schedTradeTick(tracker *trackedTrade) {
 		}
 	}
 
-	numMatches := len(tracker.activeMatches(true))
+	numMatches := len(tracker.activeMatches())
 	switch numMatches {
 	case 0:
 		return
