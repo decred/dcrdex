@@ -754,7 +754,6 @@ func (w *rpcWallet) unlockWallet(ctx context.Context, passphrase string, timeout
 func (w *rpcWallet) AccountUnlocked(ctx context.Context, acctName string) (bool, error) {
 	// First return locked status of the account, falling back to walletinfo if
 	// the account is not individually password protected.
-	var res *walletjson.AccountUnlockedResult
 	res, err := w.rpcClient.AccountUnlocked(ctx, acctName)
 	if err != nil {
 		return false, err
@@ -805,7 +804,6 @@ func (w *rpcWallet) LockAccount(ctx context.Context, acctName string) error {
 // UnlockAccount unlocks the specified account or the wallet if account is not
 // encrypted. Part of the Wallet interface.
 func (w *rpcWallet) UnlockAccount(ctx context.Context, pw []byte, acctName string) error {
-	var res *walletjson.AccountUnlockedResult
 	res, err := w.rpcClient.AccountUnlocked(ctx, acctName)
 	if err != nil {
 		return err
