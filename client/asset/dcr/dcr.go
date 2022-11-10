@@ -800,10 +800,8 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		}
 	}()
 
-	cfg := dcr.config()
-
 	// Validate accounts early on to prevent errors later.
-	for _, acct := range []string{cfg.primaryAcct, cfg.unmixedAccount, cfg.tradingAccount} {
+	for _, acct := range dcr.allAccounts() {
 		if acct == "" {
 			continue
 		}
@@ -3154,7 +3152,7 @@ func (dcr *ExchangeWallet) Lock() error {
 // Locked will be true if the wallet is currently locked.
 // Q: why are we ignoring RPC errors in this?
 func (dcr *ExchangeWallet) Locked() bool {
-	for _, acct := range dcr.fundingAccounts() {
+	for _, acct := range dcr.allAccounts() {
 		unlocked, err := dcr.wallet.AccountUnlocked(dcr.ctx, acct)
 		if err != nil {
 			dcr.log.Errorf("error checking account lock status %v", err)
