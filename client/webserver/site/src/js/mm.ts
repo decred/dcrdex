@@ -10,7 +10,9 @@ import {
   MaxSell,
   MaxBuy,
   MarketReport,
-  SupportedAsset
+  SupportedAsset,
+  MakerProgram,
+  GapEngineCfg
 } from './registry'
 import Doc from './doc'
 import BasePage from './basepage'
@@ -28,6 +30,8 @@ const GapStrategyAbsolute = 'absolute'
 const GapStrategyAbsolutePlus = 'absolute-plus'
 const GapStrategyPercent = 'percent'
 const GapStrategyPercentPlus = 'percent-plus'
+
+const GapEngineID = 'GapEngine'
 
 interface HostedMarket extends Market {
   host: string
@@ -714,6 +718,10 @@ export default class MarketMakerPage extends BasePage {
   setEditProgram (report: BotReport): void {
     const { createOpts, page } = this
     const pgm = report.program
+    if (!pgm.gapEngineCfg) {
+      console.error('no gap engine cfg')
+      return
+    }
     const [b, q] = [app().assets[pgm.baseID], app().assets[pgm.quoteID]]
     const mkt = app().exchanges[pgm.host].markets[`${b.symbol}_${q.symbol}`]
     this.setMarket([{
@@ -726,24 +734,24 @@ export default class MarketMakerPage extends BasePage {
     this.editProgram = report
     page.createBox.classList.add('edit')
     page.programsBox.classList.add('edit')
-    page.lotsInput.value = String(pgm.lots)
-    createOpts.oracleWeighting = pgm.oracleWeighting
-    this.weightOpt.setValue(pgm.oracleWeighting)
-    createOpts.oracleBias = pgm.oracleBias
-    this.biasOpt.setValue(pgm.oracleBias)
-    createOpts.driftTolerance = pgm.driftTolerance
-    this.driftToleranceOpt.setValue(pgm.driftTolerance)
-    page.gapStrategySelect.value = pgm.gapStrategy
+    page.lotsInput.value = String(pgm.gapEngineCfg.lots)
+    createOpts.oracleWeighting = pgm.gapEngineCfg.oracleWeighting
+    this.weightOpt.setValue(pgm.gapEngineCfg.oracleWeighting)
+    createOpts.oracleBias = pgm.gapEngineCfg.oracleBias
+    this.biasOpt.setValue(pgm.gapEngineCfg.oracleBias)
+    createOpts.driftTolerance = pgm.gapEngineCfg.driftTolerance
+    this.driftToleranceOpt.setValue(pgm.gapEngineCfg.driftTolerance)
+    page.gapStrategySelect.value = pgm.gapEngineCfg.gapStrategy
     this.updateGapStrategyInputVisibility()
     this.createOptsUpdated()
 
-    switch (pgm.gapStrategy) {
+    switch (pgm.gapEngineCfg.gapStrategy) {
       case GapStrategyPercent:
       case GapStrategyPercentPlus:
-        this.gapPercentOpt.setValue(pgm.gapFactor)
+        this.gapPercentOpt.setValue(pgm.gapEngineCfg.gapFactor)
         break
       case GapStrategyMultiplier:
-        this.gapMultiplierOpt.setValue(pgm.gapFactor)
+        this.gapMultiplierOpt.setValue(pgm.gapEngineCfg.gapFactor)
     }
 
     Doc.bind(page.programsBox, 'click', () => this.leaveEditMode())
@@ -824,11 +832,12 @@ export default class MarketMakerPage extends BasePage {
     Doc.hide(tmpl.programRunning, tmpl.programPaused)
     if (report.running) Doc.show(tmpl.programRunning)
     else Doc.show(tmpl.programPaused)
-    tmpl.lots.textContent = String(pgm.lots)
-    tmpl.boost.textContent = `${(pgm.gapFactor * 100).toFixed(1)}%`
-    tmpl.driftTolerance.textContent = `${(pgm.driftTolerance * 100).toFixed(2)}%`
-    tmpl.oracleWeight.textContent = `${(pgm.oracleWeighting * 100).toFixed(0)}%`
-    tmpl.oracleBias.textContent = `${(pgm.oracleBias * 100).toFixed(1)}%`
+    if (!pgm.gapEngineCfg) return
+    tmpl.lots.textContent = String(pgm.gapEngineCfg.lots)
+    tmpl.boost.textContent = `${(pgm.gapEngineCfg.gapFactor * 100).toFixed(1)}%`
+    tmpl.driftTolerance.textContent = `${(pgm.gapEngineCfg.driftTolerance * 100).toFixed(2)}%`
+    tmpl.oracleWeight.textContent = `${(pgm.gapEngineCfg.oracleWeighting * 100).toFixed(0)}%`
+    tmpl.oracleBias.textContent = `${(pgm.gapEngineCfg.oracleBias * 100).toFixed(1)}%`
   }
 
   setMarketSubchoice (host: string, name: string): void {
@@ -900,24 +909,21 @@ export default class MarketMakerPage extends BasePage {
       Doc.show(page.createErr)
     }
 
-    const lots = parseInt(page.lotsInput.value || '0')
-    if (lots === 0) return setError('must specify > 0 lots')
-    const makerProgram = Object.assign({
+    const makerProgram : MakerProgram = {
       host: currentMarket.host,
       baseID: currentMarket.baseid,
-      quoteID: currentMarket.quoteid
-    }, this.createOpts, { lots, gapStrategy: '' })
+      quoteID: currentMarket.quoteid,
+      engineID: GapEngineID
+    }
+
+    const lots = parseInt(page.lotsInput.value || '0')
+    if (lots === 0) return setError('must specify > 0 lots')
+
+    const gapEngineCfg : GapEngineCfg = Object.assign(this.createOpts)
+    gapEngineCfg.lots = lots
 
     const strategy = page.gapStrategySelect.value
-    makerProgram.gapStrategy = strategy ?? ''
-
-    const req = {
-      botType: 'MakerV0',
-      program: makerProgram,
-      programID: 0,
-      appPW: appPW,
-      manualRate: 0
-    }
+    gapEngineCfg.gapStrategy = strategy ?? ''
 
     switch (strategy) {
       case GapStrategyAbsolute:
@@ -925,15 +931,24 @@ export default class MarketMakerPage extends BasePage {
         const r = parseFloat(page.absInput.value || '0')
         if (r === 0) return setError('gap must be specified for strategy = absolute')
         else if (currentReport?.basisPrice && r >= currentReport.basisPrice) return setError('gap width cannot be > current spot price')
-        makerProgram.gapFactor = r
+        gapEngineCfg.gapFactor = r
         break
       }
       case GapStrategyPercent:
       case GapStrategyPercentPlus:
-        makerProgram.gapFactor = this.gapRanges.gapPercent
+        gapEngineCfg.gapFactor = this.gapRanges.gapPercent
         break
       default:
-        makerProgram.gapFactor = this.gapRanges.gapMultiplier
+        gapEngineCfg.gapFactor = this.gapRanges.gapMultiplier
+    }
+
+    makerProgram.gapEngineCfg = gapEngineCfg
+
+    const req = {
+      botType: 'MakerV0',
+      program: makerProgram,
+      programID: 0,
+      appPW: appPW
     }
 
     let endpoint = '/api/createbot'
@@ -947,7 +962,7 @@ export default class MarketMakerPage extends BasePage {
           setError('price must be set manually')
           return
         }
-        req.program.manualRate = this.specifiedPrice
+        gapEngineCfg.manualRate = this.specifiedPrice
       }
     }
 

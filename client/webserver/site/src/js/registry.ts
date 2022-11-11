@@ -498,16 +498,22 @@ export interface OrderFilter {
   statuses: number[]
 }
 
-export interface MakerProgram {
-  host: string
-  baseID: number
-  quoteID: number
+export interface GapEngineCfg {
   lots: number
   oracleWeighting: number
   oracleBias: number
   driftTolerance: number
   gapFactor: number
   gapStrategy: string
+  manualRate?: number
+}
+
+export interface MakerProgram {
+  host: string
+  baseID: number
+  quoteID: number
+  engineID: string
+  gapEngineCfg?: GapEngineCfg
 }
 
 export interface BotOrder {

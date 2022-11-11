@@ -99,7 +99,7 @@ func mainErr() error {
 	}
 
 	if manualRate > 0 {
-		pgm.EmptyMarketRate = manualRate
+		pgm.GapEngineCfg.EmptyMarketRate = manualRate
 	}
 
 	net := dex.Mainnet

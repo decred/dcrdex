@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/client/core/botengine"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
@@ -33,8 +34,7 @@ const (
 	oraclePriceExpiration = time.Minute * 10
 	oracleRecheckInterval = time.Minute * 3
 
-	ErrNoMarkets           = dex.ErrorKind("no markets")
-	defaultOracleWeighting = 0.2
+	ErrNoMarkets = dex.ErrorKind("no markets")
 
 	// Our mid-gap rate derived from the local DEX order book is converted to an
 	// effective mid-gap that can only vary by up to 3% from the oracle rate.
@@ -45,69 +45,17 @@ const (
 	maxOracleMismatch = 0.03
 )
 
-// GapStrategy is a specifier for an algorithm to choose the maker bot's target
-// spread.
-type GapStrategy string
-
-const (
-	// GapStrategyMultiplier calculates the spread by multiplying the
-	// break-even gap by the specified multiplier, 1 <= r <= 100.
-	GapStrategyMultiplier GapStrategy = "multiplier"
-	// GapStrategyAbsolute sets the spread to the rate difference.
-	GapStrategyAbsolute GapStrategy = "absolute"
-	// GapStrategyAbsolutePlus sets the spread to the rate difference plus the
-	// break-even gap.
-	GapStrategyAbsolutePlus GapStrategy = "absolute-plus"
-	// GapStrategyPercent sets the spread as a ratio of the mid-gap rate.
-	// 0 <= r <= 0.1
-	GapStrategyPercent GapStrategy = "percent"
-	// GapStrategyPercentPlus sets the spread as a ratio of the mid-gap rate
-	// plus the break-even gap.
-	GapStrategyPercentPlus GapStrategy = "percent-plus"
-)
-
-// MakerProgram is the program for a makerBot.
 type MakerProgram struct {
-	Host    string `json:"host"`
-	BaseID  uint32 `json:"baseID"`
-	QuoteID uint32 `json:"quoteID"`
+	Host     string `json:"host"`
+	BaseID   uint32 `json:"baseID"`
+	QuoteID  uint32 `json:"quoteID"`
+	EngineID string `json:"engineID"`
 
-	// Lots is the number of lots to allocate to each side of the market. This
-	// is an ideal allotment, but at any given time, a side could have up to
-	// 2 * Lots on order.
-	Lots uint64 `json:"lots"`
-
-	// GapStrategy selects an algorithm for calculating the target spread.
-	GapStrategy GapStrategy `json:"gapStrategy"`
-
-	// GapFactor controls the gap width in a way determined by the GapStrategy.
-	GapFactor float64 `json:"gapFactor"`
-
-	// DriftTolerance is how far away from an ideal price an order can drift
-	// before it will replaced (units: ratio of price). Default: 0.1%.
-	// 0 <= x <= 0.01.
-	DriftTolerance float64 `json:"driftTolerance"`
-
-	// OracleWeighting affects how the target price is derived based on external
-	// market data. OracleWeighting, r, determines the target price with the
-	// formula:
-	//   target_price = dex_mid_gap_price * (1 - r) + oracle_price * r
-	// OracleWeighting is limited to 0 <= x <= 1.0.
-	// Fetching of price data is disabled if OracleWeighting = 0.
-	OracleWeighting *float64 `json:"oracleWeighting"`
-
-	// OracleBias applies a bias in the positive (higher price) or negative
-	// (lower price) direction. -0.05 <= x <= 0.05.
-	OracleBias float64 `json:"oracleBias"`
-
-	// EmptyMarketRate can be set if there is no market data available, and is
-	// ignored if there is market data available.
-	EmptyMarketRate float64 `json:"manualRate"`
+	// The config of each engine type will be here, but only one will be non-nil
+	GapEngineCfg *botengine.GapEngineCfg `json:"gapEngineCfg"`
 }
 
-// validateProgram checks the sensibility of a *MakerProgram's values and sets
-// some defaults.
-func validateProgram(pgm *MakerProgram) error {
+func (pgm *MakerProgram) validate() error {
 	if pgm.Host == "" {
 		return errors.New("no host specified")
 	}
@@ -117,51 +65,20 @@ func validateProgram(pgm *MakerProgram) error {
 	if dex.BipIDSymbol(pgm.QuoteID) == "" {
 		return fmt.Errorf("quote asset %d unknown", pgm.QuoteID)
 	}
-	if pgm.Lots == 0 {
-		return errors.New("cannot run with lots = 0")
-	}
-	if pgm.OracleBias < -0.05 || pgm.OracleBias > 0.05 {
-		return fmt.Errorf("bias %f out of bounds", pgm.OracleBias)
-	}
-	if pgm.OracleWeighting != nil {
-		w := *pgm.OracleWeighting
-		if w < 0 || w > 1 {
-			return fmt.Errorf("oracle weighting %f out of bounds", w)
+
+	switch pgm.EngineID {
+	case string(botengine.GapEngineType):
+		if pgm.GapEngineCfg == nil {
+			return errors.New("gap engine cfg is nil")
 		}
-	}
-
-	if pgm.DriftTolerance == 0 {
-		pgm.DriftTolerance = 0.001
-	}
-	if pgm.DriftTolerance < 0 || pgm.DriftTolerance > 0.01 {
-		return fmt.Errorf("drift tolerance %f out of bounds", pgm.DriftTolerance)
-	}
-
-	var limits [2]float64
-	switch pgm.GapStrategy {
-	case GapStrategyMultiplier:
-		limits = [2]float64{1, 100}
-	case GapStrategyPercent, GapStrategyPercentPlus:
-		limits = [2]float64{0, 0.1}
-	case GapStrategyAbsolute, GapStrategyAbsolutePlus:
-		limits = [2]float64{0, math.MaxFloat64} // validate at < spot price at creation time
+		if err := pgm.GapEngineCfg.Validate(); err != nil {
+			return fmt.Errorf("error validating gap engine cfg: %w", err)
+		}
 	default:
-		return fmt.Errorf("unknown gap strategy %q", pgm.GapStrategy)
+		return fmt.Errorf("unknown bot engine type: %s", pgm.EngineID)
 	}
 
-	if pgm.GapFactor < limits[0] || pgm.GapFactor > limits[1] {
-		return fmt.Errorf("%s gap factor %f is out of bounds %+v", pgm.GapStrategy, pgm.GapFactor, limits)
-	}
 	return nil
-}
-
-// oracleWeighting returns the specified OracleWeighting, or the default if
-// not set.
-func (pgm *MakerProgram) oracleWeighting() float64 {
-	if pgm.OracleWeighting == nil {
-		return defaultOracleWeighting
-	}
-	return *pgm.OracleWeighting
 }
 
 // makerAsset combines a *dex.Asset with a WalletState.
@@ -169,25 +86,10 @@ type makerAsset struct {
 	*SupportedAsset
 	// walletV  atomic.Value // *WalletState
 	balanceV atomic.Value // *WalletBalance
-
 }
 
 // makerBot is a *Core extension that enables operation of a market-maker bot.
-// Given an order for L lots, every epoch the makerBot will...
-//  1. Calculate a "basis price", which is based on DEX market data,
-//     optionally mixed (OracleWeight) with external market data.
-//  2. Calculate a "break-even spread". This is the spread at which tx fee
-//     losses exactly match profits.
-//  3. The break-even spread serves as a hard minimum, and is used to determine
-//     the target spread based on the specified gap strategy, giving the target
-//     buy and sell prices.
-//  4. Scan existing orders to determine if their prices are still valid,
-//     within DriftTolerance of the buy or sell price. If not, schedule them
-//     for cancellation.
-//  5. Calculate how many lots are needed to be ordered in order to meet the
-//     2 x L commitment. If low balance restricts the maintenance of L lots on
-//     one side, allow the difference in lots to be added to the opposite side.
-//  6. Place orders, cancels first, then buys and sells.
+// The strategy the makerBot follows depends on the engine.
 type makerBot struct {
 	*Core
 	pgmID uint64
@@ -197,12 +99,11 @@ type makerBot struct {
 	market *Market
 	log    dex.Logger
 	book   *orderbook.OrderBook
+	engine botengine.BotEngine
 
 	running uint32 // atomic
 	wg      sync.WaitGroup
 	die     context.CancelFunc
-
-	rebalanceRunning uint32 // atomic
 
 	programV atomic.Value // *MakerProgram
 
@@ -212,10 +113,52 @@ type makerBot struct {
 	oracleRunning uint32 // atomic
 }
 
-func createMakerBot(ctx context.Context, c *Core, pgm *MakerProgram) (*makerBot, error) {
-	if err := validateProgram(pgm); err != nil {
-		return nil, err
+var _ botengine.GapEngineInputs = (*makerBot)(nil)
+
+// checkInitialFunding ensures that the wallets have enough funds to start the bot.
+//
+// The makerBot's engine must be set before calling this function.
+func (m *makerBot) checkInitialFunding(ctx context.Context) error {
+	// Get a rate now, because max buy won't have an oracle fallback.
+	var rate uint64
+	if m.market.SpotPrice != nil {
+		rate = m.market.SpotPrice.Rate
 	}
+	if rate == 0 {
+		price, err := m.syncOraclePrice(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to establish a starting price: %v", err)
+		}
+		rate = m.market.ConventionalRateToMsg(price)
+	}
+
+	pgm := m.program()
+
+	var maxBuyLots, maxSellLots uint64
+	maxBuy, err := m.MaxBuy(rate)
+	if err == nil {
+		maxBuyLots = maxBuy.Swap.Lots
+	} else {
+		m.log.Errorf("Bot MaxBuy error: %v", err)
+	}
+	maxSell, err := m.MaxSell()
+	if err == nil {
+		maxSellLots = maxSell.Swap.Lots
+	} else {
+		m.log.Errorf("Bot MaxSell error: %v", err)
+	}
+
+	lotsRequired := m.engine.InitialLotsRequired()
+	if maxBuyLots+maxSellLots < lotsRequired {
+		return fmt.Errorf("cannot create bot. %d lots total balance required to start, "+
+			"and only %d %s lots and %d %s lots = %d total lots are available", lotsRequired,
+			maxBuyLots, unbip(pgm.QuoteID), maxSellLots, unbip(pgm.BaseID), maxSellLots+maxBuyLots)
+	}
+
+	return nil
+}
+
+func createMakerBot(ctx context.Context, c *Core, pgm *MakerProgram) (*makerBot, error) {
 	dc, err := c.connectedDEX(pgm.Host)
 	if err != nil {
 		return nil, err
@@ -266,37 +209,24 @@ func createMakerBot(ctx context.Context, c *Core, pgm *MakerProgram) (*makerBot,
 	}
 	m.programV.Store(pgm)
 
-	// Get a rate now, because max buy won't have an oracle fallback.
-	var rate uint64
-	if mkt.SpotPrice != nil {
-		rate = mkt.SpotPrice.Rate
-	}
-	if rate == 0 {
-		price, err := m.syncOraclePrice(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to establish a starting price: %v", err)
+	switch pgm.EngineID {
+	case string(botengine.GapEngineType):
+		if pgm.GapEngineCfg == nil {
+			return nil, errors.New("cannot create gap engine without gap engine cfg")
 		}
-		rate = mkt.ConventionalRateToMsg(price)
+		engine, err := botengine.NewGapEngine(m, pgm.GapEngineCfg, m.log.SubLogger("GAP-ENGINE"))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create gap engine: %w", err)
+		}
+		m.engine = engine
+
+	default:
+		return nil, fmt.Errorf("unknown bot engine: %v", pgm.EngineID)
 	}
 
-	var maxBuyLots, maxSellLots uint64
-	maxBuy, err := c.MaxBuy(pgm.Host, pgm.BaseID, pgm.QuoteID, rate)
-	if err == nil {
-		maxBuyLots = maxBuy.Swap.Lots
-	} else {
-		m.log.Errorf("Bot MaxBuy error: %v", err)
-	}
-	maxSell, err := c.MaxSell(pgm.Host, pgm.BaseID, pgm.QuoteID)
-	if err == nil {
-		maxSellLots = maxSell.Swap.Lots
-	} else {
-		m.log.Errorf("Bot MaxSell error: %v", err)
-	}
-
-	if maxBuyLots+maxSellLots < pgm.Lots*2 {
-		return nil, fmt.Errorf("cannot create bot with %d lots. 2 x %d = %d lots total balance required to start, "+
-			"and only %d %s lots and %d %s lots = %d total lots are available", pgm.Lots, pgm.Lots, pgm.Lots*2,
-			maxBuyLots, unbip(pgm.QuoteID), maxSellLots, unbip(pgm.BaseID), maxSellLots+maxBuyLots)
+	err = m.checkInitialFunding(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// We don't use the dynamic data from *Market, just the configuration.
@@ -323,13 +253,17 @@ func newMakerBot(ctx context.Context, c *Core, pgm *MakerProgram) (*makerBot, er
 	return m, nil
 }
 
-// recreateMakerBot creates a new makerBot and assigns the specified program ID.
-func recreateMakerBot(ctx context.Context, c *Core, pgmID uint64, pgm *MakerProgram) (*makerBot, error) {
-	m, err := createMakerBot(ctx, c, pgm)
+// recreateMakerBot recreates a maker bot using the object saved in the db.
+func recreateMakerBot(ctx context.Context, c *Core, id uint64, botPgm *db.BotProgram) (*makerBot, error) {
+	var makerPgm *MakerProgram
+	if err := json.Unmarshal(botPgm.Program, &makerPgm); err != nil {
+		return nil, fmt.Errorf("Error decoding maker program: %v", err)
+	}
+	m, err := createMakerBot(ctx, c, makerPgm)
 	if err != nil {
 		return nil, err
 	}
-	m.pgmID = pgmID
+	m.pgmID = id
 
 	return m, nil
 }
@@ -356,6 +290,7 @@ func (m *makerBot) liveOrderIDs() []order.OrderID {
 // the database.
 func (m *makerBot) retire() {
 	m.stop()
+
 	if err := m.db.RetireBotProgram(m.pgmID); err != nil {
 		m.log.Errorf("error retiring bot program")
 		return
@@ -376,8 +311,15 @@ func (m *makerBot) stop() {
 		}
 	}
 
+	m.ordMtx.Lock()
+	m.ords = make(map[order.OrderID]*Order)
+	m.ordMtx.Unlock()
+
 	// TODO: Should really wait until the cancels match. If we're cancelling
 	// orders placed in the same epoch, they might miss and need to be replaced.
+
+	// TODO: If the bot is stopped before the trades become booked, and the cancels
+	// do not match, then the bot will be stopped but the orders still on the books.
 }
 
 func (m *makerBot) run(ctx context.Context) {
@@ -402,10 +344,6 @@ func (m *makerBot) run(ctx context.Context) {
 	}
 	m.book = book
 
-	if pgm.OracleWeighting != nil {
-		m.startOracleSync(ctx)
-	}
-
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
@@ -423,8 +361,9 @@ func (m *makerBot) run(ctx context.Context) {
 		}
 	}()
 
-	cid, notes := m.notificationFeed()
+	m.engine.Run(ctx)
 
+	cid, notes := m.notificationFeed()
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
@@ -439,9 +378,52 @@ func (m *makerBot) run(ctx context.Context) {
 		}
 	}()
 
+	tradeFeed := m.engine.TradeFeed()
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		for {
+			select {
+			case n := <-tradeFeed:
+				m.handleTradeFeedNote(n)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
 	m.notify(newBotNote(TopicBotStarted, "", "", db.Data, m.report()))
 
 	m.wg.Wait()
+}
+
+// handleNote handles the makerBot's Core notifications.
+func (m *makerBot) handleNote(ctx context.Context, note Notification) {
+	switch n := note.(type) {
+	case *OrderNote:
+		ord := n.Order
+		if ord == nil {
+			return
+		}
+		m.processTrade(ord)
+	case *EpochNotification:
+		m.engine.Notify(botengine.EpochNote(n.Epoch))
+	}
+}
+
+// handleTradeFeedNote handles a note from the engine.
+func (m *makerBot) handleTradeFeedNote(note interface{}) {
+	switch n := note.(type) {
+	case *botengine.CancelNote:
+		err := m.cancelOrder(n.OID)
+		if err != nil {
+			m.log.Errorf("failed to place cancel order: %v", err)
+		}
+	case *botengine.OrderNote:
+		m.placeOrder(n.Lots, n.Rate, n.Sell)
+	default:
+		m.log.Warnf("unexpected trade feed note type: %v", n)
+	}
 }
 
 // botOrders is a list of orders created and monitored by the makerBot.
@@ -492,23 +474,60 @@ func (m *makerBot) saveProgram() (uint64, error) {
 	return m.db.SaveBotProgram(dbRecord)
 }
 
-// updateProgram updates the current bot program. The applied changes will
-// be in effect for the next rebalance.
+// marshalEngineCfg marshals the engine's configuration.
+func (m *makerBot) marshalEngineCfg() ([]byte, error) {
+	pgm := m.program()
+	switch pgm.EngineID {
+	case string(botengine.GapEngineType):
+		if pgm.GapEngineCfg == nil {
+			return nil, errors.New("gap engine cfg is nil")
+		}
+		cfgB, err := json.Marshal(pgm.GapEngineCfg)
+		if err != nil {
+			return nil, err
+		}
+		return cfgB, nil
+	default:
+		return nil, fmt.Errorf("unknown bot engine type: %s", pgm.EngineID)
+	}
+}
+
+// updateProgram updates the current bot program.
 func (m *makerBot) updateProgram(pgm *MakerProgram) error {
+	err := pgm.validate()
+	if err != nil {
+		return err
+	}
+
+	currentPgm := m.program()
+	if pgm.Host != currentPgm.Host ||
+		pgm.BaseID != currentPgm.BaseID ||
+		pgm.QuoteID != currentPgm.QuoteID ||
+		pgm.EngineID != currentPgm.EngineID {
+		return errors.New("only engine config can be updated")
+	}
+
 	dbRecord, err := makerProgramDBRecord(pgm)
 	if err != nil {
 		return err
 	}
 
-	if err := m.db.UpdateBotProgram(m.pgmID, dbRecord); err != nil {
-		return err
+	cfgB, err := m.marshalEngineCfg()
+	if err != nil {
+		return fmt.Errorf("failed to marshal engine cfg: %w", err)
 	}
 
-	if pgm.oracleWeighting() > 0 {
-		m.startOracleSync(m.ctx) // no-op if sync is already running
+	err = m.engine.Update(cfgB)
+	if err != nil {
+		return fmt.Errorf("failed to update engine: %w", err)
 	}
 
 	m.programV.Store(pgm)
+
+	if err := m.db.UpdateBotProgram(m.pgmID, dbRecord); err != nil {
+		m.log.Errorf("faied to store updated bot program in DB: %v", err)
+	}
+
 	m.notify(newBotNote(TopicBotUpdated, "", "", db.Data, m.report()))
 	return nil
 }
@@ -535,8 +554,8 @@ func (c *Core) cachedOraclePrice(mktName string) *stampedPrice {
 	return p
 }
 
-// startOracleSync starts the syncOracle loop.
-func (m *makerBot) startOracleSync(ctx context.Context) {
+// StartOracleSync starts the syncOracle loop.
+func (m *makerBot) StartOracleSync(ctx context.Context) {
 	m.wg.Add(1)
 	go func() {
 		m.syncOracle(ctx)
@@ -584,18 +603,18 @@ func (m *makerBot) syncOracle(ctx context.Context) {
 	}
 }
 
-// basisPrice is the basis price for the makerBot's market.
-func (m *makerBot) basisPrice() uint64 {
+// BasisPrice is the basis price for the makerBot's market.
+func (m *makerBot) BasisPrice(oracleBias, oracleWeighting, emptyMarketRate float64) uint64 {
 	pgm := m.program()
 	midGap, err := m.book.MidGap()
 	if err != nil && !errors.Is(err, orderbook.ErrEmptyOrderbook) {
 		m.log.Errorf("error calculating mid-gap: %w", err)
 		return 0
 	}
-	if p := basisPrice(pgm.Host, m.market, pgm.OracleBias, pgm.oracleWeighting(), midGap, m, m.log); p > 0 {
+	if p := basisPrice(pgm.Host, m.market, oracleBias, oracleWeighting, midGap, m, m.log); p > 0 {
 		return p
 	}
-	return m.market.ConventionalRateToMsg(pgm.EmptyMarketRate)
+	return m.market.ConventionalRateToMsg(emptyMarketRate)
 }
 
 type basisPricer interface {
@@ -801,20 +820,6 @@ func oracleMarketReport(ctx context.Context, b, q *SupportedAsset, log dex.Logge
 	return
 }
 
-// handleNote handles the makerBot's Core notifications.
-func (m *makerBot) handleNote(ctx context.Context, note Notification) {
-	switch n := note.(type) {
-	case *OrderNote:
-		ord := n.Order
-		if ord == nil {
-			return
-		}
-		m.processTrade(ord)
-	case *EpochNotification:
-		go m.rebalance(ctx, n.Epoch)
-	}
-}
-
 // processTrade processes an order update.
 func (m *makerBot) processTrade(o *Order) {
 	if len(o.ID) == 0 {
@@ -857,261 +862,8 @@ func (m *makerBot) processTrade(o *Order) {
 	}
 }
 
-// rebalance rebalances the makerBot's orders.
-//  1. Generate a basis price, p, adjusted for oracle weighting and bias.
-//  2. Apply the gap strategy to get a target spread, s.
-//  3. Check existing orders, if out of bounds
-//     [p +/- (s/2) - drift_tolerance, p +/- (s/2) + drift_tolerance],
-//     cancel the order
-//  4. Compare remaining order counts to configured, lots, and place new
-//     orders.
-func (m *makerBot) rebalance(ctx context.Context, newEpoch uint64) {
-	if !atomic.CompareAndSwapUint32(&m.rebalanceRunning, 0, 1) {
-		return
-	}
-	defer atomic.StoreUint32(&m.rebalanceRunning, 0)
-
-	newBuyLots, newSellLots, buyPrice, sellPrice := rebalance(ctx, m, m.market, m.program(), m.log, newEpoch)
-
-	// Place buy orders.
-	if newBuyLots > 0 {
-		ord := m.placeOrder(uint64(newBuyLots), buyPrice, false)
-		if ord != nil {
-			var oid order.OrderID
-			copy(oid[:], ord.ID)
-			m.ordMtx.Lock()
-			m.ords[oid] = ord
-			m.ordMtx.Unlock()
-		}
-	}
-
-	// Place sell orders.
-	if newSellLots > 0 {
-		ord := m.placeOrder(uint64(newSellLots), sellPrice, true)
-		if ord != nil {
-			var oid order.OrderID
-			copy(oid[:], ord.ID)
-			m.ordMtx.Lock()
-			m.ords[oid] = ord
-			m.ordMtx.Unlock()
-		}
-	}
-}
-
-// rebalancer is a stub to enabling testing of the rebalance calculations.
-type rebalancer interface {
-	basisPrice() uint64
-	halfSpread(basisPrice uint64) (uint64, error)
-	sortedOrders() (buys, sells []*sortedOrder)
-	cancelOrder(oid order.OrderID) error
-	MaxBuy(host string, base, quote uint32, rate uint64) (*MaxOrderEstimate, error)
-	MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, error)
-}
-
-func rebalance(ctx context.Context, m rebalancer, mkt *Market, pgm *MakerProgram, log dex.Logger, newEpoch uint64) (newBuyLots, newSellLots int, buyPrice, sellPrice uint64) {
-	basisPrice := m.basisPrice()
-	if basisPrice == 0 {
-		log.Errorf("No basis price available and no empty-market rate set")
-		return
-	}
-
-	log.Tracef("rebalance: basis price = %d", basisPrice)
-
-	// Three of the strategies will use a break-even half-gap.
-	var breakEven uint64
-	switch pgm.GapStrategy {
-	case GapStrategyAbsolutePlus, GapStrategyPercentPlus, GapStrategyMultiplier:
-		var err error
-		breakEven, err = m.halfSpread(basisPrice)
-		if err != nil {
-			log.Errorf("Could not calculate break-even spread: %v", err)
-			return
-		}
-	}
-
-	// Apply the base strategy.
-	var halfSpread uint64
-	switch pgm.GapStrategy {
-	case GapStrategyMultiplier:
-		halfSpread = uint64(math.Round(float64(breakEven) * pgm.GapFactor))
-	case GapStrategyPercent, GapStrategyPercentPlus:
-		halfSpread = uint64(math.Round(pgm.GapFactor * float64(basisPrice)))
-	case GapStrategyAbsolute, GapStrategyAbsolutePlus:
-		halfSpread = mkt.ConventionalRateToMsg(pgm.GapFactor)
-	}
-
-	// Add the break-even to the "-plus" strategies.
-	switch pgm.GapStrategy {
-	case GapStrategyAbsolutePlus, GapStrategyPercentPlus:
-		halfSpread += breakEven
-	}
-
-	log.Tracef("rebalance: strategized half-spread = %d, strategy = %s", halfSpread, pgm.GapStrategy)
-
-	halfSpread = steppedRate(halfSpread, mkt.RateStep)
-
-	log.Tracef("rebalance: step-resolved half-spread = %d", halfSpread)
-
-	buyPrice = basisPrice - halfSpread
-	sellPrice = basisPrice + halfSpread
-
-	log.Tracef("rebalance: buy price = %d, sell price = %d", buyPrice, sellPrice)
-
-	buys, sells := m.sortedOrders()
-
-	// Figure out the best existing sell and buy of existing monitored orders.
-	// These values are used to cancel order placement if there is a chance
-	// of self-matching, especially against a scheduled cancel order.
-	highestBuy, lowestSell := buyPrice, sellPrice
-	if len(sells) > 0 {
-		ord := sells[0]
-		if ord.rate < lowestSell {
-			lowestSell = ord.rate
-		}
-	}
-	if len(buys) > 0 {
-		ord := buys[0]
-		if ord.rate > highestBuy {
-			highestBuy = ord.rate
-		}
-	}
-
-	// Check if order-placement might self-match.
-	var cantBuy, cantSell bool
-	if buyPrice >= lowestSell {
-		log.Tracef("rebalance: can't buy because delayed cancel sell order interferes. booked rate = %d, buy price = %d",
-			lowestSell, buyPrice)
-		cantBuy = true
-	}
-	if sellPrice <= highestBuy {
-		log.Tracef("rebalance: can't sell because delayed cancel sell order interferes. booked rate = %d, sell price = %d",
-			highestBuy, sellPrice)
-		cantSell = true
-	}
-
-	var canceledBuyLots, canceledSellLots uint64 // for stats reporting
-	cancels := make([]*sortedOrder, 0)
-	addCancel := func(ord *sortedOrder) {
-		if newEpoch-ord.Epoch < 2 {
-			log.Debugf("rebalance: skipping cancel not past free cancel threshold")
-		}
-
-		if ord.Sell {
-			canceledSellLots += ord.lots
-		} else {
-			canceledBuyLots += ord.lots
-		}
-		if ord.Status <= order.OrderStatusBooked {
-			cancels = append(cancels, ord)
-		}
-	}
-
-	processSide := func(ords []*sortedOrder, price uint64, sell bool) (keptLots int) {
-		tol := uint64(math.Round(float64(price) * pgm.DriftTolerance))
-		low, high := price-tol, price+tol
-
-		// Limit large drift tolerances to their respective sides, i.e. mid-gap
-		// is a hard cutoff.
-		if !sell && high > basisPrice {
-			high = basisPrice - 1
-		}
-		if sell && low < basisPrice {
-			low = basisPrice + 1
-		}
-
-		for _, ord := range ords {
-			log.Tracef("rebalance: processSide: sell = %t, order rate = %d, low = %d, high = %d",
-				sell, ord.rate, low, high)
-			if ord.rate < low || ord.rate > high {
-				if newEpoch < ord.Epoch+2 { // https://github.com/decred/dcrdex/pull/1682
-					log.Tracef("rebalance: postponing cancellation for order < 2 epochs old")
-					keptLots += int(ord.lots)
-				} else {
-					log.Tracef("rebalance: cancelling out-of-bounds order (%d lots remaining). rate %d is not in range %d < r < %d",
-						ord.lots, ord.rate, low, high)
-					addCancel(ord)
-				}
-			} else {
-				keptLots += int(ord.lots)
-			}
-		}
-		return
-	}
-
-	newBuyLots, newSellLots = int(pgm.Lots), int(pgm.Lots)
-	keptBuys := processSide(buys, buyPrice, false)
-	keptSells := processSide(sells, sellPrice, true)
-	newBuyLots -= keptBuys
-	newSellLots -= keptSells
-
-	// Cancel out of bounds or over-stacked orders.
-	if len(cancels) > 0 {
-		// Only cancel orders that are > 1 epoch old.
-		log.Tracef("rebalance: cancelling %d orders", len(cancels))
-		for _, cancel := range cancels {
-			if err := m.cancelOrder(cancel.id); err != nil {
-				log.Errorf("error cancelling order: %v", err)
-				return
-			}
-		}
-	}
-
-	if cantBuy {
-		newBuyLots = 0
-	}
-	if cantSell {
-		newSellLots = 0
-	}
-
-	log.Tracef("rebalance: %d buy lots and %d sell lots scheduled after existing valid %d buy and %d sell lots accounted",
-		newBuyLots, newSellLots, keptBuys, keptSells)
-
-	// Resolve requested lots against the current balance. If we come up short,
-	// we may be able to place extra orders on the other side to satisfy our
-	// lot commitment and shift our balance back.
-	var maxBuyLots int
-	if newBuyLots > 0 {
-		// TODO: MaxBuy and MaxSell shouldn't error for insufficient funds, but
-		// they do. Maybe consider a constant error asset.InsufficientBalance.
-		maxOrder, err := m.MaxBuy(pgm.Host, pgm.BaseID, pgm.QuoteID, buyPrice)
-		if err != nil {
-			log.Tracef("MaxBuy error: %v", err)
-		} else {
-			maxBuyLots = int(maxOrder.Swap.Lots)
-		}
-		if maxBuyLots < newBuyLots {
-			// We don't have the balance. Add our shortcoming to the other side.
-			shortLots := newBuyLots - maxBuyLots
-			newSellLots += shortLots
-			newBuyLots = maxBuyLots
-			log.Tracef("rebalance: reduced buy lots to %d because of low balance", newBuyLots)
-		}
-	}
-
-	if newSellLots > 0 {
-		var maxLots int
-		maxOrder, err := m.MaxSell(pgm.Host, pgm.BaseID, pgm.QuoteID)
-		if err != nil {
-			log.Tracef("MaxSell error: %v", err)
-		} else {
-			maxLots = int(maxOrder.Swap.Lots)
-		}
-		if maxLots < newSellLots {
-			shortLots := newSellLots - maxLots
-			newBuyLots += shortLots
-			if newBuyLots > maxBuyLots {
-				log.Tracef("rebalance: increased buy lot order to %d lots because sell balance is low", newBuyLots)
-				newBuyLots = maxBuyLots
-			}
-			newSellLots = maxLots
-			log.Tracef("rebalance: reduced sell lots to %d because of low balance", newSellLots)
-		}
-	}
-	return
-}
-
 // placeOrder places a single order on the market.
-func (m *makerBot) placeOrder(lots, rate uint64, sell bool) *Order {
+func (m *makerBot) placeOrder(lots, rate uint64, sell bool) {
 	pgm := m.program()
 	ord, err := m.Trade(nil, &TradeForm{
 		Host:    pgm.Host,
@@ -1125,46 +877,75 @@ func (m *makerBot) placeOrder(lots, rate uint64, sell bool) *Order {
 	})
 	if err != nil {
 		m.log.Errorf("Error placing rebalancing order: %v", err)
-		return nil
+	} else {
+		var oid order.OrderID
+		copy(oid[:], ord.ID)
+		m.ordMtx.Lock()
+		m.ords[oid] = ord
+		m.ordMtx.Unlock()
 	}
-	return ord
 }
 
-// sortedOrder is a subset of an *Order used internally for sorting.
-type sortedOrder struct {
-	*Order
-	id   order.OrderID
-	rate uint64
-	lots uint64
+func (m *makerBot) MaxBuy(rate uint64) (*botengine.MaxOrderEstimate, error) {
+	pgm := m.program()
+	estimate, err := m.Core.MaxBuy(pgm.Host, pgm.BaseID, pgm.QuoteID, rate)
+	if err != nil {
+		return nil, err
+	}
+	return &botengine.MaxOrderEstimate{
+		Swap:   estimate.Swap,
+		Redeem: estimate.Redeem,
+	}, nil
+}
+
+func (m *makerBot) MaxSell() (*botengine.MaxOrderEstimate, error) {
+	pgm := m.program()
+	estimate, err := m.Core.MaxSell(pgm.Host, pgm.BaseID, pgm.QuoteID)
+	if err != nil {
+		return nil, err
+	}
+	return &botengine.MaxOrderEstimate{
+		Swap:   estimate.Swap,
+		Redeem: estimate.Redeem,
+	}, nil
+}
+
+func (m *makerBot) ConventionalRateToMsg(r float64) uint64 {
+	return m.market.ConventionalRateToMsg(r)
+}
+func (m *makerBot) RateStep() uint64 {
+	return m.market.RateStep
 }
 
 // sortedOrders returns lists of buy and sell orders, with buys sorted
 // high to low by rate, and sells low to high.
-func (m *makerBot) sortedOrders() (buys, sells []*sortedOrder) {
-	makeSortedOrder := func(o *Order) *sortedOrder {
+func (m *makerBot) SortedOrders() (buys, sells []*botengine.Order) {
+	makeBotEngineOrder := func(o *Order) *botengine.Order {
 		var oid order.OrderID
 		copy(oid[:], o.ID)
-		return &sortedOrder{
-			Order: o,
-			id:    oid,
-			rate:  o.Rate,
-			lots:  (o.Qty - o.Filled) / m.market.LotSize,
+		return &botengine.Order{
+			Sell:   o.Sell,
+			ID:     oid,
+			Status: o.Status,
+			Rate:   o.Rate,
+			Lots:   (o.Qty - o.Filled) / m.market.LotSize,
+			Epoch:  o.Epoch,
 		}
 	}
 
-	buys, sells = make([]*sortedOrder, 0), make([]*sortedOrder, 0)
+	buys, sells = make([]*botengine.Order, 0), make([]*botengine.Order, 0)
 	m.ordMtx.RLock()
 	for _, ord := range m.ords {
 		if ord.Sell {
-			sells = append(sells, makeSortedOrder(ord))
+			sells = append(sells, makeBotEngineOrder(ord))
 		} else {
-			buys = append(buys, makeSortedOrder(ord))
+			buys = append(buys, makeBotEngineOrder(ord))
 		}
 	}
 	m.ordMtx.RUnlock()
 
-	sort.Slice(buys, func(i, j int) bool { return buys[i].rate > buys[j].rate })
-	sort.Slice(sells, func(i, j int) bool { return sells[i].rate < sells[j].rate })
+	sort.Slice(buys, func(i, j int) bool { return buys[i].Rate > buys[j].Rate })
+	sort.Slice(sells, func(i, j int) bool { return sells[i].Rate < sells[j].Rate })
 
 	return buys, sells
 }
@@ -1277,7 +1058,9 @@ func (c *Core) feeEstimates(form *TradeForm) (swapFees, redeemFees uint64, err e
 	return
 }
 
-func (m *makerBot) halfSpread(basisPrice uint64) (uint64, error) {
+// HalfSpread calculates the half-gap at which a buy->sell or sell->buy
+// sequence breaks even in terms of profit and fee losses.
+func (m *makerBot) HalfSpread(basisPrice uint64) (uint64, error) {
 	pgm := m.program()
 	return breakEvenHalfSpread(pgm.Host, m.market, basisPrice, m.Core, m.log)
 }
@@ -1528,12 +1311,7 @@ func (c *Core) loadBotPrograms() error {
 		if c.mm.bots[pgmID] != nil {
 			continue
 		}
-		var makerPgm *MakerProgram
-		if err := json.Unmarshal(botPgm.Program, &makerPgm); err != nil {
-			c.log.Errorf("Error decoding maker program: %v", err)
-			continue
-		}
-		bot, err := recreateMakerBot(c.ctx, c, pgmID, makerPgm)
+		bot, err := recreateMakerBot(c.ctx, c, pgmID, botPgm)
 		if err != nil {
 			c.log.Errorf("Error recreating maker bot: %v", err)
 			continue

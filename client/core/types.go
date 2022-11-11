@@ -518,7 +518,7 @@ func (m *Market) MsgRateToConventional(r uint64) float64 {
 	return float64(r) / calc.RateEncodingFactor * m.AtomToConv
 }
 
-// ConventionalRateToMsg converts a conventinal rate to a message-rate.
+// ConventionalRateToMsg converts a conventional rate to a message-rate.
 func (m *Market) ConventionalRateToMsg(p float64) uint64 {
 	return uint64(math.Round(p / m.AtomToConv * calc.RateEncodingFactor))
 }

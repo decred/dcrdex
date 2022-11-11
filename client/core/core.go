@@ -4080,6 +4080,11 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 		// NOTE: initializeDEXConnections will do authDEX and a 'connect'
 		// request only if NOT already dc.acct.authed().
 		dexStats := c.initializeDEXConnections(crypter)
+
+		if err := c.loadBotPrograms(); err != nil {
+			c.log.Errorf("Error loading bot programs: %v", err)
+		}
+
 		notes, err := c.db.NotificationsN(100)
 		if err != nil {
 			c.log.Errorf("Login -> NotificationsN error: %v", err)
@@ -4187,10 +4192,6 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	// Unlock account keys and attempt to authorize with each dexConnection.
 	// Even if connect fails, this prepares the account private keys so authDEX
 	// triggered by the reconnect handler can succeed.
-
-	if err := c.loadBotPrograms(); err != nil {
-		c.log.Errorf("Error loading bot programs: %v", err)
-	}
 
 	return loginResult(), nil
 }
