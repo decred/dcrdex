@@ -307,7 +307,7 @@ export default class MarketsPage extends BasePage {
     bind(page.maxOrd, 'click', () => {
       const maxOrderLots = this.calcMaxOrderLots()
       page.lotField.value = String(maxOrderLots)
-      this.lotFieldChangeEvent()
+      this.lotFieldChangeHandler()
     })
 
     Doc.disableMouseWheel(page.rateField, page.lotField, page.qtyField, page.mktBuyField)
@@ -409,14 +409,14 @@ export default class MarketsPage extends BasePage {
     })
 
     // Event listeners for interactions with the various input fields.
-    bind(page.lotField, 'change', () => { this.lotFieldChangeEvent() })
-    bind(page.lotField, 'keyup', () => { this.lotFieldKeyUpEvent() })
-    bind(page.qtyField, 'change', () => { this.qtyFieldChangeEvent() })
-    bind(page.qtyField, 'keyup', () => { this.qtyFieldKeyUpEvent() })
-    bind(page.mktBuyField, 'change', () => { this.marketBuyChangedEvent() })
-    bind(page.mktBuyField, 'keyup', () => { this.marketBuyChangedEvent() })
-    bind(page.rateField, 'change', () => { this.rateFieldChangeEvent() })
-    bind(page.rateField, 'keyup', () => { this.rateFieldKeyUpEvent() })
+    bind(page.lotField, 'change', () => { this.lotFieldChangeHandler() })
+    bind(page.lotField, 'keyup', () => { this.lotFieldKeyupHandler() })
+    bind(page.qtyField, 'change', () => { this.qtyFieldChangeHandler() })
+    bind(page.qtyField, 'keyup', () => { this.qtyFieldKeyupHandler() })
+    bind(page.mktBuyField, 'change', () => { this.marketBuyChangedHandler() })
+    bind(page.mktBuyField, 'keyup', () => { this.marketBuyChangedHandler() })
+    bind(page.rateField, 'change', () => { this.rateFieldChangeHandler() })
+    bind(page.rateField, 'keyup', () => { this.rateFieldKeyupHandler() })
 
     // Market search input bindings.
     bind(page.marketSearchV1, 'change', () => { this.filterMarkets() })
@@ -559,29 +559,20 @@ export default class MarketsPage extends BasePage {
         setPriceAndChange(s.tmpl, xc, mkt)
       }
     }
-    this.page.rateField.value = fourSigFigs(this.defaultRate())
   }
 
   // defaultRate return default exchange rate (aka price).
   defaultRate (): number {
     // Current exchange rate would be reasonable default Price value.
     const { market: { cfg: { baseid, quoteid, spot }, dex } } = this
-    let rate = 0
-    if (spot) rate = spot.rate
+    const rate = spot ? spot.rate : 0
     return app().conventionalRate(baseid, quoteid, rate, dex)
   }
 
   /* calcMaxOrderLots calculates max lots amount user can make an order with. */
   calcMaxOrderLots (): number {
-    const adjRateAtoms = this.adjustedRateAtoms(this.page.rateField.value)
-    let maxEstimate: MaxOrderEstimate | null = this.market.maxBuys[adjRateAtoms]
-    if (this.isSell()) {
-      maxEstimate = this.market.maxSell
-    }
-    if (!maxEstimate) {
-      return 0
-    }
-    return maxEstimate.swap.lots
+    if (this.isSell()) return this.market.maxSell?.swap.lots ?? 0
+    return this.market.maxBuys[this.adjustedRateAtoms(this.page.rateField.value)]?.swap.lots ?? 0
   }
 
   // calcMaxOrderQtyAtoms calculates max quantity (in atoms) user can make an order
@@ -1207,13 +1198,12 @@ export default class MarketsPage extends BasePage {
    * market.
    */
   setMarketBuyOrderEstimate () {
-    const market = this.market
-    const lotSize = market.cfg.lotsize
-    const xc = app().user.exchanges[market.dex.host]
-    const buffer = xc.markets[market.sid].buybuffer
+    const { page, market: { sid, baseUnitInfo: bui, cfg: { lotsize: lotSize }, dex: { host } } } = this
+    const xc = app().user.exchanges[host]
+    const buffer = xc.markets[sid].buybuffer
     const gap = this.midGapConventional()
     if (gap) {
-      this.page.minMktBuy.textContent = Doc.formatCoinValue(lotSize * buffer * gap, market.baseUnitInfo)
+      page.minMktBuy.textContent = Doc.formatCoinValue(lotSize * buffer * gap, bui)
     }
   }
 
@@ -2125,7 +2115,7 @@ export default class MarketsPage extends BasePage {
     this.balanceWgt.updateAsset(this.openAsset.id)
   }
 
-  lotFieldKeyUpEvent () {
+  lotFieldKeyupHandler () {
     const page = this.page
 
     // We can't do anything with empty value here, and since it is a default
@@ -2136,14 +2126,14 @@ export default class MarketsPage extends BasePage {
       return
     }
 
-    const [inputInvalid, adjusted,, adjQty] = this.parseLotInput()
-    if (inputInvalid || adjusted) {
+    const [inputValid, adjusted,, adjQty] = this.parseLotInput()
+    if (!inputValid || adjusted) {
       // Let the user know that lot value he's entered was rounded down to the
       // nearest integer number.
       highlightOutlineRed(page.lotField)
-      highlightBackgroundRed(page.lostSizeBox)
+      highlightBackgroundRed(page.lotSizeBox)
     }
-    if (inputInvalid) {
+    if (!inputValid) {
       page.orderTotalPreview.textContent = ''
       page.qtyField.value = ''
       return
@@ -2156,7 +2146,7 @@ export default class MarketsPage extends BasePage {
     this.previewTotal()
   }
 
-  lotFieldChangeEvent () {
+  lotFieldChangeHandler () {
     const page = this.page
 
     // We can't do anything with empty value here, and since it is a default
@@ -2167,18 +2157,18 @@ export default class MarketsPage extends BasePage {
       return
     }
 
-    const [inputInvalid, adjusted, adjLots, adjQty] = this.parseLotInput()
-    if (inputInvalid) {
+    const [inputValid, adjusted, adjLots, adjQty] = this.parseLotInput()
+    if (!inputValid) {
       // Disable submit button temporarily (that additionally draws his
       // attention to order-form) to prevent user clicking on it while input
       // auto-adjusting is in progress. Otherwise, he might not notice the rounding.
       animateClick(page.submitBttn, page.submitBttnLoader)
     }
-    if (inputInvalid || adjusted) {
+    if (!inputValid || adjusted) {
       // Let the user know that lot value he's entered was rounded down to the
       // nearest integer number.
       highlightOutlineRed(page.lotField)
-      highlightBackgroundRed(page.lostSizeBox)
+      highlightBackgroundRed(page.lotSizeBox)
     }
     page.lotField.value = String(adjLots)
     page.qtyField.value = String(adjQty)
@@ -2186,27 +2176,30 @@ export default class MarketsPage extends BasePage {
     this.previewTotal()
   }
 
-  // parseLotInput parses lot input and returns whether there are any
-  // parsing issues, whether rounding(adjustment) to it had happened, and
-  // returns adjusted lot value. If lot value couldn't be parsed (parsing
-  // issues), 0 values, not defaults, are returned for 2nd, 3rd, 4th value.
+  // parseLotInput parses lot input and returns:
+  // 1) whether there are any parsing issues (true if none, false when
+  //    parsing fails)
+  // 2) whether rounding(adjustment) had happened (true when did)
+  // 3) adjusted lot value
+  // 4) adjusted quantity value
+  //
+  // If lot value couldn't be parsed (parsing issues), the following
+  // values are returned: [false, false, 0, 0].
   parseLotInput (): [boolean, boolean, number, number] {
-    const page = this.page
-    const market = this.market
-    const lotSize = market.cfg.lotsize
+    const { page, market: { baseUnitInfo: bui, cfg: { lotsize: lotSize } } } = this
 
     const lotsAdj = parseInt(page.lotField.value || '')
     if (lotsAdj < 1) {
-      return [true, false, 0, 0]
+      return [false, false, 0, 0]
     }
 
     const rounded = String(lotsAdj) !== page.lotField.value
-    const adjQty = lotsAdj * lotSize / market.baseUnitInfo.conventional.conversionFactor
+    const adjQty = lotsAdj * lotSize / bui.conventional.conversionFactor
 
     return [false, rounded, lotsAdj, adjQty]
   }
 
-  qtyFieldKeyUpEvent () {
+  qtyFieldKeyupHandler () {
     const page = this.page
 
     // We can't do anything with empty value here, and since it is a default
@@ -2217,13 +2210,13 @@ export default class MarketsPage extends BasePage {
       return
     }
 
-    const [inputInvalid, adjusted, adjLots] = this.parseQtyInput()
-    if (inputInvalid || adjusted) {
+    const [inputValid, adjusted, adjLots] = this.parseQtyInput()
+    if (!inputValid || adjusted) {
       // Let the user know that quantity he's entered was rounded down.
       highlightOutlineRed(page.qtyField)
-      highlightBackgroundRed(page.lostSizeBox)
+      highlightBackgroundRed(page.lotSizeBox)
     }
-    if (inputInvalid) {
+    if (!inputValid) {
       page.orderTotalPreview.textContent = ''
       page.lotField.value = ''
       return
@@ -2236,7 +2229,7 @@ export default class MarketsPage extends BasePage {
     this.previewTotal()
   }
 
-  qtyFieldChangeEvent () {
+  qtyFieldChangeHandler () {
     const page = this.page
 
     // We can't do anything with empty value here, and since it is a default
@@ -2247,17 +2240,17 @@ export default class MarketsPage extends BasePage {
       return
     }
 
-    const [inputInvalid, adjusted, adjLots, adjQty] = this.parseQtyInput()
-    if (inputInvalid) {
+    const [inputValid, adjusted, adjLots, adjQty] = this.parseQtyInput()
+    if (!inputValid) {
       // Disable submit button temporarily (that additionally draws his
       // attention to order-form) to prevent user clicking on it while input
       // auto-adjusting is in progress. Otherwise, he might not notice the rounding.
       animateClick(page.submitBttn, page.submitBttnLoader)
     }
-    if (inputInvalid || adjusted) {
+    if (!inputValid || adjusted) {
       // Let the user know that quantity he's entered was rounded down.
       highlightOutlineRed(page.qtyField)
-      highlightBackgroundRed(page.lostSizeBox)
+      highlightBackgroundRed(page.lotSizeBox)
     }
     page.lotField.value = String(adjLots)
     page.qtyField.value = String(adjQty)
@@ -2265,26 +2258,28 @@ export default class MarketsPage extends BasePage {
     this.previewTotal()
   }
 
-  // parseQtyInput parses quantity input and returns whether there are any
-  // parsing issues, whether rounding(adjustment) to it had happened, and
-  // returns adjusted quantity value. If quantity value couldn't be parsed
-  // (parsing issues), 0 values, not defaults, are returned for 2nd, 3rd, 4th
-  // value.
+  // parseQtyInput parses quantity input and returns:
+  // 1) whether there are any parsing issues (true if none, false when
+  //    parsing fails)
+  // 2) whether rounding(adjustment) had happened (true when did)
+  // 3) adjusted lot value
+  // 4) adjusted quantity value
+  //
+  // If quantity value couldn't be parsed (parsing issues), the following
+  // values are returned: [false, false, 0, 0].
   parseQtyInput (): [boolean, boolean, number, number] {
-    const page = this.page
-    const market = this.market
-    const lotSize = market.cfg.lotsize
+    const { page, market: { baseUnitInfo: bui, cfg: { lotsize: lotSize } } } = this
 
-    const qtyRawAtom = convertToAtoms(page.qtyField.value || '', market.baseUnitInfo.conventional.conversionFactor)
+    const qtyRawAtom = convertToAtoms(page.qtyField.value || '', bui.conventional.conversionFactor)
     if (qtyRawAtom < 1) {
-      return [true, false, 0, 0]
+      return [false, false, 0, 0]
     }
 
     const lotsRaw = qtyRawAtom / lotSize
     const adjLots = Math.floor(lotsRaw)
     const adjQtyAtom = adjLots * lotSize
     const rounded = adjQtyAtom !== qtyRawAtom
-    const adjQty = adjQtyAtom / market.baseUnitInfo.conventional.conversionFactor
+    const adjQty = adjQtyAtom / bui.conventional.conversionFactor
 
     return [false, rounded, adjLots, adjQty]
   }
@@ -2293,7 +2288,7 @@ export default class MarketsPage extends BasePage {
    * marketBuyChanged is attached to the keyup and change events of the quantity
    * input for the market-buy form.
    */
-  marketBuyChangedEvent () {
+  marketBuyChangedHandler () {
     const page = this.page
     const qty = convertToAtoms(page.mktBuyField.value || '', this.market.quoteUnitInfo.conventional.conversionFactor)
     const gap = this.midGap()
@@ -2308,16 +2303,16 @@ export default class MarketsPage extends BasePage {
     page.mktBuyScore.textContent = Doc.formatCoinValue(received, this.market.baseUnitInfo)
   }
 
-  rateFieldKeyUpEvent () {
+  rateFieldKeyupHandler () {
     const page = this.page
 
-    const [inputInvalid, adjusted] = this.parseRateInput()
-    if (inputInvalid || adjusted) {
+    const [inputValid, adjusted] = this.parseRateInput()
+    if (!inputValid || adjusted) {
       // Let the user know that rate he's entered was rounded down.
       highlightOutlineRed(page.rateField)
       highlightBackgroundRed(page.rateStepBox)
     }
-    if (inputInvalid) {
+    if (!inputValid) {
       page.orderTotalPreview.textContent = ''
       return
     }
@@ -2326,17 +2321,17 @@ export default class MarketsPage extends BasePage {
     this.drawChartLineInputRate()
   }
 
-  rateFieldChangeEvent () {
+  rateFieldChangeHandler () {
     const page = this.page
 
-    const [inputInvalid, adjusted, adjRate] = this.parseRateInput()
-    if (inputInvalid) {
+    const [inputValid, adjusted, adjRate] = this.parseRateInput()
+    if (!inputValid) {
       // Disable submit button temporarily (that additionally draws his
       // attention to order-form) to prevent user clicking on it while input
       // auto-adjusting is in progress. Otherwise, he might not notice the rounding.
       animateClick(page.submitBttn, page.submitBttnLoader)
     }
-    if (inputInvalid || adjusted) {
+    if (!inputValid || adjusted) {
       // Let the user know that rate he's entered was rounded down.
       highlightOutlineRed(page.rateField)
       highlightBackgroundRed(page.rateStepBox)
@@ -2349,10 +2344,14 @@ export default class MarketsPage extends BasePage {
     this.drawChartLineInputRate()
   }
 
-  // parseRateInput parses rate(price) input and returns whether there are any
-  // parsing issues, whether rounding(adjustment) to rate-step had happened, and
-  // returns adjusted rate(price) value. If rate(price) couldn't be parsed (parsing
-  // issues), default rate value (current market price) is returned.
+  // parseRateInput parses rate(price) input and returns:
+  // 1) whether there are any parsing issues (true if none, false when
+  //    parsing fails)
+  // 2) whether rounding(adjustment) to rate-step had happened (true when did)
+  // 3) adjusted rate(price) value
+  //
+  // If rate(price) couldn't be parsed (parsing issues), default rate(price)
+  // value (current market price) is returned.
   parseRateInput (): [boolean, boolean, number] {
     const rawRateAtom = this.rateAtoms(this.page.rateField.value)
     let adjRateAtom = this.adjustedRateAtoms(this.page.rateField.value)
@@ -2365,7 +2364,7 @@ export default class MarketsPage extends BasePage {
     const rounded = adjRateAtom !== rawRateAtom
     const adjRate = adjRateAtom / this.market.rateConversionFactor
 
-    return [rateParsingIssue, rounded, adjRate]
+    return [!rateParsingIssue, rounded, adjRate]
   }
 
   /*
