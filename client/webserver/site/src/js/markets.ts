@@ -1,4 +1,4 @@
-import Doc, { WalletIcons } from './doc'
+import Doc, { WalletIcons, Animation } from './doc'
 import State from './state'
 import BasePage from './basepage'
 import OrderBook from './orderbook'
@@ -182,6 +182,7 @@ export default class MarketsPage extends BasePage {
   recentMatchesSortDirection: 1 | -1
   stats: [StatsDisplay, StatsDisplay]
   loadingAnimations: { candles?: Wave, depth?: Wave }
+  runningErrAnimations: Animation[]
 
   constructor (main: HTMLElement, data: any) {
     super()
@@ -204,6 +205,7 @@ export default class MarketsPage extends BasePage {
     this.recentMatchesSortDirection = 1
     // store original title so we can re-append it when updating market value.
     this.ogTitle = document.title
+    this.runningErrAnimations = []
 
     const depthReporters = {
       // When the user clicks on depth-chart area, this click func gets called with x
@@ -409,14 +411,14 @@ export default class MarketsPage extends BasePage {
     })
 
     // Event listeners for interactions with the various input fields.
-    bind(page.lotField, 'change', () => { this.lotFieldChangeHandler() })
-    bind(page.lotField, 'keyup', () => { this.lotFieldKeyupHandler() })
-    bind(page.qtyField, 'change', () => { this.qtyFieldChangeHandler() })
-    bind(page.qtyField, 'keyup', () => { this.qtyFieldKeyupHandler() })
-    bind(page.mktBuyField, 'change', () => { this.marketBuyChangedHandler() })
-    bind(page.mktBuyField, 'keyup', () => { this.marketBuyChangedHandler() })
-    bind(page.rateField, 'change', () => { this.rateFieldChangeHandler() })
-    bind(page.rateField, 'keyup', () => { this.rateFieldKeyupHandler() })
+    bind(page.lotField, 'change', async () => { await this.lotFieldChangeHandler() })
+    bind(page.lotField, 'keyup', async () => { await this.lotFieldKeyupHandler() })
+    bind(page.qtyField, 'change', async () => { await this.qtyFieldChangeHandler() })
+    bind(page.qtyField, 'keyup', async () => { await this.qtyFieldKeyupHandler() })
+    bind(page.mktBuyField, 'change', async () => { await this.marketBuyChangedHandler() })
+    bind(page.mktBuyField, 'keyup', async () => { await this.marketBuyChangedHandler() })
+    bind(page.rateField, 'change', async () => { await this.rateFieldChangeHandler() })
+    bind(page.rateField, 'keyup', async () => { await this.rateFieldKeyupHandler() })
 
     // Market search input bindings.
     bind(page.marketSearchV1, 'change', () => { this.filterMarkets() })
@@ -1103,7 +1105,7 @@ export default class MarketsPage extends BasePage {
    * validateOrder performs some basic order sanity checks, returning boolean
    * true if the order appears valid.
    */
-  validateOrder (order: TradeForm) {
+  async validateOrder (order: TradeForm) {
     const page = this.page
 
     const showError = function (err: string) {
@@ -1116,20 +1118,19 @@ export default class MarketsPage extends BasePage {
 
     if (order.isLimit && !order.rate) {
       // Hints to the user what inputs don't pass validation.
-      highlightOutlineRed(page.rateField)
+      await this.animateErrors(highlightOutlineRed(page.rateField))
       showError(intl.ID_NO_ZERO_RATE)
       return false
     }
     if (!order.qty) {
       // Hints to the user what inputs don't pass validation.
-      highlightOutlineRed(page.qtyField)
+      await this.animateErrors(highlightOutlineRed(page.qtyField))
       showError(intl.ID_NO_ZERO_QUANTITY)
       return false
     }
     if (order.qty > this.calcMaxOrderQtyAtoms()) {
       // Hints to the user what inputs don't pass validation.
-      highlightBackgroundRed(page.maxOrd)
-      highlightBackgroundRed(page.orderTotalPreview)
+      await this.animateErrors(highlightBackgroundRed(page.maxOrd), highlightBackgroundRed(page.orderTotalPreview))
       showError(intl.ID_NO_QUANTITY_EXCEEDS_MAX)
       return false
     }
@@ -1878,14 +1879,17 @@ export default class MarketsPage extends BasePage {
    * will attempt to be unlocked in the order submission process, negating the
    * need to unlock ahead of time.
    */
-  stepSubmit () {
+  async stepSubmit () {
     const page = this.page
     const market = this.market
 
     animateClick(page.submitBttn, page.submitBttnLoader)
 
     Doc.hide(page.orderErr)
-    if (!this.validateOrder(this.parseOrder())) return
+    const valid = await this.validateOrder(this.parseOrder())
+    if (!valid) {
+      return
+    }
     const baseWallet = app().walletMap[market.base.id]
     const quoteWallet = app().walletMap[market.quote.id]
     if (!baseWallet) {
@@ -2115,7 +2119,7 @@ export default class MarketsPage extends BasePage {
     this.balanceWgt.updateAsset(this.openAsset.id)
   }
 
-  lotFieldKeyupHandler () {
+  async lotFieldKeyupHandler () {
     const page = this.page
 
     // We can't do anything with empty value here, and since it is a default
@@ -2130,8 +2134,7 @@ export default class MarketsPage extends BasePage {
     if (!inputValid || adjusted) {
       // Let the user know that lot value he's entered was rounded down to the
       // nearest integer number.
-      highlightOutlineRed(page.lotField)
-      highlightBackgroundRed(page.lotSizeBox)
+      await this.animateErrors(highlightOutlineRed(page.lotField), highlightBackgroundRed(page.lotSizeBox))
     }
     if (!inputValid) {
       page.orderTotalPreview.textContent = ''
@@ -2146,7 +2149,7 @@ export default class MarketsPage extends BasePage {
     this.previewTotal()
   }
 
-  lotFieldChangeHandler () {
+  async lotFieldChangeHandler () {
     const page = this.page
 
     // We can't do anything with empty value here, and since it is a default
@@ -2167,8 +2170,7 @@ export default class MarketsPage extends BasePage {
     if (!inputValid || adjusted) {
       // Let the user know that lot value he's entered was rounded down to the
       // nearest integer number.
-      highlightOutlineRed(page.lotField)
-      highlightBackgroundRed(page.lotSizeBox)
+      await this.animateErrors(highlightOutlineRed(page.lotField), highlightBackgroundRed(page.lotSizeBox))
     }
     page.lotField.value = String(adjLots)
     page.qtyField.value = String(adjQty)
@@ -2199,7 +2201,7 @@ export default class MarketsPage extends BasePage {
     return [true, rounded, lotsAdj, adjQty]
   }
 
-  qtyFieldKeyupHandler () {
+  async qtyFieldKeyupHandler () {
     const page = this.page
 
     // We can't do anything with empty value here, and since it is a default
@@ -2213,8 +2215,7 @@ export default class MarketsPage extends BasePage {
     const [inputValid, adjusted, adjLots] = this.parseQtyInput()
     if (!inputValid || adjusted) {
       // Let the user know that quantity he's entered was rounded down.
-      highlightOutlineRed(page.qtyField)
-      highlightBackgroundRed(page.lotSizeBox)
+      await this.animateErrors(highlightOutlineRed(page.qtyField), highlightBackgroundRed(page.lotSizeBox))
     }
     if (!inputValid) {
       page.orderTotalPreview.textContent = ''
@@ -2229,7 +2230,7 @@ export default class MarketsPage extends BasePage {
     this.previewTotal()
   }
 
-  qtyFieldChangeHandler () {
+  async qtyFieldChangeHandler () {
     const page = this.page
 
     // We can't do anything with empty value here, and since it is a default
@@ -2249,8 +2250,7 @@ export default class MarketsPage extends BasePage {
     }
     if (!inputValid || adjusted) {
       // Let the user know that quantity he's entered was rounded down.
-      highlightOutlineRed(page.qtyField)
-      highlightBackgroundRed(page.lotSizeBox)
+      await this.animateErrors(highlightOutlineRed(page.qtyField), highlightBackgroundRed(page.lotSizeBox))
     }
     page.lotField.value = String(adjLots)
     page.qtyField.value = String(adjQty)
@@ -2303,14 +2303,13 @@ export default class MarketsPage extends BasePage {
     page.mktBuyScore.textContent = Doc.formatCoinValue(received, this.market.baseUnitInfo)
   }
 
-  rateFieldKeyupHandler () {
+  async rateFieldKeyupHandler () {
     const page = this.page
 
     const [inputValid, adjusted] = this.parseRateInput()
     if (!inputValid || adjusted) {
       // Let the user know that rate he's entered was rounded down.
-      highlightOutlineRed(page.rateField)
-      highlightBackgroundRed(page.rateStepBox)
+      await this.animateErrors(highlightOutlineRed(page.rateField), highlightBackgroundRed(page.rateStepBox))
     }
     if (!inputValid) {
       page.orderTotalPreview.textContent = ''
@@ -2321,7 +2320,7 @@ export default class MarketsPage extends BasePage {
     this.drawChartLineInputRate()
   }
 
-  rateFieldChangeHandler () {
+  async rateFieldChangeHandler () {
     const page = this.page
 
     const [inputValid, adjusted, adjRate] = this.parseRateInput()
@@ -2333,8 +2332,7 @@ export default class MarketsPage extends BasePage {
     }
     if (!inputValid || adjusted) {
       // Let the user know that rate he's entered was rounded down.
-      highlightOutlineRed(page.rateField)
-      highlightBackgroundRed(page.rateStepBox)
+      await this.animateErrors(highlightOutlineRed(page.rateField), highlightBackgroundRed(page.rateStepBox))
     }
 
     page.rateField.value = String(adjRate)
@@ -2629,6 +2627,20 @@ export default class MarketsPage extends BasePage {
     this.candleChart.unattach()
     Doc.unbind(document, 'keyup', this.keyup)
     clearInterval(this.secondTicker)
+  }
+
+  async animateErrors (...animations: { (): Animation }[]) {
+    for (const ani of this.runningErrAnimations) {
+      // console.log('waiting')
+      // Must wait because until it fully stops it might interfere with new animations.
+      // await ani.stopAndWait()
+      ani.stop()
+    }
+
+    this.runningErrAnimations = []
+    for (const ani of animations) {
+      this.runningErrAnimations.push(ani())
+    }
   }
 }
 
@@ -3195,55 +3207,51 @@ function hostColor (host: string): string {
   return generateHue(hosts.indexOf(host))
 }
 
-// highlightBackgroundRed will change element background color to red and back in
-// a smooth transition.
-function highlightBackgroundRed (element: PageElement) {
-  if (element.animating) {
-    // Don't want to interfere with already running animation.
-    return
-  }
-  element.animating = true
-
-  const red = 'rgba(128, 0, 0, 1)'
-
+// highlightBackgroundRed returns Animation-factory that will construct Animation that will
+// change element background color to red and back in a smooth transition.
+// Note: Animation will start when constructed by "new" ^ right away - that's why
+// we return constructor-func here (aka factory), instead of constructing Animation
+// right away.
+function highlightBackgroundRed (element: PageElement): () => Animation {
   const prevColor = element.style.backgroundColor
-  element.style.backgroundColor = red
 
-  Doc.animate(animationLength, (progress: number) => {
-    element.style.backgroundColor = `rgba(128, 0, 0, ${0.5 - 0.5 * progress})`
-  }, 'easeIn')
-
-  setTimeout(function () {
-    element.style.backgroundColor = prevColor
-    element.animating = false
-  }, animationLength + 1)
+  // TODO - pick best colors (for black / white backgrounds)
+  // const red = 'rgba(128, 0, 0, 1)'
+  const [r, g, b] = State.isDark() ? [233, 94, 94] : [153, 48, 43]
+  return (): Animation => {
+    return new Animation(animationLength, (progress: number) => {
+      element.style.backgroundColor = `rgba(${r}, ${g}, ${b}, ${0.5 - 0.5 * progress})`
+    },
+    'easeIn',
+    () => {
+      element.style.backgroundColor = prevColor
+    })
+  }
 }
 
-// highlightOutlineRed will add red outline to the element and will smoothly remove
-// it afterwards.
-function highlightOutlineRed (element: PageElement) {
-  if (element.animating) {
-    // Don't want to interfere with already running animation.
-    return
-  }
-  element.animating = true
-
-  const red = 'rgba(128, 0, 0, 1)'
-
-  const prevOutline = element.style.outline
+// highlightOutlineRed returns Animation-factory that will construct Animation that will
+// change element outline color to red and back in a smooth transition.
+// Note: Animation will start when constructed by "new" ^ right away - that's why
+// we return constructor-func here (aka factory), instead of constructing Animation
+// right away.
+function highlightOutlineRed (element: PageElement): () => Animation {
+  // const prevOutline = element.style.outline
   const prevOutlineColor = element.style.outlineColor
-  element.style.outline = '2px solid'
-  element.style.outlineColor = red
 
-  Doc.animate(animationLength, (progress: number) => {
-    element.style.outlineColor = `rgba(128, 0, 0, ${0.5 - 0.5 * progress})`
-  }, 'easeIn')
-
-  setTimeout(function () {
-    element.style.outline = prevOutline
-    element.style.outlineColor = prevOutlineColor
-    element.animating = false
-  }, animationLength + 1)
+  // TODO - pick best colors (for black / white backgrounds)
+  // const red = 'rgba(128, 0, 0, 1)'
+  const [r, g, b] = State.isDark() ? [233, 94, 94] : [153, 48, 43]
+  /* // TODO ? Set the `outline` width in market.scss */
+  return (): Animation => {
+    return new Animation(animationLength, (progress: number) => {
+      element.style.outlineColor = `rgba(${r}, ${g}, ${b}, ${0.5 - 0.5 * progress})`
+    },
+    'easeIn',
+    () => {
+      // element.style.outline = prevOutline
+      element.style.outlineColor = prevOutlineColor
+    })
+  }
 }
 
 // animateClick will temporarily replace button with animation, and put it back

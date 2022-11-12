@@ -383,7 +383,6 @@ export interface PageElement extends HTMLElement {
   checked?: boolean
   href?: string
   htmlFor?: string
-  animating?: boolean
 }
 
 export interface BooleanConfig {
