@@ -2631,10 +2631,10 @@ export default class MarketsPage extends BasePage {
 
   async animateErrors (...animations: { (): Animation }[]) {
     for (const ani of this.runningErrAnimations) {
-      // console.log('waiting')
+      console.log('waiting')
       // Must wait because until it fully stops it might interfere with new animations.
-      // await ani.stopAndWait()
-      ani.stop()
+      await ani.stopAndWait()
+      // ani.stop()
     }
 
     this.runningErrAnimations = []
@@ -3213,12 +3213,11 @@ function hostColor (host: string): string {
 // we return constructor-func here (aka factory), instead of constructing Animation
 // right away.
 function highlightBackgroundRed (element: PageElement): () => Animation {
-  const prevColor = element.style.backgroundColor
-
   // TODO - pick best colors (for black / white backgrounds)
   // const red = 'rgba(128, 0, 0, 1)'
   const [r, g, b] = State.isDark() ? [233, 94, 94] : [153, 48, 43]
   return (): Animation => {
+    const prevColor = element.style.backgroundColor
     return new Animation(animationLength, (progress: number) => {
       element.style.backgroundColor = `rgba(${r}, ${g}, ${b}, ${0.5 - 0.5 * progress})`
     },
@@ -3235,14 +3234,13 @@ function highlightBackgroundRed (element: PageElement): () => Animation {
 // we return constructor-func here (aka factory), instead of constructing Animation
 // right away.
 function highlightOutlineRed (element: PageElement): () => Animation {
-  // const prevOutline = element.style.outline
-  const prevOutlineColor = element.style.outlineColor
-
   // TODO - pick best colors (for black / white backgrounds)
   // const red = 'rgba(128, 0, 0, 1)'
   const [r, g, b] = State.isDark() ? [233, 94, 94] : [153, 48, 43]
   /* // TODO ? Set the `outline` width in market.scss */
   return (): Animation => {
+    // const prevOutline = element.style.outline
+    const prevOutlineColor = element.style.outlineColor
     return new Animation(animationLength, (progress: number) => {
       element.style.outlineColor = `rgba(${r}, ${g}, ${b}, ${0.5 - 0.5 * progress})`
     },
