@@ -3213,17 +3213,14 @@ function hostColor (host: string): string {
 // we return constructor-func here (aka factory), instead of constructing Animation
 // right away.
 function highlightBackgroundRed (element: PageElement): () => Animation {
-  // TODO - pick best colors (for black / white backgrounds)
-  // const red = 'rgba(128, 0, 0, 1)'
-  const [r, g, b] = State.isDark() ? [233, 94, 94] : [153, 48, 43]
+  const [r, g, b, a] = State.isDark() ? [233, 94, 94, 0.8] : [153, 48, 43, 0.6]
   return (): Animation => {
-    const prevColor = element.style.backgroundColor
     return new Animation(animationLength, (progress: number) => {
-      element.style.backgroundColor = `rgba(${r}, ${g}, ${b}, ${0.5 - 0.5 * progress})`
+      element.style.backgroundColor = `rgba(${r}, ${g}, ${b}, ${a - a * progress})`
     },
     'easeIn',
     () => {
-      element.style.backgroundColor = prevColor
+      element.style.backgroundColor = 'none'
     })
   }
 }
@@ -3234,20 +3231,16 @@ function highlightBackgroundRed (element: PageElement): () => Animation {
 // we return constructor-func here (aka factory), instead of constructing Animation
 // right away.
 function highlightOutlineRed (element: PageElement): () => Animation {
-  // TODO - pick best colors (for black / white backgrounds)
-  // const red = 'rgba(128, 0, 0, 1)'
-  const [r, g, b] = State.isDark() ? [233, 94, 94] : [153, 48, 43]
-  /* // TODO ? Set the `outline` width in market.scss */
+  const [r, g, b, a] = State.isDark() ? [233, 94, 94, 0.8] : [153, 48, 43, 0.8]
   return (): Animation => {
-    // const prevOutline = element.style.outline
-    const prevOutlineColor = element.style.outlineColor
+    element.style.outline = '2px solid'
     return new Animation(animationLength, (progress: number) => {
-      element.style.outlineColor = `rgba(${r}, ${g}, ${b}, ${0.5 - 0.5 * progress})`
+      element.style.outlineColor = `rgba(${r}, ${g}, ${b}, ${a - a * progress})`
     },
     'easeIn',
     () => {
-      // element.style.outline = prevOutline
-      element.style.outlineColor = prevOutlineColor
+      element.style.outline = '2px'
+      element.style.outlineColor = 'none'
     })
   }
 }
