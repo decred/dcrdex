@@ -39,6 +39,8 @@ import (
 // Driver implements asset.Driver.
 type Driver struct{}
 
+var _ asset.Driver = (*Driver)(nil)
+
 // Setup creates the DCR backend. Start the backend with its Run method.
 func (d *Driver) Setup(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
 	// With a websocket RPC client with auto-reconnect, setup a logging
@@ -114,6 +116,7 @@ const (
 	BipID                    = 42
 	assetName                = "dcr"
 	immatureTransactionError = dex.ErrorKind("immature output")
+	BondVersion              = 0
 )
 
 // dcrNode represents a blockchain information fetcher. In practice, it is
@@ -167,7 +170,7 @@ func translateRPCCancelErr(err error) error {
 // script.
 func ParseBondTx(ver uint16, rawTx []byte) (bondCoinID []byte, amt int64, bondAddr string,
 	bondPubKeyHash []byte, lockTime int64, acct account.AccountID, err error) {
-	if ver != 0 {
+	if ver != BondVersion {
 		err = errors.New("only version 0 bonds supported")
 		return
 	}
@@ -626,6 +629,74 @@ func (dcr *Backend) VerifyUnspentCoin(ctx context.Context, coinID []byte) error 
 		return asset.CoinNotFoundError
 	}
 	return nil
+}
+
+// BondVer returns the latest supported bond version.
+func (dcr *Backend) BondVer() uint16 {
+	return BondVersion
+}
+
+// ParseBondTx makes the package-level ParseBondTx pure function accessible via
+// a Backend instance. This performs basic validation of a serialized
+// time-locked fidelity bond transaction given the bond's P2SH redeem script.
+func (*Backend) ParseBondTx(ver uint16, rawTx []byte) (bondCoinID []byte, amt int64, bondAddr string,
+	bondPubKeyHash []byte, lockTime int64, acct account.AccountID, err error) {
+	return ParseBondTx(ver, rawTx)
+}
+
+// BondCoin locates a bond transaction output, validates the entire transaction,
+// and returns the amount, encoded lockTime and account ID, and the
+// confirmations of the transaction. It is a CoinNotFoundError if the
+// transaction output is spent.
+func (dcr *Backend) BondCoin(ctx context.Context, ver uint16, coinID []byte) (amt, lockTime, confs int64, acct account.AccountID, err error) {
+	txHash, vout, errCoin := decodeCoinID(coinID)
+	if errCoin != nil {
+		err = fmt.Errorf("error decoding coin ID %x: %w", coinID, errCoin)
+		return
+	}
+
+	verboseTx, err := dcr.node.GetRawTransactionVerbose(dcr.ctx, txHash)
+	if err != nil {
+		if isTxNotFoundErr(err) {
+			err = asset.CoinNotFoundError
+		} else {
+			err = translateRPCCancelErr(err)
+		}
+		return
+	}
+
+	if int(vout) > len(verboseTx.Vout)-1 {
+		err = fmt.Errorf("invalid output index for tx with %d outputs", len(verboseTx.Vout))
+		return
+	}
+
+	confs = verboseTx.Confirmations
+
+	// msgTx, err := msgTxFromHex(verboseTx.Hex)
+	rawTx, err := hex.DecodeString(verboseTx.Hex) // ParseBondTx will deserialize to msgTx, so just get the bytes
+	if err != nil {
+		err = fmt.Errorf("failed to decode transaction %s: %w", txHash, err)
+		return
+	}
+	// rawTx, _ := msgTx.Bytes()
+
+	// tree := determineTxTree(msgTx)
+	txOut, err := dcr.node.GetTxOut(ctx, txHash, vout, wire.TxTreeRegular, true) // check regular tree first
+	if err == nil && txOut == nil {
+		txOut, err = dcr.node.GetTxOut(ctx, txHash, vout, wire.TxTreeStake, true) // check stake tree
+	}
+	if err != nil {
+		err = fmt.Errorf("GetTxOut error for output %s:%d: %w",
+			txHash, vout, translateRPCCancelErr(err))
+		return
+	}
+	if txOut == nil { // spent == invalid bond
+		err = asset.CoinNotFoundError
+		return
+	}
+
+	_, amt, _, _, lockTime, acct, err = ParseBondTx(ver, rawTx)
+	return
 }
 
 // FeeCoin gets the recipient address, value, and confirmations of a transaction

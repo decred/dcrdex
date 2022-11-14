@@ -22,7 +22,7 @@ type KeyIndexer interface {
 	SetKeyIndex(idx uint32, xpub string) error
 }
 
-// BackendInfo provides auxillary information about a backend.
+// BackendInfo provides auxiliary information about a backend.
 type BackendInfo struct {
 	SupportsDynamicTxFee bool
 }
@@ -80,7 +80,7 @@ type Backend interface {
 	// Synced should return true when the blockchain is synced and ready for
 	// fee rate estimation.
 	Synced() (bool, error)
-	// Info provides auxillary information about a backend.
+	// Info provides auxiliary information about a backend.
 	Info() *BackendInfo
 	// ValidateFeeRate checks that the transaction fees used to initiate the
 	// contract are sufficient.
