@@ -189,7 +189,7 @@ func TestMakeBondTx(t *testing.T) {
 	t.Logf("bond txid %v\n", coinhash)
 	t.Logf("signed tx: %x\n", bond.SignedTx)
 	t.Logf("unsigned tx: %x\n", bond.UnsignedTx)
-	t.Logf("bond script: %x\n", bond.BondData)
+	t.Logf("bond script: %x\n", bond.Data)
 	t.Logf("redeem tx: %x\n", bond.RedeemTx)
 	bondMsgTx, err := msgTxFromBytes(bond.SignedTx)
 	if err != nil {
@@ -199,7 +199,7 @@ func TestMakeBondTx(t *testing.T) {
 
 	pkh := dcrutil.Hash160(pubkey.SerializeCompressed())
 
-	lockTimeUint, pkhPush, err := dexdcr.ExtractBondDetailsV0(bondOutVersion, bond.BondData)
+	lockTimeUint, pkhPush, err := dexdcr.ExtractBondDetailsV0(bondOutVersion, bond.Data)
 	if err != nil {
 		t.Fatalf("ExtractBondDetailsV0: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestMakeBondTx(t *testing.T) {
 	waitNetwork() // wait for beta to see the new block (bond must be mined for RefundBond)
 
 	refundTxNew, err := wallet.RefundBond(context.Background(), bondVer, bond.CoinID,
-		bond.BondData, bond.Amount, priv)
+		bond.Data, bond.Amount, priv)
 	if err != nil {
 		t.Fatalf("RefundBond: %v", err)
 	}

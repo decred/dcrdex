@@ -458,9 +458,17 @@ type TxFeeEstimator interface {
 	EstimateSendTxFee(address string, value, feeRate uint64, subtract bool) (fee uint64, isValidAddress bool, err error)
 }
 
+// Broadcaster is a wallet that can send a raw transaction on the asset network.
+type Broadcaster interface {
+	// SendTransaction broadcasts a raw transaction, returning its coin ID.
+	SendTransaction(rawTx []byte) ([]byte, error)
+}
+
 // Bonder is a wallet capable of creating and redeeming time-locked fidelity
 // bond transaction outputs.
 type Bonder interface {
+	Broadcaster
+
 	// MakeBondTx authors a DEX time-locked fidelity bond transaction for the
 	// provided amount, lock time, and dex account ID. An explicit private key
 	// type is used to guarantee it's not bytes from something else like a
@@ -469,8 +477,6 @@ type Bonder interface {
 	// RefundBond will refund the bond given the full bond output details and
 	// private key to spend it.
 	RefundBond(ctx context.Context, ver uint16, coinID, script []byte, amt uint64, privKey *secp256k1.PrivateKey) ([]byte, error)
-	// SendTransaction broadcasts a raw transaction, returning its coin ID.
-	SendTransaction(rawTx []byte) ([]byte, error)
 
 	// A RefundBondByCoinID may be created in the future to attempt to refund a
 	// bond by locating it on chain, i.e. without providing the amount or
@@ -743,7 +749,7 @@ type Bond struct {
 	AssetID     uint32
 	Amount      uint64
 	CoinID      []byte
-	BondData    []byte // additional data to interpret the bond e.g. redeem script, bond contract, etc.
+	Data        []byte // additional data to interpret the bond e.g. redeem script, bond contract, etc.
 	BondPrivKey []byte // caller provided, but kept with the output
 	// SignedTx and UnsignedTx are the opaque (raw bytes) signed and unsigned
 	// bond creation transactions, in whatever encoding and funding scheme for

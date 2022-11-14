@@ -496,10 +496,11 @@ func (w *xcWallet) RefundBond(ctx context.Context, ver uint16, coinID, script []
 	return bonder.RefundBond(ctx, ver, coinID, script, amt, priv)
 }
 
+// SendTransaction broadcasts a raw transaction if the wallet is a Broadcaster.
 func (w *xcWallet) SendTransaction(tx []byte) ([]byte, error) {
-	bonder, ok := w.Wallet.(asset.Bonder)
+	bonder, ok := w.Wallet.(asset.Broadcaster)
 	if !ok {
-		return nil, errors.New("wallet does not implement SendTransaction") // seems silly, I know, but Bonder is optional
+		return nil, errors.New("wallet is not a Broadcaster")
 	}
 	return bonder.SendTransaction(tx)
 }

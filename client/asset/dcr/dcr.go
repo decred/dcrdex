@@ -3202,11 +3202,11 @@ func (dcr *ExchangeWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
 // Output 2 is change, if any.
 //
 // The bond output's redeem script, which is needed to spend the bond output, is
-// returned as the BondData field of the Bond. The bond output pays to a
-// pubkeyhash script for a wallet address. Bond.RedeemTx is a backup transaction
-// that spends the bond output after lockTime passes, paying to an address for
-// the current underlying wallet; the bond private key (BondPrivKey) should
-// normally be used to author a new transaction paying to a new address instead.
+// returned as the Data field of the Bond. The bond output pays to a pubkeyhash
+// script for a wallet address. Bond.RedeemTx is a backup transaction that
+// spends the bond output after lockTime passes, paying to an address for the
+// current underlying wallet; the bond private key (BondPrivKey) should normally
+// be used to author a new transaction paying to a new address instead.
 func (dcr *ExchangeWallet) MakeBondTx(ver uint16, amt uint64, lockTime time.Time,
 	bondKey *secp256k1.PrivateKey, acctID []byte) (*asset.Bond, error) {
 	if ver != 0 {
@@ -3320,7 +3320,7 @@ func (dcr *ExchangeWallet) MakeBondTx(ver uint16, amt uint64, lockTime time.Time
 		AssetID:     BipID,
 		Amount:      amt,
 		CoinID:      toCoinID(&txid, 0),
-		BondData:    bondScript,
+		Data:        bondScript,
 		BondPrivKey: bondKey.Serialize(),
 		SignedTx:    signedTxBytes,
 		UnsignedTx:  unsignedTxBytes,
