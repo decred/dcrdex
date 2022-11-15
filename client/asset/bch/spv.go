@@ -53,7 +53,7 @@ import (
 
 const (
 	DefaultM       uint64 = 784931 // From bchutil. Used for gcs filters.
-	logDirName            = "logs"
+	logDirName            = "spvlogs"
 	neutrinoDBName        = "neutrino.db"
 	defaultAcctNum        = 0
 )
@@ -960,20 +960,49 @@ func (w logWriter) Write(p []byte) (n int, err error) {
 // logRotator initializes a rotating file logger.
 func logRotator(netDir string) (*rotator.Rotator, error) {
 	const maxLogRolls = 8
-	logDir := filepath.Join(netDir, logDirName)
-	if err := os.MkdirAll(logDir, 0744); err != nil {
-		return nil, fmt.Errorf("error creating log directory: %w", err)
+	logDir := filepath.Join(filepath.Dir(netDir), logDirName)
+	exist, err := fileExists(logDir)
+	if err != nil {
+		return nil, err
+	}
+	if !exist {
+		oldDir := filepath.Join(netDir, "logs")
+		exist, err := fileExists(oldDir)
+		if err != nil {
+			return nil, err
+		}
+		if !exist {
+			if err := os.MkdirAll(logDir, 0744); err != nil {
+				return nil, fmt.Errorf("error creating log directory: %w", err)
+			}
+		} else {
+			// Move old logs to new log path.
+			if err := os.Rename(oldDir, logDir); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	logFilename := filepath.Join(logDir, logFileName)
 	return rotator.New(logFilename, 32*1024, false, maxLogRolls)
 }
 
+func fileExists(filePath string) (bool, error) {
+	_, err := os.Stat(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 // logNeutrino initializes logging in the neutrino + wallet packages. Logging
 // only has to be initialized once, so an atomic flag is used internally to
 // return early on subsequent invocations.
 //
-// In theory, the the rotating file logger must be Close'd at some point, but
+// In theory, the rotating file logger must be Closed at some point, but
 // there are concurrency issues with that since btcd and btcwallet have
 // unsupervised goroutines still running after shutdown. So we leave the rotator
 // running at the risk of losing some logs.

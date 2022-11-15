@@ -54,7 +54,7 @@ const (
 	defaultAcctName = "default"
 	walletDbName    = "wallet.db"
 	dbDriver        = "bdb"
-	logDirName      = "logs"
+	logDirName      = "spvlogs"
 	logFileName     = "neutrino.log"
 )
 
@@ -139,7 +139,6 @@ var _ tipNotifier = (*spvWallet)(nil)
 
 func createSPVWallet(pw, seed []byte, dataDir string, extIdx, intIdx uint32, chainParams *chaincfg.Params) error {
 	dir := filepath.Join(dataDir, chainParams.Name, "spv")
-
 	if err := initLogging(dir); err != nil {
 		return fmt.Errorf("error initializing dcrwallet logging: %w", err)
 	}
@@ -939,9 +938,27 @@ var (
 // logRotator initializes a rotating file logger.
 func logRotator(netDir string) (*rotator.Rotator, error) {
 	const maxLogRolls = 8
-	logDir := filepath.Join(netDir, logDirName)
-	if err := os.MkdirAll(logDir, 0744); err != nil {
-		return nil, fmt.Errorf("error creating log directory: %w", err)
+	logDir := filepath.Join(filepath.Dir(netDir), logDirName)
+	exist, err := fileExists(logDir)
+	if err != nil {
+		return nil, err
+	}
+	if !exist {
+		oldDir := filepath.Join(netDir, "logs")
+		exist, err := fileExists(oldDir)
+		if err != nil {
+			return nil, err
+		}
+		if !exist {
+			if err := os.MkdirAll(logDir, 0744); err != nil {
+				return nil, fmt.Errorf("error creating log directory: %w", err)
+			}
+		} else {
+			// Move old logs to new log path.
+			if err := os.Rename(oldDir, logDir); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	logFilename := filepath.Join(logDir, logFileName)
@@ -952,11 +969,11 @@ func logRotator(netDir string) (*rotator.Rotator, error) {
 // to be initialized once, so an atomic flag is used internally to return early
 // on subsequent invocations.
 //
-// TODO: See if the below precaution is even necessary for dcrwallet.
-// // In theory, the the rotating file logger must be Close'd at some point, but
-// // there are concurrency issues with that since btcd and btcwallet have
-// // unsupervised goroutines still running after shutdown. So we leave the rotator
-// // running at the risk of losing some logs.
+// TODO: See if the below precaution is even necessary for dcrwallet. In theory,
+// the the rotating file logger must be Close'd at some point, but there are
+// concurrency issues with that since btcd and btcwallet have unsupervised
+// goroutines still running after shutdown. So we leave the rotator running at
+// the risk of losing some logs.
 func initLogging(netDir string) error {
 	if !atomic.CompareAndSwapUint32(&loggingInited, 0, 1) {
 		return nil

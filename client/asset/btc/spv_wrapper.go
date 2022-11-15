@@ -71,7 +71,7 @@ const (
 
 	maxFutureBlockTime = 2 * time.Hour // see MaxTimeOffsetSeconds in btcd/blockchain/validate.go
 	neutrinoDBName     = "neutrino.db"
-	logDirName         = "logs"
+	logDirName         = "spvlogs"
 	logFileName        = "neutrino.log"
 	defaultAcctNum     = 0
 	defaultAcctName    = "default"
@@ -204,13 +204,42 @@ var (
 // logRotator initializes a rotating file logger.
 func logRotator(dir string) (*rotator.Rotator, error) {
 	const maxLogRolls = 8
-	logDir := filepath.Join(dir, logDirName)
-	if err := os.MkdirAll(logDir, 0744); err != nil {
-		return nil, fmt.Errorf("error creating log directory: %w", err)
+	logDir := filepath.Join(filepath.Dir(dir), logDirName)
+	exist, err := fileExists(logDir)
+	if err != nil {
+		return nil, err
+	}
+	if !exist {
+		oldDir := filepath.Join(dir, "logs")
+		exist, err := fileExists(oldDir)
+		if err != nil {
+			return nil, err
+		}
+		if !exist {
+			if err := os.MkdirAll(logDir, 0744); err != nil {
+				return nil, fmt.Errorf("error creating log directory: %w", err)
+			}
+		} else {
+			// Move old logs to new log path.
+			if err := os.Rename(oldDir, logDir); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	logFilename := filepath.Join(logDir, logFileName)
 	return rotator.New(logFilename, 32*1024, false, maxLogRolls)
+}
+
+func fileExists(filePath string) (bool, error) {
+	_, err := os.Stat(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // spendingInput is added to a filterScanResult if a spending input is found.
@@ -1086,7 +1115,7 @@ func (w *spvWallet) getBestBlockHeader() (*blockHeader, error) {
 }
 
 func (w *spvWallet) logFilePath() string {
-	return filepath.Join(w.dir, logDirName, logFileName)
+	return filepath.Join(filepath.Dir(w.dir), logDirName, logFileName)
 }
 
 // connect will start the wallet and begin syncing.
@@ -1158,7 +1187,25 @@ func (w *spvWallet) moveWalletData(backupDir string) error {
 		return err
 	}
 	backupFolder := filepath.Join(backupDir, timeString)
-	return os.Rename(w.dir, backupFolder)
+	if err := os.Rename(w.dir, backupFolder); err != nil {
+		return err
+	}
+	// Copy wallet logs.
+	if err := w.copyWalletLogFile(filepath.Join(backupFolder, logDirName)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (w *spvWallet) copyWalletLogFile(dstDir string) error {
+	if err := os.MkdirAll(dstDir, 0744); err != nil {
+		return err
+	}
+	logBytes, err := os.ReadFile(w.logFilePath())
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dstDir, logFileName), logBytes, 0744)
 }
 
 // numDerivedAddresses returns the number of internal and external addresses
