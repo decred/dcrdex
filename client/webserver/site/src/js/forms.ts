@@ -417,6 +417,7 @@ export class WalletConfigForm {
   textInputTmpl: PageElement
   dateInputTmpl: PageElement
   checkboxTmpl: PageElement
+  repeatableTmplOuter: PageElement
   repeatableTmpl: PageElement
   fileSelector: PageElement
   fileInput: PageElement
@@ -449,8 +450,14 @@ export class WalletConfigForm {
     this.dateInputTmpl.remove()
     this.checkboxTmpl = Doc.tmplElement(form, 'checkbox')
     this.checkboxTmpl.remove()
-    this.repeatableTmpl = Doc.tmplElement(form, 'repeatableInput')
+    // repeatableTmplOuter holds the repeatableInput element that we will
+    // duplicate. Outer also exists to be duplicated but can be used to find
+    // the last child per repeatableInput chain.
+    this.repeatableTmplOuter = Doc.tmplElement(form, 'repeatableInputOuter')
+    // repeatableTmpl is only ever copied and the copies are used.
+    this.repeatableTmpl = Doc.tmplElement(this.repeatableTmplOuter, 'repeatableInput')
     this.repeatableTmpl.remove()
+    this.repeatableTmplOuter.remove()
     this.fileSelector = Doc.tmplElement(form, 'fileSelector')
     this.fileInput = Doc.tmplElement(form, 'fileInput')
     this.errMsg = Doc.tmplElement(form, 'errMsg')
@@ -507,18 +514,52 @@ export class WalletConfigForm {
     if (loadedOpts + defaultOpts === 0) Doc.hide(this.showOther, this.otherSettings)
   }
 
-  addOpt (box: HTMLElement, opt: ConfigOption, insertAfter?: PageElement, n?: number): PageElement {
+  /*
+  * copyRepeatableOpt copies the repeatable option that can be used for the
+  * ith place.
+  */
+  copyRepeatableOpt (opt: ConfigOption, i: number): ConfigOption {
+    const description = opt.repeatableDescription ? opt.repeatableDescription[i] : ''
+    const displayname = opt.repeatableDisplayName ? opt.repeatableDisplayName[i] : ''
+    return <ConfigOption>{
+      key: opt.key,
+      displayname: displayname,
+      description: description,
+      repeatableDisplayName: opt.repeatableDisplayName,
+      repeatableDescription: opt.repeatableDescription,
+      required: true,
+      default: ''
+    }
+  }
+
+  /*
+  * addOpt adds options. n and noClick are used with repeatable options. n is
+  * always the package level repeatableCounter.
+  */
+  addOpt (box: HTMLElement, opt: ConfigOption, n?: number, noClick?: boolean): PageElement {
     const elID = 'wcfg-' + opt.key + (n ? String(n) : '')
     let el: HTMLElement
     if (opt.isboolean) el = this.checkboxTmpl.cloneNode(true) as HTMLElement
     else if (opt.isdate) el = this.dateInputTmpl.cloneNode(true) as HTMLElement
-    else if (opt.repeatable) {
+    else if (opt.repeatableDescription) {
       el = this.repeatableTmpl.cloneNode(true) as HTMLElement
-      el.classList.add('repeatable')
-      Doc.bind(Doc.tmplElement(el, 'add'), 'click', () => {
-        repeatableCounter++
-        this.addOpt(box, opt, el, repeatableCounter)
-      })
+      if (noClick) {
+        // Disable adding for all but the first repeatable option of a set.
+        Doc.hide(Doc.tmplElement(el, 'add'))
+      } else {
+        // Adding for repeatable options may add several elements to the end
+        // of box.
+        Doc.bind(Doc.tmplElement(el, 'add'), 'click', () => {
+          repeatableCounter++
+          if (opt.repeatableDescription) {
+            for (let i = 0; i < opt.repeatableDescription.length; i++) {
+              const o = this.copyRepeatableOpt(opt, i)
+              if (i === 0) this.addOpt(box, o, repeatableCounter)
+              else this.addOpt(box, o, repeatableCounter, true)
+            }
+          }
+        })
+      }
     } else el = this.textInputTmpl.cloneNode(true) as HTMLElement
     this.configElements.push([opt, el])
     const input = el.querySelector('input') as ConfigOptionInput
@@ -533,8 +574,7 @@ export class WalletConfigForm {
       label.prepend(logo)
       opt.regAsset = this.formOpts.assetID // Signal for map filtering
     }
-    if (insertAfter) insertAfter.after(el)
-    else box.appendChild(el)
+    box.appendChild(el)
     if (opt.noecho) {
       input.type = 'password'
       input.autocomplete = 'off'
@@ -580,7 +620,26 @@ export class WalletConfigForm {
     const defaultedOpts = []
     for (const opt of this.configOpts) {
       if (this.sectionize && opt.default !== null) defaultedOpts.push(opt)
-      else this.addOpt(this.dynamicOpts, opt)
+      else if (opt.repeatableDescription) {
+        // Add the repeatable template outer element back to the DOM if
+        // repeatables will be used.
+        //
+        // TODO: This is not correct if a repeatable option is used more than
+        // once in a form. More boxes will need to be created and inserted into
+        // the DOM.
+        const box = this.repeatableTmplOuter
+        this.dynamicOpts.appendChild(box)
+        for (let i = 0; i < opt.repeatableDescription.length; i++) {
+          const o = this.copyRepeatableOpt(opt, i)
+          if (i === 0) this.addOpt(box, o, repeatableCounter)
+          else {
+            repeatableCounter++
+            this.addOpt(box, o, repeatableCounter, true)
+          }
+        }
+      } else {
+        this.addOpt(this.dynamicOpts, opt)
+      }
     }
     if (defaultedOpts.length) {
       for (const opt of defaultedOpts) {
@@ -623,21 +682,37 @@ export class WalletConfigForm {
       const [opt, el] = r
       const v = cfg[opt.key]
       if (v === undefined) continue
-      if (opt.repeatable) {
+      if (opt.repeatableDescription) {
+        // Replace all repeatable options with new ones.
+        removes.push(r)
         if (handledRepeatables[opt.key]) {
-          removes.push(r)
           continue
         }
         handledRepeatables[opt.key] = true
-        const vals = v.split(opt.repeatable)
-        const firstVal = vals[0]
-        finds.push(el)
-        Doc.safeSelector(el, 'input').value = firstVal
-        for (let i = 1; i < vals.length; i++) {
-          repeatableCounter++
-          const newEl = this.addOpt(el.parentElement as PageElement, opt, el, repeatableCounter)
-          Doc.safeSelector(newEl, 'input').value = vals[i]
-          finds.push(newEl)
+        // TODO: This is not correct if a repeatable option is used more than
+        // once in a form. More boxes will need to be created and inserted into
+        // the DOM.
+        const box = this.repeatableTmplOuter
+        let child = box.lastChild
+        while (child) {
+          child.remove()
+          child = box.lastChild
+        }
+        const numVal = opt.repeatableDescription.length
+        // Repeatable option values are stored as an array of array of strings.
+        // The outer array is the number of value sets stored while inner
+        // arrays have the same number of values as descriptions/display names.
+        // There is one new element per inner value.
+        const vals: string[][] = JSON.parse(v)
+        for (let i = 0; i < vals.length; i++) {
+          const valSet = vals[i]
+          for (let j = 0; j < numVal; j++) {
+            repeatableCounter++
+            const o = this.copyRepeatableOpt(opt, j)
+            const newEl = (j === 0) ? this.addOpt(box, o, repeatableCounter) : this.addOpt(box, o, repeatableCounter, true)
+            if (valSet.length > j) Doc.safeSelector(newEl, 'input').value = valSet[j]
+            finds.push(newEl)
+          }
         }
         continue
       }
@@ -647,6 +722,7 @@ export class WalletConfigForm {
       else if (opt.isdate) input.valueAsDate = new Date(parseInt(v) * 1000)
       else input.value = v
     }
+    app().bindTooltips(this.allSettings)
     for (const r of removes) {
       const i = this.configElements.indexOf(r)
       if (i >= 0) this.configElements.splice(i, 1)
@@ -686,9 +762,39 @@ export class WalletConfigForm {
         if (date < minDate) date = minDate
         else if (date > maxDate) date = maxDate
         config[opt.key] = '' + date
+      } else if (opt.repeatableDescription) {
+        // Reapeatables are stored as the json string representation of an array
+        // of an array of strings. The outer array is the number of value sets.
+        // The inner array is a value set of repeatables.
+        const numRep = opt.repeatableDescription.length
+        const vals: string[][] = (config[opt.key]) ? JSON.parse(config[opt.key]) : null
+        if (!vals || vals.length === 0) {
+          if (numRep === 1 && input.value === '') continue
+          config[opt.key] = JSON.stringify([[input.value]])
+          continue
+        }
+        const lastVals = vals[vals.length - 1]
+        if (lastVals.length % numRep === 0) {
+          // New set of values.
+          if (numRep === 1 && input.value === '') continue
+          vals.push([input.value])
+        } else {
+          // Append to the last values and delete them all if all are empty
+          // arrays.
+          lastVals.push(input.value)
+          if (lastVals.length === numRep) {
+            let allEmpty = true
+            lastVals.forEach(val => { if (val !== '') allEmpty = false })
+            if (allEmpty) {
+              if (numRep !== 1) vals.pop()
+            } else {
+              vals[vals.length - 1] = lastVals
+            }
+          }
+        }
+        config[opt.key] = JSON.stringify(vals)
       } else if (input.value) {
-        if (opt.repeatable && config[opt.key]) config[opt.key] += opt.repeatable + input.value
-        else config[opt.key] = input.value
+        config[opt.key] = input.value
       }
     }
     return config

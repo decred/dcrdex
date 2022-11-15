@@ -40,7 +40,7 @@ func TestMain(m *testing.M) {
 	run := func() (int, error) {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(context.Background())
-		ethClient = newRPCClient(dex.Simnet, ipc)
+		ethClient = newRPCClient(dex.Simnet, &endpoint{addr: ipc})
 		defer func() {
 			cancel()
 			ethClient.shutdown()
@@ -51,7 +51,6 @@ func TestMain(m *testing.M) {
 		netToken := dexeth.Tokens[testTokenID].NetTokens[dex.Simnet]
 		netToken.Address = getContractAddrFromFile(tokenErc20AddrFile)
 		netToken.SwapContracts[0].Address = getContractAddrFromFile(tokenSwapAddrFile)
-		registerToken(testTokenID, 0)
 
 		if err := ethClient.connect(ctx); err != nil {
 			return 1, fmt.Errorf("Connect error: %w", err)
@@ -152,8 +151,9 @@ func testAccountBalance(t *testing.T, assetID uint32) {
 		t.Fatalf("accountBalance error: %v", err)
 	}
 
+	// NOTE: Token transfers use eth for the fee, so token difference is exact.
 	diff := new(big.Int).Sub(balBefore, balAfter)
-	if diff.Cmp(dexeth.GweiToWei(vGwei)) <= 0 {
+	if diff.Cmp(dexeth.GweiToWei(vGwei)) < 0 {
 		t.Fatalf("account balance changed by %d. expected > %d", dexeth.WeiToGwei(diff), uint64(vGwei))
 	}
 }

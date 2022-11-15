@@ -2939,7 +2939,7 @@ func TestDriverOpen(t *testing.T) {
 	logger := dex.StdOutLogger("ETHTEST", dex.LevelOff)
 	tmpDir := t.TempDir()
 
-	settings := map[string]string{providersKey: "a.ipc"}
+	settings := map[string]string{providersKey: `[["a.ipc",""]]`}
 	err := createWallet(&asset.CreateWalletParams{
 		Type:     walletTypeRPC,
 		Seed:     encode.RandomBytes(32),
@@ -2990,7 +2990,7 @@ func TestDriverExists(t *testing.T) {
 	drv := &Driver{}
 	tmpDir := t.TempDir()
 
-	settings := map[string]string{providersKey: "a.ipc"}
+	settings := map[string]string{providersKey: `[["a.ipc",""]]`}
 
 	// no wallet
 	exists, err := drv.Exists(walletTypeRPC, tmpDir, settings, dex.Simnet)
@@ -4557,7 +4557,7 @@ func testMaxSwapRedeemLots(t *testing.T, assetID uint32) {
 	logger := dex.StdOutLogger("ETHTEST", dex.LevelOff)
 	tmpDir := t.TempDir()
 
-	settings := map[string]string{providersKey: "a.ipc"}
+	settings := map[string]string{providersKey: `[["a.ipc",""]]`}
 	err := createWallet(&asset.CreateWalletParams{
 		Type:     walletTypeRPC,
 		Seed:     encode.RandomBytes(32),

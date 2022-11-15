@@ -48,7 +48,7 @@ fi
 
 if [ $ETH_ON -eq 0 ]; then
 	echo configuring Eth and dextt.eth wallets
-	./dexcctl -p abc -p "" --simnet newwallet 60 rpc "" "{\"providers\":\"${HOME}/dextest/eth/alpha/node/geth.ipc\"}"
+	./dexcctl -p abc -p "" --simnet newwallet 60 rpc "" '{"providersv1":"[[\"~/dextest/eth/alpha/node/geth.ipc\"]]"}'
 	./dexcctl -p abc -p "" --simnet newwallet 60000 rpc
 fi
 

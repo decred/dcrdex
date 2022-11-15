@@ -1,7 +1,18 @@
 //go:build harness && lgpl
 
-// This test requires that the simnet harness be running. Some tests will
-// alternatively work on testnet.
+// This test requires that the simnet harness be running. Tests also work on
+// siment but require some extra setup.
+//
+// If you are testing on testnet, you must specify the provider and/or jwt secret
+// in the testnet-credentials.json file.
+//
+// example of testnet-credentials.json file:
+// {
+//  	"key0": "0000000000000000000000000000000000000000000000000000000000000000",
+//  	"key1": "1111111111111111111111111111111111111111111111111111111111111111",
+//  	"provider": "ws://127.0.0.1:8551",
+//	"jwt": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+// }
 //
 // NOTE: These test reuse a light node that lives in the dextest folders.
 // However, when recreating the test database for every test, the nonce used
@@ -11,10 +22,6 @@
 // fail, and sometimes the redeem and refund functions to also fail. This could
 // be a problem in the future if a user restores from seed. Punting on this
 // particular problem for now.
-//
-// TODO: Running these tests many times on simnet eventually results in all
-// transactions returning "unexpected error for test ok: exceeds block gas
-// limit". Find out why that is.
 
 package eth
 
@@ -105,11 +112,9 @@ var (
 	// block currently. Is set in code to testnetSecPerBlock if runing on
 	// testnet.
 	secPerBlock = time.Second
-	// If you are testing on testnet, you must specify the rpcNode. You can also
-	// specify it in the testnet-credentials.json file.
-	rpcNode string
 	// useRPC can be set to true to test the RPC clients.
-	useRPC bool
+	useRPC  bool
+	rpcNode endpoint
 
 	// isTestnet can be set to true to perform tests on the goerli testnet.
 	// May need some setup including sending testnet coins to the addresses
@@ -268,14 +273,14 @@ out:
 	return nil
 }
 
-func prepareRPCClient(name, dataDir, endpoint string, net dex.Network) (*multiRPCClient, *accounts.Account, error) {
+func prepareRPCClient(name, dataDir string, ep *endpoint, net dex.Network) (*multiRPCClient, *accounts.Account, error) {
 	ethCfg, err := ethChainConfig(net)
 	if err != nil {
 		return nil, nil, err
 	}
 	cfg := ethCfg.Genesis.Config
 
-	c, err := newMultiRPCClient(dataDir, []string{endpoint}, tLogger.SubLogger(name), cfg, big.NewInt(chainIDs[net]), net)
+	c, err := newMultiRPCClient(dataDir, []endpoint{{addr: ep.addr, jwt: ep.jwt}}, tLogger.SubLogger(name), cfg, big.NewInt(chainIDs[net]), net)
 	if err != nil {
 		return nil, nil, fmt.Errorf("(%s) newNodeClient error: %v", name, err)
 	}
@@ -285,11 +290,11 @@ func prepareRPCClient(name, dataDir, endpoint string, net dex.Network) (*multiRP
 	return c, c.creds.acct, nil
 }
 
-func rpcEndpoints(net dex.Network) (string, string) {
+func rpcEndpoints(net dex.Network) (initiator, participant *endpoint) {
 	if net == dex.Testnet {
-		return rpcNode, rpcNode
+		return &rpcNode, &rpcNode
 	}
-	return alphaIPCFile, betaIPCFile
+	return &endpoint{addr: alphaIPCFile}, &endpoint{addr: betaIPCFile}
 }
 
 func prepareTestRPCClients(initiatorDir, participantDir string, net dex.Network) (err error) {
@@ -605,25 +610,24 @@ func useTestnet() error {
 	isTestnet = true
 	b, err := os.ReadFile(testnetCredentialsPath)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			return fmt.Errorf("error reading credentials file: %v", err)
-		}
-	} else {
-		var creds struct {
-			Key0     string `json:"key0"`
-			Key1     string `json:"key1"`
-			Provider string `json:"provider"`
-		}
-		if err := json.Unmarshal(b, &creds); err != nil {
-			return fmt.Errorf("error parsing credentials file: %v", err)
-		}
-		if creds.Key0 == "" || creds.Key1 == "" {
-			return fmt.Errorf("must provide both keys in testnet credentials file")
-		}
-		testnetWalletSeed = creds.Key0
-		testnetParticipantWalletSeed = creds.Key1
-		rpcNode = creds.Provider
+		return fmt.Errorf("error reading credentials file: %v", err)
 	}
+	var creds struct {
+		Key0     string `json:"key0"`
+		Key1     string `json:"key1"`
+		Provider string `json:"provider"`
+		JWT      string `json:"jwt"`
+	}
+	if err := json.Unmarshal(b, &creds); err != nil {
+		return fmt.Errorf("error parsing credentials file: %v", err)
+	}
+	if creds.Key0 == "" || creds.Key1 == "" {
+		return fmt.Errorf("must provide both keys in testnet credentials file")
+	}
+	testnetWalletSeed = creds.Key0
+	testnetParticipantWalletSeed = creds.Key1
+	rpcNode.addr = creds.Provider
+	rpcNode.jwt = creds.JWT
 	return nil
 }
 
@@ -631,7 +635,9 @@ func TestMain(m *testing.M) {
 	dexeth.MaybeReadSimnetAddrs()
 
 	flag.BoolVar(&isTestnet, "testnet", false, "use testnet")
-	flag.BoolVar(&useRPC, "rpc", false, "use RPC")
+	// NOTE: Internal clients are currently disabled because light clients
+	// do not work since the merge. Default this to false when they are fixed.
+	flag.BoolVar(&useRPC, "rpc", true, "use RPC")
 	flag.Parse()
 
 	if isTestnet {
@@ -666,7 +672,7 @@ func TestMain(m *testing.M) {
 	os.Exit(exitCode)
 }
 
-func setupWallet(walletDir, seed, listenAddress, rpcAddr string, net dex.Network) error {
+func setupWallet(walletDir, seed, listenAddress string, ep *endpoint, net dex.Network) error {
 	walletType := walletTypeGeth
 	settings := map[string]string{
 		"nodelistenaddr": listenAddress,
@@ -674,7 +680,7 @@ func setupWallet(walletDir, seed, listenAddress, rpcAddr string, net dex.Network
 	if useRPC {
 		walletType = walletTypeRPC
 		settings = map[string]string{
-			providersKey: rpcAddr,
+			providersKey: fmt.Sprintf("[[\"%v\",\"%v\"]]", ep.addr, ep.jwt),
 		}
 	}
 	seedB, _ := hex.DecodeString(seed)
