@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -73,7 +74,7 @@ const (
 	walletTypeGeth = "geth"
 	walletTypeRPC  = "rpc"
 
-	providersKey = "providers"
+	providersKey = "providersv1"
 
 	// confCheckTimeout is the amount of time allowed to check for
 	// confirmations. Testing on testnet has shown spikes up to 2.5
@@ -101,13 +102,13 @@ var (
 	}
 	RPCOpts = []*asset.ConfigOption{
 		{
-			Key:         providersKey,
-			DisplayName: "Provider",
-			Description: "Specify one or more providers. For infrastructure " +
+			Key:                   providersKey,
+			RepeatableDisplayName: []string{"Provider", "JWT secret"},
+			RepeatableDescription: []string{"Specify one or more providers. For infrastructure " +
 				"providers, use an https address. Only url-based authentication " +
 				"is supported. For a local node, use the filepath to an IPC file.",
-			Repeatable: providerDelimiter,
-			Required:   true,
+				"Specify a jwt secret if communication with a geth full node over ws."},
+			Required: true,
 		},
 	}
 	// WalletInfo defines some general information about a Ethereum wallet.
@@ -516,6 +517,31 @@ func CreateWallet(cfg *asset.CreateWalletParams) error {
 	return createWallet(cfg, false)
 }
 
+// endpointsFromSettings parses endpoints from the setting map. Endpoints are
+// stored as and array of and array of strings.
+func endpointsFromSettings(settings map[string]string) ([]endpoint, error) {
+	providerDef := settings[providersKey]
+	if len(providerDef) == 0 {
+		return nil, errors.New("no providers specified")
+	}
+	var values [][]string
+	err := json.Unmarshal([]byte(providerDef), &values)
+	if err != nil {
+		return nil, err
+	}
+	endpoints := make([]endpoint, len(values))
+	for i, v := range values {
+		switch len(v) {
+		case 2:
+			endpoints[i].jwt = v[1]
+			fallthrough
+		case 1:
+			endpoints[i].addr = v[0]
+		}
+	}
+	return endpoints, nil
+}
+
 func createWallet(createWalletParams *asset.CreateWalletParams, skipConnect bool) error {
 	switch createWalletParams.Type {
 	case walletTypeGeth:
@@ -558,12 +584,10 @@ func createWallet(createWalletParams *asset.CreateWalletParams, skipConnect bool
 	case walletTypeRPC:
 
 		// Check that we can connect to all endpoints.
-		providerDef := createWalletParams.Settings[providersKey]
-		if len(providerDef) == 0 {
-			return errors.New("no providers specified")
+		endpoints, err := endpointsFromSettings(createWalletParams.Settings)
+		if err != nil {
+			return fmt.Errorf("unable to read endpoints: %v", err)
 		}
-		endpoints := strings.Split(providerDef, providerDelimiter)
-		n := len(endpoints)
 
 		// TODO: This procedure may actually work for walletTypeGeth too.
 		ks := keystore.NewKeyStore(filepath.Join(walletDir, "keystore"), keystore.LightScryptN, keystore.LightScryptP)
@@ -577,14 +601,15 @@ func createWallet(createWalletParams *asset.CreateWalletParams, skipConnect bool
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 			defer cancel()
 
-			var unknownEndpoints []string
+			var unknownEndpoints []endpoint
 
-			for _, endpoint := range endpoints {
-				known, compliant := providerIsCompliant(endpoint)
+			for _, ep := range endpoints {
+				addr := ep.addr
+				known, compliant := providerIsCompliant(addr)
 				if known && !compliant {
-					return fmt.Errorf("provider %q is known to have an insufficient API for DEX", endpoint)
+					return fmt.Errorf("provider %q is known to have an insufficient API for DEX", addr)
 				} else if !known {
-					unknownEndpoints = append(unknownEndpoints, endpoint)
+					unknownEndpoints = append(unknownEndpoints, ep)
 				}
 			}
 
@@ -598,8 +623,8 @@ func createWallet(createWalletParams *asset.CreateWalletParams, skipConnect bool
 						p.ec.Close()
 					}
 				}()
-				if len(providers) != n {
-					return fmt.Errorf("Could not connect to all providers")
+				if len(providers) != len(endpoints) {
+					return errors.New("could not connect to all providers")
 				}
 				if err := checkProvidersCompliance(ctx, walletDir, providers, createWalletParams.Logger); err != nil {
 					return err
@@ -728,7 +753,10 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 		// }
 		return nil, asset.ErrWalletTypeDisabled
 	case walletTypeRPC:
-		endpoints := strings.Split(w.settings[providersKey], " ")
+		endpoints, err := endpointsFromSettings(w.settings)
+		if err != nil {
+			return nil, fmt.Errorf("unable to read endpoints: %v", err)
+		}
 		ethCfg, err := ethChainConfig(w.net)
 		if err != nil {
 			return nil, err
@@ -738,7 +766,7 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 		// Point to a harness node on simnet, if not specified.
 		if w.net == dex.Simnet && len(endpoints) == 0 {
 			u, _ := user.Current()
-			endpoints = append(endpoints, filepath.Join(u.HomeDir, "dextest", "eth", "beta", "node", "geth.ipc"))
+			endpoints = append(endpoints, endpoint{addr: filepath.Join(u.HomeDir, "dextest", "eth", "beta", "node", "geth.ipc")})
 		}
 
 		cl, err = newMultiRPCClient(w.dir, endpoints, w.log.SubLogger("RPC"), chainConfig, big.NewInt(chainIDs[w.net]), w.net)

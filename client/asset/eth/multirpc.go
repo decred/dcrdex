@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -206,7 +207,7 @@ func (p *provider) subscribeHeaders(ctx context.Context, sub ethereum.Subscripti
 				return sub, nil
 			}
 			if time.Since(lastWarning) > 5*time.Minute {
-				log.Warnf("can't resubscribe to %q headers: %v", err)
+				log.Warnf("can't resubscribe to %q headers: %v", p.host, err)
 			}
 			select {
 			case <-time.After(time.Second * 30):
@@ -254,7 +255,7 @@ func (p *provider) subscribeHeaders(ctx context.Context, sub ethereum.Subscripti
 				return
 			}
 			log.Errorf("%q header subscription error: %v", p.host, err)
-			log.Info("Attempting to resubscribe to %q block headers", p.host)
+			log.Infof("Attempting to resubscribe to %q block headers", p.host)
 			sub, err = newSub()
 			if err != nil { // context cancelled
 				return
@@ -282,6 +283,11 @@ type receiptRecord struct {
 	confirmed  bool
 }
 
+type endpoint struct {
+	addr string
+	jwt  string
+}
+
 // multiRPCClient is an ethFetcher backed by one or more public RPC providers.
 type multiRPCClient struct {
 	cfg     *params.ChainConfig
@@ -290,7 +296,7 @@ type multiRPCClient struct {
 	chainID *big.Int
 
 	providerMtx sync.Mutex
-	endpoints   []string
+	endpoints   []endpoint
 	providers   []*provider
 
 	lastNonce struct {
@@ -316,7 +322,7 @@ type multiRPCClient struct {
 
 var _ ethFetcher = (*multiRPCClient)(nil)
 
-func newMultiRPCClient(dir string, endpoints []string, log dex.Logger, cfg *params.ChainConfig, chainID *big.Int, net dex.Network) (*multiRPCClient, error) {
+func newMultiRPCClient(dir string, endpoints []endpoint, log dex.Logger, cfg *params.ChainConfig, chainID *big.Int, net dex.Network) (*multiRPCClient, error) {
 	walletDir := getWalletDir(dir, net)
 	creds, err := pathCredentials(filepath.Join(walletDir, "keystore"))
 	if err != nil {
@@ -340,7 +346,7 @@ func newMultiRPCClient(dir string, endpoints []string, log dex.Logger, cfg *para
 // list of providers that were successfully connected. It is not an error for a
 // connection to fail. The caller can infer failed connections from the length
 // and contents of the returned provider list.
-func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, chainID *big.Int) ([]*provider, error) {
+func connectProviders(ctx context.Context, endpoints []endpoint, log dex.Logger, chainID *big.Int) ([]*provider, error) {
 	providers := make([]*provider, 0, len(endpoints))
 	var success bool
 
@@ -352,7 +358,7 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 		}
 	}()
 
-	for _, endpoint := range endpoints {
+	for _, ep := range endpoints {
 		// First try to get a websocket connection. Websockets have a header
 		// feed, so are much preferred to http connections. So much so, that
 		// we'll do some path inspection here and make an attempt to find a
@@ -362,10 +368,14 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 		var sub ethereum.Subscription
 		var h chan *types.Header
 		host := providerIPC
-		if !strings.HasSuffix(endpoint, ".ipc") {
-			wsURL, err := url.Parse(endpoint)
+		addr := ep.addr
+		if strings.HasSuffix(addr, ".ipc") {
+			// Clean file path.
+			addr = dex.CleanAndExpandPath(addr)
+		} else {
+			wsURL, err := url.Parse(addr)
 			if err != nil {
-				return nil, fmt.Errorf("Failed to parse url %q", endpoint)
+				return nil, fmt.Errorf("Failed to parse url %q", addr)
 			}
 			host = wsURL.Host
 			ogScheme := wsURL.Scheme
@@ -376,7 +386,7 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 				wsURL.Scheme = "ws"
 			case "ws", "wss":
 			default:
-				return nil, fmt.Errorf("unknown scheme for endpoint %q: %q", endpoint, wsURL.Scheme)
+				return nil, fmt.Errorf("unknown scheme for endpoint %q: %q", addr, wsURL.Scheme)
 			}
 			replaced := ogScheme != wsURL.Scheme
 
@@ -392,7 +402,18 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 				host = providerRivetCloud
 			}
 
-			rpcClient, err = rpc.DialWebsocket(ctx, wsURL.String(), "")
+			if ep.jwt == "" {
+				rpcClient, err = rpc.DialWebsocket(ctx, wsURL.String(), "")
+			} else {
+				// Geth clients should always be able to get a
+				// websocket connection, making http unnecessary.
+				var authFn func(h http.Header) error
+				authFn, err = dexeth.JWTHTTPAuthFn(ep.jwt)
+				if err != nil {
+					return nil, fmt.Errorf("unable to create auth function: %v", err)
+				}
+				rpcClient, err = rpc.DialOptions(ctx, wsURL.String(), rpc.WithHTTPAuth(authFn))
+			}
 			if err == nil {
 				ec = ethclient.NewClient(rpcClient)
 				h = make(chan *types.Header, 8)
@@ -410,7 +431,7 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 				if replaced {
 					log.Debugf("couldn't get a websocket connection for %q (original scheme: %q) (OK)", wsURL, ogScheme)
 				} else {
-					log.Errorf("failed to get websocket connection to %q. attempting http(s) fallback: error = %v", endpoint, err)
+					log.Errorf("failed to get websocket connection to %q. attempting http(s) fallback: error = %v", addr, err)
 				}
 			}
 		}
@@ -418,9 +439,9 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 		// path discrimination, so I won't even try to validate the protocol.
 		if ec == nil {
 			var err error
-			rpcClient, err = rpc.Dial(endpoint)
+			rpcClient, err = rpc.DialContext(ctx, addr)
 			if err != nil {
-				log.Errorf("error creating http client for %q: %v", endpoint, err)
+				log.Errorf("error creating http client for %q: %v", addr, err)
 				continue
 			}
 			ec = ethclient.NewClient(rpcClient)
@@ -431,12 +452,12 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 		if err != nil {
 			// If we can't get a header, don't use this provider.
 			ec.Close()
-			log.Errorf("Failed to get chain ID from %q: %v", endpoint, err)
+			log.Errorf("Failed to get chain ID from %q: %v", addr, err)
 			continue
 		}
 		if chainID.Cmp(reportedChainID) != 0 {
 			ec.Close()
-			log.Errorf("%q reported wrong chain ID. expected %d, got %d", endpoint, chainID, reportedChainID)
+			log.Errorf("%q reported wrong chain ID. expected %d, got %d", addr, chainID, reportedChainID)
 			continue
 		}
 
@@ -444,7 +465,7 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 		if err != nil {
 			// If we can't get a header, don't use this provider.
 			ec.Close()
-			log.Errorf("Failed to get header from %q: %v", endpoint, err)
+			log.Errorf("Failed to get header from %q: %v", addr, err)
 			continue
 		}
 
@@ -547,11 +568,10 @@ func (m *multiRPCClient) voidUnusedNonce() {
 }
 
 func (m *multiRPCClient) reconfigure(ctx context.Context, settings map[string]string) error {
-	providerDef := settings[providersKey]
-	if len(providerDef) == 0 {
-		return errors.New("no providers specified")
+	endpoints, err := endpointsFromSettings(settings)
+	if err != nil {
+		return fmt.Errorf("unable to read endpoints: %v", err)
 	}
-	endpoints := strings.Split(providerDef, " ")
 	providers, err := connectProviders(ctx, endpoints, m.log, m.chainID)
 	if err != nil {
 		return err

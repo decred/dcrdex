@@ -250,11 +250,11 @@ type ConfigOption struct {
 	IsDate            bool `json:"isdate"`
 	DisableWhenActive bool `json:"disablewhenactive"`
 	IsBirthdayConfig  bool `json:"isBirthdayConfig"`
-	// Repeatable signals a text input that can be duplicated and submitted
-	// multiple times, with the specified delimiter used to encode the data
-	// in the settings map.
-	Repeatable string `json:"repeatable"`
-	Required   bool   `json:"required"`
+	// Repeatable arguments signal a text input that can be duplicated and
+	// submitted multiple times. They must have the same length.
+	RepeatableDisplayName []string `json:"repeatableDisplayName"`
+	RepeatableDescription []string `json:"repeatableDescription"`
+	Required              bool     `json:"required"`
 
 	// ShowByDefault to show or not options on "hide advanced options".
 	ShowByDefault bool `json:"showByDefault,omitempty"`

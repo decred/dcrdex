@@ -72,6 +72,13 @@ ETH_ON=$?
 
 set -e
 
+if [ $ETH_ON -eq 0 ]; then
+  cat > "${DCRDEX_DATA_DIR}/geth.conf" <<EOF
+addr=ws://127.0.0.1:8552
+jwt=0x45747261485f394e52346574347a4d78527941734f30512d4e32383dbabababa
+EOF
+fi
+
 # Write markets.json.
 # The dcr and btc harnesses should be running. The assets config paths
 # used here are created by the respective harnesses.
@@ -224,7 +231,7 @@ if [ $ETH_ON -eq 0 ]; then
             "network": "simnet",
             "maxFeeRate": 200,
             "swapConf": 2,
-            "configPath": "${TEST_ROOT}/eth/alpha/node/geth.ipc"
+            "configPath": "${DCRDEX_DATA_DIR}/geth.conf"
         },
         "DEXTT_simnet": {
             "bip44symbol": "dextt.eth",

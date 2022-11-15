@@ -30,11 +30,6 @@ geth --datadir="${NODE_DIR}" \$*
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/${NAME}"
 
-HTTP_OPT=""
-if [ "$NAME" = "delta" ]; then
-  HTTP_OPT="--http --http.port ${DELTA_HTTP_PORT} --ws --ws.port ${DELTA_WS_PORT} --ws.api \"db,eth,net,web3,personal,txpool,admin\""
-fi
-
 # Write mine script if CHAIN_ADDRESS is present.
 if [ "${CHAIN_ADDRESS}" != "_" ]; then
   # The mining script may end up mining more or less blocks than specified.
@@ -69,6 +64,10 @@ EOF
 
 fi
 
+cat > "${NODE_DIR}/jwt.hex" <<EOF
+0x45747261485f394e52346574347a4d78527941734f30512d4e32383dbabababa
+EOF
+
 cat > "${NODE_DIR}/eth.conf" <<EOF
 [Eth]
 NetworkId = 42
@@ -80,6 +79,7 @@ DatasetDir = "${NODE_DIR}/.ethash"
 [Node]
 DataDir = "${NODE_DIR}"
 AuthPort = ${AUTHRPC_PORT}
+JWTSecret = "${NODE_DIR}/jwt.hex"
 
 [Node.P2P]
 NoDiscovery = true

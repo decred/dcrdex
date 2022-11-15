@@ -227,7 +227,8 @@ export interface ConfigOption {
   isdate: boolean
   disablewhenactive: boolean
   isBirthdayConfig: boolean
-  repeatable?: string
+  repeatableDescription?: string[]
+  repeatableDisplayName?: string[]
   noauth: boolean
   regAsset?: number
   required?: boolean
