@@ -440,7 +440,6 @@ export class Animation {
    * manner dictated by easingAlgo.
    */
   async run (duration: number, f: (progress: number) => void, easingAlgo?: string) {
-    console.log('started')
     duration = duration >= 0 ? duration : 1000 * 86400 * 365 * 10 // 10 years, in ms
     const easer = easingAlgo ? Easing[easingAlgo] : Easing.linear
     const start = new Date().getTime()
@@ -462,7 +461,6 @@ export class Animation {
   /* wait returns a promise that will resolve when the animation completes. */
   async wait () {
     await this.thread
-    console.log('done')
   }
 
   /* stop schedules the animation to exit at its next frame. */
