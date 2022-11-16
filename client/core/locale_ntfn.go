@@ -87,6 +87,11 @@ var originLocale = map[Topic]*translation{
 		subject:  "Send Successful",
 		template: "Sending %s %s to %s has completed successfully. Coin ID = %s",
 	},
+	//[order ID, error]
+	TopicAsyncOrderFailure: {
+		subject:  "In-Flight Order Error",
+		template: "In-Flight order with ID %v failed: %v",
+	},
 	// [error]
 	TopicOrderLoadFailure: {
 		subject:  "Order load failure",

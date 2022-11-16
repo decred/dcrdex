@@ -1193,7 +1193,10 @@ export default class MarketsPage extends BasePage {
         details: details,
         ord: ord
       }
-      metaOrders[ord.id] = mord
+
+      // No need to track in-flight orders here. We've already added it to
+      // display.
+      if (ord.id) metaOrders[ord.id] = mord
 
       header.sideLight.classList.add(ord.sell ? 'sell' : 'buy')
       details.side.textContent = header.side.textContent = OrderUtil.sellString(ord)
@@ -1210,20 +1213,28 @@ export default class MarketsPage extends BasePage {
         this.setDepthMarkers()
       })
 
-      if (ord.type === OrderUtil.Limit && (ord.tif === OrderUtil.StandingTiF && ord.status < OrderUtil.StatusExecuted)) {
-        Doc.show(details.cancelBttn)
-        bind(details.cancelBttn, 'click', e => {
-          e.stopPropagation()
-          this.showCancel(div, ord.id)
-        })
-      }
+      if (!ord.id) {
+        Doc.hide(details.accelerateBttn)
+        Doc.hide(details.cancelBttn)
+        Doc.hide(details.link)
+      } else {
+        if (ord.type === OrderUtil.Limit && (ord.tif === OrderUtil.StandingTiF && ord.status < OrderUtil.StatusExecuted)) {
+          Doc.show(details.cancelBttn)
+          bind(details.cancelBttn, 'click', e => {
+            e.stopPropagation()
+            this.showCancel(div, ord.id)
+          })
+        }
 
-      bind(details.accelerateBttn, 'click', e => {
-        e.stopPropagation()
-        this.showAccelerate(ord)
-      })
-      if (app().canAccelerateOrder(ord)) {
-        Doc.show(details.accelerateBttn)
+        bind(details.accelerateBttn, 'click', e => {
+          e.stopPropagation()
+          this.showAccelerate(ord)
+        })
+        if (app().canAccelerateOrder(ord)) {
+          Doc.show(details.accelerateBttn)
+        }
+        details.link.href = `order/${ord.id}`
+        app().bindInternalNavigation(div)
       }
 
       Doc.bind(header.expander, 'click', () => {
@@ -1237,8 +1248,6 @@ export default class MarketsPage extends BasePage {
         header.expander.classList.remove('ico-arrowdown')
         header.expander.classList.add('ico-arrowup')
       })
-      details.link.href = `order/${ord.id}`
-      app().bindInternalNavigation(div)
       app().bindTooltips(div)
     }
     this.setDepthMarkers()
@@ -1854,10 +1863,10 @@ export default class MarketsPage extends BasePage {
   handleOrderNote (note: OrderNote) {
     const order = note.order
     const mord = this.metaOrders[order.id]
-    // If metaOrder doesn't exist for the given order it means it was
-    // created via dexcctl and the GUI isn't aware of it.
+    // If metaOrder doesn't exist for the given order it means it was created
+    // via dexcctl and the GUI isn't aware of it or it was an inflight order.
     // Call refreshActiveOrders to grab the order.
-    if (!mord) return this.refreshActiveOrders()
+    if (!mord || note.topic === 'AsyncOrderFailure') return this.refreshActiveOrders()
     const oldStatus = mord.status
     mord.ord = order
     if (note.topic === 'MissedCancel') Doc.show(mord.details.cancelBttn)
@@ -1986,11 +1995,11 @@ export default class MarketsPage extends BasePage {
     // Show loader and hide submit button.
     page.vSubmit.classList.add('d-hide')
     page.vLoader.classList.remove('d-hide')
-    const res = await postJSON('/api/trade', req)
+    const res = await postJSON('/api/tradeasync', req)
     // Hide loader and show submit button.
     page.vSubmit.classList.remove('d-hide')
     page.vLoader.classList.add('d-hide')
-    // If errors display error on confirmation modal.
+    // If error, display error on confirmation modal.
     if (!app().checkResponse(res)) {
       page.vErr.textContent = res.msg
       Doc.show(page.vErr)
@@ -1999,7 +2008,6 @@ export default class MarketsPage extends BasePage {
     // Hide confirmation modal only on success.
     Doc.hide(page.forms)
     this.refreshActiveOrders()
-    this.depthChart.draw()
   }
 
   /*

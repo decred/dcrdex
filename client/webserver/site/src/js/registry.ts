@@ -57,6 +57,11 @@ export interface Market {
   orders: Order[]
   spot: Spot | undefined
   atomToConv: number
+  inflight: InFlightOrder[]
+}
+
+export interface InFlightOrder extends Order {
+  tempID: number
 }
 
 export interface Order {
@@ -321,6 +326,7 @@ export interface ConnEventNote extends CoreNote {
 
 export interface OrderNote extends CoreNote {
   order: Order
+  tempID: number
 }
 
 export interface RecentMatch {

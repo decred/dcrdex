@@ -64,7 +64,7 @@ type myOrder struct {
 	MarketName  string   `json:"marketName"`
 	BaseID      uint32   `json:"baseID"`
 	QuoteID     uint32   `json:"quoteID"`
-	ID          string   `json:"id"`
+	ID          string   `json:"id"` // Can be empty if part of an InFlightOrder.
 	Type        string   `json:"type"`
 	Sell        bool     `json:"sell"`
 	Stamp       uint64   `json:"stamp"`

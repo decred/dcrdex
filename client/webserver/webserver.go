@@ -115,6 +115,7 @@ type clientCore interface {
 	SupportedAssets() map[uint32]*core.SupportedAsset
 	Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (asset.Coin, error)
 	Trade(pw []byte, form *core.TradeForm) (*core.Order, error)
+	TradeAsync(pw []byte, form *core.TradeForm) (*core.InFlightOrder, error)
 	Cancel(pw []byte, oid dex.Bytes) error
 	NotificationFeed() <-chan core.Notification
 	Logout() error
@@ -377,6 +378,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/rescanwallet", s.apiRescanWallet)
 			apiAuth.Post("/recoverwallet", s.apiRecoverWallet)
 			apiAuth.Post("/trade", s.apiTrade)
+			apiAuth.Post("/tradeasync", s.apiTradeAsync)
 			apiAuth.Post("/cancel", s.apiCancel)
 			apiAuth.Post("/logout", s.apiLogout)
 			apiAuth.Post("/balance", s.apiGetBalance)

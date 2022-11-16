@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"os"
 	"strings"
@@ -78,6 +79,7 @@ type TCore struct {
 	walletStatusErr  error
 	deletedRecords   int
 	deleteRecordsErr error
+	tradeErr         error
 }
 
 func (c *TCore) Network() dex.Network                         { return dex.Mainnet }
@@ -153,13 +155,28 @@ func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 func (c *TCore) Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (asset.Coin, error) {
 	return &tCoin{id: []byte{0xde, 0xc7, 0xed}}, c.sendErr
 }
-func (w *TCore) ValidateAddress(address string, assetID uint32) (bool, error) {
-	return w.validAddr, nil
+func (c *TCore) ValidateAddress(address string, assetID uint32) (bool, error) {
+	return c.validAddr, nil
 }
 func (c *TCore) EstimateSendTxFee(addr string, assetID uint32, value uint64, subtract bool) (fee uint64, isValidAddress bool, err error) {
 	return c.estFee, true, c.estFeeErr
 }
 func (c *TCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error) {
+	if c.tradeErr != nil {
+		return nil, c.tradeErr
+	}
+	return trade(form), nil
+}
+func (c *TCore) TradeAsync(pw []byte, form *core.TradeForm) (*core.InFlightOrder, error) {
+	if c.tradeErr != nil {
+		return nil, c.tradeErr
+	}
+	return &core.InFlightOrder{
+		Order:       trade(form),
+		TemporaryID: uint64(rand.Int63()),
+	}, nil
+}
+func trade(form *core.TradeForm) *core.Order {
 	oType := order.LimitOrderType
 	if !form.IsLimit {
 		oType = order.MarketOrderType
@@ -170,9 +187,8 @@ func (c *TCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error) {
 		Rate:  form.Rate,
 		Qty:   form.Qty,
 		Sell:  form.Sell,
-	}, nil
+	}
 }
-
 func (c *TCore) Cancel(pw []byte, oid dex.Bytes) error { return nil }
 
 func (c *TCore) NotificationFeed() <-chan core.Notification { return make(chan core.Notification, 1) }
@@ -924,7 +940,6 @@ func TestAPIDeleteArchivedRecords(t *testing.T) {
 	var body *deleteRecordsForm
 	ensure := func(want string) {
 		ensureResponse(t, s.apiDeleteArchivedRecords, want, reader, writer, body, nil)
-
 	}
 
 	body = &deleteRecordsForm{
@@ -935,5 +950,35 @@ func TestAPIDeleteArchivedRecords(t *testing.T) {
 	ensure(`{"ok":true,"archivedRecordsDeleted":23,"archivedRecordsPath":"/path/to/records"}`)
 
 	tCore.deleteRecordsErr = tErr
+	ensure(`{"ok":false,"msg":"expected dummy error"}`)
+}
+
+func TestAPITrade(t *testing.T) {
+	testTrade(t, false)
+}
+
+func TestAPITradeAsync(t *testing.T) {
+	testTrade(t, true)
+}
+
+func testTrade(t *testing.T, async bool) {
+	s, tCore, shutdown := newTServer(t, false)
+	defer shutdown()
+	writer := new(TWriter)
+	reader := new(TReader)
+
+	body := &tradeForm{
+		Pass: []byte("random"),
+	}
+
+	ensure := func(want string) {
+		if async {
+			ensureResponse(t, s.apiTradeAsync, want, reader, writer, body, nil)
+		} else {
+			ensureResponse(t, s.apiTrade, want, reader, writer, body, nil)
+		}
+	}
+
+	tCore.tradeErr = tErr
 	ensure(`{"ok":false,"msg":"expected dummy error"}`)
 }
