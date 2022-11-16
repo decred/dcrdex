@@ -1194,10 +1194,9 @@ export default class MarketsPage extends BasePage {
         ord: ord
       }
 
-      const inflight = ord.id.split('').every(char => ord.id[0] === char) // order ID is zero
       // No need to track inflight orders here. We've already added it to
       // display.
-      if (!inflight) metaOrders[ord.id] = mord
+      if (ord.id) metaOrders[ord.id] = mord
 
       header.sideLight.classList.add(ord.sell ? 'sell' : 'buy')
       details.side.textContent = header.side.textContent = OrderUtil.sellString(ord)
@@ -1214,7 +1213,7 @@ export default class MarketsPage extends BasePage {
         this.setDepthMarkers()
       })
 
-      if (inflight) {
+      if (!ord.id) {
         Doc.hide(details.accelerateBttn)
         Doc.hide(details.cancelBttn)
         Doc.hide(details.link)
@@ -1996,7 +1995,7 @@ export default class MarketsPage extends BasePage {
     // Show loader and hide submit button.
     page.vSubmit.classList.add('d-hide')
     page.vLoader.classList.remove('d-hide')
-    const res = await postJSON('/api/trade', req)
+    const res = await postJSON('/api/tradeasync', req)
     // Hide loader and show submit button.
     page.vSubmit.classList.remove('d-hide')
     page.vLoader.classList.add('d-hide')

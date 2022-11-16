@@ -70,7 +70,7 @@ export function hasLiveMatches (order: Order) {
 
 /* statusString converts the order status to a string */
 export function statusString (order: Order): string {
-  if (order.id.split('').every(char => order.id[0] === char)) return intl.prep(intl.ID_ORDER_PENDING) // order ID is zero
+  if (!order.id) return intl.prep(intl.ID_ORDER_SUBMITTING) // order ID is empty.
   const isLive = hasLiveMatches(order)
   switch (order.status) {
     case StatusUnknown: return intl.prep(intl.ID_UNKNOWN)

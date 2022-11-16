@@ -226,8 +226,7 @@ func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, 
 			tUTXOAssetB.ID: tUTXOAssetB,
 			tACCTAsset.ID:  tACCTAsset,
 		},
-		inFlightOrders: make(map[uint64]*InFlightOrder),
-		books:          make(map[string]*bookie),
+		books: make(map[string]*bookie),
 		cfg: &msgjson.ConfigResult{
 			CancelMax:        0.8,
 			BroadcastTimeout: 1000, // 1000 ms for faster expiration, but ticker fires fast
@@ -272,6 +271,7 @@ func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, 
 		},
 		notify:            func(Notification) {},
 		trades:            make(map[order.OrderID]*trackedTrade),
+		inFlightOrders:    make(map[uint64]*InFlightOrder),
 		epoch:             map[string]uint64{tDcrBtcMktName: 0},
 		apiVer:            serverdex.PreAPIVersion,
 		connectionStatus:  uint32(comms.Connected),
@@ -2702,7 +2702,6 @@ func TestSend(t *testing.T) {
 }
 
 func trade(t *testing.T, async bool) {
-	t.Helper()
 	rig := newTestRig()
 	defer rig.shutdown()
 	tCore := rig.core

@@ -314,7 +314,7 @@ type Order struct {
 	QuoteSymbol       string            `json:"quoteSymbol"`
 	MarketID          string            `json:"market"`
 	Type              order.OrderType   `json:"type"`
-	ID                dex.Bytes         `json:"id"`    // Can be zero if part of an InFlightOrder
+	ID                dex.Bytes         `json:"id"`    // Can be empty if part of an InFlightOrder
 	Stamp             uint64            `json:"stamp"` // Server's time stamp
 	SubmitTime        uint64            `json:"submitTime"`
 	Sig               dex.Bytes         `json:"sig"`
@@ -404,9 +404,9 @@ func coreOrderFromTrade(ord order.Order, metaData *db.OrderMetaData) *Order {
 	}
 
 	// For in-flight orders, we'll set the order ID as a zero-hash.
-	var oid order.OrderID
+	var oid dex.Bytes
 	if ord.Time() > 0 {
-		oid = ord.ID()
+		oid = ord.ID().Bytes()
 	}
 
 	corder := &Order{
@@ -417,7 +417,7 @@ func coreOrderFromTrade(ord order.Order, metaData *db.OrderMetaData) *Order {
 		QuoteSymbol: unbip(quoteID),
 		MarketID:    marketName(baseID, quoteID),
 		Type:        prefix.OrderType,
-		ID:          oid.Bytes(),
+		ID:          oid,
 		Stamp:       uint64(prefix.ServerTime.UnixMilli()),
 		SubmitTime:  uint64(prefix.ClientTime.UnixMilli()),
 		Sig:         metaData.Proof.DEXSig,
