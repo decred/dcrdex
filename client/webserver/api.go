@@ -359,8 +359,7 @@ func (s *WebServer) apiConnectWallet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
-// apiTrade is the handler for the '/trade' API request. This end-point is
-// Deprecated. Use the 'tradeasync' end-point.
+// apiTrade is the handler for the '/trade' API request.
 func (s *WebServer) apiTrade(w http.ResponseWriter, r *http.Request) {
 	form := new(tradeForm)
 	defer form.Pass.Clear()

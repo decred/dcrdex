@@ -543,10 +543,10 @@ export default class Application {
 
         // Ensure market's inflight orders list is updated.
         if (note.topic === 'AsyncOrderSubmitted') {
-          const inflight = order as InFlightOrder
-          inflight.tempID = tempID
-          if (!mkt.inflight) mkt.inflight = [inflight]
-          else mkt.inflight.push(inflight)
+          const inFlight = order as InFlightOrder
+          inFlight.tempID = tempID
+          if (!mkt.inflight) mkt.inflight = [inFlight]
+          else mkt.inflight.push(inFlight)
           break
         } else if (note.topic === 'AsyncOrderFailure') {
           mkt.inflight = mkt.inflight.filter(ord => ord.tempID !== tempID)
@@ -797,19 +797,11 @@ export default class Application {
    * including inflight orders.
    */
   orders (host: string, mktID: string): Order[] {
-    let o = this.user.exchanges[host].markets[mktID].orders
-    if (!o) {
-      o = []
-      this.user.exchanges[host].markets[mktID].orders = o
-    }
-
-    let inflight = this.user.exchanges[host].markets[mktID].inflight
-    if (inflight) o = o.concat(inflight)
-    else {
-      inflight = []
-      this.user.exchanges[host].markets[mktID].inflight = inflight
-    }
-    return o
+    let orders: Order[] = []
+    const mkt = this.user.exchanges[host].markets[mktID]
+    if (mkt.orders) orders = orders.concat(mkt.orders)
+    if (mkt.inflight) orders = orders.concat(mkt.inflight)
+    return orders
   }
 
   /*

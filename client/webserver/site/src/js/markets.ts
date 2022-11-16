@@ -1194,7 +1194,7 @@ export default class MarketsPage extends BasePage {
         ord: ord
       }
 
-      // No need to track inflight orders here. We've already added it to
+      // No need to track in-flight orders here. We've already added it to
       // display.
       if (ord.id) metaOrders[ord.id] = mord
 

@@ -2841,7 +2841,7 @@ func trade(t *testing.T, async bool) {
 			return tCore.Trade(tPW, form)
 		}
 
-		inflight, err := tCore.TradeAsync(tPW, form)
+		inFlight, err := tCore.TradeAsync(tPW, form)
 		if err != nil {
 			return nil, err
 		}
@@ -2851,8 +2851,8 @@ func trade(t *testing.T, async bool) {
 			return nil, err
 		}
 
-		if inflight.TemporaryID != tempID {
-			t.Fatalf("received wrong inflight order, expected %d got %d", inflight.TemporaryID, tempID)
+		if inFlight.TemporaryID != tempID {
+			t.Fatalf("received wrong in-flight order, expected %d got %d", inFlight.TemporaryID, tempID)
 		}
 
 		return corder, nil

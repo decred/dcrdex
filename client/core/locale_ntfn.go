@@ -89,8 +89,8 @@ var originLocale = map[Topic]*translation{
 	},
 	//[order ID, error]
 	TopicAsyncOrderFailure: {
-		subject:  "Inflight Order Error",
-		template: "Inflight order with ID %v failed: %v",
+		subject:  "In-Flight Order Error",
+		template: "In-Flight order with ID %v failed: %v",
 	},
 	// [error]
 	TopicOrderLoadFailure: {
