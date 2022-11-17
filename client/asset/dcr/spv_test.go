@@ -174,6 +174,10 @@ func (w *tDcrWallet) TxDetails(ctx context.Context, txHash *chainhash.Hash) (*ud
 	return w.txDetails, w.txDetailsErr
 }
 
+func (w *tDcrWallet) Synced() bool {
+	return true
+}
+
 func (w *tDcrWallet) GetRemotePeers() map[string]*p2p.RemotePeer {
 	return w.remotePeers
 }

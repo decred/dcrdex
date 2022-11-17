@@ -88,6 +88,7 @@ type dcrWallet interface {
 // Interface for *spv.Syncer so that we can test with a stub.
 type spvSyncer interface {
 	wallet.NetworkBackend
+	Synced() bool
 	GetRemotePeers() map[string]*p2p.RemotePeer
 }
 
@@ -773,7 +774,12 @@ func (w *spvWallet) SyncStatus(ctx context.Context) (bool, float32, error) {
 		return false, 0, nil
 	}
 
-	return bestHeight == height, float32(height) / float32(bestHeight), nil
+	synced, progress := w.spv.Synced(), float32(height)/float32(bestHeight)
+	if progress > 0.999 && !synced {
+		progress = 0.999
+	}
+
+	return synced, progress, nil
 }
 
 // bestPeerInitialHeight is the highest InitialHeight recorded from our peers.
