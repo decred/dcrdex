@@ -4,7 +4,6 @@
 package zec
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -237,7 +236,7 @@ func zecTx(tx *wire.MsgTx) *dexzec.Tx {
 // get up to speed, and forget about simnet.
 // See https://github.com/zcash/zcash/issues/2552
 
-func estimateFee(ctx context.Context, node btc.RawRequester, confTarget uint64, allowExternal bool, net dex.Network) (uint64, error) {
+func estimateFee(node btc.RawRequester, confTarget uint64) (uint64, error) {
 	const feeConfs = 10
 	resp, err := node.RawRequest("estimatefee", []json.RawMessage{[]byte(strconv.Itoa(feeConfs))})
 	if err != nil {

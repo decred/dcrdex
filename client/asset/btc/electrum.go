@@ -171,8 +171,8 @@ func (btc *ExchangeWalletElectrum) Sweep(address string, feeSuggestion uint64) (
 }
 
 // override feeRate to avoid unnecessary conversions and btcjson types.
-func (btc *ExchangeWalletElectrum) feeRate(ctx context.Context, _ RawRequester, confTarget uint64, allowExternal bool, net dex.Network) (uint64, error) {
-	satPerKB, err := btc.ew.wallet.FeeRate(ctx, int64(confTarget))
+func (btc *ExchangeWalletElectrum) feeRate(_ RawRequester, confTarget uint64) (uint64, error) {
+	satPerKB, err := btc.ew.wallet.FeeRate(btc.ew.ctx, int64(confTarget))
 	if err != nil {
 		return 0, err
 	}
@@ -181,7 +181,7 @@ func (btc *ExchangeWalletElectrum) feeRate(ctx context.Context, _ RawRequester, 
 
 // FeeRate gets a fee rate estimate. Satisfies asset.FeeRater.
 func (btc *ExchangeWalletElectrum) FeeRate() uint64 {
-	feeRate, err := btc.feeRate(btc.ew.ctx, nil, 1, btc.apiFeeFallback(), btc.Network)
+	feeRate, err := btc.feeRate(nil, 1)
 	if err != nil {
 		btc.log.Errorf("Failed to retrieve fee rate: %v", err)
 		return 0

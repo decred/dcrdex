@@ -925,7 +925,7 @@ func (btc *ExchangeWalletSPV) Rescan(_ context.Context) error {
 
 // FeeRate satisfies asset.FeeRater.
 func (btc *ExchangeWalletFullNode) FeeRate() uint64 {
-	rate, err := btc.estimateFee(btc.ctx, btc.node, 1, btc.apiFeeFallback(), btc.Network)
+	rate, err := btc.estimateFee(btc.node, 1)
 	if err != nil {
 		btc.log.Tracef("Failed to get fee rate: %v", err)
 		return 0
@@ -1263,7 +1263,7 @@ func (btc *baseWallet) connect(ctx context.Context) (*sync.WaitGroup, error) {
 		return nil, fmt.Errorf("invalid best block hash from %s node: %v", btc.symbol, err)
 	}
 	// Check for method unknown error for feeRate method.
-	_, err = btc.estimateFee(ctx, btc.node, 1, btc.apiFeeFallback(), btc.Network)
+	_, err = btc.estimateFee(btc.node, 1)
 	if isMethodNotFoundErr(err) {
 		return nil, fmt.Errorf("fee estimation method not found. Are you configured for the correct RPC?")
 	}
@@ -1472,16 +1472,11 @@ func (btc *baseWallet) legacyBalance() (*asset.Balance, error) {
 
 // feeRate returns the current optimal fee rate in sat / byte using the
 // estimatesmartfee RPC.
-func (btc *baseWallet) feeRate(ctx context.Context, _ RawRequester, confTarget uint64, allowExternal bool, net dex.Network) (uint64, error) {
-	feeResult, err := btc.node.estimateSmartFee(int64(confTarget), &btcjson.EstimateModeConservative)
-	if err != nil {
-		if !btc.apiFeeFallback() {
-			btc.log.Warnf("Failed to get local fee rate estimate: %v", err)
-			return 0, err
-		}
+func (btc *baseWallet) feeRate(_ RawRequester, confTarget uint64) (uint64, error) {
+	externalFee := func(context.Context, uint64) (uint64, error) {
 		if btc.fetchExternalFee == nil {
 			btc.log.Debug("API fallback allowed but no fetcher provided for %s", btc.symbol)
-			return 0, err
+			return 0, fmt.Errorf("Fetch External Fee not defined.")
 		}
 		btc.log.Debug("Retrieving fee rate from external API: ", externalApiUrl)
 		estimatedFee, err := btc.fetchExternalFee(btc.ctx, btc.Network)
@@ -1494,6 +1489,15 @@ func (btc *baseWallet) feeRate(ctx context.Context, _ RawRequester, confTarget u
 		}
 		return estimatedFee, nil
 	}
+	feeResult, err := btc.node.estimateSmartFee(int64(confTarget), &btcjson.EstimateModeConservative)
+	if err != nil {
+		btc.log.Errorf("Failed to get fee rate with estimate smart fee rate: %v", err)
+
+		if !btc.apiFeeFallback() {
+			return 0, err
+		}
+		return externalFee(btc.ctx, 1)
+	}
 	if len(feeResult.Errors) > 0 {
 		return 0, fmt.Errorf(strings.Join(feeResult.Errors, "; "))
 	}
@@ -1505,7 +1509,10 @@ func (btc *baseWallet) feeRate(ctx context.Context, _ RawRequester, confTarget u
 		return 0, err
 	}
 	if satPerKB <= 0 {
-		return 0, fmt.Errorf("invalid fee rate %v", satPerKB)
+		if !btc.apiFeeFallback() {
+			return 0, fmt.Errorf("invalid fee rate %v", satPerKB)
+		}
+		return externalFee(btc.ctx, 1)
 	}
 	return uint64(dex.IntDivUp(int64(satPerKB), 1000)), nil
 }
@@ -1556,7 +1563,7 @@ func (a amount) String() string {
 // number of confirmations, but falls back to the suggestion or fallbackFeeRate
 // via feeRateWithFallback.
 func (btc *baseWallet) targetFeeRateWithFallback(confTarget, feeSuggestion uint64) uint64 {
-	feeRate, err := btc.estimateFee(btc.ctx, btc.node, confTarget, btc.apiFeeFallback(), btc.Network)
+	feeRate, err := btc.estimateFee(btc.node, 1)
 	if err == nil && feeRate > 0 {
 		btc.log.Tracef("Obtained local estimate for %d-conf fee rate, %d", confTarget, feeRate)
 		return feeRate

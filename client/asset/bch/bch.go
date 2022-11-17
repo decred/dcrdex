@@ -5,7 +5,6 @@ package bch
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -260,7 +259,7 @@ func serializeBtcTx(msgTx *wire.MsgTx) ([]byte, error) {
 
 // estimateFee uses Bitcoin Cash's estimatefee RPC, since estimatesmartfee
 // is not implemented.
-func estimateFee(ctx context.Context, node btc.RawRequester, confTarget uint64, allowExternal bool, net dex.Network) (uint64, error) {
+func estimateFee(node btc.RawRequester, confTarget uint64) (uint64, error) {
 	resp, err := node.RawRequest("estimatefee", nil)
 	if err != nil {
 		return 0, err

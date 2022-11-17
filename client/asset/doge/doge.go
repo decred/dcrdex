@@ -182,36 +182,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		SingularWallet:           true,
 		UnlockSpends:             true,
 		ConstantDustLimit:        dustLimit,
-		FeeEstimator: func(ctx context.Context, cl btc.RawRequester, _ uint64, allowExternal bool, net dex.Network) (uint64, error) {
-			confArg, err := json.Marshal(feeConfs)
-			if err != nil {
-				return 0, err
-			}
-			resp, err := cl.RawRequest("estimatefee", []json.RawMessage{confArg})
-			if err != nil {
-				if !allowExternal {
-					return 0, err
-				}
-				return externalFeeEstimator(ctx, net)
-			}
-			var feeRate float64
-			err = json.Unmarshal(resp, &feeRate)
-			if err != nil {
-				return 0, err
-			}
-			if feeRate <= 0 {
-				if !allowExternal {
-					return 0, nil
-				}
-				return externalFeeEstimator(ctx, net)
-			}
-			// estimatefee is f#$%ed
-			// https://github.com/decred/dcrdex/pull/1558#discussion_r850061882
-			if feeRate > dexdoge.DefaultFeeRateLimit/1e5 {
-				return dexdoge.DefaultFee, nil
-			}
-			return uint64(math.Round(feeRate * 1e5)), nil
-		},
+
 		ExternalFeeEstimator: func(ctx context.Context, net dex.Network) (uint64, error) {
 			var url string
 			if net == dex.Testnet {
