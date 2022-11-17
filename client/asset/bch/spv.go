@@ -243,7 +243,7 @@ func (w *bchSPVWallet) Start() (btc.SPVService, error) {
 	// 	addPeers = []string{"cfilters.ssgen.io"}
 	case bchwire.TestNet4:
 		// Add the address for a local bchd testnet4 node.
-		defaultPeers = []string{"localhost:28333"}
+		defaultPeers = []string{}
 	case bchwire.TestNet, bchwire.SimNet: // plain "wire.TestNet" is regnet!
 		defaultPeers = []string{"localhost:21577"}
 	}
