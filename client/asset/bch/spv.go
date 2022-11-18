@@ -414,30 +414,6 @@ func (w *bchSPVWallet) PrivKeyForAddress(a btcutil.Address) (*btcec.PrivateKey, 
 	return priv, nil
 }
 
-func (w *bchSPVWallet) SendOutputs(outputs []*wire.TxOut, _ *waddrmgr.KeyScope, account uint32, minconf int32,
-	satPerKb btcutil.Amount, _ btcwallet.CoinSelectionStrategy, label string) (*wire.MsgTx, error) {
-
-	bchOuts := make([]*bchwire.TxOut, len(outputs))
-	for i, op := range outputs {
-		bchOuts[i] = &bchwire.TxOut{
-			Value:    op.Value,
-			PkScript: op.PkScript,
-		}
-	}
-
-	bchTx, err := w.Wallet.SendOutputs(bchOuts, account, minconf, bchutil.Amount(satPerKb))
-	if err != nil {
-		return nil, err
-	}
-
-	btcTx, err := convertMsgTxToBTC(bchTx)
-	if err != nil {
-		return nil, err
-	}
-
-	return btcTx, nil
-}
-
 func (w *bchSPVWallet) HaveAddress(a btcutil.Address) (bool, error) {
 	bchAddr, err := dexbch.BTCAddrToBCHAddr(a, w.btcParams)
 	if err != nil {

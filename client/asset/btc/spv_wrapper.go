@@ -96,8 +96,6 @@ type BTCWallet interface {
 	Unlock(passphrase []byte, lock <-chan time.Time) error
 	Lock()
 	Locked() bool
-	SendOutputs(outputs []*wire.TxOut, keyScope *waddrmgr.KeyScope, account uint32, minconf int32,
-		satPerKb btcutil.Amount, coinSelectionStrategy wallet.CoinSelectionStrategy, label string) (*wire.MsgTx, error)
 	HaveAddress(a btcutil.Address) (bool, error)
 	WaitForShutdown()
 	ChainSynced() bool // currently unused

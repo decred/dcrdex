@@ -491,31 +491,6 @@ func (w *ltcSPVWallet) PrivKeyForAddress(a btcutil.Address) (*btcec.PrivateKey, 
 	return priv, nil
 }
 
-func (w *ltcSPVWallet) SendOutputs(outputs []*wire.TxOut, _ *waddrmgr.KeyScope, account uint32, minconf int32,
-	satPerKb btcutil.Amount, css btcwallet.CoinSelectionStrategy, label string) (*wire.MsgTx, error) {
-
-	ltcOuts := make([]*ltcwire.TxOut, len(outputs))
-	for i, op := range outputs {
-		ltcOuts[i] = &ltcwire.TxOut{
-			Value:    op.Value,
-			PkScript: op.PkScript,
-		}
-	}
-
-	ltcTx, err := w.Wallet.SendOutputs(ltcOuts, &ltcwaddrmgr.KeyScopeBIP0084, account,
-		minconf, ltcutil.Amount(satPerKb), wallet.CoinSelectionStrategy(css), label)
-	if err != nil {
-		return nil, err
-	}
-
-	btcTx, err := convertMsgTxToBTC(ltcTx)
-	if err != nil {
-		return nil, err
-	}
-
-	return btcTx, nil
-}
-
 func (w *ltcSPVWallet) HaveAddress(a btcutil.Address) (bool, error) {
 	ltcAddr, err := w.addrBTC2LTC(a)
 	if err != nil {

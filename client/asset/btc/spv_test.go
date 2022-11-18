@@ -166,21 +166,6 @@ func (c *tBtcWallet) Locked() bool {
 	return false
 }
 
-func (c *tBtcWallet) SendOutputs(outputs []*wire.TxOut, keyScope *waddrmgr.KeyScope,
-	account uint32, minconf int32, satPerKb btcutil.Amount,
-	coinSelectionStrategy wallet.CoinSelectionStrategy, label string) (*wire.MsgTx, error) {
-	if c.sendToAddressErr != nil {
-		return nil, c.sendToAddressErr
-	}
-	tx := wire.NewMsgTx(wire.TxVersion)
-	for _, txOut := range outputs {
-		tx.AddTxOut(txOut)
-	}
-	tx.AddTxIn(dummyInput())
-
-	return tx, nil
-}
-
 func (c *tBtcWallet) HaveAddress(a btcutil.Address) (bool, error) {
 	return false, nil
 }
