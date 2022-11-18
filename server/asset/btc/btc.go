@@ -1218,6 +1218,7 @@ func (btc *Backend) estimateFee(ctx context.Context) (satsPerB uint64, err error
 	} else if err != nil && !errors.Is(err, errNoFeeRate) {
 		btc.log.Debugf("Estimate fee failure: %v", err)
 	}
+	btc.log.Debugf("No fee estimate from node. Computing median fee rate from blocks...")
 
 	tip := btc.blockCache.tipHash()
 

@@ -107,6 +107,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 			return zecTx.MsgTx, nil
 		},
 		DumbFeeEstimates:     true,
+		FeeConfs:             feeConfs,
 		ManualMedianFee:      true,
 		BlockFeeTransactions: blockFeeTransactions,
 		NumericGetRawRPC:     true,
