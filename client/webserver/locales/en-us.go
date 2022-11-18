@@ -310,4 +310,6 @@ var EnUS = map[string]string{
 	"Configure":              "Configure",
 	"Retire":                 "Retire",
 	"Lots":                   "Lots",
+	"show advanced options":  "show advanced options",
+	"hide advanced options":  "hide advanced options",
 }

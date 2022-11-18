@@ -1425,11 +1425,12 @@ func (dcr *ExchangeWallet) splitOption(req *asset.PreSwapForm, utxos []*composit
 	cfg := dcr.config()
 	return &asset.OrderOption{
 		ConfigOption: asset.ConfigOption{
-			Key:          splitKey,
-			DisplayName:  "Pre-size Funds",
-			Description:  desc,
-			DefaultValue: cfg.useSplitTx,
-			IsBoolean:    true,
+			Key:           splitKey,
+			DisplayName:   "Pre-size Funds",
+			Description:   desc,
+			DefaultValue:  cfg.useSplitTx,
+			IsBoolean:     true,
+			ShowByDefault: true,
 		},
 		Boolean: &asset.BooleanConfig{
 			Reason: reason,

@@ -245,6 +245,9 @@ type ConfigOption struct {
 	// in the settings map.
 	Repeatable string `json:"repeatable"`
 	Required   bool   `json:"required"`
+
+	// ShowByDefault to show or not options on "hide advanced options".
+	ShowByDefault bool `json:"showByDefault,omitempty"`
 }
 
 const (

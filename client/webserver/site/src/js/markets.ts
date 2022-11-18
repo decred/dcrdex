@@ -339,7 +339,7 @@ export default class MarketsPage extends BasePage {
     Doc.bind(page.vUnlockSubmit, 'click', async () => { this.submitEstimateUnlock() })
     // Cancel order form.
     bindForm(page.cancelForm, page.cancelSubmit, async () => { this.submitCancel() })
-    // Order detail view
+    // Order detail view.
     Doc.bind(page.vFeeDetails, 'click', () => this.showForm(page.vDetailPane))
     Doc.bind(page.closeDetailPane, 'click', () => this.showVerifyForm())
     // // Bind active orders list's header sort events.
@@ -1668,6 +1668,32 @@ export default class MarketsPage extends BasePage {
     page.vPreorderErrTip.dataset.tooltip = msg
   }
 
+  showPreOrderAdvancedOptions () {
+    const page = this.page
+    Doc.hide(page.showAdvancedOptions)
+    Doc.show(page.hideAdvancedOptions, page.vOtherOrderOpts)
+  }
+
+  hidePreOrderAdvancedOptions () {
+    const page = this.page
+    Doc.hide(page.hideAdvancedOptions, page.vOtherOrderOpts)
+    Doc.show(page.showAdvancedOptions)
+  }
+
+  reloadOrderOpts (order: TradeForm, swap: PreSwap, redeem: PreRedeem, changed: ()=>void) {
+    const page = this.page
+    Doc.empty(page.vDefaultOrderOpts, page.vOtherOrderOpts)
+    const addOption = (opt: OrderOption, isSwap: boolean) => {
+      const el = OrderUtil.optionElement(opt, order, changed, isSwap)
+      if (opt.showByDefault) page.vDefaultOrderOpts.appendChild(el)
+      else page.vOtherOrderOpts.appendChild(el)
+    }
+    for (const opt of swap.options || []) addOption(opt, true)
+    for (const opt of redeem.options || []) addOption(opt, false)
+    app().bindTooltips(page.vDefaultOrderOpts)
+    app().bindTooltips(page.vOtherOrderOpts)
+  }
+
   /* preOrder loads the options and fetches pre-order estimates */
   async preOrder (order: TradeForm) {
     const page = this.page
@@ -1680,7 +1706,6 @@ export default class MarketsPage extends BasePage {
       Doc.hide(page.vPreorderErr)
       Doc.show(page.vPreorder)
       const { swap, redeem } = est
-      Doc.empty(page.vOrderOpts)
       swap.options = swap.options || []
       redeem.options = redeem.options || []
       this.setFeeEstimates(swap, redeem, order)
@@ -1691,10 +1716,10 @@ export default class MarketsPage extends BasePage {
           page.vFeeSummary.style.backgroundColor = `rgba(128, 128, 128, ${0.5 - 0.5 * progress})`
         })
       }
-      const addOption = (opt: OrderOption, isSwap: boolean) => page.vOrderOpts.appendChild(OrderUtil.optionElement(opt, order, changed, isSwap))
-      for (const opt of swap.options || []) addOption(opt, true)
-      for (const opt of redeem.options || []) addOption(opt, false)
-      app().bindTooltips(page.vOrderOpts)
+      // bind show or hide advanced pre order options.
+      Doc.bind(page.showAdvancedOptions, 'click', () => { this.showPreOrderAdvancedOptions() })
+      Doc.bind(page.hideAdvancedOptions, 'click', () => { this.hidePreOrderAdvancedOptions() })
+      this.reloadOrderOpts(order, swap, redeem, changed)
     }
 
     refreshPreorder()

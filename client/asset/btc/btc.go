@@ -1826,11 +1826,12 @@ func (btc *baseWallet) splitOption(req *asset.PreSwapForm, utxos []*compositeUTX
 
 	return &asset.OrderOption{
 		ConfigOption: asset.ConfigOption{
-			Key:          splitKey,
-			DisplayName:  "Pre-size Funds",
-			Description:  desc,
-			DefaultValue: btc.useSplitTx(),
-			IsBoolean:    true,
+			Key:           splitKey,
+			DisplayName:   "Pre-size Funds",
+			Description:   desc,
+			DefaultValue:  btc.useSplitTx(),
+			IsBoolean:     true,
+			ShowByDefault: true,
 		},
 		Boolean: &asset.BooleanConfig{
 			Reason: reason,
