@@ -14,7 +14,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 )
 
-var maxFeeBlocks = 50
+var maxFeeBlocks = 16
 
 // Driver implements asset.Driver.
 type Driver struct{}
@@ -49,7 +49,7 @@ const (
 	version   = 0
 	BipID     = 3
 	assetName = "doge"
-	feeConfs  = 10
+	feeConfs  = 8
 )
 
 // NewBackend generates the network parameters and creates a ltc backend as a
@@ -92,7 +92,8 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		Net:                  network,
 		ChainParams:          params,
 		Ports:                ports,
-		DumbFeeEstimates:     true,
+		DumbFeeEstimates:     true, // dogecoind actually has estimatesmartfee, but it is marked deprecated
+		FeeConfs:             feeConfs,
 		ManualMedianFee:      true,
 		NoCompetitionFeeRate: dexdoge.DefaultFee,
 		MaxFeeBlocks:         maxFeeBlocks,
