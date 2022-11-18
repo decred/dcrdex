@@ -141,17 +141,18 @@ func (w *SPVPeerManager) resolveAddress(addr string) (string, error) {
 		return addr, nil
 	}
 
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return "", err
+	}
+	if len(ips) == 0 {
+		return "", fmt.Errorf("no addresses found for %s", host)
+	}
+
 	var ip string
-	if host == "localhost" {
+	if host == "localhost" && len(ips) > 1 {
 		ip = "127.0.0.1"
 	} else {
-		ips, err := net.LookupIP(host)
-		if err != nil {
-			return "", err
-		}
-		if len(ips) == 0 {
-			return "", fmt.Errorf("no addresses found for %s", host)
-		}
 		ip = ips[0].String()
 	}
 
