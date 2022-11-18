@@ -91,7 +91,7 @@ var _ btc.BTCWallet = (*bchSPVWallet)(nil)
 
 // openSPVWallet creates a bchSPVWallet, but does not Start.
 // Satisfies btc.BTCWalletConstructor.
-func openSPVWallet(dir string, cfg *btc.WalletConfig, btcParams *chaincfg.Params, log dex.Logger) (btc.BTCWallet, error) {
+func openSPVWallet(dir string, cfg *btc.WalletConfig, btcParams *chaincfg.Params, log dex.Logger) btc.BTCWallet {
 	var bchParams *bchchaincfg.Params
 	switch btcParams.Name {
 	case dexbch.MainNetParams.Name:
@@ -110,7 +110,7 @@ func openSPVWallet(dir string, cfg *btc.WalletConfig, btcParams *chaincfg.Params
 		allowAutomaticRescan: !cfg.ActivelyUsed,
 	}
 	w.birthdayV.Store(cfg.AdjustedBirthday())
-	return w, nil
+	return w
 }
 
 // createSPVWallet creates a new SPV wallet.
@@ -245,7 +245,7 @@ func (w *bchSPVWallet) Start() (btc.SPVService, error) {
 		// Add the address for a local bchd testnet4 node.
 		defaultPeers = []string{}
 	case bchwire.TestNet, bchwire.SimNet: // plain "wire.TestNet" is regnet!
-		defaultPeers = []string{"localhost:21577"}
+		defaultPeers = []string{"127.0.0.1:21577"}
 	}
 	peerManager := btc.NewSPVPeerManager(&spvService{w.cl}, defaultPeers, w.dir, w.log, w.chainParams.DefaultPort)
 	w.peerManager = peerManager
@@ -846,6 +846,10 @@ func (s *spvService) Peers() []btc.SPVPeer {
 
 func (s *spvService) AddPeer(addr string) error {
 	return s.ChainService.ConnectNode(addr, true)
+}
+
+func (s *spvService) RemovePeer(addr string) error {
+	return s.ChainService.RemoveNodeByAddr(addr)
 }
 
 func (s *spvService) GetBlockHeight(h *chainhash.Hash) (int32, error) {

@@ -116,7 +116,7 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dataDir strin
 
 // openSPVWallet is the BTCWalletConstructor for Bitcoin.
 func openSPVWallet(dir string, cfg *WalletConfig,
-	chainParams *chaincfg.Params, log dex.Logger) (BTCWallet, error) {
+	chainParams *chaincfg.Params, log dex.Logger) BTCWallet {
 
 	w := &btcSPVWallet{
 		dir:                  dir,
@@ -125,7 +125,7 @@ func openSPVWallet(dir string, cfg *WalletConfig,
 		allowAutomaticRescan: !cfg.ActivelyUsed,
 	}
 	w.birthdayV.Store(cfg.AdjustedBirthday())
-	return w, nil
+	return w
 }
 
 func (w *btcSPVWallet) Birthday() time.Time {
@@ -204,7 +204,7 @@ func (w *btcSPVWallet) Start() (SPVService, error) {
 	case wire.TestNet3:
 		defaultPeers = []string{"dex-test.ssgen.io:18333"}
 	case wire.TestNet, wire.SimNet: // plain "wire.TestNet" is regnet!
-		defaultPeers = []string{"localhost:20575"}
+		defaultPeers = []string{"127.0.0.1:20575"}
 	}
 	peerManager := NewSPVPeerManager(&btcChainService{w.cl}, defaultPeers, w.dir, w.log, w.chainParams.DefaultPort)
 	w.peerManager = peerManager

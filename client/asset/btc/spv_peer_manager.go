@@ -10,7 +10,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -44,7 +43,7 @@ type walletPeer struct {
 // to communicate with a chain service.
 type PeerManagerChainService interface {
 	AddPeer(addr string) error
-	RemoveNodeByAddr(addr string) error
+	RemovePeer(addr string) error
 	Peers() []SPVPeer
 }
 
@@ -65,9 +64,21 @@ type SPVPeerManager struct {
 	log dex.Logger
 }
 
-func (w *SPVPeerManager) connectedPeers() map[string]interface{} {
+// NewSPVPeerManager creates a new SPVPeerManager.
+func NewSPVPeerManager(cs PeerManagerChainService, defaultPeers []string, dir string, log dex.Logger, defaultPort string) *SPVPeerManager {
+	return &SPVPeerManager{
+		cs:                 cs,
+		defaultPeers:       defaultPeers,
+		peers:              make(map[string]*walletPeer),
+		savedPeersFilePath: filepath.Join(dir, "dexc-peers.json"), // peers.json is used by neutrino
+		log:                log,
+		defaultPort:        defaultPort,
+	}
+}
+
+func (w *SPVPeerManager) connectedPeers() map[string]struct{} {
 	peers := w.cs.Peers()
-	connectedPeers := make(map[string]interface{})
+	connectedPeers := make(map[string]struct{}, len(peers))
 	for _, peer := range peers {
 		connectedPeers[peer.Addr()] = struct{}{}
 	}
@@ -127,29 +138,24 @@ func (w *SPVPeerManager) resolveAddress(addr string) (string, error) {
 	// Tor addresses cannot be resolved to an IP, so just return onionAddr
 	// instead.
 	if strings.HasSuffix(host, ".onion") {
-		return host, nil
+		return addr, nil
 	}
 
-	// Attempt to look up an IP address associated with the parsed host.
-	ips, err := net.LookupIP(host)
-	if err != nil {
-		return "", err
+	var ip string
+	if host == "localhost" {
+		ip = "127.0.0.1"
+	} else {
+		ips, err := net.LookupIP(host)
+		if err != nil {
+			return "", err
+		}
+		if len(ips) == 0 {
+			return "", fmt.Errorf("no addresses found for %s", host)
+		}
+		ip = ips[0].String()
 	}
 
-	if len(ips) == 0 {
-		return "", fmt.Errorf("no addresses found for %s", host)
-	}
-
-	port, err := strconv.Atoi(strPort)
-	if err != nil {
-		return "", err
-	}
-
-	return (&net.TCPAddr{
-		IP:   ips[0],
-		Port: port,
-	}).String(), nil
-
+	return net.JoinHostPort(ip, strPort), nil
 }
 
 // peerWithResolvedAddress checks to see if there is a peer with a resolved
@@ -204,7 +210,7 @@ func (w *SPVPeerManager) addPeer(addr string, source peerSource, initialLoad boo
 			// to the user. If a user previously added a peer that originally connected
 			// but now the address cannot be resolved to an IP, it should be displayed
 			// that the wallet was unable to connect to that peer.
-			w.peers[addr] = &walletPeer{source: source, resolvedName: resolvedAddr}
+			w.peers[addr] = &walletPeer{source: source}
 		}
 		return fmt.Errorf("failed to resolve address: %v", err)
 	}
@@ -268,7 +274,7 @@ func (w *SPVPeerManager) RemovePeer(addr string) error {
 	connectedPeers := w.connectedPeers()
 	_, connected := connectedPeers[peer.resolvedName]
 	if connected {
-		return w.cs.RemoveNodeByAddr(peer.resolvedName)
+		return w.cs.RemovePeer(peer.resolvedName)
 	}
 
 	return nil
@@ -278,7 +284,10 @@ func (w *SPVPeerManager) RemovePeer(addr string) error {
 // that were added by the user and persisted in the db.
 func (w *SPVPeerManager) ConnectToInitialWalletPeers() {
 	for _, peer := range w.defaultPeers {
-		w.addPeer(peer, defaultPeer, true)
+		err := w.addPeer(peer, defaultPeer, true)
+		if err != nil {
+			w.log.Errorf("failed to add default peer %s: %v", peer, err)
+		}
 	}
 
 	savedPeers, err := w.loadSavedPeersFromFile()
@@ -292,17 +301,5 @@ func (w *SPVPeerManager) ConnectToInitialWalletPeers() {
 		if err != nil {
 			w.log.Errorf("failed to add peer %s: %v", addr, err)
 		}
-	}
-}
-
-// NewSPVPeerManager creates a new SPVPeerManager.
-func NewSPVPeerManager(cs PeerManagerChainService, defaultPeers []string, dir string, log dex.Logger, defaultPort string) *SPVPeerManager {
-	return &SPVPeerManager{
-		cs:                 cs,
-		defaultPeers:       defaultPeers,
-		peers:              make(map[string]*walletPeer),
-		savedPeersFilePath: filepath.Join(dir, "dexc-peers.json"), // peers.json is used by neutrino
-		log:                log,
-		defaultPort:        defaultPort,
 	}
 }

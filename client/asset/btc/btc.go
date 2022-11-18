@@ -1230,7 +1230,7 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 		decodeAddr:  btc.decodeAddr,
 	}
 
-	spvw.wallet, err = walletConstructor(spvw.dir, spvw.cfg, spvw.chainParams, spvw.log)
+	spvw.wallet = walletConstructor(spvw.dir, spvw.cfg, spvw.chainParams, spvw.log)
 	if err != nil {
 		return nil, err
 	}

@@ -167,10 +167,14 @@ func (s *btcChainService) AddPeer(addr string) error {
 	return s.ChainService.ConnectNode(addr, true)
 }
 
+func (s *btcChainService) RemovePeer(addr string) error {
+	return s.ChainService.RemoveNodeByAddr(addr)
+}
+
 var _ SPVService = (*btcChainService)(nil)
 
 // BTCWalletConstructor is a function to construct a BTCWallet.
-type BTCWalletConstructor func(dir string, cfg *WalletConfig, chainParams *chaincfg.Params, log dex.Logger) (BTCWallet, error)
+type BTCWalletConstructor func(dir string, cfg *WalletConfig, chainParams *chaincfg.Params, log dex.Logger) BTCWallet
 
 func extendAddresses(extIdx, intIdx uint32, btcw *wallet.Wallet) error {
 	scopedKeyManager, err := btcw.Manager.FetchScopedKeyManager(waddrmgr.KeyScopeBIP0084)
