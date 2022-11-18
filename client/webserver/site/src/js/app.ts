@@ -889,7 +889,7 @@ export default class Application {
     const [b, q] = [this.unitInfo(baseID, xc), this.unitInfo(quoteID, xc)]
 
     const r = b.conventional.conversionFactor / q.conventional.conversionFactor
-    return encRate / RateEncodingFactor * r
+    return encRate * r / RateEncodingFactor
   }
 
   walletDefinition (assetID: number, walletType: string): WalletDefinition {

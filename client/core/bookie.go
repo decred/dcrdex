@@ -977,14 +977,17 @@ func (dc *dexConnection) subPriceFeed() {
 
 // handlePriceUpdateNote handles the price_update note that is part of the
 // price feed.
-func handlePriceUpdateNote(_ *Core, dc *dexConnection, msg *msgjson.Message) error {
+func handlePriceUpdateNote(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	spot := new(msgjson.Spot)
 	if err := msg.Unmarshal(spot); err != nil {
 		return fmt.Errorf("error unmarshaling price update: %v", err)
 	}
 	mktName, err := dex.MarketName(spot.BaseID, spot.QuoteID)
 	if err != nil {
-		return fmt.Errorf("error parsing market for base = %d, quote = %d: %v", spot.BaseID, spot.QuoteID, err)
+		// It's possible for the dex server to have a market with coin
+		// ID's we do not know, especially in the case of eth tokens.
+		c.log.Debugf("error parsing market for base = %d, quote = %d: %v", spot.BaseID, spot.QuoteID, err)
+		return nil
 	}
 	dc.spotsMtx.Lock()
 	dc.spots[mktName] = spot

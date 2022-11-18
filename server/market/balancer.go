@@ -79,7 +79,10 @@ func NewDEXBalancer(tunnels map[string]PendingAccounter, assets map[uint32]*asse
 			}
 			bb.feeFamily[parentID] = parent.assetInfo
 			for tokenID := range asset.Tokens(parentID) {
-				if tokenID == assetID { // Don't double count
+				// Don't double count. Also, some tokens are specific
+				// to certain networks. A token not in the assets
+				// map indicates it does not exist for this network.
+				if tokenID == assetID || assets[tokenID] == nil {
 					continue
 				}
 				bb.feeFamily[tokenID] = &assets[tokenID].Asset

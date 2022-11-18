@@ -304,11 +304,12 @@ func (n *nodeClient) getCodeAt(ctx context.Context, contractAddr common.Address)
 
 // txOpts generates a set of TransactOpts for the account. If maxFeeRate is
 // zero, it will be calculated as double the current baseFee. The tip will be
-// added automatically.
+// added automatically. Sets the passed nonce if supplied. If nonce is nil the
+// next nonce will be fetched and the passed argument altered.
 //
 // NOTE: The nonce included in the txOpts must be sent before txOpts is used
 // again. The caller should ensure that txOpts -> send sequence is synchronized.
-func (n *nodeClient) txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate *big.Int) (*bind.TransactOpts, error) {
+func (n *nodeClient) txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate, nonce *big.Int) (*bind.TransactOpts, error) {
 	baseFee, gasTipCap, err := n.currentFees(ctx)
 	if err != nil {
 		return nil, err
@@ -318,12 +319,17 @@ func (n *nodeClient) txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate 
 		maxFeeRate = new(big.Int).Mul(baseFee, big.NewInt(2))
 	}
 
-	nonce, err := n.leth.ApiBackend.GetPoolNonce(ctx, n.creds.addr)
-	if err != nil {
-		return nil, fmt.Errorf("error getting nonce: %v", err)
+	// If nonce is not nil, this indicates that we are trying to re-send an
+	// old transaction with higher fee in order to ensure it is mined.
+	if nonce == nil {
+		n, err := n.leth.ApiBackend.GetPoolNonce(ctx, n.creds.addr)
+		if err != nil {
+			return nil, fmt.Errorf("error getting nonce: %v", err)
+		}
+		nonce = new(big.Int).SetUint64(n)
 	}
 	txOpts := newTxOpts(ctx, n.creds.addr, val, maxGas, maxFeeRate, gasTipCap)
-	txOpts.Nonce = new(big.Int).SetUint64(nonce)
+	txOpts.Nonce = nonce
 	n.addSignerToOpts(txOpts)
 
 	return txOpts, nil

@@ -46,7 +46,7 @@ var (
 	testAddressC = common.HexToAddress("2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27")
 
 	ethGases   = dexeth.VersionedGases[0]
-	tokenGases = dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts[0].Gas
+	tokenGases = dexeth.Tokens[simnetTokenID].NetTokens[dex.Simnet].SwapContracts[0].Gas
 
 	tETH = &dex.Asset{
 		// Version meaning?
@@ -70,7 +70,7 @@ var (
 	}
 
 	tToken = &dex.Asset{
-		ID:           testTokenID,
+		ID:           simnetTokenID,
 		Symbol:       "dextt.eth",
 		Version:      0,
 		SwapSize:     tokenGases.Swap,
@@ -178,7 +178,7 @@ func (n *testNode) getTransaction(ctx context.Context, hash common.Hash) (*types
 	return n.getTxRes, n.getTxHeight, n.getTxErr
 }
 
-func (n *testNode) txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate *big.Int) (*bind.TransactOpts, error) {
+func (n *testNode) txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate, nonce *big.Int) (*bind.TransactOpts, error) {
 	if maxFeeRate == nil {
 		maxFeeRate = n.maxFeeRate
 	}
@@ -352,6 +352,8 @@ func (c *tContractor) value(_ context.Context, tx *types.Transaction) (incoming,
 func (c *tContractor) isRefundable(secretHash [32]byte) (bool, error) {
 	return c.refundable, c.refundableErr
 }
+
+func (c *tContractor) voidUnusedNonce() {}
 
 type tTokenContractor struct {
 	*tContractor
@@ -629,19 +631,16 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *testNode, contex
 			assetID:     BipID,
 			atomize:     dexeth.WeiToGwei,
 		}
-		testTokenID, found := dex.BipSymbolID("dextt.eth")
-		if !found {
-			panic("could not find test token ID")
-		}
 		w = &TokenWallet{
 			assetWallet: aw,
 			cfg:         &tokenWalletConfig{},
 			parent:      node.tokenParent,
-			token:       dexeth.Tokens[testTokenID],
+			token:       dexeth.Tokens[simnetTokenID],
+			netToken:    dexeth.Tokens[simnetTokenID].NetTokens[dex.Simnet],
 		}
 		aw.wallets = map[uint32]*assetWallet{
-			testTokenID: aw,
-			BipID:       node.tokenParent,
+			simnetTokenID: aw,
+			BipID:         node.tokenParent,
 		}
 	}
 
@@ -735,7 +734,7 @@ func TestBalance(t *testing.T) {
 	for _, test := range tests {
 		var assetID uint32 = BipID
 		if test.token {
-			assetID = testTokenID
+			assetID = simnetTokenID
 		}
 
 		_, eth, node, shutdown := tassetWallet(assetID)
@@ -848,7 +847,7 @@ func TestFeeRate(t *testing.T) {
 
 func TestRefund(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testRefund(t, BipID) })
-	t.Run("token", func(t *testing.T) { testRefund(t, testTokenID) })
+	t.Run("token", func(t *testing.T) { testRefund(t, simnetTokenID) })
 }
 
 func testRefund(t *testing.T, assetID uint32) {
@@ -871,7 +870,7 @@ func testRefund(t *testing.T, assetID uint32) {
 		dexeth.VersionedGases[1] = gasesV1
 		defer delete(dexeth.VersionedGases, 1)
 	} else {
-		tokenContracts := dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts
+		tokenContracts := dexeth.Tokens[simnetTokenID].NetTokens[dex.Simnet].SwapContracts
 		tc := *tokenContracts[0]
 		tc.Gas = *gasesV1
 		tokenContracts[1] = &tc
@@ -1031,7 +1030,7 @@ func (b *badCoin) Value() uint64 {
 
 func TestFundOrderReturnCoinsFundingCoins(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testFundOrderReturnCoinsFundingCoins(t, BipID) })
-	t.Run("token", func(t *testing.T) { testFundOrderReturnCoinsFundingCoins(t, testTokenID) })
+	t.Run("token", func(t *testing.T) { testFundOrderReturnCoinsFundingCoins(t, simnetTokenID) })
 }
 
 func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
@@ -1450,7 +1449,7 @@ func TestPreSwap(t *testing.T) {
 		var assetID uint32 = BipID
 		assetCfg := tETH
 		if test.token {
-			assetID = testTokenID
+			assetID = simnetTokenID
 			assetCfg = tToken
 		}
 
@@ -1508,7 +1507,7 @@ func TestPreSwap(t *testing.T) {
 
 func TestSwap(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testSwap(t, BipID) })
-	t.Run("token", func(t *testing.T) { testSwap(t, testTokenID) })
+	t.Run("token", func(t *testing.T) { testSwap(t, simnetTokenID) })
 }
 
 func testSwap(t *testing.T, assetID uint32) {
@@ -1787,7 +1786,7 @@ func TestPreRedeem(t *testing.T) {
 	}
 
 	// Token
-	w, _, node, shutdown2 := tassetWallet(testTokenID)
+	w, _, node, shutdown2 := tassetWallet(simnetTokenID)
 	defer shutdown2()
 
 	form.Version = tToken.Version
@@ -1805,7 +1804,7 @@ func TestPreRedeem(t *testing.T) {
 
 func TestRedeem(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testRedeem(t, BipID) })
-	t.Run("token", func(t *testing.T) { testRedeem(t, testTokenID) })
+	t.Run("token", func(t *testing.T) { testRedeem(t, simnetTokenID) })
 }
 
 func testRedeem(t *testing.T, assetID uint32) {
@@ -1815,7 +1814,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 	// Test with a non-zero contract version to ensure it makes it into the receipt
 	contractVer := uint32(1)
 	dexeth.VersionedGases[1] = ethGases // for dexeth.RedeemGas(..., 1)
-	tokenContracts := dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts
+	tokenContracts := dexeth.Tokens[simnetTokenID].NetTokens[dex.Simnet].SwapContracts
 	tokenContracts[1] = tokenContracts[0]
 	defer delete(dexeth.VersionedGases, 1)
 	defer delete(tokenContracts, 1)
@@ -2480,7 +2479,7 @@ func TestMaxOrder(t *testing.T) {
 		var assetID uint32 = BipID
 		dexAsset := tETH
 		if test.token {
-			assetID = testTokenID
+			assetID = simnetTokenID
 		}
 
 		w, _, node, shutdown := tassetWallet(assetID)
@@ -2570,7 +2569,7 @@ func packRedeemDataV0(redemptions []*dexeth.Redemption) ([]byte, error) {
 
 func TestAuditContract(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testAuditContract(t, BipID) })
-	t.Run("token", func(t *testing.T) { testAuditContract(t, testTokenID) })
+	t.Run("token", func(t *testing.T) { testAuditContract(t, simnetTokenID) })
 }
 
 func testAuditContract(t *testing.T, assetID uint32) {
@@ -3156,7 +3155,7 @@ func TestLocktimeExpired(t *testing.T) {
 
 func TestFindRedemption(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testFindRedemption(t, BipID) })
-	t.Run("token", func(t *testing.T) { testFindRedemption(t, testTokenID) })
+	t.Run("token", func(t *testing.T) { testFindRedemption(t, simnetTokenID) })
 }
 
 func testFindRedemption(t *testing.T, assetID uint32) {
@@ -3298,7 +3297,7 @@ func testFindRedemption(t *testing.T, assetID uint32) {
 
 func TestRefundReserves(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testRefundReserves(t, BipID) })
-	t.Run("token", func(t *testing.T) { testRefundReserves(t, testTokenID) })
+	t.Run("token", func(t *testing.T) { testRefundReserves(t, simnetTokenID) })
 }
 
 func testRefundReserves(t *testing.T, assetID uint32) {
@@ -3326,7 +3325,7 @@ func testRefundReserves(t *testing.T, assetID uint32) {
 		feeWallet = node.tokenParent
 		assetV0 = *tToken
 		assetV1 = *tToken
-		tokenContracts := dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts
+		tokenContracts := dexeth.Tokens[simnetTokenID].NetTokens[dex.Simnet].SwapContracts
 		gasesV0 = &tokenGases
 		tc := *tokenContracts[0]
 		tc.Gas = *gasesV1
@@ -3393,7 +3392,7 @@ func testRefundReserves(t *testing.T, assetID uint32) {
 
 func TestRedemptionReserves(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testRedemptionReserves(t, BipID) })
-	t.Run("token", func(t *testing.T) { testRedemptionReserves(t, testTokenID) })
+	t.Run("token", func(t *testing.T) { testRedemptionReserves(t, simnetTokenID) })
 }
 
 func testRedemptionReserves(t *testing.T, assetID uint32) {
@@ -3421,7 +3420,7 @@ func testRedemptionReserves(t *testing.T, assetID uint32) {
 		feeWallet = node.tokenParent
 		assetV0 = *tToken
 		assetV1 = *tToken
-		tokenContracts := dexeth.Tokens[testTokenID].NetTokens[dex.Simnet].SwapContracts
+		tokenContracts := dexeth.Tokens[simnetTokenID].NetTokens[dex.Simnet].SwapContracts
 		gasesV0 = &tokenGases
 		tc := *tokenContracts[0]
 		tc.Gas = *gasesV1
@@ -3525,7 +3524,7 @@ func TestReconfigure(t *testing.T) {
 
 func TestSend(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testSend(t, BipID) })
-	t.Run("token", func(t *testing.T) { testSend(t, testTokenID) })
+	t.Run("token", func(t *testing.T) { testSend(t, simnetTokenID) })
 }
 
 func testSend(t *testing.T, assetID uint32) {
@@ -3610,7 +3609,7 @@ func testSend(t *testing.T, assetID uint32) {
 
 func TestConfirmRedemption(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testConfirmRedemption(t, BipID) })
-	t.Run("token", func(t *testing.T) { testConfirmRedemption(t, testTokenID) })
+	t.Run("token", func(t *testing.T) { testConfirmRedemption(t, simnetTokenID) })
 }
 
 func testConfirmRedemption(t *testing.T, assetID uint32) {
@@ -4466,7 +4465,7 @@ func TestMarshalMonitoredTx(t *testing.T) {
 
 func TestEstimateSendTxFee(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testEstimateSendTxFee(t, BipID) })
-	t.Run("token", func(t *testing.T) { testEstimateSendTxFee(t, testTokenID) })
+	t.Run("token", func(t *testing.T) { testEstimateSendTxFee(t, simnetTokenID) })
 }
 
 func testEstimateSendTxFee(t *testing.T, assetID uint32) {
@@ -4550,7 +4549,7 @@ func testEstimateSendTxFee(t *testing.T, assetID uint32) {
 // contract (that require more gas) are added.
 func TestMaxSwapRedeemLots(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testMaxSwapRedeemLots(t, BipID) })
-	t.Run("token", func(t *testing.T) { testMaxSwapRedeemLots(t, testTokenID) })
+	t.Run("token", func(t *testing.T) { testMaxSwapRedeemLots(t, simnetTokenID) })
 }
 
 func testMaxSwapRedeemLots(t *testing.T, assetID uint32) {
@@ -4843,6 +4842,42 @@ func TestReceiptCache(t *testing.T) {
 		t.Fatalf("receipt wasn't pruned")
 	}
 
+}
+
+func TestUnusedNonce(t *testing.T) {
+	mRPC := new(multiRPCClient)
+	tests := []struct {
+		name  string
+		nonce uint64
+		want  bool
+		wait  bool
+	}{{
+		name:  "ok initiation",
+		nonce: 0,
+		want:  true,
+	}, {
+		name:  "ok larger",
+		nonce: 1,
+		want:  true,
+	}, {
+		name:  "same nonce",
+		nonce: 1,
+		// Uncomment for full tests.
+		// }, {
+		// 	name:  "ok after expiration",
+		// 	nonce: 1,
+		// 	wait:  true,
+		// 	want:  true,
+	}}
+	for _, test := range tests {
+		if test.wait {
+			time.Sleep(time.Minute + time.Second)
+		}
+		got := mRPC.registerNonce(test.nonce)
+		if test.want != got {
+			t.Fatalf("%q: wanted %v got %v", test.name, test.want, got)
+		}
+	}
 }
 
 func parseRecoveryID(c asset.Coin) []byte {

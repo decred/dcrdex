@@ -1772,8 +1772,8 @@ func (c *Core) connectAndUpdateWalletResumeTrades(w *xcWallet, resumeTrades bool
 		}
 		if !parentWallet.connected() {
 			if err := c.connectAndUpdateWalletResumeTrades(parentWallet, resumeTrades); err != nil {
-				return fmt.Errorf("failed to connect %s parent wallet for %s token",
-					unbip(token.ParentID), unbip(assetID))
+				return fmt.Errorf("failed to connect %s parent wallet for %s token: %v",
+					unbip(token.ParentID), unbip(assetID), err)
 			}
 		}
 	}
@@ -9328,12 +9328,19 @@ func (c *Core) FiatRateSources() map[string]bool {
 // fiatConversions returns fiat rate for all supported assets that have a
 // wallet.
 func (c *Core) fiatConversions() map[uint32]float64 {
+	assetIDs := make(map[uint32]struct{})
 	supportedAssets := asset.Assets()
+	for assetID, asset := range supportedAssets {
+		assetIDs[assetID] = struct{}{}
+		for tokenID := range asset.Tokens {
+			assetIDs[tokenID] = struct{}{}
+		}
+	}
 
 	c.ratesMtx.RLock()
 	defer c.ratesMtx.RUnlock()
 	fiatRatesMap := make(map[uint32]float64, len(supportedAssets))
-	for assetID := range supportedAssets {
+	for assetID := range assetIDs {
 		var rateSum float64
 		var sources int
 		for _, source := range c.fiatRateSources {

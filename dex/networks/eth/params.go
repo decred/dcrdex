@@ -239,6 +239,7 @@ type Redemption struct {
 }
 
 var testTokenID, _ = dex.BipSymbolID("dextt.eth")
+var usdcTokenID, _ = dex.BipSymbolID("usdc.eth")
 
 // Gases lists the expected gas required for various DEX and wallet operations.
 // ★★ IMPORTANT ★★  By policy, clients should allow servers to adjust Swap and

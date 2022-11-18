@@ -133,7 +133,16 @@ func fetchCoinpaprikaRates(ctx context.Context, log dex.Logger, assets map[uint3
 			} `json:"quotes"`
 		})
 
-		reqStr := fmt.Sprintf(coinpaprikaURL, coinpapSlug(sa.Symbol, sa.Info.Name))
+		symbol := sa.Symbol
+		name := sa.Name
+		// TODO: Store these within the *SupportedAsset.
+		switch assetID {
+		case 60001: // usdc
+			symbol = "usdc"
+			name = "usd-coin"
+		}
+
+		reqStr := fmt.Sprintf(coinpaprikaURL, coinpapSlug(symbol, name))
 
 		if err := getRates(ctx, reqStr, res); err != nil {
 			log.Error(err)
@@ -197,6 +206,13 @@ func fetchMessariRates(ctx context.Context, log dex.Logger, assets map[uint32]*S
 		})
 
 		slug := strings.ToLower(asset.Symbol)
+
+		// TODO: Store these within the *SupportedAsset.
+		switch assetID {
+		case 60001: // usdc
+			slug = "usdc"
+		}
+
 		reqStr := fmt.Sprintf(messariURL, slug)
 
 		if err := getRates(ctx, reqStr, res); err != nil {

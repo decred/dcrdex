@@ -154,7 +154,7 @@ func TestSimnetMultiRPCClient(t *testing.T) {
 		var alphaAddr = common.HexToAddress("0x18d65fb8d60c1199bb1ad381be47aa692b482605")
 
 		for i := 0; i < 10; i++ {
-			txOpts, err := cl.txOpts(ctx, amt, defaultSendGasLimit, nil)
+			txOpts, err := cl.txOpts(ctx, amt, defaultSendGasLimit, nil, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
