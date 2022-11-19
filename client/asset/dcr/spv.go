@@ -939,26 +939,8 @@ var (
 func logRotator(netDir string) (*rotator.Rotator, error) {
 	const maxLogRolls = 8
 	logDir := filepath.Join(filepath.Dir(netDir), logDirName)
-	exist, err := fileExists(logDir)
-	if err != nil {
-		return nil, err
-	}
-	if !exist {
-		oldDir := filepath.Join(netDir, "logs")
-		exist, err := fileExists(oldDir)
-		if err != nil {
-			return nil, err
-		}
-		if !exist {
-			if err := os.MkdirAll(logDir, 0744); err != nil {
-				return nil, fmt.Errorf("error creating log directory: %w", err)
-			}
-		} else {
-			// Move old logs to new log path.
-			if err := os.Rename(oldDir, logDir); err != nil {
-				return nil, err
-			}
-		}
+	if err := os.MkdirAll(logDir, 0744); err != nil {
+		return nil, fmt.Errorf("error creating log directory: %w", err)
 	}
 
 	logFilename := filepath.Join(logDir, logFileName)
