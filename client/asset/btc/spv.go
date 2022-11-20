@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -190,7 +189,6 @@ func (w *btcSPVWallet) Start() (SPVService, error) {
 		// inv/getdata round trip is ~4 seconds, so we set this so neutrino does
 		// not cancel queries too readily.
 		BroadcastTimeout: 6 * time.Second,
-		NameResolver:     net.LookupIP,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("couldn't create Neutrino ChainService: %w", err)

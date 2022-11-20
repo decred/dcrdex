@@ -1231,10 +1231,6 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 	}
 
 	spvw.wallet = walletConstructor(spvw.dir, spvw.cfg, spvw.chainParams, spvw.log)
-	if err != nil {
-		return nil, err
-	}
-
 	btc.node = spvw
 
 	return &ExchangeWalletSPV{

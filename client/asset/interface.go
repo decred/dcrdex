@@ -700,6 +700,9 @@ type RedemptionConfirmer interface {
 	ConfirmRedemption(coinID dex.Bytes, redemption *Redemption) (*ConfirmRedemptionStatus, error)
 }
 
+// PeerSource specifies how a wallet knows about a peer. It may have been
+// hardcoded into the wallet code, added manually by the user, or discovered
+// by communicating with the default/user added peers.
 type PeerSource uint16
 
 const (
@@ -708,12 +711,15 @@ const (
 	Discovered
 )
 
+// WalletPeer provides information about a wallet's peer.
 type WalletPeer struct {
 	Addr      string     `json:"addr"`
 	Source    PeerSource `json:"source"`
 	Connected bool       `json:"connected"`
 }
 
+// PeerManager is a wallet which provides allows the user to see the peers the
+// wallet is connected to and add new peers.
 type PeerManager interface {
 	// Peers returns a list of peers that the wallet is connected to.
 	Peers() ([]*WalletPeer, error)

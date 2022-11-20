@@ -5,7 +5,6 @@ package rpcserver
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -699,15 +698,12 @@ func handleDeleteArchivedRecords(s *RPCServer, params *RawParams) *msgjson.Respo
 }
 
 func handleWalletPeers(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 1 {
-		return usage(walletPeersRoute, errors.New("expected 1 arg"))
-	}
-	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
+	assetID, err := parseWalletPeersArgs(params)
 	if err != nil {
 		return usage(walletPeersRoute, err)
 	}
 
-	peers, err := s.core.WalletPeers(uint32(assetID))
+	peers, err := s.core.WalletPeers(assetID)
 	if err != nil {
 		errMsg := fmt.Sprintf("unable to get wallet peers: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCWalletPeersError, errMsg)
@@ -717,45 +713,35 @@ func handleWalletPeers(s *RPCServer, params *RawParams) *msgjson.ResponsePayload
 }
 
 func handleAddWalletPeer(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 2 {
-		return usage(walletPeersRoute, errors.New("expected 2 args"))
-	}
-	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
+	form, err := parseAddRemoveWalletPeerArgs(params)
 	if err != nil {
-		return usage(walletPeersRoute, err)
+		return usage(addWalletPeerRoute, err)
 	}
 
-	addr := params.Args[1]
-
-	err = s.core.AddWalletPeer(uint32(assetID), addr)
+	err = s.core.AddWalletPeer(form.assetID, form.address)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to get wallet peers: %v", err)
+		errMsg := fmt.Sprintf("unable to add wallet peer: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCWalletPeersError, errMsg)
-		return createResponse(walletPeersRoute, nil, resErr)
+		return createResponse(addWalletPeerRoute, nil, resErr)
 	}
 
-	return createResponse(walletPeersRoute, "successfully added peer", nil)
+	return createResponse(addWalletPeerRoute, "successfully added peer", nil)
 }
 
 func handleRemoveWalletPeer(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	if len(params.Args) != 2 {
-		return usage(walletPeersRoute, errors.New("expected 2 args"))
-	}
-	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
+	form, err := parseAddRemoveWalletPeerArgs(params)
 	if err != nil {
-		return usage(walletPeersRoute, err)
+		return usage(removeWalletPeerRoute, err)
 	}
 
-	addr := params.Args[1]
-
-	err = s.core.RemoveWalletPeer(uint32(assetID), addr)
+	err = s.core.RemoveWalletPeer(form.assetID, form.address)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to get wallet peers: %v", err)
+		errMsg := fmt.Sprintf("unable to remove wallet peer: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCWalletPeersError, errMsg)
-		return createResponse(walletPeersRoute, nil, resErr)
+		return createResponse(removeWalletPeerRoute, nil, resErr)
 	}
 
-	return createResponse(walletPeersRoute, "successfully removed peer", nil)
+	return createResponse(removeWalletPeerRoute, "successfully removed peer", nil)
 }
 
 // format concatenates thing and tail. If thing is empty, returns an empty

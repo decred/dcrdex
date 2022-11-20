@@ -174,6 +174,12 @@ type deleteRecordsForm struct {
 	ordersFileStr, matchesFileStr string
 }
 
+// addRemovePeerForm is the information necessary to add or remove a wallet peer.
+type addRemovePeerForm struct {
+	assetID uint32
+	address string
+}
+
 // checkNArgs checks that args and pwArgs are the correct length.
 func checkNArgs(params *RawParams, nPWArgs, nArgs []int) error {
 	// For want, one integer indicates an exact match, two are the min and max.
@@ -597,5 +603,30 @@ func parseDeleteArchivedRecordsArgs(params *RawParams) (form *deleteRecordsForm,
 		t := time.UnixMilli(olderThanMs)
 		form.olderThan = &t
 	}
+	return form, nil
+}
+
+func parseWalletPeersArgs(params *RawParams) (uint32, error) {
+	if err := checkNArgs(params, []int{0}, []int{1}); err != nil {
+		return 0, err
+	}
+	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
+	if err != nil {
+		return 0, err
+	}
+	return uint32(assetID), nil
+}
+
+func parseAddRemoveWalletPeerArgs(params *RawParams) (form *addRemovePeerForm, err error) {
+	if err = checkNArgs(params, []int{0}, []int{2}); err != nil {
+		return nil, err
+	}
+	form = new(addRemovePeerForm)
+	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
+	if err != nil {
+		return nil, fmt.Errorf("invalid assetID: %v", err)
+	}
+	form.assetID = uint32(assetID)
+	form.address = params.Args[1]
 	return form, nil
 }
