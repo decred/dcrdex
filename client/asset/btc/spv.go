@@ -60,18 +60,20 @@ var _ BTCWallet = (*btcSPVWallet)(nil)
 
 // createSPVWallet creates a new SPV wallet.
 func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dataDir string, log dex.Logger, extIdx, intIdx uint32, net *chaincfg.Params) error {
-	dir := filepath.Join(dataDir, net.Name, "spv")
-	if err := logNeutrino(dir); err != nil {
+	netDir := filepath.Join(dataDir, net.Name)
+	walletDir := filepath.Join(netDir, "spv")
+
+	if err := logNeutrino(netDir); err != nil {
 		return fmt.Errorf("error initializing btcwallet+neutrino logging: %w", err)
 	}
 
-	logDir := filepath.Join(dataDir, net.Name, logDirName)
+	logDir := filepath.Join(netDir, logDirName)
 	err := os.MkdirAll(logDir, 0744)
 	if err != nil {
 		return fmt.Errorf("error creating wallet directories: %w", err)
 	}
 
-	loader := wallet.NewLoader(net, dir, true, dbTimeout, 250)
+	loader := wallet.NewLoader(net, walletDir, true, dbTimeout, 250)
 
 	pubPass := []byte(wallet.InsecurePubPassphrase)
 
@@ -95,7 +97,7 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dataDir strin
 	}
 
 	// The chain service DB
-	neutrinoDBPath := filepath.Join(dir, neutrinoDBName)
+	neutrinoDBPath := filepath.Join(walletDir, neutrinoDBName)
 	db, err := walletdb.Create("bdb", neutrinoDBPath, true, dbTimeout)
 	if err != nil {
 		bailOnWallet()
@@ -145,7 +147,8 @@ func (w *btcSPVWallet) updateDBBirthday(bday time.Time) error {
 // Start initializes the *btcwallet.Wallet and its supporting players and
 // starts syncing.
 func (w *btcSPVWallet) Start() (SPVService, error) {
-	if err := logNeutrino(w.dir); err != nil {
+	netDir := filepath.Dir(w.dir)
+	if err := logNeutrino(netDir); err != nil {
 		return nil, fmt.Errorf("error initializing btcwallet+neutrino logging: %v", err)
 	}
 	// timeout and recoverWindow arguments borrowed from btcwallet directly.

@@ -138,21 +138,23 @@ var _ Wallet = (*spvWallet)(nil)
 var _ tipNotifier = (*spvWallet)(nil)
 
 func createSPVWallet(pw, seed []byte, dataDir string, extIdx, intIdx uint32, chainParams *chaincfg.Params) error {
-	dir := filepath.Join(dataDir, chainParams.Name, "spv")
-	if err := initLogging(dir); err != nil {
+	netDir := filepath.Join(dataDir, chainParams.Name)
+	walletDir := filepath.Join(netDir, "spv")
+
+	if err := initLogging(netDir); err != nil {
 		return fmt.Errorf("error initializing dcrwallet logging: %w", err)
 	}
 
-	if exists, err := walletExists(dir); err != nil {
+	if exists, err := walletExists(walletDir); err != nil {
 		return err
 	} else if exists {
-		return fmt.Errorf("wallet at %q already exists", dir)
+		return fmt.Errorf("wallet at %q already exists", walletDir)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	dbPath := filepath.Join(dir, walletDbName)
+	dbPath := filepath.Join(walletDir, walletDbName)
 	exists, err := fileExists(dbPath)
 	if err != nil {
 		return fmt.Errorf("error checking file existence for %q: %w", dbPath, err)
@@ -162,7 +164,7 @@ func createSPVWallet(pw, seed []byte, dataDir string, extIdx, intIdx uint32, cha
 	}
 
 	// Ensure the data directory for the network exists.
-	if err := checkCreateDir(dir); err != nil {
+	if err := checkCreateDir(walletDir); err != nil {
 		return fmt.Errorf("checkCreateDir error: %w", err)
 	}
 
@@ -171,7 +173,7 @@ func createSPVWallet(pw, seed []byte, dataDir string, extIdx, intIdx uint32, cha
 	// attempts to remove any wallet remnants.
 	defer func() {
 		if err != nil {
-			_ = os.Remove(dir)
+			_ = os.Remove(walletDir)
 		}
 	}()
 
@@ -231,7 +233,8 @@ func (w *spvWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, ne
 }
 
 func (w *spvWallet) startWallet(ctx context.Context) error {
-	if err := initLogging(w.dir); err != nil {
+	netDir := filepath.Dir(w.dir)
+	if err := initLogging(netDir); err != nil {
 		return fmt.Errorf("error initializing dcrwallet logging: %w", err)
 	}
 
@@ -938,7 +941,7 @@ var (
 // logRotator initializes a rotating file logger.
 func logRotator(netDir string) (*rotator.Rotator, error) {
 	const maxLogRolls = 8
-	logDir := filepath.Join(filepath.Dir(netDir), logDirName)
+	logDir := filepath.Join(netDir, logDirName)
 	if err := os.MkdirAll(logDir, 0744); err != nil {
 		return nil, fmt.Errorf("error creating log directory: %w", err)
 	}

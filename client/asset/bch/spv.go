@@ -115,7 +115,8 @@ func openSPVWallet(dir string, cfg *btc.WalletConfig, btcParams *chaincfg.Params
 
 // createSPVWallet creates a new SPV wallet.
 func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string, log dex.Logger, extIdx, intIdx uint32, net *bchchaincfg.Params) error {
-	netDir := filepath.Join(dbDir, net.Name, "spv")
+	netDir := filepath.Join(dbDir, net.Name)
+	walletDir := filepath.Join(netDir, "spv")
 
 	if err := logNeutrino(netDir, log); err != nil {
 		return fmt.Errorf("error initializing bchwallet+neutrino logging: %w", err)
@@ -127,7 +128,7 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string,
 		return fmt.Errorf("error creating wallet directories: %w", err)
 	}
 
-	loader := wallet.NewLoader(net, netDir, true, 250)
+	loader := wallet.NewLoader(net, walletDir, true, 250)
 
 	pubPass := []byte(wallet.InsecurePubPassphrase)
 
@@ -148,7 +149,7 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string,
 	}
 
 	// The chain service DB
-	neutrinoDBPath := filepath.Join(netDir, neutrinoDBName)
+	neutrinoDBPath := filepath.Join(walletDir, neutrinoDBName)
 	db, err := walletdb.Create("bdb", neutrinoDBPath, true)
 	if err != nil {
 		return fmt.Errorf("unable to create neutrino db at %q: %w", neutrinoDBPath, err)
@@ -168,7 +169,8 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string,
 // Start initializes the *bchwallet.Wallet and its supporting players and starts
 // syncing.
 func (w *bchSPVWallet) Start() (btc.SPVService, error) {
-	if err := logNeutrino(w.dir, w.log); err != nil {
+	netDir := filepath.Dir(w.dir)
+	if err := logNeutrino(netDir, w.log); err != nil {
 		return nil, fmt.Errorf("error initializing bchwallet+neutrino logging: %v", err)
 	}
 	// recoverWindow arguments borrowed from bchwallet directly.
@@ -960,7 +962,7 @@ func (w logWriter) Write(p []byte) (n int, err error) {
 // logRotator initializes a rotating file logger.
 func logRotator(netDir string) (*rotator.Rotator, error) {
 	const maxLogRolls = 8
-	logDir := filepath.Join(filepath.Dir(netDir), logDirName)
+	logDir := filepath.Join(netDir, logDirName)
 	if err := os.MkdirAll(logDir, 0744); err != nil {
 		return nil, fmt.Errorf("error creating log directory: %w", err)
 	}

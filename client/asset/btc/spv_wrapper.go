@@ -204,7 +204,7 @@ var (
 // logRotator initializes a rotating file logger.
 func logRotator(dir string) (*rotator.Rotator, error) {
 	const maxLogRolls = 8
-	logDir := filepath.Join(filepath.Dir(dir), logDirName)
+	logDir := filepath.Join(dir, logDirName)
 	if err := os.MkdirAll(logDir, 0744); err != nil {
 		return nil, fmt.Errorf("error creating log directory: %w", err)
 	}
