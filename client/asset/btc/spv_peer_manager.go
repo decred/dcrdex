@@ -76,8 +76,8 @@ func NewSPVPeerManager(cs PeerManagerChainService, defaultPeers []string, dir st
 	}
 }
 
-func (w *SPVPeerManager) connectedPeers() map[string]struct{} {
-	peers := w.cs.Peers()
+func (s *SPVPeerManager) connectedPeers() map[string]struct{} {
+	peers := s.cs.Peers()
 	connectedPeers := make(map[string]struct{}, len(peers))
 	for _, peer := range peers {
 		connectedPeers[peer.Addr()] = struct{}{}
@@ -88,15 +88,15 @@ func (w *SPVPeerManager) connectedPeers() map[string]struct{} {
 // Peers returns the list of peers that the wallet is connected to. It also
 // returns the peers that the user added that the wallet may not currently
 // be connected to.
-func (w *SPVPeerManager) Peers() ([]*asset.WalletPeer, error) {
-	w.peersMtx.RLock()
-	defer w.peersMtx.RUnlock()
+func (s *SPVPeerManager) Peers() ([]*asset.WalletPeer, error) {
+	s.peersMtx.RLock()
+	defer s.peersMtx.RUnlock()
 
-	connectedPeers := w.connectedPeers()
+	connectedPeers := s.connectedPeers()
 
 	walletPeers := make([]*asset.WalletPeer, 0, len(connectedPeers))
 
-	for originalAddr, peer := range w.peers {
+	for originalAddr, peer := range s.peers {
 		_, connected := connectedPeers[peer.resolvedName]
 		delete(connectedPeers, peer.resolvedName)
 		walletPeers = append(walletPeers, &asset.WalletPeer{
@@ -123,13 +123,13 @@ func (w *SPVPeerManager) Peers() ([]*asset.WalletPeer, error) {
 // with the resolved address, then we keep track of the mapping of address to
 // resolved address in order to be able to display the address the user provided
 // back to the user.
-func (w *SPVPeerManager) resolveAddress(addr string) (string, error) {
+func (s *SPVPeerManager) resolveAddress(addr string) (string, error) {
 	host, strPort, err := net.SplitHostPort(addr)
 	if err != nil {
 		switch err.(type) {
 		case *net.AddrError:
 			host = addr
-			strPort = w.defaultPort
+			strPort = s.defaultPort
 		default:
 			return "", err
 		}
@@ -160,10 +160,10 @@ func (w *SPVPeerManager) resolveAddress(addr string) (string, error) {
 }
 
 // peerWithResolvedAddress checks to see if there is a peer with a resolved
-// address in w.peers, and if so, returns the address that was user to add
+// address in s.peers, and if so, returns the address that was user to add
 // the peer.
-func (w *SPVPeerManager) peerWithResolvedAddr(resolvedAddr string) (string, bool) {
-	for originalAddr, peer := range w.peers {
+func (s *SPVPeerManager) peerWithResolvedAddr(resolvedAddr string) (string, bool) {
+	for originalAddr, peer := range s.peers {
 		if peer.resolvedName == resolvedAddr {
 			return originalAddr, true
 		}
@@ -172,8 +172,8 @@ func (w *SPVPeerManager) peerWithResolvedAddr(resolvedAddr string) (string, bool
 }
 
 // loadSavedPeersFromFile returns the contents of dexc-peers.json.
-func (w *SPVPeerManager) loadSavedPeersFromFile() (map[string]peerSource, error) {
-	content, err := os.ReadFile(w.savedPeersFilePath)
+func (s *SPVPeerManager) loadSavedPeersFromFile() (map[string]peerSource, error) {
+	content, err := os.ReadFile(s.savedPeersFilePath)
 	if errors.Is(err, os.ErrNotExist) {
 		return make(map[string]peerSource), nil
 	}
@@ -190,20 +190,20 @@ func (w *SPVPeerManager) loadSavedPeersFromFile() (map[string]peerSource, error)
 	return peers, nil
 }
 
-// loadSavedPeersFromFile replaces the contents of dexc-peers.json.
-func (w *SPVPeerManager) writeSavedPeersToFile(peers map[string]peerSource) error {
+// writeSavedPeersToFile replaces the contents of dexc-peers.json.
+func (s *SPVPeerManager) writeSavedPeersToFile(peers map[string]peerSource) error {
 	content, err := json.Marshal(peers)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(w.savedPeersFilePath, content, 0644)
+	return os.WriteFile(s.savedPeersFilePath, content, 0644)
 }
 
-func (w *SPVPeerManager) addPeer(addr string, source peerSource, initialLoad bool) error {
-	w.peersMtx.Lock()
-	defer w.peersMtx.Unlock()
+func (s *SPVPeerManager) addPeer(addr string, source peerSource, initialLoad bool) error {
+	s.peersMtx.Lock()
+	defer s.peersMtx.Unlock()
 
-	resolvedAddr, err := w.resolveAddress(addr)
+	resolvedAddr, err := s.resolveAddress(addr)
 	if err != nil {
 		if initialLoad {
 			// If this is the initial load, we still want to add peers that are
@@ -211,71 +211,71 @@ func (w *SPVPeerManager) addPeer(addr string, source peerSource, initialLoad boo
 			// to the user. If a user previously added a peer that originally connected
 			// but now the address cannot be resolved to an IP, it should be displayed
 			// that the wallet was unable to connect to that peer.
-			w.peers[addr] = &walletPeer{source: source}
+			s.peers[addr] = &walletPeer{source: source}
 		}
 		return fmt.Errorf("failed to resolve address: %v", err)
 	}
 
-	if duplicatePeer, found := w.peerWithResolvedAddr(resolvedAddr); found {
+	if duplicatePeer, found := s.peerWithResolvedAddr(resolvedAddr); found {
 		return fmt.Errorf("%s and %s resolve to the same node", duplicatePeer, addr)
 	}
 
-	w.peers[addr] = &walletPeer{source: source, resolvedName: resolvedAddr}
+	s.peers[addr] = &walletPeer{source: source, resolvedName: resolvedAddr}
 
 	if !initialLoad {
-		savedPeers, err := w.loadSavedPeersFromFile()
+		savedPeers, err := s.loadSavedPeersFromFile()
 		if err != nil {
-			w.log.Errorf("failed to load saved peers from file")
+			s.log.Errorf("failed to load saved peers from file")
 		} else {
 			savedPeers[addr] = source
-			err = w.writeSavedPeersToFile(savedPeers)
+			err = s.writeSavedPeersToFile(savedPeers)
 			if err != nil {
-				w.log.Errorf("failed to add peer to saved peers file: %v")
+				s.log.Errorf("failed to add peer to saved peers file: %v")
 			}
 		}
 	}
 
-	connectedPeers := w.connectedPeers()
+	connectedPeers := s.connectedPeers()
 	_, connected := connectedPeers[resolvedAddr]
 	if !connected {
-		return w.cs.AddPeer(resolvedAddr)
+		return s.cs.AddPeer(resolvedAddr)
 	}
 
 	return nil
 }
 
 // AddPeer connects to a new peer and stores it in the db.
-func (w *SPVPeerManager) AddPeer(addr string) error {
-	return w.addPeer(addr, added, false)
+func (s *SPVPeerManager) AddPeer(addr string) error {
+	return s.addPeer(addr, added, false)
 }
 
 // RemovePeer disconnects from a peer added by the user and removes it from
 // the db.
-func (w *SPVPeerManager) RemovePeer(addr string) error {
-	w.peersMtx.Lock()
-	defer w.peersMtx.Unlock()
+func (s *SPVPeerManager) RemovePeer(addr string) error {
+	s.peersMtx.Lock()
+	defer s.peersMtx.Unlock()
 
-	peer, found := w.peers[addr]
+	peer, found := s.peers[addr]
 	if !found {
 		return fmt.Errorf("peer not found: %v", addr)
 	}
 
-	savedPeers, err := w.loadSavedPeersFromFile()
+	savedPeers, err := s.loadSavedPeersFromFile()
 	if err != nil {
 		return err
 	}
 	delete(savedPeers, addr)
-	err = w.writeSavedPeersToFile(savedPeers)
+	err = s.writeSavedPeersToFile(savedPeers)
 	if err != nil {
-		w.log.Errorf("failed to delete peer from saved peers file: %v")
+		s.log.Errorf("failed to delete peer from saved peers file: %v")
 	} else {
-		delete(w.peers, addr)
+		delete(s.peers, addr)
 	}
 
-	connectedPeers := w.connectedPeers()
+	connectedPeers := s.connectedPeers()
 	_, connected := connectedPeers[peer.resolvedName]
 	if connected {
-		return w.cs.RemovePeer(peer.resolvedName)
+		return s.cs.RemovePeer(peer.resolvedName)
 	}
 
 	return nil
@@ -283,24 +283,24 @@ func (w *SPVPeerManager) RemovePeer(addr string) error {
 
 // ConnectToInitialWalletPeers connects to the default peers and the peers
 // that were added by the user and persisted in the db.
-func (w *SPVPeerManager) ConnectToInitialWalletPeers() {
-	for _, peer := range w.defaultPeers {
-		err := w.addPeer(peer, defaultPeer, true)
+func (s *SPVPeerManager) ConnectToInitialWalletPeers() {
+	for _, peer := range s.defaultPeers {
+		err := s.addPeer(peer, defaultPeer, true)
 		if err != nil {
-			w.log.Errorf("failed to add default peer %s: %v", peer, err)
+			s.log.Errorf("failed to add default peer %s: %v", peer, err)
 		}
 	}
 
-	savedPeers, err := w.loadSavedPeersFromFile()
+	savedPeers, err := s.loadSavedPeersFromFile()
 	if err != nil {
-		w.log.Errorf("failed to load saved peers from file: v", err)
+		s.log.Errorf("failed to load saved peers from file: v", err)
 		return
 	}
 
 	for addr := range savedPeers {
-		err := w.addPeer(addr, added, true)
+		err := s.addPeer(addr, added, true)
 		if err != nil {
-			w.log.Errorf("failed to add peer %s: %v", addr, err)
+			s.log.Errorf("failed to add peer %s: %v", addr, err)
 		}
 	}
 }
