@@ -222,7 +222,9 @@ var enUS = map[Topic]*translation{
 	// [token]
 	TopicFailedCancel: {
 		subject:  "Failed cancel",
-		template: "Cancel order for order %s stuck in Epoch status for 2 epochs and is now deleted.",
+		template: "Cancel order for order %s failed and is now deleted.",
+		// NOTE: "failed" means we missed the preimage request and either got
+		// the revoke_order message or it stayed in epoch status for too long.
 	},
 	// [coin ID, ticker, match]
 	TopicAuditTrouble: {

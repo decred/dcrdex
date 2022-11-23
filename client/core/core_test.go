@@ -4120,18 +4120,46 @@ func TestHandleRevokeOrderMsg(t *testing.T) {
 		t.Fatal("[handleRevokeOrderMsg] expected a non-existent order")
 	}
 
-	// Now store the order in dc.trades.
+	// Now store the order in dc.trades, with a linked cancel order.
 	mkt := dc.marketConfig(tDcrBtcMktName)
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen,
 		rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, tDcrWallet.fundingCoins, rig.core.notify,
 		rig.core.formatDetails, nil, 0, 0)
+	preImgC := newPreimage()
+	co := &order.CancelOrder{
+		P: order.Prefix{
+			ServerTime: time.Now(),
+			Commit:     preImgC.Commit(),
+		},
+	}
+	tracker.cancel = &trackedCancel{CancelOrder: *co}
+	coid := co.ID()
 	rig.dc.trades[oid] = tracker
 
 	orderNotes, feedDone := orderNoteFeed(tCore)
 	defer feedDone()
 
-	// Success
+	// Revoke the cancel order, not the targeted order.
+	payloadC := &msgjson.RevokeOrder{
+		OrderID: coid[:],
+	}
+	reqC, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.RevokeOrderRoute, payloadC)
+	err = handleRevokeOrderMsg(rig.core, rig.dc, reqC)
+	if err != nil {
+		t.Fatalf("handleRevokeOrderMsg error: %v", err)
+	}
+
+	verifyRevokeNotification(orderNotes, TopicFailedCancel, t)
+
+	if tracker.metaData.Status == order.OrderStatusRevoked {
+		t.Errorf("Incorrectly revoked the targeted order instead of clearing the cancel order!")
+	}
+	if tracker.cancel != nil {
+		t.Fatalf("Did not clear the cancel order")
+	}
+
+	// Now revoke the actual trade order.
 	err = handleRevokeOrderMsg(rig.core, rig.dc, req)
 	if err != nil {
 		t.Fatalf("handleRevokeOrderMsg error: %v", err)
@@ -6560,7 +6588,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 }
 
 func orderNoteFeed(tCore *Core) (orderNotes chan *OrderNote, done func()) {
-	orderNotes = make(chan *OrderNote, 1)
+	orderNotes = make(chan *OrderNote, 16)
 
 	ntfnFeed := tCore.NotificationFeed()
 	feedDone := make(chan struct{})
@@ -6571,10 +6599,8 @@ func orderNoteFeed(tCore *Core) (orderNotes chan *OrderNote, done func()) {
 		for {
 			select {
 			case n := <-ntfnFeed:
-				ordNote, ok := n.(*OrderNote)
-				if ok {
+				if ordNote, ok := n.(*OrderNote); ok {
 					orderNotes <- ordNote
-					return // just one OrderNote and done
 				}
 			case <-tCtx.Done():
 				return
@@ -6592,6 +6618,7 @@ func orderNoteFeed(tCore *Core) (orderNotes chan *OrderNote, done func()) {
 }
 
 func verifyRevokeNotification(ch chan *OrderNote, expectedTopic Topic, t *testing.T) {
+	t.Helper()
 	select {
 	case actualOrderNote := <-ch:
 		if expectedTopic != actualOrderNote.TopicID {
