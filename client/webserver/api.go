@@ -130,6 +130,63 @@ func (s *WebServer) apiEstimateSendTxFee(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, resp, s.indent)
 }
 
+// apiGetWalletPeers is the handler for the '/getwalletpeers' API request.
+func (s *WebServer) apiGetWalletPeers(w http.ResponseWriter, r *http.Request) {
+	var form struct {
+		AssetID uint32 `json:"assetID"`
+	}
+	if !readPost(w, r, &form) {
+		return
+	}
+	peers, err := s.core.WalletPeers(form.AssetID)
+	if err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+	resp := struct {
+		OK    bool                `json:"ok"`
+		Peers []*asset.WalletPeer `json:"peers"`
+	}{
+		OK:    true,
+		Peers: peers,
+	}
+	writeJSON(w, resp, s.indent)
+}
+
+// apiAddWalletPeer is the handler for the '/addwalletpeer' API request.
+func (s *WebServer) apiAddWalletPeer(w http.ResponseWriter, r *http.Request) {
+	var form struct {
+		AssetID uint32 `json:"assetID"`
+		Address string `json:"addr"`
+	}
+	if !readPost(w, r, &form) {
+		return
+	}
+	err := s.core.AddWalletPeer(form.AssetID, form.Address)
+	if err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+	writeJSON(w, simpleAck(), s.indent)
+}
+
+// apiRemoveWalletPeer is the handler for the '/removewalletpeer' API request.
+func (s *WebServer) apiRemoveWalletPeer(w http.ResponseWriter, r *http.Request) {
+	var form struct {
+		AssetID uint32 `json:"assetID"`
+		Address string `json:"addr"`
+	}
+	if !readPost(w, r, &form) {
+		return
+	}
+	err := s.core.RemoveWalletPeer(form.AssetID, form.Address)
+	if err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+	writeJSON(w, simpleAck(), s.indent)
+}
+
 // apiGetDEXInfo is the handler for the '/getdexinfo' API request.
 func (s *WebServer) apiGetDEXInfo(w http.ResponseWriter, r *http.Request) {
 	form := new(registrationForm)

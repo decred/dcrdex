@@ -246,6 +246,15 @@ func (c *TCore) WalletRestorationInfo(pw []byte, assetID uint32) ([]*asset.Walle
 func (c *TCore) DeleteArchivedRecordsWithBackup(endDateTime *time.Time, saveMatchesToFile, saveOrdersToFile bool) (string, int, error) {
 	return "/path/to/records", c.deletedRecords, c.deleteRecordsErr
 }
+func (c *TCore) WalletPeers(assetID uint32) ([]*asset.WalletPeer, error) {
+	return nil, nil
+}
+func (c *TCore) AddWalletPeer(assetID uint32, address string) error {
+	return nil
+}
+func (c *TCore) RemoveWalletPeer(assetID uint32, address string) error {
+	return nil
+}
 
 func (c *TCore) CreateBot(pw []byte, botType string, pgm *core.MakerProgram) (uint64, error) {
 	return 1, nil

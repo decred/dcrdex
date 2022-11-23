@@ -148,6 +148,9 @@ type clientCore interface {
 	UpdateBotProgram(pgmID uint64, pgm *core.MakerProgram) error
 	RetireBot(pgmID uint64) error
 	MarketReport(host string, baseID, quoteID uint32) (*core.MarketReport, error)
+	WalletPeers(assetID uint32) ([]*asset.WalletPeer, error)
+	AddWalletPeer(assetID uint32, addr string) error
+	RemoveWalletPeer(assetID uint32, addr string) error
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -408,6 +411,10 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/validateaddress", s.apiValidateAddress)
 			apiAuth.Post("/txfee", s.apiEstimateSendTxFee)
 			apiAuth.Post("/deletearchivedrecords", s.apiDeleteArchivedRecords)
+			apiAuth.Post("/getwalletpeers", s.apiGetWalletPeers)
+			apiAuth.Post("/addwalletpeer", s.apiAddWalletPeer)
+			apiAuth.Post("/removewalletpeer", s.apiRemoveWalletPeer)
+
 			if s.experimental {
 				apiAuth.Post("/createbot", s.apiCreateBot)
 				apiAuth.Post("/startbot", s.apiStartBot)
@@ -416,7 +423,6 @@ func New(cfg *Config) (*WebServer, error) {
 				apiAuth.Post("/retirebot", s.apiRetireBot)
 				apiAuth.Post("/marketreport", s.apiMarketReport)
 			}
-
 		})
 	})
 

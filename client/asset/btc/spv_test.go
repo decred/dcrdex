@@ -329,6 +329,16 @@ func (c *tBtcWallet) Reconfigure(*asset.WalletConfig, string) (bool, error) {
 	return false, nil
 }
 
+func (c *tBtcWallet) Peers() ([]*asset.WalletPeer, error) {
+	return nil, nil
+}
+func (c *tBtcWallet) AddPeer(string) error {
+	return nil
+}
+func (c *tBtcWallet) RemovePeer(string) error {
+	return nil
+}
+
 type tNeutrinoClient struct {
 	*testData
 }
@@ -370,6 +380,10 @@ func (c *tNeutrinoClient) Peers() []SPVPeer {
 		peer.UpdateLastBlockHeight(int32(c.getBlockchainInfo.Headers))
 	}
 	return []SPVPeer{peer}
+}
+
+func (c *tNeutrinoClient) AddPeer(string) error {
+	return nil
 }
 
 func (c *tNeutrinoClient) GetBlockHeight(hash *chainhash.Hash) (int32, error) {

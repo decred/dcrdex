@@ -8,5 +8,9 @@ body.dark {
     #walletDetailsBox {
       border-bottom: $dark_border_color;
     }
+
+    .peers-table {
+      @extend .table-dark;
+    }
   }
 }

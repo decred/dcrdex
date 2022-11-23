@@ -544,6 +544,20 @@ export interface OracleReport {
   bestSell: number
 }
 
+// changing the order of the elements in this enum will affect
+// the sorting of the peers table in wallets.ts.
+export enum PeerSource {
+  WalletDefault,
+  UserAdded,
+  Discovered,
+}
+
+export interface WalletPeer {
+  addr: string
+  source: PeerSource
+  connected: boolean
+}
+
 export interface Application {
   assets: Record<number, SupportedAsset>
   seedGenTime: number

@@ -114,6 +114,9 @@ type BTCWallet interface {
 	Stop()
 	Reconfigure(*asset.WalletConfig, string) (bool, error)
 	Birthday() time.Time
+	Peers() ([]*asset.WalletPeer, error)
+	AddPeer(string) error
+	RemovePeer(string) error
 }
 
 // BlockNotification is block hash and height delivered by a BTCWallet when it
@@ -129,6 +132,7 @@ type SPVService interface {
 	GetBlockHash(int64) (*chainhash.Hash, error)
 	BestBlock() (*headerfs.BlockStamp, error)
 	Peers() []SPVPeer
+	AddPeer(addr string) error
 	GetBlockHeight(hash *chainhash.Hash) (int32, error)
 	GetBlockHeader(*chainhash.Hash) (*wire.BlockHeader, error)
 	GetCFilter(blockHash chainhash.Hash, filterType wire.FilterType, options ...neutrino.QueryOption) (*gcs.Filter, error)
@@ -141,6 +145,7 @@ type SPVService interface {
 type SPVPeer interface {
 	StartingHeight() int32
 	LastBlock() int32
+	Addr() string
 }
 
 // btcChainService wraps *neutrino.ChainService in order to translate the
@@ -156,6 +161,14 @@ func (s *btcChainService) Peers() []SPVPeer {
 		peers = append(peers, p)
 	}
 	return peers
+}
+
+func (s *btcChainService) AddPeer(addr string) error {
+	return s.ChainService.ConnectNode(addr, true)
+}
+
+func (s *btcChainService) RemovePeer(addr string) error {
+	return s.ChainService.RemoveNodeByAddr(addr)
 }
 
 var _ SPVService = (*btcChainService)(nil)
@@ -479,6 +492,18 @@ func (w *spvWallet) getChainHeight() (int32, error) {
 
 func (w *spvWallet) peerCount() (uint32, error) {
 	return uint32(len(w.cl.Peers())), nil
+}
+
+func (w *spvWallet) peers() ([]*asset.WalletPeer, error) {
+	return w.wallet.Peers()
+}
+
+func (w *spvWallet) addPeer(addr string) error {
+	return w.wallet.AddPeer(addr)
+}
+
+func (w *spvWallet) removePeer(addr string) error {
+	return w.wallet.RemovePeer(addr)
 }
 
 // syncHeight is the best known sync height among peers.

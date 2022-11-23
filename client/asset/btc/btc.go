@@ -842,6 +842,8 @@ type intermediaryWallet struct {
 // method to implement asset.Rescanner.
 type ExchangeWalletSPV struct {
 	*intermediaryWallet
+
+	spvNode *spvWallet
 }
 
 // ExchangeWalletFullNode implements Wallet and adds the FeeRate method.
@@ -864,6 +866,7 @@ var _ asset.Rescanner = (*ExchangeWalletSPV)(nil)
 var _ asset.FeeRater = (*ExchangeWalletFullNode)(nil)
 var _ asset.LogFiler = (*ExchangeWalletSPV)(nil)
 var _ asset.Recoverer = (*ExchangeWalletSPV)(nil)
+var _ asset.PeerManager = (*ExchangeWalletSPV)(nil)
 var _ asset.TxFeeEstimator = (*intermediaryWallet)(nil)
 
 // RecoveryCfg is the information that is transferred from the old wallet
@@ -877,9 +880,7 @@ type RecoveryCfg struct {
 // back to its previous state after it is recreated. Part of the
 // Recoverer interface.
 func (btc *ExchangeWalletSPV) GetRecoveryCfg() (map[string]string, error) {
-	w := btc.node.(*spvWallet)
-
-	internal, external, err := w.numDerivedAddresses()
+	internal, external, err := btc.spvNode.numDerivedAddresses()
 	if err != nil {
 		return nil, err
 	}
@@ -899,8 +900,7 @@ func (btc *ExchangeWalletSPV) GetRecoveryCfg() (map[string]string, error) {
 // Destroy will delete all the wallet files so the wallet can be recreated.
 // Part of the Recoverer interface.
 func (btc *ExchangeWalletSPV) Move(backupDir string) error {
-	w := btc.node.(*spvWallet)
-	err := w.moveWalletData(backupDir)
+	err := btc.spvNode.moveWalletData(backupDir)
 	if err != nil {
 		return fmt.Errorf("unable to move wallet data: %w", err)
 	}
@@ -911,12 +911,26 @@ func (btc *ExchangeWalletSPV) Move(backupDir string) error {
 // Rescan satisfies the asset.Rescanner interface, and issues a rescan wallet
 // command if the backend is an SPV wallet.
 func (btc *ExchangeWalletSPV) Rescan(_ context.Context) error {
-	// This will panic if not an spvWallet, which would indicate that
-	// openSPVWallet was not used to construct this instance.
-	w := btc.node.(*spvWallet)
 	atomic.StoreInt64(&btc.tipAtConnect, 0) // for progress
 	// Caller should start calling SyncStatus on a ticker.
-	return w.wallet.RescanAsync()
+	return btc.spvNode.wallet.RescanAsync()
+}
+
+// Peers returns a list of peers that the wallet is connected to.
+func (btc *ExchangeWalletSPV) Peers() ([]*asset.WalletPeer, error) {
+	return btc.spvNode.peers()
+}
+
+// AddPeer connects the wallet to a new peer. The peer's address will be
+// persisted and connected to each time the wallet is started up.
+func (btc *ExchangeWalletSPV) AddPeer(addr string) error {
+	return btc.spvNode.addPeer(addr)
+}
+
+// RemovePeer will remove a peer that was added by AddPeer. This peer may
+// still be connected to by the wallet if it discovers it on it's own.
+func (btc *ExchangeWalletSPV) RemovePeer(addr string) error {
+	return btc.spvNode.removePeer(addr)
 }
 
 // FeeRate satisfies asset.FeeRater.
@@ -931,8 +945,7 @@ func (btc *ExchangeWalletFullNode) FeeRate() uint64 {
 
 // LogFilePath returns the path to the neutrino log file.
 func (btc *ExchangeWalletSPV) LogFilePath() string {
-	w := btc.node.(*spvWallet)
-	return w.logFilePath()
+	return btc.spvNode.logFilePath()
 }
 
 type block struct {
@@ -1218,7 +1231,6 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 	}
 
 	spvw.wallet = walletConstructor(spvw.dir, spvw.cfg, spvw.chainParams, spvw.log)
-
 	btc.node = spvw
 
 	return &ExchangeWalletSPV{
@@ -1227,6 +1239,7 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 			txFeeEstimator: spvw,
 			tipRedeemer:    spvw,
 		},
+		spvNode: spvw,
 	}, nil
 }
 

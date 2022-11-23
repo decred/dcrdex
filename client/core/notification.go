@@ -477,6 +477,7 @@ const (
 	TopicWalletPasswordUpdated      Topic = "WalletPasswordUpdated"
 	TopicWalletPeersWarning         Topic = "WalletPeersWarning"
 	TopicWalletTypeDeprecated       Topic = "WalletTypeDeprecated"
+	TopicWalletPeersUpdate          Topic = "WalletPeersUpdate"
 )
 
 func newWalletConfigNote(topic Topic, subject, details string, severity db.Severity, walletState *WalletState) *WalletConfigNote {
