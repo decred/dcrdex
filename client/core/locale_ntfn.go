@@ -249,7 +249,9 @@ var originLocale = map[Topic]*translation{
 	// [token]
 	TopicFailedCancel: {
 		subject:  "Failed cancel",
-		template: "Cancel order for order %s stuck in Epoch status for 2 epochs and is now deleted.",
+		template: "Cancel order for order %s failed and is now deleted.",
+		// NOTE: "failed" means we missed the preimage request and either got
+		// the revoke_order message or it stayed in epoch status for too long.
 	},
 	// [coin ID, ticker, match]
 	TopicAuditTrouble: {
@@ -574,6 +576,7 @@ var ptBR = map[Topic]*translation{
 	TopicFailedCancel: {
 		template: "Ordem de cancelamento para pedido %s presa em estado de Epoque por 2 epoques e foi agora deletado.",
 		subject:  "Falhou Cancelamento",
+		stale:    true,
 	},
 	// [coin ID, ticker, match]
 	TopicAuditTrouble: {
@@ -878,6 +881,7 @@ var zhCN = map[Topic]*translation{
 	TopicFailedCancel: {
 		subject:  "取消失败",
 		template: "取消订单 %s 的订单 %s 处于 Epoque 状态 2 个 epoques，现在已被删除。",
+		stale:    true,
 	},
 	// [coin ID, ticker, match]
 	TopicAuditTrouble: {
@@ -1181,6 +1185,7 @@ var plPL = map[Topic]*translation{
 	TopicFailedCancel: {
 		subject:  "Niepowodzenie anulowania",
 		template: "Zlecenie anulacji dla zlecenia %s utknęło w statusie epoki przez 2 epoki i zostało usunięte.",
+		stale:    true,
 	},
 	// [coin ID, ticker, match]
 	TopicAuditTrouble: {
@@ -1503,6 +1508,7 @@ var deDE = map[Topic]*translation{
 	TopicFailedCancel: {
 		subject:  "Abbruch fehlgeschlagen",
 		template: "Der Auftrag für den Abbruch des Auftrags %s blieb 2 Epochen lang im Epoche-Status hängen und wird nun gelöscht.",
+		stale:    true,
 	},
 	// [coin ID, ticker, match]
 	TopicAuditTrouble: {
