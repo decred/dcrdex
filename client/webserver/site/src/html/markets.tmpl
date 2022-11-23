@@ -231,22 +231,22 @@
                     <span></span>
                   </div>
 
-                  {{- /* MARKET CONFIG */ -}}
-                  <div class="d-flex justify-content-between my-2 fs14">
-                    <div id="lotSizeBox">
-                      [[[:title:lot_size]]]:
-                      <span id="lotSize"></span>
-                      <span data-unit="base"></span>
+                  {{- /* LIMIT BUY & SELL ORDER */ -}}
+                  <div id="limitOrderBox">
+                    <div class="d-flex justify-content-between my-2 fs14">
+                      <div id="lotSizeBox">
+                        [[[:title:lot_size]]]:
+                        <span id="lotSize"></span>
+                        <span data-unit="base"></span>
+                      </div>
+                      <div id="rateStepBox">
+                        [[[Rate Step]]]:
+                        <span id="rateStep"></span>
+                        <span data-unit="quote"></span>
+                      </div>
                     </div>
-                    <div id="rateStepBox">
-                      [[[Rate Step]]]:
-                      <span id="rateStep"></span>
-                      <span data-unit="quote"></span>
-                    </div>
-                  </div>
-                  <div class="my-2 fs14 h21" id="maxBox">
-                    <div id="maxOrd" class="d-hide position-relative pointer">
-                      <span id="maxLotBox" class="d-hide">
+                    <div id="maxOrd" class="position-relative pointer">
+                      <span id="maxLotBox">
                         <span class="underline">[[[Max]]] <span id="maxLbl">[[[Buy]]]</span></span>:
                         <span id="maxFromLots"></span>
                         <span id="maxFromLotsLbl">[[[lot]]]</span>
@@ -262,30 +262,39 @@
                         </span>
                       </span>
                     </div>
+                    {{- /* RATE AND QUANTITY INPUTS */ -}}
+                    <div class="d-flex mt-3" id="priceBox">
+                      <label for="rateField" class="form-label col-6 d-flex align-items-center p-0">[[[:title:price]]]</label>
+                      <div class="col-18 p-0 position-relative">
+                        <input type="number" class="form-control select bg1" id="rateField">
+                        <span class="unitbox"><span class="unit" data-unit="quote"></span>/<span class="unit" data-unit="base"></span></span>
+                      </div>
+                    </div>
+                    <div class="d-flex mt-4" id="qtyBox">
+                      <label for="qtyField" class="form-label col-6 d-flex align-items-center p-0">[[[Quantity]]]</label>
+                      <div class="col-6 p-0 position-relative">
+                        <input type="number" class="form-control select bg1" id="lotField">
+                        <span class="unit unitbox">[[[:title:lots]]]</span>
+                      </div>
+                      <div class="col-1 p-0"></div> {{/* spacer */}}
+                      <div class="col-11 p-0 position-relative">
+                        <input type="number" class="form-control select bg1" id="qtyField">
+                        <span class="unit unitbox" data-unit="base"></span>
+                      </div>
+                    </div>
+                    {{- /* ORDER PREVIEW */ -}}
+                    <div class="mt-2 fs14 text-end" id="orderTotalPreview"></div>
+                    {{- /* TIME-IN-FORCE CHECK BOX */ -}}
+                    <div class="my-1 text-start form-check" id="tifBox">
+                      <input id="tifNow" class="form-check-input" type="checkbox" value="">
+                      <label class="form-check-label" for="tifNow">
+                        [[[Immediate or cancel]]]
+                        <span class="ico-info fs12" data-tooltip="[[[immediate_explanation]]]"></span>
+                      </label>
+                    </div>
                   </div>
 
-                  {{- /* RATE AND QUANTITY INPUTS */ -}}
-                  <div class="d-flex mt-3" id="priceBox">
-                    <label for="rateField" class="form-label col-6 d-flex align-items-center p-0">[[[:title:price]]]</label>
-                    <div class="col-18 p-0 position-relative">
-                      <input type="number" class="form-control select bg1" id="rateField">
-                      <span class="unitbox"><span class="unit" data-unit="quote"></span>/<span class="unit" data-unit="base"></span></span>
-                    </div>
-                  </div>
-                  <div class="d-flex mt-4" id="qtyBox">
-                    <label for="qtyField" class="form-label col-6 d-flex align-items-center p-0">[[[Quantity]]]</label>
-                    <div class="col-6 p-0 position-relative">
-                      <input type="number" class="form-control select bg1" id="lotField">
-                      <span class="unit unitbox">[[[:title:lots]]]</span>
-                    </div>
-                    <div class="col-1 p-0"></div> {{/* spacer */}}
-                    <div class="col-11 p-0 position-relative">
-                      <input type="number" class="form-control select bg1" id="qtyField">
-                      <span class="unit unitbox" data-unit="base"></span>
-                    </div>
-                  </div>
-
-                  {{- /* MARKET BUY ORDER QUANTITY INPUT */ -}}
+                  {{- /* MARKET BUY ORDER */ -}}
                   <div id="mktBuyBox" class="d-hide">
                     <div class="text-center mt-2 fs15">
                       [[[min trade is about]]] <span id="minMktBuy"></span> <span data-unit="quote"></span>
@@ -306,16 +315,46 @@
                     </div>
                   </div>
 
-                  {{- /* ORDER PREVIEW */ -}}
-                  <div class="mt-2 fs14 text-end" id="orderTotalPreview"></div>
-
-                  {{- /* TIME-IN-FORCE CHECK BOX */ -}}
-                  <div class="my-1 text-start form-check" id="tifBox">
-                    <input id="tifNow" class="form-check-input" type="checkbox" value="">
-                    <label class="form-check-label" for="tifNow">
-                      [[[Immediate or cancel]]]
-                      <span class="ico-info fs12" data-tooltip="[[[immediate_explanation]]]"></span>
-                    </label>
+                  {{- /* MARKET SELL ORDER */ -}}
+                  <div id="mktSellBox" class="d-hide">
+                    <div class="d-flex justify-content-between my-2 fs14">
+                      <div id="mktSellLotSizeBox">
+                        [[[:title:lot_size]]]:
+                        <span id="mktSellLotSize"></span>
+                        <span data-unit="base"></span>
+                      </div>
+                    </div>
+                    <div id="mktSellMaxOrd" class="position-relative pointer">
+                      <span id="mktSellMaxLotBox">
+                        <span class="underline">[[[Max]]] <span id="mktSellMaxLbl">[[[Sell]]]</span></span>:
+                        <span id="mktSellMaxFromLots"></span>
+                        <span id="mktSellMaxFromLotsLbl">[[[lot]]]</span>
+                      </span>
+                      <span id="mktSellMaxQtyBox" class="d-hide">
+                        =
+                        <span id="mktSellMaxAboveZero">
+                          <span id="mktSellMaxFromAmt"></span>
+                          <span id="mktSellMaxFromTicker"></span>
+                          <!-- &rarr;
+                          <span id="mktSellMaxToAmt"></span>
+                          <span id="mktSellMaxToTicker"></span> -->
+                        </span>
+                      </span>
+                    </div>
+                    <div class="d-flex mt-4" id="mktSellQtyBox">
+                      <label for="mktSellQtyField" class="form-label col-6 d-flex align-items-center p-0">[[[Quantity]]]</label>
+                      <div class="col-6 p-0 position-relative">
+                        <input type="number" class="form-control select bg1" id="mktSellLotField">
+                        <span class="unit unitbox">[[[:title:lots]]]</span>
+                      </div>
+                      <div class="col-1 p-0"></div> {{/* spacer */}}
+                      <div class="col-11 p-0 position-relative">
+                        <input type="number" class="form-control select bg1" id="mktSellQtyField">
+                        <span class="unit unitbox" data-unit="base"></span>
+                      </div>
+                    </div>
+                    {{- /* ORDER PREVIEW */ -}}
+                    <div class="mt-2 fs14 text-end" id="mktSellTotalPreview"></div>
                   </div>
 
                   {{- /* SUBMIT ORDER BUTTON */ -}}
