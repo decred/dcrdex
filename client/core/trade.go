@@ -1107,7 +1107,10 @@ func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTra
 //
 // This is to be used in trade status resolution only, since normally the fate
 // of cancel orders is determined by match/nomatch and status set to executed
-// (see nomatch and negotiate)
+// (see nomatch and negotiate). A missed preimage request for the cancel order
+// that results in a revoke_order message for the cancel order should also use
+// this method to unlink and retire the failed cancel order. Similarly, cancel
+// orders detected as "stale" with the two-epochs-old heuristic use this.
 //
 // This method MUST be called with the trackedTrade mutex lock held for writes.
 func (t *trackedTrade) deleteCancelOrder() {

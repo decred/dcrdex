@@ -7301,9 +7301,19 @@ func handleRevokeOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	var oid order.OrderID
 	copy(oid[:], revocation.OrderID)
 
-	tracker, _, _ := dc.findOrder(oid)
+	tracker, _, isCancel := dc.findOrder(oid)
 	if tracker == nil {
 		return fmt.Errorf("no order found with id %s", oid.String())
+	}
+
+	if isCancel {
+		// Cancel order revoked (e.g. we missed the preimage request). Don't
+		// revoke the targeted order, just unlink the cancel order.
+		c.log.Warnf("Deleting failed cancel order %v that targeted trade order %v", oid, tracker.ID())
+		tracker.deleteCancelOrder()
+		subject, details := c.formatDetails(TopicFailedCancel, tracker.token())
+		c.notify(newOrderNote(TopicFailedCancel, subject, details, db.WarningLevel, tracker.coreOrder()))
+		return nil
 	}
 
 	if tracker.status() == order.OrderStatusRevoked {
