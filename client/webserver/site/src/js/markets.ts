@@ -819,7 +819,6 @@ export default class MarketsPage extends BasePage {
     const [bui, qui] = [app().unitInfo(base, dex), app().unitInfo(quote, dex)]
 
     const rateConversionFactor = OrderUtil.RateEncodingFactor / bui.conventional.conversionFactor * qui.conventional.conversionFactor
-    Doc.hide(page.maxOrd, page.mktSellMaxOrd, page.chartErrMsg)
     if (this.maxEstimateTimer) {
       window.clearTimeout(this.maxEstimateTimer)
       this.maxEstimateTimer = null
@@ -827,6 +826,7 @@ export default class MarketsPage extends BasePage {
     const mktId = marketID(baseCfg.symbol, quoteCfg.symbol)
     const baseAsset = app().assets[base]
     const quoteAsset = app().assets[quote]
+
     this.market = {
       dex: dex,
       sid: mktId, // A string market identifier used by the DEX.
@@ -1099,7 +1099,7 @@ export default class MarketsPage extends BasePage {
     if (!bWallet || !bWallet.running || !qWallet || !qWallet.running) return
     if (this.maxEstimateTimer) window.clearTimeout(this.maxEstimateTimer)
 
-    Doc.show(page.maxOrd, page.mktSellMaxOrd)
+    Doc.hide(page.maxQtyBox, page.mktSellMaxQtyBox)
 
     page.maxFromLots.textContent = intl.prep(intl.ID_CALCULATING)
     page.maxFromLotsLbl.textContent = ''
@@ -1141,7 +1141,6 @@ export default class MarketsPage extends BasePage {
 
     const lots = maxOrder ? maxOrder.lots : 0
 
-    Doc.show(page.maxOrd, page.mktSellMaxOrd)
     if (lots !== 0) {
       Doc.show(page.maxQtyBox, page.mktSellMaxQtyBox)
     } else {
