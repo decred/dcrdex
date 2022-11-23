@@ -128,12 +128,6 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string,
 		return fmt.Errorf("error initializing dcrwallet+neutrino logging: %w", err)
 	}
 
-	logDir := filepath.Join(netDir, logDirName)
-	err := os.MkdirAll(logDir, 0744)
-	if err != nil {
-		return fmt.Errorf("error creating wallet directories: %w", err)
-	}
-
 	// timeout and recoverWindow arguments borrowed from btcwallet directly.
 	loader := wallet.NewLoader(net, walletDir, true, dbTimeout, 250)
 

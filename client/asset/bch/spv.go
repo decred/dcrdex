@@ -122,12 +122,6 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string,
 		return fmt.Errorf("error initializing bchwallet+neutrino logging: %w", err)
 	}
 
-	logDir := filepath.Join(netDir, logDirName)
-	err := os.MkdirAll(logDir, 0744)
-	if err != nil {
-		return fmt.Errorf("error creating wallet directories: %w", err)
-	}
-
 	loader := wallet.NewLoader(net, walletDir, true, 250)
 
 	pubPass := []byte(wallet.InsecurePubPassphrase)

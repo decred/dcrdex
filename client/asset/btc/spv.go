@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sync/atomic"
 	"time"
@@ -65,12 +64,6 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dataDir strin
 
 	if err := logNeutrino(netDir); err != nil {
 		return fmt.Errorf("error initializing btcwallet+neutrino logging: %w", err)
-	}
-
-	logDir := filepath.Join(netDir, logDirName)
-	err := os.MkdirAll(logDir, 0744)
-	if err != nil {
-		return fmt.Errorf("error creating wallet directories: %w", err)
 	}
 
 	loader := wallet.NewLoader(net, walletDir, true, dbTimeout, 250)
