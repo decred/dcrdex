@@ -96,6 +96,9 @@ func (source *commonRateSource) refreshRates(ctx context.Context, logger dex.Log
 	source.mtx.Lock()
 	defer source.mtx.Unlock()
 	for assetID, fiatRate := range fiatRates {
+		if fiatRate <= 0 {
+			continue
+		}
 		source.fiatRates[assetID] = &fiatRateInfo{
 			rate:       fiatRate,
 			lastUpdate: now,
@@ -132,7 +135,7 @@ func fetchCoinpaprikaRates(ctx context.Context, log dex.Logger, assets map[uint3
 
 		reqStr := fmt.Sprintf(coinpaprikaURL, coinpapSlug(sa.Symbol, sa.Info.Name))
 
-		if err := getInto(ctx, reqStr, res); err != nil {
+		if err := getRates(ctx, reqStr, res); err != nil {
 			log.Error(err)
 			continue
 		}
@@ -159,7 +162,7 @@ func fetchDcrdataRates(ctx context.Context, log dex.Logger, assets map[uint32]*S
 		BtcPrice float64 `json:"btcPrice"`
 	})
 
-	if err := getInto(ctx, dcrDataURL, res); err != nil {
+	if err := getRates(ctx, dcrDataURL, res); err != nil {
 		log.Error(err)
 		return nil
 	}
@@ -196,7 +199,7 @@ func fetchMessariRates(ctx context.Context, log dex.Logger, assets map[uint32]*S
 		slug := strings.ToLower(asset.Symbol)
 		reqStr := fmt.Sprintf(messariURL, slug)
 
-		if err := getInto(ctx, reqStr, res); err != nil {
+		if err := getRates(ctx, reqStr, res); err != nil {
 			log.Error(err)
 			continue
 		}
@@ -212,7 +215,7 @@ func coinpapSlug(symbol, name string) string {
 	return strings.ToLower(strings.ReplaceAll(slug, " ", "-"))
 }
 
-func getInto(ctx context.Context, url string, thing interface{}) error {
+func getRates(ctx context.Context, url string, thing interface{}) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err

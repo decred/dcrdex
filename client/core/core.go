@@ -9063,7 +9063,7 @@ func (c *Core) fiatConversions() map[uint32]float64 {
 		var sources int
 		for _, source := range c.fiatRateSources {
 			rateInfo := source.assetRate(assetID)
-			if rateInfo != nil && time.Since(rateInfo.lastUpdate) < fiatRateDataExpiry {
+			if rateInfo != nil && time.Since(rateInfo.lastUpdate) < fiatRateDataExpiry && rateInfo.rate > 0 {
 				sources++
 				rateSum += rateInfo.rate
 			}
