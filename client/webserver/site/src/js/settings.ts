@@ -39,7 +39,7 @@ export default class SettingsPage extends BasePage {
     this.fiatRateSources = Doc.applySelector(page.fiatRateSources, 'input[type=checkbox]')
 
     Doc.bind(page.darkMode, 'click', () => {
-      State.dark(page.darkMode.checked || false)
+      State.setCookie(State.DarkModeCK, page.darkMode.checked || false ? '1' : '0')
       if (page.darkMode.checked) {
         document.body.classList.add('dark')
       } else {
@@ -48,9 +48,7 @@ export default class SettingsPage extends BasePage {
     })
 
     Doc.bind(page.showPokes, 'click', () => {
-      const show = page.showPokes.checked || false
-      State.setCookie('popups', show ? '1' : '0')
-      app().showPopups = show
+      State.setCookie(State.PopupsCK, page.showPokes.checked || false ? '1' : '0')
     })
 
     page.commitHash.textContent = app().commitHash.substring(0, 7)

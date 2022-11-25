@@ -1,12 +1,14 @@
-const darkModeCK = 'darkMode'
-const authCK = 'dexauth'
-const popupsCK = 'popups'
-const pwKeyCK = 'sessionkey'
-
 // State is a set of static methods for working with the user state. It has
 // utilities for setting and retrieving cookies and storing user configuration
 // to localStorage.
 export default class State {
+  static DarkModeCK = 'darkMode'
+  static AuthCK = 'dexauth'
+  static PopupsCK = 'popups'
+  static PwKeyCK = 'sessionkey'
+  static LeftMarketDockCK = 'leftmarketdock'
+  static SelectedAssetCK = 'selectedAsset'
+
   static orderDisclaimerAckedLK = 'ordAck'
 
   static setCookie (cname: string, cvalue: string) {
@@ -28,26 +30,37 @@ export default class State {
     return null
   }
 
-  /* dark sets the dark-mode cookie. */
-  static dark (dark: boolean) {
-    this.setCookie(darkModeCK, dark ? '1' : '0')
-    if (dark) {
-      document.body.classList.add('dark')
-    } else {
-      document.body.classList.remove('dark')
-    }
-  }
-
   /*
    * isDark returns true if the dark-mode cookie is currently set to '1' = true.
    */
   static isDark () {
-    return document.cookie.split(';').filter((item) => item.includes(`${darkModeCK}=1`)).length
+    return document.cookie.split(';').filter((item) => item.includes(`${State.DarkModeCK}=1`)).length
   }
 
   /* passwordIsCached returns whether or not there is a cached password in the cookies. */
   static passwordIsCached () {
-    return !!this.getCookie(pwKeyCK)
+    return !!this.getCookie(State.PwKeyCK)
+  }
+
+  /* showLeftMarketDock returns whether or not user wants left market doc shown. */
+  static showLeftMarketDock () {
+    return this.getCookie(State.LeftMarketDockCK) === '1'
+  }
+
+  static removeAuthCK () {
+    document.cookie = `${State.AuthCK}=;expires=Thu, 01 Jan 1970 00:00:01 GMT;`
+  }
+
+  /*
+   * selectedAsset returns selected asset ID or null if none user hasn't selected one
+   * yet.
+   */
+  static selectedAsset (): number | null {
+    const assetIDStr = State.getCookie(State.SelectedAssetCK)
+    if (!assetIDStr) {
+      return null
+    }
+    return Number(assetIDStr)
   }
 
   /* store puts the key-value pair into Window.localStorage. */
@@ -58,10 +71,6 @@ export default class State {
   /* clearAllStore remove all the key-value pair in Window.localStorage. */
   static clearAllStore () {
     window.localStorage.clear()
-  }
-
-  static removeAuthCK () {
-    document.cookie = `${authCK}=;expires=Thu, 01 Jan 1970 00:00:01 GMT;`
   }
 
   /*
@@ -77,6 +86,7 @@ export default class State {
   }
 }
 
-// If the dark-mode cookie is not set, set it to dark mode on.
-if (State.getCookie(darkModeCK) === null) State.setCookie(darkModeCK, '1')
-if (State.getCookie(popupsCK) === null) State.setCookie(popupsCK, '1')
+// Setting defaults here, unless specific cookie value was already chosen by the user.
+if (State.getCookie(State.DarkModeCK) === null) State.setCookie(State.DarkModeCK, '1')
+if (State.getCookie(State.PopupsCK) === null) State.setCookie(State.PopupsCK, '1')
+if (State.getCookie(State.LeftMarketDockCK) === null) State.setCookie(State.LeftMarketDockCK, '1')

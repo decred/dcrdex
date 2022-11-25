@@ -108,7 +108,7 @@ export default class Application {
     this.commitHash = process.env.COMMITHASH || ''
     this.noteReceivers = []
     this.fiatRatesMap = {}
-    this.showPopups = State.getCookie('popups') === '1'
+    this.showPopups = State.getCookie(State.PopupsCK) === '1'
     console.log('Decred DEX Client App, Build', this.commitHash.substring(0, 7))
 
     // Loggers can be enabled by setting a truthy value to the loggerID using

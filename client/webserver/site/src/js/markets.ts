@@ -455,27 +455,24 @@ export default class MarketsPage extends BasePage {
     this.stats = [{ row: stats0, tmpl: Doc.parseTemplate(stats0) }, { row: stats1, tmpl: Doc.parseTemplate(stats1) }]
 
     const closeMarketsList = () => {
-      page.leftColumnV1.classList.remove('default')
-      page.leftColumnV1.classList.add('stashed')
+      State.setCookie(State.LeftMarketDockCK, '0')
+      page.leftMarketDock.classList.remove('default')
+      page.leftMarketDock.classList.add('stashed')
       for (const s of this.stats) s.row.classList.remove('listopen')
     }
-
     const openMarketsList = () => {
-      page.leftColumnV1.classList.remove('default', 'stashed')
+      State.setCookie(State.LeftMarketDockCK, '1')
+      page.leftMarketDock.classList.remove('default', 'stashed')
       for (const s of this.stats) s.row.classList.add('listopen')
     }
-
     Doc.bind(page.leftHider, 'click', () => closeMarketsList())
-
     Doc.bind(page.marketReopener, 'click', () => openMarketsList())
-
     for (const s of this.stats) {
       Doc.bind(s.tmpl.marketSelect, 'click', () => {
-        if (page.leftColumnV1.clientWidth === 0) openMarketsList()
+        if (page.leftMarketDock.clientWidth === 0) openMarketsList()
         else closeMarketsList()
       })
     }
-
     this.marketList = new MarketList(page.marketListV1)
     // Prepare the list of markets.
     for (const row of this.marketList.markets) {
@@ -483,6 +480,9 @@ export default class MarketsPage extends BasePage {
         this.startLoadingAnimations()
         this.setMarket(row.mkt.xc.host, row.mkt.baseid, row.mkt.quoteid)
       })
+    }
+    if (!State.showLeftMarketDock()) { // It is shown by default, hiding if necessary.
+      closeMarketsList()
     }
 
     // Notification filters.
