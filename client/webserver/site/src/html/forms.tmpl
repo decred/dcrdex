@@ -67,11 +67,11 @@
       <label for="newWalletPass" class="form-label pt-3 ps-1 mb-1">[[[Wallet Password]]]
         <span class="ico-info" data-tooltip="[[[w_password_tooltip]]]"></span>
       </label>
-      <input type="password" class="form-control select" data-tmpl="newWalletPass" autocomplete="off">
+      <input type="password" class="form-control select" data-tmpl="newWalletPass" autocomplete="current-password">
     </div>
     <div class="hide-pw col-11 p-0">
       <label for="nwAppPass" class="form-label pt-3 ps-1 mb-1">[[[App Password]]]</label>
-      <input type="password" class="form-control select" id="nwAppPass" data-tmpl="appPass" autocomplete="off">
+      <input type="password" class="form-control select" id="nwAppPass" data-tmpl="appPass" autocomplete="current-password">
     </div>
     <span class="col-3 hide-pw"></span> {{/* flex dummy */}}
     <div class="d-grid align-items-end col-10 p-0 mt-4">
@@ -110,7 +110,7 @@
 <div id="uwAppPassBox" class="my-3">
   <label for="uwAppPass" class="form-label ps-1">[[[App Password]]]</label>
   <div class="fs14 px-1 mb-1">[[[app_password_reminder]]]</div>
-  <input type="password" class="form-control select" id="uwAppPass" autocomplete="off">
+  <input type="password" class="form-control select" id="uwAppPass" autocomplete="current-password">
 </div>
 <div id="submitUnlockDiv" class="d-flex justify-content-end">
   <button id="submitUnlock" type="submit" class="col-8 justify-content-center fs15 bg2 selected">[[[Unlock]]]</button>
@@ -405,7 +405,7 @@
 <div class="d-flex flex-row align-items-end {{if $passwordIsCached}}justify-content-end{{end}} pb-4">
   <div class="col-12 p-0 {{if $passwordIsCached}}d-hide{{end}}">
     <label for="cancelPass" class="form-label pt-3 mb-1">[[[Password]]]</label>
-    <input type="password" class="form-control select" id="cancelPass" autocomplete="off">
+    <input type="password" class="form-control select" id="cancelPass" autocomplete="current-password">
   </div>
   <div class="col-12 py-1 {{if not $passwordIsCached}}ps-5{{end}} position-relative">
     <button id="cancelSubmit" type="button" class="w-100 fs15 bg2 selected position-relative d-inline-block">[[[Submit]]]</button>
@@ -439,7 +439,7 @@
     <div class="d-flex flex-row align-items-end {{if $passwordIsCached}}justify-content-end{{end}} pb-4">
       <div class="col-12 p-0 {{if $passwordIsCached}}d-hide{{end}}">
         <label for="acceleratePass" class="pt-3 mb-1">[[[Password]]]</label>
-        <input type="password" class="form-control select" id="acceleratePass" autocomplete="off">
+        <input type="password" class="form-control select" id="acceleratePass" autocomplete="current-password">
       </div>
       <div class="col-12 pt-2 {{if not $passwordIsCached}}px-5{{end}}">
         <button id="accelerateSubmit" type="button" class="w-100 fs15 bg2 selected">[[[Submit]]]</button>

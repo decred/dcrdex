@@ -334,14 +334,14 @@ export default class MarketsPage extends BasePage {
     // Main order form.
     bindForm(page.orderForm, page.submitBttn, async () => { this.stepSubmit() })
     // Order verification form.
-    bindForm(page.verifyForm, page.vSubmit, async () => { this.submitOrder() })
+    bindForm(page.verifyAuthForm, page.vSubmit, async () => { this.submitOrder() })
     // Unlock for order estimation
-    Doc.bind(page.vUnlockSubmit, 'click', async () => { this.submitEstimateUnlock() })
+    bindForm(page.vUnlockPreorderForm, page.vUnlockSubmit, async () => { this.submitEstimateUnlock() })
     // Cancel order form.
     bindForm(page.cancelForm, page.cancelSubmit, async () => { this.submitCancel() })
     // Order detail view.
     Doc.bind(page.vFeeDetails, 'click', () => this.showForm(page.vDetailPane))
-    Doc.bind(page.closeDetailPane, 'click', () => this.showVerifyForm())
+    Doc.bind(page.closeDetailPane, 'click', () => this.showVerifyOrderView())
     // // Bind active orders list's header sort events.
     page.recentMatchesTable.querySelectorAll('[data-ordercol]')
       .forEach((th: HTMLElement) => bind(
@@ -389,7 +389,7 @@ export default class MarketsPage extends BasePage {
 
     // If the user clicks outside of a form, it should close the page overlay.
     bind(page.forms, 'mousedown', (e: MouseEvent) => {
-      if (Doc.isDisplayed(page.vDetailPane) && !Doc.mouseInElement(e, page.vDetailPane)) return this.showVerifyForm()
+      if (Doc.isDisplayed(page.vDetailPane) && !Doc.mouseInElement(e, page.vDetailPane)) return this.showVerifyOrderView()
       if (!Doc.mouseInElement(e, this.currentForm)) {
         closePopups()
       }
@@ -415,6 +415,9 @@ export default class MarketsPage extends BasePage {
     bind(page.mktBuyField, 'keyup', () => { this.marketBuyChanged() })
     bind(page.rateField, 'change', () => { this.rateFieldChanged() })
     bind(page.rateField, 'keyup', () => { this.previewQuoteAmt(true) })
+    // Verify order view.
+    bind(page.vPass, 'input', () => { this.vPassInputHandler() })
+    bind(page.vUnlockPass, 'input', () => { this.vUnlockPassInputHandler() })
 
     // Market search input bindings.
     bind(page.marketSearchV1, 'change', () => { this.filterMarkets() })
@@ -947,6 +950,14 @@ export default class MarketsPage extends BasePage {
     page.orderPreview.textContent = intl.prep(intl.ID_ORDER_PREVIEW, { total, asset: quoteAsset.symbol.toUpperCase() })
     if (this.isSell()) this.preSell()
     else this.preBuy()
+  }
+
+  vPassInputHandler () {
+    Doc.hide(this.page.verifyAuthFormErr)
+  }
+
+  vUnlockPassInputHandler () {
+    Doc.hide(this.page.vPreorderErr)
   }
 
   /**
@@ -1518,7 +1529,7 @@ export default class MarketsPage extends BasePage {
       }
     }
 
-    Doc.hide(page.vUnlockPreorder, page.vPreorderErr)
+    Doc.hide(page.vUnlockPreorderForm, page.vPreorderErr)
     Doc.show(page.vPreorder)
 
     page.vBuySell.textContent = isSell ? intl.prep(intl.ID_SELLING) : intl.prep(intl.ID_BUYING)
@@ -1569,14 +1580,14 @@ export default class MarketsPage extends BasePage {
       page.vSubmit.classList.add(buyBtnClass)
       page.vSubmit.classList.remove(sellBtnClass)
     }
-    this.showVerifyForm()
+    this.showVerifyOrderView()
     page.vPass.focus()
 
     if (baseAsset.wallet.open && quoteAsset.wallet.open) this.preOrder(order)
     else {
       Doc.hide(page.vPreorder)
       if (State.passwordIsCached()) this.unlockWalletsForEstimates('')
-      else Doc.show(page.vUnlockPreorder)
+      else Doc.show(page.vUnlockPreorderForm)
     }
   }
 
@@ -1590,11 +1601,11 @@ export default class MarketsPage extends BasePage {
     }
   }
 
-  /* showVerifyForm displays form to verify an order */
-  async showVerifyForm () {
+  /* showVerifyOrderView displays form to verify an order */
+  async showVerifyOrderView () {
     const page = this.page
-    Doc.hide(page.vErr)
-    this.showForm(page.verifyForm)
+    Doc.hide(page.verifyAuthFormErr)
+    this.showForm(page.verifyOrderView)
   }
 
   /*
@@ -1612,12 +1623,12 @@ export default class MarketsPage extends BasePage {
    */
   async unlockWalletsForEstimates (pw: string) {
     const page = this.page
-    const loaded = app().loading(page.verifyForm)
+    const loaded = app().loading(page.verifyOrderView)
     const err = await this.attemptWalletUnlock(pw)
     loaded()
     if (err) return this.setPreorderErr(err)
     Doc.show(page.vPreorder)
-    Doc.hide(page.vUnlockPreorder)
+    Doc.hide(page.vUnlockPreorderForm)
     this.preOrder(this.parseOrder())
   }
 
@@ -1651,7 +1662,7 @@ export default class MarketsPage extends BasePage {
     if (cached) return cached
 
     Doc.hide(page.vPreorderErr)
-    const loaded = app().loading(page.verifyForm)
+    const loaded = app().loading(page.verifyOrderView)
     const res = await postJSON('/api/preorder', wireOrder(order))
     loaded()
     if (!app().checkResponse(res)) return { err: res.msg }
@@ -2010,7 +2021,7 @@ export default class MarketsPage extends BasePage {
    */
   async submitOrder () {
     const page = this.page
-    Doc.hide(page.orderErr, page.vErr)
+    Doc.hide(page.orderErr, page.verifyAuthFormErr)
     const order = this.currentOrder
     const pw = page.vPass.value
     page.vPass.value = ''
@@ -2028,8 +2039,8 @@ export default class MarketsPage extends BasePage {
     page.vLoader.classList.add('d-hide')
     // If error, display error on confirmation modal.
     if (!app().checkResponse(res)) {
-      page.vErr.textContent = res.msg
-      Doc.show(page.vErr)
+      page.verifyAuthFormErr.textContent = res.msg
+      Doc.show(page.verifyAuthFormErr)
       return
     }
     // Hide confirmation modal only on success.

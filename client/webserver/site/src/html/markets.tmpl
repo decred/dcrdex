@@ -472,72 +472,73 @@
     </form>
 
     {{- /* VERIFY FORM */ -}}
-      <form class="position-relative fs16 text-center d-hide" id="verifyForm" autocomplete="off">
-        <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
-        <div class="py-1 text-center fs18 position-relative header buygreen-bg" id="vHeader">
-          <span id="vBuySell"></span> <span data-unit="base"></span>
-        </div>
-        <div class="d-flex justify-content-between align-items-center py-2 fs13">
-          <span id="vOrderType" class="grey"></span>
-          <span id="vOrderHost" class="grey"></span>
-        </div>
+    <div class="position-relative fs16 text-center d-hide" id="verifyOrderView">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="py-1 text-center fs18 position-relative header buygreen-bg" id="vHeader">
+        <span id="vBuySell"></span> <span data-unit="base"></span>
+      </div>
+      <div class="d-flex justify-content-between align-items-center py-2 fs13">
+        <span id="vOrderType" class="grey"></span>
+        <span id="vOrderHost" class="grey"></span>
+      </div>
 
-        <hr class="dashed mt-0 mb-2">
+      <hr class="dashed mt-0 mb-2">
 
-        {{- /* Price, Quantity, Total Section */ -}}
-        <div id="verifyLimit">
-          <div class="d-flex align-items-center justify-content-between">
-            <span class="grey fs17 flex-grow-1 text-start">[[[:title:price]]]</span>
-            <span id="vRate" class="fs18 demi"></span>
-            <span class="grey fs14 ms-2">
-              <sup data-unit="quote"></sup>/<sub data-unit="base"></sub>
-            </span>
-          </div>
-          <div class="d-flex align-items-center mt-1">
-            <span class="grey fs17 flex-grow-1 text-start">[[[Quantity]]]</span>
-            <span id="vQty" class="fs18 demi"></span>
-            <span data-unit="base" class="grey fs14 ms-2"></span>
-          </div>
-          <div class="d-flex align-items-center mt-1">
-            <span class="grey fs17 flex-grow-1 text-start">[[[Total]]]</span>
-            <span id="vTotal" class="fs18 demi"></span>
-            <span data-unit="quote" class="grey fs14 ms-2"></span>
-          </div>
-          <span class="d-flex d-hide justify-content-end grey fs14">
-          ~<span id="vFiatTotal" class="mx-1"></span>USD
+      {{- /* Price, Quantity, Total Section */ -}}
+      <div id="verifyLimit">
+        <div class="d-flex align-items-center justify-content-between">
+          <span class="grey fs17 flex-grow-1 text-start">[[[:title:price]]]</span>
+          <span id="vRate" class="fs18 demi"></span>
+          <span class="grey fs14 ms-2">
+            <sup data-unit="quote"></sup>/<sub data-unit="base"></sub>
           </span>
         </div>
-        <div id="verifyMarket">
-          <div class="d-flex align-items-center justify-content-between">
-            <span class="grey fs17 flex-grow-1 text-start">[[[Trading]]]</span>
-            <span id="vmFromTotal" class="fs18 demi"></span>
-            <span id="vmFromAsset" class="grey fs14 ms-2"></span>
-          </div>
-          <span class="d-flex d-hide justify-content-end grey fs14">
-           ~<span id="vmFromTotalFiat" class="mx-1"></span>USD
-          </span>
-          <div id="vMarketEstimate" class="d-flex align-items-center justify-content-between">
-            <span class="grey fs17 flex-grow-1 text-start">
-              [[[Receiving Approximately]]]
-              <span class="ico-info fs12" data-tooltip="[[[verify_market]]]"></span>
-            </span>
-            <span id="vmToTotal" class="fs18 demi"></span>
-            <span id="vmToAsset" class="grey fs14 ms-2"></span>
-          </div>
-          <span class="d-flex d-hide justify-content-end grey fs14">
-           ~<span id="vmTotalFiat" class="mx-1"></span>USD
-          </span>
+        <div class="d-flex align-items-center mt-1">
+          <span class="grey fs17 flex-grow-1 text-start">[[[Quantity]]]</span>
+          <span id="vQty" class="fs18 demi"></span>
+          <span data-unit="base" class="grey fs14 ms-2"></span>
         </div>
+        <div class="d-flex align-items-center mt-1">
+          <span class="grey fs17 flex-grow-1 text-start">[[[Total]]]</span>
+          <span id="vTotal" class="fs18 demi"></span>
+          <span data-unit="quote" class="grey fs14 ms-2"></span>
+        </div>
+        <span class="d-flex d-hide justify-content-end grey fs14">
+        ~<span id="vFiatTotal" class="mx-1"></span>USD
+        </span>
+      </div>
+      <div id="verifyMarket">
+        <div class="d-flex align-items-center justify-content-between">
+          <span class="grey fs17 flex-grow-1 text-start">[[[Trading]]]</span>
+          <span id="vmFromTotal" class="fs18 demi"></span>
+          <span id="vmFromAsset" class="grey fs14 ms-2"></span>
+        </div>
+        <span class="d-flex d-hide justify-content-end grey fs14">
+         ~<span id="vmFromTotalFiat" class="mx-1"></span>USD
+        </span>
+        <div id="vMarketEstimate" class="d-flex align-items-center justify-content-between">
+          <span class="grey fs17 flex-grow-1 text-start">
+            [[[Receiving Approximately]]]
+            <span class="ico-info fs12" data-tooltip="[[[verify_market]]]"></span>
+          </span>
+          <span id="vmToTotal" class="fs18 demi"></span>
+          <span id="vmToAsset" class="grey fs14 ms-2"></span>
+        </div>
+        <span class="d-flex d-hide justify-content-end grey fs14">
+         ~<span id="vmTotalFiat" class="mx-1"></span>USD
+        </span>
+      </div>
 
-        <hr class="dashed my-2">
+      <hr class="dashed my-2">
 
-        {{- /* Auth Section */ -}}
+      {{- /* Auth Section */ -}}
+      <form id="verifyAuthForm">
         {{$passwordIsCached := .UserInfo.PasswordIsCached}}
         <div class="fs16 text-center {{if $passwordIsCached}}d-hide{{end}}">[[[auth_order_app_pw]]]</div>
         <div class="d-flex mt-3 {{if $passwordIsCached}}justify-content-end{{end}}" >
           <div class="col-12 p-0 text-start {{if $passwordIsCached}}d-hide{{end}}">
             <label for="vPass" class="form-label ps-1 mb-1">[[[Password]]]</label>
-            <input type="password" class="form-control select" id="vPass">
+            <input type="password" class="form-control select" id="vPass" autocomplete="current-password">
           </div>
           <div class="col-12 p-0 d-flex justify-content-end">
             <button id="vSubmit" type="button" class="w-75 mt-1 justify-content-center fs15 selected">
@@ -548,73 +549,75 @@
               <div class="ico-spinner spinner"></div>
             </div>
           </div>
+          <input type="submit" hidden /> <!-- To make Enter = vSubmit press -->
         </div>
-        <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="vErr"></div>{{- /* End Auth Section */ -}}
+        <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="verifyAuthFormErr"></div>{{- /* End Auth Section */ -}}
+      </form>
 
-        <div id="vPreorder">
-          <hr class="dashed mb-2 mt-3">
+      <div id="vPreorder">
+        <hr class="dashed mb-2 mt-3">
 
-          <div class="d-flex justify-content-between align-items-center">
-            <span class="grey fs18">
-              [[[Fee Projection]]]
-              <span class="ico-info fs12" data-tooltip="[[[fee_projection_tooltip]]]"></span>
-            </span>
-            <span class="grey fs14 underline pointer hoverbg" id="vFeeDetails">[[[details]]]</span>
-          </div>
+        <div class="d-flex justify-content-between align-items-center">
+          <span class="grey fs18">
+            [[[Fee Projection]]]
+            <span class="ico-info fs12" data-tooltip="[[[fee_projection_tooltip]]]"></span>
+          </span>
+          <span class="grey fs14 underline pointer hoverbg" id="vFeeDetails">[[[details]]]</span>
+        </div>
 
-          <div class="py-1 d-flex align-items-center justify-content-center fs18" id="vFeeSummary">
-            <span id="vFeeSummaryLow"></span>
-            <span class="fs15">%</span>
-            <span class="fs15 px-2">[[[to]]]</span>
-            <span id="vFeeSummaryHigh"></span>
-            <span class="fs15">%</span>
-          </div>
+        <div class="py-1 d-flex align-items-center justify-content-center fs18" id="vFeeSummary">
+          <span id="vFeeSummaryLow"></span>
+          <span class="fs15">%</span>
+          <span class="fs15 px-2">[[[to]]]</span>
+          <span id="vFeeSummaryHigh"></span>
+          <span class="fs15">%</span>
+        </div>
 
-          <hr class="dashed mb-2 mt-3">
+        <hr class="dashed mb-2 mt-3">
 
-          <div class="grey fs18 d-flex justify-content-between align-items-center">
-            [[[Options]]]
-            <span class="grey fs14 underline pointer hoverbg" id="showAdvancedOptions">
-              [[[show advanced options]]]
-            </span>
-            <span class="grey fs14 underline pointer hoverbg d-hide" id="hideAdvancedOptions">
-              [[[hide advanced options]]]
-            </span>
-          </div>
+        <div class="grey fs18 d-flex justify-content-between align-items-center">
+          [[[Options]]]
+          <span class="grey fs14 underline pointer hoverbg" id="showAdvancedOptions">
+            [[[show advanced options]]]
+          </span>
+          <span class="grey fs14 underline pointer hoverbg d-hide" id="hideAdvancedOptions">
+            [[[hide advanced options]]]
+          </span>
+        </div>
 
-          <div id="vDefaultOrderOpts">
-            {{template "orderOptionTemplates"}}
-          </div>
-          <div id="vOtherOrderOpts" class="d-hide"></div>
-        </div> {{- /* END id="vPreorder" */ -}}
+        <div id="vDefaultOrderOpts">
+          {{template "orderOptionTemplates"}}
+        </div>
+        <div id="vOtherOrderOpts" class="d-hide"></div>
+      </div> {{- /* END id="vPreorder" */ -}}
 
-        <div id="vUnlockPreorder">
-          <hr class="dashed mb-2 mt-3">
-          <div class="flex-center flex-column my-2 p-3">
-            <span class="ico-locked my-2"></span>
-            <span>[[[unlock_for_details]]]</span>
-            <div class="d-flex align-items-stretch w-100">
-              <div class="col-12 p-0 text-start">
-                <label for="vUnlockPass" class="form-label ps-1 mb-1">[[[Password]]]</label>
-                <input type="password" class="form-control select w-100" id="vUnlockPass">
-              </div>
-              <div class="col-12 p-0 d-flex align-items-end justify-content-end">
-                <button type="button" id="vUnlockSubmit" class="selected buygreen-bg">[[[Unlock]]]</button>
-              </div>
+      <form id="vUnlockPreorderForm">
+        <hr class="dashed mb-2 mt-3">
+        <div class="flex-center flex-column my-2 p-3">
+          <span class="ico-locked my-2"></span>
+          <span>[[[unlock_for_details]]]</span>
+          <div class="d-flex align-items-stretch w-100">
+            <div class="col-12 p-0 text-start">
+              <label for="vUnlockPass" class="form-label ps-1 mb-1">[[[Password]]]</label>
+              <input type="password" class="form-control select w-100" id="vUnlockPass" autocomplete="current-password">
+            </div>
+            <div class="col-12 p-0 d-flex align-items-end justify-content-end">
+              <button type="button" id="vUnlockSubmit" class="selected buygreen-bg">[[[Unlock]]]</button>
             </div>
           </div>
         </div>
-
-        <div id="vPreorderErr" class="mt-2">
-          [[[estimate_unavailable]]]
-          <span class="ico-info red fs12" id="vPreorderErrTip" data-tooltip=" "></span>
-        </div>
-
-        <hr class="dashed my-2">
-        <div class="disclaimer fs14">
-          [[[order_disclaimer]]]
-        </div>
+        <input type="submit" hidden /> <!-- To make Enter = vUnlockSubmit press -->
       </form>
+
+      <div id="vPreorderErr" class="mt-2">
+        [[[estimate_unavailable]]]
+        <span class="ico-info red fs12" id="vPreorderErrTip" data-tooltip=" "></span>
+      </div>
+
+      <hr class="dashed my-2">
+      <div class="disclaimer fs14">
+        [[[order_disclaimer]]]
+      </div>
 
       {{- /* FEE DETAIL BREAKDOWN */ -}}
       <form id="vDetailPane" class="d-hide fs16 pb-2">
@@ -678,17 +681,16 @@
 
         </div>
       </form>
-
-      {{- /* CANCEL ORDER FORM */ -}}
-      <form class="d-hide" id="cancelForm" autocomplete="off">
-        {{template "cancelOrderForm" .}}
-      </form>
-      <form class="d-hide" id="accelerateForm">
-        {{template "accelerateForm" .}}
-      </form>
     </div>
-  </div>
 
+    {{- /* CANCEL ORDER FORM */ -}}
+    <form class="d-hide" id="cancelForm" autocomplete="off">
+      {{template "cancelOrderForm" .}}
+    </form>
+    <form class="d-hide" id="accelerateForm">
+      {{template "accelerateForm" .}}
+    </form>
+  </div>
 </div>
 {{template "bottom"}}
 {{end}}
