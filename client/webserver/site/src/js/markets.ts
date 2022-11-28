@@ -213,8 +213,10 @@ export default class MarketsPage extends BasePage {
       click: (x: number) => {
         // Must adjust chosen value here since it might not be conforming to rate-step.
         this.page.rateField.value = String(x)
-        const [,, adjRate] = this.parseRateInput()
-        this.reportDepthClick(adjRate)
+        const [inputValid,, adjRate] = this.parseRateInput()
+        if (inputValid) {
+          this.reportDepthClick(adjRate)
+        }
       },
       volume: (r: VolumeReport) => { this.reportDepthVolume(r) },
       mouse: (r: MouseReport) => { this.reportDepthMouse(r) },
@@ -422,18 +424,12 @@ export default class MarketsPage extends BasePage {
 
     // Limit order form: event listeners for handling user interactions.
     bind(page.rateField, 'change', () => { this.rateFieldChangeHandler() })
-    bind(page.rateField, 'keyup', () => { this.rateFieldKeyupHandler() })
     bind(page.lotField, 'change', () => { this.lotFieldChangeHandler() })
-    bind(page.lotField, 'keyup', () => { this.lotFieldKeyupHandler() })
     bind(page.qtyField, 'change', () => { this.qtyFieldChangeHandler() })
-    bind(page.qtyField, 'keyup', () => { this.qtyFieldKeyupHandler() })
     // Market order form: event listeners for handling user interactions.
     bind(page.mktBuyField, 'change', () => { this.mktBuyFieldHandler() })
-    bind(page.mktBuyField, 'keyup', () => { this.mktBuyFieldHandler() })
     bind(page.mktSellLotField, 'change', () => { this.mktSellLotFieldChangeHandler() })
-    bind(page.mktSellLotField, 'keyup', () => { this.mktSellLotFieldKeyupHandler() })
     bind(page.mktSellQtyField, 'change', () => { this.mktSellQtyFieldChangeHandler() })
-    bind(page.mktSellQtyField, 'keyup', () => { this.mktSellQtyFieldKeyupHandler() })
 
     // Market search input bindings.
     bind(page.marketSearchV1, 'change', () => { this.filterMarkets() })
@@ -674,7 +670,7 @@ export default class MarketsPage extends BasePage {
       const lot = '1'
       const lotSize = String(this.market.cfg.lotsize / this.market.baseUnitInfo.conventional.conversionFactor)
       const rateStep = String(this.market.cfg.ratestep / this.market.rateConversionFactor)
-      const [,, rate] = this.parseRateInput() // will return default adjusted rate.
+      const rate = this.defaultRate()
 
       // Reset limit-order form inputs to defaults.
       page.lotField.min = lot
@@ -2214,11 +2210,17 @@ export default class MarketsPage extends BasePage {
     this.balanceWgt.updateAsset(this.openAsset.id)
   }
 
-  lotFieldKeyupHandler () {
+  lotFieldChangeHandler () {
     const page = this.page
 
-    const [inputValid, adjusted,, adjQty] = this.parseLotInput(page.lotField.value)
+    Doc.hide(page.orderErr)
+
+    const [inputValid, adjusted, adjLots, adjQty] = this.parseLotInput(page.lotField.value)
     if (!inputValid || adjusted) {
+      // Disable submit button temporarily (that additionally draws his
+      // attention to order-form) to prevent user clicking on it while input
+      // auto-adjusting is in progress. Otherwise, he might not notice the rounding.
+      animateClick(page.submitBttn, page.submitBttnLoader)
       // Let the user know that lot value he's entered was rounded down to the
       // nearest integer number.
       this.animateErrors(highlightOutlineRed(page.lotField), highlightBackgroundRed(page.lotSizeBox))
@@ -2230,61 +2232,11 @@ export default class MarketsPage extends BasePage {
       return
     }
     // Lots and quantity fields are tightly coupled to each other, when one is
-    // changed, we need to update the other one as well. But we don't want to
-    // do this in keyup handler to let the user preview the result with the value
-    // he actually entered (not the one he gets after rounding down to lot size).
-    page.qtyField.value = String(adjQty)
-
-    this.previewTotal()
-  }
-
-  lotFieldChangeHandler () {
-    const page = this.page
-
-    Doc.hide(page.orderErr)
-
-    const [inputValid, adjusted, adjLots, adjQty] = this.parseLotInput(page.lotField.value)
-    if (!inputValid) {
-      // Disable submit button temporarily (that additionally draws his
-      // attention to order-form) to prevent user clicking on it while input
-      // auto-adjusting is in progress. Otherwise, he might not notice the rounding.
-      animateClick(page.submitBttn, page.submitBttnLoader)
-    }
-    if (!inputValid || adjusted) {
-      // Let the user know that lot value he's entered was rounded down to the
-      // nearest integer number.
-      this.animateErrors(highlightOutlineRed(page.lotField), highlightBackgroundRed(page.lotSizeBox))
-    }
-    // Lots and quantity fields are tightly coupled to each other, when one is
     // changed, we need to update the other one as well.
     page.lotField.value = String(adjLots)
     page.qtyField.value = String(adjQty)
 
     this.previewTotal()
-  }
-
-  mktSellLotFieldKeyupHandler () {
-    const page = this.page
-
-    const [inputValid, adjusted,, adjQty] = this.parseLotInput(page.mktSellLotField.value)
-    if (!inputValid || adjusted) {
-      // Let the user know that lot value he's entered was rounded down to the
-      // nearest integer number.
-      this.animateErrors(highlightOutlineRed(page.mktSellLotField), highlightBackgroundRed(page.mktSellLotSizeBox))
-    }
-    if (!inputValid) {
-      page.mktSellTotalPreview.textContent = ''
-      page.mktSellLotField.value = ''
-      page.mktSellQtyField.value = ''
-      return
-    }
-    // Lots and quantity fields are tightly coupled to each other, when one is
-    // changed, we need to update the other one as well. But we don't want to
-    // do this in keyup handler to let the user preview the result with the value
-    // he actually entered (not the one he gets after rounding down to lot size).
-    page.mktSellQtyField.value = String(adjQty)
-
-    this.previewMktSellTotal(adjQty)
   }
 
   mktSellLotFieldChangeHandler () {
@@ -2293,16 +2245,20 @@ export default class MarketsPage extends BasePage {
     Doc.hide(page.orderErr)
 
     const [inputValid, adjusted, adjLots, adjQty] = this.parseLotInput(page.mktSellLotField.value)
-    if (!inputValid) {
+    if (!inputValid || adjusted) {
       // Disable submit button temporarily (that additionally draws his
       // attention to order-form) to prevent user clicking on it while input
       // auto-adjusting is in progress. Otherwise, he might not notice the rounding.
       animateClick(page.submitBttn, page.submitBttnLoader)
-    }
-    if (!inputValid || adjusted) {
       // Let the user know that lot value he's entered was rounded down to the
       // nearest integer number.
       this.animateErrors(highlightOutlineRed(page.mktSellLotField), highlightBackgroundRed(page.mktSellLotSizeBox))
+    }
+    if (!inputValid) {
+      page.mktSellTotalPreview.value = ''
+      page.mktSellLotField.value = ''
+      page.mktSellQtyField.value = ''
+      return
     }
     // Lots and quantity fields are tightly coupled to each other, when one is
     // changed, we need to update the other one as well.
@@ -2337,13 +2293,17 @@ export default class MarketsPage extends BasePage {
     return [true, rounded, lotsAdj, adjQty]
   }
 
-  qtyFieldKeyupHandler () {
+  qtyFieldChangeHandler () {
     const page = this.page
 
     Doc.hide(page.orderErr)
 
-    const [inputValid, adjusted, adjLots] = this.parseQtyInput(page.qtyField.value)
+    const [inputValid, adjusted, adjLots, adjQty] = this.parseQtyInput(page.qtyField.value)
     if (!inputValid || adjusted) {
+      // Disable submit button temporarily (that additionally draws his
+      // attention to order-form) to prevent user clicking on it while input
+      // auto-adjusting is in progress. Otherwise, he might not notice the rounding.
+      animateClick(page.submitBttn, page.submitBttnLoader)
       // Let the user know that quantity he's entered was rounded down.
       this.animateErrors(highlightOutlineRed(page.qtyField), highlightBackgroundRed(page.lotSizeBox))
     }
@@ -2354,61 +2314,11 @@ export default class MarketsPage extends BasePage {
       return
     }
     // Lots and quantity fields are tightly coupled to each other, when one is
-    // changed, we need to update the other one as well. But we don't want to
-    // do this in keyup handler to let the user preview the result with the value
-    // he actually entered (not the one he gets after rounding down to lot size).
-    page.lotField.value = String(adjLots)
-
-    this.previewTotal()
-  }
-
-  qtyFieldChangeHandler () {
-    const page = this.page
-
-    Doc.hide(page.orderErr)
-
-    const [inputValid, adjusted, adjLots, adjQty] = this.parseQtyInput(page.qtyField.value)
-    if (!inputValid) {
-      // Disable submit button temporarily (that additionally draws his
-      // attention to order-form) to prevent user clicking on it while input
-      // auto-adjusting is in progress. Otherwise, he might not notice the rounding.
-      animateClick(page.submitBttn, page.submitBttnLoader)
-    }
-    if (!inputValid || adjusted) {
-      // Let the user know that quantity he's entered was rounded down.
-      this.animateErrors(highlightOutlineRed(page.qtyField), highlightBackgroundRed(page.lotSizeBox))
-    }
-    // Lots and quantity fields are tightly coupled to each other, when one is
     // changed, we need to update the other one as well.
     page.lotField.value = String(adjLots)
     page.qtyField.value = String(adjQty)
 
     this.previewTotal()
-  }
-
-  mktSellQtyFieldKeyupHandler () {
-    const page = this.page
-
-    Doc.hide(page.orderErr)
-
-    const [inputValid, adjusted, adjLots, adjQty] = this.parseQtyInput(page.mktSellQtyField.value)
-    if (!inputValid || adjusted) {
-      // Let the user know that quantity he's entered was rounded down.
-      this.animateErrors(highlightOutlineRed(page.mktSellQtyField), highlightBackgroundRed(page.mktSellLotSizeBox))
-    }
-    if (!inputValid) {
-      page.mktSellTotalPreview.textContent = ''
-      page.mktSellLotField.value = ''
-      page.mktSellQtyField.value = ''
-      return
-    }
-    // Lots and quantity fields are tightly coupled to each other, when one is
-    // changed, we need to update the other one as well. But we don't want to
-    // do this in keyup handler to let the user preview the result with the value
-    // he actually entered (not the one he gets after rounding down to lot size).
-    page.mktSellLotField.value = String(adjLots)
-
-    this.previewMktSellTotal(adjQty)
   }
 
   mktSellQtyFieldChangeHandler () {
@@ -2417,15 +2327,19 @@ export default class MarketsPage extends BasePage {
     Doc.hide(page.orderErr)
 
     const [inputValid, adjusted, adjLots, adjQty] = this.parseQtyInput(page.mktSellQtyField.value)
-    if (!inputValid) {
+    if (!inputValid || adjusted) {
       // Disable submit button temporarily (that additionally draws his
       // attention to order-form) to prevent user clicking on it while input
       // auto-adjusting is in progress. Otherwise, he might not notice the rounding.
       animateClick(page.submitBttn, page.submitBttnLoader)
-    }
-    if (!inputValid || adjusted) {
       // Let the user know that quantity he's entered was rounded down.
       this.animateErrors(highlightOutlineRed(page.mktSellQtyField), highlightBackgroundRed(page.mktSellLotSizeBox))
+    }
+    if (!inputValid) {
+      page.mktSellTotalPreview.value = ''
+      page.mktSellLotField.value = ''
+      page.mktSellQtyField.value = ''
+      return
     }
     // Lots and quantity fields are tightly coupled to each other, when one is
     // changed, we need to update the other one as well.
@@ -2448,7 +2362,7 @@ export default class MarketsPage extends BasePage {
     const { market: { baseUnitInfo: bui, cfg: { lotsize: lotSize } } } = this
 
     const qtyRawAtom = convertToAtoms(value || '', bui.conventional.conversionFactor)
-    if (isNaN(qtyRawAtom) || qtyRawAtom < 1) {
+    if (isNaN(qtyRawAtom) || qtyRawAtom < lotSize) {
       return [false, false, 0, 0]
     }
 
@@ -2462,8 +2376,8 @@ export default class MarketsPage extends BasePage {
   }
 
   /*
-   * marketBuyChanged is attached to the keyup and change events of the quantity
-   * input for the market-buy form.
+   * marketBuyChanged is attached to the change events of the quantity input
+   * for the market-buy form.
    */
   mktBuyFieldHandler () {
     const page = this.page
@@ -2480,40 +2394,22 @@ export default class MarketsPage extends BasePage {
     page.mktBuyScore.textContent = Doc.formatCoinValue(received, this.market.baseUnitInfo)
   }
 
-  rateFieldKeyupHandler () {
-    const page = this.page
-
-    Doc.hide(page.orderErr)
-
-    const [inputValid, adjusted] = this.parseRateInput()
-    if (!inputValid || adjusted) {
-      // Let the user know that rate he's entered was rounded down.
-      this.animateErrors(highlightOutlineRed(page.rateField), highlightBackgroundRed(page.rateStepBox))
-    }
-    if (!inputValid) {
-      page.orderTotalPreview.textContent = ''
-      return
-    }
-    this.previewMax()
-    this.previewTotal()
-    this.drawChartLineInputRate()
-  }
-
   rateFieldChangeHandler () {
     const page = this.page
 
     Doc.hide(page.orderErr)
 
-    const [inputValid, adjusted, adjRate] = this.parseRateInput()
-    if (!inputValid) {
+    let [inputValid, adjusted, adjRate] = this.parseRateInput()
+    if (!inputValid || adjusted) {
       // Disable submit button temporarily (that additionally draws his
       // attention to order-form) to prevent user clicking on it while input
       // auto-adjusting is in progress. Otherwise, he might not notice the rounding.
       animateClick(page.submitBttn, page.submitBttnLoader)
-    }
-    if (!inputValid || adjusted) {
-      // Let the user know that rate he's entered was rounded down.
+      // Let the user know that rate he's entered is invalid or was rounded down.
       this.animateErrors(highlightOutlineRed(page.rateField), highlightBackgroundRed(page.rateStepBox))
+    }
+    if (!inputValid) {
+      adjRate = this.defaultRate()
     }
 
     page.rateField.value = String(adjRate)
@@ -2533,13 +2429,8 @@ export default class MarketsPage extends BasePage {
   // value (current market price) is returned.
   parseRateInput (): [boolean, boolean, number] {
     const rawRateAtom = this.rateAtoms(this.page.rateField.value)
-    let adjRateAtom = this.adjustedRateAtoms(this.page.rateField.value)
+    const adjRateAtom = this.adjustedRateAtoms(this.page.rateField.value)
     const rateParsingIssue = isNaN(rawRateAtom) || rawRateAtom <= 0
-    if (rateParsingIssue) {
-      // Set rate to default value if we weren't able to parse user input.
-      // Note, this default value might need adjustment to rate-step.
-      adjRateAtom = this.adjustedRateAtoms(String(this.defaultRate()))
-    }
     const rounded = adjRateAtom !== rawRateAtom
     const adjRate = adjRateAtom / this.market.rateConversionFactor
 
