@@ -80,6 +80,10 @@ const (
 	// seconds. This value may need to be adjusted in the future.
 	confCheckTimeout                 = 4 * time.Second
 	dynamicSwapOrRedemptionFeesConfs = 2
+
+	// coinIDTakerFoundMakerRedemption is a prefix to identify one of CoinID formats,
+	// see DecodeCoinID func for details.
+	coinIDTakerFoundMakerRedemption = "TakerFoundMakerRedemption:"
 )
 
 var (
@@ -149,8 +153,6 @@ var (
 	// an upgrade to unlimited (since we don't support limited allowance yet).
 	unlimitedAllowanceReplenishThreshold = new(big.Int).Div(unlimitedAllowance, big.NewInt(2))
 
-	findRedemptionCoinID = []byte("FindRedemption Coin")
-
 	seedDerivationPath = []uint32{
 		hdkeychain.HardenedKeyStart + 44, // purpose 44' for HD wallets
 		hdkeychain.HardenedKeyStart + 60, // eth coin type 60'
@@ -188,13 +190,17 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Ne
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for Ethereum.
-// In ETH there are 3 possible coin IDs:
+// These are supported coin ID formats:
 //  1. A transaction hash. 32 bytes
 //  2. An encoded ETH funding coin id which includes the account address and
 //     amount. 20 + 8 = 28 bytes
-//  3. An encoded token funding coin id which includes the account address, an
+//  3. An encoded token funding coin id which includes the account address,
 //     a token value, and fees. 20 + 8 + 8 = 36 bytes
 //  4. A byte encoded string of the account address. 40 or 42 (with 0x) bytes
+//  5. A byte encoded string which represents specific case where Taker found
+//     Maker redemption on his own (while Maker failed to notify him about it
+//     first). 26 (`TakerFoundMakerRedemption:` prefix) + 42 (Maker address
+//     with 0x) bytes
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 	switch len(coinID) {
 	case common.HashLength:
@@ -219,7 +225,16 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 			return "", fmt.Errorf("invalid hex address %q", coinID)
 		}
 		return common.HexToAddress(hexAddr).String(), nil
+	case len(coinIDTakerFoundMakerRedemption) + common.AddressLength*2 + 2:
+		hexCoinID := string(coinID)
+		if !strings.HasPrefix(hexCoinID, coinIDTakerFoundMakerRedemption) {
+			return "", fmt.Errorf("coinID %q has no %s prefix", coinID, coinIDTakerFoundMakerRedemption)
+		}
+		coinIDCopy := make([]byte, len(hexCoinID))
+		copy(coinIDCopy, hexCoinID)
+		return string(coinIDCopy), nil
 	}
+
 	return "", fmt.Errorf("unknown coin ID format: %x", coinID)
 }
 
@@ -2290,8 +2305,9 @@ func (w *assetWallet) ContractLockTimeExpired(ctx context.Context, contract dex.
 
 // findRedemptionResult is used internally for queued findRedemptionRequests.
 type findRedemptionResult struct {
-	err    error
-	secret []byte
+	err       error
+	secret    []byte
+	makerAddr string
 }
 
 // findRedemptionRequest is a request that is waiting on a redemption result.
@@ -2302,9 +2318,15 @@ type findRedemptionRequest struct {
 
 // sendFindRedemptionResult sends the result or logs a message if it cannot be
 // sent.
-func (eth *baseWallet) sendFindRedemptionResult(req *findRedemptionRequest, secretHash [32]byte, secret []byte, err error) {
+func (eth *baseWallet) sendFindRedemptionResult(
+	req *findRedemptionRequest,
+	secretHash [32]byte,
+	secret []byte,
+	makerAddr string,
+	err error,
+) {
 	select {
-	case req.res <- &findRedemptionResult{secret: secret, err: err}:
+	case req.res <- &findRedemptionResult{secret: secret, makerAddr: makerAddr, err: err}:
 	default:
 		eth.log.Info("findRedemptionResult channel blocking for request %s", secretHash)
 	}
@@ -2325,19 +2347,27 @@ func (w *assetWallet) findRedemptionRequests() map[[32]byte]*findRedemptionReque
 // but un-redeemed and un-refunded, FindRedemption will block until a redemption
 // is seen.
 func (w *assetWallet) FindRedemption(ctx context.Context, _, contract dex.Bytes) (redemptionCoin, secret dex.Bytes, err error) {
+	// coinIDTmpl is a template for constructing Coin ID when Taker
+	// (aka participant) finds redemption himself. %s represents Maker Ethereum
+	// account address so that user, as Taker, could manually look it up in case
+	// he needs it. Ideally we'd want to have transaction ID there instead of
+	// account address, but that's currently impossible to get in Ethereum smart
+	// contract, so we are basically doing the next best thing here.
+	const coinIDTmpl = coinIDTakerFoundMakerRedemption + "%s"
+
 	contractVer, secretHash, err := dexeth.DecodeContractData(contract)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// See if it's ready right away.
-	secret, err = w.findSecret(secretHash, contractVer)
+	secret, makerAddr, err := w.findSecret(secretHash, contractVer)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	if len(secret) > 0 {
-		return findRedemptionCoinID, secret, nil
+		return dex.Bytes(fmt.Sprintf(coinIDTmpl, makerAddr)), secret, nil
 	}
 
 	// Not ready. Queue the request.
@@ -2375,28 +2405,31 @@ func (w *assetWallet) FindRedemption(ctx context.Context, _, contract dex.Bytes)
 		return nil, nil, res.err
 	}
 
-	return findRedemptionCoinID, res.secret[:], nil
+	return dex.Bytes(fmt.Sprintf(coinIDTmpl, res.makerAddr)), res.secret[:], nil
 }
 
-func (w *assetWallet) findSecret(secretHash [32]byte, contractVer uint32) ([]byte, error) {
+// findSecret returns redemption secret from smart contract that Maker put there
+// redeeming Taker swap along with Maker Ethereum account address. Returns empty
+// values if Maker hasn't redeemed yet.
+func (w *assetWallet) findSecret(secretHash [32]byte, contractVer uint32) ([]byte, string, error) {
 	ctx, cancel := context.WithTimeout(w.ctx, 10*time.Second)
 	defer cancel()
 	swap, err := w.swap(ctx, secretHash, contractVer)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	switch swap.State {
 	case dexeth.SSInitiated:
-		return nil, nil // no redeem yet, but keep checking
+		return nil, "", nil // no Maker redeem yet, but keep checking
 	case dexeth.SSRedeemed:
-		return swap.Secret[:], nil
+		return swap.Secret[:], swap.Initiator.String(), nil
 	case dexeth.SSNone:
-		return nil, fmt.Errorf("swap %x does not exist", secretHash)
+		return nil, "", fmt.Errorf("swap %x does not exist", secretHash)
 	case dexeth.SSRefunded:
-		return nil, fmt.Errorf("swap %x is already refunded", secretHash)
+		return nil, "", fmt.Errorf("swap %x is already refunded", secretHash)
 	}
-	return nil, fmt.Errorf("unrecognized swap state %v", swap.State)
+	return nil, "", fmt.Errorf("unrecognized swap state %v", swap.State)
 }
 
 // Refund refunds a contract. This can only be used after the time lock has
@@ -3490,11 +3523,11 @@ func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Rede
 // checkFindRedemptions checks queued findRedemptionRequests.
 func (w *assetWallet) checkFindRedemptions() {
 	for secretHash, req := range w.findRedemptionRequests() {
-		secret, err := w.findSecret(secretHash, req.contractVer)
+		secret, makerAddr, err := w.findSecret(secretHash, req.contractVer)
 		if err != nil {
-			w.sendFindRedemptionResult(req, secretHash, nil, err)
+			w.sendFindRedemptionResult(req, secretHash, nil, "", err)
 		} else if len(secret) > 0 {
-			w.sendFindRedemptionResult(req, secretHash, secret, nil)
+			w.sendFindRedemptionResult(req, secretHash, secret, makerAddr, nil)
 		}
 	}
 }
