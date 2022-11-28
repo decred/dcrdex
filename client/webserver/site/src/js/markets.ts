@@ -2359,16 +2359,16 @@ export default class MarketsPage extends BasePage {
   // If quantity value couldn't be parsed (parsing issues), the following
   // values are returned: [false, false, 0, 0].
   parseQtyInput (value: string | undefined): [boolean, boolean, number, number] {
-    const { market: { baseUnitInfo: bui, cfg: { lotsize: lotSize } } } = this
+    const { market: { baseUnitInfo: bui, cfg: { lotsize: lotSizeAtom } } } = this
 
     const qtyRawAtom = convertToAtoms(value || '', bui.conventional.conversionFactor)
-    if (isNaN(qtyRawAtom) || qtyRawAtom < lotSize) {
+    if (isNaN(qtyRawAtom) || qtyRawAtom < lotSizeAtom) {
       return [false, false, 0, 0]
     }
 
-    const lotsRaw = qtyRawAtom / lotSize
+    const lotsRaw = qtyRawAtom / lotSizeAtom
     const adjLots = Math.floor(lotsRaw)
-    const adjQtyAtom = adjLots * lotSize
+    const adjQtyAtom = adjLots * lotSizeAtom
     const rounded = adjQtyAtom !== qtyRawAtom
     const adjQty = adjQtyAtom / bui.conventional.conversionFactor
 
