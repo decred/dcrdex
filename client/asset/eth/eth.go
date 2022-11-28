@@ -226,12 +226,12 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 		}
 		return common.HexToAddress(hexAddr).String(), nil
 	case len(coinIDTakerFoundMakerRedemption) + common.AddressLength*2 + 2:
-		hexCoinID := string(coinID)
-		if !strings.HasPrefix(hexCoinID, coinIDTakerFoundMakerRedemption) {
+		coinIDStr := string(coinID)
+		if !strings.HasPrefix(coinIDStr, coinIDTakerFoundMakerRedemption) {
 			return "", fmt.Errorf("coinID %q has no %s prefix", coinID, coinIDTakerFoundMakerRedemption)
 		}
-		coinIDCopy := make([]byte, len(hexCoinID))
-		copy(coinIDCopy, hexCoinID)
+		coinIDCopy := make([]byte, len(coinID))
+		copy(coinIDCopy, coinID)
 		return string(coinIDCopy), nil
 	}
 
