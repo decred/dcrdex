@@ -1067,7 +1067,7 @@ export default class MarketsPage extends BasePage {
       this.setMaxOrder(mkt.maxBuys[rate].swap)
       return
     }
-    // 0 delay for first fetch after balance update or market change, otherwise
+    // 0 delay for first fetch after balance update or market rate(price) change, otherwise
     // meter these at 1 / sec.
     const delay = Object.keys(mkt.maxBuys).length ? 350 : 0
     this.scheduleMaxEstimate('/api/maxbuy', { rate }, delay, (res: MaxBuy) => {
