@@ -60,7 +60,7 @@ var _ BTCWallet = (*btcSPVWallet)(nil)
 // createSPVWallet creates a new SPV wallet.
 func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dataDir string, log dex.Logger, extIdx, intIdx uint32, net *chaincfg.Params) error {
 	netDir := filepath.Join(dataDir, net.Name)
-	walletDir := filepath.Join(netDir, "spv")
+	walletDir := filepath.Join(netDir, spvDir)
 
 	if err := logNeutrino(netDir); err != nil {
 		return fmt.Errorf("error initializing btcwallet+neutrino logging: %w", err)

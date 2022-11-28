@@ -71,6 +71,7 @@ const (
 
 	maxFutureBlockTime = 2 * time.Hour // see MaxTimeOffsetSeconds in btcd/blockchain/validate.go
 	neutrinoDBName     = "neutrino.db"
+	spvDir             = "spv"
 	logDirName         = "spvlogs"
 	logFileName        = "neutrino.log"
 	defaultAcctNum     = 0
@@ -1157,26 +1158,54 @@ func (w *spvWallet) moveWalletData(backupDir string) error {
 	if err != nil {
 		return err
 	}
-	backupFolder := filepath.Join(backupDir, timeString)
-	if err := os.Rename(w.dir, backupFolder); err != nil {
+
+	backupFolder := filepath.Join(backupDir, w.chainParams.Name, timeString)
+	// Copy wallet logs first. Even if there is an error, wallet files are
+	// still intact.
+	backupLogDir := filepath.Join(backupFolder, logDirName)
+	walletLogDir := filepath.Dir(w.logFilePath())
+	if err := copyDir(walletLogDir, backupLogDir); err != nil {
 		return err
 	}
-	// Copy wallet logs.
-	if err := w.copyWalletLogFile(filepath.Join(backupFolder, logDirName)); err != nil {
+
+	walletBackupDir := filepath.Join(backupFolder, spvDir)
+	if err := os.Rename(w.dir, walletBackupDir); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (w *spvWallet) copyWalletLogFile(dstDir string) error {
-	if err := os.MkdirAll(dstDir, 0744); err != nil {
-		return err
-	}
-	logBytes, err := os.ReadFile(w.logFilePath())
+// copyDir recursively copies the directories and files in source directory to
+// destination directory without preserving the original file permissions.
+func copyDir(srcDir, dstDir string) error {
+	dirFiles, err := os.ReadDir(srcDir)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dstDir, logFileName), logBytes, 0744)
+
+	if err := os.MkdirAll(dstDir, 0744); err != nil {
+		return err
+	}
+
+	for _, file := range dirFiles {
+		srcFile := filepath.Join(srcDir, file.Name())
+		dstFile := filepath.Join(dstDir, file.Name())
+		if file.IsDir() {
+			if err := copyDir(srcFile, dstFile); err != nil {
+				return err
+			}
+		} else if file.Type().IsRegular() {
+			logBytes, err := os.ReadFile(srcFile)
+			if err != nil {
+				return err
+			}
+			if err := os.WriteFile(dstFile, logBytes, 0744); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 // numDerivedAddresses returns the number of internal and external addresses
