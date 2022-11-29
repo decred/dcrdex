@@ -695,7 +695,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	// Because the dexBalancer relies on the marketTunnels map, and NewMarket
 	// checks necessary balances for account-based assets using the dexBalancer,
 	// that means that each market can only query orders for the markets that
-	// were intitialized before it was, which is fine, but notable. The
+	// were initialized before it was, which is fine, but notable. The
 	// resulting behavior is that a user could have orders involving an
 	// account-based asset approved for re-booking on one market, but have
 	// orders rejected on a market involving the same asset created afterwards,

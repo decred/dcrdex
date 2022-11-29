@@ -29,6 +29,7 @@ const (
 	methodGetIndexInfo      = "getindexinfo"
 	methodGetBlockHeader    = "getblockheader"
 	methodGetBlockStats     = "getblockstats"
+	methodGetBlockHash      = "getblockhash"
 
 	errNoCompetition = dex.ErrorKind("no competition")
 	errNoFeeRate     = dex.ErrorKind("fee rate could not be estimated")
@@ -96,8 +97,8 @@ func (rc *RPCClient) GetBlockChainInfo() (*GetBlockchainInfoResult, error) {
 	return chainInfo, nil
 }
 
-// txIndexResult models the data returned from the getindexinfo command
-// for txindex.
+// txIndexResult models the data returned from the getindexinfo command for
+// txindex.
 // txIndexResult.Txindex is nil if the returned data is an empty json object.
 type txIndexResult struct {
 	TxIndex *struct{} `json:"txindex"`
@@ -107,12 +108,55 @@ type txIndexResult struct {
 func (rc *RPCClient) checkTxIndex() (bool, error) {
 	res := new(txIndexResult)
 	err := rc.call(methodGetIndexInfo, anylist{"txindex"}, res)
+	if err == nil {
+		// Return early if there is no error. bitcoind returns an empty json
+		// object if txindex is not enabled. It is safe to conclude txindex is
+		// enabled if res.Txindex is not nil.
+		return res.TxIndex != nil, nil
+	}
+
+	if !isMethodNotFoundErr(err) {
+		return false, err
+	}
+
+	// Using block at index 5 to retrieve a coinbase transaction and ensure
+	// txindex is enabled for pre 0.21 versions of bitcoind.
+	const blockIndex = 5
+	blockHash, err := rc.getBlockHash(blockIndex)
 	if err != nil {
 		return false, err
 	}
-	// bitcoind returns an empty json object if txindex is not enabled.
-	// It is safe to conclude txindex is enabled if res.Txindex is not nil.
-	return res.TxIndex != nil, nil
+
+	blockInfo, err := rc.GetBlockVerbose(blockHash)
+	if err != nil {
+		return false, err
+	}
+
+	if len(blockInfo.Tx) == 0 {
+		return false, fmt.Errorf("block %d does not have a coinbase transaction", blockIndex)
+	}
+
+	txHash, err := chainhash.NewHashFromStr(blockInfo.Tx[0])
+	if err != nil {
+		return false, err
+	}
+
+	// Retrieve coinbase transaction information.
+	txBytes, err := rc.GetRawTransaction(txHash)
+	if err != nil {
+		return false, err
+	}
+
+	return len(txBytes) != 0, nil
+}
+
+// getBlockHash fetches the block hash for the block at the given index.
+func (rc *RPCClient) getBlockHash(index int64) (*chainhash.Hash, error) {
+	var blockHashStr string
+	if err := rc.call(methodGetBlockHash, anylist{index}, &blockHashStr); err != nil {
+		return nil, err
+	}
+	return chainhash.NewHashFromStr(blockHashStr)
 }
 
 // EstimateSmartFee requests the server to estimate a fee level.

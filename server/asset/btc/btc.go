@@ -368,19 +368,15 @@ func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		}
 	}
 
-	if txindex, err := btc.node.checkTxIndex(); err != nil {
-		if !isMethodNotFoundErr(err) {
-			btc.shutdown()
-			return nil, fmt.Errorf("%s getindexinfo check failed: %w", btc.name, err)
-		}
-		// Ignore and log err if getindexinfo method is not found.
-		// getindexinfo method is not currently supported by
-		// pre 0.21 versions of bitcoind, and some forks of
-		// bitcoin core (litecoin).
-		btc.log.Warnf("The getindexinfo RPC is unavailable. Please ensure txindex is enabled in the node config.")
-	} else if !txindex {
+	txindex, err := btc.node.checkTxIndex()
+	if err != nil {
+		btc.log.Warnf(`Please ensure txindex is enabled in the node config and you might need to re-index if txindex was not previously enabled for %s`, btc.name)
 		btc.shutdown()
-		return nil, fmt.Errorf("%s transaction index is not enabled. Please enable txindex in the node config", btc.name)
+		return nil, fmt.Errorf("error checking txindex for %s: %w", btc.name, err)
+	}
+	if !txindex {
+		btc.shutdown()
+		return nil, fmt.Errorf("%s transaction index is not enabled. Please enable txindex in the node config and you might need to re-index when you enable txindex", btc.name)
 	}
 
 	if _, err = btc.estimateFee(ctx); err != nil {
@@ -648,7 +644,7 @@ func (btc *Backend) TxData(coinID []byte) ([]byte, error) {
 		if isTxNotFoundErr(err) {
 			return nil, asset.CoinNotFoundError
 		}
-		return nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %w", txHash, err)
+		return nil, fmt.Errorf("GetRawTransaction for txid %s: %w", txHash, err)
 	}
 	return txB, nil
 }

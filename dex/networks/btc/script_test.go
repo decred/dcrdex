@@ -257,7 +257,6 @@ func TestIsDust(t *testing.T) {
 		if res != test.isDust {
 			t.Fatalf("Dust test '%s' failed: want %v got %v",
 				test.name, test.isDust, res)
-			continue
 		}
 	}
 }
