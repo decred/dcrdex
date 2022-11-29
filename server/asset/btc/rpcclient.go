@@ -115,39 +115,48 @@ func (rc *RPCClient) checkTxIndex() (bool, error) {
 		return res.TxIndex != nil, nil
 	}
 
-	if isMethodNotFoundErr(err) {
-		// Using block at index 5 to retrieve a coinbase transaction and ensure
-		// txindex is enabled for pre 0.21 versions of bitcoind.
-		const blockIndex = 5
-		blockHash, err := rc.GetBlockHash(blockIndex)
-		if err != nil {
-			return false, err
-		}
-
-		blockInfo, err := rc.GetBlockVerbose(blockHash)
-		if err != nil {
-			return false, err
-		}
-
-		if len(blockInfo.Tx) == 0 {
-			return false, fmt.Errorf("block %d does not have a coinbase transaction", blockIndex)
-		}
-
-		txHash, err := chainhash.NewHashFromStr(blockInfo.Tx[0])
-		if err != nil {
-			return false, err
-		}
-
-		// Retrieve coinbase transaction information.
-		txBytes, err := rc.GetRawTransaction(txHash)
-		if err != nil {
-			return false, err
-		}
-
-		return len(txBytes) != 0, nil
+	if !isMethodNotFoundErr(err) {
+		return false, err
 	}
 
-	return false, err
+	// Using block at index 5 to retrieve a coinbase transaction and ensure
+	// txindex is enabled for pre 0.21 versions of bitcoind.
+	const blockIndex = 5
+	blockHash, err := rc.getBlockHash(blockIndex)
+	if err != nil {
+		return false, err
+	}
+
+	blockInfo, err := rc.GetBlockVerbose(blockHash)
+	if err != nil {
+		return false, err
+	}
+
+	if len(blockInfo.Tx) == 0 {
+		return false, fmt.Errorf("block %d does not have a coinbase transaction", blockIndex)
+	}
+
+	txHash, err := chainhash.NewHashFromStr(blockInfo.Tx[0])
+	if err != nil {
+		return false, err
+	}
+
+	// Retrieve coinbase transaction information.
+	txBytes, err := rc.GetRawTransaction(txHash)
+	if err != nil {
+		return false, err
+	}
+
+	return len(txBytes) != 0, nil
+}
+
+// getBlockHash fetches the block hash for the block at the given index.
+func (rc *RPCClient) getBlockHash(index int64) (*chainhash.Hash, error) {
+	var blockHashStr string
+	if err := rc.call(methodGetBlockHash, anylist{index}, &blockHashStr); err != nil {
+		return nil, err
+	}
+	return chainhash.NewHashFromStr(blockHashStr)
 }
 
 // EstimateSmartFee requests the server to estimate a fee level.
@@ -282,22 +291,6 @@ func (rc *RPCClient) GetBlockVerbose(blockHash *chainhash.Hash) (*GetBlockVerbos
 	}
 	res := new(GetBlockVerboseResult)
 	return res, rc.call(methodGetBlock, anylist{blockHash.String(), arg}, res)
-}
-
-// GetBlockHash fetches the block hash for the block at the given index.
-func (rc *RPCClient) GetBlockHash(index int64) (*chainhash.Hash, error) {
-	var blockHashStr string
-	err := rc.Call(methodGetBlockHash, []interface{}{index}, &blockHashStr)
-	if err != nil {
-		return nil, err
-	}
-
-	blockHash, err := chainhash.NewHashFromStr(blockHashStr)
-	if err != nil {
-		return nil, err
-	}
-
-	return blockHash, nil
 }
 
 // MedianFeeRate returns the median rate from the specified block.
