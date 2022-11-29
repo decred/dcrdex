@@ -20,7 +20,7 @@ const (
 	// DefaultFiatCurrency is the currency for displaying assets fiat value.
 	DefaultFiatCurrency = "USD"
 	// fiatRateRequestInterval is the amount of time between calls to the exchange API.
-	fiatRateRequestInterval = 5 * time.Minute
+	fiatRateRequestInterval = 12 * time.Minute
 	// fiatRateDataExpiry : Any data older than fiatRateDataExpiry will be discarded.
 	fiatRateDataExpiry = 60 * time.Minute
 
@@ -226,6 +226,10 @@ func getRates(ctx context.Context, url string, thing interface{}) error {
 		return err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected response, got status code %d", resp.StatusCode)
+	}
 
 	reader := io.LimitReader(resp.Body, 1<<20)
 	return json.NewDecoder(reader).Decode(thing)
