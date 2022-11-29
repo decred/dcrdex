@@ -230,9 +230,7 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 		if !strings.HasPrefix(coinIDStr, coinIDTakerFoundMakerRedemption) {
 			return "", fmt.Errorf("coinID %q has no %s prefix", coinID, coinIDTakerFoundMakerRedemption)
 		}
-		coinIDCopy := make([]byte, len(coinID))
-		copy(coinIDCopy, coinID)
-		return string(coinIDCopy), nil
+		return coinIDStr, nil
 	}
 
 	return "", fmt.Errorf("unknown coin ID format: %x", coinID)
