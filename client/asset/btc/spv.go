@@ -401,6 +401,21 @@ func (w *btcSPVWallet) SignTx(tx *wire.MsgTx) error {
 	return txauthor.AddAllInputScripts(tx, prevPkScripts, inputValues, &secretSource{w, w.chainParams})
 }
 
+// NewAddress gets a new bech32-encoded (P2WPKH) external address.
+func (w *btcSPVWallet) NewAddress(account uint32) (btcutil.Address, error) {
+	return w.Wallet.NewAddress(account, waddrmgr.KeyScopeBIP0084)
+}
+
+// NewChangeAddress gets a new bech32-encoded (P2WPKH) change address.
+func (w *btcSPVWallet) NewChangeAddress(account uint32) (btcutil.Address, error) {
+	return w.Wallet.NewChangeAddress(account, waddrmgr.KeyScopeBIP0084)
+}
+
+// AccountProperties returns the properties of the P2WPKH account.
+func (w *btcSPVWallet) AccountProperties(acct uint32) (*waddrmgr.AccountProperties, error) {
+	return w.Wallet.AccountProperties(waddrmgr.KeyScopeBIP0084, acct)
+}
+
 func (w *btcSPVWallet) BlockNotifications(ctx context.Context) <-chan *BlockNotification {
 	cl := w.Wallet.NtfnServer.TransactionNotifications()
 	ch := make(chan *BlockNotification, 1)

@@ -90,16 +90,16 @@ type BTCWallet interface {
 	LockOutpoint(op wire.OutPoint)
 	UnlockOutpoint(op wire.OutPoint)
 	LockedOutpoints() []btcjson.TransactionInput
-	NewChangeAddress(account uint32, scope waddrmgr.KeyScope) (btcutil.Address, error)
-	NewAddress(account uint32, scope waddrmgr.KeyScope) (btcutil.Address, error)
+	NewChangeAddress(account uint32) (btcutil.Address, error)
+	NewAddress(account uint32) (btcutil.Address, error)
 	PrivKeyForAddress(a btcutil.Address) (*btcec.PrivateKey, error)
 	Unlock(passphrase []byte, lock <-chan time.Time) error
 	Lock()
 	Locked() bool
 	HaveAddress(a btcutil.Address) (bool, error)
 	WaitForShutdown()
-	ChainSynced() bool // currently unused
-	AccountProperties(scope waddrmgr.KeyScope, acct uint32) (*waddrmgr.AccountProperties, error)
+	ChainSynced() bool                                                  // currently unused
+	AccountProperties(acct uint32) (*waddrmgr.AccountProperties, error) // maybe change to AccountKeyIndexes
 	// The below methods are not implemented by *wallet.Wallet, so must be
 	// implemented by the BTCWallet implementation.
 	WalletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetails, error)
@@ -702,16 +702,14 @@ func (w *spvWallet) listLockUnspent() ([]*RPCOutpoint, error) {
 	return pts, nil
 }
 
-// changeAddress gets a new internal address from the wallet. The address will
-// be bech32-encoded (P2WPKH).
+// changeAddress gets a new internal address from the wallet.
 func (w *spvWallet) changeAddress() (btcutil.Address, error) {
-	return w.wallet.NewChangeAddress(w.acctNum, waddrmgr.KeyScopeBIP0084)
+	return w.wallet.NewChangeAddress(w.acctNum)
 }
 
-// externalAddress gets a new bech32-encoded (P2WPKH) external address from the
-// wallet.
+// externalAddress gets a new external address from the wallet.
 func (w *spvWallet) externalAddress() (btcutil.Address, error) {
-	return w.wallet.NewAddress(w.acctNum, waddrmgr.KeyScopeBIP0084)
+	return w.wallet.NewAddress(w.acctNum)
 }
 
 func (w *spvWallet) refundAddress() (btcutil.Address, error) {
@@ -1116,7 +1114,7 @@ func copyDir(src, dst string) error {
 // numDerivedAddresses returns the number of internal and external addresses
 // that the wallet has derived.
 func (w *spvWallet) numDerivedAddresses() (internal, external uint32, err error) {
-	props, err := w.wallet.AccountProperties(waddrmgr.KeyScopeBIP0084, w.acctNum)
+	props, err := w.wallet.AccountProperties(w.acctNum)
 	if err != nil {
 		return 0, 0, err
 	}

@@ -118,14 +118,14 @@ func (c *tBtcWallet) LockedOutpoints() []btcjson.TransactionInput {
 	return unspents
 }
 
-func (c *tBtcWallet) NewChangeAddress(account uint32, scope waddrmgr.KeyScope) (btcutil.Address, error) {
+func (c *tBtcWallet) NewChangeAddress(account uint32) (btcutil.Address, error) {
 	if c.changeAddrErr != nil {
 		return nil, c.changeAddrErr
 	}
 	return btcutil.DecodeAddress(c.changeAddr, &chaincfg.MainNetParams)
 }
 
-func (c *tBtcWallet) NewAddress(account uint32, scope waddrmgr.KeyScope) (btcutil.Address, error) {
+func (c *tBtcWallet) NewAddress(account uint32) (btcutil.Address, error) {
 	if c.newAddressErr != nil {
 		return nil, c.newAddressErr
 	}
@@ -254,22 +254,6 @@ func (c *tBtcWallet) WalletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetail
 	}, nil
 }
 
-func (c *tBtcWallet) getTransaction(txHash *chainhash.Hash) (*GetTransactionResult, error) {
-	if c.getTransactionErr != nil {
-		return nil, c.getTransactionErr
-	}
-	var txData *GetTransactionResult
-	if c.getTransactionMap != nil {
-		if txData = c.getTransactionMap["any"]; txData == nil {
-			txData = c.getTransactionMap[txHash.String()]
-		}
-	}
-	if txData == nil {
-		return nil, WalletTransactionNotFound
-	}
-	return txData, nil
-}
-
 func (c *tBtcWallet) SyncedTo() waddrmgr.BlockStamp {
 	bestHash, bestHeight := c.bestBlock() // NOTE: in reality this may be lower than the chain service's best block
 	blk := c.getBlock(bestHash.String())
@@ -291,7 +275,7 @@ func (c *tBtcWallet) SignTx(tx *wire.MsgTx) error {
 	return nil
 }
 
-func (c *tBtcWallet) AccountProperties(scope waddrmgr.KeyScope, acct uint32) (*waddrmgr.AccountProperties, error) {
+func (c *tBtcWallet) AccountProperties(acct uint32) (*waddrmgr.AccountProperties, error) {
 	return nil, nil
 }
 
@@ -340,9 +324,9 @@ func (c *tNeutrinoClient) GetBlockHash(blockHeight int64) (*chainhash.Hash, erro
 
 func (c *tNeutrinoClient) BestBlock() (*headerfs.BlockStamp, error) {
 	c.blockchainMtx.RLock()
-	if c.getBestBlockHashErr != nil {
-		defer c.blockchainMtx.RUnlock() // reading c.getBestBlockHashErr below
-		return nil, c.getBestBlockHashErr
+	if err := c.getBestBlockHashErr; err != nil {
+		c.blockchainMtx.RUnlock()
+		return nil, err
 	}
 	c.blockchainMtx.RUnlock()
 	bestHash, bestHeight := c.bestBlock()
@@ -398,18 +382,6 @@ func (c *tNeutrinoClient) GetBlock(blockHash chainhash.Hash, options ...neutrino
 		return nil, fmt.Errorf("no (test) block %s", blockHash)
 	}
 	return btcutil.NewBlock(blk.msgBlock), nil
-}
-
-type tSPVPeer struct {
-	startHeight, lastHeight int32
-}
-
-func (p *tSPVPeer) StartingHeight() int32 {
-	return p.startHeight
-}
-
-func (p *tSPVPeer) LastBlock() int32 {
-	return p.lastHeight
 }
 
 func TestSwapConfirmations(t *testing.T) {

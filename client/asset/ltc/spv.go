@@ -460,7 +460,7 @@ func (w *ltcSPVWallet) LockedOutpoints() []btcjson.TransactionInput {
 	return locked
 }
 
-func (w *ltcSPVWallet) NewChangeAddress(account uint32, _ waddrmgr.KeyScope) (btcutil.Address, error) {
+func (w *ltcSPVWallet) NewChangeAddress(account uint32) (btcutil.Address, error) {
 	ltcAddr, err := w.Wallet.NewChangeAddress(account, ltcwaddrmgr.KeyScopeBIP0084)
 	if err != nil {
 		return nil, err
@@ -468,7 +468,7 @@ func (w *ltcSPVWallet) NewChangeAddress(account uint32, _ waddrmgr.KeyScope) (bt
 	return w.addrLTC2BTC(ltcAddr)
 }
 
-func (w *ltcSPVWallet) NewAddress(account uint32, _ waddrmgr.KeyScope) (btcutil.Address, error) {
+func (w *ltcSPVWallet) NewAddress(account uint32) (btcutil.Address, error) {
 	ltcAddr, err := w.Wallet.NewAddress(account, ltcwaddrmgr.KeyScopeBIP0084)
 	if err != nil {
 		return nil, err
@@ -522,7 +522,7 @@ func (w *ltcSPVWallet) Stop() {
 	w.log.Info("SPV wallet closed")
 }
 
-func (w *ltcSPVWallet) AccountProperties(_ waddrmgr.KeyScope, acct uint32) (*waddrmgr.AccountProperties, error) {
+func (w *ltcSPVWallet) AccountProperties(acct uint32) (*waddrmgr.AccountProperties, error) {
 	props, err := w.Wallet.AccountProperties(ltcwaddrmgr.KeyScopeBIP0084, acct)
 	if err != nil {
 		return nil, err
