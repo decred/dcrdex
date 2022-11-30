@@ -742,7 +742,7 @@ func oracleMarketReport(ctx context.Context, b, q *SupportedAsset, log dex.Logge
 	// running on the same market.
 	var rawMarkets []*coinpapMarket
 	url := fmt.Sprintf("https://api.coinpaprika.com/v1/coins/%s/markets", baseSlug)
-	if err := getInto(ctx, url, &rawMarkets); err != nil {
+	if err := getRates(ctx, url, &rawMarkets); err != nil {
 		return nil, err
 	}
 
@@ -1657,7 +1657,7 @@ func fetchBinanceSpread(ctx context.Context, baseSymbol, quoteSymbol string) (se
 		BidPrice float64 `json:"bidPrice,string"`
 		AskPrice float64 `json:"askPrice,string"`
 	}
-	return resp.AskPrice, resp.BidPrice, getInto(ctx, url, &resp)
+	return resp.AskPrice, resp.BidPrice, getRates(ctx, url, &resp)
 }
 
 func fetchCoinbaseSpread(ctx context.Context, baseSymbol, quoteSymbol string) (sell, buy float64, err error) {
@@ -1669,7 +1669,7 @@ func fetchCoinbaseSpread(ctx context.Context, baseSymbol, quoteSymbol string) (s
 		Bid float64 `json:"bid,string"`
 	}
 
-	return resp.Ask, resp.Bid, getInto(ctx, url, &resp)
+	return resp.Ask, resp.Bid, getRates(ctx, url, &resp)
 }
 
 func fetchBittrexSpread(ctx context.Context, baseSymbol, quoteSymbol string) (sell, buy float64, err error) {
@@ -1679,7 +1679,7 @@ func fetchBittrexSpread(ctx context.Context, baseSymbol, quoteSymbol string) (se
 		AskRate float64 `json:"askRate,string"`
 		BidRate float64 `json:"bidRate,string"`
 	}
-	return resp.AskRate, resp.BidRate, getInto(ctx, url, &resp)
+	return resp.AskRate, resp.BidRate, getRates(ctx, url, &resp)
 }
 
 func fetchHitBTCSpread(ctx context.Context, baseSymbol, quoteSymbol string) (sell, buy float64, err error) {
@@ -1690,7 +1690,7 @@ func fetchHitBTCSpread(ctx context.Context, baseSymbol, quoteSymbol string) (sel
 		Ask [][2]json.Number `json:"ask"`
 		Bid [][2]json.Number `json:"bid"`
 	}
-	if err := getInto(ctx, url, &resp); err != nil {
+	if err := getRates(ctx, url, &resp); err != nil {
 		return 0, 0, err
 	}
 	if len(resp.Ask) < 1 || len(resp.Bid) < 1 {
@@ -1719,7 +1719,7 @@ func fetchEXMOSpread(ctx context.Context, baseSymbol, quoteSymbol string) (sell,
 		BidTop float64 `json:"bid_top,string"`
 	}
 
-	if err := getInto(ctx, url, &resp); err != nil {
+	if err := getRates(ctx, url, &resp); err != nil {
 		return 0, 0, err
 	}
 
