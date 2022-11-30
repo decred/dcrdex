@@ -1892,7 +1892,6 @@ func (c *Core) unlockWallet(crypter encrypt.Crypter, wallet *xcWallet) error {
 // resumed at startup will be made.
 func (c *Core) connectAndUnlockResumeTrades(crypter encrypt.Crypter, wallet *xcWallet, resumeTrades bool) error {
 	if !wallet.connected() {
-		c.log.Infof("Connecting wallet for %s", unbip(wallet.AssetID))
 		err := c.connectAndUpdateWalletResumeTrades(wallet, resumeTrades)
 		if err != nil {
 			return err
@@ -3254,18 +3253,31 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 // updateAssetWalletRefs sets all references of an asset's wallet to newWallet.
 func (c *Core) updateAssetWalletRefs(newWallet *xcWallet) {
 	assetID := newWallet.AssetID
-	for _, dc := range c.dexConnections() {
-		dc.tradeMtx.RLock()
-		for _, tracker := range dc.trades {
-			tracker.mtx.Lock()
-			if tracker.wallets.fromWallet.AssetID == assetID {
-				tracker.wallets.fromWallet = newWallet
-			} else if tracker.wallets.toWallet.AssetID == assetID {
-				tracker.wallets.toWallet = newWallet
-			}
-			tracker.mtx.Unlock()
+	updateWalletSet := func(t *trackedTrade) {
+		t.mtx.Lock()
+		defer t.mtx.Unlock()
+
+		if t.wallets.fromWallet.AssetID == assetID {
+			t.wallets.fromWallet = newWallet
+		} else if t.wallets.toWallet.AssetID == assetID {
+			t.wallets.toWallet = newWallet
+		} else {
+			return // no need to check base/quote wallet aliases
 		}
-		dc.tradeMtx.RUnlock()
+
+		// Also base/quote wallet aliases. The following is more fool-proof and
+		// concise than nested t.Trade().Sell conditions above:
+		if t.wallets.baseWallet.AssetID == assetID {
+			t.wallets.baseWallet = newWallet
+		} else /* t.wallets.quoteWallet.AssetID == assetID */ {
+			t.wallets.quoteWallet = newWallet
+		}
+	}
+
+	for _, dc := range c.dexConnections() {
+		for _, tracker := range dc.trackedTrades() {
+			updateWalletSet(tracker)
+		}
 	}
 
 	c.updateWallet(assetID, newWallet)

@@ -354,6 +354,9 @@ func (t *trackedTrade) status() order.OrderStatus {
 // when this method returns. If there is a synced book, the estimate will always
 // be updated. If there is no synced book, but a non-zero fee suggestion is
 // already cached, no new requests will be made.
+//
+// The trackedTrade mutex should be held for reads for safe access to the
+// walletSet and the readyToTick flag.
 func (t *trackedTrade) cacheRedemptionFeeSuggestion() {
 	now := time.Now()
 
@@ -1781,9 +1784,6 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 	defer t.tickLock.Unlock()
 	tLock = time.Since(tStart)
 
-	// Make sure we have a redemption fee suggestion cached.
-	t.cacheRedemptionFeeSuggestion()
-
 	var swaps, redeems, refunds, revokes, searches, redemptionConfirms,
 		dynamicSwapFeeConfirms, dynamicRedemptionFeeConfirms []*matchTracker
 	var sent, quoteSent, received, quoteReceived uint64
@@ -1891,6 +1891,9 @@ func (c *Core) tick(t *trackedTrade) (assetMap, error) {
 
 	// Begin checks under read-only lock.
 	t.mtx.RLock()
+
+	// Make sure we have a redemption fee suggestion cached.
+	t.cacheRedemptionFeeSuggestion()
 
 	if !t.readyToTick {
 		t.mtx.RUnlock()
