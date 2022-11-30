@@ -7019,6 +7019,7 @@ func TestReconfigureWallet(t *testing.T) {
 
 	// For the last success, make sure that we also clear any related
 	// tickGovernors.
+	abcWallet, _ := newTWallet(tUTXOAssetA.ID) // for to/baseWallet
 	matchID := ordertest.RandomMatchID()
 	match := &matchTracker{
 		suspectSwap:  true,
@@ -7042,10 +7043,12 @@ func TestReconfigureWallet(t *testing.T) {
 			},
 		},
 		wallets: &walletSet{
-			fromAsset:  &dex.Asset{ID: assetID},
-			fromWallet: &xcWallet{AssetID: assetID},
-			toAsset:    &dex.Asset{},
-			toWallet:   &xcWallet{},
+			fromAsset:   &dex.Asset{ID: assetID},
+			fromWallet:  xyzWallet,
+			quoteWallet: xyzWallet, // sell=false
+			toAsset:     &dex.Asset{},
+			toWallet:    abcWallet,
+			baseWallet:  abcWallet,
 		},
 		matches: map[order.MatchID]*matchTracker{
 			{}: match,
