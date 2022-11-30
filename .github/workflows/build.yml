@@ -11,14 +11,14 @@ jobs:
         go: [1.18, 1.19]
     steps:
       - name: Set up Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@84cbf8094393cdc5fe1fe1671ff2647332956b1a #v3.2.1
         with:
           go-version: ${{ matrix.go }}
 
       - name: Check out source
-        uses: actions/checkout@v3
+        uses: actions/checkout@93ea575cb5d8a053eaa0ac8fa3b40d7e05a33cc8 #v3.1.0
       - name: Install Linters
-        run: "curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.48.0"
+        run: "curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.50.1"
 
       - name: Test
         env:
@@ -34,9 +34,9 @@ jobs:
       matrix:
         node-version: [16.x, 18.x]
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@93ea575cb5d8a053eaa0ac8fa3b40d7e05a33cc8 #v3.1.0
     - name: Use nodejs ${{ matrix.node-version }}
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@8c91899e586c5b171469028077307d293428b516 #v3.5.1
       with:
         node-version: ${{ matrix.node-version }}
     - name: npm clean-install
@@ -52,8 +52,8 @@ jobs:
     name: Lint Markdown
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
-    - uses: DavidAnson/markdownlint-cli2-action@v7
+    - uses: actions/checkout@93ea575cb5d8a053eaa0ac8fa3b40d7e05a33cc8 #v3.1.0
+    - uses: DavidAnson/markdownlint-cli2-action@d57f8bd57670b9c1deedf71219dd494614ff3335 #v8
       continue-on-error: true
       with:
         globs: |
