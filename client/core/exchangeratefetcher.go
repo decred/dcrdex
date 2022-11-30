@@ -20,7 +20,7 @@ const (
 	// DefaultFiatCurrency is the currency for displaying assets fiat value.
 	DefaultFiatCurrency = "USD"
 	// fiatRateRequestInterval is the amount of time between calls to the exchange API.
-	fiatRateRequestInterval = 5 * time.Minute
+	fiatRateRequestInterval = 8 * time.Minute
 	// fiatRateDataExpiry : Any data older than fiatRateDataExpiry will be discarded.
 	fiatRateDataExpiry = 60 * time.Minute
 
@@ -96,6 +96,9 @@ func (source *commonRateSource) refreshRates(ctx context.Context, logger dex.Log
 	source.mtx.Lock()
 	defer source.mtx.Unlock()
 	for assetID, fiatRate := range fiatRates {
+		if fiatRate <= 0 {
+			continue
+		}
 		source.fiatRates[assetID] = &fiatRateInfo{
 			rate:       fiatRate,
 			lastUpdate: now,
@@ -148,6 +151,11 @@ func fetchCoinpaprikaRates(ctx context.Context, log dex.Logger, assets map[uint3
 		}
 		defer resp.Body.Close()
 
+		if resp.StatusCode != http.StatusOK {
+			log.Errorf("unexpected response, got status code %d", resp.StatusCode)
+			continue
+		}
+
 		// Read the raw bytes and close the response.
 		reader := io.LimitReader(resp.Body, 1<<20)
 		err = json.NewDecoder(reader).Decode(res)
@@ -191,6 +199,10 @@ func fetchDcrdataRates(ctx context.Context, log dex.Logger, assets map[uint32]*S
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		log.Errorf("unexpected response, got status code %d", resp.StatusCode)
+		return nil
+	}
 	// Read the raw bytes and close the response.
 	reader := io.LimitReader(resp.Body, 1<<20)
 	err = json.NewDecoder(reader).Decode(res)
@@ -243,6 +255,11 @@ func fetchMessariRates(ctx context.Context, log dex.Logger, assets map[uint32]*S
 			continue
 		}
 		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			log.Errorf("unexpected response, got status code %d", resp.StatusCode)
+			continue
+		}
 
 		// Read the raw bytes and close the response.
 		reader := io.LimitReader(resp.Body, 1<<20)
