@@ -7252,6 +7252,7 @@ func TestReconfigureWallet(t *testing.T) {
 
 	// For the last success, make sure that we also clear any related
 	// tickGovernors.
+	abcWallet, _ := newTWallet(tUTXOAssetA.ID) // for to/baseWallet
 	matchID := ordertest.RandomMatchID()
 	match := &matchTracker{
 		suspectSwap:  true,
@@ -7276,16 +7277,17 @@ func TestReconfigureWallet(t *testing.T) {
 			},
 		},
 		wallets: &walletSet{
-			// fromAsset:  &dex.Asset{ID: assetID},
-			fromWallet: &xcWallet{AssetID: assetID},
-			// toAsset:    &dex.Asset{},
-			toWallet: &xcWallet{},
+			fromWallet:  xyzWallet,
+			quoteWallet: xyzWallet, // sell=false
+			toWallet:    abcWallet,
+			baseWallet:  abcWallet,
 		},
 		matches: map[order.MatchID]*matchTracker{
 			{}: match,
 		},
-		metaData: &db.OrderMetaData{},
-		dc:       rig.dc,
+		metaData:    &db.OrderMetaData{},
+		dc:          rig.dc,
+		readyToTick: true, // prevent resume path
 	}
 	tCore.conns[tDexHost].tradeMtx.Unlock()
 
@@ -10316,11 +10318,14 @@ func TestUpdateFeesPaid(t *testing.T) {
 		utxoWallet, _ := newTWallet(tUTXOAssetA.ID)
 
 		wallets := &walletSet{
-			fromWallet: acctWallet,
-			toWallet:   utxoWallet,
+			fromWallet:  acctWallet,
+			toWallet:    utxoWallet,
+			baseWallet:  acctWallet,
+			quoteWallet: utxoWallet,
 		}
 		if test.swapWallets {
 			wallets.fromWallet, wallets.toWallet = wallets.toWallet, wallets.fromWallet
+			wallets.baseWallet, wallets.quoteWallet = wallets.quoteWallet, wallets.baseWallet
 		}
 
 		dc := &dexConnection{
