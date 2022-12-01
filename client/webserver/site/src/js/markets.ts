@@ -222,6 +222,12 @@ export default class MarketsPage extends BasePage {
     // TODO: Store user's state and reload last known configuration.
     this.candleDur = fiveMinBinKey
 
+    // Setup the register to trade button.
+    const registerBttn = Doc.tmplElement(page.notRegistered, 'registerBttn')
+    bind(registerBttn, 'click', () => {
+      window.location.assign(`/register/${this.market.dex.host}`)
+    })
+
     // Set up the BalanceWidget.
     {
       page.walletInfoTmpl.removeAttribute('id')
@@ -549,11 +555,6 @@ export default class MarketsPage extends BasePage {
     return this.page.limitBttn.classList.contains('selected')
   }
 
-  /* hasFeePending is true if the fee payment is pending */
-  hasFeePending () {
-    return !!this.market.dex.pendingFee
-  }
-
   /* setStats updates the currently displayed market and spot price. */
   setStats (): void {
     const selected = this.market
@@ -662,12 +663,12 @@ export default class MarketsPage extends BasePage {
     // By default the order form should be hidden, and only if market is set
     // and ready for trading the form should show up.
     Doc.hide(page.orderForm, page.orderTypeBttns)
-    const feePaid = !this.hasFeePending()
     const assetsAreSupported = this.assetsAreSupported().isSupported
-    const { base, quote } = this.market
+    const { dex, base, quote } = this.market
+    const registeredAndFeePaid = !!dex.acctID && !dex.pendingFee
     const hasWallets = base && app().assets[base.id].wallet && quote && app().assets[quote.id].wallet
 
-    if (feePaid && assetsAreSupported && hasWallets) {
+    if (registeredAndFeePaid && assetsAreSupported && hasWallets) {
       Doc.show(page.orderForm, page.orderTypeBttns)
     }
   }
@@ -686,6 +687,7 @@ export default class MarketsPage extends BasePage {
     }
     page.loaderMsg.textContent = text
     Doc.show(page.loaderMsg)
+    Doc.hide(page.notRegistered)
     Doc.hide(page.noWallet)
   }
 
@@ -778,6 +780,7 @@ export default class MarketsPage extends BasePage {
     page.qtyField.value = ''
     page.rateField.value = ''
 
+    Doc.hide(page.notRegistered)
     Doc.hide(page.noWallet)
 
     // If we have not yet connected, there is no dex.assets or any other
@@ -824,6 +827,11 @@ export default class MarketsPage extends BasePage {
       rateConversionFactor,
       sellBalance: 0,
       buyBalance: 0
+    }
+
+    if (!dex.acctID) {
+      page.unregisteredDex.textContent = host
+      Doc.show(page.notRegistered)
     }
 
     Doc.setVis(!(baseAsset && quoteAsset) || !(baseAsset.wallet && quoteAsset.wallet), page.noWallet)

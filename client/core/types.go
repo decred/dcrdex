@@ -695,10 +695,11 @@ type CandlesPayload struct {
 // dexAccount is the core type to represent the client's account information for
 // a DEX.
 type dexAccount struct {
-	host      string
-	cert      []byte
-	dexPubKey *secp256k1.PublicKey
+	host      string               // on init
+	cert      []byte               // on init
+	dexPubKey *secp256k1.PublicKey // on connectDEX -> refreshServerConfig
 
+	// generated in {DiscoverAcct, Register} -> discoverAcct -> setupCryptoV2
 	keyMtx  sync.RWMutex
 	encKey  []byte
 	privKey *secp256k1.PrivateKey
@@ -745,6 +746,14 @@ func (a *dexAccount) ID() account.AccountID {
 	a.keyMtx.RLock()
 	defer a.keyMtx.RUnlock()
 	return a.id
+}
+
+// isRegistered is true if this account has a feeCoin. Every registered account
+// must have a feeCoin set.
+func (a *dexAccount) isRegistered() bool {
+	a.keyMtx.RLock()
+	defer a.keyMtx.RUnlock()
+	return len(a.feeCoin) > 0
 }
 
 // setupCryptoV2 generates a hierarchical deterministic key for the account.

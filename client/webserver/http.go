@@ -85,14 +85,17 @@ type registerTmplData struct {
 	CommonArguments
 	Initialized    bool
 	Authed         bool
+	Host           string
 	KnownExchanges []string
 }
 
 // handleRegister is the handler for the '/register' page request.
 func (s *WebServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 	common := s.commonArgs(r, "Register | Decred DEX")
+	host, _ := getHostCtx(r)
 	s.sendTemplate(w, "register", &registerTmplData{
 		CommonArguments: *common,
+		Host:            host,
 		KnownExchanges:  s.knownUnregisteredExchanges(common.UserInfo.Exchanges),
 	})
 }

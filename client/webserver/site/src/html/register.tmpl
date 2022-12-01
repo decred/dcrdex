@@ -1,6 +1,6 @@
 {{define "register"}}
 {{template "top" .}}
-<div id="main" data-handler="register" class="main align-items-center justify-content-center flex-column stylish-overflow">
+<div id="main" data-handler="register" data-host="{{.Host}}" class="main align-items-center justify-content-center flex-column stylish-overflow">
   <div class="position-absolute" id="forms">
 
     {{- /* Set up the initial application password. Only shown if app is not already initialized. */ -}}

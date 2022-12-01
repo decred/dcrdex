@@ -62,10 +62,7 @@ export default class RegistrationPage extends BasePage {
 
     // ADD DEX
     this.dexAddrForm = new DEXAddressForm(page.dexAddrForm, async (xc, certFile) => {
-      this.currentDEX = xc
-      this.confirmRegisterForm.setExchange(xc, certFile)
-      this.walletWaitForm.setExchange(xc)
-      this.regAssetForm.setExchange(xc)
+      this.setupFeePaymentForExchange(xc, certFile)
       this.animateRegAsset(page.dexAddrForm)
     }, this.pwCache)
 
@@ -101,16 +98,23 @@ export default class RegistrationPage extends BasePage {
       this.animateRegAsset(page.confirmRegForm)
     }, this.pwCache)
 
-    const currentForm = Doc.safeSelector(page.forms, ':scope > form.selected')
-    currentForm.classList.remove('selected')
-    switch (currentForm) {
-      case page.loginForm:
-        this.loginForm.animate()
-        break
-      case page.dexAddrForm:
-        this.dexAddrForm.animate()
+    const requestedExchange = app().authed() && body.dataset.host ? app().exchanges[body.dataset.host] : null
+    if (requestedExchange) {
+      this.setupFeePaymentForExchange(requestedExchange, '')
+      this.regAssetForm.animate()
+      Doc.show(this.page.regAssetForm)
+    } else {
+      const currentForm = Doc.safeSelector(page.forms, ':scope > form.selected')
+      currentForm.classList.remove('selected')
+      switch (currentForm) {
+        case page.loginForm:
+          this.loginForm.animate()
+          break
+        case page.dexAddrForm:
+          this.dexAddrForm.animate()
+      }
+      Doc.show(currentForm)
     }
-    Doc.show(currentForm)
 
     if (app().authed()) this.auth()
   }
@@ -122,6 +126,13 @@ export default class RegistrationPage extends BasePage {
   // auth should be called once user is known to be authed with the server.
   async auth () {
     await app().fetchUser()
+  }
+
+  async setupFeePaymentForExchange (xc: Exchange, certFile: string) {
+    this.currentDEX = xc
+    this.confirmRegisterForm.setExchange(xc, certFile)
+    this.walletWaitForm.setExchange(xc)
+    this.regAssetForm.setExchange(xc)
   }
 
   /* Swap in the asset selection form and run the animation. */

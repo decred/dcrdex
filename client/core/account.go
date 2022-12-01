@@ -276,6 +276,7 @@ func (c *Core) UpdateDEXHost(oldHost, newHost string, appPW []byte, certI interf
 	if err != nil {
 		return nil, codedError(passwordErr, err)
 	}
+	defer crypter.Close()
 
 	oldDc, _, err := c.dex(oldHost)
 	if err != nil {

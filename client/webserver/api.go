@@ -20,6 +20,28 @@ import (
 
 var zero = encode.ClearBytes
 
+// apiAddDEX is the handler for the '/adddex' API request.
+func (s *WebServer) apiAddDEX(w http.ResponseWriter, r *http.Request) {
+	form := new(registrationForm)
+	defer form.Password.Clear()
+	if !readPost(w, r, form) {
+		return
+	}
+	cert := []byte(form.Cert)
+	pass, err := s.resolvePass(form.Password, r)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
+		return
+	}
+	defer zero(pass)
+	err = s.core.AddDEX(form.Addr, pass, cert)
+	if err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+	writeJSON(w, simpleAck(), s.indent)
+}
+
 // apiDiscoverAccount is the handler for the '/discoveracct' API request.
 func (s *WebServer) apiDiscoverAccount(w http.ResponseWriter, r *http.Request) {
 	form := new(registrationForm)

@@ -1431,6 +1431,7 @@ export class DEXAddressForm {
 
     if (dexToUpdate) {
       Doc.hide(page.addDexHdr)
+      Doc.hide(page.skipRegistration.parentElement as PageElement)
       Doc.show(page.updateDexHdr)
       this.dexToUpdate = dexToUpdate
     }
@@ -1486,6 +1487,7 @@ export class DEXAddressForm {
     if (!State.passwordIsCached()) {
       pw = page.appPW.value || (this.pwCache ? this.pwCache.pw : '')
     }
+    const skipRegistration = page.skipRegistration.checked
     let endpoint : string, req: any
     if (this.dexToUpdate) {
       endpoint = '/api/updatedexhost'
@@ -1496,7 +1498,7 @@ export class DEXAddressForm {
         oldHost: this.dexToUpdate
       }
     } else {
-      endpoint = '/api/discoveracct'
+      endpoint = skipRegistration ? '/api/adddex' : '/api/discoveracct'
       req = {
         addr: addr,
         cert: cert,
@@ -1515,7 +1517,7 @@ export class DEXAddressForm {
       }
       return
     }
-    if (!this.dexToUpdate && res.paid) {
+    if (!this.dexToUpdate && (skipRegistration || res.paid)) {
       await app().fetchUser()
       await app().loadPage('markets')
       return

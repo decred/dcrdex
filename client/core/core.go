@@ -38,7 +38,6 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/wait"
-	"decred.org/dcrdex/server/account"
 	serverdex "decred.org/dcrdex/server/dex"
 	"github.com/decred/dcrd/crypto/blake256"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -401,10 +400,9 @@ func (dc *dexConnection) getPendingFee() *PendingFeeState {
 
 func (dc *dexConnection) exchangeInfo() *Exchange {
 	// Set AcctID to empty string if not registered.
-	acctID := dc.acct.ID().String()
-	var emptyAcctID account.AccountID
-	if dc.acct.ID() == emptyAcctID {
-		acctID = ""
+	acctID := ""
+	if dc.acct.isRegistered() {
+		acctID = dc.acct.ID().String()
 	}
 
 	dc.cfgMtx.RLock()
@@ -1209,6 +1207,10 @@ func (c *Core) connectedDEX(addr string) (*dexConnection, error) {
 	dc, connected, err := c.dex(addr)
 	if err != nil {
 		return nil, err
+	}
+
+	if !dc.acct.isRegistered() {
+		return nil, fmt.Errorf("not yet registered at %s", dc.acct.host)
 	}
 
 	if dc.acct.locked() {
@@ -3568,9 +3570,18 @@ func (c *Core) isRegistered(host string) bool {
 		return false
 	}
 
-	dc.acct.keyMtx.RLock()
-	defer dc.acct.keyMtx.RUnlock()
-	return len(dc.acct.encKey) > 0 // should be for all in conns map, but check
+	return dc.acct.isRegistered()
+}
+
+func (c *Core) unregisteredDex(host string) *dexConnection {
+	c.connMtx.RLock()
+	dc, found := c.conns[host]
+	c.connMtx.RUnlock()
+	if found && !dc.acct.isRegistered() {
+		return dc
+	}
+
+	return nil
 }
 
 // tempDexConnection creates an unauthenticated dexConnection. The caller must
@@ -3584,7 +3595,7 @@ func (c *Core) tempDexConnection(dexAddr string, certI interface{}) (*dexConnect
 	if err != nil {
 		return nil, newError(fileReadErr, "failed to parse certificate: %w", err)
 	}
-	if c.isRegistered(host) {
+	if c.isRegistered(host) { // unregistered dex may exist, why not use that?
 		return nil, newError(dupeDEXErr, "already registered at %s", dexAddr)
 	}
 
@@ -3602,6 +3613,10 @@ func (c *Core) tempDexConnection(dexAddr string, certI interface{}) (*dexConnect
 // via the User or Exchanges methods. A TLS certificate, certI, can be provided
 // as either a string filename, or []byte file contents.
 func (c *Core) GetDEXConfig(dexAddr string, certI interface{}) (*Exchange, error) {
+	if dc, _, _ := c.dex(dexAddr); dc != nil {
+		return dc.exchangeInfo(), nil
+	}
+
 	dc, err := c.tempDexConnection(dexAddr, certI)
 	if dc != nil {
 		// Stop (re)connect loop, which may be running even if err != nil.
@@ -3736,6 +3751,53 @@ func (c *Core) upgradeConnection(dc *dexConnection) {
 	c.addDexConnection(dc)
 }
 
+// AddDEX adds a DEX to the connections map without requiring registration and
+// fee payment. If a paid account exists with the DEX, it'll be set up and ready
+// for immediate use. Otherwise, Register should be used to pay the required
+// registration fee before the DEX can be used to trade.
+func (c *Core) AddDEX(dexAddr string, appPW []byte, certI interface{}) error {
+	if !c.IsInitialized() {
+		return fmt.Errorf("cannot register DEX because app has not been initialized")
+	}
+
+	crypter, err := c.encryptionKey(appPW)
+	if err != nil {
+		return codedError(passwordErr, err)
+	}
+	crypter.Close()
+
+	host, err := addrHost(dexAddr)
+	if err != nil {
+		return newError(addressParseErr, "error parsing address: %w", err)
+	}
+
+	cert, err := parseCert(host, certI, c.net)
+	if err != nil {
+		return newError(fileReadErr, "failed to parse certificate: %w", err)
+	}
+	if c.isRegistered(host) {
+		return newError(dupeDEXErr, "already registered at %s", dexAddr)
+	}
+
+	dc, err := c.connectDEX(&db.AccountInfo{
+		Host: host,
+		Cert: cert,
+	})
+	if err != nil {
+		if dc != nil {
+			// Stop (re)connect loop, which may be running even if err != nil.
+			dc.connMaster.Disconnect()
+		}
+		return codedError(connectionErr, err)
+	}
+
+	c.connMtx.Lock()
+	c.conns[dc.acct.host] = dc
+	c.connMtx.Unlock()
+
+	return nil
+}
+
 // DiscoverAccount fetches the DEX server's config, and if the server supports
 // the new deterministic account derivation scheme by providing its public key
 // in the config response, DiscoverAccount also checks if the account is already
@@ -3772,26 +3834,28 @@ func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI interface{}) 
 	c.connMtx.RLock()
 	dc, found := c.conns[host]
 	c.connMtx.RUnlock()
-	if found {
+	if found && dc.acct.isRegistered() {
 		// Already registered, but connection may be down and/or PostBond needed.
 		return dc.exchangeInfo(), true, nil // *Exchange has Tier and BondsPending
 	}
 
 	var ready bool
-	dc, err = c.tempDexConnection(host, certI)
-	if dc != nil { // (re)connect loop may be running even if err != nil
-		defer func() {
-			// Either disconnect or promote this connection.
-			if !ready {
-				dc.connMaster.Disconnect()
-				return
-			}
+	if dc == nil {
+		dc, err = c.tempDexConnection(host, certI)
+		if dc != nil { // (re)connect loop may be running even if err != nil
+			defer func() {
+				// Either disconnect or promote this connection.
+				if !ready {
+					dc.connMaster.Disconnect()
+					return
+				}
 
-			c.upgradeConnection(dc)
-		}()
-	}
-	if err != nil {
-		return nil, false, err
+				c.upgradeConnection(dc)
+			}()
+		}
+		if err != nil {
+			return nil, false, err
+		}
 	}
 
 	// Older DEX server. We won't allow registering without an HD account key,
@@ -3839,15 +3903,19 @@ func (c *Core) EstimateRegistrationTxFee(host string, certI interface{}, assetID
 	}
 
 	if rate == 0 {
-		dc, err := c.tempDexConnection(host, certI)
-		if dc != nil {
-			// Stop (re)connect loop, which may be running even if err != nil.
-			defer dc.connMaster.Disconnect()
+		dc, _, _ := c.dex(host)
+		if dc == nil {
+			dc, err = c.tempDexConnection(host, certI)
+			if dc != nil {
+				// Stop (re)connect loop, which may be running even if err != nil.
+				defer dc.connMaster.Disconnect()
+			}
+			if err != nil {
+				c.log.Warnf("failed to connect to dex: %v", err)
+			}
 		}
-		if err == nil {
+		if dc != nil {
 			rate = dc.fetchFeeRate(assetID)
-		} else {
-			c.log.Warnf("failed to connect to dex: %v", err)
 		}
 	}
 
@@ -3911,23 +3979,28 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		return nil, newError(fileReadErr, "failed to read certificate file from %s: %w", cert, err)
 	}
 
-	dc, err := c.connectDEX(&db.AccountInfo{
-		Host:      host,
-		Cert:      cert,
-		BondAsset: defaultBondAsset,
-	})
-	if err != nil {
-		if dc != nil {
-			// Stop (re)connect loop, which may be running even if err != nil.
-			dc.connMaster.Disconnect()
+	dc := c.unregisteredDex(host)
+	existingConn := dc != nil
+
+	if !existingConn {
+		dc, err = c.connectDEX(&db.AccountInfo{
+			Host:      host,
+			Cert:      cert,
+			BondAsset: defaultBondAsset,
+		})
+		if err != nil {
+			if dc != nil {
+				// Stop (re)connect loop, which may be running even if err != nil.
+				dc.connMaster.Disconnect()
+			}
+			return nil, codedError(connectionErr, err)
 		}
-		return nil, codedError(connectionErr, err)
 	}
 
 	// close the connection to the dex server if the registration fails.
 	var registrationComplete bool
 	defer func() {
-		if !registrationComplete {
+		if !existingConn && !registrationComplete {
 			dc.connMaster.Disconnect()
 		}
 	}()
@@ -4794,6 +4867,10 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) {
 	var wg sync.WaitGroup
 	conns := c.dexConnections()
 	for _, dc := range conns {
+		if !dc.acct.isRegistered() {
+			continue // don't attempt authDEX if unregistered
+		}
+
 		// Unlock before checking auth and continuing, because if the user
 		// logged out and didn't shut down, the account is still authed, but
 		// locked, and needs unlocked.
