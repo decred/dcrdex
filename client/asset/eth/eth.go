@@ -2316,13 +2316,8 @@ type findRedemptionRequest struct {
 
 // sendFindRedemptionResult sends the result or logs a message if it cannot be
 // sent.
-func (eth *baseWallet) sendFindRedemptionResult(
-	req *findRedemptionRequest,
-	secretHash [32]byte,
-	secret []byte,
-	makerAddr string,
-	err error,
-) {
+func (eth *baseWallet) sendFindRedemptionResult(req *findRedemptionRequest, secretHash [32]byte,
+	secret []byte, makerAddr string, err error) {
 	select {
 	case req.res <- &findRedemptionResult{secret: secret, makerAddr: makerAddr, err: err}:
 	default:
