@@ -77,7 +77,6 @@ func defaultHostByNetwork(network dex.Network) string {
 type Config struct {
 	AppData      string `long:"appdata" description:"Path to application directory."`
 	Config       string `long:"config" description:"Path to an INI configuration file."`
-	SiteDir      string `long:"sitedir" description:"Path to the 'site' directory with packaged web files. Unspecifed = default is good in most cases."`
 	DBPath       string `long:"db" description:"Database filepath. Database will be created if it does not exist."`
 	RPCOn        bool   `long:"rpc" description:"turn on the rpc server"`
 	RPCAddr      string `long:"rpcaddr" description:"RPC server listen address"`
@@ -92,6 +91,7 @@ type Config struct {
 	Simnet       bool   `long:"simnet" description:"use simnet"`
 	ReloadHTML   bool   `long:"reload-html" description:"(DEPRECATED) Reload the webserver's page template from disk with every request. Prevents use of any embedded UI files. For development purposes. This is deprecated. Use --no-embed-site instead."`
 	NoEmbedSite  bool   `long:"no-embed-site" description:"Use on-disk UI files instead of embedded resources. This also reloads the html template with every request. For development purposes."`
+	SiteDir      string `long:"sitedir" description:"Path to the 'site' directory with packaged web files. Only used with --no-embed-site. When unspecified, search known locations relative to dexc."`
 	DebugLevel   string `long:"log" description:"Logging level {trace, debug, info, warn, error, critical}"`
 	LocalLogs    bool   `long:"loglocal" description:"Use local time zone time stamps in log entries."`
 	CPUProfile   string `long:"cpuprofile" description:"File for CPU profiling."`
@@ -103,6 +103,10 @@ type Config struct {
 	Net          dex.Network
 	CertHosts    []string
 	Experimental bool `long:"experimental" description:"Enable experimental features"`
+
+	NoAutoWalletLock   bool `long:"no-wallet-lock" description:"Disable locking of wallets on shutdown or logout. Use this if you want your external wallets to stay unlocked after closing the DEX app."`
+	NoAutoDBBackup     bool `long:"no-db-backup" description:"Disable creation of a database backup on shutdown."`
+	UnlockCoinsOnLogin bool `long:"release-wallet-coins" description:"On login or wallet creation, instruct the wallet to release any coins that it may have locked."`
 }
 
 var defaultConfig = Config{
