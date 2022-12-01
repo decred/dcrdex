@@ -96,13 +96,16 @@ func mainCore() error {
 
 	// Prepare the Core.
 	clientCore, err := core.New(&core.Config{
-		DBPath:       cfg.DBPath, // global set in config.go
-		Net:          cfg.Net,
-		Logger:       logMaker.Logger("CORE"),
-		TorProxy:     cfg.TorProxy,
-		TorIsolation: cfg.TorIsolation,
-		Onion:        cfg.Onion,
-		Language:     cfg.Language,
+		DBPath:             cfg.DBPath,
+		Net:                cfg.Net,
+		Logger:             logMaker.Logger("CORE"),
+		TorProxy:           cfg.TorProxy,
+		TorIsolation:       cfg.TorIsolation,
+		Onion:              cfg.Onion,
+		Language:           cfg.Language,
+		UnlockCoinsOnLogin: cfg.UnlockCoinsOnLogin,
+		NoAutoWalletLock:   cfg.NoAutoWalletLock,
+		NoAutoDBBackup:     cfg.NoAutoDBBackup,
 	})
 	if err != nil {
 		return fmt.Errorf("error creating client core: %w", err)

@@ -150,9 +150,12 @@ func newMantle(name string) (*Mantle, error) {
 	}
 	dbPath := filepath.Join(coreDir, "core.db")
 	c, err := core.New(&core.Config{
-		DBPath: dbPath,
-		Net:    dex.Simnet,
-		Logger: loggerMaker.Logger("CORE:" + name),
+		DBPath:           dbPath,
+		Net:              dex.Simnet,
+		Logger:           loggerMaker.Logger("CORE:" + name),
+		NoAutoWalletLock: true,
+		// UnlockCoinsOnLogin: true, // true if we are certain that two bots/Core's are not using the same external wallet
+		NoAutoDBBackup: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error initializing core: %w", err)
