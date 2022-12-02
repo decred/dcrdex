@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -1175,33 +1176,57 @@ func (w *spvWallet) moveWalletData(backupDir string) error {
 	return nil
 }
 
+// copyFile copies a file from src to dst.
+func copyFile(src, dst string) error {
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	_, err = io.Copy(out, in)
+	return err
+}
+
 // copyDir recursively copies the directories and files in source directory to
-// destination directory without preserving the original file permissions.
-func copyDir(srcDir, dstDir string) error {
-	dirFiles, err := os.ReadDir(srcDir)
+// destination directory without preserving the original file permissions. The
+// destination folder must not exist.
+func copyDir(src, dst string) error {
+	entries, err := os.ReadDir(src)
 	if err != nil {
 		return err
 	}
 
-	if err := os.MkdirAll(dstDir, 0744); err != nil {
-		return err
+	fi, err := os.Stat(dst)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		err = os.MkdirAll(dst, 0744)
+		if err != nil {
+			return err
+		}
+	} else if !fi.IsDir() {
+		return fmt.Errorf("%q is not a directory", dst)
 	}
 
-	for _, file := range dirFiles {
-		srcFile := filepath.Join(srcDir, file.Name())
-		dstFile := filepath.Join(dstDir, file.Name())
-		if file.IsDir() {
-			if err := copyDir(srcFile, dstFile); err != nil {
-				return err
-			}
-		} else if file.Type().IsRegular() {
-			logBytes, err := os.ReadFile(srcFile)
-			if err != nil {
-				return err
-			}
-			if err := os.WriteFile(dstFile, logBytes, 0744); err != nil {
-				return err
-			}
+	for _, fd := range entries {
+		fName := fd.Name()
+		srcFile := filepath.Join(src, fName)
+		dstFile := filepath.Join(dst, fName)
+		if fd.IsDir() {
+			err = copyDir(srcFile, dstFile)
+		} else if fd.Type().IsRegular() {
+			err = copyFile(srcFile, dstFile)
+		}
+		if err != nil {
+			return err
 		}
 	}
 
