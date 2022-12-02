@@ -19,6 +19,12 @@ BCH_ON=$?
 ~/dextest/eth/harness-ctl/alpha attach --exec 'eth.blockNumber' > /dev/null
 ETH_ON=$?
 
+~/dextest/doge/harness-ctl/alpha getblockchaininfo > /dev/null
+DOGE_ON=$?
+
+~/dextest/zec/harness-ctl/alpha getblockchaininfo > /dev/null
+ZEC_ON=$?
+
 set -e
 
 echo initializing
@@ -41,8 +47,19 @@ if [ $BCH_ON -eq 0 ]; then
 fi
 
 if [ $ETH_ON -eq 0 ]; then
-	echo configuring Eth wallet
-	./dexcctl -p abc -p "" --simnet newwallet 60 geth
+	echo configuring Eth and dextt.eth wallets
+	./dexcctl -p abc -p "" --simnet newwallet 60 rpc "" "{\"providers\":\"${HOME}/dextest/eth/alpha/node/geth.ipc\"}"
+	./dexcctl -p abc -p "" --simnet newwallet 60000 rpc
+fi
+
+if [ $DOGE_ON -eq 0 ]; then
+	echo configuring doge wallet
+	./dexcctl -p abc -p "" --simnet newwallet 3 dogecoindRPC ~/dextest/doge/alpha/alpha.conf
+fi
+
+if [ $ZEC_ON -eq 0 ]; then
+	echo configuring zcash wallet
+	./dexcctl -p abc -p "" --simnet newwallet 133 zcashdRPC ~/dextest/zec/alpha/alpha.conf
 fi
 
 echo checking if we have an account already
