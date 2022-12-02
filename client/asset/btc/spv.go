@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sync/atomic"
 	"time"
@@ -60,18 +59,14 @@ var _ BTCWallet = (*btcSPVWallet)(nil)
 
 // createSPVWallet creates a new SPV wallet.
 func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dataDir string, log dex.Logger, extIdx, intIdx uint32, net *chaincfg.Params) error {
-	dir := filepath.Join(dataDir, net.Name, "spv")
-	if err := logNeutrino(dir); err != nil {
+	netDir := filepath.Join(dataDir, net.Name)
+	walletDir := filepath.Join(netDir, spvDir)
+
+	if err := logNeutrino(netDir); err != nil {
 		return fmt.Errorf("error initializing btcwallet+neutrino logging: %w", err)
 	}
 
-	logDir := filepath.Join(dir, logDirName)
-	err := os.MkdirAll(logDir, 0744)
-	if err != nil {
-		return fmt.Errorf("error creating wallet directories: %w", err)
-	}
-
-	loader := wallet.NewLoader(net, dir, true, dbTimeout, 250)
+	loader := wallet.NewLoader(net, walletDir, true, dbTimeout, 250)
 
 	pubPass := []byte(wallet.InsecurePubPassphrase)
 
@@ -95,7 +90,7 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dataDir strin
 	}
 
 	// The chain service DB
-	neutrinoDBPath := filepath.Join(dir, neutrinoDBName)
+	neutrinoDBPath := filepath.Join(walletDir, neutrinoDBName)
 	db, err := walletdb.Create("bdb", neutrinoDBPath, true, dbTimeout)
 	if err != nil {
 		bailOnWallet()
@@ -142,10 +137,11 @@ func (w *btcSPVWallet) updateDBBirthday(bday time.Time) error {
 	})
 }
 
-// startWallet initializes the *btcwallet.Wallet and its supporting players and
+// Start initializes the *btcwallet.Wallet and its supporting players and
 // starts syncing.
 func (w *btcSPVWallet) Start() (SPVService, error) {
-	if err := logNeutrino(w.dir); err != nil {
+	netDir := filepath.Dir(w.dir)
+	if err := logNeutrino(netDir); err != nil {
 		return nil, fmt.Errorf("error initializing btcwallet+neutrino logging: %v", err)
 	}
 	// timeout and recoverWindow arguments borrowed from btcwallet directly.
@@ -242,7 +238,7 @@ func (w *btcSPVWallet) Start() (SPVService, error) {
 	return &btcChainService{w.cl}, nil
 }
 
-// stop stops the wallet and database threads.
+// Stop stops the wallet and database threads.
 func (w *btcSPVWallet) Stop() {
 	w.log.Info("Unloading wallet")
 	if err := w.loader.UnloadWallet(); err != nil {
@@ -351,7 +347,7 @@ func (w *btcSPVWallet) ForceRescan() {
 	}
 }
 
-// walletTransaction pulls the transaction from the database.
+// WalletTransaction pulls the transaction from the database.
 func (w *btcSPVWallet) WalletTransaction(txHash *chainhash.Hash) (*wtxmgr.TxDetails, error) {
 	details, err := wallet.UnstableAPI(w.Wallet).TxDetails(txHash)
 	if err != nil {
@@ -383,12 +379,12 @@ func (w *btcSPVWallet) SyncedTo() waddrmgr.BlockStamp {
 // 		return err
 // 	})
 // 	if err != nil {
-// 		return nil, err // sadly, waddrmgr.ErrBirthdayBlockNotSet is expected during most of chain sync
+// 		return nil, err // sadly, waddrmgr.ErrBirthdayBlockNotSet is expected during most of the chain sync
 // 	}
 // 	return &birthdayBlock, nil
 // }
 
-// signTransaction signs the transaction inputs.
+// SignTx signs the transaction inputs.
 func (w *btcSPVWallet) SignTx(tx *wire.MsgTx) error {
 	var prevPkScripts [][]byte
 	var inputValues []btcutil.Amount
@@ -500,7 +496,7 @@ func (s *secretSource) GetScript(addr btcutil.Address) ([]byte, error) {
 // only has to be initialized once, so an atomic flag is used internally to
 // return early on subsequent invocations.
 //
-// In theory, the the rotating file logger must be Close'd at some point, but
+// In theory, the rotating file logger must be Closed at some point, but
 // there are concurrency issues with that since btcd and btcwallet have
 // unsupervised goroutines still running after shutdown. So we leave the rotator
 // running at the risk of losing some logs.

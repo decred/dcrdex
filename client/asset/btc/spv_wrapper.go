@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -71,7 +72,8 @@ const (
 
 	maxFutureBlockTime = 2 * time.Hour // see MaxTimeOffsetSeconds in btcd/blockchain/validate.go
 	neutrinoDBName     = "neutrino.db"
-	logDirName         = "logs"
+	spvDir             = "spv"
+	logDirName         = "spvlogs"
 	logFileName        = "neutrino.log"
 	defaultAcctNum     = 0
 	defaultAcctName    = "default"
@@ -1082,7 +1084,7 @@ func (w *spvWallet) getBestBlockHeader() (*blockHeader, error) {
 }
 
 func (w *spvWallet) logFilePath() string {
-	return filepath.Join(w.dir, logDirName, logFileName)
+	return filepath.Join(filepath.Dir(w.dir), logDirName, logFileName)
 }
 
 // connect will start the wallet and begin syncing.
@@ -1153,8 +1155,78 @@ func (w *spvWallet) moveWalletData(backupDir string) error {
 	if err != nil {
 		return err
 	}
-	backupFolder := filepath.Join(backupDir, timeString)
-	return os.Rename(w.dir, backupFolder)
+
+	backupFolder := filepath.Join(backupDir, w.chainParams.Name, timeString)
+	// Copy wallet logs first. Even if there is an error, wallet files are
+	// still intact.
+	backupLogDir := filepath.Join(backupFolder, logDirName)
+	walletLogDir := filepath.Dir(w.logFilePath())
+	if err := copyDir(walletLogDir, backupLogDir); err != nil {
+		return err
+	}
+
+	walletBackupDir := filepath.Join(backupFolder, spvDir)
+	if err := os.Rename(w.dir, walletBackupDir); err != nil {
+		return err
+	}
+	return nil
+}
+
+// copyFile copies a file from src to dst.
+func copyFile(src, dst string) error {
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	_, err = io.Copy(out, in)
+	return err
+}
+
+// copyDir recursively copies the directories and files in source directory to
+// destination directory without preserving the original file permissions. The
+// destination folder must not exist.
+func copyDir(src, dst string) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+
+	fi, err := os.Stat(dst)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		err = os.MkdirAll(dst, 0744)
+		if err != nil {
+			return err
+		}
+	} else if !fi.IsDir() {
+		return fmt.Errorf("%q is not a directory", dst)
+	}
+
+	for _, fd := range entries {
+		fName := fd.Name()
+		srcFile := filepath.Join(src, fName)
+		dstFile := filepath.Join(dst, fName)
+		if fd.IsDir() {
+			err = copyDir(srcFile, dstFile)
+		} else if fd.Type().IsRegular() {
+			err = copyFile(srcFile, dstFile)
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // numDerivedAddresses returns the number of internal and external addresses

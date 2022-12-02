@@ -53,7 +53,7 @@ import (
 
 const (
 	DefaultM       uint64 = 784931 // From bchutil. Used for gcs filters.
-	logDirName            = "logs"
+	logDirName            = "spvlogs"
 	neutrinoDBName        = "neutrino.db"
 	defaultAcctNum        = 0
 )
@@ -115,19 +115,14 @@ func openSPVWallet(dir string, cfg *btc.WalletConfig, btcParams *chaincfg.Params
 
 // createSPVWallet creates a new SPV wallet.
 func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string, log dex.Logger, extIdx, intIdx uint32, net *bchchaincfg.Params) error {
-	netDir := filepath.Join(dbDir, net.Name, "spv")
+	netDir := filepath.Join(dbDir, net.Name)
+	walletDir := filepath.Join(netDir, "spv")
 
 	if err := logNeutrino(netDir, log); err != nil {
 		return fmt.Errorf("error initializing bchwallet+neutrino logging: %w", err)
 	}
 
-	logDir := filepath.Join(netDir, logDirName)
-	err := os.MkdirAll(logDir, 0744)
-	if err != nil {
-		return fmt.Errorf("error creating wallet directories: %w", err)
-	}
-
-	loader := wallet.NewLoader(net, netDir, true, 250)
+	loader := wallet.NewLoader(net, walletDir, true, 250)
 
 	pubPass := []byte(wallet.InsecurePubPassphrase)
 
@@ -148,7 +143,7 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string,
 	}
 
 	// The chain service DB
-	neutrinoDBPath := filepath.Join(netDir, neutrinoDBName)
+	neutrinoDBPath := filepath.Join(walletDir, neutrinoDBName)
 	db, err := walletdb.Create("bdb", neutrinoDBPath, true)
 	if err != nil {
 		return fmt.Errorf("unable to create neutrino db at %q: %w", neutrinoDBPath, err)
@@ -168,7 +163,8 @@ func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string,
 // Start initializes the *bchwallet.Wallet and its supporting players and starts
 // syncing.
 func (w *bchSPVWallet) Start() (btc.SPVService, error) {
-	if err := logNeutrino(w.dir, w.log); err != nil {
+	netDir := filepath.Dir(w.dir)
+	if err := logNeutrino(netDir, w.log); err != nil {
 		return nil, fmt.Errorf("error initializing bchwallet+neutrino logging: %v", err)
 	}
 	// recoverWindow arguments borrowed from bchwallet directly.
@@ -973,7 +969,7 @@ func logRotator(netDir string) (*rotator.Rotator, error) {
 // only has to be initialized once, so an atomic flag is used internally to
 // return early on subsequent invocations.
 //
-// In theory, the the rotating file logger must be Close'd at some point, but
+// In theory, the rotating file logger must be Closed at some point, but
 // there are concurrency issues with that since btcd and btcwallet have
 // unsupervised goroutines still running after shutdown. So we leave the rotator
 // running at the risk of losing some logs.

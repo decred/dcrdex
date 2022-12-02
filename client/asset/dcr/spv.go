@@ -54,7 +54,7 @@ const (
 	defaultAcctName = "default"
 	walletDbName    = "wallet.db"
 	dbDriver        = "bdb"
-	logDirName      = "logs"
+	logDirName      = "spvlogs"
 	logFileName     = "neutrino.log"
 )
 
@@ -138,22 +138,23 @@ var _ Wallet = (*spvWallet)(nil)
 var _ tipNotifier = (*spvWallet)(nil)
 
 func createSPVWallet(pw, seed []byte, dataDir string, extIdx, intIdx uint32, chainParams *chaincfg.Params) error {
-	dir := filepath.Join(dataDir, chainParams.Name, "spv")
+	netDir := filepath.Join(dataDir, chainParams.Name)
+	walletDir := filepath.Join(netDir, "spv")
 
-	if err := initLogging(dir); err != nil {
+	if err := initLogging(netDir); err != nil {
 		return fmt.Errorf("error initializing dcrwallet logging: %w", err)
 	}
 
-	if exists, err := walletExists(dir); err != nil {
+	if exists, err := walletExists(walletDir); err != nil {
 		return err
 	} else if exists {
-		return fmt.Errorf("wallet at %q already exists", dir)
+		return fmt.Errorf("wallet at %q already exists", walletDir)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	dbPath := filepath.Join(dir, walletDbName)
+	dbPath := filepath.Join(walletDir, walletDbName)
 	exists, err := fileExists(dbPath)
 	if err != nil {
 		return fmt.Errorf("error checking file existence for %q: %w", dbPath, err)
@@ -163,7 +164,7 @@ func createSPVWallet(pw, seed []byte, dataDir string, extIdx, intIdx uint32, cha
 	}
 
 	// Ensure the data directory for the network exists.
-	if err := checkCreateDir(dir); err != nil {
+	if err := checkCreateDir(walletDir); err != nil {
 		return fmt.Errorf("checkCreateDir error: %w", err)
 	}
 
@@ -172,7 +173,7 @@ func createSPVWallet(pw, seed []byte, dataDir string, extIdx, intIdx uint32, cha
 	// attempts to remove any wallet remnants.
 	defer func() {
 		if err != nil {
-			_ = os.Remove(dir)
+			_ = os.Remove(walletDir)
 		}
 	}()
 
@@ -232,7 +233,8 @@ func (w *spvWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, ne
 }
 
 func (w *spvWallet) startWallet(ctx context.Context) error {
-	if err := initLogging(w.dir); err != nil {
+	netDir := filepath.Dir(w.dir)
+	if err := initLogging(netDir); err != nil {
 		return fmt.Errorf("error initializing dcrwallet logging: %w", err)
 	}
 
@@ -952,11 +954,11 @@ func logRotator(netDir string) (*rotator.Rotator, error) {
 // to be initialized once, so an atomic flag is used internally to return early
 // on subsequent invocations.
 //
-// TODO: See if the below precaution is even necessary for dcrwallet.
-// // In theory, the the rotating file logger must be Close'd at some point, but
-// // there are concurrency issues with that since btcd and btcwallet have
-// // unsupervised goroutines still running after shutdown. So we leave the rotator
-// // running at the risk of losing some logs.
+// TODO: See if the below precaution is even necessary for dcrwallet. In theory,
+// the the rotating file logger must be Close'd at some point, but there are
+// concurrency issues with that since btcd and btcwallet have unsupervised
+// goroutines still running after shutdown. So we leave the rotator running at
+// the risk of losing some logs.
 func initLogging(netDir string) error {
 	if !atomic.CompareAndSwapUint32(&loggingInited, 0, 1) {
 		return nil
