@@ -21,6 +21,13 @@ import (
 	"github.com/davecgh/go-spew/spew"
 )
 
+func init() {
+	asset.Register(tUTXOAssetA.ID, &tDriver{
+		decodedCoinID: tUTXOAssetA.Symbol,
+		winfo:         tWalletInfo,
+	})
+}
+
 func verifyResponse(payload *msgjson.ResponsePayload, res interface{}, wantErrCode int) error {
 	if wantErrCode != -1 {
 		if payload.Error == nil {
@@ -40,7 +47,49 @@ func verifyResponse(payload *msgjson.ResponsePayload, res interface{}, wantErrCo
 	return nil
 }
 
-var wsServer = websocket.New(&TCore{}, dex.StdOutLogger("TEST", dex.LevelTrace))
+var (
+	wsServer    = websocket.New(&TCore{}, dex.StdOutLogger("TEST", dex.LevelTrace))
+	tUTXOAssetA = &dex.Asset{
+		ID:           42,
+		Symbol:       "dcr",
+		Version:      0, // match the stubbed (*TXCWallet).Info result
+		SwapSize:     251,
+		SwapSizeBase: 85,
+		RedeemSize:   200,
+		MaxFeeRate:   10,
+		SwapConf:     1,
+	}
+	tWalletInfo = &asset.WalletInfo{
+		Version:           0,
+		SupportedVersions: []uint32{0},
+		UnitInfo: dex.UnitInfo{
+			Conventional: dex.Denomination{
+				ConversionFactor: 1e8,
+			},
+		},
+		AvailableWallets: []*asset.WalletDefinition{{
+			Type: "rpc",
+		}},
+	}
+)
+
+type tDriver struct {
+	wallet        asset.Wallet
+	decodedCoinID string
+	winfo         *asset.WalletInfo
+}
+
+func (drv *tDriver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (asset.Wallet, error) {
+	return drv.wallet, nil
+}
+
+func (drv *tDriver) DecodeCoinID(coinID []byte) (string, error) {
+	return drv.decodedCoinID, nil
+}
+
+func (drv *tDriver) Info() *asset.WalletInfo {
+	return drv.winfo
+}
 
 type Dummy struct {
 	Status string
@@ -277,6 +326,15 @@ func TestHandleNewWallet(t *testing.T) {
 			`{"field":  value"}`,
 		},
 	}
+	badWalletDefParams := &RawParams{
+		PWArgs: []encode.PassBytes{pw, pw},
+		Args: []string{
+			"45",
+			"rpc",
+			"username=tacotime",
+			`{"field":"value"}`,
+		},
+	}
 	tests := []struct {
 		name            string
 		params          *RawParams
@@ -307,6 +365,10 @@ func TestHandleNewWallet(t *testing.T) {
 		name:        "bad JSON error",
 		params:      badJSONParams,
 		wantErrCode: msgjson.RPCArgumentsError,
+	}, {
+		name:        "bad config opts error, unknown coin",
+		params:      badWalletDefParams,
+		wantErrCode: msgjson.RPCWalletDefinitionError,
 	}, {
 		name:        "bad params",
 		params:      &RawParams{},

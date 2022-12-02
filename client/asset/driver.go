@@ -271,3 +271,32 @@ nextasset:
 		delete(tokens, assetID)
 	}
 }
+
+// WalletDef gets the registered WalletDefinition for the asset and
+// wallet type.
+func WalletDef(assetID uint32, walletType string) (*WalletDefinition, error) {
+	token := TokenInfo(assetID)
+	if token != nil {
+		return token.Definition, nil
+	}
+	winfo, err := Info(assetID)
+	if err != nil {
+		return nil, fmt.Errorf("Info error: %w", err)
+	}
+	if walletType == "" {
+		if len(winfo.AvailableWallets) <= winfo.LegacyWalletIndex {
+			return nil, fmt.Errorf("legacy wallet index out of range")
+		}
+		return winfo.AvailableWallets[winfo.LegacyWalletIndex], nil
+	}
+	var wd *WalletDefinition
+	for _, def := range winfo.AvailableWallets {
+		if def.Type == walletType {
+			wd = def
+		}
+	}
+	if wd == nil {
+		return nil, fmt.Errorf("could not find wallet definition for asset %s, type %q", dex.BipIDSymbol(assetID), walletType)
+	}
+	return wd, nil
+}

@@ -2376,9 +2376,9 @@ func (c *Core) createWalletOrToken(crypter encrypt.Crypter, walletPW []byte, for
 }
 
 func (c *Core) createWallet(crypter encrypt.Crypter, walletPW []byte, assetID uint32, form *WalletForm) (*db.Wallet, error) {
-	walletDef, err := walletDefinition(assetID, form.Type)
+	walletDef, err := asset.WalletDef(assetID, form.Type)
 	if err != nil {
-		return nil, err
+		return nil, newError(assetSupportErr, "asset.WalletDef error: %w", err)
 	}
 
 	// Sometimes core will insert data into the Settings map to communicate
@@ -2798,9 +2798,9 @@ func (c *Core) RecoverWallet(assetID uint32, appPW []byte, force bool) error {
 	if !isRecoverer {
 		return errors.New("wallet is not a recoverer")
 	}
-	walletDef, err := walletDefinition(assetID, oldWallet.walletType)
+	walletDef, err := asset.WalletDef(assetID, oldWallet.walletType)
 	if err != nil {
-		return err
+		return newError(assetSupportErr, "asset.WalletDef error: %w", err)
 	}
 	// Unseeded wallets shouldn't implement the Recoverer interface. This
 	// is just an additional check for safety.
@@ -3016,9 +3016,9 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 
 	assetID := form.AssetID
 
-	walletDef, err := walletDefinition(assetID, form.Type)
+	walletDef, err := asset.WalletDef(assetID, form.Type)
 	if err != nil {
-		return err
+		return newError(assetSupportErr, "asset.WalletDef error: %w", err)
 	}
 	if walletDef.Seeded && newWalletPW != nil {
 		return newError(passwordErr, "cannot set a password on a built-in(seeded) wallet")
@@ -3034,9 +3034,9 @@ func (c *Core) ReconfigureWallet(appPW, newWalletPW []byte, form *WalletForm) er
 		return fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(assetID)))
 	}
 
-	oldDef, err := walletDefinition(assetID, oldWallet.walletType)
+	oldDef, err := asset.WalletDef(assetID, oldWallet.walletType)
 	if err != nil {
-		return fmt.Errorf("failed to locate old wallet definition: %v", err)
+		return newError(assetSupportErr, "old wallet asset.WalletDef error: %w", err)
 	}
 	oldDepositAddr := oldWallet.currentDepositAddress()
 
@@ -3338,9 +3338,9 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 
 // setWalletPassword updates the (encrypted) password for the wallet.
 func (c *Core) setWalletPassword(wallet *xcWallet, newPW []byte, crypter encrypt.Crypter) error {
-	walletDef, err := walletDefinition(wallet.AssetID, wallet.walletType)
+	walletDef, err := asset.WalletDef(wallet.AssetID, wallet.walletType)
 	if err != nil {
-		return err
+		return newError(assetSupportErr, "asset.WalletDef error: %w", err)
 	}
 	if walletDef.Seeded || asset.TokenInfo(wallet.AssetID) != nil {
 		return newError(passwordErr, "cannot set a password on a seeded or token wallet")
@@ -3436,9 +3436,9 @@ func (c *Core) NewDepositAddress(assetID uint32) (string, error) {
 // asset.WalletInfo.DefaultConfigPath. If settings are not found, an empty map
 // is returned.
 func (c *Core) AutoWalletConfig(assetID uint32, walletType string) (map[string]string, error) {
-	walletDef, err := walletDefinition(assetID, walletType)
+	walletDef, err := asset.WalletDef(assetID, walletType)
 	if err != nil {
-		return nil, err
+		return nil, newError(assetSupportErr, "asset.WalletDef error: %w", err)
 	}
 
 	if walletDef.DefaultConfigPath == "" {
@@ -8680,35 +8680,6 @@ func parseCert(host string, certI interface{}, net dex.Network) ([]byte, error) 
 		return CertStore[net][host], nil // not found is ok (try without TLS)
 	}
 	return nil, fmt.Errorf("not a valid certificate type %T", certI)
-}
-
-// walletDefinition gets the registered WalletDefinition for the asset and
-// wallet type.
-func walletDefinition(assetID uint32, walletType string) (*asset.WalletDefinition, error) {
-	token := asset.TokenInfo(assetID)
-	if token != nil {
-		return token.Definition, nil
-	}
-	winfo, err := asset.Info(assetID)
-	if err != nil {
-		return nil, newError(assetSupportErr, "asset.Info error: %w", err)
-	}
-	if walletType == "" {
-		if len(winfo.AvailableWallets) <= winfo.LegacyWalletIndex {
-			return nil, fmt.Errorf("legacy wallet index out of range")
-		}
-		return winfo.AvailableWallets[winfo.LegacyWalletIndex], nil
-	}
-	var walletDef *asset.WalletDefinition
-	for _, def := range winfo.AvailableWallets {
-		if def.Type == walletType {
-			walletDef = def
-		}
-	}
-	if walletDef == nil {
-		return nil, fmt.Errorf("could not find wallet definition for asset %s, type %q", unbip(assetID), walletType)
-	}
-	return walletDef, nil
 }
 
 // WalletLogFilePath returns the path to the wallet's log file.

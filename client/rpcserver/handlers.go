@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
@@ -192,6 +193,22 @@ func handleNewWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		resErr := msgjson.NewError(msgjson.RPCWalletExistsError, errMsg)
 		return createResponse(newWalletRoute, nil, resErr)
 	}
+
+	walletDef, err := asset.WalletDef(form.assetID, form.walletType)
+	if err != nil {
+		errMsg := fmt.Sprintf("error creating %s wallet: unable to get wallet definition: %v",
+			dex.BipIDSymbol(form.assetID), err)
+		resErr := msgjson.NewError(msgjson.RPCWalletDefinitionError, errMsg)
+		return createResponse(newWalletRoute, nil, resErr)
+	}
+
+	// Apply default config options if they exist.
+	for _, opt := range walletDef.ConfigOpts {
+		if _, has := form.config[opt.Key]; !has && opt.DefaultValue != nil {
+			form.config[opt.Key] = fmt.Sprintf("%v", opt.DefaultValue)
+		}
+	}
+
 	// Wallet does not exist yet. Try to create it.
 	err = s.core.CreateWallet(form.appPass, form.walletPass, &core.WalletForm{
 		Type:    form.walletType,
