@@ -879,7 +879,7 @@ export default class Application {
     const supportedAsset = this.assets[assetID]
     if (supportedAsset) return supportedAsset.unitInfo
     if (!xc || !xc.assets) {
-      throw Error(`no supported asset info for id = ${assetID}, and no exchange info provided`)
+      throw Error(intl.prep(intl.ID_UNSUPPORTED_ASSET_INFO_ERR_MSG, { assetID: `${assetID}` }))
     }
     return xc.assets[assetID].unitInfo
   }
