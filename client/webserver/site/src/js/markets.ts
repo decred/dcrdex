@@ -424,12 +424,18 @@ export default class MarketsPage extends BasePage {
 
     // Limit order form: event listeners for handling user interactions.
     bind(page.rateField, 'change', () => { this.rateFieldChangeHandler() })
+    bind(page.rateField, 'input', () => { this.rateFieldInputHandler() })
     bind(page.lotField, 'change', () => { this.lotFieldChangeHandler() })
+    bind(page.lotField, 'input', () => { this.lotFieldInputHandler() })
     bind(page.qtyField, 'change', () => { this.qtyFieldChangeHandler() })
+    bind(page.qtyField, 'input', () => { this.qtyFieldInputHandler() })
     // Market order form: event listeners for handling user interactions.
     bind(page.mktBuyField, 'change', () => { this.mktBuyFieldHandler() })
+    bind(page.mktBuyField, 'input', () => { this.mktBuyFieldHandler() })
     bind(page.mktSellLotField, 'change', () => { this.mktSellLotFieldChangeHandler() })
+    bind(page.mktSellLotField, 'input', () => { this.mktSellLotFieldInputHandler() })
     bind(page.mktSellQtyField, 'change', () => { this.mktSellQtyFieldChangeHandler() })
+    bind(page.mktSellQtyField, 'input', () => { this.mktSellQtyFieldInputHandler() })
 
     // Market search input bindings.
     bind(page.marketSearchV1, 'change', () => { this.filterMarkets() })
@@ -2210,6 +2216,23 @@ export default class MarketsPage extends BasePage {
     this.balanceWgt.updateAsset(this.openAsset.id)
   }
 
+  lotFieldInputHandler () {
+    const page = this.page
+
+    const [inputValid,,, adjQty] = this.parseLotInput(page.lotField.value)
+    if (!inputValid) {
+      page.orderTotalPreview.textContent = ''
+      page.lotField.value = ''
+      page.qtyField.value = ''
+      return
+    }
+    // Lots and quantity fields are tightly coupled to each other, when one is
+    // changed, we need to update the other one as well.
+    page.qtyField.value = String(adjQty)
+
+    this.previewTotal()
+  }
+
   lotFieldChangeHandler () {
     const page = this.page
 
@@ -2237,6 +2260,23 @@ export default class MarketsPage extends BasePage {
     page.qtyField.value = String(adjQty)
 
     this.previewTotal()
+  }
+
+  mktSellLotFieldInputHandler () {
+    const page = this.page
+
+    const [inputValid,,, adjQty] = this.parseLotInput(page.mktSellLotField.value)
+    if (!inputValid) {
+      page.mktSellTotalPreview.textContent = ''
+      page.mktSellLotField.value = ''
+      page.mktSellQtyField.value = ''
+      return
+    }
+    // Lots and quantity fields are tightly coupled to each other, when one is
+    // changed, we need to update the other one as well.
+    page.mktSellQtyField.value = String(adjQty)
+
+    this.previewMktSellTotal(adjQty)
   }
 
   mktSellLotFieldChangeHandler () {
@@ -2283,7 +2323,7 @@ export default class MarketsPage extends BasePage {
     Doc.hide(page.orderErr)
 
     const lotsAdj = parseInt(value || '')
-    if (isNaN(lotsAdj) || lotsAdj < 1) {
+    if (isNaN(lotsAdj) || lotsAdj < 0) {
       return [false, false, 0, 0]
     }
 
@@ -2291,6 +2331,25 @@ export default class MarketsPage extends BasePage {
     const adjQty = lotsAdj * lotSize / bui.conventional.conversionFactor
 
     return [true, rounded, lotsAdj, adjQty]
+  }
+
+  qtyFieldInputHandler () {
+    const page = this.page
+
+    Doc.hide(page.orderErr)
+
+    const [inputValid,, adjLots] = this.parseQtyInput(page.qtyField.value)
+    if (!inputValid) {
+      page.orderTotalPreview.textContent = ''
+      page.lotField.value = ''
+      page.qtyField.value = ''
+      return
+    }
+    // Lots and quantity fields are tightly coupled to each other, when one is
+    // changed, we need to update the other one as well.
+    page.lotField.value = String(adjLots)
+
+    this.previewTotal()
   }
 
   qtyFieldChangeHandler () {
@@ -2319,6 +2378,25 @@ export default class MarketsPage extends BasePage {
     page.qtyField.value = String(adjQty)
 
     this.previewTotal()
+  }
+
+  mktSellQtyFieldInputHandler () {
+    const page = this.page
+
+    Doc.hide(page.orderErr)
+
+    const [inputValid,, adjLots, adjQty] = this.parseQtyInput(page.mktSellQtyField.value)
+    if (!inputValid) {
+      page.mktSellTotalPreview.textContent = ''
+      page.mktSellLotField.value = ''
+      page.mktSellQtyField.value = ''
+      return
+    }
+    // Lots and quantity fields are tightly coupled to each other, when one is
+    // changed, we need to update the other one as well.
+    page.mktSellLotField.value = String(adjLots)
+
+    this.previewMktSellTotal(adjQty)
   }
 
   mktSellQtyFieldChangeHandler () {
@@ -2362,7 +2440,7 @@ export default class MarketsPage extends BasePage {
     const { market: { baseUnitInfo: bui, cfg: { lotsize: lotSizeAtom } } } = this
 
     const qtyRawAtom = convertToAtoms(value || '', bui.conventional.conversionFactor)
-    if (isNaN(qtyRawAtom) || qtyRawAtom < lotSizeAtom) {
+    if (isNaN(qtyRawAtom) || qtyRawAtom < 0) {
       return [false, false, 0, 0]
     }
 
@@ -2392,6 +2470,22 @@ export default class MarketsPage extends BasePage {
     const received = qty / gap
     page.mktBuyLots.textContent = (received / lotSize).toFixed(1)
     page.mktBuyScore.textContent = Doc.formatCoinValue(received, this.market.baseUnitInfo)
+  }
+
+  rateFieldInputHandler () {
+    const page = this.page
+
+    Doc.hide(page.orderErr)
+
+    const [inputValid] = this.parseRateInput()
+    if (!inputValid) {
+      page.orderTotalPreview.textContent = ''
+      return
+    }
+
+    this.previewMax()
+    this.previewTotal()
+    this.drawChartLineInputRate()
   }
 
   rateFieldChangeHandler () {
