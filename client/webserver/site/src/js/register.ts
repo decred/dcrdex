@@ -4,6 +4,7 @@ import { postJSON } from './http'
 import {
   NewWalletForm,
   DEXAddressForm,
+  DiscoverAccountForm,
   LoginForm,
   ConfirmRegistrationForm,
   FeeAssetSelectionForm,
@@ -26,6 +27,7 @@ export default class RegistrationPage extends BasePage {
   page: Record<string, PageElement>
   loginForm: LoginForm
   dexAddrForm: DEXAddressForm
+  discoverAcctForm: DiscoverAccountForm
   newWalletForm: NewWalletForm
   regAssetForm: FeeAssetSelectionForm
   walletWaitForm: WalletWaitForm
@@ -49,8 +51,13 @@ export default class RegistrationPage extends BasePage {
 
     this.loginForm = new LoginForm(page.loginForm, async () => {
       await app().fetchUser()
-      this.dexAddrForm.refresh()
-      slideSwap(page.loginForm, page.dexAddrForm)
+      if (this.discoverAcctForm) {
+        this.discoverAcctForm.refresh()
+        slideSwap(page.loginForm, page.discoverAcctForm)
+      } else {
+        this.dexAddrForm.refresh()
+        slideSwap(page.loginForm, page.dexAddrForm)
+      }
     }, this.pwCache)
 
     this.newWalletForm = new NewWalletForm(
@@ -62,9 +69,15 @@ export default class RegistrationPage extends BasePage {
 
     // ADD DEX
     this.dexAddrForm = new DEXAddressForm(page.dexAddrForm, async (xc, certFile) => {
-      this.setupFeePaymentForExchange(xc, certFile)
-      this.animateRegAsset(page.dexAddrForm)
+      this.requestFeepayment(page.dexAddrForm, xc, certFile)
     }, this.pwCache)
+
+    const addr = page.discoverAcctForm.dataset.host
+    if (addr) {
+      this.discoverAcctForm = new DiscoverAccountForm(page.discoverAcctForm, addr, async (xc) => {
+        this.requestFeepayment(page.discoverAcctForm, xc, '')
+      }, this.pwCache)
+    }
 
     // SELECT REG ASSET
     this.regAssetForm = new FeeAssetSelectionForm(page.regAssetForm, async assetID => {
@@ -98,23 +111,19 @@ export default class RegistrationPage extends BasePage {
       this.animateRegAsset(page.confirmRegForm)
     }, this.pwCache)
 
-    const requestedExchange = app().authed() && body.dataset.host ? app().exchanges[body.dataset.host] : null
-    if (requestedExchange) {
-      this.setupFeePaymentForExchange(requestedExchange, '')
-      this.regAssetForm.animate()
-      Doc.show(this.page.regAssetForm)
-    } else {
-      const currentForm = Doc.safeSelector(page.forms, ':scope > form.selected')
-      currentForm.classList.remove('selected')
-      switch (currentForm) {
-        case page.loginForm:
-          this.loginForm.animate()
-          break
-        case page.dexAddrForm:
-          this.dexAddrForm.animate()
-      }
-      Doc.show(currentForm)
+    const currentForm = Doc.safeSelector(page.forms, ':scope > form.selected')
+    currentForm.classList.remove('selected')
+    switch (currentForm) {
+      case page.loginForm:
+        this.loginForm.animate()
+        break
+      case page.dexAddrForm:
+        this.dexAddrForm.animate()
+        break
+      case page.discoverAcctForm:
+        this.discoverAcctForm.animate()
     }
+    Doc.show(currentForm)
 
     if (app().authed()) this.auth()
   }
@@ -128,11 +137,12 @@ export default class RegistrationPage extends BasePage {
     await app().fetchUser()
   }
 
-  async setupFeePaymentForExchange (xc: Exchange, certFile: string) {
+  async requestFeepayment (oldForm: HTMLElement, xc: Exchange, certFile: string) {
     this.currentDEX = xc
     this.confirmRegisterForm.setExchange(xc, certFile)
     this.walletWaitForm.setExchange(xc)
     this.regAssetForm.setExchange(xc)
+    this.animateRegAsset(oldForm)
   }
 
   /* Swap in the asset selection form and run the animation. */

@@ -3832,9 +3832,9 @@ func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI interface{}) 
 	defer crypter.Close()
 
 	c.connMtx.RLock()
-	dc, found := c.conns[host]
+	dc, existingConn := c.conns[host]
 	c.connMtx.RUnlock()
-	if found && dc.acct.isRegistered() {
+	if existingConn && dc.acct.isRegistered() {
 		// Already registered, but connection may be down and/or PostBond needed.
 		return dc.exchangeInfo(), true, nil // *Exchange has Tier and BondsPending
 	}
@@ -3867,10 +3867,12 @@ func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI interface{}) 
 	// Don't allow registering for another dex with the same pubKey. There can only
 	// be one dex connection per pubKey. UpdateDEXHost must be called to connect to
 	// the same dex using a different host name.
-	exists, host := c.dexWithPubKeyExists(dc.acct.dexPubKey)
-	if exists {
-		return nil, false,
-			fmt.Errorf("the dex at %v is the same dex as %v. Use Update Host to switch host names", host, dexAddr)
+	if !existingConn {
+		exists, host := c.dexWithPubKeyExists(dc.acct.dexPubKey)
+		if exists {
+			return nil, false,
+				fmt.Errorf("the dex at %v is the same dex as %v. Use Update Host to switch host names", host, dexAddr)
+		}
 	}
 
 	// Setup our account keys and attempt to authorize with the DEX.

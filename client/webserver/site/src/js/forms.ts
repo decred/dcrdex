@@ -1549,6 +1549,74 @@ export class DEXAddressForm {
   }
 }
 
+/* DiscoverAccountForm performs account discovery for a pre-selected DEX. */
+export class DiscoverAccountForm {
+  form: HTMLElement
+  addr: string
+  success: (xc: Exchange) => void
+  pwCache: PasswordCache | null
+  page: Record<string, PageElement>
+
+  constructor (form: HTMLElement, addr: string, success: (xc: Exchange) => void, pwCache?: PasswordCache) {
+    this.form = form
+    this.addr = addr
+    this.success = success
+    this.pwCache = pwCache || null
+
+    const page = this.page = Doc.parseTemplate(form)
+    page.dexHost.textContent = addr
+    bind(form, page.submit, () => this.checkDEX())
+
+    this.refresh()
+  }
+
+  refresh () {
+    const page = this.page
+    page.appPW.value = ''
+    Doc.hide(page.err)
+    const hidePWBox = State.passwordIsCached() || (this.pwCache && this.pwCache.pw)
+    if (hidePWBox) Doc.hide(page.appPWBox)
+    else Doc.show(page.appPWBox)
+  }
+
+  /* Just a small size tweak and fade-in. */
+  async animate () {
+    const form = this.form
+    Doc.animate(550, prog => {
+      form.style.transform = `scale(${0.9 + 0.1 * prog})`
+      form.style.opacity = String(Math.pow(prog, 4))
+    }, 'easeOut')
+  }
+
+  async checkDEX () {
+    const page = this.page
+    Doc.hide(page.err)
+    let pw = ''
+    if (!State.passwordIsCached()) {
+      pw = page.appPW.value || (this.pwCache ? this.pwCache.pw : '')
+    }
+    const req = {
+      addr: this.addr,
+      pass: pw
+    }
+    const loaded = app().loading(this.form)
+    const res = await postJSON('/api/discoveracct', req)
+    loaded()
+    if (!app().checkResponse(res)) {
+      page.err.textContent = res.msg
+      Doc.show(page.err)
+      return
+    }
+    if (res.paid) {
+      await app().fetchUser()
+      await app().loadPage('markets')
+      return
+    }
+    if (this.pwCache) this.pwCache.pw = pw
+    this.success(res.xc)
+  }
+}
+
 /* LoginForm is used to sign into the app. */
 export class LoginForm {
   form: HTMLElement
