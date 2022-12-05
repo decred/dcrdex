@@ -2168,9 +2168,14 @@ func (btc *baseWallet) ReturnCoins(unspents asset.Coins) error {
 			return fmt.Errorf("error converting coin: %w", err)
 		}
 		ops = append(ops, op)
+	}
+	if err := btc.node.lockUnspent(true, ops); err != nil {
+		return err // could it have unlocked some of them? we may want to loop instead if that's the case
+	}
+	for _, op := range ops {
 		delete(btc.fundingCoins, op.pt)
 	}
-	return btc.node.lockUnspent(true, ops)
+	return nil
 }
 
 // rawWalletTx gets the raw bytes of a transaction and the number of
