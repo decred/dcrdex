@@ -2001,14 +2001,21 @@ func (dcr *ExchangeWallet) returnCoins(unspents asset.Coins) ([]*fundingCoin, er
 		ops = append(ops, op.wireOutPoint()) // op.tree may be wire.TxTreeUnknown, but that's fine since wallet.LockUnspent doesn't rely on it
 		if fCoin, ok := dcr.fundingCoins[op.pt]; ok {
 			fundingCoins = append(fundingCoins, fCoin)
-			delete(dcr.fundingCoins, op.pt)
 		} else {
 			dcr.log.Warnf("returning coin %s that is not cached as a funding coin", op)
 			fundingCoins = append(fundingCoins, &fundingCoin{op: op})
 		}
 	}
 
-	return fundingCoins, dcr.wallet.LockUnspent(dcr.ctx, true, ops)
+	if err := dcr.wallet.LockUnspent(dcr.ctx, true, ops); err != nil {
+		return nil, err
+	}
+
+	for _, fCoin := range fundingCoins {
+		delete(dcr.fundingCoins, fCoin.op.pt)
+	}
+
+	return fundingCoins, nil
 }
 
 // FundingCoins gets funding coins for the coin IDs. The coins are locked. This
