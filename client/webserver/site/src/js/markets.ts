@@ -214,9 +214,7 @@ export default class MarketsPage extends BasePage {
         // Must adjust chosen value here since it might not be conforming to rate-step.
         this.page.rateField.value = String(x)
         const [inputValid,, adjRate] = this.parseRateInput()
-        if (inputValid) {
-          this.reportDepthClick(adjRate)
-        }
+        if (inputValid) this.reportDepthClick(adjRate)
       },
       volume: (r: VolumeReport) => { this.reportDepthVolume(r) },
       mouse: (r: MouseReport) => { this.reportDepthMouse(r) },
@@ -644,8 +642,7 @@ export default class MarketsPage extends BasePage {
   setOrderVisibility () {
     const page = this.page
     if (this.isLimit()) {
-      Doc.hide(page.mktBuyBox)
-      Doc.hide(page.mktSellBox)
+      Doc.hide(page.mktBuyBox, page.mktSellBox)
       Doc.show(page.limitOrderBox) // for limit - same form is used for buy and sell orders.
     } else {
       Doc.hide(page.limitOrderBox) // for limit - same form is used for buy and sell orders.
@@ -821,6 +818,7 @@ export default class MarketsPage extends BasePage {
     const [bui, qui] = [app().unitInfo(base, dex), app().unitInfo(quote, dex)]
 
     const rateConversionFactor = OrderUtil.RateEncodingFactor / bui.conventional.conversionFactor * qui.conventional.conversionFactor
+    Doc.hide(page.chartErrMsg)
     if (this.maxEstimateTimer) {
       window.clearTimeout(this.maxEstimateTimer)
       this.maxEstimateTimer = null
