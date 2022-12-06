@@ -93,6 +93,7 @@ export const ID_MATCH_STATUS_REFUNDED = 'MATCH_STATUS_REFUNDED'
 export const ID_MATCH_STATUS_REFUND_PENDING = 'MATCH_STATUS_REFUND_PENDING'
 export const ID_MATCH_STATUS_REDEEM_PENDING = 'MATCH_STATUS_REDEEM_PENDING'
 export const ID_MATCH_STATUS_COMPLETE = 'MATCH_STATUS_COMPLETE'
+export const ID_TAKER_FOUND_MAKER_REDEMPTION = 'ID_TAKER_FOUND_MAKER_REDEMPTION'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -187,7 +188,8 @@ export const enUS: Locale = {
   [ID_MATCH_STATUS_REFUNDED]: 'Refunded',
   [ID_MATCH_STATUS_REDEEM_PENDING]: 'Redeem PENDING',
   [ID_MATCH_STATUS_REDEMPTION_CONFIRMED]: 'Redemption Confirmed',
-  [ID_MATCH_STATUS_COMPLETE]: 'Complete'
+  [ID_MATCH_STATUS_COMPLETE]: 'Complete',
+  [ID_TAKER_FOUND_MAKER_REDEMPTION]: 'redeemed by {{ makerAddr }}'
 }
 
 export const ptBR: Locale = {

@@ -262,7 +262,7 @@ export default class OrderPage extends BasePage {
       const formatCoinID = (cid: string) => {
         if (cid.startsWith(coinIDTakerFoundMakerRedemption)) {
           const makerAddr = cid.substring(coinIDTakerFoundMakerRedemption.length)
-          return `${makerAddr} redeemed`
+          return intl.prep(intl.ID_TAKER_FOUND_MAKER_REDEMPTION, { makerAddr: makerAddr })
         }
         return cid
       }
