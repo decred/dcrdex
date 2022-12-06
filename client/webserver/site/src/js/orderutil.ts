@@ -50,7 +50,7 @@ export function sellString (ord: Order) {
 }
 
 export function typeString (ord: Order) {
-  return ord.type === Limit ? (ord.tif === ImmediateTiF ? intl.ID_LIMIT_ORDER_IMMEDIATE_TIF : intl.ID_LIMIT_ORDER) : intl.ID_MARKET_ORDER
+  return ord.type === Limit ? (ord.tif === ImmediateTiF ? intl.prep(intl.ID_LIMIT_ORDER_IMMEDIATE_TIF) : intl.prep(intl.ID_LIMIT_ORDER)) : intl.prep(intl.ID_MARKET_ORDER)
 }
 
 /* isMarketBuy will return true if the order is a market buy order. */
@@ -137,41 +137,41 @@ export function matchStatusString (m: Match) {
     // When revoked, match status is less important than pending action if still
     // active, or the outcome if inactive.
     if (m.active) {
-      if (m.redeem) return intl.prep(intl.ID_MATCH_STATUS_REVOKED, { status: intl.ID_MATCH_STATUS_REDEMPTION_SENT }) // must require confirmation if active
+      if (m.redeem) return intl.prep(intl.ID_MATCH_STATUS_REVOKED, { status: intl.prep(intl.ID_MATCH_STATUS_REDEMPTION_SENT) }) // must require confirmation if active
       // If maker and we have not redeemed, waiting to refund, assuming it's not
       // revoked while waiting for confs on an unspent/unexpired taker swap.
-      if (m.side === Maker) return intl.prep(intl.ID_MATCH_STATUS_REVOKED, { status: intl.ID_MATCH_STATUS_REFUND_PENDING })
+      if (m.side === Maker) return intl.prep(intl.ID_MATCH_STATUS_REVOKED, { status: intl.prep(intl.ID_MATCH_STATUS_REFUND_PENDING) })
       // As taker, resolution depends on maker's actions while waiting to refund.
-      if (m.counterRedeem) return intl.prep(intl.ID_MATCH_STATUS_REVOKED, { status: intl.ID_MATCH_STATUS_REDEEM_PENDING }) // this should be very brief if we see the maker's redeem
-      return intl.prep(intl.ID_MATCH_STATUS_REVOKED, { status: intl.ID_MATCH_STATUS_REFUND_PENDING }) // may switch to redeem if maker redeems on the sly
+      if (m.counterRedeem) return intl.prep(intl.ID_MATCH_STATUS_REVOKED, { status: intl.prep(intl.ID_MATCH_STATUS_REDEEM_PENDING) }) // this should be very brief if we see the maker's redeem
+      return intl.prep(intl.ID_MATCH_STATUS_REVOKED, { status: intl.prep(intl.ID_MATCH_STATUS_REFUND_PENDING) }) // may switch to redeem if maker redeems on the sly
     }
     if (m.refund) {
-      return intl.prep(intl.ID_MATCH_STATUS_REVOKED, { status: intl.ID_MATCH_STATUS_REFUNDED })
+      return intl.prep(intl.ID_MATCH_STATUS_REVOKED, { status: intl.prep(intl.ID_MATCH_STATUS_REFUNDED) })
     }
     if (m.redeem) {
-      return intl.prep(intl.ID_MATCH_STATUS_REVOKED, { status: intl.ID_MATCH_STATUS_REDEMPTION_CONFIRMED })
+      return intl.prep(intl.ID_MATCH_STATUS_REVOKED, { status: intl.prep(intl.ID_MATCH_STATUS_REDEMPTION_CONFIRMED) })
     }
-    return intl.prep(intl.ID_MATCH_STATUS_REVOKED, { status: intl.ID_MATCH_STATUS_COMPLETE }) // i.e. we sent no swap
+    return intl.prep(intl.ID_MATCH_STATUS_REVOKED, { status: intl.prep(intl.ID_MATCH_STATUS_COMPLETE) }) // i.e. we sent no swap
   }
 
   switch (m.status) {
     case NewlyMatched:
-      return intl.ID_MATCH_STATUS_NEWLY_MATCHED
+      return intl.prep(intl.ID_MATCH_STATUS_NEWLY_MATCHED)
     case MakerSwapCast:
-      return intl.ID_MATCH_STATUS_MAKER_SWAP_CAST
+      return intl.prep(intl.ID_MATCH_STATUS_MAKER_SWAP_CAST)
     case TakerSwapCast:
-      return intl.ID_MATCH_STATUS_TAKER_SWAP_CAST
+      return intl.prep(intl.ID_MATCH_STATUS_TAKER_SWAP_CAST)
     case MakerRedeemed:
       if (m.side === Maker) {
-        return intl.ID_MATCH_STATUS_REDEMPTION_SENT
+        return intl.prep(intl.ID_MATCH_STATUS_REDEMPTION_SENT)
       }
-      return intl.ID_MATCH_STATUS_MAKER_REDEEMED
+      return intl.prep(intl.ID_MATCH_STATUS_MAKER_REDEEMED)
     case MatchComplete:
-      return intl.ID_MATCH_STATUS_REDEMPTION_SENT
+      return intl.prep(intl.ID_MATCH_STATUS_REDEMPTION_SENT)
     case MatchConfirmed:
-      return intl.ID_MATCH_STATUS_REDEMPTION_CONFIRMED
+      return intl.prep(intl.ID_MATCH_STATUS_REDEMPTION_CONFIRMED)
   }
-  return intl.ID_MATCH_STATUS_UNKNOWN
+  return intl.prep(intl.ID_MATCH_STATUS_UNKNOWN)
 }
 
 /*
