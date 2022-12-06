@@ -7615,15 +7615,17 @@ func (c *Core) handleReconnect(host string) {
 	go dc.subPriceFeed()
 
 	// If we are registered with this DEX, authenticate.
-	if !dc.acct.locked() /* && dc.acct.feePaid() */ {
-		err = c.authDEX(dc)
-		if err != nil {
-			c.log.Errorf("handleReconnect: Unable to authorize DEX at %s: %v", host, err)
-			return
+	if dc.acct.isRegistered() {
+		if !dc.acct.locked() /* && dc.acct.feePaid() */ {
+			err = c.authDEX(dc)
+			if err != nil {
+				c.log.Errorf("handleReconnect: Unable to authorize DEX at %s: %v", host, err)
+				return
+			}
+		} else {
+			c.log.Infof("Connection to %v established, but you still need to login.", host)
+			// Continue to resubscribe to market fees.
 		}
-	} else {
-		c.log.Infof("Connection to %v established, but you still need to login.", host)
-		// Continue to resubscribe to market fees.
 	}
 
 	// Now that reconcileTrades has been run in authDEX, make a list of epoch
