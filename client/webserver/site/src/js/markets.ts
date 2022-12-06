@@ -578,7 +578,9 @@ export default class MarketsPage extends BasePage {
     }
   }
 
-  // defaultRate returns default exchange rate (aka price).
+  /**
+   * defaultRate returns default exchange rate (aka price).
+   */
   defaultRate (): number {
     // Current exchange rate would be reasonable default Price value.
     const { market: { cfg: { baseid, quoteid, spot }, dex } } = this
@@ -586,14 +588,18 @@ export default class MarketsPage extends BasePage {
     return app().conventionalRate(baseid, quoteid, rate, dex)
   }
 
-  // calcMaxOrderLots returns the maximum order size, in lots (buy or sell,
-  // depending on what user chose in UI).
+  /**
+   * calcMaxOrderLots returns the maximum order size, in lots (buy or sell,
+   * depending on what user chose in UI).
+   */
   calcMaxOrderLots (): number {
     if (this.isSell()) return this.market.maxSell?.swap.lots ?? 0
     return this.market.maxBuys[this.adjustedRateAtoms(this.page.rateField.value)]?.swap.lots ?? 0
   }
 
-  // calcMaxOrderQtyAtoms returns the maximum order size, in atoms.
+  /**
+   * calcMaxOrderQtyAtoms returns the maximum order size, in atoms.
+   */
   calcMaxOrderQtyAtoms (): number {
     const lotSize = this.market.cfg.lotsize
     const maxOrderLots = this.calcMaxOrderLots()
@@ -2306,15 +2312,17 @@ export default class MarketsPage extends BasePage {
     this.previewMktSellTotal(adjQty)
   }
 
-  // parseLotInput parses lot input and returns:
-  // 1) whether there are any parsing issues (true if none, false when
-  //    parsing fails)
-  // 2) whether rounding(adjustment) had happened (true when did)
-  // 3) adjusted lot value
-  // 4) adjusted quantity value
-  //
-  // If lot value couldn't be parsed (parsing issues), the following
-  // values are returned: [false, false, 0, 0].
+  /**
+   * parseLotInput parses lot input and returns:
+   * 1) whether there are any parsing issues (true if none, false when
+   *    parsing fails)
+   * 2) whether rounding(adjustment) had happened (true when did)
+   * 3) adjusted lot value
+   * 4) adjusted quantity value
+   *
+   * If lot value couldn't be parsed (parsing issues), the following
+   * values are returned: [false, false, 0, 0].
+   */
   parseLotInput (value: string | undefined): [boolean, boolean, number, number] {
     const { page, market: { baseUnitInfo: bui, cfg: { lotsize: lotSize } } } = this
 
@@ -2425,15 +2433,17 @@ export default class MarketsPage extends BasePage {
     this.previewMktSellTotal(adjQty)
   }
 
-  // parseQtyInput parses quantity input and returns:
-  // 1) whether there are any parsing issues (true if none, false when
-  //    parsing fails)
-  // 2) whether rounding(adjustment) had happened (true when did)
-  // 3) adjusted lot value
-  // 4) adjusted quantity value
-  //
-  // If quantity value couldn't be parsed (parsing issues), the following
-  // values are returned: [false, false, 0, 0].
+  /**
+   * parseQtyInput parses quantity input and returns:
+   * 1) whether there are any parsing issues (true if none, false when
+   *    parsing fails)
+   * 2) whether rounding(adjustment) had happened (true when did)
+   * 3) adjusted lot value
+   * 4) adjusted quantity value
+   *
+   * If quantity value couldn't be parsed (parsing issues), the following
+   * values are returned: [false, false, 0, 0].
+   */
   parseQtyInput (value: string | undefined): [boolean, boolean, number, number] {
     const { market: { baseUnitInfo: bui, cfg: { lotsize: lotSizeAtom } } } = this
 
@@ -2511,14 +2521,16 @@ export default class MarketsPage extends BasePage {
     this.drawChartLineInputRate()
   }
 
-  // parseRateInput parses rate(price) input and returns:
-  // 1) whether there are any parsing issues (true if none, false when
-  //    parsing fails)
-  // 2) whether rounding(adjustment) to rate-step had happened (true when did)
-  // 3) adjusted rate(price) value
-  //
-  // If rate(price) couldn't be parsed (parsing issues), default rate(price)
-  // value (current market price) is returned.
+  /**
+   * parseRateInput parses rate(price) input and returns:
+   * 1) whether there are any parsing issues (true if none, false when
+   *    parsing fails)
+   * 2) whether rounding(adjustment) to rate-step had happened (true when did)
+   * 3) adjusted rate(price) value
+   *
+   * If rate(price) couldn't be parsed (parsing issues), default rate(price)
+   * value (current market price) is returned.
+   */
   parseRateInput (): [boolean, boolean, number] {
     const rawRateAtom = this.rateAtoms(this.page.rateField.value)
     const adjRateAtom = this.adjustedRateAtoms(this.page.rateField.value)
@@ -3370,11 +3382,13 @@ function hostColor (host: string): string {
   return generateHue(hosts.indexOf(host))
 }
 
-// highlightBackgroundRed returns Animation-factory that will construct Animation that will
-// change element background color to red and back in a smooth transition.
-// Note: Animation will start when constructed by "new" ^ right away - that's why
-// we return constructor-func here (aka factory), instead of constructing Animation
-// right away.
+/**
+ * highlightBackgroundRed returns Animation-factory that will construct Animation that will
+ * change element background color to red and back in a smooth transition.
+ * Note: Animation will start when constructed by "new" ^ right away - that's why
+ * we return constructor-func here (aka factory), instead of constructing Animation
+ * right away.
+ */
 function highlightBackgroundRed (element: PageElement): () => Animation {
   const [r, g, b, a] = State.isDark() ? [203, 94, 94, 0.8] : [153, 48, 43, 0.6]
   return (): Animation => {
@@ -3390,11 +3404,13 @@ function highlightBackgroundRed (element: PageElement): () => Animation {
   }
 }
 
-// highlightOutlineRed returns Animation-factory that will construct Animation that will
-// change element outline color to red and back in a smooth transition.
-// Note: Animation will start when constructed by "new" ^ right away - that's why
-// we return constructor-func here (aka factory), instead of constructing Animation
-// right away.
+/**
+ * highlightOutlineRed returns Animation-factory that will construct Animation that will
+ * change element outline color to red and back in a smooth transition.
+ * Note: Animation will start when constructed by "new" ^ right away - that's why
+ * we return constructor-func here (aka factory), instead of constructing Animation
+ * right away.
+ */
 function highlightOutlineRed (element: PageElement): () => Animation {
   const [r, g, b, a] = State.isDark() ? [203, 94, 94, 0.8] : [153, 48, 43, 0.8]
   return (): Animation => {
@@ -3409,8 +3425,10 @@ function highlightOutlineRed (element: PageElement): () => Animation {
   }
 }
 
-// animateClick will temporarily replace button with animation, and put it back
-// to give the user satisfying interaction.
+/**
+ * animateClick will temporarily replace button with animation, and put it back
+ * to give the user satisfying interaction.
+ */
 function animateClick (button: PageElement, animation: PageElement) {
   Doc.hide(button)
   Doc.show(animation)
