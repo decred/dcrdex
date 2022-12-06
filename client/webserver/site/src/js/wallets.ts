@@ -288,10 +288,10 @@ export default class WalletsPage extends BasePage {
       page.vSendDestinationAmt.textContent = Doc.formatFullPrecision(value, ui)
       const totalSend = value + txfee
       page.vTotalSend.textContent = Doc.formatFullPrecision(totalSend, ui)
-      this.showFiatValue(assetID, value, page.vTotalSendFiat)
+      this.showFiatValue(assetID, totalSend, page.vTotalSendFiat)
       const bal = wallet.balance.available - totalSend
-      // handle edge cases where bal is not enough to cover totalSend.
-      // we don't want a minus display of user bal.
+      // handle edge cases where bal is not enough to cover totalSend. we don't
+      // want a minus display of user balance after send.
       if (bal <= 0) {
         page.balanceAfterSend.textContent = Doc.formatFullPrecision(0, ui)
         this.showFiatValue(assetID, 0, page.balanceAfterSendFiat)
