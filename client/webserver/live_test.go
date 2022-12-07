@@ -584,7 +584,7 @@ func (c *TCore) GetDEXConfig(host string, certI interface{}) (*core.Exchange, er
 	return tExchanges[firstDEX], nil
 }
 
-func (c *TCore) AddDEX(dexAddr string, appPW []byte, certI interface{}) error {
+func (c *TCore) AddDEX(dexAddr string, certI interface{}) error {
 	return nil
 }
 

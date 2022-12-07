@@ -607,6 +607,7 @@ type Exchange struct {
 	BondAssets       map[string]*BondAsset  `json:"bondAssets"`
 	ConnectionStatus comms.ConnectionStatus `json:"connectionStatus"`
 	CandleDurs       []string               `json:"candleDurs"`
+	Registered       bool                   `json:"registered"`
 	Tier             int64                  `json:"tier"`
 	BondsPending     bool                   `json:"bondsPending"`
 	// TODO: a Bonds slice
@@ -748,12 +749,23 @@ func (a *dexAccount) ID() account.AccountID {
 	return a.id
 }
 
-// isRegistered is true if this account has a feeCoin. Every registered account
-// must have a feeCoin set.
-func (a *dexAccount) isRegistered() bool {
+func (a *dexAccount) hasKeys() bool {
 	a.keyMtx.RLock()
 	defer a.keyMtx.RUnlock()
-	return len(a.feeCoin) > 0
+	return len(a.encKey) > 0
+}
+
+// isRegistered is true if fee is paid (legacy) or initial bond is posted, even
+// if the payment/bond is yet to be confirmed.
+func (a *dexAccount) isRegistered() bool {
+	a.authMtx.RLock()
+	defer a.authMtx.RUnlock()
+
+	return a.isAuthed || // 'connect' succeeded, so fee is paid or initial bond is posted+confirmed
+		len(a.feeCoin) > 0 || // fee is paid but either yet to 'connect' or is waiting confirmations
+		len(a.bonds) > 0 || // initial bond is posted+confirmed, probably hasn't 'connect'ed yet
+		len(a.pendingBonds) > 0 || // initial bond is posted, waiting confirmations
+		len(a.expiredBonds) > 0 // initial bond _was_ posted and confirmed
 }
 
 // setupCryptoV2 generates a hierarchical deterministic key for the account.

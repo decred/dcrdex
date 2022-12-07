@@ -1404,6 +1404,8 @@ export class DEXAddressForm {
     const page = this.page = Doc.parseTemplate(form)
 
     page.selectedCert.textContent = intl.prep(intl.ID_NONE_SELECTED)
+
+    Doc.bind(page.skipRegistration, 'change', () => this.showOrHidePWBox())
     Doc.bind(page.certFile, 'change', () => this.onCertFileChange())
     Doc.bind(page.removeCert, 'click', () => this.clearCertFile())
     Doc.bind(page.addCert, 'click', () => page.certFile.click())
@@ -1417,8 +1419,11 @@ export class DEXAddressForm {
       Doc.bind(div, 'click', () => {
         const host = div.dataset.host
         for (const d of this.knownExchanges) d.classList.remove('selected')
-        // If we have the password cached, we're good to go.
-        if (State.passwordIsCached() || (pwCache && pwCache.pw)) return this.checkDEX(host)
+        // If we don't intend to register or we have the password cached, we're
+        // good to go.
+        if (this.skipRegistration() || State.passwordIsCached() || (pwCache && pwCache.pw)) {
+          return this.checkDEX(host)
+        }
         // Highlight the entry, but the user will have to enter their password
         // and click submit.
         div.classList.add('selected')
@@ -1430,8 +1435,7 @@ export class DEXAddressForm {
     bind(form, page.submit, () => this.checkDEX())
 
     if (dexToUpdate) {
-      Doc.hide(page.addDexHdr)
-      Doc.hide(page.skipRegistration.parentElement as PageElement)
+      Doc.hide(page.addDexHdr, page.skipRegistration.parentElement as PageElement)
       Doc.show(page.updateDexHdr)
       this.dexToUpdate = dexToUpdate
     }
@@ -1445,9 +1449,6 @@ export class DEXAddressForm {
     page.appPW.value = ''
     this.clearCertFile()
     Doc.hide(page.err)
-    const hidePWBox = State.passwordIsCached() || (this.pwCache && this.pwCache.pw)
-    if (hidePWBox) Doc.hide(page.appPWBox, page.auth)
-    else Doc.show(page.appPWBox, page.auth)
     if (this.knownExchanges.length === 0 || this.dexToUpdate) {
       Doc.show(page.customBox, page.auth)
       Doc.hide(page.showCustom, page.knownXCs, page.pickServerMsg, page.addCustomMsg)
@@ -1456,6 +1457,27 @@ export class DEXAddressForm {
       Doc.show(page.showCustom)
     }
     for (const div of this.knownExchanges) div.classList.remove('selected')
+    this.showOrHidePWBox()
+  }
+
+  /**
+   * Show or hide appPWBox depending on if password is required. Show the
+   * submit button if connecting a custom server or password is required).
+   */
+  showOrHidePWBox () {
+    const passwordCached = State.passwordIsCached() || (this.pwCache && this.pwCache.pw)
+    const passwordRequired = !passwordCached && !this.skipRegistration()
+    const page = this.page
+    if (passwordRequired) {
+      Doc.show(page.appPWBox, page.auth)
+    } else {
+      Doc.hide(page.appPWBox)
+      Doc.setVis(Doc.isDisplayed(page.customBox), page.auth)
+    }
+  }
+
+  skipRegistration () : boolean {
+    return this.page.skipRegistration.checked ?? false
   }
 
   /* Just a small size tweak and fade-in. */
@@ -1483,11 +1505,11 @@ export class DEXAddressForm {
         cert = await files[0].text()
       }
     }
+    const skipRegistration = this.skipRegistration()
     let pw = ''
-    if (!State.passwordIsCached()) {
+    if (!skipRegistration && !State.passwordIsCached()) {
       pw = page.appPW.value || (this.pwCache ? this.pwCache.pw : '')
     }
-    const skipRegistration = page.skipRegistration.checked
     let endpoint : string, req: any
     if (this.dexToUpdate) {
       endpoint = '/api/updatedexhost'

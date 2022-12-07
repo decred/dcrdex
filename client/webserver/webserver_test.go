@@ -92,7 +92,7 @@ func (c *TCore) Exchange(host string) (*core.Exchange, error) { return nil, nil 
 func (c *TCore) GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange, error) {
 	return nil, c.getDEXConfigErr // TODO along with test for apiUser / Exchanges() / User()
 }
-func (c *TCore) AddDEX(dexAddr string, appPW []byte, certI interface{}) error {
+func (c *TCore) AddDEX(dexAddr string, certI interface{}) error {
 	return nil
 }
 func (c *TCore) DiscoverAccount(dexAddr string, pw []byte, certI interface{}) (*core.Exchange, bool, error) {

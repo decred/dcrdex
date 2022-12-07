@@ -665,7 +665,7 @@ export default class MarketsPage extends BasePage {
     Doc.hide(page.orderForm, page.orderTypeBttns)
     const assetsAreSupported = this.assetsAreSupported().isSupported
     const { dex, base, quote } = this.market
-    const registeredAndFeePaid = !!dex.acctID && !dex.pendingFee
+    const registeredAndFeePaid = dex.registered && !dex.pendingFee
     const hasWallets = base && app().assets[base.id].wallet && quote && app().assets[quote.id].wallet
 
     if (registeredAndFeePaid && assetsAreSupported && hasWallets) {
@@ -829,7 +829,7 @@ export default class MarketsPage extends BasePage {
       buyBalance: 0
     }
 
-    if (!dex.acctID) {
+    if (!dex.registered) {
       page.unregisteredDex.textContent = host
       Doc.show(page.notRegistered)
     }

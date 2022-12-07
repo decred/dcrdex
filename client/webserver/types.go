@@ -36,6 +36,12 @@ type loginForm struct {
 	RememberPass bool             `json:"rememberPass"`
 }
 
+// addDexForm is used to connect a DEX without creating an account.
+type addDexForm struct {
+	Addr string `json:"addr"`
+	Cert string `json:"cert"`
+}
+
 // registrationForm is used to register a new DEX account.
 type registrationForm struct {
 	Addr     string           `json:"addr"`
