@@ -10,6 +10,8 @@ debug
 /vendor/
 *.orig
 *.pprof
+go.work
+go.work.sum
 .DS_Store
 \.project
 dex*key
@@ -27,6 +29,7 @@ docs/examples/rpcclient/rpcclient
 /wiki
 dex/testing/loadbot/loadbot
 bin/
+bin-v*/
 client/webserver/site/template-builder/template-builder
 dex/testing/btc/harnesschain.tar.gz
 client/asset/btc/electrum/example/server/server
