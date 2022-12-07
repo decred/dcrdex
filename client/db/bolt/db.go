@@ -204,8 +204,26 @@ func (db *BoltDB) Run(ctx context.Context) {
 		}
 	}
 
-	// Only compact the current DB file if there are excessive free pages.
-	if db.Stats().FreePageN < 32 { // 128 KiB for 4096 page size
+	// Only compact the current DB file if there is excessive free space, in
+	// terms of bytes AND relative to total DB size.
+	const byteThresh = 1 << 18 // 256 KiB free
+	const pctThresh = 0.05     // 5% free
+	var dbSize int64
+	_ = db.View(func(tx *bbolt.Tx) error {
+		dbSize = tx.Size() // db size including free bytes
+		return nil
+	})
+	dbStats := db.Stats()
+	// FreeAlloc is (FreePageN + PendingPageN) * db.Info().PageSize
+	// FreelistInuse seems to be page header overhead (much smaller). Add them.
+	// https://github.com/etcd-io/bbolt/blob/020684ea1eb7b5574a8007c8d69605b1de8d9ec4/tx.go#L308-L309
+	freeBytes := int64(dbStats.FreeAlloc + dbStats.FreelistInuse)
+	pctFree := float64(freeBytes) / float64(dbSize)
+	db.log.Debugf("Total DB size %d bytes, %d bytes unused (%.2f%%)",
+		dbSize, freeBytes, 100*pctFree)
+	// Only compact if free space is at least the byte threshold AND that fee
+	// space accounts for a significant percent of the file.
+	if freeBytes < byteThresh || pctFree < pctThresh {
 		db.Close()
 		return
 	}
@@ -217,7 +235,7 @@ func (db *BoltDB) Run(ctx context.Context) {
 
 	// Compact the database by writing into a temporary file, closing the source
 	// DB, and overwriting the original with the compacted temporary file.
-	db.log.Infof("Compacting database...")
+	db.log.Infof("Compacting database to reclaim at least %d bytes...", freeBytes)
 	srcPath := db.Path()                     // before db.Close
 	compFile := srcPath + ".tmp"             // deterministic on *same fs*
 	err := db.BackupTo(compFile, true, true) // overwrite and compact
@@ -230,8 +248,8 @@ func (db *BoltDB) Run(ctx context.Context) {
 	db.Close() // close db file at srcPath
 
 	initSize, compSize := db.fileSize(srcPath), db.fileSize(compFile)
-	db.log.Infof("Compacted database from %v => %v bytes (%.2f%% reduction)",
-		initSize, compSize, 100*float64(compSize)/float64(initSize))
+	db.log.Infof("Compacted database file from %v => %v bytes (%.2f%% reduction)",
+		initSize, compSize, 100*float64(initSize-compSize)/float64(initSize))
 
 	err = os.Rename(compFile, srcPath) // compFile => srcPath
 	if err != nil {
