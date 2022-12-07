@@ -5107,7 +5107,7 @@ func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 		LotSize:         swapLotSize,
 		Lots:            lots,
 		MaxFeeRate:      assetConfigs.fromAsset.MaxFeeRate,
-		Immediate:       form.IsLimit && form.TifNow,
+		Immediate:       (form.IsLimit && form.TifNow) || !form.IsLimit,
 		FeeSuggestion:   swapFeeSuggestion,
 		SelectedOptions: form.Options,
 		RedeemVersion:   assetConfigs.toAsset.Version,
