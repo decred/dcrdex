@@ -1278,7 +1278,7 @@ func (dcr *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 	}
 
 	// Get the estimate for the requested number of lots.
-	est, splitUsed, _, err := dcr.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion,
+	est, _, _, err := dcr.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion,
 		req.MaxFeeRate, utxos, split, bump)
 	if err != nil {
 		return nil, fmt.Errorf("estimation failed: %v", err)
@@ -1286,9 +1286,8 @@ func (dcr *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 
 	var opts []*asset.OrderOption
 
-	// If the used split isn't the requested split, the other split option was
-	// unavailable, so there is no option to offer.
-	if !req.Immediate && splitUsed == split {
+	// Only offer the split option for standing orders.
+	if !req.Immediate {
 		if splitOpt := dcr.splitOption(req, utxos, bump); splitOpt != nil {
 			opts = append(opts, splitOpt)
 		}
@@ -1410,40 +1409,41 @@ func (dcr *ExchangeWallet) splitOption(req *asset.PreSwapForm, utxos []*composit
 		dcr.log.Errorf("estimateSwap (with split) error: %v", err)
 		return nil
 	}
-	if !splitUsed {
-		// unable to do the split. no option.
-		dcr.log.Debugf("split option unavailable")
-		return nil
-	}
 
-	xtraFees := splitEst.RealisticWorstCase - noSplitEst.RealisticWorstCase
-	pctChange := (float64(splitEst.RealisticWorstCase)/float64(noSplitEst.RealisticWorstCase) - 1) * 100
-	overlock := noSplitLocked - splitLocked
-
-	var reason string
-	if pctChange > 1 {
-		reason = fmt.Sprintf("+%d%% fees, avoids %s DCR overlock", int(math.Round(pctChange)), amount(overlock))
-	} else {
-		reason = fmt.Sprintf("+%.1f%% fees, avoids %s DCR overlock", pctChange, amount(overlock))
-	}
-
-	desc := fmt.Sprintf("Using a split transaction to prevent temporary overlock of %s DCR, but for additional fees of %s DCR",
-		amount(overlock), amount(xtraFees))
-
-	cfg := dcr.config()
-	return &asset.OrderOption{
+	opt := &asset.OrderOption{
 		ConfigOption: asset.ConfigOption{
 			Key:           splitKey,
 			DisplayName:   "Pre-size Funds",
-			Description:   desc,
-			DefaultValue:  cfg.useSplitTx,
 			IsBoolean:     true,
+			DefaultValue:  false, // not nil interface
 			ShowByDefault: true,
 		},
-		Boolean: &asset.BooleanConfig{
-			Reason: reason,
-		},
+		Boolean: &asset.BooleanConfig{},
 	}
+
+	if !splitUsed || splitLocked >= noSplitLocked { // locked check should be redundant
+		opt.Boolean.Reason = "avoids no DCR overlock for this order (ignored)"
+		opt.Description = "A split transaction for this order avoids no DCR overlock, but adds additional fees."
+		return opt // not enabled by default, but explain why
+	}
+
+	// Since it is usable, apply the user's default value, and set the
+	// reason and description.
+	opt.DefaultValue = dcr.config().useSplitTx
+
+	overlock := noSplitLocked - splitLocked
+	pctChange := (float64(splitEst.RealisticWorstCase)/float64(noSplitEst.RealisticWorstCase) - 1) * 100
+	if pctChange > 1 {
+		opt.Boolean.Reason = fmt.Sprintf("+%d%% fees, avoids %s DCR overlock", int(math.Round(pctChange)), amount(overlock))
+	} else {
+		opt.Boolean.Reason = fmt.Sprintf("+%.1f%% fees, avoids %s DCR overlock", pctChange, amount(overlock))
+	}
+
+	xtraFees := splitEst.RealisticWorstCase - noSplitEst.RealisticWorstCase
+	opt.Description = fmt.Sprintf("Using a split transaction may prevent temporary overlock of %s DCR, but for additional fees of %s DCR",
+		amount(overlock), amount(xtraFees))
+
+	return opt
 }
 
 // PreRedeem generates an estimate of the range of redemption fees that could

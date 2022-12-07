@@ -1706,7 +1706,7 @@ func (btc *baseWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
 	}
 
 	// Get the estimate using the current configuration.
-	est, splitUsed, _, err := btc.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion,
+	est, _, _, err := btc.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion,
 		req.MaxFeeRate, utxos, split, bump)
 	if err != nil {
 		return nil, fmt.Errorf("estimation failed: %v", err)
@@ -1714,9 +1714,8 @@ func (btc *baseWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
 
 	var opts []*asset.OrderOption
 
-	// If the used split isn't the requested split, the other split option was
-	// unavailable, so there is no option to offer.
-	if !req.Immediate && splitUsed == split {
+	// Only offer the split option for standing orders.
+	if !req.Immediate {
 		if splitOpt := btc.splitOption(req, utxos, bump); splitOpt != nil {
 			opts = append(opts, splitOpt)
 		}
@@ -1853,40 +1852,43 @@ func (btc *baseWallet) splitOption(req *asset.PreSwapForm, utxos []*compositeUTX
 		btc.log.Errorf("estimateSwap (with split) error: %v", err)
 		return nil
 	}
-	if !splitUsed {
-		// unable to do the split. no option.
-		btc.log.Debugf("split option unavailable")
-		return nil
-	}
 	symbol := strings.ToUpper(btc.symbol)
 
-	xtraFees := splitEst.RealisticWorstCase - noSplitEst.RealisticWorstCase
-	pctChange := (float64(splitEst.RealisticWorstCase)/float64(noSplitEst.RealisticWorstCase) - 1) * 100
-	overlock := noSplitLocked - splitLocked
-
-	var reason string
-	if pctChange > 1 {
-		reason = fmt.Sprintf("+%d%% fees, -%s %s overlock", int(math.Round(pctChange)), prettyBTC(overlock), symbol)
-	} else {
-		reason = fmt.Sprintf("+%.1f%% fees, -%s %s overlock", pctChange, prettyBTC(overlock), symbol)
-	}
-
-	desc := fmt.Sprintf("Using a split transaction to prevent temporary overlock of %s %s, but for additional fees of %s %s",
-		prettyBTC(overlock), symbol, prettyBTC(xtraFees), symbol)
-
-	return &asset.OrderOption{
+	opt := &asset.OrderOption{
 		ConfigOption: asset.ConfigOption{
 			Key:           splitKey,
 			DisplayName:   "Pre-size Funds",
-			Description:   desc,
-			DefaultValue:  btc.useSplitTx(),
 			IsBoolean:     true,
+			DefaultValue:  false, // not nil interface
 			ShowByDefault: true,
 		},
-		Boolean: &asset.BooleanConfig{
-			Reason: reason,
-		},
+		Boolean: &asset.BooleanConfig{},
 	}
+
+	if !splitUsed || splitLocked >= noSplitLocked { // locked check should be redundant
+		opt.Boolean.Reason = fmt.Sprintf("avoids no %s overlock for this order (ignored)", symbol)
+		opt.Description = fmt.Sprintf("A split transaction for this order avoids no %s overlock, "+
+			"but adds additional fees.", symbol)
+		return opt // not enabled by default, but explain why
+	}
+
+	// Since it is usable, apply the user's default value, and set the
+	// reason and description.
+	opt.DefaultValue = btc.useSplitTx()
+
+	overlock := noSplitLocked - splitLocked
+	pctChange := (float64(splitEst.RealisticWorstCase)/float64(noSplitEst.RealisticWorstCase) - 1) * 100
+	if pctChange > 1 {
+		opt.Boolean.Reason = fmt.Sprintf("+%d%% fees, avoids %s %s overlock", int(math.Round(pctChange)), prettyBTC(overlock), symbol)
+	} else {
+		opt.Boolean.Reason = fmt.Sprintf("+%.1f%% fees, avoids %s %s overlock", pctChange, prettyBTC(overlock), symbol)
+	}
+
+	xtraFees := splitEst.RealisticWorstCase - noSplitEst.RealisticWorstCase
+	opt.Description = fmt.Sprintf("Using a split transaction to prevent temporary overlock of %s %s, but for additional fees of %s %s",
+		prettyBTC(overlock), symbol, prettyBTC(xtraFees), symbol)
+
+	return opt
 }
 
 // estimateSwap prepares an *asset.SwapEstimate.
