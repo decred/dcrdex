@@ -1903,15 +1903,19 @@ func (btc *baseWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate uin
 	bumpedMaxRate := maxFeeRate
 	bumpedNetRate := feeSuggestion
 	if feeBump > 1 {
-		bumpedMaxRate = uint64(math.Round(float64(bumpedMaxRate) * feeBump))
-		bumpedNetRate = uint64(math.Round(float64(bumpedNetRate) * feeBump))
+		bumpedMaxRate = uint64(math.Ceil(float64(bumpedMaxRate) * feeBump))
+		bumpedNetRate = uint64(math.Ceil(float64(bumpedNetRate) * feeBump))
 	}
 
 	val := lots * lotSize
-
+	// This enough func does not account for a split transaction at the start,
+	// so it is possible that funding for trySplit would actually choose more
+	// UTXOs. Actual order funding accounts for this. For this estimate, we will
+	// just not use a split tx if the split-adjusted required funds exceeds the
+	// total value of the UTXO selected with this enough closure.
 	enough := func(inputsSize, inputsVal uint64) bool {
 		reqFunds := calc.RequiredOrderFundsAlt(val, inputsSize, lots, btc.initTxSizeBase,
-			btc.initTxSize, bumpedMaxRate)
+			btc.initTxSize, bumpedMaxRate) // no +splitMaxFees so this is accurate without split
 		return inputsVal >= reqFunds
 	}
 
@@ -1921,7 +1925,7 @@ func (btc *baseWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate uin
 	}
 
 	reqFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots,
-		btc.initTxSizeBase, btc.initTxSize, bumpedMaxRate)
+		btc.initTxSizeBase, btc.initTxSize, bumpedMaxRate) // same as in enough func
 	maxFees := reqFunds - val
 
 	estHighFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots,
@@ -1935,23 +1939,21 @@ func (btc *baseWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate uin
 	} else {
 		estLowFunds += dexbtc.P2SHOutputSize * (lots - 1) * bumpedNetRate
 	}
-
 	estLowFees := estLowFunds - val
 
 	// Math for split transactions is a little different.
 	if trySplit {
-		_, extraMaxFees := btc.splitBaggageFees(bumpedMaxRate)
+		_, splitMaxFees := btc.splitBaggageFees(bumpedMaxRate)
 		_, splitFees := btc.splitBaggageFees(bumpedNetRate)
-		locked := val + maxFees + extraMaxFees
-
-		if avail >= reqFunds+extraMaxFees {
+		reqTotal := reqFunds + splitMaxFees // ~ rather than actually fund()ing again
+		if reqTotal <= sum {
 			return &asset.SwapEstimate{
 				Lots:               lots,
 				Value:              val,
-				MaxFees:            maxFees + extraMaxFees,
+				MaxFees:            maxFees + splitMaxFees,
 				RealisticBestCase:  estLowFees + splitFees,
 				RealisticWorstCase: estHighFees + splitFees,
-			}, true, locked, nil
+			}, true, reqFunds, nil // requires reqTotal, but locks reqFunds in the split output
 		}
 	}
 

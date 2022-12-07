@@ -1101,16 +1101,16 @@ func TestFundingCoins(t *testing.T) {
 	ensureGood()
 }
 
-func checkMaxOrder(t *testing.T, wallet *ExchangeWallet, lots, swapVal, maxFees, estWorstCase, estBestCase, locked uint64) {
+func checkMaxOrder(t *testing.T, wallet *ExchangeWallet, lots, swapVal, maxFees, estWorstCase, estBestCase uint64) {
 	t.Helper()
 	_, maxOrder, err := wallet.maxOrder(tLotSize, feeSuggestion, tDCR.MaxFeeRate)
 	if err != nil {
 		t.Fatalf("MaxOrder error: %v", err)
 	}
-	checkSwapEstimate(t, maxOrder, lots, swapVal, maxFees, estWorstCase, estBestCase, locked)
+	checkSwapEstimate(t, maxOrder, lots, swapVal, maxFees, estWorstCase, estBestCase)
 }
 
-func checkSwapEstimate(t *testing.T, est *asset.SwapEstimate, lots, swapVal, maxFees, estWorstCase, estBestCase, locked uint64) {
+func checkSwapEstimate(t *testing.T, est *asset.SwapEstimate, lots, swapVal, maxFees, estWorstCase, estBestCase uint64) {
 	t.Helper()
 	if est.Lots != lots {
 		t.Fatalf("MaxOrder has wrong Lots. wanted %d, got %d", lots, est.Lots)
@@ -1135,10 +1135,6 @@ func TestFundEdges(t *testing.T) {
 
 	swapVal := uint64(1e8)
 	lots := swapVal / tLotSize
-
-	checkMax := func(lots, swapVal, maxFees, estWorstCase, estBestCase, locked uint64) {
-		checkMaxOrder(t, wallet, lots, swapVal, maxFees, estWorstCase, estBestCase, locked)
-	}
 
 	// Swap fees
 	//
@@ -1183,8 +1179,10 @@ func TestFundEdges(t *testing.T) {
 
 	var feeReduction uint64 = swapSize * tDCR.MaxFeeRate
 	estFeeReduction := swapSize * feeSuggestion
-	checkMax(lots-1, swapVal-tLotSize, fees-feeReduction, totalBytes*feeSuggestion-estFeeReduction,
-		(bestCaseBytes-swapOutputSize)*feeSuggestion, swapVal+fees-1)
+	checkMaxOrder(t, wallet, lots-1, swapVal-tLotSize,
+		fees-feeReduction,                            // max fees
+		totalBytes*feeSuggestion-estFeeReduction,     // worst case
+		(bestCaseBytes-swapOutputSize)*feeSuggestion) // best case
 
 	_, _, err := wallet.FundOrder(ord)
 	if err == nil {
@@ -1194,7 +1192,8 @@ func TestFundEdges(t *testing.T) {
 	p2pkhUnspent.Amount = float64(swapVal+fees) / 1e8
 	node.unspent = []walletjson.ListUnspentResult{p2pkhUnspent}
 
-	checkMax(lots, swapVal, fees, totalBytes*feeSuggestion, bestCaseBytes*feeSuggestion, swapVal+fees)
+	checkMaxOrder(t, wallet, lots, swapVal, fees, totalBytes*feeSuggestion,
+		bestCaseBytes*feeSuggestion)
 
 	_, _, err = wallet.FundOrder(ord)
 	if err != nil {
@@ -1223,7 +1222,8 @@ func TestFundEdges(t *testing.T) {
 	v = swapVal + fees
 	node.unspent[0].Amount = float64(v) / 1e8
 
-	checkMax(lots, swapVal, fees, (totalBytes+splitTxBaggage)*feeSuggestion, (bestCaseBytes+splitTxBaggage)*feeSuggestion, v)
+	checkMaxOrder(t, wallet, lots, swapVal, fees, (totalBytes+splitTxBaggage)*feeSuggestion,
+		(bestCaseBytes+splitTxBaggage)*feeSuggestion)
 
 	coins, _, err = wallet.FundOrder(ord)
 	if err != nil {
@@ -1252,47 +1252,9 @@ func TestFundEdges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error fixing split tx: %v", err)
 	}
-
-	// TODO: test version mismatch
-
 	wallet.config().useSplitTx = false
 
-	// TODO: fix the p2sh test so that the redeem script is a p2pk pkScript or a
-	// multisig pkScript, not a p2pkh pkScript.
-
-	// P2SH pkScript size = 23 bytes
-	// P2PK pkScript (the redeem script) = 35 bytes
-	// P2SH redeem input size = overhead(58) + sigScript((1 + 73 + 1) + (1 + 33 + 1)) +
-	//   p2sh pkScript length(23) = 191 bytes vs 166 for P2PKH
-	// backing_fees: 191 bytes * fee_rate(24) = 4584 atoms
-	// total bytes: 2344 + 191 = 2535
-	// total: 56256 + 4584 = 60840 atoms
-	//     OR (2344 + 191) * 24 = 60840
-	// p2shRedeem, _ := hex.DecodeString("76a914" + "db1755408acd315baa75c18ebbe0e8eaddf64a97" + "88ac") // (p2pkh! pkScript) 1+1+1+20+1+1 =25 bytes
-	// scriptAddr := "DcsJEKNF3dQwcSozroei5FRPsbPEmMuWRaj"
-	// p2shScriptPubKey, _ := hex.DecodeString("a914" + "3ff6a24a50135f69be9ffed744443da08408fc1a" + "87") // 1 + 1 + 20 + 1 = 23 bytes
-	// fees = 2535 * tDCR.MaxFeeRate
-	// halfSwap := swapVal / 2
-	// p2shUnspent := walletjson.ListUnspentResult{
-	// 	TxID:          tTxID,
-	// 	Address:       scriptAddr,
-	// 	Amount:        float64(halfSwap) / 1e8,
-	// 	Confirmations: 10,
-	// 	ScriptPubKey:  hex.EncodeToString(p2shScriptPubKey),
-	// 	RedeemScript:  hex.EncodeToString(p2shRedeem),
-	// }
-	// p2pkhUnspent.Amount = float64(halfSwap+fees-1) / 1e8
-	// node.unspent = []walletjson.ListUnspentResult{p2pkhUnspent, p2shUnspent}
-	// _, err = wallet.FundOrder(swapVal, false, tDCR)
-	// if err == nil {
-	// 	t.Fatalf("no error when not enough funds in two utxos")
-	// }
-	// p2pkhUnspent.Amount = float64(halfSwap+fees) / 1e8
-	// node.unspent = []walletjson.ListUnspentResult{p2pkhUnspent, p2shUnspent}
-	// _, err = wallet.FundOrder(swapVal, false, tDCR)
-	// if err != nil {
-	// 	t.Fatalf("error when should be enough funding in two utxos: %v", err)
-	// }
+	// TODO: test version mismatch
 }
 
 func TestSwap(t *testing.T) {
@@ -2474,7 +2436,7 @@ func TestPreSwap(t *testing.T) {
 	maxFees := totalBytes * tDCR.MaxFeeRate
 	estHighFees := totalBytes * feeSuggestion
 	estLowFees := bestCaseBytes * feeSuggestion
-	checkSwapEstimate(t, preSwap.Estimate, lots, swapVal, maxFees, estHighFees, estLowFees, minReq)
+	checkSwapEstimate(t, preSwap.Estimate, lots, swapVal, maxFees, estHighFees, estLowFees)
 
 	// Too little funding is an error.
 	node.unspent[0].Amount = float64(minReq-1) / 1e8

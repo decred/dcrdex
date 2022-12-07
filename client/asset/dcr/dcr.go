@@ -1185,18 +1185,23 @@ func (dcr *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate
 	bumpedMaxRate := maxFeeRate
 	bumpedNetRate := feeSuggestion
 	if feeBump > 1 {
-		bumpedMaxRate = uint64(math.Round(float64(bumpedMaxRate) * feeBump))
-		bumpedNetRate = uint64(math.Round(float64(bumpedNetRate) * feeBump))
+		bumpedMaxRate = uint64(math.Ceil(float64(bumpedMaxRate) * feeBump))
+		bumpedNetRate = uint64(math.Ceil(float64(bumpedNetRate) * feeBump))
 	}
 
 	val := lots * lotSize
+	// The orderEnough func does not account for a split transaction at the
+	// start, so it is possible that funding for trySplit would actually choose
+	// more UTXOs. Actual order funding accounts for this. For this estimate, we
+	// will just not use a split tx if the split-adjusted required funds exceeds
+	// the total value of the UTXO selected with this enough closure.
 	sum, inputsSize, _, _, _, err := tryFund(utxos, orderEnough(val, lots, bumpedMaxRate))
 	if err != nil {
 		return nil, false, 0, err
 	}
 
 	reqFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots,
-		dexdcr.InitTxSizeBase, dexdcr.InitTxSize, bumpedMaxRate)
+		dexdcr.InitTxSizeBase, dexdcr.InitTxSize, bumpedMaxRate) // as in tryFund's enough func
 	maxFees := reqFunds - val
 
 	estHighFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots,
@@ -1210,17 +1215,17 @@ func (dcr *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate
 
 	// Math for split transactions is a little different.
 	if trySplit {
-		extraFees := splitTxBaggage * bumpedMaxRate
+		splitMaxFees := splitTxBaggage * bumpedMaxRate
 		splitFees := splitTxBaggage * bumpedNetRate
-		if avail >= reqFunds+extraFees {
-			locked := val + maxFees + extraFees
+		reqTotal := reqFunds + splitMaxFees // ~ rather than actually fund()ing again
+		if reqTotal <= sum {
 			return &asset.SwapEstimate{
 				Lots:               lots,
 				Value:              val,
-				MaxFees:            maxFees + extraFees,
+				MaxFees:            maxFees + splitMaxFees,
 				RealisticBestCase:  estLowFees + splitFees,
 				RealisticWorstCase: estHighFees + splitFees,
-			}, true, locked, nil
+			}, true, reqFunds, nil // requires reqTotal, but locks reqFunds in the split output
 		}
 	}
 
