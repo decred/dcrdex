@@ -2,7 +2,7 @@
 
 set -e
 
-VER="0.5.7"
+VER="0.5.8"
 
 rm -rf bin
 mkdir -p bin/dexc-windows-amd64-v${VER}
