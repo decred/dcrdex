@@ -1229,7 +1229,7 @@ func (c *Core) feeEstimates(form *TradeForm) (swapFees, redeemFees uint64, err e
 		LotSize:         swapLotSize,
 		Lots:            lots,
 		MaxFeeRate:      fromAsset.MaxFeeRate,
-		Immediate:       (form.IsLimit && form.TifNow),
+		Immediate:       (form.IsLimit && form.TifNow) || !form.IsLimit,
 		FeeSuggestion:   swapFeeSuggestion,
 		SelectedOptions: form.Options,
 		RedeemVersion:   toWallet.version,
