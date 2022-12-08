@@ -57,9 +57,11 @@ func (c *Core) refundExpiredBonds(ctx context.Context) {
 	}
 
 	for _, dc := range c.dexConnections() {
-
+		lockTimeThresh := now // in case dex is down, expire (to refund) when lock time is passed
 		dc.cfgMtx.RLock()
-		lockTimeThresh := now + int64(dc.cfg.BondExpiry)
+		if dc.cfg != nil {
+			lockTimeThresh += int64(dc.cfg.BondExpiry)
+		}
 		dc.cfgMtx.RUnlock()
 
 		filterExpiredBonds := func(bond []*db.Bond) (liveBonds []*db.Bond) {
