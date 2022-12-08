@@ -49,7 +49,9 @@ export function sellString (ord: Order) {
   return intl.prep(key).toLocaleLowerCase(lang)
 }
 
-export function typeString (ord: Order) { return ord.type === Limit ? (ord.tif === ImmediateTiF ? 'limit (i)' : 'limit') : 'market' }
+export function typeString (ord: Order) {
+  return ord.type === Limit ? (ord.tif === ImmediateTiF ? intl.prep(intl.ID_LIMIT_ORDER_IMMEDIATE_TIF) : intl.prep(intl.ID_LIMIT_ORDER)) : intl.prep(intl.ID_MARKET_ORDER)
+}
 
 /* isMarketBuy will return true if the order is a market buy order. */
 export function isMarketBuy (ord: Order) {
@@ -135,41 +137,47 @@ export function matchStatusString (m: Match) {
     // When revoked, match status is less important than pending action if still
     // active, or the outcome if inactive.
     if (m.active) {
-      if (m.redeem) return 'Revoked - Redemption Sent' // must require confirmation if active
+      if (m.redeem) return revokedMatchStatus(intl.ID_MATCH_STATUS_REDEMPTION_SENT) // must require confirmation if active
       // If maker and we have not redeemed, waiting to refund, assuming it's not
       // revoked while waiting for confs on an unspent/unexpired taker swap.
-      if (m.side === Maker) return 'Revoked - Refund PENDING'
+      if (m.side === Maker) return revokedMatchStatus(intl.ID_MATCH_STATUS_REFUND_PENDING)
       // As taker, resolution depends on maker's actions while waiting to refund.
-      if (m.counterRedeem) return 'Revoked - Redeem PENDING' // this should be very brief if we see the maker's redeem
-      return 'Revoked - Refund PENDING' // may switch to redeem if maker redeems on the sly
+      if (m.counterRedeem) return revokedMatchStatus(intl.ID_MATCH_STATUS_REDEEM_PENDING) // this should be very brief if we see the maker's redeem
+      return revokedMatchStatus(intl.ID_MATCH_STATUS_REFUND_PENDING) // may switch to redeem if maker redeems on the sly
     }
     if (m.refund) {
-      return 'Revoked - Refunded'
+      return revokedMatchStatus(intl.ID_MATCH_STATUS_REFUNDED)
     }
     if (m.redeem) {
-      return 'Revoked - Redemption Confirmed'
+      return revokedMatchStatus(intl.ID_MATCH_STATUS_REDEMPTION_CONFIRMED)
     }
-    return 'Revoked - Complete' // i.e. we sent no swap
+    return revokedMatchStatus(intl.ID_MATCH_STATUS_COMPLETE) // i.e. we sent no swap
   }
 
   switch (m.status) {
     case NewlyMatched:
-      return 'Newly Matched'
+      return intl.prep(intl.ID_MATCH_STATUS_NEWLY_MATCHED)
     case MakerSwapCast:
-      return 'Maker Swap Sent'
+      return intl.prep(intl.ID_MATCH_STATUS_MAKER_SWAP_CAST)
     case TakerSwapCast:
-      return 'Taker Swap Sent'
+      return intl.prep(intl.ID_MATCH_STATUS_TAKER_SWAP_CAST)
     case MakerRedeemed:
       if (m.side === Maker) {
-        return 'Redemption Sent'
+        return intl.prep(intl.ID_MATCH_STATUS_REDEMPTION_SENT)
       }
-      return 'Maker Redeemed'
+      return intl.prep(intl.ID_MATCH_STATUS_MAKER_REDEEMED)
     case MatchComplete:
-      return 'Redemption Sent'
+      return intl.prep(intl.ID_MATCH_STATUS_REDEMPTION_SENT)
     case MatchConfirmed:
-      return 'Redemption Confirmed'
+      return intl.prep(intl.ID_MATCH_STATUS_REDEMPTION_CONFIRMED)
   }
-  return 'Unknown Match Status'
+  return intl.prep(intl.ID_UNKNOWN)
+}
+
+// revokedMatchStatus is a helper function that returns the revoked match status
+// string.
+function revokedMatchStatus (matchStatus: string): string {
+  return intl.prep(intl.ID_MATCH_STATUS_REVOKED, { status: intl.prep(matchStatus) })
 }
 
 /*
