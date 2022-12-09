@@ -1,5 +1,0 @@
-=Decred DEX=
-
-This is the repository for the Decred Distributed Exchange (DEX). Please find
-the '''specification''' document [[spec/README.mediawiki|here]] and the new README
-covering the '''source code''' [[README.md|here]].
