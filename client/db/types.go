@@ -220,7 +220,19 @@ type AccountInfo struct {
 	LegacyFeeCoin    []byte
 	LegacyFeeAssetID uint32
 	// LegacyFeePaid should be set on retrieval if there is an AccountProof set.
-	LegacyFeePaid bool // DEPRECATED
+	LegacyFeePaid bool // DEPRECATED LegacyFeeConfirmed
+}
+
+// Registered indicates if the account should exist server-side. This is when
+// the legacy fee txn or at least one bond txn has been broadcast even if
+// neither has received the required confirmations. This may return a false
+// negative for a recovered account that had no active bonds at recovery time,
+// unless new bond(s) have been posted since recovery.
+func (ai *AccountInfo) Registered() bool {
+	if ai.LegacyFeePaid || len(ai.LegacyFeeCoin) > 0 {
+		return true
+	}
+	return len(ai.Bonds) > 0
 }
 
 // Encode the AccountInfo as bytes. NOTE: remove deprecated fee fields and do a

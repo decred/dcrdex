@@ -2068,6 +2068,7 @@ func TestRegister(t *testing.T) {
 	form.Addr = tDexHost
 
 	// account already exists
+	dc.acct.auth(1, false) // sets dc.acct.registered to true
 	tCore.addDexConnection(dc)
 	_, err = tCore.Register(form)
 	if !errorHasCode(err, dupeDEXErr) {

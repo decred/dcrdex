@@ -707,6 +707,7 @@ type dexAccount struct {
 	id      account.AccountID
 
 	authMtx       sync.RWMutex
+	registered    bool // account exists server-side -- read as mayAuth
 	isAuthed      bool
 	pendingBonds  []*db.Bond // not yet confirmed
 	bonds         []*db.Bond // confirmed, and not yet expired
@@ -732,6 +733,7 @@ func newDEXAccount(acctInfo *db.AccountInfo) *dexAccount {
 		cert:       acctInfo.Cert,
 		dexPubKey:  acctInfo.DEXPubKey,
 		encKey:     acctInfo.EncKey(), // privKey and id on decrypt
+		registered: acctInfo.Registered(),
 		feeAssetID: acctInfo.LegacyFeeAssetID,
 		feeCoin:    acctInfo.LegacyFeeCoin,
 		isPaid:     acctInfo.LegacyFeePaid,
@@ -755,17 +757,13 @@ func (a *dexAccount) hasKeys() bool {
 	return len(a.encKey) > 0
 }
 
-// isRegistered is true if fee is paid (legacy) or initial bond is posted, even
-// if the payment/bond is yet to be confirmed.
+// isRegistered is true if the account should exist server-side. This is when
+// the legacy fee txn or at least one bond txn has been broadcast even if
+// neither has received the required confirmations.
 func (a *dexAccount) isRegistered() bool {
 	a.authMtx.RLock()
 	defer a.authMtx.RUnlock()
-
-	return a.isAuthed || // 'connect' succeeded, so fee is paid or initial bond is posted+confirmed
-		len(a.feeCoin) > 0 || // fee is paid but either yet to 'connect' or is waiting confirmations
-		len(a.bonds) > 0 || // initial bond is posted+confirmed, probably hasn't 'connect'ed yet
-		len(a.pendingBonds) > 0 || // initial bond is posted, waiting confirmations
-		len(a.expiredBonds) > 0 // initial bond _was_ posted and confirmed
+	return a.registered
 }
 
 // setupCryptoV2 generates a hierarchical deterministic key for the account.
@@ -899,6 +897,17 @@ func (a *dexAccount) auth(tier int64, legacyFeePaid bool) {
 	a.isAuthed = true
 	a.tier = tier
 	a.legacyFeePaid = legacyFeePaid
+	a.registered = true // account exists server-side
+	a.authMtx.Unlock()
+}
+
+// unAuth sets the account as not authenticated.
+func (a *dexAccount) unAuth() {
+	a.authMtx.Lock()
+	a.isAuthed = false
+	a.tier = 0
+	a.legacyFeePaid = false
+	a.registered = false
 	a.authMtx.Unlock()
 }
 

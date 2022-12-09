@@ -3646,13 +3646,13 @@ func (c *Core) AddDEX(dexAddr string, certI interface{}) error {
 	}
 
 	c.connMtx.RLock()
-	dc, found := c.conns[host]
+	_, found := c.conns[host]
 	c.connMtx.RUnlock()
 	if found {
 		return newError(dupeDEXErr, "already connected to DEX at %s", dexAddr)
 	}
 
-	dc, err = c.connectDEX(&db.AccountInfo{
+	dc, err := c.connectDEX(&db.AccountInfo{
 		Host: host,
 		Cert: cert,
 	})
@@ -3726,8 +3726,13 @@ func (c *Core) discoverAccount(dc *dexConnection, crypter encrypt.Crypter) (bool
 			return false, newError(authErr, "unexpected authDEX error: %w", err)
 		}
 
-		// do not skip key if tier is 0 and bonds will be used
-		if dc.acct.tier < 0 || (dc.acct.tier < 1 && dc.apiVersion() < serverdex.BondAPIVersion) {
+		// skip key if account cannot be used to trade, i.e. tier < 0 or tier ==
+		// 0 but server doesn't support bonds. If tier == 0 and server supports
+		// bonds, a bond must be posted before the account can be used to trade,
+		// but generating a new key isn't necessary.
+		cannotTrade := dc.acct.tier < 0 || (dc.acct.tier == 0 && dc.apiVersion() < serverdex.BondAPIVersion)
+		if cannotTrade {
+			dc.acct.unAuth() // acct was marked as authenticated by authDEX above.
 			c.log.Infof("HD account key for %s has tier %d (not able to trade). Deriving another account key.",
 				dc.acct.host, dc.acct.tier)
 			keyIndex++
@@ -3842,7 +3847,7 @@ func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI interface{}) 
 	}
 
 	var ready bool
-	if dc == nil {
+	if !existingConn {
 		dc, err = c.tempDexConnection(host, certI)
 		if dc != nil { // (re)connect loop may be running even if err != nil
 			defer func() {
@@ -3883,7 +3888,7 @@ func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI interface{}) 
 		return nil, false, err
 	}
 	if !paid {
-		return dc.exchangeInfo(), false, nil // all good, just go register now
+		return dc.exchangeInfo(), false, nil // all good, just go register or postbond now
 	}
 
 	ready = true // do not disconnect
@@ -4100,6 +4105,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	// Set the dexConnection account fields and save account info to db.
 	dc.acct.feeCoin = coin.ID()
 	dc.acct.feeAssetID = feeAsset.ID
+	dc.acct.registered = true
 
 	// Registration complete.
 	registrationComplete = true
@@ -4191,6 +4197,7 @@ func (c *Core) register(dc *dexConnection, assetID uint32) (regRes *msgjson.Regi
 			// This is now account recovery, which is great news since we don't
 			// have to pay the fee. Server provides fee coin as the error message.
 			c.log.Infof("%s is reporting that this account already exists. Skipping fee payment.", dc.acct.host)
+			dc.acct.registered = true
 			dc.acct.feeAssetID = 42 // actual asset ID unknown, but paid
 			dc.acct.feeCoin, err = hex.DecodeString(msgErr.Message)
 			if err != nil || len(dc.acct.feeCoin) == 0 { // err may be nil but feeCoin is empty, e.g. if msgErr.Message == ""
@@ -4213,7 +4220,7 @@ func (c *Core) register(dc *dexConnection, assetID uint32) (regRes *msgjson.Regi
 				BondAsset:        dc.acct.bondAsset,
 				LegacyFeeAssetID: dc.acct.feeAssetID,
 				LegacyFeeCoin:    dc.acct.feeCoin,
-				// LegacyFeePaid set with AccountPaid below.
+				// LegacyFeePaid set with authDEX below.
 			})
 			if err != nil {
 				// Shouldn't let the client trade with this server if we can't store
@@ -4298,7 +4305,6 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 			c.log.Errorf("fee paid, but failed to authenticate connection to %s: %v", dc.acct.host, err)
 		}
 	})
-
 }
 
 // IsInitialized checks if the app is already initialized.

@@ -994,6 +994,7 @@ func (c *Core) makeAndPostBond(dc *dexConnection, acctExists bool, wallet *xcWal
 	}
 
 	dc.acct.authMtx.Lock()
+	dc.acct.registered = true // if it wasn't already, so we don't ask user to "create account to trade"
 	dc.acct.pendingBonds = append(dc.acct.pendingBonds, dbBond)
 	dc.acct.authMtx.Unlock()
 
