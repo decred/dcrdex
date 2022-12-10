@@ -21,6 +21,7 @@ import (
 	_ "decred.org/dcrdex/client/asset/bch"  // register bch asset
 	_ "decred.org/dcrdex/client/asset/btc"  // register btc asset
 	_ "decred.org/dcrdex/client/asset/dcr"  // register dcr asset
+	_ "decred.org/dcrdex/client/asset/dgb"  // register dgb asset
 	_ "decred.org/dcrdex/client/asset/doge" // register doge asset
 	_ "decred.org/dcrdex/client/asset/ltc"  // register ltc asset
 	_ "decred.org/dcrdex/client/asset/zec"  // register zec asset
