@@ -368,12 +368,12 @@ type BTCCloneCFG struct {
 	// getrawtransaction RPC.
 	NumericGetRawRPC bool
 	// LegacyValidateAddressRPC uses the validateaddress endpoint instead of
-	// getwalletinfo in order to discover ownership of an address.
+	// getaddressinfo in order to discover ownership of an address.
 	LegacyValidateAddressRPC bool
 	// SingularWallet signals that the node software supports only one wallet,
 	// so the RPC endpoint does not have a /wallet/{walletname} path.
 	SingularWallet bool
-	// UnlockSpends manually unlocks outputs as they are spent. Most asses will
+	// UnlockSpends manually unlocks outputs as they are spent. Most assets will
 	// unlock wallet outputs automatically as they are spent.
 	UnlockSpends bool
 	// ConstantDustLimit is used if an asset enforces a dust limit (minimum
