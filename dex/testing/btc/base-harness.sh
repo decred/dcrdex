@@ -217,6 +217,7 @@ if [ "$CHAIN_LOADED" ] ; then
   tmux send-keys -t $SESSION:2 "./beta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
 
 else
+  sleep 1
   tmux send-keys -t $SESSION:2 "./beta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
   # This timeout is apparently critical. Give the nodes time to sync.
   sleep 2
@@ -242,12 +243,12 @@ else
     tmux send-keys -t $SESSION:2 "./beta encryptwallet ${WALLET_PASSWORD}${DONE}" C-m\; ${WAIT}
   fi
 
-
   #################################################################################
   # Optional restart for some assets
   ################################################################################
 
   if [ "$RESTART_AFTER_ENCRYPT" ] ; then
+    sleep 2
     echo "Restarting alpha/beta nodes"
     tmux send-keys -t $SESSION:0 "${DAEMON} -rpcuser=user -rpcpassword=pass \
       -rpcport=${ALPHA_RPC_PORT} -datadir=${ALPHA_DIR} \
@@ -259,9 +260,13 @@ else
       -port=${BETA_LISTEN_PORT} -fallbackfee=0.00001 ${EXTRA_ARGS}; \
       tmux wait-for -S beta${SYMBOL}" C-m
     sleep 3
+
+    tmux send-keys -t $SESSION:2 "./beta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${DONE}" C-m\; ${WAIT}
   fi
 
   tmux send-keys -t $SESSION:2 "./alpha walletpassphrase ${WALLET_PASSWORD} 100000000${DONE}" C-m\; ${WAIT}
+  tmux send-keys -t $SESSION:2 "./beta walletpassphrase ${WALLET_PASSWORD} 100000000${DONE}" C-m\; ${WAIT}
+
   echo "Setting private keys for alpha"
   if [ -z "$ALPHA_WALLET_SEED" ]; then
     tmux send-keys -t $SESSION:2 "./alpha importdescriptors \$(< ../desc-alpha.json)${DONE}" C-m\; ${WAIT}
@@ -269,7 +274,6 @@ else
     tmux send-keys -t $SESSION:2 "./alpha sethdseed true ${ALPHA_WALLET_SEED}${DONE}" C-m\; ${WAIT}
   fi
 
-  tmux send-keys -t $SESSION:2 "./beta walletpassphrase ${WALLET_PASSWORD} 100000000${DONE}" C-m\; ${WAIT}
   echo "Setting private keys for beta"
   if [ -z "$BETA_WALLET_SEED" ]; then
     tmux send-keys -t $SESSION:2 "./beta importdescriptors \$(< ../desc-beta.json)${DONE}" C-m\; ${WAIT}
@@ -327,8 +331,9 @@ else
     ./alpha sendtoaddress ${MWADDR} 1.234 && sleep 1
     ./alpha generatetoaddress 3 ${ALPHA_MINING_ADDR}
   else
-    echo "Generating 400 blocks for alpha"
-    tmux send-keys -t $SESSION:2 "./alpha generatetoaddress 400 ${ALPHA_MINING_ADDR}${DONE}" C-m\; ${WAIT}
+    BLOCKS_TO_MINE=${BLOCKS_TO_MINE=400}
+    echo "Generating ${BLOCKS_TO_MINE} blocks for alpha"
+    tmux send-keys -t $SESSION:2 "./alpha generatetoaddress ${BLOCKS_TO_MINE} ${ALPHA_MINING_ADDR}${DONE}" C-m\; ${WAIT}
   fi
 
   #################################################################################
@@ -372,9 +377,11 @@ fi
 tmux send-keys -t $SESSION:2 "set -o history" C-m
 
 # Miner
-tmux new-window -t $SESSION:3 -n "miner" $SHELL
-tmux send-keys -t $SESSION:3 "cd ${HARNESS_DIR}" C-m
-tmux send-keys -t $SESSION:3 "watch -n 15 ./mine-alpha 1" C-m
+if [ -z "$NOMINER" ] ; then
+  tmux new-window -t $SESSION:3 -n "miner" $SHELL
+  tmux send-keys -t $SESSION:3 "cd ${HARNESS_DIR}" C-m
+  tmux send-keys -t $SESSION:3 "watch -n 15 ./mine-alpha 1" C-m
+fi
 
 if [ ! -z "$GODAEMON" ]; then
   $GODAEMON --version &> /dev/null
