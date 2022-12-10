@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
+	btctest "decred.org/dcrdex/dex/networks/btc/test"
 	"decred.org/dcrdex/server/asset"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -379,74 +380,14 @@ func isEscrowScript(script []byte) bool {
 	return false
 }
 
-// CompatibilityItems are a set of pubkey scripts and corresponding
-// string-encoded addresses checked in CompatibilityTest. They should be taken
-// from existing on-chain data.
-type CompatibilityItems struct {
-	P2PKHScript  []byte
-	PKHAddr      string
-	P2WPKHScript []byte
-	WPKHAddr     string
-	P2SHScript   []byte
-	SHAddr       string
-	P2WSHScript  []byte
-	WSHAddr      string
-}
+// CompatibilityItems is an alias for the type in dex/networks/btc/test, which
+// should be used instead of this type to test a clone's chain parameters.
+type CompatibilityItems = btctest.CompatibilityItems
 
-// CompatibilityCheck checks various scripts' compatibility with the Backend.
-// If a fork's CompatibilityItems can pass the CompatibilityCheck, the node
-// can likely use NewBTCClone to create a DEX-compatible backend.
+// CompatibilityCheck is an alias for the type in dex/networks/btc/test, which
+// should be used instead of this type to test a clone's chain parameters.
 func CompatibilityCheck(items *CompatibilityItems, chainParams *chaincfg.Params, t *testing.T) {
-	checkAddr := func(pkScript []byte, addr string) {
-		_, addrs, _, err := txscript.ExtractPkScriptAddrs(pkScript, chainParams)
-		if err != nil {
-			t.Fatalf("ExtractPkScriptAddrs error: %v", err)
-		}
-		if len(addrs) == 0 {
-			t.Fatalf("no addresses extracted from script %x", pkScript)
-		}
-		if addrs[0].String() != addr {
-			t.Fatalf("address mismatch %s != %s", addrs[0].String(), addr)
-		}
-	}
-
-	// P2PKH
-	pkh := dexbtc.ExtractPubKeyHash(items.P2PKHScript)
-	if pkh == nil {
-		t.Fatalf("incompatible P2PKH script")
-	}
-	checkAddr(items.P2PKHScript, items.PKHAddr)
-
-	// P2WPKH
-	// A clone doesn't necessarily need segwit, so a nil value here will skip
-	// the test.
-	if items.P2WPKHScript != nil {
-		scriptClass := txscript.GetScriptClass(items.P2WPKHScript)
-		if scriptClass != txscript.WitnessV0PubKeyHashTy {
-			t.Fatalf("incompatible P2WPKH script")
-		}
-		checkAddr(items.P2WPKHScript, items.WPKHAddr)
-	}
-
-	// P2SH
-	sh := dexbtc.ExtractScriptHash(items.P2SHScript)
-	if sh == nil {
-		t.Fatalf("incompatible P2SH script")
-	}
-	checkAddr(items.P2SHScript, items.SHAddr)
-
-	// P2WSH
-	if items.P2WSHScript != nil {
-		scriptClass := txscript.GetScriptClass(items.P2WSHScript)
-		if scriptClass != txscript.WitnessV0ScriptHashTy {
-			t.Fatalf("incompatible P2WPKH script")
-		}
-		wsh := dexbtc.ExtractScriptHash(items.P2WSHScript)
-		if wsh == nil {
-			t.Fatalf("incompatible P2WSH script")
-		}
-		checkAddr(items.P2WSHScript, items.WSHAddr)
-	}
+	btctest.CompatibilityCheck(t, items, chainParams)
 }
 
 func TestMedianFees(btc *Backend, t *testing.T) {
