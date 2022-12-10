@@ -25,6 +25,9 @@ DOGE_ON=$?
 ~/dextest/zec/harness-ctl/alpha getblockchaininfo > /dev/null
 ZEC_ON=$?
 
+~/dextest/dgb/harness-ctl/alpha getblockchaininfo > /dev/null
+DGB_ON=$?
+
 set -e
 
 echo initializing
@@ -61,6 +64,11 @@ fi
 if [ $ZEC_ON -eq 0 ]; then
 	echo configuring zcash wallet
 	./dexcctl -p abc -p "" --simnet newwallet 133 zcashdRPC ~/dextest/zec/alpha/alpha.conf
+fi
+
+if [ $DGB_ON -eq 0 ]; then
+	echo configuring dgb wallet
+	./dexcctl -p abc -p "" --simnet newwallet 20 digibytedRPC ~/dextest/dgb/alpha/alpha.conf
 fi
 
 echo checking if we have an account already

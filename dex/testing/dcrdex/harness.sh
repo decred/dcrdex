@@ -65,6 +65,9 @@ DOGE_ON=$?
 ~/dextest/zec/harness-ctl/alpha getblockchaininfo &> /dev/null
 ZEC_ON=$?
 
+~/dextest/dgb/harness-ctl/alpha getblockchaininfo &> /dev/null
+DGB_ON=$?
+
 ~/dextest/eth/harness-ctl/alpha attach --exec 'eth.blockNumber' > /dev/null
 ETH_ON=$?
 
@@ -161,6 +164,20 @@ if [ $ZEC_ON -eq 0 ]; then
             "marketBuyBuffer": 1.2
 EOF
 else echo "WARNING: ZCash is not running. Configuring dcrdex markets without ZEC."
+fi
+
+if [ $DGB_ON -eq 0 ]; then
+    cat << EOF >> "./markets.json"
+        },
+        {
+            "base": "DCR_simnet",
+            "quote": "DGB_simnet",
+            "lotSize": 100000000,
+            "rateStep": 1000000,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2
+EOF
+else echo "WARNING: Digibyte is not running. Configuring dcrdex markets without DGB."
 fi
 
 cat << EOF >> "./markets.json"
@@ -270,6 +287,18 @@ if [ $ZEC_ON -eq 0 ]; then
             "maxFeeRate": 200,
             "swapConf": 1,
             "configPath": "${TEST_ROOT}/zec/alpha/alpha.conf"
+EOF
+fi
+
+if [ $DGB_ON -eq 0 ]; then
+    cat << EOF >> "./markets.json"
+         },
+        "DGB_simnet": {
+            "bip44symbol": "dgb",
+            "network": "simnet",
+            "maxFeeRate": 2000,
+            "swapConf": 1,
+            "configPath": "${TEST_ROOT}/dgb/alpha/alpha.conf"
 EOF
 fi
 
