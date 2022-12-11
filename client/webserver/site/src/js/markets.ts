@@ -1125,6 +1125,7 @@ export default class MarketsPage extends BasePage {
       if (counter !== this.maxOrderUpdateCounter) return
       if (!app().checkResponse(res)) {
         console.warn('max order estimate not available:', res)
+        page.maxFromLots.textContent = intl.prep(intl.ID_ESTIMATE_UNAVAILABLE)
         page.mktSellMaxFromLots.textContent = intl.prep(intl.ID_ESTIMATE_UNAVAILABLE)
         if (this.maxLoaded) {
           this.maxLoaded()
