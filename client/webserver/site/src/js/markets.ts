@@ -486,6 +486,7 @@ export default class MarketsPage extends BasePage {
       bind(row.node, 'click', () => {
         this.startLoadingAnimations()
         this.setMarket(row.mkt.xc.host, row.mkt.baseid, row.mkt.quoteid)
+        this.setRegistrationStatusVisibility()
       })
     }
 
@@ -774,12 +775,10 @@ export default class MarketsPage extends BasePage {
         this.resolveOrderFormVisibility()
       }
       if (Doc.isHidden(page.orderForm)) {
-        // wait a couple of seconds before showing the form so the success
-        // message is shown to the user
+        // Wait a couple of seconds before showing the form so the success
+        // message is shown to the user.
         setTimeout(toggle, 5000)
-        return
       }
-      toggle()
     }
   }
 
@@ -866,7 +865,6 @@ export default class MarketsPage extends BasePage {
     this.loadCandles()
 
     this.setLoaderMsgVisibility()
-    this.setRegistrationStatusVisibility()
     this.resolveOrderFormVisibility()
     this.setOrderBttnText()
     this.setCandleDurBttns()
