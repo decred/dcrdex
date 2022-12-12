@@ -557,6 +557,10 @@ const CoinExplorers: Record<number, Record<number, (cid: string) => string>> = {
     [Mainnet]: (cid: string) => `https://ltc.bitaps.com/${cid.split(':')[0]}`,
     [Testnet]: (cid: string) => `https://sochain.com/tx/LTCTEST/${cid.split(':')[0]}`
   },
+  20: {
+    [Mainnet]: (cid: string) => `https://digiexplorer.info/tx/${cid.split(':')[0]}`,
+    [Testnet]: (cid: string) => `https://testnetexplorer.digibyteservers.io/tx/${cid.split(':')[0]}`
+  },
   60: ethExplorers,
   60001: ethExplorers,
   3: { // doge
