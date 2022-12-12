@@ -455,13 +455,13 @@ export default class MarketsPage extends BasePage {
     this.stats = [{ row: stats0, tmpl: Doc.parseTemplate(stats0) }, { row: stats1, tmpl: Doc.parseTemplate(stats1) }]
 
     const closeMarketsList = () => {
-      State.setCookie(State.LeftMarketDockCK, '0')
+      State.store(State.LeftMarketDockLK, '0')
       page.leftMarketDock.classList.remove('default')
       page.leftMarketDock.classList.add('stashed')
       for (const s of this.stats) s.row.classList.remove('listopen')
     }
     const openMarketsList = () => {
-      State.setCookie(State.LeftMarketDockCK, '1')
+      State.store(State.LeftMarketDockLK, '1')
       page.leftMarketDock.classList.remove('default', 'stashed')
       for (const s of this.stats) s.row.classList.add('listopen')
     }

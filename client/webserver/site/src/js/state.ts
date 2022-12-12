@@ -2,12 +2,14 @@
 // utilities for setting and retrieving cookies and storing user configuration
 // to localStorage.
 export default class State {
+  // Cookie keys.
   static DarkModeCK = 'darkMode'
   static AuthCK = 'dexauth'
   static PopupsCK = 'popups'
   static PwKeyCK = 'sessionkey'
-  static LeftMarketDockCK = 'leftmarketdock'
-  static SelectedAssetCK = 'selectedAsset'
+  // Local storage keys (for data that we don't need at the server).
+  static LeftMarketDockLK = 'leftmarketdock'
+  static SelectedAssetLK = 'selectedasset'
 
   static orderDisclaimerAckedLK = 'ordAck'
 
@@ -42,13 +44,13 @@ export default class State {
     return !!this.getCookie(State.PwKeyCK)
   }
 
-  /* showLeftMarketDock returns whether or not user wants left market doc shown. */
-  static showLeftMarketDock () {
-    return this.getCookie(State.LeftMarketDockCK) === '1'
-  }
-
   static removeAuthCK () {
     document.cookie = `${State.AuthCK}=;expires=Thu, 01 Jan 1970 00:00:01 GMT;`
+  }
+
+  /* showLeftMarketDock returns whether or not user wants left market doc shown. */
+  static showLeftMarketDock () {
+    return this.fetch(State.LeftMarketDockLK) === '1'
   }
 
   /*
@@ -56,7 +58,7 @@ export default class State {
    * yet.
    */
   static selectedAsset (): number | null {
-    const assetIDStr = State.getCookie(State.SelectedAssetCK)
+    const assetIDStr = State.fetch(State.SelectedAssetLK)
     if (!assetIDStr) {
       return null
     }
@@ -74,7 +76,7 @@ export default class State {
   }
 
   /*
-  * fetch fetches the value associated with the key in Window.localStorage, or
+  * fetch the value associated with the key in Window.localStorage, or
   * null if the no value exists for the key.
   */
   static fetch (k: string) {
@@ -86,7 +88,7 @@ export default class State {
   }
 }
 
-// Setting defaults here, unless specific cookie value was already chosen by the user.
+// Setting defaults here, unless specific cookie (or local storage) value was already chosen by the user.
 if (State.getCookie(State.DarkModeCK) === null) State.setCookie(State.DarkModeCK, '1')
 if (State.getCookie(State.PopupsCK) === null) State.setCookie(State.PopupsCK, '1')
-if (State.getCookie(State.LeftMarketDockCK) === null) State.setCookie(State.LeftMarketDockCK, '1')
+if (State.fetch(State.LeftMarketDockLK) === null) State.store(State.LeftMarketDockLK, '1')

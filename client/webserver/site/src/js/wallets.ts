@@ -592,7 +592,7 @@ export default class WalletsPage extends BasePage {
       this.updateAssetButton(a.id)
       Doc.bind(bttn, 'click', () => {
         this.setSelectedAsset(a.id)
-        State.setCookie(State.SelectedAssetCK, String(a.id))
+        State.store(State.SelectedAssetLK, String(a.id))
       })
     }
     page.assetSelect.classList.remove('invisible')

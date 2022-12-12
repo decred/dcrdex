@@ -48,7 +48,9 @@ export default class SettingsPage extends BasePage {
     })
 
     Doc.bind(page.showPokes, 'click', () => {
-      State.setCookie(State.PopupsCK, page.showPokes.checked || false ? '1' : '0')
+      const show = page.showPokes.checked || false
+      State.setCookie(State.PopupsCK, show ? '1' : '0')
+      app().showPopups = show
     })
 
     page.commitHash.textContent = app().commitHash.substring(0, 7)
