@@ -56,7 +56,10 @@ with unit ''atoms Y / unit Z''.
 In order to demonstrate control of unspent value on the blockchain, a user must
 provide its location. For Bitcoin-based blockchains, value is located by
 pointing to an unspent transaction output (UTXO), identified by its transaction
-ID and output index (vout).
+ID and output index (vout). For account based assets, the coin id is different
+in different situations. Pre-swap it is simply an account address. While swapping,
+the value is transferred to a swap contract's address and can be found there in
+a map keyed by the swap's secret hash.
 
 In an effort to stay blockchain-protocol agnostic, the DEX accepts
 and recognizes the locating information as a single byte-array called the
@@ -189,13 +192,19 @@ of their penalization.
 {|
 ! field   !! type   !! description
 |-
-| matches || &#91;object&#93; || list of [[orders.mediawiki/#Match_negotiation|Match objects]]
+| activematches || <nowiki>[object]</nowiki> || list of active [[orders.mediawiki/#Match_negotiation|Match objects]]
 |-
-| order statuses || <nowiki>[object]</nowiki> || list of <code>Order Status Object</code>
+| activeorderstatuses || <nowiki>[object]</nowiki> || list of active <code>Order Status Object</code>
 |-
 | score || int || The user's score. The math behind this is currently being adjusted
 |-
-| suspended || bool || true if suspended. will be deprecated in a future version
+| tier || int || Bond tier. One or more indicates the account can trade. Legacy fee being paid gives a perpetual +1 to tier. Not set by legacy servers.
+|-
+| activeBonds || <nowiki>[object]</nowiki> || list of active <code>Bond Object</code>
+|-
+| legacyFeePaid || bool || Whether the legacy fee was paid. This currently has the internal value of one bond tier. Not set by legacy servers.
+|-
+| suspended || bool || DEPRECATED. For legacy servers true if suspended. Implies tier < 1, and means that the user cannot trade until posting more bond.
 |-
 | sig || string || hex-encoded server's signature of the serialized connection data
 |}
@@ -210,10 +219,26 @@ of their penalization.
 | Status || int || the order status. See [[https://github.com/decred/dcrdex/blob/master/dex/order/status.go|status.go]] for statuses.
 |}
 
+'''Bond Object'''
+
+{|
+! field !! type !! description
+|-
+| version || int || Bond version.
+|-
+| amount || int || Amount held in the bond in the lowest communicatable denomination of that coin. i.e. atoms for dcr, gwei for eth.
+|-
+| expiry || int || When the bond expires, NOT the bond locktime.
+|-
+| coinID || bytes || Coin ID that created the bond.
+|-
+| assetID || int || SLIP-0044 registered coin type of the bond asset.
+|}
+
 ==HTTP==
 
 An API using HTTP for message transport may be provided for basic account
-management and server status queries, however webWebSocketsocket connections are to be
+management and server status queries, however WebSocket connections are to be
 the sole means for
 [[orders.mediawiki/#Client_Order_Management|placing, monitoring, and executing orders]].
 The primary reason for limiting the scope of the HTTP API is to eliminate client
