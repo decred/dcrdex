@@ -10,7 +10,7 @@ import (
 
 // DelayedRelay creates a simple error signal pipeline that delays and
 // aggregates the relaying of nil errors. Non-nil errors received on the in
-// channel are immediately send on the out channel without delay. If a nil error
+// channel are immediately sent on the out channel without delay. If a nil error
 // arrives within minDelay of the previous one, it will be scheduled for later
 // to respect the configured delay. If multiple arrive within minDelay, they
 // will be grouped into a single delayed signal.
@@ -54,8 +54,8 @@ func DelayedRelay(ctx context.Context, minDelay time.Duration, n int) (out <-cha
 				last = time.Now().UTC()
 
 			case <-ctx.Done():
-				if scheduled != nil && !scheduled.Stop() {
-					<-scheduled.C
+				if scheduled != nil {
+					scheduled.Stop()
 				}
 				return
 			}
