@@ -799,7 +799,7 @@ func (s *Swapper) Run(ctx context.Context) {
 						return
 					}
 					select {
-					case <-mainLoop:
+					case <-ctxHelpers.Done():
 						return
 					case blockNotes <- &blockNotification{
 						time:    time.Now().UTC(),
