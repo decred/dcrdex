@@ -231,6 +231,7 @@ export default class WalletsPage extends BasePage {
     const page = this.page
     Doc.hide(page.vSendErr, page.sendErr, page.vSendEstimates, page.txFeeNotAvailable)
     const assetID = parseInt(page.sendForm.dataset.assetID || '')
+    const token = app().assets[assetID].token
     const subtract = page.subtractCheckBox.checked || false
     const conversionFactor = app().unitInfo(assetID).conventional.conversionFactor
     const value = Math.round(parseFloat(page.sendAmt.value || '') * conversionFactor)
@@ -273,7 +274,12 @@ export default class WalletsPage extends BasePage {
     page.vSendSymbol.textContent = symbol.toUpperCase()
     page.vSendLogo.src = Doc.logoPath(symbol)
 
-    page.vSendFee.textContent = Doc.formatFullPrecision(txfee, ui)
+    if (token) {
+      const { unitInfo: feeUI, symbol: feeSymbol } = app().assets[token.parentID]
+      page.vSendFee.textContent = Doc.formatFullPrecision(txfee, feeUI) + ' ' + feeSymbol
+    } else {
+      page.vSendFee.textContent = Doc.formatFullPrecision(txfee, ui)
+    }
     this.showFiatValue(assetID, txfee, page.vSendFeeFiat)
     page.vSendDestinationAmt.textContent = Doc.formatFullPrecision(value - txfee, ui)
     page.vTotalSend.textContent = Doc.formatFullPrecision(value, ui)
@@ -283,15 +289,18 @@ export default class WalletsPage extends BasePage {
     page.balanceAfterSend.textContent = Doc.formatFullPrecision(bal, ui)
     this.showFiatValue(assetID, bal, page.balanceAfterSendFiat)
     Doc.show(page.approxSign)
+    // NOTE: All tokens take this route because they cannot pay the fee.
     if (!subtract) {
       Doc.hide(page.approxSign)
       page.vSendDestinationAmt.textContent = Doc.formatFullPrecision(value, ui)
-      const totalSend = value + txfee
+      let totalSend = value
+      if (!token) totalSend += txfee
       page.vTotalSend.textContent = Doc.formatFullPrecision(totalSend, ui)
       this.showFiatValue(assetID, totalSend, page.vTotalSendFiat)
-      const bal = wallet.balance.available - totalSend
-      // handle edge cases where bal is not enough to cover totalSend. we don't
-      // want a minus display of user balance after send.
+      let bal = wallet.balance.available - value
+      if (!token) bal -= txfee
+      // handle edge cases where bal is not enough to cover totalSend.
+      // we don't want a minus display of user bal.
       if (bal <= 0) {
         page.balanceAfterSend.textContent = Doc.formatFullPrecision(0, ui)
         this.showFiatValue(assetID, 0, page.balanceAfterSendFiat)
@@ -925,7 +934,7 @@ export default class WalletsPage extends BasePage {
   async showSendForm (assetID: number) {
     const page = this.page
     const box = page.sendForm
-    const { wallet, name, unitInfo: ui, symbol } = app().assets[assetID]
+    const { wallet, name, unitInfo: ui, symbol, token } = app().assets[assetID]
     Doc.hide(page.toggleSubtract)
     page.subtractCheckBox.checked = false
 
@@ -956,12 +965,21 @@ export default class WalletsPage extends BasePage {
       const res = await postJSON('/api/txfee', feeReq)
       loaded()
       if (app().checkResponse(res)) {
-        const canSend = wallet.balance.available - res.txfee
+        let canSend = wallet.balance.available
+        if (!token) {
+          canSend -= res.txfee
+        }
         this.maxSend = canSend
         page.maxSend.textContent = Doc.formatFullPrecision(canSend, ui)
         this.showFiatValue(assetID, canSend, page.maxSendFiat)
-        page.maxSendFee.textContent = Doc.formatFullPrecision(res.txfee, ui)
-        this.showFiatValue(assetID, res.txfee, page.maxSendFeeFiat)
+        if (token) {
+          const { unitInfo: feeUI, symbol: feeSymbol } = app().assets[token.parentID]
+          page.maxSendFee.textContent = Doc.formatFullPrecision(res.txfee, feeUI) + ' ' + feeSymbol
+          this.showFiatValue(token.parentID, res.txfee, page.maxSendFeeFiat)
+        } else {
+          page.maxSendFee.textContent = Doc.formatFullPrecision(res.txfee, ui)
+          this.showFiatValue(assetID, res.txfee, page.maxSendFeeFiat)
+        }
         Doc.show(page.maxSendDisplay)
       }
     }

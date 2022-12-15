@@ -105,11 +105,17 @@ var Tokens = map[uint32]*Token{
 						// address to file. Live tests must populate this field.
 						Address: common.Address{},
 						Gas: Gases{
-							Swap:      174_000,
-							SwapAdd:   115_000,
-							Redeem:    70_000,
-							RedeemAdd: 33_000,
-							Refund:    50_000, // [48149 48149 48137 48149 48137]
+							// Results from client's GetGasEstimates.
+							//
+							// First swap used 171756 gas
+							//   4 additional swaps averaged 112607 gas each
+							//   [171756 284366 396976 509586 622184]
+							// First redeem used 63214 gas
+							//   4 additional redeems averaged 31641 gas each
+							//   [63214 94858 126502 158135 189779]
+							// Average of 5 refunds: 48127
+							//   [48127 48127 48127 48127 48127]
+							//
 							// Approve is the gas used to call the approve
 							// method of the contract. For Approve transactions,
 							// the very first approval for an account-spender
@@ -117,11 +123,96 @@ var Tokens = map[uint32]*Token{
 							// results are repeated for a different account's
 							// first approvals on the same contract, so it's not
 							// just the global first.
-							Approve:  46_000, //  [44465 27365 27365 27365 27365]
-							Transfer: 27_000, // [24964 24964 24964 24964 24964]
+							// Average of 5 approvals: 27365
+							//   [44465 27365 27365 27365 27365]
+							//
+							// The first transfer to an address the contract has
+							// not seen before will insert a new key into the
+							// contract's token map. The amount of extra gas
+							// this consumes seems to depend on the size of the
+							// map and is not noticeable on simnet.
+							// Average of 5 transfers: 32540
+							//   [32540 32540 32540 32540 32540]
+							Swap:      174_000,
+							SwapAdd:   115_000,
+							Redeem:    70_000,
+							RedeemAdd: 33_000,
+							Refund:    50_000,
+							Approve:   46_000,
+							Transfer:  35_000,
 						},
 					},
 				},
+			},
+		},
+	},
+	usdcTokenID: {
+		EVMFactor: new(int64),
+		Token: &dex.Token{
+			ParentID: EthBipID,
+			Name:     "USDC",
+			UnitInfo: dex.UnitInfo{
+				AtomicUnit: "microUSD",
+				Conventional: dex.Denomination{
+					Unit:             "USDC",
+					ConversionFactor: 1e6,
+				},
+			},
+		},
+		NetTokens: map[dex.Network]*NetToken{
+			dex.Mainnet: {
+				Address:       common.Address{},
+				SwapContracts: map[uint32]*SwapContract{},
+			},
+			dex.Testnet: {
+				Address: common.HexToAddress("0x07865c6e87b9f70255377e024ace6630c1eaa37f"),
+				SwapContracts: map[uint32]*SwapContract{
+					0: {
+						Address: common.HexToAddress("0x9E493d3766989e701797b9371682B7b94fD8Af9c"),
+						Gas: Gases{
+							// Results from client's GetGasEstimates.
+							//
+							// First swap used 170853 gas
+							//   4 additional swaps averaged 112583 gas each
+							//   [170853 283439 396025 508563 621185]
+							// First redeem used 83874 gas
+							//   4 additional redeems averaged 31641 gas each
+							//   [83874 115518 147138 178747 210439]
+							// Average of 5 refunds: 64334
+							//   [64337 64337 64337 64337 64325]
+							//
+							// Approve is the gas used to call the approve
+							// method of the contract. For Approve transactions,
+							// the very first approval for an account-spender
+							// pair takes more than subsequent approvals. The
+							// results are repeated for a different account's
+							// first approvals on the same contract, so it's not
+							// just the global first.
+							// Average of 5 approvals: 46222
+							//   [59902 42802 42802 42802 42802]
+							//
+							//
+							// The first transfer to an address the contract has
+							// not seen before will insert a new key into the
+							// contract's token map. The amount of extra gas
+							// this consumes seems to depend on the size of the
+							// map.
+							// Average of 5 transfers: 51820
+							//   [65500 48400 48400 48400 48400]
+							Swap:      175_000,
+							SwapAdd:   115_000,
+							Redeem:    87_000,
+							RedeemAdd: 33_000,
+							Refund:    67_000,
+							Approve:   65_000,
+							Transfer:  70_000,
+						},
+					},
+				},
+			},
+			dex.Simnet: {
+				Address:       common.Address{},
+				SwapContracts: map[uint32]*SwapContract{},
 			},
 		},
 	},

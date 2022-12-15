@@ -20,7 +20,8 @@ const BipIDs: Record<number, string> = {
   145: 'bch',
   60: 'eth',
   133: 'zec',
-  60000: 'dextt.eth'
+  60000: 'dextt.eth',
+  60001: 'usdc.eth'
 }
 
 const BipSymbols = Object.values(BipIDs)

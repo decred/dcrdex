@@ -497,6 +497,21 @@ function setCoinHref (assetID: number, link: PageElement) {
   link.href = formatter(link.dataset.explorerCoin || '')
 }
 
+const ethExplorers: Record<number, (cid: string) => string> = {
+  [Mainnet]: (cid: string) => {
+    if (cid.length === 42) {
+      return `https://etherscan.io/address/${cid}`
+    }
+    return `https://etherscan.io/tx/${cid}`
+  },
+  [Testnet]: (cid: string) => {
+    if (cid.length === 42) {
+      return `https://goerli.etherscan.io/address/${cid}`
+    }
+    return `https://goerli.etherscan.io/tx/${cid}`
+  }
+}
+
 const CoinExplorers: Record<number, Record<number, (cid: string) => string>> = {
   42: { // dcr
     [Mainnet]: (cid: string) => {
@@ -516,20 +531,8 @@ const CoinExplorers: Record<number, Record<number, (cid: string) => string>> = {
     [Mainnet]: (cid: string) => `https://ltc.bitaps.com/${cid.split(':')[0]}`,
     [Testnet]: (cid: string) => `https://sochain.com/tx/LTCTEST/${cid.split(':')[0]}`
   },
-  60: { // eth
-    [Mainnet]: (cid: string) => {
-      if (cid.length === 42) {
-        return `https://etherscan.io/address/${cid}`
-      }
-      return `https://etherscan.io/tx/${cid}`
-    },
-    [Testnet]: (cid: string) => {
-      if (cid.length === 42) {
-        return `https://goerli.etherscan.io/address/${cid}`
-      }
-      return `https://goerli.etherscan.io/tx/${cid}`
-    }
-  },
+  60: ethExplorers,
+  60001: ethExplorers,
   3: { // doge
     [Mainnet]: (cid: string) => `https://dogeblocks.com/tx/${cid.split(':')[0]}`,
     [Testnet]: (cid: string) => `https://blockexplorer.one/dogecoin/testnet/tx/${cid.split(':')[0]}`

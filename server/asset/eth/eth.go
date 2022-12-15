@@ -81,6 +81,7 @@ func init() {
 	})
 
 	registerToken(testTokenID, 0)
+	registerToken(usdcID, 0)
 }
 
 const (
@@ -101,6 +102,7 @@ var (
 	}
 
 	testTokenID, _ = dex.BipSymbolID("dextt.eth")
+	usdcID, _      = dex.BipSymbolID("usdc.eth")
 )
 
 type driverBase struct {
@@ -622,7 +624,7 @@ func (be *AssetBackend) AccountBalance(addrStr string) (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("accountBalance error: %w", err)
 	}
-	return dexeth.WeiToGweiUint64(bigBal)
+	return be.atomize(bigBal), nil
 }
 
 // ValidateSignature checks that the pubkey is correct for the address and

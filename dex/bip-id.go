@@ -591,6 +591,7 @@ var bipIDs = map[uint32]string{
 	49344: "stash",
 	// ETH reserved token range 60000-60999
 	60000: "dextt.eth", // DEX test token
+	60001: "usdc.eth",
 	// END ETH reserved token range
 	65536:    "keth",
 	88888:    "ryo[c0ban]",

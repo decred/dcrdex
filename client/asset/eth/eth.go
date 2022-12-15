@@ -30,7 +30,6 @@ import (
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/keygen"
-	"decred.org/dcrdex/dex/networks/erc20"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/decred/dcrd/hdkeychain/v3"
@@ -60,7 +59,8 @@ func registerToken(tokenID uint32, desc string, nets ...dex.Network) {
 func init() {
 	asset.Register(BipID, &Driver{})
 	// Test token
-	registerToken(testTokenID, "A token wallet for the DEX test token. Used for testing DEX software.", dex.Simnet)
+	registerToken(simnetTokenID, "A token wallet for the DEX test token. Used for testing DEX software.", dex.Simnet)
+	registerToken(usdcTokenID, "The USDC Ethereum ERC20 token.", dex.Testnet)
 }
 
 const (
@@ -83,7 +83,8 @@ const (
 )
 
 var (
-	testTokenID, _ = dex.BipSymbolID("dextt.eth")
+	simnetTokenID, _ = dex.BipSymbolID("dextt.eth")
+	usdcTokenID, _   = dex.BipSymbolID("usdc.eth")
 	// blockTicker is the delay between calls to check for new blocks.
 	blockTicker     = time.Second
 	peerCountTicker = 5 * time.Second
@@ -284,7 +285,7 @@ type ethFetcher interface {
 	syncProgress(context.Context) (*ethereum.SyncProgress, error)
 	transactionConfirmations(context.Context, common.Hash) (uint32, error)
 	getTransaction(context.Context, common.Hash) (*types.Transaction, int64, error)
-	txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate *big.Int) (*bind.TransactOpts, error)
+	txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate, nonce *big.Int) (*bind.TransactOpts, error)
 	currentFees(ctx context.Context) (baseFees, tipCap *big.Int, err error)
 	unlock(pw string) error
 	getConfirmedNonce(context.Context, int64) (uint64, error)
@@ -455,6 +456,7 @@ type TokenWallet struct {
 	parent   *assetWallet
 	approval atomic.Value
 	token    *dexeth.Token
+	netToken *dexeth.NetToken
 }
 
 // maxProportionOfBlockGasLimitToUse sets the maximum proportion of a block's
@@ -956,6 +958,7 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 		cfg:         cfg,
 		parent:      w.assetWallet,
 		token:       token,
+		netToken:    netToken,
 	}, nil
 }
 
@@ -1482,7 +1485,7 @@ func (w *assetWallet) approvalGas(newGas *big.Int, ver uint32) (uint64, error) {
 	if approveEst, err := w.estimateApproveGas(newGas); err != nil {
 		return 0, fmt.Errorf("error estimating approve gas: %v", err)
 	} else if approveEst > approveGas {
-		w.log.Warnf("Approve gas estimate %d is greater than the expected value %d. Using live estimate + 10%.")
+		w.log.Warnf("Approve gas estimate %d is greater than the expected value %d. Using live estimate + 10%%.", approveEst, approveGas)
 		return approveEst * 11 / 10, nil
 	}
 	return approveGas, nil
@@ -1756,6 +1759,12 @@ func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uin
 		return fail("Swap: initiate error: %w", err)
 	}
 
+	if w.netToken.SwapContracts[swaps.Version] == nil {
+		return fail("unable to find contract address for asset %d contract version %d", w.assetID, swaps.Version)
+	}
+
+	contractAddr := w.netToken.SwapContracts[swaps.Version].Address.String()
+
 	txHash := tx.Hash()
 	for _, swap := range swaps.Contracts {
 		var secretHash [dexeth.SecretHashSize]byte
@@ -1766,7 +1775,7 @@ func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uin
 			txHash:       txHash,
 			secretHash:   secretHash,
 			ver:          swaps.Version,
-			contractAddr: erc20.ContractAddresses[swaps.Version][w.net].String(),
+			contractAddr: contractAddr,
 		})
 	}
 
@@ -2032,18 +2041,20 @@ func (w *assetWallet) tokenAllowance() (allowance *big.Int, err error) {
 func (w *assetWallet) approveToken(amount *big.Int, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
 	w.nonceSendMtx.Lock()
 	defer w.nonceSendMtx.Unlock()
-	txOpts, err := w.node.txOpts(w.ctx, 0, approveGas, dexeth.GweiToWei(maxFeeRate))
+	txOpts, err := w.node.txOpts(w.ctx, 0, approveGas, dexeth.GweiToWei(maxFeeRate), nil)
 	if err != nil {
 		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
 	}
 
 	return tx, w.withTokenContractor(w.assetID, contractVer, func(c tokenContractor) error {
 		tx, err = c.approve(txOpts, amount)
-		if err == nil {
-			w.log.Infof("Approval sent for %s at token address %s, nonce = %s",
-				dex.BipIDSymbol(w.assetID), c.tokenAddress(), txOpts.Nonce)
+		if err != nil {
+			c.voidUnusedNonce()
+			return err
 		}
-		return err
+		w.log.Infof("Approval sent for %s at token address %s, nonce = %s",
+			dex.BipIDSymbol(w.assetID), c.tokenAddress(), txOpts.Nonce)
+		return nil
 	})
 }
 
@@ -3387,7 +3398,7 @@ func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Rede
 
 	monitoredTx, err := w.getLatestMonitoredTx(txHash)
 	if err != nil {
-		w.log.Error("getLatestMonitoredTx error: %v", err)
+		w.log.Errorf("getLatestMonitoredTx error: %v", err)
 		return w.confirmRedemptionWithoutMonitoredTx(txHash, redemption, feeWallet)
 	}
 	// This mutex is locked inside of getLatestMonitoredTx.
@@ -3567,11 +3578,18 @@ func (w *assetWallet) balanceWithTxPool() (*Balance, error) {
 func (w *ETHWallet) sendToAddr(addr common.Address, amt uint64, maxFeeRate *big.Int) (tx *types.Transaction, err error) {
 	w.baseWallet.nonceSendMtx.Lock()
 	defer w.baseWallet.nonceSendMtx.Unlock()
-	txOpts, err := w.node.txOpts(w.ctx, amt, defaultSendGasLimit, maxFeeRate)
+	txOpts, err := w.node.txOpts(w.ctx, amt, defaultSendGasLimit, maxFeeRate, nil)
 	if err != nil {
 		return nil, err
 	}
-	return w.node.sendTransaction(w.ctx, txOpts, addr, nil)
+	tx, err = w.node.sendTransaction(w.ctx, txOpts, addr, nil)
+	if err != nil {
+		if mRPC, is := w.node.(*multiRPCClient); is {
+			mRPC.voidUnusedNonce()
+		}
+		return nil, err
+	}
+	return tx, nil
 }
 
 // sendToAddr sends funds to the address.
@@ -3582,13 +3600,17 @@ func (w *TokenWallet) sendToAddr(addr common.Address, amt uint64, maxFeeRate *bi
 	if g == nil {
 		return nil, fmt.Errorf("no gas table")
 	}
+	txOpts, err := w.node.txOpts(w.ctx, 0, g.Transfer, nil, nil)
+	if err != nil {
+		return nil, err
+	}
 	return tx, w.withTokenContractor(w.assetID, contractVersionNewest, func(c tokenContractor) error {
-		txOpts, err := w.node.txOpts(w.ctx, 0, g.Transfer, nil)
+		tx, err = c.transfer(txOpts, addr, w.evmify(amt))
 		if err != nil {
+			c.voidUnusedNonce()
 			return err
 		}
-		tx, err = c.transfer(txOpts, addr, w.evmify(amt))
-		return err
+		return nil
 	})
 }
 
@@ -3612,10 +3634,17 @@ func (w *assetWallet) initiate(ctx context.Context, assetID uint32, contracts []
 	}
 	w.nonceSendMtx.Lock()
 	defer w.nonceSendMtx.Unlock()
-	txOpts, _ := w.node.txOpts(ctx, val, gasLimit, dexeth.GweiToWei(maxFeeRate))
+	txOpts, err := w.node.txOpts(ctx, val, gasLimit, dexeth.GweiToWei(maxFeeRate), nil)
+	if err != nil {
+		return nil, err
+	}
 	return tx, w.withContractor(contractVer, func(c contractor) error {
 		tx, err = c.initiate(txOpts, contracts)
-		return err
+		if err != nil {
+			c.voidUnusedNonce()
+			return err
+		}
+		return nil
 	})
 }
 
@@ -3729,18 +3758,27 @@ func (w *assetWallet) estimateTransferGas(val uint64) (gas uint64, err error) {
 func (w *assetWallet) redeem(ctx context.Context, assetID uint32, redemptions []*asset.Redemption, maxFeeRate, gasLimit uint64, contractVer uint32, nonceOverride *uint64) (tx *types.Transaction, err error) {
 	w.nonceSendMtx.Lock()
 	defer w.nonceSendMtx.Unlock()
-	txOpts, err := w.node.txOpts(ctx, 0, gasLimit, dexeth.GweiToWei(maxFeeRate))
+	var nonce *big.Int
+	if nonceOverride != nil {
+		nonce = new(big.Int).SetUint64(*nonceOverride)
+	}
+	txOpts, err := w.node.txOpts(ctx, 0, gasLimit, dexeth.GweiToWei(maxFeeRate), nonce)
 	if err != nil {
 		return nil, err
 	}
 
-	if nonceOverride != nil {
-		txOpts.Nonce = new(big.Int).SetUint64(*nonceOverride)
-	}
-
 	return tx, w.withContractor(contractVer, func(c contractor) error {
 		tx, err = c.redeem(txOpts, redemptions)
-		return err
+		if err != nil {
+			// If we did not override the nonce for a replacement
+			// transaction, make it available for the next transaction
+			// on error.
+			if nonceOverride == nil {
+				c.voidUnusedNonce()
+			}
+			return err
+		}
+		return nil
 	})
 }
 
@@ -3754,14 +3792,18 @@ func (w *assetWallet) refund(secretHash [32]byte, maxFeeRate uint64, contractVer
 	}
 	w.nonceSendMtx.Lock()
 	defer w.nonceSendMtx.Unlock()
-	txOpts, err := w.node.txOpts(w.ctx, 0, gas.Refund, dexeth.GweiToWei(maxFeeRate))
+	txOpts, err := w.node.txOpts(w.ctx, 0, gas.Refund, dexeth.GweiToWei(maxFeeRate), nil)
 	if err != nil {
-		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
+		return nil, err
 	}
 
 	return tx, w.withContractor(contractVer, func(c contractor) error {
 		tx, err = c.refund(txOpts, secretHash)
-		return err
+		if err != nil {
+			c.voidUnusedNonce()
+			return err
+		}
+		return nil
 	})
 }
 
@@ -3799,7 +3841,8 @@ func checkTxStatus(receipt *types.Receipt, gasLimit uint64) error {
 // factor of 2. The account should already have a trading balance of at least
 // maxSwaps gwei (token or eth), and sufficient eth balance to cover the
 // requisite tx fees.
-func GetGasEstimates(ctx context.Context, cl ethFetcher, c contractor, maxSwaps int, g *dexeth.Gases, waitForMined func()) error {
+func GetGasEstimates(ctx context.Context, cl ethFetcher, c contractor, maxSwaps int, g *dexeth.Gases,
+	toAddress common.Address, waitForMined func(), waitForReceipt func(ethFetcher, *types.Transaction) (*types.Receipt, error)) error {
 	tokenContractor, isToken := c.(tokenContractor)
 
 	stats := struct {
@@ -3860,7 +3903,7 @@ func GetGasEstimates(ctx context.Context, cl ethFetcher, c contractor, maxSwaps 
 		// Estimate approve.
 		var approveTx, transferTx *types.Transaction
 		if isToken {
-			txOpts, err := cl.txOpts(ctx, 0, g.Approve*2, nil)
+			txOpts, err := cl.txOpts(ctx, 0, g.Approve*2, nil, nil)
 			if err != nil {
 				return fmt.Errorf("error constructing signed tx opts for approve: %v", err)
 			}
@@ -3868,11 +3911,11 @@ func GetGasEstimates(ctx context.Context, cl ethFetcher, c contractor, maxSwaps 
 			if err != nil {
 				return fmt.Errorf("error estimating approve gas: %v", err)
 			}
-			txOpts, err = cl.txOpts(ctx, 0, g.Transfer*2, nil)
+			txOpts, err = cl.txOpts(ctx, 0, g.Transfer*2, nil, nil)
 			if err != nil {
 				return fmt.Errorf("error constructing signed tx opts for transfer: %v", err)
 			}
-			transferTx, err = tokenContractor.transfer(txOpts, cl.address(), big.NewInt(1))
+			transferTx, err = tokenContractor.transfer(txOpts, toAddress, big.NewInt(1))
 			if err != nil {
 				return fmt.Errorf("error estimating transfer gas: %v", err)
 			}
@@ -3900,7 +3943,7 @@ func GetGasEstimates(ctx context.Context, cl ethFetcher, c contractor, maxSwaps 
 		}
 
 		// Send the inits
-		txOpts, err := cl.txOpts(ctx, optsVal, g.SwapN(n)*2, nil)
+		txOpts, err := cl.txOpts(ctx, optsVal, g.SwapN(n)*2, nil, nil)
 		if err != nil {
 			return fmt.Errorf("error constructing signed tx opts for %d swaps: %v", n, err)
 		}
@@ -3909,7 +3952,7 @@ func GetGasEstimates(ctx context.Context, cl ethFetcher, c contractor, maxSwaps 
 			return fmt.Errorf("initiate error for %d swaps: %v", n, err)
 		}
 		waitForMined()
-		receipt, _, err := cl.transactionReceipt(ctx, tx.Hash())
+		receipt, err := waitForReceipt(cl, tx)
 		if err != nil {
 			return err
 		}
@@ -3919,7 +3962,7 @@ func GetGasEstimates(ctx context.Context, cl ethFetcher, c contractor, maxSwaps 
 		stats.swaps = append(stats.swaps, receipt.GasUsed)
 
 		if isToken {
-			receipt, _, err = cl.transactionReceipt(ctx, approveTx.Hash())
+			receipt, err = waitForReceipt(cl, approveTx)
 			if err != nil {
 				return err
 			}
@@ -3927,7 +3970,7 @@ func GetGasEstimates(ctx context.Context, cl ethFetcher, c contractor, maxSwaps 
 				return err
 			}
 			stats.approves = append(stats.approves, receipt.GasUsed)
-			receipt, _, err = cl.transactionReceipt(ctx, transferTx.Hash())
+			receipt, err = waitForReceipt(cl, transferTx)
 			if err != nil {
 				return err
 			}
@@ -3956,13 +3999,16 @@ func GetGasEstimates(ctx context.Context, cl ethFetcher, c contractor, maxSwaps 
 			})
 		}
 
-		txOpts, _ = cl.txOpts(ctx, 0, g.RedeemN(n)*2, nil)
+		txOpts, err = cl.txOpts(ctx, 0, g.RedeemN(n)*2, nil, nil)
+		if err != nil {
+			return err
+		}
 		tx, err = c.redeem(txOpts, redemptions)
 		if err != nil {
 			return fmt.Errorf("redeem error for %d swaps: %v", n, err)
 		}
 		waitForMined()
-		receipt, _, err = cl.transactionReceipt(ctx, tx.Hash())
+		receipt, err = waitForReceipt(cl, tx)
 		if err != nil {
 			return err
 		}

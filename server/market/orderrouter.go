@@ -421,7 +421,7 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 			return msgjson.NewError(msgjson.SignatureError, "redeem signature validation failed")
 		}
 
-		if !r.sufficientAccountBalance(acctAddr, oRecord.order, &assets.receiving.Asset, assets.receiving.ID, tunnel) {
+		if !r.sufficientAccountBalance(acctAddr, oRecord.order, assets.receiving.Asset.ID, assets.receiving.ID, tunnel) {
 			return msgjson.NewError(msgjson.FundingError, "insufficient balance")
 		}
 	}
@@ -452,7 +452,7 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 			return msgjson.NewError(msgjson.SignatureError, "signature validation failed")
 		}
 
-		if !r.sufficientAccountBalance(acctAddr, oRecord.order, &assets.funding.Asset, assets.receiving.ID, tunnel) {
+		if !r.sufficientAccountBalance(acctAddr, oRecord.order, assets.funding.Asset.ID, assets.receiving.ID, tunnel) {
 			return msgjson.NewError(msgjson.FundingError, "insufficient balance")
 		}
 		return r.submitOrderToMarket(tunnel, oRecord)
@@ -618,22 +618,31 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 // sufficientAccountBalance checks that the user's account-based asset balance
 // is sufficient to support the order, considering the user's other orders and
 // active matches across all DEX markets.
-func (r *OrderRouter) sufficientAccountBalance(accountAddr string, ord order.Order, assetInfo *dex.Asset, redeemAssetID uint32, tunnel MarketTunnel) bool {
-	assetID := assetInfo.ID
+func (r *OrderRouter) sufficientAccountBalance(accountAddr string, ord order.Order,
+	assetID, redeemAssetID uint32, tunnel MarketTunnel) bool {
 	trade := ord.Trade()
 
-	var fundingQty, fundingLots uint64
-	var redeems int
+	// This asset is funding an order when it is either:
+	//  - base asset in a sell order e.g. selling ETH in a ETH-LTC market
+	//  - quote asset in a buy order e.g. buying BTC in a BTC-ETH market
+	// This asset will be redeemed when it is either:
+	//  - base asset in a buy order e.g. buying ETH in a ETH-LTC market
+	//  - quote asset in a sell order e.g. selling in a BTC-ETH market
+
+	var fundingQty, fundingLots uint64 // when the asset is base in sell order, or quote in buy order
+	var redeems int                    // when the asset is base in buy order, or quote in sell order
 	if ord.Base() == assetID {
 		if trade.Sell {
 			fundingQty = trade.Quantity
 			fundingLots = trade.Quantity / tunnel.LotSize()
-		} else {
-			if lo, ok := ord.(*order.LimitOrder); ok {
-				redeems = int(calc.QuoteToBase(lo.Rate, trade.Quantity) / tunnel.LotSize())
-			} else {
-				redeems = int(calc.QuoteToBase(safeMidGap(tunnel), trade.Quantity) / tunnel.LotSize())
+		} else { // buying base asset
+			baseQty := trade.Quantity
+			if _, ok := ord.(*order.MarketOrder); ok {
+				// Market buy Quantity is in units of quote asset, so estimate
+				// how much of base asset that might be based on mid-gap rate.
+				baseQty = calc.QuoteToBase(safeMidGap(tunnel), trade.Quantity)
 			}
+			redeems = int(baseQty / tunnel.LotSize())
 		}
 	} else {
 		if trade.Sell {

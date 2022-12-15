@@ -44,6 +44,7 @@ type contractor interface {
 	// case will always be zero.
 	value(context.Context, *types.Transaction) (incoming, outgoing uint64, err error)
 	isRefundable(secretHash [32]byte) (bool, error)
+	voidUnusedNonce()
 }
 
 // tokenContractor interacts with an ERC20 token contract and a token swap
@@ -113,7 +114,7 @@ func newV0Contractor(net dex.Network, acctAddr common.Address, cb bind.ContractB
 }
 
 // initiate sends the initiations to the swap contract's initiate function.
-func (c *contractorV0) initiate(txOpts *bind.TransactOpts, contracts []*asset.Contract) (*types.Transaction, error) {
+func (c *contractorV0) initiate(txOpts *bind.TransactOpts, contracts []*asset.Contract) (tx *types.Transaction, err error) {
 	inits := make([]swapv0.ETHSwapInitiation, 0, len(contracts))
 	secrets := make(map[[32]byte]bool, len(contracts))
 
@@ -146,9 +147,10 @@ func (c *contractorV0) initiate(txOpts *bind.TransactOpts, contracts []*asset.Co
 }
 
 // redeem sends the redemptions to the swap contracts redeem method.
-func (c *contractorV0) redeem(txOpts *bind.TransactOpts, redemptions []*asset.Redemption) (*types.Transaction, error) {
+func (c *contractorV0) redeem(txOpts *bind.TransactOpts, redemptions []*asset.Redemption) (tx *types.Transaction, err error) {
 	redemps := make([]swapv0.ETHSwapRedemption, 0, len(redemptions))
 	secretHashes := make(map[[32]byte]bool, len(redemptions))
+
 	for _, r := range redemptions {
 		secretB, secretHashB := r.Secret, r.Spends.SecretHash
 		if len(secretB) != 32 || len(secretHashB) != 32 {
@@ -194,7 +196,7 @@ func (c *contractorV0) swap(ctx context.Context, secretHash [32]byte) (*dexeth.S
 
 // refund issues the refund command to the swap contract. Use isRefundable first
 // to ensure the refund will be accepted.
-func (c *contractorV0) refund(txOpts *bind.TransactOpts, secretHash [32]byte) (*types.Transaction, error) {
+func (c *contractorV0) refund(txOpts *bind.TransactOpts, secretHash [32]byte) (tx *types.Transaction, err error) {
 	return c.contractV0.Refund(txOpts, secretHash)
 }
 
@@ -318,6 +320,15 @@ func (c *contractorV0) outgoingValue(tx *types.Transaction) (swapped uint64) {
 	return
 }
 
+// voidUnusedNonce allows the next nonce received from a provider to be the same
+// as a recent nonce. Use when we fetch a nonce but error before or while
+// sending a transaction.
+func (c *contractorV0) voidUnusedNonce() {
+	if mRPC, is := c.cb.(*multiRPCClient); is {
+		mRPC.voidUnusedNonce()
+	}
+}
+
 // tokenContractorV0 is a contractor that implements the tokenContractor
 // methods, providing access to the methods of the token's ERC20 contract.
 type tokenContractorV0 struct {
@@ -395,13 +406,13 @@ func (c *tokenContractorV0) allowance(ctx context.Context) (*big.Int, error) {
 
 // approve sends an approve transaction approving the linked contract to call
 // transferFrom for the specified amount.
-func (c *tokenContractorV0) approve(txOpts *bind.TransactOpts, amount *big.Int) (*types.Transaction, error) {
+func (c *tokenContractorV0) approve(txOpts *bind.TransactOpts, amount *big.Int) (tx *types.Transaction, err error) {
 	return c.tokenContract.Approve(txOpts, c.contractAddr, amount)
 }
 
 // transfer calls the transfer method of the erc20 token contract. Used for
 // sends or withdrawals.
-func (c *tokenContractorV0) transfer(txOpts *bind.TransactOpts, addr common.Address, amount *big.Int) (*types.Transaction, error) {
+func (c *tokenContractorV0) transfer(txOpts *bind.TransactOpts, addr common.Address, amount *big.Int) (tx *types.Transaction, err error) {
 	return c.tokenContract.Transfer(txOpts, addr, amount)
 }
 
