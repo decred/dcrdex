@@ -949,6 +949,11 @@ func token(id []byte) string {
 func coinIDString(assetID uint32, coinID []byte) string {
 	coinStr, err := asset.DecodeCoinID(assetID, coinID)
 	if err != nil {
+		// Logging error here with fmt.Printf is better than dropping it. It's not
+		// worth polluting this func signature passing in logger because it is used
+		// a lot in many places.
+		fmt.Printf("invalid coin ID %x for asset %d -> %s: %v\n", coinID, assetID, unbip(assetID), err)
+
 		return "<invalid coin>:" + hex.EncodeToString(coinID)
 	}
 	return coinStr
