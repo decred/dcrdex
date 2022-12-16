@@ -931,9 +931,8 @@ export default class Application {
   }
 
   /**
-   * signOut call to /api/logout, if response with no errors occurred clear all
-   * store, remove auth, darkMode cookies and reload the page, otherwise will
-   * show a notification
+   * signOut call to /api/logout, if response with no errors occurred remove
+   * auth cookie and reload the page, otherwise show a notification.
    */
   async signOut () {
     const res = await postJSON('/api/logout')
@@ -946,7 +945,6 @@ export default class Application {
       Doc.show(this.page.logoutErr)
       return
     }
-    State.clearAllStore()
     State.removeAuthCK()
     window.location.href = '/login'
   }

@@ -70,11 +70,6 @@ export default class State {
     window.localStorage.setItem(k, JSON.stringify(v))
   }
 
-  /* clearAllStore remove all the key-value pair in Window.localStorage. */
-  static clearAllStore () {
-    window.localStorage.clear()
-  }
-
   /*
   * fetch the value associated with the key in Window.localStorage, or
   * null if the no value exists for the key.
