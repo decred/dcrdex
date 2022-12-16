@@ -618,14 +618,12 @@ func newBotNote(topic Topic, subject, details string, severity db.Severity, repo
 // LoginNote is a notification with the recent login status.
 type LoginNote struct {
 	db.Notification
-	Message string `json:"msg"`
 }
 
 const TopicLoginStatus Topic = "LoginStatus"
 
 func newLoginNote(message string) *LoginNote {
 	return &LoginNote{
-		Notification: db.NewNotification(NoteTypeLogin, TopicLoginStatus, "", "", db.Data),
-		Message:      message,
+		Notification: db.NewNotification(NoteTypeLogin, TopicLoginStatus, "", message, db.Data),
 	}
 }
