@@ -33,6 +33,7 @@ const (
 	NoteTypeDEXAuth      = "dex_auth"
 	NoteTypeFiatRates    = "fiatrateupdate"
 	NoteTypeCreateWallet = "createwallet"
+	NoteTypeLogin        = "login"
 )
 
 var noteChanCounter uint64
@@ -611,5 +612,20 @@ func newBotNote(topic Topic, subject, details string, severity db.Severity, repo
 	return &BotNote{
 		Notification: db.NewNotification(NoteTypeBot, topic, subject, details, severity),
 		Report:       report,
+	}
+}
+
+// LoginNote is a notification with the recent login status.
+type LoginNote struct {
+	db.Notification
+	Message string `json:"msg"`
+}
+
+const TopicLoginStatus Topic = "LoginStatus"
+
+func newLoginNote(message string) *LoginNote {
+	return &LoginNote{
+		Notification: db.NewNotification(NoteTypeLogin, TopicLoginStatus, "", "", db.Data),
+		Message:      message,
 	}
 }

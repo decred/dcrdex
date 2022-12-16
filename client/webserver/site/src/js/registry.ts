@@ -313,6 +313,10 @@ export interface BotNote extends CoreNote {
   report: BotReport
 }
 
+export interface LoginNote extends CoreNote {
+  msg: string
+}
+
 export interface MatchNote extends CoreNote {
   orderID: string
   match: Match
