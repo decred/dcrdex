@@ -4268,7 +4268,7 @@ func (c *Core) Login(pw []byte) error {
 		return fmt.Errorf("cannot log in because app has not been initialized")
 	}
 
-	c.notify(newLoginNote("Verifying login credentials..."))
+	c.notify(newLoginNote("Verifying credentials..."))
 	if len(creds.EncInnerKey) == 0 {
 		err := c.initializePrimaryCredentials(pw, creds.OuterKeyParams)
 		if err != nil {
@@ -4296,9 +4296,9 @@ func (c *Core) Login(pw []byte) error {
 		// and the balance updated there.
 		c.notify(newLoginNote("Connecting wallets..."))
 		c.connectWallets()
-		c.notify(newLoginNote("Resolving active trades..."))
+		c.notify(newLoginNote("Resuming active trades..."))
 		c.resolveActiveTrades(crypter)
-		c.notify(newLoginNote("Initializing DEX connections..."))
+		c.notify(newLoginNote("Connecting to DEX servers..."))
 		c.initializeDEXConnections(crypter)
 		if err = c.loadBotPrograms(); err != nil {
 			c.log.Errorf("Error loading bot programs: %v", err)
