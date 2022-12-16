@@ -581,16 +581,6 @@ export default class MarketsPage extends BasePage {
   }
 
   /**
-   * defaultRate returns default exchange rate (aka price).
-   */
-  defaultRate (): number {
-    // Current exchange rate would be reasonable default Price value.
-    const { market: { cfg: { baseid, quoteid, spot }, dex } } = this
-    const rate = spot ? spot.rate : 0
-    return app().conventionalRate(baseid, quoteid, rate, dex)
-  }
-
-  /**
    * calcMaxOrderLots returns the maximum order size, in lots (buy or sell,
    * depending on what user chose in UI).
    */
@@ -690,14 +680,7 @@ export default class MarketsPage extends BasePage {
       const rateStep = String(this.market.cfg.ratestep / this.market.rateConversionFactor)
       page.rateField.min = rateStep
       page.rateField.step = rateStep
-      // It would be nice to provide default rate for the user, so he could use it as
-      // a reference point.
-      const [inputValid,, adjRate] = this.parseRateInput(String(this.defaultRate()))
-      if (inputValid) {
-        page.rateField.value = String(adjRate)
-      } else {
-        page.rateField.value = ''
-      }
+      page.rateField.value = ''
       this.previewMax()
       page.orderTotalPreview.textContent = ''
       // Reset market-sell-order form inputs to defaults.
@@ -2550,7 +2533,7 @@ export default class MarketsPage extends BasePage {
 
     Doc.hide(page.orderErr)
 
-    let [inputValid, adjusted, adjRate] = this.parseRateInput(this.page.rateField.value)
+    const [inputValid, adjusted, adjRate] = this.parseRateInput(this.page.rateField.value)
     if (!inputValid || adjusted) {
       // Disable submit button temporarily (that additionally draws his
       // attention to order-form) to prevent user clicking on it while input
@@ -2560,14 +2543,10 @@ export default class MarketsPage extends BasePage {
       this.animateErrors(highlightOutlineRed(page.rateField), highlightBackgroundRed(page.rateStepBox))
     }
     if (!inputValid) {
-      // Try reset to default rate.
-      [inputValid,, adjRate] = this.parseRateInput(String(this.defaultRate()))
-      if (!inputValid) {
-        page.rateField.value = ''
-        page.orderTotalPreview.textContent = ''
-        this.previewMax() // will hide max buy/sell view.
-        return
-      }
+      page.rateField.value = ''
+      page.orderTotalPreview.textContent = ''
+      this.previewMax() // will hide max buy/sell view.
+      return
     }
     page.rateField.value = String(adjRate)
 
