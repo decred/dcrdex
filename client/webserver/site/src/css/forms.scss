@@ -302,6 +302,10 @@ button.form-button {
 
 #loginForm {
   width: 250px;
+
+  #loader {
+    backdrop-filter: blur(4px);
+  }
 }
 
 #unlockWalletForm,
