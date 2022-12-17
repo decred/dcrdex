@@ -20,9 +20,6 @@ import State from './state'
 import { bind as bindForm, NewWalletForm } from './forms'
 import { RateEncodingFactor } from './orderutil'
 
-const lastMarketKey = 'mmMarket'
-const optionsExpansionKey = 'mmOptsExpand'
-
 const GapStrategyMultiplier = 'multiplier'
 const GapStrategyAbsolute = 'absolute'
 const GapStrategyAbsolutePlus = 'absolute-plus'
@@ -294,13 +291,13 @@ export default class MarketMakerPage extends BasePage {
     page.options.appendChild(this.biasOpt.node)
 
     Doc.bind(page.showAdvanced, 'click', () => {
-      State.store(optionsExpansionKey, true)
+      State.store(State.OptionsExpansionLK, true)
       Doc.hide(page.showAdvanced)
       Doc.show(page.hideAdvanced, page.options)
     })
 
     Doc.bind(page.hideAdvanced, 'click', () => {
-      State.store(optionsExpansionKey, false)
+      State.store(State.OptionsExpansionLK, false)
       Doc.hide(page.hideAdvanced, page.options)
       Doc.show(page.showAdvanced)
     })
@@ -395,7 +392,7 @@ export default class MarketMakerPage extends BasePage {
       }
     }
 
-    const lastMkt = State.fetch(lastMarketKey) as HostedMarket
+    const lastMkt = State.fetch(State.LastMMMarketLK) as HostedMarket
     let mkt: HostedMarket | null = null
     if (lastMkt && lastMkt.host) {
       const xc = app().exchanges[lastMkt.host]
@@ -406,7 +403,7 @@ export default class MarketMakerPage extends BasePage {
       }
     }
 
-    if (State.fetch(optionsExpansionKey)) {
+    if (State.fetch(State.OptionsExpansionLK)) {
       Doc.show(page.hideAdvanced, page.options)
       Doc.hide(page.showAdvanced)
     }
@@ -575,7 +572,7 @@ export default class MarketMakerPage extends BasePage {
     this.setCurrentReport(null)
     page.manualPriceInput.value = ''
 
-    State.store(lastMarketKey, mkt)
+    State.store(State.LastMMMarketLK, mkt)
 
     Doc.empty(page.baseSelect, page.quoteSelect)
     page.baseSelect.appendChild(this.assetRow(mkt.basesymbol))
@@ -630,7 +627,7 @@ export default class MarketMakerPage extends BasePage {
         page.lotEstQuoteBox, page.lotEstBaseBox, page.availHeader, page.fetchingMarkets,
         page.lotsBox, page.advancedBox
       )
-      if (State.fetch(optionsExpansionKey)) Doc.show(page.options)
+      if (State.fetch(State.OptionsExpansionLK)) Doc.show(page.options)
       const loaded = app().loading(page.options)
       const buy = this.fetchOracleAndMaxBuy()
       const sell = this.fetchMaxSell()

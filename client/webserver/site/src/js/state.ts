@@ -8,6 +8,12 @@ export default class State {
   static PopupsCK = 'popups'
   static PwKeyCK = 'sessionkey'
   // Local storage keys (for data that we don't need at the server).
+  static LoggersLK = 'loggers'
+  static RecordersLK = 'recorders'
+  static LastMarketLK = 'selectedMarket'
+  static DepthZoomLK = 'depthZoom'
+  static LastMMMarketLK = 'mmMarket'
+  static OptionsExpansionLK = 'mmOptsExpand'
   static LeftMarketDockLK = 'leftmarketdock'
   static SelectedAssetLK = 'selectedasset'
 

@@ -74,9 +74,6 @@ const candleUpdateRoute = 'candle_update'
 const unmarketRoute = 'unmarket'
 const epochMatchSummaryRoute = 'epoch_match_summary'
 
-const lastMarketKey = 'selectedMarket'
-const depthZoomKey = 'depthZoom'
-
 const animationLength = 500
 
 const anHour = 60 * 60 * 1000 // milliseconds
@@ -211,7 +208,7 @@ export default class MarketsPage extends BasePage {
       mouse: (r: MouseReport) => { this.reportDepthMouse(r) },
       zoom: (z: number) => { this.reportDepthZoom(z) }
     }
-    this.depthChart = new DepthChart(page.depthChart, depthReporters, State.fetch(depthZoomKey))
+    this.depthChart = new DepthChart(page.depthChart, depthReporters, State.fetch(State.DepthZoomLK))
 
     const candleReporters: CandleReporters = {
       mouse: c => { this.reportMouseCandle(c) }
@@ -519,7 +516,7 @@ export default class MarketsPage extends BasePage {
     if (data && data.host && typeof data.base !== 'undefined' && typeof data.quote !== 'undefined') {
       selected = makeMarket(data.host, parseInt(data.base), parseInt(data.quote))
     } else {
-      selected = State.fetch(lastMarketKey)
+      selected = State.fetch(State.LastMarketLK)
     }
     if (!selected || !this.marketList.exists(selected.host, selected.base, selected.quote)) {
       const first = this.marketList.first()
@@ -884,7 +881,7 @@ export default class MarketsPage extends BasePage {
    * across reloads.
    */
   reportDepthZoom (zoom: number) {
-    State.store(depthZoomKey, zoom)
+    State.store(State.DepthZoomLK, zoom)
   }
 
   reportMouseCandle (candle: Candle | null) {
@@ -1349,7 +1346,7 @@ export default class MarketsPage extends BasePage {
     this.updateTitle()
     this.marketList.select(host, b.id, q.id)
 
-    State.store(lastMarketKey, {
+    State.store(State.LastMarketLK, {
       host: note.host,
       base: mktBook.base,
       quote: mktBook.quote

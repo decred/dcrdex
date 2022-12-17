@@ -48,8 +48,6 @@ const bind = Doc.bind
 const unbind = Doc.unbind
 
 const notificationRoute = 'notify'
-const loggersKey = 'loggers'
-const recordersKey = 'recorders'
 const noteCacheSize = 100
 
 interface Page {
@@ -114,18 +112,18 @@ export default class Application {
     // Loggers can be enabled by setting a truthy value to the loggerID using
     // enableLogger. Settings are stored across sessions. See docstring for the
     // log method for more info.
-    this.loggers = State.fetch(loggersKey) || {}
+    this.loggers = State.fetch(State.LoggersLK) || {}
     window.enableLogger = (loggerID, state) => {
       if (state) this.loggers[loggerID] = true
       else delete this.loggers[loggerID]
-      State.store(loggersKey, this.loggers)
+      State.store(State.LoggersLK, this.loggers)
       return `${loggerID} logger ${state ? 'enabled' : 'disabled'}`
     }
     // Enable logging from anywhere.
     window.log = (loggerID, ...a) => { this.log(loggerID, ...a) }
 
     // Recorders can record log messages, and then save them to file on request.
-    const recorderKeys = State.fetch(recordersKey) || []
+    const recorderKeys = State.fetch(State.RecordersLK) || []
     this.recorders = {}
     for (const loggerID of recorderKeys) {
       console.log('recording', loggerID)
@@ -134,7 +132,7 @@ export default class Application {
     window.recordLogger = (loggerID, on) => {
       if (on) this.recorders[loggerID] = []
       else delete this.recorders[loggerID]
-      State.store(recordersKey, Object.keys(this.recorders))
+      State.store(State.RecordersLK, Object.keys(this.recorders))
       return `${loggerID} recorder ${on ? 'enabled' : 'disabled'}`
     }
     window.dumpLogger = loggerID => {
