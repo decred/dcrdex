@@ -16,6 +16,7 @@ export default class State {
   static OptionsExpansionLK = 'mmOptsExpand'
   static LeftMarketDockLK = 'leftmarketdock'
   static SelectedAssetLK = 'selectedasset'
+  static NotificationsLK = 'notifications'
 
   static orderDisclaimerAckedLK = 'ordAck'
 
@@ -54,6 +55,10 @@ export default class State {
     document.cookie = `${State.AuthCK}=;expires=Thu, 01 Jan 1970 00:00:01 GMT;`
   }
 
+  static removePwKeyCK () {
+    document.cookie = `${State.PwKeyCK}=;expires=Thu, 01 Jan 1970 00:00:01 GMT;`
+  }
+
   /* showLeftMarketDock returns whether or not user wants left market doc shown. */
   static showLeftMarketDock () {
     return this.fetch(State.LeftMarketDockLK) === '1'
@@ -86,6 +91,11 @@ export default class State {
       return JSON.parse(v)
     }
     return null
+  }
+
+  /* store removes the key-value pair from Window.localStorage. */
+  static remove (k: string) {
+    window.localStorage.removeItem(k)
   }
 }
 

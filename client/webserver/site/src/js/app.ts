@@ -184,7 +184,7 @@ export default class Application {
     this.attachCommon(this.header)
     this.attach({})
     // Load recent notifications from Window.localStorage.
-    const notes = State.fetch('notifications')
+    const notes = State.fetch(State.NotificationsLK)
     this.setNotes(notes || [])
     // Connect the websocket and register the notification route.
     ws.connect(getSocketURI(), this.reconnected)
@@ -434,7 +434,7 @@ export default class Application {
    * actual stored list is stripped of information not necessary for display.
    */
   storeNotes () {
-    State.store('notifications', this.notes.map(n => {
+    State.store(State.NotificationsLK, this.notes.map(n => {
       return {
         subject: n.subject,
         details: n.details,
@@ -929,8 +929,9 @@ export default class Application {
   }
 
   /**
-   * signOut call to /api/logout, if response with no errors occurred remove
-   * auth cookie and reload the page, otherwise show a notification.
+   * signOut call to /api/logout, if response with no errors occurred remove auth
+   * and other privacy-critical cookies/locals and reload the page, otherwise
+   * show a notification.
    */
   async signOut () {
     const res = await postJSON('/api/logout')
@@ -944,6 +945,10 @@ export default class Application {
       return
     }
     State.removeAuthCK()
+    State.removePwKeyCK()
+    State.remove(State.LastMarketLK)
+    State.remove(State.LastMMMarketLK)
+    State.remove(State.NotificationsLK)
     window.location.href = '/login'
   }
 }
