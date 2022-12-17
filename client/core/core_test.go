@@ -345,6 +345,9 @@ func (conn *TWebsocket) Connect(context.Context) (*sync.WaitGroup, error) {
 	// Consider reworking the tests (TODO).
 	return &sync.WaitGroup{}, conn.connectErr
 }
+func (conn *TWebsocket) SendRaw(b []byte) error {
+	return nil
+}
 
 type TDB struct {
 	updateWalletErr          error
@@ -599,6 +602,12 @@ func (tdb *TDB) RetireBotProgram(pgmID uint64) error {
 }
 
 func (tdb *TDB) ActiveBotPrograms() (map[uint64]*db.BotProgram, error) {
+	return nil, nil
+}
+func (tdb *TDB) StoreCEXCreds(cex string, apiKey, apiSecret string) error {
+	return nil
+}
+func (tdb *TDB) LoadRegisteredCEXes() (CEXes map[string]*db.CEXCreds, err error) {
 	return nil, nil
 }
 

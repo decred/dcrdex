@@ -3,7 +3,12 @@
 
 package dex
 
+import "strings"
+
 var symbolBipIDs map[string]uint32
+
+// symbol -> (network -> id)
+var tokenSymbolNetworkBipIDs map[string]map[string]uint32
 
 // BipSymbolID returns the asset ID associated with a given ticker symbol.
 // While there are a number of duplicate ticker symbols in the BIP ID list
@@ -19,6 +24,31 @@ func BipSymbolID(symbol string) (uint32, bool) {
 
 	idx, found := symbolBipIDs[symbol]
 	return idx, found
+}
+
+// BipTokenSymbolNetworks takes a asset part of a token's symbol
+// and returns a mapping of the various networks the token is
+// hosted on to their BIP-IDs.
+// For example if we have {"usdc.eth":60001, "usdc.matic":60002},
+// then passing in "usdc" will return {"eth": 60001, "matic": 60002}.
+func BipTokenSymbolNetworks(symbol string) (map[string]uint32, bool) {
+	if tokenSymbolNetworkBipIDs == nil {
+		tokenSymbolNetworkBipIDs = make(map[string]map[string]uint32)
+		for idx, sym := range bipIDs {
+			parts := strings.Split(sym, ".")
+			if len(parts) != 2 {
+				continue
+			}
+			tokenSym, network := parts[0], parts[1]
+			if _, found := tokenSymbolNetworkBipIDs[tokenSym]; !found {
+				tokenSymbolNetworkBipIDs[tokenSym] = make(map[string]uint32)
+			}
+			tokenSymbolNetworkBipIDs[tokenSym][network] = idx
+		}
+	}
+
+	networkIDs, found := tokenSymbolNetworkBipIDs[symbol]
+	return networkIDs, found
 }
 
 // BipIDSymbol returns the BIP ID for a given symbol.

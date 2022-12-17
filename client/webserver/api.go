@@ -1523,6 +1523,105 @@ func (s *WebServer) apiMarketReport(w http.ResponseWriter, r *http.Request) {
 	}, s.indent)
 }
 
+func (s *WebServer) apiRegisterNewCex(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		Name      string `json:"name"`
+		APIKey    string `json:"apiKey"`
+		APISecret string `json:"apiSecret"`
+	}{}
+
+	if !readPost(w, r, form) {
+		s.writeAPIError(w, errors.New("invalid arguments"))
+		return
+	}
+
+	cexReport, err := s.core.RegisterNewCEX(form.Name, form.APIKey, form.APISecret)
+	if err != nil {
+		log.Infof("error registering: %v", err)
+		s.writeAPIError(w, fmt.Errorf("error registering new cex: %w", err))
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK  bool            `json:"ok"`
+		CEX *core.CEXReport `json:"cex"`
+	}{
+		OK:  true,
+		CEX: cexReport,
+	}, s.indent)
+}
+
+func (s *WebServer) apiUpdateCEXCreds(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		Name      string `json:"name"`
+		APIKey    string `json:"apiKey"`
+		APISecret string `json:"apiSecret"`
+	}{}
+
+	if !readPost(w, r, form) {
+		s.writeAPIError(w, errors.New("invalid arguments"))
+		return
+	}
+
+	cexReport, err := s.core.UpdateCEXCreds(form.Name, form.APIKey, form.APISecret)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error updating cex creds: %w", err))
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK  bool            `json:"ok"`
+		CEX *core.CEXReport `json:"cex"`
+	}{
+		OK:  true,
+		CEX: cexReport,
+	}, s.indent)
+}
+
+func (s *WebServer) apiConnectCEX(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		Name string `json:"name"`
+	}{}
+
+	if !readPost(w, r, form) {
+		s.writeAPIError(w, errors.New("invalid arguments"))
+		return
+	}
+
+	cexReport, err := s.core.ConnectCEX(form.Name)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("failed to connect CEX: %w", err))
+		return
+	}
+
+	writeJSON(w, &struct {
+		OK  bool            `json:"ok"`
+		CEX *core.CEXReport `json:"cex"`
+	}{
+		OK:  true,
+		CEX: cexReport,
+	}, s.indent)
+}
+
+func (s *WebServer) apiDisconnectCEX(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		Name string `json:"name"`
+	}{}
+
+	if !readPost(w, r, form) {
+		s.writeAPIError(w, errors.New("invalid arguments"))
+		return
+	}
+
+	err := s.core.DisconnectCEX(form.Name)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("failed to disconnect CEX: %w", err))
+		return
+	}
+
+	writeJSON(w, simpleAck(), s.indent)
+}
+
 // writeAPIError logs the formatted error and sends a standardResponse with the
 // error message.
 func (s *WebServer) writeAPIError(w http.ResponseWriter, err error) {

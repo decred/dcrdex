@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/client/core/libxc"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
@@ -745,6 +746,9 @@ func oracleMarketReport(ctx context.Context, b, q *SupportedAsset, log dex.Logge
 	if err := getRates(ctx, url, &rawMarkets); err != nil {
 		return nil, err
 	}
+
+	// TODO: many of the results from CoinPaprika have a null MarketURL causing a bunch
+	// error messages.
 
 	// Create filter for desireable matches.
 	marketMatches := func(mkt *coinpapMarket) bool {
@@ -1507,6 +1511,38 @@ func (c *Core) RetireBot(pgmID uint64) error {
 // Loads all existing programs from the database and matches bots with
 // existing orders.
 func (c *Core) loadBotPrograms() error {
+	registeredCEXes, err := c.db.LoadRegisteredCEXes()
+	if err != nil {
+		return err
+	}
+
+	c.log.Infof("loaded registered cexes: %+v", registeredCEXes)
+
+	c.cexesMtx.Lock()
+	for cexName, creds := range registeredCEXes {
+		if !libxc.IsValidCexName(cexName) {
+			c.log.Errorf("invalid cex name stored in DB: %s", cexName)
+			continue
+		}
+
+		cex, err := libxc.NewCEX(cexName, creds.ApiKey, creds.ApiSecret, c.log.SubLogger(fmt.Sprintf("CEX-%s", cexName)), c.net)
+		if err != nil {
+			// This will not error unless an invalid cex name is passed, which
+			// we checked for above.
+			c.cexesMtx.Unlock()
+			return err
+		}
+
+		c.cexes[cexName] = &coreCEX{
+			cex:       cex,
+			connector: dex.NewConnectionMaster(cex),
+		}
+	}
+	c.cexesMtx.Unlock()
+
+	c.mm.Lock()
+	defer c.mm.Unlock()
+
 	botPrograms, err := c.db.ActiveBotPrograms()
 	if err != nil {
 		return err
@@ -1522,18 +1558,11 @@ func (c *Core) loadBotPrograms() error {
 			}
 		}
 	}
-	c.mm.Lock()
-	defer c.mm.Unlock()
 	for pgmID, botPgm := range botPrograms {
 		if c.mm.bots[pgmID] != nil {
 			continue
 		}
-		var makerPgm *MakerProgram
-		if err := json.Unmarshal(botPgm.Program, &makerPgm); err != nil {
-			c.log.Errorf("Error decoding maker program: %v", err)
-			continue
-		}
-		bot, err := recreateMakerBot(c.ctx, c, pgmID, makerPgm)
+		bot, err := recreateMakerBot(c.ctx, c, pgmID, botPgm)
 		if err != nil {
 			c.log.Errorf("Error recreating maker bot: %v", err)
 			continue
@@ -1559,6 +1588,231 @@ func (c *Core) bots() []*BotReport {
 	// Sort them newest first.
 	sort.Slice(bots, func(i, j int) bool { return bots[i].ProgramID > bots[j].ProgramID })
 	return bots
+}
+
+// CEXReport contains information about a CEX. Markets and Balances
+// will only be populated if Connected=true.
+type CEXReport struct {
+	Name      string                            `json:"name"`
+	Connected bool                              `json:"connected"`
+	Markets   []*libxc.Market                   `json:"markets"`
+	Balances  map[uint32]*libxc.ExchangeBalance `json:"balances"`
+}
+
+func (c *Core) cexReport(cexName string, cex *coreCEX) *CEXReport {
+	cexReport := &CEXReport{
+		Name: cexName,
+	}
+
+	if cex.connector.On() {
+		cexReport.Connected = true
+
+		markets, err := cex.cex.Markets()
+		if err != nil {
+			c.log.Errorf("failed to get %s markets: %v", cexName, err)
+		} else {
+			cexReport.Markets = markets
+		}
+
+		balances, err := cex.cex.Balances()
+		if err != nil {
+			c.log.Errorf("failed to get %s balances: %v", cexName, err)
+		} else {
+			cexReport.Balances = balances
+		}
+	}
+
+	return cexReport
+}
+
+// cexes returns information about all CEXes for which this client has
+// registered api keys.
+func (c *Core) cexReports() []*CEXReport {
+	c.cexesMtx.RLock()
+	defer c.cexesMtx.RUnlock()
+
+	cexes := make([]*CEXReport, 0, len(c.cexes))
+	for name, cex := range c.cexes {
+		cexes = append(cexes, c.cexReport(name, cex))
+	}
+
+	return cexes
+}
+
+// connectCEX connects to a CEX and starts listening for updates from the CEX.
+// The initialConnection return value will be true if the CEX was not yet
+// connected before calling this function.
+func (c *Core) connectCEX(cexName string) (report *CEXReport, initialConnection bool, err error) {
+	c.cexesMtx.RLock()
+	defer c.cexesMtx.RUnlock()
+
+	cex, found := c.cexes[cexName]
+	if !found {
+		return nil, false, fmt.Errorf("%s is not registered", cexName)
+	}
+
+	if cex.connector.On() {
+		return c.cexReport(cexName, cex), false, nil
+	}
+
+	err = cex.connector.Connect(c.ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to connect to %s: %v", cexName, err)
+	}
+
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		updates := cex.cex.SubscribeCEXUpdates()
+		for {
+			select {
+			case <-cex.connector.Done():
+				return
+			case <-updates:
+				cexReport := c.cexReport(cexName, cex)
+				c.notify(newCEXNote(cexReport))
+			}
+		}
+	}()
+
+	return c.cexReport(cexName, cex), true, nil
+}
+
+// ConnectCEX starts a connection to a cex.
+func (c *Core) ConnectCEX(cexName string) (*CEXReport, error) {
+	if !libxc.IsValidCexName(cexName) {
+		return nil, fmt.Errorf("%s is not a recognized CEX", cexName)
+	}
+
+	cexReport, _, err := c.connectCEX(cexName)
+	if err != nil {
+		return nil, err
+	}
+
+	return cexReport, nil
+}
+
+// cexInUse checks if a cex is being used by a bot.
+func (c *Core) cexInUse(cexName string) bool {
+	c.mm.RLock()
+	defer c.mm.RUnlock()
+
+	for _, bot := range c.mm.bots {
+		pgm := bot.program()
+		if pgm.ArbEngineCfg != nil && pgm.ArbEngineCfg.CEXName == cexName {
+			return true
+		}
+	}
+	return false
+}
+
+// DisconnectCEX ends a connection to a CEX.
+func (c *Core) DisconnectCEX(cexName string) error {
+	if !libxc.IsValidCexName(cexName) {
+		return fmt.Errorf("%s is not a recognized CEX", cexName)
+	}
+
+	c.cexesMtx.Lock()
+	defer c.cexesMtx.Unlock()
+
+	if c.cexInUse(cexName) {
+		return fmt.Errorf("%s cannot be disconnected because it is in use", cexName)
+	}
+
+	cex, found := c.cexes[cexName]
+	if !found {
+		return fmt.Errorf("%s is not registered", cexName)
+	}
+
+	if cex.connector.On() {
+		cex.connector.Disconnect()
+	}
+
+	return nil
+}
+
+// RegisterNewCEX connects to a CEX that this client has never connected to
+// before, and stores its API credentials in the DB.
+func (c *Core) RegisterNewCEX(cexName, key, secret string) (*CEXReport, error) {
+	if !libxc.IsValidCexName(cexName) {
+		return nil, fmt.Errorf("%s is not a recognized CEX", cexName)
+	}
+
+	c.cexesMtx.RLock()
+	if _, found := c.cexes[cexName]; found {
+		c.mm.RUnlock()
+		return nil, fmt.Errorf("%s is already registered", cexName)
+	}
+	c.cexesMtx.RUnlock()
+
+	cex, err := libxc.NewCEX(cexName, key, secret, c.log.SubLogger(fmt.Sprintf("CEX-%s", cexName)), c.net)
+	if err != nil {
+		// Will only happen if invalid cex name
+		return nil, err
+	}
+
+	connector := dex.NewConnectionMaster(cex)
+	err = connector.Connect(c.ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	err = c.db.StoreCEXCreds(cexName, key, secret)
+	if err != nil {
+		c.log.Errorf("failed to store cex creds: %v", err)
+	}
+
+	c.cexesMtx.Lock()
+	coreCex := &coreCEX{
+		cex:       cex,
+		connector: connector,
+	}
+	c.cexes[cexName] = coreCex
+	c.cexesMtx.Unlock()
+
+	return c.cexReport(cexName, coreCex), nil
+}
+
+// UpdateCEXCreds updates the API credentials for a CEX.
+func (c *Core) UpdateCEXCreds(cexName, key, secret string) (*CEXReport, error) {
+	if !libxc.IsValidCexName(cexName) {
+		return nil, fmt.Errorf("%s is not a recognized CEX", cexName)
+	}
+
+	c.cexesMtx.Lock()
+	defer c.cexesMtx.Unlock()
+
+	if _, found := c.cexes[cexName]; !found {
+		return nil, fmt.Errorf("%s is not yet registered", cexName)
+	}
+
+	if c.cexInUse(cexName) {
+		return nil, fmt.Errorf("%s cannot be disconnected because it is in use", cexName)
+	}
+
+	cex, err := libxc.NewCEX(cexName, key, secret, c.log.SubLogger(fmt.Sprintf("CEX-%s", cexName)), c.net)
+	if err != nil {
+		// Will only happen if invalid cex name
+		return nil, err
+	}
+	connector := dex.NewConnectionMaster(cex)
+	err = connector.Connect(c.ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect using new keys: %w", err)
+	}
+
+	coreCex := &coreCEX{
+		cex:       cex,
+		connector: connector,
+	}
+	c.cexes[cexName] = coreCex
+
+	err = c.db.StoreCEXCreds(cexName, key, secret)
+	if err != nil {
+		c.log.Errorf("failed to store cex creds: %v", err)
+	}
+
+	return c.cexReport(cexName, coreCex), nil
 }
 
 // MarketReport generates a summary of oracle price data for a market.

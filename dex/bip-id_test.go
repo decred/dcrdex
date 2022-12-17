@@ -71,3 +71,49 @@ func TestBipSymbolID(t *testing.T) {
 		})
 	}
 }
+
+func TestBipTokenSymbolNetworks(t *testing.T) {
+	tests := []struct {
+		name   string
+		symbol string
+		want   map[string]uint32
+		want1  bool
+	}{
+		{
+			name:   "ok",
+			symbol: "dextt",
+			want: map[string]uint32{
+				"eth": 60000,
+			},
+			want1: true,
+		},
+		{
+			name:   "ok, again with pre-computed map",
+			symbol: "dextt",
+			want: map[string]uint32{
+				"eth": 60000,
+			},
+			want1: true,
+		},
+		{
+			name:   "missing",
+			symbol: "blahblahfake",
+			want:   nil,
+			want1:  false,
+		},
+	}
+	for _, tt := range tests {
+		got, got1 := BipTokenSymbolNetworks(tt.symbol)
+		if tt.want1 != got1 {
+			t.Fatalf("%s: expected found %v, but got %v", tt.name, tt.want1, got1)
+		}
+		if len(tt.want) != len(got) {
+			t.Fatalf("%s: expected num networks %d but got %d", tt.name, len(tt.want), len(got))
+		}
+		for net, id := range tt.want {
+			if got[net] != id {
+				t.Fatalf("%s: id did not match for netowrk %s", tt.name, net)
+			}
+		}
+	}
+}

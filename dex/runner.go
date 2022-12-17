@@ -89,9 +89,10 @@ type Connector interface {
 
 // ConnectionMaster manages a Connector.
 type ConnectionMaster struct {
-	connector Connector
-	cancel    context.CancelFunc
-	done      atomic.Value // chan struct{}
+	connector  Connector
+	cancel     context.CancelFunc
+	connecting uint32       // atomic
+	done       atomic.Value // chan struct{}
 }
 
 // NewConnectionMaster creates a new ConnectionMaster. The Connect method should
@@ -113,6 +114,11 @@ func NewConnectionMaster(c Connector) *ConnectionMaster {
 // not to be "on". If the ConnectionMaster is discarded on error, it is not
 // important which method is used.
 func (c *ConnectionMaster) Connect(ctx context.Context) (err error) {
+	if !atomic.CompareAndSwapUint32(&c.connecting, 0, 1) {
+		return
+	}
+	defer atomic.StoreUint32(&c.connecting, 0)
+
 	if c.On() { // probably a bug in the consumer
 		return errors.New("already running")
 	}

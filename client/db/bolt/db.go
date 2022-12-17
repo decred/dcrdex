@@ -64,6 +64,7 @@ var (
 	activeMatchesBucket    = []byte("activeMatches")
 	archivedMatchesBucket  = []byte("matches")
 	botProgramsBucket      = []byte("botPrograms")
+	cexCredsBucket         = []byte("cexCreds")
 	walletsBucket          = []byte("wallets")
 	notesBucket            = []byte("notes")
 	credentialsBucket      = []byte("credentials")
@@ -118,6 +119,8 @@ var (
 	disabledRateSourceKey = []byte("disabledRateSources")
 	walletDisabledKey     = []byte("walletDisabled")
 	programKey            = []byte("program")
+	cexKeyKey             = []byte("cexKey")
+	cexSecretKey          = []byte("cexSecret")
 
 	// values
 	byteTrue   = encode.ByteTrue
@@ -176,7 +179,7 @@ func NewDB(dbPath string, logger dex.Logger, opts ...Opts) (dexdb.DB, error) {
 		activeOrdersBucket, archivedOrdersBucket,
 		activeMatchesBucket, archivedMatchesBucket,
 		walletsBucket, notesBucket, credentialsBucket,
-		botProgramsBucket,
+		botProgramsBucket, cexCredsBucket,
 	}); err != nil {
 		return nil, err
 	}
@@ -2471,6 +2474,52 @@ func (db *BoltDB) ActiveBotPrograms() (pgms map[uint64]*dexdb.BotProgram, err er
 			pgms[intCoder.Uint64(k)] = &dexdb.BotProgram{
 				Type:    string(pgmBkt.Get(typeKey)),
 				Program: pgmBkt.Get(programKey),
+			}
+		}
+		return nil
+	})
+}
+
+func storeCexCreds(bkt *bbolt.Bucket, cex string, key, secret string) error {
+	k := []byte(cex)
+	cexBkt, err := bkt.CreateBucketIfNotExists(k)
+	if err != nil {
+		return fmt.Errorf("error creating program bucket: %w", err)
+	}
+
+	return newBucketPutter(cexBkt).
+		put(cexKeyKey, []byte(key)).
+		put(cexSecretKey, []byte(secret)).
+		err()
+}
+
+// StoreCEXCreds stores the api credentials for a CEX.
+func (db *BoltDB) StoreCEXCreds(cex string, key, secret string) error {
+	return db.Update(func(tx *bbolt.Tx) error {
+		bkt := tx.Bucket(cexCredsBucket)
+		if bkt == nil {
+			return errors.New("no cex creds bucket")
+		}
+		return storeCexCreds(bkt, cex, key, secret)
+	})
+}
+
+// LoadRegisteredCEXes loads the api credentials for all CEXes.
+func (db *BoltDB) LoadRegisteredCEXes() (CEXes map[string]*dexdb.CEXCreds, err error) {
+	return CEXes, db.View(func(tx *bbolt.Tx) error {
+		bkt := tx.Bucket(cexCredsBucket)
+		if bkt == nil {
+			return errors.New("not cex creds bucket")
+		}
+
+		CEXes = make(map[string]*dexdb.CEXCreds)
+
+		c := bkt.Cursor()
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			cexBkt := bkt.Bucket(k)
+			CEXes[string(k)] = &dexdb.CEXCreds{
+				ApiKey:    string(cexBkt.Get(cexKeyKey)),
+				ApiSecret: string(cexBkt.Get(cexSecretKey)),
 			}
 		}
 		return nil

@@ -247,6 +247,6 @@ func getRates(ctx context.Context, url string, thing interface{}) error {
 		return fmt.Errorf("unexpected response, got status code %d", resp.StatusCode)
 	}
 
-	reader := io.LimitReader(resp.Body, 1<<20)
+	reader := io.LimitReader(resp.Body, 1<<22)
 	return json.NewDecoder(reader).Decode(thing)
 }

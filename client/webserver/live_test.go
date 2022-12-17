@@ -641,6 +641,18 @@ func (c *TCore) Logout() error       { return nil }
 func (c *TCore) Notifications(n int) ([]*db.Notification, error) {
 	return nil, nil
 }
+func (c *TCore) RegisterNewCEX(cexToRegister, key, secret string) (*core.CEXReport, error) {
+	return nil, nil
+}
+func (c *TCore) UpdateCEXCreds(cexToUpdate, key, secret string) (*core.CEXReport, error) {
+	return nil, nil
+}
+func (c *TCore) ConnectCEX(cexToConnect string) (*core.CEXReport, error) {
+	return nil, nil
+}
+func (c *TCore) DisconnectCEX(cexToDisconnect string) error {
+	return nil
+}
 
 var orderAssets = []string{"dcr", "btc", "ltc", "doge", "mona", "vtc", "dextt.eth"}
 

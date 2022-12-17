@@ -13,6 +13,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/comms"
+	"decred.org/dcrdex/client/core/libxc"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
@@ -137,6 +138,12 @@ type WalletState struct {
 	Disabled     bool              `json:"disabled"`
 }
 
+type CEXInfo struct {
+	Connected bool                              `json:"connected"`
+	Markets   []*libxc.Market                   `json:"markets"`
+	Balances  map[uint32]*libxc.ExchangeBalance `json:"balances"`
+}
+
 // User is information about the user's wallets and DEX accounts.
 type User struct {
 	Exchanges          map[string]*Exchange       `json:"exchanges"`
@@ -145,6 +152,7 @@ type User struct {
 	Assets             map[uint32]*SupportedAsset `json:"assets"`
 	FiatRates          map[uint32]float64         `json:"fiatRates"`
 	Bots               []*BotReport               `json:"bots"`
+	CEXes              []*CEXReport               `json:"cexes"`
 }
 
 // SupportedAsset is data about an asset and possibly the wallet associated

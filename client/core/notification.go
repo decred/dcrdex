@@ -31,6 +31,7 @@ const (
 	NoteTypeSecurity     = "security"
 	NoteTypeUpgrade      = "upgrade"
 	NoteTypeBot          = "bot"
+	NoteTypeCEX          = "cex"
 	NoteTypeDEXAuth      = "dex_auth"
 	NoteTypeFiatRates    = "fiatrateupdate"
 	NoteTypeCreateWallet = "createwallet"
@@ -641,5 +642,18 @@ const TopicLoginStatus Topic = "LoginStatus"
 func newLoginNote(message string) *LoginNote {
 	return &LoginNote{
 		Notification: db.NewNotification(NoteTypeLogin, TopicLoginStatus, "", message, db.Data),
+	}
+}
+
+// CEXNotes is a notification with information about a CEX.
+type CEXNote struct {
+	db.Notification
+	Report *CEXReport `json:"cex"`
+}
+
+func newCEXNote(report *CEXReport) *CEXNote {
+	return &CEXNote{
+		Notification: db.NewNotification(NoteTypeCEX, "", "", "", db.Data),
+		Report:       report,
 	}
 }

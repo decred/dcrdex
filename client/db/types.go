@@ -1232,3 +1232,9 @@ func hashKey(b []byte) []byte {
 	h := blake2s.Sum256(b)
 	return h[:]
 }
+
+// CEXCreds holds the credentials needed to interact with a CEX's API.
+type CEXCreds struct {
+	ApiKey    string `json:"apiKey"`
+	ApiSecret string `json:"apiSecret"`
+}

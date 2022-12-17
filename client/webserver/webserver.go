@@ -155,6 +155,10 @@ type clientCore interface {
 	AddWalletPeer(assetID uint32, addr string) error
 	RemoveWalletPeer(assetID uint32, addr string) error
 	Notifications(n int) ([]*db.Notification, error)
+	RegisterNewCEX(cexToRegister, key, secret string) (*core.CEXReport, error)
+	UpdateCEXCreds(cexToUpdate, key, secret string) (*core.CEXReport, error)
+	ConnectCEX(cexToConnect string) (*core.CEXReport, error)
+	DisconnectCEX(cexToDisconnect string) error
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -437,6 +441,10 @@ func New(cfg *Config) (*WebServer, error) {
 				apiAuth.Post("/updatebotprogram", s.apiUpdateBotProgram)
 				apiAuth.Post("/retirebot", s.apiRetireBot)
 				apiAuth.Post("/marketreport", s.apiMarketReport)
+				apiAuth.Post("/registernewcex", s.apiRegisterNewCex)
+				apiAuth.Post("/updatecexcreds", s.apiUpdateCEXCreds)
+				apiAuth.Post("/connectcex", s.apiConnectCEX)
+				apiAuth.Post("/disconnectcex", s.apiDisconnectCEX)
 			}
 		})
 	})

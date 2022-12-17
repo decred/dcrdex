@@ -158,4 +158,8 @@ type DB interface {
 	RetireBotProgram(pgmID uint64) error
 	// ActiveBotPrograms loads a list of active bot program IDs.
 	ActiveBotPrograms() (map[uint64]*BotProgram, error)
+	// StoreCEXCreds stores the api credentials for a CEX.
+	StoreCEXCreds(cex string, apiKey, apiSecret string) error
+	// LoadRegisteredCEXes loads the api credentials for all CEXes.
+	LoadRegisteredCEXes() (CEXes map[string]*CEXCreds, err error)
 }
