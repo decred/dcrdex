@@ -268,6 +268,23 @@ export interface Denomination {
   conversionFactor: number
 }
 
+export interface CEXMarket {
+  base: number
+  quote: number
+}
+
+export interface CEXBalance {
+  available: number
+  locked: number
+}
+
+export interface CEXReport {
+  name: string
+  connected: boolean
+  markets: CEXMarket[]
+  balances: Record<number, CEXBalance>
+}
+
 export interface User {
   exchanges: Record<string, Exchange>
   inited: boolean
@@ -277,6 +294,7 @@ export interface User {
   authed: boolean // added by webserver
   ok: boolean // added by webserver
   bots: BotReport[]
+  cexes: CEXReport[]
 }
 
 export interface CoreNote {
@@ -324,6 +342,10 @@ export interface SpotPriceNote extends CoreNote {
 
 export interface BotNote extends CoreNote {
   report: BotReport
+}
+
+export interface CEXNote extends CoreNote {
+  cex: CEXReport
 }
 
 export interface MatchNote extends CoreNote {
@@ -519,16 +541,29 @@ export interface OrderFilter {
   statuses: number[]
 }
 
-export interface MakerProgram {
-  host: string
-  baseID: number
-  quoteID: number
+export interface GapEngineCfg {
   lots: number
   oracleWeighting: number
   oracleBias: number
   driftTolerance: number
   gapFactor: number
   gapStrategy: string
+  manualRate?: number
+}
+
+export interface ArbEngineCfg {
+  cexName: string
+  profitTrigger: number
+  maxActiveArbs: number
+  numEpochsLeaveOpen: number
+}
+
+export interface MakerProgram {
+  host: string
+  baseID: number
+  quoteID: number
+  gapEngineCfg?: GapEngineCfg
+  arbEngineCfg?: ArbEngineCfg
 }
 
 export interface BotOrder {
@@ -619,6 +654,8 @@ export interface Application {
   checkResponse (resp: APIResponse): boolean
   signOut (): Promise<void>
   registerNoteFeeder (receivers: Record<string, (n: CoreNote) => void>): void
+  updateCEX (cex: CEXReport): void
+  disconnectCEX(cexName: string): void
 }
 
 // TODO: Define an interface for Application?

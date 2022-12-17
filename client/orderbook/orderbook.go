@@ -454,23 +454,17 @@ func (ob *OrderBook) Unbook(note *msgjson.UnbookOrderNote) error {
 }
 
 // BestNOrders returns the best n orders from the provided side.
-// NOTE: This is UNUSED, and test coverage is a near dup of bookside_test.go.
-func (ob *OrderBook) BestNOrders(n int, side uint8) ([]*Order, bool, error) {
+func (ob *OrderBook) BestNOrders(n int, sell bool) ([]*Order, bool, error) {
 	if !ob.isSynced() {
 		return nil, false, fmt.Errorf("order book is unsynced")
 	}
 
 	var orders []*Order
 	var filled bool
-	switch side {
-	case msgjson.BuyOrderNum:
-		orders, filled = ob.buys.BestNOrders(n)
-
-	case msgjson.SellOrderNum:
+	if sell {
 		orders, filled = ob.sells.BestNOrders(n)
-
-	default:
-		return nil, false, fmt.Errorf("unknown side provided: %d", side)
+	} else {
+		orders, filled = ob.buys.BestNOrders(n)
 	}
 
 	return orders, filled, nil

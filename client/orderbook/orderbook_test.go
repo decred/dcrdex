@@ -643,7 +643,7 @@ func TestOrderBookBestNOrders(t *testing.T) {
 		label     string
 		orderBook *OrderBook
 		n         int
-		side      uint8
+		sell      bool
 		expected  []*Order
 		wantErr   bool
 	}{
@@ -662,7 +662,7 @@ func TestOrderBookBestNOrders(t *testing.T) {
 				true,
 			),
 			n:    3,
-			side: msgjson.BuyOrderNum,
+			sell: false,
 			expected: []*Order{
 				makeOrder([32]byte{'e'}, msgjson.BuyOrderNum, 8, 4, 12),
 				makeOrder([32]byte{'d'}, msgjson.BuyOrderNum, 5, 3, 10),
@@ -685,7 +685,7 @@ func TestOrderBookBestNOrders(t *testing.T) {
 				true,
 			),
 			n:        3,
-			side:     msgjson.SellOrderNum,
+			sell:     true,
 			expected: []*Order{},
 			wantErr:  false,
 		},
@@ -704,7 +704,7 @@ func TestOrderBookBestNOrders(t *testing.T) {
 				true,
 			),
 			n:    5,
-			side: msgjson.SellOrderNum,
+			sell: true,
 			expected: []*Order{
 				makeOrder([32]byte{'b'}, msgjson.SellOrderNum, 10, 1, 2),
 				makeOrder([32]byte{'c'}, msgjson.SellOrderNum, 10, 2, 5),
@@ -728,7 +728,7 @@ func TestOrderBookBestNOrders(t *testing.T) {
 				false,
 			),
 			n:        5,
-			side:     msgjson.SellOrderNum,
+			sell:     true,
 			expected: nil,
 			wantErr:  true,
 		},
@@ -747,7 +747,7 @@ func TestOrderBookBestNOrders(t *testing.T) {
 				true,
 			),
 			n:    3,
-			side: msgjson.SellOrderNum,
+			sell: true,
 			expected: []*Order{
 				makeOrder([32]byte{'b'}, msgjson.SellOrderNum, 10, 1, 2),
 				makeOrder([32]byte{'c'}, msgjson.SellOrderNum, 10, 2, 5),
@@ -758,7 +758,7 @@ func TestOrderBookBestNOrders(t *testing.T) {
 	}
 
 	for idx, tc := range tests {
-		best, _, err := tc.orderBook.BestNOrders(tc.n, tc.side)
+		best, _, err := tc.orderBook.BestNOrders(tc.n, tc.sell)
 		if (err != nil) != tc.wantErr {
 			t.Fatalf("[OrderBook.BestNOrders] #%d: error: %v, wantErr: %v",
 				idx+1, err, tc.wantErr)

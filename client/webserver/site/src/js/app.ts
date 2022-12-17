@@ -40,7 +40,9 @@ import {
   APIResponse,
   RateNote,
   BotReport,
-  InFlightOrder
+  InFlightOrder,
+  CEXReport,
+  CEXNote
 } from './registry'
 
 const idel = Doc.idel // = element by id
@@ -637,6 +639,13 @@ export default class Application {
             if (idx >= 0) bots[idx] = n.report
             else bots.push(n.report)
         }
+        break
+      }
+      case 'cex': {
+        const n = note as CEXNote
+        console.log(`CEX NOTE -- ${JSON.stringify(n)}`)
+        const idx = this.user.cexes.findIndex((cex: CEXReport) => cex.name === n.cex.name)
+        this.user.cexes[idx] = n.cex
       }
     }
   }
@@ -857,6 +866,26 @@ export default class Application {
       }
     }
     return false
+  }
+
+  updateCEX (cex: CEXReport): void {
+    const cexIndex = this.user.cexes.findIndex((savedCEX) => cex.name === savedCEX.name)
+    console.log(`updateCEX - ${JSON.stringify(cex)}`)
+    console.log(JSON.stringify(this.user.cexes))
+    if (cexIndex > -1) this.user.cexes[cexIndex] = cex
+    else this.user.cexes.push(cex)
+    console.log(JSON.stringify(this.user.cexes))
+  }
+
+  disconnectCEX (cexName: string): void {
+    console.log(`in disconnectCEX ${cexName}`)
+    console.log(`in disconnectCEX ${JSON.stringify(this.user.cexes)}`)
+    const cex = this.user.cexes.find((savedCEX) => cexName === savedCEX.name)
+    if (cex) {
+      cex.connected = false
+      cex.markets = []
+      cex.balances = {}
+    }
   }
 
   /*

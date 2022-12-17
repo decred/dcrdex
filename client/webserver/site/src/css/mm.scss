@@ -35,7 +35,9 @@
   }
 
   .brdr-right,
-  .brdr-top {
+  .brdr-left,
+  .brdr-top,
+  .brdr-btm {
     border-width: 1px;
     border-color: #7777;
   }
@@ -44,8 +46,16 @@
     border-right-style: solid;
   }
 
+  .brdr-left {
+    border-left-style: solid;
+  }
+
   .brdr-top {
     border-top-style: solid;
+  }
+
+  .brdr-btm {
+    border-bottom-style: solid;
   }
 
   .bg10 {
@@ -137,7 +147,7 @@
 
         td:last-child {
           text-align: right;
-          padding-left: 10px;
+          padding-right: 10px;
         }
       }
     }
@@ -221,6 +231,42 @@
   #noFiatBox {
     max-width: 275px;
   }
+
+  #manageCexBtn {
+    background-color: #0b5831;
+  }
+
+  .cex-table,
+  .balances-table,
+  .markets-table {
+    @extend .table;
+    @extend .table-striped;
+    @extend .w-100;
+
+    border-width: 2px;
+    border-color: block;
+    border-style: solid;
+    vertical-align: middle;
+  }
+
+  .balances-table,
+  .markets-table {
+    img {
+      width: 25px;
+      height: 25px;
+      margin-right: 5px;
+    }
+  }
+
+  .cex-table {
+    .unregistered-btn {
+      background-color: #e95e5e99;
+    }
+
+    .registered-btn {
+      background-color: #0b5831;
+    }
+  }
 }
 
 body.dark #main.mm {
@@ -230,5 +276,11 @@ body.dark #main.mm {
 
   #assetDropdown {
     background-color: $dark_body_bg;
+  }
+
+  .cex-table,
+  .balances-table,
+  .markets-table {
+    @extend .table-dark;
   }
 }

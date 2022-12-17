@@ -118,7 +118,7 @@ export class XYRangeOption extends Option {
   changed: () => void
   dict: Record<string, any>
 
-  constructor (opt: OrderOption, symbol: string, dict: Record<string, any>, changed: () => void) {
+  constructor (opt: OrderOption, symbol: string, dict: Record<string, any>, changed: () => void, roundX?: boolean, roundY?: boolean) {
     super(opt, symbol, {
       enable: () => this.enable(),
       disable: () => this.disable()
@@ -141,7 +141,7 @@ export class XYRangeOption extends Option {
     }
     const onChange = () => { this.changed() }
     const selected = () => { this.node.classList.add('selected') }
-    this.handler = new XYRangeHandler(cfg, this.x, onUpdate, onChange, selected)
+    this.handler = new XYRangeHandler(cfg, this.x, onUpdate, onChange, selected, roundX, roundY)
     this.tmpl.controls.appendChild(this.handler.control)
   }
 
@@ -175,15 +175,17 @@ export class XYRangeHandler {
   scrollingX: number
   y: number
   r: number
+  roundX: boolean
   roundY: boolean
   updated: (x:number, y:number) => void
   changed: () => void
   selected: () => void
   setConfig: (cfg: XYRange) => void
 
-  constructor (cfg: XYRange, initVal: number, updated: (x:number, y:number) => void, changed: () => void, selected: () => void, roundY?: boolean) {
+  constructor (cfg: XYRange, initVal: number, updated: (x:number, y:number) => void, changed: () => void, selected: () => void, roundX?: boolean, roundY?: boolean) {
     const control = this.control = rangeOptTmpl.cloneNode(true) as HTMLElement
     const tmpl = this.tmpl = Doc.parseTemplate(control)
+    this.roundX = Boolean(roundX)
     this.roundY = Boolean(roundY)
     this.cfg = cfg
 
@@ -312,9 +314,11 @@ export class XYRangeHandler {
 
   accept (x: number, skipUpdate?: boolean): void {
     const tmpl = this.tmpl
+    if (this.roundX) this.x = Math.round(this.x)
     if (this.roundY) this.y = Math.round(this.y)
     tmpl.x.textContent = threeSigFigs.format(x)
     tmpl.y.textContent = threeSigFigs.format(this.y)
+    if (this.roundX) tmpl.x.textContent = `${this.x}`
     if (this.roundY) tmpl.y.textContent = `${this.y}`
     tmpl.handle.style.left = `calc(${this.r * 100}% - ${this.r * 14}px)`
     this.x = x
@@ -324,6 +328,7 @@ export class XYRangeHandler {
 
   setValue (x: number) {
     const cfg = this.cfg
+    this.x = x
     this.r = (x - cfg.start.x) / (cfg.end.x - cfg.start.x)
     this.y = cfg.start.y + this.r * (cfg.end.y - cfg.start.y)
     this.accept(x, true)

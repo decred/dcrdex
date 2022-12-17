@@ -10,7 +10,13 @@ import {
   MaxSell,
   MaxBuy,
   MarketReport,
-  SupportedAsset
+  SupportedAsset,
+  MakerProgram,
+  GapEngineCfg,
+  ArbEngineCfg,
+  CEXReport,
+  CEXMarket,
+  CEXNote
 } from './registry'
 import Doc from './doc'
 import BasePage from './basepage'
@@ -19,6 +25,11 @@ import { setOptionTemplates, XYRangeOption } from './opts'
 import State from './state'
 import { bind as bindForm, NewWalletForm } from './forms'
 import { RateEncodingFactor } from './orderutil'
+
+const gapBotType = 'gapBot'
+// const arbBotType = 'arbBot'
+
+const CEXes = ['Binance', 'BinanceUS']
 
 const GapStrategyMultiplier = 'multiplier'
 const GapStrategyAbsolute = 'absolute'
@@ -166,6 +177,84 @@ const gapPercentRange: XYRange = {
 }
 const gapPercentOption: OrderOption = createXYRange(gapPercentBaseOption, gapPercentRange)
 
+const profitTriggerBaseOption: BaseOption = {
+  key: 'profitTrigger',
+  displayname: 'Profit Trigger',
+  description: 'The amount of arbitrage needed to trigger an arb sequence.',
+  default: 0.01,
+  max: 0.1,
+  min: 0.001
+}
+
+const profitTriggerRange: XYRange = {
+  start: {
+    label: '0.1%',
+    x: 0.001,
+    y: 0.1
+  },
+  end: {
+    label: '10%',
+    x: 0.1,
+    y: 10
+  },
+  xUnit: '',
+  yUnit: '%'
+}
+
+const arbProfitTriggerOption = createXYRange(profitTriggerBaseOption, profitTriggerRange)
+
+const maxNumArbsBaseOption: BaseOption = {
+  key: 'maxActiveArbs',
+  displayname: 'Max Active Arbs',
+  description: 'The maximum number of arbitrage sequences that will simultaneously be open.',
+  default: 5,
+  max: 10,
+  min: 1
+}
+
+const maxNumArbsRange: XYRange = {
+  start: {
+    label: '1',
+    x: 1,
+    y: 1
+  },
+  end: {
+    label: '10',
+    x: 10,
+    y: 10
+  },
+  xUnit: '',
+  yUnit: ''
+}
+
+const maxNumArbsOption = createXYRange(maxNumArbsBaseOption, maxNumArbsRange)
+
+const numEpochsLeaveOpenBaseOpt: BaseOption = {
+  key: 'numEpochsLeaveOpen',
+  displayname: 'Arbitrage Length',
+  description: 'The number of epochs before unfilled orders will be cancelled.',
+  default: 10,
+  max: 20,
+  min: 1
+}
+
+const numEpochsLeaveOpenRange: XYRange = {
+  start: {
+    label: '2',
+    x: 2,
+    y: 2
+  },
+  end: {
+    label: '20',
+    x: 20,
+    y: 20
+  },
+  xUnit: '',
+  yUnit: ''
+}
+
+const numEpochsLeaveOpenOption = createXYRange(numEpochsLeaveOpenBaseOpt, numEpochsLeaveOpenRange)
+
 const animationLength = 300
 
 export default class MarketMakerPage extends BasePage {
@@ -173,20 +262,25 @@ export default class MarketMakerPage extends BasePage {
   data: any
   createOpts: Record<string, number>
   gapRanges: Record<string, number>
+  arbRanges: Record<string, number>
   currentMarket: HostedMarket
-  currentForm: PageElement
+  currentForm: PageElement | null
   keyup: (e: KeyboardEvent) => void
   programs: Record<number, LiveProgram>
   editProgram: BotReport | null
   gapMultiplierOpt: XYRangeOption
   gapPercentOpt: XYRangeOption
   driftToleranceOpt: XYRangeOption
+  arbProfitTriggerOpt: XYRangeOption
+  maxNumArbsOpt: XYRangeOption
+  numEpochsLeaveOpenOpt: XYRangeOption
   biasOpt: XYRangeOption
   weightOpt: XYRangeOption
   pwHandler: ((pw: string) => Promise<void>) | null
   newWalletForm: NewWalletForm
   specifiedPrice: number
   currentReport: MarketReport | null
+  registeringNewApiKey: boolean
 
   constructor (main: HTMLElement, data: any) {
     super()
@@ -204,6 +298,11 @@ export default class MarketMakerPage extends BasePage {
       [gapMultiplierBaseOption.key]: gapMultiplierBaseOption.default,
       [gapPercentBaseOption.key]: gapPercentBaseOption.default
     }
+    this.arbRanges = {
+      [profitTriggerBaseOption.key]: profitTriggerBaseOption.default,
+      [maxNumArbsBaseOption.key]: maxNumArbsBaseOption.default,
+      [numEpochsLeaveOpenBaseOpt.key]: numEpochsLeaveOpenBaseOpt.default
+    }
 
     page.forms.querySelectorAll('.form-closer').forEach(el => {
       Doc.bind(el, 'click', () => { this.closePopups() })
@@ -212,7 +311,9 @@ export default class MarketMakerPage extends BasePage {
     setOptionTemplates(page)
 
     Doc.cleanTemplates(page.assetRowTmpl, page.booleanOptTmpl, page.rangeOptTmpl,
-      page.orderOptTmpl, page.runningProgramTmpl, page.oracleTmpl)
+      page.orderOptTmpl, page.runningProgramTmpl, page.oracleTmpl, page.updateApiKeysBtn,
+      page.registerApiKeysBtn, page.balancesBtn, page.marketsBtn, page.cexTableRow,
+      page.balancesTableRow, page.marketsTableRow, page.connectCexBtn, page.disconnectCexBtn)
 
     const selectClicked = (e: MouseEvent, isBase: boolean): void => {
       e.stopPropagation()
@@ -277,32 +378,48 @@ export default class MarketMakerPage extends BasePage {
       this.setMarketSubchoice(host, name)
     })
 
+    Doc.bind(page.botTypeSelect, 'change', () => this.updateBotType())
+    Doc.bind(page.manageCexBtn, 'click', () => this.showManageCexForm())
+    Doc.bind(page.apiKeysSubmit, 'click', (e: Event) => {
+      e.preventDefault()
+      this.submitApiKeyForm()
+    })
+
+    this.arbProfitTriggerOpt = new XYRangeOption(arbProfitTriggerOption, '', this.arbRanges, () => { /* nothing */ })
+    this.maxNumArbsOpt = new XYRangeOption(maxNumArbsOption, '', this.arbRanges, () => { /* nothing */ }, true, true)
+    this.numEpochsLeaveOpenOpt = new XYRangeOption(numEpochsLeaveOpenOption, '', this.arbRanges, () => { /* nothing */ }, true, true)
+
+    page.arbOptions.appendChild(this.arbProfitTriggerOpt.node)
+    page.arbOptions.appendChild(this.maxNumArbsOpt.node)
+    page.arbOptions.appendChild(this.numEpochsLeaveOpenOpt.node)
+
     this.gapMultiplierOpt = new XYRangeOption(gapMultiplierOption, '', this.gapRanges, () => this.createOptsUpdated())
     this.gapPercentOpt = new XYRangeOption(gapPercentOption, '', this.gapRanges, () => this.createOptsUpdated())
     this.driftToleranceOpt = new XYRangeOption(driftToleranceOption, '', this.createOpts, () => this.createOptsUpdated())
     this.biasOpt = new XYRangeOption(oracleBiasOption, '', this.createOpts, () => this.createOptsUpdated())
     this.weightOpt = new XYRangeOption(oracleWeightOption, '', this.createOpts, () => this.createOptsUpdated())
 
-    page.options.appendChild(this.gapMultiplierOpt.node)
+    page.gapOptions.appendChild(this.gapMultiplierOpt.node)
     Doc.hide(this.gapMultiplierOpt.node) // Default is GapStrategyPercentPlus
-    page.options.appendChild(this.gapPercentOpt.node)
-    page.options.appendChild(this.driftToleranceOpt.node)
-    page.options.appendChild(this.weightOpt.node)
-    page.options.appendChild(this.biasOpt.node)
+    page.gapOptions.appendChild(this.gapPercentOpt.node)
+    page.gapOptions.appendChild(this.driftToleranceOpt.node)
+    page.gapOptions.appendChild(this.weightOpt.node)
+    page.gapOptions.appendChild(this.biasOpt.node)
 
     Doc.bind(page.showAdvanced, 'click', () => {
       State.storeLocal(State.optionsExpansionLK, true)
       Doc.hide(page.showAdvanced)
-      Doc.show(page.hideAdvanced, page.options)
+      Doc.show(page.hideAdvanced, page.gapOptions)
     })
 
     Doc.bind(page.hideAdvanced, 'click', () => {
       State.storeLocal(State.optionsExpansionLK, false)
-      Doc.hide(page.hideAdvanced, page.options)
+      Doc.hide(page.hideAdvanced, page.gapOptions)
       Doc.show(page.showAdvanced)
     })
 
-    Doc.bind(page.runBttn, 'click', this.authedRoute(async (pw: string): Promise<void> => this.createBot(pw)))
+    Doc.bind(page.gapRunBttn, 'click', this.authedRoute(async (pw: string): Promise<void> => this.createGapBot(pw)))
+    Doc.bind(page.arbRunBttn, 'click', this.authedRoute(async (pw: string): Promise<void> => this.createArbBot(pw)))
 
     Doc.bind(page.lotsInput, 'change', () => {
       page.lotsInput.value = String(Math.round(parseFloat(page.lotsInput.value ?? '0')))
@@ -383,6 +500,7 @@ export default class MarketMakerPage extends BasePage {
     })
 
     Doc.bind(page.forms, 'mousedown', (e: MouseEvent) => {
+      if (!this.currentForm) return
       if (!Doc.mouseInElement(e, this.currentForm)) { this.closePopups() }
     })
 
@@ -404,18 +522,341 @@ export default class MarketMakerPage extends BasePage {
     }
 
     if (State.fetchLocal(State.optionsExpansionLK)) {
-      Doc.show(page.hideAdvanced, page.options)
+      Doc.show(page.hideAdvanced, page.gapOptions)
       Doc.hide(page.showAdvanced)
     }
 
     app().registerNoteFeeder({
-      bot: (n: BotNote) => { this.handleBotNote(n) }
+      bot: (n: BotNote) => { this.handleBotNote(n) },
+      cex: (n: CEXNote) => { this.handleCEXNote(n) }
     })
 
     this.setMarket([mkt ?? sortedMarkets()[0]])
     this.populateRunningPrograms()
     page.createBox.classList.remove('invisible')
     page.programsBox.classList.remove('invisible')
+
+    Doc.bind(page.cexSelector, 'change', () => this.updateArbMarket())
+    this.updateCEXSelector()
+  }
+
+  /* updateBotType updates which bot type settings are shown for */
+  updateBotType (): void {
+    const page = this.page
+    if (page.botTypeSelect.value === gapBotType) {
+      Doc.hide(page.arbBotSettings)
+      Doc.show(page.gapBotSettings)
+    } else {
+      Doc.show(page.arbBotSettings)
+      Doc.hide(page.gapBotSettings)
+    }
+  }
+
+  /*
+   * updateCEXSelector populates the cexSelector dropdown with the CEXes that
+   * have been connected, and also updates the rest of the arb bot settings
+   * based on what is populated in the cexSelector.
+   */
+  updateCEXSelector ():void {
+    const page = this.page
+
+    while (page.cexSelector.firstChild) {
+      page.cexSelector.removeChild(page.cexSelector.firstChild)
+    }
+    app().user.cexes.forEach((cex: CEXReport) => {
+      if (!cex.connected) return
+      const opt = document.createElement('option')
+      opt.value = cex.name
+      opt.textContent = cex.name
+      page.cexSelector.appendChild(opt)
+    })
+
+    if (page.cexSelector.children.length === 0) {
+      Doc.hide(page.cexSelectorLbl, page.cexSelector, page.arbSettingsIfMarket, page.arbSettingsNoMarket)
+      Doc.show(page.noConnectedCexLbl)
+    } else {
+      Doc.show(page.cexSelectorLbl, page.cexSelector, page.arbSettingsIfMarket, page.arbSettingsNoMarket)
+      Doc.hide(page.noConnectedCexLbl)
+    }
+
+    this.updateArbMarket()
+  }
+
+  // selectedChecks returns the CEXReport for the CEX that is currently selected
+  // by the cexSelector.
+  selectedCEX (): (CEXReport|undefined) {
+    const page = this.page
+    const currentCEXName = page.cexSelector.value
+    if (!currentCEXName) return undefined
+    return app().user.cexes.find((cex: CEXReport) => currentCEXName === cex.name)
+  }
+
+  // cexHasMarket returns whether or not a CEX has a market for a base/quote
+  // pair.
+  cexHasMarket (cex: CEXReport, base: number, quote: number): boolean {
+    for (const market of cex.markets) {
+      if (market.base === base && market.quote === quote) {
+        return true
+      }
+    }
+    return false
+  }
+
+  // updateArbMarket checks if the current selected CEX contains the market
+  // that the user wants to deploy a bot on. If so, then the balances on
+  // the CEX of the relevant assets is displayed. Otherwise, a message is
+  // displayed that the CEX does not contain this market.
+  updateArbMarket (): void {
+    const page = this.page
+    const currentCEX = this.selectedCEX()
+    if (!currentCEX) return
+    const base = app().assets[this.currentMarket.baseid]
+    const quote = app().assets[this.currentMarket.quoteid]
+    const cexHasMarket = this.cexHasMarket(currentCEX, base.id, quote.id)
+    if (cexHasMarket) {
+      const baseBalance = currentCEX.balances[base.id]
+      const quoteBalance = currentCEX.balances[quote.id]
+      if (baseBalance) page.cexBalancesBase.textContent = String(baseBalance.available / base.unitInfo.conventional.conversionFactor)
+      else page.cexBalancesBase.textContent = '0'
+      if (quoteBalance) page.cexBalancesQuote.textContent = String(quoteBalance.available / quote.unitInfo.conventional.conversionFactor)
+      else page.cexBalanceQuote.textContent = '0'
+      page.cexBalancesBaseSymbol.textContent = base.symbol.toUpperCase()
+      page.cexBalancesQuoteSymbol.textContent = quote.symbol.toUpperCase()
+      page.balancesCexName.textContent = currentCEX.name
+    } else {
+      page.noMarketCexName.textContent = currentCEX.name
+      page.noMarketBase.textContent = base.symbol.toUpperCase()
+      page.noMarketQuote.textContent = quote.symbol.toUpperCase()
+    }
+    Doc.setVis(cexHasMarket, page.arbSettingsIfMarket)
+    Doc.setVis(!cexHasMarket, page.arbSettingsNoMarket)
+  }
+
+  // updateManageCEXForm updates the form that allows the user to manage their
+  // CEX keys based on whether the user has registered keys for a CEX and
+  // whether or not the CEX is connected.
+  updateManageCexForm (): void {
+    const page = this.page
+    Doc.hide(page.manageCEXErr)
+    while (page.cexTableBody.firstChild) {
+      page.cexTableBody.removeChild(page.cexTableBody.firstChild)
+    }
+    const registeredCEXes = app().user.cexes
+    const findRegisteredCEX = (cex: string) : CEXReport|undefined => {
+      return registeredCEXes.find(el => el.name === cex)
+    }
+    CEXes.forEach((cexName: string) => {
+      const row = page.cexTableRow.cloneNode(true) as PageElement
+      const tmpl = Doc.parseTemplate(row)
+      tmpl.cexName.textContent = cexName
+      const registeredCEX = findRegisteredCEX(cexName)
+      // Register/Update keys button.
+      let apiKeysBtn : PageElement
+      if (registeredCEX) {
+        apiKeysBtn = page.updateApiKeysBtn.cloneNode(true) as PageElement
+      } else {
+        apiKeysBtn = page.registerApiKeysBtn.cloneNode(true) as PageElement
+      }
+      Doc.bind(apiKeysBtn, 'click', (e: Event) => {
+        e.preventDefault()
+        this.registeringNewApiKey = !registeredCEX
+        this.showApiKeyForm(cexName)
+      })
+      tmpl.apiKeys.appendChild(apiKeysBtn)
+      // Only show register keys button if not yet registered.
+      if (!registeredCEX) {
+        page.cexTableBody.append(row)
+        return
+      }
+      // If not connected, only show update keys button and connect button.
+      if (!registeredCEX.connected) {
+        const connectBtn = page.connectCexBtn.cloneNode(true) as PageElement
+        Doc.bind(connectBtn, 'click', (e: Event) => {
+          e.preventDefault()
+          this.connectCEX(cexName)
+        })
+        tmpl.connect.appendChild(connectBtn)
+        page.cexTableBody.append(row)
+        return
+      }
+      // If connected, show disconnect, balances, and markets buttons.
+      const disconnectBtn = page.disconnectCexBtn.cloneNode(true) as PageElement
+      Doc.bind(disconnectBtn, 'click', (e: Event) => {
+        e.preventDefault()
+        this.disconnectCEX(cexName)
+      })
+      tmpl.connect.appendChild(disconnectBtn)
+      const balancesBtn = page.balancesBtn.cloneNode(true) as PageElement
+      Doc.bind(balancesBtn, 'click', (e: Event) => {
+        e.preventDefault()
+        this.showBalancesForm(cexName)
+      })
+      tmpl.balances.appendChild(balancesBtn)
+      const marketsBtn = page.marketsBtn.cloneNode(true) as PageElement
+      Doc.bind(marketsBtn, 'click', (e: Event) => {
+        e.preventDefault()
+        this.showMarketsForm(cexName)
+      })
+      tmpl.markets.appendChild(marketsBtn)
+      page.cexTableBody.append(row)
+    })
+  }
+
+  /* connectCEX sets up a connection to a CEX */
+  async connectCEX (cexName: string): Promise<void> {
+    const page = this.page
+    if (Doc.isDisplayed(page.connectCexSpinner)) return
+    Doc.show(page.connectCexSpinner)
+    const res = await postJSON('/api/connectcex', {
+      name: cexName
+    })
+    Doc.hide(page.connectCexSpinner)
+    if (!app().checkResponse(res as any)) {
+      page.manageCEXErr.textContent = res.msg
+      Doc.show(page.manageCEXErr)
+      return
+    }
+    app().updateCEX(res.cex)
+    this.updateManageCexForm()
+    this.updateCEXSelector()
+  }
+
+  /* disconnectCEX end a connection to a CEX. */
+  async disconnectCEX (cexName: string): Promise<void> {
+    const page = this.page
+    if (Doc.isDisplayed(page.connectCexSpinner)) return
+    const res = await postJSON('/api/disconnectcex', {
+      name: cexName
+    })
+    if (!app().checkResponse(res as any)) {
+      page.manageCEXErr.textContent = res.msg
+      Doc.show(page.manageCEXErr)
+      return
+    }
+    app().disconnectCEX(cexName)
+    this.updateManageCexForm()
+    this.updateCEXSelector()
+  }
+
+  /* showManageCexForm displays the manageCexForm. */
+  showManageCexForm ():void {
+    this.updateManageCexForm()
+    this.showForm(this.page.manageCexForm)
+  }
+
+  /* showApiKeyForm displays the apiKeysForm. */
+  showApiKeyForm (cex: string):void {
+    const page = this.page
+    Doc.hide(page.apiKeysErr)
+    page.apiKeyInput.value = ''
+    page.apiSecretInput.value = ''
+    page.apiKeysCexLbl.textContent = cex
+    this.showForm(page.apiKeysForm)
+  }
+
+  /* updatedBalancesTable updates the values on the table displaying the user's
+   * balances on a CEX
+   */
+  updateBalancesTable (cexName: string): void {
+    const page = this.page
+    while (page.balancesTableBody.firstChild) {
+      page.balancesTableBody.removeChild(page.balancesTableBody.firstChild)
+    }
+    const cex = app().user.cexes.find((report) => report.name === cexName)
+    if (!cex) {
+      console.error(`could not find ${cexName}`)
+      return
+    }
+    for (const assetID in cex.balances) {
+      const asset = app().assets[assetID]
+      if (!asset) {
+        console.error(`non supported asset in cex balances: ${assetID}`)
+        continue
+      }
+      const balanceRow = page.balancesTableRow.cloneNode(true) as PageElement
+      const tmpl = Doc.parseTemplate(balanceRow)
+      tmpl.assetLogo.src = Doc.logoPath(asset.symbol)
+      tmpl.assetName.textContent = asset.symbol.toUpperCase()
+      const balance = cex.balances[assetID]
+      tmpl.available.textContent = String(balance.available / asset.unitInfo.conventional.conversionFactor)
+      tmpl.locked.textContent = String(balance.locked / asset.unitInfo.conventional.conversionFactor)
+      page.balancesTableBody.appendChild(balanceRow)
+    }
+  }
+
+  /* showBalancesForm displays the form containing the user's balances on a CEX */
+  showBalancesForm (cexName: string): void {
+    const page = this.page
+    page.cexBalancesFormLbl.textContent = cexName
+    this.updateBalancesTable(cexName)
+    this.showForm(page.balancesForm)
+  }
+
+  /* showMarketsForm displays the markets that a CEX has. */
+  showMarketsForm (cexName: string): void {
+    const page = this.page
+    page.cexMarketsLbl.textContent = cexName
+
+    const setMarkets = (markets: CEXMarket[]) => {
+      while (page.marketsTableBody.firstChild) {
+        page.marketsTableBody.removeChild(page.marketsTableBody.firstChild)
+      }
+
+      markets.forEach((market: CEXMarket) => {
+        const base = app().assets[market.base]
+        if (!base) {
+          return
+        }
+
+        const quote = app().assets[market.quote]
+        if (!quote) {
+          return
+        }
+
+        const marketRow = page.marketsTableRow.cloneNode(true) as PageElement
+        const tmpl = Doc.parseTemplate(marketRow)
+
+        tmpl.baseAssetLogo.src = Doc.logoPath(base.symbol)
+        tmpl.baseAssetName.textContent = base.symbol.toUpperCase()
+        tmpl.quoteAssetLogo.src = Doc.logoPath(quote.symbol)
+        tmpl.quoteAssetName.textContent = quote.symbol.toUpperCase()
+        page.marketsTableBody.appendChild(marketRow)
+      })
+    }
+
+    const cex = app().user.cexes.find((report) => report.name === cexName)
+    if (!cex) {
+      console.error(`could not find ${cexName}`)
+      return
+    }
+
+    setMarkets(cex.markets)
+    this.showForm(page.marketsForm)
+  }
+
+  /*
+   * submitApiKeyForm either registers keys for a CEX or updates the keys
+   * for a CEX that has not yet been registered.
+   */
+  async submitApiKeyForm (): Promise<void> {
+    const page = this.page
+    const endPoint = this.registeringNewApiKey ? '/api/registernewcex' : '/api/updatecexcreds'
+    Doc.show(page.apiKeysSpinner)
+    const res = await postJSON(endPoint, {
+      name: page.apiKeysCexLbl.textContent,
+      apiKey: page.apiKeyInput.value,
+      apiSecret: page.apiSecretInput.value
+    })
+    Doc.hide(page.apiKeysSpinner)
+    if (!app().checkResponse(res as any)) {
+      page.apiKeysErr.textContent = res.msg
+      Doc.show(page.apiKeysErr)
+      return
+    }
+    app().updateCEX(res.cex)
+    this.updateManageCexForm()
+    this.updateCEXSelector()
+    this.showManageCexForm()
   }
 
   unload (): void {
@@ -426,7 +867,8 @@ export default class MarketMakerPage extends BasePage {
   async showForm (form: HTMLElement): Promise<void> {
     this.currentForm = form
     const page = this.page
-    Doc.hide(page.pwForm, page.newWalletForm)
+    Doc.hide(page.pwForm, page.newWalletForm, page.manageCexForm, page.apiKeysForm,
+      page.balancesForm, page.marketsForm)
     form.style.right = '10000px'
     Doc.show(page.forms, form)
     const shift = (page.forms.offsetWidth + form.offsetWidth) / 2
@@ -437,9 +879,18 @@ export default class MarketMakerPage extends BasePage {
   }
 
   closePopups (): void {
+    const page = this.page
     this.pwHandler = null
-    this.page.pwInput.value = ''
-    Doc.hide(this.page.forms)
+    page.pwInput.value = ''
+
+    if (this.currentForm === page.apiKeysForm ||
+        this.currentForm === page.balancesForm ||
+        this.currentForm === page.marketsForm) {
+      this.showForm(this.page.manageCexForm)
+    } else {
+      Doc.hide(this.page.forms)
+      this.currentForm = null
+    }
   }
 
   hideAssetDropdown (): void {
@@ -619,16 +1070,19 @@ export default class MarketMakerPage extends BasePage {
 
     Doc.hide(
       page.lotEstQuoteBox, page.lotEstQuoteNoWallet, page.lotEstBaseBox, page.lotEstBaseNoWallet, page.availHeader,
-      page.lotEstimateBox, page.marketInfo, page.oraclesBox, page.lotsBox, page.options, page.advancedBox
+      page.lotEstimateBox, page.marketInfo, page.oraclesBox, page.lotsBox, page.gapOptions, page.advancedBox,
+      page.botTypeDiv, page.gapBotSettings, page.arbBotSettings
     )
     const [b, q] = [app().assets[mkt.baseid], app().assets[mkt.quoteid]]
     if (b.wallet && q.wallet) {
+      this.updateArbMarket()
       Doc.show(
         page.lotEstQuoteBox, page.lotEstBaseBox, page.availHeader, page.fetchingMarkets,
-        page.lotsBox, page.advancedBox
+        page.lotsBox, page.advancedBox, page.botTypeDiv
       )
+      this.updateBotType()
       if (State.fetchLocal(State.optionsExpansionLK)) Doc.show(page.options)
-      const loaded = app().loading(page.options)
+      const loaded = app().loading(page.gapOptions)
       const buy = this.fetchOracleAndMaxBuy()
       const sell = this.fetchMaxSell()
       await buy
@@ -723,24 +1177,37 @@ export default class MarketMakerPage extends BasePage {
     this.editProgram = report
     page.createBox.classList.add('edit')
     page.programsBox.classList.add('edit')
-    page.lotsInput.value = String(pgm.lots)
-    createOpts.oracleWeighting = pgm.oracleWeighting
-    this.weightOpt.setValue(pgm.oracleWeighting)
-    createOpts.oracleBias = pgm.oracleBias
-    this.biasOpt.setValue(pgm.oracleBias)
-    createOpts.driftTolerance = pgm.driftTolerance
-    this.driftToleranceOpt.setValue(pgm.driftTolerance)
-    page.gapStrategySelect.value = pgm.gapStrategy
-    this.updateGapStrategyInputVisibility()
-    this.createOptsUpdated()
+    Doc.hide(page.botTypeDiv)
 
-    switch (pgm.gapStrategy) {
-      case GapStrategyPercent:
-      case GapStrategyPercentPlus:
-        this.gapPercentOpt.setValue(pgm.gapFactor)
-        break
-      case GapStrategyMultiplier:
-        this.gapMultiplierOpt.setValue(pgm.gapFactor)
+    if (pgm.gapEngineCfg) {
+      Doc.show(page.gapBotSettings)
+      Doc.hide(page.arbBotSettings)
+      page.lotsInput.value = String(pgm.gapEngineCfg.lots)
+      createOpts.oracleWeighting = pgm.gapEngineCfg.oracleWeighting
+      this.weightOpt.setValue(pgm.gapEngineCfg.oracleWeighting)
+      createOpts.oracleBias = pgm.gapEngineCfg.oracleBias
+      this.biasOpt.setValue(pgm.gapEngineCfg.oracleBias)
+      createOpts.driftTolerance = pgm.gapEngineCfg.driftTolerance
+      this.driftToleranceOpt.setValue(pgm.gapEngineCfg.driftTolerance)
+      page.gapStrategySelect.value = pgm.gapEngineCfg.gapStrategy
+      this.updateGapStrategyInputVisibility()
+      this.createOptsUpdated()
+
+      switch (pgm.gapEngineCfg.gapStrategy) {
+        case GapStrategyPercent:
+        case GapStrategyPercentPlus:
+          this.gapPercentOpt.setValue(pgm.gapEngineCfg.gapFactor)
+          break
+        case GapStrategyMultiplier:
+          this.gapMultiplierOpt.setValue(pgm.gapEngineCfg.gapFactor)
+      }
+    } else if (pgm.arbEngineCfg) {
+      Doc.show(page.arbBotSettings, page.arbSettingsIfMarket)
+      Doc.hide(page.gapBotSettings, page.cexBalances, page.cexBalancesLbl, page.arbSettingsNoMarket)
+
+      this.arbProfitTriggerOpt.setValue(pgm.arbEngineCfg.profitTrigger)
+      this.maxNumArbsOpt.setValue(pgm.arbEngineCfg.maxActiveArbs)
+      this.numEpochsLeaveOpenOpt.setValue(pgm.arbEngineCfg.numEpochsLeaveOpen)
     }
 
     Doc.bind(page.programsBox, 'click', () => this.leaveEditMode())
@@ -753,6 +1220,8 @@ export default class MarketMakerPage extends BasePage {
     page.createBox.classList.remove('edit')
     page.programsBox.classList.remove('edit')
     this.editProgram = null
+    Doc.show(page.botTypeDiv, page.cexBalances, page.cexBalancesLbl)
+    this.updateCEXSelector()
     this.setMarket([this.currentMarket])
   }
 
@@ -821,11 +1290,20 @@ export default class MarketMakerPage extends BasePage {
     Doc.hide(tmpl.programRunning, tmpl.programPaused)
     if (report.running) Doc.show(tmpl.programRunning)
     else Doc.show(tmpl.programPaused)
-    tmpl.lots.textContent = String(pgm.lots)
-    tmpl.boost.textContent = `${(pgm.gapFactor * 100).toFixed(1)}%`
-    tmpl.driftTolerance.textContent = `${(pgm.driftTolerance * 100).toFixed(2)}%`
-    tmpl.oracleWeight.textContent = `${(pgm.oracleWeighting * 100).toFixed(0)}%`
-    tmpl.oracleBias.textContent = `${(pgm.oracleBias * 100).toFixed(1)}%`
+    if (pgm.gapEngineCfg) {
+      Doc.hide(tmpl.arbBotOpts)
+      tmpl.lots.textContent = String(pgm.gapEngineCfg.lots)
+      tmpl.boost.textContent = `${(pgm.gapEngineCfg.gapFactor * 100).toFixed(1)}%`
+      tmpl.driftTolerance.textContent = `${(pgm.gapEngineCfg.driftTolerance * 100).toFixed(2)}%`
+      tmpl.oracleWeight.textContent = `${(pgm.gapEngineCfg.oracleWeighting * 100).toFixed(0)}%`
+      tmpl.oracleBias.textContent = `${(pgm.gapEngineCfg.oracleBias * 100).toFixed(1)}%`
+    } else if (pgm.arbEngineCfg) {
+      Doc.hide(tmpl.gapBotOpts)
+      tmpl.cex.textContent = pgm.arbEngineCfg.cexName
+      tmpl.profitTrigger.textContent = `${(pgm.arbEngineCfg.profitTrigger * 100).toFixed(1)}%`
+      tmpl.maxArbs.textContent = String(pgm.arbEngineCfg.maxActiveArbs)
+      tmpl.arbLength.textContent = String(pgm.arbEngineCfg.numEpochsLeaveOpen)
+    }
   }
 
   setMarketSubchoice (host: string, name: string): void {
@@ -860,6 +1338,14 @@ export default class MarketMakerPage extends BasePage {
     }
   }
 
+  handleCEXNote (note: CEXNote): void {
+    this.updateCEXSelector()
+    if (this.currentForm === this.page.balancesForm &&
+      this.page.balancesCexName.textContent === note.cex.name) {
+      this.updateBalancesTable(note.cex.name)
+    }
+  }
+
   setCreationBase (symbol: string) {
     const counterAsset = this.currentMarket.quotesymbol
     const markets = sortedMarkets()
@@ -888,33 +1374,78 @@ export default class MarketMakerPage extends BasePage {
     for (const mkt of markets) if (mkt.basesymbol === symbol) return this.setMarket([mkt])
   }
 
-  async createBot (appPW: string): Promise<void> {
-    const { page, currentMarket, currentReport } = this
+  async createArbBot (appPW: string): Promise<void> {
+    const { page, currentMarket } = this
+    Doc.hide(page.createArbErr)
 
-    Doc.hide(page.createErr)
     const setError = (s: string) => {
-      page.createErr.textContent = s
-      Doc.show(page.createErr)
+      page.createArbErr.textContent = s
+      Doc.show(page.createArbErr)
     }
 
-    const lots = parseInt(page.lotsInput.value || '0')
-    if (lots === 0) return setError('must specify > 0 lots')
-    const makerProgram = Object.assign({
+    const arbEngineCfg : ArbEngineCfg = {
+      cexName: page.cexSelector.value || '',
+      profitTrigger: this.arbRanges.profitTrigger,
+      maxActiveArbs: Math.round(this.arbRanges.maxActiveArbs),
+      numEpochsLeaveOpen: Math.round(this.arbRanges.numEpochsLeaveOpen)
+    }
+
+    const makerProgram : MakerProgram = {
       host: currentMarket.host,
       baseID: currentMarket.baseid,
-      quoteID: currentMarket.quoteid
-    }, this.createOpts, { lots, gapStrategy: '' })
-
-    const strategy = page.gapStrategySelect.value
-    makerProgram.gapStrategy = strategy ?? ''
+      quoteID: currentMarket.quoteid,
+      arbEngineCfg: arbEngineCfg
+    }
 
     const req = {
       botType: 'MakerV0',
       program: makerProgram,
       programID: 0,
-      appPW: appPW,
-      manualRate: 0
+      appPW: appPW
     }
+
+    let endpoint = '/api/createbot'
+
+    if (this.editProgram !== null) {
+      req.programID = this.editProgram.programID
+      endpoint = '/api/updatebotprogram'
+    }
+
+    const loaded = app().loading(page.botCreator)
+    const res = await postJSON(endpoint, req)
+    loaded()
+
+    if (!app().checkResponse(res)) {
+      setError(res.msg)
+      return
+    }
+
+    this.leaveEditMode()
+  }
+
+  async createGapBot (appPW: string): Promise<void> {
+    const { page, currentMarket, currentReport } = this
+
+    Doc.hide(page.createGapErr)
+    const setError = (s: string) => {
+      page.createGapErr.textContent = s
+      Doc.show(page.createGapErr)
+    }
+
+    const makerProgram : MakerProgram = {
+      host: currentMarket.host,
+      baseID: currentMarket.baseid,
+      quoteID: currentMarket.quoteid
+    }
+
+    const lots = parseInt(page.lotsInput.value || '0')
+    if (lots === 0) return setError('must specify > 0 lots')
+
+    const gapEngineCfg : GapEngineCfg = Object.assign(this.createOpts)
+    gapEngineCfg.lots = lots
+
+    const strategy = page.gapStrategySelect.value
+    gapEngineCfg.gapStrategy = strategy ?? ''
 
     switch (strategy) {
       case GapStrategyAbsolute:
@@ -922,15 +1453,24 @@ export default class MarketMakerPage extends BasePage {
         const r = parseFloat(page.absInput.value || '0')
         if (r === 0) return setError('gap must be specified for strategy = absolute')
         else if (currentReport?.basisPrice && r >= currentReport.basisPrice) return setError('gap width cannot be > current spot price')
-        makerProgram.gapFactor = r
+        gapEngineCfg.gapFactor = r
         break
       }
       case GapStrategyPercent:
       case GapStrategyPercentPlus:
-        makerProgram.gapFactor = this.gapRanges.gapPercent
+        gapEngineCfg.gapFactor = this.gapRanges.gapPercent
         break
       default:
-        makerProgram.gapFactor = this.gapRanges.gapMultiplier
+        gapEngineCfg.gapFactor = this.gapRanges.gapMultiplier
+    }
+
+    makerProgram.gapEngineCfg = gapEngineCfg
+
+    const req = {
+      botType: 'MakerV0',
+      program: makerProgram,
+      programID: 0,
+      appPW: appPW
     }
 
     let endpoint = '/api/createbot'
@@ -944,7 +1484,7 @@ export default class MarketMakerPage extends BasePage {
           setError('price must be set manually')
           return
         }
-        req.program.manualRate = this.specifiedPrice
+        gapEngineCfg.manualRate = this.specifiedPrice
       }
     }
 
@@ -953,8 +1493,8 @@ export default class MarketMakerPage extends BasePage {
     loaded()
 
     if (!app().checkResponse(res)) {
-      page.createErr.textContent = res.msg
-      Doc.show(page.createErr)
+      page.createGapErr.textContent = res.msg
+      Doc.show(page.createGapErr)
       return
     }
 
