@@ -208,7 +208,7 @@ export default class MarketsPage extends BasePage {
       mouse: (r: MouseReport) => { this.reportDepthMouse(r) },
       zoom: (z: number) => { this.reportDepthZoom(z) }
     }
-    this.depthChart = new DepthChart(page.depthChart, depthReporters, State.fetch(State.DepthZoomLK))
+    this.depthChart = new DepthChart(page.depthChart, depthReporters, State.fetchLocal(State.DepthZoomLK))
 
     const candleReporters: CandleReporters = {
       mouse: c => { this.reportMouseCandle(c) }
@@ -452,13 +452,13 @@ export default class MarketsPage extends BasePage {
     this.stats = [{ row: stats0, tmpl: Doc.parseTemplate(stats0) }, { row: stats1, tmpl: Doc.parseTemplate(stats1) }]
 
     const closeMarketsList = () => {
-      State.store(State.LeftMarketDockLK, '0')
+      State.storeLocal(State.LeftMarketDockLK, '0')
       page.leftMarketDock.classList.remove('default')
       page.leftMarketDock.classList.add('stashed')
       for (const s of this.stats) s.row.classList.remove('listopen')
     }
     const openMarketsList = () => {
-      State.store(State.LeftMarketDockLK, '1')
+      State.storeLocal(State.LeftMarketDockLK, '1')
       page.leftMarketDock.classList.remove('default', 'stashed')
       for (const s of this.stats) s.row.classList.add('listopen')
     }
@@ -516,7 +516,7 @@ export default class MarketsPage extends BasePage {
     if (data && data.host && typeof data.base !== 'undefined' && typeof data.quote !== 'undefined') {
       selected = makeMarket(data.host, parseInt(data.base), parseInt(data.quote))
     } else {
-      selected = State.fetch(State.LastMarketLK)
+      selected = State.fetchLocal(State.LastMarketLK)
     }
     if (!selected || !this.marketList.exists(selected.host, selected.base, selected.quote)) {
       const first = this.marketList.first()
@@ -881,7 +881,7 @@ export default class MarketsPage extends BasePage {
    * across reloads.
    */
   reportDepthZoom (zoom: number) {
-    State.store(State.DepthZoomLK, zoom)
+    State.storeLocal(State.DepthZoomLK, zoom)
   }
 
   reportMouseCandle (candle: Candle | null) {
@@ -1346,7 +1346,7 @@ export default class MarketsPage extends BasePage {
     this.updateTitle()
     this.marketList.select(host, b.id, q.id)
 
-    State.store(State.LastMarketLK, {
+    State.storeLocal(State.LastMarketLK, {
       host: note.host,
       base: mktBook.base,
       quote: mktBook.quote

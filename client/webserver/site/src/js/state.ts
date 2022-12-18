@@ -40,6 +40,15 @@ export default class State {
   }
 
   /*
+   * removeCookie tells the browser to stop using cookie. It's not enough to simply
+   * erase cookie value because browser will still send it to the server (with empty
+   * value), and that's not what server expects.
+   */
+  static removeCookie (cKey: string) {
+    document.cookie = `${cKey}=;expires=Thu, 01 Jan 1970 00:00:01 GMT;`
+  }
+
+  /*
    * isDark returns true if the dark-mode cookie is currently set to '1' = true.
    */
   static isDark () {
@@ -51,17 +60,9 @@ export default class State {
     return !!this.getCookie(State.PwKeyCK)
   }
 
-  static removeAuthCK () {
-    document.cookie = `${State.AuthCK}=;expires=Thu, 01 Jan 1970 00:00:01 GMT;`
-  }
-
-  static removePwKeyCK () {
-    document.cookie = `${State.PwKeyCK}=;expires=Thu, 01 Jan 1970 00:00:01 GMT;`
-  }
-
   /* showLeftMarketDock returns whether or not user wants left market doc shown. */
   static showLeftMarketDock () {
-    return this.fetch(State.LeftMarketDockLK) === '1'
+    return this.fetchLocal(State.LeftMarketDockLK) === '1'
   }
 
   /*
@@ -69,23 +70,23 @@ export default class State {
    * yet.
    */
   static selectedAsset (): number | null {
-    const assetIDStr = State.fetch(State.SelectedAssetLK)
+    const assetIDStr = State.fetchLocal(State.SelectedAssetLK)
     if (!assetIDStr) {
       return null
     }
     return Number(assetIDStr)
   }
 
-  /* store puts the key-value pair into Window.localStorage. */
-  static store (k: string, v: any) {
+  /* storeLocal puts the key-value pair into Window.localStorage. */
+  static storeLocal (k: string, v: any) {
     window.localStorage.setItem(k, JSON.stringify(v))
   }
 
   /*
-  * fetch the value associated with the key in Window.localStorage, or
+  * fetchLocal the value associated with the key in Window.localStorage, or
   * null if the no value exists for the key.
   */
-  static fetch (k: string) {
+  static fetchLocal (k: string) {
     const v = window.localStorage.getItem(k)
     if (v !== null) {
       return JSON.parse(v)
@@ -93,8 +94,8 @@ export default class State {
     return null
   }
 
-  /* store removes the key-value pair from Window.localStorage. */
-  static remove (k: string) {
+  /* removeLocal removes the key-value pair from Window.localStorage. */
+  static removeLocal (k: string) {
     window.localStorage.removeItem(k)
   }
 }
@@ -102,4 +103,4 @@ export default class State {
 // Setting defaults here, unless specific cookie (or local storage) value was already chosen by the user.
 if (State.getCookie(State.DarkModeCK) === null) State.setCookie(State.DarkModeCK, '1')
 if (State.getCookie(State.PopupsCK) === null) State.setCookie(State.PopupsCK, '1')
-if (State.fetch(State.LeftMarketDockLK) === null) State.store(State.LeftMarketDockLK, '1')
+if (State.fetchLocal(State.LeftMarketDockLK) === null) State.storeLocal(State.LeftMarketDockLK, '1')

@@ -112,18 +112,18 @@ export default class Application {
     // Loggers can be enabled by setting a truthy value to the loggerID using
     // enableLogger. Settings are stored across sessions. See docstring for the
     // log method for more info.
-    this.loggers = State.fetch(State.LoggersLK) || {}
+    this.loggers = State.fetchLocal(State.LoggersLK) || {}
     window.enableLogger = (loggerID, state) => {
       if (state) this.loggers[loggerID] = true
       else delete this.loggers[loggerID]
-      State.store(State.LoggersLK, this.loggers)
+      State.storeLocal(State.LoggersLK, this.loggers)
       return `${loggerID} logger ${state ? 'enabled' : 'disabled'}`
     }
     // Enable logging from anywhere.
     window.log = (loggerID, ...a) => { this.log(loggerID, ...a) }
 
     // Recorders can record log messages, and then save them to file on request.
-    const recorderKeys = State.fetch(State.RecordersLK) || []
+    const recorderKeys = State.fetchLocal(State.RecordersLK) || []
     this.recorders = {}
     for (const loggerID of recorderKeys) {
       console.log('recording', loggerID)
@@ -132,7 +132,7 @@ export default class Application {
     window.recordLogger = (loggerID, on) => {
       if (on) this.recorders[loggerID] = []
       else delete this.recorders[loggerID]
-      State.store(State.RecordersLK, Object.keys(this.recorders))
+      State.storeLocal(State.RecordersLK, Object.keys(this.recorders))
       return `${loggerID} recorder ${on ? 'enabled' : 'disabled'}`
     }
     window.dumpLogger = loggerID => {
@@ -184,7 +184,7 @@ export default class Application {
     this.attachCommon(this.header)
     this.attach({})
     // Load recent notifications from Window.localStorage.
-    const notes = State.fetch(State.NotificationsLK)
+    const notes = State.fetchLocal(State.NotificationsLK)
     this.setNotes(notes || [])
     // Connect the websocket and register the notification route.
     ws.connect(getSocketURI(), this.reconnected)
@@ -434,7 +434,7 @@ export default class Application {
    * actual stored list is stripped of information not necessary for display.
    */
   storeNotes () {
-    State.store(State.NotificationsLK, this.notes.map(n => {
+    State.storeLocal(State.NotificationsLK, this.notes.map(n => {
       return {
         subject: n.subject,
         details: n.details,
@@ -944,11 +944,11 @@ export default class Application {
       Doc.show(this.page.logoutErr)
       return
     }
-    State.removeAuthCK()
-    State.removePwKeyCK()
-    State.remove(State.LastMarketLK)
-    State.remove(State.LastMMMarketLK)
-    State.remove(State.NotificationsLK)
+    State.removeCookie(State.AuthCK)
+    State.removeCookie(State.PwKeyCK)
+    State.removeLocal(State.LastMarketLK)
+    State.removeLocal(State.LastMMMarketLK)
+    State.removeLocal(State.NotificationsLK)
     window.location.href = '/login'
   }
 }

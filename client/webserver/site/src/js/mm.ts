@@ -291,13 +291,13 @@ export default class MarketMakerPage extends BasePage {
     page.options.appendChild(this.biasOpt.node)
 
     Doc.bind(page.showAdvanced, 'click', () => {
-      State.store(State.OptionsExpansionLK, true)
+      State.storeLocal(State.OptionsExpansionLK, true)
       Doc.hide(page.showAdvanced)
       Doc.show(page.hideAdvanced, page.options)
     })
 
     Doc.bind(page.hideAdvanced, 'click', () => {
-      State.store(State.OptionsExpansionLK, false)
+      State.storeLocal(State.OptionsExpansionLK, false)
       Doc.hide(page.hideAdvanced, page.options)
       Doc.show(page.showAdvanced)
     })
@@ -392,7 +392,7 @@ export default class MarketMakerPage extends BasePage {
       }
     }
 
-    const lastMkt = State.fetch(State.LastMMMarketLK) as HostedMarket
+    const lastMkt = State.fetchLocal(State.LastMMMarketLK) as HostedMarket
     let mkt: HostedMarket | null = null
     if (lastMkt && lastMkt.host) {
       const xc = app().exchanges[lastMkt.host]
@@ -403,7 +403,7 @@ export default class MarketMakerPage extends BasePage {
       }
     }
 
-    if (State.fetch(State.OptionsExpansionLK)) {
+    if (State.fetchLocal(State.OptionsExpansionLK)) {
       Doc.show(page.hideAdvanced, page.options)
       Doc.hide(page.showAdvanced)
     }
@@ -572,7 +572,7 @@ export default class MarketMakerPage extends BasePage {
     this.setCurrentReport(null)
     page.manualPriceInput.value = ''
 
-    State.store(State.LastMMMarketLK, mkt)
+    State.storeLocal(State.LastMMMarketLK, mkt)
 
     Doc.empty(page.baseSelect, page.quoteSelect)
     page.baseSelect.appendChild(this.assetRow(mkt.basesymbol))
@@ -627,7 +627,7 @@ export default class MarketMakerPage extends BasePage {
         page.lotEstQuoteBox, page.lotEstBaseBox, page.availHeader, page.fetchingMarkets,
         page.lotsBox, page.advancedBox
       )
-      if (State.fetch(State.OptionsExpansionLK)) Doc.show(page.options)
+      if (State.fetchLocal(State.OptionsExpansionLK)) Doc.show(page.options)
       const loaded = app().loading(page.options)
       const buy = this.fetchOracleAndMaxBuy()
       const sell = this.fetchMaxSell()
