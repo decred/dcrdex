@@ -671,24 +671,24 @@ export default class MarketsPage extends BasePage {
       const lot = '1'
       const lotSize = String(this.market.cfg.lotsize / this.market.baseUnitInfo.conventional.conversionFactor)
       // Reset limit-order form inputs to defaults.
-      page.lotField.min = lot
-      page.lotField.step = lot
+      page.lotField.min = lot // improve up/down key-press handling, and hover-message
+      page.lotField.step = lot // improve up/down key-press handling, and hover-message
       page.lotField.value = ''
-      page.qtyField.min = lotSize
-      page.qtyField.step = lotSize
+      page.qtyField.min = lotSize // improve up/down key-press handling, and hover-message
+      page.qtyField.step = lotSize // improve up/down key-press handling, and hover-message
       page.qtyField.value = ''
       const rateStep = String(this.market.cfg.ratestep / this.market.rateConversionFactor)
-      page.rateField.min = rateStep
-      page.rateField.step = rateStep
+      page.rateField.min = rateStep // improve up/down key-press handling, and hover-message
+      page.rateField.step = rateStep // improve up/down key-press handling, and hover-message
       page.rateField.value = ''
       this.previewMax()
       page.orderTotalPreview.textContent = ''
       // Reset market-sell-order form inputs to defaults.
-      page.mktSellLotField.min = lot
-      page.mktSellLotField.step = lot
+      page.mktSellLotField.min = lot // improve up/down key-press handling, and hover-message
+      page.mktSellLotField.step = lot // improve up/down key-press handling, and hover-message
       page.mktSellLotField.value = ''
-      page.mktSellQtyField.min = lotSize
-      page.mktSellQtyField.step = lotSize
+      page.mktSellQtyField.min = lotSize // improve up/down key-press handling, and hover-message
+      page.mktSellQtyField.step = lotSize // improve up/down key-press handling, and hover-message
       page.mktSellQtyField.value = ''
 
       Doc.show(page.orderForm, page.orderTypeBttns)
