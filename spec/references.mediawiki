@@ -1,13 +1,15 @@
 ==References==
 
-&#91;1&#93; Teall, John L., Financial Trading and Investing, p. 336 (2013)
+<nowiki>[1]</nowiki> Teall, John L., Financial Trading and Investing, p. 336 (2013)
 
-&#91;2&#93; [https://github.com/decred/atomicswap Atomic Swaps]
+<nowiki>[2]</nowiki> [https://github.com/decred/atomicswap Atomic Swaps]
 
-&#91;3&#93; [https://tools.ietf.org/html/rfc6455 The WebSocket Protocol]
+<nowiki>[3]</nowiki> [https://tools.ietf.org/html/rfc6455 The WebSocket Protocol]
 
-&#91;4&#93; [https://tools.ietf.org/html/rfc8446 Transport Layer Security 1.3]
+<nowiki>[4]</nowiki> [https://tools.ietf.org/html/rfc8446 Transport Layer Security 1.3]
 
-&#91;5&#93; [https://tools.ietf.org/html/rfc8259 JSON]
+<nowiki>[5]</nowiki> [https://tools.ietf.org/html/rfc8259 JSON]
 
-&#91;6&#93; [https://github.com/satoshilabs/slips/blob/master/slip-0044.md BIP-0044 Registered Coins]
+<nowiki>[6]</nowiki> [https://github.com/satoshilabs/slips/blob/master/slip-0044.md BIP-0044 Registered Coins]
+
+<nowiki>[7]</nowiki> [https://en.wikipedia.org/wiki/Elliptic_Curve_Digital_Signature_Algorithm ECDSA]
