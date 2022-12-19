@@ -1609,18 +1609,357 @@ var deDE = map[Topic]*translation{
 	},
 }
 
+// ar is the Arabic translations.
+var ar = map[Topic]*translation{
+	// [host]
+	TopicAccountRegistered: {
+		subject:  "تم تسجيل الحساب",
+		template: "يمكنك الآن التداول عند \u200e%s",
+	},
+	// [confs, host]
+	TopicFeePaymentInProgress: {
+		subject:  "جارٍ دفع الرسوم",
+		template: "في انتظار \u200e%d تأكيدات قبل التداول عند \u200e%s",
+	},
+	// [confs, required confs]
+	TopicRegUpdate: {
+		subject:  "تحديث التسجيل",
+		template: "تأكيدات دفع الرسوم \u200e%v/\u200e%v",
+	},
+	// [host, error]
+	TopicFeePaymentError: {
+		subject:  "خطأ في دفع الرسوم",
+		template: "عثر على خطأ أثناء دفع الرسوم إلى \u200e%s: \u200e%v",
+	},
+	// [host, error]
+	TopicAccountUnlockError: {
+		subject:  "خطأ فتح الحساب",
+		template: "خطأ فتح الحساب لأجل \u200e%s: \u200e%v",
+	},
+	// [host]
+	TopicFeeCoinError: {
+		subject:  "خطأ في رسوم العملة",
+		template: "رسوم العملة \u200e%s فارغة.",
+	},
+	// [host]
+	TopicWalletConnectionWarning: {
+		subject:  "تحذير اتصال المحفظة",
+		template: "تم الكشف عن تسجيل غير مكتمل لـ  \u200e%s، لكنه فشل في الاتصال بمحفظة ديكريد",
+	},
+	// [host, error]
+	TopicWalletUnlockError: {
+		subject:  "خطأ في فتح المحفظة",
+		template: "متصل بالمحفظة لإكمال التسجيل عند \u200e%s، لكنه فشل في فتح القفل: \u200e%v",
+	},
+	// [asset name, error message]
+	TopicWalletCommsWarning: {
+		subject:  "مشكلة الإتصال بالمحفظة",
+		template: "غير قادر على الاتصال بمحفظة !\u200e%v السبب: \u200e%v",
+	},
+	// [asset name]
+	TopicWalletPeersWarning: {
+		subject:  "مشكلة في شبكة المحفظة",
+		template: "!لا يوجد لدى المحفظة \u200e%v نظراء على الشبكة",
+	},
+	// [asset name]
+	TopicWalletPeersRestored: {
+		subject:  "تمت استعادة الاتصال بالمحفظة",
+		template: "تمت اعادة الاتصال بالمحفظة \u200e%v.",
+	},
+	// [ticker, error]
+	TopicSendError: {
+		subject:  "إرسال الخطأ",
+		template: "تمت مصادفة خطأ أثناء إرسال \u200e%s: \u200e%v",
+	},
+	// [value string, ticker, destination address, coin ID]
+	TopicSendSuccess: {
+		subject:  "تم الإرسال بنجاح",
+		template: "تم بنجاح إرسال \u200e%s \u200e%s إلى \u200e%s. معرف العملة = \u200e%s",
+	},
+	// [error]
+	TopicOrderLoadFailure: {
+		subject:  "فشل تحميل الطلب",
+		template: "فشل تحميل بعض الطلبات من قاعدة البيانات: \u200e%v",
+	},
+	// [qty, ticker, token]
+	TopicYoloPlaced: {
+		subject:  "تم تقديم طلب السوق",
+		template: "بيع \u200e%s \u200e%s بسعر السوق (\u200e%s)",
+	},
+	// [qty, ticker, rate string, token]
+	TopicBuyOrderPlaced: {
+		subject:  "تم وضع الطلب",
+		template: "الشراء \u200e%s \u200e%s، السعر = \u200e%s (\u200e%s)",
+	},
+	// [qty, ticker, rate string, token]
+	TopicSellOrderPlaced: {
+		subject:  "تم وضع الطلب",
+		template: "بيع \u200e%s \u200e%s، السعر = \u200e%s (\u200e%s)",
+	},
+	// [missing count, token, host]
+	TopicMissingMatches: {
+		subject:  "مطابقات مفقودة",
+		template: "لم يتم الإبلاغ عن \u200e%d تطابقات للطلب \u200e%s من قبل \u200e%q وتعتبر باطلة",
+	},
+	// [token, error]
+	TopicWalletMissing: {
+		subject:  "المحفظة مفقودة",
+		template: "خطأ في استرداد المحفظة للطلب النشط \u200e%s: \u200e%v",
+	},
+	// [side, token, match status]
+	TopicMatchErrorCoin: {
+		subject:  "خطأ في مطابقة العملة",
+		template: "مطابقة \u200e%s للطلب \u200e%s في الحالة \u200e%s، لكن لا توجد عملة مقايضة من الصانع.",
+	},
+	// [side, token, match status]
+	TopicMatchErrorContract: {
+		subject:  "خطأ في عقد المطابقة",
+		template: "تطابق \u200e%s للطلب \u200e%s في الحالة \u200e%s، لكن لا يوجد عقد مقايضة من الصانع.",
+	},
+	// [ticker, contract, token, error]
+	TopicMatchRecoveryError: {
+		subject:  "خطأ استعادة المطابقة",
+		template: "خطأ في تدقيق عقد مقايضة الطرف المقابل (\u200e%s \u200e%v) أثناء استرداد المقايضة عند الطلب \u200e%s: \u200e%v",
+	},
+	// [token]
+	TopicOrderCoinError: {
+		subject:  "خطأ عند طلب العملة",
+		template: "لم يتم تسجيل عملات تمويل للطلب النشط \u200e%s",
+	},
+	// [token, ticker, error]
+	TopicOrderCoinFetchError: {
+		subject:  "خطأ في جلب طلب العملة",
+		template: "خطأ في استرداد عملات المصدر للطلب \u200e%s (\u200e%s): \u200e%v",
+	},
+	// [token]
+	TopicMissedCancel: {
+		subject:  "تفويت الإلغاء",
+		template: "طلب الإلغاء لم يتطابق مع الطلب \u200e%s. يمكن أن يحدث هذا إذا تم تقديم طلب الإلغاء في نفس حقبة التداول أو إذا تم تنفيذ الطلب المستهدف بالكامل قبل المطابقة مع طلب الإلغاء.",
+	},
+	// [base ticker, quote ticker, host, token]
+	TopicBuyOrderCanceled: {
+		subject:  "تم إلغاء الطلب",
+		template: "تم إلغاء  (\u200e%s) طلب الشراء عند \u200e%s-\u200e%s في \u200e%s",
+	},
+	TopicSellOrderCanceled: {
+		subject:  "تم إلغاء الطلب",
+		template: "تم إلغاء  (\u200e%s) طلب البيع عند \u200e%s-\u200e%s في \u200e%s",
+	},
+	// [base ticker, quote ticker, fill percent, token]
+	TopicBuyMatchesMade: {
+		subject:  "تم وضع المطابقات",
+		template: "تم تنفيذ (\u200e%s) طلب البيع عند \u200e%s-\u200e%s \u200e%.1f%%",
+	},
+	// [base ticker, quote ticker, fill percent, token]
+	TopicSellMatchesMade: {
+		subject:  "تم وضع المطابقات",
+		template: "تم تنفيذ (\u200e%s) طلب الشراء عند \u200e%s-\u200e%s \u200e%.1f%%",
+	},
+	// [qty, ticker, token]
+	TopicSwapSendError: {
+		subject:  "خطأ في إرسال المقايضة",
+		template: "تمت مصادفة خطأ في إرسال إخراج (مخرجات) مقايضة بقيمة \u200e%s \u200e%s عند الطلب \u200e%s",
+	},
+	// [match, error]
+	TopicInitError: {
+		subject:  "خطأ إبلاغ مقايضة",
+		template: "خطأ إخطار منصة المبادلات اللامركزية بالمقايضة من أجل المطابقة \u200e%s: \u200e%v",
+	},
+	// [match, error]
+	TopicReportRedeemError: {
+		subject:  "خطأ إبلاغ الإسترداد",
+		template: "خطأ في إعلام منصة المبادلات اللامركزية بالاسترداد من أجل المطابقة \u200e%s: \u200e%v",
+	},
+	// [qty, ticker, token]
+	TopicSwapsInitiated: {
+		subject:  "بدأت المقايضات",
+		template: "تم إرسال مقايضات بقيمة \u200e%s \u200e%s عند الطلب \u200e%s",
+	},
+	// [qty, ticker, token]
+	TopicRedemptionError: {
+		subject:  "خطأ في الاسترداد",
+		template: "حدث خطأ أثناء إرسال عمليات استرداد بقيمة \u200e%s \u200e%s للطلب \u200e%s",
+	},
+	// [qty, ticker, token]
+	TopicMatchComplete: {
+		subject:  "اكتملت المطابقة",
+		template: "تم استرداد \u200e%s \u200e%s عند الطلب \u200e%s",
+	},
+	// [qty, ticker, token]
+	TopicRefundFailure: {
+		subject:  "فشل الاسترداد",
+		template: "تم استرداد \u200e%s \u200e%s للطلب \u200e%s، مع وجود بعض الأخطاء",
+	},
+	// [qty, ticker, token]
+	TopicMatchesRefunded: {
+		subject:  "تم استرداد مبالغ المطابقات",
+		template: "تم استرداد مبلغ \u200e%s \u200e%s للطلب \u200e%s",
+	},
+	// [match ID token]
+	TopicMatchRevoked: {
+		subject:  "تم إبطال المطابقة",
+		template: "تم إبطال المطابقة \u200e%s",
+	},
+	// [token, market name, host]
+	TopicOrderRevoked: {
+		subject:  "تم إبطال الطلب",
+		template: "تم إبطال الطلب \u200e%s في السوق \u200e%s عند \u200e%s من قبل الخادم",
+	},
+	// [token, market name, host]
+	TopicOrderAutoRevoked: {
+		subject:  "تم إبطال الطلب تلقائيًا",
+		template: "تم إبطال الطلب \u200e%s في السوق \u200e%s عند \u200e%s بسبب تعليق عمليات السوق",
+	},
+	// [ticker, coin ID, match]
+	TopicMatchRecovered: {
+		subject:  "تم استرداد المطابقة",
+		template: "تم إيجاد استرداد (\u200e%s: \u200e%v) صانع القيمة وسر المطابقة الذي تم التحقق منه \u200e%s",
+	},
+	// [token]
+	TopicCancellingOrder: {
+		subject:  "إلغاء الطلب",
+		template: "تم إرسال إلغاء طلب للطلب \u200e%s",
+	},
+	// [token, old status, new status]
+	TopicOrderStatusUpdate: {
+		subject:  "تحديث حالة الطلب",
+		template: "تمت مراجعة حالة الطلب \u200e%v من \u200e%v إلى \u200e%v",
+	},
+	// [count, host, token]
+	TopicMatchResolutionError: {
+		subject:  "خطأ في دقة المطابقة",
+		template: "لم يتم العثور على \u200e%d تطابقات تم الإبلاغ عنها بواسطة \u200e%s لـ \u200e%s.",
+	},
+	// [token]
+	TopicFailedCancel: {
+		subject:  "فشل الإلغاء",
+		template: "إلغاء الطلب للطلب \u200e%s عالق في حالة الحقبة الزمنية لحقبتين وتم حذفه الآن.",
+	},
+	// [coin ID, ticker, match]
+	TopicAuditTrouble: {
+		subject:  "مشكلة في التدقيق",
+		template: "لا يزال البحث جارٍ عن عقد عملة \u200e%v (\u200e%s) الطرف الثاني للمطابقة \u200e%s. هل إتصالك بكل من الإنترنت و المحفظة جيد؟",
+	},
+	// [host, error]
+	TopicDexAuthError: {
+		subject:  "خطأ في مصادقة منصة المبادلات اللامركزية",
+		template: "\u200e%s: \u200e%v",
+	},
+	// [count, host]
+	TopicUnknownOrders: {
+		subject:  "أبلغت منصة المبادلات اللامركزية عن طلبات غير معروفة",
+		template: "لم يتم العثور على \u200e%d من الطلبات النشطة التي تم الإبلاغ عنها بواسطة منصة المبادلات اللامركزية \u200e%s.",
+	},
+	// [count]
+	TopicOrdersReconciled: {
+		subject:  "تمت تسوية الطلبات مع منصة المبادلات اللامركزية",
+		template: "تم تحديث الحالات لـ \u200e%d من الطلبات.",
+	},
+	// [ticker, address]
+	TopicWalletConfigurationUpdated: {
+		subject:  "تم تحديث تهيئة المحفظة",
+		template: "تم تحديث تهيئة المحفظة \u200e%s. عنوان الإيداع = \u200e%s",
+	},
+	//  [ticker]
+	TopicWalletPasswordUpdated: {
+		subject:  "تم تحديث كلمة مرور المحفظة",
+		template: "تم تحديث كلمة المرور لمحفظة \u200e%s.",
+	},
+	// [market name, host, time]
+	TopicMarketSuspendScheduled: {
+		subject:  "تمت جدولة تعليق السوق",
+		template: "تمت جدولة تعليق \u200e%v السوق \u200e%s عند \u200e%s",
+	},
+	// [market name, host]
+	TopicMarketSuspended: {
+		subject:  "تعليق السوق",
+		template: "تم تعليق التداول في السوق \u200e%s عند \u200e%s.",
+	},
+	// [market name, host]
+	TopicMarketSuspendedWithPurge: {
+		subject:  "تم تعليق السوق، وألغيت الطلبات",
+		template: "تم تعليق التداول في السوق \u200e%s عند \u200e%s. كما تمت إزالة جميع الطلبات المحجوزة.",
+	},
+	// [market name, host, time]
+	TopicMarketResumeScheduled: {
+		subject:  "تمت جدولة استئناف السوق",
+		template: "تمت جدولة السوق \u200e%s في \u200e%s للاستئناف في \u200e%v",
+	},
+	// [market name, host, epoch]
+	TopicMarketResumed: {
+		subject:  "استئناف السوق",
+		template: "استأنف السوق \u200e%s في \u200e%s التداول في الحقبة الزمنية \u200e%d",
+	},
+	// [host]
+	TopicUpgradeNeeded: {
+		subject:  "التحديث مطلوب",
+		template: "قد تحتاج إلى تحديث عميلك للتداول في \u200e%s.",
+	},
+	// [host]
+	TopicDEXConnected: {
+		subject:  "الخادم متصل",
+		template: "\u200e%s متصل",
+	},
+	// [host]
+	TopicDEXDisconnected: {
+		subject:  "قطع الاتصال بالخادم",
+		template: "\u200e%s غير متصل",
+	},
+	// [host, rule, time, details]
+	TopicPenalized: {
+		subject:  "لقد عاقبك الخادم",
+		template: "عقوبة من منصة المبادلات اللامركزية في \u200e%s\nآخر قاعدة مكسورة: \u200e%s\nالوقت: \u200e%v\nالتفاصيل:\n\"\u200e%s\"\n",
+	},
+	TopicSeedNeedsSaving: {
+		subject:  "لا تنس عمل نسخة احتياطية من بذرة التطبيق",
+		template: "تم إنشاء بذرة تطبيق جديدة. قم بعمل نسخة احتياطية الآن في عرض الإعدادات.",
+	},
+	TopicUpgradedToSeed: {
+		subject:  "قم بعمل نسخة احتياطية من بذرة التطبيق الجديدة",
+		template: "تم تحديث العميل لاستخدام بذرة التطبيق. قم بعمل نسخة احتياطية من البذرة الآن في عرض الإعدادات.",
+	},
+	// [host, msg]
+	TopicDEXNotification: {
+		subject:  "رسالة من منصة المبادلات اللامركزية",
+		template: "\u200e%s: \u200e%s",
+	},
+	// [parentSymbol, tokenSymbol]
+	TopicQueuedCreationFailed: {
+		subject:  "فشل إنشاء توكن المحفظة",
+		template: "بعد إنشاء محفظة \u200e%s، فشل في إنشاء \u200e%s للمحفظة",
+	},
+	TopicRedemptionResubmitted: {
+		subject:  "أعيد تقديم المبلغ المسترد",
+		template: "تمت إعادة إرسال مبلغك المسترد للمطابقة \u200e%s في الطلب .\u200e%s",
+	},
+	TopicSwapRefunded: {
+		subject:  "مقايضة مستردة",
+		template: "تمت استعادة تطابق \u200e%s للطلب \u200e%s من قبل الطرف الثاني.",
+	},
+	TopicRedemptionConfirmed: {
+		subject:  "تم تأكيد الاسترداد",
+		template: "تم تأكيد استردادك للمطابقة \u200e%s للطلب \u200e%s",
+	},
+}
+
+// The language string key *must* parse with language.Parse.
 var locales = map[string]map[Topic]*translation{
 	originLang: originLocale,
 	"pt-BR":    ptBR,
 	"zh-CN":    zhCN,
 	"pl-PL":    plPL,
-	"de-DE":    deDE, // language.German is de
+	"de-DE":    deDE,
+	"ar":       ar,
 }
 
 func init() {
 	for lang, translations := range locales {
+		langtag, err := language.Parse(lang)
+		if err != nil {
+			panic(err.Error())
+		} // otherwise would fail in core.New parsing the languages
 		for topic, translation := range translations {
-			err := message.SetString(language.Make(lang), string(topic), translation.template)
+			err := message.SetString(langtag, string(topic), translation.template)
 			if err != nil {
 				panic(fmt.Sprintf("SetString(%s): %v", lang, err))
 			}

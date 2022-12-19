@@ -42,7 +42,7 @@ func (s *WebServer) sendTemplate(w http.ResponseWriter, tmplID string, data inte
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Content-Type", "text/html;charset=UTF-8")
 	w.WriteHeader(http.StatusOK)
 	io.WriteString(w, page)
 }

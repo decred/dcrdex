@@ -25,6 +25,7 @@ module.exports = {
     'no-alert': 'error',
     'no-eval': 'error',
     'no-implied-eval': 'error',
-    'object-shorthand': 'off'
+    'object-shorthand': 'off',
+    'quote-props': ["error", "consistent"]
   }
 }
