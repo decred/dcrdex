@@ -1,6 +1,28 @@
 =Distributed Exchange Design Fundamentals=
 
-__TOC__
+<!-- TODO: Previously, contents was just __TOC__, but scrolling does not seem to work
+by default on github for section names with spaces. Fix scrolling with the default
+_TOC_ and revert. Here and in other files. -->
+__NOTOC__
+==Contents==
+* [[#exchange-variables|Exchange Variables]]
+** [[#global-variables|Global Variables]]
+** [[#asset-variables|Asset Variables]]
+** [[#market-variables|Market Variables]]
+** [[#bond-asset-variables|Bond Asset Variables]]
+** [[#configuration-data-request|Configuration Data Request]]
+* [[#bonds|Bonds]]
+* [[#transaction-fees|Transaction Fees]]
+* [[#epochbased-order-matching|Epoch-based Order Matching]]
+** [[#epoch-time|Epoch Time]]
+** [[#pseudorandom-order-matching|Pseudorandom Order Matching]]
+* [[#identities-based-on-public-key-infrastructure-pki-key-pairs|Identification]]
+* [[#blockchain-interaction|Blockchain Interaction]]
+* [[#adding-new-assets|Adding New Assets]]
+* [[#api-version|API Version]]
+** [[#v0|v0]]
+
+----
 
 There are several notable aspects of the DEX design that were chosen to permit
 peer-to-peer trades with the mechanics of order execution existing entirely on
@@ -15,75 +37,121 @@ This section describes each of these design aspects.
 
 ==Exchange Variables==
 
-There are a number of exchange-wide, market-specific, and asset-specific
+There are a number of exchange-wide, market-specific, asset-specific, and user specific
 variables that must be known by the client. These settings should be requested
 by the user immediately after connecting via the
-[[#Configuration_Data_Request|<code>config</code> request]].
+[[#configuration-data-request|<code>config</code> request]].
 
 ===Global Variables===
 
-The cancellation rate for a user is the ratio of their canceled order count to
-completed order count. A user's cancellation rate must remain below the configured
-[[community.mediawiki/#Rule_3_An_accounts_cancellation_rate_must_not_exceed_the_threshold|'''cancellation threshold''']]
+The '''api version''' (<code>apiver</code>) is the server's communications API
+version. Check before attempting to trade.
+
+The '''dex public key''' (<code>pubkey</code>) is the public side of a
+[[#identities-based-on-public-key-infrastructure-pki-key-pairs|key pair]]
+and uniquely identifies the dex. It can be used to verify messages from the dex.
+
+The cancel rate for a user is the ratio of their canceled order count to
+completed order count. This only applies to cancels made within two epochs of
+the order being booked. After orders have sat for one epoch, they can be canceled
+for free.  A user's cancellation rate must remain below the configured
+[[community.mediawiki/#rule-3-an-accounts-cancellation-rate-must-not-exceed-the-threshold|'''cancellation threshold''']]
 (<code>cancelmax</code>) to avoid penalty.
 
 The '''broadcast timeout''' (<code>btimeout</code>) is the amount of time a
 client has to broadcast a transaction. For the maker, the broadcast time is
 measured from the time of match notification. For the taker, timeout is measured
 from the time when the maker's swap receives its
-<code>swapconf</code><sup>th</sup> confirmation (see [[#Asset_Variables|Asset Variables]]).
+<code>swapconf</code><sup>th</sup> confirmation (see [[#asset-variables|Asset Variables]]).
 
-The user's transaction that pays the registration fee specified by the
-<code>register</code> response during [[accounts.mediawiki/#Account_Creation|account creation]]
-must have <code>regfeeconfirms</code> confirmations before the server will
-accept the user's [[accounts.mediawiki/#Step_2_Fee_Notification|fee payment notification]]
-and complete the registration process.
+The '''bin sizes''' (<code>binSizes</code>) are the bin sizes for candlestick data sets. i.e.
+"24h", "1h", "5m". Use in conjuction with <!-- TODO: create and link report notes --> epoch report notes to monitor trade history.
+
+The config has three subsections detailed more below. They are '''asset variables'''
+(<code>assets</code>), '''market variables''' (<code>markets</code>), and
+'''bond asset variables''' (<code>bondAssets</code>).
 
 ===Asset Variables===
 
-The '''lot size''' for an asset serves as both the minimum order quantity and
-the order quantity increment for limit orders and market buy orders, which are
-quantified in the market's base asset.
+The '''version''' (<code>version</code>) is the asset version. Check before trading. A higher
+version indicates updated swap configurations.
+
+Every asset is assigned a unique integer '''ID''' (<code>id</code>) that will be used to identify the
+asset in serialized structures. Whenever possible, the ID is the same as the
+BIP-0044 registered [https://github.com/satoshilabs/slips/blob/master/slip-0044.md coin type index]
+[[references.mediawiki|<nowiki>[6]</nowiki>]]. The '''symbol''' (<code>symbol</code>) is also found there.
+
+The '''swap confirmations''' (<code>swapconf</code>) is the number of confirmations required during
+settlement on the first swap transaction, before the second swap transaction is
+broadcast, as well as on the second swap transaction, before the first
+redemption is broadcast.
+
+The '''max fee rate''' (<code>maxfeerate</code>) is the greatest fee the server
+may expect the client to pay on initiation transactions. This can be used by
+the client to determine how much needs to be reserved to trade.
+
+The '''unit info''' (<code>unitinfo</code>) contains information on unit names
+and includes the following variables:
+
+* The '''atomic unit''' (<code>atomicUnit</code>) is the unit the asset package will use in communications. i.e. Sats for btc and gwei for eth.
+
+* The '''conventional denomination''' (<code>conventional</code>) is the most commonly used denomination '''unit''' (<code>unit</code>) and its '''conversion factor''' (<code>conversionFactor</code>). i.e. BTC at 1e8 Sats or ETH at 1e9 gwei.
+
+* The '''alternatives''' (<code>denominations</code>) are other possible '''unit''' and '''conversion factor''' combinations. i.e. µBTC at 1e2 Sats. They may not exist for some assets.
+
+===Market Variables===
+
+The '''name''' (<code>name</code>) is the market's name, composed of the base
+and quote asset symbols, lower case, with a hyphen inbetween. i.e. dcr_btc.
+
+The '''base''' (<code>base</code>) and '''quote''' (<code>quote</code>) are the
+BIP-0044 registered [https://github.com/satoshilabs/slips/blob/master/slip-0044.md coin type index]
+[[references.mediawiki|<nowiki>[6]</nowiki>]] of the base and quote assets that
+make up the market.
+
+The '''lot size''' (<code>lotsize</code>) for a market serves as both
+the minimum order quantity and the order quantity increment for limit orders
+and market buy orders, which are quantified in the market's base asset.
 In particular, for ''lot size''  '''''l''''', the requested ''order quantity'',
 '''''Q''''', must satisfy
 
 <!--Q = n l, n \in \{1, 2, 3, ...\}-->
 [[File:images/lot-sizes.png]]
 
-Every asset is assigned a unique integer ID that will be used to identify the
-asset in serialized structures. Whenever possible, the ID is the same as the
-BIP-0044 registered coin type index
-[https://github.com/satoshilabs/slips/blob/master/slip-0044.md &#91;6&#93;].
-
-When the asset is the quote asset, a '''price increment''' is enforced.
-The '''rate''', '''''r''''', of a limit order must be an integer multiple of the
-''price increment'', '''''p'''''.
+A trade's rate ''r'' is in units of the quote asset, and must be specified in
+integer multiples of the '''rate step''' (<code>ratestep</code>) shown here as ''p''.
 
 <!--r = n p, n \in \{1, 2, 3, ...\}-->
 [[File:images/price-increment.png]]
 
-The DEX operator specifies an on-chain transaction '''fee rate'''
-(units ''atoms/byte'') used when
-[[orders.mediawiki/#Calculating_Transaction_Fees|calculating the fees]] for
-initialization transactions.
+The '''epoch duration''' (<code>epochlen</code>) is the length of one [[#epoch-time|epoch]].
 
-The <code>swapconf</code> is the number of confirmations required during
-settlement on the first swap transaction, before the second swap transaction is
-broadcast, as well as on the second swap transaction, before the first
-redemption is broadcast.
-
-===Market Variables===
 
 If the client connects shortly after a
 [[orders.mediawiki/#Trade_Suspension|trade suspension]], it's possible that
-trading will not commence until a future epoch. The DEX's <code>config</code>
-response will indicate for each market at which epoch index trading did or will
-begin (<code>startepoch</code>), along with the epoch duration in milliseconds
-(<code>epochlen</code>), for each market.
+trading will not commence until a future epoch. This information can be found in the config response's '''market status'''
+(<code>status</code>) which inclues a few variables:
 
-The [[orders.mediawiki/#Market_Buy_Orders|market buy buffer]], which defines the
-minimum order size for a market buy order, is also in the market configuration
-returned in the server's response as <code>buybuffer</code>.
+* If the market has been or will be susupended, the '''start epoch''' (<code>start epoch</code>) will be populated for each market and contains which epoch index trading did or will begin.
+
+* A '''final epoch''' (<code>finalepoch</code>) may also be present if the dex is scheduled to go into trade suspension. If this variable is present, there may also be a '''persists''' (<code>persistbook</code>) boolean that is true when booked orders will not be purged after market suspension.
+
+The [[orders.mediawiki/#Market_Buy_Orders|'''market buy buffer''']] (<code>buybuffer</code>)
+defines the minimum order size for a market buy order.
+
+===Bond Asset Variables===
+
+The '''version''' (<code>version</code>) is the bond version. A higher version indicates updated bond construction.
+
+The '''id''' (<code>id</code>) is the bond asset's BIP-0044 registered [https://github.com/satoshilabs/slips/blob/master/slip-0044.md coin type index]
+[[references.mediawiki|<nowiki>[6]</nowiki>]]
+
+The '''confirmations''' (<code>confs</code>) are the confirmations needed in order for the bond to be
+considered valid.
+
+The '''amount''' (<code>amount</code>) is how much is required for one bond, and
+the amount posted must be divisible by this amount. The amount will be in the
+asset's [[#asset-variables|asset's]] <code>atomic unit</code>.
 
 ===Configuration Data Request===
 
@@ -96,41 +164,61 @@ respond with its current configuration.
 {|
 ! field          !! type  !! description
 |-
-| cancelmax      || float || the [[community.mediawiki/#Rule_3_An_accounts_cancellation_rate_must_not_exceed_the_threshold|cancellation threshold]]
+| cancelmax      || float || the [[community.mediawiki/#rule-3-an-accounts-cancellation-rate-must-not-exceed-the-threshold|cancellation threshold]]
 |-
 | btimeout       || int   || the broadcast timeout
 |-
-| fee            || int   || registration fee (Decred atoms)
-|-
-| regfeeconfirms || int   || required confirmations for the registration fee payment transaction
-|-
 | apiver         || int   || the server's [[#API_Version|api version]]
+|-
+| pubkey         || bytes || the server's public ecdsa key
 |-
 | binSizes       || <nowiki>[string]</nowiki>  || bin sizes for candlestick data sets (i.e. <nowiki>["24h", "1h", "5m"]</nowiki>)
 |-
-| assets         || &#91;object&#93; || list of Asset objects (definition below)
+| bondAssets     || <nowiki>map[string]object</nowiki> || map of coin ticker symbols to Bond Asset objects (definition below)
 |-
-| markets        || &#91;object&#93; || list of Market objects (definition below)
+| assets         || <nowiki>[object]</nowiki> || list of Asset objects (definition below)
+|-
+| markets        || <nowiki>[object]</nowiki> || list of Market objects (definition below)
 |}
 
 '''Asset object'''
 
 {|
-! field    !! type !! description
+! field      !! type !! description
 |-
-| symbol   || string || ticker symbol
+| version    || int   || the asset's version
 |-
-| id       || int || a unique per-asset ID
+| symbol     || string || ticker symbol
 |-
-| lotsize  || int || lot size (atoms)
+| id         || int || a unique per-asset ID
 |-
-| ratestep || int || the price rate increment (atoms)
+| maxfeerate || int || the maximum fee rate for transactions (atoms/byte)
 |-
-| feerate  || int || the fee rate for transactions (atoms/byte)
+| swapconf   || int || minimum confirmations for swap transactions
 |-
-| swapsize || int || the size of the initialization transaction (bytes)
+| unitinfo   || object || a Unit Info object (definition below)
+|}
+
+'''Unit Info object'''
+
+{|
+! field      !! type !! description
 |-
-| swapconf || int || minimum confirmations for swap transactions
+| atomicUnit  || string || the title of the smallest communicatable unit of the asset. i.e. Sats
+|-
+| conventional  || object || the most common Conversion Factor object (definition below)
+|-
+| denominations  || <nowiki>[object]</nowiki> || list of other optional Conversion Factor objects. May be empty (definition below)
+|}
+
+'''Conversion Factor object'''
+
+{|
+! field      !! type !! description
+|-
+| unit  || string || the title of the denomination. i.e. BTC
+|-
+| conversionFactor  || int || the number of atomic units in the denomination. i.e. 1e8
 |}
 
 '''Market object'''
@@ -144,31 +232,41 @@ respond with its current configuration.
 |-
 | quote       || int    || quote asset ID
 |-
-| epochlen    || int    || the [[#Epochbased_Order_Matching|epoch duration]] (milliseconds)
+| lotsize     || int    || lot size (atoms)
 |-
-| buybuffer   || float  || the [[orders.mediawiki/#Market_Buy_Orders|market buy buffer]]
+| ratestep    || int    || the price rate increment (atoms)
 |-
-| startepoch  || int    || the epoch number at which trading did or will commence. May be in the future e.g. [[orders.mediawiki/#Trade_Suspension|after maintenance]]
+| epochlen    || int    || the [[#epochbased-order-matching|epoch duration]] (milliseconds)
+|-
+| buybuffer   || float  || the [[orders.mediawiki/#market-buy-orders|market buy buffer]]
+|-
+| status      || object || a Market Status object (definition below)
+|}
+
+'''Market Status object'''
+
+{|
+! field      !! type !! description
+|-
+| startepoch  || int    || the epoch number at which trading did or will commence. May be in the future e.g. [[orders.mediawiki/#trade-suspension|after maintenance]]
 |-
 | finalepoch  || int    || the epoch number at which trading will be suspended. Only present when a suspension is scheduled
 |-
 | persistbook || bool   || whether or not booked orders will be persisted through a scheduled suspension. Only present when a suspension is scheduled
 |}
 
-==Fees==
+==Bonds==
 
 The DEX collects no trading fees.
 Collecting fees from trades executed via atomic swaps (where the server
 is never in control of funds and settlement occurs directly on-chain) would
 add considerable complexity to the swap process and incentivize DEX operators to
 facilitate wash trading.
-Instead, a one-time fee is collected by the pool during registration.
-Registration fees discourage certain spam attacks, enable punitive actions when
-[[community.mediawiki/#Rules_of_Community_Conduct|conduct rules]] are violated, and help to cover
-DEX operating expenses.
-Registration fees will be configurable by the exchange operator.
+Instead, time locked bonds are considered during registration. <!-- TODO: Create and link to bond specifics. -->
+Locked funds discourage certain spam attacks and enable punitive actions when
+[[community.mediawiki/#Rules_of_Community_Conduct|conduct rules]] are violated.
 
-===Transaction Fees===
+==Transaction Fees==
 
 The clients will cover on-chain transaction fees at a minimum fee rate set by
 the DEX operator.
@@ -183,9 +281,9 @@ rate.
 
 Total on-chain fees associated with an order will increase as the number of swap
 transactions required to settle the order increases. Maximum fees paid
-[[orders.mediawiki/#Calculating_Transaction_Fees|vary linearly with order size]], but the actual
+[[orders.mediawiki/#calculating-transaction-fees|vary linearly with order size]], but the actual
 fees realized can be significantly less than the maximum.
-See the [[atomic.mediawiki/#Atomic_Settlement|atomic settlement]] section for examples of simple
+See the [[atomic.mediawiki/#atomic-settlement|atomic settlement]] section for examples of simple
 and complex matches and how that affects the swap transaction sizes.
 
 Fee rates can vary greatly between assets.
@@ -195,8 +293,6 @@ For high-fee assets, the DEX operator must find a balance between lower fees,
 which are preferable from an accounting standpoint, and higher fees, which can
 decrease settlement time by increasing the speed at which transactions are
 mined.
-
-See also: [[orders.mediawiki/#Calculating_Transaction_Fees|Calculating Transaction Fees]]
 
 ==Epoch-based Order Matching==
 
@@ -232,10 +328,10 @@ client clocks are synchronized within acceptable tolerances.
 
 When the epoch ends, a match cycle begins. The preimage for each order is
 collected and the orders are sorted lexicographically by their
-[[orders.mediawiki/#Order_ID|order IDs]].
+[[orders.mediawiki/#order-id|order IDs]].
 
 A random seed is derived from the Blake-256 hash of the concatenated
-[[orders.mediawiki/#Order_Commitment|order preimages]].
+[[orders.mediawiki/#order-commitment|order preimages]].
 
 <!--H_{seed} = \text{\footnotesize BLAKE256}(p_1 || p_2 || ... || p_N)-->
 [[File:images/seed-eq.png]]
@@ -290,7 +386,8 @@ For the special case of an epoch with no orders, the checksum will be null.
 
 ==Identities based on Public Key Infrastructure (PKI) Key Pairs==
 
-The server and the clients are identified and authenticated using public keys,
+The server and the clients are identified and authenticated using [https://en.wikipedia.org/wiki/Elliptic_Curve_Digital_Signature_Algorithm ECDSA]
+[[references.mediawiki|<nowiki>[7]</nowiki>]] public keys,
 with matching private keys used to sign and authorize orders and other messages.
 Establishing client identity with public keys keeps the notion of client
 identity to a minimum, while providing a number of other security benefits
@@ -312,7 +409,7 @@ Decred blockchain may be useful for establishing a reputation system.
 
 '''Clients''' need wallets that support atomic swaps and the ability to
 broadcast transactions to each of the blockchain networks involved in
-[[atomic.mediawiki/#Atomic_Settlement|the swap]].
+[[atomic.mediawiki/#atomic-settlement|the swap]].
 
 '''DEX operators''' need access to trusted full nodes for each of the
 assets supported.
@@ -335,7 +432,6 @@ There are then two ways to import the asset backend into the server software.
 With the exception of a small handful of assets which will be implemented during
 initial phases of DEX development, it is expected that development communities
 will release their own appropriately vetted plugins.
-
 
 ==API Version==
 

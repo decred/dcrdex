@@ -1239,8 +1239,6 @@ type Asset struct {
 	Symbol     string       `json:"symbol"`
 	ID         uint32       `json:"id"`
 	Version    uint32       `json:"version"`
-	LotSize    uint64       `json:"lotsize,omitempty"`
-	RateStep   uint64       `json:"ratestep,omitempty"`
 	MaxFeeRate uint64       `json:"maxfeerate"`
 	SwapConf   uint16       `json:"swapconf"`
 	UnitInfo   dex.UnitInfo `json:"unitinfo"`
@@ -1251,6 +1249,11 @@ type Asset struct {
 	SwapSize     uint64 `json:"swapsize"`
 	SwapSizeBase uint64 `json:"swapsizebase"`
 	RedeemSize   uint64 `json:"redeemsize"`
+
+	// The Asset LotSize and RateStep fields are DEPRECATED. They are now
+	// market specific.
+	LotSize  uint64 `json:"lotsize,omitempty"`
+	RateStep uint64 `json:"ratestep,omitempty"`
 }
 
 // FeeAsset describes an asset for which registration fees are supported.
