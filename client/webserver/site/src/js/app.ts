@@ -167,7 +167,7 @@ export default class Application {
     })
     // The main element is the interchangeable part of the page that doesn't
     // include the header. Main should define a data-handler attribute
-    // associated with  one of the available constructors.
+    // associated with one of the available constructors.
     this.main = idel(document, 'main')
     const handler = this.main.dataset.handler
     // Don't fetch the user until we know what page we're on.

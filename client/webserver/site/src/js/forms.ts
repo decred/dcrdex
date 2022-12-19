@@ -22,7 +22,8 @@ import {
   WalletStateNote,
   WalletInfo,
   Token,
-  WalletCreationNote
+  WalletCreationNote,
+  CoreNote
 } from './registry'
 import { XYRangeHandler } from './opts'
 
@@ -1573,6 +1574,16 @@ export class LoginForm {
     this.headerTxt = page.header.textContent || ''
 
     bind(form, page.submit, () => { this.submit() })
+
+    app().registerNoteFeeder({
+      login: (note: CoreNote) => { this.handleLoginNote(note) }
+    })
+  }
+
+  handleLoginNote (n: CoreNote) {
+    if (n.details === '') return
+    const loginMsg = Doc.idel(this.form, 'loaderMsg')
+    if (loginMsg) loginMsg.textContent = n.details
   }
 
   focus () {
