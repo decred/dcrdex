@@ -507,3 +507,17 @@ span.token-aware-symbol sup {
     }
   }
 }
+
+.form-check-input[type=checkbox] {
+  background-color: #ebebeb;
+
+  &:checked {
+    background-color: #3095db;
+  }
+}
+
+.form-check-label {
+  &:hover {
+    font-weight: bold;
+  }
+}
