@@ -220,7 +220,7 @@ type AccountInfo struct {
 	LegacyFeeCoin    []byte
 	LegacyFeeAssetID uint32
 	// LegacyFeePaid should be set on retrieval if there is an AccountProof set.
-	LegacyFeePaid bool // DEPRECATED LegacyFeeConfirmed
+	LegacyFeePaid bool // DEPRECATED
 }
 
 // Registered indicates if the account should exist server-side. This is when

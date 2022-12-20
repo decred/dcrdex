@@ -220,8 +220,26 @@ func (c *Core) UpdateCert(host string, cert []byte) error {
 	}
 
 	acct, err := c.db.Account(host)
+	var viewOnlyConn bool
+	accountInfo, err := c.db.Account(host)
 	if err != nil {
-		return err
+		if err != db.ErrAcctNotFound {
+			return err
+		}
+
+		// Account not found in db may be because the dex is view-only.
+		// If so, retrieve the account from the view-only connection.
+		if dc.acct.isRegistered() { // not connected or not view-only
+			return err
+		}
+
+		viewOnlyConn = true
+		accountInfo = &db.AccountInfo{
+			Host: dc.acct.host,
+			// Cert is updated below
+			DEXPubKey: dc.acct.dexPubKey,
+			// BondAsset
+		}
 	}
 
 	// Ensure user provides a new cert.
@@ -254,9 +272,11 @@ func (c *Core) UpdateCert(host string, cert []byte) error {
 		return fmt.Errorf("failed to connect using new cert (will attempt to restore old connection): %v", err)
 	}
 
-	err = c.db.UpdateAccountInfo(acct)
-	if err != nil {
-		return fmt.Errorf("failed to update account info: %w", err)
+	if !viewOnlyConn {
+		err = c.db.UpdateAccountInfo(accountInfo)
+		if err != nil {
+			return fmt.Errorf("failed to update account info: %w", err)
+		}
 	}
 
 	c.addDexConnection(dc)
@@ -320,14 +340,16 @@ func (c *Core) UpdateDEXHost(oldHost, newHost string, appPW []byte, certI interf
 
 	c.disconnectDEX(oldDc)
 
-	_, err = c.discoverAccount(newDc, crypter)
-	if err != nil {
-		return nil, err
-	}
+	if oldDc.acct.isRegistered() {
+		_, err = c.discoverAccount(newDc, crypter)
+		if err != nil {
+			return nil, err
+		}
 
-	err = c.db.DisableAccount(oldDc.acct.host)
-	if err != nil {
-		return nil, newError(accountDisableErr, "error disabling account: %w", err)
+		err = c.db.DisableAccount(oldDc.acct.host)
+		if err != nil {
+			return nil, newError(accountDisableErr, "error disabling account: %w", err)
+		}
 	}
 
 	updatedHost = true

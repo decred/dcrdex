@@ -83,8 +83,10 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 // registerTmplData is template data for the /register page.
 type registerTmplData struct {
 	CommonArguments
-	Initialized    bool
-	Authed         bool
+	Initialized bool
+	Authed      bool
+	// Host is optional. If provided, the register page will be rendered to only
+	// permit registering with the specified server.
 	Host           string
 	KnownExchanges []string
 }
