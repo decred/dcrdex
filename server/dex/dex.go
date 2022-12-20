@@ -73,6 +73,7 @@ type RPCConfig = comms.RPCConfig
 // DexConf is the configuration data required to create a new DEX.
 type DexConf struct {
 	DataDir           string
+	Logo              []byte // optional
 	LogBackend        *dex.LoggerMaker
 	Markets           []*dex.MarketInfo
 	Assets            []*AssetConf
@@ -128,6 +129,9 @@ type DEX struct {
 	bookRouter  *market.BookRouter
 	subsystems  []subsystem
 	server      *comms.Server
+	// Logo is an optional custom logo that can be be provided by server
+	// operators.
+	logo []byte
 
 	configRespMtx sync.RWMutex
 	configResp    *configResponse
@@ -238,6 +242,12 @@ func (dm *DEX) handleDEXConfig(interface{}) (interface{}, error) {
 	dm.configRespMtx.RLock()
 	defer dm.configRespMtx.RUnlock()
 	return dm.configResp.configEnc, nil
+}
+
+func (dm *DEX) handleDEXLogo(interface{}) (interface{}, error) {
+	dm.configRespMtx.RLock()
+	defer dm.configRespMtx.RUnlock()
+	return dm.logo, nil
 }
 
 // FeeCoiner describes a type that can check a transaction output, namely a fee
@@ -843,10 +853,12 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		bookRouter:  bookRouter,
 		subsystems:  subsystems,
 		server:      server,
+		logo:        cfg.Logo,
 		configResp:  cfgResp,
 	}
 
 	comms.RegisterHTTP(msgjson.ConfigRoute, dexMgr.handleDEXConfig)
+	comms.RegisterHTTP(msgjson.LogoRoute, dexMgr.handleDEXLogo)
 
 	startSubSys("Comms Server", server)
 

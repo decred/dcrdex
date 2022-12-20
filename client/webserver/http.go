@@ -514,3 +514,42 @@ func (s *WebServer) orderReader(ord *core.Order) *core.OrderReader {
 		QuoteFeeAssetSymbol: quoteFeeAssetSymbol,
 	}
 }
+
+// handleGetDexLogo is the handler for the '/dexlogo/{host}' request. It
+// downloads and returns the logo for an exchange.
+func (s *WebServer) handleGetDexLogo(w http.ResponseWriter, r *http.Request) {
+	var host string
+	var err error
+
+	// Return a dummy logo if anything went wrong.
+	serveDummyLogo := func() {
+		http.Redirect(w, r, dummyLogoURL(host), http.StatusSeeOther)
+	}
+
+	if host, err = getHostCtx(r); err != nil {
+		serveDummyLogo()
+		return
+	}
+
+	logoBytes := s.core.DEXLogo(host)
+	if len(logoBytes) == 0 {
+		serveDummyLogo()
+		return
+	}
+
+	// Validate logo image type and use a fallback if the image is not an
+	// expected file type.
+	logoType := http.DetectContentType(logoBytes)
+	switch logoType {
+	case "image/jpeg", "image/png", "image/jpg":
+	default:
+		serveDummyLogo()
+		return
+	}
+
+	// Respond with dex logo.
+	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", logoType)
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(logoBytes)))
+	w.Write(logoBytes)
+}

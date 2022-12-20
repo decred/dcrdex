@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/order"
@@ -187,4 +188,16 @@ func getOrderIDCtx(r *http.Request) (dex.Bytes, error) {
 		return nil, fmt.Errorf("")
 	}
 	return oidB, nil
+}
+
+// CacheControl creates a new middleware to set the HTTP response header with
+// "Cache-Control: max-age=maxAge" where maxAge is in seconds.
+func CacheControl(maxAge int64) func(http.Handler) http.Handler {
+	cacheCtrl := fmt.Sprintf("max-age=%d" + strconv.FormatInt(maxAge, 10))
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", cacheCtrl)
+			next.ServeHTTP(w, r)
+		})
+	}
 }

@@ -155,6 +155,7 @@ type clientCore interface {
 	AddWalletPeer(assetID uint32, addr string) error
 	RemoveWalletPeer(assetID uint32, addr string) error
 	Notifications(n int) ([]*db.Notification, error)
+	DEXLogo(host string) []byte
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -357,6 +358,7 @@ func New(cfg *Config) (*WebServer, error) {
 					webAuth.Get(homeRoute, s.handleHome)
 					webAuth.Get(marketsRoute, s.handleMarkets)
 					webAuth.With(dexHostCtx).Get("/dexsettings/{host}", s.handleDexSettings)
+					webAuth.With(CacheControl(86400 /* cache for a day */), dexHostCtx).Get("/dexlogo/{host}", s.handleGetDexLogo)
 					if s.experimental {
 						webAuth.Get(marketMakerRoute, s.handleMarketMaker)
 					}

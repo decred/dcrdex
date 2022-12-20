@@ -275,7 +275,9 @@ func (c *TCore) RemoveWalletPeer(assetID uint32, address string) error {
 func (c *TCore) Notifications(n int) ([]*db.Notification, error) {
 	return c.notes, c.notesErr
 }
-
+func (c *TCore) DEXLogo(host string) []byte {
+	return nil
+}
 func (c *TCore) CreateBot(pw []byte, botType string, pgm *core.MakerProgram) (uint64, error) {
 	return 1, nil
 }

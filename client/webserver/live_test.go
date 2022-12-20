@@ -1918,6 +1918,9 @@ func (c *TCore) AddWalletPeer(assetID uint32, address string) error {
 func (c *TCore) RemoveWalletPeer(assetID uint32, address string) error {
 	return nil
 }
+func (c *TCore) DEXLogo(host string) []byte {
+	return nil
+}
 
 var botCounter uint64
 

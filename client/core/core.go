@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -1404,6 +1405,11 @@ type Config struct {
 	UnlockCoinsOnLogin bool
 }
 
+type cachedLogo struct {
+	lastRefreshed time.Time
+	logo          []byte
+}
+
 // Core is the core client application. Core manages DEX connections, wallets,
 // database access, match negotiation and more.
 type Core struct {
@@ -1470,6 +1476,9 @@ type Core struct {
 			prices map[string]*stampedPrice
 		}
 	}
+
+	dexLogoMtx   sync.Mutex
+	dexLogoCache map[string]*cachedLogo
 }
 
 // New is the constructor for a new Core.
@@ -1568,6 +1577,8 @@ func New(cfg *Config) (*Core, error) {
 
 		fiatRateSources: make(map[string]*commonRateSource),
 		pendingWallets:  make(map[uint32]bool),
+
+		dexLogoCache: make(map[string]*cachedLogo),
 	}
 	c.mm.bots = make(map[uint64]*makerBot)
 	c.mm.cache.prices = make(map[string]*stampedPrice)
@@ -10012,4 +10023,110 @@ func (c *Core) saveDisabledRateSources() {
 	if err != nil {
 		c.log.Errorf("Unable to save disabled fiat rate source to database: %v", err)
 	}
+}
+
+// DEXLogo returns a DEX's logo.
+func (c *Core) DEXLogo(host string) []byte {
+	c.dexLogoMtx.Lock()
+	defer c.dexLogoMtx.Unlock()
+	// Check if we have cached the DEX logo.
+	cl, found := c.dexLogoCache[host]
+	if found && time.Since(cl.lastRefreshed) < 24*time.Hour {
+		return cl.logo
+	}
+
+	logoBytes := c.fetchDEXLogo(host)
+	c.dexLogoCache[host] = &cachedLogo{
+		lastRefreshed: time.Now(),
+		logo:          logoBytes,
+	}
+	return logoBytes
+}
+
+// fetchDEXLogo downloads and returns the logo for an exchange.
+func (c *Core) fetchDEXLogo(host string) []byte {
+	const (
+		funcName    = "fetchDEXLogo"
+		dexLogoPath = "api/logo"
+	)
+
+	var cert []byte
+	c.connMtx.RLock()
+	dc, found := c.conns[host]
+	c.connMtx.RUnlock()
+	if found {
+		cert = dc.acct.cert
+	} else {
+		cert = CertStore[c.Network()][host]
+	}
+
+	scheme := "https"
+	if len(cert) == 0 {
+		scheme = "http"
+	}
+
+	var u url.URL
+	u.Host = host
+	u.Scheme = scheme
+	u.Path = dexLogoPath
+
+	// The *tls.Config returned will be nil and no error if cert is empty.
+	tlsConfig, err := comms.TLSConfig(u.String(), cert)
+	if err != nil {
+		c.log.Errorf("%s: comms.TLSConfig error: %v", funcName, err)
+		return nil
+	}
+
+	transport := &http.Transport{
+		TLSClientConfig: tlsConfig,
+	}
+
+	isOnionHost := isOnionHost(host)
+	if scheme == "http" && !isOnionHost {
+		c.log.Errorf("%s: a TLS connection is required when not using a hidden service", funcName)
+		return nil
+	}
+
+	if isOnionHost && c.cfg.Onion == "" {
+		c.log.Errorf("%s: or must be configured for .onion addresses", funcName)
+		return nil
+	}
+
+	if isOnionHost || c.cfg.TorProxy != "" {
+		proxyAddr := c.cfg.TorProxy
+		if isOnionHost {
+			proxyAddr = c.cfg.Onion
+		}
+
+		proxy := &socks.Proxy{
+			Addr:         proxyAddr,
+			TorIsolation: c.cfg.TorIsolation,
+		}
+		transport.DialContext = proxy.DialContext
+	}
+
+	client := &http.Client{
+		Timeout:   5 * time.Second,
+		Transport: transport,
+	}
+
+	res, err := client.Get(u.String())
+	if err != nil {
+		c.log.Errorf("%s: http.Client.Get error %v", funcName, err)
+		return nil
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		c.log.Errorf("%s: received unexpected response: %s", funcName, res.Status)
+		return nil
+	}
+
+	buf := new(bytes.Buffer)
+	if _, err = buf.ReadFrom(res.Body); err != nil {
+		c.log.Errorf("%s: error reading response body: %v", funcName, err)
+		return nil
+	}
+
+	return buf.Bytes()
 }

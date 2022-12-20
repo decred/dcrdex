@@ -35,7 +35,16 @@
       <div id="exchanges" {{if eq (len .UserInfo.Exchanges) 0}} class="d-hide"{{end}}>
         <h5>[[[registered dexes]]]</h5>
         {{range $host, $xc := .UserInfo.Exchanges}}
-          <a href="/dexsettings/{{$host}}"><button class="bg2 selected"><div class=text-break>{{$host}}<span class="dex-settings-icon ico-settings"></span></div></button></a>
+          <a href="/dexsettings/{{$host}}">
+            <button class="bg2 selected">
+              <div class=text-break>
+                <img class="micro-icon m-1" src="/dexlogo/{{$host}}">
+                {{$host}}
+                <span class="dex-settings-icon ico-settings">
+                </span>
+              </div>
+            </button>
+          </a>
         {{end}}
       </div>
       <br>

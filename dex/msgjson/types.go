@@ -220,6 +220,8 @@ const (
 	// CandlesRoute is the HTTP request to get the set of candlesticks
 	// representing market activity history.
 	CandlesRoute = "candles"
+	// LogoRoute is the HTTP request to fetch server's custom logo.
+	LogoRoute = "logo"
 )
 
 const errNullRespPayload = dex.ErrorKind("null response payload")

@@ -270,7 +270,7 @@ func TestMain(m *testing.M) {
 	testCtx, shutdown = context.WithCancel(context.Background())
 	defer shutdown()
 	// Register dummy handlers for the HTTP routes.
-	for _, route := range []string{msgjson.ConfigRoute, msgjson.SpotsRoute, msgjson.CandlesRoute, msgjson.OrderBookRoute} {
+	for _, route := range []string{msgjson.ConfigRoute, msgjson.SpotsRoute, msgjson.CandlesRoute, msgjson.OrderBookRoute, msgjson.LogoRoute} {
 		RegisterHTTP(route, func(interface{}) (interface{}, error) { return nil, nil })
 	}
 	UseLogger(tLogger)

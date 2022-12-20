@@ -244,6 +244,7 @@ func newRouteLimiter() *routeLimiter {
 			msgjson.ConfigRoute:  infoLimiter,
 			msgjson.SpotsRoute:   infoLimiter,
 			msgjson.CandlesRoute: infoLimiter,
+			msgjson.LogoRoute:    infoLimiter,
 		},
 	}
 }
@@ -448,6 +449,31 @@ func (s *Server) Run(ctx context.Context) {
 		rr.Use(s.limitRate)
 		rr.Get("/config", routeHandler(msgjson.ConfigRoute))
 		rr.Get("/spots", routeHandler(msgjson.SpotsRoute))
+		rr.Get("/logo", func(w http.ResponseWriter, r *http.Request) {
+			handler := httpRoutes[msgjson.LogoRoute]
+			if handler == nil {
+				log.Critical("No handler for %s", msgjson.LogoRoute)
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(http.StatusText(http.StatusInternalServerError)))
+				return
+			}
+
+			logo, err := handler(r.Context().Value(ctxThing))
+			if err != nil { // err will always be nil, but this might change.
+				http.NotFound(w, r)
+				return
+			}
+
+			if logo == nil {
+				http.NotFound(w, r)
+				return
+			}
+
+			logoBytes := logo.([]byte)
+			w.Header().Set("Content-Type", http.DetectContentType(logoBytes))
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(logoBytes)))
+			w.Write(logoBytes)
+		})
 		rr.With(candleParamsParser).Get("/candles/{baseSymbol}/{quoteSymbol}/{binSize}", routeHandler(msgjson.CandlesRoute))
 		rr.With(candleParamsParser).Get("/candles/{baseSymbol}/{quoteSymbol}/{binSize}/{count}", routeHandler(msgjson.CandlesRoute))
 		rr.With(orderBookParamsParser).Get("/orderbook/{baseSymbol}/{quoteSymbol}", routeHandler(msgjson.OrderBookRoute))

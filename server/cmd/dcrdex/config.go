@@ -39,6 +39,7 @@ const (
 	defaultLogLevel            = "debug"
 	defaultLogDirname          = "logs"
 	defaultMarketsConfFilename = "markets.json"
+	defaultLogoName            = "logo.png"
 	defaultMaxLogZips          = 128
 	defaultPGHost              = "127.0.0.1:5432"
 	defaultPGUser              = "dcrdex"
@@ -69,6 +70,7 @@ type procOpts struct {
 // dexConf is the data that is required to setup the dex.
 type dexConf struct {
 	DataDir           string
+	Logo              []byte // optional
 	Network           dex.Network
 	DBName            string
 	DBUser            string
@@ -109,6 +111,7 @@ type flagsData struct {
 	ConfigFile  string `short:"C" long:"configfile" description:"Path to configuration file."`
 	DataDir     string `short:"b" long:"datadir" description:"Directory to store data."`
 	LogDir      string `long:"logdir" description:"Directory to log output."`
+	Logo        string `long:"logo" description:"Path to server's custom logo."`
 	DebugLevel  string `short:"d" long:"debuglevel" description:"Logging level {trace, debug, info, warn, error, critical}."`
 	LocalLogs   bool   `long:"loglocal" description:"Use local time zone time stamps in log entries."`
 	MaxLogZips  int    `long:"maxlogzips" description:"The number of zipped log files created by the log rotator to be retained. Setting to 0 will keep all."`
@@ -251,7 +254,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 	// Default config
 	cfg := flagsData{
 		AppDataDir: defaultAppDataDir,
-		// Defaults for ConfigFile, LogDir, and DataDir are set relative to
+		// Defaults for ConfigFile, LogDir, DataDir and Logo are set relative to
 		// AppDataDir. They are not to be set here.
 		MaxLogZips:       defaultMaxLogZips,
 		RPCCert:          defaultRPCCertFilename,
@@ -414,6 +417,23 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		cfg.LogDir = filepath.Join(cfg.AppDataDir, cfg.LogDir)
 	}
 
+	if cfg.Logo == "" {
+		cfg.Logo = filepath.Join(cfg.AppDataDir, defaultLogoName)
+	} else if !filepath.IsAbs(cfg.Logo) {
+		cfg.Logo = filepath.Join(cfg.AppDataDir, cfg.Logo)
+	}
+
+	// Attempt to fetch server logo. If the logo does not exists, we will ignore
+	// since clients will use a fallback.
+	logo, err := os.ReadFile(cfg.Logo)
+	if err != nil && !os.IsNotExist(err) {
+		return loadConfigError(err)
+	}
+
+	if len(logo) == 0 {
+		log.Info("Server's custom logo is not set. See https://github.com/decred/dcrdex/blob/master/docs/wiki/Server-Admin.md#logo-image")
+	}
+
 	// Append the network type to the data directory so it is "namespaced" per
 	// network.  In addition to the block database, there are other pieces of
 	// data that are saved to disk such as address manager state. All data is
@@ -533,6 +553,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 
 	dexCfg := &dexConf{
 		DataDir:           cfg.DataDir,
+		Logo:              logo,
 		Network:           network,
 		DBName:            cfg.PGDBName,
 		DBHost:            dbHost,

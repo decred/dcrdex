@@ -2,6 +2,24 @@
 
 ## Exchange Settings
 
+### Logo Image
+
+Server operators can optionally provide their preferred logo image in their DEX
+config file.
+
+#### ~/.dcrdex/dcrdex.conf
+
+```ini
+logo=path/to/logo.png
+```
+
+OR via CLI using the `--logo` flag, e.g `dcrdex --logo path/to/logo.png`.
+
+ **NOTE**: If `path/to/logo.png` is not an absolute path, It will be interpreted
+as subpath of the dex data dir. Logo image should be preferably encoded as a
+`png`, `jpg`, or `jpeg` file and path to the custom logo must indicate the file
+type (e.g `.png`,`.jpg`,`.jpeg`).
+
 ### Admin HTTP JSON API
 
 See <https://github.com/decred/dcrdex/blob/6693bc57283d4cf5b451778091aa1c1b20cb9187/server/admin/server.go#L145>
