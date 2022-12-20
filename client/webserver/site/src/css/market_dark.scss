@@ -17,29 +17,9 @@ body.dark {
       background-color: #141488;
     }
 
-    .markettab.selected {
-      background-color: #fff1;
-    }
-
     .market-bal {
       border: 1px solid $dark_border_color;
       border-radius: 3px;
-    }
-
-    .brdrleft {
-      border-left: 1px solid $dark_border_color;
-    }
-
-    .brdrright {
-      border-right: 1px solid $dark_border_color;
-    }
-
-    .brdrtop {
-      border-top: 1px solid $dark_border_color;
-    }
-
-    .brdrbottom {
-      border-bottom: 1px solid $dark_border_color;
     }
 
     .chart-legend {
@@ -97,22 +77,39 @@ body.dark {
     #orderForm {
       color: #a1a1a1;
 
+      input[type=number] {
+        background-color: black;
+      }
+
+      #limitBttnBox {
+        border-right-color: $dark_border_color;
+      }
+
+      #marketBttnBox {
+        border-left-color: $dark_border_color;
+      }
+
       button {
-        color: #aaa;
-      }
+        &.limit-market-order-type {
+          color: #a1a1a1;
 
-      button:hover,
-      button.selected {
-        color: #eee;
-      }
+          &.selected {
+            color: #eee;
+          }
 
-      button.submit {
-        background-color: #0b5831;
-        color: #eee;
-      }
+          &:hover {
+            color: #eee;
+          }
+        }
 
-      button.selected,
-      button.submit {
+        &.switch-buy-sell {
+          color: #a1a1a1;
+
+          &:hover {
+            color: #eee;
+          }
+        }
+
         &.buygreen-bg {
           background-color: #29bb7799;
         }
@@ -120,6 +117,17 @@ body.dark {
         &.sellred-bg {
           background-color: #e95e5e99;
         }
+
+        &.submit {
+          &:hover {
+            color: #eee;
+          }
+        }
+      }
+
+      #maxOrd,
+      #orderPreview {
+        color: $font-color-dark;
       }
     }
 

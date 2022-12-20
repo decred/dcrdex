@@ -182,6 +182,8 @@ export default class MarketsPage extends BasePage {
   recentMatchesSortDirection: 1 | -1
   stats: [StatsDisplay, StatsDisplay]
   loadingAnimations: { candles?: Wave, depth?: Wave }
+  isSell: boolean
+  isLimit: boolean
 
   constructor (main: HTMLElement, data: any) {
     super()
@@ -263,9 +265,15 @@ export default class MarketsPage extends BasePage {
     this.quoteUnits = main.querySelectorAll('[data-unit=quote]')
     this.baseUnits = main.querySelectorAll('[data-unit=base]')
 
+    // When /markets page loads we are displaying limit-buy-order form.
+    this.isLimit = true
+    this.isSell = false
+
     // Buttons to set order type and side.
     bind(page.buyBttn, 'click', () => {
-      swapBttns(page.sellBttn, page.buyBttn)
+      this.isSell = false
+      Doc.hide(page.buyBttn)
+      Doc.show(page.sellBttn)
       page.submitBttn.classList.remove(sellBtnClass)
       page.submitBttn.classList.add(buyBtnClass)
       page.maxLbl.textContent = intl.prep(intl.ID_BUY)
@@ -274,7 +282,9 @@ export default class MarketsPage extends BasePage {
       this.drawChartLines()
     })
     bind(page.sellBttn, 'click', () => {
-      swapBttns(page.buyBttn, page.sellBttn)
+      this.isSell = true
+      Doc.hide(page.sellBttn)
+      Doc.show(page.buyBttn)
       page.submitBttn.classList.add(sellBtnClass)
       page.submitBttn.classList.remove(buyBtnClass)
       page.maxLbl.textContent = intl.prep(intl.ID_SELL)
@@ -283,16 +293,18 @@ export default class MarketsPage extends BasePage {
       this.drawChartLines()
     })
     bind(page.limitBttn, 'click', () => {
+      this.isLimit = true
       swapBttns(page.marketBttn, page.limitBttn)
       this.setOrderVisibility()
       if (!page.rateField.value) return
       this.depthLines.input = [{
         rate: parseFloat(page.rateField.value || '0'),
-        color: this.isSell() ? this.depthChart.theme.sellLine : this.depthChart.theme.buyLine
+        color: this.isSell ? this.depthChart.theme.sellLine : this.depthChart.theme.buyLine
       }]
       this.drawChartLines()
     })
     bind(page.marketBttn, 'click', () => {
+      this.isLimit = false
       swapBttns(page.limitBttn, page.marketBttn)
       this.setOrderVisibility()
       this.setMarketBuyOrderEstimate()
@@ -300,7 +312,7 @@ export default class MarketsPage extends BasePage {
       this.drawChartLines()
     })
     bind(page.maxOrd, 'click', () => {
-      if (this.isSell()) {
+      if (this.isSell) {
         const maxSell = this.market.maxSell
         if (!maxSell) return
         page.lotField.value = String(maxSell.swap.lots)
@@ -527,16 +539,6 @@ export default class MarketsPage extends BasePage {
     anis.depth = new Wave(page.depthChart, { message: intl.prep(intl.ID_DEPTH_LOADING) })
   }
 
-  /* isSell is true if the user has selected sell in the order options. */
-  isSell () {
-    return this.page.sellBttn.classList.contains('selected')
-  }
-
-  /* isLimit is true if the user has selected the "limit order" tab. */
-  isLimit () {
-    return this.page.limitBttn.classList.contains('selected')
-  }
-
   /* hasFeePending is true if the fee payment is pending */
   hasFeePending () {
     return !!this.market.dex.pendingFee
@@ -600,13 +602,13 @@ export default class MarketsPage extends BasePage {
    */
   setOrderVisibility () {
     const page = this.page
-    if (this.isLimit()) {
+    if (this.isLimit) {
       Doc.show(page.priceBox, page.tifBox, page.qtyBox, page.maxBox)
       Doc.hide(page.mktBuyBox)
       this.previewQuoteAmt(true)
     } else {
       Doc.hide(page.tifBox, page.maxBox, page.priceBox)
-      if (this.isSell()) {
+      if (this.isSell) {
         Doc.hide(page.mktBuyBox)
         Doc.show(page.qtyBox)
         this.previewQuoteAmt(true)
@@ -716,7 +718,7 @@ export default class MarketsPage extends BasePage {
   }
 
   setOrderBttnText () {
-    if (this.isSell()) {
+    if (this.isSell) {
       this.page.submitBttn.textContent = intl.prep(intl.ID_SET_BUTTON_SELL, { asset: Doc.shortSymbol(this.market.baseCfg.symbol) })
     } else this.page.submitBttn.textContent = intl.prep(intl.ID_SET_BUTTON_BUY, { asset: Doc.shortSymbol(this.market.baseCfg.symbol) })
   }
@@ -893,8 +895,8 @@ export default class MarketsPage extends BasePage {
   parseOrder (): TradeForm {
     const page = this.page
     let qtyField = page.qtyField
-    const limit = this.isLimit()
-    const sell = this.isSell()
+    const limit = this.isLimit
+    const sell = this.isSell
     const market = this.market
     let qtyConv = market.baseUnitInfo.conventional.conversionFactor
     if (!limit && !sell) {
@@ -928,7 +930,7 @@ export default class MarketsPage extends BasePage {
       else this.preBuy()
     }
     this.depthLines.input = []
-    if (adjusted && this.isLimit()) {
+    if (adjusted && this.isLimit) {
       this.depthLines.input = [{
         rate: order.rate / this.market.rateConversionFactor,
         color: order.sell ? this.depthChart.theme.sellLine : this.depthChart.theme.buyLine
@@ -945,7 +947,7 @@ export default class MarketsPage extends BasePage {
     const total = Doc.formatCoinValue(quoteQty, this.market.quoteUnitInfo)
 
     page.orderPreview.textContent = intl.prep(intl.ID_ORDER_PREVIEW, { total, asset: quoteAsset.symbol.toUpperCase() })
-    if (this.isSell()) this.preSell()
+    if (this.isSell) this.preSell()
     else this.preBuy()
   }
 
@@ -1051,7 +1053,7 @@ export default class MarketsPage extends BasePage {
       this.maxLoaded = null
     }
     Doc.show(page.maxOrd, page.maxLotBox, page.maxAboveZero)
-    const sell = this.isSell()
+    const sell = this.isSell
 
     let lots = 0
     if (maxOrder) lots = maxOrder.lots
@@ -2008,12 +2010,12 @@ export default class MarketsPage extends BasePage {
         // If we're not showing the max order panel yet, don't do anything.
         if (!mkt.maxSell) break
         if (typeof mkt.sellBalance === 'number' && mkt.sellBalance !== avail) mkt.maxSell = null
-        if (this.isSell()) this.preSell()
+        if (this.isSell) this.preSell()
         break
       case mkt.quoteCfg.id:
         if (!Object.keys(mkt.maxBuys).length) break
         if (typeof mkt.buyBalance === 'number' && mkt.buyBalance !== avail) mkt.maxBuys = {}
-        if (!this.isSell()) this.preBuy()
+        if (!this.isSell) this.preBuy()
     }
   }
 

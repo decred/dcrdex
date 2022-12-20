@@ -51,9 +51,15 @@ div[data-handler=markets] {
     #orderForm {
       input[type=number] {
         height: 30px;
-        border: 1px solid #6a6a6a;
         border-radius: 0;
         font-size: 14px;
+        font-weight: bold;
+        background-color: #ebebeb;
+
+        &:hover,
+        &.selected {
+          border: 1px solid #6a6a6a;
+        }
       }
 
       input:focus {
@@ -70,23 +76,51 @@ div[data-handler=markets] {
         white-space: nowrap;
       }
 
+      #limitBttnBox {
+        padding-right: 1px;
+        border-right: 1px solid $light_border_color;
+
+        #limitBttn {
+          padding-right: 28px;
+        }
+      }
+
+      #marketBttnBox {
+        padding-left: 1px;
+        border-left: 1px solid $light_border_color;
+
+        #marketBttn {
+          padding-left: 28px;
+        }
+      }
+
       button {
-        padding: 5px 25px;
-        border-radius: 3px;
-        color: #555;
-      }
+        &.limit-market-order-type {
+          height: 30px;
+          border-style: none;
 
-      button:hover,
-      button.selected {
-        color: black;
-      }
+          &.selected {
+            background-color: transparent;
+            color: black;
+            font-weight: bold;
+          }
 
-      button.submit {
-        background-color: #5cba8b;
-      }
+          &:hover {
+            color: black;
+          }
+        }
 
-      button.selected,
-      button.submit {
+        &.switch-buy-sell {
+          opacity: 0.85;
+          padding: 0 12px;
+          border-radius: 3px;
+
+          &:hover {
+            opacity: 1;
+            color: black;
+          }
+        }
+
         &.buygreen-bg {
           background-color: #207a4699;
         }
@@ -94,13 +128,29 @@ div[data-handler=markets] {
         &.sellred-bg {
           background-color: #99302b99;
         }
+
+        &.submit {
+          opacity: 0.85;
+          padding: 8px 25px;
+          border-radius: 3px;
+
+          &:hover {
+            color: black;
+            opacity: 1;
+          }
+        }
       }
 
       .ico-unlocked {
         color: #1e7d11;
       }
 
-      #orderPreview,
+      #maxOrd,
+      #orderPreview {
+        font-weight: bold;
+      }
+
+      #orderPreview, /* Defined height prevents layout from sliding, when this element is empty. */
       .h21 {
         height: 21px;
       }
@@ -244,15 +294,6 @@ div[data-handler=markets] {
 
     .ico-check {
       color: #9b8c09;
-    }
-  }
-
-  .markettab {
-    height: 30px;
-    border-style: none;
-
-    &.selected {
-      background-color: #fffe;
     }
   }
 

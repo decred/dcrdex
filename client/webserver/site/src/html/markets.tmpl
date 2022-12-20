@@ -193,13 +193,6 @@
           {{- /* ORDER FORM */ -}}
           <div class="order-panel pb-3 position-relative">
             <div class="d-flex flex-column align-items-stretch">
-
-              {{- /* ORDER TYPE BUTTONS */ -}}
-              <div id="orderTypeBttns" class="fs14 d-flex justify-content-start align-items-stretch d-hide">
-                <button id="limitBttn" type="button" class="flex-center px-3 py-0 markettab brdrbottom selected">[[[Limit Order]]]</button>
-                <button id="marketBttn" type="button" class="flex-center px-3 py-0 markettab brdrbottom brdrleft brdrright">[[[Market Order]]]</button>
-              </div>
-
               <div class="fs15 pt-3 text-center d-hide" id="loaderMsg"></div>
 
               {{- /* REGISTRATION STATUS */ -}}
@@ -215,22 +208,24 @@
               </div>
 
               {{- /* ORDER FORM */ -}}
-              <form id="orderForm" class="p-3 d-hide">
-                <div class="p-0 w-100">
-
-                  {{- /* BUY - SELL SELECTOR */ -}}
-                  <div class="d-flex justify-content-start pb-2 fs14">
-                    <button id="buyBttn" type="button" class="buygreen-bg selected">
-                      [[[Buy]]]
-                      <span data-unit="base"></span>
-                    </button>
-                    <button id="sellBttn" type="button" class="sellred-bg ms-2">
-                      [[[Sell]]]
-                      <span data-unit="base"></span>
-                    </button>
-                    <span></span>
+              <form id="orderForm" class="p-1 d-hide">
+                {{- /* ORDER TYPE BUTTONS */ -}}
+                <div id="orderTypeBttns" class="fs14 d-flex justify-content-between">
+                  <div id="limitBttnBox">
+                    <button id="limitBttn" type="button" class="limit-market-order-type flex-center pr-2 py-0 hoverbg selected">[[[Limit Order]]]</button>
                   </div>
-
+                  <button id="sellBttn" type="button" class="switch-buy-sell px-4 sellred-bg">
+                    [[[sell_switch]]]
+                  </button>
+                  <button id="buyBttn" type="button" class="switch-buy-sell px-4 buygreen-bg d-hide">
+                    [[[buy_switch]]]
+                  </button>
+                  <div id="marketBttnBox">
+                    <button id="marketBttn" type="button" class="limit-market-order-type flex-center pl-2 py-0 hoverbg">[[[Market Order]]]</button>
+                  </div>
+                </div>
+                {{- /* ORDER FORM - CONTENTS */ -}}
+                <div id="orderFormBody" class="mt-0 mb-1 px-2">
                   {{- /* MARKET CONFIG */ -}}
                   <div class="d-flex justify-content-between my-2 fs14">
                     <div>
@@ -244,7 +239,7 @@
                       <span data-unit="quote"></span>
                     </div>
                   </div>
-                  <div class="my-2 fs14 h21" id="maxBox">
+                  <div class="my-1 fs14 h21" id="maxBox">
                     <div id="maxOrd" class="d-hide position-relative pointer">
                       <span id="maxLotBox" class="d-hide">
                         <span class="underline">[[[Max]]] <span id="maxLbl">[[[Buy]]]</span></span>:
@@ -263,14 +258,14 @@
                   </div>
 
                   {{- /* RATE AND QUANTITY INPUTS */ -}}
-                  <div class="d-flex mt-3" id="priceBox">
+                  <div class="d-flex mt-1" id="priceBox">
                     <label for="rateField" class="form-label col-6 d-flex align-items-center p-0">[[[:title:price]]]</label>
                     <div class="col-18 p-0 position-relative">
                       <input type="number" class="form-control select bg1" id="rateField">
                       <span class="unitbox"><span class="unit" data-unit="quote"></span>/<span class="unit" data-unit="base"></span></span>
                     </div>
                   </div>
-                  <div class="d-flex mt-4" id="qtyBox">
+                  <div class="d-flex mt-1" id="qtyBox">
                     <label for="qtyField" class="form-label col-6 d-flex align-items-center p-0">[[[Quantity]]]</label>
                     <div class="col-6 p-0 position-relative">
                       <input type="number" class="form-control select bg1" id="lotField">
@@ -285,10 +280,10 @@
 
                   {{- /* MARKET BUY ORDER QUANTITY INPUT */ -}}
                   <div id="mktBuyBox" class="d-hide">
-                    <div class="text-center mt-2 fs15">
+                    <div class="text-center mt-1 fs15">
                       [[[min trade is about]]] <span id="minMktBuy"></span> <span data-unit="quote"></span>
                     </div>
-                    <div class="d-flex justify-content-center mt-2">
+                    <div class="d-flex justify-content-center mt-1">
                       <!-- <label for="mktBuyField" class="flex-center col-12 p-0">Trading</label> -->
                       <div class="col-12 p-0 position-relative">
                         <input type="number" class="form-control select bg1" id="mktBuyField">
@@ -305,23 +300,24 @@
                   </div>
 
                   {{- /* ORDER PREVIEW */ -}}
-                  <div class="mt-2 fs14 text-end" id="orderPreview"></div>
+                  <div class="fs14 text-end" id="orderPreview"></div>
 
-                  {{- /* TIME-IN-FORCE CHECK BOX */ -}}
-                  <div class="my-1 text-start form-check" id="tifBox">
-                    <input id="tifNow" class="form-check-input" type="checkbox" value="">
-                    <label class="form-check-label" for="tifNow">
-                      [[[Immediate or cancel]]]
-                      <span class="ico-info fs12" data-tooltip="[[[immediate_explanation]]]"></span>
-                    </label>
+                  <div class="mt-1 d-flex align-items-center justify-content-end">
+                    {{- /* TIME-IN-FORCE CHECK BOX */ -}}
+                    <div class="form-check mx-2 px-1" id="tifBox">
+                      <input id="tifNow" class="form-check-input" type="checkbox" value="">
+                      <label class="form-check-label" for="tifNow">
+                        [[[Immediate only]]]
+                        <span class="ico-info fs12" data-tooltip="[[[immediate_explanation]]]"></span>
+                      </label>
+                    </div>
+                    {{- /* SUBMIT ORDER BUTTON */ -}}
+                    <div class="text-end">
+                      <button id="submitBttn" type="button" class="fs14 submit text-center buygreen-bg"></button> {{/* textContent set by script */}}
+                    </div>
                   </div>
-
-                  {{- /* SUBMIT ORDER BUTTON */ -}}
-                  <div class="text-end">
-                    <button id="submitBttn" type="button" class="my-1 fs14 submit text-center buygreen-bg"></button> {{/* textContent set by script */}}
-                  </div>
+                  <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="orderErr"></div>
                 </div>
-                <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="orderErr"></div>
               </form>
 
               {{- /* BALANCES */ -}}
