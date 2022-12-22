@@ -53,7 +53,7 @@ func NewPackageTranslator(pkg string, defaultLang language.Tag) *BaseTranslator 
 	return t
 }
 
-func (t *BaseTranslator) Register(topic string, tln *DocumentedTranslation) {
+func (t *BaseTranslator) RegisterNotifications(topic string, tln *DocumentedTranslation) {
 	t.dicts[t.defaultLang][topic] = tln.Translation
 	t.origin[topic] = tln
 	if err := message.SetString(t.defaultLang, topic, tln.Template); err != nil {
@@ -103,7 +103,7 @@ func (t *BaseTranslator) LanguageTranslator(lang language.Tag) *Translator {
 	}
 }
 
-func (t *Translator) Register(topic string, tln *Translation) {
+func (t *Translator) RegisterNotifications(topic string, tln *Translation) {
 	t.dicts[t.lang][topic] = tln
 	if err := message.SetString(t.lang, topic, tln.Template); err != nil {
 		panic(fmt.Sprintf("SetString(%s): %v", t.lang, err))

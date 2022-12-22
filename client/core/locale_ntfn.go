@@ -1,11 +1,8 @@
 package core
 
 import (
-	"fmt"
-
 	"decred.org/dcrdex/client/i18n"
 	"golang.org/x/text/language"
-	"golang.org/x/text/message"
 )
 
 var translator = i18n.NewPackageTranslator("core", language.AmericanEnglish)
@@ -2081,33 +2078,28 @@ var ar = map[Topic]*i18n.Translation{
 }
 
 // The language string key *must* parse with language.Parse.
-var locales = map[string]map[Topic]*translation{
-	originLang: originLocale,
-	"pt-BR":    ptBR,
-	"zh-CN":    zhCN,
-	"pl-PL":    plPL,
-	"de-DE":    deDE,
-	"ar":       ar,
-}
+// var locales = map[string]map[Topic]*translation{
+// 	originLang: originLocale,
+// 	"pt-BR":    ptBR,
+// 	"zh-CN":    zhCN,
+// 	"pl-PL":    plPL,
+// 	"de-DE":    deDE,
+// 	"ar":       ar,
+// }
 
 func registerLocale(lang language.Tag, dict map[Topic]*i18n.Translation) {
 	t := translator.LanguageTranslator(lang)
 	for topic, tln := range dict {
-		t.Register(string(topic), tln)
+		t.RegisterNotifications(string(topic), tln)
 	}
 }
 
 func init() {
-	for lang, translations := range locales {
-		langtag, err := language.Parse(lang)
-		if err != nil {
-			panic(err.Error())
-		} // otherwise would fail in core.New parsing the languages
-		for topic, translation := range translations {
-			err := message.SetString(langtag, string(topic), translation.template)
-			if err != nil {
-				panic(fmt.Sprintf("SetString(%s): %v", lang, err))
-			}
-		}
+	for topic, tln := range originLocale {
+		translator.RegisterNotifications(string(topic), tln)
 	}
+	registerLocale(language.BrazilianPortuguese, ptBR)
+	registerLocale(language.SimplifiedChinese, zhCN)
+	registerLocale(language.Polish, plPL)
+	registerLocale(language.German, deDE)
 }

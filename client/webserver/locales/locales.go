@@ -3,6 +3,7 @@ package locales
 import (
 	"fmt"
 
+	"decred.org/dcrdex/client/i18n"
 	"golang.org/x/text/language"
 )
 
@@ -12,8 +13,8 @@ var (
 
 func init() {
 	Locales = map[string]map[string]string{
-		"en-US": EnUS,
-		"pt-BR": PtBr,
+		"en-US": i18n.EnUS,
+		"pt-BR": i18n.PtBr,
 		"zh-CN": ZhCN,
 		"pl-PL": PlPL,
 		"de-DE": DeDE,

@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 
+	"decred.org/dcrdex/client/i18n"
 	"decred.org/dcrdex/client/webserver/locales"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -89,7 +90,7 @@ func (t *templates) translate(name string) (string, error) {
 
 		if !found {
 			if replacement, found = t.dict[key]; !found {
-				if replacement, found = locales.EnUS[key]; !found {
+				if replacement, found = i18n.EnUS[key]; !found {
 					return "", fmt.Errorf("warning: no translation text for key %q", key)
 				}
 			}

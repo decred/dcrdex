@@ -1,4 +1,4 @@
-package locales
+package i18n
 
 var EnUS = map[string]string{
 	"Language":                       "en-US", // the bcp47 lang tag

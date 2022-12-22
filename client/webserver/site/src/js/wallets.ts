@@ -375,7 +375,7 @@ export default class WalletsPage extends BasePage {
     })
 
     const defaultText = intl.prep(intl.ID_DEFAULT)
-    const addedText = intl.prep(intl.ID_ADDED)
+    const addedText = intl.prep(intl.ID_USER_ADDED)
     const discoveredText = intl.prep(intl.ID_DISCOVERED)
 
     peers.forEach((peer: WalletPeer) => {

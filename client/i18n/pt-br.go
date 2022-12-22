@@ -1,4 +1,4 @@
-package locales
+package i18n
 
 var PtBr = map[string]string{
 	"Language":                       "pt-BR",
