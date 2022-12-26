@@ -625,8 +625,15 @@ func (w *spvWallet) syncStatus() (*syncStatus, error) {
 	if err != nil {
 		return nil, err
 	}
-	target := w.syncHeight()
+
 	currentHeight := chainBlk.Height
+
+	var target int32
+	if len(w.cl.Peers()) > 0 {
+		target = w.syncHeight()
+	} else { // use cached value if available
+		target = atomic.LoadInt32(&w.syncTarget)
+	}
 
 	var synced bool
 	var blk *block
