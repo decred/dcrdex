@@ -118,15 +118,16 @@ func (w *extendedWallet) TxDetails(ctx context.Context, txHash *chainhash.Hash) 
 // spvWallet is a Wallet built on dcrwallet's *wallet.Wallet running in SPV
 // mode.
 type spvWallet struct {
-	dcrWallet   // *wallet.Wallet
-	db          wallet.DB
-	acctNum     uint32
-	acctName    string
-	dir         string
-	chainParams *chaincfg.Params
-	log         dex.Logger
-	spv         spvSyncer // *spv.Syncer
-	tipChan     chan *block
+	dcrWallet         // *wallet.Wallet
+	db                wallet.DB
+	acctNum           uint32
+	acctName          string
+	dir               string
+	chainParams       *chaincfg.Params
+	log               dex.Logger
+	spv               spvSyncer // *spv.Syncer
+	bestSpvPeerHeight int32     // atomic
+	tipChan           chan *block
 
 	blockCache blockCache
 
@@ -765,18 +766,21 @@ func (w *spvWallet) UnlockAccount(ctx context.Context, pw []byte, _ string) erro
 // SyncStatus returns the wallet's sync status.
 // Part of the Wallet interface.
 func (w *spvWallet) SyncStatus(ctx context.Context) (bool, float32, error) {
-	bestHeight := w.bestPeerInitialHeight()
-	_, h := w.dcrWallet.MainChainTip(ctx)
-	height := h
-	if h > bestHeight {
-		bestHeight = h
-	}
-
-	if h == 0 || bestHeight == 0 {
+	targetHeight := w.bestPeerInitialHeight()
+	if targetHeight == 0 {
 		return false, 0, nil
 	}
 
-	synced, progress := w.spv.Synced(), float32(height)/float32(bestHeight)
+	_, height := w.dcrWallet.MainChainTip(ctx)
+	if height == 0 {
+		return false, 0, nil
+	}
+
+	if height > targetHeight {
+		targetHeight = height
+	}
+
+	synced, progress := w.spv.Synced(), float32(height)/float32(targetHeight)
 	if progress > 0.999 && !synced {
 		progress = 0.999
 	}
@@ -784,14 +788,22 @@ func (w *spvWallet) SyncStatus(ctx context.Context) (bool, float32, error) {
 	return synced, progress, nil
 }
 
-// bestPeerInitialHeight is the highest InitialHeight recorded from our peers.
+// bestPeerInitialHeight is the highest InitialHeight recorded from connected
+// spv peers. If no peers are connected, the last observed max peer height is
+// returned.
 func (w *spvWallet) bestPeerInitialHeight() int32 {
+	peers := w.spv.GetRemotePeers()
+	if len(peers) == 0 {
+		return atomic.LoadInt32(&w.bestSpvPeerHeight)
+	}
+
 	var bestHeight int32
-	for _, p := range w.spv.GetRemotePeers() {
+	for _, p := range peers {
 		if h := p.InitialHeight(); h > bestHeight {
 			bestHeight = h
 		}
 	}
+	atomic.StoreInt32(&w.bestSpvPeerHeight, bestHeight)
 	return bestHeight
 }
 
