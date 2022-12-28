@@ -35,6 +35,7 @@ type outputSpenderFinder struct {
 	spenderMtx       sync.RWMutex
 	lastScannedBlock *chainhash.Hash
 	spenderBlock     *block
+	spenderTx        *wire.MsgTx
 }
 
 // lookupTxOutWithBlockFilters returns confirmations and spend status of the
@@ -99,7 +100,7 @@ func (dcr *ExchangeWallet) externalTxOutput(ctx context.Context, op outPoint, pk
 
 	// Scan block filters to find the tx block if it is yet unknown.
 	if txBlock == nil {
-		dcr.log.Infof("Contract output %s:%d NOT yet found; now searching with block filters.", op.txHash, op.vout)
+		dcr.log.Infof("Output %s:%d NOT yet found; now searching with block filters.", op.txHash, op.vout)
 		txBlock, err = dcr.scanFiltersForTxBlock(ctx, tx, [][]byte{pkScript}, earliestTxTime)
 		if err != nil {
 			return nil, nil, fmt.Errorf("error checking if tx %s is mined: %w", tx.hash, err)
@@ -277,6 +278,7 @@ func (dcr *ExchangeWallet) findTxInBlock(ctx context.Context, txHash chainhash.H
 		for _, txIn := range tx.TxIn {
 			if txIn.PreviousOutPoint.Hash == txHash { // found a spender
 				outputSpenders[txIn.PreviousOutPoint.Index].spenderBlock = &block{int64(blk.Header.Height), blockHash}
+				outputSpenders[txIn.PreviousOutPoint.Index].spenderTx = tx
 			}
 		}
 	}
@@ -310,6 +312,7 @@ func (dcr *ExchangeWallet) isOutputSpent(ctx context.Context, output *outputSpen
 			"has been orphaned or disapproved by stakeholders.",
 			output.spenderBlock.hash, output.op)
 		output.spenderBlock = nil
+		output.spenderTx = nil
 	}
 
 	// This tx output is not known to be spent as of last search (if any).
@@ -359,6 +362,7 @@ func (dcr *ExchangeWallet) isOutputSpent(ctx context.Context, output *outputSpen
 	}
 
 	output.spenderBlock = &block{hash: stopBlockHash, height: stopBlockHeight}
+	output.spenderTx = spenderTx
 	return true, nil
 }
 

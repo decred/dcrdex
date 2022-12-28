@@ -3078,15 +3078,11 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 
 		switch spent {
 		case 0: // unspent, proceed to create refund tx
-		case 1: // spent!
-			// Refund MUST signal to caller that it is spent via
-			// asset.CoinNotFoundError so that it knows to begin looking for the
-			// counterparty's redeem and move on to redeem too. TODO: attempt to
-			// identify if it was manually refunded with the backup transaction,
-			// in which case we can skip broadcast and record the spending
-			// transaction we may locate as below.
-			return nil, fmt.Errorf("contract %s:%d is spent (%w)", txHash, vout, asset.CoinNotFoundError)
-		case -1: // unknown, we must scan for spending tx
+		case 1, -1: // spent or unknown
+			// Attempt to identify if it was manually refunded with the backup
+			// transaction, in which case we can skip broadcast and record the
+			// spending transaction we may locate as below.
+
 			// First find the block containing the output itself.
 			scriptAddr, err := stdaddr.NewAddressScriptHashV0(contract, dcr.chainParams)
 			if err != nil {
@@ -3098,12 +3094,19 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 			if err != nil {
 				return nil, err // possibly the contract is still in mempool
 			}
+			// Try to find a transaction that spends it.
 			spent, err := dcr.isOutputSpent(dcr.ctx, outFound) // => findTxOutSpender
 			if err != nil {
 				return nil, fmt.Errorf("error checking if contract %v:%d is spent: %w", txHash, vout, err)
 			}
 			if spent {
-				return nil, fmt.Errorf("contract %s:%d is spent (%w)", txHash, vout, asset.CoinNotFoundError)
+				spendTx := outFound.spenderTx
+				// Refunds are not batched, so input 0 is always the spender.
+				if dexdcr.IsRefundScript(utxo.Version, spendTx.TxIn[0].SignatureScript, contract) {
+					return spendTx, nil
+				} // otherwise it must be a redeem
+				return nil, fmt.Errorf("contract %s:%d is spent in %v (%w)",
+					txHash, vout, spendTx.TxHash(), asset.CoinNotFoundError)
 			}
 		}
 	}
