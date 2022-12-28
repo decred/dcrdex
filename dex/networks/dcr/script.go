@@ -803,6 +803,52 @@ func InputInfo(version uint16, pkScript, redeemScript []byte, chainParams *chain
 	}, nil
 }
 
+// IsRefundScript checks if the signature script is of the expected format for
+// the standard swap contract refund. The signature and pubkey data pushes are
+// not validated other than ensuring they are data pushes. The provided contract
+// must correspond to the final data push in the sigScript, but it is otherwise
+// not validated either.
+func IsRefundScript(scriptVersion uint16, sigScript, contract []byte) bool {
+	tokenizer := txscript.MakeScriptTokenizer(scriptVersion, sigScript)
+	// sig
+	if !tokenizer.Next() {
+		return false
+	}
+	if tokenizer.Data() == nil {
+		return false // should be a der signature
+	}
+
+	// pubkey
+	if !tokenizer.Next() {
+		return false
+	}
+	if tokenizer.Data() == nil {
+		return false // should be a pubkey
+	}
+
+	// OP_0
+	if !tokenizer.Next() {
+		return false
+	}
+	if tokenizer.Opcode() != txscript.OP_0 {
+		return false
+	}
+
+	// contract script
+	if !tokenizer.Next() {
+		return false
+	}
+	push := tokenizer.Data()
+	if len(push) != SwapContractSize {
+		return false
+	}
+	if !bytes.Equal(push, contract) {
+		return false
+	}
+
+	return tokenizer.Done()
+}
+
 // FindKeyPush attempts to extract the secret key from the signature script. The
 // contract must be provided for the search algorithm to verify the correct data
 // push. Only contracts of length SwapContractSize that can be validated by

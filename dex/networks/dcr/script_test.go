@@ -627,3 +627,43 @@ func TestDataPrefixSize(t *testing.T) {
 		})
 	}
 }
+
+func hexBytes(h string) []byte {
+	b, err := hex.DecodeString(h)
+	if err != nil {
+		panic(err.Error())
+	}
+	return b
+}
+
+func TestIsRefundScript(t *testing.T) {
+	tests := []struct {
+		name          string
+		scriptVersion uint16
+		sigScript     []byte
+		contract      []byte
+		want          bool
+	}{
+		{
+			"redeem",
+			0,
+			hexBytes("47304402203cf1e969830a6255d02e40a9333b502d802f0c17331e54dc5d8028fb6a3bd54c02202cfc3673c8013416e38dd27d3c96082a4f069cf296ca2bbba7d039308df1bdc401210227b951b91a01e11600cdd1d3e9f2894e2e38567b6883b9b3e7a4f99946a3d445209a5a58c653c2c384825bc4217443a2b3e3dead04db5e0586570c774706d97a0d514c616382012088c020c66b3b91cffadc613689cf9c391c7792307e5d5390407ad3e33b6ff0bf4a95218876a91425e5d9b138e16fa526bc765a721193da79fc5c32670420489d63b17576a9147f1686f0a6f1b0afd5b9efaee37d234b417ca2ee6888ac"),
+			hexBytes("6382012088c020c66b3b91cffadc613689cf9c391c7792307e5d5390407ad3e33b6ff0bf4a95218876a91425e5d9b138e16fa526bc765a721193da79fc5c32670420489d63b17576a9147f1686f0a6f1b0afd5b9efaee37d234b417ca2ee6888ac"),
+			false,
+		},
+		{
+			"refund",
+			0,
+			hexBytes("473044022063793a405b3c60a37180d009f191bf68a8ce0560093718612220b019596ebd9602201f9028644d45744279f5676db18ba3621760eb33d18d6ba74909a2e98393e40c012102bc03f292e7ec067c10cdcbc22eb9dc49b2693a1b7dd7c3b4c4d9a0bf054f3f2d004c616382012088c020eec3b3ffb1bf921701653437600eba8a8fc95dd5bbefa65e977b3d91db9ca6248876a9145ca2a115488f1b264591a014734d33443bbfa379670410bf3563b17576a914462748b29df61bd1fedd7dc1a953392aa2c05d996888ac"),
+			hexBytes("6382012088c020eec3b3ffb1bf921701653437600eba8a8fc95dd5bbefa65e977b3d91db9ca6248876a9145ca2a115488f1b264591a014734d33443bbfa379670410bf3563b17576a914462748b29df61bd1fedd7dc1a953392aa2c05d996888ac"),
+			true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if is := IsRefundScript(tt.scriptVersion, tt.sigScript, tt.contract); is != tt.want {
+				t.Errorf("want %v, got %v", tt.want, is)
+			}
+		})
+	}
+}
