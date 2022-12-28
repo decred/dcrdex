@@ -3069,14 +3069,40 @@ func (dcr *ExchangeWallet) refundTx(coinID, contract dex.Bytes, val uint64, refu
 		if utxo == nil {
 			return nil, asset.CoinNotFoundError
 		}
-		if spent == 1 {
+		val = uint64(utxo.Value)
+
+		switch spent {
+		case 0: // unspent, proceed to create refund tx
+		case 1: // spent!
 			// Refund MUST signal to caller that it is spent via
 			// asset.CoinNotFoundError so that it knows to begin looking for the
-			// counterparty's redeem and move on to redeem too.
+			// counterparty's redeem and move on to redeem too. TODO: attempt to
+			// identify if it was manually refunded with the backup transaction,
+			// in which case we can skip broadcast and record the spending
+			// transaction we may locate as below.
 			return nil, fmt.Errorf("contract %s:%d is spent (%w)", txHash, vout, asset.CoinNotFoundError)
+		case -1: // unknown, we must scan for spending tx
+			// First find the block containing the output itself.
+			scriptAddr, err := stdaddr.NewAddressScriptHashV0(contract, dcr.chainParams)
+			if err != nil {
+				return nil, fmt.Errorf("error encoding contract address: %w", err)
+			}
+			_, pkScript := scriptAddr.PaymentScript()
+			outFound, _, err := dcr.externalTxOutput(dcr.ctx, newOutPoint(txHash, vout),
+				pkScript, time.Now().Add(-60*24*time.Hour)) // search up to 60 days ago
+			if err != nil {
+				return nil, err // possibly the contract is still in mempool
+			}
+			spent, err := dcr.isOutputSpent(dcr.ctx, outFound) // => findTxOutSpender
+			if err != nil {
+				return nil, fmt.Errorf("error checking if contract %v:%d is spent: %w", txHash, vout, err)
+			}
+			if spent {
+				return nil, fmt.Errorf("contract %s:%d is spent (%w)", txHash, vout, asset.CoinNotFoundError)
+			}
 		}
-		val = uint64(utxo.Value)
 	}
+
 	sender, _, lockTime, _, err := dexdcr.ExtractSwapDetails(contract, dcr.chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting swap addresses: %w", err)
