@@ -320,7 +320,6 @@ func New(cfg *Config) (*WebServer, error) {
 			rr.With(dexHostCtx).Get("/{host}", s.handleRegister)
 		})
 		web.Get(settingsRoute, s.handleSettings)
-		web.With(dexHostCtx).Get("/dexsettings/{host}", s.handleDexSettings)
 
 		web.Get("/generateqrcode", s.handleGenerateQRCode)
 
@@ -350,6 +349,7 @@ func New(cfg *Config) (*WebServer, error) {
 					webAuth.Get(exportOrderRoute, s.handleExportOrders)
 					webAuth.Get(homeRoute, s.handleHome)
 					webAuth.Get(marketsRoute, s.handleMarkets)
+					webAuth.With(dexHostCtx).Get("/dexsettings/{host}", s.handleDexSettings)
 					if s.experimental {
 						webAuth.Get(marketMakerRoute, s.handleMarketMaker)
 					}

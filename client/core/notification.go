@@ -247,6 +247,7 @@ type BondPostNote struct {
 	Asset         *uint32 `json:"asset,omitempty"`
 	Confirmations *int32  `json:"confirmations,omitempty"`
 	Tier          *int64  `json:"tier,omitempty"`
+	CoinID        *string `json:"coinID,omitempty"`
 	Dex           string  `json:"dex,omitempty"`
 }
 
@@ -258,9 +259,10 @@ func newBondPostNote(topic Topic, subject, details string, severity db.Severity,
 	}
 }
 
-func newBondPostNoteWithConfirmations(topic Topic, subject, details string, severity db.Severity, asset uint32, currConfs int32, dexAddr string) *BondPostNote {
+func newBondPostNoteWithConfirmations(topic Topic, subject, details string, severity db.Severity, asset uint32, coinID string, currConfs int32, dexAddr string) *BondPostNote {
 	bondPmtNt := newBondPostNote(topic, subject, details, severity, dexAddr)
 	bondPmtNt.Asset = &asset
+	bondPmtNt.CoinID = &coinID
 	bondPmtNt.Confirmations = &currConfs
 	return bondPmtNt
 }
