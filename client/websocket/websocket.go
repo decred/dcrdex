@@ -172,7 +172,7 @@ func (s *Server) connect(ctx context.Context, conn ws.Connection, addr string) {
 	s.log.Tracef("Disconnected websocket client %s", addr)
 }
 
-// Notify sends a notification to the websocket client.
+// Notify sends a notification to the websocket clients.
 func (s *Server) Notify(route string, payload interface{}) {
 	msg, err := msgjson.NewNotification(route, payload)
 	if err != nil {

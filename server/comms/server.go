@@ -60,6 +60,13 @@ const (
 	// The cumulative rates below would need to be less than sum of above to
 	// actually trip unless it is also applied to unspecified routes.
 	wsRateTotal, wsBurstTotal = 40, 1000
+
+	// maxClientAnomaliesCount is the maximum websocket connection anomaly
+	// before client is sent a message to check their connection.
+	maxClientAnomaliesCount = 3
+	// If websocket clients disconnects before wsAnomalyDuration since last
+	// connect time, the websocket client anomaly count is increased.
+	wsAnomalyDuration = 60 * time.Minute
 )
 
 var (
@@ -256,6 +263,12 @@ type ipWsLimiter struct {
 	*routeLimiter
 }
 
+// anomalyCount is used to track websocket clients with connectivity issues.
+type anomalyCount struct {
+	anomalies   int32
+	lastConnect time.Time
+}
+
 // Server is a low-level communications hub. It supports websocket clients
 // and an HTTP API.
 type Server struct {
@@ -265,7 +278,9 @@ type Server struct {
 	// The client map indexes each wsLink by its id.
 	clientMtx sync.RWMutex
 	clients   map[uint64]*wsLink
-	counter   uint64 // for generating unique client IDs
+	// wsAnomalyCounter tracks websocket clients with connectivity issues.
+	wsAnomalyCounter map[dex.IPKey]*anomalyCount
+	counter          uint64 // for generating unique client IDs
 
 	// wsLimiters manages per-IP per-route websocket connection request rate
 	// limiters that are not subject to server-wide rate limits or affected by
@@ -364,12 +379,13 @@ func NewServer(cfg *RPCConfig) (*Server, error) {
 	}
 
 	return &Server{
-		listeners:   listeners,
-		clients:     make(map[uint64]*wsLink),
-		wsLimiters:  make(map[dex.IPKey]*ipWsLimiter),
-		v6Prefixes:  make(map[dex.IPKey]int),
-		quarantine:  make(map[dex.IPKey]time.Time),
-		dataEnabled: dataEnabled,
+		listeners:        listeners,
+		clients:          make(map[uint64]*wsLink),
+		wsLimiters:       make(map[dex.IPKey]*ipWsLimiter),
+		v6Prefixes:       make(map[dex.IPKey]int),
+		quarantine:       make(map[dex.IPKey]time.Time),
+		wsAnomalyCounter: make(map[dex.IPKey]*anomalyCount),
+		dataEnabled:      dataEnabled,
 	}, nil
 }
 
@@ -485,6 +501,30 @@ func (s *Server) Run(ctx context.Context) {
 				return
 			}
 		}
+	}()
+
+	// Run a periodic routine to keep websocket clients anomaly counter map
+	// clean.
+	go func() {
+		ticker := time.NewTicker(60 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.clientMtx.Lock()
+				// Remove websocket clients with no disconnect in the last one
+				// hour from anomaly counter map.
+				for ip, client := range s.wsAnomalyCounter {
+					if time.Since(client.lastConnect) > wsAnomalyDuration {
+						delete(s.wsAnomalyCounter, ip)
+					}
+				}
+				s.clientMtx.Unlock()
+			case <-ctx.Done():
+				return
+			}
+		}
+
 	}()
 
 	<-ctx.Done()
@@ -650,7 +690,7 @@ func (s *Server) websocketHandler(ctx context.Context, conn ws.Connection, ip de
 		log.Errorf("Failed to add client %s", addr)
 		return
 	}
-	defer s.removeClient(client.id)
+	defer s.handleClientDisconnect(client.id)
 
 	// The connection remains until the connection is lost or the link's
 	// disconnect method is called (e.g. via disconnectClients).
@@ -720,14 +760,27 @@ func (s *Server) addClient(ctx context.Context, client *wsLink) (*dex.Connection
 	client.id = s.counter
 	s.counter++
 	s.clients[client.id] = client
+	s.trackClientConnectivity(client, time.Now())
 	return cm, nil
 }
 
-// Remove the client from the map.
-func (s *Server) removeClient(id uint64) {
+// handleClientDisconnect handles a client's websocket disconnection.
+func (s *Server) handleClientDisconnect(id uint64) {
 	s.clientMtx.Lock()
-	delete(s.clients, id)
-	s.clientMtx.Unlock()
+	defer func() {
+		delete(s.clients, id)
+		s.clientMtx.Unlock()
+	}()
+
+	c, ok := s.clients[id]
+	if !ok {
+		return
+	}
+
+	ac, ok := s.wsAnomalyCounter[dex.NewIPKey(c.Addr())]
+	if ok && time.Since(ac.lastConnect) < wsAnomalyDuration {
+		ac.anomalies++
+	}
 }
 
 // Get the number of active clients.
@@ -735,6 +788,39 @@ func (s *Server) clientCount() uint64 {
 	s.clientMtx.RLock()
 	defer s.clientMtx.RUnlock()
 	return uint64(len(s.clients))
+}
+
+// trackClientConnectivity tracks connection anomalies for a connected websocket
+// client and notifies the client if client has exceeded
+// maxClientAnomaliesCount. This method should be called under s.clientMtx Lock
+// and the provided client must be already connected.
+func (s *Server) trackClientConnectivity(client *wsLink, lastConnect time.Time) {
+	ip := dex.NewIPKey(client.Addr())
+	ac := s.wsAnomalyCounter[ip]
+	if ac == nil {
+		s.wsAnomalyCounter[ip] = &anomalyCount{
+			lastConnect: lastConnect,
+		}
+		return
+	}
+	ac.lastConnect = lastConnect
+
+	// If websocket client anomaly count is more than maxClientAnomaliesCount,
+	// notify client of unstable internet connection.
+	if ac.anomalies >= maxClientAnomaliesCount {
+		poorConnectivityMsg := "Your internet connection is unstable, kindly check your internet connection"
+		msg, err := msgjson.NewNotification(msgjson.NotifyRoute, poorConnectivityMsg)
+		if err != nil {
+			log.Errorf("Error sending unstable connection notification to %s: %v", ip, err)
+		}
+
+		if err = client.Send(msg); err != nil {
+			log.Errorf("Error sending unstable connection notification to %s: %v", ip, err)
+		}
+
+		// Reset anomaly count.
+		ac.anomalies = 0
+	}
 }
 
 // Get the number of websocket connections for a given IP, excluding loopback.

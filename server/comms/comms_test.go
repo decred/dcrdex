@@ -33,11 +33,12 @@ var (
 
 func newServer() *Server {
 	return &Server{
-		clients:     make(map[uint64]*wsLink),
-		wsLimiters:  make(map[dex.IPKey]*ipWsLimiter),
-		v6Prefixes:  make(map[dex.IPKey]int),
-		quarantine:  make(map[dex.IPKey]time.Time),
-		dataEnabled: 1,
+		clients:          make(map[uint64]*wsLink),
+		wsLimiters:       make(map[dex.IPKey]*ipWsLimiter),
+		v6Prefixes:       make(map[dex.IPKey]int),
+		quarantine:       make(map[dex.IPKey]time.Time),
+		wsAnomalyCounter: make(map[dex.IPKey]*anomalyCount),
+		dataEnabled:      1,
 	}
 }
 
@@ -92,6 +93,8 @@ type wsConnStub struct {
 }
 
 func (conn *wsConnStub) addChan() {
+	conn.writeMtx.Lock()
+	defer conn.writeMtx.Unlock()
 	conn.recv = make(chan []byte)
 }
 
