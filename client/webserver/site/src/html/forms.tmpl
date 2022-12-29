@@ -290,6 +290,13 @@
   [[[reg_confirm_submit]]]
 </div>
 
+<div class="d-flex my-3">
+  <label for="bondStrengthField" class="form-label col-6 d-flex align-items-center p-0">[[[bond_strength]]]</label>
+  <div class="col-18 p-0 position-relative">
+    <input type="number" min="1" value="1" class="form-control select bg1" id="bondStrengthField" data-tmpl="bondStrengthField">
+  </div>
+</div>
+
 <div class="d-flex align-items-stretch justify-content-center">
   <div class="borderright flex-center my-2 px-4">
     <span class="ico-check fs28"></span>
@@ -300,8 +307,8 @@
     <div class="d-flex flex-column justify-content-start align-items-start">
       <span class="fs16 text-break" data-tmpl="host"></span>
       <span>
-        <span data-tmpl="fee" class="fs22 lh1 me-1"></span>
-        <span data-tmpl="feeUnit" class="fs16 grey"></span>
+        <span data-tmpl="bondAmt" class="fs22 lh1 me-1"></span>
+        <span data-tmpl="bondUnit" class="fs16 grey"></span>
       </span>
       <span class="fs14">[[[plus tx fees]]] </span>
     </div>

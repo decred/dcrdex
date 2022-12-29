@@ -19,7 +19,7 @@ import {
   SupportedAsset,
   Exchange,
   WalletState,
-  FeePaymentNote,
+  BondNote,
   CoreNote,
   OrderNote,
   Market,
@@ -479,32 +479,33 @@ export default class Application {
   }
 
   /*
-   * updateExchangeRegistration updates the information for the exchange
-   * registration payment
+   * updateBondConfs updates the information for a pending bond.
    */
-  updateExchangeRegistration (dexAddr: string, confs: number, assetID: number) {
+  updateBondConfs (dexAddr: string, coinID: string, confs: number, assetID: number) {
     const dex = this.exchanges[dexAddr]
     const symbol = this.assets[assetID].symbol
-    dex.pendingFee = { confs, assetID, symbol }
+    dex.pendingBonds[coinID] = { confs, assetID, symbol }
   }
 
-  setDEXPaid (host: string) {
-    // setting the null value in the 'confs' field indicates that the fee
-    // payment was completed
-    this.exchanges[host].pendingFee = null
+  updateTier (host: string, tier: number) {
+    this.exchanges[host].tier = tier
   }
 
   /*
-   * handleFeePaymentNote is the handler for the 'feepayment'-type notification, which
-   * is used to update the dex registration status.
+   * handleBondNote is the handler for the 'bondpost'-type notification, which
+   * is used to update the dex tier and registration status.
    */
-  handleFeePaymentNote (note: FeePaymentNote) {
+  handleBondNote (note: BondNote) {
     switch (note.topic) {
       case 'RegUpdate':
-        this.updateExchangeRegistration(note.dex, note.confirmations, note.asset)
+        if (note.coinID !== null) { // should never be null for RegUpdate
+          this.updateBondConfs(note.dex, note.coinID, note.confirmations, note.asset)
+        }
         break
-      case 'AccountRegistered':
-        this.setDEXPaid(note.dex)
+      case 'BondConfirmed':
+        if (note.tier !== null) { // should never be null for BondConfirmed
+          this.updateTier(note.dex, note.tier)
+        }
         break
       default:
         break
@@ -586,8 +587,8 @@ export default class Application {
         if (w) w.balance = n.balance
         break
       }
-      case 'feepayment':
-        this.handleFeePaymentNote(note as FeePaymentNote)
+      case 'bondpost':
+        this.handleBondNote(note as BondNote)
         break
       case 'walletstate':
       case 'walletconfig': {

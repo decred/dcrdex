@@ -48,7 +48,7 @@ import {
   WalletStateNote,
   WalletCreationNote,
   SpotPriceNote,
-  FeePaymentNote,
+  BondNote,
   OrderNote,
   EpochNote,
   BalanceNote,
@@ -496,7 +496,7 @@ export default class MarketsPage extends BasePage {
       epoch: (note: EpochNote) => { this.handleEpochNote(note) },
       conn: (note: ConnEventNote) => { this.handleConnNote(note) },
       balance: (note: BalanceNote) => { this.handleBalanceNote(note) },
-      feepayment: (note: FeePaymentNote) => { this.handleFeePayment(note) },
+      bondpost: (note: BondNote) => { this.handleBondUpdate(note) },
       spots: (note: SpotPriceNote) => { this.handlePriceUpdate(note) }
     })
 
@@ -554,6 +554,11 @@ export default class MarketsPage extends BasePage {
   /* isLimit is true if the user has selected the "limit order" tab. */
   isLimit () {
     return this.page.limitBttn.classList.contains('selected')
+  }
+
+  /* hasPendingBonds is true if there are pending bonds */
+  hasPendingBonds (): boolean {
+    return Object.keys(this.market.dex.pendingBonds).length > 0
   }
 
   /* setStats updates the currently displayed market and spot price. */
@@ -713,15 +718,16 @@ export default class MarketsPage extends BasePage {
     const { page, market: { dex } } = this
     page.regStatusDex.textContent = dex.host
 
-    const pending = dex.pendingFee
-    if (!pending) {
+    if (dex.tier >= 1) {
       this.setRegistrationStatusView(intl.prep(intl.ID_REGISTRATION_FEE_SUCCESS), '', 'completed')
       return
     }
 
-    const confirmationsRequired = dex.regFees[pending.symbol].confs
-    page.confReq.textContent = String(confirmationsRequired)
-    const confStatusMsg = `${pending.confs} / ${confirmationsRequired}`
+    const confStatuses = Object.values(dex.pendingBonds).map(pending => {
+      const confirmationsRequired = dex.bondAssets[pending.symbol].confs
+      return `${pending.confs} / ${confirmationsRequired}`
+    })
+    const confStatusMsg = confStatuses.join(', ')
     this.setRegistrationStatusView(intl.prep(intl.ID_WAITING_FOR_CONFS), confStatusMsg, 'waiting')
   }
 
@@ -733,15 +739,13 @@ export default class MarketsPage extends BasePage {
     const { page, market } = this
     if (!market || !market.dex) return
 
-    // If dex is not connected to server, is not possible to know fee
+    // If dex is not connected to server, is not possible to know the
     // registration status.
     if (market.dex.connectionStatus !== ConnectionStatus.Connected) return
 
     this.updateRegistrationStatusView()
 
-    if (market.dex.pendingFee) {
-      Doc.show(page.registrationStatus)
-    } else {
+    if (market.dex.tier >= 1) {
       const toggle = () => {
         Doc.hide(page.registrationStatus)
         this.resolveOrderFormVisibility()
@@ -753,6 +757,12 @@ export default class MarketsPage extends BasePage {
         return
       }
       toggle()
+    } else if (this.hasPendingBonds()) {
+      Doc.show(page.registrationStatus)
+    } else {
+      page.acctTier.textContent = `${market.dex.tier}`
+      page.dexSettingsLink.href = `/dexsettings/${market.dex.host}`
+      Doc.show(page.bondRequired)
     }
   }
 
@@ -2001,10 +2011,10 @@ export default class MarketsPage extends BasePage {
   }
 
   /*
-   * handleFeePayment is the handler for the 'feepayment' notification type.
+   * handleBondUpdate is the handler for the 'bondpost' notification type.
    * This is used to update the registration status of the current exchange.
    */
-  async handleFeePayment (note: FeePaymentNote) {
+  async handleBondUpdate (note: BondNote) {
     const dexAddr = note.dex
     if (dexAddr !== this.market.dex.host) return
     // If we just finished legacy registration, we need to update the Exchange.

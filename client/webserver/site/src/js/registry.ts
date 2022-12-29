@@ -21,10 +21,9 @@ export interface Exchange {
   assets: Record<number, Asset>
   connectionStatus: ConnectionStatus
   viewOnly: boolean
+  bondAssets: Record<string, BondAsset>
   tier: number
-  feeAsset: FeeAsset // DEPRECATED. DCR.
-  regFees: Record<string, FeeAsset>
-  pendingFee: PendingFeeState | null
+  pendingBonds: Record<string, PendingBondState>
   candleDurs: string[]
 }
 
@@ -136,13 +135,14 @@ export interface Asset {
   unitInfo: UnitInfo
 }
 
-export interface FeeAsset {
+export interface BondAsset {
+  ver: number
   id: number
   confs: number
   amount: number
 }
 
-export interface PendingFeeState {
+export interface PendingBondState {
   symbol: string
   assetID: number
   confs: number
@@ -283,10 +283,12 @@ export interface CoreNote {
   id: string
 }
 
-export interface FeePaymentNote extends CoreNote {
+export interface BondNote extends CoreNote {
   asset: number
   confirmations: number
   dex: string
+  coinID: string | null
+  tier: number | null
 }
 
 export interface BalanceNote extends CoreNote {
@@ -589,8 +591,8 @@ export interface Application {
   storeNotes (): void
   updateMenuItemsDisplay (): void
   attachCommon (node: HTMLElement): void
-  updateExchangeRegistration (dexAddr: string, confs: number, assetID: number): void
-  handleFeePaymentNote (note: FeePaymentNote): void
+  updateBondConfs (dexAddr: string, coinID: string, confs: number, assetID: number): void
+  handleBondNote (note: BondNote): void
   setNotes (notes: CoreNote[]): void
   notify (note: CoreNote): void
   log (loggerID: string, ...msg: any): void

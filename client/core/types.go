@@ -598,27 +598,30 @@ type BondAsset struct {
 // FeeAsset is deprecated (V0PURGE), but the same as BondAsset.
 type FeeAsset BondAsset
 
-// PendingFeeState conveys a pending registration fee's asset and current
-// confirmation count.  Deprecated (V0PURGE).
-type PendingFeeState struct {
+// PendingBondState conveys a pending bond's asset and current confirmation
+// count.
+type PendingBondState struct {
 	Symbol  string `json:"symbol"`
 	AssetID uint32 `json:"assetID"`
 	Confs   uint32 `json:"confs"`
 }
 
+// PendingFeeState is deprecated (V0PURGE), but the same as PendingBondState.
+type PendingFeeState PendingBondState
+
 // Exchange represents a single DEX with any number of markets.
 type Exchange struct {
-	Host             string                 `json:"host"`
-	AcctID           string                 `json:"acctID"`
-	Markets          map[string]*Market     `json:"markets"`
-	Assets           map[uint32]*dex.Asset  `json:"assets"`
-	BondExpiry       uint64                 `json:"bondExpiry"`
-	BondAssets       map[string]*BondAsset  `json:"bondAssets"`
-	ConnectionStatus comms.ConnectionStatus `json:"connectionStatus"`
-	CandleDurs       []string               `json:"candleDurs"`
-	ViewOnly         bool                   `json:"viewOnly"`
-	Tier             int64                  `json:"tier"`
-	BondsPending     bool                   `json:"bondsPending"`
+	Host             string                       `json:"host"`
+	AcctID           string                       `json:"acctID"`
+	Markets          map[string]*Market           `json:"markets"`
+	Assets           map[uint32]*dex.Asset        `json:"assets"`
+	BondExpiry       uint64                       `json:"bondExpiry"`
+	BondAssets       map[string]*BondAsset        `json:"bondAssets"`
+	ConnectionStatus comms.ConnectionStatus       `json:"connectionStatus"`
+	CandleDurs       []string                     `json:"candleDurs"`
+	ViewOnly         bool                         `json:"viewOnly"`
+	Tier             int64                        `json:"tier"`
+	PendingBonds     map[string]*PendingBondState `json:"pendingBonds"`
 	// TODO: Bonds slice(s) - and a LockedInBonds(assetID) method
 
 	// OLD fields for the legacy registration fee (V0PURGE):
@@ -715,18 +718,19 @@ type dexAccount struct {
 	privKey  *secp256k1.PrivateKey
 	id       account.AccountID
 
-	authMtx       sync.RWMutex
-	isAuthed      bool
-	pendingBonds  []*db.Bond // not yet confirmed
-	bonds         []*db.Bond // confirmed, and not yet expired
-	expiredBonds  []*db.Bond // expired and needing refund
-	tier          int64      // check instead of isSuspended
-	tierChange    int64      // unactuated with bond reserves
-	targetTier    uint64
-	maxBondedAmt  uint64
-	totalReserved int64  // total of bondAsset reserved for bonds (future and liveunspent), set iff maintaining bonds
-	bondAsset     uint32 // asset used for bond maintenance/rotation
-	legacyFeePaid bool   // server reports a legacy fee paid
+	authMtx           sync.RWMutex
+	isAuthed          bool
+	pendingBondsConfs map[string]uint32
+	pendingBonds      []*db.Bond // not yet confirmed
+	bonds             []*db.Bond // confirmed, and not yet expired
+	expiredBonds      []*db.Bond // expired and needing refund
+	tier              int64      // check instead of isSuspended
+	tierChange        int64      // unactuated with bond reserves
+	targetTier        uint64
+	maxBondedAmt      uint64
+	totalReserved     int64  // total of bondAsset reserved for bonds (future and liveunspent), set iff maintaining bonds
+	bondAsset         uint32 // asset used for bond maintenance/rotation
+	legacyFeePaid     bool   // server reports a legacy fee paid
 
 	// Legacy reg fee (V0PURGE)
 	feeAssetID uint32

@@ -14,7 +14,7 @@ import {
   Exchange,
   Market,
   UnitInfo,
-  FeeAsset,
+  BondAsset,
   WalletState,
   BalanceNote,
   Order,
@@ -726,6 +726,13 @@ export class ConfirmRegistrationForm {
     this.pwCache = pwCache
 
     Doc.bind(this.page.goBack, 'click', () => goBack())
+    Doc.bind(this.page.bondStrengthField, 'change', () => {
+      const asset = app().assets[this.feeAssetID]
+      if (!asset) return
+      const ui = asset.unitInfo
+      const bondAsset = this.xc.bondAssets[asset.symbol]
+      this.page.bondAmt.textContent = Doc.formatCoinValue(this.totalBondAmount(bondAsset.amount), ui)
+    })
     bind(form, this.page.submit, () => this.submitForm())
   }
 
@@ -743,10 +750,15 @@ export class ConfirmRegistrationForm {
     const ui = asset.unitInfo
     this.feeAssetID = asset.id
     const page = this.page
-    const regAsset = this.xc.regFees[asset.symbol]
-    page.fee.textContent = Doc.formatCoinValue(regAsset.amount, ui)
-    page.feeUnit.textContent = ui.conventional.unit.toUpperCase()
+    const bondAsset = this.xc.bondAssets[asset.symbol]
+    page.bondAmt.textContent = Doc.formatCoinValue(this.totalBondAmount(bondAsset.amount), ui)
+    page.bondUnit.textContent = ui.conventional.unit.toUpperCase()
     page.logo.src = Doc.logoPath(asset.symbol)
+  }
+
+  totalBondAmount (singleBondAmount: number): number {
+    const bondStrength = +(this.page.bondStrengthField.value ?? 1)
+    return bondStrength * singleBondAmount
   }
 
   /* Form expands into its space quickly from the lower-right as it fades in. */
@@ -770,27 +782,27 @@ export class ConfirmRegistrationForm {
     if (!page.submit.classList.contains('selected')) {
       return
     }
-    if (this.feeAssetID === null) {
+    const asset = app().assets[this.feeAssetID]
+    if (!asset) {
       page.regErr.innerText = intl.prep(intl.ID_SELECT_WALLET_FOR_FEE_PAYMENT)
       Doc.show(page.regErr)
       return
     }
-    const symbol = app().user.assets[this.feeAssetID].wallet.symbol
     Doc.hide(page.regErr)
-    const feeAsset = this.xc.regFees[symbol]
+    const bondAsset = this.xc.bondAssets[asset.wallet.symbol]
     const cert = await this.certFile
     const dexAddr = this.xc.host
     const pw = page.appPass.value || (this.pwCache ? this.pwCache.pw : '')
-    const registration = {
+    const postBondForm = {
       addr: dexAddr,
+      cert: cert,
       pass: pw,
-      fee: feeAsset.amount,
-      asset: feeAsset.id,
-      cert: cert
+      bond: this.totalBondAmount(bondAsset.amount),
+      asset: bondAsset.id
     }
     page.appPass.value = ''
     const loaded = app().loading(this.form)
-    const res = await postJSON('/api/register', registration)
+    const res = await postJSON('/api/postbond', postBondForm)
     loaded()
     if (!app().checkResponse(res)) {
       page.regErr.textContent = res.msg
@@ -874,25 +886,25 @@ export class FeeAssetSelectionForm {
       return n
     }
 
-    for (const [symbol, feeAsset] of Object.entries(xc.regFees)) {
-      const asset = app().assets[feeAsset.id]
+    for (const [symbol, bondAsset] of Object.entries(xc.bondAssets)) {
+      const asset = app().assets[bondAsset.id]
       if (!asset) continue
       const unitInfo = asset.unitInfo
       const assetNode = page.assetTmpl.cloneNode(true) as HTMLElement
-      Doc.bind(assetNode, 'click', () => { this.success(feeAsset.id) })
-      const assetTmpl = this.assetTmpls[feeAsset.id] = Doc.parseTemplate(assetNode)
+      Doc.bind(assetNode, 'click', () => { this.success(bondAsset.id) })
+      const assetTmpl = this.assetTmpls[bondAsset.id] = Doc.parseTemplate(assetNode)
       page.assets.appendChild(assetNode)
       assetTmpl.logo.src = Doc.logoPath(symbol)
-      const fee = Doc.formatCoinValue(feeAsset.amount, unitInfo)
+      const fee = Doc.formatCoinValue(bondAsset.amount, unitInfo)
       assetTmpl.feeAmt.textContent = String(fee)
       assetTmpl.feeSymbol.replaceWith(Doc.symbolize(asset.symbol))
-      assetTmpl.confs.textContent = String(feeAsset.confs)
+      assetTmpl.confs.textContent = String(bondAsset.confs)
       setReadyMessage(assetTmpl.ready, asset)
 
       let count = 0
       for (const mkt of Object.values(xc.markets)) {
-        if (mkt.baseid !== feeAsset.id && mkt.quoteid !== feeAsset.id) continue
-        const node = marketNode(mkt, feeAsset.id)
+        if (mkt.baseid !== bondAsset.id && mkt.quoteid !== bondAsset.id) continue
+        const node = marketNode(mkt, bondAsset.id)
         if (!node) continue
         count++
         assetTmpl.markets.appendChild(node)
@@ -962,7 +974,7 @@ function setReadyMessage (el: PageElement, asset: SupportedAsset) {
 
 /*
  * WalletWaitForm is a form used to track the wallet sync status and balance
- * in preparation for paying the registration fee.
+ * in preparation for posting a bond.
  */
 export class WalletWaitForm {
   form: HTMLElement
@@ -972,7 +984,7 @@ export class WalletWaitForm {
   assetID: number
   parentID?: number
   xc: Exchange
-  regFee: FeeAsset
+  bondAsset: BondAsset
   progressCache: ProgressPoint[]
   progressed: boolean
   funded: boolean
@@ -1015,7 +1027,7 @@ export class WalletWaitForm {
     const page = this.page
     const asset = app().assets[wallet.assetID]
     this.parentID = asset.token ? asset.token.parentID : undefined
-    const fee = this.regFee = this.xc.regFees[asset.symbol]
+    const bondAsset = this.bondAsset = this.xc.bondAssets[asset.symbol]
 
     const symbolize = (el: PageElement, symbol: string) => {
       Doc.empty(el)
@@ -1025,13 +1037,13 @@ export class WalletWaitForm {
     for (const span of Doc.applySelector(this.form, '.unit')) symbolize(span, asset.symbol)
     page.logo.src = Doc.logoPath(asset.symbol)
     page.depoAddr.textContent = wallet.address
-    page.fee.textContent = Doc.formatCoinValue(fee.amount, asset.unitInfo)
+    page.fee.textContent = Doc.formatCoinValue(bondAsset.amount, asset.unitInfo)
 
     Doc.hide(page.syncUncheck, page.syncCheck, page.balUncheck, page.balCheck, page.syncRemainBox)
     Doc.show(page.balanceBox)
 
     if (txFee > 0) {
-      page.totalFees.textContent = Doc.formatCoinValue(fee.amount + txFee, asset.unitInfo)
+      page.totalFees.textContent = Doc.formatCoinValue(bondAsset.amount + txFee, asset.unitInfo)
       Doc.show(page.txFeeBox)
       Doc.hide(page.sendEnough, page.sendEnoughForToken, page.sendEnoughWithEst)
 
@@ -1040,7 +1052,7 @@ export class WalletWaitForm {
         const parentAsset = app().assets[asset.token.parentID]
         page.txFee.textContent = Doc.formatCoinValue(txFee, parentAsset.unitInfo)
         page.parentFees.textContent = Doc.formatCoinValue(txFee, parentAsset.unitInfo)
-        page.tokenFees.textContent = Doc.formatCoinValue(fee.amount, asset.unitInfo)
+        page.tokenFees.textContent = Doc.formatCoinValue(bondAsset.amount, asset.unitInfo)
         symbolize(page.txFeeUnit, parentAsset.symbol)
         symbolize(page.parentUnit, parentAsset.symbol)
         symbolize(page.parentBalUnit, parentAsset.symbol)
@@ -1056,7 +1068,7 @@ export class WalletWaitForm {
     }
 
     Doc.show(wallet.synced ? page.syncCheck : wallet.syncProgress >= 1 ? page.syncSpinner : page.syncUncheck)
-    Doc.show(wallet.balance.available > fee.amount ? page.balCheck : page.balUncheck)
+    Doc.show(wallet.balance.available > bondAsset.amount ? page.balCheck : page.balUncheck)
 
     page.progress.textContent = (wallet.syncProgress * 100).toFixed(1)
 
@@ -1096,7 +1108,7 @@ export class WalletWaitForm {
       if (parentAvail < this.txFee) return
     }
 
-    if (avail <= this.regFee.amount) return
+    if (avail <= this.bondAsset.amount) return
 
     Doc.show(page.balCheck)
     Doc.hide(page.balUncheck, page.balanceBox, page.sendEnough)
@@ -1556,7 +1568,7 @@ export class DEXAddressForm {
       }
       return
     }
-    if (!this.dexToUpdate && (skipRegistration || res.paid)) {
+    if (!this.dexToUpdate && (skipRegistration || res.paid || Object.keys(res.xc.pendingBonds).length > 0)) {
       await app().fetchUser()
       await app().loadPage('markets')
       return

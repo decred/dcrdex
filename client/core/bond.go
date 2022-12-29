@@ -641,6 +641,8 @@ func (c *Core) monitorBondConfs(dc *dexConnection, bond *asset.Bond, reqConfs ui
 		c.updateAssetBalance(bond.AssetID)
 	}
 
+	c.updatePendingBondConfs(dc, bond.AssetID, bond.CoinID, lastConfs)
+
 	trigger := func() (bool, error) {
 		// Retrieve the current wallet in case it was reconfigured.
 		wallet, _ := c.wallet(assetID) // We already know the wallet is there by now.
@@ -652,12 +654,13 @@ func (c *Core) monitorBondConfs(dc *dexConnection, bond *asset.Bond, reqConfs ui
 		if confs != lastConfs {
 			c.updateAssetBalance(assetID)
 			lastConfs = confs
+			c.updatePendingBondConfs(dc, bond.AssetID, bond.CoinID, confs)
 		}
 
 		if confs < reqConfs {
-			details := fmt.Sprintf("Fee payment confirmations %v/%v", confs, reqConfs)
+			details := fmt.Sprintf("Bond confirmations %v/%v", confs, reqConfs)
 			c.notify(newBondPostNoteWithConfirmations(TopicRegUpdate, string(TopicRegUpdate),
-				details, db.Data, assetID, int32(confs), host))
+				details, db.Data, assetID, coinIDStr, int32(confs), host))
 		}
 
 		return confs >= reqConfs, nil
@@ -1245,7 +1248,7 @@ func (c *Core) makeAndPostBond(dc *dexConnection, acctExists bool, wallet *xcWal
 	details := fmt.Sprintf("Waiting for %d confirmations to post bond %v (%s) to %s",
 		reqConfs, bondCoinStr, unbip(bond.AssetID), dc.acct.host) // TODO: subject, detail := c.formatDetails(...)
 	c.notify(newBondPostNoteWithConfirmations(TopicBondConfirming, string(TopicBondConfirming),
-		details, db.Success, bond.AssetID, 0, dc.acct.host))
+		details, db.Success, bond.AssetID, bondCoinStr, 0, dc.acct.host))
 	// Set up the coin waiter, which watches confirmations so the user knows
 	// when to expect their account to be marked paid by the server.
 	c.monitorBondConfs(dc, bond, reqConfs)
@@ -1253,10 +1256,21 @@ func (c *Core) makeAndPostBond(dc *dexConnection, acctExists bool, wallet *xcWal
 	return bond.CoinID, nil
 }
 
+func (c *Core) updatePendingBondConfs(dc *dexConnection, assetID uint32, coinID []byte, confs uint32) {
+	dc.acct.authMtx.Lock()
+	defer dc.acct.authMtx.Unlock()
+	bondIDStr := coinIDString(assetID, coinID)
+	dc.acct.pendingBondsConfs[bondIDStr] = confs
+	c.log.Errorf("attempted to update confs for bond %s not in pending bonds slice", bondIDStr)
+}
+
 func (c *Core) bondConfirmed(dc *dexConnection, assetID uint32, coinID []byte, newTier int64) error {
+	bondIDStr := coinIDString(assetID, coinID)
+
 	// Update dc.acct.{bonds,pendingBonds,tier} under authMtx lock.
 	var foundPending, foundConfirmed bool
 	dc.acct.authMtx.Lock()
+	delete(dc.acct.pendingBondsConfs, bondIDStr)
 	for i, bond := range dc.acct.pendingBonds {
 		if bond.AssetID == assetID && bytes.Equal(bond.CoinID, coinID) {
 			// Delete the bond from pendingBonds and move it to (active) bonds.
@@ -1281,7 +1295,6 @@ func (c *Core) bondConfirmed(dc *dexConnection, assetID uint32, coinID []byte, n
 	isAuthed := dc.acct.isAuthed
 	dc.acct.authMtx.Unlock()
 
-	bondIDStr := coinIDString(assetID, coinID)
 	if foundPending {
 		// Set bond confirmed in the DB.
 		err := c.db.ConfirmBond(dc.acct.host, assetID, coinID)

@@ -92,8 +92,8 @@ export default class RegistrationPage extends BasePage {
       const asset = app().assets[assetID]
       const wallet = asset.wallet
       if (wallet) {
-        const fee = this.currentDEX.regFees[asset.symbol]
-        if (wallet.synced && wallet.balance.available > fee.amount) {
+        const bondAsset = this.currentDEX.bondAssets[asset.symbol]
+        if (wallet.synced && wallet.balance.available > bondAsset.amount) {
           this.animateConfirmForm(page.regAssetForm)
           return
         }
@@ -250,9 +250,9 @@ export default class RegistrationPage extends BasePage {
     const page = this.page
     const asset = user.assets[assetID]
     const wallet = asset.wallet
-    const feeAmt = this.currentDEX.regFees[asset.symbol].amount
+    const bondAmt = this.currentDEX.bondAssets[asset.symbol].amount
 
-    if (wallet.synced && wallet.balance.available > feeAmt) {
+    if (wallet.synced && wallet.balance.available > bondAmt) {
       await this.animateConfirmForm(page.newWalletForm)
       return
     }

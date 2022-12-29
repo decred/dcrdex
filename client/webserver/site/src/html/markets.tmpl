@@ -202,6 +202,15 @@
 
               <div class="fs15 pt-3 text-center d-hide" id="loaderMsg"></div>
 
+              {{- /* CREATE ACCOUNT TO TRADE */ -}}
+              <div id="notRegistered" class="d-hide">
+                <div class="p-3 flex-center fs16 grey">[[[create_account_to_trade]]]</div>
+                <div class="brdrtop brdrbottom flex-center p-2">
+                  <p class="text-center fs14 p-2 m-0">[[[need_to_register_msg]]]</p>
+                  <button data-tmpl="registerBttn" type="button" class="pointer hoverbg text-center p-2 text-nowrap">[[[Create Account]]]</button>
+                </div>
+              </div>
+
               {{- /* REGISTRATION STATUS */ -}}
               <div class="d-hide p-2 mt-2" id="registrationStatus">
                 <div class="p-0 w-100">
@@ -211,6 +220,17 @@
                     </p>
                     <span id="regStatusConfsDisplay"></span>
                   </div>
+                </div>
+              </div>
+
+              {{- /* BOND REQUIRED TO TRADE */ -}}
+              <div class="d-hide p-2 mt-2" id="bondRequired">
+                <div class="p-3 flex-center fs16 grey">[[[action_required_to_trade]]]</div>
+                <div class="brdrtop brdrbottom flex-center p-2">
+                  <p class="text-center fs14 sans-light p-2 m-0">
+                  [[[acct_tier_post_bond]]]
+                  <a id="dexSettingsLink" class="fs15 hoverbg subtlelink">[[[enable_bond_maintenance]]]</a>
+                  </p>
                 </div>
               </div>
 
@@ -323,15 +343,6 @@
                 </div>
                 <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="orderErr"></div>
               </form>
-
-              {{- /* CREATE ACCOUNT TO TRADE */ -}}
-              <div id="notRegistered" class="d-hide">
-                <div class="p-3 flex-center fs16 grey">[[[create_account_to_trade]]]</div>
-                <div class="brdrtop brdrbottom flex-center p-2">
-                  <p class="text-center fs14 p-2 m-0">[[[need_to_register_msg]]]</p>
-                  <button data-tmpl="registerBttn" type="button" class="pointer hoverbg text-center p-2 text-nowrap">[[[Create Account]]]</button>
-                </div>
-              </div>
 
               {{- /* BALANCES */ -}}
               <div id="noWallet" class="p-3 flex-center fs16 grey d-hide">
