@@ -85,11 +85,11 @@ var Tokens = map[uint32]*Token{
 			},
 		},
 		NetTokens: map[dex.Network]*NetToken{
-			dex.Mainnet: {
+			dex.Mainnet: { // no dextt on mainnet
 				Address:       common.Address{},
 				SwapContracts: map[uint32]*SwapContract{},
 			},
-			dex.Testnet: {
+			dex.Testnet: { // no dextt on goerli
 				Address:       common.Address{},
 				SwapContracts: map[uint32]*SwapContract{},
 			},
@@ -159,8 +159,21 @@ var Tokens = map[uint32]*Token{
 		},
 		NetTokens: map[dex.Network]*NetToken{
 			dex.Mainnet: {
-				Address:       common.Address{},
-				SwapContracts: map[uint32]*SwapContract{},
+				Address: common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"), // https://etherscan.io/address/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+				SwapContracts: map[uint32]*SwapContract{
+					0: { // https://etherscan.io/address/0x1bbd020ddd6dc01f974aa74d2d727b2a6782f32d#code
+						Address: common.HexToAddress("0x1bbd020DDD6dc01f974Aa74D2D727B2A6782F32D"),
+						Gas: Gases{
+							Swap:      175_000,
+							SwapAdd:   115_000,
+							Redeem:    87_000,
+							RedeemAdd: 33_000,
+							Refund:    67_000,
+							Approve:   65_000,
+							Transfer:  70_000,
+						},
+					},
+				},
 			},
 			dex.Testnet: {
 				Address: common.HexToAddress("0x07865c6e87b9f70255377e024ace6630c1eaa37f"),
@@ -208,7 +221,7 @@ var Tokens = map[uint32]*Token{
 					},
 				},
 			},
-			dex.Simnet: {
+			dex.Simnet: { // no usdc on simnet, dextt instead
 				Address:       common.Address{},
 				SwapContracts: map[uint32]*SwapContract{},
 			},

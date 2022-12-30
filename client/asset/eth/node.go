@@ -158,9 +158,7 @@ func prepareNode(cfg *nodeConfig) (*node.Node, error) {
 	case dex.Testnet:
 		urls = params.GoerliBootnodes
 	case dex.Mainnet:
-		// urls = params.MainnetBootnodes
-		// TODO: Allow.
-		return nil, fmt.Errorf("eth cannot be used on mainnet")
+		urls = params.MainnetBootnodes
 	default:
 		return nil, fmt.Errorf("unknown network ID: %d", uint8(cfg.net))
 	}
@@ -210,9 +208,8 @@ func ethChainConfig(network dex.Network) (c ethconfig.Config, err error) {
 		ethCfg.Genesis = core.DefaultGoerliGenesisBlock()
 		ethCfg.NetworkId = params.GoerliChainConfig.ChainID.Uint64()
 	case dex.Mainnet:
-		// urls = params.MainnetBootnodes
-		// TODO: Allow.
-		return c, fmt.Errorf("eth cannot be used on mainnet")
+		ethCfg.Genesis = core.DefaultGenesisBlock()
+		ethCfg.NetworkId = params.MainnetChainConfig.ChainID.Uint64()
 	default:
 		return c, fmt.Errorf("unknown network ID: %d", uint8(network))
 	}
