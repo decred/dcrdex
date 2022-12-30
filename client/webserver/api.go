@@ -1086,8 +1086,8 @@ func (s *WebServer) apiChangeAppPass(w http.ResponseWriter, r *http.Request) {
 			log.Errorf("unable to cache password: %w", err)
 			clearCookie(pwKeyCK, w)
 		} else {
-			zero(key)
 			setCookie(pwKeyCK, hex.EncodeToString(key), w)
+			zero(key)
 		}
 	}
 
