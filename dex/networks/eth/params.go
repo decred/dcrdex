@@ -44,7 +44,7 @@ var (
 
 	ContractAddresses = map[uint32]map[dex.Network]common.Address{
 		0: {
-			dex.Mainnet: common.Address{},
+			dex.Mainnet: common.HexToAddress("0x8C17e4968B6903E1601be82Ca989c5B5E2c7b400"),
 			dex.Simnet:  common.HexToAddress("0x2f68e723b8989ba1c6a9f03e42f33cb7dc9d606f"),
 			dex.Testnet: common.HexToAddress("0x198463496037754564e9bea5418Bf4117Db0520C"),
 		},
@@ -240,9 +240,6 @@ var testTokenID, _ = dex.BipSymbolID("dextt.eth")
 var usdcTokenID, _ = dex.BipSymbolID("usdc.eth")
 
 // Gases lists the expected gas required for various DEX and wallet operations.
-// ★★ IMPORTANT ★★  By policy, clients should allow servers to adjust Swap and
-// Redeem gas values in their *dex.Asset up to but not over 2x the value listed
-// in VersionedGases or Tokens.
 type Gases struct {
 	// Approve is the amount of gas needed to approve the swap contract for
 	// transferring tokens.

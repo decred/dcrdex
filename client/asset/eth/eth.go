@@ -59,7 +59,7 @@ func init() {
 	asset.Register(BipID, &Driver{})
 	// Test token
 	registerToken(simnetTokenID, "A token wallet for the DEX test token. Used for testing DEX software.", dex.Simnet)
-	registerToken(usdcTokenID, "The USDC Ethereum ERC20 token.", dex.Testnet)
+	registerToken(usdcTokenID, "The USDC Ethereum ERC20 token.", dex.Mainnet, dex.Testnet)
 }
 
 const (

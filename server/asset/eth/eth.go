@@ -261,16 +261,6 @@ func unconnectedETH(logger dex.Logger, net dex.Network) (*ETHBackend, error) {
 // NewBackend is the exported constructor by which the DEX will import the
 // Backend.
 func NewBackend(configPath string, log dex.Logger, net dex.Network) (*ETHBackend, error) {
-	switch net {
-	case dex.Simnet:
-	case dex.Testnet:
-	case dex.Mainnet:
-		// TODO: Allow. When?
-		return nil, fmt.Errorf("eth cannot be used on mainnet")
-	default:
-		return nil, fmt.Errorf("unknown network ID: %d", net)
-	}
-
 	file, err := os.Open(configPath)
 	if err != nil {
 		return nil, err
@@ -310,7 +300,7 @@ func NewBackend(configPath string, log dex.Logger, net dex.Network) (*ETHBackend
 		return nil, fmt.Errorf("no contract address for eth version %d on %s", ethContractVersion, eth.net)
 	}
 
-	eth.node = newRPCClient(eth.net, endpoints, ethContractAddr, log.SubLogger("RPC"))
+	eth.node = newRPCClient(net, endpoints, ethContractAddr, log.SubLogger("RPC"))
 	return eth, nil
 }
 
