@@ -660,7 +660,7 @@ func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, 
 	if err != nil {
 		return false, err
 	}
-	dir := filepath.Join(dataDir, chainParams.Name, "spv")
+	dir := filepath.Join(dataDir, chainParams.Name)
 	// timeout and recoverWindow arguments borrowed from btcwallet directly.
 	loader := wallet.NewLoader(chainParams, dir, true, dbTimeout, 250)
 	return loader.WalletExists()
@@ -699,7 +699,8 @@ func (d *Driver) Create(params *asset.CreateWalletParams) error {
 		return err
 	}
 
-	return createSPVWallet(params.Pass, params.Seed, cfg.AdjustedBirthday(), params.DataDir,
+	dir := filepath.Join(params.DataDir, chainParams.Name)
+	return createSPVWallet(params.Pass, params.Seed, cfg.AdjustedBirthday(), dir,
 		params.Logger, cfg.NumExternalAddresses, cfg.NumInternalAddresses, chainParams)
 }
 
@@ -1243,7 +1244,7 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 		cfg:         walletCfg,
 		acctNum:     defaultAcctNum,
 		acctName:    defaultAcctName,
-		dir:         filepath.Join(cfg.WalletCFG.DataDir, cfg.ChainParams.Name, "spv"),
+		dir:         filepath.Join(cfg.WalletCFG.DataDir, cfg.ChainParams.Name),
 		txBlocks:    make(map[chainhash.Hash]*hashEntry),
 		checkpoints: make(map[outPoint]*scanCheckpoint),
 		log:         cfg.Logger.SubLogger("SPV"),

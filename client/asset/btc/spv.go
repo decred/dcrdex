@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync/atomic"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/btcsuite/btcwallet/wallet/txauthor"
 	"github.com/btcsuite/btcwallet/walletdb"
 	"github.com/btcsuite/btcwallet/wtxmgr"
+	"github.com/jrick/logrotate/rotator"
 	"github.com/lightninglabs/neutrino"
 )
 
@@ -58,11 +60,8 @@ type btcSPVWallet struct {
 var _ BTCWallet = (*btcSPVWallet)(nil)
 
 // createSPVWallet creates a new SPV wallet.
-func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dataDir string, log dex.Logger, extIdx, intIdx uint32, net *chaincfg.Params) error {
-	netDir := filepath.Join(dataDir, net.Name)
-	walletDir := filepath.Join(netDir, spvDir)
-
-	if err := logNeutrino(netDir); err != nil {
+func createSPVWallet(privPass []byte, seed []byte, bday time.Time, walletDir string, log dex.Logger, extIdx, intIdx uint32, net *chaincfg.Params) error {
+	if err := logNeutrino(walletDir); err != nil {
 		return fmt.Errorf("error initializing btcwallet+neutrino logging: %w", err)
 	}
 
@@ -140,8 +139,7 @@ func (w *btcSPVWallet) updateDBBirthday(bday time.Time) error {
 // Start initializes the *btcwallet.Wallet and its supporting players and
 // starts syncing.
 func (w *btcSPVWallet) Start() (SPVService, error) {
-	netDir := filepath.Dir(w.dir)
-	if err := logNeutrino(netDir); err != nil {
+	if err := logNeutrino(w.dir); err != nil {
 		return nil, fmt.Errorf("error initializing btcwallet+neutrino logging: %v", err)
 	}
 	// timeout and recoverWindow arguments borrowed from btcwallet directly.
@@ -492,6 +490,23 @@ func (s *secretSource) GetScript(addr btcutil.Address) ([]byte, error) {
 	return msa.Script()
 }
 
+var (
+	// loggingInited will be set when the log rotator has been initialized.
+	loggingInited uint32
+)
+
+// logRotator initializes a rotating file logger.
+func logRotator(dir string) (*rotator.Rotator, error) {
+	const maxLogRolls = 8
+	logDir := filepath.Join(dir, logDirName)
+	if err := os.MkdirAll(logDir, 0744); err != nil {
+		return nil, fmt.Errorf("error creating log directory: %w", err)
+	}
+
+	logFilename := filepath.Join(logDir, logFileName)
+	return rotator.New(logFilename, 32*1024, false, maxLogRolls)
+}
+
 // logNeutrino initializes logging in the neutrino + wallet packages. Logging
 // only has to be initialized once, so an atomic flag is used internally to
 // return early on subsequent invocations.
@@ -500,17 +515,17 @@ func (s *secretSource) GetScript(addr btcutil.Address) ([]byte, error) {
 // there are concurrency issues with that since btcd and btcwallet have
 // unsupervised goroutines still running after shutdown. So we leave the rotator
 // running at the risk of losing some logs.
-func logNeutrino(dir string) error {
+func logNeutrino(walletDir string) error {
 	if !atomic.CompareAndSwapUint32(&loggingInited, 0, 1) {
 		return nil
 	}
 
-	logSpinner, err := logRotator(dir)
+	logSpinner, err := logRotator(walletDir)
 	if err != nil {
 		return fmt.Errorf("error initializing log rotator: %w", err)
 	}
 
-	backendLog := btclog.NewBackend(logWriter{logSpinner})
+	backendLog := btclog.NewBackend(logSpinner)
 
 	logger := func(name string, lvl btclog.Level) btclog.Logger {
 		l := backendLog.Logger(name)
