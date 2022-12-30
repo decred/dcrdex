@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
@@ -50,7 +51,6 @@ import (
 	"github.com/btcsuite/btcwallet/walletdb"
 	_ "github.com/btcsuite/btcwallet/walletdb/bdb" // bdb init() registers a driver
 	"github.com/btcsuite/btcwallet/wtxmgr"
-	"github.com/jrick/logrotate/rotator"
 	"github.com/lightninglabs/neutrino"
 	"github.com/lightninglabs/neutrino/headerfs"
 )
@@ -72,8 +72,7 @@ const (
 
 	maxFutureBlockTime = 2 * time.Hour // see MaxTimeOffsetSeconds in btcd/blockchain/validate.go
 	neutrinoDBName     = "neutrino.db"
-	spvDir             = "spv"
-	logDirName         = "spvlogs"
+	logDirName         = "logs"
 	logFileName        = "neutrino.log"
 	defaultAcctNum     = 0
 	defaultAcctName    = "default"
@@ -198,23 +197,6 @@ func extendAddresses(extIdx, intIdx uint32, btcw *wallet.Wallet) error {
 	})
 }
 
-var (
-	// loggingInited will be set when the log rotator has been initialized.
-	loggingInited uint32
-)
-
-// logRotator initializes a rotating file logger.
-func logRotator(dir string) (*rotator.Rotator, error) {
-	const maxLogRolls = 8
-	logDir := filepath.Join(dir, logDirName)
-	if err := os.MkdirAll(logDir, 0744); err != nil {
-		return nil, fmt.Errorf("error creating log directory: %w", err)
-	}
-
-	logFilename := filepath.Join(logDir, logFileName)
-	return rotator.New(logFilename, 32*1024, false, maxLogRolls)
-}
-
 // spendingInput is added to a filterScanResult if a spending input is found.
 type spendingInput struct {
 	txHash      chainhash.Hash
@@ -251,16 +233,6 @@ type hashEntry struct {
 type scanCheckpoint struct {
 	res        *filterScanResult
 	lastAccess time.Time
-}
-
-// logWriter implements an io.Writer that outputs to a rotating log file.
-type logWriter struct {
-	*rotator.Rotator
-}
-
-// Write writes the data in p to the log file.
-func (w logWriter) Write(p []byte) (n int, err error) {
-	return w.Rotator.Write(p)
 }
 
 // spvWallet is an in-process btcwallet.Wallet + neutrino light-filter-based
@@ -1091,7 +1063,7 @@ func (w *spvWallet) getBestBlockHeader() (*blockHeader, error) {
 }
 
 func (w *spvWallet) logFilePath() string {
-	return filepath.Join(filepath.Dir(w.dir), logDirName, logFileName)
+	return filepath.Join(w.dir, logDirName, logFileName)
 }
 
 // connect will start the wallet and begin syncing.
@@ -1155,28 +1127,47 @@ func (w *spvWallet) connect(ctx context.Context, wg *sync.WaitGroup) (err error)
 	return nil
 }
 
-// moveWalletData will move all wallet files to a backup directory.
+// moveWalletData will move all wallet files to a backup directory, but leaving
+// the logs folder.
 func (w *spvWallet) moveWalletData(backupDir string) error {
 	timeString := time.Now().Format("2006-01-02T15:04:05")
-	err := os.MkdirAll(backupDir, 0744)
+	backupFolder := filepath.Join(backupDir, w.chainParams.Name, timeString)
+	err := os.MkdirAll(backupFolder, 0744)
 	if err != nil {
 		return err
 	}
 
-	backupFolder := filepath.Join(backupDir, w.chainParams.Name, timeString)
-	// Copy wallet logs first. Even if there is an error, wallet files are
-	// still intact.
+	// Copy wallet logs folder since we do not move it.
 	backupLogDir := filepath.Join(backupFolder, logDirName)
-	walletLogDir := filepath.Dir(w.logFilePath())
+	walletLogDir := filepath.Join(w.dir, logDirName)
 	if err := copyDir(walletLogDir, backupLogDir); err != nil {
 		return err
 	}
 
-	walletBackupDir := filepath.Join(backupFolder, spvDir)
-	if err := os.Rename(w.dir, walletBackupDir); err != nil {
-		return err
-	}
-	return nil
+	// Move contents of the wallet dir, except the logs folder.
+	return filepath.WalkDir(w.dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == w.dir { // top
+			return nil
+		}
+		if d.IsDir() && d.Name() == logDirName {
+			return filepath.SkipDir
+		}
+		rel, err := filepath.Rel(w.dir, path)
+		if err != nil {
+			return err
+		}
+		err = os.Rename(path, filepath.Join(backupFolder, rel))
+		if err != nil {
+			return err
+		}
+		if d.IsDir() { // we just moved a folder, including the contents
+			return filepath.SkipDir
+		}
+		return nil
+	})
 }
 
 // copyFile copies a file from src to dst.

@@ -53,7 +53,7 @@ import (
 
 const (
 	DefaultM       uint64 = 784931 // From ltcutil. Used for gcs filters.
-	logDirName            = "spvlogs"
+	logDirName            = "logs"
 	neutrinoDBName        = "neutrino.db"
 	defaultAcctNum        = 0
 	dbTimeout             = 20 * time.Second
@@ -120,11 +120,8 @@ func openSPVWallet(dir string, cfg *btc.WalletConfig, btcParams *chaincfg.Params
 }
 
 // createSPVWallet creates a new SPV wallet.
-func createSPVWallet(privPass []byte, seed []byte, bday time.Time, dbDir string, log dex.Logger, extIdx, intIdx uint32, net *ltcchaincfg.Params) error {
-	netDir := filepath.Join(dbDir, net.Name)
-	walletDir := filepath.Join(netDir, "spv")
-
-	if err := logNeutrino(netDir, log); err != nil {
+func createSPVWallet(privPass []byte, seed []byte, bday time.Time, walletDir string, log dex.Logger, extIdx, intIdx uint32, net *ltcchaincfg.Params) error {
+	if err := logNeutrino(walletDir, log); err != nil {
 		return fmt.Errorf("error initializing dcrwallet+neutrino logging: %w", err)
 	}
 
@@ -183,8 +180,7 @@ func (w *ltcSPVWallet) walletParams() *ltcchaincfg.Params {
 // Start initializes the *ltcwallet.Wallet and its supporting players and starts
 // syncing.
 func (w *ltcSPVWallet) Start() (btc.SPVService, error) {
-	netDir := filepath.Dir(w.dir)
-	if err := logNeutrino(netDir, w.log); err != nil {
+	if err := logNeutrino(w.dir, w.log); err != nil {
 		return nil, fmt.Errorf("error initializing dcrwallet+neutrino logging: %v", err)
 	}
 	// recoverWindow arguments borrowed from ltcwallet directly.
@@ -986,9 +982,9 @@ var (
 )
 
 // logRotator initializes a rotating file logger.
-func logRotator(netDir string) (*rotator.Rotator, error) {
+func logRotator(walletDir string) (*rotator.Rotator, error) {
 	const maxLogRolls = 8
-	logDir := filepath.Join(netDir, logDirName)
+	logDir := filepath.Join(walletDir, logDirName)
 	if err := os.MkdirAll(logDir, 0744); err != nil {
 		return nil, fmt.Errorf("error creating log directory: %w", err)
 	}
@@ -1005,12 +1001,12 @@ func logRotator(netDir string) (*rotator.Rotator, error) {
 // there are concurrency issues with that since btcd and btcwallet have
 // unsupervised goroutines still running after shutdown. So we leave the rotator
 // running at the risk of losing some logs.
-func logNeutrino(netDir string, errorLogger dex.Logger) error {
+func logNeutrino(walletDir string, errorLogger dex.Logger) error {
 	if !atomic.CompareAndSwapUint32(&loggingInited, 0, 1) {
 		return nil
 	}
 
-	logSpinner, err := logRotator(netDir)
+	logSpinner, err := logRotator(walletDir)
 	if err != nil {
 		return fmt.Errorf("error initializing log rotator: %w", err)
 	}

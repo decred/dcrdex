@@ -127,9 +127,9 @@ func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, 
 	if err != nil {
 		return false, err
 	}
-	netDir := filepath.Join(dataDir, chainParams.Name, "spv")
+	walletDir := filepath.Join(dataDir, chainParams.Name)
 	// recoverWindow argument borrowed from bchwallet directly.
-	loader := wallet.NewLoader(chainParams, netDir, true, 250)
+	loader := wallet.NewLoader(chainParams, walletDir, true, 250)
 	return loader.WalletExists()
 }
 
@@ -161,7 +161,8 @@ func (d *Driver) Create(params *asset.CreateWalletParams) error {
 		return err
 	}
 
-	return createSPVWallet(params.Pass, params.Seed, walletCfg.AdjustedBirthday(), params.DataDir,
+	walletDir := filepath.Join(params.DataDir, chainParams.Name)
+	return createSPVWallet(params.Pass, params.Seed, walletCfg.AdjustedBirthday(), walletDir,
 		params.Logger, recoveryCfg.NumExternalAddresses, recoveryCfg.NumInternalAddresses, chainParams)
 }
 
