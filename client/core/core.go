@@ -1193,6 +1193,16 @@ func (c *Core) dex(addr string) (*dexConnection, bool, error) {
 	return dc, dc.status() == comms.Connected, nil
 }
 
+// addDexConnection is a helper used to add a dex connection.
+func (c *Core) addDexConnection(dc *dexConnection) {
+	if dc == nil {
+		return
+	}
+	c.connMtx.Lock()
+	c.conns[dc.acct.host] = dc
+	c.connMtx.Unlock()
+}
+
 // Get the *dexConnection for the host. Return an error if the DEX is not
 // connected.
 func (c *Core) connectedDEX(addr string) (*dexConnection, error) {
@@ -3723,9 +3733,7 @@ func (c *Core) upgradeConnection(dc *dexConnection) {
 		go c.listen(dc)
 		go dc.subPriceFeed()
 	}
-	c.connMtx.Lock()
-	c.conns[dc.acct.host] = dc
-	c.connMtx.Unlock()
+	c.addDexConnection(dc)
 }
 
 // DiscoverAccount fetches the DEX server's config, and if the server supports
@@ -3944,9 +3952,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	if paid {
 		registrationComplete = true
 		// The listen goroutine is already running, now track the conn.
-		c.connMtx.Lock()
-		c.conns[dc.acct.host] = dc
-		c.connMtx.Unlock()
+		c.addDexConnection(dc)
 
 		feeCoinStr := coinIDString(dc.acct.feeAssetID, dc.acct.feeCoin)
 		return &RegisterResult{FeeID: feeCoinStr, ReqConfirms: 0}, nil
@@ -3975,10 +3981,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		return nil, err
 	}
 	if paid { // would have gotten this from discoverAccount
-		c.connMtx.Lock()
-		c.conns[dc.acct.host] = dc
-		c.connMtx.Unlock()
-
+		c.addDexConnection(dc)
 		registrationComplete = true
 		// register already promoted the connection
 		feeCoinStr := coinIDString(dc.acct.feeAssetID, dc.acct.feeCoin)
@@ -4020,9 +4023,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 
 	// Registration complete.
 	registrationComplete = true
-	c.connMtx.Lock()
-	c.conns[host] = dc
-	c.connMtx.Unlock()
+	c.addDexConnection(dc)
 
 	err = c.db.CreateAccount(&db.AccountInfo{
 		Host:             dc.acct.host,
@@ -6341,8 +6342,7 @@ func (c *Core) initialize() {
 // connectAccount makes a connection to the DEX for the given account. If a
 // non-nil dexConnection is returned, it was inserted into the conns map even if
 // the initial connection attempt failed (connected == false), and the connect
-// retry / keepalive loop is active. If there was already a dexConnection, it is
-// first stopped.
+// retry / keepalive loop is active.
 func (c *Core) connectAccount(acct *db.AccountInfo) (dc *dexConnection, connected bool) {
 	// if !acct.Paid && len(acct.FeeCoin) == 0 {
 	// 	// Register should have set this when creating the account that was
@@ -6358,22 +6358,6 @@ func (c *Core) connectAccount(acct *db.AccountInfo) (dc *dexConnection, connecte
 		return
 	}
 
-	c.connMtx.RLock()
-	if dc := c.conns[host]; dc != nil {
-		dc.connMaster.Disconnect()
-		dc.acct.lock()
-		dc.booksMtx.Lock()
-		for m, b := range dc.books {
-			b.closeFeeds()
-			if b.closeTimer != nil {
-				b.closeTimer.Stop()
-			}
-			delete(dc.books, m)
-		}
-		dc.booksMtx.Unlock()
-	} // leave it in the map so it remains listed if connectDEX fails
-	c.connMtx.RUnlock()
-
 	dc, err = c.connectDEX(acct)
 	if dc == nil {
 		c.log.Errorf("Unable to prepare DEX %s: %v", host, err)
@@ -6386,9 +6370,7 @@ func (c *Core) connectAccount(acct *db.AccountInfo) (dc *dexConnection, connecte
 		connected = true
 	}
 
-	c.connMtx.Lock()
-	c.conns[host] = dc
-	c.connMtx.Unlock()
+	c.addDexConnection(dc)
 
 	return
 }

@@ -2066,9 +2066,7 @@ func TestRegister(t *testing.T) {
 	form.Addr = tDexHost
 
 	// account already exists
-	tCore.connMtx.Lock()
-	tCore.conns[tDexHost] = dc
-	tCore.connMtx.Unlock()
+	tCore.addDexConnection(dc)
 	_, err = tCore.Register(form)
 	if !errorHasCode(err, dupeDEXErr) {
 		t.Fatalf("wrong account exists error: %v", err)

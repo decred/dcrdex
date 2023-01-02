@@ -860,9 +860,7 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 		if paid {
 			success = true
 			// The listen goroutine is already running, now track the conn.
-			c.connMtx.Lock()
-			c.conns[dc.acct.host] = dc
-			c.connMtx.Unlock()
+			c.addDexConnection(dc)
 			return &PostBondResult{ /* no new bond */ }, nil
 		}
 	}
@@ -997,9 +995,7 @@ func (c *Core) makeAndPostBond(dc *dexConnection, acctExists bool, wallet *xcWal
 	dc.acct.authMtx.Unlock()
 
 	if !acctExists { // *after* setting pendingBonds for rotateBonds accounting if targetTier>0
-		c.connMtx.Lock()
-		c.conns[dc.acct.host] = dc
-		c.connMtx.Unlock()
+		c.addDexConnection(dc)
 		// NOTE: it's still not authed if this was the first bond
 	}
 
