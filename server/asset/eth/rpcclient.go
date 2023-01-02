@@ -18,7 +18,6 @@ import (
 	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -183,92 +182,14 @@ func (c *rpcclient) transaction(ctx context.Context, hash common.Hash) (tx *type
 // accountBalance gets the account balance, including the effects of known
 // unmined transactions.
 func (c *rpcclient) accountBalance(ctx context.Context, assetID uint32, addr common.Address) (*big.Int, error) {
-	tip, err := c.blockNumber(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("blockNumber error: %v", err)
-	}
-
-	// We need to subtract and pending outgoing value, but ignore any pending
-	// incoming value since that can't be spent until mined. So we can't using
-	// PendingBalanceAt or BalanceAt by themselves.
-	// We'll iterate tx pool transactions and subtract any value and fees being
-	// sent from this account. The rpc.Client doesn't expose the
-	// txpool_contentFrom => (*TxPool).ContentFrom RPC method, for whatever
-	// reason, so we'll have to use CallContext and copy the mimic the
-	// internal RPCTransaction type.
-	var txs map[string]map[string]*RPCTransaction
-	err = c.caller.CallContext(ctx, &txs, "txpool_contentFrom", addr)
-	if err != nil {
-		return nil, fmt.Errorf("contentFrom error: %w", err)
-	}
-
 	if assetID == BipID {
-		ethBalance, err := c.ec.BalanceAt(ctx, addr, big.NewInt(int64(tip)))
-		if err != nil {
-			return nil, err
-		}
-		outgoingEth := new(big.Int)
-		for _, group := range txs { // 2 groups, pending and queued
-			for _, tx := range group {
-				outgoingEth.Add(outgoingEth, tx.Value.ToInt())
-				gas := new(big.Int).SetUint64(uint64(tx.Gas))
-				if tx.GasPrice != nil && tx.GasPrice.ToInt().Cmp(bigZero) > 0 {
-					outgoingEth.Add(outgoingEth, new(big.Int).Mul(gas, tx.GasPrice.ToInt()))
-				} else if tx.GasFeeCap != nil {
-					outgoingEth.Add(outgoingEth, new(big.Int).Mul(gas, tx.GasFeeCap.ToInt()))
-				} else {
-					return nil, fmt.Errorf("cannot find fees for tx %s", tx.Hash)
-				}
-			}
-		}
-		return ethBalance.Sub(ethBalance, outgoingEth), nil
+		return c.ec.BalanceAt(ctx, addr, nil)
 	}
 
-	// For tokens, we'll do something similar, but with checks for pending txs
-	// that transfer tokens or pay to the swap contract.
 	bal := new(big.Int)
 	return bal, c.withTokener(assetID, func(tkn *tokener) error {
+		var err error
 		bal, err = tkn.balanceOf(ctx, addr)
-		if err != nil {
-			return err
-		}
-		for _, group := range txs {
-			for _, rpcTx := range group {
-				to := *rpcTx.To
-				if to == tkn.tokenAddr {
-					if sent := tkn.transferred(rpcTx.Input); sent != nil {
-						bal.Sub(bal, sent)
-					}
-				}
-				if to == tkn.contractAddr {
-					if swapped := tkn.swapped(rpcTx.Input); swapped != nil {
-						bal.Sub(bal, swapped)
-					}
-				}
-			}
-		}
-		return nil
+		return err
 	})
-}
-
-type RPCTransaction struct {
-	Value     *hexutil.Big    `json:"value"`
-	Gas       hexutil.Uint64  `json:"gas"`
-	GasPrice  *hexutil.Big    `json:"gasPrice"`
-	GasFeeCap *hexutil.Big    `json:"maxFeePerGas,omitempty"`
-	Hash      common.Hash     `json:"hash"`
-	To        *common.Address `json:"to"`
-	Input     hexutil.Bytes   `json:"input"`
-	// BlockHash        *common.Hash      `json:"blockHash"`
-	// BlockNumber      *hexutil.Big      `json:"blockNumber"`
-	// From             common.Address    `json:"from"`
-	// GasTipCap        *hexutil.Big      `json:"maxPriorityFeePerGas,omitempty"`
-	// Nonce            hexutil.Uint64    `json:"nonce"`
-	// TransactionIndex *hexutil.Uint64   `json:"transactionIndex"`
-	// Type             hexutil.Uint64    `json:"type"`
-	// Accesses         *types.AccessList `json:"accessList,omitempty"`
-	// ChainID          *hexutil.Big      `json:"chainId,omitempty"`
-	// V                *hexutil.Big      `json:"v"`
-	// R                *hexutil.Big      `json:"r"`
-	// S                *hexutil.Big      `json:"s"`
 }
