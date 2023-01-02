@@ -1456,6 +1456,15 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	// actor.
 	mktMatch := db.MatchID(acker.match.Match)
 
+	// If this is the maker's (optional) redeem ack sig, we can stop tracking
+	// the match. Do it here to avoid lock order violation (a deadlock trap).
+	if acker.isMaker && !acker.isAudit { // getting Sigs.MakerRedeem
+		log.Debugf("Deleting completed match %v", mktMatch)
+		s.matchMtx.Lock() // before locking matchTracker.mtx
+		s.deleteMatch(acker.match)
+		s.matchMtx.Unlock()
+	}
+
 	acker.match.mtx.Lock()
 	defer acker.match.mtx.Unlock()
 
@@ -1486,10 +1495,6 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	if acker.isMaker { // maker acknowledging the redeem req we sent regarding the taker redeem
 		acker.match.Sigs.MakerRedeem = ack.Sig
 		// We don't save that pointless sig anymore; use it as a flag.
-		log.Debugf("Deleting completed match %v", mktMatch)
-		s.matchMtx.Lock()
-		s.deleteMatch(acker.match)
-		s.matchMtx.Unlock()
 	} else { // taker acknowledging the redeem req we sent regarding the maker redeem
 		acker.match.Sigs.TakerRedeem = ack.Sig
 		if err = s.storage.SaveRedeemAckSigB(mktMatch, ack.Sig); err != nil {
