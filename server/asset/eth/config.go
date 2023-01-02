@@ -6,14 +6,13 @@
 package eth
 
 import (
-	"encoding/hex"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"decred.org/dcrdex/dex"
+	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/jessevdk/go-flags"
 )
@@ -108,7 +107,7 @@ func loadConfig(configPath string, net dex.Network, logger dex.Logger) (*config,
 		if cfg.JWT == "" {
 			return nil, fmt.Errorf("config missing jwt secret: %s", exConfStr)
 		}
-		if cfg.JWT, err = findJWTHex(cfg.JWT); err != nil {
+		if cfg.JWT, err = dexeth.FindJWTHex(cfg.JWT); err != nil {
 			return nil, fmt.Errorf("problem with jwt hex: %v: %s", err, exConfStr)
 		}
 	}
@@ -119,34 +118,4 @@ func loadConfig(configPath string, net dex.Network, logger dex.Logger) (*config,
 	}
 
 	return cfg, nil
-}
-
-// findJWTHex will detect if thing is hex or a file pointing to hex and return
-// that hex. Errors if not hex or a file with just hex.
-func findJWTHex(thing string) (string, error) {
-	// If the thing is hex pass it through.
-	hexStr := strings.TrimPrefix(thing, "0x")
-	_, hexErr := hex.DecodeString(strings.TrimPrefix(hexStr, "0x"))
-	if hexErr == nil {
-		return thing, nil
-	}
-	// If not a hex, check if it is a file.
-	fp := dex.CleanAndExpandPath(thing)
-	if _, err := os.Stat(fp); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("file at %s does not exist", fp)
-		}
-		return "", fmt.Errorf("jwt does not appear to be hex or a file location: hex error: %v: file error: %v", hexErr, err)
-	}
-	b, err := os.ReadFile(fp)
-	if err != nil {
-		return "", fmt.Errorf("unable to read jwt file at %s: %v", fp, err)
-	}
-	// Check if file contents are hex.
-	hexStr = strings.TrimRight(strings.TrimPrefix(string(b), "0x"), "\r\n")
-	_, err = hex.DecodeString(hexStr)
-	if err != nil {
-		return "", fmt.Errorf("file at %s does not appear to contain jwt hex: %v", fp, err)
-	}
-	return hexStr, nil
 }

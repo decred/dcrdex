@@ -405,16 +405,21 @@ func connectProviders(ctx context.Context, endpoints []endpoint, log dex.Logger,
 			if ep.jwt == "" {
 				rpcClient, err = rpc.DialWebsocket(ctx, wsURL.String(), "")
 			} else {
+				var jwt string
+				jwt, err = dexeth.FindJWTHex(ep.jwt)
+				if err != nil {
+					return nil, fmt.Errorf("unable to find or parse jwt secret: %v", err)
+				}
 				// Geth clients should always be able to get a
 				// websocket connection, making http unnecessary.
 				var authFn func(h http.Header) error
-				authFn, err = dexeth.JWTHTTPAuthFn(ep.jwt)
+				authFn, err = dexeth.JWTHTTPAuthFn(jwt)
 				if err != nil {
 					return nil, fmt.Errorf("unable to create auth function: %v", err)
 				}
 				rpcClient, err = rpc.DialOptions(ctx, wsURL.String(), rpc.WithHTTPAuth(authFn))
 			}
-			if err == nil {
+			if err == nil && rpcClient != nil {
 				ec = ethclient.NewClient(rpcClient)
 				h = make(chan *types.Header, 8)
 				sub, err = ec.SubscribeNewHead(ctx, h)
@@ -445,6 +450,15 @@ func connectProviders(ctx context.Context, endpoints []endpoint, log dex.Logger,
 				continue
 			}
 			ec = ethclient.NewClient(rpcClient)
+		}
+
+		if ep.jwt != "" {
+			// Check that the eth node supports needed apis.
+			if err := dexeth.CheckAPIModules(rpcClient, addr, log); err != nil {
+				ec.Close()
+				log.Errorf("API not compatible %q: %v", addr, err)
+				continue
+			}
 		}
 
 		// Get chain ID.

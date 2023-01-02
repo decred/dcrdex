@@ -87,7 +87,8 @@ var (
 	testnetWalletDir            = filepath.Join(homeDir, "ethtest", "testnet_contract_tests", "walletA")
 	testnetParticipantWalletDir = filepath.Join(homeDir, "ethtest", "testnet_contract_tests", "walletB")
 	alphaNodeDir                = filepath.Join(homeDir, "dextest", "eth", "alpha", "node")
-	alphaIPCFile                = filepath.Join(alphaNodeDir, "geth.ipc")
+	alphaAuthAddr               = "ws://127.0.0.1:8552"
+	alphaJWTFile                = filepath.Join(alphaNodeDir, "jwt.hex")
 	betaNodeDir                 = filepath.Join(homeDir, "dextest", "eth", "beta", "node")
 	betaIPCFile                 = filepath.Join(betaNodeDir, "geth.ipc")
 	ctx                         context.Context
@@ -294,7 +295,7 @@ func rpcEndpoints(net dex.Network) (initiator, participant *endpoint) {
 	if net == dex.Testnet {
 		return &rpcNode, &rpcNode
 	}
-	return &endpoint{addr: alphaIPCFile}, &endpoint{addr: betaIPCFile}
+	return &endpoint{addr: alphaAuthAddr, jwt: alphaJWTFile}, &endpoint{addr: betaIPCFile}
 }
 
 func prepareTestRPCClients(initiatorDir, participantDir string, net dex.Network) (err error) {

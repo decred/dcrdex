@@ -11,7 +11,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
-	"io/fs"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -998,68 +997,6 @@ func TestLoadConfig(t *testing.T) {
 		}
 		if err != nil {
 			t.Fatalf("unexpected error for test %q: %v", test.name, err)
-		}
-	}
-}
-
-func TestFindJWTHex(t *testing.T) {
-	tDir := t.TempDir()
-	tFilePath := filepath.Join(tDir, "jwt.hex")
-	tests := []struct {
-		name, jwtFileContents, jwt, wantHex string
-		noPerms                             bool
-		wantErr                             bool
-	}{{
-		name:    "ok hex",
-		jwt:     "baadbeef",
-		wantHex: "baadbeef",
-	}, {
-		name:            "ok file",
-		jwt:             tFilePath,
-		jwtFileContents: "baadbeef\n",
-		wantHex:         "baadbeef",
-	}, {
-		name:    "not hex and no file",
-		jwt:     tFilePath,
-		wantErr: true,
-	}, {
-		name:            "not hex but cant read file",
-		jwt:             tFilePath,
-		jwtFileContents: "baadbeef\n",
-		noPerms:         true,
-		wantErr:         true,
-	}, {
-		name:            "not hex and bad hex in file",
-		jwt:             tFilePath,
-		jwtFileContents: "saadbeef\n",
-		wantErr:         true,
-	}}
-	for _, test := range tests {
-		if test.jwtFileContents != "" {
-			perms := fs.FileMode(0666)
-			if test.noPerms {
-				perms = 0000
-			}
-			err := os.WriteFile(tFilePath, []byte(test.jwtFileContents), perms)
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
-		hex, err := findJWTHex(test.jwt)
-		if test.jwtFileContents != "" {
-			os.Remove(tFilePath)
-		}
-		if test.wantErr {
-			if err == nil {
-				t.Fatalf("expected error for test %q", test.name)
-			}
-			continue
-		}
-		if err != nil {
-			t.Fatalf("unexpected error for test %q: %v", test.name, err)
-		}
-		if hex != test.wantHex {
-			t.Fatalf("wanted jwt %q but got %q for test %q", test.wantHex, hex, test.name)
 		}
 	}
 }
