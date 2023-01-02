@@ -1,10 +1,12 @@
 package core
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"fmt"
 
+	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -208,23 +210,56 @@ func (c *Core) AccountImport(pw []byte, acct *Account, bonds []*db.Bond) error {
 
 // UpdateCert attempts to connect to a server using a new TLS certificate. If
 // the connection is successful, then the cert in the database is updated.
+// Updating cert for already connected dex will return an error.
 func (c *Core) UpdateCert(host string, cert []byte) error {
-	accountInfo, err := c.db.Account(host)
+	c.connMtx.RLock()
+	dc, found := c.conns[host]
+	c.connMtx.RUnlock()
+	if found && dc.status() == comms.Connected {
+		return errors.New("dex is already connected")
+	}
+
+	acct, err := c.db.Account(host)
 	if err != nil {
 		return err
 	}
 
-	accountInfo.Cert = cert
-
-	_, connected := c.connectAccount(accountInfo)
-	if !connected {
-		return errors.New("failed to connect using new cert")
+	// Ensure user provides a new cert.
+	if bytes.Equal(acct.Cert, cert) {
+		return errors.New("provided cert is the same with the old cert")
 	}
 
-	err = c.db.UpdateAccountInfo(accountInfo)
+	// Stop reconnect retry for previous dex connection first but leave it in
+	// the map so it remains listed incase we need it in the interim.
+	if found {
+		dc.connMaster.Disconnect()
+		dc.acct.lock()
+		dc.booksMtx.Lock()
+		for m, b := range dc.books {
+			b.closeFeeds()
+			if b.closeTimer != nil {
+				b.closeTimer.Stop()
+			}
+			delete(dc.books, m)
+		}
+		dc.booksMtx.Unlock()
+	}
+
+	acct.Cert = cert
+	dc, err = c.connectDEX(acct)
+	if err != nil {
+		if dc != nil {
+			dc.connMaster.Disconnect() // stop any retry loop for this new connection.
+		}
+		return fmt.Errorf("failed to connect using new cert (will attempt to restore old connection): %v", err)
+	}
+
+	err = c.db.UpdateAccountInfo(acct)
 	if err != nil {
 		return fmt.Errorf("failed to update account info: %w", err)
 	}
+
+	c.addDexConnection(dc)
 
 	return nil
 }

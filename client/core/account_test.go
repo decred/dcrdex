@@ -307,9 +307,7 @@ func TestUpdateDEXHost(t *testing.T) {
 		rig.db.acct.LegacyFeeCoin = encode.RandomBytes(32)
 		rig.db.acct.Host = tDexHost
 
-		tCore.connMtx.Lock()
-		tCore.conns[rig.acct.host] = rig.dc
-		tCore.connMtx.Unlock()
+		tCore.addDexConnection(rig.dc)
 
 		rig.dc.pendingFee = nil
 		if test.feePending {
