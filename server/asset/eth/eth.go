@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	dexconf "decred.org/dcrdex/dex/config"
+	"decred.org/dcrdex/dex/config"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
@@ -263,24 +263,28 @@ func unconnectedETH(logger dex.Logger, net dex.Network) (*ETHBackend, error) {
 	}}, nil
 }
 
-type endpoint struct {
-	addr string
-	jwt  string
-}
-
 // NewBackend is the exported constructor by which the DEX will import the
 // Backend.
-func NewBackend(configPath string, logger dex.Logger, net dex.Network) (*ETHBackend, error) {
-	cfg, err := loadConfig(configPath, net, logger)
-	if err != nil {
-		return nil, err
+func NewBackend(ipc string, logger dex.Logger, net dex.Network) (*ETHBackend, error) {
+	switch net {
+	case dex.Simnet:
+	case dex.Testnet:
+	case dex.Mainnet:
+		// TODO: Allow. When?
+		return nil, fmt.Errorf("eth cannot be used on mainnet")
+	default:
+		return nil, fmt.Errorf("unknown network ID: %d", net)
+	}
+
+	if ipc == "" {
+		ipc = defaultIPC
 	}
 
 	eth, err := unconnectedETH(logger, net)
 	if err != nil {
 		return nil, err
 	}
-	eth.node = newRPCClient(eth.net, &endpoint{addr: cfg.ADDR, jwt: cfg.JWT})
+	eth.node = newRPCClient(eth.net, ipc)
 	return eth, nil
 }
 
@@ -347,7 +351,7 @@ func (eth *ETHBackend) TokenBackend(assetID uint32, configPath string) (asset.Ba
 
 	gases := new(configuredTokenGases)
 	if configPath != "" {
-		if err := dexconf.ParseInto(configPath, gases); err != nil {
+		if err := config.ParseInto(configPath, gases); err != nil {
 			return nil, fmt.Errorf("error parsing fee overrides for token %d: %v", assetID, err)
 		}
 	}

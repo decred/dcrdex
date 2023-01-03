@@ -11,10 +11,8 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
-	"io/fs"
 	"math/big"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -920,146 +918,6 @@ func TestValidateSignature(t *testing.T) {
 		}
 		if err != nil {
 			t.Fatalf("unexpected error for test %q: %v", test.name, err)
-		}
-	}
-}
-
-func TestLoadConfig(t *testing.T) {
-	tDir := t.TempDir()
-	tFilePath := filepath.Join(tDir, "geth.conf")
-	tests := []struct {
-		name, cfgPath, cfg string
-		net                dex.Network
-		wantErr            bool
-	}{{
-		name: "ok deprecated ipc",
-		net:  dex.Simnet,
-	}, {
-		name:    "ok file ipc",
-		cfgPath: tFilePath,
-		cfg:     "addr=asdf.ipc",
-		net:     dex.Simnet,
-	}, {
-		name:    "ok file ws",
-		cfgPath: tFilePath,
-		cfg:     "addr=ws://1234\njwt=baadbeef",
-		net:     dex.Simnet,
-	}, {
-		name:    "can't use on mainnet",
-		net:     dex.Mainnet,
-		wantErr: true,
-	}, {
-		name:    "unknown net",
-		net:     dex.Network(100),
-		wantErr: true,
-	}, {
-		name:    "no file",
-		net:     dex.Simnet,
-		cfgPath: filepath.Join(tDir, "asdf.conf"),
-		wantErr: true,
-	}, {
-		name:    "malformed config = -> :",
-		cfgPath: tFilePath,
-		cfg:     "addr:ws://1234\njwt=asdf",
-		net:     dex.Simnet,
-		wantErr: true,
-	}, {
-		name:    "no addr",
-		cfgPath: tFilePath,
-		cfg:     "jwt=abcd",
-		net:     dex.Simnet,
-		wantErr: true,
-	}, {
-		name:    "not ipc but no jwt",
-		cfgPath: tFilePath,
-		cfg:     "addr=ws://1234",
-		net:     dex.Simnet,
-		wantErr: true,
-	}, {
-		name:    "not ipc and bad jwt",
-		cfgPath: tFilePath,
-		cfg:     "addr=ws://1234\njwt=saadbeef",
-		net:     dex.Simnet,
-		wantErr: true,
-	}}
-	for _, test := range tests {
-		if test.cfg != "" {
-			err := os.WriteFile(test.cfgPath, []byte(test.cfg), 0666)
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
-		_, err := loadConfig(test.cfgPath, test.net, tLogger)
-		if test.wantErr {
-			if err == nil {
-				t.Fatalf("expected error for test %q", test.name)
-			}
-			continue
-		}
-		if err != nil {
-			t.Fatalf("unexpected error for test %q: %v", test.name, err)
-		}
-	}
-}
-
-func TestFindJWTHex(t *testing.T) {
-	tDir := t.TempDir()
-	tFilePath := filepath.Join(tDir, "jwt.hex")
-	tests := []struct {
-		name, jwtFileContents, jwt, wantHex string
-		noPerms                             bool
-		wantErr                             bool
-	}{{
-		name:    "ok hex",
-		jwt:     "baadbeef",
-		wantHex: "baadbeef",
-	}, {
-		name:            "ok file",
-		jwt:             tFilePath,
-		jwtFileContents: "baadbeef\n",
-		wantHex:         "baadbeef",
-	}, {
-		name:    "not hex and no file",
-		jwt:     tFilePath,
-		wantErr: true,
-	}, {
-		name:            "not hex but cant read file",
-		jwt:             tFilePath,
-		jwtFileContents: "baadbeef\n",
-		noPerms:         true,
-		wantErr:         true,
-	}, {
-		name:            "not hex and bad hex in file",
-		jwt:             tFilePath,
-		jwtFileContents: "saadbeef\n",
-		wantErr:         true,
-	}}
-	for _, test := range tests {
-		if test.jwtFileContents != "" {
-			perms := fs.FileMode(0666)
-			if test.noPerms {
-				perms = 0000
-			}
-			err := os.WriteFile(tFilePath, []byte(test.jwtFileContents), perms)
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
-		hex, err := findJWTHex(test.jwt)
-		if test.jwtFileContents != "" {
-			os.Remove(tFilePath)
-		}
-		if test.wantErr {
-			if err == nil {
-				t.Fatalf("expected error for test %q", test.name)
-			}
-			continue
-		}
-		if err != nil {
-			t.Fatalf("unexpected error for test %q: %v", test.name, err)
-		}
-		if hex != test.wantHex {
-			t.Fatalf("wanted jwt %q but got %q for test %q", test.wantHex, hex, test.name)
 		}
 	}
 }

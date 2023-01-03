@@ -6,13 +6,9 @@
 package eth
 
 import (
-	"encoding/hex"
 	"fmt"
-	"net/http"
-	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/node"
 )
 
 // DecodeCoinID decodes the coin ID into a common.Hash. For eth, there are no
@@ -31,15 +27,3 @@ func DecodeCoinID(coinID []byte) (common.Hash, error) {
 // SecretHashSize is the byte-length of the hash of the secret key used in
 // swaps.
 const SecretHashSize = 32
-
-// JWTHTTPAuthFn returns a function that creates a signed jwt token using the
-// provided secret and inserts it into the passed header.
-func JWTHTTPAuthFn(jwtStr string) (func(h http.Header) error, error) {
-	s, err := hex.DecodeString(strings.TrimPrefix(jwtStr, "0x"))
-	if err != nil {
-		return nil, err
-	}
-	var secret [32]byte
-	copy(secret[:], s)
-	return node.NewJWTAuth(secret), nil
-}
