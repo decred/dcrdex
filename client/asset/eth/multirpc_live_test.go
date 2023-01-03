@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,9 +25,8 @@ import (
 )
 
 const (
-	alphaAuthedPort = "8552"
-	betaAuthedPort  = "8553"
-	jwtSecret       = "0x45747261485f394e52346574347a4d78527941734f30512d4e32383dbabababa"
+	deltaHTTPPort = "38556"
+	deltaWSPort   = "38557"
 )
 
 var (
@@ -46,7 +46,7 @@ func mine(ctx context.Context) error {
 	return err
 }
 
-func testEndpoint(endpoints []endpoint, syncBlocks uint64, tFunc func(context.Context, *multiRPCClient)) error {
+func testEndpoint(endpoints []string, syncBlocks uint64, tFunc func(context.Context, *multiRPCClient)) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
@@ -102,21 +102,20 @@ func testEndpoint(endpoints []endpoint, syncBlocks uint64, tFunc func(context.Co
 	return nil
 }
 
-// NOTE: This will be upgraded to websocket and does not test a http path in earnest.
 func TestHTTP(t *testing.T) {
-	if err := testEndpoint([]endpoint{{addr: "http://localhost:" + alphaAuthedPort, jwt: jwtSecret}}, 2, nil); err != nil {
+	if err := testEndpoint([]string{"http://localhost:" + deltaHTTPPort}, 2, nil); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestWS(t *testing.T) {
-	if err := testEndpoint([]endpoint{{addr: "ws://localhost:" + betaAuthedPort, jwt: jwtSecret}}, 2, nil); err != nil {
+	if err := testEndpoint([]string{"ws://localhost:" + deltaWSPort}, 2, nil); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestWSTxLogs(t *testing.T) {
-	if err := testEndpoint([]endpoint{{addr: "ws://localhost:" + alphaAuthedPort, jwt: jwtSecret}}, 2, func(ctx context.Context, cl *multiRPCClient) {
+	if err := testEndpoint([]string{"ws://localhost:" + deltaWSPort}, 2, func(ctx context.Context, cl *multiRPCClient) {
 		for i := 0; i < 3; i++ {
 			time.Sleep(time.Second)
 			harnessCmd(ctx, "./sendtoaddress", cl.creds.addr.String(), "1")
@@ -131,9 +130,9 @@ func TestWSTxLogs(t *testing.T) {
 }
 
 func TestSimnetMultiRPCClient(t *testing.T) {
-	endpoints := []endpoint{
-		{addr: "ws://localhost:" + alphaAuthedPort, jwt: jwtSecret},
-		{addr: "http://localhost:" + betaAuthedPort, jwt: jwtSecret}, // NOTE: Will be upgraded to a websocket.
+	endpoints := []string{
+		"ws://localhost:" + deltaWSPort,
+		"http://localhost:" + deltaHTTPPort,
 	}
 
 	nonceProviderStickiness = time.Second / 2
@@ -239,13 +238,9 @@ func TestMonitorMainnet(t *testing.T) {
 
 func testMonitorNet(t *testing.T, net dex.Network) {
 	providerFile := readProviderFile(t, net)
-	endpoints := make([]endpoint, 0, 1)
-	for _, addr := range providerFile.Providers {
-		endpoints = append(endpoints, endpoint{addr: addr})
-	}
 	dir, _ := os.MkdirTemp("", "")
 
-	cl, err := tRPCClient(dir, providerFile.Seed, endpoints, net, true)
+	cl, err := tRPCClient(dir, providerFile.Seed, providerFile.Providers, net, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,13 +255,13 @@ func testMonitorNet(t *testing.T, net dex.Network) {
 }
 
 func TestRPC(t *testing.T) {
-	addr := os.Getenv("PROVIDER")
-	if addr == "" {
+	endpoint := os.Getenv("PROVIDER")
+	if endpoint == "" {
 		t.Fatalf("specify a provider in the PROVIDER environmental variable")
 	}
 	dir, _ := os.MkdirTemp("", "")
 	defer os.RemoveAll(dir)
-	cl, err := tRPCClient(dir, encode.RandomBytes(32), []endpoint{{addr: addr}}, dex.Mainnet, true)
+	cl, err := tRPCClient(dir, encode.RandomBytes(32), []string{endpoint}, dex.Mainnet, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,12 +292,12 @@ var freeServers = []string{
 }
 
 func TestFreeServers(t *testing.T) {
-	runTest := func(ep endpoint) error {
+	runTest := func(endpoint string) error {
 		dir, _ := os.MkdirTemp("", "")
 		defer os.RemoveAll(dir)
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		cl, err := tRPCClient(dir, encode.RandomBytes(32), []endpoint{ep}, dex.Mainnet, true)
+		cl, err := tRPCClient(dir, encode.RandomBytes(32), []string{endpoint}, dex.Mainnet, true)
 		if err != nil {
 			return fmt.Errorf("tRPCClient error: %v", err)
 		}
@@ -314,19 +309,18 @@ func TestFreeServers(t *testing.T) {
 				if err := tt.f(p); err != nil {
 					return fmt.Errorf("%q error: %v", tt.name, err)
 				}
-				fmt.Printf("#### %q passed %q \n", ep.addr, tt.name)
+				fmt.Printf("#### %q passed %q \n", endpoint, tt.name)
 			}
 			return nil
 		})
 	}
 
 	passes, fails := make([]string, 0), make(map[string]error, 0)
-	for _, addr := range freeServers {
-		ep := endpoint{addr: addr}
-		if err := runTest(ep); err != nil {
-			fails[addr] = err
+	for _, endpoint := range freeServers {
+		if err := runTest(endpoint); err != nil {
+			fails[endpoint] = err
 		} else {
-			passes = append(passes, addr)
+			passes = append(passes, endpoint)
 		}
 	}
 	for _, pass := range passes {
@@ -339,16 +333,12 @@ func TestFreeServers(t *testing.T) {
 
 func TestMainnetCompliance(t *testing.T) {
 	providerFile := readProviderFile(t, dex.Mainnet)
-	endpoints := make([]endpoint, 0, len(providerFile.Providers))
-	for _, addr := range providerFile.Providers {
-		endpoints = append(endpoints, endpoint{addr: addr})
-	}
 	dir, _ := os.MkdirTemp("", "")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	log := dex.StdOutLogger("T", dex.LevelTrace)
-	providers, err := connectProviders(ctx, endpoints, log, big.NewInt(chainIDs[dex.Mainnet]))
+	providers, err := connectProviders(ctx, providerFile.Providers, log, big.NewInt(chainIDs[dex.Mainnet]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,23 +348,14 @@ func TestMainnetCompliance(t *testing.T) {
 	}
 }
 
-func tRPCClient(dir string, seed []byte, endpoints []endpoint, net dex.Network, skipConnect bool) (*multiRPCClient, error) {
+func tRPCClient(dir string, seed []byte, endpoints []string, net dex.Network, skipConnect bool) (*multiRPCClient, error) {
 	log := dex.StdOutLogger("T", dex.LevelTrace)
-	var providersSlice [][]string
-	for _, ep := range endpoints {
-		valueSet := []string{ep.addr, ep.jwt}
-		providersSlice = append(providersSlice, valueSet)
-	}
-	providers, err := json.Marshal(providersSlice)
-	if err != nil {
-		return nil, err
-	}
 	if err := createWallet(&asset.CreateWalletParams{
 		Type: walletTypeRPC,
 		Seed: seed,
 		Pass: []byte("abc"),
 		Settings: map[string]string{
-			providersKey: string(providers),
+			"providers": strings.Join(endpoints, " "),
 		},
 		DataDir: dir,
 		Net:     net,

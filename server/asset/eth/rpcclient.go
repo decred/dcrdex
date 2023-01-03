@@ -9,9 +9,6 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"net/http"
-	"net/url"
-	"strings"
 
 	"decred.org/dcrdex/dex"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
@@ -37,7 +34,7 @@ type ContextCaller interface {
 
 type rpcclient struct {
 	net dex.Network
-	ep  *endpoint
+	ipc string
 	// ec wraps a *rpc.Client with some useful calls.
 	ec *ethclient.Client
 	// caller is a client for raw calls not implemented by *ethclient.Client.
@@ -51,43 +48,21 @@ type rpcclient struct {
 	tokens map[uint32]*tokener
 }
 
-func newRPCClient(net dex.Network, ep *endpoint) *rpcclient {
+func newRPCClient(net dex.Network, ipc string) *rpcclient {
 	return &rpcclient{
 		net:    net,
 		tokens: make(map[uint32]*tokener),
-		ep:     ep,
+		ipc:    ipc,
 	}
 }
 
 // connect connects to an ipc socket. It then wraps ethclient's client and
 // bundles commands in a form we can easily use.
 func (c *rpcclient) connect(ctx context.Context) error {
-	var client *rpc.Client
-	var err error
-	addr := c.ep.addr
-	if strings.HasSuffix(addr, ".ipc") {
-		client, err = rpc.DialIPC(ctx, addr)
-		if err != nil {
-			return err
-		}
-	} else {
-		var wsURL *url.URL
-		wsURL, err = url.Parse(addr)
-		if err != nil {
-			return fmt.Errorf("Failed to parse url %q", addr)
-		}
-		wsURL.Scheme = "ws"
-		var authFn func(h http.Header) error
-		authFn, err = dexeth.JWTHTTPAuthFn(c.ep.jwt)
-		if err != nil {
-			return fmt.Errorf("unable to create auth function: %v", err)
-		}
-		client, err = rpc.DialOptions(ctx, wsURL.String(), rpc.WithHTTPAuth(authFn))
-		if err != nil {
-			return err
-		}
+	client, err := rpc.DialIPC(ctx, c.ipc)
+	if err != nil {
+		return fmt.Errorf("unable to dial rpc: %v", err)
 	}
-
 	c.ec = ethclient.NewClient(client)
 
 	netAddrs, found := dexeth.ContractAddresses[ethContractVersion]
