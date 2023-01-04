@@ -30,7 +30,7 @@ require (
 	github.com/decred/dcrd/crypto/blake256 v1.0.0
 	github.com/decred/dcrd/dcrec v1.0.0
 	github.com/decred/dcrd/dcrec/edwards/v2 v2.0.2
-	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.1
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.1.0
 	github.com/decred/dcrd/dcrjson/v4 v4.0.0
 	github.com/decred/dcrd/dcrutil/v4 v4.0.0
 	github.com/decred/dcrd/gcs/v3 v3.0.0
@@ -64,12 +64,12 @@ require (
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/tyler-smith/go-bip39 v1.1.0
 	go.etcd.io/bbolt v1.3.7-0.20220130032806-d5db64bdbfde
-	golang.org/x/crypto v0.0.0-20220507011949-2cf3adece122
-	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
-	golang.org/x/term v0.0.0-20220411215600-e5f449aeb171
-	golang.org/x/text v0.3.7
-	golang.org/x/time v0.0.0-20220411224347-583f2d630306
-	gopkg.in/ini.v1 v1.66.4
+	golang.org/x/crypto v0.4.0
+	golang.org/x/sync v0.1.0
+	golang.org/x/term v0.3.0
+	golang.org/x/text v0.5.0
+	golang.org/x/time v0.3.0
+	gopkg.in/ini.v1 v1.67.0
 	lukechampine.com/blake3 v1.1.7
 )
 
@@ -152,8 +152,8 @@ require (
 	github.com/urfave/cli/v2 v2.10.2 // indirect
 	github.com/xrash/smetrics v0.0.0-20201216005158-039620a65673 // indirect
 	github.com/zquestz/grab v0.0.0-20190224022517-abcee96e61b1 // indirect
-	golang.org/x/net v0.0.0-20220607020251-c690dde0001d // indirect
-	golang.org/x/sys v0.0.0-20220520151302-bc2c85ada10a // indirect
+	golang.org/x/net v0.3.0 // indirect
+	golang.org/x/sys v0.3.0 // indirect
 	google.golang.org/protobuf v1.28.0 // indirect
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce // indirect
 )

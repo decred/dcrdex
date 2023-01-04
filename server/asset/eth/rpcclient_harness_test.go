@@ -52,8 +52,9 @@ func TestMain(m *testing.M) {
 		netToken.Address = getContractAddrFromFile(tokenErc20AddrFile)
 		netToken.SwapContracts[0].Address = getContractAddrFromFile(tokenSwapAddrFile)
 		registerToken(testTokenID, 0)
+		logger := dex.StdOutLogger("ETHTEST", dex.LevelTrace)
 
-		if err := ethClient.connect(ctx); err != nil {
+		if err := ethClient.connect(ctx, logger); err != nil {
 			return 1, fmt.Errorf("Connect error: %w", err)
 		}
 

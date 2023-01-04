@@ -11,10 +11,6 @@
 // fail, and sometimes the redeem and refund functions to also fail. This could
 // be a problem in the future if a user restores from seed. Punting on this
 // particular problem for now.
-//
-// TODO: Running these tests many times on simnet eventually results in all
-// transactions returning "unexpected error for test ok: exceeds block gas
-// limit". Find out why that is.
 
 package eth
 
