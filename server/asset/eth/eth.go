@@ -161,7 +161,7 @@ type ethFetcher interface {
 	bestHeader(ctx context.Context) (*types.Header, error)
 	blockNumber(ctx context.Context) (uint64, error)
 	headerByHeight(ctx context.Context, height uint64) (*types.Header, error)
-	connect(ctx context.Context) error
+	connect(ctx context.Context, log dex.Logger) error
 	shutdown()
 	suggestGasTipCap(ctx context.Context) (*big.Int, error)
 	syncProgress(ctx context.Context) (*ethereum.SyncProgress, error)
@@ -296,7 +296,7 @@ func (eth *baseBackend) shutdown() {
 func (eth *ETHBackend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	eth.baseBackend.ctx = ctx
 
-	if err := eth.node.connect(ctx); err != nil {
+	if err := eth.node.connect(ctx, eth.log); err != nil {
 		return nil, err
 	}
 

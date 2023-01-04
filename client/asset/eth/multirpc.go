@@ -254,7 +254,7 @@ func (p *provider) subscribeHeaders(ctx context.Context, sub ethereum.Subscripti
 				return
 			}
 			log.Errorf("%q header subscription error: %v", p.host, err)
-			log.Info("Attempting to resubscribe to %q block headers", p.host)
+			log.Infof("Attempting to resubscribe to %q block headers", p.host)
 			sub, err = newSub()
 			if err != nil { // context cancelled
 				return

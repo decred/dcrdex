@@ -58,11 +58,17 @@ func newRPCClient(net dex.Network, ipc string) *rpcclient {
 
 // connect connects to an ipc socket. It then wraps ethclient's client and
 // bundles commands in a form we can easily use.
-func (c *rpcclient) connect(ctx context.Context) error {
+func (c *rpcclient) connect(ctx context.Context, log dex.Logger) error {
 	client, err := rpc.DialIPC(ctx, c.ipc)
 	if err != nil {
 		return fmt.Errorf("unable to dial rpc: %v", err)
 	}
+
+	reqModules := []string{"eth", "txpool"}
+	if err := dexeth.CheckAPIModules(client, c.ipc, log, reqModules); err != nil {
+		return fmt.Errorf("error checking required modules: %v", err)
+	}
+
 	c.ec = ethclient.NewClient(client)
 
 	netAddrs, found := dexeth.ContractAddresses[ethContractVersion]

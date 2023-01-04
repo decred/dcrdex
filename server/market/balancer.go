@@ -150,7 +150,7 @@ func (b *DEXBalancer) CheckBalance(acctAddr string, assetID, redeemAssetID uint3
 	// Make sure we can get the primary balance first.
 	bal, err := backedAsset.balancer.AccountBalance(acctAddr)
 	if err != nil {
-		log.Error("(*DEXBalancer).CheckBalance: error getting account balance for %q: %v", acctAddr, err)
+		log.Errorf("(*DEXBalancer).CheckBalance: error getting account balance for %q: %v", acctAddr, err)
 		return false
 	}
 	if qty > 0 && bal == 0 { // shortcut if they are requesting funds and have none.
