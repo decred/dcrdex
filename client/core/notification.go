@@ -26,7 +26,7 @@ const (
 	NoteTypeSpots        = "spots"
 	NoteTypeWalletConfig = "walletconfig"
 	NoteTypeWalletState  = "walletstate"
-	NoteTypeServerNotify = "notify"
+	NoteTypeNotify       = "notify"
 	NoteTypeSecurity     = "security"
 	NoteTypeUpgrade      = "upgrade"
 	NoteTypeBot          = "bot"
@@ -556,7 +556,7 @@ const (
 
 func newServerNotifyNote(topic Topic, subject, details string, severity db.Severity) *ServerNotifyNote {
 	return &ServerNotifyNote{
-		Notification: db.NewNotification(NoteTypeServerNotify, topic, subject, details, severity),
+		Notification: db.NewNotification(NoteTypeNotify, topic, subject, details, severity),
 	}
 }
 
@@ -625,5 +625,18 @@ const TopicLoginStatus Topic = "LoginStatus"
 func newLoginNote(message string) *LoginNote {
 	return &LoginNote{
 		Notification: db.NewNotification(NoteTypeLogin, TopicLoginStatus, "", message, db.Data),
+	}
+}
+
+// ClientNotifyNote is a notification containing a client-originating message.
+type ClientNotifyNote struct {
+	db.Notification
+}
+
+const TopicCheckConnectivity Topic = "CheckConnectivity"
+
+func newClientNotifyNote(topic Topic, subject, details string, severity db.Severity) *ClientNotifyNote {
+	return &ClientNotifyNote{
+		Notification: db.NewNotification(NoteTypeNotify, topic, subject, details, severity),
 	}
 }

@@ -65,6 +65,13 @@ const (
 	// consider sharing const for the preimage timeout with the server packages,
 	// or a config response field if it should be considered variable.
 	preimageReqTimeout = 20 * time.Second
+
+	// maxClientAnomaliesCount is the maximum websocket connection anomaly
+	// before client is sends a notification to check their connection.
+	maxClientAnomaliesCount = 3
+	// If websocket client disconnects before wsAnomalyDuration since last
+	// connect time, the websocket client anomaly count is increased.
+	wsAnomalyDuration = 60 * time.Minute
 )
 
 var (
@@ -163,6 +170,10 @@ type dexConnection struct {
 
 	spotsMtx sync.RWMutex
 	spots    map[string]*msgjson.Spot
+
+	// anomaliesCount tracks client's connection anomalies.
+	anomaliesCount int64 // atomic
+	lastConnect    time.Time
 }
 
 // DefaultResponseTimeout is the default timeout for responses after a request is
@@ -7362,6 +7373,14 @@ func (c *Core) handleReconnect(host string) {
 		return
 	}
 
+	anomalies := atomic.LoadInt64(&dc.anomaliesCount)
+	if anomalies > maxClientAnomaliesCount {
+		// Send notification to check connectivity.
+		subject, details := c.formatDetails(TopicCheckConnectivity)
+		c.notify(newClientNotifyNote(TopicCheckConnectivity, subject, details, db.Poke))
+		atomic.StoreInt64(&dc.anomaliesCount, 0) // reset anomalies count.
+	}
+
 	// The server's configuration may have changed, so retrieve the current
 	// server configuration.
 	cfg, err := dc.refreshServerConfig()
@@ -7511,7 +7530,13 @@ func (c *Core) handleConnectEvent(dc *dexConnection, status comms.ConnectionStat
 	topic := TopicDEXDisconnected
 	if status == comms.Connected {
 		topic = TopicDEXConnected
+		dc.lastConnect = time.Now()
 	} else {
+		if time.Since(dc.lastConnect) < wsAnomalyDuration {
+			// Increase anomalies count for this connection.
+			atomic.StoreInt64(&dc.anomaliesCount, atomic.LoadInt64(&dc.anomaliesCount)+1)
+		}
+
 		for _, tracker := range dc.trackedTrades() {
 			tracker.setSelfGoverned(true) // reconnect handles unflagging based on fresh market config
 

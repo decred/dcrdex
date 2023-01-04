@@ -366,6 +366,10 @@ var originLocale = map[Topic]*translation{
 		subject:  "Resume order failure",
 		template: "Failed to resume processing of trade: %v",
 	},
+	TopicCheckConnectivity: {
+		subject:  "Internet Connectivity",
+		template: "Your internet connection is unstable, check your internet connection",
+	},
 }
 
 var ptBR = map[Topic]*translation{
