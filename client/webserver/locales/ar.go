@@ -63,8 +63,6 @@ var Ar = map[string]string{
 	"Quantity":                       "الكمية",
 	"Rate":                           "السعر",
 	"Epoch":                          "الحقبة الزمنية",
-	"Limit Order":                    "أمر محدد",
-	"Market Order":                   "أمر السوق",
 	"reg_status_msg":                 `من أجل التداول على <span id="regStatusDex" class="text-break"></span>, يجب دفع رسوم التسجيل <span id="confReq"></span> التأكيدات.`,
 	"Buy":                            "شراء",
 	"Sell":                           "بيع",

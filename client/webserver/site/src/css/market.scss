@@ -81,7 +81,7 @@ div[data-handler=markets] {
         border-right: 1px solid $light_border_color;
 
         #limitBttn {
-          padding-right: 28px;
+          padding-right: 8px;
         }
       }
 
@@ -90,53 +90,65 @@ div[data-handler=markets] {
         border-left: 1px solid $light_border_color;
 
         #marketBttn {
-          padding-left: 28px;
+          padding-left: 8px;
         }
       }
 
       button {
         &.limit-market-order-type {
+          opacity: 0.6;
           height: 30px;
           border-style: none;
 
           &.selected {
+            opacity: 1;
             background-color: transparent;
             color: black;
             font-weight: bold;
           }
 
           &:hover {
+            opacity: 1;
             color: black;
           }
         }
 
         &.switch-buy-sell {
-          opacity: 0.85;
-          padding: 0 12px;
+          opacity: 0.6;
+          padding: 0 40px;
+          border-radius: 3px;
+
+          &:hover,
+          &.selected {
+            opacity: 1;
+            color: black;
+
+            &.buygreen-bg {
+              background-color: #207a4699;
+            }
+
+            &.sellred-bg {
+              background-color: #99302b99;
+            }
+          }
+        }
+
+        &.submit {
+          opacity: 0.6;
+          padding: 8px 25px;
           border-radius: 3px;
 
           &:hover {
             opacity: 1;
             color: black;
           }
-        }
 
-        &.buygreen-bg {
-          background-color: #207a4699;
-        }
+          &.buygreen-bg {
+            background-color: #207a4699;
+          }
 
-        &.sellred-bg {
-          background-color: #99302b99;
-        }
-
-        &.submit {
-          opacity: 0.85;
-          padding: 8px 25px;
-          border-radius: 3px;
-
-          &:hover {
-            color: black;
-            opacity: 1;
+          &.sellred-bg {
+            background-color: #99302b99;
           }
         }
       }

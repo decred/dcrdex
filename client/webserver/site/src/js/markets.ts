@@ -272,8 +272,7 @@ export default class MarketsPage extends BasePage {
     // Buttons to set order type and side.
     bind(page.buyBttn, 'click', () => {
       this.isSell = false
-      Doc.hide(page.buyBttn)
-      Doc.show(page.sellBttn)
+      swapBttns(page.sellBttn, page.buyBttn)
       page.submitBttn.classList.remove(sellBtnClass)
       page.submitBttn.classList.add(buyBtnClass)
       page.maxLbl.textContent = intl.prep(intl.ID_BUY)
@@ -283,8 +282,7 @@ export default class MarketsPage extends BasePage {
     })
     bind(page.sellBttn, 'click', () => {
       this.isSell = true
-      Doc.hide(page.sellBttn)
-      Doc.show(page.buyBttn)
+      swapBttns(page.buyBttn, page.sellBttn)
       page.submitBttn.classList.add(sellBtnClass)
       page.submitBttn.classList.remove(buyBtnClass)
       page.maxLbl.textContent = intl.prep(intl.ID_SELL)
