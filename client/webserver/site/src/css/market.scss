@@ -76,6 +76,10 @@ div[data-handler=markets] {
         white-space: nowrap;
       }
 
+      #orderTypeBttns {
+        min-height: 30px;
+      }
+
       #limitBttnBox {
         width: 15%;
         padding-right: 1px;
@@ -109,7 +113,8 @@ div[data-handler=markets] {
       button {
         &.limit-market-order-type {
           opacity: 0.6;
-          height: 30px;
+          width: 98%;
+          height: 98%;
           border-style: none;
 
           &.selected {
