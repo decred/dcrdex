@@ -210,7 +210,7 @@
               {{- /* ORDER FORM */ -}}
               <form id="orderForm" class="p-1 d-hide">
                 {{- /* ORDER TYPE BUTTONS */ -}}
-                <div id="orderTypeBttns" class="fs14 d-flex justify-content-between">
+                <div id="orderTypeBttns" class="mt-2 fs14 d-flex justify-content-between">
                   <div id="limitBttnBox">
                     <button id="limitBttn" type="button" class="limit-market-order-type flex-center pr-2 py-0 hoverbg selected">[[[Limit Order]]]</button>
                   </div>
@@ -258,14 +258,14 @@
                   </div>
 
                   {{- /* RATE AND QUANTITY INPUTS */ -}}
-                  <div class="d-flex mt-1" id="priceBox">
+                  <div class="d-flex mt-2" id="priceBox">
                     <label for="rateField" class="form-label col-6 d-flex align-items-center p-0">[[[:title:price]]]</label>
                     <div class="col-18 p-0 position-relative">
                       <input type="number" class="form-control select bg1" id="rateField">
                       <span class="unitbox"><span class="unit" data-unit="quote"></span>/<span class="unit" data-unit="base"></span></span>
                     </div>
                   </div>
-                  <div class="d-flex mt-1" id="qtyBox">
+                  <div class="d-flex mt-2" id="qtyBox">
                     <label for="qtyField" class="form-label col-6 d-flex align-items-center p-0">[[[Quantity]]]</label>
                     <div class="col-6 p-0 position-relative">
                       <input type="number" class="form-control select bg1" id="lotField">
@@ -280,17 +280,17 @@
 
                   {{- /* MARKET BUY ORDER QUANTITY INPUT */ -}}
                   <div id="mktBuyBox" class="d-hide">
-                    <div class="text-center mt-1 fs15">
+                    <div class="text-center mt-2 fs15">
                       [[[min trade is about]]] <span id="minMktBuy"></span> <span data-unit="quote"></span>
                     </div>
-                    <div class="d-flex justify-content-center mt-1">
+                    <div class="d-flex justify-content-center mt-2">
                       <!-- <label for="mktBuyField" class="flex-center col-12 p-0">Trading</label> -->
                       <div class="col-12 p-0 position-relative">
                         <input type="number" class="form-control select bg1" id="mktBuyField">
                         <span class="unit unitbox" data-unit="quote"></span>
                       </div>
                     </div>
-                    <div class="p-0 fs14 flex-center mt-1">
+                    <div class="p-0 fs14 flex-center mt-2">
                       <span>
                         ~ <span id="mktBuyScore">0</span> <span data-unit="base"></span>
                         @ <span id="mktBuyLots">0</span> <span >[[[:title:lots]]]</span><br>
@@ -302,7 +302,7 @@
                   {{- /* ORDER PREVIEW */ -}}
                   <div class="fs14 text-end" id="orderPreview"></div>
 
-                  <div class="mt-1 d-flex align-items-center justify-content-end">
+                  <div class="mt-2 d-flex align-items-center justify-content-end">
                     {{- /* TIME-IN-FORCE CHECK BOX */ -}}
                     <div class="form-check mx-2 px-1" id="tifBox">
                       <input id="tifNow" class="form-check-input" type="checkbox" value="">
