@@ -50,6 +50,7 @@ const (
 	newAddrErr
 	bondAmtErr
 	bondTimeErr
+	bondAssetErr
 	bondPostErr // TODO
 )
 

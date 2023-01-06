@@ -1565,6 +1565,7 @@ func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) (r
 				if match.MetaData.Proof.SelfRevoked {
 					return false, false // already self-revoked
 				}
+				// Here we can check to see if this is a redeem we failed to record...
 				t.dc.log.Warnf("Order %s, match %s counter-party's swap is spent before we could redeem", t.ID(), match)
 				return false, true // REVOKE!
 			}

@@ -1226,11 +1226,9 @@ type testRig struct {
 
 func newTestRig() *testRig {
 	tdb := &TDB{
-		orderOrders: make(map[order.OrderID]*db.MetaOrder),
-		wallet:      &db.Wallet{},
-		existValues: map[string]bool{
-			keyParamsKey: true,
-		},
+		orderOrders:  make(map[order.OrderID]*db.MetaOrder),
+		wallet:       &db.Wallet{},
+		existValues:  map[string]bool{},
 		legacyKeyErr: tErr,
 	}
 
@@ -2660,7 +2658,6 @@ func TestInitializeClient(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
 	tCore := rig.core
-	rig.db.existValues[keyParamsKey] = false
 
 	clearCreds := func() {
 		tCore.credentials = nil
