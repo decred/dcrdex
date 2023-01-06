@@ -17,6 +17,7 @@ import (
 const (
 	NoteTypeFeePayment   = "feepayment"
 	NoteTypeBondPost     = "bondpost"
+	NoteTypeBondRefund   = "bondrefund"
 	NoteTypeSend         = "send"
 	NoteTypeOrder        = "order"
 	NoteTypeMatch        = "match"
@@ -195,6 +196,7 @@ const (
 	TopicFeeCoinError            Topic = "FeeCoinError"
 	TopicRegUpdate               Topic = "RegUpdate"
 	TopicBondConfirming          Topic = "BondConfirming"
+	TopicBondRefunded            Topic = "BondRefunded"
 	TopicBondPostError           Topic = "BondPostError"
 	TopicBondCoinError           Topic = "BondCoinError"
 	TopicAccountRegistered       Topic = "AccountRegistered"
@@ -226,6 +228,17 @@ func newFeePaymentNoteWithConfirmations(topic Topic, subject, details string, se
 	feePmtNt.Asset = &asset
 	feePmtNt.Confirmations = &currConfs
 	return feePmtNt
+}
+
+// BondRefundNote is a notification regarding bond refunds.
+type BondRefundNote struct {
+	db.Notification
+}
+
+func newBondRefundNote(topic Topic, subject, details string, severity db.Severity) *BondRefundNote {
+	return &BondRefundNote{
+		Notification: db.NewNotification(NoteTypeBondRefund, topic, subject, details, severity),
+	}
 }
 
 // BondPostNote is a notification regarding bond posting.

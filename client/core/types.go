@@ -158,9 +158,12 @@ type SupportedAsset struct {
 
 // BondOptionsForm is used from the settings page to change the auto-bond
 // maintenance setting for a DEX.
-// type BondOptionsForm struct {
-// 	MaintainBonds bool `json:"maintainbonds"` // auto-post new bonds when old ones expire
-// }
+type BondOptionsForm struct {
+	Addr         string  `json:"host"`
+	TargetTier   *uint64 `json:"targetTier,omitempty"`
+	MaxBondedAmt *uint64 `json:"maxBondedAmt,omitempty"`
+	BondAsset    *uint32 `json:"bondAsset,omitempty"`
+}
 
 // PostBondForm is information necessary to post a new bond for a new or
 // existing DEX account at the specified DEX address.
@@ -170,7 +173,10 @@ type PostBondForm struct {
 	Asset    *uint32          `json:"assetID,omitempty"` // do not default to 0
 	Bond     uint64           `json:"bond"`
 	LockTime uint64           `json:"lockTime"` // 0 means go with server-derived value
-	// BondOptionsForm, maybe
+
+	// These options may be set when creating an account.
+	MaintainTier *bool   `json:"maintainTier,omitempty"` // tier implied from Bond amount
+	MaxBondedAmt *uint64 `json:"maxBondedAmt,omitempty"`
 
 	// Cert is needed if posting bond to a new DEX. Cert can be a string, which
 	// is interpreted as a filepath, or a []byte, which is interpreted as the
@@ -565,7 +571,7 @@ func (m *Market) MsgRateToConventional(r uint64) float64 {
 	return float64(r) / calc.RateEncodingFactor * m.AtomToConv
 }
 
-// ConventionalRateToMsg converts a conventinal rate to a message-rate.
+// ConventionalRateToMsg converts a conventional rate to a message-rate.
 func (m *Market) ConventionalRateToMsg(p float64) uint64 {
 	return uint64(math.Round(p / m.AtomToConv * calc.RateEncodingFactor))
 }
@@ -704,7 +710,10 @@ type dexAccount struct {
 	bonds         []*db.Bond // confirmed, and not yet expired
 	expiredBonds  []*db.Bond // expired and needing refund
 	tier          int64      // check instead of isSuspended
-	legacyFeePaid bool       // server reports a legacy fee paid
+	targetTier    uint64
+	maxBondedAmt  uint64
+	bondAsset     uint32 // initially all bonds will be with the same asset
+	legacyFeePaid bool   // server reports a legacy fee paid
 
 	// Legacy reg fee (V0PURGE)
 	feeAssetID uint32
@@ -725,6 +734,9 @@ func newDEXAccount(acctInfo *db.AccountInfo) *dexAccount {
 		feeCoin:    acctInfo.LegacyFeeCoin,
 		isPaid:     acctInfo.LegacyFeePaid,
 		// bonds are set separately when categorized in authDEX
+		targetTier:   acctInfo.TargetTier,
+		maxBondedAmt: acctInfo.MaxBondedAmt,
+		bondAsset:    acctInfo.BondAsset,
 	}
 }
 
@@ -829,7 +841,14 @@ func (a *dexAccount) lock() {
 	a.keyMtx.Unlock()
 }
 
-// locked will be true if the account private key is currently decrypted.
+func (a *dexAccount) status() (initialized, unlocked, authed bool) {
+	a.keyMtx.RLock()
+	defer a.keyMtx.RUnlock()
+	return len(a.encKey) > 0, a.privKey != nil, a.isAuthed
+}
+
+// locked will be true if the account private key is currently decrypted, or
+// there are no account keys generated yet.
 func (a *dexAccount) locked() bool {
 	a.keyMtx.RLock()
 	defer a.keyMtx.RUnlock()

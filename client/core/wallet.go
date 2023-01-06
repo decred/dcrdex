@@ -236,6 +236,11 @@ func (w *xcWallet) unitInfo() dex.UnitInfo {
 	return w.Info().UnitInfo
 }
 
+func (w *xcWallet) amtString(amt uint64) string {
+	ui := w.unitInfo()
+	return fmt.Sprintf("%s %s", ui.ConventionalString(amt), ui.Conventional.Unit)
+}
+
 // state returns the current WalletState.
 func (w *xcWallet) state() *WalletState {
 	winfo := w.Info()
@@ -327,6 +332,13 @@ func (w *xcWallet) connected() bool {
 	return w.hookedUp
 }
 
+// synchronized is true if the wallet had been synchronized with the network.
+func (w *xcWallet) synchronized() bool {
+	w.mtx.RLock()
+	defer w.mtx.RUnlock()
+	return w.synced
+}
+
 // Connect calls the dex.Connector's Connect method, sets the xcWallet.hookedUp
 // flag to true, and validates the deposit address. Use Disconnect to cleanly
 // shutdown the wallet.
@@ -373,7 +385,7 @@ func (w *xcWallet) Connect() error {
 	}
 	w.hookedUp = true
 	w.synced = synced
-	w.syncProgress = progress
+	w.syncProgress = progress // updated in walletCheckAndNotify
 	ready = true
 
 	return nil

@@ -19,9 +19,9 @@ const (
 
 	secondsPerMinute  int64 = 60
 	secondsPerDay           = 24 * 60 * secondsPerMinute
-	BondExpiryMainnet       = 30 * secondsPerDay    // 30 days
-	BondExpiryTestnet       = 90 * secondsPerMinute // 90 minutes
-	BondExpirySimnet        = 4 * secondsPerMinute  // 4 minutes
+	BondExpiryMainnet       = 30 * secondsPerDay     // 30 days
+	BondExpiryTestnet       = 180 * secondsPerMinute // 3 hours
+	BondExpirySimnet        = 4 * secondsPerMinute   // 4 minutes
 )
 
 var (

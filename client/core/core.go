@@ -42,14 +42,13 @@ import (
 	"github.com/decred/dcrd/crypto/blake256"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
+	"github.com/decred/dcrd/hdkeychain/v3"
 	"github.com/decred/go-socks/socks"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 )
 
 const (
-	keyParamsKey = "keyParams"
-
 	// tickCheckDivisions is how many times to tick trades per broadcast timeout
 	// interval. e.g. 12 min btimeout / 8 divisions = 90 sec between checks.
 	tickCheckDivisions = 8
@@ -186,6 +185,12 @@ func (dc *dexConnection) running(mkt string) bool {
 // status returns the status of the connection to the dex.
 func (dc *dexConnection) status() comms.ConnectionStatus {
 	return comms.ConnectionStatus(atomic.LoadUint32(&dc.connectionStatus))
+}
+
+func (dc *dexConnection) config() *msgjson.ConfigResult {
+	dc.cfgMtx.RLock()
+	defer dc.cfgMtx.RUnlock()
+	return dc.cfg
 }
 
 func (dc *dexConnection) feeAsset(assetID uint32) *msgjson.FeeAsset {
@@ -1341,14 +1346,16 @@ type Core struct {
 	lockTimeTaker time.Duration
 	lockTimeMaker time.Duration
 
-	loginMtx sync.Mutex
-	loggedIn bool
-
 	locale        map[Topic]*translation
 	localePrinter *message.Printer
 
+	// construction or init sets credentials
 	credMtx     sync.RWMutex
 	credentials *db.PrimaryCredentials
+
+	loginMtx  sync.Mutex
+	loggedIn  bool
+	bondXPriv *hdkeychain.ExtendedKey // derived from creds.EncSeed on login
 
 	seedGenerationTime uint64
 
@@ -1558,7 +1565,7 @@ func (c *Core) Run(ctx context.Context) {
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
-		c.watchExpiredBonds(ctx)
+		c.watchBonds(ctx)
 	}()
 
 	c.wg.Wait() // block here until all goroutines except DB complete
@@ -2078,6 +2085,9 @@ func (c *Core) ToggleWalletStatus(assetID uint32, disable bool) error {
 
 		if c.assetHasActiveOrders(assetID) {
 			return newError(activeOrdersErr, "active orders for %v", unbip(assetID))
+		}
+		if c.isActiveBondAsset(assetID, true) {
+			return newError(bondAssetErr, "%v is an active bond asset wallet", unbip(assetID))
 		}
 
 		if wallet.connected() {
@@ -2682,6 +2692,63 @@ func (c *Core) walletIsActive(assetID uint32) bool {
 	return false
 }
 
+func (dc *dexConnection) bondOpts() (assetID uint32, targetTier, max uint64) {
+	dc.acct.authMtx.RLock()
+	defer dc.acct.authMtx.RUnlock()
+	return dc.acct.bondAsset, dc.acct.targetTier, dc.acct.maxBondedAmt
+}
+
+func (dc *dexConnection) hasActiveBond(assetID uint32) bool {
+	check := func(bonds []*db.Bond) bool {
+		for _, b := range bonds {
+			if assetID == b.AssetID {
+				return true
+			}
+		}
+		return false
+	}
+	dc.acct.authMtx.RLock()
+	defer dc.acct.authMtx.RUnlock()
+	return check(dc.acct.bonds) || check(dc.acct.pendingBonds) || check(dc.acct.expiredBonds)
+}
+
+// isActiveBondAsset indicates if a wallet (or it's parent if the asset is a
+// token, or it's children if it's a base asset) is needed for bonding on any
+// configured DEX. includeLive should be set to consider all existing unspent
+// bonds that need to be refunded in the future (only requires a broadcast, no
+// wallet signing ability).
+func (c *Core) isActiveBondAsset(assetID uint32, includeLive bool) bool {
+	// Consider this asset and any child tokens if it is a base asset, or just
+	// the parent asset if it's a token.
+	assetIDs := map[uint32]bool{
+		assetID: true,
+	}
+	if ra := asset.Asset(assetID); ra != nil { // it's a base asset, all tokens need it
+		for tknAssetID := range ra.Tokens {
+			assetIDs[tknAssetID] = true
+		}
+	} else { // it's a token and we only care about the parent, not sibling tokens
+		if tkn := asset.TokenInfo(assetID); tkn != nil { // it should be
+			assetIDs[tkn.ParentID] = true
+		}
+	}
+
+	for _, dc := range c.dexConnections() {
+		bondAsset, targetTier, _ := dc.bondOpts()
+		if targetTier > 0 && assetIDs[bondAsset] {
+			return true
+		}
+		if includeLive {
+			for id := range assetIDs {
+				if dc.hasActiveBond(id) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // walletCheckAndNotify sets the xcWallet's synced and syncProgress fields from
 // the wallet's SyncStatus result, emits a WalletStateNote, and returns the
 // synced value. When synced is true, this also updates the wallet's balance,
@@ -2945,6 +3012,9 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 // CloseWallet closes the wallet for the specified asset. The wallet cannot be
 // closed if there are active negotiations for the asset.
 func (c *Core) CloseWallet(assetID uint32) error {
+	if c.isActiveBondAsset(assetID, false) { // unlock not needed for refunds
+		return fmt.Errorf("%s wallet must remain unlocked for bonding", unbip(assetID))
+	}
 	if c.assetHasActiveOrders(assetID) {
 		return fmt.Errorf("cannot lock %s wallet with active swap negotiations", unbip(assetID))
 	}
@@ -3508,8 +3578,9 @@ func (c *Core) tempDexConnection(dexAddr string, certI interface{}) (*dexConnect
 	}
 
 	return c.connectDEX(&db.AccountInfo{
-		Host: host,
-		Cert: cert,
+		Host:      host,
+		Cert:      cert,
+		BondAsset: defaultBondAsset,
 	}, true)
 }
 
@@ -3605,6 +3676,7 @@ func (c *Core) discoverAccount(dc *dexConnection, crypter encrypt.Crypter) (bool
 		DEXPubKey:        dc.acct.dexPubKey,
 		EncKeyV2:         dc.acct.encKey,
 		Bonds:            dc.acct.bonds, // any reported by server
+		BondAsset:        dc.acct.bondAsset,
 		LegacyFeeAssetID: dc.acct.feeAssetID,
 		LegacyFeeCoin:    dc.acct.feeCoin,
 	})
@@ -3831,8 +3903,9 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	}
 
 	dc, err := c.connectDEX(&db.AccountInfo{
-		Host: host,
-		Cert: cert,
+		Host:      host,
+		Cert:      cert,
+		BondAsset: defaultBondAsset,
 	})
 	if err != nil {
 		if dc != nil {
@@ -3955,6 +4028,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		Cert:             dc.acct.cert,
 		DEXPubKey:        dc.acct.dexPubKey,
 		EncKeyV2:         dc.acct.encKey,
+		BondAsset:        dc.acct.bondAsset,
 		LegacyFeeAssetID: dc.acct.feeAssetID,
 		LegacyFeeCoin:    dc.acct.feeCoin,
 		// LegacyFeePaid set with AccountPaid after notifyFee.
@@ -4054,6 +4128,7 @@ func (c *Core) register(dc *dexConnection, assetID uint32) (regRes *msgjson.Regi
 				Cert:             dc.acct.cert,
 				DEXPubKey:        dc.acct.dexPubKey,
 				EncKeyV2:         dc.acct.encKey,
+				BondAsset:        dc.acct.bondAsset,
 				LegacyFeeAssetID: dc.acct.feeAssetID,
 				LegacyFeeCoin:    dc.acct.feeCoin,
 				// LegacyFeePaid set with AccountPaid below.
@@ -4252,6 +4327,12 @@ func (c *Core) generateCredentials(pw, seed []byte) (encrypt.Crypter, *db.Primar
 	return innerCrypter, creds, nil
 }
 
+func (c *Core) bondKeysReady() bool {
+	c.loginMtx.Lock()
+	defer c.loginMtx.Unlock()
+	return c.bondXPriv != nil && c.bondXPriv.IsPrivate() // infer not Zeroed via IsPrivate
+}
+
 // Login logs the user in. On the first login after startup or after a logout,
 // this function will connect wallets, resolve active trades, and decrypt
 // account keys for all known DEXes. Otherwise, it will only check whether or
@@ -4289,6 +4370,16 @@ func (c *Core) Login(pw []byte) error {
 	defer c.loginMtx.Unlock()
 
 	if !c.loggedIn {
+		// Derive the bond extended key from the seed.
+		seed, err := crypter.Decrypt(creds.EncSeed)
+		if err != nil {
+			return fmt.Errorf("seed decryption error: %w", err)
+		}
+		defer encode.ClearBytes(seed)
+		c.bondXPriv, err = deriveBondXPriv(seed)
+		if err != nil {
+			return fmt.Errorf("GenDeepChild error: %w", err)
+		}
 		// It is not an error if we can't connect, unless we need the wallet
 		// for active trades, but that condition is checked later in
 		// resolveActiveTrades. We won't try to unlock here, but if the wallet
@@ -4458,6 +4549,9 @@ func (c *Core) Logout() error {
 	for _, dc := range conns {
 		dc.acct.lock()
 	}
+
+	c.bondXPriv.Zero()
+	c.bondXPriv = nil
 
 	c.loggedIn = false
 
@@ -4707,6 +4801,26 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) {
 			c.notify(newFeePaymentNote(TopicAccountUnlockError, subject, details, db.ErrorLevel, dc.acct.host)) // newDEXAuthNote?
 			continue
 		}
+
+		// Unlock the bond wallet if a target tier is set.
+		if bondAssetID, targetTier, maxBondedAmt := dc.bondOpts(); targetTier > 0 {
+			c.log.Debugf("Preparing %s wallet to maintain target tier of %d for %v, bonding limit %v",
+				unbip(bondAssetID), targetTier, dc.acct.host, maxBondedAmt)
+			wallet, exists := c.wallet(bondAssetID)
+			if !exists || !wallet.connected() { // connectWallets already run, just fail
+				subject, _ := c.formatDetails(TopicWalletConnectionWarning)
+				c.notify(newWalletConfigNote(TopicWalletConnectionWarning, subject,
+					fmt.Sprintf("bond asset wallet %s not configured or connected", unbip(bondAssetID)),
+					db.ErrorLevel, wallet.state()))
+			} else if !wallet.unlocked() {
+				err = wallet.Unlock(crypter)
+				if err != nil {
+					subject, details := c.formatDetails(TopicWalletUnlockError, dc.acct.host, err)
+					c.notify(newFeePaymentNote(TopicWalletUnlockError, subject, details, db.ErrorLevel, dc.acct.host))
+				}
+			}
+		}
+
 		if dc.acct.authed() {
 			continue // authDEX already done
 		}
@@ -4732,7 +4846,8 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) {
 			c.reFee(feeWallet, dc)
 			continue
 		}
-		// Pending bonds will be handled by authDEX.
+		// Pending bonds will be handled by authDEX. Expired bonds will be
+		// refunded by rotateBonds.
 
 		// If the connection is down, authDEX will fail on Send.
 		if dc.IsDown() {
@@ -4783,6 +4898,20 @@ func (c *Core) wait(coinID []byte, assetID uint32, trigger func() (bool, error),
 		trigger: trigger,
 		action:  action,
 	}
+}
+
+func (c *Core) waiting(coinID []byte, assetID uint32) bool {
+	c.waiterMtx.RLock()
+	defer c.waiterMtx.RUnlock()
+	_, found := c.blockWaiters[coinIDString(assetID, coinID)]
+	return found
+}
+
+// removeWaiter removes a blockWaiter from the map.
+func (c *Core) removeWaiter(id string) {
+	c.waiterMtx.Lock()
+	delete(c.blockWaiters, id)
+	c.waiterMtx.Unlock()
 }
 
 // V0PURGE
@@ -4841,7 +4970,6 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 // for a cached fee rate obtained with an epoch_report message, and falls back
 // to directly requesting a rate from servers with a fee_rate request.
 func (c *Core) feeSuggestionAny(assetID uint32, preferredConns ...*dexConnection) uint64 {
-	conns := append(preferredConns, c.dexConnections()...)
 	// See if the wallet supports fee rates.
 	w, found := c.wallet(assetID)
 	if found && w.connected() {
@@ -4852,6 +4980,7 @@ func (c *Core) feeSuggestionAny(assetID uint32, preferredConns ...*dexConnection
 		}
 	}
 	// Look for cached rates from epoch_report messages.
+	conns := append(preferredConns, c.dexConnections()...)
 	for _, dc := range conns {
 		feeSuggestion := dc.bestBookFeeSuggestion(assetID)
 		if feeSuggestion > 0 {
@@ -5889,6 +6018,13 @@ func (c *Core) authDEX(dc *dexConnection) error {
 			continue // good, it's live server-side too
 		}
 
+		// Double check bond expiry. It will be moved to the expiredBonds slice
+		// by the rotateBonds goroutine shortly after.
+		if bond.LockTime <= uint64(time.Now().Unix())+cfg.BondExpiry {
+			c.log.Debugf("Recently expired bond not reported by server (OK): %s (%s)", bondIDStr, symb)
+			continue
+		}
+
 		c.log.Warnf("Locally-active bond %v (%s) not reported by server. Will repost...",
 			bondIDStr, symb) // unexpected, but postbond again
 
@@ -5931,7 +6067,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 
 		// Still pending on server. Start waiting for confs.
 		c.log.Debugf("Preparing to post pending bond %v (%s).", bondIDStr, symb)
-		c.monitorBondConfs(dc, assetBond(bond), bondAsset.Confs)
+		c.monitorBondConfs(dc, assetBond(bond), bondAsset.Confs, true)
 	}
 
 	localBondMap := make(map[string]struct{}, len(localActiveBonds)+len(localPendingBonds))
@@ -5963,7 +6099,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 
 		symb := dex.BipIDSymbol(bond.AssetID)
 		bondIDStr := coinIDString(bond.AssetID, bond.CoinID)
-		c.log.Warnf("Unknown bond reported by server: %v (%d)", bondIDStr, symb)
+		c.log.Warnf("Unknown bond reported by server: %v (%s)", bondIDStr, symb)
 
 		dc.acct.bonds = append(dc.acct.bonds, dbBond) // for tier accounting, but we cannot redeem it
 	}
@@ -6302,7 +6438,7 @@ func (c *Core) reFee(wallet *xcWallet, dc *dexConnection) {
 	reqConfs := feeAsset.Confs
 
 	// Return if the coin is already in blockWaiters.
-	if c.existsWaiter(coinIDString(dc.acct.feeAssetID, dc.acct.feeCoin)) {
+	if c.waiting(dc.acct.feeCoin, dc.acct.feeAssetID) {
 		return
 	}
 
@@ -7281,14 +7417,6 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 		go c.listen(dc)
 	}
 
-	err = dc.connMaster.Connect(c.ctx)
-	if err != nil {
-		// Not connected, but reconnect cycle is running. Caller should track
-		// this dexConnection, and a listen goroutine must be running to handle
-		// messages received when the connection is eventually established.
-		return dc, err
-	}
-
 	// Categorize bonds now for sake of expired bonds that need to be refunded.
 	categorizeBonds := func(lockTimeThresh int64) {
 		dc.acct.authMtx.Lock()
@@ -7326,10 +7454,20 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 		// according to ConnectResult.Bonds slice.
 	}
 
+	err = dc.connMaster.Connect(c.ctx)
+	if err != nil {
+		// Sort out the bonds with current time to indicate refundable bonds.
+		categorizeBonds(time.Now().Unix())
+		// Not connected, but reconnect cycle is running. Caller should track
+		// this dexConnection, and a listen goroutine must be running to handle
+		// messages received when the connection is eventually established.
+		return dc, err
+	}
+
 	// Request the market configuration.
 	cfg, err := dc.refreshServerConfig() // handleReconnect must too
 	if err != nil {
-		// Sort out the bonds with current time indicating refundable bonds.
+		// Sort out the bonds with current time to indicate refundable bonds.
 		categorizeBonds(time.Now().Unix())
 		if errors.Is(err, outdatedClientErr) {
 			sendOutdatedClientNotification(c, dc)
@@ -7706,9 +7844,10 @@ func handleTierChangeMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 	}
 	dc.acct.authMtx.Lock()
 	dc.acct.tier = tierChanged.Tier
+	targetTier := dc.acct.targetTier
 	dc.acct.authMtx.Unlock()
-	c.log.Infof("Received tierchanged notification from %v for account %v. New tier = %v",
-		dc.acct.host, dc.acct.ID(), tierChanged.Tier)
+	c.log.Infof("Received tierchanged notification from %v for account %v. New tier = %v (target = %d)",
+		dc.acct.host, dc.acct.ID(), tierChanged.Tier, targetTier)
 	// TODO: notify sub consumers e.g. frontend
 	return nil
 }
@@ -8379,21 +8518,6 @@ func handleRedemptionRoute(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	return fmt.Errorf("redemption request received for unknown order: %s", string(msg.Payload))
 }
 
-// existsWaiter returns true if the waiter already exists in the map.
-func (c *Core) existsWaiter(id string) bool {
-	c.waiterMtx.RLock()
-	_, exists := c.blockWaiters[id]
-	c.waiterMtx.RUnlock()
-	return exists
-}
-
-// removeWaiter removes a blockWaiter from the map.
-func (c *Core) removeWaiter(id string) {
-	c.waiterMtx.Lock()
-	delete(c.blockWaiters, id)
-	c.waiterMtx.Unlock()
-}
-
 // peerChange is called by a wallet backend when the peer count changes or
 // cannot be determined. A wallet state note is always emitted. In addition to
 // recording the number of peers, if the number of peers is 0, the wallet is
@@ -8461,7 +8585,7 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 		return
 	}
 	c.log.Tracef("Processing tip change for %s", unbip(assetID))
-	c.waiterMtx.Lock()
+	c.waiterMtx.RLock()
 	for id, waiter := range c.blockWaiters {
 		if waiter.assetID != assetID {
 			continue
@@ -8479,7 +8603,7 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 			}
 		}(id, waiter)
 	}
-	c.waiterMtx.Unlock()
+	c.waiterMtx.RUnlock()
 
 	assets := make(assetMap)
 	for _, dc := range c.dexConnections() {
@@ -8564,7 +8688,7 @@ func sendRequest(conn comms.WsConn, route string, request, response interface{},
 	err = conn.RequestWithTimeout(reqMsg, func(msg *msgjson.Message) {
 		errChan <- msg.UnmarshalResult(response)
 	}, timeout, func() {
-		errChan <- fmt.Errorf("timed out waiting for %q response", route) // code this as a timeout!
+		errChan <- fmt.Errorf("timed out waiting for %q response (%w)", route, errTimeout) // code this as a timeout! like today!!!
 	})
 	// Check the request error.
 	if err != nil {

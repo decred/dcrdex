@@ -24,6 +24,13 @@ func GenDeepChild(seed []byte, kids []uint32) (*hdkeychain.ExtendedKey, error) {
 		return nil, err
 	}
 	defer root.Zero()
+
+	return GenDeepChildFromXPriv(root, kids)
+}
+
+// GenDeepChildFromXPriv derives the leaf of a path of children from a parent
+// extended key.
+func GenDeepChildFromXPriv(root *hdkeychain.ExtendedKey, kids []uint32) (*hdkeychain.ExtendedKey, error) {
 	genChild := func(parent *hdkeychain.ExtendedKey, childIdx uint32) (*hdkeychain.ExtendedKey, error) {
 		err := hdkeychain.ErrInvalidChild
 		for err == hdkeychain.ErrInvalidChild {
@@ -39,12 +46,13 @@ func GenDeepChild(seed []byte, kids []uint32) (*hdkeychain.ExtendedKey, error) {
 	}
 
 	extKey := root
-	for _, childIdx := range kids {
+	for i, childIdx := range kids {
 		childExtKey, err := genChild(extKey, childIdx)
-		extKey.Zero()
+		if i > 0 { // don't zero the input arg
+			extKey.Zero()
+		}
 		extKey = childExtKey
 		if err != nil {
-			extKey.Zero()
 			return nil, fmt.Errorf("genChild error: %w", err)
 		}
 	}
