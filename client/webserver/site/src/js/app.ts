@@ -106,24 +106,24 @@ export default class Application {
     this.commitHash = process.env.COMMITHASH || ''
     this.noteReceivers = []
     this.fiatRatesMap = {}
-    this.showPopups = State.getCookie(State.PopupsCK) === '1'
+    this.showPopups = State.getCookie(State.popupsCK) === '1'
     console.log('Decred DEX Client App, Build', this.commitHash.substring(0, 7))
 
     // Loggers can be enabled by setting a truthy value to the loggerID using
     // enableLogger. Settings are stored across sessions. See docstring for the
     // log method for more info.
-    this.loggers = State.fetchLocal(State.LoggersLK) || {}
+    this.loggers = State.fetchLocal(State.loggersLK) || {}
     window.enableLogger = (loggerID, state) => {
       if (state) this.loggers[loggerID] = true
       else delete this.loggers[loggerID]
-      State.storeLocal(State.LoggersLK, this.loggers)
+      State.storeLocal(State.loggersLK, this.loggers)
       return `${loggerID} logger ${state ? 'enabled' : 'disabled'}`
     }
     // Enable logging from anywhere.
     window.log = (loggerID, ...a) => { this.log(loggerID, ...a) }
 
     // Recorders can record log messages, and then save them to file on request.
-    const recorderKeys = State.fetchLocal(State.RecordersLK) || []
+    const recorderKeys = State.fetchLocal(State.recordersLK) || []
     this.recorders = {}
     for (const loggerID of recorderKeys) {
       console.log('recording', loggerID)
@@ -132,7 +132,7 @@ export default class Application {
     window.recordLogger = (loggerID, on) => {
       if (on) this.recorders[loggerID] = []
       else delete this.recorders[loggerID]
-      State.storeLocal(State.RecordersLK, Object.keys(this.recorders))
+      State.storeLocal(State.recordersLK, Object.keys(this.recorders))
       return `${loggerID} recorder ${on ? 'enabled' : 'disabled'}`
     }
     window.dumpLogger = loggerID => {
@@ -184,7 +184,7 @@ export default class Application {
     this.attachCommon(this.header)
     this.attach({})
     // Load recent notifications from Window.localStorage.
-    const notes = State.fetchLocal(State.NotificationsLK)
+    const notes = State.fetchLocal(State.notificationsLK)
     this.setNotes(notes || [])
     // Connect the websocket and register the notification route.
     ws.connect(getSocketURI(), this.reconnected)
@@ -434,7 +434,7 @@ export default class Application {
    * actual stored list is stripped of information not necessary for display.
    */
   storeNotes () {
-    State.storeLocal(State.NotificationsLK, this.notes.map(n => {
+    State.storeLocal(State.notificationsLK, this.notes.map(n => {
       return {
         subject: n.subject,
         details: n.details,
@@ -944,11 +944,11 @@ export default class Application {
       Doc.show(this.page.logoutErr)
       return
     }
-    State.removeCookie(State.AuthCK)
-    State.removeCookie(State.PwKeyCK)
-    State.removeLocal(State.LastMarketLK)
-    State.removeLocal(State.LastMMMarketLK)
-    State.removeLocal(State.NotificationsLK)
+    State.removeCookie(State.authCK)
+    State.removeCookie(State.pwKeyCK)
+    State.removeLocal(State.lastMarketLK)
+    State.removeLocal(State.lastMMMarketLK)
+    State.removeLocal(State.notificationsLK)
     window.location.href = '/login'
   }
 }

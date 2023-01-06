@@ -218,9 +218,10 @@ export default class WalletsPage extends BasePage {
     })
 
     const firstAsset = this.sortAssetButtons()
-    let selectedAsset = State.selectedAsset()
-    if (!selectedAsset) {
-      selectedAsset = firstAsset.id
+    let selectedAsset = firstAsset.id
+    const assetIDStr = State.fetchLocal(State.selectedAssetLK)
+    if (assetIDStr) {
+      selectedAsset = Number(assetIDStr)
     }
     this.setSelectedAsset(selectedAsset)
   }
@@ -592,7 +593,7 @@ export default class WalletsPage extends BasePage {
       this.updateAssetButton(a.id)
       Doc.bind(bttn, 'click', () => {
         this.setSelectedAsset(a.id)
-        State.storeLocal(State.SelectedAssetLK, String(a.id))
+        State.storeLocal(State.selectedAssetLK, String(a.id))
       })
     }
     page.assetSelect.classList.remove('invisible')

@@ -3,20 +3,20 @@
 // to localStorage.
 export default class State {
   // Cookie keys.
-  static DarkModeCK = 'darkMode'
-  static AuthCK = 'dexauth'
-  static PopupsCK = 'popups'
-  static PwKeyCK = 'sessionkey'
+  static darkModeCK = 'darkMode'
+  static authCK = 'dexauth'
+  static popupsCK = 'popups'
+  static pwKeyCK = 'sessionkey'
   // Local storage keys (for data that we don't need at the server).
-  static LoggersLK = 'loggers'
-  static RecordersLK = 'recorders'
-  static LastMarketLK = 'selectedMarket'
-  static DepthZoomLK = 'depthZoom'
-  static LastMMMarketLK = 'mmMarket'
-  static OptionsExpansionLK = 'mmOptsExpand'
-  static LeftMarketDockLK = 'leftmarketdock'
-  static SelectedAssetLK = 'selectedasset'
-  static NotificationsLK = 'notifications'
+  static loggersLK = 'loggers'
+  static recordersLK = 'recorders'
+  static lastMarketLK = 'selectedMarket'
+  static depthZoomLK = 'depthZoom'
+  static lastMMMarketLK = 'mmMarket'
+  static optionsExpansionLK = 'mmOptsExpand'
+  static leftMarketDockLK = 'leftmarketdock'
+  static selectedAssetLK = 'selectedasset'
+  static notificationsLK = 'notifications'
 
   static orderDisclaimerAckedLK = 'ordAck'
 
@@ -52,29 +52,12 @@ export default class State {
    * isDark returns true if the dark-mode cookie is currently set to '1' = true.
    */
   static isDark () {
-    return document.cookie.split(';').filter((item) => item.includes(`${State.DarkModeCK}=1`)).length
+    return document.cookie.split(';').filter((item) => item.includes(`${State.darkModeCK}=1`)).length
   }
 
   /* passwordIsCached returns whether or not there is a cached password in the cookies. */
   static passwordIsCached () {
-    return !!this.getCookie(State.PwKeyCK)
-  }
-
-  /* showLeftMarketDock returns whether or not user wants left market doc shown. */
-  static showLeftMarketDock () {
-    return this.fetchLocal(State.LeftMarketDockLK) === '1'
-  }
-
-  /*
-   * selectedAsset returns selected asset ID or null if none user hasn't selected one
-   * yet.
-   */
-  static selectedAsset (): number | null {
-    const assetIDStr = State.fetchLocal(State.SelectedAssetLK)
-    if (!assetIDStr) {
-      return null
-    }
-    return Number(assetIDStr)
+    return !!this.getCookie(State.pwKeyCK)
   }
 
   /* storeLocal puts the key-value pair into Window.localStorage. */
@@ -101,6 +84,6 @@ export default class State {
 }
 
 // Setting defaults here, unless specific cookie (or local storage) value was already chosen by the user.
-if (State.getCookie(State.DarkModeCK) === null) State.setCookie(State.DarkModeCK, '1')
-if (State.getCookie(State.PopupsCK) === null) State.setCookie(State.PopupsCK, '1')
-if (State.fetchLocal(State.LeftMarketDockLK) === null) State.storeLocal(State.LeftMarketDockLK, '1')
+if (State.getCookie(State.darkModeCK) === null) State.setCookie(State.darkModeCK, '1')
+if (State.getCookie(State.popupsCK) === null) State.setCookie(State.popupsCK, '1')
+if (State.fetchLocal(State.leftMarketDockLK) === null) State.storeLocal(State.leftMarketDockLK, '1')

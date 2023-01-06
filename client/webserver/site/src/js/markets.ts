@@ -208,7 +208,7 @@ export default class MarketsPage extends BasePage {
       mouse: (r: MouseReport) => { this.reportDepthMouse(r) },
       zoom: (z: number) => { this.reportDepthZoom(z) }
     }
-    this.depthChart = new DepthChart(page.depthChart, depthReporters, State.fetchLocal(State.DepthZoomLK))
+    this.depthChart = new DepthChart(page.depthChart, depthReporters, State.fetchLocal(State.depthZoomLK))
 
     const candleReporters: CandleReporters = {
       mouse: c => { this.reportMouseCandle(c) }
@@ -452,13 +452,13 @@ export default class MarketsPage extends BasePage {
     this.stats = [{ row: stats0, tmpl: Doc.parseTemplate(stats0) }, { row: stats1, tmpl: Doc.parseTemplate(stats1) }]
 
     const closeMarketsList = () => {
-      State.storeLocal(State.LeftMarketDockLK, '0')
+      State.storeLocal(State.leftMarketDockLK, '0')
       page.leftMarketDock.classList.remove('default')
       page.leftMarketDock.classList.add('stashed')
       for (const s of this.stats) s.row.classList.remove('listopen')
     }
     const openMarketsList = () => {
-      State.storeLocal(State.LeftMarketDockLK, '1')
+      State.storeLocal(State.leftMarketDockLK, '1')
       page.leftMarketDock.classList.remove('default', 'stashed')
       for (const s of this.stats) s.row.classList.add('listopen')
     }
@@ -478,7 +478,7 @@ export default class MarketsPage extends BasePage {
         this.setMarket(row.mkt.xc.host, row.mkt.baseid, row.mkt.quoteid)
       })
     }
-    if (!State.showLeftMarketDock()) { // It is shown by default, hiding if necessary.
+    if (State.fetchLocal(State.leftMarketDockLK) !== '1') { // It is shown by default, hiding if necessary.
       closeMarketsList()
     }
 
@@ -516,7 +516,7 @@ export default class MarketsPage extends BasePage {
     if (data && data.host && typeof data.base !== 'undefined' && typeof data.quote !== 'undefined') {
       selected = makeMarket(data.host, parseInt(data.base), parseInt(data.quote))
     } else {
-      selected = State.fetchLocal(State.LastMarketLK)
+      selected = State.fetchLocal(State.lastMarketLK)
     }
     if (!selected || !this.marketList.exists(selected.host, selected.base, selected.quote)) {
       const first = this.marketList.first()
@@ -881,7 +881,7 @@ export default class MarketsPage extends BasePage {
    * across reloads.
    */
   reportDepthZoom (zoom: number) {
-    State.storeLocal(State.DepthZoomLK, zoom)
+    State.storeLocal(State.depthZoomLK, zoom)
   }
 
   reportMouseCandle (candle: Candle | null) {
@@ -1346,7 +1346,7 @@ export default class MarketsPage extends BasePage {
     this.updateTitle()
     this.marketList.select(host, b.id, q.id)
 
-    State.storeLocal(State.LastMarketLK, {
+    State.storeLocal(State.lastMarketLK, {
       host: note.host,
       base: mktBook.base,
       quote: mktBook.quote
