@@ -525,6 +525,17 @@ func (w *rpcWallet) InternalAddress(ctx context.Context, acctName string) (stdad
 	return addr, translateRPCCancelErr(err)
 }
 
+// ExternalAddress returns an external address from the specified account using
+// GapPolicyWrap. The dcrwallet user should set --gaplimit= as needed to prevent
+// address reused depending on their needs. Part of the Wallet interface.
+func (w *rpcWallet) ExternalAddress(ctx context.Context, acctName string) (stdaddr.Address, error) {
+	addr, err := w.rpcClient.GetNewAddressGapPolicy(ctx, acctName, dcrwallet.GapPolicyWrap)
+	if err != nil {
+		return nil, translateRPCCancelErr(err)
+	}
+	return addr, nil
+}
+
 // LockUnspent locks or unlocks the specified outpoint.
 // Part of the Wallet interface.
 func (w *rpcWallet) LockUnspent(ctx context.Context, unlock bool, ops []*wire.OutPoint) error {
@@ -576,17 +587,6 @@ func (w *rpcWallet) UnspentOutput(ctx context.Context, txHash *chainhash.Hash, i
 	}
 
 	return nil, asset.CoinNotFoundError
-}
-
-// ExternalAddress returns an external address from the specified account using
-// GapPolicyIgnore.
-// Part of the Wallet interface.
-func (w *rpcWallet) ExternalAddress(ctx context.Context, acctName string) (stdaddr.Address, error) {
-	addr, err := w.rpcClient.GetNewAddressGapPolicy(ctx, acctName, dcrwallet.GapPolicyIgnore)
-	if err != nil {
-		return nil, translateRPCCancelErr(err)
-	}
-	return addr, nil
 }
 
 // SignRawTransaction signs the provided transaction using rpc RawRequest.
