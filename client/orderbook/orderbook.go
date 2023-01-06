@@ -56,6 +56,13 @@ type rateSell struct {
 
 // OrderBook represents a client tracked order book.
 type OrderBook struct {
+	// feeRates is at the top to account for atomic field alignment in
+	// 32-bit systems. See also https://golang.org/pkg/sync/atomic/#pkg-note-BUG
+	feeRates struct {
+		base  uint64
+		quote uint64
+	}
+
 	log      dex.Logger
 	seqMtx   sync.Mutex
 	seq      uint64
@@ -78,13 +85,6 @@ type OrderBook struct {
 	currentEpoch uint64
 	proofedEpoch uint64
 	epochQueues  map[uint64]*EpochQueue
-
-	// feeRates is a separate struct to account for atomic field alignment in
-	// 32-bit systems. See also https://golang.org/pkg/sync/atomic/#pkg-note-BUG
-	feeRates struct {
-		base  uint64
-		quote uint64
-	}
 }
 
 // NewOrderBook creates a new order book.
