@@ -368,7 +368,7 @@ func TestSynced(t *testing.T) {
 	}}
 
 	for _, test := range tests {
-		nowInSecs := uint64(time.Now().Unix() / 1000)
+		nowInSecs := uint64(time.Now().Unix())
 		eth, node := tNewBackend(BipID)
 		node.syncProg = test.syncProg
 		node.syncProgErr = test.syncProgErr

@@ -2756,10 +2756,32 @@ func (*baseWallet) ValidateSecret(secret, secretHash []byte) bool {
 }
 
 // SyncStatus is information about the blockchain sync status.
+//
+// TODO: Since the merge, the sync status from a geth full node, namely the
+// prog.CurrentBlock prog.HighestBlock, always seem to be the same number.
+// Initial sync will always be zero. Later when restarting the node they move
+// together but never indicate the highest known block on the chain. Further
+// more, requesting the best block header starts to fail after a few tries
+// during initial sync. Investigate how to get correct sync progress.
 func (eth *baseWallet) SyncStatus() (bool, float32, error) {
 	prog, err := eth.node.syncProgress(eth.ctx)
 	if err != nil {
 		return false, 0, err
+	}
+	checkHeaderTime := func() (bool, error) {
+		bh, err := eth.node.bestHeader(eth.ctx)
+		if err != nil {
+			return false, err
+		}
+		// Time in the header is in seconds.
+		timeDiff := time.Now().Unix() - int64(bh.Time)
+		if timeDiff > dexeth.MaxBlockInterval && eth.net != dex.Simnet {
+			eth.log.Infof("Time since last eth block (%d sec) exceeds %d sec."+
+				"Assuming not in sync. Ensure your computer's system clock "+
+				"is correct.", timeDiff, dexeth.MaxBlockInterval)
+			return false, nil
+		}
+		return true, nil
 	}
 	if prog.HighestBlock != 0 {
 		// HighestBlock was set. This means syncing started and is
@@ -2767,6 +2789,13 @@ func (eth *baseWallet) SyncStatus() (bool, float32, error) {
 		// continue to go up even if we are not in a syncing state.
 		// HighestBlock will not.
 		if prog.CurrentBlock >= prog.HighestBlock {
+			fresh, err := checkHeaderTime()
+			if err != nil {
+				return false, 0, err
+			}
+			if !fresh {
+				return false, 0, nil
+			}
 			return eth.node.peerCount() > 0, 1.0, nil
 		}
 
@@ -2785,15 +2814,11 @@ func (eth *baseWallet) SyncStatus() (bool, float32, error) {
 	// syncing state. In order to discern if syncing has begun when
 	// HighestBlock is not set, check that the best header came in under
 	// dexeth.MaxBlockInterval and guess.
-	bh, err := eth.node.bestHeader(eth.ctx)
+	fresh, err := checkHeaderTime()
 	if err != nil {
 		return false, 0, err
 	}
-	// Time in the header is in seconds.
-	timeDiff := time.Now().Unix() - int64(bh.Time)
-	if timeDiff > dexeth.MaxBlockInterval && eth.net != dex.Simnet {
-		eth.log.Debugf("Time since last block (%d sec) exceeds %d sec."+
-			"Assuming not in sync.", timeDiff, dexeth.MaxBlockInterval)
+	if !fresh {
 		return false, 0, nil
 	}
 	return eth.node.peerCount() > 0, 1.0, nil

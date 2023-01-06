@@ -577,7 +577,7 @@ func (eth *baseBackend) Synced() (bool, error) {
 		return false, err
 	}
 	// Time in the header is in seconds.
-	nowInSecs := time.Now().Unix() / 1000
+	nowInSecs := time.Now().Unix()
 	timeDiff := nowInSecs - int64(bh.Time)
 	return timeDiff < dexeth.MaxBlockInterval, nil
 }
