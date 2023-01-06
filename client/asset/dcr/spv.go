@@ -546,7 +546,7 @@ func (w *spvWallet) ExternalAddress(ctx context.Context, _ string) (stdaddr.Addr
 // InternalAddress returns an internal address using GapPolicyIgnore.
 // Part of the Wallet interface.
 func (w *spvWallet) InternalAddress(ctx context.Context, _ string) (stdaddr.Address, error) {
-	return w.NewInternalAddress(ctx, w.acctNum, wallet.WithGapPolicyIgnore())
+	return w.NewInternalAddress(ctx, w.acctNum, wallet.WithGapPolicyWrap())
 }
 
 // SignRawTransaction signs the provided transaction.
