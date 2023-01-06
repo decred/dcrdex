@@ -477,7 +477,7 @@ type Bonder interface {
 	// provided amount, lock time, and dex account ID. An explicit private key
 	// type is used to guarantee it's not bytes from something else like a
 	// public key.
-	MakeBondTx(ver uint16, amt uint64, lockTime time.Time, privKey *secp256k1.PrivateKey, acctID []byte) (*Bond, error)
+	MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Time, privKey *secp256k1.PrivateKey, acctID []byte) (*Bond, error)
 	// RefundBond will refund the bond given the full bond output details and
 	// private key to spend it.
 	RefundBond(ctx context.Context, ver uint16, coinID, script []byte, amt uint64, privKey *secp256k1.PrivateKey) ([]byte, error)

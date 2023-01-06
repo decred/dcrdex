@@ -580,7 +580,8 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 	}
 	defer priv.Zero()
 	acctID := dc.acct.ID()
-	bond, err := wallet.MakeBondTx(bondAsset.Version, form.Bond, lockTime, priv, acctID[:])
+	feeRate := c.feeSuggestionAny(bondAsset.ID)
+	bond, err := wallet.MakeBondTx(bondAsset.Version, form.Bond, feeRate, lockTime, acctID[:])
 	if err != nil {
 		return nil, codedError(registerErr, err)
 	}
