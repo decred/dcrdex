@@ -3258,7 +3258,7 @@ func (dcr *ExchangeWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
 // spends the bond output after lockTime passes, paying to an address for the
 // current underlying wallet; the bond private key (BondPrivKey) should normally
 // be used to author a new transaction paying to a new address instead.
-func (dcr *ExchangeWallet) MakeBondTx(ver uint16, amt uint64, lockTime time.Time,
+func (dcr *ExchangeWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Time,
 	bondKey *secp256k1.PrivateKey, acctID []byte) (*asset.Bond, error) {
 	if ver != 0 {
 		return nil, errors.New("only version 0 bonds supported")
@@ -3272,8 +3272,7 @@ func (dcr *ExchangeWallet) MakeBondTx(ver uint16, amt uint64, lockTime time.Time
 	pk := bondKey.PubKey().SerializeCompressed()
 	pkh := stdaddr.Hash160(pk)
 
-	feeRate := dcr.targetFeeRateWithFallback(2, 0)
-
+	feeRate = dcr.feeRateWithFallback(feeRate)
 	baseTx := wire.NewMsgTx()
 	const scriptVersion = 0
 
