@@ -6,7 +6,7 @@
 # $ docker volume create --name=dcrdex_data
 #
 # Run the docker image, mapping web access port.
-# $ docker run -d --rm -p 127.0.0.1:5758:5758 -v dcrdex_data:/root/.dexc user/dcrdex
+# $ docker run -d --rm -p 127.0.0.1:5758:5758 -v dcrdex_data:/dex/.dexc user/dcrdex
 #
 
 # frontend build
@@ -28,7 +28,11 @@ RUN CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build
 
 # Final image
 FROM debian:buster-slim
-WORKDIR /root
+RUN apt-get update && apt-get install -y ca-certificates
+WORKDIR /dex
+ENV HOME /dex
+RUN mkdir -p /dex/.dexc && chown 1000 /dex/.dexc
+USER 1000
 COPY --from=gobuilder /root/dex/client/cmd/dexc/dexc ./
 COPY --from=gobuilder /root/dex/client/cmd/dexcctl/dexcctl ./
 COPY --from=gobuilder /root/dex/client/webserver/site ./site
