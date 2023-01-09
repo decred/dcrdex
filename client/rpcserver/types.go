@@ -210,6 +210,14 @@ func checkNArgs(params *RawParams, nPWArgs, nArgs []int) error {
 	return nil
 }
 
+func checkIntArg(arg, name string, bitSize int) (int64, error) {
+	i, err := strconv.ParseInt(arg, 10, bitSize)
+	if err != nil {
+		return i, fmt.Errorf("%w: cannot parse %s: %v", errArgs, name, err)
+	}
+	return i, nil
+}
+
 func checkUIntArg(arg, name string, bitSize int) (uint64, error) {
 	i, err := strconv.ParseUint(arg, 10, bitSize)
 	if err != nil {
@@ -424,6 +432,55 @@ func parseBondAssetsArgs(params *RawParams) (host string, cert []byte, err error
 	return params.Args[0], []byte(params.Args[1]), nil
 }
 
+// bondopts 127.0.0.1:17273 2 2012345678 42
+func parseBondOptsArgs(params *RawParams) (*core.BondOptionsForm, error) {
+	if err := checkNArgs(params, []int{0}, []int{2, 4}); err != nil {
+		return nil, err
+	}
+
+	var targetTierP *uint64
+	targetTier, err := checkIntArg(params.Args[1], "targetTier", 17)
+	if err != nil {
+		return nil, err
+	}
+	if targetTier >= 0 {
+		targetTierU64 := uint64(targetTier)
+		targetTierP = &targetTierU64
+	}
+
+	var maxBondedP *uint64
+	if len(params.Args) > 2 {
+		maxBonded, err := checkIntArg(params.Args[2], "maxBonded", 64)
+		if err != nil {
+			return nil, err
+		}
+		if maxBonded >= 0 {
+			maxBondedU64 := uint64(maxBonded)
+			maxBondedP = &maxBondedU64
+		}
+	}
+
+	var bondAssetP *uint32
+	if len(params.Args) > 3 {
+		bondAsset, err := checkIntArg(params.Args[3], "bondAsset", 33)
+		if err != nil {
+			return nil, err
+		}
+		if bondAsset >= 0 {
+			bondAssetU32 := uint32(bondAsset)
+			bondAssetP = &bondAssetU32
+		}
+	}
+
+	req := &core.BondOptionsForm{
+		Addr:         params.Args[0],
+		TargetTier:   targetTierP,
+		MaxBondedAmt: maxBondedP,
+		BondAsset:    bondAssetP,
+	}
+	return req, nil
+}
+
 func parsePostBondArgs(params *RawParams) (*core.PostBondForm, error) {
 	if err := checkNArgs(params, []int{1}, []int{3, 5}); err != nil {
 		return nil, err
@@ -437,13 +494,15 @@ func parsePostBondArgs(params *RawParams) (*core.PostBondForm, error) {
 		return nil, err
 	}
 
-	var lockTimeEpoch uint64
+	var maintain *bool
 	if len(params.Args) > 3 {
-		lockTimeEpoch, err = checkUIntArg(params.Args[3], "locktime", 64)
+		tt, err := checkBoolArg(params.Args[3], "maintain")
 		if err != nil {
 			return nil, err
 		}
+		maintain = &tt
 	}
+
 	var cert []byte
 	if len(params.Args) > 4 {
 		cert = []byte(params.Args[4])
@@ -451,12 +510,12 @@ func parsePostBondArgs(params *RawParams) (*core.PostBondForm, error) {
 
 	asset32 := uint32(asset)
 	req := &core.PostBondForm{
-		AppPass:  params.PWArgs[0],
-		Addr:     params.Args[0],
-		Cert:     cert,
-		Bond:     bond,
-		Asset:    &asset32,
-		LockTime: lockTimeEpoch,
+		AppPass:      params.PWArgs[0],
+		Addr:         params.Args[0],
+		Cert:         cert,
+		Bond:         bond,
+		Asset:        &asset32,
+		MaintainTier: maintain,
 	}
 	return req, nil
 }

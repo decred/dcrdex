@@ -58,7 +58,7 @@ func configure() (*config, []string, bool, error) {
 	cfg := &config{
 		Config: defaultConfigPath,
 	}
-	preParser := flags.NewParser(cfg, flags.HelpFlag)
+	preParser := flags.NewParser(cfg, flags.HelpFlag|flags.PassDoubleDash|flags.PassAfterNonOption)
 	_, err := preParser.Parse()
 	if err != nil {
 		var flagErr *flags.Error
@@ -85,7 +85,7 @@ func configure() (*config, []string, bool, error) {
 		return nil, nil, stop, nil
 	}
 
-	parser := flags.NewParser(cfg, flags.Default)
+	parser := flags.NewParser(cfg, flags.Default|flags.PassAfterNonOption)
 
 	if dex.FileExists(cfg.Config) {
 		// Load additional config from file.

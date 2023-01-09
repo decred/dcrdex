@@ -50,6 +50,7 @@ type TCore struct {
 	registerErr              error
 	postBondResult           *core.PostBondResult
 	postBondErr              error
+	bondOptsErr              error
 	exchanges                map[string]*core.Exchange
 	loginErr                 error
 	order                    *core.Order
@@ -127,6 +128,9 @@ func (c *TCore) Register(*core.RegisterForm) (*core.RegisterResult, error) {
 }
 func (c *TCore) PostBond(*core.PostBondForm) (*core.PostBondResult, error) {
 	return c.postBondResult, c.postBondErr
+}
+func (c *TCore) UpdateBondOptions(form *core.BondOptionsForm) error {
+	return c.bondOptsErr
 }
 func (c *TCore) SyncBook(dex string, base, quote uint32) (core.BookFeed, error) {
 	return &tBookFeed{}, c.syncErr

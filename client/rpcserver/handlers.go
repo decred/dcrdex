@@ -37,6 +37,7 @@ const (
 	bondAssetsRoute            = "bondassets"
 	registerRoute              = "register"
 	postBondRoute              = "postbond"
+	bondOptionsRoute           = "bondopts"
 	tradeRoute                 = "trade"
 	versionRoute               = "version"
 	walletsRoute               = "wallets"
@@ -97,6 +98,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	getDEXConfRoute:            handleGetDEXConfig,
 	registerRoute:              handleRegister,
 	postBondRoute:              handlePostBond,
+	bondOptionsRoute:           handleBondOptions,
 	bondAssetsRoute:            handleBondAssets,
 	tradeRoute:                 handleTrade,
 	versionRoute:               handleVersion,
@@ -399,6 +401,19 @@ func handleRegister(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	return createResponse(registerRoute, res, nil)
 }
 
+func handleBondOptions(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	form, err := parseBondOptsArgs(params)
+	if err != nil {
+		return usage(bondOptionsRoute, err)
+	}
+	err = s.core.UpdateBondOptions(form)
+	if err != nil {
+		resErr := &msgjson.Error{Code: msgjson.RPCPostBondError, Message: err.Error()}
+		return createResponse(bondOptionsRoute, nil, resErr)
+	}
+	return createResponse(bondOptionsRoute, "ok", nil)
+}
+
 // handlePostBond handles requests for postbond. *msgjson.ResponsePayload.Error
 // is empty if successful.
 func handlePostBond(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
@@ -443,6 +458,9 @@ func handlePostBond(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	if err != nil {
 		resErr := &msgjson.Error{Code: msgjson.RPCPostBondError, Message: err.Error()}
 		return createResponse(postBondRoute, nil, resErr)
+	}
+	if res.BondID == "" {
+		return createResponse(postBondRoute, "existing account configured - no bond posted", nil)
 	}
 	return createResponse(postBondRoute, res, nil)
 }
@@ -1117,22 +1135,32 @@ Registration is complete after the fee transaction has been confirmed.`,
 	},
 	postBondRoute: {
 		pwArgsShort: `"appPass"`,
-		argsShort:   `"addr" bond assetID (lockTime "cert")`,
+		argsShort:   `"addr" bond assetID (lockTime "cert" maintain)`,
 		cmdSummary: `Post new bond for DEX. An ok response does not mean that the bond is active.
-	Bond is active after the bond transaction has been confirmed and the server notified.`,
+		Bond is active after the bond transaction has been confirmed and the server notified.`,
 		pwArgsLong: `Password Args:
-	appPass (string): The DEX client password.`,
+    appPass (string): The DEX client password.`,
 		argsLong: `Args:
-	addr (string): The DEX address to post bond for for.
-	bond (int): The bond amount (in DCR presently).
-	assetID (int): The asset ID with which to pay the fee.
-	lockTime (int): The bond's lockTime as UNIX epoch time (seconds).
-    cert (string): Optional. The TLS certificate path.`,
+    addr (string): The DEX address to post bond for for.
+    bond (int): The bond amount (in DCR presently).
+    assetID (int): The asset ID with which to pay the fee.
+    cert (string): Optional. The TLS certificate path. Only applicable when registering.
+    maintain (bool): Optional. Whether to maintain the trading tier established by this bond. Only applicable when registering. (default is true)`,
 		returns: `Returns:
-	{
-	  "bondID" (string): The bond transactions's txid and output index.
-	  "reqConfirms" (int): The number of confirmations required to start trading.
-	}`,
+    {
+      "bondID" (string): The bond transactions's txid and output index.
+      "reqConfirms" (int): The number of confirmations required to start trading.
+    }`,
+	},
+	bondOptionsRoute: {
+		argsShort:  `"addr" targetTier (maxBondedAmt bondAssetID)`,
+		cmdSummary: `Change bond options for a DEX.`,
+		argsLong: `Args:
+    addr (string): The DEX address to post bond for for.
+    targetTier (int): The target trading tier.
+    maxBondedAmt (int): The maximum amount that may be locked in bonds.
+    bondAssetID (int): The asset ID with which to auto-post bonds.`,
+		returns: `Returns: "ok"`,
 	},
 	exchangesRoute: {
 		cmdSummary: `Detailed information about known exchanges and markets.`,
