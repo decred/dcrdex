@@ -172,7 +172,7 @@ type dexConnection struct {
 	spots    map[string]*msgjson.Spot
 
 	// anomaliesCount tracks client's connection anomalies.
-	anomaliesCount int64 // atomic
+	anomaliesCount uint32 // atomic
 	lastConnect    time.Time
 }
 
@@ -7373,12 +7373,12 @@ func (c *Core) handleReconnect(host string) {
 		return
 	}
 
-	anomalies := atomic.LoadInt64(&dc.anomaliesCount)
+	anomalies := atomic.LoadUint32(&dc.anomaliesCount)
 	if anomalies > maxClientAnomaliesCount {
 		// Send notification to check connectivity.
 		subject, details := c.formatDetails(TopicDexConnectivity, host)
 		c.notify(newConnEventNote(TopicDexConnectivity, subject, host, dc.status(), details, db.Poke))
-		atomic.StoreInt64(&dc.anomaliesCount, 0) // reset anomalies count.
+		atomic.StoreUint32(&dc.anomaliesCount, 0) // reset anomalies count.
 	}
 
 	// The server's configuration may have changed, so retrieve the current
@@ -7534,7 +7534,7 @@ func (c *Core) handleConnectEvent(dc *dexConnection, status comms.ConnectionStat
 	} else {
 		if time.Since(dc.lastConnect) < wsAnomalyDuration {
 			// Increase anomalies count for this connection.
-			atomic.StoreInt64(&dc.anomaliesCount, atomic.LoadInt64(&dc.anomaliesCount)+1)
+			atomic.StoreUint32(&dc.anomaliesCount, atomic.LoadUint32(&dc.anomaliesCount)+1)
 		}
 
 		for _, tracker := range dc.trackedTrades() {
