@@ -510,10 +510,7 @@ span.token-aware-symbol sup {
 
 .form-check-input[type=checkbox] {
   background-color: #ebebeb;
-
-  &:hover {
-    cursor: pointer;
-  }
+  cursor: pointer;
 
   &:checked {
     background-color: #3095db;
@@ -521,8 +518,9 @@ span.token-aware-symbol sup {
 }
 
 .form-check-label {
+  cursor: pointer;
+
   &:hover {
     font-weight: bold;
-    cursor: pointer;
   }
 }
