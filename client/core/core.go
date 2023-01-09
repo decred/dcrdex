@@ -7376,8 +7376,8 @@ func (c *Core) handleReconnect(host string) {
 	anomalies := atomic.LoadInt64(&dc.anomaliesCount)
 	if anomalies > maxClientAnomaliesCount {
 		// Send notification to check connectivity.
-		subject, details := c.formatDetails(TopicCheckConnectivity)
-		c.notify(newClientNotifyNote(TopicCheckConnectivity, subject, details, db.Poke))
+		subject, details := c.formatDetails(TopicDexConnectivity, host)
+		c.notify(newConnEventNote(TopicDexConnectivity, subject, host, dc.status(), details, db.Poke))
 		atomic.StoreInt64(&dc.anomaliesCount, 0) // reset anomalies count.
 	}
 

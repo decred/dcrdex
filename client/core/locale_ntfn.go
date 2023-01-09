@@ -323,6 +323,11 @@ var originLocale = map[Topic]*translation{
 		subject:  "Server disconnect",
 		template: "%s is disconnected",
 	},
+	// [host]
+	TopicDexConnectivity: {
+		subject:  "Internet Connectivity",
+		template: "Your internet connection to %s is unstable, check your internet connection",
+	},
 	// [host, rule, time, details]
 	TopicPenalized: {
 		subject:  "Server has penalized you",
@@ -365,10 +370,6 @@ var originLocale = map[Topic]*translation{
 	TopicOrderResumeFailure: {
 		subject:  "Resume order failure",
 		template: "Failed to resume processing of trade: %v",
-	},
-	TopicCheckConnectivity: {
-		subject:  "Internet Connectivity",
-		template: "Your internet connection is unstable, check your internet connection",
 	},
 }
 
