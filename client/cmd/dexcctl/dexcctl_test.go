@@ -75,12 +75,12 @@ func TestConfigure(t *testing.T) {
 	}
 
 	// parse args
-	os.Args = []string{"", "-C.nofile", "arg1", "arg2"}
+	os.Args = []string{"", "-C.nofile", "arg1", "arg2", "-1"}
 	_, args, _, err := configure()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if args[0] != "arg1" && args[1] != "arg2" {
+	if args[0] != "arg1" || args[1] != "arg2" || args[2] != "-1" {
 		t.Fatal("arguments not parsed correctly")
 	}
 

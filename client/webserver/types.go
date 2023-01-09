@@ -47,12 +47,14 @@ type registrationForm struct {
 
 // postBondForm is used to post a new bond for an existing DEX account.
 type postBondForm struct {
-	Addr     string           `json:"addr"`
-	Cert     string           `json:"cert"` // may be empty for adding bond to existing account
-	Password encode.PassBytes `json:"pass"`
-	Bond     uint64           `json:"bond"`
-	AssetID  *uint32          `json:"asset,omitempty"` // prevent omission using BTC
-	LockTime uint64           `json:"lockTime"`
+	Addr         string           `json:"addr"`
+	Cert         string           `json:"cert"` // may be empty for adding bond to existing account
+	Password     encode.PassBytes `json:"pass"`
+	Bond         uint64           `json:"bond"`
+	AssetID      *uint32          `json:"asset,omitempty"` // prevent omission using BTC
+	LockTime     uint64           `json:"lockTime"`
+	Maintain     *bool            `json:"maintain,omitempty"`
+	MaxBondedAmt *uint64          `json:"maxBondedAmt,omitempty"`
 }
 
 type registrationTxFeeForm struct {

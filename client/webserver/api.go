@@ -278,6 +278,9 @@ func (s *WebServer) apiPostBond(w http.ResponseWriter, r *http.Request) {
 		Bond:     post.Bond,
 		Asset:    &assetID,
 		LockTime: post.LockTime,
+		// Options valid only when creating an account with bond:
+		MaintainTier: post.Maintain,
+		MaxBondedAmt: post.MaxBondedAmt,
 	})
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("add bond error: %w", err))

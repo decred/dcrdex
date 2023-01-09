@@ -37,7 +37,7 @@ const (
 	// patch for bug fixes. Dexcctl requiredRPCSemVer should be kept up to date
 	// with this version.
 	rpcSemverMajor uint32 = 0
-	rpcSemverMinor uint32 = 3
+	rpcSemverMinor uint32 = 4
 	rpcSemverPatch uint32 = 0
 
 	// rpcTimeoutSeconds is the number of seconds a connection to the RPC server
@@ -71,6 +71,7 @@ type clientCore interface {
 	GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange, error)
 	Register(form *core.RegisterForm) (*core.RegisterResult, error) // V0PURGE
 	PostBond(form *core.PostBondForm) (*core.PostBondResult, error)
+	UpdateBondOptions(form *core.BondOptionsForm) error
 	Trade(appPass []byte, form *core.TradeForm) (order *core.Order, err error)
 	Wallets() (walletsStates []*core.WalletState)
 	WalletState(assetID uint32) *core.WalletState
