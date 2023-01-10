@@ -223,18 +223,6 @@ type AccountInfo struct {
 	LegacyFeePaid bool // DEPRECATED
 }
 
-// Registered indicates if the account should exist server-side. This is when
-// the legacy fee txn or at least one bond txn has been broadcast even if
-// neither has received the required confirmations. This may return a false
-// negative for a recovered account that had no active bonds at recovery time,
-// unless new bond(s) have been posted since recovery.
-func (ai *AccountInfo) Registered() bool {
-	if ai.LegacyFeePaid || len(ai.LegacyFeeCoin) > 0 {
-		return true
-	}
-	return len(ai.Bonds) > 0
-}
-
 // Encode the AccountInfo as bytes. NOTE: remove deprecated fee fields and do a
 // DB upgrade at some point. But how to deal with old accounts needing to store
 // this data forever?
@@ -250,6 +238,11 @@ func (ai *AccountInfo) Encode() []byte {
 		AddData(encode.Uint32Bytes(ai.BondAsset)).
 		AddData(encode.Uint32Bytes(ai.LegacyFeeAssetID)).
 		AddData(ai.LegacyFeeCoin)
+}
+
+// ViewOnly is true if account keys are not saved.
+func (ai *AccountInfo) ViewOnly() bool {
+	return len(ai.EncKey()) == 0
 }
 
 // EncKey is the encrypted account private key.

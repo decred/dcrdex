@@ -223,6 +223,7 @@ export default class MarketsPage extends BasePage {
     this.candleDur = fiveMinBinKey
 
     // Setup the register to trade button.
+    // TODO: Use dexsettings page?
     const registerBttn = Doc.tmplElement(page.notRegistered, 'registerBttn')
     bind(registerBttn, 'click', () => {
       window.location.assign(`/register/${this.market.dex.host}`)
@@ -663,14 +664,16 @@ export default class MarketsPage extends BasePage {
     // By default the order form should be hidden, and only if market is set
     // and ready for trading the form should show up.
     Doc.hide(page.orderForm, page.orderTypeBttns)
-    const assetsAreSupported = this.assetsAreSupported().isSupported
-    const { dex, base, quote } = this.market
-    const registeredAndFeePaid = dex.registered && !dex.pendingFee
-    const hasWallets = base && app().assets[base.id].wallet && quote && app().assets[quote.id].wallet
 
-    if (registeredAndFeePaid && assetsAreSupported && hasWallets) {
-      Doc.show(page.orderForm, page.orderTypeBttns)
-    }
+    if (!this.assetsAreSupported().isSupported) return // assets not supported
+
+    if (this.market.dex.tier < 1) return // acct suspended or not registered
+
+    const { base, quote } = this.market
+    const hasWallets = base && app().assets[base.id].wallet && quote && app().assets[quote.id].wallet
+    if (!hasWallets) return
+
+    Doc.show(page.orderForm, page.orderTypeBttns)
   }
 
   /* setLoaderMsgVisibility displays a message in case a dex asset is not
@@ -829,7 +832,7 @@ export default class MarketsPage extends BasePage {
       buyBalance: 0
     }
 
-    if (!dex.registered) {
+    if (dex.viewOnly) {
       page.unregisteredDex.textContent = host
       Doc.show(page.notRegistered)
     }

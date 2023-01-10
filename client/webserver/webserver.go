@@ -368,7 +368,7 @@ func New(cfg *Config) (*WebServer, error) {
 		r.Group(func(apiInit chi.Router) {
 			apiInit.Use(s.rejectUninited)
 			apiInit.Post("/login", s.apiLogin)
-			apiInit.Post("/getdexinfo", s.apiGetDEXInfo)
+			apiInit.Post("/getdexinfo", s.apiGetDEXInfo) // TODO: Seems unused.
 			apiInit.Post("/adddex", s.apiAddDEX)
 			apiInit.Post("/discoveracct", s.apiDiscoverAccount)
 			apiInit.Post("/regtxfee", s.apiEstimateRegistrationTxFee)

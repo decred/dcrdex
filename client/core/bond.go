@@ -803,7 +803,7 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 	dc, found := c.conns[host]
 	c.connMtx.RUnlock()
 	if found {
-		acctExists = dc.acct.hasKeys()
+		acctExists = !dc.acct.isViewOnly()
 		if acctExists && dc.acct.locked() { // require authDEX first to reconcile any existing bond statuses
 			return nil, newError(acctKeyErr, "acct locked %s (login first)", form.Addr)
 		}
@@ -986,7 +986,7 @@ func (c *Core) makeAndPostBond(dc *dexConnection, acctExists bool, wallet *xcWal
 			BondAsset:  dc.acct.bondAsset,
 			TargetTier: dc.acct.targetTier,
 		}
-		err = c.db.CreateAccount(ai)
+		err = c.dbCreateOrUpdateAccount(dc, ai)
 		if err != nil {
 			return nil, fmt.Errorf("failed to store account %v for dex %v: %w",
 				dc.acct.id, dc.acct.host, err)
@@ -994,7 +994,6 @@ func (c *Core) makeAndPostBond(dc *dexConnection, acctExists bool, wallet *xcWal
 	}
 
 	dc.acct.authMtx.Lock()
-	dc.acct.registered = true // if it wasn't already, so we don't ask user to "create account to trade"
 	dc.acct.pendingBonds = append(dc.acct.pendingBonds, dbBond)
 	dc.acct.authMtx.Unlock()
 

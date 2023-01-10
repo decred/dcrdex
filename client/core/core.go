@@ -470,7 +470,7 @@ func (dc *dexConnection) exchangeInfo() *Exchange {
 		BondAssets:       bondAssets,
 		ConnectionStatus: dc.status(),
 		CandleDurs:       cfg.BinSizes,
-		Registered:       dc.acct.isRegistered(),
+		ViewOnly:         dc.acct.isViewOnly(),
 		Tier:             tier,
 		BondsPending:     bondsPending,
 		// TODO: Bonds
@@ -1204,22 +1204,16 @@ func (c *Core) addDexConnection(dc *dexConnection) {
 	c.connMtx.Unlock()
 }
 
-// dexForTrading returns the *dexConnection for the host or an error if the DEX
-// is not connected or cannot be used to trade.
-func (c *Core) dexForTrading(addr string) (*dexConnection, error) {
+// Get the *dexConnection for the host. Return an error if the DEX is not
+// connected.
+func (c *Core) connectedDEX(addr string) (*dexConnection, error) {
 	dc, connected, err := c.dex(addr)
 	if err != nil {
 		return nil, err
 	}
 
-	if !dc.acct.authed() {
-		// may mean not yet 'connect'ed, but the more likely scenario is that
-		// 'connect' was attempted but did not find a registered account.
+	if dc.acct.isViewOnly() {
 		return nil, fmt.Errorf("not yet registered at %s", dc.acct.host)
-	}
-
-	if dc.acct.suspended() {
-		return nil, newError(suspendedAcctErr, "may not trade while account is suspended")
 	}
 
 	if dc.acct.locked() {
@@ -3584,22 +3578,20 @@ func (c *Core) tempDexConnection(dexAddr string, certI interface{}) (*dexConnect
 	}
 
 	c.connMtx.RLock()
-	dc, found := c.conns[host]
+	_, found := c.conns[host]
 	c.connMtx.RUnlock()
-	if found && dc.acct.hasKeys() {
-		// May actually not be registered with the DEX but registration was at
-		// least attempted. In any case, no need to create a new connection.
+	if found {
 		return nil, newError(dupeDEXErr, "already registered at %s", dexAddr)
 	}
 
 	// TODO: if a "keyless" (view-only) dex connection exists, this temp
 	// connection may be used to replace the existing connection and likely
 	// without (properly) closing the existing connection. Is this OK??
-	return c.connectDEX(&db.AccountInfo{
+	return c.connectDEXWithFlag(&db.AccountInfo{
 		Host:      host,
 		Cert:      cert,
 		BondAsset: defaultBondAsset,
-	}, true)
+	}, connectDEXFlagTemporary)
 }
 
 // GetDEXConfig creates a temporary connection to the specified DEX Server and
@@ -3609,10 +3601,6 @@ func (c *Core) tempDexConnection(dexAddr string, certI interface{}) (*dexConnect
 // via the User or Exchanges methods. A TLS certificate, certI, can be provided
 // as either a string filename, or []byte file contents.
 func (c *Core) GetDEXConfig(dexAddr string, certI interface{}) (*Exchange, error) {
-	if dc, _, _ := c.dex(dexAddr); dc != nil {
-		return dc.exchangeInfo(), nil
-	}
-
 	dc, err := c.tempDexConnection(dexAddr, certI)
 	if dc != nil {
 		// Stop (re)connect loop, which may be running even if err != nil.
@@ -3627,11 +3615,12 @@ func (c *Core) GetDEXConfig(dexAddr string, certI interface{}) (*Exchange, error
 	return dc.exchangeInfo(), nil
 }
 
-// AddDEX configures a DEX host connection without creating an account. This
-// allows watching trade activity without registering with the DEX. Register
-// may be used to set up a trading account for this DEX if and when necessary.
+// AddDEX configures a view-only DEX connection. This allows watching trade
+// activity without setting up account keys or communicating account identity
+// with the DEX. DiscoverAccount, Post Bond or Register (deprecated) may be used
+// to set up a trading account for this DEX if required.
 func (c *Core) AddDEX(dexAddr string, certI interface{}) error {
-	if !c.IsInitialized() {
+	if !c.IsInitialized() { // TODO: Allow adding view-only DEX without init.
 		return fmt.Errorf("cannot register DEX because app has not been initialized")
 	}
 
@@ -3652,10 +3641,10 @@ func (c *Core) AddDEX(dexAddr string, certI interface{}) error {
 		return newError(dupeDEXErr, "already connected to DEX at %s", dexAddr)
 	}
 
-	dc, err := c.connectDEX(&db.AccountInfo{
+	dc, err := c.connectDEXWithFlag(&db.AccountInfo{
 		Host: host,
 		Cert: cert,
-	})
+	}, connectDEXFlagViewOnly)
 	if err != nil {
 		if dc != nil {
 			// Stop (re)connect loop, which may be running even if err != nil.
@@ -3664,20 +3653,54 @@ func (c *Core) AddDEX(dexAddr string, certI interface{}) error {
 		return codedError(connectionErr, err)
 	}
 
+	// Close the connection to the dex server if adding the dex fails.
+	var success bool
+	defer func() {
+		if !success {
+			dc.connMaster.Disconnect()
+		}
+	}()
+
 	// Don't allow adding another dex with the same pubKey. There can only be
 	// one dex connection per pubKey. UpdateDEXHost must be called to connect to
 	// the same dex using a different host name.
 	exists, host := c.dexWithPubKeyExists(dc.acct.dexPubKey)
 	if exists {
-		dc.connMaster.Disconnect()
 		return newError(dupeDEXErr, "already connected to DEX at %s but with different host name %s", dexAddr, host)
 	}
 
+	err = c.db.CreateAccount(&db.AccountInfo{
+		Host:      dc.acct.host,
+		Cert:      dc.acct.cert,
+		DEXPubKey: dc.acct.dexPubKey,
+	})
+	if err != nil {
+		return fmt.Errorf("error saving account info for view-only DEX: %w", err)
+	}
+
+	success = true
 	c.connMtx.Lock()
 	c.conns[dc.acct.host] = dc
 	c.connMtx.Unlock()
 
 	return nil
+}
+
+// dbCreateOrUpdateAccount saves account info to db after an account is
+// discovered or registration/postbond completes.
+func (c *Core) dbCreateOrUpdateAccount(dc *dexConnection, ai *db.AccountInfo) error {
+	dc.acct.keyMtx.Lock()
+	defer dc.acct.keyMtx.Unlock()
+
+	if !dc.acct.viewOnly {
+		return c.db.CreateAccount(ai)
+	}
+
+	err := c.db.UpdateAccountInfo(ai)
+	if err == nil {
+		dc.acct.viewOnly = false
+	}
+	return err
 }
 
 // discoverAccount attempts to identify existing accounts at the connected DEX.
@@ -3750,7 +3773,7 @@ func (c *Core) discoverAccount(dc *dexConnection, crypter encrypt.Crypter) (bool
 		dc.acct.feeAssetID = 42
 	}
 
-	err := c.db.CreateAccount(&db.AccountInfo{
+	err := c.dbCreateOrUpdateAccount(dc, &db.AccountInfo{
 		Host:             dc.acct.host,
 		Cert:             dc.acct.cert,
 		DEXPubKey:        dc.acct.dexPubKey,
@@ -3841,7 +3864,7 @@ func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI interface{}) 
 	c.connMtx.RLock()
 	dc, existingConn := c.conns[host]
 	c.connMtx.RUnlock()
-	if existingConn && dc.acct.isRegistered() {
+	if existingConn && !dc.acct.isViewOnly() {
 		// Already registered, but connection may be down and/or PostBond needed.
 		return dc.exchangeInfo(), true, nil // *Exchange has Tier and BondsPending
 	}
@@ -3963,7 +3986,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	c.connMtx.RLock()
 	dc, existingConn := c.conns[host]
 	c.connMtx.RUnlock()
-	if existingConn && dc.acct.isRegistered() {
+	if existingConn && !dc.acct.isViewOnly() {
 		// Already registered, but connection may be down and/or PostBond needed.
 		return nil, newError(dupeDEXErr, "already registered at %s", form.Addr)
 	}
@@ -4105,13 +4128,12 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	// Set the dexConnection account fields and save account info to db.
 	dc.acct.feeCoin = coin.ID()
 	dc.acct.feeAssetID = feeAsset.ID
-	dc.acct.registered = true
 
 	// Registration complete.
 	registrationComplete = true
 	c.addDexConnection(dc)
 
-	err = c.db.CreateAccount(&db.AccountInfo{
+	err = c.dbCreateOrUpdateAccount(dc, &db.AccountInfo{
 		Host:             dc.acct.host,
 		Cert:             dc.acct.cert,
 		DEXPubKey:        dc.acct.dexPubKey,
@@ -4197,7 +4219,6 @@ func (c *Core) register(dc *dexConnection, assetID uint32) (regRes *msgjson.Regi
 			// This is now account recovery, which is great news since we don't
 			// have to pay the fee. Server provides fee coin as the error message.
 			c.log.Infof("%s is reporting that this account already exists. Skipping fee payment.", dc.acct.host)
-			dc.acct.registered = true
 			dc.acct.feeAssetID = 42 // actual asset ID unknown, but paid
 			dc.acct.feeCoin, err = hex.DecodeString(msgErr.Message)
 			if err != nil || len(dc.acct.feeCoin) == 0 { // err may be nil but feeCoin is empty, e.g. if msgErr.Message == ""
@@ -4212,7 +4233,7 @@ func (c *Core) register(dc *dexConnection, assetID uint32) (regRes *msgjson.Regi
 				}
 			}
 
-			err = c.db.CreateAccount(&db.AccountInfo{
+			err = c.dbCreateOrUpdateAccount(dc, &db.AccountInfo{
 				Host:             dc.acct.host,
 				Cert:             dc.acct.cert,
 				DEXPubKey:        dc.acct.dexPubKey,
@@ -4880,8 +4901,8 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) {
 	var wg sync.WaitGroup
 	conns := c.dexConnections()
 	for _, dc := range conns {
-		if !dc.acct.hasKeys() {
-			continue // don't attempt authDEX if acct keys have not been generated
+		if dc.acct.isViewOnly() {
+			continue // don't attempt authDEX for view-only conn
 		}
 
 		// Unlock before checking auth and continuing, because if the user
@@ -5222,7 +5243,7 @@ func (c *Core) EstimateSendTxFee(address string, assetID uint32, amount uint64, 
 }
 
 func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
-	dc, err := c.dexForTrading(form.Host)
+	dc, err := c.connectedDEX(form.Host)
 	if err != nil {
 		return nil, err
 	}
@@ -5442,9 +5463,12 @@ func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, e
 		defer crypter.Close()
 	}
 
-	dc, err := c.dexForTrading(form.Host)
+	dc, err := c.connectedDEX(form.Host)
 	if err != nil {
 		return nil, err
+	}
+	if dc.acct.suspended() {
+		return nil, newError(suspendedAcctErr, "may not trade while account is suspended")
 	}
 
 	mktID := marketName(form.Base, form.Quote)
@@ -6445,7 +6469,11 @@ func (c *Core) connectAccount(acct *db.AccountInfo) (dc *dexConnection, connecte
 		return
 	}
 
-	dc, err = c.connectDEX(acct)
+	var connectFlag connectDEXFlag
+	if acct.ViewOnly() {
+		connectFlag |= connectDEXFlagViewOnly
+	}
+	dc, err = c.connectDEXWithFlag(acct, connectFlag)
 	if dc == nil {
 		c.log.Errorf("Unable to prepare DEX %s: %v", host, err)
 		return
@@ -7382,13 +7410,24 @@ func isOnionHost(addr string) bool {
 	return strings.HasSuffix(host, ".onion")
 }
 
+type connectDEXFlag uint8
+
+const (
+	connectDEXFlagTemporary connectDEXFlag = 1 << iota
+	connectDEXFlagViewOnly
+)
+
 // connectDEX establishes a ws connection to a DEX server using the provided
 // account info, but does not authenticate the connection through the 'connect'
 // route. If temporary is provided and true, the c.listen(dc) goroutine is not
 // started so that associated trades are not processed and no incoming requests
 // and notifications are handled. A temporary dexConnection may be used to
 // inspect the config response or check if a (paid) HD account exists with a DEX.
-func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConnection, error) {
+func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
+	return c.connectDEXWithFlag(acctInfo, 0)
+}
+
+func (c *Core) connectDEXWithFlag(acctInfo *db.AccountInfo, flag connectDEXFlag) (*dexConnection, error) {
 	// Get the host from the DEX URL.
 	host, err := addrHost(acctInfo.Host)
 	if err != nil {
@@ -7405,8 +7444,8 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 		return nil, newError(addressParseErr, "error parsing ws address %s: %w", wsAddr, err)
 	}
 
-	listen := len(temporary) == 0 || !temporary[0]
-
+	listen := flag&connectDEXFlagTemporary == 0
+	viewOnly := flag&connectDEXFlagViewOnly != 0
 	var reporting uint32
 	if listen {
 		reporting = 1
@@ -7414,7 +7453,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo, temporary ...bool) (*dexConn
 
 	dc := &dexConnection{
 		log:               c.log,
-		acct:              newDEXAccount(acctInfo),
+		acct:              newDEXAccount(acctInfo, viewOnly),
 		notify:            c.notify,
 		ticker:            newDexTicker(defaultTickInterval), // updated when server config obtained
 		books:             make(map[string]*bookie),
@@ -7622,9 +7661,8 @@ func (c *Core) handleReconnect(host string) {
 
 	go dc.subPriceFeed()
 
-	// If we have set up account keys, we may be registered with this DEX.
-	// Attempt to authenticate the connection.
-	if dc.acct.hasKeys() {
+	// If this isn't a view-only connection, authenticate.
+	if !dc.acct.isViewOnly() {
 		if !dc.acct.locked() /* && dc.acct.feePaid() */ {
 			err = c.authDEX(dc)
 			if err != nil {

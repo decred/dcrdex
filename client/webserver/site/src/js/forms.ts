@@ -1435,7 +1435,7 @@ export class DEXAddressForm {
     bind(form, page.submit, () => this.checkDEX())
 
     if (dexToUpdate) {
-      Doc.hide(page.addDexHdr, page.skipRegistration.parentElement as PageElement)
+      Doc.hide(page.addDexHdr, page.skipRegistrationBox)
       Doc.show(page.updateDexHdr)
       this.dexToUpdate = dexToUpdate
     }

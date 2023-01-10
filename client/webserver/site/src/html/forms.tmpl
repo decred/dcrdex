@@ -140,11 +140,6 @@
 {{define "dexAddrForm"}}
 <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 <div data-tmpl="addDexHdr" class="flex-center fs24 sans-light"><span class="ico-plus fs12 me-2"></span> [[[Add a DEX]]]</div>
-<div class="pt-2 fs14">
-  <hr class="dashed my-2">
-  <input class="form-check-input" type="checkbox" data-tmpl="skipRegistration" id="skipRegistration">
-  <label for="skipRegistration" class="ps-1">[[[Skip Registration]]]</label>
-</div>
 <div data-tmpl="updateDexHdr" class="flex-center fs24 sans-light d-hide"></span> [[[update dex host]]]</div>
 <div class="fs20 sans-light" data-tmpl="pickServerMsg">
   <hr class="dashed my-2">
@@ -155,10 +150,17 @@
     <div class="known-exchange" data-host="{{.}}"><img class="micro-icon me-1" src={{dummyExchangeLogo .}}> {{.}}</div>
   {{end}}
 </div>
-<div class="px-1 mt-3 fs14 pointer d-flex justify-content-start align-items-center {{if eq (len .KnownExchanges) 0}}d-hide{{end}}"
-  data-tmpl="showCustom">
-  <span class="ico-plus fs11"></span>
-  <div class="ps-2">[[[add a different server]]]</div>
+<div class="fs14" data-tmpl="skipRegistrationBox">
+  <hr class="dashed my-2">
+  <input class="form-check-input" type="checkbox" data-tmpl="skipRegistration" id="skipRegistration">
+  <label for="skipRegistration" class="ps-1">[[[Skip Registration]]]</label>
+</div>
+<div data-tmpl="showCustom">
+  <hr class="dashed my-2">
+  <div class="px-1 mt-3 fs14 pointer d-flex justify-content-start align-items-center {{if eq (len .KnownExchanges) 0}}d-hide{{end}}">
+    <span class="ico-plus fs11"></span>
+    <div class="ps-2">[[[add a different server]]]</div>
+  </div>
 </div>
 
 <div data-tmpl="customBox">

@@ -607,7 +607,7 @@ type Exchange struct {
 	BondAssets       map[string]*BondAsset  `json:"bondAssets"`
 	ConnectionStatus comms.ConnectionStatus `json:"connectionStatus"`
 	CandleDurs       []string               `json:"candleDurs"`
-	Registered       bool                   `json:"registered"`
+	ViewOnly         bool                   `json:"viewOnly"`
 	Tier             int64                  `json:"tier"`
 	BondsPending     bool                   `json:"bondsPending"`
 	// TODO: a Bonds slice
@@ -696,18 +696,17 @@ type CandlesPayload struct {
 // dexAccount is the core type to represent the client's account information for
 // a DEX.
 type dexAccount struct {
-	host      string               // on init
-	cert      []byte               // on init
-	dexPubKey *secp256k1.PublicKey // on connectDEX -> refreshServerConfig
+	host      string
+	cert      []byte
+	dexPubKey *secp256k1.PublicKey
 
-	// generated in {DiscoverAcct, Register} -> discoverAcct -> setupCryptoV2
-	keyMtx  sync.RWMutex
-	encKey  []byte
-	privKey *secp256k1.PrivateKey
-	id      account.AccountID
+	keyMtx   sync.RWMutex
+	viewOnly bool // true, unless account keys are generated AND saved to db
+	encKey   []byte
+	privKey  *secp256k1.PrivateKey
+	id       account.AccountID
 
 	authMtx       sync.RWMutex
-	registered    bool // account exists server-side -- read as mayAuth
 	isAuthed      bool
 	pendingBonds  []*db.Bond // not yet confirmed
 	bonds         []*db.Bond // confirmed, and not yet expired
@@ -727,13 +726,13 @@ type dexAccount struct {
 }
 
 // newDEXAccount is a constructor for a new *dexAccount.
-func newDEXAccount(acctInfo *db.AccountInfo) *dexAccount {
+func newDEXAccount(acctInfo *db.AccountInfo, viewOnly bool) *dexAccount {
 	return &dexAccount{
 		host:       acctInfo.Host,
 		cert:       acctInfo.Cert,
 		dexPubKey:  acctInfo.DEXPubKey,
+		viewOnly:   viewOnly,
 		encKey:     acctInfo.EncKey(), // privKey and id on decrypt
-		registered: acctInfo.Registered(),
 		feeAssetID: acctInfo.LegacyFeeAssetID,
 		feeCoin:    acctInfo.LegacyFeeCoin,
 		isPaid:     acctInfo.LegacyFeePaid,
@@ -751,19 +750,11 @@ func (a *dexAccount) ID() account.AccountID {
 	return a.id
 }
 
-func (a *dexAccount) hasKeys() bool {
+// isViewOnly is true if account keys have not been generated AND saved to db.
+func (a *dexAccount) isViewOnly() bool {
 	a.keyMtx.RLock()
 	defer a.keyMtx.RUnlock()
-	return len(a.encKey) > 0
-}
-
-// isRegistered is true if the account should exist server-side. This is when
-// the legacy fee txn or at least one bond txn has been broadcast even if
-// neither has received the required confirmations.
-func (a *dexAccount) isRegistered() bool {
-	a.authMtx.RLock()
-	defer a.authMtx.RUnlock()
-	return a.registered
+	return a.viewOnly
 }
 
 // setupCryptoV2 generates a hierarchical deterministic key for the account.
@@ -897,7 +888,6 @@ func (a *dexAccount) auth(tier int64, legacyFeePaid bool) {
 	a.isAuthed = true
 	a.tier = tier
 	a.legacyFeePaid = legacyFeePaid
-	a.registered = true // account exists server-side
 	a.authMtx.Unlock()
 }
 
@@ -907,7 +897,6 @@ func (a *dexAccount) unAuth() {
 	a.isAuthed = false
 	a.tier = 0
 	a.legacyFeePaid = false
-	a.registered = false
 	a.authMtx.Unlock()
 }
 

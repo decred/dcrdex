@@ -2068,7 +2068,6 @@ func TestRegister(t *testing.T) {
 	form.Addr = tDexHost
 
 	// account already exists
-	dc.acct.auth(1, false) // sets dc.acct.registered to true
 	tCore.addDexConnection(dc)
 	_, err = tCore.Register(form)
 	if !errorHasCode(err, dupeDEXErr) {
@@ -2788,7 +2787,6 @@ func trade(t *testing.T, async bool) {
 	rig := newTestRig()
 	defer rig.shutdown()
 	tCore := rig.core
-	rig.acct.auth(1, false) // Short path through initializeDEXConnections
 	dcrWallet, tDcrWallet := newTWallet(tUTXOAssetA.ID)
 	tCore.wallets[tUTXOAssetA.ID] = dcrWallet
 	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
@@ -6931,8 +6929,6 @@ func TestHandleTradeResumptionMsg(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
 
-	rig.acct.auth(1, false) // Short path through initializeDEXConnections
-
 	tCore := rig.core
 	dcrWallet, _ := newTWallet(tUTXOAssetA.ID)
 	tCore.wallets[tUTXOAssetA.ID] = dcrWallet
@@ -7594,7 +7590,6 @@ func TestHandlePenaltyMsg(t *testing.T) {
 func TestPreimageSync(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
-	rig.acct.auth(1, false) // Short path through initializeDEXConnections
 	tCore := rig.core
 	dcrWallet, tDcrWallet := newTWallet(tUTXOAssetA.ID)
 	tCore.wallets[tUTXOAssetA.ID] = dcrWallet
@@ -9467,7 +9462,6 @@ func TestPreOrder(t *testing.T) {
 	defer rig.shutdown()
 	tCore := rig.core
 	dc := rig.dc
-	rig.acct.auth(1, false) // Short path through initializeDEXConnections
 
 	btcWallet, tBtcWallet := newTWallet(tUTXOAssetB.ID)
 	tCore.wallets[tUTXOAssetB.ID] = btcWallet

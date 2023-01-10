@@ -306,7 +306,6 @@ func TestUpdateDEXHost(t *testing.T) {
 		rig.db.acct.LegacyFeePaid = true
 		rig.db.acct.LegacyFeeCoin = encode.RandomBytes(32)
 		rig.db.acct.Host = tDexHost
-		rig.acct.auth(1, false) // Short path through initializeDEXConnections
 
 		tCore.addDexConnection(rig.dc)
 
