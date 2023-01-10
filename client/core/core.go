@@ -66,11 +66,12 @@ const (
 	// or a config response field if it should be considered variable.
 	preimageReqTimeout = 20 * time.Second
 
-	// maxClientAnomaliesCount is the maximum websocket connection anomaly
-	// before client is sends a notification to check their connection.
-	maxClientAnomaliesCount = 3
-	// If websocket client disconnects before wsAnomalyDuration since last
-	// connect time, the websocket client anomaly count is increased.
+	// wsMaxAnomalyCount is the maximum websocket connection anomaly after which
+	// a client receives a notification to check their connectivity.
+	wsMaxAnomalyCount = 3
+	// If a client's websocket connection to a server disconnects before
+	// wsAnomalyDuration since last connect time, the client's websocket
+	// connection anomaly count is increased.
 	wsAnomalyDuration = 60 * time.Minute
 )
 
@@ -7374,7 +7375,7 @@ func (c *Core) handleReconnect(host string) {
 	}
 
 	anomalies := atomic.LoadUint32(&dc.anomaliesCount)
-	if anomalies > maxClientAnomaliesCount {
+	if anomalies > wsMaxAnomalyCount {
 		// Send notification to check connectivity.
 		subject, details := c.formatDetails(TopicDexConnectivity, host)
 		c.notify(newConnEventNote(TopicDexConnectivity, subject, host, dc.status(), details, db.Poke))
