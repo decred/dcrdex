@@ -52,11 +52,11 @@ var (
 )
 
 var v0Gases = &Gases{
-	Swap:      135000,
-	SwapAdd:   113000,
-	Redeem:    63000,
-	RedeemAdd: 32000,
-	Refund:    43000,
+	Swap:      174500, // 134,500 actual -- https://goerli.etherscan.io/tx/0xa17b6edeaf79791b5fc9232dc05a56d43f3a67845f3248e763b77162fae9b181, verified on mainnet
+	SwapAdd:   146400, // 112,600 actual (247,100 for 2) -- https://goerli.etherscan.io/tx/0xa4fc65b8001bf8c44f1079b3d97adf42eb1097658e360b9033596253b0cbbd04, verified on mainnet
+	Redeem:    78600,  // 60,456 actual -- https://goerli.etherscan.io/tx/0x5b22c48052df4a8ecd03a31b62e5015e6afe18c9ffb05e6cdd77396dfc3ca917, verified on mainnet
+	RedeemAdd: 41000,  // 31,672 actual (92,083 for 2, 123,724 for 3) -- https://goerli.etherscan.io/tx/0xae424cc9b0d43bf934112245cb74ab9eca9c2611eabcd6257b6ec258b071c1e6, https://goerli.etherscan.io/tx/0x7ba7cb945da108d39a5a0ac580d4841c4017a32cd0e244f26845c6ed501d2475, verified on mainnet
+	Refund:    57000,  // 43,014 actual -- https://goerli.etherscan.io/tx/0x586ed4cb7dab043f98d4cc08930d9eb291b0052d140d949b20232ceb6ad15f25
 }
 
 // LoadGenesisFile loads a Genesis config from a json file.
