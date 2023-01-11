@@ -2150,7 +2150,7 @@ func (w *TokenWallet) maybeApproveTokenSwapContract(ver uint32, maxFeeRate, swap
 		return fmt.Errorf("parent balance %d doesn't cover contract approval (%d) and tx fees (%d)",
 			ethBal.Available, approveGas*maxFeeRate, swapReserves)
 	}
-	tx, err := w.approveToken(unlimitedAllowance, maxFeeRate, ver)
+	tx, err := w.approveToken(unlimitedAllowance, maxFeeRate, approveGas, ver)
 	if err != nil {
 		return fmt.Errorf("token contract approval error (using max fee rate %d): %w", maxFeeRate, err)
 	}
@@ -2178,10 +2178,10 @@ func (w *assetWallet) tokenAllowance() (allowance *big.Int, err error) {
 
 // approveToken approves the token swap contract to spend tokens on behalf of
 // account handled by the wallet.
-func (w *assetWallet) approveToken(amount *big.Int, maxFeeRate uint64, contractVer uint32) (tx *types.Transaction, err error) {
+func (w *assetWallet) approveToken(amount *big.Int, maxFeeRate, gasLimit uint64, contractVer uint32) (tx *types.Transaction, err error) {
 	w.nonceSendMtx.Lock()
 	defer w.nonceSendMtx.Unlock()
-	txOpts, err := w.node.txOpts(w.ctx, 0, approveGas, dexeth.GweiToWei(maxFeeRate), nil)
+	txOpts, err := w.node.txOpts(w.ctx, 0, gasLimit, dexeth.GweiToWei(maxFeeRate), nil)
 	if err != nil {
 		return nil, fmt.Errorf("addSignerToOpts error: %w", err)
 	}
