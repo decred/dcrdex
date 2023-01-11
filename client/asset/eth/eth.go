@@ -689,6 +689,9 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		maxRedeemsInTx:     perTxGasLimit / maxRedeemGas,
 	}
 
+	logger.Infof("ETH wallet will support a maximum of %d swaps and %d redeems per transaction.",
+		aw.maxSwapsInTx, aw.maxRedeemsInTx)
+
 	aw.wallets = map[uint32]*assetWallet{
 		BipID: aw,
 	}

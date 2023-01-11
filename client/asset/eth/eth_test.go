@@ -4601,18 +4601,18 @@ func testMaxSwapRedeemLots(t *testing.T, assetID uint32) {
 
 	info := wallet.Info()
 	if assetID == BipID {
-		if info.MaxSwapsInTx != 37 {
-			t.Fatalf("expected 37 for max swaps but got %d", info.MaxSwapsInTx)
+		if info.MaxSwapsInTx != 28 {
+			t.Fatalf("expected 28 for max swaps but got %d", info.MaxSwapsInTx)
 		}
-		if info.MaxRedeemsInTx != 79 {
-			t.Fatalf("expected 119 for max redemptions but got %d", info.MaxRedeemsInTx)
+		if info.MaxRedeemsInTx != 63 {
+			t.Fatalf("expected 63 for max redemptions but got %d", info.MaxRedeemsInTx)
 		}
 	} else {
 		if info.MaxSwapsInTx != 28 {
-			t.Fatalf("expected 43 for max swaps but got %d", info.MaxSwapsInTx)
+			t.Fatalf("expected 28 for max swaps but got %d", info.MaxSwapsInTx)
 		}
 		if info.MaxRedeemsInTx != 71 {
-			t.Fatalf("expected 107 for max redemptions but got %d", info.MaxRedeemsInTx)
+			t.Fatalf("expected 71 for max redemptions but got %d", info.MaxRedeemsInTx)
 		}
 	}
 }

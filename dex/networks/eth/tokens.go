@@ -163,14 +163,17 @@ var Tokens = map[uint32]*Token{
 				SwapContracts: map[uint32]*SwapContract{
 					0: { // https://etherscan.io/address/0x1bbd020ddd6dc01f974aa74d2d727b2a6782f32d#code
 						Address: common.HexToAddress("0x1bbd020DDD6dc01f974Aa74D2D727B2A6782F32D"),
+						// USDC's contract is upgradable, using a proxy call, so
+						// gas cost could change without notice, so we do not
+						// want to set limits too low, even with live estimates.
 						Gas: Gases{
-							Swap:      175_000,
-							SwapAdd:   115_000,
-							Redeem:    87_000,
-							RedeemAdd: 33_000,
-							Refund:    67_000,
-							Approve:   65_000,
-							Transfer:  70_000,
+							Swap:      242_000,
+							SwapAdd:   146_400,
+							Redeem:    102_700,
+							RedeemAdd: 31_600,
+							Refund:    77_000,
+							Approve:   78_400,
+							Transfer:  85_100,
 						},
 					},
 				},
@@ -210,13 +213,15 @@ var Tokens = map[uint32]*Token{
 							// map.
 							// Average of 5 transfers: 51820
 							//   [65500 48400 48400 48400 48400]
-							Swap:      175_000,
-							SwapAdd:   115_000,
-							Redeem:    87_000,
-							RedeemAdd: 33_000,
-							Refund:    67_000,
-							Approve:   65_000,
-							Transfer:  70_000,
+							//
+							// Then buffered by about 30%...
+							Swap:      242_000, // actual ~187,880 -- https://goerli.etherscan.io/tx/0x352baccafa96bb09d5c118f8dcce26e34267beb8bcda9c026f8d5353abea50fd, verified on mainnet at 188,013 gas
+							SwapAdd:   146_400, // actual ~112,639 (300,519 for 2) -- https://goerli.etherscan.io/tx/0x97f9a1ed69883a6e701f37883ef74d79a709e0edfc4a45987fa659700663f40e
+							Redeem:    109_000, // actual ~83,850 (initial receive, subsequent ~79,012) -- https://goerli.etherscan.io/tx/0x96f007036b01eb2e44615dc67d3e99748bc133496187348b2af26834f46bfdc8, verified on mainnet at 79,113 gas for subsequent
+							RedeemAdd: 31_600,  // actual ~31,641 (110,653 for 2) -- https://goerli.etherscan.io/tx/0xcf717512796868273ed93c37fa139973c9b8305a736c4a3b50ac9f35ae747f99
+							Refund:    77_000,  // actual ~59,152 -- https://goerli.etherscan.io/tx/0xc5692ad0e6d86b721af75ff3b4b7c2e17d939918db030ebf5444ccf840c7a90b
+							Approve:   78_400,  // actual ~60,190 (initial) -- https://goerli.etherscan.io/tx/0xd695fd174dede7bb798488ead7fed5ef33bcd79932b0fa35db0d17c84c97a8a1, verified on mainnet at 60,311
+							Transfer:  85_100,  // actual ~65,524 (initial receive, subsequent 48,424)
 						},
 					},
 				},
