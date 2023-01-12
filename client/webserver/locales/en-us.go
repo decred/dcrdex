@@ -102,6 +102,8 @@ var EnUS = map[string]string{
 	"order_disclaimer": `<span class="red">IMPORTANT</span>: Trades take time to settle, and you cannot turn off the DEX client software,
 		or the <span data-unit="quote"></span> or <span data-unit="base"></span> blockchain and/or wallet software, until
 		settlement is complete. Settlement can complete as quickly as a few minutes or take as long as a few hours.`,
+	"acknowledge_and_hide":      "acknowledge and hide",
+	"show_disclaimer":           "view warnings",
 	"Order":                     "Order",
 	"see all orders":            "see all orders",
 	"Exchange":                  "Exchange",

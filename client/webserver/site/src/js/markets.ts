@@ -420,6 +420,21 @@ export default class MarketsPage extends BasePage {
     bind(page.marketSearchV1, 'change', () => { this.filterMarkets() })
     bind(page.marketSearchV1, 'keyup', () => { this.filterMarkets() })
 
+    // Acknowledge the order disclaimer.
+    const setDisclaimerAckViz = (acked: boolean) => {
+      Doc.setVis(!acked, page.disclaimer, page.disclaimerAck)
+      Doc.setVis(acked, page.showDisclaimer)
+    }
+    bind(page.disclaimerAck, 'click', () => {
+      State.store(State.orderDisclaimerAckedLK, true)
+      setDisclaimerAckViz(true)
+    })
+    bind(page.showDisclaimer, 'click', () => {
+      State.store(State.orderDisclaimerAckedLK, false)
+      setDisclaimerAckViz(false)
+    })
+    setDisclaimerAckViz(State.fetch(State.orderDisclaimerAckedLK))
+
     const clearChartLines = () => {
       this.depthLines.hover = []
       this.drawChartLines()
