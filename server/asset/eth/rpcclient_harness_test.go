@@ -1,7 +1,7 @@
 //go:build harness && lgpl
 
 // This test requires that the testnet harness be running and the unix socket
-// be located at $HOME/dextest/eth/alpha/node/geth.ipc
+// be located at $HOME/dextest/eth/delta/node/geth.ipc
 
 package eth
 
@@ -24,12 +24,13 @@ import (
 )
 
 var (
-	homeDir            = os.Getenv("HOME")
-	ipc                = filepath.Join(homeDir, "dextest/eth/alpha/node/geth.ipc")
+	homeDir = os.Getenv("HOME")
+	// endpoint = filepath.Join(homeDir, "dextest/eth/delta/node/geth.ipc")
+	endpoint           = "ws://localhost:38557"
 	contractAddrFile   = filepath.Join(homeDir, "dextest", "eth", "eth_swap_contract_address.txt")
 	tokenSwapAddrFile  = filepath.Join(homeDir, "dextest", "eth", "erc20_swap_contract_address.txt")
 	tokenErc20AddrFile = filepath.Join(homeDir, "dextest", "eth", "test_token_contract_address.txt")
-	alphaAddress       = "18d65fb8d60c1199bb1ad381be47aa692b482605"
+	deltaAddress       = "d12ab7cf72ccf1f3882ec99ddc53cd415635c3be"
 	gammaAddress       = "41293c2032bac60aa747374e966f79f575d42379"
 	ethClient          *rpcclient
 	ctx                context.Context
@@ -40,7 +41,7 @@ func TestMain(m *testing.M) {
 	run := func() (int, error) {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(context.Background())
-		ethClient = newRPCClient(dex.Simnet, ipc)
+		ethClient = newRPCClient(dex.Simnet, endpoint)
 		defer func() {
 			cancel()
 			ethClient.shutdown()
@@ -51,7 +52,6 @@ func TestMain(m *testing.M) {
 		netToken := dexeth.Tokens[testTokenID].NetTokens[dex.Simnet]
 		netToken.Address = getContractAddrFromFile(tokenErc20AddrFile)
 		netToken.SwapContracts[0].Address = getContractAddrFromFile(tokenSwapAddrFile)
-		registerToken(testTokenID, 0)
 		logger := dex.StdOutLogger("ETHTEST", dex.LevelTrace)
 
 		if err := ethClient.connect(ctx, logger); err != nil {
@@ -131,7 +131,7 @@ func TestAccountBalance(t *testing.T) {
 }
 
 func testAccountBalance(t *testing.T, assetID uint32) {
-	addr := common.HexToAddress(alphaAddress)
+	addr := common.HexToAddress(deltaAddress)
 	const vGwei = 1e7
 
 	balBefore, err := ethClient.accountBalance(ctx, assetID, addr)
@@ -140,7 +140,7 @@ func testAccountBalance(t *testing.T, assetID uint32) {
 	}
 
 	if assetID == BipID {
-		err = tmuxSend(alphaAddress, gammaAddress, vGwei)
+		err = tmuxSend(deltaAddress, gammaAddress, vGwei)
 	} else {
 		err = tmuxSendToken(gammaAddress, vGwei)
 	}
@@ -153,9 +153,18 @@ func testAccountBalance(t *testing.T, assetID uint32) {
 		t.Fatalf("accountBalance error: %v", err)
 	}
 
-	diff := new(big.Int).Sub(balBefore, balAfter)
-	if diff.Cmp(dexeth.GweiToWei(vGwei)) <= 0 {
-		t.Fatalf("account balance changed by %d. expected > %d", dexeth.WeiToGwei(diff), uint64(vGwei))
+	if assetID == BipID {
+		diff := new(big.Int).Sub(balBefore, balAfter)
+		if diff.Cmp(dexeth.GweiToWei(vGwei)) <= 0 {
+			t.Fatalf("account balance changed by %d. expected > %d", dexeth.WeiToGwei(diff), uint64(vGwei))
+		}
+	}
+
+	if assetID == testTokenID {
+		diff := new(big.Int).Sub(balBefore, balAfter)
+		if diff.Cmp(dexeth.GweiToWei(vGwei)) != 0 {
+			t.Fatalf("account balance changed by %d. expected > %d", dexeth.WeiToGwei(diff), uint64(vGwei))
+		}
 	}
 }
 
@@ -169,11 +178,11 @@ func tmuxRun(cmd string) error {
 }
 
 func tmuxSend(from, to string, v uint64) error {
-	return tmuxRun(fmt.Sprintf("./alpha attach --preload send.js --exec \"send(\\\"%s\\\",\\\"%s\\\",%s)\"", from, to, dexeth.GweiToWei(v)))
+	return tmuxRun(fmt.Sprintf("./delta attach --preload send.js --exec \"send(\\\"%s\\\",\\\"%s\\\",%s)\"", from, to, dexeth.GweiToWei(v)))
 }
 
 func tmuxSendToken(to string, v uint64) error {
-	return tmuxRun(fmt.Sprintf("./alpha attach --preload loadTestToken.js --exec \"testToken.transfer(\\\"0x%s\\\",%s)\"", to, dexeth.GweiToWei(v)))
+	return tmuxRun(fmt.Sprintf("./delta attach --preload loadTestToken.js --exec \"testToken.transfer(\\\"0x%s\\\",%s)\"", to, dexeth.GweiToWei(v)))
 }
 
 func getContractAddrFromFile(fileName string) common.Address {

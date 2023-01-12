@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"strings"
 
 	"decred.org/dcrdex/dex"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
@@ -33,8 +34,8 @@ type ContextCaller interface {
 }
 
 type rpcclient struct {
-	net dex.Network
-	ipc string
+	net      dex.Network
+	endpoint string
 	// ec wraps a *rpc.Client with some useful calls.
 	ec *ethclient.Client
 	// caller is a client for raw calls not implemented by *ethclient.Client.
@@ -48,24 +49,34 @@ type rpcclient struct {
 	tokens map[uint32]*tokener
 }
 
-func newRPCClient(net dex.Network, ipc string) *rpcclient {
+func newRPCClient(net dex.Network, endpoint string) *rpcclient {
 	return &rpcclient{
-		net:    net,
-		tokens: make(map[uint32]*tokener),
-		ipc:    ipc,
+		net:      net,
+		tokens:   make(map[uint32]*tokener),
+		endpoint: endpoint,
 	}
 }
 
 // connect connects to an ipc socket. It then wraps ethclient's client and
 // bundles commands in a form we can easily use.
 func (c *rpcclient) connect(ctx context.Context, log dex.Logger) error {
-	client, err := rpc.DialIPC(ctx, c.ipc)
-	if err != nil {
-		return fmt.Errorf("unable to dial rpc: %v", err)
+	var client *rpc.Client
+	var err error
+	if strings.HasSuffix(c.endpoint, ".ipc") {
+		client, err = rpc.DialIPC(ctx, c.endpoint)
+		if err != nil {
+			return fmt.Errorf("unable to dial ipc: %v", err)
+		}
+	} else {
+		log.Debugf("dialing endpoint: %s", c.endpoint)
+		client, err = rpc.DialContext(ctx, c.endpoint)
+		if err != nil {
+			return fmt.Errorf("unable to dial rpc: %v", err)
+		}
 	}
 
 	reqModules := []string{"eth", "txpool"}
-	if err := dexeth.CheckAPIModules(client, c.ipc, log, reqModules); err != nil {
+	if err := dexeth.CheckAPIModules(client, c.endpoint, log, reqModules); err != nil {
 		return fmt.Errorf("error checking required modules: %v", err)
 	}
 

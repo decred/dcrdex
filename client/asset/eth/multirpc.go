@@ -418,7 +418,7 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 		// path discrimination, so I won't even try to validate the protocol.
 		if ec == nil {
 			var err error
-			rpcClient, err = rpc.Dial(endpoint)
+			rpcClient, err = rpc.DialContext(ctx, endpoint)
 			if err != nil {
 				log.Errorf("error creating http client for %q: %v", endpoint, err)
 				continue
