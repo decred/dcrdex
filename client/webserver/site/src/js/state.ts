@@ -7,6 +7,8 @@ const pwKeyCK = 'sessionkey'
 // utilities for setting and retrieving cookies and storing user configuration
 // to localStorage.
 export default class State {
+  static orderDisclaimerAckedLK = 'ordAck'
+
   static setCookie (cname: string, cvalue: string) {
     const d = new Date()
     // Set cookie to expire in ten years.
