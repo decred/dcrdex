@@ -29,7 +29,7 @@ func (c *fundingCoin) String() string {
 }
 
 // ID utf-8 encodes the account address. This ID will be sent to the server as
-// part of the an order.
+// part of the order.
 func (c *fundingCoin) ID() dex.Bytes {
 	return []byte(c.addr.String())
 }

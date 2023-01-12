@@ -19,6 +19,8 @@ const Mainnet = 0
 const Testnet = 1
 // const Regtest = 3
 
+const coinIDTakerFoundMakerRedemption = 'TakerFoundMakerRedemption:'
+
 const animationLength = 500
 
 let net: number
@@ -257,6 +259,13 @@ export default class OrderPage extends BasePage {
     tmpl.status.textContent = OrderUtil.matchStatusString(m)
 
     const setCoin = (pendingName: string, linkName: string, coin: Coin) => {
+      const formatCoinID = (cid: string) => {
+        if (cid.startsWith(coinIDTakerFoundMakerRedemption)) {
+          const makerAddr = cid.substring(coinIDTakerFoundMakerRedemption.length)
+          return intl.prep(intl.ID_TAKER_FOUND_MAKER_REDEMPTION, { makerAddr: makerAddr })
+        }
+        return cid
+      }
       const coinLink = tmpl[linkName]
       const pendingSpan = tmpl[pendingName]
       if (!coin) {
@@ -264,7 +273,7 @@ export default class OrderPage extends BasePage {
         Doc.hide(tmpl[linkName])
         return
       }
-      coinLink.textContent = coin.stringID
+      coinLink.textContent = formatCoinID(coin.stringID)
       coinLink.dataset.explorerCoin = coin.stringID
       setCoinHref(coin.assetID, coinLink)
       Doc.hide(pendingSpan)
@@ -499,12 +508,20 @@ function setCoinHref (assetID: number, link: PageElement) {
 
 const ethExplorers: Record<number, (cid: string) => string> = {
   [Mainnet]: (cid: string) => {
+    if (cid.startsWith(coinIDTakerFoundMakerRedemption)) {
+      const makerAddr = cid.substring(coinIDTakerFoundMakerRedemption.length)
+      return `https://etherscan.io/address/${makerAddr}`
+    }
     if (cid.length === 42) {
       return `https://etherscan.io/address/${cid}`
     }
     return `https://etherscan.io/tx/${cid}`
   },
   [Testnet]: (cid: string) => {
+    if (cid.startsWith(coinIDTakerFoundMakerRedemption)) {
+      const makerAddr = cid.substring(coinIDTakerFoundMakerRedemption.length)
+      return `https://goerli.etherscan.io/address/${makerAddr}`
+    }
     if (cid.length === 42) {
       return `https://goerli.etherscan.io/address/${cid}`
     }
