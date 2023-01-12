@@ -56,10 +56,6 @@ div[data-handler=markets] {
         font-size: 14px;
       }
 
-      input:focus {
-        outline: none;
-      }
-
       span.unitbox {
         position: absolute;
         font-size: 14px;
@@ -100,7 +96,8 @@ div[data-handler=markets] {
         color: #1e7d11;
       }
 
-      #orderPreview,
+      #orderTotalPreview,
+      #mktSellTotalPreview,
       .h21 {
         height: 21px;
       }

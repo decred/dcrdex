@@ -191,6 +191,22 @@ export default class Doc {
   }
 
   /*
+   * hidePreservingLayout hides the specified elements without affecting page layout
+   * (like Doc.hide can). Use Doc.showPreservingLayout to undo.
+   */
+  static hidePreservingLayout (...els: HTMLElement[]) {
+    for (const el of els) el.style.visibility = 'hidden'
+  }
+
+  /*
+   * showPreservingLayout shows the specified elements, undoing changes by made with
+   * Doc.hidePreservingLayout.
+   */
+  static showPreservingLayout (...els: HTMLElement[]) {
+    for (const el of els) el.style.visibility = 'visible'
+  }
+
+  /*
    * show or hide the specified elements, based on value of the truthiness of
    * vis.
    */
@@ -455,7 +471,7 @@ export class Animation {
       now = new Date().getTime()
     }
     f(1)
-    this.runCompletionFunction()
+    return this.runCompletionFunction()
   }
 
   /* wait returns a promise that will resolve when the animation completes. */

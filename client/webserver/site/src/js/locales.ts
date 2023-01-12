@@ -15,11 +15,13 @@ export const ID_BUY = 'ID_BUY'
 export const ID_SELL = 'ID_SELL'
 export const ID_NOT_SUPPORTED = 'ID_NOT_SUPPORTED'
 export const ID_CONNECTION_FAILED = 'ID_CONNECTION_FAILED'
-export const ID_ORDER_PREVIEW = 'ID_ORDER_PREVIEW'
+export const ID_LIMIT_ORDER_TOTAL_PREVIEW = 'ID_LIMIT_ORDER_TOTAL_PREVIEW'
+export const ID_MARKET_ORDER_TOTAL_PREVIEW = 'ID_MARKET_ORDER_TOTAL_PREVIEW'
 export const ID_CALCULATING = 'ID_CALCULATING'
 export const ID_ESTIMATE_UNAVAILABLE = 'ID_ESTIMATE_UNAVAILABLE'
 export const ID_NO_ZERO_RATE = 'ID_NO_ZERO_RATE'
 export const ID_NO_ZERO_QUANTITY = 'ID_NO_ZERO_QUANTITY'
+export const ID_NO_QUANTITY_EXCEEDS_MAX = 'ID_NO_QUANTITY_EXCEEDS_MAX'
 export const ID_TRADE = 'ID_TRADE'
 export const ID_NO_ASSET_WALLET = 'ID_NO_ASSET_WALLET'
 export const ID_EXECUTED = 'ID_EXECUTED'
@@ -112,11 +114,13 @@ export const enUS: Locale = {
   [ID_SELL]: 'Sell',
   [ID_NOT_SUPPORTED]: '{{ asset }} is not supported',
   [ID_CONNECTION_FAILED]: 'Connection to dex server failed. You can close dexc and try again later or wait for it to reconnect.',
-  [ID_ORDER_PREVIEW]: 'Total: {{ total }} {{ asset }}',
+  [ID_LIMIT_ORDER_TOTAL_PREVIEW]: 'Total: {{ total }} {{ asset }}',
+  [ID_MARKET_ORDER_TOTAL_PREVIEW]: 'Total: ~ {{ total }} {{ asset }}',
   [ID_CALCULATING]: 'calculating...',
   [ID_ESTIMATE_UNAVAILABLE]: 'estimate unavailable',
   [ID_NO_ZERO_RATE]: 'zero rate not allowed',
   [ID_NO_ZERO_QUANTITY]: 'zero quantity not allowed',
+  [ID_NO_QUANTITY_EXCEEDS_MAX]: 'not enough funds',
   [ID_TRADE]: 'trade',
   [ID_NO_ASSET_WALLET]: 'No {{ asset }} wallet',
   [ID_EXECUTED]: 'executed',
@@ -209,7 +213,8 @@ export const ptBR: Locale = {
   [ID_SELL]: 'Vender',
   [ID_NOT_SUPPORTED]: '{{ asset }} não tem suporte',
   [ID_CONNECTION_FAILED]: 'Conexão ao server dex falhou. Pode fechar dexc e tentar novamente depois ou esperar para tentar se reconectar.',
-  [ID_ORDER_PREVIEW]: 'Total: {{ total }} {{ asset }}',
+  [ID_LIMIT_ORDER_TOTAL_PREVIEW]: 'Total: {{ total }} {{ asset }}',
+  [ID_MARKET_ORDER_TOTAL_PREVIEW]: 'Total: ~ {{ total }} {{ asset }}',
   [ID_CALCULATING]: 'calculando...',
   [ID_ESTIMATE_UNAVAILABLE]: 'estimativa indisponível',
   [ID_NO_ZERO_RATE]: 'taxa não pode ser zero',
@@ -263,7 +268,8 @@ export const zhCN: Locale = {
   [ID_SELL]: '卖出',
   [ID_NOT_SUPPORTED]: '{{ asset }}不受支持',
   [ID_CONNECTION_FAILED]: '连接到服务器 dex 失败。您可以关闭 dexc 并稍后重试或等待尝试重新连接。',
-  [ID_ORDER_PREVIEW]: '总计： {{ total }} {{ asset }}',
+  [ID_LIMIT_ORDER_TOTAL_PREVIEW]: '总计： {{ total }} {{ asset }}',
+  [ID_MARKET_ORDER_TOTAL_PREVIEW]: '总计： ~ {{ total }} {{ asset }}',
   [ID_CALCULATING]: '计算中...',
   [ID_ESTIMATE_UNAVAILABLE]: '估计不可用',
   [ID_NO_ZERO_RATE]: '汇率不能为零',
@@ -303,7 +309,8 @@ export const plPL: Locale = {
   [ID_SELL]: 'Sprzedaj',
   [ID_NOT_SUPPORTED]: '{{ asset }} nie jest wspierany',
   [ID_CONNECTION_FAILED]: 'Połączenie z serwerem dex nie powiodło się. Możesz zamknąć dexc i spróbować ponownie później, lub poczekać na wznowienie połączenia.',
-  [ID_ORDER_PREVIEW]: 'W sumie: {{ total }} {{ asset }}',
+  [ID_LIMIT_ORDER_TOTAL_PREVIEW]: 'W sumie: {{ total }} {{ asset }}',
+  [ID_MARKET_ORDER_TOTAL_PREVIEW]: 'W sumie: ~ {{ total }} {{ asset }}',
   [ID_CALCULATING]: 'obliczanie...',
   [ID_ESTIMATE_UNAVAILABLE]: 'brak szacunkowego wyliczenia',
   [ID_NO_ZERO_RATE]: 'zero nie może być ceną',
@@ -357,7 +364,8 @@ export const deDE: Locale = {
   [ID_SELL]: 'Verkaufen',
   [ID_NOT_SUPPORTED]: '{{ asset }} wird nicht unterstützt',
   [ID_CONNECTION_FAILED]: 'Die Verbindung zum Dex-Server fehlgeschlagen. Du kannst dexc schließen und es später erneut versuchen oder warten bis die Verbindung wiederhergestellt ist.',
-  [ID_ORDER_PREVIEW]: 'Insgesamt: {{ total }} {{ asset }}',
+  [ID_LIMIT_ORDER_TOTAL_PREVIEW]: 'Insgesamt: {{ total }} {{ asset }}',
+  [ID_MARKET_ORDER_TOTAL_PREVIEW]: 'Insgesamt: ~ {{ total }} {{ asset }}',
   [ID_CALCULATING]: 'kalkuliere...',
   [ID_ESTIMATE_UNAVAILABLE]: 'Schätzung nicht verfügbar',
   [ID_NO_ZERO_RATE]: 'Null-Satz nicht erlaubt',
@@ -415,7 +423,8 @@ export const ar: Locale = {
   [ID_SELL]: 'بيع',
   [ID_NOT_SUPPORTED]: '{{ asset }} غير مدعوم',
   [ID_CONNECTION_FAILED]: 'فشل الاتصال بخادم dex. يمكنك إغلاق dexc والمحاولة مرة أخرى لاحقًا أو انتظار إعادة الاتصال.',
-  [ID_ORDER_PREVIEW]: 'إجمالي: {{ total }} {{ asset }}',
+  [ID_LIMIT_ORDER_TOTAL_PREVIEW]: 'إجمالي: {{ total }} {{ asset }}',
+  [ID_MARKET_ORDER_TOTAL_PREVIEW]: 'إجمالي: ~ {{ total }} {{ asset }}',
   [ID_CALCULATING]: 'جاري الحساب ...',
   [ID_ESTIMATE_UNAVAILABLE]: 'التقديرات غير متاحة',
   [ID_NO_ZERO_RATE]: 'معدل الصفر غير مسموح به',
