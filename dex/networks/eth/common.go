@@ -55,7 +55,7 @@ func CheckAPIModules(c *rpc.Client, endpoint string, log dex.Logger, reqModules 
 		for v := range reqModulesMap {
 			reqs = append(reqs, v)
 		}
-		return fmt.Errorf("needed apis not present: %v", strings.Join(reqs, " "))
+		return fmt.Errorf("needed apis not present: %v.", strings.Join(reqs, " "))
 	}
 	sort.Strings(haveModules)
 	log.Debugf("API endpoints supported by %s: %s", endpoint, strings.Join(haveModules, " "))

@@ -141,7 +141,7 @@ if [ "${SYNC_MODE}" = "snap" ]; then
 else
   # Start the eth node listening restricted to localhost and our custom
   # configuration file.
-  tmux send-keys -t "$TMUX_WIN_ID" "${NODES_ROOT}/harness-ctl/${NAME} --nodiscover " \
+  tmux send-keys -t "$TMUX_WIN_ID" "${NODES_ROOT}/harness-ctl/${NAME} --nodiscover --allow-insecure-unlock " \
 	  "--config ${NODE_DIR}/eth.conf --verbosity 5 ${HTTP_OPT} 2>&1 | tee " \
 	  "${NODE_DIR}/${NAME}.log" C-m
 fi
