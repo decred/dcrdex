@@ -385,7 +385,7 @@ const TopicBalanceUpdated Topic = "BalanceUpdated"
 
 func newBalanceNote(assetID uint32, bal *WalletBalance) *BalanceNote {
 	return &BalanceNote{
-		Notification: db.NewNotification(NoteTypeBalance, TopicBalanceUpdated, "balance updated", "", db.Data),
+		Notification: db.NewNotification(NoteTypeBalance, TopicBalanceUpdated, "", "", db.Data),
 		AssetID:      assetID,
 		Balance:      bal, // Once created, balance is never modified by Core.
 	}
