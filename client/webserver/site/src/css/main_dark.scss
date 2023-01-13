@@ -132,4 +132,12 @@ body.dark {
   #loader {
     background-color: #13202b77;
   }
+
+  .form-check-input[type=checkbox] {
+    background-color: black;
+
+    &:checked {
+      background-color: #27278d;
+    }
+  }
 }
