@@ -443,8 +443,8 @@ var _ asset.LiveReconfigurer = (*ETHWallet)(nil)
 var _ asset.LiveReconfigurer = (*TokenWallet)(nil)
 var _ asset.TxFeeEstimator = (*ETHWallet)(nil)
 var _ asset.TxFeeEstimator = (*TokenWallet)(nil)
-var _ asset.DynamicSwapOrRedemptionFeeChecker = (*ETHWallet)(nil)
-var _ asset.DynamicSwapOrRedemptionFeeChecker = (*TokenWallet)(nil)
+var _ asset.DynamicSwapper = (*ETHWallet)(nil)
+var _ asset.DynamicSwapper = (*TokenWallet)(nil)
 var _ asset.BotWallet = (*assetWallet)(nil)
 var _ asset.Authenticator = (*ETHWallet)(nil)
 
@@ -3052,13 +3052,13 @@ func (eth *baseWallet) SyncStatus() (bool, float32, error) {
 }
 
 // DynamicSwapFeesPaid returns fees for initiation transactions. Part of the
-// asset.DynamicSwapOrRedemptionFeeChecker interface.
+// asset.DynamicSwapper interface.
 func (eth *assetWallet) DynamicSwapFeesPaid(ctx context.Context, coinID, contractData dex.Bytes) (fee uint64, secretHashes [][]byte, err error) {
 	return eth.swapOrRedemptionFeesPaid(ctx, coinID, contractData, true)
 }
 
 // DynamicRedemptionFeesPaid returns fees for redemption transactions. Part of
-// the asset.DynamicSwapOrRedemptionFeeChecker interface.
+// the asset.DynamicSwapper interface.
 func (eth *assetWallet) DynamicRedemptionFeesPaid(ctx context.Context, coinID, contractData dex.Bytes) (fee uint64, secretHashes [][]byte, err error) {
 	return eth.swapOrRedemptionFeesPaid(ctx, coinID, contractData, false)
 }
@@ -3491,8 +3491,9 @@ func (w *assetWallet) swapIsRedeemed(secretHash common.Hash, contractVersion uin
 // that a transaction will not be mined, this function will submit a new
 // transaction to replace the old one. The caller is notified of this by having
 // a different coinID in the returned asset.ConfirmRedemptionStatus as was used
-// to call the function.
-func (w *ETHWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Redemption) (*asset.ConfirmRedemptionStatus, error) {
+// to call the function. Fee argument is ignored since it is calculated from
+// the best header.
+func (w *ETHWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Redemption, _ uint64) (*asset.ConfirmRedemptionStatus, error) {
 	return w.confirmRedemption(coinID, redemption, nil)
 }
 
@@ -3500,8 +3501,9 @@ func (w *ETHWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Redemp
 // that a transaction will not be mined, this function will submit a new
 // transaction to replace the old one. The caller is notified of this by having
 // a different coinID in the returned asset.ConfirmRedemptionStatus as was used
-// to call the function.
-func (w *TokenWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Redemption) (*asset.ConfirmRedemptionStatus, error) {
+// to call the function. Fee argument is ignored since it is calculated from
+// the best header.
+func (w *TokenWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Redemption, _ uint64) (*asset.ConfirmRedemptionStatus, error) {
 	return w.confirmRedemption(coinID, redemption, w.parent)
 }
 

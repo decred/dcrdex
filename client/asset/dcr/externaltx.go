@@ -328,17 +328,16 @@ func (dcr *ExchangeWallet) isOutputSpent(ctx context.Context, output *outputSpen
 	nextScanHeight := lastScannedHeight + 1
 
 	bestBlock := dcr.cachedBestBlock()
-	if nextScanHeight >= bestBlock.height {
-		// When a transaction is initially found in a block, that block is also
-		// scanned for spending transactions (see findTxInBlock) as an
-		// optimization since the block was pulled. As such, it is normal for
-		// the lastScannedHeight for newly located transactions to be the best
-		// block, so there is no need to warn, only return.
-		if nextScanHeight > bestBlock.height+1 {
-			dcr.log.Warnf("Attempted to look for output spender in block %d but current tip is %d!",
-				nextScanHeight, bestBlock.height)
-		}
-		// No new blocks to scan, output isn't spent as of last scan.
+	if lastScannedHeight == bestBlock.height {
+		// This is fine. No more blocks to scan
+		return false, nil
+	}
+	if lastScannedHeight > bestBlock.height {
+		// This is not fine, how did it scan a height above the best
+		// height? Log a warning, should never happen anyways.
+		dcr.log.Warnf("Attempted to look for output spender in block %d but current tip is %d!",
+			nextScanHeight, bestBlock.height)
+		// Return too, since there're obviously no more blocks to scan.
 		return false, nil
 	}
 

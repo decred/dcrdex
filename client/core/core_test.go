@@ -795,7 +795,7 @@ func (w *TXCWallet) Balance() (*asset.Balance, error) {
 	return w.bal, nil
 }
 
-func (w *TXCWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Redemption) (*asset.ConfirmRedemptionStatus, error) {
+func (w *TXCWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Redemption, feeSuggestion uint64) (*asset.ConfirmRedemptionStatus, error) {
 	w.confirmRedemptionCalled = true
 	return w.confirmRedemptionResult, w.confirmRedemptionErr
 }
@@ -10332,21 +10332,21 @@ func TestEstimateSendTxFee(t *testing.T) {
 	}
 }
 
-type TDynamicSwapOrRedemptionFeeChecker struct {
+type TDynamicSwapper struct {
 	*TXCWallet
 	tfpPaid         uint64
 	tfpSecretHashes [][]byte
 	tfpErr          error
 }
 
-func (dtfc *TDynamicSwapOrRedemptionFeeChecker) DynamicSwapFeesPaid(ctx context.Context, coinID, contractData dex.Bytes) (uint64, [][]byte, error) {
+func (dtfc *TDynamicSwapper) DynamicSwapFeesPaid(ctx context.Context, coinID, contractData dex.Bytes) (uint64, [][]byte, error) {
 	return dtfc.tfpPaid, dtfc.tfpSecretHashes, dtfc.tfpErr
 }
-func (dtfc *TDynamicSwapOrRedemptionFeeChecker) DynamicRedemptionFeesPaid(ctx context.Context, coinID, contractData dex.Bytes) (uint64, [][]byte, error) {
+func (dtfc *TDynamicSwapper) DynamicRedemptionFeesPaid(ctx context.Context, coinID, contractData dex.Bytes) (uint64, [][]byte, error) {
 	return dtfc.tfpPaid, dtfc.tfpSecretHashes, dtfc.tfpErr
 }
 
-var _ asset.DynamicSwapOrRedemptionFeeChecker = (*TDynamicSwapOrRedemptionFeeChecker)(nil)
+var _ asset.DynamicSwapper = (*TDynamicSwapper)(nil)
 
 func TestUpdateFeesPaid(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -10373,7 +10373,7 @@ func TestUpdateFeesPaid(t *testing.T) {
 	}}
 	for _, test := range tests {
 		acctWallet, tWallet := newTWallet(tACCTAsset.ID)
-		dynamicFeeChecker := &TDynamicSwapOrRedemptionFeeChecker{TXCWallet: tWallet}
+		dynamicFeeChecker := &TDynamicSwapper{TXCWallet: tWallet}
 		acctWallet.Wallet = dynamicFeeChecker
 		tWallet.confs["00"] = 10
 

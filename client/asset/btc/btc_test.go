@@ -4452,3 +4452,119 @@ func TestReconfigure(t *testing.T) {
 		t.Fatal("redeemconftarget not updated in final success", wallet.redeemConfTarget())
 	}
 }
+
+func TestConfirmRedemption(t *testing.T) {
+	segwit := true
+	wallet, node, shutdown := tNewWallet(segwit, walletTypeRPC)
+	defer shutdown()
+
+	swapVal := toSatoshi(5)
+
+	secret, _, _, contract, addr, _, lockTime := makeSwapContract(segwit, time.Hour*12)
+
+	coin := newOutput(tTxHash, 0, swapVal)
+	ci := &asset.AuditInfo{
+		Coin:       coin,
+		Contract:   contract,
+		Recipient:  addr.String(),
+		Expiration: lockTime,
+	}
+
+	redemption := &asset.Redemption{
+		Spends: ci,
+		Secret: secret,
+	}
+
+	coinID := coin.ID()
+
+	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
+	privKey, _ := btcec.PrivKeyFromBytes(privBytes)
+	wif, err := btcutil.NewWIF(privKey, &chaincfg.MainNetParams, true)
+	if err != nil {
+		t.Fatalf("error encoding wif: %v", err)
+	}
+
+	node.changeAddr = tP2WPKHAddr
+	node.privKeyForAddr = wif
+
+	tests := []struct {
+		name                 string
+		redemption           *asset.Redemption
+		coinID               []byte
+		wantErr              bool
+		wantConfs            uint64
+		txOutRes             *btcjson.GetTxOutResult
+		getTransactionResult *GetTransactionResult
+		txOutErr             error
+		getTransactionErr    error
+	}{{
+		name:                 "ok and found",
+		coinID:               coinID,
+		redemption:           redemption,
+		getTransactionResult: new(GetTransactionResult),
+	}, {
+		name:       "ok spent by someone but not sure who",
+		coinID:     coinID,
+		redemption: redemption,
+		wantConfs:  requiredRedeemConfirms,
+	}, {
+		name:       "ok but sending new tx",
+		coinID:     coinID,
+		redemption: redemption,
+		txOutRes:   new(btcjson.GetTxOutResult),
+	}, {
+		name:       "decode coin error",
+		redemption: redemption,
+		wantErr:    true,
+	}, {
+		name:       "error finding contract output",
+		coinID:     coinID,
+		redemption: redemption,
+		txOutErr:   errors.New(""),
+		wantErr:    true,
+	}, {
+		name:              "error finding redeem tx",
+		coinID:            coinID,
+		redemption:        redemption,
+		getTransactionErr: errors.New(""),
+		wantErr:           true,
+	}, {
+		name:   "redemption error",
+		coinID: coinID,
+		redemption: func() *asset.Redemption {
+			ci := &asset.AuditInfo{
+				Coin: coin,
+				// Contract:   contract,
+				Recipient:  addr.String(),
+				Expiration: lockTime,
+			}
+
+			return &asset.Redemption{
+				Spends: ci,
+				Secret: secret,
+			}
+		}(),
+		txOutRes: new(btcjson.GetTxOutResult),
+		wantErr:  true,
+	}}
+	for _, test := range tests {
+		node.txOutRes = test.txOutRes
+		node.txOutErr = test.txOutErr
+		node.getTransactionErr = test.getTransactionErr
+		node.getTransactionMap[tTxID] = test.getTransactionResult
+
+		status, err := wallet.ConfirmRedemption(test.coinID, test.redemption, 0)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("%q: expected error", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%q: unexpected error: %v", test.name, err)
+		}
+		if status.Confs != test.wantConfs {
+			t.Fatalf("%q: wanted %d confs but got %d", test.name, test.wantConfs, status.Confs)
+		}
+	}
+}

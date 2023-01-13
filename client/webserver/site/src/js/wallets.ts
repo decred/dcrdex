@@ -33,8 +33,8 @@ const traitLogFiler = 1 << 2
 const traitRecoverer = 1 << 5
 const traitWithdrawer = 1 << 6
 const traitRestorer = 1 << 8
-const traitTxFeeEstimator = 1 << 10
-const traitPeerManager = 1 << 11
+const traitTxFeeEstimator = 1 << 9
+const traitPeerManager = 1 << 10
 const traitsExtraOpts = traitLogFiler & traitRecoverer & traitRestorer & traitRescanner & traitPeerManager
 
 interface ReconfigRequest {

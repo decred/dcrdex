@@ -3795,8 +3795,6 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 	wi, eth, node, shutdown := tassetWallet(assetID)
 	defer shutdown()
 
-	w := wi.(asset.RedemptionConfirmer)
-
 	txHashes := make([]common.Hash, 5)
 	secrets := make([]common.Hash, 5)
 	secretHashes := make([][32]byte, 5)
@@ -4467,7 +4465,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 			}
 		}
 
-		result, err := w.ConfirmRedemption(test.coinID, test.redemption)
+		result, err := wi.ConfirmRedemption(test.coinID, test.redemption, 0)
 		if test.expectErr {
 			if err == nil {
 				t.Fatalf("%s: expected but did not get", test.name)

@@ -1385,7 +1385,7 @@ func (t *trackedTrade) checkSwapFeeConfirms(match *matchTracker) bool {
 	if match.MetaData.Proof.SwapFeeConfirmed {
 		return false
 	}
-	_, dynamic := t.wallets.fromWallet.Wallet.(asset.DynamicSwapOrRedemptionFeeChecker)
+	_, dynamic := t.wallets.fromWallet.Wallet.(asset.DynamicSwapper)
 	if !dynamic {
 		// Confirmed will be set in the db.
 		return true
@@ -1408,7 +1408,7 @@ func (t *trackedTrade) checkRedemptionFeeConfirms(match *matchTracker) bool {
 	if match.MetaData.Proof.RedemptionFeeConfirmed {
 		return false
 	}
-	_, dynamic := t.wallets.toWallet.Wallet.(asset.DynamicSwapOrRedemptionFeeChecker)
+	_, dynamic := t.wallets.toWallet.Wallet.(asset.DynamicSwapper)
 	if !dynamic {
 		// Confirmed will be set in the db.
 		return true
@@ -1426,8 +1426,8 @@ func (t *trackedTrade) checkRedemptionFeeConfirms(match *matchTracker) bool {
 //
 // NOTE: As long as init and redemption confirms add up to more than two this
 // method will fire as expected before the swap is determined in Confirmed
-// status. The asset.DynamicSwapOrRedemptionFeeChecker interface requires the
-// asset.RedemptionConfirmer interface to ensure this for redemptions.
+// status. Swaps naturally require a certain number of redemption confirms
+// before they are confirmed so this is currently ensured.
 func (t *trackedTrade) updateDynamicSwapOrRedemptionFeesPaid(ctx context.Context, match *matchTracker, isInit bool) {
 	wallet := t.wallets.fromWallet
 	if !isInit {
@@ -1444,7 +1444,7 @@ func (t *trackedTrade) updateDynamicSwapOrRedemptionFeesPaid(ctx context.Context
 			t.dc.log.Errorf("Error updating order metadata for order %s: %v", t.ID(), err)
 		}
 	}
-	feeChecker, dynamic := wallet.Wallet.(asset.DynamicSwapOrRedemptionFeeChecker)
+	feeChecker, dynamic := wallet.Wallet.(asset.DynamicSwapper)
 	if !dynamic {
 		stopChecks()
 		return
@@ -2418,7 +2418,7 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 	// would have been spent and unlocked.
 	t.coinsLocked = false
 	t.changeLocked = lockChange
-	if _, dynamic := fromWallet.Wallet.(asset.DynamicSwapOrRedemptionFeeChecker); !dynamic {
+	if _, dynamic := fromWallet.Wallet.(asset.DynamicSwapper); !dynamic {
 		t.metaData.SwapFeesPaid += fees // dynamic tx wallets don't know the fees paid until mining
 	}
 
@@ -2629,20 +2629,6 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 		})
 	}
 
-	// Try not to use (*Core).feeSuggestion here, since it can incur an RPC
-	// request to the server. t.redeemFeeSuggestion is updated every tick and
-	// uses a rate directly from our wallet, if available. Only go looking for
-	// one if we don't have one cached.
-	var feeSuggestion uint64
-	if _, is := t.accountRedeemer(); is {
-		feeSuggestion = t.metaData.RedeemMaxFeeRate
-	} else {
-		feeSuggestion = t.redeemFeeSuggestion.get()
-	}
-	if feeSuggestion == 0 {
-		feeSuggestion = t.dc.bestBookFeeSuggestion(t.wallets.toWallet.AssetID)
-	}
-
 	// Send the transaction.
 	redeemWallet := t.wallets.toWallet // this is our redeem
 	if !redeemWallet.connected() {
@@ -2651,7 +2637,7 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 	}
 	coinIDs, outCoin, fees, err := redeemWallet.Redeem(&asset.RedeemForm{
 		Redemptions:   redemptions,
-		FeeSuggestion: feeSuggestion, // fallback - wallet will try to get a rate internally for configured redeem conf target
+		FeeSuggestion: t.redeemFee(), // fallback - wallet will try to get a rate internally for configured redeem conf target
 		Options:       t.options,
 	})
 	// If an error was encountered, fail all of the matches. A failed match will
@@ -2700,7 +2686,7 @@ func (c *Core) redeemMatchGroup(t *trackedTrade, matches []*matchTracker, errs *
 	c.log.Infof("Broadcasted redeem transaction spending %d contracts for order %v, paying to %s (%s)",
 		len(redemptions), t.ID(), outCoin, redeemWallet.Symbol)
 
-	if _, dynamic := t.wallets.toWallet.Wallet.(asset.DynamicSwapOrRedemptionFeeChecker); !dynamic {
+	if _, dynamic := t.wallets.toWallet.Wallet.(asset.DynamicSwapper); !dynamic {
 		t.metaData.RedemptionFeesPaid += fees // dynamic tx wallets don't know the fees paid until mining
 	}
 
@@ -2844,23 +2830,48 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 	}()
 }
 
+func (t *trackedTrade) redeemFee() uint64 {
+	// Try not to use (*Core).feeSuggestion here, since it can incur an RPC
+	// request to the server. t.redeemFeeSuggestion is updated every tick and
+	// uses a rate directly from our wallet, if available. Only go looking for
+	// one if we don't have one cached.
+	var feeSuggestion uint64
+	if _, is := t.accountRedeemer(); is {
+		feeSuggestion = t.metaData.RedeemMaxFeeRate
+	} else {
+		feeSuggestion = t.redeemFeeSuggestion.get()
+	}
+	if feeSuggestion == 0 {
+		feeSuggestion = t.dc.bestBookFeeSuggestion(t.wallets.toWallet.AssetID)
+	}
+	return feeSuggestion
+}
+
 // confirmRedemption checks if the user's redemption has been confirmed,
 // and if so, updates the match's status to MatchConfirmed.
 //
 // This method accesses match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
 func (t *trackedTrade) confirmRedemption(match *matchTracker) {
-	confirmer, isConfirmer := t.wallets.toWallet.Wallet.(asset.RedemptionConfirmer)
-	if !isConfirmer {
-		match.Status = order.MatchConfirmed
-		err := t.db.UpdateMatch(&match.MetaMatch)
-		if err != nil {
-			t.dc.log.Errorf("Failed to update match in db %v", err)
-		}
+	// In some cases the wallet will need to send a new redeem transaction.
+	toWallet := t.wallets.toWallet
+
+	if toWallet.peerCount < 1 {
+		t.dc.log.Errorf("Unable to confirm redemption. %s wallet has no peers.", unbip(toWallet.AssetID))
 		return
 	}
-	if !t.wallets.toWallet.connected() {
+
+	if !toWallet.synchronized() {
+		t.dc.log.Errorf("Unable to confirm redemption. %s still syncing.", unbip(toWallet.AssetID))
 		return
+	}
+
+	didUnlock, err := toWallet.refreshUnlock()
+	if err != nil { // Just log it and try anyway.
+		t.dc.log.Errorf("refreshUnlock error checking redeem %s: %v", t.wallets.toWallet.Symbol, err)
+	}
+	if didUnlock {
+		t.dc.log.Warnf("Unexpected unlock needed for the %s wallet to check a redemption", t.wallets.toWallet.Symbol)
 	}
 
 	var redeemCoinID order.CoinID
@@ -2872,10 +2883,10 @@ func (t *trackedTrade) confirmRedemption(match *matchTracker) {
 
 	match.confirmRedemptionNumTries++
 
-	redemptionStatus, err := confirmer.ConfirmRedemption(dex.Bytes(redeemCoinID), &asset.Redemption{
+	redemptionStatus, err := toWallet.Wallet.ConfirmRedemption(dex.Bytes(redeemCoinID), &asset.Redemption{
 		Spends: match.counterSwap,
 		Secret: match.MetaData.Proof.Secret,
-	})
+	}, t.redeemFee())
 	if errors.Is(asset.ErrSwapRefunded, err) {
 		subject, details := t.formatDetails(TopicSwapRefunded, match.token(), t.token())
 		note := newMatchNote(TopicSwapRefunded, subject, details, db.ErrorLevel, t, match)

@@ -82,6 +82,11 @@ const (
 	// testnetExternalApiUrl is the URL of the testnet external API in case of
 	// fallback.
 	testnetExternalApiUrl = "https://mempool.space/testnet/api/"
+
+	// requiredRedeemConfirms is the amount of confirms a redeem transaction
+	// needs before the trade is considered confirmed. The redeem is
+	// monitored until this number of confirms is reached.
+	requiredRedeemConfirms = 1
 )
 
 const (
@@ -5796,4 +5801,83 @@ func deserializeMsgTx(r io.Reader) (*wire.MsgTx, error) {
 // msgTxFromBytes creates a wire.MsgTx by deserializing the transaction.
 func msgTxFromBytes(txB []byte) (*wire.MsgTx, error) {
 	return deserializeMsgTx(bytes.NewReader(txB))
+}
+
+// ConfirmRedemption returns how many confirmations a redemption has. Normally
+// this is very straitforward. However, with fluxuating fees, there's the
+// possibility that the tx is never mined and eventually purged from the
+// mempool. In that case we use the provided fee suggestion to create and send
+// a new redeem transaction, returning the new transactions hash.
+func (btc *baseWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Redemption, feeSuggestion uint64) (*asset.ConfirmRedemptionStatus, error) {
+	txHash, _, err := decodeCoinID(coinID)
+	if err != nil {
+		return nil, err
+	}
+
+	_, confs, err := btc.rawWalletTx(txHash)
+	// redemption transaction found, return its confirms.
+	//
+	// TODO: Investigate the case where this redeem has been sitting in the
+	// mempool for a long amount of time, possibly requiring some action by
+	// us to get it unstuck.
+	if err == nil {
+		return &asset.ConfirmRedemptionStatus{
+			Confs:  uint64(confs),
+			Req:    requiredRedeemConfirms,
+			CoinID: coinID,
+		}, nil
+	}
+
+	if !errors.Is(err, WalletTransactionNotFound) {
+		return nil, fmt.Errorf("problem searching for redemption transaction %s: %w", txHash, err)
+	}
+
+	// Redemption transaction is missing from the point of view of our node!
+	// Unlikely, but possible it was redeemed by another transaction. Check
+	// if the contract is still an unspent output.
+
+	pkScript, err := btc.scriptHashScript(redemption.Spends.Contract)
+	if err != nil {
+		return nil, fmt.Errorf("error creating contract script: %w", err)
+	}
+
+	swapHash, vout, err := decodeCoinID(redemption.Spends.Coin.ID())
+	if err != nil {
+		return nil, err
+	}
+
+	utxo, _, err := btc.node.getTxOut(swapHash, vout, pkScript, time.Now().Add(-ContractSearchLimit))
+	if err != nil {
+		return nil, fmt.Errorf("error finding unspent contract %s with swap hash %v vout %d: %w", redemption.Spends.Coin.ID(), swapHash, vout, err)
+	}
+	if utxo == nil {
+		// TODO: Spent, but by who. Find the spending tx.
+		btc.log.Warnf("Contract coin %v with swap hash %v vout %d spent by someone but not sure who.", redemption.Spends.Coin.ID(), swapHash, vout)
+		// Incorrect, but we will be in a loop of erroring if we don't
+		// return something.
+		return &asset.ConfirmRedemptionStatus{
+			Confs:  requiredRedeemConfirms,
+			Req:    requiredRedeemConfirms,
+			CoinID: coinID,
+		}, nil
+	}
+
+	// The contract has not yet been redeemed, but it seems the redeeming
+	// tx has disappeared. Assume the fee was too low at the time and it
+	// was eventually purged from the mempool. Attempt to redeem again with
+	// a currently reasonable fee.
+
+	form := &asset.RedeemForm{
+		Redemptions:   []*asset.Redemption{redemption},
+		FeeSuggestion: feeSuggestion,
+	}
+	_, coin, _, err := btc.Redeem(form)
+	if err != nil {
+		return nil, fmt.Errorf("unable to re-redeem %s with swap hash %v vout %d: %w", redemption.Spends.Coin.ID(), swapHash, vout, err)
+	}
+	return &asset.ConfirmRedemptionStatus{
+		Confs:  0,
+		Req:    requiredRedeemConfirms,
+		CoinID: coin.ID(),
+	}, nil
 }

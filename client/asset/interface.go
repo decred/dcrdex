@@ -16,20 +16,19 @@ import (
 type WalletTrait uint64
 
 const (
-	WalletTraitRescanner           WalletTrait = 1 << iota // The Wallet is an asset.Rescanner.
-	WalletTraitNewAddresser                                // The Wallet can generate new addresses on demand with NewAddress.
-	WalletTraitLogFiler                                    // The Wallet allows for downloading of a log file.
-	WalletTraitFeeRater                                    // Wallet can provide a fee rate for non-critical transactions
-	WalletTraitAccelerator                                 // This wallet can accelerate transactions using the CPFP technique
-	WalletTraitRecoverer                                   // The wallet is an asset.Recoverer.
-	WalletTraitWithdrawer                                  // The Wallet can withdraw a specific amount from an exchange wallet.
-	WalletTraitSweeper                                     // The Wallet can sweep all the funds, leaving no change.
-	WalletTraitRestorer                                    // The wallet is an asset.WalletRestorer
-	WalletTraitRedemptionConfirmer                         // The wallet has a process to confirm a redemption.
-	WalletTraitTxFeeEstimator                              // The wallet can estimate transaction fees.
-	WalletTraitPeerManager                                 // The wallet can manage its peers.
-	WalletTraitAuthenticator                               // The wallet require authentication.
-	WalletTraitShielded                                    // The wallet is ShieldedWallet (e.g. ZCash)
+	WalletTraitRescanner      WalletTrait = 1 << iota // The Wallet is an asset.Rescanner.
+	WalletTraitNewAddresser                           // The Wallet can generate new addresses on demand with NewAddress.
+	WalletTraitLogFiler                               // The Wallet allows for downloading of a log file.
+	WalletTraitFeeRater                               // Wallet can provide a fee rate for non-critical transactions
+	WalletTraitAccelerator                            // This wallet can accelerate transactions using the CPFP technique
+	WalletTraitRecoverer                              // The wallet is an asset.Recoverer.
+	WalletTraitWithdrawer                             // The Wallet can withdraw a specific amount from an exchange wallet.
+	WalletTraitSweeper                                // The Wallet can sweep all the funds, leaving no change.
+	WalletTraitRestorer                               // The wallet is an asset.WalletRestorer
+	WalletTraitTxFeeEstimator                         // The wallet can estimate transaction fees.
+	WalletTraitPeerManager                            // The wallet can manage its peers.
+	WalletTraitAuthenticator                          // The wallet require authentication.
+	WalletTraitShielded                               // The wallet is ShieldedWallet (e.g. ZCash)
 )
 
 // IsRescanner tests if the WalletTrait has the WalletTraitRescanner bit set.
@@ -138,9 +137,6 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	}
 	if _, is := w.(WalletRestorer); is {
 		t |= WalletTraitRestorer
-	}
-	if _, is := w.(RedemptionConfirmer); is {
-		t |= WalletTraitRedemptionConfirmer
 	}
 	if _, is := w.(TxFeeEstimator); is {
 		t |= WalletTraitTxFeeEstimator
@@ -476,6 +472,15 @@ type Wallet interface {
 	EstimateRegistrationTxFee(feeRate uint64) uint64
 	// ValidateAddress checks that the provided address is valid.
 	ValidateAddress(address string) bool
+	// ConfirmRedemption checks the status of a redemption. It returns the
+	// number of confirmations the redemption has, the number of confirmations
+	// that are required for it to be considered fully confirmed, and the
+	// CoinID used to do the redemption. If it is determined that a transaction
+	// will not be mined, this function will submit a new transaction to
+	// replace the old one. The caller is notified of this by having a
+	// different CoinID in the returned asset.ConfirmRedemptionStatus as was
+	// used to call the function.
+	ConfirmRedemption(coinID dex.Bytes, redemption *Redemption, feeSuggestion uint64) (*ConfirmRedemptionStatus, error)
 }
 
 // Authenticator is a wallet implementation that require authentication.
@@ -596,18 +601,13 @@ type LogFiler interface {
 	LogFilePath() string
 }
 
-// DynamicSwapOrRedemptionFeeChecker defines methods that accept an initiation
+// DynamicSwapper defines methods that accept an initiation
 // or redemption coinID and returns the fee spent on the transaction along with
 // the secrets included in the tx. Returns asset.CoinNotFoundError for unmined
 // txn. Returns asset.ErrNotEnoughConfirms for txn with too few confirmations.
 // Will also error if the secret in the contractData is not found in the
 // transaction secrets.
-type DynamicSwapOrRedemptionFeeChecker interface {
-	// RedemptionConfirmer methods are not currently used. However, a
-	// RedemptionConfirmer adds the necessity to wait for redemption
-	// confirmations that the DynamicSwapOrRedemptionFeeChecker depends on
-	// and will not work properly without them.
-	RedemptionConfirmer
+type DynamicSwapper interface {
 	// DynamicSwapFeesPaid returns fees for initiation transactions.
 	DynamicSwapFeesPaid(ctx context.Context, coinID, contractData dex.Bytes) (fee uint64, secretHashes [][]byte, err error)
 	// DynamicRedemptionFeesPaid returns fees for redemption transactions.
@@ -760,20 +760,6 @@ type LiveReconfigurer interface {
 	// requires a restart, the Wallet should still validate as much
 	// configuration as possible.
 	Reconfigure(ctx context.Context, cfg *WalletConfig, currentAddress string) (restartRequired bool, err error)
-}
-
-// RedemptionConfirmer is a wallet that has a process to confirm and
-// potentially resubmit a redemption.
-type RedemptionConfirmer interface {
-	// ConfirmRedemption checks the status of a redemption. It returns the
-	// number of confirmations the redemption has, the number of confirmations
-	// that are required for it to be considered fully confirmed, and the
-	// CoinID used to do the redemption. If it is determined that a transaction
-	// will not be mined, this function will submit a new transaction to
-	// replace the old one. The caller is notified of this by having a
-	// different CoinID in the returned asset.ConfirmRedemptionStatus as was
-	// used to call the function.
-	ConfirmRedemption(coinID dex.Bytes, redemption *Redemption) (*ConfirmRedemptionStatus, error)
 }
 
 // PeerSource specifies how a wallet knows about a peer. It may have been
