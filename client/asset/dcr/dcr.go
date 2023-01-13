@@ -88,6 +88,12 @@ const (
 	// freshFeeAge is the expiry age for cached fee rates of external origin,
 	// past which fetchFeeFromOracle should be used to refresh the rate.
 	freshFeeAge = time.Minute
+
+	// requiredRedeemConfirms is the amount of confirms a redeem transaction
+	// needs before the trade is considered confirmed. The redeem is
+	// monitored until this number of confirms is reached. Two to make sure
+	// the block containing the redeem is stakeholder-approved
+	requiredRedeemConfirms = 2
 )
 
 var (
@@ -101,6 +107,13 @@ var (
 	peerCountTicker              = 5 * time.Second
 	conventionalConversionFactor = float64(dexdcr.UnitInfo.Conventional.ConversionFactor)
 	walletBlockAllowance         = time.Second * 10
+
+	// maxRedeemMempoolAge is the max amount of time the wallet will let a
+	// redeem transaction sit in mempool from the time it is first seen
+	// until it attempts to abandon it and try to send a new transaction.
+	// This is necessary because transactions with already spent inputs may
+	// be tried over and over with wallet in SPV mode.
+	maxRedeemMempoolAge = time.Hour * 2
 
 	walletOpts = []*asset.ConfigOption{
 		{
@@ -537,6 +550,11 @@ type exchangeWalletConfig struct {
 	apiFeeFallback   bool
 }
 
+type mempoolRedeem struct {
+	txHash    chainhash.Hash
+	firstSeen time.Time
+}
+
 // ExchangeWallet is a wallet backend for Decred. The backend is how the DEX
 // client app communicates with the Decred blockchain and wallet. ExchangeWallet
 // satisfies the dex.Wallet interface.
@@ -585,6 +603,10 @@ type ExchangeWallet struct {
 
 	externalTxMtx   sync.RWMutex
 	externalTxCache map[chainhash.Hash]*externalTx
+
+	// TODO: Consider persisting mempool redeems on file.
+	mempoolRedeemsMtx sync.RWMutex
+	mempoolRedeems    map[[32]byte]*mempoolRedeem // keyed by secret hash
 }
 
 func (dcr *ExchangeWallet) config() *exchangeWalletConfig {
@@ -813,6 +835,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *walletConfig, chainParam
 		findRedemptionQueue: make(map[outPoint]*findRedemptionReq),
 		externalTxCache:     make(map[chainhash.Hash]*externalTx),
 		oracleFees:          make(map[uint64]feeStamped),
+		mempoolRedeems:      make(map[[32]byte]*mempoolRedeem),
 	}
 
 	w.cfgV.Store(walletCfg)
@@ -2703,10 +2726,14 @@ func (dcr *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 		return nil, nil, 0, err
 	}
 	coinIDs := make([]dex.Bytes, 0, len(form.Redemptions))
+	dcr.mempoolRedeemsMtx.Lock()
 	for i := range form.Redemptions {
 		coinIDs = append(coinIDs, toCoinID(txHash, uint32(i)))
+		var secretHash [32]byte
+		copy(secretHash[:], form.Redemptions[i].Spends.SecretHash)
+		dcr.mempoolRedeems[secretHash] = &mempoolRedeem{txHash: *txHash, firstSeen: time.Now()}
 	}
-
+	dcr.mempoolRedeemsMtx.Unlock()
 	return coinIDs, newOutput(txHash, 0, uint64(txOut.Value), wire.TxTreeRegular), fee, nil
 }
 
@@ -4908,4 +4935,201 @@ func float64PtrStr(v *float64) string {
 		return "nil"
 	}
 	return strconv.FormatFloat(*v, 'f', 8, 64)
+}
+
+// ConfirmRedemption returns how many confirmations a redemption has. Normally
+// this is very straitforward. However there are two situations that have come
+// up that this also handles. One is when the wallet can not find the redemption
+// transaction. This is most likely because the fee was set too low and the tx
+// was removed from the mempool. In the case where it is not found, this will
+// send a new tx using the provided fee suggestion. The second situation
+// this watches for is a transaction that we can find but has been sitting in
+// the mempool for a long time. This has been observed with the wallet in SPV
+// mode and the transaction inputs having been spent by another transaction. The
+// wallet will not pick up on this so we could tell it to abandon the original
+// transaction and, again, send a new one using the provided feeSuggestion, but
+// only warning for now. This method should not be run for the same redemption
+// concurrently as it need to watch a new redeem transaction before finishing.
+func (dcr *ExchangeWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Redemption, feeSuggestion uint64) (*asset.ConfirmRedemptionStatus, error) {
+	txHash, _, err := decodeCoinID(coinID)
+	if err != nil {
+		return nil, err
+	}
+
+	var secretHash [32]byte
+	copy(secretHash[:], redemption.Spends.SecretHash)
+	dcr.mempoolRedeemsMtx.RLock()
+	mRedeem, have := dcr.mempoolRedeems[secretHash]
+	dcr.mempoolRedeemsMtx.RUnlock()
+
+	var deleteMempoolRedeem bool
+	defer func() {
+		if deleteMempoolRedeem {
+			dcr.mempoolRedeemsMtx.Lock()
+			delete(dcr.mempoolRedeems, secretHash)
+			dcr.mempoolRedeemsMtx.Unlock()
+		}
+	}()
+
+	tx, err := dcr.wallet.GetTransaction(dcr.ctx, txHash)
+	if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
+		return nil, fmt.Errorf("problem searching for redemption transaction %s: %w", txHash, err)
+	}
+	if err == nil {
+		if have && mRedeem.txHash == *txHash {
+			if tx.Confirmations == 0 && time.Now().After(mRedeem.firstSeen.Add(maxRedeemMempoolAge)) {
+				// Transaction has been sitting in the mempool
+				// for a long time now.
+				//
+				// TODO: Consider abandoning.
+				redeemAge := time.Since(mRedeem.firstSeen)
+				dcr.log.Warnf("Redemption transaction %v has been in the mempool for %v which is too long.", txHash, redeemAge)
+			}
+		} else {
+			if have {
+				// This should not happen. Core has told us to
+				// watch a new redeem with a different transaction
+				// hash for a trade we were already watching.
+				return nil, fmt.Errorf("tx were were watching %s for redeem with secret hash %x being "+
+					"replaced by tx %s. core should not be replacing the transaction. maybe ConfirmRedemption "+
+					"is being run concurrently for the same redeem", mRedeem.txHash, secretHash, *txHash)
+			}
+			// Will hit this if dexc was restarted with an actively
+			// redeeming swap.
+			dcr.mempoolRedeemsMtx.Lock()
+			dcr.mempoolRedeems[secretHash] = &mempoolRedeem{txHash: *txHash, firstSeen: time.Now()}
+			dcr.mempoolRedeemsMtx.Unlock()
+		}
+		if tx.Confirmations >= requiredRedeemConfirms {
+			deleteMempoolRedeem = true
+		}
+		return &asset.ConfirmRedemptionStatus{
+			Confs:  uint64(tx.Confirmations),
+			Req:    requiredRedeemConfirms,
+			CoinID: coinID,
+		}, nil
+	}
+
+	// Redemption transaction is missing from the point of view of our wallet!
+	// Unlikely, but possible it was redeemed by another transaction. We
+	// assume a contract past its locktime cannot make it here, so it must
+	// not be refunded. Check if the contract is still an unspent output.
+
+	swapHash, vout, err := decodeCoinID(redemption.Spends.Coin.ID())
+	if err != nil {
+		return nil, err
+	}
+
+	_, _, spentStatus, err := dcr.lookupTxOutput(dcr.ctx, swapHash, vout)
+	if err != nil {
+		return nil, fmt.Errorf("error finding unspent contract: %w", err)
+	}
+
+	switch spentStatus {
+	case -1, 1:
+		// First find the block containing the output itself.
+		scriptAddr, err := stdaddr.NewAddressScriptHashV0(redemption.Spends.Contract, dcr.chainParams)
+		if err != nil {
+			return nil, fmt.Errorf("error encoding contract address: %w", err)
+		}
+		_, pkScript := scriptAddr.PaymentScript()
+		outFound, block, err := dcr.externalTxOutput(dcr.ctx, newOutPoint(swapHash, vout),
+			pkScript, time.Now().Add(-60*24*time.Hour)) // search up to 60 days ago
+		if err != nil {
+			return nil, err // possibly the contract is still in mempool
+		}
+		spent, err := dcr.isOutputSpent(dcr.ctx, outFound)
+		if err != nil {
+			return nil, fmt.Errorf("error checking if contract %v:%d is spent: %w", *swapHash, vout, err)
+		}
+		if !spent {
+			break
+		}
+		vin := -1
+		spendTx := outFound.spenderTx
+		for i := range spendTx.TxIn {
+			sigScript := spendTx.TxIn[i].SignatureScript
+			sigScriptLen := len(sigScript)
+			if sigScriptLen < dexdcr.SwapContractSize {
+				continue
+			}
+			// The spent contract is at the end of the signature
+			// script. Lop off the front half.
+			script := sigScript[sigScriptLen-dexdcr.SwapContractSize:]
+			_, _, _, sh, err := dexdcr.ExtractSwapDetails(script, dcr.chainParams)
+			if err != nil {
+				// This is not our script, but not necessarily
+				// a problem.
+				dcr.log.Tracef("Error encountered searching for the input that spends %v, "+
+					"extracting swap details from vin %d of %d. Probably not a problem: %v.",
+					spendTx.TxHash(), i, len(spendTx.TxIn), err)
+				continue
+			}
+			if bytes.Equal(sh[:], secretHash[:]) {
+				vin = i
+				break
+			}
+		}
+		if vin >= 0 {
+			_, height, err := dcr.wallet.GetBestBlock(dcr.ctx)
+			if err != nil {
+				return nil, err
+			}
+			confs := uint64(height - block.height)
+			hash := spendTx.TxHash()
+			if confs < requiredRedeemConfirms {
+				dcr.mempoolRedeemsMtx.Lock()
+				dcr.mempoolRedeems[secretHash] = &mempoolRedeem{txHash: hash, firstSeen: time.Now()}
+				dcr.mempoolRedeemsMtx.Unlock()
+			}
+			return &asset.ConfirmRedemptionStatus{
+				Confs:  confs,
+				Req:    requiredRedeemConfirms,
+				CoinID: toCoinID(&hash, uint32(vin)),
+			}, nil
+		}
+		dcr.log.Warnf("Contract coin %v spent by someone but not sure who.", redemption.Spends.Coin.ID())
+		// Incorrect, but we will be in a loop of erroring if we don't
+		// return something. We were unable to find the spender for some
+		// reason.
+
+		// May be still in the map if abandonTx failed.
+		deleteMempoolRedeem = true
+
+		return &asset.ConfirmRedemptionStatus{
+			Confs:  requiredRedeemConfirms,
+			Req:    requiredRedeemConfirms,
+			CoinID: coinID,
+		}, nil
+	}
+
+	// The contract has not yet been redeemed, but it seems the redeeming
+	// tx has disappeared. Assume the fee was too low at the time and it
+	// was eventually purged from the mempool. Attempt to redeem again with
+	// a currently reasonable fee.
+
+	form := &asset.RedeemForm{
+		Redemptions:   []*asset.Redemption{redemption},
+		FeeSuggestion: feeSuggestion,
+	}
+	_, coin, _, err := dcr.Redeem(form)
+	if err != nil {
+		return nil, fmt.Errorf("unable to re-redeem %s: %w", redemption.Spends.Coin.ID(), err)
+	}
+
+	coinID = coin.ID()
+	newRedeemHash, _, err := decodeCoinID(coinID)
+	if err != nil {
+		return nil, err
+	}
+
+	dcr.mempoolRedeemsMtx.Lock()
+	dcr.mempoolRedeems[secretHash] = &mempoolRedeem{txHash: *newRedeemHash, firstSeen: time.Now()}
+	dcr.mempoolRedeemsMtx.Unlock()
+
+	return &asset.ConfirmRedemptionStatus{
+		Confs:  0,
+		Req:    requiredRedeemConfirms,
+		CoinID: coinID,
+	}, nil
 }

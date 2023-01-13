@@ -202,8 +202,7 @@ type tRPCClient struct {
 	signFunc       func(tx *wire.MsgTx) (*wire.MsgTx, bool, error)
 	privWIF        *dcrutil.WIF
 	privWIFErr     error
-	walletTx       *walletjson.GetTransactionResult
-	walletTxErr    error
+	walletTxFn     func() (*walletjson.GetTransactionResult, error)
 	lockErr        error
 	passErr        error
 	disconnected   bool
@@ -250,6 +249,7 @@ func (blockchain *tBlockchain) addRawTx(blockHeight int64, tx *wire.MsgTx) (*cha
 				PrevBlock: *prevBlockHash,
 				Height:    uint32(blockHeight),
 				VoteBits:  1,
+				Timestamp: time.Now(),
 			},
 		}
 	}
@@ -474,8 +474,8 @@ func (c *tRPCClient) DumpPrivKey(_ context.Context, address stdaddr.Address) (*d
 }
 
 func (c *tRPCClient) GetTransaction(_ context.Context, txHash *chainhash.Hash) (*walletjson.GetTransactionResult, error) {
-	if c.walletTx != nil || c.walletTxErr != nil {
-		return c.walletTx, c.walletTxErr
+	if c.walletTxFn != nil {
+		return c.walletTxFn()
 	}
 	return nil, dcrjson.NewRPCError(dcrjson.ErrRPCNoTxInfo, "no test transaction")
 }
@@ -1754,7 +1754,7 @@ func TestFindRedemption(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error generating hex for contract tx: %v", err)
 	}
-	node.walletTx = &walletjson.GetTransactionResult{
+	walletTx := &walletjson.GetTransactionResult{
 		BlockHash:     blockHash.String(),
 		Confirmations: 1,
 		Details: []walletjson.GetTransactionDetailsResult{
@@ -1765,6 +1765,10 @@ func TestFindRedemption(t *testing.T) {
 			},
 		},
 		Hex: txHex,
+	}
+
+	node.walletTxFn = func() (*walletjson.GetTransactionResult, error) {
+		return walletTx, nil
 	}
 
 	// Add an intermediate block for good measure.
@@ -1795,12 +1799,16 @@ func TestFindRedemption(t *testing.T) {
 	}
 
 	// gettransaction error
-	node.walletTxErr = tErr
+	node.walletTxFn = func() (*walletjson.GetTransactionResult, error) {
+		return walletTx, tErr
+	}
 	_, _, err = wallet.FindRedemption(tCtx, coinID, nil)
 	if err == nil {
 		t.Fatalf("no error for gettransaction rpc error")
 	}
-	node.walletTxErr = nil
+	node.walletTxFn = func() (*walletjson.GetTransactionResult, error) {
+		return walletTx, nil
+	}
 
 	// getcfilterv2 error
 	node.rawErr[methodGetCFilterV2] = tErr
@@ -1838,12 +1846,12 @@ func TestFindRedemption(t *testing.T) {
 	redeemBlock.Transactions[0].TxIn[1].SignatureScript = redemptionScript
 
 	// Wrong script type for output
-	node.walletTx.Hex, _ = makeTxHex(inputs, []dex.Bytes{otherScript, otherScript})
+	walletTx.Hex, _ = makeTxHex(inputs, []dex.Bytes{otherScript, otherScript})
 	_, _, err = wallet.FindRedemption(tCtx, coinID, nil)
 	if err == nil {
 		t.Fatalf("no error for wrong script type")
 	}
-	node.walletTx.Hex = txHex
+	walletTx.Hex = txHex
 
 	// Sanity check to make sure it passes again.
 	_, _, err = wallet.FindRedemption(tCtx, coinID, nil)
@@ -2203,7 +2211,10 @@ func TestLookupTxOutput(t *testing.T) {
 
 	// gettransaction error
 	delete(node.txOutRes, op)
-	node.walletTxErr = tErr
+	walletTx := &walletjson.GetTransactionResult{}
+	node.walletTxFn = func() (*walletjson.GetTransactionResult, error) {
+		return walletTx, tErr
+	}
 	_, _, spent, err = wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
 	if err == nil {
 		t.Fatalf("no error for gettransaction error")
@@ -2211,7 +2222,9 @@ func TestLookupTxOutput(t *testing.T) {
 	if spent != 0 {
 		t.Fatalf("spent is not 0 with gettransaction error")
 	}
-	node.walletTxErr = nil
+	node.walletTxFn = func() (*walletjson.GetTransactionResult, error) {
+		return walletTx, nil
+	}
 
 	// wallet.lookupTxOutput will check if the tx is confirmed, its hex
 	// is valid and contains an output at index 0, for the output to be
@@ -2225,10 +2238,8 @@ func TestLookupTxOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error preparing tx hex with 1 output: %v", err)
 	}
-	node.walletTx = &walletjson.GetTransactionResult{
-		Hex:           txHex,
-		Confirmations: 0, // unconfirmed = unspent
-	}
+	walletTx.Hex = txHex // unconfirmed = unspent
+
 	_, _, spent, err = wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
 	if err != nil {
 		t.Fatalf("unexpected error for gettransaction path (unconfirmed): %v", err)
@@ -2238,7 +2249,7 @@ func TestLookupTxOutput(t *testing.T) {
 	}
 
 	// Confirmed wallet tx without gettxout response is spent.
-	node.walletTx.Confirmations = 2
+	walletTx.Confirmations = 2
 	_, _, spent, err = wallet.lookupTxOutput(context.Background(), &op.txHash, op.vout)
 	if err != nil {
 		t.Fatalf("unexpected error for gettransaction path (confirmed): %v", err)
@@ -2777,5 +2788,213 @@ func TestEstimateSendTxFee(t *testing.T) {
 	_, _, err = wallet.EstimateSendTxFee(addr, 0, optimalFeeRate, true)
 	if err == nil {
 		t.Fatal("Expected error, send amount is zero")
+	}
+}
+
+func TestConfirmRedemption(t *testing.T) {
+	wallet, node, shutdown := tNewWallet()
+	defer shutdown()
+
+	swapVal := toAtoms(5)
+	secret := randBytes(32)
+	secretHash := sha256.Sum256(secret)
+	lockTime := time.Now().Add(time.Hour * 12)
+	addr := tPKHAddr.String()
+
+	contract, err := dexdcr.MakeContract(addr, addr, secretHash[:], lockTime.Unix(), tChainParams)
+	if err != nil {
+		t.Fatalf("error making swap contract: %v", err)
+	}
+
+	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
+
+	node.changeAddr = tPKHAddr
+	node.privWIF, err = dcrutil.NewWIF(privBytes, tChainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
+	if err != nil {
+		t.Fatalf("NewWIF error: %v", err)
+	}
+
+	contractAddr, _ := stdaddr.NewAddressScriptHashV0(contract, tChainParams)
+	_, contractP2SHScript := contractAddr.PaymentScript()
+
+	redemptionScript, _ := dexdcr.RedeemP2SHContract(contract, randBytes(73), randBytes(33), secret)
+
+	spentTx := makeRawTx(nil, []dex.Bytes{contractP2SHScript})
+	txHash := spentTx.TxHash()
+	node.blockchain.addRawTx(1, spentTx)
+	inputs := []*wire.TxIn{makeRPCVin(&txHash, 0, redemptionScript)}
+	spenderTx := makeRawTx(inputs, nil)
+	node.blockchain.addRawTx(2, spenderTx)
+
+	wallet.tipMtx.Lock()
+	wallet.currentTip, _ = wallet.getBestBlock(wallet.ctx)
+	wallet.tipMtx.Unlock()
+
+	txFn := func(doErr []bool) func() (*walletjson.GetTransactionResult, error) {
+		var i int
+		return func() (*walletjson.GetTransactionResult, error) {
+			defer func() { i++ }()
+			if doErr[i] {
+				return nil, asset.CoinNotFoundError
+			}
+			b, err := spenderTx.Bytes() // spender is redeem, searched first
+			if err != nil {
+				t.Fatal(err)
+			}
+			if i > 0 {
+				b, err = spentTx.Bytes() // spent is swap, searched if the fist call was a forced error
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			h := hex.EncodeToString(b)
+			return &walletjson.GetTransactionResult{
+				BlockHash:     hex.EncodeToString(randBytes(32)),
+				Hex:           h,
+				Confirmations: int64(i), // 0 for redeem and 1 for swap
+			}, nil
+		}
+	}
+
+	coin := newOutput(&txHash, 0, swapVal, wire.TxTreeRegular)
+
+	ci := &asset.AuditInfo{
+		Coin:       coin,
+		Contract:   contract,
+		Recipient:  tPKHAddr.String(),
+		Expiration: lockTime,
+		SecretHash: secretHash[:],
+	}
+
+	redemption := &asset.Redemption{
+		Spends: ci,
+		Secret: secret,
+	}
+
+	coinID := coin.ID()
+	// Inverting the first byte.
+	badCoinID := append(append(make([]byte, 0, len(coinID)), ^coinID[0]), coinID[1:]...)
+
+	tests := []struct {
+		name             string
+		redemption       *asset.Redemption
+		coinID           []byte
+		wantErr          bool
+		bestBlockErr     error
+		txRes            func() (*walletjson.GetTransactionResult, error)
+		wantConfs        uint64
+		mempoolRedeems   map[[32]byte]*mempoolRedeem
+		txOutRes         map[outPoint]*chainjson.GetTxOutResult
+		unspentOutputErr error
+	}{{
+		name:       "ok tx never seen before now",
+		coinID:     coinID,
+		redemption: redemption,
+		txRes:      txFn([]bool{false}),
+	}, {
+		name:           "ok tx in map",
+		coinID:         coinID,
+		redemption:     redemption,
+		txRes:          txFn([]bool{false}),
+		mempoolRedeems: map[[32]byte]*mempoolRedeem{secretHash: {txHash: txHash, firstSeen: time.Now()}},
+	}, {
+		name:           "tx in map has different hash than coin id",
+		coinID:         badCoinID,
+		redemption:     redemption,
+		txRes:          txFn([]bool{false}),
+		mempoolRedeems: map[[32]byte]*mempoolRedeem{secretHash: {txHash: txHash, firstSeen: time.Now()}},
+		wantErr:        true,
+	}, {
+		name:       "ok tx not found spent new tx",
+		coinID:     coinID,
+		redemption: redemption,
+		txRes:      txFn([]bool{false}),
+		txOutRes:   map[outPoint]*chainjson.GetTxOutResult{newOutPoint(&txHash, 0): makeGetTxOutRes(0, 5, nil)},
+	}, {
+		name:           "ok old tx should maybe be abandoned",
+		coinID:         coinID,
+		redemption:     redemption,
+		txRes:          txFn([]bool{false}),
+		mempoolRedeems: map[[32]byte]*mempoolRedeem{secretHash: {txHash: txHash, firstSeen: time.Now().Add(-maxRedeemMempoolAge - time.Second)}},
+	}, {
+		name:       "ok and spent",
+		coinID:     coinID,
+		txRes:      txFn([]bool{true, false}),
+		redemption: redemption,
+		wantConfs:  1, // one confirm because this tx is in the best block
+	}, {
+		name:   "ok and spent but we dont know who spent it",
+		coinID: coinID,
+		txRes:  txFn([]bool{true, false}),
+		redemption: func() *asset.Redemption {
+			ci := &asset.AuditInfo{
+				Coin:       coin,
+				Contract:   contract,
+				Recipient:  tPKHAddr.String(),
+				Expiration: lockTime,
+				SecretHash: make([]byte, 32), // fake secret hash
+			}
+			return &asset.Redemption{
+				Spends: ci,
+				Secret: secret,
+			}
+		}(),
+		wantConfs: requiredRedeemConfirms,
+	}, {
+		name:       "get transaction error",
+		coinID:     coinID,
+		redemption: redemption,
+		txRes:      txFn([]bool{true, true}),
+		wantErr:    true,
+	}, {
+		name:       "decode coin error",
+		coinID:     nil,
+		redemption: redemption,
+		txRes:      txFn([]bool{true, false}),
+		wantErr:    true,
+	}, {
+		name:     "redeem error",
+		coinID:   coinID,
+		txOutRes: map[outPoint]*chainjson.GetTxOutResult{newOutPoint(&txHash, 0): makeGetTxOutRes(0, 5, nil)},
+		txRes:    txFn([]bool{true, false}),
+		redemption: func() *asset.Redemption {
+			ci := &asset.AuditInfo{
+				Coin: coin,
+				// Contract:   contract,
+				Recipient:  tPKHAddr.String(),
+				Expiration: lockTime,
+				SecretHash: secretHash[:],
+			}
+			return &asset.Redemption{
+				Spends: ci,
+				Secret: secret,
+			}
+		}(),
+		wantErr: true,
+	}}
+	for _, test := range tests {
+		node.walletTxFn = test.txRes
+		node.bestBlockErr = test.bestBlockErr
+		wallet.mempoolRedeems = test.mempoolRedeems
+		if wallet.mempoolRedeems == nil {
+			wallet.mempoolRedeems = make(map[[32]byte]*mempoolRedeem)
+		}
+		node.txOutRes = test.txOutRes
+		if node.txOutRes == nil {
+			node.txOutRes = make(map[outPoint]*chainjson.GetTxOutResult)
+		}
+		status, err := wallet.ConfirmRedemption(test.coinID, test.redemption, 0)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("%q: expected error", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%q: unexpected error: %v", test.name, err)
+		}
+		if status.Confs != test.wantConfs {
+			t.Fatalf("%q: wanted %d confs but got %d", test.name, test.wantConfs, status.Confs)
+		}
 	}
 }
