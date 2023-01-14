@@ -172,7 +172,7 @@ func waitForReceipt(nc ethFetcher, tx *types.Transaction) (*types.Receipt, error
 				}
 				return nil, err
 			}
-			spew.Dump(receipt)
+			// spew.Dump(receipt)
 			return receipt, nil
 		case <-timesUp:
 			spew.Dump(tx)
@@ -718,17 +718,17 @@ func prepareTokenClients(t *testing.T) {
 		t.Fatalf("unexpected error while waiting to mine approval block: %v", err)
 	}
 
-	receipt1, err := waitForReceipt(ethClient, tx1)
+	_, err = waitForReceipt(ethClient, tx1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	spew.Dump(receipt1)
+	// spew.Dump(receipt1)
 
-	receipt2, err := waitForReceipt(participantEthClient, tx2)
+	_, err = waitForReceipt(participantEthClient, tx2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	spew.Dump(receipt2)
+	// spew.Dump(receipt2)
 }
 
 func syncClient(cl ethFetcher) error {
@@ -2299,15 +2299,12 @@ func testSignMessage(t *testing.T) {
 }
 
 func TestTokenGasEstimates(t *testing.T) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	runSimnetMiner(ctx, tLogger)
 	prepareTokenClients(t)
-	if err := GetGasEstimates(ctx, ethClient, simnetTokenContractor, 5, tokenGases, participantAddr,
-		func() {
-			if err := waitForMined(10, false); err != nil {
-				t.Fatalf("mining error: %v", err)
-			}
-		}, func(nc ethFetcher, tx *types.Transaction) (*types.Receipt, error) {
-			return waitForReceipt(nc, tx)
-		}); err != nil {
+	tLogger.SetLevel(dex.LevelInfo)
+	if err := getGasEstimates(ctx, ethClient, simnetTokenContractor, 5, tokenGases, tLogger); err != nil {
 		t.Fatalf("getGasEstimates error: %v", err)
 	}
 }
@@ -2316,21 +2313,6 @@ func TestConfirmedNonce(t *testing.T) {
 	_, err := ethClient.getConfirmedNonce(ctx)
 	if err != nil {
 		t.Fatalf("getConfirmedNonce error: %v", err)
-	}
-}
-
-func TestTokenGasEstimatesParticipant(t *testing.T) {
-	prepareTokenClients(t)
-	if err := GetGasEstimates(ctx, participantEthClient, participantTokenContractor, 5, tokenGases, simnetAddr,
-		func() {
-			if err := waitForMined(10, false); err != nil {
-				t.Fatalf("mining error: %v", err)
-			}
-		},
-		func(nc ethFetcher, tx *types.Transaction) (*types.Receipt, error) {
-			return waitForReceipt(nc, tx)
-		}); err != nil {
-		t.Fatalf("getGasEstimates error: %v", err)
 	}
 }
 
