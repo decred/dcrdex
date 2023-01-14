@@ -4542,7 +4542,7 @@ func getGasEstimates(ctx context.Context, cl ethFetcher, c contractor, maxSwaps 
 		fmt.Printf("    %+v \n", stats.transfers)
 	}()
 
-	// Estimate approve for tokens..
+	// Estimate approve for tokens.
 	if isToken {
 		txOpts, err := cl.txOpts(ctx, 0, g.Approve*2, nil, nil)
 		if err != nil {
