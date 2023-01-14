@@ -146,7 +146,15 @@ interface StatsDisplay {
 export default class MarketsPage extends BasePage {
   page: Record<string, PageElement>
   main: HTMLElement
+  // maxEstimateAvailable reflects whether up-to-date max buy/sell order estimate
+  // has already been calculated. Max buy/sell order estimate depends on user-inputs
+  // such as Price and Quantity, when these inputs are updated maxEstimateAvailable
+  // resets to false (since the previous max estimate is no longer up-to-date with
+  // respect to user-inputs), and UI attempts to re-calculate Max estimate.
+  maxEstimateAvailable: boolean
+  // maxLoaded gets called when max buy/sell estimate has been loaded.
   maxLoaded: (() => void) | null
+  // maxMktSellLoaded gets called when max buy/sell estimate has been loaded.
   maxMktSellLoaded: (() => void) | null
   maxOrderUpdateCounter: number
   market: CurrentMarket
@@ -1130,6 +1138,7 @@ export default class MarketsPage extends BasePage {
    */
   scheduleMaxEstimate (path: string, args: any, delay: number, success: (res: any) => void) {
     const page = this.page
+    this.maxEstimateAvailable = false // invalidates previously-calculated value.
     if (!this.maxLoaded) this.maxLoaded = app().loading(page.maxOrd)
     if (!this.maxMktSellLoaded) this.maxMktSellLoaded = app().loading(page.mktSellMaxOrd)
     const [bid, qid] = [this.market.base.id, this.market.quote.id]
@@ -1170,6 +1179,7 @@ export default class MarketsPage extends BasePage {
         return
       }
       success(res)
+      this.maxEstimateAvailable = true
     }, delay)
   }
 
@@ -1230,7 +1240,11 @@ export default class MarketsPage extends BasePage {
           showError(intl.ID_NO_ZERO_QUANTITY)
           return false
         }
-        if (order.qty > this.calcMaxOrderQtyAtoms()) {
+        // Skipping max order validation step in case we don't have reasonable value
+        // to compare against. Note, the order still will be re-checked by dexc at
+        // the placement time, so we have this validation here just to provide snappy
+        // feedback for the user.
+        if (this.maxEstimateAvailable && order.qty > this.calcMaxOrderQtyAtoms()) {
           // Hints to the user what inputs don't pass validation.
           this.animateErrors(highlightBackgroundRed(page.mktSellMaxOrd), highlightOutlineRed(page.mktSellLotField))
           showError(intl.ID_NO_QUANTITY_EXCEEDS_MAX)
@@ -1256,7 +1270,11 @@ export default class MarketsPage extends BasePage {
       showError(intl.ID_NO_ZERO_QUANTITY)
       return false
     }
-    if (order.qty > this.calcMaxOrderQtyAtoms()) {
+    // Skipping max order validation step in case we don't have reasonable value
+    // to compare against. Note, the order still will be re-checked by dexc at
+    // the placement time, so we have this validation here just to provide snappy
+    // feedback for the user.
+    if (this.maxEstimateAvailable && order.qty > this.calcMaxOrderQtyAtoms()) {
       // Hints to the user what inputs don't pass validation.
       this.animateErrors(highlightBackgroundRed(page.maxOrd), highlightOutlineRed(page.lotField))
       showError(intl.ID_NO_QUANTITY_EXCEEDS_MAX)
