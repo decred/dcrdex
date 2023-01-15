@@ -4287,7 +4287,13 @@ func quickNode(ctx context.Context, walletDir string, assetID, contractVer uint3
 	if err = cl.connect(ctx); err != nil {
 		return nil, nil, fmt.Errorf("error connecting: %v", err)
 	}
-	defer cl.shutdown()
+
+	success := false
+	defer func() {
+		if !success {
+			cl.shutdown()
+		}
+	}()
 
 	if err = cl.unlock(string(pw)); err != nil {
 		return nil, nil, fmt.Errorf("error unlocking initiator node: %v", err)
@@ -4313,6 +4319,7 @@ func quickNode(ctx context.Context, walletDir string, assetID, contractVer uint3
 			return nil, nil, fmt.Errorf("token contractor constructor error: %v", err)
 		}
 	}
+	success = true
 	return cl, c, nil
 }
 
@@ -4355,7 +4362,11 @@ func runSimnetMiner(ctx context.Context, log dex.Logger) {
 	log.Infof("Starting the simnet miner")
 	go func() {
 		tick := time.NewTicker(time.Second * 5)
-		u, _ := user.Current()
+		u, err := user.Current()
+		if err != nil {
+			log.Criticalf("cannot run simnet miner because we couldn't get the current user")
+			return
+		}
 		for {
 			select {
 			case <-tick.C:
@@ -4412,6 +4423,7 @@ func GetGasEstimates(ctx context.Context, net dex.Network, assetID, contractVer 
 	if err != nil {
 		return fmt.Errorf("error creating initiator wallet: %v", err)
 	}
+	defer cl.shutdown()
 
 	log.Infof("Initiator address: %s", cl.address())
 
@@ -4436,28 +4448,9 @@ func GetGasEstimates(ctx context.Context, net dex.Network, assetID, contractVer 
 	isToken := assetID != BipID
 	ethReq := fees + swapReq
 	if isToken {
-		fees += (gases.Transfer*2 + gases.Approve*2) * 2 * 6 / 5 * feeRate // Adding 20% in case base rate goes up
+		fees += (gases.Transfer*2 + gases.Approve*2*2 /* two approvals */ + defaultSendGasLimit /* approval client fee funding tx */) *
+			2 * 6 / 5 * feeRate // Adding 20% in case base rate goes up
 		ethReq = fees
-		tc := c.(tokenContractor)
-		tokenBal, err := tc.balance(ctx)
-		if err != nil {
-			return fmt.Errorf("error fetching token balance: %v", err)
-		}
-		ui, err := asset.UnitInfo(assetID)
-		if err != nil {
-			return fmt.Errorf("error getting unit info for %d: %v", assetID, err)
-		}
-		convUnit := ui.Conventional.Unit
-		log.Infof("%s balance: %s %s", strings.ToUpper(symbol), ui.ConventionalString(dexeth.WeiToGwei(tokenBal)), convUnit)
-		log.Infof("%d %s required for swaps", swapReq, ui.AtomicUnit)
-		log.Infof("%d gwei eth required for fees", ethReq)
-		atomicBal := dexeth.Tokens[assetID].EVMToAtomic(tokenBal)
-		if atomicBal < swapReq {
-			return fmt.Errorf("token balance insufficient to get gas estimates. current: %s, required %s %s. send %s to %s",
-				ui.ConventionalString(atomicBal), ui.ConventionalString(swapReq), convUnit, symbol, cl.address())
-		}
-	} else {
-		log.Infof("%d gwei eth required for fees and swaps", ethReq)
 	}
 
 	ethBal, err := cl.addressBalance(ctx, cl.address())
@@ -4471,12 +4464,67 @@ func GetGasEstimates(ctx context.Context, net dex.Network, assetID, contractVer 
 			dexeth.UnitInfo.ConventionalString(atomicBal), dexeth.UnitInfo.ConventionalString(ethReq), cl.address())
 	}
 
+	// Run the miner now, in case we need it for the approval client preload.
 	if net == dex.Simnet {
 		runSimnetMiner(ctx, log)
 	}
 
+	var approvalClient *multiRPCClient
+	var approvalContractor tokenContractor
+	if isToken {
+
+		tc := c.(tokenContractor)
+		tokenBal, err := tc.balance(ctx)
+		if err != nil {
+			return fmt.Errorf("error fetching token balance: %v", err)
+		}
+		ui, err := asset.UnitInfo(assetID)
+		if err != nil {
+			return fmt.Errorf("error getting unit info for %d: %v", assetID, err)
+		}
+
+		atomicBal := dexeth.Tokens[assetID].EVMToAtomic(tokenBal)
+
+		convUnit := ui.Conventional.Unit
+		log.Infof("%s balance: %s %s", strings.ToUpper(symbol), ui.ConventionalString(atomicBal), convUnit)
+		log.Infof("%d %s required for swaps", swapReq, ui.AtomicUnit)
+		log.Infof("%d gwei eth required for fees", ethReq)
+		if atomicBal < swapReq {
+			return fmt.Errorf("token balance insufficient to get gas estimates. current: %s, required %s %s. send %s to %s",
+				ui.ConventionalString(atomicBal), ui.ConventionalString(swapReq), convUnit, symbol, cl.address())
+		}
+
+		var mrc contractor
+		approvalClient, mrc, err = quickNode(ctx, filepath.Join(walletDir, "ac_dir"), assetID, contractVer, encode.RandomBytes(32), provider, net, log)
+		if err != nil {
+			return fmt.Errorf("error creating approval contract node: %v", err)
+		}
+		approvalContractor = mrc.(tokenContractor)
+		defer approvalClient.shutdown()
+
+		// TODO: We're overloading by probably 140% here, but this is what
+		// we've reserved in our fee checks. Is it worth recovering unused
+		// balance?
+		feePreload := gases.Approve * 2 * 6 / 5 * feeRate
+		txOpts, err := cl.txOpts(ctx, feePreload, defaultSendGasLimit, nil, nil)
+		if err != nil {
+			return fmt.Errorf("error creating tx opts for sending fees for approval client: %v", err)
+		}
+
+		tx, err := cl.sendTransaction(ctx, txOpts, approvalClient.address(), nil)
+		if err != nil {
+			return fmt.Errorf("error sending fee reserves to approval client: %v", err)
+		}
+		if err = waitForConfirmation(ctx, approvalClient, tx.Hash()); err != nil {
+			return fmt.Errorf("error waiting for approval fee funding tx: %w", err)
+		}
+
+	} else {
+		log.Infof("%d gwei eth required for fees and swaps", ethReq)
+	}
+
 	log.Debugf("Getting gas estimates")
-	return getGasEstimates(ctx, cl, c, maxSwaps, gases, log)
+	return getGasEstimates(ctx, cl, approvalClient, c, approvalContractor, maxSwaps, gases, log)
 }
 
 // getGasEstimate is used to get a gas table for an asset's contract(s). The
@@ -4485,7 +4533,14 @@ func GetGasEstimates(ctx context.Context, net dex.Network, assetID, contractVer 
 // factor of 2. The account should already have a trading balance of at least
 // maxSwaps gwei (token or eth), and sufficient eth balance to cover the
 // requisite tx fees.
-func getGasEstimates(ctx context.Context, cl ethFetcher, c contractor, maxSwaps int, g *dexeth.Gases, log dex.Logger) error {
+//
+// acl (approval client) and ac (approval contractor) should be an ethFetcher
+// and tokenContractor for a fresh account. They are used to get the approval
+// gas estimate. These are only needed when the asset is a token. For eth, they
+// can be nil.
+func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac tokenContractor,
+	maxSwaps int, g *dexeth.Gases, log dex.Logger) (err error) {
+
 	tc, isToken := c.(tokenContractor)
 
 	stats := struct {
@@ -4544,29 +4599,42 @@ func getGasEstimates(ctx context.Context, cl ethFetcher, c contractor, maxSwaps 
 
 	// Estimate approve for tokens.
 	if isToken {
-		txOpts, err := cl.txOpts(ctx, 0, g.Approve*2, nil, nil)
-		if err != nil {
-			return fmt.Errorf("error constructing signed tx opts for approve: %w", err)
-		}
-		log.Debugf("Sending approval transaction")
-		approveTx, err := tc.approve(txOpts, unlimitedAllowance)
-		if err != nil {
-			return fmt.Errorf("error estimating approve gas: %w", err)
-		}
-		if err = waitForConfirmation(ctx, cl, approveTx.Hash()); err != nil {
-			return fmt.Errorf("error waiting for approve transaction: %w", err)
-		}
-		receipt, _, err := cl.transactionReceipt(ctx, approveTx.Hash())
-		if err != nil {
-			return fmt.Errorf("error getting receipt for approve tx: %w", err)
-		}
-		if err := checkTxStatus(receipt, g.Approve*2); err != nil {
-			return fmt.Errorf("approve tx failed status check: [%w]. %d gas used out of %d available", err, receipt.GasUsed, g.Approve*2)
-		}
-		log.Infof("%d gas used for approval tx", receipt.GasUsed)
-		stats.approves = append(stats.approves, receipt.GasUsed)
+		sendApprove := func(cl ethFetcher, c tokenContractor) error {
+			txOpts, err := cl.txOpts(ctx, 0, g.Approve*2, nil, nil)
+			if err != nil {
+				return fmt.Errorf("error constructing signed tx opts for approve: %w", err)
+			}
+			tx, err := c.approve(txOpts, unlimitedAllowance)
+			if err != nil {
+				return fmt.Errorf("error estimating approve gas: %w", err)
+			}
+			if err = waitForConfirmation(ctx, cl, tx.Hash()); err != nil {
+				return fmt.Errorf("error waiting for approve transaction: %w", err)
+			}
+			receipt, _, err := cl.transactionReceipt(ctx, tx.Hash())
+			if err != nil {
+				return fmt.Errorf("error getting receipt for approve tx: %w", err)
+			}
+			if err = checkTxStatus(receipt, g.Approve*2); err != nil {
+				return fmt.Errorf("approve tx failed status check: [%w]. %d gas used out of %d available", err, receipt.GasUsed, g.Approve*2)
+			}
 
-		txOpts, err = cl.txOpts(ctx, 0, g.Transfer*2, nil, nil)
+			log.Infof("%d gas used for approval tx", receipt.GasUsed)
+			stats.approves = append(stats.approves, receipt.GasUsed)
+			return nil
+		}
+
+		log.Debugf("Sending approval transaction for random test client")
+		if err = sendApprove(acl, ac); err != nil {
+			return fmt.Errorf("error sending approve transaction for the new client: %w", err)
+		}
+
+		log.Debugf("Sending approval transaction for initiator")
+		if err = sendApprove(cl, tc); err != nil {
+			return fmt.Errorf("error sending approve transaction for the initiator: %w", err)
+		}
+
+		txOpts, err := cl.txOpts(ctx, 0, g.Transfer*2, nil, nil)
 		if err != nil {
 			return fmt.Errorf("error constructing signed tx opts for transfer: %w", err)
 		}
@@ -4582,11 +4650,11 @@ func getGasEstimates(ctx context.Context, cl ethFetcher, c contractor, maxSwaps 
 		if err = waitForConfirmation(ctx, cl, transferTx.Hash()); err != nil {
 			return fmt.Errorf("error waiting for transfer tx: %w", err)
 		}
-		receipt, _, err = cl.transactionReceipt(ctx, transferTx.Hash())
+		receipt, _, err := cl.transactionReceipt(ctx, transferTx.Hash())
 		if err != nil {
 			return fmt.Errorf("error getting tx receipt for transfer tx: %w", err)
 		}
-		if err := checkTxStatus(receipt, g.Transfer*2); err != nil {
+		if err = checkTxStatus(receipt, g.Transfer*2); err != nil {
 			return fmt.Errorf("transfer tx failed status check: [%w]. %d gas used out of %d available", err, receipt.GasUsed, g.Transfer*2)
 		}
 		log.Infof("%d gas used for transfer tx", receipt.GasUsed)
@@ -4632,7 +4700,7 @@ func getGasEstimates(ctx context.Context, cl ethFetcher, c contractor, maxSwaps 
 		if err != nil {
 			return fmt.Errorf("error getting init tx receipt: %w", err)
 		}
-		if err := checkTxStatus(receipt, txOpts.GasLimit); err != nil {
+		if err = checkTxStatus(receipt, txOpts.GasLimit); err != nil {
 			return fmt.Errorf("init tx failed status check: %w", err)
 		}
 		log.Infof("%d gas used for %d initation txs", receipt.GasUsed, n)
@@ -4674,7 +4742,7 @@ func getGasEstimates(ctx context.Context, cl ethFetcher, c contractor, maxSwaps 
 		if err != nil {
 			return fmt.Errorf("error getting redeem tx receipt: %w", err)
 		}
-		if err := checkTxStatus(receipt, txOpts.GasLimit); err != nil {
+		if err = checkTxStatus(receipt, txOpts.GasLimit); err != nil {
 			return fmt.Errorf("redeem tx failed status check: %w", err)
 		}
 		log.Infof("%d gas used for %d redemptions", receipt.GasUsed, n)

@@ -29,7 +29,10 @@ func mainErr() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	u, _ := user.Current()
+	u, err := user.Current()
+	if err != nil {
+		return fmt.Errorf("could not get the current user")
+	}
 	defaultCredsPath := filepath.Join(u.HomeDir, "ethtest", "getgas-credentials.json")
 
 	var maxSwaps, contractVerI int
@@ -40,7 +43,7 @@ func mainErr() error {
 	flag.BoolVar(&useSimnet, "simnet", false, "use simnet")
 	flag.BoolVar(&trace, "trace", false, "use simnet")
 	flag.BoolVar(&debug, "debug", false, "use simnet")
-	flag.IntVar(&maxSwaps, "n", 5, "max number of swaps per transaction. test will run from 1 swap up to n swaps. minimum is 2.")
+	flag.IntVar(&maxSwaps, "n", 5, "max number of swaps per transaction. minimum is 2. test will run from 2 swap up to n swaps.")
 	flag.StringVar(&token, "token", "eth", "symbol of the token. if token is not specified, will check gas for Ethereum")
 	flag.IntVar(&contractVerI, "ver", 0, "contract version")
 	flag.StringVar(&credentialsPath, "creds", defaultCredsPath, "path for JSON credentials file")
@@ -49,6 +52,10 @@ func mainErr() error {
 	if !useMainnet && !useTestnet && !useSimnet {
 		return fmt.Errorf("no network specified. add flag --mainnet, --testnet, or --simnet")
 	}
+	if (useMainnet && useTestnet) || (useMainnet && useSimnet) || (useTestnet && useSimnet) {
+		return fmt.Errorf("more than one network specified")
+	}
+
 	net := dex.Mainnet
 	if useSimnet {
 		net = dex.Simnet

@@ -2304,7 +2304,7 @@ func TestTokenGasEstimates(t *testing.T) {
 	runSimnetMiner(ctx, tLogger)
 	prepareTokenClients(t)
 	tLogger.SetLevel(dex.LevelInfo)
-	if err := getGasEstimates(ctx, ethClient, simnetTokenContractor, 5, tokenGases, tLogger); err != nil {
+	if err := getGasEstimates(ctx, ethClient, participantEthClient, simnetTokenContractor, participantTokenContractor, 5, tokenGases, tLogger); err != nil {
 		t.Fatalf("getGasEstimates error: %v", err)
 	}
 }

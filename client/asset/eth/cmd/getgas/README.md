@@ -1,6 +1,6 @@
 ## Gas Estimator Utility
 
-`getgas` is a program for getting gas estimates for DEX critical operations
+`getgas` is a program for getting gas estimates for DEX-critical operations
 on Ethereum. Use `getgas` to generate gas tables (`dexeth.Gases`) when adding a
 new token or a new contract version.
 
@@ -24,9 +24,13 @@ If this is a new asset, you must populate either `dexeth.VersionedGases` or
 
 - Decide the maximum number of swaps you want in the largest initiation transaction, `--n`. Minimum is 2. `getgas` will check initiations with from 1 up to `n` swaps. There is a balance between cost and precision. Using more than 2 generates an average over `n - 1` intiations to calculate the cost of additional swaps (`Gases.SwapAdd`) and redeems (`Gases.RedeemAdd`).
 
+- If you run `getgas` with insufficient or zero ETH and/or token balance on the seed, no transactions will be sent and you'll get a message indicating the amount of funding needed to run.
+
 - A network **MUST** be specified with the `--mainnet`, `--testnet`, or `--simnet` flag.
 
 - Use `--help` to see additional options.
+
+- **If running on mainnet, real funds will be used** for fees based on the current network base fee and tip rate. All swaps sent are just 1 gwei (atom), with fees additional. If testing a token, 1 atom will be transferred to a [random address](https://ethereum.stackexchange.com/a/3298/83118) and will unrecoverable.
 
 **example usage**
 ```

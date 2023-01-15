@@ -242,9 +242,12 @@ var usdcTokenID, _ = dex.BipSymbolID("usdc.eth")
 // Gases lists the expected gas required for various DEX and wallet operations.
 type Gases struct {
 	// Approve is the amount of gas needed to approve the swap contract for
-	// transferring tokens.
+	// transferring tokens. The first approval for an address uses more gas than
+	// subsequent approvals for the same address.
 	Approve uint64 `json:"approve"`
-	// Transfer is the amount of gas needed to transfer tokens.
+	// Transfer is the amount of gas needed to transfer tokens. The first
+	// transfer to an address uses more gas than subsequent transfers to the
+	// same address.
 	Transfer uint64 `json:"transfer"`
 	// Swap is the amount of gas needed to initialize a single ethereum swap.
 	Swap uint64 `json:"swap"`
