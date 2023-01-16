@@ -4,8 +4,7 @@ import (
 	"encoding/hex"
 	"testing"
 
-	dexltc "decred.org/dcrdex/dex/networks/ltc"
-	"decred.org/dcrdex/server/asset/btc"
+	btctest "decred.org/dcrdex/dex/networks/btc/test"
 )
 
 func TestCompatibility(t *testing.T) {
@@ -18,7 +17,7 @@ func TestCompatibility(t *testing.T) {
 	}
 	// These scripts and addresses are just copy-pasted from random
 	// getrawtransaction output.
-	items := &btc.CompatibilityItems{
+	items := &btctest.CompatibilityItems{
 		P2PKHScript:  fromHex("76a9146e137cab355e7a35d7546470dc6db403b7bd47ea88ac"),
 		PKHAddr:      "LVFywJ1DHYbN2uYjWNCJGcLJJhL3boaiSy",
 		P2WPKHScript: fromHex("00144820955c5ecf2fd7a0864d8ae7572f17b1e8fb91"),
@@ -28,5 +27,5 @@ func TestCompatibility(t *testing.T) {
 		P2WSHScript:  fromHex("0020adb044cf4da15506e73c6d3928737229e64227f29cd86dcc34b7353c1f5560eb"),
 		WSHAddr:      "ltc1q4kcyfn6d592sdeeud5ujsumj98nyyfljnnvxmnp5ku6nc864vr4sawj2gw",
 	}
-	btc.CompatibilityCheck(items, dexltc.MainNetParams, t)
+	btctest.CompatibilityCheck(t, items, MainNetParams)
 }
