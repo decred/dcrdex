@@ -11,9 +11,7 @@ import (
 	"testing"
 
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
-	btctest "decred.org/dcrdex/dex/networks/btc/test"
 	"decred.org/dcrdex/server/asset"
-	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 )
@@ -378,16 +376,6 @@ func isEscrowScript(script []byte) bool {
 		return true
 	}
 	return false
-}
-
-// CompatibilityItems is an alias for the type in dex/networks/btc/test, which
-// should be used instead of this type to test a clone's chain parameters.
-type CompatibilityItems = btctest.CompatibilityItems
-
-// CompatibilityCheck is an alias for the type in dex/networks/btc/test, which
-// should be used instead of this type to test a clone's chain parameters.
-func CompatibilityCheck(items *CompatibilityItems, chainParams *chaincfg.Params, t *testing.T) {
-	btctest.CompatibilityCheck(t, items, chainParams)
 }
 
 func TestMedianFees(btc *Backend, t *testing.T) {
