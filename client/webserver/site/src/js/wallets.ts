@@ -1270,10 +1270,9 @@ export default class WalletsPage extends BasePage {
  */
 function assetIsConfigurable (assetID: number) {
   const asset = app().assets[assetID]
-  if (asset.token) {
-    const opts = asset.token.definition.configopts
-    return opts && opts.length > 0
-  }
+  // alaways return if it is a token, so we can enable or disable the wallet
+  // and export it.
+  if (asset.token) return true
   if (!asset.info) throw Error('this asset isn\'t an asset, I guess')
   const defs = asset.info.availablewallets
   const zerothOpts = defs[0].configopts
