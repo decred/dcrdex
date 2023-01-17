@@ -14,6 +14,7 @@ export const ID_SHOW_ADDITIONAL_SETTINGS = 'ID_SHOW_ADDITIONAL_SETTINGS'
 export const ID_BUY = 'ID_BUY'
 export const ID_SELL = 'ID_SELL'
 export const ID_NOT_SUPPORTED = 'ID_NOT_SUPPORTED'
+export const ID_VERSION_NOT_SUPPORTED = 'ID_VERSION_NOT_SUPPORTED'
 export const ID_CONNECTION_FAILED = 'ID_CONNECTION_FAILED'
 export const ID_ORDER_PREVIEW = 'ID_ORDER_PREVIEW'
 export const ID_CALCULATING = 'ID_CALCULATING'
@@ -123,6 +124,7 @@ export const enUS: Locale = {
   [ID_BUY]: 'Buy',
   [ID_SELL]: 'Sell',
   [ID_NOT_SUPPORTED]: '{{ asset }} is not supported',
+  [ID_VERSION_NOT_SUPPORTED]: '{{ asset }} (v{{version}}) is not supported',
   [ID_CONNECTION_FAILED]: 'Connection to dex server failed. You can close dexc and try again later or wait for it to reconnect.',
   [ID_ORDER_PREVIEW]: 'Total: {{ total }} {{ asset }}',
   [ID_CALCULATING]: 'calculating...',

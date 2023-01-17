@@ -191,6 +191,7 @@ export interface WalletInfo {
   name: string
   version: number
   availablewallets: WalletDefinition[]
+  versions: number[]
   emptyidx: number
   unitinfo: UnitInfo
 }
