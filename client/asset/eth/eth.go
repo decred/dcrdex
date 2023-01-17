@@ -401,7 +401,9 @@ type baseWallet struct {
 	log        dex.Logger
 	dir        string
 	walletType string
-	settings   map[string]string
+
+	settingsMtx sync.RWMutex
+	settings    map[string]string
 
 	gasFeeLimitV uint64 // atomic
 
@@ -741,6 +743,8 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 		// }
 		return nil, asset.ErrWalletTypeDisabled
 	case walletTypeRPC:
+		w.settingsMtx.RLock()
+		defer w.settingsMtx.RUnlock()
 		endpoints := strings.Split(w.settings[providersKey], " ")
 		ethCfg, err := ethChainConfig(w.net)
 		if err != nil {
@@ -860,6 +864,10 @@ func (w *ETHWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, cu
 			return false, err
 		}
 	}
+
+	w.settingsMtx.Lock()
+	w.settings = cfg.Settings
+	w.settingsMtx.Unlock()
 
 	atomic.StoreUint64(&w.baseWallet.gasFeeLimitV, gasFeeLimit)
 
