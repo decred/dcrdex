@@ -636,8 +636,11 @@ export default class WalletsPage extends BasePage {
 
       const walletDef = app().walletDefinition(assetID, wallet.type)
       page.walletType.textContent = walletDef.tab
+      Doc.show(page.reconfigureBox)
       const configurable = assetIsConfigurable(assetID)
-      if (configurable) Doc.show(page.reconfigureBox)
+      // if it is not configurable, we do not show the password form.
+      if (configurable) Doc.show(page.passwordWrapper)
+      else Doc.hide(page.passwordWrapper)
 
       if (wallet.disabled) Doc.show(page.statusDisabled) // wallet is disabled
       else if (wallet.running) {
@@ -1270,9 +1273,10 @@ export default class WalletsPage extends BasePage {
  */
 function assetIsConfigurable (assetID: number) {
   const asset = app().assets[assetID]
-  // alaways return if it is a token, so we can enable or disable the wallet
-  // and export it.
-  if (asset.token) return true
+  if (asset.token) {
+    const opts = asset.token.definition.configopts
+    return opts && opts.length > 0
+  }
   if (!asset.info) throw Error('this asset isn\'t an asset, I guess')
   const defs = asset.info.availablewallets
   const zerothOpts = defs[0].configopts
