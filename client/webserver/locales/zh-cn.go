@@ -195,7 +195,7 @@ var ZhCN = map[string]string{
 	"details":                     "细节",
 	"to":                          "到",
 	"Options":                     "选项",
-	"fee_projection_tooltip":      "如果在您的订单匹配之前网络条件没有改变，则总费用（作为交易的百分比）应该在这个范围内。",
+	"fee_projection_tooltip":      "如果在您的订单匹配之前网络条件没有改变，则总费用应该在这个范围内。",
 	"unlock_for_details":          "解锁您的钱包以检索订单详细信息和其它选项。",
 	"estimate_unavailable":        "订单估算和选项不可用",
 	"Fee Details":                 "费用明细",

@@ -189,7 +189,7 @@ var PtBr = map[string]string{
 	"details":                     "detalhes",
 	"to":                          "para",
 	"Options":                     "Opções",
-	"fee_projection_tooltip":      "Se as condições da rede não mudarem antes que seu pedido corresponda, O total de taxas realizadas (como porcentagem da troca) deve estar dentro dessa faixa.",
+	"fee_projection_tooltip":      "Se as condições da rede não mudarem antes que seu pedido corresponda, O total de taxas realizadas deve estar dentro dessa faixa.",
 	"unlock_for_details":          "Desbloqueie suas carteiras para recuperar detalhes do pedido e opções adicionais.",
 	"estimate_unavailable":        "Orçamentos e opções de pedidos indisponíveis",
 	"Fee Details":                 "Detalhes da taxa",

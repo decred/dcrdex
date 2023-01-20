@@ -189,7 +189,7 @@ var PlPL = map[string]string{
 	"details":                     "szczegóły",
 	"to":                          "do",
 	"Options":                     "Opcje",
-	"fee_projection_tooltip":      "Jeśli warunki sieciowe nie ulegną zmianie zanim Twoje zlecenie zostanie spasowane, całkowite poniesione opłaty (jako procent wymienianej sumy) powinny zmieścić się w tym przedziale.",
+	"fee_projection_tooltip":      "Jeśli warunki sieciowe nie ulegną zmianie zanim Twoje zlecenie zostanie spasowane, całkowite poniesione opłaty powinny zmieścić się w tym przedziale.",
 	"unlock_for_details":          "Odblokuj portfele, aby wyciągnąć dane zleceń oraz dodatkowe opcje.",
 	"estimate_unavailable":        "Szacunkowe dane zleceń i opcje są niedostępne",
 	"Fee Details":                 "Szczegóły opłat",
