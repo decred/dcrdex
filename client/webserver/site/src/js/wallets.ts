@@ -629,18 +629,15 @@ export default class WalletsPage extends BasePage {
       page.balanceBox, page.fiatBalanceBox, page.createWalletBox, page.walletDetails,
       page.sendReceive, page.connectBttnBox, page.statusLocked, page.statusReady,
       page.statusOff, page.unlockBttnBox, page.lockBttnBox, page.connectBttnBox,
-      page.reconfigureBox, page.peerCountBox, page.syncProgressBox, page.statusDisabled
+      page.peerCountBox, page.syncProgressBox, page.statusDisabled
     )
     if (wallet) {
       this.updateDisplayedAssetBalance()
 
       const walletDef = app().walletDefinition(assetID, wallet.type)
       page.walletType.textContent = walletDef.tab
-      Doc.show(page.reconfigureBox)
       const configurable = assetIsConfigurable(assetID)
-      // if it is not configurable, we do not show the password form.
-      if (configurable) Doc.show(page.passwordWrapper)
-      else Doc.hide(page.passwordWrapper)
+      Doc.setVis(configurable, page.passwordWrapper)
 
       if (wallet.disabled) Doc.show(page.statusDisabled) // wallet is disabled
       else if (wallet.running) {
