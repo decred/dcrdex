@@ -147,3 +147,7 @@ approval of the
 The source code for the DEX server and client are being developed according to
 the specification. This undertaking was approved via a second DEX
 [development proposal](https://proposals.decred.org/proposals/417607aaedff2942ff3701cdb4eff76637eca4ed7f7ba816e5c0bd2e971602e1).
+
+## FAQS
+
+- How can I integrate new assets? To add new assets, follow the instructions [here](https://github.com/decred/dcrdex/blob/master/spec/fundamentals.mediawiki/#adding-new-assets) and see existing implementations [here](https://github.com/decred/dcrdex/tree/master/server/asset).
