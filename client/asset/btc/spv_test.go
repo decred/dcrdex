@@ -49,9 +49,7 @@ func (c *tBtcWallet) PublishTransaction(tx *wire.MsgTx, label string) error {
 		return c.sendToAddressErr
 	}
 	if c.badSendHash != nil {
-		// testData would return the badSendHash. We'll do something similar
-		// by adding a random output.
-		tx.AddTxOut(wire.NewTxOut(1, []byte{0x01}))
+		return errors.New("bad hash")
 	}
 	return c.sendErr
 }
