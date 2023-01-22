@@ -2881,7 +2881,7 @@ func accelerateOrder(btc *baseWallet, swapCoins, accelerationCoins []dex.Bytes, 
 	if err != nil {
 		return nil, "", err
 	}
-	err = btc.broadcastTx(signedTx)
+	_, err = btc.broadcastTx(signedTx)
 	if err != nil {
 		return nil, "", err
 	}
@@ -3303,7 +3303,7 @@ func (btc *baseWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, ui
 	}
 
 	// Refund txs prepared and signed. Can now broadcast the swap(s).
-	err = btc.broadcastTx(msgTx)
+	_, err = btc.broadcastTx(msgTx)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -3468,14 +3468,9 @@ func (btc *baseWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Coin, 
 	}
 
 	// Send the transaction.
-	checkHash := btc.hashTx(msgTx)
-	txHash, err := btc.node.sendRawTransaction(msgTx)
+	txHash, err := btc.broadcastTx(msgTx)
 	if err != nil {
 		return nil, nil, 0, err
-	}
-	if *txHash != *checkHash {
-		return nil, nil, 0, fmt.Errorf("redemption sent, but received unexpected transaction ID back from RPC server. "+
-			"expected %s, got %s", *txHash, checkHash)
 	}
 	// Log the change output.
 	coinIDs := make([]dex.Bytes, 0, len(form.Redemptions))
@@ -3951,14 +3946,9 @@ func (btc *baseWallet) Refund(coinID, contract dex.Bytes, feeRate uint64) (dex.B
 		return nil, fmt.Errorf("error creating refund tx: %w", err)
 	}
 
-	checkHash := btc.hashTx(msgTx)
-	refundHash, err := btc.node.sendRawTransaction(msgTx)
+	refundHash, err := btc.broadcastTx(msgTx)
 	if err != nil {
-		return nil, fmt.Errorf("sendRawTransaction: %w", err)
-	}
-	if *refundHash != *checkHash {
-		return nil, fmt.Errorf("refund sent, but received unexpected transaction ID back from RPC server. "+
-			"expected %s, got %s", *refundHash, checkHash)
+		return nil, fmt.Errorf("broadcastTx: %w", err)
 	}
 	return toCoinID(refundHash, 0), nil
 }
@@ -4519,7 +4509,7 @@ func (btc *baseWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Address,
 		return nil, err
 	}
 
-	err = btc.broadcastTx(signedTx)
+	_, err = btc.broadcastTx(signedTx)
 	return signedTx, err
 }
 
@@ -4637,17 +4627,17 @@ func (btc *baseWallet) signTxAndAddChange(baseTx *wire.MsgTx, addr btcutil.Addre
 	return msgTx, change, fee, nil
 }
 
-func (btc *baseWallet) broadcastTx(signedTx *wire.MsgTx) error {
+func (btc *baseWallet) broadcastTx(signedTx *wire.MsgTx) (*chainhash.Hash, error) {
 	txHash, err := btc.node.sendRawTransaction(signedTx)
 	if err != nil {
-		return fmt.Errorf("sendrawtx error: %v, raw tx: %x", err, btc.wireBytes(signedTx))
+		return nil, fmt.Errorf("sendrawtx error: %v, raw tx: %x", err, btc.wireBytes(signedTx))
 	}
 	checkHash := btc.hashTx(signedTx)
 	if *txHash != *checkHash {
-		return fmt.Errorf("transaction sent, but received unexpected transaction ID back from RPC server. "+
+		return nil, fmt.Errorf("transaction sent, but received unexpected transaction ID back from RPC server. "+
 			"expected %s, got %s. raw tx: %x", checkHash, *txHash, btc.wireBytes(signedTx))
 	}
-	return nil
+	return txHash, nil
 }
 
 // txOutFromTxBytes parses the specified *wire.TxOut from the serialized

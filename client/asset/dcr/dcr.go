@@ -2239,7 +2239,7 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	}
 
 	// Refund txs prepared and signed. Can now broadcast the swap(s).
-	err = dcr.broadcastTx(msgTx)
+	_, err = dcr.broadcastTx(msgTx)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -2357,14 +2357,9 @@ func (dcr *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 		msgTx.TxIn[i].SignatureScript = redeemSigScript
 	}
 	// Send the transaction.
-	checkHash := msgTx.TxHash()
-	txHash, err := dcr.wallet.SendRawTransaction(dcr.ctx, msgTx, false)
+	txHash, err := dcr.broadcastTx(msgTx)
 	if err != nil {
 		return nil, nil, 0, err
-	}
-	if *txHash != checkHash {
-		return nil, nil, 0, fmt.Errorf("redemption sent, but received unexpected transaction ID back from RPC server. "+
-			"expected %s, got %s", *txHash, checkHash)
 	}
 	coinIDs := make([]dex.Bytes, 0, len(form.Redemptions))
 	for i := range form.Redemptions {
@@ -3049,14 +3044,9 @@ func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes, feeRate uint64) (d
 		return nil, fmt.Errorf("error creating refund tx: %w", err)
 	}
 
-	checkHash := msgTx.TxHash()
-	refundHash, err := dcr.wallet.SendRawTransaction(dcr.ctx, msgTx, false)
+	refundHash, err := dcr.broadcastTx(msgTx)
 	if err != nil {
 		return nil, err
-	}
-	if *refundHash != checkHash {
-		return nil, fmt.Errorf("refund sent, but received unexpected transaction ID back from RPC server. "+
-			"expected %s, got %s", checkHash, *refundHash)
 	}
 	return toCoinID(refundHash, 0), nil
 }
@@ -3904,7 +3894,7 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, feeRate uint64, su
 		return nil, err
 	}
 
-	err = dcr.broadcastTx(signedTx)
+	_, err = dcr.broadcastTx(signedTx)
 	return signedTx, err
 }
 
@@ -4144,17 +4134,17 @@ func (dcr *ExchangeWallet) EstimateSendTxFee(address string, sendAmount, feeRate
 	return finalFee, isValidAddress, nil
 }
 
-func (dcr *ExchangeWallet) broadcastTx(signedTx *wire.MsgTx) error {
+func (dcr *ExchangeWallet) broadcastTx(signedTx *wire.MsgTx) (*chainhash.Hash, error) {
 	txHash, err := dcr.wallet.SendRawTransaction(dcr.ctx, signedTx, false)
 	if err != nil {
-		return fmt.Errorf("sendrawtx error: %w, raw tx: %x", err, dcr.wireBytes(signedTx))
+		return nil, fmt.Errorf("sendrawtx error: %w, raw tx: %x", err, dcr.wireBytes(signedTx))
 	}
 	checkHash := signedTx.TxHash()
 	if *txHash != checkHash {
-		return fmt.Errorf("transaction sent, but received unexpected transaction ID back from RPC server. "+
+		return nil, fmt.Errorf("transaction sent, but received unexpected transaction ID back from RPC server. "+
 			"expected %s, got %s, raw tx: %x", *txHash, checkHash, dcr.wireBytes(signedTx))
 	}
-	return nil
+	return txHash, nil
 }
 
 // createSig creates and returns the serialized raw signature and compressed
