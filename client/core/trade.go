@@ -1989,6 +1989,13 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 			highestFeeRate = freshRate
 		}
 	}
+
+	// Ensure swap is not sent with a zero fee rate.
+	if highestFeeRate == 0 {
+		errs.add("swap cannot proceed with a zero fee rate")
+		return
+	}
+
 	// swapMatches is no longer idempotent after this point.
 
 	// Send the swap. If the swap fails, set the swapErr flag for all matches.
