@@ -1388,10 +1388,11 @@ func (t *trackedTrade) checkSwapFeeConfirms(match *matchTracker) bool {
 	}
 	// Waiting until the swap is definitely confirmed in order to not
 	// keep calling the fee checker before the swap is confirmed.
+	mine, _ := match.confirms()
 	if match.Side == order.Maker {
-		return match.Status >= order.TakerSwapCast
+		return match.Status > order.MakerSwapCast || (match.Status == order.MakerSwapCast && mine > 1)
 	}
-	return match.Status >= order.MakerRedeemed
+	return match.Status > order.TakerSwapCast || (match.Status == order.TakerSwapCast && mine > 1)
 }
 
 // checkRedemptionFeeConfirms returns whether the swap fee confirmations should
