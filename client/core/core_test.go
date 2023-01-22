@@ -4586,13 +4586,14 @@ func TestTradeTracking(t *testing.T) {
 	//
 	mid = ordertest.RandomMatchID()
 	msgMatch = &msgjson.Match{
-		OrderID:    loid[:],
-		MatchID:    mid[:],
-		Quantity:   matchSize,
-		Rate:       rate,
-		Address:    "counterparty-address",
-		Side:       uint8(order.Taker),
-		ServerTime: uint64(matchTime.UnixMilli()),
+		OrderID:     loid[:],
+		MatchID:     mid[:],
+		Quantity:    matchSize,
+		Rate:        rate,
+		Address:     "counterparty-address",
+		Side:        uint8(order.Taker),
+		ServerTime:  uint64(matchTime.UnixMilli()),
+		FeeRateBase: tMaxFeeRate,
 	}
 	sign(tDexPriv, msgMatch)
 	msg, _ = msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
@@ -5143,13 +5144,14 @@ func TestRefunds(t *testing.T) {
 
 	matchTime := time.Now().Truncate(time.Millisecond).UTC()
 	msgMatch := &msgjson.Match{
-		OrderID:    loid[:],
-		MatchID:    mid[:],
-		Quantity:   matchSize,
-		Rate:       rate,
-		Address:    "counterparty-address",
-		Side:       uint8(order.Maker),
-		ServerTime: uint64(matchTime.UnixMilli()),
+		OrderID:      loid[:],
+		MatchID:      mid[:],
+		Quantity:     matchSize,
+		Rate:         rate,
+		Address:      "counterparty-address",
+		Side:         uint8(order.Maker),
+		ServerTime:   uint64(matchTime.UnixMilli()),
+		FeeRateQuote: tMaxFeeRate,
 	}
 	swapID := encode.RandomBytes(36)
 	contract := encode.RandomBytes(36)
@@ -5211,13 +5213,14 @@ func TestRefunds(t *testing.T) {
 	tracker.mtx.Unlock()
 	mid = ordertest.RandomMatchID()
 	msgMatch = &msgjson.Match{
-		OrderID:    loid[:],
-		MatchID:    mid[:],
-		Quantity:   matchSize,
-		Rate:       rate,
-		Address:    "counterparty-address",
-		Side:       uint8(order.Taker),
-		ServerTime: uint64(matchTime.UnixMilli()),
+		OrderID:      loid[:],
+		MatchID:      mid[:],
+		Quantity:     matchSize,
+		Rate:         rate,
+		Address:      "counterparty-address",
+		Side:         uint8(order.Taker),
+		ServerTime:   uint64(matchTime.UnixMilli()),
+		FeeRateQuote: tMaxFeeRate,
 	}
 	sign(tDexPriv, msgMatch)
 	msg, _ = msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
@@ -8418,10 +8421,11 @@ func TestSuspectTrades(t *testing.T) {
 					},
 				},
 				UserMatch: &order.UserMatch{
-					MatchID: ordertest.RandomMatchID(),
-					Side:    side,
-					Address: ordertest.RandomAddress(),
-					Status:  status,
+					MatchID:     ordertest.RandomMatchID(),
+					Side:        side,
+					Address:     ordertest.RandomAddress(),
+					Status:      status,
+					FeeRateSwap: tMaxFeeRate,
 				},
 			},
 		}
