@@ -2139,6 +2139,10 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 // because they're not auto-unlocked by the wallet and therefore inaccurately
 // included as part of the locked balance despite being spent.
 func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
+	if swaps.FeeRate == 0 {
+		return nil, nil, 0, fmt.Errorf("cannot send swap with with zero fee rate")
+	}
+
 	var totalOut uint64
 	// Start with an empty MsgTx.
 	baseTx := wire.NewMsgTx()

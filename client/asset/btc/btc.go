@@ -3190,6 +3190,10 @@ func preAccelerate(btc *baseWallet, swapCoins, accelerationCoins []dex.Bytes, ch
 // are NOT manually unlocked because they're auto-unlocked when the transaction
 // is broadcasted.
 func (btc *baseWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
+	if swaps.FeeRate == 0 {
+		return nil, nil, 0, fmt.Errorf("cannot send swap with with zero fee rate")
+	}
+
 	contracts := make([][]byte, 0, len(swaps.Contracts))
 	var totalOut uint64
 	// Start with an empty MsgTx.
