@@ -1669,6 +1669,10 @@ var _ asset.Receipt = (*swapReceipt)(nil)
 // max fees that will possibly be used, since in ethereum with EIP-1559 we cannot
 // know exactly how much fees will be used.
 func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
+	if swaps.FeeRate == 0 {
+		return nil, nil, 0, fmt.Errorf("cannot send swap with with zero fee rate")
+	}
+
 	fail := func(s string, a ...interface{}) ([]asset.Receipt, asset.Coin, uint64, error) {
 		return nil, nil, 0, fmt.Errorf(s, a...)
 	}
@@ -1735,6 +1739,10 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 // max fees that will possibly be used, since in ethereum with EIP-1559 we cannot
 // know exactly how much fees will be used.
 func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
+	if swaps.FeeRate == 0 {
+		return nil, nil, 0, fmt.Errorf("cannot send swap with with zero fee rate")
+	}
+
 	fail := func(s string, a ...interface{}) ([]asset.Receipt, asset.Coin, uint64, error) {
 		return nil, nil, 0, fmt.Errorf(s, a...)
 	}
