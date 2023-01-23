@@ -79,8 +79,8 @@ func (c *rpcclient) connect(ctx context.Context, log dex.Logger) error {
 
 	reqModules := []string{"eth", "txpool"}
 	if err := dexeth.CheckAPIModules(client, c.endpoint, log, reqModules); err != nil {
-		log.Warnf("error checking required modules: %v", err)
-		log.Warn("will not account for pending transactions in balance calculations")
+		log.Warnf("Error checking required modules: %v", err)
+		log.Warn("Will not account for pending transactions in balance calculations")
 		c.txPoolSupported = false
 	} else {
 		c.txPoolSupported = true
