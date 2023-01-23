@@ -847,7 +847,7 @@ export default class WalletsPage extends BasePage {
       if (app().checkResponse(res)) {
         this.openWalletSuccess(assetID)
       } else {
-        this.showOpen(assetID, `Error opening wallet: ${res.msg}`)
+        this.showOpen(assetID, intl.prep(intl.ID_OPEN_WALLET_ERR_MSG, { msg: res.msg }))
       }
     }
   }

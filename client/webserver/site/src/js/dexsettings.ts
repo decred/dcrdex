@@ -3,6 +3,7 @@ import BasePage from './basepage'
 import State from './state'
 import { postJSON } from './http'
 import * as forms from './forms'
+import * as intl from './locales'
 
 import {
   app,
@@ -194,15 +195,15 @@ export default class DexSettingsPage extends BasePage {
       switch (exchange.connectionStatus) {
         case ConnectionStatus.Connected:
           displayIcons(true)
-          page.connectionStatus.textContent = 'Connected'
+          page.connectionStatus.textContent = intl.prep(intl.ID_CONNECTED)
           break
         case ConnectionStatus.Disconnected:
           displayIcons(false)
-          page.connectionStatus.textContent = 'Disconnected'
+          page.connectionStatus.textContent = intl.prep(intl.ID_DISCONNECTED)
           break
         case ConnectionStatus.InvalidCert:
           displayIcons(false)
-          page.connectionStatus.textContent = 'Disconnected - Invalid Certificate'
+          page.connectionStatus.textContent = `${intl.prep(intl.ID_DISCONNECTED)} - ${intl.prep(intl.ID_INVALID_CERTIFICATE)}`
       }
     }
   }

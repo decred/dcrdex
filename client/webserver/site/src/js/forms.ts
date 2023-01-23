@@ -780,7 +780,7 @@ export class ConfirmRegistrationForm {
       return
     }
     if (this.feeAssetID === null) {
-      page.regErr.innerText = 'You must select a valid wallet for the fee payment'
+      page.regErr.innerText = intl.prep(intl.ID_SELECT_WALLET_FOR_FEE_PAYMENT)
       Doc.show(page.regErr)
       return
     }
@@ -1316,7 +1316,7 @@ export class AccelerateOrderForm {
       Doc.show(page.accelerateMsgDiv, page.accelerateSuccess)
       this.success()
     } else {
-      page.accelerateErr.textContent = `Error accelerating order: ${res.msg}`
+      page.accelerateErr.textContent = intl.prep(intl.ID_ORDER_ACCELERATION_ERR_MSG, { msg: res.msg })
       Doc.hide(page.earlyAccelerationDiv)
       Doc.show(page.accelerateErr, page.configureAccelerationDiv)
     }
@@ -1339,7 +1339,7 @@ export class AccelerateOrderForm {
     this.order = order
     const res = await postJSON('/api/preaccelerate', order.id)
     if (!app().checkResponse(res)) {
-      page.preAccelerateErr.textContent = `Error accelerating order: ${res.msg}`
+      page.preAccelerateErr.textContent = intl.prep(intl.ID_ORDER_ACCELERATION_ERR_MSG, { msg: res.msg })
       Doc.hide(page.accelerateMainDiv, page.accelerateSuccess)
       Doc.show(page.accelerateMsgDiv, page.preAccelerateErr)
       return
@@ -1376,7 +1376,7 @@ export class AccelerateOrderForm {
     const res = await postJSON('/api/accelerationestimate', req)
     loaded()
     if (!app().checkResponse(res)) {
-      page.accelerateErr.textContent = `Error estimating acceleration fee: ${res.msg}`
+      page.accelerateErr.textContent = intl.prep(intl.ID_ORDER_ACCELERATION_FEE_ERR_MSG, { msg: res.msg })
       Doc.show(page.accelerateErr)
       return
     }
@@ -1401,7 +1401,6 @@ export class DEXAddressForm {
   form: HTMLElement
   success: (xc: Exchange, cert: string) => void
   pwCache: PasswordCache | null
-  defaultTLSText: string
   page: Record<string, PageElement>
   knownExchanges: HTMLElement[]
   dexToUpdate?: string
@@ -1410,11 +1409,10 @@ export class DEXAddressForm {
     this.form = form
     this.success = success
     this.pwCache = pwCache || null
-    this.defaultTLSText = 'none selected'
 
     const page = this.page = Doc.parseTemplate(form)
 
-    page.selectedCert.textContent = this.defaultTLSText
+    page.selectedCert.textContent = intl.prep(intl.ID_NONE_SELECTED)
     Doc.bind(page.certFile, 'change', () => this.onCertFileChange())
     Doc.bind(page.removeCert, 'click', () => this.clearCertFile())
     Doc.bind(page.addCert, 'click', () => page.certFile.click())
@@ -1482,7 +1480,7 @@ export class DEXAddressForm {
     Doc.hide(page.err)
     addr = addr || page.addr.value
     if (addr === '') {
-      page.err.textContent = 'DEX address cannot be empty'
+      page.err.textContent = intl.prep(intl.ID_EMPTY_DEX_ADDRESS_MSG)
       Doc.show(page.err)
       return
     }
@@ -1518,7 +1516,7 @@ export class DEXAddressForm {
     const res = await postJSON(endpoint, req)
     loaded()
     if (!app().checkResponse(res)) {
-      if (res.msg === 'certificate required') {
+      if (String(res.msg).includes('certificate required')) {
         Doc.show(page.needCert)
       } else {
         page.err.textContent = res.msg
@@ -1552,7 +1550,7 @@ export class DEXAddressForm {
   clearCertFile () {
     const page = this.page
     page.certFile.value = ''
-    page.selectedCert.textContent = this.defaultTLSText
+    page.selectedCert.textContent = intl.prep(intl.ID_NONE_SELECTED)
     Doc.hide(page.removeCert)
     Doc.show(page.addCert)
   }

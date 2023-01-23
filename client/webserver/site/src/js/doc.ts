@@ -284,7 +284,7 @@ export default class Doc {
    * conventional units and returns the fiat value as a string.
    */
   static formatFiatConversion (vAtomic: number, rate: number, unitInfo?: UnitInfo): string {
-    if (!rate || rate === 0) return 'unavailable'
+    if (!rate || rate === 0) return intl.prep(intl.ID_UNAVAILABLE)
     const prec = 2
     const [v] = convertToConventional(vAtomic, unitInfo)
     const value = v * rate
@@ -553,7 +553,7 @@ export class WalletIcons {
     const i = this.icons
     Doc.hide(i.locked, i.unlocked, i.sleeping, i.syncing, i.disabled)
     Doc.show(i.nowallet)
-    if (this.status) this.status.textContent = intl.prep(intl.ID_NOWALLET)
+    if (this.status) this.status.textContent = intl.prep(intl.ID_NO_WALLET)
   }
 
   /* set the icons to indicate that the wallet is disabled */

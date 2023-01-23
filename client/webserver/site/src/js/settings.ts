@@ -26,13 +26,11 @@ export default class SettingsPage extends BasePage {
   dexAddrForm: forms.DEXAddressForm
   currentForm: PageElement
   pwCache: PasswordCache
-  defaultTLSText: string
   keyup: (e: KeyboardEvent) => void
 
   constructor (body: HTMLElement) {
     super()
     this.body = body
-    this.defaultTLSText = 'none selected'
     const page = this.page = Doc.idDescendants(body)
 
     this.forms = Doc.applySelector(page.forms, ':scope > form')
@@ -208,7 +206,7 @@ export default class SettingsPage extends BasePage {
   clearAccountFile () {
     const page = this.page
     page.accountFile.value = ''
-    page.selectedAccount.textContent = 'none selected'
+    page.selectedAccount.textContent = intl.prep(intl.ID_NONE_SELECTED)
     Doc.hide(page.removeAccount)
     Doc.show(page.addAccount)
   }
