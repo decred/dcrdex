@@ -43,6 +43,7 @@ require (
 	github.com/decred/slog v1.2.0
 	github.com/dgraph-io/badger v1.6.2
 	github.com/ethereum/go-ethereum v1.10.25
+	github.com/fatih/color v1.11.0
 	github.com/gcash/bchd v0.19.0
 	github.com/gcash/bchlog v0.0.0-20180913005452-b4f036f92fa6
 	github.com/gcash/bchutil v0.0.0-20210113190856-6ea28dff4000

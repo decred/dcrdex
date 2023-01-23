@@ -11,6 +11,7 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	"github.com/fatih/color"
 )
 
 func parseWalletType(t string) (core.SimWalletType, error) {
@@ -36,7 +37,7 @@ func main() {
 }
 
 func run() error {
-	var baseSymbol, quoteSymbol, base1Node, quote1Node, base2Node, quote2Node, regAsset string
+	var baseSymbol, quoteSymbol, base1Node, quote1Node, base2Node, quote2Node, regAsset, logColor string
 	var base1SPV, quote1SPV, base2SPV, quote2SPV, debug, trace, list, all, runOnce bool
 	var base1Type, quote1Type, base2Type, quote2Type string
 	var tests, except flagArray
@@ -52,6 +53,7 @@ func run() error {
 	flag.StringVar(&quote1Type, "quote1type", "core", "the wallet type for the first client's quote asset (core, spv, electrum). ignored for eth")
 	flag.StringVar(&base2Type, "base2type", "core", "the wallet type for the second client's base asset (core, spv, electrum). ignored for eth")
 	flag.StringVar(&quote2Type, "quote2type", "core", "the wallet type for the second client's quote asset (core, spv, electrum). ignored for eth")
+	flag.StringVar(&logColor, "color", "green", "the color to show test progress logs with. white, black, blue, yellow, magenta, green, or red")
 	flag.BoolVar(&base1SPV, "base1spv", false, "use native SPV wallet for the first client's base asset (removed: use base1type)")
 	flag.BoolVar(&quote1SPV, "quote1spv", false, "use native SPV wallet for the first client's quote asset (removed: use quote1type)")
 	flag.BoolVar(&base2SPV, "base2spv", false, "use native SPV wallet for the second client's base asset (removed: use base2type)")
@@ -154,6 +156,28 @@ func run() error {
 		}
 	}
 
+	var fgColor color.Attribute
+	switch logColor {
+	case "magenta":
+		fgColor = color.FgMagenta
+	case "white":
+		fgColor = color.FgWhite
+	case "black":
+		fgColor = color.FgBlack
+	case "blue":
+		fgColor = color.FgBlue
+	case "yellow":
+		fgColor = color.FgYellow
+	case "green":
+		fgColor = color.FgGreen
+	case "red":
+		fgColor = color.FgRed
+	default:
+		return fmt.Errorf("unknown color %s", logColor)
+	}
+
+	pl := prettyLogger{c: color.New(fgColor)}
+
 	return core.RunSimulationTest(&core.SimulationConfig{
 		BaseSymbol:        baseSymbol,
 		QuoteSymbol:       quoteSymbol,
@@ -171,9 +195,17 @@ func run() error {
 			QuoteNode:       quote2Node,
 		},
 		Tests:   tests,
-		Logger:  dex.StdOutLogger("T", logLevel),
+		Logger:  dex.NewLogger("T", logLevel, pl),
 		RunOnce: runOnce,
 	})
+}
+
+type prettyLogger struct {
+	c *color.Color
+}
+
+func (cl prettyLogger) Write(p []byte) (n int, err error) {
+	return cl.c.Fprint(os.Stdout, string(p))
 }
 
 type flagArray []string

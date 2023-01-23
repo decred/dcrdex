@@ -151,6 +151,7 @@ func (s *simulationTest) waitALittleBit() {
 		s.client2.BaseWalletType == WTElectrum || s.client2.QuoteWalletType == WTElectrum {
 		sleep = 7 * time.Second
 	}
+	s.log.Infof("Waiting a little bit, %s.", sleep)
 	time.Sleep(sleep * sleepFactor)
 }
 
@@ -237,9 +238,12 @@ func RunSimulationTest(cfg *SimulationConfig) error {
 	if err := s.setup(cfg.Client1, cfg.Client2); err != nil {
 		return fmt.Errorf("setup error: %w", err)
 	}
+	spacer := `
 
+*******************************************************************************
+`
 	for _, testName := range cfg.Tests {
-		s.log.Infof("Running %q with cliet 1 as maker", testName)
+		s.log.Infof("%s\nRunning test %q with client 1 as maker on market %q.%s", spacer, testName, s.marketName, spacer)
 		f, ok := testLookup[testName]
 		if !ok {
 			return fmt.Errorf("no test named %q", testName)
@@ -248,19 +252,21 @@ func RunSimulationTest(cfg *SimulationConfig) error {
 		if err := f(s); err != nil {
 			return fmt.Errorf("test %q failed with client 1 as maker: %w", testName, err)
 		}
+		s.log.Infof("%s\nSUCCESS!! Test %q with client 1 as maker on market %q PASSED!%s", spacer, testName, s.marketName, spacer)
 		s.client1IsMaker = false
 		if !cfg.RunOnce && testName != "orderstatus" {
-			s.log.Infof("Running %q with client 2 as maker", testName)
+			s.log.Infof("%s\nRunning test %q with client 2 as maker on market %q.%s", spacer, testName, s.marketName, spacer)
 			if err := f(s); err != nil {
 				return fmt.Errorf("test %q failed with client 2 as maker: %w", testName, err)
 			}
+			s.log.Infof("%s\nSUCCESS!! Test %q with client 2 as maker on market %q PASSED!%s", spacer, testName, s.marketName, spacer)
 		}
 	}
 
 	s.cancel()
 	for _, c := range s.clients {
 		c.wg.Wait()
-		c.log.Infof("Client %s done", c.name)
+		c.log.Infof("Client %s done.", c.name)
 	}
 
 	return nil
@@ -272,7 +278,13 @@ func (s *simulationTest) startClients() error {
 		if err != nil {
 			return err
 		}
-		c.log.Infof("Core created")
+		walletNames := [2]string{}
+		var i int
+		for bipID := range c.wallets {
+			walletNames[i] = unbip(bipID)
+			i++
+		}
+		c.log.Infof("Setting up client %s with wallets %s and %s.", c.name, walletNames[0], walletNames[1])
 
 		c.wg.Add(1)
 		go func() {
@@ -286,39 +298,38 @@ func (s *simulationTest) startClients() error {
 		if err != nil {
 			return err
 		}
-		c.log.Infof("Core initialized")
+		c.log.Infof("Core initialized.")
 
 		createWallet := func(pass []byte, fund bool, form *WalletForm) error {
 			err = c.core.CreateWallet(c.appPass, pass, form)
 			if err != nil {
 				return err
 			}
-			c.log.Infof("Connected %s wallet (fund = %v)", unbip(form.AssetID), fund)
-			if fund {
-				hctrl := newHarnessCtrl(form.AssetID)
-				// eth needs the headers to be new in order to
-				// count itself synced, so mining a few blocks here.
-				hctrl.mineBlocks(s.ctx, 1)
-				c.log.Infof("Waiting for %s wallet to sync", unbip(form.AssetID))
-				synced := make(chan error)
-				go func() {
-					tStart := time.Now()
-					for time.Since(tStart) < time.Second*30 {
-						if c.core.WalletState(form.AssetID).Synced {
-							synced <- nil
-							return
-						}
-						time.Sleep(time.Second)
+			c.log.Infof("Connected %s wallet (fund = %v).", unbip(form.AssetID), fund)
+			hctrl := newHarnessCtrl(form.AssetID)
+			// eth needs the headers to be new in order to
+			// count itself synced, so mining a few blocks here.
+			hctrl.mineBlocks(s.ctx, 1)
+			c.log.Infof("Waiting for %s wallet to syn.c", unbip(form.AssetID))
+			synced := make(chan error)
+			go func() {
+				tStart := time.Now()
+				for time.Since(tStart) < time.Second*30 {
+					if c.core.WalletState(form.AssetID).Synced {
+						synced <- nil
+						return
 					}
-					synced <- fmt.Errorf("wallet never synced")
-				}()
-				if err := <-synced; err != nil {
-					return fmt.Errorf("wallet never synced")
+					time.Sleep(time.Second)
 				}
-				c.log.Infof("%s wallet synced and ready to use", unbip(form.AssetID))
-
+				synced <- fmt.Errorf("wallet never synced")
+			}()
+			if err := <-synced; err != nil {
+				return fmt.Errorf("wallet never synced")
+			}
+			c.log.Infof("Client %s %s wallet.", c.name, unbip(form.AssetID))
+			if fund {
 				// Fund new wallet.
-				c.log.Infof("Funding %s wallet", unbip(form.AssetID))
+				c.log.Infof("Client %s funding synced %s wallet.", c.name, unbip(form.AssetID))
 				address := c.core.WalletState(form.AssetID).Address
 				amts := []int{10, 18, 5, 7, 1, 15, 3, 25}
 				if err := hctrl.fund(s.ctx, address, amts); err != nil {
@@ -335,7 +346,7 @@ func (s *simulationTest) startClients() error {
 		for assetID, wallet := range c.wallets {
 			os.RemoveAll(c.core.assetDataDirectory(assetID))
 
-			c.log.Infof("Creating %s %s-type wallet. config = %+v", dex.BipIDSymbol(assetID), wallet.walletType, wallet.config)
+			c.log.Infof("Creating %s %s-type wallet. config = %+v.", dex.BipIDSymbol(assetID), wallet.walletType, wallet.config)
 
 			pw := wallet.pass
 
@@ -565,17 +576,19 @@ func testOrderStatusReconciliation(s *simulationTest) error {
 		return fmt.Errorf("client 2 pre-trade balance error %w", err)
 	}
 	preTradeLockedBalance := c2Balance.Locked
+	s.log.Infof("Client 2 %s available balance is %v.", s.base.symbol, s.base.valFmt(c2Balance.Available))
 
 	rate := 100 * s.rateStep
 
-	// Place an order for client 1, qty=2*lotSize, rate=100*rateStep
-	// This order should get matched to either or both of these client 2
-	// sell orders:
-	// - Order 2: immediate limit order, qty=2*lotSize, rate=100*rateStep,
-	//            may not get matched if Order 3 below is matched first.
-	// - Order 3: standing limit order, qty=4*lotSize, rate=100*rateStep,
-	//            will always be partially matched (3*lotSize matched or
-	//            1*lotSize matched, if Order 2 is matched first).
+	s.log.Infof("%s\n", `
+Placing an order for client 1, qty=3*lotSize, rate=100*rateStep
+This order should get matched to either or both of these client 2
+sell orders:
+- Order 2: immediate limit order, qty=2*lotSize, rate=100*rateStep,
+           may not get matched if Order 3 below is matched first.
+- Order 3: standing limit order, qty=4*lotSize, rate=100*rateStep,
+           will always be partially matched (3*lotSize matched or
+           1*lotSize matched, if Order 2 is matched first).`)
 	waiter.Go(func() error {
 		_, err := s.placeOrder(s.client1, 3*s.lotSize, rate, false)
 		if err != nil {
@@ -590,6 +603,7 @@ func testOrderStatusReconciliation(s *simulationTest) error {
 	c2dc := s.client2.dc()
 	c2ForgottenOrders := make(map[order.OrderID]*trackedTrade)
 	forgetClient2Order := func(oid order.OrderID) {
+		s.log.Infof("Forcing client 2 to forget order %s.", oid)
 		c2dc.tradeMtx.Lock()
 		defer c2dc.tradeMtx.Unlock()
 		tracker, found := c2dc.trades[oid]
@@ -611,11 +625,13 @@ func testOrderStatusReconciliation(s *simulationTest) error {
 		c2OrdersAfter[oid] = afterStatus
 	}
 
-	// Order 1:
-	// - Standing order, preimage not revealed, "missed" revoke_order note.
-	// - Expect order status to stay at Epoch status before going AWOL and
-	//   to become Revoked after re-connecting the DEX. Locked coins should
-	//   be returned.
+	s.log.Infof("%s\n", `
+Placing Clinet 2 Order 1:
+ - Standing order, preimage not revealed, "missed" revoke_order note.
+ - Expect order status to stay at Epoch status before going AWOL and
+   to become Revoked after re-connecting the DEX. Locked coins should
+   be returned.`)
+
 	waiter.Go(func() error {
 		// standing limit order, qty and rate doesn't matter, preimage
 		// miss prevents this order from getting matched.
@@ -634,13 +650,15 @@ func testOrderStatusReconciliation(s *simulationTest) error {
 		return nil
 	})
 
-	// Order 2:
-	// - Non-standing order, preimage revealed, "missed" nomatch or match
-	//   request (if matched).
-	// - Expect order status to stay at Epoch status before going AWOL and
-	//   to become Executed after re-connecting the DEX, even if the order
-	//   was matched and the matches got revoked due to client inaction. No
-	//   attempt is made to cause match revocation anyways.
+	s.log.Infof("%s\n", `
+Placing Client 2 Order 2:
+- Non-standing order, preimage revealed, "missed" nomatch or match
+  request (if matched).
+- Expect order status to stay at Epoch status before going AWOL and
+  to become Executed after re-connecting the DEX, even if the order
+  was matched and the matches got revoked due to client inaction. No
+  attempt is made to cause match revocation anyways.`)
+
 	waiter.Go(func() error {
 		notes := s.client2.startNotificationReader(ctx)
 		// immediate limit order, use qty=2*lotSize, rate=300*rateStep to be
@@ -656,7 +674,7 @@ func testOrderStatusReconciliation(s *simulationTest) error {
 		oid := tracker.ID()
 		// Wait a max of 2 epochs for preimage to be sent for this order.
 		twoEpochs := 2 * time.Duration(tracker.epochLen()) * time.Millisecond
-		s.client2.log.Infof("Waiting %v for preimage reveal, order %s", twoEpochs, tracker.token())
+		s.client2.log.Infof("Client 2 waiting %v for preimage reveal, order %s", twoEpochs, tracker.token())
 		preimageRevealed := notes.find(ctx, twoEpochs, func(n Notification) bool {
 			orderNote, isOrderNote := n.(*OrderNote)
 			if isOrderNote && n.Topic() == TopicPreimageSent && orderNote.Order.ID.String() == orderID {
@@ -672,11 +690,13 @@ func testOrderStatusReconciliation(s *simulationTest) error {
 		return nil
 	})
 
-	// Order 3:
-	// - Standing order, partially matched, booked, revoked due to inaction on
-	//   a match.
-	// - Expect order status to be Booked before going AWOL and to become
-	//   Revoked after re-connecting the DEX. Locked coins should be returned.
+	s.log.Infof("%s\n", `
+Client 2 placing Order 3:
+ - Standing order, partially matched, booked, revoked due to inaction on
+   a match.
+ - Expect order status to be Booked before going AWOL and to become
+   Revoked after re-connecting the DEX. Locked coins should be returned.`)
+
 	waiter.Go(func() error {
 		notes := s.client2.startNotificationReader(ctx)
 		// standing limit order, use qty=4*lotSize, rate=100*rateStep to be
@@ -691,7 +711,7 @@ func testOrderStatusReconciliation(s *simulationTest) error {
 		}
 		// Wait a max of 2 epochs for preimage to be sent for this order.
 		twoEpochs := 2 * time.Duration(tracker.epochLen()) * time.Millisecond
-		s.client2.log.Infof("Waiting %v for preimage reveal, order %s", twoEpochs, tracker.token())
+		s.client2.log.Infof("Client 2 waiting %v for preimage reveal, order %s", twoEpochs, tracker.token())
 		preimageRevealed := notes.find(ctx, twoEpochs, func(n Notification) bool {
 			orderNote, isOrderNote := n.(*OrderNote)
 			return isOrderNote && n.Topic() == TopicPreimageSent && orderNote.Order.ID.String() == orderID
@@ -706,7 +726,7 @@ func testOrderStatusReconciliation(s *simulationTest) error {
 		oid := tracker.ID()
 		// Wait 1 minute for order to receive match request.
 		maxMatchDuration := time.Minute
-		s.client2.log.Infof("Waiting %v for order %s to be partially matched", maxMatchDuration, tracker.token())
+		s.client2.log.Infof("Client 2 waiting %v for order %s to be partially matched", maxMatchDuration, tracker.token())
 		matched := notes.find(ctx, maxMatchDuration, func(n Notification) bool {
 			orderNote, isOrderNote := n.(*OrderNote)
 			isMatchedTopic := n.Topic() == TopicBuyMatchesMade || n.Topic() == TopicSellMatchesMade
@@ -753,7 +773,7 @@ func testOrderStatusReconciliation(s *simulationTest) error {
 		return err
 	}
 
-	s.log.Info("orders placed and monitored to desired states")
+	s.log.Info("Orders placed and monitored to desired states.")
 
 	// Confirm that the order statuses are what we expect before triggering
 	// a authDEX->connect status recovery.
@@ -770,7 +790,7 @@ func testOrderStatusReconciliation(s *simulationTest) error {
 			return fmt.Errorf("expected pre-recovery status %v for client 2 order %v, got %v",
 				expectStatus, oid, tracker.metaData.Status)
 		}
-		s.client2.log.Infof("client 2 order %v in expected pre-recovery status %v", oid, expectStatus)
+		s.client2.log.Infof("Client 2 order %v in expected pre-recovery status %v.", oid, expectStatus)
 	}
 	c2dc.tradeMtx.RUnlock()
 
@@ -779,12 +799,13 @@ func testOrderStatusReconciliation(s *simulationTest) error {
 	if err != nil {
 		return fmt.Errorf("client 2 pre-disconnect balance error %w", err)
 	}
+	s.client2.log.Infof("Client 2 %s available balance before disconnecting is %v.", s.base.symbol, s.base.valFmt(c2Balance.Available))
 	totalLockedByTrades := c2Balance.Locked - preTradeLockedBalance
 	preDisconnectLockedBalance := c2Balance.Locked   // should reduce after funds are returned
 	preDisconnectAvailableBal := c2Balance.Available // should increase after funds are returned
 
 	// Disconnect the DEX and allow some time for DEX to update order statuses.
-	s.client2.log.Infof("Disconnecting from the DEX server")
+	s.client2.log.Info("Disconnecting client 2 from the DEX server.")
 	c2dc.connMaster.Disconnect()
 	// Disconnection is asynchronous, wait for confirmation of DEX disconnection.
 	disconnectTimeout := 10 * sleepFactor * time.Second
@@ -806,10 +827,11 @@ func testOrderStatusReconciliation(s *simulationTest) error {
 	// for requests pending on the server to expire (usually bTimeout).
 	bTimeout := time.Millisecond * time.Duration(c2dc.cfg.BroadcastTimeout)
 	disconnectPeriod := 2 * bTimeout
-	s.client2.log.Infof("Waiting %v before reconnecting DEX", disconnectPeriod)
+	s.client2.log.Infof("Waiting %v before reconnecting client 2 to DEX.", disconnectPeriod)
 	time.Sleep(disconnectPeriod)
 
-	s.client2.log.Infof("Reconnecting DEX to trigger order status reconciliation")
+	s.client2.log.Info("Reconnecting client 2 to DEX to trigger order status reconciliation.")
+
 	// Use core.initialize to restore client 2 orders from db, and login
 	// to trigger dex authentication.
 	// TODO: cannot do this anymore with built-in wallets
@@ -830,7 +852,7 @@ func testOrderStatusReconciliation(s *simulationTest) error {
 			return fmt.Errorf("status not updated for client 2 order %v, expected %v, got %v",
 				oid, expectStatus, tracker.metaData.Status)
 		}
-		s.client2.log.Infof("Client 2 order %v in expected post-recovery status %v", oid, expectStatus)
+		s.client2.log.Infof("Client 2 order %v in expected post-recovery status %v.", oid, expectStatus)
 	}
 	c2dc.tradeMtx.RUnlock()
 
@@ -842,6 +864,7 @@ func testOrderStatusReconciliation(s *simulationTest) error {
 	if err != nil {
 		return fmt.Errorf("client 2 post-reconnect balance error %w", err)
 	}
+	s.client2.log.Infof("Client 2 %s available balance after reconnecting to DEX is %v.", s.base.symbol, s.base.valFmt(c2Balance.Available))
 	if c2Balance.Available != preDisconnectAvailableBal+totalLockedByTrades {
 		return fmt.Errorf("client 2 locked funds not returned: locked before trading %v, locked after trading %v, "+
 			"locked after reconnect %v", preTradeLockedBalance, preDisconnectLockedBalance, c2Balance.Locked)
@@ -939,18 +962,23 @@ func (s *simulationTest) simpleTradeTest(qty, rate uint64, finalStatus order.Mat
 			client.disableWallets()
 			defer client.enableWallets()
 		}
+
+		s.log.Info("Disabled wallets to prevent order status from moving past order.NewlyMatched")
 	}
 
 	if finalStatus == order.MakerSwapCast {
 		// Kill the wallets to prevent Taker from sending swap as soon
 		// as the orders are matched.
+		name := s.client1.name
 		if s.client1IsMaker {
+			name = s.client2.name
 			s.client2.disableWallets()
 			defer s.client2.enableWallets()
 		} else {
 			s.client1.disableWallets()
 			defer s.client1.enableWallets()
 		}
+		s.log.Infof("Disabled client %s wallets to prevent order status from moving past order.MakerSwapCast.", name)
 	}
 
 	// NOTE: Client 1 is always maker the first time this test is run and
@@ -1075,6 +1103,8 @@ func (s *simulationTest) placeTestOrders(qty, rate uint64) (string, string, erro
 func (s *simulationTest) monitorOrderMatchingAndTradeNeg(ctx context.Context, client *simulationClient, orderID string, finalStatus order.MatchStatus) error {
 	errs := newErrorSet("[client %s] ", client.name)
 
+	client.log.Infof("Client %s starting to monitor order %s.", client.name, orderID)
+
 	tracker, err := client.findOrder(orderID)
 	if err != nil {
 		return errs.addErr(err)
@@ -1082,7 +1112,7 @@ func (s *simulationTest) monitorOrderMatchingAndTradeNeg(ctx context.Context, cl
 
 	// Wait up to 2 times the epoch duration for this order to get matched.
 	maxMatchDuration := 2 * time.Duration(tracker.epochLen()) * time.Millisecond
-	client.log.Infof("Waiting up to %v for matches on order %s", maxMatchDuration, tracker.token())
+	client.log.Infof("Client %s Waiting up to %v for matches on order %s.", client.name, maxMatchDuration, tracker.token())
 	matched := client.notes.find(ctx, maxMatchDuration, func(n Notification) bool {
 		orderNote, isOrderNote := n.(*OrderNote)
 		isMatchedTopic := n.Topic() == TopicBuyMatchesMade || n.Topic() == TopicSellMatchesMade
@@ -1106,15 +1136,15 @@ func (s *simulationTest) monitorOrderMatchingAndTradeNeg(ctx context.Context, cl
 		if isSwap {
 			amt *= -1
 		}
-		client.log.Infof("updated %s balance diff with %s", a.symbol, a.valFmt(amt))
+		client.log.Infof("Updated %s balance diff with %s.", a.symbol, a.valFmt(amt))
 		client.expectBalanceDiffs[a.id] += amt
 	}
 
 	tracker.mtx.RLock()
-	client.log.Infof("%d match(es) received for order %s", len(tracker.matches), tracker.token())
+	client.log.Infof("Client %s %d match(es) received for order %s.", client.name, len(tracker.matches), tracker.token())
 	for _, match := range tracker.matches {
-		client.log.Infof("%s on match %s, amount %s %s", match.Side.String(), token(match.MatchID.Bytes()),
-			s.base.valFmt(match.Quantity), s.base.symbol)
+		client.log.Infof("Client %s is %s on match %s, amount %s %s.", client.name, match.Side.String(),
+			token(match.MatchID.Bytes()), s.base.valFmt(match.Quantity), s.base.symbol)
 		if match.Side == order.Taker {
 			if finalStatus >= order.TakerSwapCast {
 				recordBalanceChanges(true, match.Quantity, match.Rate)
@@ -1160,7 +1190,7 @@ func (s *simulationTest) monitorTrackedTrade(client *simulationClient, tracker *
 				continue
 			}
 			if status != lastStatus {
-				client.log.Infof("NOW =====> %s", status)
+				client.log.Infof("Match %s: NOW =====> %s.", match.MatchID, status)
 				client.psMTX.Lock()
 				client.processedStatus[match.MatchID] = status
 				client.psMTX.Unlock()
@@ -1175,7 +1205,7 @@ func (s *simulationTest) monitorTrackedTrade(client *simulationClient, tracker *
 				} else {
 					actor = order.Maker
 				}
-				client.log.Infof("Mining %d %s blocks for %s's %s, match %s", nBlocks, unbip(assetID),
+				client.log.Infof("Mining %d %s blocks for %s's %s, match %s.", nBlocks, unbip(assetID),
 					actor, swapOrRedeem, token(match.MatchID.Bytes()))
 			}
 
@@ -1232,13 +1262,13 @@ func (s *simulationTest) monitorTrackedTrade(client *simulationClient, tracker *
 		// before the match can be confirmed if the utxo side completes
 		// too fast.
 		if waitForOtherSideMakerInit || waitForOtherSideTakerInit {
-			client.log.Infof("Not mining asset %d so geth can find init confirms", thisSide)
+			client.log.Infof("Not mining asset %d so geth can find init confirms.", thisSide)
 			delete(mineAssets, thisSide)
 		}
 		mine := func(assetID, nBlocks uint32) {
 			err := newHarnessCtrl(assetID).mineBlocks(s.ctx, nBlocks)
 			if err != nil {
-				client.log.Infof("%s mine error %v", unbip(assetID), err) // return err???
+				client.log.Infof("%s mine error %v.", unbip(assetID), err) // return err???
 			}
 		}
 		for assetID, swapConf := range mineAssets {
@@ -1265,10 +1295,10 @@ func (s *simulationTest) monitorTrackedTrade(client *simulationClient, tracker *
 	for _, match := range tracker.matches {
 		if match.Status < finalStatus {
 			incompleteTrades++
-			client.log.Infof("incomplete trade: order %s, match %s, status %s, side %s", tracker.token(),
+			client.log.Infof("Incomplete trade: order %s, match %s, status %s, side %s.", tracker.token(),
 				token(match.MatchID[:]), match.Status, match.Side)
 		} else {
-			client.log.Infof("trade for order %s, match %s monitored successfully till %s, side %s", tracker.token(),
+			client.log.Infof("Trade for order %s, match %s monitored successfully till %s, side %s.", tracker.token(),
 				token(match.MatchID[:]), match.Status, match.Side)
 		}
 	}
@@ -1293,13 +1323,13 @@ func (client *simulationClient) mineMedian(ctx context.Context, assetID uint32) 
 		return fmt.Errorf("client %s: error mining 6 %s blocks for swap refunds: %v",
 			client.name, unbip(assetID), err)
 	}
-	client.log.Infof("Mined 6 blocks for assetID %d to expire swap locktimes", assetID)
+	client.log.Infof("Mined 6 blocks for assetID %d to expire swap locktimes.", assetID)
 	return nil
 }
 
 func (s *simulationTest) checkAndWaitForRefunds(ctx context.Context, client *simulationClient, orderID string) error {
 	// check if client has pending refunds
-	client.log.Info("checking if refunds are necessary")
+	client.log.Infof("Checking if refunds are necessary for client %s.", client.name)
 	refundAmts := map[uint32]int64{s.base.id: 0, s.quote.id: 0}
 	var furthestLockTime time.Time
 
@@ -1344,18 +1374,19 @@ func (s *simulationTest) checkAndWaitForRefunds(ctx context.Context, client *sim
 		return nil
 	}
 	if furthestLockTime.IsZero() {
-		client.log.Infof("No refunds necessary")
+		client.log.Infof("No refunds necessary for client %s.", client.name)
 		return nil
 	}
 
-	client.log.Infof("Found refundable swaps worth %s %s and %s %s", s.base.valFmt(refundAmts[s.base.id]),
+	client.log.Infof("Found refundable swaps worth %s %s and %s %s.", s.base.valFmt(refundAmts[s.base.id]),
 		s.base.symbol, s.quote.valFmt(refundAmts[s.quote.id]), s.quote.symbol)
 
 	// wait for refunds to be executed
 	now := time.Now()
 	if furthestLockTime.After(now) {
 		wait := furthestLockTime.Sub(now)
-		client.log.Infof("Waiting %v before checking wallet balances for expected refunds", wait)
+		client.log.Infof("Waiting until the longest timelock expires at %v before checking "+
+			"client %s wallet balances for expected refunds.", wait, client.name)
 		select {
 		case <-ctx.Done():
 			return nil
@@ -1410,7 +1441,7 @@ func (s *simulationTest) checkAndWaitForRefunds(ctx context.Context, client *sim
 	client.expectBalanceDiffs = refundAmts
 	err = s.assertBalanceChanges(client, true)
 	if err == nil {
-		client.log.Infof("successfully refunded swaps worth %s %s and %s %s", s.base.valFmt(refundAmts[s.base.id]),
+		client.log.Infof("Successfully refunded swaps worth %s %s and %s %s.", s.base.valFmt(refundAmts[s.base.id]),
 			s.base.symbol, s.quote.valFmt(refundAmts[s.quote.id]), s.quote.symbol)
 	}
 	return err
@@ -1803,7 +1834,7 @@ func (s *simulationTest) registerDEX(client *simulationClient) error {
 	if err != nil {
 		return err
 	}
-	client.log.Infof("Sent registration fee to DEX %s", dexHost)
+	client.log.Infof("Sent registration fee to DEX %s.", dexHost)
 
 	// Mine block(s) to mark fee as paid.
 
@@ -1822,12 +1853,12 @@ func (s *simulationTest) registerDEX(client *simulationClient) error {
 		}
 	}()
 
-	client.log.Infof("Mined %d %s blocks for fee payment confirmation", regRes.ReqConfirms, feeAssetSymbol)
+	client.log.Infof("Mined %d %s blocks for fee payment confirmation.", regRes.ReqConfirms, feeAssetSymbol)
 
 	// Wait up to bTimeout+12 seconds for fee payment. notify_fee times out
 	// after bTimeout+10 seconds.
 	feeTimeout := time.Millisecond*time.Duration(client.dc().cfg.BroadcastTimeout) + 12*time.Second
-	client.log.Infof("Waiting %v for fee confirmation notice", feeTimeout)
+	client.log.Infof("Waiting %v for fee confirmation notice.", feeTimeout)
 	feePaid := client.notes.find(s.ctx, feeTimeout, func(n Notification) bool {
 		return n.Type() == NoteTypeFeePayment && n.Topic() == TopicAccountRegistered
 	})
@@ -1836,7 +1867,7 @@ func (s *simulationTest) registerDEX(client *simulationClient) error {
 		return fmt.Errorf("fee payment not confirmed after %s", feeTimeout)
 	}
 
-	client.log.Infof("Fee payment confirmed")
+	client.log.Infof("Fee payment confirmed for client %s.", client.name)
 	return nil
 }
 
@@ -1930,13 +1961,13 @@ func (s *simulationTest) placeOrder(client *simulationClient, qty, rate uint64, 
 
 	r := calc.ConventionalRateAlt(rate, s.base.conversionFactor, s.quote.conversionFactor)
 
-	client.log.Infof("placed order %sing %s %s at %f %s/%s (%s)", sellString(client.isSeller),
+	client.log.Infof("Client %s placed order %sing %s %s at %f %s/%s (%s).", client.name, sellString(client.isSeller),
 		s.base.valFmt(qty), s.base.symbol, r, s.quote.symbol, s.base.symbol, ord.ID[:8])
 	return ord.ID.String(), nil
 }
 
 func (s *simulationTest) updateBalances(client *simulationClient) error {
-	client.log.Infof("updating balances")
+	client.log.Infof("Updating balances for client %s.", client.name)
 	client.balances = make(map[uint32]uint64, len(client.wallets))
 	setBalance := func(a *assetConfig) error {
 		if parent := client.wallets[a.id].parent; parent != nil {
@@ -1945,7 +1976,7 @@ func (s *simulationTest) updateBalances(client *simulationClient) error {
 			if err != nil {
 				return fmt.Errorf("error getting parent %s balance: %w", parentSymbol, err)
 			}
-			client.log.Infof("parent %s available %s, immature %s, locked %s", parentSymbol,
+			s.log.Infof("Client %s parent %s balance: available %s, immature %s, locked %s.", client.name, parentSymbol,
 				a.valFmt(parentBalance.Available), a.valFmt(parentBalance.Immature), a.valFmt(parentBalance.Locked))
 		}
 
@@ -1954,7 +1985,7 @@ func (s *simulationTest) updateBalances(client *simulationClient) error {
 			return err
 		}
 		client.balances[a.id] = balances.Available + balances.Immature + balances.Locked
-		client.log.Infof("%s available %s, immature %s, locked %s", a.symbol,
+		client.log.Infof("Client %s %s balance: available %s, immature %s, locked %s.", client.name, a.symbol,
 			a.valFmt(balances.Available), a.valFmt(balances.Immature), a.valFmt(balances.Locked))
 		return nil
 	}
@@ -2044,7 +2075,7 @@ func (s *simulationTest) assertBalanceChanges(client *simulationClient, isRefund
 			return fmt.Errorf("%s balance change not in expected range %s - %s, got %s", a.symbol,
 				a.valFmt(minExpectedDiff), a.valFmt(maxExpectedDiff), a.valFmt(balanceDiff))
 		}
-		client.log.Infof("%s balance change %s is in expected range of %s - %s", a.symbol,
+		client.log.Infof("%s balance change %s is in expected range of %s - %s.", a.symbol,
 			a.valFmt(balanceDiff), a.valFmt(minExpectedDiff), a.valFmt(maxExpectedDiff))
 		return nil
 	}
@@ -2089,7 +2120,7 @@ func (client *simulationClient) enableWallets() {
 }
 
 func (client *simulationClient) disconnectWallets() {
-	client.log.Infof("Disconnecting wallets")
+	client.log.Infof("Disconnecting wallets for client %s.", client.name)
 	client.core.walletMtx.Lock()
 	for _, wallet := range client.core.wallets {
 		wallet.Disconnect()
