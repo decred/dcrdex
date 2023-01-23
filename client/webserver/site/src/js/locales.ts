@@ -6,7 +6,7 @@ export const ID_SET_BUTTON_BUY = 'ID_SET_BUTTON_BUY'
 export const ID_SET_BUTTON_SELL = 'ID_SET_BUTTON_SELL'
 export const ID_OFF = 'ID_OFF'
 export const ID_READY = 'ID_READY'
-export const ID_NOWALLET = 'ID_NOWALLET'
+export const ID_NO_WALLET = 'ID_NO_WALLET'
 export const ID_DISABLED_MSG = 'ID_DISABLED_MSG'
 export const ID_WALLET_SYNC_PROGRESS = 'ID_WALLET_SYNC_PROGRESS'
 export const ID_HIDE_ADDITIONAL_SETTINGS = 'ID_HIDE_ADDITIONAL_SETTINGS'
@@ -94,6 +94,18 @@ export const ID_MATCH_STATUS_REFUND_PENDING = 'MATCH_STATUS_REFUND_PENDING'
 export const ID_MATCH_STATUS_REDEEM_PENDING = 'MATCH_STATUS_REDEEM_PENDING'
 export const ID_MATCH_STATUS_COMPLETE = 'MATCH_STATUS_COMPLETE'
 export const ID_TAKER_FOUND_MAKER_REDEMPTION = 'TAKER_FOUND_MAKER_REDEMPTION'
+export const ID_OPEN_WALLET_ERR_MSG = 'OPEN_WALLET_ERR_MSG'
+export const ID_ORDER_ACCELERATION_FEE_ERR_MSG = 'ORDER_ACCELERATION_FEE_ERR_MSG'
+export const ID_ORDER_ACCELERATION_ERR_MSG = 'ORDER_ACCELERATION_FEE_ERR_MSG'
+export const ID_CONNECTED = 'CONNECTED'
+export const ID_DISCONNECTED = 'DISCONNECTED'
+export const ID_INVALID_CERTIFICATE = 'INVALID_CERTIFICATE'
+export const ID_CONFIRMATIONS = 'ID_CONFIRMATIONS'
+export const ID_TAKER = 'TAKER'
+export const ID_MAKER = 'MAKER'
+export const ID_EMPTY_DEX_ADDRESS_MSG = 'EMPTY_DEX_ADDRESS_MSG'
+export const ID_SELECT_WALLET_FOR_FEE_PAYMENT = 'SELECT_WALLET_FOR_FEE_PAYMENT'
+export const ID_UNAVAILABLE = 'UNAVAILABLE'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -104,7 +116,7 @@ export const enUS: Locale = {
   [ID_OFF]: 'off',
   [ID_READY]: 'ready',
   [ID_LOCKED]: 'locked',
-  [ID_NOWALLET]: 'no wallet',
+  [ID_NO_WALLET]: 'no wallet',
   [ID_WALLET_SYNC_PROGRESS]: 'wallet is {{ syncProgress }}% synced',
   [ID_HIDE_ADDITIONAL_SETTINGS]: 'hide additional settings',
   [ID_SHOW_ADDITIONAL_SETTINGS]: 'show additional settings',
@@ -189,7 +201,19 @@ export const enUS: Locale = {
   [ID_MATCH_STATUS_REDEEM_PENDING]: 'Redeem PENDING',
   [ID_MATCH_STATUS_REDEMPTION_CONFIRMED]: 'Redemption Confirmed',
   [ID_MATCH_STATUS_COMPLETE]: 'Complete',
-  [ID_TAKER_FOUND_MAKER_REDEMPTION]: 'redeemed by {{ makerAddr }}'
+  [ID_TAKER_FOUND_MAKER_REDEMPTION]: 'redeemed by {{ makerAddr }}',
+  [ID_OPEN_WALLET_ERR_MSG]: 'Error opening wallet: {{ msg }}',
+  [ID_ORDER_ACCELERATION_FEE_ERR_MSG]: 'Error estimating acceleration fee: {{ msg }}',
+  [ID_ORDER_ACCELERATION_ERR_MSG]: 'Error accelerating order: {{ msg }}',
+  [ID_CONNECTED]: 'Connected',
+  [ID_DISCONNECTED]: 'Disconnected',
+  [ID_INVALID_CERTIFICATE]: 'Invalid Certificate',
+  [ID_CONFIRMATIONS]: 'confirmations',
+  [ID_TAKER]: 'Taker',
+  [ID_MAKER]: 'Maker',
+  [ID_UNAVAILABLE]: 'unavailable',
+  [ID_EMPTY_DEX_ADDRESS_MSG]: 'DEX address cannot be empty',
+  [ID_SELECT_WALLET_FOR_FEE_PAYMENT]: 'You must select a valid wallet for fee payment'
 }
 
 export const ptBR: Locale = {
@@ -201,7 +225,7 @@ export const ptBR: Locale = {
   [ID_OFF]: 'desligar',
   [ID_READY]: 'pronto',
   [ID_LOCKED]: 'trancado',
-  [ID_NOWALLET]: 'sem carteira',
+  [ID_NO_WALLET]: 'sem carteira',
   [ID_WALLET_SYNC_PROGRESS]: 'carteira está {{ syncProgress }}% sincronizada',
   [ID_HIDE_ADDITIONAL_SETTINGS]: 'esconder configurações adicionais',
   [ID_SHOW_ADDITIONAL_SETTINGS]: 'mostrar configurações adicionais',
@@ -255,7 +279,7 @@ export const zhCN: Locale = {
   [ID_OFF]: '关闭',
   [ID_READY]: '准备就绪', //  alt. 准备好
   [ID_LOCKED]: '锁',
-  [ID_NOWALLET]: '未连接钱包', // alt. 没有钱包
+  [ID_NO_WALLET]: '未连接钱包', // alt. 没有钱包
   [ID_WALLET_SYNC_PROGRESS]: '钱包同步进度{{ syncProgress }}%',
   [ID_HIDE_ADDITIONAL_SETTINGS]: '隐藏其它设置',
   [ID_SHOW_ADDITIONAL_SETTINGS]: '显示其它设置',
@@ -295,7 +319,7 @@ export const plPL: Locale = {
   [ID_OFF]: 'wyłączony',
   [ID_READY]: 'gotowy',
   [ID_LOCKED]: 'zablokowany',
-  [ID_NOWALLET]: 'brak portfela',
+  [ID_NO_WALLET]: 'brak portfela',
   [ID_WALLET_SYNC_PROGRESS]: 'portfel zsynchronizowany w {{ syncProgress }}%',
   [ID_HIDE_ADDITIONAL_SETTINGS]: 'ukryj dodatkowe ustawienia',
   [ID_SHOW_ADDITIONAL_SETTINGS]: 'pokaż dodatkowe ustawienia',
@@ -349,7 +373,7 @@ export const deDE: Locale = {
   [ID_OFF]: 'aus',
   [ID_READY]: 'bereit',
   [ID_LOCKED]: 'gesperrt',
-  [ID_NOWALLET]: 'kein Wallet',
+  [ID_NO_WALLET]: 'kein Wallet',
   [ID_WALLET_SYNC_PROGRESS]: 'Wallet ist zu {{ syncProgress }}% synchronisiert',
   [ID_HIDE_ADDITIONAL_SETTINGS]: 'zusätzliche Einstellungen ausblenden',
   [ID_SHOW_ADDITIONAL_SETTINGS]: 'zusätzliche Einstellungen anzeigen',
@@ -407,7 +431,7 @@ export const ar: Locale = {
   [ID_OFF]: 'إيقاف',
   [ID_READY]: 'متوقف',
   [ID_LOCKED]: 'مقفل',
-  [ID_NOWALLET]: 'لا توجد أي محفظة',
+  [ID_NO_WALLET]: 'لا توجد أي محفظة',
   [ID_WALLET_SYNC_PROGRESS]: 'تمت مزامنة {{ syncProgress }}% المحفظة',
   [ID_HIDE_ADDITIONAL_SETTINGS]: 'إخفاء الإعدادات الإضافية',
   [ID_SHOW_ADDITIONAL_SETTINGS]: 'عرض الإعدادات الإضافية',

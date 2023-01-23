@@ -186,7 +186,7 @@ export default class OrderPage extends BasePage {
     tmpl.orderPortion.textContent = orderPortion
 
     if (match.side === OrderUtil.Maker) {
-      tmpl.side.textContent = 'Maker'
+      tmpl.side.textContent = intl.prep(intl.ID_MAKER)
       Doc.show(
         tmpl.makerSwapYou,
         tmpl.makerRedeemYou,
@@ -200,7 +200,7 @@ export default class OrderPage extends BasePage {
         tmpl.makerRedeemThem
       )
     } else {
-      tmpl.side.textContent = 'Taker'
+      tmpl.side.textContent = intl.prep(intl.ID_TAKER)
       Doc.hide(
         tmpl.makerSwapYou,
         tmpl.makerRedeemYou,
@@ -453,7 +453,7 @@ export default class OrderPage extends BasePage {
  * */
 function confirmationString (coin: Coin) {
   if (!coin.confs || coin.confs.required === 0) return ''
-  return `${coin.confs.count} / ${coin.confs.required} confirmations`
+  return `${coin.confs.count} / ${coin.confs.required} ${intl.prep(intl.ID_CONFIRMATIONS)}`
 }
 
 // makerSwapCoin return's the maker's swap coin.
