@@ -360,7 +360,7 @@ const (
 )
 
 func newMatchNote(topic Topic, subject, details string, severity db.Severity, t *trackedTrade, match *matchTracker) *MatchNote {
-	_, counterConfs := match.confirms()
+	swapConfs, counterConfs := match.confirms()
 	if counterConfs < 0 {
 		// This can be -1 before it is actually checked, but for purposes of the
 		// match note, it should be non-negative.
@@ -369,7 +369,7 @@ func newMatchNote(topic Topic, subject, details string, severity db.Severity, t 
 	return &MatchNote{
 		Notification: db.NewNotification(NoteTypeMatch, topic, subject, details, severity),
 		OrderID:      t.ID().Bytes(),
-		Match: matchFromMetaMatchWithConfs(t.Order, &match.MetaMatch, match.swapConfirms,
+		Match: matchFromMetaMatchWithConfs(t.Order, &match.MetaMatch, swapConfs,
 			int64(t.metaData.FromSwapConf), counterConfs, int64(t.metaData.ToSwapConf),
 			int64(match.redemptionConfs), int64(match.redemptionConfsReq)),
 		Host:     t.dc.acct.host,
