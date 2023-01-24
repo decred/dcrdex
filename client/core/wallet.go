@@ -340,7 +340,7 @@ func (w *xcWallet) Connect() error {
 	// ConnectOnce so that the ConnectionMaster's On method will report false.
 	err := w.connector.ConnectOnce(context.Background())
 	if err != nil {
-		return err
+		return fmt.Errorf("%s: %w", unbip(w.AssetID), err)
 	}
 	// Now that we are connected, we must Disconnect if any calls fail below
 	// since we are considering this wallet not "hookedUp".
@@ -348,7 +348,7 @@ func (w *xcWallet) Connect() error {
 	synced, progress, err := w.SyncStatus()
 	if err != nil {
 		w.connector.Disconnect()
-		return err
+		return fmt.Errorf("%s: %w", unbip(w.AssetID), err)
 	}
 
 	w.mtx.Lock()
@@ -358,7 +358,7 @@ func (w *xcWallet) Connect() error {
 		haveAddress, err = w.OwnsDepositAddress(w.address)
 		if err != nil {
 			w.connector.Disconnect()
-			return err
+			return fmt.Errorf("%s: %w", unbip(w.AssetID), err)
 		}
 	}
 	if !haveAddress {
