@@ -174,6 +174,7 @@ type dexConnection struct {
 
 	// anomaliesCount tracks client's connection anomalies.
 	anomaliesCount uint32 // atomic
+	lastConnectMtx sync.RWMutex
 	lastConnect    time.Time
 }
 
@@ -7530,9 +7531,14 @@ func (c *Core) handleConnectEvent(dc *dexConnection, status comms.ConnectionStat
 	topic := TopicDEXDisconnected
 	if status == comms.Connected {
 		topic = TopicDEXConnected
+		dc.lastConnectMtx.Lock()
 		dc.lastConnect = time.Now()
+		dc.lastConnectMtx.Unlock()
 	} else {
-		if time.Since(dc.lastConnect) < wsAnomalyDuration {
+		dc.lastConnectMtx.RLock()
+		lastConnect := dc.lastConnect
+		dc.lastConnectMtx.RUnlock()
+		if time.Since(lastConnect) < wsAnomalyDuration {
 			// Increase anomalies count for this connection.
 			atomic.AddUint32(&dc.anomaliesCount, 1)
 		}
