@@ -47,6 +47,8 @@ type rpcclient struct {
 	// mutex, as it is expected that the caller will connect and place calls to
 	// loadToken sequentially in the same thread during initialization.
 	tokens map[uint32]*tokener
+
+	txPoolSupported bool
 }
 
 func newRPCClient(net dex.Network, endpoint string) *rpcclient {
@@ -77,7 +79,11 @@ func (c *rpcclient) connect(ctx context.Context, log dex.Logger) error {
 
 	reqModules := []string{"eth", "txpool"}
 	if err := dexeth.CheckAPIModules(client, c.endpoint, log, reqModules); err != nil {
-		return fmt.Errorf("error checking required modules: %v", err)
+		log.Warnf("Error checking required modules: %v", err)
+		log.Warn("Will not account for pending transactions in balance calculations")
+		c.txPoolSupported = false
+	} else {
+		c.txPoolSupported = true
 	}
 
 	c.ec = ethclient.NewClient(client)
@@ -172,9 +178,24 @@ func (c *rpcclient) transaction(ctx context.Context, hash common.Hash) (tx *type
 	return c.ec.TransactionByHash(ctx, hash)
 }
 
-// accountBalance gets the account balance, including the effects of known
+// dumbBalance gets the account balance, ignoring the effects of unmined
+// transactions.
+func (c *rpcclient) dumbBalance(ctx context.Context, assetID uint32, addr common.Address) (*big.Int, error) {
+	if assetID == BipID {
+		return c.ec.BalanceAt(ctx, addr, nil)
+	}
+
+	bal := new(big.Int)
+	return bal, c.withTokener(assetID, func(tkn *tokener) error {
+		var err error
+		bal, err = tkn.balanceOf(ctx, addr)
+		return err
+	})
+}
+
+// smartBalance gets the account balance, including the effects of known
 // unmined transactions.
-func (c *rpcclient) accountBalance(ctx context.Context, assetID uint32, addr common.Address) (*big.Int, error) {
+func (c *rpcclient) smartBalance(ctx context.Context, assetID uint32, addr common.Address) (*big.Int, error) {
 	tip, err := c.blockNumber(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("blockNumber error: %v", err)
@@ -241,6 +262,16 @@ func (c *rpcclient) accountBalance(ctx context.Context, assetID uint32, addr com
 		}
 		return nil
 	})
+}
+
+// accountBalance gets the account balance. If txPool functions are supported by the
+// client, it will include the effects of unmined transactions, otherwise it will not.
+func (c *rpcclient) accountBalance(ctx context.Context, assetID uint32, addr common.Address) (*big.Int, error) {
+	if c.txPoolSupported {
+		return c.smartBalance(ctx, assetID, addr)
+	} else {
+		return c.dumbBalance(ctx, assetID, addr)
+	}
 }
 
 type RPCTransaction struct {
