@@ -3413,7 +3413,7 @@ func TestRefundReserves(t *testing.T) {
 				CoinID:  encode.RandomBytes(36),
 			},
 		}
-		tracker.processRedemption(1, redemption)
+		tracker.processRedemption(dc, 1, redemption)
 	})
 
 	// Market sell order
@@ -3484,7 +3484,7 @@ func TestRefundReserves(t *testing.T) {
 				CoinID:  encode.RandomBytes(36),
 			},
 		}
-		tracker.processRedemption(1, redemption)
+		tracker.processRedemption(dc, 1, redemption)
 	})
 
 	resetMatches()
@@ -3806,7 +3806,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 			preImg:   preImg,
 			mktID:    tDcrBtcMktName,
 			db:       rig.db,
-			dc:       rig.dc,
+			host:     rig.dc.acct.host,
 			metaData: &db.OrderMetaData{},
 		}
 
@@ -3900,7 +3900,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 			preImg:   preImg,
 			mktID:    tDcrBtcMktName,
 			db:       rig.db,
-			dc:       rig.dc,
+			host:     rig.dc.acct.host,
 			metaData: &db.OrderMetaData{},
 		}
 
@@ -3968,7 +3968,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 			preImg: preImg,
 			mktID:  tDcrBtcMktName,
 			db:     rig.db,
-			dc:     rig.dc,
+			host:   rig.dc.acct.host,
 			// Simulate first preimage request by initializing csum here.
 			csum:     firstCSum,
 			metaData: &db.OrderMetaData{},
@@ -4041,7 +4041,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 			preImg: preImg,
 			mktID:  tDcrBtcMktName,
 			db:     rig.db,
-			dc:     rig.dc,
+			host:   rig.dc.acct.host,
 			// Simulate first preimage request by initializing csum here.
 			csum:     csum,
 			metaData: &db.OrderMetaData{},
@@ -4108,7 +4108,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 			preImg:   preImg,
 			mktID:    tDcrBtcMktName,
 			db:       rig.db,
-			dc:       rig.dc,
+			host:     rig.dc.acct.host,
 			metaData: &db.OrderMetaData{},
 			cancel: &trackedCancel{
 				CancelOrder: order.CancelOrder{
@@ -4190,7 +4190,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 			preImg:   preImg,
 			mktID:    tDcrBtcMktName,
 			db:       rig.db,
-			dc:       rig.dc,
+			host:     rig.dc.acct.host,
 			metaData: &db.OrderMetaData{},
 			cancel: &trackedCancel{
 				// Simulate first preimage request by initializing csum here.
@@ -4276,7 +4276,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 			preImg:   preImg,
 			mktID:    tDcrBtcMktName,
 			db:       rig.db,
-			dc:       rig.dc,
+			host:     rig.dc.acct.host,
 			metaData: &db.OrderMetaData{},
 			cancel: &trackedCancel{
 				// Simulate first preimage request by initializing csum here.
@@ -4711,7 +4711,7 @@ func TestTradeTracking(t *testing.T) {
 		name: "resend pending init (invalid ack)",
 		fn: func() error {
 			rig.ws.queueResponse(msgjson.InitRoute, invalidAcker)
-			tCore.resendPendingRequests(tracker)
+			tCore.resendPendingRequests(&dexTrade{tracker, dc})
 			return nil
 		},
 		expectError:          false,
@@ -4730,7 +4730,7 @@ func TestTradeTracking(t *testing.T) {
 		name: "resend pending init (valid ack)",
 		fn: func() error {
 			rig.ws.queueResponse(msgjson.InitRoute, initAcker)
-			tCore.resendPendingRequests(tracker)
+			tCore.resendPendingRequests(&dexTrade{tracker, dc})
 			return nil
 		},
 		expectError:          false,
@@ -5973,7 +5973,7 @@ func TestReReserveFunding(t *testing.T) {
 
 	tracker := &trackedTrade{
 		Order:    lo,
-		dc:       rig.dc,
+		host:     rig.dc.acct.host,
 		metaData: dbOrder.MetaData,
 		matches: map[order.MatchID]*matchTracker{
 			match.MatchID: {
@@ -6445,7 +6445,6 @@ func Test_marketTrades(t *testing.T) {
 		Order:  activeOrd,
 		preImg: preImg,
 		mktID:  mktID,
-		dc:     dc,
 		metaData: &db.OrderMetaData{
 			Status: order.OrderStatusBooked,
 		},
@@ -6463,7 +6462,6 @@ func Test_marketTrades(t *testing.T) {
 		Order:  inactiveOrd,
 		preImg: preImg,
 		mktID:  mktID,
-		dc:     dc,
 		metaData: &db.OrderMetaData{
 			Status: order.OrderStatusExecuted,
 		},
@@ -6496,7 +6494,7 @@ func TestLogout(t *testing.T) {
 	tracker := &trackedTrade{
 		Order:  ord,
 		preImg: newPreimage(),
-		dc:     rig.dc,
+		host:   rig.dc.acct.host,
 		metaData: &db.OrderMetaData{
 			Status: order.OrderStatusBooked,
 		},
@@ -7352,7 +7350,7 @@ func TestReconfigureWallet(t *testing.T) {
 			{}: match,
 		},
 		metaData:    &db.OrderMetaData{},
-		dc:          rig.dc,
+		host:        rig.dc.acct.host,
 		readyToTick: true, // prevent resume path
 	}
 	tCore.conns[tDexHost].tradeMtx.Unlock()
@@ -9069,9 +9067,10 @@ func TestMaxSwapsRedeemsInTx(t *testing.T) {
 
 	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)
 	oid := lo.ID()
-	tracker := newTrackedTrade(dbOrder, preImg, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+	tt := newTrackedTrade(dbOrder, preImg, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails)
-	dc.trades[oid] = tracker
+	dc.trades[oid] = tt
+	tracker := &dexTrade{tt, dc}
 
 	newMatch := func(side order.MatchSide, status order.MatchStatus) *matchTracker {
 		return &matchTracker{
@@ -9195,9 +9194,10 @@ func TestSuspectTrades(t *testing.T) {
 
 	lo, dbOrder, preImg, addr := makeLimitOrder(dc, true, 0, 0)
 	oid := lo.ID()
-	tracker := newTrackedTrade(dbOrder, preImg, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+	tt := newTrackedTrade(dbOrder, preImg, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
 		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails)
-	dc.trades[oid] = tracker
+	dc.trades[oid] = tt
+	tracker := &dexTrade{tt, dc}
 
 	newMatch := func(side order.MatchSide, status order.MatchStatus) *matchTracker {
 		return &matchTracker{
@@ -10403,7 +10403,7 @@ func TestUpdateFeesPaid(t *testing.T) {
 		lo, _, _, _ := makeLimitOrder(dc, true, 0, 0)
 		tracker := &trackedTrade{
 			wallets:  wallets,
-			dc:       dc,
+			host:     dc.acct.host,
 			metaData: new(db.OrderMetaData),
 			db:       new(TDB),
 			Order:    lo,

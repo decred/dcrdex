@@ -39,6 +39,7 @@ import (
 	_ "decred.org/dcrdex/client/asset/eth"
 	_ "decred.org/dcrdex/client/asset/ltc"
 	_ "decred.org/dcrdex/client/asset/zec"
+	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
@@ -631,6 +632,10 @@ func run() error {
 			defer proxy.Delete()
 		}
 	}
+
+	// Set core's package-level (default) logger
+	commonCoreLogger := loggerMaker.Logger("CORE[common]")
+	core.UseLogger(commonCoreLogger)
 
 	tStart := time.Now()
 

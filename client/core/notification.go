@@ -387,8 +387,8 @@ func newMatchNote(topic Topic, subject, details string, severity db.Severity, t 
 		Match: matchFromMetaMatchWithConfs(t.Order, &match.MetaMatch, swapConfs,
 			int64(t.metaData.FromSwapConf), counterConfs, int64(t.metaData.ToSwapConf),
 			int64(match.redemptionConfs), int64(match.redemptionConfsReq)),
-		Host:     t.dc.acct.host,
-		MarketID: marketName(t.Base(), t.Quote()),
+		Host:     t.host,
+		MarketID: t.mktID, // marketName(t.Base(), t.Quote())
 	}
 }
 

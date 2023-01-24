@@ -91,11 +91,13 @@ func runCore() error {
 		closeFileLogger()
 	}()
 
+	coreLogger := logMaker.Logger("CORE")
+	core.UseLogger(coreLogger)
+
 	// Prepare the Core.
 	clientCore, err := core.New(&core.Config{
 		DBPath:             cfg.DBPath,
 		Net:                cfg.Net,
-		Logger:             logMaker.Logger("CORE"),
 		TorProxy:           cfg.TorProxy,
 		TorIsolation:       cfg.TorIsolation,
 		Onion:              cfg.Onion,

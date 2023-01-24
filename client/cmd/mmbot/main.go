@@ -110,10 +110,13 @@ func mainErr() error {
 		net = dex.Testnet
 	}
 
+	coreLogger := loggerMaker.Logger("CORE")
+	core.UseLogger(coreLogger)
+
 	c, err = core.New(&core.Config{
 		DBPath:   filepath.Join(coreDir, net.String(), "dexc.db"),
 		Net:      net,
-		Logger:   loggerMaker.NewLogger("CORE"),
+		Logger:   coreLogger,
 		Language: lang,
 	})
 	if err != nil {

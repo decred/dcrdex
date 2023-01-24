@@ -89,7 +89,13 @@ var (
 	walletDisabledErrStr = "%s wallet is disabled"
 
 	errTimeout = errors.New("timeout")
+
+	log = dex.StdOutLogger("core", dex.DefaultLogLevel) // default logger
 )
+
+func UseLogger(l dex.Logger) {
+	log = l
+}
 
 type dexTicker struct {
 	dur int64 // atomic
@@ -1205,7 +1211,7 @@ func (c *Core) tickAsset(dc *dexConnection, assetID uint32) assetMap {
 		}
 		trade := trade // bad go, bad
 		go func() {
-			newUpdates, err := c.tick(trade)
+			newUpdates, err := c.tick(&dexTrade{trade, dc})
 			if err != nil {
 				c.log.Errorf("%s tick error: %v", dc.acct.host, err)
 			}
@@ -1462,7 +1468,7 @@ type Core struct {
 // New is the constructor for a new Core.
 func New(cfg *Config) (*Core, error) {
 	if cfg.Logger == nil {
-		return nil, fmt.Errorf("Core.Config must specify a Logger")
+		cfg.Logger = log // use the package level-logger, may be stdout
 	}
 	dbOpts := bolt.Opts{
 		BackupOnShutdown: !cfg.NoAutoDBBackup,
@@ -7499,7 +7505,7 @@ func generateDEXMaps(host string, cfg *msgjson.ConfigResult) (map[uint32]*dex.As
 }
 
 // runMatches runs the sorted matches returned from parseMatches.
-func (c *Core) runMatches(tradeMatches map[order.OrderID]*serverMatches) (assetMap, error) {
+func (c *Core) runMatches(dc *dexConnection, tradeMatches map[order.OrderID]*serverMatches) (assetMap, error) {
 	runMatch := func(sm *serverMatches) (assetMap, error) {
 		updatedAssets := make(assetMap)
 		tracker := sm.tracker
@@ -7532,7 +7538,7 @@ func (c *Core) runMatches(tradeMatches map[order.OrderID]*serverMatches) (assetM
 
 			// Try to tick the trade now, but do not interrupt on error. The
 			// trade will tick again automatically.
-			tickUpdatedAssets, err := c.tick(tracker)
+			tickUpdatedAssets, err := c.tick(&dexTrade{tracker, dc})
 			updatedAssets.merge(tickUpdatedAssets)
 			if err != nil {
 				return updatedAssets, fmt.Errorf("tick of order %v failed: %w", oid, err)
@@ -7801,6 +7807,7 @@ func (c *Core) handleReconnect(host string) {
 		name  string
 		base  uint32
 		quote uint32
+		lotSz uint64
 	}
 	mkts := make(map[string]*market, len(dc.cfg.Markets))
 	for _, m := range cfg.Markets {
@@ -7808,6 +7815,7 @@ func (c *Core) handleReconnect(host string) {
 			name:  m.Name,
 			base:  m.Base,
 			quote: m.Quote,
+			lotSz: m.LotSize,
 		}
 	}
 
@@ -7815,7 +7823,8 @@ func (c *Core) handleReconnect(host string) {
 	for _, trade := range dc.trackedTrades() {
 		// If the server's market is gone, we're on our own, otherwise we are
 		// now free to swap for this order.
-		auto := mkts[trade.mktID] == nil
+		mkt := mkts[trade.mktID]
+		auto := mkt == nil
 		if !auto { // market exists, now check asset config and version
 			baseCfg := dc.assetConfig(trade.Base())
 			auto = baseCfg == nil || !trade.wallets.baseWallet.supportsVer(baseCfg.Version)
@@ -7832,8 +7841,12 @@ func (c *Core) handleReconnect(host string) {
 				c.log.Infof("DEX %v with market %v restored for trade %v", host, trade.mktID, trade.ID())
 			}
 		}
-		// We could refresh the asset configs in the walletSet, but we'll stick
-		// to what we have recorded in OrderMetaData at time of order placement.
+
+		if !auto && !trade.isMarketBuy() {
+			trade.mtx.Lock()
+			trade.reservesDustPct = float64(mkt.lotSz) / float64(trade.Trade().Quantity)
+			trade.mtx.Unlock()
+		}
 	}
 
 	go dc.subPriceFeed()
@@ -8303,7 +8316,7 @@ func (c *Core) listen(dc *dexConnection) {
 			if c.ctx.Err() != nil { // don't fail each one in sequence if shutting down
 				return
 			}
-			newUpdates, err := c.tick(trade)
+			newUpdates, err := c.tick(&dexTrade{trade, dc})
 			if err != nil {
 				c.log.Error(err)
 			}
@@ -8563,7 +8576,7 @@ func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	}
 
 	// Begin match negotiation.
-	updatedAssets, err := c.runMatches(matches)
+	updatedAssets, err := c.runMatches(dc, matches)
 	if len(updatedAssets) > 0 {
 		c.updateBalances(updatedAssets)
 	}
@@ -8601,7 +8614,7 @@ func handleNoMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error 
 	return err
 }
 
-func (c *Core) schedTradeTick(tracker *trackedTrade) {
+func (c *Core) schedTradeTick(tracker *dexTrade) {
 	oid := tracker.ID()
 	c.tickSchedMtx.Lock()
 	defer c.tickSchedMtx.Unlock()
@@ -8658,7 +8671,7 @@ func handleAuditRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	if tracker == nil {
 		return fmt.Errorf("audit request received for unknown order: %s", string(msg.Payload))
 	}
-	return tracker.processAuditMsg(msg.ID, audit)
+	return tracker.processAuditMsg(dc, msg.ID, audit)
 }
 
 // handleRedemptionRoute handles the DEX-originating redemption request, which
@@ -8685,11 +8698,11 @@ func handleRedemptionRoute(c *Core, dc *dexConnection, msg *msgjson.Message) err
 			return fmt.Errorf("redemption request received for cancel order %v, match %v (you ok server?)",
 				oid, redemption.MatchID)
 		}
-		err = tracker.processRedemption(msg.ID, redemption)
+		err = tracker.processRedemption(dc, msg.ID, redemption)
 		if err != nil {
 			return err
 		}
-		c.schedTradeTick(tracker)
+		c.schedTradeTick(&dexTrade{tracker, dc})
 		return nil
 	}
 
@@ -9534,10 +9547,15 @@ func (c *Core) AccelerateOrder(pw []byte, oidB dex.Bytes, newFeeRate uint64) (st
 	if err != nil {
 		return "", err
 	}
-	tracker, err := c.findActiveOrder(oid)
+	tracker, dc, err := c.findActiveOrder(oid)
 	if err != nil {
 		return "", err
 	}
+	mkt := dc.marketConfig(tracker.mktID)
+	if mkt == nil {
+		return "", fmt.Errorf("could not find market: %v", tracker.mktID)
+	}
+	lotSize := mkt.LotSize
 
 	if !tracker.wallets.fromWallet.traits.IsAccelerator() {
 		return "", fmt.Errorf("the %s wallet is not an accelerator", tracker.wallets.fromWallet.Symbol)
@@ -9546,7 +9564,7 @@ func (c *Core) AccelerateOrder(pw []byte, oidB dex.Bytes, newFeeRate uint64) (st
 	tracker.mtx.Lock()
 	defer tracker.mtx.Unlock()
 
-	swapCoinIDs, accelerationCoins, changeCoinID, requiredForRemainingSwaps, err := tracker.orderAccelerationParameters()
+	swapCoinIDs, accelerationCoins, changeCoinID, requiredForRemainingSwaps, err := tracker.orderAccelerationParameters(lotSize)
 	if err != nil {
 		return "", err
 	}
@@ -9574,10 +9592,15 @@ func (c *Core) AccelerationEstimate(oidB dex.Bytes, newFeeRate uint64) (uint64, 
 		return 0, err
 	}
 
-	tracker, err := c.findActiveOrder(oid)
+	tracker, dc, err := c.findActiveOrder(oid)
 	if err != nil {
 		return 0, err
 	}
+	mkt := dc.marketConfig(tracker.mktID)
+	if mkt == nil {
+		return 0, fmt.Errorf("could not find market: %v", tracker.mktID)
+	}
+	lotSize := mkt.LotSize
 
 	if !tracker.wallets.fromWallet.traits.IsAccelerator() {
 		return 0, fmt.Errorf("the %s wallet is not an accelerator", tracker.wallets.fromWallet.Symbol)
@@ -9586,7 +9609,7 @@ func (c *Core) AccelerationEstimate(oidB dex.Bytes, newFeeRate uint64) (uint64, 
 	tracker.mtx.RLock()
 	defer tracker.mtx.RUnlock()
 
-	swapCoins, accelerationCoins, changeCoin, requiredForRemainingSwaps, err := tracker.orderAccelerationParameters()
+	swapCoins, accelerationCoins, changeCoin, requiredForRemainingSwaps, err := tracker.orderAccelerationParameters(lotSize)
 	if err != nil {
 		return 0, err
 	}
@@ -9607,10 +9630,15 @@ func (c *Core) PreAccelerateOrder(oidB dex.Bytes) (*PreAccelerate, error) {
 		return nil, err
 	}
 
-	tracker, err := c.findActiveOrder(oid)
+	tracker, dc, err := c.findActiveOrder(oid)
 	if err != nil {
 		return nil, err
 	}
+	mkt := dc.marketConfig(tracker.mktID)
+	if mkt == nil {
+		return nil, fmt.Errorf("could not find market: %v", tracker.mktID)
+	}
+	lotSize := mkt.LotSize
 
 	if !tracker.wallets.fromWallet.traits.IsAccelerator() {
 		return nil, fmt.Errorf("the %s wallet is not an accelerator", tracker.wallets.fromWallet.Symbol)
@@ -9620,7 +9648,7 @@ func (c *Core) PreAccelerateOrder(oidB dex.Bytes) (*PreAccelerate, error) {
 
 	tracker.mtx.RLock()
 	defer tracker.mtx.RUnlock()
-	swapCoinIDs, accelerationCoins, changeCoinID, requiredForRemainingSwaps, err := tracker.orderAccelerationParameters()
+	swapCoinIDs, accelerationCoins, changeCoinID, requiredForRemainingSwaps, err := tracker.orderAccelerationParameters(lotSize)
 	if err != nil {
 		return nil, err
 	}
@@ -9694,14 +9722,14 @@ func (c *Core) RemoveWalletPeer(assetID uint32, address string) error {
 
 // findActiveOrder will search the dex connections for an active order by order
 // id. An error is returned if it cannot be found.
-func (c *Core) findActiveOrder(oid order.OrderID) (*trackedTrade, error) {
+func (c *Core) findActiveOrder(oid order.OrderID) (*trackedTrade, *dexConnection, error) {
 	for _, dc := range c.dexConnections() {
 		tracker, _, _ := dc.findOrder(oid)
 		if tracker != nil {
-			return tracker, nil
+			return tracker, dc, nil
 		}
 	}
-	return nil, fmt.Errorf("could not find active order with order id: %s", oid)
+	return nil, nil, fmt.Errorf("could not find active order with order id: %s", oid)
 }
 
 // fetchFiatExchangeRates starts the fiat rate fetcher goroutine and schedules

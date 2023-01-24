@@ -202,7 +202,7 @@ func resolveMissedMakerAudit(dc *dexConnection, trade *trackedTrade, match *matc
 			match.MetaData.Proof.SelfRevoked = true
 			err = trade.db.UpdateMatch(&match.MetaMatch)
 			if err != nil {
-				trade.dc.log.Errorf("Error updating database for match %s: %v", match, err)
+				dc.log.Errorf("Error updating database for match %s: %v", match, err)
 			}
 		}
 	}()
@@ -245,7 +245,7 @@ func resolveMissedTakerAudit(dc *dexConnection, trade *trackedTrade, match *matc
 			match.MetaData.Proof.SelfRevoked = true
 			err = trade.db.UpdateMatch(&match.MetaMatch)
 			if err != nil {
-				trade.dc.log.Errorf("Error updating database for match %s: %v", match, err)
+				dc.log.Errorf("Error updating database for match %s: %v", match, err)
 			}
 		}
 	}()
