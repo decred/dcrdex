@@ -93,6 +93,7 @@ body.dark {
   input:not([type=checkbox]),
   input:focus:not([type=checkbox]) {
     background-color: black;
+    border: 1px solid $dark_input_border;
   }
 
   input:disabled {
@@ -135,6 +136,7 @@ body.dark {
 
   .form-check-input[type=checkbox] {
     background-color: black;
+    border: 1px solid $dark_input_border;
 
     &:checked {
       background-color: #27278d;

@@ -184,6 +184,13 @@ input[type=number] {
   -moz-appearance: textfield;
 }
 
+select,
+select:focus,
+input:not([type=checkbox]),
+input:focus:not([type=checkbox]) {
+  border: 1px solid $light_input_border;
+}
+
 .flex-center {
   display: flex;
   justify-content: center;
@@ -510,6 +517,7 @@ span.token-aware-symbol sup {
 
 .form-check-input[type=checkbox] {
   background-color: #ebebeb;
+  border: 1px solid $light_input_border;
   cursor: pointer;
 
   &:checked {
