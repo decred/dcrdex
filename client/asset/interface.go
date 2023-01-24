@@ -479,8 +479,8 @@ type Bonder interface {
 	// public key.
 	MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Time, privKey *secp256k1.PrivateKey, acctID []byte) (*Bond, error)
 	// RefundBond will refund the bond given the full bond output details and
-	// private key to spend it.
-	RefundBond(ctx context.Context, ver uint16, coinID, script []byte, amt uint64, privKey *secp256k1.PrivateKey) ([]byte, error)
+	// private key to spend it. The bond is broadcasted.
+	RefundBond(ctx context.Context, ver uint16, coinID, script []byte, amt uint64, privKey *secp256k1.PrivateKey) (Coin, error)
 
 	// A RefundBondByCoinID may be created in the future to attempt to refund a
 	// bond by locating it on chain, i.e. without providing the amount or

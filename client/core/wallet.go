@@ -241,6 +241,13 @@ func (w *xcWallet) amtString(amt uint64) string {
 	return fmt.Sprintf("%s %s", ui.ConventionalString(amt), ui.Conventional.Unit)
 }
 
+func (w *xcWallet) amtStringSigned(amt int64) string {
+	if amt >= 0 {
+		return w.amtString(uint64(amt))
+	}
+	return "-" + w.amtString(uint64(-amt))
+}
+
 // state returns the current WalletState.
 func (w *xcWallet) state() *WalletState {
 	winfo := w.Info()
@@ -504,7 +511,7 @@ func (w *xcWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Tim
 // RefundBond will refund the bond if the asset.Wallet implementation is a
 // Bonder. The lock time must be passed to spend the bond. LockTimeExpired
 // should be used to check first.
-func (w *xcWallet) RefundBond(ctx context.Context, ver uint16, coinID, script []byte, amt uint64, priv *secp256k1.PrivateKey) ([]byte, error) {
+func (w *xcWallet) RefundBond(ctx context.Context, ver uint16, coinID, script []byte, amt uint64, priv *secp256k1.PrivateKey) (asset.Coin, error) {
 	bonder, ok := w.Wallet.(asset.Bonder)
 	if !ok {
 		return nil, errors.New("wallet does not support refunding bond transactions")

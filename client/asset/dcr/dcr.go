@@ -3359,9 +3359,13 @@ func (dcr *ExchangeWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime 
 	}
 
 	// Prep the redeem / refund tx.
-	redeemTx, err := dcr.makeBondRefundTxV0(&txid, 0, amt, bondScript, bondKey, feeRate)
+	redeemMsgTx, err := dcr.makeBondRefundTxV0(&txid, 0, amt, bondScript, bondKey, feeRate)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create bond redemption tx: %w", err)
+	}
+	redeemTx, err := redeemMsgTx.Bytes()
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize bond redemption tx: %w", err)
 	}
 
 	bond := &asset.Bond{
@@ -3380,7 +3384,7 @@ func (dcr *ExchangeWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime 
 }
 
 func (dcr *ExchangeWallet) makeBondRefundTxV0(txid *chainhash.Hash, vout uint32, amt uint64,
-	script []byte, priv *secp256k1.PrivateKey, feeRate uint64) ([]byte, error) {
+	script []byte, priv *secp256k1.PrivateKey, feeRate uint64) (*wire.MsgTx, error) {
 	lockTime, pkhPush, err := dexdcr.ExtractBondDetailsV0(0, script)
 	if err != nil {
 		return nil, err
@@ -3432,16 +3436,14 @@ func (dcr *ExchangeWallet) makeBondRefundTxV0(txid *chainhash.Hash, vout uint32,
 	}
 	redeemMsgTx.TxIn[0].SignatureScript = bondRedeemSigScript
 
-	redeemTx, err := redeemMsgTx.Bytes()
-	if err != nil {
-		return nil, fmt.Errorf("unable to serialize bond redemption tx: %w", err)
-	}
-	return redeemTx, nil
+	return redeemMsgTx, nil
 }
 
 // RefundBond refunds a bond output to a new wallet address given the redeem
-// script and private key.
-func (dcr *ExchangeWallet) RefundBond(ctx context.Context, ver uint16, coinID, script []byte, amt uint64, privKey *secp256k1.PrivateKey) ([]byte, error) {
+// script and private key. After broadcasting, the output paying to the wallet
+// is returned.
+func (dcr *ExchangeWallet) RefundBond(ctx context.Context, ver uint16, coinID, script []byte,
+	amt uint64, privKey *secp256k1.PrivateKey) (asset.Coin, error) {
 	if ver != 0 {
 		return nil, errors.New("only version 0 bonds supported")
 	}
@@ -3452,7 +3454,18 @@ func (dcr *ExchangeWallet) RefundBond(ctx context.Context, ver uint16, coinID, s
 
 	feeRate := dcr.targetFeeRateWithFallback(2, 0)
 
-	return dcr.makeBondRefundTxV0(txHash, vout, amt, script, privKey, feeRate)
+	msgTx, err := dcr.makeBondRefundTxV0(txHash, vout, amt, script, privKey, feeRate)
+	if err != nil {
+		return nil, err
+	}
+
+	redeemHash, err := dcr.wallet.SendRawTransaction(ctx, msgTx, false)
+	if err != nil { // TODO: we need to be much smarter about these send error types/codes
+		return nil, translateRPCCancelErr(err)
+	}
+
+	refundAmt := msgTx.TxOut[0].Value
+	return newOutput(redeemHash, 0, uint64(refundAmt), wire.TxTreeRegular), nil
 
 	/* If we need to find the actual unspent bond transaction for any of:
 	   (1) the output amount, (2) the commitment output data, or (3) to ensure
