@@ -1353,7 +1353,11 @@ func (c *Core) Run(ctx context.Context) {
 	// Store the context as a field, since we will need to spawn new DEX threads
 	// when new accounts are registered.
 	c.ctx = ctx
-	c.initialize() // connectDEX gets ctx for the wsConn
+	if err := c.initialize(); err != nil { // connectDEX gets ctx for the wsConn
+		c.log.Critical(err)
+		close(c.ready) // unblock <-Ready()
+		return
+	}
 	close(c.ready)
 
 	// The DB starts first and stops last.
@@ -5238,10 +5242,10 @@ func (c *Core) AssetBalance(assetID uint32) (*WalletBalance, error) {
 
 // initialize pulls the known DEXes from the database and attempts to connect
 // and retrieve the DEX configuration.
-func (c *Core) initialize() {
+func (c *Core) initialize() error {
 	accts, err := c.db.Accounts()
 	if err != nil {
-		c.log.Errorf("Error retrieving accounts from database: %v", err) // panic?
+		return fmt.Errorf("failed to retrieve accounts from database: %w", err)
 	}
 
 	// Start connecting to DEX servers.
@@ -5297,6 +5301,8 @@ func (c *Core) initialize() {
 			c.log.Warnf("\n\n\t ****  IMPORTANT: You have %d active order%s on %s. LOGIN immediately!  **** \n", n, pluralize(n), dc.acct.host)
 		}
 	}
+
+	return nil
 }
 
 // connectAccount makes a connection to the DEX for the given account. If a
