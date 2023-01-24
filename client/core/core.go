@@ -3555,6 +3555,11 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 
 // setWalletPassword updates the (encrypted) password for the wallet.
 func (c *Core) setWalletPassword(wallet *xcWallet, newPW []byte, crypter encrypt.Crypter) error {
+	authenticator, is := wallet.Wallet.(asset.Authenticator)
+	if !is { // password setting is not supported by wallet.
+		return newError(passwordErr, "wallet does not support password setting")
+	}
+
 	walletDef, err := asset.WalletDef(wallet.AssetID, wallet.walletType)
 	if err != nil {
 		return newError(assetSupportErr, "asset.WalletDef error: %w", err)
@@ -3581,7 +3586,7 @@ func (c *Core) setWalletPassword(wallet *xcWallet, newPW []byte, crypter encrypt
 		if err != nil {
 			return newError(encryptionErr, "encryption error: %w", err)
 		}
-		err = wallet.Wallet.Unlock(newPW)
+		err = authenticator.Unlock(newPW)
 		if err != nil {
 			return newError(authErr,
 				"setWalletPassword unlocking wallet error, is the new password correct?: %w", err)
@@ -3593,10 +3598,10 @@ func (c *Core) setWalletPassword(wallet *xcWallet, newPW []byte, crypter encrypt
 		// empty password. The following Lock->Unlock cycle but may be required
 		// to detect a newly-unprotected wallet without reconnecting. We will
 		// ignore errors in this process as we are discovering the true state.
-		backend := wallet.Wallet // check the backend directly, not using the xcWallet
-		_ = backend.Lock()
-		_ = backend.Unlock([]byte{})
-		if backend.Locked() {
+		// check the backend directly, not using the xcWallet
+		_ = authenticator.Lock()
+		_ = authenticator.Unlock([]byte{})
+		if authenticator.Locked() {
 			if wasUnlocked { // try to re-unlock the wallet with previous encPW
 				_ = c.unlockWallet(crypter, wallet)
 			}

@@ -144,7 +144,6 @@ type Config struct {
 	SPV          bool
 	FirstWallet  *WalletName
 	SecondWallet *WalletName
-	Unencrypted  bool
 }
 
 func Run(t *testing.T, cfg *Config) {
@@ -197,23 +196,19 @@ func Run(t *testing.T, cfg *Config) {
 	rig.secondWallet = tBackend(tCtx, t, cfg, cfg.SecondWallet, blkFunc)
 	defer rig.close()
 
-	// Unlock the wallet for use.
-	if !cfg.Unencrypted {
-		err := rig.firstWallet.Unlock(walletPassword)
-		if err != nil {
-			t.Fatalf("error unlocking gamma wallet: %v", err)
-		}
-
-		if cfg.SPV {
-			// // The test expects beta and gamma to be unlocked.
-			// if err := rig.beta().Unlock(walletPassword); err != nil {
-			// 	t.Fatalf("beta Unlock error: %v", err)
-			// }
-			if err := rig.secondWallet.Unlock(walletPassword); err != nil {
-				t.Fatalf("gamma Unlock error: %v", err)
+	// Unlocks a wallet for use.
+	unlock := func(w *connectedWallet) {
+		a, isAuthenticator := w.Wallet.(asset.Authenticator)
+		if isAuthenticator {
+			err := a.Unlock(walletPassword)
+			if err != nil {
+				t.Fatalf("error unlocking gamma wallet: %v", err)
 			}
 		}
 	}
+
+	unlock(rig.firstWallet)
+	unlock(rig.secondWallet)
 
 	var lots uint64 = 2
 	contractValue := lots * cfg.LotSize

@@ -871,12 +871,18 @@ type intermediaryWallet struct {
 // method to implement asset.Rescanner.
 type ExchangeWalletSPV struct {
 	*intermediaryWallet
+	*authAddOn
 
 	spvNode *spvWallet
 }
 
 // ExchangeWalletFullNode implements Wallet and adds the FeeRate method.
 type ExchangeWalletFullNode struct {
+	*intermediaryWallet
+	*authAddOn
+}
+
+type ExchangeWalletNoAuth struct {
 	*intermediaryWallet
 }
 
@@ -898,6 +904,9 @@ var _ asset.Recoverer = (*ExchangeWalletSPV)(nil)
 var _ asset.PeerManager = (*ExchangeWalletSPV)(nil)
 var _ asset.TxFeeEstimator = (*intermediaryWallet)(nil)
 var _ asset.Bonder = (*baseWallet)(nil)
+var _ asset.Authenticator = (*ExchangeWalletSPV)(nil)
+var _ asset.Authenticator = (*ExchangeWalletFullNode)(nil)
+var _ asset.Authenticator = (*ExchangeWalletAccelerator)(nil)
 
 // RecoveryCfg is the information that is transferred from the old wallet
 // to the new one when the wallet is recovered.
@@ -1077,22 +1086,42 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 // conjunction with ReadCloneParams, to create a ExchangeWallet for other assets
 // with minimal coding.
 func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWalletFullNode, error) {
+	iw, err := btcCloneWallet(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &ExchangeWalletFullNode{iw, &authAddOn{iw.node}}, nil
+}
+
+// BTCCloneWalletNoAuth is like BTCCloneWallet but the wallet created does not
+// implement asset.Authenticator.
+func BTCCloneWalletNoAuth(cfg *BTCCloneCFG) (*ExchangeWalletNoAuth, error) {
+	iw, err := btcCloneWallet(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &ExchangeWalletNoAuth{iw}, nil
+}
+
+// btcCloneWallet creates a wallet backend for a set of network parameters and
+// default network ports.
+func btcCloneWallet(cfg *BTCCloneCFG) (*intermediaryWallet, error) {
 	clientCfg, client, err := parseRPCWalletConfig(cfg.WalletCFG.Settings, cfg.Symbol, cfg.Network, cfg.Ports, cfg.SingularWallet)
 	if err != nil {
 		return nil, err
 	}
 
-	btc, err := newRPCWallet(client, cfg, clientCfg)
+	iw, err := newRPCWallet(client, cfg, clientCfg)
 	if err != nil {
-		return nil, fmt.Errorf("error creating %s ExchangeWallet: %v", cfg.Symbol,
+		return nil, fmt.Errorf("error creating %s exchange wallet: %v", cfg.Symbol,
 			err)
 	}
 
-	return btc, nil
+	return iw, nil
 }
 
 // newRPCWallet creates the ExchangeWallet and starts the block monitor.
-func newRPCWallet(requester RawRequester, cfg *BTCCloneCFG, parsedCfg *RPCWalletConfig) (*ExchangeWalletFullNode, error) {
+func newRPCWallet(requester RawRequester, cfg *BTCCloneCFG, parsedCfg *RPCWalletConfig) (*intermediaryWallet, error) {
 	btc, err := newUnconnectedWallet(cfg, &parsedCfg.WalletConfig)
 	if err != nil {
 		return nil, err
@@ -1131,12 +1160,10 @@ func newRPCWallet(requester RawRequester, cfg *BTCCloneCFG, parsedCfg *RPCWallet
 	core.requesterV.Store(requester)
 	node := newRPCClient(core)
 	btc.node = node
-	return &ExchangeWalletFullNode{
-		intermediaryWallet: &intermediaryWallet{
-			baseWallet:     btc,
-			txFeeEstimator: node,
-			tipRedeemer:    node,
-		},
+	return &intermediaryWallet{
+		baseWallet:     btc,
+		txFeeEstimator: node,
+		tipRedeemer:    node,
 	}, nil
 }
 
@@ -1288,7 +1315,8 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 			txFeeEstimator: spvw,
 			tipRedeemer:    spvw,
 		},
-		spvNode: spvw,
+		authAddOn: &authAddOn{spvw},
+		spvNode:   spvw,
 	}, nil
 }
 
@@ -2699,20 +2727,27 @@ func (btc *baseWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	return coins, nil
 }
 
-// Unlock unlocks the ExchangeWallet. The pw supplied should be the same as the
-// password for the underlying bitcoind wallet which will also be unlocked.
-func (btc *baseWallet) Unlock(pw []byte) error {
-	return btc.node.walletUnlock(pw)
+// authAddOn implements the asset.Authenticator.
+type authAddOn struct {
+	w Wallet
 }
 
-// Lock locks the ExchangeWallet and the underlying bitcoind wallet.
-func (btc *baseWallet) Lock() error {
-	return btc.node.walletLock()
+// Unlock unlocks the underlying wallet. The pw supplied should be the same as
+// the password for the underlying bitcoind wallet which will also be unlocked.
+// It implements asset.authenticator.
+func (a *authAddOn) Unlock(pw []byte) error {
+	return a.w.walletUnlock(pw)
 }
 
-// Locked will be true if the wallet is currently locked.
-func (btc *baseWallet) Locked() bool {
-	return btc.node.locked()
+// Lock locks the underlying bitcoind wallet. It implements asset.authenticator.
+func (a *authAddOn) Lock() error {
+	return a.w.walletLock()
+}
+
+// Locked will be true if the wallet is currently locked. It implements
+// asset.authenticator.
+func (a *authAddOn) Locked() bool {
+	return a.w.locked()
 }
 
 func (btc *baseWallet) addInputsToTx(tx *wire.MsgTx, coins asset.Coins) (uint64, []outPoint, error) {
@@ -4208,7 +4243,7 @@ func (btc *baseWallet) DepositAddress() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if btc.Locked() {
+	if btc.node.locked() {
 		return addrStr, nil
 	}
 	// If the wallet is unlocked, be extra cautious and ensure the wallet gave
