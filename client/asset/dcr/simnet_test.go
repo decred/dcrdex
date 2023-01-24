@@ -227,24 +227,12 @@ func TestMakeBondTx(t *testing.T) {
 	mineAlpha()
 	waitNetwork() // wait for beta to see the new block (bond must be mined for RefundBond)
 
-	refundTxNew, err := wallet.RefundBond(context.Background(), bondVer, bond.CoinID,
+	refundCoin, err := wallet.RefundBond(context.Background(), bondVer, bond.CoinID,
 		bond.Data, bond.Amount, priv)
 	if err != nil {
 		t.Fatalf("RefundBond: %v", err)
 	}
-	t.Logf("refundTxNew: %x\n", refundTxNew)
-
-	// Send it, but note that since lock time is not passed this is still
-	// non-standard and won't yet propagate on mainnet.
-	refundCoin, err := wallet.SendTransaction(refundTxNew)
-	if err != nil {
-		t.Fatalf("SendTransaction: %v", err)
-	}
-	refundCoinTxid, _, err := decodeCoinID(refundCoin)
-	if err != nil {
-		t.Fatalf("decodeCoinID: %v", err)
-	}
-	t.Log(refundCoinTxid)
+	t.Logf("refundCoin: %v\n", refundCoin)
 }
 
 func TestWallet(t *testing.T) {

@@ -262,6 +262,7 @@ func (c *Core) rotateBonds(ctx context.Context) {
 		mustPost := tierDeficit + weakStrength - pendingStrength
 
 		spentBonds := make([]*bondID, 0, len(expiredBonds))
+		transactedAssets := make(map[uint32]struct{}) // wallets that will need balance update
 		for _, bond := range expiredBonds {
 			bondIDStr := fmt.Sprintf("%v (%s)", coinIDString(bond.AssetID, bond.CoinID), unbip(bond.AssetID))
 			if now < int64(bond.LockTime) {
@@ -304,21 +305,34 @@ func (c *Core) rotateBonds(ctx context.Context) {
 			// Generate a refund tx paying to an address from the currently
 			// connected wallet, using bond.KeyIndex to create the signed
 			// transaction. The RefundTx is really a backup.
+			var refundCoinStr string
+			var refundVal uint64
 			var bondAlreadySpent bool
-			newRefundTx := bond.RefundTx         // invalid/unknown key index fallback (v0 db.Bond, which was never released), also will skirt reserves :/
-			if bond.KeyIndex != math.MaxUint32 { // normal path
+			if bond.KeyIndex == math.MaxUint32 { // invalid/unknown key index fallback (v0 db.Bond, which was never released), also will skirt reserves :/
+				if len(bond.RefundTx) > 0 {
+					refundCoinID, err := wallet.SendTransaction(bond.RefundTx)
+					if err != nil {
+						c.log.Errorf("Failed to broadcast bond refund txn %x: %v", bond.RefundTx, err)
+						continue
+					}
+					refundCoinStr, _ = asset.DecodeCoinID(bond.AssetID, refundCoinID)
+				} else { // else "Unknown bond reported by server", see result.ActiveBonds in authDEX
+					bondAlreadySpent = true
+				}
+			} else { // expected case -- TODO: remove the math.MaxUint32 sometime after 0.6 release
 				priv, err := c.bondKeyIdx(bond.AssetID, bond.KeyIndex)
 				if err != nil {
 					c.log.Errorf("Failed to derive bond private key: %v", err)
 					continue
 				}
-				newRefundTx, err = wallet.RefundBond(ctx, bond.Version, bond.CoinID, bond.Data, bond.Amount, priv)
+				refundCoin, err := wallet.RefundBond(ctx, bond.Version, bond.CoinID, bond.Data, bond.Amount, priv)
 				priv.Zero()
 				bondAlreadySpent = errors.Is(err, asset.CoinNotFoundError) // or never mined!
 				if err != nil && !bondAlreadySpent {
 					c.log.Errorf("Failed to generate bond refund tx: %v", err)
 					continue
 				}
+				refundCoinStr, refundVal = refundCoin.String(), refundCoin.Value()
 			}
 
 			// If the user hasn't already manually refunded the bond, broadcast
@@ -327,24 +341,21 @@ func (c *Core) rotateBonds(ctx context.Context) {
 				c.log.Warnf("Bond output not found, possibly already spent or never mined! "+
 					"Marking refunded. Backup refund transaction: %x", bond.RefundTx)
 			} else {
-				refundCoinID, err := wallet.SendTransaction(newRefundTx)
-				if err != nil {
-					c.log.Errorf("Failed to broadcast bond refund txn %v: %v", newRefundTx, err)
-					continue
-				}
 				// TODO: subject, detail := c.formatDetails(...)
-				details := fmt.Sprintf("Bond %v for %v refunded in %v (%s)", bondIDStr, dc.acct.host,
-					coinIDString(assetID, refundCoinID), unbip(bond.AssetID))
+				details := fmt.Sprintf("Bond %v for %v refunded in %v, reclaiming %v of %v (%s) after tx fees",
+					bondIDStr, dc.acct.host, refundCoinStr, refundVal,
+					coinIDString(assetID, bond.CoinID), unbip(assetID))
 				c.notify(newBondRefundNote(TopicBondRefunded, string(TopicBondRefunded),
 					details, db.Success))
 			}
 
-			err = c.db.BondRefunded(dc.acct.host, bond.AssetID, bond.CoinID)
-			if err != nil {
+			err = c.db.BondRefunded(dc.acct.host, assetID, bond.CoinID)
+			if err != nil { // next DB load we'll retry, hit bondAlreadySpent, and store here again
 				c.log.Errorf("Failed to mark bond as refunded: %v", err)
 			}
 
 			spentBonds = append(spentBonds, &bondID{assetID, bond.CoinID})
+			transactedAssets[assetID] = struct{}{}
 		}
 
 		// Delete the now-spent bonds from the expiredBonds slice.
@@ -359,6 +370,10 @@ func (c *Core) rotateBonds(ctx context.Context) {
 		}
 		expiredStrength := sumBondStrengths(dc.acct.expiredBonds)
 		dc.acct.authMtx.Unlock()
+
+		for assetID := range transactedAssets {
+			c.updateAssetBalance(assetID)
+		}
 
 		if mustPost > 0 && targetTier > 0 && bondExpiry > 0 {
 			c.log.Infof("Gotta post %d bond increments now. Target tier %d, current tier %d (%d weak, %d pending)",
