@@ -1177,18 +1177,22 @@ func TestFundEdges(t *testing.T) {
 		FeeSuggestion: feeSuggestion,
 	}
 
+	// MaxOrder will try a split tx, which will work with one lot less.
 	var feeReduction uint64 = swapSize * tDCR.MaxFeeRate
 	estFeeReduction := swapSize * feeSuggestion
+	splitFees := splitTxBaggage * tDCR.MaxFeeRate
 	checkMaxOrder(t, wallet, lots-1, swapVal-tLotSize,
-		fees-feeReduction,                        // max fees
-		totalBytes*feeSuggestion-estFeeReduction, // worst case
-		bestCaseBytes*feeSuggestion)              // best case
+		fees+splitFees-feeReduction,                               // max fees
+		(totalBytes+splitTxBaggage)*feeSuggestion-estFeeReduction, // worst case
+		(bestCaseBytes+splitTxBaggage)*feeSuggestion)              // best case
 
 	_, _, err := wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error when not enough funds in single p2pkh utxo")
 	}
-	// Now add the needed atoms and try again.
+
+	// Now add the needed atoms and try again. The fees will reflect that the
+	// split was skipped because insufficient available for splitFees.
 	p2pkhUnspent.Amount = float64(swapVal+fees) / 1e8
 	node.unspent = []walletjson.ListUnspentResult{p2pkhUnspent}
 
@@ -1223,7 +1227,7 @@ func TestFundEdges(t *testing.T) {
 	node.unspent[0].Amount = float64(v) / 1e8
 
 	checkMaxOrder(t, wallet, lots, swapVal, fees, (totalBytes+splitTxBaggage)*feeSuggestion,
-		(bestCaseBytes+splitTxBaggage)*feeSuggestion)
+		(bestCaseBytes+splitTxBaggage)*feeSuggestion) // fees include split (did not fall back to no split)
 
 	coins, _, err = wallet.FundOrder(ord)
 	if err != nil {

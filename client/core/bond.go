@@ -334,6 +334,8 @@ func (c *Core) rotateBonds(ctx context.Context) {
 				}
 				refundCoinStr, refundVal = refundCoin.String(), refundCoin.Value()
 			}
+			// RefundBond increases reserves when it spends the bond, adding to
+			// the wallet's balance (available or immature).
 
 			// If the user hasn't already manually refunded the bond, broadcast
 			// the refund txn. Mark it refunded and stop tracking regardless.
@@ -955,10 +957,18 @@ func (c *Core) makeAndPostBond(dc *dexConnection, acctExists bool, wallet *xcWal
 
 	acctID := dc.acct.ID()
 	feeRate := c.feeSuggestionAny(bondAsset.ID)
-	bond, err := wallet.MakeBondTx(bondAsset.Version, amt, feeRate, lockTime, bondKey, acctID[:])
+	bond, abandon, err := wallet.MakeBondTx(bondAsset.Version, amt, feeRate, lockTime, bondKey, acctID[:])
 	if err != nil {
-		return nil, codedError(registerErr, err)
+		return nil, codedError(bondPostErr, err)
 	}
+	// MakeBondTx lock coins and reduces reserves in proportion
+
+	var success bool
+	defer func() {
+		if !success {
+			abandon() // unlock coins and increase reserves
+		}
+	}()
 
 	// Do prevalidatebond with the *unsigned* txn.
 	if err = c.preValidateBond(dc, bond); err != nil {
@@ -1008,6 +1018,8 @@ func (c *Core) makeAndPostBond(dc *dexConnection, acctExists bool, wallet *xcWal
 		}
 	}
 
+	success = true // we're doing this
+
 	dc.acct.authMtx.Lock()
 	dc.acct.pendingBonds = append(dc.acct.pendingBonds, dbBond)
 	dc.acct.authMtx.Unlock()
@@ -1023,6 +1035,9 @@ func (c *Core) makeAndPostBond(dc *dexConnection, acctExists bool, wallet *xcWal
 		bondCoinStr, unbip(bond.AssetID), lockTime, bond.Data, bond.RedeemTx)
 	if bondCoinCast, err := wallet.SendTransaction(bond.SignedTx); err != nil {
 		c.log.Warnf("Failed to broadcast bond txn (%v). Tx bytes: %x", bond.SignedTx)
+		// There is a good possibility it actually made it to the network. We
+		// should start monitoring, perhaps even rebroadcast. It's tempting to
+		// abort and remove the pending bond, but that's bad if it's sent.
 	} else if !bytes.Equal(bond.CoinID, bondCoinCast) {
 		c.log.Warnf("Broadcasted bond %v; was expecting %v!",
 			coinIDString(bond.AssetID, bondCoinCast), bondCoinStr)

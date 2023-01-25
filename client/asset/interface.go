@@ -479,8 +479,12 @@ type Bonder interface {
 	// MakeBondTx authors a DEX time-locked fidelity bond transaction for the
 	// provided amount, lock time, and dex account ID. An explicit private key
 	// type is used to guarantee it's not bytes from something else like a
-	// public key.
-	MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Time, privKey *secp256k1.PrivateKey, acctID []byte) (*Bond, error)
+	// public key. If there are insufficient bond reserves, the returned error
+	// should be of kind asset.ErrInsufficientBalance. The returned function may
+	// be used to abandon the bond iff it has not yet been broadcast. Generally
+	// this means unlocking the funds that are used by the transaction and
+	// restoring consumed reserves amounts.
+	MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Time, privKey *secp256k1.PrivateKey, acctID []byte) (*Bond, func(), error)
 	// RefundBond will refund the bond given the full bond output details and
 	// private key to spend it. The bond is broadcasted.
 	RefundBond(ctx context.Context, ver uint16, coinID, script []byte, amt uint64, privKey *secp256k1.PrivateKey) (Coin, error)

@@ -597,11 +597,62 @@ func (dcr *ExchangeWallet) config() *exchangeWalletConfig {
 func (dcr *ExchangeWallet) reserves() uint64 {
 	dcr.reservesMtx.RLock()
 	defer dcr.reservesMtx.RUnlock()
-	var reserves uint64
 	if r := dcr.bondReservesEnforced; r > 0 {
-		reserves = uint64(r)
+		return uint64(r)
 	}
-	return reserves
+	if dcr.bondReservesNominal == 0 { // disabled
+		return 0
+	}
+	// When enforced is negative, we're unbonding. If nominal is still positive,
+	// we're partially unbonding and we need to report the remaining reserves
+	// after excess is unbonded, offsetting the negative enforced amount. This
+	// is the relatively small fee buffer.
+	if int64(dcr.bondReservesUsed) == dcr.bondReservesNominal {
+		return uint64(-dcr.bondReservesEnforced)
+	}
+
+	return 0
+}
+
+// bondLocked reduces reserves, increases bonded (used) amount.
+func (dcr *ExchangeWallet) bondLocked(amt uint64) (reserved int64, unspent uint64) {
+	dcr.reservesMtx.Lock()
+	defer dcr.reservesMtx.Unlock()
+	e0 := dcr.bondReservesEnforced
+	dcr.bondReservesEnforced -= int64(amt)
+	dcr.bondReservesUsed += amt
+	dcr.log.Tracef("bondLocked (%v): enforced %v ==> %v (with bonded = %v / nominal = %v)",
+		toDCR(amt), toDCRSigned(e0), toDCRSigned(dcr.bondReservesEnforced),
+		toDCR(dcr.bondReservesUsed), toDCRSigned(dcr.bondReservesNominal))
+	return dcr.bondReservesEnforced, dcr.bondReservesUsed
+}
+
+// bondSpent increases enforce reserves, decreases bonded amount. When the
+// tracked unspent amount is reduced to zero, this clears the enforced amount
+// (just the remaining fee buffer).
+func (dcr *ExchangeWallet) bondSpent(amt uint64) (reserved int64, unspent uint64) {
+	dcr.reservesMtx.Lock()
+	defer dcr.reservesMtx.Unlock()
+
+	if amt <= dcr.bondReservesUsed {
+		dcr.bondReservesUsed -= amt
+	} else {
+		dcr.log.Errorf("bondSpent: live bonds accounting error, spending bond worth %v with %v known live (zeroing!)",
+			amt, dcr.bondReservesUsed)
+		dcr.bondReservesUsed = 0
+	}
+
+	if dcr.bondReservesNominal == 0 { // disabled
+		return dcr.bondReservesEnforced, dcr.bondReservesUsed // return 0, ...
+	}
+
+	e0 := dcr.bondReservesEnforced
+	dcr.bondReservesEnforced += int64(amt)
+
+	dcr.log.Tracef("bondSpent (%v): enforced %v ==> %v (with bonded = %v / nominal = %v)",
+		toDCR(amt), toDCRSigned(e0), toDCRSigned(dcr.bondReservesEnforced),
+		toDCR(dcr.bondReservesUsed), toDCRSigned(dcr.bondReservesNominal))
+	return dcr.bondReservesEnforced, dcr.bondReservesUsed
 }
 
 // Check that ExchangeWallet satisfies the Wallet interface.
@@ -1264,7 +1315,7 @@ func (dcr *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate
 		reqTotal := reqFunds + splitMaxFees // ~ rather than actually fund()ing again
 		// We must consider splitMaxFees otherwise we'd skip the split on
 		// account of excess baggage.
-		if sum-reqTotal >= reserves { // avail-sum+extra > reserves && reqTotal <= sum
+		if reqTotal <= sum && sum-reqTotal >= reserves { // avail-sum+extra > reserves
 			return &asset.SwapEstimate{
 				Lots:               lots,
 				Value:              val,
@@ -3355,14 +3406,14 @@ func (dcr *ExchangeWallet) EstimateRegistrationTxFee(feeRate uint64) uint64 {
 // current underlying wallet; the bond private key should normally be used to
 // author a new transaction paying to a new address instead.
 func (dcr *ExchangeWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Time,
-	bondKey *secp256k1.PrivateKey, acctID []byte) (*asset.Bond, error) {
+	bondKey *secp256k1.PrivateKey, acctID []byte) (*asset.Bond, func(), error) {
 	if ver != 0 {
-		return nil, errors.New("only version 0 bonds supported")
+		return nil, nil, errors.New("only version 0 bonds supported")
 	}
 	if until := time.Until(lockTime); until >= 365*12*time.Hour /* ~6 months */ {
-		return nil, fmt.Errorf("that lock time is nuts: %v", lockTime)
+		return nil, nil, fmt.Errorf("that lock time is nuts: %v", lockTime)
 	} else if until < 0 {
-		return nil, fmt.Errorf("that lock time is already passed: %v", lockTime)
+		return nil, nil, fmt.Errorf("that lock time is already passed: %v", lockTime)
 	}
 
 	pk := bondKey.PubKey().SerializeCompressed()
@@ -3375,20 +3426,20 @@ func (dcr *ExchangeWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime 
 	// TL output.
 	lockTimeSec := lockTime.Unix()
 	if lockTimeSec >= dexdcr.MaxCLTVScriptNum || lockTimeSec <= 0 {
-		return nil, fmt.Errorf("invalid lock time %v", lockTime)
+		return nil, nil, fmt.Errorf("invalid lock time %v", lockTime)
 	}
 	bondScript, err := dexdcr.MakeBondScript(ver, uint32(lockTimeSec), pkh)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build bond output redeem script: %w", err)
+		return nil, nil, fmt.Errorf("failed to build bond output redeem script: %w", err)
 	}
 	bondAddr, err := stdaddr.NewAddressScriptHash(scriptVersion, bondScript, dcr.chainParams)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build bond output payment script: %w", err)
+		return nil, nil, fmt.Errorf("failed to build bond output payment script: %w", err)
 	}
 	bondPkScriptVer, bondPkScript := bondAddr.PaymentScript()
 	txOut := newTxOut(int64(amt), bondPkScriptVer, bondPkScript)
 	if dexdcr.IsDust(txOut, feeRate) {
-		return nil, fmt.Errorf("bond output is dust")
+		return nil, nil, fmt.Errorf("bond output is dust")
 	}
 	baseTx.AddTxOut(txOut)
 
@@ -3409,7 +3460,7 @@ func (dcr *ExchangeWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime 
 		AddData(pushData).
 		Script()
 	if err != nil {
-		return nil, fmt.Errorf("failed to build acct commit output script: %w", err)
+		return nil, nil, fmt.Errorf("failed to build acct commit output script: %w", err)
 	}
 	acctOut := newTxOut(0, scriptVersion, commitPkScript) // value zero
 	baseTx.AddTxOut(acctOut)
@@ -3417,52 +3468,64 @@ func (dcr *ExchangeWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime 
 	// NOTE: this "fund -> addInputCoins -> signTxAndAddChange -> lock prevouts"
 	// sequence might be best encapsulated in a fundRawTransactionMethod.
 	baseSize := uint32(baseTx.SerializeSize()) + dexdcr.P2PKHOutputSize // uint32(dexdcr.MsgTxOverhead + dexdcr.P2PKHOutputSize*3)
-	enough := func(sum uint64, size uint32, unspent *compositeUTXO) bool {
-		txFee := uint64(baseSize+size+unspent.input.Size()) * feeRate
-		return sum+toAtoms(unspent.rpc.Amount) >= amt+txFee
-	}
-	coins, _, _, _, err := dcr.fund(enough)
+	enough := sendEnough(amt, feeRate, false, baseSize, true)
+	coins, _, _, _, err := dcr.fund(0, enough)
 	if err != nil {
-		return nil, fmt.Errorf("Unable to send %s DCR with fee rate of %d atoms/byte: %w",
+		return nil, nil, fmt.Errorf("Unable to send %s DCR with fee rate of %d atoms/byte: %w",
 			amount(amt), feeRate, err)
 	}
-	_, err = dcr.addInputCoins(baseTx, coins)
-	if err != nil {
-		return nil, err
+	// Reduce the reserves counter now that utxos are explicitly allocated. When
+	// the bond is refunded and we pay back into our wallet, we will increase
+	// the reserves counter.
+	newReserves, unspent := dcr.bondLocked(amt) // nominal, not spent amount
+	dcr.log.Debugf("New bond reserves (new post) = %f DCR with %f in unspent bonds",
+		toDCRSigned(newReserves), toDCR(unspent)) // decrement and report new
+
+	abandon := func() { // if caller does not broadcast, or we fail in this method
+		newReserves, unspent = dcr.bondSpent(amt)
+		dcr.log.Debugf("New bond reserves (abandoned post) = %f DCR with %f in unspent bonds",
+			toDCRSigned(newReserves), toDCR(unspent)) // increment/restore and report new
+		_, err := dcr.returnCoins(coins)
+		if err != nil {
+			dcr.log.Errorf("error returning coins for unused bond tx: %v", coins)
+		}
 	}
+
 	var success bool
 	defer func() {
 		if !success {
-			_, err = dcr.returnCoins(coins)
-			if err != nil {
-				dcr.log.Errorf("error returning coins for unused bond tx: %v", coins)
-			}
+			abandon()
 		}
 	}()
 
+	_, err = dcr.addInputCoins(baseTx, coins)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	signedTx, _, _, _, err := dcr.signTxAndAddChange(baseTx, feeRate, -1, dcr.depositAccount())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	txid := signedTx.TxHash()
+	txid := signedTx.TxHash() // spentAmt := amt + fees
 
 	signedTxBytes, err := signedTx.Bytes()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	unsignedTxBytes, err := baseTx.Bytes()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Prep the redeem / refund tx.
 	redeemMsgTx, err := dcr.makeBondRefundTxV0(&txid, 0, amt, bondScript, bondKey, feeRate)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create bond redemption tx: %w", err)
+		return nil, nil, fmt.Errorf("unable to create bond redemption tx: %w", err)
 	}
 	redeemTx, err := redeemMsgTx.Bytes()
 	if err != nil {
-		return nil, fmt.Errorf("failed to serialize bond redemption tx: %w", err)
+		return nil, nil, fmt.Errorf("failed to serialize bond redemption tx: %w", err)
 	}
 
 	bond := &asset.Bond{
@@ -3477,7 +3540,7 @@ func (dcr *ExchangeWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime 
 	}
 	success = true
 
-	return bond, nil
+	return bond, abandon, nil
 }
 
 func (dcr *ExchangeWallet) makeBondRefundTxV0(txid *chainhash.Hash, vout uint32, amt uint64,
@@ -3555,9 +3618,17 @@ func (dcr *ExchangeWallet) RefundBond(ctx context.Context, ver uint16, coinID, s
 	if err != nil {
 		return nil, err
 	}
+	// Increment the enforced reserves before the refunded coins make it to the
+	// spendable balance, which could be spent by another concurrent process.
+	newReserves, unspent := dcr.bondSpent(amt) // nominal, not refundAmt
+	dcr.log.Debugf("New bond reserves (new refund of %f DCR) = %f DCR with %f in unspent bonds",
+		toDCR(amt), toDCRSigned(newReserves), toDCR(unspent))
 
 	redeemHash, err := dcr.wallet.SendRawTransaction(ctx, msgTx, false)
 	if err != nil { // TODO: we need to be much smarter about these send error types/codes
+		newReserves, unspent = dcr.bondLocked(amt) // assume it didn't really send :/
+		dcr.log.Debugf("New bond reserves (failed refund broadcast) = %f DCR with %f in unspent bonds",
+			toDCRSigned(newReserves), toDCR(unspent)) // increment/restore and report new
 		return nil, translateRPCCancelErr(err)
 	}
 
@@ -4601,6 +4672,10 @@ func reduceMsgTx(tx *wire.MsgTx) (in, out, fees, rate, size uint64) {
 // toDCR returns a float representation in conventional units for the given
 // atoms.
 func toDCR(v uint64) float64 {
+	return dcrutil.Amount(v).ToCoin()
+}
+
+func toDCRSigned(v int64) float64 {
 	return dcrutil.Amount(v).ToCoin()
 }
 
