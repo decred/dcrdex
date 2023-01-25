@@ -542,6 +542,23 @@ type exchangeWalletConfig struct {
 // client app communicates with the Decred blockchain and wallet. ExchangeWallet
 // satisfies the dex.Wallet interface.
 type ExchangeWallet struct {
+	reservesMtx sync.RWMutex // frequent reads for balance, infrequent updates
+	// bondReservesEnforced is used to reserve unspent amounts for upcoming bond
+	// transactions, including projected transaction fees, and does not include
+	// amounts that are currently locked in unspent bonds, which are in
+	// bondReservesUsed. When bonds are created, bondReservesEnforced is
+	// decremented and bondReservesUsed are incremented; when bonds are
+	// refunded, the reverse. bondReservesEnforced may become negative during
+	// the unbonding process.
+	bondReservesEnforced int64  // set by ReserveBondFunds, modified by bondSpent and bondLocked
+	bondReservesUsed     uint64 // set by RegisterUnspent, modified by bondSpent and bondLocked
+	// When bondReservesEnforced is non-zero, bondReservesNominal is the
+	// cumulative of all ReserveBondFunds and RegisterUnspent input amounts,
+	// with no fee padding. It includes the future and live (currently unspent)
+	// bond amounts. This amount only changes via ReserveBondFunds, and it is
+	// used to recognize when all reserves have been released.
+	bondReservesNominal int64 // only set by ReserveBondFunds
+
 	cfgV atomic.Value // *exchangeWalletConfig
 
 	ctx           context.Context // the asset subsystem starts with Connect(ctx)
@@ -573,6 +590,18 @@ type ExchangeWallet struct {
 
 func (dcr *ExchangeWallet) config() *exchangeWalletConfig {
 	return dcr.cfgV.Load().(*exchangeWalletConfig)
+}
+
+// reserves returns the total non-negative amount reserved to inform balance
+// reporting and transaction funding.
+func (dcr *ExchangeWallet) reserves() uint64 {
+	dcr.reservesMtx.RLock()
+	defer dcr.reservesMtx.RUnlock()
+	var reserves uint64
+	if r := dcr.bondReservesEnforced; r > 0 {
+		reserves = uint64(r)
+	}
+	return reserves
 }
 
 // Check that ExchangeWallet satisfies the Wallet interface.
@@ -916,12 +945,7 @@ func (dcr *ExchangeWallet) OwnsDepositAddress(address string) (bool, error) {
 	return dcr.wallet.AccountOwnsAddress(dcr.ctx, addr, dcr.depositAccount())
 }
 
-// Balance should return the total available funds in the wallet. Note that
-// after calling Fund, the amount returned by Balance may change by more than
-// the value funded. Part of the asset.Wallet interface. TODO: Since this
-// includes potentially untrusted 0-conf utxos, consider prioritizing confirmed
-// utxos when funding an order.
-func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
+func (dcr *ExchangeWallet) balance() (*asset.Balance, error) {
 	cfg := dcr.config()
 
 	locked, err := dcr.lockedAtoms(cfg.primaryAcct)
@@ -937,6 +961,7 @@ func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
 		Immature: toAtoms(ab.ImmatureCoinbaseRewards) +
 			toAtoms(ab.ImmatureStakeGeneration),
 		Locked: locked + toAtoms(ab.LockedByTickets),
+		Other:  make(map[string]uint64),
 	}
 
 	if cfg.unmixedAccount == "" {
@@ -966,6 +991,26 @@ func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
 	return bal, nil
 }
 
+// Balance should return the total available funds in the wallet.
+func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
+	bal, err := dcr.balance()
+	if err != nil {
+		return nil, err
+	}
+
+	reserves := dcr.reserves()
+	if reserves > bal.Available { // unmixed (immature) probably needs to trickle in
+		dcr.log.Warnf("Available balance is below configured reserves: %f < %f",
+			toDCR(bal.Available), toDCR(reserves))
+		bal.Other["Reserves Deficit"] = reserves - bal.Available
+		reserves = bal.Available
+	}
+	bal.Other["Bond Reserves (locked)"] = reserves
+	bal.Available -= reserves
+	bal.Locked += reserves
+
+	return bal, nil
+}
 // FeeRate satisfies asset.FeeRater.
 func (dcr *ExchangeWallet) FeeRate() uint64 {
 	const confTarget = 2 // 1 historically gives crazy rates

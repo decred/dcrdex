@@ -1230,6 +1230,7 @@ func randomBalance(assetID uint32) *core.WalletBalance {
 			Stamp: time.Now().Add(-time.Duration(int64(2 * float64(time.Hour) * rand.Float64()))),
 		},
 		ContractLocked: randVal(),
+		BondLocked:     randVal(),
 	}
 }
 

@@ -12,5 +12,11 @@ body.dark {
     .peers-table {
       @extend .table-dark;
     }
+
+    table#balanceTable {
+      tr.first-other {
+        border-top: 1px solid $dark_border_color;
+      }
+    }
   }
 }

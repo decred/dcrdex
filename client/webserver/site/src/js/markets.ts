@@ -2810,7 +2810,7 @@ class BalanceWidget {
     }
 
     addRow(intl.prep(intl.ID_AVAILABLE), bal.available, asset.unitInfo)
-    addRow(intl.prep(intl.ID_LOCKED), bal.locked + bal.contractlocked, asset.unitInfo)
+    addRow(intl.prep(intl.ID_LOCKED), bal.locked + bal.contractlocked + bal.bondlocked, asset.unitInfo)
     addRow(intl.prep(intl.ID_IMMATURE), bal.immature, asset.unitInfo)
     if (asset.token) {
       const { wallet: { balance }, unitInfo, symbol } = app().assets[asset.token.parentID]
