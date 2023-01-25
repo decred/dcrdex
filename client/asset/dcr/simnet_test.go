@@ -178,7 +178,7 @@ func TestMakeBondTx(t *testing.T) {
 	}
 
 	lockTime := time.Now().Add(5 * time.Minute)
-	bond, err := wallet.MakeBondTx(bondVer, fee, 10, lockTime, priv, acctID)
+	bond, _, err := wallet.MakeBondTx(bondVer, fee, 10, lockTime, priv, acctID)
 	if err != nil {
 		t.Fatal(err)
 	}
