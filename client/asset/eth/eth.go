@@ -325,7 +325,7 @@ type ethFetcher interface {
 	sendSignedTransaction(ctx context.Context, tx *types.Transaction) error
 	sendTransaction(ctx context.Context, txOpts *bind.TransactOpts, to common.Address, data []byte) (*types.Transaction, error)
 	signData(data []byte) (sig, pubKey []byte, err error)
-	syncProgress(context.Context) (*ethereum.SyncProgress, error)
+	syncProgress(context.Context) (progress *ethereum.SyncProgress, tipTime uint64, err error)
 	transactionConfirmations(context.Context, common.Hash) (uint32, error)
 	getTransaction(context.Context, common.Hash) (*types.Transaction, int64, error)
 	txOpts(ctx context.Context, val, maxGas uint64, maxFeeRate, nonce *big.Int) (*bind.TransactOpts, error)
@@ -622,7 +622,7 @@ func createWallet(createWalletParams *asset.CreateWalletParams, skipConnect bool
 			}
 
 			if len(unknownEndpoints) > 0 && createWalletParams.Net == dex.Mainnet {
-				providers, err := connectProviders(ctx, unknownEndpoints, createWalletParams.Logger, big.NewInt(chainIDs[createWalletParams.Net]))
+				providers, err := connectProviders(ctx, unknownEndpoints, createWalletParams.Logger, big.NewInt(chainIDs[createWalletParams.Net]), createWalletParams.Net)
 				if err != nil {
 					return err
 				}
@@ -2885,17 +2885,13 @@ func (*baseWallet) ValidateSecret(secret, secretHash []byte) bool {
 // more, requesting the best block header starts to fail after a few tries
 // during initial sync. Investigate how to get correct sync progress.
 func (eth *baseWallet) SyncStatus() (bool, float32, error) {
-	prog, err := eth.node.syncProgress(eth.ctx)
+	prog, tipTime, err := eth.node.syncProgress(eth.ctx)
 	if err != nil {
 		return false, 0, err
 	}
 	checkHeaderTime := func() (bool, error) {
-		bh, err := eth.node.bestHeader(eth.ctx)
-		if err != nil {
-			return false, err
-		}
 		// Time in the header is in seconds.
-		timeDiff := time.Now().Unix() - int64(bh.Time)
+		timeDiff := time.Now().Unix() - int64(tipTime)
 		if timeDiff > dexeth.MaxBlockInterval && eth.net != dex.Simnet {
 			eth.log.Infof("Time since last eth block (%d sec) exceeds %d sec."+
 				"Assuming not in sync. Ensure your computer's system clock "+

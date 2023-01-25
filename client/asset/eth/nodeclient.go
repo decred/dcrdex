@@ -248,10 +248,15 @@ func (n *nodeClient) sendTransaction(ctx context.Context, txOpts *bind.TransactO
 	return tx, n.leth.ApiBackend.SendTx(ctx, tx)
 }
 
-// syncProgress return the current sync progress. Returns no error and nil when not syncing.
-func (n *nodeClient) syncProgress(_ context.Context) (*ethereum.SyncProgress, error) {
+// syncProgress return the current sync progress and the best block's header
+// time in seconds. Returns no error and nil when not syncing.
+func (n *nodeClient) syncProgress(ctx context.Context) (*ethereum.SyncProgress, uint64, error) {
+	hdr, err := n.bestHeader(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
 	p := n.leth.ApiBackend.SyncProgress()
-	return &p, nil
+	return &p, hdr.Time, nil
 }
 
 // signData uses the private key of the address to sign a piece of data.

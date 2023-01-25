@@ -32,6 +32,7 @@ const (
 var (
 	dextestDir = filepath.Join(os.Getenv("HOME"), "dextest")
 	harnessDir = filepath.Join(dextestDir, "eth", "harness-ctl")
+	ctx        = context.Background()
 )
 
 func harnessCmd(ctx context.Context, exe string, args ...string) (string, error) {
@@ -47,9 +48,6 @@ func mine(ctx context.Context) error {
 }
 
 func testEndpoint(endpoints []string, syncBlocks uint64, tFunc func(context.Context, *multiRPCClient)) error {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-
 	dir, _ := os.MkdirTemp("", "")
 	defer os.RemoveAll(dir)
 
@@ -96,7 +94,6 @@ func testEndpoint(endpoints []string, syncBlocks uint64, tFunc func(context.Cont
 		tFunc(ctx, cl)
 	}
 
-	cancel()
 	time.Sleep(time.Second)
 
 	return nil
@@ -245,7 +242,7 @@ func testMonitorNet(t *testing.T, net dex.Network) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
+	ctx, cancel := context.WithTimeout(ctx, time.Hour)
 	defer cancel()
 
 	if err := cl.connect(ctx); err != nil {
@@ -266,15 +263,13 @@ func TestRPC(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	if err := cl.connect(ctx); err != nil {
 		t.Fatalf("connect error: %v", err)
 	}
 
-	for _, tt := range newCompatibilityTests(ctx, cl, cl.log) {
+	for _, tt := range newCompatibilityTests(cl, cl.log) {
 		tStart := time.Now()
-		if err := cl.withAny(tt.f); err != nil {
+		if err := cl.withAny(ctx, tt.f); err != nil {
 			t.Fatalf("%q: %v", tt.name, err)
 		}
 		fmt.Printf("### %q: %s \n", tt.name, time.Since(tStart))
@@ -295,8 +290,6 @@ func TestFreeServers(t *testing.T) {
 	runTest := func(endpoint string) error {
 		dir, _ := os.MkdirTemp("", "")
 		defer os.RemoveAll(dir)
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
 		cl, err := tRPCClient(dir, encode.RandomBytes(32), []string{endpoint}, dex.Mainnet, true)
 		if err != nil {
 			return fmt.Errorf("tRPCClient error: %v", err)
@@ -304,9 +297,9 @@ func TestFreeServers(t *testing.T) {
 		if err := cl.connect(ctx); err != nil {
 			return fmt.Errorf("connect error: %v", err)
 		}
-		return cl.withAny(func(p *provider) error {
-			for _, tt := range newCompatibilityTests(ctx, cl, cl.log) {
-				if err := tt.f(p); err != nil {
+		return cl.withAny(ctx, func(ctx context.Context, p *provider) error {
+			for _, tt := range newCompatibilityTests(cl, cl.log) {
+				if err := tt.f(ctx, p); err != nil {
 					return fmt.Errorf("%q error: %v", tt.name, err)
 				}
 				fmt.Printf("#### %q passed %q \n", endpoint, tt.name)
@@ -334,11 +327,9 @@ func TestFreeServers(t *testing.T) {
 func TestMainnetCompliance(t *testing.T) {
 	providerFile := readProviderFile(t, dex.Mainnet)
 	dir, _ := os.MkdirTemp("", "")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	log := dex.StdOutLogger("T", dex.LevelTrace)
-	providers, err := connectProviders(ctx, providerFile.Providers, log, big.NewInt(chainIDs[dex.Mainnet]))
+	providers, err := connectProviders(ctx, providerFile.Providers, log, big.NewInt(chainIDs[dex.Mainnet]), dex.Mainnet)
 	if err != nil {
 		t.Fatal(err)
 	}

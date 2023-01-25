@@ -97,6 +97,8 @@ type testNode struct {
 	bestHdr         *types.Header
 	bestHdrErr      error
 	syncProg        ethereum.SyncProgress
+	syncProgT       uint64
+	syncProgErr     error
 	bal             *big.Int
 	balErr          error
 	signDataErr     error
@@ -206,8 +208,8 @@ func (n *testNode) lock() error {
 func (n *testNode) locked() bool {
 	return false
 }
-func (n *testNode) syncProgress(context.Context) (*ethereum.SyncProgress, error) {
-	return &n.syncProg, nil
+func (n *testNode) syncProgress(context.Context) (prog *ethereum.SyncProgress, bestBlockUNIXTime uint64, err error) {
+	return &n.syncProg, n.syncProgT, n.syncProgErr
 }
 func (n *testNode) peerCount() uint32 {
 	return 1
@@ -465,8 +467,8 @@ func TestSyncStatus(t *testing.T) {
 	tests := []struct {
 		name                string
 		syncProg            ethereum.SyncProgress
+		syncProgErr         error
 		subSecs             uint64
-		bestHdrErr          error
 		wantErr, wantSynced bool
 		wantRatio           float32
 	}{{
@@ -492,22 +494,22 @@ func TestSyncStatus(t *testing.T) {
 		},
 		subSecs: dexeth.MaxBlockInterval + 1,
 	}, {
-		name:       "best header error",
-		bestHdrErr: errors.New(""),
+		name: "sync progress error",
 		syncProg: ethereum.SyncProgress{
 			CurrentBlock: 25,
 			HighestBlock: 0,
 		},
-		wantErr: true,
+		syncProgErr: errors.New(""),
+		wantErr:     true,
 	}}
 
 	for _, test := range tests {
 		nowInSecs := uint64(time.Now().Unix())
 		ctx, cancel := context.WithCancel(context.Background())
 		node := &testNode{
-			syncProg:   test.syncProg,
-			bestHdr:    &types.Header{Time: nowInSecs - test.subSecs},
-			bestHdrErr: test.bestHdrErr,
+			syncProg:    test.syncProg,
+			syncProgT:   nowInSecs - test.subSecs,
+			syncProgErr: test.syncProgErr,
 		}
 		eth := &baseWallet{
 			node: node,
