@@ -668,7 +668,8 @@ export default class WalletsPage extends BasePage {
     const { wallet, unitInfo: ui, symbol, id: assetID } = app().assets[this.selectedAssetID]
     const bal = wallet.balance
     Doc.show(page.balanceBox, page.walletDetails)
-    const totalBalance = bal.available + bal.locked + bal.immature
+    const totalLocked = bal.locked + bal.contractlocked + bal.bondlocked
+    const totalBalance = bal.available + totalLocked + bal.immature
     page.balance.textContent = Doc.formatCoinValue(totalBalance, ui)
     Doc.empty(page.balanceUnit)
     page.balanceUnit.appendChild(Doc.symbolize(symbol))
@@ -677,19 +678,27 @@ export default class WalletsPage extends BasePage {
       Doc.show(page.fiatBalanceBox)
       page.fiatBalance.textContent = Doc.formatFiatConversion(totalBalance, rate, ui)
     }
+    let firstOther = false
     Doc.empty(page.balanceDetailBox)
     const addSubBalance = (category: string, subBalance: number) => {
       const row = page.balanceDetailRow.cloneNode(true) as PageElement
+      if (firstOther) {
+        row.classList.add('first-other')
+        firstOther = false
+      }
       page.balanceDetailBox.appendChild(row)
       const tmpl = Doc.parseTemplate(row)
       tmpl.category.textContent = category
       tmpl.subBalance.textContent = Doc.formatCoinValue(subBalance, ui)
     }
     addSubBalance('Available', bal.available)
-    addSubBalance('Locked', bal.locked) // Hide if zero?
-    addSubBalance('Immature', bal.immature) // Hide if zero?
+    addSubBalance('Locked', totalLocked)
+    addSubBalance('Immature', bal.immature)
     const sortedCats = Object.entries(bal.other || {})
     sortedCats.sort((a: [string, number], b: [string, number]): number => a[0].localeCompare(b[0]))
+    firstOther = true
+    if (bal.contractlocked > 0) addSubBalance('Swapping (locked)', bal.contractlocked)
+    if (bal.bondlocked > 0) addSubBalance('Bonded (locked)', bal.bondlocked)
     for (const [cat, sub] of sortedCats) addSubBalance(cat, sub)
   }
 

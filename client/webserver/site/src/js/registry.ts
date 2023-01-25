@@ -205,6 +205,7 @@ export interface WalletBalance {
   stamp: string // time.Time
   orderlocked: number
   contractlocked: number
+  bondlocked: number
   other: Record<string, number>
 }
 

@@ -89,6 +89,10 @@
     td:last-child {
       text-align: right;
     }
+
+    tr.first-other {
+      border-top: 1px solid $light_border_color;
+    }
   }
 
   #balanceBreakdownBox {

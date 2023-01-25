@@ -96,17 +96,26 @@ type WalletForm struct {
 	ParentForm *WalletForm
 }
 
-// WalletBalance is an exchange wallet's balance which includes contractlocked
-// amounts in addition to other balance details stored in db.
+// WalletBalance is an exchange wallet's balance which includes various locked
+// amounts in addition to other balance details stored in db. Both the
+// ContractLocked and BondLocked amounts are not included in the Locked field of
+// the embedded asset.Balance since they correspond to outputs that are foreign
+// to the wallet i.e. only spendable by externally-crafted transactions. On the
+// other hand, OrderLocked is part of Locked since these are regular UTXOs that
+// have been locked by the wallet to fund an order's swap transaction.
 type WalletBalance struct {
 	*db.Balance
 	// OrderLocked is the total amount of funds that is currently locked
 	// for swap, but not actually swapped yet. This amount is also included
 	// in the `Locked` balance value.
 	OrderLocked uint64 `json:"orderlocked"`
-	// ContractLocked is the total amount of funds locked in unspent
-	// (i.e. unredeemed / unrefunded) swap contracts.
+	// ContractLocked is the total amount of funds locked in unspent (i.e.
+	// unredeemed / unrefunded) swap contracts. This amount is NOT included in
+	// the db.Balance.
 	ContractLocked uint64 `json:"contractlocked"`
+	// BondLocked is the total amount of funds locked in unspent fidelity bonds.
+	// This amount is NOT included in the db.Balance.
+	BondLocked uint64 `json:"bondlocked"`
 }
 
 // WalletState is the current status of an exchange wallet.

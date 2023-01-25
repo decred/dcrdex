@@ -1984,7 +1984,7 @@ func (c *Core) walletBalance(wallet *xcWallet) (*WalletBalance, error) {
 	if err != nil {
 		return nil, err
 	}
-	contractLockedAmt, orderLockedAmt := c.lockedAmounts(wallet.AssetID)
+	contractLockedAmt, orderLockedAmt, bondLockedAmt := c.lockedAmounts(wallet.AssetID)
 	return &WalletBalance{
 		Balance: &db.Balance{
 			Balance: *bal,
@@ -1992,6 +1992,7 @@ func (c *Core) walletBalance(wallet *xcWallet) (*WalletBalance, error) {
 		},
 		OrderLocked:    orderLockedAmt,
 		ContractLocked: contractLockedAmt,
+		BondLocked:     bondLockedAmt,
 	}, nil
 }
 
@@ -2015,11 +2016,13 @@ func (c *Core) updateWalletBalance(wallet *xcWallet) (*WalletBalance, error) {
 }
 
 // lockedAmounts returns the total amount locked in unredeemed and unrefunded
-// swaps (contractLocked) and the total amount locked by orders for future
-// swaps (orderLocked). Only applies to trades where the specified assetID is
-// the fromAssetID.
-func (c *Core) lockedAmounts(assetID uint32) (contractLocked, orderLocked uint64) {
+// swaps (contractLocked), the total amount locked by orders for future swaps
+// (orderLocked), and the total amount locked in fidelity bonds (bondLocked).
+// Only applies to trades where the specified assetID is the fromAssetID.
+func (c *Core) lockedAmounts(assetID uint32) (contractLocked, orderLocked, bondLocked uint64) {
 	for _, dc := range c.dexConnections() {
+		tot, _ := dc.bondTotal(assetID)
+		bondLocked += tot
 		for _, tracker := range dc.trackedTrades() {
 			if tracker.fromAssetID == assetID {
 				tracker.mtx.RLock()
@@ -2590,7 +2593,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	assetID := dbWallet.AssetID
 
 	// Construct the unconnected xcWallet.
-	contractLockedAmt, orderLockedAmt := c.lockedAmounts(assetID)
+	contractLockedAmt, orderLockedAmt, bondLockedAmt := c.lockedAmounts(assetID)
 	wallet := &xcWallet{ // captured by the PeersChange closure
 		AssetID: assetID,
 		Symbol:  unbip(assetID),
@@ -2598,6 +2601,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 			Balance:        dbWallet.Balance,
 			OrderLocked:    orderLockedAmt,
 			ContractLocked: contractLockedAmt,
+			BondLocked:     bondLockedAmt,
 		},
 		encPass:      dbWallet.EncryptedPW,
 		address:      dbWallet.Address,
@@ -2719,18 +2723,28 @@ func (dc *dexConnection) bondOpts() (assetID uint32, targetTier, max uint64) {
 	return dc.acct.bondAsset, dc.acct.targetTier, dc.acct.maxBondedAmt
 }
 
-func (dc *dexConnection) hasActiveBond(assetID uint32) bool {
-	check := func(bonds []*db.Bond) bool {
+func (dc *dexConnection) bondTotalInternal(assetID uint32) (total, active uint64) {
+	sum := func(bonds []*db.Bond) (amt uint64) {
 		for _, b := range bonds {
 			if assetID == b.AssetID {
-				return true
+				amt += b.Amount
 			}
 		}
-		return false
+		return
 	}
+	active = sum(dc.acct.bonds)
+	return active + sum(dc.acct.pendingBonds) + sum(dc.acct.expiredBonds), active
+}
+
+func (dc *dexConnection) bondTotal(assetID uint32) (total, active uint64) {
 	dc.acct.authMtx.RLock()
 	defer dc.acct.authMtx.RUnlock()
-	return check(dc.acct.bonds) || check(dc.acct.pendingBonds) || check(dc.acct.expiredBonds)
+	return dc.bondTotalInternal(assetID)
+}
+
+func (dc *dexConnection) hasUnspentBond(assetID uint32) bool {
+	total, _ := dc.bondTotal(assetID)
+	return total > 0
 }
 
 // isActiveBondAsset indicates if a wallet (or it's parent if the asset is a
@@ -2761,7 +2775,7 @@ func (c *Core) isActiveBondAsset(assetID uint32, includeLive bool) bool {
 		}
 		if includeLive {
 			for id := range assetIDs {
-				if dc.hasActiveBond(id) {
+				if dc.hasUnspentBond(id) {
 					return true
 				}
 			}
@@ -3015,9 +3029,9 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 		return err
 	}
 	c.log.Infof("Connected to and unlocked %s wallet. Balance available "+
-		"= %d / locked = %d / locked in contracts = %d, Deposit address = %s",
+		"= %d / locked = %d / locked in contracts = %d, locked in bonds = %d, Deposit address = %s",
 		state.Symbol, balances.Available, balances.Locked, balances.ContractLocked,
-		state.Address)
+		balances.BondLocked, state.Address)
 
 	c.wg.Add(1)
 	func() {
