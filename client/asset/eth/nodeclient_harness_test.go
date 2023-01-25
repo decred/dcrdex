@@ -438,7 +438,10 @@ func runSimnet(m *testing.M) (int, error) {
 	}
 
 	// Fund the wallets.
-	homeDir, _ := os.UserHomeDir()
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return 1, err
+	}
 	harnessCtlDir := filepath.Join(homeDir, "dextest", "eth", "harness-ctl")
 	send := func(exe, addr, amt string) error {
 		cmd := exec.CommandContext(ctx, exe, addr, amt)
@@ -737,22 +740,13 @@ func syncClient(cl ethFetcher) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		prog, err := cl.syncProgress(ctx)
+		prog, tipTime, err := cl.syncProgress(ctx)
 		if err != nil {
 			return err
 		}
 		if isTestnet {
-			if prog.HighestBlock == 0 {
-				bh, err := cl.bestHeader(ctx)
-				if err != nil {
-					return err
-				}
-				// Time in the header is in seconds.
-				timeDiff := time.Now().Unix() - int64(bh.Time)
-				if timeDiff < dexeth.MaxBlockInterval {
-					return nil
-				}
-			} else if prog.CurrentBlock >= prog.HighestBlock {
+			timeDiff := time.Now().Unix() - int64(tipTime)
+			if timeDiff < dexeth.MaxBlockInterval {
 				return nil
 			}
 		} else {
@@ -1111,7 +1105,7 @@ func testSwap(t *testing.T, assetID uint32) {
 }
 
 func testSyncProgress(t *testing.T) {
-	p, err := ethClient.syncProgress(ctx)
+	p, _, err := ethClient.syncProgress(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2016,7 +2010,10 @@ func testRefund(t *testing.T, assetID uint32) {
 				t.Fatalf("%s: pre-redeem mining error: %v", test.name, err)
 			}
 
-			txOpts, _ = participantEthClient.txOpts(ctx, 0, gases.RedeemN(1), nil, nil)
+			txOpts, err = participantEthClient.txOpts(ctx, 0, gases.RedeemN(1), nil, nil)
+			if err != nil {
+				t.Fatalf("%s: txOpts error: %v", test.name, err)
+			}
 			_, err := pc.redeem(txOpts, []*asset.Redemption{newRedeem(secret, secretHash)})
 			if err != nil {
 				t.Fatalf("%s: redeem error: %v", test.name, err)
