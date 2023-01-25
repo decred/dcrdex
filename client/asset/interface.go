@@ -160,6 +160,9 @@ const (
 	// ErrWalletTypeDisabled inidicates that a wallet type is no longer
 	// available.
 	ErrWalletTypeDisabled = dex.ErrorKind("wallet type has been disabled")
+	// ErrInsufficientBalance is returned when there is insufficient available
+	// balance for an operation, such as reserving funds for future bonds.
+	ErrInsufficientBalance = dex.ErrorKind("insufficient available balance")
 
 	// InternalNodeLoggerName is the name for a logger that is used to fine
 	// tune log levels for only loggers using this name.

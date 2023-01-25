@@ -1192,10 +1192,7 @@ func (dcr *ExchangeWallet) maxOrder(lotSize, feeSuggestion, maxFeeRate uint64) (
 	if err != nil {
 		return nil, nil, fmt.Errorf("error parsing unspent outputs: %w", err)
 	}
-	var avail uint64
-	for _, utxo := range utxos {
-		avail += toAtoms(utxo.rpc.Amount)
-	}
+	avail := sumUTXOs(utxos)
 
 	// Start by attempting max lots with a basic fee.
 	basicFee := dexdcr.InitTxSize * maxFeeRate
@@ -1219,12 +1216,6 @@ func (dcr *ExchangeWallet) maxOrder(lotSize, feeSuggestion, maxFeeRate uint64) (
 // estimateSwap prepares an *asset.SwapEstimate.
 func (dcr *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate uint64, utxos []*compositeUTXO,
 	trySplit bool, feeBump float64) (*asset.SwapEstimate, bool /*split used*/, uint64 /* locked */, error) {
-
-	var avail uint64
-	for _, utxo := range utxos {
-		avail += toAtoms(utxo.rpc.Amount)
-	}
-
 	// If there is a fee bump, the networkFeeRate can be higher than the
 	// MaxFeeRate
 	bumpedMaxRate := maxFeeRate
@@ -1240,29 +1231,40 @@ func (dcr *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate
 	// more UTXOs. Actual order funding accounts for this. For this estimate, we
 	// will just not use a split tx if the split-adjusted required funds exceeds
 	// the total value of the UTXO selected with this enough closure.
-	sum, inputsSize, _, _, _, err := tryFund(utxos, orderEnough(val, lots, bumpedMaxRate))
+	sum, _, inputsSize, _, _, _, err := tryFund(utxos, orderEnough(val, lots, bumpedMaxRate, trySplit))
 	if err != nil {
 		return nil, false, 0, err
 	}
 
-	reqFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots,
-		dexdcr.InitTxSizeBase, dexdcr.InitTxSize, bumpedMaxRate) // as in tryFund's enough func
-	maxFees := reqFunds - val
+	avail := sumUTXOs(utxos)
+	reserves := dcr.reserves()
 
-	estHighFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots,
-		dexdcr.InitTxSizeBase, dexdcr.InitTxSize, bumpedNetRate)
-	estHighFees := estHighFunds - val
+	digestInputs := func(inputsSize uint32) (reqFunds, maxFees, estHighFees, estLowFees uint64) {
+		// NOTE: reqFunds = val + fees, so change (extra) will be sum-reqFunds
+		reqFunds = calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots,
+			dexdcr.InitTxSizeBase, dexdcr.InitTxSize, bumpedMaxRate) // as in tryFund's enough func
+		maxFees = reqFunds - val
 
-	estLowFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), 1,
-		dexdcr.InitTxSizeBase, dexdcr.InitTxSize, bumpedNetRate) // best means single multi-lot match, even better than batch
-	estLowFees := estLowFunds - val
+		estHighFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots,
+			dexdcr.InitTxSizeBase, dexdcr.InitTxSize, bumpedNetRate)
+		estHighFees = estHighFunds - val
+
+		estLowFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), 1,
+			dexdcr.InitTxSizeBase, dexdcr.InitTxSize, bumpedNetRate) // best means single multi-lot match, even better than batch
+		estLowFees = estLowFunds - val
+		return
+	}
+
+	reqFunds, maxFees, estHighFees, estLowFees := digestInputs(inputsSize)
 
 	// Math for split transactions is a little different.
 	if trySplit {
 		splitMaxFees := splitTxBaggage * bumpedMaxRate
 		splitFees := splitTxBaggage * bumpedNetRate
 		reqTotal := reqFunds + splitMaxFees // ~ rather than actually fund()ing again
-		if reqTotal <= sum {
+		// We must consider splitMaxFees otherwise we'd skip the split on
+		// account of excess baggage.
+		if sum-reqTotal >= reserves { // avail-sum+extra > reserves && reqTotal <= sum
 			return &asset.SwapEstimate{
 				Lots:               lots,
 				Value:              val,
@@ -1271,6 +1273,21 @@ func (dcr *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate
 				RealisticWorstCase: estHighFees + splitFees,
 			}, true, reqFunds, nil // requires reqTotal, but locks reqFunds in the split output
 		}
+	}
+
+	if sum > avail-reserves { // no split means no change available for reserves
+		if trySplit { // if we tried with a split, that's the best we can do
+			return nil, false, 0, errors.New("eats bond reserves")
+		}
+		// Like the fund() method, try again with some utxos taken out of the
+		// mix for reserves, as precise in value as possible.
+		kept := leastOverFund(reserves, utxos)
+		utxos = utxoSetDiff(utxos, kept)
+		sum, _, inputsSize, _, _, _, err = tryFund(utxos, orderEnough(val, lots, bumpedMaxRate, false))
+		if err != nil { // no joy with the reduced set
+			return nil, false, 0, err
+		}
+		_, maxFees, estHighFees, estLowFees = digestInputs(inputsSize)
 	}
 
 	// No split transaction.
@@ -1573,17 +1590,6 @@ func (dcr *ExchangeWallet) SingleLotRedeemFees(req *asset.PreRedeemForm) (uint64
 	return preRedeem.Estimate.RealisticWorstCase, nil
 }
 
-// orderEnough generates a function that can be used as the enough argument to
-// the fund method.
-func orderEnough(val, lots, feeRate uint64) func(sum uint64, size uint32, unspent *compositeUTXO) bool {
-	return func(sum uint64, size uint32, unspent *compositeUTXO) bool {
-		reqFunds := calc.RequiredOrderFundsAlt(val, uint64(size+unspent.input.Size()), lots,
-			dexdcr.InitTxSizeBase, dexdcr.InitTxSize, feeRate)
-		// needed fees are reqFunds - value
-		return sum+toAtoms(unspent.rpc.Amount) >= reqFunds
-	}
-}
-
 // FundOrder selects coins for use in an order. The coins will be locked, and
 // will not be returned in subsequent calls to FundOrder or calculated in calls
 // to Available, unless they are unlocked with ReturnCoins.
@@ -1630,19 +1636,25 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 		dcr.log.Errorf("calcBumpRate error: %v", err)
 	}
 
-	coins, redeemScripts, sum, inputsSize, err := dcr.fund(orderEnough(ord.Value, ord.MaxSwapCount, bumpedMaxRate))
+	useSplit := cfg.useSplitTx
+	if customCfg.Split != nil {
+		useSplit = *customCfg.Split
+	}
+	if ord.Immediate {
+		useSplit = false
+	}
+
+	changeForReserves := useSplit && cfg.unmixedAccount == ""
+	reserves := dcr.reserves()
+	coins, redeemScripts, sum, inputsSize, err := dcr.fund(reserves,
+		orderEnough(ord.Value, ord.MaxSwapCount, bumpedMaxRate, changeForReserves))
 	if err != nil {
 		return nil, nil, fmt.Errorf("error funding order value of %s DCR: %w",
 			amount(ord.Value), err)
 	}
 
-	useSplit := cfg.useSplitTx
-	if customCfg.Split != nil {
-		useSplit = *customCfg.Split
-	}
-
 	// Send a split, if preferred.
-	if useSplit && !ord.Immediate {
+	if useSplit {
 		// We apply the bumped fee rate to the split transaction when the
 		// PreSwap is created, so we use that bumped rate here too.
 		// But first, check that it's within bounds.
@@ -1684,8 +1696,12 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 // fund finds coins for the specified value. A function is provided that can
 // check whether adding the provided output would be enough to satisfy the
 // needed value. Preference is given to selecting coins with 1 or more confs,
-// falling back to 0-conf coins where there are not enough 1+ confs coins.
-func (dcr *ExchangeWallet) fund(enough func(sum uint64, size uint32, unspent *compositeUTXO) bool) (
+// falling back to 0-conf coins where there are not enough 1+ confs coins. If
+// change should not be considered "kept" (e.g. no preceding split txn, or
+// mixing sends change to umixed account where it is unusable for reserves),
+// caller should return 0 extra from enough func.
+func (dcr *ExchangeWallet) fund(keep uint64, // leave utxos for this reserve amt
+	enough func(sum uint64, size uint32, unspent *compositeUTXO) (bool, uint64)) (
 	coins asset.Coins, redeemScripts []dex.Bytes, sum, size uint64, err error) {
 
 	// Keep a consistent view of spendable and locked coins in the wallet and
@@ -1698,9 +1714,34 @@ func (dcr *ExchangeWallet) fund(enough func(sum uint64, size uint32, unspent *co
 		return nil, nil, 0, 0, err
 	}
 
-	sum, sz, coins, spents, redeemScripts, err := tryFund(utxos, enough)
+	avail := sumUTXOs(utxos)
+	if keep > avail { // skip utxo selection if we can't possibly make reserves
+		return nil, nil, 0, 0, asset.ErrInsufficientBalance
+	}
+
+	sum, extra, sz, coins, spents, redeemScripts, err := tryFund(utxos, enough)
 	if err != nil {
 		return nil, nil, 0, 0, err
+	}
+
+	if avail-sum+extra < keep {
+		if extra != 0 { // there was usable change from enough, just not enough
+			return nil, nil, 0, 0, asset.ErrInsufficientBalance
+		} // else caller probably not granting change
+		// NOTE: tryFund above may not have tried 0-conf, but we may now.
+
+		dcr.log.Debugf("Trying again with some UTXOs excluded for required reserves of %v DCR",
+			toDCR(keep))
+
+		// Try again with some utxos taken out of the mix for keep. Select these
+		// with the objective of being as close to the amount as possible,
+		// unlike tryFund that minimizes the number of UTXOs chosen.
+		kept := leastOverFund(keep, utxos)
+		utxos = utxoSetDiff(utxos, kept)
+		sum, _, sz, coins, spents, redeemScripts, err = tryFund(utxos, enough)
+		if err != nil { // no joy with the reduced set
+			return nil, nil, 0, 0, err
+		}
 	}
 
 	err = dcr.lockFundingCoins(spents)
@@ -1744,12 +1785,14 @@ func (dcr *ExchangeWallet) spendableUTXOs() ([]*compositeUTXO, error) {
 	return utxos, nil
 }
 
-// tryFund attempts to use the provided []*compositeUTXO to satisfy the enough
-// function with the fewest number of inputs. The selected utxos are not locked.
-// If the requirement can be satisfied without 0-conf utxos, that set will be
-// selected regardless of whether the 0-conf inclusive case would be cheaper.
-func tryFund(utxos []*compositeUTXO, enough func(sum uint64, size uint32, unspent *compositeUTXO) bool) (
-	sum uint64, size uint32, coins asset.Coins, spents []*fundingCoin, redeemScripts []dex.Bytes, err error) {
+// tryFund attempts to use the provided UTXO set to satisfy the enough function
+// with the fewest number of inputs. The selected utxos are not locked. If the
+// requirement can be satisfied without 0-conf utxos, that set will be selected
+// regardless of whether the 0-conf inclusive case would be cheaper. The
+// provided UTXOs must be sorted in ascending order by value.
+func tryFund(utxos []*compositeUTXO,
+	enough func(sum uint64, size uint32, unspent *compositeUTXO) (bool, uint64)) (
+	sum, extra uint64, size uint32, coins asset.Coins, spents []*fundingCoin, redeemScripts []dex.Bytes, err error) {
 
 	addUTXO := func(unspent *compositeUTXO) error {
 		txHash, err := chainhash.NewHashFromStr(unspent.rpc.TxID)
@@ -1775,7 +1818,8 @@ func tryFund(utxos []*compositeUTXO, enough func(sum uint64, size uint32, unspen
 	}
 
 	isEnoughWith := func(utxo *compositeUTXO) bool {
-		return enough(sum, size, utxo)
+		ok, _ := enough(sum, size, utxo)
+		return ok
 	}
 
 	tryUTXOs := func(minconf int64) (ok bool, err error) {
@@ -1809,9 +1853,11 @@ func tryFund(utxos []*compositeUTXO, enough func(sum uint64, size uint32, unspen
 			idx := sort.Search(len(okUTXOs), func(i int) bool {
 				return isEnoughWith(okUTXOs[i])
 			})
-			// No need to check idx == -1. We already verified that the last
+			// No need to check idx == n. We already verified that the last
 			// utxo passes above.
-			if err = addUTXO(okUTXOs[idx]); err != nil {
+			final := okUTXOs[idx]
+			_, extra = enough(sum, size, final) // sort.Search might not have called isEnough for this utxo last
+			if err = addUTXO(final); err != nil {
 				return false, err
 			}
 			return true, nil
@@ -1821,18 +1867,18 @@ func tryFund(utxos []*compositeUTXO, enough func(sum uint64, size uint32, unspen
 	// First try with confs>0.
 	ok, err := tryUTXOs(1)
 	if err != nil {
-		return 0, 0, nil, nil, nil, err
+		return 0, 0, 0, nil, nil, nil, err
 	}
 
 	// Fallback to allowing 0-conf outputs.
 	if !ok {
 		ok, err = tryUTXOs(0)
 		if err != nil {
-			return 0, 0, nil, nil, nil, err
+			return 0, 0, 0, nil, nil, nil, err
 		}
 		if !ok {
-			return 0, 0, nil, nil, nil, fmt.Errorf("not enough to cover requested funds. "+
-				"%s DCR available in %d UTXOs", amount(sum), len(coins))
+			return 0, 0, 0, nil, nil, nil, fmt.Errorf("not enough to cover requested funds. "+
+				"%s DCR available in %d UTXOs (%w)", amount(sum), len(coins), asset.ErrInsufficientBalance)
 		}
 	}
 
@@ -1879,6 +1925,12 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 		dcr.log.Debugf("Skipping split transaction because cost is greater than potential over-lock. %s > %s.",
 			amount(baggageFees), amount(excess))
 		dcr.log.Infof("Funding %s DCR order with coins %v worth %s", valStr, coins, amount(coinSum))
+		// NOTE: The caller may be expecting a split to happen to maintain
+		// reserves via the change from the split, but the amount held locked
+		// when skipping the split in this case is roughly equivalent to the
+		// loss to fees in a split. This trivial amount is of no concern because
+		// the reserves should be buffered for amounts much larger than the fees
+		// on a single transaction.
 		return coins, false, nil
 	}
 
@@ -3804,10 +3856,11 @@ func (dcr *ExchangeWallet) withdraw(addr stdaddr.Address, val, feeRate uint64) (
 	if val == 0 {
 		return nil, 0, fmt.Errorf("cannot withdraw value = 0")
 	}
-	enough := func(sum uint64, size uint32, unspent *compositeUTXO) bool {
-		return sum+toAtoms(unspent.rpc.Amount) >= val
-	}
-	coins, _, _, _, err := dcr.fund(enough)
+	baseSize := uint32(dexdcr.MsgTxOverhead + dexdcr.P2PKHOutputSize*2)
+	reportChange := dcr.config().unmixedAccount == "" // otherwise change goes to unmixed account
+	enough := sendEnough(val, feeRate, true, baseSize, reportChange)
+	reserves := dcr.reserves()
+	coins, _, _, _, err := dcr.fund(reserves, enough)
 	if err != nil {
 		return nil, 0, fmt.Errorf("unable to withdraw %s DCR to address %s with feeRate %d atoms/byte: %w",
 			amount(val), addr, feeRate, err)
@@ -3828,11 +3881,10 @@ func (dcr *ExchangeWallet) withdraw(addr stdaddr.Address, val, feeRate uint64) (
 // TODO: Just use the sendtoaddress rpc since dcrwallet respects locked utxos!
 func (dcr *ExchangeWallet) sendToAddress(addr stdaddr.Address, amt, feeRate uint64) (*wire.MsgTx, uint64, error) {
 	baseSize := uint32(dexdcr.MsgTxOverhead + dexdcr.P2PKHOutputSize*2) // may be extra if change gets omitted (see signTxAndAddChange)
-	enough := func(sum uint64, size uint32, unspent *compositeUTXO) bool {
-		txFee := uint64(baseSize+size+unspent.input.Size()) * feeRate
-		return sum+toAtoms(unspent.rpc.Amount) >= amt+txFee
-	}
-	coins, _, _, _, err := dcr.fund(enough)
+	reportChange := dcr.config().unmixedAccount == ""                   // otherwise change goes to unmixed account
+	enough := sendEnough(amt, feeRate, false, baseSize, reportChange)
+	reserves := dcr.reserves()
+	coins, _, _, _, err := dcr.fund(reserves, enough)
 	if err != nil {
 		return nil, 0, fmt.Errorf("Unable to send %s DCR with fee rate of %d atoms/byte: %w",
 			amount(amt), feeRate, err)
@@ -3958,7 +4010,8 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, feeRate uint64, su
 // subtractFrom indicates the output from which fees should be subtracted, where
 // -1 indicates fees should come out of a change output. baseTx may be modified
 // with an added change output or a reduced value of the subtractFrom output.
-func (dcr *ExchangeWallet) signTxAndAddChange(baseTx *wire.MsgTx, feeRate uint64, subtractFrom int32, changeAcct string) (*wire.MsgTx, *output, string, uint64, error) {
+func (dcr *ExchangeWallet) signTxAndAddChange(baseTx *wire.MsgTx, feeRate uint64,
+	subtractFrom int32, changeAcct string) (*wire.MsgTx, *output, string, uint64, error) {
 	// Sign the transaction to get an initial size estimate and calculate
 	// whether a change output would be dust.
 	sigCycles := 1
@@ -4140,26 +4193,24 @@ func (dcr *ExchangeWallet) EstimateSendTxFee(address string, sendAmount, feeRate
 	tx := wire.NewMsgTx()
 
 	tx.AddTxOut(newTxOut(int64(sendAmount), payScriptVer, pkScript)) // payScriptVer is default zero
-	minTxSize := uint32(tx.SerializeSize())
-
-	// If subtract, select enough inputs for amount because the fees will be
-	// taken from the amount, else select enough inputs to cover minimum fees.
-	enough := func(sum uint64, inputSize uint32, unspent *compositeUTXO) bool {
-		if subtract {
-			return sum+toAtoms(unspent.rpc.Amount) >= sendAmount
-		}
-		minFee := uint64(minTxSize+inputSize+unspent.input.Size()) * feeRate
-		return sum+toAtoms(unspent.rpc.Amount) >= sendAmount+minFee
-	}
 
 	utxos, err := dcr.spendableUTXOs()
 	if err != nil {
 		return 0, false, err
 	}
 
-	sum, inputsSize, _, _, _, err := tryFund(utxos, enough)
+	minTxSize := uint32(tx.SerializeSize())
+	reportChange := dcr.config().unmixedAccount == ""
+	enough := sendEnough(sendAmount, feeRate, subtract, minTxSize, reportChange)
+	sum, extra, inputsSize, _, _, _, err := tryFund(utxos, enough)
 	if err != nil {
 		return 0, false, err
+	}
+
+	reserves := dcr.reserves()
+	avail := sumUTXOs(utxos)
+	if avail-sum+extra /* avail-sendAmount-fees */ < reserves {
+		return 0, false, errors.New("violates reserves")
 	}
 
 	txSize := uint64(minTxSize + inputsSize)
