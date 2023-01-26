@@ -508,6 +508,26 @@ func (w *xcWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Tim
 	return bonder.MakeBondTx(ver, amt, feeRate, lockTime, priv, acctID)
 }
 
+// ReserveBondFunds reserves funds for future bonds given known live bonds.
+func (w *xcWallet) ReserveBondFunds(future int64, respectBalance bool) bool {
+	bonder, ok := w.Wallet.(asset.Bonder)
+	if !ok {
+		return false
+	}
+	return bonder.ReserveBondFunds(future, respectBalance)
+}
+
+// RegisterUnspent informs the wallet of existing bond amounts that will be
+// refunded with RefundBond. If reserves are subsequently enabled with
+// ReserveBondFunds, these amounts are combined into a "nominal" reserves.
+func (w *xcWallet) RegisterUnspent(live uint64) {
+	bonder, ok := w.Wallet.(asset.Bonder)
+	if !ok {
+		return
+	}
+	bonder.RegisterUnspent(live)
+}
+
 // RefundBond will refund the bond if the asset.Wallet implementation is a
 // Bonder. The lock time must be passed to spend the bond. LockTimeExpired
 // should be used to check first.

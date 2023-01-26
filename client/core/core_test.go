@@ -5772,12 +5772,21 @@ var (
 	}
 )
 
+// auth sets the account as authenticated at the provided tier.
+func auth(a *dexAccount, tier int64, legacyFeePaid bool) {
+	a.authMtx.Lock()
+	a.isAuthed = true
+	a.tier = tier
+	a.legacyFeePaid = legacyFeePaid
+	a.authMtx.Unlock()
+}
+
 func TestResolveActiveTrades(t *testing.T) {
 	rig := newTestRig()
 	defer rig.shutdown()
 	tCore := rig.core
 
-	rig.acct.auth(1, false) // Short path through initializeDEXConnections
+	auth(rig.acct, 1, false) // Short path through initializeDEXConnections
 
 	utxoAsset /* base */, acctAsset /* quote */ := tUTXOAssetB, tACCTAsset
 
@@ -5943,7 +5952,7 @@ func TestReReserveFunding(t *testing.T) {
 	defer rig.shutdown()
 	tCore := rig.core
 
-	rig.acct.auth(1, false) // Short path through initializeDEXConnections
+	auth(rig.acct, 1, false) // Short path through initializeDEXConnections
 
 	utxoAsset /* base */, acctAsset /* quote */ := tUTXOAssetB, tACCTAsset
 

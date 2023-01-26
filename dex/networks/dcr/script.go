@@ -127,6 +127,10 @@ const (
 	// compressed pubkey, and the bond script. Each of said data pushes use an
 	// OP_DATA_ code.
 	RedeemBondSigScriptSize = 1 + DERSigLength + 1 + pubkeyLength + 1 + BondScriptSize // 141
+
+	// BondPushDataSize is the size of the nulldata in a bond commitment output:
+	//  OP_RETURN <pushData: ver[2] | account_id[32] | lockTime[4] | pkh[20]>
+	BondPushDataSize = 2 + account.HashSize + 4 + 20
 )
 
 // ScriptType is a bitmask with information about a pubkey script and
@@ -349,8 +353,7 @@ func extractBondCommitDataV0(pushData []byte) (acct account.AccountID, lockTime 
 		return
 	}
 
-	const wantPushSize = 2 + account.HashSize + 4 + 20
-	if len(pushData) != wantPushSize {
+	if len(pushData) != BondPushDataSize {
 		err = fmt.Errorf("invalid bond commitment output script length: %d", len(pushData))
 		return
 	}

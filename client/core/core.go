@@ -213,6 +213,23 @@ func (dc *dexConnection) bondAsset(assetID uint32) (*msgjson.BondAsset, uint64) 
 	return bondAsset, bondExpiry // bondAsset may be nil
 }
 
+func (dc *dexConnection) bondAssets() (map[uint32]*BondAsset, uint64) {
+	bondAssets := make(map[uint32]*BondAsset)
+	cfg := dc.config()
+	if cfg == nil {
+		return nil, 0
+	}
+	for symb, ba := range cfg.BondAssets {
+		assetID, ok := dex.BipSymbolID(symb)
+		if !ok {
+			continue
+		}
+		coreBondAsset := BondAsset(*ba)
+		bondAssets[assetID] = &coreBondAsset
+	}
+	return bondAssets, cfg.BondExpiry
+}
+
 // marketConfig is the market's configuration, as returned by the server in the
 // 'config' response.
 func (dc *dexConnection) marketConfig(mktID string) *msgjson.Market {
@@ -1887,6 +1904,22 @@ func (c *Core) connectWalletResumeTrades(w *xcWallet, resumeTrades bool) (deposi
 	err = w.Connect() // ensures valid deposit address
 	if err != nil {
 		return "", newError(connectWalletErr, "failed to connect %s wallet: %w", w.Symbol, err)
+	}
+
+	// Register existing bonds with wallets for possible reserves accounting.
+	for _, dc := range c.dexConnections() {
+		// Register all current unspent bonds with this xcWallet instance.
+		if unspent, _ := dc.bondTotal(w.AssetID); unspent > 0 {
+			w.RegisterUnspent(unspent)
+			// We are assuming that if this is a reused instance, the prior
+			// disconnect cleared it all, but if not we may need to move this to
+			// a login-only method like connectWallets and have
+			// ReconfigureWallet also do this as part of reReserveFunds.
+			// However, doing it on wallet connect assures that if a wallet
+			// failed to connect on login, reserves will be set properly when it
+			// is connected later. A dc.acct.unregistered bonds slice could
+			// address this, but let's avoid that if we can.
+		}
 	}
 
 	// This may be a wallet that does not require a password, so we can attempt
@@ -4514,7 +4547,7 @@ func (c *Core) Login(pw []byte) error {
 		// is needed for active trades, it will be unlocked in resolveActiveTrades
 		// and the balance updated there.
 		c.notify(newLoginNote("Connecting wallets..."))
-		c.connectWallets()
+		c.connectWallets() // initialize reserves
 		c.notify(newLoginNote("Resuming active trades..."))
 		c.resolveActiveTrades(crypter)
 		c.notify(newLoginNote("Connecting to DEX servers..."))
@@ -4530,7 +4563,7 @@ func (c *Core) Login(pw []byte) error {
 }
 
 // connectWallets attempts to connect to and retrieve balance from all known
-// wallets.
+// wallets. This should be done only ONCE on Login.
 func (c *Core) connectWallets() {
 	var wg sync.WaitGroup
 	var connectCount uint32
@@ -4915,7 +4948,7 @@ func (c *Core) MaxSell(host string, base, quote uint32) (*MaxOrderEstimate, erro
 }
 
 // initializeDEXConnections connects to the DEX servers in the conns map and
-// authenticates the connection. This is done on Login.
+// authenticates the connection.
 func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) {
 	var wg sync.WaitGroup
 	conns := c.dexConnections()
@@ -4953,7 +4986,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) {
 			}
 		}
 
-		if dc.acct.authed() {
+		if dc.acct.authed() { // should not be possible with newly idempotent login, but there's AccountImport...
 			continue // authDEX already done
 		}
 
@@ -6029,13 +6062,10 @@ func bondKey(assetID uint32, coinID []byte) string {
 
 // authDEX authenticates the connection for a DEX.
 func (c *Core) authDEX(dc *dexConnection) error {
-	dc.cfgMtx.RLock()
-	cfg := dc.cfg
-	dc.cfgMtx.RUnlock()
-	if cfg == nil { // reconnect loop may be running
+	bondAssets, bondExpiry := dc.bondAssets()
+	if bondAssets == nil { // reconnect loop may be running
 		return fmt.Errorf("dex connection not usable prior to config request")
 	}
-	bondAssets := cfg.BondAssets
 
 	// Copy the local bond slices since bondConfirmed will modify them.
 	dc.acct.authMtx.RLock()
@@ -6083,10 +6113,10 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	var mErr *msgjson.Error
 	if errors.As(err, &mErr) && mErr.Code == msgjson.AccountNotFoundError {
 		for _, dbBond := range localPendingBonds {
-			symb := dex.BipIDSymbol(dbBond.AssetID)
-			bondAsset := bondAssets[symb]
+			bondAsset := bondAssets[dbBond.AssetID]
 			if bondAsset == nil {
-				c.log.Warnf("authDEX: No info on bond asset %s. Cannot start postbond waiter.", symb)
+				c.log.Warnf("authDEX: No info on bond asset %s. Cannot start postbond waiter.",
+					dex.BipIDSymbol(dbBond.AssetID))
 				continue
 			}
 			c.monitorBondConfs(dc, assetBond(dbBond), bondAsset.Confs)
@@ -6119,13 +6149,6 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		}
 	}
 
-	// Set the account as authenticated.
-	c.log.Infof("Authenticated connection to %s, acct %v, %d active bonds, %d active orders, %d active matches, score %d, tier %d",
-		dc.acct.host, acctID, len(result.ActiveBonds), len(result.ActiveOrderStatuses), len(result.ActiveMatches), result.Score, tier)
-	// Flag as authenticated before bondConfirmed / monitorBondConfs, which may
-	// call authDEX if not flagged as such.
-	dc.acct.auth(tier, legacyFeePaid)
-
 	// Check active and pending bonds, comparing against result.ActiveBonds. For
 	// pendingBonds, rebroadcast and start waiter to postBond. For
 	// (locally-confirmed) bonds that are not in connectResp.Bonds, postBond.
@@ -6136,22 +6159,36 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		remoteLiveBonds[bondKey(bond.AssetID, bond.CoinID)] = bond
 	}
 
+	type queuedBond struct {
+		bond  *asset.Bond
+		confs uint32
+	}
+	var toPost, toConfirmLocally []queuedBond
+
 	// Identify bonds we consider live that are either pending or missing from
 	// server. In either case, do c.monitorBondConfs (will be immediate postBond
 	// and bondConfirmed if at required confirmations).
+	var bondedTiers uint64 // nominal expected tier based on active bonds
 	for _, bond := range localActiveBonds {
-		key := bondKey(bond.AssetID, bond.CoinID)
 		symb := dex.BipIDSymbol(bond.AssetID)
 		bondIDStr := coinIDString(bond.AssetID, bond.CoinID)
 
+		bondAsset := bondAssets[bond.AssetID]
+		if bondAsset == nil {
+			c.log.Warnf("Server no longer supports %v as a bond asset!", symb)
+			continue
+		}
+
+		key := bondKey(bond.AssetID, bond.CoinID)
 		_, found := remoteLiveBonds[key]
 		if found {
+			bondedTiers += bond.Amount / bondAsset.Amt
 			continue // good, it's live server-side too
-		}
+		} // else needs post retry or it's expired
 
 		// Double check bond expiry. It will be moved to the expiredBonds slice
 		// by the rotateBonds goroutine shortly after.
-		if bond.LockTime <= uint64(time.Now().Unix())+cfg.BondExpiry {
+		if bond.LockTime <= uint64(time.Now().Unix())+bondExpiry+2 {
 			c.log.Debugf("Recently expired bond not reported by server (OK): %s (%s)", bondIDStr, symb)
 			continue
 		}
@@ -6159,15 +6196,9 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		c.log.Warnf("Locally-active bond %v (%s) not reported by server. Will repost...",
 			bondIDStr, symb) // unexpected, but postbond again
 
-		bondAsset := bondAssets[symb]
-		if bondAsset == nil {
-			c.log.Warnf("Server no longer supports %v as a bond asset!", symb)
-			continue
-		}
-
 		// Unknown on server. postBond at required confs.
-		c.log.Infof("Posting locally-confirmed bond %v (%s).", bondIDStr, symb)
-		c.monitorBondConfs(dc, assetBond(bond), bondAsset.Confs)
+		c.log.Infof("Preparing to post locally-confirmed bond %v (%s).", bondIDStr, symb)
+		toPost = append(toPost, queuedBond{assetBond(bond), bondAsset.Confs})
 		continue
 	}
 
@@ -6179,26 +6210,121 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		symb := dex.BipIDSymbol(bond.AssetID)
 		bondIDStr := coinIDString(bond.AssetID, bond.CoinID)
 
-		_, found := remoteLiveBonds[key]
-		if found {
-			// It's live server-side. Confirm it locally.
-			c.log.Debugf("Confirming pending bond %v that is confirmed server side", bondIDStr)
-			if err = c.bondConfirmed(dc, bond.AssetID, bond.CoinID, tier /* no change */); err != nil {
-				c.log.Errorf("Unable to confirm bond %s: %v", bondIDStr, err)
-			}
-			continue
-		}
-
-		c.log.Debugf("Starting coin waiter for pending bond %v (%s)", bondIDStr, symb)
-		bondAsset := bondAssets[symb]
+		bondAsset := bondAssets[bond.AssetID]
 		if bondAsset == nil {
 			c.log.Warnf("Server no longer supports %v as a bond asset!", symb)
 			continue // will retry, eventually refund
 		}
 
+		_, found := remoteLiveBonds[key]
+		if found {
+			// It's live server-side. Confirm it locally (db and slices).
+			toConfirmLocally = append(toConfirmLocally, queuedBond{assetBond(bond), 0})
+			bondedTiers += bond.Amount / bondAsset.Amt
+			continue
+		}
+
+		c.log.Debugf("Starting coin waiter for pending bond %v (%s)", bondIDStr, symb)
+
 		// Still pending on server. Start waiting for confs.
 		c.log.Debugf("Preparing to post pending bond %v (%s).", bondIDStr, symb)
-		c.monitorBondConfs(dc, assetBond(bond), bondAsset.Confs, true)
+		toPost = append(toPost, queuedBond{assetBond(bond), bondAsset.Confs})
+	}
+
+	// just a little debugging block, can remove
+	if bondAssetID, targetTier, _ := dc.bondOpts(); targetTier > 0 {
+		bondAsset := bondAssets[bondAssetID]
+		if bondAsset == nil {
+			c.log.Warnf("Selected bond asset %v is not supported by %v", unbip(bondAssetID), dc.acct.host)
+		} else { // adjust reserves given observed tier offset
+			tierOffset := tier - int64(bondedTiers) // negative means penalties, positive means bonus (trade history or legacy fee)
+			c.log.Tracef("actual (%d) - bonded (%d) tiers = %d", tier, int64(bondedTiers), tierOffset)
+			tierSurplus := tier - int64(dc.acct.targetTier) // captured by inBonds, _ := dc.bondTotalInternal(bondAsset.ID)
+			c.log.Tracef("actual (%d) - target (%d) tiers = %d", tier, int64(dc.acct.targetTier), tierSurplus)
+		}
+	}
+
+	// Set the account as authenticated.
+	c.log.Infof("Authenticated connection to %s, acct %v, %d active bonds, %d active orders, %d active matches, score %d, tier %d",
+		dc.acct.host, acctID, len(result.ActiveBonds), len(result.ActiveOrderStatuses), len(result.ActiveMatches), result.Score, tier)
+	updatedAssets := make(assetMap)
+	// Flag as authenticated before bondConfirmed and monitorBondConfs, which
+	// may call authDEX if not flagged as such.
+	dc.acct.authMtx.Lock()
+	// Reasons we are here: (1) first auth after login, (2) re-auth on
+	// reconnect, (3) bondConfirmed for the initial bond for the account.
+	// totalReserved is non-zero in #3, but zero in #1. There are no reserves
+	// actions to take in #3 since PostBond reserves prior to post.
+	loginAuth := !dc.acct.isAuthed && dc.acct.totalReserved == 0
+	dc.acct.isAuthed = true
+	dc.acct.tierChange += tier - dc.acct.tier
+	dc.acct.tier = tier
+	dc.acct.legacyFeePaid = legacyFeePaid
+	c.log.Debugf("Tier/bonding with %v: tier = %v, tierChange = %v, targetTier = %v, bondedTiers = %v, legacy = %v",
+		dc.acct.host, tier, dc.acct.tierChange, dc.acct.targetTier, bondedTiers, legacyFeePaid)
+	// If tier maintenance is enabled AND tier changed, update reserves.
+	if dc.acct.targetTier > 0 && (dc.acct.tierChange != 0 || loginAuth) {
+		if bondAsset := bondAssets[dc.acct.bondAsset]; bondAsset == nil {
+			c.log.Warnf("Selected bond asset %s is not supported by %s", unbip(dc.acct.bondAsset), dc.acct.host)
+		} else if bondWallet, ok := c.wallet(bondAsset.ID); ok {
+			// Here we correct for reserves inaccuracies from the previously
+			// known tier, which in the case of the first login is 0. If this is
+			// a reauth after reconnect and we discover our tier has changed, we
+			// are adjusting in either direction. Remember: Tier increase is
+			// reserves reduction (and vice versa).
+
+			var future int64
+			if loginAuth {
+				// If we are enabling reserves enforcement for spendable
+				// balance, we need to subtract how much we have already locked
+				// in bonds from the full amount based on the target tier. When
+				// restarting with a fully bonded account, this is expected to
+				// be zero, which simply enables reserves accounting for this
+				// asset, including any transaction fee buffering. This amount
+				// may also be negative, which signifies unbonding.
+				inBonds, _ := dc.bondTotalInternal(bondAsset.ID)
+				future = int64(bondOverlap*dc.acct.targetTier*bondAsset.Amt - inBonds) // note: minus inBonds
+				if tierOffset := tier - int64(bondedTiers); tierOffset != 0 {
+					c.log.Warnf("Discrepancy between actual tier (%v) and expected tier from active bonds (%v). "+
+						"Offset: %v (negative implies penalties / positive implies bonus)", // or bug
+						tier, bondedTiers, tierOffset)
+					if tierOffset < 0 { // make up for penalties, but don't go the other way yet
+						future -= tierOffset * int64(bondAsset.Amt)
+					}
+				}
+				dc.acct.totalReserved = int64(inBonds) + future // enabling starts with inBonds
+				c.log.Infof("First login at %v, with %v (x%d) in unspent bonds, "+
+					"reserving %v for future bonds with target tier of %d",
+					dc.acct.host, bondWallet.amtString(inBonds), inBonds/bondAsset.Amt,
+					bondWallet.amtStringSigned(future), dc.acct.targetTier)
+			} else {
+				// Subsequent re-auth, such as on reconnect, only needs to apply
+				// any unactuated tier changes.
+				future = bondOverlap * -dc.acct.tierChange * int64(bondAsset.Amt)
+				dc.acct.totalReserved += future
+			}
+
+			// TODO: limit dc.acct.totalReserved+future against maxBondedAmt
+
+			bondWallet.ReserveBondFunds(future, false)
+			dc.log.Infof("Total reserved for %v is now %v (%v more future in bonds)", dc.acct.host,
+				bondWallet.amtStringSigned(dc.acct.totalReserved), bondWallet.amtStringSigned(future))
+			updatedAssets.count(bondAsset.ID)
+			dc.acct.tierChange = 0 // tier change is now actuated with wallet reserves
+		}
+	}
+	dc.acct.authMtx.Unlock()
+
+	for _, pending := range toPost {
+		c.monitorBondConfs(dc, pending.bond, pending.confs, true)
+	}
+	for _, confirmed := range toConfirmLocally {
+		bond := confirmed.bond
+		bondIDStr := coinIDString(bond.AssetID, bond.CoinID)
+		c.log.Debugf("Confirming pending bond %v that is confirmed server side", bondIDStr)
+		if err = c.bondConfirmed(dc, bond.AssetID, bond.CoinID, tier /* no change */); err != nil {
+			c.log.Errorf("Unable to confirm bond %s: %v", bondIDStr, err)
+		}
 	}
 
 	localBondMap := make(map[string]struct{}, len(localActiveBonds)+len(localPendingBonds))
@@ -6233,7 +6359,9 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		bondIDStr := coinIDString(bond.AssetID, bond.CoinID)
 		c.log.Warnf("Unknown bond reported by server: %v (%s)", bondIDStr, symb)
 
+		dc.acct.authMtx.Lock()
 		dc.acct.bonds = append(dc.acct.bonds, dbBond) // for tier accounting, but we cannot redeem it
+		dc.acct.authMtx.Unlock()
 	}
 
 	// Associate the matches with known trades.
@@ -6243,7 +6371,6 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	}
 
 	exceptions, matchConflicts := dc.compareServerMatches(matches)
-	updatedAssets := make(assetMap)
 	for oid, matchAnomalies := range exceptions {
 		trade := matchAnomalies.trade
 		missing, extras := matchAnomalies.missing, matchAnomalies.extra
@@ -6427,9 +6554,21 @@ func (c *Core) initialize() error {
 		wg.Add(1)
 		go func(acct *db.AccountInfo) {
 			defer wg.Done()
-			if _, connected := c.connectAccount(acct); connected {
-				atomic.AddUint32(&liveConns, 1)
+			var connectFlag connectDEXFlag
+			if acct.ViewOnly() {
+				connectFlag |= connectDEXFlagViewOnly
 			}
+			dc, err := c.connectDEXWithFlag(acct, connectFlag)
+			if dc == nil {
+				c.log.Errorf("Unable to prepare DEX %s: %v", acct.Host, err)
+				return
+			}
+			// Connected or not, the dexConnection goes in the conns map now.
+			if err != nil {
+				c.log.Errorf("Trouble establishing connection to %s (will retry). Error: %v", acct.Host, err)
+			}
+			c.addDexConnection(dc)
+			atomic.AddUint32(&liveConns, 1)
 		}(acct)
 	}
 
@@ -6438,6 +6577,16 @@ func (c *Core) initialize() error {
 	if err != nil {
 		c.log.Errorf("error loading wallets from database: %v", err)
 	}
+
+	// Wait for dexConnections to be loaded to ensure they are ready for
+	// authentication when Login is triggered. NOTE/TODO: Login could just as
+	// easily make the connection, but arguably configured DEXs should be
+	// available for unauthenticated operations such as watching market feeds.
+	//
+	// loadWallet requires dexConnections loaded to set proper locked balances
+	// (contracts and bonds), so we don't wait after the dbWallets loop.
+	wg.Wait()
+	c.log.Infof("Connected to %d of %d DEX servers", liveConns, len(accts))
 
 	for _, dbWallet := range dbWallets {
 		assetID := dbWallet.AssetID
@@ -6451,13 +6600,6 @@ func (c *Core) initialize() error {
 		c.updateWallet(assetID, wallet)
 	}
 
-	// Wait for DEXes to be connected to ensure DEXes are ready for
-	// authentication when Login is triggered. NOTE/TODO: Login could just as
-	// easily make the connection, but arguably configured DEXs should be
-	// available for unauthenticated operations such as watching market feeds.
-	wg.Wait()
-	c.log.Infof("Connected to %d of %d DEX servers", liveConns, len(accts))
-
 	// Check DB for active orders on any DEX.
 	for _, acct := range accts {
 		host, _ := addrHost(acct.Host)
@@ -6469,46 +6611,6 @@ func (c *Core) initialize() error {
 	}
 
 	return nil
-}
-
-// connectAccount makes a connection to the DEX for the given account. If a
-// non-nil dexConnection is returned, it was inserted into the conns map even if
-// the initial connection attempt failed (connected == false), and the connect
-// retry / keepalive loop is active.
-func (c *Core) connectAccount(acct *db.AccountInfo) (dc *dexConnection, connected bool) {
-	// if !acct.Paid && len(acct.FeeCoin) == 0 {
-	// 	// Register should have set this when creating the account that was
-	// 	// obtained via db.Accounts.
-	// 	c.log.Warnf("Incomplete registration without fee payment detected for DEX %s. "+
-	// 		"Discarding account.", acct.Host)
-	// 	return
-	// }
-
-	host, err := addrHost(acct.Host)
-	if err != nil {
-		c.log.Errorf("skipping loading of %s due to address parse error: %v", host, err)
-		return
-	}
-
-	var connectFlag connectDEXFlag
-	if acct.ViewOnly() {
-		connectFlag |= connectDEXFlagViewOnly
-	}
-	dc, err = c.connectDEXWithFlag(acct, connectFlag)
-	if dc == nil {
-		c.log.Errorf("Unable to prepare DEX %s: %v", host, err)
-		return
-	}
-	// Connected or not, the dexConnection goes in the conns map now.
-	if err != nil {
-		c.log.Errorf("Trouble establishing connection to %s (will retry). Error: %v", host, err)
-	} else {
-		connected = true
-	}
-
-	c.addDexConnection(dc)
-
-	return
 }
 
 // feeLock is used to ensure that no more than one reFee check is running at a
@@ -7178,6 +7280,20 @@ func (c *Core) reReserveFunding(w *xcWallet) {
 	}
 
 	for _, dc := range c.dexConnections() {
+		dc.acct.authMtx.RLock()
+		if w.AssetID == dc.acct.bondAsset && dc.acct.targetTier > 0 {
+			inBonds, _ := dc.bondTotalInternal(w.AssetID)
+			// Wallet Connect currently does the RegisterUnspent part:
+			// w.RegisterUnspent(inBonds)
+
+			// Here we re-reserve for future bonds, whatever that amount was
+			// (totalReserved minus what's locked in bonds, see the firstAuth
+			// path in authDEX, and the "enabling reserves" parts of
+			// UpdateBondOptions):
+			w.ReserveBondFunds(dc.acct.totalReserved-int64(inBonds), false)
+		}
+		dc.acct.authMtx.RUnlock()
+
 		for _, tracker := range dc.trackedTrades() {
 			// TODO: Consider tokens
 			if tracker.Base() != w.AssetID && tracker.Quote() != w.AssetID {
@@ -7556,6 +7672,10 @@ func (c *Core) connectDEXWithFlag(acctInfo *db.AccountInfo, flag connectDEXFlag)
 			if dbBond.Refunded { // maybe don't even load these, but it may be of use for record keeping
 				continue
 			}
+
+			// IDEA: unspent bonds to register with wallet on first connect, if
+			// we need wallet Disconnect to *not* clear reserves.
+			// dc.acct.unreserved = append(dc.acct.unreserved, dbBond)
 
 			bondIDStr := coinIDString(dbBond.AssetID, dbBond.CoinID)
 
@@ -7975,6 +8095,7 @@ func handleTierChangeMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 		return newError(signatureErr, "handleTierChangeMsg: DEX signature validation error: %v", err) // warn?
 	}
 	dc.acct.authMtx.Lock()
+	dc.acct.tierChange += tierChanged.Tier - dc.acct.tier // normally negative with this ntfn
 	dc.acct.tier = tierChanged.Tier
 	targetTier := dc.acct.targetTier
 	dc.acct.authMtx.Unlock()
