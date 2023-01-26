@@ -81,15 +81,19 @@ func init() {
 
 	registerToken(testTokenID, 0)
 	registerToken(usdcID, 0)
+
+	if blockPollIntervalStr != "" {
+		blockPollInterval, _ = time.ParseDuration(blockPollIntervalStr)
+		if blockPollInterval < time.Second {
+			panic(fmt.Sprintf("invalid value for blockPollIntervalStr: %q", blockPollIntervalStr))
+		}
+	}
 }
 
 const (
 	BipID              = 60
 	ethContractVersion = 0
 	version            = 0
-	// The blockPollInterval is the delay between calls to bestBlockHash to
-	// check for new blocks.
-	blockPollInterval = time.Second
 )
 
 var (
@@ -102,6 +106,12 @@ var (
 
 	testTokenID, _ = dex.BipSymbolID("dextt.eth")
 	usdcID, _      = dex.BipSymbolID("usdc.eth")
+
+	// blockPollInterval is the delay between calls to bestBlockHash to check
+	// for new blocks. Modify at compile time via blockPollIntervalStr:
+	// go build -tags lgpl -ldflags "-X 'decred.org/dcrdex/server/asset/eth.blockPollIntervalStr=10s'"
+	blockPollInterval    = time.Second
+	blockPollIntervalStr string
 )
 
 type driverBase struct {
@@ -705,6 +715,8 @@ func (eth *ETHBackend) poll(ctx context.Context) {
 
 // run processes the queue and monitors the application context.
 func (eth *ETHBackend) run(ctx context.Context) {
+	eth.baseLogger.Infof("Starting ETH block polling with interval of %v",
+		blockPollInterval)
 	blockPoll := time.NewTicker(blockPollInterval)
 	defer blockPoll.Stop()
 
