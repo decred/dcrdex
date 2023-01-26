@@ -1853,12 +1853,12 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 // startup will be made.
 func (c *Core) connectWalletResumeTrades(w *xcWallet, resumeTrades bool) (depositAddr string, err error) {
 	if w.isDisabled() {
-		return "", fmt.Errorf(walletDisabledErrStr, strings.ToUpper(unbip(w.AssetID)))
+		return "", fmt.Errorf(walletDisabledErrStr, w.Symbol)
 	}
 
 	err = w.Connect() // ensures valid deposit address
 	if err != nil {
-		return "", codedError(connectWalletErr, err)
+		return "", newError(connectWalletErr, "failed to connect %s wallet: %w", w.Symbol, err)
 	}
 
 	// This may be a wallet that does not require a password, so we can attempt
