@@ -619,7 +619,7 @@ type Exchange struct {
 	ViewOnly         bool                   `json:"viewOnly"`
 	Tier             int64                  `json:"tier"`
 	BondsPending     bool                   `json:"bondsPending"`
-	// TODO: a Bonds slice
+	// TODO: Bonds slice(s) - and a LockedInBonds(assetID) method
 
 	// OLD fields for the legacy registration fee (V0PURGE):
 	Fee        *FeeAsset            `json:"feeAsset"` // DCR. DEPRECATED by RegFees.
@@ -721,9 +721,11 @@ type dexAccount struct {
 	bonds         []*db.Bond // confirmed, and not yet expired
 	expiredBonds  []*db.Bond // expired and needing refund
 	tier          int64      // check instead of isSuspended
+	tierChange    int64      // unactuated with bond reserves
 	targetTier    uint64
 	maxBondedAmt  uint64
-	bondAsset     uint32 // initially all bonds will be with the same asset
+	totalReserved int64  // total of bondAsset reserved for bonds (future and liveunspent), set iff maintaining bonds
+	bondAsset     uint32 // asset used for bond maintenance/rotation
 	legacyFeePaid bool   // server reports a legacy fee paid
 
 	// Legacy reg fee (V0PURGE)
@@ -745,7 +747,7 @@ func newDEXAccount(acctInfo *db.AccountInfo, viewOnly bool) *dexAccount {
 		feeAssetID: acctInfo.LegacyFeeAssetID,
 		feeCoin:    acctInfo.LegacyFeeCoin,
 		isPaid:     acctInfo.LegacyFeePaid,
-		// bonds are set separately when categorized in authDEX
+		// bonds are set separately when categorized in connectDEX
 		targetTier:   acctInfo.TargetTier,
 		maxBondedAmt: acctInfo.MaxBondedAmt,
 		bondAsset:    acctInfo.BondAsset,
@@ -889,15 +891,6 @@ func (a *dexAccount) authed() bool {
 	a.authMtx.RLock()
 	defer a.authMtx.RUnlock()
 	return a.isAuthed
-}
-
-// auth sets the account as authenticated at the provided tier.
-func (a *dexAccount) auth(tier int64, legacyFeePaid bool) {
-	a.authMtx.Lock()
-	a.isAuthed = true
-	a.tier = tier
-	a.legacyFeePaid = legacyFeePaid
-	a.authMtx.Unlock()
 }
 
 // unAuth sets the account as not authenticated.
