@@ -35,6 +35,5 @@ RUN mkdir -p /dex/.dexc && chown 1000 /dex/.dexc
 USER 1000
 COPY --from=gobuilder /root/dex/client/cmd/dexc/dexc ./
 COPY --from=gobuilder /root/dex/client/cmd/dexcctl/dexcctl ./
-COPY --from=gobuilder /root/dex/client/webserver/site ./site
 EXPOSE 5758
 CMD [ "./dexc", "--webaddr=0.0.0.0:5758" ]
