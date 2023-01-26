@@ -404,14 +404,6 @@ func (c *rpcclient) suggestGasTipCap(ctx context.Context) (tipCap *big.Int, err 
 	})
 }
 
-// syncProgress return the current sync progress. Returns no error and nil when not syncing.
-func (c *rpcclient) syncProgress(ctx context.Context) (prog *ethereum.SyncProgress, err error) {
-	return prog, c.withClient(func(ec *ethConn) error {
-		prog, err = ec.SyncProgress(ctx)
-		return err
-	})
-}
-
 // blockNumber gets the chain length at the time of calling.
 func (c *rpcclient) blockNumber(ctx context.Context) (bn uint64, err error) {
 	return bn, c.withClient(func(ec *ethConn) error {

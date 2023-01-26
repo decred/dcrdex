@@ -105,13 +105,6 @@ func TestBlockNumber(t *testing.T) {
 	}
 }
 
-func TestSyncProgress(t *testing.T) {
-	_, err := ethClient.syncProgress(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestSuggestGasTipCap(t *testing.T) {
 	_, err := ethClient.suggestGasTipCap(ctx)
 	if err != nil {

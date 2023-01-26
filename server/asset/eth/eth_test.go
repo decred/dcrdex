@@ -350,10 +350,8 @@ func TestSynced(t *testing.T) {
 		wantErr, wantSynced     bool
 	}{{
 		name:       "ok synced",
+		subSecs:    dexeth.MaxBlockInterval - 1,
 		wantSynced: true,
-	}, {
-		name:     "ok syncing",
-		syncProg: new(ethereum.SyncProgress),
 	}, {
 		name:    "ok header too old",
 		subSecs: dexeth.MaxBlockInterval,
@@ -361,10 +359,6 @@ func TestSynced(t *testing.T) {
 		name:       "best header error",
 		bestHdrErr: errors.New(""),
 		wantErr:    true,
-	}, {
-		name:        "sync progress error",
-		syncProgErr: errors.New(""),
-		wantErr:     true,
 	}}
 
 	for _, test := range tests {

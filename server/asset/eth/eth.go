@@ -22,7 +22,6 @@ import (
 	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
-	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -163,7 +162,6 @@ type ethFetcher interface {
 	headerByHeight(ctx context.Context, height uint64) (*types.Header, error)
 	connect(ctx context.Context) error
 	suggestGasTipCap(ctx context.Context) (*big.Int, error)
-	syncProgress(ctx context.Context) (*ethereum.SyncProgress, error)
 	transaction(ctx context.Context, hash common.Hash) (tx *types.Transaction, isMempool bool, err error)
 	// token- and asset-specific methods
 	loadToken(ctx context.Context, assetID uint32) error
@@ -578,16 +576,6 @@ func (eth *baseBackend) ValidateSecret(secret, contractData []byte) bool {
 
 // Synced is true if the blockchain is ready for action.
 func (eth *baseBackend) Synced() (bool, error) {
-	// node.SyncProgress will return nil both before syncing has begun and
-	// after it has finished. In order to discern when syncing has begun,
-	// check that the best header came in under MaxBlockInterval.
-	sp, err := eth.node.syncProgress(eth.ctx)
-	if err != nil {
-		return false, err
-	}
-	if sp != nil {
-		return false, nil
-	}
 	bh, err := eth.node.bestHeader(eth.ctx)
 	if err != nil {
 		return false, err
