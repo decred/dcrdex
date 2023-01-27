@@ -7375,13 +7375,6 @@ func (c *Core) handleReconnect(host string) {
 		return
 	}
 
-	if atomic.LoadUint32(&dc.anomaliesCount) > wsMaxAnomalyCount {
-		// Send notification to check connectivity.
-		subject, details := c.formatDetails(TopicDexConnectivity, host)
-		c.notify(newConnEventNote(TopicDexConnectivity, subject, host, dc.status(), details, db.Poke))
-		atomic.StoreUint32(&dc.anomaliesCount, 0) // reset anomalies count.
-	}
-
 	// The server's configuration may have changed, so retrieve the current
 	// server configuration.
 	cfg, err := dc.refreshServerConfig()
@@ -7538,7 +7531,12 @@ func (c *Core) handleConnectEvent(dc *dexConnection, status comms.ConnectionStat
 		dc.lastConnectMtx.RLock()
 		lastConnect := dc.lastConnect
 		dc.lastConnectMtx.RUnlock()
-		if time.Since(lastConnect) < wsAnomalyDuration {
+
+		if atomic.CompareAndSwapUint32(&dc.anomaliesCount, wsMaxAnomalyCount, 0 /* reset anomalies count */) {
+			// Send notification to check connectivity.
+			subject, details := c.formatDetails(TopicDexConnectivity, dc.acct.host)
+			c.notify(newConnEventNote(TopicDexConnectivity, subject, dc.acct.host, dc.status(), details, db.Poke))
+		} else if time.Since(lastConnect) < wsAnomalyDuration {
 			// Increase anomalies count for this connection.
 			atomic.AddUint32(&dc.anomaliesCount, 1)
 		}
