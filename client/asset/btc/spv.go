@@ -191,8 +191,6 @@ func (w *btcSPVWallet) Start() (SPVService, error) {
 
 	var defaultPeers []string
 	switch w.chainParams.Net {
-	case wire.MainNet:
-		defaultPeers = []string{"cfilters.ssgen.io:8333"}
 	case wire.TestNet3:
 		defaultPeers = []string{"dex-test.ssgen.io:18333"}
 	case wire.TestNet, wire.SimNet: // plain "wire.TestNet" is regnet!
