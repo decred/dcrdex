@@ -45,9 +45,9 @@ type Creator interface {
 }
 
 func withDriver(assetID uint32, f func(Driver) error) error {
-	driversMtx.Lock()
-	defer driversMtx.Unlock()
+	driversMtx.RLock()
 	drv, ok := drivers[assetID]
+	driversMtx.RUnlock()
 	if !ok {
 		return fmt.Errorf("asset: unknown driver asset %d", assetID)
 	}
