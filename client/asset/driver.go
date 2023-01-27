@@ -52,9 +52,9 @@ type Creator interface {
 }
 
 func withDriver(assetID uint32, f func(Driver) error) error {
-	driversMtx.Lock()
-	defer driversMtx.Unlock()
+	driversMtx.RLock()
 	drv, ok := drivers[assetID]
+	driversMtx.RUnlock()
 	if !ok {
 		return fmt.Errorf("asset: unknown driver asset %d", assetID)
 	}
@@ -136,8 +136,8 @@ func OpenWallet(assetID uint32, cfg *WalletConfig, logger dex.Logger, net dex.Ne
 // asset with a corresponding driver registered with this package. For now,
 // token id decoding is deferred to the parent asset.
 func DecodeCoinID(assetID uint32, coinID []byte) (cid string, err error) {
-	driversMtx.Lock()
-	defer driversMtx.Unlock()
+	driversMtx.RLock()
+	defer driversMtx.RUnlock()
 	drv, ok := drivers[assetID]
 	if ok {
 		return drv.DecodeCoinID(coinID)
