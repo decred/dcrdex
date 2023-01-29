@@ -1437,7 +1437,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	}
 	var user account.AccountID
 	copy(user[:], connect.AccountID[:])
-	lockTimeThresh := time.Now().Add(auth.bondExpiry)
+	lockTimeThresh := time.Now().Add(auth.bondExpiry).Truncate(time.Second)
 	acctInfo, bonds, legacy, legacyPaid := auth.storage.Account(user, lockTimeThresh)
 	if acctInfo == nil {
 		return &msgjson.Error{
@@ -1501,19 +1501,11 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	auth.orderOutcomes[user] = latestFinished
 	auth.violationMtx.Unlock()
 
-	var bondTier int64
-	for _, bond := range bonds {
-		bondTier += int64(bond.Strength)
-	}
-
-	tier := auth.tier(bondTier, score, legacyPaid)
-
 	client := &clientInfo{
-		acct:          acctInfo,
-		conn:          conn,
-		respHandlers:  respHandlers,
-		tier:          tier,
-		bonds:         bonds,
+		acct:         acctInfo,
+		conn:         conn,
+		respHandlers: respHandlers,
+		// bonds and tier set after screening them again below
 		legacyFeePaid: legacyPaid,
 	}
 
@@ -1593,6 +1585,8 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	conn.Authorized()
 
 	// Prepare bond info for response.
+	var bondTier int64
+	activeBonds := make([]*db.Bond, 0, len(bonds)) // some may have just expired
 	msgBonds := make([]*msgjson.Bond, 0, len(bonds))
 	for _, bond := range bonds {
 		// Double check the DB backend's thresholding.
@@ -1602,6 +1596,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 				coinIDString(bond.AssetID, bond.CoinID), lockTime, lockTimeThresh)
 			continue // will be expired on next prune
 		}
+		bondTier += int64(bond.Strength)
 		expireTime := lockTime.Add(-auth.bondExpiry)
 		msgBonds = append(msgBonds, &msgjson.Bond{
 			Version: bond.Version,
@@ -1610,7 +1605,13 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 			CoinID:  bond.CoinID,
 			AssetID: bond.AssetID,
 		})
+		activeBonds = append(activeBonds, bond)
 	}
+
+	// Ensure tier and filtered bonds agree.
+	tier := auth.tier(bondTier, score, legacyPaid)
+	client.tier = tier
+	client.bonds = activeBonds
 
 	// Sign and send the connect response.
 	suspended := tier < 1 // for legacy clients
