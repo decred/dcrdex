@@ -394,7 +394,9 @@ var _ asset.DynamicSwapOrRedemptionFeeChecker = (*TokenWallet)(nil)
 var _ asset.BotWallet = (*assetWallet)(nil)
 
 type baseWallet struct {
-	ctx        context.Context // the asset subsystem starts with Connect(ctx)
+	// The asset subsystem starts with Connect(ctx). This ctx will be initialized
+	// in parent ETHWallet once and re-used in child TokenWallet instances.
+	ctx        context.Context
 	net        dex.Network
 	node       ethFetcher
 	addr       common.Address
@@ -768,7 +770,7 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 
 	w.node = cl
 	w.addr = cl.address()
-	w.ctx = ctx
+	w.ctx = ctx // TokenWallet will re-use this ctx.
 	err = w.node.connect(ctx)
 	if err != nil {
 		return nil, err
@@ -824,10 +826,8 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 // Connect waits for context cancellation and closes the WaitGroup. Satisfies
 // dex.Connector.
 func (w *TokenWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
-	w.ctx = ctx
-
 	if w.parent.ctx == nil || w.parent.ctx.Err() != nil {
-		return nil, fmt.Errorf("parent not connected")
+		return nil, fmt.Errorf("parent wallet not connected")
 	}
 
 	err := w.loadContractors()
@@ -841,7 +841,7 @@ func (w *TokenWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		defer wg.Done()
 		select {
 		case <-ctx.Done():
-		case <-w.baseWallet.ctx.Done():
+		case <-w.parent.ctx.Done():
 		}
 	}()
 	return &wg, nil
