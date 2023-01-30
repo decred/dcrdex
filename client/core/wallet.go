@@ -173,13 +173,16 @@ func (w *xcWallet) locallyUnlocked() bool {
 
 // state returns the current WalletState.
 func (w *xcWallet) state() *WalletState {
-	var peerCount uint32
-	if w.peerCount > 0 { // -1 initially
-		peerCount = uint32(w.peerCount)
-	}
+	winfo := w.Info()
+
 	w.mtx.RLock()
 	defer w.mtx.RUnlock()
-	winfo := w.Info()
+
+	var peerCount uint32
+	if w.peerCount > 0 { // initialized to -1 initially, means no count yet
+		peerCount = uint32(w.peerCount)
+	}
+
 	return &WalletState{
 		Symbol:       unbip(w.AssetID),
 		AssetID:      w.AssetID,
