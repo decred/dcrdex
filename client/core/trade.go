@@ -1386,10 +1386,13 @@ func (t *trackedTrade) checkSwapFeeConfirms(match *matchTracker) bool {
 		// Confirmed will be set in the db.
 		return true
 	}
+	// Waiting until the swap is definitely confirmed in order to not
+	// keep calling the fee checker before the swap is confirmed.
+	mySwapConfs, _ := match.confirms()
 	if match.Side == order.Maker {
-		return match.Status >= order.MakerSwapCast
+		return match.Status > order.MakerSwapCast || mySwapConfs > 0
 	}
-	return match.Status >= order.TakerSwapCast
+	return match.Status > order.TakerSwapCast || mySwapConfs > 0
 }
 
 // checkRedemptionFeeConfirms returns whether the swap fee confirmations should
