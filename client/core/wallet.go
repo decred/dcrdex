@@ -343,12 +343,18 @@ func (w *xcWallet) Connect() error {
 	if err != nil {
 		return err
 	}
-	// Now that we are connected, we must Disconnect if any calls fail below
-	// since we are considering this wallet not "hookedUp".
+
+	var ready bool
+	defer func() {
+		// Now that we are connected, we must Disconnect if any calls fail below
+		// since we are considering this wallet not "hookedUp".
+		if !ready {
+			w.connector.Disconnect()
+		}
+	}()
 
 	synced, progress, err := w.SyncStatus()
 	if err != nil {
-		w.connector.Disconnect()
 		return err
 	}
 
@@ -356,22 +362,19 @@ func (w *xcWallet) Connect() error {
 	defer w.mtx.Unlock()
 	haveAddress := w.address != ""
 	if haveAddress {
-		haveAddress, err = w.OwnsDepositAddress(w.address)
-		if err != nil {
-			w.connector.Disconnect()
+		if haveAddress, err = w.OwnsDepositAddress(w.address); err != nil {
 			return err
 		}
 	}
 	if !haveAddress {
-		w.address, err = w.DepositAddress()
-		if err != nil {
-			w.connector.Disconnect()
-			return fmt.Errorf("%s Wallet.Address error: %w", unbip(w.AssetID), err)
+		if w.address, err = w.DepositAddress(); err != nil {
+			return err
 		}
 	}
 	w.hookedUp = true
 	w.synced = synced
 	w.syncProgress = progress
+	ready = true
 
 	return nil
 }
