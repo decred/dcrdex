@@ -108,7 +108,11 @@ func (p *provider) setTip(header *types.Header) {
 func (p *provider) cachedTip() *types.Header {
 	stale := time.Second * 10
 	if p.ws {
-		stale = time.Minute * 2
+		// We want to avoid requests, and we expect that our notification feed
+		// is working. Setting this too low would result in unnecessary requests
+		// when notifications are working right. Setting this too high will
+		// inevitably result in long tip change intervals if notifications fail.
+		stale = time.Minute
 	}
 
 	p.tip.RLock()
@@ -217,6 +221,7 @@ func (p *provider) subscribeHeaders(ctx context.Context, sub ethereum.Subscripti
 			}
 			select {
 			case <-time.After(time.Second * 30):
+				log.Debugf("attempting to resubscribe to websocket headers from %s", p.host)
 			case <-ctx.Done():
 				return nil, context.Canceled
 			}
@@ -362,7 +367,7 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 	// addEnpoint only returns errors that should be propagated immediately.
 	addEndpoint := func(endpoint string) error {
 		// Give ourselves a limited time to resolve a connection.
-		ctx, cancel := context.WithTimeout(ctx, defaultRequestTimeout)
+		timedCtx, cancel := context.WithTimeout(ctx, defaultRequestTimeout)
 		defer cancel()
 		// First try to get a websocket connection. Websockets have a header
 		// feed, so are much preferred to http connections. So much so, that
@@ -403,11 +408,11 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 				host = providerRivetCloud
 			}
 
-			rpcClient, err = rpc.DialWebsocket(ctx, wsURL.String(), "")
+			rpcClient, err = rpc.DialWebsocket(timedCtx, wsURL.String(), "")
 			if err == nil {
 				ec = ethclient.NewClient(rpcClient)
 				h = make(chan *types.Header, 8)
-				sub, err = ec.SubscribeNewHead(ctx, h)
+				sub, err = ec.SubscribeNewHead(timedCtx, h)
 				if err != nil {
 					rpcClient.Close()
 					ec = nil
@@ -429,7 +434,7 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 		// path discrimination, so I won't even try to validate the protocol.
 		if ec == nil {
 			var err error
-			rpcClient, err = rpc.DialContext(ctx, endpoint)
+			rpcClient, err = rpc.DialContext(timedCtx, endpoint)
 			if err != nil {
 				log.Errorf("error creating http client for %q: %v", endpoint, err)
 				return nil
@@ -438,7 +443,7 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 		}
 
 		// Get chain ID.
-		reportedChainID, err := ec.ChainID(ctx)
+		reportedChainID, err := ec.ChainID(timedCtx)
 		if err != nil {
 			// If we can't get a header, don't use this provider.
 			ec.Close()
@@ -451,7 +456,7 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 			return nil
 		}
 
-		hdr, err := ec.HeaderByNumber(ctx, nil /* latest */)
+		hdr, err := ec.HeaderByNumber(timedCtx, nil /* latest */)
 		if err != nil {
 			// If we can't get a header, don't use this provider.
 			ec.Close()
