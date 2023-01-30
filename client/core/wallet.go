@@ -238,11 +238,6 @@ func (w *xcWallet) unitInfo() dex.UnitInfo {
 
 // state returns the current WalletState.
 func (w *xcWallet) state() *WalletState {
-	var peerCount uint32
-	if w.peerCount > 0 { // -1 initially
-		peerCount = uint32(w.peerCount)
-	}
-
 	winfo := w.Info()
 	lockable := w
 	if w.parent != nil {
@@ -251,6 +246,12 @@ func (w *xcWallet) state() *WalletState {
 
 	w.mtx.RLock()
 	defer w.mtx.RUnlock()
+
+	var peerCount uint32
+	if w.peerCount > 0 { // initialized to -1 initially, means no count yet
+		peerCount = uint32(w.peerCount)
+	}
+
 	return &WalletState{
 		Symbol:       unbip(w.AssetID),
 		AssetID:      w.AssetID,
