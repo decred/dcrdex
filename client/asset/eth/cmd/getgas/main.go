@@ -31,7 +31,7 @@ func mainErr() error {
 
 	u, err := user.Current()
 	if err != nil {
-		return fmt.Errorf("could not get the current user")
+		return fmt.Errorf("could not get the current user: %w", err)
 	}
 	defaultCredsPath := filepath.Join(u.HomeDir, "ethtest", "getgas-credentials.json")
 

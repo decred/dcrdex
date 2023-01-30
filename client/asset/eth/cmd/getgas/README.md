@@ -30,7 +30,7 @@ If this is a new asset, you must populate either `dexeth.VersionedGases` or
 
 - Use `--help` to see additional options.
 
-- **If running on mainnet, real funds will be used** for fees based on the current network base fee and tip rate. All swaps sent are just 1 gwei (atom), with fees additional. If testing a token, 1 atom will be transferred to a [random address](https://ethereum.stackexchange.com/a/3298/83118) and will unrecoverable.
+- **If running on mainnet, real funds will be used** for fees based on the current network base fee and tip rate. All swaps sent are just 1 gwei (atom), with fees additional. If testing a token, 1 atom will be transferred to a [random address](https://ethereum.stackexchange.com/a/3298/83118) and will be unrecoverable.
 
 **example usage**
 ```
