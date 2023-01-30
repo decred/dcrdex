@@ -2955,8 +2955,9 @@ function fourSigFigs (v: number): string {
 function setMarketDetails (tmpl: Record<string, PageElement>, mkt: Market) {
   tmpl.baseIcon.src = Doc.logoPath(mkt.basesymbol)
   tmpl.quoteIcon.src = Doc.logoPath(mkt.quotesymbol)
-  tmpl.baseSymbol.textContent = mkt.basesymbol.toUpperCase()
-  tmpl.quoteSymbol.textContent = mkt.quotesymbol.toUpperCase()
+  Doc.empty(tmpl.baseSymbol, tmpl.quoteSymbol)
+  tmpl.baseSymbol.appendChild(Doc.symbolize(mkt.basesymbol))
+  tmpl.quoteSymbol.appendChild(Doc.symbolize(mkt.quotesymbol))
 }
 
 function setPriceAndChange (tmpl: Record<string, PageElement>, xc: Exchange, mkt: Market) {
