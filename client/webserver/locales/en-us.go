@@ -200,7 +200,7 @@ var EnUS = map[string]string{
 	"details":                     "details",
 	"to":                          "to",
 	"Options":                     "Options",
-	"fee_projection_tooltip":      "If network conditions don't change before your order matches, total realized fees (as a percentage of trade) should fall within this range.",
+	"fee_projection_tooltip":      "If network conditions don't change before your order matches, total realized fees should fall within this range.",
 	"unlock_for_details":          "Unlock your wallets to retrieve order details and additional options.",
 	"estimate_unavailable":        "Order estimates and options unavailable",
 	"Fee Details":                 "Fee Details",

@@ -1529,15 +1529,34 @@ export default class MarketsPage extends BasePage {
     const toAsset = isSell ? quoteAsset : baseAsset
     const fromAsset = isSell ? baseAsset : quoteAsset
 
-    // Set the to and from icons in the fee details pane.
-    for (const icon of Doc.applySelector(page.vDetailPane, '[data-icon]')) {
+    const setIcon = (icon: PageElement) => {
       switch (icon.dataset.icon) {
         case 'from':
-          icon.src = Doc.logoPath(fromAsset.symbol)
+          if (fromAsset.token) {
+            const parentAsset = app().assets[fromAsset.token.parentID]
+            icon.src = Doc.logoPath(parentAsset.symbol)
+          } else {
+            icon.src = Doc.logoPath(fromAsset.symbol)
+          }
           break
         case 'to':
-          icon.src = Doc.logoPath(toAsset.symbol)
+          if (toAsset.token) {
+            const parentAsset = app().assets[toAsset.token.parentID]
+            icon.src = Doc.logoPath(parentAsset.symbol)
+          } else {
+            icon.src = Doc.logoPath(toAsset.symbol)
+          }
       }
+    }
+
+    // Set the to and from icons in the fee details pane.
+    for (const icon of Doc.applySelector(page.vDetailPane, '[data-icon]')) {
+      setIcon(icon)
+    }
+
+    // Set the to and from icons in the fee summary pane.
+    for (const icon of Doc.applySelector(page.vFeeSummary, '[data-icon]')) {
+      setIcon(icon)
     }
 
     Doc.hide(page.vUnlockPreorder, page.vPreorderErr)
@@ -1752,23 +1771,34 @@ export default class MarketsPage extends BasePage {
   /* setFeeEstimates sets all of the pre-order estimate fields */
   setFeeEstimates (swap: PreSwap, redeem: PreRedeem, order: TradeForm) {
     const { page, market } = this
-    const { baseUnitInfo, quoteUnitInfo, rateConversionFactor } = market
+    let { baseUnitInfo, quoteUnitInfo, rateConversionFactor } = market
     const swapped = swap.estimate.value || 0
     const fmtPct = percentFormatter.format
 
+    if (market.base.token) {
+      const parent = app().assets[market.base.token.parentID]
+      baseUnitInfo = parent.unitInfo
+    }
+    if (market.quote.token) {
+      const parent = app().assets[market.quote.token.parentID]
+      quoteUnitInfo = parent.unitInfo
+    }
+
+    let [toIsToken, fromIsToken] = [!!market.base.token, !!market.quote.token]
     let [toUI, fromUI] = [baseUnitInfo, quoteUnitInfo]
     if (this.currentOrder.sell) {
+      [fromIsToken, toIsToken] = [toIsToken, fromIsToken];
       [fromUI, toUI] = [toUI, fromUI]
     }
 
     // Set swap fee estimates in the details pane.
     const bestSwapPct = swap.estimate.realisticBestCase / swapped * 100
-    page.vSwapFeesLowPct.textContent = `${fmtPct(bestSwapPct)}%`
+    page.vSwapFeesLowPct.textContent = fromIsToken ? '' : `(${fmtPct(bestSwapPct)}%)`
     page.vSwapFeesLow.textContent = Doc.formatCoinValue(swap.estimate.realisticBestCase, fromUI)
     const worstSwapPct = swap.estimate.realisticWorstCase / swapped * 100
-    page.vSwapFeesHighPct.textContent = `${fmtPct(worstSwapPct)}%`
+    page.vSwapFeesHighPct.textContent = fromIsToken ? '' : `(${fmtPct(worstSwapPct)}%)`
     page.vSwapFeesHigh.textContent = Doc.formatCoinValue(swap.estimate.realisticWorstCase, fromUI)
-    page.vSwapFeesMaxPct.textContent = `${fmtPct(swap.estimate.maxFees / swapped * 100)}%`
+    page.vSwapFeesMaxPct.textContent = fromIsToken ? '' : `(${fmtPct(swap.estimate.maxFees / swapped * 100)}%)`
     page.vSwapFeesMax.textContent = Doc.formatCoinValue(swap.estimate.maxFees, fromUI)
 
     // Set redemption fee estimates in the details pane.
@@ -1776,16 +1806,18 @@ export default class MarketsPage extends BasePage {
     const estRate = midGap || order.rate / rateConversionFactor
     const received = order.sell ? swapped * estRate : swapped / estRate
     const bestRedeemPct = redeem.estimate.realisticBestCase / received * 100
-    page.vRedeemFeesLowPct.textContent = `${fmtPct(bestRedeemPct)}%`
+    page.vRedeemFeesLowPct.textContent = toIsToken ? '' : `(${fmtPct(bestRedeemPct)}%)`
     page.vRedeemFeesLow.textContent = Doc.formatCoinValue(redeem.estimate.realisticBestCase, toUI)
     const worstRedeemPct = redeem.estimate.realisticWorstCase / received * 100
-    page.vRedeemFeesHighPct.textContent = `${fmtPct(worstRedeemPct)}%`
+    page.vRedeemFeesHighPct.textContent = toIsToken ? '' : `(${fmtPct(worstRedeemPct)}%)`
     page.vRedeemFeesHigh.textContent = Doc.formatCoinValue(redeem.estimate.realisticWorstCase, toUI)
 
     // Set the summary percent, which is a simple addition of swap and redeem
     // loss percents.
-    page.vFeeSummaryLow.textContent = fmtPct(bestSwapPct + bestRedeemPct)
-    page.vFeeSummaryHigh.textContent = fmtPct(worstSwapPct + worstRedeemPct)
+    page.summarySwapFeesLow.textContent = page.vSwapFeesLow.textContent
+    page.summarySwapFeesHigh.textContent = page.vSwapFeesHigh.textContent
+    page.summaryRedeemFeesLow.textContent = page.vRedeemFeesLow.textContent
+    page.summaryRedeemFeesHigh.textContent = page.vRedeemFeesHigh.textContent
   }
 
   async submitCancel () {

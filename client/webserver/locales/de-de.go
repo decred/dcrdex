@@ -196,7 +196,7 @@ var DeDE = map[string]string{
 	"details":                     "Details",
 	"to":                          "nach",
 	"Options":                     "Optionen",
-	"fee_projection_tooltip":      "Wenn sich die Netzwerkbedingungen nicht ändern bevor dein Auftrag erfüllt ist sollten die gesamten Gebühren (als Prozentsatz des Handels) innerhalb dieses Bereichs liegen.",
+	"fee_projection_tooltip":      "Wenn sich die Netzwerkbedingungen nicht ändern bevor dein Auftrag erfüllt ist sollten die gesamten Gebühren innerhalb dieses Bereichs liegen.",
 	"unlock_for_details":          "Entsperre dein Wallet um Auftragsdetails und zusätzliche Optionen zu erhalten.",
 	"estimate_unavailable":        "Schätzungen und Optionen zum Auftrag nicht verfügbar",
 	"Fee Details":                 "Gebühren Details",
