@@ -20,7 +20,7 @@ require (
 	github.com/dcrlabs/neutrino-bch v0.0.0-20221031001408-f296bfa9bd1c
 	github.com/dcrlabs/neutrino-ltc v0.0.0-20221031001456-55ef06cefead
 	github.com/decred/base58 v1.0.4
-	github.com/decred/dcrd/addrmgr/v2 v2.0.0
+	github.com/decred/dcrd/addrmgr/v2 v2.0.1
 	github.com/decred/dcrd/blockchain/stake/v4 v4.0.0
 	github.com/decred/dcrd/blockchain/v4 v4.0.2
 	github.com/decred/dcrd/certgen v1.1.1

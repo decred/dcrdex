@@ -241,8 +241,9 @@ github.com/deckarep/golang-set v1.8.0/go.mod h1:5nI87KwE7wgsBU1F4GKAw2Qod7p5kyS3
 github.com/decred/base58 v1.0.3/go.mod h1:pXP9cXCfM2sFLb2viz2FNIdeMWmZDBKG3ZBYbiSM78E=
 github.com/decred/base58 v1.0.4 h1:QJC6B0E0rXOPA8U/kw2rP+qiRJsUaE2Er+pYb3siUeA=
 github.com/decred/base58 v1.0.4/go.mod h1:jJswKPEdvpFpvf7dsDvFZyLT22xZ9lWqEByX38oGd9E=
-github.com/decred/dcrd/addrmgr/v2 v2.0.0 h1:ui8zpM+of+peJo19XGnFgwtrEK/boTyZpFzzqVUIWFk=
 github.com/decred/dcrd/addrmgr/v2 v2.0.0/go.mod h1:5g9jPzBSQotmSnPri4oc1n5VVgWzPLlXwbr6HGoUVrg=
+github.com/decred/dcrd/addrmgr/v2 v2.0.1 h1:o+AetOWZcSa2j2uVRf0gHvTSCmt4jMviKKpX/KgGQSw=
+github.com/decred/dcrd/addrmgr/v2 v2.0.1/go.mod h1:HcDrmMGqo2ilwjMi73YLwJQScv8djDPHgTV8kON8Wx4=
 github.com/decred/dcrd/blockchain/stake/v4 v4.0.0 h1:PwoCjCTbRvDUZKKs6N2Haus8XcbVXCJ9iGVs8C9sKwQ=
 github.com/decred/dcrd/blockchain/stake/v4 v4.0.0/go.mod h1:bOgG7YTbTOWQgtHLL2l1Y9gBHIuM86zwVcQtsoGlZlQ=
 github.com/decred/dcrd/blockchain/standalone/v2 v2.1.0 h1:aXh7a+86p+H65MGy0QKu4Juf3/j+Y5koVSyVYFMdqP0=

@@ -43,7 +43,7 @@ require (
 	github.com/dcrlabs/neutrino-ltc v0.0.0-20221031001456-55ef06cefead // indirect
 	github.com/deckarep/golang-set v1.8.0 // indirect
 	github.com/decred/base58 v1.0.4 // indirect
-	github.com/decred/dcrd/addrmgr/v2 v2.0.0 // indirect
+	github.com/decred/dcrd/addrmgr/v2 v2.0.1 // indirect
 	github.com/decred/dcrd/blockchain/stake/v4 v4.0.0 // indirect
 	github.com/decred/dcrd/blockchain/standalone/v2 v2.1.0 // indirect
 	github.com/decred/dcrd/blockchain/v4 v4.0.2 // indirect
