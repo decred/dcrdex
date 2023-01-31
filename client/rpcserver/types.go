@@ -312,6 +312,7 @@ func parseNewWalletArgs(params *RawParams) (*newWalletForm, error) {
 		walletType: params.Args[1],
 		walletPass: params.PWArgs[1],
 		assetID:    uint32(assetID),
+		config:     make(map[string]string),
 	}
 	if len(params.Args) > 2 {
 		req.config, err = config.Parse([]byte(params.Args[2]))
