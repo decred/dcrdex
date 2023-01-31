@@ -106,7 +106,7 @@ export default class Application {
     this.commitHash = process.env.COMMITHASH || ''
     this.noteReceivers = []
     this.fiatRatesMap = {}
-    this.showPopups = State.fetchLocal(State.popupsCK) === '1'
+    this.showPopups = State.fetchLocal(State.popupsLK) === '1'
 
     console.log('Decred DEX Client App, Build', this.commitHash.substring(0, 7))
 

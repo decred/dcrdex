@@ -47,10 +47,10 @@ export default class SettingsPage extends BasePage {
       }
     })
 
-    page.showPokes.checked = State.fetchLocal(State.popupsCK) === '1'
+    page.showPokes.checked = State.fetchLocal(State.popupsLK) === '1'
     Doc.bind(page.showPokes, 'click', () => {
       const show = page.showPokes.checked || false
-      State.storeLocal(State.popupsCK, show ? '1' : '0')
+      State.storeLocal(State.popupsLK, show ? '1' : '0')
       app().showPopups = show
     })
 
