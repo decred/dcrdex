@@ -51,8 +51,6 @@ const (
 	darkModeCK = "darkMode"
 	// authCK is the authorization token cookie key.
 	authCK = "dexauth"
-	// popupsCK is the cookie key for the user's preference for showing popups.
-	popupsCK = "popups"
 	// pwKeyCK is the cookie used to unencrypt the user's password.
 	pwKeyCK = "sessionkey"
 	// ctxKeyUserInfo is used in the authorization middleware for saving user
@@ -729,7 +727,6 @@ type userInfo struct {
 	Authed           bool
 	PasswordIsCached bool
 	DarkMode         bool
-	ShowPopups       bool
 }
 
 // Extract the userInfo from the request context. This should be used with

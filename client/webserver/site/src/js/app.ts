@@ -48,8 +48,6 @@ const bind = Doc.bind
 const unbind = Doc.unbind
 
 const notificationRoute = 'notify'
-const loggersKey = 'loggers'
-const recordersKey = 'recorders'
 const noteCacheSize = 100
 
 interface Page {
@@ -108,24 +106,25 @@ export default class Application {
     this.commitHash = process.env.COMMITHASH || ''
     this.noteReceivers = []
     this.fiatRatesMap = {}
-    this.showPopups = State.getCookie('popups') === '1'
+    this.showPopups = State.fetchLocal(State.popupsLK) === '1'
+
     console.log('Decred DEX Client App, Build', this.commitHash.substring(0, 7))
 
     // Loggers can be enabled by setting a truthy value to the loggerID using
     // enableLogger. Settings are stored across sessions. See docstring for the
     // log method for more info.
-    this.loggers = State.fetch(loggersKey) || {}
+    this.loggers = State.fetchLocal(State.loggersLK) || {}
     window.enableLogger = (loggerID, state) => {
       if (state) this.loggers[loggerID] = true
       else delete this.loggers[loggerID]
-      State.store(loggersKey, this.loggers)
+      State.storeLocal(State.loggersLK, this.loggers)
       return `${loggerID} logger ${state ? 'enabled' : 'disabled'}`
     }
     // Enable logging from anywhere.
     window.log = (loggerID, ...a) => { this.log(loggerID, ...a) }
 
     // Recorders can record log messages, and then save them to file on request.
-    const recorderKeys = State.fetch(recordersKey) || []
+    const recorderKeys = State.fetchLocal(State.recordersLK) || []
     this.recorders = {}
     for (const loggerID of recorderKeys) {
       console.log('recording', loggerID)
@@ -134,7 +133,7 @@ export default class Application {
     window.recordLogger = (loggerID, on) => {
       if (on) this.recorders[loggerID] = []
       else delete this.recorders[loggerID]
-      State.store(recordersKey, Object.keys(this.recorders))
+      State.storeLocal(State.recordersLK, Object.keys(this.recorders))
       return `${loggerID} recorder ${on ? 'enabled' : 'disabled'}`
     }
     window.dumpLogger = loggerID => {
@@ -186,7 +185,7 @@ export default class Application {
     this.attachCommon(this.header)
     this.attach({})
     // Load recent notifications from Window.localStorage.
-    const notes = State.fetch('notifications')
+    const notes = State.fetchLocal(State.notificationsLK)
     this.setNotes(notes || [])
     // Connect the websocket and register the notification route.
     ws.connect(getSocketURI(), this.reconnected)
@@ -436,7 +435,7 @@ export default class Application {
    * actual stored list is stripped of information not necessary for display.
    */
   storeNotes () {
-    State.store('notifications', this.notes.map(n => {
+    State.storeLocal(State.notificationsLK, this.notes.map(n => {
       return {
         subject: n.subject,
         details: n.details,
@@ -931,9 +930,9 @@ export default class Application {
   }
 
   /**
-   * signOut call to /api/logout, if response with no errors occurred clear all
-   * store, remove auth, darkMode cookies and reload the page, otherwise will
-   * show a notification
+   * signOut call to /api/logout, if response with no errors occurred remove auth
+   * and other privacy-critical cookies/locals and reload the page, otherwise
+   * show a notification.
    */
   async signOut () {
     const res = await postJSON('/api/logout')
@@ -946,8 +945,9 @@ export default class Application {
       Doc.show(this.page.logoutErr)
       return
     }
-    State.clearAllStore()
-    State.removeAuthCK()
+    State.removeCookie(State.authCK)
+    State.removeCookie(State.pwKeyCK)
+    State.removeLocal(State.notificationsLK)
     window.location.href = '/login'
   }
 }

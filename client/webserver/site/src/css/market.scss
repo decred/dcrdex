@@ -263,7 +263,7 @@ div[data-handler=markets] {
     font-size: 0.9em;
   }
 
-  #leftColumnV1 {
+  #leftMarketDock {
     height: 100%;
     position: absolute;
     display: flex;
@@ -773,7 +773,7 @@ div[data-handler=markets] {
     display: flex;
   }
 
-  div[data-handler=markets] #leftColumnV1 {
+  div[data-handler=markets] #leftMarketDock {
     position: relative;
 
     &.default {
@@ -871,7 +871,7 @@ div[data-handler=markets] {
       }
     }
 
-    #leftColumnV1.stashed + #marketReopener {
+    #leftMarketDock.stashed + #marketReopener {
       display: block;
     }
   }

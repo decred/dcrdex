@@ -1,12 +1,22 @@
-const darkModeCK = 'darkMode'
-const authCK = 'dexauth'
-const popupsCK = 'popups'
-const pwKeyCK = 'sessionkey'
-
 // State is a set of static methods for working with the user state. It has
 // utilities for setting and retrieving cookies and storing user configuration
 // to localStorage.
 export default class State {
+  // Cookie keys.
+  static darkModeCK = 'darkMode'
+  static authCK = 'dexauth'
+  static pwKeyCK = 'sessionkey'
+  // Local storage keys (for data that we don't need at the server).
+  static popupsLK = 'popups'
+  static loggersLK = 'loggers'
+  static recordersLK = 'recorders'
+  static lastMarketLK = 'selectedMarket'
+  static depthZoomLK = 'depthZoom'
+  static lastMMMarketLK = 'mmMarket'
+  static optionsExpansionLK = 'mmOptsExpand'
+  static leftMarketDockLK = 'leftmarketdock'
+  static selectedAssetLK = 'selectedasset'
+  static notificationsLK = 'notifications'
   static orderDisclaimerAckedLK = 'ordAck'
 
   static setCookie (cname: string, cvalue: string) {
@@ -28,55 +38,51 @@ export default class State {
     return null
   }
 
-  /* dark sets the dark-mode cookie. */
-  static dark (dark: boolean) {
-    this.setCookie(darkModeCK, dark ? '1' : '0')
-    if (dark) {
-      document.body.classList.add('dark')
-    } else {
-      document.body.classList.remove('dark')
-    }
+  /*
+   * removeCookie tells the browser to stop using cookie. It's not enough to simply
+   * erase cookie value because browser will still send it to the server (with empty
+   * value), and that's not what server expects.
+   */
+  static removeCookie (cKey: string) {
+    document.cookie = `${cKey}=;expires=Thu, 01 Jan 1970 00:00:01 GMT;`
   }
 
   /*
    * isDark returns true if the dark-mode cookie is currently set to '1' = true.
    */
   static isDark () {
-    return document.cookie.split(';').filter((item) => item.includes(`${darkModeCK}=1`)).length
+    return document.cookie.split(';').filter((item) => item.includes(`${State.darkModeCK}=1`)).length
   }
 
   /* passwordIsCached returns whether or not there is a cached password in the cookies. */
   static passwordIsCached () {
-    return !!this.getCookie(pwKeyCK)
+    return !!this.getCookie(State.pwKeyCK)
   }
 
-  /* store puts the key-value pair into Window.localStorage. */
-  static store (k: string, v: any) {
+  /* storeLocal puts the key-value pair into Window.localStorage. */
+  static storeLocal (k: string, v: any) {
     window.localStorage.setItem(k, JSON.stringify(v))
   }
 
-  /* clearAllStore remove all the key-value pair in Window.localStorage. */
-  static clearAllStore () {
-    window.localStorage.clear()
-  }
-
-  static removeAuthCK () {
-    document.cookie = `${authCK}=;expires=Thu, 01 Jan 1970 00:00:01 GMT;`
-  }
-
   /*
-  * fetch fetches the value associated with the key in Window.localStorage, or
+  * fetchLocal the value associated with the key in Window.localStorage, or
   * null if the no value exists for the key.
   */
-  static fetch (k: string) {
+  static fetchLocal (k: string) {
     const v = window.localStorage.getItem(k)
     if (v !== null) {
       return JSON.parse(v)
     }
     return null
   }
+
+  /* removeLocal removes the key-value pair from Window.localStorage. */
+  static removeLocal (k: string) {
+    window.localStorage.removeItem(k)
+  }
 }
 
-// If the dark-mode cookie is not set, set it to dark mode on.
-if (State.getCookie(darkModeCK) === null) State.setCookie(darkModeCK, '1')
-if (State.getCookie(popupsCK) === null) State.setCookie(popupsCK, '1')
+// Setting defaults here, unless specific cookie (or local storage) value was already chosen by the user.
+if (State.getCookie(State.darkModeCK) === null) State.setCookie(State.darkModeCK, '1')
+if (State.fetchLocal(State.popupsLK) === null) State.storeLocal(State.popupsLK, '1')
+if (State.fetchLocal(State.leftMarketDockLK) === null) State.storeLocal(State.leftMarketDockLK, '1')

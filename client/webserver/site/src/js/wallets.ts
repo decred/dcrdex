@@ -102,7 +102,7 @@ export default class WalletsPage extends BasePage {
     Doc.cleanTemplates(
       page.iconSelectTmpl, page.balanceDetailRow, page.recentOrderTmpl
     )
-    const firstAsset = this.sortAssetButtons()
+
     Doc.bind(page.createWallet, 'click', () => this.showNewWallet(this.selectedAssetID))
     Doc.bind(page.connectBttn, 'click', () => this.doConnect(this.selectedAssetID))
     Doc.bind(page.send, 'click', () => this.showSendForm(this.selectedAssetID))
@@ -217,7 +217,11 @@ export default class WalletsPage extends BasePage {
       createwallet: (note: WalletCreationNote) => { this.handleCreateWalletNote(note) }
     })
 
-    this.setSelectedAsset(firstAsset.id)
+    const firstAsset = this.sortAssetButtons()
+    let selectedAsset = firstAsset.id
+    const assetIDStr = State.fetchLocal(State.selectedAssetLK)
+    if (assetIDStr) selectedAsset = Number(assetIDStr)
+    this.setSelectedAsset(selectedAsset)
   }
 
   closePopups () {
@@ -567,6 +571,8 @@ export default class WalletsPage extends BasePage {
     await defaultsLoaded
   }
 
+  // sortAssetButtons displays supported assets, sorted. Returns first asset in the
+  // list.
   sortAssetButtons (): SupportedAsset {
     const page = this.page
     this.assetButtons = {}
@@ -583,7 +589,10 @@ export default class WalletsPage extends BasePage {
       const tmpl = Doc.parseTemplate(bttn)
       this.assetButtons[a.id] = { tmpl, bttn }
       this.updateAssetButton(a.id)
-      Doc.bind(bttn, 'click', () => this.setSelectedAsset(a.id))
+      Doc.bind(bttn, 'click', () => {
+        this.setSelectedAsset(a.id)
+        State.storeLocal(State.selectedAssetLK, String(a.id))
+      })
     }
     page.assetSelect.classList.remove('invisible')
     return sortedAssets[0]

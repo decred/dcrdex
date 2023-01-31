@@ -44,7 +44,6 @@ func (s *WebServer) authMiddleware(next http.Handler) http.Handler {
 			Authed:           s.isAuthed(r),
 			PasswordIsCached: s.isPasswordCached(r),
 			DarkMode:         extractBooleanCookie(r, darkModeCK, true),
-			ShowPopups:       extractBooleanCookie(r, popupsCK, true),
 		})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
