@@ -984,10 +984,7 @@ func handlePriceUpdateNote(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	}
 	mktName, err := dex.MarketName(spot.BaseID, spot.QuoteID)
 	if err != nil {
-		// It's possible for the dex server to have a market with coin
-		// ID's we do not know, especially in the case of eth tokens.
-		c.log.Debugf("error parsing market for base = %d, quote = %d: %v", spot.BaseID, spot.QuoteID, err)
-		return nil
+		return nil // it's just an asset we don't support, don't insert, but don't spam
 	}
 	dc.spotsMtx.Lock()
 	dc.spots[mktName] = spot
