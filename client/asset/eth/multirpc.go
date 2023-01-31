@@ -78,14 +78,14 @@ type combinedRPCClient struct {
 
 type provider struct {
 	// host is the domain and tld of the provider, and is used as a identifier
-	// in logs and as a unique, path- and subdomaion-independent ID for e.g. map
+	// in logs and as a unique, path- and subdomain-independent ID for e.g. map
 	// keys.
 	host    string
 	ec      *combinedRPCClient
 	ws      bool
 	tipCapV atomic.Value // *cachedTipCap
 
-	// tip tracks the best known header as well as any error encount
+	// tip tracks the best known header as well as any error encountered
 	tip struct {
 		sync.RWMutex
 		header      *types.Header
@@ -840,22 +840,22 @@ func (m *multiRPCClient) withPreferred(f func(*provider) error, acceptabilityFil
 // nonceProviderList returns the randomized provider list, but with any recent
 // nonce provider inserted in the first position.
 func (m *multiRPCClient) nonceProviderList() []*provider {
-	m.providerMtx.Lock()
-	defer m.providerMtx.Unlock()
-
-	providers := make([]*provider, 0, len(m.providers))
-
 	var lastProvider *provider
+	m.lastProvider.Lock()
 	if time.Since(m.lastProvider.stamp) < nonceProviderStickiness {
 		lastProvider = m.lastProvider.provider
 	}
+	m.lastProvider.Unlock()
 
+	m.providerMtx.Lock()
+	providers := make([]*provider, 0, len(m.providers))
 	for _, p := range m.providers {
 		if lastProvider != nil && lastProvider.host == p.host {
-			continue // already added it
+			continue // adding lastProvider below, as preferred provider
 		}
 		providers = append(providers, p)
 	}
+	m.providerMtx.Unlock()
 
 	shuffleProviders(providers)
 
