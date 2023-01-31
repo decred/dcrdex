@@ -664,11 +664,6 @@ export default class Application {
     if (note.severity < ntfn.POKE) return
     // Poke notifications have their own display.
     const { popupTmpl, popupNotes, showPopups } = this
-
-    // TODO
-    console.log(showPopups)
-    console.log(this.showPopups)
-
     if (showPopups) {
       const span = popupTmpl.cloneNode(true) as HTMLElement
       Doc.tmplElement(span, 'text').textContent = `${note.subject}: ${note.details}`

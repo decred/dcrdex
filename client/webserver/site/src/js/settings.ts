@@ -50,22 +50,8 @@ export default class SettingsPage extends BasePage {
     page.showPokes.checked = State.fetchLocal(State.popupsCK) === '1'
     Doc.bind(page.showPokes, 'click', () => {
       const show = page.showPokes.checked || false
-
-      // TODO
-      console.log('Show')
-      console.log(show)
-
       State.storeLocal(State.popupsCK, show ? '1' : '0')
-
-      // TODO
-      console.log('Before')
-      console.log(app().showPopups)
-
       app().showPopups = show
-
-      // TODO
-      console.log('After')
-      console.log(app().showPopups)
     })
 
     page.commitHash.textContent = app().commitHash.substring(0, 7)
