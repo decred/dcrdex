@@ -629,7 +629,7 @@ export default class WalletsPage extends BasePage {
       page.balanceBox, page.fiatBalanceBox, page.createWalletBox, page.walletDetails,
       page.sendReceive, page.connectBttnBox, page.statusLocked, page.statusReady,
       page.statusOff, page.unlockBttnBox, page.lockBttnBox, page.connectBttnBox,
-      page.reconfigureBox, page.peerCountBox, page.syncProgressBox, page.statusDisabled
+      page.peerCountBox, page.syncProgressBox, page.statusDisabled
     )
     if (wallet) {
       this.updateDisplayedAssetBalance()
@@ -637,7 +637,7 @@ export default class WalletsPage extends BasePage {
       const walletDef = app().walletDefinition(assetID, wallet.type)
       page.walletType.textContent = walletDef.tab
       const configurable = assetIsConfigurable(assetID)
-      if (configurable) Doc.show(page.reconfigureBox)
+      Doc.setVis(configurable, page.passwordWrapper)
 
       if (wallet.disabled) Doc.show(page.statusDisabled) // wallet is disabled
       else if (wallet.running) {

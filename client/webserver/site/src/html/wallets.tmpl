@@ -385,7 +385,7 @@
         </div>
         <select id="changeWalletTypeSelect"></select>
       </div>
-      <div class="d-flex mt-1 {{if $passwordIsCached}}justify-content-end{{end}}">
+      <div id="passwordWrapper" class="d-flex mt-1 {{if $passwordIsCached}}justify-content-end{{end}}">
         <div class="col-12 p-0 {{if $passwordIsCached}}d-hide{{end}}">
           <label for="appPW" class="form-label ps-1 mb-1">[[[App Password]]]</label>
           <input type="password" class="form-control select" id="appPW" autocomplete="off">
