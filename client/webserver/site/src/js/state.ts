@@ -5,9 +5,9 @@ export default class State {
   // Cookie keys.
   static darkModeCK = 'darkMode'
   static authCK = 'dexauth'
-  static popupsCK = 'popups'
   static pwKeyCK = 'sessionkey'
   // Local storage keys (for data that we don't need at the server).
+  static popupsCK = 'popups'
   static loggersLK = 'loggers'
   static recordersLK = 'recorders'
   static lastMarketLK = 'selectedMarket'
@@ -85,5 +85,5 @@ export default class State {
 
 // Setting defaults here, unless specific cookie (or local storage) value was already chosen by the user.
 if (State.getCookie(State.darkModeCK) === null) State.setCookie(State.darkModeCK, '1')
-if (State.getCookie(State.popupsCK) === null) State.setCookie(State.popupsCK, '1')
+if (State.fetchLocal(State.popupsCK) === null) State.storeLocal(State.popupsCK, '1')
 if (State.fetchLocal(State.leftMarketDockLK) === null) State.storeLocal(State.leftMarketDockLK, '1')

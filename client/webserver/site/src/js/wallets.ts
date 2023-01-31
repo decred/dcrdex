@@ -220,9 +220,7 @@ export default class WalletsPage extends BasePage {
     const firstAsset = this.sortAssetButtons()
     let selectedAsset = firstAsset.id
     const assetIDStr = State.fetchLocal(State.selectedAssetLK)
-    if (assetIDStr) {
-      selectedAsset = Number(assetIDStr)
-    }
+    if (assetIDStr) selectedAsset = Number(assetIDStr)
     this.setSelectedAsset(selectedAsset)
   }
 

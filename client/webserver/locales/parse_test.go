@@ -14,7 +14,7 @@ func TestTokens(t *testing.T) {
 <div id="main" data-handler="settings" class="text-center py-5 overflow-y-auto">
   <div class="settings">
     <div class="form-check">
-      <input class="form-check-input" type="checkbox" value="" id="showPokes"{{if .UserInfo.ShowPopups}} checked{{end}}>
+      <input class="form-check-input" type="checkbox" value="" id="showPokes" checked>
       <label class="form-check-label" for="showPokes">
         [[[Show pop-up notifications]]]
       </label>

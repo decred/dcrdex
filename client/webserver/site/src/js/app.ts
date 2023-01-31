@@ -106,7 +106,8 @@ export default class Application {
     this.commitHash = process.env.COMMITHASH || ''
     this.noteReceivers = []
     this.fiatRatesMap = {}
-    this.showPopups = State.getCookie(State.popupsCK) === '1'
+    this.showPopups = State.fetchLocal(State.popupsCK) === '1'
+
     console.log('Decred DEX Client App, Build', this.commitHash.substring(0, 7))
 
     // Loggers can be enabled by setting a truthy value to the loggerID using
@@ -663,6 +664,11 @@ export default class Application {
     if (note.severity < ntfn.POKE) return
     // Poke notifications have their own display.
     const { popupTmpl, popupNotes, showPopups } = this
+
+    // TODO
+    console.log(showPopups)
+    console.log(this.showPopups)
+
     if (showPopups) {
       const span = popupTmpl.cloneNode(true) as HTMLElement
       Doc.tmplElement(span, 'text').textContent = `${note.subject}: ${note.details}`
@@ -946,8 +952,6 @@ export default class Application {
     }
     State.removeCookie(State.authCK)
     State.removeCookie(State.pwKeyCK)
-    State.removeLocal(State.lastMarketLK)
-    State.removeLocal(State.lastMMMarketLK)
     State.removeLocal(State.notificationsLK)
     window.location.href = '/login'
   }
