@@ -963,7 +963,7 @@ func handlePriceUpdateNote(_ *Core, dc *dexConnection, msg *msgjson.Message) err
 	}
 	mktName, err := dex.MarketName(spot.BaseID, spot.QuoteID)
 	if err != nil {
-		return fmt.Errorf("error parsing market for base = %d, quote = %d: %v", spot.BaseID, spot.QuoteID, err)
+		return nil // it's just an asset we don't support
 	}
 	dc.spotsMtx.Lock()
 	dc.spots[mktName] = spot
