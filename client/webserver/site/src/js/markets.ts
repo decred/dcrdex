@@ -423,14 +423,14 @@ export default class MarketsPage extends BasePage {
       Doc.setVis(acked, page.showDisclaimer)
     }
     bind(page.disclaimerAck, 'click', () => {
-      State.store(State.orderDisclaimerAckedLK, true)
+      State.storeLocal(State.orderDisclaimerAckedLK, true)
       setDisclaimerAckViz(true)
     })
     bind(page.showDisclaimer, 'click', () => {
-      State.store(State.orderDisclaimerAckedLK, false)
+      State.storeLocal(State.orderDisclaimerAckedLK, false)
       setDisclaimerAckViz(false)
     })
-    setDisclaimerAckViz(State.fetch(State.orderDisclaimerAckedLK))
+    setDisclaimerAckViz(State.fetchLocal(State.orderDisclaimerAckedLK))
 
     const clearChartLines = () => {
       this.depthLines.hover = []

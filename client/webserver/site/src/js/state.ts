@@ -17,7 +17,6 @@ export default class State {
   static leftMarketDockLK = 'leftmarketdock'
   static selectedAssetLK = 'selectedasset'
   static notificationsLK = 'notifications'
-
   static orderDisclaimerAckedLK = 'ordAck'
 
   static setCookie (cname: string, cvalue: string) {
