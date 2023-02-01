@@ -296,7 +296,7 @@ type multiRPCClient struct {
 	log     dex.Logger
 	chainID *big.Int
 
-	providerMtx sync.Mutex
+	providerMtx sync.RWMutex
 	endpoints   []string
 	providers   []*provider
 
@@ -735,8 +735,8 @@ func (m *multiRPCClient) getConfirmedNonce(ctx context.Context, blockNumber int6
 }
 
 func (m *multiRPCClient) providerList() []*provider {
-	m.providerMtx.Lock()
-	defer m.providerMtx.Unlock()
+	m.providerMtx.RLock()
+	defer m.providerMtx.RUnlock()
 
 	providers := make([]*provider, len(m.providers))
 	copy(providers, m.providers)
@@ -847,7 +847,7 @@ func (m *multiRPCClient) nonceProviderList() []*provider {
 	}
 	m.lastProvider.Unlock()
 
-	m.providerMtx.Lock()
+	m.providerMtx.RLock()
 	providers := make([]*provider, 0, len(m.providers))
 	for _, p := range m.providers {
 		if lastProvider != nil && lastProvider.host == p.host {
@@ -855,7 +855,7 @@ func (m *multiRPCClient) nonceProviderList() []*provider {
 		}
 		providers = append(providers, p)
 	}
-	m.providerMtx.Unlock()
+	m.providerMtx.RUnlock()
 
 	shuffleProviders(providers)
 
@@ -954,8 +954,8 @@ func (m *multiRPCClient) chainConfig() *params.ChainConfig {
 }
 
 func (m *multiRPCClient) peerCount() (c uint32) {
-	m.providerMtx.Lock()
-	defer m.providerMtx.Unlock()
+	m.providerMtx.RLock()
+	defer m.providerMtx.RUnlock()
 	for _, p := range m.providers {
 		if !p.failed() {
 			c++
