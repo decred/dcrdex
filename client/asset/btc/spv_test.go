@@ -328,7 +328,7 @@ func (c *tNeutrinoClient) GetBlockHash(blockHeight int64) (*chainhash.Hash, erro
 func (c *tNeutrinoClient) BestBlock() (*headerfs.BlockStamp, error) {
 	c.blockchainMtx.RLock()
 	if c.getBestBlockHashErr != nil {
-		c.blockchainMtx.RUnlock()
+		defer c.blockchainMtx.RUnlock() // reading c.getBestBlockHashErr below
 		return nil, c.getBestBlockHashErr
 	}
 	c.blockchainMtx.RUnlock()
