@@ -1,6 +1,7 @@
 package auth
 
 import (
+	crand "crypto/rand"
 	"math/rand"
 	"sort"
 	"testing"
@@ -10,7 +11,7 @@ import (
 )
 
 func randomOrderID() (oid order.OrderID) {
-	rand.Read(oid[:])
+	crand.Read(oid[:])
 	return
 }
 
@@ -79,8 +80,6 @@ func Test_latestOrders(t *testing.T) {
 	if cancels != 1 {
 		t.Errorf("expected 1 cancels, got %d", total)
 	}
-
-	rand.Seed(1324)
 
 	for i := total; i < int(cap); i++ {
 		ts++

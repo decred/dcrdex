@@ -8,14 +8,13 @@ import (
 	"time"
 )
 
-// randomCommitment creates a random order commitment. If you require a matching
-// commitment, generate a Preimage, then Preimage.Commit().
-func randomCommitment() (com Commitment) {
-	rand.Read(com[:])
-	return
-}
-
 func TestMatchID(t *testing.T) {
+	rnd := rand.New(rand.NewSource(1))
+	randomCommitment := func() (com Commitment) {
+		rnd.Read(com[:])
+		return
+	}
+
 	// taker
 	marketID0, _ := hex.DecodeString("f1f4fb29235f5eeef55b27d909aac860828f6cf45f0b0fab92c6265844c50e54")
 	var marketID OrderID

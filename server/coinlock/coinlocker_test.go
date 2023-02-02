@@ -1,6 +1,7 @@
 package coinlock
 
 import (
+	crand "crypto/rand"
 	"math/rand"
 	"testing"
 
@@ -10,7 +11,7 @@ import (
 
 func randomBytes(len int) []byte {
 	bytes := make([]byte, len)
-	rand.Read(bytes)
+	crand.Read(bytes)
 	return bytes
 }
 
@@ -50,8 +51,6 @@ func verifyLocked(cl CoinLockChecker, coins []CoinID, wantLocked bool, t *testin
 }
 
 func Test_swapLocker_LockOrderCoins(t *testing.T) {
-	rand.Seed(0)
-
 	w := &test.Writer{
 		Addr: "asdf",
 		Acct: test.NextAccount(),
@@ -145,8 +144,6 @@ func Test_swapLocker_LockOrderCoins(t *testing.T) {
 func Test_bookLocker_LockCoins(t *testing.T) {
 	masterLock := NewMasterCoinLocker()
 	bookLock := masterLock.Book()
-
-	rand.Seed(0)
 
 	coinMap := make(map[order.OrderID][]CoinID)
 	var allCoins []CoinID

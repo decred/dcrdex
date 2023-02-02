@@ -2,6 +2,7 @@ package test
 
 import (
 	"bytes"
+	crand "crypto/rand"
 	"encoding/binary"
 	"fmt"
 	"math/rand"
@@ -18,6 +19,34 @@ const (
 	addressLength  = 34
 )
 
+var rnd = rand.New(CryptoSource)
+
+func UseRand(use *rand.Rand) {
+	rnd = use
+}
+
+var CryptoSource cryptoSource
+
+type cryptoSource struct{}
+
+func (cs cryptoSource) Uint64() uint64 {
+	var b [8]byte
+	crand.Read(b[:])
+	return binary.LittleEndian.Uint64(b[:])
+}
+
+func (cs cryptoSource) Int63() int64 {
+	const rngMask = 1<<63 - 1
+	return int64(cs.Uint64() & rngMask)
+}
+
+func (cs cryptoSource) Seed(seed int64) { /* no-op */ }
+
+var _ rand.Source = cryptoSource{}
+var _ rand.Source = (*cryptoSource)(nil)
+var _ rand.Source64 = cryptoSource{}
+var _ rand.Source64 = (*cryptoSource)(nil)
+
 var (
 	acctTemplate = account.AccountID{
 		0x22, 0x4c, 0xba, 0xaa, 0xfa, 0x80, 0xbf, 0x3b, 0xd1, 0xff, 0x73, 0x15,
@@ -29,22 +58,22 @@ var (
 
 func randBytes(l int) []byte {
 	b := make([]byte, l)
-	rand.Read(b)
+	rnd.Read(b)
 	return b
 }
 
-func randUint32() uint32 { return uint32(rand.Int31()) }
-func randUint64() uint64 { return uint64(rand.Int63()) }
+func randUint32() uint32 { return uint32(rnd.Int31()) }
+func randUint64() uint64 { return uint64(rnd.Int63()) }
 
 func randBool() bool {
-	return rand.Intn(2) == 1
+	return rnd.Intn(2) == 1
 }
 
 // A random base-58 string.
 func RandomAddress() string {
 	b := make([]byte, addressLength)
 	for i := range b {
-		b[i] = b58Set[rand.Intn(58)]
+		b[i] = b58Set[rnd.Intn(58)]
 	}
 	return string(b)
 }
@@ -76,14 +105,14 @@ func RandomMatchID() order.MatchID {
 
 // RandomPreimage creates a random order preimage.
 func RandomPreimage() (pi order.Preimage) {
-	rand.Read(pi[:])
+	rnd.Read(pi[:])
 	return
 }
 
 // RandomCommitment creates a random order commitment. Use RandomPreimage
 // followed by Preimage.Commit() if you require a matching commitment.
 func RandomCommitment() (com order.Commitment) {
-	rand.Read(com[:])
+	rnd.Read(com[:])
 	return
 }
 
@@ -143,7 +172,7 @@ func WriteLimitOrder(writer *Writer, rate, lots uint64, force order.TimeInForce,
 
 // RandomLimitOrder creates a random limit order with a random writer.
 func RandomLimitOrder() (*order.LimitOrder, order.Preimage) {
-	return WriteLimitOrder(RandomWriter(), randUint64(), randUint64(), order.TimeInForce(rand.Intn(2)), 0)
+	return WriteLimitOrder(RandomWriter(), randUint64(), randUint64(), order.TimeInForce(rnd.Intn(2)), 0)
 }
 
 // WriteMarketOrder creates a market order with the specified writer and
@@ -255,8 +284,8 @@ func RandomUserMatch() *order.UserMatch {
 		Quantity:    randUint64(),
 		Rate:        randUint64(),
 		Address:     RandomAddress(),
-		Status:      order.MatchStatus(rand.Intn(5)),
-		Side:        order.MatchSide(rand.Intn(2)),
+		Status:      order.MatchStatus(rnd.Intn(5)),
+		Side:        order.MatchSide(rnd.Intn(2)),
 		FeeRateSwap: randUint64(),
 	}
 }
