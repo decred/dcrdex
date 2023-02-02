@@ -29,8 +29,10 @@ const (
 	LotSize = uint64(10 * 1e8)
 )
 
+var rnd = rand.New(rand.NewSource(1))
+
 func randomPreimage() (pe order.Preimage) {
-	rand.Read(pe[:])
+	rnd.Read(pe[:])
 	return
 }
 
@@ -537,7 +539,7 @@ func TestMatch_cancelOnly(t *testing.T) {
 	// New matching engine.
 	me := New()
 
-	rand.Seed(1212121)
+	rnd.Seed(1212121)
 
 	fakeOrder := newLimitOrder(false, 4550000, 1, order.ImmediateTiF, 0)
 	fakeOrder.ServerTime = time.Now()
@@ -692,7 +694,7 @@ func TestMatch_limitsOnly(t *testing.T) {
 	// New matching engine.
 	me := New()
 
-	rand.Seed(1212121)
+	rnd.Seed(1212121)
 
 	badLotsizeOrder := newLimit(false, 05000000, 1, order.ImmediateTiF, 0)
 	badLotsizeOrder.Order.(*order.LimitOrder).Quantity /= 2
@@ -1004,7 +1006,7 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 	// New matching engine.
 	me := New()
 
-	rand.Seed(1212121)
+	rnd.Seed(1212121)
 
 	badLotsizeOrder := newMarketSellOrder(1, 0)
 	badLotsizeOrder.Order.(*order.MarketOrder).Quantity /= 2
@@ -1315,7 +1317,7 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 	// New matching engine.
 	me := New()
 
-	rand.Seed(1212121)
+	rnd.Seed(1212121)
 
 	nSell := len(bookSellOrders)
 

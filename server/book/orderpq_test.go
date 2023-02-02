@@ -3,6 +3,7 @@ package book
 import (
 	"flag"
 	"math/rand"
+	crand "math/rand"
 	"os"
 	"sort"
 	"testing"
@@ -15,17 +16,12 @@ type Order = order.LimitOrder
 
 var (
 	bigList []*Order
-	orders  = []*Order{
-		newLimitOrder(false, 42000000, 2, order.StandingTiF, 0),
-		newLimitOrder(false, 10000, 2, order.StandingTiF, 0),
-		newLimitOrder(false, 42000000, 2, order.StandingTiF, -1000), // rate dup, different time
-		newLimitOrder(false, 123000000, 2, order.StandingTiF, 0),
-		newLimitOrder(false, 42000000, 1, order.StandingTiF, 0), // rate and time dup, different OrderID
-	}
+	orders  []*Order
+	rnd     = rand.New(rand.NewSource(1))
 )
 
 func randomAccount() (user account.AccountID) {
-	rand.Read(user[:])
+	crand.Read(user[:])
 	return
 }
 
@@ -33,7 +29,7 @@ func newFakeAddr() string {
 	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 	b := make([]byte, 35)
 	for i := range b {
-		b[i] = letters[rand.Int63()%int64(len(letters))]
+		b[i] = letters[rnd.Int63()%int64(len(letters))]
 	}
 	b[0], b[1] = 'D', 's' // at least have it resemble an address
 	return string(b)
@@ -44,7 +40,7 @@ func genBigList(listSize int) {
 		return
 	}
 	seed := int64(-3405439173988651889)
-	rand.Seed(seed)
+	rnd.Seed(seed)
 
 	dupRate := 800
 	if listSize < dupRate {
@@ -56,7 +52,7 @@ func genBigList(listSize int) {
 
 	bigList = make([]*Order, 0, listSize)
 	for i := 0; i < listSize; i++ {
-		lo := newLimitOrder(false, uint64(rand.Int63n(90000000)), uint64(rand.Int63n(6))+1, order.StandingTiF, rand.Int63n(240)-120)
+		lo := newLimitOrder(false, uint64(rnd.Int63n(90000000)), uint64(rnd.Int63n(6))+1, order.StandingTiF, rnd.Int63n(240)-120)
 		lo.Address = newFakeAddr()
 		// duplicate some prices
 		if (i+1)%(listSize/dupRate) == 0 {
@@ -75,6 +71,14 @@ const (
 
 func TestMain(m *testing.M) {
 	flag.Parse() // for -short
+	rnd.Seed(4)  // some predetermined and reproducible order IDs
+	orders = []*Order{
+		newLimitOrder(false, 42000000, 2, order.StandingTiF, 0),
+		newLimitOrder(false, 10000, 2, order.StandingTiF, 0),
+		newLimitOrder(false, 42000000, 2, order.StandingTiF, -1000), // rate dup, different time
+		newLimitOrder(false, 123000000, 2, order.StandingTiF, 0),
+		newLimitOrder(false, 42000000, 1, order.StandingTiF, 0), // rate and time dup, different OrderID
+	}
 	if testing.Short() {
 		genBigList(shortListLen)
 	} else {
@@ -419,13 +423,13 @@ func TestMaxOrderPQ_TieRate(t *testing.T) {
 func TestMaxOrderPQ_TieRateAndTime(t *testing.T) {
 	pq := NewMaxOrderPQ(4)
 
-	// 7f9200eedcf2fa868173cdfc2101ee4d71ec024c1c052589b3371442aaa26c2d
+	// 3671433862ea385f967377d836040cfa74bd66cf35ee1795cc48cab2a9576bc1
 	ok := pq.Insert(orders[0])
 	if !ok {
 		t.Errorf("Failed to insert order %v", orders[0])
 	}
 
-	// 2eb563f255b0a9484bbbee718b2cdce3a31bd5ea8649b579b3184a4bd60d1703 ** higher priority
+	// 1cc5fe0804be6b8112b71dd2d8d4a48177ee78a7f2c663e620c369d3211c86a1 ** higher priority
 	ok = pq.Insert(orders[4])
 	if !ok {
 		t.Errorf("Failed to insert order %v", orders[4])

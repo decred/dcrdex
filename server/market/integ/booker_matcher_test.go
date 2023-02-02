@@ -23,6 +23,8 @@ var acct0 = account.AccountID{
 	0x46, 0x34, 0xe9, 0x1c, 0xec, 0x25, 0xd5, 0x40, // 32 bytes
 }
 
+var rnd = rand.New(rand.NewSource(1))
+
 const (
 	AssetDCR uint32 = iota
 	AssetBTC
@@ -39,7 +41,7 @@ func startLogger() {
 }
 
 func randomPreimage() (pe order.Preimage) {
-	rand.Read(pe[:])
+	rnd.Read(pe[:])
 	return
 }
 
@@ -243,7 +245,7 @@ func TestMatchWithBook_limitsOnly(t *testing.T) {
 	// New matching engine.
 	me := matcher.New()
 
-	rand.Seed(0)
+	rnd.Seed(0)
 
 	badLotsizeOrder := newLimit(false, 05000000, 1, order.ImmediateTiF, 0)
 	badLotsizeOrder.Order.(*order.LimitOrder).Quantity /= 2
@@ -497,7 +499,7 @@ func TestMatchWithBook_limitsOnly_multipleQueued(t *testing.T) {
 	// New matching engine.
 	me := matcher.New()
 
-	rand.Seed(0)
+	rnd.Seed(0)
 
 	// epochQueue is heterogenous w.r.t. type
 	epochQueue := []*matcher.OrderRevealed{
@@ -733,7 +735,7 @@ func TestMatch_cancelOnly(t *testing.T) {
 	// New matching engine.
 	me := matcher.New()
 
-	rand.Seed(0)
+	rnd.Seed(0)
 
 	fakeOrder := newLimitOrder(false, 4550000, 1, order.ImmediateTiF, 0)
 	fakeOrder.ServerTime = time.Unix(1566497654, 0)
@@ -863,7 +865,7 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 	// New matching engine.
 	me := matcher.New()
 
-	rand.Seed(0)
+	rnd.Seed(0)
 
 	badLotsizeOrder := newMarketSell(1, 0)
 	badLotsizeOrder.Order.(*order.MarketOrder).Quantity /= 2
@@ -1118,7 +1120,7 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 	// New matching engine.
 	me := matcher.New()
 
-	rand.Seed(0)
+	rnd.Seed(0)
 
 	nSell := len(bookSellOrders)
 	//nBuy := len(bookBuyOrders)
@@ -1293,7 +1295,7 @@ func TestMatchWithBook_everything_multipleQueued(t *testing.T) {
 	// New matching engine.
 	me := matcher.New()
 
-	rand.Seed(12)
+	rnd.Seed(12)
 
 	nSell := len(bookSellOrders)
 	nBuy := len(bookBuyOrders)
