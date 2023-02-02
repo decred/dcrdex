@@ -20,10 +20,6 @@ import (
 	"go.etcd.io/bbolt"
 )
 
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
-
 var (
 	tLogger = dex.StdOutLogger("db_TEST", dex.LevelTrace)
 )

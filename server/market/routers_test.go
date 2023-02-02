@@ -114,6 +114,8 @@ var (
 	}
 )
 
+var rnd = rand.New(rand.NewSource(1))
+
 func nowMs() time.Time {
 	return time.Now().Truncate(time.Millisecond).UTC()
 }
@@ -625,7 +627,7 @@ var assetUnknown = &asset.BackedAsset{
 
 func randomBytes(len int) []byte {
 	bytes := make([]byte, len)
-	rand.Read(bytes)
+	rnd.Read(bytes)
 	return bytes
 }
 
@@ -659,6 +661,8 @@ func TestMain(m *testing.M) {
 	book.UseLogger(logger)
 	matcher.UseLogger(logger)
 	swap.UseLogger(logger)
+
+	ordertest.UseRand(rnd) // yuk, but we have old tests with deterministic sequences from math/rand that I'm not rewriting now
 
 	privKey, _ := secp256k1.GeneratePrivateKey()
 	auth := &TAuth{
@@ -1415,11 +1419,11 @@ func testPrefixTrade(prefix *msgjson.Prefix, trade *msgjson.Trade, fundingAsset,
 
 // nolint:unparam
 func randLots(max int) uint64 {
-	return uint64(rand.Intn(max) + 1)
+	return uint64(rnd.Intn(max) + 1)
 }
 
 func randRate(baseRate, lotSize uint64, min, max float64) uint64 {
-	multiplier := rand.Float64()*(max-min) + min
+	multiplier := rnd.Float64()*(max-min) + min
 	rate := uint64(multiplier * float64(baseRate))
 	return rate - rate%lotSize
 }

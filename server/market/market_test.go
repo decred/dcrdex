@@ -376,11 +376,11 @@ func TestMarket_NewMarket_BookOrders(t *testing.T) {
 	}
 	cleanup()
 
-	rand.Seed(12)
+	rnd.Seed(12)
 
 	randCoinDCR := func() []byte {
 		coinID := make([]byte, 36)
-		rand.Read(coinID[:])
+		rnd.Read(coinID[:])
 		return coinID
 	}
 
@@ -438,7 +438,7 @@ func TestMarket_Book(t *testing.T) {
 	}
 	defer cleanup()
 
-	rand.Seed(0)
+	rnd.Seed(0)
 
 	// Fill the book.
 	for i := 0; i < 8; i++ {
@@ -1214,7 +1214,7 @@ func TestMarket_enqueueEpoch(t *testing.T) {
 	}
 	defer cleanup()
 
-	rand.Seed(0) // deterministic random data
+	rnd.Seed(0) // deterministic random data
 
 	// Fill the book. Preimages not needed for these.
 	for i := 0; i < 8; i++ {
@@ -1601,7 +1601,7 @@ func TestMarket_Cancelable(t *testing.T) {
 
 func TestMarket_handlePreimageResp(t *testing.T) {
 	randomCommit := func() (com order.Commitment) {
-		rand.Read(com[:])
+		rnd.Read(com[:])
 		return
 	}
 
