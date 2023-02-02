@@ -2123,7 +2123,7 @@ func (db *BoltDB) DeleteInactiveOrders(ctx context.Context, olderThan *time.Time
 			return 0, err
 		}
 		start := time.Now()
-		nDeletedOrders = 0
+		nDeletedBatch := 0
 		err := db.Update(func(tx *bbolt.Tx) error {
 			// Run through the archived order bucket storing id's keys for
 			// returning the order data and deletion later.
@@ -2169,14 +2169,16 @@ func (db *BoltDB) DeleteInactiveOrders(ctx context.Context, olderThan *time.Time
 						return fmt.Errorf("problem performing batch function: %v", err)
 					}
 				}
-				nDeletedOrders++
+				nDeletedBatch++
 			}
-			db.log.Infof("Deleted %d orders from the database in %v.", nDeletedOrders, time.Since(start))
+			nDeletedOrders += nDeletedBatch
+			db.log.Infof("Deleted %d orders (%d total) from the database in %v.",
+				nDeletedBatch, nDeletedOrders, time.Since(start))
 			return nil
 		})
 		if err != nil {
-			if perOrderFn != nil && nDeletedOrders != 0 {
-				db.log.Warnf("%d orders reported as deleted have been rolled back due to error.", nDeletedOrders)
+			if perOrderFn != nil && nDeletedBatch != 0 {
+				db.log.Warnf("%d orders reported as deleted have been rolled back due to error.", nDeletedBatch)
 			}
 			return 0, fmt.Errorf("unable to delete orders: %v", err)
 		}
@@ -2260,7 +2262,7 @@ func (db *BoltDB) DeleteInactiveMatches(ctx context.Context, olderThan *time.Tim
 			return 0, err
 		}
 		start := time.Now()
-		nDeletedMatches = 0
+		nDeletedBatch := 0
 		if err := db.Update(func(tx *bbolt.Tx) error {
 			archivedMB := tx.Bucket(archivedMatchesBucket)
 			if archivedMB == nil {
@@ -2305,13 +2307,16 @@ func (db *BoltDB) DeleteInactiveMatches(ctx context.Context, olderThan *time.Tim
 						return fmt.Errorf("problem performing batch function: %v", err)
 					}
 				}
-				nDeletedMatches++
+				nDeletedBatch++
 			}
-			db.log.Infof("Deleted %d matches from the database in %v.", nDeletedMatches, time.Since(start))
+			nDeletedMatches += nDeletedBatch
+			db.log.Infof("Deleted %d matches (%d total) from the database in %v.",
+				nDeletedBatch, nDeletedMatches, time.Since(start))
+
 			return nil
 		}); err != nil {
-			if perMatchFn != nil && nDeletedMatches != 0 {
-				db.log.Warnf("%d matches reported as deleted have been rolled back due to error.", nDeletedMatches)
+			if perMatchFn != nil && nDeletedBatch != 0 {
+				db.log.Warnf("%d matches reported as deleted have been rolled back due to error.", nDeletedBatch)
 			}
 			return 0, fmt.Errorf("unable to delete matches: %v", err)
 		}
