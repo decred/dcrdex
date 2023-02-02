@@ -1247,7 +1247,7 @@ func (c *Core) feeEstimates(form *TradeForm) (swapFees, redeemFees uint64, err e
 			if err2 != nil {
 				return 0, 0, fmt.Errorf("error getting swap estimate (%v) and single-lot estimate (%v)", err, err2)
 			}
-			err = nil
+			// err = nil // ineffassign
 		} else {
 			return 0, 0, fmt.Errorf("error getting swap estimate: %w", err)
 		}

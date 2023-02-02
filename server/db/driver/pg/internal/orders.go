@@ -53,7 +53,7 @@ const (
 	WHERE account_id = $1
 		AND status >= 0         -- exclude forgiven
 	ORDER BY epochCloseTime DESC
-	LIMIT $2`  // no ;
+	LIMIT $2` // no ;
 	// NOTE: we could join with the epochs table if we really want match_time instead of epoch close time
 
 	// SelectUserOrders retrieves all columns of all orders for the given
@@ -80,7 +80,7 @@ const (
 		JOIN %[2]s ON %[2]s.epoch_idx = %[1]s.epoch_idx AND %[2]s.epoch_dur = %[1]s.epoch_dur -- join on epochs table PK
 		WHERE account_id = $1 AND status = ANY($2) -- {orderStatusCanceled, orderStatusRevoked}
 		ORDER BY match_time DESC
-		LIMIT $3;`  // The matchTime is when the order was booked, not canceled!!!
+		LIMIT $3;` // The matchTime is when the order was booked, not canceled!!!
 
 	// SelectOrderByCommit retrieves the order ID for any order with the given
 	// commitment value. This applies to the cancel order tables as well.
@@ -199,7 +199,7 @@ const (
 		AND commit IS NOT NULL  -- commit NOT NULL to exclude server-generated cancels
 		AND status >= 0         -- not forgiven
 	ORDER BY epochCloseTime DESC
-	LIMIT $2`  // no ;
+	LIMIT $2` // no ;
 
 	// SelectRevokeCancels retrieves server-initiated cancels (revokes).
 	SelectRevokeCancels = `SELECT oid, target_order, server_time, epoch_idx
@@ -227,7 +227,7 @@ const (
 		JOIN %[2]s ON %[2]s.epoch_idx = %[1]s.epoch_idx AND %[2]s.epoch_dur = %[1]s.epoch_dur -- join on epochs table PK
 		WHERE account_id = $1 AND status = $2
 		ORDER BY match_time DESC
-		LIMIT $3;`  // NOTE: find revoked orders via SelectRevokeCancels
+		LIMIT $3;` // NOTE: find revoked orders via SelectRevokeCancels
 
 	// InsertCancelOrder inserts a cancel order row into the specified table.
 	InsertCancelOrder = `INSERT INTO %s (oid, account_id, client_time, server_time,
