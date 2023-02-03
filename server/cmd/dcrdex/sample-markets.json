@@ -75,7 +75,7 @@
             "rateStep": 1000000000,
             "maxFeeRate": 200,
             "swapConf": 12,
-            "configPath": "/home/.ethereum/geth/geth.ipc"
+            "configPath": "/home/.ethereum/dex.conf"
         }
     }
 }

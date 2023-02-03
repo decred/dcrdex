@@ -6,12 +6,14 @@
 package eth
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -161,7 +163,7 @@ type ethFetcher interface {
 	bestHeader(ctx context.Context) (*types.Header, error)
 	blockNumber(ctx context.Context) (uint64, error)
 	headerByHeight(ctx context.Context, height uint64) (*types.Header, error)
-	connect(ctx context.Context, log dex.Logger) error
+	connect(ctx context.Context) error
 	shutdown()
 	suggestGasTipCap(ctx context.Context) (*big.Int, error)
 	syncProgress(ctx context.Context) (*ethereum.SyncProgress, error)
@@ -265,7 +267,7 @@ func unconnectedETH(logger dex.Logger, net dex.Network) (*ETHBackend, error) {
 
 // NewBackend is the exported constructor by which the DEX will import the
 // Backend.
-func NewBackend(endpoint string, logger dex.Logger, net dex.Network) (*ETHBackend, error) {
+func NewBackend(configPath string, log dex.Logger, net dex.Network) (*ETHBackend, error) {
 	switch net {
 	case dex.Simnet:
 	case dex.Testnet:
@@ -276,15 +278,34 @@ func NewBackend(endpoint string, logger dex.Logger, net dex.Network) (*ETHBacken
 		return nil, fmt.Errorf("unknown network ID: %d", net)
 	}
 
-	if endpoint == "" {
-		endpoint = defaultIPC
-	}
-
-	eth, err := unconnectedETH(logger, net)
+	file, err := os.Open(configPath)
 	if err != nil {
 		return nil, err
 	}
-	eth.node = newRPCClient(eth.net, endpoint)
+	defer file.Close()
+
+	var endpoints []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.Trim(scanner.Text(), " ")
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		endpoints = append(endpoints, line)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("error reading eth config file at %q. %v", configPath, err)
+	}
+	if len(endpoints) == 0 {
+		return nil, fmt.Errorf("no endpoint found in the eth config file at %q", configPath)
+	}
+	log.Debugf("Parsed %d endpoints from the ETH config file", len(endpoints))
+
+	eth, err := unconnectedETH(log, net)
+	if err != nil {
+		return nil, err
+	}
+	eth.node = newRPCClient(eth.net, endpoints, log.SubLogger("RPC"))
 	return eth, nil
 }
 
@@ -296,7 +317,7 @@ func (eth *baseBackend) shutdown() {
 func (eth *ETHBackend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	eth.baseBackend.ctx = ctx
 
-	if err := eth.node.connect(ctx, eth.log); err != nil {
+	if err := eth.node.connect(ctx); err != nil {
 		return nil, err
 	}
 
@@ -338,7 +359,8 @@ func (eth *TokenBackend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 }
 
 // TokenBackend creates an *AssetBackend for a token. Part of the
-// asset.TokenBacker interface.
+// asset.TokenBacker interface. Do not call TokenBackend concurrently for the
+// same asset.
 func (eth *ETHBackend) TokenBackend(assetID uint32, configPath string) (asset.Backend, error) {
 	if _, found := eth.baseBackend.tokens[assetID]; found {
 		return nil, fmt.Errorf("asset %d backend already loaded", assetID)
