@@ -15,6 +15,9 @@ ADDRESS_JSON_FILE_NAME=$9
 NODE_KEY=${10}
 SYNC_MODE=${11}
 AUTHRPC_PORT=${12}
+HTTP_PORT=${13}
+WS_PORT=${14}
+WS_MODULES=${15}
 
 GROUP_DIR="${NODES_ROOT}/${NAME}"
 MINE_JS="${GROUP_DIR}/mine.js"
@@ -29,11 +32,6 @@ cat > "${NODES_ROOT}/harness-ctl/${NAME}" <<EOF
 geth --datadir="${NODE_DIR}" \$*
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/${NAME}"
-
-HTTP_OPT=""
-if [ "$NAME" = "delta" ]; then
-  HTTP_OPT="--http --http.port ${DELTA_HTTP_PORT} --ws --ws.port ${DELTA_WS_PORT} --ws.api \"db,eth,net,web3,personal,txpool,admin\""
-fi
 
 # Write mine script if CHAIN_ADDRESS is present.
 if [ "${CHAIN_ADDRESS}" != "_" ]; then
@@ -137,8 +135,10 @@ if [ "${SYNC_MODE}" = "snap" ]; then
   tmux send-keys -t "$TMUX_WIN_ID" "${NODES_ROOT}/harness-ctl/${NAME} --nodiscover " \
 	  "--config ${NODE_DIR}/eth.conf --unlock ${CHAIN_ADDRESS} " \
 	  "--password ${GROUP_DIR}/password --light.serve 25 --datadir.ancient " \
-	  "${NODE_DIR}/geth-ancient --verbosity 5 --vmdebug 2>&1 | tee " \
-	  "${NODE_DIR}/${NAME}.log" C-m
+	  "${NODE_DIR}/geth-ancient --verbosity 5 --vmdebug --http --http.port " \
+	  "${HTTP_PORT} --ws --ws.port ${WS_PORT} --ws.api " \
+	  "${WS_MODULES} --allow-insecure-unlock " \
+	  "2>&1 | tee ${NODE_DIR}/${NAME}.log" C-m
 
 else
   # Start the eth node listening restricted to localhost and our custom
