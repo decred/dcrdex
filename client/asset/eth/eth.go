@@ -116,9 +116,17 @@ var (
 	}
 	// WalletInfo defines some general information about a Ethereum wallet.
 	WalletInfo = &asset.WalletInfo{
-		Name: "Ethereum",
-		// Version and SupportedVersions set in Driver methods.
-		UnitInfo: dexeth.UnitInfo,
+		Name:    "Ethereum",
+		Version: 0,
+		// SupportedVersions: For Ethereum, the server backend maintains a
+		// single protocol version, so tokens and ETH have the same set of
+		// supported versions. Even though the SupportedVersions are made
+		// accessible for tokens via (*TokenWallet).Info, the versions are not
+		// exposed though any Driver methods or assets/driver functions. Use the
+		// parent wallet's WalletInfo via (*Driver).Info if you need a token's
+		// supported versions before a wallet is available.
+		SupportedVersions: []uint32{0},
+		UnitInfo:          dexeth.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{
 			// {
 			// 	Type:        walletTypeGeth,
@@ -135,6 +143,8 @@ var (
 				Seeded:      true,
 				NoAuth:      true,
 			},
+			// MaxSwapsInTx and MaxRedeemsInTx are set in (Wallet).Info, since
+			// the value cannot be known until we connect and get network info.
 		},
 	}
 
@@ -236,22 +246,16 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 	return "", fmt.Errorf("unknown coin ID format: %x", coinID)
 }
 
-func ethWalletInfo() *asset.WalletInfo {
+func ethWalletInfo(maxSwaps, maxRedeems uint64) *asset.WalletInfo {
 	wi := *WalletInfo
-	var bestVer uint32
-	for ver := range contractorConstructors {
-		wi.SupportedVersions = append(wi.SupportedVersions, ver)
-		if ver > bestVer {
-			bestVer = ver
-		}
-	}
-	wi.Version = bestVer
+	wi.MaxSwapsInTx = maxSwaps
+	wi.MaxRedeemsInTx = maxRedeems
 	return &wi
 }
 
 // Info returns basic information about the wallet and asset.
 func (d *Driver) Info() *asset.WalletInfo {
-	return ethWalletInfo()
+	return WalletInfo
 }
 
 // Exists checks the existence of the wallet.
@@ -483,30 +487,15 @@ const maxProportionOfBlockGasLimitToUse = 4
 
 // Info returns basic information about the wallet and asset.
 func (w *ETHWallet) Info() *asset.WalletInfo {
-	wi := ethWalletInfo()
-	wi.MaxSwapsInTx = w.maxSwapsInTx
-	wi.MaxRedeemsInTx = w.maxRedeemsInTx
-	return wi
+	return ethWalletInfo(w.maxSwapsInTx, w.maxRedeemsInTx)
 }
 
 // Info returns basic information about the wallet and asset.
 func (w *TokenWallet) Info() *asset.WalletInfo {
-	var bestVer uint32
-	var vers []uint32
-	netToken := w.token.NetTokens[w.net]
-	if netToken != nil {
-		for ver := range netToken.SwapContracts {
-			vers = append(vers, ver)
-			if ver > bestVer {
-				bestVer = ver
-			}
-		}
-	} // maybe panic
-
 	return &asset.WalletInfo{
 		Name:              w.token.Name,
-		Version:           bestVer,
-		SupportedVersions: vers,
+		Version:           WalletInfo.Version,
+		SupportedVersions: WalletInfo.SupportedVersions,
 		UnitInfo:          w.token.UnitInfo,
 		MaxSwapsInTx:      w.maxSwapsInTx,
 		MaxRedeemsInTx:    w.maxRedeemsInTx,
