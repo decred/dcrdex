@@ -605,68 +605,27 @@ export default class MarketsPage extends BasePage {
     isSupported: boolean;
     text: string;
     } {
-    const { market } = this
-    const [base, quote] = [market.base, market.quote]
+    const { market: { base, quote, baseCfg, quoteCfg } } = this
     if (!base || !quote) {
-      const symbol = market.base ? market.quoteCfg.symbol : market.baseCfg.symbol
+      const symbol = base ? quoteCfg.symbol : baseCfg.symbol
       return {
         isSupported: false,
         text: intl.prep(intl.ID_NOT_SUPPORTED, { asset: symbol.toUpperCase() })
       }
     }
-    const { baseCfg, quoteCfg } = this.market
     // check if versions are supported. If asset is a token, we check if its
     // parent supports the version.
-    let text = ''
-    if (base.token && quote.token) {
-      const bParent = app().assets[base.token.parentID]
-      const qParent = app().assets[quote.token.parentID]
-      if (!bParent.info?.versions.includes(baseCfg.version)) {
-        text = intl.prep(intl.ID_VERSION_NOT_SUPPORTED, { asset: bParent.symbol.toUpperCase(), version: baseCfg.version + '' })
-      }
-      if (!qParent.info?.versions.includes(quoteCfg.version)) {
-        text = intl.prep(intl.ID_VERSION_NOT_SUPPORTED, { asset: qParent.symbol.toUpperCase(), version: quoteCfg.version + '' })
-      }
-      return {
-        isSupported: !!qParent.info?.versions.includes(quoteCfg.version) && !!bParent.info?.versions.includes(baseCfg.version),
-        text
-      }
-    }
-    if (base.token) {
-      const bParent = app().assets[base.token.parentID]
-      if (!bParent.info?.versions.includes(baseCfg.version)) {
-        text = intl.prep(intl.ID_VERSION_NOT_SUPPORTED, { asset: bParent.symbol.toUpperCase(), version: baseCfg.version + '' })
-      }
-      if (!quote.info?.versions.includes(quoteCfg.version)) {
-        text = intl.prep(intl.ID_VERSION_NOT_SUPPORTED, { asset: quote.symbol.toUpperCase(), version: quoteCfg.version + '' })
-      }
-      return {
-        isSupported: !!quote.info?.versions.includes(quoteCfg.version) && !!bParent.info?.versions.includes(baseCfg.version),
-        text
-      }
-    }
-    if (quote.token) {
-      const qParent = app().assets[quote.token.parentID]
-      if (!base.info?.versions.includes(baseCfg.version)) {
-        text = intl.prep(intl.ID_VERSION_NOT_SUPPORTED, { asset: base.symbol.toUpperCase(), version: baseCfg.version + '' })
-      }
-      if (!qParent.info?.versions.includes(quoteCfg.version)) {
-        text = intl.prep(intl.ID_VERSION_NOT_SUPPORTED, { asset: quote.symbol.toUpperCase(), version: quoteCfg.version + '' })
-      }
-      return {
-        isSupported: !!base.info?.versions.includes(baseCfg.version) && !!qParent.info?.versions.includes(quoteCfg.version),
-        text
-      }
-    }
+    const bVers = (base.token ? app().assets[base.token.parentID].info?.versions : base.info?.versions) as number[]
+    const qVers = (quote.token ? app().assets[quote.token.parentID].info?.versions : quote.info?.versions) as number[]
     // if none them are token, just check if own asset is supported.
-    if (!base.info?.versions.includes(baseCfg.version)) {
+    let text = ''
+    if (!bVers.includes(baseCfg.version)) {
       text = intl.prep(intl.ID_VERSION_NOT_SUPPORTED, { asset: base.symbol.toUpperCase(), version: baseCfg.version + '' })
-    }
-    if (!quote.info?.versions.includes(quoteCfg.version)) {
+    } else if (!qVers.includes(quoteCfg.version)) {
       text = intl.prep(intl.ID_VERSION_NOT_SUPPORTED, { asset: quote.symbol.toUpperCase(), version: quoteCfg.version + '' })
     }
     return {
-      isSupported: !!base.info?.versions.includes(baseCfg.version) && !!quote.info?.versions.includes(quoteCfg.version),
+      isSupported: bVers.includes(baseCfg.version) && qVers.includes(quoteCfg.version),
       text
     }
   }
