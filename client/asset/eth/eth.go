@@ -596,7 +596,6 @@ func createWallet(createWalletParams *asset.CreateWalletParams, skipConnect bool
 			return errors.New("no providers specified")
 		}
 		endpoints := strings.Split(providerDef, providerDelimiter)
-		n := len(endpoints)
 
 		// TODO: This procedure may actually work for walletTypeGeth too.
 		ks := keystore.NewKeyStore(filepath.Join(walletDir, "keystore"), keystore.LightScryptN, keystore.LightScryptP)
@@ -607,36 +606,9 @@ func createWallet(createWalletParams *asset.CreateWalletParams, skipConnect bool
 		}
 
 		if !skipConnect {
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
-			defer cancel()
-
-			var unknownEndpoints []string
-
-			for _, endpoint := range endpoints {
-				known, compliant := providerIsCompliant(endpoint)
-				if known && !compliant {
-					return fmt.Errorf("provider %q is known to have an insufficient API for DEX", endpoint)
-				} else if !known {
-					unknownEndpoints = append(unknownEndpoints, endpoint)
-				}
-			}
-
-			if len(unknownEndpoints) > 0 && createWalletParams.Net == dex.Mainnet {
-				providers, err := connectProviders(ctx, unknownEndpoints, createWalletParams.Logger, big.NewInt(chainIDs[createWalletParams.Net]), createWalletParams.Net)
-				if err != nil {
-					return err
-				}
-				defer func() {
-					for _, p := range providers {
-						p.ec.Close()
-					}
-				}()
-				if len(providers) != n {
-					return fmt.Errorf("Could not connect to all providers")
-				}
-				if err := checkProvidersCompliance(ctx, walletDir, providers, createWalletParams.Logger); err != nil {
-					return err
-				}
+			if err := createAndCheckProviders(context.Background(), walletDir, endpoints,
+				createWalletParams.Net, createWalletParams.Logger); err != nil {
+				return fmt.Errorf("create and check providers problem: %v", err)
 			}
 		}
 		return importKeyToKeyStore(ks, priv, createWalletParams.Pass)
@@ -893,7 +865,8 @@ func (w *ETHWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig, cu
 	}
 
 	if rpc, is := w.node.(*multiRPCClient); is {
-		if err := rpc.reconfigure(ctx, cfg.Settings); err != nil {
+		walletDir := getWalletDir(w.dir, w.net)
+		if err := rpc.reconfigure(ctx, cfg.Settings, walletDir); err != nil {
 			return false, err
 		}
 	}

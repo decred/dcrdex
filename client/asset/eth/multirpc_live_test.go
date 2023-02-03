@@ -267,7 +267,7 @@ func TestRPC(t *testing.T) {
 		t.Fatalf("connect error: %v", err)
 	}
 
-	for _, tt := range newCompatibilityTests(cl, cl.log) {
+	for _, tt := range newCompatibilityTests(cl, dex.Mainnet, cl.log) {
 		tStart := time.Now()
 		if err := cl.withAny(ctx, tt.f); err != nil {
 			t.Fatalf("%q: %v", tt.name, err)
@@ -297,15 +297,13 @@ func TestFreeServers(t *testing.T) {
 		if err := cl.connect(ctx); err != nil {
 			return fmt.Errorf("connect error: %v", err)
 		}
-		return cl.withAny(ctx, func(ctx context.Context, p *provider) error {
-			for _, tt := range newCompatibilityTests(cl, cl.log) {
-				if err := tt.f(ctx, p); err != nil {
-					return fmt.Errorf("%q error: %v", tt.name, err)
-				}
-				fmt.Printf("#### %q passed %q \n", endpoint, tt.name)
+		for _, tt := range newCompatibilityTests(cl, dex.Mainnet, cl.log) {
+			if err := cl.withAny(ctx, tt.f); err != nil {
+				return fmt.Errorf("%q error: %v", tt.name, err)
 			}
-			return nil
-		})
+			fmt.Printf("#### %q passed %q \n", endpoint, tt.name)
+		}
+		return nil
 	}
 
 	passes, fails := make([]string, 0), make(map[string]error, 0)
@@ -326,20 +324,26 @@ func TestFreeServers(t *testing.T) {
 
 func TestMainnetCompliance(t *testing.T) {
 	providerFile := readProviderFile(t, dex.Mainnet)
-	dir, _ := os.MkdirTemp("", "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	log := dex.StdOutLogger("T", dex.LevelTrace)
 	providers, err := connectProviders(ctx, providerFile.Providers, log, big.NewInt(chainIDs[dex.Mainnet]), dex.Mainnet)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = checkProvidersCompliance(ctx, dir, providers, log)
+	err = checkProvidersCompliance(ctx, providers, dex.Mainnet, log)
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
 func tRPCClient(dir string, seed []byte, endpoints []string, net dex.Network, skipConnect bool) (*multiRPCClient, error) {
+	wDir := getWalletDir(dir, net)
+	err := os.MkdirAll(wDir, 0755)
+	if err != nil {
+		return nil, fmt.Errorf("os.Mkdir error: %w", err)
+	}
 	log := dex.StdOutLogger("T", dex.LevelTrace)
 	if err := createWallet(&asset.CreateWalletParams{
 		Type: walletTypeRPC,
