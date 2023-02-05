@@ -222,7 +222,7 @@ ETH_CONFIG_PATH=${TEST_ROOT}/eth.conf
 ETH_IPC_FILE=${TEST_ROOT}/eth/alpha/node/geth.ipc
 cat << EOF >> $ETH_CONFIG_PATH
 ws://localhost:38557
-# comments and respected
+# comments are respected
 # http://localhost:38556
 ${ETH_IPC_FILE}
 EOF

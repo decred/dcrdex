@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"strings"
 	"sync"
+	"time"
 
 	"decred.org/dcrdex/dex"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
@@ -28,7 +29,8 @@ import (
 var (
 	_ ethFetcher = (*rpcclient)(nil)
 
-	bigZero = new(big.Int)
+	bigZero              = new(big.Int)
+	headerExpirationTime = time.Minute
 )
 
 type ContextCaller interface {
@@ -37,6 +39,7 @@ type ContextCaller interface {
 
 type ethConn struct {
 	*ethclient.Client
+	endpoint string
 	// swapContract is the current ETH swapContract.
 	swapContract swapContract
 	// tokens are tokeners for loaded tokens. tokens is not protected by a
@@ -105,6 +108,8 @@ func (c *rpcclient) connect(ctx context.Context) (err error) {
 		return fmt.Errorf("no contract address for eth version %d on %s", ethContractVersion, c.net)
 	}
 
+	var success bool
+
 	c.clients = make([]*ethConn, len(c.endpoints))
 	for i, endpoint := range c.endpoints {
 		client, err := rpc.DialContext(ctx, endpoint)
@@ -112,9 +117,16 @@ func (c *rpcclient) connect(ctx context.Context) (err error) {
 			return fmt.Errorf("unable to dial rpc to %q: %v", endpoint, err)
 		}
 
+		defer func() {
+			if !success {
+				client.Close()
+			}
+		}()
+
 		ec := &ethConn{
-			Client: ethclient.NewClient(client),
-			tokens: make(map[uint32]*tokener),
+			Client:   ethclient.NewClient(client),
+			endpoint: endpoint,
+			tokens:   make(map[uint32]*tokener),
 		}
 
 		reqModules := []string{"eth", "txpool"}
@@ -126,6 +138,15 @@ func (c *rpcclient) connect(ctx context.Context) (err error) {
 			ec.txPoolSupported = true
 		}
 
+		hdr, err := ec.HeaderByNumber(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("error getting best header from %q: %v", endpoint, err)
+		}
+		if c.headerIsOutdated(hdr) {
+			return fmt.Errorf("initial header fetched from %q appears to be outdated (time %s). If you continue to see this message, you might need to check your system clock",
+				endpoint, time.Unix(int64(hdr.Time), 0))
+		}
+
 		es, err := swapv0.NewETHSwap(contractAddr, ec.Client)
 		if err != nil {
 			return fmt.Errorf("unable to initialize eth contract for %q: %v", endpoint, err)
@@ -135,7 +156,12 @@ func (c *rpcclient) connect(ctx context.Context) (err error) {
 
 		c.clients[i] = ec
 	}
+	success = true
 	return nil
+}
+
+func (c *rpcclient) headerIsOutdated(hdr *types.Header) bool {
+	return c.net != dex.Simnet && hdr.Time < uint64(time.Now().Add(-headerExpirationTime).Unix())
 }
 
 // shutdown shuts down the client.
@@ -171,11 +197,18 @@ func (c *rpcclient) withTokener(assetID uint32, f func(*tokener) error) error {
 // bestHeader gets the best header at the time of calling.
 func (c *rpcclient) bestHeader(ctx context.Context) (hdr *types.Header, err error) {
 	return hdr, c.withClient(func(ec *ethConn) error {
-		bn, err := ec.BlockNumber(ctx)
-		if err != nil {
-			return err
+		hdr, err = ec.HeaderByNumber(ctx, nil)
+		if err == nil && c.headerIsOutdated(hdr) {
+			c.log.Errorf("Best header from %q appears to be outdated (time %s). If you continue to see this message, you might need to check your system clock",
+				ec.endpoint, time.Unix(int64(hdr.Time), 0))
+			if len(c.endpoints) > 0 {
+				c.idxMtx.Lock()
+				c.endpointIdx = (c.endpointIdx + 1) % len(c.endpoints)
+				endpoint := c.endpoints[c.endpointIdx]
+				c.idxMtx.Unlock()
+				c.log.Infof("Switching RPC endpoint to %q", endpoint)
+			}
 		}
-		hdr, err = ec.HeaderByNumber(ctx, big.NewInt(int64(bn)))
 		return err
 	})
 
