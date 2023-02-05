@@ -7,6 +7,7 @@ package eth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -65,7 +66,7 @@ func newRPCClient(net dex.Network, endpoints []string, log dex.Logger) *rpcclien
 	}
 }
 
-func (c *rpcclient) withClient(f func(ec *ethConn) error, propagateNotFound ...bool) (err error) {
+func (c *rpcclient) withClient(f func(ec *ethConn) error, haltOnNotFound ...bool) (err error) {
 	for range c.endpoints {
 		c.idxMtx.RLock()
 		idx := c.endpointIdx
@@ -76,7 +77,7 @@ func (c *rpcclient) withClient(f func(ec *ethConn) error, propagateNotFound ...b
 		if err == nil {
 			return nil
 		}
-		if len(propagateNotFound) > 0 && propagateNotFound[0] && strings.Contains(err.Error(), "not found") {
+		if len(haltOnNotFound) > 0 && haltOnNotFound[0] && (errors.Is(err, ethereum.NotFound) || strings.Contains(err.Error(), "not found")) {
 			return err
 		}
 		c.log.Errorf("Unpropagated error from %q: %v", c.endpoints[idx], err)
@@ -106,7 +107,7 @@ func (c *rpcclient) connect(ctx context.Context) (err error) {
 
 	c.clients = make([]*ethConn, len(c.endpoints))
 	for i, endpoint := range c.endpoints {
-		client, err := rpc.Dial(endpoint)
+		client, err := rpc.DialContext(ctx, endpoint)
 		if err != nil {
 			return fmt.Errorf("unable to dial rpc to %q: %v", endpoint, err)
 		}
@@ -233,7 +234,7 @@ func (c *rpcclient) transaction(ctx context.Context, hash common.Hash) (tx *type
 	return tx, isMempool, c.withClient(func(ec *ethConn) error {
 		tx, isMempool, err = ec.TransactionByHash(ctx, hash)
 		return err
-	}, true)
+	}, true) // stop on first provider with "not found", because this should be an error if tx does not exist
 }
 
 // dumbBalance gets the account balance, ignoring the effects of unmined
