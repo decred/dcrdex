@@ -684,7 +684,7 @@ func (eth *ETHBackend) poll(ctx context.Context) {
 		return
 	}
 	if bn == eth.bestHeight {
-		// Same hash, nothing to do.
+		// Same height, nothing to do.
 		return
 	}
 	eth.log.Debugf("Tip change from %d to %d.", eth.bestHeight, bn)
