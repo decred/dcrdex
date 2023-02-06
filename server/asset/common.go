@@ -179,7 +179,7 @@ type Contract struct {
 // BlockUpdate is sent over the update channel when a tip change is detected.
 type BlockUpdate struct {
 	Err   error
-	Reorg bool
+	Reorg bool // TODO: Not used. Remove and update through btc and dcr. Don't really need the BlockUpdate struct at all.
 }
 
 // ConnectionError error should be sent over the block update channel if a
