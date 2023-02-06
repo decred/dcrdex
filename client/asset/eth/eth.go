@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"os"
 	"os/user"
 	"path/filepath"
 	"sort"
@@ -589,6 +590,11 @@ func createWallet(createWalletParams *asset.CreateWalletParams, skipConnect bool
 	// 	defer node.Close()
 	// 	return importKeyToNode(node, privateKey, createWalletParams.Pass)
 	case walletTypeRPC:
+		// Make the wallet dir if it does not exist, otherwise we may fail to
+		// write the compliant_providers.json file.
+		if err := os.MkdirAll(walletDir, 0700); err != nil {
+			return err
+		}
 
 		// Check that we can connect to all endpoints.
 		providerDef := createWalletParams.Settings[providersKey]
