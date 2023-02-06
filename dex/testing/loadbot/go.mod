@@ -5,13 +5,13 @@ go 1.18
 replace decred.org/dcrdex => ../../../
 
 require (
-	decred.org/dcrdex v0.0.0-20220620230547-1283356d184b
+	decred.org/dcrdex v0.0.0-20230206134810-8a482dd7caf1
 	github.com/Shopify/toxiproxy/v2 v2.4.0
 )
 
 require (
 	decred.org/cspp/v2 v2.0.0 // indirect
-	decred.org/dcrwallet/v2 v2.0.8 // indirect
+	decred.org/dcrwallet/v2 v2.0.10 // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
 	github.com/VictoriaMetrics/fastcache v1.6.0 // indirect
