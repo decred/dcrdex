@@ -3,7 +3,7 @@ module decred.org/dcrdex
 go 1.18
 
 require (
-	decred.org/dcrwallet/v2 v2.0.8
+	decred.org/dcrwallet/v2 v2.0.10
 	fyne.io/systray v1.10.1-0.20220621085403-9a2652634e93
 	github.com/btcsuite/btcd v0.23.3
 	github.com/btcsuite/btcd/btcec/v2 v2.2.1
