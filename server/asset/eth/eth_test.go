@@ -242,7 +242,7 @@ func TestRun(t *testing.T) {
 		t.Fatalf("unconnectedETH error: %v", err)
 	}
 	backend.node = &testNode{
-		bestHdr: &types.Header{Number: big.NewInt(1)},
+		blkNum: backend.bestHeight + 1,
 	}
 	ch := backend.BlockChannel(1)
 	go func() {
@@ -757,75 +757,34 @@ func TestAccountBalance(t *testing.T) {
 }
 
 func TestPoll(t *testing.T) {
-	blkHdr := &types.Header{Number: big.NewInt(0)}
 	tests := []struct {
-		name                       string
-		bestHdr, hdrByHeight       *types.Header
-		bestHdrErr, hdrByHeightErr error
-		wantErr, preventSend       bool
+		name        string
+		addBlock    bool
+		blockNumErr error
 	}{{
-		name:    "ok nothing to do",
-		bestHdr: blkHdr,
+		name: "ok nothing to do",
 	}, {
-		name: "ok sequential",
-		bestHdr: &types.Header{
-			Number:     big.NewInt(1),
-			ParentHash: blkHdr.Hash(),
-		},
+		name:     "ok new",
+		addBlock: true,
 	}, {
-		name: "ok fast blocks",
-		bestHdr: &types.Header{
-			Number: big.NewInt(1),
-		},
-		hdrByHeight: blkHdr,
-	}, {
-		name: "ok reorg",
-		bestHdr: &types.Header{
-			Number: big.NewInt(1),
-		},
-	}, {
-		name: "ok but cannot send",
-		bestHdr: &types.Header{
-			Number:     big.NewInt(1),
-			ParentHash: blkHdr.Hash(),
-		},
-		preventSend: true,
-	}, {
-		name:       "best header error",
-		bestHdrErr: errors.New(""),
-		wantErr:    true,
-	}, {
-		name: "header by height error",
-		bestHdr: &types.Header{
-			Number: big.NewInt(1),
-		},
-		hdrByHeightErr: errors.New(""),
-		wantErr:        true,
+		name:        "blockNumber error",
+		blockNumErr: errors.New(""),
 	}}
 
 	for _, test := range tests {
 		be, node := tNewBackend(BipID)
 		eth := &ETHBackend{be}
-		node.bestHdr = test.bestHdr
-		node.bestHdrErr = test.bestHdrErr
-		node.hdrByHeight = test.hdrByHeight
-		node.hdrByHeightErr = test.hdrByHeightErr
-		eth.bestHash = hashN{
-			hash: blkHdr.Hash(),
+		node.blkNumErr = test.blockNumErr
+		if test.addBlock {
+			node.blkNum = be.bestHeight + 1
+		} else {
+			node.blkNum = be.bestHeight
 		}
-		chSize := 1
-		if test.preventSend {
-			chSize = 0
-		}
-		ch := make(chan *asset.BlockUpdate, chSize)
+		ch := make(chan *asset.BlockUpdate, 1)
 		eth.blockChans[ch] = struct{}{}
 		bu := new(asset.BlockUpdate)
 		wait := make(chan struct{})
 		go func() {
-			if test.preventSend {
-				close(wait)
-				return
-			}
 			select {
 			case bu = <-ch:
 			case <-time.After(time.Second * 2):
@@ -834,7 +793,7 @@ func TestPoll(t *testing.T) {
 		}()
 		eth.poll(nil)
 		<-wait
-		if test.wantErr {
+		if test.blockNumErr != nil {
 			if bu.Err == nil {
 				t.Fatalf("expected error for test %q", test.name)
 			}

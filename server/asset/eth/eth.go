@@ -172,11 +172,6 @@ type ethFetcher interface {
 	accountBalance(ctx context.Context, assetID uint32, addr common.Address) (*big.Int, error)
 }
 
-type hashN struct {
-	height uint64
-	hash   common.Hash
-}
-
 type baseBackend struct {
 	// A connection-scoped Context is used to cancel active RPCs on
 	// connection shutdown.
@@ -184,10 +179,11 @@ type baseBackend struct {
 	net  dex.Network
 	node ethFetcher
 
-	// bestHash caches the last know best block hash and height and is used
-	// to detect reorgs. Only accessed in Connect and poll which is
-	// syncronous so no locking is needed presently.
-	bestHash hashN
+	// bestHeight is the last best known chain tip height. bestHeight is set
+	// in Connect before the poll loop is started, and only updated in the poll
+	// loop thereafter. Do not use bestHeight outside of the poll loop unless
+	// you change it to an atomic.
+	bestHeight uint64
 
 	// A logger will be provided by the DEX. All logging should use the provided
 	// logger.
@@ -301,14 +297,11 @@ func (eth *ETHBackend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	}
 
 	// Prime the best block hash and height.
-	hdr, err := eth.node.bestHeader(ctx)
+	bn, err := eth.node.blockNumber(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error getting best block header from geth: %w", err)
 	}
-	eth.baseBackend.bestHash = hashN{
-		height: hdr.Number.Uint64(),
-		hash:   hdr.Hash(),
-	}
+	eth.baseBackend.bestHeight = bn
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -671,14 +664,12 @@ func (eth *baseBackend) ValidateSignature(addr string, pubkey, msg, sig []byte) 
 // hash. If the same does nothing. If different, updates the stored hash and
 // notifies listeners on block chans.
 func (eth *ETHBackend) poll(ctx context.Context) {
-	best := &eth.bestHash
-	send := func(reorg bool, err error) {
+	send := func(err error) {
 		if err != nil {
 			eth.log.Error(err)
 		}
 		u := &asset.BlockUpdate{
-			Reorg: reorg,
-			Err:   err,
+			Err: err,
 		}
 
 		eth.sendBlockUpdate(u)
@@ -687,57 +678,18 @@ func (eth *ETHBackend) poll(ctx context.Context) {
 			be.sendBlockUpdate(u)
 		}
 	}
-	bhdr, err := eth.node.bestHeader(ctx)
+	bn, err := eth.node.blockNumber(ctx)
 	if err != nil {
-		send(false, fmt.Errorf("error getting best block header from geth: %w", err))
+		send(fmt.Errorf("error getting best block header from geth: %w", err))
 		return
 	}
-	if bhdr.Hash() == best.hash {
+	if bn == eth.bestHeight {
 		// Same hash, nothing to do.
 		return
 	}
-	update := func(reorg bool, fastBlocks bool) {
-		hash := bhdr.Hash()
-		height := bhdr.Number.Uint64()
-		str := fmt.Sprintf("Tip change from %s (%d) to %s (%d).",
-			best.hash, best.height, hash, height)
-		switch {
-		case reorg:
-			str += " Detected reorg."
-		case fastBlocks:
-			str += " Fast blocks."
-		}
-		eth.log.Debug(str)
-		best.hash = hash
-		best.height = height
-	}
-	if bhdr.ParentHash == best.hash {
-		// Sequential hash, report a block update.
-		update(false, false)
-		send(false, nil)
-		return
-	}
-	// Either a block was skipped or a reorg happened. We can only detect
-	// the reorg if our last best header's hash has changed. Otherwise,
-	// assume no reorg and report the new block change.
-	//
-	// headerByHeight will only return mainchain headers.
-	hdr, err := eth.node.headerByHeight(ctx, best.height)
-	if err != nil {
-		send(false, fmt.Errorf("error getting block header from geth: %w", err))
-		return
-	}
-	if hdr.Hash() == best.hash {
-		// Our recorded hash is still on main chain so there is no reorg
-		// that we know of. The chain has advanced more than one block.
-		update(false, true)
-		send(false, nil)
-		return
-	}
-	// The block for our recorded hash was forked off and the chain had a
-	// reorganization.
-	update(true, false)
-	send(true, nil)
+	eth.log.Debugf("Tip change from %d to %d.", eth.bestHeight, bn)
+	eth.bestHeight = bn
+	send(nil)
 }
 
 // run processes the queue and monitors the application context.
