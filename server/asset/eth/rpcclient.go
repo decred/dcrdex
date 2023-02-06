@@ -133,11 +133,7 @@ func (c *rpcclient) withTokener(assetID uint32, f func(*tokener) error) error {
 
 // bestHeader gets the best header at the time of calling.
 func (c *rpcclient) bestHeader(ctx context.Context) (*types.Header, error) {
-	bn, err := c.ec.BlockNumber(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return c.ec.HeaderByNumber(ctx, big.NewInt(int64(bn)))
+	return c.ec.HeaderByNumber(ctx, nil)
 }
 
 // headerByHeight gets the best header at height.
