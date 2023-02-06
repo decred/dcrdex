@@ -1898,11 +1898,14 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 
 	gasLimit, gasFeeCap := g.Redeem*n, form.FeeSuggestion
 	originalFundsReserved := gasLimit * gasFeeCap
-	gasEst, err := w.estimateRedeemGas(w.ctx, secrets, contractVer)
-	if err != nil {
+
+	/* We could get a gas estimate via RPC, but this will reveal the secret key
+	   before submitting the redeem transaction. This is not OK for maker.
+	   Disable for now.
+
+	if gasEst, err := w.estimateRedeemGas(w.ctx, secrets, contractVer); err != nil {
 		return fail(fmt.Errorf("error getting redemption estimate: %w", err))
-	}
-	if gasEst > gasLimit {
+	} else if gasEst > gasLimit {
 		// This is sticky. We only reserved so much for redemption, so accepting
 		// a gas limit higher than anticipated could potentially mess us up. On
 		// the other hand, we don't want to simply reject the redemption.
@@ -1920,6 +1923,7 @@ func (w *assetWallet) Redeem(form *asset.RedeemForm, feeWallet *assetWallet, non
 		w.log.Warnf("live gas estimate %d exceeded expected max value %d. using higher limit %d for redemption", gasEst, gasLimit, candidateLimit)
 		gasLimit = candidateLimit
 	}
+	*/
 
 	// If the base fee is higher than the FeeSuggestion we attempt to increase
 	// the gasFeeCap to 2*baseFee. If we don't have enough funds, we use the
@@ -3714,6 +3718,10 @@ func (w *assetWallet) estimateInitGas(ctx context.Context, numSwaps int, contrac
 }
 
 // estimateRedeemGas checks the amount of gas that is used for the redemption.
+// Only used with testing and development tools like the
+// nodeclient_harness_test.go suite (GetGasEstimates, testRedeemGas, etc.).
+// Never use this with a public RPC provider, especially as maker, since it
+// reveals the secret keys.
 func (w *assetWallet) estimateRedeemGas(ctx context.Context, secrets [][32]byte, contractVer uint32) (gas uint64, err error) {
 	return gas, w.withContractor(contractVer, func(c contractor) error {
 		gas, err = c.estimateRedeemGas(ctx, secrets)

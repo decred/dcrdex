@@ -1843,6 +1843,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 	addSwapToSwapMap(secretHashes[0], 1e9, dexeth.SSInitiated) // states will be reset by tests though
 	addSwapToSwapMap(secretHashes[1], 1e9, dexeth.SSInitiated)
 
+	/* COMMENTED while estimateRedeemGas is on the $#!t list
 	var redeemGas uint64
 	if assetID == BipID {
 		redeemGas = ethGases.Redeem
@@ -1850,9 +1851,9 @@ func testRedeem(t *testing.T, assetID uint32) {
 		redeemGas = tokenGases.Redeem
 	}
 
-	var higherGasEstimate uint64 = redeemGas * 2 * 12 / 10                     // 120% of estimate
-	var doubleGasEstimate uint64 = (redeemGas * 2 * 2) * 10 / 11               // 200% of estimate after 10% increase
-	var moreThanDoubleGasEstimate uint64 = (redeemGas * 2 * 21 / 10) * 10 / 11 // > 200% of estimate after 10% increase
+	var higherGasEstimate uint64 = redeemGas * 2 * 12 / 10       // 120% of estimate
+	var doubleGasEstimate uint64 = (redeemGas * 2 * 2) * 10 / 11 // 200% of estimate after 10% increase
+	// var moreThanDoubleGasEstimate uint64 = (redeemGas * 2 * 21 / 10) * 10 / 11 // > 200% of estimate after 10% increase
 	// additionalFundsNeeded calculates the amount of available funds that we be
 	// needed to use a higher gas estimate than the original, and double the base
 	// fee if it is higher than the server's max fee rate.
@@ -1876,6 +1877,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 
 		return amountRequired - originalReserves
 	}
+	*/
 
 	var bestBlock int64 = 123
 	node.bestHdr = &types.Header{
@@ -1932,6 +1934,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 				FeeSuggestion: 100,
 			},
 		},
+		/* COMMENTED while estimateRedeemGas is on the $#!t list
 		{
 			name:              "higher gas estimate than reserved",
 			expectError:       false,
@@ -2134,6 +2137,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 				FeeSuggestion: 100,
 			},
 		},
+		*/
 		{
 			name:        "not redeemable",
 			expectError: true,
@@ -2320,15 +2324,15 @@ func testRedeem(t *testing.T, assetID uint32) {
 
 		// Check that gas limit in the transaction is as expected
 		var expectedGasLimit uint64
-		if test.redeemGasOverride == nil {
-			if assetID == BipID {
-				expectedGasLimit = ethGases.Redeem * uint64(len(test.form.Redemptions))
-			} else {
-				expectedGasLimit = tokenGases.Redeem * uint64(len(test.form.Redemptions))
-			}
+		// if test.redeemGasOverride == nil {
+		if assetID == BipID {
+			expectedGasLimit = ethGases.Redeem * uint64(len(test.form.Redemptions))
 		} else {
-			expectedGasLimit = *test.redeemGasOverride * 11 / 10
+			expectedGasLimit = tokenGases.Redeem * uint64(len(test.form.Redemptions))
 		}
+		// } else {
+		// 	expectedGasLimit = *test.redeemGasOverride * 11 / 10
+		// }
 		if contractorV1.lastRedeemOpts.GasLimit != expectedGasLimit {
 			t.Fatalf("%s: expected gas limit %d, but got %d", test.name, expectedGasLimit, contractorV1.lastRedeemOpts.GasLimit)
 		}
