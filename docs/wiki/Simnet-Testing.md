@@ -44,13 +44,13 @@ When done with a harness, use `./quit` to shutdown all the processes and tmux se
 For convenience, the harnesses may continually mine blocks with the `watch` command. To generate a new Bitcoin block every 5 seconds:
 
 ```sh
-~dextest/btc/harness-ctl $ watch -n 25 ./mine-alpha 1
+~/dextest/btc/harness-ctl $ watch -n 25 ./mine-alpha 1
 ```
 
 Decred is similar, but under the `dcr` folder:
 
 ```sh
-~dextest/dcr/harness-ctl $ watch -n 30 ./mine-alpha 1
+~/dextest/dcr/harness-ctl $ watch -n 30 ./mine-alpha 1
 ```
 
 **WARNING**: Decred's harness can't mine indefinitely so stop the watch when you have completed your current test.  The harness config has a ticket buyer, but not enough tickets are purchased on a long enough timeline because automatic buying is not allowed before a price change.  This needs tweaking.
@@ -62,7 +62,7 @@ Decred is similar, but under the `dcr` folder:
 There is a dcrdex harness that will set up everything for you, although with a very short contract lock time set of 1 min maker and 30 sec taker.
 
 ```sh
-~[repo root]/dex/testing/dcrdex $ ./harness.sh
+/[repo root]/dex/testing/dcrdex $ ./harness.sh
 ```
 
 To setup the dcrdex server manually, and with the regular contract lock times, follow the steps in the following subsections.
@@ -179,7 +179,7 @@ enabled. This should redirect to <http://127.0.0.3:5758/register.>
 5. If auto-mining is not setup, mine a few blocks on Decred simnet. How many depends on the `regfeeconfirms` setting used with `dcrdex.
 
     ```none
-    ~dextest/dcr/harness-ctl $ ./mine-alpha 1 # mine one block
+    ~/dextest/dcr/harness-ctl $ ./mine-alpha 1 # mine one block
     ```
 
 6. Place a couple orders that match.
