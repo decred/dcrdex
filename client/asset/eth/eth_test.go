@@ -559,6 +559,7 @@ func newTestNode(assetID uint32) *testNode {
 		approveTx:   types.NewTransaction(4, common.Address{0x34}, big.NewInt(1e9), defaultGasFeeLimit, big.NewInt(2e9), nil),
 	}
 	if assetID != BipID {
+		ttc.tContractor.gasEstimates = &tokenGases
 		c = ttc
 	}
 
