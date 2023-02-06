@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"sync"
 
 	"decred.org/dcrdex/dex"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
@@ -42,6 +43,12 @@ type rpcclient struct {
 	caller ContextCaller
 	// swapContract is the current ETH swapContract.
 	swapContract swapContract
+
+	tip struct {
+		sync.Mutex
+		bestNum uint64
+		hdr     *types.Header
+	}
 
 	// tokens are tokeners for loaded tokens. tokens is not protected by a
 	// mutex, as it is expected that the caller will connect and place calls to
@@ -133,7 +140,22 @@ func (c *rpcclient) withTokener(assetID uint32, f func(*tokener) error) error {
 
 // bestHeader gets the best header at the time of calling.
 func (c *rpcclient) bestHeader(ctx context.Context) (*types.Header, error) {
-	return c.ec.HeaderByNumber(ctx, nil)
+	bn, err := c.ec.BlockNumber(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c.tip.Lock()
+	defer c.tip.Unlock()
+	if c.tip.bestNum == bn {
+		return c.tip.hdr, nil
+	}
+	hdr, err := c.ec.HeaderByNumber(ctx, big.NewInt(int64(bn)))
+	if err != nil {
+		return nil, err
+	}
+	c.tip.bestNum = hdr.Number.Uint64()
+	c.tip.hdr = hdr
+	return hdr, nil
 }
 
 // headerByHeight gets the best header at height.
