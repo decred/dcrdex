@@ -98,7 +98,7 @@ var (
 	tokenGases                  *dexeth.Gases
 	testnetSecPerBlock          = 15 * time.Second
 	// secPerBlock is one for simnet, because it takes one second to mine a
-	// block currently. Is set in code to testnetSecPerBlock if runing on
+	// block currently. Is set in code to testnetSecPerBlock if running on
 	// testnet.
 	secPerBlock = time.Second
 	// If you are testing on testnet, you must specify the rpcNode. You can also
@@ -1590,7 +1590,6 @@ func testRedeem(t *testing.T, assetID uint32) {
 		redeemerContractor contractor
 		swaps              []*asset.Contract
 		redemptions        []*asset.Redemption
-		isRedeemable       []bool
 		finalStates        []dexeth.SwapStep
 		addAmt             bool
 		expectRedeemErr    bool
@@ -1603,7 +1602,6 @@ func testRedeem(t *testing.T, assetID uint32) {
 			redeemerContractor: pc,
 			swaps:              []*asset.Contract{newContract(lockTime, secretHashes[0], 1)},
 			redemptions:        []*asset.Redemption{newRedeem(secrets[0], secretHashes[0])},
-			isRedeemable:       []bool{true},
 			finalStates:        []dexeth.SwapStep{dexeth.SSRedeemed},
 			addAmt:             true,
 		},
@@ -1621,7 +1619,6 @@ func testRedeem(t *testing.T, assetID uint32) {
 				newRedeem(secrets[1], secretHashes[1]),
 				newRedeem(secrets[2], secretHashes[2]),
 			},
-			isRedeemable: []bool{true, true},
 			finalStates: []dexeth.SwapStep{
 				dexeth.SSRedeemed, dexeth.SSRedeemed,
 			},
@@ -1635,7 +1632,6 @@ func testRedeem(t *testing.T, assetID uint32) {
 			redeemerContractor: pc,
 			swaps:              []*asset.Contract{newContract(lockTime, secretHashes[3], 1)},
 			redemptions:        []*asset.Redemption{newRedeem(secrets[3], secretHashes[3])},
-			isRedeemable:       []bool{true},
 			finalStates:        []dexeth.SwapStep{dexeth.SSRedeemed},
 			addAmt:             true,
 		},
@@ -1647,7 +1643,6 @@ func testRedeem(t *testing.T, assetID uint32) {
 			redeemerContractor: c,
 			swaps:              []*asset.Contract{newContract(lockTime, secretHashes[4], 1)},
 			redemptions:        []*asset.Redemption{newRedeem(secrets[4], secretHashes[4])},
-			isRedeemable:       []bool{false},
 			finalStates:        []dexeth.SwapStep{dexeth.SSInitiated},
 			addAmt:             false,
 		},
@@ -1659,7 +1654,6 @@ func testRedeem(t *testing.T, assetID uint32) {
 			redeemerContractor: pc,
 			swaps:              []*asset.Contract{newContract(lockTime, secretHashes[5], 1)},
 			redemptions:        []*asset.Redemption{newRedeem(secrets[6], secretHashes[5])},
-			isRedeemable:       []bool{false},
 			finalStates:        []dexeth.SwapStep{dexeth.SSInitiated},
 			addAmt:             false,
 		},
@@ -1678,7 +1672,6 @@ func testRedeem(t *testing.T, assetID uint32) {
 				newRedeem(secrets[7], secretHashes[7]),
 				newRedeem(secrets[7], secretHashes[7]),
 			},
-			isRedeemable: []bool{true, true},
 			finalStates: []dexeth.SwapStep{
 				dexeth.SSInitiated,
 				dexeth.SSInitiated,
@@ -1745,16 +1738,6 @@ func testRedeem(t *testing.T, assetID uint32) {
 			}
 			if swap.State != dexeth.SSInitiated {
 				t.Fatalf("unexpected swap state for test %v: want %s got %s", test.name, dexeth.SSInitiated, swap.State)
-			}
-
-			expected := test.isRedeemable[i]
-			redemption := test.redemptions[i]
-
-			isRedeemable, err := test.redeemerContractor.isRedeemable(bytesToArray(redemption.Spends.SecretHash), bytesToArray(redemption.Secret))
-			if err != nil {
-				t.Fatalf(`test "%v": error calling isRedeemable: %v`, test.name, err)
-			} else if isRedeemable != expected {
-				t.Fatalf(`test "%v": expected isRedeemable to be %v, but got %v. swap = %+v`, test.name, expected, isRedeemable, swap)
 			}
 		}
 

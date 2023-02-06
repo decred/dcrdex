@@ -44,10 +44,6 @@ func (c *tContractV0) Refund(opts *bind.TransactOpts, secretHash [32]byte) (*typ
 	return nil, nil
 }
 
-func (c *tContractV0) IsRedeemable(opts *bind.CallOpts, secretHash [32]byte, secret [32]byte) (bool, error) {
-	return false, nil
-}
-
 func (c tContractV0) IsRefundable(opts *bind.CallOpts, secretHash [32]byte) (bool, error) {
 	return false, nil
 }
