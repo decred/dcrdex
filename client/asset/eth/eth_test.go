@@ -273,9 +273,6 @@ type tContractor struct {
 	redeemGasErr      error
 	refundGasErr      error
 	redeemGasOverride *uint64
-	redeemable        bool
-	redeemableErr     error
-	redeemableMap     map[common.Hash]bool
 	valueIn           map[common.Hash]uint64
 	valueOut          map[common.Hash]uint64
 	valueErr          error
@@ -331,18 +328,6 @@ func (c *tContractor) estimateRedeemGas(ctx context.Context, secrets [][32]byte)
 
 func (c *tContractor) estimateRefundGas(ctx context.Context, secretHash [32]byte) (uint64, error) {
 	return c.gasEstimates.Refund, c.refundGasErr
-}
-
-func (c *tContractor) isRedeemable(secretHash, secret [32]byte) (bool, error) {
-	if c.redeemableErr != nil {
-		return false, c.redeemableErr
-	}
-
-	if c.redeemableMap != nil {
-		return c.redeemableMap[secretHash], nil
-	}
-
-	return c.redeemable, c.redeemableErr
 }
 
 func (c *tContractor) value(_ context.Context, tx *types.Transaction) (incoming, outgoing uint64, err error) {
@@ -1855,7 +1840,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		secretHashes = append(secretHashes, secretHash)
 	}
 
-	addSwapToSwapMap(secretHashes[0], 1e9, dexeth.SSInitiated)
+	addSwapToSwapMap(secretHashes[0], 1e9, dexeth.SSInitiated) // states will be reset by tests though
 	addSwapToSwapMap(secretHashes[1], 1e9, dexeth.SSInitiated)
 
 	var redeemGas uint64
@@ -1864,6 +1849,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 	} else {
 		redeemGas = tokenGases.Redeem
 	}
+
 	var higherGasEstimate uint64 = redeemGas * 2 * 12 / 10                     // 120% of estimate
 	var doubleGasEstimate uint64 = (redeemGas * 2 * 2) * 10 / 11               // 200% of estimate after 10% increase
 	var moreThanDoubleGasEstimate uint64 = (redeemGas * 2 * 21 / 10) * 10 / 11 // > 200% of estimate after 10% increase
@@ -1896,12 +1882,17 @@ func testRedeem(t *testing.T, assetID uint32) {
 		Number: big.NewInt(bestBlock),
 	}
 
+	swappableSwapMap := map[[32]byte]dexeth.SwapStep{
+		secretHashes[0]: dexeth.SSInitiated,
+		secretHashes[1]: dexeth.SSInitiated,
+	}
+
 	tests := []struct {
 		name              string
 		form              asset.RedeemForm
 		redeemErr         error
-		isRedeemable      bool
-		isRedeemableErr   error
+		swapMap           map[[32]byte]dexeth.SwapStep
+		swapErr           error
 		ethBal            *big.Int
 		baseFee           *big.Int
 		redeemGasOverride *uint64
@@ -1911,7 +1902,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		{
 			name:              "ok",
 			expectError:       false,
-			isRedeemable:      true,
+			swapMap:           swappableSwapMap,
 			ethBal:            dexeth.GweiToWei(10e9),
 			baseFee:           dexeth.GweiToWei(100),
 			expectedGasFeeCap: dexeth.GweiToWei(100),
@@ -1944,7 +1935,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		{
 			name:              "higher gas estimate than reserved",
 			expectError:       false,
-			isRedeemable:      true,
+			swapMap:           swappableSwapMap,
 			ethBal:            dexeth.GweiToWei(additionalFundsNeeded(100, 50, higherGasEstimate, 2)),
 			baseFee:           dexeth.GweiToWei(100),
 			expectedGasFeeCap: dexeth.GweiToWei(100),
@@ -1978,7 +1969,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		{
 			name:              "gas estimate double reserved",
 			expectError:       false,
-			isRedeemable:      true,
+			swapMap:           swappableSwapMap,
 			ethBal:            dexeth.GweiToWei(10e9),
 			baseFee:           dexeth.GweiToWei(100),
 			expectedGasFeeCap: dexeth.GweiToWei(100),
@@ -2012,7 +2003,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		{
 			name:              "gas estimate more than double reserved",
 			expectError:       true,
-			isRedeemable:      true,
+			swapMap:           swappableSwapMap,
 			ethBal:            dexeth.GweiToWei(additionalFundsNeeded(100, 50, moreThanDoubleGasEstimate, 2)),
 			baseFee:           dexeth.GweiToWei(100),
 			redeemGasOverride: &moreThanDoubleGasEstimate,
@@ -2045,7 +2036,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		{
 			name:              "higher gas estimate than reserved, balance too low",
 			expectError:       true,
-			isRedeemable:      true,
+			swapMap:           swappableSwapMap,
 			ethBal:            dexeth.GweiToWei(additionalFundsNeeded(100, 50, higherGasEstimate, 2) - 1),
 			baseFee:           dexeth.GweiToWei(100),
 			redeemGasOverride: &higherGasEstimate,
@@ -2078,7 +2069,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		{
 			name:              "base fee > fee suggestion",
 			expectError:       false,
-			isRedeemable:      true,
+			swapMap:           swappableSwapMap,
 			ethBal:            dexeth.GweiToWei(additionalFundsNeeded(100, 200, higherGasEstimate, 2)),
 			baseFee:           dexeth.GweiToWei(150),
 			expectedGasFeeCap: dexeth.GweiToWei(300),
@@ -2112,7 +2103,7 @@ func testRedeem(t *testing.T, assetID uint32) {
 		{
 			name:              "base fee > fee suggestion, not enough for 2x base fee",
 			expectError:       false,
-			isRedeemable:      true,
+			swapMap:           swappableSwapMap,
 			ethBal:            dexeth.GweiToWei(additionalFundsNeeded(100, 149, higherGasEstimate, 2)),
 			baseFee:           dexeth.GweiToWei(150),
 			expectedGasFeeCap: dexeth.GweiToWei(298),
@@ -2144,11 +2135,14 @@ func testRedeem(t *testing.T, assetID uint32) {
 			},
 		},
 		{
-			name:         "not redeemable",
-			expectError:  true,
-			isRedeemable: false,
-			ethBal:       dexeth.GweiToWei(10e9),
-			baseFee:      dexeth.GweiToWei(100),
+			name:        "not redeemable",
+			expectError: true,
+			swapMap: map[[32]byte]dexeth.SwapStep{
+				secretHashes[0]: dexeth.SSNone,
+				secretHashes[1]: dexeth.SSRedeemed,
+			},
+			ethBal:  dexeth.GweiToWei(10e9),
+			baseFee: dexeth.GweiToWei(100),
 
 			form: asset.RedeemForm{
 				Redemptions: []*asset.Redemption{
@@ -2177,12 +2171,11 @@ func testRedeem(t *testing.T, assetID uint32) {
 			},
 		},
 		{
-			name:            "isRedeemable error",
-			expectError:     true,
-			isRedeemable:    true,
-			ethBal:          dexeth.GweiToWei(10e9),
-			baseFee:         dexeth.GweiToWei(100),
-			isRedeemableErr: errors.New(""),
+			name:        "isRedeemable error",
+			expectError: true,
+			ethBal:      dexeth.GweiToWei(10e9),
+			baseFee:     dexeth.GweiToWei(100),
+			swapErr:     errors.New("swap() error"),
 			form: asset.RedeemForm{
 				Redemptions: []*asset.Redemption{
 					{
@@ -2210,12 +2203,12 @@ func testRedeem(t *testing.T, assetID uint32) {
 			},
 		},
 		{
-			name:         "redeem error",
-			redeemErr:    errors.New(""),
-			isRedeemable: true,
-			expectError:  true,
-			ethBal:       dexeth.GweiToWei(10e9),
-			baseFee:      dexeth.GweiToWei(100),
+			name:        "redeem error",
+			redeemErr:   errors.New(""),
+			swapMap:     swappableSwapMap,
+			expectError: true,
+			ethBal:      dexeth.GweiToWei(10e9),
+			baseFee:     dexeth.GweiToWei(100),
 			form: asset.RedeemForm{
 				Redemptions: []*asset.Redemption{
 					{
@@ -2233,11 +2226,11 @@ func testRedeem(t *testing.T, assetID uint32) {
 			},
 		},
 		{
-			name:         "swap not found in contract",
-			isRedeemable: true,
-			expectError:  true,
-			ethBal:       dexeth.GweiToWei(10e9),
-			baseFee:      dexeth.GweiToWei(100),
+			name:        "swap not found in contract",
+			swapMap:     swappableSwapMap,
+			expectError: true,
+			ethBal:      dexeth.GweiToWei(10e9),
+			baseFee:     dexeth.GweiToWei(100),
 			form: asset.RedeemForm{
 				Redemptions: []*asset.Redemption{
 					{
@@ -2255,11 +2248,11 @@ func testRedeem(t *testing.T, assetID uint32) {
 			},
 		},
 		{
-			name:         "empty redemptions slice error",
-			ethBal:       dexeth.GweiToWei(10e9),
-			baseFee:      dexeth.GweiToWei(100),
-			isRedeemable: true,
-			expectError:  true,
+			name:        "empty redemptions slice error",
+			ethBal:      dexeth.GweiToWei(10e9),
+			baseFee:     dexeth.GweiToWei(100),
+			swapMap:     swappableSwapMap,
+			expectError: true,
 			form: asset.RedeemForm{
 				Redemptions:   []*asset.Redemption{},
 				FeeSuggestion: 100,
@@ -2269,9 +2262,11 @@ func testRedeem(t *testing.T, assetID uint32) {
 
 	for _, test := range tests {
 		contractorV1.redeemErr = test.redeemErr
-		contractorV1.redeemable = test.isRedeemable
-		contractorV1.redeemableErr = test.isRedeemableErr
+		contractorV1.swapErr = test.swapErr
 		contractorV1.redeemGasOverride = test.redeemGasOverride
+		for secretHash, step := range test.swapMap {
+			contractorV1.swapMap[secretHash].State = step
+		}
 
 		eth.monitoredTxsMtx.Lock()
 		eth.monitoredTxs = make(map[common.Hash]*monitoredTx)
@@ -3402,7 +3397,11 @@ func testRedemptionReserves(t *testing.T, assetID uint32) {
 	w := wi.(asset.AccountLocker)
 
 	node.bal = dexeth.GweiToWei(1e9)
-	node.tContractor.redeemable = true
+	// node.tContractor.swapMap =  map[[32]byte]*dexeth.SwapState{
+	// 	secretHashes[0]: {
+	// 		State: dexeth.SSInitiated,
+	// 	},
+	// },
 
 	var secretHash [32]byte
 	node.tContractor.swapMap[secretHash] = &dexeth.SwapState{}
@@ -3700,10 +3699,9 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 		expectSentSignedTransaction    *types.Transaction
 		expectedMonitoredTxs           map[common.Hash]*monitoredTx
 
-		getTxResMap   map[common.Hash]*txData
-		swapMap       map[[32]byte]*dexeth.SwapState
-		monitoredTxs  map[common.Hash]*monitoredTx
-		redeemableMap map[common.Hash]bool
+		getTxResMap  map[common.Hash]*txData
+		swapMap      map[[32]byte]*dexeth.SwapState
+		monitoredTxs map[common.Hash]*monitoredTx
 
 		redeemTx  *types.Transaction
 		redeemErr error
@@ -3806,7 +3804,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 			},
 			swapMap: map[[32]byte]*dexeth.SwapState{
 				secretHashes[0]: {
-					State: dexeth.SSRedeemed,
+					State: dexeth.SSInitiated,
 				},
 			},
 			monitoredTxs: map[common.Hash]*monitoredTx{
@@ -3826,9 +3824,9 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 					blockSubmitted: 19,
 				},
 			},
-			redeemableMap: map[common.Hash]bool{
-				secretHashes[0]: true,
-			},
+			// redeemableMap: map[common.Hash]bool{
+			// 	secretHashes[0]: true,
+			// },
 			bestBlock: 19,
 			expectedResult: &asset.ConfirmRedemptionStatus{
 				Confs:  0,
@@ -3887,9 +3885,6 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 				secretHashes[0]: {
 					State: dexeth.SSInitiated,
 				},
-			},
-			redeemableMap: map[common.Hash]bool{
-				secretHashes[0]: true,
 			},
 			monitoredTxs: map[common.Hash]*monitoredTx{},
 			expectedMonitoredTxs: map[common.Hash]*monitoredTx{
@@ -3964,10 +3959,6 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 					blockSubmitted: 13,
 				},
 			},
-			redeemableMap: map[common.Hash]bool{
-				secretHashes[0]: true,
-				secretHashes[1]: true,
-			},
 			bestBlock: 13,
 			expectedResult: &asset.ConfirmRedemptionStatus{
 				Confs:  0,
@@ -4010,10 +4001,6 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 					tx:             toEthTx(4, 123, redeem0Data),
 					blockSubmitted: 13,
 				},
-			},
-			redeemableMap: map[common.Hash]bool{
-				secretHashes[0]: true,
-				secretHashes[1]: false,
 			},
 			bestBlock: 13,
 			expectedResult: &asset.ConfirmRedemptionStatus{
@@ -4133,9 +4120,6 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 					blockSubmitted: 13,
 				},
 			},
-			redeemableMap: map[common.Hash]bool{
-				secretHashes[0]: true,
-			},
 			bestBlock: 13,
 			expectedResult: &asset.ConfirmRedemptionStatus{
 				Confs:  0,
@@ -4183,9 +4167,6 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 					blockSubmitted: 13,
 				},
 			},
-			redeemableMap: map[common.Hash]bool{
-				secretHashes[0]: true,
-			},
 			bestBlock: 13,
 			expectedResult: &asset.ConfirmRedemptionStatus{
 				Confs:  0,
@@ -4227,9 +4208,6 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 					tx:             toEthTx(3, 200, redeem0Data),
 					blockSubmitted: 3,
 				},
-			},
-			redeemableMap: map[common.Hash]bool{
-				secretHashes[0]: true,
 			},
 			bestBlock: 13,
 			expectedResult: &asset.ConfirmRedemptionStatus{
@@ -4284,7 +4262,6 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 		}
 
 		node.tContractor.swapMap = test.swapMap
-		node.tContractor.redeemableMap = test.redeemableMap
 		node.tContractor.redeemTx = test.redeemTx
 		node.tContractor.lastRedeems = nil
 		node.tokenContractor.bal = big.NewInt(1e9)

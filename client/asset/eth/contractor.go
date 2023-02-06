@@ -37,7 +37,6 @@ type contractor interface {
 	estimateInitGas(ctx context.Context, n int) (uint64, error)
 	estimateRedeemGas(ctx context.Context, secrets [][32]byte) (uint64, error)
 	estimateRefundGas(ctx context.Context, secretHash [32]byte) (uint64, error)
-	isRedeemable(secretHash, secret [32]byte) (bool, error)
 	// value checks the incoming or outgoing contract value. This is just the
 	// one of redeem, refund, or initiate values. It is not an error if the
 	// transaction does not pay to the contract, and the values returned in that
@@ -70,7 +69,6 @@ type contractV0 interface {
 	Redeem(opts *bind.TransactOpts, redemptions []swapv0.ETHSwapRedemption) (*types.Transaction, error)
 	Swap(opts *bind.CallOpts, secretHash [32]byte) (swapv0.ETHSwapSwap, error)
 	Refund(opts *bind.TransactOpts, secretHash [32]byte) (*types.Transaction, error)
-	IsRedeemable(opts *bind.CallOpts, secretHash [32]byte, secret [32]byte) (bool, error)
 	IsRefundable(opts *bind.CallOpts, secretHash [32]byte) (bool, error)
 }
 
@@ -198,11 +196,6 @@ func (c *contractorV0) swap(ctx context.Context, secretHash [32]byte) (*dexeth.S
 // to ensure the refund will be accepted.
 func (c *contractorV0) refund(txOpts *bind.TransactOpts, secretHash [32]byte) (tx *types.Transaction, err error) {
 	return c.contractV0.Refund(txOpts, secretHash)
-}
-
-// isRedeemable exposes the isRedeemable method of the swap contract.
-func (c *contractorV0) isRedeemable(secretHash, secret [32]byte) (bool, error) {
-	return c.contractV0.IsRedeemable(&bind.CallOpts{From: c.acctAddr}, secretHash, secret)
 }
 
 // isRefundable exposes the isRefundable method of the swap contract.

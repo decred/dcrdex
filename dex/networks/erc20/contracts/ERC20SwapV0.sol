@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BlueOak-1.0.0
 // pragma should be as specific as possible to allow easier validation.
-pragma solidity = 0.8.15;
+pragma solidity = 0.8.18;
 
 // ETHSwap creates a contract to be deployed on an ethereum network. In
 // order to save on gas fees, a separate ERC20Swap contract is deployed
@@ -117,19 +117,6 @@ contract ERC20Swap {
     struct Redemption {
         bytes32 secret;
         bytes32 secretHash;
-    }
-
-    // isRedeemable returns whether or not a swap identified by secretHash
-    // can be redeemed using secret.
-    function isRedeemable(bytes32 secretHash, bytes32 secret)
-        public
-        view
-        returns (bool)
-    {
-        Swap storage swapToRedeem = swaps[secretHash];
-        return swapToRedeem.state == State.Filled &&
-               swapToRedeem.participant == msg.sender &&
-               sha256(abi.encodePacked(secret)) == secretHash;
     }
 
     // redeem redeems an array of swaps contract. It checks that the sender is

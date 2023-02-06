@@ -3863,12 +3863,19 @@ func (w *assetWallet) refund(secretHash [32]byte, maxFeeRate uint64, contractVer
 	})
 }
 
-// isRedeemable checks if the swap identified by secretHash is redeemable using secret.
+// isRedeemable checks if the swap identified by secretHash is redeemable using
+// secret. This must NOT be a contractor call.
 func (w *assetWallet) isRedeemable(secretHash [32]byte, secret [32]byte, contractVer uint32) (redeemable bool, err error) {
-	return redeemable, w.withContractor(contractVer, func(c contractor) error {
-		redeemable, err = c.isRedeemable(secretHash, secret)
-		return err
-	})
+	swap, err := w.swap(w.ctx, secretHash, contractVer)
+	if err != nil {
+		return false, err
+	}
+
+	if swap.State != dexeth.SSInitiated {
+		return false, nil
+	}
+
+	return w.ValidateSecret(secret[:], secretHash[:]), nil
 }
 
 func (w *assetWallet) isRefundable(secretHash [32]byte, contractVer uint32) (refundable bool, err error) {

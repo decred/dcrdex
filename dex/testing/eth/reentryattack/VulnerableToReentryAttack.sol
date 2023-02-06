@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BlueOak-1.0.0
-pragma solidity = 0.8.15;
+pragma solidity = 0.8.18;
 contract ETHSwap {
     enum State { Empty, Filled, Redeemed, Refunded }
 
