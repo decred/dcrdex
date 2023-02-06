@@ -6,15 +6,10 @@
 package eth
 
 import (
-	"path/filepath"
-
 	"github.com/decred/dcrd/dcrutil/v4"
 )
 
-var (
-	ethHomeDir = dcrutil.AppDataDir("ethereum", false)
-	defaultIPC = filepath.Join(ethHomeDir, "geth/geth.ipc")
-)
+var ethHomeDir = dcrutil.AppDataDir("ethereum", false)
 
 // For tokens, the file at the config path can contain overrides for
 // token gas values. Gas used for token swaps is dependent on the token contract

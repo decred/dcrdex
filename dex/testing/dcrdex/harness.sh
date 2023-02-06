@@ -217,6 +217,15 @@ EOF
 fi
 
 if [ $ETH_ON -eq 0 ]; then
+
+ETH_CONFIG_PATH=${TEST_ROOT}/eth.conf
+ETH_IPC_FILE=${TEST_ROOT}/eth/alpha/node/geth.ipc
+cat << EOF >> $ETH_CONFIG_PATH
+ws://localhost:38557
+# comments are respected
+# http://localhost:38556
+${ETH_IPC_FILE}
+EOF
     cat << EOF >> "./markets.json"
          },
         "ETH_simnet": {
@@ -224,7 +233,7 @@ if [ $ETH_ON -eq 0 ]; then
             "network": "simnet",
             "maxFeeRate": 200,
             "swapConf": 2,
-            "configPath": "ws://localhost:38557"
+            "configPath": "$ETH_CONFIG_PATH"
         },
         "DEXTT_simnet": {
             "bip44symbol": "dextt.eth",

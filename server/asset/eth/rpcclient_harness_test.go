@@ -24,9 +24,10 @@ import (
 )
 
 var (
-	homeDir = os.Getenv("HOME")
-	// endpoint = filepath.Join(homeDir, "dextest/eth/delta/node/geth.ipc")
-	endpoint           = "ws://localhost:38557"
+	wsEndpoint   = "ws://localhost:38557"
+	homeDir      = os.Getenv("HOME")
+	alphaIPCFile = filepath.Join(homeDir, "dextest", "eth", "alpha", "node", "geth.ipc")
+
 	contractAddrFile   = filepath.Join(homeDir, "dextest", "eth", "eth_swap_contract_address.txt")
 	tokenSwapAddrFile  = filepath.Join(homeDir, "dextest", "eth", "erc20_swap_contract_address.txt")
 	tokenErc20AddrFile = filepath.Join(homeDir, "dextest", "eth", "test_token_contract_address.txt")
@@ -41,7 +42,8 @@ func TestMain(m *testing.M) {
 	run := func() (int, error) {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(context.Background())
-		ethClient = newRPCClient(dex.Simnet, endpoint)
+		log := dex.StdOutLogger("T", dex.LevelTrace)
+		ethClient = newRPCClient(dex.Simnet, []string{wsEndpoint, alphaIPCFile}, log)
 		defer func() {
 			cancel()
 			ethClient.shutdown()
@@ -52,9 +54,8 @@ func TestMain(m *testing.M) {
 		netToken := dexeth.Tokens[testTokenID].NetTokens[dex.Simnet]
 		netToken.Address = getContractAddrFromFile(tokenErc20AddrFile)
 		netToken.SwapContracts[0].Address = getContractAddrFromFile(tokenSwapAddrFile)
-		logger := dex.StdOutLogger("ETHTEST", dex.LevelTrace)
 
-		if err := ethClient.connect(ctx, logger); err != nil {
+		if err := ethClient.connect(ctx); err != nil {
 			return 1, fmt.Errorf("Connect error: %w", err)
 		}
 
@@ -165,6 +166,39 @@ func testAccountBalance(t *testing.T, assetID uint32) {
 		if diff.Cmp(dexeth.GweiToWei(vGwei)) != 0 {
 			t.Fatalf("account balance changed by %d. expected > %d", dexeth.WeiToGwei(diff), uint64(vGwei))
 		}
+	}
+}
+
+func TestRPCRotation(t *testing.T) {
+	ethClient.idxMtx.RLock()
+	idx := ethClient.endpointIdx
+	ethClient.idxMtx.RUnlock()
+	if idx != 0 {
+		t.Fatal("expected initial index to be zero")
+	}
+
+	// Requesting a non-existent transaction should propagate the error. Also
+	// check logs to ensure the endpoint index was not advanced.
+	_, _, err := ethClient.transaction(ctx, common.Hash{})
+	if !errors.Is(err, ethereum.NotFound) {
+		t.Fatalf("'not found' error not propagated. got err = %v", err)
+	}
+	ethClient.log.Info("Not found error successfully propagated")
+
+	// Shut down the zeroth client and ensure the endpoint index is advanced.
+	cl := ethClient.clients[idx]
+	cl.Close()
+
+	_, err = ethClient.bestHeader(ctx)
+	if err != nil {
+		t.Fatalf("error getting best header with index advance: %v", err)
+	}
+
+	ethClient.idxMtx.RLock()
+	idx = ethClient.endpointIdx
+	ethClient.idxMtx.RUnlock()
+	if idx == 0 {
+		t.Fatalf("endpoint index not advanced")
 	}
 }
 

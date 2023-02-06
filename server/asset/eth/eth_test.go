@@ -111,7 +111,7 @@ type testNode struct {
 	acctBalErr       error
 }
 
-func (n *testNode) connect(ctx context.Context, log dex.Logger) error {
+func (n *testNode) connect(ctx context.Context) error {
 	return n.connectErr
 }
 
