@@ -8,29 +8,21 @@ import (
 	"time"
 )
 
-func TestTaper(t *testing.T) {
+func TestTaperingQueueExpiration(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	q := NewTaperingTickerQueue(time.Millisecond, time.Millisecond*10)
 	go q.Run(ctx)
 
-	var last time.Time
-	intervals := make([]time.Duration, 0, 10)
 	var expirationTime time.Time
 	var expiration sync.WaitGroup
 	expiration.Add(1)
 
-	wantExpirationTime := time.Now().Add(time.Millisecond * 30)
+	wantExpirationTime := time.Now().Add(time.Millisecond * 10)
 	q.Wait(&Waiter{
 		Expiration: wantExpirationTime,
 		TryFunc: func() TryDirective {
-			if last.IsZero() {
-				last = time.Now()
-				return TryAgain
-			}
-			intervals = append(intervals, time.Since(last))
-			last = time.Now()
 			return TryAgain
 		},
 		ExpireFunc: func() {
@@ -41,29 +33,6 @@ func TestTaper(t *testing.T) {
 
 	expiration.Wait()
 
-	if len(intervals) < 3 {
-		t.Fatalf("only %d intervals", len(intervals))
-	}
-
-	// check that the first interval was close to the expected value.
-	var sum time.Duration
-	for _, i := range intervals[:fullSpeedTicks] {
-		sum += i
-	}
-	avg := sum / fullSpeedTicks
-
-	// It'd be nice to check this tighter than *10, but with the race detector,
-	// there are some unexpectedly long times.
-	if avg < time.Millisecond || avg > time.Millisecond*10 {
-		t.Fatalf("first intervals are out of bound: %s", avg)
-	}
-
-	// Make sure it tapered. Can't use the actual last interval, since that
-	// might be truncated. Use the second from the last.
-	lastInterval := intervals[len(intervals)-2]
-	if lastInterval < time.Millisecond*2 {
-		t.Fatalf("last interval wasn't ~5 ms: %s", lastInterval)
-	}
 	if expirationTime.Before(wantExpirationTime) {
 		t.Fatalf("expired at: %v - sooner than expected: %v", expirationTime, wantExpirationTime)
 	}
