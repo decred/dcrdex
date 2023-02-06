@@ -3779,10 +3779,10 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 					blockSubmitted: 9,
 				},
 			},
-			bestBlock: 13,
+			bestBlock: 11, // tx.height + txConfsNeededToConfirm - 2
 			expectedResult: &asset.ConfirmRedemptionStatus{
-				Confs:  4,
-				Req:    10,
+				Confs:  txConfsNeededToConfirm - 1,
+				Req:    txConfsNeededToConfirm,
 				CoinID: toEthTxCoinID(3, 200, redeem0Data),
 			},
 			baseFee: dexeth.GweiToWei(100),
@@ -3811,10 +3811,10 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 				},
 			},
 			expectedMonitoredTxs: map[common.Hash]*monitoredTx{},
-			bestBlock:            19,
+			bestBlock:            12, // tx.height + txConfsNeededToConfirm
 			expectedResult: &asset.ConfirmRedemptionStatus{
-				Confs:  10,
-				Req:    10,
+				Confs:  txConfsNeededToConfirm,
+				Req:    txConfsNeededToConfirm,
 				CoinID: toEthTxCoinID(3, 200, redeem0Data),
 			},
 			receipt: &types.Receipt{
@@ -3862,7 +3862,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 			bestBlock: 19,
 			expectedResult: &asset.ConfirmRedemptionStatus{
 				Confs:  0,
-				Req:    10,
+				Req:    txConfsNeededToConfirm,
 				CoinID: toEthTxCoinID(4, 123, redeem0Data),
 			},
 			redeemTx: toEthTx(4, 123, redeem0Data),
@@ -3928,14 +3928,14 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 			bestBlock: 13,
 			expectedResult: &asset.ConfirmRedemptionStatus{
 				Confs:  0,
-				Req:    10,
+				Req:    txConfsNeededToConfirm,
 				CoinID: toEthTxCoinID(4, 123, redeem0Data),
 			},
 			redeemTx: toEthTx(4, 123, redeem0Data),
 			baseFee:  dexeth.GweiToWei(100),
 		},
 		{
-			name:       "not in monitored txs, found by geth, < 10 confirmations",
+			name:       "not in monitored txs, found by geth, < 3 confirmations",
 			coinID:     toEthTxCoinID(3, 200, redeem0Data),
 			redemption: assetRedemption(secretHashes[0], secrets[0]),
 			getTxResMap: map[common.Hash]*txData{
@@ -3952,11 +3952,11 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 				},
 			},
 			monitoredTxs: map[common.Hash]*monitoredTx{},
-			bestBlock:    13,
+			bestBlock:    11,
 
 			expectedResult: &asset.ConfirmRedemptionStatus{
-				Confs:  4,
-				Req:    10,
+				Confs:  2,
+				Req:    txConfsNeededToConfirm,
 				CoinID: toEthTxCoinID(3, 200, redeem0Data),
 			},
 			baseFee: dexeth.GweiToWei(100),
@@ -3994,7 +3994,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 			bestBlock: 13,
 			expectedResult: &asset.ConfirmRedemptionStatus{
 				Confs:  0,
-				Req:    10,
+				Req:    txConfsNeededToConfirm,
 				CoinID: toEthTxCoinID(4, 123, redeem0and1Data),
 			},
 			expectedResubmittedRedemptions: []*asset.Redemption{
@@ -4037,7 +4037,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 			bestBlock: 13,
 			expectedResult: &asset.ConfirmRedemptionStatus{
 				Confs:  0,
-				Req:    10,
+				Req:    txConfsNeededToConfirm,
 				CoinID: toEthTxCoinID(4, 123, redeem0Data),
 			},
 			expectedResubmittedRedemptions: []*asset.Redemption{
@@ -4088,7 +4088,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 			bestBlock: 22,
 			expectedResult: &asset.ConfirmRedemptionStatus{
 				Confs:  2,
-				Req:    10,
+				Req:    txConfsNeededToConfirm,
 				CoinID: toEthTxCoinID(5, 200, redeem0Data),
 			},
 			baseFee: dexeth.GweiToWei(100),
@@ -4110,10 +4110,10 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 					State: dexeth.SSRedeemed,
 				},
 			},
-			bestBlock: 13,
+			bestBlock: 3, // txConfsNeededToConfirm + tx.height + 1
 			expectedResult: &asset.ConfirmRedemptionStatus{
-				Confs:  10,
-				Req:    10,
+				Confs:  txConfsNeededToConfirm,
+				Req:    txConfsNeededToConfirm,
 				CoinID: toEthTxCoinID(3, 200, redeem0Data),
 			},
 			baseFee: dexeth.GweiToWei(100),
@@ -4155,7 +4155,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 			bestBlock: 13,
 			expectedResult: &asset.ConfirmRedemptionStatus{
 				Confs:  0,
-				Req:    10,
+				Req:    txConfsNeededToConfirm,
 				CoinID: toEthTxCoinID(4, 123, redeem0Data),
 			},
 			expectedResubmittedRedemptions: []*asset.Redemption{
@@ -4202,7 +4202,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 			bestBlock: 13,
 			expectedResult: &asset.ConfirmRedemptionStatus{
 				Confs:  0,
-				Req:    10,
+				Req:    txConfsNeededToConfirm,
 				CoinID: toEthTxCoinID(4, 123, redeem0Data),
 			},
 			expectedResubmittedRedemptions: []*asset.Redemption{
@@ -4244,7 +4244,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 			bestBlock: 13,
 			expectedResult: &asset.ConfirmRedemptionStatus{
 				Confs:  0,
-				Req:    10,
+				Req:    txConfsNeededToConfirm,
 				CoinID: toEthTxCoinID(3, 200, redeem0Data),
 			},
 			expectSentSignedTransaction: toEthTx(3, 200, redeem0Data),
@@ -4282,6 +4282,7 @@ func testConfirmRedemption(t *testing.T, assetID uint32) {
 	}
 
 	for _, test := range tests {
+		fmt.Printf("###### %s ###### \n", test.name)
 		node.getTxResMap = make(map[common.Hash]*tGetTxRes)
 		for hash, txData := range test.getTxResMap {
 			node.getTxResMap[hash] = &tGetTxRes{

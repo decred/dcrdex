@@ -3420,7 +3420,7 @@ func (w *TokenWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Rede
 }
 
 const (
-	txConfsNeededToConfirm               = 10
+	txConfsNeededToConfirm               = 3
 	blocksToWaitBeforeCoinNotFound       = 10
 	blocksToWaitBeforeCheckingIfReplaced = 10
 )
