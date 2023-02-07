@@ -591,10 +591,10 @@ export default class MarketsPage extends BasePage {
       if (c.highRate > high) high = c.highRate
     }
 
-    const bconv = app().unitInfo(this.market.cfg.baseid, this.market.dex).conventional.conversionFactor
+    const qconv = app().unitInfo(this.market.cfg.quoteid, this.market.dex).conventional.conversionFactor
     for (const s of this.stats) {
-      s.tmpl.high.textContent = high > 0 ? fourSigFigs(high / bconv) : '-'
-      s.tmpl.low.textContent = low > 0 ? fourSigFigs(low / bconv) : '-'
+      s.tmpl.high.textContent = high > 0 ? fourSigFigs(high / qconv) : '-'
+      s.tmpl.low.textContent = low > 0 ? fourSigFigs(low / qconv) : '-'
     }
   }
 
