@@ -1469,7 +1469,7 @@ func (w *assetWallet) swapGas(n int, ver uint32) (oneSwap, nSwap uint64, approve
 		// TODO: investigate "gas required exceeds allowance".
 		return 0, 0, false, err
 	} else if gasEst > nSwap {
-		w.log.Warnf("Swap gas estimate %d is greater than the server's configured value %d. Using live estimate + 10%.", gasEst, nSwap)
+		w.log.Warnf("Swap gas estimate %d is greater than the server's configured value %d. Using live estimate + 10%%.", gasEst, nSwap)
 		nSwap = gasEst * 11 / 10 // 10% buffer
 		if n == 1 && nSwap > oneSwap {
 			oneSwap = nSwap
@@ -1701,8 +1701,14 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 	gasLimit := oneSwap * uint64(len(swaps.Contracts))
 	fees := gasLimit * swaps.FeeRate
 
+	if swapVal > reservedVal {
+		return fail("unfunded swap: %d < %d", reservedVal, swapVal)
+	}
+
 	if swapVal+fees > reservedVal {
-		return fail("unfunded swap: %d < %d", reservedVal, swapVal+fees)
+		// It is possible that a live estimate showed we need more for
+		// fees than was originally expected.
+		w.log.Warnf("Swap and fees are more than expected. Expected %d but actual is %d.", reservedVal, swapVal+fees)
 	}
 
 	tx, err := w.initiate(w.ctx, w.assetID, swaps.Contracts, swaps.FeeRate, gasLimit, swaps.Version)
@@ -1780,7 +1786,9 @@ func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uin
 	}
 
 	if fees > reservedParent {
-		return fail("unfunded token swap fees: %d < %d", reservedParent, fees)
+		// It is possible that a live estimate showed we need more for
+		// fees than was originally expected.
+		w.log.Warnf("Token swap fees are more than expected. Expected %d but actual is %d.", reservedParent, fees)
 	}
 
 	tx, err := w.initiate(w.ctx, w.assetID, swaps.Contracts, swaps.FeeRate, gasLimit, swaps.Version)

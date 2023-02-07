@@ -199,13 +199,13 @@ var Tokens = map[uint32]*Token{
 							// map.
 							// Average of 5 transfers: 51820
 							//   [65500 48400 48400 48400 48400]
-							Swap:      175_000,
-							SwapAdd:   115_000,
-							Redeem:    87_000,
-							RedeemAdd: 33_000,
-							Refund:    67_000,
-							Approve:   65_000,
-							Transfer:  70_000,
+							Swap:      188_000,
+							SwapAdd:   124_000,
+							Redeem:    92_000,
+							RedeemAdd: 35_000,
+							Refund:    71_000,
+							Approve:   66_000,
+							Transfer:  72_000,
 						},
 					},
 				},
