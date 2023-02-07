@@ -1281,7 +1281,7 @@ export default class MarketsPage extends BasePage {
         app().bindInternalNavigation(div)
       }
 
-      Doc.bind(header.expander, 'click', () => {
+      Doc.bind(headerEl, 'click', () => {
         if (Doc.isDisplayed(detailsDiv)) {
           Doc.hide(detailsDiv)
           header.expander.classList.add('ico-arrowdown')
