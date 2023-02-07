@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -301,16 +302,23 @@ func (c *Core) rotateBonds(ctx context.Context) {
 			// TODO: if mustPost > 0 { wallet.RenewBond(...) }
 
 			// Generate a refund tx paying to an address from the currently
-			// connected wallet, using bond.PrivKey to create the signed
+			// connected wallet, using bond.KeyIndex to create the signed
 			// transaction. The RefundTx is really a backup.
-			priv := secp256k1.PrivKeyFromBytes(bond.PrivKey)
-			// c.bondKeyIdx(bond.AssetID, bond.KeyIndex) // TODO, with KeyIndex in DB instead of PrivKey
-			newRefundTx, err := wallet.RefundBond(ctx, bond.Version, bond.CoinID, bond.Data, bond.Amount, priv)
-			priv.Zero()
-			bondAlreadySpent := errors.Is(err, asset.CoinNotFoundError) // or never mined!
-			if err != nil && !bondAlreadySpent {
-				c.log.Errorf("Failed to generate bond refund tx: %v", err)
-				continue
+			var bondAlreadySpent bool
+			newRefundTx := bond.RefundTx         // invalid/unknown key index fallback (v0 db.Bond, which was never released), also will skirt reserves :/
+			if bond.KeyIndex != math.MaxUint32 { // normal path
+				priv, err := c.bondKeyIdx(bond.AssetID, bond.KeyIndex)
+				if err != nil {
+					c.log.Errorf("Failed to derive bond private key: %v", err)
+					continue
+				}
+				newRefundTx, err = wallet.RefundBond(ctx, bond.Version, bond.CoinID, bond.Data, bond.Amount, priv)
+				priv.Zero()
+				bondAlreadySpent = errors.Is(err, asset.CoinNotFoundError) // or never mined!
+				if err != nil && !bondAlreadySpent {
+					c.log.Errorf("Failed to generate bond refund tx: %v", err)
+					continue
+				}
 			}
 
 			// If the user hasn't already manually refunded the bond, broadcast
@@ -405,20 +413,13 @@ func (c *Core) rotateBonds(ctx context.Context) {
 					toPost, mustPost, wallet.amtString(maxBondedAmt))
 			}
 
-			priv, err := c.nextBondKey(bondAssetID)
-			if err != nil {
-				c.log.Errorf("nextBondKey: %v", err)
-				return // try again next tick, maybe DB will work then, or login race resolved?
-			}
-			defer priv.Zero()
-
 			bondLifetime := minBondLifetime(c.net, bondExpiry)
 			lockTime := time.Now().Add(bondLifetime).Truncate(time.Second)
 			if lockDur := time.Until(lockTime); lockDur > lockTimeLimit {
 				c.log.Errorf("excessive lock time (%v>%v) - not posting!", lockDur, lockTimeLimit)
 			} else {
 				c.log.Tracef("Bond lifetime = %v (lockTime = %v)", bondLifetime, lockTime)
-				_, err = c.makeAndPostBond(dc, true, wallet, amt, lockTime, bondAsset, priv)
+				_, err = c.makeAndPostBond(dc, true, wallet, amt, lockTime, bondAsset)
 				if err != nil {
 					c.log.Errorf("Unable to post bond: %v", err)
 				} // else it's now in pendingBonds
@@ -657,13 +658,18 @@ func (c *Core) bondKeyIdx(assetID, idx uint32) (*secp256k1.PrivateKey, error) {
 // nextBondKey generates the private key for the next bond, incrementing a
 // persistent bond index counter. This method requires login to decrypt and set
 // the bond xpriv, so use the bondKeysReady method to ensure it is ready first.
-func (c *Core) nextBondKey(assetID uint32) (*secp256k1.PrivateKey, error) {
+// The bond key index is returned so the same key may be regenerated.
+func (c *Core) nextBondKey(assetID uint32) (*secp256k1.PrivateKey, uint32, error) {
 	nextBondKeyIndex, err := c.db.NextBondKeyIndex(assetID)
 	if err != nil {
-		return nil, fmt.Errorf("NextBondIndex: %v", err)
+		return nil, 0, fmt.Errorf("NextBondIndex: %v", err)
 	}
 
-	return c.bondKeyIdx(assetID, nextBondKeyIndex)
+	priv, err := c.bondKeyIdx(assetID, nextBondKeyIndex)
+	if err != nil {
+		return nil, 0, fmt.Errorf("bondKeyIdx: %v", err)
+	}
+	return priv, nextBondKeyIndex, nil
 }
 
 // UpdateBondOptions sets the bond rotation options for a DEX host, including
@@ -914,13 +920,7 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 	}
 
 	// Make a bond transaction for the account ID generated from our public key.
-	priv, err := c.nextBondKey(bondAssetID)
-	if err != nil {
-		return nil, fmt.Errorf("bond key derivation failed: %v", err)
-	}
-	defer priv.Zero()
-
-	bondCoin, err := c.makeAndPostBond(dc, acctExists, wallet, form.Bond, lockTime, bondAsset, priv)
+	bondCoin, err := c.makeAndPostBond(dc, acctExists, wallet, form.Bond, lockTime, bondAsset)
 	if err != nil {
 		return nil, err
 	}
@@ -930,7 +930,13 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 }
 
 func (c *Core) makeAndPostBond(dc *dexConnection, acctExists bool, wallet *xcWallet, amt uint64,
-	lockTime time.Time, bondAsset *msgjson.BondAsset, bondKey *secp256k1.PrivateKey) ([]byte, error) {
+	lockTime time.Time, bondAsset *msgjson.BondAsset) ([]byte, error) {
+	bondKey, keyIndex, err := c.nextBondKey(bondAsset.ID)
+	if err != nil {
+		return nil, fmt.Errorf("bond key derivation failed: %v", err)
+	}
+	defer bondKey.Zero()
+
 	acctID := dc.acct.ID()
 	feeRate := c.feeSuggestionAny(bondAsset.ID)
 	bond, err := wallet.MakeBondTx(bondAsset.Version, amt, feeRate, lockTime, bondKey, acctID[:])
@@ -958,7 +964,7 @@ func (c *Core) makeAndPostBond(dc *dexConnection, acctExists bool, wallet *xcWal
 		Data:       bond.Data,
 		Amount:     amt,
 		LockTime:   uint64(lockTime.Unix()),
-		PrivKey:    bond.BondPrivKey,
+		KeyIndex:   keyIndex,
 		RefundTx:   bond.RedeemTx,
 		// Confirmed and Refunded are false (new bond tx)
 	}
@@ -1098,7 +1104,7 @@ func (c *Core) bondExpired(dc *dexConnection, assetID uint32, coinID []byte, new
 		if bond.AssetID == assetID && bytes.Equal(bond.CoinID, coinID) {
 			// Delete the bond from bonds and move it to expiredBonds.
 			dc.acct.bonds = cutBond(dc.acct.bonds, i)
-			if len(bond.RefundTx) > 0 || len(bond.PrivKey) > 0 {
+			if len(bond.RefundTx) > 0 || bond.KeyIndex != math.MaxUint32 {
 				dc.acct.expiredBonds = append(dc.acct.expiredBonds, bond) // we'll wait for lockTime to pass to refund
 			} else {
 				c.log.Warnf("Dropping expired bond with no known keys or refund transaction. "+

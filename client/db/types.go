@@ -6,6 +6,7 @@ package db
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -100,7 +101,7 @@ type Bond struct {
 	Data       []byte // e.g. redeem script
 	Amount     uint64
 	LockTime   uint64
-	PrivKey    []byte // private key to which the bond script pays, TODO: encrypt
+	KeyIndex   uint32 // child key index for HD path: m / hdKeyPurposeBonds / assetID' / bondIndex
 	RefundTx   []byte // pays to wallet that created it - only a backup for emergency!
 
 	Confirmed bool // if reached required confs according to server, not in serialization
@@ -114,16 +115,16 @@ func (b *Bond) UniqueID() []byte {
 
 // Encode serialized the Bond. Confirmed and Refund are not included.
 func (b *Bond) Encode() []byte {
-	return versionedBytes(0).
+	return versionedBytes(1).
 		AddData(uint16Bytes(b.Version)).
 		AddData(uint32Bytes(b.AssetID)).
 		AddData(b.CoinID).
 		AddData(b.UnsignedTx).
 		AddData(b.SignedTx).
 		AddData(b.Data).
-		AddData(encode.Uint64Bytes(b.Amount)).
-		AddData(encode.Uint64Bytes(b.LockTime)).
-		AddData(b.PrivKey).
+		AddData(uint64Bytes(b.Amount)).
+		AddData(uint64Bytes(b.LockTime)).
+		AddData(uint32Bytes(b.KeyIndex)).
 		AddData(b.RefundTx)
 	// Confirmed and Refunded are not part of the encoding.
 }
@@ -137,10 +138,16 @@ func DecodeBond(b []byte) (*Bond, error) {
 	switch ver {
 	case 0:
 		return decodeBond_v0(pushes)
+	case 1:
+		return decodeBond_v1(pushes)
 	}
 	return nil, fmt.Errorf("unknown Bond version %d", ver)
 }
 
+// decodeBond_v0 handles the unreleased v0 db.Bond format that did spend some
+// notable time on master. The app will recognize the special KeyIndex value and
+// use the RefundTx instead, if there were were any unspent bonds at time of
+// upgrade, but this is mainly so we can decode the v0 blobs.
 func decodeBond_v0(pushes [][]byte) (*Bond, error) {
 	if len(pushes) != 10 {
 		return nil, fmt.Errorf("decodeBond_v0: expected 10 data pushes, got %d", len(pushes))
@@ -148,7 +155,8 @@ func decodeBond_v0(pushes [][]byte) (*Bond, error) {
 	ver, assetIDB, coinID := pushes[0], pushes[1], pushes[2]
 	utx, stx := pushes[3], pushes[4]
 	data, amtB, lockTimeB := pushes[5], pushes[6], pushes[7]
-	privKey, refundTx := pushes[8], pushes[9]
+	// privKey := pushes[8] // in v0, so we will use the refundTx to handle this unreleased revision without deleting out DB files
+	refundTx := pushes[9]
 	return &Bond{
 		Version:    intCoder.Uint16(ver),
 		AssetID:    intCoder.Uint32(assetIDB),
@@ -158,7 +166,29 @@ func decodeBond_v0(pushes [][]byte) (*Bond, error) {
 		Data:       data,
 		Amount:     intCoder.Uint64(amtB),
 		LockTime:   intCoder.Uint64(lockTimeB),
-		PrivKey:    privKey,
+		KeyIndex:   math.MaxUint32, // special
+		RefundTx:   refundTx,
+	}, nil
+}
+
+func decodeBond_v1(pushes [][]byte) (*Bond, error) {
+	if len(pushes) != 10 {
+		return nil, fmt.Errorf("decodeBond_v0: expected 10 data pushes, got %d", len(pushes))
+	}
+	ver, assetIDB, coinID := pushes[0], pushes[1], pushes[2]
+	utx, stx := pushes[3], pushes[4]
+	data, amtB, lockTimeB := pushes[5], pushes[6], pushes[7]
+	keyIndex, refundTx := pushes[8], pushes[9]
+	return &Bond{
+		Version:    intCoder.Uint16(ver),
+		AssetID:    intCoder.Uint32(assetIDB),
+		CoinID:     coinID,
+		UnsignedTx: utx,
+		SignedTx:   stx,
+		Data:       data,
+		Amount:     intCoder.Uint64(amtB),
+		LockTime:   intCoder.Uint64(lockTimeB),
+		KeyIndex:   intCoder.Uint32(keyIndex),
 		RefundTx:   refundTx,
 	}, nil
 }

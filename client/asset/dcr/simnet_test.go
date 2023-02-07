@@ -213,16 +213,6 @@ func TestMakeBondTx(t *testing.T) {
 	lockTimePush := time.Unix(int64(lockTimeUint), 0)
 	t.Logf("lock time in bond script: %v", lockTimePush)
 
-	privOut := secp256k1.PrivKeyFromBytes(bond.BondPrivKey)
-	pk := privOut.PubKey()
-	if !pk.IsEqual(pubkey) {
-		t.Fatalf("privkey does not match pubkey from bond script and bond signature")
-	}
-
-	if !privOut.Key.Equals(&priv.Key) {
-		t.Fatalf("serialized private key from asset.Bond does not match private key provided private key")
-	}
-
 	sendBondTx, err := wallet.SendTransaction(bond.SignedTx)
 	if err != nil {
 		t.Fatalf("RefundBond: %v", err)

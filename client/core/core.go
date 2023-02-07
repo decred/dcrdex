@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"os"
@@ -5879,15 +5880,14 @@ func (c *Core) cancelOrder(oid order.OrderID) error {
 
 func assetBond(bond *db.Bond) *asset.Bond {
 	return &asset.Bond{
-		Version:     bond.Version,
-		AssetID:     bond.AssetID,
-		Amount:      bond.Amount,
-		CoinID:      bond.CoinID,
-		Data:        bond.Data,
-		BondPrivKey: bond.PrivKey,
-		SignedTx:    bond.SignedTx,
-		UnsignedTx:  bond.UnsignedTx,
-		RedeemTx:    bond.RefundTx,
+		Version:    bond.Version,
+		AssetID:    bond.AssetID,
+		Amount:     bond.Amount,
+		CoinID:     bond.CoinID,
+		Data:       bond.Data,
+		SignedTx:   bond.SignedTx,
+		UnsignedTx: bond.UnsignedTx,
+		RedeemTx:   bond.RefundTx,
 	}
 }
 
@@ -6092,8 +6092,9 @@ func (c *Core) authDEX(dc *dexConnection) error {
 			CoinID:   bond.CoinID,
 			Amount:   bond.Amount,
 			LockTime: bond.Expiry, // trust?
-			// PrivKey/RefundTx unknown. If this is really our bond and not
+			// RefundTx/KeyIndex unknown. If this is really our bond and not
 			// garbage from an untrusted server, the user better have a backup!
+			KeyIndex:  math.MaxUint32,
 			Confirmed: true,
 		}
 

@@ -745,16 +745,13 @@ type PeerManager interface {
 // and lock time. These data are intended for the "post bond" request, in which
 // the server pre-validates the unsigned transaction, the client then publishes
 // the corresponding signed transaction, and a final request is made once the
-// bond is fully confirmed. The bond key is kept in this struct to keep it
-// coupled with the bond identity, and a redeem transaction is provided as a
-// backup.
+// bond is fully confirmed. The caller should manage the private key.
 type Bond struct {
-	Version     uint16
-	AssetID     uint32
-	Amount      uint64
-	CoinID      []byte
-	Data        []byte // additional data to interpret the bond e.g. redeem script, bond contract, etc.
-	BondPrivKey []byte // caller provided, but kept with the output
+	Version uint16
+	AssetID uint32
+	Amount  uint64
+	CoinID  []byte
+	Data    []byte // additional data to interpret the bond e.g. redeem script, bond contract, etc.
 	// SignedTx and UnsignedTx are the opaque (raw bytes) signed and unsigned
 	// bond creation transactions, in whatever encoding and funding scheme for
 	// this asset and wallet. The unsigned one is used to pre-validate this bond
@@ -763,7 +760,7 @@ type Bond struct {
 	// published by the wallet.
 	SignedTx, UnsignedTx []byte
 	// RedeemTx is a backup transaction that spends the bond output. Normally
-	// the BondPrivKey will be used when the bond expires.
+	// the a key index will be used to derive the key when the bond expires.
 	RedeemTx []byte
 }
 
