@@ -1454,11 +1454,12 @@ func (w *assetWallet) swapGas(n int, ver uint32) (oneSwap, nSwap uint64, approve
 	// If a live estimate is greater than our estimate from configured values,
 	// use the live estimate with a warning.
 	if gasEst, err := w.estimateInitGas(w.ctx, n, ver); err != nil {
-		w.log.Errorf("(%d) error estimating swap gas: %v", w.assetID, err)
+		w.log.Errorf("(%d) error estimating swap gas (using expected gas cap instead): %v", w.assetID, err)
 		// TODO: investigate "gas required exceeds allowance".
-		return 0, 0, false, err
+		// TODO: investigate "error getting gas fees: execution reverted: transfer from failed"
+		// return 0, 0, false, err
 	} else if gasEst > nSwap {
-		w.log.Warnf("Swap gas estimate %d is greater than the server's configured value %d. Using live estimate + 10%.", gasEst, nSwap)
+		w.log.Warnf("Swap gas estimate %d is greater than the server's configured value %d. Using live estimate + 10%%.", gasEst, nSwap)
 		nSwap = gasEst * 11 / 10 // 10% buffer
 		if n == 1 && nSwap > oneSwap {
 			oneSwap = nSwap
