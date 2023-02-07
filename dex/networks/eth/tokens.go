@@ -168,7 +168,7 @@ var Tokens = map[uint32]*Token{
 				Address: common.HexToAddress("0x07865c6e87b9f70255377e024ace6630c1eaa37f"),
 				SwapContracts: map[uint32]*SwapContract{
 					0: {
-						Address: common.HexToAddress("0x9E493d3766989e701797b9371682B7b94fD8Af9c"),
+						Address: common.HexToAddress("0xA7Af47DB3296206eA543A82ffBF7Fc312698E6C9"),
 						Gas: Gases{
 							// Results from client's GetGasEstimates.
 							//
