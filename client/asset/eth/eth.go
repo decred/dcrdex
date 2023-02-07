@@ -1443,7 +1443,9 @@ type gasEstimate struct {
 	// IF the redeem asset is a fee-family asset. Otherwise Redeem and RedeemAdd
 	// are zero.
 	dexeth.Gases
-	// Additional fields are based on live estimates of the swap.
+	// Additional fields may be based on live estimates of the swap. Both oneGas
+	// and nGas will include both swap and redeem gas, but note that the redeem
+	// gas may be zero if the redeemed asset is not ETH or an ETH token.
 	oneGas, nGas, nSwap, nRedeem uint64
 }
 
@@ -1453,26 +1455,28 @@ type gasEstimate struct {
 func (w *assetWallet) initGasEstimate(n int, initVer, redeemVer, redeemAssetID uint32) (est *gasEstimate, err error) {
 	est = new(gasEstimate)
 
-	g := w.gases(initVer)
-	if g == nil {
+	// Get the refund gas.
+	if g := w.gases(initVer); g == nil {
 		return nil, fmt.Errorf("no gas table")
+	} else { // scoping g
+		est.Refund = g.Refund
 	}
-
-	est.Refund = g.Refund
 
 	est.Swap, est.nSwap, _, err = w.swapGas(n, initVer)
 	if err != nil {
 		return nil, fmt.Errorf("error calculating swap gas: %w", err)
 	}
 
-	est.oneGas = est.Swap + est.Redeem
-	est.nGas = est.nSwap + est.nRedeem
+	est.oneGas = est.Swap
+	est.nGas = est.nSwap
 
 	if redeemW := w.wallet(redeemAssetID); redeemW != nil {
 		est.Redeem, est.nRedeem, err = redeemW.redeemGas(n, redeemVer)
 		if err != nil {
 			return nil, fmt.Errorf("error calculating fee-family redeem gas: %w", err)
 		}
+		est.oneGas += est.Redeem
+		est.nGas += est.nRedeem
 	}
 
 	return
@@ -1480,7 +1484,8 @@ func (w *assetWallet) initGasEstimate(n int, initVer, redeemVer, redeemAssetID u
 
 // swapGas estimates gas for a number of initiations. swapGas will error if we
 // cannot get a live estimate from the contractor, which will happen if the
-// wallet has no balance.
+// wallet has no balance. A live gas estimate will always be attempted, and used
+// if our expected gas values are lower (anomalous).
 func (w *assetWallet) swapGas(n int, ver uint32) (oneSwap, nSwap uint64, approved bool, err error) {
 	g := w.gases(ver)
 	if g == nil {
@@ -1492,18 +1497,6 @@ func (w *assetWallet) swapGas(n int, ver uint32) (oneSwap, nSwap uint64, approve
 	// but we're not gonna worry about accuracy for nSwap, since it's only used
 	// for estimates and never for dex-validated values like order funding.
 	nSwap = oneSwap + uint64(n-1)*g.SwapAdd
-
-	// If we're not approved, we can't get a live estimate, so this is as
-	// far as we can go.
-	if approved, err = w.isApproved(); err != nil {
-		return 0, 0, false, fmt.Errorf("error checking approval on transferFrom failure: %w", err)
-	} else if !approved {
-		w.log.Debug("Skipping live swap gas because contract is not approved for transferFrom")
-		return oneSwap, nSwap, false, nil
-	}
-
-	// If we've approved the contract to transfer, we can get a live
-	// estimate to double check.
 
 	// The amount we can estimate and ultimately the amount we can use in a
 	// single transaction is limited by the block gas limit or the tx gas
@@ -1522,12 +1515,27 @@ func (w *assetWallet) swapGas(n int, ver uint32) (oneSwap, nSwap uint64, approve
 		}
 	}
 
+	// If we've approved the contract to transfer, we can get a live estimate to
+	// double check. If we're not approved, we can't get a live estimate, so
+	// this is as far as we can go.
+	if approved, err = w.isApproved(); err != nil {
+		return 0, 0, false, fmt.Errorf("error checking approval on transferFrom failure: %w", err)
+	} else if !approved {
+		w.log.Debug("Skipping live swap gas because contract is not approved for transferFrom")
+		return oneSwap, nSwap, false, nil
+	}
+
 	// If a live estimate is greater than our estimate from configured values,
 	// use the live estimate with a warning.
 	gasEst, err := w.estimateInitGas(w.ctx, nMax, ver)
 	if err != nil {
-		w.log.Errorf("(%d) error estimating swap gas: %v", w.assetID, err)
 		return 0, 0, false, err
+		// Or we could go with what we know? But this estimate error could be a
+		// hint that the transaction would fail, and we don't have a way to
+		// recover from that. Play it safe and allow caller to retry assuming
+		// the error is transient with the provider.
+		// w.log.Errorf("(%d) error estimating swap gas (using expected gas cap instead): %v", w.assetID, err)
+		// return oneSwap, nSwap, true, nil
 	}
 	if nMax != n {
 		// If we needed to adjust the max earlier, and the estimate did
@@ -1752,8 +1760,6 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 		return nil, nil, 0, fmt.Errorf(s, a...)
 	}
 
-	receipts := make([]asset.Receipt, 0, len(swaps.Contracts))
-
 	var reservedVal uint64
 	for _, input := range swaps.Inputs { // Should only ever be 1 input, I think.
 		c, is := input.(*fundingCoin)
@@ -1768,16 +1774,32 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 		swapVal += contract.Value
 	}
 
-	oneSwap, _, _, err := w.swapGas(1, swaps.Version)
+	// Set the gas limit as high as reserves will allow.
+	n := len(swaps.Contracts)
+	oneSwap, nSwap, _, err := w.swapGas(n, swaps.Version)
 	if err != nil {
 		return fail("error getting gas fees: %v", err)
 	}
-
-	gasLimit := oneSwap * uint64(len(swaps.Contracts))
+	gasLimit := oneSwap * uint64(n) // naive unbatched, higher but not realistic
 	fees := gasLimit * swaps.FeeRate
-
 	if swapVal+fees > reservedVal {
-		return fail("unfunded swap: %d < %d", reservedVal, swapVal+fees)
+		if n == 1 {
+			return fail("unfunded swap: %d < %d", reservedVal, swapVal+fees)
+		}
+		w.log.Warnf("Unexpectedly low reserves for %d swaps: %d < %d", n, reservedVal, swapVal+fees)
+		// Since this is a batch swap, attempt to use the realistic limits.
+		gasLimit = nSwap
+		fees = gasLimit * swaps.FeeRate
+		if swapVal+fees > reservedVal {
+			// If the live gas estimate is giving us an unrealistically high
+			// value, we're in trouble, so we might consider a third fallback
+			// that only uses our known gases:
+			//   g := w.gases(swaps.Version)
+			//   nSwap = g.Swap + uint64(n-1)*g.SwapAdd
+			// But we've not swapped yet and we don't want a failed transaction,
+			// so we will do nothing.
+			return fail("unfunded swap: %d < %d", reservedVal, swapVal+fees)
+		}
 	}
 
 	tx, err := w.initiate(w.ctx, w.assetID, swaps.Contracts, swaps.FeeRate, gasLimit, swaps.Version)
@@ -1786,6 +1808,7 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 	}
 
 	txHash := tx.Hash()
+	receipts := make([]asset.Receipt, 0, n)
 	for _, swap := range swaps.Contracts {
 		var secretHash [dexeth.SecretHashSize]byte
 		copy(secretHash[:], swap.SecretHash)
@@ -1822,8 +1845,6 @@ func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uin
 		return nil, nil, 0, fmt.Errorf(s, a...)
 	}
 
-	receipts := make([]asset.Receipt, 0, len(swaps.Contracts))
-
 	var reservedVal, reservedParent uint64
 	for _, input := range swaps.Inputs { // Should only ever be 1 input, I think.
 		c, is := input.(*tokenFundingCoin)
@@ -1839,23 +1860,31 @@ func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uin
 		swapVal += contract.Value
 	}
 
-	oneSwap, _, approved, err := w.swapGas(1, swaps.Version)
+	if swapVal > reservedVal {
+		return fail("unfunded token swap: %d < %d", reservedVal, swapVal)
+	}
+
+	n := len(swaps.Contracts)
+	oneSwap, nSwap, approved, err := w.swapGas(n, swaps.Version)
 	if err != nil {
 		return fail("error getting gas fees: %v", err)
 	}
 	if !approved && w.approval.Load() == nil {
 		return fail("cannot initiate token swap without approval")
 	}
-
-	gasLimit := oneSwap * uint64(len(swaps.Contracts))
+	gasLimit := oneSwap * uint64(n)
 	fees := gasLimit * swaps.FeeRate
-
-	if swapVal > reservedVal {
-		return fail("unfunded token swap: %d < %d", reservedVal, swapVal)
-	}
-
 	if fees > reservedParent {
-		return fail("unfunded token swap fees: %d < %d", reservedParent, fees)
+		if n == 1 {
+			return fail("unfunded token swap fees: %d < %d", reservedParent, fees)
+		}
+		// Since this is a batch swap, attempt to use the realistic limits.
+		w.log.Warnf("Unexpectedly low reserves for %d swaps: %d < %d", n, reservedVal, swapVal+fees)
+		gasLimit = nSwap
+		fees = gasLimit * swaps.FeeRate
+		if fees > reservedParent {
+			return fail("unfunded token swap fees: %d < %d", reservedParent, fees)
+		} // See (*ETHWallet).Swap comments for a third option.
 	}
 
 	tx, err := w.initiate(w.ctx, w.assetID, swaps.Contracts, swaps.FeeRate, gasLimit, swaps.Version)
@@ -1870,6 +1899,7 @@ func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uin
 	contractAddr := w.netToken.SwapContracts[swaps.Version].Address.String()
 
 	txHash := tx.Hash()
+	receipts := make([]asset.Receipt, 0, n)
 	for _, swap := range swaps.Contracts {
 		var secretHash [dexeth.SecretHashSize]byte
 		copy(secretHash[:], swap.SecretHash)
