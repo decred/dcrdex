@@ -1018,7 +1018,7 @@ export class CandleChart extends Chart {
     if (!data.candles) return
     this.market = market
     const [qFactor, bFactor] = [quoteUnitInfo.conventional.conversionFactor, baseUnitInfo.conventional.conversionFactor]
-    this.rateConversionFactor = RateEncodingFactor * bFactor / qFactor
+    this.rateConversionFactor = RateEncodingFactor * qFactor / bFactor
     let n = 25
     this.zoomLevels = []
     const maxCandles = Math.max(data.candles.length, 1000)
