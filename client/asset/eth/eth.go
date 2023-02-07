@@ -455,11 +455,11 @@ type baseWallet struct {
 // assetWallet satisfies the dex.Wallet interface.
 type assetWallet struct {
 	*baseWallet
-	assetID    uint32
-	tipChange  func(error)
-	log        dex.Logger
-	atomicUnit string
-	connected  atomic.Bool
+	assetID   uint32
+	tipChange func(error)
+	log       dex.Logger
+	ui        dex.UnitInfo
+	connected atomic.Bool
 
 	lockedFunds struct {
 		mtx                sync.RWMutex
@@ -684,7 +684,7 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		contractors:        make(map[uint32]contractor),
 		evmify:             dexeth.GweiToWei,
 		atomize:            dexeth.WeiToGwei,
-		atomicUnit:         dexeth.UnitInfo.AtomicUnit,
+		ui:                 dexeth.UnitInfo,
 		maxSwapsInTx:       perTxGasLimit / maxSwapGas,
 		maxRedeemsInTx:     perTxGasLimit / maxRedeemGas,
 	}
@@ -988,7 +988,7 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 		contractors:        make(map[uint32]contractor),
 		evmify:             token.AtomicToEVM,
 		atomize:            token.EVMToAtomic,
-		atomicUnit:         token.UnitInfo.AtomicUnit,
+		ui:                 token.UnitInfo,
 		maxSwapsInTx:       perTxGasLimit / maxSwapGas,
 		maxRedeemsInTx:     perTxGasLimit / maxRedeemGas,
 	}
@@ -1017,6 +1017,10 @@ func (eth *baseWallet) OwnsDepositAddress(address string) (bool, error) {
 	}
 	addr := common.HexToAddress(address)
 	return addr == eth.addr, nil
+}
+
+func (w *assetWallet) amtString(amt uint64) string {
+	return fmt.Sprintf("%s %s", w.ui.ConventionalString(amt), w.ui.Conventional.Unit)
 }
 
 // fundReserveType represents the various uses for which funds need to be locked:
@@ -1066,7 +1070,7 @@ func (w *assetWallet) lockFunds(amt uint64, t fundReserveType) error {
 
 	if balance.Available < amt {
 		return fmt.Errorf("attempting to lock more %s for %s than is currently available. %d > %d %s",
-			dex.BipIDSymbol(w.assetID), t, amt, balance.Available, w.atomicUnit)
+			dex.BipIDSymbol(w.assetID), t, amt, balance.Available, w.ui.AtomicUnit)
 	}
 
 	w.lockedFunds.mtx.Lock()
@@ -1390,6 +1394,8 @@ func (w *ETHWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error
 	// some work for the caller as well. We can't just always do it that way and
 	// remove RedeemN, since we can't guarantee that the redemption asset is in
 	// our fee-family. though it could still be an AccountRedeemer.
+	w.log.Debugf("Locking %s to swap %s in up to %d swaps at a fee rate of %d gwei/gas using up to %d gas per swap",
+		w.amtString(ethToLock), w.amtString(ord.Value), ord.MaxSwapCount, ord.MaxFeeRate, g.Swap)
 
 	coin := w.createFundingCoin(ethToLock)
 
@@ -1431,6 +1437,8 @@ func (w *TokenWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, err
 		}
 	}()
 
+	w.log.Debugf("Locking %s to swap %s in up to %d swaps at a fee rate of %d gwei/gas using up to %d gas per swap",
+		w.parent.amtString(ethToLock), w.amtString(ord.Value), ord.MaxSwapCount, ord.MaxFeeRate, g.Swap)
 	if err := w.parent.lockFunds(ethToLock, initiationReserve); err != nil {
 		return nil, nil, err
 	}
@@ -1557,7 +1565,7 @@ func (w *assetWallet) swapGas(n int, ver uint32) (oneSwap, nSwap uint64, approve
 		}
 	}
 	if gasEst > nSwap {
-		w.log.Warnf("Swap gas estimate %d is greater than the server's configured value %d. Using live estimate + 10%.", gasEst, nSwap)
+		w.log.Warnf("Swap gas estimate %d is greater than the server's configured value %d. Using live estimate + 10%%.", gasEst, nSwap)
 		nSwap = gasEst * 11 / 10 // 10% buffer
 		if n == 1 && nSwap > oneSwap {
 			oneSwap = nSwap
@@ -2747,7 +2755,7 @@ func (w *TokenWallet) canSend(value uint64, isPreEstimate bool) (uint64, *big.In
 		}
 		avail := bal.Available
 		if avail < value {
-			return 0, nil, fmt.Errorf("not enough tokens: have %[1]d %[3]s need %[2]d %[3]s", avail, value, w.atomicUnit)
+			return 0, nil, fmt.Errorf("not enough tokens: have %[1]d %[3]s need %[2]d %[3]s", avail, value, w.ui.AtomicUnit)
 		}
 
 		ethBal, err := w.parent.Balance()
