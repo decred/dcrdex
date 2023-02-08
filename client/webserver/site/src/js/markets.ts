@@ -1852,8 +1852,8 @@ export default class MarketsPage extends BasePage {
     if (baseExchangeRate && quoteExchangeRate) {
       Doc.show(page.vFeeSummaryPct)
       Doc.hide(page.vFeeSummary)
-      page.vFeeSummaryLow.textContent = fmtPct((bestSwapPct + bestRedeemPct) / 2)
-      page.vFeeSummaryHigh.textContent = fmtPct((worstSwapPct + worstRedeemPct) / 2)
+      page.vFeeSummaryLow.textContent = fmtPct(bestSwapPct + bestRedeemPct)
+      page.vFeeSummaryHigh.textContent = fmtPct(worstSwapPct + worstRedeemPct)
     } else {
       Doc.hide(page.vFeeSummaryPct)
       Doc.show(page.vFeeSummary)
