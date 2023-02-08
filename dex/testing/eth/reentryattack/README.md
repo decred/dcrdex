@@ -1,4 +1,12 @@
-## Reentry Contract Creation
+## Reentry Attack Proof-of-Concept and Avoidance
+
+The proof-of-concept Solidity contracts are no longer in the repository, but
+they may be found at the following past revisions:
+
+- https://github.com/decred/dcrdex/blob/5632a241faaa1d0ef25505731284337cbd29096d/dex/testing/eth/reentryattack/ReentryAttack.sol
+- https://github.com/decred/dcrdex/blob/5632a241faaa1d0ef25505731284337cbd29096d/dex/testing/eth/reentryattack/VulnerableToReentryAttack.sol
+
+## Contract Creation
 
 Have `solc` and `abigen` installed on your system and run from this directory:
 
