@@ -601,9 +601,33 @@ export default class MarketsPage extends BasePage {
   /* assetsAreSupported is true if all the assets of the current market are
    * supported
    */
-  assetsAreSupported () {
-    const [b, q] = [this.market.base, this.market.quote]
-    return b && q
+  assetsAreSupported (): {
+    isSupported: boolean;
+    text: string;
+    } {
+    const { market: { base, quote, baseCfg, quoteCfg } } = this
+    if (!base || !quote) {
+      const symbol = base ? quoteCfg.symbol : baseCfg.symbol
+      return {
+        isSupported: false,
+        text: intl.prep(intl.ID_NOT_SUPPORTED, { asset: symbol.toUpperCase() })
+      }
+    }
+    // check if versions are supported. If asset is a token, we check if its
+    // parent supports the version.
+    const bVers = (base.token ? app().assets[base.token.parentID].info?.versions : base.info?.versions) as number[]
+    const qVers = (quote.token ? app().assets[quote.token.parentID].info?.versions : quote.info?.versions) as number[]
+    // if none them are token, just check if own asset is supported.
+    let text = ''
+    if (!bVers.includes(baseCfg.version)) {
+      text = intl.prep(intl.ID_VERSION_NOT_SUPPORTED, { asset: base.symbol.toUpperCase(), version: baseCfg.version + '' })
+    } else if (!qVers.includes(quoteCfg.version)) {
+      text = intl.prep(intl.ID_VERSION_NOT_SUPPORTED, { asset: quote.symbol.toUpperCase(), version: quoteCfg.version + '' })
+    }
+    return {
+      isSupported: bVers.includes(baseCfg.version) && qVers.includes(quoteCfg.version),
+      text
+    }
   }
 
   /*
@@ -639,7 +663,7 @@ export default class MarketsPage extends BasePage {
     // and ready for trading the form should show up.
     Doc.hide(page.orderForm, page.orderTypeBttns)
     const feePaid = !this.hasFeePending()
-    const assetsAreSupported = this.assetsAreSupported()
+    const assetsAreSupported = this.assetsAreSupported().isSupported
     const { base, quote } = this.market
     const hasWallets = base && app().assets[base.id].wallet && quote && app().assets[quote.id].wallet
 
@@ -652,15 +676,15 @@ export default class MarketsPage extends BasePage {
    * supported
    */
   setLoaderMsgVisibility () {
-    const { page, market } = this
+    const { page } = this
 
-    if (this.assetsAreSupported()) {
+    const { isSupported, text } = this.assetsAreSupported()
+    if (isSupported) {
       // make sure to hide the loader msg
       Doc.hide(page.loaderMsg)
       return
     }
-    const symbol = market.base ? market.quoteCfg.symbol : market.baseCfg.symbol
-    page.loaderMsg.textContent = intl.prep(intl.ID_NOT_SUPPORTED, { asset: symbol.toUpperCase() })
+    page.loaderMsg.textContent = text
     Doc.show(page.loaderMsg)
     Doc.hide(page.noWallet)
   }
