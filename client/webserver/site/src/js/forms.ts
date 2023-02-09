@@ -289,7 +289,7 @@ export class NewWalletForm {
     if (parentAsset.wallet) {
       // If the parent asset already has a wallet, there's no need to configure
       // the parent too. Just configure the token.
-      this.current = { asset, parentAsset, winfo: token, selectedDef: token.definition }
+      this.current = { asset, winfo: token, selectedDef: token.definition }
       return true
     }
     if (!parentAsset.info) throw Error('this parent has no wallet info!')
@@ -335,13 +335,21 @@ export class NewWalletForm {
     }
 
     const { asset, parentAsset, winfo } = this.current
+
     if (parentAsset) {
-      this.subform.update(configOpts, { assetID: parentAsset.id })
-      this.subform.update((winfo as Token).definition.configopts, {
-        skipClear: true,
-        assetID: asset.id
-      })
-    } else this.subform.update(configOpts, {})
+      const parentAndTokenOpts = JSON.parse(JSON.stringify(configOpts))
+      // Add the regAsset field to the configurations so proper logos will be displayed
+      // next to them, and map can filter them out. The opts are copied here so the originals
+      // do not have the regAsset field added to them.
+      for (const opt of parentAndTokenOpts) opt.regAsset = parentAsset.id
+      const tokenOpts = (winfo as Token).definition.configopts || []
+      if (tokenOpts.length > 0) {
+        const tokenOptsCopy = JSON.parse(JSON.stringify(tokenOpts))
+        for (const opt of tokenOptsCopy) opt.regAsset = asset.id
+        parentAndTokenOpts.push(...tokenOptsCopy)
+      }
+      this.subform.update(parentAndTokenOpts, false)
+    } else this.subform.update(configOpts, false)
 
     if (this.subform.dynamicOpts.children.length || this.subform.defaultSettings.children.length) {
       Doc.show(page.walletSettingsHeader)
@@ -389,18 +397,6 @@ export class NewWalletForm {
   }
 }
 
-interface ConfigFormOptions {
-  // If skipClear is true, the existing inputs will not be cleared before adding
-  // the new ones.
-  skipClear?: boolean
-  // If assetID is set, a logo will be displayed near the inputs and map will
-  // filter out non-matching inputs.
-  assetID?: number
-  // assetHasActiveOrders will disable inputs whose ConfigOption has
-  // disablewhenactive set.
-  assetHasActiveOrders?: boolean
-}
-
 let repeatableCounter = 0
 
 /*
@@ -430,7 +426,7 @@ export class WalletConfigForm {
   loadedSettings: PageElement
   defaultSettingsMsg: PageElement
   defaultSettings: PageElement
-  formOpts: ConfigFormOptions
+  assetHasActiveOrders: boolean
 
   constructor (form: HTMLElement, sectionize: boolean) {
     this.form = form
@@ -527,11 +523,10 @@ export class WalletConfigForm {
     const label = Doc.safeSelector(el, 'label')
     label.htmlFor = elID // 'for' attribute, but 'for' is a keyword
     label.prepend(opt.displayname)
-    if (typeof this.formOpts.assetID === 'number') {
+    if (opt.regAsset !== undefined) {
       const logo = new window.Image(15, 15)
-      logo.src = Doc.logoPathFromID(this.formOpts.assetID || -1)
+      logo.src = Doc.logoPathFromID(opt.regAsset || -1)
       label.prepend(logo)
-      opt.regAsset = this.formOpts.assetID // Signal for map filtering
     }
     if (insertAfter) insertAfter.after(el)
     else box.appendChild(el)
@@ -551,25 +546,21 @@ export class WalletConfigForm {
       input.min = getMinMaxVal(opt.min)
       input.valueAsDate = opt.default ? new Date(opt.default * 1000) : new Date()
     } else input.value = opt.default !== null ? opt.default : ''
-    input.disabled = Boolean(opt.disablewhenactive && this.formOpts.assetHasActiveOrders)
+    input.disabled = Boolean(opt.disablewhenactive && this.assetHasActiveOrders)
     return el
   }
 
   /*
    * update creates the dynamic form.
    */
-  update (configOpts: ConfigOption[] | null, formOpts: ConfigFormOptions) {
-    this.formOpts = formOpts
-    configOpts = configOpts || []
-    if (formOpts.skipClear) this.configOpts.push(...configOpts)
-    else {
-      this.configElements = []
-      this.configOpts = configOpts
-      Doc.empty(this.dynamicOpts, this.defaultSettings, this.loadedSettings)
-    }
+  update (configOpts: ConfigOption[] | null, activeOrders: boolean) {
+    this.assetHasActiveOrders = activeOrders
+    this.configElements = []
+    this.configOpts = configOpts || []
+    Doc.empty(this.dynamicOpts, this.defaultSettings, this.loadedSettings)
 
     // If there are no options, just hide the entire form.
-    if (configOpts.length === 0) return Doc.hide(this.form)
+    if (this.configOpts.length === 0) return Doc.hide(this.form)
     Doc.show(this.form)
 
     this.setOtherSettingsViz(false)
