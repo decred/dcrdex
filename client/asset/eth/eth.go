@@ -1195,7 +1195,7 @@ func (w *assetWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, maxFeeRa
 		return &asset.SwapEstimate{}, nil
 	}
 
-	oneSwap, nSwap, _, err := w.swapGas(int(lots), ver)
+	oneSwap, nSwap, _, err := w.swapGas(int(lots), ver, true) // fail if live gas estimate fails
 	if err != nil {
 		return nil, fmt.Errorf("error getting swap gas estimate: %w", err)
 	}
@@ -1395,18 +1395,19 @@ type gasEstimate struct {
 
 // initGasEstimate gets the best available gas estimate for n initiations. A
 // live estimate is checked against the server's configured values and our own
-// known values and errors or logs generated in certain cases.
+// known values and errors or logs generated in certain cases. It is an error if
+// the live gas estimate fails, so only use this method for order prep.
 func (w *assetWallet) initGasEstimate(n int, initVer, redeemVer, redeemAssetID uint32) (est *gasEstimate, err error) {
 	est = new(gasEstimate)
 
-	g := w.gases(initVer)
-	if g == nil {
+	// Get the refund gas.
+	if g := w.gases(initVer); g == nil {
 		return nil, fmt.Errorf("no gas table")
+	} else { // scoping g
+		est.Refund = g.Refund
 	}
 
-	est.Refund = g.Refund
-
-	est.Swap, est.nSwap, _, err = w.swapGas(n, initVer)
+	est.Swap, est.nSwap, _, err = w.swapGas(n, initVer, true) // fail if live gas estimate fails
 	if err != nil {
 		return nil, fmt.Errorf("error calculating swap gas: %w", err)
 	}
@@ -1426,8 +1427,11 @@ func (w *assetWallet) initGasEstimate(n int, initVer, redeemVer, redeemAssetID u
 
 // swapGas estimates gas for a number of initiations. swapGas will error if we
 // cannot get a live estimate from the contractor, which will happen if the
-// wallet has no balance.
-func (w *assetWallet) swapGas(n int, ver uint32) (oneSwap, nSwap uint64, approved bool, err error) {
+// wallet has no balance. A live gas estimate will always be attempted, and used
+// if our expected gas values are lower. If requireLiveEst is true and the
+// estimate fails, and error is returned, otherwise a failure only logs an error
+// and the known gases are used.
+func (w *assetWallet) swapGas(n int, ver uint32, requireLiveEst bool) (oneSwap, nSwap uint64, approved bool, err error) {
 	g := w.gases(ver)
 	if g == nil {
 		return 0, 0, false, fmt.Errorf("no gases known for %d version %d", w.assetID, ver)
@@ -1455,9 +1459,11 @@ func (w *assetWallet) swapGas(n int, ver uint32) (oneSwap, nSwap uint64, approve
 	// use the live estimate with a warning.
 	if gasEst, err := w.estimateInitGas(w.ctx, n, ver); err != nil {
 		w.log.Errorf("(%d) error estimating swap gas (using expected gas cap instead): %v", w.assetID, err)
+		if requireLiveEst {
+			return 0, 0, false, err
+		} // else go with what we know
 		// TODO: investigate "gas required exceeds allowance".
-		// TODO: investigate "error getting gas fees: execution reverted: transfer from failed"
-		// return 0, 0, false, err
+		// TODO: investigate "error getting gas fees: execution reverted: transfer from failed" (seems to be approval not actually ready)
 	} else if gasEst > nSwap {
 		w.log.Warnf("Swap gas estimate %d is greater than the server's configured value %d. Using live estimate + 10%%.", gasEst, nSwap)
 		nSwap = gasEst * 11 / 10 // 10% buffer
@@ -1683,7 +1689,7 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 
 	// Set the gas limit as high as reserves will allow.
 	n := len(swaps.Contracts)
-	oneSwap, nSwap, _, err := w.swapGas(n, swaps.Version)
+	oneSwap, nSwap, _, err := w.swapGas(n, swaps.Version, false) // allow live est to fail, using our own gas values
 	if err != nil {
 		return fail("error getting gas fees: %v", err)
 	}
@@ -1772,7 +1778,7 @@ func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uin
 	}
 
 	n := len(swaps.Contracts)
-	oneSwap, nSwap, approved, err := w.swapGas(n, swaps.Version)
+	oneSwap, nSwap, approved, err := w.swapGas(n, swaps.Version, false) // allow live est to fail, using our own gas values
 	if err != nil {
 		return fail("error getting gas fees: %v", err)
 	}
