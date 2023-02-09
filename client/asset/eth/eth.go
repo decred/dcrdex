@@ -1667,8 +1667,6 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 		return nil, nil, 0, fmt.Errorf(s, a...)
 	}
 
-	receipts := make([]asset.Receipt, 0, len(swaps.Contracts))
-
 	var reservedVal uint64
 	for _, input := range swaps.Inputs { // Should only ever be 1 input, I think.
 		c, is := input.(*fundingCoin)
@@ -1683,16 +1681,32 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 		swapVal += contract.Value
 	}
 
-	oneSwap, _, _, err := w.swapGas(1, swaps.Version)
+	// Set the gas limit as high as reserves will allow.
+	n := len(swaps.Contracts)
+	oneSwap, nSwap, _, err := w.swapGas(n, swaps.Version)
 	if err != nil {
 		return fail("error getting gas fees: %v", err)
 	}
-
-	gasLimit := oneSwap * uint64(len(swaps.Contracts))
+	gasLimit := oneSwap * uint64(n) // naive unbatched, higher but not realistic
 	fees := gasLimit * swaps.FeeRate
-
 	if swapVal+fees > reservedVal {
-		return fail("unfunded swap: %d < %d", reservedVal, swapVal+fees)
+		if n == 1 {
+			return fail("unfunded swap: %d < %d", reservedVal, swapVal+fees)
+		}
+		w.log.Warnf("Unexpectedly low reserves for %d swaps: %d < %d", n, reservedVal, swapVal+fees)
+		// Since this is a batch swap, attempt to use the realistic limits.
+		gasLimit = nSwap
+		fees = gasLimit * swaps.FeeRate
+		if swapVal+fees > reservedVal {
+			// If the live gas estimate is giving us an unrealistically high
+			// value, we're in trouble, so we might consider a third fallback
+			// that only uses our known gases:
+			//   g := w.gases(swaps.Version)
+			//   nSwap = g.Swap + uint64(n-1)*g.SwapAdd
+			// But we've not swapped yet and we don't want a failed transaction,
+			// so we will do nothing.
+			return fail("unfunded swap: %d < %d", reservedVal, swapVal+fees)
+		}
 	}
 
 	tx, err := w.initiate(w.ctx, w.assetID, swaps.Contracts, swaps.FeeRate, gasLimit, swaps.Version)
@@ -1701,6 +1715,7 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 	}
 
 	txHash := tx.Hash()
+	receipts := make([]asset.Receipt, 0, n)
 	for _, swap := range swaps.Contracts {
 		var secretHash [dexeth.SecretHashSize]byte
 		copy(secretHash[:], swap.SecretHash)
@@ -1737,8 +1752,6 @@ func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uin
 		return nil, nil, 0, fmt.Errorf(s, a...)
 	}
 
-	receipts := make([]asset.Receipt, 0, len(swaps.Contracts))
-
 	var reservedVal, reservedParent uint64
 	for _, input := range swaps.Inputs { // Should only ever be 1 input, I think.
 		c, is := input.(*tokenFundingCoin)
@@ -1754,23 +1767,31 @@ func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uin
 		swapVal += contract.Value
 	}
 
-	oneSwap, _, approved, err := w.swapGas(1, swaps.Version)
+	if swapVal > reservedVal {
+		return fail("unfunded token swap: %d < %d", reservedVal, swapVal)
+	}
+
+	n := len(swaps.Contracts)
+	oneSwap, nSwap, approved, err := w.swapGas(n, swaps.Version)
 	if err != nil {
 		return fail("error getting gas fees: %v", err)
 	}
 	if !approved && w.approval.Load() == nil {
 		return fail("cannot initiate token swap without approval")
 	}
-
-	gasLimit := oneSwap * uint64(len(swaps.Contracts))
+	gasLimit := oneSwap * uint64(n)
 	fees := gasLimit * swaps.FeeRate
-
-	if swapVal > reservedVal {
-		return fail("unfunded token swap: %d < %d", reservedVal, swapVal)
-	}
-
 	if fees > reservedParent {
-		return fail("unfunded token swap fees: %d < %d", reservedParent, fees)
+		if n == 1 {
+			return fail("unfunded token swap fees: %d < %d", reservedParent, fees)
+		}
+		// Since this is a batch swap, attempt to use the realistic limits.
+		w.log.Warnf("Unexpectedly low reserves for %d s")
+		gasLimit = nSwap
+		fees = gasLimit * swaps.FeeRate
+		if fees > reservedParent {
+			return fail("unfunded token swap fees: %d < %d", reservedParent, fees)
+		} // See (*ETHWallet).Swap comments for a third option.
 	}
 
 	tx, err := w.initiate(w.ctx, w.assetID, swaps.Contracts, swaps.FeeRate, gasLimit, swaps.Version)
@@ -1785,6 +1806,7 @@ func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uin
 	contractAddr := w.netToken.SwapContracts[swaps.Version].Address.String()
 
 	txHash := tx.Hash()
+	receipts := make([]asset.Receipt, 0, n)
 	for _, swap := range swaps.Contracts {
 		var secretHash [dexeth.SecretHashSize]byte
 		copy(secretHash[:], swap.SecretHash)
