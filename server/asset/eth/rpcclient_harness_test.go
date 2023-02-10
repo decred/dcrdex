@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"context"
 	"testing"
@@ -38,6 +39,8 @@ var (
 )
 
 func TestMain(m *testing.M) {
+	monitorConnectionsInterval = 3 * time.Second
+
 	// Run in function so that defers happen before os.Exit is called.
 	run := func() (int, error) {
 		var cancel context.CancelFunc
@@ -169,14 +172,7 @@ func testAccountBalance(t *testing.T, assetID uint32) {
 	}
 }
 
-func TestRPCRotation(t *testing.T) {
-	ethClient.idxMtx.RLock()
-	idx := ethClient.endpointIdx
-	ethClient.idxMtx.RUnlock()
-	if idx != 0 {
-		t.Fatal("expected initial index to be zero")
-	}
-
+func TestMonitorHealth(t *testing.T) {
 	// Requesting a non-existent transaction should propagate the error. Also
 	// check logs to ensure the endpoint index was not advanced.
 	_, _, err := ethClient.transaction(ctx, common.Hash{})
@@ -185,20 +181,27 @@ func TestRPCRotation(t *testing.T) {
 	}
 	ethClient.log.Info("Not found error successfully propagated")
 
-	// Shut down the zeroth client and ensure the endpoint index is advanced.
-	cl := ethClient.clients[idx]
-	cl.Close()
+	originalClients := ethClient.clientsCopy()
+	originalClients[0].Close()
 
-	_, err = ethClient.bestHeader(ctx)
-	if err != nil {
-		t.Fatalf("error getting best header with index advance: %v", err)
+	fmt.Println("Waiting for client health check...")
+	time.Sleep(5 * time.Second)
+
+	updatedClients := ethClient.clientsCopy()
+
+	getEndpoints := func(clients []*ethConn) []string {
+		endpoints := make([]string, 0, len(clients))
+		for _, c := range clients {
+			endpoints = append(endpoints, c.endpoint)
+		}
+		return endpoints
 	}
 
-	ethClient.idxMtx.RLock()
-	idx = ethClient.endpointIdx
-	ethClient.idxMtx.RUnlock()
-	if idx == 0 {
-		t.Fatalf("endpoint index not advanced")
+	fmt.Println("Original clients:", getEndpoints(originalClients))
+	fmt.Println("Updated clients:", getEndpoints(updatedClients))
+
+	if originalClients[0].endpoint != updatedClients[len(updatedClients)-1].endpoint {
+		t.Fatalf("failing client was not moved to the end. got %s, expected %s", updatedClients[len(updatedClients)-1].endpoint, originalClients[0].endpoint)
 	}
 }
 
