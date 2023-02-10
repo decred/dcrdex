@@ -1131,10 +1131,6 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 			// bond maintenance options set below.
 		})
 		if err != nil {
-			if dc != nil {
-				// Stop (re)connect loop, which may be running even if err != nil.
-				dc.connMaster.Disconnect()
-			}
 			return nil, codedError(connectionErr, err)
 		}
 

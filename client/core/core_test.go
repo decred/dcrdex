@@ -2577,18 +2577,20 @@ func TestConnectDEX(t *testing.T) {
 
 	rig.queueConfig()
 	tCore.cfg.Onion = "127.0.0.1:9050"
-	_, err = tCore.connectDEX(ai)
+	dc, err := tCore.connectDEX(ai)
 	if err != nil {
 		t.Fatalf("error connecting to onion host with an onion proxy configured: %v", err)
 	}
+	dc.connMaster.Disconnect()
 
 	rig.queueConfig()
 	ai.Host = "somedex.com"
 	ai.Cert = []byte{0x1}
-	_, err = tCore.connectDEX(ai)
+	dc, err = tCore.connectDEX(ai)
 	if err != nil {
 		t.Fatalf("initial connectDEX error: %v", err)
 	}
+	dc.connMaster.Disconnect()
 
 	// Bad URL.
 	ai.Host = tUnparseableHost // Illegal ASCII control character
@@ -2611,18 +2613,11 @@ func TestConnectDEX(t *testing.T) {
 
 	// WsConn.Connect error.
 	rig.ws.connectErr = tErr
-	dc, err := tCore.connectDEX(ai)
+	_, err = tCore.connectDEX(ai)
 	if err == nil {
-		if dc != nil {
-			dc.connMaster.Disconnect()
-		}
 		t.Fatalf("no error for WsConn.Connect error")
 	}
-	if dc == nil {
-		t.Error("Expected a non-nil dexConnection that is still trying to connect.")
-	} else {
-		dc.connMaster.Disconnect()
-	}
+
 	rig.ws.connectErr = nil
 
 	// 'config' route error.
@@ -2631,25 +2626,18 @@ func TestConnectDEX(t *testing.T) {
 		f(resp)
 		return nil
 	})
-	dc, err = tCore.connectDEX(ai)
+	_, err = tCore.connectDEX(ai)
 	if err == nil {
-		if dc != nil {
-			dc.connMaster.Disconnect()
-		}
 		t.Fatalf("no error for 'config' route error")
-	}
-	if dc == nil {
-		t.Error("Expected a non-nil dexConnection that is still trying to connect.")
-	} else {
-		dc.connMaster.Disconnect()
 	}
 
 	// Success again.
 	rig.queueConfig()
-	_, err = tCore.connectDEX(ai)
+	dc, err = tCore.connectDEX(ai)
 	if err != nil {
 		t.Fatalf("final connectDEX error: %v", err)
 	}
+	dc.connMaster.Disconnect()
 
 	// TODO: test temporary, ensure listen isn't running, somehow
 }

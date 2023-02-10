@@ -3719,10 +3719,6 @@ func (c *Core) tempDexConnection(dexAddr string, certI interface{}) (*dexConnect
 // as either a string filename, or []byte file contents.
 func (c *Core) GetDEXConfig(dexAddr string, certI interface{}) (*Exchange, error) {
 	dc, err := c.tempDexConnection(dexAddr, certI)
-	if dc != nil {
-		// Stop (re)connect loop, which may be running even if err != nil.
-		defer dc.connMaster.Disconnect()
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -3989,20 +3985,19 @@ func (c *Core) DiscoverAccount(dexAddr string, appPW []byte, certI interface{}) 
 	var ready bool
 	if !existingConn {
 		dc, err = c.tempDexConnection(host, certI)
-		if dc != nil { // (re)connect loop may be running even if err != nil
-			defer func() {
-				// Either disconnect or promote this connection.
-				if !ready {
-					dc.connMaster.Disconnect()
-					return
-				}
-
-				c.upgradeConnection(dc)
-			}()
-		}
 		if err != nil {
 			return nil, false, err
 		}
+
+		defer func() {
+			// Either disconnect or promote this connection.
+			if !ready {
+				dc.connMaster.Disconnect()
+				return
+			}
+
+			c.upgradeConnection(dc)
+		}()
 	}
 
 	// Older DEX server. We won't allow registering without an HD account key,
@@ -4054,13 +4049,10 @@ func (c *Core) EstimateRegistrationTxFee(host string, certI interface{}, assetID
 	if rate == 0 {
 		dc, _, _ := c.dex(host)
 		if dc == nil {
-			dc, err = c.tempDexConnection(host, certI)
-			if dc != nil {
-				// Stop (re)connect loop, which may be running even if err != nil.
-				defer dc.connMaster.Disconnect()
-			}
-			if err != nil {
+			if dc, err = c.tempDexConnection(host, certI); err != nil {
 				c.log.Warnf("failed to connect to dex: %v", err)
+			} else {
+				defer dc.connMaster.Disconnect()
 			}
 		}
 		if dc != nil {
@@ -4134,6 +4126,8 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		return nil, newError(fileReadErr, "failed to read certificate file from %s: %w", cert, err)
 	}
 
+	// close the connection to the dex server if the registration fails.
+	var registrationComplete bool
 	if !existingConn {
 		dc, err = c.connectDEX(&db.AccountInfo{
 			Host:      host,
@@ -4141,21 +4135,15 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 			BondAsset: defaultBondAsset,
 		})
 		if err != nil {
-			if dc != nil {
-				// Stop (re)connect loop, which may be running even if err != nil.
-				dc.connMaster.Disconnect()
-			}
 			return nil, codedError(connectionErr, err)
 		}
-	}
 
-	// close the connection to the dex server if the registration fails.
-	var registrationComplete bool
-	defer func() {
-		if !existingConn && !registrationComplete {
-			dc.connMaster.Disconnect()
-		}
-	}()
+		defer func() {
+			if !registrationComplete {
+				dc.connMaster.Disconnect()
+			}
+		}()
+	}
 
 	// Ensure this DEX supports this asset for registration fees, and get the
 	// required confirmations and fee amount.
@@ -6627,21 +6615,9 @@ func (c *Core) initialize() error {
 		wg.Add(1)
 		go func(acct *db.AccountInfo) {
 			defer wg.Done()
-			var connectFlag connectDEXFlag
-			if acct.ViewOnly() {
-				connectFlag |= connectDEXFlagViewOnly
+			if c.connectAccount(acct) {
+				atomic.AddUint32(&liveConns, 1)
 			}
-			dc, err := c.connectDEXWithFlag(acct, connectFlag)
-			if dc == nil {
-				c.log.Errorf("Unable to prepare DEX %s: %v", acct.Host, err)
-				return
-			}
-			// Connected or not, the dexConnection goes in the conns map now.
-			if err != nil {
-				c.log.Errorf("Trouble establishing connection to %s (will retry). Error: %v", acct.Host, err)
-			}
-			c.addDexConnection(dc)
-			atomic.AddUint32(&liveConns, 1)
 		}(acct)
 	}
 
@@ -6684,6 +6660,38 @@ func (c *Core) initialize() error {
 	}
 
 	return nil
+}
+
+// connectAccount makes a connection to the DEX for the given account. If a
+// non-nil dexConnection is returned from newDEXConnection, it was inserted into
+// the conns map even if the connection attempt failed (connected == false), and
+// the connect retry / keepalive loop is active.
+func (c *Core) connectAccount(acct *db.AccountInfo) (connected bool) {
+	host, err := addrHost(acct.Host)
+	if err != nil {
+		c.log.Errorf("skipping loading of %s due to address parse error: %v", host, err)
+		return
+	}
+
+	var connectFlag connectDEXFlag
+	if acct.ViewOnly() {
+		connectFlag |= connectDEXFlagViewOnly
+	}
+
+	dc, err := c.newDEXConnection(acct, connectFlag)
+	if err != nil {
+		c.log.Errorf("Unable to prepare DEX %s: %v", host, err)
+		return
+	}
+
+	err = c.startDexConnection(acct, dc)
+	if err != nil {
+		c.log.Errorf("Trouble establishing connection to %s (will retry). Error: %v", host, err)
+	}
+
+	// Connected or not, the dexConnection goes in the conns map now.
+	c.addDexConnection(dc)
+	return err == nil
 }
 
 // feeLock is used to ensure that no more than one reFee check is running at a
@@ -7630,17 +7638,40 @@ const (
 	connectDEXFlagViewOnly
 )
 
-// connectDEX establishes a ws connection to a DEX server using the provided
-// account info, but does not authenticate the connection through the 'connect'
-// route. If temporary is provided and true, the c.listen(dc) goroutine is not
-// started so that associated trades are not processed and no incoming requests
-// and notifications are handled. A temporary dexConnection may be used to
-// inspect the config response or check if a (paid) HD account exists with a DEX.
+// connectDEX is like connectDEXWithFlag but always creates a full connection
+// for use with a trading account. For a temporary or view-only dexConnection,
+// use connectDEXWithFlag.
 func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	return c.connectDEXWithFlag(acctInfo, 0)
 }
 
+// connectDEXWithFlag establishes a ws connection to a DEX server using the
+// provided account info, but does not authenticate the connection through the
+// 'connect' route. If the connectDEXFlagTemporary bit is set in flag, the
+// c.listen(dc) goroutine is not started so that associated trades are not
+// processed and no incoming requests and notifications are handled. A temporary
+// dexConnection may be used to inspect the config response or check if a (paid)
+// HD account exists with a DEX. If connecting fails, there are no retries. To
+// allow an initial connection error to begin a reconnect loop, either use the
+// connectAccount method, or manually use newDEXConnection and
+// startDexConnection to tolerate initial connection failure.
 func (c *Core) connectDEXWithFlag(acctInfo *db.AccountInfo, flag connectDEXFlag) (*dexConnection, error) {
+	dc, err := c.newDEXConnection(acctInfo, flag)
+	if err != nil {
+		return nil, err
+	}
+
+	err = c.startDexConnection(acctInfo, dc)
+	if err != nil {
+		dc.connMaster.Disconnect() // stop any retry loop for this new connection.
+		return nil, err
+	}
+
+	return dc, nil
+}
+
+// newDEXConnection creates a new valid instance of *dexConnection.
+func (c *Core) newDEXConnection(acctInfo *db.AccountInfo, flag connectDEXFlag) (*dexConnection, error) {
 	// Get the host from the DEX URL.
 	host, err := addrHost(acctInfo.Host)
 	if err != nil {
@@ -7722,18 +7753,19 @@ func (c *Core) connectDEXWithFlag(acctInfo *db.AccountInfo, flag connectDEXFlag)
 	dc.WsConn = conn
 	dc.connMaster = dex.NewConnectionMaster(conn)
 
-	// At this point, we have a valid dexConnection object whether or not we can
-	// actually connect. In any return below, we return the dexConnection so it
-	// may be tracked in the c.conns map (and listed as a known DEX). TODO:
-	// split the above code into a dexConnection constructor, and the below into
-	// a startDexConnection function so we don't have the anti-pattern of
-	// returning a non-nil object with a non-nil error and requiring the caller
-	// to check both!
+	return dc, nil
+}
 
+// startDexConnection attempts to connect the provided dexConnection. dc must be
+// a new dexConnection returned from newDEXConnection above. Callers can choose
+// to stop reconnect retries and any current goroutine for the provided
+// dexConnection using dc.connMaster.Disconnect().
+func (c *Core) startDexConnection(acctInfo *db.AccountInfo, dc *dexConnection) error {
 	// Start listening for messages. The listener stops when core shuts down or
 	// the dexConnection's ConnectionMaster is shut down. This goroutine should
 	// be started as long as the reconnect loop is running. It only returns when
 	// the wsConn is stopped.
+	listen := dc.broadcastingConnect()
 	if listen {
 		c.wg.Add(1)
 		go c.listen(dc)
@@ -7780,14 +7812,14 @@ func (c *Core) connectDEXWithFlag(acctInfo *db.AccountInfo, flag connectDEXFlag)
 		// according to ConnectResult.Bonds slice.
 	}
 
-	err = dc.connMaster.Connect(c.ctx)
+	err := dc.connMaster.Connect(c.ctx)
 	if err != nil {
 		// Sort out the bonds with current time to indicate refundable bonds.
 		categorizeBonds(time.Now().Unix())
 		// Not connected, but reconnect cycle is running. Caller should track
 		// this dexConnection, and a listen goroutine must be running to handle
 		// messages received when the connection is eventually established.
-		return dc, err
+		return err
 	}
 
 	// Request the market configuration.
@@ -7798,7 +7830,7 @@ func (c *Core) connectDEXWithFlag(acctInfo *db.AccountInfo, flag connectDEXFlag)
 		if errors.Is(err, outdatedClientErr) {
 			sendOutdatedClientNotification(c, dc)
 		}
-		return dc, err // no dc.acct.dexPubKey
+		return err // no dc.acct.dexPubKey
 	}
 	// handleConnectEvent sets dc.connected, even on first connect
 
@@ -7806,13 +7838,13 @@ func (c *Core) connectDEXWithFlag(acctInfo *db.AccountInfo, flag connectDEXFlag)
 	categorizeBonds(time.Now().Unix() + int64(cfg.BondExpiry))
 
 	if listen {
-		c.log.Infof("Connected to DEX server at %s and listening for messages.", host)
+		c.log.Infof("Connected to DEX server at %s and listening for messages.", dc.acct.host)
 		go dc.subPriceFeed()
 	} else {
-		c.log.Infof("Connected to DEX server at %s but NOT listening for messages.", host)
+		c.log.Infof("Connected to DEX server at %s but NOT listening for messages.", dc.acct.host)
 	}
 
-	return dc, nil
+	return nil
 }
 
 // handleReconnect is called when a WsConn indicates that a lost connection has

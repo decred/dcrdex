@@ -336,9 +336,6 @@ func (c *Core) UpdateCert(host string, cert []byte) error {
 	acct.Cert = cert
 	dc, err = c.connectDEX(acct)
 	if err != nil {
-		if dc != nil {
-			dc.connMaster.Disconnect() // stop any retry loop for this new connection.
-		}
 		return fmt.Errorf("failed to connect using new cert (will attempt to restore old connection): %v", err)
 	}
 
@@ -387,19 +384,18 @@ func (c *Core) UpdateDEXHost(oldHost, newHost string, appPW []byte, certI interf
 
 	var updatedHost bool
 	newDc, err := c.tempDexConnection(newHost, certI)
-	if newDc != nil { // (re)connect loop may be running even if err != nil
-		defer func() {
-			// Either disconnect or promote this connection.
-			if !updatedHost {
-				newDc.connMaster.Disconnect()
-				return
-			}
-			c.upgradeConnection(newDc)
-		}()
-	}
 	if err != nil {
 		return nil, err
 	}
+
+	defer func() {
+		// Either disconnect or promote this connection.
+		if !updatedHost {
+			newDc.connMaster.Disconnect()
+			return
+		}
+		c.upgradeConnection(newDc)
+	}()
 
 	if !newDc.acct.dexPubKey.IsEqual(oldDc.acct.dexPubKey) {
 		return nil, fmt.Errorf("the dex at %s does not have the same public key as %s",
