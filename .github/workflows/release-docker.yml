@@ -1,0 +1,33 @@
+name: Build and Push Docker Image
+
+on:
+  release:
+    types: [created]
+
+env:
+  DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+  DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+  IMAGE_NAME: decred/dcrdex
+
+jobs:
+  build-and-push:
+    runs-on: bullseye-slim
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Set up Docker Buildx
+      run: |
+        docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+        docker buildx create --use --name mybuilder
+        docker buildx inspect --bootstrap
+
+    - name: Build and Push Docker Image
+      run: |
+        docker buildx build  -f client/Dockerfile --platform linux/arm64,linux/amd64 \
+          --tag ${{ env.IMAGE_NAME }}:${{ env.TAG_NAME }} \
+          --output "type=registry" .
+      env:
+        DOCKER_USERNAME: ${{ env.DOCKER_USERNAME }}
+        DOCKER_PASSWORD: ${{ env.DOCKER_PASSWORD }}
