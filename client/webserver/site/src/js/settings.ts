@@ -19,6 +19,7 @@ export default class SettingsPage extends BasePage {
   page: Record<string, PageElement>
   forms: PageElement[]
   fiatRateSources: PageElement[]
+  noteTypesPermissions: PageElement[]
   regAssetForm: forms.FeeAssetSelectionForm
   confirmRegisterForm: forms.ConfirmRegistrationForm
   newWalletForm: forms.NewWalletForm
@@ -33,6 +34,14 @@ export default class SettingsPage extends BasePage {
     this.body = body
     const page = this.page = Doc.idDescendants(body)
 
+    this.noteTypesPermissions = Doc.applySelector(page.noteTypesPermissions, 'input[type=checkbox]')
+    this.noteTypesPermissions.forEach(async (nt, i) => {
+      const res = await postJSON('/api/getnotetypepermission', {
+        noteType: nt.id
+      })
+      this.noteTypesPermissions[i].checked = res.enabled
+    })
+    Doc.bind(page.allowNtfn, 'click', () => this.saveNtfnsSettings())
     this.forms = Doc.applySelector(page.forms, ':scope > form')
     this.fiatRateSources = Doc.applySelector(page.fiatRateSources, 'input[type=checkbox]')
 
@@ -209,6 +218,14 @@ export default class SettingsPage extends BasePage {
     page.selectedAccount.textContent = intl.prep(intl.ID_NONE_SELECTED)
     Doc.hide(page.removeAccount)
     Doc.show(page.addAccount)
+  }
+
+  async saveNtfnsSettings () {
+    const notesEnabled: string[] = []
+    this.noteTypesPermissions.forEach(nt => {
+      if (nt.checked) notesEnabled.push(nt.id)
+    })
+    await postJSON('/api/setnotestypepermission', { notesType: notesEnabled })
   }
 
   async prepareAccountImport (authorizeAccountImportForm: HTMLElement) {

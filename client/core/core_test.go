@@ -535,6 +535,14 @@ func (tdb *TDB) StoreAccountProof(proof *db.AccountProof) error {
 	return tdb.storeAccountProofErr
 }
 
+func (tdb *TDB) GetNotePermission(string) (bool, error) {
+	return true, nil
+}
+
+func (tdb *TDB) SetNoteTypesPermission([]string) error {
+	return nil
+}
+
 func (tdb *TDB) SaveNotification(*db.Notification) error            { return nil }
 func (tdb *TDB) BackupTo(dst string, overwrite, compact bool) error { return nil }
 func (tdb *TDB) NotificationsN(int) ([]*db.Notification, error)     { return nil, nil }

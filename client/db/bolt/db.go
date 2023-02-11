@@ -118,6 +118,11 @@ var (
 	disabledRateSourceKey = []byte("disabledRateSources")
 	walletDisabledKey     = []byte("walletDisabled")
 	programKey            = []byte("program")
+	notePermissionKey     = []byte("notePermission")
+
+	// notesPermissionKey represents notes type with permission to notifcation
+	// be sent to OS.
+	notesPermissionKey = []byte("notesPermission")
 
 	// values
 	byteTrue   = encode.ByteTrue
@@ -1851,6 +1856,40 @@ func (db *BoltDB) SaveNotification(note *dexdb.Notification) error {
 	})
 }
 
+func (db *BoltDB) GetNotePermission(noteType string) (enabled bool, err error) {
+	return enabled, db.View(func(tx *bbolt.Tx) error {
+		enabled = false
+		bkt := tx.Bucket(appBucket)
+		if bkt == nil {
+			return fmt.Errorf("no %s bucket", string(appBucket))
+		}
+		notesEnabled := string(bkt.Get(notesPermissionKey))
+		if notesEnabled == "" {
+			return nil
+		}
+		notes := strings.Split(notesEnabled, ",")
+		for _, note := range notes {
+			if note == noteType {
+				enabled = true
+				break
+			}
+		}
+		return nil
+	})
+}
+
+// setNoteTypesPermission sets an array of noteType as true to notify by the OS
+// Browser notification.
+func (db *BoltDB) SetNoteTypesPermission(noteTypes []string) error {
+	return db.Update(func(tx *bbolt.Tx) error {
+		bkt := tx.Bucket(appBucket)
+		if bkt == nil {
+			return fmt.Errorf("failed to open %s bucket", string(appBucket))
+		}
+		return bkt.Put(notesPermissionKey, []byte(strings.Join(noteTypes, ",")))
+	})
+}
+
 // AckNotification sets the acknowledgement for a notification.
 func (db *BoltDB) AckNotification(id []byte) error {
 	return db.notesUpdate(func(master *bbolt.Bucket) error {
@@ -1885,6 +1924,11 @@ func (db *BoltDB) NotificationsN(n int) ([]*dexdb.Notification, error) {
 				}
 				continue
 			}
+			permission, err := db.GetNotePermission(note.NoteType)
+			if err != nil {
+				return err
+			}
+			note.OSPermission = permission
 			notes = append(notes, note)
 		}
 		return nil

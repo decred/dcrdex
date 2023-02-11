@@ -151,6 +151,8 @@ var EnUS = map[string]string{
 	"Export Account":            "Export Account",
 	"simultaneous_servers_msg":  "The Decred DEX Client supports simultaneous use of any number of DEX servers.",
 	"Change App Password":       "Change App Password",
+	"Enable Notifications":      "Enable Notifications",
+	"Save Notifications":        "Save Notifications",
 	"Build ID":                  "Build ID",
 	"Connect":                   "Connect",
 	"Send":                      "Send",

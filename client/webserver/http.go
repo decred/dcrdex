@@ -255,14 +255,16 @@ func (s *WebServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 	common := s.commonArgs(r, "Settings | Decred DEX")
 	data := &struct {
 		CommonArguments
-		KnownExchanges  []string
-		FiatRateSources map[string]bool
-		FiatCurrency    string
+		KnownExchanges      []string
+		FiatRateSources     map[string]bool
+		NoteTypePermissions map[string]string
+		FiatCurrency        string
 	}{
-		CommonArguments: *common,
-		KnownExchanges:  s.knownUnregisteredExchanges(common.UserInfo.Exchanges),
-		FiatCurrency:    core.DefaultFiatCurrency,
-		FiatRateSources: s.core.FiatRateSources(),
+		CommonArguments:     *common,
+		KnownExchanges:      s.knownUnregisteredExchanges(common.UserInfo.Exchanges),
+		FiatCurrency:        core.DefaultFiatCurrency,
+		FiatRateSources:     s.core.FiatRateSources(),
+		NoteTypePermissions: s.core.NoteTypePermissionsOpt(),
 	}
 	s.sendTemplate(w, "settings", data)
 }

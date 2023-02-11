@@ -767,6 +767,10 @@ export default class Application {
       Doc.safeSelector(el, 'div.note-indicator').classList.add(cls)
     }
 
+    // permission enables notifications to be notified by the browser api
+    if (note.permission && !note.acked) {
+      ntfn.showNotification(note)
+    }
     Doc.safeSelector(el, 'div.note-subject').textContent = note.subject
     Doc.safeSelector(el, 'div.note-details').textContent = note.details
     const np: CoreNotePlus = { el, ...note }

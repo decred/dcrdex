@@ -288,6 +288,7 @@ export interface CoreNote {
   stamp: number
   acked: boolean
   id: string
+  permission: boolean
 }
 
 export interface BondNote extends CoreNote {

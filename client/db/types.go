@@ -1050,6 +1050,8 @@ type Notification struct {
 	TimeStamp   uint64    `json:"stamp"`
 	Ack         bool      `json:"acked"`
 	Id          dex.Bytes `json:"id"`
+	// OSPermission if user giver or not permission to show up on OS ntfn
+	OSPermission bool `json:"permission,omitempty"`
 }
 
 // NewNotification is a constructor for a Notification.

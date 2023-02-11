@@ -128,6 +128,8 @@ type DB interface {
 	NotificationsN(int) ([]*Notification, error)
 	// AckNotification sets the acknowledgement for a notification.
 	AckNotification(id []byte) error
+
+	GetNotePermission(string) (bool, error)
 	// DeleteInactiveOrders deletes inactive orders from the database that are
 	// older than the supplied time and returns the total number of orders
 	// deleted. If no time is supplied, the current time is used. Accepts an
@@ -158,4 +160,6 @@ type DB interface {
 	RetireBotProgram(pgmID uint64) error
 	// ActiveBotPrograms loads a list of active bot program IDs.
 	ActiveBotPrograms() (map[uint64]*BotProgram, error)
+	// SetNoteTypesPermission sets permission to send notifications from the OS.
+	SetNoteTypesPermission(noteTypes []string) error
 }

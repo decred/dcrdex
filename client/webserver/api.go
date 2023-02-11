@@ -1350,6 +1350,47 @@ func (s *WebServer) apiToggleRateSource(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, simpleAck(), s.indent)
 }
 
+// apiOrders responds with a filtered list of user orders.
+func (s *WebServer) apiGetNoteTypePermission(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		NoteType string `json:"noteType"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+	enabled, err := s.core.GetNoteTypePermission(form.NoteType)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("Orders error: %w", err))
+		return
+	}
+	writeJSON(w, &struct {
+		OK      bool `json:"ok"`
+		Enabled bool `json:"enabled"`
+	}{
+		OK:      true,
+		Enabled: enabled,
+	}, s.indent)
+}
+
+func (s *WebServer) apiSetNotesTypePermission(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		NotesType []string `json:"notesType"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+	err := s.core.SetNotesTypePermission(form.NotesType)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("Error: %w", err))
+		return
+	}
+	writeJSON(w, &struct {
+		OK bool `json:"ok"`
+	}{
+		OK: true,
+	}, s.indent)
+}
+
 // apiDeleteArchiveRecords handles the '/deletearchivedrecords' API request.
 func (s *WebServer) apiDeleteArchivedRecords(w http.ResponseWriter, r *http.Request) {
 	form := new(deleteRecordsForm)

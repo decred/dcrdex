@@ -37,7 +37,32 @@ const (
 	NoteTypeLogin        = "login"
 )
 
-var noteChanCounter uint64
+var (
+	noteChanCounter uint64
+	// note types which notifications user can receive at OS level.
+	noteTypesOpt = map[string]string{
+		NoteTypeFeePayment: "Fee Payment",
+		NoteTypeBondPost:   "Bond Post",
+		NoteTypeBondRefund: "Bond Refund",
+		NoteTypeSend:       "Send",
+		NoteTypeOrder:      "Order",
+		NoteTypeMatch:      "Match",
+		NoteTypeEpoch:      "Epoch",
+		NoteTypeConnEvent:  "Conections Events",
+		NoteTypeBalance:    "Balance",
+		// NoteTypeSpots:        "Spots",
+		NoteTypeWalletConfig: "Wallet Config",
+		NoteTypeWalletState:  "Wallet State",
+		// NoteTypeServerNotify:"",
+		NoteTypeSecurity: "Security",
+		NoteTypeUpgrade:  "Upgrade",
+		// NoteTypeBot:          "Bot",
+		// NoteTypeDEXAuth:      "Auth",
+		// NoteTypeFiatRates:    "Fiat Rate Update",
+		// NoteTypeCreateWallet: "Create Wallet",
+		// NoteTypeLogin: "login",
+	}
+)
 
 func (c *Core) logNote(n Notification) {
 	// Do not log certain spammy note types that have no value in logs.

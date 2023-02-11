@@ -154,6 +154,9 @@ type clientCore interface {
 	AddWalletPeer(assetID uint32, addr string) error
 	RemoveWalletPeer(assetID uint32, addr string) error
 	Notifications(n int) ([]*db.Notification, error)
+	NoteTypePermissionsOpt() map[string]string
+	SetNotesTypePermission([]string) error
+	GetNoteTypePermission(string) (bool, error)
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -423,6 +426,8 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/getwalletpeers", s.apiGetWalletPeers)
 			apiAuth.Post("/addwalletpeer", s.apiAddWalletPeer)
 			apiAuth.Post("/removewalletpeer", s.apiRemoveWalletPeer)
+			apiAuth.Post("/getnotetypepermission", s.apiGetNoteTypePermission)
+			apiAuth.Post("/setnotestypepermission", s.apiSetNotesTypePermission)
 			if s.experimental {
 				apiAuth.Post("/createbot", s.apiCreateBot)
 				apiAuth.Post("/startbot", s.apiStartBot)

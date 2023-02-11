@@ -50,6 +50,22 @@
     <div>
         <button id="changeAppPW" class="bg2 selected">[[[Change App Password]]]</button>
     </div>
+    <div id="noteTypesPermissions" {{if not .UserInfo.Authed}} class="d-hide"{{end}}>
+      <span class="mb-2" data-tooltip="[[[fiat_exchange_rate_msg]]]">
+      [[[Enable Notifications]]]:
+      <span class="ico-info"></span>
+      </span>
+      {{range $noteTypeKey, $noteType := .NoteTypePermissions}}
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" value="{{$noteTypeKey}}" id="{{$noteTypeKey}}">
+        <label class="form-check-label" for="{{$noteTypeKey}}">{{$noteType}}</label>
+      </div>
+      {{end}}
+      </div>
+      <div {{if not .UserInfo.Authed}} class="d-hide"{{end}}>
+          <button id="allowNtfn" class="bg2 selected">[[[Save Notifications]]]</button>
+      </div>
+    </div>
     <div{{if not .UserInfo.Authed}} class="d-hide"{{end}}>
       [[[seed_implore_msg]]]<br>
       <button id="exportSeed" class="fs15 bg2 selected">[[[View Application Seed]]]</button>

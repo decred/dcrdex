@@ -1446,6 +1446,8 @@ type Core struct {
 	// goroutine when all rate sources have been disabled.
 	stopFiatRateFetching context.CancelFunc
 
+	noteTypePermissions map[string]bool
+
 	pendingWalletsMtx sync.RWMutex
 	pendingWallets    map[uint32]bool
 
@@ -9922,4 +9924,24 @@ func (c *Core) saveDisabledRateSources() {
 	if err != nil {
 		c.log.Errorf("Unable to save disabled fiat rate source to database: %v", err)
 	}
+}
+
+// NoteTypePermissions returns a map of note types which user permission to
+// receive notfication at OS level.
+func (c *Core) NoteTypePermissionsOpt() map[string]string {
+	opts := make(map[string]string, len(noteTypesOpt))
+	for noteTypeKey, noteType := range noteTypesOpt {
+		opts[noteTypeKey] = noteType
+	}
+	return opts
+}
+
+func (c *Core) GetNoteTypePermission(noteType string) (bool, error) {
+	return c.db.GetNotePermission(noteType)
+}
+
+// SetNotesTypePermission toggles notifications which have permission to being
+// called by the OS notifications.
+func (c *Core) SetNotesTypePermission(notesType []string) error {
+	return c.db.SetNoteTypesPermission(notesType)
 }
