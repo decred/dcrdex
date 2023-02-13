@@ -95,6 +95,8 @@ if [ "${CHAIN_ADDRESS}" != "_" ]; then
 
 [Eth.Miner]
 Etherbase = "0x${CHAIN_ADDRESS}"
+GasFloor = 30000000
+GasCeil = 30000000
 EOF
 fi
 

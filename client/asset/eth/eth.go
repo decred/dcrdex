@@ -84,6 +84,15 @@ const (
 	// coinIDTakerFoundMakerRedemption is a prefix to identify one of CoinID formats,
 	// see DecodeCoinID func for details.
 	coinIDTakerFoundMakerRedemption = "TakerFoundMakerRedemption:"
+
+	// maxTxFeeGwei is the default max amout of eth that can be used in one
+	// transaction. This is set by the host in the case of providers. The
+	// internal node currently has no max but also cannot be used since the
+	// merge.
+	//
+	// TODO: Find a way to ask the host about their config set max fee and
+	// gas values.
+	maxTxFeeGwei = 1_000_000_000
 )
 
 var (
@@ -170,6 +179,23 @@ var (
 		0,                                // branch 0
 		0,                                // index 0
 	}
+
+	// perTxGasLimit is the most gas we can use on a transaction. It is the
+	// lower of either the per tx or per block gas limit.
+	perTxGasLimit = func() uint64 {
+		// blockGasLimit is the amount of gas we can use in one transaction
+		// according to the block gas limit.
+		blockGasLimit := ethconfig.Defaults.Miner.GasCeil / maxProportionOfBlockGasLimitToUse
+
+		// txGasLimit is the amount of gas we can use in one transaction
+		// according to the default transaction gas fee limit.
+		txGasLimit := uint64(maxTxFeeGwei / defaultGasFeeLimit)
+
+		if blockGasLimit > txGasLimit {
+			return txGasLimit
+		}
+		return blockGasLimit
+	}()
 )
 
 // WalletConfig are wallet-level configuration settings.
@@ -620,7 +646,7 @@ func createWallet(createWalletParams *asset.CreateWalletParams, skipConnect bool
 }
 
 // NewWallet is the exported constructor by which the DEX will import the
-// exchange wallet. It starts an internal light node.
+// exchange wallet.
 func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network) (w *ETHWallet, err error) {
 	// var cl ethFetcher
 	switch assetCFG.Type {
@@ -655,7 +681,6 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		monitoredTxs: make(map[common.Hash]*monitoredTx),
 	}
 
-	gasCeil := ethconfig.Defaults.Miner.GasCeil
 	var maxSwapGas, maxRedeemGas uint64
 	for _, gases := range dexeth.VersionedGases {
 		if gases.Swap > maxSwapGas {
@@ -664,6 +689,13 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		if gases.Redeem > maxRedeemGas {
 			maxRedeemGas = gases.Redeem
 		}
+	}
+
+	if maxSwapGas == 0 || perTxGasLimit < maxSwapGas {
+		return nil, errors.New("max swaps cannot be zero or undefined")
+	}
+	if maxRedeemGas == 0 || perTxGasLimit < maxRedeemGas {
+		return nil, errors.New("max redeems cannot be zero or undefined")
 	}
 
 	aw := &assetWallet{
@@ -677,8 +709,8 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		evmify:             dexeth.GweiToWei,
 		atomize:            dexeth.WeiToGwei,
 		atomicUnit:         dexeth.UnitInfo.AtomicUnit,
-		maxSwapsInTx:       gasCeil / maxProportionOfBlockGasLimitToUse / maxSwapGas,
-		maxRedeemsInTx:     gasCeil / maxProportionOfBlockGasLimitToUse / maxRedeemGas,
+		maxSwapsInTx:       perTxGasLimit / maxSwapGas,
+		maxRedeemsInTx:     perTxGasLimit / maxRedeemGas,
 	}
 
 	aw.wallets = map[uint32]*assetWallet{
@@ -949,7 +981,6 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 		return nil, fmt.Errorf("could not find token with ID %d on network %s", w.assetID, w.net)
 	}
 
-	gasCeil := ethconfig.Defaults.Miner.GasCeil
 	var maxSwapGas, maxRedeemGas uint64
 	for _, contract := range netToken.SwapContracts {
 		if contract.Gas.Swap > maxSwapGas {
@@ -958,6 +989,13 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 		if contract.Gas.Redeem > maxRedeemGas {
 			maxRedeemGas = contract.Gas.Redeem
 		}
+	}
+
+	if maxSwapGas == 0 || perTxGasLimit < maxSwapGas {
+		return nil, errors.New("max swaps cannot be zero or undefined")
+	}
+	if maxRedeemGas == 0 || perTxGasLimit < maxRedeemGas {
+		return nil, errors.New("max redeems cannot be zero or undefined")
 	}
 
 	aw := &assetWallet{
@@ -971,8 +1009,8 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 		evmify:             token.AtomicToEVM,
 		atomize:            token.EVMToAtomic,
 		atomicUnit:         token.UnitInfo.AtomicUnit,
-		maxSwapsInTx:       gasCeil / maxProportionOfBlockGasLimitToUse / maxSwapGas,
-		maxRedeemsInTx:     gasCeil / maxProportionOfBlockGasLimitToUse / maxRedeemGas,
+		maxSwapsInTx:       perTxGasLimit / maxSwapGas,
+		maxRedeemsInTx:     perTxGasLimit / maxRedeemGas,
 	}
 
 	w.baseWallet.walletsMtx.Lock()
@@ -1047,7 +1085,6 @@ func (w *assetWallet) lockFunds(amt uint64, t fundReserveType) error {
 	}
 
 	if balance.Available < amt {
-
 		return fmt.Errorf("attempting to lock more %s for %s than is currently available. %d > %d %s",
 			dex.BipIDSymbol(w.assetID), t, amt, balance.Available, w.atomicUnit)
 	}
@@ -1135,17 +1172,18 @@ func (w *assetWallet) maxOrder(lotSize uint64, feeSuggestion, maxFeeRate uint64,
 		return nil, fmt.Errorf("gasEstimate error: %w", err)
 	}
 
+	refundCost := g.Refund * maxFeeRate
 	oneFee := g.oneGas * maxFeeRate
 	var lots uint64
 	if feeWallet == nil {
-		lots = balance.Available / (lotSize + oneFee)
+		lots = balance.Available / (lotSize + oneFee + refundCost)
 	} else { // token
 		lots = balance.Available / lotSize
 		parentBal, err := feeWallet.Balance()
 		if err != nil {
 			return nil, fmt.Errorf("error getting base chain balance: %w", err)
 		}
-		feeLots := parentBal.Available / oneFee
+		feeLots := parentBal.Available / (oneFee + refundCost)
 		if feeLots < lots {
 			w.log.Infof("MaxOrder reducing lots because of low fee reserves: %d -> %d", lots, feeLots)
 			lots = feeLots
@@ -1467,13 +1505,45 @@ func (w *assetWallet) swapGas(n int, ver uint32) (oneSwap, nSwap uint64, approve
 	// If we've approved the contract to transfer, we can get a live
 	// estimate to double check.
 
+	// The amount we can estimate and ultimately the amount we can use in a
+	// single transaction is limited by the block gas limit or the tx gas
+	// limit. Core will use the largest gas among all versions when
+	// determining the maximum number of swaps that can be in one
+	// transaction. Limit our gas estimate to the same number of swaps.
+	nMax := n
+	var nRemain, nFull int
+	if uint64(n) > w.maxSwapsInTx {
+		nMax = int(w.maxSwapsInTx)
+		nFull = n / nMax
+		nSwap = (oneSwap + uint64(nMax-1)*g.SwapAdd) * uint64(nFull)
+		nRemain = n % nMax
+		if nRemain != 0 {
+			nSwap += oneSwap + uint64(nRemain-1)*g.SwapAdd
+		}
+	}
+
 	// If a live estimate is greater than our estimate from configured values,
 	// use the live estimate with a warning.
-	if gasEst, err := w.estimateInitGas(w.ctx, n, ver); err != nil {
+	gasEst, err := w.estimateInitGas(w.ctx, nMax, ver)
+	if err != nil {
 		w.log.Errorf("(%d) error estimating swap gas: %v", w.assetID, err)
-		// TODO: investigate "gas required exceeds allowance".
 		return 0, 0, false, err
-	} else if gasEst > nSwap {
+	}
+	if nMax != n {
+		// If we needed to adjust the max earlier, and the estimate did
+		// not error, multiply the estimate by the number of full
+		// transactions and add the estimate of the remainder.
+		gasEst *= uint64(nFull)
+		if nRemain > 0 {
+			remainEst, err := w.estimateInitGas(w.ctx, nRemain, ver)
+			if err != nil {
+				w.log.Errorf("(%d) error estimating swap gas for remainder: %v", w.assetID, err)
+				return 0, 0, false, err
+			}
+			gasEst += remainEst
+		}
+	}
+	if gasEst > nSwap {
 		w.log.Warnf("Swap gas estimate %d is greater than the server's configured value %d. Using live estimate + 10%.", gasEst, nSwap)
 		nSwap = gasEst * 11 / 10 // 10% buffer
 		if n == 1 && nSwap > oneSwap {
