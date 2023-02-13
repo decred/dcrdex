@@ -597,6 +597,8 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *testNode, contex
 		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
 		evmify:             dexeth.GweiToWei,
 		atomize:            dexeth.WeiToGwei,
+		maxSwapsInTx:       40,
+		maxRedeemsInTx:     60,
 	}
 	aw.wallets = map[uint32]*assetWallet{
 		BipID: aw,
@@ -1305,9 +1307,10 @@ func TestPreSwap(t *testing.T) {
 	const feeSuggestion = 90
 	const lotSize = 10e9
 	oneFee := ethGases.Swap * tETH.MaxFeeRate
-	oneLock := lotSize + oneFee
+	refund := ethGases.Refund * tETH.MaxFeeRate
+	oneLock := lotSize + oneFee + refund
 
-	oneFeeToken := tokenGases.Swap * tToken.MaxFeeRate
+	oneFeeToken := tokenGases.Swap*tToken.MaxFeeRate + tokenGases.Refund*tToken.MaxFeeRate
 
 	tests := []struct {
 		name      string
@@ -4574,17 +4577,17 @@ func testMaxSwapRedeemLots(t *testing.T, assetID uint32) {
 
 	info := wallet.Info()
 	if assetID == BipID {
-		if info.MaxSwapsInTx != 55 {
-			t.Fatalf("expected 55 for max swaps but got %d", info.MaxSwapsInTx)
+		if info.MaxSwapsInTx != 37 {
+			t.Fatalf("expected 37 for max swaps but got %d", info.MaxSwapsInTx)
 		}
-		if info.MaxRedeemsInTx != 119 {
+		if info.MaxRedeemsInTx != 79 {
 			t.Fatalf("expected 119 for max redemptions but got %d", info.MaxRedeemsInTx)
 		}
 	} else {
-		if info.MaxSwapsInTx != 43 {
+		if info.MaxSwapsInTx != 28 {
 			t.Fatalf("expected 43 for max swaps but got %d", info.MaxSwapsInTx)
 		}
-		if info.MaxRedeemsInTx != 107 {
+		if info.MaxRedeemsInTx != 71 {
 			t.Fatalf("expected 107 for max redemptions but got %d", info.MaxRedeemsInTx)
 		}
 	}

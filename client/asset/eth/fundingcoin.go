@@ -25,7 +25,7 @@ type fundingCoin struct {
 
 // String creates a human readable string.
 func (c *fundingCoin) String() string {
-	return fmt.Sprintf("address: %v, amount:%x", c.addr, c.amt)
+	return fmt.Sprintf("address: %v, amount: %d", c.addr, c.amt)
 }
 
 // ID utf-8 encodes the account address. This ID will be sent to the server as
