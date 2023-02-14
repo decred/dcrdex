@@ -1475,11 +1475,11 @@ func (dcr *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate
 	}
 
 	if sum > avail-reserves { // no split means no change available for reserves
-		if trySplit { // if we tried with a split, that's the best we can do
+		if trySplit { // if we already tried with a split, that's the best we can do
 			return nil, false, 0, errors.New("eats bond reserves")
 		}
-		// Like the fund() method, try again with some utxos taken out of the
-		// mix for reserves, as precise in value as possible.
+		// Like the fund() method, try with some utxos taken out of the mix for
+		// reserves, as precise in value as possible.
 		kept := leastOverFund(reserves, utxos)
 		utxos = utxoSetDiff(utxos, kept)
 		sum, _, inputsSize, _, _, _, err = tryFund(utxos, orderEnough(val, lots, bumpedMaxRate, false))
@@ -1835,6 +1835,9 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 		dcr.log.Errorf("calcBumpRate error: %v", err)
 	}
 
+	// If a split is not requested, but is forced, create an extra output from
+	// the split tx to help avoid a forced split in subsequent orders.
+	var extraSplitOutput uint64
 	useSplit := cfg.useSplitTx
 	if customCfg.Split != nil {
 		useSplit = *customCfg.Split
@@ -1848,11 +1851,25 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	coins, redeemScripts, sum, inputsSize, err := dcr.fund(reserves,
 		orderEnough(ord.Value, ord.MaxSwapCount, bumpedMaxRate, changeForReserves))
 	if err != nil {
-		return nil, nil, fmt.Errorf("error funding order value of %s DCR: %w",
-			amount(ord.Value), err)
+		if !changeForReserves && reserves > 0 { // split not selected, or it's a mixing account where change isn't usable
+			// Force a split if funding failure may be due to reserves.
+			dcr.log.Infof("Retrying order funding with a forced split transaction to help respect reserves.")
+			useSplit = true
+			keepForSplitToo := reserves + (bumpedMaxRate * dexdcr.P2PKHInputSize) // so we fail before split() if it's really that tight
+			coins, redeemScripts, sum, inputsSize, err = dcr.fund(keepForSplitToo,
+				orderEnough(ord.Value, ord.MaxSwapCount, bumpedMaxRate, useSplit))
+			// And make an extra output for the reserves amount plus additional
+			// fee buffer (double) to help avoid this for a while in the future.
+			// This also deals with mixing wallets not having usable change.
+			extraSplitOutput = reserves + bondsFeeBuffer(cfg.feeRateLimit)
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("error funding order value of %s DCR: %w",
+				amount(ord.Value), err)
+		}
 	}
 
-	// Send a split, if preferred.
+	// Send a split, if preferred or required.
 	if useSplit {
 		// We apply the bumped fee rate to the split transaction when the
 		// PreSwap is created, so we use that bumped rate here too.
@@ -1875,13 +1892,14 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 		}
 
 		splitCoins, split, err := dcr.split(ord.Value, ord.MaxSwapCount, coins,
-			inputsSize, splitFeeRate, bumpedMaxRate)
-		if err != nil {
+			inputsSize, splitFeeRate, bumpedMaxRate, extraSplitOutput)
+		if err != nil { // potentially try again with extraSplitOutput=0 if it wasn't already
 			if _, errRet := dcr.returnCoins(coins); errRet != nil {
 				dcr.log.Warnf("Failed to unlock funding coins %v: %v", coins, errRet)
 			}
 			return nil, nil, err
-		} else if split {
+		}
+		if split {
 			return splitCoins, []dex.Bytes{nil}, nil // no redeem script required for split tx output
 		}
 		return splitCoins, redeemScripts, nil // splitCoins == coins
@@ -1918,28 +1936,40 @@ func (dcr *ExchangeWallet) fund(keep uint64, // leave utxos for this reserve amt
 		return nil, nil, 0, 0, asset.ErrInsufficientBalance
 	}
 
-	sum, extra, sz, coins, spents, redeemScripts, err := tryFund(utxos, enough)
-	if err != nil {
-		return nil, nil, 0, 0, err
-	}
+	var sz uint32
+	var spents []*fundingCoin
 
-	if avail-sum+extra < keep {
-		if extra != 0 { // there was usable change from enough, just not enough
-			return nil, nil, 0, 0, asset.ErrInsufficientBalance
-		} // else caller probably not granting change
-		// NOTE: tryFund above may not have tried 0-conf, but we may now.
-
-		dcr.log.Debugf("Trying again with some UTXOs excluded for required reserves of %v DCR",
-			toDCR(keep))
-
-		// Try again with some utxos taken out of the mix for keep. Select these
-		// with the objective of being as close to the amount as possible,
-		// unlike tryFund that minimizes the number of UTXOs chosen.
+	// First take some UTXOs out of the mix for any keep amount. Select these
+	// with the objective of being as close to the amount as possible, unlike
+	// tryFund that minimizes the number of UTXOs chosen. By doing this first,
+	// we may be making the order spend a larger number of UTXOs, but we
+	// mitigate subsequent order funding failure due to reserves because we know
+	// this order will leave behind sufficient UTXOs without relying on change.
+	if keep > 0 {
 		kept := leastOverFund(keep, utxos)
-		utxos = utxoSetDiff(utxos, kept)
-		sum, _, sz, coins, spents, redeemScripts, err = tryFund(utxos, enough)
-		if err != nil { // no joy with the reduced set
+		dcr.log.Debugf("Setting aside %v DCR in %d UTXOs to respect the %v DCR reserved amount",
+			toDCR(sumUTXOs(kept)), len(kept), toDCR(keep))
+		utxosPruned := utxoSetDiff(utxos, kept)
+		sum, _, sz, coins, spents, redeemScripts, err = tryFund(utxosPruned, enough)
+		if err != nil { // try with the full set
+			dcr.log.Debugf("Unable to fund order with UTXOs set aside (%v), trying again with full UTXO set.", err)
+		} // else spents is populated
+	}
+	if len(spents) == 0 { // either keep is zero or it failed with utxosPruned
+		// Without utxos set aside for keep, we have to consider any spendable
+		// change (extra) that the enough func grants us.
+		var extra uint64
+		sum, extra, sz, coins, spents, redeemScripts, err = tryFund(utxos, enough)
+		if err != nil {
 			return nil, nil, 0, 0, err
+		}
+		if avail-sum+extra < keep {
+			return nil, nil, 0, 0, asset.ErrInsufficientBalance
+		}
+		// else we got lucky with the legacy funding approach and there was
+		// either available unspent or the enough func granted spendable change.
+		if keep > 0 && extra > 0 {
+			dcr.log.Debugf("Funding succeeded with %f DCR in spendable change.", toDCR(extra))
 		}
 	}
 
@@ -2104,11 +2134,14 @@ func tryFund(utxos []*compositeUTXO,
 // would already have an output of just the right size, and that would be
 // recognized here.
 func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, inputsSize uint64,
-	splitFeeRate, bumpedMaxRate uint64) (asset.Coins, bool, error) {
+	splitFeeRate, bumpedMaxRate, extraOutput uint64) (asset.Coins, bool, error) {
 
 	// Calculate the extra fees associated with the additional inputs, outputs,
 	// and transaction overhead, and compare to the excess that would be locked.
 	baggageFees := bumpedMaxRate * splitTxBaggage
+	if extraOutput > 0 {
+		baggageFees += bumpedMaxRate * dexdcr.P2PKHOutputSize
+	}
 
 	var coinSum uint64
 	for _, coin := range coins {
@@ -2133,21 +2166,30 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 		return coins, false, nil
 	}
 
-	// Generate an address to receive the sized output. If mixing is enabled on
+	// Generate an address to receive the sized outputs. If mixing is enabled on
 	// the wallet, generate the address from the external branch of the trading
 	// account. The external branch is used so that if this split output isn't
 	// spent, it won't be transferred to the unmixed account for re-mixing.
 	// Instead, it'll simply be unlocked in the trading account and can thus be
 	// used to fund future orders.
 	cfg := dcr.config()
-	addr, err := func() (stdaddr.Address, error) {
+	getAddr := func() (stdaddr.Address, error) {
 		if cfg.tradingAccount != "" {
 			return dcr.wallet.ExternalAddress(dcr.ctx, cfg.tradingAccount)
 		}
 		return dcr.wallet.InternalAddress(dcr.ctx, cfg.primaryAcct)
-	}()
+	}
+	addr, err := getAddr()
 	if err != nil {
 		return nil, false, fmt.Errorf("error creating split transaction address: %w", err)
+	}
+
+	var addr2 stdaddr.Address
+	if extraOutput > 0 {
+		addr2, err = getAddr()
+		if err != nil {
+			return nil, false, fmt.Errorf("error creating secondary split transaction address: %w", err)
+		}
 	}
 
 	reqFunds := calc.RequiredOrderFundsAlt(value, dexdcr.P2PKHInputSize, lots,
@@ -2156,7 +2198,7 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 	dcr.fundingMtx.Lock()         // before generating the new output in sendCoins
 	defer dcr.fundingMtx.Unlock() // after locking it (wallet and map)
 
-	msgTx, sentVal, err := dcr.sendCoins(addr, coins, reqFunds, splitFeeRate, false)
+	msgTx, sentVal, err := dcr.sendCoins(coins, addr, addr2, reqFunds, extraOutput, splitFeeRate, false)
 	if err != nil {
 		return nil, false, fmt.Errorf("error sending split transaction: %w", err)
 	}
@@ -4093,7 +4135,7 @@ func (dcr *ExchangeWallet) withdraw(addr stdaddr.Address, val, feeRate uint64) (
 			amount(val), addr, feeRate, err)
 	}
 
-	msgTx, sentVal, err := dcr.sendCoins(addr, coins, val, feeRate, true)
+	msgTx, sentVal, err := dcr.sendCoins(coins, addr, nil, val, 0, feeRate, true)
 	if err != nil {
 		if _, retErr := dcr.returnCoins(coins); retErr != nil {
 			dcr.log.Errorf("Failed to unlock coins: %v", retErr)
@@ -4117,7 +4159,7 @@ func (dcr *ExchangeWallet) sendToAddress(addr stdaddr.Address, amt, feeRate uint
 			amount(amt), feeRate, err)
 	}
 
-	msgTx, sentVal, err := dcr.sendCoins(addr, coins, amt, feeRate, false)
+	msgTx, sentVal, err := dcr.sendCoins(coins, addr, nil, amt, 0, feeRate, false)
 	if err != nil {
 		if _, retErr := dcr.returnCoins(coins); retErr != nil {
 			dcr.log.Errorf("Failed to unlock coins: %v", retErr)
@@ -4131,7 +4173,13 @@ func (dcr *ExchangeWallet) sendToAddress(addr stdaddr.Address, amt, feeRate uint
 // specified coins. If subtract is true, the transaction fees will be taken from
 // the sent value, otherwise it will taken from the change output. If there is
 // change, it will be at index 1.
-func (dcr *ExchangeWallet) sendCoins(addr stdaddr.Address, coins asset.Coins, val, feeRate uint64, subtract bool) (*wire.MsgTx, uint64, error) {
+//
+// An optional second output may be generated with the second address and amount
+// arguments, if addr2 is non-nil. Note that to omit the extra output, the
+// *interface* must be nil, not just the concrete type, so be cautious with
+// concrete address types because a nil pointer wrap into a non-nil std.Address!
+func (dcr *ExchangeWallet) sendCoins(coins asset.Coins, addr, addr2 stdaddr.Address, val, val2, feeRate uint64,
+	subtract bool) (*wire.MsgTx, uint64, error) {
 	baseTx := wire.NewMsgTx()
 	_, err := dcr.addInputCoins(baseTx, coins)
 	if err != nil {
@@ -4140,6 +4188,11 @@ func (dcr *ExchangeWallet) sendCoins(addr stdaddr.Address, coins asset.Coins, va
 	payScriptVer, payScript := addr.PaymentScript()
 	txOut := newTxOut(int64(val), payScriptVer, payScript)
 	baseTx.AddTxOut(txOut)
+	if addr2 != nil {
+		payScriptVer, payScript := addr2.PaymentScript()
+		txOut := newTxOut(int64(val2), payScriptVer, payScript)
+		baseTx.AddTxOut(txOut)
+	}
 
 	var feeSource int32 // subtract from vout 0
 	if !subtract {
