@@ -301,7 +301,17 @@ func NewBackend(configPath string, log dex.Logger, net dex.Network) (*ETHBackend
 	if err != nil {
 		return nil, err
 	}
-	eth.node = newRPCClient(eth.net, endpoints, log.SubLogger("RPC"))
+
+	netAddrs, found := dexeth.ContractAddresses[ethContractVersion]
+	if !found {
+		return nil, fmt.Errorf("no contract address for eth version %d", ethContractVersion)
+	}
+	ethContractAddr, found := netAddrs[eth.net]
+	if !found {
+		return nil, fmt.Errorf("no contract address for eth version %d on %s", ethContractVersion, eth.net)
+	}
+
+	eth.node = newRPCClient(eth.net, endpoints, ethContractAddr, log.SubLogger("RPC"))
 	return eth, nil
 }
 

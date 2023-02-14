@@ -46,7 +46,17 @@ func TestMain(m *testing.M) {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(context.Background())
 		log := dex.StdOutLogger("T", dex.LevelTrace)
-		ethClient = newRPCClient(dex.Simnet, []string{wsEndpoint, alphaIPCFile}, log)
+
+		netAddrs, found := dexeth.ContractAddresses[ethContractVersion]
+		if !found {
+			return 1, fmt.Errorf("no contract address for eth version %d", ethContractVersion)
+		}
+		ethContractAddr, found := netAddrs[dex.Simnet]
+		if !found {
+			return 1, fmt.Errorf("no contract address for eth version %d on %s", ethContractVersion, dex.Simnet)
+		}
+
+		ethClient = newRPCClient(dex.Simnet, []string{wsEndpoint, alphaIPCFile}, ethContractAddr, log)
 		defer func() {
 			cancel()
 			ethClient.shutdown()
