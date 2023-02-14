@@ -281,12 +281,14 @@ func NewBackend(configPath string, log dex.Logger, net dex.Network) (*ETHBackend
 	defer file.Close()
 
 	var endpoints []string
+	endpointsMap := make(map[string]bool) // to avoid duplicates
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.Trim(scanner.Text(), " ")
-		if line == "" || strings.HasPrefix(line, "#") {
+		if line == "" || strings.HasPrefix(line, "#") || endpointsMap[line] {
 			continue
 		}
+		endpointsMap[line] = true
 		endpoints = append(endpoints, line)
 	}
 	if err := scanner.Err(); err != nil {
