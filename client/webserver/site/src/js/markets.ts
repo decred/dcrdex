@@ -1803,6 +1803,11 @@ export default class MarketsPage extends BasePage {
   /* setFeeEstimates sets all of the pre-order estimate fields */
   setFeeEstimates (swap: PreSwap, redeem: PreRedeem, order: TradeForm) {
     const { page, market } = this
+    if (!swap.estimate || !redeem.estimate) {
+      Doc.hide(page.vPreorderEstimates)
+      return // preOrder may return just options, no fee estimates
+    }
+    Doc.show(page.vPreorderEstimates)
     const { baseUnitInfo, quoteUnitInfo, rateConversionFactor } = market
     const fmtPct = (value: number) => {
       if (value < 0.05) return '< 0.1'
@@ -2124,6 +2129,7 @@ export default class MarketsPage extends BasePage {
   /* handleBalanceNote handles notifications updating a wallet's balance. */
   handleBalanceNote (note: BalanceNote) {
     this.setBalanceVisibility()
+    this.preorderCache = {} // invalidate previous preorder results
     // if connection to dex server fails, it is not possible to retrieve
     // markets.
     const mkt = this.market
