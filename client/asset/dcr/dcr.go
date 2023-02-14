@@ -135,10 +135,9 @@ var (
 				"necessary. Otherwise, excess funds may be reserved to fund the order " +
 				"until the first swap contract is broadcast during match settlement, or " +
 				"the order is canceled. This an extra transaction for which network " +
-				"mining fees are paid.  Used only for standing-type orders, e.g. " +
-				"limit orders without immediate time-in-force.",
+				"mining fees are paid.",
 			IsBoolean:    true,
-			DefaultValue: false,
+			DefaultValue: true, // cheap fees, helpful for bond reserves, and adjustable at order-time
 		},
 		{
 			Key:         "apifeefallback",
@@ -1396,9 +1395,12 @@ func (dcr *ExchangeWallet) maxOrder(lotSize, feeSuggestion, maxFeeRate uint64) (
 	// Start by attempting max lots with a basic fee.
 	basicFee := dexdcr.InitTxSize * maxFeeRate
 	lots := avail / (lotSize + basicFee)
-	cfg := dcr.config()
+	// NOTE: Split tx is an order-time option. The max order is generally
+	// attainable when split is used, regardless of whether they choose it on
+	// the order form. Allow the split for max order purposes.
+	trySplitTx := true
 	for lots > 0 {
-		est, _, _, err := dcr.estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate, utxos, cfg.useSplitTx, 1.0)
+		est, _, _, err := dcr.estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate, utxos, trySplitTx, 1.0)
 		// The only failure mode of estimateSwap -> dcr.fund is when there is
 		// not enough funds, so if an error is encountered, count down the lots
 		// and repeat until we have enough.
@@ -1513,7 +1515,7 @@ func (dcr *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 	if err != nil {
 		return nil, err
 	}
-	if maxEst.Lots < req.Lots {
+	if maxEst.Lots < req.Lots { // changing options isn't going to fix this, only lots
 		return nil, fmt.Errorf("%d lots available for %d-lot order", maxEst.Lots, req.Lots)
 	}
 
@@ -1541,23 +1543,21 @@ func (dcr *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 	est, _, _, err := dcr.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion,
 		req.MaxFeeRate, utxos, split, bump)
 	if err != nil {
-		return nil, fmt.Errorf("estimation failed: %v", err)
+		dcr.log.Warnf("estimateSwap failure: %v", err)
 	}
 
-	var opts []*asset.OrderOption
-
-	// Only offer the split option for standing orders.
-	if !req.Immediate {
-		if splitOpt := dcr.splitOption(req, utxos, bump); splitOpt != nil {
-			opts = append(opts, splitOpt)
-		}
-	}
+	// Always offer the split option, even for non-standing orders since
+	// immediately spendable change many be desirable regardless.
+	opts := []*asset.OrderOption{dcr.splitOption(req, utxos, bump)}
 
 	// Figure out what our maximum available fee bump is, within our 2x hard
 	// limit.
 	var maxBump float64
 	var maxBumpEst *asset.SwapEstimate
 	for maxBump = 2.0; maxBump > 1.01; maxBump -= 0.1 {
+		if est == nil {
+			break
+		}
 		tryEst, splitUsed, _, err := dcr.estimateSwap(req.Lots, req.LotSize,
 			req.FeeSuggestion, req.MaxFeeRate, utxos, split, maxBump)
 		// If the split used wasn't the configured value, this option is not
@@ -1610,7 +1610,7 @@ func (dcr *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 	}
 
 	return &asset.PreSwap{
-		Estimate: est,
+		Estimate: est, // may be nil so we can present options, which in turn affect estimate feasibility
 		Options:  opts,
 	}, nil
 }
@@ -1657,39 +1657,38 @@ func (dcr *ExchangeWallet) SingleLotSwapFees(form *asset.PreSwapForm) (fees uint
 // splitOption constructs an *asset.OrderOption with customized text based on the
 // difference in fees between the configured and test split condition.
 func (dcr *ExchangeWallet) splitOption(req *asset.PreSwapForm, utxos []*compositeUTXO, bump float64) *asset.OrderOption {
-	noSplitEst, _, noSplitLocked, err := dcr.estimateSwap(req.Lots, req.LotSize,
-		req.FeeSuggestion, req.MaxFeeRate, utxos, false, bump)
-	if err != nil {
-		dcr.log.Errorf("estimateSwap (no split) error: %v", err)
-		return nil
-	}
-	splitEst, splitUsed, splitLocked, err := dcr.estimateSwap(req.Lots, req.LotSize,
-		req.FeeSuggestion, req.MaxFeeRate, utxos, true, bump)
-	if err != nil {
-		dcr.log.Errorf("estimateSwap (with split) error: %v", err)
-		return nil
-	}
-
 	opt := &asset.OrderOption{
 		ConfigOption: asset.ConfigOption{
 			Key:           splitKey,
 			DisplayName:   "Pre-size Funds",
 			IsBoolean:     true,
-			DefaultValue:  false, // not nil interface
+			DefaultValue:  dcr.config().useSplitTx, // not nil interface
 			ShowByDefault: true,
 		},
 		Boolean: &asset.BooleanConfig{},
 	}
 
+	noSplitEst, _, noSplitLocked, err := dcr.estimateSwap(req.Lots, req.LotSize,
+		req.FeeSuggestion, req.MaxFeeRate, utxos, false, bump)
+	if err != nil {
+		dcr.log.Errorf("estimateSwap (no split) error: %v", err)
+		opt.Boolean.Reason = fmt.Sprintf("estimate without a split failed with \"%v\"", err)
+		return opt // utility and overlock report unavailable, but show the option
+	}
+	splitEst, splitUsed, splitLocked, err := dcr.estimateSwap(req.Lots, req.LotSize,
+		req.FeeSuggestion, req.MaxFeeRate, utxos, true, bump)
+	if err != nil {
+		dcr.log.Errorf("estimateSwap (with split) error: %v", err)
+		opt.Boolean.Reason = fmt.Sprintf("estimate with a split failed with \"%v\"", err)
+		return opt // utility and overlock report unavailable, but show the option
+	}
+
 	if !splitUsed || splitLocked >= noSplitLocked { // locked check should be redundant
 		opt.Boolean.Reason = "avoids no DCR overlock for this order (ignored)"
 		opt.Description = "A split transaction for this order avoids no DCR overlock, but adds additional fees."
+		opt.DefaultValue = false
 		return opt // not enabled by default, but explain why
 	}
-
-	// Since it is usable, apply the user's default value, and set the
-	// reason and description.
-	opt.DefaultValue = dcr.config().useSplitTx
 
 	overlock := noSplitLocked - splitLocked
 	pctChange := (float64(splitEst.RealisticWorstCase)/float64(noSplitEst.RealisticWorstCase) - 1) * 100
@@ -1841,9 +1840,6 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes
 	useSplit := cfg.useSplitTx
 	if customCfg.Split != nil {
 		useSplit = *customCfg.Split
-	}
-	if ord.Immediate {
-		useSplit = false
 	}
 
 	changeForReserves := useSplit && cfg.unmixedAccount == ""
