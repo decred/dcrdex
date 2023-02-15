@@ -213,7 +213,7 @@ func (conn *wsConn) connect(ctx context.Context) error {
 	ws, _, err := dialer.DialContext(ctx, conn.cfg.URL, nil)
 	if err != nil {
 		var e x509.UnknownAuthorityError
-		if errors.As(err, &e) {
+		if errors.As(err, &e) || strings.Contains(err.Error(), "certificate is not standards compliant") {
 			conn.setConnectionStatus(InvalidCert)
 			if conn.tlsCfg == nil {
 				return ErrCertRequired
