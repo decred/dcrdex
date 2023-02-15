@@ -213,7 +213,7 @@ export class NewWalletForm {
       // Not synced, so create a syncer to update the parent sync pane.
       this.parentSyncer = (w: WalletState) => {
         if (w.assetID !== parentAsset.id) return
-        page.parentSyncPct.textContent = String(Math.round(w.syncProgress * 100))
+        page.parentSyncPct.textContent = (w.syncProgress * 100).toFixed(1)
       }
       // Handle the async result.
       this.createUpdater = (note: WalletCreationNote) => {
@@ -1058,7 +1058,7 @@ export class WalletWaitForm {
     Doc.show(wallet.synced ? page.syncCheck : wallet.syncProgress >= 1 ? page.syncSpinner : page.syncUncheck)
     Doc.show(wallet.balance.available > fee.amount ? page.balCheck : page.balUncheck)
 
-    page.progress.textContent = String(Math.round(wallet.syncProgress * 100))
+    page.progress.textContent = (wallet.syncProgress * 100).toFixed(1)
 
     if (wallet.synced) {
       this.progressed = true
@@ -1124,26 +1124,43 @@ export class WalletWaitForm {
       Doc.hide(page.syncSpinner)
       Doc.show(page.syncUncheck)
     }
-    page.progress.textContent = String(Math.round(prog * 100))
+    page.progress.textContent = (prog * 100).toFixed(1)
 
-    // The remaining time estimate must be based on more than one progress
-    // report. We'll cache up to the last 20 and look at the difference between
-    // the first and last to make the estimate.
+    if (prog >= 0.999) {
+      Doc.hide(page.syncRemaining)
+      Doc.show(page.syncFinishingUp)
+      Doc.show(page.syncRemainBox)
+      // The final stage of wallet sync process can take a while (it might hang
+      // at 99.9% for many minutes, indexing addresses for example), the simplest
+      // way to handle it is to keep displaying "finishing up" message until the
+      // sync is finished, since we can't reasonably show it progressing over time.
+      page.syncFinishingUp.textContent = intl.prep(intl.ID_WALLET_SYNC_FINISHING_UP)
+      return
+    }
+    // Before we get to 99.9% the remaining time estimate must be based on more
+    // than one progress report. We'll cache up to the last 20 and look at the
+    // difference between the first and last to make the estimate.
     const cacheSize = 20
     const cache = this.progressCache
     cache.push({
       stamp: new Date().getTime(),
       progress: prog
     })
+    if (cache.length < 2) {
+      // Can't meaningfully estimate remaining until we have at least 2 data points.
+      return
+    }
     while (cache.length > cacheSize) cache.shift()
-    if (cache.length === 1) return
-    Doc.show(page.syncRemainBox)
     const [first, last] = [cache[0], cache[cache.length - 1]]
     const progDelta = last.progress - first.progress
     if (progDelta === 0) {
-      page.syncRemain.textContent = '> 1 day'
+      // Having no progress for a while likely means we are experiencing network
+      // issues, can't reasonably estimate time remaining in this case.
       return
     }
+    Doc.hide(page.syncFinishingUp)
+    Doc.show(page.syncRemaining)
+    Doc.show(page.syncRemainBox)
     const timeDelta = last.stamp - first.stamp
     const progRate = progDelta / timeDelta
     const toGoProg = 1 - last.progress

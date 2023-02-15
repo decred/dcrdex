@@ -107,6 +107,7 @@ export const ID_MAKER = 'MAKER'
 export const ID_EMPTY_DEX_ADDRESS_MSG = 'EMPTY_DEX_ADDRESS_MSG'
 export const ID_SELECT_WALLET_FOR_FEE_PAYMENT = 'SELECT_WALLET_FOR_FEE_PAYMENT'
 export const ID_UNAVAILABLE = 'UNAVAILABLE'
+export const ID_WALLET_SYNC_FINISHING_UP = 'WALLET_SYNC_FINISHING_UP'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -215,7 +216,8 @@ export const enUS: Locale = {
   [ID_MAKER]: 'Maker',
   [ID_UNAVAILABLE]: 'unavailable',
   [ID_EMPTY_DEX_ADDRESS_MSG]: 'DEX address cannot be empty',
-  [ID_SELECT_WALLET_FOR_FEE_PAYMENT]: 'You must select a valid wallet for fee payment'
+  [ID_SELECT_WALLET_FOR_FEE_PAYMENT]: 'You must select a valid wallet for fee payment',
+  [ID_WALLET_SYNC_FINISHING_UP]: 'finishing up'
 }
 
 export const ptBR: Locale = {
