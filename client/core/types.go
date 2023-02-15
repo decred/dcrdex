@@ -841,10 +841,10 @@ func (a *dexAccount) lock() {
 	a.keyMtx.Unlock()
 }
 
-func (a *dexAccount) status() (initialized, unlocked, authed bool) {
+func (a *dexAccount) status() (initialized, unlocked bool) {
 	a.keyMtx.RLock()
 	defer a.keyMtx.RUnlock()
-	return len(a.encKey) > 0, a.privKey != nil, a.isAuthed
+	return len(a.encKey) > 0, a.privKey != nil
 }
 
 // locked will be true if the account private key is currently decrypted, or

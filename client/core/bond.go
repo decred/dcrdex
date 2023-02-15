@@ -165,7 +165,7 @@ func (c *Core) rotateBonds(ctx context.Context) {
 	}
 
 	for _, dc := range c.dexConnections() {
-		initialized, unlocked, _ := dc.acct.status()
+		initialized, unlocked := dc.acct.status()
 		if !initialized {
 			continue // view-only or temporary connection
 		}
