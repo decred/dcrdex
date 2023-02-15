@@ -1942,14 +1942,16 @@ func TestRegister(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			timeout := time.NewTimer(time.Second * 2)
+			defer timeout.Stop()
+			ticker := time.NewTicker(10 * time.Microsecond)
+			defer ticker.Stop()
 			for {
 				select {
-				case <-time.After(10 * time.Millisecond):
+				case <-ticker.C:
 					tCore.waiterMtx.Lock()
 					waiterCount := len(tCore.blockWaiters)
 					tCore.waiterMtx.Unlock()
 					if waiterCount > 0 { // when verifyRegistrationFee adds a waiter, then we can trigger tip change
-						timeout.Stop()
 						tWallet.setConfs(tWallet.sendCoin.id, 0, nil) // 0 ????
 						tCore.tipChange(tUTXOAssetA.ID, nil)
 						return
