@@ -154,10 +154,13 @@ const (
 func (c *rpcclient) checkConnectionStatus(ctx context.Context, conn *ethConn) connectionStatus {
 	hdr, err := conn.HeaderByNumber(ctx, nil)
 	if err != nil {
+		c.log.Errorf("Failed to get header from %q: %v", conn.endpoint, err)
 		return failed
 	}
 
 	if c.headerIsOutdated(hdr) {
+		c.log.Warnf("header fetched from %q appears to be outdated (time %s). If you continue to see this message, you might need to check your system clock",
+			conn.endpoint, time.Unix(int64(hdr.Time), 0))
 		return outdated
 	}
 
@@ -196,7 +199,7 @@ func (c *rpcclient) sortConnectionsByHealth(ctx context.Context) bool {
 		categorizeConnection(ec)
 	}
 
-	if c.healthCheckCounter == 0 {
+	if c.healthCheckCounter == 0 && len(c.neverConnectedEndpoints) > 0 {
 		c.log.Tracef("number of never connected endpoints: %d", len(c.neverConnectedEndpoints))
 		stillUnconnectedEndpoints := make([]string, 0, len(c.neverConnectedEndpoints))
 
@@ -221,9 +224,16 @@ func (c *rpcclient) sortConnectionsByHealth(ctx context.Context) bool {
 	clientsUpdatedOrder = append(clientsUpdatedOrder, outdatedConnections...)
 	clientsUpdatedOrder = append(clientsUpdatedOrder, failingConnections...)
 
-	c.log.Tracef("healthy connections: %v", healthyConnections)
-	c.log.Tracef("outdated connections: %v", outdatedConnections)
-	c.log.Tracef("failing connections: %v", failingConnections)
+	getEndpoints := func(clients []*ethConn) []string {
+		endpoints := make([]string, 0, len(clients))
+		for _, c := range clients {
+			endpoints = append(endpoints, c.endpoint)
+		}
+		return endpoints
+	}
+	c.log.Tracef("healthy connections: %v", getEndpoints(healthyConnections))
+	c.log.Tracef("outdated connections: %v", getEndpoints(outdatedConnections))
+	c.log.Tracef("failing connections: %v", getEndpoints(failingConnections))
 
 	c.clientsMtx.Lock()
 	defer c.clientsMtx.Unlock()
