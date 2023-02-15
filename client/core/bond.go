@@ -1359,9 +1359,11 @@ func (c *Core) bondExpired(dc *dexConnection, assetID uint32, coinID []byte, new
 			bondIDStr, unbip(assetID))
 	}
 
-	details := fmt.Sprintf("New tier = %d (target = %d).", newTier, targetTier)
-	c.notify(newBondPostNoteWithTier(TopicBondExpired, string(TopicBondExpired),
-		details, db.Success, dc.acct.host, newTier))
+	if targetTier > uint64(newTier) {
+		details := fmt.Sprintf("New tier = %d (target = %d).", newTier, targetTier)
+		c.notify(newBondPostNoteWithTier(TopicBondExpired, string(TopicBondExpired),
+			details, db.WarningLevel, dc.acct.host, newTier))
+	}
 
 	return nil
 }
