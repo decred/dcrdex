@@ -1942,14 +1942,16 @@ func TestRegister(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			timeout := time.NewTimer(time.Second * 2)
+			defer timeout.Stop()
+			ticker := time.NewTicker(10 * time.Millisecond)
+			defer ticker.Stop()
 			for {
 				select {
-				case <-time.After(10 * time.Millisecond):
+				case <-ticker.C:
 					tCore.waiterMtx.Lock()
 					waiterCount := len(tCore.blockWaiters)
 					tCore.waiterMtx.Unlock()
 					if waiterCount > 0 { // when verifyRegistrationFee adds a waiter, then we can trigger tip change
-						timeout.Stop()
 						tWallet.setConfs(tWallet.sendCoin.id, 0, nil) // 0 ????
 						tCore.tipChange(tUTXOAssetA.ID, nil)
 						return
@@ -2005,7 +2007,7 @@ func TestRegister(t *testing.T) {
 			return n
 			// When it works, it should be virtually instant, but I have seen it fail
 			// at 1 millisecond.
-		case <-time.NewTimer(time.Second).C:
+		case <-time.NewTimer(time.Second * 2).C:
 			t.Fatalf("timed out waiting for %s notification", tag)
 		}
 		return nil
