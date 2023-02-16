@@ -1792,53 +1792,98 @@ export default class MarketsPage extends BasePage {
   /* setFeeEstimates sets all of the pre-order estimate fields */
   setFeeEstimates (swap: PreSwap, redeem: PreRedeem, order: TradeForm) {
     const { page, market } = this
-    let { baseUnitInfo, quoteUnitInfo, rateConversionFactor } = market
-    const swapped = swap.estimate.value || 0
-    const fmtPct = percentFormatter.format
+    const { baseUnitInfo, quoteUnitInfo, rateConversionFactor } = market
+    const fmtPct = (value: number) => {
+      if (value < 0.05) return '< 0.1'
+      return percentFormatter.format(value)
+    }
+
+    // If the asset is a token, in order to calculate the fee as a percentage
+    // of the total order, we try to  use the fiat rates to find out the
+    // exchange rate between the token and parent assets.
+    // Initially these are set to 1, which we would use if the asset is not a
+    // token and no conversion is needed.
+    let baseExchangeRate = 1
+    let quoteExchangeRate = 1
+    let baseFeeAssetUI = baseUnitInfo
+    let quoteFeeAssetUI = quoteUnitInfo
 
     if (market.base.token) {
       const parent = app().assets[market.base.token.parentID]
-      baseUnitInfo = parent.unitInfo
+      baseFeeAssetUI = parent.unitInfo
+      const tokenFiatRate = app().fiatRatesMap[market.base.id]
+      const parentFiatRate = app().fiatRatesMap[parent.id]
+      if (tokenFiatRate && parentFiatRate) {
+        const conventionalRate = parentFiatRate / tokenFiatRate
+        baseExchangeRate = conventionalRate * baseUnitInfo.conventional.conversionFactor / parent.unitInfo.conventional.conversionFactor
+      } else {
+        baseExchangeRate = 0
+      }
     }
+
     if (market.quote.token) {
       const parent = app().assets[market.quote.token.parentID]
-      quoteUnitInfo = parent.unitInfo
+      quoteFeeAssetUI = parent.unitInfo
+      const tokenFiatRate = app().fiatRatesMap[market.quote.id]
+      const parentFiatRate = app().fiatRatesMap[parent.id]
+      if (tokenFiatRate && parentFiatRate) {
+        const conventionalRate = parentFiatRate / tokenFiatRate
+        quoteExchangeRate = conventionalRate * quoteUnitInfo.conventional.conversionFactor / parent.unitInfo.conventional.conversionFactor
+      } else {
+        quoteExchangeRate = 0
+      }
     }
 
-    let [toIsToken, fromIsToken] = [!!market.base.token, !!market.quote.token]
-    let [toUI, fromUI] = [baseUnitInfo, quoteUnitInfo]
+    let [toFeeAssetUI, fromFeeAssetUI] = [baseFeeAssetUI, quoteFeeAssetUI]
+    let [toExchangeRate, fromExchangeRate] = [baseExchangeRate, quoteExchangeRate]
     if (this.currentOrder.sell) {
-      [fromIsToken, toIsToken] = [toIsToken, fromIsToken];
-      [fromUI, toUI] = [toUI, fromUI]
+      [fromFeeAssetUI, toFeeAssetUI] = [toFeeAssetUI, fromFeeAssetUI];
+      [fromExchangeRate, toExchangeRate] = [toExchangeRate, fromExchangeRate]
     }
+
+    const swapped = swap.estimate.value || 0
+    const swappedInParentUnits = fromExchangeRate > 0 ? swapped / fromExchangeRate : swapped
 
     // Set swap fee estimates in the details pane.
-    const bestSwapPct = swap.estimate.realisticBestCase / swapped * 100
-    page.vSwapFeesLowPct.textContent = fromIsToken ? '' : `(${fmtPct(bestSwapPct)}%)`
-    page.vSwapFeesLow.textContent = Doc.formatCoinValue(swap.estimate.realisticBestCase, fromUI)
-    const worstSwapPct = swap.estimate.realisticWorstCase / swapped * 100
-    page.vSwapFeesHighPct.textContent = fromIsToken ? '' : `(${fmtPct(worstSwapPct)}%)`
-    page.vSwapFeesHigh.textContent = Doc.formatCoinValue(swap.estimate.realisticWorstCase, fromUI)
-    page.vSwapFeesMaxPct.textContent = fromIsToken ? '' : `(${fmtPct(swap.estimate.maxFees / swapped * 100)}%)`
-    page.vSwapFeesMax.textContent = Doc.formatCoinValue(swap.estimate.maxFees, fromUI)
+    const bestSwapPct = swap.estimate.realisticBestCase / swappedInParentUnits * 100
+    page.vSwapFeesLowPct.textContent = fromExchangeRate <= 0 ? '' : `(${fmtPct(bestSwapPct)}%)`
+    page.vSwapFeesLow.textContent = Doc.formatCoinValue(swap.estimate.realisticBestCase, fromFeeAssetUI)
+
+    const worstSwapPct = swap.estimate.realisticWorstCase / swappedInParentUnits * 100
+    page.vSwapFeesHighPct.textContent = fromExchangeRate <= 0 ? '' : `(${fmtPct(worstSwapPct)}%)`
+    page.vSwapFeesHigh.textContent = Doc.formatCoinValue(swap.estimate.realisticWorstCase, fromFeeAssetUI)
+
+    const swapFeesMaxPct = swap.estimate.maxFees / swappedInParentUnits * 100
+    page.vSwapFeesMaxPct.textContent = fromExchangeRate <= 0 ? '' : `(${fmtPct(swapFeesMaxPct)}%)`
+    page.vSwapFeesMax.textContent = Doc.formatCoinValue(swap.estimate.maxFees, fromFeeAssetUI)
 
     // Set redemption fee estimates in the details pane.
     const midGap = this.midGap()
     const estRate = midGap || order.rate / rateConversionFactor
     const received = order.sell ? swapped * estRate : swapped / estRate
-    const bestRedeemPct = redeem.estimate.realisticBestCase / received * 100
-    page.vRedeemFeesLowPct.textContent = toIsToken ? '' : `(${fmtPct(bestRedeemPct)}%)`
-    page.vRedeemFeesLow.textContent = Doc.formatCoinValue(redeem.estimate.realisticBestCase, toUI)
-    const worstRedeemPct = redeem.estimate.realisticWorstCase / received * 100
-    page.vRedeemFeesHighPct.textContent = toIsToken ? '' : `(${fmtPct(worstRedeemPct)}%)`
-    page.vRedeemFeesHigh.textContent = Doc.formatCoinValue(redeem.estimate.realisticWorstCase, toUI)
+    const receivedInParentUnits = toExchangeRate > 0 ? received / toExchangeRate : received
 
-    // Set the summary percent, which is a simple addition of swap and redeem
-    // loss percents.
-    page.summarySwapFeesLow.textContent = page.vSwapFeesLow.textContent
-    page.summarySwapFeesHigh.textContent = page.vSwapFeesHigh.textContent
-    page.summaryRedeemFeesLow.textContent = page.vRedeemFeesLow.textContent
-    page.summaryRedeemFeesHigh.textContent = page.vRedeemFeesHigh.textContent
+    const bestRedeemPct = redeem.estimate.realisticBestCase / receivedInParentUnits * 100
+    page.vRedeemFeesLowPct.textContent = toExchangeRate <= 0 ? '' : `(${fmtPct(bestRedeemPct)}%)`
+    page.vRedeemFeesLow.textContent = Doc.formatCoinValue(redeem.estimate.realisticBestCase, toFeeAssetUI)
+
+    const worstRedeemPct = redeem.estimate.realisticWorstCase / receivedInParentUnits * 100
+    page.vRedeemFeesHighPct.textContent = toExchangeRate <= 0 ? '' : `(${fmtPct(worstRedeemPct)}%)`
+    page.vRedeemFeesHigh.textContent = Doc.formatCoinValue(redeem.estimate.realisticWorstCase, toFeeAssetUI)
+
+    if (baseExchangeRate && quoteExchangeRate) {
+      Doc.show(page.vFeeSummaryPct)
+      Doc.hide(page.vFeeSummary)
+      page.vFeeSummaryLow.textContent = fmtPct(bestSwapPct + bestRedeemPct)
+      page.vFeeSummaryHigh.textContent = fmtPct(worstSwapPct + worstRedeemPct)
+    } else {
+      Doc.hide(page.vFeeSummaryPct)
+      Doc.show(page.vFeeSummary)
+      page.summarySwapFeesLow.textContent = page.vSwapFeesLow.textContent
+      page.summarySwapFeesHigh.textContent = page.vSwapFeesHigh.textContent
+      page.summaryRedeemFeesLow.textContent = page.vRedeemFeesLow.textContent
+      page.summaryRedeemFeesHigh.textContent = page.vRedeemFeesHigh.textContent
+    }
   }
 
   async submitCancel () {
