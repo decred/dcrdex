@@ -434,6 +434,7 @@ type assetWallet struct {
 	tipChange  func(error)
 	log        dex.Logger
 	atomicUnit string
+	connected  atomic.Bool
 
 	lockedFunds struct {
 		mtx                sync.RWMutex
@@ -797,6 +798,8 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	atomic.StoreInt64(&w.tipAtConnect, height.Int64())
 	w.log.Infof("Connected to geth, at height %d", height)
 
+	w.connected.Store(true)
+
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -809,6 +812,12 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 		defer wg.Done()
 		w.monitorPeers(ctx)
 	}()
+
+	go func() {
+		<-ctx.Done()
+		w.connected.Store(false)
+	}()
+
 	return &wg, nil
 }
 
@@ -824,6 +833,8 @@ func (w *TokenWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		return nil, err
 	}
 
+	w.connected.Store(true)
+
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -831,6 +842,7 @@ func (w *TokenWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		select {
 		case <-ctx.Done():
 		case <-w.parent.ctx.Done():
+			w.connected.Store(false)
 		}
 	}()
 	return &wg, nil
@@ -869,12 +881,16 @@ func (w *TokenWallet) Reconfigure(context.Context, *asset.WalletConfig, string) 
 	return false, nil
 }
 
-func (eth *baseWallet) walletList() []*assetWallet {
+func (eth *baseWallet) connectedWallets() []*assetWallet {
 	eth.walletsMtx.RLock()
 	defer eth.walletsMtx.RUnlock()
+
 	m := make([]*assetWallet, 0, len(eth.wallets))
+
 	for _, w := range eth.wallets {
-		m = append(m, w)
+		if w.connected.Load() {
+			m = append(m, w)
+		}
 	}
 	return m
 }
@@ -2991,7 +3007,7 @@ func (eth *baseWallet) FeeRate() uint64 {
 func (eth *ETHWallet) checkPeers() {
 	numPeers := eth.node.peerCount()
 
-	for _, w := range eth.walletList() {
+	for _, w := range eth.connectedWallets() {
 		prevPeer := atomic.SwapUint32(&w.lastPeerCount, numPeers)
 		if prevPeer != numPeers {
 			w.peersChange(numPeers, nil)
@@ -3059,15 +3075,15 @@ func (eth *ETHWallet) checkForNewBlocks(reportErr func(error)) {
 	eth.log.Debugf("tip change: %s (%s) => %s (%s)", prevTip.Number,
 		currentTipHash, bestHdr.Number, bestHash)
 
-	walletList := eth.walletList()
+	connectedWallets := eth.connectedWallets()
 
 	go func() {
-		for _, w := range walletList {
+		for _, w := range connectedWallets {
 			w.tipChange(nil)
 		}
 	}()
 	go func() {
-		for _, w := range walletList {
+		for _, w := range connectedWallets {
 			w.checkFindRedemptions()
 		}
 	}()
