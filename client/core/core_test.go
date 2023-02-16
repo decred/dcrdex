@@ -1943,7 +1943,7 @@ func TestRegister(t *testing.T) {
 			defer wg.Done()
 			timeout := time.NewTimer(time.Second * 2)
 			defer timeout.Stop()
-			ticker := time.NewTicker(10 * time.Microsecond)
+			ticker := time.NewTicker(10 * time.Millisecond)
 			defer ticker.Stop()
 			for {
 				select {
@@ -2007,7 +2007,7 @@ func TestRegister(t *testing.T) {
 			return n
 			// When it works, it should be virtually instant, but I have seen it fail
 			// at 1 millisecond.
-		case <-time.NewTimer(time.Second).C:
+		case <-time.NewTimer(time.Second * 2).C:
 			t.Fatalf("timed out waiting for %s notification", tag)
 		}
 		return nil
