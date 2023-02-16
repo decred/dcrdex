@@ -1307,6 +1307,7 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 }
 
 func TestPreSwap(t *testing.T) {
+	const baseFee, tip = 42, 2
 	const feeSuggestion = 90
 	const lotSize = 10e9
 	oneFee := ethGases.Swap * tETH.MaxFeeRate
@@ -1361,8 +1362,8 @@ func TestPreSwap(t *testing.T) {
 			wantLots:      1,
 			wantValue:     lotSize,
 			wantMaxFees:   tETH.MaxFeeRate * ethGases.Swap,
-			wantBestCase:  feeSuggestion * ethGases.Swap,
-			wantWorstCase: feeSuggestion * ethGases.Swap,
+			wantBestCase:  (baseFee + tip) * ethGases.Swap,
+			wantWorstCase: (baseFee + tip) * ethGases.Swap,
 		},
 		{
 			name:      "one lot enough for fees - token",
@@ -1374,8 +1375,8 @@ func TestPreSwap(t *testing.T) {
 			wantLots:      1,
 			wantValue:     lotSize,
 			wantMaxFees:   tToken.MaxFeeRate * tokenGases.Swap,
-			wantBestCase:  feeSuggestion * tokenGases.Swap,
-			wantWorstCase: feeSuggestion * tokenGases.Swap,
+			wantBestCase:  (baseFee + tip) * tokenGases.Swap,
+			wantWorstCase: (baseFee + tip) * tokenGases.Swap,
 		},
 		{
 			name: "more lots than max lots",
@@ -1401,8 +1402,8 @@ func TestPreSwap(t *testing.T) {
 			wantLots:      4,
 			wantValue:     4 * lotSize,
 			wantMaxFees:   4 * tETH.MaxFeeRate * ethGases.Swap,
-			wantBestCase:  feeSuggestion * ethGases.SwapN(4),
-			wantWorstCase: 4 * feeSuggestion * ethGases.Swap,
+			wantBestCase:  (baseFee + tip) * ethGases.SwapN(4),
+			wantWorstCase: 4 * (baseFee + tip) * ethGases.Swap,
 		},
 		{
 			name:      "fewer than max lots - token",
@@ -1414,8 +1415,8 @@ func TestPreSwap(t *testing.T) {
 			wantLots:      4,
 			wantValue:     4 * lotSize,
 			wantMaxFees:   4 * tToken.MaxFeeRate * tokenGases.Swap,
-			wantBestCase:  feeSuggestion * tokenGases.SwapN(4),
-			wantWorstCase: 4 * feeSuggestion * tokenGases.Swap,
+			wantBestCase:  (baseFee + tip) * tokenGases.SwapN(4),
+			wantWorstCase: 4 * (baseFee + tip) * tokenGases.Swap,
 		},
 		{
 			name:   "balanceError",
@@ -1446,6 +1447,7 @@ func TestPreSwap(t *testing.T) {
 
 		w, _, node, shutdown := tassetWallet(assetID)
 		defer shutdown()
+		node.baseFee, node.tip = dexeth.GweiToWei(baseFee), dexeth.GweiToWei(tip)
 
 		if test.token {
 			node.tokenContractor.bal = dexeth.GweiToWei(test.bal)

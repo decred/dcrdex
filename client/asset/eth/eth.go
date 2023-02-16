@@ -1209,7 +1209,17 @@ func (w *TokenWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
 }
 
 func (w *assetWallet) preSwap(req *asset.PreSwapForm, feeWallet *assetWallet) (*asset.PreSwap, error) {
-	maxEst, err := w.maxOrder(req.LotSize, req.FeeSuggestion, req.MaxFeeRate, req.Version,
+	// Get a realistic current effective fee rate, ignoring req.FeeSuggestion
+	// since it is generally MaxFeeRate because of dynamic txns.
+	rateNow, err := w.currentFeeRate(w.ctx)
+	if err != nil {
+		return nil, err
+	}
+	rate, err := dexeth.WeiToGweiUint64(rateNow)
+	if err != nil {
+		return nil, fmt.Errorf("invalid current fee rate: %v", err)
+	}
+	maxEst, err := w.maxOrder(req.LotSize, rate, req.MaxFeeRate, req.Version,
 		req.RedeemVersion, req.RedeemAssetID, feeWallet)
 	if err != nil {
 		return nil, err
@@ -1219,7 +1229,7 @@ func (w *assetWallet) preSwap(req *asset.PreSwapForm, feeWallet *assetWallet) (*
 		return nil, fmt.Errorf("%d lots available for %d-lot order", maxEst.Lots, req.Lots)
 	}
 
-	est, err := w.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion, req.MaxFeeRate,
+	est, err := w.estimateSwap(req.Lots, req.LotSize, rate, req.MaxFeeRate,
 		req.Version, req.RedeemVersion, req.RedeemAssetID)
 	if err != nil {
 		return nil, err
@@ -3067,6 +3077,18 @@ func (eth *baseWallet) RegFeeConfirmations(ctx context.Context, coinID dex.Bytes
 	var txHash common.Hash
 	copy(txHash[:], coinID)
 	return eth.node.transactionConfirmations(ctx, txHash)
+}
+
+// currentFeeRate gives the current rate of transactions being mined. Only
+// use this to provide informative realistic estimates of actual fee *use*. For
+// transaction planning, use recommendedMaxFeeRate.
+func (eth *baseWallet) currentFeeRate(ctx context.Context) (*big.Int, error) {
+	base, tip, err := eth.node.currentFees(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("Error getting net fee state: %v", err)
+	}
+
+	return new(big.Int).Add(tip, base), nil
 }
 
 // recommendedMaxFeeRate finds a recommended max fee rate using the somewhat
