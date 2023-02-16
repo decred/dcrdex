@@ -1389,7 +1389,9 @@ type gasEstimate struct {
 	// IF the redeem asset is a fee-family asset. Otherwise Redeem and RedeemAdd
 	// are zero.
 	dexeth.Gases
-	// Additional fields are based on live estimates of the swap.
+	// Additional fields may be based on live estimates of the swap. Both oneGas
+	// and nGas will include both swap and redeem gas, but note that the redeem
+	// gas may be zero if the redeemed asset is not ETH or an ETH token.
 	oneGas, nGas, nSwap, nRedeem uint64
 }
 
@@ -1412,14 +1414,16 @@ func (w *assetWallet) initGasEstimate(n int, initVer, redeemVer, redeemAssetID u
 		return nil, fmt.Errorf("error calculating swap gas: %w", err)
 	}
 
-	est.oneGas = est.Swap + est.Redeem
-	est.nGas = est.nSwap + est.nRedeem
+	est.oneGas = est.Swap
+	est.nGas = est.nSwap
 
 	if redeemW := w.wallet(redeemAssetID); redeemW != nil {
 		est.Redeem, est.nRedeem, err = redeemW.redeemGas(n, redeemVer)
 		if err != nil {
 			return nil, fmt.Errorf("error calculating fee-family redeem gas: %w", err)
 		}
+		est.oneGas += est.Redeem
+		est.nGas += est.nRedeem
 	}
 
 	return
