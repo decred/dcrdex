@@ -69,14 +69,15 @@ func (cs ConnectionStatus) String() string {
 // caused by or related to an invalid cert.
 var invalidCertRegexp = regexp.MustCompile(".*(unknown authority|not standards compliant|not trusted)")
 
-// IsErrorInvalidCert checks if the provided error is one of the different
+// isErrorInvalidCert checks if the provided error is one of the different
 // variant of an invalid cert error returned from the x509 package or is
 // ErrInvalidCert.
-func IsErrorInvalidCert(err error) bool {
-	var invalidCert x509.CertificateInvalidError
-	var unknownCertAuth x509.UnknownAuthorityError
-	return errors.Is(err, ErrInvalidCert) || errors.Is(err, invalidCert) ||
-		errors.Is(err, unknownCertAuth) || invalidCertRegexp.MatchString(err.Error())
+func isErrorInvalidCert(err error) bool {
+	var invalidCertErr x509.CertificateInvalidError
+	var unknownCertAuthErr x509.UnknownAuthorityError
+	var hostNameErr x509.HostnameError
+	return errors.Is(err, ErrInvalidCert) || errors.As(err, &invalidCertErr) || errors.As(err, &hostNameErr) ||
+		errors.As(err, &unknownCertAuthErr) || invalidCertRegexp.MatchString(err.Error())
 }
 
 // ErrInvalidCert is the error returned when attempting to use an invalid cert
@@ -227,8 +228,7 @@ func (conn *wsConn) connect(ctx context.Context) error {
 	}
 	ws, _, err := dialer.DialContext(ctx, conn.cfg.URL, nil)
 	if err != nil {
-		var e x509.HostnameError // No need to retry...
-		if IsErrorInvalidCert(err) || errors.Is(err, e) {
+		if isErrorInvalidCert(err) {
 			conn.setConnectionStatus(InvalidCert)
 			if conn.tlsCfg == nil {
 				return ErrCertRequired
