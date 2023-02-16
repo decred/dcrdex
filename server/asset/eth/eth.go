@@ -164,7 +164,6 @@ type ethFetcher interface {
 	blockNumber(ctx context.Context) (uint64, error)
 	headerByHeight(ctx context.Context, height uint64) (*types.Header, error)
 	connect(ctx context.Context) error
-	shutdown()
 	suggestGasTipCap(ctx context.Context) (*big.Int, error)
 	syncProgress(ctx context.Context) (*ethereum.SyncProgress, error)
 	transaction(ctx context.Context, hash common.Hash) (tx *types.Transaction, isMempool bool, err error)
@@ -285,7 +284,7 @@ func NewBackend(configPath string, log dex.Logger, net dex.Network) (*ETHBackend
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.Trim(scanner.Text(), " ")
-		if line == "" || strings.HasPrefix(line, "#") || endpointsMap[line] {
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") || endpointsMap[line] {
 			continue
 		}
 		endpointsMap[line] = true
@@ -317,21 +316,22 @@ func NewBackend(configPath string, log dex.Logger, net dex.Network) (*ETHBackend
 	return eth, nil
 }
 
-func (eth *baseBackend) shutdown() {
-	eth.node.shutdown()
-}
-
 // Connect connects to the node RPC server and initializes some variables.
 func (eth *ETHBackend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	eth.baseBackend.ctx = ctx
 
-	if err := eth.node.connect(ctx); err != nil {
+	// Create a separate context for the node so that it will only be cancelled
+	// after the ETHBackend's run method has returned.
+	nodeContext, cancelNodeContext := context.WithCancel(context.Background())
+	if err := eth.node.connect(nodeContext); err != nil {
+		cancelNodeContext()
 		return nil, err
 	}
 
 	// Prime the best block hash and height.
 	bn, err := eth.node.blockNumber(ctx)
 	if err != nil {
+		cancelNodeContext()
 		return nil, fmt.Errorf("error getting best block header from geth: %w", err)
 	}
 	eth.baseBackend.bestHeight = bn
@@ -340,6 +340,7 @@ func (eth *ETHBackend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	wg.Add(1)
 	go func() {
 		eth.run(ctx)
+		cancelNodeContext()
 		wg.Done()
 	}()
 	return &wg, nil
@@ -728,9 +729,6 @@ func (eth *ETHBackend) poll(ctx context.Context) {
 
 // run processes the queue and monitors the application context.
 func (eth *ETHBackend) run(ctx context.Context) {
-	// Shut down the RPC client on ctx.Done().
-	defer eth.shutdown()
-
 	blockPoll := time.NewTicker(blockPollInterval)
 	defer blockPoll.Stop()
 

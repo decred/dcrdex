@@ -59,7 +59,6 @@ func TestMain(m *testing.M) {
 		ethClient = newRPCClient(dex.Simnet, []string{wsEndpoint, alphaIPCFile}, ethContractAddr, log)
 		defer func() {
 			cancel()
-			ethClient.shutdown()
 		}()
 
 		dexeth.ContractAddresses[0][dex.Simnet] = getContractAddrFromFile(contractAddrFile)
@@ -199,16 +198,8 @@ func TestMonitorHealth(t *testing.T) {
 
 	updatedClients := ethClient.clientsCopy()
 
-	getEndpoints := func(clients []*ethConn) []string {
-		endpoints := make([]string, 0, len(clients))
-		for _, c := range clients {
-			endpoints = append(endpoints, c.endpoint)
-		}
-		return endpoints
-	}
-
-	fmt.Println("Original clients:", getEndpoints(originalClients))
-	fmt.Println("Updated clients:", getEndpoints(updatedClients))
+	fmt.Println("Original clients:", originalClients)
+	fmt.Println("Updated clients:", updatedClients)
 
 	if originalClients[0].endpoint != updatedClients[len(updatedClients)-1].endpoint {
 		t.Fatalf("failing client was not moved to the end. got %s, expected %s", updatedClients[len(updatedClients)-1].endpoint, originalClients[0].endpoint)
