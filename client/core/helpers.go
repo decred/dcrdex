@@ -256,8 +256,9 @@ func (ord *OrderReader) sumTo(filter func(match *Match) bool) uint64 {
 	return v
 }
 
-// hasLiveMatches will be true if there are any matches < MakerRedeemed.
-func (ord *OrderReader) hasLiveMatches() bool {
+// hasActiveMatches will be true if order has any matches that still require some
+// actions to complete settlement.
+func (ord *OrderReader) hasActiveMatches() bool {
 	for _, match := range ord.Matches {
 		if match.Active {
 			return true
@@ -268,7 +269,7 @@ func (ord *OrderReader) hasLiveMatches() bool {
 
 // StatusString is the order status.
 func (ord *OrderReader) StatusString() string {
-	isLive := ord.hasLiveMatches()
+	isLive := ord.hasActiveMatches()
 	switch ord.Status {
 	case order.OrderStatusUnknown:
 		return "unknown"

@@ -655,7 +655,7 @@ export default class WalletsPage extends BasePage {
         page.syncProgress.textContent = `${(wallet.syncProgress * 100).toFixed(1)}%`
         if (wallet.open) {
           Doc.show(page.statusReady)
-          if (!app().haveAssetOrders(assetID) && wallet.encrypted) Doc.show(page.lockBttnBox)
+          if (!app().haveActiveOrders(assetID) && wallet.encrypted) Doc.show(page.lockBttnBox)
         } else Doc.show(page.statusLocked, page.unlockBttnBox) // wallet not unlocked
       } else Doc.show(page.statusOff, page.connectBttnBox) // wallet not running
     } else Doc.show(page.createWalletBox) // no wallet
@@ -911,7 +911,7 @@ export default class WalletsPage extends BasePage {
       Doc.showFormError(page.reconfigErr, res.msg)
       return
     }
-    const assetHasActiveOrders = app().haveAssetOrders(assetID)
+    const assetHasActiveOrders = app().haveActiveOrders(assetID)
     this.reconfigForm.update(currentDef.configopts || [], assetHasActiveOrders)
     this.reconfigForm.setConfig(res.map)
     this.updateDisplayedReconfigFields(currentDef)

@@ -59,13 +59,13 @@ export function isMarketBuy (ord: Order) {
 }
 
 /*
- * hasLiveMatches returns true if the order has matches that have not completed
+ * hasActiveMatches returns true if the order has matches that have not completed
  * settlement yet.
  */
-export function hasLiveMatches (order: Order) {
+export function hasActiveMatches (order: Order) {
   if (!order.matches) return false
   for (const match of order.matches) {
-    if (!match.revoked && match.status < MakerRedeemed) return true
+    if (match.active) return true
   }
   return false
 }
@@ -73,7 +73,7 @@ export function hasLiveMatches (order: Order) {
 /* statusString converts the order status to a string */
 export function statusString (order: Order): string {
   if (!order.id) return intl.prep(intl.ID_ORDER_SUBMITTING) // order ID is empty.
-  const isLive = hasLiveMatches(order)
+  const isLive = hasActiveMatches(order)
   switch (order.status) {
     case StatusUnknown: return intl.prep(intl.ID_UNKNOWN)
     case StatusEpoch: return intl.prep(intl.ID_EPOCH)
@@ -88,7 +88,7 @@ export function statusString (order: Order): string {
     case StatusRevoked:
       return isLive ? `${intl.prep(intl.ID_REVOKED)}/${intl.prep(intl.ID_SETTLING)}` : intl.prep(intl.ID_REVOKED)
   }
-  return ''
+  return intl.prep(intl.ID_UNKNOWN)
 }
 
 /* filled sums the quantities of non-cancel matches available. */
