@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"context"
 	"testing"
@@ -38,15 +39,26 @@ var (
 )
 
 func TestMain(m *testing.M) {
+	monitorConnectionsInterval = 3 * time.Second
+
 	// Run in function so that defers happen before os.Exit is called.
 	run := func() (int, error) {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(context.Background())
 		log := dex.StdOutLogger("T", dex.LevelTrace)
-		ethClient = newRPCClient(dex.Simnet, []string{wsEndpoint, alphaIPCFile}, log)
+
+		netAddrs, found := dexeth.ContractAddresses[ethContractVersion]
+		if !found {
+			return 1, fmt.Errorf("no contract address for eth version %d", ethContractVersion)
+		}
+		ethContractAddr, found := netAddrs[dex.Simnet]
+		if !found {
+			return 1, fmt.Errorf("no contract address for eth version %d on %s", ethContractVersion, dex.Simnet)
+		}
+
+		ethClient = newRPCClient(dex.Simnet, []string{wsEndpoint, alphaIPCFile}, ethContractAddr, log)
 		defer func() {
 			cancel()
-			ethClient.shutdown()
 		}()
 
 		dexeth.ContractAddresses[0][dex.Simnet] = getContractAddrFromFile(contractAddrFile)
@@ -169,14 +181,7 @@ func testAccountBalance(t *testing.T, assetID uint32) {
 	}
 }
 
-func TestRPCRotation(t *testing.T) {
-	ethClient.idxMtx.RLock()
-	idx := ethClient.endpointIdx
-	ethClient.idxMtx.RUnlock()
-	if idx != 0 {
-		t.Fatal("expected initial index to be zero")
-	}
-
+func TestMonitorHealth(t *testing.T) {
 	// Requesting a non-existent transaction should propagate the error. Also
 	// check logs to ensure the endpoint index was not advanced.
 	_, _, err := ethClient.transaction(ctx, common.Hash{})
@@ -185,20 +190,19 @@ func TestRPCRotation(t *testing.T) {
 	}
 	ethClient.log.Info("Not found error successfully propagated")
 
-	// Shut down the zeroth client and ensure the endpoint index is advanced.
-	cl := ethClient.clients[idx]
-	cl.Close()
+	originalClients := ethClient.clientsCopy()
+	originalClients[0].Close()
 
-	_, err = ethClient.bestHeader(ctx)
-	if err != nil {
-		t.Fatalf("error getting best header with index advance: %v", err)
-	}
+	fmt.Println("Waiting for client health check...")
+	time.Sleep(5 * time.Second)
 
-	ethClient.idxMtx.RLock()
-	idx = ethClient.endpointIdx
-	ethClient.idxMtx.RUnlock()
-	if idx == 0 {
-		t.Fatalf("endpoint index not advanced")
+	updatedClients := ethClient.clientsCopy()
+
+	fmt.Println("Original clients:", originalClients)
+	fmt.Println("Updated clients:", updatedClients)
+
+	if originalClients[0].endpoint != updatedClients[len(updatedClients)-1].endpoint {
+		t.Fatalf("failing client was not moved to the end. got %s, expected %s", updatedClients[len(updatedClients)-1].endpoint, originalClients[0].endpoint)
 	}
 }
 

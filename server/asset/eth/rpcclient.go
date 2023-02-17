@@ -29,8 +29,12 @@ import (
 var (
 	_ ethFetcher = (*rpcclient)(nil)
 
-	bigZero              = new(big.Int)
-	headerExpirationTime = time.Minute
+	bigZero                    = new(big.Int)
+	headerExpirationTime       = time.Minute
+	monitorConnectionsInterval = 30 * time.Second
+	// failingEndpointsCheckFreq means that endpoints that were never connected
+	// will be attempted every (monitorConnectionsInterval * failingEndpointsCheckFreq).
+	failingEndpointsCheckFreq = 4
 )
 
 type ContextCaller interface {
@@ -51,31 +55,245 @@ type ethConn struct {
 	txPoolSupported bool
 }
 
-type rpcclient struct {
-	net       dex.Network
-	log       dex.Logger
-	endpoints []string
-	clients   []*ethConn
-
-	idxMtx      sync.RWMutex
-	endpointIdx int
+func (ec *ethConn) String() string {
+	return ec.endpoint
 }
 
-func newRPCClient(net dex.Network, endpoints []string, log dex.Logger) *rpcclient {
+type rpcclient struct {
+	net dex.Network
+	log dex.Logger
+	// endpoints should only be used during connect to know which endpoints
+	// to attempt to connect. If we were unable to connect to some of the
+	// endpoints, they will not be included in the clients slice.
+	endpoints []string
+	// neverConnectedEndpoints failed to connect since the initial connect call,
+	// so an ethConn has not been created for them.
+	neverConnectedEndpoints []string
+	healthCheckCounter      int
+	tokensLoaded            map[uint32]bool
+	ethContractAddr         common.Address
+
+	// the order of clients will change based on the health of the connections.
+	clientsMtx sync.RWMutex
+	clients    []*ethConn
+}
+
+func newRPCClient(net dex.Network, endpoints []string, ethContractAddr common.Address, log dex.Logger) *rpcclient {
 	return &rpcclient{
-		net:       net,
-		endpoints: endpoints,
-		log:       log,
+		net:             net,
+		endpoints:       endpoints,
+		log:             log,
+		ethContractAddr: ethContractAddr,
+		tokensLoaded:    make(map[uint32]bool),
+	}
+}
+
+func (c *rpcclient) clientsCopy() []*ethConn {
+	c.clientsMtx.RLock()
+	defer c.clientsMtx.RUnlock()
+
+	clients := make([]*ethConn, len(c.clients))
+	copy(clients, c.clients)
+	return clients
+}
+
+func (c *rpcclient) connectToEndpoint(ctx context.Context, endpoint string) (*ethConn, error) {
+	var success bool
+
+	client, err := rpc.DialContext(ctx, endpoint)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() {
+		// This shouldn't happen as the only possible errors are due to ETHSwap and
+		// tokener creation.
+		if !success {
+			client.Close()
+		}
+	}()
+
+	ec := &ethConn{
+		Client:   ethclient.NewClient(client),
+		endpoint: endpoint,
+		tokens:   make(map[uint32]*tokener),
+		caller:   client,
+	}
+
+	reqModules := []string{"eth", "txpool"}
+	if err := dexeth.CheckAPIModules(client, endpoint, c.log, reqModules); err != nil {
+		c.log.Warnf("Error checking required modules at %q: %v", endpoint, err)
+		c.log.Warnf("Will not account for pending transactions in balance calculations at %q", endpoint)
+		ec.txPoolSupported = false
+	} else {
+		ec.txPoolSupported = true
+	}
+
+	es, err := swapv0.NewETHSwap(c.ethContractAddr, ec.Client)
+	if err != nil {
+		return nil, fmt.Errorf("unable to initialize eth contract for %q: %v", endpoint, err)
+	}
+	ec.swapContract = &swapSourceV0{es}
+
+	for assetID := range c.tokensLoaded {
+		tkn, err := newTokener(ctx, assetID, c.net, ec.Client)
+		if err != nil {
+			return nil, fmt.Errorf("error constructing ERC20Swap: %w", err)
+		}
+		ec.tokens[assetID] = tkn
+	}
+	success = true
+
+	return ec, nil
+}
+
+type connectionStatus int
+
+const (
+	failed connectionStatus = iota
+	outdated
+	connected
+)
+
+func (c *rpcclient) checkConnectionStatus(ctx context.Context, conn *ethConn) connectionStatus {
+	hdr, err := conn.HeaderByNumber(ctx, nil)
+	if err != nil {
+		c.log.Errorf("Failed to get header from %q: %v", conn.endpoint, err)
+		return failed
+	}
+
+	if c.headerIsOutdated(hdr) {
+		hdrTime := time.Unix(int64(hdr.Time), 0)
+		c.log.Warnf("header fetched from %q appears to be outdated (time %s is %v old). "+
+			"If you continue to see this message, you might need to check your system clock",
+			conn.endpoint, hdrTime, time.Since(hdrTime))
+		return outdated
+	}
+
+	return connected
+}
+
+// sortConnectionsByHealth checks the health of the connections and sorts them
+// based on their health. It does a best header call to each connection and
+// connections with non outdated headers are placed first, ones with outdated
+// headers are placed in the middle, and ones that error are placed last.
+// Every failingEndpointsCheckFreq health checks, the endpoints that have
+// never been successfully connection will be checked. True is returned if
+// there is at least one healthy connection.
+func (c *rpcclient) sortConnectionsByHealth(ctx context.Context) bool {
+	clients := c.clientsCopy()
+
+	healthyConnections := make([]*ethConn, 0, len(clients))
+	outdatedConnections := make([]*ethConn, 0, len(clients))
+	failingConnections := make([]*ethConn, 0, len(clients))
+
+	categorizeConnection := func(conn *ethConn) {
+		status := c.checkConnectionStatus(ctx, conn)
+		switch status {
+		case connected:
+			healthyConnections = append(healthyConnections, conn)
+		case outdated:
+			outdatedConnections = append(outdatedConnections, conn)
+		case failed:
+			failingConnections = append(failingConnections, conn)
+		}
+	}
+
+	for _, ec := range clients {
+		categorizeConnection(ec)
+	}
+
+	if c.healthCheckCounter == 0 && len(c.neverConnectedEndpoints) > 0 {
+		stillUnconnectedEndpoints := make([]string, 0, len(c.neverConnectedEndpoints))
+
+		for _, endpoint := range c.neverConnectedEndpoints {
+			ec, err := c.connectToEndpoint(ctx, endpoint)
+			if err != nil {
+				c.log.Errorf("Error connecting to %q: %v", endpoint, err)
+				stillUnconnectedEndpoints = append(stillUnconnectedEndpoints, endpoint)
+				continue
+			}
+
+			c.log.Infof("Successfully connected to %q", endpoint)
+
+			categorizeConnection(ec)
+		}
+
+		c.neverConnectedEndpoints = stillUnconnectedEndpoints
+	}
+
+	clientsUpdatedOrder := make([]*ethConn, 0, len(clients))
+	clientsUpdatedOrder = append(clientsUpdatedOrder, healthyConnections...)
+	clientsUpdatedOrder = append(clientsUpdatedOrder, outdatedConnections...)
+	clientsUpdatedOrder = append(clientsUpdatedOrder, failingConnections...)
+
+	c.log.Tracef("Healthy connections: %v", healthyConnections)
+	if len(outdatedConnections) > 0 {
+		c.log.Warnf("Outdated connections: %v", outdatedConnections)
+	}
+	if len(failingConnections) > 0 {
+		c.log.Warnf("Failing connections: %v", failingConnections)
+	}
+
+	c.clientsMtx.Lock()
+	defer c.clientsMtx.Unlock()
+	c.clients = clientsUpdatedOrder
+	c.healthCheckCounter = (c.healthCheckCounter + 1) % failingEndpointsCheckFreq
+
+	return len(healthyConnections) > 0
+}
+
+// markConnectionAsFailed moves an connection to the end of the client list.
+func (c *rpcclient) markConnectionAsFailed(endpoint string) {
+	c.clientsMtx.Lock()
+	defer c.clientsMtx.Unlock()
+
+	var index int = -1
+	for i, ec := range c.clients {
+		if ec.endpoint == endpoint {
+			index = i
+			break
+		}
+	}
+	if index == -1 {
+		c.log.Errorf("Failed to mark client as failed: %q not found", endpoint)
+		return
+	}
+
+	updatedClients := make([]*ethConn, 0, len(c.clients))
+	updatedClients = append(updatedClients, c.clients[:index]...)
+	updatedClients = append(updatedClients, c.clients[index+1:]...)
+	updatedClients = append(updatedClients, c.clients[index])
+
+	c.clients = updatedClients
+}
+
+// monitorConnectionsHealth starts a goroutine that checks the health of all
+// connections every 30 seconds.
+func (c *rpcclient) monitorConnectionsHealth(ctx context.Context) {
+	defer func() {
+		for _, ec := range c.clientsCopy() {
+			ec.Close()
+		}
+	}()
+
+	ticker := time.NewTicker(monitorConnectionsInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !c.sortConnectionsByHealth(ctx) {
+				c.log.Warnf("No healthy ETH RPC connections")
+			}
+		}
 	}
 }
 
 func (c *rpcclient) withClient(f func(ec *ethConn) error, haltOnNotFound ...bool) (err error) {
-	for range c.endpoints {
-		c.idxMtx.RLock()
-		idx := c.endpointIdx
-		ec := c.clients[idx]
-		c.idxMtx.RUnlock()
-
+	for _, ec := range c.clientsCopy() {
 		err = f(ec)
 		if err == nil {
 			return nil
@@ -83,80 +301,55 @@ func (c *rpcclient) withClient(f func(ec *ethConn) error, haltOnNotFound ...bool
 		if len(haltOnNotFound) > 0 && haltOnNotFound[0] && (errors.Is(err, ethereum.NotFound) || strings.Contains(err.Error(), "not found")) {
 			return err
 		}
-		c.log.Errorf("Unpropagated error from %q: %v", c.endpoints[idx], err)
-		// Try the next client.
-		c.idxMtx.Lock()
-		// Only advance it if another thread hasn't.
-		if c.endpointIdx == idx && len(c.endpoints) > 0 {
-			c.endpointIdx = (c.endpointIdx + 1) % len(c.endpoints)
-			c.log.Infof("Switching RPC endpoint to %q", c.endpoints[c.endpointIdx])
-		}
-		c.idxMtx.Unlock()
+
+		c.log.Errorf("Unpropagated error from %q: %v", ec.endpoint, err)
+		c.markConnectionAsFailed(ec.endpoint)
 	}
+
 	return fmt.Errorf("all providers failed. last error: %w", err)
 }
 
-// connect connects to an ipc socket. It then wraps ethclient's client and
-// bundles commands in a form we can easily use.
+// connect will attempt to connect to all the endpoints in the endpoints slice.
+// If at least one of the connections is successful and is not outdated, the
+// function will return without error.
+//
+// Connections with an outdated block will be marked as outdated, but included
+// in the clients slice. If the up-to-date providers start to fail, the outdated
+// ones will be checked to see if they are still outdated.
+//
+// Failed connections will not be included in the clients slice.
 func (c *rpcclient) connect(ctx context.Context) (err error) {
-	netAddrs, found := dexeth.ContractAddresses[ethContractVersion]
-	if !found {
-		return fmt.Errorf("no contract address for eth version %d", ethContractVersion)
-	}
-	contractAddr, found := netAddrs[c.net]
-	if !found {
-		return fmt.Errorf("no contract address for eth version %d on %s", ethContractVersion, c.net)
-	}
-
 	var success bool
 
-	c.clients = make([]*ethConn, len(c.endpoints))
-	for i, endpoint := range c.endpoints {
-		client, err := rpc.DialContext(ctx, endpoint)
+	c.clients = make([]*ethConn, 0, len(c.endpoints))
+	c.neverConnectedEndpoints = make([]string, 0, len(c.endpoints))
+
+	for _, endpoint := range c.endpoints {
+		ec, err := c.connectToEndpoint(ctx, endpoint)
 		if err != nil {
-			return fmt.Errorf("unable to dial rpc to %q: %v", endpoint, err)
+			c.log.Errorf("Error connecting to %q: %v", endpoint, err)
+			c.neverConnectedEndpoints = append(c.neverConnectedEndpoints, endpoint)
+			continue
 		}
 
 		defer func() {
+			// If all connections are outdated, we will not start, so close any open connections.
 			if !success {
-				client.Close()
+				ec.Close()
 			}
 		}()
 
-		ec := &ethConn{
-			Client:   ethclient.NewClient(client),
-			endpoint: endpoint,
-			tokens:   make(map[uint32]*tokener),
-		}
-
-		reqModules := []string{"eth", "txpool"}
-		if err := dexeth.CheckAPIModules(client, endpoint, c.log, reqModules); err != nil {
-			c.log.Warnf("Error checking required modules at %q: %v", endpoint, err)
-			c.log.Warnf("Will not account for pending transactions in balance calculations at %q", endpoint)
-			ec.txPoolSupported = false
-		} else {
-			ec.txPoolSupported = true
-		}
-
-		hdr, err := ec.HeaderByNumber(ctx, nil)
-		if err != nil {
-			return fmt.Errorf("error getting best header from %q: %v", endpoint, err)
-		}
-		if c.headerIsOutdated(hdr) {
-			return fmt.Errorf("initial header fetched from %q appears to be outdated (time %s). If you continue to see this message, you might need to check your system clock",
-				endpoint, time.Unix(int64(hdr.Time), 0))
-		}
-
-		es, err := swapv0.NewETHSwap(contractAddr, ec.Client)
-		if err != nil {
-			return fmt.Errorf("unable to initialize eth contract for %q: %v", endpoint, err)
-		}
-		ec.swapContract = &swapSourceV0{es}
-		ec.caller = client
-
-		c.clients[i] = ec
+		c.clients = append(c.clients, ec)
 	}
-	success = true
+
+	success = c.sortConnectionsByHealth(ctx)
+
+	if !success {
+		return fmt.Errorf("failed to connect to an up-to-date ethereum node")
+	}
+
+	go c.monitorConnectionsHealth(ctx)
+
 	return nil
 }
 
@@ -164,20 +357,14 @@ func (c *rpcclient) headerIsOutdated(hdr *types.Header) bool {
 	return c.net != dex.Simnet && hdr.Time < uint64(time.Now().Add(-headerExpirationTime).Unix())
 }
 
-// shutdown shuts down the client.
-func (c *rpcclient) shutdown() {
-	for _, ec := range c.clients {
-		ec.Close()
-	}
-}
-
 func (c *rpcclient) loadToken(ctx context.Context, assetID uint32) error {
-	for _, cl := range c.clients {
+	c.tokensLoaded[assetID] = true
+
+	for _, cl := range c.clientsCopy() {
 		tkn, err := newTokener(ctx, assetID, c.net, cl.Client)
 		if err != nil {
 			return fmt.Errorf("error constructing ERC20Swap: %w", err)
 		}
-
 		cl.tokens[assetID] = tkn
 	}
 	return nil
@@ -198,20 +385,8 @@ func (c *rpcclient) withTokener(assetID uint32, f func(*tokener) error) error {
 func (c *rpcclient) bestHeader(ctx context.Context) (hdr *types.Header, err error) {
 	return hdr, c.withClient(func(ec *ethConn) error {
 		hdr, err = ec.HeaderByNumber(ctx, nil)
-		if err == nil && c.headerIsOutdated(hdr) {
-			c.log.Errorf("Best header from %q appears to be outdated (time %s). If you continue to see this message, you might need to check your system clock",
-				ec.endpoint, time.Unix(int64(hdr.Time), 0))
-			if len(c.endpoints) > 0 {
-				c.idxMtx.Lock()
-				c.endpointIdx = (c.endpointIdx + 1) % len(c.endpoints)
-				endpoint := c.endpoints[c.endpointIdx]
-				c.idxMtx.Unlock()
-				c.log.Infof("Switching RPC endpoint to %q", endpoint)
-			}
-		}
 		return err
 	})
-
 }
 
 // headerByHeight gets the best header at height.
