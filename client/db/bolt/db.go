@@ -1836,7 +1836,7 @@ func (db *BoltDB) AckNotification(id []byte) error {
 // NotificationsN reads out the N most recent notifications.
 func (db *BoltDB) NotificationsN(n int) ([]*dexdb.Notification, error) {
 	notes := make([]*dexdb.Notification, 0, n)
-	return notes, db.notesView(func(master *bbolt.Bucket) error {
+	return notes, db.notesUpdate(func(master *bbolt.Bucket) error {
 		trios := newestBuckets([]*bbolt.Bucket{master}, n, stampKey, nil)
 		for _, trio := range trios {
 			note, err := dexdb.DecodeNotification(getCopy(trio.b, noteKey))
@@ -1845,6 +1845,17 @@ func (db *BoltDB) NotificationsN(n int) ([]*dexdb.Notification, error) {
 			}
 			note.Ack = bEqual(trio.b.Get(ackKey), byteTrue)
 			note.Id = note.ID()
+			if !bytes.Equal(note.Id, trio.k) {
+				// This notification was initially stored when the serialization
+				// and thus note ID did not include the TopicID. Ignore it, and
+				// flag it acknowledged so we don't have to hear about it again.
+				if !note.Ack {
+					db.log.Tracef("Ignoring stored note with bad key: %x != %x \"%s\"",
+						[]byte(note.Id), trio.k, note.String())
+					_ = trio.b.Put(ackKey, byteTrue)
+				}
+				continue
+			}
 			notes = append(notes, note)
 		}
 		return nil
