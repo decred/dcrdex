@@ -975,6 +975,7 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 	}
 	_, err = wallet.refreshUnlock()
 	if err != nil {
+		// TODO: Unlock with form.AppPass?
 		return nil, fmt.Errorf("bond asset wallet %v is locked", unbip(bondAssetID))
 	}
 	if !wallet.synchronized() { // otherwise we might double spend if the wallet keys were used elsewhere
@@ -997,7 +998,8 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 
 	var success, acctExists bool
 
-	// When creating an account, the default is to maintain tier.
+	// When creating an account or registering a view-only account, the default
+	// is to maintain tier.
 	maintain := true
 	if form.MaintainTier != nil {
 		maintain = *form.MaintainTier
@@ -1026,21 +1028,15 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 			return nil, newError(bondAssetErr, "insufficient available balance")
 		}
 
-		maxBondedAmt := maxBondedMult * form.Bond // default
-		if form.MaxBondedAmt != nil {
-			maxBondedAmt = *form.MaxBondedAmt
-		}
 		// New DEX connection.
 		cert, err := parseCert(host, form.Cert, c.net)
 		if err != nil {
 			return nil, newError(fileReadErr, "failed to read certificate file from %s: %v", cert, err)
 		}
 		dc, err = c.connectDEX(&db.AccountInfo{
-			Host:         host,
-			Cert:         cert,
-			BondAsset:    bondAssetID,
-			MaxBondedAmt: maxBondedAmt,
-			// TargetTier set after determining this bond's strength.
+			Host: host,
+			Cert: cert,
+			// bond maintenance options set below.
 		})
 		if err != nil {
 			if dc != nil {
@@ -1111,7 +1107,7 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 			"(target tier %d, bond asset %d, maxBonded %v). "+
 			"Consider using UpdateBondOptions instead.",
 			targetTier, autoBondAsset, wallet.amtString(maxBondedAmt))
-	} else if maintain { // new account with tier maintenance enabled
+	} else if maintain { // new account (or registering a view-only acct) with tier maintenance enabled
 		// Fully pre-reserve funding with the wallet before making and
 		// transactions. bondConfirmed will call authDEX, which will recognize
 		// that it is the first authorization of the account with the DEX via
@@ -1121,10 +1117,15 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 			return nil, newError(bondAssetErr, "insufficient available balance to reserve %v for bonds plus fees",
 				wallet.amtString(mod))
 		}
+		maxBondedAmt := maxBondedMult * form.Bond // default
+		if form.MaxBondedAmt != nil {
+			maxBondedAmt = *form.MaxBondedAmt
+		}
 		dc.acct.authMtx.Lock()
 		dc.acct.totalReserved = int64(mod) // should have been zero already (new account == no existing bonds)
+		dc.acct.bondAsset = bondAssetID
 		dc.acct.targetTier = form.Bond / bondAsset.Amt
-		// maxBondedAmt and bondAsset were set by connectDEX
+		dc.acct.maxBondedAmt = maxBondedAmt
 		dc.acct.authMtx.Unlock()
 	}
 
@@ -1202,13 +1203,14 @@ func (c *Core) makeAndPostBond(dc *dexConnection, acctExists bool, wallet *xcWal
 		}
 	} else {
 		ai := &db.AccountInfo{
-			Host:       dc.acct.host,
-			Cert:       dc.acct.cert,
-			DEXPubKey:  dc.acct.dexPubKey,
-			EncKeyV2:   dc.acct.encKey,
-			Bonds:      []*db.Bond{dbBond},
-			BondAsset:  dc.acct.bondAsset,
-			TargetTier: dc.acct.targetTier,
+			Host:         dc.acct.host,
+			Cert:         dc.acct.cert,
+			DEXPubKey:    dc.acct.dexPubKey,
+			EncKeyV2:     dc.acct.encKey,
+			Bonds:        []*db.Bond{dbBond},
+			TargetTier:   dc.acct.targetTier,
+			MaxBondedAmt: dc.acct.maxBondedAmt,
+			BondAsset:    dc.acct.bondAsset,
 		}
 		err = c.dbCreateOrUpdateAccount(dc, ai)
 		if err != nil {
@@ -1261,7 +1263,6 @@ func (c *Core) updatePendingBondConfs(dc *dexConnection, assetID uint32, coinID 
 	defer dc.acct.authMtx.Unlock()
 	bondIDStr := coinIDString(assetID, coinID)
 	dc.acct.pendingBondsConfs[bondIDStr] = confs
-	c.log.Errorf("attempted to update confs for bond %s not in pending bonds slice", bondIDStr)
 }
 
 func (c *Core) bondConfirmed(dc *dexConnection, assetID uint32, coinID []byte, newTier int64) error {

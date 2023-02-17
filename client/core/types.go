@@ -743,14 +743,15 @@ type dexAccount struct {
 // newDEXAccount is a constructor for a new *dexAccount.
 func newDEXAccount(acctInfo *db.AccountInfo, viewOnly bool) *dexAccount {
 	return &dexAccount{
-		host:       acctInfo.Host,
-		cert:       acctInfo.Cert,
-		dexPubKey:  acctInfo.DEXPubKey,
-		viewOnly:   viewOnly,
-		encKey:     acctInfo.EncKey(), // privKey and id on decrypt
-		feeAssetID: acctInfo.LegacyFeeAssetID,
-		feeCoin:    acctInfo.LegacyFeeCoin,
-		isPaid:     acctInfo.LegacyFeePaid,
+		host:              acctInfo.Host,
+		cert:              acctInfo.Cert,
+		dexPubKey:         acctInfo.DEXPubKey,
+		viewOnly:          viewOnly,
+		encKey:            acctInfo.EncKey(), // privKey and id on decrypt
+		feeAssetID:        acctInfo.LegacyFeeAssetID,
+		feeCoin:           acctInfo.LegacyFeeCoin,
+		isPaid:            acctInfo.LegacyFeePaid,
+		pendingBondsConfs: make(map[string]uint32),
 		// bonds are set separately when categorized in connectDEX
 		targetTier:   acctInfo.TargetTier,
 		maxBondedAmt: acctInfo.MaxBondedAmt,

@@ -649,7 +649,31 @@ func (db *BoltDB) UpdateAccountInfo(ai *dexdb.AccountInfo) error {
 		if acct == nil {
 			return fmt.Errorf("account not found for %s", ai.Host)
 		}
-		return acct.Put(accountKey, ai.Encode())
+
+		err := acct.Put(accountKey, ai.Encode())
+		if err != nil {
+			return fmt.Errorf("accountKey put error: %w", err)
+		}
+
+		bonds, err := acct.CreateBucketIfNotExists(bondsSubBucket)
+		if err != nil {
+			return fmt.Errorf("unable to create bonds sub-bucket for account for %s: %w", ai.Host, err)
+		}
+
+		for _, bond := range ai.Bonds {
+			bondUID := bond.UniqueID()
+			bondBkt, err := bonds.CreateBucketIfNotExists(bondUID)
+			if err != nil {
+				return fmt.Errorf("failed to create bond %x bucket: %w", bondUID, err)
+			}
+
+			err = db.storeBond(bondBkt, bond)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
 	})
 }
 

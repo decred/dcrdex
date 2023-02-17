@@ -757,6 +757,9 @@ export default class MarketsPage extends BasePage {
         return
       }
       toggle()
+    } else if (market.dex.viewOnly) {
+      page.unregisteredDex.textContent = market.dex.host
+      Doc.show(page.notRegistered)
     } else if (this.hasPendingBonds()) {
       Doc.show(page.registrationStatus)
     } else {
@@ -793,8 +796,7 @@ export default class MarketsPage extends BasePage {
     page.qtyField.value = ''
     page.rateField.value = ''
 
-    Doc.hide(page.notRegistered)
-    Doc.hide(page.noWallet)
+    Doc.hide(page.notRegistered, page.bondRequired, page.noWallet)
 
     // If we have not yet connected, there is no dex.assets or any other
     // exchange data, so just put up a message and wait for the connection to be
@@ -840,11 +842,6 @@ export default class MarketsPage extends BasePage {
       rateConversionFactor,
       sellBalance: 0,
       buyBalance: 0
-    }
-
-    if (dex.viewOnly) {
-      page.unregisteredDex.textContent = host
-      Doc.show(page.notRegistered)
     }
 
     Doc.setVis(!(baseAsset && quoteAsset) || !(baseAsset.wallet && quoteAsset.wallet), page.noWallet)
