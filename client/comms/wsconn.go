@@ -70,13 +70,12 @@ func (cs ConnectionStatus) String() string {
 var invalidCertRegexp = regexp.MustCompile(".*(unknown authority|not standards compliant|not trusted)")
 
 // isErrorInvalidCert checks if the provided error is one of the different
-// variant of an invalid cert error returned from the x509 package or is
-// ErrInvalidCert.
+// variant of an invalid cert error returned from the x509 package.
 func isErrorInvalidCert(err error) bool {
 	var invalidCertErr x509.CertificateInvalidError
 	var unknownCertAuthErr x509.UnknownAuthorityError
 	var hostNameErr x509.HostnameError
-	return errors.Is(err, ErrInvalidCert) || errors.As(err, &invalidCertErr) || errors.As(err, &hostNameErr) ||
+	return errors.As(err, &invalidCertErr) || errors.As(err, &hostNameErr) ||
 		errors.As(err, &unknownCertAuthErr) || invalidCertRegexp.MatchString(err.Error())
 }
 
@@ -231,9 +230,9 @@ func (conn *wsConn) connect(ctx context.Context) error {
 		if isErrorInvalidCert(err) {
 			conn.setConnectionStatus(InvalidCert)
 			if conn.tlsCfg == nil {
-				return ErrCertRequired
+				return dex.NewError(ErrCertRequired, err.Error())
 			}
-			return ErrInvalidCert
+			return dex.NewError(ErrInvalidCert, err.Error())
 		}
 		conn.setConnectionStatus(Disconnected)
 		return err
