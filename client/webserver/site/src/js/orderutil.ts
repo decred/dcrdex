@@ -10,7 +10,7 @@ import { BooleanOption, XYRangeOption } from './opts'
 
 export const Limit = 1
 export const Market = 2
-export const CANCEL = 3
+export const Cancel = 3
 
 /* The time-in-force specifiers are a mirror of dex/order.TimeInForce. */
 export const ImmediateTiF = 0
@@ -82,7 +82,8 @@ export function statusString (order: Order): string {
       return isLive ? `${intl.prep(intl.ID_BOOKED)}/${intl.prep(intl.ID_SETTLING)}` : intl.prep(intl.ID_BOOKED)
     case StatusExecuted:
       if (isLive) return intl.prep(intl.ID_SETTLING)
-      return (order.filled === 0) ? intl.prep(intl.ID_NO_MATCH) : intl.prep(intl.ID_EXECUTED)
+      if (order.filled === 0 && order.type !== Cancel) return intl.prep(intl.ID_NO_MATCH)
+      return intl.prep(intl.ID_EXECUTED)
     case StatusCanceled:
       return isLive ? `${intl.prep(intl.ID_CANCELED)}/${intl.prep(intl.ID_SETTLING)}` : intl.prep(intl.ID_CANCELED)
     case StatusRevoked:
