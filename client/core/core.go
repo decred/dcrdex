@@ -1660,6 +1660,7 @@ const defaultDEXPort = "7232"
 
 // addrHost returns the host or url:port pair for an address.
 func addrHost(addr string) (string, error) {
+	addr = strings.TrimSpace(addr)
 	const defaultHost = "localhost"
 	const missingPort = "missing port in address"
 	// Empty addresses are localhost.
