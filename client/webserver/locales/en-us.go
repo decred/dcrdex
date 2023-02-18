@@ -94,6 +94,8 @@ var EnUS = map[string]string{
 	"fee balance":                    "fee balance",
 	"Sell Orders":                    "Sell Orders",
 	"Your Orders":                    "Your Orders",
+	"sweep_orders":                   "Hide fully executed orders",
+	"sweep_order":                    "Hide this fully executed order",
 	"Recent Matches":                 "Recent Matches",
 	"Type":                           "Type",
 	"Side":                           "Side",

@@ -407,12 +407,15 @@
               </div>
 
               {{- /* USER ORDERS */ -}}
-              <div class="text-center fs20 sans-light my-1">[[[Your Orders]]]</div>
+              <div class="position-relative text-center fs20 sans-light my-1">
+                [[[Your Orders]]]
+                <div id="sweepOrders" class="ico-sweep fs20 hoverbg pointer d-hide" data-tooltip="[[[sweep_orders]]]"></div>
+              </div>
               <div id="unreadyOrdersMsg" class="d-hide px-3 py-1 flex-center fs16 red">[[[unready_wallets_msg]]]</div>
               <div id="userNoOrders" class="p-3 flex-center fs16 grey">no active orders</div>
               <div id="userOrders" class="mb-3">
                 <div id="userOrderTmpl" class="user-order">
-                  <div data-tmpl="header" class="user-order-header">
+                  <div data-tmpl="header" class="user-order-header pointer">
                     <div data-tmpl="sideLight" class="side-indicator"></div>
                     <span data-tmpl="side"></span>
                     <span data-tmpl="qty" class="ms-1"></span>
@@ -428,10 +431,11 @@
                     <!-- <span class="fs11 ico-open ms-2"></span> -->
                   </div>
                   <div data-tmpl="details" class="order-details d-hide">
-                    <div class="user-order-datum full-span d-flex flex-row justify-content-start align-items-center brdrbottom fs12 p-2">
-                      <span data-tmpl="accelerateBttn" class="ico-rocket pointer hoverbg d-hide me-3" data-tooltip="[[[accelerate_order]]]"></span>
-                      <span data-tmpl="cancelBttn" class="ico-cross pointer hoverbg fs11 d-hide me-3" data-tooltip="[[[cancel_order]]]"></span>
-                      <a data-tmpl="link" class="ico-open pointer hoverbg me-3 fs13 plainlink" data-tooltip="[[[order details]]]"></a>
+                    <div class="user-order-datum full-span d-flex flex-row justify-content-start align-items-center brdrbottom fs14">
+                      <span data-tmpl="accelerateBttn" class="ico-rocket pointer hoverbg d-hide p-2" data-tooltip="[[[accelerate_order]]]"></span>
+                      <span data-tmpl="cancelBttn" class="ico-cross pointer hoverbg fs11 d-hide p-2" data-tooltip="[[[cancel_order]]]"></span>
+                      <span data-tmpl="sweepBttn" class="ico-sweep pointer hoverbg fs15 d-hide p-2" data-tooltip="[[[sweep_order]]]"></span>
+                      <a data-tmpl="link" class="ico-open pointer hoverbg me-3 fs13 plainlink p-2" data-tooltip="[[[order details]]]"></a>
                     </div>
                     <div class="user-order-datum">
                       <span>[[[Type]]]</span>

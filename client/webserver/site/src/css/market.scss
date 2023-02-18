@@ -121,6 +121,15 @@ div[data-handler=markets] {
     }
   }
 
+  #sweepOrders {
+    position: absolute;
+    right: 15px;
+    top: 50%;
+    transform: translateY(-50%);
+    line-height: 1;
+    padding: 6px;
+  }
+
   #unreadyOrdersMsg {
     color: red;
   }
@@ -893,5 +902,25 @@ div[data-handler=markets] {
   #recentMatchesBox {
     overflow: visible;
     max-height: none;
+  }
+}
+
+.user-order-floaty-menu {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  z-index: 5;
+  border: 1px solid;
+  border-color: $light_border_color $light_input_border $light_input_border $light_input_border;
+  padding: 0 10px;
+  background-color: $light_body_bg;
+  cursor: pointer;
+  overflow: hidden;
+
+  & > span,
+  & > a {
+    &:hover {
+      background-color: #7775;
+    }
   }
 }

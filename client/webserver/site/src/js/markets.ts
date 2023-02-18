@@ -445,6 +445,15 @@ export default class MarketsPage extends BasePage {
       this.activeMarkerRate = null
       this.setDepthMarkers()
     })
+    Doc.bind(page.sweepOrders, 'click', () => {
+      for (const [orderID, mord] of Object.entries(this.metaOrders)) {
+        if (sweepable(mord.ord)) {
+          mord.div.remove()
+          delete this.metaOrders[orderID]
+        }
+      }
+      Doc.hide(page.sweepOrders)
+    })
 
     const stats0 = page.marketStatsV1
     const stats1 = stats0.cloneNode(true) as PageElement
@@ -1496,9 +1505,11 @@ export default class MarketsPage extends BasePage {
         ord: ord
       }
 
+      const orderID = ord.id
+
       // No need to track in-flight orders here. We've already added it to
       // display.
-      if (ord.id) metaOrders[ord.id] = mord
+      if (orderID) metaOrders[orderID] = mord
 
       if (!ord.readyToTick) {
         headerEl.classList.add('unready-user-order')
@@ -1519,30 +1530,46 @@ export default class MarketsPage extends BasePage {
         this.setDepthMarkers()
       })
 
-      if (!ord.id) {
+      const showCancel = (e: Event) => {
+        e.stopPropagation()
+        this.showCancel(div, orderID)
+      }
+
+      const showAccelerate = (e: Event) => {
+        e.stopPropagation()
+        this.showAccelerate(ord)
+      }
+
+      const sweepOrder = (e: Event) => {
+        e.stopPropagation()
+        delete this.metaOrders[orderID]
+        div.remove()
+        this.setMasterSweeperVis()
+      }
+
+      if (!orderID) {
         Doc.hide(details.accelerateBttn)
         Doc.hide(details.cancelBttn)
         Doc.hide(details.link)
       } else {
-        if (ord.type === OrderUtil.Limit && (ord.tif === OrderUtil.StandingTiF && ord.status < OrderUtil.StatusExecuted)) {
+        if (OrderUtil.isCancellable(ord)) {
           Doc.show(details.cancelBttn)
-          bind(details.cancelBttn, 'click', e => {
-            e.stopPropagation()
-            this.showCancel(div, ord.id)
-          })
+          bind(details.cancelBttn, 'click', (e: Event) => { showCancel(e) })
         }
 
-        bind(details.accelerateBttn, 'click', e => {
-          e.stopPropagation()
-          this.showAccelerate(ord)
-        })
+        bind(details.accelerateBttn, 'click', (e: Event) => { showAccelerate(e) })
         if (app().canAccelerateOrder(ord)) {
           Doc.show(details.accelerateBttn)
         }
-        details.link.href = `order/${ord.id}`
+        Doc.bind(details.sweepBttn, 'click', (e: Event) => { sweepOrder(e) })
+        if (sweepable(ord)) {
+          Doc.show(details.sweepBttn)
+        }
+
+        details.link.href = `order/${orderID}`
         app().bindInternalNavigation(div)
       }
-
+      let currentFloater: (PageElement | null)
       Doc.bind(headerEl, 'click', () => {
         if (Doc.isDisplayed(detailsDiv)) {
           Doc.hide(detailsDiv)
@@ -1553,6 +1580,55 @@ export default class MarketsPage extends BasePage {
         Doc.show(detailsDiv)
         header.expander.classList.remove('ico-arrowdown')
         header.expander.classList.add('ico-arrowup')
+        if (currentFloater) currentFloater.remove()
+      })
+      /**
+       * We'll show the button menu when they hover over the header. To avoid
+       * pushing the layout around, we'll show the buttons as an absolutely
+       * positioned copy of the button menu.
+       */
+      Doc.bind(headerEl, 'mouseenter', () => {
+        // Don't show the copy if the details are already displayed.
+        if (Doc.isDisplayed(detailsDiv)) return
+        // Create and position the element based on the position of the header.
+        const floater = document.createElement('div')
+        currentFloater = floater
+        document.body.appendChild(floater)
+        floater.className = 'user-order-floaty-menu'
+        const m = Doc.layoutMetrics(headerEl)
+        floater.style.width = `${m.width}px`
+        floater.style.top = `${m.bodyTop + m.height}px`
+        floater.style.left = `${m.bodyLeft}px`
+        // Get the updated version of the order
+        const mord = this.metaOrders[orderID]
+        const ord = mord.ord
+
+        const addButton = (baseBttn: PageElement, cb: ((e: Event) => void)) => {
+          const icon = baseBttn.cloneNode(true) as PageElement
+          floater.appendChild(icon)
+          Doc.show(icon)
+          Doc.bind(icon, 'click', (e: Event) => { cb(e) })
+        }
+
+        if (OrderUtil.isCancellable(ord)) addButton(details.cancelBttn, (e: Event) => { showCancel(e) })
+        if (app().canAccelerateOrder(ord)) addButton(details.accelerateBttn, (e: Event) => { showAccelerate(e) })
+        if (sweepable(ord)) {
+          addButton(details.sweepBttn, (e: Event) => {
+            sweepOrder(e)
+            floater.remove()
+            this.setMasterSweeperVis()
+          })
+        }
+        floater.appendChild(details.link.cloneNode(true))
+
+        // Set up the hover interactions.
+        const moved = (e: MouseEvent) => {
+          if (Doc.mouseInElement(e, floater) || Doc.mouseInElement(e, div)) return
+          floater.remove()
+          currentFloater = null
+          document.removeEventListener('mousemove', moved)
+        }
+        document.addEventListener('mousemove', moved)
       })
       app().bindTooltips(div)
     }
@@ -1571,6 +1647,7 @@ export default class MarketsPage extends BasePage {
     details.age.textContent = Doc.timeSince(ord.submitTime)
     details.filled.textContent = `${(OrderUtil.filled(ord) / ord.qty * 100).toFixed(1)}%`
     details.settled.textContent = `${(OrderUtil.settled(ord) / ord.qty * 100).toFixed(1)}%`
+    if (ord.status >= OrderUtil.StatusExecuted && !OrderUtil.hasActiveMatches(ord)) Doc.show(details.sweepBttn)
   }
 
   /* setMarkers sets the depth chart markers for booked orders. */
@@ -2267,6 +2344,21 @@ export default class MarketsPage extends BasePage {
   }
 
   /*
+   * setMasterSweeperVis sets the visibility of the button that deletes away all
+   * fully-executted active order elements.
+   */
+  setMasterSweeperVis () {
+    let showMasterSweeper = false
+    for (const m of Object.values(this.metaOrders)) {
+      if (sweepable(m.ord)) {
+        showMasterSweeper = true
+        break
+      }
+    }
+    Doc.setVis(showMasterSweeper, this.page.sweepOrders)
+  }
+
+  /*
    * handleOrderNote is the handler for the 'order'-type notification, which are
    * used to update a user's order's status.
    */
@@ -2291,6 +2383,7 @@ export default class MarketsPage extends BasePage {
     if (app().canAccelerateOrder(order)) Doc.show(mord.details.accelerateBttn)
     else Doc.hide(mord.details.accelerateBttn)
     this.updateMetaOrder(mord)
+    this.setMasterSweeperVis()
     // Only reset markers if there is a change, since the chart is redrawn.
     if ((oldStatus === OrderUtil.StatusEpoch && order.status === OrderUtil.StatusBooked) ||
       (oldStatus === OrderUtil.StatusBooked && order.status > OrderUtil.StatusBooked)) this.setDepthMarkers()
@@ -3326,4 +3419,8 @@ function hostColor (host: string): string {
   const hosts = Object.keys(app().exchanges)
   hosts.sort()
   return generateHue(hosts.indexOf(host))
+}
+
+function sweepable (ord: Order): boolean {
+  return ord.status >= OrderUtil.StatusExecuted && !OrderUtil.hasActiveMatches(ord)
 }
