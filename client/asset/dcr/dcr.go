@@ -1209,8 +1209,7 @@ func (dcr *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate
 	estHighFees := estHighFunds - val
 
 	estLowFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), 1,
-		dexdcr.InitTxSizeBase, dexdcr.InitTxSize, bumpedNetRate)
-	estLowFunds += dexdcr.P2SHOutputSize * (lots - 1) * bumpedNetRate
+		dexdcr.InitTxSizeBase, dexdcr.InitTxSize, bumpedNetRate) // best means single multi-lot match, even better than batch
 	estLowFees := estLowFunds - val
 
 	// Math for split transactions is a little different.
