@@ -1155,7 +1155,7 @@ func TestFundEdges(t *testing.T) {
 	//                      = 85 + 9*34 + 166 = 557
 	const swapSize = 251
 	const totalBytes = 2510
-	const bestCaseBytes = 557
+	const bestCaseBytes = swapSize
 	const swapOutputSize = 34
 	fees := uint64(totalBytes) * tDCR.MaxFeeRate
 	p2pkhUnspent := walletjson.ListUnspentResult{
@@ -1180,9 +1180,9 @@ func TestFundEdges(t *testing.T) {
 	var feeReduction uint64 = swapSize * tDCR.MaxFeeRate
 	estFeeReduction := swapSize * feeSuggestion
 	checkMaxOrder(t, wallet, lots-1, swapVal-tLotSize,
-		fees-feeReduction,                            // max fees
-		totalBytes*feeSuggestion-estFeeReduction,     // worst case
-		(bestCaseBytes-swapOutputSize)*feeSuggestion) // best case
+		fees-feeReduction,                        // max fees
+		totalBytes*feeSuggestion-estFeeReduction, // worst case
+		bestCaseBytes*feeSuggestion)              // best case
 
 	_, _, err := wallet.FundOrder(ord)
 	if err == nil {
@@ -2396,7 +2396,9 @@ func TestPreSwap(t *testing.T) {
 	lots := swapVal / tLotSize // 10 lots
 
 	const totalBytes = 2510
-	const bestCaseBytes = 557
+	// base_best_case_bytes = swap_size_base + backing_bytes
+	//                      = 85 + 166 = 251
+	const bestCaseBytes = 251 // i.e. swapSize
 
 	backingFees := uint64(totalBytes) * tDCR.MaxFeeRate // total_bytes * fee_rate
 
