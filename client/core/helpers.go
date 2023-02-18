@@ -268,6 +268,9 @@ func (ord *OrderReader) hasActiveMatches() bool {
 }
 
 // StatusString is the order status.
+//
+// IMPORTANT: we have similar function in JS for UI, it must match this one exactly,
+// when updating make sure to update both!
 func (ord *OrderReader) StatusString() string {
 	isLive := ord.hasActiveMatches()
 	switch ord.Status {

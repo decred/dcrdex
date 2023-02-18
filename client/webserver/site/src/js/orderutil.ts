@@ -70,7 +70,12 @@ export function hasActiveMatches (order: Order) {
   return false
 }
 
-/* statusString converts the order status to a string */
+/**
+ * statusString converts the order status to a string.
+ *
+ * IMPORTANT: we have similar function in Golang, it must match this one exactly,
+ * when updating make sure to update both!
+ */
 export function statusString (order: Order): string {
   if (!order.id) return intl.prep(intl.ID_ORDER_SUBMITTING) // order ID is empty.
   const isLive = hasActiveMatches(order)
