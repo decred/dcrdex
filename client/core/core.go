@@ -1205,8 +1205,8 @@ func (c *Core) addDexConnection(dc *dexConnection) {
 }
 
 // Get the *dexConnection for the host. Return an error if the DEX is not
-// connected.
-func (c *Core) connectedDEX(addr string) (*dexConnection, error) {
+// registered, connected, and unlocked.
+func (c *Core) registeredDEX(addr string) (*dexConnection, error) {
 	dc, connected, err := c.dex(addr)
 	if err != nil {
 		return nil, err
@@ -5243,7 +5243,7 @@ func (c *Core) EstimateSendTxFee(address string, assetID uint32, amount uint64, 
 }
 
 func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
-	dc, err := c.connectedDEX(form.Host)
+	dc, err := c.registeredDEX(form.Host)
 	if err != nil {
 		return nil, err
 	}
@@ -5463,7 +5463,7 @@ func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, e
 		defer crypter.Close()
 	}
 
-	dc, err := c.connectedDEX(form.Host)
+	dc, err := c.registeredDEX(form.Host)
 	if err != nil {
 		return nil, err
 	}

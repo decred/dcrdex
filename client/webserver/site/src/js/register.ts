@@ -33,11 +33,17 @@ export default class RegistrationPage extends BasePage {
   walletWaitForm: WalletWaitForm
   confirmRegisterForm: ConfirmRegistrationForm
 
-  constructor (body: HTMLElement) {
+  constructor (body: HTMLElement, data: any) {
     super()
     this.body = body
     this.pwCache = { pw: '' }
     const page = this.page = Doc.idDescendants(body)
+
+    if (data.host && page.dexAddrForm.classList.contains('selected')) {
+      page.dexAddrForm.classList.remove('selected')
+      page.discoverAcctForm.classList.add('selected')
+      page.discoverAcctForm.dataset.host = data.host
+    }
 
     // Hide the form closers for the registration process.
     body.querySelectorAll('.form-closer').forEach(el => Doc.hide(el))

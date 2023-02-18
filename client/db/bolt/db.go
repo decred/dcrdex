@@ -584,11 +584,6 @@ func (db *BoltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 	if ai.DEXPubKey == nil {
 		return fmt.Errorf("nil DEXPubKey not allowed")
 	}
-	// TODO: Accept a viewOnly bool param to prevent unintentionally saving
-	// zero-length Enckey.
-	// if len(ai.EncKey()) == 0 {
-	// 	return fmt.Errorf("zero-length EncKey not allowed")
-	// }
 	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
 		acct, err := accts.CreateBucket([]byte(ai.Host))
 		if err != nil {

@@ -226,7 +226,7 @@ export default class MarketsPage extends BasePage {
     // TODO: Use dexsettings page?
     const registerBttn = Doc.tmplElement(page.notRegistered, 'registerBttn')
     bind(registerBttn, 'click', () => {
-      window.location.assign(`/register/${this.market.dex.host}`)
+      app().loadPage('register', { host: this.market.dex.host })
     })
 
     // Set up the BalanceWidget.
@@ -1999,10 +1999,13 @@ export default class MarketsPage extends BasePage {
    * handleFeePayment is the handler for the 'feepayment' notification type.
    * This is used to update the registration status of the current exchange.
    */
-  handleFeePayment (note: FeePaymentNote) {
+  async handleFeePayment (note: FeePaymentNote) {
     const dexAddr = note.dex
     if (dexAddr !== this.market.dex.host) return
-    // update local dex
+    // If we just finished legacy registration, we need to update the Exchange.
+    // TODO: Use tier change notification once available.
+    if (note.topic === 'AccountRegistered') await app().fetchUser()
+    // Update local copy of Exchange.
     this.market.dex = app().exchanges[dexAddr]
     this.setRegistrationStatusVisibility()
   }
