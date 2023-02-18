@@ -1353,12 +1353,11 @@ func TestFundEdges(t *testing.T) {
 	// total_bytes  = base_tx_bytes + backing_bytes = 2101 + 149 = 2250
 	// total_fees: base_fees + backing_fees = 71434 + 5066 = 76500 atoms
 	//          OR total_bytes * fee_rate = 2250 * 34 = 76500
-	// base_best_case_bytes = swap_size_base + (lots - 1) * swap_output_size (P2SHOutputSize) + backing_bytes
-	//                      = 76 + 9*32 + 149 = 513
+	// base_best_case_bytes = swap_size_base + backing_bytes
+	//                      = 76 + 149 = 225
 	const swapSize = 225
 	const totalBytes = 2250
-	const bestCaseBytes = 513
-	const swapOutputSize = 32                           // (P2SHOutputSize)
+	const bestCaseBytes = 225
 	backingFees := uint64(totalBytes) * tBTC.MaxFeeRate // total_bytes * fee_rate
 	p2pkhUnspent := &ListUnspentResult{
 		TxID:          tTxID,
@@ -1383,7 +1382,7 @@ func TestFundEdges(t *testing.T) {
 	estFeeReduction := swapSize * feeSuggestion
 	checkMaxOrder(t, wallet, lots-1, swapVal-tLotSize, backingFees-feeReduction,
 		totalBytes*feeSuggestion-estFeeReduction,
-		(bestCaseBytes-swapOutputSize)*feeSuggestion)
+		bestCaseBytes*feeSuggestion)
 
 	_, _, err := wallet.FundOrder(ord)
 	if err == nil {
@@ -1575,12 +1574,11 @@ func TestFundEdgesSegwit(t *testing.T) {
 	// total_bytes  = base_tx_bytes + backing_bytes = 1461 + 69 = 1530
 	// total_fees: base_fees + backing_fees = 49674 + 2346 = 52020 atoms
 	//          OR total_bytes * fee_rate = 1530 * 34 = 52020
-	// base_best_case_bytes = swap_size_base + (lots - 1) * swap_output_size (P2SHOutputSize) + backing_bytes
-	//                      = 84 + 9*43 + 69 = 540
+	// base_best_case_bytes = swap_size_base + backing_bytes
+	//                      = 84 + 69 = 153
 	const swapSize = 153
 	const totalBytes = 1530
-	const bestCaseBytes = 540
-	const swapOutputSize = 43                           // (P2WSHOutputSize)
+	const bestCaseBytes = 153
 	backingFees := uint64(totalBytes) * tBTC.MaxFeeRate // total_bytes * fee_rate
 	p2wpkhUnspent := &ListUnspentResult{
 		TxID:          tTxID,
@@ -1605,7 +1603,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 	estFeeReduction := swapSize * feeSuggestion
 	checkMaxOrder(t, wallet, lots-1, swapVal-tLotSize, backingFees-feeReduction,
 		totalBytes*feeSuggestion-estFeeReduction,
-		(bestCaseBytes-swapOutputSize)*feeSuggestion)
+		bestCaseBytes*feeSuggestion)
 
 	_, _, err := wallet.FundOrder(ord)
 	if err == nil {
@@ -2725,12 +2723,12 @@ func testPreSwap(t *testing.T, segwit bool, walletType string) {
 
 	// var swapSize = 225
 	var totalBytes uint64 = 2250
-	var bestCaseBytes uint64 = 513
+	var bestCaseBytes uint64 = 225
 	pkScript := tP2PKH
 	if segwit {
 		// swapSize = 153
 		totalBytes = 1530
-		bestCaseBytes = 540
+		bestCaseBytes = 153
 		pkScript = tP2WPKH
 	}
 

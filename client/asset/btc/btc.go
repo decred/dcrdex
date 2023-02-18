@@ -1728,12 +1728,7 @@ func (btc *baseWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, utxos [
 	estHighFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots, nfo.SwapSizeBase, nfo.SwapSize, bumpedNetRate)
 	estHighFees := estHighFunds - val
 
-	estLowFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), 1, nfo.SwapSizeBase, nfo.SwapSize, bumpedNetRate)
-	if btc.segwit {
-		estLowFunds += dexbtc.P2WSHOutputSize * (lots - 1) * bumpedNetRate
-	} else {
-		estLowFunds += dexbtc.P2SHOutputSize * (lots - 1) * bumpedNetRate
-	}
+	estLowFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), 1, nfo.SwapSizeBase, nfo.SwapSize, bumpedNetRate) // best means single multi-lot match, even better than batch
 	estLowFees := estLowFunds - val
 
 	// Math for split transactions is a little different.
