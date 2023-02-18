@@ -240,6 +240,11 @@ func (ai *AccountInfo) Encode() []byte {
 		AddData(ai.LegacyFeeCoin)
 }
 
+// ViewOnly is true if account keys are not saved.
+func (ai *AccountInfo) ViewOnly() bool {
+	return len(ai.EncKey()) == 0
+}
+
 // EncKey is the encrypted account private key.
 func (ai *AccountInfo) EncKey() []byte {
 	if len(ai.EncKeyV2) > 0 {

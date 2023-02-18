@@ -607,6 +607,7 @@ type Exchange struct {
 	BondAssets       map[string]*BondAsset  `json:"bondAssets"`
 	ConnectionStatus comms.ConnectionStatus `json:"connectionStatus"`
 	CandleDurs       []string               `json:"candleDurs"`
+	ViewOnly         bool                   `json:"viewOnly"`
 	Tier             int64                  `json:"tier"`
 	BondsPending     bool                   `json:"bondsPending"`
 	// TODO: a Bonds slice
@@ -699,10 +700,11 @@ type dexAccount struct {
 	cert      []byte
 	dexPubKey *secp256k1.PublicKey
 
-	keyMtx  sync.RWMutex
-	encKey  []byte
-	privKey *secp256k1.PrivateKey
-	id      account.AccountID
+	keyMtx   sync.RWMutex
+	viewOnly bool // true, unless account keys are generated AND saved to db
+	encKey   []byte
+	privKey  *secp256k1.PrivateKey
+	id       account.AccountID
 
 	authMtx       sync.RWMutex
 	isAuthed      bool
@@ -724,11 +726,12 @@ type dexAccount struct {
 }
 
 // newDEXAccount is a constructor for a new *dexAccount.
-func newDEXAccount(acctInfo *db.AccountInfo) *dexAccount {
+func newDEXAccount(acctInfo *db.AccountInfo, viewOnly bool) *dexAccount {
 	return &dexAccount{
 		host:       acctInfo.Host,
 		cert:       acctInfo.Cert,
 		dexPubKey:  acctInfo.DEXPubKey,
+		viewOnly:   viewOnly,
 		encKey:     acctInfo.EncKey(), // privKey and id on decrypt
 		feeAssetID: acctInfo.LegacyFeeAssetID,
 		feeCoin:    acctInfo.LegacyFeeCoin,
@@ -745,6 +748,13 @@ func (a *dexAccount) ID() account.AccountID {
 	a.keyMtx.RLock()
 	defer a.keyMtx.RUnlock()
 	return a.id
+}
+
+// isViewOnly is true if account keys have not been generated AND saved to db.
+func (a *dexAccount) isViewOnly() bool {
+	a.keyMtx.RLock()
+	defer a.keyMtx.RUnlock()
+	return a.viewOnly
 }
 
 // setupCryptoV2 generates a hierarchical deterministic key for the account.
@@ -878,6 +888,15 @@ func (a *dexAccount) auth(tier int64, legacyFeePaid bool) {
 	a.isAuthed = true
 	a.tier = tier
 	a.legacyFeePaid = legacyFeePaid
+	a.authMtx.Unlock()
+}
+
+// unAuth sets the account as not authenticated.
+func (a *dexAccount) unAuth() {
+	a.authMtx.Lock()
+	a.isAuthed = false
+	a.tier = 0
+	a.legacyFeePaid = false
 	a.authMtx.Unlock()
 }
 

@@ -276,6 +276,7 @@ func (c *Core) UpdateDEXHost(oldHost, newHost string, appPW []byte, certI interf
 	if err != nil {
 		return nil, codedError(passwordErr, err)
 	}
+	defer crypter.Close()
 
 	oldDc, _, err := c.dex(oldHost)
 	if err != nil {
@@ -319,9 +320,11 @@ func (c *Core) UpdateDEXHost(oldHost, newHost string, appPW []byte, certI interf
 
 	c.disconnectDEX(oldDc)
 
-	_, err = c.discoverAccount(newDc, crypter)
-	if err != nil {
-		return nil, err
+	if !oldDc.acct.isViewOnly() { // view-only dc should not discoverAcct
+		_, err = c.discoverAccount(newDc, crypter)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	err = c.db.DisableAccount(oldDc.acct.host)

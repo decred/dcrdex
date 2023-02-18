@@ -111,6 +111,7 @@ type clientCore interface {
 	AutoWalletConfig(assetID uint32, walletType string) (map[string]string, error)
 	User() *core.User
 	GetDEXConfig(dexAddr string, certI interface{}) (*core.Exchange, error)
+	AddDEX(dexAddr string, certI interface{}) error
 	DiscoverAccount(dexAddr string, pass []byte, certI interface{}) (*core.Exchange, bool, error)
 	SupportedAssets() map[uint32]*core.SupportedAsset
 	Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (asset.Coin, error)
@@ -314,7 +315,10 @@ func New(cfg *Config) (*WebServer, error) {
 		// The register page performs init if needed, along with
 		// initial setup and settings is used to register more DEXs
 		// after initial setup.
-		web.Get(registerRoute, s.handleRegister)
+		web.Route(registerRoute, func(rr chi.Router) {
+			rr.Get("/", s.handleRegister)
+			rr.With(dexHostCtx).Get("/{host}", s.handleRegister)
+		})
 		web.Get(settingsRoute, s.handleSettings)
 		web.With(dexHostCtx).Get("/dexsettings/{host}", s.handleDexSettings)
 
@@ -364,7 +368,8 @@ func New(cfg *Config) (*WebServer, error) {
 		r.Group(func(apiInit chi.Router) {
 			apiInit.Use(s.rejectUninited)
 			apiInit.Post("/login", s.apiLogin)
-			apiInit.Post("/getdexinfo", s.apiGetDEXInfo)
+			apiInit.Post("/getdexinfo", s.apiGetDEXInfo) // TODO: Seems unused.
+			apiInit.Post("/adddex", s.apiAddDEX)
 			apiInit.Post("/discoveracct", s.apiDiscoverAccount)
 			apiInit.Post("/regtxfee", s.apiEstimateRegistrationTxFee)
 		})

@@ -222,6 +222,13 @@ export default class MarketsPage extends BasePage {
     // TODO: Store user's state and reload last known configuration.
     this.candleDur = fiveMinBinKey
 
+    // Setup the register to trade button.
+    // TODO: Use dexsettings page?
+    const registerBttn = Doc.tmplElement(page.notRegistered, 'registerBttn')
+    bind(registerBttn, 'click', () => {
+      app().loadPage('register', { host: this.market.dex.host })
+    })
+
     // Set up the BalanceWidget.
     {
       page.walletInfoTmpl.removeAttribute('id')
@@ -549,11 +556,6 @@ export default class MarketsPage extends BasePage {
     return this.page.limitBttn.classList.contains('selected')
   }
 
-  /* hasFeePending is true if the fee payment is pending */
-  hasFeePending () {
-    return !!this.market.dex.pendingFee
-  }
-
   /* setStats updates the currently displayed market and spot price. */
   setStats (): void {
     const selected = this.market
@@ -662,14 +664,16 @@ export default class MarketsPage extends BasePage {
     // By default the order form should be hidden, and only if market is set
     // and ready for trading the form should show up.
     Doc.hide(page.orderForm, page.orderTypeBttns)
-    const feePaid = !this.hasFeePending()
-    const assetsAreSupported = this.assetsAreSupported().isSupported
+
+    if (!this.assetsAreSupported().isSupported) return // assets not supported
+
+    if (this.market.dex.tier < 1) return // acct suspended or not registered
+
     const { base, quote } = this.market
     const hasWallets = base && app().assets[base.id].wallet && quote && app().assets[quote.id].wallet
+    if (!hasWallets) return
 
-    if (feePaid && assetsAreSupported && hasWallets) {
-      Doc.show(page.orderForm, page.orderTypeBttns)
-    }
+    Doc.show(page.orderForm, page.orderTypeBttns)
   }
 
   /* setLoaderMsgVisibility displays a message in case a dex asset is not
@@ -686,6 +690,7 @@ export default class MarketsPage extends BasePage {
     }
     page.loaderMsg.textContent = text
     Doc.show(page.loaderMsg)
+    Doc.hide(page.notRegistered)
     Doc.hide(page.noWallet)
   }
 
@@ -778,6 +783,7 @@ export default class MarketsPage extends BasePage {
     page.qtyField.value = ''
     page.rateField.value = ''
 
+    Doc.hide(page.notRegistered)
     Doc.hide(page.noWallet)
 
     // If we have not yet connected, there is no dex.assets or any other
@@ -824,6 +830,11 @@ export default class MarketsPage extends BasePage {
       rateConversionFactor,
       sellBalance: 0,
       buyBalance: 0
+    }
+
+    if (dex.viewOnly) {
+      page.unregisteredDex.textContent = host
+      Doc.show(page.notRegistered)
     }
 
     Doc.setVis(!(baseAsset && quoteAsset) || !(baseAsset.wallet && quoteAsset.wallet), page.noWallet)
@@ -1988,10 +1999,13 @@ export default class MarketsPage extends BasePage {
    * handleFeePayment is the handler for the 'feepayment' notification type.
    * This is used to update the registration status of the current exchange.
    */
-  handleFeePayment (note: FeePaymentNote) {
+  async handleFeePayment (note: FeePaymentNote) {
     const dexAddr = note.dex
     if (dexAddr !== this.market.dex.host) return
-    // update local dex
+    // If we just finished legacy registration, we need to update the Exchange.
+    // TODO: Use tier change notification once available.
+    if (note.topic === 'AccountRegistered') await app().fetchUser()
+    // Update local copy of Exchange.
     this.market.dex = app().exchanges[dexAddr]
     this.setRegistrationStatusVisibility()
   }

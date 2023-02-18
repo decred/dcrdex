@@ -11,7 +11,7 @@
   </div>
   <div class="fs15 pt-3 text-center d-hide errcolor text-break" id="errMsg"></div>
   <div class="settings">
-    <div>
+    <div {{if .Exchange.ViewOnly}} class="d-hide"{{end}}>
       <button id="exportDexBtn" class="bg2 selected">[[[Export Account]]]</button>
     </div>
     <div>

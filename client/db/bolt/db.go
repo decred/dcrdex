@@ -584,9 +584,6 @@ func (db *BoltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 	if ai.DEXPubKey == nil {
 		return fmt.Errorf("nil DEXPubKey not allowed")
 	}
-	if len(ai.EncKey()) == 0 {
-		return fmt.Errorf("zero-length EncKey not allowed")
-	}
 	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
 		acct, err := accts.CreateBucket([]byte(ai.Host))
 		if err != nil {
@@ -676,12 +673,16 @@ func (db *BoltDB) DisableAccount(url string) error {
 	if err != nil {
 		return err
 	}
-	// Copy AccountInfo to disabledAccounts.
-	err = db.disabledAcctsUpdate(func(disabledAccounts *bbolt.Bucket) error {
-		return disabledAccounts.Put(ai.EncKey(), ai.Encode())
-	})
-	if err != nil {
-		return err
+	// Copy AccountInfo to disabledAccounts. Not necessary for view-only
+	// accounts.
+	acctKey := ai.EncKey()
+	if len(acctKey) > 0 {
+		err = db.disabledAcctsUpdate(func(disabledAccounts *bbolt.Bucket) error {
+			return disabledAccounts.Put(acctKey, ai.Encode())
+		})
+		if err != nil {
+			return err
+		}
 	}
 	// WARNING/TODO: account proof (fee paid info) not saved!
 	err = db.deleteAccount(ai.Host)

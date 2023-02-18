@@ -20,6 +20,8 @@ export interface Exchange {
   markets: Record<string, Market>
   assets: Record<number, Asset>
   connectionStatus: ConnectionStatus
+  viewOnly: boolean
+  tier: number
   feeAsset: FeeAsset // DEPRECATED. DCR.
   regFees: Record<string, FeeAsset>
   pendingFee: PendingFeeState | null

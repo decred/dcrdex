@@ -4,6 +4,7 @@ import { postJSON } from './http'
 import {
   NewWalletForm,
   DEXAddressForm,
+  DiscoverAccountForm,
   LoginForm,
   ConfirmRegistrationForm,
   FeeAssetSelectionForm,
@@ -26,16 +27,23 @@ export default class RegistrationPage extends BasePage {
   page: Record<string, PageElement>
   loginForm: LoginForm
   dexAddrForm: DEXAddressForm
+  discoverAcctForm: DiscoverAccountForm
   newWalletForm: NewWalletForm
   regAssetForm: FeeAssetSelectionForm
   walletWaitForm: WalletWaitForm
   confirmRegisterForm: ConfirmRegistrationForm
 
-  constructor (body: HTMLElement) {
+  constructor (body: HTMLElement, data: any) {
     super()
     this.body = body
     this.pwCache = { pw: '' }
     const page = this.page = Doc.idDescendants(body)
+
+    if (data.host && page.dexAddrForm.classList.contains('selected')) {
+      page.dexAddrForm.classList.remove('selected')
+      page.discoverAcctForm.classList.add('selected')
+      page.discoverAcctForm.dataset.host = data.host
+    }
 
     // Hide the form closers for the registration process.
     body.querySelectorAll('.form-closer').forEach(el => Doc.hide(el))
@@ -49,8 +57,13 @@ export default class RegistrationPage extends BasePage {
 
     this.loginForm = new LoginForm(page.loginForm, async () => {
       await app().fetchUser()
-      this.dexAddrForm.refresh()
-      slideSwap(page.loginForm, page.dexAddrForm)
+      if (this.discoverAcctForm) {
+        this.discoverAcctForm.refresh()
+        slideSwap(page.loginForm, page.discoverAcctForm)
+      } else {
+        this.dexAddrForm.refresh()
+        slideSwap(page.loginForm, page.dexAddrForm)
+      }
     }, this.pwCache)
 
     this.newWalletForm = new NewWalletForm(
@@ -62,12 +75,15 @@ export default class RegistrationPage extends BasePage {
 
     // ADD DEX
     this.dexAddrForm = new DEXAddressForm(page.dexAddrForm, async (xc, certFile) => {
-      this.currentDEX = xc
-      this.confirmRegisterForm.setExchange(xc, certFile)
-      this.walletWaitForm.setExchange(xc)
-      this.regAssetForm.setExchange(xc)
-      this.animateRegAsset(page.dexAddrForm)
+      this.requestFeepayment(page.dexAddrForm, xc, certFile)
     }, this.pwCache)
+
+    const addr = page.discoverAcctForm.dataset.host
+    if (addr) {
+      this.discoverAcctForm = new DiscoverAccountForm(page.discoverAcctForm, addr, async (xc) => {
+        this.requestFeepayment(page.discoverAcctForm, xc, '')
+      }, this.pwCache)
+    }
 
     // SELECT REG ASSET
     this.regAssetForm = new FeeAssetSelectionForm(page.regAssetForm, async assetID => {
@@ -109,6 +125,9 @@ export default class RegistrationPage extends BasePage {
         break
       case page.dexAddrForm:
         this.dexAddrForm.animate()
+        break
+      case page.discoverAcctForm:
+        this.discoverAcctForm.animate()
     }
     Doc.show(currentForm)
 
@@ -122,6 +141,14 @@ export default class RegistrationPage extends BasePage {
   // auth should be called once user is known to be authed with the server.
   async auth () {
     await app().fetchUser()
+  }
+
+  async requestFeepayment (oldForm: HTMLElement, xc: Exchange, certFile: string) {
+    this.currentDEX = xc
+    this.confirmRegisterForm.setExchange(xc, certFile)
+    this.walletWaitForm.setExchange(xc)
+    this.regAssetForm.setExchange(xc)
+    this.animateRegAsset(oldForm)
   }
 
   /* Swap in the asset selection form and run the animation. */

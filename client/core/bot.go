@@ -216,7 +216,7 @@ func createMakerBot(ctx context.Context, c *Core, pgm *MakerProgram) (*makerBot,
 	if err := validateProgram(pgm); err != nil {
 		return nil, err
 	}
-	dc, err := c.connectedDEX(pgm.Host)
+	dc, err := c.registeredDEX(pgm.Host)
 	if err != nil {
 		return nil, err
 	}

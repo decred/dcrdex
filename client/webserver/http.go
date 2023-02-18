@@ -83,16 +83,19 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 // registerTmplData is template data for the /register page.
 type registerTmplData struct {
 	CommonArguments
-	Initialized    bool
-	Authed         bool
 	KnownExchanges []string
+	// Host is optional. If provided, the register page will not display the add
+	// dex form, instead this host will be pre-selected for registration.
+	Host string
 }
 
 // handleRegister is the handler for the '/register' page request.
 func (s *WebServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 	common := s.commonArgs(r, "Register | Decred DEX")
+	host, _ := getHostCtx(r)
 	s.sendTemplate(w, "register", &registerTmplData{
 		CommonArguments: *common,
+		Host:            host,
 		KnownExchanges:  s.knownUnregisteredExchanges(common.UserInfo.Exchanges),
 	})
 }

@@ -20,6 +20,21 @@ import (
 
 var zero = encode.ClearBytes
 
+// apiAddDEX is the handler for the '/adddex' API request.
+func (s *WebServer) apiAddDEX(w http.ResponseWriter, r *http.Request) {
+	form := new(addDexForm)
+	if !readPost(w, r, form) {
+		return
+	}
+	cert := []byte(form.Cert)
+	err := s.core.AddDEX(form.Addr, cert)
+	if err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+	writeJSON(w, simpleAck(), s.indent)
+}
+
 // apiDiscoverAccount is the handler for the '/discoveracct' API request.
 func (s *WebServer) apiDiscoverAccount(w http.ResponseWriter, r *http.Request) {
 	form := new(registrationForm)

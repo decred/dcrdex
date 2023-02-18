@@ -584,6 +584,10 @@ func (c *TCore) GetDEXConfig(host string, certI interface{}) (*core.Exchange, er
 	return tExchanges[firstDEX], nil
 }
 
+func (c *TCore) AddDEX(dexAddr string, certI interface{}) error {
+	return nil
+}
+
 // DiscoverAccount - use secondDEX = "thisdexwithalongname.com" to get paid = true.
 func (c *TCore) DiscoverAccount(dexAddr string, pw []byte, certI interface{}) (*core.Exchange, bool, error) {
 	xc := tExchanges[dexAddr]
