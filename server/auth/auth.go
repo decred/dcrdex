@@ -966,7 +966,7 @@ func (auth *AuthManager) SwapSuccess(user account.AccountID, mmid db.MarketMatch
 // TODO: provide lots instead of value, or convert to lots somehow. But, Swapper
 // has no clue about lot size, and neither does DB!
 func (auth *AuthManager) Inaction(user account.AccountID, misstep NoActionStep, mmid db.MarketMatchID, matchValue uint64, refTime time.Time, oid order.OrderID) {
-	violation := SwapSuccess.Violation()
+	violation := misstep.Violation()
 	if violation == ViolationInvalid {
 		log.Errorf("Invalid inaction step %d", misstep)
 		return
