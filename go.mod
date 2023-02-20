@@ -3,7 +3,7 @@ module decred.org/dcrdex
 go 1.18
 
 require (
-	decred.org/dcrwallet/v2 v2.0.8
+	decred.org/dcrwallet/v2 v2.0.10
 	github.com/btcsuite/btcd v0.23.3
 	github.com/btcsuite/btcd/btcec/v2 v2.2.1
 	github.com/btcsuite/btcd/btcutil v1.1.2
@@ -17,7 +17,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1
 	github.com/dchest/blake2b v1.0.0
 	github.com/decred/base58 v1.0.4
-	github.com/decred/dcrd/addrmgr/v2 v2.0.0
+	github.com/decred/dcrd/addrmgr/v2 v2.0.1
 	github.com/decred/dcrd/blockchain/stake/v4 v4.0.0
 	github.com/decred/dcrd/blockchain/v4 v4.0.2
 	github.com/decred/dcrd/certgen v1.1.1

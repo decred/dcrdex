@@ -40,8 +40,8 @@ cloud.google.com/go/storage v1.10.0/go.mod h1:FLPqc6j+Ki4BU591ie1oL6qBQGu2Bl/tZ9
 contrib.go.opencensus.io/exporter/stackdriver v0.13.4/go.mod h1:aXENhDJ1Y4lIg4EUaVTwzvYETVNZk10Pu26tevFKLUc=
 decred.org/cspp/v2 v2.0.0 h1:b4fZrElRufz30rYnBZ2shhC8AjNVTN4i6TMzDi+hk44=
 decred.org/cspp/v2 v2.0.0/go.mod h1:0shJWKTWY3LxZEWGxtbER1Y45+HVjC0WZtj4bctSzCI=
-decred.org/dcrwallet/v2 v2.0.8 h1:ps0hU8SO2qnCjl4FxQxri8mO8MBWH4NRNW42hSN3E6o=
-decred.org/dcrwallet/v2 v2.0.8/go.mod h1:DEt4isEGSqMiMvo4scTX58oepPIwhTnaMCyTVPxCbzY=
+decred.org/dcrwallet/v2 v2.0.10 h1:ni/27pSDlIi8T/gj4oDYAyaMN+AFQ/ykcudk5UFQ9j4=
+decred.org/dcrwallet/v2 v2.0.10/go.mod h1:q4V2AiAAUBcGerp/jNm8IuN7r3Q9Avv13jhtUNIDzUw=
 dmitri.shuralyov.com/gpu/mtl v0.0.0-20190408044501-666a987793e9/go.mod h1:H6x//7gZCb22OMCxBHrMx7a5I7Hp++hsVxbQ4BYO7hU=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym/WlBOVXweHU+Q+/VP0lqqI8lqeDx9IjBqo=
@@ -217,8 +217,8 @@ github.com/deckarep/golang-set v1.8.0/go.mod h1:5nI87KwE7wgsBU1F4GKAw2Qod7p5kyS3
 github.com/decred/base58 v1.0.3/go.mod h1:pXP9cXCfM2sFLb2viz2FNIdeMWmZDBKG3ZBYbiSM78E=
 github.com/decred/base58 v1.0.4 h1:QJC6B0E0rXOPA8U/kw2rP+qiRJsUaE2Er+pYb3siUeA=
 github.com/decred/base58 v1.0.4/go.mod h1:jJswKPEdvpFpvf7dsDvFZyLT22xZ9lWqEByX38oGd9E=
-github.com/decred/dcrd/addrmgr/v2 v2.0.0 h1:ui8zpM+of+peJo19XGnFgwtrEK/boTyZpFzzqVUIWFk=
-github.com/decred/dcrd/addrmgr/v2 v2.0.0/go.mod h1:5g9jPzBSQotmSnPri4oc1n5VVgWzPLlXwbr6HGoUVrg=
+github.com/decred/dcrd/addrmgr/v2 v2.0.1 h1:o+AetOWZcSa2j2uVRf0gHvTSCmt4jMviKKpX/KgGQSw=
+github.com/decred/dcrd/addrmgr/v2 v2.0.1/go.mod h1:HcDrmMGqo2ilwjMi73YLwJQScv8djDPHgTV8kON8Wx4=
 github.com/decred/dcrd/blockchain/stake/v4 v4.0.0 h1:PwoCjCTbRvDUZKKs6N2Haus8XcbVXCJ9iGVs8C9sKwQ=
 github.com/decred/dcrd/blockchain/stake/v4 v4.0.0/go.mod h1:bOgG7YTbTOWQgtHLL2l1Y9gBHIuM86zwVcQtsoGlZlQ=
 github.com/decred/dcrd/blockchain/standalone/v2 v2.1.0 h1:aXh7a+86p+H65MGy0QKu4Juf3/j+Y5koVSyVYFMdqP0=
