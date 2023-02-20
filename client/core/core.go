@@ -6409,9 +6409,21 @@ func (c *Core) initialize() {
 		wg.Add(1)
 		go func(acct *db.AccountInfo) {
 			defer wg.Done()
-			if _, connected := c.connectAccount(acct); connected {
-				atomic.AddUint32(&liveConns, 1)
+			var connectFlag connectDEXFlag
+			if acct.ViewOnly() {
+				connectFlag |= connectDEXFlagViewOnly
 			}
+			dc, err := c.connectDEXWithFlag(acct, connectFlag)
+			if dc == nil {
+				c.log.Errorf("Unable to prepare DEX %s: %v", acct.Host, err)
+				return
+			}
+			// Connected or not, the dexConnection goes in the conns map now.
+			if err != nil {
+				c.log.Errorf("Trouble establishing connection to %s (will retry). Error: %v", acct.Host, err)
+			}
+			c.addDexConnection(dc)
+			atomic.AddUint32(&liveConns, 1)
 		}(acct)
 	}
 
@@ -6449,46 +6461,6 @@ func (c *Core) initialize() {
 				n, pluralize(n), host)
 		}
 	}
-}
-
-// connectAccount makes a connection to the DEX for the given account. If a
-// non-nil dexConnection is returned, it was inserted into the conns map even if
-// the initial connection attempt failed (connected == false), and the connect
-// retry / keepalive loop is active.
-func (c *Core) connectAccount(acct *db.AccountInfo) (dc *dexConnection, connected bool) {
-	// if !acct.Paid && len(acct.FeeCoin) == 0 {
-	// 	// Register should have set this when creating the account that was
-	// 	// obtained via db.Accounts.
-	// 	c.log.Warnf("Incomplete registration without fee payment detected for DEX %s. "+
-	// 		"Discarding account.", acct.Host)
-	// 	return
-	// }
-
-	host, err := addrHost(acct.Host)
-	if err != nil {
-		c.log.Errorf("skipping loading of %s due to address parse error: %v", host, err)
-		return
-	}
-
-	var connectFlag connectDEXFlag
-	if acct.ViewOnly() {
-		connectFlag |= connectDEXFlagViewOnly
-	}
-	dc, err = c.connectDEXWithFlag(acct, connectFlag)
-	if dc == nil {
-		c.log.Errorf("Unable to prepare DEX %s: %v", host, err)
-		return
-	}
-	// Connected or not, the dexConnection goes in the conns map now.
-	if err != nil {
-		c.log.Errorf("Trouble establishing connection to %s (will retry). Error: %v", host, err)
-	} else {
-		connected = true
-	}
-
-	c.addDexConnection(dc)
-
-	return
 }
 
 // feeLock is used to ensure that no more than one reFee check is running at a
