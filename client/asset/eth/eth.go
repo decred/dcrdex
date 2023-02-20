@@ -1146,18 +1146,18 @@ func (w *assetWallet) balance() (*asset.Balance, error) {
 // associated with nfo.MaxFeeRate. For quote assets, the caller will have to
 // calculate lotSize based on a rate conversion from the base asset's lot size.
 func (w *ETHWallet) MaxOrder(ord *asset.MaxOrderForm) (*asset.SwapEstimate, error) {
-	return w.maxOrder(ord.LotSize, ord.FeeSuggestion, ord.MaxFeeRate, ord.AssetVersion,
+	return w.maxOrder(ord.LotSize, ord.MaxFeeRate, ord.AssetVersion,
 		ord.RedeemVersion, ord.RedeemAssetID, nil)
 }
 
 // MaxOrder generates information about the maximum order size and associated
 // fees that the wallet can support for the given DEX configuration.
 func (w *TokenWallet) MaxOrder(ord *asset.MaxOrderForm) (*asset.SwapEstimate, error) {
-	return w.maxOrder(ord.LotSize, ord.FeeSuggestion, ord.MaxFeeRate, ord.AssetVersion,
+	return w.maxOrder(ord.LotSize, ord.MaxFeeRate, ord.AssetVersion,
 		ord.RedeemVersion, ord.RedeemAssetID, w.parent)
 }
 
-func (w *assetWallet) maxOrder(lotSize uint64, feeSuggestion, maxFeeRate uint64, ver uint32,
+func (w *assetWallet) maxOrder(lotSize uint64, maxFeeRate uint64, ver uint32,
 	redeemVer, redeemAssetID uint32, feeWallet *assetWallet) (*asset.SwapEstimate, error) {
 	balance, err := w.Balance()
 	if err != nil {
@@ -1193,7 +1193,7 @@ func (w *assetWallet) maxOrder(lotSize uint64, feeSuggestion, maxFeeRate uint64,
 	if lots < 1 {
 		return &asset.SwapEstimate{}, nil
 	}
-	return w.estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate, ver, redeemVer, redeemAssetID)
+	return w.estimateSwap(lots, lotSize, maxFeeRate, ver, redeemVer, redeemAssetID)
 }
 
 // PreSwap gets order estimates based on the available funds and the wallet
@@ -1209,7 +1209,7 @@ func (w *TokenWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
 }
 
 func (w *assetWallet) preSwap(req *asset.PreSwapForm, feeWallet *assetWallet) (*asset.PreSwap, error) {
-	maxEst, err := w.maxOrder(req.LotSize, req.FeeSuggestion, req.MaxFeeRate, req.Version,
+	maxEst, err := w.maxOrder(req.LotSize, req.MaxFeeRate, req.Version,
 		req.RedeemVersion, req.RedeemAssetID, feeWallet)
 	if err != nil {
 		return nil, err
@@ -1219,7 +1219,7 @@ func (w *assetWallet) preSwap(req *asset.PreSwapForm, feeWallet *assetWallet) (*
 		return nil, fmt.Errorf("%d lots available for %d-lot order", maxEst.Lots, req.Lots)
 	}
 
-	est, err := w.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion, req.MaxFeeRate,
+	est, err := w.estimateSwap(req.Lots, req.LotSize, req.MaxFeeRate,
 		req.Version, req.RedeemVersion, req.RedeemAssetID)
 	if err != nil {
 		return nil, err
@@ -1243,16 +1243,41 @@ func (w *assetWallet) SingleLotSwapFees(form *asset.PreSwapForm) (fees uint64, e
 
 // estimateSwap prepares an *asset.SwapEstimate. The estimate does not include
 // funds that might be locked for refunds.
-func (w *assetWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, maxFeeRate uint64, ver uint32,
+func (w *assetWallet) estimateSwap(lots, lotSize uint64, maxFeeRate uint64, ver uint32,
 	redeemVer, redeemAssetID uint32) (*asset.SwapEstimate, error) {
 	if lots == 0 {
 		return &asset.SwapEstimate{}, nil
 	}
 
-	oneSwap, nSwap, _, err := w.swapGas(int(lots), ver)
+	rateNow, err := w.currentFeeRate(w.ctx)
 	if err != nil {
-		return nil, fmt.Errorf("error getting swap gas estimate: %w", err)
+		return nil, err
 	}
+	rate, err := dexeth.WeiToGweiUint64(rateNow)
+	if err != nil {
+		return nil, fmt.Errorf("invalid current fee rate: %v", err)
+	}
+
+	// This is an estimate, so we use the (lower) live gas estimates. If we're
+	// not approved, we can't get a live gas estimate, but we'll use higher the
+	// hard-coded gases that are heavily padded for the txOps field.
+	var oneSwap uint64
+	if approved, err := w.isApproved(); err != nil {
+		return nil, fmt.Errorf("error checking approval: %w", err)
+	} else if !approved {
+		g := w.gases(ver)
+		if g == nil {
+			return nil, fmt.Errorf("no gases known for %d version %d", w.assetID, ver)
+		}
+		oneSwap = g.Swap
+	} else {
+		oneSwap, err = w.estimateInitGas(w.ctx, 1, ver)
+		if err != nil {
+			return nil, fmt.Errorf("(%d) error estimating swap gas: %v", w.assetID, err)
+		}
+	}
+	// NOTE: nSwap is neither best nor worst case. A single match can be
+	// multiple lots. See RealisticBestCase descriptions.
 
 	value := lots * lotSize
 	allowanceGas, err := w.allowanceGasRequired(redeemVer, redeemAssetID)
@@ -1267,8 +1292,8 @@ func (w *assetWallet) estimateSwap(lots, lotSize, feeSuggestion uint64, maxFeeRa
 		Lots:               lots,
 		Value:              value,
 		MaxFees:            maxFees,
-		RealisticWorstCase: oneGasMax * feeSuggestion,
-		RealisticBestCase:  (nSwap + allowanceGas) * feeSuggestion,
+		RealisticWorstCase: oneGasMax * rate,
+		RealisticBestCase:  (oneSwap + allowanceGas) * rate, // not even batch, just perfect match
 	}, nil
 }
 
@@ -3067,6 +3092,18 @@ func (eth *baseWallet) RegFeeConfirmations(ctx context.Context, coinID dex.Bytes
 	var txHash common.Hash
 	copy(txHash[:], coinID)
 	return eth.node.transactionConfirmations(ctx, txHash)
+}
+
+// currentFeeRate gives the current rate of transactions being mined. Only
+// use this to provide informative realistic estimates of actual fee *use*. For
+// transaction planning, use recommendedMaxFeeRate.
+func (eth *baseWallet) currentFeeRate(ctx context.Context) (*big.Int, error) {
+	base, tip, err := eth.node.currentFees(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("Error getting net fee state: %v", err)
+	}
+
+	return new(big.Int).Add(tip, base), nil
 }
 
 // recommendedMaxFeeRate finds a recommended max fee rate using the somewhat

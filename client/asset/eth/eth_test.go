@@ -1307,7 +1307,8 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 }
 
 func TestPreSwap(t *testing.T) {
-	const feeSuggestion = 90
+	const baseFee, tip = 42, 2
+	const feeSuggestion = 90 // ignored by eth's PreSwap
 	const lotSize = 10e9
 	oneFee := ethGases.Swap * tETH.MaxFeeRate
 	refund := ethGases.Refund * tETH.MaxFeeRate
@@ -1315,7 +1316,7 @@ func TestPreSwap(t *testing.T) {
 
 	oneFeeToken := tokenGases.Swap*tToken.MaxFeeRate + tokenGases.Refund*tToken.MaxFeeRate
 
-	tests := []struct {
+	type testData struct {
 		name      string
 		bal       uint64
 		balErr    error
@@ -1329,7 +1330,9 @@ func TestPreSwap(t *testing.T) {
 		wantMaxFees   uint64
 		wantWorstCase uint64
 		wantBestCase  uint64
-	}{
+	}
+
+	tests := []testData{
 		{
 			name: "no balance",
 			bal:  0,
@@ -1361,8 +1364,8 @@ func TestPreSwap(t *testing.T) {
 			wantLots:      1,
 			wantValue:     lotSize,
 			wantMaxFees:   tETH.MaxFeeRate * ethGases.Swap,
-			wantBestCase:  feeSuggestion * ethGases.Swap,
-			wantWorstCase: feeSuggestion * ethGases.Swap,
+			wantBestCase:  (baseFee + tip) * ethGases.Swap,
+			wantWorstCase: (baseFee + tip) * ethGases.Swap,
 		},
 		{
 			name:      "one lot enough for fees - token",
@@ -1374,8 +1377,8 @@ func TestPreSwap(t *testing.T) {
 			wantLots:      1,
 			wantValue:     lotSize,
 			wantMaxFees:   tToken.MaxFeeRate * tokenGases.Swap,
-			wantBestCase:  feeSuggestion * tokenGases.Swap,
-			wantWorstCase: feeSuggestion * tokenGases.Swap,
+			wantBestCase:  (baseFee + tip) * tokenGases.Swap,
+			wantWorstCase: (baseFee + tip) * tokenGases.Swap,
 		},
 		{
 			name: "more lots than max lots",
@@ -1401,8 +1404,8 @@ func TestPreSwap(t *testing.T) {
 			wantLots:      4,
 			wantValue:     4 * lotSize,
 			wantMaxFees:   4 * tETH.MaxFeeRate * ethGases.Swap,
-			wantBestCase:  feeSuggestion * ethGases.SwapN(4),
-			wantWorstCase: 4 * feeSuggestion * ethGases.Swap,
+			wantBestCase:  (baseFee + tip) * ethGases.Swap,
+			wantWorstCase: 4 * (baseFee + tip) * ethGases.Swap,
 		},
 		{
 			name:      "fewer than max lots - token",
@@ -1414,8 +1417,8 @@ func TestPreSwap(t *testing.T) {
 			wantLots:      4,
 			wantValue:     4 * lotSize,
 			wantMaxFees:   4 * tToken.MaxFeeRate * tokenGases.Swap,
-			wantBestCase:  feeSuggestion * tokenGases.SwapN(4),
-			wantWorstCase: 4 * feeSuggestion * tokenGases.Swap,
+			wantBestCase:  (baseFee + tip) * tokenGases.Swap,
+			wantWorstCase: 4 * (baseFee + tip) * tokenGases.Swap,
 		},
 		{
 			name:   "balanceError",
@@ -1436,7 +1439,7 @@ func TestPreSwap(t *testing.T) {
 		},
 	}
 
-	for _, test := range tests {
+	runTest := func(t *testing.T, test testData) {
 		var assetID uint32 = BipID
 		assetCfg := tETH
 		if test.token {
@@ -1446,8 +1449,11 @@ func TestPreSwap(t *testing.T) {
 
 		w, _, node, shutdown := tassetWallet(assetID)
 		defer shutdown()
+		node.baseFee, node.tip = dexeth.GweiToWei(baseFee), dexeth.GweiToWei(tip)
 
 		if test.token {
+			node.tContractor.gasEstimates = &tokenGases
+			node.tokenContractor.allow = unlimitedAllowance
 			node.tokenContractor.bal = dexeth.GweiToWei(test.bal)
 			node.bal = dexeth.GweiToWei(test.parentBal)
 		} else {
@@ -1461,38 +1467,44 @@ func TestPreSwap(t *testing.T) {
 			LotSize:       lotSize,
 			Lots:          test.lots,
 			MaxFeeRate:    assetCfg.MaxFeeRate,
-			FeeSuggestion: feeSuggestion,
+			FeeSuggestion: feeSuggestion, // ignored
 			RedeemVersion: tBTC.Version,
 			RedeemAssetID: tBTC.ID,
 		})
 
 		if test.wantErr {
 			if err == nil {
-				t.Fatalf("expected error for test %q", test.name)
+				t.Fatalf("expected error")
 			}
-			continue
+			return
 		}
 		if err != nil {
-			t.Fatalf("unexpected error for test %q: %v", test.name, err)
+			t.Fatalf("unexpected error: %v", err)
 		}
 
 		est := preSwap.Estimate
 
 		if est.Lots != test.wantLots {
-			t.Fatalf("want lots %v got %v for test %q", test.wantLots, est.Lots, test.name)
+			t.Fatalf("want lots %v got %v", test.wantLots, est.Lots)
 		}
 		if est.Value != test.wantValue {
-			t.Fatalf("want value %v got %v for test %q", test.wantValue, est.Value, test.name)
+			t.Fatalf("want value %v got %v", test.wantValue, est.Value)
 		}
 		if est.MaxFees != test.wantMaxFees {
-			t.Fatalf("want maxFees %v got %v for test %q", test.wantMaxFees, est.MaxFees, test.name)
+			t.Fatalf("want maxFees %v got %v", test.wantMaxFees, est.MaxFees)
 		}
 		if est.RealisticBestCase != test.wantBestCase {
-			t.Fatalf("want best case %v got %v for test %q", test.wantBestCase, est.RealisticBestCase, test.name)
+			t.Fatalf("want best case %v got %v", test.wantBestCase, est.RealisticBestCase)
 		}
 		if est.RealisticWorstCase != test.wantWorstCase {
-			t.Fatalf("want worst case %v got %v for test %q", test.wantWorstCase, est.RealisticWorstCase, test.name)
+			t.Fatalf("want worst case %v got %v", test.wantWorstCase, est.RealisticWorstCase)
 		}
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runTest(t, test)
+		})
 	}
 }
 
@@ -2363,7 +2375,9 @@ func testRedeem(t *testing.T, assetID uint32) {
 }
 
 func TestMaxOrder(t *testing.T) {
-	tests := []struct {
+	const baseFee, tip = 42, 2
+
+	type testData struct {
 		name          string
 		bal           uint64
 		balErr        error
@@ -2379,7 +2393,8 @@ func TestMaxOrder(t *testing.T) {
 		wantWorstCase uint64
 		wantBestCase  uint64
 		wantLocked    uint64
-	}{
+	}
+	tests := []testData{
 		{
 			name:          "no balance",
 			bal:           0,
@@ -2421,8 +2436,8 @@ func TestMaxOrder(t *testing.T) {
 			wantLots:      1,
 			wantValue:     ethToGwei(10),
 			wantMaxFees:   100 * ethGases.Swap,
-			wantBestCase:  90 * ethGases.Swap,
-			wantWorstCase: 90 * ethGases.Swap,
+			wantBestCase:  (baseFee + tip) * ethGases.Swap,
+			wantWorstCase: (baseFee + tip) * ethGases.Swap,
 			wantLocked:    ethToGwei(10) + (100 * ethGases.Swap),
 		},
 		{
@@ -2436,8 +2451,8 @@ func TestMaxOrder(t *testing.T) {
 			wantLots:      1,
 			wantValue:     ethToGwei(10),
 			wantMaxFees:   100 * tokenGases.Swap,
-			wantBestCase:  90 * tokenGases.Swap,
-			wantWorstCase: 90 * tokenGases.Swap,
+			wantBestCase:  (baseFee + tip) * tokenGases.Swap,
+			wantWorstCase: (baseFee + tip) * tokenGases.Swap,
 			wantLocked:    ethToGwei(10) + (100 * tokenGases.Swap),
 		},
 		{
@@ -2449,8 +2464,8 @@ func TestMaxOrder(t *testing.T) {
 			wantLots:      5,
 			wantValue:     ethToGwei(50),
 			wantMaxFees:   5 * 100 * ethGases.Swap,
-			wantBestCase:  90 * ethGases.SwapN(5),
-			wantWorstCase: 5 * 90 * ethGases.Swap,
+			wantBestCase:  (baseFee + tip) * ethGases.Swap,
+			wantWorstCase: 5 * (baseFee + tip) * ethGases.Swap,
 			wantLocked:    ethToGwei(50) + (5 * 100 * ethGases.Swap),
 		},
 		{
@@ -2464,8 +2479,8 @@ func TestMaxOrder(t *testing.T) {
 			wantLots:      5,
 			wantValue:     ethToGwei(50),
 			wantMaxFees:   5 * 100 * tokenGases.Swap,
-			wantBestCase:  90 * tokenGases.SwapN(5),
-			wantWorstCase: 5 * 90 * tokenGases.Swap,
+			wantBestCase:  (baseFee + tip) * tokenGases.Swap,
+			wantWorstCase: 5 * (baseFee + tip) * tokenGases.Swap,
 			wantLocked:    ethToGwei(50) + (5 * 100 * tokenGases.Swap),
 		},
 		{
@@ -2478,20 +2493,22 @@ func TestMaxOrder(t *testing.T) {
 			wantErr:       true,
 		},
 	}
-	redeemerAsset := tBTC
 
-	for _, test := range tests {
+	runTest := func(t *testing.T, test testData) {
 		var assetID uint32 = BipID
-		dexAsset := tETH
+		assetCfg := tETH
 		if test.token {
 			assetID = simnetTokenID
+			assetCfg = tToken
 		}
 
 		w, _, node, shutdown := tassetWallet(assetID)
 		defer shutdown()
+		node.baseFee, node.tip = dexeth.GweiToWei(baseFee), dexeth.GweiToWei(tip)
 
 		if test.token {
-			dexAsset = tToken
+			node.tContractor.gasEstimates = &tokenGases
+			node.tokenContractor.allow = unlimitedAllowance
 			node.tokenContractor.bal = dexeth.GweiToWei(ethToGwei(test.bal))
 			node.bal = dexeth.GweiToWei(ethToGwei(test.parentBal))
 		} else {
@@ -2500,41 +2517,45 @@ func TestMaxOrder(t *testing.T) {
 
 		node.balErr = test.balErr
 
-		dexAsset.MaxFeeRate = test.maxFeeRate
-
 		maxOrder, err := w.MaxOrder(&asset.MaxOrderForm{
 			LotSize:       ethToGwei(test.lotSize),
-			FeeSuggestion: test.feeSuggestion,
-			AssetVersion:  dexAsset.Version,
-			MaxFeeRate:    dexAsset.MaxFeeRate,
-			RedeemVersion: redeemerAsset.Version,
-			RedeemAssetID: redeemerAsset.ID,
+			FeeSuggestion: test.feeSuggestion, // ignored
+			AssetVersion:  assetCfg.Version,
+			MaxFeeRate:    test.maxFeeRate,
+			RedeemVersion: tBTC.Version,
+			RedeemAssetID: tBTC.ID,
 		})
 		if test.wantErr {
 			if err == nil {
-				t.Fatalf("expected error for test %q", test.name)
+				t.Fatalf("expected error")
 			}
-			continue
+			return
 		}
 		if err != nil {
-			t.Fatalf("unexpected error for test %q: %v", test.name, err)
+			t.Fatalf("unexpected error: %v", err)
 		}
 
 		if maxOrder.Lots != test.wantLots {
-			t.Fatalf("want lots %v got %v for test %q", test.wantLots, maxOrder.Lots, test.name)
+			t.Fatalf("want lots %v got %v", test.wantLots, maxOrder.Lots)
 		}
 		if maxOrder.Value != test.wantValue {
-			t.Fatalf("want value %v got %v for test %q", test.wantValue, maxOrder.Value, test.name)
+			t.Fatalf("want value %v got %v", test.wantValue, maxOrder.Value)
 		}
 		if maxOrder.MaxFees != test.wantMaxFees {
-			t.Fatalf("want maxFees %v got %v for test %q", test.wantMaxFees, maxOrder.MaxFees, test.name)
+			t.Fatalf("want maxFees %v got %v", test.wantMaxFees, maxOrder.MaxFees)
 		}
 		if maxOrder.RealisticBestCase != test.wantBestCase {
-			t.Fatalf("want best case %v got %v for test %q", test.wantBestCase, maxOrder.RealisticBestCase, test.name)
+			t.Fatalf("want best case %v got %v", test.wantBestCase, maxOrder.RealisticBestCase)
 		}
 		if maxOrder.RealisticWorstCase != test.wantWorstCase {
-			t.Fatalf("want worst case %v got %v for test %q", test.wantWorstCase, maxOrder.RealisticWorstCase, test.name)
+			t.Fatalf("want worst case %v got %v", test.wantWorstCase, maxOrder.RealisticWorstCase)
 		}
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runTest(t, test)
+		})
 	}
 }
 
