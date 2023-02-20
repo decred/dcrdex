@@ -700,11 +700,10 @@ type dexAccount struct {
 	cert      []byte
 	dexPubKey *secp256k1.PublicKey
 
-	keyMtx   sync.RWMutex
-	viewOnly bool // true, unless account keys are generated AND saved to db
-	encKey   []byte
-	privKey  *secp256k1.PrivateKey
-	id       account.AccountID
+	keyMtx  sync.RWMutex
+	encKey  []byte
+	privKey *secp256k1.PrivateKey
+	id      account.AccountID
 
 	authMtx       sync.RWMutex
 	isAuthed      bool
@@ -726,13 +725,12 @@ type dexAccount struct {
 }
 
 // newDEXAccount is a constructor for a new *dexAccount.
-func newDEXAccount(acctInfo *db.AccountInfo, viewOnly bool) *dexAccount {
+func newDEXAccount(acctInfo *db.AccountInfo) *dexAccount {
 	return &dexAccount{
 		host:       acctInfo.Host,
 		cert:       acctInfo.Cert,
 		dexPubKey:  acctInfo.DEXPubKey,
-		viewOnly:   viewOnly,
-		encKey:     acctInfo.EncKey(), // privKey and id on decrypt
+		encKey:     acctInfo.EncKey(), // privKey and id on decrypt, empty for view-only
 		feeAssetID: acctInfo.LegacyFeeAssetID,
 		feeCoin:    acctInfo.LegacyFeeCoin,
 		isPaid:     acctInfo.LegacyFeePaid,
@@ -748,13 +746,6 @@ func (a *dexAccount) ID() account.AccountID {
 	a.keyMtx.RLock()
 	defer a.keyMtx.RUnlock()
 	return a.id
-}
-
-// isViewOnly is true if account keys have not been generated AND saved to db.
-func (a *dexAccount) isViewOnly() bool {
-	a.keyMtx.RLock()
-	defer a.keyMtx.RUnlock()
-	return a.viewOnly
 }
 
 // setupCryptoV2 generates a hierarchical deterministic key for the account.
@@ -855,6 +846,12 @@ func (a *dexAccount) status() (initialized, unlocked bool) {
 	a.keyMtx.RLock()
 	defer a.keyMtx.RUnlock()
 	return len(a.encKey) > 0, a.privKey != nil
+}
+
+// isViewOnly is true if account keys have not been generated.
+func (a *dexAccount) isViewOnly() bool {
+	hasKeys, _ := a.status()
+	return !hasKeys
 }
 
 // locked will be true if the account private key is currently decrypted, or

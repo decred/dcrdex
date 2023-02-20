@@ -240,7 +240,7 @@ func (ai *AccountInfo) Encode() []byte {
 		AddData(ai.LegacyFeeCoin)
 }
 
-// ViewOnly is true if account keys are not saved.
+// ViewOnly is true if account keys (identity) do not exist.
 func (ai *AccountInfo) ViewOnly() bool {
 	return len(ai.EncKey()) == 0
 }
