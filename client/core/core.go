@@ -494,6 +494,8 @@ func (dc *dexConnection) exchangeInfo() *Exchange {
 	dc.acct.authMtx.RLock()
 	// TODO: List bonds in core.Exchange. For now, just tier.
 	tier := dc.acct.tier
+	bondAssetID := dc.acct.bondAsset
+	targetTier, maxBondedAmt := dc.acct.targetTier, dc.acct.maxBondedAmt
 	dc.acct.authMtx.RUnlock()
 
 	return &Exchange{
@@ -507,7 +509,12 @@ func (dc *dexConnection) exchangeInfo() *Exchange {
 		CandleDurs:       cfg.BinSizes,
 		ViewOnly:         dc.acct.isViewOnly(),
 		Tier:             tier,
-		PendingBonds:     dc.pendingBonds(),
+		BondOptions: &BondOptions{
+			BondAsset:    bondAssetID,
+			TargetTier:   targetTier,
+			MaxBondedAmt: maxBondedAmt,
+		},
+		PendingBonds: dc.pendingBonds(),
 		// TODO: Bonds
 
 		// Legacy reg fee (V0PURGE)

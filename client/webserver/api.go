@@ -307,6 +307,22 @@ func (s *WebServer) apiPostBond(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
+// apiUpdateBondOptions is the handler for the '/updatebondoptions' API request.
+func (s *WebServer) apiUpdateBondOptions(w http.ResponseWriter, r *http.Request) {
+	form := new(core.BondOptionsForm)
+	if !readPost(w, r, form) {
+		return
+	}
+
+	err := s.core.UpdateBondOptions(form)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("update bond options error: %w", err))
+		return
+	}
+
+	writeJSON(w, simpleAck(), s.indent)
+}
+
 // apiNewWallet is the handler for the '/newwallet' API request.
 func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 	form := new(newWalletForm)
