@@ -282,6 +282,11 @@ echo "Starting simnet delta node"
 	"_" "_" "_" "_" "$DELTA_ADDRESS_JSON" "$DELTA_ADDRESS_JSON_FILE_NAME" \
 	"$DELTA_NODE_KEY" "light" "$DELTA_AUTHRPC_PORT"
 
+# Miner
+tmux new-window -t $SESSION:5 -n "miner" $SHELL
+tmux send-keys -t $SESSION:5 "cd ${NODES_ROOT}/harness-ctl" C-m
+tmux send-keys -t $SESSION:5 "watch -n 20 ./mine-alpha 1" C-m
+
 sleep 1
 
 # NOTE: Connecting a node will add for both. Also, light nodes take longer to
