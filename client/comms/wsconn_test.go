@@ -263,13 +263,13 @@ func TestWsConn(t *testing.T) {
 	err = noCertConnMaster.Connect(ctx)
 	noCertConnMaster.Disconnect()
 	if err == nil || !errors.Is(err, ErrCertRequired) {
-		t.Fatalf("failed to get ErrCertRequired for no cert connection")
+		t.Fatalf("failed to get ErrCertRequired for no cert connection, got %v", err)
 	}
 
 	// test invalid cert error
 	_, err = setupWsConn([]byte("invalid cert"))
 	if err == nil || !errors.Is(err, ErrInvalidCert) {
-		t.Fatalf("failed to get ErrInvalidCert for invalid cert connection")
+		t.Fatalf("failed to get ErrInvalidCert for invalid cert connection, got %v", err)
 	}
 
 	// connect with cert
