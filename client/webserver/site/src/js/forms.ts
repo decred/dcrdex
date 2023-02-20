@@ -57,7 +57,7 @@ interface WalletConfig {
 
 /*
  * NewWalletForm should be used with the "newWalletForm" template. The enclosing
- * <form> element should be the second argument of the constructor.
+ * <form> element should be the first argument of the constructor.
  */
 export class NewWalletForm {
   page: Record<string, PageElement>
@@ -726,7 +726,7 @@ export class ConfirmRegistrationForm {
     this.pwCache = pwCache
 
     Doc.bind(this.page.goBack, 'click', () => goBack())
-    Doc.bind(this.page.bondStrengthField, 'change', () => {
+    Doc.bind(this.page.bondStrengthField, 'input', () => {
       const asset = app().assets[this.feeAssetID]
       if (!asset) return
       const ui = asset.unitInfo

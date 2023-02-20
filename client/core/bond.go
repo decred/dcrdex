@@ -773,7 +773,7 @@ func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
 		return errors.New("login or register first")
 	}
 
-	// Revert to initial vals on any error.
+	// Revert to initial values if we encounter any error below.
 	bondAssetID0 = dc.acct.bondAsset
 	targetTier0, maxBondedAmt0 = dc.acct.targetTier, dc.acct.maxBondedAmt
 	totalReserved0 := dc.acct.totalReserved
@@ -1202,15 +1202,16 @@ func (c *Core) makeAndPostBond(dc *dexConnection, acctExists bool, wallet *xcWal
 				bondCoinStr, unbip(bond.AssetID), dc.acct.host, err)
 		}
 	} else {
+		bondAsset, targetTier, maxBondedAmt := dc.bondOpts()
 		ai := &db.AccountInfo{
 			Host:         dc.acct.host,
 			Cert:         dc.acct.cert,
 			DEXPubKey:    dc.acct.dexPubKey,
 			EncKeyV2:     dc.acct.encKey,
 			Bonds:        []*db.Bond{dbBond},
-			TargetTier:   dc.acct.targetTier,
-			MaxBondedAmt: dc.acct.maxBondedAmt,
-			BondAsset:    dc.acct.bondAsset,
+			TargetTier:   targetTier,
+			MaxBondedAmt: maxBondedAmt,
+			BondAsset:    bondAsset,
 		}
 		err = c.dbCreateOrUpdateAccount(dc, ai)
 		if err != nil {

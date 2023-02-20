@@ -608,6 +608,9 @@ func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) {
 func (c *TCore) PostBond(r *core.PostBondForm) (*core.PostBondResult, error) {
 	return nil, nil
 }
+func (c *TCore) UpdateBondOptions(form *core.BondOptionsForm) error {
+	return nil
+}
 func (c *TCore) EstimateRegistrationTxFee(host string, certI interface{}, assetID uint32) (uint64, error) {
 	xc := tExchanges[host]
 	if xc == nil {

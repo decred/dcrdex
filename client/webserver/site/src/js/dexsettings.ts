@@ -32,6 +32,7 @@ export default class DexSettingsPage extends BasePage {
 
     Doc.bind(page.exportDexBtn, 'click', () => this.prepareAccountExport(page.authorizeAccountExportForm))
     Doc.bind(page.disableAcctBtn, 'click', () => this.prepareAccountDisable(page.disableAccountForm))
+    Doc.bind(page.updateBondOptionsBtn, 'click', () => this.prepareUpdateBondOptions())
     Doc.bind(page.updateCertBtn, 'click', () => page.certFileInput.click())
     Doc.bind(page.updateHostBtn, 'click', () => this.prepareUpdateHost())
     Doc.bind(page.certFileInput, 'change', () => this.onCertFileChange())
@@ -40,6 +41,7 @@ export default class DexSettingsPage extends BasePage {
       window.location.assign(`/dexsettings/${xc.host}`)
     }, undefined, this.host)
 
+    forms.bind(page.updateBondOptionsForm, page.updateBondOptionsConfirm, () => this.updateBondOptions())
     forms.bind(page.authorizeAccountExportForm, page.authorizeExportAccountConfirm, () => this.exportAccount())
     forms.bind(page.disableAccountForm, page.disableAccountConfirm, () => this.disableAccount())
 
@@ -153,6 +155,24 @@ export default class DexSettingsPage extends BasePage {
     this.showForm(disableAccountForm)
   }
 
+  // prepareUpdateBondOptions resets and prepares the Update Bond Options form.
+  async prepareUpdateBondOptions () {
+    const page = this.page
+    const xc = app().user.exchanges[this.host]
+    page.bondTargetTier.setAttribute('placeholder', xc.bondOptions.targetTier.toString())
+    Doc.empty(page.bondAssetSelect)
+    for (const [assetSymbol, bondAsset] of Object.entries(xc.bondAssets)) {
+      const option = document.createElement('option') as HTMLOptionElement
+      option.value = bondAsset.id.toString()
+      option.textContent = assetSymbol.toUpperCase()
+      if (bondAsset.id === xc.bondOptions.bondAsset) option.selected = true
+      page.bondAssetSelect.appendChild(option)
+    }
+    page.bondOptionsErr.textContent = ''
+    Doc.hide(page.bondOptionsErr)
+    this.showForm(page.updateBondOptionsForm)
+  }
+
   async prepareUpdateHost () {
     const page = this.page
     this.dexAddrForm.refresh()
@@ -205,6 +225,41 @@ export default class DexSettingsPage extends BasePage {
           displayIcons(false)
           page.connectionStatus.textContent = `${intl.prep(intl.ID_DISCONNECTED)} - ${intl.prep(intl.ID_INVALID_CERTIFICATE)}`
       }
+    }
+  }
+
+  /*
+   * updateBondOptions is called when the form to update bond options is
+   * submitted.
+   */
+  async updateBondOptions () {
+    const page = this.page
+    const targetTier = parseInt(page.bondTargetTier.value ?? '')
+    const bondAsset = parseInt(page.bondAssetSelect.value ?? '')
+
+    const bondOptions = {
+      host: this.host,
+      targetTier: targetTier,
+      bondAsset: bondAsset
+    }
+
+    const loaded = app().loading(this.body)
+    const res = await postJSON('/api/updatebondoptions', bondOptions)
+    loaded()
+    if (!app().checkResponse(res)) {
+      page.bondOptionsErr.textContent = res.msg
+      Doc.show(page.bondOptionsErr)
+    } else {
+      Doc.hide(page.bondOptionsErr)
+      Doc.show(page.bondOptionsMsg)
+      setTimeout(() => {
+        Doc.hide(page.bondOptionsMsg)
+        Doc.hide(page.forms)
+      }, 5000)
+      // update the in-memory values.
+      const xc = app().user.exchanges[this.host]
+      xc.bondOptions.bondAsset = bondAsset
+      xc.bondOptions.targetTier = targetTier
     }
   }
 }

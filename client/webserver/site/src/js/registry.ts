@@ -14,6 +14,12 @@ export enum ConnectionStatus {
   InvalidCert = 2,
 }
 
+export interface BondOptions {
+  bondAsset: number
+  targetTier: number
+  maxBondedAmt: number
+}
+
 export interface Exchange {
   host: string
   acctID: string
@@ -23,6 +29,7 @@ export interface Exchange {
   viewOnly: boolean
   bondAssets: Record<string, BondAsset>
   tier: number
+  bondOptions: BondOptions
   pendingBonds: Record<string, PendingBondState>
   candleDurs: string[]
 }

@@ -92,6 +92,7 @@ type clientCore interface {
 	Exchange(host string) (*core.Exchange, error)
 	Register(*core.RegisterForm) (*core.RegisterResult, error)
 	PostBond(form *core.PostBondForm) (*core.PostBondResult, error)
+	UpdateBondOptions(form *core.BondOptionsForm) error
 	Login(pw []byte) error
 	InitializeClient(pw, seed []byte) error
 	AssetBalance(assetID uint32) (*core.WalletBalance, error)
@@ -380,6 +381,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/defaultwalletcfg", s.apiDefaultWalletCfg)
 			apiAuth.Post("/register", s.apiRegister)
 			apiAuth.Post("/postbond", s.apiPostBond)
+			apiAuth.Post("/updatebondoptions", s.apiUpdateBondOptions)
 			apiAuth.Post("/newwallet", s.apiNewWallet)
 			apiAuth.Post("/openwallet", s.apiOpenWallet)
 			apiAuth.Post("/depositaddress", s.apiNewDepositAddress)

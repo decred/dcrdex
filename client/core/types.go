@@ -609,6 +609,13 @@ type PendingBondState struct {
 // PendingFeeState is deprecated (V0PURGE), but the same as PendingBondState.
 type PendingFeeState PendingBondState
 
+// BondOptions are auto-bond maintenance settings for a particular DEX.
+type BondOptions struct {
+	BondAsset    uint32 `json:"bondAsset"`
+	TargetTier   uint64 `json:"targetTier"`
+	MaxBondedAmt uint64 `json:"maxBondedAmt"`
+}
+
 // Exchange represents a single DEX with any number of markets.
 type Exchange struct {
 	Host             string                       `json:"host"`
@@ -621,6 +628,7 @@ type Exchange struct {
 	CandleDurs       []string                     `json:"candleDurs"`
 	ViewOnly         bool                         `json:"viewOnly"`
 	Tier             int64                        `json:"tier"`
+	BondOptions      *BondOptions                 `json:"bondOptions"`
 	PendingBonds     map[string]*PendingBondState `json:"pendingBonds"`
 	// TODO: Bonds slice(s) - and a LockedInBonds(assetID) method
 
