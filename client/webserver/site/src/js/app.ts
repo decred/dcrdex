@@ -9,7 +9,7 @@ import OrdersPage from './orders'
 import OrderPage from './order'
 import DexSettingsPage from './dexsettings'
 import MarketMakerPage from './mm'
-import { RateEncodingFactor, StatusExecuted, hasLiveMatches } from './orderutil'
+import { RateEncodingFactor, StatusExecuted, hasActiveMatches } from './orderutil'
 import { getJSON, postJSON, Errors } from './http'
 import * as ntfn from './notifications'
 import ws from './ws'
@@ -807,26 +807,15 @@ export default class Application {
    * haveActiveOrders returns whether or not there are active orders involving a
    * certain asset.
    */
-  haveAssetOrders (assetID: number): boolean {
+  haveActiveOrders (assetID: number): boolean {
     for (const xc of Object.values(this.user.exchanges)) {
       if (!xc.markets) continue
       for (const market of Object.values(xc.markets)) {
         if (!market.orders) continue
         for (const ord of market.orders) {
           if ((ord.baseID === assetID || ord.quoteID === assetID) &&
-            (ord.status < StatusExecuted || hasLiveMatches(ord))) return true
+            (ord.status < StatusExecuted || hasActiveMatches(ord))) return true
         }
-      }
-    }
-    return false
-  }
-
-  walletIsActive (assetID: number): boolean {
-    if (this.haveAssetOrders(assetID)) return true
-    for (const xc of Object.values(this.user.exchanges)) {
-      if (!xc) continue
-      if (xc.pendingFee && xc.pendingFee.assetID === assetID) {
-        return true
       }
     }
     return false

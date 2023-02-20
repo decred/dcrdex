@@ -10,7 +10,7 @@ import { BooleanOption, XYRangeOption } from './opts'
 
 export const Limit = 1
 export const Market = 2
-export const CANCEL = 3
+export const Cancel = 3
 
 /* The time-in-force specifiers are a mirror of dex/order.TimeInForce. */
 export const ImmediateTiF = 0
@@ -59,21 +59,26 @@ export function isMarketBuy (ord: Order) {
 }
 
 /*
- * hasLiveMatches returns true if the order has matches that have not completed
+ * hasActiveMatches returns true if the order has matches that have not completed
  * settlement yet.
  */
-export function hasLiveMatches (order: Order) {
+export function hasActiveMatches (order: Order) {
   if (!order.matches) return false
   for (const match of order.matches) {
-    if (!match.revoked && match.status < MakerRedeemed) return true
+    if (match.active) return true
   }
   return false
 }
 
-/* statusString converts the order status to a string */
+/**
+ * statusString converts the order status to a string.
+ *
+ * IMPORTANT: we have similar function in Golang, it must match this one exactly,
+ * when updating make sure to update both!
+ */
 export function statusString (order: Order): string {
   if (!order.id) return intl.prep(intl.ID_ORDER_SUBMITTING) // order ID is empty.
-  const isLive = hasLiveMatches(order)
+  const isLive = hasActiveMatches(order)
   switch (order.status) {
     case StatusUnknown: return intl.prep(intl.ID_UNKNOWN)
     case StatusEpoch: return intl.prep(intl.ID_EPOCH)
@@ -82,13 +87,14 @@ export function statusString (order: Order): string {
       return isLive ? `${intl.prep(intl.ID_BOOKED)}/${intl.prep(intl.ID_SETTLING)}` : intl.prep(intl.ID_BOOKED)
     case StatusExecuted:
       if (isLive) return intl.prep(intl.ID_SETTLING)
-      return (order.filled === 0) ? intl.prep(intl.ID_NO_MATCH) : intl.prep(intl.ID_EXECUTED)
+      if (order.filled === 0 && order.type !== Cancel) return intl.prep(intl.ID_NO_MATCH)
+      return intl.prep(intl.ID_EXECUTED)
     case StatusCanceled:
       return isLive ? `${intl.prep(intl.ID_CANCELED)}/${intl.prep(intl.ID_SETTLING)}` : intl.prep(intl.ID_CANCELED)
     case StatusRevoked:
       return isLive ? `${intl.prep(intl.ID_REVOKED)}/${intl.prep(intl.ID_SETTLING)}` : intl.prep(intl.ID_REVOKED)
   }
-  return ''
+  return intl.prep(intl.ID_UNKNOWN)
 }
 
 /* filled sums the quantities of non-cancel matches available. */

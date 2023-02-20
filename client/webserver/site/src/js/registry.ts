@@ -598,8 +598,7 @@ export interface Application {
   prependListElement (noteList: HTMLElement, note: CoreNote, el: NoteElement): void
   loading (el: HTMLElement): () => void
   orders (host: string, mktID: string): Order[]
-  haveAssetOrders (assetID: number): boolean
-  walletIsActive (assetID: number): boolean
+  haveActiveOrders (assetID: number): boolean
   order (oid: string): Order | null
   canAccelerateOrder(order: Order): boolean
   unitInfo (assetID: number, xc?: Exchange): UnitInfo
