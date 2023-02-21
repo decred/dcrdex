@@ -1,4 +1,4 @@
-//go:build !spvlive
+//go:build !spvlive && !harness
 
 package btc
 
@@ -1395,9 +1395,10 @@ func TestFundEdges(t *testing.T) {
 
 	var feeReduction uint64 = swapSize * tBTC.MaxFeeRate
 	estFeeReduction := swapSize * feeSuggestion
-	checkMaxOrder(t, wallet, lots-1, swapVal-tLotSize, backingFees-feeReduction,
-		totalBytes*feeSuggestion-estFeeReduction,
-		bestCaseBytes*feeSuggestion)
+	splitFees := splitTxBaggage * tBTC.MaxFeeRate
+	checkMaxOrder(t, wallet, lots-1, swapVal-tLotSize, backingFees+splitFees-feeReduction,
+		(totalBytes+splitTxBaggage)*feeSuggestion-estFeeReduction,
+		(bestCaseBytes+splitTxBaggage)*feeSuggestion)
 
 	_, _, err := wallet.FundOrder(ord)
 	if err == nil {
@@ -1617,9 +1618,10 @@ func TestFundEdgesSegwit(t *testing.T) {
 
 	var feeReduction uint64 = swapSize * tBTC.MaxFeeRate
 	estFeeReduction := swapSize * feeSuggestion
-	checkMaxOrder(t, wallet, lots-1, swapVal-tLotSize, backingFees-feeReduction,
-		totalBytes*feeSuggestion-estFeeReduction,
-		bestCaseBytes*feeSuggestion)
+	splitFees := splitTxBaggageSegwit * tBTC.MaxFeeRate
+	checkMaxOrder(t, wallet, lots-1, swapVal-tLotSize, backingFees+splitFees-feeReduction,
+		(totalBytes+splitTxBaggageSegwit)*feeSuggestion-estFeeReduction,
+		(bestCaseBytes+splitTxBaggageSegwit)*feeSuggestion)
 
 	_, _, err := wallet.FundOrder(ord)
 	if err == nil {
@@ -2387,69 +2389,203 @@ func testSender(t *testing.T, senderType tSenderType, segwit bool, walletType st
 		}
 	}
 
+	node.signFunc = func(tx *wire.MsgTx) {
+		signFunc(tx, 0, wallet.segwit)
+	}
+
 	addr := btcAddr(segwit)
-	fee := float64(1) // BTC
 	node.setTxFee = true
 	node.changeAddr = btcAddr(segwit).String()
 
 	pkScript, _ := txscript.PayToAddrScript(addr)
 	tx := makeRawTx([]dex.Bytes{randBytes(5), pkScript}, []*wire.TxIn{dummyInput()})
 	txHash := tx.TxHash()
-	const vout = 1
-	const blockHeight = 2
-	blockHash, _ := node.addRawTx(blockHeight, tx)
 
-	txB, _ := serializeMsgTx(tx)
+	changeAddr := btcAddr(segwit)
+	node.changeAddr = changeAddr.String()
 
-	node.sendToAddress = txHash.String()
-	node.getTransactionMap = map[string]*GetTransactionResult{
-		"any": {
-			BlockHash:  blockHash.String(),
-			BlockIndex: blockHeight,
-			Hex:        txB,
-		}}
-
-	unspents := []*ListUnspentResult{{
-		TxID:          txHash.String(),
-		Address:       addr.String(),
-		Amount:        100,
-		Confirmations: 1,
-		Vout:          vout,
-		ScriptPubKey:  pkScript,
-		SafePtr:       boolPtr(true),
-		Spendable:     true,
-	}}
-	node.listUnspent = unspents
-
-	node.signFunc = func(tx *wire.MsgTx) {
-		signFunc(tx, 0, wallet.segwit)
+	expectedFees := func(numInputs int) uint64 {
+		txSize := dexbtc.MinimumTxOverhead
+		if segwit {
+			txSize += (dexbtc.P2WPKHOutputSize * 2) + (numInputs * dexbtc.RedeemP2WPKHInputTotalSize)
+		} else {
+			txSize += (dexbtc.P2PKHOutputSize * 2) + (numInputs * dexbtc.RedeemP2PKHInputSize)
+		}
+		return uint64(txSize * feeSuggestion)
 	}
 
-	_, err := sender(addr.String(), toSatoshi(fee))
-	if err != nil {
-		t.Fatalf("send error: %v", err)
+	expectedSentVal := func(sendVal, fees uint64) uint64 {
+		if senderType == tSendSender {
+			return sendVal
+		}
+		return sendVal - fees
 	}
 
-	// SendToAddress error
-	node.sendToAddressErr = tErr
-	_, err = sender(addr.String(), 1e8)
-	if err == nil {
-		t.Fatalf("no error for SendToAddress error: %v", err)
+	expectedChangeVal := func(totalInput, sendVal, fees uint64) uint64 {
+		if senderType == tSendSender {
+			return totalInput - sendVal - fees
+		}
+		return totalInput - sendVal
 	}
-	node.sendToAddressErr = nil
 
-	// GetTransaction error
-	node.getTransactionErr = tErr
-	_, err = sender(addr.String(), 1e8)
-	if err == nil {
-		t.Fatalf("no error for gettransaction error: %v", err)
+	requiredVal := func(sendVal, fees uint64) uint64 {
+		if senderType == tSendSender {
+			return sendVal + fees
+		}
+		return sendVal
 	}
-	node.getTransactionErr = nil
 
-	// good again
-	_, err = sender(addr.String(), toSatoshi(fee))
-	if err != nil {
-		t.Fatalf("Send error afterwards: %v", err)
+	type test struct {
+		name                 string
+		val                  uint64
+		unspents             []*ListUnspentResult
+		bondReservesEnforced int64
+
+		expectedInputs []*outPoint
+		expectSentVal  uint64
+		expectChange   uint64
+		expectErr      bool
+	}
+	tests := []test{
+		{
+			name: "plenty of funds",
+			val:  toSatoshi(5),
+			unspents: []*ListUnspentResult{{
+				TxID:          txHash.String(),
+				Address:       addr.String(),
+				Amount:        100,
+				Confirmations: 1,
+				Vout:          0,
+				ScriptPubKey:  pkScript,
+				SafePtr:       boolPtr(true),
+				Spendable:     true,
+			}},
+			expectedInputs: []*outPoint{
+				{txHash: txHash,
+					vout: 0},
+			},
+			expectSentVal: expectedSentVal(toSatoshi(5), expectedFees(1)),
+			expectChange:  expectedChangeVal(toSatoshi(100), toSatoshi(5), expectedFees(1)),
+		},
+		{
+			name: "just enough change for bond reserves",
+			val:  toSatoshi(5),
+			unspents: []*ListUnspentResult{{
+				TxID:          txHash.String(),
+				Address:       addr.String(),
+				Amount:        5.2,
+				Confirmations: 1,
+				Vout:          0,
+				ScriptPubKey:  pkScript,
+				SafePtr:       boolPtr(true),
+				Spendable:     true,
+			}},
+			expectedInputs: []*outPoint{
+				{txHash: txHash,
+					vout: 0},
+			},
+			expectSentVal:        expectedSentVal(toSatoshi(5), expectedFees(1)),
+			expectChange:         expectedChangeVal(toSatoshi(5.2), toSatoshi(5), expectedFees(1)),
+			bondReservesEnforced: int64(expectedChangeVal(toSatoshi(5.2), toSatoshi(5), expectedFees(1))),
+		},
+		{
+			name: "not enough change for bond reserves",
+			val:  toSatoshi(5),
+			unspents: []*ListUnspentResult{{
+				TxID:          txHash.String(),
+				Address:       addr.String(),
+				Amount:        5.2,
+				Confirmations: 1,
+				Vout:          0,
+				ScriptPubKey:  pkScript,
+				SafePtr:       boolPtr(true),
+				Spendable:     true,
+			}},
+			expectedInputs: []*outPoint{
+				{txHash: txHash,
+					vout: 0},
+			},
+			bondReservesEnforced: int64(expectedChangeVal(toSatoshi(5.2), toSatoshi(5), expectedFees(1))) + 1,
+			expectErr:            true,
+		},
+		{
+			name: "1 satoshi less than needed",
+			val:  toSatoshi(5),
+			unspents: []*ListUnspentResult{{
+				TxID:          txHash.String(),
+				Address:       addr.String(),
+				Amount:        toBTC(requiredVal(toSatoshi(5), expectedFees(1)) - 1),
+				Confirmations: 1,
+				Vout:          0,
+				ScriptPubKey:  pkScript,
+				SafePtr:       boolPtr(true),
+				Spendable:     true,
+			}},
+			expectErr: true,
+		},
+		{
+			name: "exact amount needed",
+			val:  toSatoshi(5),
+			unspents: []*ListUnspentResult{{
+				TxID:          txHash.String(),
+				Address:       addr.String(),
+				Amount:        toBTC(requiredVal(toSatoshi(5), expectedFees(1))),
+				Confirmations: 1,
+				Vout:          0,
+				ScriptPubKey:  pkScript,
+				SafePtr:       boolPtr(true),
+				Spendable:     true,
+			}},
+			expectedInputs: []*outPoint{
+				{txHash: txHash,
+					vout: 0},
+			},
+			expectSentVal: expectedSentVal(toSatoshi(5), expectedFees(1)),
+			expectChange:  0,
+		},
+	}
+
+	for _, test := range tests {
+		node.listUnspent = test.unspents
+		wallet.bondReservesEnforced = test.bondReservesEnforced
+
+		_, err := sender(addr.String(), test.val)
+		if test.expectErr {
+			if err == nil {
+				t.Fatalf("%s: no error for expected error", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", test.name, err)
+		}
+
+		tx := node.sentRawTx
+		if len(test.expectedInputs) != len(tx.TxIn) {
+			t.Fatalf("expected %d inputs, got %d", len(test.expectedInputs), len(tx.TxIn))
+		}
+
+		for i, input := range tx.TxIn {
+			if input.PreviousOutPoint.Hash != test.expectedInputs[i].txHash ||
+				input.PreviousOutPoint.Index != test.expectedInputs[i].vout {
+				t.Fatalf("expected input %d to be %v, got %v", i, test.expectedInputs[i], input.PreviousOutPoint)
+			}
+		}
+
+		if test.expectChange > 0 && len(tx.TxOut) != 2 {
+			t.Fatalf("expected 2 outputs, got %d", len(tx.TxOut))
+		}
+		if test.expectChange == 0 && len(tx.TxOut) != 1 {
+			t.Fatalf("expected 2 outputs, got %d", len(tx.TxOut))
+		}
+
+		if tx.TxOut[0].Value != int64(test.expectSentVal) {
+			t.Fatalf("expected sent value to be %d, got %d", test.expectSentVal, tx.TxOut[0].Value)
+		}
+
+		if test.expectChange > 0 && tx.TxOut[1].Value != int64(test.expectChange) {
+			t.Fatalf("expected change value to be %d, got %d", test.expectChange, tx.TxOut[1].Value)
+		}
 	}
 }
 

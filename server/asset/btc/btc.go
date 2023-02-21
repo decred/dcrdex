@@ -19,7 +19,10 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
+	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
+	srvdex "decred.org/dcrdex/server/dex"
+	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -90,6 +93,7 @@ const (
 	BipID                    = 0
 	assetName                = "btc"
 	immatureTransactionError = dex.ErrorKind("immature output")
+	BondVersion              = 0
 )
 
 func netParams(network dex.Network) (*chaincfg.Params, error) {
@@ -156,6 +160,7 @@ type Backend struct {
 
 // Check that Backend satisfies the Backend interface.
 var _ asset.Backend = (*Backend)(nil)
+var _ srvdex.Bonder = (*Backend)(nil)
 
 // NewBackend is the exported constructor by which the DEX will import the
 // backend. The configPath can be an empty string, in which case the standard
@@ -507,6 +512,173 @@ func (btc *Backend) VerifyUnspentCoin(_ context.Context, coinID []byte) error {
 		return asset.CoinNotFoundError
 	}
 	return nil
+}
+
+// ParseBondTx performs basic validation of a serialized time-locked fidelity
+// bond transaction given the bond's P2SH or P2WSH redeem script.
+//
+// The transaction must have at least two outputs: out 0 pays to a P2SH address
+// (the bond), and out 1 is a nulldata output that commits to an account ID.
+// There may also be a change output.
+//
+// Returned: The bond's coin ID (i.e. encoded UTXO) of the bond output. The bond
+// output's amount and PWSH/P2WSH address. The lockTime and pubkey hash data pushes
+// from the script. The account ID from the second output is also returned.
+//
+// Properly formed transactions:
+//
+//  1. The bond output (vout 0) must be a P2SH/P2WSH output.
+//  2. The bond's redeem script must be of the form:
+//     <lockTime[4]> OP_CHECKLOCKTIMEVERIFY OP_DROP OP_DUP OP_HASH160 <pubkeyhash[20]> OP_EQUALVERIFY OP_CHECKSIG
+//  3. The null data output (vout 1) must have a 58-byte data push (ver | account ID | lockTime | pubkeyHash).
+//  4. The transaction must have a zero locktime and expiry.
+//  5. All inputs must have the max sequence num set (finalized).
+//  6. The transaction must pass the checks in the
+//     blockchain.CheckTransactionSanity function.
+func ParseBondTx(ver uint16, rawTx []byte, chainParams *chaincfg.Params) (bondCoinID []byte, amt int64, bondAddr string,
+	bondPubKeyHash []byte, lockTime int64, acct account.AccountID, err error) {
+	if ver != BondVersion {
+		err = errors.New("only version 0 bonds supported")
+		return
+	}
+	msgTx := wire.NewMsgTx(wire.TxVersion)
+	if err = msgTx.Deserialize(bytes.NewReader(rawTx)); err != nil {
+		return
+	}
+
+	if msgTx.LockTime != 0 {
+		err = errors.New("transaction locktime not zero")
+		return
+	}
+	if err = blockchain.CheckTransactionSanity(btcutil.NewTx(msgTx)); err != nil {
+		return
+	}
+
+	if len(msgTx.TxOut) < 2 {
+		err = fmt.Errorf("expected at least 2 outputs, found %d", len(msgTx.TxOut))
+		return
+	}
+
+	for _, txIn := range msgTx.TxIn {
+		if txIn.Sequence != wire.MaxTxInSequenceNum {
+			err = errors.New("input has non-max sequence number")
+			return
+		}
+	}
+
+	// Fidelity bond (output 0)
+	bondOut := msgTx.TxOut[0]
+	scriptHash := dexbtc.ExtractScriptHash(bondOut.PkScript)
+	if scriptHash == nil {
+		err = fmt.Errorf("bad bond pkScript")
+		return
+	}
+
+	acctCommitOut := msgTx.TxOut[1]
+	acct, lock, pkh, err := dexbtc.ExtractBondCommitDataV0(0, acctCommitOut.PkScript)
+	if err != nil {
+		err = fmt.Errorf("invalid bond commitment output: %w", err)
+		return
+	}
+
+	// Reconstruct and check the bond redeem script.
+	bondScript, err := dexbtc.MakeBondScript(ver, lock, pkh[:])
+	if err != nil {
+		err = fmt.Errorf("failed to build bond output redeem script: %w", err)
+		return
+	}
+
+	// Check that the script hash extracted from output 0 is what is expected
+	// based on the information in the account commitment.
+	// P2WSH uses sha256, while P2SH uses ripemd160(sha256).
+	var expectedScriptHash []byte
+	if len(scriptHash) == 32 {
+		hash := sha256.Sum256(bondScript)
+		expectedScriptHash = hash[:]
+	} else {
+		expectedScriptHash = btcutil.Hash160(bondScript)
+	}
+	if !bytes.Equal(expectedScriptHash, scriptHash) {
+		err = fmt.Errorf("script hash check failed for output 0 of %s", msgTx.TxHash())
+		return
+	}
+
+	_, addrs, _, err := dexbtc.ExtractScriptData(bondOut.PkScript, chainParams)
+	if err != nil {
+		err = fmt.Errorf("error extracting addresses from bond output: %w", err)
+		return
+	}
+
+	txid := msgTx.TxHash()
+	bondCoinID = toCoinID(&txid, 0)
+	amt = bondOut.Value
+	bondAddr = addrs[0] // don't convert address, must match type we specified
+	lockTime = int64(lock)
+	bondPubKeyHash = pkh[:]
+
+	return
+}
+
+// BondVer returns the latest supported bond version.
+func (dcr *Backend) BondVer() uint16 {
+	return BondVersion
+}
+
+// ParseBondTx makes the package-level ParseBondTx pure function accessible via
+// a Backend instance. This performs basic validation of a serialized
+// time-locked fidelity bond transaction given the bond's P2SH redeem script.
+func (btc *Backend) ParseBondTx(ver uint16, rawTx []byte) (bondCoinID []byte, amt int64, bondAddr string,
+	bondPubKeyHash []byte, lockTime int64, acct account.AccountID, err error) {
+	return ParseBondTx(ver, rawTx, btc.chainParams)
+}
+
+// BondCoin locates a bond transaction output, validates the entire transaction,
+// and returns the amount, encoded lockTime and account ID, and the
+// confirmations of the transaction. It is a CoinNotFoundError if the
+// transaction output is spent.
+func (btc *Backend) BondCoin(ctx context.Context, ver uint16, coinID []byte) (amt, lockTime, confs int64, acct account.AccountID, err error) {
+	txHash, vout, errCoin := decodeCoinID(coinID)
+	if errCoin != nil {
+		err = fmt.Errorf("error decoding coin ID %x: %w", coinID, errCoin)
+		return
+	}
+
+	verboseTx, err := btc.node.GetRawTransactionVerbose(txHash)
+	if err != nil {
+		if isTxNotFoundErr(err) {
+			err = asset.CoinNotFoundError
+		}
+		return
+	}
+
+	if int(vout) > len(verboseTx.Vout)-1 {
+		err = fmt.Errorf("invalid output index for tx with %d outputs", len(verboseTx.Vout))
+		return
+	}
+
+	confs = int64(verboseTx.Confirmations)
+
+	rawTx, err := hex.DecodeString(verboseTx.Hex) // ParseBondTx will deserialize to msgTx, so just get the bytes
+	if err != nil {
+		err = fmt.Errorf("failed to decode transaction %s: %w", txHash, err)
+		return
+	}
+
+	txOut, err := btc.node.GetTxOut(txHash, vout, true) // check regular tree first
+	if err != nil {
+		if isTxNotFoundErr(err) { // should be txOut==nil, but checking anyway
+			err = asset.CoinNotFoundError
+			return
+		}
+		return
+	}
+	if txOut == nil { // spent == invalid bond
+		err = asset.CoinNotFoundError
+		return
+	}
+
+	_, amt, _, _, lockTime, acct, err = ParseBondTx(ver, rawTx, btc.chainParams)
+	return
 }
 
 // FeeCoin gets the recipient address, value, and confirmations of a transaction

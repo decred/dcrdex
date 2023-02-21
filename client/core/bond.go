@@ -512,7 +512,7 @@ func (c *Core) preValidateBond(dc *dexConnection, bond *asset.Bond) error {
 		return fmt.Errorf("account keys not decrypted")
 	}
 
-	assetID, bondCoin := bond.AssetID, bond.CoinID
+	assetID, bondCoin := bond.AssetID, bond.UnsignedCoinID
 	bondCoinStr := coinIDString(assetID, bondCoin)
 
 	// Pre-validate with the raw bytes of the unsigned tx and our account
@@ -536,8 +536,8 @@ func (c *Core) preValidateBond(dc *dexConnection, bond *asset.Bond) error {
 		c.log.Warnf("prevalidatebond: DEX signature validation error: %v", err)
 	}
 	if !bytes.Equal(preBondRes.BondID, bondCoin) {
-		return fmt.Errorf("server reported bond coin ID %v, expected %v", bondCoinStr,
-			coinIDString(assetID, preBondRes.BondID))
+		return fmt.Errorf("server reported bond coin ID %v, expected %v", coinIDString(assetID, preBondRes.BondID),
+			bondCoinStr)
 	}
 
 	if preBondRes.Amount != bond.Amount {
@@ -582,8 +582,8 @@ func (c *Core) postBond(dc *dexConnection, bond *asset.Bond) (*msgjson.PostBondR
 		c.log.Warnf("postbond: DEX signature validation error: %v", err)
 	}
 	if !bytes.Equal(postBondRes.BondID, bondCoin) {
-		return nil, fmt.Errorf("server reported bond coin ID %v, expected %v", bondCoinStr,
-			coinIDString(assetID, postBondRes.BondID))
+		return nil, fmt.Errorf("server reported bond coin ID %v, expected %v", coinIDString(assetID, postBondRes.BondID),
+			bondCoinStr)
 	}
 
 	return postBondRes, nil
@@ -1206,16 +1206,17 @@ func (c *Core) makeAndPostBond(dc *dexConnection, acctExists bool, wallet *xcWal
 
 	// Store the account and bond info.
 	dbBond := &db.Bond{
-		Version:    bond.Version,
-		AssetID:    bond.AssetID,
-		CoinID:     bond.CoinID,
-		UnsignedTx: bond.UnsignedTx,
-		SignedTx:   bond.SignedTx,
-		Data:       bond.Data,
-		Amount:     amt,
-		LockTime:   uint64(lockTime.Unix()),
-		KeyIndex:   keyIndex,
-		RefundTx:   bond.RedeemTx,
+		Version:        bond.Version,
+		AssetID:        bond.AssetID,
+		UnsignedCoinID: bond.UnsignedCoinID,
+		CoinID:         bond.CoinID,
+		UnsignedTx:     bond.UnsignedTx,
+		SignedTx:       bond.SignedTx,
+		Data:           bond.Data,
+		Amount:         amt,
+		LockTime:       uint64(lockTime.Unix()),
+		KeyIndex:       keyIndex,
+		RefundTx:       bond.RedeemTx,
 		// Confirmed and Refunded are false (new bond tx)
 	}
 

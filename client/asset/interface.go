@@ -784,11 +784,12 @@ type PeerManager interface {
 // the corresponding signed transaction, and a final request is made once the
 // bond is fully confirmed. The caller should manage the private key.
 type Bond struct {
-	Version uint16
-	AssetID uint32
-	Amount  uint64
-	CoinID  []byte
-	Data    []byte // additional data to interpret the bond e.g. redeem script, bond contract, etc.
+	Version        uint16
+	AssetID        uint32
+	Amount         uint64
+	UnsignedCoinID []byte
+	CoinID         []byte
+	Data           []byte // additional data to interpret the bond e.g. redeem script, bond contract, etc.
 	// SignedTx and UnsignedTx are the opaque (raw bytes) signed and unsigned
 	// bond creation transactions, in whatever encoding and funding scheme for
 	// this asset and wallet. The unsigned one is used to pre-validate this bond

@@ -73,9 +73,6 @@ func (auth *AuthManager) handlePreValidateBond(conn comms.Link, msg *msgjson.Mes
 	if !ok {
 		return msgjson.NewError(msgjson.BondError, "only DCR bonds supported presently")
 	}
-	if assetID != 42 { // Temporary! need to update tier computations for different bond increment/amounts!
-		return msgjson.NewError(msgjson.BondError, "only DCR bonds supported presently")
-	}
 
 	// Create an account.Account from the provided pubkey.
 	acct, err := account.NewAccountFromPubKey(preBond.AcctPubKey)
@@ -158,13 +155,9 @@ func (auth *AuthManager) handlePostBond(conn comms.Link, msg *msgjson.Message) *
 		return msgjson.NewError(msgjson.BondError, "error parsing postbond request")
 	}
 
-	// TODO: allow different assets for bond, switching parse functions, etc.
 	assetID := postBond.AssetID
 	bondAsset, ok := auth.bondAssets[assetID]
 	if !ok {
-		return msgjson.NewError(msgjson.BondError, "only DCR bonds supported presently")
-	}
-	if assetID != 42 { // Temporary! need to update tier computations for different bond increment/amounts!
 		return msgjson.NewError(msgjson.BondError, "only DCR bonds supported presently")
 	}
 

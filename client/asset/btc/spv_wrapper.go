@@ -44,7 +44,6 @@ import (
 	"github.com/btcsuite/btcd/btcutil/psbt"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/waddrmgr"
 	"github.com/btcsuite/btcwallet/wallet"
@@ -749,137 +748,12 @@ func (w *spvWallet) Lock() error {
 	return nil
 }
 
-// sendToAddress sends the amount to the address. feeRate is in units of
-// sats/byte.
-func (w *spvWallet) sendToAddress(address string, value, feeRate uint64, subtract bool) (*chainhash.Hash, error) {
-	addr, err := w.decodeAddr(address, w.chainParams)
-	if err != nil {
-		return nil, err
-	}
-
-	pkScript, err := txscript.PayToAddrScript(addr)
-	if err != nil {
-		return nil, err
-	}
-
-	if subtract {
-		return w.sendWithSubtract(pkScript, value, feeRate)
-	}
-
-	wireOP := wire.NewTxOut(int64(value), pkScript)
-	if dexbtc.IsDust(wireOP, feeRate) {
-		return nil, errors.New("output value is dust")
-	}
-
-	// converting sats/vB -> sats/kvB
-	feeRateAmt := btcutil.Amount(feeRate * 1e3)
-	tx, err := w.wallet.SendOutputs([]*wire.TxOut{wireOP}, nil, w.acctNum, 0,
-		feeRateAmt, wallet.CoinSelectionLargest, "")
-	if err != nil {
-		return nil, err
-	}
-
-	txHash := tx.TxHash()
-
-	return &txHash, nil
-}
-
-func (w *spvWallet) sendWithSubtract(pkScript []byte, value, feeRate uint64) (*chainhash.Hash, error) {
-	txOutSize := dexbtc.TxOutOverhead + uint64(len(pkScript)) // send-to address
-	var unfundedTxSize uint64 = dexbtc.MinimumTxOverhead + dexbtc.P2WPKHOutputSize /* change */ + txOutSize
-
-	unspents, err := w.listUnspent()
-	if err != nil {
-		return nil, fmt.Errorf("error listing unspent outputs: %w", err)
-	}
-
-	utxos, _, _, err := convertUnspent(0, unspents, w.chainParams)
-	if err != nil {
-		return nil, fmt.Errorf("error converting unspent outputs: %w", err)
-	}
-
-	// With sendWithSubtract, fees are subtracted from the sent amount, so we
-	// target an input sum, not an output value. Makes the math easy.
-	enough := func(_, inputsVal uint64) bool {
-		return inputsVal >= value
-	}
-
-	sum, inputsSize, _, fundingCoins, _, _, err := fund(utxos, enough)
-	if err != nil {
-		return nil, fmt.Errorf("error funding sendWithSubtract value of %s: %w", amount(value), err)
-	}
-
-	fees := (unfundedTxSize + uint64(inputsSize)) * feeRate
-	send := value - fees
-	extra := sum - send
-
-	switch {
-	case fees > sum:
-		return nil, fmt.Errorf("fees > sum")
-	case fees > value:
-		return nil, fmt.Errorf("fees > value")
-	case send > sum:
-		return nil, fmt.Errorf("send > sum")
-	}
-
-	tx := wire.NewMsgTx(wire.TxVersion)
-	for op := range fundingCoins {
-		wireOP := wire.NewOutPoint(&op.txHash, op.vout)
-		txIn := wire.NewTxIn(wireOP, []byte{}, nil)
-		tx.AddTxIn(txIn)
-	}
-
-	change := extra - fees
-	changeAddr, err := w.changeAddress()
-	if err != nil {
-		return nil, fmt.Errorf("error retrieving change address: %w", err)
-	}
-
-	changeScript, err := txscript.PayToAddrScript(changeAddr)
-	if err != nil {
-		return nil, fmt.Errorf("error generating pubkey script: %w", err)
-	}
-
-	changeOut := wire.NewTxOut(int64(change), changeScript)
-
-	// One last check for dust.
-	if dexbtc.IsDust(changeOut, feeRate) {
-		// Re-calculate fees and change
-		fees = (unfundedTxSize - dexbtc.P2WPKHOutputSize + uint64(inputsSize)) * feeRate
-		send = sum - fees
-	} else {
-		tx.AddTxOut(changeOut)
-	}
-
-	wireOP := wire.NewTxOut(int64(send), pkScript)
-	if dexbtc.IsDust(wireOP, feeRate) {
-		return nil, errors.New("output value is dust")
-	}
-	tx.AddTxOut(wireOP)
-
-	if err := w.wallet.SignTx(tx); err != nil {
-		return nil, fmt.Errorf("signing error: %w", err)
-	}
-
-	return w.sendRawTransaction(tx)
-}
-
 // estimateSendTxFee callers should provide at least one output value.
 func (w *spvWallet) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract bool) (fee uint64, err error) {
 	minTxSize := uint64(tx.SerializeSize())
 	var sendAmount uint64
 	for _, txOut := range tx.TxOut {
 		sendAmount += uint64(txOut.Value)
-	}
-
-	// If subtract is true, select enough inputs for sendAmount. Fees will be taken
-	// from the sendAmount. If not, select enough inputs to cover minimum fees.
-	enough := func(inputsSize, sum uint64) bool {
-		if subtract {
-			return sum >= sendAmount
-		}
-		minFee := (minTxSize + inputsSize) * feeRate
-		return sum >= sendAmount+minFee
 	}
 
 	unspents, err := w.listUnspent()
@@ -892,12 +766,13 @@ func (w *spvWallet) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract b
 		return 0, fmt.Errorf("error converting unspent outputs: %w", err)
 	}
 
-	sum, inputsSize, _, _, _, _, err := fund(utxos, enough)
+	enough := sendEnough(sendAmount, feeRate, subtract, minTxSize, true, false)
+	sum, _, inputsSize, _, _, _, _, err := tryFund(utxos, enough)
 	if err != nil {
 		return 0, err
 	}
 
-	txSize := minTxSize + uint64(inputsSize)
+	txSize := minTxSize + inputsSize
 	estFee := feeRate * txSize
 	remaining := sum - sendAmount
 

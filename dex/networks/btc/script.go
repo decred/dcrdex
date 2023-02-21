@@ -8,16 +8,27 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/server/account"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
+	dcrtxscript "github.com/decred/dcrd/txscript/v4"
 )
 
 const (
+	// MaxCLTVScriptNum is the largest usable value for a CLTV lockTime. This
+	// will actually be stored in a 5-byte ScriptNum since they have a sign bit,
+	// however, it is not 2^39-1 since the spending transaction's nLocktime is
+	// an unsigned 32-bit integer and it must be at least the CLTV value. This
+	// establishes a maximum lock time of February 7, 2106. Any later requires
+	// using a block height instead of a unix epoch time stamp.
+	MaxCLTVScriptNum = 1<<32 - 1 // 0xffff_ffff a.k.a. 2^32-1
+
 	// SecretHashSize is the byte-length of the hash of the secret key used in an
 	// atomic swap.
 	SecretHashSize = 32
@@ -235,6 +246,21 @@ const (
 		(SegwitMarkerAndFlagWeight+RedeemP2WPKHInputWitnessWeight+(witnessWeight-1))/witnessWeight
 
 	witnessWeight = 4 // github.com/btcsuite/btcd/blockchain.WitnessScaleFactor
+
+	// BondScriptSize is the maximum size of a DEX time-locked fidelity bond
+	// output script to which a bond P2SH pays:
+	//   OP_DATA_4/5 (4/5 bytes lockTime) OP_CHECKLOCKTIMEVERIFY OP_DROP OP_DUP OP_HASH160 OP_DATA_20 (20-byte pubkey hash160) OP_EQUALVERIFY OP_CHECKSIG
+	BondScriptSize = 1 + 5 + 1 + 1 + 1 + 1 + 1 + 20 + 1 + 1 // 33
+
+	// RedeemBondSigScriptSize is the worst case size of a fidelity bond
+	// signature script that spends a bond output. It includes a signature, a
+	// compressed pubkey, and the bond script. Each of said data pushes use an
+	// OP_DATA_ code.
+	RedeemBondSigScriptSize = 1 + DERSigLength + 1 + 33 + 1 + BondScriptSize // 142
+
+	// BondPushDataSize is the size of the nulldata in a bond commitment output:
+	//  OP_RETURN <pushData: ver[2] | account_id[32] | lockTime[4] | pkh[20]>
+	BondPushDataSize = 2 + account.HashSize + 4 + 20
 )
 
 // BTCScriptType holds details about a pubkey script and possibly it's redeem
@@ -599,6 +625,205 @@ func RefundP2SHContract(contract, sig, pubkey []byte) ([]byte, error) {
 		AddInt64(0).
 		AddData(contract).
 		Script()
+}
+
+// OP_RETURN <pushData: ver[2] | account_id[32] | lockTime[4] | pkh[20]>
+func extractBondCommitDataV0(pushData []byte) (acct account.AccountID, lockTime uint32, pubkeyHash [20]byte, err error) {
+	if len(pushData) < 2 {
+		err = errors.New("invalid data")
+		return
+	}
+	ver := binary.BigEndian.Uint16(pushData)
+	if ver != 0 {
+		err = fmt.Errorf("unexpected bond commitment version %d, expected 0", ver)
+		return
+	}
+
+	if len(pushData) != BondPushDataSize {
+		err = fmt.Errorf("invalid bond commitment output script length: %d", len(pushData))
+		return
+	}
+
+	pushData = pushData[2:] // pop off ver
+
+	copy(acct[:], pushData)
+	pushData = pushData[account.HashSize:]
+
+	lockTime = binary.BigEndian.Uint32(pushData)
+	pushData = pushData[4:]
+
+	copy(pubkeyHash[:], pushData)
+
+	return
+}
+
+// ExtractBondCommitDataV0 parses a v0 bond commitment output script. This is
+// the OP_RETURN output, not the P2SH bond output. Use ExtractBondDetailsV0 to
+// parse the P2SH bond output's redeem script.
+//
+// If the decoded commitment data indicates a version other than 0, an error is
+// returned.
+func ExtractBondCommitDataV0(scriptVer uint16, pkScript []byte) (acct account.AccountID, lockTime uint32, pubkeyHash [20]byte, err error) {
+	tokenizer := txscript.MakeScriptTokenizer(scriptVer, pkScript)
+	if !tokenizer.Next() {
+		err = tokenizer.Err()
+		return
+	}
+
+	if tokenizer.Opcode() != txscript.OP_RETURN {
+		err = errors.New("not a null data output")
+		return
+	}
+
+	if !tokenizer.Next() {
+		err = tokenizer.Err()
+		return
+	}
+
+	pushData := tokenizer.Data()
+	acct, lockTime, pubkeyHash, err = extractBondCommitDataV0(pushData)
+	if err != nil {
+		return
+	}
+
+	if !tokenizer.Done() {
+		err = errors.New("script has extra opcodes")
+		return
+	}
+
+	return
+}
+
+// MakeBondScript constructs a versioned bond output script for the provided
+// lock time and pubkey hash. Only version 0 is supported at present. The lock
+// time must be less than 2^32-1 so that it uses at most 5 bytes. The lockTime
+// is also required to use at least 4 bytes (time stamp, not block time).
+func MakeBondScript(ver uint16, lockTime uint32, pubkeyHash []byte) ([]byte, error) {
+	if ver != 0 {
+		return nil, errors.New("only version 0 bonds supported")
+	}
+	if lockTime >= MaxCLTVScriptNum { // == should be OK, but let's not
+		return nil, errors.New("invalid lock time")
+	}
+	lockTimeInt64 := int64(lockTime)
+	if len(pubkeyHash) != 20 {
+		return nil, errors.New("invalid pubkey hash")
+	}
+	return txscript.NewScriptBuilder().
+		AddInt64(lockTimeInt64).
+		AddOp(txscript.OP_CHECKLOCKTIMEVERIFY).
+		AddOp(txscript.OP_DROP).
+		AddOp(txscript.OP_DUP).
+		AddOp(txscript.OP_HASH160).
+		AddData(pubkeyHash).
+		AddOp(txscript.OP_EQUALVERIFY).
+		AddOp(txscript.OP_CHECKSIG).
+		Script()
+}
+
+// RefundBondScript builds the signature script to refund a time-locked fidelity
+// bond in a P2SH output paying to the provided P2PKH bondScript.
+func RefundBondScript(bondScript, sig, pubkey []byte) ([]byte, error) {
+	return txscript.NewScriptBuilder().
+		AddData(sig).
+		AddData(pubkey).
+		AddData(bondScript).
+		Script()
+}
+
+// RefundBondScript builds the signature script to refund a time-locked fidelity
+// bond in a P2WSH output paying to the provided P2PKH bondScript.
+func RefundBondScriptSegwit(bondScript, sig, pubkey []byte) [][]byte {
+	return [][]byte{
+		sig,
+		pubkey,
+		bondScript,
+	}
+}
+
+// ExtractBondDetailsV0 validates the provided bond redeem script, extracting
+// the lock time and pubkey. The V0 format of the script must be as follows:
+//
+//	<lockTime> OP_CHECKLOCKTIMEVERIFY OP_DROP OP_DUP OP_HASH160 <pubkeyhash[20]> OP_EQUALVERIFY OP_CHECKSIG
+//
+// The script version refers to the pkScript version, not bond version, which
+// pertains to DEX's version of the bond script.
+func ExtractBondDetailsV0(scriptVersion uint16, bondScript []byte) (lockTime uint32, pkh []byte, err error) {
+	type templateMatch struct {
+		expectInt     bool
+		maxIntBytes   int
+		opcode        byte
+		extractedInt  int64
+		extractedData []byte
+	}
+	var template = [...]templateMatch{
+		{expectInt: true, maxIntBytes: 5}, // extractedInt
+		{opcode: txscript.OP_CHECKLOCKTIMEVERIFY},
+		{opcode: txscript.OP_DROP},
+		{opcode: txscript.OP_DUP},
+		{opcode: txscript.OP_HASH160},
+		{opcode: txscript.OP_DATA_20}, // extractedData
+		{opcode: txscript.OP_EQUALVERIFY},
+		{opcode: txscript.OP_CHECKSIG},
+	}
+
+	var templateOffset int
+	tokenizer := txscript.MakeScriptTokenizer(scriptVersion, bondScript)
+	for tokenizer.Next() {
+		if templateOffset >= len(template) {
+			return 0, nil, errors.New("too many script elements")
+		}
+
+		op, data := tokenizer.Opcode(), tokenizer.Data()
+		tplEntry := &template[templateOffset]
+		if tplEntry.expectInt {
+			switch {
+			case data != nil:
+				val, err := dcrtxscript.MakeScriptNum(data, tplEntry.maxIntBytes)
+				if err != nil {
+					return 0, nil, err
+				}
+				tplEntry.extractedInt = int64(val)
+			case dcrtxscript.IsSmallInt(op): // not expected for our lockTimes, but it is an integer
+				tplEntry.extractedInt = int64(dcrtxscript.AsSmallInt(op))
+			default:
+				return 0, nil, errors.New("expected integer")
+			}
+		} else {
+			if op != tplEntry.opcode {
+				return 0, nil, fmt.Errorf("expected opcode %v, got %v", tplEntry.opcode, op)
+			}
+
+			tplEntry.extractedData = data
+		}
+
+		templateOffset++
+	}
+	if err := tokenizer.Err(); err != nil {
+		return 0, nil, err
+	}
+	if !tokenizer.Done() || templateOffset != len(template) {
+		return 0, nil, errors.New("incorrect script length")
+	}
+
+	// The script matches in structure. Now validate the two pushes.
+
+	lockTime64 := template[0].extractedInt
+	if lockTime64 <= 0 { // || lockTime64 > MaxCLTVScriptNum {
+		return 0, nil, fmt.Errorf("invalid locktime %d", lockTime64)
+	}
+	lockTime = uint32(lockTime64)
+
+	const pubkeyHashLen = 20
+	bondPubKeyHash := template[5].extractedData
+	if len(bondPubKeyHash) != pubkeyHashLen {
+		err = errors.New("missing or invalid pubkeyhash data")
+		return
+	}
+	pkh = make([]byte, pubkeyHashLen)
+	copy(pkh, bondPubKeyHash)
+
+	return
 }
 
 // MsgTxVBytes returns the transaction's virtual size, which accounts for the

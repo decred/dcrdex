@@ -198,7 +198,6 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		InitTxSizeBase:     dexbtc.InitTxSizeBase,
 		InitTxSize:         dexbtc.InitTxSize,
 		LegacyBalance:      cfg.Type != walletTypeSPV,
-		LegacySendToAddr:   true,
 		// Bitcoin Cash uses the Cash Address encoding, which is Bech32, but not
 		// indicative of segwit. We provide a custom encoder and decode to go
 		// to/from a btcutil.Address and a string.

@@ -120,13 +120,13 @@ const (
 	// BondScriptSize is the maximum size of a DEX time-locked fidelity bond
 	// output script to which a bond P2SH pays:
 	//   OP_DATA_4/5 (4/5 bytes lockTime) OP_CHECKLOCKTIMEVERIFY OP_DROP OP_DUP OP_HASH160 OP_DATA_20 (20-byte pubkey hash160) OP_EQUALVERIFY OP_CHECKSIG
-	BondScriptSize = 1 + 5 + 1 + 1 + 1 + 1 + 1 + 20 + 1 + 1 // 32
+	BondScriptSize = 1 + 5 + 1 + 1 + 1 + 1 + 1 + 20 + 1 + 1 // 33
 
 	// RedeemBondSigScriptSize is the worst case size of a fidelity bond
 	// signature script that spends a bond output. It includes a signature, a
 	// compressed pubkey, and the bond script. Each of said data pushes use an
 	// OP_DATA_ code.
-	RedeemBondSigScriptSize = 1 + DERSigLength + 1 + pubkeyLength + 1 + BondScriptSize // 141
+	RedeemBondSigScriptSize = 1 + DERSigLength + 1 + pubkeyLength + 1 + BondScriptSize // 142
 
 	// BondPushDataSize is the size of the nulldata in a bond commitment output:
 	//  OP_RETURN <pushData: ver[2] | account_id[32] | lockTime[4] | pkh[20]>

@@ -72,8 +72,7 @@ type PreSwapForm struct {
 	RedeemAssetID uint32
 }
 
-// PreSwap is a SwapEstimate returned from Wallet.PreSwap. The struct will be
-// expanded in in-progress work to accommodate order-time options.
+// PreSwap is a SwapEstimate returned from Wallet.PreSwap.
 type PreSwap struct {
 	Estimate *SwapEstimate  `json:"estimate"`
 	Options  []*OrderOption `json:"options"`

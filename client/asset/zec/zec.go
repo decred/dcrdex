@@ -179,7 +179,6 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 		InitTxSizeBase:           dexzec.InitTxSizeBase,
 		OmitAddressType:          true,
 		LegacySignTxRPC:          true,
-		LegacySendToAddr:         true,
 		NumericGetRawRPC:         true,
 		LegacyValidateAddressRPC: true,
 		SingularWallet:           true,
