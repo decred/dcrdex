@@ -374,7 +374,7 @@ tmux send-keys -t $SESSION:2 "set -o history" C-m
 # Miner
 tmux new-window -t $SESSION:3 -n "miner" $SHELL
 tmux send-keys -t $SESSION:3 "cd ${HARNESS_DIR}" C-m
-tmux send-keys -t $SESSION:3 "watch -n 20 ./mine-alpha 1" C-m
+tmux send-keys -t $SESSION:3 "watch -n 15 ./mine-alpha 1" C-m
 
 if [ ! -z "$GODAEMON" ]; then
   $GODAEMON --version &> /dev/null

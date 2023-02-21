@@ -285,7 +285,7 @@ echo "Starting simnet delta node"
 # Miner
 tmux new-window -t $SESSION:5 -n "miner" $SHELL
 tmux send-keys -t $SESSION:5 "cd ${NODES_ROOT}/harness-ctl" C-m
-tmux send-keys -t $SESSION:5 "watch -n 20 ./mine-alpha 1" C-m
+tmux send-keys -t $SESSION:5 "watch -n 15 ./mine-alpha 1" C-m
 
 sleep 1
 

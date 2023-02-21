@@ -375,7 +375,7 @@ tmux send-keys -t $SESSION:0 "./mine-alpha 2${WAIT}" C-m\; wait-for donedcr
 
 tmux new-window -t $SESSION:8 -n "miner" $SHELL
 tmux send-keys -t $SESSION:8 "cd ${NODES_ROOT}/harness-ctl" C-m
-tmux send-keys -t $SESSION:8 "watch -n 20 ./mine-alpha 1" C-m
+tmux send-keys -t $SESSION:8 "watch -n 15 ./mine-alpha 1" C-m
 
 # Reenable history and attach to the control session.
 tmux send-keys -t $SESSION:0 "set -o history" C-m
