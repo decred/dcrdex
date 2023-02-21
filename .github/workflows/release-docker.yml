@@ -26,7 +26,7 @@ jobs:
     - name: Build and Push Docker Image
       run: |
         docker buildx build  -f client/Dockerfile --platform linux/arm64,linux/amd64 \
-          --tag ${{ env.IMAGE_NAME }}:${{ env.TAG_NAME }} \
+          --tag ${{ env.IMAGE_NAME }}:$GITHUB_REF_NAME \
           --output "type=registry" .
       env:
         DOCKER_USERNAME: ${{ env.DOCKER_USERNAME }}
