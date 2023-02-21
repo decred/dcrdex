@@ -22,7 +22,9 @@ jobs:
         docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
         docker buildx create --use --name mybuilder
         docker buildx inspect --bootstrap
-
+    - name: Log in to Docker
+      run: |
+        docker login -u ${{ env.DOCKER_USERNAME }}  -p ${{ env.DOCKER_PASSWORD }}
     - name: Build and Push Docker Image
       run: |
         docker buildx build  -f client/Dockerfile --platform linux/arm64,linux/amd64 \
