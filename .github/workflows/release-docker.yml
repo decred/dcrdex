@@ -11,22 +11,24 @@ env:
 
 jobs:
   build-and-push:
-    runs-on: bullseye-slim
+    runs-on: ubuntu-22.04
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v2
+      uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c #v3.3.0
 
     - name: Set up Docker Buildx
       run: |
         docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
         docker buildx create --use --name mybuilder
         docker buildx inspect --bootstrap
-
+    - name: Log in to Docker 
+      run: |
+        docker login -u ${{ env.DOCKER_USERNAME }}  -p ${{ env.DOCKER_PASSWORD }}
     - name: Build and Push Docker Image
       run: |
         docker buildx build  -f client/Dockerfile --platform linux/arm64,linux/amd64 \
-          --tag ${{ env.IMAGE_NAME }}:${{ env.TAG_NAME }} \
+          --tag ${{ env.IMAGE_NAME }}:${{ github.ref_name }} \
           --output "type=registry" .
       env:
         DOCKER_USERNAME: ${{ env.DOCKER_USERNAME }}
