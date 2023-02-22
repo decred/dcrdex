@@ -14,8 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build lgpl
-
 // This file lifted from go-ethereum/signer/fourbyte at v1.10.6 commit
 // 576681f29b895dd39e559b7ba17fcd89b42e4833 and modified to make parseCalldata take
 // an abi instead of a string.

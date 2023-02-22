@@ -1,4 +1,4 @@
-//go:build harness && lgpl
+//go:build harness
 
 // This test requires that the simnet harness be running. Some tests will
 // alternatively work on testnet.

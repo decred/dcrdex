@@ -1,4 +1,4 @@
-//go:build harness && lgpl
+//go:build harness && !nolgpl
 
 package main
 

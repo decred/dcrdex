@@ -1,7 +1,7 @@
-//go:build live && lgpl
+//go:build live && !nolgpl
 
 // Run a test server with
-// go test -v -tags live,lgpl -run Server -timeout 60m
+// go test -v -tags live -run Server -timeout 60m
 // test server will run for 1 hour and serve randomness.
 
 package webserver
