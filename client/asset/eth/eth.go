@@ -798,7 +798,7 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	// Initialize the best block.
 	bestHdr, err := w.node.bestHeader(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("error getting best block hash from geth: %w", err)
+		return nil, fmt.Errorf("error getting best block hash: %w", err)
 	}
 	w.tipMtx.Lock()
 	w.currentTip = bestHdr
@@ -806,7 +806,7 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 	height := w.currentTip.Number
 	// NOTE: We should be using the tipAtConnect to set Progress in SyncStatus.
 	atomic.StoreInt64(&w.tipAtConnect, height.Int64())
-	w.log.Infof("Connected to geth, at height %d", height)
+	w.log.Infof("Connected to eth (%s), at height %d", w.walletType, height)
 
 	w.connected.Store(true)
 
@@ -2923,16 +2923,16 @@ func (eth *baseWallet) SyncStatus() (bool, float32, error) {
 	if err != nil {
 		return false, 0, err
 	}
-	checkHeaderTime := func() (bool, error) {
+	checkHeaderTime := func() bool {
 		// Time in the header is in seconds.
 		timeDiff := time.Now().Unix() - int64(tipTime)
 		if timeDiff > dexeth.MaxBlockInterval && eth.net != dex.Simnet {
 			eth.log.Infof("Time since last eth block (%d sec) exceeds %d sec."+
 				"Assuming not in sync. Ensure your computer's system clock "+
 				"is correct.", timeDiff, dexeth.MaxBlockInterval)
-			return false, nil
+			return false
 		}
-		return true, nil
+		return true
 	}
 	if prog.HighestBlock != 0 {
 		// HighestBlock was set. This means syncing started and is
@@ -2940,11 +2940,7 @@ func (eth *baseWallet) SyncStatus() (bool, float32, error) {
 		// continue to go up even if we are not in a syncing state.
 		// HighestBlock will not.
 		if prog.CurrentBlock >= prog.HighestBlock {
-			fresh, err := checkHeaderTime()
-			if err != nil {
-				return false, 0, err
-			}
-			if !fresh {
+			if fresh := checkHeaderTime(); !fresh {
 				return false, 0, nil
 			}
 			return eth.node.peerCount() > 0, 1.0, nil
@@ -2965,11 +2961,7 @@ func (eth *baseWallet) SyncStatus() (bool, float32, error) {
 	// syncing state. In order to discern if syncing has begun when
 	// HighestBlock is not set, check that the best header came in under
 	// dexeth.MaxBlockInterval and guess.
-	fresh, err := checkHeaderTime()
-	if err != nil {
-		return false, 0, err
-	}
-	if !fresh {
+	if fresh := checkHeaderTime(); !fresh {
 		return false, 0, nil
 	}
 	return eth.node.peerCount() > 0, 1.0, nil
@@ -3501,7 +3493,7 @@ func (w *assetWallet) checkUnconfirmedRedemption(secretHash common.Hash, contrac
 // confirmRedemptionWithoutMonitoredTx checks the confirmation status of a
 // redemption transaction. It is called when a monitored tx cannot be
 // found. The main difference between the regular path and this one is that
-// when geth can also not find the transaction, instead of resubmitting an
+// when we can also not find the transaction, instead of resubmitting an
 // entire redemption batch, a new transaction containing only the swap we are
 // searching for will be created.
 func (w *assetWallet) confirmRedemptionWithoutMonitoredTx(txHash common.Hash, redemption *asset.Redemption, feeWallet *assetWallet) (*asset.ConfirmRedemptionStatus, error) {
@@ -3517,7 +3509,7 @@ func (w *assetWallet) confirmRedemptionWithoutMonitoredTx(txHash common.Hash, re
 
 	tx, txBlock, err := w.node.getTransaction(w.ctx, txHash)
 	if errors.Is(err, asset.CoinNotFoundError) {
-		w.log.Errorf("ConfirmRedemption: geth could not find tx: %s", txHash)
+		w.log.Errorf("ConfirmRedemption: could not find tx: %s", txHash)
 		swapIsRedeemed, err := w.swapIsRedeemed(secretHash, contractVer)
 		if err != nil {
 			return nil, err
@@ -3526,7 +3518,7 @@ func (w *assetWallet) confirmRedemptionWithoutMonitoredTx(txHash common.Hash, re
 			return confStatus(txConfsNeededToConfirm, txHash), nil
 		}
 
-		// If geth cannot find the transaction, and it also wasn't among the
+		// If we cannot find the transaction, and it also wasn't among the
 		// monitored txs, we will resubmit the swap individually.
 		txs, _, _, err := w.Redeem(&asset.RedeemForm{
 			Redemptions:   []*asset.Redemption{redemption},
@@ -3616,7 +3608,7 @@ func (w *assetWallet) confirmRedemption(coinID dex.Bytes, redemption *asset.Rede
 	tx, txBlock, err := w.node.getTransaction(w.ctx, txHash)
 	if errors.Is(err, asset.CoinNotFoundError) {
 		if blocksSinceSubmission > 2 {
-			w.log.Errorf("ConfirmRedemption: geth could not find tx: %s", txHash)
+			w.log.Errorf("ConfirmRedemption: could not find tx: %s", txHash)
 		}
 
 		if blocksSinceSubmission < blocksToWaitBeforeCoinNotFound {
@@ -3947,7 +3939,8 @@ func (w *assetWallet) estimateTransferGas(val uint64) (gas uint64, err error) {
 
 // redeem redeems a swap contract. Any on-chain failure, such as this secret not
 // matching the hash, will not cause this to error.
-func (w *assetWallet) redeem(ctx context.Context, assetID uint32, redemptions []*asset.Redemption, maxFeeRate, gasLimit uint64, contractVer uint32, nonceOverride *uint64) (tx *types.Transaction, err error) {
+func (w *assetWallet) redeem(ctx context.Context, assetID uint32 /* ?? */, redemptions []*asset.Redemption,
+	maxFeeRate, gasLimit uint64, contractVer uint32, nonceOverride *uint64) (tx *types.Transaction, err error) {
 	w.nonceSendMtx.Lock()
 	defer w.nonceSendMtx.Unlock()
 	var nonce *big.Int
