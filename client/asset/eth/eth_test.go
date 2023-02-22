@@ -1,4 +1,4 @@
-//go:build !harness && !rpclive && lgpl
+//go:build !harness && !rpclive
 
 // These tests will not be run if the harness build tag is set.
 

@@ -1,4 +1,4 @@
-//go:build harness && lgpl
+//go:build harness
 
 // This test requires that the testnet harness be running and the unix socket
 // be located at $HOME/dextest/eth/delta/node/geth.ipc

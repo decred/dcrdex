@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 set -e;
-go build -tags lgpl;
+go build;
 ./loadbot -p $@ | tee -i bot.log;

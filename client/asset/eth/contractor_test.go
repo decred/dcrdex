@@ -1,5 +1,3 @@
-//go:build lgpl
-
 package eth
 
 import (

@@ -10,7 +10,7 @@ Navigate to `client/webserver/site` and run `npm i && npm run build`.
 To run the test server, navigate to `client/webserver` and run
 
 ```sh
-go test -tags live,lgpl -timeout 60m
+go test -tags live -timeout 60m
 ```
 
 In your browser, navigate to `http://localhost:54321`.
