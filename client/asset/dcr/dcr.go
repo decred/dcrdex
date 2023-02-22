@@ -621,8 +621,8 @@ func (dcr *ExchangeWallet) bondLocked(amt uint64) (reserved int64, unspent uint6
 	dcr.bondReservesEnforced -= int64(amt)
 	dcr.bondReservesUsed += amt
 	dcr.log.Tracef("bondLocked (%v): enforced %v ==> %v (with bonded = %v / nominal = %v)",
-		toDCR(amt), toDCRSigned(e0), toDCRSigned(dcr.bondReservesEnforced),
-		toDCR(dcr.bondReservesUsed), toDCRSigned(dcr.bondReservesNominal))
+		toDCR(amt), toDCR(e0), toDCR(dcr.bondReservesEnforced),
+		toDCR(dcr.bondReservesUsed), toDCR(dcr.bondReservesNominal))
 	return dcr.bondReservesEnforced, dcr.bondReservesUsed
 }
 
@@ -649,8 +649,8 @@ func (dcr *ExchangeWallet) bondSpent(amt uint64) (reserved int64, unspent uint64
 	dcr.bondReservesEnforced += int64(amt)
 
 	dcr.log.Tracef("bondSpent (%v): enforced %v ==> %v (with bonded = %v / nominal = %v)",
-		toDCR(amt), toDCRSigned(e0), toDCRSigned(dcr.bondReservesEnforced),
-		toDCR(dcr.bondReservesUsed), toDCRSigned(dcr.bondReservesNominal))
+		toDCR(amt), toDCR(e0), toDCR(dcr.bondReservesEnforced),
+		toDCR(dcr.bondReservesUsed), toDCR(dcr.bondReservesNominal))
 	return dcr.bondReservesEnforced, dcr.bondReservesUsed
 }
 
@@ -1102,7 +1102,7 @@ func (dcr *ExchangeWallet) RegisterUnspent(inBonds uint64) {
 	// The nominal counter is not modified until ReserveBondFunds is called.
 	if dcr.bondReservesNominal != 0 {
 		dcr.log.Warnf("BUG: RegisterUnspent called with existing nominal reserves of %v DCR",
-			toDCRSigned(dcr.bondReservesNominal))
+			toDCR(dcr.bondReservesNominal))
 	}
 }
 
@@ -1164,9 +1164,9 @@ func (dcr *ExchangeWallet) ReserveBondFunds(future int64, respectBalance bool) b
 	defer func(enforced0, used0, nominal0 int64) {
 		dcr.log.Tracef("ReserveBondFunds(%v, %v): enforced = %v / bonded = %v / nominal = %v "+
 			" ==>  enforced = %v / bonded = %v / nominal = %v",
-			toDCRSigned(future), respectBalance,
-			toDCRSigned(enforced0), toDCRSigned(used0), toDCRSigned(nominal0),
-			toDCRSigned(dcr.bondReservesEnforced), toDCR(dcr.bondReservesUsed), toDCR(uint64(dcr.bondReservesNominal)))
+			toDCR(future), respectBalance,
+			toDCR(enforced0), toDCR(used0), toDCR(nominal0),
+			toDCR(dcr.bondReservesEnforced), toDCR(dcr.bondReservesUsed), toDCR(uint64(dcr.bondReservesNominal)))
 	}(dcr.bondReservesEnforced, int64(dcr.bondReservesUsed), dcr.bondReservesNominal)
 
 	// For the reserves initialization, add the fee buffer.
@@ -3665,12 +3665,12 @@ func (dcr *ExchangeWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime 
 	// the reserves counter.
 	newReserves, unspent := dcr.bondLocked(amt) // nominal, not spent amount
 	dcr.log.Debugf("New bond reserves (new post) = %f DCR with %f in unspent bonds",
-		toDCRSigned(newReserves), toDCR(unspent)) // decrement and report new
+		toDCR(newReserves), toDCR(unspent)) // decrement and report new
 
 	abandon := func() { // if caller does not broadcast, or we fail in this method
 		newReserves, unspent = dcr.bondSpent(amt)
 		dcr.log.Debugf("New bond reserves (abandoned post) = %f DCR with %f in unspent bonds",
-			toDCRSigned(newReserves), toDCR(unspent)) // increment/restore and report new
+			toDCR(newReserves), toDCR(unspent)) // increment/restore and report new
 		_, err := dcr.returnCoins(coins)
 		if err != nil {
 			dcr.log.Errorf("error returning coins for unused bond tx: %v", coins)
@@ -3808,13 +3808,13 @@ func (dcr *ExchangeWallet) RefundBond(ctx context.Context, ver uint16, coinID, s
 	// spendable balance, which could be spent by another concurrent process.
 	newReserves, unspent := dcr.bondSpent(amt) // nominal, not refundAmt
 	dcr.log.Debugf("New bond reserves (new refund of %f DCR) = %f DCR with %f in unspent bonds",
-		toDCR(amt), toDCRSigned(newReserves), toDCR(unspent))
+		toDCR(amt), toDCR(newReserves), toDCR(unspent))
 
 	redeemHash, err := dcr.wallet.SendRawTransaction(ctx, msgTx, false)
 	if err != nil { // TODO: we need to be much smarter about these send error types/codes
 		newReserves, unspent = dcr.bondLocked(amt) // assume it didn't really send :/
 		dcr.log.Debugf("New bond reserves (failed refund broadcast) = %f DCR with %f in unspent bonds",
-			toDCRSigned(newReserves), toDCR(unspent)) // increment/restore and report new
+			toDCR(newReserves), toDCR(unspent)) // increment/restore and report new
 		return nil, translateRPCCancelErr(err)
 	}
 
@@ -4876,11 +4876,7 @@ func reduceMsgTx(tx *wire.MsgTx) (in, out, fees, rate, size uint64) {
 
 // toDCR returns a float representation in conventional units for the given
 // atoms.
-func toDCR(v uint64) float64 {
-	return dcrutil.Amount(v).ToCoin()
-}
-
-func toDCRSigned(v int64) float64 {
+func toDCR[V uint64 | int64](v V) float64 {
 	return dcrutil.Amount(v).ToCoin()
 }
 
