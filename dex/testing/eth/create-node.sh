@@ -137,13 +137,13 @@ if [ "${SYNC_MODE}" = "snap" ]; then
 	  "--password ${GROUP_DIR}/password --light.serve 25 --datadir.ancient " \
 	  "${NODE_DIR}/geth-ancient --verbosity 5 --vmdebug --http --http.port " \
 	  "${HTTP_PORT} --ws --ws.port ${WS_PORT} --ws.api " \
-	  "${WS_MODULES} --allow-insecure-unlock " \
+	  "${WS_MODULES} --allow-insecure-unlock --rpc.enabledeprecatedpersonal " \
 	  "2>&1 | tee ${NODE_DIR}/${NAME}.log" C-m
 
 else
   # Start the eth node listening restricted to localhost and our custom
   # configuration file.
-  tmux send-keys -t "$TMUX_WIN_ID" "${NODES_ROOT}/harness-ctl/${NAME} --nodiscover --allow-insecure-unlock " \
+  tmux send-keys -t "$TMUX_WIN_ID" "${NODES_ROOT}/harness-ctl/${NAME} --nodiscover --allow-insecure-unlock --rpc.enabledeprecatedpersonal " \
 	  "--config ${NODE_DIR}/eth.conf --verbosity 5 ${HTTP_OPT} 2>&1 | tee " \
 	  "${NODE_DIR}/${NAME}.log" C-m
 fi
