@@ -5,8 +5,7 @@ on:
     types: [created]
 
 env:
-  DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-  DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+  DOCKER_CLI_EXPERIMENTAL: enabled
   IMAGE_NAME: decred/dcrdex
 
 jobs:
@@ -14,22 +13,22 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c #v3.3.0
+      - name: Login to Docker Hub
+        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
-    - name: Set up Docker Buildx
-      run: |
-        docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-        docker buildx create --use --name mybuilder
-        docker buildx inspect --bootstrap
-    - name: Log in to Docker
-      run: |
-        docker login -u ${{ env.DOCKER_USERNAME }}  -p ${{ env.DOCKER_PASSWORD }}
-    - name: Build and Push Docker Image
-      run: |
-        docker buildx build  -f client/Dockerfile --platform linux/arm64,linux/amd64 \
-          --tag ${{ env.IMAGE_NAME }}:${{ github.ref_name }} \
-          --output "type=registry" .
-      env:
-        DOCKER_USERNAME: ${{ env.DOCKER_USERNAME }}
-        DOCKER_PASSWORD: ${{ env.DOCKER_PASSWORD }}
+      - name: Checkout project
+        uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c #v3.3.0
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@e81a89b1732b9c48d79cd809d8d81d79c4647a18 #v2.1.0
+
+      - name: Setup Docker buildx action
+        uses: docker/setup-buildx-action@f03ac48505955848960e80bbb68046aa35c7b9e7 #v2.4.1
+
+      - name: Build and Push Docker Image
+        run: |
+          docker buildx build  \
+            -f client/Dockerfile.release \
+            --platform linux/arm64,linux/amd64 \
+            --tag ${{ env.IMAGE_NAME }}:${{ github.ref_name }} \
+            --output "type=registry" .
