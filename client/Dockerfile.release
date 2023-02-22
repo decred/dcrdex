@@ -1,0 +1,34 @@
+#
+# Build a release Docker image
+# This file is used to build production images off of a release-vx.x branch
+# where the site build is checked in.  (This allows for faster image builds.)
+#
+# $ docker build -t user/dcrdex -f client/Dockerfile.release .
+#
+# Create docker volume to store client data
+# $ docker volume create --name=dcrdex_data
+#
+# Run the docker image, mapping web access port.
+# $ docker run -d --rm -p 127.0.0.1:5758:5758 -v dcrdex_data:/dex/.dexc user/dcrdex
+#
+
+# dexc binary build
+FROM golang:1.20-alpine AS gobuilder
+WORKDIR /root/dex
+COPY . . 
+WORKDIR /root/dex/client/cmd/dexc/
+RUN CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build
+WORKDIR /root/dex/client/cmd/dexcctl/
+RUN CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build
+
+# Final image
+FROM debian:buster-slim
+RUN apt-get update && apt-get install -y ca-certificates
+WORKDIR /dex
+ENV HOME /dex
+RUN mkdir -p /dex/.dexc && chown 1000 /dex/.dexc
+USER 1000
+COPY --from=gobuilder /root/dex/client/cmd/dexc/dexc ./
+COPY --from=gobuilder /root/dex/client/cmd/dexcctl/dexcctl ./
+EXPOSE 5758
+CMD [ "./dexc", "--webaddr=0.0.0.0:5758" ]
