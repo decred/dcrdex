@@ -13,10 +13,12 @@
 FROM node:19-buster-slim AS nodebuilder
 WORKDIR /root/dex
 COPY . .
-RUN apt-get update && apt-get install -y git
-WORKDIR /root/dex/client/webserver/site/
-RUN npm clean-install
-RUN npm run build
+# The release branches have the Webpack bundle checked so in is not necessary to
+# build it again. These lines are only necessary on a development branch.
+# RUN apt-get update && apt-get install -y git
+# WORKDIR /root/dex/client/webserver/site/
+# RUN npm clean-install
+# RUN npm run build
 
 # dexc binary build
 FROM golang:1.19-alpine AS gobuilder
