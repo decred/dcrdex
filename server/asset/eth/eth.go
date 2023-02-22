@@ -250,7 +250,7 @@ func unconnectedETH(logger dex.Logger, net dex.Network) (*ETHBackend, error) {
 			baseLogger: logger,
 			tokens:     make(map[uint32]*TokenBackend),
 		},
-		log:          logger.SubLogger("ETH"),
+		log:          logger,
 		contractAddr: contractAddr,
 		blockChans:   make(map[chan *asset.BlockUpdate]struct{}),
 		initTxSize:   uint32(dexeth.InitGas(1, ethContractVersion)),

@@ -672,7 +672,7 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 
 	aw := &assetWallet{
 		baseWallet:         eth,
-		log:                logger.SubLogger("ETH"),
+		log:                logger,
 		assetID:            BipID,
 		tipChange:          assetCFG.TipChange,
 		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
