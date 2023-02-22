@@ -587,7 +587,7 @@ func (db *BoltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
 		acct, err := accts.CreateBucket([]byte(ai.Host))
 		if err != nil {
-			return fmt.Errorf("failed to create account bucket")
+			return fmt.Errorf("failed to create account bucket: %w", err)
 		}
 
 		err = acct.Put(accountKey, ai.Encode())
