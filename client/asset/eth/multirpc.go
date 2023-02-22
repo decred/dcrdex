@@ -29,7 +29,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/misc"
-	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/params"
@@ -1177,7 +1177,7 @@ func (m *multiRPCClient) sendSignedTransaction(ctx context.Context, tx *types.Tr
 		m.log.Tracef("Sending signed tx via %q", p.host)
 		return p.ec.SendTransaction(ctx, tx)
 	}, func(err error) (discard, propagate, fail bool) {
-		return errorFilter(err, core.ErrAlreadyKnown, "known transaction"), false, false
+		return errorFilter(err, txpool.ErrAlreadyKnown, "known transaction"), false, false
 	}); err != nil {
 		return err
 	}
