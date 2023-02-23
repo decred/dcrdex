@@ -1571,7 +1571,8 @@ func (db *BoltDB) filteredMatches(filter func(*bbolt.Bucket) bool, excludeCancel
 		if includeArchived {
 			buckets = append(buckets, archivedMB)
 		}
-		for _, master := range buckets {
+		const archivedBucketIdx = 1
+		for i, master := range buckets {
 			err := master.ForEach(func(k, _ []byte) error {
 				mBkt := master.Bucket(k)
 				if mBkt == nil {
@@ -1585,6 +1586,14 @@ func (db *BoltDB) filteredMatches(filter func(*bbolt.Bucket) bool, excludeCancel
 					return fmt.Errorf("loading match %x bucket: %w", k, err)
 				}
 				if match != nil {
+					// Archived matches that were written prior to the
+					// introduction of the MatchConfirmed status will not be
+					// past MatchComplete. Switch any unrevoked matches in this
+					// bucket to MatchConfirmed to agree with the MatchIsActive.
+					if i == archivedBucketIdx && match.Status == order.MatchComplete &&
+						!match.MetaData.Proof.IsRevoked() { // revoked check probably redundant
+						match.Status = order.MatchConfirmed
+					}
 					matches = append(matches, match)
 				}
 				return nil
