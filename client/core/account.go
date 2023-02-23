@@ -54,9 +54,12 @@ func (c *Core) AccountDisable(pw []byte, addr string) error {
 		return newError(unknownDEXErr, "error retrieving dex conn: %w", err)
 	}
 
-	// Check active orders.
+	// Check active orders or bonds.
 	if dc.hasActiveOrders() {
 		return fmt.Errorf("cannot disable account with active orders")
+	}
+	if dc.hasUnspentBond() {
+		return fmt.Errorf("cannot disable account with unspent bonds")
 	}
 
 	err = c.db.DisableAccount(dc.acct.host)
