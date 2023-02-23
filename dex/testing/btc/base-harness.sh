@@ -201,6 +201,7 @@ cat > "${HARNESS_DIR}/quit" <<EOF
 tmux send-keys -t $SESSION:0 C-c
 tmux send-keys -t $SESSION:1 C-c
 tmux send-keys -t $SESSION:3 C-c
+tmux send-keys -t $SESSION:4 C-c
 tmux wait-for alpha${SYMBOL}
 tmux wait-for beta${SYMBOL}
 # seppuku
@@ -370,6 +371,11 @@ fi
 # Reenable history
 tmux send-keys -t $SESSION:2 "set -o history" C-m
 
+# Miner
+tmux new-window -t $SESSION:3 -n "miner" $SHELL
+tmux send-keys -t $SESSION:3 "cd ${HARNESS_DIR}" C-m
+tmux send-keys -t $SESSION:3 "watch -n 15 ./mine-alpha 1" C-m
+
 if [ ! -z "$GODAEMON" ]; then
   $GODAEMON --version &> /dev/null
   DAEMON_INSTALLED=$?
@@ -377,8 +383,8 @@ if [ ! -z "$GODAEMON" ]; then
   if [ $DAEMON_INSTALLED -eq 0 ]; then
     echo "Go node found. Starting"
 
-    tmux new-window -t $SESSION:3 -n "go-node" $SHELL
-    tmux send-keys -t $SESSION:3 "set +o history" C-m
+    tmux new-window -t $SESSION:4 -n "go-node" $SHELL
+    tmux send-keys -t $SESSION:4 "set +o history" C-m
 
     $GOCLIENT --version &> /dev/null
     CLIENT_INSTALLED=$?
@@ -391,6 +397,7 @@ if [ ! -z "$GODAEMON" ]; then
       NODE_CONF="${OMEGA_DIR}/gonode.conf"
       CLIENT_CONF="${OMEGA_DIR}/goctl.conf"
       OMEGA_RPC_PORT=21558
+
 
 cat > "${NODE_CONF}" <<EOF
 addpeer=127.0.0.1:${ALPHA_LISTEN_PORT}
@@ -418,7 +425,7 @@ ${GOCLIENT} --configfile=${CLIENT_CONF} "\$@"
 EOF
 chmod +x "${HARNESS_DIR}/omega"
 
-      tmux send-keys -t $SESSION:3 "${GODAEMON} --datadir ${OMEGA_DIR} \
+      tmux send-keys -t $SESSION:4 "${GODAEMON} --datadir ${OMEGA_DIR} \
       --configfile ${NODE_CONF}" C-m
 
     else
