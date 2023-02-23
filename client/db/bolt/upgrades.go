@@ -329,7 +329,7 @@ func v6Upgrade(dbtx *bbolt.Tx) error {
 		if matchB == nil {
 			return fmt.Errorf("nil match bytes for %x", k)
 		}
-		match, err := order.DecodeMatch(matchB)
+		match, _, err := order.DecodeMatch(matchB)
 		if err != nil {
 			return fmt.Errorf("error decoding match %x: %w", k, err)
 		}
