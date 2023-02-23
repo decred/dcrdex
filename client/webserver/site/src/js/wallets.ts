@@ -603,7 +603,7 @@ export default class WalletsPage extends BasePage {
     const { bttn, tmpl } = this.assetButtons[assetID]
     Doc.hide(tmpl.fiat, tmpl.noWallet)
     bttn.classList.add('nowallet')
-    tmpl.img.src = Doc.logoPath(a.symbol)
+    tmpl.img.src ||= Doc.logoPath(a.symbol) // don't initiate GET if already set (e.g. update on some notification)
     tmpl.name.textContent = a.name
     if (a.wallet) {
       bttn.classList.remove('nowallet')
