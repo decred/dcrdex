@@ -84,7 +84,7 @@ func testUserMatch(t *testing.T) {
 	match := RandomUserMatch()
 	matchB := order.EncodeMatch(match)
 
-	reMatch, err := order.DecodeMatch(matchB)
+	reMatch, _, err := order.DecodeMatch(matchB)
 	if err != nil {
 		t.Fatalf("error decoding UserMatch: %v", err)
 	}

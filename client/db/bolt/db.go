@@ -1603,9 +1603,14 @@ func loadMatchBucket(mBkt *bbolt.Bucket, excludeCancels bool) (*dexdb.MetaMatch,
 	if matchB == nil {
 		return nil, fmt.Errorf("nil match bytes")
 	}
-	match, err := order.DecodeMatch(matchB)
+	match, matchVer, err := order.DecodeMatch(matchB)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding match: %w", err)
+	}
+	if matchVer == 0 && match.Status == order.MatchComplete {
+		// When v0 matches were written, there was no MatchConfirmed, so we will
+		// "upgrade" this match on the fly to agree with MatchIsActive.
+		match.Status = order.MatchConfirmed
 	}
 	// A cancel match for a maker (trade) order has an empty address.
 	if excludeCancels && match.Address == "" {

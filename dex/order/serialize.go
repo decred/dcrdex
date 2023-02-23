@@ -146,7 +146,7 @@ func decodeTrade_v0(pushes [][]byte) (mrkt *Trade, err error) {
 // EncodeMatch encodes the UserMatch to bytes suitable for binary storage or
 // communications.
 func EncodeMatch(match *UserMatch) []byte {
-	return encode.BuildyBytes{0}.
+	return encode.BuildyBytes{1}.
 		AddData(match.OrderID[:]).
 		AddData(match.MatchID[:]).
 		AddData(uint64B(match.Quantity)).
@@ -158,19 +158,21 @@ func EncodeMatch(match *UserMatch) []byte {
 }
 
 // DecodeMatch decodes the versioned blob into a UserMatch.
-func DecodeMatch(b []byte) (match *UserMatch, err error) {
-	ver, pushes, err := encode.DecodeBlob(b, 8)
+func DecodeMatch(b []byte) (match *UserMatch, ver uint8, err error) {
+	var pushes [][]byte
+	ver, pushes, err = encode.DecodeBlob(b, 8)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	switch ver {
-	case 0:
-		return matchDecoder_v0(pushes)
+	case 0, 1: // same encoding, just a flag
+		match, err = matchDecoder_v0(pushes)
+		return
 	}
-	return nil, fmt.Errorf("unknown UserMatch version %d", ver)
+	return nil, 0, fmt.Errorf("unknown UserMatch version %d", ver)
 }
 
-// matchDecoder_v0 decodes the version 0 payload into a *UserMatch.
+// matchDecoder_v0 decodes the version 0 (and 1) payload into a *UserMatch.
 func matchDecoder_v0(pushes [][]byte) (*UserMatch, error) {
 	if len(pushes) != 8 {
 		return nil, fmt.Errorf("matchDecoder_v0: expected 8 pushes, got %d", len(pushes))
