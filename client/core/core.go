@@ -2534,7 +2534,7 @@ func (c *Core) createSeededWallet(assetID uint32, crypter encrypt.Crypter, form 
 		Settings: form.Config,
 		DataDir:  c.assetDataDirectory(assetID),
 		Net:      c.net,
-		Logger:   c.log.SubLogger("CREATE"),
+		Logger:   c.log.SubLogger(unbip(assetID)),
 	}); err != nil {
 		return nil, fmt.Errorf("Error creating wallet: %w", err)
 	}
@@ -2959,7 +2959,7 @@ func (c *Core) RecoverWallet(assetID uint32, appPW []byte, force bool) error {
 		Settings: dbWallet.Settings,
 		DataDir:  c.assetDataDirectory(assetID),
 		Net:      c.net,
-		Logger:   c.log.SubLogger("CREATE"),
+		Logger:   c.log.SubLogger(unbip(assetID)),
 	}); err != nil {
 		return fmt.Errorf("error creating wallet: %w", err)
 	}

@@ -24,7 +24,6 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/networks/erc20"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
-	"github.com/decred/slog"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -695,7 +694,7 @@ func createAndCheckProviders(ctx context.Context, walletDir string, endpoints []
 		if len(providers) != len(unknownEndpoints) {
 			return providersErr(providers)
 		}
-		if err := checkProvidersCompliance(ctx, providers, net, log); err != nil {
+		if err := checkProvidersCompliance(ctx, providers, net, dex.Disabled /* logger is for testing only */); err != nil {
 			return err
 		}
 	}
@@ -1398,7 +1397,9 @@ type rpcTest struct {
 
 // newCompatibilityTests returns a list of RPC tests to run to determine API
 // compatibility.
-func newCompatibilityTests(cb bind.ContractBackend, net dex.Network, log slog.Logger) []*rpcTest {
+func newCompatibilityTests(cb bind.ContractBackend, net dex.Network, log dex.Logger) []*rpcTest {
+	// NOTE: The logger is intended for use the execution of the compatibility
+	// tests, and it will generally be dex.Disabled in production.
 	var (
 		// Vitalik's address from https://twitter.com/VitalikButerin/status/1050126908589887488
 		mainnetAddr      = common.HexToAddress("0xab5801a7d398351b8be11c439e05c5b3259aec9b")
@@ -1438,15 +1439,15 @@ func newCompatibilityTests(cb bind.ContractBackend, net dex.Network, log slog.Lo
 		readIt := func(path string) string {
 			b, err := os.ReadFile(path)
 			if err != nil {
-				log.Errorf("Problem reading simnet testing file: %v", err)
+				panic(fmt.Sprintf("Problem reading simnet testing file %q: %v", path, err))
 			}
-			return strings.TrimRight(string(b), "\r\n")
+			return strings.TrimSpace(string(b)) // mainly the trailing "\r\n"
 		}
 		usdc = common.HexToAddress(readIt(tContractFile))
 		txHash = common.HexToHash(readIt(tTxHashFile))
 		blockHash = common.HexToHash(readIt(tBlockHashFile))
-	default:
-		log.Errorf("Unknown net %v in compatibility tests. Testing data not initiated.", net)
+	default: // caller should have checked though
+		panic(fmt.Sprintf("Unknown net %v in compatibility tests. Testing data not initiated.", net))
 	}
 
 	return []*rpcTest{
@@ -1485,7 +1486,7 @@ func newCompatibilityTests(cb bind.ContractBackend, net dex.Network, log slog.Lo
 				if err != nil {
 					return err
 				}
-				log.Info("#### Retreived tip cap:", tipCap)
+				log.Debugf("#### Retrieved tip cap: %d gwei", dexeth.WeiToGwei(tipCap))
 				return nil
 			},
 		},
@@ -1496,7 +1497,7 @@ func newCompatibilityTests(cb bind.ContractBackend, net dex.Network, log slog.Lo
 				if err != nil {
 					return err
 				}
-				log.Infof("#### Balance retrieved: %.9f", float64(dexeth.WeiToGwei(bal))/1e9)
+				log.Debugf("#### Balance retrieved: %.9f", float64(dexeth.WeiToGwei(bal))/1e9)
 				return nil
 			},
 		},
@@ -1507,7 +1508,7 @@ func newCompatibilityTests(cb bind.ContractBackend, net dex.Network, log slog.Lo
 				if err != nil {
 					return err
 				}
-				log.Infof("#### %d bytes of USDC contract retrieved", len(code))
+				log.Debugf("#### %d bytes of USDC contract retrieved", len(code))
 				return nil
 			},
 		},
@@ -1528,7 +1529,7 @@ func newCompatibilityTests(cb bind.ContractBackend, net dex.Network, log slog.Lo
 				// I guess we would need to unpack the results. I don't really
 				// know how to interpret these, but I'm really just looking for
 				// a request error.
-				log.Info("#### USDC balanceOf result:", bal, "wei")
+				log.Debug("#### USDC balanceOf result:", dexeth.WeiToGwei(bal), "gwei")
 				return nil
 			},
 		},
@@ -1539,18 +1540,7 @@ func newCompatibilityTests(cb bind.ContractBackend, net dex.Network, log slog.Lo
 				if err != nil {
 					return err
 				}
-				log.Infof("#### Chain ID: %d", chainID)
-				return nil
-			},
-		},
-		{
-			name: "PendingNonceAt",
-			f: func(ctx context.Context, p *provider) error {
-				n, err := p.ec.PendingNonceAt(ctx, addr)
-				if err != nil {
-					return err
-				}
-				log.Infof("#### Pending nonce: %d", n)
+				log.Debugf("#### Chain ID: %d", chainID)
 				return nil
 			},
 		},
@@ -1565,7 +1555,7 @@ func newCompatibilityTests(cb bind.ContractBackend, net dex.Network, log slog.Lo
 				if rpcTx.BlockNumber != nil {
 					h = *rpcTx.BlockNumber
 				}
-				log.Infof("#### RPC Tx is nil? %t, block number: %q", rpcTx.tx == nil, h)
+				log.Debugf("#### RPC Tx is nil? %t, block number: %q", rpcTx.tx == nil, h)
 				return nil
 			},
 		},
@@ -1585,7 +1575,7 @@ func domain(host string) string {
 // requires by sending a series of requests and verifying the responses. If a
 // provider is found to be compliant, their domain name is added to a list and
 // stored in a file on disk so that future checks can be short-circuited.
-func checkProvidersCompliance(ctx context.Context, providers []*provider, net dex.Network, log slog.Logger) error {
+func checkProvidersCompliance(ctx context.Context, providers []*provider, net dex.Network, log dex.Logger) error {
 	for _, p := range providers {
 		// Need to run API tests on this endpoint.
 		for _, t := range newCompatibilityTests(p.ec, net, log) {

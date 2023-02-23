@@ -248,7 +248,7 @@ func unconnectedETH(logger dex.Logger, net dex.Network) (*ETHBackend, error) {
 			baseLogger: logger,
 			tokens:     make(map[uint32]*TokenBackend),
 		},
-		log:          logger.SubLogger("ETH"),
+		log:          logger,
 		contractAddr: contractAddr,
 		blockChans:   make(map[chan *asset.BlockUpdate]struct{}),
 		initTxSize:   uint32(dexeth.InitGas(1, ethContractVersion)),
@@ -330,7 +330,7 @@ func (eth *ETHBackend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	bn, err := eth.node.blockNumber(ctx)
 	if err != nil {
 		cancelNodeContext()
-		return nil, fmt.Errorf("error getting best block header from geth: %w", err)
+		return nil, fmt.Errorf("error getting best block header: %w", err)
 	}
 	eth.baseBackend.bestHeight = bn
 
@@ -713,7 +713,7 @@ func (eth *ETHBackend) poll(ctx context.Context) {
 	}
 	bn, err := eth.node.blockNumber(ctx)
 	if err != nil {
-		send(fmt.Errorf("error getting best block header from geth: %w", err))
+		send(fmt.Errorf("error getting best block header: %w", err))
 		return
 	}
 	if bn == eth.bestHeight {
