@@ -2775,9 +2775,15 @@ func (dc *dexConnection) bondTotal(assetID uint32) (total, active uint64) {
 	return dc.bondTotalInternal(assetID)
 }
 
-func (dc *dexConnection) hasUnspentBond(assetID uint32) bool {
+func (dc *dexConnection) hasUnspentAssetBond(assetID uint32) bool {
 	total, _ := dc.bondTotal(assetID)
 	return total > 0
+}
+
+func (dc *dexConnection) hasUnspentBond() bool {
+	dc.acct.authMtx.RLock()
+	defer dc.acct.authMtx.RUnlock()
+	return len(dc.acct.bonds) > 0 || len(dc.acct.pendingBonds) > 0 || len(dc.acct.expiredBonds) > 0
 }
 
 // isActiveBondAsset indicates if a wallet (or it's parent if the asset is a
@@ -2808,7 +2814,7 @@ func (c *Core) isActiveBondAsset(assetID uint32, includeLive bool) bool {
 		}
 		if includeLive {
 			for id := range assetIDs {
-				if dc.hasUnspentBond(id) {
+				if dc.hasUnspentAssetBond(id) {
 					return true
 				}
 			}
