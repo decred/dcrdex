@@ -13,7 +13,7 @@
 FROM node:19-buster-slim AS nodebuilder
 WORKDIR /root/dex
 COPY . .
-RUN apt-get update && apt-get install -y git
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y git
 WORKDIR /root/dex/client/webserver/site/
 RUN npm clean-install
 RUN npm run build
@@ -28,7 +28,7 @@ RUN CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build
 
 # Final image
 FROM debian:buster-slim
-RUN apt-get update && apt-get install -y ca-certificates
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates
 WORKDIR /dex
 ENV HOME /dex
 RUN mkdir -p /dex/.dexc && chown 1000 /dex/.dexc
