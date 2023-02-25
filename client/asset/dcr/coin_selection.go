@@ -80,21 +80,21 @@ func sumUTXOs(set []*compositeUTXO) (tot uint64) {
 // unused UTXOs until the total value is greater than or equal to amt.
 func subsetWithLeastSumGreaterThan(amt uint64, utxos []*compositeUTXO) []*compositeUTXO {
 	best := uint64(1 << 62)
-	var bestIncluded *[]bool
+	var bestIncluded []bool
 	bestNumIncluded := 0
 
-	iterations := 1000
+	rnd := rand.New(rand.NewSource(rand.Int63()))
+	included := make([]bool, len(utxos))
+	const iterations = 1000
 	for nRep := 0; nRep < iterations; nRep++ {
-		included := make([]bool, len(utxos))
-
-		var found bool
 		var nTotal uint64
 		var numIncluded int
-		for nPass := 0; nPass < 2 && !found; nPass++ {
+	passes:
+		for nPass := 0; nPass < 2; nPass++ {
 			for i := 0; i < len(utxos); i++ {
 				var use bool
 				if nPass == 0 {
-					use = rand.Uint32()&1 == 1
+					use = rnd.Int63()&1 == 1
 				} else {
 					use = !included[i]
 				}
@@ -105,14 +105,19 @@ func subsetWithLeastSumGreaterThan(amt uint64, utxos []*compositeUTXO) []*compos
 					if nTotal >= amt {
 						if nTotal < best || (nTotal == best && numIncluded < bestNumIncluded) {
 							best = nTotal
-							bestIncluded = &included
+							if bestIncluded == nil {
+								bestIncluded = make([]bool, len(utxos))
+							}
+							copy(bestIncluded, included)
 							bestNumIncluded = numIncluded
-							found = true
 						}
-						break
+						break passes
 					}
 				}
 			}
+		}
+		for i := 0; i < len(included); i++ {
+			included[i] = false
 		}
 	}
 
@@ -121,7 +126,7 @@ func subsetWithLeastSumGreaterThan(amt uint64, utxos []*compositeUTXO) []*compos
 	}
 
 	set := make([]*compositeUTXO, 0, len(utxos))
-	for i, inc := range *bestIncluded {
+	for i, inc := range bestIncluded {
 		if inc {
 			set = append(set, utxos[i])
 		}
