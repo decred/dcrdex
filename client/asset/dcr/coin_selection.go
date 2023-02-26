@@ -30,9 +30,6 @@ func sendEnough(amt, feeRate uint64, subtract bool, baseTxSize uint32, reportCha
 			return false, 0
 		}
 		excess := total - req
-		if subtract && excess > txFee {
-			excess -= txFee // total - (req + txFee), without underflow
-		}
 		if !reportChange || dexdcr.IsDustVal(dexdcr.P2PKHOutputSize, excess, feeRate) {
 			excess = 0
 		}
