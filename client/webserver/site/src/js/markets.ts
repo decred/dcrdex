@@ -198,7 +198,7 @@ export default class MarketsPage extends BasePage {
     this.hovers = []
     // 'Recent Matches' list sort key and direction.
     this.recentMatchesSortKey = 'age'
-    this.recentMatchesSortDirection = 1
+    this.recentMatchesSortDirection = -1
     // store original title so we can re-append it when updating market value.
     this.ogTitle = document.title
 

@@ -757,10 +757,6 @@ div[data-handler=markets] {
       }
     }
   }
-
-  tr {
-    cursor: pointer;
-  }
 }
 
 @include media-breakpoint-up(xl) {
