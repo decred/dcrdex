@@ -6,6 +6,7 @@ package dcr
 import (
 	"math/rand"
 	"sort"
+	"time"
 
 	"decred.org/dcrdex/dex/calc"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
@@ -83,15 +84,24 @@ func subsetWithLeastSumGreaterThan(amt uint64, utxos []*compositeUTXO) []*compos
 	var bestIncluded []bool
 	bestNumIncluded := 0
 
-	rnd := rand.New(rand.NewSource(rand.Int63()))
+	rnd := rand.New(rand.NewSource(time.Now().Unix()))
+
+	shuffledUTXOs := make([]*compositeUTXO, len(utxos))
+	copy(shuffledUTXOs, utxos)
+	rnd.Shuffle(len(shuffledUTXOs), func(i, j int) {
+		shuffledUTXOs[i], shuffledUTXOs[j] = shuffledUTXOs[j], shuffledUTXOs[i]
+	})
+
 	included := make([]bool, len(utxos))
 	const iterations = 1000
+
+searchLoop:
 	for nRep := 0; nRep < iterations; nRep++ {
 		var nTotal uint64
 		var numIncluded int
-	passes:
+
 		for nPass := 0; nPass < 2; nPass++ {
-			for i := 0; i < len(utxos); i++ {
+			for i := 0; i < len(shuffledUTXOs); i++ {
 				var use bool
 				if nPass == 0 {
 					use = rnd.Int63()&1 == 1
@@ -101,17 +111,22 @@ func subsetWithLeastSumGreaterThan(amt uint64, utxos []*compositeUTXO) []*compos
 				if use {
 					included[i] = true
 					numIncluded++
-					nTotal += toAtoms(utxos[i].rpc.Amount)
+					nTotal += toAtoms(shuffledUTXOs[i].rpc.Amount)
 					if nTotal >= amt {
 						if nTotal < best || (nTotal == best && numIncluded < bestNumIncluded) {
 							best = nTotal
 							if bestIncluded == nil {
-								bestIncluded = make([]bool, len(utxos))
+								bestIncluded = make([]bool, len(shuffledUTXOs))
 							}
 							copy(bestIncluded, included)
 							bestNumIncluded = numIncluded
 						}
-						break passes
+						if nTotal == amt {
+							break searchLoop
+						}
+						included[i] = false
+						nTotal -= toAtoms(shuffledUTXOs[i].rpc.Amount)
+						numIncluded--
 					}
 				}
 			}
@@ -125,10 +140,10 @@ func subsetWithLeastSumGreaterThan(amt uint64, utxos []*compositeUTXO) []*compos
 		return nil
 	}
 
-	set := make([]*compositeUTXO, 0, len(utxos))
+	set := make([]*compositeUTXO, 0, len(shuffledUTXOs))
 	for i, inc := range bestIncluded {
 		if inc {
-			set = append(set, utxos[i])
+			set = append(set, shuffledUTXOs[i])
 		}
 	}
 
