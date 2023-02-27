@@ -807,6 +807,7 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 	}
 
 	// Record any cancel order Match and update order status.
+	var metaCancelMatch *db.MetaMatch
 	if cancelMatch != nil {
 		t.dc.log.Infof("Maker notification for cancel order received for order %s. match id = %s",
 			t.ID(), cancelMatch.MatchID)
@@ -819,6 +820,11 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 			t.maybeReturnCoins()
 		}
 
+		// Note: In TopicNewMatch later, it must be status complete to agree
+		// with coreOrderFromMetaOrder, which pulls match data *from the DB*.
+		cancelMatch.Status = uint8(order.MatchComplete) // we're completing it now
+		cancelMatch.Address = ""                        // not a trade match
+
 		t.cancel.matches.maker = cancelMatch // taker is stored via processCancelMatch before negotiate
 		// Set the order status for the cancel order.
 		err := t.db.UpdateOrderStatus(t.cancel.ID(), order.OrderStatusExecuted)
@@ -828,10 +834,8 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 			// Try to store the match anyway.
 		}
 		// Store a completed maker cancel match in the DB.
-		makerCancelMeta := t.makeMetaMatch(cancelMatch)
-		makerCancelMeta.Status = order.MatchComplete
-		makerCancelMeta.Address = "" // not a trade match
-		err = t.db.UpdateMatch(makerCancelMeta)
+		metaCancelMatch = t.makeMetaMatch(cancelMatch)
+		err = t.db.UpdateMatch(metaCancelMatch)
 		if err != nil {
 			return fmt.Errorf("failed to update match in db: %w", err)
 		}
@@ -920,7 +924,7 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 
 	// Send notifications.
 	corder := t.coreOrderInternal()
-	if cancelMatch != nil {
+	if metaCancelMatch != nil {
 		topic := TopicBuyOrderCanceled
 		if trade.Sell {
 			topic = TopicSellOrderCanceled
@@ -933,7 +937,7 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		t.notify(newMatchNote(TopicNewMatch, "", "", db.Data, t, &matchTracker{
 			prefix:    t.Prefix(),
 			trade:     trade,
-			MetaMatch: *t.makeMetaMatch(cancelMatch),
+			MetaMatch: *metaCancelMatch,
 		}))
 	}
 	if len(newTrackers) > 0 {
