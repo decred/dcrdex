@@ -2050,6 +2050,10 @@ export default class MarketsPage extends BasePage {
     mord.ord = order
     if (note.topic === 'MissedCancel') Doc.show(mord.details.cancelBttn)
     if (order.filled === order.qty) Doc.hide(mord.details.cancelBttn)
+    if (note.topic === 'OrderRetired') {
+      delete this.metaOrders[order.id]
+      mord.div.remove()
+    }
     if (app().canAccelerateOrder(order)) Doc.show(mord.details.accelerateBttn)
     else Doc.hide(mord.details.accelerateBttn)
     this.updateMetaOrder(mord)
