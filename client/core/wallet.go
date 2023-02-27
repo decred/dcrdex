@@ -277,7 +277,9 @@ func (w *xcWallet) state() *WalletState {
 	w.mtx.RUnlock()
 
 	if w.parent != nil {
+		w.parent.mtx.RLock()
 		state.Open = len(w.parent.encPass) == 0 || len(w.parent.pw) > 0
+		w.parent.mtx.RUnlock()
 	}
 
 	return state
