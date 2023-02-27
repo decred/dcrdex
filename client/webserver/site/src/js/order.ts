@@ -62,6 +62,15 @@ export default class OrderPage extends BasePage {
       })
     })
 
+    // Some static elements on this page contain assets that can be linked
+    // to blockchain explorers (such as Etherscan) so users can easily
+    // examine funding/acceleration coins data there. We'd need to set up
+    // such hyperlinks here.
+    main.querySelectorAll('[data-asset-id]').forEach((link: PageElement) => {
+      const assetID = parseInt(link.dataset.assetId || '')
+      setCoinHref(assetID, link)
+    })
+
     if (page.cancelBttn) {
       Doc.bind(page.cancelBttn, 'click', () => {
         this.showForm(page.cancelForm)
@@ -493,8 +502,8 @@ function inConfirmingTakerRedeem (m: Match) {
 }
 
 /*
- * setCoinHref sets the hyperlink element's href attribute based on its
- * data-explorer-id and data-explorer-coin values.
+ * setCoinHref sets the hyperlink element's href attribute based on provided
+ * assetID and data-explorer-coin value present on supplied link element.
  */
 function setCoinHref (assetID: number, link: PageElement) {
   const assetExplorer = CoinExplorers[assetID]
