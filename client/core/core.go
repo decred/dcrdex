@@ -5693,6 +5693,11 @@ func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, e
 		return nil, codedError(walletErr, fmt.Errorf("FundOrder error for %s, funding quantity %d (%d lots): %w",
 			assetConfigs.fromAsset.Symbol, fundQty, lots, err))
 	}
+	defer func() {
+		if _, err := c.updateWalletBalance(fromWallet); err != nil {
+			c.log.Errorf("updateWalletBalance error: %v", err)
+		}
+	}()
 
 	coinIDs := make([]order.CoinID, 0, len(coins))
 	for i := range coins {
@@ -5791,6 +5796,12 @@ func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, e
 		if err != nil {
 			return nil, codedError(walletErr, fmt.Errorf("ReserveNRedemptions error: %w", err))
 		}
+		defer func() {
+			if _, err := c.updateWalletBalance(toWallet); err != nil {
+				c.log.Errorf("updateWalletBalance error: %v", err)
+			}
+		}()
+
 		msgTrade.RedeemSig = &msgjson.RedeemSig{
 			PubKey: pubKeys[0],
 			Sig:    sigs[0],
