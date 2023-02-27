@@ -78,7 +78,7 @@ const (
 		$3, $4, $5,
 		$6, $7, $8,
 		$9, $10,
-		$11, $12, $13, $14, $15) `  // do not terminate with ;
+		$11, $12, $13, $14, $15) ` // do not terminate with ;
 
 	UpsertMatch = InsertMatch + ` ON CONFLICT (matchid) DO
 	UPDATE SET quantity = $11, status = $15;`
@@ -92,7 +92,7 @@ const (
 			$2, $3,
 			$4, $5,
 			$6, $7,
-			$8, $9, $10) `  // status should be MatchComplete although there is no swap
+			$8, $9, $10) ` // status should be MatchComplete although there is no swap
 
 	UpsertCancelMatch = InsertCancelMatch + ` ON CONFLICT (matchid) DO NOTHING;`
 
