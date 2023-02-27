@@ -787,6 +787,18 @@ func (c *TCore) AccountImport(pw []byte, account *core.Account, bond []*db.Bond)
 }
 func (c *TCore) AccountDisable(pw []byte, host string) error { return nil }
 
+func (c *TCore) GetNoteTypePermission(string) (bool, error) {
+	return false, nil
+}
+
+func (c *TCore) NoteTypePermissionsOpt() map[string]string {
+	return nil
+}
+
+func (c *TCore) SetNotesTypePermission([]string) error {
+	return nil
+}
+
 func coreCoin() *core.Coin {
 	b := make([]byte, 36)
 	copy(b[:], encode.RandomBytes(32))

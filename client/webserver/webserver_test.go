@@ -296,6 +296,18 @@ func (c *TCore) MarketReport(host string, baseID, quoteID uint32) (*core.MarketR
 	return nil, nil
 }
 
+func (c *TCore) GetNoteTypePermission(string) (bool, error) {
+	return false, nil
+}
+
+func (c *TCore) NoteTypePermissionsOpt() map[string]string {
+	return nil
+}
+
+func (c *TCore) SetNotesTypePermission([]string) error {
+	return nil
+}
+
 type TWriter struct {
 	b []byte
 }
