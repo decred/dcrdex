@@ -251,24 +251,17 @@ func (w *xcWallet) amtStringSigned(amt int64) string {
 // state returns the current WalletState.
 func (w *xcWallet) state() *WalletState {
 	winfo := w.Info()
-	lockable := w
-	if w.parent != nil {
-		lockable = w.parent
-	}
 
 	w.mtx.RLock()
-	defer w.mtx.RUnlock()
-
 	var peerCount uint32
 	if w.peerCount > 0 { // initialized to -1 initially, means no count yet
 		peerCount = uint32(w.peerCount)
 	}
-
-	return &WalletState{
+	state := &WalletState{
 		Symbol:       unbip(w.AssetID),
 		AssetID:      w.AssetID,
 		Version:      winfo.Version,
-		Open:         len(lockable.encPass) == 0 || len(lockable.pw) > 0,
+		Open:         len(w.encPass) == 0 || len(w.pw) > 0,
 		Running:      w.connector.On(),
 		Balance:      w.balance,
 		Address:      w.address,
@@ -281,6 +274,13 @@ func (w *xcWallet) state() *WalletState {
 		Traits:       w.traits,
 		Disabled:     w.disabled,
 	}
+	w.mtx.RUnlock()
+
+	if w.parent != nil {
+		state.Open = len(w.parent.encPass) == 0 || len(w.parent.pw) > 0
+	}
+
+	return state
 }
 
 // setBalance sets the wallet balance.
