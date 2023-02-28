@@ -407,7 +407,9 @@ func (c *Core) rotateBonds(ctx context.Context) {
 
 		bondAsset := bondAssets[bondAssetID]
 		if bondAsset == nil {
-			c.log.Warnf("Bond asset %d not supported by DEX %v", bondAssetID, dc.acct.host)
+			if targetTier > 0 {
+				c.log.Warnf("Bond asset %d not supported by DEX %v", bondAssetID, dc.acct.host)
+			}
 			continue
 		}
 
