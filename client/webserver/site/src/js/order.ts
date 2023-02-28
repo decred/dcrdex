@@ -66,8 +66,8 @@ export default class OrderPage extends BasePage {
     // to blockchain explorers (such as Etherscan) so users can easily
     // examine funding/acceleration coins data there. We'd need to set up
     // such hyperlinks here.
-    main.querySelectorAll('[data-asset-id]').forEach((link: PageElement) => {
-      const assetID = parseInt(link.dataset.assetId || '')
+    main.querySelectorAll('[data-explorer-id]').forEach((link: PageElement) => {
+      const assetID = parseInt(link.dataset.explorerId || '')
       setCoinHref(assetID, link)
     })
 
