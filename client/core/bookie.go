@@ -206,6 +206,7 @@ func (b *bookie) logEpochReport(note *msgjson.EpochReportNote) error {
 			continue
 		}
 		dur, _ := time.ParseDuration(durStr)
+		cCopy := *c
 		b.send(&BookUpdate{
 			Action:   CandleUpdateAction,
 			Host:     b.dc.acct.host,
@@ -213,7 +214,8 @@ func (b *bookie) logEpochReport(note *msgjson.EpochReportNote) error {
 			Payload: CandleUpdate{
 				Dur:          durStr,
 				DurMilliSecs: uint64(dur.Milliseconds()),
-				Candle:       c,
+				// Have to copy msgjson.Candle data here since it will be used concurrently.
+				Candle: &cCopy,
 			},
 		})
 	}
