@@ -444,7 +444,7 @@ func TestCheckForNewBlocks(t *testing.T) {
 		}
 		w.wallets = map[uint32]*assetWallet{BipID: w.assetWallet}
 		w.assetWallet.connected.Store(true)
-		w.checkForNewBlocks(tipChange)
+		w.checkForNewBlocks(ctx, tipChange)
 
 		if test.hasTipChange {
 			<-blocker
