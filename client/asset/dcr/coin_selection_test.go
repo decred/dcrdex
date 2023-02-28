@@ -3,114 +3,12 @@ package dcr
 import (
 	"math/rand"
 	"reflect"
+	"sort"
 	"testing"
+	"time"
 
 	walletjson "decred.org/dcrwallet/v2/rpc/jsonrpc/types"
 )
-
-func Test_subsetLargeBias(t *testing.T) {
-	amt := uint64(10e8)
-	newU := func(amt float64) *compositeUTXO {
-		return &compositeUTXO{
-			rpc: &walletjson.ListUnspentResult{Amount: amt},
-		}
-	}
-	tests := []struct {
-		name  string
-		utxos []*compositeUTXO
-		want  []*compositeUTXO
-	}{
-		{
-			"1,3 exact",
-			[]*compositeUTXO{newU(1), newU(8), newU(9)},
-			[]*compositeUTXO{newU(1), newU(9)},
-		},
-		{
-			"subset large bias",
-			[]*compositeUTXO{newU(1), newU(3), newU(6), newU(7)},
-			[]*compositeUTXO{newU(3), newU(7)},
-		},
-		{
-			"subset large bias",
-			[]*compositeUTXO{newU(1), newU(3), newU(5), newU(7), newU(8)},
-			[]*compositeUTXO{newU(3), newU(8)},
-		},
-		{
-			"insufficient",
-			[]*compositeUTXO{newU(1), newU(8)},
-			nil,
-		},
-		{
-			"all exact",
-			[]*compositeUTXO{newU(1), newU(9)},
-			[]*compositeUTXO{newU(1), newU(9)},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := subsetLargeBias(amt, tt.utxos); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("subset() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func Test_subsetSmallBias(t *testing.T) {
-	amt := uint64(10e8)
-	newU := func(amt float64) *compositeUTXO {
-		return &compositeUTXO{
-			rpc: &walletjson.ListUnspentResult{Amount: amt},
-		}
-	}
-	tests := []struct {
-		name  string
-		utxos []*compositeUTXO
-		want  []*compositeUTXO
-	}{
-		{
-			"1,3",
-			[]*compositeUTXO{newU(1), newU(8), newU(9)},
-			[]*compositeUTXO{newU(8), newU(9)},
-		},
-		{
-			"subset",
-			[]*compositeUTXO{newU(1), newU(9), newU(11)},
-			[]*compositeUTXO{newU(1), newU(9)},
-		},
-		{
-			"subset small bias",
-			[]*compositeUTXO{newU(1), newU(3), newU(6), newU(7)},
-			[]*compositeUTXO{newU(1), newU(3), newU(6)},
-		},
-		{
-			"subset small bias",
-			[]*compositeUTXO{newU(1), newU(3), newU(5), newU(7), newU(8)},
-			[]*compositeUTXO{newU(5), newU(7)},
-		},
-		{
-			"ok nil",
-			[]*compositeUTXO{newU(1), newU(8)},
-			nil,
-		},
-		{
-			"two, over",
-			[]*compositeUTXO{newU(5), newU(7), newU(11)},
-			[]*compositeUTXO{newU(5), newU(7)},
-		},
-		{
-			"insufficient",
-			[]*compositeUTXO{newU(1), newU(8)},
-			nil,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := subsetSmallBias(amt, tt.utxos); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("subset() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
 
 func Test_leastOverFund(t *testing.T) {
 	amt := uint64(10e8)
@@ -156,7 +54,7 @@ func Test_leastOverFund(t *testing.T) {
 		},
 		{
 			"subset small bias",
-			[]*compositeUTXO{newU(1), newU(3), newU(6), newU(7)},
+			[]*compositeUTXO{newU(3), newU(6), newU(7)},
 			[]*compositeUTXO{newU(3), newU(7)},
 		},
 		{
@@ -182,7 +80,11 @@ func Test_leastOverFund(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := leastOverFund(amt, tt.utxos); !reflect.DeepEqual(got, tt.want) {
+			got := leastOverFund(amt, tt.utxos)
+			sort.Slice(got, func(i int, j int) bool {
+				return got[i].rpc.Amount < got[j].rpc.Amount
+			})
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("subset() = %v, want %v", got, tt.want)
 			}
 		})
@@ -190,22 +92,20 @@ func Test_leastOverFund(t *testing.T) {
 }
 
 func Fuzz_leastOverFund(f *testing.F) {
-	seeds := []struct {
+	type seed struct {
 		amt uint64
 		n   int
-	}{{
-		amt: 200,
-		n:   2,
-	}, {
-		amt: 20,
-		n:   1,
-	}, {
-		amt: 20,
-		n:   20,
-	}, {
-		amt: 2,
-		n:   40,
-	}}
+	}
+
+	rnd := rand.New(rand.NewSource(1))
+
+	seeds := make([]seed, 0, 40)
+	for i := 0; i < 10; i++ {
+		seeds = append(seeds, seed{
+			amt: uint64(rnd.Intn(40)),
+			n:   rnd.Intn(20000),
+		})
+	}
 
 	for _, seed := range seeds {
 		f.Add(seed.amt, seed.n)
@@ -216,6 +116,9 @@ func Fuzz_leastOverFund(f *testing.F) {
 			rpc: &walletjson.ListUnspentResult{Amount: amt},
 		}
 	}
+
+	var totalDuration time.Duration
+	var totalUTXO int64
 
 	f.Fuzz(func(t *testing.T, amt uint64, n int) {
 		if n < 1 || n > 65535 || amt == 0 || amt > 21e6 {
@@ -236,8 +139,31 @@ func Fuzz_leastOverFund(f *testing.F) {
 			}
 			utxos[i] = newU(v)
 		}
+		startTime := time.Now()
 		leastOverFund(amt*1e8, utxos)
+		totalDuration += time.Since(startTime)
+		totalUTXO += int64(n)
 	})
+
+	f.Logf("leastOverFund: average duration: %v, with average number of UTXOs: %v\n", totalDuration/100, totalUTXO/100)
+}
+
+func BenchmarkLeastOverFund(b *testing.B) {
+	// Same amounts every time.
+	rnd := rand.New(rand.NewSource(1))
+	utxos := make([]*compositeUTXO, 2_000)
+	for i := range utxos {
+		utxo := &compositeUTXO{
+			rpc: &walletjson.ListUnspentResult{
+				Amount: float64(1+rnd.Int31n(100)) / float64(1e8),
+			},
+		}
+		utxos[i] = utxo
+	}
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		leastOverFund(10_000, utxos)
+	}
 }
 
 func Test_utxoSetDiff(t *testing.T) {
