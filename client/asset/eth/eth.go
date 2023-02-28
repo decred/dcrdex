@@ -3151,8 +3151,11 @@ func (eth *ETHWallet) monitorBlocks(ctx context.Context, reportErr func(error)) 
 	for {
 		select {
 		case <-ticker.C:
-			eth.checkForNewBlocks(reportErr)
+			eth.checkForNewBlocks(ctx, reportErr)
 		case <-ctx.Done():
+			return
+		}
+		if ctx.Err() != nil { // shutdown during last check, disallow chance of another tick
 			return
 		}
 	}
@@ -3161,8 +3164,8 @@ func (eth *ETHWallet) monitorBlocks(ctx context.Context, reportErr func(error)) 
 // checkForNewBlocks checks for new blocks. When a tip change is detected, the
 // tipChange callback function is invoked and a goroutine is started to check
 // if any contracts in the findRedemptionQueue are redeemed in the new blocks.
-func (eth *ETHWallet) checkForNewBlocks(reportErr func(error)) {
-	ctx, cancel := context.WithTimeout(eth.ctx, 2*time.Second)
+func (eth *ETHWallet) checkForNewBlocks(ctx context.Context, reportErr func(error)) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	bestHdr, err := eth.node.bestHeader(ctx)
 	if err != nil {
