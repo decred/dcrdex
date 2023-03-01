@@ -8009,7 +8009,7 @@ func handleMatchProofMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 		// Just warning the user for now, later on we might wanna revoke the
 		// order if this happens.
 		if err = trade.verifyCSum(note.CSum, note.Epoch); err != nil {
-			c.log.Warnf("Failed to validate commitment checksum for %s epoch %d at %s: %v"+
+			c.log.Warnf("Failed to validate commitment checksum for %s epoch %d at %s: %v",
 				note.MarketID, note.Epoch, dc.acct.host, err)
 		}
 	}

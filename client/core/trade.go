@@ -582,7 +582,7 @@ func (t *trackedTrade) cancelEpochIdx() uint64 {
 	return uint64(t.cancel.Prefix().ServerTime.UnixMilli()) / epochLen
 }
 
-func (t *trackedTrade) verifyCSum(csum []byte, epochIdx uint64) error {
+func (t *trackedTrade) verifyCSum(csum dex.Bytes, epochIdx uint64) error {
 	t.mtx.RLock()
 	defer t.mtx.RUnlock()
 
