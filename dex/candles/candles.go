@@ -159,7 +159,7 @@ func (c *Cache) Delta(since time.Time) (changePct float64, vol, high, low uint64
 	return (float64(endRate) - float64(startRate)) / float64(startRate), vol, high, low
 }
 
-// last gets the most recent candle in the cache.
+// Last gets the most recent candle in the cache.
 func (c *Cache) Last() *Candle {
 	return &c.Candles[c.cursor]
 }

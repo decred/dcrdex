@@ -64,6 +64,9 @@ func (f *bookFeed) Candles(durStr string) error {
 // candleCache adds synchronization and an on/off switch to *candles.Cache.
 type candleCache struct {
 	*candles.Cache
+	// candleMtx protects the integrity of candles.Cache (e.g. we can't update
+	// it while making copy at the same time), so it represents a consistent
+	// data snapshot.
 	candleMtx sync.RWMutex
 	on        uint32
 }
@@ -91,15 +94,16 @@ func (c *candleCache) init(in []*msgjson.Candle) {
 	}
 }
 
-// addCandle adds the candle using candles.Cache.Add.
-func (c *candleCache) addCandle(msgCandle *msgjson.Candle) *msgjson.Candle {
+// addCandle adds the candle using candles.Cache.Add. It returns most recent candle
+// in cache.
+func (c *candleCache) addCandle(msgCandle *msgjson.Candle) (recent msgjson.Candle, ok bool) {
 	if atomic.LoadUint32(&c.on) == 0 {
-		return nil
+		return msgjson.Candle{}, false
 	}
 	c.candleMtx.Lock()
 	defer c.candleMtx.Unlock()
 	c.Add(msgCandle)
-	return c.Last()
+	return *c.Last(), true
 }
 
 // bookie is a BookFeed manager. bookie will maintain any number of order book
@@ -201,8 +205,8 @@ func (b *bookie) logEpochReport(note *msgjson.EpochReportNote) error {
 		})
 	}
 	for durStr, cache := range b.candleCaches {
-		c := cache.addCandle(&note.Candle)
-		if c == nil {
+		c, ok := cache.addCandle(&note.Candle)
+		if !ok {
 			continue
 		}
 		dur, _ := time.ParseDuration(durStr)
@@ -213,7 +217,8 @@ func (b *bookie) logEpochReport(note *msgjson.EpochReportNote) error {
 			Payload: CandleUpdate{
 				Dur:          durStr,
 				DurMilliSecs: uint64(dur.Milliseconds()),
-				Candle:       c,
+				// Providing a copy of msgjson.Candle data here since it will be used concurrently.
+				Candle: &c,
 			},
 		})
 	}
