@@ -243,3 +243,74 @@ func TestDeltaPartialDays(t *testing.T) {
 		t.Fatalf("wrong 12-hour volume. wanted 110, got %d", vol6)
 	}
 }
+
+func TestCandlesCopy(t *testing.T) {
+	smallCap := 10
+	binSize := uint64(60 * 5 * 1000)
+	cacheWithCandles := func(adds uint64) *Cache {
+		cache := NewCache(smallCap, binSize)
+		for i := uint64(0); i < adds; i++ {
+			candle := &Candle{
+				StartStamp: i * binSize,
+				EndStamp:   (i + 1) * binSize,
+			}
+			cache.Add(candle)
+		}
+		return cache
+	}
+	tests := []struct {
+		name                string
+		adds                uint64
+		wantLen             int
+		wantFirst, wantLast uint64 // EndStamp times
+	}{{
+		name: "no candles",
+	}, {
+		name:      "one candle",
+		adds:      1,
+		wantLen:   1,
+		wantFirst: binSize,
+		wantLast:  binSize,
+	}, {
+		name:      "five candles",
+		adds:      5,
+		wantLen:   5,
+		wantFirst: binSize,
+		wantLast:  binSize * 5,
+	}, {
+		name:      "at cap before reusing zero",
+		adds:      uint64(smallCap),
+		wantLen:   smallCap,
+		wantFirst: binSize,
+		wantLast:  binSize * 10,
+	}, {
+		name:      "first candle over cap",
+		adds:      11,
+		wantLen:   smallCap,
+		wantFirst: binSize * (11 + 1 - uint64(smallCap)),
+		wantLast:  binSize * 11,
+	}, {
+		name:      "many times over cap",
+		adds:      1345,
+		wantLen:   smallCap,
+		wantFirst: binSize * (1345 + 1 - uint64(smallCap)),
+		wantLast:  binSize * 1345,
+	}}
+	for _, test := range tests {
+		c := cacheWithCandles(test.adds)
+		cc := c.CandlesCopy()
+		if len(cc) != test.wantLen {
+			t.Fatalf("%q: wanted len %d but got %d", test.name, test.wantLen, len(cc))
+		}
+		if test.wantLen != 0 {
+			first := cc[0].EndStamp
+			if first != test.wantFirst {
+				t.Fatalf("%q: wanted first end stamp %d but got %d", test.name, test.wantFirst, first)
+			}
+			last := cc[len(cc)-1].EndStamp
+			if last != test.wantLast {
+				t.Fatalf("%q: wanted last end stamp %d but got %d", test.name, test.wantLast, last)
+			}
+		}
+	}
+}

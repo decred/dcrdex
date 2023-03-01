@@ -20,7 +20,6 @@ import (
 var (
 	// Our internal millisecond representation of the bin sizes.
 	binSizes []uint64
-	bin5min  uint64 = 60 * 5 * 1000
 	started  uint32
 )
 

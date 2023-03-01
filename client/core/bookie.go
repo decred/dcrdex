@@ -71,19 +71,6 @@ type candleCache struct {
 	on        uint32
 }
 
-// copy creates a copy of the candles.
-func (c *candleCache) copy() []candles.Candle {
-	var cands []candles.Candle
-	// The last candle can be modified after creation. Make a copy.
-	c.candleMtx.RLock()
-	defer c.candleMtx.RUnlock()
-	if len(c.Candles) > 0 {
-		cands = make([]candles.Candle, len(c.Candles))
-		copy(cands, c.Candles)
-	}
-	return cands
-}
-
 // init resets the candles with the supplied set.
 func (c *candleCache) init(in []*msgjson.Candle) {
 	c.candleMtx.Lock()
@@ -285,6 +272,9 @@ func (b *bookie) candles(durStr string, feedID uint32) error {
 			return
 		}
 		dur, _ := time.ParseDuration(durStr)
+		cache.candleMtx.RLock()
+		cdls := cache.CandlesCopy()
+		cache.candleMtx.RUnlock()
 		f.c <- &BookUpdate{
 			Action:   FreshCandlesAction,
 			Host:     b.dc.acct.host,
@@ -292,7 +282,7 @@ func (b *bookie) candles(durStr string, feedID uint32) error {
 			Payload: &CandlesPayload{
 				Dur:          durStr,
 				DurMilliSecs: uint64(dur.Milliseconds()),
-				Candles:      cache.copy(),
+				Candles:      cdls,
 			},
 		}
 	}()
