@@ -101,10 +101,27 @@ func (c *Cache) WireCandles(count int) *msgjson.WireCandles {
 	return wc
 }
 
-// Delta calculates the the change in rate, as a percentage, and total volume
-// over the specified period going backwards from now. Because the first candle
-// does not necessarily align with the cutoff, the rate and volume contribution
-// from that candle is linearly interpreted between the endpoints. The caller is
+// CandlesCopy returns a deep copy of Candles with the oldest candle at the
+// first index.
+func (c *Cache) CandlesCopy() []msgjson.Candle {
+	sz := len(c.Candles)
+	candles := make([]msgjson.Candle, sz)
+	switch {
+	case sz == 0:
+	case sz == c.cap: // circular mode
+		oldIdx := (c.cursor + 1) % c.cap
+		copy(candles, c.Candles[oldIdx:])
+		copy(candles[sz-oldIdx:], c.Candles)
+	default:
+		copy(candles, c.Candles)
+	}
+	return candles
+}
+
+// Delta calculates the change in rate, as a percentage, and total volume over
+// the specified period going backwards from now. Because the first candle does
+// not necessarily align with the cutoff, the rate and volume contribution from
+// that candle is linearly interpreted between the endpoints. The caller is
 // responsible for making sure that dur >> binSize, otherwise the results will
 // be of little value.
 func (c *Cache) Delta(since time.Time) (changePct float64, vol, high, low uint64) {
