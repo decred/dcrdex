@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -42,6 +43,7 @@ type ContextCaller interface {
 type ethConn struct {
 	*ethclient.Client
 	endpoint string
+	priority uint16
 	// swapContract is the current ETH swapContract.
 	swapContract swapContract
 	// tokens are tokeners for loaded tokens. tokens is not protected by a
@@ -57,16 +59,21 @@ func (ec *ethConn) String() string {
 	return ec.endpoint
 }
 
+type endpoint struct {
+	url      string
+	priority uint16
+}
+
 type rpcclient struct {
 	net dex.Network
 	log dex.Logger
 	// endpoints should only be used during connect to know which endpoints
 	// to attempt to connect. If we were unable to connect to some of the
 	// endpoints, they will not be included in the clients slice.
-	endpoints []string
+	endpoints []endpoint
 	// neverConnectedEndpoints failed to connect since the initial connect call,
 	// so an ethConn has not been created for them.
-	neverConnectedEndpoints []string
+	neverConnectedEndpoints []endpoint
 	healthCheckCounter      int
 	tokensLoaded            map[uint32]bool
 	ethContractAddr         common.Address
@@ -76,7 +83,7 @@ type rpcclient struct {
 	clients    []*ethConn
 }
 
-func newRPCClient(net dex.Network, endpoints []string, ethContractAddr common.Address, log dex.Logger) *rpcclient {
+func newRPCClient(net dex.Network, endpoints []endpoint, ethContractAddr common.Address, log dex.Logger) *rpcclient {
 	return &rpcclient{
 		net:             net,
 		endpoints:       endpoints,
@@ -95,10 +102,10 @@ func (c *rpcclient) clientsCopy() []*ethConn {
 	return clients
 }
 
-func (c *rpcclient) connectToEndpoint(ctx context.Context, endpoint string) (*ethConn, error) {
+func (c *rpcclient) connectToEndpoint(ctx context.Context, endpoint endpoint) (*ethConn, error) {
 	var success bool
 
-	client, err := rpc.DialContext(ctx, endpoint)
+	client, err := rpc.DialContext(ctx, endpoint.url)
 	if err != nil {
 		return nil, err
 	}
@@ -113,13 +120,14 @@ func (c *rpcclient) connectToEndpoint(ctx context.Context, endpoint string) (*et
 
 	ec := &ethConn{
 		Client:   ethclient.NewClient(client),
-		endpoint: endpoint,
+		endpoint: endpoint.url,
+		priority: endpoint.priority,
 		tokens:   make(map[uint32]*tokener),
 		caller:   client,
 	}
 
 	reqModules := []string{"eth", "txpool"}
-	if err := dexeth.CheckAPIModules(client, endpoint, c.log, reqModules); err != nil {
+	if err := dexeth.CheckAPIModules(client, endpoint.url, c.log, reqModules); err != nil {
 		c.log.Warnf("Error checking required modules at %q: %v", endpoint, err)
 		c.log.Warnf("Will not account for pending transactions in balance calculations at %q", endpoint)
 		ec.txPoolSupported = false
@@ -202,7 +210,7 @@ func (c *rpcclient) sortConnectionsByHealth(ctx context.Context) bool {
 	}
 
 	if c.healthCheckCounter == 0 && len(c.neverConnectedEndpoints) > 0 {
-		stillUnconnectedEndpoints := make([]string, 0, len(c.neverConnectedEndpoints))
+		stillUnconnectedEndpoints := make([]endpoint, 0, len(c.neverConnectedEndpoints))
 
 		for _, endpoint := range c.neverConnectedEndpoints {
 			ec, err := c.connectToEndpoint(ctx, endpoint)
@@ -219,6 +227,17 @@ func (c *rpcclient) sortConnectionsByHealth(ctx context.Context) bool {
 
 		c.neverConnectedEndpoints = stillUnconnectedEndpoints
 	}
+
+	// Higher priority comes first.
+	sort.Slice(healthyConnections, func(i, j int) bool {
+		return healthyConnections[i].priority > healthyConnections[j].priority
+	})
+	sort.Slice(outdatedConnections, func(i, j int) bool {
+		return outdatedConnections[i].priority > outdatedConnections[j].priority
+	})
+	sort.Slice(failingConnections, func(i, j int) bool {
+		return failingConnections[i].priority > failingConnections[j].priority
+	})
 
 	clientsUpdatedOrder := make([]*ethConn, 0, len(clients))
 	clientsUpdatedOrder = append(clientsUpdatedOrder, healthyConnections...)
@@ -320,7 +339,7 @@ func (c *rpcclient) connect(ctx context.Context) (err error) {
 	var success bool
 
 	c.clients = make([]*ethConn, 0, len(c.endpoints))
-	c.neverConnectedEndpoints = make([]string, 0, len(c.endpoints))
+	c.neverConnectedEndpoints = make([]endpoint, 0, len(c.endpoints))
 
 	for _, endpoint := range c.endpoints {
 		ec, err := c.connectToEndpoint(ctx, endpoint)
