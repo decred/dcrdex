@@ -3739,7 +3739,7 @@ func (dcr *ExchangeWallet) makeBondRefundTxV0(txid *chainhash.Hash, vout uint32,
 	pk := priv.PubKey().SerializeCompressed()
 	pkh := stdaddr.Hash160(pk)
 	if !bytes.Equal(pkh, pkhPush) {
-		return nil, fmt.Errorf("incorrect private key to spend the bond output")
+		return nil, asset.ErrIncorrectBondKey
 	}
 
 	redeemMsgTx := wire.NewMsgTx()

@@ -5,9 +5,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
@@ -138,17 +140,70 @@ func (c *Core) AccountImport(pw []byte, acct *Account, bonds []*db.Bond) error {
 		return newError(addressParseErr, "error parsing address: %w", err)
 	}
 
-	// Don't try to create and import an account for a DEX that we are already
-	// connected to.
-	c.connMtx.RLock()
-	_, connected := c.conns[host]
-	c.connMtx.RUnlock()
-	if connected {
-		return errors.New("already connected")
-	}
-	_, err = c.db.Account(host) // may just not be in the conns map
-	if err == nil {
-		return errors.New("account already exists")
+	// Don't try to create and import an account for a DEX that we already know,
+	// but try to import missing bonds.
+	if acctInfo, err := c.db.Account(host); err == nil {
+		// Before importing bonds, make sure this is the same DEX (by public
+		// key) and same account ID, otherwise the bonds do not apply. The user
+		// can still refund by manually broadcasting the backup refund tx.
+		if acct.DEXPubKey != hex.EncodeToString(acctInfo.DEXPubKey.SerializeCompressed()) {
+			return errors.New("known dex host has different public key")
+		}
+		keyB, err := crypter.Decrypt(acctInfo.EncKey())
+		if err != nil {
+			return err
+		}
+		defer encode.ClearBytes(keyB)
+		privKey := secp256k1.PrivKeyFromBytes(keyB)
+		defer privKey.Zero()
+		accountID := account.NewID(privKey.PubKey().SerializeCompressed())
+		if acct.AccountID != accountID.String() {
+			return errors.New("known dex account has different identity")
+		}
+
+		c.log.Infof("Found existing account for %s. Merging bonds...", host)
+		haveBond := func(bond *db.Bond) *db.Bond {
+			for _, knownBond := range acctInfo.Bonds {
+				if bytes.Equal(knownBond.UniqueID(), bond.UniqueID()) {
+					return knownBond
+				}
+			}
+			return nil
+		}
+		var newLiveBonds int
+		for _, bond := range bonds {
+			have := haveBond(bond)
+			if have != nil && have.KeyIndex != math.MaxUint32 {
+				continue // we have this proper (not placeholder) bond already
+			}
+			if err = c.db.AddBond(host, bond); err != nil { // add OR update
+				return fmt.Errorf("importing bond: %v", err)
+			}
+			if have == nil {
+				acctInfo.Bonds = append(acctInfo.Bonds, bond)
+			} else { // else this is the placeholder from Unknown active bond reported by server
+				*have = *bond // update element in acctInfo.Bonds slice
+			}
+			if !bond.Refunded {
+				newLiveBonds++
+			}
+		}
+		if newLiveBonds == 0 {
+			return nil
+		}
+		c.log.Infof("Imported %d new unspent bonds", newLiveBonds)
+		if dc, connected, _ := c.dex(host); connected {
+			c.disconnectDEX(dc)
+			// TODO: less heavy handed approach to append or update
+			// dc.acct.{bonds,pendingBonds,expiredBonds}, using server config...
+		}
+		dc, err := c.connectDEX(acctInfo)
+		if err != nil {
+			return err
+		}
+		c.addDexConnection(dc)
+		c.initializeDEXConnections(crypter)
+		return nil
 	}
 
 	accountInfo := db.AccountInfo{
@@ -175,16 +230,41 @@ func (c *Core) AccountImport(pw []byte, acct *Account, bonds []*db.Bond) error {
 		return codedError(decodeErr, err)
 	}
 
+	accountInfo.LegacyFeePaid = acct.FeeProofSig != "" && acct.FeeProofStamp != 0
+
+	// Before we import the private key as LegacyEncKey, see if the account
+	// derives from the app seed. Somewhat inconsequential except for logging
+	// and use of the appropriate enc key field.
 	privKey, err := hex.DecodeString(acct.PrivKey)
 	if err != nil {
 		return codedError(decodeErr, err)
 	}
-	accountInfo.LegacyEncKey, err = crypter.Encrypt(privKey)
+	encKey, err := crypter.Encrypt(privKey)
 	if err != nil {
 		return codedError(encryptionErr, err)
 	}
-
-	accountInfo.LegacyFeePaid = acct.FeeProofSig != "" && acct.FeeProofStamp != 0
+	dcAcct := newDEXAccount(&accountInfo, false)
+	creds := c.creds()
+	const maxRecoveryIndex = 1000
+	for keyIndex := uint32(0); keyIndex < maxRecoveryIndex; keyIndex++ {
+		err := dcAcct.setupCryptoV2(creds, crypter, keyIndex)
+		if err != nil {
+			return newError(acctKeyErr, "setupCryptoV2 error: %w", err)
+		}
+		if bytes.Equal(privKey, dcAcct.privKey.Serialize()) {
+			c.log.Debugf("Account derives from current application seed, with account key index %d", keyIndex)
+			accountInfo.EncKeyV2 = encKey
+			// Any unspent bonds for this account will refund using KeyIndex.
+			break
+		}
+	}
+	if len(accountInfo.EncKeyV2) == 0 {
+		c.log.Warnf("Account with foreign key imported. " +
+			"Any imported bonds will be refunded to the previous wallet!")
+		accountInfo.LegacyEncKey = encKey
+		// Any unspent bonds for this account will refund using the backup tx.
+	}
+	dcAcct.privKey.Zero()
 
 	err = c.db.CreateAccount(&accountInfo)
 	if err != nil {
@@ -207,6 +287,11 @@ func (c *Core) AccountImport(pw []byte, acct *Account, bonds []*db.Bond) error {
 		}
 	}
 
+	dc, err := c.connectDEX(&accountInfo)
+	if err != nil {
+		return err
+	}
+	c.addDexConnection(dc)
 	c.initializeDEXConnections(crypter)
 	return nil
 }

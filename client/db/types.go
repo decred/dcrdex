@@ -91,21 +91,22 @@ func BondUID(assetID uint32, bondCoinID []byte) []byte {
 	return hashKey(append(uint32Bytes(assetID), bondCoinID...))
 }
 
-// Bond is stored in a sub-bucket of an account bucket.
+// Bond is stored in a sub-bucket of an account bucket. The dex.Bytes type is
+// used for certain fields so that the data marshals to/from hexadecimal.
 type Bond struct {
-	Version    uint16
-	AssetID    uint32
-	CoinID     []byte
-	UnsignedTx []byte
-	SignedTx   []byte // can be obtained from msgjson.Bond.CoinID
-	Data       []byte // e.g. redeem script
-	Amount     uint64
-	LockTime   uint64
-	KeyIndex   uint32 // child key index for HD path: m / hdKeyPurposeBonds / assetID' / bondIndex
-	RefundTx   []byte // pays to wallet that created it - only a backup for emergency!
+	Version    uint16    `json:"ver"`
+	AssetID    uint32    `json:"asset"`
+	CoinID     dex.Bytes `json:"coinID"`
+	UnsignedTx dex.Bytes `json:"utx"`
+	SignedTx   dex.Bytes `json:"stx"`  // can be obtained from msgjson.Bond.CoinID
+	Data       dex.Bytes `json:"data"` // e.g. redeem script
+	Amount     uint64    `json:"amt"`
+	LockTime   uint64    `json:"lockTime"`
+	KeyIndex   uint32    `json:"keyIndex"` // child key index for HD path: m / hdKeyPurposeBonds / assetID' / bondIndex
+	RefundTx   dex.Bytes `json:"refundTx"` // pays to wallet that created it - only a backup for emergency!
 
-	Confirmed bool // if reached required confs according to server, not in serialization
-	Refunded  bool // not in serialization
+	Confirmed bool `json:"confirmed"` // if reached required confs according to server, not in serialization
+	Refunded  bool `json:"refunded"`  // not in serialization
 }
 
 // UniqueID computes the bond's unique ID for keying purposes.
