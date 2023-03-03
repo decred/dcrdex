@@ -715,7 +715,7 @@ export class ConfirmRegistrationForm {
   page: Record<string, PageElement>
   xc: Exchange
   certFile: string
-  feeAssetID: number
+  bondAssetID: number
   pwCache: PasswordCache
 
   constructor (form: HTMLElement, success: () => void, goBack: () => void, pwCache: PasswordCache) {
@@ -727,7 +727,7 @@ export class ConfirmRegistrationForm {
 
     Doc.bind(this.page.goBack, 'click', () => goBack())
     Doc.bind(this.page.bondStrengthField, 'input', () => {
-      const asset = app().assets[this.feeAssetID]
+      const asset = app().assets[this.bondAssetID]
       if (!asset) return
       const ui = asset.unitInfo
       const bondAsset = this.xc.bondAssets[asset.symbol]
@@ -748,7 +748,7 @@ export class ConfirmRegistrationForm {
   setAsset (assetID: number) {
     const asset = app().assets[assetID]
     const ui = asset.unitInfo
-    this.feeAssetID = asset.id
+    this.bondAssetID = asset.id
     const page = this.page
     const bondAsset = this.xc.bondAssets[asset.symbol]
     page.bondAmt.textContent = Doc.formatCoinValue(this.totalBondAmount(bondAsset.amount), ui)
@@ -782,7 +782,7 @@ export class ConfirmRegistrationForm {
     if (!page.submit.classList.contains('selected')) {
       return
     }
-    const asset = app().assets[this.feeAssetID]
+    const asset = app().assets[this.bondAssetID]
     if (!asset) {
       page.regErr.innerText = intl.prep(intl.ID_SELECT_WALLET_FOR_FEE_PAYMENT)
       Doc.show(page.regErr)
@@ -988,7 +988,8 @@ export class WalletWaitForm {
   progressCache: ProgressPoint[]
   progressed: boolean
   funded: boolean
-  txFee: number
+  // if progressed && funded, stop reporting balance or state; call success()
+  bondFeeBuffer: number // in parent asset
   parentAssetSynced: boolean
 
   constructor (form: HTMLElement, success: () => void, goBack: () => void) {
@@ -1016,17 +1017,17 @@ export class WalletWaitForm {
     this.xc = xc
   }
 
-  /* setWallet must be called before showing the form. */
-  setWallet (wallet: WalletState, txFee: number) {
+  /* setWallet must be called before showing the WalletWaitForm. */
+  setWallet (wallet: WalletState, bondFeeBuffer: number) {
     this.assetID = wallet.assetID
     this.progressCache = []
     this.progressed = false
     this.funded = false
-    this.txFee = txFee
+    this.bondFeeBuffer = bondFeeBuffer // in case we're a token, parent's balance must cover
     this.parentAssetSynced = false
     const page = this.page
     const asset = app().assets[wallet.assetID]
-    this.parentID = asset.token ? asset.token.parentID : undefined
+    this.parentID = asset.token?.parentID
     const bondAsset = this.bondAsset = this.xc.bondAssets[asset.symbol]
 
     const symbolize = (el: PageElement, symbol: string) => {
@@ -1042,16 +1043,18 @@ export class WalletWaitForm {
     Doc.hide(page.syncUncheck, page.syncCheck, page.balUncheck, page.balCheck, page.syncRemainBox)
     Doc.show(page.balanceBox)
 
-    if (txFee > 0) {
-      page.totalFees.textContent = Doc.formatCoinValue(bondAsset.amount + txFee, asset.unitInfo)
-      Doc.show(page.txFeeBox)
-      Doc.hide(page.sendEnough, page.sendEnoughForToken, page.sendEnoughWithEst)
+    if (bondFeeBuffer > 0) {
+      // overlap * increment + buffer
+      page.totalForBond.textContent = Doc.formatCoinValue(2 * bondAsset.amount + bondFeeBuffer, asset.unitInfo)
+      Doc.hide(page.sendEnough) // generic msg when no fee info available when
+      Doc.hide(page.txFeeBox, page.sendEnoughForToken, page.txFeeBalanceBox) // for tokens
+      Doc.hide(page.sendEnoughWithEst) // non-tokens
 
       if (asset.token) {
-        Doc.show(page.sendEnoughForToken, page.txFeeBalanceBox)
+        Doc.show(page.txFeeBox, page.sendEnoughForToken, page.txFeeBalanceBox)
         const parentAsset = app().assets[asset.token.parentID]
-        page.txFee.textContent = Doc.formatCoinValue(txFee, parentAsset.unitInfo)
-        page.parentFees.textContent = Doc.formatCoinValue(txFee, parentAsset.unitInfo)
+        page.txFee.textContent = Doc.formatCoinValue(bondFeeBuffer, parentAsset.unitInfo)
+        page.parentFees.textContent = Doc.formatCoinValue(bondFeeBuffer, parentAsset.unitInfo)
         page.tokenFees.textContent = Doc.formatCoinValue(bondAsset.amount, asset.unitInfo)
         symbolize(page.txFeeUnit, parentAsset.symbol)
         symbolize(page.parentUnit, parentAsset.symbol)
@@ -1059,16 +1062,13 @@ export class WalletWaitForm {
         page.parentBal.textContent = parentAsset.wallet ? Doc.formatCoinValue(parentAsset.wallet.balance.available, parentAsset.unitInfo) : '0'
       } else {
         Doc.show(page.sendEnoughWithEst)
-        page.txFee.textContent = Doc.formatCoinValue(txFee, asset.unitInfo)
-        symbolize(page.txFeeUnit, asset.symbol)
       }
-    } else {
+    } else { // show some generic message with no amounts, this shouldn't happen... show wallet error?
       Doc.show(page.sendEnough)
-      Doc.hide(page.sendEnoughWithEst, page.sendEnoughForToken, page.txFeeBox)
     }
 
     Doc.show(wallet.synced ? page.syncCheck : wallet.syncProgress >= 1 ? page.syncSpinner : page.syncUncheck)
-    Doc.show(wallet.balance.available > bondAsset.amount ? page.balCheck : page.balUncheck)
+    Doc.show(wallet.balance.available >= 2 * bondAsset.amount + bondFeeBuffer ? page.balCheck : page.balUncheck)
 
     page.progress.textContent = (wallet.syncProgress * 100).toFixed(1)
 
@@ -1105,10 +1105,13 @@ export class WalletWaitForm {
       const parentAsset = app().assets[asset.token.parentID]
       const parentAvail = parentAsset.wallet.balance.available
       page.parentBal.textContent = Doc.formatCoinValue(parentAvail, parentAsset.unitInfo)
-      if (parentAvail < this.txFee) return
+      if (parentAvail < this.bondFeeBuffer) return
     }
 
-    if (avail <= this.bondAsset.amount) return
+    // NOTE: when/if we allow one-time bond post (no maintenance) from the UI we
+    // may allow to proceed as long as they have enough for tx fees. For now,
+    // the balance check box will remain unchecked and we will not proceed.
+    if (avail < 2 * this.bondAsset.amount + this.bondFeeBuffer) return
 
     Doc.show(page.balCheck)
     Doc.hide(page.balUncheck, page.balanceBox, page.sendEnough)

@@ -526,38 +526,38 @@
       <span class="ico-checkbox fs14 d-hide" data-tmpl="balUncheck"></span>
       <span class="ico-check d-hide fs16" data-tmpl="balCheck"></span>
     </div>
-    <span class="fs20 sans-light">[[[2 Fund the Registration Fee]]]</span>
+    <span class="fs20 sans-light">[[[2 Fund your Wallet]]]</span>
   </div>
   <div class="d-flex flex-column align-items-start" data-tmpl="balanceBox">
-    <div class="mt-1">
-      <span class="ico-info"></span>
-      <span class="fs14">[[[One time anti-spam measure]]]</span>
-    </div>
     <div class="flex-center mt-1">
       <span class="fs16 me-1">[[[Balance]]]:</span>
       <span class="fs20 me-1" data-tmpl="balance"></span>
       <span class="fs16 grey unit">XYZ</span>
     </div>
+    <div class="mt-1">
+      <span class="ico-info"></span>
+      <span class="fs14">[[[whatsabond]]]</span>
+    </div>
     <div class="mb-1 flex-center flex-row">
-      <span class="fs16 me-1">[[[Registration fee]]]:</span>
+      <span class="fs16 me-1">[[[Bond amount]]]:</span>
       <span class="fs20 me-1" data-tmpl="fee"></span>
       <span class="fs16 grey unit">XYZ</span>
     </div>
-    <div class="mb-1 flex-center flex-row" data-tmpl="txFeeBox">
-      <span class="fs16 me-1">Transaction Fees:</span>
+    <span data-tmpl="sendEnoughWithEst">[[[Send enough with estimate]]]</span> {{- /* NOTE: includes totalForBond */}}
+    <span data-tmpl="sendEnoughForToken">[[[Send funds for token]]]</span>
+    <div class="mb-1 flex-center flex-row d-hide" data-tmpl="txFeeBox">
+      <span class="fs16 me-1">[[[Reserves for tx fees]]]</span>
       <span class="fs20 me-1" data-tmpl="txFee"></span>
       <span class="fs16 grey unit" data-tmpl="txFeeUnit">XYZ</span>
     </div>
     <div class="mb-1 flex-center flex-row d-hide" data-tmpl="txFeeBalanceBox">
-      <span class="fs16 me-1">Tx Fee Balance:</span>
+      <span class="fs16 me-1">[[[Tx Fee Balance]]]</span>
       <span class="fs20 me-1" data-tmpl="parentBal">0</span>
       <span class="fs16 grey unit" data-tmpl="parentBalUnit">XYZ</span>
     </div>
     <div class="fs14 mt-2">[[[Your Deposit Address]]]</div>
     <div class="mono deposit-address select-all my-1" data-tmpl="depoAddr"></div>
-    <span data-tmpl="sendEnough">[[[Send enough for reg fee]]]</span>
-    <span data-tmpl="sendEnoughWithEst">[[[Send enough with estimate]]]</span>
-    <span data-tmpl="sendEnoughForToken">[[[Send funds for token]]]</span>
+    <span data-tmpl="sendEnough">[[[Send enough for bonds]]]</span> {{- /* generic message if the fee buffer is unknown */}}
   </div>
 </div>
 
