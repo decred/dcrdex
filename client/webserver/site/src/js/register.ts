@@ -97,8 +97,8 @@ export default class RegistrationPage extends BasePage {
           this.animateConfirmForm(page.regAssetForm)
           return
         }
-        const txFee = await this.getRegistrationTxFeeEstimate(assetID, page.regAssetForm)
-        this.walletWaitForm.setWallet(wallet, txFee)
+        const bondsFeeBuffer = await this.getBondsFeeBuffer(assetID, page.regAssetForm)
+        this.walletWaitForm.setWallet(wallet, bondsFeeBuffer)
         slideSwap(page.regAssetForm, page.walletWait)
         return
       }
@@ -166,19 +166,14 @@ export default class RegistrationPage extends BasePage {
   }
 
   // Retrieve an estimate for the tx fee needed to pay the registration fee.
-  async getRegistrationTxFeeEstimate (assetID: number, form: HTMLElement) {
-    const cert = await this.getCertFile()
+  async getBondsFeeBuffer (assetID: number, form: HTMLElement) {
     const loaded = app().loading(form)
-    const res = await postJSON('/api/regtxfee', {
-      addr: this.currentDEX.host,
-      cert: cert,
-      asset: assetID
-    })
+    const res = await postJSON('/api/bondsfeebuffer', { assetID })
     loaded()
     if (!app().checkResponse(res)) {
       return 0
     }
-    return res.txfee
+    return res.feeBuffer
   }
 
   /* Set the application password. Attached to form submission. */
@@ -257,8 +252,8 @@ export default class RegistrationPage extends BasePage {
       return
     }
 
-    const txFee = await this.getRegistrationTxFeeEstimate(assetID, page.newWalletForm)
-    this.walletWaitForm.setWallet(wallet, txFee)
+    const bondsFeeBuffer = await this.getBondsFeeBuffer(assetID, page.newWalletForm)
+    this.walletWaitForm.setWallet(wallet, bondsFeeBuffer)
     await slideSwap(page.newWalletForm, page.walletWait)
   }
 }

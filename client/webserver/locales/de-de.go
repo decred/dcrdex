@@ -25,9 +25,9 @@ var DeDE = map[string]string{
 	"remove":                         "Entfernen",
 	"add a file":                     "Datei hinzufügen",
 	"Submit":                         "Senden",
-	"Confirm Registration":           "Registration bestätigen",
-	"app_pw_reg":                     "Gib dein App-Passwort ein um die DEX-Registrierung zu bestätigen.",
-	"reg_confirm_submit":             `Wenn du dieses Formular abschickst wird die Anmeldegebühr von deinem Geldbeutel abgebucht.`,
+	"Confirm Registration":           "Registration bestätigen",                                                                    // stale but better than no translation
+	"app_pw_reg":                     "Gib dein App-Passwort ein um die DEX-Registrierung zu bestätigen.",                          // stale...
+	"reg_confirm_submit":             `Wenn du dieses Formular abschickst wird die Anmeldegebühr von deinem Geldbeutel abgebucht.`, // stale...
 	"provided_markets":               "Dieser DEX bietet folgende Märkte:",
 	"accepted_fee_assets":            "Dieser DEX akzeptiert die folgenden Gebühren:",
 	"base_header":                    "Basis",
@@ -39,7 +39,7 @@ var DeDE = map[string]string{
 	"export_app_pw_msg":              "Gib dein App-Passwort ein und genehmige den Kontoexport für",
 	"Disable Account":                "Konto deaktivieren",
 	"disable_app_pw_msg":             "Gib dein App-Passwort ein um dein Konto zu deaktivieren.",
-	"disable_dex_server":             "Dieser DEX-Server kann jederzeit wieder aktiviert werden (Du musst die Registrierungsgebühr nicht nochmals bezahlen), indem Du ihn erneut hinzufügst.",
+	"disable_dex_server":             "Dieser DEX-Server kann jederzeit wieder aktiviert werden, indem Du ihn erneut hinzufügst.",
 	"Authorize Import":               "Import genehmigen",
 	"app_pw_import_msg":              "Gib dein App-Passwort ein um den Kontoimport zu bestätigen.",
 	"Account File":                   "Konto Datei",
@@ -182,8 +182,8 @@ var DeDE = map[string]string{
 	"One time anti-spam measure":  "Dies ist eine kleine, einmalige Anti-Spam-Maßnahme um störendes Verhalten wie z.B. das Zurückziehen von Swaps zu verhindern.",
 	"Registration fee":            "Anmeldegebühr",
 	"Your Deposit Address":        "Einzahlungsadresse für Ihr Wallet",
-	"Send enough for reg fee":     `Achte darauf genug senden um auch die Netzwerkgebühren zu decken. Du kannst so viel einzahlen wie du willst da im nächsten Schritt nur die Registrierungsgebühr abgezogen wird. Du musst die Bestätigungen deiner Einzahlung abwarten damit du fortfahren kannst.`,
-	"Send enough with estimate":   `Zahle mindestens <span data-tmpl="totalFees"></span> <span class="unit">XYZ</span> ein um auch die Netzwerkgebühren der Transaktion zu decken. Du kannst so viel einzahlen wie du möchtest da nur der erforderliche Betrag im nächsten Schritt verrechnet wird. Du musst die Bestätigungen deiner Einzahlung abwarten damit du fortfahren kannst.`,
+	// "Send enough for bonds":       `Achte darauf genug senden um auch die Netzwerkgebühren zu decken. Du kannst so viel einzahlen wie du willst da im nächsten Schritt nur die Registrierungsgebühr abgezogen wird. Du musst die Bestätigungen deiner Einzahlung abwarten damit du fortfahren kannst.`,
+	"Send enough with estimate":   `Zahle mindestens <span data-tmpl="totalForBond"></span> <span class="unit">XYZ</span> ein um auch die Netzwerkgebühren der Transaktion zu decken. Du kannst so viel einzahlen wie du möchtest da nur der erforderliche Betrag im nächsten Schritt verrechnet wird. Du musst die Bestätigungen deiner Einzahlung abwarten damit du fortfahren kannst.`,
 	"Send funds for token":        `Zahle mindestens <span data-tmpl="tokenFees"></span> <span class="unit">XYZ</span> und <span data-tmpl="parentFees"></span> <span data-tmpl="parentUnit">XYZ</span> ein um die Registrationsgebühr zu begleichen. Du kannst soviel in dein Wallet einzahlen wie du möchtest da nur der genannte Betrag für die Zahlung der Registrationsgebühr genutzt wird. Die Einzahlung muss erst bestätigt werden damit du fortfahren kannst.`,
 	"add a different server":      "einen anderen Server hinzufügen",
 	"Add a custom server":         "Benutzerdefinierten Server hinzufügen",

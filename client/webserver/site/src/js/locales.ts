@@ -150,7 +150,7 @@ export const enUS: Locale = {
   [ID_REVOKED]: 'revoked',
   [ID_WAITING_FOR_CONFS]: 'Waiting for confirmations...',
   [ID_NONE_SELECTED]: 'none selected',
-  [ID_REGISTRATION_FEE_SUCCESS]: 'Registration fee payment successful!',
+  [ID_REGISTRATION_FEE_SUCCESS]: 'Fidelity bond accepted!',
   [ID_API_ERROR]: 'API error',
   [ID_ADD]: 'Add',
   [ID_CREATE]: 'Create',
@@ -216,7 +216,7 @@ export const enUS: Locale = {
   [ID_MAKER]: 'Maker',
   [ID_UNAVAILABLE]: 'unavailable',
   [ID_EMPTY_DEX_ADDRESS_MSG]: 'DEX address cannot be empty',
-  [ID_SELECT_WALLET_FOR_FEE_PAYMENT]: 'You must select a valid wallet for fee payment',
+  [ID_SELECT_WALLET_FOR_FEE_PAYMENT]: 'Select a valid wallet to post a bond',
   [ID_WALLET_SYNC_FINISHING_UP]: 'finishing up'
 }
 
@@ -260,7 +260,7 @@ export const ptBR: Locale = {
   [ID_REVOKED]: 'revocado',
   [ID_WAITING_FOR_CONFS]: 'Esperando confirmações...',
   [ID_NONE_SELECTED]: 'nenhuma selecionado',
-  [ID_REGISTRATION_FEE_SUCCESS]: 'Sucesso no pagamento da taxa de registro!',
+  [ID_REGISTRATION_FEE_SUCCESS]: 'Sucesso no pagamento da taxa de registro!', // TODO: reword from fee => bond
   [ID_API_ERROR]: 'Erro de API',
   [ID_ADD]: 'Adicionar',
   [ID_CREATE]: 'Criar',
@@ -354,7 +354,7 @@ export const plPL: Locale = {
   [ID_REVOKED]: 'unieważniono',
   [ID_WAITING_FOR_CONFS]: 'Oczekiwanie na potwierdzenia...',
   [ID_NONE_SELECTED]: 'brak zaznaczenia',
-  [ID_REGISTRATION_FEE_SUCCESS]: 'Płatność rejestracyjna powiodła się!',
+  [ID_REGISTRATION_FEE_SUCCESS]: 'Płatność rejestracyjna powiodła się!', // TODO: reword from fee => bond
   [ID_API_ERROR]: 'błąd API',
   [ID_ADD]: 'Dodaj',
   [ID_CREATE]: 'Utwórz',
@@ -408,7 +408,7 @@ export const deDE: Locale = {
   [ID_REVOKED]: 'widerrufen',
   [ID_WAITING_FOR_CONFS]: 'Warten auf Bestätigungen...',
   [ID_NONE_SELECTED]: 'keine ausgewählt',
-  [ID_REGISTRATION_FEE_SUCCESS]: 'Zahlung der Registrierungsgebühr erfolgreich!',
+  [ID_REGISTRATION_FEE_SUCCESS]: 'Zahlung der Registrierungsgebühr erfolgreich!', // TODO: reword from fee => bond
   [ID_API_ERROR]: 'API Fehler',
   [ID_ADD]: 'Hinzufügen',
   [ID_CREATE]: 'Erstellen',
@@ -466,7 +466,7 @@ export const ar: Locale = {
   [ID_REVOKED]: 'مستعادة',
   [ID_WAITING_FOR_CONFS]: 'في انتظار التأكيدات ...',
   [ID_NONE_SELECTED]: 'لم يتم تحديد أي شيء',
-  [ID_REGISTRATION_FEE_SUCCESS]: 'تم دفع رسوم التسجيل بنجاح!',
+  [ID_REGISTRATION_FEE_SUCCESS]: 'تم دفع رسوم التسجيل بنجاح!', // TODO: reword from fee => bond
   [ID_API_ERROR]: 'خطأ في واجهة برمجة التطبيقات',
   [ID_ADD]: 'إضافة',
   [ID_CREATE]: 'إنشاء',
