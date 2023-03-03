@@ -56,7 +56,7 @@ func TestMain(m *testing.M) {
 			return 1, fmt.Errorf("no contract address for eth version %d on %s", ethContractVersion, dex.Simnet)
 		}
 
-		ethClient = newRPCClient(dex.Simnet, []string{wsEndpoint, alphaIPCFile}, ethContractAddr, log)
+		ethClient = newRPCClient(dex.Simnet, []endpoint{{url: wsEndpoint}, {url: alphaIPCFile}}, ethContractAddr, log)
 		defer func() {
 			cancel()
 		}()

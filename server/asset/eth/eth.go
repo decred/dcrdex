@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -275,16 +276,38 @@ func NewBackend(configPath string, log dex.Logger, net dex.Network) (*ETHBackend
 	}
 	defer file.Close()
 
-	var endpoints []string
+	var endpoints []endpoint
 	endpointsMap := make(map[string]bool) // to avoid duplicates
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		line := strings.Trim(scanner.Text(), " ")
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") || endpointsMap[line] {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		ethCfgInstructions := "invalid eth config line: \"%s\". " +
+			"Each line must contain URL and optionally a priority (between 0-65535) " +
+			"separated by a comma. Example: \"https://www.infura.io/,2\""
+		parts := strings.Split(line, ",")
+		if len(parts) < 1 || len(parts) > 2 {
+			return nil, fmt.Errorf(ethCfgInstructions, line)
+		}
+		url := strings.TrimSpace(parts[0])
+		var priority uint16
+		if len(parts) == 2 {
+			priority64, err := strconv.ParseUint(strings.TrimSpace(parts[1]), 10, 16)
+			if err != nil {
+				return nil, fmt.Errorf(ethCfgInstructions, line)
+			}
+			priority = uint16(priority64)
+		}
+		if endpointsMap[url] {
 			continue
 		}
 		endpointsMap[line] = true
-		endpoints = append(endpoints, line)
+		endpoints = append(endpoints, endpoint{
+			url:      url,
+			priority: priority,
+		})
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("error reading eth config file at %q. %v", configPath, err)
