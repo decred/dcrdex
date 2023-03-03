@@ -1000,11 +1000,6 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 	if _, ok := wallet.Wallet.(asset.Bonder); !ok { // will fail in MakeBondTx, but assert early
 		return nil, fmt.Errorf("wallet %v is not an asset.Bonder", bondAssetSymbol)
 	}
-	_, err = wallet.refreshUnlock()
-	if err != nil {
-		// TODO: Unlock with form.AppPass?
-		return nil, fmt.Errorf("bond asset wallet %v is locked", unbip(bondAssetID))
-	}
 	if !wallet.synchronized() { // otherwise we might double spend if the wallet keys were used elsewhere
 		return nil, fmt.Errorf("wallet %v is not synchronized", unbip(bondAssetID))
 	}
@@ -1021,6 +1016,14 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 	host, err := addrHost(form.Addr)
 	if err != nil {
 		return nil, newError(addressParseErr, "error parsing address: %v", err)
+	}
+
+	// Get ready to generate the bond txn.
+	if !wallet.unlocked() {
+		err = wallet.Unlock(crypter)
+		if err != nil {
+			return nil, newError(walletAuthErr, "failed to unlock %s wallet: %v", unbip(wallet.AssetID), err)
+		}
 	}
 
 	var success, acctExists bool
@@ -1154,14 +1157,6 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 		dc.acct.targetTier = form.Bond / bondAsset.Amt
 		dc.acct.maxBondedAmt = maxBondedAmt
 		dc.acct.authMtx.Unlock()
-	}
-
-	// Get ready to generate the bond txn.
-	if !wallet.unlocked() {
-		err = wallet.Unlock(crypter)
-		if err != nil {
-			return nil, newError(walletAuthErr, "failed to unlock %s wallet: %v", unbip(wallet.AssetID), err)
-		}
 	}
 
 	// Make a bond transaction for the account ID generated from our public key.
