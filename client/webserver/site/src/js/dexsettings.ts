@@ -107,6 +107,7 @@ export default class DexSettingsPage extends BasePage {
       Doc.show(page.exportAccountErr)
       return
     }
+    res.account.bonds = res.bonds // maintain backward compat of JSON file
     const accountForExport = JSON.parse(JSON.stringify(res.account))
     const a = document.createElement('a')
     a.setAttribute('download', 'dcrAccount-' + host + '.json')

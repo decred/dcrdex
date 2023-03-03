@@ -244,9 +244,11 @@ export default class SettingsPage extends BasePage {
       Doc.show(page.importAccountErr)
       return
     }
+    const { bonds = [], ...acctInf } = account
     const req = {
       pw: pw,
-      account: account
+      account: acctInf,
+      bonds: bonds
     }
     const loaded = app().loading(this.body)
     const importResponse = await postJSON('/api/importaccount', req)

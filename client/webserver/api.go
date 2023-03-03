@@ -565,10 +565,13 @@ func (s *WebServer) apiAccountExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer zero(pass)
-	account, _, err := s.core.AccountExport(pass, form.Host)
+	account, bonds, err := s.core.AccountExport(pass, form.Host)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error exporting account: %w", err))
 		return
+	}
+	if bonds == nil {
+		bonds = make([]*db.Bond, 0) // marshal to [], not null
 	}
 	w.Header().Set("Connection", "close")
 	res := &struct {
@@ -578,7 +581,7 @@ func (s *WebServer) apiAccountExport(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK:      true,
 		Account: account,
-		// Bonds TODO
+		Bonds:   bonds,
 	}
 	writeJSON(w, res, s.indent)
 }
@@ -622,7 +625,7 @@ func (s *WebServer) apiAccountImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer zero(pass)
-	err = s.core.AccountImport(pass, form.Account, nil /* Bonds TODO */)
+	err = s.core.AccountImport(pass, form.Account, form.Bonds)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error importing account: %w", err))
 		return
