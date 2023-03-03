@@ -1082,6 +1082,13 @@ func bondsFeeBuffer(highFeeRate uint64) uint64 {
 	return parallelTracks * largeBondTxSize * highFeeRate
 }
 
+// BondsFeeBuffer suggests how much extra may be required for the transaction
+// fees part of required bond reserves when bond rotation is enabled.
+func (dcr *ExchangeWallet) BondsFeeBuffer() uint64 {
+	// 150% of the fee buffer portion of the reserves.
+	return 15 * bondsFeeBuffer(dcr.config().feeRateLimit) / 10
+}
+
 // RegisterUnspent should be called once for every configured DEX with existing
 // unspent bond amounts, prior to login, which is when reserves for future bonds
 // are then added given the actual account tier, target tier, and this combined

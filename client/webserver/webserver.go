@@ -133,6 +133,7 @@ type clientCore interface {
 	PreOrder(*core.TradeForm) (*core.OrderEstimate, error)
 	WalletLogFilePath(assetID uint32) (string, error)
 	EstimateRegistrationTxFee(host string, certI interface{}, assetID uint32) (uint64, error)
+	BondsFeeBuffer(assetID uint32) (uint64, error)
 	PreAccelerateOrder(oidB dex.Bytes) (*core.PreAccelerate, error)
 	AccelerateOrder(pw []byte, oidB dex.Bytes, newFeeRate uint64) (string, error)
 	AccelerationEstimate(oidB dex.Bytes, newFeeRate uint64) (uint64, error)
@@ -373,6 +374,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiInit.Post("/adddex", s.apiAddDEX)
 			apiInit.Post("/discoveracct", s.apiDiscoverAccount)
 			apiInit.Post("/regtxfee", s.apiEstimateRegistrationTxFee)
+			apiInit.Post("/bondsfeebuffer", s.apiBondsFeeBuffer)
 		})
 
 		r.Group(func(apiAuth chi.Router) {

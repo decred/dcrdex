@@ -263,6 +263,27 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
+// apiBondsFeeBuffer is the handler for the '/bondsfeebuffer' API request.
+func (s *WebServer) apiBondsFeeBuffer(w http.ResponseWriter, r *http.Request) {
+	form := new(bondsFeeBufferForm)
+	if !readPost(w, r, form) {
+		return
+	}
+	feeBuffer, err := s.core.BondsFeeBuffer(form.AssetID)
+	if err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+	resp := struct {
+		OK        bool   `json:"ok"`
+		FeeBuffer uint64 `json:"feeBuffer"`
+	}{
+		OK:        true,
+		FeeBuffer: feeBuffer,
+	}
+	writeJSON(w, resp, s.indent)
+}
+
 // apiPostBond is the handler for the '/postbond' API request.
 func (s *WebServer) apiPostBond(w http.ResponseWriter, r *http.Request) {
 	post := new(postBondForm)

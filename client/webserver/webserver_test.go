@@ -108,6 +108,9 @@ func (c *TCore) UpdateBondOptions(form *core.BondOptionsForm) error {
 func (c *TCore) EstimateRegistrationTxFee(host string, certI interface{}, assetID uint32) (uint64, error) {
 	return 0, nil
 }
+func (c *TCore) BondsFeeBuffer(assetID uint32) (uint64, error) {
+	return 222, nil
+}
 func (c *TCore) ToggleRateSourceStatus(src string, disable bool) error {
 	return c.rateSourceErr
 }

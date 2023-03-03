@@ -479,6 +479,13 @@ type Broadcaster interface {
 type Bonder interface {
 	Broadcaster
 
+	// BondsFeeBuffer suggests how much extra may be required for the
+	// transaction fees part of bond reserves when bond rotation is enabled.
+	// This should return an amount larger than the minimum required by the
+	// asset's reserves system for fees, if non-zero, so that a reserves
+	// "deficit" does not appear right after the first bond is posted.
+	BondsFeeBuffer() uint64
+
 	// RegisterUnspent informs the wallet of a certain amount already locked in
 	// unspent bonds that will eventually be refunded with RefundBond. This
 	// should be used prior to ReserveBondFunds. This alone does not enable
