@@ -626,6 +626,9 @@ func (c *TCore) EstimateRegistrationTxFee(host string, certI interface{}, assetI
 	}
 	return txFee, nil
 }
+func (c *TCore) BondsFeeBuffer(assetID uint32) (uint64, error) {
+	return 222, nil
+}
 func (c *TCore) ValidateAddress(address string, assetID uint32) (bool, error) {
 	return len(address) > 10, nil
 }

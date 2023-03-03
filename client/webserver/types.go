@@ -52,6 +52,10 @@ type registrationForm struct {
 	AssetID  *uint32          `json:"asset,omitempty"` // prevent omission using BTC
 }
 
+type bondsFeeBufferForm struct {
+	AssetID uint32 `json:"assetID"`
+}
+
 // postBondForm is used to post a new bond for an existing DEX account.
 type postBondForm struct {
 	Addr         string           `json:"addr"`
