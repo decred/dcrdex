@@ -284,16 +284,19 @@ func NewBackend(configPath string, log dex.Logger, net dex.Network) (*ETHBackend
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
 			continue
 		}
+		ethCfgInstructions := "invalid eth config line: \"%s\". " +
+			"Each line must contain URL and optionally a priority (between 0-65535) " +
+			"separated by a comma. Example: \"https://www.infura.io/,2\""
 		parts := strings.Split(line, ",")
 		if len(parts) < 1 || len(parts) > 2 {
-			return nil, fmt.Errorf("invalid eth config line %q", line)
+			return nil, fmt.Errorf(ethCfgInstructions, line)
 		}
 		url := strings.TrimSpace(parts[0])
 		var priority uint16
 		if len(parts) == 2 {
 			priority64, err := strconv.ParseUint(strings.TrimSpace(parts[1]), 10, 16)
 			if err != nil {
-				return nil, fmt.Errorf("invalid eth config line %q: %v", line, err)
+				return nil, fmt.Errorf(ethCfgInstructions, line)
 			}
 			priority = uint16(priority64)
 		}
