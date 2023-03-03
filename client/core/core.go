@@ -2112,6 +2112,22 @@ func (c *Core) updateBalances(assets assetMap) {
 			c.log.Errorf("error updating %q balance: %v", unbip(assetID), err)
 			continue
 		}
+
+		if token := asset.TokenInfo(assetID); token != nil {
+			if _, alreadyUpdating := assets[token.ParentID]; alreadyUpdating {
+				continue
+			}
+			parentWallet, exists := c.wallet(token.ParentID)
+			if !exists {
+				c.log.Errorf("non-existent %d wallet should exist", token.ParentID)
+				continue
+			}
+			_, err := c.updateWalletBalance(parentWallet)
+			if err != nil {
+				c.log.Errorf("error updating %q balance: %v", unbip(token.ParentID), err)
+				continue
+			}
+		}
 	}
 }
 
@@ -5697,6 +5713,9 @@ func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, e
 		if _, err := c.updateWalletBalance(fromWallet); err != nil {
 			c.log.Errorf("updateWalletBalance error: %v", err)
 		}
+		if fromToken := asset.TokenInfo(assetConfigs.fromAsset.ID); fromToken != nil {
+			c.updateAssetBalance(fromToken.ParentID)
+		}
 	}()
 
 	coinIDs := make([]order.CoinID, 0, len(coins))
@@ -5799,6 +5818,9 @@ func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, e
 		defer func() {
 			if _, err := c.updateWalletBalance(toWallet); err != nil {
 				c.log.Errorf("updateWalletBalance error: %v", err)
+			}
+			if toToken := asset.TokenInfo(assetConfigs.toAsset.ID); toToken != nil {
+				c.updateAssetBalance(toToken.ParentID)
 			}
 		}()
 
@@ -5959,15 +5981,6 @@ func (c *Core) sendTradeRequest(tr *tradeRequest) (*Order, error) {
 		}
 		subject, details := c.formatDetails(topic, ui.ConventionalString(corder.Qty), ui.Conventional.Unit, rateString, tracker.token())
 		c.notify(newOrderNoteWithTempID(topic, subject, details, db.Poke, corder, tr.tempID))
-	}
-
-	fromWallet := wallets.fromWallet
-	if (dbOrder.MetaData.RefundReserves != 0) && (fromWallet.parent != nil) {
-		c.updateAssetBalance(fromWallet.parent.AssetID)
-	}
-	toWallet := wallets.toWallet
-	if (dbOrder.MetaData.RedemptionReserves != 0) && (toWallet.parent != nil) {
-		c.updateAssetBalance(toWallet.parent.AssetID)
 	}
 
 	tr.errCloser.Success()
@@ -7538,6 +7551,9 @@ func (c *Core) runMatches(tradeMatches map[order.OrderID]*serverMatches) (assetM
 			tracker.mtx.RLock()
 			if tracker.metaData.Status == order.OrderStatusCanceled {
 				updatedAssets.count(tracker.fromAssetID)
+				if _, is := tracker.wallets.toWallet.Wallet.(asset.AccountLocker); is {
+					updatedAssets.count(tracker.wallets.toWallet.AssetID)
+				}
 			}
 			tracker.mtx.RUnlock()
 
