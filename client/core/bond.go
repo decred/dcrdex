@@ -946,6 +946,22 @@ func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
 	return err
 }
 
+// BondsFeeBuffer suggests how much extra may be required for the transaction
+// fees part of bond reserves when bond rotation is enabled. This may be used to
+// inform the consumer how much extra (beyond double the bond amount) is
+// required to facilitate uninterrupted maintenance of a target trading tier.
+func (c *Core) BondsFeeBuffer(assetID uint32) (uint64, error) {
+	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return 0, err
+	}
+	bonder, ok := wallet.Wallet.(asset.Bonder)
+	if !ok {
+		return 0, errors.New("wallet does not support bonds")
+	}
+	return bonder.BondsFeeBuffer(), nil
+}
+
 // PostBond begins the process of posting a new bond for a new or existing DEX
 // account. On return, the bond transaction will have been broadcast, and when
 // the required number of confirmations is reached, Core will submit the bond
