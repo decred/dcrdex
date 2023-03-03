@@ -512,14 +512,11 @@ func (c *Core) preValidateBond(dc *dexConnection, bond *asset.Bond) error {
 		return fmt.Errorf("account keys not decrypted")
 	}
 
-	assetID, bondCoin := bond.AssetID, bond.UnsignedCoinID
-	bondCoinStr := coinIDString(assetID, bondCoin)
-
 	// Pre-validate with the raw bytes of the unsigned tx and our account
 	// pubkey.
 	preBond := &msgjson.PreValidateBond{
 		AcctPubKey: pkBytes,
-		AssetID:    assetID,
+		AssetID:    bond.AssetID,
 		Version:    bond.Version,
 		RawTx:      bond.UnsignedTx,
 	}
@@ -531,13 +528,9 @@ func (c *Core) preValidateBond(dc *dexConnection, bond *asset.Bond) error {
 	}
 
 	// Check the response signature.
-	err = dc.acct.checkSig(preBondRes.Serialize(), preBondRes.Sig)
+	err = dc.acct.checkSig(append(preBondRes.Serialize(), bond.UnsignedTx...), preBondRes.Sig)
 	if err != nil {
-		c.log.Warnf("prevalidatebond: DEX signature validation error: %v", err)
-	}
-	if !bytes.Equal(preBondRes.BondID, bondCoin) {
-		return fmt.Errorf("server reported bond coin ID %v, expected %v", coinIDString(assetID, preBondRes.BondID),
-			bondCoinStr)
+		return fmt.Errorf("preValidateBond: DEX signature validation error: %v", err)
 	}
 
 	if preBondRes.Amount != bond.Amount {
@@ -1206,17 +1199,16 @@ func (c *Core) makeAndPostBond(dc *dexConnection, acctExists bool, wallet *xcWal
 
 	// Store the account and bond info.
 	dbBond := &db.Bond{
-		Version:        bond.Version,
-		AssetID:        bond.AssetID,
-		UnsignedCoinID: bond.UnsignedCoinID,
-		CoinID:         bond.CoinID,
-		UnsignedTx:     bond.UnsignedTx,
-		SignedTx:       bond.SignedTx,
-		Data:           bond.Data,
-		Amount:         amt,
-		LockTime:       uint64(lockTime.Unix()),
-		KeyIndex:       keyIndex,
-		RefundTx:       bond.RedeemTx,
+		Version:    bond.Version,
+		AssetID:    bond.AssetID,
+		CoinID:     bond.CoinID,
+		UnsignedTx: bond.UnsignedTx,
+		SignedTx:   bond.SignedTx,
+		Data:       bond.Data,
+		Amount:     amt,
+		LockTime:   uint64(lockTime.Unix()),
+		KeyIndex:   keyIndex,
+		RefundTx:   bond.RedeemTx,
 		// Confirmed and Refunded are false (new bond tx)
 	}
 

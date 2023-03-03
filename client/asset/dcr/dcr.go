@@ -3701,7 +3701,6 @@ func (dcr *ExchangeWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime 
 		return nil, nil, err
 	}
 	txid := signedTx.TxHash() // spentAmt := amt + fees
-	unsignedTxid := baseTx.TxHash()
 
 	signedTxBytes, err := signedTx.Bytes()
 	if err != nil {
@@ -3723,15 +3722,14 @@ func (dcr *ExchangeWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime 
 	}
 
 	bond := &asset.Bond{
-		Version:        ver,
-		AssetID:        BipID,
-		Amount:         amt,
-		CoinID:         toCoinID(&txid, 0),
-		UnsignedCoinID: toCoinID(&unsignedTxid, 0),
-		Data:           bondScript,
-		SignedTx:       signedTxBytes,
-		UnsignedTx:     unsignedTxBytes,
-		RedeemTx:       redeemTx,
+		Version:    ver,
+		AssetID:    BipID,
+		Amount:     amt,
+		CoinID:     toCoinID(&txid, 0),
+		Data:       bondScript,
+		SignedTx:   signedTxBytes,
+		UnsignedTx: unsignedTxBytes,
+		RedeemTx:   redeemTx,
 	}
 	success = true
 

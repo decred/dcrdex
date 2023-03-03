@@ -123,9 +123,8 @@ func (auth *AuthManager) handlePreValidateBond(conn comms.Link, msg *msgjson.Mes
 		AssetID:   assetID,
 		Amount:    uint64(amt),
 		Expiry:    uint64(expireTime.Unix()),
-		BondID:    bondCoinID,
 	}
-	auth.Sign(preBondRes)
+	preBondRes.SetSig(auth.SignMsg(append(preBondRes.Serialize(), preBond.RawTx...)))
 
 	resp, err := msgjson.NewResponse(msg.ID, preBondRes, nil)
 	if err != nil { // shouldn't be possible

@@ -5185,7 +5185,6 @@ func (btc *baseWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time
 	}
 
 	txid := signedTx.TxHash()
-	unsignedTxid := baseTx.TxHash()
 
 	signedTxBytes, err := serializeMsgTx(signedTx)
 	if err != nil {
@@ -5207,15 +5206,14 @@ func (btc *baseWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time
 	}
 
 	bond := &asset.Bond{
-		Version:        ver,
-		AssetID:        BipID,
-		Amount:         amt,
-		CoinID:         toCoinID(&txid, 0),
-		UnsignedCoinID: toCoinID(&unsignedTxid, 0),
-		Data:           bondScript,
-		SignedTx:       signedTxBytes,
-		UnsignedTx:     unsignedTxBytes,
-		RedeemTx:       redeemTx,
+		Version:    ver,
+		AssetID:    BipID,
+		Amount:     amt,
+		CoinID:     toCoinID(&txid, 0),
+		Data:       bondScript,
+		SignedTx:   signedTxBytes,
+		UnsignedTx: unsignedTxBytes,
+		RedeemTx:   redeemTx,
 	}
 	success = true
 
