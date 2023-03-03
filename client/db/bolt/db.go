@@ -824,7 +824,8 @@ func (db *BoltDB) storeBond(bondBkt *bbolt.Bucket, bond *db.Bond) error {
 	return nil
 }
 
-// AddBond saves a new Bond for an existing DEX account.
+// AddBond saves a new Bond or updates an existing bond for an existing DEX
+// account.
 func (db *BoltDB) AddBond(host string, bond *db.Bond) error {
 	acctKey := []byte(host)
 	return db.acctsUpdate(func(accts *bbolt.Bucket) error {

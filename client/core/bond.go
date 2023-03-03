@@ -345,11 +345,22 @@ func (c *Core) rotateBonds(ctx context.Context) {
 				refundCoin, err := wallet.RefundBond(ctx, bond.Version, bond.CoinID, bond.Data, bond.Amount, priv)
 				priv.Zero()
 				bondAlreadySpent = errors.Is(err, asset.CoinNotFoundError) // or never mined!
-				if err != nil && !bondAlreadySpent {
-					c.log.Errorf("Failed to generate bond refund tx: %v", err)
-					continue
+				if err != nil {
+					if errors.Is(err, asset.ErrIncorrectBondKey) { // imported account and app seed is different
+						c.log.Warnf("Private key to spend bond %v is not available. Broadcasting backup refund tx.", bondIDStr)
+						refundCoinID, err := wallet.SendTransaction(bond.RefundTx)
+						if err != nil {
+							c.log.Errorf("Failed to broadcast bond refund txn %x: %v", bond.RefundTx, err)
+							continue
+						}
+						refundCoinStr, _ = asset.DecodeCoinID(bond.AssetID, refundCoinID)
+					} else if !bondAlreadySpent {
+						c.log.Errorf("Failed to generate bond refund tx: %v", err)
+						continue
+					}
+				} else {
+					refundCoinStr, refundVal = refundCoin.String(), refundCoin.Value()
 				}
-				refundCoinStr, refundVal = refundCoin.String(), refundCoin.Value()
 			}
 			// RefundBond increases reserves when it spends the bond, adding to
 			// the wallet's balance (available or immature).

@@ -5,6 +5,7 @@ package webserver
 
 import (
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 )
@@ -131,6 +132,7 @@ type accountExportForm struct {
 type accountImportForm struct {
 	Pass    encode.PassBytes `json:"pw"`
 	Account *core.Account    `json:"account"`
+	Bonds   []*db.Bond       `json:"bonds"`
 }
 
 type accountDisableForm struct {

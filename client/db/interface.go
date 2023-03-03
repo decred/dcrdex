@@ -38,7 +38,7 @@ type DB interface {
 	// the same Host as the parameter. If no account exists with this host,
 	// an error is returned.
 	UpdateAccountInfo(ai *AccountInfo) error
-	// AddBond saves a new Bond for a DEX.
+	// AddBond saves a new Bond or updates an existing bond for a DEX.
 	AddBond(host string, bond *Bond) error
 	// NextBondKeyIndex returns the next bond key index and increments the
 	// stored value so that subsequent calls will always return a higher index.
