@@ -16,10 +16,10 @@ import (
 // the fund method when creating transactions to send funds. If fees are to be
 // subtracted from the inputs, set subtract so that the required amount excludes
 // the transaction fee. If change from the transaction should be considered
-// immediately available (not mixing), set reportChange to indicate this and the
-// returned enough func will return a non-zero excess value. Otherwise, the
-// enough func will always return 0, leaving only unselected UTXOs to cover any
-// required reserves.
+// immediately available, set reportChange to indicate this and the returned
+// enough func will return a non-zero excess value. Otherwise, the enough func
+// will always return 0, leaving only unselected UTXOs to cover any required
+// reserves.
 func sendEnough(amt, feeRate uint64, subtract bool, baseTxSize uint64, segwit, reportChange bool) func(inputSize, sum uint64) (bool, uint64) {
 	return func(inputSize, sum uint64) (bool, uint64) {
 		txFee := (baseTxSize + inputSize) * feeRate
@@ -40,10 +40,10 @@ func sendEnough(amt, feeRate uint64, subtract bool, baseTxSize uint64, segwit, r
 
 // orderEnough generates a function that can be used as the enough argument to
 // the fund method. If change from a split transaction will be created AND
-// immediately available (not mixing), set reportChange to indicate this and the
-// returned enough func will return a non-zero excess value reflecting this
-// potential spit tx change. Otherwise, the enough func will always return 0,
-// leaving only unselected UTXOs to cover any required reserves.
+// immediately available, set reportChange to indicate this and the returned
+// enough func will return a non-zero excess value reflecting this potential
+// spit tx change. Otherwise, the enough func will always return 0, leaving
+// only unselected UTXOs to cover any required reserves.
 func orderEnough(val, lots, feeRate, initTxSizeBase, initTxSize uint64, segwit, reportChange bool) func(inputsSize, sum uint64) (bool, uint64) {
 	return func(inputsSize, sum uint64) (bool, uint64) {
 		reqFunds := calc.RequiredOrderFundsAlt(val, inputsSize, lots, initTxSizeBase, initTxSize, feeRate)
