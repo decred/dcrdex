@@ -155,6 +155,9 @@ func NewDB(dbPath string, logger dex.Logger, opts ...Opts) (dexdb.DB, error) {
 
 	db, err := bbolt.Open(dbPath, 0600, &bbolt.Options{Timeout: 3 * time.Second})
 	if err != nil {
+		if errors.Is(err, bbolt.ErrTimeout) {
+			err = fmt.Errorf("%w, could happen when database is already being used by another process", err)
+		}
 		return nil, err
 	}
 
