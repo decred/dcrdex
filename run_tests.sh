@@ -41,7 +41,6 @@ go run ./client/core/localetest/main.go
 # -race in go tests above requires cgo, but disable it for the compile tests below
 export CGO_ENABLED=0
 go build ./...
-go build ./...
 go build -tags harness -o /dev/null ./client/cmd/simnet-trade-tests
 go build -tags harness -o /dev/null ./client/cmd/mmbot
 
