@@ -153,7 +153,13 @@ export class NewWalletForm {
     const { asset, parentAsset } = this.current
     const selectedDef = this.current.selectedDef
     let parentForm
+    let walletType = selectedDef.type
     if (parentAsset) {
+      if (!asset.token) {
+        this.setError('token is absent from asset with parent, should never happen!')
+        return
+      }
+      walletType = asset.token.definition.type
       parentForm = {
         assetID: parentAsset.id,
         config: this.subform.map(parentAsset.id),
@@ -161,7 +167,7 @@ export class NewWalletForm {
       }
     }
     // Register the selected asset.
-    const res = await this.createWallet(asset.id, selectedDef.type, pw, parentForm)
+    const res = await this.createWallet(asset.id, walletType, pw, parentForm)
     if (!app().checkResponse(res)) {
       this.setError(res.msg)
       return
