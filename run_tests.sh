@@ -75,7 +75,6 @@ golangci-lint run --disable-all --deadline=10m \
   --enable=govet \
   --enable=gosimple \
   --enable=unconvert \
-  --enable=structcheck \
   --enable=ineffassign \
   --enable=asciicheck \
   --enable=rowserrcheck \

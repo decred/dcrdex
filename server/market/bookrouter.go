@@ -93,7 +93,7 @@ func (us updateSignal) String() string {
 	return us.action.String()
 }
 
-// nolint:structcheck,unused
+// nolint:unused
 type sigDataOrder struct {
 	order    order.Order
 	epochIdx int64
