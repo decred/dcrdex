@@ -284,7 +284,11 @@ func New(cfg *Config) (*WebServer, error) {
 
 	// Middleware
 	if log.Level() == dex.LevelTrace {
-		mux.Use(middleware.Logger)
+		mux.Use(
+			middleware.RequestLogger(
+				&middleware.DefaultLogFormatter{Logger: &chiLogger{logger: log}},
+			),
+		)
 	}
 	mux.Use(s.securityMiddleware)
 	mux.Use(middleware.Recoverer)
@@ -903,4 +907,14 @@ func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int, ind
 func folderExists(fp string) bool {
 	stat, err := os.Stat(fp)
 	return err == nil && stat.IsDir()
+}
+
+// chiLogger is an adaptor around dex.Logger so that it can be used seamlessly
+// with chi library.
+type chiLogger struct {
+	logger dex.Logger
+}
+
+func (l *chiLogger) Print(v ...interface{}) {
+	l.logger.Trace(v...)
 }
