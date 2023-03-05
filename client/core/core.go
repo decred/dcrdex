@@ -7901,8 +7901,14 @@ func (c *Core) handleReconnect(host string) {
 	}
 
 	resubMkt := func(mkt *market) {
-		// Locate any bookie for this market.
-		booky := dc.bookie(mkt.name)
+		// Locking on dc.booksMtx is currently the only way to ensure the "book"
+		// notification gets sent first, before we start applying any update
+		// notifications coming from server (that can potentially happen once
+		// booky.Reset func returns).
+		dc.booksMtx.Lock()
+		defer dc.booksMtx.Unlock()
+
+		booky := dc.books[mkt.name]
 		if booky == nil {
 			// Was not previously subscribed with the server for this market.
 			return
