@@ -540,7 +540,7 @@ func (r *BookRouter) Book(mktName string) (*msgjson.OrderBook, error) {
 	return msgOB, nil
 }
 
-// sendBook encodes and sends the the entire order book to the specified client.
+// sendBook encodes and sends the entire order book to the specified client.
 func (r *BookRouter) sendBook(conn comms.Link, book *msgBook, msgID uint64) {
 	msgOB := r.msgOrderBook(book)
 	if msgOB == nil {

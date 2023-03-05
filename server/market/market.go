@@ -698,7 +698,7 @@ func (m *Market) OrderFeed() <-chan *updateSignal {
 // FeedDone informs the market that the caller is finished receiving from the
 // given channel, which should have been obtained from OrderFeed. If the channel
 // was a registered order feed channel from OrderFeed, it is closed and removed
-// so that no further signals will be send on the channel.
+// so that no further signals will be sent on the channel.
 func (m *Market) FeedDone(feed <-chan *updateSignal) bool {
 	m.orderFeedMtx.Lock()
 	defer m.orderFeedMtx.Unlock()

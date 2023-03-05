@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"encoding/csv"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -134,6 +135,12 @@ type dexConnection struct {
 	cfgMtx sync.RWMutex
 	cfg    *msgjson.ConfigResult
 
+	// booksMtx is used for both, protecting access to books map so that
+	// concurrent modifications are serialized and to synchronize certain
+	// actions performed on a particular bookie in that map (such as
+	// preventing applying any order book updates until order book snapshot
+	// is taken by another go-routine, so that it can get a feed on those
+	// changes to keep the original snapshot in sync).
 	booksMtx sync.RWMutex
 	books    map[string]*bookie
 
@@ -7915,16 +7922,21 @@ func (c *Core) handleReconnect(host string) {
 			c.log.Errorf("handleReconnect: Failed to Sync market %q order book snapshot: %v", mkt.name, err)
 		}
 
+		payload := MarketOrderBook{
+			Base:  mkt.base,
+			Quote: mkt.quote,
+			Book:  booky.book(),
+		}
+		encPayload, err := json.Marshal(payload)
+		if err != nil {
+			c.log.Errorf("handleReconnect: Failed to marshal payload: %+v, err: %v", payload, err)
+		}
 		// Send a FreshBookAction to the subscribers.
 		booky.send(&BookUpdate{
 			Action:   FreshBookAction,
 			Host:     dc.acct.host,
 			MarketID: mkt.name,
-			Payload: &MarketOrderBook{
-				Base:  mkt.base,
-				Quote: mkt.quote,
-				Book:  booky.book(),
-			},
+			Payload:  encPayload,
 		})
 	}
 

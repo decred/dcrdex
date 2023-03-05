@@ -4,6 +4,7 @@
 package core
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -83,14 +84,14 @@ func (c *candleCache) init(in []*msgjson.Candle) {
 
 // addCandle adds the candle using candles.Cache.Add. It returns most recent candle
 // in cache.
-func (c *candleCache) addCandle(msgCandle *msgjson.Candle) (recent msgjson.Candle, ok bool) {
+func (c *candleCache) addCandle(msgCandle *msgjson.Candle) *msgjson.Candle {
 	if atomic.LoadUint32(&c.on) == 0 {
-		return msgjson.Candle{}, false
+		return nil
 	}
 	c.candleMtx.Lock()
 	defer c.candleMtx.Unlock()
 	c.Add(msgCandle)
-	return *c.Last(), true
+	return c.Last()
 }
 
 // bookie is a BookFeed manager. bookie will maintain any number of order book
@@ -185,36 +186,47 @@ func (b *bookie) logEpochReport(note *msgjson.EpochReportNote) error {
 	marketID := marketName(b.base, b.quote)
 	matchSummaries := b.AddRecentMatches(note.MatchSummary, note.EndStamp)
 	if len(note.MatchSummary) > 0 {
+		encPayload, err := json.Marshal(matchSummaries)
+		if err != nil {
+			return fmt.Errorf("logEpochReport: Failed to marshal payload: %+v, err: %v", matchSummaries, err)
+		}
 		b.send(&BookUpdate{
 			Action:   EpochMatchSummary,
 			MarketID: marketID,
-			Payload:  matchSummaries,
+			Payload:  encPayload,
 		})
 	}
 	for durStr, cache := range b.candleCaches {
-		c, ok := cache.addCandle(&note.Candle)
-		if !ok {
+		c := cache.addCandle(&note.Candle)
+		if c == nil {
 			continue
 		}
+
 		dur, _ := time.ParseDuration(durStr)
+		payload := CandleUpdate{
+			Dur:          durStr,
+			DurMilliSecs: uint64(dur.Milliseconds()),
+			Candle:       c,
+		}
+		encPayload, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("logEpochReport: Failed to marshal payload: %+v, err: %v", payload, err)
+		}
 		b.send(&BookUpdate{
 			Action:   CandleUpdateAction,
 			Host:     b.dc.acct.host,
 			MarketID: marketID,
-			Payload: CandleUpdate{
-				Dur:          durStr,
-				DurMilliSecs: uint64(dur.Milliseconds()),
-				// Providing a copy of msgjson.Candle data here since it will be used concurrently.
-				Candle: &c,
-			},
+			Payload:  encPayload,
 		})
 	}
 
 	return nil
 }
 
-// newFeed gets a new *bookFeed and cancels the close timer. feed must be called
-// with the bookie.mtx locked. The feed is primed with the provided *BookUpdate.
+// newFeed gets a new *bookFeed and cancels the close timer. The feed is primed
+// with the provided *BookUpdate.
+// newFeed must be called with dexConnection.booksMtx locked, see its description
+// for details on why.
 func (b *bookie) newFeed(u *BookUpdate) *bookFeed {
 	b.timerMtx.Lock()
 	if b.closeTimer != nil {
@@ -264,26 +276,37 @@ func (b *bookie) candles(durStr string, feedID uint32) error {
 		if err != nil {
 			return
 		}
+
 		b.feedsMtx.RLock()
 		defer b.feedsMtx.RUnlock()
+
 		f, ok := b.feeds[feedID]
 		if !ok {
 			// Feed must have been closed in another thread.
 			return
 		}
+
 		dur, _ := time.ParseDuration(durStr)
 		cache.candleMtx.RLock()
 		cdls := cache.CandlesCopy()
 		cache.candleMtx.RUnlock()
+
+		payload := CandlesPayload{
+			Dur:          durStr,
+			DurMilliSecs: uint64(dur.Milliseconds()),
+			Candles:      cdls,
+		}
+		encPayload, encErr := json.Marshal(payload)
+		if encErr != nil {
+			err = fmt.Errorf("candles: Failed to marshal payload: %+v, err: %v", payload, encErr)
+			return
+		}
+
 		f.c <- &BookUpdate{
 			Action:   FreshCandlesAction,
 			Host:     b.dc.acct.host,
 			MarketID: marketName(b.base, b.quote),
-			Payload: &CandlesPayload{
-				Dur:          durStr,
-				DurMilliSecs: uint64(dur.Milliseconds()),
-				Candles:      cdls,
-			},
+			Payload:  encPayload,
 		}
 	}()
 	if atomic.LoadUint32(&cache.on) == 1 {
@@ -395,6 +418,16 @@ func (dc *dexConnection) syncBook(base, quote uint32) (*orderbook.OrderBook, Boo
 	cfg := dc.cfg
 	dc.cfgMtx.RUnlock()
 
+	// bookie is reflecting client's point of view on the state of server order
+	// book. First bookie syncs order book, then it keeps order book state
+	// consistent with server's by applying sequential updates on top of the
+	// data it got during sync. bookie can't apply these order book updates
+	// while sync is in progress, and applying updates isn't enough - bookie
+	// must relay those updates through his feed to the interested consumers,
+	// we lock dc.booksMtx here to prevent those updates from being applied
+	// until bookie is ready, see more on that below.
+	// And we need to serialize map entry usage by concurrent actors here so
+	// that we won't be trying to create 2 bookies when we really need 2 feeds.
 	dc.booksMtx.Lock()
 	defer dc.booksMtx.Unlock()
 
@@ -419,18 +452,30 @@ func (dc *dexConnection) syncBook(base, quote uint32) (*orderbook.OrderBook, Boo
 		dc.books[mktID] = booky
 	}
 
-	// Get the feed and the book under a single lock to make sure the first
-	// message is the book.
+	payload := MarketOrderBook{
+		Base:  base,
+		Quote: quote,
+		Book:  booky.book(),
+	}
+	encPayload, err := json.Marshal(payload)
+	if err != nil {
+		return nil, nil, fmt.Errorf("syncBook: Failed to marshal payload: %+v, err: %v", payload, err)
+	}
 	feed := booky.newFeed(&BookUpdate{
 		Action:   FreshBookAction,
 		Host:     dc.acct.host,
 		MarketID: mktID,
-		Payload: &MarketOrderBook{
-			Base:  base,
-			Quote: quote,
-			Book:  booky.book(),
-		},
+		Payload:  encPayload,
 	})
+
+	// bookie is not considered initialized until it has at least 1 feed, if we
+	// release dc.booksMtx before that we will receive and apply those order book
+	// updates mentioned above on top of the order book state we got during initial
+	// bookie sync, but we won't be able to relay them as feed to the consumer who
+	// initiated this function in the first place. So, now the feed is initialized,
+	// it's safe to release this mutex (done with defer).
+	// Same reasoning applies when we are extending existing bookie with 2nd, 3rd ...
+	// feed.
 
 	return booky.OrderBook, feed, nil
 }
@@ -615,11 +660,17 @@ func handleBookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error 
 	if err != nil {
 		return err
 	}
+
+	payload := book.minifyOrder(note.OrderID, &note.TradeNote, 0)
+	encPayload, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("handleBookOrderMsg: Failed to marshal payload: %+v, err: %v", payload, err)
+	}
 	book.send(&BookUpdate{
 		Action:   BookOrderAction,
 		Host:     dc.acct.host,
 		MarketID: note.MarketID,
-		Payload:  book.minifyOrder(note.OrderID, &note.TradeNote, 0),
+		Payload:  encPayload,
 	})
 	return nil
 }
@@ -743,16 +794,21 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	}
 	dc.tradeMtx.RUnlock()
 
+	payload := MarketOrderBook{
+		Base:  mkt.Base,
+		Quote: mkt.Quote,
+		Book:  book.book(), // empty
+	}
+	encPayload, encErr := json.Marshal(payload)
+	if encErr != nil {
+		return fmt.Errorf("handleTradeSuspensionMsg: Failed to marshal payload: %+v, err: %v", payload, err)
+	}
 	// Clear the book.
 	book.send(&BookUpdate{
 		Action:   FreshBookAction,
 		Host:     dc.acct.host,
 		MarketID: sp.MarketID,
-		Payload: &MarketOrderBook{
-			Base:  mkt.Base,
-			Quote: mkt.Quote,
-			Book:  book.book(), // empty
-		},
+		Payload:  encPayload,
 	})
 
 	if len(updatedAssets) > 0 {
@@ -1007,11 +1063,17 @@ func handleUnbookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) erro
 	if err != nil {
 		return err
 	}
+
+	payload := MiniOrder{Token: token(note.OrderID)}
+	encPayload, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("handleUnbookOrderMsg: Failed to marshal payload: %+v, err: %v", payload, err)
+	}
 	book.send(&BookUpdate{
 		Action:   UnbookOrderAction,
 		Host:     dc.acct.host,
 		MarketID: note.MarketID,
-		Payload:  &MiniOrder{Token: token(note.OrderID)},
+		Payload:  encPayload,
 	})
 
 	return nil
@@ -1035,15 +1097,21 @@ func handleUpdateRemainingMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) 
 	if err != nil {
 		return err
 	}
+
+	payload := RemainderUpdate{
+		Token:     token(note.OrderID),
+		Qty:       float64(note.Remaining) / float64(book.baseUnits.Conventional.ConversionFactor),
+		QtyAtomic: note.Remaining,
+	}
+	encPayload, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("handleUpdateRemainingMsg: Failed to marshal payload: %+v, err: %v", payload, err)
+	}
 	book.send(&BookUpdate{
 		Action:   UpdateRemainingAction,
 		Host:     dc.acct.host,
 		MarketID: note.MarketID,
-		Payload: &RemainderUpdate{
-			Token:     token(note.OrderID),
-			Qty:       float64(note.Remaining) / float64(book.baseUnits.Conventional.ConversionFactor),
-			QtyAtomic: note.Remaining,
-		},
+		Payload:  encPayload,
 	})
 	return nil
 }
@@ -1087,12 +1155,17 @@ func handleEpochOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error
 		return fmt.Errorf("failed to Enqueue epoch order: %w", err)
 	}
 
+	payload := book.minifyOrder(note.OrderID, &note.TradeNote, note.Epoch)
+	encPayload, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("handleEpochOrderMsg: Failed to marshal payload: %+v, err: %v", payload, err)
+	}
 	// Send a MiniOrder for book updates.
 	book.send(&BookUpdate{
 		Action:   EpochOrderAction,
 		Host:     dc.acct.host,
 		MarketID: note.MarketID,
-		Payload:  book.minifyOrder(note.OrderID, &note.TradeNote, note.Epoch),
+		Payload:  encPayload,
 	})
 
 	return nil

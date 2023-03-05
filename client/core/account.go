@@ -233,7 +233,7 @@ func (c *Core) UpdateCert(host string, cert []byte) error {
 	}
 
 	// Stop reconnect retry for previous dex connection first but leave it in
-	// the map so it remains listed incase we need it in the interim.
+	// the map so it remains listed in case we need it in the interim.
 	if found {
 		dc.connMaster.Disconnect()
 		dc.acct.lock()

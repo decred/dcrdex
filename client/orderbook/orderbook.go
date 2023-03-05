@@ -224,7 +224,7 @@ func (ob *OrderBook) processCachedNotes() error {
 }
 
 // Sync updates a client tracked order book with an order book snapshot. It is
-// an error if the the OrderBook is already synced.
+// an error if the OrderBook is already synced.
 func (ob *OrderBook) Sync(snapshot *msgjson.OrderBook) error {
 	if ob.isSynced() {
 		return fmt.Errorf("order book is already synced")

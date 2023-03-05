@@ -6,6 +6,7 @@ package core
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
@@ -701,10 +702,10 @@ const (
 
 // BookUpdate is an order book update.
 type BookUpdate struct {
-	Action   string      `json:"action"`
-	Host     string      `json:"host"`
-	MarketID string      `json:"marketID"`
-	Payload  interface{} `json:"payload"`
+	Action   string          `json:"action"`
+	Host     string          `json:"host"`
+	MarketID string          `json:"marketID"`
+	Payload  json.RawMessage `json:"payload"`
 }
 
 type CandlesPayload struct {

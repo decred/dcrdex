@@ -365,7 +365,7 @@ func NewRequest(id uint64, route string, payload interface{}) (*Message, error) 
 	}
 	return &Message{
 		Type:    Request,
-		Payload: json.RawMessage(encoded),
+		Payload: encoded,
 		Route:   route,
 		ID:      id,
 	}, nil
@@ -390,7 +390,7 @@ func NewResponse(id uint64, result interface{}, rpcErr *Error) (*Message, error)
 	}
 	return &Message{
 		Type:    Response,
-		Payload: json.RawMessage(encResp),
+		Payload: encResp,
 		ID:      id,
 	}, nil
 }
@@ -425,7 +425,7 @@ func NewNotification(route string, payload interface{}) (*Message, error) {
 	return &Message{
 		Type:    Notification,
 		Route:   route,
-		Payload: json.RawMessage(encPayload),
+		Payload: encPayload,
 	}, nil
 }
 

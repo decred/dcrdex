@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
@@ -981,11 +982,16 @@ func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (core.BookFeed, err
 						side = c.sells
 					}
 					side[ord.Token] = ord
+					payload := ord
+					encPayload, err := json.Marshal(payload)
+					if err != nil {
+						panic(fmt.Errorf("SyncBook: Failed to marshal payload: %+v, err: %v", payload, err))
+					}
 					epochOrder := &core.BookUpdate{
 						Action:   msgjson.EpochOrderRoute,
 						Host:     c.dexAddr,
 						MarketID: mktID,
-						Payload:  ord,
+						Payload:  encPayload,
 					}
 					c.trySend(epochOrder)
 					c.epochOrders = append(c.epochOrders, epochOrder)
@@ -1014,11 +1020,16 @@ func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (core.BookFeed, err
 					delete(side, tkn)
 					c.orderMtx.Unlock()
 
+					payload := core.MiniOrder{Token: tkn}
+					encPayload, err := json.Marshal(payload)
+					if err != nil {
+						panic(fmt.Errorf("SyncBook: Failed to marshal payload: %+v, err: %v", payload, err))
+					}
 					c.trySend(&core.BookUpdate{
 						Action:   msgjson.UnbookOrderRoute,
 						Host:     c.dexAddr,
 						MarketID: mktID,
-						Payload:  &core.MiniOrder{Token: tkn},
+						Payload:  encPayload,
 					})
 				}
 
@@ -1030,15 +1041,20 @@ func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (core.BookFeed, err
 				if dur == 0 {
 					continue
 				}
+				payload := core.CandleUpdate{
+					Dur:          durStr,
+					DurMilliSecs: uint64(dur.Milliseconds()),
+					Candle:       candle(mkt, dur, time.Now()),
+				}
+				encPayload, err := json.Marshal(payload)
+				if err != nil {
+					panic(fmt.Errorf("SyncBook: Failed to marshal payload: %+v, err: %v", payload, err))
+				}
 				c.trySend(&core.BookUpdate{
 					Action:   core.CandleUpdateAction,
 					Host:     dexAddr,
 					MarketID: mktID,
-					Payload: &core.CandleUpdate{
-						Dur:          durStr,
-						DurMilliSecs: uint64(dur.Milliseconds()),
-						Candle:       candle(mkt, dur, time.Now()),
-					},
+					Payload:  encPayload,
 				})
 
 			case <-ctx.Done():
@@ -1048,15 +1064,20 @@ func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (core.BookFeed, err
 		}
 	}()
 
+	payload := core.MarketOrderBook{
+		Base:  base,
+		Quote: quote,
+		Book:  c.book(dexAddr, mktID),
+	}
+	encPayload, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("SyncBook: Failed to marshal payload: %+v, err: %v", payload, err)
+	}
 	c.bookFeed.c <- &core.BookUpdate{
 		Action:   core.FreshBookAction,
 		Host:     dexAddr,
 		MarketID: mktID,
-		Payload: &core.MarketOrderBook{
-			Base:  base,
-			Quote: quote,
-			Book:  c.book(dexAddr, mktID),
-		},
+		Payload:  encPayload,
 	}
 
 	return c.bookFeed, nil
@@ -1128,15 +1149,20 @@ func (c *TCore) sendCandles(durStr string) {
 		iStartTime = iStartTime.Add(dur)
 	}
 
+	payload := core.CandlesPayload{
+		Dur:          durStr,
+		DurMilliSecs: uint64(dur.Milliseconds()),
+		Candles:      candles,
+	}
+	encPayload, err := json.Marshal(payload)
+	if err != nil {
+		panic(fmt.Errorf("SyncBook: Failed to marshal payload: %+v, err: %v", payload, err))
+	}
 	c.bookFeed.c <- &core.BookUpdate{
 		Action:   core.FreshCandlesAction,
 		Host:     dexAddr,
 		MarketID: mktID,
-		Payload: &core.CandlesPayload{
-			Dur:          durStr,
-			DurMilliSecs: uint64(dur.Milliseconds()),
-			Candles:      candles,
-		},
+		Payload:  encPayload,
 	}
 }
 
@@ -1805,15 +1831,19 @@ out:
 			c.orderMtx.Lock()
 			// Send limit orders as newly booked.
 			for _, o := range c.epochOrders {
-				miniOrder := o.Payload.(*core.MiniOrder)
+				var miniOrder core.MiniOrder
+				err := json.Unmarshal(o.Payload, &miniOrder)
+				if err != nil {
+					panic(fmt.Errorf("runEpochs: Failed to marshal payload: %+v, err: %v", o.Payload, err))
+				}
 				if miniOrder.Rate > 0 {
 					miniOrder.Epoch = 0
 					o.Action = msgjson.BookOrderRoute
 					c.trySend(o)
 					if miniOrder.Sell {
-						c.sells[miniOrder.Token] = miniOrder
+						c.sells[miniOrder.Token] = &miniOrder
 					} else {
-						c.buys[miniOrder.Token] = miniOrder
+						c.buys[miniOrder.Token] = &miniOrder
 					}
 				}
 			}
