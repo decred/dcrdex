@@ -199,6 +199,7 @@ const (
 	TopicWalletUnlockError       Topic = "TopicWalletUnlockError"
 	TopicWalletCommsWarning      Topic = "TopicWalletCommsWarning"
 	TopicWalletPeersRestored     Topic = "TopicWalletPeersRestored"
+	TopicBondRefunded            Topic = "TopicBondRefunded"
 )
 
 // FeePaymentNote is a notification regarding registration fee payment.

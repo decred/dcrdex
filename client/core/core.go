@@ -1404,7 +1404,6 @@ type Core struct {
 	lockTimeTaker time.Duration
 	lockTimeMaker time.Duration
 
-	locale        map[Topic]*translation
 	localePrinter *message.Printer
 
 	// construction or init sets credentials
@@ -1414,8 +1413,6 @@ type Core struct {
 	credMtx     sync.RWMutex
 	credentials *db.PrimaryCredentials
 
-	loginMtx  sync.Mutex
-	loggedIn  bool
 	bondXPriv *hdkeychain.ExtendedKey // derived from creds.EncSeed on login
 
 	seedGenerationTime uint64
