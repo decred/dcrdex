@@ -516,7 +516,7 @@ func TestAPILogin(t *testing.T) {
 	tCore.notes = []*db.Notification{{
 		TopicID: core.TopicAccountUnlockError,
 	}}
-	ensure(`{"ok":true,"notes":[{"type":"","topic":"AccountUnlockError","subject":"","details":"","severity":0,"stamp":0,"acked":false,"id":""}]}`)
+	ensure(`{"ok":true,"notes":[{"type":"","topic":"TopicAccountUnlockError","subject":"","details":"","severity":0,"stamp":0,"acked":false,"id":""}]}`)
 
 	tCore.notes = nil
 	tCore.notesErr = errors.New("")

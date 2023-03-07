@@ -11,20 +11,20 @@ import (
 )
 
 type Translation struct {
-	Subject  string
-	Template string
+	Subject  string `json:"subject"`
+	Template string `json:"template"`
 	// stale is used to indicate that a translation has changed, is only
 	// partially translated, or just needs review, and should be updated. This
 	// is useful when it's better than falling back to english, but it allows
 	// these translations to be identified programmatically.
-	Stale bool
+	Stale bool `json:"stale"`
 }
 
 const OriginLang = "en-US"
 
 type DocumentedTranslation struct {
 	*Translation
-	Docs string
+	Docs string `json:"docs"`
 }
 
 var (
@@ -38,6 +38,14 @@ type BaseTranslator struct {
 	dict        map[string]*Translation
 	printer     *message.Printer
 	origin      map[string]*DocumentedTranslation
+}
+
+func (t *BaseTranslator) GetDocumentedDict() map[string]*DocumentedTranslation {
+	return t.origin
+}
+
+func (t *BaseTranslator) GetDict(l language.Tag) map[string]*Translation {
+	return t.dicts[l]
 }
 
 func NewPackageTranslator(pkg string, defaultLang language.Tag) *BaseTranslator {

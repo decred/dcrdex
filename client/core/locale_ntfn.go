@@ -8,7 +8,7 @@ import (
 var translator = i18n.NewPackageTranslator("core", language.AmericanEnglish)
 
 // originLocale is the American English translations.
-var originLocale = map[Topic]*i18n.DocumentedTranslation{
+var OriginLocale = map[Topic]*i18n.DocumentedTranslation{
 	TopicAccountRegistered: {
 		Translation: &i18n.Translation{
 			Subject:  "Account registered",
@@ -503,7 +503,7 @@ var originLocale = map[Topic]*i18n.DocumentedTranslation{
 	},
 }
 
-var ptBR = map[Topic]*i18n.Translation{
+var PTBR = map[Topic]*i18n.Translation{
 	// [host]
 	TopicAccountRegistered: {
 		Subject:  "Conta Registrada",
@@ -2095,10 +2095,10 @@ func registerLocale(lang language.Tag, dict map[Topic]*i18n.Translation) {
 }
 
 func init() {
-	for topic, tln := range originLocale {
+	for topic, tln := range OriginLocale {
 		translator.RegisterNotifications(string(topic), tln)
 	}
-	registerLocale(language.BrazilianPortuguese, ptBR)
+	registerLocale(language.BrazilianPortuguese, PTBR)
 	registerLocale(language.SimplifiedChinese, zhCN)
 	registerLocale(language.Polish, plPL)
 	registerLocale(language.German, deDE)
