@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>dcrdex Translator</title>
+    <meta charset="utf-8" />
+    <script src="/static/diff_match_patch.js" type="text/javascript"></script>
+
+    <style>
+    nav ul {
+      display: flex;
+      list-style-type: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    nav li {
+      flex: 1;
+      text-align: center;
+    }
+
+    nav a {
+      text-decoration: none;
+      color: #000;
+      padding: 10px;
+      display: block;
+    }
+
+    nav a:hover {
+      background-color: #ddd;
+    }
+
+    .posRelative {
+      position: relative;
+    }
+
+    .hidden {
+      display: hidden;
+    }
+
+    #error {
+      color: red;
+      padding: 2em;
+    }
+      .posRelative {
+        position: relative;
+      }
+      .hidden {
+        display: hidden;
+      }
+      #error {
+        color: red;
+        padding: 2em;
+      }
+
+      #translation_ui {
+        display: none;
+        grid-template-columns: 2fr 4fr;
+      }
+
+      .string_list {
+        border: 1px solid #ccc;
+        margin: 10px;
+        padding-right: 0.5em;
+        padding-top: 1em;
+        overflow-y: auto;
+        height: calc(100vh - 75px);
+        width: 20em;
+      }
+
+      .string_list li {
+        cursor: pointer;
+        user-select: none;
+        margin-bottom: 1em;
+      }
+
+      .string_list li:hover {
+        cursor: pointer;
+        color: blue;
+      }
+
+      .string_list li span {
+        display: block;
+        color: #888;
+        font-size: 80%;
+        padding-top: 2px;
+      }
+
+      .string_list li.deleted.selected,
+      .string_list li.selected {
+        color: #ff8051;
+      }
+
+      .string_list li.deleted {
+        color: #888;
+      }
+
+      #key_str {
+        color: #888;
+        font-size: 80%;
+        padding-top: 0.4rem;
+      }
+
+      #original_str,
+      #prev_original_str {
+        margin: 10px 0px;
+        border: 1px solid #ccc;
+        padding: 1em 1em 2em 1em;
+      }
+
+      #prev_original_str_label {
+        display: block;
+        position: absolute;
+        font-size: 80%;
+        color: #888;
+        bottom: 0.5em;
+        left: 0.7em;
+      }
+
+      #original_str.inactive,
+      #prev_original_str.inactive {
+        background-color: lightgrey;
+        color: grey;
+      }
+
+      #original_str_label {
+        display: block;
+        position: absolute;
+        font-size: 80%;
+        color: #888;
+        margin-top: 10px;
+        bottom: 0.5em;
+        left: 0.7em;
+      }
+
+      #buttons {
+        margin: 10px 0px;
+      }
+
+      #translated_str {
+        min-width: calc(100% - 2em);
+        min-height: 10rem;
+        font-size: 150%;
+        padding: 1em 1em 2em 1em;
+      }
+
+      #translated_str:focus {
+        outline: none;
+      }
+
+      #translated {
+        position: relative;
+      }
+
+      #translated::after {
+        display: block;
+        position: absolute;
+        font-size: 80%;
+        color: #888;
+        content: "Translated String";
+        bottom: 4pt;
+        left: 0.7em;
+        right: 1rem;
+        background-color: white;
+        padding: 0.5rem 0;
+      }
+
+      #translated.disabled::after {
+        background-color: transparent;
+      }
+
+      #toggle_diff_bt {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+      }
+    </style>
+
+    <script>
+      // Global state of the app.
+      let state = {
+        original: {},
+        translated: {},
+        selectedKey: "",
+        selectedFilterVal: "",
+        prevOriginal: {},
+        changedEntries: [],
+        deletedEntries: [],
+        showDiff: true
+      };
+
+      const dmp = new diff_match_patch();
+
+      function updateState(delta) {
+        state = { ...state, ...delta };
+      }
+
+      function elID(id) {
+        return document.getElementById(id);
+      }
+
+      function newEl(parent, tagname) {
+        const el = document.createElement(tagname);
+        parent.appendChild(el);
+        return el;
+      }
+
+      function exportTranslatedFile() {
+        saveTranslation();
+        const translated = state.translated;
+        let data = Object.keys(translated)
+          .sort()
+          .map((k) => `  "${k}": ${JSON.stringify(translated[k])}`)
+          .join(",\n");
+        let json = `{\n${data}\n}\n`;
+        const file = new Blob([json], { type: "application/octet-stream" });
+        const url = URL.createObjectURL(file);
+
+        const downBtn = elID("export_translation_btn");
+        downBtn.href = url;
+        downBtn.download = "custom-translation.json";
+      }
+
+      function isEntryDeleted(key) {
+        return state.deletedEntries.indexOf(key) !== -1;
+      }
+
+      function saveTranslation() {
+        if (state.selectedKey) {
+          const isDeleted = isEntryDeleted(state.selectedKey);
+          // Save last translation.
+          if (!isDeleted) {
+            const newValue = elID("translated_str").value;
+            state.translated[state.selectedKey] = newValue;
+
+            // update untranslated list if necessary
+            const el = elID(`li-untranslated-${state.selectedKey}`);
+            if (newValue !== "" && el) {
+              el.remove();
+            } else if (newValue === "" && !el) {
+              // The user cleared a previously translated translation.
+              // We clear the untranslated list DOM and rerender
+              // it in the next refreshGUI.
+              const stringList = elID("string_list_untranslated");
+              stringList.innerHTML = "";
+            }
+          }
+        }
+      }
+
+      function getFilterVal() {
+        return document.querySelector('input[name="filter"]:checked').value;
+      }
+
+      function setFilterVal(value) {
+        if (value !== "") {
+          document.querySelector(`input[value="${value}"]`).checked = true;
+        }
+      }
+
+      function getSelectedEl() {
+        return document.querySelector('li[class*="selected"]');
+      }
+
+      function changeToKey(newkey, save) {
+        if (save) {
+          saveTranslation();
+        }
+        let v = state.translated[newkey] ? state.translated[newkey] : "";
+        const filterVal = getFilterVal();
+        elID("translated_str").value = v;
+        const selectedEl = getSelectedEl();
+        if (selectedEl) {
+          selectedEl.classList.remove("selected");
+        }
+        elID(`li-${filterVal}-${newkey}`).classList.add("selected");
+        updateState({
+          selectedKey: newkey,
+          selectedFilterVal: filterVal
+        });
+        refreshUI();
+        scrollSelectedEntryIntoViewIfNeeded();
+      }
+
+      function onFilterChange() {
+        dotry(refreshUI);
+      }
+
+      function scrollSelectedEntryIntoViewIfNeeded() {
+        const filterVal = getFilterVal();
+        if (!filterVal) {
+          return;
+        }
+        const selectedEl = getSelectedEl();
+        if (!selectedEl) {
+          return;
+        }
+        const stringList = elID(`string_list_${filterVal}`);
+        const { top, bottom, height } = selectedEl.getBoundingClientRect();
+        const stringListRect = stringList.getBoundingClientRect();
+
+        const isScrolledIntoView =
+          top <= stringListRect.top
+            ? stringListRect.top - top <= height
+            : bottom - stringListRect.bottom <= height;
+
+        if (!isScrolledIntoView)
+          selectedEl.scrollIntoView({
+            block: "end",
+            inline: "nearest"
+          });
+      }
+
+      function switchList(filterVal) {
+        const stringListContrainers = elID("string_list_contrainer").children;
+        for (i = 0; i < stringListContrainers.length; i++) {
+          const listEl = stringListContrainers[i];
+          listEl.hidden = !listEl.id.includes(filterVal);
+        }
+      }
+
+      function renderList(filterVal) {
+        const stringsEl = elID(`string_list_${filterVal}`);
+        if (stringsEl.innerHTML === "") {
+          if (filterVal === "deleted") {
+            Object.keys(state.deletedEntries).map((k) => {
+              const li = newEl(stringsEl, "li");
+              li.innerText = state.deletedEntries[k];
+              li.classList.add("deleted");
+              li.id = `li-${filterVal}-${state.deletedEntries[k]}`;
+              li.dataset.key = `${state.deletedEntries[k]}`;
+              newEl(li, "span").innerText = "";
+
+              if (state.deletedEntries[k] === state.selectedKey) {
+                li.classList.add("selected");
+                selectedEntry = k;
+              }
+
+              li.onclick = () => changeToKey(state.deletedEntries[k]);
+            });
+          } else {
+            Object.keys(state.original).map((k) => {
+              if (filterVal === "untranslated" && state.translated[k]) {
+                return;
+              }
+              if (
+                filterVal === "changed" &&
+                state.changedEntries.indexOf(k) === -1
+              ) {
+                return;
+              }
+              const li = newEl(stringsEl, "li");
+              li.innerText = state.original[k];
+              li.id = `li-${filterVal}-${k}`;
+              li.dataset.key = k;
+              newEl(li, "span").innerText = k;
+
+              if (k === state.selectedKey) {
+                li.classList.add("selected");
+              }
+
+              li.onclick = () => changeToKey(k);
+            });
+          }
+        }
+        switchList(filterVal);
+      }
+
+      function refreshUI() {
+        const filterVal = getFilterVal();
+        renderList(filterVal);
+
+        const isDeleted = isEntryDeleted(state.selectedKey);
+
+        if (isDeleted || state.selectedKey === "") {
+          elID("original_str").classList.add("inactive");
+          elID("translated").classList.add("disabled");
+        } else {
+          elID("original_str").classList.remove("inactive");
+          elID("translated").classList.remove("disabled");
+        }
+
+        const origStr = state.original[state.selectedKey]
+          ? state.original[state.selectedKey]
+          : "";
+
+        const prevStr = state.prevOriginal[state.selectedKey]
+          ? state.prevOriginal[state.selectedKey]
+          : "";
+
+        if (state.showDiff && origStr !== "" && prevStr !== "") {
+          var d = dmp.diff_main(prevStr, origStr);
+          dmp.diff_cleanupEfficiency(d);
+          elID("original_str").innerHTML = dmp.diff_prettyHtml(d);
+        } else {
+          elID("original_str").innerHTML = origStr;
+        }
+        elID("prev_original_str").innerText = prevStr;
+        if (prevStr === "" || origStr === prevStr) {
+          elID("toggle_diff_bt").disabled = true;
+          elID("prev_original_str").classList.add("inactive");
+        } else {
+          elID("prev_original_str").classList.remove("inactive");
+          elID("toggle_diff_bt").disabled = false;
+        }
+        elID("key_str").innerText = state.selectedKey;
+
+        elID("prev_bt").innerText = isDeleted ? "previous" : "save & previous";
+        elID("prev_bt").disabled =
+          getPreviousEl() === null || state.selectedKey === "";
+        elID("copy_bt").disabled = isDeleted || origStr === "";
+        elID("next_bt").innerText = isDeleted ? "next" : "save & next";
+        elID("next_bt").disabled = state.selectedKey === "";
+        elID("translated_str").disabled = isDeleted || state.selectedKey === "";
+        elID("toggle_diff_bt").innerText = state.showDiff
+          ? "hide diff"
+          : "show diff";
+        elID("toggle_diff_bt").disabled = isDeleted || state.selectedKey === "";
+      }
+
+      function jumpToSelectedList() {
+        let filterVal = getFilterVal();
+        if (
+          state.selectedFilterVal !== undefined &&
+          filterVal !== state.selectedFilterVal
+        ) {
+          filterVal = state.selectedFilterVal;
+          setFilterVal(filterVal);
+        }
+      }
+
+      function getPreviousEl() {
+        const selectedEl = getSelectedEl();
+        if (!selectedEl) {
+          return;
+        }
+
+        return selectedEl.previousElementSibling;
+      }
+
+      function previousKey() {
+        jumpToSelectedList();
+
+        const previousEl = getPreviousEl();
+
+        if (previousEl) {
+          changeToKey(previousEl.dataset.key, true);
+        }
+      }
+
+      function nextKey() {
+        jumpToSelectedList();
+
+        const selectedEl = getSelectedEl();
+        if (!selectedEl) {
+          return;
+        }
+
+        if (selectedEl.nextElementSibling) {
+          changeToKey(selectedEl.nextElementSibling.dataset.key, true);
+        } else {
+          changeToKey(selectedEl.parentElement.firstChild.dataset.key, true);
+        }
+      }
+
+      function textAreaKeyDown(event) {
+        if (event.keyCode === 9) {
+          event.preventDefault();
+          let v = this.value;
+          let s = this.selectionStart;
+          let e = this.selectionEnd;
+          this.value = v.substring(0, s) + "    " + v.substring(e);
+          this.selectionStart = this.selectionEnd = s + 1;
+          return false;
+        }
+        if (event.keyCode === 13 && event.ctrlKey) {
+          event.preventDefault();
+          nextKey();
+          return false;
+        }
+        if (event.key === "g" && event.ctrlKey) {
+          event.preventDefault();
+          copyOriginal();
+          return false;
+        }
+      }
+
+      function copyOriginal() {
+        let originalStr = state.original[state.selectedKey];
+        elID("translated_str").value = originalStr;
+      }
+
+      async function dotry(f, ...args) {
+        try {
+          await f(...args);
+        } catch (error) {
+          const el = elID("error");
+          el.innerText = "Caught exception: " + String(error);
+          el.hidden = false;
+          throw error;
+        }
+      }
+
+      function fetchData(id) {
+        return new Promise((ok) => {
+          fetch('/data?lang='+id)
+          .then(response => response.json())
+          .then(data => {
+            ok(data)
+          })
+        });
+      }
+
+      function readVersion(obj, label, filename) {
+        if (obj?.meta?.version) {
+          elID(label).innerText = `String in ${obj.meta.version}`;
+          return true;
+        } else {
+          const el = elID("error");
+          el.innerText += `Warning: could not find version meta data in ${filename}.\n`;
+          el.hidden = false;
+        }
+        return false;
+      }
+
+      function toggleDiff() {
+        updateState({
+          showDiff: !state.showDiff
+        });
+        refreshUI();
+      }
+
+      async function startTranslation() {
+        const prevOrig = await fetchData("enus");
+        console.log(prevOrig)
+        const orig = await fetchData("enus");
+        const translated = await fetchData("ptbr");
+
+        if (
+          readVersion(prevOrig, "prev_original_str_label", "prevoriginal_file")
+        ) {
+          delete prevOrig.meta;
+        }
+        if (readVersion(orig, "original_str_label", "original_file")) {
+          delete orig.meta;
+        }
+
+        // Figure out all changed entries between prevOrig and orig.
+        const changedEntries = [];
+        const deletedEntries = [];
+        Object.keys(prevOrig).forEach((k) => {
+          if (orig[k] === undefined && translated[k] !== undefined)
+            deletedEntries.push(k);
+          else if (orig[k] !== prevOrig[k]) changedEntries.push(k);
+        });
+
+        updateState({
+          original: orig,
+          translated: translated,
+          prevOriginal: prevOrig,
+          changedEntries,
+          deletedEntries
+        });
+
+        refreshUI();
+
+        elID("load_files").hidden = true;
+        elID("translation_ui").style.display = "grid";
+      }
+    </script>
+  </head>
+
+  <body>
+    <nav>
+      <ul>
+        <li><a href="/translate-js">Translation JS files</a></li>
+        <li><a href="/translate-go">Translation Go Files</a></li>
+        <li><a href="/translate-ntfn">Translation Notifications</a></li>
+      </ul>
+    </nav>
+
+    <div id="error" hidden="true"></div>
+
+    <div id="load_files">
+      <div>
+        Load the "previous_original.json" file:
+        <input id="prevoriginal_file" type="file" />
+      </div>
+      <div>
+        Load the "original.json" file: <input id="original_file" type="file" />
+      </div>
+      <div>
+        Load the "[language].json" file: <input id="lang_file" type="file" />
+      </div>
+      <div><button onclick="dotry(startTranslation)">Start</button></div>
+    </div>
+
+    <div id="translation_ui">
+      <div>
+        <div>
+          <input
+            type="radio"
+            name="filter"
+            value="all"
+            checked="checked"
+            onclick="onFilterChange()"
+          />All
+          <input
+            type="radio"
+            name="filter"
+            value="untranslated"
+            onclick="onFilterChange()"
+          />Untranslated
+          <input
+            type="radio"
+            name="filter"
+            value="changed"
+            checked="checked"
+            onclick="onFilterChange()"
+          />Changed
+          <input
+            type="radio"
+            name="filter"
+            value="deleted"
+            onclick="onFilterChange()"
+          />Deleted
+        </div>
+
+        <div id="string_list_contrainer">
+          <ul id="string_list_all" class="string_list"></ul>
+          <ul id="string_list_untranslated" class="string_list"></ul>
+          <ul id="string_list_changed" class="string_list"></ul>
+          <ul id="string_list_deleted" class="string_list"></ul>
+        </div>
+      </div>
+
+      <div>
+        <div id="key_str"></div>
+        <div class="posRelative">
+          <div id="prev_original_str"></div>
+          <label id="prev_original_str_label">Previous Original String</label>
+        </div>
+        <div class="posRelative">
+          <div id="original_str"></div>
+          <label htmlFor="original_str" id="original_str_label"
+            >Original String</label
+          >
+          <button id="toggle_diff_bt" onclick="toggleDiff()">Hide diff</button>
+        </div>
+
+        <div id="buttons">
+          <button onclick="previousKey()" title="Previous String" id="prev_bt">
+            save & previous
+          </button>
+          <button
+            onclick="copyOriginal()"
+            title="Copy original (ctrl+g)"
+            id="copy_bt"
+          >
+            copy original
+          </button>
+          <button
+            onclick="nextKey()"
+            title="Next String (ctrl+enter)"
+            id="next_bt"
+          >
+            save & next
+          </button>
+          <a
+            id="export_translation_btn"
+            onclick="exportTranslatedFile()"
+            href="#"
+            >export translation</a
+          >
+        </div>
+
+        <div style="font-size: 80%; color: #888">
+          ctrl+&lt;enter&gt;: save string & goto next<br />
+          ctrl+g: copy original string
+        </div>
+
+        <div id="translated">
+          <textarea
+            dir="auto"
+            rows="10"
+            id="translated_str"
+            onkeydown="textAreaKeyDown.apply(this, [event])"
+          ></textarea>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
