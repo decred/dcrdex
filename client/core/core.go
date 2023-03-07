@@ -1674,7 +1674,7 @@ func (c *Core) Run(ctx context.Context) {
 	defer c.walletMtx.Unlock()
 	for assetID, wallet := range c.wallets {
 		delete(c.wallets, assetID)
-		if !wallet.connected() {
+		if !wallet.connected() || wallet.parent != nil {
 			continue
 		}
 		if !c.cfg.NoAutoWalletLock {
