@@ -240,11 +240,11 @@ out:
 			// NOTE: Not effectual for providers. waitForMinedRPC
 			// above handles waiting for mined blocks that we assume
 			// have our transactions.
-			txsa, err := ethClient.pendingTransactions()
+			txsa, err := ethClient.(mempoolFetcher).pendingTransactions()
 			if err != nil {
 				return fmt.Errorf("initiator pendingTransactions error: %v", err)
 			}
-			txsb, err := participantEthClient.pendingTransactions()
+			txsb, err := participantEthClient.(mempoolFetcher).pendingTransactions()
 			if err != nil {
 				return fmt.Errorf("participant pendingTransactions error: %v", err)
 			}
@@ -1085,7 +1085,11 @@ func testTransactionReceipt(t *testing.T) {
 }
 
 func testPendingTransactions(t *testing.T) {
-	txs, err := ethClient.pendingTransactions()
+	mf, is := ethClient.(mempoolFetcher)
+	if !is {
+		return
+	}
+	txs, err := mf.pendingTransactions()
 	if err != nil {
 		t.Fatal(err)
 	}
