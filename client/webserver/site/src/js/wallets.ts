@@ -1299,13 +1299,12 @@ function assetIsConfigurable (assetID: number) {
 }
 
 const FourSigFigs = new Intl.NumberFormat((navigator.languages as string[]), {
-  minimumSignificantDigits: 4,
   maximumSignificantDigits: 4
 })
 
 const intFormatter = new Intl.NumberFormat((navigator.languages as string[]))
 
 function fourSigFigs (v: number): string {
-  if (v < 100) return FourSigFigs.format(v)
+  if (v < 1000) return FourSigFigs.format(v)
   return intFormatter.format(Math.round(v))
 }
