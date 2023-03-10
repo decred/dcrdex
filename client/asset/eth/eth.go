@@ -3820,8 +3820,8 @@ func (w *assetWallet) balanceWithTxPool() (*Balance, error) {
 		out, in := w.sumPendingTxs()
 		return &Balance{
 			Current:    confirmed,
-			PendingOut: dexeth.GweiToWei(out),
-			PendingIn:  dexeth.GweiToWei(in),
+			PendingOut: w.evmify(out),
+			PendingIn:  w.evmify(in),
 		}, nil
 	}
 
