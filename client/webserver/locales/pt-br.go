@@ -117,7 +117,6 @@ var PtBr = map[string]string{
 	"them":                        "Eles",
 	"Redemption":                  "Rendenção",
 	"Refund":                      "Reembolso",
-	"Funding Coins":               "Moedas de Financiamento",
 	"Exchanges":                   "Casa de câmbios", //revisar
 	"apply":                       "aplicar",
 	"Assets":                      "Ativos",

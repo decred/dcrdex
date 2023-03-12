@@ -76,7 +76,9 @@ export default class OrderPage extends BasePage {
         this.showForm(page.cancelForm)
       })
     }
-
+    Doc.bind(page.offerAmt, 'click', () => {
+      this.showFundingCoinsList()
+    })
     Doc.bind(page.accelerateBttn, 'click', () => {
       this.showAccelerateForm()
     })
@@ -392,6 +394,17 @@ export default class OrderPage extends BasePage {
     page.status.textContent = intl.prep(intl.ID_CANCELING)
     Doc.hide(page.forms)
     order.cancelling = true
+  }
+
+  /*
+   * showFundingCoinsList shows funding coins list instead of amount being offered.
+   */
+  showFundingCoinsList () {
+    if (!this.order) return
+    const page = this.page
+    Doc.hide(page.offerAmt)
+    page.offering.classList.remove('hoverbg', 'pointer')
+    Doc.show(page.fundingCoinsList)
   }
 
   /*

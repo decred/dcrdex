@@ -8,7 +8,7 @@ div.order-datum {
   font-size: 15px;
   margin: 5px 10px 5px 0;
 
-  div:first-child {
+  .order-datum-hdr {
     padding: 2px 15px;
     border-bottom: 1px solid #777a;
     font-family: $demi-sans;

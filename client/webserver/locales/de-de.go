@@ -118,7 +118,6 @@ var DeDE = map[string]string{
 	"them":                      "Gegenseite",
 	"Redemption":                "Rücknahme",
 	"Refund":                    "Erstattung",
-	"Funding Coins":             "Funding-Coins",
 	"Exchanges":                 "Exchanges",
 	"apply":                     "Anwenden",
 	"Assets":                    "Assets",

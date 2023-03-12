@@ -118,7 +118,6 @@ var ZhCN = map[string]string{
 	"them":                      "他们",
 	"Redemption":                "赎回",
 	"Refund":                    "退款",
-	"Funding Coins":             "资金硬币",
 	"Exchanges":                 "交易",
 	"apply":                     "申请",
 	"Assets":                    "资产",

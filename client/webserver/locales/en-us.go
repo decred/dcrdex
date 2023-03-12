@@ -134,7 +134,6 @@ var EnUS = map[string]string{
 	"them":                      "them",
 	"Redemption":                "Redemption",
 	"Refund":                    "Refund",
-	"Funding Coins":             "Funding Coins",
 	"Exchanges":                 "Exchanges",
 	"apply":                     "apply",
 	"Assets":                    "Assets",

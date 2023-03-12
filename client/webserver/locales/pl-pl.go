@@ -116,7 +116,6 @@ var PlPL = map[string]string{
 	"them":                        "oni",
 	"Redemption":                  "Wykupienie środków",
 	"Refund":                      "Zwrot środków",
-	"Funding Coins":               "Środki fundujące zlecenie",
 	"Exchanges":                   "Giełdy",
 	"apply":                       "zastosuj",
 	"Assets":                      "Aktywa",

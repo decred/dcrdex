@@ -15,22 +15,22 @@
     {{- /* DATA CARDS */ -}}
     <div class="d-flex flex-wrap">
       <div class="order-datum">
-        <div>[[[Exchange]]]</div>
+        <div class="order-datum-hdr">[[[Exchange]]]</div>
         <div>{{$ord.Host}}</div>
       </div>
       <div class="order-datum">
-        <div>[[[Market]]]</div>
+        <div class="order-datum-hdr">[[[Market]]]</div>
         <a href="/markets?host={{$ord.Host}}&base={{$ord.BaseID}}&quote={{$ord.QuoteID}}" class="plainlink hoverbg">
           {{template "microIcon" $ord.BaseSymbol}} {{template "microIcon" $ord.QuoteSymbol}}
           <span id="mktBaseSymbol">{{toUpper $ord.BaseSymbol}}</span>-<span id="mktQuoteSymbol">{{toUpper $ord.QuoteSymbol}}</span>
         </a>
       </div>
       <div class="order-datum">
-        <div>[[[Type]]]</div>
+        <div class="order-datum-hdr">[[[Type]]]</div>
         <div>{{ $ord.TypeString }}</div>
       </div>
       <div class="order-datum">
-        <div>[[[Status]]]</div>
+        <div class="order-datum-hdr">[[[Status]]]</div>
         <div>
           <span id="status">{{$ord.StatusString}}</span>
           {{if $ord.Cancelable}}
@@ -39,11 +39,20 @@
         </div>
       </div>
       <div class="order-datum">
-        <div>[[[Offering]]]</div>
-        <div>{{$ord.OfferString}} {{$ord.FromSymbol}} {{template "microIcon" $ord.FromSymbol}}</div>
+        <div class="order-datum-hdr">[[[Offering]]]</div>
+        <div id="offering" class="pointer hoverbg">
+          <div id="offerAmt">
+            {{$ord.OfferString}} {{$ord.FromSymbol}} {{template "microIcon" $ord.FromSymbol}}
+          </div>
+          <div id="fundingCoinsList" class="fs14 text-start d-hide">
+            {{range $ord.FundingCoins}}
+              <a target="_blank" class="plainlink mono" data-explorer-id="{{$ord.FromID}}" data-explorer-coin="{{.StringID}}">{{.StringID}}</a><br>
+            {{end}}
+          </div>
+        </div>
       </div>
       <div class="order-datum">
-        <div>[[[Asking]]]</div>
+        <div class="order-datum-hdr">[[[Asking]]]</div>
         <div>
           {{if (not $ord.IsMarketOrder)}}
             {{$ord.AskString}}
@@ -52,11 +61,11 @@
         </div>
       </div>
       <div class="order-datum">
-        <div>[[[Rate]]]</div>
+        <div class="order-datum-hdr">[[[Rate]]]</div>
         <div>{{$ord.RateString}}</div>
       </div>
       <div class="order-datum">
-        <div>[[[Filled]]]</div>
+        <div class="order-datum-hdr">[[[Filled]]]</div>
         <div>
           {{$ord.FilledPercent}}%
           ({{$ord.FilledFrom}} {{template "microIcon" $ord.FromSymbol}}
@@ -65,7 +74,7 @@
         </div>
       </div>
       <div class="order-datum">
-        <div>[[[Settled]]]</div>
+        <div class="order-datum-hdr">[[[Settled]]]</div>
         <div>
           {{$ord.SettledPercent}}%
           ({{$ord.SettledFrom}} {{template "microIcon" $ord.FromSymbol}}
@@ -74,14 +83,14 @@
         </div>
       </div>
       <div class="order-datum">
-        <div>[[[Fees]]] <span class="ico-info fs12" data-tooltip="[[[order_fees_tooltip]]]"></span></div>
+        <div class="order-datum-hdr">[[[Fees]]] <span class="ico-info fs12" data-tooltip="[[[order_fees_tooltip]]]"></span></div>
         <div>
           {{$ord.SwapFeesString}} {{template "microIcon" $ord.FromFeeSymbol}},
           {{$ord.RedemptionFeesString}} {{template "microIcon" $ord.ToFeeSymbol}}
         </div>
       </div>
       <div class="order-datum">
-        <div>[[[Age]]]</div>
+        <div class="order-datum-hdr">[[[Age]]]</div>
         <div data-stamp="{{$ord.SubmitTime}}"></div>
       </div>
     </div> {{- /* END DATA CARDS */ -}}
@@ -196,16 +205,6 @@
           </div>
         </div>
       </div>    
-    </div>
-
-    {{- /* FUNDING COINS */ -}}
-    <div class="order-datum d-inline-block my-3">
-      <div class="text-start">[[[Funding Coins]]]</div>
-      <div class="fs14 text-start">
-        {{range $ord.FundingCoins}}
-          <a target="_blank" class="plainlink mono" data-explorer-id="{{$ord.FromID}}" data-explorer-coin="{{.StringID}}">{{.StringID}}</a><br>
-        {{end}}
-      </div>
     </div>
 
     <div id="accelerationCoins" class="order-datum d-inline-block my-3 {{if not $ord.AccelerationCoins}}d-hide{{end}}">

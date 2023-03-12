@@ -124,7 +124,6 @@ var Ar = map[string]string{
 	"them":                      "هم",
 	"Redemption":                "اِستِردَاد",
 	"Refund":                    "المبالغ المردودة",
-	"Funding Coins":             "عملات التمويل",
 	"Exchanges":                 "منصات التداول",
 	"apply":                     "طبق",
 	"Assets":                    "الأصول",
