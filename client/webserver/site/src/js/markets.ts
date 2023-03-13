@@ -2770,7 +2770,7 @@ class BalanceWidget {
       tmpl.newWalletRow, tmpl.expired, tmpl.unsupported, tmpl.connect, tmpl.spinner,
       tmpl.walletState, tmpl.balanceRows, tmpl.walletAddr
     )
-    tmpl.logo.src = Doc.logoPath(cfg.symbol)
+    tmpl.logo.src ||= Doc.logoPath(cfg.symbol)
     tmpl.addWalletSymbol.textContent = cfg.symbol.toUpperCase()
     Doc.empty(tmpl.symbol)
     tmpl.symbol.appendChild(Doc.symbolize(cfg.symbol))
