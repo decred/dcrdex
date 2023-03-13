@@ -12,12 +12,12 @@ export CGO_ENABLED=0
 LDFLAGS="-s -w -X main.Version=${VER}${META:++${META}}"
 
 # Build the webpack bundle prior to building the webserver package, which embeds
-# the files.
-pushd client/webserver/site
-go generate # just check, no write
-npm ci
-npm run build
-popd
+# the files. This is checked in for the release branches.
+# pushd client/webserver/site
+# go generate # just check, no write
+# npm ci
+# npm run build
+# popd
 
 rm -rf bin
 
