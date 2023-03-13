@@ -569,21 +569,19 @@ export default class MarketsPage extends BasePage {
     // Get an up-to-date Market.
     const xc = app().exchanges[selected.dex.host]
     const mkt = xc.markets[selected.cfg.name]
+    if (!mkt.spot) return
+
     for (const s of this.stats) {
-      if (mkt.spot) {
-        const bconv = xc.assets[mkt.baseid].unitInfo.conventional.conversionFactor
-        s.tmpl.volume.textContent = fourSigFigs(mkt.spot.vol24 / bconv)
-        setPriceAndChange(s.tmpl, xc, mkt)
-      }
+      const bconv = xc.assets[mkt.baseid].unitInfo.conventional.conversionFactor
+      s.tmpl.volume.textContent = fourSigFigs(mkt.spot.vol24 / bconv)
+      setPriceAndChange(s.tmpl, xc, mkt)
     }
 
-    if (mkt.spot) {
-      this.page.obPrice.textContent = Doc.formatFullPrecision(mkt.spot.rate / this.market.rateConversionFactor)
-      this.page.obPrice.classList.remove('sellcolor', 'buycolor')
-      this.page.obPrice.classList.add(mkt.spot.change24 >= 0 ? 'buycolor' : 'sellcolor')
-      Doc.setVis(mkt.spot.change24 >= 0, this.page.obUp)
-      Doc.setVis(mkt.spot.change24 < 0, this.page.obDown)
-    }
+    this.page.obPrice.textContent = Doc.formatFullPrecision(mkt.spot.rate / this.market.rateConversionFactor)
+    this.page.obPrice.classList.remove('sellcolor', 'buycolor')
+    this.page.obPrice.classList.add(mkt.spot.change24 >= 0 ? 'buycolor' : 'sellcolor')
+    Doc.setVis(mkt.spot.change24 >= 0, this.page.obUp)
+    Doc.setVis(mkt.spot.change24 < 0, this.page.obDown)
   }
 
   /* setMarketDetails updates the currency names on the stats displays. */
