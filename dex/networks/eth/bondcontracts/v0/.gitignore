@@ -1,0 +1,11 @@
+# dependencies
+/node_modules
+/typechain-types
+
+# build artifacts
+/artifacts
+/cache
+
+# local network
+/.hardhat
+
