@@ -973,21 +973,21 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 	if _, ok := wallet.Wallet.(asset.Bonder); !ok { // will fail in MakeBondTx, but assert early
 		return nil, fmt.Errorf("wallet %v is not an asset.Bonder", bondAssetSymbol)
 	}
-	_, err = wallet.refreshUnlock()
-	if err != nil {
-		// TODO: Unlock with form.AppPass?
-		return nil, fmt.Errorf("bond asset wallet %v is locked", unbip(bondAssetID))
-	}
-	if !wallet.synchronized() { // otherwise we might double spend if the wallet keys were used elsewhere
-		return nil, fmt.Errorf("wallet %v is not synchronized", unbip(bondAssetID))
-	}
 
-	// Check the app password.
 	crypter, err := c.encryptionKey(form.AppPass)
 	if err != nil {
 		return nil, codedError(passwordErr, err)
 	}
 	defer crypter.Close()
+
+	err = c.unlockWallet(crypter, wallet)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unlock bond asset wallet %v", unbip(bondAssetID))
+	}
+	if !wallet.synchronized() { // otherwise we might double spend if the wallet keys were used elsewhere
+		return nil, fmt.Errorf("wallet %v is not synchronized", unbip(bondAssetID))
+	}
+
 	if form.Addr == "" {
 		return nil, newError(emptyHostErr, "no dex address specified")
 	}
