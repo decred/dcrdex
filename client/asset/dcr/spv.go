@@ -587,23 +587,32 @@ func (w *spvWallet) GetBlockHeader(ctx context.Context, blockHash *chainhash.Has
 		return nil, err
 	}
 
-	_, tipHeight := w.MainChainTip(ctx)
-	if tipHeight < int32(hdr.Height) {
-		return nil, errors.New("sumpin's wrong with our tip")
-	}
-
+	// Get next block hash unless there are none.
 	var nextHash *chainhash.Hash
-	if tipHeight > int32(hdr.Height) {
-		nextHash, err = w.GetBlockHash(ctx, int64(hdr.Height)+1)
-		if err != nil {
-			return nil, fmt.Errorf("error getting next hash for block %q: %w", blockHash, err)
+	confirmations := int64(-1)
+	mainChainHasBlock, _, err := w.BlockInMainChain(ctx, blockHash)
+	if err != nil {
+		return nil, fmt.Errorf("error checking if block is in mainchain: %w", err)
+	}
+	if mainChainHasBlock {
+		_, tipHeight := w.MainChainTip(ctx)
+		if int32(hdr.Height) < tipHeight {
+			nextHash, err = w.GetBlockHash(ctx, int64(hdr.Height)+1)
+			if err != nil {
+				return nil, fmt.Errorf("error getting next hash for block %q: %w", blockHash, err)
+			}
+		}
+		if int32(hdr.Height) <= tipHeight {
+			confirmations = int64(tipHeight) - int64(hdr.Height) + 1
+		} else { // if tip is less, may be rolling back, so just mock dcrd/dcrwallet
+			confirmations = 0
 		}
 	}
 
 	return &BlockHeader{
 		BlockHeader:   hdr,
 		MedianTime:    medianTime,
-		Confirmations: int64(uint32(tipHeight)-hdr.Height) + 1,
+		Confirmations: confirmations,
 		NextHash:      nextHash,
 	}, nil
 }
