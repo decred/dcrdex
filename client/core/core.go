@@ -2102,9 +2102,9 @@ func (c *Core) updateBalances(assets assetMap) {
 	for assetID := range assets {
 		w, exists := c.wallet(assetID)
 		if !exists {
-			// This should never be the case, but log an error in case I'm
-			// wrong or something changes.
-			c.log.Errorf("non-existent %d wallet should exist", assetID)
+			// Could happen if we are here when handling "tip change" before Core
+			// managed to initialize its wallets map (or already removed it from it).
+			c.log.Tracef("can't update %q balance, Core isn't tracking this wallet yet/already", unbip(assetID))
 			continue
 		}
 		_, err := c.updateWalletBalance(w)
