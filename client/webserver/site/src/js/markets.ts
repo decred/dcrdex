@@ -747,7 +747,7 @@ export default class MarketsPage extends BasePage {
 
     if (market.dex.tier >= 1) {
       const toggle = () => {
-        Doc.hide(page.registrationStatus)
+        Doc.hide(page.registrationStatus, page.bondRequired)
         this.resolveOrderFormVisibility()
       }
       if (Doc.isHidden(page.orderForm)) {
