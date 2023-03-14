@@ -463,7 +463,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			}
 			bonders[assetID] = bc
 			log.Infof("Bonds accepted using %s: amount %d, confs %d",
-				symbol, assetConf.RegFee, assetConf.RegConfs)
+				symbol, assetConf.BondAmt, assetConf.BondConfs)
 		}
 
 		if assetConf.RegFee > 0 {
