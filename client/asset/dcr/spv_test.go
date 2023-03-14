@@ -518,6 +518,16 @@ func TestGetBlockHeader(t *testing.T) {
 		t.Fatal("wrong next hash")
 	}
 
+	dcrw.mainchainDontHave = true
+	hdr, err = w.GetBlockHeader(tCtx, &blockHash)
+	if err != nil {
+		t.Fatalf("initial success error: %v", err)
+	}
+	if hdr.Confirmations != -1 {
+		t.Fatalf("expected -1 confs for side chain block, got %d", hdr.Confirmations)
+	}
+	dcrw.mainchainDontHave = false
+
 	// BlockHeader error
 	dcrw.blockHeaderErr[blockHash] = tErr
 	if _, err := w.GetBlockHeader(tCtx, &blockHash); err == nil {
@@ -534,8 +544,10 @@ func TestGetBlockHeader(t *testing.T) {
 
 	// MainChainTip error
 	dcrw.tip.height = 3
-	if _, err := w.GetBlockHeader(tCtx, &blockHash); err == nil {
+	if hdr, err := w.GetBlockHeader(tCtx, &blockHash); err != nil {
 		t.Fatalf("invalid tip height not noticed")
+	} else if hdr.Confirmations != 0 {
+		t.Fatalf("confirmations not zero for lower tip height")
 	}
 	dcrw.tip.height = tipHeight
 
