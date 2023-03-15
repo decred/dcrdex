@@ -726,6 +726,10 @@ export class ConfirmRegistrationForm {
     this.pwCache = pwCache
 
     Doc.bind(this.page.goBack, 'click', () => goBack())
+    // bondStrengthField is presently hidden since there is no scaling of user
+    // limits yet, and there needs to be considerable explanation of why
+    // anything other than 1 would be used. Unhide bondStrengthInput to show it
+    // when we are ready. (TODO)
     Doc.bind(this.page.bondStrengthField, 'input', () => {
       const asset = app().assets[this.bondAssetID]
       if (!asset) return
