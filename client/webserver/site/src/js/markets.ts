@@ -3066,15 +3066,17 @@ function sortedMarkets (): ExchangeMarket[] {
 }
 
 const FourSigFigs = new Intl.NumberFormat((navigator.languages as string[]), {
-  minimumSignificantDigits: 4,
   maximumSignificantDigits: 4
 })
 
-const intFormatter = new Intl.NumberFormat((navigator.languages as string[]))
+const OneFractionalDigit = new Intl.NumberFormat((navigator.languages as string[]), {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1
+})
 
-function fourSigFigs (v: number): string {
-  if (v < 100) return FourSigFigs.format(v)
-  return intFormatter.format(Math.round(v))
+function fourSigFigs (v: number) {
+  if (v >= 1000 || Math.round(v) === v) return OneFractionalDigit.format(v)
+  return FourSigFigs.format(v)
 }
 
 function setMarketDetails (tmpl: Record<string, PageElement>, mkt: Market) {
