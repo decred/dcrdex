@@ -2103,8 +2103,8 @@ func (c *Core) updateBalances(assets assetMap) {
 		w, exists := c.wallet(assetID)
 		if !exists {
 			// Could happen if we are here when handling "tip change" before Core
-			// managed to initialize its wallets map (or already removed it from it).
-			c.log.Tracef("can't update %q balance, Core isn't tracking this wallet yet/already", unbip(assetID))
+			// managed to initialize its wallets map (or removed this wallet already).
+			c.log.Tracef("can't update %q balance, Core isn't tracking this wallet yet/still", unbip(assetID))
 			continue
 		}
 		_, err := c.updateWalletBalance(w)
