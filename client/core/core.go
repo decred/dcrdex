@@ -319,7 +319,7 @@ func coreMarketFromMsgMarket(dc *dexConnection, msgMkt *msgjson.Market) *Market 
 		EpochLen:        msgMkt.EpochLen,
 		StartEpoch:      msgMkt.StartEpoch,
 		MarketBuyBuffer: msgMkt.MarketBuyBuffer,
-		AtomToConv:      float64(qconv) / float64(bconv),
+		AtomToConv:      float64(bconv) / float64(qconv),
 	}
 
 	trades, inFlight := dc.marketTrades(mkt.marketName())
