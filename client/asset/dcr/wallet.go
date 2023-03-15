@@ -66,12 +66,12 @@ type AddressInfo struct {
 type Wallet interface {
 	// Connect establishes a connection to the wallet.
 	Connect(ctx context.Context) error
-	//  Disconnect shuts down access to the wallet.
+	// Disconnect shuts down access to the wallet.
 	Disconnect()
 	// SpvMode returns true if the wallet is connected to the Decred
 	// network via SPV peers.
 	SpvMode() bool
-	// NotifyOnTipChange registers a callback function that the should be
+	// NotifyOnTipChange registers a callback function that should be
 	// invoked when the wallet sees new mainchain blocks. The return value
 	// indicates if this notification can be provided. Where this tip change
 	// notification is unimplemented, monitorBlocks should be used to track
