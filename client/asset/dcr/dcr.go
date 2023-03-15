@@ -4696,12 +4696,15 @@ func (dcr *ExchangeWallet) handleTipChange(ctx context.Context, newTipHash *chai
 		return
 	}
 
+	// Lock to avoid concurrent handleTipChange execution for simplicity.
 	dcr.tipMtx.Lock()
 	defer dcr.tipMtx.Unlock()
 
 	prevTip := dcr.currentTip
 	dcr.currentTip = &block{newTipHeight, newTipHash}
+
 	dcr.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.height, prevTip.hash, newTipHeight, newTipHash)
+
 	go dcr.tipChange(nil)
 
 	// Search for contract redemption in new blocks if there
@@ -4717,12 +4720,18 @@ func (dcr *ExchangeWallet) handleTipChange(ctx context.Context, newTipHash *chai
 		return
 	}
 
+	startHeight := prevTip.height + 1
+
+	// Redemption search would be compromised if the starting point cannot
+	// be determined, as searching just the new tip might result in blocks
+	// being omitted from the search operation. If that happens, cancel all
+	// find redemption requests in queue.
 	notifyFatalFindRedemptionError := func(s string, a ...interface{}) {
 		dcr.fatalFindRedemptionsError(fmt.Errorf("tipChange handler - "+s, a...), contractOutpoints)
 	}
 
 	// Check if the previous tip is still part of the mainchain (prevTip confs >= 0).
-	// Redemption search would typically resume from prevTipHeight + 1 unless the
+	// Redemption search would typically resume from prevTip.height + 1 unless the
 	// previous tip was re-orged out of the mainchain, in which case redemption
 	// search will resume from the mainchain ancestor of the previous tip.
 	prevTipHeader, isMainchain, _, err := dcr.blockHeader(ctx, prevTip.hash)
@@ -4733,33 +4742,20 @@ func (dcr *ExchangeWallet) handleTipChange(ctx context.Context, newTipHash *chai
 			prevTip.hash, err)
 		return
 	}
-
-	startHeight := int64(prevTipHeader.Height + 1)
 	if !isMainchain {
 		// The previous tip is no longer part of the mainchain. Crawl blocks
 		// backwards until finding a mainchain block. Start with the block
 		// that is the immediate ancestor to the previous tip.
-		ancestorBlockHash := &prevTipHeader.PrevBlock
-		for {
-			aBlock, isMainchain, _, err := dcr.blockHeader(ctx, ancestorBlockHash)
-			if err != nil {
-				notifyFatalFindRedemptionError("Error getting block header %s: %w", ancestorBlockHash, err)
-				return
-			}
-			if isMainchain {
-				// Found the mainchain ancestor of previous tip.
-				startHeight = int64(aBlock.Height)
-				dcr.log.Debugf("reorg detected from height %d to %d", aBlock.Height, newTipHeight)
-				break
-			}
-			if aBlock.Height == 0 {
-				// Crawled back to genesis block without finding a mainchain ancestor
-				// for the previous tip. Should never happen!
-				notifyFatalFindRedemptionError("no mainchain ancestor for orphaned block %s", prevTip.hash)
-				return
-			}
-			ancestorBlockHash = &aBlock.PrevBlock
+		ancestorBlockHash, ancestorHeight, err := dcr.mainchainAncestor(ctx, &prevTipHeader.PrevBlock)
+		if err != nil {
+			notifyFatalFindRedemptionError("find mainchain ancestor for prev block: %s: %w", prevTipHeader.PrevBlock, err)
+			return
 		}
+
+		dcr.log.Debugf("reorg detected during tip change from height %d (%s) to %d (%s)",
+			ancestorHeight, ancestorBlockHash, newTipHeight, newTipHash)
+
+		startHeight = ancestorHeight // have to recheck orphaned blocks again
 	}
 
 	// Run the redemption search from the startHeight determined above up
@@ -4789,7 +4785,9 @@ func (dcr *ExchangeWallet) mainchainAncestor(ctx context.Context, blockHash *cha
 			return checkHash, int64(checkBlock.Height), nil
 		}
 		if checkBlock.Height == 0 {
-			return nil, 0, fmt.Errorf("no mainchain ancestor for block %s", blockHash)
+			// Crawled back to genesis block without finding a mainchain ancestor
+			// for the previous tip. Should never happen!
+			return nil, 0, fmt.Errorf("no mainchain ancestor found for block %s", blockHash)
 		}
 		checkHash = &checkBlock.PrevBlock
 	}
