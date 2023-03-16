@@ -1051,17 +1051,21 @@ func (w *spvWallet) getBlockHeader(blockHash *chainhash.Hash) (header *blockHead
 		return nil, false, err
 	}
 
-	mainchain = w.blockIsMainchain(blockHash, blockHeight)
 	confirmations := int64(-1)
+	mainchain = w.blockIsMainchain(blockHash, blockHeight)
 	if mainchain {
 		confirmations = int64(confirms(blockHeight, tip.Height))
 	}
+	if tip.Height < blockHeight { // if tip is less, may be rolling back, so just mock dcrd/dcrwallet
+		confirmations = 0
+	}
 
 	return &blockHeader{
-		Hash:          hdr.BlockHash().String(),
-		Confirmations: confirmations,
-		Height:        int64(blockHeight),
-		Time:          hdr.Timestamp.Unix(),
+		Hash:              hdr.BlockHash().String(),
+		Confirmations:     confirmations,
+		Height:            int64(blockHeight),
+		Time:              hdr.Timestamp.Unix(),
+		PreviousBlockHash: hdr.PrevBlock.String(),
 	}, mainchain, nil
 }
 

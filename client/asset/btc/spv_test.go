@@ -891,3 +891,100 @@ func TestTryBlocksWithNotifier(t *testing.T) {
 		t.Fatal("queued polled block that should have been canceled came through")
 	}
 }
+
+func TestGetBlockHeader(t *testing.T) {
+	wallet, node, shutdown := tNewWallet(true, walletTypeSPV)
+	defer shutdown()
+
+	const tipHeight = 12
+	const blockHeight = 11 // 2 confirmations
+	var blockHash, prevHash, h chainhash.Hash
+	var blockHdr msgBlockWithHeight
+	for height := 0; height <= tipHeight; height++ {
+		hdr := &msgBlockWithHeight{
+			msgBlock: &wire.MsgBlock{
+				Header: wire.BlockHeader{
+					PrevBlock: h,
+					Timestamp: time.Unix(int64(height), 0),
+				},
+				Transactions: nil,
+			},
+			height: int64(height),
+		}
+
+		h = hdr.msgBlock.BlockHash()
+
+		switch height {
+		case blockHeight - 1:
+			prevHash = h
+			blockHdr = *hdr
+		case blockHeight:
+			blockHash = h
+		}
+
+		node.verboseBlocks[h.String()] = hdr
+		hh := h // just because we are storing pointers in mainchain
+		node.mainchain[int64(height)] = &hh
+	}
+
+	hdr, mainchain, err := wallet.tipRedeemer.getBlockHeader(&blockHash)
+	if err != nil {
+		t.Fatalf("initial success error: %v", err)
+	}
+	if !mainchain {
+		t.Fatalf("expected block %s to be in mainchain", blockHash)
+	}
+	if hdr.Hash != blockHash.String() {
+		t.Fatal("wrong header?")
+	}
+	if hdr.Height != blockHeight {
+		t.Fatal("wrong height?")
+	}
+	if hdr.Time != blockHeight {
+		t.Fatalf("wrong block time stamp, wanted %d, got %d", blockHeight, hdr.Time)
+	}
+	if hdr.Confirmations != 2 {
+		t.Fatalf("expected 2 confs, got %d", hdr.Confirmations)
+	}
+	if hdr.PreviousBlockHash != prevHash.String() {
+		t.Fatalf("wrong previous hash, want: %s got: %s", prevHash.String(), hdr.PreviousBlockHash)
+	}
+
+	node.mainchain[int64(blockHeight)] = &chainhash.Hash{0x01} // mainchain ended up with different block
+	hdr, mainchain, err = wallet.tipRedeemer.getBlockHeader(&blockHash)
+	if err != nil {
+		t.Fatalf("initial success error: %v", err)
+	}
+	if mainchain {
+		t.Fatalf("expected block %s to be classified as oprhan", blockHash)
+	}
+	if hdr.Confirmations != -1 {
+		t.Fatalf("expected -1 confs for side chain block, got %d", hdr.Confirmations)
+	}
+	node.mainchain[int64(blockHeight)] = &blockHash // clean up
+
+	// Can't fetch header error.
+	delete(node.verboseBlocks, blockHash.String()) // can't find block by hash
+	if _, _, err := wallet.tipRedeemer.getBlockHeader(&blockHash); err == nil {
+		t.Fatalf("Can't fetch header error not propagated")
+	}
+	node.verboseBlocks[blockHash.String()] = &blockHdr // clean up
+
+	// Main chain is shorter than requested block.
+	prevMainchain := node.mainchain
+	node.mainchain = map[int64]*chainhash.Hash{
+		0: node.mainchain[0],
+		1: node.mainchain[1],
+	}
+	hdr, mainchain, err = wallet.tipRedeemer.getBlockHeader(&blockHash)
+	if err != nil {
+		t.Fatalf("invalid tip height not noticed")
+	}
+	if mainchain {
+		t.Fatalf("expected block %s to be classified as oprhan", blockHash)
+	}
+	if hdr.Confirmations != 0 {
+		t.Fatalf("confirmations not zero for lower mainchain tip height, got: %d", hdr.Confirmations)
+	}
+	node.mainchain = prevMainchain // clean up
+}
