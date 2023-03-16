@@ -214,8 +214,8 @@ func (n *nodeClient) addPeer(peerURL string) error {
 
 // getConfirmedNonce returns the nonce of the account in the state of a
 // certain block.
-func (n *nodeClient) getConfirmedNonce(ctx context.Context, blockNumber int64) (uint64, error) {
-	state, _, err := n.leth.ApiBackend.StateAndHeaderByNumber(ctx, rpc.BlockNumber(blockNumber))
+func (n *nodeClient) getConfirmedNonce(ctx context.Context) (uint64, error) {
+	state, _, err := n.leth.ApiBackend.StateAndHeaderByNumber(ctx, rpc.PendingBlockNumber)
 	if err != nil {
 		return 0, err
 	}

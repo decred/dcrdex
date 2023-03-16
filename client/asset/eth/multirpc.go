@@ -872,7 +872,7 @@ func (m *multiRPCClient) getTransaction(ctx context.Context, txHash common.Hash)
 	})
 }
 
-func (m *multiRPCClient) getConfirmedNonce(ctx context.Context, blockNumber int64) (n uint64, err error) {
+func (m *multiRPCClient) getConfirmedNonce(ctx context.Context) (n uint64, err error) {
 	return n, m.withPreferred(ctx, func(ctx context.Context, p *provider) error {
 		n, err = p.ec.PendingNonceAt(ctx, m.address())
 		return err

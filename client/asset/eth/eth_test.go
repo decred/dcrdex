@@ -157,7 +157,7 @@ func (n *testNode) chainConfig() *params.ChainConfig {
 	return params.AllEthashProtocolChanges
 }
 
-func (n *testNode) getConfirmedNonce(context.Context, int64) (uint64, error) {
+func (n *testNode) getConfirmedNonce(context.Context) (uint64, error) {
 	return n.confNonce, n.confNonceErr
 }
 
@@ -812,13 +812,14 @@ func TestBalanceNoMempool(t *testing.T) {
 		confs uint32
 	}
 
-	newPendingTx := func(assetID uint32, out, in, fees uint64, confs uint32) *tPendingTx {
+	newPendingTx := func(assetID uint32, out, in, maxFees uint64, confs uint32) *tPendingTx {
 		return &tPendingTx{
 			pendingTx: &pendingTx{
 				assetID:   assetID,
 				out:       out,
 				in:        in,
-				fees:      fees,
+				maxFees:   maxFees,
+				stamp:     time.Now(),
 				lastCheck: lastCheck,
 			},
 			confs: confs,
@@ -899,6 +900,8 @@ func TestBalanceNoMempool(t *testing.T) {
 			eth.node = tNode.testNode // no mempool
 			tNode.txConfirmations = make(map[common.Hash]uint32)
 			tNode.txConfsErr = make(map[common.Hash]error)
+			tNode.bal = unlimitedAllowance
+			tNode.tokenContractor.bal = unlimitedAllowance
 
 			eth.tipMtx.Lock()
 			eth.currentTip = &types.Header{Number: new(big.Int).SetUint64(tipHeight)}
