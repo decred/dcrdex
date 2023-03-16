@@ -3762,12 +3762,7 @@ func (w *assetWallet) sumPendingTxs() (out, in uint64) {
 
 	isETH := w.assetID == BipID
 
-	// Because we will run confirmation checks concurrently, we need protection
-	// for the out and in variables and the w.pendingTxs map deletions.
-	var localMtx sync.Mutex
 	addPendingTx := func(pt *pendingTx) {
-		localMtx.Lock()
-		defer localMtx.Unlock()
 		in += pt.in
 		if isETH {
 			if pt.assetID == BipID {
@@ -3781,46 +3776,6 @@ func (w *assetWallet) sumPendingTxs() (out, in uint64) {
 		out += pt.out
 	}
 
-	deletions := make(map[common.Hash]struct{})
-
-	deletePendingTx := func(txHash common.Hash) {
-		localMtx.Lock()
-		deletions[txHash] = struct{}{}
-		localMtx.Unlock()
-	}
-
-	var wg sync.WaitGroup
-
-	updatePendingTx := func(txHash common.Hash, pt *pendingTx) {
-		defer wg.Done()
-		confs, err := w.node.transactionConfirmations(w.ctx, txHash)
-		if err != nil {
-			if !errors.Is(err, asset.CoinNotFoundError) {
-				w.log.Errorf("Error getting confirmations for pending tx %s: %v", txHash, err)
-			}
-			if time.Since(pt.stamp) > time.Minute*2 {
-				currentNonce, err := w.node.getConfirmedNonce(w.ctx)
-				if err != nil {
-					w.log.Errorf("Error getting account nonce for stale pending tx check: %v", err)
-					return
-				}
-				if currentNonce >= pt.nonce {
-					w.log.Errorf("pending tx not confirmed but nonce has been confirmed")
-					deletePendingTx(txHash)
-				}
-			}
-			if !errors.Is(err, asset.CoinNotFoundError) {
-				return
-			}
-		}
-		if confs > 0 {
-			deletePendingTx(txHash)
-			return
-		}
-		pt.lastCheck = tip // Avoid multiple checks on the same block.
-		addPendingTx(pt)
-	}
-
 	w.pendingTxMtx.Lock()
 	defer w.pendingTxMtx.Unlock()
 	for txHash, pt := range w.pendingTxs {
@@ -3832,12 +3787,32 @@ func (w *assetWallet) sumPendingTxs() (out, in uint64) {
 			addPendingTx(pt)
 			continue
 		}
-		wg.Add(1)
-		go updatePendingTx(txHash, pt)
-	}
-	wg.Wait()
-	for txHash := range deletions {
-		delete(w.pendingTxs, txHash)
+		confs, err := w.node.transactionConfirmations(w.ctx, txHash)
+		if err != nil {
+			if !errors.Is(err, asset.CoinNotFoundError) {
+				w.log.Errorf("Error getting confirmations for pending tx %s: %v", txHash, err)
+			}
+			if time.Since(pt.stamp) > time.Minute*5 {
+				currentNonce, err := w.node.getConfirmedNonce(w.ctx)
+				if err != nil {
+					w.log.Errorf("Error getting account nonce for stale pending tx check: %v", err)
+					continue
+				}
+				if currentNonce >= pt.nonce {
+					w.log.Errorf("pending tx not confirmed but nonce has been confirmed")
+					delete(w.pendingTxs, txHash)
+				}
+			}
+			if !errors.Is(err, asset.CoinNotFoundError) {
+				continue
+			}
+		}
+		if confs > 0 {
+			delete(w.pendingTxs, txHash)
+			continue
+		}
+		pt.lastCheck = tip // Avoid multiple checks on the same block.
+		addPendingTx(pt)
 	}
 	return
 }
@@ -3853,40 +3828,42 @@ func (w *assetWallet) balanceWithTxPool() (*Balance, error) {
 		}
 	}
 
+	txPoolNode, is := w.node.(txPoolFetcher)
+	if !is {
+		for {
+			confirmed, err := getBal()
+			if err != nil {
+				return nil, fmt.Errorf("balance error: %v", err)
+			}
+			out, in := w.sumPendingTxs()
+			checkBal, err := getBal()
+			if err != nil {
+				return nil, fmt.Errorf("balance consistency check error: %v", err)
+			}
+			outEVM := w.evmify(out)
+			// If our balance has gone down in the interim, we'll use the lower
+			// balance, but ensure that we're not setting up an underflow for
+			// available balance.
+			if checkBal.Cmp(confirmed) != 0 {
+				w.log.Debugf("ETH balance changed while checking pending txs. Trying again.")
+				continue
+			}
+			if outEVM.Cmp(confirmed) > 0 {
+				return nil, fmt.Errorf("balance undeflow detected. pending out (%s) > balance (%s)", outEVM, confirmed)
+			}
+
+			return &Balance{
+				Current:    confirmed,
+				PendingOut: outEVM,
+				PendingIn:  w.evmify(in),
+			}, nil
+		}
+	}
+
 	confirmed, err := getBal()
 
 	if err != nil {
 		return nil, fmt.Errorf("balance error: %v", err)
-	}
-
-	txPoolNode, is := w.node.(txPoolFetcher)
-	if !is {
-		out, in := w.sumPendingTxs()
-
-		// To avoid the possibility that a pending spending tx is mined after we
-		// pull the balance but before we check pending txs, which would result
-		// in an incorrectly high balance, we'll play safe here and check the
-		// balance again.
-		checkBal, err := getBal()
-		if err != nil {
-			return nil, fmt.Errorf("balance consistency check error: %v", err)
-		}
-		outEVM := w.evmify(out)
-		// If our balance has gone down in the interim, we'll use the lower
-		// balance, but ensure that we're not setting up an underflow for
-		// available balance.
-		if checkBal.Cmp(confirmed) < 0 {
-			confirmed = checkBal
-		}
-		if outEVM.Cmp(confirmed) > 0 {
-			return nil, fmt.Errorf("balance consistency check failed. pending out (%s) > balance (%s)", outEVM, checkBal)
-		}
-
-		return &Balance{
-			Current:    confirmed,
-			PendingOut: outEVM,
-			PendingIn:  w.evmify(in),
-		}, nil
 	}
 
 	pendingTxs, err := txPoolNode.pendingTransactions()
