@@ -4349,7 +4349,7 @@ func (btc *intermediaryWallet) reportNewTip(ctx context.Context, newTip *block) 
 	// Redemption search would typically resume from prevTipHeight + 1 unless the
 	// previous tip was re-orged out of the mainchain, in which case redemption
 	// search will resume from the mainchain ancestor of the previous tip.
-	prevTipHeader, err := btc.tipRedeemer.getBlockHeader(&prevTip.hash)
+	prevTipHeader, isMainchain, err := btc.tipRedeemer.getBlockHeader(&prevTip.hash)
 	switch {
 	case err != nil:
 		// Redemption search cannot continue reliably without knowing if there
@@ -4358,7 +4358,7 @@ func (btc *intermediaryWallet) reportNewTip(ctx context.Context, newTip *block) 
 			prevTip.hash, err)
 		return
 
-	case prevTipHeader.Confirmations < 0:
+	case !isMainchain:
 		// The previous tip is no longer part of the mainchain. Crawl blocks
 		// backwards until finding a mainchain block. Start with the block
 		// that is the immediate ancestor to the previous tip.
@@ -4368,12 +4368,12 @@ func (btc *intermediaryWallet) reportNewTip(ctx context.Context, newTip *block) 
 			return
 		}
 		for {
-			aBlock, err := btc.tipRedeemer.getBlockHeader(ancestorBlockHash)
+			aBlock, isMainchain, err := btc.tipRedeemer.getBlockHeader(ancestorBlockHash)
 			if err != nil {
 				notifyFatalFindRedemptionError("getBlockHeader error for block %s: %w", ancestorBlockHash, err)
 				return
 			}
-			if aBlock.Confirmations > -1 {
+			if isMainchain {
 				// Found the mainchain ancestor of previous tip.
 				startPoint = &block{height: aBlock.Height, hash: *ancestorBlockHash}
 				btc.log.Debugf("reorg detected from height %d to %d", aBlock.Height, newTip.height)

@@ -52,7 +52,7 @@ type Wallet interface {
 type tipRedemptionWallet interface {
 	Wallet
 	getBlockHeight(*chainhash.Hash) (int32, error)
-	getBlockHeader(blockHash *chainhash.Hash) (*blockHeader, error)
+	getBlockHeader(blockHash *chainhash.Hash) (hdr *blockHeader, mainchain bool, err error)
 	getBlock(h chainhash.Hash) (*wire.MsgBlock, error)
 	searchBlockForRedemptions(ctx context.Context, reqs map[outPoint]*findRedemptionReq, blockHash chainhash.Hash) (discovered map[outPoint]*findRedemptionResult)
 	findRedemptionsInMempool(ctx context.Context, reqs map[outPoint]*findRedemptionReq) (discovered map[outPoint]*findRedemptionResult)

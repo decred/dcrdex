@@ -417,6 +417,8 @@ func (w *spvWallet) getBlockHash(blockHeight int64) (*chainhash.Hash, error) {
 	return w.cl.GetBlockHash(blockHeight)
 }
 
+// getBlockHeight gets the mainchain height for the specified block. Returns
+// error for orphaned blocks.
 func (w *spvWallet) getBlockHeight(h *chainhash.Hash) (int32, error) {
 	return w.cl.GetBlockHeight(h)
 }
@@ -1030,28 +1032,37 @@ func (w *spvWallet) walletUnlock(pw []byte) error {
 	return w.Unlock(pw)
 }
 
-func (w *spvWallet) getBlockHeader(blockHash *chainhash.Hash) (*blockHeader, error) {
+// getBlockHeader gets the *blockHeader for the specified block hash. It also
+// returns a bool value to indicate whether this block is a part of main chain.
+// For orphaned blocks header.Confirmations is negative (typically -1).
+func (w *spvWallet) getBlockHeader(blockHash *chainhash.Hash) (header *blockHeader, mainchain bool, err error) {
 	hdr, err := w.cl.GetBlockHeader(blockHash)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	tip, err := w.cl.BestBlock()
 	if err != nil {
-		return nil, fmt.Errorf("BestBlock error: %v", err)
+		return nil, false, fmt.Errorf("BestBlock error: %v", err)
 	}
 
 	blockHeight, err := w.cl.GetBlockHeight(blockHash)
 	if err != nil {
-		return nil, err
+		return nil, false, err
+	}
+
+	mainchain = w.blockIsMainchain(blockHash, blockHeight)
+	confirmations := int64(-1)
+	if mainchain {
+		confirmations = int64(confirms(blockHeight, tip.Height))
 	}
 
 	return &blockHeader{
 		Hash:          hdr.BlockHash().String(),
-		Confirmations: int64(confirms(blockHeight, tip.Height)),
+		Confirmations: confirmations,
 		Height:        int64(blockHeight),
 		Time:          hdr.Timestamp.Unix(),
-	}, nil
+	}, mainchain, nil
 }
 
 func (w *spvWallet) getBestBlockHeader() (*blockHeader, error) {
@@ -1059,7 +1070,8 @@ func (w *spvWallet) getBestBlockHeader() (*blockHeader, error) {
 	if err != nil {
 		return nil, err
 	}
-	return w.getBlockHeader(hash)
+	hdr, _, err := w.getBlockHeader(hash)
+	return hdr, err
 }
 
 func (w *spvWallet) logFilePath() string {
@@ -1450,7 +1462,7 @@ func (w *spvWallet) getTxOut(txHash *chainhash.Hash, vout uint32, pkScript []byt
 				if err != nil {
 					return nil, 0, fmt.Errorf("BestBlock error: %v", err)
 				}
-				confs = uint32(confirms(txDetails.Block.Height, tip.Height))
+				confs = confirms(txDetails.Block.Height, tip.Height)
 			}
 
 			msgTx := &txDetails.MsgTx
@@ -1458,7 +1470,6 @@ func (w *spvWallet) getTxOut(txHash *chainhash.Hash, vout uint32, pkScript []byt
 				return nil, 0, fmt.Errorf("wallet transaction %s found, but not enough outputs for vout %d", txHash, vout)
 			}
 			return msgTx.TxOut[vout], confs, nil
-
 		}
 		if txDetails.Block.Hash != (chainhash.Hash{}) {
 			blockHash = &txDetails.Block.Hash
@@ -1480,7 +1491,7 @@ func (w *spvWallet) getTxOut(txHash *chainhash.Hash, vout uint32, pkScript []byt
 		return nil, 0, fmt.Errorf("BestBlock error: %v", err)
 	}
 
-	confs := uint32(confirms(int32(utxo.blockHeight), tip.Height))
+	confs := confirms(int32(utxo.blockHeight), tip.Height)
 
 	return utxo.txOut, confs, nil
 }
@@ -1655,7 +1666,7 @@ func (w *spvWallet) confirmations(txHash *chainhash.Hash, vout uint32) (blockHas
 		if err != nil {
 			return nil, 0, false, err
 		}
-		confs = uint32(confirms(details.Block.Height, height))
+		confs = confirms(details.Block.Height, height)
 	}
 
 	spent, found := outputSpendStatus(details, vout)
@@ -1711,7 +1722,7 @@ func (w *spvWallet) getWalletTransaction(txHash *chainhash.Hash) (*GetTransactio
 		TimeReceived: uint64(details.Received.Unix()),
 	}
 
-	if details.Block.Height != -1 {
+	if details.Block.Height > 0 {
 		ret.BlockHash = details.Block.Hash.String()
 		ret.BlockTime = uint64(details.Block.Time.Unix())
 		// ret.BlockHeight = uint64(details.Block.Height)
@@ -1745,12 +1756,12 @@ func (w *spvWallet) getWalletTransaction(txHash *chainhash.Hash) (*GetTransactio
 	*/
 }
 
-func confirms(txHeight, curHeight int32) int32 {
+func confirms(txHeight, curHeight int32) uint32 {
 	switch {
-	case txHeight == -1, txHeight > curHeight:
-		return 0
+	case curHeight >= txHeight:
+		return uint32(curHeight - txHeight + 1) // positive numbers here, no overflow
 	default:
-		return curHeight - txHeight + 1
+		return 0 // undefined for all other cases
 	}
 }
 
