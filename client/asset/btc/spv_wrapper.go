@@ -1726,7 +1726,7 @@ func (w *spvWallet) getWalletTransaction(txHash *chainhash.Hash) (*GetTransactio
 		TimeReceived: uint64(details.Received.Unix()),
 	}
 
-	if details.Block.Height > 0 {
+	if details.Block.Height >= 0 {
 		ret.BlockHash = details.Block.Hash.String()
 		ret.BlockTime = uint64(details.Block.Time.Unix())
 		// ret.BlockHeight = uint64(details.Block.Height)
