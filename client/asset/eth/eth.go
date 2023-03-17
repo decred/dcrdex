@@ -3830,10 +3830,14 @@ func (w *assetWallet) balanceWithTxPool() (*Balance, error) {
 
 	txPoolNode, is := w.node.(txPoolFetcher)
 	if !is {
+		var confirmed *big.Int
 		for {
-			confirmed, err := getBal()
-			if err != nil {
-				return nil, fmt.Errorf("balance error: %v", err)
+			if confirmed == nil {
+				var err error
+				confirmed, err = getBal()
+				if err != nil {
+					return nil, fmt.Errorf("balance error: %v", err)
+				}
 			}
 			out, in := w.sumPendingTxs()
 			checkBal, err := getBal()
@@ -3845,7 +3849,8 @@ func (w *assetWallet) balanceWithTxPool() (*Balance, error) {
 			// balance, but ensure that we're not setting up an underflow for
 			// available balance.
 			if checkBal.Cmp(confirmed) != 0 {
-				w.log.Debugf("ETH balance changed while checking pending txs. Trying again.")
+				w.log.Debugf("balance changed while checking pending txs. Trying again.")
+				confirmed = checkBal
 				continue
 			}
 			if outEVM.Cmp(confirmed) > 0 {
