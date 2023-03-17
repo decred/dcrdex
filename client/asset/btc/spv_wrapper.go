@@ -1055,8 +1055,10 @@ func (w *spvWallet) getBlockHeader(blockHash *chainhash.Hash) (header *blockHead
 	mainchain = w.blockIsMainchain(blockHash, blockHeight)
 	if mainchain {
 		confirmations = int64(confirms(blockHeight, tip.Height))
-	}
-	if tip.Height < blockHeight { // if tip is less, may be rolling back, so just mock dcrd/dcrwallet
+	} else if tip.Height < blockHeight {
+		// Gotta treat this block as mainchain, until mainchain tip catches up.
+		mainchain = true
+		// If tip is less, may be rolling back, so just mock dcrd/dcrwallet.
 		confirmations = 0
 	}
 
