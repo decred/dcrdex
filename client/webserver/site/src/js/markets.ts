@@ -561,20 +561,38 @@ export default class MarketsPage extends BasePage {
     return Object.keys(this.market.dex.pendingBonds).length > 0
   }
 
-  /* setStats updates the currently displayed market and spot price. */
-  setStats (): void {
+  /* setCurrMarketPrice updates the current market price on the stats displays
+     and the orderbook display. */
+  setCurrMarketPrice (): void {
     const selected = this.market
     if (!selected) return
     // Get an up-to-date Market.
     const xc = app().exchanges[selected.dex.host]
     const mkt = xc.markets[selected.cfg.name]
+    if (!mkt.spot) return
+
     for (const s of this.stats) {
-      setMarketDetails(s.tmpl, mkt)
-      if (mkt.spot) {
-        const bconv = xc.assets[mkt.baseid].unitInfo.conventional.conversionFactor
-        s.tmpl.volume.textContent = fourSigFigs(mkt.spot.vol24 / bconv)
-        setPriceAndChange(s.tmpl, xc, mkt)
-      }
+      const bconv = xc.assets[mkt.baseid].unitInfo.conventional.conversionFactor
+      s.tmpl.volume.textContent = fourSigFigs(mkt.spot.vol24 / bconv)
+      setPriceAndChange(s.tmpl, xc, mkt)
+    }
+
+    this.page.obPrice.textContent = Doc.formatFullPrecision(mkt.spot.rate / this.market.rateConversionFactor)
+    this.page.obPrice.classList.remove('sellcolor', 'buycolor')
+    this.page.obPrice.classList.add(mkt.spot.change24 >= 0 ? 'buycolor' : 'sellcolor')
+    Doc.setVis(mkt.spot.change24 >= 0, this.page.obUp)
+    Doc.setVis(mkt.spot.change24 < 0, this.page.obDown)
+  }
+
+  /* setMarketDetails updates the currency names on the stats displays. */
+  setMarketDetails () {
+    if (!this.market) return
+    for (const s of this.stats) {
+      s.tmpl.baseIcon.src = Doc.logoPath(this.market.cfg.basesymbol)
+      s.tmpl.quoteIcon.src = Doc.logoPath(this.market.cfg.quotesymbol)
+      Doc.empty(s.tmpl.baseSymbol, s.tmpl.quoteSymbol)
+      s.tmpl.baseSymbol.appendChild(Doc.symbolize(this.market.cfg.basesymbol))
+      s.tmpl.quoteSymbol.appendChild(Doc.symbolize(this.market.cfg.quotesymbol))
     }
   }
 
@@ -845,7 +863,8 @@ export default class MarketsPage extends BasePage {
     }
 
     Doc.setVis(!(baseAsset && quoteAsset) || !(baseAsset.wallet && quoteAsset.wallet), page.noWallet)
-    this.setStats()
+    this.setMarketDetails()
+    this.setCurrMarketPrice()
     this.refreshRecentMatchesTable()
 
     // if (!dex.candleDurs || dex.candleDurs.length === 0) this.currentChart = depthChart
@@ -2004,6 +2023,9 @@ export default class MarketsPage extends BasePage {
    * handlePriceUpdate is the handler for the 'spots' notification.
    */
   handlePriceUpdate (note: SpotPriceNote) {
+    if (note.host === this.market.dex.host && note.spots[this.market.cfg.name]) {
+      this.setCurrMarketPrice()
+    }
     this.marketList.updateSpots(note)
   }
 
@@ -3077,14 +3099,6 @@ const OneFractionalDigit = new Intl.NumberFormat((navigator.languages as string[
 function fourSigFigs (v: number) {
   if (v >= 1000 || Math.round(v) === v) return OneFractionalDigit.format(v)
   return FourSigFigs.format(v)
-}
-
-function setMarketDetails (tmpl: Record<string, PageElement>, mkt: Market) {
-  tmpl.baseIcon.src = Doc.logoPath(mkt.basesymbol)
-  tmpl.quoteIcon.src = Doc.logoPath(mkt.quotesymbol)
-  Doc.empty(tmpl.baseSymbol, tmpl.quoteSymbol)
-  tmpl.baseSymbol.appendChild(Doc.symbolize(mkt.basesymbol))
-  tmpl.quoteSymbol.appendChild(Doc.symbolize(mkt.quotesymbol))
 }
 
 function setPriceAndChange (tmpl: Record<string, PageElement>, xc: Exchange, mkt: Market) {
