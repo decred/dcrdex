@@ -1525,6 +1525,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		log.Warnf("Contract error encountered for match %s, actor %s using coin ID %v and contract %v: %v",
 			stepInfo.match.ID(), actor, params.CoinID, params.Contract, err)
 		actor.status.mtx.RUnlock()
+		actor.status.endSwapSearch() // allow client retry even before notifying him
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
 			fmt.Sprintf("contract error encountered: %v", err))
 		return wait.DontTryAgain
@@ -1550,6 +1551,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	if !chain.ValidateFeeRate(contract, reqFeeRate) {
 		confs := swapConfs()
 		if confs < 1 {
+			actor.status.endSwapSearch() // allow client retry even before notifying him
 			s.respondError(msg.ID, actor.user, msgjson.ContractError, "low tx fee")
 			return wait.DontTryAgain
 		}
@@ -1557,17 +1559,20 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 			contract, stepInfo.asset.Symbol, contract.FeeRate(), reqFeeRate, confs)
 	}
 	if contract.SwapAddress != counterParty.order.Trade().SwapAddress() {
+		actor.status.endSwapSearch() // allow client retry even before notifying him
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
 			fmt.Sprintf("incorrect recipient. expected %s. got %s",
 				contract.SwapAddress, counterParty.order.Trade().SwapAddress()))
 		return wait.DontTryAgain
 	}
 	if contract.Value() != stepInfo.checkVal {
+		actor.status.endSwapSearch() // allow client retry even before notifying him
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
 			fmt.Sprintf("contract error. expected contract value to be %d, got %d", stepInfo.checkVal, contract.Value()))
 		return wait.DontTryAgain
 	}
 	if !actor.isMaker && !bytes.Equal(contract.SecretHash, counterParty.status.swap.SecretHash) {
+		actor.status.endSwapSearch() // allow client retry even before notifying him
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
 			fmt.Sprintf("incorrect secret hash. expected %x. got %x",
 				contract.SecretHash, counterParty.status.swap.SecretHash))
@@ -1579,10 +1584,12 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		reqLockTime = encode.DropMilliseconds(stepInfo.match.matchTime.Add(s.lockTimeMaker))
 	}
 	if contract.LockTime.Before(reqLockTime) {
+		actor.status.endSwapSearch() // allow client retry even before notifying him
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
 			fmt.Sprintf("contract error. expected lock time >= %s, got %s", reqLockTime, contract.LockTime))
 		return wait.DontTryAgain
 	} else if remain := time.Until(contract.LockTime); remain < 0 {
+		actor.status.endSwapSearch() // allow client retry even before notifying him
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
 			fmt.Sprintf("contract is correct, but lock time passed %s ago", remain))
 		// Revoke the match proactively before checkInaction gets to it.
@@ -1629,6 +1636,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		s.matchMtx.RUnlock()
 		log.Errorf("Contract txn located after match was revoked (match id=%v, maker=%v)",
 			matchID, actor.isMaker)
+		actor.status.endSwapSearch() // allow client retry even before notifying him
 		s.respondError(msg.ID, actor.user, msgjson.ContractError, "match already revoked due to inaction")
 		return wait.DontTryAgain
 	}
@@ -1639,7 +1647,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	actor.status.mtx.Unlock()
 
 	stepInfo.match.mtx.Lock()
-	stepInfo.match.Status = stepInfo.nextStep
+	stepInfo.match.Status = stepInfo.nextStep // handleInit (gate mechanism) won't allow backward progress
 	stepInfo.match.mtx.Unlock()
 
 	// Only unlock match map after the statuses and txn times are stored,
@@ -1672,6 +1680,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	if err != nil {
 		// This is likely an impossible condition.
 		log.Errorf("error creating audit request: %v", err)
+		actor.status.endSwapSearch() // allow client retry even before notifying him
 		return wait.DontTryAgain
 	}
 
@@ -1689,12 +1698,19 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	// The counterparty will audit the contract by retrieving it, which may
 	// involve them waiting for up to the broadcast timeout before responding,
 	// so the user gets at least s.bTimeout to the request.
-	s.authMgr.RequestWithTimeout(ack.user, notification, func(_ comms.Link, resp *msgjson.Message) {
+	err = s.authMgr.RequestWithTimeout(ack.user, notification, func(_ comms.Link, resp *msgjson.Message) {
 		s.processAck(resp, ack) // resp.ID == notification.ID
 	}, s.bTimeout, func() {
 		log.Infof("Timeout waiting for contract 'audit' request acknowledgement from user %v (%s) for match %v",
 			ack.user, makerTaker(ack.isMaker), matchID)
 	})
+	if err != nil {
+		log.Errorf("Couldn't send 'audit' request to user %v (%s) for match %v", ack.user, makerTaker(ack.isMaker), matchID)
+	}
+
+	// Contract now recorded and will be used to reject backward progress (duplicate
+	// or malicious requests client might still send after this point).
+	actor.status.endSwapSearch()
 
 	return wait.DontTryAgain
 }
@@ -1726,6 +1742,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	if !chain.ValidateSecret(params.Secret, cpContract) {
 		log.Infof("Secret validation failed (match id=%v, maker=%v, secret=%v)",
 			matchID, actor.isMaker, params.Secret)
+		actor.status.endRedeemSearch() // allow client retry even before notifying him
 		s.respondError(msg.ID, actor.user, msgjson.InvalidRequestError, "secret validation failed")
 		return wait.DontTryAgain
 	}
@@ -1740,6 +1757,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		log.Warnf("Redemption error encountered for match %s, actor %s, using coin ID %v to satisfy contract at %x: %v",
 			stepInfo.match.ID(), actor, params.CoinID, cpSwapCoin, err)
 		actor.status.mtx.RUnlock()
+		actor.status.endRedeemSearch() // allow client retry even before notifying him
 		s.respondError(msg.ID, actor.user, msgjson.RedemptionError,
 			fmt.Sprintf("redemption error encountered: %v", err))
 		return wait.DontTryAgain
@@ -1757,18 +1775,19 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		s.matchMtx.RUnlock()
 		log.Errorf("Redeem txn found after match was revoked (match id=%v, maker=%v)",
 			matchID, actor.isMaker)
+		actor.status.endRedeemSearch() // allow client retry even before notifying him
 		s.respondError(msg.ID, actor.user, msgjson.RedemptionError, "match already revoked due to inaction")
 		return wait.DontTryAgain
 	}
 
 	actor.status.mtx.Lock()
 	redeemTime := unixMsNow()
-	actor.status.redemption = redemption
+	actor.status.redemption = redemption // redemption should not be set already (handleRedeem should gate)
 	actor.status.redeemTime = redeemTime
 	actor.status.mtx.Unlock()
 
 	match.mtx.Lock()
-	match.Status = newStatus
+	match.Status = newStatus // handleRedeem (gate mechanism) won't allow backward progress
 	match.mtx.Unlock()
 
 	// Only unlock match map after the statuses and txn times are stored,
@@ -1835,6 +1854,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	redemptionReq, err := msgjson.NewRequest(comms.NextID(), msgjson.RedemptionRoute, rParams)
 	if err != nil {
 		log.Errorf("error creating redemption request: %v", err)
+		actor.status.endRedeemSearch() // allow client retry even before notifying him
 		return wait.DontTryAgain
 	}
 
@@ -1853,12 +1873,19 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 
 	// The counterparty does not need to actually locate the redemption txn,
 	// so use the default request timeout.
-	s.authMgr.RequestWithTimeout(ack.user, redemptionReq, func(_ comms.Link, resp *msgjson.Message) {
+	err = s.authMgr.RequestWithTimeout(ack.user, redemptionReq, func(_ comms.Link, resp *msgjson.Message) {
 		s.processAck(resp, ack) // resp.ID == notification.ID
 	}, time.Until(redeemTime.Add(s.bTimeout)), func() {
 		log.Infof("Timeout waiting for 'redemption' request from user %v (%s) for match %v",
 			ack.user, makerTaker(ack.isMaker), matchID)
 	})
+	if err != nil {
+		log.Errorf("Couldn't send 'redemption' request to user %v (%s) for match %v", ack.user, makerTaker(ack.isMaker), matchID)
+	}
+
+	// Redemption now recorded and will be used to reject backward progress (duplicate
+	// or malicious requests client might still send after this point).
+	actor.status.endRedeemSearch()
 
 	return wait.DontTryAgain
 }
@@ -1968,11 +1995,7 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 	s.latencyQ.Wait(&wait.Waiter{
 		Expiration: expireTime,
 		TryFunc: func() wait.TryDirective {
-			res := s.processInit(msg, params, stepInfo)
-			if res == wait.DontTryAgain {
-				stepInfo.actor.status.endSwapSearch() // contract now recorded
-			}
-			return res
+			return s.processInit(msg, params, stepInfo)
 		},
 		ExpireFunc: func() {
 			stepInfo.actor.status.endSwapSearch() // allow init retries
@@ -2074,11 +2097,7 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 	s.latencyQ.Wait(&wait.Waiter{
 		Expiration: expireTime,
 		TryFunc: func() wait.TryDirective {
-			res := s.processRedeem(msg, params, stepInfo)
-			if res == wait.DontTryAgain {
-				stepInfo.actor.status.endRedeemSearch()
-			}
-			return res
+			return s.processRedeem(msg, params, stepInfo)
 		},
 		ExpireFunc: func() {
 			stepInfo.actor.status.endRedeemSearch()
@@ -2524,7 +2543,7 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
 			s.processMatchAcks(u, resp, m)
 		})
 		if err != nil {
-			log.Infof("Failed to sent %v request to %v. The match will be returned in the connect response.",
+			log.Infof("Failed to send %v request to %v. The match will be returned in the connect response.",
 				req.Route, u)
 		}
 	}

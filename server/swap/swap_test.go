@@ -654,7 +654,7 @@ func (rig *testRig) waitChans(tag string, chans ...chan struct{}) error {
 		select {
 		case <-c:
 		case <-time.After(time.Second):
-			return fmt.Errorf("%s timed out", tag)
+			return fmt.Errorf("waiting on %q timed out", tag)
 		}
 	}
 	return nil
