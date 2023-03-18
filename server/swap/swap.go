@@ -1655,6 +1655,10 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	// request counterparty audit.
 	s.matchMtx.RUnlock()
 
+	// Contract now recorded and will be used to reject backward progress (duplicate
+	// or malicious requests client might still send after this point).
+	actor.status.endSwapSearch()
+
 	log.Debugf("processInit: valid contract %v (%s) received at %v from user %v (%s) for match %v, "+
 		"fee rate = %d, swapStatus %v => %v", contract, stepInfo.asset.Symbol, swapTime, actor.user,
 		makerTaker(actor.isMaker), matchID, contract.FeeRate(), stepInfo.step, stepInfo.nextStep)
@@ -1680,7 +1684,6 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	if err != nil {
 		// This is likely an impossible condition.
 		log.Errorf("error creating audit request: %v", err)
-		actor.status.endSwapSearch() // allow client retry even before notifying him
 		return wait.DontTryAgain
 	}
 
@@ -1707,10 +1710,6 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	if err != nil {
 		log.Errorf("Couldn't send 'audit' request to user %v (%s) for match %v", ack.user, makerTaker(ack.isMaker), matchID)
 	}
-
-	// Contract now recorded and will be used to reject backward progress (duplicate
-	// or malicious requests client might still send after this point).
-	actor.status.endSwapSearch()
 
 	return wait.DontTryAgain
 }
@@ -1794,6 +1793,10 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	// ensuring that checkInaction will not revoke the match as we respond.
 	s.matchMtx.RUnlock()
 
+	// Redemption now recorded and will be used to reject backward progress (duplicate
+	// or malicious requests client might still send after this point).
+	actor.status.endRedeemSearch()
+
 	log.Debugf("processRedeem: valid redemption %v (%s) spending contract %s received at %v from %v (%s) for match %v, "+
 		"swapStatus %v => %v", redemption, stepInfo.asset.Symbol, cpSwapStr, redeemTime, actor.user,
 		makerTaker(actor.isMaker), matchID, stepInfo.step, newStatus)
@@ -1854,7 +1857,6 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	redemptionReq, err := msgjson.NewRequest(comms.NextID(), msgjson.RedemptionRoute, rParams)
 	if err != nil {
 		log.Errorf("error creating redemption request: %v", err)
-		actor.status.endRedeemSearch() // allow client retry even before notifying him
 		return wait.DontTryAgain
 	}
 
@@ -1882,10 +1884,6 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	if err != nil {
 		log.Errorf("Couldn't send 'redemption' request to user %v (%s) for match %v", ack.user, makerTaker(ack.isMaker), matchID)
 	}
-
-	// Redemption now recorded and will be used to reject backward progress (duplicate
-	// or malicious requests client might still send after this point).
-	actor.status.endRedeemSearch()
 
 	return wait.DontTryAgain
 }
