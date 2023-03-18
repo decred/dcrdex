@@ -980,10 +980,10 @@ func TestGetBlockHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("invalid tip height not noticed")
 	}
-	if !mainchain {
-		t.Fatalf("expected block %s to be classified as oprhan", blockHash)
+	if mainchain {
+		t.Fatalf("expected block %s to be classified as orphan", blockHash)
 	}
-	if hdr.Confirmations != 0 {
+	if hdr.Confirmations != -1 {
 		t.Fatalf("confirmations not zero for lower mainchain tip height, got: %d", hdr.Confirmations)
 	}
 	node.mainchain = prevMainchain // clean up

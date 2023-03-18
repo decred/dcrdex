@@ -1034,7 +1034,7 @@ func (w *spvWallet) walletUnlock(pw []byte) error {
 
 // getBlockHeader gets the *blockHeader for the specified block hash. It also
 // returns a bool value to indicate whether this block is a part of main chain.
-// For orphaned blocks header.Confirmations is negative (typically -1).
+// For orphaned blocks header.Confirmations is negative.
 func (w *spvWallet) getBlockHeader(blockHash *chainhash.Hash) (header *blockHeader, mainchain bool, err error) {
 	hdr, err := w.cl.GetBlockHeader(blockHash)
 	if err != nil {
@@ -1055,11 +1055,6 @@ func (w *spvWallet) getBlockHeader(blockHash *chainhash.Hash) (header *blockHead
 	mainchain = w.blockIsMainchain(blockHash, blockHeight)
 	if mainchain {
 		confirmations = int64(confirms(blockHeight, tip.Height))
-	} else if tip.Height < blockHeight {
-		// Gotta treat this block as mainchain, until mainchain tip catches up.
-		mainchain = true
-		// If tip is less, may be rolling back, so just mock dcrd/dcrwallet.
-		confirmations = 0
 	}
 
 	return &blockHeader{
@@ -1468,7 +1463,7 @@ func (w *spvWallet) getTxOut(txHash *chainhash.Hash, vout uint32, pkScript []byt
 				if err != nil {
 					return nil, 0, fmt.Errorf("BestBlock error: %v", err)
 				}
-				confs = confirms(txDetails.Block.Height, tip.Height)
+				confs = uint32(confirms(txDetails.Block.Height, tip.Height))
 			}
 
 			msgTx := &txDetails.MsgTx
@@ -1497,7 +1492,7 @@ func (w *spvWallet) getTxOut(txHash *chainhash.Hash, vout uint32, pkScript []byt
 		return nil, 0, fmt.Errorf("BestBlock error: %v", err)
 	}
 
-	confs := confirms(int32(utxo.blockHeight), tip.Height)
+	confs := uint32(confirms(int32(utxo.blockHeight), tip.Height))
 
 	return utxo.txOut, confs, nil
 }
@@ -1672,7 +1667,7 @@ func (w *spvWallet) confirmations(txHash *chainhash.Hash, vout uint32) (blockHas
 		if err != nil {
 			return nil, 0, false, err
 		}
-		confs = confirms(details.Block.Height, height)
+		confs = uint32(confirms(details.Block.Height, height))
 	}
 
 	spent, found := outputSpendStatus(details, vout)
@@ -1762,12 +1757,12 @@ func (w *spvWallet) getWalletTransaction(txHash *chainhash.Hash) (*GetTransactio
 	*/
 }
 
-func confirms(txHeight, curHeight int32) uint32 {
+func confirms(txHeight, curHeight int32) int32 {
 	switch {
-	case curHeight >= txHeight:
-		return uint32(curHeight - txHeight + 1) // positive numbers here, no overflow
+	case txHeight == -1, txHeight > curHeight:
+		return 0
 	default:
-		return 0 // undefined for all other cases
+		return curHeight - txHeight + 1
 	}
 }
 
