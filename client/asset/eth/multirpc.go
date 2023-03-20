@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -871,7 +872,7 @@ func (m *multiRPCClient) getTransaction(ctx context.Context, txHash common.Hash)
 	})
 }
 
-func (m *multiRPCClient) getConfirmedNonce(ctx context.Context, blockNumber int64) (n uint64, err error) {
+func (m *multiRPCClient) getConfirmedNonce(ctx context.Context) (n uint64, err error) {
 	return n, m.withPreferred(ctx, func(ctx context.Context, p *provider) error {
 		n, err = p.ec.PendingNonceAt(ctx, m.address())
 		return err
@@ -983,13 +984,46 @@ func (m *multiRPCClient) withAny(ctx context.Context, f func(context.Context, *p
 	return m.withOne(ctx, providers, f, acceptabilityFilters...)
 }
 
+// withFreshest runs the provider function against known providers in order of
+// best header time until one succeeds or all have failed.
+func (m *multiRPCClient) withFreshest(ctx context.Context, f func(context.Context, *provider) error, acceptabilityFilters ...acceptabilityFilter) error {
+	providers := m.freshnessSortedProviders()
+	return m.withOne(ctx, providers, f, acceptabilityFilters...)
+}
+
 // withPreferred is like withAny, but will prioritize recently used nonce
 // providers.
 func (m *multiRPCClient) withPreferred(ctx context.Context, f func(context.Context, *provider) error, acceptabilityFilters ...acceptabilityFilter) error {
 	return m.withOne(ctx, m.nonceProviderList(), f, acceptabilityFilters...)
 }
 
-// nonceProviderList returns the randomized provider list, but with any recent
+// freshnessSortedProviders generates a list of providers sorted by their header
+// times, newest first.
+func (m *multiRPCClient) freshnessSortedProviders() []*provider {
+	unsorted := m.providerList()
+	type stampedProvider struct {
+		stamp time.Time
+		p     *provider
+	}
+	sps := make([]*stampedProvider, len(unsorted))
+	for i, p := range unsorted {
+		p.tip.RLock()
+		stamp := p.tip.headerStamp
+		p.tip.RUnlock()
+		sps[i] = &stampedProvider{
+			stamp: stamp,
+			p:     p,
+		}
+	}
+	sort.Slice(sps, func(i, j int) bool { return sps[i].stamp.Before(sps[j].stamp) })
+	providers := make([]*provider, len(sps))
+	for i, sp := range sps {
+		providers[i] = sp.p
+	}
+	return providers
+}
+
+// nonceProviderList returns the freshness-sorted provider list, but with any recent
 // nonce provider inserted in the first position.
 func (m *multiRPCClient) nonceProviderList() []*provider {
 	var lastProvider *provider
@@ -999,17 +1033,15 @@ func (m *multiRPCClient) nonceProviderList() []*provider {
 	}
 	m.lastProvider.Unlock()
 
-	m.providerMtx.RLock()
+	freshProviders := m.freshnessSortedProviders()
+
 	providers := make([]*provider, 0, len(m.providers))
-	for _, p := range m.providers {
+	for _, p := range freshProviders {
 		if lastProvider != nil && lastProvider.host == p.host {
 			continue // adding lastProvider below, as preferred provider
 		}
 		providers = append(providers, p)
 	}
-	m.providerMtx.RUnlock()
-
-	shuffleProviders(providers)
 
 	if lastProvider != nil {
 		providers = append([]*provider{lastProvider}, providers...)
@@ -1054,7 +1086,7 @@ func (m *multiRPCClient) address() common.Address {
 }
 
 func (m *multiRPCClient) addressBalance(ctx context.Context, addr common.Address) (bal *big.Int, err error) {
-	return bal, m.withAny(ctx, func(ctx context.Context, p *provider) error {
+	return bal, m.withFreshest(ctx, func(ctx context.Context, p *provider) error {
 		bal, err = p.ec.BalanceAt(ctx, addr, nil /* latest */)
 		return err
 	})
@@ -1123,10 +1155,6 @@ func (m *multiRPCClient) lock() error {
 func (m *multiRPCClient) locked() bool {
 	status, _ := m.creds.wallet.Status()
 	return status != "Unlocked"
-}
-
-func (m *multiRPCClient) pendingTransactions() ([]*types.Transaction, error) {
-	return []*types.Transaction{}, nil
 }
 
 func (m *multiRPCClient) shutdown() {
