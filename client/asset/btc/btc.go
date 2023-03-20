@@ -5328,6 +5328,13 @@ func (btc *baseWallet) RefundBond(ctx context.Context, ver uint16, coinID, scrip
 	return newOutput(txHash, 0, uint64(msgTx.TxOut[0].Value)), nil
 }
 
+// BondsFeeBuffer suggests how much extra may be required for the transaction
+// fees part of required bond reserves when bond rotation is enabled.
+func (btc *baseWallet) BondsFeeBuffer() uint64 {
+	// 150% of the fee buffer portion of the reserves.
+	return 15 * bondsFeeBuffer(btc.segwit, btc.feeRateLimit()) / 10
+}
+
 type utxo struct {
 	txHash  *chainhash.Hash
 	vout    uint32
