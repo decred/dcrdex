@@ -417,6 +417,8 @@ func (w *spvWallet) getBlockHash(blockHeight int64) (*chainhash.Hash, error) {
 	return w.cl.GetBlockHash(blockHeight)
 }
 
+// getBlockHeight gets the mainchain height for the specified block. Returns
+// error for orphaned blocks.
 func (w *spvWallet) getBlockHeight(h *chainhash.Hash) (int32, error) {
 	return w.cl.GetBlockHeight(h)
 }
@@ -1030,28 +1032,38 @@ func (w *spvWallet) walletUnlock(pw []byte) error {
 	return w.Unlock(pw)
 }
 
-func (w *spvWallet) getBlockHeader(blockHash *chainhash.Hash) (*blockHeader, error) {
+// getBlockHeader gets the *blockHeader for the specified block hash. It also
+// returns a bool value to indicate whether this block is a part of main chain.
+// For orphaned blocks header.Confirmations is negative.
+func (w *spvWallet) getBlockHeader(blockHash *chainhash.Hash) (header *blockHeader, mainchain bool, err error) {
 	hdr, err := w.cl.GetBlockHeader(blockHash)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	tip, err := w.cl.BestBlock()
 	if err != nil {
-		return nil, fmt.Errorf("BestBlock error: %v", err)
+		return nil, false, fmt.Errorf("BestBlock error: %v", err)
 	}
 
 	blockHeight, err := w.cl.GetBlockHeight(blockHash)
 	if err != nil {
-		return nil, err
+		return nil, false, err
+	}
+
+	confirmations := int64(-1)
+	mainchain = w.blockIsMainchain(blockHash, blockHeight)
+	if mainchain {
+		confirmations = int64(confirms(blockHeight, tip.Height))
 	}
 
 	return &blockHeader{
-		Hash:          hdr.BlockHash().String(),
-		Confirmations: int64(confirms(blockHeight, tip.Height)),
-		Height:        int64(blockHeight),
-		Time:          hdr.Timestamp.Unix(),
-	}, nil
+		Hash:              hdr.BlockHash().String(),
+		Confirmations:     confirmations,
+		Height:            int64(blockHeight),
+		Time:              hdr.Timestamp.Unix(),
+		PreviousBlockHash: hdr.PrevBlock.String(),
+	}, mainchain, nil
 }
 
 func (w *spvWallet) getBestBlockHeader() (*blockHeader, error) {
@@ -1059,7 +1071,8 @@ func (w *spvWallet) getBestBlockHeader() (*blockHeader, error) {
 	if err != nil {
 		return nil, err
 	}
-	return w.getBlockHeader(hash)
+	hdr, _, err := w.getBlockHeader(hash)
+	return hdr, err
 }
 
 func (w *spvWallet) logFilePath() string {
@@ -1458,7 +1471,6 @@ func (w *spvWallet) getTxOut(txHash *chainhash.Hash, vout uint32, pkScript []byt
 				return nil, 0, fmt.Errorf("wallet transaction %s found, but not enough outputs for vout %d", txHash, vout)
 			}
 			return msgTx.TxOut[vout], confs, nil
-
 		}
 		if txDetails.Block.Hash != (chainhash.Hash{}) {
 			blockHash = &txDetails.Block.Hash
@@ -1711,7 +1723,7 @@ func (w *spvWallet) getWalletTransaction(txHash *chainhash.Hash) (*GetTransactio
 		TimeReceived: uint64(details.Received.Unix()),
 	}
 
-	if details.Block.Height != -1 {
+	if details.Block.Height >= 0 {
 		ret.BlockHash = details.Block.Hash.String()
 		ret.BlockTime = uint64(details.Block.Time.Unix())
 		// ret.BlockHeight = uint64(details.Block.Height)
