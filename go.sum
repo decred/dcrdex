@@ -40,8 +40,8 @@ cloud.google.com/go/storage v1.10.0/go.mod h1:FLPqc6j+Ki4BU591ie1oL6qBQGu2Bl/tZ9
 contrib.go.opencensus.io/exporter/stackdriver v0.13.4/go.mod h1:aXENhDJ1Y4lIg4EUaVTwzvYETVNZk10Pu26tevFKLUc=
 decred.org/cspp/v2 v2.0.0 h1:b4fZrElRufz30rYnBZ2shhC8AjNVTN4i6TMzDi+hk44=
 decred.org/cspp/v2 v2.0.0/go.mod h1:0shJWKTWY3LxZEWGxtbER1Y45+HVjC0WZtj4bctSzCI=
-decred.org/dcrwallet/v2 v2.0.10 h1:ni/27pSDlIi8T/gj4oDYAyaMN+AFQ/ykcudk5UFQ9j4=
-decred.org/dcrwallet/v2 v2.0.10/go.mod h1:q4V2AiAAUBcGerp/jNm8IuN7r3Q9Avv13jhtUNIDzUw=
+decred.org/dcrwallet/v2 v2.0.11 h1:JhR5KAb/x04wzZEoTStbxeUR0r4K7rHDqEnjdM1zpIU=
+decred.org/dcrwallet/v2 v2.0.11/go.mod h1:q4V2AiAAUBcGerp/jNm8IuN7r3Q9Avv13jhtUNIDzUw=
 dmitri.shuralyov.com/gpu/mtl v0.0.0-20190408044501-666a987793e9/go.mod h1:H6x//7gZCb22OMCxBHrMx7a5I7Hp++hsVxbQ4BYO7hU=
 fyne.io/systray v1.10.1-0.20220621085403-9a2652634e93 h1:V2IC9t0Zj9Ur6qDbfhUuzVmIvXKFyxZXRJyigUvovs4=
 fyne.io/systray v1.10.1-0.20220621085403-9a2652634e93/go.mod h1:oM2AQqGJ1AMo4nNqZFYU8xYygSBZkW2hmdJ7n4yjedE=
