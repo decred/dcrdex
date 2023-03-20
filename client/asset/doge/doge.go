@@ -179,6 +179,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		FeeEstimator:             estimateFee,
 		ExternalFeeEstimator:     fetchExternalFee,
 		BlockDeserializer:        dexdoge.DeserializeBlock,
+		AssetID:                  BipID,
 	}
 
 	return btc.BTCCloneWallet(cloneCFG)

@@ -216,6 +216,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		// then, they modified it from the old Bitcoin Core estimatefee by
 		// removing the confirmation target argument.
 		FeeEstimator: estimateFee,
+		AssetID:      BipID,
 	}
 
 	switch cfg.Type {

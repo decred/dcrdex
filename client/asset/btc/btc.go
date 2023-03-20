@@ -388,6 +388,8 @@ type BTCCloneCFG struct {
 	ManualMedianTime bool
 	// OmitRPCOptionsArg is for clones that don't take an options argument.
 	OmitRPCOptionsArg bool
+	// AssetID is the asset ID of the clone.
+	AssetID uint32
 }
 
 // outPoint is the hash and output index of a transaction output.
@@ -1042,6 +1044,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 		// FeeEstimator must default to rpcFeeRate if not set, but set a
 		// specific external estimator:
 		ExternalFeeEstimator: externalFeeEstimator,
+		AssetID:              BipID,
 	}
 
 	switch cfg.Type {
@@ -5207,7 +5210,7 @@ func (btc *baseWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time
 
 	bond := &asset.Bond{
 		Version:    ver,
-		AssetID:    BipID,
+		AssetID:    btc.cloneParams.AssetID,
 		Amount:     amt,
 		CoinID:     toCoinID(&txid, 0),
 		Data:       bondScript,

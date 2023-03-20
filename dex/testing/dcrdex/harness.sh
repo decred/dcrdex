@@ -201,7 +201,9 @@ if [ $LTC_ON -eq 0 ]; then
             "network": "simnet",
             "maxFeeRate": 20,
             "swapConf": 2,
-            "configPath": "${TEST_ROOT}/ltc/alpha/alpha.conf"
+            "configPath": "${TEST_ROOT}/ltc/alpha/alpha.conf",
+            "bondAmt": 10000000,
+            "bondConfs": 1
 EOF
 fi
 
@@ -213,7 +215,9 @@ if [ $BCH_ON -eq 0 ]; then
             "network": "simnet",
             "maxFeeRate": 20,
             "swapConf": 2,
-            "configPath": "${TEST_ROOT}/bch/alpha/alpha.conf"
+            "configPath": "${TEST_ROOT}/bch/alpha/alpha.conf",
+            "bondAmt": 10000000,
+            "bondConfs": 1
 EOF
 fi
 

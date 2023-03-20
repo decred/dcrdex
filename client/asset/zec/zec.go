@@ -219,6 +219,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 		// https://github.com/zcash/zcash/pull/6005
 		ManualMedianTime:  true,
 		OmitRPCOptionsArg: true,
+		AssetID:           BipID,
 	}
 
 	var err error
