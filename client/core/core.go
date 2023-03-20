@@ -65,6 +65,14 @@ const (
 	// consider sharing const for the preimage timeout with the server packages,
 	// or a config response field if it should be considered variable.
 	preimageReqTimeout = 20 * time.Second
+
+	// wsMaxAnomalyCount is the maximum websocket connection anomaly after which
+	// a client receives a notification to check their connectivity.
+	wsMaxAnomalyCount = 3
+	// If a client's websocket connection to a server disconnects before
+	// wsAnomalyDuration since last connect time, the client's websocket
+	// connection anomaly count is increased.
+	wsAnomalyDuration = 60 * time.Minute
 )
 
 var (
@@ -163,6 +171,11 @@ type dexConnection struct {
 
 	spotsMtx sync.RWMutex
 	spots    map[string]*msgjson.Spot
+
+	// anomaliesCount tracks client's connection anomalies.
+	anomaliesCount uint32 // atomic
+	lastConnectMtx sync.RWMutex
+	lastConnect    time.Time
 }
 
 // DefaultResponseTimeout is the default timeout for responses after a request is
@@ -7964,7 +7977,22 @@ func (c *Core) handleConnectEvent(dc *dexConnection, status comms.ConnectionStat
 	topic := TopicDEXDisconnected
 	if status == comms.Connected {
 		topic = TopicDEXConnected
+		dc.lastConnectMtx.Lock()
+		dc.lastConnect = time.Now()
+		dc.lastConnectMtx.Unlock()
 	} else {
+		dc.lastConnectMtx.RLock()
+		lastConnect := dc.lastConnect
+		dc.lastConnectMtx.RUnlock()
+		if atomic.LoadUint32(&dc.anomaliesCount)%wsMaxAnomalyCount == 0 {
+			// Send notification to check connectivity.
+			subject, details := c.formatDetails(TopicDexConnectivity, dc.acct.host)
+			c.notify(newConnEventNote(TopicDexConnectivity, subject, dc.acct.host, dc.status(), details, db.Poke))
+		} else if time.Since(lastConnect) < wsAnomalyDuration {
+			// Increase anomalies count for this connection.
+			atomic.AddUint32(&dc.anomaliesCount, 1)
+		}
+
 		for _, tracker := range dc.trackedTrades() {
 			tracker.setSelfGoverned(true) // reconnect handles unflagging based on fresh market config
 

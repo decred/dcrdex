@@ -436,6 +436,7 @@ type ConnEventNote struct {
 const (
 	TopicDEXConnected    Topic = "DEXConnected"
 	TopicDEXDisconnected Topic = "DEXDisconnected"
+	TopicDexConnectivity Topic = "DEXConnectivity"
 )
 
 func newConnEventNote(topic Topic, subject, host string, status comms.ConnectionStatus, details string, severity db.Severity) *ConnEventNote {

@@ -323,6 +323,11 @@ var originLocale = map[Topic]*translation{
 		subject:  "Server disconnect",
 		template: "%s is disconnected",
 	},
+	// [host]
+	TopicDexConnectivity: {
+		subject:  "Internet Connectivity",
+		template: "Your internet connection to %s is unstable, check your internet connection",
+	},
 	// [host, rule, time, details]
 	TopicPenalized: {
 		subject:  "Server has penalized you",
