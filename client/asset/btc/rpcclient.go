@@ -349,7 +349,7 @@ func (wc *rpcClient) getBlockHash(blockHeight int64) (*chainhash.Hash, error) {
 }
 
 // getBestBlockHash returns the hash of the best block in the longest block
-// chain.
+// chain (aka mainchain).
 func (wc *rpcClient) getBestBlockHash() (*chainhash.Hash, error) {
 	return wc.callHashGetter(methodGetBestBlockHash, nil)
 }
@@ -360,7 +360,8 @@ func (wc *rpcClient) getBestBlockHeader() (*blockHeader, error) {
 	if err != nil {
 		return nil, err
 	}
-	return wc.getBlockHeader(tipHash)
+	hdr, _, err := wc.getBlockHeader(tipHash)
+	return hdr, err
 }
 
 // getBestBlockHeight returns the height of the top mainchain block.
@@ -374,7 +375,7 @@ func (wc *rpcClient) getBestBlockHeight() (int32, error) {
 
 // getChainStamp satisfies chainStamper for manual median time calculations.
 func (wc *rpcClient) getChainStamp(blockHash *chainhash.Hash) (stamp time.Time, prevHash *chainhash.Hash, err error) {
-	hdr, err := wc.getBlockHeader(blockHash)
+	hdr, _, err := wc.getBlockHeader(blockHash)
 	if err != nil {
 		return
 	}
@@ -989,18 +990,23 @@ func (wc *rpcClient) getRPCBlockHeader(blockHash *chainhash.Hash) (*rpcBlockHead
 	return blkHeader, nil
 }
 
-// getBlockHeader gets the *blockHeader for the specified block hash.
-func (wc *rpcClient) getBlockHeader(blockHash *chainhash.Hash) (*blockHeader, error) {
+// getBlockHeader gets the *blockHeader for the specified block hash. It also
+// returns a bool value to indicate whether this block is a part of main chain.
+// For orphaned blocks header.Confirmations is negative (typically -1).
+func (wc *rpcClient) getBlockHeader(blockHash *chainhash.Hash) (header *blockHeader, mainchain bool, err error) {
 	hdr, err := wc.getRPCBlockHeader(blockHash)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return &hdr.blockHeader, nil
+	// RPC wallet must return negative confirmations number for orphaned blocks.
+	mainchain = hdr.Confirmations >= 0
+	return &hdr.blockHeader, mainchain, nil
 }
 
-// getBlockHeight gets the mainchain height for the specified block.
+// getBlockHeight gets the mainchain height for the specified block. Returns
+// error for orphaned blocks.
 func (wc *rpcClient) getBlockHeight(blockHash *chainhash.Hash) (int32, error) {
-	hdr, err := wc.getBlockHeader(blockHash)
+	hdr, _, err := wc.getBlockHeader(blockHash)
 	if err != nil {
 		return -1, err
 	}
