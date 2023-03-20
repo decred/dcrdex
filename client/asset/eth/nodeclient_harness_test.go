@@ -240,11 +240,11 @@ out:
 			// NOTE: Not effectual for providers. waitForMinedRPC
 			// above handles waiting for mined blocks that we assume
 			// have our transactions.
-			txsa, err := ethClient.pendingTransactions()
+			txsa, err := ethClient.(txPoolFetcher).pendingTransactions()
 			if err != nil {
 				return fmt.Errorf("initiator pendingTransactions error: %v", err)
 			}
-			txsb, err := participantEthClient.pendingTransactions()
+			txsb, err := participantEthClient.(txPoolFetcher).pendingTransactions()
 			if err != nil {
 				return fmt.Errorf("participant pendingTransactions error: %v", err)
 			}
@@ -1085,7 +1085,11 @@ func testTransactionReceipt(t *testing.T) {
 }
 
 func testPendingTransactions(t *testing.T) {
-	txs, err := ethClient.pendingTransactions()
+	mf, is := ethClient.(txPoolFetcher)
+	if !is {
+		return
+	}
+	txs, err := mf.pendingTransactions()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2309,7 +2313,7 @@ func TestTokenGasEstimates(t *testing.T) {
 }
 
 func TestConfirmedNonce(t *testing.T) {
-	_, err := ethClient.getConfirmedNonce(ctx, -1)
+	_, err := ethClient.getConfirmedNonce(ctx)
 	if err != nil {
 		t.Fatalf("getConfirmedNonce error: %v", err)
 	}

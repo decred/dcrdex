@@ -125,11 +125,12 @@ type testNode struct {
 	sendTxErr       error
 	simBackend      bind.ContractBackend
 	maxFeeRate      *big.Int
-	pendingTxs      []*types.Transaction
 	tContractor     *tContractor
 	tokenContractor *tTokenContractor
 	contractor      contractor
 	tokenParent     *assetWallet // only set for tokens
+	txConfirmations map[common.Hash]uint32
+	txConfsErr      map[common.Hash]error
 }
 
 func newBalance(current, in, out uint64) *Balance {
@@ -156,11 +157,7 @@ func (n *testNode) chainConfig() *params.ChainConfig {
 	return params.AllEthashProtocolChanges
 }
 
-func (n *testNode) pendingTransactions() ([]*types.Transaction, error) {
-	return n.pendingTxs, nil
-}
-
-func (n *testNode) getConfirmedNonce(context.Context, int64) (uint64, error) {
+func (n *testNode) getConfirmedNonce(context.Context) (uint64, error) {
 	return n.confNonce, n.confNonceErr
 }
 
@@ -249,8 +246,11 @@ func tTx(gasFeeCap, gasTipCap, value uint64, to *common.Address, data []byte) *t
 	})
 }
 
-func (n *testNode) transactionConfirmations(context.Context, common.Hash) (uint32, error) {
-	return 0, nil
+func (n *testNode) transactionConfirmations(_ context.Context, txHash common.Hash) (uint32, error) {
+	if n.txConfirmations == nil {
+		return 0, nil
+	}
+	return n.txConfirmations[txHash], n.txConfsErr[txHash]
 }
 
 func (n *testNode) headerByHash(_ context.Context, txHash common.Hash) (*types.Header, error) {
@@ -259,6 +259,15 @@ func (n *testNode) headerByHash(_ context.Context, txHash common.Hash) (*types.H
 
 func (n *testNode) transactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, *types.Transaction, error) {
 	return n.receipt, n.receiptTx, n.receiptErr
+}
+
+type tMempoolNode struct {
+	*testNode
+	pendingTxs []*types.Transaction
+}
+
+func (n *tMempoolNode) pendingTransactions() ([]*types.Transaction, error) {
+	return n.pendingTxs, nil
 }
 
 type tContractor struct {
@@ -431,16 +440,16 @@ func TestCheckForNewBlocks(t *testing.T) {
 		w := &ETHWallet{
 			assetWallet: &assetWallet{
 				baseWallet: &baseWallet{
-					node: node,
-					addr: node.address(),
-					ctx:  ctx,
-					log:  tLogger,
+					node:       node,
+					addr:       node.address(),
+					ctx:        ctx,
+					log:        tLogger,
+					currentTip: header0,
 				},
 				log:       tLogger.SubLogger("ETH"),
 				tipChange: tipChange,
 				assetID:   BipID,
 			},
-			currentTip: header0,
 		}
 		w.wallets = map[uint32]*assetWallet{BipID: w.assetWallet}
 		w.assetWallet.connected.Store(true)
@@ -537,7 +546,7 @@ func TestSyncStatus(t *testing.T) {
 	}
 }
 
-func newTestNode(assetID uint32) *testNode {
+func newTestNode(assetID uint32) *tMempoolNode {
 	privKey, _ := crypto.HexToECDSA("9447129055a25c8496fca9e5ee1b9463e47e6043ff0c288d07169e8284860e34")
 	addr := common.HexToAddress("2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27")
 	acct := &accounts.Account{
@@ -563,20 +572,22 @@ func newTestNode(assetID uint32) *testNode {
 		c = ttc
 	}
 
-	return &testNode{
-		acct:            acct,
-		addr:            acct.Address,
-		maxFeeRate:      dexeth.GweiToWei(100),
-		baseFee:         dexeth.GweiToWei(100),
-		tip:             dexeth.GweiToWei(2),
-		privKey:         privKey,
-		contractor:      c,
-		tContractor:     tc,
-		tokenContractor: ttc,
+	return &tMempoolNode{
+		testNode: &testNode{
+			acct:            acct,
+			addr:            acct.Address,
+			maxFeeRate:      dexeth.GweiToWei(100),
+			baseFee:         dexeth.GweiToWei(100),
+			tip:             dexeth.GweiToWei(2),
+			privKey:         privKey,
+			contractor:      c,
+			tContractor:     tc,
+			tokenContractor: ttc,
+		},
 	}
 }
 
-func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *testNode, context.CancelFunc) {
+func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, context.CancelFunc) {
 	node := newTestNode(assetID)
 	ctx, cancel := context.WithCancel(context.Background())
 	var c contractor = node.tContractor
@@ -594,6 +605,7 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *testNode, contex
 			gasFeeLimitV:  defaultGasFeeLimit,
 			monitoredTxs:  make(map[common.Hash]*monitoredTx),
 			monitoredTxDB: kvdb.NewMemoryDB(),
+			pendingTxs:    make(map[common.Hash]*pendingTx),
 		},
 		log:                tLogger.SubLogger(strings.ToUpper(dex.BipIDSymbol(assetID))),
 		assetID:            assetID,
@@ -638,7 +650,7 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *testNode, contex
 	return w, aw, node, cancel
 }
 
-func TestBalance(t *testing.T) {
+func TestBalanceWithMempool(t *testing.T) {
 	tinyBal := newBalance(0, 0, 0)
 	tinyBal.Current = big.NewInt(dexeth.GweiFactor - 1)
 
@@ -790,6 +802,141 @@ func TestBalance(t *testing.T) {
 	}
 }
 
+func TestBalanceNoMempool(t *testing.T) {
+
+	const tipHeight = 50
+	const lastCheck = tipHeight - 1
+
+	type tPendingTx struct {
+		*pendingTx
+		confs uint32
+	}
+
+	newPendingTx := func(assetID uint32, out, in, maxFees uint64, confs uint32) *tPendingTx {
+		return &tPendingTx{
+			pendingTx: &pendingTx{
+				assetID:   assetID,
+				out:       out,
+				in:        in,
+				maxFees:   maxFees,
+				stamp:     time.Now(),
+				lastCheck: lastCheck,
+			},
+			confs: confs,
+		}
+	}
+
+	tests := []struct {
+		name          string
+		assetID       uint32
+		pendingTxs    []*tPendingTx
+		expPendingIn  uint64
+		expPendingOut uint64
+		expCountAfter int
+	}{
+		{
+			name:    "single eth tx",
+			assetID: BipID,
+			pendingTxs: []*tPendingTx{
+				newPendingTx(BipID, 1, 0, 2, 0),
+			},
+			expPendingOut: 3,
+			expCountAfter: 1,
+		},
+		{
+			name:    "single tx expired",
+			assetID: BipID,
+			pendingTxs: []*tPendingTx{
+				newPendingTx(BipID, 1, 0, 1, 1),
+			},
+		},
+		{
+			name:    "eth with token fees",
+			assetID: BipID,
+			pendingTxs: []*tPendingTx{
+				newPendingTx(simnetTokenID, 4, 0, 5, 0),
+			},
+			expPendingOut: 5,
+			expCountAfter: 1,
+		},
+		{
+			name:    "token with 1 tx and other ignored assets",
+			assetID: simnetTokenID,
+			pendingTxs: []*tPendingTx{
+				newPendingTx(simnetTokenID, 4, 0, 5, 0),
+				newPendingTx(simnetTokenID+1, 8, 0, 9, 0),
+			},
+			expPendingOut: 4,
+			expCountAfter: 2,
+		},
+		{
+			name:    "token with 1 tx incoming",
+			assetID: simnetTokenID,
+			pendingTxs: []*tPendingTx{
+				newPendingTx(simnetTokenID, 0, 15, 5, 0),
+			},
+			expPendingIn:  15,
+			expCountAfter: 1,
+		},
+		{
+			name:    "eth mixed txs",
+			assetID: BipID,
+			pendingTxs: []*tPendingTx{
+				newPendingTx(BipID, 1, 0, 2, 0),         // 3 eth out
+				newPendingTx(simnetTokenID, 3, 0, 4, 1), // confirmed
+				newPendingTx(simnetTokenID, 5, 0, 6, 0), // 6 eth out
+				newPendingTx(BipID, 0, 7, 1, 0),         // 1 eth out, 7 eth in
+			},
+			expPendingOut: 10,
+			expPendingIn:  7,
+			expCountAfter: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, eth, tNode, shutdown := tassetWallet(tt.assetID)
+			defer shutdown()
+			eth.node = tNode.testNode // no mempool
+			tNode.txConfirmations = make(map[common.Hash]uint32)
+			tNode.txConfsErr = make(map[common.Hash]error)
+			tNode.bal = unlimitedAllowance
+			tNode.tokenContractor.bal = unlimitedAllowance
+
+			eth.tipMtx.Lock()
+			eth.currentTip = &types.Header{Number: new(big.Int).SetUint64(tipHeight)}
+			eth.tipMtx.Unlock()
+
+			for _, pt := range tt.pendingTxs {
+				txHash := common.BytesToHash(encode.RandomBytes(32))
+				eth.pendingTxs[txHash] = pt.pendingTx
+				if pt.confs == 0 {
+					tNode.txConfsErr[txHash] = asset.CoinNotFoundError
+				} else {
+					tNode.txConfirmations[txHash] = pt.confs
+				}
+			}
+
+			bal, err := eth.balanceWithTxPool()
+			if err != nil {
+				t.Fatalf("balanceWithTxPool error: %v", err)
+			}
+
+			if in := dexeth.WeiToGwei(bal.PendingIn); in != tt.expPendingIn {
+				t.Fatalf("wrong PendingIn. wanted %d, got %d", tt.expPendingIn, in)
+			}
+
+			if out := dexeth.WeiToGwei(bal.PendingOut); out != tt.expPendingOut {
+				t.Fatalf("wrong PendingOut. wanted %d, got %d", tt.expPendingOut, out)
+			}
+
+			if len(eth.pendingTxs) != tt.expCountAfter {
+				t.Fatalf("wrong pending tx count after balance check. expected %d, got %d", tt.expCountAfter, len(eth.pendingTxs))
+			}
+		})
+	}
+}
+
 func TestFeeRate(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -874,7 +1021,7 @@ func testRefund(t *testing.T, assetID uint32) {
 	var secretHash [32]byte
 	copy(secretHash[:], encode.RandomBytes(32))
 	v0Contract := dexeth.EncodeContractData(0, secretHash)
-	ss := new(dexeth.SwapState)
+	ss := &dexeth.SwapState{Value: dexeth.GweiToWei(1)}
 	v0Contractor := node.tContractor
 
 	v0Contractor.swapMap[secretHash] = ss
@@ -1034,7 +1181,7 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 	} else {
 		fromAsset = tToken
 		node.tokenContractor.bal = dexeth.GweiToWei(walletBalanceGwei)
-		node.tokenParent.node.(*testNode).bal = dexeth.GweiToWei(walletBalanceGwei)
+		node.tokenParent.node.(*tMempoolNode).bal = dexeth.GweiToWei(walletBalanceGwei)
 	}
 
 	checkBalance := func(wallet *assetWallet, expectedAvailable, expectedLocked uint64, testName string) {
@@ -4887,6 +5034,45 @@ func TestUnusedNonce(t *testing.T) {
 		if test.want != got {
 			t.Fatalf("%q: wanted %v got %v", test.name, test.want, got)
 		}
+	}
+}
+
+func TestFreshProviderList(t *testing.T) {
+
+	tests := []struct {
+		times    []int64
+		expOrder []int
+	}{
+		{
+			times:    []int64{1, 2, 3},
+			expOrder: []int{0, 1, 2},
+		},
+		{
+			times:    []int64{3, 2, 1},
+			expOrder: []int{2, 1, 0},
+		},
+		{
+			times:    []int64{1, 5, 4, 2, 3},
+			expOrder: []int{0, 3, 4, 2, 1},
+		},
+	}
+
+	for i, tt := range tests {
+		t.Run(fmt.Sprintf("test#%d", i), func(t *testing.T) {
+			node := &multiRPCClient{providers: make([]*provider, len(tt.times))}
+			for i, stamp := range tt.times {
+				p := &provider{}
+				p.tip.headerStamp = time.Unix(stamp, 0)
+				p.tip.failCount = i // hi-jacking field for initial sort order
+				node.providers[i] = p
+			}
+			providers := node.freshnessSortedProviders()
+			for i, p := range providers {
+				if p.tip.failCount != tt.expOrder[i] {
+					t.Fatalf("%d'th provider in sorted list is unexpected", i)
+				}
+			}
+		})
 	}
 }
 
