@@ -25,7 +25,7 @@ import (
 )
 
 var (
-	wsEndpoint   = "ws://localhost:38557"
+	wsEndpoint   = "ws://localhost:38559" // beta ws port, with txpool api namespace enabled
 	homeDir      = os.Getenv("HOME")
 	alphaIPCFile = filepath.Join(homeDir, "dextest", "eth", "alpha", "node", "geth.ipc")
 
@@ -45,6 +45,7 @@ func TestMain(m *testing.M) {
 	run := func() (int, error) {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(context.Background())
+		defer cancel()
 		log := dex.StdOutLogger("T", dex.LevelTrace)
 
 		netAddrs, found := dexeth.ContractAddresses[ethContractVersion]
@@ -57,9 +58,6 @@ func TestMain(m *testing.M) {
 		}
 
 		ethClient = newRPCClient(dex.Simnet, []endpoint{{url: wsEndpoint}, {url: alphaIPCFile}}, ethContractAddr, log)
-		defer func() {
-			cancel()
-		}()
 
 		dexeth.ContractAddresses[0][dex.Simnet] = getContractAddrFromFile(contractAddrFile)
 
@@ -154,6 +152,8 @@ func testAccountBalance(t *testing.T, assetID uint32) {
 		t.Fatalf("send error: %v", err)
 	}
 
+	// NOTE: this test does not mine the above sends, and as such the node or
+	// provider for this test must have the txpool api namespace enabled.
 	balAfter, err := ethClient.accountBalance(ctx, assetID, addr)
 	if err != nil {
 		t.Fatalf("accountBalance error: %v", err)
