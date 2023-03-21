@@ -2768,7 +2768,7 @@ func isValidSend(addr string, value uint64, subtract bool) error {
 // canSend ensures that the wallet has enough to cover send value and returns
 // the fee rate and max fee required for the send tx. If isPreEstimate is false,
 // wallet balance must be enough to cover total spend.
-func (w *ETHWallet) canSend(value uint64, isPreEstimate bool) (uint64, *big.Int, error) {
+func (w *ETHWallet) canSend(value uint64, verifyBalance, isPreEstimate bool) (uint64, *big.Int, error) {
 	maxFeeRate, err := w.recommendedMaxFeeRate(w.ctx)
 	if err != nil {
 		return 0, nil, fmt.Errorf("error getting max fee rate: %w", err)
@@ -2776,7 +2776,11 @@ func (w *ETHWallet) canSend(value uint64, isPreEstimate bool) (uint64, *big.Int,
 
 	maxFee := defaultSendGasLimit * dexeth.WeiToGwei(maxFeeRate)
 
-	if !isPreEstimate {
+	if isPreEstimate {
+		maxFee = maxFee * 12 / 10 // 20% buffer
+	}
+
+	if verifyBalance {
 		bal, err := w.Balance()
 		if err != nil {
 			return 0, nil, err
@@ -2795,7 +2799,7 @@ func (w *ETHWallet) canSend(value uint64, isPreEstimate bool) (uint64, *big.Int,
 
 // canSend ensures that the wallet has enough to cover send value and returns
 // the fee rate and max fee required for the send tx.
-func (w *TokenWallet) canSend(value uint64, isPreEstimate bool) (uint64, *big.Int, error) {
+func (w *TokenWallet) canSend(value uint64, verifyBalance, isPreEstimate bool) (uint64, *big.Int, error) {
 	maxFeeRate, err := w.recommendedMaxFeeRate(w.ctx)
 	if err != nil {
 		return 0, nil, fmt.Errorf("error getting max fee rate: %w", err)
@@ -2808,7 +2812,11 @@ func (w *TokenWallet) canSend(value uint64, isPreEstimate bool) (uint64, *big.In
 
 	maxFee := dexeth.WeiToGwei(maxFeeRate) * g.Transfer
 
-	if !isPreEstimate {
+	if isPreEstimate {
+		maxFee = maxFee * 12 / 10 // 20% buffer
+	}
+
+	if verifyBalance {
 		bal, err := w.Balance()
 		if err != nil {
 			return 0, nil, err
@@ -2839,7 +2847,7 @@ func (w *ETHWallet) EstimateSendTxFee(addr string, value, _ uint64, subtract boo
 	if err := isValidSend(addr, value, subtract); err != nil && addr != "" { // fee estimate for a send tx.
 		return 0, false, err
 	}
-	maxFee, _, err := w.canSend(value, addr == "")
+	maxFee, _, err := w.canSend(value, addr != "", true)
 	if err != nil {
 		return 0, false, err
 	}
@@ -2854,7 +2862,7 @@ func (w *TokenWallet) EstimateSendTxFee(addr string, value, _ uint64, subtract b
 	if err := isValidSend(addr, value, subtract); err != nil && addr != "" { // fee estimate for a send tx.
 		return 0, false, err
 	}
-	maxFee, _, err := w.canSend(value, addr == "")
+	maxFee, _, err := w.canSend(value, addr != "", true)
 	if err != nil {
 		return 0, false, err
 	}
@@ -2935,7 +2943,7 @@ func (w *ETHWallet) Send(addr string, value, _ uint64) (asset.Coin, error) {
 		return nil, err
 	}
 
-	maxFee, maxFeeRate, err := w.canSend(value, false)
+	maxFee, maxFeeRate, err := w.canSend(value, true, false)
 	if err != nil {
 		return nil, err
 	}
@@ -2961,7 +2969,7 @@ func (w *TokenWallet) Send(addr string, value, _ uint64) (asset.Coin, error) {
 		return nil, err
 	}
 
-	maxFee, maxFeeRate, err := w.canSend(value, false)
+	maxFee, maxFeeRate, err := w.canSend(value, true, false)
 	if err != nil {
 		return nil, err
 	}
