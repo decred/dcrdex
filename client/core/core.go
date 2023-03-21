@@ -7984,7 +7984,8 @@ func (c *Core) handleConnectEvent(dc *dexConnection, status comms.ConnectionStat
 		dc.lastConnectMtx.RLock()
 		lastConnect := dc.lastConnect
 		dc.lastConnectMtx.RUnlock()
-		if atomic.LoadUint32(&dc.anomaliesCount)%wsMaxAnomalyCount == 0 {
+		anomalies := atomic.LoadUint32(&dc.anomaliesCount)
+		if anomalies != 0 && anomalies%wsMaxAnomalyCount == 0 {
 			// Send notification to check connectivity.
 			subject, details := c.formatDetails(TopicDexConnectivity, dc.acct.host)
 			c.notify(newConnEventNote(TopicDexConnectivity, subject, dc.acct.host, dc.status(), details, db.Poke))
