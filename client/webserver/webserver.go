@@ -284,11 +284,14 @@ func New(cfg *Config) (*WebServer, error) {
 
 	// Middleware
 	if log.Level() == dex.LevelTrace {
-		mux.Use(
-			middleware.RequestLogger(
-				&middleware.DefaultLogFormatter{Logger: &chiLogger{logger: log}},
-			),
-		)
+		mux.Use(middleware.RequestLogger(&middleware.DefaultLogFormatter{
+			Logger: &chiLogger{
+				// Using stdout for these logs because while colored output looks fine in
+				// console, it's inconvenient to deal with in a log file (e.g. hard to grep).
+				Logger: dex.StdOutLogger("WEB", dex.LevelTrace),
+			},
+			//NoColor: false, // we are using colored output here
+		}))
 	}
 	mux.Use(s.securityMiddleware)
 	mux.Use(middleware.Recoverer)
@@ -909,12 +912,12 @@ func folderExists(fp string) bool {
 	return err == nil && stat.IsDir()
 }
 
-// chiLogger is an adaptor around dex.Logger so that it can be used seamlessly
-// with chi library.
+// chiLogger is an adaptor around dex.Logger that satisfies
+// chi/middleware.LoggerInterface for chi's DefaultLogFormatter.
 type chiLogger struct {
-	logger dex.Logger
+	dex.Logger
 }
 
 func (l *chiLogger) Print(v ...interface{}) {
-	l.logger.Trace(v...)
+	l.Trace(v...)
 }
