@@ -3719,7 +3719,7 @@ func (btc *intermediaryWallet) FindRedemption(ctx context.Context, coinID, _ dex
 		return nil, nil, fmt.Errorf("queueFindRedemptionRequest error for redemption %s: %w", outPt, err)
 	}
 
-	go btc.tryRedemptionRequests(ctx, nil, []*findRedemptionReq{req})
+	btc.tryRedemptionRequests(ctx, nil, []*findRedemptionReq{req})
 
 	var result *findRedemptionResult
 	select {
@@ -4325,90 +4325,105 @@ func (btc *intermediaryWallet) prepareRedemptionRequestsForBlockCheck() []*findR
 // and a goroutine is started to check if any contracts in the
 // findRedemptionQueue are redeemed in the new blocks.
 func (btc *intermediaryWallet) reportNewTip(ctx context.Context, newTip *block) {
+	// Lock to avoid concurrent reportNewTip execution for simplicity.
 	btc.tipMtx.Lock()
 	defer btc.tipMtx.Unlock()
 
 	prevTip := btc.currentTip
 	btc.currentTip = newTip
+
 	btc.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.height, prevTip.hash, newTip.height, newTip.hash)
+
 	go btc.tipChange(nil)
 
 	reqs := btc.prepareRedemptionRequestsForBlockCheck()
+	if len(reqs) == 0 {
+		return
+	}
+
 	// Redemption search would be compromised if the starting point cannot
 	// be determined, as searching just the new tip might result in blocks
 	// being omitted from the search operation. If that happens, cancel all
 	// find redemption requests in queue.
 	notifyFatalFindRedemptionError := func(s string, a ...interface{}) {
-		for _, req := range reqs {
-			req.fail("tipChange handler - "+s, a...)
-		}
+		btc.fatalFindRedemptionsError(fmt.Errorf("tipChange handler - "+s, a...), reqs)
 	}
 
-	var startPoint *block
+	startHash := &newTip.hash
+
 	// Check if the previous tip is still part of the mainchain (prevTip confs >= 0).
 	// Redemption search would typically resume from prevTipHeight + 1 unless the
+	// Redemption search would typically resume from prevTip.height + 1 unless the
 	// previous tip was re-orged out of the mainchain, in which case redemption
 	// search will resume from the mainchain ancestor of the previous tip.
 	prevTipHeader, isMainchain, err := btc.tipRedeemer.getBlockHeader(&prevTip.hash)
-	switch {
-	case err != nil:
+	if err != nil {
 		// Redemption search cannot continue reliably without knowing if there
 		// was a reorg, cancel all find redemption requests in queue.
-		notifyFatalFindRedemptionError("getBlockHeader error for prev tip hash %s: %w",
+		notifyFatalFindRedemptionError("tipRedeemer.getBlockHeader error for prev tip hash %s: %w",
 			prevTip.hash, err)
 		return
+	}
 
-	case !isMainchain:
+	if !isMainchain {
 		// The previous tip is no longer part of the mainchain. Crawl blocks
 		// backwards until finding a mainchain block. Start with the block
 		// that is the immediate ancestor to the previous tip.
-		ancestorBlockHash, err := chainhash.NewHashFromStr(prevTipHeader.PreviousBlockHash)
+		ancestorBlockHash, ancestorHeight, err := btc.mainchainAncestor(prevTipHeader.PreviousBlockHash)
 		if err != nil {
-			notifyFatalFindRedemptionError("hash decode error for block %s: %w", prevTipHeader.PreviousBlockHash, err)
+			notifyFatalFindRedemptionError("find mainchain ancestor for prev block: %s: %w", prevTipHeader.PreviousBlockHash, err)
 			return
 		}
-		for {
-			aBlock, isMainchain, err := btc.tipRedeemer.getBlockHeader(ancestorBlockHash)
-			if err != nil {
-				notifyFatalFindRedemptionError("getBlockHeader error for block %s: %w", ancestorBlockHash, err)
-				return
-			}
-			if isMainchain {
-				// Found the mainchain ancestor of previous tip.
-				startPoint = &block{height: aBlock.Height, hash: *ancestorBlockHash}
-				btc.log.Debugf("reorg detected from height %d to %d", aBlock.Height, newTip.height)
-				break
-			}
-			if aBlock.Height == 0 {
-				// Crawled back to genesis block without finding a mainchain ancestor
-				// for the previous tip. Should never happen!
-				notifyFatalFindRedemptionError("no mainchain ancestor for orphaned block %s", prevTipHeader.Hash)
-				return
-			}
-			ancestorBlockHash, err = chainhash.NewHashFromStr(aBlock.PreviousBlockHash)
-			if err != nil {
-				notifyFatalFindRedemptionError("hash decode error for block %s: %w", prevTipHeader.PreviousBlockHash, err)
-				return
-			}
-		}
 
-	case newTip.height-prevTipHeader.Height > 1:
-		// 2 or more blocks mined since last tip, start at prevTip height + 1.
-		afterPrivTip := prevTipHeader.Height + 1
-		hashAfterPrevTip, err := btc.node.getBlockHash(afterPrivTip)
-		if err != nil {
-			notifyFatalFindRedemptionError("getBlockHash error for height %d: %w", afterPrivTip, err)
-			return
-		}
-		startPoint = &block{hash: *hashAfterPrevTip, height: afterPrivTip}
+		btc.log.Debugf("reorg detected during tip change from height %d (%s) to %d (%s)",
+			ancestorHeight, ancestorBlockHash, newTip.height, newTip.hash)
 
-	default:
-		// Just 1 new block since last tip report, search the lone block.
-		startPoint = newTip
+		startHash = ancestorBlockHash // have to recheck orphaned blocks again
 	}
 
-	if len(reqs) > 0 {
-		go btc.tryRedemptionRequests(ctx, &startPoint.hash, reqs)
+	// Run the redemption search from the startHash determined above up
+	// till the current tip height.
+	go btc.tryRedemptionRequests(ctx, startHash, reqs)
+}
+
+// fatalFindRedemptionsError should be called when an error occurs that prevents
+// redemption search for the specified contracts from continuing reliably. The
+// error will be propagated to the seeker(s) of these contracts' redemptions via
+// the registered result channels and the contracts will be removed from the
+// findRedemptionQueue.
+func (btc *intermediaryWallet) fatalFindRedemptionsError(err error, reqs []*findRedemptionReq) {
+	btc.findRedemptionMtx.Lock()
+	btc.log.Debugf("stopping redemption search for %d contracts in queue: %v", len(reqs), err)
+	for _, req := range reqs {
+		req.resultChan <- &findRedemptionResult{
+			err: err,
+		}
+		delete(btc.findRedemptionQueue, req.outPt)
+	}
+	btc.findRedemptionMtx.Unlock()
+}
+
+// mainchainAncestor crawls blocks backwards starting at the provided hash
+// until finding a mainchain block. Returns the first mainchain block found.
+func (btc *intermediaryWallet) mainchainAncestor(blockHashStr string) (*chainhash.Hash, int64, error) {
+	checkHashStr := blockHashStr
+	for {
+		checkHash, err := chainhash.NewHashFromStr(checkHashStr)
+		if err != nil {
+			return nil, 0, fmt.Errorf("couldn't parse string block hash %s: %w", checkHashStr, err)
+		}
+		checkBlock, isMainchain, err := btc.tipRedeemer.getBlockHeader(checkHash)
+		if err != nil {
+			return nil, 0, fmt.Errorf("getblockheader error for block %s: %w", checkHash, err)
+		}
+		if isMainchain {
+			// This is a mainchain block, return the hash and height.
+			return checkHash, checkBlock.Height, nil
+		}
+		if checkBlock.Height == 0 {
+			return nil, 0, fmt.Errorf("no mainchain ancestor for block %s", checkHash)
+		}
+		checkHashStr = checkBlock.PreviousBlockHash
 	}
 }
 
@@ -4435,7 +4450,7 @@ func (btc *intermediaryWallet) trySetRedemptionRequestBlock(req *findRedemptionR
 		return
 	}
 	// Don't update the findRedemptionReq, since the findRedemptionMtx only
-	// protects the map.
+	// protects the map, simply replace it instead.
 	req = &findRedemptionReq{
 		outPt:        req.outPt,
 		blockHash:    blockHash,
@@ -4447,7 +4462,7 @@ func (btc *intermediaryWallet) trySetRedemptionRequestBlock(req *findRedemptionR
 	btc.findRedemptionQueue[req.outPt] = req
 }
 
-// checkRedemptionBlockDetails retrieves the block at blockStr and checks that
+// checkRedemptionBlockDetails retrieves the block at blockHash and checks that
 // the provided pkScript matches the specified outpoint. The transaction's
 // block height is returned.
 func (btc *intermediaryWallet) checkRedemptionBlockDetails(outPt outPoint, blockHash *chainhash.Hash, pkScript []byte) (int32, error) {
