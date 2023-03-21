@@ -4620,6 +4620,55 @@ func TestMarshalMonitoredTx(t *testing.T) {
 	}
 }
 
+// Ensures that a small rise in the base fee between estimation
+// and sending will not cause a failure.
+func TestEstimateVsActualSendFees(t *testing.T) {
+	t.Run("eth", func(t *testing.T) { testEstimateVsActualSendFees(t, BipID) })
+	t.Run("token", func(t *testing.T) { testEstimateVsActualSendFees(t, simnetTokenID) })
+}
+
+func testEstimateVsActualSendFees(t *testing.T, assetID uint32) {
+	w, _, node, shutdown := tassetWallet(assetID)
+	defer shutdown()
+
+	tx := tTx(0, 0, 0, &testAddressA, nil)
+	node.sendTxTx = tx
+	node.tokenContractor.transferTx = tx
+
+	const testAddr = "dd93b447f7eBCA361805eBe056259853F3912E04"
+
+	txFeeEstimator := w.(asset.TxFeeEstimator)
+	fee, _, err := txFeeEstimator.EstimateSendTxFee("", 0, 0, false)
+	if err != nil {
+		t.Fatalf("error estimating fee: %v", err)
+	}
+
+	// Increase the base fee by 10%.
+	node.baseFee = node.baseFee.Mul(node.baseFee, big.NewInt(11))
+	node.baseFee = node.baseFee.Div(node.baseFee, big.NewInt(10))
+
+	if assetID == BipID {
+		node.bal = dexeth.GweiToWei(11e9)
+		canSend := new(big.Int).Sub(node.bal, dexeth.GweiToWei(fee))
+		canSendGwei, err := dexeth.WeiToGweiUint64(canSend)
+		if err != nil {
+			t.Fatalf("error converting canSend to gwei: %v", err)
+		}
+		_, err = w.Send(testAddr, canSendGwei, 0)
+		if err != nil {
+			t.Fatalf("error sending: %v", err)
+		}
+	} else {
+		tokenVal := uint64(10e9)
+		node.tokenContractor.bal = dexeth.GweiToWei(tokenVal)
+		node.bal = dexeth.GweiToWei(fee)
+		_, err = w.Send(testAddr, tokenVal, 0)
+		if err != nil {
+			t.Fatalf("error sending: %v", err)
+		}
+	}
+}
+
 func TestEstimateSendTxFee(t *testing.T) {
 	t.Run("eth", func(t *testing.T) { testEstimateSendTxFee(t, BipID) })
 	t.Run("token", func(t *testing.T) { testEstimateSendTxFee(t, simnetTokenID) })
@@ -4632,6 +4681,9 @@ func testEstimateSendTxFee(t *testing.T, assetID uint32) {
 	maxFeeRate, _ := eth.recommendedMaxFeeRate(eth.ctx)
 	ethFees := dexeth.WeiToGwei(maxFeeRate) * defaultSendGasLimit
 	tokenFees := dexeth.WeiToGwei(maxFeeRate) * tokenGases.Transfer
+
+	ethFees = ethFees * 12 / 10
+	tokenFees = tokenFees * 12 / 10
 
 	const testAddr = "dd93b447f7eBCA361805eBe056259853F3912E04"
 
