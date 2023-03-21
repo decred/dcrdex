@@ -544,7 +544,11 @@ export class WalletConfigForm {
       }
       input.max = getMinMaxVal(opt.max)
       input.min = getMinMaxVal(opt.min)
-      input.valueAsDate = opt.default ? new Date(opt.default * 1000) : new Date()
+      const date = opt.default ? new Date(opt.default * 1000) : new Date()
+      // UI shows Dates in valueAsDate as UTC, but user interprets local. Set a
+      // local date string so the UI displays what the user expects. alt:
+      // input.valueAsDate = dateApplyOffset(date)
+      input.value = dateToString(date)
     } else input.value = opt.default !== null ? opt.default : ''
     input.disabled = Boolean(opt.disablewhenactive && this.assetHasActiveOrders)
     return el
@@ -635,8 +639,10 @@ export class WalletConfigForm {
       finds.push(el)
       const input = Doc.safeSelector(el, 'input') as HTMLInputElement
       if (opt.isboolean) input.checked = isTruthyString(v)
-      else if (opt.isdate) input.valueAsDate = new Date(parseInt(v) * 1000)
-      else input.value = v
+      else if (opt.isdate) {
+        input.value = dateToString(new Date(parseInt(v) * 1000))
+        // alt: input.valueAsDate = dateApplyOffset(...)
+      } else input.value = v
     }
     for (const r of removes) {
       const i = this.configElements.indexOf(r)
@@ -671,9 +677,11 @@ export class WalletConfigForm {
       if (opt.isboolean && opt.key) {
         config[opt.key] = input.checked ? '1' : '0'
       } else if (opt.isdate && opt.key) {
-        const minDate = input.min ? toUnixDate(new Date(input.min)) : Number.MIN_SAFE_INTEGER
-        const maxDate = input.max ? toUnixDate(new Date(input.max)) : Number.MAX_SAFE_INTEGER
-        let date = input.value ? toUnixDate(new Date(input.value)) : 0
+        // Force local time interpretation by appending a time to the date
+        // string, otherwise the Date constructor considers it UTC.
+        const minDate = input.min ? toUnixDate(new Date(input.min + 'T00:00')) : Number.MIN_SAFE_INTEGER
+        const maxDate = input.max ? toUnixDate(new Date(input.max + 'T00:00')) : Number.MAX_SAFE_INTEGER
+        let date = input.value ? toUnixDate(new Date(input.value + 'T00:00')) : 0
         if (date < minDate) date = minDate
         else if (date > maxDate) date = maxDate
         config[opt.key] = '' + date
@@ -1856,7 +1864,21 @@ function toUnixDate (date: Date) {
   return Math.floor(date.getTime() / 1000)
 }
 
-// dateToString converts a javascript date object to a YYYY-MM-DD format string.
+// dateApplyOffset shifts a date by the timezone offset. This is used to make
+// UTC dates show the local date. This can be used to prepare a Date so
+// toISOString generates a local date string. This is also used to trick an html
+// input element to show the local date when setting the valueAsDate field. When
+// reading the date back to JS, the value field should be interpreted as local
+// using the "T00:00" suffix, or the Date in valueAsDate should be shifted in
+// the opposite direction.
+function dateApplyOffset (date: Date) {
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60 * 1000)
+}
+
+// dateToString converts a javascript date object to a YYYY-MM-DD format string,
+// in the local time zone.
 function dateToString (date: Date) {
-  return date.toISOString().split('T')[0]
+  return dateApplyOffset(date).toISOString().split('T')[0]
+  // Another common hack:
+  // date.toLocaleString("sv-SE", { year: "numeric", month: "2-digit", day: "2-digit" })
 }

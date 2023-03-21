@@ -550,7 +550,7 @@ type WalletConfig struct {
 }
 
 // AdjustedBirthday converts WalletConfig.Birthday to a time.Time, and adjusts
-// it so that defaultWalletBirthday <= WalletConfig.Bithday <= now.
+// it so that defaultWalletBirthday <= WalletConfig.Birthday <= now.
 func (cfg *WalletConfig) AdjustedBirthday() time.Time {
 	bday := time.Unix(int64(cfg.Birthday), 0)
 	now := time.Now()
