@@ -615,6 +615,7 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 		atomize:            dexeth.WeiToGwei,
 		maxSwapsInTx:       40,
 		maxRedeemsInTx:     60,
+		pendingTxCheckBal:  new(big.Int),
 	}
 	aw.wallets = map[uint32]*assetWallet{
 		BipID: aw,

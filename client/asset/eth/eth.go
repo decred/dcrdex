@@ -508,6 +508,13 @@ type assetWallet struct {
 
 	maxSwapsInTx   uint64
 	maxRedeemsInTx uint64
+
+	// pendingTxCheckBal is protected by the pendingTxMtx. We use this field
+	// as a secondary check to see if we need to request confirmations for
+	// pending txs, since tips are cached for up to 10 seconds. We check the
+	// status of pending txs if the tip has changed OR if the balance has
+	// changed.
+	pendingTxCheckBal *big.Int
 }
 
 // ETHWallet implements some Ethereum-specific methods.
@@ -712,6 +719,7 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		ui:                 dexeth.UnitInfo,
 		maxSwapsInTx:       perTxGasLimit / maxSwapGas,
 		maxRedeemsInTx:     perTxGasLimit / maxRedeemGas,
+		pendingTxCheckBal:  new(big.Int),
 	}
 
 	logger.Infof("ETH wallet will support a maximum of %d swaps and %d redeems per transaction.",
@@ -1022,6 +1030,7 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 		ui:                 token.UnitInfo,
 		maxSwapsInTx:       perTxGasLimit / maxSwapGas,
 		maxRedeemsInTx:     perTxGasLimit / maxRedeemGas,
+		pendingTxCheckBal:  new(big.Int),
 	}
 
 	w.baseWallet.walletsMtx.Lock()
@@ -3755,7 +3764,7 @@ func (w *assetWallet) checkFindRedemptions() {
 
 // sumPendingTxs sums the expected incoming and outgoing values in unconfirmed
 // transactions stored in pendingTxs. Not used if the node is a txPoolFetcher.
-func (w *assetWallet) sumPendingTxs() (out, in uint64) {
+func (w *assetWallet) sumPendingTxs(bal *big.Int) (out, in uint64) {
 	w.tipMtx.RLock()
 	tip := w.currentTip.Number.Uint64()
 	w.tipMtx.RUnlock()
@@ -3778,11 +3787,13 @@ func (w *assetWallet) sumPendingTxs() (out, in uint64) {
 
 	w.pendingTxMtx.Lock()
 	defer w.pendingTxMtx.Unlock()
+	balanceHasChanged := bal.Cmp(w.pendingTxCheckBal) != 0
+	w.pendingTxCheckBal = bal
 	for txHash, pt := range w.pendingTxs {
 		if !isETH && pt.assetID != w.assetID {
 			continue
 		}
-		if pt.lastCheck == tip {
+		if pt.lastCheck == tip && !balanceHasChanged {
 			// Expect nothing has changed since our last check.
 			addPendingTx(pt)
 			continue
@@ -3828,18 +3839,15 @@ func (w *assetWallet) balanceWithTxPool() (*Balance, error) {
 		}
 	}
 
+	confirmed, err := getBal()
+	if err != nil {
+		return nil, fmt.Errorf("balance error: %v", err)
+	}
+
 	txPoolNode, is := w.node.(txPoolFetcher)
 	if !is {
-		var confirmed *big.Int
 		for {
-			if confirmed == nil {
-				var err error
-				confirmed, err = getBal()
-				if err != nil {
-					return nil, fmt.Errorf("balance error: %v", err)
-				}
-			}
-			out, in := w.sumPendingTxs()
+			out, in := w.sumPendingTxs(confirmed)
 			checkBal, err := getBal()
 			if err != nil {
 				return nil, fmt.Errorf("balance consistency check error: %v", err)
@@ -3863,12 +3871,6 @@ func (w *assetWallet) balanceWithTxPool() (*Balance, error) {
 				PendingIn:  w.evmify(in),
 			}, nil
 		}
-	}
-
-	confirmed, err := getBal()
-
-	if err != nil {
-		return nil, fmt.Errorf("balance error: %v", err)
 	}
 
 	pendingTxs, err := txPoolNode.pendingTransactions()
