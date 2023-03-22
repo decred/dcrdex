@@ -636,7 +636,7 @@ func createWallet(createWalletParams *asset.CreateWalletParams, skipConnect bool
 		if !skipConnect {
 			if err := createAndCheckProviders(context.Background(), walletDir, endpoints,
 				createWalletParams.Net, createWalletParams.Logger); err != nil {
-				return fmt.Errorf("create and check providers problem: %v", err)
+				return fmt.Errorf("create and check providers: %v", err)
 			}
 		}
 		return importKeyToKeyStore(ks, priv, createWalletParams.Pass)

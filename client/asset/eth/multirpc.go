@@ -425,7 +425,7 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 		if !strings.HasSuffix(endpoint, ".ipc") {
 			wsURL, err := url.Parse(endpoint)
 			if err != nil {
-				return fmt.Errorf("Failed to parse url %q", endpoint)
+				return fmt.Errorf("failed to parse url %q: %w", endpoint, err)
 			}
 			host = wsURL.Host
 			ogScheme := wsURL.Scheme
@@ -436,7 +436,8 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 				wsURL.Scheme = "ws"
 			case "ws", "wss":
 			default:
-				return fmt.Errorf("unknown scheme for endpoint %q: %q", endpoint, wsURL.Scheme)
+				return fmt.Errorf("unknown scheme for endpoint %q: %q, expected any of: ws(s)/http(s)",
+					endpoint, wsURL.Scheme)
 			}
 			replaced := ogScheme != wsURL.Scheme
 
@@ -554,10 +555,11 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 	}
 
 	if len(providers) == 0 {
-		return nil, fmt.Errorf("failed to connect")
+		return nil, fmt.Errorf("failed to connect to even single provider among: %s",
+			failedProviders(providers, endpoints))
 	}
 
-	log.Debugf("Connected with %d of %d RPC servers", len(providers), len(endpoints))
+	log.Debugf("Connected with %d of %d RPC providers", len(providers), len(endpoints))
 
 	success = true
 	return providers, nil
@@ -669,23 +671,10 @@ func createAndCheckProviders(ctx context.Context, walletDir string, endpoints []
 	}
 
 	if len(unknownEndpoints) > 0 {
-		providersErr := func(providers []*provider) error {
-			// Remove connected providers from the unknown endpoints for
-			// printing.
-			for i := len(unknownEndpoints) - 1; i >= 0; i-- {
-				for _, p := range providers {
-					if p.endpointAddr == unknownEndpoints[i] {
-						unknownEndpoints = append(unknownEndpoints[:i], unknownEndpoints[i+1:]...)
-						break
-					}
-				}
-			}
-			return fmt.Errorf("could not connect to the following providers: %v", strings.Join(unknownEndpoints, " "))
-		}
-
 		providers, err := connectProviders(ctx, unknownEndpoints, log, big.NewInt(chainIDs[net]), net)
 		if err != nil {
-			return fmt.Errorf("%v: %v", providersErr(providers), err)
+			return fmt.Errorf("expected to successfully connect to at least 1 of these unfamiliar providers: %s",
+				failedProviders(providers, unknownEndpoints))
 		}
 		defer func() {
 			for _, p := range providers {
@@ -693,7 +682,8 @@ func createAndCheckProviders(ctx context.Context, walletDir string, endpoints []
 			}
 		}()
 		if len(providers) != len(unknownEndpoints) {
-			return providersErr(providers)
+			return fmt.Errorf("expected to successfully connect to all of these unfamiliar providers: %s",
+				failedProviders(providers, unknownEndpoints))
 		}
 		if err := checkProvidersCompliance(ctx, providers, net, dex.Disabled /* logger is for testing only */); err != nil {
 			return err
@@ -712,6 +702,20 @@ func createAndCheckProviders(ctx context.Context, walletDir string, endpoints []
 	return nil
 }
 
+// failedProviders builds string message that describes providers we tried to connect
+// to but didn't succeed.
+func failedProviders(succeeded []*provider, tried []string) string {
+	for i := len(tried) - 1; i >= 0; i-- {
+		for _, p := range succeeded {
+			if p.endpointAddr == tried[i] {
+				tried = append(tried[:i], tried[i+1:]...)
+				break
+			}
+		}
+	}
+	return strings.Join(tried, " ")
+}
+
 func (m *multiRPCClient) reconfigure(ctx context.Context, settings map[string]string, walletDir string) error {
 	providerDef := settings[providersKey]
 	if len(providerDef) == 0 {
@@ -719,7 +723,7 @@ func (m *multiRPCClient) reconfigure(ctx context.Context, settings map[string]st
 	}
 	endpoints := strings.Split(providerDef, " ")
 	if err := createAndCheckProviders(ctx, walletDir, endpoints, m.net, m.log); err != nil {
-		return fmt.Errorf("create and check providers problem: %v", err)
+		return fmt.Errorf("create and check providers: %v", err)
 	}
 	providers, err := connectProviders(ctx, endpoints, m.log, m.chainID, m.net)
 	if err != nil {
