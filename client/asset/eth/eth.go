@@ -293,6 +293,8 @@ func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, 
 
 	keyStoreDir := filepath.Join(getWalletDir(dataDir, net), "keystore")
 	ks := keystore.NewKeyStore(keyStoreDir, keystore.LightScryptN, keystore.LightScryptP)
+	// NOTE: If the keystore did not exist, a warning from an internal KeyStore
+	// goroutine may be printed to this effect. Not an issue.
 	return len(ks.Wallets()) > 0, nil
 }
 
@@ -620,8 +622,11 @@ func createWallet(createWalletParams *asset.CreateWalletParams, skipConnect bool
 	// 	return importKeyToNode(node, privateKey, createWalletParams.Pass)
 	case walletTypeRPC:
 		// Make the wallet dir if it does not exist, otherwise we may fail to
-		// write the compliant_providers.json file.
-		if err := os.MkdirAll(walletDir, 0700); err != nil {
+		// write the compliant_providers.json file. Create the keystore
+		// subdirectory as well to avoid a "failed to watch keystore folder"
+		// error from the keystore's internal account cache supervisor.
+		keystoreDir := filepath.Join(walletDir, "keystore")
+		if err := os.MkdirAll(keystoreDir, 0700); err != nil {
 			return err
 		}
 
@@ -633,7 +638,7 @@ func createWallet(createWalletParams *asset.CreateWalletParams, skipConnect bool
 		endpoints := strings.Split(providerDef, providerDelimiter)
 
 		// TODO: This procedure may actually work for walletTypeGeth too.
-		ks := keystore.NewKeyStore(filepath.Join(walletDir, "keystore"), keystore.LightScryptN, keystore.LightScryptP)
+		ks := keystore.NewKeyStore(keystoreDir, keystore.LightScryptN, keystore.LightScryptP)
 
 		priv, err := crypto.ToECDSA(privateKey)
 		if err != nil {
