@@ -19,6 +19,13 @@ import (
 	"github.com/decred/dcrd/rpcclient/v7"
 )
 
+const (
+	mainnetNU5ActivationHeight        = 1687104
+	testnetNU5ActivationHeight        = 1842420
+	testnetSaplingActivationHeight    = 280000
+	testnetOverwinterActivationHeight = 207500
+)
+
 var (
 	tLotSize uint64 = 1e6
 	tZEC            = &dex.Asset{
@@ -44,7 +51,6 @@ func TestWallet(t *testing.T) {
 			Node:     "beta",
 			Filename: "beta.conf",
 		},
-		Unencrypted: true,
 	})
 }
 

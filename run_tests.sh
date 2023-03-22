@@ -52,6 +52,7 @@ go test -c -o /dev/null -tags harness ./client/asset/ltc
 go test -c -o /dev/null -tags harness ./client/asset/bch
 go test -c -o /dev/null -tags harness ./client/asset/eth
 go test -c -o /dev/null -tags rpclive ./client/asset/eth
+go test -c -o /dev/null -tags harness ./client/asset/zec
 go test -c -o /dev/null -tags dcrlive ./server/asset/dcr
 go test -c -o /dev/null -tags btclive ./server/asset/btc
 go test -c -o /dev/null -tags ltclive ./server/asset/ltc
