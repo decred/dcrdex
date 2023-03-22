@@ -705,15 +705,17 @@ func createAndCheckProviders(ctx context.Context, walletDir string, endpoints []
 // failedProviders builds string message that describes providers we tried to connect
 // to but didn't succeed.
 func failedProviders(succeeded []*provider, tried []string) string {
-	for i := len(tried) - 1; i >= 0; i-- {
-		for _, p := range succeeded {
-			if p.endpointAddr == tried[i] {
-				tried = append(tried[:i], tried[i+1:]...)
-				break
-			}
+	ok := make(map[string]bool)
+	for _, p := range succeeded {
+		ok[p.endpointAddr] = true
+	}
+	notOK := make([]string, 0, len(tried)-len(succeeded))
+	for _, addr := range tried {
+		if !ok[addr] {
+			notOK = append(notOK, domain(addr))
 		}
 	}
-	return strings.Join(tried, " ")
+	return strings.Join(notOK, " ")
 }
 
 func (m *multiRPCClient) reconfigure(ctx context.Context, settings map[string]string, walletDir string) error {
