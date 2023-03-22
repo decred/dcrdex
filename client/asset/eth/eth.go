@@ -3787,7 +3787,7 @@ func (w *assetWallet) sumPendingTxs(bal *big.Int) (out, in uint64) {
 
 	w.pendingTxMtx.Lock()
 	defer w.pendingTxMtx.Unlock()
-	balanceHasChanged := bal.Cmp(w.pendingTxCheckBal) != 0
+	balanceHasChanged := w.pendingTxCheckBal == nil || bal.Cmp(w.pendingTxCheckBal) != 0
 	w.pendingTxCheckBal = bal
 	for txHash, pt := range w.pendingTxs {
 		if !isETH && pt.assetID != w.assetID {
