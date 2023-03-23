@@ -1394,10 +1394,10 @@ func TestAuxiliary(t *testing.T) {
 	}
 }
 
-// TestCheckAddress checks that addresses are parsing or not parsing as
+// TestCheckSwapAddress checks that addresses are parsing or not parsing as
 // expected.
-func TestCheckAddress(t *testing.T) {
-	btc, shutdown := testBackend(false)
+func TestCheckSwapAddress(t *testing.T) {
+	btc, shutdown := testBackend(false) // non-segwit
 	defer shutdown()
 
 	type test struct {
@@ -1405,18 +1405,37 @@ func TestCheckAddress(t *testing.T) {
 		wantErr bool
 	}
 	tests := []test{
-		{"", true},
-		{"18Zpft83eov56iESWuPpV8XFLJ1b8gMZy7", false},                                 // p2pk
-		{"3GD2fSQxhkXDAW66i6JBwCqhLFSvhMNrtJ", false},                                 // p2pkh
-		{"03aab68960ac1cc2a4151e40c530fcf32284afaed0cebbaec98500c8f3c491d50b", false}, // p2sh
-		{"bc1qq3wc0u7x0nezw3hfjkh45ffk09gm4ghl0k7dwe", false},                         // p2wpkh
-		{"bc1qdn28r3yr790mjzadkd79sgdkm92jdfq6j5zxsz6w0j9hvwsmr4ys7yn244", false},     // p2wskh
-		{"28Zpft83eov56iESWuPpV8XFLJ1b8gMZy7", true},                                  // wrong network
-		{"3GD2fSQxhkXDAW66i6JBwCqhLFSvhMNrtO", true},                                  // capital letter O not base 58
-		{"3GD2fSQx", true},
+		{"", true}, // "unknown format"
+		{"18Zpft83eov56iESWuPpV8XFLJ1b8gMZy7", false},                                // p2pkh (ok)
+		{"3GD2fSQxhkXDAW66i6JBwCqhLFSvhMNrtJ", true},                                 // p2sh
+		{"03aab68960ac1cc2a4151e40c530fcf32284afaed0cebbaec98500c8f3c491d50b", true}, // pubkey (not really address)
+		{"bc1qq3wc0u7x0nezw3hfjkh45ffk09gm4ghl0k7dwe", true},                         // p2wpkh (segwit)
+		{"bc1qdn28r3yr790mjzadkd79sgdkm92jdfq6j5zxsz6w0j9hvwsmr4ys7yn244", true},     // p2wsh
+		{"28Zpft83eov56iESWuPpV8XFLJ1b8gMZy7", true},                                 // wrong network (checksum mismatch)
+		{"3GD2fSQxhkXDAW66i6JBwCqhLFSvhMNrtO", true},                                 // capital letter O not base 58 (unknown format)
+		{"3GD2fSQx", true}, // checksum mismatch
 	}
 	for _, test := range tests {
-		if btc.CheckAddress(test.addr) != !test.wantErr {
+		if btc.CheckSwapAddress(test.addr) != !test.wantErr {
+			t.Fatalf("wantErr = %t, address = %s", test.wantErr, test.addr)
+		}
+	}
+
+	btcSegwit, shutdown := testBackend(true) // segwit
+	defer shutdown()
+
+	tests = []test{
+		{"18Zpft83eov56iESWuPpV8XFLJ1b8gMZy7", true},                                 // p2pkh (non-segwit)
+		{"3GD2fSQxhkXDAW66i6JBwCqhLFSvhMNrtJ", true},                                 // p2sh
+		{"03aab68960ac1cc2a4151e40c530fcf32284afaed0cebbaec98500c8f3c491d50b", true}, // pubkey (not really address)
+		{"bc1qq3wc0u7x0nezw3hfjkh45ffk09gm4ghl0k7dwe", false},                        // p2wpkh (ok)
+		{"bc1qdn28r3yr790mjzadkd79sgdkm92jdfq6j5zxsz6w0j9hvwsmr4ys7yn244", true},     // p2wsh
+		{"28Zpft83eov56iESWuPpV8XFLJ1b8gMZy7", true},                                 // wrong network (checksum mismatch)
+		{"3GD2fSQxhkXDAW66i6JBwCqhLFSvhMNrtO", true},                                 // capital letter O not base 58 (unknown format)
+		{"3GD2fSQx", true}, // checksum mismatch
+	}
+	for _, test := range tests {
+		if btcSegwit.CheckSwapAddress(test.addr) != !test.wantErr {
 			t.Fatalf("wantErr = %t, address = %s", test.wantErr, test.addr)
 		}
 	}

@@ -416,7 +416,7 @@ func (b *TBackend) Redemption(redemptionID, contractID, contractData []byte) (as
 func (b *TBackend) BlockChannel(size int) <-chan *asset.BlockUpdate { return nil }
 func (b *TBackend) InitTxSize() uint32                              { return dummySize }
 func (b *TBackend) InitTxSizeBase() uint32                          { return dummySize / 2 }
-func (b *TBackend) CheckAddress(string) bool                        { return b.addrChecks }
+func (b *TBackend) CheckSwapAddress(string) bool                    { return b.addrChecks }
 func (b *TBackend) addUTXO(coin *msgjson.Coin, val uint64) {
 	b.utxos[hex.EncodeToString(coin.ID)] = val
 }

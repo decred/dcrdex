@@ -429,7 +429,7 @@ func (a *TBackend) BlockChannel(size int) <-chan *asset.BlockUpdate  { return a.
 func (a *TBackend) InitTxSize() uint32                               { return 100 }
 func (a *TBackend) InitTxSizeBase() uint32                           { return 66 }
 func (a *TBackend) FeeRate(context.Context) (uint64, error)          { return 10, nil }
-func (a *TBackend) CheckAddress(string) bool                         { return true }
+func (a *TBackend) CheckSwapAddress(string) bool                     { return true }
 func (a *TBackend) Connect(context.Context) (*sync.WaitGroup, error) { return nil, nil }
 func (a *TBackend) ValidateSecret(secret, contract []byte) bool      { return true }
 func (a *TBackend) Synced() (bool, error)                            { return true, nil }

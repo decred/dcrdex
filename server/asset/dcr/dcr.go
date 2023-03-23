@@ -583,14 +583,20 @@ func (dcr *Backend) ValidateContract(contract []byte) error {
 	return err
 }
 
-// CheckAddress checks that the given address is parseable.
-func (dcr *Backend) CheckAddress(addr string) bool {
-	_, err := stdaddr.DecodeAddress(addr, chainParams)
+// CheckSwapAddress checks that the given address is parseable and of the
+// required type for a swap contract script (p2pkh).
+func (dcr *Backend) CheckSwapAddress(addr string) bool {
+	dcrAddr, err := stdaddr.DecodeAddress(addr, chainParams)
 	if err != nil {
 		dcr.log.Errorf("DecodeAddress error for %s: %v", addr, err)
+		return false
 	}
-
-	return err == nil
+	if _, ok := dcrAddr.(*stdaddr.AddressPubKeyHashEcdsaSecp256k1V0); !ok {
+		dcr.log.Errorf("CheckSwapAddress for %s failed: not a pubkey-hash-ecdsa-secp256k1 address (%T)",
+			dcrAddr.String(), dcrAddr)
+		return false
+	}
+	return true
 }
 
 // TxData is the raw transaction bytes. SPV clients rebroadcast the transaction
