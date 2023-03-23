@@ -1503,9 +1503,9 @@ func TestAuxiliary(t *testing.T) {
 	}
 }
 
-// TestCheckAddress checks that addresses are parsing or not parsing as
+// TestCheckSwapAddress checks that addresses are parsing or not parsing as
 // expected.
-func TestCheckAddress(t *testing.T) {
+func TestCheckSwapAddress(t *testing.T) {
 	dcr, shutdown := testBackend()
 	defer shutdown()
 
@@ -1516,16 +1516,16 @@ func TestCheckAddress(t *testing.T) {
 	tests := []test{
 		{"", true},
 		{"DsYXjAK3UiTVN9js8v9G21iRbr2wPty7f12", false},
-		{"DeZcGyCtPq7sTvACZupjT3BC1tsSEsKaYL4", false},
-		{"DSo9Qw4FZLTwFL6fg2T9XPoJA8sFoZ4idZ7", false},
-		{"DkM3W1518RharMSnqSiJCCGQ7RikMKCATeRvRwEW8vy1B2fjTd4Xi", false},
-		{"Dce4vLzzENaZT7D2Wq5crRZ4VwfYMDMWkD9", false},
-		{"TsYXjAK3UiTVN9js8v9G21iRbr2wPty7f12", true},
-		{"Dce4vLzzENaZT7D2Wq5crRZ4VwfYMDMWkD0", true}, // capital letter O not base 58
+		{"DeZcGyCtPq7sTvACZupjT3BC1tsSEsKaYL4", true},                   // valid, but AddressPubKeyHashEd25519V0
+		{"DSo9Qw4FZLTwFL6fg2T9XPoJA8sFoZ4idZ7", true},                   // valid, but AddressPubKeyHashSchnorrSecp256k1V0
+		{"DkM3W1518RharMSnqSiJCCGQ7RikMKCATeRvRwEW8vy1B2fjTd4Xi", true}, // valid, but AddressPubKeyEcdsaSecp256k1V0
+		{"Dce4vLzzENaZT7D2Wq5crRZ4VwfYMDMWkD9", true},                   // valid, but AddressScriptHashV0
+		{"TsYXjAK3UiTVN9js8v9G21iRbr2wPty7f12", true},                   // wrong network
+		{"Dce4vLzzENaZT7D2Wq5crRZ4VwfYMDMWkD0", true},                   // capital letter O not base 58
 		{"Dce4vLzzE", true},
 	}
 	for _, test := range tests {
-		if dcr.CheckAddress(test.addr) != !test.wantErr {
+		if dcr.CheckSwapAddress(test.addr) != !test.wantErr {
 			t.Fatalf("wantErr = %t, address = %s", test.wantErr, test.addr)
 		}
 	}
