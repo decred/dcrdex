@@ -286,11 +286,9 @@ func New(cfg *Config) (*WebServer, error) {
 	if log.Level() == dex.LevelTrace {
 		mux.Use(middleware.RequestLogger(&middleware.DefaultLogFormatter{
 			Logger: &chiLogger{
-				// Using stdout for these logs because while colored output looks fine in
-				// console, it's inconvenient to deal with in a log file (e.g. hard to grep).
-				Logger: dex.StdOutLogger("WEB", dex.LevelTrace),
+				Logger: log,
 			},
-			//NoColor: false, // we are using colored output here
+			NoColor: true, // colored output is awkward to deal with in log file
 		}))
 	}
 	mux.Use(s.securityMiddleware)
