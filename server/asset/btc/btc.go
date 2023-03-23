@@ -627,13 +627,28 @@ func (*Backend) ValidateFeeRate(contract *asset.Contract, reqFeeRate uint64) boo
 	return contract.FeeRate() >= reqFeeRate
 }
 
-// CheckAddress checks that the given address is parseable.
-func (btc *Backend) CheckAddress(addr string) bool {
-	_, err := btc.decodeAddr(addr, btc.chainParams)
+// CheckSwapAddress checks that the given address is parseable, and suitable as
+// a redeem address in a swap contract script.
+func (btc *Backend) CheckSwapAddress(addr string) bool {
+	btcAddr, err := btc.decodeAddr(addr, btc.chainParams)
 	if err != nil {
-		btc.log.Errorf("CheckAddress for %s failed: %v", addr, err)
+		btc.log.Errorf("CheckSwapAddress for %s failed: %v", addr, err)
+		return false
 	}
-	return err == nil
+	if btc.segwit {
+		if _, ok := btcAddr.(*btcutil.AddressWitnessPubKeyHash); !ok {
+			btc.log.Errorf("CheckSwapAddress for %s failed: not a witness-pubkey-hash address (%T)",
+				btcAddr.String(), btcAddr)
+			return false
+		}
+	} else {
+		if _, ok := btcAddr.(*btcutil.AddressPubKeyHash); !ok {
+			btc.log.Errorf("CheckSwapAddress for %s failed: not a pubkey-hash address (%T)",
+				btcAddr.String(), btcAddr)
+			return false
+		}
+	}
+	return true
 }
 
 // TxData is the raw transaction bytes. SPV clients rebroadcast the transaction

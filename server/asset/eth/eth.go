@@ -607,8 +607,8 @@ func (eth *baseBackend) ValidateCoinID(coinID []byte) (string, error) {
 	return txHash.String(), nil
 }
 
-// CheckAddress checks that the given address is parseable.
-func (eth *baseBackend) CheckAddress(addr string) bool {
+// CheckSwapAddress checks that the given address is parseable.
+func (eth *baseBackend) CheckSwapAddress(addr string) bool {
 	return common.IsHexAddress(addr)
 }
 
