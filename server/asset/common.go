@@ -64,8 +64,9 @@ type Backend interface {
 	InitTxSize() uint32
 	// InitTxSizeBase is InitTxSize not including an input.
 	InitTxSizeBase() uint32
-	// CheckAddress checks that the given address is parseable.
-	CheckAddress(string) bool
+	// CheckSwapAddress checks that the given address is parseable, and suitable
+	// as a redeem address in a swap contract script or initiation.
+	CheckSwapAddress(string) bool
 	// ValidateCoinID checks the coinID to ensure it can be decoded, returning a
 	// human-readable string if it is valid.
 	// Note: ValidateCoinID is NOT used for funding coin IDs for account-based

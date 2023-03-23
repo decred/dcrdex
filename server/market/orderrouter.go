@@ -911,7 +911,7 @@ func (r *OrderRouter) checkPrefixTrade(assets *assetSet, lotSize uint64, prefix 
 		return rpcErr
 	}
 	// Check that the address is valid.
-	if !assets.receiving.Backend.CheckAddress(trade.Address) {
+	if !assets.receiving.Backend.CheckSwapAddress(trade.Address) {
 		return msgjson.NewError(msgjson.OrderParameterError, "address doesn't check")
 	}
 	// Quantity cannot be zero, and must be an integral multiple of the lot size.
