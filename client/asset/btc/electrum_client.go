@@ -52,9 +52,6 @@ type electrumWalletClient interface {
 	CheckAddress(ctx context.Context, addr string) (valid, mine bool, err error)
 	SignTx(ctx context.Context, walletPass string, psbtB64 string) ([]byte, error)
 	GetPrivateKeys(ctx context.Context, walletPass, addr string) (string, error)
-	PayTo(ctx context.Context, walletPass string, addr string, amtBTC float64, feeRate float64) ([]byte, error)
-	PayToFromCoinsAbsFee(ctx context.Context, walletPass string, fromCoins []string, addr string, amtBTC float64, absFee float64) ([]byte, error)
-	Sweep(ctx context.Context, walletPass string, addr string, feeRate float64) ([]byte, error)
 	GetWalletTxConfs(ctx context.Context, txid string) (int, error)     // shortcut if owned
 	GetRawTransaction(ctx context.Context, txid string) ([]byte, error) // wallet method
 	GetAddressHistory(ctx context.Context, addr string) ([]*electrum.GetAddressHistoryResult, error)

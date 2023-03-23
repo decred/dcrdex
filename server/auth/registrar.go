@@ -71,7 +71,7 @@ func (auth *AuthManager) handlePreValidateBond(conn comms.Link, msg *msgjson.Mes
 	assetID := preBond.AssetID
 	bondAsset, ok := auth.bondAssets[assetID]
 	if !ok {
-		return msgjson.NewError(msgjson.BondError, "only DCR bonds supported presently")
+		return msgjson.NewError(msgjson.BondError, "%s does not support bonds", dex.BipIDSymbol(assetID))
 	}
 
 	// Create an account.Account from the provided pubkey.
@@ -157,7 +157,7 @@ func (auth *AuthManager) handlePostBond(conn comms.Link, msg *msgjson.Message) *
 	assetID := postBond.AssetID
 	bondAsset, ok := auth.bondAssets[assetID]
 	if !ok {
-		return msgjson.NewError(msgjson.BondError, "only DCR bonds supported presently")
+		return msgjson.NewError(msgjson.BondError, "%s does not support bonds", dex.BipIDSymbol(assetID))
 	}
 
 	// Create an account.Account from the provided pubkey.

@@ -2018,7 +2018,7 @@ func (btc *baseWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate uin
 
 	if sum > avail-reserves {
 		if trySplit {
-			return nil, false, 0, errors.New("eats bond reserves")
+			return nil, false, 0, errors.New("balance too low to both fund order and maintain bond reserves")
 		}
 
 		kept := leastOverFund(reserves, utxos)
@@ -4986,7 +4986,15 @@ func (btc *baseWallet) bondSpent(amt uint64) (reserved int64, unspent uint64) {
 	return btc.bondReservesEnforced, btc.bondReservesUsed
 }
 
-// RegisterUnspent
+// RegisterUnspent should be called once for every configured DEX with existing
+// unspent bond amounts, prior to login, which is when reserves for future bonds
+// are then added given the actual account tier, target tier, and this combined
+// existing bonds amount. This must be used before ReserveBondFunds, which
+// begins reserves enforcement provided a future amount that may be required
+// before the existing bonds are refunded. No reserves enforcement is enabled
+// until ReserveBondFunds is called, even with a future value of 0. A wallet
+// that is not enforcing reserves, but which has unspent bonds should use this
+// method to facilitate switching to the wallet for bonds in future.
 func (btc *baseWallet) RegisterUnspent(inBonds uint64) {
 	btc.reservesMtx.Lock()
 	defer btc.reservesMtx.Unlock()
@@ -5002,7 +5010,57 @@ func (btc *baseWallet) RegisterUnspent(inBonds uint64) {
 	}
 }
 
-// ReserveBondFunds
+// ReserveBondFunds increases the bond reserves to accommodate a certain nominal
+// amount of future bonds, or reduces the amount if a negative value is
+// provided. If indicated, updating the reserves will require sufficient
+// available balance, otherwise reserves will be adjusted regardless and the
+// funds are pre-reserved. This returns false if the available balance was
+// insufficient iff the caller requested it be respected, otherwise it always
+// returns true (success).
+//
+// The reserves enabled with this method are enforced when funding transactions
+// (e.g. regular withdraws/sends or funding orders), and deducted from available
+// balance. Amounts may be reserved beyond the available balance, but only the
+// amount that is offset by the available balance is reflected in the locked
+// balance category. Like funds locked in swap contracts, the caller must
+// supplement balance reporting with known bond amounts. However, via
+// RegisterUnspent, the wallet is made aware of pre-existing unspent bond
+// amounts (cumulative) that will eventually be spent with RefundBond.
+//
+// If this wallet is enforcing reserves (this method has been called, even with
+// a future value of zero), when new bonds are created the nominal bond amount
+// is deducted from the enforced reserves; when bonds are spent with RefundBond,
+// the nominal bond amount is added back into the enforced reserves. That is,
+// when there are no active bonds, the locked balance category will reflect the
+// entire amount requested with ReserveBondFunds (plus a fee buffer, see below),
+// and when bonds are created with MakeBondTx, the locked amount decreases since
+// that portion of the reserves are now held in inaccessible UTXOs, the amounts
+// of which the caller tracks independently. When spent with RefundBond, that
+// same *nominal* bond value is added back to the enforced reserves amount.
+//
+// The amounts requested for bond reserves should be the nominal amounts of the
+// bonds, but the reserved amount reflected in the locked balance category will
+// include a considerable buffer for transaction fees. Therefore when the full
+// amount of the reserves are presently locked in unspent bonds, the locked
+// balance will include this fee buffer while the wallet is enforcing reserves.
+//
+// Until this method is called, reserves enforcement is disabled, and any
+// unspent bonds registered with RegisterUnspent do not go into the enforced
+// reserves when spent. In this way, all Bonder wallets remain aware of the
+// total nominal value of unspent bonds even if the wallet is not presently
+// being used to maintain a target bonding amount that necessitates reserves
+// enforcement.
+//
+// A negative value may be provided to reduce allocated reserves. When the
+// amount is reduced by the same amount it was previously increased by both
+// ReserveBondFunds and RegisterUnspent, reserves enforcement including fee
+// padding is disabled. Consider the following example: on startup, .2 BTC of
+// existing unspent bonds are registered via RegisterUnspent, then on login and
+// auth with the relevant DEX host, .4 BTC of future bond reserves are requested
+// with ReserveBondFunds to maintain a configured target tier given the current
+// tier and amounts of the existing unspent bonds. To disable reserves, the
+// client would call ReserveBondFunds with -.6 BTC, which the wallet's internal
+// accounting recognizes as complete removal of the reserves.
 func (btc *baseWallet) ReserveBondFunds(future int64, respectBalance bool) bool {
 	btc.reservesMtx.Lock()
 	defer btc.reservesMtx.Unlock()
