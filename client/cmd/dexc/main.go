@@ -69,9 +69,6 @@ func runCore() error {
 
 	// Initialize logging.
 	utc := !cfg.LocalLogs
-	if cfg.Net == dex.Simnet {
-		utc = false
-	}
 	logMaker := initLogging(cfg.DebugLevel, utc)
 	log = logMaker.Logger("DEXC")
 	log.Infof("%s version %v (Go version %s)", appName, Version, runtime.Version())
