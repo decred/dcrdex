@@ -403,12 +403,11 @@ if [ ! -z "$GODAEMON" ]; then
 
       NODE_CONF="${OMEGA_DIR}/gonode.conf"
       CLIENT_CONF="${OMEGA_DIR}/goctl.conf"
-      OMEGA_RPC_PORT=21558
 
 
 cat > "${NODE_CONF}" <<EOF
 addpeer=127.0.0.1:${ALPHA_LISTEN_PORT}
-listen=:21577
+listen=:${OMEGA_LISTEN_PORT}
 rpcuser=user
 rpcpass=pass
 rpclisten=0.0.0.0:${OMEGA_RPC_PORT}

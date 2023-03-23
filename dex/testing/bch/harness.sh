@@ -25,5 +25,7 @@ export DELTA_ADDRESS="bchreg:qzhru360ks09fgzuh0ycpvslslvpj72ulqlw5j6ksy"
 export NEW_WALLET_CMD="./\$1 createwallet \$2"
 export GODAEMON="go run github.com/gcash/bchd@v0.19.0"
 export GOCLIENT="go run github.com/gcash/bchd/cmd/bchctl@v0.19.0"
+export OMEGA_LISTEN_PORT=21577
+export OMEGA_RPC_PORT=21558
 # Run the harness
 ../btc/base-harness.sh
