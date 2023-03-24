@@ -1523,6 +1523,91 @@ func (s *WebServer) apiMarketReport(w http.ResponseWriter, r *http.Request) {
 	}, s.indent)
 }
 
+func (s *WebServer) apiShieldedStatus(w http.ResponseWriter, r *http.Request) {
+	var assetID uint32
+	if !readPost(w, r, &assetID) {
+		return
+	}
+	status, err := s.core.ShieldedStatus(assetID)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error getting shielded balances: %w", err))
+		return
+	}
+	writeJSON(w, &struct {
+		OK       bool                  `json:"ok"`
+		Balances *asset.ShieldedStatus `json:"status"`
+	}{
+		OK:       true,
+		Balances: status,
+	}, s.indent)
+}
+
+func (s *WebServer) apiNewShieldedAddress(w http.ResponseWriter, r *http.Request) {
+	var assetID uint32
+	if !readPost(w, r, &assetID) {
+		return
+	}
+	addr, err := s.core.NewShieldedAddress(assetID)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error getting new shielded address: %w", err))
+		return
+	}
+	writeJSON(w, &struct {
+		OK      bool   `json:"ok"`
+		Address string `json:"address"`
+	}{
+		OK:      true,
+		Address: addr,
+	}, s.indent)
+}
+
+type shieldUnshieldForm struct {
+	AssetID uint32 `json:"assetID"`
+	Amount  uint64 `json:"amt"`
+}
+
+func (s *WebServer) apiShieldFunds(w http.ResponseWriter, r *http.Request) {
+	var form shieldUnshieldForm
+	if !readPost(w, r, &form) {
+		return
+	}
+	_, err := s.core.ShieldFunds(form.AssetID, form.Amount)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error shielding funds: %w", err))
+		return
+	}
+	writeJSON(w, simpleAck(), s.indent)
+}
+
+func (s *WebServer) apiUnshieldFunds(w http.ResponseWriter, r *http.Request) {
+	var form shieldUnshieldForm
+	if !readPost(w, r, &form) {
+		return
+	}
+	_, err := s.core.UnshieldFunds(form.AssetID, form.Amount)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error unshielding funds: %w", err))
+		return
+	}
+	writeJSON(w, simpleAck(), s.indent)
+}
+
+func (s *WebServer) apiSendShielded(w http.ResponseWriter, r *http.Request) {
+	var form struct {
+		shieldUnshieldForm
+		ToAddress string `json:"toAddress"`
+	}
+	if !readPost(w, r, &form) {
+		return
+	}
+	_, err := s.core.SendShielded(form.AssetID, form.ToAddress, form.Amount)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("error unshielding funds: %w", err))
+		return
+	}
+	writeJSON(w, simpleAck(), s.indent)
+}
+
 // writeAPIError logs the formatted error and sends a standardResponse with the
 // error message.
 func (s *WebServer) writeAPIError(w http.ResponseWriter, err error) {

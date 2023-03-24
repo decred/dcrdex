@@ -155,6 +155,11 @@ type clientCore interface {
 	AddWalletPeer(assetID uint32, addr string) error
 	RemoveWalletPeer(assetID uint32, addr string) error
 	Notifications(n int) ([]*db.Notification, error)
+	ShieldedStatus(assetID uint32) (*asset.ShieldedStatus, error)
+	NewShieldedAddress(assetID uint32) (string, error)
+	ShieldFunds(assetID uint32, amt uint64) (dex.Bytes, error)
+	UnshieldFunds(assetID uint32, amt uint64) (dex.Bytes, error)
+	SendShielded(assetID uint32, toAddr string, amt uint64) (dex.Bytes, error)
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -430,6 +435,13 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/getwalletpeers", s.apiGetWalletPeers)
 			apiAuth.Post("/addwalletpeer", s.apiAddWalletPeer)
 			apiAuth.Post("/removewalletpeer", s.apiRemoveWalletPeer)
+
+			apiAuth.Post("/shieldedstatus", s.apiShieldedStatus)
+			apiAuth.Post("/newshieldedaddress", s.apiNewShieldedAddress)
+			apiAuth.Post("/shieldfunds", s.apiShieldFunds)
+			apiAuth.Post("/unshieldfunds", s.apiUnshieldFunds)
+			apiAuth.Post("/sendshielded", s.apiSendShielded)
+
 			if s.experimental {
 				apiAuth.Post("/createbot", s.apiCreateBot)
 				apiAuth.Post("/startbot", s.apiStartBot)

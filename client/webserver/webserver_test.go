@@ -300,6 +300,22 @@ func (c *TCore) MarketReport(host string, baseID, quoteID uint32) (*core.MarketR
 	return nil, nil
 }
 
+func (c *TCore) ShieldedStatus(assetID uint32) (*asset.ShieldedStatus, error) {
+	return nil, nil
+}
+func (c *TCore) NewShieldedAddress(assetID uint32) (string, error) {
+	return "", nil
+}
+func (c *TCore) ShieldFunds(assetID uint32, amt uint64) (dex.Bytes, error) {
+	return nil, nil
+}
+func (c *TCore) UnshieldFunds(assetID uint32, amt uint64) (dex.Bytes, error) {
+	return nil, nil
+}
+func (c *TCore) SendShielded(assetID uint32, toAddr string, amt uint64) (dex.Bytes, error) {
+	return nil, nil
+}
+
 type TWriter struct {
 	b []byte
 }
