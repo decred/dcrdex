@@ -3,7 +3,7 @@
 set -e
 
 # For release, remove pre-release info, and set metadata to "release".
-VER="0.6.0-beta" # pre, beta, rc1, etc.
+VER="0.6.0-rc.1" # pre, beta, rc1, etc.
 META= # "release"
 
 export CGO_ENABLED=0
