@@ -4395,9 +4395,7 @@ func (btc *intermediaryWallet) fatalFindRedemptionsError(err error, reqs []*find
 	btc.findRedemptionMtx.Lock()
 	btc.log.Debugf("stopping redemption search for %d contracts in queue: %v", len(reqs), err)
 	for _, req := range reqs {
-		req.resultChan <- &findRedemptionResult{
-			err: err,
-		}
+		req.fail("searching for redemption, fatal error %w", err)
 		delete(btc.findRedemptionQueue, req.outPt)
 	}
 	btc.findRedemptionMtx.Unlock()
