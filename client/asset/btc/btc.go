@@ -4352,7 +4352,6 @@ func (btc *intermediaryWallet) reportNewTip(ctx context.Context, newTip *block) 
 	startHash := &newTip.hash
 
 	// Check if the previous tip is still part of the mainchain (prevTip confs >= 0).
-	// Redemption search would typically resume from prevTipHeight + 1 unless the
 	// Redemption search would typically resume from prevTip.height + 1 unless the
 	// previous tip was re-orged out of the mainchain, in which case redemption
 	// search will resume from the mainchain ancestor of the previous tip.
