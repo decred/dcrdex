@@ -51,7 +51,7 @@ func registerToken(tokenID uint32, desc string, nets ...dex.Network) {
 	}
 	asset.RegisterToken(tokenID, token.Token, &asset.WalletDefinition{
 		Type:        walletTypeToken,
-		Tab:         "Token",
+		Tab:         "Ethereum token",
 		Description: desc,
 	}, nets...)
 }
@@ -147,7 +147,7 @@ var (
 			// },
 			{
 				Type:        walletTypeRPC,
-				Tab:         "External",
+				Tab:         "RPC",
 				Description: "Infrastructure providers (e.g. Infura) or local nodes",
 				ConfigOpts:  append(RPCOpts, WalletOpts...),
 				Seeded:      true,
