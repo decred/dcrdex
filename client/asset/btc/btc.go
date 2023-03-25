@@ -325,6 +325,10 @@ type BTCCloneCFG struct {
 	// inputs. This is used to accurately determine the size of the first swap
 	// in a chain when considered with the actual inputs.
 	InitTxSizeBase uint32
+	// AddrFunc is an optional function to produce new addresses. If AddrFunc
+	// is provided, the regular getnewaddress and getrawchangeaddress methods
+	// will not be used, and AddrFunc will be used instead.
+	AddrFunc func() (btcutil.Address, error)
 	// AddressDecoder is an optional argument that can decode an address string
 	// into btcutil.Address. If AddressDecoder is not supplied,
 	// btcutil.DecodeAddress will be used.
@@ -341,6 +345,10 @@ type BTCCloneCFG struct {
 	// NonSegwitSigner can be true if the transaction signature hash data is not
 	// the standard for non-segwit Bitcoin. If nil, txscript.
 	NonSegwitSigner TxInSigner
+	// ConnectFunc, if provided, is called by the RPC client at the end of the
+	// (*rpcClient).connect method. Errors returned by ConnectFunc will preclude
+	// the starting of goroutines associated with block and peer monitoring.
+	ConnectFunc func() error
 	// FeeEstimator provides a way to get fees given an RawRequest-enabled
 	// client and a confirmation target.
 	FeeEstimator func(context.Context, RawRequester, uint64) (uint64, error)
@@ -1117,6 +1125,8 @@ func newRPCWallet(requester RawRequester, cfg *BTCCloneCFG, parsedCfg *RPCWallet
 		legacyValidateAddressRPC: cfg.LegacyValidateAddressRPC,
 		manualMedianTime:         cfg.ManualMedianTime,
 		omitRPCOptionsArg:        cfg.OmitRPCOptionsArg,
+		addrFunc:                 cfg.AddrFunc,
+		connectFunc:              cfg.ConnectFunc,
 	}
 	core.requesterV.Store(requester)
 	node := newRPCClient(core)
@@ -5587,6 +5597,17 @@ func (btc *baseWallet) scriptHashScript(contract []byte) ([]byte, error) {
 		return nil, err
 	}
 	return txscript.PayToAddrScript(addr)
+}
+
+// CallRPC is a method for making RPC calls directly on an underlying RPC
+// client. CallRPC is not part of the wallet interface. Its intended use is for
+// clone wallets to implement custom functionality.
+func (btc *baseWallet) CallRPC(method string, args []interface{}, thing interface{}) error {
+	rpcCl, is := btc.node.(*rpcClient)
+	if !is {
+		return errors.New("wallet is not RPC")
+	}
+	return rpcCl.call(method, args, thing)
 }
 
 func scriptHashAddress(segwit bool, contract []byte, chainParams *chaincfg.Params) (btcutil.Address, error) {
