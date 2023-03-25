@@ -4349,7 +4349,7 @@ func (btc *intermediaryWallet) reportNewTip(ctx context.Context, newTip *block) 
 		btc.fatalFindRedemptionsError(fmt.Errorf("tipChange handler - "+s, a...), reqs)
 	}
 
-	startHash := &newTip.hash
+	var startHash *chainhash.Hash
 
 	// Check if the previous tip is still part of the mainchain (prevTip confs >= 0).
 	// Redemption search would typically resume from prevTip.height + 1 unless the
@@ -4363,8 +4363,8 @@ func (btc *intermediaryWallet) reportNewTip(ctx context.Context, newTip *block) 
 			prevTip.hash, err)
 		return
 	}
-
-	if !isMainchain {
+	switch {
+	case !isMainchain:
 		// The previous tip is no longer part of the mainchain. Crawl blocks
 		// backwards until finding a mainchain block. Start with the block
 		// that is the immediate ancestor to the previous tip.
@@ -4378,6 +4378,17 @@ func (btc *intermediaryWallet) reportNewTip(ctx context.Context, newTip *block) 
 			ancestorHeight, ancestorBlockHash, newTip.height, newTip.hash)
 
 		startHash = ancestorBlockHash // have to recheck orphaned blocks again
+	case newTip.height-prevTipHeader.Height > 1:
+		// 2 or more blocks mined since last tip report, start at prevTip.height + 1.
+		hashAfterPrevTip, err := btc.node.getBlockHash(prevTipHeader.Height + 1)
+		if err != nil {
+			notifyFatalFindRedemptionError("getBlockHash error for height %d: %w", prevTipHeader.Height+1, err)
+			return
+		}
+		startHash = hashAfterPrevTip
+	default:
+		// 1 block mined since last tip report, already have the hash for block to search.
+		startHash = &newTip.hash
 	}
 
 	// Run the redemption search from the startHash determined above up
