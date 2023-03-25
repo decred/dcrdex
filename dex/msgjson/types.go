@@ -1036,6 +1036,8 @@ func (pb *PreValidateBond) Serialize() []byte {
 // PreValidateBondResult is the response to the client's PreValidateBond
 // request.
 type PreValidateBondResult struct {
+	// Signature is the result of signing the serialized PreValidateBondResult
+	// concatenated with the RawTx.
 	Signature
 	AccountID Bytes  `json:"accountID"`
 	AssetID   uint32 `json:"assetID"`

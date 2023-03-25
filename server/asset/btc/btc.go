@@ -522,7 +522,7 @@ func (btc *Backend) VerifyUnspentCoin(_ context.Context, coinID []byte) error {
 // There may also be a change output.
 //
 // Returned: The bond's coin ID (i.e. encoded UTXO) of the bond output. The bond
-// output's amount and PWSH/P2WSH address. The lockTime and pubkey hash data pushes
+// output's amount and P2SH/P2WSH address. The lockTime and pubkey hash data pushes
 // from the script. The account ID from the second output is also returned.
 //
 // Properly formed transactions:
@@ -535,7 +535,7 @@ func (btc *Backend) VerifyUnspentCoin(_ context.Context, coinID []byte) error {
 //  5. All inputs must have the max sequence num set (finalized).
 //  6. The transaction must pass the checks in the
 //     blockchain.CheckTransactionSanity function.
-func ParseBondTx(ver uint16, rawTx []byte, chainParams *chaincfg.Params) (bondCoinID []byte, amt int64, bondAddr string,
+func ParseBondTx(ver uint16, rawTx []byte, chainParams *chaincfg.Params, segwit bool) (bondCoinID []byte, amt int64, bondAddr string,
 	bondPubKeyHash []byte, lockTime int64, acct account.AccountID, err error) {
 	if ver != BondVersion {
 		err = errors.New("only version 0 bonds supported")
@@ -571,6 +571,10 @@ func ParseBondTx(ver uint16, rawTx []byte, chainParams *chaincfg.Params) (bondCo
 	scriptHash := dexbtc.ExtractScriptHash(bondOut.PkScript)
 	if scriptHash == nil {
 		err = fmt.Errorf("bad bond pkScript")
+		return
+	}
+	if !segwit && len(scriptHash) == 32 {
+		err = fmt.Errorf("%s backend does not support segwit bonds", chainParams.Name)
 		return
 	}
 
@@ -629,7 +633,7 @@ func (dcr *Backend) BondVer() uint16 {
 // time-locked fidelity bond transaction given the bond's P2SH redeem script.
 func (btc *Backend) ParseBondTx(ver uint16, rawTx []byte) (bondCoinID []byte, amt int64, bondAddr string,
 	bondPubKeyHash []byte, lockTime int64, acct account.AccountID, err error) {
-	return ParseBondTx(ver, rawTx, btc.chainParams)
+	return ParseBondTx(ver, rawTx, btc.chainParams, btc.segwit)
 }
 
 // BondCoin locates a bond transaction output, validates the entire transaction,
@@ -677,7 +681,7 @@ func (btc *Backend) BondCoin(ctx context.Context, ver uint16, coinID []byte) (am
 		return
 	}
 
-	_, amt, _, _, lockTime, acct, err = ParseBondTx(ver, rawTx, btc.chainParams)
+	_, amt, _, _, lockTime, acct, err = ParseBondTx(ver, rawTx, btc.chainParams, btc.segwit)
 	return
 }
 

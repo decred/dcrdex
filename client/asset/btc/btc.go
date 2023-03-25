@@ -5304,14 +5304,14 @@ func (btc *baseWallet) makeBondRefundTxV0(txid *chainhash.Hash, vout uint32, amt
 	msgTx.AddTxIn(txIn)
 
 	// Calculate fees and add the refund output.
-	var outputSize int
+	size := btc.calcTxSize(msgTx)
 	if btc.segwit {
-		outputSize = dexbtc.P2WPKHOutputSize
+		witnessVBytes := (dexbtc.RedeemBondSigScriptSize + 2 + 3) / 4
+		size += uint64(witnessVBytes) + dexbtc.P2WPKHOutputSize
 	} else {
-		outputSize = dexbtc.P2PKHOutputSize
+		size += dexbtc.RedeemBondSigScriptSize + dexbtc.P2PKHOutputSize
 	}
-	redeemSize := msgTx.SerializeSize() + dexbtc.RedeemBondSigScriptSize + outputSize
-	fee := feeRate * uint64(redeemSize)
+	fee := feeRate * size
 	if fee > amt {
 		return nil, fmt.Errorf("irredeemable bond at fee rate %d atoms/byte", feeRate)
 	}
