@@ -420,6 +420,7 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 		var ec *ethclient.Client
 		var rpcClient *rpc.Client
 		var sub ethereum.Subscription
+		var wsSubscribed bool
 		var h chan *types.Header
 		host := providerIPC
 		if !strings.HasSuffix(endpoint, ".ipc") {
@@ -466,6 +467,8 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 					} else {
 						log.Errorf("Connected to websocket, but headers subscription not supported. Attempting HTTP fallback")
 					}
+				} else {
+					wsSubscribed = true
 				}
 			} else {
 				if replaced {
@@ -512,7 +515,7 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 		p := &provider{
 			host:         host,
 			endpointAddr: endpoint,
-			ws:           sub != nil,
+			ws:           wsSubscribed,
 			net:          net,
 			ec: &combinedRPCClient{
 				Client: ec,
@@ -525,7 +528,7 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 		var wg sync.WaitGroup
 
 		// Start websocket listen loop.
-		if sub != nil {
+		if wsSubscribed {
 			wg.Add(1)
 			go func() {
 				p.subscribeHeaders(ctx, sub, h, log)
