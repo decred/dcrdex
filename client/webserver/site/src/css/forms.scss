@@ -337,6 +337,11 @@ button.form-button {
   width: 425px;
 }
 
+a[data-tmpl=walletCfgGuide] {
+  color: inherit;
+  text-decoration: none;
+}
+
 #deposit {
   #copyAlert {
     margin-left: 12px;
