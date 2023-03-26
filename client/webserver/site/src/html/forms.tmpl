@@ -43,6 +43,13 @@
 <div data-tmpl="errMsg" class="fs15 pt-3 text-center d-hide errcolor text-break"></div>
 {{end}}
 
+{{define "walletCfgGuideTemplate"}}
+<a data-tmpl="walletCfgGuide" class="d-flex justify-content-start align-items-center py-2 mt-2 pointer hoverbg" target="_blank">
+  <span class="ico-textfile fs18"></span>
+  <span class="pointer ps-1">[[[configuration guide]]]</span>
+</a>
+{{end}}
+
 {{define "newWalletForm"}}
 <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
 <div class="wallet-tabs" data-tmpl="walletTypeTabs">
@@ -61,6 +68,7 @@
   <div data-tmpl="walletSettings">
     {{template "walletConfigTemplates"}}
   </div>
+  {{template "walletCfgGuideTemplate"}}
   <hr class="dashed my-2">
   <div class="d-flex justify-content-between align-items-stretch flex-wrap" data-tmpl="auth">
     <div class="col-11 p-0" data-tmpl="newWalletPassBox">
@@ -74,7 +82,7 @@
       <input type="password" class="form-control select" id="nwAppPass" data-tmpl="appPass" autocomplete="off">
     </div>
     <span class="col-3 hide-pw"></span> {{/* flex dummy */}}
-    <div class="d-grid align-items-end col-10 p-0 mt-4">
+    <div class="d-grid align-items-end col-10 p-0">
       <button data-tmpl="submitAdd" type="submit" class="fs15 bg2 selected">[[[Add]]]</button>
     </div>
   </div>
