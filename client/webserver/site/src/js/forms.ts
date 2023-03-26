@@ -67,7 +67,7 @@ export class NewWalletForm {
   current: CurrentAsset
   pwHiders: HTMLElement[]
   subform: WalletConfigForm
-  currentWalletType: string
+  walletCfgGuide: PageElement
   parentSyncer: null | ((w: WalletState) => void)
   createUpdater: null | ((note: WalletCreationNote) => void)
 
@@ -89,6 +89,8 @@ export class NewWalletForm {
 
     // WalletConfigForm will set the global app variable.
     this.subform = new WalletConfigForm(page.walletSettings, true)
+
+    this.walletCfgGuide = Doc.tmplElement(form, 'walletCfgGuide')
 
     bind(form, page.submitAdd, () => this.submit())
     bind(form, page.oneBttn, () => this.submit())
@@ -304,6 +306,7 @@ export class NewWalletForm {
     this.current.selectedDef = walletDef
     const appPwCached = State.passwordIsCached() || (this.pwCache && this.pwCache.pw)
     Doc.hide(page.auth, page.oneBttnBox, page.newWalletPassBox)
+    const guideLink = walletDef.guidelink
     const configOpts = walletDef.configopts || []
     // If a config represents a wallet's birthday, we update the default
     // selection to the current date if this installation of the client
@@ -352,6 +355,7 @@ export class NewWalletForm {
       }
       this.subform.update(parentAndTokenOpts, false)
     } else this.subform.update(configOpts, false)
+    this.setGuideLink(guideLink)
 
     if (this.subform.dynamicOpts.children.length || this.subform.defaultSettings.children.length) {
       Doc.show(page.walletSettingsHeader)
@@ -363,6 +367,14 @@ export class NewWalletForm {
 
     this.refresh()
     await this.loadDefaults()
+  }
+
+  setGuideLink (guideLink: string) {
+    Doc.hide(this.walletCfgGuide)
+    if (guideLink !== '') {
+      this.walletCfgGuide.href = guideLink
+      Doc.show(this.walletCfgGuide)
+    }
   }
 
   /* setError sets and shows the in-form error message. */
@@ -399,13 +411,14 @@ export class NewWalletForm {
   }
 }
 
-let repeatableCounter = 0
+let dynamicInputCounter = 0
 
 /*
  * WalletConfigForm is a dynamically generated sub-form for setting
  * asset-specific wallet configuration options.
 */
 export class WalletConfigForm {
+  page: Record<string, PageElement>
   form: HTMLElement
   configElements: [ConfigOption, HTMLElement][]
   configOpts: ConfigOption[]
@@ -431,6 +444,7 @@ export class WalletConfigForm {
   assetHasActiveOrders: boolean
 
   constructor (form: HTMLElement, sectionize: boolean) {
+    this.page = Doc.idDescendants(form)
     this.form = form
     // A configElement is a div containing an input and its label.
     this.configElements = []
@@ -505,8 +519,7 @@ export class WalletConfigForm {
     if (loadedOpts + defaultOpts === 0) Doc.hide(this.showOther, this.otherSettings)
   }
 
-  addOpt (box: HTMLElement, opt: ConfigOption, insertAfter?: PageElement, n?: number): PageElement {
-    const elID = 'wcfg-' + opt.key + (n ? String(n) : '')
+  addOpt (box: HTMLElement, opt: ConfigOption, insertAfter?: PageElement, skipRepeatN?: boolean): PageElement {
     let el: HTMLElement
     if (opt.isboolean) el = this.checkboxTmpl.cloneNode(true) as HTMLElement
     else if (opt.isdate) el = this.dateInputTmpl.cloneNode(true) as HTMLElement
@@ -514,13 +527,17 @@ export class WalletConfigForm {
       el = this.repeatableTmpl.cloneNode(true) as HTMLElement
       el.classList.add('repeatable')
       Doc.bind(Doc.tmplElement(el, 'add'), 'click', () => {
-        repeatableCounter++
-        this.addOpt(box, opt, el, repeatableCounter)
+        this.addOpt(box, opt, el, true)
       })
+      if (!skipRepeatN) for (let i = 0; i < (opt.repeatN ? opt.repeatN - 1 : 0); i++) this.addOpt(box, opt, insertAfter, true)
     } else el = this.textInputTmpl.cloneNode(true) as HTMLElement
     this.configElements.push([opt, el])
     const input = el.querySelector('input') as ConfigOptionInput
     input.dataset.configKey = opt.key
+    // We need to generate a unique ID only for the <input id> => <label for>
+    // matching.
+    dynamicInputCounter++
+    const elID = 'wcfg-' + String(dynamicInputCounter)
     input.id = elID
     const label = Doc.safeSelector(el, 'label')
     label.htmlFor = elID // 'for' attribute, but 'for' is a keyword
@@ -580,9 +597,7 @@ export class WalletConfigForm {
       else this.addOpt(this.dynamicOpts, opt)
     }
     if (defaultedOpts.length) {
-      for (const opt of defaultedOpts) {
-        this.addOpt(this.defaultSettings, opt)
-      }
+      for (const opt of defaultedOpts) this.addOpt(this.defaultSettings, opt)
       Doc.show(this.showOther, this.defaultSettingsMsg, this.defaultSettings)
     } else {
       Doc.hide(this.showOther)
@@ -622,6 +637,7 @@ export class WalletConfigForm {
       if (v === undefined) continue
       if (opt.repeatable) {
         if (handledRepeatables[opt.key]) {
+          el.remove()
           removes.push(r)
           continue
         }
@@ -630,9 +646,12 @@ export class WalletConfigForm {
         const firstVal = vals[0]
         finds.push(el)
         Doc.safeSelector(el, 'input').value = firstVal
+        // Add repeatN - 1 empty elements to the reconfig form. Add them before
+        // the populated inputs just because of the way we're using the
+        // insertAfter argument to addOpt.
+        for (let i = 1; i < (opt.repeatN || 1); i++) finds.push(this.addOpt(el.parentElement as PageElement, opt, el, true))
         for (let i = 1; i < vals.length; i++) {
-          repeatableCounter++
-          const newEl = this.addOpt(el.parentElement as PageElement, opt, el, repeatableCounter)
+          const newEl = this.addOpt(el.parentElement as PageElement, opt, el, true)
           Doc.safeSelector(newEl, 'input').value = vals[i]
           finds.push(newEl)
         }

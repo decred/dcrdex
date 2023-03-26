@@ -118,9 +118,10 @@ var (
 			Key:         providersKey,
 			DisplayName: "Provider",
 			Description: "Specify one or more providers. For infrastructure " +
-				"providers, use an https address. Only url-based authentication " +
+				"providers, prefer using wss address. Only url-based authentication " +
 				"is supported. For a local node, use the filepath to an IPC file.",
 			Repeatable: providerDelimiter,
+			RepeatN:    2,
 			Required:   true,
 		},
 	}
@@ -152,6 +153,7 @@ var (
 				ConfigOpts:  append(RPCOpts, WalletOpts...),
 				Seeded:      true,
 				NoAuth:      true,
+				GuideLink:   "https://github.com/decred/dcrdex/blob/master/docs/wiki/Ethereum.md",
 			},
 			// MaxSwapsInTx and MaxRedeemsInTx are set in (Wallet).Info, since
 			// the value cannot be known until we connect and get network info.

@@ -199,6 +199,9 @@ type WalletDefinition struct {
 	// TODO: Use an asset.Authenticator interface and WalletTraits to do this
 	// instead.
 	NoAuth bool `json:"noauth"`
+	// GuideLink is a link to wallet configuration docs that the user may follow
+	// when creating a new wallet or updating its settings.
+	GuideLink string `json:"guidelink"`
 }
 
 // Token combines the generic dex.Token with a WalletDefinition.
@@ -260,7 +263,10 @@ type ConfigOption struct {
 	// multiple times, with the specified delimiter used to encode the data
 	// in the settings map.
 	Repeatable string `json:"repeatable"`
-	Required   bool   `json:"required"`
+	// RepeatN signals how many times text input should be repeated, replicating
+	// this option N times.
+	RepeatN  int32 `json:"repeatN"`
+	Required bool  `json:"required"`
 
 	// ShowByDefault to show or not options on "hide advanced options".
 	ShowByDefault bool `json:"showByDefault,omitempty"`

@@ -224,6 +224,7 @@ export interface WalletDefinition {
   configpath: string
   configopts: ConfigOption[]
   noauth: boolean
+  guidelink: string
 }
 
 export interface ConfigOption {
@@ -239,6 +240,7 @@ export interface ConfigOption {
   disablewhenactive: boolean
   isBirthdayConfig: boolean
   repeatable?: string
+  repeatN?: number
   noauth: boolean
   regAsset?: number
   required?: boolean
