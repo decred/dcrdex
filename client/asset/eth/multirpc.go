@@ -649,7 +649,7 @@ func (m *multiRPCClient) voidUnusedNonce() {
 // createAndCheckProviders creates and connects to providers. It checks that
 // unknown providers have a sufficient api to trade and saves good providers to
 // file. One bad provider or connect problem will cause this to error.
-func createAndCheckProviders(ctx context.Context, walletDir string, endpoints []string, net dex.Network,
+func createAndCheckProviders(ctx context.Context, walletDir string, endpoints []string, chainID *big.Int, net dex.Network,
 	log dex.Logger) error {
 	var localCP map[string]bool
 	path := filepath.Join(walletDir, "compliant-providers.json")
@@ -686,7 +686,7 @@ func createAndCheckProviders(ctx context.Context, walletDir string, endpoints []
 	}
 
 	if len(unknownEndpoints) > 0 {
-		providers, err := connectProviders(ctx, unknownEndpoints, log, big.NewInt(chainIDs[net]), net)
+		providers, err := connectProviders(ctx, unknownEndpoints, log, chainID, net)
 		if err != nil {
 			return fmt.Errorf("expected to successfully connect to at least 1 of these unfamiliar providers: %s",
 				failedProviders(providers, unknownEndpoints))
@@ -742,7 +742,7 @@ func (m *multiRPCClient) reconfigure(ctx context.Context, settings map[string]st
 		return errors.New("no providers specified")
 	}
 	endpoints := strings.Split(providerDef, " ")
-	if err := createAndCheckProviders(ctx, walletDir, endpoints, m.net, m.log); err != nil {
+	if err := createAndCheckProviders(ctx, walletDir, endpoints, m.chainID, m.net, m.log); err != nil {
 		return fmt.Errorf("create and check providers: %v", err)
 	}
 	providers, err := connectProviders(ctx, endpoints, m.log, m.chainID, m.net)
