@@ -188,16 +188,16 @@ export default class Application {
     const notes = State.fetchLocal(State.notificationsLK)
     this.setNotes(notes || [])
     // Connect the websocket and register the notification route.
-    ws.connect(getSocketURI(), this.reconnected)
+    ws.connect(getSocketURI(), this.reloadPage)
     ws.registerRoute(notificationRoute, (note: CoreNote) => {
       this.notify(note)
     })
   }
 
   /*
-   * reconnected is called by the websocket client when a reconnection is made.
+   * reloadPage is called by the websocket client when a reconnection is made.
    */
-  reconnected () {
+  reloadPage () {
     window.location.reload() // This triggers another websocket disconnect/connect (!)
     // a fetchUser() and loadPage(window.history.state.page) might work
   }

@@ -47,7 +47,6 @@ class MessageSocket {
   handlers: Record<string, NoteReceiver[]>
   queue: [string, any][]
   maxQlength: number
-  reloader: () => void // appears unused
 
   constructor () {
     this.handlers = {}
@@ -89,9 +88,8 @@ class MessageSocket {
     if (this.connection) this.connection.close()
   }
 
-  connect (uri: string, reloader: () => void) {
+  connect (uri: string, reloadPage: () => void) {
     this.uri = uri
-    this.reloader = reloader
     let retrys = 0
     const go = () => {
       window.log('ws', `connecting to ${uri}`)
@@ -114,6 +112,16 @@ class MessageSocket {
         clearTimeout(timeout)
         conn = this.connection = null
         forward('close', null, this.handlers)
+
+        // Certain browsers have degrading performance bug when retries are issued
+        // perpetually (e.g. browser tab is still trying to reconnect WS to dexc after
+        // user shut it down but left his tab open). Refreshing page here is a patch
+        // for this behavior, it breaks this browser tab retry cycle.
+        if (retrys > 10) {
+          reloadPage()
+          return
+        }
+
         retrys++
         // 1.2, 1.6, 2.0, 2.4, 3.1, 3.8, 4.8, 6.0, 7.5, 9.3, ...
         const delay = Math.min(Math.pow(1.25, retrys), 10)
@@ -128,7 +136,12 @@ class MessageSocket {
         clearTimeout(timeout)
         if (retrys > 0) {
           retrys = 0
-          reloader()
+          // Once dexc is back online we have to reload book/candles (and maybe other
+          // stuff) otherwise we'll be missing a bunch of data for display in UI.
+          // Note, reloading page like this will result in ditching this WS connection
+          // and reestablishing new one.
+          reloadPage()
+          return
         }
         forward('open', null, this.handlers)
         const queue = this.queue

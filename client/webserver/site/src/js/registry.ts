@@ -585,7 +585,6 @@ export interface Application {
   commitHash: string
   authed(): boolean
   start (): Promise<void>
-  reconnected (): void
   fetchUser (): Promise<User | void>
   loadPage (page: string, data?: any, skipPush?: boolean): Promise<boolean>
   attach (data: any): void
