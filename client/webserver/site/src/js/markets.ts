@@ -2382,6 +2382,7 @@ export default class MarketsPage extends BasePage {
     let row = tbody.firstChild as OrderRow
     // Handle market order differently.
     if (order.rate === 0) {
+      if (order.qtyAtomic === 0) return // a cancel order. TODO: maybe make an indicator on the target order, maybe gray out
       // This is a market order.
       if (row && row.manager.getRate() === 0) {
         row.manager.insertOrder(order)
