@@ -32,7 +32,7 @@ const (
 	// structure.
 	defaultFee          = 10
 	defaultFeeRateLimit = 1000
-	minNetworkVersion   = 5000025
+	minNetworkVersion   = 5040250 // v5.4.2
 	walletTypeRPC       = "zcashdRPC"
 
 	mainnetNU5ActivationHeight        = 1687104
