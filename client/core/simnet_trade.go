@@ -38,6 +38,7 @@ import (
 	"decred.org/dcrdex/client/asset/bch"
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/client/asset/dcr"
+	"decred.org/dcrdex/client/asset/dgb"
 	"decred.org/dcrdex/client/asset/doge"
 	"decred.org/dcrdex/client/asset/eth"
 	"decred.org/dcrdex/client/asset/ltc"
@@ -48,6 +49,7 @@ import (
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/msgjson"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
+	dexdgb "decred.org/dcrdex/dex/networks/dgb"
 	dexdoge "decred.org/dcrdex/dex/networks/doge"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"decred.org/dcrdex/dex/order"
@@ -310,7 +312,7 @@ func (s *simulationTest) startClients() error {
 			// eth needs the headers to be new in order to
 			// count itself synced, so mining a few blocks here.
 			hctrl.mineBlocks(s.ctx, 1)
-			c.log.Infof("Waiting for %s wallet to syn.c", unbip(form.AssetID))
+			c.log.Infof("Waiting for %s wallet to sync.", unbip(form.AssetID))
 			synced := make(chan error)
 			go func() {
 				tStart := time.Now()
@@ -626,7 +628,7 @@ sell orders:
 	}
 
 	s.log.Infof("%s\n", `
-Placing Clinet 2 Order 1:
+Placing Client 2 Order 1:
  - Standing order, preimage not revealed, "missed" revoke_order note.
  - Expect order status to stay at Epoch status before going AWOL and
    to become Revoked after re-connecting the DEX. Locked coins should
@@ -835,7 +837,10 @@ Client 2 placing Order 3:
 	// Use core.initialize to restore client 2 orders from db, and login
 	// to trigger dex authentication.
 	// TODO: cannot do this anymore with built-in wallets
-	s.client2.core.initialize()
+	err = s.client2.core.initialize()
+	if err != nil {
+		return fmt.Errorf("client 2 login error: %w", err)
+	}
 	err = s.client2.core.Login(s.client2.appPass)
 	if err != nil {
 		return fmt.Errorf("client 2 login error: %w", err)
@@ -1520,7 +1525,7 @@ func (hc *harnessCtrl) fund(ctx context.Context, address string, amts []int) err
 func newHarnessCtrl(assetID uint32) *harnessCtrl {
 
 	switch assetID {
-	case dcr.BipID, btc.BipID, ltc.BipID, bch.BipID, doge.BipID, zec.BipID:
+	case dcr.BipID, btc.BipID, ltc.BipID, bch.BipID, doge.BipID, zec.BipID, dgb.BipID:
 		return &harnessCtrl{
 			dir:     filepath.Join(dextestDir, dex.BipIDSymbol(assetID), "harness-ctl"),
 			fundCmd: "./alpha",
@@ -1555,6 +1560,7 @@ type tWallet struct {
 var cloneTypes = map[uint32]string{
 	0:   "bitcoindRPC",
 	2:   "litecoindRPC",
+	20:  "digibytedRPC",
 	145: "bitcoindRPC", // yes, same as btc
 	3:   "dogecoindRPC",
 	133: "zcashdRPC",
@@ -1681,9 +1687,13 @@ func btcCloneWallet(assetID uint32, node string, wt SimWalletType) (*tWallet, er
 
 	// doge fees are slightly higher than others. Leaving this as 0 will
 	// apply bitcoin limits.
-	if assetID == doge.BipID {
+	switch assetID {
+	case doge.BipID:
 		cfg["fallbackfee"] = fmt.Sprintf("%f", dexdoge.DefaultFee*1000/1e8)
 		cfg["feeratelimit"] = fmt.Sprintf("%f", dexdoge.DefaultFeeRateLimit*1000/1e8)
+	case dgb.BipID:
+		cfg["fallbackfee"] = fmt.Sprintf("%f", dexdgb.DefaultFee*1000/1e8)
+		cfg["feeratelimit"] = fmt.Sprintf("%f", dexdgb.DefaultFeeRateLimit*1000/1e8)
 	}
 
 	return &tWallet{
@@ -1695,6 +1705,10 @@ func btcCloneWallet(assetID uint32, node string, wt SimWalletType) (*tWallet, er
 
 func dogeWallet(node string) (*tWallet, error) {
 	return btcCloneWallet(doge.BipID, node, WTCoreClone)
+}
+
+func dgbWallet(node string) (*tWallet, error) {
+	return btcCloneWallet(dgb.BipID, node, WTCoreClone)
 }
 
 func zecWallet(node string) (*tWallet, error) {
@@ -1721,6 +1735,8 @@ func (s *simulationTest) newClient(name string, cl *SimClient) (*simulationClien
 			tw, err = bchWallet(wt, node)
 		case doge.BipID:
 			tw, err = dogeWallet(node)
+		case dgb.BipID:
+			tw, err = dgbWallet(node)
 		case zec.BipID:
 			tw, err = zecWallet(node)
 		default:
@@ -2026,9 +2042,18 @@ func (s *simulationTest) assertBalanceChanges(client *simulationClient, isRefund
 		prevOut := wire.NewOutPoint(&chainhash.Hash{}, 0)
 		txIn := wire.NewTxIn(prevOut, []byte{}, nil)
 		msgTx.AddTxIn(txIn)
-		size := dexbtc.MsgTxVBytes(msgTx)
+		size := dexbtc.MsgTxVBytes(msgTx) //wut? btc only
 		// tx fee is 1sat/vByte on simnet. utxoRefundFees is 293 sats.
+		// TODO: even simnet rate on other assets like dgb and doge isn't 1...
 		utxoRefundFees := int64(size + dexbtc.RefundSigScriptSize + dexbtc.P2PKHOutputSize)
+		// TODO: segwit proper fee rate, but need to get segwit flag:
+		// size := btc.calcTxSize(msgTx)
+		// if btc.segwit {
+		// 	witnessVBytes := uint64((dexbtc.RefundSigScriptSize + 2 + 3) / 4)
+		// 	size += witnessVBytes + dexbtc.P2WPKHOutputSize
+		// } else {
+		// 	size += dexbtc.RefundSigScriptSize + dexbtc.P2PKHOutputSize
+		// }
 		if ord.Sell {
 			if accountBIPs[s.base.id] {
 				baseFees = ethRefundFees
