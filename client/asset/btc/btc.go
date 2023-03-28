@@ -2836,7 +2836,7 @@ func (btc *baseWallet) sizeAndFeesOfUnconfirmedTxs(txs []*GetTransactionResult) 
 		}
 
 		fees += fee
-		size += dexbtc.MsgTxVBytes(msgTx)
+		size += btc.calcTxSize(msgTx)
 	}
 
 	return size, fees, nil
@@ -4751,7 +4751,7 @@ func (btc *baseWallet) signTxAndAddChange(baseTx *wire.MsgTx, addr btcutil.Addre
 		// Add the change output.
 		vSize0 := btc.calcTxSize(baseTx)
 		baseTx.AddTxOut(changeOutput)
-		changeSize := dexbtc.MsgTxVBytes(baseTx) - vSize0   // may be dexbtc.P2WPKHOutputSize
+		changeSize := btc.calcTxSize(baseTx) - vSize0       // may be dexbtc.P2WPKHOutputSize
 		addrStr, _ := btc.stringAddr(addr, btc.chainParams) // just for logging
 		btc.log.Debugf("Change output size = %d, addr = %s", changeSize, addrStr)
 
