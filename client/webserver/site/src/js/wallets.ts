@@ -986,9 +986,7 @@ export default class WalletsPage extends BasePage {
         let canSend = wallet.balance.available
         if (!token) {
           canSend -= res.txfee
-          if (canSend < 0) {
-            canSend = 0
-          }
+          if (canSend < 0) canSend = 0
         }
         this.maxSend = canSend
         page.maxSend.textContent = Doc.formatFullPrecision(canSend, ui)
