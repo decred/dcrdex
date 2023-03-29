@@ -807,8 +807,9 @@ github.com/ltcsuite/lnd/queue v1.0.3/go.mod h1:L0MMGRrsJFPHhTInek8YgW2v7NyB6pXrA
 github.com/ltcsuite/lnd/ticker v1.0.1 h1:+0KvqE4HYO+fFPgNo+42hhyEjK0DwBp//IPmkLhCMcI=
 github.com/ltcsuite/lnd/ticker v1.0.1/go.mod h1:WZKpekfDVAVv7Gsrr0GAWC/U1XURfGesFg9sQYJbeL4=
 github.com/ltcsuite/ltcd v0.20.1-beta/go.mod h1:ZFQaYdYULIuTQiWqs7AUiHD2XhDFeeHW1IH+UYMdABU=
-github.com/ltcsuite/ltcd v0.22.0-beta h1:jYVHOeg2oBDvsduV26LtCZnzwifMDWoVbkdHTjGvHTk=
 github.com/ltcsuite/ltcd v0.22.0-beta/go.mod h1:/BXtm50r591uMfXf8XgSpL5er32HCvheJtBSPYK5bFM=
+github.com/ltcsuite/ltcd v0.22.1-beta.0.20230329025258-1ea035d2e665 h1:6JipITSBzYFnjiOpPRwLj7H95nPtOPQPfG3NDBxstyo=
+github.com/ltcsuite/ltcd v0.22.1-beta.0.20230329025258-1ea035d2e665/go.mod h1:O9R9U/mbZwRgr3So8TlNmW7CPc2ZQVhWyVlhXrqu/vo=
 github.com/ltcsuite/ltcd/btcec/v2 v2.1.0 h1:0DMWBjQDb0V1+4kCLOJlNdHs7ewwYturuUfLHq8mosY=
 github.com/ltcsuite/ltcd/btcec/v2 v2.1.0/go.mod h1:Vc9ZYXMcl5D6bA0VwMvGRDJYggO3YZ7/BuIri02Lq0E=
 github.com/ltcsuite/ltcd/ltcutil v1.1.0 h1:btwbdHO9cEr22zW/vgCLiF6ghh+IDngJdJsyhJ6mntU=
@@ -1805,6 +1806,7 @@ gopkg.in/yaml.v3 v3.0.0-20191120175047-4206685974f2/go.mod h1:K4uyk7z7BCEPqu6E+C
 gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
 gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
 gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
+gotest.tools v2.2.0+incompatible h1:VsBPFP1AI068pPrMxtb/S8Zkgf9xEmTLJjfM+P5UIEo=
 honnef.co/go/tools v0.0.0-20180728063816-88497007e858/go.mod h1:rf3lG4BRIbNafJWhAfAdb/ePZxsR/4RtNHQocxwk9r4=
 honnef.co/go/tools v0.0.0-20190102054323-c2f93a96b099/go.mod h1:rf3lG4BRIbNafJWhAfAdb/ePZxsR/4RtNHQocxwk9r4=
 honnef.co/go/tools v0.0.0-20190106161140-3f1c8253044a/go.mod h1:rf3lG4BRIbNafJWhAfAdb/ePZxsR/4RtNHQocxwk9r4=
