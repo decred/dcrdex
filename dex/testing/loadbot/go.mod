@@ -122,7 +122,7 @@ require (
 	github.com/ltcsuite/lnd/clock v0.0.0-20200822020009-1a001cbb895a // indirect
 	github.com/ltcsuite/lnd/queue v1.0.3 // indirect
 	github.com/ltcsuite/lnd/ticker v1.0.1 // indirect
-	github.com/ltcsuite/ltcd v0.22.1-beta // indirect
+	github.com/ltcsuite/ltcd v0.22.1-beta.0.20230329025258-1ea035d2e665 // indirect
 	github.com/ltcsuite/ltcd/btcec/v2 v2.1.0 // indirect
 	github.com/ltcsuite/ltcd/ltcutil v1.1.0 // indirect
 	github.com/ltcsuite/ltcd/ltcutil/psbt v1.1.0-1 // indirect
