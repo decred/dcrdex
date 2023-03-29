@@ -573,8 +573,19 @@ func ParseBondTx(ver uint16, rawTx []byte, chainParams *chaincfg.Params, segwit 
 		err = fmt.Errorf("bad bond pkScript")
 		return
 	}
-	if !segwit && len(scriptHash) == 32 {
-		err = fmt.Errorf("%s backend does not support segwit bonds", chainParams.Name)
+	switch len(scriptHash) {
+	case 32:
+		if !segwit {
+			err = fmt.Errorf("%s backend does not support segwit bonds", chainParams.Name)
+			return
+		}
+	case 20:
+		if segwit {
+			err = fmt.Errorf("%s backend requires segwit bonds", chainParams.Name)
+			return
+		}
+	default:
+		err = fmt.Errorf("unexpected script hash length %d", len(scriptHash))
 		return
 	}
 
