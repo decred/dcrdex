@@ -55,7 +55,7 @@ require (
 	github.com/jrick/logrotate v1.0.0
 	github.com/lib/pq v1.10.4
 	github.com/lightninglabs/neutrino v0.14.3-0.20221024182812-792af8548c14
-	github.com/ltcsuite/ltcd v0.22.0-beta
+	github.com/ltcsuite/ltcd v0.22.1-beta.0.20230329025258-1ea035d2e665
 	github.com/ltcsuite/ltcd/ltcutil v1.1.0
 	github.com/ltcsuite/ltcwallet v0.13.1
 	github.com/ltcsuite/ltcwallet/wallet/txauthor v1.1.0

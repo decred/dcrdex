@@ -804,8 +804,8 @@ github.com/ltcsuite/lnd/ticker v1.0.1 h1:+0KvqE4HYO+fFPgNo+42hhyEjK0DwBp//IPmkLh
 github.com/ltcsuite/lnd/ticker v1.0.1/go.mod h1:WZKpekfDVAVv7Gsrr0GAWC/U1XURfGesFg9sQYJbeL4=
 github.com/ltcsuite/ltcd v0.20.1-beta/go.mod h1:ZFQaYdYULIuTQiWqs7AUiHD2XhDFeeHW1IH+UYMdABU=
 github.com/ltcsuite/ltcd v0.22.0-beta/go.mod h1:/BXtm50r591uMfXf8XgSpL5er32HCvheJtBSPYK5bFM=
-github.com/ltcsuite/ltcd v0.22.1-beta h1:aXeIMuzwPss4VABDyc7Zbx+NMLYFaG3YkNTPNkKL9XA=
-github.com/ltcsuite/ltcd v0.22.1-beta/go.mod h1:O9R9U/mbZwRgr3So8TlNmW7CPc2ZQVhWyVlhXrqu/vo=
+github.com/ltcsuite/ltcd v0.22.1-beta.0.20230329025258-1ea035d2e665 h1:6JipITSBzYFnjiOpPRwLj7H95nPtOPQPfG3NDBxstyo=
+github.com/ltcsuite/ltcd v0.22.1-beta.0.20230329025258-1ea035d2e665/go.mod h1:O9R9U/mbZwRgr3So8TlNmW7CPc2ZQVhWyVlhXrqu/vo=
 github.com/ltcsuite/ltcd/btcec/v2 v2.1.0 h1:0DMWBjQDb0V1+4kCLOJlNdHs7ewwYturuUfLHq8mosY=
 github.com/ltcsuite/ltcd/btcec/v2 v2.1.0/go.mod h1:Vc9ZYXMcl5D6bA0VwMvGRDJYggO3YZ7/BuIri02Lq0E=
 github.com/ltcsuite/ltcd/ltcutil v1.1.0 h1:btwbdHO9cEr22zW/vgCLiF6ghh+IDngJdJsyhJ6mntU=
