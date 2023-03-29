@@ -155,11 +155,7 @@ export class NewWalletForm {
     let parentForm
     let walletType = selectedDef.type
     if (parentAsset) {
-      if (!asset.token) {
-        this.setError('token is absent from asset with parent, should never happen!')
-        return
-      }
-      walletType = asset.token.definition.type
+      walletType = (asset.token as Token).definition.type
       parentForm = {
         assetID: parentAsset.id,
         config: this.subform.map(parentAsset.id),
