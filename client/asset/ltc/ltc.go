@@ -192,6 +192,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		InitTxSize:          dexbtc.InitTxSizeSegwit,
 		InitTxSizeBase:      dexbtc.InitTxSizeBaseSegwit,
 		BlockDeserializer:   dexltc.DeserializeBlockBytes,
+		AssetID:             BipID,
 	}
 
 	switch cfg.Type {

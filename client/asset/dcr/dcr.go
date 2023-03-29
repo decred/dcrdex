@@ -1485,7 +1485,7 @@ func (dcr *ExchangeWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate
 
 	if sum > avail-reserves { // no split means no change available for reserves
 		if trySplit { // if we already tried with a split, that's the best we can do
-			return nil, false, 0, errors.New("eats bond reserves")
+			return nil, false, 0, errors.New("balance too low to both fund order and maintain bond reserves")
 		}
 		// Like the fund() method, try with some utxos taken out of the mix for
 		// reserves, as precise in value as possible.
