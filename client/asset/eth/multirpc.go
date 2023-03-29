@@ -102,6 +102,11 @@ type provider struct {
 	}
 }
 
+// String returns the provider host name.
+func (p *provider) String() string {
+	return p.host
+}
+
 func (p *provider) shutdown() {
 	p.stop()
 	p.ec.Close()
@@ -976,7 +981,7 @@ func (m *multiRPCClient) withOne(ctx context.Context, providers []*provider, f f
 		} else if err.Error() != superError.Error() {
 			superError = fmt.Errorf("%v: %w", superError, err)
 		}
-		for _, f := range acceptabilityFilters {
+		for _, f := range acceptabilityFilters { // use case for more than one? is it just variadic to allow 0?
 			discard, propagate, fail := f(err)
 			if discard {
 				return nil
@@ -993,6 +998,68 @@ func (m *multiRPCClient) withOne(ctx context.Context, providers []*provider, f f
 		return errors.New("all providers in a failed state")
 	}
 	return
+}
+
+// withAll runs the provider function against all known providers in order of
+// freshness, with any non-stale nonce provider first. This is similar to
+// withPreferred, except that it does not stop after the first success. However,
+// if an acceptability filter indicates to "propagate" the error (hard stop), it
+// will not try all providers. withAll should only be used for actions that are
+// safe to repeat, such as broadcasting a transaction or getting results for a
+// read-only operation.
+func (m *multiRPCClient) withAll(ctx context.Context, f func(context.Context, *provider) error,
+	acceptabilityFilters ...acceptabilityFilter) error {
+	var atLeastOne bool
+	var errs []error
+	for _, p := range m.nonceProviderList() {
+		if p.failed() {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(ctx, defaultRequestTimeout)
+		err := f(ctx, p)
+		cancel()
+		if err == nil {
+			atLeastOne = true // return nil err unless a later "propagated" error says to
+			continue
+		}
+		var discarded bool
+		for i, f := range acceptabilityFilters {
+			discard, propagate, fail := f(err)
+			discarded = discard && (discarded || i == 0)
+			if discard {
+				m.log.Tracef("non-fatal provider error: %v (%T / %T)", err, err, errors.Unwrap(err))
+				continue // or maybe break since what is the use case of conflicting filters?
+			}
+			if fail {
+				p.setFailed()
+			}
+			if propagate {
+				return err
+			}
+		}
+		if discarded {
+			atLeastOne = true
+		} else {
+			errs = append(errs, err)
+			m.log.Warnf("Failed request from %q: %v", p, err)
+		}
+	}
+
+	if atLeastOne {
+		return nil
+	}
+	if errs == nil {
+		return errors.New("all providers in a failed state")
+	}
+	// TODO: use errors.Join(errs) when Go 1.20 is the min
+	var b []byte
+	for i, err := range errs {
+		if i > 0 {
+			b = append(b, '\n')
+		}
+		b = append(b, err.Error()...)
+	}
+	return errors.New(string(b))
 }
 
 // withAny runs the provider function against known providers in random order
@@ -1185,11 +1252,13 @@ func (m *multiRPCClient) shutdown() {
 
 func (m *multiRPCClient) sendSignedTransaction(ctx context.Context, tx *types.Transaction) error {
 	var lastProvider *provider
-	if err := m.withPreferred(ctx, func(ctx context.Context, p *provider) error {
+	if err := m.withAll(ctx, func(ctx context.Context, p *provider) error {
 		lastProvider = p
 		m.log.Tracef("Sending signed tx via %q", p.host)
 		return p.ec.SendTransaction(ctx, tx)
 	}, func(err error) (discard, propagate, fail bool) {
+		// NOTE: err never hits errors.Is(err, txpool.ErrAlreadyKnown) because
+		// err is a *rpc.jsonError, but it does have a Message that matches.
 		return errorFilter(err, txpool.ErrAlreadyKnown, "known transaction"), false, false
 	}); err != nil {
 		return err

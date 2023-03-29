@@ -155,7 +155,7 @@ func TestSimnetMultiRPCClient(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			// Send two in a row. They should use the same provider.
+			// Send two in a row. They should use each provider, preferred first.
 			for j := 0; j < 2; j++ {
 				if _, err := cl.sendTransaction(ctx, txOpts, alphaAddr, nil); err != nil {
 					t.Fatalf("error sending tx %d-%d: %v", i, j, err)
