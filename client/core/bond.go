@@ -512,14 +512,11 @@ func (c *Core) preValidateBond(dc *dexConnection, bond *asset.Bond) error {
 		return fmt.Errorf("account keys not decrypted")
 	}
 
-	assetID, bondCoin := bond.AssetID, bond.CoinID
-	bondCoinStr := coinIDString(assetID, bondCoin)
-
 	// Pre-validate with the raw bytes of the unsigned tx and our account
 	// pubkey.
 	preBond := &msgjson.PreValidateBond{
 		AcctPubKey: pkBytes,
-		AssetID:    assetID,
+		AssetID:    bond.AssetID,
 		Version:    bond.Version,
 		RawTx:      bond.UnsignedTx,
 	}
@@ -531,13 +528,9 @@ func (c *Core) preValidateBond(dc *dexConnection, bond *asset.Bond) error {
 	}
 
 	// Check the response signature.
-	err = dc.acct.checkSig(preBondRes.Serialize(), preBondRes.Sig)
+	err = dc.acct.checkSig(append(preBondRes.Serialize(), bond.UnsignedTx...), preBondRes.Sig)
 	if err != nil {
-		c.log.Warnf("prevalidatebond: DEX signature validation error: %v", err)
-	}
-	if !bytes.Equal(preBondRes.BondID, bondCoin) {
-		return fmt.Errorf("server reported bond coin ID %v, expected %v", bondCoinStr,
-			coinIDString(assetID, preBondRes.BondID))
+		return fmt.Errorf("preValidateBond: DEX signature validation error: %v", err)
 	}
 
 	if preBondRes.Amount != bond.Amount {
@@ -582,8 +575,8 @@ func (c *Core) postBond(dc *dexConnection, bond *asset.Bond) (*msgjson.PostBondR
 		c.log.Warnf("postbond: DEX signature validation error: %v", err)
 	}
 	if !bytes.Equal(postBondRes.BondID, bondCoin) {
-		return nil, fmt.Errorf("server reported bond coin ID %v, expected %v", bondCoinStr,
-			coinIDString(assetID, postBondRes.BondID))
+		return nil, fmt.Errorf("server reported bond coin ID %v, expected %v", coinIDString(assetID, postBondRes.BondID),
+			bondCoinStr)
 	}
 
 	return postBondRes, nil

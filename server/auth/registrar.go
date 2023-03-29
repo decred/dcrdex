@@ -71,10 +71,7 @@ func (auth *AuthManager) handlePreValidateBond(conn comms.Link, msg *msgjson.Mes
 	assetID := preBond.AssetID
 	bondAsset, ok := auth.bondAssets[assetID]
 	if !ok {
-		return msgjson.NewError(msgjson.BondError, "only DCR bonds supported presently")
-	}
-	if assetID != 42 { // Temporary! need to update tier computations for different bond increment/amounts!
-		return msgjson.NewError(msgjson.BondError, "only DCR bonds supported presently")
+		return msgjson.NewError(msgjson.BondError, "%s does not support bonds", dex.BipIDSymbol(assetID))
 	}
 
 	// Create an account.Account from the provided pubkey.
@@ -126,9 +123,8 @@ func (auth *AuthManager) handlePreValidateBond(conn comms.Link, msg *msgjson.Mes
 		AssetID:   assetID,
 		Amount:    uint64(amt),
 		Expiry:    uint64(expireTime.Unix()),
-		BondID:    bondCoinID,
 	}
-	auth.Sign(preBondRes)
+	preBondRes.SetSig(auth.SignMsg(append(preBondRes.Serialize(), preBond.RawTx...)))
 
 	resp, err := msgjson.NewResponse(msg.ID, preBondRes, nil)
 	if err != nil { // shouldn't be possible
@@ -158,14 +154,10 @@ func (auth *AuthManager) handlePostBond(conn comms.Link, msg *msgjson.Message) *
 		return msgjson.NewError(msgjson.BondError, "error parsing postbond request")
 	}
 
-	// TODO: allow different assets for bond, switching parse functions, etc.
 	assetID := postBond.AssetID
 	bondAsset, ok := auth.bondAssets[assetID]
 	if !ok {
-		return msgjson.NewError(msgjson.BondError, "only DCR bonds supported presently")
-	}
-	if assetID != 42 { // Temporary! need to update tier computations for different bond increment/amounts!
-		return msgjson.NewError(msgjson.BondError, "only DCR bonds supported presently")
+		return msgjson.NewError(msgjson.BondError, "%s does not support bonds", dex.BipIDSymbol(assetID))
 	}
 
 	// Create an account.Account from the provided pubkey.

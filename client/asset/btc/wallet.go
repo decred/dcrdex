@@ -38,7 +38,6 @@ type Wallet interface {
 	privKeyForAddress(addr string) (*btcec.PrivateKey, error)
 	walletUnlock(pw []byte) error
 	walletLock() error
-	sendToAddress(address string, value, feeRate uint64, subtract bool) (*chainhash.Hash, error)
 	locked() bool
 	syncStatus() (*syncStatus, error)
 	peerCount() (uint32, error)

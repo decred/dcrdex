@@ -36,6 +36,7 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/wallet"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/rpcclient/v7"
 )
 
@@ -219,8 +220,7 @@ func CommonConfigOpts(symbol string /* upper-case */, withApiFallback bool) []*a
 				"necessary. Otherwise, excess funds may be reserved to fund the order " +
 				"until the first swap contract is broadcast during match settlement, " +
 				"or the order is canceled. This an extra transaction for which network " +
-				"mining fees are paid. Used only for standing-type orders, e.g. limit " +
-				"orders without immediate time-in-force.",
+				"mining fees are paid.",
 			IsBoolean:    true,
 			DefaultValue: false,
 		},
@@ -388,9 +388,8 @@ type BTCCloneCFG struct {
 	ManualMedianTime bool
 	// OmitRPCOptionsArg is for clones that don't take an options argument.
 	OmitRPCOptionsArg bool
-	// LegacySendToAddr sents legacy raw tx which does not have positional fee
-	// rate param.
-	LegacySendToAddr bool
+	// AssetID is the asset ID of the clone.
+	AssetID uint32
 }
 
 // outPoint is the hash and output index of a transaction output.
@@ -815,6 +814,23 @@ type baseWallet struct {
 
 	findRedemptionMtx   sync.RWMutex
 	findRedemptionQueue map[outPoint]*findRedemptionReq
+
+	reservesMtx sync.RWMutex // frequent reads for balance, infrequent updates
+	// bondReservesEnforced is used to reserve unspent amounts for upcoming bond
+	// transactions, including projected transaction fees, and does not include
+	// amounts that are currently locked in unspent bonds, which are in
+	// bondReservesUsed. When bonds are created, bondReservesEnforced is
+	// decremented and bondReservesUsed are incremented; when bonds are
+	// refunded, the reverse. bondReservesEnforced may become negative during
+	// the unbonding process.
+	bondReservesEnforced int64  // set by ReserveBondFunds, modified by bondSpent and bondLocked
+	bondReservesUsed     uint64 // set by RegisterUnspent, modified by bondSpent and bondLocked
+	// When bondReservesEnforced is non-zero, bondReservesNominal is the
+	// cumulative of all ReserveBondFunds and RegisterUnspent input amounts,
+	// with no fee padding. It includes the future and live (currently unspent)
+	// bond amounts. This amount only changes via ReserveBondFunds, and it is
+	// used to recognize when all reserves have been released.
+	bondReservesNominal int64 // only set by ReserveBondFunds
 }
 
 func (w *baseWallet) fallbackFeeRate() uint64 {
@@ -873,6 +889,7 @@ var _ asset.LogFiler = (*ExchangeWalletSPV)(nil)
 var _ asset.Recoverer = (*ExchangeWalletSPV)(nil)
 var _ asset.PeerManager = (*ExchangeWalletSPV)(nil)
 var _ asset.TxFeeEstimator = (*intermediaryWallet)(nil)
+var _ asset.Bonder = (*baseWallet)(nil)
 
 // RecoveryCfg is the information that is transferred from the old wallet
 // to the new one when the wallet is recovered.
@@ -1027,6 +1044,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 		// FeeEstimator must default to rpcFeeRate if not set, but set a
 		// specific external estimator:
 		ExternalFeeEstimator: externalFeeEstimator,
+		AssetID:              BipID,
 	}
 
 	switch cfg.Type {
@@ -1090,7 +1108,6 @@ func newRPCWallet(requester RawRequester, cfg *BTCCloneCFG, parsedCfg *RPCWallet
 		chainParams:              cfg.ChainParams,
 		omitAddressType:          cfg.OmitAddressType,
 		legacySignTx:             cfg.LegacySignTxRPC,
-		legacySendToAddr:         cfg.LegacySendToAddr,
 		booleanGetBlock:          cfg.BooleanGetBlockRPC,
 		unlockSpends:             cfg.UnlockSpends,
 		deserializeTx:            btc.deserializeTx,
@@ -1363,7 +1380,17 @@ func (btc *baseWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig,
 		return false, err
 	}
 
-	btc.cfgV.Store(newCfg) // probably won't matter if restart/reinit required
+	oldCfg := btc.cfgV.Swap(newCfg).(*baseWalletConfig)
+	if oldCfg.feeRateLimit != newCfg.feeRateLimit {
+		// Adjust the bond reserves fee buffer, if enforcing.
+		btc.reservesMtx.Lock()
+		if btc.bondReservesNominal != 0 {
+			btc.bondReservesEnforced += int64(bondsFeeBuffer(btc.segwit, newCfg.feeRateLimit)) -
+				int64(bondsFeeBuffer(btc.segwit, oldCfg.feeRateLimit))
+		}
+		btc.reservesMtx.Unlock()
+	}
+
 	return restart, nil
 }
 
@@ -1439,9 +1466,7 @@ func (btc *baseWallet) OwnsDepositAddress(address string) (bool, error) {
 	return btc.node.ownsAddress(addr)
 }
 
-// Balance returns the total available funds in the wallet. Part of the
-// asset.Wallet interface.
-func (btc *baseWallet) Balance() (*asset.Balance, error) {
+func (btc *baseWallet) balance() (*asset.Balance, error) {
 	if btc.useLegacyBalance || btc.zecStyleBalance {
 		return btc.legacyBalance()
 	}
@@ -1458,7 +1483,47 @@ func (btc *baseWallet) Balance() (*asset.Balance, error) {
 		Available: toSatoshi(balances.Mine.Trusted) - locked,
 		Immature:  toSatoshi(balances.Mine.Immature + balances.Mine.Untrusted),
 		Locked:    locked,
+		Other:     make(map[string]uint64),
 	}, nil
+}
+
+// Balance should return the total available funds in the wallet.
+func (btc *baseWallet) Balance() (*asset.Balance, error) {
+	bal, err := btc.balance()
+	if err != nil {
+		return nil, err
+	}
+
+	reserves := btc.reserves()
+	if reserves > bal.Available {
+		btc.log.Warnf("Available balance is below configured reserves: %f < %f",
+			toBTC(bal.Available), toBTC(reserves))
+		bal.Other["Reserves Deficit"] = reserves - bal.Available
+		reserves = bal.Available
+	}
+	bal.Other["Bond Reserves (locked)"] = reserves
+	bal.Available -= reserves
+	bal.Locked += reserves
+
+	return bal, nil
+}
+
+func bondsFeeBuffer(segwit bool, highFeeRate uint64) uint64 {
+	const inputCount uint64 = 12 // plan for lots of inputs
+	var largeBondTxSize uint64
+	if segwit {
+		largeBondTxSize = dexbtc.MinimumTxOverhead + dexbtc.P2WSHOutputSize + 1 + dexbtc.BondPushDataSize +
+			dexbtc.P2WPKHOutputSize + inputCount*dexbtc.RedeemP2WPKHInputSize
+	} else {
+		largeBondTxSize = dexbtc.MinimumTxOverhead + dexbtc.P2SHOutputSize + 1 + dexbtc.BondPushDataSize +
+			dexbtc.P2PKHOutputSize + inputCount*dexbtc.RedeemP2PKHInputSize
+	}
+
+	// Normally we can plan on just 2 parallel "tracks" (single bond overlap
+	// when bonds are expired and waiting to refund) but that may increase
+	// temporarily if target tier is adjusted up.
+	const parallelTracks uint64 = 4
+	return parallelTracks * largeBondTxSize * highFeeRate
 }
 
 // legacyBalance is used for clones that are < node version 0.18 and so don't
@@ -1648,7 +1713,7 @@ func (btc *baseWallet) maxOrder(lotSize, feeSuggestion, maxFeeRate uint64) (utxo
 	lots := avail / (lotSize + basicFee)
 	for lots > 0 {
 		est, _, _, err := btc.estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate,
-			utxos, btc.useSplitTx(), 1.0)
+			utxos, true, 1.0)
 		// The only failure mode of estimateSwap -> btc.fund is when there is
 		// not enough funds, so if an error is encountered, count down the lots
 		// and repeat until we have enough.
@@ -1676,9 +1741,7 @@ func (btc *baseWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
 	// Start with the maxOrder at the default configuration. This gets us the
 	// utxo set, the network fee rate, and the wallet's maximum order size. The
 	// utxo set can then be used repeatedly in estimateSwap at virtually zero
-	// cost since there are no more RPC calls. The utxo set is only used once
-	// right now, but when order-time options are implemented, the utxos will be
-	// used to calculate option availability and fees.
+	// cost since there are no more RPC calls.
 	utxos, maxEst, err := btc.maxOrder(req.LotSize, req.FeeSuggestion, req.MaxFeeRate)
 	if err != nil {
 		return nil, err
@@ -1710,23 +1773,21 @@ func (btc *baseWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
 	est, _, _, err := btc.estimateSwap(req.Lots, req.LotSize, req.FeeSuggestion,
 		req.MaxFeeRate, utxos, split, bump)
 	if err != nil {
-		return nil, fmt.Errorf("estimation failed: %v", err)
+		btc.log.Warnf("estimateSwap failure: %v", err)
 	}
 
-	var opts []*asset.OrderOption
-
-	// Only offer the split option for standing orders.
-	if !req.Immediate {
-		if splitOpt := btc.splitOption(req, utxos, bump); splitOpt != nil {
-			opts = append(opts, splitOpt)
-		}
-	}
+	// Always offer the split option, even for non-standing orders since
+	// immediately spendable change many be desirable regardless.
+	opts := []*asset.OrderOption{btc.splitOption(req, utxos, bump)}
 
 	// Figure out what our maximum available fee bump is, within our 2x hard
 	// limit.
 	var maxBump float64
 	var maxBumpEst *asset.SwapEstimate
 	for maxBump = 2.0; maxBump > 1.01; maxBump -= 0.1 {
+		if est == nil {
+			break
+		}
 		tryEst, splitUsed, _, err := btc.estimateSwap(req.Lots, req.LotSize,
 			req.FeeSuggestion, req.MaxFeeRate, utxos, split, maxBump)
 		// If the split used wasn't the configured value, this option is not
@@ -1779,7 +1840,7 @@ func (btc *baseWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
 	}
 
 	return &asset.PreSwap{
-		Estimate: est,
+		Estimate: est, // may be nil so we can present options, which in turn affect estimate feasibility
 		Options:  opts,
 	}, nil
 }
@@ -1841,41 +1902,40 @@ func (btc *baseWallet) SingleLotSwapFees(form *asset.PreSwapForm) (fees uint64, 
 // splitOption constructs an *asset.OrderOption with customized text based on the
 // difference in fees between the configured and test split condition.
 func (btc *baseWallet) splitOption(req *asset.PreSwapForm, utxos []*compositeUTXO, bump float64) *asset.OrderOption {
-	noSplitEst, _, noSplitLocked, err := btc.estimateSwap(req.Lots, req.LotSize,
-		req.FeeSuggestion, req.MaxFeeRate, utxos, false, bump)
-	if err != nil {
-		btc.log.Errorf("estimateSwap (no split) error: %v", err)
-		return nil
-	}
-	splitEst, splitUsed, splitLocked, err := btc.estimateSwap(req.Lots, req.LotSize,
-		req.FeeSuggestion, req.MaxFeeRate, utxos, true, bump)
-	if err != nil {
-		btc.log.Errorf("estimateSwap (with split) error: %v", err)
-		return nil
-	}
-	symbol := strings.ToUpper(btc.symbol)
-
 	opt := &asset.OrderOption{
 		ConfigOption: asset.ConfigOption{
 			Key:           splitKey,
 			DisplayName:   "Pre-size Funds",
 			IsBoolean:     true,
-			DefaultValue:  false, // not nil interface
+			DefaultValue:  btc.useSplitTx(), // not nil interface
 			ShowByDefault: true,
 		},
 		Boolean: &asset.BooleanConfig{},
 	}
 
+	noSplitEst, _, noSplitLocked, err := btc.estimateSwap(req.Lots, req.LotSize,
+		req.FeeSuggestion, req.MaxFeeRate, utxos, false, bump)
+	if err != nil {
+		btc.log.Errorf("estimateSwap (no split) error: %v", err)
+		opt.Boolean.Reason = fmt.Sprintf("estimate without a split failed with \"%v\"", err)
+		return opt // utility and overlock report unavailable, but show the option
+	}
+	splitEst, splitUsed, splitLocked, err := btc.estimateSwap(req.Lots, req.LotSize,
+		req.FeeSuggestion, req.MaxFeeRate, utxos, true, bump)
+	if err != nil {
+		btc.log.Errorf("estimateSwap (with split) error: %v", err)
+		opt.Boolean.Reason = fmt.Sprintf("estimate with a split failed with \"%v\"", err)
+		return opt // utility and overlock report unavailable, but show the option
+	}
+	symbol := strings.ToUpper(btc.symbol)
+
 	if !splitUsed || splitLocked >= noSplitLocked { // locked check should be redundant
 		opt.Boolean.Reason = fmt.Sprintf("avoids no %s overlock for this order (ignored)", symbol)
 		opt.Description = fmt.Sprintf("A split transaction for this order avoids no %s overlock, "+
 			"but adds additional fees.", symbol)
+		opt.DefaultValue = false
 		return opt // not enabled by default, but explain why
 	}
-
-	// Since it is usable, apply the user's default value, and set the
-	// reason and description.
-	opt.DefaultValue = btc.useSplitTx()
 
 	overlock := noSplitLocked - splitLocked
 	pctChange := (float64(splitEst.RealisticWorstCase)/float64(noSplitEst.RealisticWorstCase) - 1) * 100
@@ -1900,6 +1960,7 @@ func (btc *baseWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate uin
 	for _, utxo := range utxos {
 		avail += utxo.amount
 	}
+	reserves := btc.reserves()
 
 	// If there is a fee bump, the networkFeeRate can be higher than the
 	// MaxFeeRate
@@ -1911,40 +1972,40 @@ func (btc *baseWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate uin
 	}
 
 	val := lots * lotSize
-	// This enough func does not account for a split transaction at the start,
+	// The orderEnough func does not account for a split transaction at the start,
 	// so it is possible that funding for trySplit would actually choose more
 	// UTXOs. Actual order funding accounts for this. For this estimate, we will
 	// just not use a split tx if the split-adjusted required funds exceeds the
 	// total value of the UTXO selected with this enough closure.
-	enough := func(inputsSize, inputsVal uint64) bool {
-		reqFunds := calc.RequiredOrderFundsAlt(val, inputsSize, lots, btc.initTxSizeBase,
-			btc.initTxSize, bumpedMaxRate) // no +splitMaxFees so this is accurate without split
-		return inputsVal >= reqFunds
-	}
-
-	sum, inputsSize, _, _, _, _, err := fund(utxos, enough)
+	sum, _, inputsSize, _, _, _, _, err := tryFund(utxos,
+		orderEnough(val, lots, bumpedMaxRate, btc.initTxSizeBase, btc.initTxSize, btc.segwit, trySplit))
 	if err != nil {
 		return nil, false, 0, fmt.Errorf("error funding swap value %s: %w", amount(val), err)
 	}
 
-	reqFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots,
-		btc.initTxSizeBase, btc.initTxSize, bumpedMaxRate) // same as in enough func
-	maxFees := reqFunds - val
+	digestInputs := func(inputsSize uint64) (reqFunds, maxFees, estHighFees, estLowFees uint64) {
+		reqFunds = calc.RequiredOrderFundsAlt(val, inputsSize, lots,
+			btc.initTxSizeBase, btc.initTxSize, bumpedMaxRate) // same as in enough func
+		maxFees = reqFunds - val
 
-	estHighFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), lots,
-		btc.initTxSizeBase, btc.initTxSize, bumpedNetRate)
-	estHighFees := estHighFunds - val
+		estHighFunds := calc.RequiredOrderFundsAlt(val, inputsSize, lots,
+			btc.initTxSizeBase, btc.initTxSize, bumpedNetRate)
+		estHighFees = estHighFunds - val
 
-	estLowFunds := calc.RequiredOrderFundsAlt(val, uint64(inputsSize), 1,
-		btc.initTxSizeBase, btc.initTxSize, bumpedNetRate) // best means single multi-lot match, even better than batch
-	estLowFees := estLowFunds - val
+		estLowFunds := calc.RequiredOrderFundsAlt(val, inputsSize, 1,
+			btc.initTxSizeBase, btc.initTxSize, bumpedNetRate) // best means single multi-lot match, even better than batch
+		estLowFees = estLowFunds - val
+		return
+	}
+
+	reqFunds, maxFees, estHighFees, estLowFees := digestInputs(inputsSize)
 
 	// Math for split transactions is a little different.
 	if trySplit {
-		_, splitMaxFees := btc.splitBaggageFees(bumpedMaxRate)
-		_, splitFees := btc.splitBaggageFees(bumpedNetRate)
+		_, splitMaxFees := btc.splitBaggageFees(bumpedMaxRate, false)
+		_, splitFees := btc.splitBaggageFees(bumpedNetRate, false)
 		reqTotal := reqFunds + splitMaxFees // ~ rather than actually fund()ing again
-		if reqTotal <= sum {
+		if reqTotal <= sum && sum-reqTotal >= reserves {
 			return &asset.SwapEstimate{
 				Lots:               lots,
 				Value:              val,
@@ -1953,6 +2014,20 @@ func (btc *baseWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate uin
 				RealisticWorstCase: estHighFees + splitFees,
 			}, true, reqFunds, nil // requires reqTotal, but locks reqFunds in the split output
 		}
+	}
+
+	if sum > avail-reserves {
+		if trySplit {
+			return nil, false, 0, errors.New("balance too low to both fund order and maintain bond reserves")
+		}
+
+		kept := leastOverFund(reserves, utxos)
+		utxos := utxoSetDiff(utxos, kept)
+		sum, _, inputsSize, _, _, _, _, err = tryFund(utxos, orderEnough(val, lots, bumpedMaxRate, btc.initTxSizeBase, btc.initTxSize, btc.segwit, false))
+		if err != nil {
+			return nil, false, 0, fmt.Errorf("error funding swap value %s: %w", amount(val), err)
+		}
+		_, maxFees, estHighFees, estLowFees = digestInputs(inputsSize)
 	}
 
 	return &asset.SwapEstimate{
@@ -2091,40 +2166,38 @@ func (btc *baseWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, er
 		return nil, nil, fmt.Errorf("error parsing swap options: %w", err)
 	}
 
-	btc.fundingMtx.Lock()         // before getting spendable utxos from wallet
-	defer btc.fundingMtx.Unlock() // after we update the map and lock in the wallet
-
-	utxos, _, avail, err := btc.spendableUTXOs(0)
-	if err != nil {
-		return nil, nil, fmt.Errorf("error parsing unspent outputs: %w", err)
-	}
-	if avail < ord.Value {
-		return nil, nil, fmt.Errorf("insufficient funds. %s requested, %s available",
-			ordValStr, amount(avail))
-	}
-
 	bumpedMaxRate, err := calcBumpedRate(ord.MaxFeeRate, customCfg.FeeBump)
 	if err != nil {
 		btc.log.Errorf("calcBumpRate error: %v", err)
 	}
 
-	enough := func(inputsSize, inputsVal uint64) bool {
-		reqFunds := calc.RequiredOrderFundsAlt(ord.Value, inputsSize, ord.MaxSwapCount,
-			btc.initTxSizeBase, btc.initTxSize, bumpedMaxRate)
-		return inputsVal >= reqFunds
-	}
-
-	sum, size, coins, fundingCoins, redeemScripts, spents, err := fund(utxos, enough)
-	if err != nil {
-		return nil, nil, fmt.Errorf("error funding swap value of %s: %w", amount(ord.Value), err)
-	}
-
+	// If a split is not requested, but is forced, create an extra output from
+	// the split tx to help avoid a forced split in subsequent orders.
+	var extraSplitOutput uint64
 	useSplit := btc.useSplitTx()
 	if customCfg.Split != nil {
 		useSplit = *customCfg.Split
 	}
 
-	if useSplit && !ord.Immediate {
+	reserves := btc.reserves()
+	minConfs := uint32(0)
+	coins, fundingCoins, spents, redeemScripts, inputsSize, sum, err := btc.fund(reserves, minConfs, true,
+		orderEnough(ord.Value, ord.MaxSwapCount, bumpedMaxRate, btc.initTxSizeBase, btc.initTxSize, btc.segwit, useSplit))
+	if err != nil {
+		if !useSplit && reserves > 0 {
+			// Force a split if funding failure may be due to reserves.
+			btc.log.Infof("Retrying order funding with a forced split transaction to help respect reserves.")
+			useSplit = true
+			coins, fundingCoins, spents, redeemScripts, inputsSize, sum, err = btc.fund(reserves, minConfs, true,
+				orderEnough(ord.Value, ord.MaxSwapCount, bumpedMaxRate, btc.initTxSizeBase, btc.initTxSize, btc.segwit, useSplit))
+			extraSplitOutput = reserves + bondsFeeBuffer(btc.segwit, btc.feeRateLimit())
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("error funding swap value of %s: %w", amount(ord.Value), err)
+		}
+	}
+
+	if useSplit {
 		// We apply the bumped fee rate to the split transaction when the
 		// PreSwap is created, so we use that bumped rate here too.
 		// But first, check that it's within bounds.
@@ -2146,39 +2219,93 @@ func (btc *baseWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, er
 		}
 
 		splitCoins, split, err := btc.split(ord.Value, ord.MaxSwapCount, spents,
-			uint64(size), fundingCoins, splitFeeRate, bumpedMaxRate)
+			inputsSize, fundingCoins, splitFeeRate, bumpedMaxRate, extraSplitOutput)
 		if err != nil {
+			if err := btc.ReturnCoins(coins); err != nil {
+				btc.log.Errorf("Error returning coins: %v", err)
+			}
 			return nil, nil, err
 		} else if split {
+			fmt.Printf("original coins: %s, split coins %s\n", coins, splitCoins)
 			return splitCoins, []dex.Bytes{nil}, nil // no redeem script required for split tx output
 		}
-		return splitCoins, redeemScripts, nil // splitCoins == coins
+		return coins, redeemScripts, nil // splitCoins == coins
 	}
 
 	btc.log.Infof("Funding %s %s order with coins %v worth %s",
 		ordValStr, btc.symbol, coins, amount(sum))
 
-	err = btc.node.lockUnspent(false, spents)
-	if err != nil {
-		return nil, nil, fmt.Errorf("LockUnspent error: %w", err)
-	}
-
-	for pt, utxo := range fundingCoins {
-		btc.fundingCoins[pt] = utxo
-	}
-
 	return coins, redeemScripts, nil
 }
 
-func fund(utxos []*compositeUTXO, enough func(uint64, uint64) bool) (
-	sum uint64, size uint32, coins asset.Coins, fundingCoins map[outPoint]*utxo, redeemScripts []dex.Bytes, spents []*output, err error) {
+func (btc *baseWallet) fundInternal(keep uint64, minConfs uint32, lockUnspents bool,
+	enough func(size, sum uint64) (bool, uint64)) (
+	coins asset.Coins, fundingCoins map[outPoint]*utxo, spents []*output, redeemScripts []dex.Bytes, size, sum uint64, err error) {
+	utxos, _, avail, err := btc.spendableUTXOs(minConfs)
+	if err != nil {
+		return nil, nil, nil, nil, 0, 0, fmt.Errorf("error getting spendable utxos: %w", err)
+	}
+
+	if keep > 0 {
+		kept := leastOverFund(keep, utxos)
+		btc.log.Debugf("Setting aside %v BTC in %d UTXOs to respect the %v BTC reserved amount",
+			toBTC(sumUTXOs(kept)), len(kept), toBTC(keep))
+		utxosPruned := utxoSetDiff(utxos, kept)
+		sum, _, size, coins, fundingCoins, redeemScripts, spents, err = tryFund(utxosPruned, enough)
+		if err != nil {
+			btc.log.Debugf("Unable to fund order with UTXOs set aside (%v), trying again with full UTXO set.", err)
+		}
+	}
+	if len(spents) == 0 { // either keep is zero or it failed with utxosPruned
+		// Without utxos set aside for keep, we have to consider any spendable
+		// change (extra) that the enough func grants us.
+		var extra uint64
+		sum, extra, size, coins, fundingCoins, redeemScripts, spents, err = tryFund(utxos, enough)
+		if err != nil {
+			return nil, nil, nil, nil, 0, 0, err
+		}
+		if avail-sum+extra < keep {
+			return nil, nil, nil, nil, 0, 0, asset.ErrInsufficientBalance
+		}
+		// else we got lucky with the legacy funding approach and there was
+		// either available unspent or the enough func granted spendable change.
+		if keep > 0 && extra > 0 {
+			btc.log.Debugf("Funding succeeded with %v BTC in spendable change.", toBTC(extra))
+		}
+	}
+
+	if lockUnspents {
+		err = btc.node.lockUnspent(false, spents)
+		if err != nil {
+			return nil, nil, nil, nil, 0, 0, fmt.Errorf("LockUnspent error: %w", err)
+		}
+		for pt, utxo := range fundingCoins {
+			btc.fundingCoins[pt] = utxo
+		}
+	}
+
+	return coins, fundingCoins, spents, redeemScripts, size, sum, err
+}
+
+func (btc *baseWallet) fund(keep uint64, minConfs uint32, lockUnspents bool,
+	enough func(size, sum uint64) (bool, uint64)) (
+	coins asset.Coins, fundingCoins map[outPoint]*utxo, spents []*output, redeemScripts []dex.Bytes, size, sum uint64, err error) {
+
+	btc.fundingMtx.Lock()
+	defer btc.fundingMtx.Unlock()
+
+	return btc.fundInternal(keep, minConfs, lockUnspents, enough)
+}
+
+func tryFund(utxos []*compositeUTXO,
+	enough func(uint64, uint64) (bool, uint64)) (
+	sum, extra, size uint64, coins asset.Coins, fundingCoins map[outPoint]*utxo, redeemScripts []dex.Bytes, spents []*output, err error) {
 
 	fundingCoins = make(map[outPoint]*utxo)
 
 	isEnoughWith := func(unspent *compositeUTXO) bool {
-		return enough(uint64(size+unspent.input.VBytes()), sum+unspent.amount)
-		// reqFunds := calc.RequiredOrderFunds(val, uint64(size+unspent.input.VBytes()), lots, nfo)
-		// return sum+unspent.amount >= reqFunds
+		ok, _ := enough(size+uint64(unspent.input.VBytes()), sum+unspent.amount)
+		return ok
 	}
 
 	addUTXO := func(unspent *compositeUTXO) {
@@ -2187,7 +2314,7 @@ func fund(utxos []*compositeUTXO, enough func(uint64, uint64) bool) (
 		coins = append(coins, op)
 		redeemScripts = append(redeemScripts, unspent.redeemScript)
 		spents = append(spents, op)
-		size += unspent.input.VBytes()
+		size += uint64(unspent.input.VBytes())
 		fundingCoins[op.pt] = unspent.utxo
 		sum += v
 	}
@@ -2225,6 +2352,7 @@ func fund(utxos []*compositeUTXO, enough func(uint64, uint64) bool) (
 			// No need to check idx == len(okUTXOs). We already verified that the last
 			// utxo passes above.
 			addUTXO(okUTXOs[idx])
+			_, extra = enough(size, sum)
 			return true
 		}
 	}
@@ -2232,7 +2360,7 @@ func fund(utxos []*compositeUTXO, enough func(uint64, uint64) bool) (
 	// First try with confs>0, falling back to allowing 0-conf outputs.
 	if !tryUTXOs(1) {
 		if !tryUTXOs(0) {
-			return 0, 0, nil, nil, nil, nil, fmt.Errorf("not enough to cover requested funds. "+
+			return 0, 0, 0, nil, nil, nil, nil, fmt.Errorf("not enough to cover requested funds. "+
 				"%s available in %d UTXOs", amount(sum), len(coins))
 		}
 	}
@@ -2260,7 +2388,7 @@ func fund(utxos []*compositeUTXO, enough func(uint64, uint64) bool) (
 // would already have an output of just the right size, and that would be
 // recognized here.
 func (btc *baseWallet) split(value uint64, lots uint64, outputs []*output, inputsSize uint64,
-	fundingCoins map[outPoint]*utxo, suggestedFeeRate, bumpedMaxRate uint64) (asset.Coins, bool, error) {
+	fundingCoins map[outPoint]*utxo, suggestedFeeRate, bumpedMaxRate, extraOutput uint64) (asset.Coins, bool, error) {
 
 	var err error
 	defer func() {
@@ -2278,7 +2406,7 @@ func (btc *baseWallet) split(value uint64, lots uint64, outputs []*output, input
 
 	// Calculate the extra fees associated with the additional inputs, outputs,
 	// and transaction overhead, and compare to the excess that would be locked.
-	swapInputSize, baggage := btc.splitBaggageFees(bumpedMaxRate)
+	swapInputSize, baggage := btc.splitBaggageFees(bumpedMaxRate, extraOutput > 0)
 
 	var coinSum uint64
 	coins := make(asset.Coins, 0, len(outputs))
@@ -2317,6 +2445,18 @@ func (btc *baseWallet) split(value uint64, lots uint64, outputs []*output, input
 	}
 	baseTx.AddTxOut(wire.NewTxOut(int64(reqFunds), splitScript))
 
+	if extraOutput > 0 {
+		addr, err := btc.node.changeAddress()
+		if err != nil {
+			return nil, false, fmt.Errorf("error creating split transaction address: %w", err)
+		}
+		splitScript, err := txscript.PayToAddrScript(addr)
+		if err != nil {
+			return nil, false, fmt.Errorf("error creating split tx script: %w", err)
+		}
+		baseTx.AddTxOut(wire.NewTxOut(int64(extraOutput), splitScript))
+	}
+
 	// Grab a change address.
 	changeAddr, err := btc.node.changeAddress()
 	if err != nil {
@@ -2324,9 +2464,9 @@ func (btc *baseWallet) split(value uint64, lots uint64, outputs []*output, input
 	}
 
 	// Sign, add change, and send the transaction.
-	msgTx, err := btc.sendWithReturn(baseTx, changeAddr, coinSum, reqFunds, suggestedFeeRate)
+	msgTx, err := btc.sendWithReturn(baseTx, changeAddr, coinSum, reqFunds+extraOutput, suggestedFeeRate)
 	if err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("error sending tx: %w", err)
 	}
 
 	txHash := btc.hashTx(msgTx)
@@ -2340,6 +2480,12 @@ func (btc *baseWallet) split(value uint64, lots uint64, outputs []*output, input
 		amount:  reqFunds,
 	}}
 
+	// Unlock spent coins
+	returnErr := btc.ReturnCoins(coins)
+	if returnErr != nil {
+		btc.log.Errorf("error unlocking spent coins: %v", err)
+	}
+
 	btc.log.Infof("Funding %s %s order with split output coin %v from original coins %v",
 		valueStr, btc.symbol, op, coins)
 	btc.log.Infof("Sent split transaction %s to accommodate swap of size %s %s + fees = %s",
@@ -2351,13 +2497,19 @@ func (btc *baseWallet) split(value uint64, lots uint64, outputs []*output, input
 }
 
 // splitBaggageFees is the fees associated with adding a split transaction.
-func (btc *baseWallet) splitBaggageFees(maxFeeRate uint64) (swapInputSize, baggage uint64) {
+func (btc *baseWallet) splitBaggageFees(maxFeeRate uint64, extraOutput bool) (swapInputSize, baggage uint64) {
 	if btc.segwit {
 		baggage = maxFeeRate * splitTxBaggageSegwit
+		if extraOutput {
+			baggage += maxFeeRate * dexbtc.P2WPKHOutputSize
+		}
 		swapInputSize = dexbtc.RedeemP2WPKHInputTotalSize
 		return
 	}
 	baggage = maxFeeRate * splitTxBaggage
+	if extraOutput {
+		baggage += maxFeeRate * dexbtc.P2PKHOutputSize
+	}
 	swapInputSize = dexbtc.RedeemP2PKHInputSize
 	return
 }
@@ -2551,24 +2703,32 @@ func (btc *baseWallet) Locked() bool {
 	return btc.node.locked()
 }
 
-// fundedTx creates and returns a new MsgTx with the provided coins as inputs.
-func (btc *baseWallet) fundedTx(coins asset.Coins) (*wire.MsgTx, uint64, []outPoint, error) {
-	baseTx := wire.NewMsgTx(btc.txVersion())
+func (btc *baseWallet) addInputsToTx(tx *wire.MsgTx, coins asset.Coins) (uint64, []outPoint, error) {
 	var totalIn uint64
 	// Add the funding utxos.
 	pts := make([]outPoint, 0, len(coins))
 	for _, coin := range coins {
 		op, err := btc.convertCoin(coin)
 		if err != nil {
-			return nil, 0, nil, fmt.Errorf("error converting coin: %w", err)
+			return 0, nil, fmt.Errorf("error converting coin: %w", err)
 		}
 		if op.value == 0 {
-			return nil, 0, nil, fmt.Errorf("zero-valued output detected for %s:%d", op.txHash(), op.vout())
+			return 0, nil, fmt.Errorf("zero-valued output detected for %s:%d", op.txHash(), op.vout())
 		}
 		totalIn += op.value
 		txIn := wire.NewTxIn(op.wireOutPoint(), []byte{}, nil)
-		baseTx.AddTxIn(txIn)
+		tx.AddTxIn(txIn)
 		pts = append(pts, op.pt)
+	}
+	return totalIn, pts, nil
+}
+
+// fundedTx creates and returns a new MsgTx with the provided coins as inputs.
+func (btc *baseWallet) fundedTx(coins asset.Coins) (*wire.MsgTx, uint64, []outPoint, error) {
+	baseTx := wire.NewMsgTx(btc.txVersion())
+	totalIn, pts, err := btc.addInputsToTx(baseTx, coins)
+	if err != nil {
+		return nil, 0, nil, err
 	}
 	return baseTx, totalIn, pts, nil
 }
@@ -2767,12 +2927,7 @@ func (btc *baseWallet) signedAccelerationTx(previousTxs []*GetTransactionResult,
 	var additionalInputs asset.Coins
 	if fundsRequired > orderChange.value {
 		// If change not enough, need to use other UTXOs.
-		utxos, _, _, err := btc.spendableUTXOs(1)
-		if err != nil {
-			return makeError(err)
-		}
-
-		_, _, additionalInputs, _, _, _, err = fund(utxos, func(inputSize, inputsVal uint64) bool {
+		enough := func(inputSize, inputsVal uint64) (bool, uint64) {
 			txSize := dexbtc.MinimumTxOverhead + inputSize
 
 			// add the order change as an input
@@ -2791,8 +2946,12 @@ func (btc *baseWallet) signedAccelerationTx(previousTxs []*GetTransactionResult,
 			}
 
 			totalFees := additionalFeesRequired + txSize*newFeeRate
-			return totalFees+requiredForRemainingSwaps <= inputsVal+orderChange.value
-		})
+			totalReq := requiredForRemainingSwaps + totalFees
+			totalVal := inputsVal + orderChange.value
+			return totalReq <= totalVal, totalVal - totalReq
+		}
+		minConfs := uint32(1)
+		additionalInputs, _, _, _, _, _, err = btc.fundInternal(btc.reserves(), minConfs, false, enough)
 		if err != nil {
 			return makeError(fmt.Errorf("failed to fund acceleration tx: %w", err))
 		}
@@ -2876,6 +3035,7 @@ func accelerateOrder(btc *baseWallet, swapCoins, accelerationCoins []dex.Bytes, 
 	if err != nil {
 		return nil, "", err
 	}
+
 	_, err = btc.broadcastTx(signedTx)
 	if err != nil {
 		return nil, "", err
@@ -4125,24 +4285,50 @@ func (btc *baseWallet) send(address string, val uint64, feeRate uint64, subtract
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("PayToAddrScript error: %w", err)
 	}
-	txHash, err := btc.node.sendToAddress(address, val, feeRate, subtract)
+
+	baseSize := dexbtc.MinimumTxOverhead
+	if btc.segwit {
+		baseSize += dexbtc.P2WPKHOutputSize * 2
+	} else {
+		baseSize += dexbtc.P2PKHOutputSize * 2
+	}
+
+	btc.fundingMtx.Lock()
+	defer btc.fundingMtx.Unlock()
+
+	enough := sendEnough(val, feeRate, subtract, uint64(baseSize), btc.segwit, true)
+	minConfs := uint32(0)
+	coins, _, _, _, inputsSize, _, err := btc.fundInternal(btc.reserves(), minConfs, false, enough)
 	if err != nil {
-		return nil, 0, 0, fmt.Errorf("SendToAddress error: %w", err)
+		return nil, 0, 0, fmt.Errorf("error funding transaction: %w", err)
 	}
-	txRaw, _, err := btc.rawWalletTx(txHash)
+
+	fundedTx, totalIn, _, err := btc.fundedTx(coins)
 	if err != nil {
-		return nil, 0, 0, fmt.Errorf("failed to locate new wallet transaction %v: %w", txHash, err)
+		return nil, 0, 0, fmt.Errorf("error adding inputs to transaction: %w", err)
 	}
-	tx, err := btc.deserializeTx(txRaw)
+
+	fees := feeRate * (inputsSize + uint64(baseSize))
+	var toSend uint64
+	if subtract {
+		toSend = val - fees
+	} else {
+		toSend = val
+	}
+	fundedTx.AddTxOut(wire.NewTxOut(int64(toSend), pay2script))
+
+	changeAddr, err := btc.node.changeAddress()
 	if err != nil {
-		return nil, 0, 0, fmt.Errorf("error decoding transaction: %w", err)
+		return nil, 0, 0, fmt.Errorf("error creating change address: %w", err)
 	}
-	for vout, txOut := range tx.TxOut {
-		if bytes.Equal(txOut.PkScript, pay2script) {
-			return txHash, uint32(vout), uint64(txOut.Value), nil
-		}
+
+	msgTx, err := btc.sendWithReturn(fundedTx, changeAddr, totalIn, toSend, feeRate)
+	if err != nil {
+		return nil, 0, 0, err
 	}
-	return nil, 0, 0, fmt.Errorf("failed to locate transaction vout")
+
+	txHash := msgTx.TxHash()
+	return &txHash, 0, toSend, nil
 }
 
 // SwapConfirmations gets the number of confirmations for the specified swap
@@ -4739,6 +4925,474 @@ func (btc *intermediaryWallet) EstimateSendTxFee(address string, sendAmount, fee
 	return fee, isValidAddress, nil
 }
 
+func (btc *baseWallet) reserves() uint64 {
+	btc.reservesMtx.RLock()
+	defer btc.reservesMtx.RUnlock()
+	if r := btc.bondReservesEnforced; r > 0 {
+		return uint64(r)
+	}
+	if btc.bondReservesNominal == 0 { // disabled
+		return 0
+	}
+	// When enforced is negative, we're unbonding. If nominal is still positive,
+	// we're partially unbonding and we need to report the remaining reserves
+	// after excess is unbonded, offsetting the negative enforced amount. This
+	// is the relatively small fee buffer.
+	if int64(btc.bondReservesUsed) == btc.bondReservesNominal {
+		return uint64(-btc.bondReservesEnforced)
+	}
+
+	return 0
+}
+
+// bondLocked reduces reserves, increases bonded (used) amount.
+func (btc *baseWallet) bondLocked(amt uint64) (reserved int64, unspent uint64) {
+	btc.reservesMtx.Lock()
+	defer btc.reservesMtx.Unlock()
+	e0 := btc.bondReservesEnforced
+	btc.bondReservesEnforced -= int64(amt)
+	btc.bondReservesUsed += amt
+	btc.log.Tracef("bondLocked (%v): enforced %v ==> %v (with bonded = %v / nominal = %v)",
+		toBTC(amt), toBTC(e0), toBTC(btc.bondReservesEnforced),
+		toBTC(btc.bondReservesUsed), toBTC(btc.bondReservesNominal))
+	return btc.bondReservesEnforced, btc.bondReservesUsed
+}
+
+// bondSpent increases enforce reserves, decreases bonded amount. When the
+// tracked unspent amount is reduced to zero, this clears the enforced amount
+// (just the remaining fee buffer).
+func (btc *baseWallet) bondSpent(amt uint64) (reserved int64, unspent uint64) {
+	btc.reservesMtx.Lock()
+	defer btc.reservesMtx.Unlock()
+
+	if amt <= btc.bondReservesUsed {
+		btc.bondReservesUsed -= amt
+	} else {
+		btc.log.Errorf("bondSpent: live bonds accounting error, spending bond worth %v with %v known live (zeroing!)",
+			amt, btc.bondReservesUsed)
+		btc.bondReservesUsed = 0
+	}
+
+	if btc.bondReservesNominal == 0 { // disabled
+		return btc.bondReservesEnforced, btc.bondReservesUsed // return 0, ...
+	}
+
+	e0 := btc.bondReservesEnforced
+	btc.bondReservesEnforced += int64(amt)
+
+	btc.log.Tracef("bondSpent (%v): enforced %v ==> %v (with bonded = %v / nominal = %v)",
+		toBTC(amt), toBTC(e0), toBTC(btc.bondReservesEnforced),
+		toBTC(btc.bondReservesUsed), toBTC(btc.bondReservesNominal))
+	return btc.bondReservesEnforced, btc.bondReservesUsed
+}
+
+// RegisterUnspent should be called once for every configured DEX with existing
+// unspent bond amounts, prior to login, which is when reserves for future bonds
+// are then added given the actual account tier, target tier, and this combined
+// existing bonds amount. This must be used before ReserveBondFunds, which
+// begins reserves enforcement provided a future amount that may be required
+// before the existing bonds are refunded. No reserves enforcement is enabled
+// until ReserveBondFunds is called, even with a future value of 0. A wallet
+// that is not enforcing reserves, but which has unspent bonds should use this
+// method to facilitate switching to the wallet for bonds in future.
+func (btc *baseWallet) RegisterUnspent(inBonds uint64) {
+	btc.reservesMtx.Lock()
+	defer btc.reservesMtx.Unlock()
+	btc.log.Tracef("RegisterUnspent(%v) changing unspent in bonds: %v => %v",
+		toBTC(inBonds), toBTC(btc.bondReservesUsed), toBTC(btc.bondReservesUsed+inBonds))
+	btc.bondReservesUsed += inBonds
+	// This method should be called before ReserveBondFunds, prior to login on
+	// application initialization (if there are existing for this asset bonds).
+	// The nominal counter is not modified until ReserveBondFunds is called.
+	if btc.bondReservesNominal != 0 {
+		btc.log.Warnf("BUG: RegisterUnspent called with existing nominal reserves of %v BTC",
+			toBTC(btc.bondReservesNominal))
+	}
+}
+
+// ReserveBondFunds increases the bond reserves to accommodate a certain nominal
+// amount of future bonds, or reduces the amount if a negative value is
+// provided. If indicated, updating the reserves will require sufficient
+// available balance, otherwise reserves will be adjusted regardless and the
+// funds are pre-reserved. This returns false if the available balance was
+// insufficient iff the caller requested it be respected, otherwise it always
+// returns true (success).
+//
+// The reserves enabled with this method are enforced when funding transactions
+// (e.g. regular withdraws/sends or funding orders), and deducted from available
+// balance. Amounts may be reserved beyond the available balance, but only the
+// amount that is offset by the available balance is reflected in the locked
+// balance category. Like funds locked in swap contracts, the caller must
+// supplement balance reporting with known bond amounts. However, via
+// RegisterUnspent, the wallet is made aware of pre-existing unspent bond
+// amounts (cumulative) that will eventually be spent with RefundBond.
+//
+// If this wallet is enforcing reserves (this method has been called, even with
+// a future value of zero), when new bonds are created the nominal bond amount
+// is deducted from the enforced reserves; when bonds are spent with RefundBond,
+// the nominal bond amount is added back into the enforced reserves. That is,
+// when there are no active bonds, the locked balance category will reflect the
+// entire amount requested with ReserveBondFunds (plus a fee buffer, see below),
+// and when bonds are created with MakeBondTx, the locked amount decreases since
+// that portion of the reserves are now held in inaccessible UTXOs, the amounts
+// of which the caller tracks independently. When spent with RefundBond, that
+// same *nominal* bond value is added back to the enforced reserves amount.
+//
+// The amounts requested for bond reserves should be the nominal amounts of the
+// bonds, but the reserved amount reflected in the locked balance category will
+// include a considerable buffer for transaction fees. Therefore when the full
+// amount of the reserves are presently locked in unspent bonds, the locked
+// balance will include this fee buffer while the wallet is enforcing reserves.
+//
+// Until this method is called, reserves enforcement is disabled, and any
+// unspent bonds registered with RegisterUnspent do not go into the enforced
+// reserves when spent. In this way, all Bonder wallets remain aware of the
+// total nominal value of unspent bonds even if the wallet is not presently
+// being used to maintain a target bonding amount that necessitates reserves
+// enforcement.
+//
+// A negative value may be provided to reduce allocated reserves. When the
+// amount is reduced by the same amount it was previously increased by both
+// ReserveBondFunds and RegisterUnspent, reserves enforcement including fee
+// padding is disabled. Consider the following example: on startup, .2 BTC of
+// existing unspent bonds are registered via RegisterUnspent, then on login and
+// auth with the relevant DEX host, .4 BTC of future bond reserves are requested
+// with ReserveBondFunds to maintain a configured target tier given the current
+// tier and amounts of the existing unspent bonds. To disable reserves, the
+// client would call ReserveBondFunds with -.6 BTC, which the wallet's internal
+// accounting recognizes as complete removal of the reserves.
+func (btc *baseWallet) ReserveBondFunds(future int64, respectBalance bool) bool {
+	btc.reservesMtx.Lock()
+	defer btc.reservesMtx.Unlock()
+
+	defer func(enforced0, used0, nominal0 int64) {
+		btc.log.Tracef("ReserveBondFunds(%v, %v): enforced = %v / bonded = %v / nominal = %v "+
+			" ==>  enforced = %v / bonded = %v / nominal = %v",
+			toBTC(future), respectBalance,
+			toBTC(enforced0), toBTC(used0), toBTC(nominal0),
+			toBTC(btc.bondReservesEnforced), toBTC(btc.bondReservesUsed), toBTC(uint64(btc.bondReservesNominal)))
+	}(btc.bondReservesEnforced, int64(btc.bondReservesUsed), btc.bondReservesNominal)
+
+	// For the reserves initialization, add the fee buffer.
+	var feeBuffer uint64
+	if btc.bondReservesNominal == 0 { // enabling, add a fee buffer
+		feeBuffer = bondsFeeBuffer(btc.segwit, btc.feeRateLimit())
+	}
+	enforcedDelta := future + int64(feeBuffer)
+
+	// How much of that is covered by the available balance, when increasing
+	// reserves via
+	if respectBalance && future > 0 {
+		bal, err := btc.balance()
+		if err != nil {
+			btc.log.Errorf("Failed to retrieve balance: %v")
+			return false
+		}
+		if int64(bal.Available) < btc.bondReservesEnforced+enforcedDelta {
+			return false
+		}
+	}
+
+	if btc.bondReservesNominal == 0 { // enabling, add any previously-registered unspent
+		btc.log.Debugf("Re-enabling reserves with %v in existing unspent bonds (added to nominal).", toBTC(btc.bondReservesUsed))
+		btc.bondReservesNominal += int64(btc.bondReservesUsed)
+	}
+	btc.bondReservesNominal += future
+	btc.bondReservesEnforced += enforcedDelta
+
+	// When disabling/zeroing reserves, wipe the fee buffer too. If there are
+	// unspent bonds, this will be done in bondSpent when the last one is spent.
+	if btc.bondReservesNominal <= 0 { // nominal should not go negative though
+		btc.log.Infof("Nominal reserves depleted -- clearing enforced reserves!")
+		btc.bondReservesEnforced = 0
+		btc.bondReservesNominal = 0
+	}
+
+	return true
+}
+
+// MakeBondTx creates a time-locked fidelity bond transaction. The V0
+// transaction has two required outputs:
+//
+// Output 0 is a the time-locked bond output of type P2SH with the provided
+// value. The redeem script looks similar to the refund path of an atomic swap
+// script, but with a pubkey hash:
+//
+//	<locktime> OP_CHECKLOCKTIMEVERIFY OP_DROP OP_DUP OP_HASH160 <pubkeyhash[20]> OP_EQUALVERIFY OP_CHECKSIG
+//
+// The pubkey referenced by the script is provided by the caller.
+//
+// Output 1 is a DEX Account commitment. This is an OP_RETURN output that
+// references the provided account ID.
+//
+//	OP_RETURN <2-byte version> <32-byte account ID> <4-byte locktime> <20-byte pubkey hash>
+//
+// Having the account ID in the raw allows the txn alone to identify the account
+// without the bond output's redeem script.
+//
+// Output 2 is change, if any.
+//
+// The bond output's redeem script, which is needed to spend the bond output, is
+// returned as the Data field of the Bond. The bond output pays to a pubkeyhash
+// script for a wallet address. Bond.RedeemTx is a backup transaction that
+// spends the bond output after lockTime passes, paying to an address for the
+// current underlying wallet; the bond private key should normally be used to
+// author a new transaction paying to a new address instead.
+func (btc *baseWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Time, bondKey *secp256k1.PrivateKey, acctID []byte) (*asset.Bond, func(), error) {
+	if ver != 0 {
+		return nil, nil, errors.New("only version 0 bonds supported")
+	}
+	if until := time.Until(lockTime); until >= 365*12*time.Hour /* ~6 months */ {
+		return nil, nil, fmt.Errorf("that lock time is nuts: %v", lockTime)
+	} else if until < 0 {
+		return nil, nil, fmt.Errorf("that lock time is already passed: %v", lockTime)
+	}
+
+	pk := bondKey.PubKey().SerializeCompressed()
+	pkh := btcutil.Hash160(pk)
+
+	feeRate = btc.feeRateWithFallback(feeRate)
+	baseTx := wire.NewMsgTx(wire.TxVersion)
+
+	// TL output.
+	lockTimeSec := lockTime.Unix()
+	if lockTimeSec >= dexbtc.MaxCLTVScriptNum || lockTimeSec <= 0 {
+		return nil, nil, fmt.Errorf("invalid lock time %v", lockTime)
+	}
+	bondScript, err := dexbtc.MakeBondScript(ver, uint32(lockTimeSec), pkh)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to build bond output redeem script: %w", err)
+	}
+	pkScript, err := btc.scriptHashScript(bondScript)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error constructing p2sh script: %v", err)
+	}
+	txOut := wire.NewTxOut(int64(amt), pkScript)
+	if dexbtc.IsDust(txOut, feeRate) {
+		return nil, nil, fmt.Errorf("bond output value of %d is dust", amt)
+	}
+	baseTx.AddTxOut(txOut)
+
+	// Acct ID commitment and bond details output, v0. The integers are encoded
+	// with big-endian byte order and a fixed number of bytes, unlike in Script,
+	// for natural visual inspection of the version and lock time.
+	pushData := make([]byte, 2+len(acctID)+4+20)
+	var offset int
+	binary.BigEndian.PutUint16(pushData[offset:], ver)
+	offset += 2
+	copy(pushData[offset:], acctID[:])
+	offset += len(acctID)
+	binary.BigEndian.PutUint32(pushData[offset:], uint32(lockTimeSec))
+	offset += 4
+	copy(pushData[offset:], pkh)
+	commitPkScript, err := txscript.NewScriptBuilder().
+		AddOp(txscript.OP_RETURN).
+		AddData(pushData).
+		Script()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to build acct commit output script: %w", err)
+	}
+	acctOut := wire.NewTxOut(0, commitPkScript) // value zero
+	baseTx.AddTxOut(acctOut)
+
+	baseSize := uint32(baseTx.SerializeSize())
+	if btc.segwit {
+		baseSize += dexbtc.P2WPKHOutputSize
+	} else {
+		baseSize += dexbtc.P2PKHOutputSize
+	}
+
+	coins, _, _, _, _, _, err := btc.fund(0, 0, true, sendEnough(amt, feeRate, true, uint64(baseSize), btc.segwit, true))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to fund bond tx: %w", err)
+	}
+
+	// Reduce the reserves counter now that utxos are explicitly allocated. When
+	// the bond is refunded and we pay back into our wallet, we will increase
+	// the reserves counter.
+	newReserves, unspent := btc.bondLocked(amt) // nominal, not spent amount
+	btc.log.Debugf("New bond reserves (new post) = %f BTC with %f in unspent bonds",
+		toBTC(newReserves), toBTC(unspent)) // decrement and report new
+
+	abandon := func() { // if caller does not broadcast, or we fail in this method
+		newReserves, unspent = btc.bondSpent(amt)
+		btc.log.Debugf("New bond reserves (abandoned post) = %f BTC with %f in unspent bonds",
+			toBTC(newReserves), toBTC(unspent)) // increment/restore and report new
+		err := btc.ReturnCoins(coins)
+		if err != nil {
+			btc.log.Errorf("error returning coins for unused bond tx: %v", coins)
+		}
+	}
+
+	var success bool
+	defer func() {
+		if !success {
+			abandon()
+		}
+	}()
+
+	totalIn, _, err := btc.addInputsToTx(baseTx, coins)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to add inputs to bond tx: %w", err)
+	}
+
+	changeAddr, err := btc.node.changeAddress()
+	if err != nil {
+		return nil, nil, fmt.Errorf("error creating change address: %w", err)
+	}
+	signedTx, _, _, err := btc.signTxAndAddChange(baseTx, changeAddr, totalIn, amt, feeRate)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to sign bond tx: %w", err)
+	}
+
+	txid := signedTx.TxHash()
+
+	signedTxBytes, err := serializeMsgTx(signedTx)
+	if err != nil {
+		return nil, nil, err
+	}
+	unsignedTxBytes, err := serializeMsgTx(baseTx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Prep the redeem / refund tx.
+	redeemMsgTx, err := btc.makeBondRefundTxV0(&txid, 0, amt, bondScript, bondKey, feeRate)
+	if err != nil {
+		return nil, nil, fmt.Errorf("unable to create bond redemption tx: %w", err)
+	}
+	redeemTx, err := serializeMsgTx(redeemMsgTx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to serialize bond redemption tx: %w", err)
+	}
+
+	bond := &asset.Bond{
+		Version:    ver,
+		AssetID:    btc.cloneParams.AssetID,
+		Amount:     amt,
+		CoinID:     toCoinID(&txid, 0),
+		Data:       bondScript,
+		SignedTx:   signedTxBytes,
+		UnsignedTx: unsignedTxBytes,
+		RedeemTx:   redeemTx,
+	}
+	success = true
+
+	return bond, abandon, nil
+}
+
+func (btc *baseWallet) makeBondRefundTxV0(txid *chainhash.Hash, vout uint32, amt uint64,
+	script []byte, priv *secp256k1.PrivateKey, feeRate uint64) (*wire.MsgTx, error) {
+	lockTime, pkhPush, err := dexbtc.ExtractBondDetailsV0(0, script)
+	if err != nil {
+		return nil, err
+	}
+
+	pk := priv.PubKey().SerializeCompressed()
+	pkh := btcutil.Hash160(pk)
+	if !bytes.Equal(pkh, pkhPush) {
+		return nil, fmt.Errorf("incorrect private key to spend the bond output")
+	}
+
+	msgTx := wire.NewMsgTx(btc.txVersion())
+	// Transaction LockTime must be <= spend time, and >= the CLTV lockTime, so
+	// we use exactly the CLTV's value. This limits the CLTV value to 32-bits.
+	msgTx.LockTime = lockTime
+	bondPrevOut := wire.NewOutPoint(txid, vout)
+	txIn := wire.NewTxIn(bondPrevOut, []byte{}, nil)
+	txIn.Sequence = wire.MaxTxInSequenceNum - 1 // not finalized, do not disable cltv
+	msgTx.AddTxIn(txIn)
+
+	// Calculate fees and add the refund output.
+	size := btc.calcTxSize(msgTx)
+	if btc.segwit {
+		witnessVBytes := (dexbtc.RedeemBondSigScriptSize + 2 + 3) / 4
+		size += uint64(witnessVBytes) + dexbtc.P2WPKHOutputSize
+	} else {
+		size += dexbtc.RedeemBondSigScriptSize + dexbtc.P2PKHOutputSize
+	}
+	fee := feeRate * size
+	if fee > amt {
+		return nil, fmt.Errorf("irredeemable bond at fee rate %d atoms/byte", feeRate)
+	}
+
+	// Add the refund output.
+	redeemAddr, err := btc.node.changeAddress()
+	if err != nil {
+		return nil, fmt.Errorf("error creating change address: %w", err)
+	}
+	redeemPkScript, err := txscript.PayToAddrScript(redeemAddr)
+	if err != nil {
+		return nil, fmt.Errorf("error creating pubkey script: %w", err)
+	}
+	redeemTxOut := wire.NewTxOut(int64(amt-fee), redeemPkScript)
+	if dexbtc.IsDust(redeemTxOut, feeRate) { // hard to imagine
+		return nil, fmt.Errorf("redeem output is dust")
+	}
+	msgTx.AddTxOut(redeemTxOut)
+
+	if btc.segwit {
+		sigHashes := txscript.NewTxSigHashes(msgTx, new(txscript.CannedPrevOutputFetcher))
+		sig, err := txscript.RawTxInWitnessSignature(msgTx, sigHashes, 0, int64(amt),
+			script, txscript.SigHashAll, priv)
+		if err != nil {
+			return nil, err
+		}
+		txIn.Witness = dexbtc.RefundBondScriptSegwit(script, sig, pk)
+	} else {
+		sig, err := btc.signNonSegwit(msgTx, 0, script, txscript.SigHashAll, priv, []int64{int64(amt)}, [][]byte{script})
+		if err != nil {
+			return nil, err
+		}
+		txIn.SignatureScript, err = dexbtc.RefundBondScript(script, sig, pk)
+		if err != nil {
+			return nil, fmt.Errorf("RefundBondScript: %w", err)
+		}
+	}
+
+	return msgTx, nil
+}
+
+// RefundBond refunds a bond output to a new wallet address given the redeem
+// script and private key. After broadcasting, the output paying to the wallet
+// is returned.
+func (btc *baseWallet) RefundBond(ctx context.Context, ver uint16, coinID, script []byte, amt uint64, privKey *secp256k1.PrivateKey) (asset.Coin, error) {
+	if ver != 0 {
+		return nil, errors.New("only version 0 bonds supported")
+	}
+	txHash, vout, err := decodeCoinID(coinID)
+	if err != nil {
+		return nil, err
+	}
+	feeRate := btc.targetFeeRateWithFallback(2, 0)
+
+	msgTx, err := btc.makeBondRefundTxV0(txHash, vout, amt, script, privKey, feeRate)
+	if err != nil {
+		return nil, err
+	}
+
+	newReserves, unspent := btc.bondSpent(amt)
+	btc.log.Debugf("New bond reserves (new refund of %f BTC) = %f BTC with %f in unspent bonds",
+		toBTC(amt), toBTC(newReserves), toBTC(unspent))
+
+	_, err = btc.node.sendRawTransaction(msgTx)
+	if err != nil {
+		newReserves, unspent = btc.bondLocked(amt) // assume it didn't really send :/
+		btc.log.Debugf("New bond reserves (failed refund broadcast) = %f BTC with %f in unspent bonds",
+			toBTC(newReserves), toBTC(unspent)) // increment/restore and report new
+		return nil, fmt.Errorf("error sending refund bond transaction: %w", err)
+	}
+
+	return newOutput(txHash, 0, uint64(msgTx.TxOut[0].Value)), nil
+}
+
+// BondsFeeBuffer suggests how much extra may be required for the transaction
+// fees part of required bond reserves when bond rotation is enabled.
+func (btc *baseWallet) BondsFeeBuffer() uint64 {
+	// 150% of the fee buffer portion of the reserves.
+	return 15 * bondsFeeBuffer(btc.segwit, btc.feeRateLimit()) / 10
+}
+
 type utxo struct {
 	txHash  *chainhash.Hash
 	vout    uint32
@@ -4846,6 +5500,7 @@ func (btc *baseWallet) lockedSats() (uint64, error) {
 	var sum uint64
 	btc.fundingMtx.Lock()
 	defer btc.fundingMtx.Unlock()
+
 	for _, rpcOP := range lockedOutpoints {
 		txHash, err := chainhash.NewHashFromStr(rpcOP.TxID)
 		if err != nil {
@@ -4958,7 +5613,7 @@ func decodeCoinID(coinID dex.Bytes) (*chainhash.Hash, uint32, error) {
 }
 
 // toBTC returns a float representation in conventional units for the sats.
-func toBTC(v uint64) float64 {
+func toBTC[V uint64 | int64](v V) float64 {
 	return btcutil.Amount(v).ToBTC()
 }
 

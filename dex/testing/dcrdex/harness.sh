@@ -187,7 +187,10 @@ cat << EOF >> "./markets.json"
             "configPath": "${TEST_ROOT}/btc/alpha/alpha.conf",
             "regConfs": 2,
             "regFee": 20000000,
-            "regXPub": "vpub5SLqN2bLY4WeZJ9SmNJHsyzqVKreTXD4ZnPC22MugDNcjhKX5xNX9QiQWcE4SSRzVWyHWUihpKRT7hckDGNzVc69wSX2JPcfGeNiT5c2XZy"
+            "regXPub": "vpub5SLqN2bLY4WeZJ9SmNJHsyzqVKreTXD4ZnPC22MugDNcjhKX5xNX9QiQWcE4SSRzVWyHWUihpKRT7hckDGNzVc69wSX2JPcfGeNiT5c2XZy",
+            "bondAmt": 10000000,
+            "bondConfs": 1
+
 EOF
 
 if [ $LTC_ON -eq 0 ]; then
@@ -198,7 +201,9 @@ if [ $LTC_ON -eq 0 ]; then
             "network": "simnet",
             "maxFeeRate": 20,
             "swapConf": 2,
-            "configPath": "${TEST_ROOT}/ltc/alpha/alpha.conf"
+            "configPath": "${TEST_ROOT}/ltc/alpha/alpha.conf",
+            "bondAmt": 10000000,
+            "bondConfs": 1
 EOF
 fi
 
@@ -210,7 +215,9 @@ if [ $BCH_ON -eq 0 ]; then
             "network": "simnet",
             "maxFeeRate": 20,
             "swapConf": 2,
-            "configPath": "${TEST_ROOT}/bch/alpha/alpha.conf"
+            "configPath": "${TEST_ROOT}/bch/alpha/alpha.conf",
+            "bondAmt": 10000000,
+            "bondConfs": 1
 EOF
 fi
 

@@ -171,7 +171,6 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		InitTxSizeBase:           dexbtc.InitTxSizeBase,
 		OmitAddressType:          true,
 		LegacySignTxRPC:          true,
-		LegacySendToAddr:         true,
 		LegacyValidateAddressRPC: true,
 		BooleanGetBlockRPC:       true,
 		SingularWallet:           true,
@@ -180,6 +179,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		FeeEstimator:             estimateFee,
 		ExternalFeeEstimator:     fetchExternalFee,
 		BlockDeserializer:        dexdoge.DeserializeBlock,
+		AssetID:                  BipID,
 	}
 
 	return btc.BTCCloneWallet(cloneCFG)

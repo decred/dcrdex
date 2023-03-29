@@ -1036,23 +1036,23 @@ func (pb *PreValidateBond) Serialize() []byte {
 // PreValidateBondResult is the response to the client's PreValidateBond
 // request.
 type PreValidateBondResult struct {
+	// Signature is the result of signing the serialized PreValidateBondResult
+	// concatenated with the RawTx.
 	Signature
 	AccountID Bytes  `json:"accountID"`
 	AssetID   uint32 `json:"assetID"`
 	Amount    uint64 `json:"amount"`
 	Expiry    uint64 `json:"expiry"` // not locktime, but time when bond expires for dex
-	BondID    Bytes  `json:"bondID"`
 }
 
 // Serialize serializes the PreValidateBondResult data for the signature.
 func (pbr *PreValidateBondResult) Serialize() []byte {
-	sz := len(pbr.AccountID) + 4 + 8 + 8 + len(pbr.BondID)
+	sz := len(pbr.AccountID) + 4 + 8 + 8
 	b := make([]byte, 0, sz)
 	b = append(b, pbr.AccountID...)
 	b = append(b, uint32Bytes(pbr.AssetID)...)
 	b = append(b, uint64Bytes(pbr.Amount)...)
-	b = append(b, uint64Bytes(pbr.Expiry)...)
-	return append(b, pbr.BondID...)
+	return append(b, uint64Bytes(pbr.Expiry)...)
 }
 
 // PostBond requests that server accept a confirmed bond payment, specified by

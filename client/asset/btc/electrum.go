@@ -4,7 +4,6 @@
 package btc
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -18,7 +17,6 @@ import (
 	"decred.org/dcrdex/dex/config"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
 )
 
 // ExchangeWalletElectrum is the asset.Wallet for an external Electrum wallet.
@@ -29,7 +27,6 @@ type ExchangeWalletElectrum struct {
 
 var _ asset.Wallet = (*ExchangeWalletElectrum)(nil)
 var _ asset.FeeRater = (*ExchangeWalletElectrum)(nil)
-var _ asset.Sweeper = (*ExchangeWalletElectrum)(nil)
 
 // ElectrumWallet creates a new ExchangeWalletElectrum for the provided
 // configuration, which must contain the necessary details for accessing the
@@ -139,41 +136,6 @@ func (btc *ExchangeWalletElectrum) Connect(ctx context.Context) (*sync.WaitGroup
 	}()
 
 	return wg, nil
-}
-
-// Sweep sends all the funds in the wallet to an address.
-func (btc *ExchangeWalletElectrum) Sweep(address string, feeSuggestion uint64) (asset.Coin, error) {
-	addr, err := btc.decodeAddr(address, btc.chainParams)
-	if err != nil {
-		return nil, fmt.Errorf("address decode error: %w", err)
-	}
-	pkScript, err := txscript.PayToAddrScript(addr)
-	if err != nil {
-		return nil, fmt.Errorf("PayToAddrScript error: %w", err)
-	}
-
-	txRaw, err := btc.ew.sweep(btc.ew.ctx, address, feeSuggestion)
-	if err != nil {
-		return nil, err
-	}
-
-	msgTx, err := btc.deserializeTx(txRaw)
-	if err != nil {
-		return nil, err
-	}
-	txHash := msgTx.TxHash()
-	for vout, txOut := range msgTx.TxOut {
-		if bytes.Equal(txOut.PkScript, pkScript) {
-			return newOutput(&txHash, uint32(vout), uint64(txOut.Value)), nil
-		}
-	}
-
-	// Well, the txn is sent, so let's at least direct the user to the txid even
-	// though we failed to find the output with the expected pkScript. Perhaps
-	// the Electrum wallet generated a slightly different pkScript for the
-	// provided address.
-	btc.log.Warnf("Generated tx does not seem to contain an output to %v!", address)
-	return newOutput(&txHash, 0, 0 /* ! */), nil
 }
 
 func (btc *ExchangeWalletElectrum) walletFeeRate(ctx context.Context, confTarget uint64) (uint64, error) {
