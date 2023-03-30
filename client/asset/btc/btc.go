@@ -1548,6 +1548,7 @@ func (btc *baseWallet) legacyBalance() (*asset.Balance, error) {
 		return &asset.Balance{
 			Available: bal - locked,
 			Locked:    locked,
+			Other:     make(map[string]uint64),
 		}, nil
 	}
 
@@ -1560,6 +1561,7 @@ func (btc *baseWallet) legacyBalance() (*asset.Balance, error) {
 		Available: toSatoshi(walletInfo.Balance+walletInfo.UnconfirmedBalance) - locked,
 		Immature:  toSatoshi(walletInfo.ImmatureBalance),
 		Locked:    locked,
+		Other:     make(map[string]uint64),
 	}, nil
 }
 
