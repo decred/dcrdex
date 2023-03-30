@@ -1,0 +1,83 @@
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org
+
+package firo
+
+import (
+	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/networks/btc"
+	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+)
+
+const (
+	DefaultFee = 10 // 0.0001 FIRO/kB
+)
+
+// Firo v0.14.12.1 defaults:
+// -fallbackfee= (default: 20000) 	wallet.h: DEFAULT_FALLBACK_FEE unused afaics
+// -mintxfee= (default: 1000)  		for tx creation
+// -maxtxfee= (default: 1000000000) 10 FIRO .. also looks unused
+// -minrelaytxfee= (default: 1000) 	0.00001 firo,
+// -blockmintxfee= (default: 1000)
+
+func mustHash(hash string) *chainhash.Hash {
+	h, err := chainhash.NewHashFromStr(hash)
+	if err != nil {
+		panic(err.Error())
+	}
+	return h
+}
+
+var (
+	UnitInfo = dex.UnitInfo{
+		AtomicUnit: "satoshi",
+		Conventional: dex.Denomination{
+			Unit:             "FIRO",
+			ConversionFactor: 1e8,
+		},
+	}
+
+	// MainNetParams are the clone parameters for mainnet.
+	MainNetParams = btc.ReadCloneParams(&btc.CloneParams{
+		Name:             "mainnet",
+		PubKeyHashAddrID: 0x52, // 82 - start with 'a' & occasionally 'Z'
+		ScriptHashAddrID: 0x07, // 07 - start with 3 or 4
+		Bech32HRPSegwit:  "",   // no segwit
+		CoinbaseMaturity: 100,
+		Net:              0xe3d9fef1,
+		GenesisHash:      mustHash("4381deb85b1b2c9843c222944b616d997516dcbd6a964e1eaf0def0830695233"),
+	})
+	// TestNetParams are the clone parameters for testnet.
+	TestNetParams = btc.ReadCloneParams(&btc.CloneParams{
+		Name:             "testnet3",
+		PubKeyHashAddrID: 0x41, // 65 - start with T
+		ScriptHashAddrID: 0xb2, // 178 - start with 2
+		Bech32HRPSegwit:  "",   // no segwit
+		CoinbaseMaturity: 100,
+		Net:              0xcffcbeea,
+		GenesisHash:      mustHash("aa22adcc12becaf436027ffe62a8fb21b234c58c23865291e5dc52cf53f64fca"),
+	})
+	// RegressionNetParams are the clone parameters for simnet.
+	RegressionNetParams = btc.ReadCloneParams(&btc.CloneParams{
+		Name:             "regtest",
+		PubKeyHashAddrID: 0x41, // 65 - start with T
+		ScriptHashAddrID: 0xb2, // 178 - start with 2
+		Bech32HRPSegwit:  "",   // no segwit
+		CoinbaseMaturity: 100,
+		Net:              0xfabfb5da,
+		// TODO or unused with simnet?
+		// There is no assert check in chainparams after genesis is calculated - need to recompile & printf
+		// This value is actually the first (and only) checkpoint
+		GenesisHash: mustHash("0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206"),
+	})
+)
+
+func init() {
+	for _, params := range []*chaincfg.Params{MainNetParams, TestNetParams, RegressionNetParams} {
+		err := chaincfg.Register(params)
+		if err != nil {
+			panic("failed to register firo parameters: " + err.Error())
+		}
+	}
+}
