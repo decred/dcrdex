@@ -705,17 +705,17 @@ func createAndCheckProviders(ctx context.Context, walletDir string, endpoints []
 	return nil
 }
 
-// failedProviders builds string message that describes providers we tried to connect
-// to but didn't succeed.
+// failedProviders builds string message that describes provider endpoints we
+// tried to connect to but didn't succeed.
 func failedProviders(succeeded []*provider, tried []string) string {
 	ok := make(map[string]bool)
 	for _, p := range succeeded {
 		ok[p.endpointAddr] = true
 	}
 	notOK := make([]string, 0, len(tried)-len(succeeded))
-	for _, addr := range tried {
-		if !ok[addr] {
-			notOK = append(notOK, domain(addr))
+	for _, endpoint := range tried {
+		if !ok[endpoint] {
+			notOK = append(notOK, endpoint)
 		}
 	}
 	return strings.Join(notOK, " ")
