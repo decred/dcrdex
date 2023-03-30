@@ -868,7 +868,7 @@ func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
 				"(%v currently locked in bonds with %v in-force) "+
 				"for bond asset change from %d to %d, with bond increment %v",
 				modStr, wallet.amtString(inBonds), wallet.amtString(live),
-				bondAssetID0, bondAssetID0, wallet.amtString(bondAssetAmt))
+				bondAssetID0, bondAssetID, wallet.amtString(bondAssetAmt))
 			if !wallet.ReserveBondFunds(mod, true) {
 				return fmt.Errorf("insufficient balance to reserve %v", modStr)
 			}
