@@ -41,7 +41,7 @@ var (
 	// and build metadata portions MUST only contain characters from
 	// semanticAlphabet.
 	// NOTE: The Version string is overridden on init.
-	Version = "0.6.0-rc.1"
+	Version = "0.6.0+release.local"
 )
 
 func init() {
