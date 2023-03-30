@@ -9,7 +9,7 @@ wallets.
 Build with server locktimes in mind.
 i.e. -ldflags "-X 'decred.org/dcrdex/dex.testLockTimeTaker=30s' -X 'decred.org/dcrdex/dex.testLockTimeMaker=1m'"
 
-Supported assets are bch, btc, dcr, doge, eth, ltc, and zec.
+Supported assets are bch, btc, dcr, doge, dgb, eth, ltc, and zec.
 */
 
 package main
@@ -35,6 +35,7 @@ import (
 	_ "decred.org/dcrdex/client/asset/bch"
 	_ "decred.org/dcrdex/client/asset/btc"
 	_ "decred.org/dcrdex/client/asset/dcr"
+	_ "decred.org/dcrdex/client/asset/dgb"
 	_ "decred.org/dcrdex/client/asset/doge"
 	_ "decred.org/dcrdex/client/asset/eth"
 	_ "decred.org/dcrdex/client/asset/ltc"
@@ -57,6 +58,7 @@ const (
 	eth              = "eth"
 	ltc              = "ltc"
 	doge             = "doge"
+	dgb              = "dgb"
 	bch              = "bch"
 	zec              = "zec"
 	dextt            = "dextt.eth"
@@ -71,6 +73,7 @@ var (
 	dexttID, _  = dex.BipSymbolID(dextt)
 	ltcID, _    = dex.BipSymbolID(ltc)
 	dogeID, _   = dex.BipSymbolID(doge)
+	dgbID, _    = dex.BipSymbolID(dgb)
 	bchID, _    = dex.BipSymbolID(bch)
 	zecID, _    = dex.BipSymbolID(zec)
 	loggerMaker *dex.LoggerMaker
@@ -465,7 +468,7 @@ func run() error {
 	getAddress := func(symbol, node string) (string, error) {
 		var args []string
 		switch symbol {
-		case btc, ltc:
+		case btc, ltc, dgb:
 			args = []string{"getnewaddress", "''", "bech32"}
 		case doge, bch, zec:
 			args = []string{"getnewaddress"}
@@ -498,7 +501,7 @@ func run() error {
 
 	unlockWallets := func(symbol string) error {
 		switch symbol {
-		case btc, ltc, doge, bch:
+		case btc, ltc, doge, bch, dgb:
 			<-harnessCtl(ctx, symbol, "./alpha", "walletpassphrase", "abc", "4294967295")
 			<-harnessCtl(ctx, symbol, "./beta", "walletpassphrase", "abc", "4294967295")
 		case dcr:
@@ -598,7 +601,7 @@ func run() error {
 			case dcrID:
 				walletAddr = pair.cfg["rpclisten"]
 				pair.cfg["rpclisten"] = newAddr
-			case btcID, ltcID, dogeID, bchID:
+			case btcID, ltcID, dogeID, bchID, dgbID:
 				oldPort := pair.cfg["rpcport"]
 				walletAddr = "127.0.0.1:" + oldPort
 				pair.cfg["rpcport"] = port
