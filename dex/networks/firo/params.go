@@ -65,7 +65,12 @@ var (
 		ScriptHashAddrID: 0xb2, // 178 - start with 2
 		Bech32HRPSegwit:  "",   // no segwit
 		CoinbaseMaturity: 100,
-		Net:              0xfabfb5da,
+		// Net is not the standard for Firo simnet, since they never changed it
+		// from the BTC regtest value: 0xfabfb5da
+		// The only place we currently use Net is in btcd/chaincfg.Register,
+		// where it is checked to prevent duplicate registration, so our only
+		// requirement is that it is unique. This one was just generated with a prng.
+		Net: 0x7da7d6db,
 		// TODO or unused with simnet?
 		// There is no assert check in chainparams after genesis is calculated - need to recompile & printf
 		// This value is actually the first (and only) checkpoint
