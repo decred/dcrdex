@@ -5129,6 +5129,108 @@ func TestFreshProviderList(t *testing.T) {
 	}
 }
 
+func TestDomain(t *testing.T) {
+	tests := []struct {
+		addr       string
+		wantDomain string
+		wantErr    bool
+	}{
+		{
+			addr:       "http://www.place.io/v3/234234wfsefe",
+			wantDomain: "place.io",
+		},
+		{
+			addr:       "wss://www.place.nz/stuff?=token",
+			wantDomain: "place.nz",
+		},
+		{
+			addr:       "http://en.us.lotssubdomains.place.io/v3/234234wfsefe",
+			wantDomain: "place.io",
+		},
+		{
+			addr:       "https://www.place.co.uk:443/blog/article/search?docid=720&hl=en#dayone",
+			wantDomain: "place.co.uk:443",
+		},
+		{
+			addr:       "wmba://www.place.com",
+			wantDomain: "place.com",
+		},
+		{
+			addr:       "ws://127.0.0.1:3000",
+			wantDomain: "127.0.0.1:3000",
+		},
+		{
+			addr:       "ws://localhost:3000",
+			wantDomain: "localhost:3000",
+		},
+		{
+			addr:       "http://123.123.123.123:3000",
+			wantDomain: "123.123.123.123:3000",
+		},
+		{
+			addr:       "https://123.123.123.123",
+			wantDomain: "123.123.123.123",
+		},
+		{
+			addr:       "ws://[abab:fde3:0:0:0:0:0:1]:8080",
+			wantDomain: "[abab:fde3:0:0:0:0:0:1]:8080",
+		},
+		{
+			addr:       "ws://[::1]:8000",
+			wantDomain: "[::1]:8000",
+		},
+		{
+			addr:       "[::1]:8000",
+			wantDomain: "[::1]:8000",
+		},
+		{
+			addr:       "[::1]",
+			wantDomain: "[::1]",
+		},
+		{
+			addr:       "127.0.0.1",
+			wantDomain: "127.0.0.1",
+		},
+		{
+			addr:       "/home/john/.geth/geth.ipc",
+			wantDomain: "/home/john/.geth/geth.ipc",
+		},
+		{
+			addr:       "/home/john/.geth/geth",
+			wantDomain: "/home/john/.geth/geth",
+		},
+		{
+			addr:    "https://\n:1234",
+			wantErr: true,
+		},
+		{
+			addr:    ":asdf",
+			wantErr: true,
+		},
+		{
+			wantErr: true,
+		},
+	}
+
+	for i, test := range tests {
+		t.Run(fmt.Sprintf("test#%d", i), func(t *testing.T) {
+			d, err := domain(test.addr)
+			if test.wantErr {
+				if err == nil {
+					t.Fatalf("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if test.wantDomain != d {
+				t.Fatalf("wanted domain %s but got %s", test.wantDomain, d)
+			}
+		})
+	}
+}
+
 func parseRecoveryID(c asset.Coin) []byte {
 	return c.(asset.RecoveryCoin).RecoveryID()
 }

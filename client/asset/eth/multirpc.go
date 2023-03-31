@@ -12,10 +12,12 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -662,7 +664,12 @@ func createAndCheckProviders(ctx context.Context, walletDir string, endpoints []
 
 	var unknownEndpoints []string
 	for _, p := range endpoints {
-		d := domain(p)
+		d, err := domain(p)
+		if err != nil {
+			log.Warnf("unable to parse domain for endpoint %s: %v", p, err)
+			unknownEndpoints = append(unknownEndpoints, p)
+			continue
+		}
 		if localCP[d] {
 			continue
 		}
@@ -715,6 +722,9 @@ func failedProviders(succeeded []*provider, tried []string) string {
 	notOK := make([]string, 0, len(tried)-len(succeeded))
 	for _, endpoint := range tried {
 		if !ok[endpoint] {
+			if d, err := domain(endpoint); err == nil {
+				endpoint = d
+			}
 			notOK = append(notOK, endpoint)
 		}
 	}
@@ -1599,13 +1609,71 @@ func newCompatibilityTests(cb bind.ContractBackend, net dex.Network, log dex.Log
 	}
 }
 
-func domain(host string) string {
-	parts := strings.Split(host, ".")
-	n := len(parts)
-	if n <= 2 {
-		return host
+// domain accepts an url, ip, or file path and returns the domain:port if they
+// exist. Returns just the domain if no port. Returns a cleaned file path if a
+// file with .ipc suffix, otherwise returns the address as is if no errors were
+// encountered.
+func domain(addr string) (string, error) {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return "", errors.New("address is an empty string")
 	}
-	return parts[n-2] + "." + parts[n-1]
+	if strings.HasSuffix(addr, ".ipc") {
+		return dex.CleanAndExpandPath(addr), nil // ipc file
+	}
+	const missingPort = "missing port in address"
+	host, port, splitErr := net.SplitHostPort(addr)
+	_, portErr := strconv.ParseUint(port, 10, 16)
+
+	removeSubdomain := func(addr string) string {
+		parts := strings.Split(host, ".")
+		n := len(parts)
+		if n <= 2 {
+			return addr
+		}
+		// Possibly an ipv4 address with no subdomain.
+		if ip := net.ParseIP(addr); ip != nil {
+			return addr
+		}
+		// Top level domains such as .ne.jp or .co.uk exist.
+		if n >= 3 && len(parts[n-2]) == 2 {
+			return parts[n-3] + "." + parts[n-2] + "." + parts[n-1]
+		}
+		// Otherwise assume domain.topleveldomain at the end.
+		return parts[n-2] + "." + parts[n-1]
+	}
+
+	// net.SplitHostPort will error on anything not in the format
+	// string:string or :string or if a colon is in an unexpected position,
+	// such as in the scheme.
+	// If the port isn't a port, it must also be parsed.
+	if splitErr != nil || portErr != nil {
+		// Any address with no colons is appended with the default port.
+		var addrErr *net.AddrError
+		if errors.As(splitErr, &addrErr) && addrErr.Err == missingPort {
+			if host == "" {
+				// address was either an ip with no port like
+				// [::1] or a file path with no .ipc at the end
+				return addr, nil
+			}
+			return removeSubdomain(host), nil // no port
+		}
+		// These are addresses with at least one colon in an unexpected
+		// position.
+		a, err := url.Parse(addr)
+		// This address is of an unknown format.
+		if err != nil {
+			return "", fmt.Errorf("addr %s of unknown format %v", addr, err)
+		}
+		host, port = a.Hostname(), a.Port()
+		if port == "" {
+			return removeSubdomain(host), nil // no port
+		}
+	}
+	if host == "" {
+		return "", fmt.Errorf("no domain found for %s", addr)
+	}
+	return net.JoinHostPort(removeSubdomain(host), port), nil
 }
 
 // checkProvidersCompliance verifies that providers support the API that DEX
