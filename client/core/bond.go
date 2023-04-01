@@ -275,7 +275,7 @@ type acctUpdate struct {
 
 // refundExpiredBonds refunds expired bonds and returns the list of bonds that
 // have been refunded and their assetIDs.
-func (c *Core) refundExpiredBonds(ctx context.Context, dc *dexConnection, state *dexAcctBondState, now int64) (map[uint32]struct{}, []*bondID, error) {
+func (c *Core) refundExpiredBonds(ctx context.Context, acct *dexAccount, cfg *dexBondCfg, state *dexAcctBondState, now int64) (map[uint32]struct{}, int64, error) {
 	spentBonds := make([]*bondID, 0, len(state.expiredBonds))
 	assetIDs := make(map[uint32]struct{})
 
@@ -295,7 +295,7 @@ func (c *Core) refundExpiredBonds(ctx context.Context, dc *dexConnection, state 
 			continue
 		}
 		if _, ok := wallet.Wallet.(asset.Bonder); !ok { // will fail in RefundBond, but assert here anyway
-			return nil, nil, fmt.Errorf("Wallet %v is not an asset.Bonder", unbip(bond.AssetID))
+			return nil, 0, fmt.Errorf("Wallet %v is not an asset.Bonder", unbip(bond.AssetID))
 		}
 
 		expired, err := wallet.LockTimeExpired(ctx, time.Unix(int64(bond.LockTime), 0))
@@ -371,13 +371,13 @@ func (c *Core) refundExpiredBonds(ctx context.Context, dc *dexConnection, state 
 		} else {
 			// TODO: subject, detail := c.formatDetails(...)
 			details := fmt.Sprintf("Bond %v for %v refunded in %v, reclaiming %v of %v after tx fees",
-				bondIDStr, dc.acct.host, refundCoinStr, wallet.amtString(refundVal),
+				bondIDStr, acct.host, refundCoinStr, wallet.amtString(refundVal),
 				wallet.amtString(bond.Amount))
 			c.notify(newBondRefundNote(TopicBondRefunded, string(TopicBondRefunded),
 				details, db.Success))
 		}
 
-		err = c.db.BondRefunded(dc.acct.host, assetID, bond.CoinID)
+		err = c.db.BondRefunded(acct.host, assetID, bond.CoinID)
 		if err != nil { // next DB load we'll retry, hit bondAlreadySpent, and store here again
 			c.log.Errorf("Failed to mark bond as refunded: %v", err)
 		}
@@ -386,26 +386,20 @@ func (c *Core) refundExpiredBonds(ctx context.Context, dc *dexConnection, state 
 		assetIDs[assetID] = struct{}{}
 	}
 
-	return assetIDs, spentBonds, nil
-}
-
-// clearSpentBonds removes all bonds that have been successfully refunded from
-// a dexConnection's expiredBonds list and returns the strength of the remaining
-// bonds.
-func (c *Core) clearSpentBonds(dc *dexConnection, bondCfg *dexBondCfg, spentBonds []*bondID) int64 {
-	dc.acct.authMtx.Lock()
-	defer dc.acct.authMtx.Unlock()
-
+	// Remove spentbonds from the dexConnection's expiredBonds list.
+	acct.authMtx.Lock()
 	for _, spentBond := range spentBonds {
-		for i, bond := range dc.acct.expiredBonds {
+		for i, bond := range acct.expiredBonds {
 			if bond.AssetID == spentBond.assetID && bytes.Equal(bond.CoinID, spentBond.coinID) {
-				dc.acct.expiredBonds = cutBond(dc.acct.expiredBonds, i)
+				acct.expiredBonds = cutBond(acct.expiredBonds, i)
 				break // next spentBond
 			}
 		}
 	}
+	expiredBondsStrength := sumBondStrengths(acct.expiredBonds, cfg.bondAssets)
+	acct.authMtx.Unlock()
 
-	return sumBondStrengths(dc.acct.expiredBonds, bondCfg.bondAssets)
+	return assetIDs, expiredBondsStrength, nil
 }
 
 // repostPendingBonds rebroadcasts all pending bond transactions for a
@@ -427,44 +421,6 @@ func (c *Core) repostPendingBonds(dc *dexConnection, cfg *dexBondCfg, state *dex
 				coinIDString(bond.AssetID, bond.CoinID))
 			// Or maybe the server config will update again? Hard to know
 			// how to handle this. This really shouldn't happen though.
-		}
-	}
-}
-
-// recordReserveAdjustments computes required reserves adjustments for any
-// unactuated tierChanges
-func recordReserveAdjustments(dc *dexConnection, state *dexAcctBondState, bondAsset *msgjson.BondAsset, netReserveDeltas map[uint32]int64, actuatedTierChanges map[uint32][]acctUpdate) {
-	if state.tierChange != 0 {
-		reserveDelta := bondOverlap * -state.tierChange * int64(bondAsset.Amt)
-		netReserveDeltas[state.bondAssetID] += reserveDelta // negative means free reserves
-		// After applying the net reserveDelta, we would normally *zero* the
-		// tierChange field, but it could change, so we remember it.
-		actuatedTierChanges[state.bondAssetID] = append(actuatedTierChanges[state.bondAssetID],
-			acctUpdate{dc.acct, state.tierChange, reserveDelta},
-		)
-	}
-}
-
-// applyReserveAdjustments notifies wallets of the aggregate reserve
-// adjustments over all dex connections.
-func (c *Core) applyReserveAdjustments(netReserveDeltas map[uint32]int64, actuatedTierChanges map[uint32][]acctUpdate) {
-	for assetID, reserveDelta := range netReserveDeltas {
-		if reserveDelta != 0 { // net adjustment across all dexConnections
-			wallet, err := c.connectedWallet(assetID)
-			if err != nil { // we grabbed it above so shouldn't happen
-				c.log.Errorf("%v wallet not available for bond: %v", unbip(assetID), err)
-				continue
-			}
-			c.log.Infof("Updating bond reserves by %s (automatic tier change adjustments)",
-				wallet.amtStringSigned(reserveDelta))
-			wallet.ReserveBondFunds(reserveDelta, false)
-		}
-		// Update the unactuated tier change counter.
-		for _, s := range actuatedTierChanges[assetID] {
-			s.acct.authMtx.Lock()
-			s.acct.tierChange -= s.tierChange
-			s.acct.totalReserved += s.reserveDelta
-			s.acct.authMtx.Unlock()
 		}
 	}
 }
@@ -556,12 +512,11 @@ func (c *Core) rotateBonds(ctx context.Context) {
 
 		c.repostPendingBonds(dc, bondCfg, acctBondState, unlocked)
 
-		refundedAssets, spentBonds, err := c.refundExpiredBonds(ctx, dc, acctBondState, now)
+		refundedAssets, expiredStrength, err := c.refundExpiredBonds(ctx, dc.acct, bondCfg, acctBondState, now)
 		if err != nil {
 			c.log.Errorf("Failed to refund expired bonds for %v: %v", dc.acct.host, err)
 			return
 		}
-		expiredStrength := c.clearSpentBonds(dc, bondCfg, spentBonds)
 		for assetID := range refundedAssets {
 			c.updateAssetBalance(assetID)
 		}
@@ -580,11 +535,38 @@ func (c *Core) rotateBonds(ctx context.Context) {
 			continue
 		}
 
-		recordReserveAdjustments(dc, acctBondState, bondAsset, netReserveDeltas, actuatedTierChanges)
+		if acctBondState.tierChange != 0 {
+			reserveDelta := bondOverlap * -acctBondState.tierChange * int64(bondAsset.Amt)
+			netReserveDeltas[acctBondState.bondAssetID] += reserveDelta // negative means free reserves
+			// After applying the net reserveDelta, we would normally *zero* the
+			// tierChange field, but it could change, so we remember it.
+			actuatedTierChanges[acctBondState.bondAssetID] = append(actuatedTierChanges[acctBondState.bondAssetID],
+				acctUpdate{dc.acct, acctBondState.tierChange, reserveDelta},
+			)
+		}
+
 		c.postRequiredBonds(dc, bondCfg, acctBondState, bondAsset, wallet, expiredStrength, unlocked)
 	}
 
-	c.applyReserveAdjustments(netReserveDeltas, actuatedTierChanges)
+	for assetID, reserveDelta := range netReserveDeltas {
+		if reserveDelta != 0 { // net adjustment across all dexConnections
+			wallet, err := c.connectedWallet(assetID)
+			if err != nil { // we grabbed it above so shouldn't happen
+				c.log.Errorf("%v wallet not available for bond: %v", unbip(assetID), err)
+				continue
+			}
+			c.log.Infof("Updating bond reserves by %s (automatic tier change adjustments)",
+				wallet.amtStringSigned(reserveDelta))
+			wallet.ReserveBondFunds(reserveDelta, false)
+		}
+		// Update the unactuated tier change counter.
+		for _, s := range actuatedTierChanges[assetID] {
+			s.acct.authMtx.Lock()
+			s.acct.tierChange -= s.tierChange
+			s.acct.totalReserved += s.reserveDelta
+			s.acct.authMtx.Unlock()
+		}
+	}
 }
 
 func (c *Core) preValidateBond(dc *dexConnection, bond *asset.Bond) error {
