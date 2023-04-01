@@ -3106,6 +3106,7 @@ function setPriceAndChange (tmpl: Record<string, PageElement>, xc: Exchange, mkt
   if (!mkt.spot) return
   tmpl.price.textContent = fourSigFigs(app().conventionalRate(mkt.baseid, mkt.quoteid, mkt.spot.rate, xc))
   const sign = mkt.spot.change24 > 0 ? '+' : ''
+  tmpl.change.classList.remove('buycolor', 'sellcolor')
   tmpl.change.classList.add(mkt.spot.change24 >= 0 ? 'buycolor' : 'sellcolor')
   tmpl.change.textContent = `${sign}${(mkt.spot.change24 * 100).toFixed(1)}%`
 }
