@@ -1284,7 +1284,7 @@ export default class MarketsPage extends BasePage {
       details.side.classList.add(ord.sell ? 'sellcolor' : 'buycolor')
       header.side.classList.add(ord.sell ? 'sellcolor' : 'buycolor')
       details.qty.textContent = header.qty.textContent = fourSigFigs(ord.qty / this.market.baseUnitInfo.conventional.conversionFactor)
-      details.rate.textContent = fourSigFigs(ord.rate / this.market.rateConversionFactor)
+      details.rate.textContent = header.rate.textContent = fourSigFigs(ord.rate / this.market.rateConversionFactor)
       header.baseSymbol.textContent = ord.baseSymbol.toUpperCase()
       details.type.textContent = OrderUtil.typeString(ord)
       this.updateMetaOrder(mord)
