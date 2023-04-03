@@ -516,7 +516,13 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	// Work around a webkit (safari) bug with the handling of the connect-src
 	// directive of content security policy. See:
 	// https://bugs.webkit.org/show_bug.cgi?id=201591
-	s.csp = fmt.Sprintf("%s ws://%s", baseCSP, s.addr)
+	if tcpAddr, ok := listener.Addr().(*net.TCPAddr); !ok || tcpAddr.IP.To4() != nil {
+		// CSP only allows 127.0.0.1 or hostnames, but just screen out IPv6 now.
+		// For anything else, the 'self' keyword had better work right.
+		s.csp = fmt.Sprintf("%s ws://%s", baseCSP, s.addr)
+	} else {
+		s.csp = baseCSP
+	}
 
 	// Shutdown the server on context cancellation.
 	var wg sync.WaitGroup
