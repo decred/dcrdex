@@ -219,8 +219,8 @@ export default class MarketsPage extends BasePage {
     // Do not call cleanTemplates before creating the AccelerateOrderForm
     this.accelerateOrderForm = new AccelerateOrderForm(page.accelerateForm, success)
 
-    // TODO: Store user's state and reload last known configuration.
-    this.candleDur = fiveMinBinKey
+    // Set user's last known candle duration.
+    this.candleDur = State.fetchLocal(State.lastCandleDurationLK)
 
     // Setup the register to trade button.
     // TODO: Use dexsettings page?
@@ -803,8 +803,8 @@ export default class MarketsPage extends BasePage {
       page.durBttnBox.appendChild(bttn)
     }
 
-    // Set last candle duration selected.
-    this.candleDurationSelected(State.fetchLocal(State.lastCandleDurationLK))
+    // Set candle duration.
+    this.candleDurationSelected(this.candleDur)
   }
 
   /* setMarket sets the currently displayed market. */
