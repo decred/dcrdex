@@ -1251,6 +1251,9 @@ func (m *multiRPCClient) transactionConfirmations(ctx context.Context, txHash co
 	}
 	if r.BlockNumber != nil && tip.Number != nil {
 		bigConfs := new(big.Int).Sub(tip.Number, r.BlockNumber)
+		if bigConfs.Sign() < 0 { // avoid potential overflow
+			return 0, nil
+		}
 		bigConfs.Add(bigConfs, big.NewInt(1))
 		if bigConfs.IsInt64() {
 			return uint32(bigConfs.Int64()), nil

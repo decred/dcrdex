@@ -379,6 +379,10 @@ func (n *nodeClient) transactionConfirmations(ctx context.Context, txHash common
 		return 0, err
 	}
 
+	if hdr.Number.Int64() < blockHeight { // avoid potential overflow
+		return 0, nil
+	}
+
 	return uint32(hdr.Number.Int64() - blockHeight + 1), nil
 }
 
