@@ -802,6 +802,9 @@ export default class MarketsPage extends BasePage {
       Doc.bind(bttn, 'click', () => this.candleDurationSelected(dur))
       page.durBttnBox.appendChild(bttn)
     }
+
+    // Set last candle duration selected.
+    this.candleDurationSelected(State.fetchLocal(State.lastCandleDurationLK))
   }
 
   /* setMarket sets the currently displayed market. */
@@ -871,10 +874,6 @@ export default class MarketsPage extends BasePage {
 
     // depth chart
     ws.request('loadmarket', makeMarket(host, base, quote))
-
-    // candlesticks
-    this.candleDur = fiveMinBinKey
-    this.loadCandles()
 
     this.setLoaderMsgVisibility()
     this.setRegistrationStatusVisibility()
@@ -2507,10 +2506,13 @@ export default class MarketsPage extends BasePage {
     this.depthChart.draw()
   }
 
-  /* candleDurationSelected sets the candleDur and loads the candles. */
+  /* candleDurationSelected sets the candleDur and loads the candles. It will
+  default to the fiveMinBinKey if dur is not valid. */
   candleDurationSelected (dur: string) {
+    if (!this.market?.dex?.candleDurs.includes(dur)) dur = fiveMinBinKey
     this.candleDur = dur
     this.loadCandles()
+    State.storeLocal(State.lastCandleDurationLK, dur)
   }
 
   /*
