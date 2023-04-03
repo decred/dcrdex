@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -1018,4 +1019,61 @@ func testTrade(t *testing.T, async bool) {
 
 	tCore.tradeErr = tErr
 	ensure(`{"ok":false,"msg":"expected dummy error"}`)
+}
+
+func Test_prepareAddr(t *testing.T) {
+	tests := []struct {
+		name       string
+		addr       net.Addr
+		allowInCSP bool
+		want       string
+	}{{
+		name: "OK: IPv4",
+		addr: &net.TCPAddr{
+			IP:   net.IPv4(127, 0, 0, 1),
+			Port: 7232,
+		},
+		want:       "127.0.0.1:7232",
+		allowInCSP: true,
+	}, {
+		name: "IPv6 loopback",
+		addr: &net.TCPAddr{
+			IP:   net.IPv6loopback,
+			Port: 7232,
+		},
+		want: "[::1]:7232",
+	}, {
+		name: "OK: IPv6 unspecified",
+		addr: &net.TCPAddr{
+			IP:   net.IPv6unspecified,
+			Port: 7232,
+		},
+		want:       "127.0.0.1:7232",
+		allowInCSP: true,
+	}, {
+		name: "OK: zero IPv4",
+		addr: &net.TCPAddr{
+			IP:   net.IPv4zero,
+			Port: 7232,
+		},
+		want:       "127.0.0.1:7232",
+		allowInCSP: true,
+	}, {
+		name: "others",
+		addr: &net.UDPAddr{
+			IP:   []byte{},
+			Port: 7232,
+		},
+		want: ":7232",
+	}}
+
+	for _, test := range tests {
+		gotAddr, allowInCSP := prepareAddr(test.addr)
+		if gotAddr != test.want {
+			t.Fatalf("%s: address: got %s, want %s", test.name, gotAddr, test.want)
+		}
+		if allowInCSP != test.allowInCSP {
+			t.Fatalf("%s: allow in CSP: got %v, want %v", test.name, allowInCSP, test.allowInCSP)
+		}
+	}
 }

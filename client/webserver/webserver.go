@@ -516,12 +516,19 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Can't listen on %s. web server quitting: %w", s.addr, err)
 	}
-	// Update the listening address in case a :0 was provided.
-	s.addr = listener.Addr().String()
-	// Work around a webkit (safari) bug with the handling of the connect-src
-	// directive of content security policy. See:
-	// https://bugs.webkit.org/show_bug.cgi?id=201591
-	s.csp = fmt.Sprintf("%s ws://%s", baseCSP, s.addr)
+
+	addr, allowInCSP := prepareAddr(listener.Addr())
+	if allowInCSP {
+		// Work around a webkit (safari) bug with the handling of the
+		// connect-src directive of content security policy. See:
+		// https://bugs.webkit.org/show_bug.cgi?id=201591. TODO: Remove this
+		// workaround since the issue has been fixed in newer versions of
+		// Safari. When this is removed, the allowInCSP variable can be removed
+		// but prepareAddr should still return 127.0.0.1 for unspecified
+		// addresses.
+		s.csp = fmt.Sprintf("%s ws://%s", baseCSP, s.addr)
+	}
+	s.addr = addr
 
 	// Shutdown the server on context cancellation.
 	var wg sync.WaitGroup
@@ -562,6 +569,21 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	log.Infof("Web server listening on %s", s.addr)
 	fmt.Printf("\n\t****  OPEN IN YOUR BROWSER TO LOGIN AND TRADE  --->  http://%s  ****\n\n", s.addr)
 	return &wg, nil
+}
+
+// prepareAddr prepares the listening address in case a :0 was provided.
+func prepareAddr(addr net.Addr) (string, bool) {
+	// If the IP is unspecified, default to `127.0.0.1`. This is a workaround
+	// for an issue where all ip addresses other than exactly 127.0.0.1 will
+	// always fail to match when used in CSP directives. See:
+	// https://w3c.github.io/webappsec-csp/#match-hosts.
+	defaultIP := net.IP{127, 0, 0, 1}
+	tcpAddr, ok := addr.(*net.TCPAddr)
+	if ok && (tcpAddr.IP.IsUnspecified() || tcpAddr.IP.Equal(defaultIP)) {
+		return net.JoinHostPort(defaultIP.String(), strconv.Itoa(tcpAddr.Port)), true
+	}
+
+	return addr.String(), false
 }
 
 // authorize creates, stores, and returns a new auth token to identify the user.
