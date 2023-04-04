@@ -94,7 +94,6 @@ A handful that we have tested:
 - Ankr (www.ankr.com/rpc) - generic endpoint, often behind a few blocks, possibly http-only
 - Flashbots (flashbots.net) - generic endpoint
 - Publicnode (publicnode.com) - generic endpoint
-- ArchiveNode (archivenode.io) - custom API, possibly http-only, no testnet, slow access approval process
 
 Infura is also extremely reliable and common, but their data retention policy
 has been under fire recently. Decide for yourself.
