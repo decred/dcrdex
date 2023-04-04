@@ -101,3 +101,27 @@ has been under fire recently. Decide for yourself.
 Some providers allow you to sign in with a web3 wallet (e.g. MetaMask) to create
 a personal API key and access a dashboard. This may be preferable to creating an
 account with an email address.
+
+## Wallet Recovery
+
+The wallet's account and private keys are derived from the DEX "application
+seed". This means that reinitializing the DEX application from this seed will
+restore the same Ethereum wallet and any ERC20 wallets.
+
+**WARNING: You should never interact with the Ethereum account outside of the
+DEX application!**
+
+**Do NOT** simultaneously use the account from multiple wallet programs,
+including multiple installations of the DEX application with the same seed. Any
+interaction other than simply viewing the balance while the DEX app is running
+or there are active orders can interfere with trades and can lead to lost funds.
+Such interactions include sending funds, cancelling or "speeding up"
+transactions, or any other interaction that consumes gas or creates a new
+transaction.
+
+However, it is possible to export the account's private key for recovery outside
+of the DEX application. Only in emergency recovery situations should you import
+the private key into another wallet. Again, do not use the wallet outside of the
+DEX application. If you feel you need to use the backup private key, or are
+unable to reinitialize the DEX application with the same seed, please first seek
+guidance in the [Decred chat](https://matrix.to/#/#dex:decred.org).
