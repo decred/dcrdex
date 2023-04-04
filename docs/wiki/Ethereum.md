@@ -16,7 +16,8 @@ specified by the user. This is the wallet's gateway to the Ethereum network.
 Casual ETH users may be familiar with Infura, as an example, since this is the
 default provider for the common MetaMask wallet. When creating your Ethereum
 wallet in the DEX application, you will need to specify the full path to an
-Ethereum RPC provider, i.e. an RPC endpoint.
+Ethereum RPC provider, i.e. an RPC endpoint. See the [RPC Provider
+List](#rpc-provider-list-partial) below for suggestions.
 
 ## Wallet Setup
 
@@ -53,9 +54,9 @@ Consider the following tips when configuring your Ethereum wallet:
   provides redundancy. Often a provider will fall behind or even stall, so
   use of multiple providers adds robustness to your wallet.
 
-- Get a custom RPC endpoint, with your own **private API key**. Many providers
-  will allow you to create a custom endpoint that includes an API "key" that is
-  assigned just to you.
+- Get a personal RPC endpoint, with your own **private API key**. Many providers
+  will allow you to create a personal endpoint that includes an API "key" that
+  is assigned just to you.
   
   This is important since all providers have request rate limits, which may be
   exhausted quickly with a generic RPC endpoint (e.g.
@@ -85,18 +86,24 @@ Some common Ethereum RPC providers are listed at <https://ethereumnodes.com/>.
 
 A handful that we have tested:
 
-- NodeReal (nodereal.io) - custom API key, wss
-- Rivet (rivet.cloud) - custom API key, wss
-- Alchemy (alchemy.com) - custom API key, wss
-- LlamaNodes (llamanodes.com) - custom API key, wss, no testnet
-- Blast (blastapi.io) - custom API, wss, often behind a few blocks
-- OmniaTech (omniatech.io) - custom API, wss
-- Ankr (www.ankr.com/rpc) - generic endpoint, often behind a few blocks, possibly http-only
-- Flashbots (flashbots.net) - generic endpoint
-- Publicnode (publicnode.com) - generic endpoint
+- [NodeReal](https://dashboard.nodereal.io/) - personal API key, wss
+- [Alchemy](https://www.alchemy.com/overviews/private-rpc-endpoint) - personal API key
+- [LlamaNodes](https://llamanodes.com/) - personal API key, wss, web3 sign-in, no testnet
+- [Rivet](https://rivet.cloud/) - personal API key, wss, web3 sign-in
+- [Blast](https://blastapi.io/login?app=consumer) - personal API key, wss, web3 sign-in
+- [OmniaTech](https://app.omniatech.io/dashboard/generate-endpoints) - personal API key, wss, web3 sign-in
+- [Ankr](https://www.ankr.com/rpc/) - generic endpoint, often behind a few blocks, possibly http-only
+- [Publicnode](https://ethereum.publicnode.com/) - generic endpoint, possibly http-only
 
-Infura is also extremely reliable and common, but their data retention policy
-has been under fire recently. Decide for yourself.
+[Infura](https://docs.infura.io/infura/reference/network-endpoints) is also
+extremely reliable and common, but their data sharing and retention policy has
+been under fire recently. Decide for yourself.
+
+The Flashbots Protect RPC service is **not recommended** for the DEX wallet
+since the public mempool is only used in certain circumstances, which is not
+helpful for the DEX wallet. Further, Flashbots will abandon transactions that
+are not mined within 6 minutes, and while it is expected that transactions will
+be mined more promptly, this is not desirable.
 
 Some providers allow you to sign in with a web3 wallet (e.g. MetaMask) to create
 a personal API key and access a dashboard. This may be preferable to creating an
