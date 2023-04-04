@@ -2597,7 +2597,7 @@ func (c *Core) createTokenWallet(tokenID uint32, token *asset.Token, form *Walle
 	}
 
 	return &db.Wallet{
-		Type:     "token",
+		Type:     form.Type,
 		AssetID:  tokenID,
 		Settings: form.Config,
 		// EncryptedPW ignored because we assume throughout that token wallet

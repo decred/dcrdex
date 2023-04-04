@@ -50,7 +50,8 @@ func registerToken(tokenID uint32, desc string, nets ...dex.Network) {
 		panic("token " + strconv.Itoa(int(tokenID)) + " not known")
 	}
 	asset.RegisterToken(tokenID, token.Token, &asset.WalletDefinition{
-		Type:        "token",
+		Type:        walletTypeToken,
+		Tab:         "Ethereum token",
 		Description: desc,
 	}, nets...)
 }
@@ -69,8 +70,9 @@ const (
 	defaultGasFeeLimit  = 200 // gwei
 	defaultSendGasLimit = 21_000
 
-	walletTypeGeth = "geth"
-	walletTypeRPC  = "rpc"
+	walletTypeGeth  = "geth"
+	walletTypeRPC   = "rpc"
+	walletTypeToken = "token"
 
 	providersKey = "providers"
 
@@ -145,7 +147,7 @@ var (
 			// },
 			{
 				Type:        walletTypeRPC,
-				Tab:         "External",
+				Tab:         "RPC",
 				Description: "Infrastructure providers (e.g. Infura) or local nodes",
 				ConfigOpts:  append(RPCOpts, WalletOpts...),
 				Seeded:      true,
