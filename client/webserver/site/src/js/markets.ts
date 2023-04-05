@@ -2587,8 +2587,6 @@ class MarketList {
   updateSpots (note: SpotPriceNote) {
     for (const row of this.markets) {
       if (row.mkt.xc.host !== note.host) continue
-      const spot = note.spots[row.mkt.name]
-      if (!spot) return
       const xc = app().exchanges[row.mkt.xc.host]
       const mkt = xc.markets[row.mkt.name]
       setPriceAndChange(row.tmpl, xc, mkt)
