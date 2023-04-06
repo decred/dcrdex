@@ -6,6 +6,7 @@
 package eth
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -20,6 +21,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	"decred.org/dcrdex/server/account"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -57,7 +59,12 @@ func TestMain(m *testing.M) {
 			return 1, fmt.Errorf("no contract address for eth version %d on %s", ethContractVersion, dex.Simnet)
 		}
 
-		ethClient = newRPCClient(BipID, dex.Simnet, []endpoint{{url: wsEndpoint}, {url: alphaIPCFile}}, ethContractAddr, log)
+		bondContractAddress, found := dexeth.ETHBondAddress[dex.Simnet]
+		if !found {
+			return 1, fmt.Errorf("no bond address for network %s", dex.Simnet)
+		}
+
+		ethClient = newRPCClient(BipID, dex.Simnet, []endpoint{{url: wsEndpoint}, {url: alphaIPCFile}}, ethContractAddr, bondContractAddress, log)
 
 		dexeth.ContractAddresses[0][dex.Simnet] = getContractAddrFromFile(contractAddrFile)
 
@@ -196,6 +203,20 @@ func TestMonitorHealth(t *testing.T) {
 
 	if originalClients[0].endpoint != updatedClients[len(updatedClients)-1].endpoint {
 		t.Fatalf("failing client was not moved to the end. got %s, expected %s", updatedClients[len(updatedClients)-1].endpoint, originalClients[0].endpoint)
+	}
+}
+
+func TestAllAccountBonds(t *testing.T) {
+	acctIDS := "83a1ddd916b9a04eb055129fb1249eff4469c064ff32bc470ee1c9ae5fe9d240"
+	accIDB, _ := hex.DecodeString(acctIDS)
+	var acctID account.AccountID
+	copy(acctID[:], accIDB)
+	bonds, err := ethClient.accountBonds(ctx, acctID)
+	if err != nil {
+		t.Fatalf("AllAccountBonds error: %v", err)
+	}
+	for _, bond := range bonds {
+		fmt.Printf("%s\n\n", hex.EncodeToString(bond.BondID[:]))
 	}
 }
 

@@ -257,6 +257,16 @@ type Bonder interface {
 		bondPubKeyHash []byte, lockTime int64, acct account.AccountID, err error)
 }
 
+// BondUpdater is a type that supports using funds in existing bonds to
+// create new bonds. This requires the server to be able to locate all
+// the active bonds for an account to know which previously posted bonds
+// should no longer applied to a user's tier.
+type BondUpdater interface {
+	Bonder
+
+	AllAccountBonds(ctx context.Context, acct account.AccountID) (bonds []*asset.BondData, err error)
+}
+
 // NewDEX creates the dex manager and starts all subsystems. Use Stop to
 // shutdown cleanly. The Context is used to abort setup.
 //  1. Validate each specified asset.
@@ -440,6 +450,7 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	xpubs := make(map[string]string) // to enforce uniqueness
 	bondAssets := make(map[string]*msgjson.BondAsset)
 	bonders := make(map[uint32]Bonder)
+	bondUpdaters := make(map[uint32]BondUpdater)
 
 	// Start asset backends.
 	lockableAssets := make(map[uint32]*swap.SwapperAsset, len(cfg.Assets))
@@ -510,6 +521,10 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 			bonders[assetID] = bc
 			log.Infof("Bonds accepted using %s: amount %d, confs %d",
 				symbol, assetConf.BondAmt, assetConf.BondConfs)
+
+			if bondUpdater, ok := be.(BondUpdater); ok {
+				bondUpdaters[assetID] = bondUpdater
+			}
 		}
 
 		if assetConf.RegFee > 0 {
@@ -664,6 +679,20 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		return bc.BondCoin(ctx, version, coinID)
 	}
 
+	allBondChecker := func(ctx context.Context, assetID uint32, ver uint16, acctID account.AccountID) ([]*asset.BondData, error) {
+		bu, ok := bondUpdaters[assetID]
+		if !ok {
+			return nil, fmt.Errorf("bond asset %v is not an updater", assetID)
+		}
+
+		return bu.AllAccountBonds(ctx, acctID)
+	}
+
+	isBondUpdater := func(assetID uint32) bool {
+		_, ok := bondUpdaters[assetID]
+		return ok
+	}
+
 	bondTxParser := func(assetID uint32, version uint16, rawTx []byte) (bondCoinID []byte,
 		amt, lockTime int64, acct account.AccountID, err error) {
 		bc := bonders[assetID]
@@ -697,6 +726,8 @@ func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 		BondTxParser:     bondTxParser,
 		BondChecker:      bondChecker,
 		BondExpiry:       uint64(dex.BondExpiry(cfg.Network)),
+		AllBondChecker:   allBondChecker,
+		IsBondUpdater:    isBondUpdater,
 		UserUnbooker:     userUnbookFun,
 		MiaUserTimeout:   cfg.BroadcastTimeout,
 		CancelThreshold:  cfg.CancelThreshold,

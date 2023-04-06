@@ -20,9 +20,11 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -158,6 +160,8 @@ type ethFetcher interface {
 	loadToken(ctx context.Context, assetID uint32, vToken *VersionedToken) error
 	swap(ctx context.Context, assetID uint32, secretHash [32]byte) (*dexeth.SwapState, error)
 	accountBalance(ctx context.Context, assetID uint32, addr common.Address) (*big.Int, error)
+	bond(ctx context.Context, accountID, bondID [32]byte) (*bondInfo, error)
+	accountBonds(ctx context.Context, accountID [32]byte) ([]*bondInfo, error)
 }
 
 type baseBackend struct {
@@ -337,13 +341,17 @@ func NewEVMBackend(
 	if !found {
 		return nil, fmt.Errorf("no contract address for %s version %d on %s", assetName, ethContractVersion, net)
 	}
+	bondContractAddress, found := dexeth.ETHBondAddress[net]
+	if !found {
+		return nil, fmt.Errorf("no bond address for network %s", net)
+	}
 
 	eth, err := unconnectedETH(baseChainID, contractAddr, vTokens, log, net)
 	if err != nil {
 		return nil, err
 	}
 
-	eth.node = newRPCClient(baseChainID, net, endpoints, contractAddr, log.SubLogger("RPC"))
+	eth.node = newRPCClient(baseChainID, net, endpoints, contractAddr, bondContractAddress, log.SubLogger("RPC"))
 	return eth, nil
 }
 
@@ -720,6 +728,103 @@ func (eth *baseBackend) ValidateSignature(addr string, pubkey, msg, sig []byte) 
 		return errors.New("cannot verify signature")
 	}
 	return nil
+}
+
+// BondVer returns the latest supported bond version.
+func (eth *ETHBackend) BondVer() uint16 {
+	return 0
+}
+
+// AllAccountBonds returns all the bonds for the specified account.
+func (eth *ETHBackend) AllAccountBonds(ctx context.Context, acct account.AccountID) ([]*asset.BondData, error) {
+	bonds, err := eth.node.accountBonds(ctx, acct)
+	if err != nil {
+		return nil, err
+	}
+
+	assetBonds := make([]*asset.BondData, 0, len(bonds))
+	for _, bond := range bonds {
+		assetBonds = append(assetBonds, &asset.BondData{
+			AccountID: acct,
+			CoinID:    append(acct[:], bond.BondID[:]...),
+			Amount:    dexeth.WeiToGwei(bond.Value),
+			LockTime:  bond.Locktime,
+		})
+	}
+	return assetBonds, nil
+}
+
+// BondCoin locates a bond transaction output, validates the entire transaction,
+// and returns the amount, encoded lockTime and account ID, and the
+// confirmations of the transaction. It is a CoinNotFoundError if the
+// transaction output is spent.
+func (eth *ETHBackend) BondCoin(ctx context.Context, ver uint16, coinID []byte) (amt, lockTime, confs int64,
+	acct account.AccountID, err error) {
+	fail := func(err error) (int64, int64, int64, account.AccountID, error) {
+		return 0, 0, 0, account.AccountID{}, err
+	}
+
+	if len(coinID) != 64 {
+		return fail(fmt.Errorf("coinID should be 32 bytes, got %d", len(coinID)))
+	}
+
+	var accountID, bondID [32]byte
+	copy(accountID[:], coinID[:32])
+	copy(bondID[:], coinID[32:])
+
+	bondData, err := eth.node.bond(ctx, accountID, bondID)
+	if err != nil && errors.Is(err, ethereum.NotFound) {
+		return fail(asset.CoinNotFoundError)
+	}
+	if err != nil {
+		return fail(err)
+	}
+
+	bn, err := eth.node.blockNumber(ctx)
+	if err != nil {
+		return fail(err)
+	}
+
+	amt = int64(dexeth.WeiToGwei(bondData.Value))
+	lockTime = int64(bondData.Locktime)
+	confs = int64(bn) - bondData.InitBlockNumber.Int64()
+	return amt, lockTime, confs, accountID, nil
+}
+
+func makeBondCoinID(acct account.AccountID, bondID [32]byte) []byte {
+	return append(acct[:], bondID[:]...)
+}
+
+// ParseBondTx returns the data about the bond that will be created using the
+// rawTx. If the transaction is an update transaction, the amount and lockTime
+// of the non-change transaction will be returned.
+func (eth *ETHBackend) ParseBondTx(ver uint16, rawTx []byte) (bondCoinID []byte, amt int64, bondAddr string,
+	bondPubKeyHash []byte, lockTime int64, acct account.AccountID, err error) {
+
+	fail := func(err error) ([]byte, int64, string, []byte, int64, account.AccountID, error) {
+		return nil, 0, "", nil, 0, account.AccountID{}, err
+	}
+
+	tx := new(types.Transaction)
+	if err := tx.UnmarshalBinary(rawTx); err != nil {
+		return fail(fmt.Errorf("unable to decode tx: %v", err))
+	}
+
+	accountID, bondID, lt, err := dexeth.ParseCreateBondTx(tx.Data())
+	if err != nil {
+		accountID, _, newBondIDs, value, lt, err := dexeth.ParseUpdateBondsTx(tx.Data())
+		if err != nil {
+			return fail(fmt.Errorf("failed to parse bond tx: %v", err))
+		}
+
+		newBondID := newBondIDs[0]
+		if len(newBondIDs) == 2 {
+			newBondID = newBondIDs[1]
+		}
+		return makeBondCoinID(accountID, newBondID), int64(dexeth.WeiToGwei(value)), "", nil, int64(lt), accountID, nil
+	}
+
+	return makeBondCoinID(accountID, bondID), int64(dexeth.WeiToGwei(tx.Value())), "", nil, int64(lt), accountID, nil
 }
 
 // poll pulls the best hash from an eth node and compares that to a stored
