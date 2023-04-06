@@ -52,6 +52,7 @@ type Storage interface {
 	CreateAccountWithBond(acct *account.Account, bond *db.Bond) error
 	AddBond(acct account.AccountID, bond *db.Bond) error
 	DeleteBond(assetID uint32, coinID []byte) error
+	UpdateAssetBonds(acct account.AccountID, assetID uint32, bonds []*db.Bond) error
 
 	CreateAccount(acct *account.Account, feeAsset uint32, feeAddr string) error // DEPRECATED
 	AccountRegAddr(account.AccountID) (addr string, asset uint32, err error)    // DEPRECATED
@@ -84,6 +85,10 @@ type FeeChecker func(assetID uint32, coinID []byte) (addr string, val uint64, co
 // transaction are also provided.
 type BondCoinChecker func(ctx context.Context, assetID uint32, ver uint16,
 	coinID []byte) (amt, lockTime, confs int64, acct account.AccountID, err error)
+
+type AllBondChecker func(ctx context.Context, assetID uint32, ver uint16, acct account.AccountID) ([]*asset.BondData, error)
+
+type BondUpdaterChecker func(assetID uint32) bool
 
 // BondTxParser parses a dex fidelity bond transaction and the redeem script of
 // the first output of the transaction, which must be the actual bond output.
@@ -127,6 +132,26 @@ func (client *clientInfo) bondTier() (bondTier int64) {
 	for _, bi := range client.bonds {
 		bondTier += int64(bi.Strength)
 	}
+	return
+}
+
+// not thread-safe
+func (client *clientInfo) updateAssetBonds(assetID uint32, bonds []*db.Bond) (bondTier int64) {
+	var n int
+	for _, bond := range bonds {
+		if bond.AssetID != assetID {
+			bondTier += int64(bond.Strength)
+			client.bonds[n] = bond
+			n++
+		}
+	}
+	client.bonds = client.bonds[:n]
+
+	for _, bond := range bonds {
+		client.bonds = append(client.bonds, bond)
+		bondTier += int64(bond.Strength)
+	}
+
 	return
 }
 
@@ -226,12 +251,15 @@ func (client *clientInfo) respHandler(id uint64) *respHandler {
 // signing messages with the DEX's private key. AuthManager manages requests to
 // the 'connect' route.
 type AuthManager struct {
-	wg             sync.WaitGroup
-	storage        Storage
-	signer         Signer
-	checkFee       FeeChecker // legacy fee confs, amt, and address
-	parseBondTx    BondTxParser
-	checkBond      BondCoinChecker // fidelity bond amount, lockTime, acct, and confs
+	wg            sync.WaitGroup
+	storage       Storage
+	signer        Signer
+	checkFee      FeeChecker // legacy fee confs, amt, and address
+	parseBondTx   BondTxParser
+	checkBond     BondCoinChecker // fidelity bond amount, lockTime, acct, and confs
+	checkAllBonds AllBondChecker  // all bonds for an account
+	// isBondupdater checks if a bond is a bond updater, which means that checkAllBonds should be called
+	isBondUpdater  BondUpdaterChecker
 	miaUserTimeout time.Duration
 	unbookFun      func(account.AccountID)
 
@@ -386,6 +414,11 @@ type Config struct {
 	// BondChecker locates an unspent bond, and extracts the amount, lockTime,
 	// and account ID, plus txn confirmations.
 	BondChecker BondCoinChecker
+	// AllBondChecker returns all the bonds for an account.
+	AllBondChecker AllBondChecker
+	// IsBondUpdater returns whether or not AllBondChecker can be called on
+	// an asset.
+	IsBondUpdater BondUpdaterChecker
 
 	// FeeAddress retrieves a fresh registration fee address for an asset. It
 	// should return an empty string for an unsupported asset.
@@ -456,6 +489,8 @@ func NewAuthManager(cfg *Config) *AuthManager {
 		checkFee:          cfg.FeeChecker,   // e.g. dcr's FeeCoin
 		parseBondTx:       cfg.BondTxParser, // e.g. dcr's ParseBondTx
 		checkBond:         cfg.BondChecker,  // e.g. dcr's BondCoin
+		checkAllBonds:     cfg.AllBondChecker,
+		isBondUpdater:     cfg.IsBondUpdater,
 		miaUserTimeout:    cfg.MiaUserTimeout,
 		unbookFun:         cfg.UserUnbooker,
 		feeAddress:        cfg.FeeAddress,
@@ -1261,6 +1296,28 @@ func (auth *AuthManager) addBond(user account.AccountID, bond *db.Bond) (bondTie
 	defer client.mtx.Unlock()
 
 	bondTier = client.addBond(bond)
+	tier = auth.tier(bondTier, score, client.legacyFeePaid)
+	client.tier = tier
+
+	return
+}
+
+// updateAssetBonds removes all of a user's bond's that were posted using a
+// ecrtain asset, and replaces them with the bonds provided.
+func (auth *AuthManager) updateAssetBonds(user account.AccountID, assetID uint32, bonds []*db.Bond) (bondTier, tier int64) {
+	client := auth.user(user)
+	if client == nil {
+		return -1, -1 // offline
+	}
+
+	auth.violationMtx.Lock()
+	score := auth.userScore(user)
+	auth.violationMtx.Unlock()
+
+	client.mtx.Lock()
+	defer client.mtx.Unlock()
+
+	bondTier = client.updateAssetBonds(assetID, bonds)
 	tier = auth.tier(bondTier, score, client.legacyFeePaid)
 	client.tier = tier
 

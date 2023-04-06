@@ -300,6 +300,78 @@ func (auth *AuthManager) handlePostBond(conn comms.Link, msg *msgjson.Message) *
 	return nil
 }
 
+func (auth *AuthManager) sendPostBondRes(conn comms.Link, reqID uint64, postBondRes *msgjson.PostBondResult, acctID account.AccountID) {
+	resp, err := msgjson.NewResponse(reqID, postBondRes, nil)
+	if err != nil { // shouldn't be possible
+		return
+	}
+	err = conn.Send(resp)
+	if err != nil {
+		log.Warnf("Error sending postbond result to user %v: %v", acctID, err)
+		if err = auth.Send(acctID, resp); err != nil {
+			log.Warnf("Error sending feepaid notification to account %v: %v", acctID, err)
+			// The user will need to either 'connect' to see confirmed status,
+			// or postbond again. If they reconnected before it was confirmed,
+			// they must retry postbond until it confirms and is added to the DB
+			// with their new account.
+		}
+	}
+}
+
+// setAllAssetBonds is called for assets that support updating of bonds. Since
+// previous bonds that were posted may have been updated by the new bond that
+// is currently being posted, we need to check the blockchain for all of the
+// bonds that are currently active for the account and determine the user's
+// tier based on them.
+func (auth *AuthManager) setAllAssetBonds(conn comms.Link, acct *account.Account, assetID uint32, reqID uint64, postBondRes *msgjson.PostBondResult) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	acctID := acct.ID
+
+	bonds, err := auth.checkAllBonds(ctx, assetID, 0, acctID)
+	if err != nil {
+		log.Errorf("Error checking bonds for account %v: %v", acctID, err)
+		return
+	}
+
+	bondAsset, ok := auth.bondAssets[assetID]
+	if !ok {
+		log.Errorf("No bond asset found for asset %d", assetID)
+		return
+	}
+
+	dbBonds := make([]*db.Bond, 0, len(bonds))
+	for _, bond := range bonds {
+		dbBonds = append(dbBonds, &db.Bond{
+			Version:  0,
+			AssetID:  assetID,
+			CoinID:   bond.CoinID,
+			Amount:   int64(bond.Amount),
+			Strength: uint32(bond.Amount / bondAsset.Amt),
+			LockTime: int64(bond.LockTime),
+		})
+	}
+
+	err = auth.storage.UpdateAssetBonds(acctID, assetID, dbBonds)
+	if err != nil {
+		log.Errorf("Error updating bonds for account %v: %v", acctID, err)
+		return
+	}
+
+	// Integrate active bonds and score to report tier.
+	bondTotal, tier := auth.updateAssetBonds(acctID, assetID, dbBonds)
+	if bondTotal == -1 { // user not authenticated, use DB
+		tier, bondTotal = auth.ComputeUserTier(acctID)
+	}
+	postBondRes.Tier = tier
+
+	log.Infof("Bonds for asset %s updated: acct %v. Bond total %d, tier %d",
+		assetID, acctID, bondTotal, tier)
+
+	auth.sendPostBondRes(conn, reqID, postBondRes, acctID)
+}
+
 func (auth *AuthManager) storeBondAndRespond(conn comms.Link, bond *db.Bond, acct *account.Account,
 	newAcct bool, reqID uint64, postBondRes *msgjson.PostBondResult) {
 	acctID := acct.ID
@@ -311,6 +383,9 @@ func (auth *AuthManager) storeBondAndRespond(conn comms.Link, bond *db.Bond, acc
 		log.Infof("Creating new user account %v from %v, posted first bond in %v (%s)",
 			acctID, conn.Addr(), bondStr, bondAssetSym)
 		err = auth.storage.CreateAccountWithBond(acct, bond)
+	} else if auth.isBondUpdater(assetID) {
+		auth.setAllAssetBonds(conn, acct, assetID, reqID, postBondRes)
+		return
 	} else {
 		log.Infof("Adding bond for existing user account %v from %v, with bond in %v (%s)",
 			acctID, conn.Addr(), bondStr, bondAssetSym)
@@ -335,22 +410,7 @@ func (auth *AuthManager) storeBondAndRespond(conn comms.Link, bond *db.Bond, acc
 	log.Infof("Bond accepted: acct %v from %v locked %d in %v. Bond total %d, tier %d",
 		acctID, conn.Addr(), bond.Amount, coinIDString(bond.AssetID, coinID), bondTotal, tier)
 
-	// Respond
-	resp, err := msgjson.NewResponse(reqID, postBondRes, nil)
-	if err != nil { // shouldn't be possible
-		return
-	}
-	err = conn.Send(resp)
-	if err != nil {
-		log.Warnf("Error sending postbond result to user %v: %v", acctID, err)
-		if err = auth.Send(acctID, resp); err != nil {
-			log.Warnf("Error sending feepaid notification to account %v: %v", acctID, err)
-			// The user will need to either 'connect' to see confirmed status,
-			// or postbond again. If they reconnected before it was confirmed,
-			// they must retry postbond until it confirms and is added to the DB
-			// with their new account.
-		}
-	}
+	auth.sendPostBondRes(conn, reqID, postBondRes, acctID)
 }
 
 // waitBondConfs is a coin waiter that should be started after validating a bond
