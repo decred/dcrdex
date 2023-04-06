@@ -15,8 +15,11 @@ import (
 
 	"decred.org/dcrdex/dex"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	bondV0 "decred.org/dcrdex/dex/networks/eth/bondcontracts/v0"
 	swapv0 "decred.org/dcrdex/dex/networks/eth/contracts/v0"
+
 	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -40,6 +43,16 @@ type ContextCaller interface {
 	CallContext(ctx context.Context, result interface{}, method string, args ...interface{}) error
 }
 
+type bondContract interface {
+	BondData(opts *bind.CallOpts, accountID [32]byte, bondID [32]byte) (struct {
+		Value           *big.Int
+		InitBlockNumber *big.Int
+		Locktime        uint64
+		Owner           common.Address
+	}, error)
+	BondsForAccount(opts *bind.CallOpts, accountID [32]byte) ([]bondV0.ETHBondBondInfo, error)
+}
+
 type ethConn struct {
 	*ethclient.Client
 	endpoint string
@@ -49,7 +62,8 @@ type ethConn struct {
 	// tokens are tokeners for loaded tokens. tokens is not protected by a
 	// mutex, as it is expected that the caller will connect and place calls to
 	// loadToken sequentially in the same thread during initialization.
-	tokens map[uint32]*tokener
+	tokens       map[uint32]*tokener
+	bondContract bondContract
 	// caller is a client for raw calls not implemented by *ethclient.Client.
 	caller          ContextCaller
 	txPoolSupported bool
@@ -77,19 +91,21 @@ type rpcclient struct {
 	healthCheckCounter      int
 	tokensLoaded            map[uint32]bool
 	ethContractAddr         common.Address
+	bondContractAddr        common.Address
 
 	// the order of clients will change based on the health of the connections.
 	clientsMtx sync.RWMutex
 	clients    []*ethConn
 }
 
-func newRPCClient(net dex.Network, endpoints []endpoint, ethContractAddr common.Address, log dex.Logger) *rpcclient {
+func newRPCClient(net dex.Network, endpoints []endpoint, ethContractAddr common.Address, bondContractAddr common.Address, log dex.Logger) *rpcclient {
 	return &rpcclient{
-		net:             net,
-		endpoints:       endpoints,
-		log:             log,
-		ethContractAddr: ethContractAddr,
-		tokensLoaded:    make(map[uint32]bool),
+		net:              net,
+		endpoints:        endpoints,
+		log:              log,
+		ethContractAddr:  ethContractAddr,
+		bondContractAddr: bondContractAddr,
+		tokensLoaded:     make(map[uint32]bool),
 	}
 }
 
@@ -140,6 +156,12 @@ func (c *rpcclient) connectToEndpoint(ctx context.Context, endpoint endpoint) (*
 		return nil, fmt.Errorf("unable to initialize eth contract for %q: %v", endpoint, err)
 	}
 	ec.swapContract = &swapSourceV0{es}
+
+	bc, err := bondV0.NewETHBond(c.bondContractAddr, ec.Client)
+	if err != nil {
+		return nil, fmt.Errorf("unable to initialize bond contract for %q: %v", endpoint, err)
+	}
+	ec.bondContract = bc
 
 	for assetID := range c.tokensLoaded {
 		tkn, err := newTokener(ctx, assetID, c.net, ec.Client)
@@ -443,6 +465,62 @@ func (c *rpcclient) swap(ctx context.Context, assetID uint32, secretHash [32]byt
 		state, err = tkn.Swap(ctx, secretHash)
 		return err
 	})
+}
+
+type bondInfo struct {
+	AccountID       [32]byte
+	BondID          [32]byte
+	Value           *big.Int
+	InitBlockNumber *big.Int
+	Locktime        uint64
+	Owner           common.Address
+}
+
+func (c *rpcclient) bond(ctx context.Context, accountID, bondID [32]byte) (*bondInfo, error) {
+	var bond *bondInfo
+	return bond, c.withClient(func(ec *ethConn) error {
+		b, err := ec.bondContract.BondData(&bind.CallOpts{Context: ctx}, accountID, bondID)
+		if err != nil {
+			return err
+		}
+		if b.InitBlockNumber == nil || b.InitBlockNumber.Cmp(big.NewInt(0)) == 0 {
+			return ethereum.NotFound
+		}
+		bond = &bondInfo{
+			AccountID:       accountID,
+			BondID:          bondID,
+			Value:           b.Value,
+			InitBlockNumber: b.InitBlockNumber,
+			Locktime:        b.Locktime,
+			Owner:           b.Owner,
+		}
+		return nil
+	}, true)
+}
+
+func (c *rpcclient) accountBonds(ctx context.Context, accountID [32]byte) ([]*bondInfo, error) {
+	var bondInfos []*bondInfo
+	return bondInfos, c.withClient(func(ec *ethConn) error {
+		bonds, err := ec.bondContract.BondsForAccount(&bind.CallOpts{Context: ctx}, accountID)
+		if err != nil {
+			return err
+		}
+
+		c.log.Tracef("Got all bonds for account: %x\n", accountID)
+		bondInfos = make([]*bondInfo, 0, len(bonds))
+		for i, bond := range bonds {
+			bondInfos = append(bondInfos, &bondInfo{
+				AccountID:       accountID,
+				BondID:          bond.BondID,
+				Value:           bond.Value,
+				InitBlockNumber: bond.InitBlockNumber,
+				Locktime:        bond.Locktime,
+				Owner:           bond.Owner,
+			})
+			c.log.Tracef("Bond Info: %+v\n", i, bondInfos[i])
+		}
+		return nil
+	}, true)
 }
 
 // transaction gets the transaction that hashes to hash from the chain or

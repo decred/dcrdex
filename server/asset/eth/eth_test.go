@@ -153,6 +153,14 @@ func (n *testNode) accountBalance(ctx context.Context, assetID uint32, addr comm
 	return n.acctBal, n.acctBalErr
 }
 
+func (n *testNode) bond(ctx context.Context, accountID, bondID [32]byte) (*bondInfo, error) {
+	return nil, nil
+}
+
+func (n *testNode) accountBonds(ctx context.Context, accountID [32]byte) ([]*bondInfo, error) {
+	return nil, nil
+}
+
 func tSwap(bn, locktime int64, value uint64, secret [32]byte, state dexeth.SwapStep, participantAddr *common.Address) *dexeth.SwapState {
 	return &dexeth.SwapState{
 		Secret:      secret,

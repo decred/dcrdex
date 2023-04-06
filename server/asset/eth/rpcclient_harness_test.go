@@ -57,7 +57,15 @@ func TestMain(m *testing.M) {
 			return 1, fmt.Errorf("no contract address for eth version %d on %s", ethContractVersion, dex.Simnet)
 		}
 
-		ethClient = newRPCClient(dex.Simnet, []endpoint{{url: wsEndpoint}, {url: alphaIPCFile}}, ethContractAddr, log)
+		bondContractAddress, found := dexeth.ETHBondAddress[dex.Simnet]
+		if !found {
+			return 1, fmt.Errorf("no bond address for network %s", dex.Simnet)
+		}
+
+		ethClient = newRPCClient(dex.Simnet, []endpoint{{url: wsEndpoint}, {url: alphaIPCFile}}, ethContractAddr, bondContractAddress, log)
+		defer func() {
+			cancel()
+		}()
 
 		dexeth.ContractAddresses[0][dex.Simnet] = getContractAddrFromFile(contractAddrFile)
 
