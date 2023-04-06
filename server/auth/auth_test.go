@@ -76,7 +76,10 @@ func (s *TStorage) Account(acct account.AccountID, lockTimeThresh time.Time) (*a
 }
 func (s *TStorage) CreateAccountWithBond(acct *account.Account, bond *db.Bond) error { return nil }
 func (s *TStorage) AddBond(acct account.AccountID, bond *db.Bond) error              { return nil }
-func (s *TStorage) DeleteBond(assetID uint32, coinID []byte) error                   { return nil }
+func (s *TStorage) UpdateAssetBonds(acct *account.Account, bonds []*db.Bond, newAcct bool) error {
+	return nil
+}
+func (s *TStorage) DeleteBond(assetID uint32, coinID []byte) error { return nil }
 func (s *TStorage) CompletedAndAtFaultMatchStats(aid account.AccountID, lastN int) ([]*db.MatchOutcome, error) {
 	return s.userMatchOutcomes, nil
 }

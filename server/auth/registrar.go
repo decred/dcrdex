@@ -301,12 +301,114 @@ func (auth *AuthManager) handlePostBond(conn comms.Link, msg *msgjson.Message) *
 	return nil
 }
 
+func (auth *AuthManager) sendPostBondRes(conn comms.Link, reqID uint64, postBondRes *msgjson.PostBondResult, acctID account.AccountID) {
+	resp, err := msgjson.NewResponse(reqID, postBondRes, nil)
+	if err != nil { // shouldn't be possible
+		return
+	}
+	err = conn.Send(resp)
+	if err != nil {
+		log.Warnf("Error sending postbond result to user %v: %v", acctID, err)
+		if err = auth.Send(acctID, resp); err != nil {
+			log.Warnf("Error sending feepaid notification to account %v: %v", acctID, err)
+			// The user will need to either 'connect' to see confirmed status,
+			// or postbond again. If they reconnected before it was confirmed,
+			// they must retry postbond until it confirms and is added to the DB
+			// with their new account.
+		}
+	}
+}
+
+// storeUpdaterBondsAndRespond is called for assets that support updating of
+// bonds. Since previous bonds that were posted may have been updated by the
+// new bond that is currently being posted, we need to check the blockchain
+// for all of the bonds that are currently active for the account and determine
+// the user's tier based on them.
+func (auth *AuthManager) storeUpdaterBondsAndRespond(conn comms.Link, acct *account.Account, newAcct bool, assetID uint32, reqID uint64, postBondRes *msgjson.PostBondResult) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	acctID := acct.ID
+
+	bonds, err := auth.checkAllBonds(ctx, assetID, 0, acctID)
+	if err != nil {
+		conn.SendError(reqID, &msgjson.Error{
+			Code:    msgjson.RPCInternalError,
+			Message: "error checking bonds",
+		})
+		return
+	}
+
+	bondAsset, ok := auth.bondAssets[assetID]
+	if !ok {
+		conn.SendError(reqID, &msgjson.Error{
+			Code:    msgjson.RPCInternalError,
+			Message: fmt.Sprintf("%s is not a bond asset", dex.BipIDSymbol(assetID)),
+		})
+		return
+	}
+
+	dbBonds := make([]*db.Bond, 0, len(bonds))
+	for _, bond := range bonds {
+		if bond.Amount < bondAsset.Amt {
+			continue
+		}
+		if time.Until(time.Unix(int64(bond.LockTime), 0)) < auth.bondExpiry {
+			continue
+		}
+		dbBonds = append(dbBonds, &db.Bond{
+			Version:  0,
+			AssetID:  assetID,
+			CoinID:   bond.CoinID,
+			Amount:   int64(bond.Amount),
+			Strength: uint32(bond.Amount / bondAsset.Amt),
+			LockTime: int64(bond.LockTime),
+		})
+	}
+
+	if len(dbBonds) == 0 {
+		conn.SendError(reqID, &msgjson.Error{
+			Code:    msgjson.RPCPostBondError,
+			Message: "no active bonds for account",
+		})
+		return
+	}
+
+	err = auth.storage.UpdateAssetBonds(acct, dbBonds, newAcct)
+	if err != nil {
+		conn.SendError(reqID, &msgjson.Error{
+			Code:    msgjson.RPCInternalError,
+			Message: "failed to store bond",
+		})
+		return
+	}
+
+	// Integrate active bonds and score to report tier.
+	rep := auth.updateAssetBonds(acctID, assetID, dbBonds)
+	if rep == nil { // user not authenticated, use DB
+		rep = auth.ComputeUserReputation(acctID)
+	}
+	postBondRes.Tier = rep.EffectiveTier()
+	postBondRes.Reputation = rep
+
+	log.Infof("Bonds for asset %d updated: acct %v. Bond total %d, tier %d",
+		assetID, acctID, rep.BondedTier, rep.EffectiveTier())
+
+	auth.sendPostBondRes(conn, reqID, postBondRes, acctID)
+}
+
 func (auth *AuthManager) storeBondAndRespond(conn comms.Link, bond *db.Bond, acct *account.Account,
 	newAcct bool, reqID uint64, postBondRes *msgjson.PostBondResult) {
 	acctID := acct.ID
 	assetID, coinID := bond.AssetID, bond.CoinID
 	bondStr := coinIDString(assetID, coinID)
 	bondAssetSym := dex.BipIDSymbol(assetID)
+
+	if auth.isBondUpdater(assetID) {
+		auth.storeUpdaterBondsAndRespond(conn, acct, newAcct, assetID, reqID, postBondRes)
+		return
+	}
+
 	var err error
 	if newAcct {
 		log.Infof("Creating new user account %v from %v, posted first bond in %v (%s)",
@@ -337,22 +439,7 @@ func (auth *AuthManager) storeBondAndRespond(conn comms.Link, bond *db.Bond, acc
 	log.Infof("Bond accepted: acct %v from %v locked %d in %v. Bond total %d, tier %d",
 		acctID, conn.Addr(), bond.Amount, coinIDString(bond.AssetID, coinID), rep.BondedTier, rep.EffectiveTier())
 
-	// Respond
-	resp, err := msgjson.NewResponse(reqID, postBondRes, nil)
-	if err != nil { // shouldn't be possible
-		return
-	}
-	err = conn.Send(resp)
-	if err != nil {
-		log.Warnf("Error sending postbond result to user %v: %v", acctID, err)
-		if err = auth.Send(acctID, resp); err != nil {
-			log.Warnf("Error sending feepaid notification to account %v: %v", acctID, err)
-			// The user will need to either 'connect' to see confirmed status,
-			// or postbond again. If they reconnected before it was confirmed,
-			// they must retry postbond until it confirms and is added to the DB
-			// with their new account.
-		}
-	}
+	auth.sendPostBondRes(conn, reqID, postBondRes, acctID)
 }
 
 // waitBondConfs is a coin waiter that should be started after validating a bond

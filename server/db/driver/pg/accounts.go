@@ -155,6 +155,58 @@ func (a *Archiver) DeleteBond(assetID uint32, coinID []byte) error {
 	return deleteBond(a.db, a.tables.bonds, assetID, coinID)
 }
 
+// UpdateAssetBonds deletes all of the bonds for an account for a certain
+// asset, and loads the provided bonds into the db. All of the provided
+// bonds must have the same asset ID. A new account will be created if
+// newAcct is true.
+func (a *Archiver) UpdateAssetBonds(acct *account.Account, bonds []*db.Bond, newAcct bool) error {
+	if len(bonds) == 0 {
+		return fmt.Errorf("no bonds provided")
+	}
+
+	assetID := bonds[0].AssetID
+	for _, bond := range bonds {
+		if bond.AssetID != assetID {
+			return fmt.Errorf("asset ID mismatch for bond %v", bond)
+		}
+	}
+
+	dbTx, err := a.db.BeginTx(a.ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err == nil || errors.Is(err, sql.ErrTxDone) {
+			return
+		}
+		if errR := dbTx.Rollback(); errR != nil {
+			log.Errorf("Rollback failed: %v", errR)
+		}
+	}()
+
+	if newAcct {
+		err = createAccountForBond(dbTx, a.tables.accounts, acct)
+		if err != nil {
+			return err
+		}
+	}
+
+	err = deleteAssetBondsForAccount(dbTx, a.tables.bonds, acct.ID, assetID)
+	if err != nil {
+		return err
+	}
+
+	for _, bond := range bonds {
+		err = addBond(dbTx, a.tables.bonds, acct.ID, bond)
+		if err != nil {
+			return err
+		}
+	}
+
+	err = dbTx.Commit() // for the defer
+	return err
+}
+
 // AccountRegAddr retrieves the registration fee address and the corresponding
 // asset ID created for the the specified account.
 func (a *Archiver) AccountRegAddr(aid account.AccountID) (string, uint32, error) {
@@ -307,6 +359,14 @@ func getBondsForAccount(dbe sqlQueryer, tableName string, acct account.AccountID
 		return nil, err
 	}
 	return bonds, nil
+}
+
+// deleteAssetBondsForAccount deletes all bonds for the specified account and
+// asset.
+func deleteAssetBondsForAccount(dbe sqlExecutor, tableName string, acct account.AccountID, assetID uint32) error {
+	stmt := fmt.Sprintf(internal.DeleteAssetBondsForUser, tableName)
+	_, err := dbe.Exec(stmt, acct, assetID)
+	return err
 }
 
 // accountRegAddr gets the registration fee address and its asset ID created for

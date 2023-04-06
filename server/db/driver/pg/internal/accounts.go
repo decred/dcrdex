@@ -43,6 +43,8 @@ const (
 
 	DeleteBond = `DELETE FROM %s WHERE bond_coin_id = $1 AND asset_id = $2;`
 
+	DeleteAssetBondsForUser = `DELETE FROM %s WHERE account_id = $1 AND asset_id = $2;`
+
 	SelectActiveBondsForUser = `SELECT version, bond_coin_id, asset_id, amount, strength, lock_time FROM %s
 		WHERE account_id = $1 AND lock_time >= $2
 		ORDER BY lock_time;`

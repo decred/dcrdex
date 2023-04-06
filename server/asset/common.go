@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/server/account"
 )
 
 // Addresser retrieves unique addresses.
@@ -198,4 +199,11 @@ func NewConnectionError(s string, a ...any) ConnectionError {
 type BackedAsset struct {
 	dex.Asset
 	Backend Backend
+}
+
+type BondData struct {
+	AccountID account.AccountID
+	Amount    uint64
+	LockTime  uint64
+	CoinID    []byte
 }

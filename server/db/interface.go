@@ -269,6 +269,12 @@ type AccountArchiver interface {
 	// coin ID), for an existing account.
 	AddBond(acct account.AccountID, bond *Bond) error
 
+	// UpdateAssetBonds deletes all of the bonds for an account for a certain
+	// asset, and loads the provided bonds into the db. All of the provided
+	// bonds must have the same asset ID. A new account will be created if
+	// newAcct is true.
+	UpdateAssetBonds(acct *account.Account, bonds []*Bond, newAcct bool) error
+
 	// DeleteBond deletes a bond which should generally be expired.
 	DeleteBond(assetID uint32, coinID []byte) error
 
