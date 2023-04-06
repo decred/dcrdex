@@ -518,6 +518,8 @@ type Bonder interface {
 	// RefundBond will refund the bond given the full bond output details and
 	// private key to spend it. The bond is broadcasted.
 	RefundBond(ctx context.Context, ver uint16, coinID, script []byte, amt uint64, privKey *secp256k1.PrivateKey) (Coin, error)
+	// BondConfirmations gets the numer of confirmations since the creation of a bond.
+	BondConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error)
 
 	// A RefundBondByCoinID may be created in the future to attempt to refund a
 	// bond by locating it on chain, i.e. without providing the amount or
@@ -526,6 +528,31 @@ type Bonder interface {
 	// known values. Further, methods for (1) locking coins for future bonds,
 	// and (2) renewing bonds by spending a bond directly into a new one, may be
 	// required for efficient client bond management.
+}
+
+// BondUpdater is a wallet that can use the values of existing bonds to create
+// new bonds with a longer lockTime. Wallet's that support this do not need to
+// reserve additional funds in order to maintain a certain tier, because bonds
+// can be extended before they expire.
+type BondUpdater interface {
+	Bonder
+
+	// UpdateBondTx creates an unsigned transaction that uses the funds locked
+	// in one or more bonds to create a new bond with a longer lockTime. If the
+	// total value of the bonds is greater than the new bond, a "change" bond
+	// will be created with the remaining funds and the same lockTime as the
+	// earliest expiring bond. If two bonds are being created, the "change"
+	// bond will be the first in the returned []*asset.Bond slice.
+	//
+	// Requirements:
+	//   - The correct amount of privKeys must be passed, depending on whether
+	//     or not a change bond is needed.
+	//   - The lockTime must be later than the latest lockTime of the
+	//     bondsToUpdate.
+	//   - The value of the earliest expiring bond must be greater than the
+	//     "change" bond value.
+	//   - The bondsToUpdate must all be from the same account.
+	UpdateBondTx(ver uint16, bondsToUpdate []dex.Bytes, privKeys []*secp256k1.PrivateKey, amt uint64, lockTime time.Time) ([]*Bond, error)
 }
 
 // Rescanner is a wallet implementation with rescan functionality.
@@ -784,11 +811,12 @@ type PeerManager interface {
 // the corresponding signed transaction, and a final request is made once the
 // bond is fully confirmed. The caller should manage the private key.
 type Bond struct {
-	Version uint16
-	AssetID uint32
-	Amount  uint64
-	CoinID  []byte
-	Data    []byte // additional data to interpret the bond e.g. redeem script, bond contract, etc.
+	Version  uint16
+	AssetID  uint32
+	Amount   uint64
+	CoinID   []byte
+	LockTime uint64
+	Data     []byte // additional data to interpret the bond e.g. redeem script, bond contract, etc.
 	// SignedTx and UnsignedTx are the opaque (raw bytes) signed and unsigned
 	// bond creation transactions, in whatever encoding and funding scheme for
 	// this asset and wallet. The unsigned one is used to pre-validate this bond
@@ -799,6 +827,10 @@ type Bond struct {
 	// RedeemTx is a backup transaction that spends the bond output. Normally
 	// the a key index will be used to derive the key when the bond expires.
 	RedeemTx []byte
+
+	// ReplacedBy is set to the CoinID of the bond that has replaced this bond,
+	// if any.
+	ReplacedBy dex.Bytes
 }
 
 // BotWallet implements some methods that can help bots function.

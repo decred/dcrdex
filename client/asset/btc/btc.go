@@ -4360,6 +4360,11 @@ func (btc *baseWallet) RegFeeConfirmations(_ context.Context, id dex.Bytes) (con
 	return
 }
 
+// BondConfirmations gets the numer of confirmations since the creation of a bond.
+func (btc *baseWallet) BondConfirmations(_ context.Context, id dex.Bytes) (confs uint32, err error) {
+	return btc.RegFeeConfirmations(context.Background(), id)
+}
+
 func (btc *baseWallet) checkPeers() {
 	numPeers, err := btc.node.peerCount()
 	if err != nil {

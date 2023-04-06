@@ -3972,6 +3972,11 @@ func (dcr *ExchangeWallet) SwapConfirmations(ctx context.Context, coinID, contra
 	return confs, spent, err
 }
 
+// BondConfirmations gets the numer of confirmations since the creation of a bond.
+func (dcr *ExchangeWallet) BondConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error) {
+	return dcr.RegFeeConfirmations(ctx, coinID)
+}
+
 // RegFeeConfirmations gets the number of confirmations for the specified
 // output.
 func (dcr *ExchangeWallet) RegFeeConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error) {
