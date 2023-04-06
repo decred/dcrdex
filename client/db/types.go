@@ -104,6 +104,7 @@ type Bond struct {
 	LockTime   uint64    `json:"lockTime"`
 	KeyIndex   uint32    `json:"keyIndex"` // child key index for HD path: m / hdKeyPurposeBonds / assetID' / bondIndex
 	RefundTx   dex.Bytes `json:"refundTx"` // pays to wallet that created it - only a backup for emergency!
+	ReplacedBy dex.Bytes `json:"replacedBy"`
 
 	Confirmed bool `json:"confirmed"` // if reached required confs according to server, not in serialization
 	Refunded  bool `json:"refunded"`  // not in serialization

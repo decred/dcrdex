@@ -40,6 +40,8 @@ type DB interface {
 	UpdateAccountInfo(ai *AccountInfo) error
 	// AddBond saves a new Bond or updates an existing bond for a DEX.
 	AddBond(host string, bond *Bond) error
+	// AddBonds saves new bonds or updates existing bonds for a DEX.
+	AddBonds(host string, bondsSlice []*Bond) error
 	// NextBondKeyIndex returns the next bond key index and increments the
 	// stored value so that subsequent calls will always return a higher index.
 	NextBondKeyIndex(assetID uint32) (uint32, error)

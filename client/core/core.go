@@ -7745,7 +7745,7 @@ func (c *Core) connectDEXWithFlag(acctInfo *db.AccountInfo, flag connectDEXFlag)
 		defer dc.acct.authMtx.Unlock()
 
 		for _, dbBond := range acctInfo.Bonds {
-			if dbBond.Refunded { // maybe don't even load these, but it may be of use for record keeping
+			if dbBond.Refunded || dbBond.ReplacedBy != nil { // maybe don't even load these, but it may be of use for record keeping
 				continue
 			}
 

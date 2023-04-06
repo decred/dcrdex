@@ -209,7 +209,8 @@ func tNewAccount(crypter *tCrypter) *dexAccount {
 		feeCoin:   []byte("somecoin"),
 		// feeAssetID is 0 (btc)
 		// tier, bonds, etc. set on auth
-		tier: 1, // not suspended by default
+		tier:              1, // not suspended by default
+		pendingBondsConfs: make(map[string]uint32),
 	}
 }
 
@@ -352,6 +353,7 @@ type TDB struct {
 	acctErr                  error
 	createAccountErr         error
 	addBondErr               error
+	addBondsErr              error
 	storeAccountProofErr     error
 	updateOrderErr           error
 	activeDEXOrders          []*db.MetaOrder
@@ -414,6 +416,10 @@ func (tdb *TDB) NextBondKeyIndex(assetID uint32) (uint32, error) {
 
 func (tdb *TDB) AddBond(host string, bond *db.Bond) error {
 	return tdb.addBondErr
+}
+
+func (tdb *TDB) AddBonds(host string, bonds []*db.Bond) error {
+	return tdb.addBondsErr
 }
 
 func (tdb *TDB) ConfirmBond(host string, assetID uint32, bondCoinID []byte) error {
@@ -647,6 +653,7 @@ func (r *tReceipt) SignedRefund() dex.Bytes {
 }
 
 type TXCWallet struct {
+	assetID             uint32
 	swapSize            uint64
 	sendFeeSuggestion   uint64
 	sendCoin            *tCoin
@@ -700,6 +707,7 @@ type TXCWallet struct {
 	feeCoin             []byte
 	makeRegFeeTxErr     error
 	feeCoinSent         []byte
+	sentRawTransaction  []byte
 	sendTxnErr          error
 	contractExpired     bool
 	contractLockTime    time.Time
@@ -718,7 +726,15 @@ type TXCWallet struct {
 	accelerationEstimate        uint64
 	accelerateOrderErr          error
 	info                        *asset.WalletInfo
+	makeBondTxSignedTx          dex.Bytes
+	makeBondTxUnsignedTx        dex.Bytes
+	makeBondTxCoinID            dex.Bytes
+	makeBondTxAmtParam          uint64
+	makeBondTxErr               error
 
+	refundBondCoin          asset.Coin
+	refundBondErr           error
+	refundBondCoinParam     dex.Bytes
 	confirmRedemptionResult *asset.ConfirmRedemptionStatus
 	confirmRedemptionErr    error
 	confirmRedemptionCalled bool
@@ -744,6 +760,7 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 			Version:           0, // match tUTXOAssetA/tUTXOAssetB
 			SupportedVersions: []uint32{0},
 		},
+		assetID: assetID,
 	}
 	var broadcasting uint32 = 1
 	xcWallet := &xcWallet{
@@ -934,11 +951,43 @@ func (w *TXCWallet) Send(address string, value, feeSuggestion uint64) (asset.Coi
 	return w.sendCoin, w.sendErr
 }
 
-func (w *TXCWallet) MakeBondTx(ver uint64, address string, regFee uint64, acctID []byte) (*asset.Bond, error) {
-	return nil, errors.New("not used")
+func (w *TXCWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Time, privKey *secp256k1.PrivateKey, acctID []byte) (*asset.Bond, func(), error) {
+	abort := func() {}
+	if w.makeBondTxErr != nil {
+		return nil, nil, w.makeBondTxErr
+	}
+	w.makeBondTxAmtParam = amt
+	return &asset.Bond{
+		AssetID:    w.assetID,
+		Amount:     amt,
+		CoinID:     w.makeBondTxCoinID,
+		SignedTx:   w.makeBondTxSignedTx,
+		UnsignedTx: w.makeBondTxUnsignedTx,
+	}, abort, w.makeBondTxErr
+}
+
+func (w *TXCWallet) BondsFeeBuffer() uint64 {
+	return 0
+}
+
+func (w *TXCWallet) RegisterUnspent(live uint64) {
+}
+
+func (w *TXCWallet) ReserveBondFunds(future int64, respectBalance bool) bool {
+	return true
+}
+
+func (w *TXCWallet) RefundBond(ctx context.Context, ver uint16, coinID, script []byte, amt uint64, privKey *secp256k1.PrivateKey) (asset.Coin, error) {
+	w.refundBondCoinParam = coinID
+	return w.refundBondCoin, w.refundBondErr
+}
+
+func (w *TXCWallet) BondConfirmations(ctx context.Context, coinID dex.Bytes) (confs uint32, err error) {
+	return 0, nil
 }
 
 func (w *TXCWallet) SendTransaction(rawTx []byte) ([]byte, error) {
+	w.sentRawTransaction = rawTx
 	return w.feeCoinSent, w.sendTxnErr
 }
 
@@ -1066,6 +1115,8 @@ func (w *TXCWallet) AccelerationEstimate(swapCoins, accelerationCoins []dex.Byte
 	return w.accelerationEstimate, nil
 }
 
+var _ asset.Bonder = (*TXCWallet)(nil)
+
 type TAccountLocker struct {
 	*TXCWallet
 	reserveNRedemptions    uint64
@@ -1088,6 +1139,58 @@ func newTAccountLocker(assetID uint32) (*xcWallet, *TAccountLocker) {
 	accountLocker := &TAccountLocker{TXCWallet: tWallet}
 	xcWallet.Wallet = accountLocker
 	return xcWallet, accountLocker
+}
+
+type TUpdateBonder struct {
+	*TXCWallet
+	updateBondTxSignedTx         dex.Bytes
+	updateBondTxUnsignedTx       dex.Bytes
+	updateBondTxCoinIDs          []dex.Bytes
+	updateBondTxChange           uint64
+	updateBondTxAmtParam         uint64
+	updateBondBondsToUpdateParam []dex.Bytes
+	updateBondTxErr              error
+}
+
+var _ asset.BondUpdater = (*TUpdateBonder)(nil)
+
+func newTUpdateBonder(assetID uint32) (*xcWallet, *TUpdateBonder) {
+	xcWallet, tWallet := newTWallet(assetID)
+	updateBonder := &TUpdateBonder{TXCWallet: tWallet}
+	xcWallet.Wallet = updateBonder
+	return xcWallet, updateBonder
+}
+
+func (w *TUpdateBonder) UpdateBondTx(ver uint16, bondsToUpdate []dex.Bytes, privKeys []*secp256k1.PrivateKey, amt uint64, lockTime time.Time) ([]*asset.Bond, error) {
+	if w.updateBondTxErr != nil {
+		return nil, w.updateBondTxErr
+	}
+	w.updateBondTxAmtParam = amt
+	w.updateBondBondsToUpdateParam = bondsToUpdate
+
+	if len(privKeys) == 2 {
+		return []*asset.Bond{{
+			AssetID:    w.assetID,
+			Amount:     w.updateBondTxChange,
+			SignedTx:   w.updateBondTxSignedTx,
+			UnsignedTx: w.updateBondTxUnsignedTx,
+			CoinID:     w.updateBondTxCoinIDs[0],
+		}, {
+			AssetID:    w.assetID,
+			Amount:     amt,
+			SignedTx:   w.updateBondTxSignedTx,
+			UnsignedTx: w.updateBondTxUnsignedTx,
+			CoinID:     w.updateBondTxCoinIDs[1],
+		}}, nil
+	}
+
+	return []*asset.Bond{{
+		AssetID:    w.assetID,
+		Amount:     amt,
+		SignedTx:   w.updateBondTxSignedTx,
+		UnsignedTx: w.updateBondTxUnsignedTx,
+		CoinID:     w.updateBondTxCoinIDs[0],
+	}}, nil
 }
 
 func (w *TAccountLocker) ReserveNRedemptions(n uint64, ver uint32, maxFeeRate uint64) (uint64, error) {
@@ -1409,6 +1512,17 @@ func (rig *testRig) queueCancel(rpcErr *msgjson.Error) {
 		if rpcErr != nil {
 			resp, _ = msgjson.NewResponse(msg.ID, nil, rpcErr)
 		}
+		f(resp)
+		return nil
+	})
+}
+
+func (rig *testRig) queuePreValidateBond(amt uint64, rawTx []byte) {
+	rig.ws.queueResponse(msgjson.PreValidateBondRoute, func(msg *msgjson.Message, f msgFunc) error {
+		msgPreValidate := new(msgjson.PreValidateBondResult)
+		msgPreValidate.Amount = amt
+		msgPreValidate.SetSig(signMsg(tDexPriv, append(msgPreValidate.Serialize(), rawTx...)))
+		resp, _ := msgjson.NewResponse(msg.ID, msgPreValidate, nil)
 		f(resp)
 		return nil
 	})

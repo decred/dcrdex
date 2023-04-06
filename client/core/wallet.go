@@ -510,6 +510,17 @@ func (w *xcWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Tim
 	return bonder.MakeBondTx(ver, amt, feeRate, lockTime, priv, acctID)
 }
 
+// UpdateBondTx authors a transaction that uses previouly created bonds to
+// create a new DEX time-locked fidelity bond transaction. This only works
+// if the asset.Wallet implementation is a BondUpdater.
+func (w *xcWallet) UpdateBondTx(ver uint16, bondsToUpdate []dex.Bytes, privKeys []*secp256k1.PrivateKey, amt uint64, lockTime time.Time) ([]*asset.Bond, error) {
+	bonder, ok := w.Wallet.(asset.BondUpdater)
+	if !ok {
+		return nil, errors.New("wallet does not support updating bond transactions")
+	}
+	return bonder.UpdateBondTx(ver, bondsToUpdate, privKeys, amt, lockTime)
+}
+
 // ReserveBondFunds reserves funds for future bonds given known live bonds.
 func (w *xcWallet) ReserveBondFunds(future int64, respectBalance bool) bool {
 	bonder, ok := w.Wallet.(asset.Bonder)
@@ -539,6 +550,16 @@ func (w *xcWallet) RefundBond(ctx context.Context, ver uint16, coinID, script []
 		return nil, errors.New("wallet does not support refunding bond transactions")
 	}
 	return bonder.RefundBond(ctx, ver, coinID, script, amt, priv)
+}
+
+// BondConfirmations returns the amount of confirmations of a bond if the
+// asset.Wallet implementation is a Bonder.s
+func (w *xcWallet) BondConfirmations(ctx context.Context, bondID dex.Bytes) (uint32, error) {
+	bonder, ok := w.Wallet.(asset.Bonder)
+	if !ok {
+		return 0, errors.New("wallet does not support bond confirmations")
+	}
+	return bonder.BondConfirmations(ctx, bondID)
 }
 
 // SendTransaction broadcasts a raw transaction if the wallet is a Broadcaster.
