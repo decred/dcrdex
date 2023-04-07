@@ -1029,7 +1029,12 @@ export default class WalletsPage extends BasePage {
     const loaded = app().loading(this.body)
     const res = await postJSON('/api/connectwallet', { assetID })
     loaded()
-    if (!app().checkResponse(res)) return
+    if (!app().checkResponse(res)) {
+      const { symbol } = app().assets[assetID]
+      const page = this.page
+      page.errorModalMsg.textContent = intl.prep(intl.ID_CONNECT_WALLET_ERR_MSG, { assetName: symbol, errMsg: res.msg })
+      this.showForm(page.errorModal)
+    }
     this.updateDisplayedAsset(assetID)
   }
 
