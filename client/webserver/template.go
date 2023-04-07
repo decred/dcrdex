@@ -166,11 +166,16 @@ func (t *templates) exec(name string, data interface{}) (string, error) {
 
 	if t.reloadOnExec {
 		// Retranslate and re-parse the template.
-		t.addTemplate(name, tmpl.preloads...)
-		log.Debugf("reloaded HTML template %q", name)
+		if err := t.addTemplate(name, tmpl.preloads...).buildErr(); err != nil {
+			// No need to return the error because we still want to display the
+			// page.
+			log.Errorf("Failed to reload HTML template %q: %v", name, err)
+		} else {
+			log.Debugf("reloaded HTML template %q", name)
 
-		// Grab the new pageTemplate
-		tmpl = t.templates[name]
+			// Grab the new pageTemplate
+			tmpl = t.templates[name]
+		}
 	}
 
 	var page strings.Builder
