@@ -261,7 +261,7 @@ func (p *provider) subscribeHeaders(ctx context.Context, sub ethereum.Subscripti
 				return sub, nil
 			}
 			if time.Since(lastWarning) > 5*time.Minute {
-				log.Warnf("can't resubscribe to %q headers: %v", err)
+				log.Warnf("can't resubscribe to %q headers: %v", p.host, err)
 			}
 			select {
 			case <-time.After(time.Second * 30):
