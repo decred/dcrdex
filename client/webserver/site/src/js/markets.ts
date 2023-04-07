@@ -219,9 +219,6 @@ export default class MarketsPage extends BasePage {
     // Do not call cleanTemplates before creating the AccelerateOrderForm
     this.accelerateOrderForm = new AccelerateOrderForm(page.accelerateForm, success)
 
-    // Set user's last known candle duration.
-    this.candleDur = State.fetchLocal(State.lastCandleDurationLK)
-
     // Setup the register to trade button.
     // TODO: Use dexsettings page?
     const registerBttn = Doc.tmplElement(page.notRegistered, 'registerBttn')
@@ -803,7 +800,19 @@ export default class MarketsPage extends BasePage {
       page.durBttnBox.appendChild(bttn)
     }
 
-    // Set candle duration.
+    // Check if we already have the fiveMinBin candles cache, if not, request
+    // for it first since we use it to determine the 24hour high/low in
+    // this.setHighLow().
+    const lastCandleDur = State.fetchLocal(State.lastCandleDurationLK)
+    const cache = this.market?.candleCaches[fiveMinBinKey]
+    if (!cache && lastCandleDur !== fiveMinBinKey) {
+      this.candleDur = fiveMinBinKey
+      this.requestCandles()
+    }
+
+    // The fiveMinBin candles have been requested, so we can set the user's last
+    // known configuration now.
+    this.candleDur = lastCandleDur
     this.candleDurationSelected(this.candleDur)
   }
 
