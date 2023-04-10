@@ -633,7 +633,6 @@ type Exchange struct {
 	// TODO: Bonds slice(s) - and a LockedInBonds(assetID) method
 
 	// OLD fields for the legacy registration fee (V0PURGE):
-	Fee        *FeeAsset            `json:"feeAsset"` // DCR. DEPRECATED by RegFees.
 	RegFees    map[string]*FeeAsset `json:"regFees"`
 	PendingFee *PendingFeeState     `json:"pendingFee,omitempty"`
 }
