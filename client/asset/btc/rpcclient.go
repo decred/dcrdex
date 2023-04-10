@@ -119,6 +119,8 @@ type rpcCore struct {
 	legacyValidateAddressRPC bool
 	manualMedianTime         bool
 	omitRPCOptionsArg        bool
+	addrFunc                 func() (btcutil.Address, error)
+	connectFunc              func() error
 }
 
 func (c *rpcCore) requester() RawRequester {
@@ -166,6 +168,11 @@ func (wc *rpcClient) connect(ctx context.Context, _ *sync.WaitGroup) error {
 				" for descriptor wallets", netVer, minDescriptorVersion)
 		}
 		wc.log.Debug("Using a descriptor wallet.")
+	}
+	if wc.connectFunc != nil {
+		if err := wc.connectFunc(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -518,6 +525,8 @@ func (wc *rpcClient) changeAddress() (btcutil.Address, error) {
 	var addrStr string
 	var err error
 	switch {
+	case wc.addrFunc != nil:
+		return wc.addrFunc()
 	case wc.omitAddressType:
 		err = wc.call(methodChangeAddress, nil, &addrStr)
 	case wc.segwit:
@@ -532,6 +541,9 @@ func (wc *rpcClient) changeAddress() (btcutil.Address, error) {
 }
 
 func (wc *rpcClient) externalAddress() (btcutil.Address, error) {
+	if wc.addrFunc != nil {
+		return wc.addrFunc()
+	}
 	if wc.segwit {
 		return wc.address("bech32")
 	}

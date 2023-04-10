@@ -6,6 +6,7 @@ package zec
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
@@ -28,13 +29,16 @@ const (
 	// structure.
 	defaultFee          = 10
 	defaultFeeRateLimit = 1000
-	minNetworkVersion   = 5000025
+	minNetworkVersion   = 5040250 // v5.4.2
 	walletTypeRPC       = "zcashdRPC"
 
 	mainnetNU5ActivationHeight        = 1687104
 	testnetNU5ActivationHeight        = 1842420
 	testnetSaplingActivationHeight    = 280000
 	testnetOverwinterActivationHeight = 207500
+
+	transparentAddressType = "p2pkh"
+	orchardAddressType     = "orchard"
 )
 
 var (
@@ -181,6 +185,12 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 		SingularWallet:           true,
 		UnlockSpends:             true,
 		FeeEstimator:             estimateFee,
+		ConnectFunc: func() error {
+			return connect(w)
+		},
+		AddrFunc: func() (btcutil.Address, error) {
+			return transparentAddress(w, addrParams, btcParams)
+		},
 		AddressDecoder: func(addr string, net *chaincfg.Params) (btcutil.Address, error) {
 			return dexzec.DecodeAddress(addr, addrParams, btcParams)
 		},
@@ -222,6 +232,62 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 	var err error
 	w, err = btc.BTCCloneWallet(cloneCFG)
 	return w, err
+}
+
+type rpcCaller interface {
+	CallRPC(method string, args []interface{}, thing interface{}) error
+}
+
+func transparentAddress(c rpcCaller, addrParams *dexzec.AddressParams, btcParams *chaincfg.Params) (btcutil.Address, error) {
+	const zerothAccount = 0
+	// One of the address types MUST be shielded.
+	addrRes, err := zGetAddressForAccount(c, zerothAccount, []string{transparentAddressType, orchardAddressType})
+	if err != nil {
+		return nil, err
+	}
+	receivers, err := zGetUnifiedReceivers(c, addrRes.Address)
+	if err != nil {
+		return nil, err
+	}
+	return dexzec.DecodeAddress(receivers.Transparent, addrParams, btcParams)
+}
+
+// connect is ZCash's BTCCloneCFG.ConnectFunc. Ensures that accounts are set
+// up correctly.
+func connect(c rpcCaller) error {
+	// Make sure we have zeroth and first account or are able to create them.
+	accts, err := zListAccounts(c)
+	if err != nil {
+		return fmt.Errorf("error listing ZCash accounts: %w", err)
+	}
+
+	createAccount := func(n uint32) error {
+		for _, acct := range accts {
+			if acct.Number == n {
+				return nil
+			}
+		}
+		acctNumber, err := zGetNewAccount(c)
+		if err != nil {
+			if strings.Contains(err.Error(), "zcashd-wallet-tool") {
+				return fmt.Errorf("account %d does not exist and cannot be created because wallet seed backup has not been acknowledged with the zcashd-wallet-tool utility", n)
+			}
+			return fmt.Errorf("error creating account %d: %w", n, err)
+		}
+		if acctNumber != n {
+			return fmt.Errorf("no account %d found and newly created account has unexpected account number %d", n, acctNumber)
+		}
+		return nil
+	}
+	if err := createAccount(0); err != nil {
+		return err
+	}
+	// When shielded pools are implemented, we'll use a separate, dedicated
+	// account that uses unified addresses with only and Orchard receiver type.
+	// if err := createAccount(1); err != nil {
+	// 	return err
+	// }
+	return nil
 }
 
 func zecTx(tx *wire.MsgTx) *dexzec.Tx {
