@@ -155,7 +155,7 @@ if [ $ZEC_ON -eq 0 ]; then
         {
             "base": "ZEC_simnet",
             "quote": "BTC_simnet",
-            "lotSize": 1000000,
+            "lotSize": 1000000000,
             "rateStep": 1000,
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2
