@@ -493,16 +493,6 @@ func (dc *dexConnection) exchangeInfo() *Exchange {
 			Amt:   asset.Amt,
 		}
 	}
-	dcrAsset := feeAssets["dcr"]
-	if dcrAsset == nil { // should have happened in refreshServerConfig
-		// V0PURGE
-		dcrAsset = &FeeAsset{
-			ID:    42,
-			Amt:   cfg.Fee,
-			Confs: uint32(cfg.RegFeeConfirms),
-		}
-		feeAssets["dcr"] = dcrAsset
-	}
 
 	dc.acct.authMtx.RLock()
 	// TODO: List bonds in core.Exchange. For now, just tier.
@@ -531,7 +521,6 @@ func (dc *dexConnection) exchangeInfo() *Exchange {
 		// TODO: Bonds
 
 		// Legacy reg fee (V0PURGE)
-		Fee:        dcrAsset,
 		RegFees:    feeAssets,
 		PendingFee: dc.getPendingFee(),
 	}

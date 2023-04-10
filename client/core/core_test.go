@@ -273,9 +273,10 @@ func testDexConnection(ctx context.Context, crypter *tCrypter) (*dexConnection, 
 			BondAssets: map[string]*msgjson.BondAsset{
 				"dcr": {ID: 42, Amt: tFee, Confs: 1},
 			},
-			Fee:            tFee,
-			RegFeeConfirms: 0, // 1 or remove?
-			BinSizes:       []string{"1h", "24h"},
+			RegFees: map[string]*msgjson.FeeAsset{
+				"dcr": {ID: 42, Amt: tFee, Confs: 0},
+			},
+			BinSizes: []string{"1h", "24h"},
 		},
 		notify:            func(Notification) {},
 		trades:            make(map[order.OrderID]*trackedTrade),
@@ -2103,14 +2104,19 @@ func TestRegister(t *testing.T) {
 	// fee asset not found, no cfg.Fee fallback
 	mkts := dc.cfg.Markets
 	dc.cfg.RegFees = nil
-	dc.cfg.Fee = 0
 	dc.cfg.Markets = []*msgjson.Market{}
 	rig.queueConfig()
 	run()
 	if !errorHasCode(err, assetSupportErr) {
 		t.Fatalf("wrong error for missing asset: %v", err)
 	}
-	dc.cfg.Fee = tFee // next connect will patch up RegFees
+	dc.cfg.RegFees = map[string]*msgjson.FeeAsset{
+		"dcr": {
+			ID:    42,
+			Confs: 0, // skip block mining and register immediately
+			Amt:   tFee,
+		},
+	}
 	dc.cfg.Markets = mkts
 
 	// error creating signing key
