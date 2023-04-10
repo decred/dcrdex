@@ -11,7 +11,8 @@ import (
 )
 
 const (
-	DefaultFee = 10 // 0.0001 FIRO/kB
+	DefaultFee          = 1  // 0.00001000 FIRO/kB
+	DefaultFeeRateLimit = 20 // 0.00020000 FIRO/kB
 )
 
 // Firo v0.14.12.1 defaults:

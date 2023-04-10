@@ -4270,15 +4270,87 @@ func (btc *baseWallet) DepositAddress() (string, error) {
 	if btc.node.locked() {
 		return addrStr, nil
 	}
+
 	// If the wallet is unlocked, be extra cautious and ensure the wallet gave
 	// us an address for which we can retrieve the private keys, regardless of
 	// what ownsAddress would say.
-	priv, err := btc.node.privKeyForAddress(addrStr)
+	priv, err := btc.getPrivKeyForAddress(addrStr)
 	if err != nil {
 		return "", fmt.Errorf("private key unavailable for address %v: %w", addrStr, err)
 	}
 	priv.Zero()
 	return addrStr, nil
+}
+
+// getPrivKeyForAddress accomodates `dumpprivkey' RPC for different RPC sequencing
+func (btc *baseWallet) getPrivKeyForAddress(addr string) (*btcec.PrivateKey, error) {
+	if btc.walletInfo.Name == "Firo" {
+		return btc.getPrivkeyFiro(addr)
+	}
+	return btc.node.privKeyForAddress(addr)
+}
+
+// getPrivkeyFiro is Firo's weird version of 'dumpprivkey'. We do it twice!
+// If the wallet is encrypted unlock first
+func (btc *baseWallet) getPrivkeyFiro(addr string) (*btcec.PrivateKey, error) {
+	var args1 []string
+	args1 = append(args1, addr)
+
+	// Params #1 -- Just the address
+	params1 := make([]json.RawMessage, 0, len(args1))
+	for i := range args1 {
+		p, err := json.Marshal(args1[i])
+		if err != nil {
+			return nil, err
+		}
+		params1 = append(params1, p)
+	}
+
+	// Call #1
+	_, err := btc.node.RawRequest(btc.ctx, "dumpprivkey", params1)
+	if err == nil {
+		unexpected := errors.New("firo dumpprivkey: no authorization challenge")
+		return nil, unexpected
+	}
+	errStr := err.Error()
+	searchStr := "authorization code is: "
+	i0 := strings.Index(errStr, searchStr)
+	if i0 == -1 {
+		return nil, err
+	}
+	i := i0 + len(searchStr)
+	auth := errStr[i : i+4]
+	/// fmt.Printf("OTA: %s\n", auth)
+
+	// Params #2 -- address + one time auth
+	var args2 []string
+	args2 = append(args2, addr, auth)
+	params2 := make([]json.RawMessage, 0, len(args2))
+	for i := range args2 {
+		p, err := json.Marshal(args2[i])
+		if err != nil {
+			return nil, err
+		}
+		params2 = append(params2, p)
+	}
+
+	// Call #2
+	jsonprivkey, err := btc.node.RawRequest(btc.ctx, "dumpprivkey", params2)
+	if err != nil {
+		return nil, err
+	}
+	var privkeyStr string
+	err = json.Unmarshal(jsonprivkey, &privkeyStr)
+	if err != nil {
+		return nil, err
+	}
+
+	wif, err := btcutil.DecodeWIF(privkeyStr)
+	if err != nil {
+		return nil, err
+	}
+
+	return wif.PrivKey, nil
 }
 
 // RedemptionAddress gets an address for use in redeeming the counterparty's
@@ -4919,7 +4991,7 @@ func (btc *baseWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, addr 
 		return nil, nil, err
 	}
 
-	privKey, err := btc.node.privKeyForAddress(addrStr)
+	privKey, err := btc.getPrivKeyForAddress(addrStr)
 	if err != nil {
 		return nil, nil, err
 	}

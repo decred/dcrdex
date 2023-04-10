@@ -69,8 +69,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 	ports := dexbtc.NetPorts{
 		Mainnet: "8168",
 		Testnet: "18168",
-		//Devnet: "38168", 	// alternate testnet
-		Simnet: "18444", // Regtest
+		Simnet:  "18444", // Regtest
 	}
 
 	if configPath == "" {
@@ -86,14 +85,12 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		ChainParams:          params,
 		Ports:                ports,
 		FeeConfs:             1,  // the default
-		NoCompetitionFeeRate: 10, // 0.00010000 FIRO/kB
+		NoCompetitionFeeRate: 1,  // 0.00001000 FIRO/kB
 		MaxFeeBlocks:         16, // copied from dgb
 	})
 }
 
-// Observation on-chain shows transparent txs usually at ~S10 firo-sats/byte
-//
-// Current Code:
+// Firo v0.14.12.1 defaults:
 // -fallbackfee= (default: 20000) 	wallet.h: DEFAULT_FALLBACK_FEE unused afaics
 // -mintxfee= (default: 1000)  		for tx creation
 // -maxtxfee= (default: 1000000000) 10 FIRO .. also looks unused

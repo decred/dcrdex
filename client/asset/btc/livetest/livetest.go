@@ -118,6 +118,8 @@ func (rig *testRig) mineAlpha() error {
 	tmuxWindow := rig.symbol + "-harness:2"
 	if rig.symbol == "zec" {
 		tmuxWindow = rig.symbol + "-harness:4"
+	} else if rig.symbol == "firo" {
+		tmuxWindow = rig.symbol + "-harness:4"
 	}
 	return exec.Command("tmux", "send-keys", "-t", tmuxWindow, "./mine-alpha 1", "C-m").Run()
 }
