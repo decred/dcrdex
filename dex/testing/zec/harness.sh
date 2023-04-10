@@ -316,18 +316,20 @@ sleep 1
 
 tmux send-keys -t $SESSION:4 "./alpha z_importwallet ${SOURCE_DIR}/alphawallet ${DONE}" C-m\; ${WAIT}
 tmux send-keys -t $SESSION:4 "./beta z_importwallet ${SOURCE_DIR}/betawallet ${DONE}" C-m\; ${WAIT}
+tmux send-keys -t $SESSION:4 "./delta z_importwallet ${SOURCE_DIR}/deltawallet ${DONE}" C-m\; ${WAIT}
+tmux send-keys -t $SESSION:4 "./gamma z_importwallet ${SOURCE_DIR}/gammawallet ${DONE}" C-m\; ${WAIT}
 
 echo "Generating 400 blocks for alpha"
 tmux send-keys -t $SESSION:4 "./alpha generate 400${DONE}" C-m\; ${WAIT}
 
-#################################################################################
+################################################################################
 # Send gamma and delta some coin
 ################################################################################
 
 ALPHA_ADDR="tmEgW8c44RQQfft9FHXnqGp8XEcQQSRcUXD"
 BETA_ADDR="tmSog4freWuq1aC13yf1996fy4qXPmv3GTB"
-DELTA_ADDR=`./delta getnewaddress`
-GAMMA_ADDR=`./gamma getnewaddress`
+DELTA_ADDR="tmYBxRStK3QCFeML4qJmzuvFCR9Kob82bi8"
+GAMMA_ADDR="tmEWZVKveNfnrdmkgizFWBtD18bnxT1NYFc"
 
 # Send the lazy wallets some dough.
 echo "Sending 174 ZEC to beta in 8 blocks"
@@ -340,6 +342,11 @@ done
 
 tmux send-keys -t $SESSION:4 "./mine-alpha 2${DONE}" C-m\; ${WAIT}
 
+tmux new-window -t $SESSION:5 -n 'miner' $SHELL
+tmux send-keys -t $SESSION:5 "cd ${HARNESS_DIR}" C-m
+tmux send-keys -t $SESSION:5 "watch -n 15 ./mine-alpha 1" C-m
+
 # Reenable history and attach to the control session.
+tmux select-window -t $SESSION:4
 tmux send-keys -t $SESSION:4 "set -o history" C-m
 tmux attach-session -t $SESSION
