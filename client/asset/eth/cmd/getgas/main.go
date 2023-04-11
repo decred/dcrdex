@@ -1,8 +1,6 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
-//go:build lgpl
-
 package main
 
 import (
@@ -36,8 +34,11 @@ func mainErr() error {
 	defaultCredsPath := filepath.Join(u.HomeDir, "ethtest", "getgas-credentials.json")
 
 	var maxSwaps, contractVerI int
-	var token, credentialsPath string
-	var useTestnet, useMainnet, useSimnet, trace, debug bool
+	var token, credentialsPath, returnAddr string
+	var useTestnet, useMainnet, useSimnet, trace, debug, readCreds, fundingReq bool
+	flag.BoolVar(&readCreds, "readcreds", false, "does not run gas estimates. read the credentials file and print the address")
+	flag.BoolVar(&fundingReq, "fundingrequired", false, "does not run gas estimates. calculate the funding required by the wallet to get estimates")
+	flag.StringVar(&returnAddr, "return", "", "does not run gas estimates. return ethereum funds to supplied address")
 	flag.BoolVar(&useMainnet, "mainnet", false, "use mainnet")
 	flag.BoolVar(&useTestnet, "testnet", false, "use testnet")
 	flag.BoolVar(&useSimnet, "simnet", false, "use simnet")
@@ -63,6 +64,18 @@ func mainErr() error {
 	if useTestnet {
 		net = dex.Testnet
 	}
+
+	if readCreds {
+		addr, provider, err := eth.GetGas.ReadCredentials(credentialsPath, net)
+		if err != nil {
+			return err
+		}
+		fmt.Println("Credentials successfully parsed")
+		fmt.Println("Address:", addr)
+		fmt.Println("Provider:", provider)
+		return nil
+	}
+
 	if maxSwaps < 2 {
 		return fmt.Errorf("n cannot be < 2")
 	}
@@ -82,5 +95,12 @@ func mainErr() error {
 
 	log := dex.StdOutLogger("GG", logLvl)
 
-	return eth.GetGasEstimates(ctx, net, assetID, contractVer, maxSwaps, credentialsPath, log)
+	switch {
+	case fundingReq:
+		return eth.GetGas.EstimateFunding(ctx, net, assetID, contractVer, maxSwaps, credentialsPath, log)
+	case returnAddr != "":
+		return eth.GetGas.ReturnETH(ctx, credentialsPath, returnAddr, net, log)
+	default:
+		return eth.GetGas.Estimate(ctx, net, assetID, contractVer, maxSwaps, credentialsPath, log)
+	}
 }

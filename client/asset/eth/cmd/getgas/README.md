@@ -22,11 +22,19 @@ If this is a new asset, you must populate either `dexeth.VersionedGases` or
 }
 ```
 
+- Use the `--readcreds` utility to check the validity of the credentials file and to print the address. e.g. `./getgas --readcreds --mainnet`. 
+
 - Decide the maximum number of swaps you want in the largest initiation transaction, `--n`. Minimum is 2. `getgas` will check initiations with from 1 up to `n` swaps. There is a balance between cost and precision. Using more than 2 generates an average over `n - 1` intiations to calculate the cost of additional swaps (`Gases.SwapAdd`) and redeems (`Gases.RedeemAdd`).
+
+- Use the `--fundingrequired` utility to see what funding is required for the estimate wallet. e.g. `./getgas --fundingrequired --n 3 --token usdc.eth --testnet`.
 
 - If you run `getgas` with insufficient or zero ETH and/or token balance on the seed, no transactions will be sent and you'll get a message indicating the amount of funding needed to run.
 
 - A network **MUST** be specified with the `--mainnet`, `--testnet`, or `--simnet` flag.
+
+- You can return Ethereum from the estimate wallet to a specified address with the `--return` utility, e.g. `./getgas --return d12ab7cf72ccf1f3882ec99ddc53cd415635c3be --mainnet`
+
+-- **DO NOT** send any more token balance that what is suggested by the `--fundingrequired`. Remaining token balance is not returned.
 
 - Use `--help` to see additional options.
 
