@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"net/http"
@@ -10122,11 +10123,11 @@ func (c *Core) fetchDEXLogo(host string) []byte {
 		return nil
 	}
 
-	buf := new(bytes.Buffer)
-	if _, err = buf.ReadFrom(res.Body); err != nil {
+	logoBytes, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	if err != nil {
 		c.log.Errorf("%s: error reading response body: %v", funcName, err)
 		return nil
 	}
 
-	return buf.Bytes()
+	return logoBytes
 }
