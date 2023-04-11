@@ -148,7 +148,7 @@
           </div>
 
           <div class="pt-3">
-            <div class="px-3 pb-3" data-tmpl="makerSwap">
+            <div class="px-3 pb-3 d-hide" data-tmpl="makerSwap">
               <div class="d-inline-block">
                 <div class="d-flex align-items-center justify-content-between">
                   <span class="match-data-label">1. [[[Maker Swap]]] (<span data-tmpl="makerSwapAsset"></span>, <span data-tmpl="makerSwapYou">[[[you]]]</span><span data-tmpl="makerSwapThem">[[[them]]]</span>)</span>
@@ -158,7 +158,7 @@
                 <a target="_blank" class="mono plainlink" data-tmpl="makerSwapCoin"></a>
               </div>
             </div>
-            <div class="px-3 pb-3" data-tmpl="takerSwap">
+            <div class="px-3 pb-3 d-hide" data-tmpl="takerSwap">
               <div class="d-inline-block">
                 <div class="d-flex align-items-center justify-content-between">
                   <span class="match-data-label">2. [[[Taker Swap]]] (<span data-tmpl="takerSwapAsset"></span>, <span data-tmpl="takerSwapYou">[[[you]]]</span><span data-tmpl="takerSwapThem">[[[them]]]</span>)</span>
@@ -168,7 +168,7 @@
                 <a target="_blank" class="mono plainlink" data-tmpl="takerSwapCoin"></a>
               </div>
             </div>
-            <div class="px-3 pb-3" data-tmpl="makerRedeem">
+            <div class="px-3 pb-3 d-hide" data-tmpl="makerRedeem">
               <div class="d-inline-block">
                 <div class="d-flex align-items-center justify-content-between">
                   <span class="match-data-label">3. [[[Maker Redemption]]] (<span data-tmpl="makerRedeemAsset"></span>, <span data-tmpl="makerRedeemYou">[[[you]]]</span><span data-tmpl="makerRedeemThem">[[[them]]]</span>)</span>
@@ -178,7 +178,7 @@
                 <a target="_blank" class="mono plainlink" data-tmpl="makerRedeemCoin"></a>
               </div>
             </div>
-            <div class="px-3 pb-3" data-tmpl="takerRedeem">
+            <div class="px-3 pb-3 d-hide" data-tmpl="takerRedeem">
               <div class="d-inline-block">
                 <div class="d-flex align-items-center justify-content-between">
                   <span class="match-data-label">4. [[[Taker Redemption]]] (<span data-tmpl="takerRedeemAsset"></span>, <span data-tmpl="takerRedeemYou">[[[you]]]</span><span data-tmpl="takerRedeemThem">[[[them]]]</span>)</span>
@@ -188,14 +188,14 @@
                 <a target="_blank" class="mono plainlink" data-tmpl="takerRedeemCoin"></a>
               </div>
             </div>
-            <div class="px-3 pb-3" data-tmpl="refund">
+            <div class="px-3 pb-3 d-hide" data-tmpl="refund">
               <span class="match-data-label red">[[[Refund]]] (<span data-tmpl="refundAsset"></span>, [[[you]]])</span><br>
-              <span data-tmpl="refundPending">&lt;[[[Pending]]]&gt;</span>
-                <a target="_blank" class="mono plainlink" data-tmpl="refundCoin"></a>
+              <span data-tmpl="refundPending"></span>
+              <a target="_blank" class="mono plainlink" data-tmpl="refundCoin"></a>
             </div>
           </div>
         </div>
-      </div>    
+      </div>
     </div>
 
     {{- /* FUNDING COINS */ -}}

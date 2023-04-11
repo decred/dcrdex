@@ -491,12 +491,12 @@ func (m *MetaMatch) MatchOrderUniqueID() []byte {
 
 // MatchIsActive returns false (i.e. the match is inactive) if any: (1) status
 // is MatchConfirmed OR InitSig unset, signaling a cancel order match, which is
-// never active), (2) the match is refunded, or (3) it is revoked and this side
+// never active, (2) the match is refunded, or (3) it is revoked and this side
 // of the match requires no further action like refund or auto-redeem.
 func MatchIsActive(match *order.UserMatch, proof *MatchProof) bool {
 	// MatchComplete only means inactive if: (a) cancel order match or (b) the
 	// redeem request was accepted for trade orders. A cancel order match starts
-	// complete and has no InitSig as their is no swap negotiation.
+	// complete and has no InitSig as there is no swap negotiation.
 	// Unfortunately, an empty Address is not sufficient since taker cancel
 	// matches included the makers Address.
 	if match.Status == order.MatchConfirmed {
