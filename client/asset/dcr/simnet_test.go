@@ -464,8 +464,7 @@ func runTest(t *testing.T, splitTx bool) {
 	mineAlpha()
 	waitNetwork()
 	// Check that the swap has one confirmation.
-	expectSpent := !betaSPV // spv wallets SwapConfirmations will never report their own swap as spent
-	checkConfs(1, expectSpent)
+	checkConfs(1, true)
 	if !blockReported {
 		t.Fatalf("no block reported")
 	}
