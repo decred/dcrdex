@@ -109,6 +109,8 @@ export const ID_SELECT_WALLET_FOR_FEE_PAYMENT = 'SELECT_WALLET_FOR_FEE_PAYMENT'
 export const ID_UNAVAILABLE = 'UNAVAILABLE'
 export const ID_WALLET_SYNC_FINISHING_UP = 'WALLET_SYNC_FINISHING_UP'
 export const ID_CONNECT_WALLET_ERR_MSG = 'CONNECTING_WALLET_ERR_MSG'
+export const ID_REFUND_IMMINENT = 'REFUND_IMMINENT'
+export const ID_REFUND_WILL_HAPPEN_AFTER = 'REFUND_WILL_HAPPEN_AFTER'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -219,7 +221,10 @@ export const enUS: Locale = {
   [ID_EMPTY_DEX_ADDRESS_MSG]: 'DEX address cannot be empty',
   [ID_SELECT_WALLET_FOR_FEE_PAYMENT]: 'Select a valid wallet to post a bond',
   [ID_WALLET_SYNC_FINISHING_UP]: 'finishing up',
-  [ID_CONNECT_WALLET_ERR_MSG]: 'Failed to connect {{ assetName }} wallet: {{ errMsg }}'
+  [ID_CONNECT_WALLET_ERR_MSG]: 'Failed to connect {{ assetName }} wallet: {{ errMsg }}',
+  [ID_TAKER_FOUND_MAKER_REDEMPTION]: 'Redeemed by {{ makerAddr }}',
+  [ID_REFUND_IMMINENT]: 'Will happen in the next few blocks',
+  [ID_REFUND_WILL_HAPPEN_AFTER]: 'Refund will happen after {{ refundAfterTime }}'
 }
 
 export const ptBR: Locale = {
