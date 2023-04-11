@@ -1,3 +1,5 @@
+//go:build harness
+
 package firo
 
 // Regnet tests expect the Firo test harness to be running.

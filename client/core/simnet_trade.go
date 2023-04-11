@@ -41,6 +41,7 @@ import (
 	"decred.org/dcrdex/client/asset/dgb"
 	"decred.org/dcrdex/client/asset/doge"
 	"decred.org/dcrdex/client/asset/eth"
+	"decred.org/dcrdex/client/asset/firo"
 	"decred.org/dcrdex/client/asset/ltc"
 	"decred.org/dcrdex/client/asset/zec"
 	"decred.org/dcrdex/client/comms"
@@ -1525,7 +1526,7 @@ func (hc *harnessCtrl) fund(ctx context.Context, address string, amts []int) err
 func newHarnessCtrl(assetID uint32) *harnessCtrl {
 
 	switch assetID {
-	case dcr.BipID, btc.BipID, ltc.BipID, bch.BipID, doge.BipID, zec.BipID, dgb.BipID:
+	case dcr.BipID, btc.BipID, ltc.BipID, bch.BipID, doge.BipID, firo.BipID, zec.BipID, dgb.BipID:
 		return &harnessCtrl{
 			dir:     filepath.Join(dextestDir, dex.BipIDSymbol(assetID), "harness-ctl"),
 			fundCmd: "./alpha",
@@ -1563,6 +1564,7 @@ var cloneTypes = map[uint32]string{
 	20:  "digibytedRPC",
 	145: "bitcoindRPC", // yes, same as btc
 	3:   "dogecoindRPC",
+	136: "firodRPC",
 	133: "zcashdRPC",
 }
 
@@ -1664,8 +1666,8 @@ func btcCloneWallet(assetID uint32, node string, wt SimWalletType) (*tWallet, er
 	}
 
 	switch assetID {
-	case doge.BipID, zec.BipID:
-	// dogecoind and Zcash don't support > 1 wallet, so gamma and delta
+	case doge.BipID, zec.BipID, firo.BipID:
+	// dogecoind, zcashd and firod don't support > 1 wallet, so gamma and delta
 	// have their own nodes.
 	default:
 		switch node {
@@ -1711,6 +1713,10 @@ func dgbWallet(node string) (*tWallet, error) {
 	return btcCloneWallet(dgb.BipID, node, WTCoreClone)
 }
 
+func firoWallet(node string) (*tWallet, error) {
+	return btcCloneWallet(firo.BipID, node, WTCoreClone)
+}
+
 func zecWallet(node string) (*tWallet, error) {
 	return btcCloneWallet(zec.BipID, node, WTCoreClone)
 }
@@ -1737,6 +1743,8 @@ func (s *simulationTest) newClient(name string, cl *SimClient) (*simulationClien
 			tw, err = dogeWallet(node)
 		case dgb.BipID:
 			tw, err = dgbWallet(node)
+		case firo.BipID:
+			tw, err = firoWallet(node)
 		case zec.BipID:
 			tw, err = zecWallet(node)
 		default:
