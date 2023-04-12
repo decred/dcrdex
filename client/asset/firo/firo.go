@@ -139,7 +139,6 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		LegacyValidateAddressRPC: true,  // use validateaddress to read 'ismine' bool
 		SingularWallet:           true,  // one wallet/node
 		UnlockSpends:             true,  // TODO: Check this after a send.
-		LegacySendToAddr:         true,  // No feerate parameter
 	}
 
 	return btc.BTCCloneWallet(cloneCFG)
