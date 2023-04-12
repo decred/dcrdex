@@ -138,7 +138,8 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		NumericGetRawRPC:         false, // getrawtransaction uses either 0/1 Or true/false
 		LegacyValidateAddressRPC: true,  // use validateaddress to read 'ismine' bool
 		SingularWallet:           true,  // one wallet/node
-		UnlockSpends:             true,  // TODO: Check this after a send.
+		UnlockSpends:             true,  // Check after send
+		//AssetID:                BipID, // Future
 	}
 
 	return btc.BTCCloneWallet(cloneCFG)

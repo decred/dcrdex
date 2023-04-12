@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 SYMBOL="firo"
-FIRO_BIN_DIR="~/firo/bin"
-DAEMON="${FIRO_BIN_DIR}/firod"
-CLI="${FIRO_BIN_DIR}/firo-cli"
+DAEMON="firod"
+CLI="firo-cli"
 RPC_USER="user"
 RPC_PASS="pass"
 ALPHA_LISTEN_PORT="53764"
