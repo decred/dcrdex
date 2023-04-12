@@ -3746,7 +3746,7 @@ func (btc *baseWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sig
 	if utxo == nil {
 		return nil, nil, fmt.Errorf("no utxo found for %s", op)
 	}
-	privKey, err := btc.node.privKeyForAddress(utxo.address)
+	privKey, err := btc.getPrivKeyForAddress(utxo.address)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -5013,7 +5013,7 @@ func (btc *baseWallet) createWitnessSig(tx *wire.MsgTx, idx int, pkScript []byte
 	if err != nil {
 		return nil, nil, err
 	}
-	privKey, err := btc.node.privKeyForAddress(addrStr)
+	privKey, err := btc.getPrivKeyForAddress(addrStr)
 	if err != nil {
 		return nil, nil, err
 	}
