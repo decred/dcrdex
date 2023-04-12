@@ -22,6 +22,9 @@ ETH_ON=$?
 ~/dextest/doge/harness-ctl/alpha getblockchaininfo > /dev/null
 DOGE_ON=$?
 
+~/dextest/firo/harness-ctl/alpha getblockchaininfo > /dev/null
+FIRO_ON=$?
+
 ~/dextest/zec/harness-ctl/alpha getblockchaininfo > /dev/null
 ZEC_ON=$?
 
@@ -59,6 +62,11 @@ fi
 if [ $DOGE_ON -eq 0 ]; then
 	echo configuring doge wallet
 	./dexcctl -p abc -p "" --simnet newwallet 3 dogecoindRPC ~/dextest/doge/alpha/alpha.conf
+fi
+
+if [ $FIRO_ON -eq 0 ]; then
+	echo configuring firo wallet
+	./dexcctl -p abc -p "" --simnet newwallet 3 firodRPC ~/dextest/firo/alpha/alpha.conf
 fi
 
 if [ $ZEC_ON -eq 0 ]; then
