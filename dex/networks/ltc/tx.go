@@ -26,18 +26,23 @@ const (
 
 type decoder struct {
 	buf [8]byte
-	io.Reader
-	tee *bytes.Buffer
+	rd  io.Reader
+	tee *bytes.Buffer // anything read from rd is Written to tee
 }
 
 func newDecoder(r io.Reader) *decoder {
-	return &decoder{Reader: r}
+	return &decoder{rd: r}
 }
 
-func (d *decoder) mirror(b []byte) {
+func (d *decoder) Read(b []byte) (n int, err error) {
+	n, err = d.rd.Read(b)
+	if err != nil {
+		return 0, err
+	}
 	if d.tee != nil {
 		d.tee.Write(b)
 	}
+	return n, nil
 }
 
 func (d *decoder) readByte() (byte, error) {
@@ -45,7 +50,6 @@ func (d *decoder) readByte() (byte, error) {
 	if _, err := io.ReadFull(d, b); err != nil {
 		return 0, err
 	}
-	d.mirror(b)
 	return b[0], nil
 }
 
@@ -54,7 +58,6 @@ func (d *decoder) readUint16() (uint16, error) {
 	if _, err := io.ReadFull(d, b); err != nil {
 		return 0, err
 	}
-	d.mirror(b)
 	return byteOrder.Uint16(b), nil
 }
 
@@ -63,7 +66,6 @@ func (d *decoder) readUint32() (uint32, error) {
 	if _, err := io.ReadFull(d, b); err != nil {
 		return 0, err
 	}
-	d.mirror(b)
 	return byteOrder.Uint32(b), nil
 }
 
@@ -72,7 +74,6 @@ func (d *decoder) readUint64() (uint64, error) {
 	if _, err := io.ReadFull(d, b); err != nil {
 		return 0, err
 	}
-	d.mirror(b)
 	return byteOrder.Uint64(b), nil
 }
 
@@ -82,7 +83,6 @@ func (d *decoder) readOutPoint(op *wire.OutPoint) error {
 	if err != nil {
 		return err
 	}
-	d.mirror(op.Hash[:])
 
 	op.Index, err = d.readUint32()
 	return err
@@ -156,9 +156,6 @@ func (d *decoder) readTxIn(ti *wire.TxIn) error {
 	if err != nil {
 		return err
 	}
-	if d.tee != nil {
-		_ = wire.WriteVarBytes(d.tee, pver, ti.SignatureScript)
-	}
 
 	ti.Sequence, err = d.readUint32()
 	return err
@@ -175,9 +172,6 @@ func (d *decoder) readTxOut(to *wire.TxOut) error {
 	if err != nil {
 		return err
 	}
-	if d.tee != nil {
-		_ = wire.WriteVarBytes(d.tee, pver, pkScript)
-	}
 
 	to.Value = int64(v)
 	to.PkScript = pkScript
@@ -186,11 +180,7 @@ func (d *decoder) readTxOut(to *wire.TxOut) error {
 }
 
 func (d *decoder) discardBytes(n int64) error {
-	w := io.Discard
-	if d.tee != nil {
-		w = d.tee
-	}
-	m, err := io.CopyN(w, d, n)
+	m, err := io.CopyN(io.Discard, d, n)
 	if err != nil {
 		return err
 	}
