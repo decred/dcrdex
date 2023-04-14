@@ -912,18 +912,33 @@ func (w *rpcWallet) Tickets(ctx context.Context) ([]*asset.Ticket, error) {
 			w.log.Errorf("GetTransaction error for ticket %s: %v", h, err)
 			continue
 		}
+		blockHeight := int64(-1)
+		// If the transaction is not yet mined we do not know the block hash.
+		if tx.BlockHash != "" {
+			blkHash, err := chainhash.NewHashFromStr(tx.BlockHash)
+			if err != nil {
+				w.log.Errorf("Invalid block hash %v for ticket %v: %w", tx.BlockHash, h, err)
+				continue
+			}
+			// dcrwallet returns do not include the block height.
+			hdr, err := w.client().GetBlockHeader(ctx, blkHash)
+			if err != nil {
+				w.log.Errorf("GetBlockHeader error for ticket %s: %v", h, err)
+				continue
+			}
+			blockHeight = int64(hdr.Height)
+		}
 		msgTx, err := msgTxFromHex(tx.Hex)
 		if err != nil {
 			w.log.Errorf("Error decoding ticket %s tx hex: %v", h, err)
 			continue
 		}
-
 		if len(msgTx.TxOut) < 1 {
 			w.log.Errorf("No outputs for ticket %s", h)
 			continue
 		}
-
-		feeAmt, _ := dcrutil.NewAmount(tx.Fee)
+		// Fee is always negative.
+		feeAmt, _ := dcrutil.NewAmount(-tx.Fee)
 
 		tickets = append(tickets, &asset.Ticket{
 			Ticket: asset.TicketTransaction{
@@ -931,7 +946,7 @@ func (w *rpcWallet) Tickets(ctx context.Context) ([]*asset.Ticket, error) {
 				TicketPrice: uint64(msgTx.TxOut[0].Value),
 				Fees:        uint64(feeAmt),
 				Stamp:       uint64(tx.Time),
-				BlockHeight: tx.BlockIndex,
+				BlockHeight: blockHeight,
 			},
 			// The walletjson.GetTransactionResult returned from GetTransaction
 			// actually has a TicketStatus string field, but it doesn't appear

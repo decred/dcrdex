@@ -55,6 +55,10 @@ const (
 	startMarketMakingRoute     = "startmarketmaking"
 	stopMarketMakingRoute      = "stopmarketmaking"
 	multiTradeRoute            = "multitrade"
+	stakeStatusRoute           = "stakestatus"
+	setVSPRoute                = "setvsp"
+	purchaseTicketsRoute       = "purchasetickets"
+	setVotingPreferencesRoute  = "setvotingprefs"
 )
 
 const (
@@ -65,6 +69,8 @@ const (
 	canceledOrderStr  = "canceled order %s"
 	logoutStr         = "goodbye"
 	walletStatusStr   = "%s wallet has been %s"
+	setVotePrefsStr   = "vote preferences set"
+	setVSPStr         = "vsp set to %s"
 )
 
 // createResponse creates a msgjson response payload.
@@ -116,10 +122,14 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	walletPeersRoute:           handleWalletPeers,
 	addWalletPeerRoute:         handleAddWalletPeer,
 	removeWalletPeerRoute:      handleRemoveWalletPeer,
-	notificationsRoute:         handleNotificationsRoute,
-	startMarketMakingRoute:     handleStartMarketMakingRoute,
-	stopMarketMakingRoute:      handleStopMarketMakingRoute,
+	notificationsRoute:         handleNotifications,
+	startMarketMakingRoute:     handleStartMarketMaking,
+	stopMarketMakingRoute:      handleStopMarketMaking,
 	multiTradeRoute:            handleMultiTrade,
+	stakeStatusRoute:           handleStakeStatus,
+	setVSPRoute:                handleSetVSP,
+	purchaseTicketsRoute:       handlePurchaseTickets,
+	setVotingPreferencesRoute:  handleSetVotingPreferences,
 }
 
 // handleHelp handles requests for help. Returns general help for all commands
@@ -888,7 +898,7 @@ func handleRemoveWalletPeer(s *RPCServer, params *RawParams) *msgjson.ResponsePa
 	return createResponse(removeWalletPeerRoute, "successfully removed peer", nil)
 }
 
-func handleNotificationsRoute(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+func handleNotifications(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	numNotes, err := parseNotificationsArgs(params)
 	if err != nil {
 		return usage(notificationsRoute, err)
@@ -896,7 +906,7 @@ func handleNotificationsRoute(s *RPCServer, params *RawParams) *msgjson.Response
 
 	notes, err := s.core.Notifications(numNotes)
 	if err != nil {
-		errMsg := fmt.Sprintf("unable to remove wallet peer: %v", err)
+		errMsg := fmt.Sprintf("unable to handle notification: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCNotificationsError, errMsg)
 		return createResponse(notificationsRoute, nil, resErr)
 	}
@@ -921,7 +931,7 @@ func parseMarketMakingConfig(path string) ([]*mm.BotConfig, error) {
 	return configs, nil
 }
 
-func handleStartMarketMakingRoute(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+func handleStartMarketMaking(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	form, err := parseStartMarketMakingArgs(params)
 	if err != nil {
 		return usage(startMarketMakingRoute, err)
@@ -944,7 +954,7 @@ func handleStartMarketMakingRoute(s *RPCServer, params *RawParams) *msgjson.Resp
 	return createResponse(startMarketMakingRoute, "started market making", nil)
 }
 
-func handleStopMarketMakingRoute(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+func handleStopMarketMaking(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	if !s.mm.Running() {
 		errMsg := "market making is not running"
 		resErr := msgjson.NewError(msgjson.RPCStopMarketMakingError, errMsg)
@@ -952,6 +962,70 @@ func handleStopMarketMakingRoute(s *RPCServer, params *RawParams) *msgjson.Respo
 	}
 	s.mm.Stop()
 	return createResponse(stopMarketMakingRoute, "stopped market making", nil)
+}
+
+func handleSetVSP(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	form, err := parseSetVSPArgs(params)
+	if err != nil {
+		return usage(setVSPRoute, err)
+	}
+
+	err = s.core.SetVSP(form.assetID, form.addr)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to set vsp: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCSetVSPError, errMsg)
+		return createResponse(setVSPRoute, nil, resErr)
+	}
+
+	return createResponse(setVSPRoute, fmt.Sprintf(setVSPStr, form.addr), nil)
+}
+
+func handlePurchaseTickets(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	form, err := parsePurchaseTicketsArgs(params)
+	if err != nil {
+		return usage(purchaseTicketsRoute, err)
+	}
+	defer form.appPass.Clear()
+
+	hashes, err := s.core.PurchaseTickets(form.assetID, form.appPass, form.num)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to purchase tickets: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCPurchaseTicketsError, errMsg)
+		return createResponse(purchaseTicketsRoute, nil, resErr)
+	}
+
+	return createResponse(purchaseTicketsRoute, hashes, nil)
+}
+
+func handleStakeStatus(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	assetID, err := parseStakeStatusArgs(params)
+	if err != nil {
+		return usage(stakeStatusRoute, err)
+	}
+	stakeStatus, err := s.core.StakeStatus(assetID)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to get staking status: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCStakeStatusError, errMsg)
+		return createResponse(stakeStatusRoute, nil, resErr)
+	}
+
+	return createResponse(stakeStatusRoute, &stakeStatus, nil)
+}
+
+func handleSetVotingPreferences(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	form, err := parseSetVotingPreferencesArgs(params)
+	if err != nil {
+		return usage(setVotingPreferencesRoute, err)
+	}
+
+	err = s.core.SetVotingPreferences(form.assetID, form.voteChoices, form.tSpendPolicy, form.treasuryPolicy)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to set voting preferences: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCSetVotingPreferencesError, errMsg)
+		return createResponse(setVotingPreferencesRoute, nil, resErr)
+	}
+
+	return createResponse(setVotingPreferencesRoute, "vote preferences set", nil)
 }
 
 // format concatenates thing and tail. If thing is empty, returns an empty
@@ -1385,7 +1459,7 @@ Registration is complete after the fee transaction has been confirmed.`,
 		cmdSummary: `Initiate a rescan of an asset's wallet. This is only supported for certain
 wallet types. Wallet resynchronization may be asynchronous, and the wallet
 state should be consulted for progress.
-	
+
 WARNING: It is ill-advised to initiate a wallet rescan with active orders
 unless as a last ditch effort to get the wallet to recognize a transaction
 needed to complete a swap.`,
@@ -1583,5 +1657,93 @@ needed to complete a swap.`,
 	},
 	stopMarketMakingRoute: {
 		cmdSummary: `Stop market making.`,
+	},
+	stakeStatusRoute: {
+		cmdSummary: `Get stake status. `,
+		argsShort:  `assetID`,
+		argsLong: `Args:
+  assetID (int): The asset's BIP-44 registered coin index.`,
+		returns: `Returns:
+  obj: The staking status.
+    {
+      ticketPrice (uint64): The current ticket price in atoms.
+      vsp (string): The url of the currently set vsp (voting service provider).
+      isRPC (bool): Whether the wallet is an RPC wallet. False indicates
+an spv wallet and enables options to view and set the vsp.
+      tickets (array): An array of ticket objects.
+      [
+        {
+          ticket (obj): Ticket transaction data.
+          {
+            hash (string): The ticket hash as hex.
+            ticketPrice (int): The amount paid for the ticket in atoms.
+            fees (int): The ticket transaction's tx fee.
+            stamp (int): The UNIX time the ticket was purchased.
+            blockHeight (int): The block number the ticket was mined.
+          },
+	  status: (int) The ticket status. 0: unknown, 1: unmined, 2: immature, 3: live,
+4: voted, 5: missed, 6:expired, 7: unspent, 8: revoked.
+          spender (string): The transaction that votes on or revokes the ticket if available.
+       },
+     ],...
+     stances (obj): Voting policies.
+     {
+       voteChoices (array): An array of consensus vote choices.
+       [
+         {
+           agendaid (string): The agenda ID,
+           agendadescription (string): A description of the agenda being voted on.
+           choiceid (string): The current choice.
+           choicedescription (string): A description of the chosen choice.
+         },
+       ],...
+       tSpendPolicy (array): An array of TSpend policies.
+       [
+         {
+           hash (string): The TSpend txid.,
+           policy (string): The policy.
+         },
+       ],...
+       treasuryPolicy (array): An array of treasury policies.
+       [
+         {
+           key (string): The pubkey of the tspend creator.
+           policy (string): The policy.
+         },
+       ],...
+     }
+  }`,
+	},
+	setVSPRoute: {
+		argsShort:  `assetID "addr"`,
+		cmdSummary: `Set a vsp by url.`,
+		argsLong: `Args:
+  assetID (int): The asset's BIP-44 registered coin index.
+  addr (string): The vsp's url.`,
+		returns: `Returns:
+  string: The message "` + fmt.Sprintf(setVSPStr, "[vsp url]") + `"`,
+	},
+	purchaseTicketsRoute: {
+		pwArgsShort: `"appPass"`,
+		argsShort:   `assetID num`,
+		cmdSummary:  `Purchase some tickets.`,
+		pwArgsLong: `Password Args:
+  appPass (string): The DEX client password.`,
+		argsLong: `Args:
+  assetID (int): The asset's BIP-44 registered coin index.
+  num (int): The number of tickets to purchase`,
+		returns: `Returns:
+  array: An array of ticket hashes.`,
+	},
+	setVotingPreferencesRoute: {
+		argsShort:  `assetID (choicesMap) (tSpendPolicyMap) (treasuryPolicyMap)`,
+		cmdSummary: `Cancel an order.`,
+		argsLong: `Args:
+  assetID (int): The asset's BIP-44 registered coin index.
+  choicesMap ({"agendaid": "choiceid", ...}): A map of choices IDs to choice policies.
+  tSpendPolicyMap ({"hash": "policy", ...}): A map of tSpend txids to tSpend policies.
+  treasuryPolicyMap ({"key": "policy", ...}): A map of treasury spender public keys to tSpend policies.`,
+		returns: `Returns:
+  string: The message "` + setVotePrefsStr + `"`,
 	},
 }

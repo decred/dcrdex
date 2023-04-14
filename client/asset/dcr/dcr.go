@@ -5174,7 +5174,7 @@ func (dcr *ExchangeWallet) EstimateSendTxFee(address string, sendAmount, feeRate
 	return finalFee, isValidAddress, nil
 }
 
-func (dcr *ExchangeWallet) isSPV() bool {
+func (dcr *ExchangeWallet) isNative() bool {
 	return dcr.walletType == walletTypeSPV
 }
 
@@ -5186,7 +5186,7 @@ func (dcr *ExchangeWallet) StakeStatus() (*asset.TicketStakingStatus, error) {
 	if err != nil {
 		return nil, err
 	}
-	isRPC := !dcr.isSPV()
+	isRPC := !dcr.isNative()
 	var vspURL string
 	if !isRPC {
 		if v := dcr.vspV.Load(); v != nil {
@@ -5240,7 +5240,7 @@ func vspInfo(url string) (*vspdjson.VspInfoResponse, error) {
 // first. Only non-RPC (internal) wallets can be set. Part of the
 // asset.TicketBuyer interface.
 func (dcr *ExchangeWallet) SetVSP(url string) error {
-	if !dcr.isSPV() {
+	if !dcr.isNative() {
 		return errors.New("cannot set vsp for external wallet")
 	}
 	info, err := vspInfo(url)
@@ -5272,7 +5272,7 @@ func (dcr *ExchangeWallet) PurchaseTickets(n int) ([]string, error) {
 	if !dcr.connected.Load() {
 		return nil, errors.New("not connected, login first")
 	}
-	if !dcr.isSPV() {
+	if !dcr.isNative() {
 		return dcr.wallet.PurchaseTickets(dcr.ctx, n, "", "")
 	}
 	v := dcr.vspV.Load()

@@ -197,6 +197,22 @@ type startMarketMakingForm struct {
 	cfgFilePath string
 }
 
+type setVSPForm struct {
+	assetID uint32
+	addr    string
+}
+
+type purchaseTicketsForm struct {
+	assetID uint32
+	num     int
+	appPass encode.PassBytes
+}
+
+type setVotingPreferencesForm struct {
+	assetID                                   uint32
+	voteChoices, tSpendPolicy, treasuryPolicy map[string]string
+}
+
 // checkNArgs checks that args and pwArgs are the correct length.
 func checkNArgs(params *RawParams, nPWArgs, nArgs []int) error {
 	// For want, one integer indicates an exact match, two are the min and max.
@@ -834,5 +850,93 @@ func parseStartMarketMakingArgs(params *RawParams) (*startMarketMakingForm, erro
 	form := new(startMarketMakingForm)
 	form.appPass = params.PWArgs[0]
 	form.cfgFilePath = params.Args[0]
+	return form, nil
+}
+
+func parseSetVSPArgs(params *RawParams) (*setVSPForm, error) {
+	if err := checkNArgs(params, []int{0}, []int{2}); err != nil {
+		return nil, err
+	}
+	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
+	if err != nil {
+		return nil, fmt.Errorf("invalid assetID: %v", err)
+	}
+	return &setVSPForm{
+		assetID: uint32(assetID),
+		addr:    params.Args[1],
+	}, nil
+}
+
+func parsePurchaseTicketsArgs(params *RawParams) (*purchaseTicketsForm, error) {
+	if err := checkNArgs(params, []int{1}, []int{2}); err != nil {
+		return nil, err
+	}
+	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
+	if err != nil {
+		return nil, fmt.Errorf("invalid assetID: %v", err)
+	}
+	num, err := checkUIntArg(params.Args[1], "num", 32)
+	if err != nil {
+		return nil, fmt.Errorf("invalid num: %v", err)
+	}
+	return &purchaseTicketsForm{
+		assetID: uint32(assetID),
+		num:     int(num),
+		appPass: params.PWArgs[0],
+	}, nil
+}
+
+func parseStakeStatusArgs(params *RawParams) (uint32, error) {
+	if err := checkNArgs(params, []int{0}, []int{1}); err != nil {
+		return 0, err
+	}
+	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
+	if err != nil {
+		return 0, fmt.Errorf("invalid assetID: %v", err)
+	}
+	return uint32(assetID), nil
+}
+
+func parseSetVotingPreferencesArgs(params *RawParams) (*setVotingPreferencesForm, error) {
+	err := checkNArgs(params, []int{0}, []int{1, 4})
+	if err != nil {
+		return nil, err
+	}
+	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
+	if err != nil {
+		return nil, fmt.Errorf("invalid assetID: %v", err)
+	}
+	var p string
+	form := &setVotingPreferencesForm{
+		assetID: uint32(assetID),
+	}
+	switch len(params.Args) {
+	case 4:
+		p = params.Args[3]
+		if p != "" {
+			form.treasuryPolicy, err = checkMapArg(p, "treasury policy")
+			if err != nil {
+				return nil, err
+			}
+		}
+		fallthrough
+	case 3:
+		p = params.Args[2]
+		if p != "" {
+			form.tSpendPolicy, err = checkMapArg(p, "tspend policy")
+			if err != nil {
+				return nil, err
+			}
+		}
+		fallthrough
+	case 2:
+		p = params.Args[1]
+		if p != "" {
+			form.voteChoices, err = checkMapArg(p, "vote choices")
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 	return form, nil
 }
