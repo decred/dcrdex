@@ -77,7 +77,7 @@ DEX client user interface as described in the next section.
 Depending on which assets you wish to use, you have different choices for wallet
 software. There are native/built-in light wallet options for Bitcoin and Decred,
 an external light wallet option for Litecoin, and full-node support for all
-other assets including: Bitcoin, Decred, Litecoin, ZCash, Dogecoin, Bitcoin
+other assets including: Bitcoin, Decred, Litecoin, Zcash, Dogecoin, Bitcoin
 Cash. The following release will include Ethereum support with a native light
 wallet.
 
@@ -95,7 +95,7 @@ wallet.
 3. **Litecoin.** Either [Litecoin Core v0.21.x](https://litecoin.org/) or
    [Electrum-LTC v4.2.x](https://electrum-ltc.org/) are supported.
 4. **Dogecoin.** [Dogecoin Core v1.14.5+](https://dogecoin.com/).
-5. **ZCash.** [zcashd v5.1](https://z.cash/download/).
+5. **Zcash.** [zcashd v5.4.2](https://z.cash/download/).
 6. **Bitcoin Cash.** [Bitcoin Cash Node v24+](https://bitcoincashnode.org/en/)
 
 ### Initial Setup
