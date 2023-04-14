@@ -20,8 +20,8 @@ const (
 	maxTxInPerMessage         = wire.MaxMessagePayload/41 + 1 // wire.maxTxInPerMessage
 	maxTxOutPerMessage        = wire.MaxMessagePayload/       // wire.maxTxOutPerMessage
 		wire.MinTxOutPayload + 1
-	maxWitnessItemsPerInput = 500000 // from wire
-	maxWitnessItemSize      = 11000  // from wire
+	maxWitnessItemsPerInput = 4_000_000 // from wire
+	maxWitnessItemSize      = 4_000_000 // from wire
 )
 
 type decoder struct {
