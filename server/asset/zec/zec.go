@@ -22,15 +22,15 @@ import (
 // Driver implements asset.Driver.
 type Driver struct{}
 
-// Setup creates the ZCash backend. Start the backend with its Run method.
+// Setup creates the Zcash backend. Start the backend with its Run method.
 func (d *Driver) Setup(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
 	return NewBackend(configPath, logger, network)
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for
-// ZCash.
+// Zcash.
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
-	// ZCash and Bitcoin have the same tx hash and output format.
+	// Zcash and Bitcoin have the same tx hash and output format.
 	return (&btc.Driver{}).DecodeCoinID(coinID)
 }
 
@@ -125,7 +125,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 }
 
 // ZECBackend embeds *btc.Backend and re-implements the Contract method to deal
-// with ZCash address translation.
+// with Zcash address translation.
 type ZECBackend struct {
 	*btc.Backend
 	btcParams  *chaincfg.Params
@@ -133,7 +133,7 @@ type ZECBackend struct {
 }
 
 // Contract returns the output from embedded Backend's Contract method, but
-// with the SwapAddress field converted to ZCash encoding.
+// with the SwapAddress field converted to Zcash encoding.
 // TODO: Drop this in favor of an AddressEncoder field in the
 // BackendCloneConfig.
 func (be *ZECBackend) Contract(coinID []byte, redeemScript []byte) (*asset.Contract, error) { // Contract.SwapAddress

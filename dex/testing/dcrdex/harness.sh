@@ -163,7 +163,7 @@ if [ $ZEC_ON -eq 0 ]; then
             "epochDuration": ${EPOCH_DURATION},
             "marketBuyBuffer": 1.2
 EOF
-else echo "WARNING: ZCash is not running. Configuring dcrdex markets without ZEC."
+else echo "WARNING: Zcash is not running. Configuring dcrdex markets without ZEC."
 fi
 
 if [ $DGB_ON -eq 0 ]; then

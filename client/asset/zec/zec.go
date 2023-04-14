@@ -52,12 +52,12 @@ var (
 		{
 			Key:         "rpcuser",
 			DisplayName: "JSON-RPC Username",
-			Description: "ZCash's 'rpcuser' setting",
+			Description: "Zcash's 'rpcuser' setting",
 		},
 		{
 			Key:         "rpcpassword",
 			DisplayName: "JSON-RPC Password",
-			Description: "ZCash's 'rpcpassword' setting",
+			Description: "Zcash's 'rpcpassword' setting",
 			NoEcho:      true,
 		},
 		{
@@ -73,7 +73,7 @@ var (
 		{
 			Key:          fallbackFeeKey,
 			DisplayName:  "Fallback fee rate",
-			Description:  "ZCash's 'fallbackfee' rate. Units: ZEC/kB",
+			Description:  "Zcash's 'fallbackfee' rate. Units: ZEC/kB",
 			DefaultValue: defaultFee * 1000 / 1e8,
 		},
 		{
@@ -95,9 +95,9 @@ var (
 			IsBoolean: true,
 		},
 	}
-	// WalletInfo defines some general information about a ZCash wallet.
+	// WalletInfo defines some general information about a Zcash wallet.
 	WalletInfo = &asset.WalletInfo{
-		Name:              "ZCash",
+		Name:              "Zcash",
 		Version:           version,
 		SupportedVersions: []uint32{version},
 		UnitInfo:          dexzec.UnitInfo,
@@ -125,9 +125,9 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Ne
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for
-// ZCash.
+// Zcash.
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
-	// ZCash and Bitcoin have the same tx hash and output format.
+	// Zcash and Bitcoin have the same tx hash and output format.
 	return (&btc.Driver{}).DecodeCoinID(coinID)
 }
 
@@ -255,13 +255,13 @@ func transparentAddress(c rpcCaller, addrParams *dexzec.AddressParams, btcParams
 	return dexzec.DecodeAddress(receivers.Transparent, addrParams, btcParams)
 }
 
-// connect is ZCash's BTCCloneCFG.ConnectFunc. Ensures that accounts are set
+// connect is Zcash's BTCCloneCFG.ConnectFunc. Ensures that accounts are set
 // up correctly.
 func connect(c rpcCaller) error {
 	// Make sure we have zeroth and first account or are able to create them.
 	accts, err := zListAccounts(c)
 	if err != nil {
-		return fmt.Errorf("error listing ZCash accounts: %w", err)
+		return fmt.Errorf("error listing Zcash accounts: %w", err)
 	}
 
 	createAccount := func(n uint32) error {
@@ -297,9 +297,9 @@ func zecTx(tx *wire.MsgTx) *dexzec.Tx {
 	return dexzec.NewTxFromMsgTx(tx, dexzec.MaxExpiryHeight)
 }
 
-// estimateFee uses ZCash's estimatefee RPC, since estimatesmartfee
+// estimateFee uses Zcash's estimatefee RPC, since estimatesmartfee
 // is not implemented.
-// ZCash's fee estimation is pretty crappy. Full nodes can take hours to
+// Zcash's fee estimation is pretty crappy. Full nodes can take hours to
 // get up to speed, and forget about simnet.
 // See https://github.com/zcash/zcash/issues/2552
 func estimateFee(ctx context.Context, node btc.RawRequester, confTarget uint64) (uint64, error) {
@@ -319,7 +319,7 @@ func estimateFee(ctx context.Context, node btc.RawRequester, confTarget uint64) 
 	return uint64(math.Round(feeRate * 1e5)), nil
 }
 
-// signTx signs the transaction input with ZCash's BLAKE-2B sighash digest.
+// signTx signs the transaction input with Zcash's BLAKE-2B sighash digest.
 // Won't work with shielded or blended transactions.
 func signTx(btcTx *wire.MsgTx, idx int, pkScript []byte, hashType txscript.SigHashType,
 	key *btcec.PrivateKey, amts []int64, prevScripts [][]byte) ([]byte, error) {

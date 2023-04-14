@@ -152,7 +152,7 @@ func (wc *rpcClient) connect(ctx context.Context, _ *sync.WaitGroup) error {
 	if netVer < wc.minNetworkVersion {
 		return fmt.Errorf("reported node version %d is less than minimum %d", netVer, wc.minNetworkVersion)
 	}
-	// TODO: codeVer is actually asset-dependent. ZCash, for example, is at
+	// TODO: codeVer is actually asset-dependent. Zcash, for example, is at
 	// 170100. So we're just lucking out here, really.
 	if codeVer < minProtocolVersion {
 		return fmt.Errorf("node software out of date. version %d is less than minimum %d", codeVer, minProtocolVersion)
