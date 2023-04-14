@@ -62,7 +62,7 @@ type JoinSplit struct {
 	Old, New uint64
 }
 
-// Tx is a ZCash-adapted MsgTx. Tx will decode any version transaction, but will
+// Tx is a Zcash-adapted MsgTx. Tx will decode any version transaction, but will
 // not save most data for shielded transactions.
 // Tx can only produce tx hashes for unshielded transactions. Tx can only create
 // signature hashes for unshielded version 5 transactions.
@@ -79,7 +79,7 @@ type Tx struct {
 	ValueBalanceOrchard int64
 }
 
-// NewTxFromMsgTx creates a Tx embedding the MsgTx, and adding ZCash-specific
+// NewTxFromMsgTx creates a Tx embedding the MsgTx, and adding Zcash-specific
 // fields.
 func NewTxFromMsgTx(tx *wire.MsgTx, expiryHeight uint32) *Tx {
 	zecTx := &Tx{
@@ -966,7 +966,7 @@ func blake2bHash(data, personalizationKey []byte) (_ [32]byte, err error) {
 	return h, err
 }
 
-// CalcTxSize calculates the size of a ZCash transparent transaction. CalcTxSize
+// CalcTxSize calculates the size of a Zcash transparent transaction. CalcTxSize
 // won't return accurate results for shielded or blended transactions.
 func CalcTxSize(tx *wire.MsgTx) uint64 {
 	return (&Tx{MsgTx: tx}).SerializeSize()
