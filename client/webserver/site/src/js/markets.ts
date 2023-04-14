@@ -690,7 +690,7 @@ export default class MarketsPage extends BasePage {
 
     if (!this.assetsAreSupported().isSupported) return // assets not supported
 
-    if (this.market.dex.tier < 1) return // acct suspended or not registered
+    if (!this.market || this.market.dex.tier < 1) return // acct suspended or not registered
 
     const { base, quote } = this.market
     const hasWallets = base && app().assets[base.id].wallet && quote && app().assets[quote.id].wallet
@@ -909,8 +909,8 @@ export default class MarketsPage extends BasePage {
   }
 
   /*
-   * reportDepthMouse accepts informations about the mouse position on the
-   * chart area.
+   * reportDepthMouse accepts information about the mouse position on the chart
+   * area.
    */
   reportDepthMouse (r: MouseReport) {
     while (this.hovers.length) (this.hovers.shift() as HTMLElement).classList.remove('hover')
@@ -937,9 +937,9 @@ export default class MarketsPage extends BasePage {
   }
 
   /*
-   * reportDepthZoom accepts informations about the current depth chart zoom level.
-   * This information is saved to disk so that the zoom level can be maintained
-   * across reloads.
+   * reportDepthZoom accepts information about the current depth chart zoom
+   * level. This information is saved to disk so that the zoom level can be
+   * maintained across reloads.
    */
   reportDepthZoom (zoom: number) {
     State.storeLocal(State.depthZoomLK, zoom)
@@ -2023,6 +2023,7 @@ export default class MarketsPage extends BasePage {
    * handlePriceUpdate is the handler for the 'spots' notification.
    */
   handlePriceUpdate (note: SpotPriceNote) {
+    if (!this.market) return // This note can arrive before the market is set.
     if (note.host === this.market.dex.host && note.spots[this.market.cfg.name]) {
       this.setCurrMarketPrice()
     }
@@ -2035,6 +2036,7 @@ export default class MarketsPage extends BasePage {
    */
   async handleBondUpdate (note: BondNote) {
     const dexAddr = note.dex
+    if (!this.market) return // This note can arrive before the market is set.
     if (dexAddr !== this.market.dex.host) return
     // If we just finished legacy registration, we need to update the Exchange.
     // TODO: Use tier change notification once available.
@@ -2085,6 +2087,7 @@ export default class MarketsPage extends BasePage {
    */
   handleEpochNote (note: EpochNote) {
     app().log('book', 'handleEpochNote:', note)
+    if (!this.market) return // This note can arrive before the market is set.
     if (note.host !== this.market.dex.host || note.marketID !== this.market.sid) return
     if (this.book) {
       this.book.setEpoch(note.epoch)
