@@ -62,7 +62,7 @@ if [ $DOGE_ON -eq 0 ]; then
 fi
 
 if [ $ZEC_ON -eq 0 ]; then
-	echo configuring zcash wallet
+	echo configuring Zcash wallet
 	./dexcctl -p abc -p "" --simnet newwallet 133 zcashdRPC ~/dextest/zec/alpha/alpha.conf
 fi
 

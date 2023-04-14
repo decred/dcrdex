@@ -12,7 +12,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 )
 
-// Block extends a wire.MsgBlock to specify ZCash specific fields, or in the
+// Block extends a wire.MsgBlock to specify Zcash specific fields, or in the
 // case of the Nonce, a type-variant.
 type Block struct {
 	wire.MsgBlock
@@ -24,7 +24,7 @@ type Block struct {
 	Solution             []byte   // length 1344 on main and testnet, 36 on regtest
 }
 
-// DeserializeBlock deserializes the ZCash-encoded block.
+// DeserializeBlock deserializes the Zcash-encoded block.
 func DeserializeBlock(b []byte) (*Block, error) {
 	zecBlock := &Block{}
 
