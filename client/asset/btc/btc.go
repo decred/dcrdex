@@ -1424,7 +1424,7 @@ type getBlockchainInfoResult struct {
 	InitialBlockDownload *bool `json:"initialblockdownload"`
 	// InitialBlockDownloadComplete will be true if this node has completed its
 	// initial block download and is expected to be synced to the network.
-	// ZCash uses this terminology instead of initialblockdownload.
+	// Zcash uses this terminology instead of initialblockdownload.
 	InitialBlockDownloadComplete *bool `json:"initial_block_download_complete"`
 }
 
@@ -1887,7 +1887,7 @@ func (btc *baseWallet) SingleLotSwapFees(form *asset.PreSwapForm) (fees uint64, 
 	}
 
 	if split {
-		// TODO: The following is not correct for all BTC clones. e.g. zcash has
+		// TODO: The following is not correct for all BTC clones. e.g. Zcash has
 		// a different MinimumTxOverhead (29).
 		if btc.segwit {
 			fees += (dexbtc.MinimumTxOverhead + dexbtc.RedeemP2WPKHInputSize + dexbtc.P2WPKHOutputSize) * bumpedNetRate

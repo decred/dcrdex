@@ -68,7 +68,7 @@ func newTransaction(btc *Backend, txHash, blockHash, lastLookup *chainhash.Hash,
 	}
 }
 
-// JoinSplit represents a ZCash JoinSplit.
+// JoinSplit represents a Zcash JoinSplit.
 // https://zips.z.cash/protocol/canopy.pdf section 4.11
 type JoinSplit struct {
 	// Old = input
@@ -89,7 +89,7 @@ type VerboseTxExtended struct {
 	BlockHash     string          `json:"blockhash,omitempty"`
 	Confirmations uint64          `json:"confirmations,omitempty"`
 
-	// ZCash-specific fields.
+	// Zcash-specific fields.
 
 	VJoinSplit          []*JoinSplit `json:"vjoinsplit"`
 	ValueBalanceSapling int64        `json:"valueBalanceZat"` // Sapling pool
@@ -106,11 +106,11 @@ type VerboseTxExtended struct {
 	// Blocktime int64  `json:"blocktime,omitempty"`
 }
 
-// Currently disabled because the verbose getrawtransaction results for ZCash
+// Currently disabled because the verbose getrawtransaction results for Zcash
 // do not include the valueBalanceOrchard yet.
 // https://github.com/zcash/zcash/pull/5969
-// // ShieldedIO sums the ZCash shielded pool inputs and outputs. Will return
-// // zeros for non-ZCash-protocol transactions.
+// // ShieldedIO sums the Zcash shielded pool inputs and outputs. Will return
+// // zeros for non-Zcash-protocol transactions.
 // func (tx *VerboseTxExtended) ShieldedIO() (in, out uint64) {
 // 	for _, js := range tx.VJoinSplit {
 // 		in += js.New

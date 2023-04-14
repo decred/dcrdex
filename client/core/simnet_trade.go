@@ -1665,7 +1665,7 @@ func btcCloneWallet(assetID uint32, node string, wt SimWalletType) (*tWallet, er
 
 	switch assetID {
 	case doge.BipID, zec.BipID:
-	// dogecoind and zcash don't support > 1 wallet, so gamma and delta
+	// dogecoind and Zcash don't support > 1 wallet, so gamma and delta
 	// have their own nodes.
 	default:
 		switch node {

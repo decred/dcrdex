@@ -110,7 +110,7 @@ var (
 	processes    []*process
 
 	// zecSendMtx prevents sending funds too soon after mining a block and
-	// the harness choosing spent outputs for zcash.
+	// the harness choosing spent outputs for Zcash.
 	zecSendMtx sync.Mutex
 )
 
@@ -198,7 +198,7 @@ func mine(symbol, node string) <-chan *harnessResult {
 		// geth may not include some tx at first because ???. Mine more.
 		n = 4
 	case zec:
-		// zcash has a problem selecting unused utxo for a second when
+		// Zcash has a problem selecting unused utxo for a second when
 		// also mining. https://github.com/zcash/zcash/issues/6045
 		zecSendMtx.Lock()
 		defer func() {

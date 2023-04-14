@@ -18,7 +18,7 @@ type AddressParams struct {
 }
 
 // DecodeAddress decodes an address string into an internal btc address.
-// ZCash uses a double SHA-256 checksum but with a 2-byte address ID, so
+// Zcash uses a double SHA-256 checksum but with a 2-byte address ID, so
 // a little customization is needed.
 // TODO: There also appears to be a bech32 encoding and something called a
 // "unified payment address", but for our use of this function client-side,
@@ -53,7 +53,7 @@ func DecodeAddress(a string, addrParams *AddressParams, btcParams *chaincfg.Para
 	return nil, fmt.Errorf("unknown address type %v", addrID)
 }
 
-// RecodeAddress converts an internal btc address to a ZCash address string.
+// RecodeAddress converts an internal btc address to a Zcash address string.
 func RecodeAddress(addr string, addrParams *AddressParams, btcParams *chaincfg.Params) (string, error) {
 	btcAddr, err := btcutil.DecodeAddress(addr, btcParams)
 	if err != nil {
@@ -63,7 +63,7 @@ func RecodeAddress(addr string, addrParams *AddressParams, btcParams *chaincfg.P
 	return EncodeAddress(btcAddr, addrParams)
 }
 
-// EncodeAddress converts a btcutil.Address from the BTC backend into a ZCash
+// EncodeAddress converts a btcutil.Address from the BTC backend into a Zcash
 // address string.
 func EncodeAddress(btcAddr btcutil.Address, addrParams *AddressParams) (string, error) {
 	switch btcAddr.(type) {

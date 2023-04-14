@@ -37,7 +37,7 @@ var (
 		},
 	}
 
-	// MainNetParams are the clone parameters for mainnet. ZCash,
+	// MainNetParams are the clone parameters for mainnet. Zcash,
 	// like Decred, uses two bytes for their address IDs. We will convert
 	// between address types on the fly and use these spoof parameters
 	// internally.
@@ -63,7 +63,7 @@ var (
 	})
 
 	// MainNetAddressParams are used for string address parsing. We use a
-	// spoofed address internally, since ZCash uses a two-byte address ID
+	// spoofed address internally, since Zcash uses a two-byte address ID
 	// instead of a 1-byte ID.
 	MainNetAddressParams = &AddressParams{
 		ScriptHashAddrID: [2]byte{0x1C, 0xBD},
