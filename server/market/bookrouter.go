@@ -194,20 +194,31 @@ func (s *subscribers) lastSeq() uint64 {
 type msgBook struct {
 	name string
 	// mtx guards orders and epochIdx
-	mtx      sync.RWMutex
-	running  bool
-	orders   map[order.OrderID]*msgjson.BookOrderNote
-	epochIdx int64
-	subs     *subscribers
-	source   BookSource
-	baseID   uint32
-	quoteID  uint32
+	mtx           sync.RWMutex
+	running       bool
+	orders        map[order.OrderID]*msgjson.BookOrderNote
+	recentMatches [][3]int64
+	epochIdx      int64
+	subs          *subscribers
+	source        BookSource
+	baseID        uint32
+	quoteID       uint32
 }
 
 func (book *msgBook) setEpoch(idx int64) {
 	book.mtx.Lock()
 	book.epochIdx = idx
 	book.mtx.Unlock()
+}
+
+func (book *msgBook) addRecentMatches(matches [][3]int64) {
+	book.mtx.Lock()
+	defer book.mtx.Unlock()
+
+	book.recentMatches = append(matches, book.recentMatches...)
+	if len(book.recentMatches) > 100 {
+		book.recentMatches = book.recentMatches[:100]
+	}
 }
 
 func (book *msgBook) epoch() int64 {
@@ -415,6 +426,15 @@ out:
 				stats := sigData.stats
 				spot = sigData.spot
 
+				matchesWithTimestamp := make([][3]int64, 0, len(sigData.matches))
+				for _, match := range sigData.matches {
+					matchesWithTimestamp = append(matchesWithTimestamp, [3]int64{
+						match[0],
+						match[1],
+						endStamp})
+				}
+				book.addRecentMatches(matchesWithTimestamp)
+
 				note = &msgjson.EpochReportNote{
 					MarketID:     book.name,
 					Epoch:        uint64(sigData.epochIdx),
@@ -570,15 +590,20 @@ func (r *BookRouter) msgOrderBook(book *msgBook) *msgjson.OrderBook {
 		ords = append(ords, o)
 	}
 	epochIdx := book.epochIdx // instead of book.epoch() while already locked
+
+	recentMatches := make([][3]int64, len(book.recentMatches))
+	copy(recentMatches, book.recentMatches)
+
 	book.mtx.RUnlock()
 
 	return &msgjson.OrderBook{
-		Seq:          book.subs.lastSeq(),
-		MarketID:     book.name,
-		Epoch:        uint64(epochIdx),
-		Orders:       ords,
-		BaseFeeRate:  r.feeSource.LastRate(book.baseID), // MaxFeeRate applied inside feeSource
-		QuoteFeeRate: r.feeSource.LastRate(book.quoteID),
+		Seq:           book.subs.lastSeq(),
+		MarketID:      book.name,
+		Epoch:         uint64(epochIdx),
+		Orders:        ords,
+		BaseFeeRate:   r.feeSource.LastRate(book.baseID), // MaxFeeRate applied inside feeSource
+		QuoteFeeRate:  r.feeSource.LastRate(book.quoteID),
+		RecentMatches: recentMatches,
 	}
 }
 
