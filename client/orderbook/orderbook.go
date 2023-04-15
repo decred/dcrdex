@@ -247,6 +247,28 @@ func (ob *OrderBook) Reset(snapshot *msgjson.OrderBook) error {
 
 	ob.marketID = snapshot.MarketID
 
+	func() { // Using a function for mutex management with defer.
+		ob.matchSummaryMtx.Lock()
+		defer ob.matchSummaryMtx.Unlock()
+
+		ob.matchesSummary = make([]*MatchSummary, len(snapshot.RecentMatches))
+		for i, match := range snapshot.RecentMatches {
+			rate, qty, ts := match[0], match[1], match[2]
+			sell := true
+			if match[1] < 0 {
+				qty *= -1
+				sell = false
+			}
+
+			ob.matchesSummary[i] = &MatchSummary{
+				Rate:  uint64(rate),
+				Qty:   uint64(qty),
+				Sell:  sell,
+				Stamp: uint64(ts),
+			}
+		}
+	}()
+
 	err := func() error { // Using a function for mutex management with defer.
 		ob.ordersMtx.Lock()
 		defer ob.ordersMtx.Unlock()

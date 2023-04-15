@@ -869,6 +869,9 @@ type OrderBook struct {
 	Orders       []*BookOrderNote `json:"orders"`
 	BaseFeeRate  uint64           `json:"baseFeeRate"`
 	QuoteFeeRate uint64           `json:"quoteFeeRate"`
+	// RecentMatches is [rate, qty, timestamp]. Quantity is signed.
+	// Negative means that the maker was a sell order.
+	RecentMatches [][3]int64 `json:"recentMatches"`
 }
 
 // MatchProofNote is the match_proof notification payload.
