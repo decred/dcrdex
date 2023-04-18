@@ -310,8 +310,6 @@ EOF
 
 # Write dcrdex.conf. The regfeexpub comes from the alpha>server_fees account.
 cat << EOF >> ./dcrdex.conf
-regfeexpub=spubVWKGn9TGzyo7M4b5xubB5UV4joZ5HBMNBmMyGvYEaoZMkSxVG4opckpmQ26E85iHg8KQxrSVTdex56biddqtXBerG9xMN8Dvb3eNQVFFwpE
-regfeeconfirms=1
 pgdbname=${TEST_DB}
 simnet=1
 rpclisten=127.0.0.1:17273
