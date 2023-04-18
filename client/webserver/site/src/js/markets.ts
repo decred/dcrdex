@@ -2869,7 +2869,8 @@ class BalanceWidget {
   /* updateParent updates the side's parent asset balance. */
   updateParent (side: BalanceWidgetElement) {
     const { wallet: { balance }, unitInfo } = app().assets[side.parentID]
-    if (side.parentBal) side.parentBal.textContent = Doc.formatCoinValue(balance.available, unitInfo)
+    // firstChild is the text node set before the img child node in addRow.
+    if (side.parentBal?.firstChild) side.parentBal.firstChild.textContent = Doc.formatCoinValue(balance.available, unitInfo)
   }
 
   /*
