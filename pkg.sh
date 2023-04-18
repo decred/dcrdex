@@ -7,9 +7,10 @@ VER="0.6.0" # pre, beta, rc1, etc.
 META="release" # "release"
 
 export CGO_ENABLED=0
+export GOWORK=off
 
 # if META set, append "+${META}", otherwise nothing.
-LDFLAGS="-s -w -X main.Version=${VER}${META:++${META}}"
+LDFLAGS_BASE="-buildid= -s -w -X main.Version=${VER}${META:++${META}}"
 
 # Build the webpack bundle prior to building the webserver package, which embeds
 # the files. This is checked in for the release branches.
@@ -30,11 +31,11 @@ build_targets (){
     mkdir -p "bin/dexc${FLAVOR}-${OS}-${ARCH}-v${VER}"
 
     pushd client/cmd/dexc
-    GOOS=${OS} GOARCH=${ARCH} go build -trimpath -o "../../../bin/dexc${FLAVOR}-${OS}-${ARCH}-v${VER}" -ldflags "$LDFLAGS"
+    GOOS=${OS} GOARCH=${ARCH} go build -trimpath ${TAGS_DEXC:+-tags ${TAGS_DEXC}} -o "../../../bin/dexc${FLAVOR}-${OS}-${ARCH}-v${VER}/${DEXC_EXE}" -ldflags "${LDFLAGS_DEXC:-${LDFLAGS_BASE}}"
     popd
 
     pushd client/cmd/dexcctl
-    GOOS=${OS} GOARCH=${ARCH} go build -trimpath -o "../../../bin/dexc${FLAVOR}-${OS}-${ARCH}-v${VER}" -ldflags "$LDFLAGS"
+    GOOS=${OS} GOARCH=${ARCH} go build -trimpath -o "../../../bin/dexc${FLAVOR}-${OS}-${ARCH}-v${VER}" -ldflags "${LDFLAGS_BASE}"
     popd
 
     pushd bin
@@ -51,9 +52,12 @@ build_targets (){
 TARGETS="linux/amd64 linux/arm64 windows/amd64 darwin/amd64 darwin/arm64"
 build_targets
 
-# Only windows gets the systray build
+# Only Windows gets the systray build
 TARGETS="windows/amd64"
 FLAVOR="-tray"
+TAGS_DEXC="systray"
+DEXC_EXE="dexc-tray.exe"
+LDFLAGS_DEXC="${LDFLAGS_BASE} -H=windowsgui"
 build_targets
 
 echo "Files embedded in the Go webserver package:"
