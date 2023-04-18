@@ -531,7 +531,9 @@ func (c *Core) rotateBonds(ctx context.Context) {
 
 		wallet, err := c.connectedWallet(acctBondState.bondAssetID)
 		if err != nil {
-			c.log.Errorf("%v wallet not available for bonds: %v", unbip(acctBondState.bondAssetID), err)
+			if acctBondState.targetTier > 0 {
+				c.log.Errorf("%v wallet not available for bonds: %v", unbip(acctBondState.bondAssetID), err)
+			}
 			continue
 		}
 
