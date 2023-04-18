@@ -358,18 +358,18 @@ ordersLoop:
 			var addr string
 			var qty, lots uint64
 			var redeems int
-			if lo.Sell {
+			if lo.Sell { // sell base => redeem acct-based quote
 				addr = lo.Address
 				redeems = int((lo.Quantity - lo.FillAmt) / mktInfo.LotSize)
-			} else {
+			} else { // buy base => offer acct-based quote
 				// address is zeroth coin
 				if len(lo.Coins) != 1 {
 					log.Errorf("rejecting account-based-base-asset order %s that has no coins ¯\\_(ツ)_/¯", lo.ID())
 					continue ordersLoop
 				}
 				addr = string(lo.Coins[0])
-				qty = lo.Quantity
-				lots = qty / mktInfo.LotSize
+				lots = lo.Quantity / mktInfo.LotSize
+				qty = calc.BaseToQuote(lo.Rate, lo.Quantity)
 			}
 			quoteAcctStats.add(addr, qty, lots, redeems)
 		} else if !lo.Sell {
