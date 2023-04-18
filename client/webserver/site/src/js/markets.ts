@@ -85,6 +85,7 @@ const buyBtnClass = 'buygreen-bg'
 const sellBtnClass = 'sellred-bg'
 
 const fiveMinBinKey = '5m'
+const oneHrBinKey = '1h'
 
 const percentFormatter = new Intl.NumberFormat(document.documentElement.lang, {
   minimumFractionDigits: 1,
@@ -595,24 +596,32 @@ export default class MarketsPage extends BasePage {
 
   /* setHighLow calculates the high and low rates over the last 24 hours. */
   setHighLow () {
-    const cache = this.market?.candleCaches[fiveMinBinKey]
-    if (!cache) {
-      for (const s of this.stats) {
-        s.tmpl.high.textContent = '-'
-        s.tmpl.low.textContent = '-'
-      }
-      return
-    }
-
-    // We'll eventually get this data in the spot, but for now, we must set it
-    // from candles.
     let [high, low] = [0, 0]
-    for (let i = cache.candles.length - 1; i >= 0; i--) {
-      const c = cache.candles[i]
-      if (low === 0 || (c.lowRate > 0 && c.lowRate < low)) low = c.lowRate
-      if (c.highRate > high) high = c.highRate
-    }
+    const spot = this.market.cfg.spot
+    // Use spot values for 24 hours high and low rates if it is available. We
+    // will default to setting it from candles if it's not.
+    const lowRateSet = spot && spot.low24 !== undefined && spot.low24 !== 0
+    const highRateSet = spot && spot.high24 !== undefined && spot.high24 !== 0
+    if (lowRateSet && highRateSet) {
+      high = spot.high24
+      low = spot.low24
+    } else {
+      const cache = this.market?.candleCaches[fiveMinBinKey]
+      if (!cache) {
+        for (const s of this.stats) {
+          s.tmpl.high.textContent = '-'
+          s.tmpl.low.textContent = '-'
+        }
+        return
+      }
 
+      // Set high and low rates from candles.
+      for (let i = cache.candles.length - 1; i >= 0; i--) {
+        const c = cache.candles[i]
+        if (low === 0 || (c.lowRate > 0 && c.lowRate < low)) low = c.lowRate
+        if (c.highRate > high) high = c.highRate
+      }
+    }
     const qconv = app().unitInfo(this.market.cfg.quoteid, this.market.dex).conventional.conversionFactor
     for (const s of this.stats) {
       s.tmpl.high.textContent = high > 0 ? fourSigFigs(high / qconv) : '-'
@@ -802,7 +811,8 @@ export default class MarketsPage extends BasePage {
 
     // Check if we already have the fiveMinBin candles cache, if not, request
     // for it first since we use it to determine the 24hour high/low in
-    // this.setHighLow().
+    // this.setHighLow() as a fallback if there is no data for 24hour high/low
+    // in spot.
     const lastCandleDur = State.fetchLocal(State.lastCandleDurationLK)
     const cache = this.market?.candleCaches[fiveMinBinKey]
     if (!cache && lastCandleDur !== fiveMinBinKey) {
@@ -2516,9 +2526,9 @@ export default class MarketsPage extends BasePage {
   }
 
   /* candleDurationSelected sets the candleDur and loads the candles. It will
-  default to the fiveMinBinKey if dur is not valid. */
+  default to the oneHrBinKey if dur is not valid. */
   candleDurationSelected (dur: string) {
-    if (!this.market?.dex?.candleDurs.includes(dur)) dur = fiveMinBinKey
+    if (!this.market?.dex?.candleDurs.includes(dur)) dur = oneHrBinKey
     this.candleDur = dur
     this.loadCandles()
     State.storeLocal(State.lastCandleDurationLK, dur)

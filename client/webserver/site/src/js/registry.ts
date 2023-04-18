@@ -128,6 +128,8 @@ export interface Spot {
   bookVolume: number // Unused?
   change24: number
   vol24: number
+  low24: number
+  high24: number
 }
 
 export interface Asset {
