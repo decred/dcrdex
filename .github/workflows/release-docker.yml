@@ -2,7 +2,8 @@ name: Build and Push Docker Image
 
 on:
   release:
-    types: [created]
+    types: [published]
+  workflow_dispatch:
 
 env:
   DOCKER_CLI_EXPERIMENTAL: enabled
