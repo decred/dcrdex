@@ -1295,9 +1295,7 @@ type ConfigResult struct {
 	// by bond version.
 	BondExpiry uint64 `json:"DEV_bondExpiry"`
 
-	RegFees        map[string]*FeeAsset `json:"regFees"`
-	Fee            uint64               `json:"fee"`            // DEPRECATED
-	RegFeeConfirms uint16               `json:"regfeeconfirms"` // DEPRECATED
+	RegFees map[string]*FeeAsset `json:"regFees"`
 }
 
 // Spot is a snapshot of a market at the end of a match cycle. A slice of Spot
