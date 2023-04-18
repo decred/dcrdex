@@ -77,9 +77,6 @@ type dexConf struct {
 	DBPort            uint16
 	ShowPGConfig      bool
 	MarketsConfPath   string
-	RegFeeXPub        string
-	RegFeeConfirms    int64
-	RegFeeAmount      uint64
 	CancelThreshold   float64
 	FreeCancels       bool
 	MaxUserCancels    uint32
@@ -127,11 +124,6 @@ type flagsData struct {
 	BroadcastTimeout time.Duration `long:"bcasttimeout" description:"The broadcast timeout specifies how long clients have to broadcast an expected transaction when it is their turn to act. Matches without the expected action by this time are revoked and the actor is penalized (default: 12 minutes)."`
 	TxWaitExpiration time.Duration `long:"txwaitexpiration" description:"How long the server will search for a client-reported transaction before responding to the client with an error indicating that it was not found. This should ideally be less than half of swaps BroadcastTimeout to allow for more than one retry of the client's request (default: 2 minutes)."`
 	DEXPrivKeyPath   string        `long:"dexprivkeypath" description:"The path to a file containing the DEX private key for message signing."`
-	// Deprecated fields that specify the Decred-specific registration fee
-	// config. This information is now specified per-asset in markets.json.
-	RegFeeXPub     string `long:"regfeexpub" description:"DEPRECATED - use markets.json instead. The extended public key for deriving Decred addresses to which DEX registration fees should be paid."`
-	RegFeeConfirms int64  `long:"regfeeconfirms" description:"DEPRECATED - use markets.json instead. The number of confirmations required to consider a registration fee paid."`
-	RegFeeAmount   uint64 `long:"regfeeamount" description:"DEPRECATED - use markets.json instead. The registration fee amount in atoms."`
 
 	CancelThreshold   float64 `long:"cancelthresh" description:"Cancellation rate threshold (cancels/all_completed)."`
 	FreeCancels       bool    `long:"freecancels" description:"No cancellation rate enforcement (unlimited cancel orders)."`
@@ -541,9 +533,6 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		DBPass:            cfg.PGPass,
 		ShowPGConfig:      cfg.ShowPGConfig,
 		MarketsConfPath:   cfg.MarketsConfPath,
-		RegFeeAmount:      cfg.RegFeeAmount,
-		RegFeeConfirms:    cfg.RegFeeConfirms,
-		RegFeeXPub:        cfg.RegFeeXPub,
 		CancelThreshold:   cfg.CancelThreshold,
 		MaxUserCancels:    cfg.MaxUserCancels,
 		FreeCancels:       cfg.FreeCancels,
