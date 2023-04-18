@@ -143,10 +143,6 @@ type configResponse struct {
 
 func newConfigResponse(cfg *DexConf, regAssets map[string]*msgjson.FeeAsset, bondAssets map[string]*msgjson.BondAsset,
 	cfgAssets []*msgjson.Asset, cfgMarkets []*msgjson.Market) (*configResponse, error) {
-	dcrAsset := regAssets["dcr"]
-	if dcrAsset == nil {
-		return nil, fmt.Errorf("DCR is required as a fee asset for backward compatibility")
-	}
 
 	configMsg := &msgjson.ConfigResult{
 		APIVersion:       uint16(APIVersion),
@@ -159,9 +155,6 @@ func newConfigResponse(cfg *DexConf, regAssets map[string]*msgjson.FeeAsset, bon
 		BondExpiry:       uint64(dex.BondExpiry(cfg.Network)), // temporary while we figure it out
 		BinSizes:         candles.BinSizes,
 		RegFees:          regAssets,
-
-		RegFeeConfirms: uint16(dcrAsset.Confs), // DEPRECATED - DCR only (V0PURGE)
-		Fee:            dcrAsset.Amt,           // DEPRECATED - DCR only
 	}
 
 	// NOTE/TODO: To include active epoch in the market status objects, we need
