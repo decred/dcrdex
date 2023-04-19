@@ -1340,7 +1340,7 @@ export default class MarketsPage extends BasePage {
   */
   updateMetaOrder (mord: MetaOrder) {
     const { header, details, ord } = mord
-    if (ord.status <= OrderUtil.StatusBooked) header.activeLight.classList.add('active')
+    if (ord.status <= OrderUtil.StatusBooked || OrderUtil.hasActiveMatches(ord)) header.activeLight.classList.add('active')
     else header.activeLight.classList.remove('active')
     details.status.textContent = header.status.textContent = OrderUtil.statusString(ord)
     details.age.textContent = Doc.timeSince(ord.submitTime)
