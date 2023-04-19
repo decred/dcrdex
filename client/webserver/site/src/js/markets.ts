@@ -221,7 +221,7 @@ export default class MarketsPage extends BasePage {
     this.accelerateOrderForm = new AccelerateOrderForm(page.accelerateForm, success)
 
     // Set user's last known candle duration.
-    this.candleDur = State.fetchLocal(State.lastCandleDurationLK)
+    this.candleDur = State.fetchLocal(State.lastCandleDurationLK) || oneHrBinKey
 
     // Setup the register to trade button.
     // TODO: Use dexsettings page?
@@ -886,9 +886,7 @@ export default class MarketsPage extends BasePage {
     ws.request('loadmarket', makeMarket(host, base, quote))
 
     // candlesticks
-    this.candleDur = fiveMinBinKey
     this.loadCandles()
-    this.candleDurationSelected(oneHrBinKey)
 
     this.setLoaderMsgVisibility()
     this.setRegistrationStatusVisibility()
