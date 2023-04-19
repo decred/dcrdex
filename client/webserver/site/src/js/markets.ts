@@ -622,8 +622,10 @@ export default class MarketsPage extends BasePage {
       }
 
       // Set high and low rates from candles.
+      const aDayAgo = new Date().getTime() - 86400000
       for (let i = cache.candles.length - 1; i >= 0; i--) {
         const c = cache.candles[i]
+        if (c.endStamp < aDayAgo) break
         if (low === 0 || (c.lowRate > 0 && c.lowRate < low)) low = c.lowRate
         if (c.highRate > high) high = c.highRate
       }
