@@ -220,6 +220,9 @@ export default class MarketsPage extends BasePage {
     // Do not call cleanTemplates before creating the AccelerateOrderForm
     this.accelerateOrderForm = new AccelerateOrderForm(page.accelerateForm, success)
 
+    // Set user's last known candle duration.
+    this.candleDur = State.fetchLocal(State.lastCandleDurationLK)
+
     // Setup the register to trade button.
     // TODO: Use dexsettings page?
     const registerBttn = Doc.tmplElement(page.notRegistered, 'registerBttn')
@@ -600,14 +603,17 @@ export default class MarketsPage extends BasePage {
     const spot = this.market.cfg.spot
     // Use spot values for 24 hours high and low rates if it is available. We
     // will default to setting it from candles if it's not.
-    const lowRateSet = spot && spot.low24 !== undefined && spot.low24 !== 0
-    const highRateSet = spot && spot.high24 !== undefined && spot.high24 !== 0
-    if (lowRateSet && highRateSet) {
+    if (spot && spot.low24 && spot.high24) {
       high = spot.high24
       low = spot.low24
     } else {
       const cache = this.market?.candleCaches[fiveMinBinKey]
       if (!cache) {
+        if (this.candleDur !== fiveMinBinKey) {
+          this.candleDur = fiveMinBinKey
+          this.requestCandles()
+          return
+        }
         for (const s of this.stats) {
           s.tmpl.high.textContent = '-'
           s.tmpl.low.textContent = '-'
@@ -622,6 +628,7 @@ export default class MarketsPage extends BasePage {
         if (c.highRate > high) high = c.highRate
       }
     }
+
     const qconv = app().unitInfo(this.market.cfg.quoteid, this.market.dex).conventional.conversionFactor
     for (const s of this.stats) {
       s.tmpl.high.textContent = high > 0 ? fourSigFigs(high / qconv) : '-'
@@ -808,22 +815,6 @@ export default class MarketsPage extends BasePage {
       Doc.bind(bttn, 'click', () => this.candleDurationSelected(dur))
       page.durBttnBox.appendChild(bttn)
     }
-
-    // Check if we already have the fiveMinBin candles cache, if not, request
-    // for it first since we use it to determine the 24hour high/low in
-    // this.setHighLow() as a fallback if there is no data for 24hour high/low
-    // in spot.
-    const lastCandleDur = State.fetchLocal(State.lastCandleDurationLK)
-    const cache = this.market?.candleCaches[fiveMinBinKey]
-    if (!cache && lastCandleDur !== fiveMinBinKey) {
-      this.candleDur = fiveMinBinKey
-      this.requestCandles()
-    }
-
-    // The fiveMinBin candles have been requested, so we can set the user's last
-    // known configuration now.
-    this.candleDur = lastCandleDur
-    this.candleDurationSelected(this.candleDur)
   }
 
   /* setMarket sets the currently displayed market. */
@@ -893,6 +884,11 @@ export default class MarketsPage extends BasePage {
 
     // depth chart
     ws.request('loadmarket', makeMarket(host, base, quote))
+
+    // candlesticks
+    this.candleDur = fiveMinBinKey
+    this.loadCandles()
+    this.candleDurationSelected(oneHrBinKey)
 
     this.setLoaderMsgVisibility()
     this.setRegistrationStatusVisibility()
