@@ -610,8 +610,7 @@ export default class MarketsPage extends BasePage {
       const cache = this.market?.candleCaches[fiveMinBinKey]
       if (!cache) {
         if (this.candleDur !== fiveMinBinKey) {
-          this.candleDur = fiveMinBinKey
-          this.requestCandles()
+          this.requestCandles(fiveMinBinKey)
           return
         }
         for (const s of this.stats) {
@@ -2550,8 +2549,10 @@ export default class MarketsPage extends BasePage {
     this.requestCandles()
   }
 
-  /* requestCandles sends the loadcandles request. */
-  requestCandles () {
+  /* requestCandles sends the loadcandles request. It accepts an optional candle
+   * duration which will be requested if it is provided.
+   */
+  requestCandles (candleDur?: string) {
     this.candlesLoading = {
       loaded: () => { /* pass */ },
       timer: window.setTimeout(() => {
@@ -2562,7 +2563,7 @@ export default class MarketsPage extends BasePage {
       }, 10000)
     }
     const { dex, baseCfg, quoteCfg } = this.market
-    ws.request('loadcandles', { host: dex.host, base: baseCfg.id, quote: quoteCfg.id, dur: this.candleDur })
+    ws.request('loadcandles', { host: dex.host, base: baseCfg.id, quote: quoteCfg.id, dur: candleDur || this.candleDur })
   }
 
   /*
