@@ -64,6 +64,13 @@ type endpoint struct {
 	priority uint16
 }
 
+func (ep endpoint) String() string {
+	return ep.url
+}
+
+var _ fmt.Stringer = endpoint{} // compile error if pointer receiver
+var _ fmt.Stringer = (*endpoint)(nil)
+
 type rpcclient struct {
 	net dex.Network
 	log dex.Logger
