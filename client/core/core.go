@@ -1450,15 +1450,6 @@ type Core struct {
 
 	pendingWalletsMtx sync.RWMutex
 	pendingWallets    map[uint32]bool
-
-	mm struct {
-		sync.RWMutex
-		bots  map[uint64]*makerBot
-		cache struct {
-			sync.RWMutex
-			prices map[string]*stampedPrice
-		}
-	}
 }
 
 // New is the constructor for a new Core.
@@ -1558,8 +1549,6 @@ func New(cfg *Config) (*Core, error) {
 		fiatRateSources: make(map[string]*commonRateSource),
 		pendingWallets:  make(map[uint32]bool),
 	}
-	c.mm.bots = make(map[uint64]*makerBot)
-	c.mm.cache.prices = make(map[string]*stampedPrice)
 
 	// Populate the initial user data. User won't include any DEX info yet, as
 	// those are retrieved when Run is called and the core connects to the DEXes.
@@ -2331,7 +2320,6 @@ func (c *Core) User() *User {
 		Initialized:        c.IsInitialized(),
 		SeedGenerationTime: c.seedGenerationTime,
 		FiatRates:          c.fiatConversions(),
-		Bots:               c.bots(),
 	}
 }
 
@@ -4599,9 +4587,6 @@ func (c *Core) Login(pw []byte) error {
 		c.resolveActiveTrades(crypter)
 		c.notify(newLoginNote("Connecting to DEX servers..."))
 		c.initializeDEXConnections(crypter)
-		if err = c.loadBotPrograms(); err != nil {
-			c.log.Errorf("Error loading bot programs: %v", err)
-		}
 
 		c.loggedIn = true
 	}
@@ -5874,7 +5859,6 @@ func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, e
 			RedemptionReserves: redemptionReserves,
 			RefundReserves:     refundReserves,
 			ChangeCoin:         changeID,
-			ProgramID:          form.Program,
 		},
 		Order: ord,
 	}

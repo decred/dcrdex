@@ -611,27 +611,6 @@ func newWalletCreationNote(topic Topic, subject, details string, severity db.Sev
 	}
 }
 
-// BotNote is a note that describes the operation of a automated trading bot.
-type BotNote struct {
-	db.Notification
-	Report *BotReport `json:"report"`
-}
-
-const (
-	TopicBotCreated Topic = "BotCreated"
-	TopicBotStarted Topic = "BotStarted"
-	TopicBotStopped Topic = "BotStopped"
-	TopicBotUpdated Topic = "BotUpdated"
-	TopicBotRetired Topic = "BotRetired"
-)
-
-func newBotNote(topic Topic, subject, details string, severity db.Severity, report *BotReport) *BotNote {
-	return &BotNote{
-		Notification: db.NewNotification(NoteTypeBot, topic, subject, details, severity),
-		Report:       report,
-	}
-}
-
 // LoginNote is a notification with the recent login status.
 type LoginNote struct {
 	db.Notification

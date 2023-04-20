@@ -587,22 +587,6 @@ func (tdb *TDB) Backup() error {
 
 func (tdb *TDB) AckNotification(id []byte) error { return nil }
 
-func (tdb *TDB) SaveBotProgram(pgm *db.BotProgram) (pgmID uint64, err error) {
-	return 1, nil
-}
-
-func (tdb *TDB) UpdateBotProgram(pgmID uint64, pgm *db.BotProgram) error {
-	return nil
-}
-
-func (tdb *TDB) RetireBotProgram(pgmID uint64) error {
-	return nil
-}
-
-func (tdb *TDB) ActiveBotPrograms() (map[uint64]*db.BotProgram, error) {
-	return nil, nil
-}
-
 type tCoin struct {
 	id []byte
 
@@ -1303,8 +1287,6 @@ func newTestRig() *testRig {
 		acct:    acct,
 		crypter: crypter,
 	}
-	rig.core.mm.bots = make(map[uint64]*makerBot)
-	rig.core.mm.cache.prices = make(map[string]*stampedPrice)
 
 	rig.core.InitializeClient(tPW, nil)
 

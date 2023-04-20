@@ -145,12 +145,6 @@ type clientCore interface {
 	EstimateSendTxFee(address string, assetID uint32, value uint64, subtract bool) (fee uint64, isValidAddress bool, err error)
 	ValidateAddress(address string, assetID uint32) (bool, error)
 	DeleteArchivedRecordsWithBackup(olderThan *time.Time, saveMatchesToFile, saveOrdersToFile bool) (string, int, error)
-	CreateBot(pw []byte, botType string, pgm *core.MakerProgram) (uint64, error)
-	StartBot(pw []byte, pgmID uint64) error
-	StopBot(pgmID uint64) error
-	UpdateBotProgram(pgmID uint64, pgm *core.MakerProgram) error
-	RetireBot(pgmID uint64) error
-	MarketReport(host string, baseID, quoteID uint32) (*core.MarketReport, error)
 	WalletPeers(assetID uint32) ([]*asset.WalletPeer, error)
 	AddWalletPeer(assetID uint32, addr string) error
 	RemoveWalletPeer(assetID uint32, addr string) error
@@ -362,9 +356,6 @@ func New(cfg *Config) (*WebServer, error) {
 					webAuth.Get(homeRoute, s.handleHome)
 					webAuth.Get(marketsRoute, s.handleMarkets)
 					webAuth.With(dexHostCtx).Get("/dexsettings/{host}", s.handleDexSettings)
-					if s.experimental {
-						webAuth.Get(marketMakerRoute, s.handleMarketMaker)
-					}
 				})
 			})
 
@@ -441,15 +432,6 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/shieldfunds", s.apiShieldFunds)
 			apiAuth.Post("/unshieldfunds", s.apiUnshieldFunds)
 			apiAuth.Post("/sendshielded", s.apiSendShielded)
-
-			if s.experimental {
-				apiAuth.Post("/createbot", s.apiCreateBot)
-				apiAuth.Post("/startbot", s.apiStartBot)
-				apiAuth.Post("/stopbot", s.apiStopBot)
-				apiAuth.Post("/updatebotprogram", s.apiUpdateBotProgram)
-				apiAuth.Post("/retirebot", s.apiRetireBot)
-				apiAuth.Post("/marketreport", s.apiMarketReport)
-			}
 		})
 	})
 
@@ -509,9 +491,6 @@ func (s *WebServer) buildTemplates(lang, siteDir string) error {
 		addTemplate("order", bb, "forms").
 		addTemplate("dexsettings", bb, "forms")
 
-	if s.experimental {
-		s.html.addTemplate("mm", bb, "forms")
-	}
 	return s.html.buildErr()
 }
 

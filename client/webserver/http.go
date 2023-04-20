@@ -127,13 +127,6 @@ func (s *WebServer) handleMarkets(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *WebServer) handleMarketMaker(w http.ResponseWriter, r *http.Request) {
-	cArgs := s.commonArgs(r, "Market Maker | Decred DEX")
-	s.sendTemplate(w, "mm", &marketTmplData{
-		CommonArguments: *cArgs,
-	})
-}
-
 type walletsTmplData struct {
 	CommonArguments
 	Assets []*core.SupportedAsset

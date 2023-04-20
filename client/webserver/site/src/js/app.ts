@@ -8,7 +8,6 @@ import MarketsPage from './markets'
 import OrdersPage from './orders'
 import OrderPage from './order'
 import DexSettingsPage from './dexsettings'
-import MarketMakerPage from './mm'
 import { RateEncodingFactor, StatusExecuted, hasActiveMatches } from './orderutil'
 import { getJSON, postJSON, Errors } from './http'
 import * as ntfn from './notifications'
@@ -71,8 +70,7 @@ const constructors: Record<string, PageClass> = {
   settings: SettingsPage,
   orders: OrdersPage,
   order: OrderPage,
-  dexsettings: DexSettingsPage,
-  mm: MarketMakerPage
+  dexsettings: DexSettingsPage
 }
 
 // Application is the main javascript web application for the Decred DEX client.

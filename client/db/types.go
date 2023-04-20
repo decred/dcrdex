@@ -474,9 +474,6 @@ type OrderMetaData struct {
 	// AccelerationCoins keeps track of all the change coins generated from doing
 	// accelerations on this order.
 	AccelerationCoins []order.CoinID
-	// ProgramID is a program ID used to identify the bot program that owns
-	// this order.
-	ProgramID uint64
 }
 
 // MetaMatch is a match and its metadata.
@@ -1209,13 +1206,6 @@ type OrderFilter struct {
 	// Statuses is a list of acceptable statuses. A zero-length Statuses means
 	// all statuses are accepted.
 	Statuses []order.OrderStatus
-}
-
-// BotProgram is a program for an automated trading bot. Encoding and decoding
-// of the Program field is left to the caller.
-type BotProgram struct {
-	Type    string `json:"type"`
-	Program []byte `json:"program"`
 }
 
 // noteKeySize must be <= 32.
