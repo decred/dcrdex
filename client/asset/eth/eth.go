@@ -6,7 +6,6 @@ package eth
 import (
 	"bytes"
 	"context"
-	goecdsa "crypto/ecdsa"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -599,10 +598,7 @@ func privKeyFromSeed(seed []byte) (pk []byte, zero func(), err error) {
 		extKey.Zero()
 		return nil, nil, err
 	}
-	return pk, func() {
-		extKey.Zero()
-		defer encode.ClearBytes(pk)
-	}, nil
+	return pk, extKey.Zero, nil
 }
 
 // CreateWallet creates a new internal ETH wallet and stores the private key
@@ -4359,7 +4355,8 @@ func waitForConfirmation(ctx context.Context, cl ethFetcher, txHash common.Hash)
 }
 
 // runSimnetMiner starts a gouroutine to generate a simnet block every 5 seconds
-// until the ctx is canceled.
+// until the ctx is canceled. By default, the eth harness will mine a block
+// every 15s. We want to speed it up a bit for e.g. GetGas testing.
 func runSimnetMiner(ctx context.Context, log dex.Logger) {
 	log.Infof("Starting the simnet miner")
 	go func() {
@@ -4410,13 +4407,7 @@ func (getGas) ReadCredentials(credentialsPath string, net dex.Network) (addr, pr
 		return "", "", err
 	}
 
-	publicKey := privateKey.Public()
-	publicKeyECDSA, ok := publicKey.(*goecdsa.PublicKey)
-	if !ok {
-		return "", "", errors.New("error casting public key to ECDSA")
-	}
-
-	addr = crypto.PubkeyToAddress(*publicKeyECDSA).String()
+	addr = crypto.PubkeyToAddress(privateKey.PublicKey).String()
 	return
 }
 
