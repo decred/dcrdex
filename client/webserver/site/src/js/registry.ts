@@ -241,7 +241,6 @@ export interface ConfigOption {
   isBirthdayConfig: boolean
   repeatable?: string
   repeatN?: number
-  noauth: boolean
   regAsset?: number
   required?: boolean
 }

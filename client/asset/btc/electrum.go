@@ -22,11 +22,13 @@ import (
 // ExchangeWalletElectrum is the asset.Wallet for an external Electrum wallet.
 type ExchangeWalletElectrum struct {
 	*baseWallet
+	*authAddOn
 	ew *electrumWallet
 }
 
 var _ asset.Wallet = (*ExchangeWalletElectrum)(nil)
 var _ asset.FeeRater = (*ExchangeWalletElectrum)(nil)
+var _ asset.Authenticator = (*ExchangeWalletElectrum)(nil)
 
 // ElectrumWallet creates a new ExchangeWalletElectrum for the provided
 // configuration, which must contain the necessary details for accessing the
@@ -61,6 +63,7 @@ func ElectrumWallet(cfg *BTCCloneCFG) (*ExchangeWalletElectrum, error) {
 
 	eew := &ExchangeWalletElectrum{
 		baseWallet: btc,
+		authAddOn:  &authAddOn{btc.node},
 		ew:         ew,
 	}
 	// In (*baseWallet).feeRate, use ExchangeWalletElectrum's walletFeeRate

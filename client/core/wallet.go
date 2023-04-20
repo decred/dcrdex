@@ -109,8 +109,14 @@ func (w *xcWallet) Unlock(crypter encrypt.Crypter) error {
 	if !w.connected() {
 		return errWalletNotConnected
 	}
+
+	a, is := w.Wallet.(asset.Authenticator)
+	if !is {
+		return nil
+	}
+
 	if len(w.encPW()) == 0 {
-		if w.Locked() {
+		if a.Locked() {
 			return fmt.Errorf("wallet reporting as locked, but no password has been set")
 		}
 		return nil
@@ -119,7 +125,7 @@ func (w *xcWallet) Unlock(crypter encrypt.Crypter) error {
 	if err != nil {
 		return fmt.Errorf("%s unlockWallet decryption error: %w", unbip(w.AssetID), err)
 	}
-	err = w.Wallet.Unlock(pw) // can be slow - no timeout and NOT in the critical section!
+	err = a.Unlock(pw) // can be slow - no timeout and NOT in the critical section!
 	if err != nil {
 		return err
 	}
@@ -149,8 +155,14 @@ func (w *xcWallet) refreshUnlock() (unlockAttempted bool, err error) {
 	if !w.connected() {
 		return false, errWalletNotConnected
 	}
+
+	a, is := w.Wallet.(asset.Authenticator)
+	if !is {
+		return false, nil
+	}
+
 	// Check if the wallet backend is already unlocked.
-	if !w.Locked() {
+	if !a.Locked() {
 		return false, nil // unlocked
 	}
 
@@ -168,13 +180,14 @@ func (w *xcWallet) refreshUnlock() (unlockAttempted bool, err error) {
 			unbip(w.AssetID))
 	}
 
-	return true, w.Wallet.Unlock(w.pw)
+	return true, a.Unlock(w.pw)
 }
 
 // Lock the wallet. For encrypted wallets (encPW set), this clears the cached
 // decrypted password and attempts to lock the wallet backend.
 func (w *xcWallet) Lock(timeout time.Duration) error {
-	if w.isDisabled() { // wallet is disabled and is locked.
+	a, is := w.Wallet.(asset.Authenticator)
+	if w.isDisabled() || !is { // wallet is disabled and is locked or it's not an authenticator.
 		return nil
 	}
 	if w.parent != nil {
@@ -193,7 +206,7 @@ func (w *xcWallet) Lock(timeout time.Duration) error {
 	w.pw = nil
 	w.mtx.Unlock() // end critical section before actual wallet request
 
-	return runWithTimeout(w.Wallet.Lock, timeout)
+	return runWithTimeout(a.Lock, timeout)
 }
 
 // unlocked will only return true if both the wallet backend is unlocked and we
@@ -204,13 +217,17 @@ func (w *xcWallet) unlocked() bool {
 	if w.isDisabled() {
 		return false
 	}
+	a, is := w.Wallet.(asset.Authenticator)
+	if !is {
+		return w.locallyUnlocked()
+	}
 	if w.parent != nil {
 		return w.parent.unlocked()
 	}
 	if !w.connected() {
 		return false
 	}
-	return w.locallyUnlocked() && !w.Locked()
+	return w.locallyUnlocked() && !a.Locked()
 }
 
 // locallyUnlocked checks whether we think the wallet is unlocked, but without

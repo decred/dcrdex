@@ -154,7 +154,6 @@ var (
 				Description: "Infrastructure providers (e.g. Infura) or local nodes",
 				ConfigOpts:  append(RPCOpts, WalletOpts...),
 				Seeded:      true,
-				NoAuth:      true,
 				GuideLink:   "https://github.com/decred/dcrdex/blob/master/docs/wiki/Ethereum.md",
 			},
 			// MaxSwapsInTx and MaxRedeemsInTx are set in (Wallet).Info, since
@@ -447,6 +446,7 @@ var _ asset.TxFeeEstimator = (*TokenWallet)(nil)
 var _ asset.DynamicSwapOrRedemptionFeeChecker = (*ETHWallet)(nil)
 var _ asset.DynamicSwapOrRedemptionFeeChecker = (*TokenWallet)(nil)
 var _ asset.BotWallet = (*assetWallet)(nil)
+var _ asset.Authenticator = (*ETHWallet)(nil)
 
 type baseWallet struct {
 	// The asset subsystem starts with Connect(ctx). This ctx will be initialized
@@ -2709,16 +2709,8 @@ func (eth *baseWallet) RedemptionAddress() (string, error) {
 	return eth.addr.String(), nil
 }
 
-// TODO: Lock, Unlock, and Locked should probably be part of an optional
-// asset.Authenticator interface that isn't implemented by token wallets.
-// This is easy to accomplish here, but would require substantial updates to
-// client/core.
-// The addition of an ETHWallet type that implements asset.Authenticator would
-// also facilitate the appropriate compartmentalization of our asset.TokenMaster
-// methods, which token wallets also won't need.
-
 // Unlock unlocks the exchange wallet.
-func (eth *baseWallet) Unlock(pw []byte) error {
+func (eth *ETHWallet) Unlock(pw []byte) error {
 	return eth.node.unlock(string(pw))
 }
 
@@ -2727,13 +2719,8 @@ func (eth *ETHWallet) Lock() error {
 	return eth.node.lock()
 }
 
-// Lock does nothing for tokens. See above TODO.
-func (eth *TokenWallet) Lock() error {
-	return nil
-}
-
 // Locked will be true if the wallet is currently locked.
-func (eth *baseWallet) Locked() bool {
+func (eth *ETHWallet) Locked() bool {
 	return eth.node.locked()
 }
 

@@ -326,8 +326,8 @@ export class NewWalletForm {
         break
       }
     }
-    const noWalletPWNeeded = !containsRequired && (walletDef.seeded || Boolean(this.current.asset.token))
-    if (appPwCached && noWalletPWNeeded) {
+    const noWalletPWNeeded = walletDef.noauth || walletDef.seeded || Boolean(this.current.asset.token)
+    if (appPwCached && noWalletPWNeeded && !containsRequired) {
       Doc.show(page.oneBttnBox)
     } else if (noWalletPWNeeded) {
       Doc.show(page.auth)

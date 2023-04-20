@@ -1002,8 +1002,7 @@ function createOption (opt: BaseOption): OrderOption {
     isboolean: false,
     isdate: false,
     disablewhenactive: false,
-    isBirthdayConfig: false,
-    noauth: false
+    isBirthdayConfig: false
   }
 }
 

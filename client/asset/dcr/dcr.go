@@ -661,6 +661,7 @@ var _ asset.Withdrawer = (*ExchangeWallet)(nil)
 var _ asset.LiveReconfigurer = (*ExchangeWallet)(nil)
 var _ asset.TxFeeEstimator = (*ExchangeWallet)(nil)
 var _ asset.Bonder = (*ExchangeWallet)(nil)
+var _ asset.Authenticator = (*ExchangeWallet)(nil)
 
 type block struct {
 	height int64

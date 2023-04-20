@@ -28,6 +28,7 @@ const (
 	WalletTraitRedemptionConfirmer                         // The wallet has a process to confirm a redemption.
 	WalletTraitTxFeeEstimator                              // The wallet can estimate transaction fees.
 	WalletTraitPeerManager                                 // The wallet can manage its peers.
+	WalletTraitAuthenticator                               // The wallet require authentication.
 )
 
 // IsRescanner tests if the WalletTrait has the WalletTraitRescanner bit set.
@@ -96,6 +97,12 @@ func (wt WalletTrait) IsPeerManager() bool {
 	return wt&WalletTraitPeerManager != 0
 }
 
+// IsAuthenticator test if WalletTrait has WalletTraitAuthenticator bit set,
+// which indicates authentication is required by wallet.
+func (wt WalletTrait) IsAuthenticator() bool {
+	return wt&WalletTraitAuthenticator != 0
+}
+
 // DetermineWalletTraits returns the WalletTrait bitset for the provided Wallet.
 func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(Rescanner); is {
@@ -133,6 +140,9 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	}
 	if _, is := w.(PeerManager); is {
 		t |= WalletTraitPeerManager
+	}
+	if _, is := w.(Authenticator); is {
+		t |= WalletTraitAuthenticator
 	}
 	return t
 }
@@ -194,10 +204,9 @@ type WalletDefinition struct {
 	// description for each option. This can be used to request config info from
 	// users e.g. via dynamically generated GUI forms.
 	ConfigOpts []*ConfigOption `json:"configopts"`
-	// NoAuth can be set true to hide the wallet password field during wallet
-	// creation.
-	// TODO: Use an asset.Authenticator interface and WalletTraits to do this
-	// instead.
+	// NoAuth indicates that the wallet does not implement the Authenticator
+	// interface. A better way to check is to use the wallet traits but wallet
+	// construction is presently required to discern traits.
 	NoAuth bool `json:"noauth"`
 	// GuideLink is a link to wallet configuration docs that the user may follow
 	// when creating a new wallet or updating its settings.
@@ -427,12 +436,6 @@ type Wallet interface {
 	// unique addresses and the orders are canceled, the gap limit may become a
 	// hurdle when restoring the wallet.
 	RedemptionAddress() (string, error)
-	// Unlock unlocks the exchange wallet.
-	Unlock(pw []byte) error
-	// Lock locks the exchange wallet.
-	Lock() error
-	// Locked will be true if the wallet is currently locked.
-	Locked() bool
 	// LockTimeExpired returns true if the specified locktime has expired,
 	// making it possible to redeem the locked coins.
 	LockTimeExpired(ctx context.Context, lockTime time.Time) (bool, error)
@@ -463,6 +466,16 @@ type Wallet interface {
 	EstimateRegistrationTxFee(feeRate uint64) uint64
 	// ValidateAddress checks that the provided address is valid.
 	ValidateAddress(address string) bool
+}
+
+// Authenticator is a wallet implementation that require authentication.
+type Authenticator interface {
+	// Unlock unlocks the exchange wallet.
+	Unlock(pw []byte) error
+	// Lock locks the exchange wallet.
+	Lock() error
+	// Locked will be true if the wallet is currently locked.
+	Locked() bool
 }
 
 // TxFeeEstimator is a wallet implementation with fee estimation functionality.
