@@ -24,8 +24,9 @@ const (
 
 	defaultBondAsset = 42 // DCR
 
-	maxBondedMult = 4
-	bondOverlap   = 2
+	maxBondedMult    = 4
+	bondOverlap      = 2
+	bondTickInterval = 20 * time.Second
 )
 
 func cutBond(bonds []*db.Bond, i int) []*db.Bond { // input slice modified
@@ -36,7 +37,7 @@ func cutBond(bonds []*db.Bond, i int) []*db.Bond { // input slice modified
 }
 
 func (c *Core) watchBonds(ctx context.Context) {
-	t := time.NewTicker(20 * time.Second)
+	t := time.NewTicker(bondTickInterval)
 	defer t.Stop()
 
 	for {
@@ -283,8 +284,10 @@ func (c *Core) rotateBonds(ctx context.Context) {
 		for _, bond := range expiredBonds {
 			bondIDStr := fmt.Sprintf("%v (%s)", coinIDString(bond.AssetID, bond.CoinID), unbip(bond.AssetID))
 			if now < int64(bond.LockTime) {
-				c.log.Debugf("Expired bond %v refundable in about %v.",
-					bondIDStr, time.Duration(int64(bond.LockTime)-now)*time.Second)
+				ttr := time.Duration(int64(bond.LockTime)-now) * time.Second
+				if ttr < 15*time.Minute || ((ttr/time.Minute)%30 == 0 && (ttr%time.Minute <= bondTickInterval)) {
+					c.log.Debugf("Expired bond %v refundable in about %v.", bondIDStr, ttr)
+				}
 				continue
 			}
 
