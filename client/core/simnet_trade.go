@@ -1902,7 +1902,7 @@ type notificationReader struct {
 // received.
 func (client *simulationClient) startNotificationReader(ctx context.Context) *notificationReader {
 	n := &notificationReader{
-		feed: client.core.NotificationFeed(),
+		feed: client.core.NotificationFeed().C,
 	}
 
 	// keep notification channel constantly drained to avoid

@@ -20,6 +20,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 )
@@ -132,8 +133,8 @@ func (c *TCore) PostBond(*core.PostBondForm) (*core.PostBondResult, error) {
 func (c *TCore) UpdateBondOptions(form *core.BondOptionsForm) error {
 	return c.bondOptsErr
 }
-func (c *TCore) SyncBook(dex string, base, quote uint32) (core.BookFeed, error) {
-	return &tBookFeed{}, c.syncErr
+func (c *TCore) SyncBook(dex string, base, quote uint32) (*orderbook.OrderBook, core.BookFeed, error) {
+	return nil, &tBookFeed{}, c.syncErr
 }
 func (c *TCore) Trade(appPass []byte, form *core.TradeForm) (order *core.Order, err error) {
 	return c.order, c.tradeErr

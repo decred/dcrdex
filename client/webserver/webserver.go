@@ -119,7 +119,7 @@ type clientCore interface {
 	Trade(pw []byte, form *core.TradeForm) (*core.Order, error)
 	TradeAsync(pw []byte, form *core.TradeForm) (*core.InFlightOrder, error)
 	Cancel(pw []byte, oid dex.Bytes) error
-	NotificationFeed() <-chan core.Notification
+	NotificationFeed() *core.NoteFeed
 	Logout() error
 	Orders(*core.OrderFilter) ([]*core.Order, error)
 	Order(oid dex.Bytes) (*core.Order, error)
@@ -718,9 +718,11 @@ func (s *WebServer) isPasswordCached(r *http.Request) bool {
 // websocket clients.
 func (s *WebServer) readNotifications(ctx context.Context) {
 	ch := s.core.NotificationFeed()
+	defer ch.ReturnFeed()
+
 	for {
 		select {
-		case n := <-ch:
+		case n := <-ch.C:
 			s.wsServer.Notify(notifyRoute, n)
 		case <-ctx.Done():
 			return

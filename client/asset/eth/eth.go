@@ -445,7 +445,6 @@ var _ asset.TxFeeEstimator = (*ETHWallet)(nil)
 var _ asset.TxFeeEstimator = (*TokenWallet)(nil)
 var _ asset.DynamicSwapper = (*ETHWallet)(nil)
 var _ asset.DynamicSwapper = (*TokenWallet)(nil)
-var _ asset.BotWallet = (*assetWallet)(nil)
 var _ asset.Authenticator = (*ETHWallet)(nil)
 
 type baseWallet struct {
@@ -1274,15 +1273,13 @@ func (w *assetWallet) preSwap(req *asset.PreSwapForm, feeWallet *assetWallet) (*
 	}, nil
 }
 
-// SingleLotSwapFees is a fallback for PreSwap that uses estimation when funds
-// aren't available. The returned fees are the RealisticWorstCase. The Lots
-// field of the PreSwapForm is ignored and assumed to be a single lot.
-func (w *assetWallet) SingleLotSwapFees(form *asset.PreSwapForm) (fees uint64, err error) {
-	g := w.gases(form.Version)
+// SingleLotSwapFees returns the fees for a swap transaction for a single lot.
+func (w *assetWallet) SingleLotSwapFees(version uint32, feeSuggestion uint64, _ map[string]string) (fees uint64, err error) {
+	g := w.gases(version)
 	if g == nil {
-		return 0, fmt.Errorf("no gases known for %d version %d", w.assetID, form.Version)
+		return 0, fmt.Errorf("no gases known for %d version %d", w.assetID, version)
 	}
-	return g.Swap * form.FeeSuggestion, nil
+	return g.Swap * feeSuggestion, nil
 }
 
 // estimateSwap prepares an *asset.SwapEstimate. The estimate does not include
@@ -1386,15 +1383,13 @@ func (w *assetWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, err
 	}, nil
 }
 
-// SingleLotRedeemFees is a fallback for PreRedeem that uses estimation when
-// funds aren't available. The returned fees are the RealisticWorstCase.  The
-// Lots field of the PreSwapForm is ignored and assumed to be a single lot.
-func (w *assetWallet) SingleLotRedeemFees(form *asset.PreRedeemForm) (fees uint64, err error) {
-	g := w.gases(form.Version)
+// SingleLotRedeemFees returns the fees for a redeem transaction for a single lot.
+func (w *assetWallet) SingleLotRedeemFees(version uint32, feeSuggestion uint64, options map[string]string) (fees uint64, err error) {
+	g := w.gases(version)
 	if g == nil {
-		return 0, fmt.Errorf("no gases known for %d version %d", w.assetID, form.Version)
+		return 0, fmt.Errorf("no gases known for %d version %d", w.assetID, version)
 	}
-	return g.Redeem * form.FeeSuggestion, nil
+	return g.Redeem * feeSuggestion, nil
 }
 
 // coin implements the asset.Coin interface for ETH

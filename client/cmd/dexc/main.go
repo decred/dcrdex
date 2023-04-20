@@ -25,6 +25,7 @@ import (
 	_ "decred.org/dcrdex/client/asset/doge" // register doge asset
 	_ "decred.org/dcrdex/client/asset/ltc"  // register ltc asset
 	_ "decred.org/dcrdex/client/asset/zec"  // register zec asset
+	"decred.org/dcrdex/client/mm"
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/rpcserver"
@@ -106,6 +107,16 @@ func runCore() error {
 		return fmt.Errorf("error creating client core: %w", err)
 	}
 
+	var marketMaker *mm.MarketMaker
+	if cfg.Experimental {
+		// TODO: on shutdown, stop market making and wait for trades to be
+		// canceled.
+		marketMaker, err = mm.NewMarketMaker(clientCore, logMaker.Logger("MM"))
+		if err != nil {
+			return fmt.Errorf("error creating market maker: %w", err)
+		}
+	}
+
 	// Catch interrupt signal (e.g. ctrl+c), prompting to shutdown if the user
 	// is logged in, and there are active orders or matches.
 	killChan := make(chan os.Signal, 1)
@@ -161,6 +172,7 @@ func runCore() error {
 		rpcserver.SetLogger(logMaker.Logger("RPC"))
 		rpcCfg := &rpcserver.Config{
 			Core:        clientCore,
+			MarketMaker: marketMaker,
 			Addr:        cfg.RPCAddr,
 			User:        cfg.RPCUser,
 			Pass:        cfg.RPCPass,

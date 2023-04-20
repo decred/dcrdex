@@ -939,7 +939,7 @@ func (c *TCore) Order(dex.Bytes) (*core.Order, error) {
 	return makeCoreOrder(), nil
 }
 
-func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (core.BookFeed, error) {
+func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (*orderbook.OrderBook, core.BookFeed, error) {
 	mktID, _ := dex.MarketName(base, quote)
 	c.mtx.Lock()
 	c.dexAddr = dexAddr
@@ -1070,7 +1070,7 @@ func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (core.BookFeed, err
 		},
 	}
 
-	return c.bookFeed, nil
+	return nil, c.bookFeed, nil
 }
 
 func candle(mkt *core.Market, dur time.Duration, stamp time.Time) *msgjson.Candle {
@@ -1743,7 +1743,11 @@ func (c *TCore) Cancel(pw []byte, oid dex.Bytes) error {
 	return nil
 }
 
-func (c *TCore) NotificationFeed() <-chan core.Notification { return c.noteFeed }
+func (c *TCore) NotificationFeed() *core.NoteFeed {
+	return &core.NoteFeed{
+		C: c.noteFeed,
+	}
+}
 
 func (c *TCore) runEpochs() {
 	epochTick := time.NewTimer(time.Second).C

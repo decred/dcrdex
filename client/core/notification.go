@@ -87,12 +87,28 @@ func (c *Core) notify(n Notification) {
 	c.noteMtx.RUnlock()
 }
 
+// NoteFeed contains a receiving channel for notifications.
+type NoteFeed struct {
+	C      <-chan Notification
+	closer func()
+}
+
+// ReturnFeed should be called when the channel is no longer needed.
+func (c *NoteFeed) ReturnFeed() {
+	if c.closer != nil {
+		c.closer()
+	}
+}
+
 // NotificationFeed returns a new receiving channel for notifications. The
 // channel has capacity 1024, and should be monitored for the lifetime of the
 // Core. Blocking channels are silently ignored.
-func (c *Core) NotificationFeed() <-chan Notification {
-	_, ch := c.notificationFeed()
-	return ch
+func (c *Core) NotificationFeed() *NoteFeed {
+	id, ch := c.notificationFeed()
+	return &NoteFeed{
+		C:      ch,
+		closer: func() { c.returnFeed(id) },
+	}
 }
 
 func (c *Core) notificationFeed() (uint64, <-chan Notification) {

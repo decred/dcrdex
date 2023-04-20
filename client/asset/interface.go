@@ -481,6 +481,10 @@ type Wallet interface {
 	// different CoinID in the returned asset.ConfirmRedemptionStatus as was
 	// used to call the function.
 	ConfirmRedemption(coinID dex.Bytes, redemption *Redemption, feeSuggestion uint64) (*ConfirmRedemptionStatus, error)
+	// SingleLotSwapFees returns the fees for a swap transaction for a single lot.
+	SingleLotSwapFees(version uint32, feeRate uint64, options map[string]string) (uint64, error)
+	// SingleLotRedeemFees returns the fees for a redeem transaction for a single lot.
+	SingleLotRedeemFees(version uint32, feeRate uint64, options map[string]string) (uint64, error)
 }
 
 // Authenticator is a wallet implementation that require authentication.
@@ -814,19 +818,6 @@ type Bond struct {
 	// RedeemTx is a backup transaction that spends the bond output. Normally
 	// the a key index will be used to derive the key when the bond expires.
 	RedeemTx []byte
-}
-
-// BotWallet implements some methods that can help bots function.
-type BotWallet interface {
-	// SingleLotSwapFees is a fallback for PreSwap that uses estimation
-	// when funds aren't available. The returned fees are the
-	// RealisticWorstCase. The Lots field of the PreSwapForm is ignored and
-	// assumed to be a single lot.
-	SingleLotSwapFees(*PreSwapForm) (uint64, error)
-	// SingleLotRedeemFees is a fallback for PreRedeem that uses estimation when
-	// funds aren't available. The returned fees are the RealisticWorstCase. The
-	// Lots field of the PreSwapForm is ignored and assumed to be a single lot.
-	SingleLotRedeemFees(*PreRedeemForm) (uint64, error)
 }
 
 // ShieldedStatus is the balance and address associated with the shielded

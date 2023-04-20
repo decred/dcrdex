@@ -1028,6 +1028,14 @@ func (w *TXCWallet) PreAccelerate(swapCoins, accelerationCoins []dex.Bytes, chan
 	return w.preAccelerateSwapRate, &w.preAccelerateSuggestedRange, nil, nil
 }
 
+func (w *TXCWallet) SingleLotSwapFees(version uint32, feeRate uint64, options map[string]string) (uint64, error) {
+	return 0, nil
+}
+
+func (w *TXCWallet) SingleLotRedeemFees(version uint32, feeRate uint64, options map[string]string) (uint64, error) {
+	return 0, nil
+}
+
 func (w *TXCWallet) AccelerationEstimate(swapCoins, accelerationCoins []dex.Bytes, changeCoin dex.Bytes, requiredForRemainingSwaps, newFeeRate uint64) (uint64, error) {
 	if w.accelerateOrderErr != nil {
 		return 0, w.accelerateOrderErr
@@ -1530,11 +1538,11 @@ func TestBookFeed(t *testing.T) {
 	}
 
 	// Sync to unknown dex
-	_, err = tCore.SyncBook("unknown dex", tUTXOAssetA.ID, tUTXOAssetB.ID)
+	_, _, err = tCore.SyncBook("unknown dex", tUTXOAssetA.ID, tUTXOAssetB.ID)
 	if err == nil {
 		t.Fatalf("no error for unknown dex")
 	}
-	_, err = tCore.SyncBook(tDexHost, tUTXOAssetA.ID, 12345)
+	_, _, err = tCore.SyncBook(tDexHost, tUTXOAssetA.ID, 12345)
 	if err == nil {
 		t.Fatalf("no error for nonsense market")
 	}
@@ -1544,11 +1552,11 @@ func TestBookFeed(t *testing.T) {
 		f(bookMsg)
 		return nil
 	})
-	feed1, err := tCore.SyncBook(tDexHost, tUTXOAssetA.ID, tUTXOAssetB.ID)
+	_, feed1, err := tCore.SyncBook(tDexHost, tUTXOAssetA.ID, tUTXOAssetB.ID)
 	if err != nil {
 		t.Fatalf("SyncBook 1 error: %v", err)
 	}
-	feed2, err := tCore.SyncBook(tDexHost, tUTXOAssetA.ID, tUTXOAssetB.ID)
+	_, feed2, err := tCore.SyncBook(tDexHost, tUTXOAssetA.ID, tUTXOAssetB.ID)
 	if err != nil {
 		t.Fatalf("SyncBook 2 error: %v", err)
 	}
@@ -1986,7 +1994,7 @@ func TestRegister(t *testing.T) {
 	getNotification := func(tag string) interface{} {
 		t.Helper()
 		select {
-		case n := <-ch:
+		case n := <-ch.C:
 			return n
 			// When it works, it should be virtually instant, but I have seen it fail
 			// at 1 millisecond.
@@ -2516,7 +2524,7 @@ func TestAccountNotFoundError(t *testing.T) {
 	// Make sure that an error notification was sent
 	for {
 		select {
-		case note := <-feed:
+		case note := <-feed.C:
 			if note.Topic() == TopicDexAuthError && strings.Contains(note.Details(), expectedErrorMessage) {
 				return
 			}
@@ -2872,7 +2880,7 @@ func trade(t *testing.T, async bool) {
 	wait:
 		for {
 			select {
-			case note := <-ch:
+			case note := <-ch.C:
 				if note.Type() == NoteTypeOrder {
 					n, ok := note.(*OrderNote)
 					if !ok {
@@ -2993,7 +3001,7 @@ func trade(t *testing.T, async bool) {
 wait:
 	for {
 		select {
-		case note := <-ch:
+		case note := <-ch.C:
 			t.Log(note)
 			if note.Topic() == TopicBalanceUpdated {
 				break wait
@@ -3832,7 +3840,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 		close(commitSig) // pretend like the order submission just finished
 
 		select {
-		case note := <-notes:
+		case note := <-notes.C:
 			if note.Topic() != TopicPreimageSent {
 				t.Fatalf("note subject is %v, not %v", note.Topic(), TopicPreimageSent)
 			}
@@ -3912,7 +3920,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 		close(commitSig) // pretend like the order submission just finished
 
 		select {
-		case note := <-notes:
+		case note := <-notes.C:
 			if note.Topic() != TopicPreimageSent {
 				t.Fatalf("note subject is %v, not %v", note.Topic(), TopicPreimageSent)
 			}
@@ -4054,7 +4062,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 		close(commitSig) // pretend like the order submission just finished
 
 		select {
-		case note := <-notes:
+		case note := <-notes.C:
 			if note.Topic() != TopicPreimageSent {
 				t.Fatalf("note subject is %v, not %v", note.Topic(), TopicPreimageSent)
 			}
@@ -4135,7 +4143,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 		close(commitSig) // pretend like the order submission just finished
 
 		select {
-		case note := <-notes:
+		case note := <-notes.C:
 			if note.Topic() != TopicCancelPreimageSent {
 				t.Fatalf("note subject is %v, not %v", note.Topic(), TopicCancelPreimageSent)
 			}
@@ -4304,7 +4312,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 		close(commitSig) // pretend like the order submission just finished
 
 		select {
-		case note := <-notes:
+		case note := <-notes.C:
 			if note.Topic() != TopicCancelPreimageSent {
 				t.Fatalf("note subject is %v, not %v", note.Topic(), TopicCancelPreimageSent)
 			}
@@ -4551,7 +4559,7 @@ func TestTradeTracking(t *testing.T) {
 	drainNotes := func() {
 		for {
 			select {
-			case <-notes:
+			case <-notes.C:
 			default:
 				return
 			}
@@ -4561,7 +4569,7 @@ func TestTradeTracking(t *testing.T) {
 	lastSwapErrorNote := func() Notification {
 		for {
 			select {
-			case note := <-notes:
+			case note := <-notes.C:
 				if note.Severity() == db.ErrorLevel && (note.Topic() == TopicSwapSendError ||
 					note.Topic() == TopicInitError || note.Topic() == TopicReportRedeemError) {
 
@@ -5556,7 +5564,7 @@ func TestNotifications(t *testing.T) {
 	ch := tCore.NotificationFeed()
 	tCore.notify(typedNote)
 	select {
-	case n := <-ch:
+	case n := <-ch.C:
 		dbtest.MustCompareNotifications(t, n.DBNote(), &typedNote.Notification)
 	case <-time.After(time.Second):
 		t.Fatalf("no notification received over the notification channel")
@@ -6874,7 +6882,7 @@ func orderNoteFeed(tCore *Core) (orderNotes chan *OrderNote, done func()) {
 		defer wg.Done()
 		for {
 			select {
-			case n := <-ntfnFeed:
+			case n := <-ntfnFeed.C:
 				if ordNote, ok := n.(*OrderNote); ok {
 					orderNotes <- ordNote
 				}
@@ -8978,7 +8986,7 @@ func TestConfirmRedemption(t *testing.T) {
 			var note *Notification
 			for {
 				select {
-				case n := <-notificationFeed:
+				case n := <-notificationFeed.C:
 					if n.Topic() == TopicRedemptionConfirmed ||
 						n.Topic() == TopicRedemptionResubmitted ||
 						n.Topic() == TopicSwapRefunded ||
@@ -9392,7 +9400,7 @@ func TestWalletSyncing(t *testing.T) {
 out:
 	for {
 		select {
-		case note := <-noteFeed:
+		case note := <-noteFeed.C:
 			walletNote, ok := note.(*WalletStateNote)
 			if !ok {
 				continue

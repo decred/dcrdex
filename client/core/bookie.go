@@ -520,12 +520,7 @@ func (dc *dexConnection) unsubscribe(base, quote uint32) error {
 // SyncBook subscribes to the order book and returns the book and a BookFeed to
 // receive order book updates. The BookFeed must be Close()d when it is no
 // longer in use.
-func (c *Core) SyncBook(host string, base, quote uint32) (BookFeed, error) {
-	_, feed, err := c.syncBook(host, base, quote)
-	return feed, err
-}
-
-func (c *Core) syncBook(host string, base, quote uint32) (*orderbook.OrderBook, BookFeed, error) {
+func (c *Core) SyncBook(host string, base, quote uint32) (*orderbook.OrderBook, BookFeed, error) {
 	c.connMtx.RLock()
 	dc, found := c.conns[host]
 	c.connMtx.RUnlock()

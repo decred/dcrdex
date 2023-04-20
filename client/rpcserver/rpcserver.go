@@ -23,6 +23,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/client/mm"
 	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
@@ -89,6 +90,7 @@ type clientCore interface {
 // interface to the DEX client.
 type RPCServer struct {
 	core        clientCore
+	mm          *mm.MarketMaker
 	mux         *chi.Mux
 	wsServer    *websocket.Server
 	addr        string
@@ -97,6 +99,7 @@ type RPCServer struct {
 	authSHA     [32]byte
 	wg          sync.WaitGroup
 	dexcVersion *SemVersion
+	ctx         context.Context
 }
 
 // genCertPair generates a key/cert pair to the paths provided.
@@ -175,9 +178,10 @@ func (s *RPCServer) handleJSON(w http.ResponseWriter, r *http.Request) {
 	s.parseHTTPRequest(w, req)
 }
 
-// Config holds variables neede to create a new RPC Server.
+// Config holds variables needed to create a new RPC Server.
 type Config struct {
 	Core                        clientCore
+	MarketMaker                 *mm.MarketMaker
 	Addr, User, Pass, Cert, Key string
 	DexcVersion                 *SemVersion
 	CertHosts                   []string
@@ -229,6 +233,7 @@ func New(cfg *Config) (*RPCServer, error) {
 	// Make the server.
 	s := &RPCServer{
 		core:        cfg.Core,
+		mm:          cfg.MarketMaker,
 		mux:         mux,
 		srv:         httpServer,
 		addr:        cfg.Addr,
@@ -265,6 +270,8 @@ func (s *RPCServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	}
 	// Update the listening address in case a :0 was provided.
 	s.addr = listener.Addr().String()
+
+	s.ctx = ctx
 
 	// Close the listener on context cancellation.
 	s.wg.Add(1)

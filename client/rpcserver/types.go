@@ -186,6 +186,11 @@ type addRemovePeerForm struct {
 	address string
 }
 
+type startMarketMakingForm struct {
+	appPass     encode.PassBytes
+	cfgFilePath string
+}
+
 // checkNArgs checks that args and pwArgs are the correct length.
 func checkNArgs(params *RawParams, nPWArgs, nArgs []int) error {
 	// For want, one integer indicates an exact match, two are the min and max.
@@ -755,4 +760,14 @@ func parseNotificationsArgs(params *RawParams) (int, error) {
 		return 0, fmt.Errorf("invalid num: %v", err)
 	}
 	return int(num), nil
+}
+
+func parseStartMarketMakingArgs(params *RawParams) (*startMarketMakingForm, error) {
+	if err := checkNArgs(params, []int{1}, []int{1}); err != nil {
+		return nil, err
+	}
+	form := new(startMarketMakingForm)
+	form.appPass = params.PWArgs[0]
+	form.cfgFilePath = params.Args[0]
+	return form, nil
 }

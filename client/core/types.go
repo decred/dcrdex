@@ -978,6 +978,15 @@ type TradeForm struct {
 	Options map[string]string `json:"options"`
 }
 
+// SingleLotFeesForm is used to determine the fees for a single lot trade.
+type SingleLotFeesForm struct {
+	Host    string            `json:"host"`
+	Base    uint32            `json:"base"`
+	Quote   uint32            `json:"quote"`
+	Sell    bool              `json:"sell"`
+	Options map[string]string `json:"options"`
+}
+
 // marketName is a string ID constructed from the asset IDs.
 func marketName(b, q uint32) string {
 	mkt, _ := dex.MarketName(b, q)
