@@ -35,3 +35,4 @@ dex/testing/btc/harnesschain.tar.gz
 client/asset/btc/electrum/example/server/server
 client/asset/btc/electrum/example/wallet/wallet
 **/testdata/fuzz
+client/asset/eth/cmd/getgas/getgas
