@@ -816,6 +816,9 @@ export default class MarketsPage extends BasePage {
       Doc.bind(bttn, 'click', () => this.candleDurationSelected(dur))
       page.durBttnBox.appendChild(bttn)
     }
+
+    // load candlesticks here since we are resetting page.durBttnBox above.
+    this.loadCandles()
   }
 
   /* setMarket sets the currently displayed market. */
@@ -885,9 +888,6 @@ export default class MarketsPage extends BasePage {
 
     // depth chart
     ws.request('loadmarket', makeMarket(host, base, quote))
-
-    // candlesticks
-    this.loadCandles()
 
     this.setLoaderMsgVisibility()
     this.setRegistrationStatusVisibility()
