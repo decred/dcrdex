@@ -8,6 +8,7 @@
     "watch": "webpack --watch --config webpack/dev.js",
     "analyze": "webpack --config webpack/analyze.js",
     "build": "npm exec tsc && webpack --config webpack/prod.js --progress --color",
+    "build_dev": "npm exec tsc && webpack --config webpack/dev.js --progress --color",
     "lint": "npm exec tsc && npm exec -- eslint src --ext .js --ext .ts",
     "check-types": "npm exec tsc"
   },

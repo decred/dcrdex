@@ -746,10 +746,10 @@ export default class WalletsPage extends BasePage {
 
       if (spot) {
         const convRate = app().conventionalRate(baseid, quoteid, spot.rate, exchanges[host])
-        tmpl.price.textContent = fourSigFigs(convRate)
+        tmpl.price.textContent = Doc.formatFourSigFigs(convRate)
         tmpl.priceQuoteUnit.textContent = quotesymbol.toUpperCase()
         tmpl.priceBaseUnit.textContent = basesymbol.toUpperCase()
-        tmpl.volume.textContent = fourSigFigs(spotVolume(assetID, mkt))
+        tmpl.volume.textContent = Doc.formatFourSigFigs(spotVolume(assetID, mkt))
         tmpl.volumeUnit.textContent = assetID === baseid ? basesymbol.toUpperCase() : quotesymbol.toUpperCase()
       } else Doc.hide(tmpl.priceBox, tmpl.volumeBox)
       Doc.bind(row, 'click', () => app().loadPage('markets', { host, base: baseid, quote: quoteid }))
@@ -1315,18 +1315,4 @@ function assetIsConfigurable (assetID: number) {
   const defs = asset.info.availablewallets
   const zerothOpts = defs[0].configopts
   return defs.length > 1 || (zerothOpts && zerothOpts.length > 0)
-}
-
-const FourSigFigs = new Intl.NumberFormat((navigator.languages as string[]), {
-  maximumSignificantDigits: 4
-})
-
-const OneFractionalDigit = new Intl.NumberFormat((navigator.languages as string[]), {
-  minimumFractionDigits: 1,
-  maximumFractionDigits: 1
-})
-
-function fourSigFigs (v: number) {
-  if (v >= 1000 || Math.round(v) === v) return OneFractionalDigit.format(v)
-  return FourSigFigs.format(v)
 }

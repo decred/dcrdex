@@ -5,6 +5,7 @@ import {
   WalletState,
   PageElement
 } from './registry'
+import { RateEncodingFactor } from './orderutil'
 
 const parser = new window.DOMParser()
 
@@ -27,20 +28,22 @@ const BipIDs: Record<number, string> = {
 
 const BipSymbols = Object.values(BipIDs)
 
+const log10RateEncodingFactor = Math.round(Math.log10(RateEncodingFactor))
+
 const intFormatter = new Intl.NumberFormat((navigator.languages as string[]))
 
-const threeSigFigs = new Intl.NumberFormat((navigator.languages as string[]), {
-  minimumSignificantDigits: 3,
-  maximumSignificantDigits: 3
+const fourSigFigs = new Intl.NumberFormat((navigator.languages as string[]), {
+  minimumSignificantDigits: 4,
+  maximumSignificantDigits: 4
 })
 
-const fiveSigFigs = new Intl.NumberFormat((navigator.languages as string[]), {
-  minimumSignificantDigits: 5,
-  maximumSignificantDigits: 5
+const oneFractionalDigit = new Intl.NumberFormat((navigator.languages as string[]), {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1
 })
 
 /* A cache for formatters used for Doc.formatCoinValue. */
-const decimalFormatters = {}
+const decimalFormatters: Record<number, Intl.NumberFormat> = {}
 
 /*
  * decimalFormatter gets the formatCoinValue formatter for the specified decimal
@@ -51,25 +54,25 @@ function decimalFormatter (prec: number) {
 }
 
 /* A cache for formatters used for Doc.formatFullPrecision. */
-const fullPrecisionFormatters = {}
+const fullPrecisionFormatters: Record<number, Intl.NumberFormat> = {}
 
 /*
  * fullPrecisionFormatter gets the formatFullPrecision formatter for the
  * specified decimal precision.
  */
-function fullPrecisionFormatter (prec: number) {
-  return formatter(fullPrecisionFormatters, prec, prec)
+function fullPrecisionFormatter (prec: number, locales?: string | string[]) {
+  return formatter(fullPrecisionFormatters, prec, prec, locales)
 }
 
 /*
  * formatter gets the formatter from the supplied cache if it already exists,
  * else creates it.
  */
-function formatter (formatters: Record<string, Intl.NumberFormat>, min: number, max: number): Intl.NumberFormat {
+function formatter (formatters: Record<string, Intl.NumberFormat>, min: number, max: number, locales?: string | string[]): Intl.NumberFormat {
   const k = `${min}-${max}`
   let fmt = formatters[k]
   if (!fmt) {
-    fmt = new Intl.NumberFormat((navigator.languages as string[]), {
+    fmt = new Intl.NumberFormat(locales || navigator.languages as string[], {
       minimumFractionDigits: min,
       maximumFractionDigits: max
     })
@@ -259,15 +262,20 @@ export default class Doc {
     return decimalFormatter(prec).format(v)
   }
 
-  static formatThreeSigFigs (v: number): string {
-    if (v >= 1000) return intFormatter.format(Math.round(v))
-    return threeSigFigs.format(v)
+  /*
+   * formatRateFullPrecision formats rate to represent it exactly at rate step
+   * precision, trimming non-effectual zeros if there are any.
+   */
+  static formatRateFullPrecision (encRate: number, bui: UnitInfo, qui: UnitInfo, rateStepEnc: number) {
+    const r = bui.conventional.conversionFactor / qui.conventional.conversionFactor
+    const convRate = encRate * r / RateEncodingFactor
+    const rateStepDigits = log10RateEncodingFactor - Math.floor(Math.log10(rateStepEnc)) -
+      Math.floor(Math.log10(bui.conventional.conversionFactor) - Math.log10(qui.conventional.conversionFactor))
+    return fullPrecisionFormatter(rateStepDigits).format(convRate)
   }
 
-  static formatFiveSigFigs (v: number, prec?: number): string {
-    if (v >= 10000) return intFormatter.format(Math.round(v))
-    else if (v < 1e5) return fullPrecisionFormatter(prec ?? 8 /* rate encoding factor */).format(v)
-    return fiveSigFigs.format(v)
+  static formatFourSigFigs (n: number): string {
+    return formatSigFigsWithFormatters(oneFractionalDigit, fourSigFigs, n)
   }
 
   /*
@@ -290,6 +298,11 @@ export default class Doc {
     const [v] = convertToConventional(vAtomic, unitInfo)
     const value = v * rate
     return fullPrecisionFormatter(prec).format(value)
+  }
+
+  static conventionalRateStep (rateStepEnc: number, baseUnitInfo: UnitInfo, quoteUnitInfo: UnitInfo) {
+    const [qFactor, bFactor] = [quoteUnitInfo.conventional.conversionFactor, baseUnitInfo.conventional.conversionFactor]
+    return rateStepEnc / RateEncodingFactor * (bFactor / qFactor)
   }
 
   /*
@@ -625,4 +638,97 @@ const aMinute = 60000
 function timeMod (t: number, dur: number) {
   const n = Math.floor(t / dur)
   return [n, t - n * dur]
+}
+
+function formatSigFigsWithFormatters (intFormatter: Intl.NumberFormat, sigFigFormatter: Intl.NumberFormat, n: number, maxDecimals?: number, locales?: string | string[]): string {
+  if (n >= 1000) return intFormatter.format(n)
+  const s = sigFigFormatter.format(n)
+  if (typeof maxDecimals !== 'number') return s
+  const fractional = sigFigFormatter.formatToParts(n).filter((part: Intl.NumberFormatPart) => part.type === 'fraction')[0].value
+  if (fractional.length <= maxDecimals) return s
+  return fullPrecisionFormatter(maxDecimals, locales).format(n)
+}
+
+if (process.env.NODE_ENV === 'development') {
+  // Code will only appear in dev build.
+  // https://webpack.js.org/guides/production/
+  window.testFormatFourSigFigs = () => {
+    const tests: [string, string, number | undefined, string][] = [
+      ['en-US', '1.234567', undefined, '1.235'], // sigFigFormatter
+      ['en-US', '1.234567', 2, '1.23'], // decimalFormatter
+      ['en-US', '1234', undefined, '1,234.0'], // oneFractionalDigit
+      ['en-US', '12', undefined, '12.00'], // sigFigFormatter
+      ['fr-FR', '123.45678', undefined, '123,5'], // oneFractionalDigit
+      ['fr-FR', '1234.5', undefined, '1 234,5'], // U+202F for thousands separator
+      // For Arabic, https://www.saitak.com/number is useful, but seems to use
+      // slightly different unicode points and no thousands separator. I think
+      // the Arabic decimal separator is supposed to be more like a point, not
+      // a comma, but Google Chrome uses U+066B (Arabic Decimal Separator),
+      // which looks like a comma to me. ¯\_(ツ)_/¯
+      ['ar-EG', '123.45678', undefined, '١٢٣٫٥'],
+      ['ar-EG', '1234', undefined, '١٬٢٣٤٫٠'],
+      ['ar-EG', '0.12345', 3, '٠٫١٢٣']
+    ]
+
+    // Reproduce the NumberFormats with ONLY our desired language.
+    for (const [code, unformatted, maxDecimals, expected] of tests) {
+      const intFormatter = new Intl.NumberFormat(code, { // oneFractionalDigit
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1
+      })
+      const sigFigFormatter = new Intl.NumberFormat(code, {
+        minimumSignificantDigits: 4,
+        maximumSignificantDigits: 4
+      })
+      for (const k in decimalFormatters) delete decimalFormatters[k] // cleanup
+      for (const k in fullPrecisionFormatters) delete fullPrecisionFormatters[k] // cleanup
+      const s = formatSigFigsWithFormatters(intFormatter, sigFigFormatter, parseFloat(unformatted), maxDecimals, code)
+      if (s !== expected) console.log(`TEST FAILED: f('${code}', ${unformatted}, ${maxDecimals}) => '${s}' != '${expected}'}`)
+      else console.log(`✔️ f('${code}', ${unformatted}, ${maxDecimals}) => ${s} ✔️`)
+    }
+  }
+
+  window.testFormatRateFullPrecision = () => {
+    const tests: [number, number, number, number, string][] = [
+      // Two utxo assets with a conventional rate of 0.15. Conventional rate
+      // step is 100 / 1e8 = 1e-6, so there should be 6 decimal digits.
+      [1.5e7, 100, 1e8, 1e8, '0.150000'],
+      // USDC quote -> utxo base with a rate of $10 / 1 XYZ. USDC has an
+      // conversion factor of 1e6, so $10 encodes to 1e7, 1 XYZ encodes to 1e8,
+      // encoded rate is 1e7 / 1e8 * 1e8 = 1e7, bFactor / qFactor is 1e2.
+      // The conventional rate step is 200 / 1e8 * 1e2 = 2e-4, so using
+      // rateStepDigits, we should get 4 decimal digits.
+      [1e7, 200, 1e6, 1e8, '10.0000'],
+      // Set a rate of 1 atom USDC for 0.01 BTC. That atomic rate will be 1 /
+      // 1e6 = 1e-6. The encoded rate will be 1e-6 * 1e8 = 1e2. As long as our
+      // rate step divides evenly into 100, this should work. The conventional
+      // rate is 1e-6 / 1e-2 = 1e-4, so expect 4 decimal digits.
+      [1e2, 100, 1e6, 1e8, '0.0001'],
+      // DCR-ETH, expect 6 decimals.
+      [1.5e7, 1000, 1e9, 1e8, '0.015000'],
+      [1e6, 1000, 1e9, 1e8, '0.001000'],
+      [1e3, 1000, 1e9, 1e8, '0.000001'],
+      [100001000, 1000, 1e9, 1e8, '0.100001'],
+      [1000001000, 1000, 1e9, 1e8, '1.000001'],
+      // DCR-USDC, expect 3 decimals.
+      [1.5e7, 1000, 1e6, 1e8, '15.000'],
+      [1e6, 1000, 1e6, 1e8, '1.000'],
+      [1e3, 1000, 1e6, 1e8, '0.001'],
+      [101000, 1000, 1e6, 1e8, '0.101'],
+      [1001000, 1000, 1e6, 1e8, '1.001'],
+      // UTXO assets but with a rate step that's not a perfect power of 10.
+      // For a rate step of 500, a min rate would be e.g. rate step = 500.
+      // 5e2 / 1e8 = 5e-6 = 0.000005
+      [5e2, 500, 1e8, 1e8, '0.000005']
+    ]
+
+    for (const [encRate, rateStep, qFactor, bFactor, expEncoding] of tests) {
+      for (const k in fullPrecisionFormatters) delete fullPrecisionFormatters[k] // cleanup
+      const bui = { conventional: { conversionFactor: bFactor } } as any as UnitInfo
+      const qui = { conventional: { conversionFactor: qFactor } } as any as UnitInfo
+      const enc = Doc.formatRateFullPrecision(encRate, bui, qui, rateStep)
+      if (enc !== expEncoding) console.log(`TEST FAILED: f(${encRate}, ${bFactor}, ${qFactor}, ${rateStep}) => ${enc} != ${expEncoding}`)
+      else console.log(`✔️ f(${encRate}, ${bFactor}, ${qFactor}, ${rateStep}) => ${enc} ✔️`)
+    }
+  }
 }

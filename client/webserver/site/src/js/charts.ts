@@ -385,7 +385,7 @@ export class DepthChart extends Chart {
   book: OrderBook
   zoomLevel: number
   lotSize: number
-  rateStep: number
+  conventionalRateStep: number
   lines: DepthLine[]
   markers: Record<string, DepthMarker[]>
   zoomInBttn: Region
@@ -454,11 +454,10 @@ export class DepthChart extends Chart {
   }
 
   // set sets the current data set and draws.
-  set (book: OrderBook, lotSize: number, rateStep: number, baseUnitInfo: UnitInfo, quoteUnitInfo: UnitInfo) {
+  set (book: OrderBook, lotSize: number, rateStepEnc: number, baseUnitInfo: UnitInfo, quoteUnitInfo: UnitInfo) {
     this.book = book
     this.lotSize = lotSize / baseUnitInfo.conventional.conversionFactor
-    const [qFactor, bFactor] = [quoteUnitInfo.conventional.conversionFactor, baseUnitInfo.conventional.conversionFactor]
-    this.rateStep = rateStep / RateEncodingFactor * qFactor / bFactor
+    this.conventionalRateStep = Doc.conventionalRateStep(rateStepEnc, baseUnitInfo, quoteUnitInfo)
     this.baseUnit = baseUnitInfo.conventional.unit
     this.quoteUnit = quoteUnitInfo.conventional.unit
     if (!this.zoomLevel) {
@@ -588,7 +587,7 @@ export class DepthChart extends Chart {
 
     // Print the x labels
     const xLabels = makeLabels(ctx, this.plotRegion.width(), dataExtents.x.min,
-      dataExtents.x.max, 100, this.rateStep, '')
+      dataExtents.x.max, 100, this.conventionalRateStep, '')
 
     this.plotXLabels(xLabels, low, high, [`${this.quoteUnit}/`, this.baseUnit])
 
@@ -611,7 +610,7 @@ export class DepthChart extends Chart {
       ctx.textBaseline = 'middle'
       ctx.fillStyle = this.theme.value
       const y = 0.5 * dataExtents.y.max
-      ctx.fillText(formatLabelValue(midGap), tools.x(midGap), tools.y(y))
+      ctx.fillText(Doc.formatFourSigFigs(midGap), tools.x(midGap), tools.y(y))
       ctx.font = '12px \'sans\', sans-serif'
       // ctx.fillText('mid-market price', tools.x(midGap), tools.y(y) + 24)
       ctx.fillText(`${(gapWidth / midGap * 100).toFixed(2)}% spread`,
@@ -928,7 +927,7 @@ export class CandleChart extends Chart {
 
     // Apply labels.
     const rFactor = this.rateConversionFactor
-    this.doYLabels(this.candleRegion, rateStep, this.market.quotesymbol, v => formatLabelValue(v / rFactor))
+    this.doYLabels(this.candleRegion, rateStep, this.market.quotesymbol, v => Doc.formatFourSigFigs(v / rFactor))
     this.candleRegion.extents.x.min = this.yRegion.extents.x.max
     this.volumeRegion.extents.x.min = this.yRegion.extents.x.max
 
@@ -1325,7 +1324,7 @@ function makeLabels (
   unit: string,
   valFmt?: (v: number) => string
 ): LabelSet {
-  valFmt = valFmt || formatLabelValue
+  valFmt = valFmt || Doc.formatFourSigFigs
   const n = screenW / spacingGuess
   const diff = max - min
   if (n < 1 || diff <= 0) return { lbls: [] }
@@ -1435,17 +1434,6 @@ function clamp (v: number, min: number, max: number): number {
   if (v < min) return min
   if (v > max) return max
   return v
-}
-
-/* labelSpecs is specifications for axis tick labels. */
-const labelSpecs = {
-  minimumSignificantDigits: 4,
-  maximumSignificantDigits: 5
-}
-
-/* formatLabelValue formats the provided value using the labelSpecs format. */
-function formatLabelValue (x: number) {
-  return x.toLocaleString('en-us', labelSpecs)
 }
 
 /* floatCompare compares two floats to within a tolerance of  1e-8. */
