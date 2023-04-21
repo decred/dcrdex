@@ -573,11 +573,11 @@ export default class MarketsPage extends BasePage {
 
     for (const s of this.stats) {
       const bconv = xc.assets[mkt.baseid].unitInfo.conventional.conversionFactor
-      s.tmpl.volume.textContent = fourSigFigs(mkt.spot.vol24 / bconv)
+      s.tmpl.volume.textContent = Doc.formatFourSigFigs(mkt.spot.vol24 / bconv)
       setPriceAndChange(s.tmpl, xc, mkt)
     }
 
-    this.page.obPrice.textContent = Doc.formatFullPrecision(mkt.spot.rate / this.market.rateConversionFactor)
+    this.page.obPrice.textContent = Doc.formatFourSigFigs(mkt.spot.rate / this.market.rateConversionFactor)
     this.page.obPrice.classList.remove('sellcolor', 'buycolor')
     this.page.obPrice.classList.add(mkt.spot.change24 >= 0 ? 'buycolor' : 'sellcolor')
     Doc.setVis(mkt.spot.change24 >= 0, this.page.obUp)
@@ -618,8 +618,8 @@ export default class MarketsPage extends BasePage {
 
     const qconv = app().unitInfo(this.market.cfg.quoteid, this.market.dex).conventional.conversionFactor
     for (const s of this.stats) {
-      s.tmpl.high.textContent = high > 0 ? fourSigFigs(high / qconv) : '-'
-      s.tmpl.low.textContent = low > 0 ? fourSigFigs(low / qconv) : '-'
+      s.tmpl.high.textContent = high > 0 ? Doc.formatFourSigFigs(high / qconv) : '-'
+      s.tmpl.low.textContent = low > 0 ? Doc.formatFourSigFigs(low / qconv) : '-'
     }
   }
 
@@ -1245,6 +1245,7 @@ export default class MarketsPage extends BasePage {
     const page = this.page
     const metaOrders = this.metaOrders
     const market = this.market
+    const cfg = this.market.cfg
     for (const oid in metaOrders) delete metaOrders[oid]
     const orders = app().orders(market.dex.host, marketID(market.baseCfg.symbol, market.quoteCfg.symbol))
     // Sort orders by sort key.
@@ -1283,8 +1284,8 @@ export default class MarketsPage extends BasePage {
       details.side.textContent = header.side.textContent = OrderUtil.sellString(ord)
       details.side.classList.add(ord.sell ? 'sellcolor' : 'buycolor')
       header.side.classList.add(ord.sell ? 'sellcolor' : 'buycolor')
-      details.qty.textContent = header.qty.textContent = fourSigFigs(ord.qty / this.market.baseUnitInfo.conventional.conversionFactor)
-      details.rate.textContent = header.rate.textContent = fourSigFigs(ord.rate / this.market.rateConversionFactor)
+      details.qty.textContent = header.qty.textContent = Doc.formatCoinValue(ord.qty, market.baseUnitInfo)
+      details.rate.textContent = header.rate.textContent = Doc.formatRateFullPrecision(ord.rate, market.baseUnitInfo, market.quoteUnitInfo, cfg.ratestep)
       header.baseSymbol.textContent = ord.baseSymbol.toUpperCase()
       details.type.textContent = OrderUtil.typeString(ord)
       this.updateMetaOrder(mord)
@@ -2459,8 +2460,8 @@ export default class MarketsPage extends BasePage {
    */
   orderTableRow (orderBin: MiniOrder[]): OrderRow {
     const tr = this.page.rowTemplate.cloneNode(true) as OrderRow
-    const { baseUnitInfo, rateConversionFactor } = this.market
-    const manager = new OrderTableRowManager(tr, orderBin, baseUnitInfo, rateConversionFactor)
+    const { baseUnitInfo, quoteUnitInfo, rateConversionFactor, cfg: { ratestep: rateStep } } = this.market
+    const manager = new OrderTableRowManager(tr, orderBin, baseUnitInfo, quoteUnitInfo, rateStep)
     tr.manager = manager
     bind(tr, 'click', () => {
       this.reportDepthClick(tr.manager.getRate() / rateConversionFactor)
@@ -2672,7 +2673,6 @@ class MarketRow {
   baseID: number
   quoteID: number
   lotSize: number
-  rateStep: number
   tmpl: Record<string, PageElement>
   rateConversionFactor: number
 
@@ -2682,7 +2682,6 @@ class MarketRow {
     this.baseID = mkt.baseid
     this.quoteID = mkt.quoteid
     this.lotSize = mkt.lotsize
-    this.rateStep = mkt.ratestep
     this.rateConversionFactor = rateConversionFactor
     this.node = template.cloneNode(true) as HTMLElement
     const tmpl = this.tmpl = Doc.parseTemplate(this.node)
@@ -2930,17 +2929,16 @@ class OrderTableRowManager {
   msgRate: number
   epoch: boolean
   baseUnitInfo: UnitInfo
-  rateConversionFactor: number
 
-  constructor (tableRow: HTMLElement, orderBin: MiniOrder[], baseUnitInfo: UnitInfo, rateConversionFactor: number) {
+  constructor (tableRow: HTMLElement, orderBin: MiniOrder[], baseUnitInfo: UnitInfo, quoteUnitInfo: UnitInfo, rateStep: number) {
     this.tableRow = tableRow
     this.orderBin = orderBin
     this.sell = orderBin[0].sell
     this.msgRate = orderBin[0].msgRate
     this.epoch = !!orderBin[0].epoch
     this.baseUnitInfo = baseUnitInfo
-    this.rateConversionFactor = rateConversionFactor
-    this.setRateEl()
+    const rateText = Doc.formatRateFullPrecision(this.msgRate, baseUnitInfo, quoteUnitInfo, rateStep)
+    this.setRateEl(rateText)
     this.setEpochEl()
     this.updateQtyNumOrdersEl()
   }
@@ -2953,13 +2951,13 @@ class OrderTableRowManager {
   }
 
   // setRateEl popuplates the rate element in the row.
-  setRateEl () {
+  setRateEl (rateText: string) {
     const rateEl = Doc.tmplElement(this.tableRow, 'rate')
     if (this.msgRate === 0) {
       rateEl.innerText = 'market'
     } else {
       const cssClass = this.isSell() ? 'sellcolor' : 'buycolor'
-      rateEl.innerText = Doc.formatFullPrecision(this.msgRate / this.rateConversionFactor)
+      rateEl.innerText = rateText
       rateEl.classList.add(cssClass)
     }
   }
@@ -3090,23 +3088,9 @@ function sortedMarkets (): ExchangeMarket[] {
   return mkts
 }
 
-const FourSigFigs = new Intl.NumberFormat((navigator.languages as string[]), {
-  maximumSignificantDigits: 4
-})
-
-const OneFractionalDigit = new Intl.NumberFormat((navigator.languages as string[]), {
-  minimumFractionDigits: 1,
-  maximumFractionDigits: 1
-})
-
-function fourSigFigs (v: number) {
-  if (v >= 1000 || Math.round(v) === v) return OneFractionalDigit.format(v)
-  return FourSigFigs.format(v)
-}
-
 function setPriceAndChange (tmpl: Record<string, PageElement>, xc: Exchange, mkt: Market) {
   if (!mkt.spot) return
-  tmpl.price.textContent = fourSigFigs(app().conventionalRate(mkt.baseid, mkt.quoteid, mkt.spot.rate, xc))
+  tmpl.price.textContent = Doc.formatFourSigFigs(app().conventionalRate(mkt.baseid, mkt.quoteid, mkt.spot.rate, xc))
   const sign = mkt.spot.change24 > 0 ? '+' : ''
   tmpl.change.classList.remove('buycolor', 'sellcolor')
   tmpl.change.classList.add(mkt.spot.change24 >= 0 ? 'buycolor' : 'sellcolor')

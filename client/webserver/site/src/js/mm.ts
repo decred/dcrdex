@@ -318,7 +318,7 @@ export default class MarketMakerPage extends BasePage {
 
     const setManualPrice = () => {
       const v = parseFloat(page.manualPriceInput.value ?? '0')
-      page.basisPrice.textContent = Doc.formatFiveSigFigs(v)
+      page.basisPrice.textContent = Doc.formatFourSigFigs(v)
       this.specifiedPrice = v
       this.setCurrentBasisPrice(v)
       Doc.show(page.basisPrice, page.manualPriceBttn)
@@ -466,10 +466,10 @@ export default class MarketMakerPage extends BasePage {
     const page = this.page
     if (r && r.basisPrice > 0) {
       this.fetchMaxBuy(Math.round(r.basisPrice / this.currentMarket.atomToConv * RateEncodingFactor))
-      page.basisPrice.textContent = Doc.formatFiveSigFigs(r.basisPrice)
+      page.basisPrice.textContent = Doc.formatFourSigFigs(r.basisPrice)
       Doc.show(page.absMaxBox, page.basisPrice)
       Doc.hide(page.manualPriceInput, page.noFiatBox)
-      this.page.gapFactorMax.textContent = Doc.formatFiveSigFigs(r.basisPrice)
+      this.page.gapFactorMax.textContent = Doc.formatFourSigFigs(r.basisPrice)
     } else {
       page.lotEstQuoteLots.textContent = '[no rate]'
       page.basisPrice.textContent = 'must set manually'
@@ -482,7 +482,7 @@ export default class MarketMakerPage extends BasePage {
 
     if (r && r.breakEvenSpread > 0) {
       Doc.show(page.breakEvenGapBox)
-      page.breakEvenGap.textContent = Doc.formatFiveSigFigs(r.breakEvenSpread)
+      page.breakEvenGap.textContent = Doc.formatFourSigFigs(r.breakEvenSpread)
     } else Doc.hide(page.breakEvenGapBox)
   }
 
@@ -687,13 +687,13 @@ export default class MarketMakerPage extends BasePage {
       const tmpl = Doc.parseTemplate(tr)
       tmpl.logo.src = 'img/' + o.host + '.png'
       tmpl.host.textContent = ExchangeNames[o.host]
-      tmpl.volume.textContent = Doc.formatThreeSigFigs(o.usdVol)
+      tmpl.volume.textContent = Doc.formatFourSigFigs(o.usdVol)
       const price = (o.bestBuy + o.bestSell) / 2
       weightedSum += o.usdVol * price
       weight += o.usdVol
-      tmpl.price.textContent = Doc.formatThreeSigFigs((o.bestBuy + o.bestSell) / 2)
+      tmpl.price.textContent = Doc.formatFourSigFigs((o.bestBuy + o.bestSell) / 2)
     }
-    page.avgPrice.textContent = Doc.formatFiveSigFigs(weightedSum / weight)
+    page.avgPrice.textContent = Doc.formatFourSigFigs(weightedSum / weight)
   }
 
   async fetchMaxBuy (rate: number): Promise<void> {
