@@ -279,8 +279,9 @@ type SendNote struct {
 }
 
 const (
-	TopicSendError   Topic = "SendError"
-	TopicSendSuccess Topic = "SendSuccess"
+	TopicSendError           Topic = "SendError"
+	TopicSendSuccess         Topic = "SendSuccess"
+	TopicShieldedSendSuccess Topic = "ShieldedSendSuccess"
 )
 
 func newSendNote(topic Topic, subject, details string, severity db.Severity) *SendNote {

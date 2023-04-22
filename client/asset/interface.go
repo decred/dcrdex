@@ -860,13 +860,13 @@ type ShieldedWallet interface {
 	NewShieldedAddress() (string, error)
 	// ShieldFunds moves funds from the transparent account to the shielded
 	// account.
-	ShieldFunds(ctx context.Context, amt uint64) (dex.Bytes, error)
+	ShieldFunds(ctx context.Context, amt uint64) ([]byte, error)
 	// UnshieldFunds moves funds from the shielded account to the transparent
 	// account.
-	UnshieldFunds(ctx context.Context, amt uint64) (dex.Bytes, error)
+	UnshieldFunds(ctx context.Context, amt uint64) ([]byte, error)
 	// SendShielded sends funds from the shielded account to the provided
 	// shielded or transparent address.
-	SendShielded(ctx context.Context, toAddr string, amt uint64) (dex.Bytes, error)
+	SendShielded(ctx context.Context, toAddr string, amt uint64) ([]byte, error)
 }
 
 // Balance is categorized information about a wallet's balance.

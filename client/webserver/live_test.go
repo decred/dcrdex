@@ -796,13 +796,13 @@ func (c *TCore) ShieldedStatus(assetID uint32) (*asset.ShieldedStatus, error) {
 func (c *TCore) NewShieldedAddress(assetID uint32) (string, error) {
 	return "", nil
 }
-func (c *TCore) ShieldFunds(assetID uint32, amt uint64) (dex.Bytes, error) {
+func (c *TCore) ShieldFunds(assetID uint32, amt uint64) ([]byte, error) {
 	return nil, nil
 }
-func (c *TCore) UnshieldFunds(assetID uint32, amt uint64) (dex.Bytes, error) {
+func (c *TCore) UnshieldFunds(assetID uint32, amt uint64) ([]byte, error) {
 	return nil, nil
 }
-func (c *TCore) SendShielded(assetID uint32, toAddr string, amt uint64) (dex.Bytes, error) {
+func (c *TCore) SendShielded(appPW []byte, assetID uint32, toAddr string, amt uint64) ([]byte, error) {
 	return nil, nil
 }
 

@@ -157,9 +157,9 @@ type clientCore interface {
 	Notifications(n int) ([]*db.Notification, error)
 	ShieldedStatus(assetID uint32) (*asset.ShieldedStatus, error)
 	NewShieldedAddress(assetID uint32) (string, error)
-	ShieldFunds(assetID uint32, amt uint64) (dex.Bytes, error)
-	UnshieldFunds(assetID uint32, amt uint64) (dex.Bytes, error)
-	SendShielded(assetID uint32, toAddr string, amt uint64) (dex.Bytes, error)
+	ShieldFunds(assetID uint32, amt uint64) ([]byte, error)
+	UnshieldFunds(assetID uint32, amt uint64) ([]byte, error)
+	SendShielded(appPW []byte, assetID uint32, toAddr string, amt uint64) ([]byte, error)
 }
 
 var _ clientCore = (*core.Core)(nil)

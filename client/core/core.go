@@ -10042,7 +10042,7 @@ func (c *Core) NewShieldedAddress(assetID uint32) (string, error) {
 }
 
 // ShieldFunds moves funds from the transparent account to the shielded account.
-func (c *Core) ShieldFunds(assetID uint32, amt uint64) (dex.Bytes, error) {
+func (c *Core) ShieldFunds(assetID uint32, amt uint64) ([]byte, error) {
 	sw, err := c.shieldedWallet(assetID)
 	if err != nil {
 		return nil, err
@@ -10052,20 +10052,49 @@ func (c *Core) ShieldFunds(assetID uint32, amt uint64) (dex.Bytes, error) {
 
 // UnshieldFunds moves funds from the shielded account to the transparent
 // account.
-func (c *Core) UnshieldFunds(assetID uint32, amt uint64) (dex.Bytes, error) {
+func (c *Core) UnshieldFunds(assetID uint32, amt uint64) ([]byte, error) {
 	sw, err := c.shieldedWallet(assetID)
 	if err != nil {
 		return nil, err
 	}
+
 	return sw.UnshieldFunds(c.ctx, amt)
 }
 
 // SendShielded sends funds from the shielded account to the provided shielded
 // or transparent address.
-func (c *Core) SendShielded(assetID uint32, toAddr string, amt uint64) (dex.Bytes, error) {
+func (c *Core) SendShielded(appPW []byte, assetID uint32, toAddr string, amt uint64) ([]byte, error) {
+	_, err := c.encryptionKey(appPW)
+	if err != nil {
+		return nil, fmt.Errorf("password error: %w", err)
+	}
+
 	sw, err := c.shieldedWallet(assetID)
 	if err != nil {
 		return nil, err
 	}
-	return sw.SendShielded(c.ctx, toAddr, amt)
+
+	coinID, err := sw.SendShielded(c.ctx, toAddr, amt)
+	if err != nil {
+		// Let errors go to logs and UI forms.
+		c.log.Errorf("Error sending shielded funds: %v", err)
+		return nil, err
+	}
+
+	// Send success notification.
+	ui, err := asset.UnitInfo(assetID)
+	if err != nil {
+		c.log.Errorf("Error getting unit info for shielded asset %d", assetID)
+	} else {
+		coinIDStr, err := asset.DecodeCoinID(assetID, coinID)
+		if err != nil {
+			c.log.Errorf("Error decoding coin ID %x from shielded send: %v", coinID, err)
+		} else {
+			val, unit := ui.ConventionalString(amt), ui.Conventional.Unit
+			subject, details := c.formatDetails(TopicShieldedSendSuccess, val, unit, toAddr, coinIDStr)
+			c.notify(newSendNote(TopicShieldedSendSuccess, subject, details, db.Success))
+		}
+	}
+
+	return coinID, nil
 }

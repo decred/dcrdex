@@ -1595,12 +1595,18 @@ func (s *WebServer) apiUnshieldFunds(w http.ResponseWriter, r *http.Request) {
 func (s *WebServer) apiSendShielded(w http.ResponseWriter, r *http.Request) {
 	var form struct {
 		shieldUnshieldForm
-		ToAddress string `json:"toAddress"`
+		ToAddress string           `json:"toAddress"`
+		AppPW     encode.PassBytes `json:"appPW"`
 	}
 	if !readPost(w, r, &form) {
 		return
 	}
-	_, err := s.core.SendShielded(form.AssetID, form.ToAddress, form.Amount)
+	pw, err := s.resolvePass(form.AppPW, r)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
+		return
+	}
+	_, err = s.core.SendShielded(pw, form.AssetID, form.ToAddress, form.Amount)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error unshielding funds: %w", err))
 		return
