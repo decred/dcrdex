@@ -983,6 +983,11 @@ var _ asset.FeeRater = (*ExchangeWalletNoAuth)(nil)
 func (btc *intermediaryWallet) feeRaterHelper() uint64 {
 	// NOTE: With baseWallet having an optional external fee rate source, we may
 	// consider making baseWallet a FeeRater by allowing a nil local func.
+	if btc.walletInfo.Name == "Firo" {
+		// estimatesmartfee unstable for firo, estimatefee not much better ;(
+		btc.log.Tracef("FeeRate: returning fee rate for firo: 0")
+		return 0
+	}
 	rate, err := btc.feeRate(1)
 	if err != nil {
 		btc.log.Tracef("Failed to get fee rate: %v", err)
