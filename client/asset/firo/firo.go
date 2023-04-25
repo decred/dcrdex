@@ -4,7 +4,9 @@
 package firo
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
@@ -12,6 +14,8 @@ import (
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	dexfiro "decred.org/dcrdex/dex/networks/firo"
 
+	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 )
 
@@ -115,6 +119,8 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		Simnet:  "18444", // Regtest
 	}
 
+	var w *btc.ExchangeWalletFullNode
+
 	cloneCFG := &btc.BTCCloneCFG{
 		WalletCFG:                cfg,
 		MinNetworkVersion:        minNetworkVersion,
@@ -140,7 +146,50 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		SingularWallet:           true,  // one wallet/node
 		UnlockSpends:             false, // checked after sendtoaddress
 		AssetID:                  BipID,
+		FeeEstimator:             btc.NoLocalFeeRate,
+		PrivKeyFunc: func(addr string) (*btcec.PrivateKey, error) {
+			return privKeyForAddress(w, addr)
+		},
 	}
 
-	return btc.BTCCloneWallet(cloneCFG)
+	var err error
+	w, err = btc.BTCCloneWallet(cloneCFG)
+	return w, err
+}
+
+// rpcCaller is satisfied by ExchangeWalletFullNode (baseWallet), providing
+// direct RPC requests.
+type rpcCaller interface {
+	CallRPC(method string, args []interface{}, thing interface{}) error
+}
+
+func privKeyForAddress(c rpcCaller, addr string) (*btcec.PrivateKey, error) {
+	const methodDumpPrivKey = "dumpprivkey"
+	var privkeyStr string
+	err := c.CallRPC(methodDumpPrivKey, []interface{}{addr}, &privkeyStr)
+	if err == nil { // really, expect an error...
+		return nil, errors.New("firo dumpprivkey: no authorization challenge")
+	}
+
+	errStr := err.Error()
+	searchStr := "authorization code is: "
+	i0 := strings.Index(errStr, searchStr) // TODO: use CutPrefix when Go 1.20 is min
+	if i0 == -1 {
+		return nil, err
+	}
+	i := i0 + len(searchStr)
+	auth := errStr[i : i+4]
+	/// fmt.Printf("OTA: %s\n", auth)
+
+	err = c.CallRPC(methodDumpPrivKey, []interface{}{addr, auth}, &privkeyStr)
+	if err != nil {
+		return nil, err
+	}
+
+	wif, err := btcutil.DecodeWIF(privkeyStr)
+	if err != nil {
+		return nil, err
+	}
+
+	return wif.PrivKey, nil
 }

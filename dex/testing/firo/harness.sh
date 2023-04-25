@@ -207,7 +207,7 @@ ${DAEMON} -rpcuser=user -rpcpassword=pass \
 -rpcport=\$2 -datadir=${NODES_ROOT}/\$1 -txindex=1 -regtest=1 -dandelion=0 \
 -debug=rpc -debug=net -debug=mempool -debug=walletdb -debug=addrman -debug=mempoolrej \
 -whitelist=127.0.0.0/8 -whitelist=::1 \
--port=\$3 -fallbackfee=0.00001 -daemon  # -daemon .. if you want to stop it with stop-wallet
+-port=\$3 -fallbackfee=0.00001 -server
 EOF
 chmod +x "./start-wallet"
 

@@ -66,7 +66,7 @@ fi
 
 if [ $FIRO_ON -eq 0 ]; then
 	echo configuring firo wallet
-	./dexcctl -p abc -p "" --simnet newwallet 3 firodRPC ~/dextest/firo/alpha/alpha.conf
+	./dexcctl -p abc -p "" --simnet newwallet 136 firodRPC ~/dextest/firo/alpha/alpha.conf
 fi
 
 if [ $ZEC_ON -eq 0 ]; then

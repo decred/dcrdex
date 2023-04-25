@@ -330,7 +330,9 @@ type BTCCloneCFG struct {
 	// inputs. This is used to accurately determine the size of the first swap
 	// in a chain when considered with the actual inputs.
 	InitTxSizeBase uint32
-	// AddrFunc is an optional function to produce new addresses. If AddrFunc
+	// PrivKeyFunc is an optional function to get a private key for an address
+	// from the wallet. If not given the usual dumpprivkey RPC will be used.
+	PrivKeyFunc func(addr string) (*btcec.PrivateKey, error) // AddrFunc is an optional function to produce new addresses. If AddrFunc
 	// is provided, the regular getnewaddress and getrawchangeaddress methods
 	// will not be used, and AddrFunc will be used instead.
 	AddrFunc func() (btcutil.Address, error)
@@ -983,11 +985,6 @@ var _ asset.FeeRater = (*ExchangeWalletNoAuth)(nil)
 func (btc *intermediaryWallet) feeRaterHelper() uint64 {
 	// NOTE: With baseWallet having an optional external fee rate source, we may
 	// consider making baseWallet a FeeRater by allowing a nil local func.
-	if btc.walletInfo.Name == "Firo" {
-		// estimatesmartfee unstable for firo, estimatefee not much better ;(
-		btc.log.Tracef("FeeRate: returning fee rate for firo: 0")
-		return 0
-	}
 	rate, err := btc.feeRate(1)
 	if err != nil {
 		btc.log.Tracef("Failed to get fee rate: %v", err)
@@ -1178,6 +1175,7 @@ func newRPCWallet(requester RawRequester, cfg *BTCCloneCFG, parsedCfg *RPCWallet
 		omitRPCOptionsArg:        cfg.OmitRPCOptionsArg,
 		addrFunc:                 cfg.AddrFunc,
 		connectFunc:              cfg.ConnectFunc,
+		privKeyFunc:              cfg.PrivKeyFunc,
 	}
 	core.requesterV.Store(requester)
 	node := newRPCClient(core)
@@ -1309,7 +1307,7 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 // NoLocalFeeRate is a dummy function for BTCCloneCFG.FeeEstimator for a wallet
 // instance that cannot support a local fee rate estimate but has an external
 // fee rate source.
-func NoLocalFeeRate() (uint64, error) {
+func NoLocalFeeRate(ctx context.Context, rr RawRequester, u uint64) (uint64, error) {
 	return 0, errors.New("no local fee rate estimate possible")
 }
 
@@ -3751,7 +3749,7 @@ func (btc *baseWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sig
 	if utxo == nil {
 		return nil, nil, fmt.Errorf("no utxo found for %s", op)
 	}
-	privKey, err := btc.getPrivKeyForAddress(utxo.address)
+	privKey, err := btc.node.privKeyForAddress(utxo.address)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -4279,83 +4277,12 @@ func (btc *baseWallet) DepositAddress() (string, error) {
 	// If the wallet is unlocked, be extra cautious and ensure the wallet gave
 	// us an address for which we can retrieve the private keys, regardless of
 	// what ownsAddress would say.
-	priv, err := btc.getPrivKeyForAddress(addrStr)
+	priv, err := btc.node.privKeyForAddress(addrStr)
 	if err != nil {
 		return "", fmt.Errorf("private key unavailable for address %v: %w", addrStr, err)
 	}
 	priv.Zero()
 	return addrStr, nil
-}
-
-// getPrivKeyForAddress accomodates `dumpprivkey' RPC for different RPC sequencing
-func (btc *baseWallet) getPrivKeyForAddress(addr string) (*btcec.PrivateKey, error) {
-	if btc.walletInfo.Name == "Firo" {
-		return btc.getPrivkeyFiro(addr)
-	}
-	return btc.node.privKeyForAddress(addr)
-}
-
-// getPrivkeyFiro is Firo's weird version of 'dumpprivkey'. We do it twice!
-// If the wallet is encrypted unlock first
-func (btc *baseWallet) getPrivkeyFiro(addr string) (*btcec.PrivateKey, error) {
-	var args1 []string
-	args1 = append(args1, addr)
-
-	// Params #1 -- Just the address
-	params1 := make([]json.RawMessage, 0, len(args1))
-	for i := range args1 {
-		p, err := json.Marshal(args1[i])
-		if err != nil {
-			return nil, err
-		}
-		params1 = append(params1, p)
-	}
-
-	// Call #1
-	_, err := btc.node.RawRequest(btc.ctx, "dumpprivkey", params1)
-	if err == nil {
-		unexpected := errors.New("firo dumpprivkey: no authorization challenge")
-		return nil, unexpected
-	}
-	errStr := err.Error()
-	searchStr := "authorization code is: "
-	i0 := strings.Index(errStr, searchStr)
-	if i0 == -1 {
-		return nil, err
-	}
-	i := i0 + len(searchStr)
-	auth := errStr[i : i+4]
-	/// fmt.Printf("OTA: %s\n", auth)
-
-	// Params #2 -- address + one time auth
-	var args2 []string
-	args2 = append(args2, addr, auth)
-	params2 := make([]json.RawMessage, 0, len(args2))
-	for i := range args2 {
-		p, err := json.Marshal(args2[i])
-		if err != nil {
-			return nil, err
-		}
-		params2 = append(params2, p)
-	}
-
-	// Call #2
-	jsonprivkey, err := btc.node.RawRequest(btc.ctx, "dumpprivkey", params2)
-	if err != nil {
-		return nil, err
-	}
-	var privkeyStr string
-	err = json.Unmarshal(jsonprivkey, &privkeyStr)
-	if err != nil {
-		return nil, err
-	}
-
-	wif, err := btcutil.DecodeWIF(privkeyStr)
-	if err != nil {
-		return nil, err
-	}
-
-	return wif.PrivKey, nil
 }
 
 // RedemptionAddress gets an address for use in redeeming the counterparty's
@@ -4996,7 +4923,7 @@ func (btc *baseWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, addr 
 		return nil, nil, err
 	}
 
-	privKey, err := btc.getPrivKeyForAddress(addrStr)
+	privKey, err := btc.node.privKeyForAddress(addrStr)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -5018,7 +4945,7 @@ func (btc *baseWallet) createWitnessSig(tx *wire.MsgTx, idx int, pkScript []byte
 	if err != nil {
 		return nil, nil, err
 	}
-	privKey, err := btc.getPrivKeyForAddress(addrStr)
+	privKey, err := btc.node.privKeyForAddress(addrStr)
 	if err != nil {
 		return nil, nil, err
 	}

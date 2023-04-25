@@ -115,11 +115,12 @@ func (rig *testRig) close() {
 }
 
 func (rig *testRig) mineAlpha() error {
-	tmuxWindow := rig.symbol + "-harness:2"
-	if rig.symbol == "zec" {
+	var tmuxWindow string
+	switch rig.symbol {
+	case "zec", "firo", "doge":
 		tmuxWindow = rig.symbol + "-harness:4"
-	} else if rig.symbol == "firo" {
-		tmuxWindow = rig.symbol + "-harness:4"
+	default:
+		tmuxWindow = rig.symbol + "-harness:2"
 	}
 	return exec.Command("tmux", "send-keys", "-t", tmuxWindow, "./mine-alpha 1", "C-m").Run()
 }
