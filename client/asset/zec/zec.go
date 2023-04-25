@@ -127,7 +127,15 @@ func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Ne
 // DecodeCoinID creates a human-readable representation of a coin ID for
 // Zcash.
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
-	// Zcash and Bitcoin have the same tx hash and output format.
+	// Zcash shielded transactions don't have transparent outputs, so the coinID
+	// will just be the tx hash.
+	if len(coinID) == chainhash.HashSize {
+		var txHash chainhash.Hash
+		copy(txHash[:], coinID)
+		return txHash.String(), nil
+	}
+	// For transparent transactions, Zcash and Bitcoin have the same tx hash
+	// and output format.
 	return (&btc.Driver{}).DecodeCoinID(coinID)
 }
 

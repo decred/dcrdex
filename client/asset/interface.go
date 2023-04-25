@@ -29,6 +29,7 @@ const (
 	WalletTraitTxFeeEstimator                              // The wallet can estimate transaction fees.
 	WalletTraitPeerManager                                 // The wallet can manage its peers.
 	WalletTraitAuthenticator                               // The wallet require authentication.
+	WalletTraitShielded                                    // The wallet is ShieldedWallet (e.g. ZCash)
 )
 
 // IsRescanner tests if the WalletTrait has the WalletTraitRescanner bit set.
@@ -103,6 +104,10 @@ func (wt WalletTrait) IsAuthenticator() bool {
 	return wt&WalletTraitAuthenticator != 0
 }
 
+func (wt WalletTrait) IsShielded() bool {
+	return wt&WalletTraitShielded != 0
+}
+
 // DetermineWalletTraits returns the WalletTrait bitset for the provided Wallet.
 func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(Rescanner); is {
@@ -143,6 +148,9 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	}
 	if _, is := w.(Authenticator); is {
 		t |= WalletTraitAuthenticator
+	}
+	if _, is := w.(ShieldedWallet); is {
+		t |= WalletTraitShielded
 	}
 	return t
 }
@@ -831,6 +839,34 @@ type BotWallet interface {
 	// funds aren't available. The returned fees are the RealisticWorstCase. The
 	// Lots field of the PreSwapForm is ignored and assumed to be a single lot.
 	SingleLotRedeemFees(*PreRedeemForm) (uint64, error)
+}
+
+// ShieldedStatus is the balance and address associated with the shielded
+// account.
+type ShieldedStatus struct {
+	LastAddress string
+	Balance     uint64
+}
+
+// ShieldedWallet is implemented by ZCash, and enables working with value in
+// shielded pools.
+type ShieldedWallet interface {
+	// ShieldedStatus list the last address and the balance in the shielded
+	// account.
+	ShieldedStatus() (*ShieldedStatus, error)
+	// NewShieldedAddress creates a new shielded address. A shielded address can
+	// be be reused without sacrifice of privacy on-chain, but that doesn't stop
+	// meat-space coordination to reduce privacy.
+	NewShieldedAddress() (string, error)
+	// ShieldFunds moves funds from the transparent account to the shielded
+	// account.
+	ShieldFunds(ctx context.Context, amt uint64) ([]byte, error)
+	// UnshieldFunds moves funds from the shielded account to the transparent
+	// account.
+	UnshieldFunds(ctx context.Context, amt uint64) ([]byte, error)
+	// SendShielded sends funds from the shielded account to the provided
+	// shielded or transparent address.
+	SendShielded(ctx context.Context, toAddr string, amt uint64) ([]byte, error)
 }
 
 // Balance is categorized information about a wallet's balance.

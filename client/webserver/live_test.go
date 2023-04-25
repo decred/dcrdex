@@ -790,6 +790,22 @@ func (c *TCore) AccountImport(pw []byte, account *core.Account, bond []*db.Bond)
 }
 func (c *TCore) AccountDisable(pw []byte, host string) error { return nil }
 
+func (c *TCore) ShieldedStatus(assetID uint32) (*asset.ShieldedStatus, error) {
+	return nil, nil
+}
+func (c *TCore) NewShieldedAddress(assetID uint32) (string, error) {
+	return "", nil
+}
+func (c *TCore) ShieldFunds(assetID uint32, amt uint64) ([]byte, error) {
+	return nil, nil
+}
+func (c *TCore) UnshieldFunds(assetID uint32, amt uint64) ([]byte, error) {
+	return nil, nil
+}
+func (c *TCore) SendShielded(appPW []byte, assetID uint32, toAddr string, amt uint64) ([]byte, error) {
+	return nil, nil
+}
+
 func coreCoin() *core.Coin {
 	b := make([]byte, 36)
 	copy(b[:], encode.RandomBytes(32))
