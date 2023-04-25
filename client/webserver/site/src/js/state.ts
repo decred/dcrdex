@@ -18,6 +18,7 @@ export default class State {
   static selectedAssetLK = 'selectedasset'
   static notificationsLK = 'notifications'
   static orderDisclaimerAckedLK = 'ordAck'
+  static lastCandleDurationLK = 'lastCandleDuration'
 
   static setCookie (cname: string, cvalue: string) {
     const d = new Date()
