@@ -74,36 +74,38 @@ func (wt WalletTrait) IsWithdrawer() bool {
 	return wt&WalletTraitWithdrawer != 0
 }
 
-// IsSweeper test if the WalletTrait has the WalletTraitSweeper bit set, which
+// IsSweeper tests if the WalletTrait has the WalletTraitSweeper bit set, which
 // indicates the presence of a Sweep method.
 func (wt WalletTrait) IsSweeper() bool {
 	return wt&WalletTraitSweeper != 0
 }
 
-// IsRestorer test if the WalletTrait has the WalletTraitRestorer bit set, which
+// IsRestorer tests if the WalletTrait has the WalletTraitRestorer bit set, which
 // indicates the wallet implements the WalletRestorer interface.
 func (wt WalletTrait) IsRestorer() bool {
 	return wt&WalletTraitRestorer != 0
 }
 
-// IsTxFeeEstimator test if the WalletTrait has the WalletTraitTxFeeEstimator
+// IsTxFeeEstimator tests if the WalletTrait has the WalletTraitTxFeeEstimator
 // bit set, which indicates the wallet implements the TxFeeEstimator interface.
 func (wt WalletTrait) IsTxFeeEstimator() bool {
 	return wt&WalletTraitTxFeeEstimator != 0
 }
 
-// IsPeerManager test if the WalletTrait has the WalletTraitPeerManager bit
+// IsPeerManager tests if the WalletTrait has the WalletTraitPeerManager bit
 // set, which indicates the wallet implements the PeerManager interface.
 func (wt WalletTrait) IsPeerManager() bool {
 	return wt&WalletTraitPeerManager != 0
 }
 
-// IsAuthenticator test if WalletTrait has WalletTraitAuthenticator bit set,
+// IsAuthenticator tests if WalletTrait has WalletTraitAuthenticator bit set,
 // which indicates authentication is required by wallet.
 func (wt WalletTrait) IsAuthenticator() bool {
 	return wt&WalletTraitAuthenticator != 0
 }
 
+// IsShielded tests if the WalletTrait has the WalletTraitShielded bit
+// set, which indicates the wallet implements the ShieldedWallet interface.
 func (wt WalletTrait) IsShielded() bool {
 	return wt&WalletTraitShielded != 0
 }
@@ -855,7 +857,7 @@ type ShieldedWallet interface {
 	// account.
 	ShieldedStatus() (*ShieldedStatus, error)
 	// NewShieldedAddress creates a new shielded address. A shielded address can
-	// be be reused without sacrifice of privacy on-chain, but that doesn't stop
+	// be reused without sacrifice of privacy on-chain, but that doesn't stop
 	// meat-space coordination to reduce privacy.
 	NewShieldedAddress() (string, error)
 	// ShieldFunds moves funds from the transparent account to the shielded
