@@ -85,6 +85,7 @@ const buyBtnClass = 'buygreen-bg'
 const sellBtnClass = 'sellred-bg'
 
 const fiveMinBinKey = '5m'
+const oneHrBinKey = '1h'
 
 const percentFormatter = new Intl.NumberFormat(document.documentElement.lang, {
   minimumFractionDigits: 1,
@@ -219,8 +220,8 @@ export default class MarketsPage extends BasePage {
     // Do not call cleanTemplates before creating the AccelerateOrderForm
     this.accelerateOrderForm = new AccelerateOrderForm(page.accelerateForm, success)
 
-    // TODO: Store user's state and reload last known configuration.
-    this.candleDur = fiveMinBinKey
+    // Set user's last known candle duration.
+    this.candleDur = State.fetchLocal(State.lastCandleDurationLK) || oneHrBinKey
 
     // Setup the register to trade button.
     // TODO: Use dexsettings page?
@@ -598,22 +599,35 @@ export default class MarketsPage extends BasePage {
 
   /* setHighLow calculates the high and low rates over the last 24 hours. */
   setHighLow () {
-    const cache = this.market?.candleCaches[fiveMinBinKey]
-    if (!cache) {
-      for (const s of this.stats) {
-        s.tmpl.high.textContent = '-'
-        s.tmpl.low.textContent = '-'
-      }
-      return
-    }
-
-    // We'll eventually get this data in the spot, but for now, we must set it
-    // from candles.
     let [high, low] = [0, 0]
-    for (let i = cache.candles.length - 1; i >= 0; i--) {
-      const c = cache.candles[i]
-      if (low === 0 || (c.lowRate > 0 && c.lowRate < low)) low = c.lowRate
-      if (c.highRate > high) high = c.highRate
+    const spot = this.market.cfg.spot
+    // Use spot values for 24 hours high and low rates if it is available. We
+    // will default to setting it from candles if it's not.
+    if (spot && spot.low24 && spot.high24) {
+      high = spot.high24
+      low = spot.low24
+    } else {
+      const cache = this.market?.candleCaches[fiveMinBinKey]
+      if (!cache) {
+        if (this.candleDur !== fiveMinBinKey) {
+          this.requestCandles(fiveMinBinKey)
+          return
+        }
+        for (const s of this.stats) {
+          s.tmpl.high.textContent = '-'
+          s.tmpl.low.textContent = '-'
+        }
+        return
+      }
+
+      // Set high and low rates from candles.
+      const aDayAgo = new Date().getTime() - 86400000
+      for (let i = cache.candles.length - 1; i >= 0; i--) {
+        const c = cache.candles[i]
+        if (c.endStamp < aDayAgo) break
+        if (low === 0 || (c.lowRate > 0 && c.lowRate < low)) low = c.lowRate
+        if (c.highRate > high) high = c.highRate
+      }
     }
 
     const qconv = app().unitInfo(this.market.cfg.quoteid, this.market.dex).conventional.conversionFactor
@@ -802,6 +816,9 @@ export default class MarketsPage extends BasePage {
       Doc.bind(bttn, 'click', () => this.candleDurationSelected(dur))
       page.durBttnBox.appendChild(bttn)
     }
+
+    // load candlesticks here since we are resetting page.durBttnBox above.
+    this.loadCandles()
   }
 
   /* setMarket sets the currently displayed market. */
@@ -871,10 +888,6 @@ export default class MarketsPage extends BasePage {
 
     // depth chart
     ws.request('loadmarket', makeMarket(host, base, quote))
-
-    // candlesticks
-    this.candleDur = fiveMinBinKey
-    this.loadCandles()
 
     this.setLoaderMsgVisibility()
     this.setRegistrationStatusVisibility()
@@ -2504,10 +2517,13 @@ export default class MarketsPage extends BasePage {
     this.depthChart.draw()
   }
 
-  /* candleDurationSelected sets the candleDur and loads the candles. */
+  /* candleDurationSelected sets the candleDur and loads the candles. It will
+  default to the oneHrBinKey if dur is not valid. */
   candleDurationSelected (dur: string) {
+    if (!this.market?.dex?.candleDurs.includes(dur)) dur = oneHrBinKey
     this.candleDur = dur
     this.loadCandles()
+    State.storeLocal(State.lastCandleDurationLK, dur)
   }
 
   /*
@@ -2530,8 +2546,10 @@ export default class MarketsPage extends BasePage {
     this.requestCandles()
   }
 
-  /* requestCandles sends the loadcandles request. */
-  requestCandles () {
+  /* requestCandles sends the loadcandles request. It accepts an optional candle
+   * duration which will be requested if it is provided.
+   */
+  requestCandles (candleDur?: string) {
     this.candlesLoading = {
       loaded: () => { /* pass */ },
       timer: window.setTimeout(() => {
@@ -2542,7 +2560,7 @@ export default class MarketsPage extends BasePage {
       }, 10000)
     }
     const { dex, baseCfg, quoteCfg } = this.market
-    ws.request('loadcandles', { host: dex.host, base: baseCfg.id, quote: quoteCfg.id, dur: this.candleDur })
+    ws.request('loadcandles', { host: dex.host, base: baseCfg.id, quote: quoteCfg.id, dur: candleDur || this.candleDur })
   }
 
   /*
