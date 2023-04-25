@@ -38,8 +38,9 @@ const (
 	minNetworkVersion   = 5040250 // v5.4.2
 	walletTypeRPC       = "zcashdRPC"
 
-	transparentAcctNumber  = 0
-	shieldedAcctNumber     = 1
+	transparentAcctNumber = 0
+	shieldedAcctNumber    = 1
+
 	transparentAddressType = "p2pkh"
 	orchardAddressType     = "orchard"
 	saplingAddressType     = "sapling"
@@ -47,8 +48,6 @@ const (
 )
 
 var (
-	fallbackFeeKey = "fallbackfee"
-
 	configOpts = []*asset.ConfigOption{
 		{
 			Key:         "rpcuser",
@@ -72,7 +71,7 @@ var (
 			Description: "Port for RPC connections (if not set in Address)",
 		},
 		{
-			Key:          fallbackFeeKey,
+			Key:          "fallbackfee",
 			DisplayName:  "Fallback fee rate",
 			Description:  "Zcash's 'fallbackfee' rate. Units: ZEC/kB",
 			DefaultValue: defaultFee * 1000 / 1e8,
@@ -357,6 +356,19 @@ func (w *zecWallet) ShieldedStatus() (status *asset.ShieldedStatus, err error) {
 }
 
 // Balance adds a sum of shielded pool balances to the transparent balance info.
+//
+// Since v4.5.0, the getnewaddress RPC is deprecated if favor of using unified
+// addresses from accounts generated wtih z_getnewaccount. Addresses are
+// generated from account 0. Any addresses generated using getnewaddress belong
+// to a legacy account that is not listed with z_listaccount, nor addressable
+// with e.g. z_getbalanceforaccount. For transparent addresses, we still use the
+// getbalance RPC, which combines transparent balance from both legacy and
+// generated accounts. This matches the behavior of the listunspent RPC, and
+// conveniently makes upgrading simple. So even though we ONLY use account 0 to
+// generate t-addresses, any account's transparent outputs are eligible for
+// trading. To minimize confusion, we don't add transparent receivers to
+// addresses generated from the shielded account. This doesn't preclude a user
+// doing something silly with zcash-cli.
 func (w *zecWallet) Balance() (*asset.Balance, error) {
 	bal, err := w.ExchangeWalletNoAuth.Balance()
 	if err != nil {
@@ -397,7 +409,7 @@ func (w *zecWallet) ShieldFunds(ctx context.Context, transparentVal uint64) ([]b
 	if err != nil {
 		return nil, err
 	}
-	const fees = 1000
+	const fees = 1000 // TODO: Update after v4.5.0 which includes ZIP137
 	if bal.Available < fees || bal.Available-fees < transparentVal {
 		return nil, asset.ErrInsufficientBalance
 	}
@@ -416,16 +428,11 @@ func (w *zecWallet) ShieldFunds(ctx context.Context, transparentVal uint64) ([]b
 // UnshieldFunds moves funds from the shielded account to the transparent
 // account.
 func (w *zecWallet) UnshieldFunds(ctx context.Context, amt uint64) ([]byte, error) {
-	// lastAddr, err := w.lastShieldedAddress()
-	// if err != nil {
-	// 	return nil, err
-	// }
-
 	bal, err := zGetBalanceForAccount(w, shieldedAcctNumber)
 	if err != nil {
 		return nil, fmt.Errorf("z_getbalance error: %w", err)
 	}
-	const fees = 1000
+	const fees = 1000 // TODO: Update after v4.5.0 which includes ZIP137
 	if bal < fees || bal-fees < amt {
 		return nil, asset.ErrInsufficientBalance
 	}
@@ -507,7 +514,7 @@ func (w *zecWallet) SendShielded(ctx context.Context, toAddr string, amt uint64)
 	if err != nil {
 		return nil, err
 	}
-	const fees = 1000
+	const fees = 1000 // TODO: Update after v4.5.0 which includes ZIP137
 	if bal < fees || bal-fees < amt {
 		return nil, asset.ErrInsufficientBalance
 	}
