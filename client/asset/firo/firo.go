@@ -4,9 +4,15 @@
 package firo
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math"
+	"net/http"
 	"strings"
+	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
@@ -24,6 +30,10 @@ const (
 	BipID             = 136    // Zcoin XZC
 	minNetworkVersion = 141201 // bitcoin 0.14 base
 	walletTypeRPC     = "firodRPC"
+	estimateFeeConfs  = 2 // 2 blocks should be enough
+
+	mainnetExplorerFeeAPI = "https://explorer.firo.org/insight-api-zcoin/utils/estimatefee"
+	testnetExplorerFeeAPI = "https://testexplorer.firo.org/insight-api-zcoin/utils/estimatefee"
 )
 
 var (
@@ -146,7 +156,8 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		SingularWallet:           true,  // one wallet/node
 		UnlockSpends:             false, // checked after sendtoaddress
 		AssetID:                  BipID,
-		FeeEstimator:             btc.NoLocalFeeRate,
+		FeeEstimator:             estimateFee,
+		ExternalFeeEstimator:     fetchExternalFee,
 		PrivKeyFunc: func(addr string) (*btcec.PrivateKey, error) {
 			return privKeyForAddress(w, addr)
 		},
@@ -163,6 +174,9 @@ type rpcCaller interface {
 	CallRPC(method string, args []interface{}, thing interface{}) error
 }
 
+// privKeyForAddress is Firo's dumpprivkey RPC which calls dumpprivkey once
+// to get a One Time Authorization (OTA) which is appended to a second call
+// for the same address to authorize the caller.
 func privKeyForAddress(c rpcCaller, addr string) (*btcec.PrivateKey, error) {
 	const methodDumpPrivKey = "dumpprivkey"
 	var privkeyStr string
@@ -192,4 +206,69 @@ func privKeyForAddress(c rpcCaller, addr string) (*btcec.PrivateKey, error) {
 	}
 
 	return wif.PrivKey, nil
+}
+
+// NOTE: btc.(*baseWallet).feeRate calls the local and external fee estimators
+// in sequence, applying the limits configured in baseWallet.
+
+func estimateFee(ctx context.Context, rr btc.RawRequester, _ uint64) (uint64, error) {
+	confArg, err := json.Marshal(estimateFeeConfs)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := rr.RawRequest(ctx, "estimatefee", []json.RawMessage{confArg})
+	if err != nil {
+		return 0, err
+	}
+	var feeRate float64
+	err = json.Unmarshal(resp, &feeRate)
+	if err != nil {
+		return 0, err
+	}
+	if feeRate <= 0 {
+		return 0, nil
+	}
+	// Keep this check
+	if feeRate > dexfiro.DefaultFeeRateLimit/1e5 {
+		return dexfiro.DefaultFee, nil
+	}
+	return uint64(math.Round(feeRate * 1e5)), nil
+}
+
+// fetchExternalFee calls 'estimatefee' API on Firo block explorer for
+// the network. API returned float value is converted into sats/byte.
+func fetchExternalFee(ctx context.Context, net dex.Network) (uint64, error) {
+	var url string
+	if net == dex.Testnet {
+		url = testnetExplorerFeeAPI
+	} else {
+		url = mainnetExplorerFeeAPI
+	}
+	// timed call
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, err
+	}
+	httpResponse, err := http.DefaultClient.Do(r)
+	if err != nil {
+		return 0, err
+	}
+	var resp map[string]float64
+	reader := io.LimitReader(httpResponse.Body, 1<<20)
+	err = json.NewDecoder(reader).Decode(&resp)
+	if err != nil {
+		return 0, err
+	}
+	httpResponse.Body.Close()
+
+	firoPerKilobyte, ok := resp["2"] // field '2': n.nnnn
+	if !ok {
+		return 0, errors.New("no fee rate in response")
+	}
+	if firoPerKilobyte <= 0 {
+		return 0, fmt.Errorf("zero or negative fee rate")
+	}
+	return uint64(math.Round(firoPerKilobyte * 1e5)), nil // FIRO/kB => firo-sat/B
 }

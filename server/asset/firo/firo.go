@@ -69,7 +69,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 	ports := dexbtc.NetPorts{
 		Mainnet: "8168",
 		Testnet: "18168",
-		Simnet:  "18444", // Regtest
+		Simnet:  "18444", // Regtest .. the old btc value ;-)
 	}
 
 	if configPath == "" {
@@ -77,22 +77,28 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 	}
 
 	return btc.NewBTCClone(&btc.BackendCloneConfig{
-		Name:                 assetName,
-		Segwit:               false,
-		ConfigPath:           configPath,
-		Logger:               logger,
-		Net:                  network,
-		ChainParams:          params,
-		Ports:                ports,
-		FeeConfs:             1,    // the default
-		ManualMedianFee:      true, // no getblockstats
+		Name:        assetName,
+		Segwit:      false,
+		ConfigPath:  configPath,
+		Logger:      logger,
+		Net:         network,
+		ChainParams: params,
+		Ports:       ports,
+		// 2 blocks should be enough - Firo has masternode 1 block finalize
+		// confirms with Instasend (see also: Dash instasend)
+		// Also 'estimatefee 2' usually returns 0.00001000
+		FeeConfs: 2,
+		// Firo mainnet blocks are rarely full so this should be the most
+		// common fee rate .. as can be seen from looking at the explorer
 		NoCompetitionFeeRate: 1,    // 0.00001000 FIRO/kB
-		MaxFeeBlocks:         16,   // copied from dgb
+		ManualMedianFee:      true, // no getblockstatss
+		MaxFeeBlocks:         16,   // failsafe
 		BooleanGetBlockRPC:   true,
 		// Firo actually has estimatesmartfee, but with a big warning
-		// WARNING: This interface is unstable and may disappear or change!
-		// and it also doesn't accept an estimate_mode argument.
-		DumbFeeEstimates: true})
+		// 'WARNING: This interface is unstable and may disappear or change!'
+		// It also doesn't accept an estimate_mode argument.
+		DumbFeeEstimates: true},
+	)
 }
 
 // Firo v0.14.12.1 defaults:
