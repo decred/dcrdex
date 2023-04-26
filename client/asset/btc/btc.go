@@ -4532,6 +4532,11 @@ func (btc *intermediaryWallet) watchBlocks(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		}
+
+		// Ensure context cancellation takes priority before the next iteration.
+		if ctx.Err() != nil {
+			return
+		}
 	}
 }
 
