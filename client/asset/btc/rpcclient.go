@@ -187,6 +187,9 @@ func (wc *rpcClient) reconfigure(cfg *asset.WalletConfig, currentAddress string)
 		restartRequired = true
 		return
 	}
+	if wc.ctx == nil || wc.ctx.Err() != nil {
+		return true, nil // not connected, ok to reconfigure, but restart required
+	}
 
 	parsedCfg := new(RPCWalletConfig)
 	if err = config.Unmapify(cfg.Settings, parsedCfg); err != nil {
