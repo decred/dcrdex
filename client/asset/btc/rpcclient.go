@@ -142,6 +142,20 @@ func newRPCClient(cfg *rpcCore) *rpcClient {
 	return &rpcClient{rpcCore: cfg}
 }
 
+// chainOK is for screening the chain field of the getblockchaininfo result.
+func chainOK(net dex.Network, str string) bool {
+	var chainStr string
+	switch net {
+	case dex.Mainnet:
+		chainStr = "main"
+	case dex.Testnet:
+		chainStr = "test"
+	case dex.Regtest:
+		chainStr = "reg"
+	}
+	return strings.Contains(str, chainStr)
+}
+
 func (wc *rpcClient) connect(ctx context.Context, _ *sync.WaitGroup) error {
 	wc.ctx = ctx
 	// Check the version. Do it here, so we can also diagnose a bad connection.
@@ -156,6 +170,13 @@ func (wc *rpcClient) connect(ctx context.Context, _ *sync.WaitGroup) error {
 	// 170100. So we're just lucking out here, really.
 	if codeVer < minProtocolVersion {
 		return fmt.Errorf("node software out of date. version %d is less than minimum %d", codeVer, minProtocolVersion)
+	}
+	chainInfo, err := wc.getBlockchainInfo()
+	if err != nil {
+		return fmt.Errorf("getblockchaininfo error: %w", err)
+	}
+	if !chainOK(wc.cloneParams.Network, chainInfo.Chain) {
+		return errors.New("wrong net")
 	}
 	wiRes, err := wc.GetWalletInfo()
 	if err != nil {
@@ -223,6 +244,14 @@ func (wc *rpcClient) reconfigure(cfg *asset.WalletConfig, currentAddress string)
 			} else if !ai.IsMine {
 				return false, errors.New("cannot reconfigure to a new RPC wallet during active use")
 			}
+		}
+
+		chainInfo := new(getBlockchainInfoResult)
+		if err := call(wc.ctx, cl, methodGetBlockchainInfo, nil, chainInfo); err != nil {
+			return false, fmt.Errorf("%s: %w", methodGetBlockchainInfo, err)
+		}
+		if !chainOK(wc.cloneParams.Network, chainInfo.Chain) {
+			return false, errors.New("wrong net")
 		}
 
 		wc.requesterV.Store(cl)

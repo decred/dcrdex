@@ -1449,6 +1449,7 @@ func (btc *baseWallet) IsDust(txOut *wire.TxOut, minRelayTxFee uint64) bool {
 // getBlockchainInfoResult models the data returned from the getblockchaininfo
 // command.
 type getBlockchainInfoResult struct {
+	Chain         string `json:"chain"`
 	Blocks        int64  `json:"blocks"`
 	Headers       int64  `json:"headers"`
 	BestBlockHash string `json:"bestblockhash"`

@@ -45,6 +45,7 @@ var (
 
 	// MainNetParams are the clone parameters for mainnet.
 	MainNetParams = btc.ReadCloneParams(&btc.CloneParams{
+		Name:             "mainnet",
 		PubKeyHashAddrID: 0x1e, // 30 - start with D
 		ScriptHashAddrID: 0x3f, // 63 - start with S, "old" was 5
 		Bech32HRPSegwit:  "dgb",
@@ -54,6 +55,7 @@ var (
 	})
 	// TestNetParams are the clone parameters for testnet.
 	TestNetParams = btc.ReadCloneParams(&btc.CloneParams{
+		Name:             "testnet4",
 		PubKeyHashAddrID: 0x7e, // 126 - start with t
 		ScriptHashAddrID: 0x8c, // 140 - start with s
 		Bech32HRPSegwit:  "dgbt",
@@ -63,6 +65,7 @@ var (
 	})
 	// RegressionNetParams are the clone parameters for simnet.
 	RegressionNetParams = btc.ReadCloneParams(&btc.CloneParams{
+		Name:             "regtest",
 		PubKeyHashAddrID: 0x7e, // 126
 		ScriptHashAddrID: 0x8c, // 140
 		Bech32HRPSegwit:  "dgbrt",
