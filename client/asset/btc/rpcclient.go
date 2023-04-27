@@ -182,8 +182,7 @@ func (wc *rpcClient) connect(ctx context.Context, _ *sync.WaitGroup) error {
 // the special_activelyUsed flag is set, reconfigure will fail if we can't
 // validate ownership of the current deposit address.
 func (wc *rpcClient) reconfigure(cfg *asset.WalletConfig, currentAddress string) (restartRequired bool, err error) {
-	// rpcClient only handles walletTypeRPC.
-	if cfg.Type != walletTypeRPC {
+	if cfg.Type != wc.cloneParams.WalletCFG.Type {
 		restartRequired = true
 		return
 	}
