@@ -34,6 +34,7 @@ var (
 	// between address types on the fly and use these spoof parameters
 	// internally.
 	MainNetParams = btc.ReadCloneParams(&btc.CloneParams{
+		Name:             "mainnet",
 		ScriptHashAddrID: 0xBD,
 		PubKeyHashAddrID: 0xB8,
 		CoinbaseMaturity: 100,
@@ -41,6 +42,7 @@ var (
 	})
 	// TestNet4Params are the clone parameters for testnet.
 	TestNet4Params = btc.ReadCloneParams(&btc.CloneParams{
+		Name:             "testnet4",
 		PubKeyHashAddrID: 0x25,
 		ScriptHashAddrID: 0xBA,
 		CoinbaseMaturity: 100,
@@ -48,6 +50,7 @@ var (
 	})
 	// RegressionNetParams are the clone parameters for simnet.
 	RegressionNetParams = btc.ReadCloneParams(&btc.CloneParams{
+		Name:             "regtest",
 		PubKeyHashAddrID: 0x25,
 		ScriptHashAddrID: 0xBA,
 		CoinbaseMaturity: 100,

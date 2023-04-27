@@ -42,6 +42,7 @@ var (
 
 	// MainNetParams are the clone parameters for mainnet.
 	MainNetParams = btc.ReadCloneParams(&btc.CloneParams{
+		Name:             "mainnet",
 		PubKeyHashAddrID: 0x1e,
 		ScriptHashAddrID: 0x16,
 		CoinbaseMaturity: 30,
@@ -50,6 +51,7 @@ var (
 	})
 	// TestNet4Params are the clone parameters for testnet.
 	TestNet4Params = btc.ReadCloneParams(&btc.CloneParams{
+		Name:             "testnet4",
 		PubKeyHashAddrID: 0x71,
 		ScriptHashAddrID: 0xc4,
 		CoinbaseMaturity: 30,
@@ -58,6 +60,7 @@ var (
 	})
 	// RegressionNetParams are the clone parameters for simnet.
 	RegressionNetParams = btc.ReadCloneParams(&btc.CloneParams{
+		Name:             "regtest",
 		PubKeyHashAddrID: 0x6f,
 		ScriptHashAddrID: 0xc4,
 		CoinbaseMaturity: 60,
