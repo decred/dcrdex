@@ -7232,6 +7232,7 @@ func TestReconfigureWallet(t *testing.T) {
 		Config:  newSettings,
 		Type:    "type",
 	}
+	xyzWallet.walletType = "type"
 
 	// App Password error
 	rig.crypter.(*tCrypter).recryptErr = tErr
