@@ -305,7 +305,7 @@ export class NewWalletForm {
     const page = this.page
     this.current.selectedDef = walletDef
     const appPwCached = State.passwordIsCached() || (this.pwCache && this.pwCache.pw)
-    Doc.hide(page.auth, page.oneBttnBox, page.newWalletPassBox)
+    Doc.hide(page.walletPassAndSubmitBttn, page.oneBttnBox, page.newWalletPassBox)
     const guideLink = walletDef.guidelink
     const configOpts = walletDef.configopts || []
     // If a config represents a wallet's birthday, we update the default
@@ -326,15 +326,15 @@ export class NewWalletForm {
         break
       }
     }
-    const noWalletPWNeeded = walletDef.noauth || walletDef.seeded || Boolean(this.current.asset.token)
-    if (appPwCached && noWalletPWNeeded && !containsRequired) {
+    const displayCreateBtn = walletDef.seeded || Boolean(this.current.asset.token)
+    if (appPwCached && displayCreateBtn && !containsRequired) {
       Doc.show(page.oneBttnBox)
-    } else if (noWalletPWNeeded) {
-      Doc.show(page.auth)
+    } else if (displayCreateBtn) {
+      Doc.show(page.walletPassAndSubmitBttn)
       page.newWalletPass.value = ''
       page.submitAdd.textContent = intl.prep(intl.ID_CREATE)
     } else {
-      Doc.show(page.auth)
+      Doc.show(page.walletPassAndSubmitBttn)
       if (!walletDef.noauth) Doc.show(page.newWalletPassBox)
       page.submitAdd.textContent = intl.prep(intl.ID_ADD)
     }
