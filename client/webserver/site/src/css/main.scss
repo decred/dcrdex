@@ -17,7 +17,10 @@ button {
 
 body {
   position: fixed;
-  inset: 0;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
@@ -196,11 +199,18 @@ input:focus:not([type=checkbox]) {
 
 @mixin fill-abs {
   position: absolute;
-  inset: 0;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
 }
 
 .fill-abs {
   @include fill-abs;
+}
+
+.min-fit {
+  min-height: fit-content;
 }
 
 @mixin stylish-overflow {

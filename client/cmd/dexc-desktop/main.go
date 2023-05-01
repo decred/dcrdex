@@ -230,7 +230,7 @@ func mainCore() error {
 	// not well documented. Test to verify. Could also catch SIGKILL, which is
 	// sent after a configured timeout if the program doesn't exit on SIGTERM.
 	killChan := make(chan os.Signal, 1)
-	signal.Notify(killChan, syscall.SIGINT /* ctrl-c */, syscall.SIGTERM /* system shutdown */)
+	signal.Notify(killChan, os.Interrupt /* ctrl-c */, syscall.SIGTERM /* system shutdown */)
 	go func() {
 		for range killChan {
 			log.Infof("Shutting down...")

@@ -35,19 +35,19 @@ body.dark {
   }
 
   .brdrleft {
-    border-left: 1px solid dark_border_color;
+    border-left: 1px solid $dark_border_color;
   }
 
   .brdrright {
-    border-right: 1px solid dark_border_color;
+    border-right: 1px solid $dark_border_color;
   }
 
   .brdrtop {
-    border-top: 1px solid dark_border_color;
+    border-top: 1px solid $dark_border_color;
   }
 
   .brdrbottom {
-    border-bottom: 1px solid dark_border_color;
+    border-bottom: 1px solid $dark_border_color;
   }
 
   .subtlelink,

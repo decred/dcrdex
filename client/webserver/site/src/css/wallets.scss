@@ -45,6 +45,7 @@
     .icon-select {
       padding: 15px;
       cursor: pointer;
+      min-height: fit-content;
 
       & > img {
         width: 40px;
