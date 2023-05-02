@@ -669,9 +669,8 @@ func tNewWallet(segwit bool, walletType string) (*intermediaryWallet, *testData,
 			}
 			w.node = spvw
 			wallet = &intermediaryWallet{
-				baseWallet:     w,
-				txFeeEstimator: spvw,
-				tipRedeemer:    spvw,
+				baseWallet:  w,
+				tipRedeemer: spvw,
 			}
 		}
 	}

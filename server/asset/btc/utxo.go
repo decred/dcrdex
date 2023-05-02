@@ -99,6 +99,12 @@ func (txio *TXIO) FeeRate() uint64 {
 	return txio.tx.feeRate
 }
 
+// Fees is the total fees paid for the tx containing the TXIO. Fees is not a
+// required method for asset.Coin, but is used by Zcash for fee validation.
+func (txio *TXIO) Fees() uint64 {
+	return txio.tx.fees
+}
+
 // Input is a transaction input.
 type Input struct {
 	TXIO

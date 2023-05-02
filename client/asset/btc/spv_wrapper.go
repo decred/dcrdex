@@ -748,36 +748,43 @@ func (w *spvWallet) Lock() error {
 	return nil
 }
 
+// DRAFT NOTE: Move estimateSendTxFee out of spv_wrapper before merge. Leaving
+// for reviewability.
+
 // estimateSendTxFee callers should provide at least one output value.
-func (w *spvWallet) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract bool) (fee uint64, err error) {
+func (btc *baseWallet) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract bool) (fee uint64, err error) {
 	minTxSize := uint64(tx.SerializeSize())
 	var sendAmount uint64
 	for _, txOut := range tx.TxOut {
 		sendAmount += uint64(txOut.Value)
 	}
 
-	unspents, err := w.listUnspent()
+	unspents, err := btc.node.listUnspent()
 	if err != nil {
 		return 0, fmt.Errorf("error listing unspent outputs: %w", err)
 	}
 
-	utxos, _, _, err := convertUnspent(0, unspents, w.chainParams)
+	utxos, _, _, err := convertUnspent(0, unspents, btc.chainParams)
 	if err != nil {
 		return 0, fmt.Errorf("error converting unspent outputs: %w", err)
 	}
 
-	enough := sendEnough(sendAmount, feeRate, subtract, minTxSize, true, false)
-	sum, _, inputsSize, _, _, _, _, err := tryFund(utxos, enough)
+	enough := btc.sendEnough(sendAmount, feeRate, subtract, minTxSize, true, false)
+	sum, _, inputsSize, coins, _, _, _, err := tryFund(utxos, enough)
 	if err != nil {
 		return 0, err
 	}
 
-	txSize := minTxSize + inputsSize
-	estFee := feeRate * txSize
+	estFee := btc.txFees(minTxSize, uint64(len(coins)), inputsSize, feeRate)
 	remaining := sum - sendAmount
 
+	var opSize uint64 = dexbtc.P2PKHOutputSize
+	if btc.segwit {
+		opSize = dexbtc.P2WPKHOutputSize
+	}
+
 	// Check if there will be a change output if there is enough remaining.
-	estFeeWithChange := (txSize + dexbtc.P2WPKHOutputSize) * feeRate
+	estFeeWithChange := btc.txFees(minTxSize+opSize, uint64(len(coins)), inputsSize, feeRate)
 	var changeValue uint64
 	if remaining > estFeeWithChange {
 		changeValue = remaining - estFeeWithChange
@@ -789,7 +796,7 @@ func (w *spvWallet) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract b
 	}
 
 	var finalFee uint64
-	if dexbtc.IsDustVal(dexbtc.P2WPKHOutputSize, changeValue, feeRate, true) {
+	if btc.isDust(opSize, changeValue, feeRate, true) {
 		// remaining cannot cover a non-dust change and the fee for the change.
 		finalFee = estFee + remaining
 	} else {
@@ -800,7 +807,7 @@ func (w *spvWallet) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract b
 	if subtract {
 		sendAmount -= finalFee
 	}
-	if dexbtc.IsDustVal(minTxSize, sendAmount, feeRate, true) {
+	if btc.isDust(minTxSize, sendAmount, feeRate, true) {
 		return 0, errors.New("output value is dust")
 	}
 

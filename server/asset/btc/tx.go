@@ -26,6 +26,9 @@ type Tx struct {
 	// Used to conditionally skip block lookups on mempool transactions during
 	// calls to Confirmations.
 	lastLookup *chainhash.Hash
+	// fees is the fees paid in the tx. fees is used Zcash. It is exposed by the
+	// (*TXIO).Fees which is not part of the asset.Coin interface.
+	fees uint64
 	// The calculated transaction fee rate, in satoshis/vbyte
 	feeRate uint64
 	// raw is the raw tx bytes.
@@ -48,7 +51,7 @@ type txOut struct {
 
 // A getter for a new Tx.
 func newTransaction(btc *Backend, txHash, blockHash, lastLookup *chainhash.Hash,
-	blockHeight int64, isCoinbase bool, ins []txIn, outs []txOut, feeRate uint64, rawTx []byte) *Tx {
+	blockHeight int64, isCoinbase bool, ins []txIn, outs []txOut, fees, feeRate uint64, rawTx []byte) *Tx {
 	// Set a nil blockHash to the zero hash.
 	hash := blockHash
 	if hash == nil {
@@ -63,6 +66,7 @@ func newTransaction(btc *Backend, txHash, blockHash, lastLookup *chainhash.Hash,
 		outs:       outs,
 		isCoinbase: isCoinbase,
 		lastLookup: lastLookup,
+		fees:       fees,
 		feeRate:    feeRate,
 		raw:        rawTx,
 	}

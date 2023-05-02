@@ -32,7 +32,7 @@ const (
 	// structure.
 	defaultFee          = 10
 	defaultFeeRateLimit = 1000
-	minNetworkVersion   = 5040250 // v5.4.2
+	minNetworkVersion   = 5050050 // v5.5.0
 	walletTypeRPC       = "zcashdRPC"
 
 	transparentAcctNumber = 0
@@ -207,7 +207,17 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 			return dexzec.EncodeAddress(addr, addrParams)
 		},
 		TxSizeCalculator: dexzec.CalcTxSize,
-		NonSegwitSigner:  signTx,
+		DustRater: func(outputSize, value, minRelayTxFee uint64, segwit bool) bool {
+			return isDust(value, outputSize)
+		},
+		OrderEstimator: func(swapVal, inputCount, inputsSize, maxSwaps, swapSizeBase, _, _ uint64) uint64 {
+			return dexzec.RequiredOrderFunds(swapVal, inputCount, inputsSize, maxSwaps)
+		},
+		TxFeesCalculator: func(baseTxSize, inputCount, inputsSize, _ uint64) uint64 {
+			return txFees(baseTxSize, inputCount, inputsSize)
+		},
+		SplitFeeCalculator: splitTxFees,
+		NonSegwitSigner:    signTx,
 		TxDeserializer: func(b []byte) (*wire.MsgTx, error) {
 			zecTx, err := dexzec.DeserializeTx(b)
 			if err != nil {
@@ -261,6 +271,40 @@ var _ asset.FeeRater = (*zecWallet)(nil)
 // FeeRate returns the asset standard fee rate for Zcash.
 func (w *zecWallet) FeeRate() uint64 {
 	return dexzec.LegacyFeeRate
+}
+
+func (w *zecWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
+	est, err := w.ExchangeWalletNoAuth.PreSwap(req)
+	if err != nil {
+		return nil, err
+	}
+	// We need to strip out the fee bump option.
+	const swapFeeBumpKey = "swapfeebump"
+	opts := make([]*asset.OrderOption, 0, len(est.Options))
+	for _, opt := range est.Options {
+		if opt.Key == swapFeeBumpKey {
+			continue
+		}
+		opts = append(opts, opt)
+	}
+	est.Options = opts
+	return est, nil
+}
+
+func (w *zecWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, error) {
+	var singleTxInsSize uint64 = dexbtc.TxInOverhead + dexbtc.RedeemSwapSigScriptSize + 1
+	var txOutsSize uint64 = dexbtc.P2PKHOutputSize + 1
+	worstCaseFees := dexzec.TransparentTxFeesZIP317(singleTxInsSize, txOutsSize) * req.Lots
+
+	multiTxInsSize := dexbtc.TxInOverhead + dexbtc.RedeemSwapSigScriptSize*req.Lots + uint64(wire.VarIntSerializeSize(req.Lots))
+	bestCaseFees := dexzec.TransparentTxFeesZIP317(multiTxInsSize, txOutsSize) * req.Lots
+	return &asset.PreRedeem{
+		Estimate: &asset.RedeemEstimate{
+			RealisticWorstCase: worstCaseFees,
+			RealisticBestCase:  bestCaseFees,
+		},
+		Options: []*asset.OrderOption{},
+	}, nil
 }
 
 var _ asset.ShieldedWallet = (*zecWallet)(nil)
@@ -586,4 +630,39 @@ func signTx(btcTx *wire.MsgTx, idx int, pkScript []byte, hashType txscript.SigHa
 	}
 
 	return append(ecdsa.Sign(key, sigHash[:]).Serialize(), byte(hashType)), nil
+}
+
+// isDust returns true if the output will be rejected as dust.
+func isDust(val, outputSize uint64) bool {
+	// See https://github.com/zcash/zcash/blob/5066efbb98bc2af5eed201212d27c77993950cee/src/primitives/transaction.h#L630
+	// https://github.com/zcash/zcash/blob/5066efbb98bc2af5eed201212d27c77993950cee/src/primitives/transaction.cpp#L127
+	// Also see informative comments hinting towards future changes at
+	// https://github.com/zcash/zcash/blob/master/src/policy/policy.h
+	sz := outputSize + 148                        // 148 accounts for an input on spending tx
+	const oneThirdDustThresholdRate = 100         // zats / kB
+	nFee := oneThirdDustThresholdRate * sz / 1000 // This is different from BTC
+	if nFee == 0 {
+		nFee = oneThirdDustThresholdRate
+	}
+	return val < 3*nFee
+}
+
+var emptyTxSize = dexzec.CalcTxSize(new(wire.MsgTx))
+
+// txFees is the tx fees for a basic single-output send with change.
+func txFees(baseTxSize, inputCount, inputsSize uint64) uint64 {
+	txInSize := inputsSize + uint64(wire.VarIntSerializeSize(inputCount))
+	outputsSize := baseTxSize - emptyTxSize
+	txOutSize := outputsSize + 1 // Assumes < 253 outputs
+	return dexzec.TransparentTxFeesZIP317(txInSize, txOutSize)
+}
+
+func splitTxFees(inputCount, inputsSize, _ uint64, extraOutput, _ bool) (swapInputSize, baggage uint64) {
+	txInsSize := inputsSize + uint64(wire.VarIntSerializeSize(inputCount))
+	var numOutputs uint64 = 2
+	if extraOutput {
+		numOutputs = 3
+	}
+	txOutsSize := dexbtc.P2PKHOutputSize*numOutputs + uint64(wire.VarIntSerializeSize(numOutputs))
+	return dexbtc.RedeemP2PKHInputSize, dexzec.TransparentTxFeesZIP317(txInsSize, txOutsSize)
 }

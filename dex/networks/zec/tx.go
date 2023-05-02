@@ -800,6 +800,20 @@ func (tx *Tx) SerializeSize() uint64 {
 	return sz
 }
 
+func (tx *Tx) TxFeesZIP317() uint64 {
+	txInsSize := uint64(wire.VarIntSerializeSize(uint64(len(tx.TxIn))))
+	for _, txIn := range tx.TxIn {
+		txInsSize += uint64(txIn.SerializeSize())
+	}
+
+	txOutsSize := uint64(wire.VarIntSerializeSize(uint64(len(tx.TxOut))))
+	for _, txOut := range tx.TxOut {
+		txOutsSize += uint64(txOut.SerializeSize())
+	}
+
+	return txFeesZIP317(txInsSize, txOutsSize, tx)
+}
+
 // writeTxIn encodes ti to the bitcoin protocol encoding for a transaction
 // input (TxIn) to w.
 func writeTxIn(w io.Writer, ti *wire.TxIn) error {

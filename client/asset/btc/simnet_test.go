@@ -21,6 +21,9 @@ import (
 	"decred.org/dcrdex/dex/config"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
@@ -61,6 +64,7 @@ func tBackend(t *testing.T, name string, blkFunc func(string, error)) (*Exchange
 	}
 	// settings["account"] = "default"
 	walletCfg := &asset.WalletConfig{
+		Type:     walletTypeRPC,
 		Settings: settings,
 		TipChange: func(err error) {
 			blkFunc(name, err)
@@ -235,4 +239,37 @@ func TestMakeBondTx(t *testing.T) {
 		t.Fatalf("RefundBond: %v", err)
 	}
 	t.Logf("refundCoin: %v\n", refundCoin)
+}
+
+func TestSendEstimation(t *testing.T) {
+	rig := newTestRig(t, func(name string, err error) {
+		tLogger.Infof("%s has reported a new block, error = %v", name, err)
+	})
+	defer rig.close(t)
+
+	addr, _ := btcutil.DecodeAddress("bcrt1qs6d2lpkcfccus6q7c0dvjnlpf5g45gf7yak6mm", &chaincfg.RegressionNetParams)
+	pkScript, _ := txscript.PayToAddrScript(addr)
+	tx := wire.NewMsgTx(wire.TxVersion)
+	tx.AddTxOut(wire.NewTxOut(10e8, pkScript))
+
+	// Use alpha, since there are many utxos.
+	w := rig.alpha()
+	const numCycles = 100
+	tStart := time.Now()
+	for i := 0; i < numCycles; i++ {
+		_, err := w.estimateSendTxFee(tx, 20, false)
+		if err != nil {
+			t.Fatalf("Error estimating with utxos: %v", err)
+		}
+	}
+	fmt.Println("Time to pick utxos ourselves:", time.Since(tStart))
+	node := w.node.(*rpcClient)
+	tStart = time.Now()
+	for i := 0; i < numCycles; i++ {
+		_, err := node.estimateSendTxFee(tx, 20, false)
+		if err != nil {
+			t.Fatalf("Error estimating with utxos: %v", err)
+		}
+	}
+	fmt.Println("Time to use fundrawtransaction:", time.Since(tStart))
 }

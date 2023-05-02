@@ -855,7 +855,7 @@ func (wc *rpcClient) locked() bool {
 	return time.Unix(*walletInfo.UnlockedUntil, 0).Before(time.Now())
 }
 
-// sendTxFeeEstimator returns the fee required to send tx using the provided
+// estimateSendTxFee returns the fee required to send tx using the provided
 // feeRate.
 func (wc *rpcClient) estimateSendTxFee(tx *wire.MsgTx, feeRate uint64, subtract bool) (txfee uint64, err error) {
 	txBytes, err := wc.serializeTx(tx)

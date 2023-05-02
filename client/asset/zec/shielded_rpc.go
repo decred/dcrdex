@@ -123,7 +123,8 @@ const (
 
 // z_sendmany "fromaddress" [{"address":... ,"amount":...},...] ( minconf ) ( fee ) ( privacyPolicy )
 func zSendMany(c rpcCaller, fromAddress string, recips []*zSendManyRecipient, priv privacyPolicy) (operationID string, err error) {
-	const minConf, fee = 1, 0.00001
+	const minConf = 1
+	var fee *uint64 // Only makes sense with >= 5.5.0
 	return operationID, c.CallRPC(methodZSendMany, []interface{}{fromAddress, recips, minConf, fee, priv}, &operationID)
 }
 

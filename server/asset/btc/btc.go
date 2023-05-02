@@ -1179,17 +1179,18 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *VerboseTxExte
 	}
 
 	var feeRate uint64
+	fees := sumIn - sumOut
 	if btc.segwit {
 		if verboseTx.Vsize > 0 {
-			feeRate = (sumIn - sumOut) / uint64(verboseTx.Vsize)
+			feeRate = fees / uint64(verboseTx.Vsize)
 		}
 	} else if verboseTx.Size > 0 {
 		// For non-segwit transactions, Size = Vsize anyway, so use Size to
 		// cover assets that won't set Vsize in their RPC response.
-		feeRate = (sumIn - sumOut) / uint64(verboseTx.Size)
+		feeRate = fees / uint64(verboseTx.Size)
 
 	}
-	return newTransaction(btc, txHash, blockHash, lastLookup, blockHeight, isCoinbase, inputs, outputs, feeRate, rawTx), nil
+	return newTransaction(btc, txHash, blockHash, lastLookup, blockHeight, isCoinbase, inputs, outputs, fees, feeRate, rawTx), nil
 }
 
 // Get information for an unspent transaction output and it's transaction.

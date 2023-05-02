@@ -396,6 +396,16 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 	return r.processTrade(oRecord, tunnel, assets, market.Coins, sell, 0, market.RedeemSig, market.Serialize())
 }
 
+// orderReq calculates the require balance for a utxo-based funding asset to
+// support an order of the specified size.
+func (r *OrderRouter) orderReq(be asset.Backend, swapVal, inputsCount, inputsSize, maxSwaps uint64, nfo *dex.Asset) uint64 {
+	if oe, is := be.(asset.OrderEstimator); is {
+		return oe.CalcOrderFunds(swapVal, inputsCount, inputsSize, maxSwaps)
+	} else {
+		return calc.RequiredOrderFunds(swapVal, inputsSize, maxSwaps, nfo)
+	}
+}
+
 // processTrade checks that the trade is valid and submits it to the market.
 func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, assets *assetSet,
 	coins []*msgjson.Coin, sell bool, rate uint64, redeemSig *msgjson.RedeemSig, sigMsg []byte) *msgjson.Error {
@@ -550,13 +560,14 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 		}
 
 		// Calculate the fees and check that the utxo sum is enough.
+		inputCount := uint64(len(coins))
 		var reqVal uint64
 		if sell {
-			reqVal = calc.RequiredOrderFunds(trade.Quantity, uint64(spendSize), lots, &fundingAsset.Asset)
+			reqVal = r.orderReq(fundingAsset.Backend, trade.Quantity, inputCount, uint64(spendSize), lots, &fundingAsset.Asset)
 		} else {
 			if rate > 0 { // limit buy
 				quoteQty := calc.BaseToQuote(rate, trade.Quantity)
-				reqVal = calc.RequiredOrderFunds(quoteQty, uint64(spendSize), lots, &assets.quote.Asset)
+				reqVal = r.orderReq(fundingAsset.Backend, quoteQty, inputCount, uint64(spendSize), lots, &assets.quote.Asset)
 			} else {
 				// This is a market buy order, so the quantity gets special handling.
 				// 1. The quantity is in units of the quote asset.
@@ -572,7 +583,7 @@ func (r *OrderRouter) processTrade(oRecord *orderRecord, tunnel MarketTunnel, as
 					errStr := fmt.Sprintf("order quantity does not satisfy market buy buffer. %d < %d. midGap = %d", trade.Quantity, minReq, midGap)
 					return false, msgjson.NewError(msgjson.FundingError, errStr)
 				}
-				reqVal = calc.RequiredOrderFunds(minReq, uint64(spendSize), 1, &assets.quote.Asset)
+				reqVal = r.orderReq(fundingAsset.Backend, minReq, inputCount, uint64(spendSize), 1, &assets.quote.Asset)
 			}
 
 		}

@@ -8,9 +8,12 @@ import (
 	"sort"
 	"time"
 
-	"decred.org/dcrdex/dex/calc"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 )
+
+func (btc *baseWallet) sendEnough(amt, feeRate uint64, subtract bool, baseTxSize uint64, segwit, reportChange bool) func(inputCount, inputSize, sum uint64) (bool, uint64) {
+	return sendEnough(amt, feeRate, subtract, baseTxSize, segwit, reportChange, btc.isDust, btc.txFees)
+}
 
 // sendEnough generates a function that can be used as the enough argument to
 // the fund method when creating transactions to send funds. If fees are to be
@@ -20,9 +23,9 @@ import (
 // enough func will return a non-zero excess value. Otherwise, the enough func
 // will always return 0, leaving only unselected UTXOs to cover any required
 // reserves.
-func sendEnough(amt, feeRate uint64, subtract bool, baseTxSize uint64, segwit, reportChange bool) func(inputSize, sum uint64) (bool, uint64) {
-	return func(inputSize, sum uint64) (bool, uint64) {
-		txFee := (baseTxSize + inputSize) * feeRate
+func sendEnough(amt, feeRate uint64, subtract bool, baseTxSize uint64, segwit, reportChange bool, isDust DustRater, sendFees TxFeesCalculator) func(inputCount, inputSize, sum uint64) (bool, uint64) {
+	return func(inputCount, inputSize, sum uint64) (bool, uint64) {
+		txFee := sendFees(baseTxSize, inputCount, inputSize, feeRate)
 		req := amt
 		if !subtract { // add the fee to required
 			req += txFee
@@ -31,11 +34,15 @@ func sendEnough(amt, feeRate uint64, subtract bool, baseTxSize uint64, segwit, r
 			return false, 0
 		}
 		excess := sum - req
-		if !reportChange || dexbtc.IsDustVal(dexbtc.P2PKHOutputSize, excess, feeRate, segwit) {
+		if !reportChange || isDust(dexbtc.P2PKHOutputSize, excess, feeRate, segwit) {
 			excess = 0
 		}
 		return true, excess
 	}
+}
+
+func (btc *baseWallet) orderEnough(val, lots, feeRate, initTxSizeBase, initTxSize uint64, segwit, reportChange bool) func(inputCount, inputSize, sum uint64) (bool, uint64) {
+	return orderEnough(val, lots, feeRate, initTxSizeBase, initTxSize, segwit, reportChange, btc.orderReq, btc.isDust)
 }
 
 // orderEnough generates a function that can be used as the enough argument to
@@ -44,12 +51,12 @@ func sendEnough(amt, feeRate uint64, subtract bool, baseTxSize uint64, segwit, r
 // enough func will return a non-zero excess value reflecting this potential
 // spit tx change. Otherwise, the enough func will always return 0, leaving
 // only unselected UTXOs to cover any required reserves.
-func orderEnough(val, lots, feeRate, initTxSizeBase, initTxSize uint64, segwit, reportChange bool) func(inputsSize, sum uint64) (bool, uint64) {
-	return func(inputsSize, sum uint64) (bool, uint64) {
-		reqFunds := calc.RequiredOrderFundsAlt(val, inputsSize, lots, initTxSizeBase, initTxSize, feeRate)
+func orderEnough(val, lots, feeRate, initTxSizeBase, initTxSize uint64, segwit, reportChange bool, orderReq OrderEstimator, isDust DustRater) func(inputCount, inputsSize, sum uint64) (bool, uint64) {
+	return func(inputCount, inputsSize, sum uint64) (bool, uint64) {
+		reqFunds := orderReq(val, inputCount, inputsSize, lots, initTxSizeBase, initTxSize, feeRate)
 		if sum >= reqFunds {
 			excess := sum - reqFunds
-			if !reportChange || dexbtc.IsDustVal(dexbtc.P2PKHOutputSize, excess, feeRate, segwit) {
+			if !reportChange || isDust(dexbtc.P2PKHOutputSize, excess, feeRate, segwit) {
 				excess = 0
 			}
 			return true, excess

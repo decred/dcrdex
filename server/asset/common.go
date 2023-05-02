@@ -123,6 +123,13 @@ type TokenBacker interface {
 	TokenBackend(assetID uint32, configPath string) (Backend, error)
 }
 
+// OrderEstimator estimate the funds required for an order of a particular size.
+// If OrderEstimator is not implemented, caller should use
+// calc.RequiredOrderFunds. Never used for account-based assets.
+type OrderEstimator interface {
+	CalcOrderFunds(swapVal, inputsCount, inputsSize, maxSwaps uint64) uint64
+}
+
 // Coin represents a transaction input or output.
 type Coin interface {
 	// Confirmations returns the number of confirmations for a Coin's

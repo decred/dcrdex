@@ -126,6 +126,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		Backend:    be,
 		addrParams: addrParams,
 		btcParams:  btcParams,
+		log:        logger.SubLogger("ZEC"),
 	}, nil
 }
 
@@ -135,6 +136,7 @@ type ZECBackend struct {
 	*btc.Backend
 	btcParams  *chaincfg.Params
 	addrParams *dexzec.AddressParams
+	log        dex.Logger
 }
 
 // Contract returns the output from embedded Backend's Contract method, but
@@ -157,6 +159,35 @@ func (be *ZECBackend) Contract(coinID []byte, redeemScript []byte) (*asset.Contr
 // guarantee the tx get over the legacy 0.00001 standard tx fee.
 func (be *ZECBackend) FeeRate(context.Context) (uint64, error) {
 	return dexzec.LegacyFeeRate, nil
+}
+
+func (be *ZECBackend) ValidateFeeRate(contract *asset.Contract, reqFeeRate uint64) bool {
+	// Fees method is implemented by btc.TXIO especially for use of Zcash, since
+	// Zcash has a unique fee calculation, and therefore special fee validation
+	// rules. See ZIP-0317.
+	fr, is := contract.Coin.(interface {
+		Fees() uint64
+	})
+	if !is {
+		be.log.Errorf("supplied contract coin is not a FeeReporter")
+		return false
+	}
+
+	fees := fr.Fees()
+
+	zecTx, err := dexzec.DeserializeTx(contract.TxData)
+	if err != nil {
+		be.log.Errorf("error deserializing contract %q tx bytes for fee validation: %w", contract.SecretHash, err)
+		return false
+	}
+
+	return fees >= zecTx.TxFeesZIP317()
+}
+
+// CalcOrderFunds is the ZIP-0317 compliant version of calc.RequiredOrderFunds.
+// Satisfies the asset.OrderEstimator interface.
+func (be *ZECBackend) CalcOrderFunds(swapVal, inputCount, inputsSize, maxSwaps uint64) uint64 {
+	return dexzec.RequiredOrderFunds(swapVal, inputCount, inputsSize, maxSwaps)
 }
 
 func blockFeeTransactions(rc *btc.RPCClient, blockHash *chainhash.Hash) (feeTxs []btc.FeeTx, prevBlock chainhash.Hash, err error) {
