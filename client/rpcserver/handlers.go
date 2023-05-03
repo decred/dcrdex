@@ -1136,7 +1136,8 @@ var helpMsgs = map[string]helpMsg{
 	toggleWalletStatusRoute: {
 		pwArgsShort: "appPass",
 		argsShort:   `assetID disable`,
-		cmdSummary:  `Disable or enable an existing wallet.`,
+		cmdSummary: `Disable or enable an existing wallet. When disabling a parent wallet, all
+		token wallets that depend on the wallet will be disabled.`,
 		pwArgsLong: `Password Args:
     appPass (string): The DEX client password.`,
 		argsLong: `Args:

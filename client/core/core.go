@@ -2178,52 +2178,64 @@ func (c *Core) ToggleWalletStatus(assetID uint32, disable bool) error {
 		return nil
 	}
 
+	// If this wallet is a parent, disable/enable all token wallets.
+	affectedWallets := []*xcWallet{wallet}
 	if disable {
-		// Ensure wallet is not a parent of an enabled token wallet.
+		// Ensure wallet is not a parent of an enabled token wallet with active
+		// orders.
 		if assetInfo := asset.Asset(assetID); assetInfo != nil {
 			for id := range assetInfo.Tokens {
-				if wallet, exists := c.wallet(id); exists && !wallet.isDisabled() {
-					return fmt.Errorf("%s wallet has an enabled %s token wallet", unbip(assetID), unbip(id))
+				if wallet, exists := c.wallet(id); exists {
+					if c.assetHasActiveOrders(wallet.AssetID) {
+						return newError(activeOrdersErr, "active orders for %v", unbip(wallet.AssetID))
+					}
+					affectedWallets = append(affectedWallets, wallet)
 				}
 			}
 		}
 
-		if c.assetHasActiveOrders(assetID) {
-			return newError(activeOrdersErr, "active orders for %v", unbip(assetID))
-		}
+		// Ensure wallet is not an active bond asset wallet. This check will
+		// cover for token wallets if this wallet is a parent.
 		if c.isActiveBondAsset(assetID, true) {
 			return newError(bondAssetErr, "%v is an active bond asset wallet", unbip(assetID))
 		}
 
-		if wallet.connected() {
-			wallet.Disconnect() // before disable or it refuses
+		// Disconnect and disable all affected wallets.
+		for _, wallet := range affectedWallets {
+			if wallet.connected() {
+				wallet.Disconnect() // before disable or it refuses
+			}
+			wallet.setDisabled(true)
 		}
-
-		wallet.setDisabled(true)
 	} else {
-		// Ensure wallet does not have a disabled parent wallet.
 		if wallet.parent != nil && wallet.parent.isDisabled() {
-			return fmt.Errorf("token parent wallet is disabled")
+			// Ensure parent wallet starts first.
+			affectedWallets = append([]*xcWallet{wallet.parent}, affectedWallets...)
 		}
 
-		// Update wallet status before attempting to connect wallet because disabled
-		// wallets cannot be connected to.
-		wallet.setDisabled(false)
+		for _, wallet := range affectedWallets {
+			// Update wallet status before attempting to connect wallet because disabled
+			// wallets cannot be connected to.
+			wallet.setDisabled(false)
 
-		// Attempt to connect wallet.
-		err := c.connectAndUpdateWallet(wallet)
+			// Attempt to connect wallet.
+			err := c.connectAndUpdateWallet(wallet)
+			if err != nil {
+				c.log.Errorf("Error connecting to %s wallet: %v", unbip(assetID), err)
+			}
+		}
+	}
+
+	for _, wallet := range affectedWallets {
+		// Update db with wallet status.
+		err := c.db.UpdateWalletStatus(wallet.dbID, disable)
 		if err != nil {
-			c.log.Errorf("Error connecting to %s wallet: %v", unbip(assetID), err)
+			return fmt.Errorf("db.UpdateWalletStatus error: %w", err)
 		}
+
+		c.notify(newWalletStateNote(wallet.state()))
 	}
 
-	// Update db with wallet status.
-	err := c.db.UpdateWalletStatus(wallet.dbID, disable)
-	if err != nil {
-		return fmt.Errorf("db.UpdateWalletStatus error: %w", err)
-	}
-
-	c.notify(newWalletStateNote(wallet.state()))
 	return nil
 }
 
