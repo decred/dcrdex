@@ -226,27 +226,34 @@ func (wc *rpcClient) reconfigure(cfg *asset.WalletConfig, currentAddress string)
 	// If the RPC configuration has changed, try to update the client.
 	oldCfg := wc.rpcConfig
 	if *newCfg != *oldCfg {
+		if wc.connectFunc != nil {
+			return true, nil // this asset needs a new rpcClient, then connect
+		}
+
 		cl, err := newRPCConnection(parsedCfg, wc.cloneParams.SingularWallet)
 		if err != nil {
 			return false, fmt.Errorf("error creating RPC client with new credentials: %v", err)
 		}
 
-		// If the wallet is in active use, check the supplied address.
-		if parsedCfg.ActivelyUsed {
-			// We can't use wc.ownsAddress because the rpcClient still has the
-			// old requester stored, so we'll call directly.
-			method := methodGetAddressInfo
-			if wc.legacyValidateAddressRPC {
-				method = methodValidateAddress
-			}
-
-			ai := new(GetAddressInfoResult)
-			if err := call(wc.ctx, cl, method, anylist{currentAddress}, ai); err != nil {
-				return false, fmt.Errorf("error getting address info with new RPC credentials: %w", err)
-			} else if !ai.IsMine {
+		// Require restart if the wallet does not own or understand our current
+		// address. We can't use wc.ownsAddress because the rpcClient still has
+		// the old requester stored, so we'll call directly.
+		method := methodGetAddressInfo
+		if wc.legacyValidateAddressRPC {
+			method = methodValidateAddress
+		}
+		ai := new(GetAddressInfoResult)
+		if err := call(wc.ctx, cl, method, anylist{currentAddress}, ai); err != nil {
+			return false, fmt.Errorf("error getting address info with new RPC client: %w", err)
+		} else if !ai.IsMine {
+			// If the wallet is in active use, check the supplied address.
+			if parsedCfg.ActivelyUsed { // deny reconfigure
 				return false, errors.New("cannot reconfigure to a new RPC wallet during active use")
 			}
-		}
+			// Allow reconfigure, but restart to trigger dep address refresh and
+			// full connect checks, which include the getblockchaininfo check.
+			return true, nil
+		} // else same wallet, skip full reconnect
 
 		chainInfo := new(getBlockchainInfoResult)
 		if err := call(wc.ctx, cl, methodGetBlockchainInfo, nil, chainInfo); err != nil {
@@ -1043,12 +1050,16 @@ func (wc *rpcClient) getBlockchainInfo() (*getBlockchainInfoResult, error) {
 func (wc *rpcClient) getVersion() (uint64, uint64, error) {
 	r := &struct {
 		Version         uint64 `json:"version"`
+		SubVersion      string `json:"subversion"`
 		ProtocolVersion uint64 `json:"protocolversion"`
 	}{}
 	err := wc.call(methodGetNetworkInfo, nil, r)
 	if err != nil {
 		return 0, 0, err
 	}
+	// TODO: We might consider checking getnetworkinfo's "subversion" field,
+	// which is something like "/Satoshi:24.0.1/".
+	wc.log.Debugf("Node at %v reports subversion \"%v\"", wc.rpcConfig.RPCBind, r.SubVersion)
 	return r.Version, r.ProtocolVersion, nil
 }
 
