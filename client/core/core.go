@@ -2194,6 +2194,10 @@ func (c *Core) ToggleWalletStatus(assetID uint32, disable bool) error {
 			}
 		}
 
+		if c.assetHasActiveOrders(assetID) {
+			return newError(activeOrdersErr, "active orders for %v", unbip(assetID))
+		}
+		
 		// Ensure wallet is not an active bond asset wallet. This check will
 		// cover for token wallets if this wallet is a parent.
 		if c.isActiveBondAsset(assetID, true) {
