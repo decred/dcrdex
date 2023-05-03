@@ -77,13 +77,22 @@ func (d *Driver) NewAddresser(xPub string, keyIndexer asset.KeyIndexer, network 
 
 func init() {
 	asset.Register(BipID, &Driver{})
+
+	if blockPollIntervalStr != "" {
+		blockPollInterval, _ = time.ParseDuration(blockPollIntervalStr)
+		if blockPollInterval < time.Second {
+			panic(fmt.Sprintf("invalid value for blockPollIntervalStr: %q", blockPollIntervalStr))
+		}
+	}
 }
 
 var (
 	zeroHash chainhash.Hash
 	// The blockPollInterval is the delay between calls to GetBestBlockHash to
-	// check for new blocks.
+	// check for new blocks. Modify at compile time via blockPollIntervalStr:
+	// go build -ldflags "-X 'decred.org/dcrdex/server/asset/btc.blockPollIntervalStr=4s'"
 	blockPollInterval            = time.Second
+	blockPollIntervalStr         string
 	conventionalConversionFactor = float64(dexbtc.UnitInfo.Conventional.ConversionFactor)
 	defaultMaxFeeBlocks          = 3
 )
@@ -1272,6 +1281,8 @@ func (btc *Backend) auditContract(contract *Output) (*asset.Contract, error) {
 func (btc *Backend) run(ctx context.Context) {
 	defer btc.shutdown()
 
+	btc.log.Infof("Starting %v block polling with interval of %v",
+		strings.ToUpper(btc.name), blockPollInterval)
 	blockPoll := time.NewTicker(blockPollInterval)
 	defer blockPoll.Stop()
 	addBlock := func(block *GetBlockVerboseResult, reorg bool) {
