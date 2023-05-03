@@ -4,6 +4,7 @@
 package zec
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -150,6 +151,12 @@ func (be *ZECBackend) Contract(coinID []byte, redeemScript []byte) (*asset.Contr
 		return nil, err
 	}
 	return contract, nil
+}
+
+// For Zcash, return a constant fee rate of 10 zats / byte. We just need to
+// guarantee the tx get over the legacy 0.00001 standard tx fee.
+func (be *ZECBackend) FeeRate(context.Context) (uint64, error) {
+	return dexzec.LegacyFeeRate, nil
 }
 
 func blockFeeTransactions(rc *btc.RPCClient, blockHash *chainhash.Hash) (feeTxs []btc.FeeTx, prevBlock chainhash.Hash, err error) {
