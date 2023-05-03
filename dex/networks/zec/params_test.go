@@ -21,11 +21,17 @@ func TestCompatibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error decoding p2pkh address: %v", err)
 	}
+	if !btcPkhAddr.IsForNet(MainNetParams) {
+		t.Fatalf("IsForNet rejected address %v (%v) for net %v", btcPkhAddr, pkhAddr, MainNetParams.Name)
+	}
 
 	shAddr := "t3ZJCdehVh9MTm6BaKWZmWy5Hsw7PhJxmTc"
 	btcShAddr, err := DecodeAddress(shAddr, MainNetAddressParams, MainNetParams)
 	if err != nil {
 		t.Fatalf("error decoding p2sh address: %v", err)
+	}
+	if !btcShAddr.IsForNet(MainNetParams) {
+		t.Fatalf("IsForNet rejected address %v (%v) for net %v", btcShAddr, shAddr, MainNetParams.Name)
 	}
 
 	items := &btctest.CompatibilityItems{

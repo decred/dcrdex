@@ -17,15 +17,23 @@ func TestCompatibility(t *testing.T) {
 	}
 
 	// 2b381efec176b72da70e894a6dbba1fc1ba18a1d573af898e6f92915c0ca8209:1
-	p2pkhAddr, err := DecodeCashAddress("bitcoincash:qznf2drgsapgsejd95yp9nw0qzhw9mrcxsez7d78uv", MainNetParams)
+	cashAddrP2PKH := "bitcoincash:qznf2drgsapgsejd95yp9nw0qzhw9mrcxsez7d78uv"
+	p2pkhAddr, err := DecodeCashAddress(cashAddrP2PKH, MainNetParams)
 	if err != nil {
 		t.Fatalf("error p2pkh decoding CashAddr address: %v", err)
 	}
+	if !p2pkhAddr.IsForNet(MainNetParams) {
+		t.Fatalf("IsForNet rejected address %v (%v) for net %v", p2pkhAddr, cashAddrP2PKH, MainNetParams.Name)
+	}
 
 	// b63e8090fe7140328d5d6ecdd6045b123e3f05742d9a749f2550fba7d0a6879f:1
-	p2shAddr, err := DecodeCashAddress("bitcoincash:pqugctqhj096cufywe32rktfu5dpmnnrjgsznuudl2", MainNetParams)
+	cashAddrP2SH := "bitcoincash:pqugctqhj096cufywe32rktfu5dpmnnrjgsznuudl2"
+	p2shAddr, err := DecodeCashAddress(cashAddrP2SH, MainNetParams)
 	if err != nil {
 		t.Fatalf("error decoding p2sh CashAddr address: %v", err)
+	}
+	if !p2shAddr.IsForNet(MainNetParams) {
+		t.Fatalf("IsForNet rejected address %v (%v) for net %v", p2shAddr, cashAddrP2SH, MainNetParams.Name)
 	}
 
 	// These scripts and addresses are just copy-pasted from random
