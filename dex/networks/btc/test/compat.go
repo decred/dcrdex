@@ -42,6 +42,9 @@ func CompatibilityCheck(t *testing.T, items *CompatibilityItems, chainParams *ch
 		if addrs[0].String() != addr {
 			t.Fatalf("address mismatch %s != %s", addrs[0].String(), addr)
 		}
+		if !addrs[0].IsForNet(chainParams) {
+			t.Fatalf("IsForNet rejected address %v for net %v", addrs[0], chainParams.Name)
+		}
 	}
 
 	// P2PKH

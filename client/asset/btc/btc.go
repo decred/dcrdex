@@ -1172,13 +1172,24 @@ func newRPCWallet(requester RawRequester, cfg *BTCCloneCFG, parsedCfg *RPCWallet
 	}, nil
 }
 
+func decodeAddress(addr string, params *chaincfg.Params) (btcutil.Address, error) {
+	a, err := btcutil.DecodeAddress(addr, params)
+	if err != nil {
+		return nil, err
+	}
+	if !a.IsForNet(params) {
+		return nil, errors.New("wrong network")
+	}
+	return a, nil
+}
+
 func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWallet, error) {
 	baseCfg, err := readBaseWalletConfig(walletCfg)
 	if err != nil {
 		return nil, err
 	}
 
-	addrDecoder := btcutil.DecodeAddress
+	addrDecoder := decodeAddress
 	if cfg.AddressDecoder != nil {
 		addrDecoder = cfg.AddressDecoder
 	}
