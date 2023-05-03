@@ -5,10 +5,7 @@ package zec
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"math"
-	"strconv"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
@@ -231,26 +228,9 @@ func zecTx(tx *wire.MsgTx) *dexzec.Tx {
 	return dexzec.NewTxFromMsgTx(tx, dexzec.MaxExpiryHeight)
 }
 
-// estimateFee uses ZCash's estimatefee RPC, since estimatesmartfee
-// is not implemented.
-// ZCash's fee estimation is pretty crappy. Full nodes can take hours to
-// get up to speed, and forget about simnet.
-// See https://github.com/zcash/zcash/issues/2552
-func estimateFee(ctx context.Context, node btc.RawRequester, confTarget uint64) (uint64, error) {
-	const feeConfs = 10
-	resp, err := node.RawRequest(ctx, "estimatefee", []json.RawMessage{[]byte(strconv.Itoa(feeConfs))})
-	if err != nil {
-		return 0, err
-	}
-	var feeRate float64
-	err = json.Unmarshal(resp, &feeRate)
-	if err != nil {
-		return 0, err
-	}
-	if feeRate <= 0 {
-		return 0, fmt.Errorf("fee could not be estimated")
-	}
-	return uint64(math.Round(feeRate * 1e5)), nil
+// estimateFee returns the asset standard legacy fee rate.
+func estimateFee(context.Context, btc.RawRequester, uint64) (uint64, error) {
+	return dexzec.LegacyFeeRate, nil
 }
 
 // signTx signs the transaction input with ZCash's BLAKE-2B sighash digest.

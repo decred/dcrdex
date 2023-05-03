@@ -18,6 +18,14 @@ const (
 
 	InitTxSizeBase = MinimumTxOverhead + btc.P2PKHOutputSize + btc.P2SHOutputSize // 29 + 34 + 32 = 95
 	InitTxSize     = InitTxSizeBase + btc.RedeemP2PKHInputSize                    // 95 + 149 = 244
+
+	// LegacyFeeRate returns a standard 10 zats / byte. Prior to ZIP-0317, Zcash
+	// used a standard tx fee of 1000 zats, regardless of tx size. We don't
+	// handle fees correctly yet though, so just use a fee / byte that
+	// guarantees a tx fee of > 1000 zats. A single input spending a p2pkh
+	// output is 149 bytes, so 10 zats / byte should be sufficient for any
+	// tx.
+	LegacyFeeRate = 10
 )
 
 var (
