@@ -1,3 +1,6 @@
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org/license/1.0.0.
+
 package mm
 
 import (
@@ -24,6 +27,8 @@ type clientCore interface {
 	MaxBuy(host string, base, quote uint32, rate uint64) (*core.MaxOrderEstimate, error)
 	MaxSell(host string, base, quote uint32) (*core.MaxOrderEstimate, error)
 }
+
+var _ clientCore = (*core.Core)(nil)
 
 // MarketMaker handles the market making process. It supports running different
 // strategies on different markets.

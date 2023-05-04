@@ -2153,6 +2153,8 @@ func (btc *baseWallet) preRedeem(numLots, feeSuggestion uint64, options map[stri
 	}, nil
 }
 
+// PreRedeem generates an estimate of the range of redemption fees that could
+// be assessed.
 func (btc *baseWallet) PreRedeem(form *asset.PreRedeemForm) (*asset.PreRedeem, error) {
 	return btc.preRedeem(form.Lots, form.FeeSuggestion, form.SelectedOptions)
 }
