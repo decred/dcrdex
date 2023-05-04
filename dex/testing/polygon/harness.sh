@@ -16,7 +16,7 @@ PASSWORD="abc"
 
 cat > "${HARNESS_DIR}/${NAME}" <<EOF
 #!/usr/bin/env bash
-bor --datadir="${NODE_DIR}" \$*
+bor \$*
 EOF
 chmod +x "${HARNESS_DIR}/${NAME}"
 
@@ -31,6 +31,7 @@ chmod +x "${HARNESS_DIR}/quit"
 
 GROUP_DIR="${NODES_ROOT}/${NAME}"
 NODE_DIR="${GROUP_DIR}/node"
+mkdir -p "${NODE_DIR}"
 
 ALPHA_ADDRESS="18d65fb8d60c1199bb1ad381be47aa692b482605"
 ALPHA_ADDRESS_JSON_FILE_NAME="UTC--2021-01-28T08-47-02.993754951Z--18d65fb8d60c1199bb1ad381be47aa692b482605"
@@ -47,30 +48,6 @@ CHAIN_ADDRESS_JSON_FILE_NAME="UTC--2021-01-27T08-20-38.123221057Z--9ebba10a61366
 CHAIN_ADDRESS="9ebba10a6136607688ca4f27fab70e23938cd027"
 CHAIN_ADDRESS_JSON='{"address":"9ebba10a6136607688ca4f27fab70e23938cd027","crypto":{"cipher":"aes-128-ctr","ciphertext":"dcfbe17de6f315c732855111b782496d76b2d703169afddaaa69e1bc9e02ec51","cipherparams":{"iv":"907e5e050649d1c5c0be782ec7db5cf1"},"kdf":"scrypt","kdfparams":{"dklen":32,"n":262144,"p":1,"r":8,"salt":"060f4e16d601069a6bccae0693a15cd72090baf1ab20e408c89883117d4f7c51"},"mac":"b9ca7dad75a04b77dc7751a814c051f32752603334e4bb4046caf927196a5579"},"id":"74805e39-6a2f-46eb-8125-70c41d12c6d9","version":3}'
 
-cat > "${NODE_DIR}/polygon.toml" <<EOF
-[Eth]
-NetworkId = 137000
-
-[Eth.Ethash]
-DatasetDir = "${NODE_DIR}/.ethash"
-
-[Node]
-DataDir = "${NODE_DIR}"
-AuthPort = ${ALPHA_AUTHRPC_PORT}
-
-[Node.P2P]
-NoDiscovery = true
-BootstrapNodes = []
-BootstrapNodesV5 = []
-ListenAddr = ":${ALPHA_NODE_PORT}"
-NetRestrict = [ "127.0.0.1/8", "::1/128" ]
-
-[Eth.Miner]
-Etherbase = "0x${CHAIN_ADDRESS}"
-GasFloor = 30000000
-GasCeil = 30000000
-EOF
-
 # Write mine script if CHAIN_ADDRESS is present.
 if [ "${CHAIN_ADDRESS}" != "_" ]; then
   # The mining script may end up mining more or less blocks than specified.
@@ -82,18 +59,18 @@ if [ "${CHAIN_ADDRESS}" != "_" ]; then
       *) NUM=\$1 ;;
   esac
   echo "Mining..."
-  BEFORE=\$("${HARNESS_DIR}/${NAME}" attach --exec 'eth.blockNumber')
-  "${HARNESS_DIR}/${NAME}" attach --exec 'miner.start()' > /dev/null
+  BEFORE=\$("${HARNESS_DIR}/${NAME}" attach ${NODE_DIR}/bor.ipc --exec 'eth.blockNumber')
+  "${HARNESS_DIR}/${NAME}" attach ${NODE_DIR}/bor.ipc --exec 'miner.start()' > /dev/null
   sleep \$(echo "\$NUM-1.8" | bc)
-  "${HARNESS_DIR}/${NAME}" attach --exec 'miner.stop()' > /dev/null
-  sleep 1
-  AFTER=\$("${HARNESS_DIR}/${NAME}" attach --exec 'eth.blockNumber')
+  "${HARNESS_DIR}/${NAME}" attach ${NODE_DIR}/bor.ipc --exec 'miner.stop()' > /dev/null
+  sleep 4
+  AFTER=\$("${HARNESS_DIR}/${NAME}" attach ${NODE_DIR}/bor.ipc --exec 'eth.blockNumber')
   DIFF=\$((AFTER-BEFORE))
   echo "Mined \$DIFF blocks on ${NAME}. Their hashes:"
   for i in \$(seq \$((BEFORE+1)) \$AFTER)
   do
     echo \$i
-    "${HARNESS_DIR}/${NAME}" attach --exec 'eth.getHeaderByNumber('\$i').hash'
+    "${HARNESS_DIR}/${NAME}" attach ${NODE_DIR}/bor.ipc --exec 'eth.getHeaderByNumber('\$i')'
   done
 EOF
   chmod +x "${HARNESS_DIR}/mine-${NAME}"
@@ -123,6 +100,7 @@ tmux send-keys -t "$SESSION:1" "cd ${NODE_DIR}" C-m
 
 # Create two accounts. The first is used to mine blocks. The second contains
 # funds.
+mkdir -p "${NODE_DIR}/keystore"
 if [ "${CHAIN_ADDRESS}" != "_" ]; then
   echo "Creating account"
   cat > "${NODE_DIR}/keystore/$CHAIN_ADDRESS_JSON_FILE_NAME" <<EOF
@@ -135,19 +113,27 @@ $ALPHA_ADDRESS_JSON
 EOF
 
 # The node key lets us control the enode address value.
+mkdir -p "${NODE_DIR}/geth"
 echo "Setting node key"
 cat > "${NODE_DIR}/geth/nodekey" <<EOF
 $ALPHA_NODE_KEY
 EOF
 
 # Start the eth node with the chain account unlocked, listening restricted to
-  # localhost, and our custom configuration file.
+# localhost, and our custom configuration file. I think providing a config file
+# overites everything provided via cmd: See:
+# https://github.com/maticnetwork/bor/blob/f8032dba23a501d02fc6eabcf2bea59fc1e07239/internal/cli/server/config.go#L1388-L1396
+# and
+# https://vscode.dev/github/maticnetwork/bor/blob/5fba09885ddc244eaa2e9e6986dab06e5d49f9d7github.com/imdario/mergo@v0.3.11/merge.go#L314
+# So we have to provided everything via cmd or everything via config file.
 tmux send-keys -t "$SESSION:1" "bor server --nodiscover " \
-    "--chain ${GENESIS_JSON_FILE_LOCATION} --config ${NODE_DIR}/polygon.toml --unlock ${CHAIN_ADDRESS} " \
+    "--chain ${GENESIS_JSON_FILE_LOCATION} --unlock ${CHAIN_ADDRESS} " \
     "--password ${GROUP_DIR}/password --datadir="${NODE_DIR}" --datadir.ancient " \
     "${NODE_DIR}/geth-ancient --verbosity 5 --vmdebug --http --http.port ${ALPHA_HTTP_PORT} " \
-    "--ws --ws.port ${ALPHA_WS_PORT} --ws.api ${ALPHA_WS_MODULES} " \
-    "--bor.withoutheimdall --bor.devfakeauthor --dev --allow-insecure-unlock --disable-bor-wallet false " \
+    "--ws --ws.port ${ALPHA_WS_PORT} --ws.api ${ALPHA_WS_MODULES} --keystore ${NODE_DIR}/keystore " \
+    "--bor.withoutheimdall --bor.devfakeauthor --allow-insecure-unlock --disable-bor-wallet false "\
+    "--bind 0.0.0.0 --port "${ALPHA_NODE_PORT}" --miner.etherbase "0x${CHAIN_ADDRESS}" "\
+    "--miner.gasprice 30000000 --miner.gaslimit 30000000 " \
     "2>&1 | tee ${NODE_DIR}/${NAME}.log" C-m
 
 tmux select-window -t $SESSION:0
