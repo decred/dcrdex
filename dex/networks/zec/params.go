@@ -23,9 +23,21 @@ const (
 	// used a standard tx fee of 1000 zats, regardless of tx size. We don't
 	// handle fees correctly yet though, so just use a fee / byte that
 	// guarantees a tx fee of > 1000 zats. A single input spending a p2pkh
-	// output is 149 bytes, so 10 zats / byte should be sufficient for any
-	// tx.
-	LegacyFeeRate = 10
+	// output is 149 bytes, so 10 zats / byte should be sufficient for any tx.
+	//
+	// However, zcashd v5.5 begins making stricter fee requirements for both
+	// relay and block inclusion. The release notes state that relay by default
+	// still works with 1000 zat fee txns, but it may be adjusted by operators,
+	// and it may need to be set to the higher ZIP 317 rate. For mining, there
+	// is a small allowance on the number of "unpaid actions" allowed in a
+	// block, so we should take care to pay the ZIP 317 "conventional" rate,
+	// which is multiples of 5000 zats, and a minimum of 10000. To ensure we
+	// have no unpaid actions in our (transparent) transactions, we need a
+	// higher rate. For a 242 byte transaction, like a swap init, we can emulate
+	// this with about 42 zats/byte. Even with 100 zats/byte, our typical redeem
+	// of ~342 bytes would pay 34200 zats, which is only about a penny, so to
+	// ensure our transactions are relayed and mined, we go with a high rate.
+	LegacyFeeRate = 84
 )
 
 var (
