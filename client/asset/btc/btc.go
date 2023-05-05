@@ -1918,15 +1918,16 @@ func (btc *baseWallet) SingleLotSwapFees(_ uint32, feeSuggestion uint64, options
 	// TODO: The following is not correct for all BTC clones. e.g. Zcash has
 	// a different MinimumTxOverhead (29).
 
-	const numInputs = 10
-	var txSize int
+	const numInputs = 12 // plan for lots of inputs to get a safe estimate
+
+	var txSize uint64
 	if btc.segwit {
 		txSize = dexbtc.MinimumTxOverhead + (numInputs * dexbtc.RedeemP2WPKHInputSize) + dexbtc.P2WSHOutputSize + dexbtc.P2WPKHOutputSize
 	} else {
 		txSize = dexbtc.MinimumTxOverhead + (numInputs * dexbtc.RedeemP2PKHInputSize) + dexbtc.P2SHOutputSize + dexbtc.P2PKHOutputSize
 	}
 
-	var splitTxSize int
+	var splitTxSize uint64
 	if split {
 		if btc.segwit {
 			splitTxSize = dexbtc.MinimumTxOverhead + dexbtc.RedeemP2WPKHInputSize + dexbtc.P2WPKHOutputSize
@@ -1935,7 +1936,7 @@ func (btc *baseWallet) SingleLotSwapFees(_ uint32, feeSuggestion uint64, options
 		}
 	}
 
-	totalTxSize := uint64(txSize + splitTxSize)
+	totalTxSize := txSize + splitTxSize
 
 	return totalTxSize * bumpedNetRate, nil
 }

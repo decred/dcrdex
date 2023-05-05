@@ -1671,10 +1671,10 @@ func (dcr *ExchangeWallet) SingleLotSwapFees(_ uint32, feeSuggestion uint64, opt
 		bumpedNetRate = uint64(math.Round(float64(bumpedNetRate) * feeBump))
 	}
 
-	const numInputs = 10
-	txSize := dexdcr.InitTxSizeBase + (numInputs * dexdcr.P2PKHInputSize)
+	const numInputs = 12 // plan for lots of inputs to get a safe estimate
+	var txSize uint64 = dexdcr.InitTxSizeBase + (numInputs * dexdcr.P2PKHInputSize)
 
-	var splitTxSize int
+	var splitTxSize uint64
 	if split {
 		// If there is a split, the split tx could have more inputs, and the
 		// swap would just have one, but the math works out the same this way
@@ -1682,7 +1682,7 @@ func (dcr *ExchangeWallet) SingleLotSwapFees(_ uint32, feeSuggestion uint64, opt
 		splitTxSize = dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + (2 * dexdcr.P2PKHOutputSize)
 	}
 
-	totalTxSize := uint64(txSize + splitTxSize)
+	totalTxSize := txSize + splitTxSize
 	return totalTxSize * bumpedNetRate, nil
 }
 
