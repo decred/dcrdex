@@ -49,7 +49,7 @@ func CheckAPIModules(c *rpc.Client, endpoint string, log dex.Logger, reqModules 
 		haveModules = append(haveModules, fmt.Sprintf("%s:%s", api, version))
 	}
 	if len(reqModulesMap) > 0 {
-		reqs := make([]string, len(reqModulesMap))
+		reqs := make([]string, 0, len(reqModulesMap))
 		for v := range reqModulesMap {
 			reqs = append(reqs, v)
 		}

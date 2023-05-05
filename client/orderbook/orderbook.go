@@ -673,7 +673,7 @@ func (ob *OrderBook) AddRecentMatches(matches [][2]int64, ts uint64) []*MatchSum
 
 	ob.matchSummaryMtx.Lock()
 	defer ob.matchSummaryMtx.Unlock()
-	ob.matchesSummary = append(newMatches, ob.matchesSummary...)
+	ob.matchesSummary = append(newMatches, ob.matchesSummary...) // nolint:makezero
 	const maxLength = 100
 	// if ob.matchesSummary length is greater than max length, we slice the array
 	// to maxLength, removing values first added.
