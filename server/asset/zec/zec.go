@@ -107,6 +107,10 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 			}
 			return zecTx.MsgTx, nil
 		},
+		TxHasher: func(tx *wire.MsgTx) *chainhash.Hash {
+			h := zecTx(tx).TxHash()
+			return &h
+		},
 		DumbFeeEstimates:     true,
 		FeeConfs:             feeConfs,
 		ManualMedianFee:      true,
@@ -266,4 +270,8 @@ func shieldedIO(tx *btc.VerboseTxExtended) (in, out uint64, err error) {
 		return 0, 0, err
 	}
 	return feeTx.shieldedIn, feeTx.shieldedOut, nil
+}
+
+func zecTx(tx *wire.MsgTx) *dexzec.Tx {
+	return dexzec.NewTxFromMsgTx(tx, dexzec.MaxExpiryHeight)
 }
