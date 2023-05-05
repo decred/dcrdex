@@ -2394,7 +2394,7 @@ func (db *BoltDB) DisabledRateSources() (disabledSources []string, err error) {
 		}
 
 		disabled := strings.Split(disabledString, ",")
-		disabledSources = make([]string, len(disabled))
+		disabledSources = make([]string, 0, len(disabled))
 		for _, token := range disabled {
 			if token != "" {
 				disabledSources = append(disabledSources, token)

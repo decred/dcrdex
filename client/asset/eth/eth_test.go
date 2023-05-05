@@ -3324,7 +3324,7 @@ func TestLocktimeExpired(t *testing.T) {
 	contract[3] = 0
 
 	// bad contract
-	contract = append(contract, 0)
+	contract = append(contract, 0) // nolint:makezero
 	ensureResult("bad contract", true, false)
 }
 
