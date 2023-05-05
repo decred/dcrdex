@@ -169,10 +169,7 @@ func blockFeeTransactions(rc *btc.RPCClient, blockHash *chainhash.Hash) (feeTxs 
 
 	feeTxs = make([]btc.FeeTx, 0, len(blk.Transactions)-1)
 	for _, tx := range blk.Transactions[1:] { // skip coinbase
-		feeTx, err := newFeeTx(tx)
-		if err != nil {
-			return nil, chainhash.Hash{}, fmt.Errorf("error parsing fee tx: %w", err)
-		}
+		feeTx := newFeeTx(tx)
 		feeTxs = append(feeTxs, feeTx)
 	}
 
@@ -190,12 +187,12 @@ type feeTx struct {
 
 var _ btc.FeeTx = (*feeTx)(nil)
 
-func newFeeTx(zecTx *dexzec.Tx) (*feeTx, error) {
+func newFeeTx(zecTx *dexzec.Tx) *feeTx {
 	var transparentOut uint64
 	for _, out := range zecTx.TxOut {
 		transparentOut += uint64(out.Value)
 	}
-	prevOuts := make([]wire.OutPoint, len(zecTx.TxOut))
+	prevOuts := make([]wire.OutPoint, 0, len(zecTx.TxIn))
 	for _, in := range zecTx.TxIn {
 		prevOuts = append(prevOuts, in.PreviousOutPoint)
 	}
@@ -221,7 +218,7 @@ func newFeeTx(zecTx *dexzec.Tx) (*feeTx, error) {
 		shieldedOut:    shieldedOut,
 		shieldedIn:     shieldedIn,
 		prevOuts:       prevOuts,
-	}, nil
+	}
 }
 
 func (tx *feeTx) PrevOuts() []wire.OutPoint {
@@ -258,10 +255,7 @@ func shieldedIO(tx *btc.VerboseTxExtended) (in, out uint64, err error) {
 	if err != nil {
 		return 0, 0, fmt.Errorf("DeserializeTx error: %w", err)
 	}
-	feeTx, err := newFeeTx(zecTx)
-	if err != nil {
-		return 0, 0, err
-	}
+	feeTx := newFeeTx(zecTx)
 	return feeTx.shieldedIn, feeTx.shieldedOut, nil
 }
 
