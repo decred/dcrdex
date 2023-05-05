@@ -149,7 +149,9 @@ type Backend struct {
 	// booleanGetBlockRPC corresponds to BackendCloneConfig.BooleanGetBlockRPC
 	// field and is used by RPCClient, which is constructed on Connect.
 	booleanGetBlockRPC bool
-	blockDeserializer  func([]byte) (*wire.MsgBlock, error)
+	blockDeserializer  func([]byte) (*wire.MsgBlock, error) // may be nil
+	txDeserializer     func([]byte) (*wire.MsgTx, error)    // must not be nil
+	txHasher           func(*wire.MsgTx) *chainhash.Hash
 	numericGetRawRPC   bool
 	// fee estimation configuration
 	feeConfs          int64
@@ -229,6 +231,16 @@ func newBTC(cloneCfg *BackendCloneConfig, rpcCfg *dexbtc.RPCConfig) *Backend {
 		}
 	}
 
+	txDeserializer := cloneCfg.TxDeserializer
+	if txDeserializer == nil {
+		txDeserializer = msgTxFromBytes
+	}
+
+	txHasher := cloneCfg.TxHasher
+	if txHasher == nil {
+		txHasher = hashTx
+	}
+
 	return &Backend{
 		rpcCfg:             rpcCfg,
 		cfg:                cloneCfg,
@@ -243,6 +255,8 @@ func newBTC(cloneCfg *BackendCloneConfig, rpcCfg *dexbtc.RPCConfig) *Backend {
 		feeConfs:           feeConfs,
 		booleanGetBlockRPC: cloneCfg.BooleanGetBlockRPC,
 		blockDeserializer:  cloneCfg.BlockDeserializer,
+		txDeserializer:     txDeserializer,
+		txHasher:           txHasher,
 		numericGetRawRPC:   cloneCfg.NumericGetRawRPC,
 		initTxSize:         initTxSize,
 		initTxSizeBase:     initTxSizeBase,
@@ -290,6 +304,8 @@ type BackendCloneConfig struct {
 	// TxDeserializer is an optional function used to deserialize a transaction.
 	// TxDeserializer is only used if ManualMedianFee is true.
 	TxDeserializer func([]byte) (*wire.MsgTx, error)
+	// TxHasher is a function that generates a tx hash from a MsgTx.
+	TxHasher func(*wire.MsgTx) *chainhash.Hash
 	// BlockFeeTransactions is a function to fetch a set of FeeTx and a previous
 	// block hash for a specific block.
 	BlockFeeTransactions BlockFeeTransactions
@@ -347,11 +363,6 @@ func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		maxFeeBlocks = defaultMaxFeeBlocks
 	}
 
-	txDeserializer := btc.cfg.TxDeserializer
-	if txDeserializer == nil {
-		txDeserializer = msgTxFromBytes
-	}
-
 	blockFeeTransactions := btc.cfg.BlockFeeTransactions
 	if blockFeeTransactions == nil {
 		blockFeeTransactions = btcBlockFeeTransactions
@@ -365,7 +376,7 @@ func (btc *Backend) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		arglessFeeEstimates:  btc.cfg.ArglessFeeEstimates,
 		blockDeserializer:    btc.blockDeserializer,
 		numericGetRawRPC:     btc.numericGetRawRPC,
-		deserializeTx:        txDeserializer,
+		deserializeTx:        btc.txDeserializer,
 		blockFeeTransactions: blockFeeTransactions,
 	}
 
@@ -544,14 +555,10 @@ func (btc *Backend) VerifyUnspentCoin(_ context.Context, coinID []byte) error {
 //  5. All inputs must have the max sequence num set (finalized).
 //  6. The transaction must pass the checks in the
 //     blockchain.CheckTransactionSanity function.
-func ParseBondTx(ver uint16, rawTx []byte, chainParams *chaincfg.Params, segwit bool) (bondCoinID []byte, amt int64, bondAddr string,
+func ParseBondTx(ver uint16, msgTx *wire.MsgTx, chainParams *chaincfg.Params, segwit bool) (amt int64, bondAddr string,
 	bondPubKeyHash []byte, lockTime int64, acct account.AccountID, err error) {
 	if ver != BondVersion {
 		err = errors.New("only version 0 bonds supported")
-		return
-	}
-	msgTx := wire.NewMsgTx(wire.TxVersion)
-	if err = msgTx.Deserialize(bytes.NewReader(rawTx)); err != nil {
 		return
 	}
 
@@ -623,7 +630,7 @@ func ParseBondTx(ver uint16, rawTx []byte, chainParams *chaincfg.Params, segwit 
 		expectedScriptHash = btcutil.Hash160(bondScript)
 	}
 	if !bytes.Equal(expectedScriptHash, scriptHash) {
-		err = fmt.Errorf("script hash check failed for output 0 of %s", msgTx.TxHash())
+		err = fmt.Errorf("script hash check failed for output 0")
 		return
 	}
 
@@ -632,9 +639,6 @@ func ParseBondTx(ver uint16, rawTx []byte, chainParams *chaincfg.Params, segwit 
 		err = fmt.Errorf("error extracting addresses from bond output: %w", err)
 		return
 	}
-
-	txid := msgTx.TxHash()
-	bondCoinID = toCoinID(&txid, 0)
 	amt = bondOut.Value
 	bondAddr = addrs[0] // don't convert address, must match type we specified
 	lockTime = int64(lock)
@@ -653,7 +657,14 @@ func (dcr *Backend) BondVer() uint16 {
 // time-locked fidelity bond transaction given the bond's P2SH redeem script.
 func (btc *Backend) ParseBondTx(ver uint16, rawTx []byte) (bondCoinID []byte, amt int64, bondAddr string,
 	bondPubKeyHash []byte, lockTime int64, acct account.AccountID, err error) {
-	return ParseBondTx(ver, rawTx, btc.chainParams, btc.segwit)
+	var msgTx *wire.MsgTx
+	msgTx, err = btc.txDeserializer(rawTx)
+	if err != nil {
+		return
+	}
+	bondCoinID = toCoinID(btc.txHasher(msgTx), 0)
+	amt, bondAddr, bondPubKeyHash, lockTime, acct, err = ParseBondTx(ver, msgTx, btc.chainParams, btc.segwit)
+	return
 }
 
 // BondCoin locates a bond transaction output, validates the entire transaction,
@@ -682,9 +693,14 @@ func (btc *Backend) BondCoin(ctx context.Context, ver uint16, coinID []byte) (am
 
 	confs = int64(verboseTx.Confirmations)
 
-	rawTx, err := hex.DecodeString(verboseTx.Hex) // ParseBondTx will deserialize to msgTx, so just get the bytes
+	rawTx, err := hex.DecodeString(verboseTx.Hex)
 	if err != nil {
 		err = fmt.Errorf("failed to decode transaction %s: %w", txHash, err)
+		return
+	}
+	var msgTx *wire.MsgTx
+	msgTx, err = btc.txDeserializer(rawTx)
+	if err != nil {
 		return
 	}
 
@@ -701,7 +717,7 @@ func (btc *Backend) BondCoin(ctx context.Context, ver uint16, coinID []byte) (am
 		return
 	}
 
-	_, amt, _, _, lockTime, acct, err = ParseBondTx(ver, rawTx, btc.chainParams, btc.segwit)
+	amt, _, _, lockTime, acct, err = ParseBondTx(ver, msgTx, btc.chainParams, btc.segwit)
 	return
 }
 
@@ -1511,21 +1527,21 @@ func isMethodNotFoundErr(err error) bool {
 			strings.Contains(strings.ToLower(rpcErr.Message), "method not found"))
 }
 
-// serializeMsgTx serializes the wire.MsgTx.
-func serializeMsgTx(msgTx *wire.MsgTx) ([]byte, error) {
-	buf := bytes.NewBuffer(make([]byte, 0, msgTx.SerializeSize()))
-	err := msgTx.Serialize(buf)
-	if err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
 // msgTxFromBytes creates a wire.MsgTx by deserializing the transaction.
+// WARNING: You probably want to use a deserializer that is appropriate for the
+// asset instead. This does not work for all assets, like Zcash.
 func msgTxFromBytes(txB []byte) (*wire.MsgTx, error) {
 	msgTx := new(wire.MsgTx)
 	if err := msgTx.Deserialize(bytes.NewReader(txB)); err != nil {
 		return nil, err
 	}
 	return msgTx, nil
+}
+
+// hashTx just calls the tx's TxHash method.
+// WARNING: You probably want to use a hasher that is appropriate for the
+// asset instead. This does not work for all assets, like Zcash.
+func hashTx(tx *wire.MsgTx) *chainhash.Hash {
+	h := tx.TxHash()
+	return &h
 }
