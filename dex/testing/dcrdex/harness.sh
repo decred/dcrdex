@@ -274,7 +274,9 @@ if [ $DOGE_ON -eq 0 ]; then
             "network": "simnet",
             "maxFeeRate": 40000,
             "swapConf": 2,
-            "configPath": "${TEST_ROOT}/doge/alpha/alpha.conf"
+            "configPath": "${TEST_ROOT}/doge/alpha/alpha.conf",
+            "bondAmt": 200000000,
+            "bondConfs": 1
 EOF
 fi
 
@@ -286,7 +288,9 @@ if [ $ZEC_ON -eq 0 ]; then
             "network": "simnet",
             "maxFeeRate": 200,
             "swapConf": 1,
-            "configPath": "${TEST_ROOT}/zec/alpha/alpha.conf"
+            "configPath": "${TEST_ROOT}/zec/alpha/alpha.conf",
+            "bondAmt": 40000000,
+            "bondConfs": 1
 EOF
 fi
 
@@ -298,7 +302,9 @@ if [ $DGB_ON -eq 0 ]; then
             "network": "simnet",
             "maxFeeRate": 2000,
             "swapConf": 1,
-            "configPath": "${TEST_ROOT}/dgb/alpha/alpha.conf"
+            "configPath": "${TEST_ROOT}/dgb/alpha/alpha.conf",
+            "bondAmt": 800000000,
+            "bondConfs": 1
 EOF
 fi
 
