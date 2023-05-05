@@ -3977,7 +3977,7 @@ func testAccelerateOrder(t *testing.T, segwit bool, walletType string) {
 					t.Fatalf("%s: unexpected error: %v", test.name, err)
 				}
 				if *changeTxHash != node.sentRawTx.TxHash() {
-					t.Fatalf("%s: change tx hash %x != expected: %x", test.name, changeTxHash, node.sentRawTx.TxHash())
+					t.Fatalf("%s: change tx hash %s != expected: %s", test.name, changeTxHash, node.sentRawTx.TxHash())
 				}
 				if changeVout != 0 {
 					t.Fatalf("%s: change vout %v != expected: 0", test.name, changeVout)
