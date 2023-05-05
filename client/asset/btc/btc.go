@@ -4928,7 +4928,7 @@ func (btc *intermediaryWallet) EstimateSendTxFee(address string, sendAmount, fee
 		return 0, false, errors.New("output value is dust")
 	}
 
-	tx := wire.NewMsgTx(wire.TxVersion)
+	tx := wire.NewMsgTx(btc.txVersion())
 	tx.AddTxOut(wireOP)
 	fee, err = btc.txFeeEstimator.estimateSendTxFee(tx, btc.feeRateWithFallback(feeRate), subtract)
 	if err != nil {
@@ -5164,7 +5164,7 @@ func (btc *baseWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time
 	pkh := btcutil.Hash160(pk)
 
 	feeRate = btc.feeRateWithFallback(feeRate)
-	baseTx := wire.NewMsgTx(wire.TxVersion)
+	baseTx := wire.NewMsgTx(btc.txVersion())
 
 	// TL output.
 	lockTimeSec := lockTime.Unix()
@@ -5352,7 +5352,11 @@ func (btc *baseWallet) makeBondRefundTxV0(txid *chainhash.Hash, vout uint32, amt
 		}
 		txIn.Witness = dexbtc.RefundBondScriptSegwit(script, sig, pk)
 	} else {
-		sig, err := btc.signNonSegwit(msgTx, 0, script, txscript.SigHashAll, priv, []int64{int64(amt)}, [][]byte{script})
+		prevPkScript, err := btc.scriptHashScript(script) // P2SH: OP_HASH160 <script hash> OP_EQUAL
+		if err != nil {
+			return nil, fmt.Errorf("error constructing p2sh script: %w", err)
+		}
+		sig, err := btc.signNonSegwit(msgTx, 0, script, txscript.SigHashAll, priv, []int64{int64(amt)}, [][]byte{prevPkScript})
 		if err != nil {
 			return nil, err
 		}
