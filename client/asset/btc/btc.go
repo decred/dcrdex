@@ -3109,7 +3109,7 @@ func accelerateOrder(btc *baseWallet, swapCoins, accelerationCoins []dex.Bytes, 
 	delete(btc.fundingCoins, newOutPoint(changeTxHash, changeVout))
 
 	if newChange == nil {
-		return nil, signedTx.TxHash().String(), nil
+		return nil, btc.hashTx(signedTx).String(), nil
 	}
 
 	// Add the new change to the cache if needed. We check if
@@ -3137,7 +3137,7 @@ func accelerateOrder(btc *baseWallet, swapCoins, accelerationCoins []dex.Bytes, 
 
 	// return nil error since tx is already broadcast, and core needs to update
 	// the change coin
-	return newChange, signedTx.TxHash().String(), nil
+	return newChange, btc.hashTx(signedTx).String(), nil
 }
 
 // AccelerationEstimate takes the same parameters as AccelerateOrder, but
@@ -4391,8 +4391,8 @@ func (btc *baseWallet) send(address string, val uint64, feeRate uint64, subtract
 		return nil, 0, 0, err
 	}
 
-	txHash := msgTx.TxHash()
-	return &txHash, 0, toSend, nil
+	txHash := btc.hashTx(msgTx)
+	return txHash, 0, toSend, nil
 }
 
 // SwapConfirmations gets the number of confirmations for the specified swap
@@ -4858,7 +4858,7 @@ func (btc *baseWallet) signTxAndAddChange(baseTx *wire.MsgTx, addr btcutil.Addre
 		totalOut += uint64(changeOutput.Value)
 	} else {
 		btc.log.Debugf("Foregoing change worth up to %v in tx %v because it is dust",
-			changeOutput.Value, msgTx.TxHash())
+			changeOutput.Value, btc.hashTx(msgTx))
 	}
 
 	txHash := btc.hashTx(msgTx)
@@ -5314,23 +5314,23 @@ func (btc *baseWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time
 		return nil, nil, fmt.Errorf("failed to sign bond tx: %w", err)
 	}
 
-	txid := signedTx.TxHash()
+	txid := btc.hashTx(signedTx)
 
-	signedTxBytes, err := serializeMsgTx(signedTx)
+	signedTxBytes, err := btc.serializeTx(signedTx)
 	if err != nil {
 		return nil, nil, err
 	}
-	unsignedTxBytes, err := serializeMsgTx(baseTx)
+	unsignedTxBytes, err := btc.serializeTx(baseTx)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// Prep the redeem / refund tx.
-	redeemMsgTx, err := btc.makeBondRefundTxV0(&txid, 0, amt, bondScript, bondKey, feeRate)
+	redeemMsgTx, err := btc.makeBondRefundTxV0(txid, 0, amt, bondScript, bondKey, feeRate)
 	if err != nil {
 		return nil, nil, fmt.Errorf("unable to create bond redemption tx: %w", err)
 	}
-	redeemTx, err := serializeMsgTx(redeemMsgTx)
+	redeemTx, err := btc.serializeTx(redeemMsgTx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to serialize bond redemption tx: %w", err)
 	}
@@ -5339,7 +5339,7 @@ func (btc *baseWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time
 		Version:    ver,
 		AssetID:    btc.cloneParams.AssetID,
 		Amount:     amt,
-		CoinID:     toCoinID(&txid, 0),
+		CoinID:     toCoinID(txid, 0),
 		Data:       bondScript,
 		SignedTx:   signedTxBytes,
 		UnsignedTx: unsignedTxBytes,
