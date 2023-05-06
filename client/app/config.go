@@ -104,6 +104,7 @@ type CoreConfig struct {
 // WebConfig encapsulates the configuration needed for the web server.
 type WebConfig struct {
 	WebAddr      string `long:"webaddr" description:"HTTP server address"`
+	WebTLS       bool   `long:"webtls" description:"Use a self-signed certificate for HTTPS with the web server. This is implied for a publicly routable (not loopback or private subnet) webaddr. When changing webaddr, you mean need to delete web.cert and web.key."`
 	SiteDir      string `long:"sitedir" description:"Path to the 'site' directory with packaged web files. Unspecifed = default is good in most cases."`
 	NoEmbedSite  bool   `long:"no-embed-site" description:"Use on-disk UI files instead of embedded resources. This also reloads the html template with every request. For development purposes."`
 	HTTPProfile  bool   `long:"httpprof" description:"Start HTTP profiler on /pprof."`
@@ -146,12 +147,30 @@ type Config struct {
 // instead of a WebConfig method because Language is an app-level setting used
 // by both core and rpcserver.
 func (cfg *Config) Web(c *core.Core, log dex.Logger, utc bool) *webserver.Config {
+	addr := cfg.WebAddr
+	host, _, err := net.SplitHostPort(addr)
+	if err == nil && host != "" {
+		addr = host
+	} else {
+		// If SplitHostPort failed, IPv6 addresses may still have brackets.
+		addr = strings.Trim(addr, "[]")
+	}
+	ip := net.ParseIP(addr)
+
+	var certFile, keyFile string
+	if cfg.WebTLS || (ip != nil && !ip.IsLoopback() && !ip.IsPrivate()) || (ip == nil && addr != "localhost") {
+		certFile = filepath.Join(cfg.AppData, "web.cert")
+		keyFile = filepath.Join(cfg.AppData, "web.key")
+	}
+
 	return &webserver.Config{
 		Core:          c,
 		Addr:          cfg.WebAddr,
 		CustomSiteDir: cfg.SiteDir,
 		Logger:        log,
 		UTC:           utc,
+		CertFile:      certFile,
+		KeyFile:       keyFile,
 		NoEmbed:       cfg.NoEmbedSite,
 		HttpProf:      cfg.HTTPProfile,
 		Language:      cfg.Language,
@@ -257,6 +276,8 @@ func ResolveConfig(appData string, cfg *Config) error {
 	if cfg.Simnet && cfg.Testnet {
 		return fmt.Errorf("simnet and testnet cannot both be specified")
 	}
+
+	cfg.AppData = appData
 
 	var defaultDBPath, defaultLogPath string
 	switch {
