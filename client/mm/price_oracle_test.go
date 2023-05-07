@@ -1,6 +1,6 @@
-//go:build botlive
+//go:build live
 
-package core
+package mm
 
 import (
 	"context"
@@ -8,8 +8,34 @@ import (
 	"testing"
 	"time"
 
+	_ "decred.org/dcrdex/client/asset/btc"
+	_ "decred.org/dcrdex/client/asset/dcr"
+	_ "decred.org/dcrdex/client/asset/eth"
+
 	"decred.org/dcrdex/dex"
 )
+
+func TestPriceOracle(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	logger := dex.StdOutLogger("TEST", dex.LevelTrace)
+
+	markets := []*mkt{
+		&mkt{base: 42, quote: 0},
+		&mkt{base: 60, quote: 0},
+	}
+
+	oracle, err := newPriceOracle(ctx, markets, logger)
+	if err != nil {
+		t.Fatalf("error creating price oracle: %v", err)
+	}
+
+	for _, mkt := range markets {
+		price := oracle.getMarketPrice(mkt.base, mkt.quote)
+		fmt.Printf("market %d - %d, price: %v\n", mkt.base, mkt.quote, price)
+	}
+}
 
 func testSpreader(t *testing.T, spreader Spreader, baseSymbol, quoteSymbol string) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
@@ -27,7 +53,7 @@ func TestFetchBinanceSpread(t *testing.T) {
 
 func TestFetchCoinbaseSpread(t *testing.T) {
 	testSpreader(t, fetchCoinbaseSpread, "btc", "usd")
-}
+}x
 
 func TestFetchBittrexSpread(t *testing.T) {
 	testSpreader(t, fetchBittrexSpread, "dcr", "btc")
@@ -39,21 +65,4 @@ func TestFetchHitBTCSpread(t *testing.T) {
 
 func TestFetchEXMOSpread(t *testing.T) {
 	testSpreader(t, fetchEXMOSpread, "dcr", "btc")
-}
-
-func TestOracleMarketReport(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	b := &SupportedAsset{Symbol: "dcr", Name: "Decred"}
-	q := &SupportedAsset{Symbol: "btc", Name: "Bitcoin"}
-
-	oracles, err := oracleMarketReport(ctx, b, q, dex.StdOutLogger("T", dex.LevelTrace))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, o := range oracles {
-		fmt.Printf("Success: %s price = %f \n", o.Host, (o.BestBuy+o.BestSell)/2)
-	}
-
 }

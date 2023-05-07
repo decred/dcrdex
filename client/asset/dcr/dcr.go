@@ -1646,13 +1646,11 @@ func (dcr *ExchangeWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, erro
 	}, nil
 }
 
-// SingleLotSwapFees is a fallback for PreSwap that uses estimation when funds
-// aren't available. The returned fees are the RealisticWorstCase. The Lots
-// field of the PreSwapForm is ignored and assumed to be a single lot.
-func (dcr *ExchangeWallet) SingleLotSwapFees(form *asset.PreSwapForm) (fees uint64, err error) {
+// SingleLotSwapFees returns the fees for a swap transaction for a single lot.
+func (dcr *ExchangeWallet) SingleLotSwapFees(_ uint32, feeSuggestion uint64, options map[string]string) (fees uint64, err error) {
 	// Load the user's selected order-time options.
 	customCfg := new(swapOptions)
-	err = config.Unmapify(form.SelectedOptions, customCfg)
+	err = config.Unmapify(options, customCfg)
 	if err != nil {
 		return 0, fmt.Errorf("error parsing selected swap options: %w", err)
 	}
@@ -1668,21 +1666,24 @@ func (dcr *ExchangeWallet) SingleLotSwapFees(form *asset.PreSwapForm) (fees uint
 		return 0, err
 	}
 
-	bumpedNetRate := form.FeeSuggestion
+	bumpedNetRate := feeSuggestion
 	if feeBump > 1 {
 		bumpedNetRate = uint64(math.Round(float64(bumpedNetRate) * feeBump))
 	}
 
+	const numInputs = 12 // plan for lots of inputs to get a safe estimate
+	var txSize uint64 = dexdcr.InitTxSizeBase + (numInputs * dexdcr.P2PKHInputSize)
+
+	var splitTxSize uint64
 	if split {
-		fees += (dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + dexdcr.P2PKHOutputSize) * bumpedNetRate
+		// If there is a split, the split tx could have more inputs, and the
+		// swap would just have one, but the math works out the same this way
+		// anyways.
+		splitTxSize = dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + (2 * dexdcr.P2PKHOutputSize)
 	}
 
-	const maxSwaps = 1 // Assumed single lot order
-	swapFunds := calc.RequiredOrderFundsAlt(form.LotSize, dexdcr.P2PKHInputSize,
-		maxSwaps, dexdcr.InitTxSizeBase, dexdcr.InitTxSize, bumpedNetRate)
-	fees += swapFunds - form.LotSize
-
-	return fees, nil
+	totalTxSize := txSize + splitTxSize
+	return totalTxSize * bumpedNetRate, nil
 }
 
 // splitOption constructs an *asset.OrderOption with customized text based on the
@@ -1736,27 +1737,25 @@ func (dcr *ExchangeWallet) splitOption(req *asset.PreSwapForm, utxos []*composit
 	return opt
 }
 
-// PreRedeem generates an estimate of the range of redemption fees that could
-// be assessed.
-func (dcr *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, error) {
+func (dcr *ExchangeWallet) preRedeem(numLots, feeSuggestion uint64, options map[string]string) (*asset.PreRedeem, error) {
 	cfg := dcr.config()
 
-	feeRate := req.FeeSuggestion
+	feeRate := feeSuggestion
 	if feeRate == 0 { // or just document that the caller must set it?
-		feeRate = dcr.targetFeeRateWithFallback(cfg.redeemConfTarget, req.FeeSuggestion)
+		feeRate = dcr.targetFeeRateWithFallback(cfg.redeemConfTarget, feeSuggestion)
 	}
 	// Best is one transaction with req.Lots inputs and 1 output.
 	var best uint64 = dexdcr.MsgTxOverhead
 	// Worst is req.Lots transactions, each with one input and one output.
-	var worst uint64 = dexdcr.MsgTxOverhead * req.Lots
+	var worst uint64 = dexdcr.MsgTxOverhead * numLots
 	var inputSize uint64 = dexdcr.TxInOverhead + dexdcr.RedeemSwapSigScriptSize
 	var outputSize uint64 = dexdcr.P2PKHOutputSize
-	best += inputSize*req.Lots + outputSize
-	worst += (inputSize + outputSize) * req.Lots
+	best += inputSize*numLots + outputSize
+	worst += (inputSize + outputSize) * numLots
 
 	// Read the order options.
 	customCfg := new(redeemOptions)
-	err := config.Unmapify(req.SelectedOptions, customCfg)
+	err := config.Unmapify(options, customCfg)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing selected options: %w", err)
 	}
@@ -1803,19 +1802,19 @@ func (dcr *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem
 	}, nil
 }
 
-// SingleLotRedeemFees is a fallback for PreRedeem that uses estimation when
-// funds aren't available. The returned fees are the RealisticWorstCase.
-func (dcr *ExchangeWallet) SingleLotRedeemFees(req *asset.PreRedeemForm) (uint64, error) {
-	// For DCR, there are no funds required to redeem, so we'll never actually
-	// end up here unless there are some bad order options, since this method
-	// is a backup for PreRedeem. We'll almost certainly generate the same error
-	// again.
-	form := *req
-	form.Lots = 1
-	preRedeem, err := dcr.PreRedeem(&form)
+// PreRedeem generates an estimate of the range of redemption fees that could
+// be assessed.
+func (dcr *ExchangeWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, error) {
+	return dcr.preRedeem(req.Lots, req.FeeSuggestion, req.SelectedOptions)
+}
+
+// SingleLotRedeemFees returns the fees for a redeem transaction for a single lot.
+func (dcr *ExchangeWallet) SingleLotRedeemFees(_ uint32, feeSuggestion uint64, options map[string]string) (uint64, error) {
+	preRedeem, err := dcr.preRedeem(1, feeSuggestion, options)
 	if err != nil {
 		return 0, err
 	}
+
 	return preRedeem.Estimate.RealisticWorstCase, nil
 }
 

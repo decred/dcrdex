@@ -1450,15 +1450,6 @@ type Core struct {
 
 	pendingWalletsMtx sync.RWMutex
 	pendingWallets    map[uint32]bool
-
-	mm struct {
-		sync.RWMutex
-		bots  map[uint64]*makerBot
-		cache struct {
-			sync.RWMutex
-			prices map[string]*stampedPrice
-		}
-	}
 }
 
 // New is the constructor for a new Core.
@@ -1558,8 +1549,6 @@ func New(cfg *Config) (*Core, error) {
 		fiatRateSources: make(map[string]*commonRateSource),
 		pendingWallets:  make(map[uint32]bool),
 	}
-	c.mm.bots = make(map[uint64]*makerBot)
-	c.mm.cache.prices = make(map[string]*stampedPrice)
 
 	// Populate the initial user data. User won't include any DEX info yet, as
 	// those are retrieved when Run is called and the core connects to the DEXes.
@@ -1794,6 +1783,22 @@ func (c *Core) Exchange(host string) (*Exchange, error) {
 		return nil, err
 	}
 	return dc.exchangeInfo(), nil
+}
+
+// ExchangeMarket returns the market with the given base and quote assets at the
+// given host. It returns an error if no market exists at that host.
+func (c *Core) ExchangeMarket(host string, base, quote uint32) (*Market, error) {
+	dc, _, err := c.dex(host)
+	if err != nil {
+		return nil, err
+	}
+
+	mkt := dc.coreMarket(marketName(base, quote))
+	if mkt == nil {
+		return nil, fmt.Errorf("no market found for %s-%s at %s", unbip(base), unbip(quote), host)
+	}
+
+	return mkt, nil
 }
 
 // dexConnections creates a slice of the *dexConnection in c.conns.
@@ -2331,7 +2336,6 @@ func (c *Core) User() *User {
 		Initialized:        c.IsInitialized(),
 		SeedGenerationTime: c.seedGenerationTime,
 		FiatRates:          c.fiatConversions(),
-		Bots:               c.bots(),
 	}
 }
 
@@ -4599,9 +4603,6 @@ func (c *Core) Login(pw []byte) error {
 		c.resolveActiveTrades(crypter)
 		c.notify(newLoginNote("Connecting to DEX servers..."))
 		c.initializeDEXConnections(crypter)
-		if err = c.loadBotPrograms(); err != nil {
-			c.log.Errorf("Error loading bot programs: %v", err)
-		}
 
 		c.loggedIn = true
 	}
@@ -5341,6 +5342,52 @@ func (c *Core) EstimateSendTxFee(address string, assetID uint32, amount uint64, 
 	return estimator.EstimateSendTxFee(address, amount, c.feeSuggestionAny(assetID), subtract)
 }
 
+// SingleLotFees returns the estimated swap and redeem fees for a single lot
+// trade.
+func (c *Core) SingleLotFees(form *SingleLotFeesForm) (uint64, uint64, error) {
+	dc, err := c.registeredDEX(form.Host)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	mktID := marketName(form.Base, form.Quote)
+	mktConf := dc.marketConfig(mktID)
+	if mktConf == nil {
+		return 0, 0, newError(marketErr, "unknown market %q", mktID)
+	}
+
+	wallets, assetConfigs, versCompat, err := c.walletSet(dc, form.Base, form.Quote, form.Sell)
+	if err != nil {
+		return 0, 0, err
+	}
+	if !versCompat { // covers missing asset config, but that's unlikely since there is a market config
+		return 0, 0, fmt.Errorf("client and server asset versions are incompatible for %v", form.Host)
+	}
+
+	swapFeeSuggestion := c.feeSuggestionAny(wallets.fromWallet.AssetID) // server rates only for the swap init
+	if swapFeeSuggestion == 0 {
+		return 0, 0, fmt.Errorf("failed to get swap fee suggestion for %s at %s", wallets.fromWallet.Symbol, form.Host)
+	}
+
+	redeemFeeSuggestion := c.feeSuggestionAny(wallets.toWallet.AssetID) // wallet rate or server rate
+	if redeemFeeSuggestion == 0 {
+		return 0, 0, fmt.Errorf("failed to get redeem fee suggestion for %s at %s", wallets.toWallet.Symbol, form.Host)
+	}
+
+	swapFees, err := wallets.fromWallet.SingleLotSwapFees(assetConfigs.fromAsset.Version, swapFeeSuggestion, form.Options)
+	if err != nil {
+		return 0, 0, fmt.Errorf("error calculating swap fees: %w", err)
+	}
+
+	redeemFees, err := wallets.toWallet.SingleLotRedeemFees(assetConfigs.toAsset.Version, redeemFeeSuggestion, form.Options)
+	if err != nil {
+		return 0, 0, fmt.Errorf("error calculating redeem fees: %w", err)
+	}
+
+	return swapFees, redeemFees, nil
+}
+
+// PreOrder calculates fee estimates for a trade.
 func (c *Core) PreOrder(form *TradeForm) (*OrderEstimate, error) {
 	dc, err := c.registeredDEX(form.Host)
 	if err != nil {
@@ -5874,7 +5921,6 @@ func (c *Core) prepareTradeRequest(pw []byte, form *TradeForm) (*tradeRequest, e
 			RedemptionReserves: redemptionReserves,
 			RefundReserves:     refundReserves,
 			ChangeCoin:         changeID,
-			ProgramID:          form.Program,
 		},
 		Order: ord,
 	}

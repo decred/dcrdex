@@ -21,6 +21,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
@@ -122,8 +123,8 @@ func (c *TCore) FiatRateSources() map[string]bool {
 func (c *TCore) InitializeClient(pw, seed []byte) error { return c.initErr }
 func (c *TCore) Login(pw []byte) error                  { return c.loginErr }
 func (c *TCore) IsInitialized() bool                    { return c.isInited }
-func (c *TCore) SyncBook(dex string, base, quote uint32) (core.BookFeed, error) {
-	return c.syncFeed, c.syncErr
+func (c *TCore) SyncBook(dex string, base, quote uint32) (*orderbook.OrderBook, core.BookFeed, error) {
+	return nil, c.syncFeed, c.syncErr
 }
 func (c *TCore) Book(dex string, base, quote uint32) (*core.OrderBook, error) {
 	return &core.OrderBook{}, nil
@@ -208,7 +209,11 @@ func trade(form *core.TradeForm) *core.Order {
 }
 func (c *TCore) Cancel(pw []byte, oid dex.Bytes) error { return nil }
 
-func (c *TCore) NotificationFeed() <-chan core.Notification { return make(chan core.Notification, 1) }
+func (c *TCore) NotificationFeed() *core.NoteFeed {
+	return &core.NoteFeed{
+		C: make(chan core.Notification, 1),
+	}
+}
 
 func (c *TCore) AckNotes(ids []dex.Bytes) {}
 
@@ -274,30 +279,6 @@ func (c *TCore) RemoveWalletPeer(assetID uint32, address string) error {
 }
 func (c *TCore) Notifications(n int) ([]*db.Notification, error) {
 	return c.notes, c.notesErr
-}
-
-func (c *TCore) CreateBot(pw []byte, botType string, pgm *core.MakerProgram) (uint64, error) {
-	return 1, nil
-}
-
-func (c *TCore) StartBot(pw []byte, pgmID uint64) error {
-	return nil
-}
-
-func (c *TCore) StopBot(pgmID uint64) error {
-	return nil
-}
-
-func (c *TCore) UpdateBotProgram(pgmID uint64, pgm *core.MakerProgram) error {
-	return nil
-}
-
-func (c *TCore) RetireBot(pgmID uint64) error {
-	return nil
-}
-
-func (c *TCore) MarketReport(host string, baseID, quoteID uint32) (*core.MarketReport, error) {
-	return nil, nil
 }
 
 func (c *TCore) ShieldedStatus(assetID uint32) (*asset.ShieldedStatus, error) {

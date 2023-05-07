@@ -144,7 +144,6 @@ type User struct {
 	SeedGenerationTime uint64                     `json:"seedgentime"`
 	Assets             map[uint32]*SupportedAsset `json:"assets"`
 	FiatRates          map[uint32]float64         `json:"fiatRates"`
-	Bots               []*BotReport               `json:"bots"`
 }
 
 // SupportedAsset is data about an asset and possibly the wallet associated
@@ -977,7 +976,15 @@ type TradeForm struct {
 	Rate    uint64            `json:"rate"`
 	TifNow  bool              `json:"tifnow"`
 	Options map[string]string `json:"options"`
-	Program uint64            // Bot program ID
+}
+
+// SingleLotFeesForm is used to determine the fees for a single lot trade.
+type SingleLotFeesForm struct {
+	Host    string            `json:"host"`
+	Base    uint32            `json:"base"`
+	Quote   uint32            `json:"quote"`
+	Sell    bool              `json:"sell"`
+	Options map[string]string `json:"options"`
 }
 
 // marketName is a string ID constructed from the asset IDs.
@@ -1081,39 +1088,4 @@ type PreAccelerate struct {
 	SuggestedRate     uint64                   `json:"suggestedRate"`
 	SuggestedRange    asset.XYRange            `json:"suggestedRange"`
 	EarlyAcceleration *asset.EarlyAcceleration `json:"earlyAcceleration,omitempty"`
-}
-
-// BotOrder identifies an order controlled by an bot program.
-type BotOrder struct {
-	Host     string            `json:"host"`
-	MarketID string            `json:"marketID"`
-	OrderID  dex.Bytes         `json:"orderID"`
-	Status   order.OrderStatus `json:"status"`
-}
-
-// BotReport is a report for the status of a bot.
-type BotReport struct {
-	ProgramID uint64        `json:"programID"`
-	Program   *MakerProgram `json:"program"`
-	Running   bool          `json:"running"`
-	Orders    []*BotOrder   `json:"orders"`
-}
-
-// MarketReport is a report about the current state of a market pair, including
-// oracle data.
-type MarketReport struct {
-	Price float64 `json:"price"`
-	// BasisPrice is the the target price before oracle weighting and bias is
-	// applied.
-	BasisPrice      float64         `json:"basisPrice"`
-	Oracles         []*OracleReport `json:"oracles"`
-	BreakEvenSpread float64         `json:"breakEvenSpread"`
-}
-
-// OracleReport is a summary of an oracle's market data.
-type OracleReport struct {
-	Host     string  `json:"host"`
-	USDVol   float64 `json:"usdVol"`
-	BestBuy  float64 `json:"bestBuy"`
-	BestSell float64 `json:"bestSell"`
 }

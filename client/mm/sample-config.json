@@ -1,0 +1,14 @@
+[{
+    "host": "127.0.0.1:17273",
+    "baseAsset": 42,
+    "quoteAsset": 0,
+    "marketMakingConfig": {
+        "lots": 1,
+        "gapStrategy": "multiplier",
+        "gapFactor": 1,
+        "driftTolerance": 0.001,
+        "oracleWeighting": 0.5,
+        "oracleBias": 0,
+        "manualRate": 0
+    }
+}]

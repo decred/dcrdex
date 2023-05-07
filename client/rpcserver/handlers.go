@@ -6,12 +6,14 @@ package rpcserver
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"sort"
 	"strings"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/mm"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
@@ -50,6 +52,8 @@ const (
 	addWalletPeerRoute         = "addwalletpeer"
 	removeWalletPeerRoute      = "removewalletpeer"
 	notificationsRoute         = "notifications"
+	startMarketMakingRoute     = "startmarketmaking"
+	stopMarketMakingRoute      = "stopmarketmaking"
 )
 
 const (
@@ -112,6 +116,8 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	addWalletPeerRoute:         handleAddWalletPeer,
 	removeWalletPeerRoute:      handleRemoveWalletPeer,
 	notificationsRoute:         handleNotificationsRoute,
+	startMarketMakingRoute:     handleStartMarketMakingRoute,
+	stopMarketMakingRoute:      handleStopMarketMakingRoute,
 }
 
 // handleHelp handles requests for help. Returns general help for all commands
@@ -874,6 +880,56 @@ func handleNotificationsRoute(s *RPCServer, params *RawParams) *msgjson.Response
 	return createResponse(notificationsRoute, notes, nil)
 }
 
+// parseMarketMakingConfig takes a path to a json file, parses the contents, and
+// returns a []*mm.BotConfig.
+func parseMarketMakingConfig(path string) ([]*mm.BotConfig, error) {
+	contents, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	var configs []*mm.BotConfig
+	err = json.Unmarshal(contents, &configs)
+	if err != nil {
+		return nil, err
+	}
+
+	return configs, nil
+}
+
+func handleStartMarketMakingRoute(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	form, err := parseStartMarketMakingArgs(params)
+	if err != nil {
+		return usage(startMarketMakingRoute, err)
+	}
+
+	configs, err := parseMarketMakingConfig(form.cfgFilePath)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to parse market making config: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCStartMarketMakingError, errMsg)
+		return createResponse(startMarketMakingRoute, nil, resErr)
+	}
+
+	err = s.mm.Run(s.ctx, configs, form.appPass)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to start market making: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCStartMarketMakingError, errMsg)
+		return createResponse(startMarketMakingRoute, nil, resErr)
+	}
+
+	return createResponse(startMarketMakingRoute, "started market making", nil)
+}
+
+func handleStopMarketMakingRoute(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	if !s.mm.Running() {
+		errMsg := "market making is not running"
+		resErr := msgjson.NewError(msgjson.RPCStopMarketMakingError, errMsg)
+		return createResponse(stopMarketMakingRoute, nil, resErr)
+	}
+	s.mm.Stop()
+	return createResponse(stopMarketMakingRoute, "stopped market making", nil)
+}
+
 // format concatenates thing and tail. If thing is empty, returns an empty
 // string.
 func format(thing, tail string) string {
@@ -1468,5 +1524,14 @@ needed to complete a swap.`,
 		argsShort:  `(num)`,
 		argsLong: `Args:
 		num (int): The number of notifications to load.`,
+	},
+	startMarketMakingRoute: {
+		cmdSummary: `Start market making.`,
+		argsShort:  `(cfgPath)`,
+		argsLong: `Args:
+		cfgPath (string): The path to the market maker config file.`,
+	},
+	stopMarketMakingRoute: {
+		cmdSummary: `Stop market making.`,
 	},
 }

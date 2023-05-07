@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 )
@@ -29,8 +30,8 @@ type TCore struct {
 	notOpen    bool
 }
 
-func (c *TCore) SyncBook(dex string, base, quote uint32) (core.BookFeed, error) {
-	return c.syncFeed, c.syncErr
+func (c *TCore) SyncBook(dex string, base, quote uint32) (*orderbook.OrderBook, core.BookFeed, error) {
+	return nil, c.syncFeed, c.syncErr
 }
 func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 	if c.notHas {

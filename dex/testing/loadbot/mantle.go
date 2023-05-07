@@ -90,7 +90,7 @@ out:
 					// Even if we're not going to use it, we need to subscribe
 					// to a book feed and keep the channel empty, so that we
 					// can keep receiving book feed notifications.
-					bookFeed, err := m.SyncBook(hostAddr, baseID, quoteID)
+					_, bookFeed, err := m.SyncBook(hostAddr, baseID, quoteID)
 					if err != nil {
 						m.fatalError("SyncBook error: %v", err)
 						return
@@ -176,7 +176,7 @@ func newMantle(name string) (*Mantle, error) {
 		name:    name,
 		log:     loggerMaker.Logger("MANTLE:" + name),
 		wallets: make(map[uint32]*botWallet),
-		notes:   c.NotificationFeed(),
+		notes:   c.NotificationFeed().C,
 	}
 
 	return m, nil

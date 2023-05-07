@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/ws"
@@ -64,7 +65,7 @@ func (cl *wsClient) shutDownFeed() {
 
 // Core specifies the needed methods for Server to operate. Satisfied by *core.Core.
 type Core interface {
-	SyncBook(dex string, base, quote uint32) (core.BookFeed, error)
+	SyncBook(dex string, base, quote uint32) (*orderbook.OrderBook, core.BookFeed, error)
 	AckNotes([]dex.Bytes)
 }
 
@@ -301,7 +302,7 @@ func loadMarket(s *Server, cl *wsClient, req *marketLoad) (*bookFeed, *msgjson.E
 		return nil, msgjson.NewError(msgjson.UnknownMarketError, errMsg)
 	}
 
-	feed, err := s.core.SyncBook(req.Host, req.Base, req.Quote)
+	_, feed, err := s.core.SyncBook(req.Host, req.Base, req.Quote)
 	if err != nil {
 		errMsg := fmt.Sprintf("error getting order feed: %v", err)
 		s.log.Errorf(errMsg)

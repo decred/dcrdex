@@ -1280,11 +1280,6 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 		}
 	}
 
-	var pgmID uint64
-	if pgmB := oBkt.Get(programKey); len(pgmB) == 8 {
-		pgmID = intCoder.Uint64(pgmB)
-	}
-
 	return &dexdb.MetaOrder{
 		MetaData: &dexdb.OrderMetaData{
 			Proof:              *proof,
@@ -1305,7 +1300,6 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 			RedemptionReserves: redemptionReserves,
 			RefundReserves:     refundReserves,
 			AccelerationCoins:  accelerationCoinIDs,
-			ProgramID:          pgmID,
 		},
 		Order: ord,
 	}, nil
@@ -1393,7 +1387,6 @@ func updateOrderMetaData(bkt *bbolt.Bucket, md *dexdb.OrderMetaData) error {
 		put(redemptionReservesKey, uint64Bytes(md.RedemptionReserves)).
 		put(refundReservesKey, uint64Bytes(md.RefundReserves)).
 		put(accelerationsKey, accelerationsB).
-		put(programKey, uint64Bytes(md.ProgramID)).
 		err()
 }
 
@@ -2398,79 +2391,6 @@ func (db *BoltDB) DisabledRateSources() (disabledSources []string, err error) {
 		for _, token := range disabled {
 			if token != "" {
 				disabledSources = append(disabledSources, token)
-			}
-		}
-		return nil
-	})
-}
-
-// SaveBotProgram saves data associated with a bot program. A unique ID
-// is returned that can be used to address this program in future queries.
-func (db *BoltDB) SaveBotProgram(pgm *dexdb.BotProgram) (pgmID uint64, err error) {
-	return pgmID, db.Update(func(tx *bbolt.Tx) error {
-		bkt := tx.Bucket(botProgramsBucket)
-		if bkt == nil {
-			return errors.New("no bot programs bucket")
-		}
-		var err error
-		pgmID, err = bkt.NextSequence()
-		if err != nil {
-			return fmt.Errorf("NextSequence error: %v", err)
-		}
-		return storeBotProgram(bkt, pgmID, pgm)
-	})
-}
-
-func storeBotProgram(bkt *bbolt.Bucket, pgmID uint64, pgm *dexdb.BotProgram) error {
-	k := uint64Bytes(pgmID)
-	pgmBkt, err := bkt.CreateBucketIfNotExists(k)
-	if err != nil {
-		return fmt.Errorf("error creating program bucket: %w", err)
-	}
-
-	return newBucketPutter(pgmBkt).
-		put(typeKey, []byte(pgm.Type)).
-		put(programKey, pgm.Program).
-		err()
-}
-
-// UpdateBotProgram updates the data associated with a running bot program.
-func (db *BoltDB) UpdateBotProgram(pgmID uint64, pgm *dexdb.BotProgram) error {
-	return db.Update(func(tx *bbolt.Tx) error {
-		bkt := tx.Bucket(botProgramsBucket)
-		if bkt == nil {
-			return errors.New("no bot programs bucket")
-		}
-		return storeBotProgram(bkt, pgmID, pgm)
-	})
-}
-
-// RetireBotProgram deletes the bot program from the database.
-func (db *BoltDB) RetireBotProgram(pgmID uint64) error {
-	return db.Update(func(tx *bbolt.Tx) error {
-		bkt := tx.Bucket(botProgramsBucket)
-		if bkt == nil {
-			return errors.New("no bot programs bucket")
-		}
-		return bkt.DeleteBucket(uint64Bytes(pgmID))
-	})
-}
-
-// ActiveBotPrograms loads a list of active bot program IDs.
-func (db *BoltDB) ActiveBotPrograms() (pgms map[uint64]*dexdb.BotProgram, err error) {
-	return pgms, db.View(func(tx *bbolt.Tx) error {
-		bkt := tx.Bucket(botProgramsBucket)
-		if bkt == nil {
-			return errors.New("no bot programs bucket")
-		}
-		pgms = make(map[uint64]*dexdb.BotProgram, bkt.Stats().KeyN)
-
-		c := bkt.Cursor()
-		for k, _ := c.First(); k != nil; k, _ = c.Next() {
-			pgmBkt := bkt.Bucket(k)
-			pgms[intCoder.Uint64(k)] = &dexdb.BotProgram{
-				Type:    string(pgmBkt.Get(typeKey)),
-				Program: pgmBkt.Get(programKey),
 			}
 		}
 		return nil

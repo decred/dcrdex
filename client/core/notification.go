@@ -87,12 +87,28 @@ func (c *Core) notify(n Notification) {
 	c.noteMtx.RUnlock()
 }
 
+// NoteFeed contains a receiving channel for notifications.
+type NoteFeed struct {
+	C      <-chan Notification
+	closer func()
+}
+
+// ReturnFeed should be called when the channel is no longer needed.
+func (c *NoteFeed) ReturnFeed() {
+	if c.closer != nil {
+		c.closer()
+	}
+}
+
 // NotificationFeed returns a new receiving channel for notifications. The
 // channel has capacity 1024, and should be monitored for the lifetime of the
 // Core. Blocking channels are silently ignored.
-func (c *Core) NotificationFeed() <-chan Notification {
-	_, ch := c.notificationFeed()
-	return ch
+func (c *Core) NotificationFeed() *NoteFeed {
+	id, ch := c.notificationFeed()
+	return &NoteFeed{
+		C:      ch,
+		closer: func() { c.returnFeed(id) },
+	}
 }
 
 func (c *Core) notificationFeed() (uint64, <-chan Notification) {
@@ -608,27 +624,6 @@ func newWalletCreationNote(topic Topic, subject, details string, severity db.Sev
 	return &WalletCreationNote{
 		Notification: db.NewNotification(NoteTypeCreateWallet, topic, subject, details, severity),
 		AssetID:      assetID,
-	}
-}
-
-// BotNote is a note that describes the operation of a automated trading bot.
-type BotNote struct {
-	db.Notification
-	Report *BotReport `json:"report"`
-}
-
-const (
-	TopicBotCreated Topic = "BotCreated"
-	TopicBotStarted Topic = "BotStarted"
-	TopicBotStopped Topic = "BotStopped"
-	TopicBotUpdated Topic = "BotUpdated"
-	TopicBotRetired Topic = "BotRetired"
-)
-
-func newBotNote(topic Topic, subject, details string, severity db.Severity, report *BotReport) *BotNote {
-	return &BotNote{
-		Notification: db.NewNotification(NoteTypeBot, topic, subject, details, severity),
-		Report:       report,
 	}
 }
 
