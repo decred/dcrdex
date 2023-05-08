@@ -314,7 +314,7 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 			return
 		}
 		<-time.After(time.Second)
-	case doge, zec:
+	case doge, firo, zec:
 		// Some coins require a totally new node. Create it and monitor
 		// it. Shut it down with the stop function before exiting.
 		addrs, err := findOpenAddrs(2)
@@ -439,7 +439,7 @@ func (m *Mantle) createWallet(symbol, node string, minFunds, maxFunds uint64, nu
 func send(symbol, node, addr string, val uint64) error {
 	var res *harnessResult
 	switch symbol {
-	case btc, dcr, ltc, doge, bch, dgb:
+	case btc, dcr, ltc, doge, firo, bch, dgb:
 		res = <-harnessCtl(ctx, symbol, fmt.Sprintf("./%s", node), "sendtoaddress", addr, valString(val, symbol))
 	case zec:
 		// sendtoaddress will choose spent outputs if a block was
@@ -685,6 +685,17 @@ func newBotWallet(symbol, node, name string, port string, pass []byte, minFunds,
 		form = &core.WalletForm{
 			Type:    "digibytedRPC",
 			AssetID: dgbID,
+			Config: map[string]string{
+				"walletname":  name,
+				"rpcuser":     "user",
+				"rpcpassword": "pass",
+				"rpcport":     port,
+			},
+		}
+	case firo:
+		form = &core.WalletForm{
+			Type:    "firodRPC",
+			AssetID: firoID,
 			Config: map[string]string{
 				"walletname":  name,
 				"rpcuser":     "user",

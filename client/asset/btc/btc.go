@@ -330,6 +330,9 @@ type BTCCloneCFG struct {
 	// inputs. This is used to accurately determine the size of the first swap
 	// in a chain when considered with the actual inputs.
 	InitTxSizeBase uint32
+	// PrivKeyFunc is an optional function to get a private key for an address
+	// from the wallet. If not given the usual dumpprivkey RPC will be used.
+	PrivKeyFunc func(addr string) (*btcec.PrivateKey, error)
 	// AddrFunc is an optional function to produce new addresses. If AddrFunc
 	// is provided, the regular getnewaddress and getrawchangeaddress methods
 	// will not be used, and AddrFunc will be used instead.
@@ -1173,6 +1176,7 @@ func newRPCWallet(requester RawRequester, cfg *BTCCloneCFG, parsedCfg *RPCWallet
 		omitRPCOptionsArg:        cfg.OmitRPCOptionsArg,
 		addrFunc:                 cfg.AddrFunc,
 		connectFunc:              cfg.ConnectFunc,
+		privKeyFunc:              cfg.PrivKeyFunc,
 	}
 	core.requesterV.Store(requester)
 	node := newRPCClient(core)
@@ -1304,7 +1308,7 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 // NoLocalFeeRate is a dummy function for BTCCloneCFG.FeeEstimator for a wallet
 // instance that cannot support a local fee rate estimate but has an external
 // fee rate source.
-func NoLocalFeeRate() (uint64, error) {
+func NoLocalFeeRate(ctx context.Context, rr RawRequester, u uint64) (uint64, error) {
 	return 0, errors.New("no local fee rate estimate possible")
 }
 
@@ -4270,6 +4274,7 @@ func (btc *baseWallet) DepositAddress() (string, error) {
 	if btc.node.locked() {
 		return addrStr, nil
 	}
+
 	// If the wallet is unlocked, be extra cautious and ensure the wallet gave
 	// us an address for which we can retrieve the private keys, regardless of
 	// what ownsAddress would say.

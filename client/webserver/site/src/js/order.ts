@@ -571,6 +571,10 @@ const CoinExplorers: Record<number, Record<number, (cid: string) => string>> = {
     [Mainnet]: (cid: string) => `https://zcashblockexplorer.com/transactions/${cid.split(':')[0]}`,
     [Testnet]: (cid: string) => `https://blockexplorer.one/zcash/testnet/tx/${cid.split(':')[0]}`
   },
+  136: { // firo
+    [Mainnet]: (cid: string) => `https://explorer.firo.org/tx/${cid.split(':')[0]}`,
+    [Testnet]: (cid: string) => `https://testexplorer.firo.org/tx/${cid.split(':')[0]}`
+  },
   145: { // bch
     [Mainnet]: (cid: string) => `https://bch.loping.net/tx/${cid.split(':')[0]}`,
     [Testnet]: (cid: string) => `https://tbch4.loping.net/tx/${cid.split(':')[0]}`

@@ -121,6 +121,7 @@ type rpcCore struct {
 	omitRPCOptionsArg        bool
 	addrFunc                 func() (btcutil.Address, error)
 	connectFunc              func() error
+	privKeyFunc              func(addr string) (*btcec.PrivateKey, error)
 }
 
 func (c *rpcCore) requester() RawRequester {
@@ -647,6 +648,10 @@ func (wc *rpcClient) listDescriptors(private bool) (*listDescriptorsResult, erro
 // privKeyForAddress retrieves the private key associated with the specified
 // address.
 func (wc *rpcClient) privKeyForAddress(addr string) (*btcec.PrivateKey, error) {
+	// Use a specialized client's privKey function
+	if wc.privKeyFunc != nil {
+		return wc.privKeyFunc(addr)
+	}
 	// Descriptor wallets do not have dumpprivkey.
 	if !wc.descriptors {
 		var keyHex string

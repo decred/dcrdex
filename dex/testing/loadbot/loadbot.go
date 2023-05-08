@@ -9,7 +9,7 @@ wallets.
 Build with server locktimes in mind.
 i.e. -ldflags "-X 'decred.org/dcrdex/dex.testLockTimeTaker=30s' -X 'decred.org/dcrdex/dex.testLockTimeMaker=1m'"
 
-Supported assets are bch, btc, dcr, doge, dgb, eth, ltc, and zec.
+Supported assets are bch, btc, dcr, doge, dgb, eth, firo, ltc, and zec.
 */
 
 package main
@@ -38,6 +38,7 @@ import (
 	_ "decred.org/dcrdex/client/asset/dgb"
 	_ "decred.org/dcrdex/client/asset/doge"
 	_ "decred.org/dcrdex/client/asset/eth"
+	_ "decred.org/dcrdex/client/asset/firo"
 	_ "decred.org/dcrdex/client/asset/ltc"
 	_ "decred.org/dcrdex/client/asset/zec"
 	"decred.org/dcrdex/dex"
@@ -56,6 +57,7 @@ const (
 	btc              = "btc"
 	dcr              = "dcr"
 	eth              = "eth"
+	firo             = "firo"
 	ltc              = "ltc"
 	doge             = "doge"
 	dgb              = "dgb"
@@ -74,6 +76,7 @@ var (
 	ltcID, _    = dex.BipSymbolID(ltc)
 	dogeID, _   = dex.BipSymbolID(doge)
 	dgbID, _    = dex.BipSymbolID(dgb)
+	firoID, _   = dex.BipSymbolID(firo)
 	bchID, _    = dex.BipSymbolID(bch)
 	zecID, _    = dex.BipSymbolID(zec)
 	loggerMaker *dex.LoggerMaker
@@ -470,7 +473,7 @@ func run() error {
 		switch symbol {
 		case btc, ltc, dgb:
 			args = []string{"getnewaddress", "''", "bech32"}
-		case doge, bch, zec:
+		case doge, bch, firo, zec:
 			args = []string{"getnewaddress"}
 		case dcr:
 			args = []string{"getnewaddress", "default", "ignore"}
@@ -501,7 +504,7 @@ func run() error {
 
 	unlockWallets := func(symbol string) error {
 		switch symbol {
-		case btc, ltc, doge, bch, dgb:
+		case btc, ltc, doge, firo, bch, dgb:
 			<-harnessCtl(ctx, symbol, "./alpha", "walletpassphrase", "abc", "4294967295")
 			<-harnessCtl(ctx, symbol, "./beta", "walletpassphrase", "abc", "4294967295")
 		case dcr:
@@ -601,7 +604,7 @@ func run() error {
 			case dcrID:
 				walletAddr = pair.cfg["rpclisten"]
 				pair.cfg["rpclisten"] = newAddr
-			case btcID, ltcID, dogeID, bchID, dgbID:
+			case btcID, ltcID, dogeID, firoID, bchID, dgbID:
 				oldPort := pair.cfg["rpcport"]
 				walletAddr = "127.0.0.1:" + oldPort
 				pair.cfg["rpcport"] = port

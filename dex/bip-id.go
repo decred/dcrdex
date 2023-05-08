@@ -163,7 +163,7 @@ var bipIDs = map[uint32]string{
 	133:   "zec",
 	134:   "lsk",
 	135:   "steem",
-	136:   "xzc",
+	136:   "firo", // modified from xzc
 	137:   "rbtc",
 	138:   "giftblock",
 	139:   "rpt",

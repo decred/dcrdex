@@ -62,6 +62,9 @@ LTC_ON=$?
 ~/dextest/doge/harness-ctl/alpha getblockchaininfo &> /dev/null
 DOGE_ON=$?
 
+~/dextest/firo/harness-ctl/alpha getblockchaininfo &> /dev/null
+FIRO_ON=$?
+
 ~/dextest/zec/harness-ctl/alpha getblockchaininfo &> /dev/null
 ZEC_ON=$?
 
@@ -150,6 +153,20 @@ if [ $DOGE_ON -eq 0 ]; then
             "marketBuyBuffer": 1.2
 EOF
 else echo "WARNING: Dogecoin is not running. Configuring dcrdex markets without DOGE."
+fi
+
+if [ $FIRO_ON -eq 0 ]; then
+    cat << EOF >> "./markets.json"
+        },
+        {
+            "base": "DCR_simnet",
+            "quote": "FIRO_simnet",
+            "lotSize": 100000000,
+            "rateStep": 1000000,
+            "epochDuration": ${EPOCH_DURATION},
+            "marketBuyBuffer": 1.2
+EOF
+else echo "WARNING: Firo is not running. Configuring dcrdex markets without FIRO."
 fi
 
 if [ $ZEC_ON -eq 0 ]; then
@@ -277,6 +294,18 @@ if [ $DOGE_ON -eq 0 ]; then
             "configPath": "${TEST_ROOT}/doge/alpha/alpha.conf",
             "bondAmt": 200000000,
             "bondConfs": 1
+EOF
+fi
+
+if [ $FIRO_ON -eq 0 ]; then
+    cat << EOF >> "./markets.json"
+         },
+        "FIRO_simnet": {
+            "bip44symbol": "firo",
+            "network": "simnet",
+            "maxFeeRate": 10,
+            "swapConf": 2,
+            "configPath": "${TEST_ROOT}/firo/alpha/alpha.conf"
 EOF
 fi
 
