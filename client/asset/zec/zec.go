@@ -256,9 +256,11 @@ type zecWallet struct {
 	lastAddress atomic.Value // "string"
 }
 
+var _ asset.FeeRater = (*zecWallet)(nil)
+
 // FeeRate returns the asset standard fee rate for Zcash.
-func (w *zecWallet) FeeRate(context.Context) (uint64, error) {
-	return dexzec.LegacyFeeRate, nil
+func (w *zecWallet) FeeRate() uint64 {
+	return dexzec.LegacyFeeRate
 }
 
 var _ asset.ShieldedWallet = (*zecWallet)(nil)
