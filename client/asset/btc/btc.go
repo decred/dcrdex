@@ -332,7 +332,8 @@ type BTCCloneCFG struct {
 	InitTxSizeBase uint32
 	// PrivKeyFunc is an optional function to get a private key for an address
 	// from the wallet. If not given the usual dumpprivkey RPC will be used.
-	PrivKeyFunc func(addr string) (*btcec.PrivateKey, error) // AddrFunc is an optional function to produce new addresses. If AddrFunc
+	PrivKeyFunc func(addr string) (*btcec.PrivateKey, error)
+	// AddrFunc is an optional function to produce new addresses. If AddrFunc
 	// is provided, the regular getnewaddress and getrawchangeaddress methods
 	// will not be used, and AddrFunc will be used instead.
 	AddrFunc func() (btcutil.Address, error)
