@@ -71,11 +71,8 @@ var (
 		// The only place we currently use Net is in btcd/chaincfg.Register,
 		// where it is checked to prevent duplicate registration, so our only
 		// requirement is that it is unique. This one was just generated with a prng.
-		Net: 0x7da7d6db,
-		// TODO or unused with simnet?
-		// There is no assert check in chainparams after genesis is calculated - need to recompile & printf
-		// This value is actually the first (and only) checkpoint
-		GenesisHash: mustHash("0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206"),
+		Net:         0x7da7d6db,
+		GenesisHash: mustHash("a42b98f04cc2916e8adfb5d9db8a2227c4629bc205748ed2f33180b636ee885b"),
 	})
 )
 
