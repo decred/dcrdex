@@ -18,6 +18,22 @@ const (
 
 	InitTxSizeBase = MinimumTxOverhead + btc.P2PKHOutputSize + btc.P2SHOutputSize // 29 + 34 + 32 = 95
 	InitTxSize     = InitTxSizeBase + btc.RedeemP2PKHInputSize                    // 95 + 149 = 244
+
+	// LegacyFeeRate returns a standard 10 zats / byte. Prior to ZIP-0317, Zcash
+	// used a standard tx fee of 1000 zats, regardless of tx size. However,
+	// zcashd v5.5 begins making stricter fee requirements for both relay and
+	// block inclusion. The release notes state that relay by default still
+	// works with 1000 zat fee txns, but it may be adjusted by operators, and it
+	// may need to be set to the higher ZIP 317 rate. For mining, there is a
+	// small allowance on the number of "unpaid actions" allowed in a block, so
+	// we should take care to pay the ZIP 317 "conventional" rate, which is
+	// multiples of 5000 zats, and a minimum of 10000. To ensure we have no
+	// unpaid actions in our (transparent) transactions, we need a higher rate.
+	// For a 242 byte transaction, like a swap init, we can emulate this with
+	// about 42 zats/byte. Even with 100 zats/byte, our typical redeem of ~342
+	// bytes would pay 34200 zats, which is only about a penny, so to ensure our
+	// transactions are relayed and mined, we go with a high rate.
+	LegacyFeeRate = 84
 )
 
 var (

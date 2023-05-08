@@ -977,8 +977,10 @@ func (btc *ExchangeWalletSPV) RemovePeer(addr string) error {
 	return btc.spvNode.removePeer(addr)
 }
 
-// FeeRate satisfies asset.FeeRater.
-func (btc *ExchangeWalletFullNode) FeeRate() uint64 {
+var _ asset.FeeRater = (*ExchangeWalletFullNode)(nil)
+var _ asset.FeeRater = (*ExchangeWalletNoAuth)(nil)
+
+func (btc *intermediaryWallet) feeRaterHelper() uint64 {
 	// NOTE: With baseWallet having an optional external fee rate source, we may
 	// consider making baseWallet a FeeRater by allowing a nil local func.
 	rate, err := btc.feeRate(1)
@@ -987,6 +989,16 @@ func (btc *ExchangeWalletFullNode) FeeRate() uint64 {
 		return 0
 	}
 	return rate
+}
+
+// FeeRate satisfies asset.FeeRater.
+func (btc *ExchangeWalletFullNode) FeeRate() uint64 {
+	return btc.feeRaterHelper()
+}
+
+// FeeRate satisfies asset.FeeRater.
+func (btc *ExchangeWalletNoAuth) FeeRate() uint64 {
+	return btc.feeRaterHelper()
 }
 
 // LogFilePath returns the path to the neutrino log file.
