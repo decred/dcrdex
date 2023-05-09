@@ -216,8 +216,10 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (ass
 		TxFeesCalculator: func(baseTxSize, inputCount, inputsSize, _ uint64) uint64 {
 			return txFees(baseTxSize, inputCount, inputsSize)
 		},
-		SplitFeeCalculator: splitTxFees,
-		NonSegwitSigner:    signTx,
+		SplitFeeCalculator: func(inputCount, inputsSize, _ uint64, extraOutput, _ bool) (swapInputSize, baggage uint64) {
+			return splitTxFees(inputCount, inputsSize, extraOutput)
+		},
+		NonSegwitSigner: signTx,
 		TxDeserializer: func(b []byte) (*wire.MsgTx, error) {
 			zecTx, err := dexzec.DeserializeTx(b)
 			if err != nil {
@@ -294,10 +296,10 @@ func (w *zecWallet) PreSwap(req *asset.PreSwapForm) (*asset.PreSwap, error) {
 func (w *zecWallet) PreRedeem(req *asset.PreRedeemForm) (*asset.PreRedeem, error) {
 	var singleTxInsSize uint64 = dexbtc.TxInOverhead + dexbtc.RedeemSwapSigScriptSize + 1
 	var txOutsSize uint64 = dexbtc.P2PKHOutputSize + 1
-	worstCaseFees := dexzec.TransparentTxFeesZIP317(singleTxInsSize, txOutsSize) * req.Lots
-
-	multiTxInsSize := dexbtc.TxInOverhead + dexbtc.RedeemSwapSigScriptSize*req.Lots + uint64(wire.VarIntSerializeSize(req.Lots))
-	bestCaseFees := dexzec.TransparentTxFeesZIP317(multiTxInsSize, txOutsSize) * req.Lots
+	// best case: all lots in a single match.
+	bestCaseFees := dexzec.TransparentTxFeesZIP317(singleTxInsSize, txOutsSize)
+	// worst-case: all single-lot matches no batching.
+	worstCaseFees := bestCaseFees * req.Lots
 	return &asset.PreRedeem{
 		Estimate: &asset.RedeemEstimate{
 			RealisticWorstCase: worstCaseFees,
@@ -649,7 +651,8 @@ func isDust(val, outputSize uint64) bool {
 
 var emptyTxSize = dexzec.CalcTxSize(new(wire.MsgTx))
 
-// txFees is the tx fees for a basic single-output send with change.
+// txFees calculates tx fees. baseTxSize is the size of the transaction with
+// outputs and no inputs.
 func txFees(baseTxSize, inputCount, inputsSize uint64) uint64 {
 	txInSize := inputsSize + uint64(wire.VarIntSerializeSize(inputCount))
 	outputsSize := baseTxSize - emptyTxSize
@@ -657,7 +660,8 @@ func txFees(baseTxSize, inputCount, inputsSize uint64) uint64 {
 	return dexzec.TransparentTxFeesZIP317(txInSize, txOutSize)
 }
 
-func splitTxFees(inputCount, inputsSize, _ uint64, extraOutput, _ bool) (swapInputSize, baggage uint64) {
+// splitTxFees calculates the fees for a split tx.
+func splitTxFees(inputCount, inputsSize uint64, extraOutput bool) (swapInputSize, baggage uint64) {
 	txInsSize := inputsSize + uint64(wire.VarIntSerializeSize(inputCount))
 	var numOutputs uint64 = 2
 	if extraOutput {

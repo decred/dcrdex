@@ -800,6 +800,7 @@ func (tx *Tx) SerializeSize() uint64 {
 	return sz
 }
 
+// TxFeesZIP317 calculates the tx fees according to ZIP-0317.
 func (tx *Tx) TxFeesZIP317() uint64 {
 	txInsSize := uint64(wire.VarIntSerializeSize(uint64(len(tx.TxIn))))
 	for _, txIn := range tx.TxIn {

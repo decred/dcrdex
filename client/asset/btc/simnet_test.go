@@ -241,11 +241,21 @@ func TestMakeBondTx(t *testing.T) {
 	t.Logf("refundCoin: %v\n", refundCoin)
 }
 
-func TestSendEstimation(t *testing.T) {
+// TestCompareSendFeeEstimation compares our manual funding routine, which pulls
+// all unspent outputs, to the rpcClient method that uses the rundrawtransaction
+// rpc.
+func TestCompareSendFeeEstimation(t *testing.T) {
 	rig := newTestRig(t, func(name string, err error) {
 		tLogger.Infof("%s has reported a new block, error = %v", name, err)
 	})
-	defer rig.close(t)
+	const numCycles = 10
+	var manualTime, rpcTime time.Duration
+	defer func() {
+		rig.close(t)
+		fmt.Printf("%d cycles each\n", numCycles)
+		fmt.Println("Time to pick utxos ourselves:", manualTime)
+		fmt.Println("Time to use fundrawtransaction:", rpcTime)
+	}()
 
 	addr, _ := btcutil.DecodeAddress("bcrt1qs6d2lpkcfccus6q7c0dvjnlpf5g45gf7yak6mm", &chaincfg.RegressionNetParams)
 	pkScript, _ := txscript.PayToAddrScript(addr)
@@ -254,7 +264,6 @@ func TestSendEstimation(t *testing.T) {
 
 	// Use alpha, since there are many utxos.
 	w := rig.alpha()
-	const numCycles = 100
 	tStart := time.Now()
 	for i := 0; i < numCycles; i++ {
 		_, err := w.estimateSendTxFee(tx, 20, false)
@@ -262,7 +271,8 @@ func TestSendEstimation(t *testing.T) {
 			t.Fatalf("Error estimating with utxos: %v", err)
 		}
 	}
-	fmt.Println("Time to pick utxos ourselves:", time.Since(tStart))
+	manualTime = time.Since(tStart)
+
 	node := w.node.(*rpcClient)
 	tStart = time.Now()
 	for i := 0; i < numCycles; i++ {
@@ -271,5 +281,5 @@ func TestSendEstimation(t *testing.T) {
 			t.Fatalf("Error estimating with utxos: %v", err)
 		}
 	}
-	fmt.Println("Time to use fundrawtransaction:", time.Since(tStart))
+	rpcTime = time.Since(tStart)
 }

@@ -10,10 +10,11 @@ import (
 	"github.com/btcsuite/btcd/wire"
 )
 
+// https://zips.z.cash/zip-0317
+
 // TransparentTxFeesZIP317 calculates the ZIP-0317 fees for a fully transparent
 // Zcash transaction, which only depends on the size of the tx_in and tx_out
 // fields.
-// https://github.com/decred/dcrdex/blob/master/docs/images/zip-0317.png
 func TransparentTxFeesZIP317(txInSize, txOutSize uint64) uint64 {
 	return txFeesZIP317(txInSize, txOutSize, nil)
 }

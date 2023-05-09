@@ -184,6 +184,8 @@ func (be *ZECBackend) ValidateFeeRate(contract *asset.Contract, reqFeeRate uint6
 	return fees >= zecTx.TxFeesZIP317()
 }
 
+var _ asset.OrderEstimator = (*ZECBackend)(nil)
+
 // CalcOrderFunds is the ZIP-0317 compliant version of calc.RequiredOrderFunds.
 // Satisfies the asset.OrderEstimator interface.
 func (be *ZECBackend) CalcOrderFunds(swapVal, inputCount, inputsSize, maxSwaps uint64) uint64 {

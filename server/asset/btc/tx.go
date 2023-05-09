@@ -26,8 +26,8 @@ type Tx struct {
 	// Used to conditionally skip block lookups on mempool transactions during
 	// calls to Confirmations.
 	lastLookup *chainhash.Hash
-	// fees is the fees paid in the tx. fees is used Zcash. It is exposed by the
-	// (*TXIO).Fees which is not part of the asset.Coin interface.
+	// fees is the fees paid in the tx. fees is used by Zcash. It is exposed by
+	// the (*TXIO).Fees which is not part of the asset.Coin interface.
 	fees uint64
 	// The calculated transaction fee rate, in satoshis/vbyte
 	feeRate uint64

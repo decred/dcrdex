@@ -291,22 +291,35 @@ func RPCConfigOpts(name, rpcPort string) []*asset.ConfigOption {
 	}
 }
 
+// OrderEstimator estimates the funding required for an order. A clone may
+// specify a custom OrderEstimator via their BTCCloneCFG. Otherwise
+// defaultOrderEstimator (calc.RequiredOrderFundsAlt) is used.
 type OrderEstimator func(swapVal, inputCount, inputsSize, maxSwaps, swapSizeBase, swapSize, feeRate uint64) uint64
 
 func defaultOrderEstimator(swapVal, _, inputsSize, maxSwaps, swapSizeBase, swapSize, feeRate uint64) uint64 {
 	return calc.RequiredOrderFundsAlt(swapVal, inputsSize, maxSwaps, swapSizeBase, swapSize, feeRate)
 }
 
+// DustRater indicates whether an output is considered dust. A clone may specify
+// a custom DustRater via their BTCCloneCFG. Otherwise, dexbtc.IsDustVal will
+// be used.
 type DustRater func(txSize, value, minRelayTxFee uint64, segwit bool) bool
 
 var defaultDustRater = dexbtc.IsDustVal
 
+// TxFeesCalculator calculates the fees for a transaction. The baseTxSize
+// argument should be the tx size including outputs but without inputs. A clone
+// may specify a custom TxFeesCalculator via their BTCCloneCFG. Otherwise,
+// defaultTxFeesCalculator is used.
 type TxFeesCalculator func(baseTxSize, inputCount, inputsSize, feeRate uint64) uint64
 
 func defaultTxFeesCalculator(baseTxSize, _, inputsSize, feeRate uint64) uint64 {
 	return (baseTxSize + inputsSize) * feeRate
 }
 
+// SplitFeeCalculator calculates the fees associated with a split tx. A clone
+// may specify a custom SplitFeeCalculator via their BTCCloneCFG. Otherwise,
+// defaultSplitFeeCalculator is used.
 type SplitFeeCalculator func(inputCount, inputsSize, maxFeeRate uint64, extraOutput, segwit bool) (swapInputSize, baggage uint64)
 
 func defaultSplitFeeCalculator(_, _, maxFeeRate uint64, extraOutput bool, segwit bool) (swapInputSize, baggage uint64) {
@@ -418,10 +431,20 @@ type BTCCloneCFG struct {
 	TxHasher func(*wire.MsgTx) *chainhash.Hash
 	// TxSizeCalculator is an optional function that will be used to calculate
 	// the size of a transaction.
-	TxSizeCalculator   func(*wire.MsgTx) uint64
-	DustRater          DustRater
-	OrderEstimator     OrderEstimator
-	TxFeesCalculator   TxFeesCalculator
+	TxSizeCalculator func(*wire.MsgTx) uint64
+	// DustRater is an optional function to calculate whether a tx output is
+	// dust. If not specified, dexbtc.IsDustVal will be used.
+	DustRater DustRater
+	// OrderEstimator is an optional function that will calculate the funding
+	// required for an order. In not spcified, calc.RequiredOrderFunds will be
+	// used.
+	OrderEstimator OrderEstimator
+	// TxFeesCalculator is an optional function that calculates fees for a tx.
+	// If not specified, the typical tx_size * fee_rate formula will be used.
+	TxFeesCalculator TxFeesCalculator
+	// SplitFeeCalculator is an optional function that specified the fees
+	// associated with a split tx. If not specified, a typical
+	// tx_size * fee_rate formula is used.
 	SplitFeeCalculator SplitFeeCalculator
 	// TxVersion is an optional function that returns a version to use for
 	// new transactions.
@@ -4848,22 +4871,19 @@ func (btc *baseWallet) signTxAndAddChange(baseTx *wire.MsgTx, addr btcutil.Addre
 	}
 	vSize := btc.calcTxSize(msgTx)
 
-	sumInputSizes := func(msgTx *wire.MsgTx) (inputsSize uint64) {
-		for _, txIn := range msgTx.TxIn {
-			if len(txIn.Witness) > 0 {
-				const witnessWeight = 4
-				witnessSize := uint64(txIn.Witness.SerializeSize())
-				inputsSize += dexbtc.TxInOverhead + (witnessSize+(witnessWeight-1))/witnessWeight
-			} else {
-				inputsSize += uint64(txIn.SerializeSize())
-			}
-		}
-		return
-	}
 	inCount := uint64(len(msgTx.TxIn))
-	inputsSize := sumInputSizes(msgTx)
-	baseTxSizeWithoutInputs := vSize - inputsSize
+	var inputsSize uint64
+	for _, txIn := range msgTx.TxIn {
+		if len(txIn.Witness) > 0 {
+			const witnessWeight = 4
+			witnessSize := uint64(txIn.Witness.SerializeSize())
+			inputsSize += dexbtc.TxInOverhead + (witnessSize+(witnessWeight-1))/witnessWeight
+		} else {
+			inputsSize += uint64(txIn.SerializeSize())
+		}
+	}
 
+	baseTxSizeWithoutInputs := vSize - inputsSize
 	minFee := btc.txFees(baseTxSizeWithoutInputs, inCount, inputsSize, feeRate) // feeRate * vSize
 	remaining := totalIn - totalOut
 	if minFee > remaining {
@@ -4901,7 +4921,6 @@ func (btc *baseWallet) signTxAndAddChange(baseTx *wire.MsgTx, addr btcutil.Addre
 		btc.log.Debugf("Change output size = %d, addr = %s", changeSize, addrStr)
 
 		vSize += changeSize
-		inputsSize := sumInputSizes(msgTx)
 		fee := btc.txFees(vSize-inputsSize, inCount, inputsSize, feeRate)
 		changeOutput.Value = int64(remaining - fee)
 		// Find the best fee rate by closing in on it in a loop.
@@ -4914,7 +4933,6 @@ func (btc *baseWallet) signTxAndAddChange(baseTx *wire.MsgTx, addr btcutil.Addre
 				return makeErr("signing error: %v, raw tx: %x", err, btc.wireBytes(baseTx))
 			}
 			vSize = btc.calcTxSize(msgTx) // recompute the size with new tx signature
-			inputsSize := sumInputSizes(msgTx)
 			reqFee := btc.txFees(vSize-inputsSize, inCount, inputsSize, feeRate)
 			if reqFee > remaining {
 				// I can't imagine a scenario where this condition would be true, but
@@ -5077,6 +5095,8 @@ func (btc *baseWallet) EstimateSendTxFee(address string, sendAmount, feeRate uin
 	tx := wire.NewMsgTx(btc.txVersion())
 	tx.AddTxOut(wireOP)
 
+	// If the node has a better way, let them do it. Otherwise, we'll use our
+	// own method, which pulls all unspent outputs.
 	estimator, is := btc.node.(txFeeEstimator)
 	if btc.manualSendEst || !is {
 		estimator = btc
