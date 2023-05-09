@@ -429,7 +429,16 @@ func runWebview(url string) {
 	defer w.Destroy()
 	w.SetTitle("Decred DEX Client")
 	w.SetSize(600, 600, webview.HintMin)
-	w.SetSize(int(C.display_width()), int(C.display_height()), webview.HintNone)
+
+	width, height := int(C.display_width()), int(C.display_height())
+	if width <= 0 || width > 1920 {
+		width = 1920
+	}
+	if height <= 0 || height > 1080 {
+		height = 1080
+	}
+
+	w.SetSize(width, height, webview.HintNone)
 	w.Navigate(url)
 	w.Run()
 }
