@@ -26,6 +26,7 @@ jobs:
         run: |
           mkdir -p client/webserver/site/dist
           touch client/webserver/site/dist/placeholder
+          sudo apt update
           sudo apt -y install libgtk-3-dev libwebkit2gtk-4.0-dev
           ./run_tests.sh
   build-js:
