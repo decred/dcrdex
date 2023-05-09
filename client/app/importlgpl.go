@@ -7,7 +7,7 @@
 
 //go:build !nolgpl
 
-package main
+package app
 
 import (
 	_ "decred.org/dcrdex/client/asset/eth" // register eth asset

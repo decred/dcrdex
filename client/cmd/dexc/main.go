@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"decred.org/dcrdex/client/app"
 	"decred.org/dcrdex/client/asset"
 	_ "decred.org/dcrdex/client/asset/bch"  // register bch asset
 	_ "decred.org/dcrdex/client/asset/btc"  // register btc asset
@@ -32,22 +33,19 @@ import (
 	"decred.org/dcrdex/client/rpcserver"
 	"decred.org/dcrdex/client/webserver"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/version"
 )
+
+// appName defines the application name.
+const appName = "dexc"
 
 var (
 	appCtx, cancel = context.WithCancel(context.Background())
 	webserverReady = make(chan string, 1)
+	log            dex.Logger
 )
 
-func runCore() error {
+func runCore(cfg *app.Config) error {
 	defer cancel() // for the earliest returns
-
-	// Parse configuration.
-	cfg, err := configure()
-	if err != nil {
-		return fmt.Errorf("configuration error: %w", err)
-	}
 
 	asset.SetNetwork(cfg.Net)
 
@@ -59,7 +57,7 @@ func runCore() error {
 
 	if cfg.CPUProfile != "" {
 		var f *os.File
-		f, err = os.Create(cfg.CPUProfile)
+		f, err := os.Create(cfg.CPUProfile)
 		if err != nil {
 			return fmt.Errorf("error starting CPU profiler: %w", err)
 		}
@@ -72,9 +70,10 @@ func runCore() error {
 
 	// Initialize logging.
 	utc := !cfg.LocalLogs
-	logMaker := initLogging(cfg.DebugLevel, utc)
+	logMaker, closeLogger := app.InitLogging(cfg.LogPath, cfg.DebugLevel, true, utc)
+	defer closeLogger()
 	log = logMaker.Logger("DEXC")
-	log.Infof("%s version %v (Go version %s)", appName, Version, runtime.Version())
+	log.Infof("%s version %v (Go version %s)", appName, app.Version, runtime.Version())
 	if utc {
 		log.Infof("Logging with UTC time stamps. Current local time is %v",
 			time.Now().Local().Format("15:04:05 MST"))
@@ -88,22 +87,10 @@ func runCore() error {
 			log.Criticalf("Uh-oh! \n\nPanic:\n\n%v\n\nStack:\n\n%v\n\n",
 				pv, string(debug.Stack()))
 		}
-		closeFileLogger()
 	}()
 
 	// Prepare the Core.
-	clientCore, err := core.New(&core.Config{
-		DBPath:             cfg.DBPath,
-		Net:                cfg.Net,
-		Logger:             logMaker.Logger("CORE"),
-		TorProxy:           cfg.TorProxy,
-		TorIsolation:       cfg.TorIsolation,
-		Onion:              cfg.Onion,
-		Language:           cfg.Language,
-		UnlockCoinsOnLogin: cfg.UnlockCoinsOnLogin,
-		NoAutoWalletLock:   cfg.NoAutoWalletLock,
-		NoAutoDBBackup:     cfg.NoAutoDBBackup,
-	})
+	clientCore, err := core.New(cfg.Core(logMaker.Logger("CORE")))
 	if err != nil {
 		return fmt.Errorf("error creating client core: %w", err)
 	}
@@ -149,40 +136,7 @@ func runCore() error {
 	}()
 
 	if cfg.RPCOn {
-		// Prepare dexc version for use with rpc server.
-		dexcMajor, dexcMinor, dexcPatch, dexcPreRel, dexcBuildMeta, err := version.ParseSemVer(Version)
-		if err != nil {
-			return fmt.Errorf("failed to parse %s version: %w", appName, err)
-		}
-
-		runtimeVer := strings.Replace(runtime.Version(), ".", "-", -1)
-		runBuildMeta := version.NormalizeString(runtimeVer)
-		build := version.NormalizeString(dexcBuildMeta)
-		if build != "" {
-			dexcBuildMeta = fmt.Sprintf("%s.%s", build, runBuildMeta)
-		}
-		dexcVersion := &rpcserver.SemVersion{
-			VersionString: Version,
-			Major:         dexcMajor,
-			Minor:         dexcMinor,
-			Patch:         dexcPatch,
-			Prerelease:    dexcPreRel,
-			BuildMetadata: dexcBuildMeta,
-		}
-
-		rpcserver.SetLogger(logMaker.Logger("RPC"))
-		rpcCfg := &rpcserver.Config{
-			Core:        clientCore,
-			MarketMaker: marketMaker,
-			Addr:        cfg.RPCAddr,
-			User:        cfg.RPCUser,
-			Pass:        cfg.RPCPass,
-			Cert:        cfg.RPCCert,
-			Key:         cfg.RPCKey,
-			DexcVersion: dexcVersion,
-			CertHosts:   cfg.CertHosts,
-		}
-		rpcSrv, err := rpcserver.New(rpcCfg)
+		rpcSrv, err := rpcserver.New(cfg.RPC(clientCore, marketMaker, logMaker.Logger("RPC")))
 		if err != nil {
 			return fmt.Errorf("failed to create rpc server: %w", err)
 		}
@@ -202,16 +156,7 @@ func runCore() error {
 	}
 
 	if !cfg.NoWeb {
-		webSrv, err := webserver.New(&webserver.Config{
-			Core:          clientCore,
-			Addr:          cfg.WebAddr,
-			CustomSiteDir: cfg.SiteDir,
-			Logger:        logMaker.Logger("WEB"),
-			NoEmbed:       cfg.NoEmbedSite,
-			HttpProf:      cfg.HTTPProfile,
-			Language:      cfg.Language,
-			Experimental:  cfg.Experimental,
-		})
+		webSrv, err := webserver.New(cfg.Web(clientCore, logMaker.Logger("WEB")))
 		if err != nil {
 			return fmt.Errorf("failed creating web server: %w", err)
 		}

@@ -1,231 +1,37 @@
-// This code is available on the terms of the project LICENSE.md file,
-// also available online at https://blueoakcouncil.org/license/1.0.0.
-
 package main
 
 import (
 	"fmt"
-	"net"
 	"os"
-	"path/filepath"
 	"runtime"
 
-	"decred.org/dcrdex/client/asset"
-	"decred.org/dcrdex/dex"
-	"github.com/decred/dcrd/dcrutil/v4"
-	"github.com/decred/slog"
-	flags "github.com/jessevdk/go-flags"
+	"decred.org/dcrdex/client/app"
 )
 
-const (
-	maxLogRolls        = 16
-	defaultRPCCertFile = "rpc.cert"
-	defaultRPCKeyFile  = "rpc.key"
-	defaultMainnetHost = "127.0.0.1"
-	defaultTestnetHost = "127.0.0.2"
-	defaultSimnetHost  = "127.0.0.3"
-	defaultRPCPort     = "5757"
-	defaultWebPort     = "5758"
-	configFilename     = "dexc.conf"
-	defaultLogLevel    = "debug"
-)
-
-var (
-	defaultApplicationDirectory = dcrutil.AppDataDir("dexc", false)
-	defaultConfigPath           = filepath.Join(defaultApplicationDirectory, configFilename)
-	cfgPath                     string // used config file path
-	logFilename, netDirectory   string
-	logDirectory                string
-	cfg                         *Config
-	// TODO: Make specific log levels settable for the user.
-	defaultLogLevelMap = map[string]slog.Level{asset.InternalNodeLoggerName: slog.LevelError}
-)
-
-// setNet sets the filepath for the network directory and some network specific
-// files. It returns a suggested path for the database file.
-func setNet(applicationDirectory, net string) string {
-	netDirectory = filepath.Join(applicationDirectory, net)
-	logDirectory = filepath.Join(netDirectory, "logs")
-	logFilename = filepath.Join(logDirectory, "dexc.log")
-	err := os.MkdirAll(netDirectory, 0700)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to create net directory: %v\n", err)
-		os.Exit(1)
-	}
-	err = os.MkdirAll(logDirectory, 0700)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to create log directory: %v\n", err)
-		os.Exit(1)
-	}
-	return filepath.Join(netDirectory, "dexc.db")
-}
-
-// defaultHostByNetwork accepts configured network and returns the network
-// specific default host
-func defaultHostByNetwork(network dex.Network) string {
-	switch network {
-	case dex.Testnet:
-		return defaultTestnetHost
-	case dex.Simnet:
-		return defaultSimnetHost
-	default:
-		return defaultMainnetHost
-	}
-}
-
-// Config is the configuration for the DEX client application.
-type Config struct {
-	AppData      string `long:"appdata" description:"Path to application directory."`
-	Config       string `long:"config" description:"Path to an INI configuration file."`
-	DBPath       string `long:"db" description:"Database filepath. Database will be created if it does not exist."`
-	RPCOn        bool   `long:"rpc" description:"turn on the rpc server"`
-	RPCAddr      string `long:"rpcaddr" description:"RPC server listen address"`
-	RPCUser      string `long:"rpcuser" description:"RPC server user name"`
-	RPCPass      string `long:"rpcpass" description:"RPC server password"`
-	RPCCert      string `long:"rpccert" description:"RPC server certificate file location"`
-	RPCKey       string `long:"rpckey" description:"RPC server key file location"`
-	WebAddr      string `long:"webaddr" description:"HTTP server address"`
-	Language     string `long:"lang" description:"BCP 47 tag for preferred language, e.g. en-GB, fr, zh-CN"`
-	NoWeb        bool   `long:"noweb" description:"disable the web server."`
-	Testnet      bool   `long:"testnet" description:"use testnet"`
-	Simnet       bool   `long:"simnet" description:"use simnet"`
-	ReloadHTML   bool   `long:"reload-html" description:"(DEPRECATED) Reload the webserver's page template from disk with every request. Prevents use of any embedded UI files. For development purposes. This is deprecated. Use --no-embed-site instead."`
-	NoEmbedSite  bool   `long:"no-embed-site" description:"Use on-disk UI files instead of embedded resources. This also reloads the html template with every request. For development purposes."`
-	SiteDir      string `long:"sitedir" description:"Path to the 'site' directory with packaged web files. Only used with --no-embed-site. When unspecified, search known locations relative to dexc."`
-	DebugLevel   string `long:"log" description:"Logging level {trace, debug, info, warn, error, critical}"`
-	LocalLogs    bool   `long:"loglocal" description:"Use local time zone time stamps in log entries."`
-	CPUProfile   string `long:"cpuprofile" description:"File for CPU profiling."`
-	HTTPProfile  bool   `long:"httpprof" description:"Start HTTP profiler on /pprof."`
-	ShowVer      bool   `short:"V" long:"version" description:"Display version information and exit"`
-	TorProxy     string `long:"torproxy" description:"Connect via TOR (eg. 127.0.0.1:9050)."`
-	TorIsolation bool   `long:"torisolation" description:"Enable TOR circuit isolation."`
-	Onion        string `long:"onion" description:"Proxy for .onion addresses, if torproxy not set (eg. 127.0.0.1:9050)."`
-	Net          dex.Network
-	CertHosts    []string
-	Experimental bool `long:"experimental" description:"Enable experimental features"`
-
-	NoAutoWalletLock   bool `long:"no-wallet-lock" description:"Disable locking of wallets on shutdown or logout. Use this if you want your external wallets to stay unlocked after closing the DEX app."`
-	NoAutoDBBackup     bool `long:"no-db-backup" description:"Disable creation of a database backup on shutdown."`
-	UnlockCoinsOnLogin bool `long:"release-wallet-coins" description:"On login or wallet creation, instruct the wallet to release any coins that it may have locked."`
-}
-
-var defaultConfig = Config{
-	AppData:    defaultApplicationDirectory,
-	Config:     defaultConfigPath,
-	DebugLevel: defaultLogLevel,
-	CertHosts: []string{defaultTestnetHost, defaultSimnetHost,
-		defaultMainnetHost},
-}
-
-// configure processes the application configuration.
-func configure() (*Config, error) {
+func configure() (*app.Config, error) {
 	// Pre-parse the command line options to see if an alternative config file
 	// or the version flag was specified. Override any environment variables
 	// with parsed command line flags.
-	iniCfg := defaultConfig
+	iniCfg := app.DefaultConfig
 	preCfg := iniCfg
-	preParser := flags.NewParser(&preCfg, flags.HelpFlag|flags.PassDoubleDash)
-	_, flagerr := preParser.Parse()
-
-	if flagerr != nil {
-		e, ok := flagerr.(*flags.Error)
-		if !ok || e.Type != flags.ErrHelp {
-			preParser.WriteHelp(os.Stderr)
-		}
-		if ok && e.Type == flags.ErrHelp {
-			preParser.WriteHelp(os.Stdout)
-			os.Exit(0)
-		}
-		return nil, flagerr
+	if err := app.ParseCLIConfig(&preCfg); err != nil {
+		return nil, err
 	}
 
 	// Show the version and exit if the version flag was specified.
 	if preCfg.ShowVer {
 		fmt.Printf("%s version %s (Go version %s %s/%s)\n",
-			appName, Version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+			appName, app.Version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 		os.Exit(0)
 	}
 
-	// If the app directory has been changed, replace shortcut chars such
-	// as "~" with the full path.
-	if preCfg.AppData != defaultApplicationDirectory {
-		preCfg.AppData = dex.CleanAndExpandPath(preCfg.AppData)
-		// If the app directory has been changed, but the config file path hasn't,
-		// reform the config file path with the new directory.
-		if preCfg.Config == defaultConfigPath {
-			preCfg.Config = filepath.Join(preCfg.AppData, configFilename)
-		}
-	}
-
-	cfgPath = dex.CleanAndExpandPath(preCfg.Config)
+	appData, configPath := app.ResolveCLIConfigPaths(&preCfg)
 
 	// Load additional config from file.
-	parser := flags.NewParser(&iniCfg, flags.Default)
-	err := flags.NewIniParser(parser).ParseFile(cfgPath)
-	if err != nil {
-		if _, ok := err.(*os.PathError); !ok {
-			fmt.Fprintln(os.Stderr, err)
-			parser.WriteHelp(os.Stderr)
-			return nil, err
-		}
-		// Missing file is not an error.
-	}
-
-	// Parse command line options again to ensure they take precedence.
-	_, err = parser.Parse()
-	if err != nil {
-		if e, ok := err.(*flags.Error); !ok || e.Type != flags.ErrHelp {
-			parser.WriteHelp(os.Stderr)
-		}
+	if err := app.ParseFileConfig(configPath, &iniCfg); err != nil {
 		return nil, err
 	}
 
-	// Set the global *Config.
-	cfg = &iniCfg
-
-	if cfg.Simnet && cfg.Testnet {
-		return nil, fmt.Errorf("simnet and testnet cannot both be specified")
-	}
-
-	var defaultDBPath string
-	switch {
-	case cfg.Testnet:
-		cfg.Net = dex.Testnet
-		defaultDBPath = setNet(preCfg.AppData, "testnet")
-	case cfg.Simnet:
-		cfg.Net = dex.Simnet
-		defaultDBPath = setNet(preCfg.AppData, "simnet")
-	default:
-		cfg.Net = dex.Mainnet
-		defaultDBPath = setNet(preCfg.AppData, "mainnet")
-	}
-	defaultHost := defaultHostByNetwork(cfg.Net)
-
-	// If web or RPC server addresses not set, use network specific
-	// defaults
-	if cfg.WebAddr == "" {
-		cfg.WebAddr = net.JoinHostPort(defaultHost, defaultWebPort)
-	}
-	if cfg.RPCAddr == "" {
-		cfg.RPCAddr = net.JoinHostPort(defaultHost, defaultRPCPort)
-	}
-
-	if cfg.RPCCert == "" {
-		cfg.RPCCert = filepath.Join(preCfg.AppData, defaultRPCCertFile)
-	}
-
-	if cfg.RPCKey == "" {
-		cfg.RPCKey = filepath.Join(preCfg.AppData, defaultRPCKeyFile)
-	}
-
-	if cfg.DBPath == "" {
-		cfg.DBPath = defaultDBPath
-	}
-
-	if cfg.ReloadHTML {
-		fmt.Println("The --reload-html switch is deprecated. Use --no-embed-site instead, which has the same reloading effect.")
-		cfg.NoEmbedSite = cfg.ReloadHTML
-	}
-
-	return cfg, nil
+	cfg := &iniCfg
+	return cfg, app.ResolveConfig(appData, cfg)
 }

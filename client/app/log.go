@@ -1,37 +1,49 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
-package main
+package app
 
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
+	"github.com/decred/slog"
 	"github.com/jrick/logrotate/rotator"
+)
+
+const (
+	maxLogRolls = 16
 )
 
 var (
 	// logRotator is one of the logging outputs. It should be closed on
 	// application shutdown.
-	logRotator *rotator.Rotator
-	log        dex.Logger
+	logRotator         *rotator.Rotator
+	defaultLogLevelMap = map[string]slog.Level{asset.InternalNodeLoggerName: slog.LevelError}
 )
 
-// logWriter implements an io.Writer that outputs to stdout
-// and a rotating log file.
-type logWriter struct{}
-
-// Write writes the data in p to both destinations.
-func (w logWriter) Write(p []byte) (n int, err error) {
-	os.Stdout.Write(p)
-	return logRotator.Write(p)
+// logWriter implements an io.Writer that outputs to a rotating log file.
+type logWriter struct {
+	*rotator.Rotator
+	stdout bool
 }
 
-// initLogging initializes the logging rotator to write logs to logFile and
+// Write writes the data in p to the log file.
+func (w logWriter) Write(p []byte) (n int, err error) {
+	if w.stdout {
+		os.Stdout.Write(p)
+	}
+	return w.Rotator.Write(p)
+}
+
+// initLogging initializes the logging rotater to write logs to logFile and
 // create roll files in the same directory. initLogging must be called before
 // the package-global log rotator variables are used.
-func initLogging(lvl string, utc bool) *dex.LoggerMaker {
+func InitLogging(logFilename, lvl string, stdout bool, utc bool) (lm *dex.LoggerMaker, close func()) {
+	logDirectory := filepath.Dir(logFilename)
 	err := os.MkdirAll(logDirectory, 0700)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create log directory: %v\n", err)
@@ -42,19 +54,14 @@ func initLogging(lvl string, utc bool) *dex.LoggerMaker {
 		fmt.Fprintf(os.Stderr, "failed to create file rotator: %v\n", err)
 		os.Exit(1)
 	}
-	lm, err := dex.NewLoggerMaker(logWriter{}, lvl, utc)
+	fmt.Println("Logging to ", logFilename)
+	lm, err = dex.NewLoggerMaker(&logWriter{logRotator, stdout}, lvl, utc)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create custom logger: %v\n", err)
 		os.Exit(1)
 	}
 	lm.SetLevelsFromMap(defaultLogLevelMap)
-	log = lm.Logger("APP")
-	return lm
-}
-
-// closeFileLogger closes the log rotator.
-func closeFileLogger() {
-	if logRotator != nil {
+	return lm, func() {
 		logRotator.Close()
 	}
 }

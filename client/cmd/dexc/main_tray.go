@@ -8,17 +8,22 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
+	"decred.org/dcrdex/client/app"
 	"fyne.io/systray"
 	"github.com/pkg/browser"
 )
 
-var mainDone = make(chan struct{})
+var (
+	mainDone = make(chan struct{})
+	cfg      *app.Config
+)
 
 func onReady() {
 	go func() {
 		defer close(mainDone)
-		if err := runCore(); err != nil {
+		if err := runCore(cfg); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 	}()
@@ -63,7 +68,7 @@ func onReady() {
 
 	systray.AddSeparator()
 
-	if logDirURL, err := filePathToURL(logDirectory); err != nil {
+	if logDirURL, err := app.FilePathToURL(filepath.Dir(cfg.LogPath)); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 	} else {
 		mLogs := systray.AddMenuItem("Open logs folder", "Open the folder with your DEX logs.")
@@ -77,15 +82,15 @@ func onReady() {
 		}()
 	}
 
-	if cfgPathURL, err := filePathToURL(cfgPath); err != nil {
+	if cfgPathURL, err := app.FilePathToURL(cfg.ConfigPath); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 	} else {
 		mConfigFile := systray.AddMenuItem("Edit config file", "Open the config file in a text editor.")
 		go func() {
 			for range mConfigFile.ClickedCh {
-				if _, err := os.Stat(cfgPath); err != nil {
+				if _, err := os.Stat(cfg.ConfigPath); err != nil {
 					if os.IsNotExist(err) {
-						fid, err := os.Create(cfgPath)
+						fid, err := os.Create(cfg.ConfigPath)
 						if err != nil {
 							fmt.Fprintf(os.Stderr, "failed to create new config file: %v", err)
 							continue
@@ -124,5 +129,12 @@ func onExit() {
 }
 
 func main() {
+	// Parse configuration.
+	var err error
+	cfg, err = configure()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "configuration error: %v", err)
+		os.Exit(1)
+	}
 	systray.Run(onReady, onExit)
 }

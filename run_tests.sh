@@ -3,7 +3,7 @@ set -ex
 
 dir=$(pwd)
 # list of all modules to test
-modules=". ./dex/testing/loadbot"
+modules=". /dex/testing/loadbot /client/cmd/dexc-desktop"
 
 GV=$(go version | sed "s/^.*go\([0-9.]*\).*/\1/")
 echo "Go version: $GV"
@@ -42,6 +42,7 @@ go run ./client/core/localetest/main.go
 export CGO_ENABLED=0
 go build ./...
 go build -tags harness -o /dev/null ./client/cmd/simnet-trade-tests
+go build -tags systray -o /dev/null ./client/cmd/dexc
 
 go test -c -o /dev/null -tags live ./client/webserver
 go test -c -o /dev/null -tags harness ./client/asset/dcr
