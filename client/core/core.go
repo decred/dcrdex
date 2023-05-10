@@ -2179,7 +2179,7 @@ func (c *Core) ToggleWalletStatus(assetID uint32, disable bool) error {
 	}
 
 	// If this wallet is a parent, disable/enable all token wallets.
-	affectedWallets := []*xcWallet{wallet}
+	var affectedWallets []*xcWallet
 	if disable {
 		// Ensure wallet is not a parent of an enabled token wallet with active
 		// orders.
@@ -2193,6 +2193,10 @@ func (c *Core) ToggleWalletStatus(assetID uint32, disable bool) error {
 				}
 			}
 		}
+
+		// If wallet is a parent wallet, it will be the last to be disconnected
+		// and disabled.
+		affectedWallets = append(affectedWallets, wallet)
 
 		if c.assetHasActiveOrders(assetID) {
 			return newError(activeOrdersErr, "active orders for %v", unbip(assetID))
@@ -2214,8 +2218,10 @@ func (c *Core) ToggleWalletStatus(assetID uint32, disable bool) error {
 	} else {
 		if wallet.parent != nil && wallet.parent.isDisabled() {
 			// Ensure parent wallet starts first.
-			affectedWallets = append([]*xcWallet{wallet.parent}, affectedWallets...)
+			affectedWallets = append(affectedWallets, wallet.parent)
 		}
+
+		affectedWallets = append(affectedWallets, wallet)
 
 		for _, wallet := range affectedWallets {
 			// Update wallet status before attempting to connect wallet because disabled
