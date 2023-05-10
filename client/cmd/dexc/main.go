@@ -156,7 +156,7 @@ func runCore(cfg *app.Config) error {
 	}
 
 	if !cfg.NoWeb {
-		webSrv, err := webserver.New(cfg.Web(clientCore, logMaker.Logger("WEB")))
+		webSrv, err := webserver.New(cfg.Web(clientCore, logMaker.Logger("WEB"), utc))
 		if err != nil {
 			return fmt.Errorf("failed creating web server: %w", err)
 		}
