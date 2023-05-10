@@ -145,12 +145,13 @@ type Config struct {
 // Web creates a configuration for the webserver. This is a Config method
 // instead of a WebConfig method because Language is an app-level setting used
 // by both core and rpcserver.
-func (cfg *Config) Web(c *core.Core, log dex.Logger) *webserver.Config {
+func (cfg *Config) Web(c *core.Core, log dex.Logger, utc bool) *webserver.Config {
 	return &webserver.Config{
 		Core:          c,
 		Addr:          cfg.WebAddr,
 		CustomSiteDir: cfg.SiteDir,
 		Logger:        log,
+		UTC:           utc,
 		NoEmbed:       cfg.NoEmbedSite,
 		HttpProf:      cfg.HTTPProfile,
 		Language:      cfg.Language,

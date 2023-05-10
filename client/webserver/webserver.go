@@ -19,6 +19,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -172,6 +173,7 @@ type Config struct {
 	CustomSiteDir string
 	Language      string
 	Logger        dex.Logger
+	UTC           bool // for stdout http request logging
 	// NoEmbed indicates to serve files from the system disk rather than the
 	// embedded files. Since this is a developer setting, this also implies
 	// reloading of templates on each request. Note that only embedded files
@@ -283,14 +285,12 @@ func New(cfg *Config) (*WebServer, error) {
 	}
 
 	// Middleware
-	if log.Level() == dex.LevelTrace {
-		mux.Use(middleware.RequestLogger(&middleware.DefaultLogFormatter{
-			Logger: &chiLogger{
-				Logger: log,
-			},
-			NoColor: true, // colored output is awkward to deal with in log file
-		}))
-	}
+	mux.Use(middleware.RequestLogger(&middleware.DefaultLogFormatter{
+		Logger: &chiLogger{ // logs with Trace()
+			Logger: dex.StdOutLogger("MUX", log.Level(), cfg.UTC),
+		},
+		NoColor: runtime.GOOS == "windows",
+	}))
 	mux.Use(s.securityMiddleware)
 	mux.Use(middleware.Recoverer)
 
