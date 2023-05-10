@@ -274,6 +274,12 @@ func (w *xcWallet) state() *WalletState {
 	if w.peerCount > 0 { // initialized to -1 initially, means no count yet
 		peerCount = uint32(w.peerCount)
 	}
+
+	var tokenApprovals map[uint32]asset.ApprovalStatus
+	if w.connector.On() {
+		tokenApprovals = w.ApprovalStatus()
+	}
+
 	state := &WalletState{
 		Symbol:       unbip(w.AssetID),
 		AssetID:      w.AssetID,
@@ -290,6 +296,7 @@ func (w *xcWallet) state() *WalletState {
 		WalletType:   w.walletType,
 		Traits:       w.traits,
 		Disabled:     w.disabled,
+		Approved:     tokenApprovals,
 	}
 	w.mtx.RUnlock()
 
@@ -565,6 +572,36 @@ func (w *xcWallet) SendTransaction(tx []byte) ([]byte, error) {
 		return nil, errors.New("wallet is not a Broadcaster")
 	}
 	return bonder.SendTransaction(tx)
+}
+
+// ApproveToken sends an approval transaction if the wallet is a TokenApprover.
+func (w *xcWallet) ApproveToken(assetVersion uint32, onConfirm func()) (string, error) {
+	approver, ok := w.Wallet.(asset.TokenApprover)
+	if !ok {
+		return "", fmt.Errorf("%s wallet is not a TokenApprover", unbip(w.AssetID))
+	}
+	return approver.ApproveToken(assetVersion, onConfirm)
+}
+
+// ApprovalFee returns the estimated fee to send an approval transaction if the
+// wallet is a TokenApprover.
+func (w *xcWallet) ApprovalFee(assetVersion uint32) (uint64, error) {
+	approver, ok := w.Wallet.(asset.TokenApprover)
+	if !ok {
+		return 0, fmt.Errorf("%s wallet is not a TokenApprover", unbip(w.AssetID))
+	}
+	return approver.ApprovalFee(assetVersion)
+}
+
+// ApprovalStatus returns the approval status of each version of the asset if
+// the wallet is a TokenApprover.
+func (w *xcWallet) ApprovalStatus() map[uint32]asset.ApprovalStatus {
+	approver, ok := w.Wallet.(asset.TokenApprover)
+	if !ok {
+		return nil
+	}
+
+	return approver.ApprovalStatus()
 }
 
 // feeRater is identical to calling w.Wallet.(asset.FeeRater).

@@ -182,6 +182,12 @@ export interface Token {
   definition: WalletDefinition
 }
 
+export enum ApprovalStatus {
+  Approved = 0,
+  Pending = 1,
+  NotApproved = 2
+}
+
 export interface WalletState {
   symbol: string
   assetID: number
@@ -198,6 +204,7 @@ export interface WalletState {
   peerCount: number
   synced: boolean
   syncProgress: number
+  approved: Record<number, ApprovalStatus>
 }
 
 export interface WalletInfo {

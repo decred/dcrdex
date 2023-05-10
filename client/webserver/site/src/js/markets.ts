@@ -58,9 +58,11 @@ import {
   OrderOption,
   ConnectionStatus,
   RecentMatch,
-  MatchNote
+  MatchNote,
+  ApprovalStatus
 } from './registry'
 import { setOptionTemplates } from './opts'
+import { CoinExplorers } from './order'
 
 const bind = Doc.bind
 
@@ -141,6 +143,8 @@ interface StatsDisplay {
   tmpl: Record<string, PageElement>
 }
 
+let net : number
+
 export default class MarketsPage extends BasePage {
   page: Record<string, PageElement>
   main: HTMLElement
@@ -180,9 +184,12 @@ export default class MarketsPage extends BasePage {
   recentMatchesSortDirection: 1 | -1
   stats: [StatsDisplay, StatsDisplay]
   loadingAnimations: { candles?: Wave, depth?: Wave }
+  approvingBaseToken: boolean
 
   constructor (main: HTMLElement, data: any) {
     super()
+
+    net = parseInt(main.dataset.net || '')
     const page = this.page = Doc.idDescendants(main)
     this.main = main
     if (!this.main.parentElement) return // Not gonna happen, but TypeScript cares.
@@ -251,8 +258,8 @@ export default class MarketsPage extends BasePage {
       bind(quoteIcons.disabled, 'click', () => { this.showToggleWalletStatus(this.market.quote) })
       bind(wgt.base.tmpl.newWalletBttn, 'click', () => { this.showCreate(this.market.base) })
       bind(wgt.quote.tmpl.newWalletBttn, 'click', () => { this.showCreate(this.market.quote) })
-      Doc.bind(wgt.base.tmpl.walletAddr, 'click', () => { this.showDeposit(this.market.base.id) })
-      Doc.bind(wgt.quote.tmpl.walletAddr, 'click', () => { this.showDeposit(this.market.quote.id) })
+      bind(wgt.base.tmpl.walletAddr, 'click', () => { this.showDeposit(this.market.base.id) })
+      bind(wgt.quote.tmpl.walletAddr, 'click', () => { this.showDeposit(this.market.quote.id) })
       this.depositAddrForm = new DepositAddress(page.deposit)
     }
 
@@ -268,25 +275,15 @@ export default class MarketsPage extends BasePage {
     this.quoteUnits = main.querySelectorAll('[data-unit=quote]')
     this.baseUnits = main.querySelectorAll('[data-unit=base]')
 
+    // Buttons to show token approval form
+    bind(page.approveBaseBttn, 'click', () => { this.showTokenApprovalPopup(true) })
+    bind(page.approveQuoteBttn, 'click', () => { this.showTokenApprovalPopup(false) })
+    bind(page.approveTokenButton, 'click', () => { this.sendTokenApproval() })
+
     // Buttons to set order type and side.
-    bind(page.buyBttn, 'click', () => {
-      swapBttns(page.sellBttn, page.buyBttn)
-      page.submitBttn.classList.remove(sellBtnClass)
-      page.submitBttn.classList.add(buyBtnClass)
-      page.maxLbl.textContent = intl.prep(intl.ID_BUY)
-      this.setOrderBttnText()
-      this.setOrderVisibility()
-      this.drawChartLines()
-    })
-    bind(page.sellBttn, 'click', () => {
-      swapBttns(page.buyBttn, page.sellBttn)
-      page.submitBttn.classList.add(sellBtnClass)
-      page.submitBttn.classList.remove(buyBtnClass)
-      page.maxLbl.textContent = intl.prep(intl.ID_SELL)
-      this.setOrderBttnText()
-      this.setOrderVisibility()
-      this.drawChartLines()
-    })
+    bind(page.buyBttn, 'click', () => { this.setBuy() })
+    bind(page.sellBttn, 'click', () => { this.setSell() })
+
     bind(page.limitBttn, 'click', () => {
       swapBttns(page.marketBttn, page.limitBttn)
       this.setOrderVisibility()
@@ -498,7 +495,8 @@ export default class MarketsPage extends BasePage {
       conn: (note: ConnEventNote) => { this.handleConnNote(note) },
       balance: (note: BalanceNote) => { this.handleBalanceNote(note) },
       bondpost: (note: BondNote) => { this.handleBondUpdate(note) },
-      spots: (note: SpotPriceNote) => { this.handlePriceUpdate(note) }
+      spots: (note: SpotPriceNote) => { this.handlePriceUpdate(note) },
+      walletstate: (note: WalletStateNote) => { this.handleWalletState(note) }
     })
 
     this.loadingAnimations = {}
@@ -555,6 +553,28 @@ export default class MarketsPage extends BasePage {
   /* isLimit is true if the user has selected the "limit order" tab. */
   isLimit () {
     return this.page.limitBttn.classList.contains('selected')
+  }
+
+  setBuy () {
+    const { page } = this
+    swapBttns(page.sellBttn, page.buyBttn)
+    page.submitBttn.classList.remove(sellBtnClass)
+    page.submitBttn.classList.add(buyBtnClass)
+    page.maxLbl.textContent = intl.prep(intl.ID_BUY)
+    this.setOrderBttnText()
+    this.setOrderVisibility()
+    this.drawChartLines()
+  }
+
+  setSell () {
+    const { page } = this
+    swapBttns(page.buyBttn, page.sellBttn)
+    page.submitBttn.classList.add(sellBtnClass)
+    page.submitBttn.classList.remove(buyBtnClass)
+    page.maxLbl.textContent = intl.prep(intl.ID_SELL)
+    this.setOrderBttnText()
+    this.setOrderVisibility()
+    this.drawChartLines()
   }
 
   /* hasPendingBonds is true if there are pending bonds */
@@ -706,6 +726,9 @@ export default class MarketsPage extends BasePage {
 
     if (!this.market || this.market.dex.tier < 1) return // acct suspended or not registered
 
+    const { baseAssetApprovalStatus, quoteAssetApprovalStatus } = this.tokenAssetApprovalStatuses()
+    if (baseAssetApprovalStatus !== ApprovalStatus.Approved && quoteAssetApprovalStatus !== ApprovalStatus.Approved) return
+
     const { base, quote } = this.market
     const hasWallets = base && app().assets[base.id].wallet && quote && app().assets[quote.id].wallet
     if (!hasWallets) return
@@ -729,6 +752,148 @@ export default class MarketsPage extends BasePage {
     Doc.show(page.loaderMsg)
     Doc.hide(page.notRegistered)
     Doc.hide(page.noWallet)
+  }
+
+  async showTokenApprovalPopup (base: boolean) {
+    const { page } = this
+
+    Doc.show(page.approveTokenButton)
+    Doc.hide(page.tokenApprovalTxMsg, page.approveTokenErr)
+    Doc.setVis(!State.passwordIsCached(), page.tokenApprovalPWBox)
+    page.tokenApprovalPW.value = ''
+    let tokenAsset : SupportedAsset
+    if (base) {
+      tokenAsset = this.market.base
+    } else {
+      tokenAsset = this.market.quote
+    }
+    this.approvingBaseToken = base
+
+    page.approveTokenSymbol.textContent = tokenAsset.symbol.toUpperCase()
+
+    if (!tokenAsset.token) {
+      console.error(`${tokenAsset.id} should be a token`)
+      return
+    }
+
+    const parentAsset = app().assets[tokenAsset.token.parentID]
+    if (!parentAsset || !parentAsset.info) {
+      console.error(`${tokenAsset.token.parentID} asset not found`)
+      return
+    }
+
+    const path = '/api/approvetokenfee'
+    const res = await postJSON(path, {
+      assetID: tokenAsset.id,
+      dexAddr: this.market.dex.host
+    })
+    if (!app().checkResponse(res)) {
+      console.error(res.msg)
+      return
+    }
+
+    const feeText = `${Doc.formatCoinValue(res.txFee, parentAsset.info.unitinfo)} ${parentAsset.symbol.toUpperCase()}`
+    page.approvalFeeEstimate.textContent = feeText
+    this.showForm(page.approveTokenForm)
+  }
+
+  async sendTokenApproval () {
+    const { page } = this
+
+    let tokenAsset : SupportedAsset
+    if (this.approvingBaseToken) {
+      tokenAsset = this.market.base
+    } else {
+      tokenAsset = this.market.quote
+    }
+
+    const path = '/api/approvetoken'
+    const res = await postJSON(path, {
+      assetID: tokenAsset.id,
+      dexAddr: this.market.dex.host,
+      pass: page.tokenApprovalPW.value
+    })
+    if (!app().checkResponse(res)) {
+      page.approveTokenErr.textContent = res.msg
+      Doc.show(page.approveTokenErr)
+      return
+    }
+
+    page.tokenApprovalTxID.innerText = res.txID
+
+    const assetExplorer = CoinExplorers[tokenAsset.id]
+    if (assetExplorer && assetExplorer[net]) {
+      page.tokenApprovalTxID.href = assetExplorer[net](res.txID)
+    }
+
+    Doc.hide(page.tokenApprovalSubmissionElements)
+    Doc.show(page.tokenApprovalTxMsg)
+  }
+
+  tokenAssetApprovalStatuses (): {
+    baseAssetApprovalStatus: ApprovalStatus;
+    quoteAssetApprovalStatus: ApprovalStatus;
+    } {
+    const { market: { base, quote } } = this
+    let baseAssetApprovalStatus = ApprovalStatus.Approved
+    let quoteAssetApprovalStatus = ApprovalStatus.Approved
+
+    if (base.token) {
+      const baseVersion = this.market.dex.assets[base.id].version
+      baseAssetApprovalStatus = app().assets[base.id].wallet.approved[baseVersion]
+    }
+    if (quote.token) {
+      const quoteVersion = this.market.dex.assets[quote.id].version
+      quoteAssetApprovalStatus = app().assets[quote.id].wallet.approved[quoteVersion]
+    }
+
+    return {
+      baseAssetApprovalStatus,
+      quoteAssetApprovalStatus
+    }
+  }
+
+  setTokenApprovalVisibility () {
+    const { page } = this
+
+    const { baseAssetApprovalStatus, quoteAssetApprovalStatus } = this.tokenAssetApprovalStatuses()
+
+    if (baseAssetApprovalStatus === ApprovalStatus.Approved && quoteAssetApprovalStatus === ApprovalStatus.Approved) {
+      Doc.hide(page.tokenApproval)
+      page.sellBttn.removeAttribute('disabled')
+      page.buyBttn.removeAttribute('disabled')
+      return
+    }
+
+    if (baseAssetApprovalStatus !== ApprovalStatus.Approved && quoteAssetApprovalStatus === ApprovalStatus.Approved) {
+      page.sellBttn.setAttribute('disabled', 'disabled')
+      page.buyBttn.removeAttribute('disabled')
+      this.setBuy()
+      Doc.show(page.approvalRequiredSell)
+      Doc.hide(page.approvalRequiredBuy, page.approvalRequiredBoth)
+    }
+
+    if (baseAssetApprovalStatus === ApprovalStatus.Approved && quoteAssetApprovalStatus !== ApprovalStatus.Approved) {
+      page.buyBttn.setAttribute('disabled', 'disabled')
+      page.sellBttn.removeAttribute('disabled')
+      this.setSell()
+      Doc.show(page.approvalRequiredBuy)
+      Doc.hide(page.approvalRequiredSell, page.approvalRequiredBoth)
+    }
+
+    // If they are both unapproved tokens, the order form will not be shown.
+    if (baseAssetApprovalStatus !== ApprovalStatus.Approved && quoteAssetApprovalStatus !== ApprovalStatus.Approved) {
+      Doc.show(page.approvalRequiredBoth)
+      Doc.hide(page.approvalRequiredSell, page.approvalRequiredBuy)
+    }
+
+    Doc.show(page.tokenApproval)
+    page.approvalPendingBaseSymbol.textContent = page.baseTokenAsset.textContent = this.market.base.symbol.toUpperCase()
+    page.approvalPendingQuoteSymbol.textContent = page.quoteTokenAsset.textContent = this.market.quote.symbol.toUpperCase()
+    Doc.setVis(baseAssetApprovalStatus === ApprovalStatus.NotApproved, page.approveBaseBttn)
+    Doc.setVis(quoteAssetApprovalStatus === ApprovalStatus.NotApproved, page.approveQuoteBttn)
+    Doc.setVis(baseAssetApprovalStatus === ApprovalStatus.Pending, page.approvalPendingBase)
+    Doc.setVis(quoteAssetApprovalStatus === ApprovalStatus.Pending, page.approvalPendingQuote)
   }
 
   /* setRegistrationStatusView sets the text content and class for the
@@ -890,6 +1055,7 @@ export default class MarketsPage extends BasePage {
     ws.request('loadmarket', makeMarket(host, base, quote))
 
     this.setLoaderMsgVisibility()
+    this.setTokenApprovalVisibility()
     this.setRegistrationStatusVisibility()
     this.resolveOrderFormVisibility()
     this.setOrderBttnText()
@@ -2042,6 +2208,14 @@ export default class MarketsPage extends BasePage {
       this.setCurrMarketPrice()
     }
     this.marketList.updateSpots(note)
+  }
+
+  handleWalletState (note: WalletStateNote) {
+    if (!this.market) return // This note can arrive before the market is set.
+    if (note.topic !== 'TokenApproval') return
+    if (note.wallet.assetID !== this.market.base.id && note.wallet.assetID !== this.market.quote.id) return
+    this.setTokenApprovalVisibility()
+    this.resolveOrderFormVisibility()
   }
 
   /*

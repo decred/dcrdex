@@ -797,6 +797,29 @@ type PeerManager interface {
 	RemovePeer(addr string) error
 }
 
+type ApprovalStatus uint8
+
+const (
+	Approved ApprovalStatus = iota
+	Pending
+	NotApproved
+)
+
+// TokenApprover is implemented by wallets that require an approval before
+// trading.
+type TokenApprover interface {
+	// ApproveToken sends an approval transaction for a specific version of
+	// the token's swap contract. An error is returned if an approval has
+	// already been done or is pending. The onConfirm callback is called
+	// when the approval transaction is confirmed.
+	ApproveToken(assetVer uint32, onConfirm func()) (string, error)
+	// ApprovalStatus returns the approval status for each version of the
+	// token's swap contract.
+	ApprovalStatus() map[uint32]ApprovalStatus
+	// ApprovalFee returns the estimated fee for an approval transaction.
+	ApprovalFee(assetVer uint32) (uint64, error)
+}
+
 // Bond is the fidelity bond info generated for a certain account ID, amount,
 // and lock time. These data are intended for the "post bond" request, in which
 // the server pre-validates the unsigned transaction, the client then publishes

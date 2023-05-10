@@ -337,4 +337,10 @@ var EnUS = map[string]string{
 	"unready_wallets_msg":    "Your wallets must be connected and unlocked before trades can be processed. Resolve this ASAP!",
 	"Error":                  "Error",
 	"configuration guide":    "configuration guide",
+	"Approve":                "Approve",
+	"approve_token_text":     `In order to trade tokens, you must approve the swap contract to handle tokens on your behalf. This is a one-time action for each token. <br/><br/> The estimated fee for the approval transaction is <b><span id="approvalFeeEstimate"></span></b>`,
+	"token_approval_tx_msg":  `Your token approval has been submitted with transaction ID:`,
+	"approval_required_buy":  "Token approval is required before buying",
+	"approval_required_sell": "Token approval is required before selling",
+	"approval_required_both": "Token approval is required before trading",
 }

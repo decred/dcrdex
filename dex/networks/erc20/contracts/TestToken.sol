@@ -112,6 +112,11 @@ contract TestToken {
         return true;
     }
 
+    function testApprove(address user, address spender, uint256 amount) public returns (bool) {
+        _approve(user, spender, amount);
+        return true;
+    }
+
     /**
      * @dev See {IERC20-transferFrom}.
      *

@@ -117,6 +117,7 @@ func (s *WebServer) knownUnregisteredExchanges(registeredExchanges map[string]*c
 type marketTmplData struct {
 	CommonArguments
 	Exchanges map[string]*core.Exchange
+	Net       uint8
 }
 
 // handleMarkets is the handler for the '/markets' page request.
@@ -124,6 +125,7 @@ func (s *WebServer) handleMarkets(w http.ResponseWriter, r *http.Request) {
 	cArgs := s.commonArgs(r, "Markets | Decred DEX")
 	s.sendTemplate(w, "markets", &marketTmplData{
 		CommonArguments: *cArgs,
+		Net:             uint8(s.core.Network()),
 	})
 }
 

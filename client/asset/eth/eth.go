@@ -432,6 +432,11 @@ type pendingTx struct {
 	lastCheck uint64 // block height
 }
 
+type pendingApproval struct {
+	txHash    common.Hash
+	onConfirm func()
+}
+
 // Check that assetWallet satisfies the asset.Wallet interface.
 var _ asset.Wallet = (*ETHWallet)(nil)
 var _ asset.Wallet = (*TokenWallet)(nil)
@@ -446,6 +451,7 @@ var _ asset.TxFeeEstimator = (*TokenWallet)(nil)
 var _ asset.DynamicSwapper = (*ETHWallet)(nil)
 var _ asset.DynamicSwapper = (*TokenWallet)(nil)
 var _ asset.Authenticator = (*ETHWallet)(nil)
+var _ asset.TokenApprover = (*TokenWallet)(nil)
 
 type baseWallet struct {
 	// The asset subsystem starts with Connect(ctx). This ctx will be initialized
@@ -505,6 +511,12 @@ type assetWallet struct {
 	findRedemptionMtx  sync.RWMutex
 	findRedemptionReqs map[[32]byte]*findRedemptionRequest
 
+	approvalsMtx     sync.RWMutex
+	pendingApprovals map[uint32]*pendingApproval
+	// since we do not support unapproving, we can cache the approved versions
+	// to avoid repeated calls.
+	approvedVersions map[uint32]struct{}
+
 	lastPeerCount uint32
 	peersChange   func(uint32, error)
 
@@ -539,7 +551,6 @@ type TokenWallet struct {
 
 	cfg      *tokenWalletConfig
 	parent   *assetWallet
-	approval atomic.Value
 	token    *dexeth.Token
 	netToken *dexeth.NetToken
 }
@@ -731,6 +742,8 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		assetID:            BipID,
 		tipChange:          assetCFG.TipChange,
 		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
+		pendingApprovals:   make(map[uint32]*pendingApproval),
+		approvedVersions:   make(map[uint32]struct{}),
 		peersChange:        assetCFG.PeersChange,
 		contractors:        make(map[uint32]contractor),
 		evmify:             dexeth.GweiToWei,
@@ -1043,6 +1056,8 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 		tipChange:          tokenCfg.TipChange,
 		peersChange:        tokenCfg.PeersChange,
 		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
+		pendingApprovals:   make(map[uint32]*pendingApproval),
+		approvedVersions:   make(map[uint32]struct{}),
 		contractors:        make(map[uint32]contractor),
 		evmify:             token.AtomicToEVM,
 		atomize:            token.EVMToAtomic,
@@ -1299,34 +1314,17 @@ func (w *assetWallet) estimateSwap(lots, lotSize uint64, maxFeeRate uint64, ver 
 		return nil, fmt.Errorf("invalid current fee rate: %v", err)
 	}
 
-	// This is an estimate, so we use the (lower) live gas estimates. If we're
-	// not approved, we can't get a live gas estimate, but we'll use higher the
-	// hard-coded gases that are heavily padded for the txOps field.
-	var oneSwap uint64
-	if approved, err := w.isApproved(); err != nil {
-		return nil, fmt.Errorf("error checking approval: %w", err)
-	} else if !approved {
-		g := w.gases(ver)
-		if g == nil {
-			return nil, fmt.Errorf("no gases known for %d version %d", w.assetID, ver)
-		}
-		oneSwap = g.Swap
-	} else {
-		oneSwap, err = w.estimateInitGas(w.ctx, 1, ver)
-		if err != nil {
-			return nil, fmt.Errorf("(%d) error estimating swap gas: %v", w.assetID, err)
-		}
+	// This is an estimate, so we use the (lower) live gas estimates.
+	oneSwap, err := w.estimateInitGas(w.ctx, 1, ver)
+	if err != nil {
+		return nil, fmt.Errorf("(%d) error estimating swap gas: %v", w.assetID, err)
 	}
+
 	// NOTE: nSwap is neither best nor worst case. A single match can be
 	// multiple lots. See RealisticBestCase descriptions.
 
 	value := lots * lotSize
-	allowanceGas, err := w.allowanceGasRequired(redeemVer, redeemAssetID)
-	if err != nil {
-		return nil, err
-	}
-
-	oneGasMax := oneSwap*lots + allowanceGas
+	oneGasMax := oneSwap * lots
 	maxFees := oneGasMax * maxFeeRate
 
 	return &asset.SwapEstimate{
@@ -1334,32 +1332,8 @@ func (w *assetWallet) estimateSwap(lots, lotSize uint64, maxFeeRate uint64, ver 
 		Value:              value,
 		MaxFees:            maxFees,
 		RealisticWorstCase: oneGasMax * rate,
-		RealisticBestCase:  (oneSwap + allowanceGas) * rate, // not even batch, just perfect match
+		RealisticBestCase:  oneSwap * rate, // not even batch, just perfect match
 	}, nil
-}
-
-// allowanceGasRequired estimates the gas that is required to issue an approval
-// for a token. This is required to redeem ERC20 tokens, and the assetID and
-// version correspond to the redeem asset. If the asset is not a fee-family
-// erc20 asset, no error is returned and the return value will be zero.
-func (w *assetWallet) allowanceGasRequired(ver, assetID uint32) (uint64, error) {
-	if assetID == BipID {
-		return 0, nil // it's eth (no allowance)
-	}
-	redeemWallet := w.wallet(assetID)
-	if redeemWallet == nil {
-		return 0, nil // not an erc20
-	}
-	currentAllowance, err := redeemWallet.tokenAllowance()
-	if err != nil {
-		return 0, err
-	}
-	// No reason to do anything if the allowance is > the unlimited
-	// allowance approval threshold.
-	if currentAllowance.Cmp(unlimitedAllowanceReplenishThreshold) < 0 {
-		return redeemWallet.approvalGas(unlimitedAllowance, ver)
-	}
-	return 0, nil
 }
 
 // gases gets the gas table for the specified contract version.
@@ -1463,11 +1437,18 @@ func (w *ETHWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error
 
 // FundOrder locks value for use in an order.
 func (w *TokenWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error) {
-
 	if w.gasFeeLimit() < ord.MaxFeeRate {
 		return nil, nil, fmt.Errorf(
 			"%v: server's max fee rate %v higher than configured fee rate limit %v",
 			dex.BipIDSymbol(w.assetID), ord.MaxFeeRate, w.gasFeeLimit())
+	}
+
+	approvalStatus, err := w.approvalStatus(ord.Version)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error getting approval status: %v", err)
+	}
+	if approvalStatus != asset.Approved {
+		return nil, nil, fmt.Errorf("token %d not approved for trading", w.assetID)
 	}
 
 	g, err := w.initGasEstimate(int(ord.MaxSwapCount), ord.Version,
@@ -1477,10 +1458,6 @@ func (w *TokenWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, err
 	}
 
 	ethToLock := ord.MaxFeeRate * g.Swap * ord.MaxSwapCount
-
-	if err := w.maybeApproveTokenSwapContract(ord.Version, ord.MaxFeeRate, ethToLock); err != nil {
-		return nil, nil, fmt.Errorf("error issuing approval: %w", err)
-	}
 
 	var success bool
 	if err = w.lockFunds(ord.Value, initiationReserve); err != nil {
@@ -1530,7 +1507,7 @@ func (w *assetWallet) initGasEstimate(n int, initVer, redeemVer, redeemAssetID u
 		est.Refund = g.Refund
 	}
 
-	est.Swap, est.nSwap, _, err = w.swapGas(n, initVer)
+	est.Swap, est.nSwap, err = w.swapGas(n, initVer)
 	if err != nil {
 		return nil, fmt.Errorf("error calculating swap gas: %w", err)
 	}
@@ -1554,10 +1531,10 @@ func (w *assetWallet) initGasEstimate(n int, initVer, redeemVer, redeemAssetID u
 // cannot get a live estimate from the contractor, which will happen if the
 // wallet has no balance. A live gas estimate will always be attempted, and used
 // if our expected gas values are lower (anomalous).
-func (w *assetWallet) swapGas(n int, ver uint32) (oneSwap, nSwap uint64, approved bool, err error) {
+func (w *assetWallet) swapGas(n int, ver uint32) (oneSwap, nSwap uint64, err error) {
 	g := w.gases(ver)
 	if g == nil {
-		return 0, 0, false, fmt.Errorf("no gases known for %d version %d", w.assetID, ver)
+		return 0, 0, fmt.Errorf("no gases known for %d version %d", w.assetID, ver)
 	}
 	oneSwap = g.Swap
 
@@ -1583,21 +1560,11 @@ func (w *assetWallet) swapGas(n int, ver uint32) (oneSwap, nSwap uint64, approve
 		}
 	}
 
-	// If we've approved the contract to transfer, we can get a live estimate to
-	// double check. If we're not approved, we can't get a live estimate, so
-	// this is as far as we can go.
-	if approved, err = w.isApproved(); err != nil {
-		return 0, 0, false, fmt.Errorf("error checking approval on transferFrom failure: %w", err)
-	} else if !approved {
-		w.log.Debug("Skipping live swap gas because contract is not approved for transferFrom")
-		return oneSwap, nSwap, false, nil
-	}
-
 	// If a live estimate is greater than our estimate from configured values,
 	// use the live estimate with a warning.
 	gasEst, err := w.estimateInitGas(w.ctx, nMax, ver)
 	if err != nil {
-		return 0, 0, false, err
+		return 0, 0, err
 		// Or we could go with what we know? But this estimate error could be a
 		// hint that the transaction would fail, and we don't have a way to
 		// recover from that. Play it safe and allow caller to retry assuming
@@ -1614,7 +1581,7 @@ func (w *assetWallet) swapGas(n int, ver uint32) (oneSwap, nSwap uint64, approve
 			remainEst, err := w.estimateInitGas(w.ctx, nRemain, ver)
 			if err != nil {
 				w.log.Errorf("(%d) error estimating swap gas for remainder: %v", w.assetID, err)
-				return 0, 0, false, err
+				return 0, 0, err
 			}
 			gasEst += remainEst
 		}
@@ -1844,7 +1811,7 @@ func (w *ETHWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint6
 
 	// Set the gas limit as high as reserves will allow.
 	n := len(swaps.Contracts)
-	oneSwap, nSwap, _, err := w.swapGas(n, swaps.Version)
+	oneSwap, nSwap, err := w.swapGas(n, swaps.Version)
 	if err != nil {
 		return fail("error getting gas fees: %v", err)
 	}
@@ -1935,13 +1902,11 @@ func (w *TokenWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uin
 	}
 
 	n := len(swaps.Contracts)
-	oneSwap, nSwap, approved, err := w.swapGas(n, swaps.Version)
+	oneSwap, nSwap, err := w.swapGas(n, swaps.Version)
 	if err != nil {
 		return fail("error getting gas fees: %v", err)
 	}
-	if !approved && w.approval.Load() == nil {
-		return fail("cannot initiate token swap without approval")
-	}
+
 	gasLimit := oneSwap * uint64(n)
 	fees := gasLimit * swaps.FeeRate
 	if fees > reservedParent {
@@ -2181,55 +2146,6 @@ func recoverPubkey(msgHash, sig []byte) ([]byte, error) {
 	return pubKey.SerializeUncompressed(), nil
 }
 
-// isApproved checks whether the contract is approved to transfer tokens on our
-// behalf. For Ethereum, isApproved always returns (true, nil).
-func (w *assetWallet) isApproved() (bool, error) {
-	if w.assetID == BipID {
-		return true, nil
-	}
-	currentAllowance, err := w.tokenAllowance()
-	if err != nil {
-		return false, fmt.Errorf("error retrieving current allowance: %w", err)
-	}
-	return currentAllowance.Cmp(unlimitedAllowanceReplenishThreshold) >= 0, nil
-}
-
-// maybeApproveTokenSwapContract checks whether a token's swap contract needs
-// to be approved for the wallet address on the erc20 contract.
-func (w *TokenWallet) maybeApproveTokenSwapContract(ver uint32, maxFeeRate, swapReserves uint64) error {
-	// Check if we need to up the allowance.
-	if approved, err := w.isApproved(); err != nil {
-		return err
-	} else if approved {
-		return nil
-	}
-
-	// Check that we don't already have an approval pending.
-	if txHashI := w.approval.Load(); txHashI != nil {
-		return fmt.Errorf("an approval is already pending (%s). wait until it is mined "+
-			"before ordering again", txHashI.(common.Hash))
-	}
-
-	ethBal, err := w.parent.balance()
-	if err != nil {
-		return fmt.Errorf("error getting eth balance: %w", err)
-	}
-	approveGas, err := w.approvalGas(unlimitedAllowance, ver)
-	if err != nil {
-		return fmt.Errorf("error estimating allowance gas: %w", err)
-	}
-	if (approveGas*maxFeeRate)+swapReserves > ethBal.Available {
-		return fmt.Errorf("parent balance %d doesn't cover contract approval (%d) and tx fees (%d)",
-			ethBal.Available, approveGas*maxFeeRate, swapReserves)
-	}
-	tx, err := w.approveToken(unlimitedAllowance, maxFeeRate, approveGas, ver)
-	if err != nil {
-		return fmt.Errorf("token contract approval error (using max fee rate %d): %w", maxFeeRate, err)
-	}
-	w.approval.Store(tx.Hash())
-	return nil
-}
-
 // tokenBalance checks the token balance of the account handled by the wallet.
 func (w *assetWallet) tokenBalance() (bal *big.Int, err error) {
 	// We don't care about the version.
@@ -2241,8 +2157,8 @@ func (w *assetWallet) tokenBalance() (bal *big.Int, err error) {
 
 // tokenAllowance checks the amount of tokens that the swap contract is approved
 // to spend on behalf of the account handled by the wallet.
-func (w *assetWallet) tokenAllowance() (allowance *big.Int, err error) {
-	return allowance, w.withTokenContractor(w.assetID, contractVersionNewest, func(c tokenContractor) error {
+func (w *assetWallet) tokenAllowance(version uint32) (allowance *big.Int, err error) {
+	return allowance, w.withTokenContractor(w.assetID, version, func(c tokenContractor) error {
 		allowance, err = c.allowance(w.ctx)
 		return err
 	})
@@ -2266,8 +2182,136 @@ func (w *assetWallet) approveToken(amount *big.Int, maxFeeRate, gasLimit uint64,
 		}
 		w.log.Infof("Approval sent for %s at token address %s, nonce = %s",
 			dex.BipIDSymbol(w.assetID), c.tokenAddress(), txOpts.Nonce)
+
+		w.addPendingTx(w.assetID, tx.Hash(), txOpts.Nonce.Uint64(), 0, 0, maxFeeRate*gasLimit)
+
 		return nil
 	})
+}
+
+func (w *assetWallet) approvalStatus(version uint32) (asset.ApprovalStatus, error) {
+	if w.assetID == BipID {
+		return asset.Approved, nil
+	}
+
+	w.approvalsMtx.RLock()
+	if _, approved := w.approvedVersions[version]; approved {
+		w.approvalsMtx.RUnlock()
+		return asset.Approved, nil
+	}
+	w.approvalsMtx.RUnlock()
+
+	currentAllowance, err := w.tokenAllowance(version)
+	if err != nil {
+		return asset.NotApproved, fmt.Errorf("error retrieving current allowance: %w", err)
+	}
+	if currentAllowance.Cmp(unlimitedAllowanceReplenishThreshold) >= 0 {
+		w.approvalsMtx.Lock()
+		w.approvedVersions[version] = struct{}{}
+		w.approvalsMtx.Unlock()
+		return asset.Approved, nil
+	}
+
+	w.approvalsMtx.RLock()
+	defer w.approvalsMtx.RUnlock()
+
+	if _, pending := w.pendingApprovals[version]; pending {
+		return asset.Pending, nil
+	}
+
+	return asset.NotApproved, nil
+}
+
+// ApproveToken sends an approval transaction for a specific version of
+// the token's swap contract. An error is returned if an approval has
+// already been done or is pending. The onConfirm callback is called
+// when the approval transaction is confirmed.
+func (w *TokenWallet) ApproveToken(assetVer uint32, onConfirm func()) (string, error) {
+	approvalStatus, err := w.approvalStatus(assetVer)
+	if err != nil {
+		return "", fmt.Errorf("error checking approval status: %w", err)
+	}
+	if approvalStatus == asset.Approved {
+		return "", fmt.Errorf("token is already approved")
+	}
+	if approvalStatus == asset.Pending {
+		return "", fmt.Errorf("approval is already pending")
+	}
+
+	feeRate, err := w.recommendedMaxFeeRate(w.ctx)
+	if err != nil {
+		return "", fmt.Errorf("error calculating approval fee rate: %w", err)
+	}
+	feeRateGwei := dexeth.WeiToGwei(feeRate)
+	approvalGas, err := w.approvalGas(unlimitedAllowance, assetVer)
+	if err != nil {
+		return "", fmt.Errorf("error calculating approval gas: %w", err)
+	}
+
+	ethBal, err := w.parent.balance()
+	if err != nil {
+		return "", fmt.Errorf("error getting eth balance: %w", err)
+	}
+	if ethBal.Available < approvalGas*feeRateGwei {
+		return "", fmt.Errorf("insufficient eth balance for approval. required: %d, available: %d",
+			approvalGas*feeRateGwei, ethBal.Available)
+	}
+
+	tx, err := w.approveToken(unlimitedAllowance, feeRateGwei, approvalGas, assetVer)
+	if err != nil {
+		return "", fmt.Errorf("error approving token: %w", err)
+	}
+
+	w.approvalsMtx.Lock()
+	defer w.approvalsMtx.Unlock()
+
+	w.pendingApprovals[assetVer] = &pendingApproval{
+		txHash:    tx.Hash(),
+		onConfirm: onConfirm,
+	}
+
+	return tx.Hash().Hex(), nil
+}
+
+// ApprovalFee returns the estimated fee for an approval transaction.
+func (w *TokenWallet) ApprovalFee(assetVer uint32) (uint64, error) {
+	if status, err := w.approvalStatus(assetVer); err != nil {
+		return 0, fmt.Errorf("error checking approval status: %w", err)
+	} else if status != asset.NotApproved {
+		return 0, fmt.Errorf("token is already approved")
+	}
+
+	approvalGas, err := w.approvalGas(unlimitedAllowance, assetVer)
+	if err != nil {
+		return 0, fmt.Errorf("error calculating approval gas: %w", err)
+	}
+
+	feeRate, err := w.recommendedMaxFeeRate(w.ctx)
+	if err != nil {
+		return 0, fmt.Errorf("error calculating approval fee rate: %w", err)
+	}
+
+	feeRateGwei := dexeth.WeiToGwei(feeRate)
+
+	return approvalGas * feeRateGwei, nil
+}
+
+// ApprovalStatus returns the approval status for each version of the
+// token's swap contract.
+func (w *TokenWallet) ApprovalStatus() map[uint32]asset.ApprovalStatus {
+	versions := w.Info().SupportedVersions
+
+	statuses := map[uint32]asset.ApprovalStatus{}
+	for _, version := range versions {
+		status, err := w.approvalStatus(version)
+		if err != nil {
+			w.log.Errorf("error checking approval status for version %d: %w", version, err)
+			continue
+		}
+		statuses[version] = status
+	}
+
+	return statuses
 }
 
 // ReserveNRedemptions locks funds for redemption. It is an error if there
@@ -2288,8 +2332,7 @@ func (w *ETHWallet) ReserveNRedemptions(n uint64, ver uint32, maxFeeRate uint64)
 }
 
 // ReserveNRedemptions locks funds for redemption. It is an error if there
-// is insufficient spendable balance. If an approval is necessary to increase
-// the allowance to facilitate redemption, the approval is performed here.
+// is insufficient spendable balance.
 // Part of the AccountLocker interface.
 func (w *TokenWallet) ReserveNRedemptions(n uint64, ver uint32, maxFeeRate uint64) (uint64, error) {
 	g := w.gases(ver)
@@ -3273,6 +3316,11 @@ func (eth *ETHWallet) checkForNewBlocks(ctx context.Context, reportErr func(erro
 			w.checkFindRedemptions()
 		}
 	}()
+	go func() {
+		for _, w := range connectedWallets {
+			w.checkPendingApprovals()
+		}
+	}()
 }
 
 // getLatestMonitoredTx looks up a txHash in the monitoredTxs map. If the
@@ -3759,6 +3807,25 @@ func (w *assetWallet) checkFindRedemptions() {
 			w.sendFindRedemptionResult(req, secretHash, nil, "", err)
 		} else if len(secret) > 0 {
 			w.sendFindRedemptionResult(req, secretHash, secret, makerAddr, nil)
+		}
+	}
+}
+
+func (w *assetWallet) checkPendingApprovals() {
+	w.approvalsMtx.Lock()
+	defer w.approvalsMtx.Unlock()
+
+	for version, pendingApproval := range w.pendingApprovals {
+		confs, err := w.node.transactionConfirmations(w.ctx, pendingApproval.txHash)
+
+		if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
+			w.log.Errorf("error getting confirmations for tx %s: %v", pendingApproval.txHash, err)
+			continue
+		}
+
+		if confs > 0 {
+			go pendingApproval.onConfirm()
+			delete(w.pendingApprovals, version)
 		}
 	}
 }

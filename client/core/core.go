@@ -5337,6 +5337,74 @@ func (c *Core) ValidateAddress(address string, assetID uint32) (bool, error) {
 	return wallet.Wallet.ValidateAddress(address), nil
 }
 
+// ApproveToken calls a wallet's ApproveToken method. It approves the version
+// of the token used by the dex at the specified address.
+func (c *Core) ApproveToken(appPW []byte, assetID uint32, dexAddr string) (string, error) {
+	crypter, err := c.encryptionKey(appPW)
+	if err != nil {
+		return "", err
+	}
+
+	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return "", err
+	}
+
+	err = wallet.Unlock(crypter)
+	if err != nil {
+		return "", err
+	}
+
+	dex, connected, err := c.dex(dexAddr)
+	if err != nil {
+		return "", err
+	}
+	if !connected {
+		return "", fmt.Errorf("not connected to %s", dexAddr)
+	}
+
+	asset, found := dex.assets[assetID]
+	if !found {
+		return "", fmt.Errorf("asset %d not found for %s", assetID, dexAddr)
+	}
+
+	onConfirm := func() {
+		go c.notify(newTokenApprovalNote(wallet.state()))
+	}
+
+	txID, err := wallet.ApproveToken(asset.Version, onConfirm)
+	if err != nil {
+		return "", err
+	}
+
+	c.notify(newTokenApprovalNote(wallet.state()))
+	return txID, nil
+}
+
+// ApproveTokenFee returns the fee for a token approval for the version
+// of the contract used by the dex at the specified address.
+func (c *Core) ApproveTokenFee(assetID uint32, dexAddr string) (uint64, error) {
+	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return 0, err
+	}
+
+	dex, connected, err := c.dex(dexAddr)
+	if err != nil {
+		return 0, err
+	}
+	if !connected {
+		return 0, fmt.Errorf("not connected to %s", dexAddr)
+	}
+
+	asset, found := dex.assets[assetID]
+	if !found {
+		return 0, fmt.Errorf("asset %d not found for %s", assetID, dexAddr)
+	}
+
+	return wallet.ApprovalFee(asset.Version)
+}
+
 // EstimateSendTxFee returns an estimate of the tx fee needed to send or
 // withdraw the specified amount.
 func (c *Core) EstimateSendTxFee(address string, assetID uint32, amount uint64, subtract bool) (fee uint64, isValidAddress bool, err error) {

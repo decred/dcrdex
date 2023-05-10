@@ -120,21 +120,22 @@ type WalletBalance struct {
 
 // WalletState is the current status of an exchange wallet.
 type WalletState struct {
-	Symbol       string            `json:"symbol"`
-	AssetID      uint32            `json:"assetID"`
-	Version      uint32            `json:"version"`
-	WalletType   string            `json:"type"`
-	Traits       asset.WalletTrait `json:"traits"`
-	Open         bool              `json:"open"`
-	Running      bool              `json:"running"`
-	Balance      *WalletBalance    `json:"balance"`
-	Address      string            `json:"address"`
-	Units        string            `json:"units"`
-	Encrypted    bool              `json:"encrypted"`
-	PeerCount    uint32            `json:"peerCount"`
-	Synced       bool              `json:"synced"`
-	SyncProgress float32           `json:"syncProgress"`
-	Disabled     bool              `json:"disabled"`
+	Symbol       string                          `json:"symbol"`
+	AssetID      uint32                          `json:"assetID"`
+	Version      uint32                          `json:"version"`
+	WalletType   string                          `json:"type"`
+	Traits       asset.WalletTrait               `json:"traits"`
+	Open         bool                            `json:"open"`
+	Running      bool                            `json:"running"`
+	Balance      *WalletBalance                  `json:"balance"`
+	Address      string                          `json:"address"`
+	Units        string                          `json:"units"`
+	Encrypted    bool                            `json:"encrypted"`
+	PeerCount    uint32                          `json:"peerCount"`
+	Synced       bool                            `json:"synced"`
+	SyncProgress float32                         `json:"syncProgress"`
+	Disabled     bool                            `json:"disabled"`
+	Approved     map[uint32]asset.ApprovalStatus `json:"approved"`
 }
 
 // User is information about the user's wallets and DEX accounts.

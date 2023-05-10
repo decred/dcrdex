@@ -612,7 +612,7 @@ const ethExplorers: Record<number, (cid: string) => string> = {
   }
 }
 
-const CoinExplorers: Record<number, Record<number, (cid: string) => string>> = {
+export const CoinExplorers: Record<number, Record<number, (cid: string) => string>> = {
   42: { // dcr
     [Mainnet]: (cid: string) => {
       const [txid, vout] = cid.split(':')

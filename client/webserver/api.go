@@ -202,6 +202,62 @@ func (s *WebServer) apiRemoveWalletPeer(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, simpleAck(), s.indent)
 }
 
+func (s *WebServer) apiApproveTokenFee(w http.ResponseWriter, r *http.Request) {
+	var form struct {
+		AssetID uint32 `json:"assetID"`
+		DexAddr string `json:"dexAddr"`
+	}
+	if !readPost(w, r, &form) {
+		return
+	}
+
+	txFee, err := s.core.ApproveTokenFee(form.AssetID, form.DexAddr)
+	if err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+
+	resp := struct {
+		OK    bool   `json:"ok"`
+		TxFee uint64 `json:"txFee"`
+	}{
+		OK:    true,
+		TxFee: txFee,
+	}
+	writeJSON(w, resp, s.indent)
+}
+
+func (s *WebServer) apiApproveToken(w http.ResponseWriter, r *http.Request) {
+	var form struct {
+		AssetID  uint32           `json:"assetID"`
+		DexAddr  string           `json:"dexAddr"`
+		Password encode.PassBytes `json:"pass"`
+	}
+	if !readPost(w, r, &form) {
+		return
+	}
+	pass, err := s.resolvePass(form.Password, r)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
+		return
+	}
+	defer zero(pass)
+
+	txID, err := s.core.ApproveToken(pass, form.AssetID, form.DexAddr)
+	if err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+	resp := struct {
+		OK   bool   `json:"ok"`
+		TxID string `json:"txID"`
+	}{
+		OK:   true,
+		TxID: txID,
+	}
+	writeJSON(w, resp, s.indent)
+}
+
 // apiGetDEXInfo is the handler for the '/getdexinfo' API request.
 func (s *WebServer) apiGetDEXInfo(w http.ResponseWriter, r *http.Request) {
 	form := new(registrationForm)
