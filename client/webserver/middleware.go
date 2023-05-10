@@ -36,7 +36,9 @@ func (s *WebServer) securityMiddleware(next http.Handler) http.Handler {
 }
 
 // authMiddleware checks incoming requests for cookie-based information
-// including the auth token.
+// including the auth token. Use extractUserInfo to access the *userInfo in
+// downstream handlers. This should be used with care since it involves a call
+// to (*Core).User, which can be expensive.
 func (s *WebServer) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.WithValue(r.Context(), ctxKeyUserInfo, &userInfo{
@@ -69,8 +71,7 @@ func extractBooleanCookie(r *http.Request, k string, defaultVal bool) bool {
 // not initialized.
 func (s *WebServer) requireInit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user := extractUserInfo(r)
-		if !user.Initialized {
+		if !s.core.IsInitialized() {
 			http.Redirect(w, r, registerRoute, http.StatusSeeOther)
 			return
 		}
@@ -82,8 +83,7 @@ func (s *WebServer) requireInit(next http.Handler) http.Handler {
 // instead of redirecting to the register path.
 func (s *WebServer) rejectUninited(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user := extractUserInfo(r)
-		if !user.Initialized {
+		if !s.core.IsInitialized() {
 			http.Error(w, http.StatusText(http.StatusPreconditionRequired), http.StatusPreconditionRequired)
 			return
 		}
@@ -97,8 +97,7 @@ func (s *WebServer) rejectUninited(next http.Handler) http.Handler {
 // the app is initialized.
 func (s *WebServer) requireLogin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user := extractUserInfo(r)
-		if !user.Authed {
+		if !s.isAuthed(r) {
 			http.Redirect(w, r, loginRoute, http.StatusSeeOther)
 			return
 		}
@@ -110,8 +109,7 @@ func (s *WebServer) requireLogin(next http.Handler) http.Handler {
 // instead of redirecting to the login path.
 func (s *WebServer) rejectUnauthed(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user := extractUserInfo(r)
-		if !user.Authed {
+		if !s.isAuthed(r) {
 			http.Error(w, "not authorized - login first", http.StatusUnauthorized)
 			return
 		}
@@ -124,8 +122,7 @@ func (s *WebServer) rejectUnauthed(next http.Handler) http.Handler {
 // register page if the user has not connected any DEX.
 func (s *WebServer) requireDEXConnection(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user := extractUserInfo(r)
-		if len(user.Exchanges) == 0 {
+		if len(s.core.Exchanges()) == 0 {
 			http.Redirect(w, r, registerRoute, http.StatusSeeOther)
 			return
 		}

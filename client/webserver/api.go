@@ -1320,8 +1320,7 @@ func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login 
 		return fmt.Errorf("login error: %w", err)
 	}
 
-	user := extractUserInfo(r)
-	if !user.Authed {
+	if !s.isAuthed(r) {
 		authToken := s.authorize()
 		setCookie(authCK, authToken, w)
 		if login.RememberPass {
@@ -1344,14 +1343,13 @@ func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login 
 
 // apiUser handles the 'user' API request.
 func (s *WebServer) apiUser(w http.ResponseWriter, r *http.Request) {
-	userInfo := extractUserInfo(r)
 	response := struct {
 		*core.User
 		Authed bool `json:"authed"`
 		OK     bool `json:"ok"`
 	}{
-		User:   userInfo.User,
-		Authed: userInfo.Authed,
+		User:   s.core.User(),
+		Authed: s.isAuthed(r),
 		OK:     true,
 	}
 	writeJSON(w, response, s.indent)

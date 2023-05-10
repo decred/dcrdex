@@ -293,7 +293,6 @@ func New(cfg *Config) (*WebServer, error) {
 	}
 	mux.Use(s.securityMiddleware)
 	mux.Use(middleware.Recoverer)
-	mux.Use(s.authMiddleware)
 
 	// HTTP profiler
 	if cfg.HttpProf {
@@ -317,6 +316,11 @@ func New(cfg *Config) (*WebServer, error) {
 
 	// Webpages
 	mux.Group(func(web chi.Router) {
+		// Inject user info for handlers that use extractUserInfo, which
+		// includes most of the page handlers that use commonArgs to
+		// inject the User object for page template execution.
+		web.Use(s.authMiddleware)
+
 		// The register page and settings page are always allowed.
 		// The register page performs init if needed, along with
 		// initial setup and settings is used to register more DEXs
