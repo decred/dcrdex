@@ -160,6 +160,11 @@ func mainCore() error {
 	// Filter registered assets.
 	asset.SetNetwork(cfg.Net)
 
+	// Prepare the image file for desktop notifications.
+	if tmpLogoPath := storeTmpLogo(); tmpLogoPath != "" {
+		defer os.RemoveAll(tmpLogoPath)
+	}
+
 	// Use a hidden "dexc-desktop-state" file to prevent other processes when
 	// dexc-desktop is already running (e.g when non-bundled version of
 	// dexc-desktop is executed from cmd and vice versa).

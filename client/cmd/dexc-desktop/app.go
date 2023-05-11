@@ -70,6 +70,7 @@ import (
 	"decred.org/dcrdex/client/webserver"
 	"decred.org/dcrdex/dex"
 	"fyne.io/systray"
+	"github.com/pkg/browser"
 	"github.com/webview/webview"
 )
 
@@ -95,6 +96,11 @@ func mainCore() error {
 	if cfg.Webview != "" {
 		runWebview(cfg.Webview)
 		return nil
+	}
+
+	// Prepare the image file for desktop notifications.
+	if tmpLogoPath := storeTmpLogo(); tmpLogoPath != "" {
+		defer os.RemoveAll(tmpLogoPath)
 	}
 
 	// Initialize logging.
@@ -366,7 +372,9 @@ func closeWindow(windowID uint32) {
 		}
 	}
 	log.Infof("Closing window. %d windows remain open.", remain)
-	cmd.Process.Kill()
+	if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		log.Errorf("Failed to kill %v: %v", cmd, err)
+	}
 }
 
 func closeAllWindows() {
@@ -374,7 +382,9 @@ func closeAllWindows() {
 	m.Lock()
 	defer m.Unlock()
 	for windowID, cmd := range m.windows {
-		cmd.Process.Kill()
+		if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			log.Errorf("Failed to kill %v: %v", cmd, err)
+		}
 		delete(m.windows, windowID)
 	}
 }
@@ -384,6 +394,11 @@ func runWebview(url string) {
 	defer w.Destroy()
 	w.SetTitle(appTitle)
 	w.SetSize(600, 600, webview.HintMin)
+	if runtime.GOOS == "windows" { // windows can use icons in its resources section, or ico files
+		useIcon(w, "#32512") // IDI_APPLICATION, see winres.json and https://learn.microsoft.com/en-us/windows/win32/menurc/about-icons
+	} else {
+		useIconBytes(w, FavIcon) // useIcon(w, "src/dexc.png")
+	}
 
 	width, height := limitedWindowWidthAndHeight(int(C.display_width()), int(C.display_height()))
 
@@ -416,7 +431,7 @@ func systrayOnReady(ctx context.Context, logDirectory string, openC chan<- struc
 	killC chan<- os.Signal, activeState <-chan bool) {
 	systray.SetIcon(FavIcon)
 	systray.SetTitle("DEX client")
-	systray.SetTooltip("Self-custodial multi-wallet")
+	systray.SetTooltip("Self-custodial multi-wallet with atomic swap capability, by Decred.")
 
 	// TODO: Consider reworking main so we can show the icon earlier?
 	// mStarting := systray.AddMenuItem("Starting...", "Starting up. Please wait...")
@@ -456,8 +471,10 @@ func systrayOnReady(ctx context.Context, logDirectory string, openC chan<- struc
 		mLogs := systray.AddMenuItem("Open logs folder", "Open the folder with your DEX logs.")
 		go func() {
 			for range mLogs.ClickedCh {
-				log.Debug("Opening browser to log directory at", logDirURL)
-				runWebviewSubprocess(ctx, logDirURL)
+				if err := browser.OpenURL(logDirURL); err != nil {
+					fmt.Fprintln(os.Stderr, err) // you're actually looking for the log file, so info on stdout is warranted
+					log.Errorf("Unable to open log file directory: %v", err)
+				}
 			}
 		}()
 	}
