@@ -1,7 +1,7 @@
 {{define "wallets"}}
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
 {{template "top" .}}
-<div id="main" data-handler="wallets" class="walletspage flex-grow-1 position-relative">
+<div id="main" data-handler="wallets" data-net="{{.Net}}" class="walletspage flex-grow-1 position-relative">
   <span class="me-2 connection ico-connection d-hide peers-table-icon" id="connectedIconTmpl"></span>
   <span class="me-2 errcolor ico-disconnected d-hide peers-table-icon" id="disconnectedIconTmpl"></span>
   <span class="me-2 errcolor ico-cross d-hide pointer peers-table-icon" id="removeIconTmpl"></span>
@@ -400,6 +400,7 @@
       <hr class="dashed my-2">
       <div class="sans-light fs17" id="otherActionsLabel">[[[other_actions]]]</div>
       <div class="d-flex flex-row fs15 pt-1">
+        <button id="unapproveTokenAllowance" type="button" class="p-1 me-2 hoverbg">[[[disallow_token]]]</button>
         <button id="managePeers" type="button" class="p-1 me-2 hoverbg">[[[manage_peers]]]</button>
         <button id="downloadLogs" type="button" class="p-1 me-2 hoverbg">[[[wallet_logs]]]</button>
         <button id="exportWallet" type="button" class="me-2 p-1 fs15 bg2">[[[export_wallet]]]</button>
@@ -421,7 +422,7 @@
       <div class="px-2 py-1 text-center position-relative fs22 sans-light">
         [[[manage_peers]]]
       </div>
-      <table id="peersTable" class="peers-table">
+      <table id="peersTable">
         <thead>
           <tr>
             <th class="text-nowrap">[[[address]]]</th>
@@ -447,6 +448,60 @@
         <div class="ico-spinner spinner fs15"></div>
       </div>
       <div class="fs15 pt-3 text-center d-hide errcolor" id="managePeersErr"></div>
+    </form>
+
+    {{- /* UNAPPROVE TOKEN VERSIONS TABLE FORM */ -}}
+    <form class="d-hide" id="unapproveTokenTableForm">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="px-2 py-1 text-center position-relative fs22 sans-light">
+        [[[unapprove_token_for]]]
+      </div>
+      <div id="tokenVersionNone" class="fs15">
+        [[[no_token_allowances]]]
+      </div>
+      <table id="tokenVersionTable">
+        <thead>
+          <tr>
+            <th class="text-nowrap">[[[version]]]</th>
+            <th class="text-nowrap">[[[used_by_dex]]]</th>
+            <th class="text-nowrap">[[[Remove]]]</th>
+          </tr>
+        </thead>
+        <tbody id="tokenVersionBody">
+          <tr id="tokenVersionRow">
+            <td data-tmpl="version"></td>
+            <td data-tmpl="usedBy"></td>
+            <td data-tmpl="remove"></td>
+          </tr>
+        </tbody>
+      </table>
+    </form>
+
+    {{- /* UNAPPROVE SPECIFIC TOKEN VERSION FORM */ -}}
+    <form class="position-relative flex-center flex-column fs20 d-hide" id="unapproveTokenForm">
+      <div class="form-closer hoverbg"><span class="ico-cross"></span></div>
+      <div class="px-2 py-1 text-center fs22 text-nowrap sans-light position-relative">
+        [[[unapprove_token_version]]]
+      </div>
+      <div id="unapproveTokenSubmissionElements">
+        <div class="fs15 text-start mt-2">
+          [[[unapprove_token_text]]]
+        </div>
+        <hr class="dashed my-2">
+        <div class="d-flex justify-content-between align-items-stretch flex-wrap">
+          <div id="unapproveTokenPWBox" class="col-11 p-0">
+            <label for="unapproveTokenPW" class="form-label pt-3 ps-1 mb-1">[[[App Password]]]</label>
+            <input type="password" class="form-control select" id="unapproveTokenPW" autocomplete="off">
+          </div>
+          <span class="col-3 hide-pw"></span> {{/* flex dummy */}}
+          <div class="d-grid align-items-end col-10 p-0">
+            <button id="unapproveTokenSubmit" type="button" class="justify-content-center fs15 bg2 selected">[[[Submit]]]</button>
+          </div>
+        </div>
+      </div>
+      <span id="unapproveTokenTxMsg" class="text-center fs17 sans-light d-hide">[[[token_unapproval_tx_msg]]]</span>
+      <a target="_blank" class="subtlelink" id="unapproveTokenTxID"></a>
+      <div class="fs15 pt-3 text-center d-hide errcolor" id="unapproveTokenErr"></div>
     </form>
 
     {{- /* CONFIRM FORCE FORM */ -}}

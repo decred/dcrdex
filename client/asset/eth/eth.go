@@ -513,9 +513,7 @@ type assetWallet struct {
 
 	approvalsMtx     sync.RWMutex
 	pendingApprovals map[uint32]*pendingApproval
-	// since we do not support unapproving, we can cache the approved versions
-	// to avoid repeated calls.
-	approvedVersions map[uint32]struct{}
+	approvalCache    map[uint32]bool
 
 	lastPeerCount uint32
 	peersChange   func(uint32, error)
@@ -743,7 +741,7 @@ func NewWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network)
 		tipChange:          assetCFG.TipChange,
 		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
 		pendingApprovals:   make(map[uint32]*pendingApproval),
-		approvedVersions:   make(map[uint32]struct{}),
+		approvalCache:      make(map[uint32]bool),
 		peersChange:        assetCFG.PeersChange,
 		contractors:        make(map[uint32]contractor),
 		evmify:             dexeth.GweiToWei,
@@ -1057,7 +1055,7 @@ func (w *ETHWallet) OpenTokenWallet(tokenCfg *asset.TokenConfig) (asset.Wallet, 
 		peersChange:        tokenCfg.PeersChange,
 		findRedemptionReqs: make(map[[32]byte]*findRedemptionRequest),
 		pendingApprovals:   make(map[uint32]*pendingApproval),
-		approvedVersions:   make(map[uint32]struct{}),
+		approvalCache:      make(map[uint32]bool),
 		contractors:        make(map[uint32]contractor),
 		evmify:             token.AtomicToEVM,
 		atomize:            token.EVMToAtomic,
@@ -2180,8 +2178,8 @@ func (w *assetWallet) approveToken(amount *big.Int, maxFeeRate, gasLimit uint64,
 			c.voidUnusedNonce()
 			return err
 		}
-		w.log.Infof("Approval sent for %s at token address %s, nonce = %s",
-			dex.BipIDSymbol(w.assetID), c.tokenAddress(), txOpts.Nonce)
+		w.log.Infof("Approval sent for %s at token address %s, nonce = %s, txID = %s",
+			dex.BipIDSymbol(w.assetID), c.tokenAddress(), txOpts.Nonce, tx.Hash().Hex())
 
 		w.addPendingTx(w.assetID, tx.Hash(), txOpts.Nonce.Uint64(), 0, 0, maxFeeRate*gasLimit)
 
@@ -2194,31 +2192,36 @@ func (w *assetWallet) approvalStatus(version uint32) (asset.ApprovalStatus, erro
 		return asset.Approved, nil
 	}
 
+	// If the result has been cached, return what is in the cache.
+	// The cache is cleared if an approval/unapproval tx is done.
 	w.approvalsMtx.RLock()
-	if _, approved := w.approvedVersions[version]; approved {
+	if approved, cached := w.approvalCache[version]; cached {
 		w.approvalsMtx.RUnlock()
-		return asset.Approved, nil
+		if approved {
+			return asset.Approved, nil
+		} else {
+			return asset.NotApproved, nil
+		}
+	}
+
+	if _, pending := w.pendingApprovals[version]; pending {
+		w.approvalsMtx.RUnlock()
+		return asset.Pending, nil
 	}
 	w.approvalsMtx.RUnlock()
+
+	w.approvalsMtx.Lock()
+	defer w.approvalsMtx.Unlock()
 
 	currentAllowance, err := w.tokenAllowance(version)
 	if err != nil {
 		return asset.NotApproved, fmt.Errorf("error retrieving current allowance: %w", err)
 	}
 	if currentAllowance.Cmp(unlimitedAllowanceReplenishThreshold) >= 0 {
-		w.approvalsMtx.Lock()
-		w.approvedVersions[version] = struct{}{}
-		w.approvalsMtx.Unlock()
+		w.approvalCache[version] = true
 		return asset.Approved, nil
 	}
-
-	w.approvalsMtx.RLock()
-	defer w.approvalsMtx.RUnlock()
-
-	if _, pending := w.pendingApprovals[version]; pending {
-		return asset.Pending, nil
-	}
-
+	w.approvalCache[version] = false
 	return asset.NotApproved, nil
 }
 
@@ -2265,6 +2268,57 @@ func (w *TokenWallet) ApproveToken(assetVer uint32, onConfirm func()) (string, e
 	w.approvalsMtx.Lock()
 	defer w.approvalsMtx.Unlock()
 
+	delete(w.approvalCache, assetVer)
+	w.pendingApprovals[assetVer] = &pendingApproval{
+		txHash:    tx.Hash(),
+		onConfirm: onConfirm,
+	}
+
+	return tx.Hash().Hex(), nil
+}
+
+// UnapproveToken removes the approval for a specific version of the token's
+// swap contract.
+func (w *TokenWallet) UnapproveToken(assetVer uint32, onConfirm func()) (string, error) {
+	approvalStatus, err := w.approvalStatus(assetVer)
+	if err != nil {
+		return "", fmt.Errorf("error checking approval status: %w", err)
+	}
+	if approvalStatus == asset.NotApproved {
+		return "", fmt.Errorf("token is not approved")
+	}
+	if approvalStatus == asset.Pending {
+		return "", fmt.Errorf("approval is pending")
+	}
+
+	feeRate, err := w.recommendedMaxFeeRate(w.ctx)
+	if err != nil {
+		return "", fmt.Errorf("error calculating approval fee rate: %w", err)
+	}
+	feeRateGwei := dexeth.WeiToGwei(feeRate)
+	approvalGas, err := w.approvalGas(big.NewInt(0), assetVer)
+	if err != nil {
+		return "", fmt.Errorf("error calculating approval gas: %w", err)
+	}
+
+	ethBal, err := w.parent.balance()
+	if err != nil {
+		return "", fmt.Errorf("error getting eth balance: %w", err)
+	}
+	if ethBal.Available < approvalGas*feeRateGwei {
+		return "", fmt.Errorf("insufficient eth balance for unapproval. required: %d, available: %d",
+			approvalGas*feeRateGwei, ethBal.Available)
+	}
+
+	tx, err := w.approveToken(big.NewInt(0), feeRateGwei, approvalGas, assetVer)
+	if err != nil {
+		return "", fmt.Errorf("error unapproving token: %w", err)
+	}
+
+	w.approvalsMtx.Lock()
+	defer w.approvalsMtx.Unlock()
+
+	delete(w.approvalCache, assetVer)
 	w.pendingApprovals[assetVer] = &pendingApproval{
 		txHash:    tx.Hash(),
 		onConfirm: onConfirm,
@@ -2274,14 +2328,14 @@ func (w *TokenWallet) ApproveToken(assetVer uint32, onConfirm func()) (string, e
 }
 
 // ApprovalFee returns the estimated fee for an approval transaction.
-func (w *TokenWallet) ApprovalFee(assetVer uint32) (uint64, error) {
-	if status, err := w.approvalStatus(assetVer); err != nil {
-		return 0, fmt.Errorf("error checking approval status: %w", err)
-	} else if status != asset.NotApproved {
-		return 0, fmt.Errorf("token is already approved")
+func (w *TokenWallet) ApprovalFee(assetVer uint32, approve bool) (uint64, error) {
+	var allowance *big.Int
+	if approve {
+		allowance = unlimitedAllowance
+	} else {
+		allowance = big.NewInt(0)
 	}
-
-	approvalGas, err := w.approvalGas(unlimitedAllowance, assetVer)
+	approvalGas, err := w.approvalGas(allowance, assetVer)
 	if err != nil {
 		return 0, fmt.Errorf("error calculating approval gas: %w", err)
 	}

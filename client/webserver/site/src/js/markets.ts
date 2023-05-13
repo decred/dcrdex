@@ -276,8 +276,8 @@ export default class MarketsPage extends BasePage {
     this.baseUnits = main.querySelectorAll('[data-unit=base]')
 
     // Buttons to show token approval form
-    bind(page.approveBaseBttn, 'click', () => { this.showTokenApprovalPopup(true) })
-    bind(page.approveQuoteBttn, 'click', () => { this.showTokenApprovalPopup(false) })
+    bind(page.approveBaseBttn, 'click', () => { this.showTokenApprovalForm(true) })
+    bind(page.approveQuoteBttn, 'click', () => { this.showTokenApprovalForm(false) })
     bind(page.approveTokenButton, 'click', () => { this.sendTokenApproval() })
 
     // Buttons to set order type and side.
@@ -754,10 +754,14 @@ export default class MarketsPage extends BasePage {
     Doc.hide(page.noWallet)
   }
 
-  async showTokenApprovalPopup (base: boolean) {
+  /*
+   * showTokenApprovalForm displays the form used to give allowance to the
+   * swap contract of a token.
+   */
+  async showTokenApprovalForm (base: boolean) {
     const { page } = this
 
-    Doc.show(page.approveTokenButton)
+    Doc.show(page.tokenApprovalSubmissionElements)
     Doc.hide(page.tokenApprovalTxMsg, page.approveTokenErr)
     Doc.setVis(!State.passwordIsCached(), page.tokenApprovalPWBox)
     page.tokenApprovalPW.value = ''
@@ -768,45 +772,43 @@ export default class MarketsPage extends BasePage {
       tokenAsset = this.market.quote
     }
     this.approvingBaseToken = base
-
     page.approveTokenSymbol.textContent = tokenAsset.symbol.toUpperCase()
-
     if (!tokenAsset.token) {
       console.error(`${tokenAsset.id} should be a token`)
       return
     }
-
     const parentAsset = app().assets[tokenAsset.token.parentID]
     if (!parentAsset || !parentAsset.info) {
       console.error(`${tokenAsset.token.parentID} asset not found`)
       return
     }
-
+    const dexAsset = this.market.dex.assets[tokenAsset.id]
+    if (!dexAsset) {
+      console.error(`${tokenAsset.id} asset not found in dex ${this.market.dex.host}`)
+      return
+    }
     const path = '/api/approvetokenfee'
     const res = await postJSON(path, {
       assetID: tokenAsset.id,
-      dexAddr: this.market.dex.host
+      version: dexAsset.version,
+      approving: true
     })
     if (!app().checkResponse(res)) {
-      console.error(res.msg)
-      return
+      page.approveTokenErr.textContent = res.msg
+      Doc.show(page.approveTokenErr)
+    } else {
+      const feeText = `${Doc.formatCoinValue(res.txFee, parentAsset.info.unitinfo)} ${parentAsset.symbol.toUpperCase()}`
+      page.approvalFeeEstimate.textContent = feeText
     }
-
-    const feeText = `${Doc.formatCoinValue(res.txFee, parentAsset.info.unitinfo)} ${parentAsset.symbol.toUpperCase()}`
-    page.approvalFeeEstimate.textContent = feeText
     this.showForm(page.approveTokenForm)
   }
 
+  /*
+   * sendTokenApproval calls the /api/approvetoken endpoint.
+   */
   async sendTokenApproval () {
     const { page } = this
-
-    let tokenAsset : SupportedAsset
-    if (this.approvingBaseToken) {
-      tokenAsset = this.market.base
-    } else {
-      tokenAsset = this.market.quote
-    }
-
+    const tokenAsset = this.approvingBaseToken ? this.market.base : this.market.quote
     const path = '/api/approvetoken'
     const res = await postJSON(path, {
       assetID: tokenAsset.id,
@@ -818,18 +820,19 @@ export default class MarketsPage extends BasePage {
       Doc.show(page.approveTokenErr)
       return
     }
-
     page.tokenApprovalTxID.innerText = res.txID
-
     const assetExplorer = CoinExplorers[tokenAsset.id]
     if (assetExplorer && assetExplorer[net]) {
       page.tokenApprovalTxID.href = assetExplorer[net](res.txID)
     }
-
     Doc.hide(page.tokenApprovalSubmissionElements)
     Doc.show(page.tokenApprovalTxMsg)
   }
 
+  /*
+   * tokenAssetApprovalStatuses returns the approval status of the base and
+   * quote assets. If the asset is not a token, it is considered approved.
+   */
   tokenAssetApprovalStatuses (): {
     baseAssetApprovalStatus: ApprovalStatus;
     quoteAssetApprovalStatus: ApprovalStatus;
@@ -839,12 +842,18 @@ export default class MarketsPage extends BasePage {
     let quoteAssetApprovalStatus = ApprovalStatus.Approved
 
     if (base.token) {
+      const baseAsset = app().assets[base.id]
       const baseVersion = this.market.dex.assets[base.id].version
-      baseAssetApprovalStatus = app().assets[base.id].wallet.approved[baseVersion]
+      if (baseAsset && baseAsset.wallet.approved && baseAsset.wallet.approved[baseVersion] !== undefined) {
+        baseAssetApprovalStatus = baseAsset.wallet.approved[baseVersion]
+      }
     }
     if (quote.token) {
+      const quoteAsset = app().assets[quote.id]
       const quoteVersion = this.market.dex.assets[quote.id].version
-      quoteAssetApprovalStatus = app().assets[quote.id].wallet.approved[quoteVersion]
+      if (quoteAsset && quoteAsset.wallet.approved && quoteAsset.wallet.approved[quoteVersion] !== undefined) {
+        quoteAssetApprovalStatus = quoteAsset.wallet.approved[quoteVersion]
+      }
     }
 
     return {
@@ -853,6 +862,10 @@ export default class MarketsPage extends BasePage {
     }
   }
 
+  /*
+   * setTokenApprovalVisibility sets the visibility of the token approval
+   * panel elements.
+   */
   setTokenApprovalVisibility () {
     const { page } = this
 
@@ -2212,7 +2225,7 @@ export default class MarketsPage extends BasePage {
 
   handleWalletState (note: WalletStateNote) {
     if (!this.market) return // This note can arrive before the market is set.
-    if (note.topic !== 'TokenApproval') return
+    // if (note.topic !== 'TokenApproval') return
     if (note.wallet.assetID !== this.market.base.id && note.wallet.assetID !== this.market.quote.id) return
     this.setTokenApprovalVisibility()
     this.resolveOrderFormVisibility()

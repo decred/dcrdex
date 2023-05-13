@@ -204,14 +204,15 @@ func (s *WebServer) apiRemoveWalletPeer(w http.ResponseWriter, r *http.Request) 
 
 func (s *WebServer) apiApproveTokenFee(w http.ResponseWriter, r *http.Request) {
 	var form struct {
-		AssetID uint32 `json:"assetID"`
-		DexAddr string `json:"dexAddr"`
+		AssetID  uint32 `json:"assetID"`
+		Version  uint32 `json:"version"`
+		Approval bool   `json:"approval"`
 	}
 	if !readPost(w, r, &form) {
 		return
 	}
 
-	txFee, err := s.core.ApproveTokenFee(form.AssetID, form.DexAddr)
+	txFee, err := s.core.ApproveTokenFee(form.AssetID, form.Version, form.Approval)
 	if err != nil {
 		s.writeAPIError(w, err)
 		return
@@ -244,6 +245,37 @@ func (s *WebServer) apiApproveToken(w http.ResponseWriter, r *http.Request) {
 	defer zero(pass)
 
 	txID, err := s.core.ApproveToken(pass, form.AssetID, form.DexAddr)
+	if err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+	resp := struct {
+		OK   bool   `json:"ok"`
+		TxID string `json:"txID"`
+	}{
+		OK:   true,
+		TxID: txID,
+	}
+	writeJSON(w, resp, s.indent)
+}
+
+func (s *WebServer) apiUnapproveToken(w http.ResponseWriter, r *http.Request) {
+	var form struct {
+		AssetID  uint32           `json:"assetID"`
+		Version  uint32           `json:"version"`
+		Password encode.PassBytes `json:"pass"`
+	}
+	if !readPost(w, r, &form) {
+		return
+	}
+	pass, err := s.resolvePass(form.Password, r)
+	if err != nil {
+		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
+		return
+	}
+	defer zero(pass)
+
+	txID, err := s.core.UnapproveToken(pass, form.AssetID, form.Version)
 	if err != nil {
 		s.writeAPIError(w, err)
 		return

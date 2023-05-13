@@ -615,7 +615,7 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 		maxRedeemsInTx:     60,
 		pendingTxCheckBal:  new(big.Int),
 		pendingApprovals:   make(map[uint32]*pendingApproval),
-		approvedVersions:   make(map[uint32]struct{}),
+		approvalCache:      make(map[uint32]bool),
 	}
 	aw.wallets = map[uint32]*assetWallet{
 		BipID: aw,
@@ -635,7 +635,7 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 			assetID:          BipID,
 			atomize:          dexeth.WeiToGwei,
 			pendingApprovals: make(map[uint32]*pendingApproval),
-			approvedVersions: make(map[uint32]struct{}),
+			approvalCache:    make(map[uint32]bool),
 		}
 		w = &TokenWallet{
 			assetWallet: aw,
@@ -1336,8 +1336,8 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 
 	// Test that funding without allowance causes error
 	if assetID != BipID {
+		eth.approvalCache = make(map[uint32]bool)
 		node.tokenContractor.allow = big.NewInt(0)
-		eth.approvedVersions = make(map[uint32]struct{})
 		_, _, err = w.FundOrder(&order)
 		if err == nil {
 			t.Fatalf("no allowance should cause error but did not")

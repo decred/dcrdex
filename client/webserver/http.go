@@ -132,6 +132,7 @@ func (s *WebServer) handleMarkets(w http.ResponseWriter, r *http.Request) {
 type walletsTmplData struct {
 	CommonArguments
 	Assets []*core.SupportedAsset
+	Net    uint8
 }
 
 // handleWallets is the handler for the '/wallets' page request.
@@ -158,6 +159,7 @@ func (s *WebServer) handleWallets(w http.ResponseWriter, r *http.Request) {
 	data := &walletsTmplData{
 		CommonArguments: *s.commonArgs(r, "Wallets | Decred DEX"),
 		Assets:          append(assets, nowallets...),
+		Net:             uint8(s.core.Network()),
 	}
 	s.sendTemplate(w, "wallets", data)
 }

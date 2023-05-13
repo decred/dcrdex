@@ -155,7 +155,8 @@ type clientCore interface {
 	UnshieldFunds(assetID uint32, amt uint64) ([]byte, error)
 	SendShielded(appPW []byte, assetID uint32, toAddr string, amt uint64) ([]byte, error)
 	ApproveToken(appPW []byte, assetID uint32, dexAddr string) (string, error)
-	ApproveTokenFee(assetID uint32, dexAddr string) (uint64, error)
+	UnapproveToken(appPW []byte, assetID uint32, version uint32) (string, error)
+	ApproveTokenFee(assetID uint32, version uint32, approval bool) (uint64, error)
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -429,6 +430,7 @@ func New(cfg *Config) (*WebServer, error) {
 			apiAuth.Post("/addwalletpeer", s.apiAddWalletPeer)
 			apiAuth.Post("/removewalletpeer", s.apiRemoveWalletPeer)
 			apiAuth.Post("/approvetoken", s.apiApproveToken)
+			apiAuth.Post("/unapprovetoken", s.apiUnapproveToken)
 			apiAuth.Post("/approvetokenfee", s.apiApproveTokenFee)
 
 			apiAuth.Post("/shieldedstatus", s.apiShieldedStatus)

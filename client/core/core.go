@@ -5381,28 +5381,45 @@ func (c *Core) ApproveToken(appPW []byte, assetID uint32, dexAddr string) (strin
 	return txID, nil
 }
 
-// ApproveTokenFee returns the fee for a token approval for the version
-// of the contract used by the dex at the specified address.
-func (c *Core) ApproveTokenFee(assetID uint32, dexAddr string) (uint64, error) {
+// UnapproveToken calls a wallet's UnapproveToken method for a specified
+// version of the token.
+func (c *Core) UnapproveToken(appPW []byte, assetID uint32, version uint32) (string, error) {
+	crypter, err := c.encryptionKey(appPW)
+	if err != nil {
+		return "", err
+	}
+
+	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return "", err
+	}
+
+	err = wallet.Unlock(crypter)
+	if err != nil {
+		return "", err
+	}
+
+	onConfirm := func() {
+		go c.notify(newTokenApprovalNote(wallet.state()))
+	}
+
+	txID, err := wallet.UnapproveToken(version, onConfirm)
+	if err != nil {
+		return "", err
+	}
+
+	c.notify(newTokenApprovalNote(wallet.state()))
+	return txID, nil
+}
+
+// ApproveTokenFee returns the fee for a token approval/unapproval.
+func (c *Core) ApproveTokenFee(assetID uint32, version uint32, approval bool) (uint64, error) {
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
 		return 0, err
 	}
 
-	dex, connected, err := c.dex(dexAddr)
-	if err != nil {
-		return 0, err
-	}
-	if !connected {
-		return 0, fmt.Errorf("not connected to %s", dexAddr)
-	}
-
-	asset, found := dex.assets[assetID]
-	if !found {
-		return 0, fmt.Errorf("asset %d not found for %s", assetID, dexAddr)
-	}
-
-	return wallet.ApprovalFee(asset.Version)
+	return wallet.ApprovalFee(version, approval)
 }
 
 // EstimateSendTxFee returns an estimate of the tx fee needed to send or

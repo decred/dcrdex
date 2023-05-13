@@ -29,6 +29,7 @@ const (
 	WalletTraitPeerManager                            // The wallet can manage its peers.
 	WalletTraitAuthenticator                          // The wallet require authentication.
 	WalletTraitShielded                               // The wallet is ShieldedWallet (e.g. ZCash)
+	WalletTraitTokenApprover                          // The wallet is a TokenApprover
 )
 
 // IsRescanner tests if the WalletTrait has the WalletTraitRescanner bit set.
@@ -109,6 +110,12 @@ func (wt WalletTrait) IsShielded() bool {
 	return wt&WalletTraitShielded != 0
 }
 
+// IsTokenApprover tests if the WalletTrait has the WalletTraitTokenApprover bit
+// set, which indicates the wallet implements the TokenApprover interface.
+func (wt WalletTrait) IsTokenApprover() bool {
+	return wt&WalletTraitTokenApprover != 0
+}
+
 // DetermineWalletTraits returns the WalletTrait bitset for the provided Wallet.
 func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(Rescanner); is {
@@ -149,6 +156,9 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	}
 	if _, is := w.(ShieldedWallet); is {
 		t |= WalletTraitShielded
+	}
+	if _, is := w.(TokenApprover); is {
+		t |= WalletTraitTokenApprover
 	}
 	return t
 }
@@ -813,11 +823,14 @@ type TokenApprover interface {
 	// already been done or is pending. The onConfirm callback is called
 	// when the approval transaction is confirmed.
 	ApproveToken(assetVer uint32, onConfirm func()) (string, error)
+	// UnapproveToken removes the approval for a specific version of the
+	// token's swap contract.
+	UnapproveToken(assetVer uint32, onConfirm func()) (string, error)
 	// ApprovalStatus returns the approval status for each version of the
 	// token's swap contract.
 	ApprovalStatus() map[uint32]ApprovalStatus
 	// ApprovalFee returns the estimated fee for an approval transaction.
-	ApprovalFee(assetVer uint32) (uint64, error)
+	ApprovalFee(assetVer uint32, approval bool) (uint64, error)
 }
 
 // Bond is the fidelity bond info generated for a certain account ID, amount,

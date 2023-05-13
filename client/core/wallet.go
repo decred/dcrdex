@@ -583,14 +583,23 @@ func (w *xcWallet) ApproveToken(assetVersion uint32, onConfirm func()) (string, 
 	return approver.ApproveToken(assetVersion, onConfirm)
 }
 
+// ApproveToken sends an approval transaction if the wallet is a TokenApprover.
+func (w *xcWallet) UnapproveToken(assetVersion uint32, onConfirm func()) (string, error) {
+	approver, ok := w.Wallet.(asset.TokenApprover)
+	if !ok {
+		return "", fmt.Errorf("%s wallet is not a TokenApprover", unbip(w.AssetID))
+	}
+	return approver.UnapproveToken(assetVersion, onConfirm)
+}
+
 // ApprovalFee returns the estimated fee to send an approval transaction if the
 // wallet is a TokenApprover.
-func (w *xcWallet) ApprovalFee(assetVersion uint32) (uint64, error) {
+func (w *xcWallet) ApprovalFee(assetVersion uint32, approval bool) (uint64, error) {
 	approver, ok := w.Wallet.(asset.TokenApprover)
 	if !ok {
 		return 0, fmt.Errorf("%s wallet is not a TokenApprover", unbip(w.AssetID))
 	}
-	return approver.ApprovalFee(assetVersion)
+	return approver.ApprovalFee(assetVersion, approval)
 }
 
 // ApprovalStatus returns the approval status of each version of the asset if
