@@ -169,7 +169,7 @@ func runOneNet(t *testing.T, electrumNetwork electrum_network,
 	hdrRes, _, _ := sc.SubscribeHeaders(ctx)
 	spew.Dump(hdrRes)
 
-	height := uint32(blockHeight)
+	height := blockHeight
 out:
 	for {
 		select {
