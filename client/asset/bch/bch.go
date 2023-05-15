@@ -212,15 +212,15 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		// Bitcoin Cash don't take a change_type argument in their options
 		// unlike Bitcoin Core.
 		OmitAddressType: true,
-		// Bitcoin Cash uses estimatefee instead of estimatesmartfee, and even
-		// then, they modified it from the old Bitcoin Core estimatefee by
-		// removing the confirmation target argument.
-		FeeEstimator: estimateFee,
-		AssetID:      BipID,
+		AssetID:         BipID,
 	}
 
 	switch cfg.Type {
 	case walletTypeRPC, walletTypeLegacy:
+		// Bitcoin Cash uses estimatefee instead of estimatesmartfee, and even
+		// then, they modified it from the old Bitcoin Core estimatefee by
+		// removing the confirmation target argument.
+		cloneCFG.FeeEstimator = estimateFee
 		return btc.BTCCloneWallet(cloneCFG)
 	// case walletTypeElectrum:
 	// 	logger.Warnf("\n\nUNTESTED Bitcoin Cash ELECTRUM WALLET IMPLEMENTATION! DO NOT USE ON mainnet!\n\n")

@@ -27,7 +27,6 @@ type ExchangeWalletElectrum struct {
 }
 
 var _ asset.Wallet = (*ExchangeWalletElectrum)(nil)
-var _ asset.FeeRater = (*ExchangeWalletElectrum)(nil)
 var _ asset.Authenticator = (*ExchangeWalletElectrum)(nil)
 
 // ElectrumWallet creates a new ExchangeWalletElectrum for the provided
@@ -67,12 +66,10 @@ func ElectrumWallet(cfg *BTCCloneCFG) (*ExchangeWalletElectrum, error) {
 		ew:         ew,
 	}
 	// In (*baseWallet).feeRate, use ExchangeWalletElectrum's walletFeeRate
-	// override for localFeeRate. No externalFeeRate is required. Note that we
-	// could set cfg.FeeEstimator to wrap ewc.FeeRate, but we'll use the
-	// ExchangeWalletElectrum method instead.
-	btc.localFeeRate = func(ctx context.Context, _ RawRequester, confTarget uint64) (uint64, error) {
-		return eew.walletFeeRate(ctx, confTarget)
-	}
+	// override for localFeeRate. No externalFeeRate is required but will be
+	// used if eew.walletFeeRate returned an error and an externalFeeRate is
+	// enabled.
+	btc.localFeeRate = eew.walletFeeRate
 
 	return eew, nil
 }
@@ -141,23 +138,13 @@ func (btc *ExchangeWalletElectrum) Connect(ctx context.Context) (*sync.WaitGroup
 	return wg, nil
 }
 
-func (btc *ExchangeWalletElectrum) walletFeeRate(ctx context.Context, confTarget uint64) (uint64, error) {
+// walletFeeRate satisfies BTCCloneCFG.FeeEstimator.
+func (btc *ExchangeWalletElectrum) walletFeeRate(ctx context.Context, _ RawRequester, confTarget uint64) (uint64, error) {
 	satPerKB, err := btc.ew.wallet.FeeRate(ctx, int64(confTarget))
 	if err != nil {
 		return 0, err
 	}
 	return uint64(dex.IntDivUp(satPerKB, 1000)), nil
-}
-
-// FeeRate gets a fee rate estimate. Satisfies asset.FeeRater. Electrum's fee
-// rate is already externally-sourced, so we simplify for FeeRate callers.
-func (btc *ExchangeWalletElectrum) FeeRate() uint64 {
-	feeRate, err := btc.walletFeeRate(btc.ew.ctx, 1)
-	if err != nil {
-		btc.log.Errorf("Failed to retrieve fee rate: %v", err)
-		return 0
-	}
-	return feeRate
 }
 
 // findRedemption will search for the spending transaction of specified
