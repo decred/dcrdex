@@ -891,8 +891,8 @@ var _ asset.Wallet = (*intermediaryWallet)(nil)
 var _ asset.Accelerator = (*ExchangeWalletAccelerator)(nil)
 var _ asset.Accelerator = (*ExchangeWalletSPV)(nil)
 var _ asset.Withdrawer = (*baseWallet)(nil)
+var _ asset.FeeRater = (*baseWallet)(nil)
 var _ asset.Rescanner = (*ExchangeWalletSPV)(nil)
-var _ asset.FeeRater = (*ExchangeWalletFullNode)(nil)
 var _ asset.LogFiler = (*ExchangeWalletSPV)(nil)
 var _ asset.Recoverer = (*ExchangeWalletSPV)(nil)
 var _ asset.PeerManager = (*ExchangeWalletSPV)(nil)
@@ -964,9 +964,7 @@ func (btc *ExchangeWalletSPV) RemovePeer(addr string) error {
 }
 
 // FeeRate satisfies asset.FeeRater.
-func (btc *ExchangeWalletFullNode) FeeRate() uint64 {
-	// NOTE: With baseWallet having an optional external fee rate source, we may
-	// consider making baseWallet a FeeRater by allowing a nil local func.
+func (btc *baseWallet) FeeRate() uint64 {
 	rate, err := btc.feeRate(1)
 	if err != nil {
 		btc.log.Tracef("Failed to get fee rate: %v", err)
@@ -1236,7 +1234,7 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 	w.cfgV.Store(baseCfg)
 
 	// Default to the BTC RPC estimator (see LTC). Consumers can use
-	// NoLocalFeeRate or a similar dummy function to power feeRate() requests
+	// noLocalFeeRate or a similar dummy function to power feeRate() requests
 	// with only an external fee rate source available. Otherwise, all method
 	// calls must provide a rate or accept the configured fallback.
 	if w.localFeeRate == nil {
@@ -1246,10 +1244,10 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 	return w, nil
 }
 
-// NoLocalFeeRate is a dummy function for BTCCloneCFG.FeeEstimator for a wallet
+// noLocalFeeRate is a dummy function for BTCCloneCFG.FeeEstimator for a wallet
 // instance that cannot support a local fee rate estimate but has an external
 // fee rate source.
-func NoLocalFeeRate() (uint64, error) {
+func noLocalFeeRate(ctx context.Context, rr RawRequester, u uint64) (uint64, error) {
 	return 0, errors.New("no local fee rate estimate possible")
 }
 
@@ -1259,6 +1257,12 @@ func OpenSPVWallet(cfg *BTCCloneCFG, walletConstructor BTCWalletConstructor) (*E
 	err := config.Unmapify(cfg.WalletCFG.Settings, walletCfg)
 	if err != nil {
 		return nil, err
+	}
+
+	// SPV wallets without a FeeEstimator will default to any enabled external
+	// fee estimator.
+	if cfg.FeeEstimator == nil {
+		cfg.FeeEstimator = noLocalFeeRate
 	}
 
 	btc, err := newUnconnectedWallet(cfg, walletCfg)
@@ -1578,7 +1582,8 @@ func (btc *baseWallet) legacyBalance() (*asset.Balance, error) {
 // feeRate returns the current optimal fee rate in sat / byte using the
 // estimatesmartfee RPC or an external API if configured and enabled.
 func (btc *baseWallet) feeRate(confTarget uint64) (uint64, error) {
-	// Local estimate first. TODO: Allow only external (nil local).
+	// Local estimate first. localFeeRate might be a dummy function for spv
+	// wallets.
 	feeRate, err := btc.localFeeRate(btc.ctx, btc.node, confTarget) // e.g. rpcFeeRate
 	if err == nil {
 		return feeRate, nil
