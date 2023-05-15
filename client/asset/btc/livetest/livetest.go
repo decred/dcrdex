@@ -62,6 +62,7 @@ func tBackend(ctx context.Context, t *testing.T, cfg *Config, walletName *Wallet
 	reportName := fmt.Sprintf("%s:%s-%s", cfg.Asset.Symbol, walletName.Node, walletName.Name)
 
 	walletCfg := &asset.WalletConfig{
+		Type:     walletName.WalletType,
 		Settings: settings,
 		TipChange: func(err error) {
 			blkFunc(reportName, err)
@@ -134,6 +135,8 @@ func randBytes(l int) []byte {
 type WalletName struct {
 	Node string
 	Name string
+	// WalletType is optional, default "" - non-breaking
+	WalletType string
 	// Filename is optional. If specified, it will be used instead of
 	// [node].conf.
 	Filename string

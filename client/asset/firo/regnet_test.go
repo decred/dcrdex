@@ -44,12 +44,14 @@ func TestWallet(t *testing.T) {
 		LotSize:   tLotSize,
 		Asset:     tFIRO,
 		FirstWallet: &livetest.WalletName{
-			Node: "alpha",
-			Name: "alpha",
+			Node:       "alpha",
+			Name:       "alpha",
+			WalletType: walletTypeRPC,
 		},
 		SecondWallet: &livetest.WalletName{
-			Node: "beta",
-			Name: "beta",
+			Node:       "beta",
+			Name:       "beta",
+			WalletType: walletTypeRPC,
 		},
 	})
 }
