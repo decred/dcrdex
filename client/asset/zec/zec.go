@@ -385,10 +385,12 @@ func (w *zecWallet) Balance() (*asset.Balance, error) {
 	}
 
 	if bal.Other == nil {
-		bal.Other = map[string]uint64{}
+		bal.Other = make(map[string]*asset.CustomBalance)
 	}
 
-	bal.Other["shielded"] = shielded
+	bal.Other["Shielded"] = &asset.CustomBalance{
+		Amount: shielded,
+	}
 	return bal, nil
 
 }

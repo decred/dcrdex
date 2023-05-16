@@ -111,6 +111,21 @@ export const ID_WALLET_SYNC_FINISHING_UP = 'WALLET_SYNC_FINISHING_UP'
 export const ID_CONNECT_WALLET_ERR_MSG = 'CONNECTING_WALLET_ERR_MSG'
 export const ID_REFUND_IMMINENT = 'REFUND_IMMINENT'
 export const ID_REFUND_WILL_HAPPEN_AFTER = 'REFUND_WILL_HAPPEN_AFTER'
+export const ID_AVAILABLE_C = 'ID_AVAILABLE_C'
+export const ID_LOCKED_C = 'ID_LOCKED_C'
+export const ID_IMMATURE_C = 'ID_IMMATURE_C'
+export const ID_SWAPPING = 'ID_SWAPPING'
+export const ID_BONDED = 'ID_BONDED'
+export const ID_LOCKED_BAL_MSG = 'ID_LOCKED_BAL_MSG'
+export const ID_IMMATURE_BAL_MSG = 'ID_IMMATURE_BAL_MSG'
+export const ID_LOCKED_SWAPPING_BAL_MSG = 'ID_LOCKED_SWAPPING_BAL_MSG'
+export const ID_LOCKED_BOND_BAL_MSG = 'ID_LOCKED_BOND_BAL_MSG'
+export const ID_RESERVES_DEFICIT = 'ID_RESERVES_DEFICIT'
+export const ID_RESERVES_DEFICIT_MSG = 'ID_RESERVES_DEFICIT_MSG'
+export const ID_BOND_RESERVES = 'ID_BOND_RESERVES'
+export const ID_BOND_RESERVES_MSG = 'ID_BOND_RESERVES_MSG'
+export const ID_SHIELDED = 'ID_SHIELDED'
+export const ID_SHIELDED_MSG = 'ID_SHIELDED_MSG'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -224,7 +239,22 @@ export const enUS: Locale = {
   [ID_CONNECT_WALLET_ERR_MSG]: 'Failed to connect {{ assetName }} wallet: {{ errMsg }}',
   [ID_TAKER_FOUND_MAKER_REDEMPTION]: 'Redeemed by {{ makerAddr }}',
   [ID_REFUND_IMMINENT]: 'Will happen in the next few blocks',
-  [ID_REFUND_WILL_HAPPEN_AFTER]: 'Refund will happen after {{ refundAfterTime }}'
+  [ID_REFUND_WILL_HAPPEN_AFTER]: 'Refund will happen after {{ refundAfterTime }}',
+  [ID_AVAILABLE_C]: 'Available',
+  [ID_LOCKED_C]: 'Locked',
+  [ID_IMMATURE_C]: 'Immature',
+  [ID_SWAPPING]: 'Swapping',
+  [ID_BONDED]: 'Bonded',
+  [ID_LOCKED_BAL_MSG]: 'Total funds temporarily locked to cover the costs of your bond maintenance, outstanding orders, and necessary fees',
+  [ID_IMMATURE_BAL_MSG]: 'Funds coming your way shortly, waiting for confirmation on the blockchain',
+  [ID_LOCKED_SWAPPING_BAL_MSG]: 'Funds currently locked in ongoing/active matches being executed at present',
+  [ID_LOCKED_BOND_BAL_MSG]: 'Funds locked in active bonds',
+  [ID_RESERVES_DEFICIT]: 'Reserves Deficit',
+  [ID_RESERVES_DEFICIT_MSG]: 'This is the difference between the available balance in your wallet and the amount that has been reserved for specific purposes',
+  [ID_BOND_RESERVES]: 'Bond Reserves',
+  [ID_BOND_RESERVES_MSG]: 'Funds reserved to cover the expenses associated with bond maintenance',
+  [ID_SHIELDED]: 'Shielded',
+  [ID_SHIELDED_MSG]: 'Funds kept secure and private in a protected address'
 }
 
 export const ptBR: Locale = {

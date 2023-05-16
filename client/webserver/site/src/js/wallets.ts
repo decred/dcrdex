@@ -25,7 +25,8 @@ import {
   Market,
   PeerSource,
   WalletPeer,
-  ApprovalStatus
+  ApprovalStatus,
+  CustomBalance
 } from './registry'
 import { CoinExplorers } from './order'
 
@@ -815,7 +816,7 @@ export default class WalletsPage extends BasePage {
     }
     let firstOther = false
     Doc.empty(page.balanceDetailBox)
-    const addSubBalance = (category: string, subBalance: number) => {
+    const addSubBalance = (category: string, subBalance: number, tooltipMsg: string) => {
       const row = page.balanceDetailRow.cloneNode(true) as PageElement
       if (firstOther) {
         row.classList.add('first-other')
@@ -823,18 +824,31 @@ export default class WalletsPage extends BasePage {
       }
       page.balanceDetailBox.appendChild(row)
       const tmpl = Doc.parseTemplate(row)
-      tmpl.category.textContent = category
+      if (tmpl.category.firstElementChild) tmpl.category.firstElementChild.textContent = category
+      else tmpl.category.textContent = category
+      if (tooltipMsg) {
+        tmpl.tooltipMsg.dataset.tooltip = tooltipMsg
+        Doc.show(tmpl.tooltipMsg)
+      }
       tmpl.subBalance.textContent = Doc.formatCoinValue(subBalance, ui)
     }
-    addSubBalance('Available', bal.available)
-    addSubBalance('Locked', totalLocked)
-    addSubBalance('Immature', bal.immature)
-    const sortedCats = Object.entries(bal.other || {})
-    sortedCats.sort((a: [string, number], b: [string, number]): number => a[0].localeCompare(b[0]))
+    addSubBalance(intl.prep(intl.ID_AVAILABLE_C), bal.available, '')
+    addSubBalance(intl.prep(intl.ID_LOCKED_C), totalLocked, intl.prep(intl.ID_LOCKED_BAL_MSG))
+    addSubBalance(intl.prep(intl.ID_IMMATURE_C), bal.immature, intl.prep(intl.ID_IMMATURE_BAL_MSG))
+    const sortedBalCats = Object.entries(bal.other || {})
+    sortedBalCats.sort((a: [string, CustomBalance], b: [string, any]): number => a[0].localeCompare(b[0]))
     firstOther = true
-    if (bal.contractlocked > 0) addSubBalance('Swapping (locked)', bal.contractlocked)
-    if (bal.bondlocked > 0) addSubBalance('Bonded (locked)', bal.bondlocked)
-    for (const [cat, sub] of sortedCats) addSubBalance(cat, sub)
+    const lockedBal = (category: string): string => {
+      return category + ' (' + intl.prep(intl.ID_LOCKED) + ') '
+    }
+    if (bal.contractlocked > 0) addSubBalance(lockedBal(intl.prep(intl.ID_SWAPPING)), bal.contractlocked, intl.prep(intl.ID_LOCKED_SWAPPING_BAL_MSG))
+    if (bal.bondlocked > 0) addSubBalance(lockedBal(intl.prep(intl.ID_BONDED)), bal.bondlocked, intl.prep(intl.ID_LOCKED_BOND_BAL_MSG))
+    for (const [cat, bal] of sortedBalCats) {
+      let [balCategory, tooltipMsg] = customWalletBalanceCategory(cat)
+      if (bal.locked) balCategory = lockedBal(balCategory)
+      addSubBalance(balCategory, bal.amt, tooltipMsg)
+    }
+    app().bindTooltips(page.balanceDetailBox)
   }
 
   showAvailableMarkets (assetID: number) {
@@ -1448,4 +1462,21 @@ function assetIsConfigurable (assetID: number) {
   const defs = asset.info.availablewallets
   const zerothOpts = defs[0].configopts
   return defs.length > 1 || (zerothOpts && zerothOpts.length > 0)
+}
+
+/*
+ * customWalletBalance returns the translated string and a message for the
+ * provided balance category.
+ */
+function customWalletBalanceCategory (category: string): [string, string] {
+  switch (category) {
+    case 'Reserves Deficit':
+      return [intl.prep(intl.ID_RESERVES_DEFICIT), intl.prep(intl.ID_RESERVES_DEFICIT_MSG)]
+    case 'Bond Reserves':
+      return [intl.prep(intl.ID_BOND_RESERVES), intl.prep(intl.ID_BOND_RESERVES_MSG)]
+    case 'Shielded':
+      return [intl.prep(intl.ID_SHIELDED), intl.prep(intl.ID_SHIELDED_MSG)]
+  }
+
+  return [category, '']
 }

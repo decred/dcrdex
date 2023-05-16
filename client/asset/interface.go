@@ -897,8 +897,15 @@ type Balance struct {
 	// Locked is the total amount locked in the wallet which includes but
 	// is not limited to funds locked for swap but not actually swapped yet.
 	Locked uint64 `json:"locked"`
-	// Other is a place to list custom balance categories.
-	Other map[string]uint64 `json:"other"`
+	// Other is a place to list custom balance categories. It is recommended for
+	// custom balance added here to have a translation and tooltip info in
+	// client/webserver/site/src/js/wallet.js#customWalletBalanceCategory
+	Other map[string]*CustomBalance `json:"other"`
+}
+
+type CustomBalance struct {
+	Amount uint64 `json:"amt"`
+	Locked bool   `json:"locked"`
 }
 
 // Coin is some amount of spendable asset. Coin provides the information needed
