@@ -912,7 +912,7 @@ type CustomBalance struct {
 	Amount uint64 `json:"amt"`
 	// Locked is a flag to indicate that this Amount is not included in
 	// Balance.Available and is included in Balance.Locked.
-	Locked bool   `json:"locked"`
+	Locked bool `json:"locked"`
 }
 
 // Coin is some amount of spendable asset. Coin provides the information needed

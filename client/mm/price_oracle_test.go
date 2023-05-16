@@ -53,7 +53,7 @@ func TestFetchBinanceSpread(t *testing.T) {
 
 func TestFetchCoinbaseSpread(t *testing.T) {
 	testSpreader(t, fetchCoinbaseSpread, "btc", "usd")
-}x
+}
 
 func TestFetchBittrexSpread(t *testing.T) {
 	testSpreader(t, fetchBittrexSpread, "dcr", "btc")
