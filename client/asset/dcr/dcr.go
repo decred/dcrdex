@@ -1044,7 +1044,7 @@ func (dcr *ExchangeWallet) balance() (*asset.Balance, error) {
 		Immature: toAtoms(ab.ImmatureCoinbaseRewards) +
 			toAtoms(ab.ImmatureStakeGeneration),
 		Locked: locked + toAtoms(ab.LockedByTickets),
-		Other:  make(map[string]*asset.CustomBalance),
+		Other:  make(map[string]asset.CustomBalance),
 	}
 
 	if cfg.unmixedAccount == "" {
@@ -1085,12 +1085,12 @@ func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
 	if reserves > bal.Available { // unmixed (immature) probably needs to trickle in
 		dcr.log.Warnf("Available balance is below configured reserves: %f < %f",
 			toDCR(bal.Available), toDCR(reserves))
-		bal.Other["Reserves Deficit"] = &asset.CustomBalance{
+		bal.Other["Reserves Deficit"] = asset.CustomBalance{
 			Amount: reserves - bal.Available,
 		}
 		reserves = bal.Available
 	}
-	bal.Other["Bond Reserves"] = &asset.CustomBalance{
+	bal.Other["Bond Reserves"] = asset.CustomBalance{
 		Amount: reserves,
 		Locked: true,
 	}

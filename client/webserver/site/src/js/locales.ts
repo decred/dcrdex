@@ -245,16 +245,16 @@ export const enUS: Locale = {
   [ID_IMMATURE_C]: 'Immature',
   [ID_SWAPPING]: 'Swapping',
   [ID_BONDED]: 'Bonded',
-  [ID_LOCKED_BAL_MSG]: 'Total funds temporarily locked to cover the costs of your bond maintenance, outstanding orders, and necessary fees',
-  [ID_IMMATURE_BAL_MSG]: 'Funds coming your way shortly, waiting for confirmation on the blockchain',
-  [ID_LOCKED_SWAPPING_BAL_MSG]: 'Funds currently locked in ongoing/active matches being executed at present',
+  [ID_LOCKED_BAL_MSG]: 'Total funds temporarily locked to cover the costs of your bond maintenance, settling matches, and necessary fees',
+  [ID_IMMATURE_BAL_MSG]: 'Incoming funds awaiting confirmation',
+  [ID_LOCKED_SWAPPING_BAL_MSG]: 'Funds currently locked settling matches',
   [ID_LOCKED_BOND_BAL_MSG]: 'Funds locked in active bonds',
   [ID_RESERVES_DEFICIT]: 'Reserves Deficit',
-  [ID_RESERVES_DEFICIT_MSG]: 'This is the difference between the available balance in your wallet and the amount that has been reserved for specific purposes',
+  [ID_RESERVES_DEFICIT_MSG]: 'Difference between the available balance in your wallet and the amount that has been reserved for specific purposes',
   [ID_BOND_RESERVES]: 'Bond Reserves',
   [ID_BOND_RESERVES_MSG]: 'Funds reserved to cover the expenses associated with bond maintenance',
   [ID_SHIELDED]: 'Shielded',
-  [ID_SHIELDED_MSG]: 'Funds kept secure and private in a protected address'
+  [ID_SHIELDED_MSG]: 'Total funds kept private'
 }
 
 export const ptBR: Locale = {

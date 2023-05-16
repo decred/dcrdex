@@ -900,11 +900,18 @@ type Balance struct {
 	// Other is a place to list custom balance categories. It is recommended for
 	// custom balance added here to have a translation and tooltip info in
 	// client/webserver/site/src/js/wallet.js#customWalletBalanceCategory
-	Other map[string]*CustomBalance `json:"other"`
+	Other map[string]CustomBalance `json:"other"`
 }
 
+// CustomBalance is a balance category used to track funds for a particular
+// purpose or for a special kind of balance (e.g Zcash Shielded wallet
+// balances).
 type CustomBalance struct {
+	// Amount is the balance in the wallet for this custom category. It is is
+	// subtracted from Balance.Available above.
 	Amount uint64 `json:"amt"`
+	// Locked is a flag to indicate that this Amount is not included in
+	// Balance.Available and is included in Balance.Locked.
 	Locked bool   `json:"locked"`
 }
 
