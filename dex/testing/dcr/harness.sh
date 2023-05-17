@@ -339,10 +339,6 @@ if [ "$MINE" = "1" ]; then
   echo "Mining 600 blocks on alpha"
   echo "Mining blocks 0 through 99"
   tmux send-keys -t $SESSION:0 "./mine-alpha 100${WAIT}" C-m\; wait-for donedcr
-
-  # Send beta some dough while we're here.
-  tmux send-keys -t $SESSION:0 "./alpha sendtoaddress ${BETA_MINING_ADDR} 1000${WAIT}" C-m\; wait-for donedcr
-
   echo "Mining blocks 100 through 199"
   tmux send-keys -t $SESSION:0 "./mine-alpha 100${WAIT}" C-m\; wait-for donedcr
   echo "Mining blocks 200 through 299"
@@ -351,10 +347,11 @@ if [ "$MINE" = "1" ]; then
   tmux send-keys -t $SESSION:0 "./mine-alpha 100${WAIT}" C-m\; wait-for donedcr
   echo "Mining blocks 400 through 499"
   tmux send-keys -t $SESSION:0 "./mine-alpha 100${WAIT}" C-m\; wait-for donedcr
-  # Don't stop here. There's a period of high ticket price where the avaialable
-  # balance for alpha is really low. Go to 600 to get through it.
   echo "Mining blocks 500 through 599"
   tmux send-keys -t $SESSION:0 "./mine-alpha 100${WAIT}" C-m\; wait-for donedcr
+
+  # Send beta some dough while we're here.
+  tmux send-keys -t $SESSION:0 "./alpha sendtoaddress ${BETA_MINING_ADDR} 1000${WAIT}" C-m\; wait-for donedcr
 
   # Have alpha send some credits to the other wallets
   for i in 10 18 5 7 1 15 3 25
