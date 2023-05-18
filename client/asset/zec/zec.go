@@ -392,7 +392,6 @@ func (w *zecWallet) Balance() (*asset.Balance, error) {
 		Amount: shielded,
 	}
 	return bal, nil
-
 }
 
 // NewShieldedAddress creates a new shielded address. A shielded address can be

@@ -247,7 +247,7 @@ export const enUS: Locale = {
   [ID_BONDED]: 'Bonded',
   [ID_LOCKED_BAL_MSG]: 'Total funds temporarily locked to cover the costs of your bond maintenance, settling matches, and necessary fees',
   [ID_IMMATURE_BAL_MSG]: 'Incoming funds awaiting confirmation',
-  [ID_LOCKED_SWAPPING_BAL_MSG]: 'Funds currently locked settling matches',
+  [ID_LOCKED_SWAPPING_BAL_MSG]: 'Funds currently locked in settling matches',
   [ID_LOCKED_BOND_BAL_MSG]: 'Funds locked in active bonds',
   [ID_RESERVES_DEFICIT]: 'Reserves Deficit',
   [ID_RESERVES_DEFICIT_MSG]: 'Difference between the available balance in your wallet and the amount that has been reserved for specific purposes',

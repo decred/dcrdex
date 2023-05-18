@@ -907,7 +907,7 @@ type Balance struct {
 // purpose or for a special kind of balance (e.g Zcash Shielded wallet
 // balances).
 type CustomBalance struct {
-	// Amount is the balance in the wallet for this custom category. It is is
+	// Amount is the balance in the wallet for this custom category. It is
 	// subtracted from Balance.Available above.
 	Amount uint64 `json:"amt"`
 	// Locked is a flag to indicate that this Amount is not included in
