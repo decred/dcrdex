@@ -146,6 +146,13 @@ type tradeForm struct {
 	srvForm *core.TradeForm
 }
 
+// multiTradeForm combines the application password and the user's trade
+// details.
+type multiTradeForm struct {
+	appPass encode.PassBytes
+	srvForm *core.MultiTradeForm
+}
+
 // cancelForm is information necessary to cancel a trade.
 type cancelForm struct {
 	appPass encode.PassBytes
@@ -576,6 +583,67 @@ func parseTradeArgs(params *RawParams) (*tradeForm, error) {
 		},
 	}
 	return req, nil
+}
+
+func parseMultiTradeArgs(params *RawParams) (*multiTradeForm, error) {
+	if err := checkNArgs(params, []int{1}, []int{7, 20}); err != nil {
+		return nil, err
+	}
+
+	sell, err := checkBoolArg(params.Args[1], "sell")
+	if err != nil {
+		return nil, err
+	}
+
+	base, err := checkUIntArg(params.Args[2], "base", 32)
+	if err != nil {
+		return nil, err
+	}
+
+	quote, err := checkUIntArg(params.Args[3], "quote", 32)
+	if err != nil {
+		return nil, err
+	}
+
+	numPlacements, err := checkIntArg(params.Args[4], "numPlacements", 32)
+	if err != nil {
+		return nil, err
+	}
+
+	placements := make([]*core.QtyRate, 0, 4)
+
+	for i := 0; i < int(numPlacements); i++ {
+		// placements are in the format of [qty, rate]. parse them
+		// and add them to the placements array
+		placement := make([]uint64, 0, 2)
+		if err := json.Unmarshal([]byte(params.Args[5+i]), &placement); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal placement %d: %v", i, err)
+		}
+		if len(placement) != 2 {
+			return nil, fmt.Errorf("placement %d must have 2 elements", i)
+		}
+		placements = append(placements, &core.QtyRate{
+			Qty:  placement[0],
+			Rate: placement[1],
+		})
+	}
+
+	options, err := checkMapArg(params.Args[5+numPlacements], "options")
+	if err != nil {
+		return nil, err
+	}
+
+	return &multiTradeForm{
+		appPass: params.PWArgs[0],
+		srvForm: &core.MultiTradeForm{
+			Host:       params.Args[0],
+			Sell:       sell,
+			Base:       uint32(base),
+			Quote:      uint32(quote),
+			Placements: placements,
+			Options:    options,
+		},
+	}, nil
 }
 
 func parseCancelArgs(params *RawParams) (*cancelForm, error) {

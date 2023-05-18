@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -412,7 +413,11 @@ func (c *tRawRequester) RawRequest(_ context.Context, method string, params []js
 		coins := make([]*RPCOutpoint, 0)
 		_ = json.Unmarshal(params[1], &coins)
 		if string(params[0]) == "false" {
-			c.lockedCoins = coins
+			if c.lockedCoins != nil {
+				c.lockedCoins = append(c.lockedCoins, coins...)
+			} else {
+				c.lockedCoins = coins
+			}
 		}
 		return json.Marshal(true)
 	case methodListLockUnspent:
@@ -745,6 +750,1027 @@ func runRubric(t *testing.T, f testFunc) {
 	})
 }
 
+func TestFundMultiOrder(t *testing.T) {
+	runRubric(t, testFundMultiOrder)
+}
+
+func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
+	wallet, node, shutdown := tNewWallet(segwit, walletType)
+	defer shutdown()
+
+	maxFeeRate := uint64(200)
+	feeSuggestion := uint64(100)
+
+	txIDs := make([]string, 0, 5)
+	txHashes := make([]*chainhash.Hash, 0, 5)
+
+	decodeString := func(s string) []byte {
+		b, _ := hex.DecodeString(s)
+		return b
+	}
+
+	addresses_legacy := []string{
+		"n235HrCqx9EcS7teHcJEAthoBF5gvtrAoy",
+		"mfjtHyu163DW5ZJXRHkY6kMLtHyWHTH6Qx",
+		"mi5QmGr9KwVLM2WVNB9hwSS7KhUx8uNQqU",
+		"mhMda8yTy52Avowe34ufbq3D59VoG7jUsy",
+		"mhgZ41MUC6EBevkwnhvetkLbBmb61F7Lyr",
+	}
+	scriptPubKeys_legacy := []dex.Bytes{
+		decodeString("76a914e114d5bb20cdbd75f3726f27c10423eb1332576288ac"),
+		decodeString("76a91402721143370117f4b37146f6688862892f272a7b88ac"),
+		decodeString("76a9141c13a8666a373c29a8a8a270b56816bb43a395e888ac"),
+		decodeString("76a914142ce1063712235182613794d6759f62dea8205a88ac"),
+		decodeString("76a91417c10273e4236592fd91f3aec1571810bbb0db6888ac"),
+	}
+
+	addresses_segwit := []string{
+		"bcrt1qy7agjj62epx0ydnqskgwlcfwu52xjtpj36hr0d",
+		"bcrt1qhyflz52jwha67dvg92q92k887emxu6jj0ytrrd",
+		"bcrt1qus3827tpu7uhreq3f3x5wmfmpgmkd0y7zhjdrs",
+		"bcrt1q4fjzhnum2krkurhg55xtadzyf76f8waqj26d0e",
+		"bcrt1qqnl9fhnms6gpmlmrwnsq36h4rqxwd3m4plkcw4",
+	}
+	scriptPubKeys_segwit := []dex.Bytes{
+		decodeString("001427ba894b4ac84cf236608590efe12ee514692c32"),
+		decodeString("0014b913f1515275fbaf35882a805558e7f6766e6a52"),
+		decodeString("0014e422757961e7b971e4114c4d476d3b0a3766bc9e"),
+		decodeString("0014aa642bcf9b55876e0ee8a50cbeb4444fb493bba0"),
+		decodeString("001404fe54de7b86901dff6374e008eaf5180ce6c775"),
+	}
+	for i := 0; i < 5; i++ {
+		txIDs = append(txIDs, hex.EncodeToString(encode.RandomBytes(32)))
+		h, _ := chainhash.NewHashFromStr(txIDs[i])
+		txHashes = append(txHashes, h)
+	}
+
+	addresses := func(i int) string {
+		if segwit {
+			return addresses_segwit[i]
+		}
+		return addresses_legacy[i]
+	}
+
+	scriptPubKeys := func(i int) dex.Bytes {
+		if segwit {
+			return scriptPubKeys_segwit[i]
+		}
+		return scriptPubKeys_legacy[i]
+	}
+
+	addrStr := tP2PKHAddr
+	if segwit {
+		addrStr = tP2WPKHAddr
+	}
+	node.changeAddr = addrStr
+	node.signFunc = func(tx *wire.MsgTx) {
+		signFunc(tx, 0, wallet.segwit)
+	}
+
+	expectedSplitFee := func(numInputs, numOutputs uint64) uint64 {
+		var inputSize, outputSize uint64
+		if segwit {
+			inputSize = dexbtc.RedeemP2WPKHInputTotalSize
+			outputSize = dexbtc.P2WPKHOutputSize
+		} else {
+			inputSize = dexbtc.RedeemP2PKHInputSize
+			outputSize = dexbtc.P2PKHOutputSize
+		}
+
+		return (dexbtc.MinimumTxOverhead + numInputs*inputSize + numOutputs*outputSize) * feeSuggestion
+	}
+
+	requiredForOrder := func(value, maxSwapCount uint64) int64 {
+		var inputSize uint64
+		if segwit {
+			inputSize = dexbtc.RedeemP2WPKHInputTotalSize
+		} else {
+			inputSize = dexbtc.RedeemP2PKHInputSize
+		}
+		return int64(calc.RequiredOrderFundsAlt(value, inputSize, maxSwapCount,
+			wallet.initTxSizeBase, wallet.initTxSize, maxFeeRate))
+	}
+
+	type test struct {
+		name                 string
+		multiOrder           *asset.MultiOrder
+		allOrNothing         bool
+		keep                 uint64
+		utxos                []*ListUnspentResult
+		bondReservesEnforced int64
+		balance              uint64
+
+		expectedCoins         []asset.Coins
+		expectedRedeemScripts [][]dex.Bytes
+		expectSendRawTx       bool
+		expectedSplitFee      uint64
+		expectedInputs        []*wire.TxIn
+		expectedOutputs       []*wire.TxOut
+		expectedChange        uint64
+		expectedLockedCoins   []*RPCOutpoint
+		expectErr             bool
+	}
+
+	fmt.Printf("amount of balance: %v\n", (2*uint64(requiredForOrder(15e5, 2)) + (expectedSplitFee(2, 2))))
+	fmt.Printf("expected split fee %v\n", expectedSplitFee(2, 2))
+
+	tests := []*test{
+		{ // "split not allowed, utxos like split previously done"
+			name: "split not allowed, utxos like split previously done",
+			multiOrder: &asset.MultiOrder{
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        1e6,
+						MaxSwapCount: 1,
+					},
+					{
+						Value:        2e6,
+						MaxSwapCount: 2,
+					},
+				},
+				MaxFeeRate:    maxFeeRate,
+				FeeSuggestion: feeSuggestion,
+				Options: map[string]string{
+					"swapsplit": "false",
+				},
+			},
+			keep: 0,
+			utxos: []*ListUnspentResult{
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[0],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(0),
+					Address:       addresses(0),
+					Amount:        12e5 / 1e8,
+					Vout:          0,
+				},
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[1],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(1),
+					Address:       addresses(1),
+					Amount:        23e5 / 1e8,
+					Vout:          0,
+				},
+			},
+			balance: 33e5,
+			expectedCoins: []asset.Coins{
+				{newOutput(txHashes[0], 0, 12e5)},
+				{newOutput(txHashes[1], 0, 23e5)},
+			},
+			expectedRedeemScripts: [][]dex.Bytes{
+				{nil},
+				{nil},
+			},
+			expectedLockedCoins: []*RPCOutpoint{
+				{txHashes[0].String(), 0},
+				{txHashes[1].String(), 0},
+			},
+		},
+		{ // "split not allowed, require multiple utxos per order"
+			name: "split not allowed, require multiple utxos per order",
+			multiOrder: &asset.MultiOrder{
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        1e6,
+						MaxSwapCount: 1,
+					},
+					{
+						Value:        2e6,
+						MaxSwapCount: 2,
+					},
+				},
+				MaxFeeRate:    maxFeeRate,
+				FeeSuggestion: feeSuggestion,
+				Options: map[string]string{
+					"swapsplit": "false",
+				},
+			},
+			allOrNothing: true,
+			keep:         0,
+			utxos: []*ListUnspentResult{
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[0],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(0),
+					Address:       addresses(0),
+					Amount:        6e5 / 1e8,
+					Vout:          0,
+				},
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[1],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(1),
+					Address:       addresses(1),
+					Amount:        5e5 / 1e8,
+					Vout:          0,
+				},
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[2],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(2),
+					Address:       addresses(2),
+					Amount:        22e5 / 1e8,
+					Vout:          0,
+				},
+			},
+			balance: 33e5,
+			expectedCoins: []asset.Coins{
+				{newOutput(txHashes[0], 0, 6e5), newOutput(txHashes[1], 0, 5e5)},
+				{newOutput(txHashes[2], 0, 22e5)},
+			},
+			expectedRedeemScripts: [][]dex.Bytes{
+				{nil, nil},
+				{nil},
+			},
+			expectedLockedCoins: []*RPCOutpoint{
+				{txHashes[0].String(), 0},
+				{txHashes[1].String(), 0},
+				{txHashes[2].String(), 0},
+			},
+		},
+		{ // "split not allowed, can only fund first order and respect keep"
+			name: "no split allowed, can only fund first order and respect keep",
+			multiOrder: &asset.MultiOrder{
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        1e6,
+						MaxSwapCount: 1,
+					},
+					{
+						Value:        2e6,
+						MaxSwapCount: 2,
+					},
+				},
+				MaxFeeRate:    maxFeeRate,
+				FeeSuggestion: feeSuggestion,
+				Options: map[string]string{
+					"swapsplit": "false",
+				},
+			},
+			keep: 12e5,
+			utxos: []*ListUnspentResult{
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[2],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(2),
+					Address:       addresses(2),
+					Amount:        1e6 / 1e8,
+					Vout:          0,
+				},
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[0],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(0),
+					Address:       addresses(0),
+					Amount:        11e5 / 1e8,
+					Vout:          0,
+				},
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[1],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(1),
+					Address:       addresses(1),
+					Amount:        25e5 / 1e8,
+					Vout:          0,
+				},
+			},
+			balance: 46e5,
+			expectedCoins: []asset.Coins{
+				{newOutput(txHashes[0], 0, 11e5)},
+			},
+			expectedRedeemScripts: [][]dex.Bytes{
+				{nil},
+			},
+			expectedLockedCoins: []*RPCOutpoint{
+				{txHashes[0].String(), 0},
+			},
+		},
+		{ // "split not allowed, can only fund first order and respect bond reserves"
+			name: "no split allowed, can only fund first order and respect bond reserves",
+			multiOrder: &asset.MultiOrder{
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        1e6,
+						MaxSwapCount: 1,
+					},
+					{
+						Value:        2e6,
+						MaxSwapCount: 2,
+					},
+				},
+				MaxFeeRate:    maxFeeRate,
+				FeeSuggestion: feeSuggestion,
+				Options: map[string]string{
+					"swapsplit": "false",
+				},
+			},
+			bondReservesEnforced: 12e5,
+			utxos: []*ListUnspentResult{
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[2],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(2),
+					Address:       addresses(2),
+					Amount:        1e6 / 1e8,
+					Vout:          0,
+				},
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[0],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(0),
+					Address:       addresses(0),
+					Amount:        11e5 / 1e8,
+					Vout:          0,
+				},
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[1],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(1),
+					Address:       addresses(1),
+					Amount:        25e5 / 1e8,
+					Vout:          0,
+				},
+			},
+			balance: 46e5,
+			expectedCoins: []asset.Coins{
+				{newOutput(txHashes[0], 0, 11e5)},
+			},
+			expectedRedeemScripts: [][]dex.Bytes{
+				{nil},
+			},
+			expectedLockedCoins: []*RPCOutpoint{
+				{txHashes[0].String(), 0},
+			},
+		},
+		{ // "split not allowed, need to fund in increasing order"
+			name: "no split, need to fund in increasing order",
+			multiOrder: &asset.MultiOrder{
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        2e6,
+						MaxSwapCount: 2,
+					},
+					{
+						Value:        11e5,
+						MaxSwapCount: 1,
+					},
+					{
+						Value:        9e5,
+						MaxSwapCount: 1,
+					},
+				},
+				MaxFeeRate:    maxFeeRate,
+				FeeSuggestion: feeSuggestion,
+				Options: map[string]string{
+					"swapsplit": "false",
+				},
+			},
+			keep: 0,
+			utxos: []*ListUnspentResult{
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[0],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(0),
+					Address:       addresses(0),
+					Amount:        11e5 / 1e8,
+					Vout:          0,
+				},
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[1],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(1),
+					Address:       addresses(1),
+					Amount:        13e5 / 1e8,
+					Vout:          0,
+				},
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[2],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(2),
+					Address:       addresses(2),
+					Amount:        26e5 / 1e8,
+					Vout:          0,
+				},
+			},
+			balance: 50e5,
+			expectedCoins: []asset.Coins{
+				{newOutput(txHashes[2], 0, 26e5)},
+				{newOutput(txHashes[1], 0, 13e5)},
+				{newOutput(txHashes[0], 0, 11e5)},
+			},
+			expectedRedeemScripts: [][]dex.Bytes{
+				{nil},
+				{nil},
+				{nil},
+			},
+			expectedLockedCoins: []*RPCOutpoint{
+				{txHashes[0].String(), 0},
+				{txHashes[1].String(), 0},
+				{txHashes[2].String(), 0},
+			},
+		},
+		{ // "split allowed, no split required"
+			name: "split allowed, no split required",
+			multiOrder: &asset.MultiOrder{
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        1e6,
+						MaxSwapCount: 1,
+					},
+					{
+						Value:        2e6,
+						MaxSwapCount: 2,
+					},
+				},
+				MaxFeeRate:    maxFeeRate,
+				FeeSuggestion: feeSuggestion,
+				Options: map[string]string{
+					"swapsplit": "true",
+				},
+			},
+			allOrNothing: false,
+			keep:         1e6,
+			utxos: []*ListUnspentResult{
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[2],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(2),
+					Address:       addresses(2),
+					Amount:        1e6 / 1e8,
+					Vout:          0,
+				},
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[0],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(0),
+					Address:       addresses(0),
+					Amount:        11e5 / 1e8,
+					Vout:          0,
+				},
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[1],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(1),
+					Address:       addresses(1),
+					Amount:        22e5 / 1e8,
+					Vout:          0,
+				},
+			},
+			balance: 43e5,
+			expectedCoins: []asset.Coins{
+				{newOutput(txHashes[0], 0, 11e5)},
+				{newOutput(txHashes[1], 0, 22e5)},
+			},
+			expectedRedeemScripts: [][]dex.Bytes{
+				{nil},
+				{nil},
+			},
+			expectedLockedCoins: []*RPCOutpoint{
+				{txHashes[0].String(), 0},
+				{txHashes[1].String(), 0},
+			},
+		},
+		{ // "split allowed, can fund both with split"
+			name: "split allowed, can fund both with split",
+			multiOrder: &asset.MultiOrder{
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        15e5,
+						MaxSwapCount: 2,
+					},
+					{
+						Value:        15e5,
+						MaxSwapCount: 2,
+					},
+				},
+				MaxFeeRate:    maxFeeRate,
+				FeeSuggestion: feeSuggestion,
+				Options: map[string]string{
+					"swapsplit": "true",
+				},
+			},
+			utxos: []*ListUnspentResult{
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[0],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(0),
+					Address:       addresses(0),
+					Amount:        1e6 / 1e8,
+					Vout:          0,
+				},
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[1],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(1),
+					Address:       addresses(1),
+					Amount:        (2*float64(requiredForOrder(15e5, 2)) + float64(expectedSplitFee(2, 2)) - 1e6) / 1e8,
+					Vout:          0,
+				},
+			},
+			balance:         2*uint64(requiredForOrder(15e5, 2)) + expectedSplitFee(2, 2),
+			expectSendRawTx: true,
+			expectedInputs: []*wire.TxIn{
+				{
+					PreviousOutPoint: wire.OutPoint{
+						Hash:  *txHashes[1],
+						Index: 0,
+					},
+				},
+				{
+					PreviousOutPoint: wire.OutPoint{
+						Hash:  *txHashes[0],
+						Index: 0,
+					},
+				},
+			},
+			expectedOutputs: []*wire.TxOut{
+				wire.NewTxOut(requiredForOrder(15e5, 2), []byte{}),
+				wire.NewTxOut(requiredForOrder(15e5, 2), []byte{}),
+			},
+			expectedSplitFee: expectedSplitFee(2, 2),
+			expectedRedeemScripts: [][]dex.Bytes{
+				{nil},
+				{nil},
+			},
+		},
+		{ // "split allowed, cannot fund both with split"
+			name: "split allowed, cannot fund both with split",
+			multiOrder: &asset.MultiOrder{
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        15e5,
+						MaxSwapCount: 2,
+					},
+					{
+						Value:        15e5,
+						MaxSwapCount: 2,
+					},
+				},
+				MaxFeeRate:    maxFeeRate,
+				FeeSuggestion: feeSuggestion,
+				Options: map[string]string{
+					"swapsplit": "true",
+				},
+			},
+			utxos: []*ListUnspentResult{
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[0],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(0),
+					Address:       addresses(0),
+					Amount:        1e6 / 1e8,
+					Vout:          0,
+				},
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[1],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(1),
+					Address:       addresses(1),
+					Amount:        ((2*float64(requiredForOrder(15e5, 2)) + float64(expectedSplitFee(2, 2)) - 1e6) / 1e8) - 1/1e8,
+					Vout:          0,
+				},
+			},
+			balance:   2*uint64(requiredForOrder(15e5, 2)) + expectedSplitFee(2, 2),
+			expectErr: true,
+		},
+		{ // "split allowed, can fund both with split and keep"
+			name: "can fund both with split and keep",
+			multiOrder: &asset.MultiOrder{
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        15e5,
+						MaxSwapCount: 2,
+					},
+					{
+						Value:        15e5,
+						MaxSwapCount: 2,
+					},
+				},
+				MaxFeeRate:    maxFeeRate,
+				FeeSuggestion: feeSuggestion,
+				Options: map[string]string{
+					"swapsplit": "true",
+				},
+			},
+			keep: 1e6,
+			utxos: []*ListUnspentResult{
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[0],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(0),
+					Address:       addresses(0),
+					Amount:        (2*float64(requiredForOrder(15e5, 2)) + 1e6 + float64(expectedSplitFee(1, 3))) / 1e8,
+					Vout:          0,
+				},
+			},
+			balance:         1e6 + 2*uint64(requiredForOrder(15e5, 2)) + expectedSplitFee(1, 3),
+			expectSendRawTx: true,
+			expectedInputs: []*wire.TxIn{
+				{
+					PreviousOutPoint: wire.OutPoint{
+						Hash:  *txHashes[0],
+						Index: 0,
+					},
+				},
+			},
+			expectedOutputs: []*wire.TxOut{
+				wire.NewTxOut(requiredForOrder(15e5, 2), []byte{}),
+				wire.NewTxOut(requiredForOrder(15e5, 2), []byte{}),
+			},
+			expectedChange:   1e6,
+			expectedSplitFee: expectedSplitFee(1, 3),
+			expectedRedeemScripts: [][]dex.Bytes{
+				{nil},
+				{nil},
+			},
+		},
+		{ // "split allowed, cannot fund both with split"
+			name: "can fund both with split, but not keep",
+			multiOrder: &asset.MultiOrder{
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        15e5,
+						MaxSwapCount: 2,
+					},
+					{
+						Value:        15e5,
+						MaxSwapCount: 2,
+					},
+				},
+				MaxFeeRate:    maxFeeRate,
+				FeeSuggestion: feeSuggestion,
+				Options: map[string]string{
+					"swapsplit": "true",
+				},
+			},
+			keep: 1e6,
+			utxos: []*ListUnspentResult{
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[0],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(0),
+					Address:       addresses(0),
+					Amount:        ((2*float64(requiredForOrder(15e5, 2)) + 1e6 + float64(expectedSplitFee(1, 3))) / 1e8) - 1/1e8,
+					Vout:          0,
+				},
+			},
+			balance:   1e6 + 2*uint64(requiredForOrder(15e5, 2)) + expectedSplitFee(1, 3),
+			expectErr: true,
+		},
+		{ // "split allowed, can fund both with split and keep and bond reserves"
+			name: "can fund both with split and keep",
+			multiOrder: &asset.MultiOrder{
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        15e5,
+						MaxSwapCount: 2,
+					},
+					{
+						Value:        15e5,
+						MaxSwapCount: 2,
+					},
+				},
+				MaxFeeRate:    maxFeeRate,
+				FeeSuggestion: feeSuggestion,
+				Options: map[string]string{
+					"swapsplit": "true",
+				},
+			},
+			keep:                 1e6,
+			bondReservesEnforced: 2e6,
+			utxos: []*ListUnspentResult{
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[0],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(0),
+					Address:       addresses(0),
+					Amount:        (2*float64(requiredForOrder(15e5, 2)) + 3e6 + float64(expectedSplitFee(1, 3))) / 1e8,
+					Vout:          0,
+				},
+			},
+			balance:         3e6 + 2*uint64(requiredForOrder(15e5, 2)) + expectedSplitFee(1, 3),
+			expectSendRawTx: true,
+			expectedInputs: []*wire.TxIn{
+				{
+					PreviousOutPoint: wire.OutPoint{
+						Hash:  *txHashes[0],
+						Index: 0,
+					},
+				},
+			},
+			expectedOutputs: []*wire.TxOut{
+				wire.NewTxOut(requiredForOrder(15e5, 2), []byte{}),
+				wire.NewTxOut(requiredForOrder(15e5, 2), []byte{}),
+			},
+			expectedChange:   3e6,
+			expectedSplitFee: expectedSplitFee(1, 3),
+			expectedRedeemScripts: [][]dex.Bytes{
+				{nil},
+				{nil},
+			},
+		},
+		{ // "split allowed, cannot fund both with split and keep and bond reserves"
+			name: "can fund both with split and keep",
+			multiOrder: &asset.MultiOrder{
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        15e5,
+						MaxSwapCount: 2,
+					},
+					{
+						Value:        15e5,
+						MaxSwapCount: 2,
+					},
+				},
+				MaxFeeRate:    maxFeeRate,
+				FeeSuggestion: feeSuggestion,
+				Options: map[string]string{
+					"swapsplit": "true",
+				},
+			},
+			keep:                 1e6,
+			bondReservesEnforced: 2e6,
+			utxos: []*ListUnspentResult{
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[0],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(0),
+					Address:       addresses(0),
+					Amount:        ((2*float64(requiredForOrder(15e5, 2)) + 3e6 + float64(expectedSplitFee(1, 3))) / 1e8) - 1/1e8,
+					Vout:          0,
+				},
+			},
+			balance:   3e6 + 2*uint64(requiredForOrder(15e5, 2)) + expectedSplitFee(1, 3),
+			expectErr: true,
+		},
+		{ // "split with buffer"
+			name: "split with buffer",
+			multiOrder: &asset.MultiOrder{
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        15e5,
+						MaxSwapCount: 2,
+					},
+					{
+						Value:        15e5,
+						MaxSwapCount: 2,
+					},
+				},
+				MaxFeeRate:    maxFeeRate,
+				FeeSuggestion: feeSuggestion,
+				Options: map[string]string{
+					"swapsplit":   "true",
+					"splitbuffer": "10",
+				},
+			},
+			utxos: []*ListUnspentResult{
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[0],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(0),
+					Address:       addresses(0),
+					Amount:        (2*float64(requiredForOrder(15e5, 2)*110/100) + float64(expectedSplitFee(1, 2))) / 1e8,
+					Vout:          0,
+				},
+			},
+			balance:         2*uint64(requiredForOrder(15e5, 2)) + expectedSplitFee(1, 2),
+			expectSendRawTx: true,
+			expectedInputs: []*wire.TxIn{
+				{
+					PreviousOutPoint: wire.OutPoint{
+						Hash:  *txHashes[0],
+						Index: 0,
+					},
+				},
+			},
+			expectedOutputs: []*wire.TxOut{
+				wire.NewTxOut(requiredForOrder(15e5, 2)*110/100, []byte{}),
+				wire.NewTxOut(requiredForOrder(15e5, 2)*110/100, []byte{}),
+			},
+			expectedSplitFee: expectedSplitFee(1, 2),
+			expectedRedeemScripts: [][]dex.Bytes{
+				{nil},
+				{nil},
+			},
+		},
+		{ // "split with buffer, cannot fund"
+			name: "split, not enough balance for buffer",
+			multiOrder: &asset.MultiOrder{
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        15e5,
+						MaxSwapCount: 2,
+					},
+					{
+						Value:        15e5,
+						MaxSwapCount: 2,
+					},
+				},
+				MaxFeeRate:    maxFeeRate,
+				FeeSuggestion: feeSuggestion,
+				Options: map[string]string{
+					"swapsplit":   "true",
+					"splitbuffer": "10",
+				},
+			},
+			utxos: []*ListUnspentResult{
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[0],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(0),
+					Address:       addresses(0),
+					Amount:        (2*float64(requiredForOrder(15e5, 2)*110/100)+float64(expectedSplitFee(1, 2)))/1e8 - 1/1e8,
+					Vout:          0,
+				},
+			},
+			balance:   (2 * uint64(requiredForOrder(15e5, 2)) * 110 / 100) + expectedSplitFee(1, 2),
+			expectErr: true,
+		},
+	}
+
+	for _, test := range tests {
+		node.listUnspent = test.utxos
+		node.sentRawTx = nil
+		node.lockedCoins = nil
+		node.getBalances = &GetBalancesResult{
+			Mine: Balances{
+				Trusted: toBTC(test.balance),
+			},
+		}
+		wallet.fundingCoins = make(map[outPoint]*utxo)
+		wallet.bondReservesEnforced = test.bondReservesEnforced
+
+		allCoins, _, splitFee, err := wallet.FundMultiOrder(test.multiOrder, test.keep)
+		if test.expectErr {
+			if err == nil {
+				t.Fatalf("%s: no error returned", test.name)
+			}
+			if strings.Contains(err.Error(), "insufficient funds") {
+				t.Fatalf("%s: unexpected insufficient funds error", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", test.name, err)
+		}
+
+		if !test.expectSendRawTx { // no split
+			if node.sentRawTx != nil {
+				t.Fatalf("%s: unexpected transaction sent", test.name)
+			}
+			if len(allCoins) != len(test.expectedCoins) {
+				t.Fatalf("%s: expected %d coins, got %d", test.name, len(test.expectedCoins), len(allCoins))
+			}
+			for i := range allCoins {
+				if len(allCoins[i]) != len(test.expectedCoins[i]) {
+					t.Fatalf("%s: expected %d coins in set %d, got %d", test.name, len(test.expectedCoins[i]), i, len(allCoins[i]))
+				}
+				actual := allCoins[i]
+				expected := test.expectedCoins[i]
+				sort.Slice(actual, func(i, j int) bool {
+					return bytes.Compare(actual[i].ID(), actual[j].ID()) < 0
+				})
+				sort.Slice(expected, func(i, j int) bool {
+					return bytes.Compare(expected[i].ID(), expected[j].ID()) < 0
+				})
+				for j := range actual {
+					if !bytes.Equal(actual[j].ID(), expected[j].ID()) {
+						t.Fatalf("%s: unexpected coin in set %d. expected %s, got %s", test.name, i, expected[j].ID(), actual[j].ID())
+					}
+					if actual[j].Value() != expected[j].Value() {
+						t.Fatalf("%s: unexpected coin value in set %d. expected %d, got %d", test.name, i, expected[j].Value(), actual[j].Value())
+					}
+				}
+			}
+			if len(test.expectedLockedCoins) != len(node.lockedCoins) {
+				t.Fatalf("%s: expected %d locked coins, got %d", test.name, len(test.expectedLockedCoins), len(node.lockedCoins))
+			}
+			lockedCoins := make(map[RPCOutpoint]interface{})
+			for _, coin := range node.lockedCoins {
+				lockedCoins[*coin] = true
+			}
+			for _, expectedCoin := range test.expectedLockedCoins {
+				if _, ok := lockedCoins[*expectedCoin]; !ok {
+					t.Fatalf("%s: expected locked coin %+v not found", test.name, *expectedCoin)
+				}
+			}
+		} else { // expectSplit
+			if node.sentRawTx == nil {
+				t.Fatalf("%s: SendRawTransaction not called", test.name)
+			}
+			if len(node.sentRawTx.TxIn) != len(test.expectedInputs) {
+				t.Fatalf("%s: expected %d inputs, got %d", test.name, len(test.expectedInputs), len(node.sentRawTx.TxIn))
+			}
+			for i, actualIn := range node.sentRawTx.TxIn {
+				expectedIn := test.expectedInputs[i]
+				if !bytes.Equal(actualIn.PreviousOutPoint.Hash[:], expectedIn.PreviousOutPoint.Hash[:]) {
+					t.Fatalf("%s: unexpected input %d hash. expected %s, got %s", test.name, i, expectedIn.PreviousOutPoint.Hash, actualIn.PreviousOutPoint.Hash)
+				}
+				if actualIn.PreviousOutPoint.Index != expectedIn.PreviousOutPoint.Index {
+					t.Fatalf("%s: unexpected input %d index. expected %d, got %d", test.name, i, expectedIn.PreviousOutPoint.Index, actualIn.PreviousOutPoint.Index)
+				}
+			}
+			expectedNumOutputs := len(test.expectedOutputs)
+			if test.expectedChange > 0 {
+				expectedNumOutputs++
+			}
+			if len(node.sentRawTx.TxOut) != expectedNumOutputs {
+				t.Fatalf("%s: expected %d outputs, got %d", test.name, expectedNumOutputs, len(node.sentRawTx.TxOut))
+			}
+			for i, expectedOut := range test.expectedOutputs {
+				actualOut := node.sentRawTx.TxOut[i]
+				if actualOut.Value != expectedOut.Value {
+					t.Fatalf("%s: unexpected output %d value. expected %d, got %d", test.name, i, expectedOut.Value, actualOut.Value)
+				}
+			}
+			if test.expectedChange > 0 {
+				actualOut := node.sentRawTx.TxOut[len(node.sentRawTx.TxOut)-1]
+				if uint64(actualOut.Value) != test.expectedChange {
+					t.Fatalf("%s: unexpected change value. expected %d, got %d", test.name, test.expectedChange, actualOut.Value)
+				}
+			}
+
+			if len(test.multiOrder.Values) != len(allCoins) {
+				t.Fatalf("%s: expected %d coins, got %d", test.name, len(test.multiOrder.Values), len(allCoins))
+			}
+			splitTxID := node.sentRawTx.TxHash()
+			for i, actualCoin := range allCoins {
+				actualOut := actualCoin[0].(*output)
+				expectedOut := node.sentRawTx.TxOut[i]
+				if uint64(expectedOut.Value) != actualOut.value {
+					t.Fatalf("%s: unexpected output %d value. expected %d, got %d", test.name, i, expectedOut.Value, actualOut.value)
+				}
+				if !bytes.Equal(actualOut.pt.txHash[:], splitTxID[:]) {
+					t.Fatalf("%s: unexpected output %d txid. expected %s, got %s", test.name, i, splitTxID, actualOut.pt.txHash)
+				}
+			}
+
+			// Each split output should be locked
+			if len(node.lockedCoins) != len(allCoins)+len(test.expectedInputs) {
+				t.Fatalf("%s: expected %d locked coins, got %d", test.name, len(allCoins)+len(test.expectedInputs), len(node.lockedCoins))
+			}
+		}
+		if test.expectedSplitFee != splitFee {
+			t.Fatalf("%s: unexpected split fee. expected %d, got %d", test.name, test.expectedSplitFee, splitFee)
+		}
+	}
+}
+
 func TestAvailableFund(t *testing.T) {
 	runRubric(t, testAvailableFund)
 }
@@ -875,7 +1901,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	}
 
 	// Zero value
-	_, _, err = wallet.FundOrder(ord)
+	_, _, _, err = wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no funding error for zero value")
 	}
@@ -883,7 +1909,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	// Nothing to spend
 	node.listUnspent = []*ListUnspentResult{}
 	setOrderValue(littleOrder)
-	_, _, err = wallet.FundOrder(ord)
+	_, _, _, err = wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error for zero utxos")
 	}
@@ -891,7 +1917,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 
 	// RPC error
 	node.listUnspentErr = tErr
-	_, _, err = wallet.FundOrder(ord)
+	_, _, _, err = wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no funding error for rpc error")
 	}
@@ -901,7 +1927,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	// There is no way to error locking outpoints in spv
 	if walletType != walletTypeSPV {
 		node.lockUnspentErr = tErr
-		_, _, err = wallet.FundOrder(ord)
+		_, _, _, err = wallet.FundOrder(ord)
 		if err == nil {
 			t.Fatalf("no error for lockunspent result = false: %v", err)
 		}
@@ -912,7 +1938,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	littleUTXO.SafePtr = boolPtr(false)
 	littleUTXO.Confirmations = 0
 	node.listUnspent = unspents
-	spendables, _, err := wallet.FundOrder(ord)
+	spendables, _, _, err := wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error funding small amount: %v", err)
 	}
@@ -933,7 +1959,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	littleUTXO.SafePtr = boolPtr(true)
 	littleUTXO.Confirmations = 2
 	node.listUnspent = unspents
-	spendables, _, err = wallet.FundOrder(ord)
+	spendables, _, _, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error funding small amount: %v", err)
 	}
@@ -948,7 +1974,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 
 	// Adding a fee bump should now require the larger UTXO.
 	ord.Options = map[string]string{swapFeeBumpKey: "1.5"}
-	spendables, _, err = wallet.FundOrder(ord)
+	spendables, _, _, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error funding bumped fees: %v", err)
 	}
@@ -966,7 +1992,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	// Make lottaOrder unconfirmed like littleOrder, favoring little now.
 	lottaUTXO.Confirmations = 0
 	node.listUnspent = unspents
-	spendables, _, err = wallet.FundOrder(ord)
+	spendables, _, _, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error funding small amount: %v", err)
 	}
@@ -981,12 +2007,15 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 
 	// Fund a lotta bit, covered by just the lottaBit UTXO.
 	setOrderValue(lottaOrder)
-	spendables, _, err = wallet.FundOrder(ord)
+	spendables, _, fees, err := wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error funding large amount: %v", err)
 	}
 	if len(spendables) != 1 {
 		t.Fatalf("expected 1 spendable, got %d", len(spendables))
+	}
+	if fees != 0 {
+		t.Fatalf("expected no fees, got %d", fees)
 	}
 	v = spendables[0].Value()
 	if v != lottaFunds {
@@ -998,12 +2027,15 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	extraLottaOrder := littleOrder + lottaOrder
 	extraLottaLots := littleLots + lottaLots
 	setOrderValue(extraLottaOrder)
-	spendables, _, err = wallet.FundOrder(ord)
+	spendables, _, fees, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error funding large amount: %v", err)
 	}
 	if len(spendables) != 2 {
 		t.Fatalf("expected 2 spendable, got %d", len(spendables))
+	}
+	if fees != 0 {
+		t.Fatalf("expected no fees, got %d", fees)
 	}
 	v = spendables[0].Value()
 	if v != lottaFunds {
@@ -1015,7 +2047,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	tweak := float64(littleFunds+lottaFunds-calc.RequiredOrderFunds(extraLottaOrder, 2*dexbtc.RedeemP2PKHInputSize, extraLottaLots, tBTC)+1) / 1e8
 	lottaUTXO.Amount -= tweak
 	node.listUnspent = unspents
-	_, _, err = wallet.FundOrder(ord)
+	_, _, _, err = wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error when not enough to cover tx fees")
 	}
@@ -1024,12 +2056,19 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 
 	// Prepare for a split transaction.
 	baggageFees := tBTC.MaxFeeRate * splitTxBaggage
-	node.changeAddr = tP2WPKHAddr
+	if segwit {
+		node.changeAddr = tP2WPKHAddr
+	} else {
+		node.changeAddr = tP2PKHAddr
+	}
 	node.walletCfg.useSplitTx = true
 	// No error when no split performed cuz math.
-	coins, _, err := wallet.FundOrder(ord)
+	coins, _, fees, err := wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error for no-split split: %v", err)
+	}
+	if fees != 0 {
+		t.Fatalf("no-split split returned non-zero fees: %d", fees)
 	}
 	// Should be both coins.
 	if len(coins) != 2 {
@@ -1039,7 +2078,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 
 	// No split because not standing order.
 	ord.Immediate = true
-	coins, _, err = wallet.FundOrder(ord)
+	coins, _, fees, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error for no-split split: %v", err)
 	}
@@ -1047,7 +2086,24 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	if len(coins) != 2 {
 		t.Fatalf("no-split split didn't return both coins")
 	}
+	if fees != 0 {
+		t.Fatalf("no-split split returned non-zero fees: %d", fees)
+	}
 	_ = wallet.ReturnCoins(coins)
+
+	var inputSize, outputSize uint64
+	if wallet.segwit {
+		inputSize = dexbtc.RedeemP2WPKHInputTotalSize
+		outputSize = dexbtc.P2WPKHOutputSize
+	} else {
+		inputSize = dexbtc.RedeemP2PKHInputSize
+		outputSize = dexbtc.P2PKHOutputSize
+	}
+	expectedTxSize := dexbtc.MinimumTxOverhead + 2*inputSize + 2*outputSize
+	if wallet.segwit {
+		expectedTxSize -= 1 // double counted wittness flag
+	}
+	expectedFees := expectedTxSize * feeSuggestion
 
 	// With a little more locked, the split should be performed.
 	node.signFunc = func(tx *wire.MsgTx) {
@@ -1055,7 +2111,7 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	}
 	lottaUTXO.Amount += float64(baggageFees) / 1e8
 	node.listUnspent = unspents
-	coins, _, err = wallet.FundOrder(ord)
+	coins, _, fees, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error for split tx: %v", err)
 	}
@@ -1066,18 +2122,24 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	if node.sentRawTx == nil {
 		t.Fatalf("split failed - no tx sent")
 	}
+	if fees != expectedFees {
+		t.Fatalf("split returned unexpected fees. wanted %d, got %d", expectedFees, fees)
+	}
 	_ = wallet.ReturnCoins(coins)
 
 	// The split should also be added if we set the option at order time.
 	node.walletCfg.useSplitTx = false
 	ord.Options = map[string]string{splitKey: "true"}
-	coins, _, err = wallet.FundOrder(ord)
+	coins, _, fees, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error for forced split tx: %v", err)
 	}
 	// Should be just one coin still.
 	if len(coins) != 1 {
 		t.Fatalf("forced split failed - coin count != 1")
+	}
+	if fees != expectedFees {
+		t.Fatalf("split returned unexpected fees. wanted %d, got %d", expectedFees, fees)
 	}
 	_ = wallet.ReturnCoins(coins)
 
@@ -1092,21 +2154,24 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 	// 	t.Fatalf("no error for no fee suggestions on split tx")
 	// }
 	ord.FeeSuggestion = tBTC.MaxFeeRate + 1
-	_, _, err = wallet.FundOrder(ord)
+	_, _, _, err = wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error for no fee suggestions on split tx")
 	}
 	// Check success again.
 	ord.FeeSuggestion = tBTC.MaxFeeRate
-	coins, _, err = wallet.FundOrder(ord)
+	coins, _, _, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error fixing split tx: %v", err)
+	}
+	if fees != expectedFees {
+		t.Fatalf("expected fees of %d, got %d", expectedFees, fees)
 	}
 	_ = wallet.ReturnCoins(coins)
 
 	// GetRawChangeAddress error
 	node.changeAddrErr = tErr
-	_, _, err = wallet.FundOrder(ord)
+	_, _, _, err = wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error for split tx change addr error")
 	}
@@ -1114,14 +2179,14 @@ func testAvailableFund(t *testing.T, segwit bool, walletType string) {
 
 	// SendRawTx error
 	node.sendErr = tErr
-	_, _, err = wallet.FundOrder(ord)
+	_, _, _, err = wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error for split tx send error")
 	}
 	node.sendErr = nil
 
 	// Success again.
-	spendables, _, err = wallet.FundOrder(ord)
+	spendables, _, _, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error for split tx recovery run")
 	}
@@ -1398,7 +2463,7 @@ func TestFundEdges(t *testing.T) {
 		(totalBytes+splitTxBaggage)*feeSuggestion-estFeeReduction,
 		(bestCaseBytes+splitTxBaggage)*feeSuggestion)
 
-	_, _, err := wallet.FundOrder(ord)
+	_, _, _, err := wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error when not enough funds in single p2pkh utxo")
 	}
@@ -1409,7 +2474,7 @@ func TestFundEdges(t *testing.T) {
 	checkMaxOrder(t, wallet, lots, swapVal, backingFees, totalBytes*feeSuggestion,
 		bestCaseBytes*feeSuggestion)
 
-	spendables, _, err := wallet.FundOrder(ord)
+	spendables, _, _, err := wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error when should be enough funding in single p2pkh utxo: %v", err)
 	}
@@ -1428,7 +2493,7 @@ func TestFundEdges(t *testing.T) {
 	p2pkhUnspent.Amount = float64(v) / 1e8
 	node.listUnspent = unspents
 
-	coins, _, err := wallet.FundOrder(ord)
+	coins, _, _, err := wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error when skipping split tx due to baggage: %v", err)
 	}
@@ -1446,7 +2511,7 @@ func TestFundEdges(t *testing.T) {
 		(totalBytes+splitTxBaggage)*feeSuggestion,
 		(bestCaseBytes+splitTxBaggage)*feeSuggestion)
 
-	coins, _, err = wallet.FundOrder(ord)
+	coins, _, _, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error funding split tx: %v", err)
 	}
@@ -1481,13 +2546,13 @@ func TestFundEdges(t *testing.T) {
 	p2pkhUnspent.Amount = float64(halfSwap+backingFees-1) / 1e8
 	unspents = []*ListUnspentResult{p2pkhUnspent, p2shUnspent}
 	node.listUnspent = unspents
-	_, _, err = wallet.FundOrder(ord)
+	_, _, _, err = wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error when not enough funds in two utxos")
 	}
 	p2pkhUnspent.Amount = float64(halfSwap+backingFees) / 1e8
 	node.listUnspent = unspents
-	_, _, err = wallet.FundOrder(ord)
+	_, _, _, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error when should be enough funding in two utxos: %v", err)
 	}
@@ -1512,13 +2577,13 @@ func TestFundEdges(t *testing.T) {
 	}
 	unspents = []*ListUnspentResult{p2wpkhUnspent}
 	node.listUnspent = unspents
-	_, _, err = wallet.FundOrder(ord)
+	_, _, _, err = wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error when not enough funds in single p2wpkh utxo")
 	}
 	p2wpkhUnspent.Amount = float64(swapVal+backingFees) / 1e8
 	node.listUnspent = unspents
-	_, _, err = wallet.FundOrder(ord)
+	_, _, _, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error when should be enough funding in single p2wpkh utxo: %v", err)
 	}
@@ -1547,13 +2612,13 @@ func TestFundEdges(t *testing.T) {
 	}
 	unspents = []*ListUnspentResult{p2wpshUnspent}
 	node.listUnspent = unspents
-	_, _, err = wallet.FundOrder(ord)
+	_, _, _, err = wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error when not enough funds in single p2wsh utxo")
 	}
 	p2wpshUnspent.Amount = float64(swapVal+backingFees) / 1e8
 	node.listUnspent = unspents
-	_, _, err = wallet.FundOrder(ord)
+	_, _, _, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error when should be enough funding in single p2wsh utxo: %v", err)
 	}
@@ -1621,7 +2686,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 		(totalBytes+splitTxBaggageSegwit)*feeSuggestion-estFeeReduction,
 		(bestCaseBytes+splitTxBaggageSegwit)*feeSuggestion)
 
-	_, _, err := wallet.FundOrder(ord)
+	_, _, _, err := wallet.FundOrder(ord)
 	if err == nil {
 		t.Fatalf("no error when not enough funds in single p2wpkh utxo")
 	}
@@ -1632,7 +2697,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 	checkMaxOrder(t, wallet, lots, swapVal, backingFees, totalBytes*feeSuggestion,
 		bestCaseBytes*feeSuggestion)
 
-	spendables, _, err := wallet.FundOrder(ord)
+	spendables, _, _, err := wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error when should be enough funding in single p2wpkh utxo: %v", err)
 	}
@@ -1649,7 +2714,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 	v := swapVal + backingFees - 1
 	p2wpkhUnspent.Amount = float64(v) / 1e8
 	node.listUnspent = unspents
-	coins, _, err := wallet.FundOrder(ord)
+	coins, _, _, err := wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error when skipping split tx because not enough to cover baggage: %v", err)
 	}
@@ -1666,7 +2731,7 @@ func TestFundEdgesSegwit(t *testing.T) {
 		(totalBytes+splitTxBaggageSegwit)*feeSuggestion,
 		(bestCaseBytes+splitTxBaggageSegwit)*feeSuggestion)
 
-	coins, _, err = wallet.FundOrder(ord)
+	coins, _, _, err = wallet.FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error funding split tx: %v", err)
 	}

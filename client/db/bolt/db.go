@@ -99,6 +99,7 @@ var (
 	maxFeeRateKey         = []byte("maxFeeRate")
 	redeemMaxFeeRateKey   = []byte("redeemMaxFeeRate")
 	redemptionFeesKey     = []byte("redeemFees")
+	fundingFeesKey        = []byte("fundingFees")
 	accelerationsKey      = []byte("accelerations")
 	typeKey               = []byte("type")
 	seedGenTimeKey        = []byte("seedGenTime")
@@ -1280,6 +1281,11 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 		}
 	}
 
+	var fundingFeesPaid uint64
+	if fundingFeesB := oBkt.Get(fundingFeesKey); len(fundingFeesB) == 8 {
+		fundingFeesPaid = intCoder.Uint64(fundingFeesB)
+	}
+
 	return &dexdb.MetaOrder{
 		MetaData: &dexdb.OrderMetaData{
 			Proof:              *proof,
@@ -1300,6 +1306,7 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 			RedemptionReserves: redemptionReserves,
 			RefundReserves:     refundReserves,
 			AccelerationCoins:  accelerationCoinIDs,
+			FundingFeesPaid:    fundingFeesPaid,
 		},
 		Order: ord,
 	}, nil
@@ -1387,6 +1394,7 @@ func updateOrderMetaData(bkt *bbolt.Bucket, md *dexdb.OrderMetaData) error {
 		put(redemptionReservesKey, uint64Bytes(md.RedemptionReserves)).
 		put(refundReservesKey, uint64Bytes(md.RefundReserves)).
 		put(accelerationsKey, accelerationsB).
+		put(fundingFeesKey, uint64Bytes(md.FundingFeesPaid)).
 		err()
 }
 

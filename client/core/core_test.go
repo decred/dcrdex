@@ -784,10 +784,10 @@ func (w *TXCWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Redemp
 	return w.confirmRedemptionResult, w.confirmRedemptionErr
 }
 
-func (w *TXCWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error) {
+func (w *TXCWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, uint64, error) {
 	w.fundedVal = ord.Value
 	w.fundedSwaps = ord.MaxSwapCount
-	return w.fundingCoins, w.fundRedeemScripts, w.fundingCoinErr
+	return w.fundingCoins, w.fundRedeemScripts, 0, w.fundingCoinErr
 }
 
 func (w *TXCWallet) MaxOrder(*asset.MaxOrderForm) (*asset.SwapEstimate, error) {

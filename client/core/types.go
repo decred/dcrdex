@@ -392,6 +392,7 @@ type InFlightOrder struct {
 type FeeBreakdown struct {
 	Swap       uint64 `json:"swap"`
 	Redemption uint64 `json:"redemption"`
+	Funding    uint64 `json:"funding"` // split fees
 }
 
 // coreOrderFromTrade constructs an *Order from the supplied limit or market
@@ -478,6 +479,7 @@ func coreOrderFromTrade(ord order.Order, metaData *db.OrderMetaData) *Order {
 		FeesPaid: &FeeBreakdown{
 			Swap:       metaData.SwapFeesPaid,
 			Redemption: metaData.RedemptionFeesPaid,
+			Funding:    metaData.FundingFeesPaid,
 		},
 		FundingCoins:      fundingCoins,
 		AccelerationCoins: accelerationCoins,
@@ -978,6 +980,24 @@ type TradeForm struct {
 	Rate    uint64            `json:"rate"`
 	TifNow  bool              `json:"tifnow"`
 	Options map[string]string `json:"options"`
+}
+
+// QtyRate specifies the quantity and rate of an order placement.
+type QtyRate struct {
+	Qty  uint64 `json:"qty"`
+	Rate uint64 `json:"rate"`
+}
+
+// MultiTradeForm is used to place multiple orders in one go.
+// All orders must be on the same side of the same market, and only standing
+// limit orders are supported.
+type MultiTradeForm struct {
+	Host       string            `json:"host"`
+	Sell       bool              `json:"sell"`
+	Base       uint32            `json:"base"`
+	Quote      uint32            `json:"quote"`
+	Placements []*QtyRate        `json:"placement"`
+	Options    map[string]string `json:"options"`
 }
 
 // SingleLotFeesForm is used to determine the fees for a single lot trade.

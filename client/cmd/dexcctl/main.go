@@ -60,6 +60,7 @@ var promptPasswords = map[string][]string{
 	"send":              {"App password:"},
 	"appseed":           {"App password:"},
 	"startmarketmaking": {"App password:"},
+	"multitrade":        {"App password:"},
 }
 
 // optionalTextFiles is a map of routes to arg index for routes that should read
