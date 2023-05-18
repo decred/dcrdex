@@ -292,6 +292,7 @@ func getContractAddrFromFile(fileName string) (addr common.Address) {
 	addrLen := len(addrBytes)
 	if addrLen == 0 {
 		fmt.Printf("no contract address found at %v \n", fileName)
+		return
 	}
 	addrStr := string(addrBytes[:addrLen-1])
 	return common.HexToAddress(addrStr)
