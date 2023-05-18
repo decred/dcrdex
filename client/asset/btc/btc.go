@@ -1564,12 +1564,12 @@ func (btc *baseWallet) Balance() (*asset.Balance, error) {
 	if reserves > bal.Available {
 		btc.log.Warnf("Available balance is below configured reserves: %f < %f",
 			toBTC(bal.Available), toBTC(reserves))
-		bal.Other["Reserves Deficit"] = asset.CustomBalance{
+		bal.Other[asset.ReservesDeficit] = asset.CustomBalance{
 			Amount: reserves - bal.Available,
 		}
 		reserves = bal.Available
 	}
-	bal.Other["Bond Reserves"] = asset.CustomBalance{
+	bal.Other[asset.BondReserves] = asset.CustomBalance{
 		Amount: reserves,
 		Locked: true,
 	}

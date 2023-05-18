@@ -915,6 +915,18 @@ type CustomBalance struct {
 	Locked bool `json:"locked"`
 }
 
+// These values are used as a map key for custom balances and may be recognized
+// in the frontend to support translation. It is recommended for custom balance
+// categories listed here to have a translation and tooltip info in
+// client/webserver/site/src/js/wallet.js#customWalletBalanceCategory. If any of
+// these balance categories should change, the customWalletBalanceCategory
+// function in the wallet.js file above should be updated with the new value.
+const (
+	BondReserves    = "Bond Reserves"
+	ReservesDeficit = "Reserves Deficit"
+	Shielded        = "Shielded"
+)
+
 // Coin is some amount of spendable asset. Coin provides the information needed
 // to locate the unspent value on the blockchain.
 type Coin interface {

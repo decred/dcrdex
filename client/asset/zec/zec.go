@@ -388,7 +388,7 @@ func (w *zecWallet) Balance() (*asset.Balance, error) {
 		bal.Other = make(map[string]asset.CustomBalance)
 	}
 
-	bal.Other["Shielded"] = asset.CustomBalance{
+	bal.Other[asset.Shielded] = asset.CustomBalance{
 		Amount: shielded,
 	}
 	return bal, nil
