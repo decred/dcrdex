@@ -108,6 +108,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/app"
+	"decred.org/dcrdex/client/asset"
 	_ "decred.org/dcrdex/client/asset/bch"  // register bch asset
 	_ "decred.org/dcrdex/client/asset/btc"  // register btc asset
 	_ "decred.org/dcrdex/client/asset/dcr"  // register dcr asset
@@ -155,6 +156,9 @@ func mainCore() error {
 	if err != nil {
 		return fmt.Errorf("configuration error: %w", err)
 	}
+
+	// Filter registered assets.
+	asset.SetNetwork(cfg.Net)
 
 	// A single process cannot run multiple webview windows, so we run webview
 	// as a subprocess. We could create a simpler webview binary to call that
