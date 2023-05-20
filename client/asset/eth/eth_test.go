@@ -17,7 +17,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -565,7 +564,6 @@ func newTestNode(assetID uint32) *tMempoolNode {
 	ttc := &tTokenContractor{
 		tContractor: tc,
 		allow:       new(big.Int),
-		approveTx:   types.NewTransaction(4, common.Address{0x34}, big.NewInt(1e9), defaultGasFeeLimit, big.NewInt(2e9), nil),
 	}
 	if assetID != BipID {
 		ttc.tContractor.gasEstimates = &tokenGases
@@ -616,6 +614,8 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 		maxSwapsInTx:       40,
 		maxRedeemsInTx:     60,
 		pendingTxCheckBal:  new(big.Int),
+		pendingApprovals:   make(map[uint32]*pendingApproval),
+		approvalCache:      make(map[uint32]bool),
 	}
 	aw.wallets = map[uint32]*assetWallet{
 		BipID: aw,
@@ -629,11 +629,13 @@ func tassetWallet(assetID uint32) (asset.Wallet, *assetWallet, *tMempoolNode, co
 		}
 	} else {
 		node.tokenParent = &assetWallet{
-			baseWallet:  aw.baseWallet,
-			log:         tLogger.SubLogger("ETH"),
-			contractors: map[uint32]contractor{0: node.tContractor},
-			assetID:     BipID,
-			atomize:     dexeth.WeiToGwei,
+			baseWallet:       aw.baseWallet,
+			log:              tLogger.SubLogger("ETH"),
+			contractors:      map[uint32]contractor{0: node.tContractor},
+			assetID:          BipID,
+			atomize:          dexeth.WeiToGwei,
+			pendingApprovals: make(map[uint32]*pendingApproval),
+			approvalCache:    make(map[uint32]bool),
 		}
 		w = &TokenWallet{
 			assetWallet: aw,
@@ -1182,6 +1184,7 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 	} else {
 		fromAsset = tToken
 		node.tokenContractor.bal = dexeth.GweiToWei(walletBalanceGwei)
+		node.tokenContractor.allow = unlimitedAllowance
 		node.tokenParent.node.(*tMempoolNode).bal = dexeth.GweiToWei(walletBalanceGwei)
 	}
 
@@ -1207,18 +1210,12 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 	}
 	checkFundOrderResult := func(coins asset.Coins, redeemScripts []dex.Bytes, err error, test fundOrderTest) {
 		t.Helper()
-		if tw, is := w.(*TokenWallet); is {
-			tw.approval = atomic.Value{}
-		}
 		if test.wantErr && err == nil {
 			t.Fatalf("%v: expected error but didn't get", test.testName)
 		}
 		if test.wantErr {
 			return
 		}
-		// if !node.tokenContractor.approved {
-		// 	t.Fatalf("token not approved")
-		// }
 		if err != nil {
 			t.Fatalf("%s: unexpected error: %v", test.testName, err)
 		}
@@ -1336,6 +1333,17 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 		t.Fatalf("balance error should cause error but did not")
 	}
 	node.balErr = nil
+
+	// Test that funding without allowance causes error
+	if assetID != BipID {
+		eth.approvalCache = make(map[uint32]bool)
+		node.tokenContractor.allow = big.NewInt(0)
+		_, _, err = w.FundOrder(&order)
+		if err == nil {
+			t.Fatalf("no allowance should cause error but did not")
+		}
+		node.tokenContractor.allow = unlimitedAllowance
+	}
 
 	// Test eth wallet gas fee limit > server MaxFeeRate causes error
 	tmpGasFeeLimit := eth.gasFeeLimit()
@@ -1602,7 +1610,6 @@ func TestPreSwap(t *testing.T) {
 
 		if test.token {
 			node.tContractor.gasEstimates = &tokenGases
-			node.tokenContractor.allow = unlimitedAllowance
 			node.tokenContractor.bal = dexeth.GweiToWei(test.bal)
 			node.bal = dexeth.GweiToWei(test.parentBal)
 		} else {
@@ -1668,7 +1675,6 @@ func testSwap(t *testing.T, assetID uint32) {
 
 	receivingAddress := "0x2b84C791b79Ee37De042AD2ffF1A253c3ce9bc27"
 	node.tContractor.initTx = types.NewTx(&types.DynamicFeeTx{})
-	node.tokenContractor.allow = unlimitedAllowance
 
 	coinIDsForAmounts := func(coinAmounts []uint64, n uint64) []dex.Bytes {
 		coinIDs := make([]dex.Bytes, 0, len(coinAmounts))
@@ -1938,11 +1944,10 @@ func TestPreRedeem(t *testing.T) {
 	}
 
 	// Token
-	w, _, node, shutdown2 := tassetWallet(simnetTokenID)
+	w, _, _, shutdown2 := tassetWallet(simnetTokenID)
 	defer shutdown2()
 
 	form.Version = tToken.Version
-	node.tokenContractor.allow = unlimitedAllowanceReplenishThreshold
 
 	preRedeem, err = w.PreRedeem(form)
 	if err != nil {
@@ -2657,7 +2662,6 @@ func TestMaxOrder(t *testing.T) {
 
 		if test.token {
 			node.tContractor.gasEstimates = &tokenGases
-			node.tokenContractor.allow = unlimitedAllowance
 			node.tokenContractor.bal = dexeth.GweiToWei(ethToGwei(test.bal))
 			node.bal = dexeth.GweiToWei(ethToGwei(test.parentBal))
 		} else {
@@ -3646,13 +3650,6 @@ func testRedemptionReserves(t *testing.T, assetID uint32) {
 	// Run some token tests
 	if assetID == BipID {
 		return
-	}
-
-	node.tokenContractor.allow = new(big.Int).Sub(unlimitedAllowanceReplenishThreshold, big.NewInt(1))
-	node.tokenContractor.approveTx = tTx(0, 0, 0, &testAddressA, nil)
-	_, err = w.ReserveNRedemptions(1, assetV0.Version, assetV0.MaxFeeRate)
-	if err != nil {
-		t.Fatalf("error reserving with token approval: %v", err)
 	}
 }
 

@@ -187,10 +187,10 @@
     padding-left: 30%;
   }
 
-  .peers-table {
+  #peersTable,
+  #tokenVersionTable {
     @extend .table;
     @extend .table-striped;
-    @extend .w-50;
   }
 }
 
@@ -260,7 +260,8 @@
 }
 
 #restoreWalletInfo,
-#exportWalletAuth {
+#exportWalletAuth,
+#unapproveTokenForm {
   width: 450px;
 }
 

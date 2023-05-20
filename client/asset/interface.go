@@ -29,6 +29,7 @@ const (
 	WalletTraitPeerManager                            // The wallet can manage its peers.
 	WalletTraitAuthenticator                          // The wallet require authentication.
 	WalletTraitShielded                               // The wallet is ShieldedWallet (e.g. ZCash)
+	WalletTraitTokenApprover                          // The wallet is a TokenApprover
 )
 
 // IsRescanner tests if the WalletTrait has the WalletTraitRescanner bit set.
@@ -109,6 +110,12 @@ func (wt WalletTrait) IsShielded() bool {
 	return wt&WalletTraitShielded != 0
 }
 
+// IsTokenApprover tests if the WalletTrait has the WalletTraitTokenApprover bit
+// set, which indicates the wallet implements the TokenApprover interface.
+func (wt WalletTrait) IsTokenApprover() bool {
+	return wt&WalletTraitTokenApprover != 0
+}
+
 // DetermineWalletTraits returns the WalletTrait bitset for the provided Wallet.
 func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(Rescanner); is {
@@ -150,6 +157,9 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(ShieldedWallet); is {
 		t |= WalletTraitShielded
 	}
+	if _, is := w.(TokenApprover); is {
+		t |= WalletTraitTokenApprover
+	}
 	return t
 }
 
@@ -182,6 +192,9 @@ const (
 	// ErrIncorrectBondKey is returned when a provided private key is incorrect
 	// for a bond output.
 	ErrIncorrectBondKey = dex.ErrorKind("incorrect private key")
+	// ErrUnapprovedToken is returned when trying to fund an order using a token
+	// that has not been approved.
+	ErrUnapprovedToken = dex.ErrorKind("token not approved")
 
 	// InternalNodeLoggerName is the name for a logger that is used to fine
 	// tune log levels for only loggers using this name.
@@ -795,6 +808,32 @@ type PeerManager interface {
 	// RemovePeer will remove a peer that was added by AddPeer. This peer may
 	// still be connected to by the wallet if it discovers it on its own.
 	RemovePeer(addr string) error
+}
+
+type ApprovalStatus uint8
+
+const (
+	Approved ApprovalStatus = iota
+	Pending
+	NotApproved
+)
+
+// TokenApprover is implemented by wallets that require an approval before
+// trading.
+type TokenApprover interface {
+	// ApproveToken sends an approval transaction for a specific version of
+	// the token's swap contract. An error is returned if an approval has
+	// already been done or is pending. The onConfirm callback is called
+	// when the approval transaction is confirmed.
+	ApproveToken(assetVer uint32, onConfirm func()) (string, error)
+	// UnapproveToken removes the approval for a specific version of the
+	// token's swap contract.
+	UnapproveToken(assetVer uint32, onConfirm func()) (string, error)
+	// ApprovalStatus returns the approval status for each version of the
+	// token's swap contract.
+	ApprovalStatus() map[uint32]ApprovalStatus
+	// ApprovalFee returns the estimated fee for an approval transaction.
+	ApprovalFee(assetVer uint32, approval bool) (uint64, error)
 }
 
 // Bond is the fidelity bond info generated for a certain account ID, amount,

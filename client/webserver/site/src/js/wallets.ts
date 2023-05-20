@@ -24,8 +24,10 @@ import {
   WalletCreationNote,
   Market,
   PeerSource,
-  WalletPeer
+  WalletPeer,
+  ApprovalStatus
 } from './registry'
+import { CoinExplorers } from './order'
 
 const animationLength = 300
 const traitRescanner = 1
@@ -35,7 +37,9 @@ const traitWithdrawer = 1 << 6
 const traitRestorer = 1 << 8
 const traitTxFeeEstimator = 1 << 9
 const traitPeerManager = 1 << 10
-const traitsExtraOpts = traitLogFiler & traitRecoverer & traitRestorer & traitRescanner & traitPeerManager
+const traitTokenApprover = 1 << 13
+
+const traitsExtraOpts = traitLogFiler & traitRecoverer & traitRestorer & traitRescanner & traitPeerManager & traitTokenApprover
 
 interface ReconfigRequest {
   assetID: number
@@ -63,6 +67,8 @@ interface AssetButton {
   bttn: PageElement
 }
 
+let net = 0
+
 export default class WalletsPage extends BasePage {
   body: HTMLElement
   page: Record<string, PageElement>
@@ -83,11 +89,13 @@ export default class WalletsPage extends BasePage {
   restoreInfoCard: HTMLElement
   selectedAssetID: number
   maxSend: number
+  unapprovingTokenVersion: number
 
   constructor (body: HTMLElement) {
     super()
     this.body = body
     const page = this.page = Doc.idDescendants(body)
+    net = parseInt(body.dataset.net || '')
 
     Doc.cleanTemplates(page.restoreInfoCard, page.connectedIconTmpl, page.disconnectedIconTmpl, page.removeIconTmpl)
     this.restoreInfoCard = page.restoreInfoCard.cloneNode(true) as HTMLElement
@@ -163,6 +171,8 @@ export default class WalletsPage extends BasePage {
     bindForm(page.toggleWalletStatusConfirm, page.toggleWalletStatusSubmit, async () => { this.toggleWalletStatus() })
     Doc.bind(page.managePeers, 'click', async () => { this.showManagePeersForm() })
     Doc.bind(page.addPeerSubmit, 'click', async () => { this.submitAddPeer() })
+    Doc.bind(page.unapproveTokenAllowance, 'click', async () => { this.showUnapproveTokenAllowanceTableForm() })
+    Doc.bind(page.unapproveTokenSubmit, 'click', async () => { this.submitUnapproveTokenAllowance() })
 
     // New deposit address button.
     this.depositAddrForm = new DepositAddress(page.deposit)
@@ -348,6 +358,128 @@ export default class WalletsPage extends BasePage {
     Doc.hide(this.page.hideIcon, this.page.changePW)
     Doc.show(this.page.showIcon)
     this.page.switchPWMsg.textContent = intl.prep(intl.ID_NEW_WALLET_PASS)
+  }
+
+  /*
+   * assetVersionUsedByDEXes returns a map of the versions of the
+   * currently selected asset to the DEXes that use that version.
+   */
+  assetVersionUsedByDEXes (): Record<number, string[]> {
+    const assetID = this.selectedAssetID
+    const versionToDEXes = {} as Record<number, string[]>
+    const exchanges = app().exchanges
+
+    for (const host in exchanges) {
+      const exchange = exchanges[host]
+      const exchangeAsset = exchange.assets[assetID]
+      if (!exchangeAsset) continue
+      if (!versionToDEXes[exchangeAsset.version]) {
+        versionToDEXes[exchangeAsset.version] = []
+      }
+      versionToDEXes[exchangeAsset.version].push(exchange.host)
+    }
+
+    return versionToDEXes
+  }
+
+  /*
+   * submitUnapproveTokenAllowance submits a request to the server to
+   * unapprove a version of the currently selected token's swap contract.
+   */
+  async submitUnapproveTokenAllowance () {
+    const page = this.page
+    const path = '/api/unapprovetoken'
+    const res = await postJSON(path, {
+      assetID: this.selectedAssetID,
+      pass: page.unapproveTokenPW.value,
+      version: this.unapprovingTokenVersion
+    })
+    if (!app().checkResponse(res)) {
+      page.unapproveTokenErr.textContent = res.msg
+      Doc.show(page.unapproveTokenErr)
+      return
+    }
+
+    const assetExplorer = CoinExplorers[this.selectedAssetID]
+    if (assetExplorer && assetExplorer[net]) {
+      page.unapproveTokenTxID.href = assetExplorer[net](res.txID)
+    }
+    page.unapproveTokenTxID.textContent = res.txID
+    Doc.hide(page.unapproveTokenSubmissionElements, page.unapproveTokenErr)
+    Doc.show(page.unapproveTokenTxMsg)
+  }
+
+  /*
+   * showUnapproveTokenAllowanceForm displays the form for unapproving
+   * a specific version of the currently selected token's swap contract.
+   */
+  async showUnapproveTokenAllowanceForm (version: number) {
+    const page = this.page
+    this.unapprovingTokenVersion = version
+    Doc.show(page.unapproveTokenSubmissionElements)
+    Doc.hide(page.unapproveTokenTxMsg, page.unapproveTokenErr)
+    Doc.setVis(!State.passwordIsCached(), page.unapproveTokenPWBox)
+    const asset = app().assets[this.selectedAssetID]
+    if (!asset || !asset.token) return
+    const parentAsset = app().assets[asset.token.parentID]
+    if (!parentAsset) return
+    page.tokenAllowanceRemoveSymbol.textContent = asset.symbol.toUpperCase()
+    page.tokenAllowanceRemoveVersion.textContent = version.toString()
+
+    const path = '/api/approvetokenfee'
+    const res = await postJSON(path, {
+      assetID: this.selectedAssetID,
+      version: version,
+      approving: false
+    })
+    if (!app().checkResponse(res)) {
+      page.unapproveTokenErr.textContent = res.msg
+      Doc.show(page.unapproveTokenErr)
+    } else {
+      const feeText = `${Doc.formatCoinValue(res.txFee, parentAsset.unitInfo)} ${parentAsset.symbol.toUpperCase()}`
+      page.unapprovalFeeEstimate.textContent = feeText
+    }
+    this.showForm(page.unapproveTokenForm)
+  }
+
+  /*
+   * showUnapproveTokenAllowanceTableForm displays a table showing each of the
+   * versions of a token's swap contract that have been approved and allows the
+   * user to unapprove any of them.
+   */
+  async showUnapproveTokenAllowanceTableForm () {
+    const page = this.page
+    const asset = app().assets[this.selectedAssetID]
+    if (!asset || !asset.wallet || !asset.wallet.approved) return
+    while (page.tokenVersionBody.firstChild) {
+      page.tokenVersionBody.removeChild(page.tokenVersionBody.firstChild)
+    }
+    page.tokenVersionTableAssetSymbol.textContent = asset.symbol.toUpperCase()
+    const versionToDEXes = this.assetVersionUsedByDEXes()
+
+    let showTable = false
+    for (let i = 0; i <= asset.wallet.version; i++) {
+      const approvalStatus = asset.wallet.approved[i]
+      if (approvalStatus === undefined || approvalStatus !== ApprovalStatus.Approved) {
+        continue
+      }
+      showTable = true
+      const row = page.tokenVersionRow.cloneNode(true) as PageElement
+      const tmpl = Doc.parseTemplate(row)
+      tmpl.version.textContent = i.toString()
+      if (versionToDEXes[i]) {
+        tmpl.usedBy.textContent = versionToDEXes[i].join(', ')
+      }
+      const removeIcon = this.page.removeIconTmpl.cloneNode(true)
+      Doc.bind(removeIcon, 'click', () => {
+        this.showUnapproveTokenAllowanceForm(i)
+      })
+      tmpl.remove.appendChild(removeIcon)
+      page.tokenVersionBody.appendChild(row)
+    }
+    Doc.setVis(showTable, page.tokenVersionTable)
+    Doc.setVis(!showTable, page.tokenVersionNone)
+    this.showForm(page.unapproveTokenTableForm)
   }
 
   /*
@@ -906,7 +1038,8 @@ export default class WalletsPage extends BasePage {
     Doc.setVis(wallet.traits & traitRecoverer, page.recoverWallet)
     Doc.setVis(wallet.traits & traitRestorer, page.exportWallet)
     Doc.setVis(wallet.traits & traitRescanner, page.rescanWallet)
-    Doc.setVis(wallet.traits & traitPeerManager, page.managePeers)
+    Doc.setVis(wallet.traits & traitPeerManager && !wallet.disabled, page.managePeers)
+    Doc.setVis(wallet.traits & traitTokenApprover && !wallet.disabled, page.unapproveTokenAllowance)
 
     Doc.setVis(wallet.traits & traitsExtraOpts, page.otherActionsLabel)
 
