@@ -352,4 +352,5 @@ var EnUS = map[string]string{
 	"used_by_dex":             "Used by DEXes",
 	"no_token_allowances":     "You have not granted allowances for any swap contracts for this token.",
 	"token_unapproval_tx_msg": `Your token approval has been removed with transaction ID:`,
+	"approval_change_pending": "Approval change pending",
 }

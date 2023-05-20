@@ -1446,7 +1446,7 @@ func (w *TokenWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, err
 		return nil, nil, fmt.Errorf("error getting approval status: %v", err)
 	}
 	if approvalStatus != asset.Approved {
-		return nil, nil, fmt.Errorf("token %d not approved for trading", w.assetID)
+		return nil, nil, asset.ErrUnapprovedToken
 	}
 
 	g, err := w.initGasEstimate(int(ord.MaxSwapCount), ord.Version,

@@ -244,7 +244,7 @@ func (s *WebServer) apiApproveToken(w http.ResponseWriter, r *http.Request) {
 	}
 	defer zero(pass)
 
-	txID, err := s.core.ApproveToken(pass, form.AssetID, form.DexAddr)
+	txID, err := s.core.ApproveToken(pass, form.AssetID, form.DexAddr, func() {})
 	if err != nil {
 		s.writeAPIError(w, err)
 		return

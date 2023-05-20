@@ -296,7 +296,7 @@ func (c *TCore) UnshieldFunds(assetID uint32, amt uint64) ([]byte, error) {
 func (c *TCore) SendShielded(appPW []byte, assetID uint32, toAddr string, amt uint64) ([]byte, error) {
 	return nil, nil
 }
-func (c *TCore) ApproveToken(appPW []byte, assetID uint32, dexAddr string) (string, error) {
+func (c *TCore) ApproveToken(appPW []byte, assetID uint32, dexAddr string, onConfirm func()) (string, error) {
 	return "", nil
 }
 func (c *TCore) UnapproveToken(appPW []byte, assetID uint32, version uint32) (string, error) {

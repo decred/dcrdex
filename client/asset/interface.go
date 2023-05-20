@@ -192,6 +192,9 @@ const (
 	// ErrIncorrectBondKey is returned when a provided private key is incorrect
 	// for a bond output.
 	ErrIncorrectBondKey = dex.ErrorKind("incorrect private key")
+	// ErrUnapprovedToken is returned when trying to fund an order using a token
+	// that has not been approved.
+	ErrUnapprovedToken = dex.ErrorKind("token not approved")
 
 	// InternalNodeLoggerName is the name for a logger that is used to fine
 	// tune log levels for only loggers using this name.

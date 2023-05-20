@@ -5339,7 +5339,7 @@ func (c *Core) ValidateAddress(address string, assetID uint32) (bool, error) {
 
 // ApproveToken calls a wallet's ApproveToken method. It approves the version
 // of the token used by the dex at the specified address.
-func (c *Core) ApproveToken(appPW []byte, assetID uint32, dexAddr string) (string, error) {
+func (c *Core) ApproveToken(appPW []byte, assetID uint32, dexAddr string, onConfirm func()) (string, error) {
 	crypter, err := c.encryptionKey(appPW)
 	if err != nil {
 		return "", err
@@ -5368,11 +5368,12 @@ func (c *Core) ApproveToken(appPW []byte, assetID uint32, dexAddr string) (strin
 		return "", fmt.Errorf("asset %d not found for %s", assetID, dexAddr)
 	}
 
-	onConfirm := func() {
+	walletOnConfirm := func() {
+		go onConfirm()
 		go c.notify(newTokenApprovalNote(wallet.state()))
 	}
 
-	txID, err := wallet.ApproveToken(asset.Version, onConfirm)
+	txID, err := wallet.ApproveToken(asset.Version, walletOnConfirm)
 	if err != nil {
 		return "", err
 	}

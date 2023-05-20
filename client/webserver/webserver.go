@@ -154,7 +154,7 @@ type clientCore interface {
 	ShieldFunds(assetID uint32, amt uint64) ([]byte, error)
 	UnshieldFunds(assetID uint32, amt uint64) ([]byte, error)
 	SendShielded(appPW []byte, assetID uint32, toAddr string, amt uint64) ([]byte, error)
-	ApproveToken(appPW []byte, assetID uint32, dexAddr string) (string, error)
+	ApproveToken(appPW []byte, assetID uint32, dexAddr string, onConrim func()) (string, error)
 	UnapproveToken(appPW []byte, assetID uint32, version uint32) (string, error)
 	ApproveTokenFee(assetID uint32, version uint32, approval bool) (uint64, error)
 }

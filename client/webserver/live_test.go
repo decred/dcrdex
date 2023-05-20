@@ -1921,7 +1921,7 @@ func (c *TCore) AddWalletPeer(assetID uint32, address string) error {
 func (c *TCore) RemoveWalletPeer(assetID uint32, address string) error {
 	return nil
 }
-func (c *TCore) ApproveToken(appPW []byte, assetID uint32, dexAddr string) (string, error) {
+func (c *TCore) ApproveToken(appPW []byte, assetID uint32, dexAddr string, onConfirm func()) (string, error) {
 	return "", nil
 }
 func (c *TCore) UnapproveToken(appPW []byte, assetID uint32, version uint32) (string, error) {
