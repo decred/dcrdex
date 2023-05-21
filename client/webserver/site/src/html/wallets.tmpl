@@ -1,7 +1,7 @@
 {{define "wallets"}}
 {{$passwordIsCached := .UserInfo.PasswordIsCached}}
 {{template "top" .}}
-<div id="main" data-handler="wallets" data-net="{{.Net}}" class="walletspage flex-grow-1 position-relative">
+<div id="main" data-handler="wallets" class="walletspage flex-grow-1 position-relative">
   <span class="me-2 connection ico-connection d-hide peers-table-icon" id="connectedIconTmpl"></span>
   <span class="me-2 errcolor ico-disconnected d-hide peers-table-icon" id="disconnectedIconTmpl"></span>
   <span class="me-2 errcolor ico-cross d-hide pointer peers-table-icon" id="removeIconTmpl"></span>

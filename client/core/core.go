@@ -2358,6 +2358,7 @@ func (c *Core) User() *User {
 		Initialized:        c.IsInitialized(),
 		SeedGenerationTime: c.seedGenerationTime,
 		FiatRates:          c.fiatConversions(),
+		Net:                c.net,
 	}
 }
 

@@ -113,26 +113,9 @@ func (s *WebServer) knownUnregisteredExchanges(registeredExchanges map[string]*c
 	return exchanges
 }
 
-// marketResult is the template data for the `/markets` page request.
-type marketTmplData struct {
-	CommonArguments
-	Exchanges map[string]*core.Exchange
-	Net       uint8
-}
-
 // handleMarkets is the handler for the '/markets' page request.
 func (s *WebServer) handleMarkets(w http.ResponseWriter, r *http.Request) {
-	cArgs := s.commonArgs(r, "Markets | Decred DEX")
-	s.sendTemplate(w, "markets", &marketTmplData{
-		CommonArguments: *cArgs,
-		Net:             uint8(s.core.Network()),
-	})
-}
-
-type walletsTmplData struct {
-	CommonArguments
-	Assets []*core.SupportedAsset
-	Net    uint8
+	s.sendTemplate(w, "markets", s.commonArgs(r, "Markets | Decred DEX"))
 }
 
 // handleWallets is the handler for the '/wallets' page request.
@@ -156,12 +139,7 @@ func (s *WebServer) handleWallets(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(nowallets, func(i, j int) bool {
 		return nowallets[i].Name < nowallets[j].Name
 	})
-	data := &walletsTmplData{
-		CommonArguments: *s.commonArgs(r, "Wallets | Decred DEX"),
-		Assets:          append(assets, nowallets...),
-		Net:             uint8(s.core.Network()),
-	}
-	s.sendTemplate(w, "wallets", data)
+	s.sendTemplate(w, "wallets", s.commonArgs(r, "Wallets | Decred DEX"))
 }
 
 // handleWalletLogFile is the handler for the '/wallets/logfile' page request.
@@ -441,8 +419,6 @@ func (s *WebServer) handleExportOrders(w http.ResponseWriter, r *http.Request) {
 type orderTmplData struct {
 	CommonArguments
 	Order *core.OrderReader
-	// Don't use dex.Network because the template parser will use the Stringer.
-	Net uint8
 }
 
 // handleOrder is the handler for the /order/{oid} page request.
@@ -462,7 +438,6 @@ func (s *WebServer) handleOrder(w http.ResponseWriter, r *http.Request) {
 	s.sendTemplate(w, "order", &orderTmplData{
 		CommonArguments: *s.commonArgs(r, "Order | Decred DEX"),
 		Order:           s.orderReader(ord),
-		Net:             uint8(s.core.Network()),
 	})
 }
 

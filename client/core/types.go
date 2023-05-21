@@ -145,6 +145,7 @@ type User struct {
 	SeedGenerationTime uint64                     `json:"seedgentime"`
 	Assets             map[uint32]*SupportedAsset `json:"assets"`
 	FiatRates          map[uint32]float64         `json:"fiatRates"`
+	Net                dex.Network                `json:"net"`
 }
 
 // SupportedAsset is data about an asset and possibly the wallet associated
