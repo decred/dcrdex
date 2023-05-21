@@ -189,7 +189,7 @@ export default class MarketsPage extends BasePage {
   constructor (main: HTMLElement, data: any) {
     super()
 
-    net = parseInt(main.dataset.net || '')
+    net = app().user.net
     const page = this.page = Doc.idDescendants(main)
     this.main = main
     if (!this.main.parentElement) return // Not gonna happen, but TypeScript cares.

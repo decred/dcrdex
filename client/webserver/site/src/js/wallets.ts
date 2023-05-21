@@ -95,7 +95,7 @@ export default class WalletsPage extends BasePage {
     super()
     this.body = body
     const page = this.page = Doc.idDescendants(body)
-    net = parseInt(body.dataset.net || '')
+    net = app().user.net
 
     Doc.cleanTemplates(page.restoreInfoCard, page.connectedIconTmpl, page.disconnectedIconTmpl, page.removeIconTmpl)
     this.restoreInfoCard = page.restoreInfoCard.cloneNode(true) as HTMLElement

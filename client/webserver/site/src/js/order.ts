@@ -44,7 +44,7 @@ export default class OrderPage extends BasePage {
     super()
     const page = this.page = Doc.idDescendants(main)
     this.stampers = Doc.applySelector(main, '[data-stamp]')
-    net = parseInt(main.dataset.net || '')
+    net = app().user.net
     // Find the order
     this.orderID = main.dataset.oid || ''
 

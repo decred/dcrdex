@@ -289,6 +289,7 @@ export interface User {
   authed: boolean // added by webserver
   ok: boolean // added by webserver
   bots: BotReport[]
+  net: number
 }
 
 export interface CoreNote {
