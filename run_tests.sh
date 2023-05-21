@@ -2,14 +2,25 @@
 set -ex
 
 dir=$(pwd)
-# list of all modules to test
-modules=". /dex/testing/loadbot /client/cmd/dexc-desktop"
 
 GV=$(go version | sed "s/^.*go\([0-9.]*\).*/\1/")
 echo "Go version: $GV"
 
 # Ensure html templates pass localization.
 go generate -x ./client/webserver/site # no -write
+
+# Ensure cache busters are updated
+source ./client/webserver/site/cache_utilities.bash
+BEFORE_HASH=`bbhash`
+setcssbuster
+setjsbuster
+if [ ${BEFORE_HASH} != `bbhash` ]; then
+	printf '%s\n' "cache busters needed updating. commit the changes" >&2
+	exit 1
+fi
+
+# list of all modules to test
+modules=". /dex/testing/loadbot /client/cmd/dexc-desktop"
 
 # For each module, run go mod tidy, build and run test.
 for m in $modules
