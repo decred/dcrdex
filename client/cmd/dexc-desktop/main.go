@@ -104,6 +104,7 @@ import (
 	"runtime/debug"
 	"runtime/pprof"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -335,6 +336,9 @@ func mainCore() error {
 			var backgroundNoteSent bool
 			select {
 			case <-windowManager.zeroLeft:
+				if windowManager.persist.Load() {
+					continue // ignore
+				}
 			logout:
 				for {
 					err := clientCore.Logout()
@@ -392,6 +396,7 @@ var windowManager = &struct {
 	counter  uint32
 	windows  map[uint32]*exec.Cmd
 	zeroLeft chan struct{}
+	persist  atomic.Bool
 }{
 	windows:  make(map[uint32]*exec.Cmd),
 	zeroLeft: make(chan struct{}, 1),
@@ -529,13 +534,28 @@ func systrayOnReady(ctx context.Context, logDirectory string, openC chan<- struc
 		mLogs := systray.AddMenuItem("Open logs folder", "Open the folder with your DEX logs.")
 		go func() {
 			for range mLogs.ClickedCh {
-				log.Debug("Opening browswer to log directory at", logDirURL)
+				log.Debug("Opening browser to log directory at", logDirURL)
 				runWebviewSubprocess(ctx, logDirURL)
 			}
 		}()
 	}
 
 	systray.AddSeparator()
+
+	mPersist := systray.AddMenuItemCheckbox("Persist after windows closed.",
+		"Keep the process running after all windows are closed. "+
+			"Shutdown is initiated through the Quit item in the system tray menu.", false)
+	go func() {
+		for range mPersist.ClickedCh {
+			var persisting = !mPersist.Checked() // toggle
+			if persisting {
+				mPersist.Check()
+			} else {
+				mPersist.Uncheck()
+			}
+			windowManager.persist.Store(persisting)
+		}
+	}()
 
 	mQuit := systray.AddMenuItem("Force Quit", "Force DEX client to close.")
 	go func() {
