@@ -622,6 +622,8 @@ type MatchProof struct {
 	// RedemptionFeeConfirmed indicate the fees for this match have been
 	// confirmed and the value added to the trade.
 	RedemptionFeeConfirmed bool
+	// RefundAddress stores the refund address used in the swap contract.
+	RefundAddress string
 }
 
 func boolByte(b bool) []byte {
@@ -633,8 +635,8 @@ func boolByte(b bool) []byte {
 
 // MatchProofVer is the current serialization version of a MatchProof.
 const (
-	MatchProofVer    = 3
-	matchProofPushes = 24
+	MatchProofVer    = 4
+	matchProofPushes = 25
 )
 
 // Encode encodes the MatchProof to a versioned blob.
@@ -664,7 +666,8 @@ func (p *MatchProof) Encode() []byte {
 		AddData(boolByte(p.SelfRevoked)).
 		AddData(p.CounterTxData).
 		AddData(boolByte(p.SwapFeeConfirmed)).
-		AddData(boolByte(p.RedemptionFeeConfirmed))
+		AddData(boolByte(p.RedemptionFeeConfirmed)).
+		AddData([]byte(p.RefundAddress))
 }
 
 // DecodeMatchProof decodes the versioned blob to a *MatchProof.
@@ -674,6 +677,9 @@ func DecodeMatchProof(b []byte) (*MatchProof, uint8, error) {
 		return nil, 0, err
 	}
 	switch ver {
+	case 4:
+		proof, err := decodeMatchProof_v4(pushes)
+		return proof, ver, err
 	case 3: // MatchProofVer
 		proof, err := decodeMatchProof_v3(pushes)
 		return proof, ver, err
@@ -708,6 +714,11 @@ func decodeMatchProof_v2(pushes [][]byte) (*MatchProof, error) {
 }
 
 func decodeMatchProof_v3(pushes [][]byte) (*MatchProof, error) {
+	pushes = append(pushes, []byte("")) // refund address
+	return decodeMatchProof_v4(pushes)
+}
+
+func decodeMatchProof_v4(pushes [][]byte) (*MatchProof, error) {
 	if len(pushes) != matchProofPushes {
 		return nil, fmt.Errorf("DecodeMatchProof: expected %d pushes, got %d",
 			matchProofPushes, len(pushes))
@@ -739,6 +750,7 @@ func decodeMatchProof_v3(pushes [][]byte) (*MatchProof, error) {
 		SelfRevoked:            bytes.Equal(pushes[20], encode.ByteTrue),
 		SwapFeeConfirmed:       bytes.Equal(pushes[21], encode.ByteTrue),
 		RedemptionFeeConfirmed: bytes.Equal(pushes[22], encode.ByteTrue),
+		RefundAddress:          string(pushes[23]),
 	}, nil
 }
 

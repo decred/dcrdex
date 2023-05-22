@@ -606,9 +606,10 @@ func (c *tCoin) Value() uint64 {
 }
 
 type tReceipt struct {
-	coin       *tCoin
-	contract   []byte
-	expiration time.Time
+	coin          *tCoin
+	contract      []byte
+	expiration    time.Time
+	refundAddress string
 }
 
 func (r *tReceipt) Coin() asset.Coin {
@@ -629,6 +630,10 @@ func (r *tReceipt) String() string {
 
 func (r *tReceipt) SignedRefund() dex.Bytes {
 	return nil
+}
+
+func (r *tReceipt) RefundAddress() string {
+	return r.refundAddress
 }
 
 type TXCWallet struct {
@@ -710,6 +715,8 @@ type TXCWallet struct {
 	estFee    uint64
 	estFeeErr error
 	validAddr bool
+
+	returnedAddrs []string
 }
 
 var _ asset.Accelerator = (*TXCWallet)(nil)
@@ -1056,6 +1063,10 @@ func (w *TXCWallet) AccelerationEstimate(swapCoins, accelerationCoins []dex.Byte
 	}
 
 	return w.accelerationEstimate, nil
+}
+
+func (w *TXCWallet) ReturnAddress(addrs ...string) {
+	w.returnedAddrs = addrs
 }
 
 type TAccountLocker struct {
@@ -7023,13 +7034,15 @@ func TestHandleNomatch(t *testing.T) {
 
 	dcrWallet, _ := newTWallet(tUTXOAssetA.ID)
 	tCore.wallets[tUTXOAssetA.ID] = dcrWallet
-	btcWallet, _ := newTWallet(tUTXOAssetB.ID)
+	btcWallet, tBtcWallet := newTWallet(tUTXOAssetB.ID)
 	tCore.wallets[tUTXOAssetB.ID] = btcWallet
 
 	walletSet, _, _, err := tCore.walletSet(dc, tUTXOAssetA.ID, tUTXOAssetB.ID, true)
 	if err != nil {
 		t.Fatalf("walletSet error: %v", err)
 	}
+
+	fundingCoins := asset.Coins{&tCoin{}}
 
 	// Four types of order to check
 
@@ -7038,7 +7051,7 @@ func TestHandleNomatch(t *testing.T) {
 	loImmediate.Force = order.ImmediateTiF
 	immediateOID := loImmediate.ID()
 	immediateTracker := newTrackedTrade(dbOrder, preImgL, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails)
+		rig.db, rig.queue, walletSet, fundingCoins, rig.core.notify, rig.core.formatDetails)
 	dc.trades[immediateOID] = immediateTracker
 
 	// 2. Standing limit order
@@ -7046,7 +7059,7 @@ func TestHandleNomatch(t *testing.T) {
 	loStanding.Force = order.StandingTiF
 	standingOID := loStanding.ID()
 	standingTracker := newTrackedTrade(dbOrder, preImgL, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails)
+		rig.db, rig.queue, walletSet, fundingCoins, rig.core.notify, rig.core.formatDetails)
 	dc.trades[standingOID] = standingTracker
 
 	// 3. Cancel order.
@@ -7069,7 +7082,7 @@ func TestHandleNomatch(t *testing.T) {
 	dbOrder.Order = mktOrder
 	marketOID := mktOrder.ID()
 	marketTracker := newTrackedTrade(dbOrder, preImgL, dc, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, nil, rig.core.notify, rig.core.formatDetails)
+		rig.db, rig.queue, walletSet, fundingCoins, rig.core.notify, rig.core.formatDetails)
 	dc.trades[marketOID] = marketTracker
 
 	runNomatch := func(tag string, oid order.OrderID) {
@@ -7095,6 +7108,11 @@ func TestHandleNomatch(t *testing.T) {
 		}
 		if rig.db.lastStatus != expStatus {
 			t.Fatalf("%s: wrong order status stored. expected %s, got %s", tag, expStatus, rig.db.lastStatus)
+		}
+		if expStatus == order.OrderStatusExecuted {
+			if len(tBtcWallet.returnedAddrs) != 1 || tBtcWallet.returnedAddrs[0] != tracker.Trade().Address {
+				t.Fatalf("%s: redemption address not returned", tag)
+			}
 		}
 	}
 
@@ -8678,7 +8696,7 @@ func TestConfirmRedemption(t *testing.T) {
 	dc := rig.dc
 	tCore := rig.core
 
-	dcrWallet, _ := newTWallet(tUTXOAssetA.ID)
+	dcrWallet, tDcrWallet := newTWallet(tUTXOAssetA.ID)
 	tCore.wallets[tUTXOAssetA.ID] = dcrWallet
 	btcWallet, tBtcWallet := newTWallet(tUTXOAssetB.ID)
 	tCore.wallets[tUTXOAssetB.ID] = btcWallet
@@ -8695,6 +8713,7 @@ func TestConfirmRedemption(t *testing.T) {
 	tUpdatedCoinID := encode.RandomBytes(36)
 	secret := encode.RandomBytes(32)
 	secretHash := sha256.Sum256(secret)
+	refundAddr := ordertest.RandomAddress()
 
 	var match *matchTracker
 
@@ -8707,7 +8726,11 @@ func TestConfirmRedemption(t *testing.T) {
 		match = &matchTracker{
 			counterSwap: auditInfo,
 			MetaMatch: db.MetaMatch{
-				MetaData: &db.MatchMetaData{},
+				MetaData: &db.MatchMetaData{
+					Proof: db.MatchProof{
+						RefundAddress: refundAddr,
+					},
+				},
 				UserMatch: &order.UserMatch{
 					MatchID: matchID,
 					Address: addr,
@@ -8718,7 +8741,6 @@ func TestConfirmRedemption(t *testing.T) {
 
 		isMaker := match.Side == order.Maker
 		match.Status = status
-		match.MetaData.Proof = db.MatchProof{}
 		proof := &match.MetaData.Proof
 		proof.Auth.InitSig = []byte{1, 2, 3, 4}
 
@@ -9021,6 +9043,11 @@ func TestConfirmRedemption(t *testing.T) {
 			}
 			if !bytes.Equal(redeemCoin, test.confirmRedemptionResult.CoinID) {
 				t.Fatalf("%s: expected coin %v != actual %v", test.name, test.confirmRedemptionResult.CoinID, redeemCoin)
+			}
+			if test.confirmRedemptionResult.Confs >= test.confirmRedemptionResult.Req {
+				if len(tDcrWallet.returnedAddrs) != 1 || tDcrWallet.returnedAddrs[0] != refundAddr {
+					t.Fatalf("%s: refund address not returned", test.name)
+				}
 			}
 		}
 

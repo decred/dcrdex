@@ -14,6 +14,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -508,10 +509,11 @@ func (ci *auditInfo) SecretHash() dex.Bytes {
 // swapReceipt is information about a swap contract that was broadcast by this
 // wallet. Satisfies the asset.Receipt interface.
 type swapReceipt struct {
-	output       *output
-	contract     []byte
-	signedRefund []byte
-	expiration   time.Time
+	output        *output
+	contract      []byte
+	signedRefund  []byte
+	expiration    time.Time
+	refundAddress string
 }
 
 // Expiration is the time that the contract will expire, allowing the user to
@@ -540,6 +542,14 @@ func (r *swapReceipt) String() string {
 // funds to the user in the case a contract expires.
 func (r *swapReceipt) SignedRefund() dex.Bytes {
 	return r.signedRefund
+}
+
+var _ asset.RefundReceipt = (*swapReceipt)(nil)
+
+// RefundAddress is an add-on method that implements asset.RefundReceipt so that
+// unused refund addresses will be returned.
+func (r *swapReceipt) RefundAddress() string {
+	return r.refundAddress
 }
 
 // RPCConfig adds a wallet name to the basic configuration.
@@ -901,6 +911,12 @@ type baseWallet struct {
 	// bond amounts. This amount only changes via ReserveBondFunds, and it is
 	// used to recognize when all reserves have been released.
 	bondReservesNominal int64 // only set by ReserveBondFunds
+
+	recycledAddrMtx sync.Mutex
+	// recycledAddrs are returned, unused redemption addresses. We track these
+	// to avoid issues with the gap policy.
+	recycledAddrs map[string]struct{}
+	recyclePath   string
 }
 
 func (w *baseWallet) fallbackFeeRate() uint64 {
@@ -970,6 +986,7 @@ var _ asset.Authenticator = (*ExchangeWalletSPV)(nil)
 var _ asset.Authenticator = (*ExchangeWalletFullNode)(nil)
 var _ asset.Authenticator = (*ExchangeWalletAccelerator)(nil)
 var _ asset.MultiOrderFunder = (*baseWallet)(nil)
+var _ asset.AddressReturner = (*baseWallet)(nil)
 
 // RecoveryCfg is the information that is transferred from the old wallet
 // to the new one when the wallet is recovered.
@@ -1244,6 +1261,12 @@ func decodeAddress(addr string, params *chaincfg.Params) (btcutil.Address, error
 }
 
 func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWallet, error) {
+	// Make sure we can use the specified wallet directory.
+	walletDir := filepath.Join(cfg.WalletCFG.DataDir, cfg.ChainParams.Name)
+	if err := os.MkdirAll(walletDir, 0744); err != nil {
+		return nil, fmt.Errorf("error creating wallet directory: %w", err)
+	}
+
 	baseCfg, err := readBaseWalletConfig(walletCfg)
 	if err != nil {
 		return nil, err
@@ -1335,8 +1358,23 @@ func newUnconnectedWallet(cfg *BTCCloneCFG, walletCfg *WalletConfig) (*baseWalle
 		calcTxSize:          txSizeCalculator,
 		txVersion:           txVersion,
 		Network:             cfg.Network,
+		recyclePath:         filepath.Join(walletDir, "recycled-addrs.txt"),
 	}
 	w.cfgV.Store(baseCfg)
+
+	// Try to load any cached unused redemption addresses.
+	b, err := os.ReadFile(w.recyclePath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("error looking for recycled address file: %w", err)
+	}
+	addrs := strings.Split(string(b), "\n")
+	w.recycledAddrs = make(map[string]struct{}, len(addrs))
+	for _, addr := range addrs {
+		if addr == "" {
+			continue
+		}
+		w.recycledAddrs[addr] = struct{}{}
+	}
 
 	// Default to the BTC RPC estimator (see LTC). Consumers can use
 	// noLocalFeeRate or a similar dummy function to power feeRate() requests
@@ -3928,15 +3966,19 @@ func (btc *baseWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, ui
 		totalOut += contract.Value
 		// revokeAddr is the address belonging to the key that may be used to
 		// sign and refund a swap past its encoded refund locktime.
-		revokeAddr, err := btc.node.refundAddress()
+		revokeAddrStr, err := btc.recyclableAddress()
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error creating revocation address: %w", err)
+		}
+		revokeAddr, err := btc.decodeAddr(revokeAddrStr, btc.chainParams)
+		if err != nil {
+			return nil, nil, 0, fmt.Errorf("refund address decode error: %v", err)
 		}
 		refundAddrs = append(refundAddrs, revokeAddr)
 
 		contractAddr, err := btc.decodeAddr(contract.Address, btc.chainParams)
 		if err != nil {
-			return nil, nil, 0, fmt.Errorf("address decode error: %v", err)
+			return nil, nil, 0, fmt.Errorf("contract address decode error: %v", err)
 		}
 
 		// Create the contract, a P2SH redeem script.
@@ -3995,8 +4037,9 @@ func (btc *baseWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, ui
 	receipts := make([]asset.Receipt, 0, swapCount)
 	for i, contract := range swaps.Contracts {
 		output := newOutput(txHash, uint32(i), contract.Value)
+		refundAddr := refundAddrs[i]
 		signedRefundTx, err := btc.refundTx(output.txHash(), output.vout(), contracts[i],
-			contract.Value, refundAddrs[i], swaps.FeeRate)
+			contract.Value, refundAddr, swaps.FeeRate)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error creating refund tx: %w", err)
 		}
@@ -4006,10 +4049,11 @@ func (btc *baseWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, ui
 			return nil, nil, 0, fmt.Errorf("error serializing refund tx: %w", err)
 		}
 		receipts = append(receipts, &swapReceipt{
-			output:       output,
-			contract:     contracts[i],
-			expiration:   time.Unix(int64(contract.LockTime), 0).UTC(),
-			signedRefund: refundBuff.Bytes(),
+			output:        output,
+			contract:      contracts[i],
+			expiration:    time.Unix(int64(contract.LockTime), 0).UTC(),
+			signedRefund:  refundBuff.Bytes(),
+			refundAddress: refundAddr.String(),
 		})
 	}
 
@@ -4770,7 +4814,55 @@ func (btc *baseWallet) DepositAddress() (string, error) {
 // RedemptionAddress gets an address for use in redeeming the counterparty's
 // swap. This would be included in their swap initialization.
 func (btc *baseWallet) RedemptionAddress() (string, error) {
+	return btc.recyclableAddress()
+}
+
+// A recyclable address is a redemption or refund address that may be recycled
+// if unused. If already recycled addresses are available, one will be returned.
+func (btc *baseWallet) recyclableAddress() (string, error) {
+	var recycledAddr string
+	btc.recycledAddrMtx.Lock()
+	nRecycles := len(btc.recycledAddrs)
+	for addr := range btc.recycledAddrs {
+		if owns, err := btc.OwnsDepositAddress(addr); owns {
+			delete(btc.recycledAddrs, addr)
+			recycledAddr = addr
+			break
+		} else if err != nil {
+			btc.log.Errorf("Error checking ownership of recycled address: %v", err)
+			// Don't delete the address in case it's just a network error for
+			// an rpc wallet or something.
+		} else { // we don't own it
+			delete(btc.recycledAddrs, addr)
+		}
+	}
+	if len(btc.recycledAddrs) != nRecycles {
+		btc.writeRecycledAddrsToFile()
+	}
+	btc.recycledAddrMtx.Unlock()
+	if recycledAddr != "" {
+		return recycledAddr, nil
+	}
+
 	return btc.DepositAddress()
+}
+
+// ReturnAddress accepts unused redemption and refund addresses and recycles
+// them to avoid gap policy issues.
+func (btc *baseWallet) ReturnAddress(addrs ...string) {
+	btc.recycledAddrMtx.Lock()
+	defer btc.recycledAddrMtx.Unlock()
+	nRecycles := len(btc.recycledAddrs)
+	for _, addr := range addrs {
+		if _, exists := btc.recycledAddrs[addr]; exists {
+			btc.log.Errorf("A returned address was already indexed")
+			continue
+		}
+		btc.recycledAddrs[addr] = struct{}{}
+	}
+	if len(btc.recycledAddrs) != nRecycles {
+		btc.writeRecycledAddrsToFile()
+	}
 }
 
 // NewAddress returns a new address from the wallet. This satisfies the
@@ -6472,4 +6564,16 @@ func (btc *baseWallet) ConfirmRedemption(coinID dex.Bytes, redemption *asset.Red
 		Req:    requiredRedeemConfirms,
 		CoinID: coin.ID(),
 	}, nil
+}
+
+// writeRecycledAddrsToFile should be called with the recycledAddrMtx locked.
+func (btc *baseWallet) writeRecycledAddrsToFile() {
+	addrs := make([]string, 0, len(btc.recycledAddrs))
+	for addr := range btc.recycledAddrs {
+		addrs = append(addrs, addr)
+	}
+	contents := []byte(strings.Join(addrs, "\n"))
+	if err := os.WriteFile(btc.recyclePath, contents, 0644); err != nil {
+		btc.log.Errorf("Error writing recycled address file: %v", err)
+	}
 }

@@ -31,9 +31,6 @@ type Wallet interface {
 	listLockUnspent() ([]*RPCOutpoint, error)
 	changeAddress() (btcutil.Address, error) // warning: don't just use the Stringer if there's a "recode" function for a clone e.g. BCH
 	externalAddress() (btcutil.Address, error)
-	// The refund addresses are almost never used, so we might tolerate some
-	// address reuse if the backend requires.
-	refundAddress() (btcutil.Address, error)
 	signTx(inTx *wire.MsgTx) (*wire.MsgTx, error)
 	privKeyForAddress(addr string) (*btcec.PrivateKey, error)
 	walletUnlock(pw []byte) error

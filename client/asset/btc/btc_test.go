@@ -189,6 +189,8 @@ type testData struct {
 	confsErr          error
 	walletTxSpent     bool
 	txFee             uint64
+	ownsAddress       bool
+	locked            bool
 }
 
 func newTestData() *testData {
@@ -480,6 +482,8 @@ func (c *tRawRequester) RawRequest(_ context.Context, method string, params []js
 			Fee:         toBTC(c.txFee),
 		}
 		return json.Marshal(resp)
+	case methodGetWalletInfo:
+		return json.Marshal(&GetWalletInfoResult{UnlockedUntil: nil /* unencrypted -> unlocked */})
 	}
 	panic("method not registered: " + method)
 }
@@ -625,6 +629,11 @@ func tNewWallet(segwit bool, walletType string) (*intermediaryWallet, *testData,
 		tBTC.SwapSizeBase = dexbtc.InitTxSizeBase
 	}
 
+	dataDir, err := os.MkdirTemp("", "")
+	if err != nil {
+		panic("couldn't create data dir:" + err.Error())
+	}
+
 	data := newTestData()
 	walletCfg := &asset.WalletConfig{
 		TipChange: func(error) {
@@ -637,6 +646,7 @@ func tNewWallet(segwit bool, walletType string) (*intermediaryWallet, *testData,
 		PeersChange: func(num uint32, err error) {
 			fmt.Printf("peer count = %d, err = %v", num, err)
 		},
+		DataDir: dataDir,
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
 	cfg := &BTCCloneCFG{
@@ -652,7 +662,6 @@ func tNewWallet(segwit bool, walletType string) (*intermediaryWallet, *testData,
 	}
 
 	var wallet *intermediaryWallet
-	var err error
 	switch walletType {
 	case walletTypeRPC:
 		wallet, err = newRPCWallet(&tRawRequester{data}, cfg, &RPCWalletConfig{})
@@ -685,12 +694,14 @@ func tNewWallet(segwit bool, walletType string) (*intermediaryWallet, *testData,
 
 	if err != nil {
 		shutdown()
+		os.RemoveAll(dataDir)
 		panic(err.Error())
 	}
 	// Initialize the best block.
 	bestHash, err := wallet.node.getBestBlockHash()
 	if err != nil {
 		shutdown()
+		os.RemoveAll(dataDir)
 		panic(err.Error())
 	}
 	wallet.tipMtx.Lock()
@@ -707,6 +718,7 @@ func tNewWallet(segwit bool, walletType string) (*intermediaryWallet, *testData,
 	}()
 	shutdownAndWait := func() {
 		shutdown()
+		os.RemoveAll(dataDir)
 		wg.Wait()
 	}
 	return wallet, data, shutdownAndWait
@@ -5866,5 +5878,87 @@ func TestConfirmRedemption(t *testing.T) {
 		if status.Confs != test.wantConfs {
 			t.Fatalf("%q: wanted %d confs but got %d", test.name, test.wantConfs, status.Confs)
 		}
+	}
+}
+
+func TestAddressRecycling(t *testing.T) {
+	w, td, shutdown := tNewWallet(false, walletTypeSPV)
+	defer shutdown()
+
+	compareAddrLists := func(tag string, exp, actual []string) {
+		if len(exp) != len(actual) {
+			t.Fatalf("%s: Wrong number of recycled addrs. Expected %d, got %d", tag, len(exp), len(actual))
+		}
+		unfound := make(map[string]bool, len(exp))
+		for _, addr := range exp {
+			unfound[addr] = true
+		}
+		for _, addr := range actual {
+			delete(unfound, addr)
+		}
+		if len(unfound) > 0 {
+			t.Fatalf("%s: Wrong addresses stored. Expected %+v, got %+v", tag, exp, actual)
+		}
+	}
+
+	checkAddrs := func(tag string, expAddrs ...string) {
+		memList := make([]string, 0, len(w.recycledAddrs))
+		for addr := range w.recycledAddrs {
+			memList = append(memList, addr)
+		}
+		compareAddrLists(tag+":mem", expAddrs, memList)
+
+		b, _ := os.ReadFile(w.recyclePath)
+		var fileAddrs []string
+		for _, addr := range strings.Split(string(b), "\n") {
+			if addr == "" {
+				continue
+			}
+			fileAddrs = append(fileAddrs, addr)
+		}
+
+		compareAddrLists(tag+":file", expAddrs, fileAddrs)
+	}
+
+	addr1, addr2 := tP2PKHAddr, tP2WPKHAddr
+
+	w.ReturnAddress(addr1)
+
+	checkAddrs("first single addr", addr1)
+
+	td.ownsAddress = true
+	redemptionAddr, _ := w.RedemptionAddress()
+	if redemptionAddr != addr1 {
+		t.Fatalf("recycled address not returned for redemption address")
+	}
+
+	w.ReturnAddress(addr1, addr2)
+
+	checkAddrs("two addrs", addr1, addr2)
+
+	// Check that unowned addresses are not returned
+	td.ownsAddress = false
+	td.newAddress = "bc1q4cku7wfklav9vzmx9hhx5qwarma7g7k689puw0"
+	priv, _ := btcec.NewPrivateKey()
+	td.privKeyForAddr, _ = btcutil.NewWIF(priv, &chaincfg.MainNetParams, true)
+	redemptionAddr, err := w.RedemptionAddress()
+	if err != nil {
+		t.Fatalf("RedemptionAddress error: %v", err)
+	}
+	if redemptionAddr == addr1 || redemptionAddr == addr2 {
+		t.Fatalf("unowned address returned (1)")
+	}
+	redemptionAddr, _ = w.RedemptionAddress()
+	if redemptionAddr == addr1 || redemptionAddr == addr2 {
+		t.Fatalf("unowned address returned (2)")
+	}
+
+	checkAddrs("after unowned")
+
+	// Check address loading.
+	w.ReturnAddress(addr1, addr2)
+	otherW, _ := newUnconnectedWallet(w.cloneParams, &WalletConfig{})
+	if len(otherW.recycledAddrs) != 2 {
+		t.Fatalf("newly opened wallet didn't load recycled addrs")
 	}
 }
