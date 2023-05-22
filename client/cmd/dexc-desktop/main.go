@@ -378,8 +378,29 @@ func mainCore() error {
 		}
 	}()
 
+	activeState := make(chan bool, 8)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		active := true // starting with "Force Quit"
+		for {
+			select {
+			case <-time.After(time.Second):
+				// inelegant polling? Even Core doesn't know until it checks, so
+				// can't feasibly rig a signal from Core without changes there.
+				coreActive := clientCore.Active()
+				if coreActive != active {
+					active = coreActive
+					activeState <- coreActive
+				}
+			case <-appCtx.Done():
+				return
+			}
+		}
+	}()
+
 	systray.Run(func() {
-		systrayOnReady(appCtx, filepath.Dir(cfg.LogPath), openC, killChan)
+		systrayOnReady(appCtx, filepath.Dir(cfg.LogPath), openC, killChan, activeState)
 	}, nil)
 
 	closeAllWindows()
@@ -491,7 +512,8 @@ var FavIcon []byte
 //go:embed src/symbol-bw-round.png
 var SymbolBWIcon []byte
 
-func systrayOnReady(ctx context.Context, logDirectory string, openC chan<- struct{}, killC chan<- os.Signal) {
+func systrayOnReady(ctx context.Context, logDirectory string, openC chan<- struct{},
+	killC chan<- os.Signal, activeState <-chan bool) {
 	systray.SetIcon(FavIcon)
 	systray.SetTitle("DEX client")
 	systray.SetTooltip("Self-custodial multi-wallet")
@@ -557,12 +579,25 @@ func systrayOnReady(ctx context.Context, logDirectory string, openC chan<- struc
 		}
 	}()
 
-	mQuit := systray.AddMenuItem("Force Quit", "Force DEX client to close.")
+	mQuit := systray.AddMenuItem("Force Quit", "Force DEX client to close with active orders.")
 	go func() {
-		<-mQuit.ClickedCh
-		mOpen.Disable()
-		mQuit.Disable()
-		killC <- os.Interrupt
+		for {
+			select {
+			case active := <-activeState:
+				if active {
+					mQuit.SetTitle("Force Quit")
+					mQuit.SetTooltip("Force DEX client to close with active orders.")
+				} else {
+					mQuit.SetTitle("Quit")
+					mQuit.SetTooltip("Shutdown the DEX client. You have no active orders.")
+				}
+			case <-mQuit.ClickedCh:
+				mOpen.Disable()
+				mQuit.Disable()
+				killC <- os.Interrupt
+				return
+			}
+		}
 	}()
 }
 
