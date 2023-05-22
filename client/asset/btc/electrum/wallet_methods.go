@@ -310,8 +310,8 @@ type paytoReq struct {
 	// FromAddr omitted
 	FromUTXOs      string `json:"from_coins,omitempty"`
 	NoCheck        bool   `json:"nocheck"`
-	Unsigned       bool   `json:"unsigned"` // unsigned returns a base64 psbt thing
-	RBF            bool   `json:"rbf"`      // default to false
+	Unsigned       bool   `json:"unsigned"`      // unsigned returns a base64 psbt thing
+	RBF            bool   `json:"rbf,omitempty"` // default to null
 	Password       string `json:"password,omitempty"`
 	LockTime       *int64 `json:"locktime,omitempty"`
 	AddTransaction bool   `json:"addtransaction"`
