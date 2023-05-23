@@ -2718,15 +2718,31 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	token := asset.TokenInfo(assetID)
 
 	peersChange := func(numPeers uint32, err error) {
-		go c.peerChange(wallet, numPeers, err)
+		if c.ctx.Err() != nil {
+			return
+		}
+
+		c.wg.Add(1)
+		go func() {
+			defer c.wg.Done()
+			c.peerChange(wallet, numPeers, err)
+		}()
 	}
 
 	tipChange := func(err error) {
-		// asset.Wallet implementations should not need wait for the
-		// callback, as they don't know what it is, and will likely launch
-		// TipChange as a goroutine. However, guard against the possibility
-		// of deadlocking a Core method that calls Wallet.Disconnect.
-		go c.tipChange(assetID, err)
+		if c.ctx.Err() != nil {
+			return
+		}
+
+		c.wg.Add(1)
+		go func() {
+			defer c.wg.Done()
+			// asset.Wallet implementations should not need wait for the
+			// callback, as they don't know what it is, and will likely launch
+			// TipChange as a goroutine. However, guard against the possibility
+			// of deadlocking a Core method that calls Wallet.Disconnect.
+			c.tipChange(assetID, err)
+		}()
 	}
 
 	var w asset.Wallet
