@@ -6,7 +6,7 @@
 set -ex
 
 APP="dexc"
-VER=`cat ../../app/VERSION`
+VER="0.7.0-pre"
 META= # "release"
 REV="0"
 ARCH="amd64"

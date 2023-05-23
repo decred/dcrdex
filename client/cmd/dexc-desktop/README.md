@@ -1,5 +1,3 @@
-Make sure to update the version in **client/app/VERSION** before packaging.
-
 ## Debian
 Build with `./debian-package.sh`. The deb archive is located in **./build**.
 
