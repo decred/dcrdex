@@ -504,7 +504,7 @@ type Wallet interface {
 // MultiOrderFunder is a wallet that can fund multiple orders at once.
 // This will be part of the Wallet interface once all wallets support it.
 type MultiOrderFunder interface {
-	FundMultiOrder(ord *MultiOrder, maxLock uint64) (coins []Coins, redeemScripts [][]dex.Bytes, fundingFees uint64, err error)
+	FundMultiOrder(ord *MultiOrder, keep uint64) (coins []Coins, redeemScripts [][]dex.Bytes, fundingFees uint64, err error)
 }
 
 // Authenticator is a wallet implementation that require authentication.

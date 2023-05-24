@@ -998,6 +998,9 @@ type MultiTradeForm struct {
 	Quote      uint32            `json:"quote"`
 	Placements []*QtyRate        `json:"placement"`
 	Options    map[string]string `json:"options"`
+	// Keep is the amount of the "from" asset that is required to still be
+	// available in the wallet after all of the trades are funded.
+	Keep uint64 `json:"keep"`
 }
 
 // SingleLotFeesForm is used to determine the fees for a single lot trade.

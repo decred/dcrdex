@@ -6161,7 +6161,7 @@ func (c *Core) prepareMultiTradeRequests(pw []byte, form *MultiTradeForm) ([]*tr
 		Options:       form.Options,
 		RedeemVersion: assetConfigs.toAsset.Version,
 		RedeemAssetID: assetConfigs.toAsset.ID,
-	}, 0)
+	}, form.Keep)
 	if err != nil {
 		return nil, codedError(walletErr, fmt.Errorf("FundMultiOrder error for %s: %v", assetConfigs.fromAsset.Symbol, err))
 	}

@@ -1347,7 +1347,7 @@ Registration is complete after the fee transaction has been confirmed.`,
 	},
 	multiTradeRoute: {
 		pwArgsShort: `"appPass"`,
-		argsShort:   `"host" sell base quote numPlacements [qty,rate] options`,
+		argsShort:   `"host" sell base quote keep numPlacements [qty,rate] options`,
 		cmdSummary:  `Place multiple orders in one go.`,
 		pwArgsLong: `Password Args:
     appPass (string): The DEX client password.`,
@@ -1356,6 +1356,7 @@ Registration is complete after the fee transaction has been confirmed.`,
     sell (bool): Whether the order is selling.
     base (int): The BIP-44 coin index for the market's base asset.
     quote (int): The BIP-44 coin index for the market's quote asset.
+    keep (int): The amount of the fund asset that must be available after all of the trades are funded.
     numPlacements (int): The number of orders to place.
     placements ([int,int]): The quantities and rates of the orders. Quantity must be
 	 a multiple of the lot size. Rate must be in atomic units of the quote asset.

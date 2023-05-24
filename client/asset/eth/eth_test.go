@@ -1338,7 +1338,7 @@ func testFundOrderReturnCoinsFundingCoins(t *testing.T, assetID uint32) {
 	if assetID != BipID {
 		eth.approvalCache = make(map[uint32]bool)
 		node.tokenContractor.allow = big.NewInt(0)
-		_, _, err = w.FundOrder(&order)
+		_, _, _, err = w.FundOrder(&order)
 		if err == nil {
 			t.Fatalf("no allowance should cause error but did not")
 		}
