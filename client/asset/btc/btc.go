@@ -2223,9 +2223,6 @@ func (btc *baseWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, ui
 	if ord.FeeSuggestion > ord.MaxFeeRate {
 		return nil, nil, 0, fmt.Errorf("fee suggestion %d > max fee rate %d", ord.FeeSuggestion, ord.MaxFeeRate)
 	}
-	if ord.FeeSuggestion > btc.feeRateLimit() {
-		return nil, nil, 0, fmt.Errorf("suggested fee > configured limit. %d > %d", ord.FeeSuggestion, btc.feeRateLimit())
-	}
 	// Check wallets fee rate limit against server's max fee rate
 	if btc.feeRateLimit() < ord.MaxFeeRate {
 		return nil, nil, 0, fmt.Errorf(
@@ -5735,9 +5732,6 @@ func (btc *baseWallet) FundMultiOrder(mo *asset.MultiOrder, keep uint64) ([]asse
 
 	if mo.FeeSuggestion > mo.MaxFeeRate {
 		return nil, nil, 0, fmt.Errorf("fee suggestion %d > max fee rate %d", mo.FeeSuggestion, mo.MaxFeeRate)
-	}
-	if mo.FeeSuggestion > btc.feeRateLimit() {
-		return nil, nil, 0, fmt.Errorf("fee suggestion %d > configured limit %d", mo.FeeSuggestion, btc.feeRateLimit())
 	}
 	// Check wallets fee rate limit against server's max fee rate
 	if btc.feeRateLimit() < mo.MaxFeeRate {

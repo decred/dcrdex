@@ -972,7 +972,7 @@ type AuditInfo struct {
 
 // Swaps is the details needed to broadcast a swap contract(s).
 type Swaps struct {
-	// Version is the asset version. Most backends only support one version.
+	// Version is the asset version.
 	Version uint32
 	// Inputs are the Coins being spent.
 	Inputs Coins
@@ -1025,7 +1025,7 @@ type RedeemForm struct {
 // Order is order details needed for FundOrder.
 type Order struct {
 	// Version is the asset version of the "from" asset with the init
-	// transaction (this wallet). Most backends only support one version.
+	// transaction.
 	Version uint32
 	// Value is the amount required to satisfy the order. The Value does not
 	// include fees. Fees will be calculated internally based on the number of
@@ -1033,11 +1033,8 @@ type Order struct {
 	// (DEXConfig).
 	Value uint64
 	// MaxSwapCount is the number of lots in the order, which is also the
-	// maximum number of transaction that an order could potentially generate
-	// in a worst-case scenario of all 1-lot matches. Note that if requesting
-	// funding for the quote asset's wallet, the number of lots will not be
-	// Value / DEXConfig.LotSize, because an order is quantified in the base
-	// asset, so lots is always (order quantity) / (base asset lot size).
+	// maximum number of transactions that an order could potentially generate
+	// in a worst-case scenario of all 1-lot matches.
 	MaxSwapCount uint64 // uint64 for compatibility with quantity and lot size.
 	// MaxFeeRate is the largest possible fee rate for the init transaction (of
 	// this "from" asset) specific to and provided by a particular server, and
@@ -1060,7 +1057,7 @@ type Order struct {
 	// tokens with ETH.
 
 	// RedeemVersion is the asset version of the "to" asset with the redeem
-	// transaction. Most backends only support one version.
+	// transaction.
 	RedeemVersion uint32
 	// RedeemAssetID is the asset ID of the "to" asset.
 	RedeemAssetID uint32
@@ -1074,18 +1071,15 @@ type MultiOrderValue struct {
 	// (DEXConfig).
 	Value uint64
 	// MaxSwapCount is the number of lots in the order, which is also the
-	// maximum number of transaction that an order could potentially generate
-	// in a worst-case scenario of all 1-lot matches. Note that if requesting
-	// funding for the quote asset's wallet, the number of lots will not be
-	// Value / DEXConfig.LotSize, because an order is quantified in the base
-	// asset, so lots is always (order quantity) / (base asset lot size).
+	// maximum number of transactions that an order could potentially generate
+	// in a worst-case scenario of all 1-lot matches.
 	MaxSwapCount uint64 // uint64 for compatibility with quantity and lot size.
 }
 
 // MultiOrder is order details needed for FundMultiOrder.
 type MultiOrder struct {
 	// Version is the asset version of the "from" asset with the init
-	// transaction (this wallet). Most backends only support one version.
+	// transaction.
 	Version uint32
 	Values  []*MultiOrderValue
 	// MaxFeeRate is the largest possible fee rate for the init transaction (of
@@ -1105,7 +1099,7 @@ type MultiOrder struct {
 	// tokens with ETH.
 
 	// RedeemVersion is the asset version of the "to" asset with the redeem
-	// transaction. Most backends only support one version.
+	// transaction.
 	RedeemVersion uint32
 	// RedeemAssetID is the asset ID of the "to" asset.
 	RedeemAssetID uint32

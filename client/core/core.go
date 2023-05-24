@@ -5640,11 +5640,13 @@ func (c *Core) MultiTrade(pw []byte, form *MultiTradeForm) ([]*Order, error) {
 
 	orders := make([]*Order, 0, len(reqs))
 
+	var numSuccessful uint64
 	for _, req := range reqs {
 		corder, err := c.sendTradeRequest(req)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error sending trade request after %d successful sends: %v", numSuccessful, err)
 		}
+		numSuccessful++
 		orders = append(orders, corder)
 	}
 

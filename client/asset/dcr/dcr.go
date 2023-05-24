@@ -2224,7 +2224,6 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 	dcr.fundingMtx.Lock()         // before generating the new output in sendCoins
 	defer dcr.fundingMtx.Unlock() // after locking it (wallet and map)
 
-	fmt.Printf("split fee rate %d\n", splitFeeRate)
 	msgTx, sentVal, err := dcr.sendCoins(coins, addr, addr2, reqFunds, extraOutput, splitFeeRate, false)
 	if err != nil {
 		return nil, false, 0, fmt.Errorf("error sending split transaction: %w", err)
@@ -2251,12 +2250,8 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 		dcr.log.Errorf("error returning coins spent in split transaction %v", coins)
 	}
 
-	fmt.Printf("split tx size %d\n", msgTx.SerializeSize())
-
 	totalOut := uint64(0)
-	fmt.Printf("bumpedMaxRate: %d\n", bumpedMaxRate)
 	for i := 0; i < len(msgTx.TxOut); i++ {
-		fmt.Printf("output amount %d\n", msgTx.TxOut[i].Value)
 		totalOut += uint64(msgTx.TxOut[i].Value)
 	}
 
@@ -4238,7 +4233,6 @@ func (dcr *ExchangeWallet) sendCoins(coins asset.Coins, addr, addr2 stdaddr.Addr
 	if !subtract {
 		feeSource = -1 // subtract from change
 	}
-	fmt.Printf("sendCoins: feeSource = %d\n", feeSource)
 
 	tx, err := dcr.sendWithReturn(baseTx, feeRate, feeSource)
 	if err != nil {
@@ -4361,7 +4355,6 @@ func (dcr *ExchangeWallet) signTxAndAddChange(baseTx *wire.MsgTx, feeRate uint64
 	var changeAddress stdaddr.Address
 	var changeOutput *wire.TxOut
 	minFeeWithChange := (size + dexdcr.P2PKHOutputSize) * feeRate
-	fmt.Printf("size=%d, minFeeWithChange = %d\n", size, minFeeWithChange)
 	if remaining > minFeeWithChange {
 		changeValue := remaining - minFeeWithChange
 		if subtractFrom >= 0 {
