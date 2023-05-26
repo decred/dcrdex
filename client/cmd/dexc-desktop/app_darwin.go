@@ -2,42 +2,6 @@
 
 package main
 
-/*
-dexc-desktop is the Desktop version of the DEX Client. There are a number of
-differences that make this version more suitable for less tech-savvy users.
-
-| CLI version                       | Desktop version                          |
-|-----------------------------------|------------------------------------------|
-| Installed by building from source | Installed with an installer program.     |
-| or downloading a binary. Or with  | (e.g a .dmg MacOS installer)             |
-| dcrinstall from a terminal.       |                                          |
-|-----------------------------------|------------------------------------------|
-| Started by command-line.          | Started by selecting from the start/main |
-|                                   | menu, or by selecting a desktop icon or  |
-|                                   | pinned taskbar icon. CLI is fine too.    |
-|                                   |                                          |
-|-----------------------------------|------------------------------------------|
-| Accessed by going to localhost    | Opens in WebView, a simple window        |
-| address in the browser.           | backed by a web engine.                  |
-|-----------------------------------|------------------------------------------|
-| Shutdown via ctrl-c signal.       | When user closes window, continues       |
-| Prompt user to force shutdown if  | running in the background if there are   |
-| there are active orders.          | active orders. Run a little server that  |
-|                                   | synchronizes at start-up, enabling the   |
-|                                   | window to be reopened when the user      |
-|                                   | tries to start another instance. A       |
-|                                   | desktop notification is sent and the     |
-|                                   | system tray icon remains in the tray.    |
-|-----------------------------------|------------------------------------------|
-
-Both versions use the same default client configuration file locations at
-AppDataDir("dexc").
-
-The program will continue to run in the background even if all windows are
-closed. This is the default behavior for MacOS apps but new windows can be
-created by clicking on the icon in the dock.
-*/
-
 import (
 	"context"
 	"errors"
@@ -75,34 +39,44 @@ import (
 	// Ethereum loaded in client/app/importlgpl.go
 )
 
+var (
+	webviewConfig  = webkit.WKWebViewConfiguration_New()
+	width, height  = defaultWindowWidthAndHeight()
+	maxOpenWindows = 5 // what would they want to do with more than 5 😂?
+	nOpenWindows   int
+)
+
 func init() {
 	runtime.LockOSThread()
+
+	// Set webview preferences.
+	webviewConfig.Preferences().SetValueForKey(core.True, core.String("developerExtrasEnabled"))
+	webviewConfig.Preferences().SetValueForKey(core.True, core.String("javaScriptCanAccessClipboard"))
+	webviewConfig.Preferences().SetValueForKey(core.True, core.String("DOMPasteAllowed"))
 }
 
-var nOpenWindows int
+// hasOpenWindows is a convenience function to tell if there are any windows
+// currently open.
+func hasOpenWindows() bool {
+	return nOpenWindows > 0
+}
 
-// createNewAppWindow creates a new window with the specified URL. Only one
-// window can be open at a time to portray the feel of a native app. We can
-// allow multiple windows in the future if needed.
+// createNewAppWindow creates a new window with the specified URL.
 func createNewAppWindow(url string) {
-	if nOpenWindows > 0 {
+	if nOpenWindows > maxOpenWindows-1 {
+		log.Debugf("Ignoring open new window request, max number of (%d) open windows exceeded", maxOpenWindows)
 		return
 	}
 	nOpenWindows++
 
-	// Prepare webview config.
-	config := webkit.WKWebViewConfiguration_New()
-	config.Preferences().SetValueForKey(core.True, core.String("developerExtrasEnabled"))
-	width, height := defaultWindowWidthAndHeight()
-
 	// Create a new webview and load the provided url.
-	webView := webkit.WKWebView_Init(core.Rect(0, 0, float64(width), float64(height)), config)
+	webView := webkit.WKWebView_Init(core.Rect(0, 0, float64(width), float64(height)), webviewConfig)
 	req := core.NSURLRequest_Init(core.URL(url))
 	webView.LoadRequest(req)
 
 	// Create a new window and set the webview as its content view.
 	win := cocoa.NSWindow_Init(core.NSMakeRect(0, 0, 1440, 900), cocoa.NSClosableWindowMask|cocoa.NSTitledWindowMask|cocoa.NSResizableWindowMask|cocoa.NSFullSizeContentViewWindowMask|cocoa.NSMiniaturizableWindowMask, cocoa.NSBackingStoreBuffered, false)
-	win.SetTitle("Decred DEX Client")
+	win.SetTitle(fmt.Sprintf("Decred DEX Client %d", nOpenWindows))
 	win.Center()
 	win.SetMovable_(true)
 	win.MakeKeyAndOrderFront(nil)
@@ -276,11 +250,40 @@ func mainCore() error {
 	cocoa.TerminateAfterWindowsClose = false
 
 	addMethodToDelegate("applicationDockMenu:", func(_ objc.Object) objc.Object {
+		menu := cocoa.NSMenu_New()
+		windows := cocoa.NSApp().OrderedWindows()
+		winLen := windows.Count()
+		var winIndex uint64
+		for ; winIndex < winLen; winIndex++ {
+			winObj := windows.ObjectAtIndex(winIndex)
+			window := cocoa.NSWindow_fromRef(winObj)
+			item := cocoa.NSMenuItem_New()
+			item.SetTitle(window.Title())
+			// Set target to the window so the "orderFront:" selector is
+			// executed by it.
+			item.SetTarget(window)
+			item.SetAction(objc.Sel("orderFront:"))
+			menu.AddItem(item)
+		}
+
+		if winLen > 0 {
+			menu.AddItem(cocoa.NSMenuItem_Separator())
+		}
+
 		newWindowItem := cocoa.NSMenuItem_New()
 		newWindowItem.SetTitle("New Window")
 		newWindowItem.SetAction(objc.Sel("newWindow:"))
 		addMethodToDelegate("newWindow:", func(_ objc.Object) {
-			createNewAppWindow(url)
+			windows := cocoa.NSApp().OrderedWindows()
+			len := windows.Count()
+			if len < uint64(maxOpenWindows) {
+				createNewAppWindow(url)
+			} else {
+				// Show the last window if maxOpenWindows has been exceeded.
+				winObj := windows.ObjectAtIndex(len - 1)
+				win := cocoa.NSWindow_fromRef(winObj)
+				win.OrderFront(nil)
+			}
 		})
 
 		openLogsItem := cocoa.NSMenuItem_New()
@@ -295,7 +298,6 @@ func mainCore() error {
 			}
 		})
 
-		menu := cocoa.NSMenu_New()
 		menu.AddItem(newWindowItem)
 		menu.AddItem(openLogsItem)
 		return menu
@@ -304,7 +306,7 @@ func mainCore() error {
 	// MacOS will always send the "windowWillClose" event when an application
 	// window is closing.
 	var noteSent bool
-	addMethodToDelegate("windowWillClose:", func(s objc.Object) {
+	addMethodToDelegate("windowWillClose:", func(_ objc.Object) {
 		nOpenWindows--
 
 		err := clientCore.Logout()
@@ -327,7 +329,7 @@ func mainCore() error {
 	// clicked or a new process is about to start, so we hijack the action and
 	// create new windows if all windows have been closed.
 	addMethodToDelegate("applicationShouldHandleReopen:hasVisibleWindows:", func(_ objc.Object) bool {
-		if nOpenWindows < 1 {
+		if !hasOpenWindows() {
 			// dexc-desktop is already running but there are no windows open so
 			// we should create a new window.
 			createNewAppWindow(url)
@@ -339,9 +341,32 @@ func mainCore() error {
 		return true
 	})
 
-	app := cocoa.NSApp_WithDidLaunch(func(notification objc.Object) {
+	app := cocoa.NSApp_WithDidLaunch(func(_ objc.Object) {
+		// We want users to notice dexc desktop is still running (even with the
+		// dot below the dock icon).
+		obj := cocoa.NSStatusBar_System().StatusItemWithLength(cocoa.NSVariableStatusItemLength)
+		obj.Retain()
+		obj.Button().SetImage(cocoa.NSImage_InitWithData(core.NSData_WithBytes(SymbolBWIcon, uint64(len(SymbolBWIcon)))))
+		obj.Button().Image().SetSize(core.Size(18, 18))
+		obj.Button().SetToolTip("Self-custodial multi-wallet")
+
+		runningItem := cocoa.NSMenuItem_New()
+		runningItem.SetTitle("Dex Client is running")
+		runningItem.SetEnabled(false)
+
+		itemQuit := cocoa.NSMenuItem_New()
+		itemQuit.SetTitle("Force Quit")
+		itemQuit.SetToolTip("Force DEX client to close")
+		itemQuit.SetAction(objc.Sel("terminate:"))
+
+		menu := cocoa.NSMenu_New()
+		menu.AddItem(runningItem)
+		menu.AddItem(itemQuit)
+		obj.SetMenu(menu)
+
 		createNewAppWindow(url)
 	})
+
 	app.SetActivationPolicy(cocoa.NSApplicationActivationPolicyRegular)
 	app.ActivateIgnoringOtherApps(false)
 	app.SetDelegate(cocoa.DefaultDelegate)
