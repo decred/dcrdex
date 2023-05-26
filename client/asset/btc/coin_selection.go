@@ -4,6 +4,7 @@
 package btc
 
 import (
+	"math"
 	"math/rand"
 	"sort"
 	"time"
@@ -78,7 +79,7 @@ func sumUTXOs(set []*compositeUTXO) (tot uint64) {
 // involves two passes over the UTXOs. The first pass randomly selects
 // each UTXO with 50% probability. Then, the second pass selects any
 // unused UTXOs until the total value is enough.
-func subsetWithLeastOverFund(enough func(uint64, uint64) (bool, uint64), utxos []*compositeUTXO) []*compositeUTXO {
+func subsetWithLeastOverFund(enough func(uint64, uint64) (bool, uint64), maxFund uint64, utxos []*compositeUTXO) []*compositeUTXO {
 	best := uint64(1 << 62)
 	var bestIncluded []bool
 	bestNumIncluded := 0
@@ -113,7 +114,7 @@ func subsetWithLeastOverFund(enough func(uint64, uint64) (bool, uint64), utxos [
 					nTotal += shuffledUTXOs[i].amount
 					totalSize += uint64(shuffledUTXOs[i].input.VBytes())
 					if e, _ := enough(totalSize, nTotal); e {
-						if nTotal < best || (nTotal == best && numIncluded < bestNumIncluded) {
+						if nTotal < best || (nTotal == best && numIncluded < bestNumIncluded) && nTotal <= maxFund {
 							best = nTotal
 							if bestIncluded == nil {
 								bestIncluded = make([]bool, len(shuffledUTXOs))
@@ -167,20 +168,36 @@ func subsetWithLeastOverFund(enough func(uint64, uint64) (bool, uint64), utxos [
 // If the provided UTXO set has less combined value than the requested amount a
 // nil slice is returned.
 func leastOverFund(enough func(inputsSize, sum uint64) (bool, uint64), utxos []*compositeUTXO) []*compositeUTXO {
-	// Partition - smallest UTXO that is large enough to fully fund, and the set
-	// of smaller ones.
+	return leastOverFundWithLimit(enough, math.MaxUint64, utxos)
+}
+
+func leastOverFundWithLimit(enough func(inputsSize, sum uint64) (bool, uint64), maxFund uint64, utxos []*compositeUTXO) []*compositeUTXO {
+	// Remove the UTXOs that are larger than maxFund
+	var smallEnoughUTXOs []*compositeUTXO
 	idx := sort.Search(len(utxos), func(i int) bool {
 		utxo := utxos[i]
+		return utxo.amount > maxFund
+	})
+	if idx == len(utxos) {
+		smallEnoughUTXOs = utxos
+	} else {
+		smallEnoughUTXOs = utxos[:idx]
+	}
+
+	// Partition - smallest UTXO that is large enough to fully fund, and the set
+	// of smaller ones.
+	idx = sort.Search(len(smallEnoughUTXOs), func(i int) bool {
+		utxo := smallEnoughUTXOs[i]
 		e, _ := enough(uint64(utxo.input.VBytes()), utxo.amount)
 		return e
 	})
 	var small []*compositeUTXO
-	var single *compositeUTXO // only return this if smaller ones would use more
-	if idx == len(utxos) {    // no one is enough
-		small = utxos
+	var single *compositeUTXO         // only return this if smaller ones would use more
+	if idx == len(smallEnoughUTXOs) { // no one is enough
+		small = smallEnoughUTXOs
 	} else {
-		small = utxos[:idx]
-		single = utxos[idx]
+		small = smallEnoughUTXOs[:idx]
+		single = smallEnoughUTXOs[idx]
 	}
 
 	var set []*compositeUTXO
@@ -193,7 +210,7 @@ func leastOverFund(enough func(inputsSize, sum uint64) (bool, uint64), utxos []*
 			return set
 		}
 	} else {
-		set = subsetWithLeastOverFund(enough, small)
+		set = subsetWithLeastOverFund(enough, maxFund, small)
 	}
 
 	// Return the small UTXO subset if it is less than the single big UTXO.

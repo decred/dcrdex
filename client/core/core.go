@@ -6161,9 +6161,12 @@ func (c *Core) prepareMultiTradeRequests(pw []byte, form *MultiTradeForm) ([]*tr
 		Options:       form.Options,
 		RedeemVersion: assetConfigs.toAsset.Version,
 		RedeemAssetID: assetConfigs.toAsset.ID,
-	}, form.Keep)
+	}, form.MaxLock)
 	if err != nil {
 		return nil, codedError(walletErr, fmt.Errorf("FundMultiOrder error for %s: %v", assetConfigs.fromAsset.Symbol, err))
+	}
+	if len(allCoins) != len(form.Placements) {
+		c.log.Infof("FundMultiOrder only funded %d orders out of %d", len(allCoins), len(form.Placements))
 	}
 	defer func() {
 		if _, err := c.updateWalletBalance(fromWallet); err != nil {

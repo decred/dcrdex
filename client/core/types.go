@@ -998,9 +998,9 @@ type MultiTradeForm struct {
 	Quote      uint32            `json:"quote"`
 	Placements []*QtyRate        `json:"placement"`
 	Options    map[string]string `json:"options"`
-	// Keep is the amount of the "from" asset that is required to still be
-	// available in the wallet after all of the trades are funded.
-	Keep uint64 `json:"keep"`
+	// MaxLock is the maximum amount of the "from" asset that the wallet
+	// should lock for the trade.
+	MaxLock uint64 `json:"maxLock"`
 }
 
 // SingleLotFeesForm is used to determine the fees for a single lot trade.

@@ -855,7 +855,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 		name                 string
 		multiOrder           *asset.MultiOrder
 		allOrNothing         bool
-		keep                 uint64
+		maxLock              uint64
 		utxos                []*ListUnspentResult
 		bondReservesEnforced int64
 		balance              uint64
@@ -872,7 +872,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 	}
 
 	fmt.Printf("amount of balance: %v\n", (2*uint64(requiredForOrder(15e5, 2)) + (expectedSplitFee(2, 2))))
-	fmt.Printf("expected split fee %v\n", expectedSplitFee(2, 2))
+	fmt.Printf("expected split fee %v\n", expectedSplitFee(1, 2))
 
 	tests := []*test{
 		{ // "split not allowed, utxos like split previously done"
@@ -894,7 +894,6 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 					"swapsplit": "false",
 				},
 			},
-			keep: 0,
 			utxos: []*ListUnspentResult{
 				{
 					Confirmations: 1,
@@ -917,7 +916,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 					Vout:          0,
 				},
 			},
-			balance: 33e5,
+			balance: 35e5,
 			expectedCoins: []asset.Coins{
 				{newOutput(txHashes[0], 0, 12e5)},
 				{newOutput(txHashes[1], 0, 23e5)},
@@ -951,7 +950,6 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 				},
 			},
 			allOrNothing: true,
-			keep:         0,
 			utxos: []*ListUnspentResult{
 				{
 					Confirmations: 1,
@@ -999,8 +997,8 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 				{txHashes[2].String(), 0},
 			},
 		},
-		{ // "split not allowed, can only fund first order and respect keep"
-			name: "no split allowed, can only fund first order and respect keep",
+		{ // "split not allowed, can only fund first order and respect maxLock"
+			name: "split not allowed, can only fund first order and respect maxLock",
 			multiOrder: &asset.MultiOrder{
 				Values: []*asset.MultiOrderValue{
 					{
@@ -1018,7 +1016,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 					"swapsplit": "false",
 				},
 			},
-			keep: 12e5,
+			maxLock: 32e5,
 			utxos: []*ListUnspentResult{
 				{
 					Confirmations: 1,
@@ -1081,6 +1079,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 					"swapsplit": "false",
 				},
 			},
+			maxLock:              46e5,
 			bondReservesEnforced: 12e5,
 			utxos: []*ListUnspentResult{
 				{
@@ -1148,7 +1147,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 					"swapsplit": "false",
 				},
 			},
-			keep: 0,
+			maxLock: 50e5,
 			utxos: []*ListUnspentResult{
 				{
 					Confirmations: 1,
@@ -1218,7 +1217,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 				},
 			},
 			allOrNothing: false,
-			keep:         1e6,
+			maxLock:      43e5,
 			utxos: []*ListUnspentResult{
 				{
 					Confirmations: 1,
@@ -1306,6 +1305,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 					Vout:          0,
 				},
 			},
+			maxLock:         2*uint64(requiredForOrder(15e5, 2)) + expectedSplitFee(2, 2),
 			balance:         2*uint64(requiredForOrder(15e5, 2)) + expectedSplitFee(2, 2),
 			expectSendRawTx: true,
 			expectedInputs: []*wire.TxIn{
@@ -1369,15 +1369,16 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 					RedeemScript:  nil,
 					ScriptPubKey:  scriptPubKeys(1),
 					Address:       addresses(1),
-					Amount:        ((2*float64(requiredForOrder(15e5, 2)) + float64(expectedSplitFee(2, 2)) - 1e6) / 1e8) - 1/1e8,
+					Amount:        (2*float64(requiredForOrder(15e5, 2)) + float64(expectedSplitFee(2, 2)) - 1e6) / 1e8,
 					Vout:          0,
 				},
 			},
-			balance:   2*uint64(requiredForOrder(15e5, 2)) + expectedSplitFee(2, 2),
+			maxLock:   2*uint64(requiredForOrder(15e5, 2)) + expectedSplitFee(2, 2) - 1,
+			balance:   2*uint64(requiredForOrder(15e5, 2)) + expectedSplitFee(2, 2) - 1,
 			expectErr: true,
 		},
-		{ // "split allowed, can fund both with split and keep"
-			name: "can fund both with split and keep",
+		{ // "can fund both with split and respect maxLock"
+			name: "can fund both with split and respect maxLock",
 			multiOrder: &asset.MultiOrder{
 				Values: []*asset.MultiOrderValue{
 					{
@@ -1395,7 +1396,6 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 					"swapsplit": "true",
 				},
 			},
-			keep: 1e6,
 			utxos: []*ListUnspentResult{
 				{
 					Confirmations: 1,
@@ -1404,11 +1404,12 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 					RedeemScript:  nil,
 					ScriptPubKey:  scriptPubKeys(0),
 					Address:       addresses(0),
-					Amount:        (2*float64(requiredForOrder(15e5, 2)) + 1e6 + float64(expectedSplitFee(1, 3))) / 1e8,
+					Amount:        float64(50e5) / 1e8,
 					Vout:          0,
 				},
 			},
-			balance:         1e6 + 2*uint64(requiredForOrder(15e5, 2)) + expectedSplitFee(1, 3),
+			balance:         50e5,
+			maxLock:         2*uint64(requiredForOrder(15e5, 2)) + expectedSplitFee(1, 2),
 			expectSendRawTx: true,
 			expectedInputs: []*wire.TxIn{
 				{
@@ -1422,15 +1423,15 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 				wire.NewTxOut(requiredForOrder(15e5, 2), []byte{}),
 				wire.NewTxOut(requiredForOrder(15e5, 2), []byte{}),
 			},
-			expectedChange:   1e6,
+			expectedChange:   50e5 - (2*uint64(requiredForOrder(15e5, 2)) + expectedSplitFee(1, 3)),
 			expectedSplitFee: expectedSplitFee(1, 3),
 			expectedRedeemScripts: [][]dex.Bytes{
 				{nil},
 				{nil},
 			},
 		},
-		{ // "split allowed, cannot fund both with split"
-			name: "can fund both with split, but not keep",
+		{ // "cannot fund both with split and respect maxLock"
+			name: "cannot fund both with split and respect maxLock",
 			multiOrder: &asset.MultiOrder{
 				Values: []*asset.MultiOrderValue{
 					{
@@ -1448,7 +1449,6 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 					"swapsplit": "true",
 				},
 			},
-			keep: 1e6,
 			utxos: []*ListUnspentResult{
 				{
 					Confirmations: 1,
@@ -1457,15 +1457,16 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 					RedeemScript:  nil,
 					ScriptPubKey:  scriptPubKeys(0),
 					Address:       addresses(0),
-					Amount:        ((2*float64(requiredForOrder(15e5, 2)) + 1e6 + float64(expectedSplitFee(1, 3))) / 1e8) - 1/1e8,
+					Amount:        float64(50e5) / 1e8,
 					Vout:          0,
 				},
 			},
-			balance:   1e6 + 2*uint64(requiredForOrder(15e5, 2)) + expectedSplitFee(1, 3),
+			balance:   50e5,
+			maxLock:   2*uint64(requiredForOrder(15e5, 2)) + expectedSplitFee(1, 2) - 1,
 			expectErr: true,
 		},
-		{ // "split allowed, can fund both with split and keep and bond reserves"
-			name: "can fund both with split and keep",
+		{ // "split allowed, can fund both with split with bond reserves"
+			name: "split allowed, can fund both with split with bond reserves",
 			multiOrder: &asset.MultiOrder{
 				Values: []*asset.MultiOrderValue{
 					{
@@ -1483,7 +1484,6 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 					"swapsplit": "true",
 				},
 			},
-			keep:                 1e6,
 			bondReservesEnforced: 2e6,
 			utxos: []*ListUnspentResult{
 				{
@@ -1493,11 +1493,12 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 					RedeemScript:  nil,
 					ScriptPubKey:  scriptPubKeys(0),
 					Address:       addresses(0),
-					Amount:        (2*float64(requiredForOrder(15e5, 2)) + 3e6 + float64(expectedSplitFee(1, 3))) / 1e8,
+					Amount:        (2*float64(requiredForOrder(15e5, 2)) + 2e6 + float64(expectedSplitFee(1, 3))) / 1e8,
 					Vout:          0,
 				},
 			},
-			balance:         3e6 + 2*uint64(requiredForOrder(15e5, 2)) + expectedSplitFee(1, 3),
+			balance:         2e6 + 2*uint64(requiredForOrder(15e5, 2)) + expectedSplitFee(1, 3),
+			maxLock:         2e6 + 2*uint64(requiredForOrder(15e5, 2)) + expectedSplitFee(1, 3),
 			expectSendRawTx: true,
 			expectedInputs: []*wire.TxIn{
 				{
@@ -1511,7 +1512,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 				wire.NewTxOut(requiredForOrder(15e5, 2), []byte{}),
 				wire.NewTxOut(requiredForOrder(15e5, 2), []byte{}),
 			},
-			expectedChange:   3e6,
+			expectedChange:   2e6,
 			expectedSplitFee: expectedSplitFee(1, 3),
 			expectedRedeemScripts: [][]dex.Bytes{
 				{nil},
@@ -1519,7 +1520,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 			},
 		},
 		{ // "split allowed, cannot fund both with split and keep and bond reserves"
-			name: "can fund both with split and keep",
+			name: "split allowed, cannot fund both with split and keep and bond reserves",
 			multiOrder: &asset.MultiOrder{
 				Values: []*asset.MultiOrderValue{
 					{
@@ -1537,7 +1538,6 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 					"swapsplit": "true",
 				},
 			},
-			keep:                 1e6,
 			bondReservesEnforced: 2e6,
 			utxos: []*ListUnspentResult{
 				{
@@ -1547,11 +1547,12 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 					RedeemScript:  nil,
 					ScriptPubKey:  scriptPubKeys(0),
 					Address:       addresses(0),
-					Amount:        ((2*float64(requiredForOrder(15e5, 2)) + 3e6 + float64(expectedSplitFee(1, 3))) / 1e8) - 1/1e8,
+					Amount:        ((2*float64(requiredForOrder(15e5, 2)) + 2e6 + float64(expectedSplitFee(1, 3))) / 1e8) - 1/1e8,
 					Vout:          0,
 				},
 			},
-			balance:   3e6 + 2*uint64(requiredForOrder(15e5, 2)) + expectedSplitFee(1, 3),
+			balance:   2e6 + 2*uint64(requiredForOrder(15e5, 2)) + expectedSplitFee(1, 3) - 1,
+			maxLock:   2e6 + 2*uint64(requiredForOrder(15e5, 2)) + expectedSplitFee(1, 3) - 1,
 			expectErr: true,
 		},
 		{ // "split with buffer"
@@ -1586,7 +1587,8 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 					Vout:          0,
 				},
 			},
-			balance:         2*uint64(requiredForOrder(15e5, 2)) + expectedSplitFee(1, 2),
+			balance:         2*uint64(requiredForOrder(15e5, 2)*110/100) + expectedSplitFee(1, 2),
+			maxLock:         2*uint64(requiredForOrder(15e5, 2)*110/100) + expectedSplitFee(1, 2),
 			expectSendRawTx: true,
 			expectedInputs: []*wire.TxIn{
 				{
@@ -1606,8 +1608,8 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 				{nil},
 			},
 		},
-		{ // "split with buffer, cannot fund"
-			name: "split, not enough balance for buffer",
+		{ // "split, maxLock too low to fund buffer"
+			name: "split, maxLock too low to fund buffer",
 			multiOrder: &asset.MultiOrder{
 				Values: []*asset.MultiOrderValue{
 					{
@@ -1634,11 +1636,12 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 					RedeemScript:  nil,
 					ScriptPubKey:  scriptPubKeys(0),
 					Address:       addresses(0),
-					Amount:        (2*float64(requiredForOrder(15e5, 2)*110/100)+float64(expectedSplitFee(1, 2)))/1e8 - 1/1e8,
+					Amount:        (2*float64(requiredForOrder(15e5, 2)*110/100) + float64(expectedSplitFee(1, 2))) / 1e8,
 					Vout:          0,
 				},
 			},
-			balance:   (2 * uint64(requiredForOrder(15e5, 2)) * 110 / 100) + expectedSplitFee(1, 2),
+			balance:   2*uint64(requiredForOrder(15e5, 2)*110/100) + expectedSplitFee(1, 2),
+			maxLock:   2*uint64(requiredForOrder(15e5, 2)*110/100) + expectedSplitFee(1, 2) - 1,
 			expectErr: true,
 		},
 	}
@@ -1655,7 +1658,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 		wallet.fundingCoins = make(map[outPoint]*utxo)
 		wallet.bondReservesEnforced = test.bondReservesEnforced
 
-		allCoins, _, splitFee, err := wallet.FundMultiOrder(test.multiOrder, test.keep)
+		allCoins, _, splitFee, err := wallet.FundMultiOrder(test.multiOrder, test.maxLock)
 		if test.expectErr {
 			if err == nil {
 				t.Fatalf("%s: no error returned", test.name)

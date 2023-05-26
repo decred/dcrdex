@@ -605,7 +605,7 @@ func parseMultiTradeArgs(params *RawParams) (*multiTradeForm, error) {
 		return nil, err
 	}
 
-	keep, err := checkUIntArg(params.Args[4], "keep", 64)
+	maxLock, err := checkUIntArg(params.Args[4], "maxLock", 64)
 	if err != nil {
 		return nil, err
 	}
@@ -647,7 +647,7 @@ func parseMultiTradeArgs(params *RawParams) (*multiTradeForm, error) {
 			Quote:      uint32(quote),
 			Placements: placements,
 			Options:    options,
-			Keep:       keep,
+			MaxLock:    maxLock,
 		},
 	}, nil
 }
