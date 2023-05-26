@@ -6148,6 +6148,33 @@ func (btc *baseWallet) FundMultiOrder(mo *asset.MultiOrder, maxLock uint64) ([]a
 	return btc.fundMulti(maxLock, mo.Values, mo.FeeSuggestion, mo.MaxFeeRate, useSplit, splitBuffer)
 }
 
+// MaxFundingFees returns the maximum funding fees for an order/multi-order.
+func (btc *baseWallet) MaxFundingFees(numTrades uint32, options map[string]string) uint64 {
+	useSplit := btc.useSplitTx()
+	if options != nil {
+		if split, ok := options[splitKey]; ok {
+			useSplit, _ = strconv.ParseBool(split)
+		}
+	}
+	if !useSplit {
+		return 0
+	}
+
+	var inputSize, outputSize uint64
+	if btc.segwit {
+		inputSize = dexbtc.RedeemP2WPKHInputTotalSize
+		outputSize = dexbtc.P2WPKHOutputSize
+	} else {
+		inputSize = dexbtc.RedeemP2PKHInputSize
+		outputSize = dexbtc.P2PKHOutputSize
+	}
+
+	const numInputs = 12 // // plan for lots of inputs to get a safe estimate
+
+	txSize := dexbtc.MinimumTxOverhead + numInputs*inputSize + uint64(numTrades+1)*outputSize
+	return btc.feeRateLimit() * txSize
+}
+
 type utxo struct {
 	txHash  *chainhash.Hash
 	vout    uint32

@@ -26,6 +26,11 @@ type clientCore interface {
 	Trade(pw []byte, form *core.TradeForm) (*core.Order, error)
 	MaxBuy(host string, base, quote uint32, rate uint64) (*core.MaxOrderEstimate, error)
 	MaxSell(host string, base, quote uint32) (*core.MaxOrderEstimate, error)
+	AssetBalance(assetID uint32) (*core.WalletBalance, error)
+	PreOrder(form *core.TradeForm) (*core.OrderEstimate, error)
+	WalletState(assetID uint32) *core.WalletState
+	MultiTrade(pw []byte, form *core.MultiTradeForm) ([]*core.Order, error)
+	MaxFundingFees(fromAsset uint32, numTrades uint32, options map[string]string) (uint64, error)
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -38,6 +43,7 @@ type MarketMaker struct {
 	running atomic.Bool
 	log     dex.Logger
 	core    *core.Core
+	bh      *balanceHandler
 }
 
 // Running returns true if the MarketMaker is running.
@@ -63,7 +69,7 @@ func duplicateBotConfig(cfgs []*BotConfig) error {
 	mkts := make(map[string]struct{})
 
 	for _, cfg := range cfgs {
-		mkt := fmt.Sprintf("%s-%d-%d", cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
+		mkt := dexMarketID(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
 		if _, found := mkts[mkt]; found {
 			return fmt.Errorf("duplicate bot config for market %s", mkt)
 		}
@@ -71,6 +77,20 @@ func duplicateBotConfig(cfgs []*BotConfig) error {
 	}
 
 	return nil
+}
+
+func priceOracleFromConfigs(ctx context.Context, cfgs []*BotConfig, log dex.Logger) (*priceOracle, error) {
+	var oracle *priceOracle
+	var err error
+	marketsRequiringOracle := marketsRequiringPriceOracle(cfgs)
+	if len(marketsRequiringOracle) > 0 {
+		oracle, err = newPriceOracle(ctx, marketsRequiringOracle, log)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create PriceOracle: %v", err)
+		}
+	}
+
+	return oracle, nil
 }
 
 // Run starts the MarketMaker. There can only be one BotConfig per dex market.
@@ -97,25 +117,35 @@ func (m *MarketMaker) Run(ctx context.Context, cfgs []*BotConfig, pw []byte) err
 		return fmt.Errorf("failed to login: %w", err)
 	}
 
-	var oracle *priceOracle
-	marketsRequiringOracle := marketsRequiringPriceOracle(cfgs)
-	if len(marketsRequiringOracle) > 0 {
-		oracle, err = newPriceOracle(m.ctx, marketsRequiringOracle, m.log.SubLogger("PriceOracle"))
-		if err != nil {
-			return fmt.Errorf("failed to create PriceOracle: %v", err)
-		}
+	// TODO: unlock all wallets
+
+	oracle, err := priceOracleFromConfigs(m.ctx, cfgs, m.log.SubLogger("PriceOracle"))
+	if err != nil {
+		return err
+	}
+
+	m.bh, err = newBalanceHandler(cfgs, m.core, m.log.SubLogger("BalanceHandler"))
+	if err != nil {
+		return err
 	}
 
 	startedMarketMaking = true
 
 	wg := new(sync.WaitGroup)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		m.bh.run(m.ctx)
+	}()
+
 	for _, cfg := range cfgs {
 		switch {
 		case cfg.MMCfg != nil:
 			wg.Add(1)
 			go func(cfg *BotConfig) {
 				logger := m.log.SubLogger(fmt.Sprintf("MarketMaker-%s-%d-%d", cfg.Host, cfg.BaseAsset, cfg.QuoteAsset))
-				RunBasicMarketMaker(m.ctx, cfg, m.core, oracle, pw, logger)
+				mktID := dexMarketID(cfg.Host, cfg.BaseAsset, cfg.QuoteAsset)
+				RunBasicMarketMaker(m.ctx, cfg, m.bh.wrappedCoreForBot(mktID), oracle, pw, logger)
 				wg.Done()
 			}(cfg)
 		default:
@@ -130,6 +160,16 @@ func (m *MarketMaker) Run(ctx context.Context, cfgs []*BotConfig, pw []byte) err
 	}()
 
 	return nil
+}
+
+// BotBalances returns the amount of each asset currently allocated to each
+// bot. This can only be called when the MarketMaker is running.
+func (m *MarketMaker) BotBalances() map[string]map[uint32]uint64 {
+	if !m.running.Load() {
+		return nil
+	}
+
+	return m.bh.allBotBalances()
 }
 
 // Stop stops the MarketMaker.

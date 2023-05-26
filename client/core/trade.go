@@ -645,14 +645,23 @@ func (t *trackedTrade) coreOrderInternal() *Order {
 	corder.Epoch = t.dc.marketEpoch(t.mktID, t.Prefix().ServerTime)
 	corder.LockedAmt = t.lockedAmount()
 	corder.ReadyToTick = t.readyToTick
+	corder.RedeemLockedAmt = t.redemptionLocked
+	corder.RefundLockedAmt = t.refundLocked
 
+	allFeesConfirmed := true
 	for _, mt := range t.matches {
+		if !mt.MetaData.Proof.SwapFeeConfirmed || !mt.MetaData.Proof.RedemptionFeeConfirmed {
+			allFeesConfirmed = false
+		}
 		swapConfs, counterConfs := mt.confirms()
 		corder.Matches = append(corder.Matches, matchFromMetaMatchWithConfs(t, &mt.MetaMatch,
 			swapConfs, int64(t.metaData.FromSwapConf),
 			counterConfs, int64(t.metaData.ToSwapConf),
 			int64(mt.redemptionConfs), int64(mt.redemptionConfsReq)))
 	}
+
+	corder.AllFeesConfirmed = allFeesConfirmed
+
 	return corder
 }
 
@@ -1485,7 +1494,7 @@ func (t *trackedTrade) updateDynamicSwapOrRedemptionFeesPaid(ctx context.Context
 	if !isInit {
 		checkFees = feeChecker.DynamicRedemptionFeesPaid
 	}
-	actualSwapFees, secrets, err := checkFees(ctx, coinID, contractData)
+	actualFees, secrets, err := checkFees(ctx, coinID, contractData)
 	if err != nil {
 		if errors.Is(err, asset.CoinNotFoundError) || errors.Is(err, asset.ErrNotEnoughConfirms) {
 			return
@@ -1500,9 +1509,9 @@ func (t *trackedTrade) updateDynamicSwapOrRedemptionFeesPaid(ctx context.Context
 		return
 	}
 	if isInit {
-		t.metaData.SwapFeesPaid += actualSwapFees
+		t.metaData.SwapFeesPaid += actualFees
 	} else {
-		t.metaData.RedemptionFeesPaid += actualSwapFees
+		t.metaData.RedemptionFeesPaid += actualFees
 	}
 	stopChecks()
 	t.notify(newOrderNote(TopicOrderStatusUpdate, "", "", db.Data, t.coreOrderInternal()))

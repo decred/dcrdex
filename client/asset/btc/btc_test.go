@@ -2018,6 +2018,48 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 	}
 }
 
+func TestMaxFundingFees(t *testing.T) {
+	runRubric(t, testMaxFundingFees)
+}
+
+func testMaxFundingFees(t *testing.T, segwit bool, walletType string) {
+	wallet, _, shutdown := tNewWallet(segwit, walletType)
+	defer shutdown()
+
+	feeRateLimit := uint64(100)
+
+	wallet.cfgV.Store(&baseWalletConfig{
+		feeRateLimit: feeRateLimit,
+	})
+
+	useSplitOptions := map[string]string{
+		splitKey: "true",
+	}
+	noSplitOptions := map[string]string{
+		splitKey: "false",
+	}
+
+	var inputSize, outputSize uint64
+	if segwit {
+		inputSize = dexbtc.RedeemP2WPKHInputTotalSize
+		outputSize = dexbtc.P2WPKHOutputSize
+	} else {
+		inputSize = dexbtc.RedeemP2PKHInputSize
+		outputSize = dexbtc.P2PKHOutputSize
+	}
+
+	maxFundingFees := wallet.MaxFundingFees(3, useSplitOptions)
+	expectedFees := feeRateLimit * (inputSize*12 + outputSize*4 + dexbtc.MinimumTxOverhead)
+	if maxFundingFees != expectedFees {
+		t.Fatalf("unexpected max funding fees. expected %d, got %d", expectedFees, maxFundingFees)
+	}
+
+	maxFundingFees = wallet.MaxFundingFees(3, noSplitOptions)
+	if maxFundingFees != 0 {
+		t.Fatalf("unexpected max funding fees. expected 0, got %d", maxFundingFees)
+	}
+}
+
 func TestAvailableFund(t *testing.T) {
 	runRubric(t, testAvailableFund)
 }

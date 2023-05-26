@@ -30,6 +30,7 @@ const (
 	WalletTraitAuthenticator                          // The wallet require authentication.
 	WalletTraitShielded                               // The wallet is ShieldedWallet (e.g. ZCash)
 	WalletTraitTokenApprover                          // The wallet is a TokenApprover
+	WalletTraitAccountLocker                          // The wallet must have enough balance for redemptions before a trade.
 )
 
 // IsRescanner tests if the WalletTrait has the WalletTraitRescanner bit set.
@@ -116,6 +117,12 @@ func (wt WalletTrait) IsTokenApprover() bool {
 	return wt&WalletTraitTokenApprover != 0
 }
 
+// IsAccountLocker test if WalletTrait has WalletTraitAccountLocker bit set,
+// which indicates the wallet implements the AccountLocker interface.
+func (wt WalletTrait) IsAccountLocker() bool {
+	return wt&WalletTraitAccountLocker != 0
+}
+
 // DetermineWalletTraits returns the WalletTrait bitset for the provided Wallet.
 func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(Rescanner); is {
@@ -160,6 +167,10 @@ func DetermineWalletTraits(w Wallet) (t WalletTrait) {
 	if _, is := w.(TokenApprover); is {
 		t |= WalletTraitTokenApprover
 	}
+	if _, is := w.(AccountLocker); is {
+		t |= WalletTraitAccountLocker
+	}
+
 	return t
 }
 
@@ -504,6 +515,8 @@ type Wallet interface {
 	// than the number of orders, then the orders at the end of the list were
 	// not about to be funded.
 	FundMultiOrder(ord *MultiOrder, maxLock uint64) (coins []Coins, redeemScripts [][]dex.Bytes, fundingFees uint64, err error)
+	// MaxFundingFees returns the max fees that could be paid for funding a swap.
+	MaxFundingFees(numTrades uint32, options map[string]string) uint64
 }
 
 // Authenticator is a wallet implementation that require authentication.
