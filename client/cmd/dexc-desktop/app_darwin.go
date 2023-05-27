@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"runtime/pprof"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -96,39 +97,54 @@ func mainCore() error {
 		return fmt.Errorf("configuration error: %w", err)
 	}
 
+	// Return early if unsupported flags are provided.
+	if cfg.Webview != "" {
+		return errors.New("--webview flag is not supported. Other OS use it for a specific reason (to support multiple windows)")
+	}
+
+	// The --kill flag is a backup measure to end a background process (that
+	// presumably has active orders).
+	if cfg.Kill {
+		// This is a desktop app and the interactive quit or force quit
+		// button can be used to shutdown the app.
+		return errors.New(`--kill flag is not supported. Use the "Quit" or "Force Quit" button to kill any running process.`)
+	}
+
 	// Filter registered assets.
 	asset.SetNetwork(cfg.Net)
 
-	if cfg.Webview != "" { // Ignore, other OS use this for a specific reason (to support multiple windows).
-		return nil
+	// Use a "dexc-desktop-state" file to prevent other processes when
+	// dexc-desktop is already running (e.g when non-bundled version of
+	// dexc-desktop is executed from cmd and vice versa).
+	dexcDesktopStateFile := filepath.Join(cfg.Config.AppData, cfg.Net.String(), "dexc-desktop-state")
+	if dex.FileExists(dexcDesktopStateFile) {
+		return fmt.Errorf("dexc-desktop is already running, if not, manually delete this file: %s", strings.ReplaceAll(dexcDesktopStateFile, " ", `\ `))
 	}
+
+	err = os.WriteFile(dexcDesktopStateFile, []byte("running"), 0600)
+	if err != nil {
+		return fmt.Errorf("os.WriteFile error: %w", err)
+	}
+
+	// shutdownCloser is used to execute functions that could have been executed
+	// as a deferred statement.
+	shutdownCloser := dex.NewErrorCloser()
+	defer shutdownCloser.Done(log) // execute deferred statements if we return early
 
 	// Initialize logging.
 	utc := !cfg.LocalLogs
 	logMaker, closeLogger := app.InitLogging(cfg.LogPath, cfg.DebugLevel, cfg.LogStdout, utc)
-	defer closeLogger()
+	shutdownCloser.Add(func() error {
+		log.Debug("Exiting dexc main.")
+		closeLogger()
+		return nil
+	})
+
 	log = logMaker.Logger("APP")
 	log.Infof("%s version %s (Go version %s)", appName, app.Version, runtime.Version())
 	if utc {
 		log.Infof("Logging with UTC time stamps. Current local time is %v",
 			time.Now().Local().Format("15:04:05 MST"))
-	}
-
-	syncDir := filepath.Join(cfg.AppData, cfg.Net.String())
-
-	// The --kill flag is a backup measure to end a background process (that
-	// presumably has active orders).
-	if cfg.Kill {
-		sendKillSignal(syncDir)
-		return nil
-	}
-
-	startServer, err := synchronize(syncDir)
-	if err != nil || !startServer {
-		// If we didn't start the server but there is no error, and it means
-		// that we've successfully sent an open window request to an already
-		// running instance.
-		return err
 	}
 
 	if cfg.CPUProfile != "" {
@@ -140,7 +156,10 @@ func mainCore() error {
 		if err != nil {
 			return fmt.Errorf("error starting CPU profiler: %w", err)
 		}
-		defer pprof.StopCPUProfile()
+		shutdownCloser.Add(func() error {
+			pprof.StopCPUProfile()
+			return nil
+		})
 	}
 
 	defer func() {
@@ -179,12 +198,6 @@ func mainCore() error {
 	}()
 
 	<-clientCore.Ready()
-
-	defer func() {
-		log.Info("Exiting dexc main.")
-		cancel()  // no-op with clean rpc/web server setup
-		wg.Wait() // no-op with clean setup and shutdown
-	}()
 
 	var marketMaker *mm.MarketMaker
 	if cfg.Experimental {
@@ -234,21 +247,35 @@ func mainCore() error {
 		return err
 	}
 
-	// No errors running webserver, so we can be certain we won any race between
-	// starting instances. Start the sync server now.
-	openC := make(chan struct{}) // no buffer. Is ignored if window is currently open
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		runServer(appCtx, syncDir, openC, killChan, cfg.Net)
-	}()
-
 	url := "http://" + webSrv.Addr()
 	logDir := filepath.Dir(cfg.LogPath)
 
 	// Set to false so that the app doesn't exit when the last window is closed.
 	cocoa.TerminateAfterWindowsClose = false
 
+	// MacOS will always send the "applicationShouldTerminate" event when an
+	// application is about to exit so we should use this opportunity to
+	// cleanup. See:
+	// https://developer.apple.com/documentation/appkit/nsapplicationdelegate/1428642-applicationshouldterminate?language=objc
+	addMethodToDelegate("applicationShouldTerminate:", func(s objc.Object) core.NSUInteger {
+		cancel()                 // no-op with clean rpc/web server setup
+		wg.Wait()                // no-op with clean setup and shutdown
+		shutdownCloser.Done(log) // execute defer statements
+		shutdownCloser.Success()
+
+		if dex.FileExists(dexcDesktopStateFile) {
+			err := os.Remove(dexcDesktopStateFile)
+			if err != nil {
+				// Just log the error, we shouldn't block shutdown.
+				log.Error("failed to remove dexc-desktop state file: %w", err)
+			}
+		}
+
+		return core.NSUInteger(1)
+	})
+
+	// "applicationDockMenu" method returns the app's dock menu. See:
+	// https://developer.apple.com/documentation/appkit/nsapplicationdelegate/1428564-applicationdockmenu?language=objc
 	addMethodToDelegate("applicationDockMenu:", func(_ objc.Object) objc.Object {
 		menu := cocoa.NSMenu_New()
 		windows := cocoa.NSApp().OrderedWindows()
@@ -304,7 +331,8 @@ func mainCore() error {
 	})
 
 	// MacOS will always send the "windowWillClose" event when an application
-	// window is closing.
+	// window is closing. See:
+	// https://developer.apple.com/documentation/appkit/nswindowdelegate/1419605-windowwillclose?language=objc
 	var noteSent bool
 	addMethodToDelegate("windowWillClose:", func(_ objc.Object) {
 		nOpenWindows--
@@ -327,7 +355,8 @@ func mainCore() error {
 
 	// MacOS will always send this event when an application icon on the dock is
 	// clicked or a new process is about to start, so we hijack the action and
-	// create new windows if all windows have been closed.
+	// create new windows if all windows have been closed. See:
+	// https://developer.apple.com/documentation/appkit/nsapplicationdelegate/1428638-applicationshouldhandlereopen?language=objc
 	addMethodToDelegate("applicationShouldHandleReopen:hasVisibleWindows:", func(_ objc.Object) bool {
 		if !hasOpenWindows() {
 			// dexc-desktop is already running but there are no windows open so
@@ -366,7 +395,6 @@ func mainCore() error {
 
 		createNewAppWindow(url)
 	})
-
 	app.SetActivationPolicy(cocoa.NSApplicationActivationPolicyRegular)
 	app.ActivateIgnoringOtherApps(false)
 	app.SetDelegate(cocoa.DefaultDelegate)
@@ -379,23 +407,11 @@ func mainCore() error {
 			case <-appCtx.Done():
 				cocoa.NSApp().Terminate()
 				return
-			case <-killChan:
-				cocoa.NSApp().Terminate()
-				return
-			case <-openC:
-				// Execute on main thread.
-				core.Dispatch(func() {
-					createNewAppWindow(url)
-				})
 			}
 		}
 	}()
 
-	app.Run() // blocks until app.Terminate() is called
-	log.Infof("Shutting down...")
-	cancel()
-	wg.Wait()
-
+	app.Run() // blocks until app.Terminate() is executed and wil not continue execution of any defer statements in the main thread.
 	return nil
 }
 
