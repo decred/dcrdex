@@ -36,7 +36,7 @@ APP_EXCE_DIR="${CONTENTS_DIR}/MacOS"
 ICON_FILE_NAME=dexc-icon.icns
 ICON_FILE="${SRC_DIR}/dexc-icon.icns"
 VOLUME_ICON_FILE="${ICON_FILE}" # use the same icon for the volume.
-BACKGROUND_FILE="${SRC_DIR}/dexc-installer-bg.png"
+BACKGROUND_FILE="${SRC_DIR}/dexc-installer-bg.tiff"
 
 function cleanup() {
 	echo "Removing build files..."
@@ -108,12 +108,12 @@ function build_targets() {
 		--volname "${VOLUME_NAME}" \
 		--volicon "${VOLUME_ICON_FILE}" \
 		--background "${BACKGROUND_FILE}" \
-		--window-pos 80 100 \
-		--window-size 850 420 \
-		--icon-size 80 \
-		--text-size 16 \
-		--icon "${APP_NAME}" 230 300 \
-		--app-drop-link 580 300 \
+		--window-pos 100 100 \
+		--window-size 550 360 \
+		--icon-size 60 \
+		--text-size 12 \
+		--icon "${APP_NAME}" 150 210 \
+		--app-drop-link 380 210 \
 		"${INSTALLERS_DIR}/${TARGET_NAME}.dmg" \
 		"${APP_DIR}"
 
