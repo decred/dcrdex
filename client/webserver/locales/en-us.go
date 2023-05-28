@@ -53,7 +53,6 @@ var EnUS = map[string]string{
 	"Current Password":               "Current Password",
 	"New Password":                   "New Password",
 	"Confirm New Password":           "Confirm New Password",
-	"cancel_pw":                      "Enter your password to submit a cancel order for the remaining",
 	"cancel_no_pw":                   "Submit a cancel order for the remaining",
 	"cancel_remain":                  "The remaining amount may change before the cancel order is matched.",
 	"Log In":                         "Log In",

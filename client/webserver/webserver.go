@@ -119,7 +119,7 @@ type clientCore interface {
 	Send(pw []byte, assetID uint32, value uint64, address string, subtract bool) (asset.Coin, error)
 	Trade(pw []byte, form *core.TradeForm) (*core.Order, error)
 	TradeAsync(pw []byte, form *core.TradeForm) (*core.InFlightOrder, error)
-	Cancel(pw []byte, oid dex.Bytes) error
+	Cancel(oid dex.Bytes) error
 	NotificationFeed() *core.NoteFeed
 	Logout() error
 	Orders(*core.OrderFilter) ([]*core.Order, error)

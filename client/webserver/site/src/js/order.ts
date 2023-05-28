@@ -102,7 +102,6 @@ export default class OrderPage extends BasePage {
           return
         }
         Doc.hide(page.forms)
-        page.cancelPass.value = ''
       }
     })
 
@@ -455,10 +454,8 @@ export default class OrderPage extends BasePage {
     const page = this.page
     const order = this.order
     const req = {
-      orderID: order.id,
-      pw: page.cancelPass.value
+      orderID: order.id
     }
-    page.cancelPass.value = ''
     const loaded = app().loading(page.cancelForm)
     const res = await postJSON('/api/cancel', req)
     loaded()

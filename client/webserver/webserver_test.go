@@ -207,7 +207,7 @@ func trade(form *core.TradeForm) *core.Order {
 		Sell:  form.Sell,
 	}
 }
-func (c *TCore) Cancel(pw []byte, oid dex.Bytes) error { return nil }
+func (c *TCore) Cancel(oid dex.Bytes) error { return nil }
 
 func (c *TCore) NotificationFeed() *core.NoteFeed {
 	return &core.NoteFeed{

@@ -487,7 +487,7 @@ func (m *basicMarketMaker) rebalance(newEpoch uint64) {
 		// Only cancel orders that are > 1 epoch old.
 		m.log.Tracef("rebalance: cancelling %d orders", len(cancels))
 		for _, cancel := range cancels {
-			if err := m.core.Cancel(m.pw, cancel.id[:]); err != nil {
+			if err := m.core.Cancel(cancel.id[:]); err != nil {
 				m.log.Errorf("error cancelling order: %v", err)
 				return
 			}
@@ -589,7 +589,7 @@ func (m *basicMarketMaker) cancelAllOrders() {
 	m.ordMtx.Lock()
 	defer m.ordMtx.Unlock()
 	for oid := range m.ords {
-		if err := m.core.Cancel(m.pw, oid[:]); err != nil {
+		if err := m.core.Cancel(oid[:]); err != nil {
 			m.log.Errorf("error cancelling order: %v", err)
 		}
 	}

@@ -22,7 +22,7 @@ type clientCore interface {
 	SyncBook(host string, base, quote uint32) (*orderbook.OrderBook, core.BookFeed, error)
 	SupportedAssets() map[uint32]*core.SupportedAsset
 	SingleLotFees(form *core.SingleLotFeesForm) (uint64, uint64, error)
-	Cancel(pw []byte, oidB dex.Bytes) error
+	Cancel(oidB dex.Bytes) error
 	Trade(pw []byte, form *core.TradeForm) (*core.Order, error)
 	MaxBuy(host string, base, quote uint32, rate uint64) (*core.MaxOrderEstimate, error)
 	MaxSell(host string, base, quote uint32) (*core.MaxOrderEstimate, error)

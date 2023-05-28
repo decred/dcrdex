@@ -386,7 +386,6 @@ export default class MarketsPage extends BasePage {
     const closePopups = () => {
       Doc.hide(page.forms)
       page.vPass.value = ''
-      page.cancelPass.value = ''
     }
 
     // If the user clicks outside of a form, it should close the page overlay.
@@ -2127,10 +2126,8 @@ export default class MarketsPage extends BasePage {
     const cancelData = this.cancelData
     const order = cancelData.order
     const req = {
-      orderID: order.id,
-      pw: page.cancelPass.value
+      orderID: order.id
     }
-    page.cancelPass.value = ''
     // Toggle the loader and submit button.
     const loaded = app().loading(page.cancelSubmit)
     const res = await postJSON('/api/cancel', req)
@@ -2156,7 +2153,6 @@ export default class MarketsPage extends BasePage {
     page.cancelUnit.textContent = asset.symbol.toUpperCase()
     Doc.hide(page.cancelErr)
     this.showForm(page.cancelForm)
-    page.cancelPass.focus()
     this.cancelData = {
       bttn: Doc.tmplElement(row, 'cancelBttn'),
       order: ord

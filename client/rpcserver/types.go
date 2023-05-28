@@ -148,7 +148,6 @@ type tradeForm struct {
 
 // cancelForm is information necessary to cancel a trade.
 type cancelForm struct {
-	appPass encode.PassBytes
 	orderID dex.Bytes
 }
 
@@ -579,7 +578,7 @@ func parseTradeArgs(params *RawParams) (*tradeForm, error) {
 }
 
 func parseCancelArgs(params *RawParams) (*cancelForm, error) {
-	if err := checkNArgs(params, []int{1}, []int{1}); err != nil {
+	if err := checkNArgs(params, []int{0}, []int{1}); err != nil {
 		return nil, err
 	}
 	id := params.Args[0]
@@ -590,7 +589,7 @@ func parseCancelArgs(params *RawParams) (*cancelForm, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: invalid order id hex", errArgs)
 	}
-	return &cancelForm{appPass: params.PWArgs[0], orderID: oidB}, nil
+	return &cancelForm{orderID: oidB}, nil
 }
 
 func parseSendOrWithdrawArgs(params *RawParams) (*sendOrWithdrawForm, error) {

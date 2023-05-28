@@ -1730,7 +1730,7 @@ func (c *TCore) trade(form *core.TradeForm) *core.Order {
 	}
 }
 
-func (c *TCore) Cancel(pw []byte, oid dex.Bytes) error {
+func (c *TCore) Cancel(oid dex.Bytes) error {
 	for _, xc := range tExchanges {
 		for _, mkt := range xc.Markets {
 			for _, ord := range mkt.Orders {

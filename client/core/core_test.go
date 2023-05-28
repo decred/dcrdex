@@ -3721,7 +3721,7 @@ func TestCancel(t *testing.T) {
 	dc.trades[oid] = tracker
 
 	rig.queueCancel(nil)
-	err := rig.core.Cancel(tPW, oid[:])
+	err := rig.core.Cancel(oid[:])
 	if err != nil {
 		t.Fatalf("cancel error: %v", err)
 	}
@@ -3731,7 +3731,7 @@ func TestCancel(t *testing.T) {
 
 	ensureErr := func(tag string) {
 		t.Helper()
-		err := rig.core.Cancel(tPW, oid[:])
+		err := rig.core.Cancel(oid[:])
 		if err == nil {
 			t.Fatalf("%s: no error", tag)
 		}
@@ -5292,7 +5292,7 @@ func TestReconcileTrades(t *testing.T) {
 				}
 				// Cancel order deleted. Canceling the order again should succeed.
 				rig.queueCancel(nil)
-				err = rig.core.Cancel(tPW, pendingCancel.ID().Bytes())
+				err = rig.core.Cancel(pendingCancel.ID().Bytes())
 				if err != nil {
 					t.Fatalf("cancel order error after deleting previous stale cancel: %v", err)
 				}

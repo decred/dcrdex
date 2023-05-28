@@ -499,9 +499,7 @@ func TestTradeArgs(t *testing.T) {
 
 func TestParseCancelArgs(t *testing.T) {
 	paramsWithOrderID := func(orderID string) *RawParams {
-		pw := encode.PassBytes("password123")
-		pwArgs := []encode.PassBytes{pw}
-		return &RawParams{PWArgs: pwArgs, Args: []string{orderID}}
+		return &RawParams{Args: []string{orderID}}
 	}
 	tests := []struct {
 		name    string
@@ -529,9 +527,6 @@ func TestParseCancelArgs(t *testing.T) {
 		}
 		if err != nil {
 			t.Fatalf("unexpected error %v for test %s", err, test.name)
-		}
-		if !bytes.Equal(reg.appPass, test.params.PWArgs[0]) {
-			t.Fatalf("appPass doesn't match")
 		}
 		if fmt.Sprint(reg.orderID) != test.params.Args[0] {
 			t.Fatalf("order ID doesn't match")
