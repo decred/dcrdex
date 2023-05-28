@@ -845,17 +845,10 @@ func (s *WebServer) apiAccountDisable(w http.ResponseWriter, r *http.Request) {
 // apiCancel is the handler for the '/cancel' API request.
 func (s *WebServer) apiCancel(w http.ResponseWriter, r *http.Request) {
 	form := new(cancelForm)
-	defer form.Pass.Clear()
 	if !readPost(w, r, form) {
 		return
 	}
-	pass, err := s.resolvePass(form.Pass, r)
-	if err != nil {
-		s.writeAPIError(w, fmt.Errorf("password error: %w", err))
-		return
-	}
-	defer zero(pass)
-	err = s.core.Cancel(pass, form.OrderID)
+	err := s.core.Cancel(form.OrderID)
 	if err != nil {
 		s.writeAPIError(w, fmt.Errorf("error cancelling order %s: %w", form.OrderID, err))
 		return

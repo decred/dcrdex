@@ -564,8 +564,7 @@ func handleCancel(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	if err != nil {
 		return usage(cancelRoute, err)
 	}
-	defer form.appPass.Clear()
-	if err := s.core.Cancel(form.appPass, form.orderID); err != nil {
+	if err := s.core.Cancel(form.orderID); err != nil {
 		errMsg := fmt.Sprintf("unable to cancel order %q: %v", form.orderID, err)
 		resErr := msgjson.NewError(msgjson.RPCCancelError, errMsg)
 		return createResponse(cancelRoute, nil, resErr)

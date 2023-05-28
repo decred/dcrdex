@@ -6224,13 +6224,7 @@ func (c *Core) walletSet(dc *dexConnection, baseID, quoteID uint32, sell bool) (
 		}, versCompat, nil
 }
 
-func (c *Core) Cancel(pw []byte, oidB dex.Bytes) error {
-	// Check the user password.
-	_, err := c.encryptionKey(pw)
-	if err != nil {
-		return fmt.Errorf("Cancel password error: %w", err)
-	}
-
+func (c *Core) Cancel(oidB dex.Bytes) error {
 	oid, err := order.IDFromBytes(oidB)
 	if err != nil {
 		return err

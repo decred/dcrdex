@@ -47,7 +47,6 @@ var DeDE = map[string]string{
 	"Current Password":               "Aktuelles Passwort",
 	"New Password":                   "Neues Passwort",
 	"Confirm New Password":           "Neues Passwort bestätigen",
-	"cancel_pw":                      "Gib dein Passwort ein zur Durchführung des Stornierungsauftrags für die verbleibenden",
 	"cancel_no_pw":                   "Sende einen Stornierungsauftrag für die verbleibenden",
 	"cancel_remain":                  "Der verbleibende Betrag kann sich ändern bevor der Stornierungsauftrag ausgeführt wird.",
 	"Log In":                         "Anmelden",

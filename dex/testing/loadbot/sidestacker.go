@@ -138,7 +138,7 @@ func (s *sideStacker) stack(m *Mantle) {
 			activeBuys -= numCancels
 		}
 		for i := 0; i < numCancels; i++ {
-			err := m.Cancel(pass, ords[i].ID)
+			err := m.Cancel(ords[i].ID)
 			if err != nil {
 				// Be permissive of cancel misses.
 				var msgErr *msgjson.Error

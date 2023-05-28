@@ -434,18 +434,14 @@
   [[[:title:cancel_order]]]
 </div>
 <div class="mt-2 sans-light">
-  {{if $passwordIsCached}}[[[cancel_no_pw]]]{{else}}[[[cancel_pw]]]{{end}}
+  [[[cancel_no_pw]]]
   <span id="cancelRemain" class="fs16 sans"></span>
   <span id="cancelUnit" class="fs14 sans"></span>.<br>
   [[[cancel_remain]]]
 </div>
 <hr class="dashed mt-2">
-<div class="d-flex flex-row align-items-end {{if $passwordIsCached}}justify-content-end{{end}} pb-4">
-  <div class="col-12 p-0 {{if $passwordIsCached}}d-hide{{end}}">
-    <label for="cancelPass" class="form-label pt-3 mb-1">[[[Password]]]</label>
-    <input type="password" class="form-control select" id="cancelPass" autocomplete="off">
-  </div>
-  <div class="col-12 py-1 {{if not $passwordIsCached}}ps-5{{end}} position-relative">
+<div class="d-flex flex-row align-items-end justify-content-end pb-4">
+  <div class="col-12 py-1 position-relative">
     <button id="cancelSubmit" type="button" class="w-100 fs15 bg2 selected position-relative d-inline-block">[[[Submit]]]</button>
   </div>
 </div>

@@ -795,8 +795,7 @@ func TestHandleTrade(t *testing.T) {
 
 func TestHandleCancel(t *testing.T) {
 	params := &RawParams{
-		PWArgs: []encode.PassBytes{encode.PassBytes("abc")},
-		Args:   []string{"fb94fe99e4e32200a341f0f1cb33f34a08ac23eedab636e8adb991fa76343e1e"},
+		Args: []string{"fb94fe99e4e32200a341f0f1cb33f34a08ac23eedab636e8adb991fa76343e1e"},
 	}
 	tests := []struct {
 		name        string

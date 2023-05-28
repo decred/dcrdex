@@ -59,7 +59,7 @@ type clientCore interface {
 	websocket.Core
 	AssetBalance(assetID uint32) (*core.WalletBalance, error)
 	Book(host string, base, quote uint32) (orderBook *core.OrderBook, err error)
-	Cancel(appPass []byte, orderID dex.Bytes) error
+	Cancel(orderID dex.Bytes) error
 	CloseWallet(assetID uint32) error
 	CreateWallet(appPass, walletPass []byte, form *core.WalletForm) error
 	DiscoverAccount(dexAddr string, pass []byte, certI interface{}) (*core.Exchange, bool, error)

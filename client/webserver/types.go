@@ -115,8 +115,7 @@ type tradeForm struct {
 }
 
 type cancelForm struct {
-	Pass    encode.PassBytes `json:"pw"`
-	OrderID dex.Bytes        `json:"orderID"`
+	OrderID dex.Bytes `json:"orderID"`
 }
 
 // sendOrWithdrawForm is sent to initiate either send or withdraw tx.
