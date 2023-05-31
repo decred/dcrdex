@@ -76,6 +76,7 @@ const (
 
 	swapFeeBumpKey   = "swapfeebump"
 	splitKey         = "swapsplit"
+	splitBufferKey   = "splitbuffer"
 	redeemFeeBumpFee = "redeemfeebump"
 	// externalApiUrl is the URL of the external API in case of fallback.
 	externalApiUrl = "https://mempool.space/api/"
@@ -761,9 +762,56 @@ func (s *swapOptions) feeBump() (float64, error) {
 	return bump, nil
 }
 
+// fundMultiOptions are the possible order options when calling FundMultiOrder.
 type fundMultiOptions struct {
-	Split       *bool   `ini:"swapsplit"`
-	SplitBuffer *uint64 `ini:"splitbuffer"`
+	// Split, if true, and multi-order cannot be funded with the existing UTXOs
+	// in the wallet without going over the maxLock limit, a split transaction
+	// will be created with one output per order.
+	//
+	// Use the splitKey const defined above in the options map to set this option.
+	Split *bool
+	// SplitBuffer, if set, will instruct the wallet to add a buffer onto each
+	// output of the multi-order split transaction (if the split is needed).
+	// SplitBuffer is defined as a percentage of the output. If a .1 BTC output
+	// is required for an order and SplitBuffer is set to 5, a .105 BTC output
+	// will be created.
+	//
+	// The motivation for this is to assist market makers in having to do the
+	// least amount of splits as possible. It is useful when BTC is the quote
+	// asset on a market, and the price is increasing. During a market maker's
+	// operation, it will frequently have to cancel and replace orders as the
+	// rate moves. If BTC is the quote asset on a market, and the rate has
+	// lightly increased, the market maker will need to lock slightly more of
+	// the quote asset for the same amount of lots of the base asset. If there
+	// is no split buffer, this may necessitate a new split transaction.
+	//
+	// Use the splitBufferKey const defined above in the options map to set this.
+	SplitBuffer *uint64
+}
+
+func decodeFundMultiOptions(options map[string]string) (*fundMultiOptions, error) {
+	opts := new(fundMultiOptions)
+	if options == nil {
+		return opts, nil
+	}
+
+	if split, ok := options[splitKey]; ok {
+		b, err := strconv.ParseBool(split)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing split option: %w", err)
+		}
+		opts.Split = &b
+	}
+
+	if splitBuffer, ok := options[splitBufferKey]; ok {
+		b, err := strconv.ParseUint(splitBuffer, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing split buffer option: %w", err)
+		}
+		opts.SplitBuffer = &b
+	}
+
+	return opts, nil
 }
 
 // redeemOptions are order options that apply to redemptions.
@@ -2092,11 +2140,7 @@ func (btc *baseWallet) estimateSwap(lots, lotSize, feeSuggestion, maxFeeRate uin
 		if trySplit {
 			return nil, false, 0, errors.New("balance too low to both fund order and maintain bond reserves")
 		}
-
-		enough := func(_, sum uint64) (bool, uint64) {
-			return sum >= reserves, 0
-		}
-		kept := leastOverFund(enough, utxos)
+		kept := leastOverFund(reserveEnough(reserves), utxos)
 		utxos := utxoSetDiff(utxos, kept)
 		sum, _, inputsSize, _, _, _, _, err = tryFund(utxos, orderEnough(val, lots, bumpedMaxRate, btc.initTxSizeBase, btc.initTxSize, btc.segwit, false))
 		if err != nil {
@@ -2317,10 +2361,7 @@ func (btc *baseWallet) fundInternal(keep uint64, minConfs uint32, lockUnspents b
 	}
 
 	if keep > 0 {
-		enough := func(_, sum uint64) (bool, uint64) {
-			return sum >= keep, 0
-		}
-		kept := leastOverFund(enough, utxos)
+		kept := leastOverFund(reserveEnough(keep), utxos)
 		btc.log.Debugf("Setting aside %v BTC in %d UTXOs to respect the %v BTC reserved amount",
 			toBTC(sumUTXOs(kept)), len(kept), toBTC(keep))
 		utxosPruned := utxoSetDiff(utxos, kept)
@@ -2374,7 +2415,8 @@ func (btc *baseWallet) fund(keep uint64, minConfs uint32, lockUnspents bool,
 // possible, it returns coins for the orders that could be funded. The coins
 // that fund each order are returned in the same order as the values that were
 // passed in.
-func (btc *baseWallet) fundMultiBestEffort(keep, maxLock uint64, values []*asset.MultiOrderValue, maxFeeRate uint64) ([]asset.Coins, [][]dex.Bytes, map[outPoint]*utxo, []*output, error) {
+func (btc *baseWallet) fundMultiBestEffort(keep, maxLock uint64, values []*asset.MultiOrderValue,
+	maxFeeRate uint64) ([]asset.Coins, [][]dex.Bytes, map[outPoint]*utxo, []*output, error) {
 	utxos, _, avail, err := btc.spendableUTXOs(0)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("error getting spendable utxos: %w", err)
@@ -2469,7 +2511,12 @@ func (btc *baseWallet) fundMultiBestEffort(keep, maxLock uint64, values []*asset
 // fundMultiWithSplit creates a split transaction with one output for each
 // order in order to fund the orders. An error is returned if there is not
 // enough funds in the wallet to cover the split transaction for each order.
-func (btc *baseWallet) fundMultiWithSplit(keep, maxLock uint64, values []*asset.MultiOrderValue, splitTxFeeRate, maxFeeRate, splitBuffer uint64) ([]asset.Coins, [][]dex.Bytes, uint64, error) {
+// If splitBuffer is non-zero, each order's output in the split transaction
+// will be increased by the percentage defined in splitBuffer. If an
+// order requires .1 BTC and the splitBuffer is 5, the order's output will
+// be .105 BTC.
+func (btc *baseWallet) fundMultiWithSplit(keep, maxLock uint64, values []*asset.MultiOrderValue,
+	splitTxFeeRate, maxFeeRate, splitBuffer uint64) ([]asset.Coins, [][]dex.Bytes, uint64, error) {
 	var swapInputSize uint64
 	if btc.segwit {
 		swapInputSize = dexbtc.RedeemP2WPKHInputTotalSize
@@ -5716,8 +5763,11 @@ func (btc *baseWallet) BondsFeeBuffer() uint64 {
 // there is no limit. An error is returned if the wallet does not have enough
 // available balance to fund each of the orders, however, if splitting is
 // not enabled and all of the orders cannot be funded due to mismatches in
-// UTXO sizes, the orders that can be funded are funded. The values in the
-// MultiOrder parameter are funded in the order they are passed in.
+// UTXO sizes, the orders that can be funded are funded. It will fail on the
+// first order that cannot be funded. The returned values will always be in
+// the same order as the Values in the parameter, if the length of the returned
+// orders is shorter than what was passed in, it means that the orders at the
+// end of the list were unable to be funded.
 func (btc *baseWallet) FundMultiOrder(mo *asset.MultiOrder, maxLock uint64) ([]asset.Coins, [][]dex.Bytes, uint64, error) {
 	btc.log.Debugf("Attempting to fund a multi-order for %s, maxFeeRate = %d", btc.symbol, mo.MaxFeeRate)
 
@@ -5744,15 +5794,6 @@ func (btc *baseWallet) FundMultiOrder(mo *asset.MultiOrder, maxLock uint64) ([]a
 		return nil, nil, 0, fmt.Errorf("maxLock < totalRequiredForOrders (%d < %d)", maxLock, totalRequiredForOrders)
 	}
 
-	bal, err := btc.Balance()
-	if err != nil {
-		return nil, nil, 0, fmt.Errorf("error getting wallet balance: %w", err)
-	}
-	if bal.Available < totalRequiredForOrders {
-		return nil, nil, 0, fmt.Errorf("insufficient funds. %d < %d",
-			bal.Available, totalRequiredForOrders)
-	}
-
 	if mo.FeeSuggestion > mo.MaxFeeRate {
 		return nil, nil, 0, fmt.Errorf("fee suggestion %d > max fee rate %d", mo.FeeSuggestion, mo.MaxFeeRate)
 	}
@@ -5763,10 +5804,18 @@ func (btc *baseWallet) FundMultiOrder(mo *asset.MultiOrder, maxLock uint64) ([]a
 			dex.BipIDSymbol(BipID), mo.MaxFeeRate, btc.feeRateLimit())
 	}
 
-	customCfg := new(fundMultiOptions)
-	err = config.Unmapify(mo.Options, customCfg)
+	bal, err := btc.Balance()
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("error parsing swap options: %w", err)
+		return nil, nil, 0, fmt.Errorf("error getting wallet balance: %w", err)
+	}
+	if bal.Available < totalRequiredForOrders {
+		return nil, nil, 0, fmt.Errorf("insufficient funds. %d < %d",
+			bal.Available, totalRequiredForOrders)
+	}
+
+	customCfg, err := decodeFundMultiOptions(mo.Options)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("error decoding options: %w", err)
 	}
 	useSplit := btc.useSplitTx()
 	var splitBuffer uint64

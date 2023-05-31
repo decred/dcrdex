@@ -59,6 +59,15 @@ func orderEnough(val, lots, feeRate, initTxSizeBase, initTxSize uint64, segwit, 
 	}
 }
 
+// reserveEnough generates a function that can be used as the enough argument
+// to the fund method. The function returns true if sum is greater than equal
+// to amt.
+func reserveEnough(amt uint64) func(_, sum uint64) (bool, uint64) {
+	return func(_, sum uint64) (bool, uint64) {
+		return sum >= amt, 0
+	}
+}
+
 func sumUTXOSize(set []*compositeUTXO) (tot uint64) {
 	for _, utxo := range set {
 		tot += uint64(utxo.input.VBytes())

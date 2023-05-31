@@ -5640,14 +5640,21 @@ func (c *Core) MultiTrade(pw []byte, form *MultiTradeForm) ([]*Order, error) {
 
 	orders := make([]*Order, 0, len(reqs))
 
-	var numSuccessful uint64
 	for _, req := range reqs {
-		corder, err := c.sendTradeRequest(req)
+		// return last error below if none of the orders succeeded
+		var corder *Order
+		corder, err = c.sendTradeRequest(req)
 		if err != nil {
-			return nil, fmt.Errorf("error sending trade request after %d successful sends: %v", numSuccessful, err)
+			c.log.Errorf("failed to send trade request: %v", err)
+			continue
 		}
-		numSuccessful++
 		orders = append(orders, corder)
+	}
+	if len(orders) < len(reqs) {
+		c.log.Errorf("failed to send %d of %d trade requests", len(reqs)-len(orders), len(reqs))
+	}
+	if len(orders) == 0 {
+		return nil, err
 	}
 
 	return orders, nil
@@ -6229,6 +6236,7 @@ func (c *Core) sendTradeRequest(tr *tradeRequest) (*Order, error) {
 	dc, dbOrder, wallets, form, route := tr.dc, tr.dbOrder, tr.wallets, tr.form, tr.route
 	mktID, msgOrder, preImg, recoveryCoin, coins := tr.mktID, tr.msgOrder, tr.preImg, tr.recoveryCoin, tr.coins
 	defer tr.errCloser.Done(c.log)
+
 	// Send and get the result.
 	result := new(msgjson.OrderResult)
 	err := dc.signAndRequest(msgOrder, route, result, fundingTxWait+DefaultResponseTimeout)

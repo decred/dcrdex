@@ -586,7 +586,7 @@ func parseTradeArgs(params *RawParams) (*tradeForm, error) {
 }
 
 func parseMultiTradeArgs(params *RawParams) (*multiTradeForm, error) {
-	if err := checkNArgs(params, []int{1}, []int{7, 20}); err != nil {
+	if err := checkNArgs(params, []int{1}, []int{7}); err != nil {
 		return nil, err
 	}
 
@@ -610,30 +610,19 @@ func parseMultiTradeArgs(params *RawParams) (*multiTradeForm, error) {
 		return nil, err
 	}
 
-	numPlacements, err := checkIntArg(params.Args[5], "numPlacements", 32)
-	if err != nil {
-		return nil, err
+	var p [][2]uint64
+	if err := json.Unmarshal([]byte(params.Args[5]), &p); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal placements: %v", err)
 	}
-
-	placements := make([]*core.QtyRate, 0, 4)
-
-	for i := 0; i < int(numPlacements); i++ {
-		// placements are in the format of [qty, rate]. parse them
-		// and add them to the placements array
-		placement := make([]uint64, 0, 2)
-		if err := json.Unmarshal([]byte(params.Args[6+i]), &placement); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal placement %d: %v", i, err)
-		}
-		if len(placement) != 2 {
-			return nil, fmt.Errorf("placement %d must have 2 elements", i)
-		}
+	placements := make([]*core.QtyRate, 0, len(p))
+	for _, placement := range p {
 		placements = append(placements, &core.QtyRate{
 			Qty:  placement[0],
 			Rate: placement[1],
 		})
 	}
 
-	options, err := checkMapArg(params.Args[6+numPlacements], "options")
+	options, err := checkMapArg(params.Args[6], "options")
 	if err != nil {
 		return nil, err
 	}
