@@ -1549,7 +1549,7 @@ func (btc *baseWallet) balance() (*asset.Balance, error) {
 		Available: toSatoshi(balances.Mine.Trusted) - locked,
 		Immature:  toSatoshi(balances.Mine.Immature + balances.Mine.Untrusted),
 		Locked:    locked,
-		Other:     make(map[string]asset.CustomBalance),
+		Other:     make(map[asset.BalanceCategory]asset.CustomBalance),
 	}, nil
 }
 
@@ -1564,12 +1564,12 @@ func (btc *baseWallet) Balance() (*asset.Balance, error) {
 	if reserves > bal.Available {
 		btc.log.Warnf("Available balance is below configured reserves: %f < %f",
 			toBTC(bal.Available), toBTC(reserves))
-		bal.Other[asset.ReservesDeficit] = asset.CustomBalance{
+		bal.Other[asset.BalanceCategoryReservesDeficit] = asset.CustomBalance{
 			Amount: reserves - bal.Available,
 		}
 		reserves = bal.Available
 	}
-	bal.Other[asset.BondReserves] = asset.CustomBalance{
+	bal.Other[asset.BalanceCategoryBondReserves] = asset.CustomBalance{
 		Amount: reserves,
 		Locked: true,
 	}
@@ -1619,7 +1619,7 @@ func (btc *baseWallet) legacyBalance() (*asset.Balance, error) {
 		return &asset.Balance{
 			Available: bal - locked,
 			Locked:    locked,
-			Other:     make(map[string]asset.CustomBalance),
+			Other:     make(map[asset.BalanceCategory]asset.CustomBalance),
 		}, nil
 	}
 
@@ -1632,7 +1632,7 @@ func (btc *baseWallet) legacyBalance() (*asset.Balance, error) {
 		Available: toSatoshi(walletInfo.Balance+walletInfo.UnconfirmedBalance) - locked,
 		Immature:  toSatoshi(walletInfo.ImmatureBalance),
 		Locked:    locked,
-		Other:     make(map[string]asset.CustomBalance),
+		Other:     make(map[asset.BalanceCategory]asset.CustomBalance),
 	}, nil
 }
 

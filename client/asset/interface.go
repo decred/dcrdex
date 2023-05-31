@@ -900,7 +900,7 @@ type Balance struct {
 	// Other is a place to list custom balance categories. It is recommended for
 	// custom balance added here to have a translation and tooltip info in
 	// client/webserver/site/src/js/wallet.js#customWalletBalanceCategory
-	Other map[string]CustomBalance `json:"other"`
+	Other map[BalanceCategory]CustomBalance `json:"other"`
 }
 
 // CustomBalance is a balance category used to track funds for a particular
@@ -915,16 +915,20 @@ type CustomBalance struct {
 	Locked bool `json:"locked"`
 }
 
-// These values are used as a map key for custom balances and may be recognized
-// in the frontend to support translation. It is recommended for custom balance
-// categories listed here to have a translation and tooltip info in
+// BalanceCategory is a string identifier for a custom balance category.
+type BalanceCategory string
+
+// Balance categories for custom balances These values are used as a map key for
+// custom balances and may be recognized in the frontend to support translation.
+// It is recommended for custom balance categories listed here to have a
+// translation and tooltip info in
 // client/webserver/site/src/js/wallet.js#customWalletBalanceCategory. If any of
 // these balance categories should change, the customWalletBalanceCategory
 // function in the wallet.js file above should be updated with the new value.
 const (
-	BondReserves    = "Bond Reserves"
-	ReservesDeficit = "Reserves Deficit"
-	Shielded        = "Shielded"
+	BalanceCategoryBondReserves    = "Bond Reserves"
+	BalanceCategoryReservesDeficit = "Reserves Deficit"
+	BalanceCategoryShielded        = "Shielded"
 )
 
 // Coin is some amount of spendable asset. Coin provides the information needed
