@@ -45,12 +45,13 @@ few simple options for obtaining the software:
 
 1. Download the the standalone DEX client for your operating system for the
    [latest release on GitHub](https://github.com/decred/dcrdex/releases).
-2. [Use Decrediton](https://docs.decred.org/wallets/decrediton/decrediton-setup/),
+2. Use your operating system's package manager. See [OS Packages](#os-packages)
+   for more info.
+3. [Use Decrediton](https://docs.decred.org/wallets/decrediton/decrediton-setup/),
    the official graphical Decred wallet, which integrates the DEX client, and go
    to the DEX tab.
-3. Use the Decred command line application installer, [**dcrinstall**](https://docs.decred.org/wallets/cli/cli-installation/),
-   with the `--dcrdex` switch.
-4. Build the standalone client [from source](https://github.com/decred/dcrdex/wiki/Client-Installation-and-Configuration#advanced-client-installation).
+4. Use the Decred command line application installer, [**dcrinstall**](https://docs.decred.org/wallets/cli/cli-installation/). Not recommended unless you already have this in your workflow.
+5. Build the standalone client [from source](https://github.com/decred/dcrdex/wiki/Client-Installation-and-Configuration#advanced-client-installation).
 
 See the [Client Installation and Configuration](https://github.com/decred/dcrdex/wiki/Client-Installation-and-Configuration)
 page on the wiki for more information and a detailed walk-through of the initial setup.
@@ -58,6 +59,15 @@ page on the wiki for more information and a detailed walk-through of the initial
 Almost everyone will just want the client to trade on existing markets, but if
 you want to set up a new DEX server and host markets of your choice, see
 [Server Installation](https://github.com/decred/dcrdex/wiki/Server-Installation).
+
+## OS Packages
+
+We are in the process of adding the application to various OS package mangers:
+
+- Arch Linux ([AUR](https://aur.archlinux.org/packages/dcrdex)). e.g. `$ yay dcrdex`.  Accessible to [Arch-based distros](https://wiki.archlinux.org/title/Arch-based_distributions) like Manjaro.
+- MacOS. Homebrew cask **coming soon**.
+- Windows. `winget` package **coming soon**.
+- Debian/Fedora. apt repository **coming soon**.
 
 ## Important Stuff to Know
 
