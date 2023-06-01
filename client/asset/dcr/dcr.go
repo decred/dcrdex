@@ -1085,15 +1085,11 @@ func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
 	if reserves > bal.Available { // unmixed (immature) probably needs to trickle in
 		dcr.log.Warnf("Available balance is below configured reserves: %f < %f",
 			toDCR(bal.Available), toDCR(reserves))
-		bal.Other[asset.BalanceCategoryReservesDeficit] = asset.CustomBalance{
-			Amount: reserves - bal.Available,
-		}
+		bal.ReservesDeficit = reserves - bal.Available
 		reserves = bal.Available
 	}
-	bal.Other[asset.BalanceCategoryBondReserves] = asset.CustomBalance{
-		Amount: reserves,
-		Locked: true,
-	}
+
+	bal.BondReserves = reserves
 	bal.Available -= reserves
 	bal.Locked += reserves
 

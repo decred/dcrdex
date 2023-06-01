@@ -824,25 +824,28 @@ export default class WalletsPage extends BasePage {
       }
       page.balanceDetailBox.appendChild(row)
       const tmpl = Doc.parseTemplate(row)
-      if (tmpl.category.firstElementChild) tmpl.category.firstElementChild.textContent = category
-      else tmpl.category.textContent = category
+      tmpl.name.textContent = category
       if (tooltipMsg) {
         tmpl.tooltipMsg.dataset.tooltip = tooltipMsg
         Doc.show(tmpl.tooltipMsg)
       }
       tmpl.subBalance.textContent = Doc.formatCoinValue(subBalance, ui)
     }
-    addSubBalance(intl.prep(intl.ID_AVAILABLE_C), bal.available, '')
-    addSubBalance(intl.prep(intl.ID_LOCKED_C), totalLocked, intl.prep(intl.ID_LOCKED_BAL_MSG))
-    addSubBalance(intl.prep(intl.ID_IMMATURE_C), bal.immature, intl.prep(intl.ID_IMMATURE_BAL_MSG))
+    addSubBalance(intl.prep(intl.ID_AVAILABLE_TITLE), bal.available, '')
+    addSubBalance(intl.prep(intl.ID_LOCKED_TITLE), totalLocked, intl.prep(intl.ID_LOCKED_BAL_MSG))
+    addSubBalance(intl.prep(intl.ID_IMMATURE_TITLE), bal.immature, intl.prep(intl.ID_IMMATURE_BAL_MSG))
     const sortedBalCats = Object.entries(bal.other || {})
     sortedBalCats.sort((a: [string, CustomBalance], b: [string, any]): number => a[0].localeCompare(b[0]))
     firstOther = true
     const lockedBal = (category: string): string => {
       return category + ' (' + intl.prep(intl.ID_LOCKED) + ') '
     }
+    if (bal.orderlocked > 0) addSubBalance(lockedBal(intl.prep(intl.ID_ORDER)), bal.orderlocked, intl.prep(intl.ID_LOCKED_ORDER_BAL_MSG))
     if (bal.contractlocked > 0) addSubBalance(lockedBal(intl.prep(intl.ID_SWAPPING)), bal.contractlocked, intl.prep(intl.ID_LOCKED_SWAPPING_BAL_MSG))
     if (bal.bondlocked > 0) addSubBalance(lockedBal(intl.prep(intl.ID_BONDED)), bal.bondlocked, intl.prep(intl.ID_LOCKED_BOND_BAL_MSG))
+    if (bal.bondReserves > 0) addSubBalance(lockedBal(intl.prep(intl.ID_BOND_RESERVES)), bal.bondReserves, intl.prep(intl.ID_BOND_RESERVES_MSG))
+    if (bal.reservesDeficit > 0) addSubBalance(intl.prep(intl.ID_RESERVES_DEFICIT), bal.reservesDeficit, intl.prep(intl.ID_RESERVES_DEFICIT_MSG))
+
     for (const [cat, bal] of sortedBalCats) {
       let [balCategory, tooltipMsg] = customWalletBalanceCategory(cat)
       if (bal.locked) balCategory = lockedBal(balCategory)
@@ -1469,14 +1472,8 @@ function assetIsConfigurable (assetID: number) {
  * provided balance category.
  */
 function customWalletBalanceCategory (category: string): [string, string] {
-  switch (category) {
-    case 'Reserves Deficit':
-      return [intl.prep(intl.ID_RESERVES_DEFICIT), intl.prep(intl.ID_RESERVES_DEFICIT_MSG)]
-    case 'Bond Reserves':
-      return [intl.prep(intl.ID_BOND_RESERVES), intl.prep(intl.ID_BOND_RESERVES_MSG)]
-    case 'Shielded':
-      return [intl.prep(intl.ID_SHIELDED), intl.prep(intl.ID_SHIELDED_MSG)]
+  if (category === 'Shielded') {
+    return [intl.prep(intl.ID_SHIELDED), intl.prep(intl.ID_SHIELDED_MSG)]
   }
-
   return [category, '']
 }

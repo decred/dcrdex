@@ -897,6 +897,12 @@ type Balance struct {
 	// Locked is the total amount locked in the wallet which includes but
 	// is not limited to funds locked for swap but not actually swapped yet.
 	Locked uint64 `json:"locked"`
+	// BondReserves is the amount of funds locked in the wallet for expenses
+	// associated with bond maintenance.
+	BondReserves uint64 `json:"bondReserves"`
+	// ReservesDeficit is the difference between the available balance and the
+	// amount reserved for specific purposes.
+	ReservesDeficit uint64 `json:"reservesDeficit"`
 	// Other is a place to list custom balance categories. It is recommended for
 	// custom balance added here to have a translation and tooltip info in
 	// client/webserver/site/src/js/wallet.js#customWalletBalanceCategory
@@ -926,9 +932,7 @@ type BalanceCategory string
 // these balance categories should change, the customWalletBalanceCategory
 // function in the wallet.js file above should be updated with the new value.
 const (
-	BalanceCategoryBondReserves    = "Bond Reserves"
-	BalanceCategoryReservesDeficit = "Reserves Deficit"
-	BalanceCategoryShielded        = "Shielded"
+	BalanceCategoryShielded = "Shielded"
 )
 
 // Coin is some amount of spendable asset. Coin provides the information needed

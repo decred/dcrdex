@@ -224,6 +224,8 @@ export interface WalletBalance {
   orderlocked: number
   contractlocked: number
   bondlocked: number
+  bondReserves: number
+  reservesDeficit: number
   other: Record<string, CustomBalance>
 }
 

@@ -111,21 +111,23 @@ export const ID_WALLET_SYNC_FINISHING_UP = 'WALLET_SYNC_FINISHING_UP'
 export const ID_CONNECT_WALLET_ERR_MSG = 'CONNECTING_WALLET_ERR_MSG'
 export const ID_REFUND_IMMINENT = 'REFUND_IMMINENT'
 export const ID_REFUND_WILL_HAPPEN_AFTER = 'REFUND_WILL_HAPPEN_AFTER'
-export const ID_AVAILABLE_C = 'ID_AVAILABLE_C'
-export const ID_LOCKED_C = 'ID_LOCKED_C'
-export const ID_IMMATURE_C = 'ID_IMMATURE_C'
-export const ID_SWAPPING = 'ID_SWAPPING'
-export const ID_BONDED = 'ID_BONDED'
-export const ID_LOCKED_BAL_MSG = 'ID_LOCKED_BAL_MSG'
-export const ID_IMMATURE_BAL_MSG = 'ID_IMMATURE_BAL_MSG'
-export const ID_LOCKED_SWAPPING_BAL_MSG = 'ID_LOCKED_SWAPPING_BAL_MSG'
-export const ID_LOCKED_BOND_BAL_MSG = 'ID_LOCKED_BOND_BAL_MSG'
-export const ID_RESERVES_DEFICIT = 'ID_RESERVES_DEFICIT'
-export const ID_RESERVES_DEFICIT_MSG = 'ID_RESERVES_DEFICIT_MSG'
-export const ID_BOND_RESERVES = 'ID_BOND_RESERVES'
-export const ID_BOND_RESERVES_MSG = 'ID_BOND_RESERVES_MSG'
-export const ID_SHIELDED = 'ID_SHIELDED'
-export const ID_SHIELDED_MSG = 'ID_SHIELDED_MSG'
+export const ID_AVAILABLE_TITLE = 'AVAILABLE_TITLE'
+export const ID_LOCKED_TITLE = 'LOCKED_TITLE'
+export const ID_IMMATURE_TITLE = 'IMMATURE_TITLE'
+export const ID_SWAPPING = 'SWAPPING'
+export const ID_BONDED = 'BONDED'
+export const ID_LOCKED_BAL_MSG = 'LOCKED_BAL_MSG'
+export const ID_IMMATURE_BAL_MSG = 'IMMATURE_BAL_MSG'
+export const ID_LOCKED_SWAPPING_BAL_MSG = 'LOCKED_SWAPPING_BAL_MSG'
+export const ID_LOCKED_BOND_BAL_MSG = 'LOCKED_BOND_BAL_MSG'
+export const ID_RESERVES_DEFICIT = 'RESERVES_DEFICIT'
+export const ID_RESERVES_DEFICIT_MSG = 'RESERVES_DEFICIT_MSG'
+export const ID_BOND_RESERVES = 'BOND_RESERVES'
+export const ID_BOND_RESERVES_MSG = 'BOND_RESERVES_MSG'
+export const ID_SHIELDED = 'SHIELDED'
+export const ID_SHIELDED_MSG = 'SHIELDED_MSG'
+export const ID_ORDER = 'ORDER'
+export const ID_LOCKED_ORDER_BAL_MSG = 'LOCKED_ORDER_BAL_MSG'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -240,9 +242,9 @@ export const enUS: Locale = {
   [ID_TAKER_FOUND_MAKER_REDEMPTION]: 'Redeemed by {{ makerAddr }}',
   [ID_REFUND_IMMINENT]: 'Will happen in the next few blocks',
   [ID_REFUND_WILL_HAPPEN_AFTER]: 'Refund will happen after {{ refundAfterTime }}',
-  [ID_AVAILABLE_C]: 'Available',
-  [ID_LOCKED_C]: 'Locked',
-  [ID_IMMATURE_C]: 'Immature',
+  [ID_AVAILABLE_TITLE]: 'Available',
+  [ID_LOCKED_TITLE]: 'Locked',
+  [ID_IMMATURE_TITLE]: 'Immature',
   [ID_SWAPPING]: 'Swapping',
   [ID_BONDED]: 'Bonded',
   [ID_LOCKED_BAL_MSG]: 'Total funds temporarily locked to cover the costs of your bond maintenance, settling matches, and necessary fees',
@@ -254,7 +256,9 @@ export const enUS: Locale = {
   [ID_BOND_RESERVES]: 'Bond Reserves',
   [ID_BOND_RESERVES_MSG]: 'Funds reserved to cover the expenses associated with bond maintenance',
   [ID_SHIELDED]: 'Shielded',
-  [ID_SHIELDED_MSG]: 'Total funds kept private'
+  [ID_SHIELDED_MSG]: 'Total funds kept private',
+  [ID_ORDER]: 'Order',
+  [ID_LOCKED_ORDER_BAL_MSG]: 'Total amount of funds currently locked for swap, but not actually swapped yet.'
 }
 
 export const ptBR: Locale = {
