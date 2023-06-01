@@ -274,6 +274,7 @@ div[data-handler=markets] {
     border-width: 1px;
     background-color: $light_body_bg;
     z-index: 2;
+    min-height: -webkit-fill-available; // for webkit browsers
 
     &.default {
       display: none;

@@ -238,7 +238,10 @@ button.form-button {
   @extend .flex-center;
 
   position: fixed;
-  inset: 0;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
   padding: 25px 0;
   background-color: $light_body_bg;
   z-index: 100;
@@ -301,6 +304,7 @@ button.form-button {
   width: 250px;
 
   #loader {
+    -webkit-backdrop-filter: blur(4px);
     backdrop-filter: blur(4px);
   }
 }
