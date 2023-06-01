@@ -31,6 +31,7 @@ func configure() (*app.Config, error) {
 	if err := app.ParseFileConfig(configPath, &iniCfg); err != nil {
 		return nil, err
 	}
+	// cfg.AppData is now re-parsed from CLI, so we need to use appData.
 
 	cfg := &iniCfg
 	return cfg, app.ResolveConfig(appData, cfg)
