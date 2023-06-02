@@ -73,30 +73,6 @@ func hasOpenWindows() bool {
 	return nOpenWindows.Load() > 0
 }
 
-// createNewAppWindow creates a new window with the specified URL.
-func createNewAppWindow(url string) {
-	if int(nOpenWindows.Load()) >= maxOpenWindows {
-		log.Debugf("Ignoring open new window request, max number of (%d) open windows exceeded", maxOpenWindows)
-		return
-	}
-	nOpenWindows.Add(1)
-
-	// Create a new webview and load the provided url.
-	webView := webkit.WKWebView_Init(core.Rect(0, 0, float64(width), float64(height)), webviewConfig)
-	req := core.NSURLRequest_Init(core.URL(url))
-	webView.LoadRequest(req)
-
-	// Create a new window and set the webview as its content view.
-	win := cocoa.NSWindow_Init(core.NSMakeRect(0, 0, 1440, 900), cocoa.NSClosableWindowMask|cocoa.NSTitledWindowMask|cocoa.NSResizableWindowMask|cocoa.NSFullSizeContentViewWindowMask|cocoa.NSMiniaturizableWindowMask, cocoa.NSBackingStoreBuffered, false)
-	win.SetTitle(appTitle)
-	win.Center()
-	win.SetMovable_(true)
-	win.MakeKeyAndOrderFront(nil)
-	win.SetContentView(webView)
-	win.SetMinSize_(core.NSSize{Width: 600, Height: 600})
-	win.SetDelegate_(cocoa.DefaultDelegate)
-}
-
 // mainCore is the darwin entry point for the DEX Desktop client.
 func mainCore() error {
 	appCtx, cancel := context.WithCancel(context.Background())
@@ -264,6 +240,41 @@ func mainCore() error {
 	// Set to false so that the app doesn't exit when the last window is closed.
 	cocoa.TerminateAfterWindowsClose = false
 
+	// createNewWebView creates a new webview with the specified URL. The actual
+	// window will be created when the webview is loaded (i.e the
+	// "webView:didFinishNavigation:" method below have been executed).
+	createNewWebView := func() {
+		if int(nOpenWindows.Load()) >= maxOpenWindows {
+			log.Debugf("Ignoring open new window request, max number of (%d) open windows exceeded", maxOpenWindows)
+			return
+		}
+
+		// Create a new webview and load the provided url.
+		req := core.NSURLRequest_Init(core.URL(url))
+		webView := webkit.WKWebView_Init(core.Rect(0, 0, float64(width), float64(height)), webviewConfig)
+		webView.LoadRequest(req)
+		webView.SetNavigationDelegate_(cocoa.DefaultDelegate)
+	}
+
+	// WebView will execute this method when the page has loaded. We can then
+	// create a new window to avoid a temporary blank window. See:
+	// https://developer.apple.com/documentation/webkit/wknavigationdelegate/1455629-webview?language=objc
+	// NOTE: This method actually receives three argument but the docs said to
+	// expect two (webView and navigation).
+	addMethodToDelegate("webView:didFinishNavigation:", func(_ objc.Object /* delegate */, webView objc.Object, _ objc.Object /* navigation */) {
+		nOpenWindows.Add(1) // increment the number of open windows
+
+		// Create a new window and set the webview as its content view.
+		win := cocoa.NSWindow_Init(core.NSMakeRect(0, 0, float64(width), float64(height)), cocoa.NSClosableWindowMask|cocoa.NSTitledWindowMask|cocoa.NSResizableWindowMask|cocoa.NSFullSizeContentViewWindowMask|cocoa.NSMiniaturizableWindowMask, cocoa.NSBackingStoreBuffered, false)
+		win.SetTitle(appTitle)
+		win.Center()
+		win.SetMovable_(true)
+		win.SetContentView(webkit.WKWebView_fromRef(webView))
+		win.SetMinSize_(core.NSSize{Width: 600, Height: 600})
+		win.MakeKeyAndOrderFront(nil)
+		win.SetDelegate_(cocoa.DefaultDelegate)
+	})
+
 	// Add custom selectors to the app delegate since there are reused in
 	// different menus. App delegates methods should be added before NSApp is
 	// initialized.
@@ -280,7 +291,7 @@ func mainCore() error {
 		windows := cocoa.NSApp().OrderedWindows()
 		len := windows.Count()
 		if len < uint64(maxOpenWindows) {
-			createNewAppWindow(url)
+			createNewWebView()
 		} else {
 			// Show the last window if maxOpenWindows has been exceeded.
 			winObj := windows.ObjectAtIndex(len - 1)
@@ -349,7 +360,7 @@ func mainCore() error {
 		if !hasOpenWindows() {
 			// dexc-desktop is already running but there are no windows open so
 			// we should create a new window.
-			createNewAppWindow(url)
+			createNewWebView()
 		}
 
 		// dexc-desktop is already running and there's a window open so we can
@@ -418,13 +429,16 @@ func mainCore() error {
 	// application has finished launching. See:
 	// https://developer.apple.com/documentation/appkit/nsapplicationdidfinishlaunchingnotification?language=objc
 	addMethodToDelegate("applicationDidFinishLaunching:", func(_, notification objc.Object) {
-		createNewAppWindow(url)
-		// Unhide the on the main thread after it has finished launching and the
-		// window is ready. This also has the side effect of redrawing the menu
-		// bar which will be unresponsive until it is redrawn.
+		// Unhide the app on the main thread after it has finished launching we
+		// need to give this priority before creating the window to ensure the
+		// window is immediately visible when it's created. This also has the
+		// side effect of redrawing the menu bar which will be unresponsive
+		// until it is redrawn.
 		core.Dispatch(func() {
 			app.TryToPerform_with_(objc.Sel("unhide:"), nil)
 		})
+
+		createNewWebView()
 	})
 
 	app.SetActivationPolicy(cocoa.NSApplicationActivationPolicyRegular)
