@@ -478,7 +478,7 @@ func createMainMenuItems() []cocoa.NSMenu {
 
 	appMenu.AddItem(cocoa.NSMenuItem_Separator())
 
-	quitMenuItem := cocoa.NSMenuItem_Init("Quit Decred DEX", objc.Sel("terminate:"), "q")
+	quitMenuItem := cocoa.NSMenuItem_Init("Quit "+macOSAppTitle, objc.Sel("terminate:"), "q")
 	quitMenuItem.SetToolTip("Force DEX client to close")
 	appMenu.AddItem(quitMenuItem)
 
@@ -540,17 +540,17 @@ func lockDexcDesktopStateFile(path string) (io.Closer, error) {
 		}
 
 		if err := os.Remove(path); err != nil {
-			return nil, fmt.Errorf("lockDexcDesktopStateFile: failed to remove lock file %s %v", path, err)
+			return nil, fmt.Errorf("lockDexcDesktopStateFile: failed to remove lock file %s: %w", path, err)
 		}
 	}
 
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC|os.O_EXCL, 0666)
 	if err != nil {
-		return nil, fmt.Errorf("lockDexcDesktopStateFile: failed to create lock file %s %v", path, err)
+		return nil, fmt.Errorf("lockDexcDesktopStateFile: failed to create lock file %s: %w", path, err)
 	}
 
 	if _, err := f.WriteString(fmt.Sprintf("%d", os.Getpid())); err != nil {
-		return nil, fmt.Errorf("lockDexcDesktopStateFile: cannot write owner pid: %v", err)
+		return nil, fmt.Errorf("lockDexcDesktopStateFile: cannot write owner pid: %w", err)
 	}
 
 	return f, nil
