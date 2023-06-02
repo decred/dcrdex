@@ -6,13 +6,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"runtime/pprof"
-	"strings"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -123,23 +124,23 @@ func mainCore() error {
 	// Filter registered assets.
 	asset.SetNetwork(cfg.Net)
 
-	// Use a "dexc-desktop-state" file to prevent other processes when
-	// dexc-desktop is already running (e.g when non-bundled version of
-	// dexc-desktop is executed from cmd and vice versa).
-	dexcDesktopStateFile := filepath.Join(cfg.Config.AppData, cfg.Net.String(), "dexc-desktop-state")
-	if dex.FileExists(dexcDesktopStateFile) {
-		return fmt.Errorf("dexc-desktop is already running, if not, manually delete this file: %s", strings.ReplaceAll(dexcDesktopStateFile, " ", `\ `))
-	}
-
-	err = os.WriteFile(dexcDesktopStateFile, []byte("running"), 0600)
-	if err != nil {
-		return fmt.Errorf("os.WriteFile error: %w", err)
-	}
-
 	// shutdownCloser is used to execute functions that could have been executed
 	// as a deferred statement.
 	shutdownCloser := dex.NewErrorCloser()
 	defer shutdownCloser.Done(log) // execute deferred statements if we return early
+
+	// Use a hidden "dexc-desktop-state" file to prevent other processes when
+	// dexc-desktop is already running (e.g when non-bundled version of
+	// dexc-desktop is executed from cmd and vice versa).
+	dexcDesktopStateFile := filepath.Join(cfg.Config.AppData, cfg.Net.String(), ".dexc-desktop-state")
+	f, err := lockDexcDesktopStateFile(dexcDesktopStateFile)
+	if err != nil {
+		return err
+	}
+	shutdownCloser.Add(func() error {
+		f.Close()
+		return os.Remove(dexcDesktopStateFile)
+	})
 
 	// Initialize logging.
 	utc := !cfg.LocalLogs
@@ -293,19 +294,10 @@ func mainCore() error {
 	// cleanup. See:
 	// https://developer.apple.com/documentation/appkit/nsapplicationdelegate/1428642-applicationshouldterminate?language=objc
 	addMethodToDelegate("applicationShouldTerminate:", func(s objc.Object) core.NSUInteger {
-		if dex.FileExists(dexcDesktopStateFile) {
-			err := os.Remove(dexcDesktopStateFile)
-			if err != nil {
-				// Just log the error, we shouldn't block shutdown.
-				log.Error("failed to remove dexc-desktop state file: %w", err)
-			}
-		}
-
 		cancel()                 // no-op with clean rpc/web server setup
 		wg.Wait()                // no-op with clean setup and shutdown
 		shutdownCloser.Done(log) // execute defer statements
 		shutdownCloser.Success()
-
 		return core.NSUInteger(1)
 	})
 
@@ -517,4 +509,35 @@ func addMethodToDelegate(method string, fn interface{}) {
 func openURL(path string) {
 	// See: https://developer.apple.com/documentation/appkit/nsworkspace?language=objc
 	objc.Get("NSWorkspace").Get("sharedWorkspace").Send("openURL:", core.NSURL_Init(path))
+}
+
+// lockDexcDesktopStateFile creates a lock file and returns a Closer that can be
+// used to unlock it. If the file already exists, the process id in the file is
+// checked to see if the process is still running.
+func lockDexcDesktopStateFile(path string) (io.Closer, error) {
+	pidB, err := os.ReadFile(path)
+	if err == nil {
+		// Check if the pid is a number.
+		if pid, err := strconv.Atoi(string(pidB)); err == nil && pid != 0 {
+			// Check if the process is still running.
+			if p, err := os.FindProcess(pid); err == nil && p.Signal(syscall.Signal(0)) == nil {
+				return nil, errors.New("dexc-desktop is already running")
+			}
+		}
+
+		if err := os.Remove(path); err != nil {
+			return nil, fmt.Errorf("lockDexcDesktopStateFile: failed to remove lock file %s %v", path, err)
+		}
+	}
+
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC|os.O_EXCL, 0666)
+	if err != nil {
+		return nil, fmt.Errorf("lockDexcDesktopStateFile: failed to create lock file %s %v", path, err)
+	}
+
+	if _, err := f.WriteString(fmt.Sprintf("%d", os.Getpid())); err != nil {
+		return nil, fmt.Errorf("lockDexcDesktopStateFile: cannot write owner pid: %v", err)
+	}
+
+	return f, nil
 }
