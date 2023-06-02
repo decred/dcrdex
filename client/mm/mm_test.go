@@ -52,7 +52,7 @@ func (c *tCore) SingleLotFees(form *core.SingleLotFeesForm) (uint64, uint64, err
 	}
 	return c.buySwapFees, c.buyRedeemFees, nil
 }
-func (*tCore) Cancel(pw []byte, oidB dex.Bytes) error {
+func (*tCore) Cancel(oidB dex.Bytes) error {
 	return nil
 }
 func (c *tCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error) {

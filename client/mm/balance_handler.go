@@ -9,7 +9,6 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
-	"decred.org/dcrdex/client/orderbook"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/order"
@@ -215,6 +214,7 @@ func (b *balanceHandler) botBalance(botID string, assetID uint32) uint64 {
 // wrappedCoreForBot returns a coreWithSegregatedBalance for the specified bot.
 func (b *balanceHandler) wrappedCoreForBot(botID string) *coreWithSegregatedBalance {
 	return &coreWithSegregatedBalance{
+		clientCore:     b.core,
 		balanceHandler: b,
 		botID:          botID,
 		core:           b.core,
@@ -511,6 +511,8 @@ func newBalanceHandler(cfgs []*BotConfig, core clientCore, log dex.Logger) (*bal
 // as if the entire balance of the wallet is the amount that has been reserved
 // for the bot.
 type coreWithSegregatedBalance struct {
+	clientCore
+
 	balanceHandler *balanceHandler
 	botID          string
 	core           clientCore
@@ -518,40 +520,6 @@ type coreWithSegregatedBalance struct {
 }
 
 var _ clientCore = (*coreWithSegregatedBalance)(nil)
-
-// NotificationFeed just forwards the call to the underlying core.
-func (c *coreWithSegregatedBalance) NotificationFeed() *core.NoteFeed {
-	return c.core.NotificationFeed()
-}
-
-// ExchangeMarket just forwards the call to the underlying core.
-func (c *coreWithSegregatedBalance) ExchangeMarket(host string, base, quote uint32) (*core.Market, error) {
-	return c.core.ExchangeMarket(host, base, quote)
-}
-
-// SyncBook just forwards the call to the underlying core.
-func (c *coreWithSegregatedBalance) SyncBook(host string, base, quote uint32) (*orderbook.OrderBook, core.BookFeed, error) {
-	return c.core.SyncBook(host, base, quote)
-}
-
-// SupportedAssets just forwards the call to the underlying core.
-func (c *coreWithSegregatedBalance) SupportedAssets() map[uint32]*core.SupportedAsset {
-	return c.core.SupportedAssets()
-}
-
-// SingleLotFees just forwards the call to the underlying core.
-func (c *coreWithSegregatedBalance) SingleLotFees(form *core.SingleLotFeesForm) (uint64, uint64, error) {
-	return c.core.SingleLotFees(form)
-}
-
-// Cancel just forwards the call to the underlying core.
-func (c *coreWithSegregatedBalance) Cancel(oidB dex.Bytes) error {
-
-	c.log.Errorf("======== Cancel Order =======/n ID: %s",
-		hex.EncodeToString(oidB))
-
-	return c.core.Cancel(oidB)
-}
 
 // Trade checks that the bot has enough balance for the trade, and if not,
 // immediately returns an error. Otherwise, it forwards the call to the
@@ -724,11 +692,16 @@ func (c *coreWithSegregatedBalance) maxBuyQty(host string, base, quote uint32, r
 		return 0, err
 	}
 
-	quoteBalance -= fundingFees
+	if quoteBalance > fundingFees {
+		quoteBalance -= fundingFees
+	} else {
+		quoteBalance = 0
+	}
+
 	lotSizeQuote := calc.BaseToQuote(rate, mkt.LotSize)
 	maxLots := quoteBalance / (lotSizeQuote + swapFees)
 
-	if c.balanceHandler.isAccountLocker(base) && redeemFees > 0 {
+	if redeemFees > 0 && c.balanceHandler.isAccountLocker(base) {
 		maxBaseLots := baseBalance / redeemFees
 		if maxLots > maxBaseLots {
 			maxLots = maxBaseLots
@@ -913,7 +886,7 @@ func (c *coreWithSegregatedBalance) sufficientBalanceForTrades(host string, base
 		if remainingBalance < req {
 			return false, nil
 		}
-		remainingBalance -= quoteQty + (numLots * swapFees)
+		remainingBalance -= req
 	}
 
 	if c.balanceHandler.isAccountLocker(base) && baseBalance < redeemFees*totalLots {
@@ -936,14 +909,4 @@ func (c *coreWithSegregatedBalance) PreOrder(form *core.TradeForm) (*core.OrderE
 	}
 
 	return c.core.PreOrder(form)
-}
-
-// WalletState just forwards the request to the underlying core.
-func (c *coreWithSegregatedBalance) WalletState(assetID uint32) *core.WalletState {
-	return c.core.WalletState(assetID)
-}
-
-// MaxFundingFees just forwards the request to the underlying core.
-func (c *coreWithSegregatedBalance) MaxFundingFees(fromAsset uint32, numTrades uint32, options map[string]string) (uint64, error) {
-	return c.core.MaxFundingFees(fromAsset, numTrades, options)
 }
