@@ -285,7 +285,7 @@ func oracleMarketReport(ctx context.Context, b, q *asset.RegisteredAsset, log de
 		return nil, err
 	}
 
-	// Create filter for desireable matches.
+	// Create filter for desirable matches.
 	marketMatches := func(mkt *coinpapMarket) bool {
 		if mkt.TrustScore != "high" {
 			return false

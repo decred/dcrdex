@@ -5828,7 +5828,7 @@ func msgTxFromBytes(txB []byte) (*wire.MsgTx, error) {
 }
 
 // ConfirmRedemption returns how many confirmations a redemption has. Normally
-// this is very straitforward. However, with fluxuating fees, there's the
+// this is very straightforward. However, with fluxuating fees, there's the
 // possibility that the tx is never mined and eventually purged from the
 // mempool. In that case we use the provided fee suggestion to create and send
 // a new redeem transaction, returning the new transactions hash.

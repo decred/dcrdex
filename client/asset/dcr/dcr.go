@@ -4937,7 +4937,7 @@ func float64PtrStr(v *float64) string {
 }
 
 // ConfirmRedemption returns how many confirmations a redemption has. Normally
-// this is very straitforward. However there are two situations that have come
+// this is very straightforward. However there are two situations that have come
 // up that this also handles. One is when the wallet can not find the redemption
 // transaction. This is most likely because the fee was set too low and the tx
 // was removed from the mempool. In the case where it is not found, this will

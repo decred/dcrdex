@@ -362,7 +362,7 @@ func (w *zecWallet) ShieldedStatus() (status *asset.ShieldedStatus, err error) {
 // Balance adds a sum of shielded pool balances to the transparent balance info.
 //
 // Since v5.4.0, the getnewaddress RPC is deprecated if favor of using unified
-// addresses from accounts generated wtih z_getnewaccount. Addresses are
+// addresses from accounts generated with z_getnewaccount. Addresses are
 // generated from account 0. Any addresses previously generated using
 // getnewaddress belong to a legacy account that is not listed with
 // z_listaccount, nor addressable with e.g. z_getbalanceforaccount. For

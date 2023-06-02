@@ -2018,7 +2018,7 @@ func TestRouter(t *testing.T) {
 // func TestFeeRateRequest(t *testing.T) {
 // 	router := rig.router
 // 	cl := tNewLink()
-// 	// Request for an unkown asset.
+// 	// Request for an unknown asset.
 // 	msg, _ := msgjson.NewRequest(1, msgjson.FeeRateRoute, 555)
 // 	msgErr := router.handleFeeRate(cl, msg)
 // 	if msgErr == nil {

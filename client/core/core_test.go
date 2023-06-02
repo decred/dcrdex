@@ -681,7 +681,6 @@ type TXCWallet struct {
 	ownsAddressErr      error
 	pubKeys             []dex.Bytes
 	sigs                []dex.Bytes
-	feeTxMade           []byte
 	feeCoin             []byte
 	makeRegFeeTxErr     error
 	feeCoinSent         []byte
@@ -8995,7 +8994,7 @@ func TestConfirmRedemption(t *testing.T) {
 						note = &n
 					}
 				case <-time.After(60 * time.Second):
-					t.Fatalf("%s: expected to recieve notification but did not", test.name)
+					t.Fatalf("%s: did not receive expected notification", test.name)
 				}
 				if note != nil {
 					break

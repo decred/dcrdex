@@ -1,0 +1,27 @@
+run:
+  deadline: 10m
+
+output:
+  format: github-actions,colored-line-number
+
+linters:
+  disable-all: true
+  enable:
+    - asciicheck
+    - bidichk
+    - durationcheck
+    - exportloopref
+    - gofmt
+    - goimports
+    - gosimple
+    - govet
+    - grouper
+    - ineffassign
+    - makezero
+    - nosprintfhostport
+    - reassign
+    - rowserrcheck
+    - sqlclosecheck
+    - tparallel
+    - typecheck
+    - unconvert
