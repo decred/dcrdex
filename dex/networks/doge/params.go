@@ -69,7 +69,7 @@ var (
 		// btcd/chaincfg.Register, where it is checked to prevent duplicate
 		// registration, so our only requirement is that it is unique. This one
 		// was just generated with a prng.
-		Net:         0xfabfb5da,
+		Net:         0xf97c5a97,
 		GenesisHash: nil, // TODO or unused with simnet?
 	})
 )
