@@ -61,6 +61,7 @@ cat >> "${WALLET_DIR}/${NAME}.conf" <<EOF
 enablevoting=1
 enableticketbuyer=1
 ticketbuyer.limit=6
+; NOTE: when regenerating the chain from genesis, might need to comment out this line:
 ticketbuyer.balancetomaintainabsolute=1000
 EOF
 fi
