@@ -75,7 +75,7 @@ var (
 		// btcd/chaincfg.Register, where it is checked to prevent duplicate
 		// registration, so our only requirement is that it is unique. This one
 		// was just generated with a prng.
-		Net:         0xfabfb5db,
+		Net:         0xfa55b279,
 		GenesisHash: mustHash("4598a0f2b823aaf9e77ee6d5e46f1edb824191dcd48b08437b7cec17e6ae6e26"), // TODO or unused with simnet?
 	})
 )
@@ -84,7 +84,7 @@ func init() {
 	for _, params := range []*chaincfg.Params{MainNetParams, TestNetParams, RegressionNetParams} {
 		err := chaincfg.Register(params)
 		if err != nil {
-			panic("failed to register doge parameters: " + err.Error())
+			panic("failed to register dgb parameters: " + err.Error())
 		}
 	}
 }
