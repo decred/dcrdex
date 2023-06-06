@@ -860,6 +860,9 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 		bondReservesEnforced int64
 		balance              uint64
 
+		// if expectedCoins is nil, all the coins are from
+		// the split output. If any of the coins are nil,
+		// than that output is from the split output.
 		expectedCoins         []asset.Coins
 		expectedRedeemScripts [][]dex.Bytes
 		expectSendRawTx       bool
@@ -870,9 +873,6 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 		expectedLockedCoins   []*RPCOutpoint
 		expectErr             bool
 	}
-
-	fmt.Printf("amount of balance: %v\n", (2*uint64(requiredForOrder(15e5, 2)) + (expectedSplitFee(2, 2))))
-	fmt.Printf("expected split fee %v\n", expectedSplitFee(1, 2))
 
 	tests := []*test{
 		{ // "split not allowed, utxos like split previously done"
@@ -902,7 +902,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 					RedeemScript:  nil,
 					ScriptPubKey:  scriptPubKeys(0),
 					Address:       addresses(0),
-					Amount:        12e5 / 1e8,
+					Amount:        19e5 / 1e8,
 					Vout:          0,
 				},
 				{
@@ -912,22 +912,18 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 					RedeemScript:  nil,
 					ScriptPubKey:  scriptPubKeys(1),
 					Address:       addresses(1),
-					Amount:        23e5 / 1e8,
+					Amount:        35e5 / 1e8,
 					Vout:          0,
 				},
 			},
 			balance: 35e5,
 			expectedCoins: []asset.Coins{
-				{newOutput(txHashes[0], 0, 12e5)},
-				{newOutput(txHashes[1], 0, 23e5)},
+				{newOutput(txHashes[0], 0, 19e5)},
+				{newOutput(txHashes[1], 0, 35e5)},
 			},
 			expectedRedeemScripts: [][]dex.Bytes{
 				{nil},
 				{nil},
-			},
-			expectedLockedCoins: []*RPCOutpoint{
-				{txHashes[0].String(), 0},
-				{txHashes[1].String(), 0},
 			},
 		},
 		{ // "split not allowed, require multiple utxos per order"
@@ -1076,7 +1072,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 				MaxFeeRate:    maxFeeRate,
 				FeeSuggestion: feeSuggestion,
 				Options: map[string]string{
-					"swapsplit": "false",
+					multiSplitKey: "false",
 				},
 			},
 			maxLock:              46e5,
@@ -1144,7 +1140,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 				MaxFeeRate:    maxFeeRate,
 				FeeSuggestion: feeSuggestion,
 				Options: map[string]string{
-					"swapsplit": "false",
+					multiSplitKey: "false",
 				},
 			},
 			maxLock: 50e5,
@@ -1213,7 +1209,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 				MaxFeeRate:    maxFeeRate,
 				FeeSuggestion: feeSuggestion,
 				Options: map[string]string{
-					"swapsplit": "true",
+					multiSplitKey: "true",
 				},
 			},
 			allOrNothing: false,
@@ -1280,7 +1276,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 				MaxFeeRate:    maxFeeRate,
 				FeeSuggestion: feeSuggestion,
 				Options: map[string]string{
-					"swapsplit": "true",
+					multiSplitKey: "true",
 				},
 			},
 			utxos: []*ListUnspentResult{
@@ -1348,7 +1344,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 				MaxFeeRate:    maxFeeRate,
 				FeeSuggestion: feeSuggestion,
 				Options: map[string]string{
-					"swapsplit": "true",
+					multiSplitKey: "true",
 				},
 			},
 			utxos: []*ListUnspentResult{
@@ -1393,7 +1389,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 				MaxFeeRate:    maxFeeRate,
 				FeeSuggestion: feeSuggestion,
 				Options: map[string]string{
-					"swapsplit": "true",
+					multiSplitKey: "true",
 				},
 			},
 			utxos: []*ListUnspentResult{
@@ -1446,7 +1442,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 				MaxFeeRate:    maxFeeRate,
 				FeeSuggestion: feeSuggestion,
 				Options: map[string]string{
-					"swapsplit": "true",
+					multiSplitKey: "true",
 				},
 			},
 			utxos: []*ListUnspentResult{
@@ -1481,7 +1477,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 				MaxFeeRate:    maxFeeRate,
 				FeeSuggestion: feeSuggestion,
 				Options: map[string]string{
-					"swapsplit": "true",
+					multiSplitKey: "true",
 				},
 			},
 			bondReservesEnforced: 2e6,
@@ -1535,7 +1531,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 				MaxFeeRate:    maxFeeRate,
 				FeeSuggestion: feeSuggestion,
 				Options: map[string]string{
-					"swapsplit": "true",
+					multiSplitKey: "true",
 				},
 			},
 			bondReservesEnforced: 2e6,
@@ -1571,8 +1567,8 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 				MaxFeeRate:    maxFeeRate,
 				FeeSuggestion: feeSuggestion,
 				Options: map[string]string{
-					"swapsplit":   "true",
-					"splitbuffer": "10",
+					multiSplitKey:       "true",
+					multiSplitBufferKey: "10",
 				},
 			},
 			utxos: []*ListUnspentResult{
@@ -1624,8 +1620,8 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 				MaxFeeRate:    maxFeeRate,
 				FeeSuggestion: feeSuggestion,
 				Options: map[string]string{
-					"swapsplit":   "true",
-					"splitbuffer": "10",
+					multiSplitKey:       "true",
+					multiSplitBufferKey: "10",
 				},
 			},
 			utxos: []*ListUnspentResult{
@@ -1643,6 +1639,171 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 			balance:   2*uint64(requiredForOrder(15e5, 2)*110/100) + expectedSplitFee(1, 2),
 			maxLock:   2*uint64(requiredForOrder(15e5, 2)*110/100) + expectedSplitFee(1, 2) - 1,
 			expectErr: true,
+		},
+		{ // "only one order needs a split, rest can be funded without"
+			name: "only one order needs a split, rest can be funded without",
+			multiOrder: &asset.MultiOrder{
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        1e6,
+						MaxSwapCount: 2,
+					},
+					{
+						Value:        1e6,
+						MaxSwapCount: 2,
+					},
+					{
+						Value:        1e6,
+						MaxSwapCount: 2,
+					},
+				},
+				MaxFeeRate:    maxFeeRate,
+				FeeSuggestion: feeSuggestion,
+				Options: map[string]string{
+					multiSplitKey: "true",
+				},
+			},
+			utxos: []*ListUnspentResult{
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[0],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(0),
+					Address:       addresses(0),
+					Amount:        12e5 / 1e8,
+					Vout:          0,
+				},
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[1],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(1),
+					Address:       addresses(1),
+					Amount:        12e5 / 1e8,
+					Vout:          0,
+				},
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[2],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(2),
+					Address:       addresses(2),
+					Amount:        120e5 / 1e8,
+					Vout:          0,
+				},
+			},
+			maxLock:         50e5,
+			balance:         144e5,
+			expectSendRawTx: true,
+			expectedInputs: []*wire.TxIn{
+				{
+					PreviousOutPoint: wire.OutPoint{
+						Hash:  *txHashes[2],
+						Index: 0,
+					},
+				},
+			},
+			expectedOutputs: []*wire.TxOut{
+				wire.NewTxOut(requiredForOrder(1e6, 2), []byte{}),
+				wire.NewTxOut(120e5-requiredForOrder(1e6, 2)-int64(expectedSplitFee(1, 2)), []byte{}),
+			},
+			expectedSplitFee: expectedSplitFee(1, 2),
+			expectedRedeemScripts: [][]dex.Bytes{
+				{nil},
+				{nil},
+				{nil},
+			},
+			expectedCoins: []asset.Coins{
+				{newOutput(txHashes[0], 0, 12e5)},
+				{newOutput(txHashes[1], 0, 12e5)},
+				nil,
+			},
+		},
+		{ // "only one order needs a split due to bond reserves, rest funded without"
+			name: "only one order needs a split, rest can be funded without",
+			multiOrder: &asset.MultiOrder{
+				Values: []*asset.MultiOrderValue{
+					{
+						Value:        1e6,
+						MaxSwapCount: 2,
+					},
+					{
+						Value:        1e6,
+						MaxSwapCount: 2,
+					},
+					{
+						Value:        1e6,
+						MaxSwapCount: 2,
+					},
+				},
+				MaxFeeRate:    maxFeeRate,
+				FeeSuggestion: feeSuggestion,
+				Options: map[string]string{
+					multiSplitKey: "true",
+				},
+			},
+			utxos: []*ListUnspentResult{
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[0],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(0),
+					Address:       addresses(0),
+					Amount:        12e5 / 1e8,
+					Vout:          0,
+				},
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[1],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(1),
+					Address:       addresses(1),
+					Amount:        12e5 / 1e8,
+					Vout:          0,
+				},
+				{
+					Confirmations: 1,
+					Spendable:     true,
+					TxID:          txIDs[2],
+					RedeemScript:  nil,
+					ScriptPubKey:  scriptPubKeys(2),
+					Address:       addresses(2),
+					Amount:        120e5 / 1e8,
+					Vout:          0,
+				},
+			},
+			maxLock:              0,
+			bondReservesEnforced: 1e6,
+			balance:              144e5,
+			expectSendRawTx:      true,
+			expectedInputs: []*wire.TxIn{
+				{
+					PreviousOutPoint: wire.OutPoint{
+						Hash:  *txHashes[2],
+						Index: 0,
+					},
+				},
+			},
+			expectedOutputs: []*wire.TxOut{
+				wire.NewTxOut(requiredForOrder(1e6, 2), []byte{}),
+				wire.NewTxOut(120e5-requiredForOrder(1e6, 2)-int64(expectedSplitFee(1, 2)), []byte{}),
+			},
+			expectedSplitFee: expectedSplitFee(1, 2),
+			expectedRedeemScripts: [][]dex.Bytes{
+				{nil},
+				{nil},
+				{nil},
+			},
+			expectedCoins: []asset.Coins{
+				{newOutput(txHashes[0], 0, 12e5)},
+				{newOutput(txHashes[1], 0, 12e5)},
+				nil,
+			},
 		},
 	}
 
@@ -1700,18 +1861,6 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 					}
 				}
 			}
-			if len(test.expectedLockedCoins) != len(node.lockedCoins) {
-				t.Fatalf("%s: expected %d locked coins, got %d", test.name, len(test.expectedLockedCoins), len(node.lockedCoins))
-			}
-			lockedCoins := make(map[RPCOutpoint]interface{})
-			for _, coin := range node.lockedCoins {
-				lockedCoins[*coin] = true
-			}
-			for _, expectedCoin := range test.expectedLockedCoins {
-				if _, ok := lockedCoins[*expectedCoin]; !ok {
-					t.Fatalf("%s: expected locked coin %+v not found", test.name, *expectedCoin)
-				}
-			}
 		} else { // expectSplit
 			if node.sentRawTx == nil {
 				t.Fatalf("%s: SendRawTransaction not called", test.name)
@@ -1735,6 +1884,7 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 			if len(node.sentRawTx.TxOut) != expectedNumOutputs {
 				t.Fatalf("%s: expected %d outputs, got %d", test.name, expectedNumOutputs, len(node.sentRawTx.TxOut))
 			}
+
 			for i, expectedOut := range test.expectedOutputs {
 				actualOut := node.sentRawTx.TxOut[i]
 				if actualOut.Value != expectedOut.Value {
@@ -1752,14 +1902,56 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 				t.Fatalf("%s: expected %d coins, got %d", test.name, len(test.multiOrder.Values), len(allCoins))
 			}
 			splitTxID := node.sentRawTx.TxHash()
-			for i, actualCoin := range allCoins {
-				actualOut := actualCoin[0].(*output)
-				expectedOut := node.sentRawTx.TxOut[i]
-				if uint64(expectedOut.Value) != actualOut.value {
-					t.Fatalf("%s: unexpected output %d value. expected %d, got %d", test.name, i, expectedOut.Value, actualOut.value)
+
+			// This means all coins are split outputs
+			if test.expectedCoins == nil {
+				for i, actualCoin := range allCoins {
+					actualOut := actualCoin[0].(*output)
+					expectedOut := node.sentRawTx.TxOut[i]
+					if uint64(expectedOut.Value) != actualOut.value {
+						t.Fatalf("%s: unexpected output %d value. expected %d, got %d", test.name, i, expectedOut.Value, actualOut.value)
+					}
+					if !bytes.Equal(actualOut.pt.txHash[:], splitTxID[:]) {
+						t.Fatalf("%s: unexpected output %d txid. expected %s, got %s", test.name, i, splitTxID, actualOut.pt.txHash)
+					}
 				}
-				if !bytes.Equal(actualOut.pt.txHash[:], splitTxID[:]) {
-					t.Fatalf("%s: unexpected output %d txid. expected %s, got %s", test.name, i, splitTxID, actualOut.pt.txHash)
+			} else {
+				var splitTxOutputIndex int
+				for i := range allCoins {
+					actual := allCoins[i]
+					expected := test.expectedCoins[i]
+
+					// This means the coins are the split outputs
+					if expected == nil {
+						actualOut := actual[0].(*output)
+						expectedOut := node.sentRawTx.TxOut[splitTxOutputIndex]
+						if uint64(expectedOut.Value) != actualOut.value {
+							t.Fatalf("%s: unexpected output %d value. expected %d, got %d", test.name, i, expectedOut.Value, actualOut.value)
+						}
+						if !bytes.Equal(actualOut.pt.txHash[:], splitTxID[:]) {
+							t.Fatalf("%s: unexpected output %d txid. expected %s, got %s", test.name, i, splitTxID, actualOut.pt.txHash)
+						}
+						splitTxOutputIndex++
+						continue
+					}
+
+					if len(actual) != len(expected) {
+						t.Fatalf("%s: expected %d coins in set %d, got %d", test.name, len(test.expectedCoins[i]), i, len(allCoins[i]))
+					}
+					sort.Slice(actual, func(i, j int) bool {
+						return bytes.Compare(actual[i].ID(), actual[j].ID()) < 0
+					})
+					sort.Slice(expected, func(i, j int) bool {
+						return bytes.Compare(expected[i].ID(), expected[j].ID()) < 0
+					})
+					for j := range actual {
+						if !bytes.Equal(actual[j].ID(), expected[j].ID()) {
+							t.Fatalf("%s: unexpected coin in set %d. expected %s, got %s", test.name, i, expected[j].ID(), actual[j].ID())
+						}
+						if actual[j].Value() != expected[j].Value() {
+							t.Fatalf("%s: unexpected coin value in set %d. expected %d, got %d", test.name, i, expected[j].Value(), actual[j].Value())
+						}
+					}
 				}
 			}
 
@@ -1767,7 +1959,47 @@ func testFundMultiOrder(t *testing.T, segwit bool, walletType string) {
 			if len(node.lockedCoins) != len(allCoins)+len(test.expectedInputs) {
 				t.Fatalf("%s: expected %d locked coins, got %d", test.name, len(allCoins)+len(test.expectedInputs), len(node.lockedCoins))
 			}
+
 		}
+
+		// Check that the right coins are locked and in the fundingCoins map
+		var totalNumCoins int
+		for _, coins := range allCoins {
+			totalNumCoins += len(coins)
+		}
+		if totalNumCoins != len(wallet.fundingCoins) {
+			t.Fatalf("%s: expected %d funding coins in wallet, got %d", test.name, totalNumCoins, len(wallet.fundingCoins))
+		}
+		totalNumCoins += len(test.expectedInputs)
+		if totalNumCoins != len(node.lockedCoins) {
+			t.Fatalf("%s: expected %d locked coins, got %d", test.name, totalNumCoins, len(node.lockedCoins))
+		}
+		lockedCoins := make(map[RPCOutpoint]interface{})
+		for _, coin := range node.lockedCoins {
+			lockedCoins[*coin] = true
+		}
+		checkLockedCoin := func(txHash chainhash.Hash, vout uint32) {
+			if _, ok := lockedCoins[RPCOutpoint{TxID: txHash.String(), Vout: vout}]; !ok {
+				t.Fatalf("%s: expected locked coin %s:%d not found", test.name, txHash, vout)
+			}
+		}
+		checkFundingCoin := func(txHash chainhash.Hash, vout uint32) {
+			if _, ok := wallet.fundingCoins[outPoint{txHash: txHash, vout: vout}]; !ok {
+				t.Fatalf("%s: expected locked coin %s:%d not found in wallet", test.name, txHash, vout)
+			}
+		}
+		for _, coins := range allCoins {
+			for _, coin := range coins {
+				// decode coin to output
+				out := coin.(*output)
+				checkLockedCoin(out.pt.txHash, out.pt.vout)
+				checkFundingCoin(out.pt.txHash, out.pt.vout)
+			}
+		}
+		for _, expectedIn := range test.expectedInputs {
+			checkLockedCoin(expectedIn.PreviousOutPoint.Hash, expectedIn.PreviousOutPoint.Index)
+		}
+
 		if test.expectedSplitFee != splitFee {
 			t.Fatalf("%s: unexpected split fee. expected %d, got %d", test.name, test.expectedSplitFee, splitFee)
 		}

@@ -6172,6 +6172,7 @@ func (c *Core) prepareMultiTradeRequests(pw []byte, form *MultiTradeForm) ([]*tr
 	if err != nil {
 		return nil, codedError(walletErr, fmt.Errorf("FundMultiOrder error for %s: %v", assetConfigs.fromAsset.Symbol, err))
 	}
+
 	if len(allCoins) != len(form.Placements) {
 		c.log.Infof("FundMultiOrder only funded %d orders out of %d", len(allCoins), len(form.Placements))
 	}
@@ -6186,10 +6187,11 @@ func (c *Core) prepareMultiTradeRequests(pw []byte, form *MultiTradeForm) ([]*tr
 
 	errClosers := make([]*dex.ErrorCloser, 0, len(allCoins))
 	for _, coins := range allCoins {
+		theseCoins := coins
 		errCloser := dex.NewErrorCloser()
 		defer errCloser.Done(c.log)
 		errCloser.Add(func() error {
-			err := fromWallet.ReturnCoins(coins)
+			err := fromWallet.ReturnCoins(theseCoins)
 			if err != nil {
 				return fmt.Errorf("unable to return %s funding coins: %v", unbip(fromWallet.AssetID), err)
 			}

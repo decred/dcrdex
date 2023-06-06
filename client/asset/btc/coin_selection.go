@@ -216,7 +216,7 @@ func leastOverFundWithLimit(enough func(inputsSize, sum uint64) (bool, uint64), 
 		if single != nil {
 			return []*compositeUTXO{single}
 		} else {
-			return set
+			return nil
 		}
 	} else {
 		set = subsetWithLeastOverFund(enough, maxFund, small)
