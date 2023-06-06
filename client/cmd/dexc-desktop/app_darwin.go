@@ -56,6 +56,8 @@ const (
 	selOpenLogs = "openLogs:"
 	// selNewWindow is the selector for the "New Window" menu item.
 	selNewWindow = "newWindow:"
+	// selIsNewWebview is the selector for a webview that require a new window.
+	selIsNewWebview = "isNewWebView:"
 )
 
 func init() {
@@ -252,6 +254,7 @@ func mainCore() error {
 		// Create a new webview and load the provided url.
 		req := core.NSURLRequest_Init(core.URL(url))
 		webView := webkit.WKWebView_Init(core.Rect(0, 0, float64(width), float64(height)), webviewConfig)
+		webView.Object.Class().AddMethod(selIsNewWebview, selTrue)
 		webView.LoadRequest(req)
 		webView.SetNavigationDelegate_(cocoa.DefaultDelegate)
 	}
@@ -262,6 +265,14 @@ func mainCore() error {
 	// NOTE: This method actually receives three argument but the docs said to
 	// expect two (webView and navigation).
 	addMethodToDelegate("webView:didFinishNavigation:", func(_ objc.Object /* delegate */, webView objc.Object, _ objc.Object /* navigation */) {
+		// Return early if we already created a window for this webview.
+		if !core.True.Equals(webView.Send(selIsNewWebview)) {
+			return // Nothing to do. This is just a normal window refresh.
+		}
+
+		// Overwrite the webview "selIsNewWebview" method.
+		webView.Class().AddMethod(selIsNewWebview, selFalse)
+
 		nOpenWindows.Add(1) // increment the number of open windows
 
 		// Create a new window and set the webview as its content view.
@@ -523,6 +534,16 @@ func addMethodToDelegate(method string, fn interface{}) {
 func openURL(path string) {
 	// See: https://developer.apple.com/documentation/appkit/nsworkspace?language=objc
 	objc.Get("NSWorkspace").Get("sharedWorkspace").Send("openURL:", core.NSURL_Init(path))
+}
+
+// selTrue returns an objc boolean "True".
+func selTrue(_ objc.Object) objc.Object {
+	return core.True
+}
+
+// selTrue returns an objc boolean "False".
+func selFalse(_ objc.Object) objc.Object {
+	return core.False
 }
 
 // lockDexcDesktopStateFile creates a lock file and returns a Closer that can be
