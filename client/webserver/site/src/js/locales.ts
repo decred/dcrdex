@@ -247,18 +247,18 @@ export const enUS: Locale = {
   [ID_IMMATURE_TITLE]: 'Immature',
   [ID_SWAPPING]: 'Swapping',
   [ID_BONDED]: 'Bonded',
-  [ID_LOCKED_BAL_MSG]: 'Total funds temporarily locked to cover the costs of your bond maintenance, settling matches, and necessary fees',
+  [ID_LOCKED_BAL_MSG]: 'Total funds temporarily locked to cover the costs of your bond maintenance, live orders, matches and other activities',
   [ID_IMMATURE_BAL_MSG]: 'Incoming funds awaiting confirmation',
   [ID_LOCKED_SWAPPING_BAL_MSG]: 'Funds currently locked in settling matches',
   [ID_LOCKED_BOND_BAL_MSG]: 'Funds locked in active bonds',
   [ID_RESERVES_DEFICIT]: 'Reserves Deficit',
-  [ID_RESERVES_DEFICIT_MSG]: 'Difference between the available balance in your wallet and the amount that has been reserved for specific purposes',
+  [ID_RESERVES_DEFICIT_MSG]: 'The apparent wallet balance shortcoming to maintain bonding level. If this persists, you may need to add funds to stay fully bonded.',
   [ID_BOND_RESERVES]: 'Bond Reserves',
   [ID_BOND_RESERVES_MSG]: 'Funds reserved to cover the expenses associated with bond maintenance',
   [ID_SHIELDED]: 'Shielded',
-  [ID_SHIELDED_MSG]: 'Total funds kept private',
+  [ID_SHIELDED_MSG]: 'Total funds kept shielded',
   [ID_ORDER]: 'Order',
-  [ID_LOCKED_ORDER_BAL_MSG]: 'Total amount of funds currently locked for swap, but not actually swapped yet.'
+  [ID_LOCKED_ORDER_BAL_MSG]: 'Funds locked in unmatched orders'
 }
 
 export const ptBR: Locale = {
