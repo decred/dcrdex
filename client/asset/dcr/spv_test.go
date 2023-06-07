@@ -18,6 +18,7 @@ import (
 	"decred.org/dcrwallet/v3/wallet/udb"
 	"github.com/decred/dcrd/blockchain/stake/v5"
 	"github.com/decred/dcrd/chaincfg/chainhash"
+	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/gcs/v4"
@@ -28,7 +29,7 @@ import (
 )
 
 type tDcrWallet struct {
-	wallet.NetworkBackend
+	spvSyncer
 	knownAddr      wallet.KnownAddress
 	knownAddrErr   error
 	txsByHash      []*wire.MsgTx
@@ -190,6 +191,146 @@ func (w *tDcrWallet) GetTransactionsByHashes(ctx context.Context, txHashes []*ch
 	txs []*wire.MsgTx, notFound []*wire.InvVect, err error) {
 
 	return w.txsByHash, nil, w.txsByHashErr
+}
+
+func (w *tDcrWallet) StakeInfo(ctx context.Context) (*wallet.StakeInfoData, error) {
+	return nil, nil
+}
+
+func (w *tDcrWallet) PurchaseTickets(context.Context, wallet.NetworkBackend, *wallet.PurchaseTicketsRequest) (*wallet.PurchaseTicketsResponse, error) {
+	return nil, nil
+}
+
+func (w *tDcrWallet) ForUnspentUnexpiredTickets(ctx context.Context, f func(hash *chainhash.Hash) error) error {
+	return nil
+}
+
+func (w *tDcrWallet) GetTickets(ctx context.Context, f func([]*wallet.TicketSummary, *wire.BlockHeader) (bool, error), startBlock, endBlock *wallet.BlockIdentifier) error {
+	return nil
+}
+
+func (w *tDcrWallet) AgendaChoices(ctx context.Context, ticketHash *chainhash.Hash) (choices wallet.AgendaChoices, voteBits uint16, err error) {
+	return nil, 0, nil
+}
+
+func (w *tDcrWallet) TreasuryKeyPolicies() []wallet.TreasuryKeyPolicy {
+	return nil
+}
+
+func (w *tDcrWallet) GetAllTSpends(ctx context.Context) []*wire.MsgTx {
+	return nil
+}
+
+func (w *tDcrWallet) TSpendPolicy(tspendHash, ticketHash *chainhash.Hash) stake.TreasuryVoteT {
+	return 0
+}
+
+func (w *tDcrWallet) VSPHostForTicket(ctx context.Context, ticketHash *chainhash.Hash) (string, error) {
+	return "", nil
+}
+
+func (w *tDcrWallet) SetAgendaChoices(ctx context.Context, ticketHash *chainhash.Hash, choices ...wallet.AgendaChoice) (voteBits uint16, err error) {
+	return 0, nil
+}
+
+func (w *tDcrWallet) SetTSpendPolicy(ctx context.Context, tspendHash *chainhash.Hash, policy stake.TreasuryVoteT, ticketHash *chainhash.Hash) error {
+	return nil
+}
+
+func (w *tDcrWallet) SetTreasuryKeyPolicy(ctx context.Context, pikey []byte, policy stake.TreasuryVoteT, ticketHash *chainhash.Hash) error {
+	return nil
+}
+
+func (w *tDcrWallet) Spender(ctx context.Context, out *wire.OutPoint) (*wire.MsgTx, uint32, error) {
+	return nil, 0, nil
+}
+
+func (w *tDcrWallet) ChainParams() *chaincfg.Params {
+	return nil
+}
+
+func (w *tDcrWallet) TxBlock(ctx context.Context, hash *chainhash.Hash) (chainhash.Hash, int32, error) {
+	return chainhash.Hash{}, 0, nil
+}
+
+func (w *tDcrWallet) DumpWIFPrivateKey(ctx context.Context, addr stdaddr.Address) (string, error) {
+	return "", nil
+}
+
+func (w *tDcrWallet) VSPFeeHashForTicket(ctx context.Context, ticketHash *chainhash.Hash) (chainhash.Hash, error) {
+	return chainhash.Hash{}, nil
+}
+
+func (w *tDcrWallet) UpdateVspTicketFeeToStarted(ctx context.Context, ticketHash, feeHash *chainhash.Hash, host string, pubkey []byte) error {
+	return nil
+}
+
+func (w *tDcrWallet) ReserveOutputsForAmount(ctx context.Context, account uint32, amount dcrutil.Amount, minconf int32) ([]wallet.Input, error) {
+	return nil, nil
+}
+
+func (w *tDcrWallet) NewChangeAddress(ctx context.Context, account uint32) (stdaddr.Address, error) {
+	return nil, nil
+}
+
+func (w *tDcrWallet) RelayFee() dcrutil.Amount {
+	return 0
+}
+
+func (w *tDcrWallet) SetPublished(ctx context.Context, hash *chainhash.Hash, published bool) error {
+	return nil
+}
+
+func (w *tDcrWallet) AddTransaction(ctx context.Context, tx *wire.MsgTx, blockHash *chainhash.Hash) error {
+	return nil
+}
+
+func (w *tDcrWallet) UpdateVspTicketFeeToPaid(ctx context.Context, ticketHash, feeHash *chainhash.Hash, host string, pubkey []byte) error {
+	return nil
+}
+
+func (w *tDcrWallet) NetworkBackend() (wallet.NetworkBackend, error) {
+	return nil, nil
+}
+
+func (w *tDcrWallet) RevokeTickets(ctx context.Context, rpcCaller wallet.Caller) error {
+	return nil
+}
+
+func (w *tDcrWallet) UpdateVspTicketFeeToErrored(ctx context.Context, ticketHash *chainhash.Hash, host string, pubkey []byte) error {
+	return nil
+}
+
+func (w *tDcrWallet) TSpendPolicyForTicket(ticketHash *chainhash.Hash) map[string]string {
+	return nil
+}
+
+func (w *tDcrWallet) TreasuryKeyPolicyForTicket(ticketHash *chainhash.Hash) map[string]string {
+	return nil
+}
+
+func (w *tDcrWallet) AbandonTransaction(ctx context.Context, hash *chainhash.Hash) error {
+	return nil
+}
+
+func (w *tDcrWallet) TxConfirms(ctx context.Context, hash *chainhash.Hash) (int32, error) {
+	return 0, nil
+}
+
+func (w *tDcrWallet) IsVSPTicketConfirmed(ctx context.Context, ticketHash *chainhash.Hash) (bool, error) {
+	return false, nil
+}
+
+func (w *tDcrWallet) UpdateVspTicketFeeToConfirmed(ctx context.Context, ticketHash, feeHash *chainhash.Hash, host string, pubkey []byte) error {
+	return nil
+}
+
+func (w *tDcrWallet) VSPTicketInfo(ctx context.Context, ticketHash *chainhash.Hash) (*wallet.VSPTicket, error) {
+	return nil, nil
+}
+
+func (w *tDcrWallet) SignMessage(ctx context.Context, msg string, addr stdaddr.Address) (sig []byte, err error) {
+	return nil, nil
 }
 
 func tNewSpvWallet() (*spvWallet, *tDcrWallet) {

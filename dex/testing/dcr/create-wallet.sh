@@ -10,6 +10,7 @@ RPC_PORT=$4
 USE_SPV=$5
 ENABLE_VOTING=$6
 HTTPPROF_PORT=$7
+MANUAL_TICKETS=$8
 
 WALLET_DIR="${NODES_ROOT}/${NAME}"
 mkdir -p ${WALLET_DIR}
@@ -53,7 +54,15 @@ EOF
 fi
 
 if [ "${ENABLE_VOTING}" = "1" ]; then
-echo "enablevoting=1" >> "${WALLET_DIR}/${NAME}.conf"
+cat >> "${WALLET_DIR}/${NAME}.conf" <<EOF
+enablevoting=1
+EOF
+fi
+
+if [ "${MANUAL_TICKETS}" = "1" ]; then
+cat >> "${WALLET_DIR}/${NAME}.conf" <<EOF
+manualtickets=1
+EOF
 fi
 
 if [ "${ENABLE_VOTING}" = "2" ]; then
@@ -66,7 +75,7 @@ ticketbuyer.balancetomaintainabsolute=1000
 EOF
 fi
 
-if [ -n "${HTTPPROF_PORT}" ]; then
+if [ "${HTTPPROF_PORT}" != "_" ]; then
 echo "profile=127.0.0.1:${HTTPPROF_PORT}" >> "${WALLET_DIR}/${NAME}.conf"
 fi
 

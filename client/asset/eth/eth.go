@@ -89,7 +89,7 @@ const (
 	// see DecodeCoinID func for details.
 	coinIDTakerFoundMakerRedemption = "TakerFoundMakerRedemption:"
 
-	// maxTxFeeGwei is the default max amout of eth that can be used in one
+	// maxTxFeeGwei is the default max amount of eth that can be used in one
 	// transaction. This is set by the host in the case of providers. The
 	// internal node currently has no max but also cannot be used since the
 	// merge.
