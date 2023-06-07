@@ -22,8 +22,8 @@ func TestPriceOracle(t *testing.T) {
 	logger := dex.StdOutLogger("TEST", dex.LevelTrace)
 
 	markets := []*mkt{
-		&mkt{base: 42, quote: 0},
-		&mkt{base: 60, quote: 0},
+		{base: 42, quote: 0},
+		{base: 60, quote: 0},
 	}
 
 	oracle, err := newPriceOracle(ctx, markets, logger)
@@ -53,7 +53,7 @@ func TestFetchBinanceSpread(t *testing.T) {
 
 func TestFetchCoinbaseSpread(t *testing.T) {
 	testSpreader(t, fetchCoinbaseSpread, "btc", "usd")
-}x
+}
 
 func TestFetchBittrexSpread(t *testing.T) {
 	testSpreader(t, fetchBittrexSpread, "dcr", "btc")

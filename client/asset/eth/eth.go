@@ -4557,8 +4557,10 @@ func getGetGasClientWithEstimatesAndBalances(ctx context.Context, net dex.Networ
 	initGas := (g.Swap * n) + g.SwapAdd*(m*(m+1)/2)
 	redeemGas := (g.Redeem * n) + g.RedeemAdd*(m*(m+1)/2)
 
-	fees := (initGas + redeemGas + defaultSendGasLimit /* fees for participant wallet */) *
-		2 /* fudge factor */ * 6 / 5 /* base rate increase accomodation */ * feeRate
+	fees := (initGas + redeemGas + defaultSendGasLimit) * // fees for participant wallet
+		2 * // fudge factor
+		6 / 5 * // base rate increase accommodation
+		feeRate
 
 	isToken := assetID != BipID
 	ethReq = fees + swapReq
@@ -5001,7 +5003,7 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 		if err = checkTxStatus(receipt, txOpts.GasLimit); err != nil {
 			return fmt.Errorf("init tx failed status check: %w", err)
 		}
-		log.Infof("%d gas used for %d initation txs", receipt.GasUsed, n)
+		log.Infof("%d gas used for %d initiation txs", receipt.GasUsed, n)
 		stats.swaps = append(stats.swaps, receipt.GasUsed)
 
 		// Estimate a refund
