@@ -385,12 +385,13 @@ func (w *zecWallet) Balance() (*asset.Balance, error) {
 	}
 
 	if bal.Other == nil {
-		bal.Other = map[string]uint64{}
+		bal.Other = make(map[asset.BalanceCategory]asset.CustomBalance)
 	}
 
-	bal.Other["shielded"] = shielded
+	bal.Other[asset.BalanceCategoryShielded] = asset.CustomBalance{
+		Amount: shielded,
+	}
 	return bal, nil
-
 }
 
 // NewShieldedAddress creates a new shielded address. A shielded address can be

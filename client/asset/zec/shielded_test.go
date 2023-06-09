@@ -90,8 +90,9 @@ func TestShieldUnshield(t *testing.T) {
 		t.Fatalf("Balance error: %v", err)
 	}
 
-	if bal.Other["shielded"] != status.Balance {
-		t.Fatalf("Account balance does not match sum of Orchard address balances. %d != %d", bal.Other["shielded"], status.Balance)
+	shieldedBal := bal.Other[asset.BalanceCategoryShielded]
+	if shieldedBal.Amount != status.Balance {
+		t.Fatalf("Account balance does not match sum of Orchard address balances. %d != %d", shieldedBal.Amount, status.Balance)
 	}
 
 	_, err = w.UnshieldFunds(ctx, 5e7)

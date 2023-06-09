@@ -224,7 +224,14 @@ export interface WalletBalance {
   orderlocked: number
   contractlocked: number
   bondlocked: number
-  other: Record<string, number>
+  bondReserves: number
+  reservesDeficit: number
+  other: Record<string, CustomBalance>
+}
+
+export interface CustomBalance {
+  amt: number
+  locked: boolean
 }
 
 export interface WalletDefinition {

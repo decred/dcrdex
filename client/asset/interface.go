@@ -897,9 +897,43 @@ type Balance struct {
 	// Locked is the total amount locked in the wallet which includes but
 	// is not limited to funds locked for swap but not actually swapped yet.
 	Locked uint64 `json:"locked"`
-	// Other is a place to list custom balance categories.
-	Other map[string]uint64 `json:"other"`
+	// BondReserves is the amount of funds locked in the wallet for expenses
+	// associated with bond maintenance.
+	BondReserves uint64 `json:"bondReserves"`
+	// ReservesDeficit is the difference between the available balance and the
+	// amount reserved for specific purposes.
+	ReservesDeficit uint64 `json:"reservesDeficit"`
+	// Other is a place to list custom balance categories. It is recommended for
+	// custom balance added here to have a translation and tooltip info in
+	// client/webserver/site/src/js/wallet.js#customWalletBalanceCategory
+	Other map[BalanceCategory]CustomBalance `json:"other"`
 }
+
+// CustomBalance is a balance category used to track funds for a particular
+// purpose or for a special kind of balance (e.g Zcash Shielded wallet
+// balances).
+type CustomBalance struct {
+	// Amount is the balance in the wallet for this custom category. It is
+	// subtracted from Balance.Available above.
+	Amount uint64 `json:"amt"`
+	// Locked is a flag to indicate that this Amount is not included in
+	// Balance.Available and is included in Balance.Locked.
+	Locked bool `json:"locked"`
+}
+
+// BalanceCategory is a string identifier for a custom balance category.
+type BalanceCategory string
+
+// Balance categories for custom balances These values are used as a map key for
+// custom balances and may be recognized in the frontend to support translation.
+// It is recommended for custom balance categories listed here to have a
+// translation and tooltip info in
+// client/webserver/site/src/js/wallet.js#customWalletBalanceCategory. If any of
+// these balance categories should change, the customWalletBalanceCategory
+// function in the wallet.js file above should be updated with the new value.
+const (
+	BalanceCategoryShielded = "Shielded"
+)
 
 // Coin is some amount of spendable asset. Coin provides the information needed
 // to locate the unspent value on the blockchain.
