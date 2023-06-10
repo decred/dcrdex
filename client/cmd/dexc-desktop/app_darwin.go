@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -21,14 +20,6 @@ import (
 
 	"decred.org/dcrdex/client/app"
 	"decred.org/dcrdex/client/asset"
-	_ "decred.org/dcrdex/client/asset/bch"  // register bch asset
-	_ "decred.org/dcrdex/client/asset/btc"  // register btc asset
-	_ "decred.org/dcrdex/client/asset/dcr"  // register dcr asset
-	_ "decred.org/dcrdex/client/asset/dgb"  // register dgb asset
-	_ "decred.org/dcrdex/client/asset/doge" // register doge asset
-	_ "decred.org/dcrdex/client/asset/firo" // register firo asset
-	_ "decred.org/dcrdex/client/asset/ltc"  // register ltc asset
-	_ "decred.org/dcrdex/client/asset/zec"  // register zec asset
 	dexCore "decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/mm"
 	"decred.org/dcrdex/client/rpcserver"
@@ -38,7 +29,6 @@ import (
 	"github.com/progrium/macdriver/core"
 	"github.com/progrium/macdriver/objc"
 	"github.com/progrium/macdriver/webkit"
-	// Ethereum loaded in client/app/importlgpl.go
 )
 
 var (
@@ -102,32 +92,28 @@ func mainCore() error {
 	// Filter registered assets.
 	asset.SetNetwork(cfg.Net)
 
-	// shutdownCloser is used to execute functions that could have been executed
-	// as a deferred statement.
-	shutdownCloser := dex.NewErrorCloser()
-	defer shutdownCloser.Done(log) // execute deferred statements if we return early
-
 	// Use a hidden "dexc-desktop-state" file to prevent other processes when
 	// dexc-desktop is already running (e.g when non-bundled version of
 	// dexc-desktop is executed from cmd and vice versa).
 	dexcDesktopStateFile := filepath.Join(cfg.Config.AppData, cfg.Net.String(), ".dexc-desktop-state")
-	f, err := lockDexcDesktopStateFile(dexcDesktopStateFile)
+	alreadyRunning, err := createDexcDesktopStateFile(dexcDesktopStateFile)
 	if err != nil {
 		return err
 	}
-	shutdownCloser.Add(func() error {
-		f.Close()
-		return os.Remove(dexcDesktopStateFile)
-	})
+
+	if alreadyRunning {
+		return errors.New("dexc-desktop is already running")
+	}
+
+	// shutdownCloser is used to execute functions that could have been executed
+	// as a deferred statement in the main goroutine.
+	shutdownCloser := new(shutdownCloser)
+	defer shutdownCloser.Done() // execute deferred functions if we return early
 
 	// Initialize logging.
 	utc := !cfg.LocalLogs
 	logMaker, closeLogger := app.InitLogging(cfg.LogPath, cfg.DebugLevel, cfg.LogStdout, utc)
-	shutdownCloser.Add(func() error {
-		log.Debug("Exiting dexc main.")
-		closeLogger()
-		return nil
-	})
+	shutdownCloser.Add(closeLogger)
 
 	log = logMaker.Logger("APP")
 	log.Infof("%s version %s (Go version %s)", appName, app.Version, runtime.Version())
@@ -145,10 +131,7 @@ func mainCore() error {
 		if err != nil {
 			return fmt.Errorf("error starting CPU profiler: %w", err)
 		}
-		shutdownCloser.Add(func() error {
-			pprof.StopCPUProfile()
-			return nil
-		})
+		shutdownCloser.Add(pprof.StopCPUProfile)
 	}
 
 	defer func() {
@@ -236,7 +219,12 @@ func mainCore() error {
 		return err
 	}
 
-	url := "http://" + webSrv.Addr()
+	scheme := "http"
+	if cfg.WebTLS {
+		scheme = "https"
+	}
+
+	url := fmt.Sprintf("%s://%s", scheme, webSrv.Addr())
 	logDir := filepath.Dir(cfg.LogPath)
 
 	// Set to false so that the app doesn't exit when the last window is closed.
@@ -311,19 +299,17 @@ func mainCore() error {
 		}
 	})
 
-	// MacOS will always send the "applicationShouldTerminate" event when an
-	// application is about to exit so we should use this opportunity to
-	// cleanup. See:
+	// MacOS will always execute this method when dexc-desktop is about to exit
+	// so we should use this opportunity to cleanup. See:
 	// https://developer.apple.com/documentation/appkit/nsapplicationdelegate/1428642-applicationshouldterminate?language=objc
 	addMethodToDelegate("applicationShouldTerminate:", func(s objc.Object) core.NSUInteger {
-		cancel()                 // no-op with clean rpc/web server setup
-		wg.Wait()                // no-op with clean setup and shutdown
-		shutdownCloser.Done(log) // execute defer statements
-		shutdownCloser.Success()
+		cancel()              // no-op with clean rpc/web server setup
+		wg.Wait()             // no-op with clean setup and shutdown
+		shutdownCloser.Done() // execute shutdown functions
 		return core.NSUInteger(1)
 	})
 
-	// "applicationDockMenu" method returns the app's dock menu. See:
+	// "applicationDockMenu:" method returns the app's dock menu. See:
 	// https://developer.apple.com/documentation/appkit/nsapplicationdelegate/1428564-applicationdockmenu?language=objc
 	addMethodToDelegate("applicationDockMenu:", func(_ objc.Object) objc.Object {
 		// Menu Items
@@ -337,8 +323,8 @@ func mainCore() error {
 		return menu
 	})
 
-	// MacOS will always send the "windowWillClose" event when an application
-	// window is closing. See:
+	// MacOS will always execute this method when dexc-desktop window is about
+	// to close See:
 	// https://developer.apple.com/documentation/appkit/nswindowdelegate/1419605-windowwillclose?language=objc
 	var noteSent bool
 	addMethodToDelegate("windowWillClose:", func(_ objc.Object) {
@@ -363,15 +349,16 @@ func mainCore() error {
 		}
 	})
 
-	// MacOS will always send this event when an application icon on the dock is
-	// clicked or a new process is about to start, so we hijack the action and
-	// create new windows if all windows have been closed. See:
+	// MacOS will always execute this method when dexc-desktop icon on the dock
+	// is clicked or a new process is about to start, so we hijack the action
+	// and create new windows if all windows have been closed. See:
 	// https://developer.apple.com/documentation/appkit/nsapplicationdelegate/1428638-applicationshouldhandlereopen?language=objc
 	addMethodToDelegate("applicationShouldHandleReopen:hasVisibleWindows:", func(_ objc.Object) bool {
 		if !hasOpenWindows() {
 			// dexc-desktop is already running but there are no windows open so
 			// we should create a new window.
 			createNewWebView()
+			return false
 		}
 
 		// dexc-desktop is already running and there's a window open so we can
@@ -382,8 +369,8 @@ func mainCore() error {
 
 	app := cocoa.NSApp()
 
-	// Set the app's main and status bar menu when we receive the
-	// "applicationWillFinishLaunching" notification. See:
+	// Set the app's main and status bar menu when we receive
+	// NSApplicationWillFinishLaunchingNotification. See:
 	//  - https://github.com/go-gl/glfw/blob/master/v3.3/glfw/glfw/src/cocoa_init.m#L427-L443
 	//  - https://developer.apple.com/documentation/appkit/nsapplicationwillfinishlaunchingnotification?language=objc
 	addMethodToDelegate("applicationWillFinishLaunching:", func(_ objc.Object) {
@@ -422,8 +409,8 @@ func mainCore() error {
 		runningItem.SetTitle("Dex Client is running")
 		runningItem.SetEnabled(false)
 
-		itemQuit := cocoa.NSMenuItem_Init("Force Quit", objc.Sel("terminate:"), "q")
-		itemQuit.SetToolTip("Force DEX client to close")
+		itemQuit := cocoa.NSMenuItem_Init("Quit", objc.Sel("terminate:"), "q")
+		itemQuit.SetToolTip("Quit DEX client")
 
 		menu := cocoa.NSMenu_New()
 		menu.AddItem(runningItem)
@@ -431,13 +418,14 @@ func mainCore() error {
 		obj.SetMenu(menu)
 
 		// Hide the application until it is ready to be shown when we receive
-		// the "applicationDidFinishLaunching" notification below. This also
+		// the "NSApplicationDidFinishLaunchingNotification" below. This also
 		// allows us to ensure the menu bar is redrawn.
 		app.TryToPerform_with_(objc.Sel("hide:"), nil)
 	})
 
-	// MacOS will always send the "applicationDidFinishLaunching" event when an
-	// application has finished launching. See:
+	// MacOS will always send a notification named
+	// "NSApplicationDidFinishLaunchingNotification" when an application has
+	// finished launching. See:
 	// https://developer.apple.com/documentation/appkit/nsapplicationdidfinishlaunchingnotification?language=objc
 	addMethodToDelegate("applicationDidFinishLaunching:", func(_, notification objc.Object) {
 		// Unhide the app on the main thread after it has finished launching we
@@ -468,7 +456,9 @@ func mainCore() error {
 		}
 	}()
 
-	app.Run() // blocks until app.Terminate() is executed and wil not continue execution of any defer statements in the main thread.
+	// Run blocks until app.Terminate() is executed and will not continue
+	// execution of any deferred functions in the main thread.
+	app.Run()
 	return nil
 }
 
@@ -490,7 +480,7 @@ func createMainMenuItems() []cocoa.NSMenu {
 	appMenu.AddItem(cocoa.NSMenuItem_Separator())
 
 	quitMenuItem := cocoa.NSMenuItem_Init("Quit "+macOSAppTitle, objc.Sel("terminate:"), "q")
-	quitMenuItem.SetToolTip("Force DEX client to close")
+	quitMenuItem.SetToolTip("Quit DEX client")
 	appMenu.AddItem(quitMenuItem)
 
 	// Create the Window menu.
@@ -546,33 +536,49 @@ func selFalse(_ objc.Object) objc.Object {
 	return core.False
 }
 
-// lockDexcDesktopStateFile creates a lock file and returns a Closer that can be
-// used to unlock it. If the file already exists, the process id in the file is
-// checked to see if the process is still running.
-func lockDexcDesktopStateFile(path string) (io.Closer, error) {
-	pidB, err := os.ReadFile(path)
+// createDexcDesktopStateFile writes the id of the current process to the file
+// located at filePath. If the file already exists, the process id in the file
+// is checked to see if the process is still running. Returns true and a nil
+// error if the file exists and dexc-desktop is already running.
+func createDexcDesktopStateFile(filePath string) (bool, error) {
+	pidB, err := os.ReadFile(filePath)
 	if err == nil {
 		// Check if the pid is a number.
 		if pid, err := strconv.Atoi(string(pidB)); err == nil && pid != 0 {
 			// Check if the process is still running.
 			if p, err := os.FindProcess(pid); err == nil && p.Signal(syscall.Signal(0)) == nil {
-				return nil, errors.New("dexc-desktop is already running")
+				return true, nil
 			}
 		}
 
-		if err := os.Remove(path); err != nil {
-			return nil, fmt.Errorf("lockDexcDesktopStateFile: failed to remove lock file %s: %w", path, err)
+		if err := os.Remove(filePath); err != nil {
+			return false, fmt.Errorf("failed to remove lock file %s: %w", filePath, err)
 		}
 	}
 
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC|os.O_EXCL, 0666)
+	err = os.WriteFile(filePath, []byte(fmt.Sprintf("%d", os.Getpid())), 0600)
 	if err != nil {
-		return nil, fmt.Errorf("lockDexcDesktopStateFile: failed to create lock file %s: %w", path, err)
+		return false, fmt.Errorf("os.WriteFile error: %w", err)
 	}
 
-	if _, err := f.WriteString(fmt.Sprintf("%d", os.Getpid())); err != nil {
-		return nil, fmt.Errorf("lockDexcDesktopStateFile: cannot write owner pid: %w", err)
-	}
+	return false, nil
+}
 
-	return f, nil
+// shutdownCloser is a helper for running shutdown functions in reverse order.
+type shutdownCloser struct {
+	closers []func()
+}
+
+// Add adds a closer function to the shutdownCloser. Done should be called when
+// the shutdownCloser is no longer needed.
+func (sc *shutdownCloser) Add(closer func()) {
+	sc.closers = append(sc.closers, closer)
+}
+
+// Done runs all of the closer functions in reverse order.
+func (sc *shutdownCloser) Done() {
+	for i := len(sc.closers) - 1; i >= 0; i-- {
+		sc.closers[i]()
+	}
+	sc.closers = nil
 }
