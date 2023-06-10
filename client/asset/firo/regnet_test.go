@@ -62,5 +62,5 @@ func TestFetchExternalFee(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Printf("#### External fee rate fetched:: %d sat/B\n", rate)
+	fmt.Printf("External fee rate fetched:: %d sat/B\n", rate)
 }
