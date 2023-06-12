@@ -41,7 +41,9 @@ privileges and forfeiture of registration fee.
 ## Getting Started
 
 To begin using the DEX to trade, you need the client application. There are a
-few simple options for obtaining the software:
+few simple *options* for obtaining the software. The standalone DEX client is
+strongly recommended as it is the easiest to setup and generally has the most
+up-to-date downloads. Pick **just one** method:
 
 1. Download the the standalone DEX client for your operating system for the
    [latest release on GitHub](https://github.com/decred/dcrdex/releases).
