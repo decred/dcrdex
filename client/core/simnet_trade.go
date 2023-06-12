@@ -1721,8 +1721,8 @@ func dgbWallet(node string) (*tWallet, error) {
 	return btcCloneWallet(dgb.BipID, node, WTCoreClone)
 }
 
-func firoWallet(wt SimWalletType, node string) (*tWallet, error) {
-	return btcCloneWallet(firo.BipID, node, wt)
+func firoWallet(node string) (*tWallet, error) {
+	return btcCloneWallet(firo.BipID, node, WTCoreClone)
 }
 
 func zecWallet(node string) (*tWallet, error) {
