@@ -2,107 +2,83 @@
 
 ## Client Quick Start Installation
 
-The DEX client can be installed in one of the following ways:
+The DEX client can be installed in one of the following ways. Download the
+application from *just one* of the following locations:
 
-1. Download the standalone DEX client for your operating system for the
-   [latest release on GitHub](https://github.com/decred/dcrdex/releases).
-2. [Use Decrediton](https://docs.decred.org/wallets/decrediton/decrediton-setup/),
-   the official graphical Decred wallet, which integrates the DEX client, and go
-   to the DEX tab.
-3. Use the Decred command line application installer, [**dcrinstall**](https://docs.decred.org/wallets/cli/cli-installation/),
-   with the `--dcrdex` switch.
-4. Build the standalone client [from source](https://github.com/decred/dcrdex/wiki/Client-Installation-and-Configuration#advanced-client-installation).
+* Download the standalone DEX client for your operating system for the [latest
+  release on GitHub](https://github.com/decred/dcrdex/releases). Extract the
+  "dexc" executable from the archive and run it. Open any web browser to the
+  link shown by the application. You may also put the **dexc** executable's
+  folder on your `PATH`.
+* [Use Decrediton](https://docs.decred.org/wallets/decrediton/decrediton-setup/),
+  the official graphical Decred wallet, which integrates the DEX client, and go
+  to the DEX tab.
+* (Legacy users) Use the Decred command line application installer,
+  [**dcrinstall**](https://docs.decred.org/wallets/cli/cli-installation/). This
+  is no longer recommended.
+* Build the standalone client [from source](https://github.com/decred/dcrdex/wiki/Client-Installation-and-Configuration#advanced-client-installation).
 
-**WARNING**: If you decide to build from source, use the `release-v0.5` branch,
+**WARNING**: If you decide to build from source, use the latest release branch,
 not `master`.
 
-### Sync Blockchains
+### Important Note on External Wallets
 
-Full nodes are NOT required to use DEX with BTC, DCR, or LTC. For Bitcoin, you
-can choose to create a native (built into the DEX client) BTC wallet by choosing
-the "Native" wallet type in the DEX client dialogs. A native DCR wallet is also
-available, but you may use Decrediton or dcrwallet running in SPV (light) mode
-for a more full-featured Decred wallet.
-
-NOTE: The upcoming Ethereum wallet is also a native wallet that uses the standard
-[light ethereum subprotocol (LES)](https://github.com/ethereum/devp2p/blob/master/caps/les.md).
-However, ETH trading is not enabled in the current release and the wallet is not
-available in the default build.
-
-Both LTC and BTC support external Electrum wallets, but this option is less
-mature and provides less privacy than the other wallet types. Be sure the wallet
-is connected to and synchronized with the network first, only the
-"default_wallet" is loaded, and its RPC server is configured
-([example](images/electrum-rpc-config.png)).
-
-If you choose to use full node wallets, you must fully synchronize them with
-their networks *before* running the DEX client. This refers to **dcrd**,
-**bitcoind**, **litecoind**, etc. Note that Bitcoin Core and most "clones"
-support block pruning, which can keep your blockchain storage down to a few GB,
-not the size of the full blockchain. Also, for good network fee estimates, the
-node should be running for several blocks.
-
-### Important Notes on Wallets
-
-- **If you already have Decrediton installed**, upgrade Decrediton before
-  running **dcrinstall**.
-
-- If using external wallet software (e.g. Decrediton, **dcrd**+**dcrwallet**,
-  **bitcoind**, Electrum, etc.), they must remain running while the DEX client
-  is running. Do not shut down, lock, unlock, or otherwise modify your wallet
-  settings while the client is running.
-
-- For Electrum, the wallet must be the "default_wallet". Only one Electrum
-  wallet should be opened to ensure the correct one is accessed.
+If using external wallet software (e.g. **dcrd**+**dcrwallet**, **bitcoind**,
+Electrum, etc.), they must remain running while the DEX client is running. Do
+not shut down, lock, unlock, or otherwise modify your wallet settings while the
+client is running.
 
 ## Client Configuration
 
-These instructions assume you've used the
-[Client Quick Start Installation](#client-quick-start-installation). If you've
-used a [custom installation](#advanced-client-installation) for the client
-and/or blockchain software, adapt as necessary.
+These instructions assume you've obtained the DEX client as described in the
+[Client Quick Start Installation](#client-quick-start-installation) section.
 
 ### Prerequisites
 
-External wallet software is not required for all assets. The native light
-wallets are the simplest and best option for most users. But if using external
-wallets, they should be running and synced before starting DEX. See the next
-section for a list of supported wallets and assets.
-
-Unless you use Decrediton to start DEX, you will need a web browser to open the
+If you use the standalone DEX client, you will need a web browser to open the
 DEX client user interface as described in the next section.
 
-### Optional External Software
+Most users will use the native wallets that are already built into the DEX
+client. Depending on the asset, you may be able to choose from: (1) the native
+wallet, (2) an external full node wallet, or (3) and Electrum-based wallet.
+Consult the following table for a summary of wallet support. If there is a
+checkmark in the "native" column, no external software is required.
 
-Depending on which assets you wish to use, you have different choices for wallet
-software. There are native/built-in light wallet options for Bitcoin and Decred,
-an external light wallet option for Litecoin, and full-node support for all
-other assets including: Bitcoin, Decred, Litecoin, Zcash, Dogecoin, Bitcoin
-Cash. The following release will include Ethereum support with a native light
-wallet.
+| Coin         | native | full node | Electrum | notes                        |
+|--------------|--------|-----------|----------|------------------------------|
+| Bitcoin      |    ✓   | [v0.21-v24](https://bitcoincore.org/en/download/) | [v4.2.x](https://electrum.org/) |                              |
+| Decred       |    ✓   | [v1.7-1.8](https://github.com/decred/decred-release/releases) |     x    |                              |
+| Ethereum     |    ✓   | geth IPC/http/ws |   N/A   |  see <https://github.com/decred/dcrdex/wiki/Ethereum>   |
+| Litecoin     |    ✓   | [v0.21.2.2](https://litecoin.org/) | [v4.2.x](https://electrum-ltc.org/) | may require a [bootstrap peer](https://gist.github.com/chappjc/d0f26b12258f8531bb78b37f38d080a0) |
+| Bitcoin Cash |    ✓   | [v24+](https://bitcoincashnode.org/) |     x    | use only Bitcoin Cash Node for full node |
+| Dogecoin     |    x   |  [v1.14.5+](https://dogecoin.com/) |     x    |                              |
+| Zcash        |    x   |   [v5.4.2](https://z.cash/download/)  |     x    |                              |
 
-1. **Bitcoin.** The native wallet has no prerequisites. To use a
-   [Bitcoin Core](https://bitcoincore.org/en/download/) full node wallet
-   (bitcoind or bitcoin-qt), the supported versions are v0.21, v22, and v23.
-   Descriptor wallets are not supported in v0.21. An [Electrum
-   v4.2.x](https://electrum.org/) wallet is also supported.
-2. **Decred.** The native wallet has no prerequisites. Alternatively, Decrediton
-   or the dcrwallet command line application may be used in either SPV or full
-   node (RPC) mode. The latest Decrediton installer includes DEX. If using a
-   standalone [dcrwallet](https://github.com/decred/dcrwallet), install from the
-   [v1.7.x release binaries](https://github.com/decred/decred-release/releases),
-   or build from the `release-v1.7` branches.
-3. **Litecoin.** Either [Litecoin Core v0.21.x](https://litecoin.org/) or
-   [Electrum-LTC v4.2.x](https://electrum-ltc.org/) are supported.
-4. **Dogecoin.** [Dogecoin Core v1.14.5+](https://dogecoin.com/).
-5. **Zcash.** [zcashd v5.4.2](https://z.cash/download/).
-6. **Bitcoin Cash.** [Bitcoin Cash Node v24+](https://bitcoincashnode.org/en/)
+NOTE: The Electrum option is less mature and provides less privacy than the
+other wallet types. Some manual configuration of the Electrum wallet's RPC
+server is also necessary: ([example](images/electrum-rpc-config.png)).
+
+### Synchronizing Wallets
+
+**If using the native wallets** that are integrated with the DEX client (see
+above), you can skip this section.
+
+If you choose to use and external wallet (full node or Electrum), you must start
+and synchronize them with their networks *before* running the DEX client.
+
+Note that Bitcoin Core and most "clones" support block pruning, which can keep
+your blockchain storage down to a few GB, not the size of the full blockchain,
+but a large size should be used to avoid full reindexing if used infrequently.
+Also, for good network fee estimates, the full node should be running for
+several blocks.
 
 ### Initial Setup
 
-1. Start the client. Either go to the "DEX" tab within Decrediton, or with the
-   standalone client, open a command prompt in the folder containing the
-   pre-compiled dexc client files and run `./dexc` (`dexc.exe` on Windows).
+1. Start the client. For the standalone client (**dexc**), open a command prompt
+   in the folder containing the dexc application and run it. e.g. `./dexc` on
+   Mac and Linux, or `dexc.exe` on Windows. To avoid the command prompt on
+   Windows, `dexc-tray.exe` may be run instead. If using Decrediton instead of
+   **dexc**, just click the "DEX" tab.
 
 2. In your web browser, navigate to <http://localhost:5758>. Skip this step if
    using Decrediton.
@@ -110,25 +86,33 @@ wallet.
    <img src="images/omnibar-client.png" width="320">
 
 3. Set your new **client application password**. You will use this password to
-   perform all future security-sensitive client operations, including
-   registering, signing in, and trading.
+   perform all future security-sensitive client operations.
 
    <img src="images/client-pw.png" width="320">
 
-4. Choose the DEX server you would like to use. Either click one of the
-   pre-defined hosts such as **dex.decred.org**, or enter the address of a known
-   server that you would like to use.
+   NOTE: Checking the "Remember my password" box only applies to the current
+   session. It is easiest for most user to check it.
+
+4. Choose the DEX host that you would like to use. Either click one of the
+   pre-defined hosts, or enter the address of a known host that you would like
+   to use.
 
    <img src="images/add-dex-reg.png" width="320">
 
-   The above example shows a local server when in simnet mode (a developer network).
+   NOTE: If you just want to view the markets without being able to trade, check
+   the "No account" box. You will have an opportunity to create an identity
+   later, but the remaining steps assume you are preparing to trade.
 
-5. The DEX server will show all offered markets, and a choice of assets with
-   which to pay the one-time setup fee. (This is a nominal amount just to
-   discourage abuse and maintain a good experience for all users. No further
-   fees are collected on trades.) Select the asset you wish to use.
+5. The DEX host will show all offered markets, and a choice of assets with which
+   you can lock in a bond to enable trading. Select the asset you wish to use.
 
-   <img src="images/choose-fee.png" width="400">
+   <img src="images/choose-bond-asset.png" width="400">
+
+   NOTE: A dedicate wiki page describing time-locked fidelity bonds will be
+   created, but in short, fidelity bonds are funds redeemable only by you, but
+   in the future. Having a potential trader lock some amount of funds before
+   placing orders is an anti-spam mechanism to combat disruptive behavior like
+   backing out on swaps.
 
 6. Choose the type of wallet to use. In this screenshot, we choose a native BTC
    wallet and click "Create!". The wallet will begin to synchronize with the
@@ -142,24 +126,26 @@ wallet.
 
 7. The next form will show you synchronization progress, and give you the first
    deposit address for the wallet and the minimum amount you should deposit to
-   be able to pay the fee. After sending to your address, the transaction **must
-   confirm** (i.e. be mined in a block) before the form will update your
-   balance. This form will be skipped if the wallet is already funded and
-   synchronized.
+   be able to create your first bond, which is required to place orders. **This
+   is your wallet**, so deposit as much as you like! After sending to your
+   address, the transaction **must confirm** (i.e. be mined in a block) before
+   the form will update your balance. This form will be skipped if the wallet is
+   already funded and synchronized.
 
    <img src="images/sync-fund-btc.png" width="360">
 
    **IMPORTANT**: This is your own local wallet, and you can send as much as you
-   like to the wallet since *only* the amount required for the fee will be spent
-   in the next step. The remaining balance will be available for trading or may
-   be withdrawn later. In the case of the screenshot above, the form indicates
-   that for the client to make a fee payment transaction for the amount of 0.001
-   BTC, the wallet should be funded with "at least 0.00100823 BTC to also cover
-   network fees".  For example, you can send yourself 5 BTC and only the
-   required amount will be spent on the registration fee, with the remainder in
-   the wallet's balance, which can then be traded or sent to another wallet.
-   Since this fee estimate can change as network conditions fluctuate, you
-   should deposit as much as you wish to trade.
+   like to your new wallet since *only* the amount required for the bond will be
+   spent in the next step. The remaining amount will be in you available
+   balance. For example, you can send yourself 5 BTC and only the required
+   amount will be spent on the registration fee, with the remainder in the
+   wallet's balance, which can then be traded or sent to another wallet.
+
+   NOTE: The native Litecoin and Bitcoin Cash wallets connect to full nodes on
+   the blockchain network that have "compact block filters" enabled. It may take
+   time for the wallet to crawl the network until it finds such nodes. Be
+   patient; otherwise you can bootstrap the process using a known seed node such
+   as the Litecoin nodes on [this list](https://gist.github.com/chappjc/d0f26b12258f8531bb78b37f38d080a0).
 
 8. Once the wallet is synchronized and has at least enough to pay the server's
    defined fee, the form will update, and you should click the button to submit
@@ -167,20 +153,22 @@ wallet.
 
    <img src="images/register-button.png" width="360">
 
-9. You will then be taken to the **markets view**, where you must wait for
-   confirmations on your registration fee transaction generated in the previous
-   step, at which time your client will automatically complete authentication
-   with that server.
+   After proceeding, the available balance will be the amount you deposited
+   in the previous step minus this bond amount and transaction fees.
+
+9. You will then be taken to the **Markets** page, where you must wait for
+   confirmations on your bond transaction:
 
    <img src="images/wait-for-confs.png" width="360">
-
-   Note the remainder of the 5 BTC deposited in the available balance after the
-   fee was paid.
 
    While waiting, you may create additional wallets either directly from the
    displayed market or on the Wallets page accessible from the navigation bar at
    the top. This is also a good time to retrieve your application "seed", as
    described in the next step.
+
+   After the transaction is confirmed, the application will complete registration:
+
+   <img src="images/bond-accepted.png" width="360">
 
 10. At any time you can go to the Settings page via the "gears" icon in the top
     navigation bar to retrieve the application seed that was generated when
@@ -197,15 +185,15 @@ wallet.
 
 ### Dependencies
 
-1. [Go 1.18 or 1.19](https://golang.org/doc/install)
-2. [Node 16 or 18](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) is used to bundle resources for the browser interface. It's important to note that the DEX client has no external JavaScript dependencies. The client doesn't import any Node packages. We only use Node to lint and compile our own JavaScript and css resources.
+1. [Go 1.19 or 1.20](https://golang.org/doc/install)
+2. (optional) [Node 18 or 20](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) is used to bundle resources for the browser interface. It's important to note that the DEX client has no external JavaScript dependencies. The client doesn't import any Node packages. We only use Node to lint and compile our own JavaScript and css resources. This build step is not required if building from a release branch such as `release-v0.6`.
 3. At least 2 GB of available system memory.
 
 ### Build from Source
 
 **Build the web assets** from *client/webserver/site/*.
 
-Bundle the CSS and JavaScript with Webpack:
+**If building from the `master` branch,** bundle the CSS and JavaScript with Webpack:
 
 ```sh
 npm clean-install && npm run build
@@ -221,9 +209,8 @@ go build
 Connect to the client from your browser at `localhost:5758`.
 
 While `dexc` may be run from within the git workspace as described above, the
-`dexc` binary executable generated with `go build` and the entire `site` folder
-can be copied into a different folder as long as `site` is in the same directory
-as `dexc` (e.g. `/opt/dcrdex/dexc` and `/opt/dcrdex/site`).
+`dexc` binary executable generated with `go build` can be copied into a
+different folder (e.g. `/opt/dcrdex/dexc`).
 
 ### Docker
 
