@@ -37,6 +37,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/bch"
 	"decred.org/dcrdex/client/asset/btc"
+	"decred.org/dcrdex/client/asset/dash"
 	"decred.org/dcrdex/client/asset/dcr"
 	"decred.org/dcrdex/client/asset/dgb"
 	"decred.org/dcrdex/client/asset/doge"
@@ -1526,7 +1527,7 @@ func (hc *harnessCtrl) fund(ctx context.Context, address string, amts []int) err
 func newHarnessCtrl(assetID uint32) *harnessCtrl {
 
 	switch assetID {
-	case dcr.BipID, btc.BipID, ltc.BipID, bch.BipID, doge.BipID, firo.BipID, zec.BipID, dgb.BipID:
+	case dcr.BipID, btc.BipID, ltc.BipID, bch.BipID, doge.BipID, firo.BipID, zec.BipID, dgb.BipID, dash.BipID:
 		return &harnessCtrl{
 			dir:     filepath.Join(dextestDir, dex.BipIDSymbol(assetID), "harness-ctl"),
 			fundCmd: "./alpha",
@@ -1566,6 +1567,7 @@ var cloneTypes = map[uint32]string{
 	3:   "dogecoindRPC",
 	136: "firodRPC",
 	133: "zcashdRPC",
+	5:   "dashdRPC",
 }
 
 // accountBIPs is a map of account based assets. Used in fee estimation.
@@ -1662,7 +1664,9 @@ func btcCloneWallet(assetID uint32, node string, wt SimWalletType) (*tWallet, er
 	parentNode := node
 	pass := []byte("abc")
 	if node == "gamma" || node == "delta" || assetID == zec.BipID {
-		pass = nil
+		if assetID != dash.BipID {
+			pass = nil
+		}
 	}
 
 	switch assetID {
@@ -1709,12 +1713,16 @@ func dogeWallet(node string) (*tWallet, error) {
 	return btcCloneWallet(doge.BipID, node, WTCoreClone)
 }
 
+func dashWallet(node string) (*tWallet, error) {
+	return btcCloneWallet(dash.BipID, node, WTCoreClone)
+}
+
 func dgbWallet(node string) (*tWallet, error) {
 	return btcCloneWallet(dgb.BipID, node, WTCoreClone)
 }
 
-func firoWallet(node string) (*tWallet, error) {
-	return btcCloneWallet(firo.BipID, node, WTCoreClone)
+func firoWallet(wt SimWalletType, node string) (*tWallet, error) {
+	return btcCloneWallet(firo.BipID, node, wt)
 }
 
 func zecWallet(node string) (*tWallet, error) {
@@ -1743,6 +1751,8 @@ func (s *simulationTest) newClient(name string, cl *SimClient) (*simulationClien
 			tw, err = dogeWallet(node)
 		case dgb.BipID:
 			tw, err = dgbWallet(node)
+		case dash.BipID:
+			tw, err = dashWallet(node)
 		case firo.BipID:
 			tw, err = firoWallet(node)
 		case zec.BipID:

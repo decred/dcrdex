@@ -634,6 +634,10 @@ export const CoinExplorers: Record<number, Record<number, (cid: string) => strin
     [Mainnet]: (cid: string) => `https://dogeblocks.com/tx/${cid.split(':')[0]}`,
     [Testnet]: (cid: string) => `https://blockexplorer.one/dogecoin/testnet/tx/${cid.split(':')[0]}`
   },
+  5: { // dash
+    [Mainnet]: (cid: string) => `https://blockexplorer.one/dash/mainnet/tx/${cid.split(':')[0]}`,
+    [Testnet]: (cid: string) => `https://blockexplorer.one/dash/testnet/tx/${cid.split(':')[0]}`
+  },
   133: { // zec
     [Mainnet]: (cid: string) => `https://zcashblockexplorer.com/transactions/${cid.split(':')[0]}`,
     [Testnet]: (cid: string) => `https://blockexplorer.one/zcash/testnet/tx/${cid.split(':')[0]}`

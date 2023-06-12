@@ -15,6 +15,7 @@ const BipIDs: Record<number, string> = {
   0: 'btc',
   42: 'dcr',
   2: 'ltc',
+  5: 'dash',
   20: 'dgb',
   22: 'mona',
   28: 'vtc',
