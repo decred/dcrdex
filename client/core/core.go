@@ -6323,6 +6323,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 			// reserves reduction (and vice versa).
 
 			var future int64
+			var feeBuffer uint64
 			if loginAuth {
 				// If we are enabling reserves enforcement for spendable
 				// balance, we need to subtract how much we have already locked
@@ -6341,6 +6342,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 						future -= tierOffset * int64(bondAsset.Amt)
 					}
 				}
+				feeBuffer = bondWallet.BondsFeeBuffer(c.feeSuggestionAny(bondAsset.ID, dc))
 				dc.acct.totalReserved = int64(inBonds) + future // enabling starts with inBonds
 				c.log.Infof("First login at %v, with %v (x%d) in unspent bonds, "+
 					"reserving %v for future bonds with target tier of %d",
@@ -6355,7 +6357,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 
 			// TODO: limit dc.acct.totalReserved+future against maxBondedAmt
 
-			bondWallet.ReserveBondFunds(future, false)
+			bondWallet.ReserveBondFunds(future, feeBuffer, false) // may create a deficit if fees are higher now and wallet lacks funds (OK)
 			dc.log.Infof("Total reserved for %v is now %v (%v more future in bonds)", dc.acct.host,
 				bondWallet.amtStringSigned(dc.acct.totalReserved), bondWallet.amtStringSigned(future))
 			updatedAssets.count(bondAsset.ID)
@@ -7339,7 +7341,8 @@ func (c *Core) reReserveFunding(w *xcWallet) {
 			// (totalReserved minus what's locked in bonds, see the firstAuth
 			// path in authDEX, and the "enabling reserves" parts of
 			// UpdateBondOptions):
-			w.ReserveBondFunds(dc.acct.totalReserved-int64(inBonds), false)
+			feeBuffer := w.BondsFeeBuffer(c.feeSuggestionAny(w.AssetID, dc))
+			w.ReserveBondFunds(dc.acct.totalReserved-int64(inBonds), feeBuffer, false)
 		}
 		dc.acct.authMtx.RUnlock()
 

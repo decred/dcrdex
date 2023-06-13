@@ -183,6 +183,10 @@ type PostBondForm struct {
 	Bond     uint64           `json:"bond"`
 	LockTime uint64           `json:"lockTime"` // 0 means go with server-derived value
 
+	// FeeBuffer is optional, to use same value from BondsFeeBuffer during
+	// wallet funding. If zero, the wallet will use an internal estimate.
+	FeeBuffer uint64 `json:"feeBuffer,omitempty"`
+
 	// These options may be set when creating an account.
 	MaintainTier *bool   `json:"maintainTier,omitempty"` // tier implied from Bond amount
 	MaxBondedAmt *uint64 `json:"maxBondedAmt,omitempty"`
