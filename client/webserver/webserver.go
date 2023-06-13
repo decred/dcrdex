@@ -217,6 +217,11 @@ type Config struct {
 	Experimental bool
 }
 
+type valStamp struct {
+	val   uint64
+	stamp time.Time
+}
+
 // WebServer is a single-client http and websocket server enabling a browser
 // interface to the DEX client.
 type WebServer struct {
@@ -233,6 +238,9 @@ type WebServer struct {
 	authMtx         sync.RWMutex
 	authTokens      map[string]bool
 	cachedPasswords map[string]*cachedPassword // cached passwords keyed by auth token
+
+	bondBufMtx sync.Mutex
+	bondBuf    map[uint32]valStamp
 }
 
 // New is the constructor for a new WebServer. CustomSiteDir in the Config can
@@ -338,6 +346,7 @@ func New(cfg *Config) (*WebServer, error) {
 		authTokens:      make(map[string]bool),
 		cachedPasswords: make(map[string]*cachedPassword),
 		experimental:    cfg.Experimental,
+		bondBuf:         map[uint32]valStamp{},
 	}
 
 	lang := cfg.Language

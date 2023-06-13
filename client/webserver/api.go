@@ -351,13 +351,42 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
+// bondsFeeBuffer is a caching helper for the bonds fee buffer. Values for a
+// given asset are cached for 45 minutes. These values are meant to provide a
+// sensible but well-padded fee buffer for bond transactions now and well into
+// the future, so a long expiry is appropriate.
+func (s *WebServer) bondsFeeBuffer(assetID uint32) (feeBuffer uint64, err error) {
+	// (*Core).BondsFeeBuffer returns a fresh fee buffer based on a current (but
+	// padded) fee rate estimate. We assist the frontend by stabilizing this
+	// value for up to 45 minutes from the last request for a given asset. A web
+	// app could conceivably do the same, but we'll do this here between the
+	// backend (Core) and UI so that a webapp does not need to employ local
+	// storage/cookies and associated caching logic.
+	const expiry = 45 * time.Minute
+	s.bondBufMtx.Lock()
+	defer s.bondBufMtx.Unlock()
+	if buf, ok := s.bondBuf[assetID]; ok && time.Since(buf.stamp) < expiry {
+		feeBuffer = buf.val
+		log.Tracef("Using cached bond fee buffer (%v old): %d",
+			time.Since(buf.stamp), feeBuffer)
+	} else {
+		feeBuffer, err = s.core.BondsFeeBuffer(assetID)
+		if err != nil {
+			return
+		}
+		log.Tracef("Obtained fresh bond fee buffer: %d", feeBuffer)
+		s.bondBuf[assetID] = valStamp{feeBuffer, time.Now()}
+	}
+	return
+}
+
 // apiBondsFeeBuffer is the handler for the '/bondsfeebuffer' API request.
 func (s *WebServer) apiBondsFeeBuffer(w http.ResponseWriter, r *http.Request) {
 	form := new(bondsFeeBufferForm)
 	if !readPost(w, r, form) {
 		return
 	}
-	feeBuffer, err := s.core.BondsFeeBuffer(form.AssetID)
+	feeBuffer, err := s.bondsFeeBuffer(form.AssetID)
 	if err != nil {
 		s.writeAPIError(w, err)
 		return
@@ -395,13 +424,20 @@ func (s *WebServer) apiPostBond(w http.ResponseWriter, r *http.Request) {
 	}
 	defer zero(pass)
 
+	feeBuffer, err := s.bondsFeeBuffer(assetID) // could also put it in postBondForm, with some work on the frontend
+	if err != nil {
+		s.writeAPIError(w, err)
+		return
+	}
+
 	_, err = s.core.PostBond(&core.PostBondForm{
-		Addr:     post.Addr,
-		Cert:     []byte(post.Cert),
-		AppPass:  pass,
-		Bond:     post.Bond,
-		Asset:    &assetID,
-		LockTime: post.LockTime,
+		Addr:      post.Addr,
+		Cert:      []byte(post.Cert),
+		AppPass:   pass,
+		Bond:      post.Bond,
+		Asset:     &assetID,
+		LockTime:  post.LockTime,
+		FeeBuffer: feeBuffer,
 		// Options valid only when creating an account with bond:
 		MaintainTier: post.Maintain,
 		MaxBondedAmt: post.MaxBondedAmt,

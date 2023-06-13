@@ -535,12 +535,21 @@ func (w *xcWallet) MakeBondTx(ver uint16, amt, feeRate uint64, lockTime time.Tim
 }
 
 // ReserveBondFunds reserves funds for future bonds given known live bonds.
-func (w *xcWallet) ReserveBondFunds(future int64, respectBalance bool) bool {
+func (w *xcWallet) ReserveBondFunds(future int64, feeBuffer uint64, respectBalance bool) bool {
 	bonder, ok := w.Wallet.(asset.Bonder)
 	if !ok {
 		return false
 	}
-	return bonder.ReserveBondFunds(future, respectBalance)
+	return bonder.ReserveBondFunds(future, feeBuffer, respectBalance)
+}
+
+// BondsFeeBuffer gets the bonds fee buffer based on the provided fee rate.
+func (w *xcWallet) BondsFeeBuffer(feeRate uint64) uint64 {
+	bonder, ok := w.Wallet.(asset.Bonder)
+	if !ok {
+		return 0
+	}
+	return bonder.BondsFeeBuffer(feeRate)
 }
 
 // RegisterUnspent informs the wallet of existing bond amounts that will be
