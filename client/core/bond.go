@@ -477,7 +477,7 @@ func (c *Core) postRequiredBonds(dc *dexConnection, cfg *dexBondCfg, state *dexA
 		c.log.Errorf("excessive lock time (%v>%v) - not posting!", lockDur, lockTimeLimit)
 	} else {
 		c.log.Tracef("Bond lifetime = %v (lockTime = %v)", bondLifetime, lockTime)
-		_, err = c.makeAndPostBond(dc, true, wallet, amt, lockTime, bondAsset)
+		_, err = c.makeAndPostBond(dc, true, wallet, amt, c.feeSuggestionAny(wallet.AssetID), lockTime, bondAsset)
 		if err != nil {
 			c.log.Errorf("Unable to post bond: %v", err)
 		} // else it's now in pendingBonds
@@ -562,7 +562,7 @@ func (c *Core) rotateBonds(ctx context.Context) {
 			}
 			c.log.Infof("Updating bond reserves by %s (automatic tier change adjustments)",
 				wallet.amtStringSigned(reserveDelta))
-			wallet.ReserveBondFunds(reserveDelta, false)
+			wallet.ReserveBondFunds(reserveDelta, 0, false) // fee buffer already added when first enabled
 		}
 		// Update the unactuated tier change counter.
 		for _, s := range actuatedTierChanges[assetID] {
@@ -941,7 +941,8 @@ func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
 				"for bond asset change from %d to %d, with bond increment %v",
 				modStr, wallet.amtString(inBonds), wallet.amtString(live),
 				bondAssetID0, bondAssetID, wallet.amtString(bondAssetAmt))
-			if !wallet.ReserveBondFunds(mod, true) {
+			feeBuffer := wallet.BondsFeeBuffer(c.feeSuggestionAny(bondAssetID, dc))
+			if !wallet.ReserveBondFunds(mod, feeBuffer, true) {
 				return fmt.Errorf("insufficient balance to reserve %v", modStr)
 			}
 		} else { // maintenance stays disabled on the new asset
@@ -955,7 +956,7 @@ func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
 			} else if _, ok := wallet0.Wallet.(asset.Bonder); !ok {
 				c.log.Warnf("old bond wallet %v is not an asset.Bonder", unbip(bondAssetID0))
 			} else {
-				wallet0.ReserveBondFunds(-totalReserved0, false)
+				wallet0.ReserveBondFunds(-totalReserved0, 0, false)
 			}
 		}
 	} else if tierChanged { // && asset not changed
@@ -965,7 +966,8 @@ func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
 		inBonds, live := dc.bondTotalInternal(bondAssetID)
 
 		var mod int64
-		if newTarget == 0 { // disable, not just a delta
+		var feeBuffer uint64 // only used if oldTarget == 0 (enabling)
+		if newTarget == 0 {  // disable, not just a delta
 			mod = -dc.acct.totalReserved
 			dc.acct.totalReserved = 0 // += mod
 		} else {
@@ -978,6 +980,7 @@ func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
 				// Wallet already has live unspent bonds (inBonds) registered.
 				mod -= int64(inBonds)                  // negative OK, combined is still positive
 				dc.acct.totalReserved = int64(inBonds) // enabling starts with inBonds as base nominal reserves
+				feeBuffer = wallet.BondsFeeBuffer(c.feeSuggestionAny(bondAssetID, dc))
 			}
 			dc.acct.totalReserved += mod
 		}
@@ -988,7 +991,8 @@ func (c *Core) UpdateBondOptions(form *BondOptionsForm) error {
 			"for target tier change from %v to %v, with bond increment %v",
 			modStr, wallet.amtString(inBonds), wallet.amtString(live),
 			oldTarget, newTarget, wallet.amtString(bondAssetAmt))
-		if !wallet.ReserveBondFunds(mod, true) { // will always allow negative mod, but may warn about balance
+
+		if !wallet.ReserveBondFunds(mod, feeBuffer, true) { // will always allow negative mod, but may warn about balance
 			return fmt.Errorf("insufficient balance to reserve an extra %v", modStr)
 		}
 		dc.log.Infof("Total reserved for %v is now %v (%v more in future bonds)", dc.acct.host,
@@ -1026,7 +1030,7 @@ func (c *Core) BondsFeeBuffer(assetID uint32) (uint64, error) {
 	if !ok {
 		return 0, errors.New("wallet does not support bonds")
 	}
-	return bonder.BondsFeeBuffer(), nil
+	return bonder.BondsFeeBuffer(c.feeSuggestionAny(assetID)), nil
 }
 
 // PostBond begins the process of posting a new bond for a new or existing DEX
@@ -1042,6 +1046,10 @@ func (c *Core) BondsFeeBuffer(assetID uint32) (uint64, error) {
 // account, the connection is established but no additional bond is posted. If
 // no account is discovered on the server, the account is created locally and
 // bond is posted to create the account.
+//
+// Note that the FeeBuffer field of the form is optional, but it may be provided
+// to ensure that the wallet reserves the amount reported by a preceding call to
+// BondsFeeBuffer, such as during initial wallet funding.
 func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 	// Make sure the app has been initialized.
 	if !c.IsInitialized() {
@@ -1163,6 +1171,8 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 		}
 	}
 
+	feeRate := c.feeSuggestionAny(bondAssetID, dc)
+
 	// Ensure this DEX supports this asset for bond, and get the required
 	// confirmations and bond amount.
 	bondAsset, bondExpiry := dc.bondAsset(bondAssetID)
@@ -1206,9 +1216,13 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 		// that it is the first authorization of the account with the DEX via
 		// the totalReserves and isAuthed fields of dexAccount.
 		mod := bondOverlap * form.Bond
-		if !wallet.ReserveBondFunds(int64(mod), true) {
-			return nil, newError(bondAssetErr, "insufficient available balance to reserve %v for bonds plus fees",
-				wallet.amtString(mod))
+		feeBuffer := form.FeeBuffer
+		if feeBuffer == 0 {
+			feeBuffer = wallet.BondsFeeBuffer(feeRate)
+		} // else using same fee buffer advised during wallet funding
+		if !wallet.ReserveBondFunds(int64(mod), feeBuffer, true) {
+			return nil, newError(bondAssetErr, "insufficient available balance to reserve %v "+
+				"for bonds plus %v for fees", wallet.amtString(mod), wallet.amtString(feeBuffer))
 		}
 		maxBondedAmt := maxBondedMult * form.Bond // default
 		if form.MaxBondedAmt != nil {
@@ -1223,7 +1237,7 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 	}
 
 	// Make a bond transaction for the account ID generated from our public key.
-	bondCoin, err := c.makeAndPostBond(dc, acctExists, wallet, form.Bond, lockTime, bondAsset)
+	bondCoin, err := c.makeAndPostBond(dc, acctExists, wallet, form.Bond, feeRate, lockTime, bondAsset)
 	if err != nil {
 		return nil, err
 	}
@@ -1232,7 +1246,7 @@ func (c *Core) PostBond(form *PostBondForm) (*PostBondResult, error) {
 	return &PostBondResult{BondID: bondCoinStr, ReqConfirms: uint16(bondAsset.Confs)}, nil
 }
 
-func (c *Core) makeAndPostBond(dc *dexConnection, acctExists bool, wallet *xcWallet, amt uint64,
+func (c *Core) makeAndPostBond(dc *dexConnection, acctExists bool, wallet *xcWallet, amt, feeRate uint64,
 	lockTime time.Time, bondAsset *msgjson.BondAsset) ([]byte, error) {
 	bondKey, keyIndex, err := c.nextBondKey(bondAsset.ID)
 	if err != nil {
@@ -1241,7 +1255,6 @@ func (c *Core) makeAndPostBond(dc *dexConnection, acctExists bool, wallet *xcWal
 	defer bondKey.Zero()
 
 	acctID := dc.acct.ID()
-	feeRate := c.feeSuggestionAny(bondAsset.ID)
 	bond, abandon, err := wallet.MakeBondTx(bondAsset.Version, amt, feeRate, lockTime, bondKey, acctID[:])
 	if err != nil {
 		return nil, codedError(bondPostErr, err)

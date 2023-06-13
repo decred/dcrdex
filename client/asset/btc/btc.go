@@ -1444,17 +1444,7 @@ func (btc *baseWallet) Reconfigure(ctx context.Context, cfg *asset.WalletConfig,
 	if err != nil {
 		return false, err
 	}
-
-	oldCfg := btc.cfgV.Swap(newCfg).(*baseWalletConfig)
-	if oldCfg.feeRateLimit != newCfg.feeRateLimit {
-		// Adjust the bond reserves fee buffer, if enforcing.
-		btc.reservesMtx.Lock()
-		if btc.bondReservesNominal != 0 {
-			btc.bondReservesEnforced += int64(bondsFeeBuffer(btc.segwit, newCfg.feeRateLimit)) -
-				int64(bondsFeeBuffer(btc.segwit, oldCfg.feeRateLimit))
-		}
-		btc.reservesMtx.Unlock()
-	}
+	btc.cfgV.Store(newCfg) // probably won't matter if restart/reinit required
 
 	return restart, nil
 }
@@ -1576,7 +1566,7 @@ func (btc *baseWallet) Balance() (*asset.Balance, error) {
 }
 
 func bondsFeeBuffer(segwit bool, highFeeRate uint64) uint64 {
-	const inputCount uint64 = 12 // plan for lots of inputs
+	const inputCount uint64 = 8 // plan for lots of inputs
 	var largeBondTxSize uint64
 	if segwit {
 		largeBondTxSize = dexbtc.MinimumTxOverhead + dexbtc.P2WSHOutputSize + 1 + dexbtc.BondPushDataSize +
@@ -2255,7 +2245,7 @@ func (btc *baseWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, er
 			useSplit = true
 			coins, fundingCoins, spents, redeemScripts, inputsSize, sum, err = btc.fund(reserves, minConfs, true,
 				orderEnough(ord.Value, ord.MaxSwapCount, bumpedMaxRate, btc.initTxSizeBase, btc.initTxSize, btc.segwit, useSplit))
-			extraSplitOutput = reserves + bondsFeeBuffer(btc.segwit, btc.feeRateLimit())
+			extraSplitOutput = reserves + btc.BondsFeeBuffer(ord.FeeSuggestion)
 		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("error funding swap value of %s: %w", amount(ord.Value), err)
@@ -5094,7 +5084,9 @@ func (btc *baseWallet) RegisterUnspent(inBonds uint64) {
 // available balance, otherwise reserves will be adjusted regardless and the
 // funds are pre-reserved. This returns false if the available balance was
 // insufficient iff the caller requested it be respected, otherwise it always
-// returns true (success).
+// returns true (success). The fee buffer is used only when enabling the
+// reserves (when starting from zero) to compute the fee buffer. It may also be
+// zero, in which case the wallet will attempt to obtain it's own estimate.
 //
 // The reserves enabled with this method are enforced when funding transactions
 // (e.g. regular withdraws/sends or funding orders), and deducted from available
@@ -5139,7 +5131,7 @@ func (btc *baseWallet) RegisterUnspent(inBonds uint64) {
 // tier and amounts of the existing unspent bonds. To disable reserves, the
 // client would call ReserveBondFunds with -.6 BTC, which the wallet's internal
 // accounting recognizes as complete removal of the reserves.
-func (btc *baseWallet) ReserveBondFunds(future int64, respectBalance bool) bool {
+func (btc *baseWallet) ReserveBondFunds(future int64, feeBuffer uint64, respectBalance bool) bool {
 	btc.reservesMtx.Lock()
 	defer btc.reservesMtx.Unlock()
 
@@ -5151,15 +5143,19 @@ func (btc *baseWallet) ReserveBondFunds(future int64, respectBalance bool) bool 
 			toBTC(btc.bondReservesEnforced), toBTC(btc.bondReservesUsed), toBTC(uint64(btc.bondReservesNominal)))
 	}(btc.bondReservesEnforced, int64(btc.bondReservesUsed), btc.bondReservesNominal)
 
+	enforcedDelta := future
+
 	// For the reserves initialization, add the fee buffer.
-	var feeBuffer uint64
 	if btc.bondReservesNominal == 0 { // enabling, add a fee buffer
-		feeBuffer = bondsFeeBuffer(btc.segwit, btc.feeRateLimit())
+		if feeBuffer == 0 {
+			feeRate := 2 * btc.targetFeeRateWithFallback(1, 0)
+			feeBuffer = bondsFeeBuffer(btc.segwit, feeRate)
+		}
+		enforcedDelta += int64(feeBuffer)
 	}
-	enforcedDelta := future + int64(feeBuffer)
 
 	// How much of that is covered by the available balance, when increasing
-	// reserves via
+	// reserves.
 	if respectBalance && future > 0 {
 		bal, err := btc.balance()
 		if err != nil {
@@ -5469,10 +5465,15 @@ func (btc *baseWallet) RefundBond(ctx context.Context, ver uint16, coinID, scrip
 }
 
 // BondsFeeBuffer suggests how much extra may be required for the transaction
-// fees part of required bond reserves when bond rotation is enabled.
-func (btc *baseWallet) BondsFeeBuffer() uint64 {
-	// 150% of the fee buffer portion of the reserves.
-	return 15 * bondsFeeBuffer(btc.segwit, btc.feeRateLimit()) / 10
+// fees part of required bond reserves when bond rotation is enabled. The
+// provided fee rate may be zero, in which case the wallet will use it's own
+// estimate or fallback value.
+func (btc *baseWallet) BondsFeeBuffer(feeRate uint64) uint64 {
+	if feeRate == 0 {
+		feeRate = btc.targetFeeRateWithFallback(1, 0)
+	}
+	feeRate *= 2 // double the current fee rate estimate so this fee buffer does not get stale too quickly
+	return bondsFeeBuffer(btc.segwit, feeRate)
 }
 
 type utxo struct {

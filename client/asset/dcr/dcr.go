@@ -1109,9 +1109,12 @@ func bondsFeeBuffer(highFeeRate uint64) uint64 {
 
 // BondsFeeBuffer suggests how much extra may be required for the transaction
 // fees part of required bond reserves when bond rotation is enabled.
-func (dcr *ExchangeWallet) BondsFeeBuffer() uint64 {
-	// 150% of the fee buffer portion of the reserves.
-	return 15 * bondsFeeBuffer(dcr.config().feeRateLimit) / 10
+func (dcr *ExchangeWallet) BondsFeeBuffer(feeRate uint64) uint64 {
+	if feeRate == 0 {
+		feeRate = dcr.targetFeeRateWithFallback(2, 0)
+	}
+	feeRate *= 2 // double the current live fee rate estimate
+	return bondsFeeBuffer(feeRate)
 }
 
 // RegisterUnspent should be called once for every configured DEX with existing
@@ -1189,7 +1192,7 @@ func (dcr *ExchangeWallet) RegisterUnspent(inBonds uint64) {
 // tier and amounts of the existing unspent bonds. To disable reserves, the
 // client would call ReserveBondFunds with -60 DCR, which the wallet's internal
 // accounting recognizes as complete removal of the reserves.
-func (dcr *ExchangeWallet) ReserveBondFunds(future int64, respectBalance bool) bool {
+func (dcr *ExchangeWallet) ReserveBondFunds(future int64, feeBuffer uint64, respectBalance bool) bool {
 	dcr.reservesMtx.Lock()
 	defer dcr.reservesMtx.Unlock()
 
@@ -1201,12 +1204,15 @@ func (dcr *ExchangeWallet) ReserveBondFunds(future int64, respectBalance bool) b
 			toDCR(dcr.bondReservesEnforced), toDCR(dcr.bondReservesUsed), toDCR(uint64(dcr.bondReservesNominal)))
 	}(dcr.bondReservesEnforced, int64(dcr.bondReservesUsed), dcr.bondReservesNominal)
 
+	enforcedDelta := future
+
 	// For the reserves initialization, add the fee buffer.
-	var feeBuffer uint64
 	if dcr.bondReservesNominal == 0 { // enabling, add a fee buffer
-		feeBuffer = bondsFeeBuffer(dcr.config().feeRateLimit)
+		if feeBuffer == 0 {
+			feeBuffer = bondsFeeBuffer(2 * dcr.targetFeeRateWithFallback(2, 0))
+		}
+		enforcedDelta += int64(feeBuffer)
 	}
-	enforcedDelta := future + int64(feeBuffer)
 
 	// Check how much of that is covered by the available balance.
 	if respectBalance {

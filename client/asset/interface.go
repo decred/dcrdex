@@ -534,8 +534,10 @@ type Bonder interface {
 	// transaction fees part of bond reserves when bond rotation is enabled.
 	// This should return an amount larger than the minimum required by the
 	// asset's reserves system for fees, if non-zero, so that a reserves
-	// "deficit" does not appear right after the first bond is posted.
-	BondsFeeBuffer() uint64
+	// "deficit" does not appear right after the first bond is posted. The
+	// caller may provide this value to ReserveBondFunds when actually posting
+	// the first bond to ensure it succeeds, assuming balance was checked.
+	BondsFeeBuffer(feeRate uint64) uint64
 
 	// RegisterUnspent informs the wallet of a certain amount already locked in
 	// unspent bonds that will eventually be refunded with RefundBond. This
@@ -555,7 +557,10 @@ type Bonder interface {
 	// refunding of live bonds), they will go directly into locked balance. When
 	// the reserves are decremented to zero (by the amount that they were
 	// incremented), all enforcement including any fee buffering is disabled.
-	ReserveBondFunds(future int64, respectBalance bool) bool
+	// The fee buffer amount is used only when enabling the reserves (when
+	// starting from zero). It may also be zero, in which case the wallet will
+	// attempt to obtain it's own estimate if it is needed.
+	ReserveBondFunds(future int64, feeBuffer uint64, respectBalance bool) bool
 
 	// MakeBondTx authors a DEX time-locked fidelity bond transaction for the
 	// provided amount, lock time, and dex account ID. An explicit private key
