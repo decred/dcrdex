@@ -44,7 +44,7 @@ do
 	fi
 
 	# run tests
-	env GORACE="halt_on_error=1" go test -race -short -count 1 ./...
+	env GORACE="halt_on_error=1" go test -race -short ./...
 done
 
 cd "$dir"

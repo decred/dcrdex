@@ -10,6 +10,11 @@ jobs:
       matrix:
         go: ['1.19', '1.20']
     steps:
+      - uses: awalsh128/cache-apt-pkgs-action@1850ee53f6e706525805321a3f2f863dcf73c962 #v1.3.0
+        with:
+          packages: git-restore-mtime libgtk-3-dev libwebkit2gtk-4.0-dev
+          version: 1.0
+
       - name: Set up Go
         uses: actions/setup-go@6edd4406fa81c3da01a34fa6f6343087c207a568 #v3.5.0
         with:
@@ -17,17 +22,28 @@ jobs:
 
       - name: Check out source
         uses: actions/checkout@8e5e7e5ab8b370d6c329ec480221332ada57f0ab #v3.5.2
+        with:
+          fetch-depth: 0
+      # Restore original file modification times for test cache reasons
+      - name: restore timestamps
+        run: git restore-mtime
       - name: Install Linters
         run: "curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.53.2"
+      - name: Use test and module cache
+        uses: actions/cache@88522ab9f39a2ea568f7027eddc7d8d8bc9d59c8 #v3.3.1
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-test-${{ matrix.go }}-${{ github.sha }}
+          restore-keys: go-test-${{ matrix.go }}
 
       - name: Test
         env:
           GO111MODULE: "on"
         run: |
           mkdir -p client/webserver/site/dist
-          touch client/webserver/site/dist/placeholder
-          sudo apt update
-          sudo apt -y install libgtk-3-dev libwebkit2gtk-4.0-dev
+          touch -t 2306151245 client/webserver/site/dist/placeholder
           ./run_tests.sh
   build-js:
     name: Build JS
