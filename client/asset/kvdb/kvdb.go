@@ -31,7 +31,17 @@ func NewFileDB(filePath string, log dex.Logger) (KeyValueDB, error) {
 	//   .WithValueLogLoadingMode(options.FileIO) // default options.MemoryMap
 	//   .WithMaxTableSize(sz int64); // bytes, default 6MB
 	//   .WithValueLogFileSize(sz int64), bytes, default 1 GB, must be 1MB <= sz <= 1GB
-	db, err := badger.Open(badger.DefaultOptions(filePath).WithLogger(&badgerLoggerWrapper{log}))
+	opts := badger.DefaultOptions(filePath).WithLogger(&badgerLoggerWrapper{log})
+	db, err := badger.Open(opts)
+	if err == badger.ErrTruncateNeeded {
+		// Probably a Windows thing.
+		// https://github.com/dgraph-io/badger/issues/744
+		log.Warnf("NewFileDB badger db: %v", err)
+		// Try again with value log truncation enabled.
+		opts.Truncate = true
+		log.Warnf("Attempting to reopen badger DB with the Truncate option set...")
+		db, err = badger.Open(opts)
+	}
 	if err != nil {
 		return nil, err
 	}
