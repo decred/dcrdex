@@ -128,6 +128,8 @@ export const ID_SHIELDED = 'SHIELDED'
 export const ID_SHIELDED_MSG = 'SHIELDED_MSG'
 export const ID_ORDER = 'ORDER'
 export const ID_LOCKED_ORDER_BAL_MSG = 'LOCKED_ORDER_BAL_MSG'
+export const ID_CREATING_WALLETS = 'CREATING_WALLETS'
+export const ID_ADDING_SERVERS = 'ADDING_SERVER'
 
 export const enUS: Locale = {
   [ID_NO_PASS_ERROR_MSG]: 'password cannot be empty',
@@ -258,7 +260,9 @@ export const enUS: Locale = {
   [ID_SHIELDED]: 'Shielded',
   [ID_SHIELDED_MSG]: 'Total funds kept shielded',
   [ID_ORDER]: 'Order',
-  [ID_LOCKED_ORDER_BAL_MSG]: 'Funds locked in unmatched orders'
+  [ID_LOCKED_ORDER_BAL_MSG]: 'Funds locked in unmatched orders',
+  [ID_CREATING_WALLETS]: 'Creating wallets',
+  [ID_ADDING_SERVERS]: 'Connecting to servers'
 }
 
 export const ptBR: Locale = {

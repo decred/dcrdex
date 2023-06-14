@@ -393,22 +393,23 @@ func New(cfg *Config) (*WebServer, error) {
 		// includes most of the page handlers that use commonArgs to
 		// inject the User object for page template execution.
 		web.Use(s.authMiddleware)
-
-		// The register page and settings page are always allowed.
-		// The register page performs init if needed, along with
-		// initial setup and settings is used to register more DEXs
-		// after initial setup.
-		web.Route(registerRoute, func(rr chi.Router) {
-			rr.Get("/", s.handleRegister)
-			rr.With(dexHostCtx).Get("/{host}", s.handleRegister)
-		})
 		web.Get(settingsRoute, s.handleSettings)
 
 		web.Get("/generateqrcode", s.handleGenerateQRCode)
 
+		web.Group(func(notInit chi.Router) {
+			notInit.Use(s.requireNotInit)
+			notInit.Get(initRoute, s.handleInit)
+		})
+
 		// The rest of the web handlers require initialization.
 		web.Group(func(webInit chi.Router) {
 			webInit.Use(s.requireInit)
+
+			webInit.Route(registerRoute, func(rr chi.Router) {
+				rr.Get("/", s.handleRegister)
+				rr.With(dexHostCtx).Get("/{host}", s.handleRegister)
+			})
 
 			// Can go to wallets with init and auth, but not dex.
 			webInit.Group(func(webAuthNoDEX chi.Router) {
@@ -569,7 +570,8 @@ func (s *WebServer) buildTemplates(lang, siteDir string) error {
 		addTemplate("settings", bb, "forms").
 		addTemplate("orders", bb).
 		addTemplate("order", bb, "forms").
-		addTemplate("dexsettings", bb, "forms")
+		addTemplate("dexsettings", bb, "forms").
+		addTemplate("init", bb)
 
 	return s.html.buildErr()
 }

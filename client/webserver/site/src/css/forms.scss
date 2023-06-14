@@ -331,12 +331,14 @@ button.form-button {
 #sendForm,
 #vSendForm,
 #exportSeedAuth,
-#cancelForm {
+#cancelForm,
+#quickConfigForm {
   width: 375px;
 }
 
 #reconfigForm,
-#authorizeSeedDisplay {
+#authorizeSeedDisplay,
+#seedBackupForm {
   width: 425px;
 }
 
@@ -409,5 +411,12 @@ a[data-tmpl=walletCfgGuide] {
     div.opt-check {
       background-color: #2cce9c;
     }
+  }
+}
+
+div[data-handler=init] {
+  .quickconfig-asset-logo {
+    width: 25px;
+    height: 25px;
   }
 }

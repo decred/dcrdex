@@ -18,6 +18,6 @@ export default class LoginPage extends BasePage {
   /* login submits the sign-in form and parses the result. */
   async loggedIn () {
     await app().fetchUser()
-    await app().loadPage('markets')
+    await app().loadPage('wallets')
   }
 }

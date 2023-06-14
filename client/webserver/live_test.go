@@ -63,6 +63,7 @@ var (
 	delayBalance          = false
 	doubleCreateAsyncErr  = false
 	randomizeOrdersCount  = false
+	initErrors            = false
 )
 
 func dummySettings() map[string]string {
@@ -224,7 +225,7 @@ func mkDexAsset(symbol string) *dex.Asset {
 	a := &dex.Asset{
 		ID:           assetID,
 		Symbol:       symbol,
-		Version:      uint32(rand.Intn(12)),
+		Version:      0,
 		MaxFeeRate:   uint64(rand.Intn(10) + 1),
 		SwapSize:     uint64(rand.Intn(150) + 150),
 		SwapSizeBase: uint64(rand.Intn(150) + 15),
@@ -370,7 +371,21 @@ var tExchanges = map[string]*core.Exchange{
 				Amt:   1e12,
 			},
 		},
-		CandleDurs: []string{"1h", "24h"},
+		CandleDurs:   []string{"1h", "24h"},
+		PendingBonds: map[string]*core.PendingBondState{},
+		BondAssets: map[string]*core.BondAsset{
+			"dcr": {
+				ID:    42,
+				Confs: 2,
+				Amt:   1,
+			},
+		},
+		BondOptions: &core.BondOptions{
+			BondAsset:    42,
+			TargetTier:   0,
+			MaxBondedAmt: 100e8,
+		},
+		ViewOnly: true,
 	},
 	secondDEX: {
 		Host:   "thisdexwithalongname.com",
@@ -414,7 +429,21 @@ var tExchanges = map[string]*core.Exchange{
 				Amt:   1e10,
 			},
 		},
-		CandleDurs: []string{"5m", "1h", "24h"},
+		CandleDurs:   []string{"5m", "1h", "24h"},
+		PendingBonds: map[string]*core.PendingBondState{},
+		BondAssets: map[string]*core.BondAsset{
+			"dcr": {
+				ID:    42,
+				Confs: 2,
+				Amt:   1,
+			},
+		},
+		BondOptions: &core.BondOptions{
+			BondAsset:    42,
+			TargetTier:   0,
+			MaxBondedAmt: 100e8,
+		},
+		ViewOnly: true,
 	},
 }
 
@@ -577,6 +606,10 @@ func (c *TCore) GetDEXConfig(host string, certI interface{}) (*core.Exchange, er
 }
 
 func (c *TCore) AddDEX(dexAddr string, certI interface{}) error {
+	randomDelay()
+	if initErrors {
+		return fmt.Errorf("forced init error")
+	}
 	return nil
 }
 
@@ -597,8 +630,20 @@ func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) {
 	c.reg = r
 	return nil, nil
 }
-func (c *TCore) PostBond(r *core.PostBondForm) (*core.PostBondResult, error) {
-	return nil, nil
+func (c *TCore) PostBond(form *core.PostBondForm) (*core.PostBondResult, error) {
+	xc, exists := tExchanges[form.Addr]
+	if !exists {
+		return nil, fmt.Errorf("server %q not known", form.Addr)
+	}
+	symbol := dex.BipIDSymbol(*form.Asset)
+	ba := xc.BondAssets[symbol]
+	tier := form.Bond / ba.Amt
+	xc.BondOptions.TargetTier = tier
+	xc.Tier = int64(tier)
+	return &core.PostBondResult{
+		BondID:      "abc",
+		ReqConfirms: uint16(ba.Confs),
+	}, nil
 }
 func (c *TCore) UpdateBondOptions(form *core.BondOptionsForm) error {
 	return nil
@@ -628,7 +673,7 @@ func (c *TCore) EstimateSendTxFee(addr string, assetID uint32, value uint64, sub
 	return uint64(float64(value) * 0.01), len(addr) > 10, nil
 }
 func (c *TCore) Login([]byte) error  { return nil }
-func (c *TCore) IsInitialized() bool { return true }
+func (c *TCore) IsInitialized() bool { return c.inited }
 func (c *TCore) Logout() error       { return nil }
 func (c *TCore) Notifications(n int) ([]*db.Notification, error) {
 	return nil, nil
@@ -1393,6 +1438,9 @@ func (c *TCore) walletState(assetID uint32) *core.WalletState {
 
 func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error {
 	randomDelay()
+	if initErrors {
+		return fmt.Errorf("forced init error")
+	}
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 
@@ -1654,13 +1702,8 @@ func (c *TCore) NewDepositAddress(assetID uint32) (string, error) {
 func (c *TCore) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) error { return nil }
 
 func (c *TCore) User() *core.User {
-	exchanges := map[string]*core.Exchange{}
-	if c.reg != nil {
-		exchanges = tExchanges
-	}
-
 	user := &core.User{
-		Exchanges:   exchanges,
+		Exchanges:   tExchanges,
 		Initialized: c.inited,
 		Assets:      c.SupportedAssets(),
 		FiatRates: map[uint32]float64{
@@ -1884,7 +1927,7 @@ func (c *TCore) runRandomNotes() {
 }
 
 func (c *TCore) ExportSeed(pw []byte) ([]byte, error) {
-	b, _ := hex.DecodeString("deadbeef1234567890")
+	b, _ := hex.DecodeString("ea9790d6b4ced3069b9fba7562904d7cfa68cb210600a76ede6f86dac1c3d18d5089e4c53543ef433f5ba4886465ab927b0231c30e8baa13f6d9c8dec1668821")
 	return b, nil
 }
 func (c *TCore) WalletLogFilePath(uint32) (string, error) {
@@ -1945,8 +1988,8 @@ func TestServer(t *testing.T) {
 	numBuys = 10
 	numSells = 10
 	feedPeriod = 5000 * time.Millisecond
-	initialize := true
-	register := true
+	initialize := false
+	register := false
 	forceDisconnectWallet = true
 	gapWidthFactor = 0.2
 	randomPokes = false
@@ -1955,6 +1998,7 @@ func TestServer(t *testing.T) {
 	delayBalance = true
 	doubleCreateAsyncErr = false
 	randomizeOrdersCount = true
+	initErrors = true
 
 	var shutdown context.CancelFunc
 	tCtx, shutdown = context.WithCancel(context.Background())

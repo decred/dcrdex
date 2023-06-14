@@ -9,10 +9,8 @@ import {
   ConfirmRegistrationForm,
   FeeAssetSelectionForm,
   WalletWaitForm,
-  slideSwap,
-  bind as bindForm
+  slideSwap
 } from './forms'
-import * as intl from './locales'
 import {
   app,
   PasswordCache,
@@ -47,13 +45,6 @@ export default class RegistrationPage extends BasePage {
 
     // Hide the form closers for the registration process.
     body.querySelectorAll('.form-closer').forEach(el => Doc.hide(el))
-
-    // SET APP PASSWORD
-    bindForm(page.appPWForm, page.appPWSubmit, () => this.setAppPass())
-    Doc.bind(page.showSeedRestore, 'click', () => {
-      Doc.show(page.seedRestore)
-      Doc.hide(page.showSeedRestore)
-    })
 
     this.loginForm = new LoginForm(page.loginForm, async () => {
       await app().fetchUser()
@@ -174,52 +165,6 @@ export default class RegistrationPage extends BasePage {
       return 0
     }
     return res.feeBuffer
-  }
-
-  /* Set the application password. Attached to form submission. */
-  async setAppPass () {
-    const page = this.page
-    Doc.hide(page.appPWErrMsg)
-    const pw = page.appPW.value || ''
-    const pwAgain = page.appPWAgain.value
-    if (pw === '') {
-      page.appPWErrMsg.textContent = intl.prep(intl.ID_NO_PASS_ERROR_MSG)
-      Doc.show(page.appPWErrMsg)
-      return
-    }
-    if (pw !== pwAgain) {
-      page.appPWErrMsg.textContent = intl.prep(intl.ID_PASSWORD_NOT_MATCH)
-      Doc.show(page.appPWErrMsg)
-      return
-    }
-
-    // Clear the notification cache. Useful for development purposes, since
-    // the Application will only clear them on login, which would leave old
-    // browser-cached notifications in place after registering even if the
-    // client db is wiped.
-    app().setNotes([])
-    page.appPW.value = ''
-    page.appPWAgain.value = ''
-    const loaded = app().loading(page.appPWForm)
-    const seed = page.seedInput.value
-    const rememberPass = page.rememberPass.checked
-    const res = await postJSON('/api/init', {
-      pass: pw,
-      seed,
-      rememberPass
-    })
-    loaded()
-    if (!app().checkResponse(res)) {
-      page.appPWErrMsg.textContent = res.msg
-      Doc.show(page.appPWErrMsg)
-      return
-    }
-    this.pwCache.pw = pw
-    this.auth()
-    app().updateMenuItemsDisplay()
-    this.newWalletForm.refresh()
-    this.dexAddrForm.refresh()
-    await slideSwap(page.appPWForm, page.dexAddrForm)
   }
 
   /* gets the contents of the cert file */

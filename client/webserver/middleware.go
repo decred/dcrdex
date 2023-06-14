@@ -72,7 +72,25 @@ func extractBooleanCookie(r *http.Request, k string, defaultVal bool) bool {
 func (s *WebServer) requireInit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.core.IsInitialized() {
-			http.Redirect(w, r, registerRoute, http.StatusSeeOther)
+			http.Redirect(w, r, initRoute, http.StatusSeeOther)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// requireNotInit ensures that the core app is not initialized before allowing
+// the incoming request to proceed. Redirects to the login page if the app is
+// initialized and the user is not logged in. If logged in, directs to the
+// wallets page.
+func (s *WebServer) requireNotInit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.core.IsInitialized() {
+			route := loginRoute
+			if extractUserInfo(r).Authed {
+				route = walletsRoute
+			}
+			http.Redirect(w, r, route, http.StatusSeeOther)
 			return
 		}
 		next.ServeHTTP(w, r)

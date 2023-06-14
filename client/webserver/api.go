@@ -928,7 +928,13 @@ func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, simpleAck(), s.indent)
+	writeJSON(w, struct {
+		OK    bool     `json:"ok"`
+		Hosts []string `json:"hosts"`
+	}{
+		OK:    true,
+		Hosts: s.knownUnregisteredExchanges(map[string]*core.Exchange{}),
+	}, s.indent)
 }
 
 // apiIsInitialized is the handler for the '/isinitialized' request.

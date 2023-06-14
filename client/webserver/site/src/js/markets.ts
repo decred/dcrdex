@@ -854,7 +854,7 @@ export default class MarketsPage extends BasePage {
     if (quote.token) {
       const quoteAsset = app().assets[quote.id]
       const quoteVersion = this.market.dex.assets[quote.id].version
-      if (quoteAsset && quoteAsset.wallet.approved && quoteAsset.wallet.approved[quoteVersion] !== undefined) {
+      if (quoteAsset?.wallet?.approved && quoteAsset.wallet.approved[quoteVersion] !== undefined) {
         quoteAssetApprovalStatus = quoteAsset.wallet.approved[quoteVersion]
       }
     }
