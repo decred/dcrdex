@@ -5,13 +5,13 @@ go 1.18
 require (
 	decred.org/dcrwallet/v2 v2.0.11
 	fyne.io/systray v1.10.1-0.20220621085403-9a2652634e93
-	github.com/btcsuite/btcd v0.23.3
-	github.com/btcsuite/btcd/btcec/v2 v2.2.1
-	github.com/btcsuite/btcd/btcutil v1.1.2
-	github.com/btcsuite/btcd/btcutil/psbt v1.1.5
+	github.com/btcsuite/btcd v0.23.4
+	github.com/btcsuite/btcd/btcec/v2 v2.2.2
+	github.com/btcsuite/btcd/btcutil v1.1.3
+	github.com/btcsuite/btcd/btcutil/psbt v1.1.8
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.0.1
 	github.com/btcsuite/btclog v0.0.0-20170628155309-84c8d2346e9f
-	github.com/btcsuite/btcwallet v0.16.1
+	github.com/btcsuite/btcwallet v0.16.10-0.20230530212348-2f8238da04ec
 	github.com/btcsuite/btcwallet/wallet/txauthor v1.3.2
 	github.com/btcsuite/btcwallet/walletdb v1.4.0
 	github.com/btcsuite/btcwallet/wtxmgr v1.5.0
@@ -54,7 +54,7 @@ require (
 	github.com/jessevdk/go-flags v1.5.0
 	github.com/jrick/logrotate v1.0.0
 	github.com/lib/pq v1.10.4
-	github.com/lightninglabs/neutrino v0.14.3-0.20221024182812-792af8548c14
+	github.com/lightninglabs/neutrino v0.15.0
 	github.com/ltcsuite/ltcd v0.22.1-beta.0.20230329025258-1ea035d2e665
 	github.com/ltcsuite/ltcd/ltcutil v1.1.0
 	github.com/ltcsuite/ltcwallet v0.13.1
@@ -132,6 +132,7 @@ require (
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lightninglabs/gozmq v0.0.0-20191113021534-d20a764486bf // indirect
+	github.com/lightninglabs/neutrino/cache v1.1.0 // indirect
 	github.com/lightningnetwork/lnd/clock v1.0.1 // indirect
 	github.com/lightningnetwork/lnd/queue v1.0.1 // indirect
 	github.com/lightningnetwork/lnd/ticker v1.0.0 // indirect
