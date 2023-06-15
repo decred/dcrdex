@@ -68,4 +68,4 @@ cd "$dir"
 # static checker.
 
 # check linters
-golangci-lint run
+golangci-lint -c ./.golangci.yml run
