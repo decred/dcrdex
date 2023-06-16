@@ -88,6 +88,7 @@ type provider struct {
 	endpointAddr string
 	ec           *combinedRPCClient
 	ws           bool
+	chainID      *big.Int
 	net          dex.Network
 	tipCapV      atomic.Value // *cachedTipCap
 	stop         func()
@@ -520,6 +521,7 @@ func connectProviders(ctx context.Context, endpoints []string, log dex.Logger, c
 		}
 
 		p := &provider{
+			chainID:      chainID,
 			host:         host,
 			endpointAddr: endpoint,
 			ws:           wsSubscribed,
@@ -700,7 +702,7 @@ func createAndCheckProviders(ctx context.Context, walletDir string, endpoints []
 			return fmt.Errorf("expected to successfully connect to all of these unfamiliar providers: %s",
 				failedProviders(providers, unknownEndpoints))
 		}
-		if err := checkProvidersCompliance(ctx, providers, net, dex.Disabled /* logger is for testing only */); err != nil {
+		if err := checkProvidersCompliance(ctx, providers, dex.Disabled /* logger is for testing only */); err != nil {
 			return err
 		}
 	}
@@ -1516,7 +1518,7 @@ type rpcTest struct {
 
 // newCompatibilityTests returns a list of RPC tests to run to determine API
 // compatibility.
-func newCompatibilityTests(cb bind.ContractBackend, net dex.Network, log dex.Logger) []*rpcTest {
+func newCompatibilityTests(cb bind.ContractBackend, chainID *big.Int, net dex.Network, log dex.Logger) []*rpcTest {
 	// NOTE: The logger is intended for use the execution of the compatibility
 	// tests, and it will generally be dex.Disabled in production.
 	var (
@@ -1548,9 +1550,17 @@ func newCompatibilityTests(cb bind.ContractBackend, net dex.Network, log dex.Log
 		txHash = testnetTxHash
 		blockHash = testnetBlockHash
 	case dex.Simnet:
+		if big.NewInt(polygonSimnetChainID).Cmp(chainID) == 0 {
+			return nil // TODO: add simnet tests for polygon this will require the ~/dextest/polygon dir to be populated with the files below.
+		}
+
+		tDir, err := simnetDataDir(chainID.Int64())
+		if err != nil {
+			panic(fmt.Sprintf("Problem getting simnet data dir: %v", err))
+		}
+
 		addr = simnetAddr
 		var (
-			tDir           = filepath.Join(os.Getenv("HOME"), "dextest", "eth")
 			tTxHashFile    = filepath.Join(tDir, "test_tx_hash.txt")
 			tBlockHashFile = filepath.Join(tDir, "test_block10_hash.txt")
 			tContractFile  = filepath.Join(tDir, "test_token_contract_address.txt")
@@ -1648,7 +1658,7 @@ func newCompatibilityTests(cb bind.ContractBackend, net dex.Network, log dex.Log
 				// I guess we would need to unpack the results. I don't really
 				// know how to interpret these, but I'm really just looking for
 				// a request error.
-				log.Debug("#### USDC balanceOf result:", dexeth.WeiToGwei(bal), "gwei")
+				log.Debug("#### USDC balanceOf result:", dexeth.WeiToGwei(bal), "gwei") // I think this should no longer assume USDC?
 				return nil
 			},
 		},
@@ -1752,10 +1762,10 @@ func domain(addr string) (string, error) {
 // requires by sending a series of requests and verifying the responses. If a
 // provider is found to be compliant, their domain name is added to a list and
 // stored in a file on disk so that future checks can be short-circuited.
-func checkProvidersCompliance(ctx context.Context, providers []*provider, net dex.Network, log dex.Logger) error {
+func checkProvidersCompliance(ctx context.Context, providers []*provider, log dex.Logger) error {
 	for _, p := range providers {
 		// Need to run API tests on this endpoint.
-		for _, t := range newCompatibilityTests(p.ec, net, log) {
+		for _, t := range newCompatibilityTests(p.ec, p.chainID, p.net, log) {
 			ctx, cancel := context.WithTimeout(ctx, defaultRequestTimeout)
 			err := t.f(ctx, p)
 			cancel()

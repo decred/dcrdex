@@ -4,10 +4,10 @@ SESSION="polygon-harness"
 
 SOURCE_DIR=$(pwd)
 NODES_ROOT=~/dextest/polygon
-GENESIS_JSON_FILE_LOCATION="${SOURCE_DIR}/simnet-genesis.json"
+GENESIS_JSON_FILE_LOCATION="${SOURCE_DIR}/genesis.json"
 HARNESS_DIR=${NODES_ROOT}/harness-ctl
 
-mkdir -p "${NODES_ROOT}/alpha"
+mkdir -p "${NODES_ROOT}/${NAME}"
 mkdir -p "${NODES_ROOT}/beta"
 mkdir -p "${HARNESS_DIR}"
 
@@ -42,7 +42,7 @@ ALPHA_NODE_PORT="10563"
 ALPHA_AUTHRPC_PORT="24331"
 ALPHA_HTTP_PORT="38556"
 ALPHA_WS_PORT="38557"
-ALPHA_WS_MODULES="eth"
+ALPHA_MODULES=["\"eth\""] # "eth,net,web3,debug,admin,personal,txpool,clique"
 
 CHAIN_ADDRESS_JSON_FILE_NAME="UTC--2021-01-27T08-20-38.123221057Z--9ebba10a6136607688ca4f27fab70e23938cd027"
 CHAIN_ADDRESS="9ebba10a6136607688ca4f27fab70e23938cd027"
@@ -74,13 +74,88 @@ if [ "${CHAIN_ADDRESS}" != "_" ]; then
   done
 EOF
   chmod +x "${HARNESS_DIR}/mine-${NAME}"
+fi
+
+# Set to true if we want to auto mine. Or false if we want to manually mine
+# using the mine script above.
+AUTO_MINE=false
+
+cat > "${NODE_DIR}/bor.toml" <<EOF
+chain = "${GENESIS_JSON_FILE_LOCATION}"
+identity = "${NAME}"
+verbosity = 5
+vmdebug = true
+datadir = "${NODE_DIR}"
+ancient = "${NODE_DIR}/geth-ancient"
+keystore = "${NODE_DIR}/keystore"
+ethstats = ""
+devfakeauthor = true
+
+[p2p]
+  maxpeers = 50
+  maxpendpeers = 50
+  bind = "0.0.0.0"
+  port = 30303
+  nodiscover = true
+  nat = "any"
+  netrestrict = "127.0.0.1/8,::1/128"
+  txarrivalwait = "500ms"
+
+[heimdall]
+  "bor.without" = true
+  "bor.runheimdall" = false
+  "bor.useheimdallapp" = false
+
+[miner]
+  mine = ${AUTO_MINE}
+  etherbase = "0x${CHAIN_ADDRESS}"
+  extradata = ""
+  gaslimit = 30000000
+  gasprice = "1000000000"
+  recommit = "2m5s"
+
+[jsonrpc]
+  ipcdisable = false
+  ipcpath = "${NODE_DIR}/bor.ipc"
+  gascap = 50000000
+  evmtimeout = "5s"
+  txfeecap = 5.0
+  allow-unprotected-txs = false
+  [jsonrpc.http]
+    enabled = true
+    port = ${ALPHA_HTTP_PORT}
+    host = "localhost"
+    api = ${ALPHA_MODULES}
+    vhosts = ["localhost"]
+    corsdomain = ["localhost"]
+  [jsonrpc.ws]
+    enabled = true
+    port = ${ALPHA_WS_PORT}
+    host = "localhost"
+    api = ${ALPHA_MODULES}
+    origins = ["localhost"]
+  [jsonrpc.auth]
+    jwtsecret = ""
+    addr = "localhost"
+    port = ${ALPHA_AUTHRPC_PORT}
+    vhosts = ["localhost"]
+
+[accounts]
+  unlock = ["${CHAIN_ADDRESS}"]
+  password = "${GROUP_DIR}/password"
+  allow-insecure-unlock = true
+  lightkdf = false
+  disable-bor-wallet = false
+
+[grpc]
+  addr = ":${ALPHA_NODE_PORT}"
+
+EOF
 
 # Write password file to unlock accounts later.
 cat > "${GROUP_DIR}/password" <<EOF
 $PASSWORD
 EOF
-
-fi
 
 echo "Starting harness"
 tmux new-session -d -s $SESSION "${SHELL}"
@@ -93,10 +168,10 @@ tmux send-keys -t "$SESSION:1" "set +o history" C-m
 tmux send-keys -t "$SESSION:1" "cd ${NODE_DIR}" C-m
 
 # # Create and wait for a node initiated with a predefined genesis json.
-# echo "Creating simnet ${NAME} node"
-# tmux send-keys -t "$SESSION:1" "${HARNESS_DIR}/${NAME} init "\
-# 	"$GENESIS_JSON_FILE_LOCATION; tmux wait-for -S ${NAME}" C-m
-# tmux wait-for "${NAME}"
+echo "Creating simnet ${NAME} node"
+tmux send-keys -t "$SESSION:1" "${HARNESS_DIR}/${NAME} init "\
+	"$GENESIS_JSON_FILE_LOCATION; tmux wait-for -S ${NAME}" C-m
+tmux wait-for "${NAME}"
 
 # Create two accounts. The first is used to mine blocks. The second contains
 # funds.
@@ -119,23 +194,28 @@ cat > "${NODE_DIR}/geth/nodekey" <<EOF
 $ALPHA_NODE_KEY
 EOF
 
-# Start the eth node with the chain account unlocked, listening restricted to
-# localhost, and our custom configuration file. I think providing a config file
-# overites everything provided via cmd: See:
-# https://github.com/maticnetwork/bor/blob/f8032dba23a501d02fc6eabcf2bea59fc1e07239/internal/cli/server/config.go#L1388-L1396
-# and
-# https://vscode.dev/github/maticnetwork/bor/blob/5fba09885ddc244eaa2e9e6986dab06e5d49f9d7github.com/imdario/mergo@v0.3.11/merge.go#L314
-# So we have to provided everything via cmd or everything via config file.
-tmux send-keys -t "$SESSION:1" "bor server --nodiscover " \
-    "--chain ${GENESIS_JSON_FILE_LOCATION} --unlock ${CHAIN_ADDRESS} " \
-    "--password ${GROUP_DIR}/password --datadir="${NODE_DIR}" --datadir.ancient " \
-    "${NODE_DIR}/geth-ancient --verbosity 5 --vmdebug --http --http.port ${ALPHA_HTTP_PORT} " \
-    "--ws --ws.port ${ALPHA_WS_PORT} --ws.api ${ALPHA_WS_MODULES} --keystore ${NODE_DIR}/keystore " \
-    "--bor.withoutheimdall --bor.devfakeauthor --allow-insecure-unlock --disable-bor-wallet false "\
-    "--bind 0.0.0.0 --port "${ALPHA_NODE_PORT}" --miner.etherbase "0x${CHAIN_ADDRESS}" "\
-    "--miner.gasprice 30000000 --miner.gaslimit 30000000 " \
-    "2>&1 | tee ${NODE_DIR}/${NAME}.log" C-m
+# Write genesis json file.
+echo "Writing genesis json file"
+cp "${GENESIS_JSON_FILE_LOCATION}" "${NODES_ROOT}/genesis.json"
 
+cat > "${NODES_ROOT}/harness-ctl/send.js" <<EOF
+function sendLegacyTx(from, to, value) {
+      from = from.startsWith('0x') ? from : '0x' + from
+      to = to.startsWith('0x') ? to : '0x' + to
+      eth.sendTransaction({ from, to, value, gasPrice: 200000000000})
+}
+EOF
+
+cat > "${NODES_ROOT}/harness-ctl/sendtoaddress" <<EOF
+#!/usr/bin/env bash
+"${HARNESS_DIR}/${NAME}" "attach ${NODE_DIR}/bor.ipc --preload ${NODES_ROOT}/harness-ctl/send.js --exec sendLegacyTx(\"${ALPHA_ADDRESS}\",\"\$1\",\$2*1e18)"
+EOF
+chmod +x "${NODES_ROOT}/harness-ctl/sendtoaddress"
+
+# Providing a config file overwrites everything provided via cli so we have to
+# provided everything via the config file: See:
+# https://vscode.dev/github/maticnetwork/bor/blob/develop/internal/cli/server/command.go#L77
+tmux send-keys -t "$SESSION:1" "bor server --config ${NODE_DIR}/bor.toml 2>&1 | tee ${NODE_DIR}/${NAME}.log" C-m
 tmux select-window -t $SESSION:0
 tmux send-keys -t $SESSION:0 "set -o history" C-m
 tmux attach-session -t $SESSION

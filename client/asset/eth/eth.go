@@ -96,6 +96,11 @@ const (
 	// TODO: Find a way to ask the host about their config set max fee and
 	// gas values.
 	maxTxFeeGwei = 1_000_000_000
+
+	// Simnet ChainIDs for ETH and EVM wallets.
+
+	ethSimnetChainID     = 42    // see dex/testing/eth/harness.sh
+	polygonSimnetChainID = 90001 // see dex/testing/polygon/genesis.json
 )
 
 var (
@@ -163,8 +168,8 @@ var (
 
 	chainIDs = map[dex.Network]int64{
 		dex.Mainnet: 1,
-		dex.Testnet: 5,  // Görli
-		dex.Simnet:  42, // see dex/testing/eth/harness.sh
+		dex.Testnet: 5, // Görli
+		dex.Simnet:  ethSimnetChainID,
 	}
 
 	// unlimitedAllowance is the maximum supported allowance for an erc20
@@ -814,7 +819,7 @@ func (w *ETHWallet) Connect(ctx context.Context) (_ *sync.WaitGroup, err error) 
 		w.settingsMtx.RLock()
 		defer w.settingsMtx.RUnlock()
 		endpoints := strings.Split(w.settings[providersKey], " ")
-		ethCfg, err := ethChainConfig(w.net)
+		ethCfg, err := chainConfig(w.chainID, w.net)
 		if err != nil {
 			return nil, err
 		}
@@ -4444,7 +4449,8 @@ func quickNode(ctx context.Context, walletDir string, assetID, contractVer uint3
 
 	pw := []byte("abc")
 
-	if err := CreateEVMWallet(chainIDs[net], &asset.CreateWalletParams{
+	chainID := chainIDs[net]
+	if err := CreateEVMWallet(chainID, &asset.CreateWalletParams{
 		Type:     walletTypeRPC,
 		Seed:     seed,
 		Pass:     pw,
@@ -4456,7 +4462,7 @@ func quickNode(ctx context.Context, walletDir string, assetID, contractVer uint3
 		return nil, nil, fmt.Errorf("error creating initiator wallet: %v", err)
 	}
 
-	ethCfg, err := ethChainConfig(net)
+	ethCfg, err := chainConfig(chainID, net)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -4555,8 +4561,8 @@ func runSimnetMiner(ctx context.Context, log dex.Logger) {
 			select {
 			case <-tick.C:
 				log.Debugf("Mining a simnet block")
-				mine := exec.CommandContext(ctx, "./mine-alpha", "1")
-				mine.Dir = filepath.Join(u.HomeDir, "dextest", "eth", "harness-ctl")
+				mine := exec.CommandContext(ctx, "./mine-alpha", "1")                // TODO: make this configurable esp for polygon simnet
+				mine.Dir = filepath.Join(u.HomeDir, "dextest", "eth", "harness-ctl") // TODO: make this configurable esp for polygon simnet
 				b, err := mine.CombinedOutput()
 				if err != nil {
 					log.Errorf("Mining error: %v", err)
@@ -5130,4 +5136,28 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 	}
 
 	return nil
+}
+
+// simnetDataDir returns the data directory for the given simnet chainID. See:
+// dex/testing/{dir}
+func simnetDataDir(chainID int64) (string, error) {
+	home := os.Getenv("HOME")
+	if home == "" {
+		home = os.Getenv("USERPROFILE") // windows
+	}
+	if home == "" {
+		return "", fmt.Errorf("could not determine home directory")
+	}
+
+	var dir string
+	switch chainID {
+	case polygonSimnetChainID:
+		dir = "polygon"
+	case ethSimnetChainID:
+		dir = "eth"
+	default:
+		return "", fmt.Errorf("unknown simnet chainID %d", chainID)
+	}
+
+	return filepath.Join(home, "dextest", dir), nil
 }

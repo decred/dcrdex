@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"decred.org/dcrdex/dex"
@@ -192,12 +191,18 @@ func prepareNode(cfg *nodeConfig) (*node.Node, error) {
 	return node, nil
 }
 
-func ethChainConfig(network dex.Network) (c ethconfig.Config, err error) {
+// TODO: Consider polygon support on mainnet and testnet.
+func chainConfig(chainID int64, network dex.Network) (c ethconfig.Config, err error) {
 	ethCfg := ethconfig.Defaults
 	switch network {
 	case dex.Simnet:
-		homeDir := os.Getenv("HOME")
-		genesisFile := filepath.Join(homeDir, "dextest", "eth", "genesis.json")
+		var c ethconfig.Config
+		dataDir, err := simnetDataDir(chainID)
+		if err != nil {
+			return c, err
+		}
+
+		genesisFile := filepath.Join(dataDir, "genesis.json")
 		genesis, err := dexeth.LoadGenesisFile(genesisFile)
 		if err != nil {
 			return c, fmt.Errorf("error reading genesis file: %v", err)
@@ -217,8 +222,8 @@ func ethChainConfig(network dex.Network) (c ethconfig.Config, err error) {
 }
 
 // startNode starts a geth node.
-func startNode(node *node.Node, network dex.Network) (*les.LightEthereum, error) {
-	ethCfg, err := ethChainConfig(network)
+func startNode(chainID int64, node *node.Node, network dex.Network) (*les.LightEthereum, error) {
+	ethCfg, err := chainConfig(chainID, network)
 	if err != nil {
 		return nil, err
 	}

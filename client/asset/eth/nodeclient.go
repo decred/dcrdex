@@ -89,7 +89,7 @@ func (n *nodeClient) chainConfig() *params.ChainConfig {
 // connect connects to a node. It then wraps ethclient's client and
 // bundles commands in a form we can easily use.
 func (n *nodeClient) connect(ctx context.Context) (err error) {
-	n.leth, err = startNode(n.node, n.net)
+	n.leth, err = startNode(n.chainID.Int64(), n.node, n.net)
 	if err != nil {
 		return err
 	}

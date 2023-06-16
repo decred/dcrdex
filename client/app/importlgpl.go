@@ -12,6 +12,7 @@ package app
 import (
 	_ "decred.org/dcrdex/client/asset/eth" // register eth asset
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	_ "decred.org/dcrdex/client/asset/polygon" // register polygon network
 )
 
 func init() {

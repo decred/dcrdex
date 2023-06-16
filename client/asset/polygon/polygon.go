@@ -13,13 +13,13 @@ import (
 )
 
 func init() {
-	asset.Register(bipID, &Driver{})
+	asset.Register(BipID, &Driver{})
 }
 
 const (
-	// bipID is the BIP-0044 asset ID for Polygon.
-	bipID = 966
-
+	// BipID is the BIP-0044 asset ID for Polygon.
+	BipID         = 966
+	version       = 0
 	walletTypeRPC = "rpc"
 )
 
@@ -27,7 +27,7 @@ var (
 	// WalletInfo defines some general information about a Ethereum wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:    "Polygon",
-		Version: 0,
+		Version: version,
 		// SupportedVersions: For Ethereum, the server backend maintains a
 		// single protocol version, so tokens and ETH have the same set of
 		// supported versions. Even though the SupportedVersions are made
@@ -35,7 +35,7 @@ var (
 		// exposed though any Driver methods or assets/driver functions. Use the
 		// parent wallet's WalletInfo via (*Driver).Info if you need a token's
 		// supported versions before a wallet is available.
-		SupportedVersions: []uint32{0},
+		SupportedVersions: []uint32{version},
 		UnitInfo:          dexpolygon.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{
 			// {
@@ -61,7 +61,7 @@ var (
 	chainIDs = map[dex.Network]int64{
 		dex.Mainnet: 137,
 		dex.Testnet: 80001, // Mumbai
-		dex.Simnet:  137000,
+		dex.Simnet:  90001, // See dex/testing/polygon/genesis.json
 	}
 )
 
@@ -69,7 +69,7 @@ type Driver struct{}
 
 // Open opens the Polygon exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (asset.Wallet, error) {
-	return eth.NewEVMWallet(bipID, chainIDs[net], cfg, logger, net)
+	return eth.NewEVMWallet(BipID, chainIDs[net], cfg, logger, net)
 }
 
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
