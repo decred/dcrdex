@@ -80,12 +80,12 @@ export default class SettingsPage extends BasePage {
       const wallet = asset.wallet
       if (wallet) {
         const bondAsset = this.currentDEX.bondAssets[asset.symbol]
-        if (wallet.synced && wallet.balance.available > bondAsset.amount) {
+        const bondsFeeBuffer = await this.getBondsFeeBuffer(assetID, page.regAssetForm)
+        if (wallet.synced && wallet.balance.available >= 2 * bondAsset.amount + bondsFeeBuffer) {
           this.animateConfirmForm(page.regAssetForm)
           return
         }
-        const txFee = await this.getRegistrationTxFeeEstimate(assetID, page.regAssetForm)
-        this.walletWaitForm.setWallet(wallet, txFee)
+        this.walletWaitForm.setWallet(wallet, bondsFeeBuffer)
         this.currentForm = page.walletWait
         forms.slideSwap(page.regAssetForm, page.walletWait)
         return
@@ -159,20 +159,15 @@ export default class SettingsPage extends BasePage {
     })
   }
 
-  // Retrieve an estimate for the tx fee needed to pay the registration fee.
-  async getRegistrationTxFeeEstimate (assetID: number, form: HTMLElement) {
-    const cert = await this.getCertFile()
+  // Retrieve an estimate for the tx fee needed to create new bond reserves.
+  async getBondsFeeBuffer (assetID: number, form: HTMLElement) {
     const loaded = app().loading(form)
-    const res = await postJSON('/api/regtxfee', {
-      addr: this.currentDEX.host,
-      cert: cert,
-      asset: assetID
-    })
+    const res = await postJSON('/api/bondsfeebuffer', { assetID })
     loaded()
     if (!app().checkResponse(res)) {
       return 0
     }
-    return res.txfee
+    return res.feeBuffer
   }
 
   async newWalletCreated (assetID: number) {
@@ -183,13 +178,13 @@ export default class SettingsPage extends BasePage {
     const wallet = asset.wallet
     const bondAmt = this.currentDEX.bondAssets[asset.symbol].amount
 
-    if (wallet.synced && wallet.balance.available > bondAmt) {
+    const bondsFeeBuffer = await this.getBondsFeeBuffer(assetID, page.newWalletForm)
+    if (wallet.synced && wallet.balance.available >= 2 * bondAmt + bondsFeeBuffer) {
       await this.animateConfirmForm(page.newWalletForm)
       return
     }
 
-    const txFee = await this.getRegistrationTxFeeEstimate(assetID, page.newWalletForm)
-    this.walletWaitForm.setWallet(wallet, txFee)
+    this.walletWaitForm.setWallet(wallet, bondsFeeBuffer)
     this.currentForm = page.walletWait
     await forms.slideSwap(page.newWalletForm, page.walletWait)
   }

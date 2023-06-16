@@ -186,7 +186,7 @@ var EnUS = map[string]string{
 	"Export Trades":               "Export Trades",
 	"change the wallet type":      "change the wallet type",
 	"confirmations":               "confirmations",
-	"how_reg":                     "How will you post bond?",
+	"how_reg":                     "How will you create your bond?",
 	"All markets at":              "All markets at",
 	"pick a different asset":      "pick a different asset",
 	"Create":                      "Create",
