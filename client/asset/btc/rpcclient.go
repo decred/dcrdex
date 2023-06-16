@@ -508,7 +508,7 @@ func (wc *rpcClient) lockAllUnspent(unlock bool) error {
 		return fmt.Errorf("'lockunspent %v': %v: ", unlock, err)
 	}
 	if !rpcReturn {
-		return fmt.Errorf("'lockunspent %v' unsuccessful: %v: RPC returns %v", unlock, err, rpcReturn)
+		return fmt.Errorf("'lockunspent %v' unsuccessful: RPC returns %v", unlock, rpcReturn)
 	}
 	return nil
 }
