@@ -264,7 +264,8 @@ out:
 }
 
 func prepareRPCClient(name, dataDir, endpoint string, net dex.Network) (*multiRPCClient, *accounts.Account, error) {
-	ethCfg, err := ethChainConfig(net)
+	chainID := chainIDs[net]
+	ethCfg, err := chainConfig(chainID, net)
 	if err != nil {
 		return nil, nil, err
 	}

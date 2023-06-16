@@ -267,7 +267,7 @@ func TestRPC(t *testing.T) {
 		t.Fatalf("connect error: %v", err)
 	}
 
-	for _, tt := range newCompatibilityTests(cl, dex.Mainnet, cl.log) {
+	for _, tt := range newCompatibilityTests(cl, big.NewInt(chainIDs[dex.Mainnet]), dex.Mainnet, cl.log) {
 		tStart := time.Now()
 		if err := cl.withAny(ctx, tt.f); err != nil {
 			t.Fatalf("%q: %v", tt.name, err)
@@ -297,7 +297,7 @@ func TestFreeServers(t *testing.T) {
 		if err := cl.connect(ctx); err != nil {
 			return fmt.Errorf("connect error: %v", err)
 		}
-		for _, tt := range newCompatibilityTests(cl, dex.Mainnet, cl.log) {
+		for _, tt := range newCompatibilityTests(cl, big.NewInt(chainIDs[dex.Mainnet]), dex.Mainnet, cl.log) {
 			if err := cl.withAny(ctx, tt.f); err != nil {
 				return fmt.Errorf("%q error: %v", tt.name, err)
 			}
@@ -332,7 +332,7 @@ func TestMainnetCompliance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = checkProvidersCompliance(ctx, providers, dex.Mainnet, log)
+	err = checkProvidersCompliance(ctx, providers, log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,8 +344,11 @@ func tRPCClient(dir string, seed []byte, endpoints []string, net dex.Network, sk
 	if err != nil {
 		return nil, fmt.Errorf("os.Mkdir error: %w", err)
 	}
+
 	log := dex.StdOutLogger("T", dex.LevelTrace)
-	if err := createWallet(&asset.CreateWalletParams{
+
+	chainID := chainIDs[net]
+	if err := CreateEVMWallet(chainID, &asset.CreateWalletParams{
 		Type: walletTypeRPC,
 		Seed: seed,
 		Pass: []byte("abc"),
@@ -366,8 +369,12 @@ func tRPCClient(dir string, seed []byte, endpoints []string, net dex.Network, sk
 		c.Genesis = core.DefaultGenesisBlock()
 		c.NetworkId = params.MainnetChainConfig.ChainID.Uint64()
 	default:
-		c, _ = ethChainConfig(net)
+		c, err = chainConfig(chainID, net)
+		if err != nil {
+			return nil, fmt.Errorf("error getting chain config: %v", err)
+		}
+		c.NetworkId = c.Genesis.Config.ChainID.Uint64()
 	}
 
-	return newMultiRPCClient(dir, endpoints, log, c.Genesis.Config, big.NewInt(chainIDs[net]), net)
+	return newMultiRPCClient(dir, endpoints, log, c.Genesis.Config, big.NewInt(chainID), net)
 }
