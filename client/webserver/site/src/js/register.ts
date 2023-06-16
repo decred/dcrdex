@@ -93,11 +93,11 @@ export default class RegistrationPage extends BasePage {
       const wallet = asset.wallet
       if (wallet) {
         const bondAsset = this.currentDEX.bondAssets[asset.symbol]
-        if (wallet.synced && wallet.balance.available > bondAsset.amount) {
+        const bondsFeeBuffer = await this.getBondsFeeBuffer(assetID, page.regAssetForm)
+        if (wallet.synced && wallet.balance.available > 2 * bondAsset.amount + bondsFeeBuffer) {
           this.animateConfirmForm(page.regAssetForm)
           return
         }
-        const bondsFeeBuffer = await this.getBondsFeeBuffer(assetID, page.regAssetForm)
         this.walletWaitForm.setWallet(wallet, bondsFeeBuffer)
         slideSwap(page.regAssetForm, page.walletWait)
         return
@@ -247,12 +247,12 @@ export default class RegistrationPage extends BasePage {
     const wallet = asset.wallet
     const bondAmt = this.currentDEX.bondAssets[asset.symbol].amount
 
-    if (wallet.synced && wallet.balance.available > bondAmt) {
+    const bondsFeeBuffer = await this.getBondsFeeBuffer(assetID, page.newWalletForm)
+    if (wallet.synced && wallet.balance.available > 2 * bondAmt + bondsFeeBuffer) {
       await this.animateConfirmForm(page.newWalletForm)
       return
     }
 
-    const bondsFeeBuffer = await this.getBondsFeeBuffer(assetID, page.newWalletForm)
     this.walletWaitForm.setWallet(wallet, bondsFeeBuffer)
     await slideSwap(page.newWalletForm, page.walletWait)
   }
