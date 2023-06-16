@@ -66,6 +66,12 @@ const (
 	dextt            = "dextt.eth"
 	maxOrderLots     = 10
 	ethFeeRate       = 200 // gwei
+	// missedCancelErrStr is part of an error found in dcrdex/server/market/orderrouter.go
+	// that a cancel order may hit with bad timing but is not a problem.
+	//
+	// TODO: Consider returning a separate msgjson error from server for
+	// this case.
+	missedCancelErrStr = "target order not known:"
 )
 
 var (
@@ -87,7 +93,7 @@ var (
 
 	usr, _       = user.Current()
 	dextestDir   = filepath.Join(usr.HomeDir, "dextest")
-	botDir       = filepath.Join(dextestDir, "loadbot")
+	botDir       = filepath.Join(dextestDir, fmt.Sprintf("loadbot_%d", time.Now().Unix()))
 	alphaIPCFile = filepath.Join(dextestDir, "eth", "alpha", "node", "geth.ipc")
 	betaIPCFile  = filepath.Join(dextestDir, "eth", "beta", "node", "geth.ipc")
 
@@ -102,12 +108,14 @@ var (
 	epochDuration                                         uint64
 	lotSize                                               uint64
 	rateStep                                              uint64
+	rateShift, rateIncrease                               int64
 	conversionFactors                                     = make(map[string]uint64)
 
-	ethInitFee                     = (dexeth.InitGas(1, 0) + dexeth.RefundGas(0)) * ethFeeRate
-	ethRedeemFee                   = dexeth.RedeemGas(1, 0) * ethFeeRate
-	defaultMidGap, marketBuyBuffer float64
-	keepMidGap                     bool
+	ethInitFee                                     = (dexeth.InitGas(1, 0) + dexeth.RefundGas(0)) * ethFeeRate
+	ethRedeemFee                                   = dexeth.RedeemGas(1, 0) * ethFeeRate
+	defaultMidGap, marketBuyBuffer, whalePercent   float64
+	keepMidGap, oscillate, randomOsc, ignoreErrors bool
+	oscInterval, oscStep, whaleFrequency           uint64
 
 	processesMtx sync.Mutex
 	processes    []*process
@@ -352,6 +360,14 @@ func run() error {
 	flag.BoolVar(&trace, "trace", false, "use trace logging")
 	flag.IntVar(&m, "m", 0, "for compound and sidestacker, m is the number of makers to stack before placing takers")
 	flag.IntVar(&n, "n", 0, "for compound and sidestacker, n is the number of orders to place per epoch (default 3)")
+	flag.Int64Var(&rateShift, "rateshift", 0, "for compound and sidestacker, rateShift is applied to every order and increases or decreases price by the chosen shift times the rate step, use to create a market trending in one direction (default 0)")
+	flag.BoolVar(&oscillate, "oscillate", false, "for compound and sidestacker, whether the price should move up and down inside a window, use to emulate a sideways market (default false)")
+	flag.BoolVar(&randomOsc, "randomosc", false, "for compound and sidestacker, oscillate more randomly")
+	flag.Uint64Var(&oscInterval, "oscinterval", 300, "for compound and sidestacker, the number of epochs to take for a full oscillation cycle")
+	flag.Uint64Var(&oscStep, "oscstep", 50, "for compound and sidestacker, the number of rate step to increase or decrease per epoch")
+	flag.BoolVar(&ignoreErrors, "ignoreerrors", false, "log and ignore errors rather than the default behavior of stopping loadbot")
+	flag.Uint64Var(&whaleFrequency, "whalefrequency", 4, "controls the frequency with which the whale \"whales\" after it is ready. To whale is to choose a rate and attempt to buy up the entire book at that price. If frequency is N, the whale will whale an average of 1 out of every N+1 epochs (default 4)")
+	flag.Float64Var(&whalePercent, "whalepercent", 0.1, "The percent of the current mid gap to whale within. If 0.1 the whale will pick a target price between 0.9 and 1.1 percent of the current mid gap (default 0.1)")
 	flag.Parse()
 
 	if programName == "" {
@@ -435,6 +451,9 @@ func run() error {
 		marketBuyBuffer = mkt.MBBuffer
 		break
 	}
+
+	rateIncrease = int64(rateStep) * rateShift
+
 	// Adjust to be comparable to the dcr_btc market.
 	defaultMidGap = defaultBtcPerDcr * float64(rateStep) / 100
 
@@ -464,7 +483,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("error creating LoggerMaker: %v", err)
 	}
-	log /* global */ = loggerMaker.NewLogger("LOADBOT", dex.LevelInfo)
+	log /* global */ = loggerMaker.NewLogger("LOADBOT")
 
 	log.Infof("Running program %s", programName)
 
@@ -534,6 +553,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("error creating loadbot directory: %v", err)
 	}
+	defer os.RemoveAll(botDir)
 
 	// Run any specified network conditions.
 	var toxics toxiproxy.Toxics
@@ -651,11 +671,13 @@ func run() error {
 	case "pingpong4":
 		runPingPong(4)
 	case "sidestacker":
-		runSideStacker(5, 3)
+		runSideStacker(20, 3)
 	case "compound":
 		runCompound()
 	case "heavy":
 		runHeavy()
+	case "whale":
+		runWhale()
 	default:
 		log.Criticalf("program " + programName + " not known")
 	}
@@ -697,4 +719,26 @@ func loadNodeConfig(symbol, node string) map[string]string {
 		panic(fmt.Sprintf("error parsing harness config file at %s: %v", cfgPath, err))
 	}
 	return cfg
+}
+
+func symmetricWalletConfig(numCoins int, midGap uint64) (
+	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty uint64) {
+
+	minBaseQty = uint64(maxOrderLots) * uint64(numCoins) * lotSize
+	minQuoteQty = calc.BaseToQuote(midGap, minBaseQty)
+	// Ensure enough for registration fees.
+	minBaseQty += 2e8
+	minQuoteQty += 2e8
+	// eth fee estimation calls for more reserves.
+	// TODO: polygon and tokens
+	if quoteSymbol == eth {
+		add := (ethRedeemFee + ethInitFee) * uint64(maxOrderLots)
+		minQuoteQty += add
+	}
+	if baseSymbol == eth {
+		add := (ethRedeemFee + ethInitFee) * uint64(maxOrderLots)
+		minBaseQty += add
+	}
+	maxBaseQty, maxQuoteQty = minBaseQty*2, minQuoteQty*2
+	return
 }

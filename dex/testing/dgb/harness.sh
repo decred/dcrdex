@@ -20,10 +20,17 @@ export DELTA_WALLET_SEED="ehA5EC6mbNvGCJ4HqtjNc822ojnU2bGRLoc3cZipoYFFYT7tYrq4"
 export DELTA_ADDRESS="dgbrt1qdgzj8guegzuyfupcvy3vjlpfxpv8rgruqtkndf"
 # Signal that the node needs to restart after encrypting wallet
 export RESTART_AFTER_ENCRYPT="1"
-export NOMINER="1"
 # $1 is the node to create with. $2 is the wallet name
 export NEW_WALLET_CMD="./\$1 createwallet \$2"
 export BLOCKS_TO_MINE=120 # it chokes with high diff if you mine much more, but if you stop at 100, nothing much is mature it seems
 export EXTRA_ARGS="-disabledandelion=1 -rpcbind=0.0.0.0 -rpcallowip=0.0.0.0/0 -nodiscover -nodnsseed" # -onlynet=ipv4 -nodiscover
+
+# Background watch mining by default:
+# 'export NOMINER="1"' or uncomment this line to disable
+#
+# TODO: Cannot presently continuously mine on simnet but when we can comment
+# this out.
+NOMINER="1"
+
 # Run the harness
 ../btc/base-harness.sh

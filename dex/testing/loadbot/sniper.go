@@ -31,7 +31,7 @@ func newSniper(maxOrdsPerEpoch int) *sniper {
 // SetupWallets is part of the Trader interface.
 func (s *sniper) SetupWallets(m *Mantle) {
 	numCoins := 3 * s.maxOrdsPerEpoch
-	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig(numCoins)
+	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig(numCoins, uint64(defaultMidGap*rateEncFactor))
 	m.createWallet(baseSymbol, alpha, minBaseQty, maxBaseQty, numCoins)
 	m.createWallet(quoteSymbol, alpha, minQuoteQty, maxQuoteQty, numCoins)
 
@@ -57,6 +57,15 @@ func (s *sniper) HandleNotification(m *Mantle, note core.Notification) {
 				}
 				s.snipe(m)
 			}()
+			numCoins := 3 * s.maxOrdsPerEpoch
+			book := m.book()
+			midGap := midGap(book)
+			minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty := symmetricWalletConfig(numCoins, midGap)
+			wmm := walletMinMax{
+				baseID:  {min: minBaseQty, max: maxBaseQty},
+				quoteID: {min: minQuoteQty, max: maxQuoteQty},
+			}
+			m.replenishBalances(wmm)
 		}
 	case *core.BalanceNote:
 		log.Infof("sniper balance: %s = %d available, %d locked", unbip(n.AssetID), n.Balance.Available, n.Balance.Locked)
@@ -96,29 +105,4 @@ func (s *sniper) snipe(m *Mantle) {
 		}
 		m.marketOrder(sell, qty)
 	}
-}
-
-func symmetricWalletConfig(numCoins int) (
-	minBaseQty, maxBaseQty, minQuoteQty, maxQuoteQty uint64) {
-
-	minBaseQty = uint64(maxOrderLots) * uint64(numCoins) * lotSize
-	minQuoteQty = calc.BaseToQuote(uint64(defaultMidGap*rateEncFactor), minBaseQty)
-	// Ensure enough for registration fees.
-	if minBaseQty < 2e8 {
-		minBaseQty = 2e8
-	}
-	if minQuoteQty < 2e8 {
-		minQuoteQty = 2e8
-	}
-	// eth fee estimation calls for more reserves.
-	if quoteSymbol == eth {
-		add := (ethRedeemFee + ethInitFee) * uint64(maxOrderLots)
-		minQuoteQty += add
-	}
-	if baseSymbol == eth {
-		add := (ethRedeemFee + ethInitFee) * uint64(maxOrderLots)
-		minBaseQty += add
-	}
-	maxBaseQty, maxQuoteQty = minBaseQty*2, minQuoteQty*2
-	return
 }
