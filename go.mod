@@ -3,7 +3,7 @@ module decred.org/dcrdex
 go 1.18
 
 require (
-	decred.org/dcrwallet/v2 v2.0.11
+	decred.org/dcrwallet/v3 v3.0.1
 	fyne.io/systray v1.10.1-0.20220621085403-9a2652634e93
 	github.com/btcsuite/btcd v0.23.4
 	github.com/btcsuite/btcd/btcec/v2 v2.2.2
@@ -19,26 +19,26 @@ require (
 	github.com/dchest/blake2b v1.0.0
 	github.com/dcrlabs/neutrino-bch v0.0.0-20221031001408-f296bfa9bd1c
 	github.com/dcrlabs/neutrino-ltc v0.0.0-20221031001456-55ef06cefead
-	github.com/decred/base58 v1.0.4
-	github.com/decred/dcrd/addrmgr/v2 v2.0.1
-	github.com/decred/dcrd/blockchain/stake/v4 v4.0.0
-	github.com/decred/dcrd/blockchain/v4 v4.0.2
-	github.com/decred/dcrd/certgen v1.1.1
-	github.com/decred/dcrd/chaincfg/chainhash v1.0.3
-	github.com/decred/dcrd/chaincfg/v3 v3.1.1
-	github.com/decred/dcrd/connmgr/v3 v3.1.0
-	github.com/decred/dcrd/crypto/blake256 v1.0.0
-	github.com/decred/dcrd/dcrec v1.0.0
-	github.com/decred/dcrd/dcrec/edwards/v2 v2.0.2
-	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.1.0
-	github.com/decred/dcrd/dcrjson/v4 v4.0.0
-	github.com/decred/dcrd/dcrutil/v4 v4.0.0
-	github.com/decred/dcrd/gcs/v3 v3.0.0
-	github.com/decred/dcrd/hdkeychain/v3 v3.1.0
-	github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0
-	github.com/decred/dcrd/rpcclient/v7 v7.0.0
-	github.com/decred/dcrd/txscript/v4 v4.0.0
-	github.com/decred/dcrd/wire v1.5.0
+	github.com/decred/base58 v1.0.5
+	github.com/decred/dcrd/addrmgr/v2 v2.0.2
+	github.com/decred/dcrd/blockchain/stake/v5 v5.0.0
+	github.com/decred/dcrd/blockchain/standalone/v2 v2.2.0
+	github.com/decred/dcrd/certgen v1.1.2
+	github.com/decred/dcrd/chaincfg/chainhash v1.0.4
+	github.com/decred/dcrd/chaincfg/v3 v3.2.0
+	github.com/decred/dcrd/connmgr/v3 v3.1.1
+	github.com/decred/dcrd/crypto/blake256 v1.0.1
+	github.com/decred/dcrd/dcrec v1.0.1
+	github.com/decred/dcrd/dcrec/edwards/v2 v2.0.3
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.2.0
+	github.com/decred/dcrd/dcrjson/v4 v4.0.1
+	github.com/decred/dcrd/dcrutil/v4 v4.0.1
+	github.com/decred/dcrd/gcs/v4 v4.0.0
+	github.com/decred/dcrd/hdkeychain/v3 v3.1.1
+	github.com/decred/dcrd/rpc/jsonrpc/types/v4 v4.0.0
+	github.com/decred/dcrd/rpcclient/v8 v8.0.0
+	github.com/decred/dcrd/txscript/v4 v4.1.0
+	github.com/decred/dcrd/wire v1.6.0
 	github.com/decred/go-socks v1.1.0
 	github.com/decred/slog v1.2.0
 	github.com/dgraph-io/badger v1.6.2
@@ -64,18 +64,18 @@ require (
 	github.com/pkg/browser v0.0.0-20210911075715-681adbf594b8
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/tyler-smith/go-bip39 v1.1.0
-	go.etcd.io/bbolt v1.3.7-0.20220130032806-d5db64bdbfde
+	go.etcd.io/bbolt v1.3.7
 	golang.org/x/crypto v0.7.0
 	golang.org/x/sync v0.1.0
 	golang.org/x/term v0.6.0
 	golang.org/x/text v0.8.0
 	golang.org/x/time v0.3.0
 	gopkg.in/ini.v1 v1.67.0
-	lukechampine.com/blake3 v1.1.7
+	lukechampine.com/blake3 v1.2.1
 )
 
 require (
-	decred.org/cspp/v2 v2.0.0 // indirect
+	decred.org/cspp/v2 v2.1.0 // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
 	github.com/DataDog/zstd v1.5.2 // indirect
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
@@ -94,13 +94,12 @@ require (
 	github.com/cockroachdb/logtags v0.0.0-20230118201751-21c54148d20b // indirect
 	github.com/cockroachdb/pebble v0.0.0-20230209160836-829675f94811 // indirect
 	github.com/cockroachdb/redact v1.1.3 // indirect
-	github.com/companyzero/sntrup4591761 v0.0.0-20200131011700-2b0d299dbd22 // indirect
+	github.com/companyzero/sntrup4591761 v0.0.0-20220309191932-9e0f3af2f07a // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.2 // indirect
 	github.com/dchest/siphash v1.2.3 // indirect
 	github.com/deckarep/golang-set/v2 v2.1.0 // indirect
-	github.com/decred/dcrd/blockchain/standalone/v2 v2.1.0 // indirect
-	github.com/decred/dcrd/crypto/ripemd160 v1.0.1 // indirect
-	github.com/decred/dcrd/database/v3 v3.0.0 // indirect
+	github.com/decred/dcrd/crypto/ripemd160 v1.0.2 // indirect
+	github.com/decred/dcrd/database/v3 v3.0.1 // indirect
 	github.com/decred/dcrd/lru v1.1.1 // indirect
 	github.com/dgraph-io/ristretto v0.0.2 // indirect
 	github.com/dustin/go-humanize v1.0.0 // indirect
@@ -125,7 +124,7 @@ require (
 	github.com/huin/goupnp v1.0.3 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/jrick/bitset v1.0.0 // indirect
-	github.com/jrick/wsrpc/v2 v2.3.4 // indirect
+	github.com/jrick/wsrpc/v2 v2.3.5 // indirect
 	github.com/kkdai/bstream v1.0.0 // indirect
 	github.com/klauspost/compress v1.15.15 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.9 // indirect
