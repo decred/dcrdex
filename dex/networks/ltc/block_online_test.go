@@ -19,7 +19,7 @@ import (
 
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/decred/dcrd/chaincfg/chainhash" // just for the array type, not its methods
-	"github.com/decred/dcrd/rpcclient/v7"
+	"github.com/decred/dcrd/rpcclient/v8"
 )
 
 // TestOnlineDeserializeBlock attempts to deserialize every testnet4 LTC block

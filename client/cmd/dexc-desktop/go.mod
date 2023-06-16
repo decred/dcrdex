@@ -12,8 +12,8 @@ require (
 )
 
 require (
-	decred.org/cspp/v2 v2.0.0 // indirect
-	decred.org/dcrwallet/v2 v2.0.11 // indirect
+	decred.org/cspp/v2 v2.1.0 // indirect
+	decred.org/dcrwallet/v3 v3.0.1 // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
 	github.com/DataDog/zstd v1.5.2 // indirect
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
@@ -42,7 +42,7 @@ require (
 	github.com/cockroachdb/logtags v0.0.0-20230118201751-21c54148d20b // indirect
 	github.com/cockroachdb/pebble v0.0.0-20230209160836-829675f94811 // indirect
 	github.com/cockroachdb/redact v1.1.3 // indirect
-	github.com/companyzero/sntrup4591761 v0.0.0-20200131011700-2b0d299dbd22 // indirect
+	github.com/companyzero/sntrup4591761 v0.0.0-20220309191932-9e0f3af2f07a // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dchest/blake2b v1.0.0 // indirect
@@ -50,30 +50,29 @@ require (
 	github.com/dcrlabs/neutrino-bch v0.0.0-20221031001408-f296bfa9bd1c // indirect
 	github.com/dcrlabs/neutrino-ltc v0.0.0-20221031001456-55ef06cefead // indirect
 	github.com/deckarep/golang-set/v2 v2.1.0 // indirect
-	github.com/decred/base58 v1.0.4 // indirect
-	github.com/decred/dcrd/addrmgr/v2 v2.0.1 // indirect
-	github.com/decred/dcrd/blockchain/stake/v4 v4.0.0 // indirect
-	github.com/decred/dcrd/blockchain/standalone/v2 v2.1.0 // indirect
-	github.com/decred/dcrd/blockchain/v4 v4.0.2 // indirect
-	github.com/decred/dcrd/certgen v1.1.1 // indirect
-	github.com/decred/dcrd/chaincfg/chainhash v1.0.3 // indirect
-	github.com/decred/dcrd/chaincfg/v3 v3.1.1 // indirect
-	github.com/decred/dcrd/connmgr/v3 v3.1.0 // indirect
-	github.com/decred/dcrd/crypto/blake256 v1.0.0 // indirect
-	github.com/decred/dcrd/crypto/ripemd160 v1.0.1 // indirect
-	github.com/decred/dcrd/database/v3 v3.0.0 // indirect
-	github.com/decred/dcrd/dcrec v1.0.0 // indirect
-	github.com/decred/dcrd/dcrec/edwards/v2 v2.0.2 // indirect
-	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.1.0 // indirect
-	github.com/decred/dcrd/dcrjson/v4 v4.0.0 // indirect
-	github.com/decred/dcrd/dcrutil/v4 v4.0.0 // indirect
-	github.com/decred/dcrd/gcs/v3 v3.0.0 // indirect
-	github.com/decred/dcrd/hdkeychain/v3 v3.1.0 // indirect
+	github.com/decred/base58 v1.0.5 // indirect
+	github.com/decred/dcrd/addrmgr/v2 v2.0.2 // indirect
+	github.com/decred/dcrd/blockchain/stake/v5 v5.0.0 // indirect
+	github.com/decred/dcrd/blockchain/standalone/v2 v2.2.0 // indirect
+	github.com/decred/dcrd/certgen v1.1.2 // indirect
+	github.com/decred/dcrd/chaincfg/chainhash v1.0.4 // indirect
+	github.com/decred/dcrd/chaincfg/v3 v3.2.0 // indirect
+	github.com/decred/dcrd/connmgr/v3 v3.1.1 // indirect
+	github.com/decred/dcrd/crypto/blake256 v1.0.1 // indirect
+	github.com/decred/dcrd/crypto/ripemd160 v1.0.2 // indirect
+	github.com/decred/dcrd/database/v3 v3.0.1 // indirect
+	github.com/decred/dcrd/dcrec v1.0.1 // indirect
+	github.com/decred/dcrd/dcrec/edwards/v2 v2.0.3 // indirect
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.2.0 // indirect
+	github.com/decred/dcrd/dcrjson/v4 v4.0.1 // indirect
+	github.com/decred/dcrd/dcrutil/v4 v4.0.1 // indirect
+	github.com/decred/dcrd/gcs/v4 v4.0.0 // indirect
+	github.com/decred/dcrd/hdkeychain/v3 v3.1.1 // indirect
 	github.com/decred/dcrd/lru v1.1.1 // indirect
-	github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0 // indirect
-	github.com/decred/dcrd/rpcclient/v7 v7.0.0 // indirect
-	github.com/decred/dcrd/txscript/v4 v4.0.0 // indirect
-	github.com/decred/dcrd/wire v1.5.0 // indirect
+	github.com/decred/dcrd/rpc/jsonrpc/types/v4 v4.0.0 // indirect
+	github.com/decred/dcrd/rpcclient/v8 v8.0.0 // indirect
+	github.com/decred/dcrd/txscript/v4 v4.1.0 // indirect
+	github.com/decred/dcrd/wire v1.6.0 // indirect
 	github.com/decred/go-socks v1.1.0 // indirect
 	github.com/decred/slog v1.2.0 // indirect
 	github.com/dgraph-io/badger v1.6.2 // indirect
@@ -111,7 +110,7 @@ require (
 	github.com/jessevdk/go-flags v1.5.0 // indirect
 	github.com/jrick/bitset v1.0.0 // indirect
 	github.com/jrick/logrotate v1.0.0 // indirect
-	github.com/jrick/wsrpc/v2 v2.3.4 // indirect
+	github.com/jrick/wsrpc/v2 v2.3.5 // indirect
 	github.com/kkdai/bstream v1.0.0 // indirect
 	github.com/klauspost/compress v1.15.15 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.9 // indirect
@@ -168,7 +167,7 @@ require (
 	github.com/urfave/cli/v2 v2.17.2-0.20221006022127-8f469abc00aa // indirect
 	github.com/xrash/smetrics v0.0.0-20201216005158-039620a65673 // indirect
 	github.com/zquestz/grab v0.0.0-20190224022517-abcee96e61b1 // indirect
-	go.etcd.io/bbolt v1.3.7-0.20220130032806-d5db64bdbfde // indirect
+	go.etcd.io/bbolt v1.3.7 // indirect
 	golang.org/x/crypto v0.7.0 // indirect
 	golang.org/x/exp v0.0.0-20230206171751-46f607a40771 // indirect
 	golang.org/x/net v0.8.0 // indirect
@@ -180,5 +179,5 @@ require (
 	google.golang.org/protobuf v1.28.1 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce // indirect
-	lukechampine.com/blake3 v1.1.7 // indirect
+	lukechampine.com/blake3 v1.2.1 // indirect
 )
