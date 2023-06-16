@@ -28,17 +28,17 @@ import (
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
-	walletjson "decred.org/dcrwallet/v2/rpc/jsonrpc/types"
-	_ "decred.org/dcrwallet/v2/wallet/drivers/bdb"
-	"github.com/decred/dcrd/blockchain/stake/v4"
-	"github.com/decred/dcrd/blockchain/v4"
+	walletjson "decred.org/dcrwallet/v3/rpc/jsonrpc/types"
+	_ "decred.org/dcrwallet/v3/wallet/drivers/bdb"
+	"github.com/decred/dcrd/blockchain/stake/v5"
+	"github.com/decred/dcrd/blockchain/standalone/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/decred/dcrd/dcrutil/v4"
-	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
+	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v4"
 	"github.com/decred/dcrd/txscript/v4"
 	"github.com/decred/dcrd/txscript/v4/sign"
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
@@ -2831,7 +2831,7 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, reb
 		if err != nil {
 			return nil, fmt.Errorf("invalid contract tx data: %w", err)
 		}
-		if err = blockchain.CheckTransactionSanity(contractTx, dcr.chainParams); err != nil {
+		if err = standalone.CheckTransactionSanity(contractTx, uint64(dcr.chainParams.MaxTxSize)); err != nil {
 			return nil, fmt.Errorf("invalid contract tx data: %w", err)
 		}
 		if checkHash := contractTx.TxHash(); checkHash != *txHash {
@@ -2888,23 +2888,7 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract, txData dex.Bytes, reb
 }
 
 func determineTxTree(msgTx *wire.MsgTx) int8 {
-	// stake.DetermineTxType will produce correct results if we pass true for
-	// isTreasuryEnabled regardless of whether the treasury vote has activated
-	// or not.
-	// The only possibility for wrong results is passing isTreasuryEnabled=false
-	// _after_ the treasury vote activates - some stake tree votes may identify
-	// as regular tree transactions.
-	// Could try with isTreasuryEnabled false, then true and if neither comes up
-	// as a stake transaction, then we infer regular, but that isn't necessary
-	// as explained above.
-	isTreasuryEnabled := true
-	// Consider the automatic ticket revocations agenda NOT active. Specifying
-	// true just adds the constraints that revocations must have an empty
-	// signature script for its input and must have zero fee. Thus, false will
-	// correctly identify consensus-validated transactions before OR after
-	// activation of this agenda.
-	isAutoRevocationsEnabled := false
-	if stake.DetermineTxType(msgTx, isTreasuryEnabled, isAutoRevocationsEnabled) != stake.TxTypeRegular {
+	if stake.DetermineTxType(msgTx) != stake.TxTypeRegular {
 		return wire.TxTreeStake
 	}
 	return wire.TxTreeRegular

@@ -29,7 +29,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/decred/dcrd/dcrjson/v4" // for dcrjson.RPCError returns from rpcclient
-	"github.com/decred/dcrd/rpcclient/v7"
+	"github.com/decred/dcrd/rpcclient/v8"
 )
 
 const defaultNoCompetitionRate = 10
