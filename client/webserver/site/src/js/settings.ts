@@ -86,14 +86,12 @@ export default class SettingsPage extends BasePage {
           return
         }
         this.walletWaitForm.setWallet(wallet, bondsFeeBuffer)
-        this.currentForm = page.walletWait
-        forms.slideSwap(page.regAssetForm, page.walletWait)
+        this.slideSwap(page.walletWait)
         return
       }
 
       this.newWalletForm.setAsset(assetID)
-      this.currentForm = page.newWalletForm
-      forms.slideSwap(page.regAssetForm, page.newWalletForm)
+      this.slideSwap(page.newWalletForm)
     })
 
     // Approve fee payment
@@ -159,6 +157,15 @@ export default class SettingsPage extends BasePage {
     })
   }
 
+  /*
+   * slideSwap animates the replacement of the currently shown form with the
+   * newForm and sets this.currentForm.
+   */
+  slideSwap (newForm: PageElement) {
+    forms.slideSwap(this.currentForm, newForm)
+    this.currentForm = newForm
+  }
+
   // Retrieve an estimate for the tx fee needed to create new bond reserves.
   async getBondsFeeBuffer (assetID: number, form: HTMLElement) {
     const loaded = app().loading(form)
@@ -185,8 +192,7 @@ export default class SettingsPage extends BasePage {
     }
 
     this.walletWaitForm.setWallet(wallet, bondsFeeBuffer)
-    this.currentForm = page.walletWait
-    await forms.slideSwap(page.newWalletForm, page.walletWait)
+    this.slideSwap(page.walletWait)
   }
 
   async onAccountFileChange () {
