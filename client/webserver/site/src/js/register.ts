@@ -94,7 +94,7 @@ export default class RegistrationPage extends BasePage {
       if (wallet) {
         const bondAsset = this.currentDEX.bondAssets[asset.symbol]
         const bondsFeeBuffer = await this.getBondsFeeBuffer(assetID, page.regAssetForm)
-        if (wallet.synced && wallet.balance.available > 2 * bondAsset.amount + bondsFeeBuffer) {
+        if (wallet.synced && wallet.balance.available >= 2 * bondAsset.amount + bondsFeeBuffer) {
           this.animateConfirmForm(page.regAssetForm)
           return
         }
@@ -165,7 +165,7 @@ export default class RegistrationPage extends BasePage {
     Doc.show(this.page.confirmRegForm)
   }
 
-  // Retrieve an estimate for the tx fee needed to pay the registration fee.
+  // Retrieve an estimate for the tx fee needed to create new bond reserves.
   async getBondsFeeBuffer (assetID: number, form: HTMLElement) {
     const loaded = app().loading(form)
     const res = await postJSON('/api/bondsfeebuffer', { assetID })
@@ -248,7 +248,7 @@ export default class RegistrationPage extends BasePage {
     const bondAmt = this.currentDEX.bondAssets[asset.symbol].amount
 
     const bondsFeeBuffer = await this.getBondsFeeBuffer(assetID, page.newWalletForm)
-    if (wallet.synced && wallet.balance.available > 2 * bondAmt + bondsFeeBuffer) {
+    if (wallet.synced && wallet.balance.available >= 2 * bondAmt + bondsFeeBuffer) {
       await this.animateConfirmForm(page.newWalletForm)
       return
     }
