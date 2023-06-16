@@ -21,15 +21,15 @@ import (
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
-	"github.com/decred/dcrd/blockchain/stake/v4"
-	"github.com/decred/dcrd/blockchain/v4"
+	"github.com/decred/dcrd/blockchain/stake/v5"
+	"github.com/decred/dcrd/blockchain/standalone/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrjson/v4"
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/hdkeychain/v3"
-	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
-	"github.com/decred/dcrd/rpcclient/v7"
+	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v4"
+	"github.com/decred/dcrd/rpcclient/v8"
 	"github.com/decred/dcrd/txscript/v4"
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/txscript/v4/stdscript"
@@ -195,7 +195,7 @@ func ParseBondTx(ver uint16, rawTx []byte) (bondCoinID []byte, amt int64, bondAd
 		return
 	}
 
-	if err = blockchain.CheckTransactionSanity(msgTx, chainParams); err != nil {
+	if err = standalone.CheckTransactionSanity(msgTx, uint64(chainParams.MaxTxSize)); err != nil {
 		return
 	}
 
@@ -1255,23 +1255,7 @@ func (dcr *Backend) getTxOutInfo(ctx context.Context, txHash *chainhash.Hash, vo
 // determineTxTree determines if the transaction is in the regular transaction
 // tree (wire.TxTreeRegular) or the stake tree (wire.TxTreeStake).
 func determineTxTree(msgTx *wire.MsgTx) int8 {
-	// stake.DetermineTxType will produce correct results if we pass true for
-	// isTreasuryEnabled regardless of whether the treasury vote has activated
-	// or not.
-	// The only possibility for wrong results is passing isTreasuryEnabled=false
-	// _after_ the treasury vote activates - some stake tree votes may identify
-	// as regular tree transactions.
-	// Could try with isTreasuryEnabled false, then true and if neither comes up
-	// as a stake transaction, then we infer regular, but that isn't necessary
-	// as explained above.
-	isTreasuryEnabled := true
-	// Consider the automatic ticket revocations agenda NOT active. Specifying
-	// true just adds the constraints that revocations must have an empty
-	// signature script for its input and must have zero fee. Thus, false will
-	// correctly identify consensus-validated transactions before OR after
-	// activation of this agenda.
-	isAutoRevocationsEnabled := false
-	if stake.DetermineTxType(msgTx, isTreasuryEnabled, isAutoRevocationsEnabled) != stake.TxTypeRegular {
+	if stake.DetermineTxType(msgTx) != stake.TxTypeRegular {
 		return wire.TxTreeStake
 	}
 	return wire.TxTreeRegular
