@@ -86,6 +86,7 @@ export default class SettingsPage extends BasePage {
           return
         }
         this.walletWaitForm.setWallet(wallet, bondsFeeBuffer)
+        this.currentForm = page.walletWait
         forms.slideSwap(page.regAssetForm, page.walletWait)
         return
       }
