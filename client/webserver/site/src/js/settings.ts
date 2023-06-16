@@ -86,6 +86,7 @@ export default class SettingsPage extends BasePage {
         }
         const txFee = await this.getRegistrationTxFeeEstimate(assetID, page.regAssetForm)
         this.walletWaitForm.setWallet(wallet, txFee)
+        this.currentForm = page.walletWait
         forms.slideSwap(page.regAssetForm, page.walletWait)
         return
       }
