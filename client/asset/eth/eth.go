@@ -4561,8 +4561,8 @@ func runSimnetMiner(ctx context.Context, log dex.Logger) {
 			select {
 			case <-tick.C:
 				log.Debugf("Mining a simnet block")
-				mine := exec.CommandContext(ctx, "./mine-alpha", "1")                // TODO: make this configurable esp for polygon simnet
-				mine.Dir = filepath.Join(u.HomeDir, "dextest", "eth", "harness-ctl") // TODO: make this configurable esp for polygon simnet
+				mine := exec.CommandContext(ctx, "./mine-alpha", "1")
+				mine.Dir = filepath.Join(u.HomeDir, "dextest", "eth", "harness-ctl")
 				b, err := mine.CombinedOutput()
 				if err != nil {
 					log.Errorf("Mining error: %v", err)
