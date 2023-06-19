@@ -8723,7 +8723,7 @@ func TestConfirmRedemption(t *testing.T) {
 
 	tBtcWallet.redeemCoins = []dex.Bytes{tUpdatedCoinID}
 
-	setupMatch := func(status order.MatchStatus) {
+	setupMatch := func(status order.MatchStatus, side order.MatchSide) {
 		matchID := ordertest.RandomMatchID()
 		_, auditInfo := tMsgAudit(oid, matchID, addr, 0, secretHash[:])
 		matchTime := time.Now()
@@ -8734,21 +8734,27 @@ func TestConfirmRedemption(t *testing.T) {
 				UserMatch: &order.UserMatch{
 					MatchID: matchID,
 					Address: addr,
+					Side:    side,
+					Status:  status,
 				},
 			},
 		}
 		tracker.matches = map[order.MatchID]*matchTracker{matchID: match}
 
 		isMaker := match.Side == order.Maker
-		match.Status = status
-		match.MetaData.Proof = db.MatchProof{}
 		proof := &match.MetaData.Proof
 		proof.Auth.InitSig = []byte{1, 2, 3, 4}
-
+		// Assume our redeem was accepted, if we sent one.
 		if isMaker {
 			auditInfo.Expiration = matchTime.Add(tracker.lockTimeTaker)
+			if status >= order.MakerRedeemed {
+				match.MetaData.Proof.Auth.RedeemSig = []byte{0}
+			}
 		} else {
 			auditInfo.Expiration = matchTime.Add(tracker.lockTimeMaker)
+			if status >= order.MatchComplete {
+				match.MetaData.Proof.Auth.RedeemSig = []byte{0}
+			}
 		}
 
 		if status >= order.MakerSwapCast {
@@ -8990,8 +8996,7 @@ func TestConfirmRedemption(t *testing.T) {
 
 	for _, test := range tests {
 		tracker.mtx.Lock()
-		setupMatch(test.matchStatus)
-		match.Side = test.matchSide
+		setupMatch(test.matchStatus, test.matchSide)
 		tracker.mtx.Unlock()
 
 		tBtcWallet.confirmRedemptionResult = test.confirmRedemptionResult
@@ -9001,8 +9006,8 @@ func TestConfirmRedemption(t *testing.T) {
 		tCore.tickAsset(dc, tUTXOAssetB.ID)
 
 		if tBtcWallet.confirmRedemptionCalled != test.expectConfirmRedemptionCalled {
-			t.Fatalf("%s: expected confirm redemption to be called %v but got %v",
-				test.name, tBtcWallet.confirmRedemptionCalled, test.expectConfirmRedemptionCalled)
+			t.Fatalf("%s: expected confirm redemption to be called=%v but got=%v",
+				test.name, test.expectConfirmRedemptionCalled, tBtcWallet.confirmRedemptionCalled)
 		}
 
 		for _, expectedNotification := range test.expectedNotifications {
