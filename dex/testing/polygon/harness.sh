@@ -4,11 +4,10 @@ SESSION="polygon-harness"
 
 SOURCE_DIR=$(pwd)
 NODES_ROOT=~/dextest/polygon
-GENESIS_JSON_FILE_LOCATION="${SOURCE_DIR}/genesis.json"
+GENESIS_JSON_FILE_LOCATION="${NODES_ROOT}/genesis.json"
 HARNESS_DIR=${NODES_ROOT}/harness-ctl
 
 mkdir -p "${NODES_ROOT}/${NAME}"
-mkdir -p "${NODES_ROOT}/beta"
 mkdir -p "${HARNESS_DIR}"
 
 NAME="alpha"
@@ -30,23 +29,74 @@ EOF
 chmod +x "${HARNESS_DIR}/quit"
 
 GROUP_DIR="${NODES_ROOT}/${NAME}"
-NODE_DIR="${GROUP_DIR}/node"
+NODE_DIR="${GROUP_DIR}/bor"
 mkdir -p "${NODE_DIR}"
 
-ALPHA_ADDRESS="18d65fb8d60c1199bb1ad381be47aa692b482605"
-ALPHA_ADDRESS_JSON_FILE_NAME="UTC--2021-01-28T08-47-02.993754951Z--18d65fb8d60c1199bb1ad381be47aa692b482605"
-ALPHA_ADDRESS_JSON='{"address":"18d65fb8d60c1199bb1ad381be47aa692b482605","crypto":{"cipher":"aes-128-ctr","ciphertext":"927bc2432492fc4bbe9acfe0042f5cd2cef25aff251ac1fb2f420ee85e3b6ee4","cipherparams":{"iv":"89e7333535aed5284abd52f841d30c95"},"kdf":"scrypt","kdfparams":{"dklen":32,"n":262144,"p":1,"r":8,"salt":"6fe29ea59d166989be533da62d79802a6b0cef26a9766fa363c7a4bb4c263b5f"},"mac":"c7e2b6c4538c373b2c4e0be7b343db618d39cc68fa872909059357ff36743ca0"},"id":"0e2b9cef-d659-4a26-8739-879129ed0b63","version":3}'
-ALPHA_NODE_KEY="71d810d39333296b518c846a3e49eca55f998fd7994998bb3e5048567f2f073c"
-ALPHA_ENODE="897c84f6e4f18195413c1d02927e6a4093f5e7574b52bdec6f20844c4f1f6dd3f16036a9e600bd8681ab50fd8dd144df4a6ba9dd8722bb578a86aaa8222c964f"
-ALPHA_NODE_PORT="10563"
-ALPHA_AUTHRPC_PORT="24331"
-ALPHA_HTTP_PORT="38556"
-ALPHA_WS_PORT="38557"
+CHAIN_ADDRESS="dbb75441459257a919c94426033af44286306739"
+CHAIN_ADDRESS_JSON_FILE_NAME="UTC--2023-06-19T10-15-10.217011000Z--dbb75441459257a919c94426033af44286306739"
+CHAIN_ADDRESS_JSON='{"address":"dbb75441459257a919c94426033af44286306739","crypto":{"cipher":"aes-128-ctr","ciphertext":"342d44548474bab8654c09c1728ad22c38b1860437ea1083a87debc7233ad5e7","cipherparams":{"iv":"ccf56516614d4ea6bb1ea1cb4d1dcc9d"},"kdf":"scrypt","kdfparams":{"dklen":32,"n":262144,"p":1,"r":8,"salt":"86e92faa7a88fce7fd4f60da6dd45e7b6754e5ff0bbda3afd27a4c54d6a64277"},"mac":"3ede3b539042c7936fea5c9d5da7f6276d565679a34d58014f8afe59be09e1f1"},"id":"49ddfe5e-0f43-40f7-9124-812a95806f2c","version":3}'
+
+ALPHA_ADDRESS="bfd16c3465b1b130e332844b194222d7dd3fc761"
+ALPHA_ADDRESS_JSON_FILE_NAME="UTC--2023-06-19T10-16-28.635853000Z--bfd16c3465b1b130e332844b194222d7dd3fc761"
+ALPHA_ADDRESS_JSON='{"address":"bfd16c3465b1b130e332844b194222d7dd3fc761","crypto":{"cipher":"aes-128-ctr","ciphertext":"f49548c8f1368aeefd8c9293bbc640b81c6c8472350c91681d4d5c04990669d9","cipherparams":{"iv":"8ee82b53f4e8e35b641e25236556b2e0"},"kdf":"scrypt","kdfparams":{"dklen":32,"n":262144,"p":1,"r":8,"salt":"3f7b263f31e7902aafbfd68d7626bda098108f89d8d3f3149a3b411c79c23f73"},"mac":"6c74b30a74e200f20c3c5928d95492d9972f44c436df8b7c6c0fc251b547af5a"},"id":"1f4379cd-8ab8-4b5e-ad4e-ef9d87553312","version":3}'
+ALPHA_NODE_PORT="21547"
+ALPHA_AUTHRPC_PORT="61829"
+ALPHA_HTTP_PORT="48296"
+ALPHA_WS_PORT="34983"
 ALPHA_MODULES=["\"eth\""] # "eth,net,web3,debug,admin,personal,txpool,clique"
 
-CHAIN_ADDRESS_JSON_FILE_NAME="UTC--2021-01-27T08-20-38.123221057Z--9ebba10a6136607688ca4f27fab70e23938cd027"
-CHAIN_ADDRESS="9ebba10a6136607688ca4f27fab70e23938cd027"
-CHAIN_ADDRESS_JSON='{"address":"9ebba10a6136607688ca4f27fab70e23938cd027","crypto":{"cipher":"aes-128-ctr","ciphertext":"dcfbe17de6f315c732855111b782496d76b2d703169afddaaa69e1bc9e02ec51","cipherparams":{"iv":"907e5e050649d1c5c0be782ec7db5cf1"},"kdf":"scrypt","kdfparams":{"dklen":32,"n":262144,"p":1,"r":8,"salt":"060f4e16d601069a6bccae0693a15cd72090baf1ab20e408c89883117d4f7c51"},"mac":"b9ca7dad75a04b77dc7751a814c051f32752603334e4bb4046caf927196a5579"},"id":"74805e39-6a2f-46eb-8125-70c41d12c6d9","version":3}'
+# Write genesis json. ".*Block" fields represent block height where certain
+# protocols take effect. The addresses in the "alloc" field are allocated
+# "balance". Values are in wei. 1*10^18 wei is equal to one MANTIC. Addresses
+# are allocated 50,000 MANTIC. The first address belongs to alpha node
+# Write genesis json file.
+echo "Writing genesis json file".
+cat > "${NODES_ROOT}/genesis.json" <<EOF
+{
+  "config": {
+    "chainId": 90001,
+    "homesteadBlock": 0,
+    "eip150Block": 0,
+    "eip150Hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "eip155Block": 0,
+    "eip158Block": 0,
+    "byzantiumBlock": 0,
+    "constantinopleBlock": 0,
+    "petersburgBlock": 0,
+    "istanbulBlock": 0,
+    "muirGlacierBlock": 0,
+    "berlinBlock": 0,
+    "londonBlock": 0,
+    "bor": {
+      "burntContract": {
+        "0": "0x000000000000000000000000000000000000dead"
+      }
+    }
+  },
+  "gasLimit": "0x989680",
+  "difficulty": "0x1",
+  "alloc": {
+    "bfd16c3465b1b130e332844b194222d7dd3fc761": {
+      "balance": "50000000000000000000000"
+    },
+    "C26880A0AF2EA0c7E8130e6EC47Af756465452E8": {
+      "balance": "0x3635c9adc5dea00000"
+    },
+    "be188D6641E8b680743A4815dFA0f6208038960F": {
+      "balance": "0x3635c9adc5dea00000"
+    },
+    "c275DC8bE39f50D12F66B6a63629C39dA5BAe5bd": {
+      "balance": "0x3635c9adc5dea00000"
+    },
+    "F903ba9E006193c1527BfBe65fe2123704EA3F99": {
+      "balance": "0x3635c9adc5dea00000"
+    },
+    "928Ed6A3e94437bbd316cCAD78479f1d163A6A8C": {
+      "balance": "0x3635c9adc5dea00000"
+    }
+  }
+}
+EOF
 
 # Write mine script if CHAIN_ADDRESS is present.
 if [ "${CHAIN_ADDRESS}" != "_" ]; then
@@ -76,10 +126,6 @@ EOF
   chmod +x "${HARNESS_DIR}/mine-${NAME}"
 fi
 
-# Set to true if we want to auto mine. Or false if we want to manually mine
-# using the mine script above.
-AUTO_MINE=false
-
 cat > "${NODE_DIR}/bor.toml" <<EOF
 chain = "${GENESIS_JSON_FILE_LOCATION}"
 identity = "${NAME}"
@@ -107,7 +153,7 @@ devfakeauthor = true
   "bor.useheimdallapp" = false
 
 [miner]
-  mine = ${AUTO_MINE}
+  mine = false
   etherbase = "0x${CHAIN_ADDRESS}"
   extradata = ""
   gaslimit = 30000000
@@ -187,22 +233,11 @@ cat > "${NODE_DIR}/keystore/$ALPHA_ADDRESS_JSON_FILE_NAME" <<EOF
 $ALPHA_ADDRESS_JSON
 EOF
 
-# The node key lets us control the enode address value.
-mkdir -p "${NODE_DIR}/geth"
-echo "Setting node key"
-cat > "${NODE_DIR}/geth/nodekey" <<EOF
-$ALPHA_NODE_KEY
-EOF
-
-# Write genesis json file.
-echo "Writing genesis json file"
-cp "${GENESIS_JSON_FILE_LOCATION}" "${NODES_ROOT}/genesis.json"
-
 cat > "${NODES_ROOT}/harness-ctl/send.js" <<EOF
 function sendLegacyTx(from, to, value) {
       from = from.startsWith('0x') ? from : '0x' + from
       to = to.startsWith('0x') ? to : '0x' + to
-      eth.sendTransaction({ from, to, value, gasPrice: 200000000000})
+      return personal.sendTransaction({ from, to, value, gasPrice: 2000000000 }, "${PASSWORD}")
 }
 EOF
 

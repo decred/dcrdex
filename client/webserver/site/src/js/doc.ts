@@ -23,6 +23,7 @@ const BipIDs: Record<number, string> = {
   60: 'eth',
   136: 'firo',
   133: 'zec',
+  966: 'matic',
   60000: 'dextt.eth',
   60001: 'usdc.eth'
 }
