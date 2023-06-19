@@ -19,23 +19,16 @@ func init() {
 const (
 	// BipID is the BIP-0044 asset ID for Polygon.
 	BipID         = 966
-	version       = 0
 	walletTypeRPC = "rpc"
 )
 
 var (
-	// WalletInfo defines some general information about a Ethereum wallet.
+	// WalletInfo defines some general information about a Polygon Wallet(EVM
+	// Compatible).
 	WalletInfo = &asset.WalletInfo{
-		Name:    "Polygon",
-		Version: version,
-		// SupportedVersions: For Ethereum, the server backend maintains a
-		// single protocol version, so tokens and ETH have the same set of
-		// supported versions. Even though the SupportedVersions are made
-		// accessible for tokens via (*TokenWallet).Info, the versions are not
-		// exposed though any Driver methods or assets/driver functions. Use the
-		// parent wallet's WalletInfo via (*Driver).Info if you need a token's
-		// supported versions before a wallet is available.
-		SupportedVersions: []uint32{version},
+		Name:              "Polygon",
+		Version:           0,
+		SupportedVersions: []uint32{0},
 		UnitInfo:          dexpolygon.UnitInfo,
 		AvailableWallets: []*asset.WalletDefinition{
 			// {
@@ -57,19 +50,13 @@ var (
 			// the value cannot be known until we connect and get network info.
 		},
 	}
-
-	chainIDs = map[dex.Network]int64{
-		dex.Mainnet: 137,
-		dex.Testnet: 80001, // Mumbai
-		dex.Simnet:  90001, // See dex/testing/polygon/genesis.json
-	}
 )
 
 type Driver struct{}
 
 // Open opens the Polygon exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (asset.Wallet, error) {
-	return eth.NewEVMWallet(BipID, chainIDs[net], cfg, logger, net)
+	return eth.NewEVMWallet(BipID, dexpolygon.ChainIDs[net], cfg, logger, net)
 }
 
 func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
@@ -88,5 +75,5 @@ func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, 
 }
 
 func (d *Driver) Create(cfg *asset.CreateWalletParams) error {
-	return eth.CreateEVMWallet(chainIDs[cfg.Net], cfg, false)
+	return eth.CreateEVMWallet(dexpolygon.ChainIDs[cfg.Net], cfg, false)
 }

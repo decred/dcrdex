@@ -347,7 +347,7 @@ func tRPCClient(dir string, seed []byte, endpoints []string, net dex.Network, sk
 
 	log := dex.StdOutLogger("T", dex.LevelTrace)
 
-	chainID := chainIDs[net]
+	chainID := dexeth.ChainIDs[net]
 	if err := CreateEVMWallet(chainID, &asset.CreateWalletParams{
 		Type: walletTypeRPC,
 		Seed: seed,

@@ -27,6 +27,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/networks/erc20"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	dexpolygon "decred.org/dcrdex/dex/networks/polygon"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -1550,8 +1551,8 @@ func newCompatibilityTests(cb bind.ContractBackend, chainID *big.Int, net dex.Ne
 		txHash = testnetTxHash
 		blockHash = testnetBlockHash
 	case dex.Simnet:
-		if big.NewInt(polygonSimnetChainID).Cmp(chainID) == 0 {
-			return nil // TODO: add simnet tests for polygon this will require the ~/dextest/polygon dir to be populated with the files below.
+		if big.NewInt(dexpolygon.SimnetChainID).Cmp(chainID) == 0 {
+			break // TODO: add simnet tests for polygon this will require the ~/dextest/polygon dir to be populated with the files below.
 		}
 
 		tDir, err := simnetDataDir(chainID.Int64())

@@ -32,6 +32,7 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/keygen"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
+	dexpolygon "decred.org/dcrdex/dex/networks/polygon"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/decred/dcrd/hdkeychain/v3"
 	"github.com/ethereum/go-ethereum"
@@ -96,11 +97,6 @@ const (
 	// TODO: Find a way to ask the host about their config set max fee and
 	// gas values.
 	maxTxFeeGwei = 1_000_000_000
-
-	// Simnet ChainIDs for ETH and EVM wallets.
-
-	ethSimnetChainID     = 42    // see dex/testing/eth/harness.sh
-	polygonSimnetChainID = 90001 // see dex/testing/polygon/genesis.json
 )
 
 var (
@@ -164,12 +160,6 @@ var (
 			// MaxSwapsInTx and MaxRedeemsInTx are set in (Wallet).Info, since
 			// the value cannot be known until we connect and get network info.
 		},
-	}
-
-	chainIDs = map[dex.Network]int64{
-		dex.Mainnet: 1,
-		dex.Testnet: 5, // Görli
-		dex.Simnet:  ethSimnetChainID,
 	}
 
 	// unlimitedAllowance is the maximum supported allowance for an erc20
@@ -309,7 +299,7 @@ func (d *Driver) Exists(walletType, dataDir string, settings map[string]string, 
 }
 
 func (d *Driver) Create(cfg *asset.CreateWalletParams) error {
-	return CreateEVMWallet(chainIDs[cfg.Net], cfg, false)
+	return CreateEVMWallet(dexeth.ChainIDs[cfg.Net], cfg, false)
 }
 
 // Balance is the current balance, including information about the pending
@@ -684,7 +674,7 @@ func CreateEVMWallet(chainID int64, createWalletParams *asset.CreateWalletParams
 
 // newWallet is the constructor for an Ethereum asset.Wallet.
 func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network) (w *ETHWallet, err error) {
-	return NewEVMWallet(BipID, chainIDs[net], assetCFG, logger, net)
+	return NewEVMWallet(BipID, dexeth.ChainIDs[net], assetCFG, logger, net)
 }
 
 func NewEVMWallet(assetID uint32, chainID int64, assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network) (w *ETHWallet, err error) {
@@ -4449,7 +4439,7 @@ func quickNode(ctx context.Context, walletDir string, assetID, contractVer uint3
 
 	pw := []byte("abc")
 
-	chainID := chainIDs[net]
+	chainID := dexeth.ChainIDs[net]
 	if err := CreateEVMWallet(chainID, &asset.CreateWalletParams{
 		Type:     walletTypeRPC,
 		Seed:     seed,
@@ -4468,7 +4458,7 @@ func quickNode(ctx context.Context, walletDir string, assetID, contractVer uint3
 	}
 	chainConfig := ethCfg.Genesis.Config
 
-	cl, err := newMultiRPCClient(walletDir, []string{provider}, log, chainConfig, big.NewInt(chainIDs[net]), net)
+	cl, err := newMultiRPCClient(walletDir, []string{provider}, log, chainConfig, big.NewInt(dexeth.ChainIDs[net]), net)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error opening initiator rpc client: %v", err)
 	}
@@ -4606,7 +4596,7 @@ func getGetGasClientWithEstimatesAndBalances(ctx context.Context, net dex.Networ
 	walletDir, provider string, seed []byte, log dex.Logger) (cl *multiRPCClient, c contractor, g *dexeth.Gases,
 	ethReq, swapReq, feeRate uint64, ethBal, tokenBal *big.Int, err error) {
 
-	g = gases(uint32(chainIDs[net]), assetID, contractVer, net)
+	g = gases(uint32(dexeth.ChainIDs[net]), assetID, contractVer, net)
 	if g == nil {
 		return nil, nil, nil, 0, 0, 0, nil, nil, fmt.Errorf("no gas table found for %s, contract version %d", dex.BipIDSymbol(assetID), contractVer)
 	}
@@ -5141,23 +5131,20 @@ func getGasEstimates(ctx context.Context, cl, acl ethFetcher, c contractor, ac t
 // simnetDataDir returns the data directory for the given simnet chainID. See:
 // dex/testing/{dir}
 func simnetDataDir(chainID int64) (string, error) {
-	home := os.Getenv("HOME")
-	if home == "" {
-		home = os.Getenv("USERPROFILE") // windows
-	}
-	if home == "" {
-		return "", fmt.Errorf("could not determine home directory")
-	}
-
 	var dir string
 	switch chainID {
-	case polygonSimnetChainID:
+	case dexpolygon.SimnetChainID:
 		dir = "polygon"
-	case ethSimnetChainID:
+	case dexeth.SimnetChainID:
 		dir = "eth"
 	default:
 		return "", fmt.Errorf("unknown simnet chainID %d", chainID)
 	}
 
-	return filepath.Join(home, "dextest", dir), nil
+	u, err := user.Current()
+	if err != nil {
+		return "", fmt.Errorf("error getting current user: %w", err)
+	}
+
+	return filepath.Join(u.HomeDir, "dextest", dir), nil
 }

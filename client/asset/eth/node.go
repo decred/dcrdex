@@ -10,15 +10,12 @@ import (
 	"path/filepath"
 
 	"decred.org/dcrdex/dex"
-	dexeth "decred.org/dcrdex/dex/networks/eth"
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/eth/downloader"
-	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/les"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/node"
@@ -189,36 +186,6 @@ func prepareNode(cfg *nodeConfig) (*node.Node, error) {
 	node.AccountManager().AddBackend(ks)
 
 	return node, nil
-}
-
-// TODO: Consider polygon support on mainnet and testnet.
-func chainConfig(chainID int64, network dex.Network) (c ethconfig.Config, err error) {
-	ethCfg := ethconfig.Defaults
-	switch network {
-	case dex.Simnet:
-		var c ethconfig.Config
-		dataDir, err := simnetDataDir(chainID)
-		if err != nil {
-			return c, err
-		}
-
-		genesisFile := filepath.Join(dataDir, "genesis.json")
-		genesis, err := dexeth.LoadGenesisFile(genesisFile)
-		if err != nil {
-			return c, fmt.Errorf("error reading genesis file: %v", err)
-		}
-		ethCfg.Genesis = genesis
-		ethCfg.NetworkId = genesis.Config.ChainID.Uint64()
-	case dex.Testnet:
-		ethCfg.Genesis = core.DefaultGoerliGenesisBlock()
-		ethCfg.NetworkId = params.GoerliChainConfig.ChainID.Uint64()
-	case dex.Mainnet:
-		ethCfg.Genesis = core.DefaultGenesisBlock()
-		ethCfg.NetworkId = params.MainnetChainConfig.ChainID.Uint64()
-	default:
-		return c, fmt.Errorf("unknown network ID: %d", uint8(network))
-	}
-	return ethCfg, nil
 }
 
 // startNode starts a geth node.
