@@ -92,8 +92,9 @@ type matchTracker struct {
 
 	// confirmRedemptionNumTries is just used for logging.
 	confirmRedemptionNumTries int
-	// redemptionConfs and redemptionConfsReq are set while the redemption
-	// confirmation process is running.
+	// redemptionConfs and redemptionConfsReq are updated while the redemption
+	// confirmation process is running. Their values are not updated after the
+	// match reaches MatchConfirmed status.
 	redemptionConfs    uint64
 	redemptionConfsReq uint64
 
@@ -2094,7 +2095,7 @@ func (c *Core) resendPendingRequests(t *trackedTrade) {
 			swapCoinID = proof.MakerSwap
 		case side == order.Taker && status == order.TakerSwapCast:
 			swapCoinID = proof.TakerSwap
-		case side == order.Maker && status == order.MakerRedeemed:
+		case side == order.Maker && status >= order.MakerRedeemed:
 			redeemCoinID = proof.MakerRedeem
 		case side == order.Taker && status >= order.MatchComplete:
 			redeemCoinID = proof.TakerRedeem
@@ -2819,11 +2820,20 @@ func (c *Core) sendRedeemAsync(t *trackedTrade, match *matchTracker, coinID, sec
 		if match.Side == order.Maker && match.Status < order.MatchComplete {
 			// As maker, this is the end. However, this diverges from server,
 			// which still needs taker's redeem.
-			match.Status = order.MatchComplete
+			if conf := match.redemptionConfs; conf > 0 && conf >= match.redemptionConfsReq {
+				match.Status = order.MatchConfirmed // redeem tx already confirmed before redeem request accepted by server
+			} else {
+				match.Status = order.MatchComplete
+			}
 		}
 		err = t.db.UpdateMatch(&match.MetaMatch)
 		if err != nil {
 			err = fmt.Errorf("error storing redeem ack sig in database: %v", err)
+		}
+		if match.Status == order.MatchConfirmed {
+			subject, details := t.formatDetails(TopicRedemptionConfirmed, match.token(), t.token())
+			note := newMatchNote(TopicRedemptionConfirmed, subject, details, db.Success, t, match)
+			t.notify(note)
 		}
 		t.mtx.Unlock()
 	}()
@@ -2871,6 +2881,25 @@ func (t *trackedTrade) confirmRedemptions(matches []*matchTracker) {
 // This method accesses match fields and MUST be called with the trackedTrade
 // mutex lock held for writes.
 func (t *trackedTrade) confirmRedemption(match *matchTracker) (bool, error) {
+	if confs := match.redemptionConfs; confs > 0 && confs >= match.redemptionConfsReq { // already there, stop checking
+		if len(match.MetaData.Proof.Auth.RedeemSig) == 0 && !t.isSelfGoverned() {
+			return false, nil // waiting on redeem request to succeed
+		}
+		// Redeem request just succeeded or we gave up on the server.
+		if match.Status == order.MatchConfirmed {
+			return true, nil // raced with concurrent sendRedeemAsync
+		}
+		match.Status = order.MatchConfirmed
+		err := t.db.UpdateMatch(&match.MetaMatch)
+		if err != nil {
+			t.dc.log.Errorf("failed to update match in db: %v", err)
+		}
+		subject, details := t.formatDetails(TopicRedemptionConfirmed, match.token(), t.token())
+		note := newMatchNote(TopicRedemptionConfirmed, subject, details, db.Success, t, match)
+		t.notify(note)
+		return true, nil
+	}
+
 	// In some cases the wallet will need to send a new redeem transaction.
 	toWallet := t.wallets.toWallet
 
@@ -2930,14 +2959,12 @@ func (t *trackedTrade) confirmRedemption(match *matchTracker) (bool, error) {
 		}
 	}
 
-	if redemptionStatus.Req <= redemptionStatus.Confs {
+	match.redemptionConfs, match.redemptionConfsReq = redemptionStatus.Confs, redemptionStatus.Req
+
+	if redemptionStatus.Confs >= redemptionStatus.Req &&
+		(len(match.MetaData.Proof.Auth.RedeemSig) > 0 || t.isSelfGoverned()) {
 		redemptionConfirmed = true
 		match.Status = order.MatchConfirmed
-		match.redemptionConfs = 0
-		match.redemptionConfsReq = 0
-	} else {
-		match.redemptionConfs = redemptionStatus.Confs
-		match.redemptionConfsReq = redemptionStatus.Req
 	}
 
 	if redemptionResubmitted || redemptionConfirmed {
