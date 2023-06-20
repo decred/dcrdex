@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+npm clean-install
 npm run build
 source cache_utilities.bash
 CSS_HASH=$(hashcssdist)

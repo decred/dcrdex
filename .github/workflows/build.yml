@@ -49,6 +49,8 @@ jobs:
       run: npm run lint
     - name: npm run build
       working-directory: ./client/webserver/site
+      run: npm run build
+    - name: verify cache busters
       run: ./ci_tests.sh
 
   lint-docs:
