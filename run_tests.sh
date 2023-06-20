@@ -17,9 +17,7 @@ CSS_BUSTER=$(csssrcbuster)
 JS_HASH=$(hashjssrc)
 JS_BUSTER=$(jssrcbuster)
 if [ "${CSS_HASH}" != "${CSS_BUSTER}" ] || [ "${JS_HASH}" != "${JS_BUSTER}" ]; then
-	setcssbuster
-	setjsbuster
-	printf '%s\n' "cache busters updated. commit the changes" >&2
+	printf '%s\n' "cache busters outdated. run ./client/webserver/site/bust_caches.sh and commit the changes" >&2
 	exit 1
 fi
 set -x
