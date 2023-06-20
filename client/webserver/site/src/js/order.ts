@@ -649,5 +649,9 @@ export const CoinExplorers: Record<number, Record<number, (cid: string) => strin
   145: { // bch
     [Mainnet]: (cid: string) => `https://bch.loping.net/tx/${cid.split(':')[0]}`,
     [Testnet]: (cid: string) => `https://tbch4.loping.net/tx/${cid.split(':')[0]}`
+  },
+  966: { // matic
+    [Mainnet]: (cid: string) => `https://polygonscan.com/tx/${cid.split(':')[0]}`,
+    [Testnet]: (cid: string) => `https://mumbai.polygonscan.com/tx/${cid.split(':')[0]}`
   }
 }
