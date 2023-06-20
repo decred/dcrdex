@@ -15,21 +15,13 @@ hashdir () {
     echo ${HASHBUF} | sha1sum | cut -d " " -f1 | cut -c1-8
 }
 
-# cachebuster takes a source directory and an output file and creates a
-# combined hash identifier with a pipe (|) seperator.
-cachebuster () {
-    DIR_HASH=$(hashdir $1)
-    FILE_HASH=$(hashfile $2 | cut -c1-8)
-    echo "${DIR_HASH}|${FILE_HASH}"
-}
-
 # hashcsssrc hashes the css source directory.
 hashcsssrc () { hashdir "${CSS_DIR}" ; }
 
 # hashcssdist hashes the compiled css.
 hashcssdist () { hashfile "${CSS_FILE}" | cut -c1-8 ; }
 
-# csssrcbuster parses the source directory portion of the CSS cachebuster from
+# csssrcbuster parses the source directory portion of the CSS cache buster from
 # bodybuilder.tmpl file. Compare the output of cssbuster with the hashcsssrc to
 # ensure that the cache buster was updated. The output file hash discareded
 # here, and is of limited use for comparison because the output file will vary
@@ -41,7 +33,7 @@ csssrcbuster () {
     echo ${HASHES} | cut -d'|' -f1
 }
 
-# cssdistbusterparses the output file portion of the CSS cachebuster from
+# cssdistbusterparses the output file portion of the CSS cache buster from
 # bodybuilder.tmpl file. Compare with output from hashcssdist to ensure the
 # cache buster is updated.
 cssdistbuster () {
@@ -51,7 +43,7 @@ cssdistbuster () {
 
 # setcssbuster sets the cache buster for CSS.
 setcssbuster () {
-    sed -i.tmp "s/href=\"\/css\/style.css?v=\([^\"]*\)\"/href=\"\/css\/style.css?v=$(cachebuster "${CSS_DIR}" "${CSS_FILE}")\"/" "${BB_FILEPATH}"
+    sed -i.tmp "s/href=\"\/css\/style.css?v=\([^\"]*\)\"/href=\"\/css\/style.css?v=$(hashcsssrc)|$(hashcssdist)\"/" "${BB_FILEPATH}"
     rm "${BB_FILEPATH}.tmp"
 }
 
@@ -59,9 +51,15 @@ setcssbuster () {
 hashjssrc () { hashdir "${JS_DIR}" ; }
 
 # hashjssrc hashes the compiled js.
-hashjsdist () { hashfile "${JS_FILE}" | cut -c1-8 ; }
+hashjsdist () {
+    cp "${JS_FILE}" js.tmp
+    sed -i 's/commitHash="[^"]*"//' js.tmp
+    HASH=$(hashfile js.tmp | cut -c1-8)
+    rm js.tmp
+    echo ${HASH}
+}
 
-# jssrcbuster parses the source directory portion of the JS cachebuster from
+# jssrcbuster parses the source directory portion of the JS cache buster from
 # bodybuilder.tmpl file. Compare the output of jssrcbuster with the hashjssrc to
 # ensure that the cache buster was updated. See csssrcbuster docs regarding
 # discarding the output file hash.
@@ -70,7 +68,7 @@ jssrcbuster () {
     echo ${HASHES} | cut -d'|' -f1
 }
 
-# jsdistbuster parses the output file portion of the JS cachebuster from
+# jsdistbuster parses the output file portion of the JS cache buster from
 # bodybuilder.tmpl. Compare with output from hashjssdist to ensure the cache
 # buster is updated.
 jsdistbuster () {
@@ -80,6 +78,6 @@ jsdistbuster () {
 
 # setjsbuster sets the cache buster for JS.
 setjsbuster () {
-    sed -i.tmp "s/src=\"\/js\/entry.js?v=\([^\"]*\)\"/src=\"\/js\/entry.js?v=$(cachebuster "${JS_DIR}" "${JS_FILE}")\"/" "${BB_FILEPATH}"
+    sed -i.tmp "s/src=\"\/js\/entry.js?v=\([^\"]*\)\"/src=\"\/js\/entry.js?v=$(hashjssrc)|$(hashjsdist)\"/" "${BB_FILEPATH}"
     rm "${BB_FILEPATH}.tmp"
 }
