@@ -2469,10 +2469,6 @@ func (c *Core) swapMatchGroup(t *trackedTrade, matches []*matchTracker, errs *er
 			match.Status = order.MakerSwapCast
 		}
 
-		if rr, is := receipt.(asset.RefundReceipt); is {
-			proof.RefundAddress = rr.RefundAddress()
-		}
-
 		if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
 			errs.add("error storing swap details in database for match %s, coin %s: %v",
 				match, coinIDString(fromWallet.AssetID, coinID), err)
@@ -2850,22 +2846,22 @@ func (t *trackedTrade) redeemFee() uint64 {
 	return feeSuggestion
 }
 
-// confirmRedemption attemps to confirm the redemptions for each match, and
+// confirmRedemption attempts to confirm the redemptions for each match, and
 // then return any refund addresses that we won't be using.
 func (t *trackedTrade) confirmRedemptions(matches []*matchTracker) {
-	var refundAddrs []string
+	var refundContracts [][]byte
 	for _, m := range matches {
 		if confirmed, err := t.confirmRedemption(m); err != nil {
 			t.dc.log.Errorf("Unable to confirm redemption: %v", err)
-		} else if confirmed && m.MetaData.Proof.RefundAddress != "" {
-			refundAddrs = append(refundAddrs, m.MetaData.Proof.RefundAddress)
+		} else if confirmed {
+			refundContracts = append(refundContracts, m.MetaData.Proof.ContractData)
 		}
 	}
-	if len(refundAddrs) == 0 {
+	if len(refundContracts) == 0 {
 		return
 	}
 	if ar, is := t.wallets.fromWallet.Wallet.(asset.AddressReturner); is {
-		ar.ReturnAddress(refundAddrs...)
+		ar.ReturnRefundContracts(refundContracts)
 	}
 }
 
@@ -3546,7 +3542,7 @@ func (t *trackedTrade) returnCoins() {
 			t.coinsLocked = false
 		}
 		if returner, is := t.wallets.toWallet.Wallet.(asset.AddressReturner); is {
-			returner.ReturnAddress(t.Trade().Address)
+			returner.ReturnRedemptionAddress(t.Trade().Address)
 		}
 	} else if t.change != nil && t.changeLocked {
 		err := t.wallets.fromWallet.ReturnCoins(asset.Coins{t.change})

@@ -5920,43 +5920,48 @@ func TestAddressRecycling(t *testing.T) {
 		compareAddrLists(tag+":file", expAddrs, fileAddrs)
 	}
 
-	addr1, addr2 := tP2PKHAddr, tP2WPKHAddr
+	addr1, _ := btcutil.NewAddressPubKeyHash(encode.RandomBytes(20), &chaincfg.MainNetParams)
+	addr2, _ := btcutil.NewAddressPubKeyHash(encode.RandomBytes(20), &chaincfg.MainNetParams)
 
-	w.ReturnAddress(addr1)
+	w.ReturnRedemptionAddress(addr1.String())
 
-	checkAddrs("first single addr", addr1)
+	checkAddrs("first single addr", addr1.String())
 
 	td.ownsAddress = true
 	redemptionAddr, _ := w.RedemptionAddress()
-	if redemptionAddr != addr1 {
+	if redemptionAddr != addr1.String() {
 		t.Fatalf("recycled address not returned for redemption address")
 	}
 
-	w.ReturnAddress(addr1, addr2)
+	contracts := make([][]byte, 2)
+	contracts[0], _ = dexbtc.MakeContract(addr1, addr2, encode.RandomBytes(32), time.Now().Unix(), false, &chaincfg.MainNetParams)
+	contracts[1], _ = dexbtc.MakeContract(addr2, addr1, encode.RandomBytes(32), time.Now().Unix(), false, &chaincfg.MainNetParams)
 
-	checkAddrs("two addrs", addr1, addr2)
+	w.ReturnRefundContracts(contracts)
+
+	checkAddrs("two addrs", addr1.String(), addr2.String())
 
 	// Check that unowned addresses are not returned
 	td.ownsAddress = false
-	td.newAddress = "bc1q4cku7wfklav9vzmx9hhx5qwarma7g7k689puw0"
+	td.newAddress = "1JoiKZz2QRd47ARtcYgvgxC9jhnre9aphv"
 	priv, _ := btcec.NewPrivateKey()
 	td.privKeyForAddr, _ = btcutil.NewWIF(priv, &chaincfg.MainNetParams, true)
 	redemptionAddr, err := w.RedemptionAddress()
 	if err != nil {
 		t.Fatalf("RedemptionAddress error: %v", err)
 	}
-	if redemptionAddr == addr1 || redemptionAddr == addr2 {
+	if redemptionAddr == addr1.String() || redemptionAddr == addr2.String() {
 		t.Fatalf("unowned address returned (1)")
 	}
 	redemptionAddr, _ = w.RedemptionAddress()
-	if redemptionAddr == addr1 || redemptionAddr == addr2 {
+	if redemptionAddr == addr1.String() || redemptionAddr == addr2.String() {
 		t.Fatalf("unowned address returned (2)")
 	}
 
 	checkAddrs("after unowned")
 
 	// Check address loading.
-	w.ReturnAddress(addr1, addr2)
+	w.ReturnRefundContracts(contracts)
 	otherW, _ := newUnconnectedWallet(w.cloneParams, &WalletConfig{})
 	if len(otherW.recycledAddrs) != 2 {
 		t.Fatalf("newly opened wallet didn't load recycled addrs")

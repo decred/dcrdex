@@ -625,11 +625,16 @@ type NewAddresser interface {
 	NewAddress() (string, error)
 }
 
-// AddressReturner is a wallet that allows recycling of unused redemption
+// AddressReturner is a wallet that allows recycling of unused redemption or refund
 // addresses. Asset implementations should log any errors internally. The caller
-// is responsible for only calling ReturnAddress with unused addresses.
+// is responsible for only returning unused addresses.
 type AddressReturner interface {
-	ReturnAddress(addrs ...string)
+	// ReturnRefundContracts should be called with the Receipt.Contract() data
+	// for any swaps that will not be refunded.
+	ReturnRefundContracts(contracts [][]byte)
+	// ReturnRedemptionAddress acceptsa  Wallet.RedemptionAddress() if the
+	// address will not be used.
+	ReturnRedemptionAddress(addr string)
 }
 
 // LogFiler is a wallet that allows for downloading of its log file.
@@ -991,13 +996,6 @@ type Receipt interface {
 	// SignedRefund is a signed refund script that can be used to return
 	// funds to the user in the case a contract expires.
 	SignedRefund() dex.Bytes
-}
-
-// RefundReceipt can be implemented on Receipt for assets that want refund
-// addresses returned via ReturnAddress.
-type RefundReceipt interface {
-	// RefundAddress is the change address used for the swap.
-	RefundAddress() string
 }
 
 // AuditInfo is audit information about a swap contract needed to audit the

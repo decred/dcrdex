@@ -509,11 +509,10 @@ func (ci *auditInfo) SecretHash() dex.Bytes {
 // swapReceipt is information about a swap contract that was broadcast by this
 // wallet. Satisfies the asset.Receipt interface.
 type swapReceipt struct {
-	output        *output
-	contract      []byte
-	signedRefund  []byte
-	expiration    time.Time
-	refundAddress string
+	output       *output
+	contract     []byte
+	signedRefund []byte
+	expiration   time.Time
 }
 
 // Expiration is the time that the contract will expire, allowing the user to
@@ -542,14 +541,6 @@ func (r *swapReceipt) String() string {
 // funds to the user in the case a contract expires.
 func (r *swapReceipt) SignedRefund() dex.Bytes {
 	return r.signedRefund
-}
-
-var _ asset.RefundReceipt = (*swapReceipt)(nil)
-
-// RefundAddress is an add-on method that implements asset.RefundReceipt so that
-// unused refund addresses will be returned.
-func (r *swapReceipt) RefundAddress() string {
-	return r.refundAddress
 }
 
 // RPCConfig adds a wallet name to the basic configuration.
@@ -4049,11 +4040,10 @@ func (btc *baseWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, ui
 			return nil, nil, 0, fmt.Errorf("error serializing refund tx: %w", err)
 		}
 		receipts = append(receipts, &swapReceipt{
-			output:        output,
-			contract:      contracts[i],
-			expiration:    time.Unix(int64(contract.LockTime), 0).UTC(),
-			signedRefund:  refundBuff.Bytes(),
-			refundAddress: refundAddr.String(),
+			output:       output,
+			contract:     contracts[i],
+			expiration:   time.Unix(int64(contract.LockTime), 0).UTC(),
+			signedRefund: refundBuff.Bytes(),
 		})
 	}
 
@@ -4829,7 +4819,7 @@ func (btc *baseWallet) recyclableAddress() (string, error) {
 			recycledAddr = addr
 			break
 		} else if err != nil {
-			btc.log.Errorf("Error checking ownership of recycled address: %v", err)
+			btc.log.Errorf("Error checking ownership of recycled address %q: %v", addr, err)
 			// Don't delete the address in case it's just a network error for
 			// an rpc wallet or something.
 		} else { // we don't own it
@@ -4847,15 +4837,41 @@ func (btc *baseWallet) recyclableAddress() (string, error) {
 	return btc.DepositAddress()
 }
 
-// ReturnAddress accepts unused redemption and refund addresses and recycles
-// them to avoid gap policy issues.
-func (btc *baseWallet) ReturnAddress(addrs ...string) {
+// ReturnRefundContracts should be called with the Receipt.Contract() data for
+// any swaps that will not be refunded.
+func (btc *baseWallet) ReturnRefundContracts(contracts [][]byte) {
+	addrs := make([]string, 0, len(contracts))
+	for _, c := range contracts {
+		sender, _, _, _, err := dexbtc.ExtractSwapDetails(c, btc.segwit, btc.chainParams)
+		if err != nil {
+			btc.log.Errorf("Error extracting refund address from contract '%x': %v", c, err)
+			continue
+		}
+		addr, err := btc.stringAddr(sender, btc.chainParams)
+		if err != nil {
+			btc.log.Errorf("Error stringifying address %q: %v", addr, err)
+			continue
+		}
+		addrs = append(addrs, addr)
+	}
+	if len(addrs) > 0 {
+		btc.returnAddresses(addrs)
+	}
+}
+
+// ReturnRedemptionAddress acceptsa  Wallet.RedemptionAddress() if the address
+// will not be used.
+func (btc *baseWallet) ReturnRedemptionAddress(addr string) {
+	btc.returnAddresses([]string{addr})
+}
+
+func (btc *baseWallet) returnAddresses(addrs []string) {
 	btc.recycledAddrMtx.Lock()
 	defer btc.recycledAddrMtx.Unlock()
 	nRecycles := len(btc.recycledAddrs)
 	for _, addr := range addrs {
 		if _, exists := btc.recycledAddrs[addr]; exists {
-			btc.log.Errorf("A returned address was already indexed")
+			btc.log.Errorf("Returned address %q was already indexed", addr)
 			continue
 		}
 		btc.recycledAddrs[addr] = struct{}{}
