@@ -39,8 +39,8 @@ If you use the standalone DEX client, you will need a web browser to open the
 DEX client user interface as described in the next section.
 
 Most users will use the native wallets that are already built into the DEX
-client. Depending on the asset, you may be able to choose from: (1) the native
-wallet, (2) an external full node wallet, or (3) and Electrum-based wallet.
+client. Depending on the asset, you may be able to choose from: (1) a native
+wallet, (2) an external full node wallet, or (3) an Electrum-based wallet.
 Consult the following table for a summary of wallet support. If there is a
 checkmark in the "native" column, no external software is required.
 
@@ -56,14 +56,14 @@ checkmark in the "native" column, no external software is required.
 
 NOTE: The Electrum option is less mature and provides less privacy than the
 other wallet types. Some manual configuration of the Electrum wallet's RPC
-server is also necessary: ([example](images/electrum-rpc-config.png)).
+server is also necessary ([example](images/electrum-rpc-config.png)).
 
 ### Synchronizing Wallets
 
 **If using the native wallets** that are integrated with the DEX client (see
 above), you can skip this section.
 
-If you choose to use and external wallet (full node or Electrum), you must start
+If you choose to use an external wallet (full node or Electrum), you must start
 and synchronize them with their networks *before* running the DEX client.
 
 Note that Bitcoin Core and most "clones" support block pruning, which can keep
@@ -78,7 +78,7 @@ several blocks.
    in the folder containing the dexc application and run it. e.g. `./dexc` on
    Mac and Linux, or `dexc.exe` on Windows. To avoid the command prompt on
    Windows, `dexc-tray.exe` may be run instead. If using Decrediton instead of
-   **dexc**, just click the "DEX" tab.
+   **dexc**, just click the "DEX" tab and skip to step 3.
 
 2. In your web browser, navigate to <http://localhost:5758>. Skip this step if
    using Decrediton.
@@ -122,24 +122,26 @@ several blocks.
 
    NOTE: This is your own **self-hosted** wallet. The wallet's address keys are
    derived from the DEX application's "seed", which you may backup from the
-   Settings page at any time.
+   Settings page at any time. Further, no central wallet backend service is
+   involved, only the nodes on the coin's decentralized network.
 
 7. The next form will show you synchronization progress, and give you the first
    deposit address for the wallet and the minimum amount you should deposit to
-   be able to create your first bond, which is required to place orders. **This
-   is your wallet**, so deposit as much as you like! After sending to your
-   address, the transaction **must confirm** (i.e. be mined in a block) before
-   the form will update your balance. This form will be skipped if the wallet is
-   already funded and synchronized.
+   be able to create your first bond in the next step, which is required to
+   place orders. **This is your wallet**, so deposit as much as you like! After
+   sending to your address, the transaction **must confirm** (i.e. be mined in a
+   block) before the form will update your balance. This form will be skipped if
+   the wallet is already funded and synchronized.
 
    <img src="images/sync-fund-btc.png" width="360">
 
    **IMPORTANT**: This is your own local wallet, and you can send as much as you
    like to your new wallet since *only* the amount required for the bond will be
-   spent in the next step. The remaining amount will be in you available
+   spent in the next step. The remaining amount will be in your available
    balance. For example, you can send yourself 5 BTC and only the required
-   amount will be spent on the registration fee, with the remainder in the
-   wallet's balance, which can then be traded or sent to another wallet.
+   amount will be spent to create the bond in the next step, with the remainder
+   in the wallet's balance, which can then be traded, sent, or simply held in
+   the wallet.
 
    NOTE: The native Litecoin and Bitcoin Cash wallets connect to full nodes on
    the blockchain network that have "compact block filters" enabled. It may take
@@ -147,9 +149,9 @@ several blocks.
    patient; otherwise you can bootstrap the process using a known seed node such
    as the Litecoin nodes on [this list](https://gist.github.com/chappjc/d0f26b12258f8531bb78b37f38d080a0).
 
-8. Once the wallet is synchronized and has at least enough to pay the server's
-   defined fee, the form will update, and you should click the button to submit
-   the registration request and transmit the fee amount.
+8. Once the wallet is synchronized and has at least enough to create your
+   time-locked fidelity bond, the form will update, and you should click the
+   button to create and broadcast your bond transaction.
 
    <img src="images/register-button.png" width="360">
 
@@ -166,7 +168,8 @@ several blocks.
    the top. This is also a good time to retrieve your application "seed", as
    described in the next step.
 
-   After the transaction is confirmed, the application will complete registration:
+   After the transaction is confirmed, the application will submit the bond for
+   validation and you will be ready to trade:
 
    <img src="images/bond-accepted.png" width="360">
 
