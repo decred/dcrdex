@@ -18,6 +18,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
+	dexeth "decred.org/dcrdex/dex/networks/eth"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/eth/ethconfig"
@@ -267,7 +268,7 @@ func TestRPC(t *testing.T) {
 		t.Fatalf("connect error: %v", err)
 	}
 
-	for _, tt := range newCompatibilityTests(cl, big.NewInt(chainIDs[dex.Mainnet]), dex.Mainnet, cl.log) {
+	for _, tt := range newCompatibilityTests(cl, big.NewInt(dexeth.ChainIDs[dex.Mainnet]), dex.Mainnet, cl.log) {
 		tStart := time.Now()
 		if err := cl.withAny(ctx, tt.f); err != nil {
 			t.Fatalf("%q: %v", tt.name, err)
@@ -297,7 +298,7 @@ func TestFreeServers(t *testing.T) {
 		if err := cl.connect(ctx); err != nil {
 			return fmt.Errorf("connect error: %v", err)
 		}
-		for _, tt := range newCompatibilityTests(cl, big.NewInt(chainIDs[dex.Mainnet]), dex.Mainnet, cl.log) {
+		for _, tt := range newCompatibilityTests(cl, big.NewInt(dexeth.ChainIDs[dex.Mainnet]), dex.Mainnet, cl.log) {
 			if err := cl.withAny(ctx, tt.f); err != nil {
 				return fmt.Errorf("%q error: %v", tt.name, err)
 			}
@@ -328,7 +329,7 @@ func TestMainnetCompliance(t *testing.T) {
 	defer cancel()
 
 	log := dex.StdOutLogger("T", dex.LevelTrace)
-	providers, err := connectProviders(ctx, providerFile.Providers, log, big.NewInt(chainIDs[dex.Mainnet]), dex.Mainnet)
+	providers, err := connectProviders(ctx, providerFile.Providers, log, big.NewInt(dexeth.ChainIDs[dex.Mainnet]), dex.Mainnet)
 	if err != nil {
 		t.Fatal(err)
 	}
