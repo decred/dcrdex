@@ -49,7 +49,8 @@ jobs:
       run: npm run lint
     - name: npm run build
       working-directory: ./client/webserver/site
-      run: npm run build
+      run: ./ci_tests.sh
+
   lint-docs:
     name: Lint Markdown
     runs-on: ubuntu-latest

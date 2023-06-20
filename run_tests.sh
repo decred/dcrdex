@@ -2,14 +2,28 @@
 set -ex
 
 dir=$(pwd)
-# list of all modules to test
-modules=". /dex/testing/loadbot /client/cmd/dexc-desktop"
 
 GV=$(go version | sed "s/^.*go\([0-9.]*\).*/\1/")
 echo "Go version: $GV"
 
 # Ensure html templates pass localization.
 go generate -x ./client/webserver/site # no -write
+
+# Ensure cache busters are updated
+set +x
+source ./client/webserver/site/cache_utilities.bash
+CSS_HASH=$(hashcsssrc)
+CSS_BUSTER=$(csssrcbuster)
+JS_HASH=$(hashjssrc)
+JS_BUSTER=$(jssrcbuster)
+if [ "${CSS_HASH}" != "${CSS_BUSTER}" ] || [ "${JS_HASH}" != "${JS_BUSTER}" ]; then
+	printf '%s\n' "cache busters outdated. run ./client/webserver/site/bust_caches.sh and commit the changes" >&2
+	exit 1
+fi
+set -x
+
+# list of all modules to test
+modules=". /dex/testing/loadbot /client/cmd/dexc-desktop"
 
 # For each module, run go mod tidy, build and run test.
 for m in $modules
