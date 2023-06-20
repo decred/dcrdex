@@ -13,9 +13,9 @@ go generate -x ./client/webserver/site # no -write
 set +x
 source ./client/webserver/site/cache_utilities.bash
 CSS_HASH=`hashcsssrc`
-CSS_BUSTER=`cssbuster`
+CSS_BUSTER=`csssrcbuster`
 JS_HASH=`hashjssrc`
-JS_BUSTER=`jsbuster`
+JS_BUSTER=`jssrcbuster`
 if [ "${CSS_HASH}" != "${CSS_BUSTER}" ] || [ "${JS_HASH}" != "${JS_BUSTER}" ]; then
 	setcssbuster
 	setjsbuster
