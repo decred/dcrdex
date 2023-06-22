@@ -58,9 +58,22 @@ hashjssrc () { hashdir "${JS_DIR}" ; }
 
 # hashjssrc hashes the compiled js.
 hashjsdist () {
-    sed -i.tmp 's/commitHash="[^"]*"//' "${JS_FILE}"
-    HASH=$(hashfile "${JS_FILE}".tmp | cut -c1-8)
-    rm "${JS_FILE}".tmp
+    # Seems like this way should be easier, but it bust_caches.sh doesn't set
+    # the buster correctly for some reason.
+
+    # sed -i.tmp 's/commitHash="[^"]*"//' "${JS_FILE}"
+    # HASH=$(hashfile "${JS_FILE}.tmp" | cut -c1-8)
+    # rm "${JS_FILE}.tmp"
+
+    # This way doesn't break bust_caches.sh
+    cp "${JS_FILE}" js.tmp
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' 's/commitHash="[^"]*"//' js.tmp
+    else
+        sed -i 's/commitHash="[^"]*"//' js.tmp
+    fi
+    HASH=$(hashfile js.tmp | cut -c1-8)
+    rm js.tmp
     echo ${HASH}
 }
 
