@@ -58,14 +58,9 @@ hashjssrc () { hashdir "${JS_DIR}" ; }
 
 # hashjssrc hashes the compiled js.
 hashjsdist () {
-    cp "${JS_FILE}" js.tmp
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        sed -i '' 's/commitHash="[^"]*"//' js.tmp
-    else
-        sed -i 's/commitHash="[^"]*"//' js.tmp
-    fi
-    HASH=$(hashfile js.tmp | cut -c1-8)
-    rm js.tmp
+    sed -i.tmp 's/commitHash="[^"]*"//' "${JS_FILE}"
+    HASH=$(hashfile "${JS_FILE}".tmp | cut -c1-8)
+    rm "${JS_FILE}".tmp
     echo ${HASH}
 }
 
