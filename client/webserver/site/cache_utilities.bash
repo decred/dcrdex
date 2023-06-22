@@ -5,14 +5,20 @@ CSS_FILE=${SITE_DIR}/dist/style.css
 JS_DIR=${SITE_DIR}/src/js
 JS_FILE=${SITE_DIR}/dist/entry.js
 
-hashfile () { sha1sum $1 | cut -d " " -f1 ; }
+if [[ "$OSTYPE" == "darwin"* ]]; then
+   hashfunc="shasum"
+else
+   hashfunc="sha1sum"
+fi
+
+hashfile () { "${hashfunc}" $1 | cut -d " " -f1 ; }
 
 hashdir () {
     HASHBUF=""
     while read FP ; do
         HASHBUF="${HASHBUF}$(hashfile ${FP})"
     done < <(git ls-files "$1")
-    echo ${HASHBUF} | sha1sum | cut -d " " -f1 | cut -c1-8
+    echo ${HASHBUF} | "${hashfunc}" | cut -d " " -f1 | cut -c1-8
 }
 
 # hashcsssrc hashes the css source directory.
@@ -53,7 +59,11 @@ hashjssrc () { hashdir "${JS_DIR}" ; }
 # hashjssrc hashes the compiled js.
 hashjsdist () {
     cp "${JS_FILE}" js.tmp
-    sed -i 's/commitHash="[^"]*"//' js.tmp
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' 's/commitHash="[^"]*"//' js.tmp
+    else
+        sed -i 's/commitHash="[^"]*"//' js.tmp
+    fi
     HASH=$(hashfile js.tmp | cut -c1-8)
     rm js.tmp
     echo ${HASH}
