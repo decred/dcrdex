@@ -1659,7 +1659,7 @@ func newCompatibilityTests(cb bind.ContractBackend, chainID *big.Int, net dex.Ne
 				// I guess we would need to unpack the results. I don't really
 				// know how to interpret these, but I'm really just looking for
 				// a request error.
-				log.Debug("#### USDC balanceOf result:", dexeth.WeiToGwei(bal), "gwei") // I think this should no longer assume USDC?
+				log.Debug("#### ERC20 token balanceOf result:", dexeth.WeiToGwei(bal), "gwei")
 				return nil
 			},
 		},

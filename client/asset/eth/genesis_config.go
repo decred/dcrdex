@@ -7,7 +7,7 @@ import (
 	"decred.org/dcrdex/dex"
 	dexeth "decred.org/dcrdex/dex/networks/eth"
 	dexpolygon "decred.org/dcrdex/dex/networks/polygon"
-	"github.com/ethereum/go-ethereum/core"
+	ethCore "github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/eth/ethconfig"
 )
 
@@ -29,9 +29,9 @@ func chainConfig(chainID int64, network dex.Network) (c ethconfig.Config, err er
 	switch chainID {
 	// Ethereum
 	case dexeth.TestnetChainID:
-		cfg.Genesis = core.DefaultGoerliGenesisBlock()
+		cfg.Genesis = ethCore.DefaultGoerliGenesisBlock()
 	case dexeth.MainnetChainID:
-		cfg.Genesis = core.DefaultGenesisBlock()
+		cfg.Genesis = ethCore.DefaultGenesisBlock()
 
 	// Polygon
 	case dexpolygon.MainnetChainID:
@@ -49,7 +49,7 @@ func chainConfig(chainID int64, network dex.Network) (c ethconfig.Config, err er
 
 // readSimnetGenesisFile reads the simnet genesis file for the wallet with the
 // specified chainID.
-func readSimnetGenesisFile(chainID int64) (*core.Genesis, error) {
+func readSimnetGenesisFile(chainID int64) (*ethCore.Genesis, error) {
 	dataDir, err := simnetDataDir(chainID)
 	if err != nil {
 		return nil, err

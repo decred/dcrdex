@@ -221,7 +221,7 @@ var _ asset.Creator = (*Driver)(nil)
 
 // Open opens the ETH exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Open(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
-	return newWallet(cfg, logger, network)
+	return NewEVMWallet(BipID, dexeth.ChainIDs[network], cfg, logger, network)
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for Ethereum.
@@ -459,8 +459,8 @@ type baseWallet struct {
 	dir        string
 	walletType string
 
-	bipID   uint32
-	chainID int64
+	bipID   uint32 // the asset ID of the chain's native token (e.g. ETH, MATIC, etc)
+	chainID int64 
 
 	tipMtx     sync.RWMutex
 	currentTip *types.Header
@@ -672,11 +672,7 @@ func CreateEVMWallet(chainID int64, createWalletParams *asset.CreateWalletParams
 	return fmt.Errorf("unknown wallet type %q", createWalletParams.Type)
 }
 
-// newWallet is the constructor for an Ethereum asset.Wallet.
-func newWallet(assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network) (w *ETHWallet, err error) {
-	return NewEVMWallet(BipID, dexeth.ChainIDs[net], assetCFG, logger, net)
-}
-
+// NewEVMWallet is the exported constructor required for asset.Wallet.
 func NewEVMWallet(assetID uint32, chainID int64, assetCFG *asset.WalletConfig, logger dex.Logger, net dex.Network) (w *ETHWallet, err error) {
 	// var cl ethFetcher
 	switch assetCFG.Type {
@@ -1329,30 +1325,6 @@ func (w *assetWallet) estimateSwap(lots, lotSize uint64, maxFeeRate uint64, ver 
 		RealisticWorstCase: oneGasMax * rate,
 		RealisticBestCase:  oneSwap * rate, // not even batch, just perfect match
 	}, nil
-}
-
-// allowanceGasRequired estimates the gas that is required to issue an approval
-// for a token. This is required to redeem ERC20 tokens, and the assetID and
-// version correspond to the redeem asset. If the asset is not a fee-family
-// erc20 asset, no error is returned and the return value will be zero.
-func (w *assetWallet) allowanceGasRequired(ver, assetID uint32) (uint64, error) {
-	if assetID == w.bipID {
-		return 0, nil // it's eth (no allowance)
-	}
-	redeemWallet := w.wallet(assetID)
-	if redeemWallet == nil {
-		return 0, nil // not an erc20
-	}
-	currentAllowance, err := redeemWallet.tokenAllowance(ver)
-	if err != nil {
-		return 0, err
-	}
-	// No reason to do anything if the allowance is > the unlimited
-	// allowance approval threshold.
-	if currentAllowance.Cmp(unlimitedAllowanceReplenishThreshold) < 0 {
-		return redeemWallet.approvalGas(unlimitedAllowance, ver)
-	}
-	return 0, nil
 }
 
 // gases gets the gas table for the specified contract version.
@@ -2163,60 +2135,6 @@ func recoverPubkey(msgHash, sig []byte) ([]byte, error) {
 		return nil, err
 	}
 	return pubKey.SerializeUncompressed(), nil
-}
-
-// isApproved checks whether the contract is approved to transfer tokens on our
-// behalf. For Ethereum, isApproved always returns (true, nil).
-func (w *assetWallet) isApproved() (bool, error) {
-	if w.assetID == w.bipID {
-		return true, nil
-	}
-	currentAllowance, err := w.tokenAllowance(0)
-	if err != nil {
-		return false, fmt.Errorf("error retrieving current allowance: %w", err)
-	}
-	return currentAllowance.Cmp(unlimitedAllowanceReplenishThreshold) >= 0, nil
-}
-
-// maybeApproveTokenSwapContract checks whether a token's swap contract needs
-// to be approved for the wallet address on the erc20 contract.
-func (w *TokenWallet) maybeApproveTokenSwapContract(ver uint32, maxFeeRate, swapReserves uint64) error {
-	// Check if we need to up the allowance.
-	if approved, err := w.isApproved(); err != nil {
-		return err
-	} else if approved {
-		return nil
-	}
-
-	// Check that we don't already have an approval pending.
-	w.approvalsMtx.Lock()
-	defer w.approvalsMtx.Unlock()
-	if pendingApproval := w.pendingApprovals[ver]; pendingApproval != nil {
-		return fmt.Errorf("an approval is already pending (%s). wait until it is mined "+
-			"before ordering again", pendingApproval.txHash)
-	}
-
-	ethBal, err := w.parent.balance()
-	if err != nil {
-		return fmt.Errorf("error getting eth balance: %w", err)
-	}
-	approveGas, err := w.approvalGas(unlimitedAllowance, ver)
-	if err != nil {
-		return fmt.Errorf("error estimating allowance gas: %w", err)
-	}
-	if (approveGas*maxFeeRate)+swapReserves > ethBal.Available {
-		return fmt.Errorf("parent balance %d doesn't cover contract approval (%d) and tx fees (%d)",
-			ethBal.Available, approveGas*maxFeeRate, swapReserves)
-	}
-	tx, err := w.approveToken(unlimitedAllowance, maxFeeRate, approveGas, ver)
-	if err != nil {
-		return fmt.Errorf("token contract approval error (using max fee rate %d): %w", maxFeeRate, err)
-	}
-	w.pendingApprovals[ver] = &pendingApproval{
-		txHash:    tx.Hash(),
-		onConfirm: nil,
-	}
-	return nil
 }
 
 // tokenBalance checks the token balance of the account handled by the wallet.
@@ -3966,15 +3884,15 @@ func (w *assetWallet) sumPendingTxs(bal *big.Int) (out, in uint64) {
 	tip := w.currentTip.Number.Uint64()
 	w.tipMtx.RUnlock()
 
-	isETH := w.assetID == w.bipID
+	isToken := w.assetID != w.bipID
 
 	addPendingTx := func(pt *pendingTx) {
 		in += pt.in
-		if isETH {
-			if pt.assetID == w.bipID {
-				out += pt.out + pt.maxFees
-			} else {
+		if !isToken {
+			if pt.assetID != w.bipID {
 				out += pt.maxFees
+			} else {
+				out += pt.out + pt.maxFees
 			}
 			return
 		}
@@ -3987,7 +3905,7 @@ func (w *assetWallet) sumPendingTxs(bal *big.Int) (out, in uint64) {
 	balanceHasChanged := w.pendingTxCheckBal == nil || bal.Cmp(w.pendingTxCheckBal) != 0
 	w.pendingTxCheckBal = bal
 	for txHash, pt := range w.pendingTxs {
-		if !isETH && pt.assetID != w.assetID {
+		if isToken && pt.assetID != w.assetID {
 			continue
 		}
 		if pt.lastCheck == tip && !balanceHasChanged {
@@ -4026,10 +3944,10 @@ func (w *assetWallet) sumPendingTxs(bal *big.Int) (out, in uint64) {
 }
 
 func (w *assetWallet) balanceWithTxPool() (*Balance, error) {
-	isETH := w.assetID == w.bipID
+	isToken := w.assetID != w.bipID
 
 	getBal := func() (*big.Int, error) {
-		if isETH {
+		if !isToken {
 			return w.node.addressBalance(w.ctx, w.addr)
 		} else {
 			return w.tokenBalance()
@@ -4097,7 +4015,7 @@ func (w *assetWallet) balanceWithTxPool() (*Balance, error) {
 			continue
 		}
 
-		if isETH {
+		if !isToken {
 			// Add tx fees
 			addFees(tx)
 		}
@@ -4116,7 +4034,7 @@ func (w *assetWallet) balanceWithTxPool() (*Balance, error) {
 		}
 		if contractOut > 0 {
 			outgoing.Add(outgoing, w.evmify(contractOut))
-		} else if isETH {
+		} else if !isToken {
 			// Count withdraws and sends for ETH.
 			v := tx.Value()
 			if v.Cmp(zero) > 0 {
@@ -4458,7 +4376,7 @@ func quickNode(ctx context.Context, walletDir string, assetID, contractVer uint3
 	}
 	chainConfig := ethCfg.Genesis.Config
 
-	cl, err := newMultiRPCClient(walletDir, []string{provider}, log, chainConfig, big.NewInt(dexeth.ChainIDs[net]), net)
+	cl, err := newMultiRPCClient(walletDir, []string{provider}, log, chainConfig, big.NewInt(chainID), net)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error opening initiator rpc client: %v", err)
 	}

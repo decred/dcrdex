@@ -3193,7 +3193,7 @@ func TestDriverExists(t *testing.T) {
 		Logger:   tLogger,
 	}, true)
 	if err != nil {
-		t.Fatalf("CreateWallet error: %v", err)
+		t.Fatalf("CreateEVMWallet error: %v", err)
 	}
 
 	// exists

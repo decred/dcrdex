@@ -406,8 +406,9 @@ func newTxOpts(ctx context.Context, from common.Address, val, maxGas uint64, max
 	}
 }
 
-func gases(bipID, assetID uint32, contractVer uint32, net dex.Network) *dexeth.Gases {
-	if assetID == bipID {
+func gases(parentID, assetID uint32, contractVer uint32, net dex.Network) *dexeth.Gases {
+	isToken := parentID != assetID
+	if !isToken { // ETH or EVM-compatible asset.
 		if contractVer != contractVersionNewest {
 			return dexeth.VersionedGases[contractVer]
 		}

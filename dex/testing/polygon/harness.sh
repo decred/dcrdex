@@ -2,7 +2,6 @@
 
 SESSION="polygon-harness"
 
-SOURCE_DIR=$(pwd)
 NODES_ROOT=~/dextest/polygon
 GENESIS_JSON_FILE_LOCATION="${NODES_ROOT}/genesis.json"
 HARNESS_DIR=${NODES_ROOT}/harness-ctl
@@ -12,12 +11,6 @@ mkdir -p "${HARNESS_DIR}"
 
 NAME="alpha"
 PASSWORD="abc"
-
-cat > "${HARNESS_DIR}/${NAME}" <<EOF
-#!/usr/bin/env bash
-bor \$*
-EOF
-chmod +x "${HARNESS_DIR}/${NAME}"
 
 # Shutdown script
 cat > "${HARNESS_DIR}/quit" <<EOF
@@ -132,7 +125,6 @@ identity = "${NAME}"
 verbosity = 5
 vmdebug = true
 datadir = "${NODE_DIR}"
-ancient = "${NODE_DIR}/geth-ancient"
 keystore = "${NODE_DIR}/keystore"
 ethstats = ""
 devfakeauthor = true
