@@ -790,14 +790,50 @@ const (
 
 // UserSettlingLimit returns a user's settling amount limit for the given market
 // in units of the base asset. The limit may be negative for accounts with poor
-// swap history.
+// swap history. The user must be connected.
 func (auth *AuthManager) UserSettlingLimit(user account.AccountID, mkt *dex.MarketInfo) int64 {
+	// WIP: https://github.com/orgs/decred/projects/2?pane=issue&itemId=2420755
+	// tier is a balance of bonding strength (bondTier) and user score, where
+	// the latter is computed from all violations and match outcomes. See the
+	// integrateOutcomes and tier methods. However, for order size limits, we
+	// consider swap outcome amounts, and consider only swap outcomes (ignore
+	// preimage and cancel rate violations). Thus, we scale the base limit by
+	// bond strength, and balance that with weighted swap history.
+
 	currentLotSize := int64(mkt.LotSize)
-	base := currentLotSize * auth.initTakerLotLimit
+	baseLimit := currentLotSize * auth.initTakerLotLimit
+
+	// The base limit scales with bond strength (plus one if legacy fee paid).
+	// This is particularly important for an account that has offset their
+	// violations with additional bond to gain a positive tier.
+	client := auth.user(user)
+	if client == nil {
+		return 0 // offline
+	}
+	client.mtx.Lock()
+	tier := client.tier
+	baseScale := client.bondTier()
+	if client.legacyFeePaid {
+		baseScale++
+	}
+	client.mtx.Unlock()
+
+	if tier < 1 { // but order router should have checked this
+		return 0
+	}
+
+	// Balance base limit with weighted swap history.
 	sa := auth.userSwapAmountHistory(user, mkt.Base, mkt.Quote)
-	limit := base + sa.Swapped*successWeight + sa.StuckLong*stuckLongWeight + sa.StuckShort*stuckShortWeight + sa.Spoofed*spoofedWeight
-	if limit/currentLotSize >= auth.absTakerLotLimit {
+	limit := baseLimit*baseScale +
+		sa.Swapped*successWeight + sa.StuckLong*stuckLongWeight +
+		sa.StuckShort*stuckShortWeight + sa.Spoofed*spoofedWeight
+	// Clamp the effective lot limit.
+	if lotLimit := limit / currentLotSize; lotLimit >= auth.absTakerLotLimit {
 		limit = auth.absTakerLotLimit * currentLotSize
+	} else if lotLimit < 1 {
+		// This possibility is a bad code smell, but for this limit we are
+		// considering swap amounts, unlike with user score.
+		limit = currentLotSize // ensure non-zero tier users are not prohibited
 	}
 	return limit
 }
@@ -1641,8 +1677,9 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		return nil
 	}
 
-	log.Infof("Authenticated account %v from %v with %d active orders, %d active matches, tier = %v",
-		user, conn.Addr(), len(msgOrderStatuses), len(msgMatches), client.tier)
+	log.Infof("Authenticated account %v from %v with %d active orders, %d active matches, tier = %v, "+
+		"bond tier = %v, score = %v",
+		user, conn.Addr(), len(msgOrderStatuses), len(msgMatches), client.tier, bondTier, score)
 	auth.addClient(client)
 
 	return nil
