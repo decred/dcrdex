@@ -459,8 +459,10 @@ type baseWallet struct {
 	dir        string
 	walletType string
 
-	bipID   uint32 // the asset ID of the chain's native token (e.g. ETH, MATIC, etc)
-	chainID int64 
+	// bipID is the asset ID of the chain's native token (e.g. ETH, MATIC, etc).
+	// This becomes the parent asset ID for non-native tokens(e.g USDC etc).
+	bipID   uint32
+	chainID int64
 
 	tipMtx     sync.RWMutex
 	currentTip *types.Header
